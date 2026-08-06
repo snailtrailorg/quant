@@ -670,3 +670,62 @@ def feishu_test(fid: int, payload: dict = Depends(require_perm("feishu_config"))
         return {"ok": False, "error": data.get("msg", str(data))}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+# --- 数据同步 ---
+
+@app.get("/api/sync/config")
+def list_sync_config(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description FROM sync_config ORDER BY id")
+        rows = cur.fetchall()
+    return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "data_type": r[4], "sync_mode": r[5], "schedule": r[6], "trade_day_filter": r[7], "enabled": r[8], "last_sync_date": r[9], "last_sync_ts": str(r[10]) if r[10] else None, "last_sync_count": r[11], "last_status": r[12], "description": r[13]} for r in rows]
+
+
+@app.put("/api/sync/config/{sid}")
+def update_sync_config_api(sid: str, body: dict, payload: dict = Depends(require_perm("data_sync"))):
+    with get_conn() as conn:
+        conn.execute("UPDATE sync_config SET schedule=%s, enabled=%s, trade_day_filter=%s WHERE id=%s",
+            (body.get("schedule"), body.get("enabled"), body.get("trade_day_filter"), sid))
+        conn.commit()
+    audit_log(payload["username"], "update_sync_config", sid)
+    return {"ok": True}
+
+
+@app.post("/api/sync/trigger/{sid}")
+def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict = Depends(require_perm("data_sync"))):
+    from src.data_sync import sync
+    result = sync(sid, backfill_from=backfill_from)
+    audit_log(payload["username"], "trigger_sync", sid)
+    return result
+
+
+@app.delete("/api/sync/data/{sid}")
+def delete_sync_data_api(sid: str, payload: dict = Depends(require_perm("data_sync"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT pg_table FROM sync_config WHERE id=%s", (sid,))
+        r = cur.fetchone()
+    if r and r[0]:
+        with get_conn() as conn:
+            conn.execute(f'DELETE FROM "{r[0]}"')
+            conn.execute("UPDATE sync_config SET last_sync_date=NULL, last_sync_ts=NULL, last_sync_count=0, last_status='idle' WHERE id=%s", (sid,))
+            conn.commit()
+    audit_log(payload["username"], "delete_sync_data", sid)
+    return {"ok": True}
+
+
+@app.get("/api/sync/log")
+def get_sync_logs_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, sync_id, mode, start, end, pulled, saved, status, ts FROM sync_log ORDER BY ts DESC LIMIT 100")
+        rows = cur.fetchall()
+    return [{"id": r[0], "sync_id": r[1], "mode": r[2], "start": r[3], "end": r[4], "pulled": r[5], "saved": r[6], "status": r[7], "ts": str(r[8]) if r[8] else None} for r in rows]
+
+
+# --- 审计日志 ---
+
+@app.get("/api/audit")
+def get_audit(payload: dict = Depends(require_perm("user_mgmt"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, ts, actor, action, detail FROM audit_log ORDER BY ts DESC LIMIT 100")
+        rows = cur.fetchall()
+    return [{"id": r[0], "ts": str(r[1]) if r[1] else None, "actor": r[2], "action": r[3], "detail": r[4]} for r in rows]
