@@ -1,0 +1,54 @@
+# 多市场混合量化交易平台 · 依赖清单
+# Python 3.10 venv
+# 镜像: pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+
+# === vnpy 生态（交易内核/网关/回测/数据）===
+vnpy>=4.0                  # 核心引擎
+vnpy-ctastrategy>=1.4      # CTA 策略 + 回测引擎 CtaBacktestingEngine
+vnpy-datamanager>=1.2      # 数据管理
+vnpy-binance               # 币安网关（永续合约）
+vnpy-okx                   # OKX 网关（永续合约）
+# vnpy_xtp —— 待中泰 XTP SDK 到位后安装（外部 gate，见 04 §11 编译指南）
+
+# === Web 后端 ===
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pyjwt>=2.8                 # JWT 认证
+passlib[bcrypt]>=1.7       # 密码哈希（生产）
+python-multipart>=0.0.9    # 表单/上传
+
+# === 数据库 / 缓存 / 向量 ===
+psycopg[binary]>=3.1       # PostgreSQL 18
+pgvector>=0.3              # pgvector python 驱动
+redis>=5.0                 # Valkey（Redis 协议兼容）/ Celery broker
+
+# === 调度 ===
+celery>=5.3
+
+# === 数据库迁移（schema 版本管理，对齐 safebox）===
+alembic>=1.13
+sqlalchemy>=2.0      # alembic 依赖，显式声明
+croniter>=2.0        # cron 表达式解析（sync_config.schedule）
+
+# === AI / LLM 网关（01）===
+openai>=1.30                # DeepSeek/GLM OpenAI 兼容客户端
+httpx>=0.27
+
+# === 数据源（06）===
+tushare>=1.4
+akshare>=1.12
+
+# === 飞书（11）===
+lark-oapi>=1.3
+
+# === 通用 ===
+pydantic>=2.7
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# === 嵌入模型 bge-m3 不进主 venv（拖 torch ~2GB）===
+# 独立 worker 进程单独建: requirements-embedding.txt
+# (sentence-transformers + FlagEmbedding)
+cryptography>=42
+qrcode>=7.4
+Pillow>=10.0

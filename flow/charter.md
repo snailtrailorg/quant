@@ -1,0 +1,54 @@
+# 项目宪章 (charter)
+
+> 立项填。所有 Agent 开工要读的第一份。
+
+- **项目名**: 多市场混合量化交易平台
+- **目标**(做成什么样算成功,一句话): 个人私有化部署的多市场量化交易平台，A股/可转债/ETF/加密永续合约全自动交易（实盘三级开关控制），带 Web 可视化管理 + 飞书移动干预 + AI 辅助研判，仅国内模型，单系统 RBAC。
+- **范围**:
+  - 做:
+    - A 股个股：日线选股 + 分钟级研判 + 实盘交易（走中泰 XTP，受 astock 分项开关控制）
+    - 可转债 / 场内 ETF：全自动 T+0 程序化交易（中泰 XTP + vnpy_xtp，Linux 原生）
+    - 加密货币永续合约：BTC/ETH 全自动 CTA/网格/对冲（币安/OKX，vnpy 加密网关）
+    - 统一数据中台：Tushare(主) + AkShare(补) + 币安/OKX WS -> PostgreSQL+pgvector+Valkey；回测与实盘 schema 对齐零迁移
+    - 配置驱动策略框架：统一 Strategy 基类 + Factor 注册制 + 信号聚合 + DSL 表达式，Web 端配置，非硬编码
+    - 自建 Web 管理后台：FastAPI+Vue3+Element Plus，策略启停/参数改/持仓看板/风控面板/日志/自然语言查询
+    - 自建 LLM 网关：DeepSeek(主)+GLM(备) 路由+容灾+工具白名单分层，bge-m3独立worker嵌入
+    - 飞书/Lark 对接：AI 动态查询 + 紧急处理（熔断/停策略，带交互确认）
+    - 风控中心：全局总风控 + 分市场独立风控双层，Valkey 无状态熔断
+    - 单系统 RBAC：Admin/Trader/Analyst/Viewer 四角色，Web+飞书+LLM 三层权限一致
+    - 告警/通知：企业微信机器人 + Discord 为主，Server酱备用，分级路由+配额聚合
+  - 不做:
+    - 多租户（多租户需求=售出独立实例，非单系统内隔离）
+    - 同交易所多账户（无必须场景）
+    - 小币种/山寨币加密合约（只 BTC/ETH 主流）
+    - 高频做市（延迟要求高，个人平台不做）
+    - 聚宽/米筐等云端 SaaS 策略平台（数据格式割裂，迁移成本高）
+    - Docker 容器化（资源受限，全程 venv+systemd）
+    - 运行期接入 Claude/OpenAI 模型（仅国内 DeepSeek/GLM）
+    - Tick 级高频全量存储（按需订阅，不持久化全量 Tick）
+- **约束**(时间 / 资源 / 必须遵守的):
+  - 部署 OS：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8；开发机 Fedora 同 RPM 系）
+  - 语言：Python 3.10（venv；服务器 120.24.235.98=3.11，本地=3.10，不用 3.14--vnpy 4.4.0 硬 pin pyside6==6.8.2.1 不支持 3.14，详见 CLAUDE.md 技术栈约束）
+  - 服务器：低配 ECS（最小 2核/4GB，推荐 4核/8GB），无 Docker
+  - 数据库：PostgreSQL 18 + pgvector + Valkey（Redis 协议兼容），弃 TimescaleDB/重型向量库
+  - 运行期 AI 仅国内模型（DeepSeek/GLM），不接 Anthropic/OpenAI
+  - 实盘三级开关（.env ENABLE_LIVE_TRADING 总闸 + Web live_trading_config 分项 + 策略 enabled+backtest_verified，详见 CLAUDE.md）
+  - 可转债/ETF/A股实盘中泰 XTP + vnpy_xtp（待券商确认门槛/品种/费率，外部 gate）
+  - 回测数据 schema 与实盘对齐（20 天 XTP 等待期零迁移）
+  - 单系统 RBAC 非多租户（数据共享，不加 user_id 隔离，只加 audit_log.actor）
+  - 联网核实走本机 `spe curl`（WebSearch/WebFetch 不可用）
+  - 所有突变操作（启停策略/熔断/改风控/改密钥）写 audit_log 带 actor
+  - API 密钥系统级加密存储，仅 Admin 管理
+  - 熔断：任何人（Trader+Admin）可 halt（安全冗余），resume 仅 Admin
+  - 多语言国际化：Web 前端按浏览器语言自动切换中/英文；LLM 回复/飞书回复/告警推送按用户语言偏好输出；日志统一英文
+- **成功标准**(尽量可衡量):
+  - A 股分析：每日选股结果 + 分钟级实时研判推送到 Web 看板
+  - 可转债/ETF：双低轮动策略在 Tushare 历史数据回测通过，实盘小资金稳定运行
+  - 加密合约：4H/1H CTA 策略在币安/OKX 回测+实盘验证
+  - Web 后台：策略启停/参数改/持仓/盈亏/风控/日志全功能可用
+  - 飞书：自然语言查持仓/盈亏 + 一键熔断（带确认）成功
+  - AI 层：可转债条款解读、盘后报告、日志归因 LLM 生成可用
+  - RBAC：Admin/Trader/Analyst/Viewer 四个账号都可登录，权限正确（Analyst 研究/Trader 交易隔离防误操作）
+  - 回测结果可在 20 天后不改代码直接切实盘（schema 一致）
+  - 系统 7×24h 稳定运行，异常自动重启，数据库定时备份
+- **角色**:拍板 = 你（项目所有者） / 主控 = Claude Code / 评审 = 待定 / 其他 =

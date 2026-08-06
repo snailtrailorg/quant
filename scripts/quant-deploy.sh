@@ -1,0 +1,379 @@
+#!/bin/bash
+########################################################################################################################
+# quant-deploy.sh - 部署工具 for 多市场混合量化交易平台
+# 部署到新服务器（120.24.235.98），与 safebox 共存时严格隔离（db4/5/6 避开 safebox db0）：
+#   - clear-redis 只清 db2(VALKEY)/db3(CELERY)，绝不用 FLUSHALL（会清掉 safebox db0）
+#   - restart-web 用 reload httpd（不断现有连接，不影响 safebox）
+#   - clear-pgsql 严格 DROP DATABASE quant（不碰 safebox 库）
+#   - 不改 pg_hba.conf（适配 safebox 已有的 md5 认证）
+#
+# Usage: $0 --server HOST [--user USER] [--dry-run] ACTION...
+#
+# 安装: cp scripts/quant-deploy.sh ~/.local/bin/quant-deploy.sh && chmod +x ~/.local/bin/quant-deploy.sh
+# 项目内便捷脚本 deploy-server.sh / deploy-web.sh 通过 `sudo -u michael quant-deploy.sh` 调用本脚本。
+########################################################################################################################
+
+set -euo pipefail
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 服务器配置（MODIFY TO MATCH YOUR SERVER）
+#-----------------------------------------------------------------------------------------------------------------------
+PROJECT_PATH="${PROJECT_PATH:-/data/websites/snailtrail.org/quant/server}"   # 后端代码+venv+.env
+WEB_PATH="${WEB_PATH:-/data/websites/snailtrail.org/quant/web}"               # 前端 dist
+SEED_SQL="${SEED_SQL:-/data/websites/snailtrail.org/quant/server/scripts/init-seed.sql}"
+SCHEMA_SQL="${SCHEMA_SQL:-/data/websites/snailtrail.org/quant/server/scripts/init-schema.sql}"
+
+# systemd 服务名（模板式 @quant 实例）
+WEB_API_SERVICE="${WEB_API_SERVICE:-quant-web-api@quant}"
+CELERY_WORKER_SERVICE="${CELERY_WORKER_SERVICE:-quant-celery-worker@quant}"
+CELERY_BEAT_SERVICE="${CELERY_BEAT_SERVICE:-quant-celery-beat@quant}"
+PGSQL_SERVICE="${PGSQL_SERVICE:-postgresql-18}"
+REDIS_SERVICE="${REDIS_SERVICE:-redis}"
+WEB_SERVICE="${WEB_SERVICE:-nginx}"
+
+# 数据库
+PG_DB="${PG_DB:-quant}"
+PG_USER="${PG_USER:-quant}"
+
+# Redis db 分配（避开 safebox db0/db1）
+VALKEY_DB="${VALKEY_DB:-2}"      # VALKEY_URL：心跳锁/进度/session
+CELERY_DB="${CELERY_DB:-3}"      # CELERY_BROKER/RESULT
+
+# Redis CLI（safebox 用 redis6-cli）
+REDIS_CLI="${REDIS_CLI:-/usr/bin/redis-cli}"
+
+#-----------------------------------------------------------------------------------------------------------------------
+# SSH
+#-----------------------------------------------------------------------------------------------------------------------
+SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 命令行 + 运行时状态
+#-----------------------------------------------------------------------------------------------------------------------
+USER=""
+SERVER="${SERVER:-120.24.235.98}"    # 默认新服务器 IP，可用环境变量或 --server 覆盖
+DRY_RUN=false
+
+DEPLOY_TASKS=()
+RESTART_SERVER=false
+RESTART_CELERY=false
+RESTART_WEB=false
+RESTART_PGSQL=false
+RESTART_REDIS=false
+CLEAR_PGSQL=false
+CLEAR_REDIS=false
+INIT_SEED=false
+INIT_SCHEMA=false
+MIGRATE=false
+PIP_INSTALL=false
+HAS_ACTION=false
+
+#-----------------------------------------------------------------------------------------------------------------------
+usage() {
+    cat <<EOF
+Usage: $0 --server HOST [--user USER] [--dry-run] ACTION...
+
+部署代码、重启服务、初始化数据库到远程服务器（与 safebox 隔离）。
+
+Global options:
+  --server HOST          目标服务器（默认 120.24.235.98，可用环境变量 SERVER 覆盖）
+  --user USER            SSH 用户（默认当前用户）
+  --dry-run              预览不执行
+  -h, --help
+
+Actions（按给定顺序执行，至少一个）:
+  deploy LOCAL REMOTE [--exclude PATTERN]...
+                         rsync LOCAL 目录到 REMOTE。可多次。
+
+  restart-server         重启 quant-web-api（uvicorn :8001）
+  restart-celery         重启 celery-worker + celery-beat
+  restart-web            reload httpd（不断连接，不影响 safebox）
+  restart-pgsql          重启 PostgreSQL（共享，短暂断连）
+  restart-redis          重启 redis6（共享，短暂断连）
+
+  clear-pgsql            DROP+CREATE quant 库（destructive，停 quant 服务，不碰 safebox 库）
+                         跑 init-seed.sql 重建 sync_config 种子后重启服务
+  clear-redis            只清 db2(VALKEY)+db3(CELERY)（destructive，绝不 FLUSHALL，不碰 safebox db0）
+migrate                alembic upgrade head（schema 版本迁移，主用，quant 用户跑）
+  pip-install            pip install -r requirements.txt（装新依赖，如 croniter，deploy 后跑）
+  init-schema            跑 init-schema.sql 集中建表（备用，postgres 用户跑）
+  init-seed              跑 init-seed.sql 初始化 sync_config 种子（幂等，不覆盖已有）
+
+Examples:
+  # 首次部署（服务器 IP 用默认 120.24.235.98，无需 --server）
+  $0 deploy ./server /data/websites/snailtrail.org/quant/server --exclude .env migrate init-seed restart-server restart-celery
+
+  # 日常更新后端
+  $0 deploy ./server /data/websites/snailtrail.org/quant/server --exclude .env restart-server restart-celery
+
+  # 清 quant 库重建
+  $0 clear-pgsql restart-server restart-celery
+
+Notes:
+  - clear-pgsql/clear-redis 是 destructive，clear-redis 绝不用 FLUSHALL
+  - restart-web 用 reload 不影响 safebox
+EOF
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 解析全局选项
+#-----------------------------------------------------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --server) SERVER="$2"; shift 2 ;;
+        --user) USER="$2"; shift 2 ;;
+        --dry-run) DRY_RUN=true; shift ;;
+        -h|--help) usage; exit 0 ;;
+        --*) echo "❌ 未知全局选项: $1" >&2; usage; exit 1 ;;
+        *) break ;;
+    esac
+done
+
+[[ -z "$SERVER" ]] && { echo "❌ --server 必填" >&2; usage; exit 1; }
+SSH_TARGET="${USER:+$USER@}$SERVER"
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 解析动作
+#-----------------------------------------------------------------------------------------------------------------------
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        deploy)
+            HAS_ACTION=true
+            [[ $# -lt 3 ]] && { echo "❌ deploy 需要 LOCAL REMOTE" >&2; exit 1; }
+            local_path="$2"; remote_path="$3"; shift 3
+            deploy_excludes=()
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    --exclude) [[ $# -lt 2 ]] && { echo "❌ --exclude 需要模式" >&2; exit 1; }; deploy_excludes+=("$2"); shift 2 ;;
+                    *) break ;;
+                esac
+            done
+            excludes_csv=$(IFS=,; echo "${deploy_excludes[*]}")
+            DEPLOY_TASKS+=("$local_path|$remote_path|$excludes_csv")
+            ;;
+        restart-server) HAS_ACTION=true; RESTART_SERVER=true; shift ;;
+        restart-celery) HAS_ACTION=true; RESTART_CELERY=true; shift ;;
+        restart-web) HAS_ACTION=true; RESTART_WEB=true; shift ;;
+        restart-pgsql) HAS_ACTION=true; RESTART_PGSQL=true; shift ;;
+        restart-redis) HAS_ACTION=true; RESTART_REDIS=true; shift ;;
+        clear-pgsql) HAS_ACTION=true; CLEAR_PGSQL=true; shift ;;
+        clear-redis) HAS_ACTION=true; CLEAR_REDIS=true; shift ;;
+        init-seed) HAS_ACTION=true; INIT_SEED=true; shift ;;
+        init-schema) HAS_ACTION=true; INIT_SCHEMA=true; shift ;;
+        migrate) HAS_ACTION=true; MIGRATE=true; shift ;;
+        pip-install) HAS_ACTION=true; PIP_INSTALL=true; shift ;;
+        *) echo "❌ 未知动作: $1" >&2; usage; exit 1 ;;
+    esac
+done
+
+$HAS_ACTION || { echo "❌ 至少一个动作" >&2; usage; exit 1; }
+
+# 校验本地 deploy 路径（文件或目录均可）
+for task in "${DEPLOY_TASKS[@]}"; do
+    IFS='|' read -r local_path _ _ <<< "$task"
+    [[ ! -e "$local_path" ]] && { echo "❌ 本地路径不存在: $local_path" >&2; exit 1; }
+done
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 依赖检查
+#-----------------------------------------------------------------------------------------------------------------------
+local_missing=()
+command -v ssh >/dev/null 2>&1 || local_missing+=("ssh")
+[[ ${#DEPLOY_TASKS[@]} -gt 0 ]] && ! command -v rsync >/dev/null 2>&1 && local_missing+=("rsync")
+[[ ${#local_missing[@]} -gt 0 ]] && { echo "❌ 本地缺依赖: ${local_missing[*]}" >&2; exit 1; }
+
+if ! $DRY_RUN; then
+    remote_tools=("bash" "sudo" "systemctl")
+    if $RESTART_PGSQL || $CLEAR_PGSQL || $INIT_SEED || $INIT_SCHEMA; then remote_tools+=("psql"); fi
+    if $RESTART_REDIS || $CLEAR_REDIS; then remote_tools+=("$REDIS_CLI"); fi
+
+    # 简单远程依赖检查：ssh 跑 command -v 列表，缺失的工具名 echo 出来
+    # （不用 bash -c '...' 嵌套，避免 [ ] false 时退出码 1 误报）
+    missing_check=""
+    for cmd in "${remote_tools[@]}"; do
+        missing_check+="command -v $cmd >/dev/null 2>&1 || echo $cmd; "
+    done
+    if ! missing_output=$(ssh $SSH_OPTS "$SSH_TARGET" "$missing_check" 2>&1); then
+        echo "❌ ssh 连接失败: $missing_output" >&2; exit 1
+    fi
+    if [[ -n "$missing_output" ]]; then
+        echo "❌ 远程缺依赖: $missing_output" >&2; exit 1
+    fi
+fi
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Dry-run
+#-----------------------------------------------------------------------------------------------------------------------
+if $DRY_RUN; then
+    echo "🔍 Dry-run on $SSH_TARGET:"
+    for task in "${DEPLOY_TASKS[@]}"; do
+        IFS='|' read -r local_path remote_path excludes_csv <<< "$task"
+        echo "🔍  deploy $local_path -> $remote_path  excludes: ${excludes_csv//,/ }"
+    done
+    $MIGRATE && echo "🔍  alembic upgrade head（schema 版本迁移）"
+    $PIP_INSTALL && echo "🔍  pip install -r requirements.txt（装新依赖）"
+    $INIT_SCHEMA && echo "🔍  跑 init-schema.sql 集中建表（owner=quant）"
+    $INIT_SEED && echo "🔍  跑 init-seed.sql 初始化 sync_config 种子"
+    $RESTART_SERVER && echo "🔍  restart $WEB_API_SERVICE"
+    $RESTART_CELERY && echo "🔍  restart $CELERY_WORKER_SERVICE + $CELERY_BEAT_SERVICE"
+    $RESTART_WEB && echo "🔍  reload $WEB_SERVICE (不影响 safebox)"
+    $RESTART_PGSQL && echo "🔍  restart $PGSQL_SERVICE (共享,短暂断连)"
+    $RESTART_REDIS && echo "🔍  restart $REDIS_SERVICE (共享,短暂断连)"
+    $CLEAR_PGSQL && echo "🔍🔥 clear-pgsql: DROP+CREATE quant 库 + init-seed (不碰 safebox)"
+    $CLEAR_REDIS && echo "🔍🔥 clear-redis: FLUSHDB db$VALKEY_DB + db$CELERY_DB (绝不 FLUSHALL)"
+    echo "🔍 Dry-run done."
+    exit 0
+fi
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 核心函数
+#-----------------------------------------------------------------------------------------------------------------------
+rsync_deploy() {
+    local local_path="$1" remote_path="$2" excludes_csv="$3"
+    local exclude_opts=""
+    if [[ -n "$excludes_csv" ]]; then
+        IFS=',' read -ra excludes <<< "$excludes_csv"
+        for pat in "${excludes[@]}"; do exclude_opts="$exclude_opts --exclude=$pat"; done
+    fi
+    echo "ℹ️ Deploy $local_path -> $SSH_TARGET:$remote_path..."
+    local temp_dir="/tmp/quant-deploy-$$-$(date +%s)-$RANDOM"
+    if [[ -d "$local_path" ]]; then
+        # 目录：rsync 内容到 temp_dir，--delete 同步
+        # shellcheck disable=SC2086
+        rsync -avz --delete -e "ssh $SSH_OPTS" $exclude_opts "$local_path/" "$SSH_TARGET:$temp_dir/"
+        # shellcheck disable=SC2086
+        ssh $SSH_OPTS "$SSH_TARGET" "sudo rsync -a --delete $exclude_opts $temp_dir/ $remote_path/ && sudo chown -R quant:quant $remote_path && rm -rf $temp_dir"
+    else
+        # 单文件：rsync 直接传成 temp_dir（文件），cp 到 remote_path（不用 --delete，避免误删目标目录其他文件）
+        # shellcheck disable=SC2086
+        rsync -avz -e "ssh $SSH_OPTS" $exclude_opts "$local_path" "$SSH_TARGET:$temp_dir"
+        ssh $SSH_OPTS "$SSH_TARGET" "sudo cp $temp_dir $remote_path && sudo chown quant:quant $remote_path && rm -f $temp_dir"
+    fi
+    echo "✅ Deployment done."
+}
+
+init_seed() {
+    echo "ℹ️ 跑 init-seed.sql 初始化 sync_config 种子..."
+    # init-seed.sql 已随 deploy 到服务器 PROJECT_PATH/scripts/
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo -u quant bash -c 'cd $PROJECT_PATH && psql -d $PG_DB -f scripts/init-seed.sql'" || \
+        echo "⚠️ init-seed 失败（scripts/init-seed.sql 是否已部署？）"
+    echo "✅ init-seed done."
+}
+
+init_schema() {
+    echo "ℹ️ 跑 init-schema.sql 集中建表（owner=quant）..."
+    # 用 postgres superuser 跑（ALTER OWNER 需要 superuser）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo -u postgres psql -d $PG_DB -f $SCHEMA_SQL" || \
+        echo "⚠️ init-schema 失败（scripts/init-schema.sql 是否已部署？）"
+    echo "✅ init-schema done."
+}
+
+migrate() {
+    echo "ℹ️ alembic upgrade head（schema 版本迁移，用 quant 用户跑，owner 自动 quant）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo -u quant bash -c 'cd $PROJECT_PATH && venv/bin/alembic upgrade head'" || \
+        echo "⚠️ migrate 失败（venv/bin/alembic 是否已装？alembic.ini 是否已部署？）"
+    echo "✅ migrate done."
+}
+
+pip_install() {
+    echo "ℹ️ pip install -r requirements.txt（装新依赖，清华镜像）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo -u quant bash -c 'cd $PROJECT_PATH && venv/bin/pip install -q -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt'"
+    echo "✅ pip install done."
+}
+
+clear_pgsql() {
+    echo "🔥 DESTRUCTIVE: DROP+CREATE quant 库（不碰 safebox）。quant 服务将临时停止。"
+    ssh $SSH_OPTS "$SSH_TARGET" bash <<REMOTE_SCRIPT
+set -euo pipefail
+echo "ℹ️ 停止 quant 服务..."
+sudo systemctl stop $WEB_API_SERVICE $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE || true
+
+echo "ℹ️ 安全检查: 确认 safebox 库存在（防止误操作）..."
+sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='safebox'" | grep -q 1 || echo "⚠️ safebox 库不存在（可能未部署 safebox，继续）"
+
+echo "ℹ️ DROP+CREATE quant 库..."
+sudo -u postgres psql -v ON_ERROR_STOP=1 -c 'DROP DATABASE IF EXISTS $PG_DB WITH (FORCE);'
+sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE $PG_DB OWNER $PG_USER;"
+sudo -u postgres psql -v ON_ERROR_STOP=1 -c "GRANT ALL ON DATABASE $PG_DB TO $PG_USER;"
+
+echo "ℹ️ 启动 quant-web-api（startup 钩子建表 + 默认 admin）..."
+sudo systemctl start $WEB_API_SERVICE
+sleep 3
+
+echo "ℹ️ 跑 init-seed.sql..."
+sudo -u quant bash -c 'cd $PROJECT_PATH && psql -d $PG_DB -f scripts/init-seed.sql'
+
+echo "ℹ️ 启动 celery..."
+sudo systemctl start $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE
+
+echo "✅ quant 库已重建: \$(sudo systemctl is-active $WEB_API_SERVICE)"
+REMOTE_SCRIPT
+    echo "✅ clear-pgsql done."
+}
+
+clear_redis() {
+    echo "🔥 DESTRUCTIVE: 清 Redis db$VALKEY_DB(VALKEY) + db$CELERY_DB(CELERY)（绝不 FLUSHALL，不碰 safebox db0）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo $REDIS_CLI -n $VALKEY_DB FLUSHDB && sudo $REDIS_CLI -n $CELERY_DB FLUSHDB"
+    echo "✅ Redis db$VALKEY_DB + db$CELERY_DB 已清（safebox db0 未动）。"
+}
+
+restart_server() {
+    echo "ℹ️ Restart $WEB_API_SERVICE..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $WEB_API_SERVICE && echo '✅ ' \$(sudo systemctl is-active $WEB_API_SERVICE)"
+    # 轮询等 health 就绪（uvicorn+vnpy import 启动慢，单次 curl 太早会误报失败）
+    local ok=0
+    for i in $(seq 1 15); do
+        if ssh $SSH_OPTS "$SSH_TARGET" 'curl -sf http://127.0.0.1:8001/health' >/dev/null 2>&1; then
+            echo "✅ health ok（第 ${i} 次尝试，约 $((i*2))s）"
+            ok=1
+            break
+        fi
+        sleep 2
+    done
+    [ $ok -eq 0 ] && echo "⚠️ health check 失败（30s 未就绪，看 journalctl -u $WEB_API_SERVICE -n 50）"
+    echo "✅ restart-server done."
+}
+
+restart_celery() {
+    echo "ℹ️ Restart $CELERY_WORKER_SERVICE + $CELERY_BEAT_SERVICE..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE && echo '✅ worker:' \$(sudo systemctl is-active $CELERY_WORKER_SERVICE) 'beat:' \$(sudo systemctl is-active $CELERY_BEAT_SERVICE)"
+    echo "✅ restart-celery done."
+}
+
+restart_web() {
+    echo "ℹ️ Reload $WEB_SERVICE（不断连接，不影响 safebox）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl reload $WEB_SERVICE && echo '✅ ' \$(sudo systemctl is-active $WEB_SERVICE)"
+    echo "✅ reload-web done."
+}
+
+restart_pgsql() {
+    echo "ℹ️ Restart $PGSQL_SERVICE（共享，quant 会短暂断连）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $PGSQL_SERVICE && echo '✅ ' \$(sudo systemctl is-active $PGSQL_SERVICE)"
+}
+
+restart_redis() {
+    echo "ℹ️ Restart $REDIS_SERVICE（共享，quant 心跳锁/Celery 短暂受影响）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $REDIS_SERVICE && echo '✅ ' \$(sudo systemctl is-active $REDIS_SERVICE)"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 执行（按顺序）
+#-----------------------------------------------------------------------------------------------------------------------
+for task in "${DEPLOY_TASKS[@]}"; do
+    IFS='|' read -r local_path remote_path excludes_csv <<< "$task"
+    rsync_deploy "$local_path" "$remote_path" "$excludes_csv"
+done
+
+$MIGRATE && migrate
+$PIP_INSTALL && pip_install
+$INIT_SCHEMA && init_schema
+$INIT_SEED && init_seed
+$CLEAR_PGSQL && clear_pgsql
+$CLEAR_REDIS && clear_redis
+$RESTART_WEB && restart_web
+$RESTART_REDIS && restart_redis
+$RESTART_PGSQL && restart_pgsql
+$RESTART_CELERY && restart_celery
+$RESTART_SERVER && restart_server
+
+echo "✅ All operations completed."

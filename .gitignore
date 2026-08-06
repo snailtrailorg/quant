@@ -1,0 +1,38 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+!server/vendor/xtp/lib/*.so
+.Python
+build/
+dist/
+*.egg-info/
+.installed.cfg
+
+# 编辑器/系统
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 项目本地敏感
+.env
+.env.local
+*.key
+secrets/
+
+# 日志/数据缓存
+*.log
+logs/
+data_cache/
+
+# 前端构建
+web/node_modules/
+web/dist/
+
+# 数据库本地
+*.sqlite3
+docs/reference/xtp-sdks/

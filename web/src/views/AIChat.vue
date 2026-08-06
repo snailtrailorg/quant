@@ -1,0 +1,75 @@
+<template>
+  <el-card style="height: calc(100vh - 140px); display: flex; flex-direction: column">
+    <template #header>
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <span>🤖 AI 助手（自然语言查询）</span>
+        <el-tag size="small">只读工具 · 下单类不开放</el-tag>
+      </div>
+    </template>
+    <div class="chat-body" ref="body">
+      <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
+        <div class="bubble">{{ msg.content }}</div>
+      </div>
+      <div v-if="loading" class="msg assistant"><div class="bubble">思考中...</div></div>
+    </div>
+    <div class="chat-input">
+      <el-input
+        v-model="input" placeholder="输入查询，如：现在持仓多少？今天盈亏？BTC策略什么状态？"
+        @keyup.enter="onSend" :disabled="loading" clearable>
+        <template #append>
+          <el-button @click="onSend" :loading="loading" :icon="Promotion">发送</el-button>
+        </template>
+      </el-input>
+      <div style="margin-top: 8px">
+        <el-button size="small" @click="quick('查持仓')">查持仓</el-button>
+        <el-button size="small" @click="quick('今天盈亏')">今天盈亏</el-button>
+        <el-button size="small" @click="quick('策略运行状态')">策略状态</el-button>
+      </div>
+    </div>
+  </el-card>
+</template>
+
+<script setup>
+import { ref, nextTick } from 'vue'
+import { Promotion } from '@element-plus/icons-vue'
+import { chat } from '../api'
+
+const messages = ref([
+  { role: 'assistant', content: '你好，我是 AI 助手。可以帮你查持仓、盈亏、策略状态、A股研判等。输入查询即可。' }
+])
+const input = ref('')
+const loading = ref(false)
+const body = ref(null)
+
+const scroll = () => nextTick(() => { if (body.value) body.value.scrollTop = body.value.scrollHeight })
+
+const onSend = async () => {
+  const text = input.value.trim()
+  if (!text) return
+  messages.value.push({ role: 'user', content: text })
+  input.value = ''
+  loading.value = true
+  scroll()
+  try {
+    const res = await chat(text)
+    messages.value.push({ role: 'assistant', content: res.reply })
+  } catch (e) {
+    messages.value.push({ role: 'assistant', content: '查询失败: ' + (e.detail || e.message || '未知错误') })
+  } finally {
+    loading.value = false
+    scroll()
+  }
+}
+const quick = q => { input.value = q; onSend() }
+</script>
+
+<style scoped>
+.chat-body { flex: 1; overflow-y: auto; padding: 12px; background: #f5f7fa; border-radius: 4px; }
+.msg { margin-bottom: 12px; display: flex; }
+.msg.user { justify-content: flex-end; }
+.msg.assistant { justify-content: flex-start; }
+.bubble { max-width: 70%; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.msg.user .bubble { background: #409eff; color: #fff; }
+.msg.assistant .bubble { background: #fff; color: #303133; border: 1px solid #e4e7ed; }
+.chat-input { margin-top: 12px; }
+</style>

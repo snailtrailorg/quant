@@ -1,0 +1,19 @@
+[Unit]
+Description=Quant Platform FastAPI Backend
+After=network-online.target postgresql.service valkey.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=__PROJECT_DIR__
+EnvironmentFile=__PROJECT_DIR__/.env
+Environment=QT_QPA_PLATFORM=offscreen
+ExecStart=__PROJECT_DIR__/venv/bin/uvicorn src.web_api.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target
