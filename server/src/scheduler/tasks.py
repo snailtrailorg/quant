@@ -485,3 +485,48 @@ def sync_all_symbols(self, sync_id: str):
         r.expire(key, 3600)
         _mark("idle", 0)  # 异常也恢复 idle（避免卡 running）
         raise
+
+
+@app.task(name="src.scheduler.tasks.sync_via_celery",
+          bind=True, soft_time_limit=3600, time_limit=4200)
+def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
+    """类型级同步异步执行（HTTP trigger 立即返回 task_id，前端轮询进度）。
+
+    progress 写 Valkey sync:type:{sid}（与全量重建 sync_all_symbols 的 sync:progress:{sid} 分开）。
+    完成态存 result 关键字段供前端 notifyResult 显示。
+    """
+    import os
+    import redis
+    from src.data_sync.engine import sync
+
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    key = f"sync:type:{sync_id}"
+
+    def progress_cb(i: int, total: int, current: str):
+        r.hset(key, mapping={
+            "status": "running", "done": i, "total": total,
+            "current": current, "pct": round(i / total * 100, 1) if total else 0,
+        })
+        r.expire(key, 3600)
+
+    r.hset(key, mapping={"status": "running", "done": 0, "total": 0, "pct": 0, "current": ""})
+    r.expire(key, 3600)
+    try:
+        result = sync(sync_id, backfill_from=backfill_from, progress_cb=progress_cb)
+        # 完成态存关键字段，供前端 notifyResult 显示
+        failed = result.get("failed_dates") or []
+        r.hset(key, mapping={
+            "status": result.get("status", "done"),
+            "rows_pulled": result.get("rows_pulled", 0),
+            "rows_saved": result.get("rows_saved", 0),
+            "expected_days": result.get("expected_days") or 0,
+            "actual_days": result.get("actual_days") or 0,
+            "failed_dates_count": len(failed),
+            "pct": 100,
+        })
+        r.expire(key, 3600)
+        return result
+    except Exception as e:
+        r.hset(key, mapping={"status": "error", "error": str(e)[:120]})
+        r.expire(key, 3600)
+        raise

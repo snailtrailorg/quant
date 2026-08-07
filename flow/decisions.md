@@ -189,3 +189,26 @@
   - 时间阈值判断僵尸进程（前棒已否决）：用 Valkey 心跳锁
 - **影响**: 部署方案见 `DEPLOY.md`，工具 `scripts/quant-deploy.sh`。safebox 的 FLUSHALL 是遗留隐患（建议 safebox 也改 FLUSHDB -n 0）。
 
+
+## 2026-08-07 · 类型级同步 trigger 异步化（Celery + progress 轮询）
+
+- **背景**：类型级同步（按日批量拉全市场）是耗时操作（astock_daily 空状态 31.9s，全量重建 37min），原 `trigger_sync_api` 同步阻塞导致 30s axios 超时（数据下完但前端报错）。
+- **决定**：类型级 trigger 全部异步化--`trigger_sync_api` 提交 Celery `sync_via_celery` 立即返回 task_id，前端轮询 `/sync/trigger/{sid}/progress`（Valkey `sync:type:{sid}` + AsyncResult 兜底）。与全量重建 `sync_all_symbols`（`sync:progress:{sid}`）统一异步架构，key 分开避免冲突。
+- **否决**：① 前端仅加 timeout:120000（最小修复，治标，超大同步仍超时 + uvicorn worker 阻塞期间其他请求排队）；② 空状态走 Celery + 前端兜底（混合，增量 last_sync_date 旧仍可能慢）。
+- **保留同步**：per-symbol 单只同步（SymbolManage onSync）保持同步 + 120s timeout（单只快，无需异步）。
+- **附带**：恢复 2026-08-04 误删的 6 个 per-symbol 端点（symbols/symbol/backfill/all/progress），靠 engine 函数 + 前端契约重建（force push 覆盖了 git 历史）。
+
+---
+
+## 2026-08-07 · LLM 网关简化：移除 tier 机制 + 移除语言注入（飞书同步）
+
+- **背景**：评审文档 `docs/LLM网关设计.md` 建议移除 tier 与语言注入。核实：**tier 是死代码**--6 个 `gateway.chat` 调用点全 `tier="regular"`，`complex`/`embedding` 从没用过，连最该用 complex 的盘后报告/A股研判都 regular；lang 注入对 i18n 是过度设计（大模型按输入语言自然回复即可，per-机器人 lang 配置增加设置负担）。用户："前期规则不合适可改，做太多设置限制体验不好"。
+- **决定**：
+  1. **移除 tier**：删 `Tier` 类型 / `llm_model_config.tier` 字段 / `chat()`+`chat_stream()` 的 `tier` 参数 / `_resolve_model(tier)`；`_load_models_from_db` 返回按 `priority` 全局排序的列表；主备容灾取前两个
+  2. **移除 lang**：删 `_inject_lang()` / `chat()`+`chat_stream()` 的 `lang` 参数；飞书端同步去 `lang`（`feishu_config.lang` 字段 + `bot.py` 传 lang + 前端设置弹窗 lang 项 + `register_app` 传 `navigator.language`）
+  3. **i18n 收窄**：LLM 回复不再"按用户语言偏好"，改为按输入语言自然回复；保留 Web 前端 UI 按浏览器语言切换 + 日志统一英文
+- **否决**：补全 tier 使用（盘后报告/A股研判传 `tier="complex"`）--当前就 2 个模型 + 外部 gate 型号待确认，YAGNI；真要 complex 路由等模型多了再加（那时 tier 有实际承载）
+- **影响文档**：`architecture/01-llm-gateway.md`（§2/§5/§6/§8/§9）、`CLAUDE.md`（AI 层段 + i18n 段）、记忆 `ai-layer-decision`
+- **关联任务**（分析已确认，建议一并实施）：P0.3 工具过滤越权漏洞、P0.4 熔断并发 Lock、gateway Role 对齐 RBAC 四角色（trader 该能 halt）
+
+---

@@ -35,7 +35,7 @@
 - **实盘三级开关**（AND）：`.env ENABLE_LIVE_TRADING` 总闸 + Web `live_trading_config` 分项（convertible/etf/astock/binance_perp/okx_perp）+ 策略 `enabled`+`backtest_verified`。任一关即拒单（`risk_control.check_order` 前置）。A 股/可转债/ETF 统一走中泰 XTP（`XTPAdapter`），加密走币安/OKX。
 - **可转债/ETF 实盘**：走中泰 XTP + vnpy_xtp（Linux 原生），需中泰开户+签协议+资产门槛（待券商确认）。
 - **加密合约**：币安/OKX 永续，vnpy 加密网关，低杠杆+逐仓。
-- **运行期 AI 只用国内模型**：DeepSeek（常规/复杂）+ GLM（备/复杂），**不接 Claude/OpenAI 运行期**。Claude Code 仅作开发助手。
+- **运行期 AI 只用国内模型**：DeepSeek（主）+ GLM（备），**不接 Claude/OpenAI 运行期**。Claude Code 仅作开发助手。LLM 网关按 `priority` 全局主备容灾（2026-08-07 移除 tier 分级--原 tier 是死代码，6 调用点全 regular）。
 - **单系统 RBAC**：Admin/Trader/Analyst/Viewer 四角色，非多租户；多租户需求=售出独立实例。Trader（交易：启停策略/熔断/下单）与 Analyst（研究：策略/回测/数据同步）隔离防误操作。
 - **部署 OS**：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8）。开发机 Fedora（同 dnf/RPM 系）。
 - **回测与实盘 schema 对齐**：数据中台 schema 现在就和未来 XTP 实时行情一致，零迁移。
@@ -56,7 +56,7 @@
 - 解决问题从根本上解，不打补丁。
 - 进展条/交接只带「指针 + 增量」，不重抄内容。
 - **联网核实**走本机 `spe curl`（WebSearch 不可用，返回幻觉；WebFetch 域安全校验后端不通）。
-- **多语言国际化（i18n）**：Web 前端按浏览器语言自动切换中/英文；LLM 回复/飞书回复/告警推送按用户语言偏好输出；日志统一英文。检测：Web 端 `navigator.language`，服务端 `LANG` 环境变量，飞书用户 locale，DB 可配用户偏好覆盖。
+- **多语言国际化（i18n）**：Web 前端按浏览器语言自动切换中/英文；LLM 回复按输入语言自然回复（2026-08-07 移除 lang 注入与飞书 per-机器人 lang 配置，简化设置）；日志统一英文。
 
 ### 外部待确认 gate（不阻塞开发，但影响实盘）
 - 中泰 XTP 门槛/品种放行/费率（用户问客户经理）

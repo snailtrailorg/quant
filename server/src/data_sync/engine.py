@@ -98,7 +98,8 @@ def _expected_trading_days(start: str, end: str) -> int:
 
 # --- 同步调度入口 ---
 
-def sync(sync_id: str, backfill_from: str | None = None) -> dict:
+def sync(sync_id: str, backfill_from: str | None = None,
+         progress_cb: Callable | None = None) -> dict:
     """执行同步任务。
 
     Args:
@@ -127,7 +128,7 @@ def sync(sync_id: str, backfill_from: str | None = None) -> dict:
     try:
         handler = _HANDLERS.get(sync_id)
         if handler:
-            r = handler(cfg, end_date, backfill_from)
+            r = handler(cfg, end_date, backfill_from, progress_cb=progress_cb)
             pulled = r.get("pulled", 0)
             saved = r.get("saved", 0)
             start_date = r.get("start", end_date)
@@ -162,7 +163,8 @@ def sync(sync_id: str, backfill_from: str | None = None) -> dict:
 # --- 通用按日批量拉取（去静默吞异常 + 完整性校验） ---
 
 def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
-                        start: str, end: str, sleep_s: float = 0.5) -> dict:
+                        start: str, end: str, sleep_s: float = 0.5,
+                        progress_cb: Callable | None = None) -> dict:
     """按交易日逐日批量拉取 + 写入。
 
     单日失败不中断整体，记入 failed_dates（含失败原因），不再静默 continue。
@@ -171,11 +173,12 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
     Returns: {pulled, saved, failed_dates, expected_days, actual_days}
     """
     date_range = pd.date_range(start=start, end=end, freq="B")
+    total = len(date_range)
     total_pulled = 0
     total_saved = 0
     failed_dates: list[str] = []
 
-    for d in date_range:
+    for i, d in enumerate(date_range, 1):
         trade_date = d.strftime("%Y%m%d")
         try:
             df = pro_api_fn(trade_date=trade_date)
@@ -183,6 +186,8 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
                 if "trade_date" not in df.columns:
                     # 防御：异常响应缺关键列，给明确报错（避免下游 KeyError 隐晦）
                     failed_dates.append(f"{trade_date}:响应缺trade_date列,cols={list(df.columns)[:4]}")
+                    if progress_cb:
+                        progress_cb(i, total, trade_date)
                     continue
                 saved = save_fn(df)
                 total_pulled += len(df)
@@ -190,6 +195,8 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
         except Exception as e:
             # 不再静默 continue：记失败日期 + 类型 + 原因，整体继续
             failed_dates.append(f"{trade_date}:{type(e).__name__}:{str(e)[:40]}")
+        if progress_cb:
+            progress_cb(i, total, trade_date)
         if sleep_s:
             time.sleep(sleep_s)
 
@@ -205,7 +212,8 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
 
 # --- 具体同步逻辑 ---
 
-def _sync_astock_daily(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_astock_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
+                      progress_cb: Callable | None = None) -> dict:
     """A股日线同步（按日期批量拉取，一次全市场）。"""
     pro = _get_pro()
     if backfill_from:
@@ -216,12 +224,14 @@ def _sync_astock_daily(cfg: dict, end_date: str, backfill_from: str | None = Non
         if start > end_date:
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
-    r = _sync_by_trade_date(pro.daily, _daily_to_save_fn, start, end_date)
+    r = _sync_by_trade_date(pro.daily, _daily_to_save_fn, start, end_date,
+                            progress_cb=progress_cb)
     r["start"] = start
     return r
 
 
-def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
+                       progress_cb: Callable | None = None) -> dict:
     """A股基本面指标同步（按日期批量拉取，一次全市场）。"""
     from src.data_platform.adapters.tushare_adapter import save_daily_basic
     pro = _get_pro()
@@ -233,12 +243,14 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
         if start > end_date:
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
-    r = _sync_by_trade_date(pro.daily_basic, lambda df: save_daily_basic(df), start, end_date)
+    r = _sync_by_trade_date(pro.daily_basic, lambda df: save_daily_basic(df), start, end_date,
+                            progress_cb=progress_cb)
     r["start"] = start
     return r
 
 
-def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None,
+                      progress_cb: Callable | None = None) -> dict:
     """A股股票列表全量同步。"""
     pro = _get_pro()
     df = pro.stock_basic(list_status="L")
@@ -262,7 +274,8 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
-def _sync_cb_daily(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_cb_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
+                   progress_cb: Callable | None = None) -> dict:
     """可转债日线同步（全量拉取，cb_daily 不支持单标的）。"""
     from src.data_platform.adapters.tushare_adapter import pull_cb_daily, to_save_rows
     from src.data_platform.db import save_bars
@@ -283,7 +296,8 @@ def _sync_cb_daily(cfg: dict, end_date: str, backfill_from: str | None = None) -
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
-def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
+                   progress_cb: Callable | None = None) -> dict:
     """可转债基本信息全量同步。"""
     pro = _get_pro()
     df = pro.cb_basic()
@@ -315,7 +329,8 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None) -
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
-def _sync_etf_daily(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_etf_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
+                   progress_cb: Callable | None = None) -> dict:
     """ETF日线同步（按日期批量拉取）。"""
     pro = _get_pro()
     if backfill_from:
@@ -326,12 +341,14 @@ def _sync_etf_daily(cfg: dict, end_date: str, backfill_from: str | None = None) 
         if start > end_date:
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
-    r = _sync_by_trade_date(pro.fund_daily, _daily_to_save_fn, start, end_date)
+    r = _sync_by_trade_date(pro.fund_daily, _daily_to_save_fn, start, end_date,
+                            progress_cb=progress_cb)
     r["start"] = start
     return r
 
 
-def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
+                   progress_cb: Callable | None = None) -> dict:
     """ETF基金列表全量同步。"""
     pro = _get_pro()
     df = pro.fund_basic(market="E")
@@ -354,7 +371,8 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None) -
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
-def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None) -> dict:
+def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
+                    progress_cb: Callable | None = None) -> dict:
     """交易日历全量同步。"""
     from src.data_platform.adapters.tushare_adapter import pull_trade_cal
     year = date.today().year
@@ -720,3 +738,61 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
     return {"status": "partial" if failed else "success",
             "total": total, "ok": ok, "failed_count": len(failed),
             "saved": total_saved, "failed": failed[:20]}
+
+
+def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> dict:
+    """列出某类型全部标的 + 本地数据状态（批量聚合查 bar_1D，避免逐只查）。
+
+    Returns: {items:[{ts_code,name,list_date,local_count,local_first,local_last}], total}
+    """
+    from src.data_platform.schema import to_vt_symbol
+    _, _, kind = _get_pro_api(sync_id)
+    if kind is None:
+        return {"items": [], "total": 0}
+    table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
+    name_col = "bond_short_name" if kind == "cb" else "name"
+
+    like = f"%{q}%" if q else "%"
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"SELECT ts_code, {name_col}, list_date FROM {table} "
+            f"WHERE ts_code ILIKE %s OR {name_col} ILIKE %s "
+            f"ORDER BY ts_code LIMIT %s OFFSET %s",
+            (like, like, size, (page - 1) * size))
+        rows = cur.fetchall()
+        cur = conn.execute(
+            f"SELECT count(*) FROM {table} WHERE ts_code ILIKE %s OR {name_col} ILIKE %s",
+            (like, like))
+        total = cur.fetchone()[0] or 0
+
+    if not rows:
+        return {"items": [], "total": total}
+
+    # 批量聚合查 bar_1D 本地数据范围（一次 ANY 查询，非逐只）
+    vts = {to_vt_symbol(r[0]): r[0] for r in rows}
+    local: dict = {}
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT symbol, count(*), min(ts), max(ts) FROM bar_1D "
+                "WHERE symbol = ANY(%s) GROUP BY symbol",
+                (list(vts.keys()),))
+            for sym, cnt, mn, mx in cur.fetchall():
+                local[sym] = (int(cnt),
+                              str(mn).replace("-", "")[:8] if mn else None,
+                              str(mx).replace("-", "")[:8] if mx else None)
+    except psycopg.errors.UndefinedTable:
+        pass
+
+    items = []
+    for ts_code, name, list_date in rows:
+        vt = to_vt_symbol(ts_code)
+        loc = local.get(vt)
+        items.append({
+            "ts_code": ts_code, "name": name,
+            "list_date": str(list_date) if list_date else "",
+            "local_count": loc[0] if loc else 0,
+            "local_first": loc[1] if loc else None,
+            "local_last": loc[2] if loc else None,
+        })
+    return {"items": items, "total": total}

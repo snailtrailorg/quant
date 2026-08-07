@@ -6,6 +6,16 @@
         <el-button @click="load" size="small">刷新</el-button>
       </div>
     </template>
+    <el-card v-if="currentSync" shadow="never" style="margin-bottom: 12px">
+      <div style="display: flex; align-items: center; gap: 12px">
+        <span style="font-size: 13px; white-space: nowrap">{{ currentSync.name }}</span>
+        <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />
+        <span style="font-size: 12px; color: #606266; white-space: nowrap">
+          {{ progress.done || 0 }} / {{ progress.total || 0 }} · {{ progress.current || '' }}
+          <span v-if="progress.status === 'error'" style="color: #f56c6c">{{ progress.error }}</span>
+        </span>
+      </div>
+    </el-card>
     <el-table :data="configs" stripe v-loading="loading">
       <el-table-column prop="name" label="数据类型" width="160" />
       <el-table-column prop="data_type" label="品类" width="80">
@@ -91,7 +101,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import api from '../api'
@@ -100,6 +110,9 @@ const router = useRouter()
 const configs = ref([])
 const logs = ref([])
 const loading = ref(false)
+const currentSync = ref(null)  // 当前异步同步任务 {sid, name, task_id}
+const progress = ref({})
+let pollTimer = null
 const role = ref(localStorage.getItem('role') || 'viewer')
 
 const PER_SYMBOL_IDS = ['astock_daily', 'etf_daily', 'cb_daily']
@@ -122,29 +135,58 @@ const onToggle = async (row) => {
   ElMessage.success(`${row.name} ${row.enabled ? '已启用' : '已停用'}`)
 }
 
-// 结果提示：含缺口时黄色警告
-const notifyResult = (row, r, prefix) => {
-  let msg = `${prefix}: 拉取${r.rows_pulled || 0} 入库${r.rows_saved || 0}`
-  if (r.expected_days != null) msg += ` (${r.actual_days}/${r.expected_days}交易日)`
-  if (r.failed_dates?.length) msg += ` 缺口${r.failed_dates.length}天`
-  ElMessage[r.failed_dates?.length ? 'warning' : 'success'](msg)
+// 异步同步完成提示（适配轮询 progress 结果，用 failed_dates_count）
+const notifyResult = (row, p, prefix) => {
+  if (p.status === 'error') { ElMessage.error(`${prefix} 失败: ${p.error || ''}`); return }
+  let msg = `${prefix}: 拉取${p.rows_pulled || 0} 入库${p.rows_saved || 0}`
+  if (p.expected_days) msg += ` (${p.actual_days}/${p.expected_days}交易日)`
+  if (p.failed_dates_count) msg += ` 缺口${p.failed_dates_count}天`
+  ElMessage[p.failed_dates_count ? 'warning' : 'success'](msg)
 }
+
+// 轮询类型级同步进度（异步化后 HTTP 立即返回 task_id，前端轮询 /sync/trigger/{sid}/progress）
+const startPoll = (row, name, task_id) => {
+  stopPoll()
+  currentSync.value = { sid: row.id, name, task_id }
+  let idleTicks = 0
+  pollTimer = setInterval(async () => {
+    try {
+      const p = await api.get(`/sync/trigger/${row.id}/progress`, { params: { task_id } })
+      progress.value = p
+      if (p.status === 'running') {
+        row.status = 'running'
+        idleTicks = 0
+      } else if (p.status === 'idle') {
+        // hash 过期且 Celery 未就绪（worker 未起？）-- 累计等待，超 30s 放弃
+        if (++idleTicks > 15) {
+          stopPoll()
+          ElMessage.warning(`${name}: 任务状态查询超时（worker 可能未运行）`)
+          currentSync.value = null; progress.value = {}; row.status = 'idle'
+        }
+      } else {
+        // success/partial/error 完成
+        stopPoll()
+        notifyResult(row, p, name)
+        currentSync.value = null; progress.value = {}
+        row.status = 'idle'
+        await load()
+      }
+    } catch (e) { /* ignore 单次轮询失败 */ }
+  }, 2000)
+}
+const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
 const onTrigger = async (row) => {
   row.status = 'running'
   try {
     const r = await api.post(`/sync/trigger/${row.id}`)
-    if (r.status === 'rebuild_submitted') {
-      // 空状态自动全量重建，提示去二级页看进度
-      ElMessageBox.confirm(
-        `${row.name} 数据为空，已提交全量重建（后台执行）。\n是否前往标的列表查看进度？`,
-        '全量重建已提交', { confirmButtonText: '查看进度', cancelButtonText: '稍后', type: 'success' }
-      ).then(() => goSymbols(row)).catch(() => {})
+    if (r.status === 'submitted') {
+      startPoll(row, `${row.name} 同步`, r.task_id)
     } else {
       notifyResult(row, r, `${row.name} 同步`)
+      row.status = 'idle'
     }
-    await load()
-  } catch (e) { ElMessage.error('同步失败'); row.status = 'idle' }
+  } catch (e) { ElMessage.error('提交失败'); row.status = 'idle' }
 }
 
 const onBackfill = async (row) => {
@@ -163,9 +205,13 @@ const onBackfill = async (row) => {
     row.status = 'running'
     try {
       const r = await api.post(`/sync/trigger/${row.id}`, null, { params: { backfill_from: value } })
-      notifyResult(row, r, `${row.name} 回补 ${value}`)
-      await load()
-    } catch (e) { ElMessage.error('回补失败'); row.status = 'idle' }
+      if (r.status === 'submitted') {
+        startPoll(row, `${row.name} 回补 ${value}`, r.task_id)
+      } else {
+        notifyResult(row, r, `${row.name} 回补 ${value}`)
+        row.status = 'idle'
+      }
+    } catch (e) { ElMessage.error('提交失败'); row.status = 'idle' }
   } catch (e) {
     // 用户取消 prompt，不动状态
   }
@@ -180,4 +226,5 @@ const onDelete = async (row) => {
   } catch {}
 }
 onMounted(load)
+onUnmounted(stopPoll)
 </script>

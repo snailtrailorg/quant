@@ -7,7 +7,7 @@ from __future__ import annotations
 from src.data_platform.db import get_conn
 import os
 from typing import Literal
-from fastapi import FastAPI, HTTPException, Depends, Header, Query
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -693,10 +693,122 @@ def update_sync_config_api(sid: str, body: dict, payload: dict = Depends(require
 
 @app.post("/api/sync/trigger/{sid}")
 def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict = Depends(require_perm("data_sync"))):
-    from src.data_sync import sync
-    result = sync(sid, backfill_from=backfill_from)
+    """异步触发类型级同步：提交 Celery 后台任务，立即返回 task_id（不阻塞 HTTP）。"""
+    from src.scheduler.tasks import sync_via_celery
+    task = sync_via_celery.delay(sid, backfill_from)
     audit_log(payload["username"], "trigger_sync", sid)
+    return {"status": "submitted", "task_id": task.id}
+
+
+@app.get("/api/sync/trigger/{sid}/progress")
+def trigger_progress_api(sid: str, task_id: str | None = None,
+                         payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """查类型级同步进度（Valkey sync:type:{sid}，无则 Celery AsyncResult 兜底）。"""
+    import os, redis
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    data = r.hgetall(f"sync:type:{sid}")
+    _INT_FIELDS = {"done", "total", "pct", "rows_pulled", "rows_saved",
+                   "expected_days", "actual_days", "failed_dates_count"}
+    if data:
+        out = {}
+        for k, v in data.items():
+            ks = k.decode() if isinstance(k, bytes) else k
+            vs = v.decode() if isinstance(v, bytes) else v
+            out[ks] = int(vs) if ks in _INT_FIELDS and vs.lstrip("-").isdigit() else vs
+        return out
+    # 兜底：查 Celery AsyncResult（hash 过期/worker 重启时）
+    if task_id:
+        from src.scheduler.app import app as celery_app
+        res = celery_app.AsyncResult(task_id)
+        if res.state == "SUCCESS":
+            d = res.result or {}
+            return {"status": d.get("status", "success"),
+                    "rows_pulled": d.get("rows_pulled", 0),
+                    "rows_saved": d.get("rows_saved", 0),
+                    "expected_days": d.get("expected_days") or 0,
+                    "actual_days": d.get("actual_days") or 0,
+                    "failed_dates_count": len(d.get("failed_dates") or [])}
+        if res.state in ("PENDING", "STARTED", "RETRY"):
+            return {"status": "running"}
+        if res.state == "FAILURE":
+            return {"status": "error", "error": str(res.result)[:120]}
+    return {"status": "idle"}
+
+
+# --- per-symbol 同步端点（2026-08-04 端点误删恢复，基于 engine 现有函数重建） ---
+
+@app.get("/api/sync/symbols/{sid}")
+def list_symbols_api(sid: str, q: str = "", page: int = 1, size: int = 9999,
+                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    from src.data_sync.engine import list_symbols
+    return list_symbols(sid, q=q, page=page, size=size)
+
+
+@app.post("/api/sync/symbol/{sid}/{ts_code}")
+def sync_symbol_api(sid: str, ts_code: str, body: dict = Body(default={}),
+                    payload: dict = Depends(require_perm("data_sync"))):
+    from src.data_sync.engine import sync_symbol
+    mode = body.get("mode", "auto") if body else "auto"
+    result = sync_symbol(sid, ts_code, mode=mode)
+    audit_log(payload["username"], "sync_symbol", f"{sid}:{ts_code}")
     return result
+
+
+@app.post("/api/sync/symbol/{sid}/{ts_code}/backfill")
+def backfill_symbol_api(sid: str, ts_code: str, body: dict = Body(...),
+                        payload: dict = Depends(require_perm("data_sync"))):
+    from src.data_sync.engine import backfill_symbol
+    result = backfill_symbol(sid, ts_code, body.get("start", ""), body.get("end", ""))
+    audit_log(payload["username"], "backfill_symbol", f"{sid}:{ts_code}:{body.get('start')}~{body.get('end')}")
+    return result
+
+
+@app.delete("/api/sync/symbol/{sid}/{ts_code}")
+def delete_symbol_api(sid: str, ts_code: str,
+                      payload: dict = Depends(require_perm("data_sync"))):
+    from src.data_sync.engine import delete_symbol
+    result = delete_symbol(sid, ts_code)
+    audit_log(payload["username"], "delete_symbol", f"{sid}:{ts_code}")
+    return result
+
+
+@app.post("/api/sync/all/{sid}")
+def sync_all_api(sid: str, payload: dict = Depends(require_perm("data_sync"))):
+    """提交全市场全量重建（Celery 后台，返回 task_id）。"""
+    from src.scheduler.tasks import sync_all_symbols
+    task = sync_all_symbols.delay(sid)
+    audit_log(payload["username"], "sync_all", sid)
+    return {"task_id": task.id}
+
+
+@app.get("/api/sync/all/{sid}/progress")
+def sync_all_progress_api(sid: str, task_id: str | None = None,
+                           payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """查全量重建进度（Valkey sync:progress:{sid}，无则 Celery AsyncResult 兜底）。"""
+    import os, redis
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    data = r.hgetall(f"sync:progress:{sid}")
+    _INT_FIELDS = {"done", "total", "pct", "ok", "saved", "failed_count"}
+    if data:
+        out = {}
+        for k, v in data.items():
+            ks = k.decode() if isinstance(k, bytes) else k
+            vs = v.decode() if isinstance(v, bytes) else v
+            out[ks] = int(vs) if ks in _INT_FIELDS and vs.lstrip("-").isdigit() else vs
+        return out
+    if task_id:
+        from src.scheduler.app import app as celery_app
+        res = celery_app.AsyncResult(task_id)
+        if res.state == "SUCCESS":
+            d = res.result or {}
+            return {"status": d.get("status", "success"),
+                    "ok": d.get("ok", 0), "total": d.get("total", 0),
+                    "saved": d.get("saved", 0), "failed_count": d.get("failed_count", 0)}
+        if res.state in ("PENDING", "STARTED", "RETRY"):
+            return {"status": "running"}
+        if res.state == "FAILURE":
+            return {"status": "error", "error": str(res.result)[:120]}
+    return {"status": "idle"}
 
 
 @app.delete("/api/sync/data/{sid}")
@@ -719,6 +831,87 @@ def get_sync_logs_api(payload: dict = Depends(require_role("viewer", "analyst", 
         cur = conn.execute("SELECT id, sync_id, mode, start, end, pulled, saved, status, ts FROM sync_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
     return [{"id": r[0], "sync_id": r[1], "mode": r[2], "start": r[3], "end": r[4], "pulled": r[5], "saved": r[6], "status": r[7], "ts": str(r[8]) if r[8] else None} for r in rows]
+
+
+@app.get("/api/kline/{symbol}")
+def get_kline_api(symbol: str, days: int = 0,
+                  payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """K线数据（days=0 全历史，>0 按日历日截断；2026-08-04 端点误删恢复）。
+
+    symbol 接受 ts_code（600000.SH）或 vt_symbol（600000.SHSE），内部 to_vt_symbol 转换查 bar_1D。
+    返回 [{ts, open, high, low, close, volume}, ...]。
+    """
+    from src.data_platform.db import get_bars
+    from src.data_platform.schema import to_vt_symbol
+    from datetime import date, timedelta
+    import pandas as pd
+    end = date.today()
+    start = end - timedelta(days=days) if days > 0 else date(2010, 1, 1)
+    vt = to_vt_symbol(symbol)
+    df = get_bars(vt, "1D", start, end)
+    if df is None or df.empty:
+        return []
+    records = df[["ts", "open", "high", "low", "close", "volume"]].to_dict("records")
+    for r in records:
+        r["ts"] = r["ts"].strftime("%Y-%m-%d") if pd.notna(r["ts"]) else None
+        for k in ("open", "high", "low", "close", "volume"):
+            r[k] = float(r[k]) if pd.notna(r[k]) else None
+    return records
+
+
+# --- 三市场筛选端点（2026-08-04 端点误删恢复） ---
+
+@app.get("/api/screen/astock")
+def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
+                      turnover_min: float = 0, limit: int = 100,
+                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """A股基本面筛选（daily_basic 最新交易日 + join asset_static_info name）。"""
+    _f = lambda x: float(x) if x is not None else None
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT d.ts_code, s.name, d.close, d.pe, d.pe_ttm, d.pb, d.turnover_rate, d.total_mv
+            FROM daily_basic d
+            LEFT JOIN asset_static_info s ON s.ts_code = d.ts_code
+            WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)
+              AND (%s = 0 OR d.pe <= %s)
+              AND (%s = 0 OR d.pb <= %s)
+              AND (%s = 0 OR d.total_mv >= %s)
+              AND (%s = 0 OR d.turnover_rate >= %s)
+            ORDER BY d.total_mv DESC NULLS LAST
+            LIMIT %s
+        """, (pe_max, pe_max, pb_max, pb_max, mv_min, mv_min, turnover_min, turnover_min, limit))
+        rows = cur.fetchall()
+    return [{"ts_code": r[0], "name": r[1], "close": _f(r[2]), "pe": _f(r[3]),
+             "pe_ttm": _f(r[4]), "pb": _f(r[5]), "turnover": _f(r[6]), "total_mv": _f(r[7])}
+            for r in rows]
+
+
+@app.get("/api/screen/cb")
+def screen_cb_api(limit: int = 100,
+                  payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """可转债筛选（cb_basic_info）。"""
+    _f = lambda x: float(x) if x is not None else None
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT ts_code, bond_short_name, stk_code, stk_short_name, conv_price, maturity_date
+            FROM cb_basic_info ORDER BY ts_code LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+    return [{"ts_code": r[0], "name": r[1], "stk_code": r[2], "stk_name": r[3],
+             "conv_price": _f(r[4]), "maturity_date": str(r[5]) if r[5] else ""} for r in rows]
+
+
+@app.get("/api/screen/etf")
+def screen_etf_api(limit: int = 100,
+                   payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """ETF 基金筛选（etf_basic_info）。"""
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT ts_code, name, management, fund_type
+            FROM etf_basic_info ORDER BY ts_code LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+    return [{"ts_code": r[0], "name": r[1], "management": r[2], "fund_type": r[3]} for r in rows]
 
 
 # --- 审计日志 ---
