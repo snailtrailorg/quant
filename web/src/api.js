@@ -55,7 +55,7 @@ export const deleteLLMModel = (id) => api.delete(`/llm-models/${id}`)
 export const testLLMModel = (id) => api.post(`/llm-models/${id}/test`)
 
 export const getFeishuList = () => api.get('/feishu/list')
-export const feishuConnect = (lang) => api.post('/feishu/connect', { lang })
+export const feishuConnect = () => api.post('/feishu/connect')
 export const feishuUpdate = (id, data) => api.put(`/feishu/${id}`, data)
 export const feishuStatus = (sid) => api.get(`/feishu/status/${sid}`)
 export const feishuStart = (id) => api.post(`/feishu/${id}/start`)

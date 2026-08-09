@@ -366,7 +366,6 @@ def get_alerts(payload: dict = Depends(require_role("viewer", "analyst", "trader
 
 class ChatReq(BaseModel):
     message: str
-    tier: str = "regular"
 
 
 @app.post("/api/chat")
@@ -377,11 +376,11 @@ def chat(req: ChatReq, payload: dict = Depends(require_role("viewer", "analyst",
         from src.llm_gateway.gateway import READ_TOOLS
         resp = gateway.chat(
             messages=[{"role": "user", "content": req.message}],
-            tier=req.tier,
             tools=READ_TOOLS,
             role=payload["role"],
             timeout=30,
             retries=0,
+            caller="web_chat",
         )
         return {"reply": resp.content or "（LLM 无响应，请检查 API key）", "usage": resp.usage}
     except Exception as e:
@@ -473,9 +472,9 @@ class LLMModelReq(BaseModel):
     base_url: str
     context_window: int = 32768
     supports_tools: bool = True
-    max_tokens: int | None = None
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
     temperature: float | None = None
-    tier: str = "regular"
     priority: int = 10
     enabled: bool = False
 
@@ -483,9 +482,9 @@ class LLMModelReq(BaseModel):
 @app.get("/api/llm-models")
 def list_llm_models(payload: dict = Depends(require_perm("llm_config"))):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_tokens, temperature, tier, priority, enabled FROM llm_model_config ORDER BY tier, priority")
+        cur = conn.execute("SELECT id, name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, priority, enabled FROM llm_model_config ORDER BY priority")
         rows = cur.fetchall()
-    return [{"id": r[0], "name": r[1], "provider": r[2], "model": r[3], "has_key": bool(r[4]), "base_url": r[5], "context_window": r[6], "supports_tools": r[7], "max_tokens": r[8], "temperature": r[9], "tier": r[10], "priority": r[11], "enabled": r[12]} for r in rows]
+    return [{"id": r[0], "name": r[1], "provider": r[2], "model": r[3], "has_key": bool(r[4]), "base_url": r[5], "context_window": r[6], "supports_tools": r[7], "max_input_tokens": r[8], "max_output_tokens": r[9], "temperature": r[10], "priority": r[11], "enabled": r[12]} for r in rows]
 
 
 @app.post("/api/llm-models")
@@ -494,8 +493,8 @@ def create_llm_model(req: LLMModelReq, payload: dict = Depends(require_perm("llm
     enc = encrypt(req.api_key) if req.api_key else ""
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO llm_model_config (name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_tokens, temperature, tier, priority, enabled) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_tokens, req.temperature, req.tier, req.priority, req.enabled))
+            "INSERT INTO llm_model_config (name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, priority, enabled) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.priority, req.enabled))
         conn.commit()
     audit_log(payload["username"], "llm_model_create", detail=f"{req.provider}/{req.model}")
     return {"id": cur.fetchone()[0]}
@@ -507,11 +506,11 @@ def update_llm_model(mid: int, req: LLMModelReq, payload: dict = Depends(require
     enc = encrypt(req.api_key) if req.api_key else None
     with get_conn() as conn:
         if enc is not None:
-            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, api_key_encrypted=%s, base_url=%s, context_window=%s, supports_tools=%s, max_tokens=%s, temperature=%s, tier=%s, priority=%s, enabled=%s, updated_at=now() WHERE id=%s",
-                (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_tokens, req.temperature, req.tier, req.priority, req.enabled, mid))
+            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, api_key_encrypted=%s, base_url=%s, context_window=%s, supports_tools=%s, max_input_tokens=%s, max_output_tokens=%s, temperature=%s, priority=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.priority, req.enabled, mid))
         else:
-            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, base_url=%s, context_window=%s, supports_tools=%s, max_tokens=%s, temperature=%s, tier=%s, priority=%s, enabled=%s, updated_at=now() WHERE id=%s",
-                (req.name, req.provider, req.model, req.base_url, req.context_window, req.supports_tools, req.max_tokens, req.temperature, req.tier, req.priority, req.enabled, mid))
+            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, base_url=%s, context_window=%s, supports_tools=%s, max_input_tokens=%s, max_output_tokens=%s, temperature=%s, priority=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                (req.name, req.provider, req.model, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.priority, req.enabled, mid))
         conn.commit()
     audit_log(payload["username"], "llm_model_update", detail=f"id={mid}")
     from src.llm_gateway.gateway import gateway
@@ -551,23 +550,20 @@ def test_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"))
 
 @app.get("/api/feishu/list")
 def feishu_list(payload: dict = Depends(require_perm("feishu_config"))):
-    """列所有飞书机器人（含 role/lang/description）。"""
+    """列所有飞书机器人（含 role/description）。"""
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, app_id, app_secret_encrypted, role, lang, description, enabled, updated_at FROM feishu_config ORDER BY id")
+        cur = conn.execute("SELECT id, name, app_id, app_secret_encrypted, role, description, enabled, updated_at FROM feishu_config ORDER BY id")
         rows = cur.fetchall()
-    return [{"id": r[0], "name": r[1], "app_id": r[2], "has_secret": bool(r[3]), "role": r[4], "lang": r[5], "description": r[6], "enabled": r[7], "updated_at": r[8]} for r in rows]
+    return [{"id": r[0], "name": r[1], "app_id": r[2], "has_secret": bool(r[3]), "role": r[4], "description": r[5], "enabled": r[6], "updated_at": r[7]} for r in rows]
 
-
-class FeishuConnectReq(BaseModel):
-    lang: str | None = None  # 浏览器语言（navigator.language），存 feishu_config.lang
 
 @app.post("/api/feishu/connect")
-def feishu_connect(req: FeishuConnectReq, payload: dict = Depends(require_perm("feishu_config"))):
-    """扫码创建/连接飞书机器人。lang=浏览器缺省语言。"""
+def feishu_connect(payload: dict = Depends(require_perm("feishu_config"))):
+    """扫码创建/连接飞书机器人。"""
     import uuid
     session_id = str(uuid.uuid4())
     from src.feishu_bot.tasks import feishu_register_task
-    feishu_register_task.delay(session_id, req.lang)
+    feishu_register_task.delay(session_id)
     return {"session_id": session_id}
 
 
@@ -616,19 +612,16 @@ def feishu_stop(fid: int, payload: dict = Depends(require_perm("feishu_config"))
 class FeishuUpdateReq(BaseModel):
     name: str | None = None
     role: str | None = None
-    lang: str | None = None
     description: str | None = None
 
 @app.put("/api/feishu/{fid}")
 def feishu_update(fid: int, req: FeishuUpdateReq, payload: dict = Depends(require_perm("feishu_config"))):
-    """改机器人配置（名称/角色/语言/备注）。修改后 role/lang 对后续消息生效。"""
+    """改机器人配置（名称/角色/备注）。修改后 role 对后续消息生效。"""
     with get_conn() as conn:
         if req.name is not None:
             conn.execute("UPDATE feishu_config SET name=%s, updated_at=now() WHERE id=%s", (req.name, fid))
         if req.role is not None:
             conn.execute("UPDATE feishu_config SET role=%s, updated_at=now() WHERE id=%s", (req.role, fid))
-        if req.lang is not None:
-            conn.execute("UPDATE feishu_config SET lang=%s, updated_at=now() WHERE id=%s", (req.lang, fid))
         if req.description is not None:
             conn.execute("UPDATE feishu_config SET description=%s, updated_at=now() WHERE id=%s", (req.description, fid))
         conn.commit()

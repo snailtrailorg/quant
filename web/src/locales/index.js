@@ -1,6 +1,6 @@
 export default {
   zh: {
-    app: { title: '量化交易平台' },
+    app: { title: '人工智能开发学习' },
     nav: {
       dashboard: '总览',
       strategy: '策略管理',
@@ -45,7 +45,7 @@ export default {
     user: { role: '角色', logout: '退出' },
   },
   en: {
-    app: { title: 'Quant Trading Platform' },
+    app: { title: '人工智能开发学习' },
     nav: {
       dashboard: 'Dashboard',
       strategy: 'Strategies',

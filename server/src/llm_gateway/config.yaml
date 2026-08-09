@@ -1,32 +1,9 @@
-# LLM 网关 · 路由配置（01-llm-gateway.md §5.2）
-# 模型型号规格以官方为准，接入时回填 context/supports_tools
-
-tiers:
-  regular:
-    primary: { provider: deepseek, model: deepseek-v4-flash }
-    fallback: { provider: glm,       model: glm-5.2 }
-  complex:
-    primary: { provider: deepseek, model: deepseek-v4-pro }
-    fallback: { provider: glm,       model: glm-5.2 }
-  embedding:
-    primary: { provider: bge-m3-worker, model: bge-m3 }      # 独立 worker
-    fallback: { provider: deepseek,     model: deepseek-embedding }
-
-providers:
-  deepseek:
-    base_url: https://api.deepseek.com/v1
-    api_key_env: DEEPSEEK_API_KEY
-  glm:
-    base_url: https://open.bigmodel.cn/api/paas/v4
-    api_key_env: GLM_API_KEY
-
+# LLM 网关 · failover 策略（模型配置已 DB 化 llm_model_config）
+# 2026-08-07：移除 tier/lang（决策见 flow/decisions.md）+ P1.8 清理 tiers/providers 死配置
+# 仅保留 failover（模型型号规格以官方为准，接入时回填到 DB llm_model_config）
 failover:
   triggers: [http_5xx, http_429, timeout, quota_exceeded]
   retry_wait_s: 2
   circuit_breaker:
     fail_threshold: 5
     pause_s: 300
-
-usage:
-  log: true
-  store: postgres

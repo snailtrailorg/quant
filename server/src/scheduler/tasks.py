@@ -81,11 +81,10 @@ def daily_report(self):
         from src.llm_gateway import gateway
         response = gateway.chat(
             [{"role": "user", "content": f"请生成简短盘后报告：\n{body}"}],
-            tier="regular",
             role="viewer",
-            lang="zh",
             timeout=30,
             retries=0,
+            caller="daily_report",
         )
         if response.content:
             body = response.content
@@ -133,7 +132,7 @@ def health_check():
     # LLM (DeepSeek)
     try:
         from src.llm_gateway import gateway
-        resp = gateway.chat([{"role":"user","content":"ping"}], tier="regular", timeout=10, retries=0)
+        resp = gateway.chat([{"role":"user","content":"ping"}], timeout=10, retries=0, caller="health_check")
         results["llm"] = {"status": "ok" if resp.content else "empty", "model": resp.usage.get("model","")}
     except Exception as e:
         results["llm"] = {"status": "error", "msg": str(e)[:100]}

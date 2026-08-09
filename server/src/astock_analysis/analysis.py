@@ -155,7 +155,7 @@ class DailySelectionEngine:
                     {"role": "system", "content": "你是一个 A 股分析助手，输出简洁的个股研判。用中文回复。"},
                     {"role": "user", "content": f"分析 {r.symbol}：{r.conclusion}。评分 {r.score}，评级 {r.rating}。"
                      f"支撑 {r.support}，阻力 {r.resistance}。给出简要研判。"}
-                ], tier="regular", role="viewer")
+                ], role="viewer", caller="astock")
                 if resp and resp.content:
                     r.llm_summary = resp.content[:200]
             except Exception:

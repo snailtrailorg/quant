@@ -2,7 +2,7 @@
 
 用法:
     from src.llm_gateway import gateway
-    resp = gateway.chat([{"role":"user","content":"你好"}], tier="regular")
+    resp = gateway.chat([{"role":"user","content":"你好"}], caller="test")
     print(resp.content)
 """
 

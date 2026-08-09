@@ -157,21 +157,19 @@ def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
 def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None):
     if receive_id is None: receive_id = open_id
     print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
-    """后台线程：消息 → LLM 网关 → 回复/确认卡片。per-机器人 role/lang（机器人=登录账号）。"""
+    """后台线程：消息 → LLM 网关 → 回复/确认卡片。per-机器人 role（机器人=登录账号）。"""
     client = FeishuClient()
     role = "viewer"
-    lang = None
     if fid:
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
-                cur = conn.execute("SELECT role, lang FROM feishu_config WHERE id=%s", (fid,))
+                cur = conn.execute("SELECT role FROM feishu_config WHERE id=%s", (fid,))
                 r = cur.fetchone()
                 if r:
                     role = r[0]
-                    lang = r[1]
         except Exception as e:
-            logger.warning(f"查飞书机器人 role/lang 失败: {e}")
+            logger.warning(f"查飞书机器人 role 失败: {e}")
     else:
         role = check_user(open_id)
         if not role:
@@ -180,30 +178,67 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
 
     try:
         from src.llm_gateway import gateway
-        resp = gateway.chat(
-            messages=[{"role": "user", "content": text}],
-            tier="regular",
-            role=role,
-            lang=lang,
-        )
-        if resp.tool_calls:
+        from src.llm_gateway.gateway import READ_TOOLS, OPERATIONAL_TOOLS
+        operational_names = {t.name for t in OPERATIONAL_TOOLS}
+        messages = [{"role": "user", "content": text}]
+        resp = None
+        # 工具调用 loop：读类直接执行回 LLM，操作类发确认卡片后等用户确认
+        for _ in range(5):
+            resp = gateway.chat(messages, role=role, tools=READ_TOOLS, caller="feishu")
+            if not resp.tool_calls:
+                break
+            messages.append({"role": "assistant", "content": resp.content or "",
+                             "tool_calls": [{"id": tc["id"], "type": "function",
+                                             "function": {"name": tc["name"],
+                                                          "arguments": tc.get("arguments", "{}")}}
+                                            for tc in resp.tool_calls]})
+            has_operational = False
             for tc in resp.tool_calls:
-                tool_name = tc["name"]
-                # 操作类 → 发确认卡片
-                from src.llm_gateway.gateway import OPERATIONAL_TOOLS
-                if any(t.name == tool_name for t in OPERATIONAL_TOOLS):
-                    card = build_confirm_card(tool_name, tc.get("arguments", {}))
+                if tc["name"] in operational_names:
+                    card = build_confirm_card(tc["name"], tc.get("arguments", {}))
                     client.send_card(open_id, card, receive_id_type)
+                    has_operational = True
                 else:
-                    # 读类 → 直接执行（简化：回 LLM 结果）
-                    client.send_text(receive_id, f"工具 {tool_name} 结果: ...", receive_id_type)
-        elif resp.content:
+                    result = execute_read_tool(tc["name"], tc.get("arguments", {}))
+                    messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+            if has_operational:
+                return  # 操作类等用户确认，不继续 loop
+        if resp and resp.content:
             client.send_text(receive_id, resp.content[:4000], receive_id_type)
         else:
             client.send_text(receive_id, "（LLM 无响应）", receive_id_type)
     except Exception as e:
         logger.error(f"飞书消息处理失败: {e}")
         client.send_text(receive_id, f"处理失败: {e}", receive_id_type)
+
+
+def execute_read_tool(name: str, args: dict) -> str:
+    """执行读类工具（直接查询，无副作用）。操作类走 execute_confirmed_tool（用户确认后）。"""
+    try:
+        if name == "query_risk_state":
+            from src.risk_control import RiskControl
+            rc = RiskControl.get()
+            state = "熔断" if rc.is_halted() else "正常"
+            return f"风控状态: {state}; 原因: {rc.halt_reason() or '无'}"
+        if name == "query_strategy_status":
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                cur = conn.execute("SELECT id, enabled, backtest_verified FROM strategy_config ORDER BY id")
+                rows = cur.fetchall()
+            if not rows:
+                return "无策略配置"
+            return "策略状态: " + "; ".join(
+                f"{r[0]}({'启' if r[1] else '停'}/{'已验' if r[2] else '未验'})" for r in rows)
+        if name == "query_position":
+            return "持仓查询需实盘对接（XTPAdapter），当前未接入实盘"
+        if name == "query_pnl":
+            return "盈亏查询需实盘对接，当前未接入实盘"
+        if name == "get_astock_analysis":
+            sym = args.get("symbol", "")
+            return f"A股研判 {sym or '全部'}：待 astock_analysis 运行产出"
+        return f"工具 {name} 未实现"
+    except Exception as e:
+        return f"工具 {name} 执行失败: {e}"
 
 
 def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
@@ -220,9 +255,19 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
             RiskControl.get().resume()
             client.send_text(receive_id, "✅ 已恢复交易")
         elif tool_name == "strategy_stop":
-            client.send_text(receive_id, f"✅ 已停止策略 {args}")
+            import subprocess
+            try:
+                subprocess.run(["systemctl", "stop", f"quant-strategy@{args}"], check=True, timeout=10)
+                client.send_text(receive_id, f"✅ 已停止策略 {args}")
+            except Exception as e:
+                client.send_text(receive_id, f"⚠️ 停止失败（polkit 未配? 待办#14）: {e}")
         elif tool_name == "strategy_start":
-            client.send_text(receive_id, f"✅ 已启动策略 {args}")
+            import subprocess
+            try:
+                subprocess.run(["systemctl", "start", f"quant-strategy@{args}"], check=True, timeout=10)
+                client.send_text(receive_id, f"✅ 已启动策略 {args}")
+            except Exception as e:
+                client.send_text(receive_id, f"⚠️ 启动失败（polkit 未配? 待办#14）: {e}")
         else:
             client.send_text(receive_id, f"⚠️ 未知操作: {tool_name}")
         # 审计

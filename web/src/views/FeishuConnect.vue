@@ -16,9 +16,6 @@
           <el-tag :type="roleType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="语言" width="80">
-        <template #default="{ row }">{{ row.lang || '浏览器' }}</template>
-      </el-table-column>
       <el-table-column prop="description" label="备注" />
       <el-table-column label="状态" width="70">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
@@ -59,13 +56,6 @@
             <el-option label="Analyst（研究：策略/回测/数据）" value="analyst" />
             <el-option label="Trader（交易：启停策略/熔断/下单）" value="trader" />
             <el-option label="Admin（全权：+恢复/配置）" value="admin" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="语言偏好">
-          <el-select v-model="settingForm.lang" style="width: 100%">
-            <el-option label="浏览器缺省（跟随用户）" value="" />
-            <el-option label="中文" value="zh" />
-            <el-option label="English" value="en" />
           </el-select>
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="settingForm.description" type="textarea" :rows="2" /></el-form-item>
@@ -110,8 +100,7 @@ const onConnect = async () => {
   qrImg.value = ''
   loading.value = true
   try {
-    const lang = navigator.language || ''
-    const { session_id } = await feishuConnect(lang)
+    const { session_id } = await feishuConnect()
     pollTimer = setInterval(async () => {
       try {
         const r = await feishuStatus(session_id)
@@ -138,7 +127,7 @@ const onConnect = async () => {
 }
 
 const onSetting = (row) => {
-  settingForm.value = { id: row.id, name: row.name || '', role: row.role || 'viewer', lang: row.lang || '', description: row.description || '' }
+  settingForm.value = { id: row.id, name: row.name || '', role: row.role || 'viewer', description: row.description || '' }
   settingVisible.value = true
 }
 

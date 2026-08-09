@@ -26,7 +26,7 @@ def _set_session(session_id: str, data: dict, expire: int = 600) -> None:
 
 
 @celery_app.task(name="src.feishu_bot.tasks.feishu_register_task", bind=True)
-def feishu_register_task(self, session_id: str, lang: str = None):
+def feishu_register_task(self, session_id: str):
     """调 lark.register_app 扫码创建/连接飞书机器人。
 
     用户扫码后手机选"连接现有/重新创建"，SDK 返回 client_id/client_secret。
@@ -97,8 +97,8 @@ def feishu_register_task(self, session_id: str, lang: str = None):
         enc_secret = encrypt(app_secret) if app_secret else ""
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO feishu_config (name, app_id, app_secret_encrypted, role, lang, enabled) VALUES (%s,%s,%s,%s,%s,true)",
-                (app_name, app_id, enc_secret, "viewer", lang))
+                "INSERT INTO feishu_config (name, app_id, app_secret_encrypted, role, enabled) VALUES (%s,%s,%s,%s,true)",
+                (app_name, app_id, enc_secret, "viewer"))
             conn.commit()
 
         _set_session(session_id, {"status": "done", "app_id": app_id}, expire=600)

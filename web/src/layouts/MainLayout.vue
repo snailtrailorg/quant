@@ -74,6 +74,9 @@
       <el-main>
         <router-view />
       </el-main>
+      <el-footer style="background: #f5f7fa; border-top: 1px solid #eee; height: auto; padding: 0">
+        <Footer />
+      </el-footer>
     </el-container>
   </el-container>
 </template>
@@ -83,6 +86,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe } from '../api'
+import Footer from '../components/Footer.vue'
 import { setLang } from '../i18n'
 
 const { t, locale } = useI18n()

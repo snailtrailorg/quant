@@ -14,7 +14,7 @@
       <p style="text-align: center; margin-top: 12px">
         <router-link to="/forgot-password" style="color: #409eff; font-size: 13px">找回密码</router-link>
       </p>
-      <p style="text-align: center; color: #999; margin-top: 16px; font-size: 12px">粤ICP备XXXX号</p>
+      <Footer style="margin-top: 16px" />
     </el-card>
   </div>
 </template>
@@ -25,6 +25,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { login } from '../api'
+import Footer from '../components/Footer.vue'
 
 const { t } = useI18n()
 const router = useRouter()

@@ -54,10 +54,11 @@ def on_message(data) -> None:
 
 def main() -> None:
     import sys, logging
+    global _FID
+    _FID = sys.argv[1] if len(sys.argv) > 1 else None
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
     """启动长连接客户端（阻塞）。"""
-    fid = sys.argv[1] if len(sys.argv) > 1 else None
-    app_id, app_secret = load_feishu_credentials(fid)
+    app_id, app_secret = load_feishu_credentials(_FID)
     event_handler = (
         EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(on_message)
@@ -70,7 +71,7 @@ def main() -> None:
         log_level=lark.LogLevel.DEBUG,
         auto_reconnect=True,
     )
-    logger.info(f"飞书长连接启动: id={fid} app_id={app_id}")
+    logger.info(f"飞书长连接启动: id={_FID} app_id={app_id}")
     client.start()  # 阻塞维持连接
 
 
