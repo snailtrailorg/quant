@@ -1,5 +1,7 @@
 # 10 - 告警/通知
 
+> **平台化集成（2026-08-08）**：MessageChannel 接口（PT4，src/alert_notify/channel.py + channel_config 表），WechatWork/Discord/ServerChan 实现，别人加钉钉/邮件实现接口。详见记忆 `platform-architecture`。
+
 ## 1. 目的
 
 平台对外触达的唯一出口：异常告警、风控触发、盘后报告分发。把推送渠道（微信/Discord）与触发源解耦，统一一层入口。

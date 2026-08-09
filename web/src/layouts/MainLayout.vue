@@ -13,6 +13,7 @@
           <template #title><el-icon><Money /></el-icon>交易工作台</template>
           <el-menu-item index="/trading"><el-icon><Wallet /></el-icon>实盘看板</el-menu-item>
           <el-menu-item index="/monitoring"><el-icon><Monitor /></el-icon>实时监控</el-menu-item>
+          <el-menu-item index="/tasks"><el-icon><List /></el-icon>后台任务</el-menu-item>
         </el-sub-menu>
 
         <!-- 策略实验室 -->
@@ -39,6 +40,7 @@
           <template #title><el-icon><Warning /></el-icon>风控</template>
           <el-menu-item index="/risk"><el-icon><Shield /></el-icon>风控中心</el-menu-item>
           <el-menu-item index="/reconcile"><el-icon><ScaleToOriginal /></el-icon>对账报告</el-menu-item>
+          <el-menu-item index="/risk-rules"><el-icon><Setting /></el-icon>风控规则</el-menu-item>
         </el-sub-menu>
 
         <!-- 系统运维（Admin + Analyst 可见，Trader/Viewer 不可见） -->
@@ -51,11 +53,14 @@
 
         <!-- 账户设置（仅 Admin） -->
         <el-sub-menu index="account-group" v-if="role === 'admin'">
-          <template #title><el-icon><User /></el-icon>账户设置</template>
+          <template #title><el-icon><User /></el-icon>系统设置</template>
           <el-menu-item index="/account"><el-icon><Key /></el-icon>账户管理</el-menu-item>
           <el-menu-item index="/audit"><el-icon><Tickets /></el-icon>审计日志</el-menu-item>
-          <el-menu-item index="/llm-models"><el-icon><ChatDotRound /></el-icon>LLM 模型</el-menu-item>
+          <el-menu-item index="/llm-models"><el-icon><ChatDotRound /></el-icon>AI 模型</el-menu-item>
           <el-menu-item index="/feishu"><el-icon><ChatDotRound /></el-icon>飞书机器人</el-menu-item>
+          <el-menu-item index="/data-sources"><el-icon><Connection /></el-icon>数据源</el-menu-item>
+          <el-menu-item index="/channels"><el-icon><ChatDotRound /></el-icon>消息通道</el-menu-item>
+          <el-menu-item index="/brokers"><el-icon><Wallet /></el-icon>交易通道</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>

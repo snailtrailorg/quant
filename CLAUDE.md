@@ -40,6 +40,7 @@
 - **部署 OS**：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8）。开发机 Fedora（同 dnf/RPM 系）。
 - **回测与实盘 schema 对齐**：数据中台 schema 现在就和未来 XTP 实时行情一致，零迁移。
 - **配置驱动非硬编码**：策略因子组合/权重/参数走 Web 配置 + DSL 表达式，每个策略都改代码是错误做法。
+- **平台化通用接口**：6 大接口抽象（DataSource/Broker/MessageChannel/Task/RiskRule/LLMProvider），结构接口按通用方向设计，实现可简化--别人通过配置 + 实现接口子类即可接入自己的数据源/通道/AI/工具，不改平台代码。业务菜单保留，管理设置类按通用化设计（2026-08-08 决策，详见 `flow/decisions.md` + 待办 PT1-PT8/PI1-PI5）。
 
 ### 技术栈约束
 - **Python 版本**：服务器 `120.24.235.98` = 3.11（venv 3.11.13），本地开发机 = 3.10。**不用 3.14**——根因：vnpy 4.4.0 硬 pin `pyside6==6.8.2.1`，该版本 `requires_python <3.14`，3.14 上 pip 装不上 vnpy 4.4.0；resolver 回退 vnpy 4.0.0 与 vnpy_binance 2026.7.23 错配（`Exchange.GLOBAL` 缺失致 import 崩）。纯 Python 依赖（numpy/pandas/psycopg/PySide6 6.11/fastapi/celery 等）在 3.14 全 OK，卡点单一在上游 vnpy 的 PySide6 pin，等 vnpy 放宽即解（2026-08-03 实测）。改版本要严格评估 + 客户确认，不擅动。

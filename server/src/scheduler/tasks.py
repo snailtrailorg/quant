@@ -497,6 +497,10 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
     import os
     import redis
     from src.data_sync.engine import sync
+    from src.task_manager import create_task, update_heartbeat, complete_task, log_task, notify_on_failure
+    task_id = self.request.id
+    create_task(task_id, f"同步 {sync_id}", "sync", "manual", "system",
+                {"sync_id": sync_id, "backfill_from": backfill_from})
 
     r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
     key = f"sync:type:{sync_id}"
@@ -507,8 +511,11 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
             "current": current, "pct": round(i / total * 100, 1) if total else 0,
         })
         r.expire(key, 3600)
+        update_heartbeat(task_id, {"current": i, "total": total,
+                                    "pct": round(i / total * 100, 1) if total else 0, "step": current})
 
     r.hset(key, mapping={"status": "running", "done": 0, "total": 0, "pct": 0, "current": ""})
+    update_heartbeat(task_id, {"current": 0, "total": 0, "pct": 0, "step": "init"})
     r.expire(key, 3600)
     try:
         result = sync(sync_id, backfill_from=backfill_from, progress_cb=progress_cb)
@@ -524,8 +531,19 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
             "pct": 100,
         })
         r.expire(key, 3600)
+        complete_task(task_id, status="completed")
         return result
     except Exception as e:
         r.hset(key, mapping={"status": "error", "error": str(e)[:120]})
         r.expire(key, 3600)
+        complete_task(task_id, status="failed", error=str(e)[:200])
+        log_task(task_id, "ERROR", f"同步失败: {e}")
+        notify_on_failure(f"同步失败 {sync_id}", str(e)[:200])
         raise
+
+@app.task(name="src.scheduler.tasks.task_stuck_check")
+def task_stuck_check():
+    """卡死检测巡检：last_heartbeat 超时 + running -> stuck（PT1）。"""
+    from src.task_manager import detect_stuck
+    count = detect_stuck()
+    return {"stuck_count": count}

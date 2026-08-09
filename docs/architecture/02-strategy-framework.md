@@ -1,5 +1,7 @@
 # 02 - 策略/模型统一框架
 
+> **平台化集成（2026-08-08）**：Broker 接口（PT5，src/strategy_framework/broker.py + broker_config 表）+ Task 统一任务（PT1，src/task_manager.py + tasks 表）。XTPAdapter/Binance/OKXBroker 实现。详见记忆 `platform-architecture`。
+
 ## 1. 目的
 
 提供跨三市场统一的策略/模型抽象：**统一的是模型结构，不是执行语义**。可转债 T+0、A 股只读分析、加密永续合约共用一套 `Strategy` 基类 + `Factor` 注册制 + `SignalAggregator` + `ExecutionAdapter` 抽象，差异下沉到适配器。

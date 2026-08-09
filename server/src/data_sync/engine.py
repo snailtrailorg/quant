@@ -23,6 +23,11 @@ DB_URL = os.environ.get("QUANT_DB_URL", "postgresql://quant@127.0.0.1:5432/quant
 
 
 def _get_pro():
+    """从 data_source_config DB 读 Tushare（DB 优先，.env fallback）。"""
+    from src.data_platform.data_source import get_data_source
+    ds = get_data_source("tushare")
+    if ds:
+        return ds.get_client()
     import tushare as ts
     return ts.pro_api(os.environ.get("TUSHARE_TOKEN", ""))
 
@@ -523,10 +528,7 @@ def _expected_trade_dates(api_fn, start: str, end: str) -> list[str]:
         return dates
     # 2. trade_cal DB 没覆盖该区间 -> pro.trade_cal 按年拉
     try:
-        import tushare as ts, os
-        from dotenv import load_dotenv
-        load_dotenv()
-        pro = ts.pro_api(os.environ.get("TUSHARE_TOKEN", ""))
+        pro = _get_pro()
         start_y = int(start[:4]); end_y = int(end[:4])
         all_d = []
         for y in range(start_y, end_y + 1):

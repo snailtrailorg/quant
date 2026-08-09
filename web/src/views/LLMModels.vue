@@ -1,6 +1,24 @@
 <template>
   <el-card>
     <template #header>LLM 模型配置（DB 化，多模型不限种类）</template>
+    <el-card shadow="never" style="margin-bottom: 12px">
+      <template #header>📊 用量监控（本月）<el-button @click="loadUsage" size="small" link>刷新</el-button></template>
+      <el-table :data="usage.month" stripe size="small">
+        <el-table-column prop="provider" label="Provider" width="120" />
+        <el-table-column prop="model" label="型号" />
+        <el-table-column prop="calls" label="调用" width="80" />
+        <el-table-column label="Token(入/出)" width="160">
+          <template #default="{ row }">{{ row.input_tokens.toLocaleString() }} / {{ row.output_tokens.toLocaleString() }}</template>
+        </el-table-column>
+        <el-table-column prop="avg_latency_ms" label="延迟ms" width="80" />
+        <el-table-column label="成功率" width="80">
+          <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'" size="small">{{ row.success_rate }}%</el-tag></template>
+        </el-table-column>
+      </el-table>
+      <div style="font-size: 12px; color: #999; margin-top: 8px">
+        近7天：<span v-for="t in usage.trend" :key="t.date" style="margin-right: 10px">{{ t.date.slice(5) }} {{t.calls}}次/{{t.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">（暂无）</span>
+      </div>
+    </el-card>
     <el-table :data="models" stripe size="small">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" label="名称" />
@@ -44,10 +62,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel } from '../api'
+import { getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const models = ref([])
+const usage = ref({ today: [], month: [], trend: [] })
 const form = ref(emptyForm())
 const saving = ref(false)
 const testing = ref(0)
@@ -57,7 +76,8 @@ function emptyForm() {
 }
 
 const load = async () => { models.value = await getLLMModels() }
-onMounted(load)
+const loadUsage = async () => { usage.value = await getLLMUsage() }
+onMounted(() => { load(); loadUsage() })
 
 const onEdit = (row) => { form.value = { ...row, api_key: '' } }
 const resetForm = () => { form.value = emptyForm() }

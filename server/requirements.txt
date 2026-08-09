@@ -52,3 +52,7 @@ python-dotenv>=1.0
 cryptography>=42
 qrcode>=7.4
 Pillow>=10.0
+
+# === 测试 ===
+pytest>=8.0
+pytest-mock>=3.12

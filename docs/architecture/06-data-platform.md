@@ -1,5 +1,7 @@
 # 06 - 数据中台
 
+> **平台化集成（2026-08-08）**：DataSource 接口（PT3，src/data_platform/data_source.py + data_source_config 表），TushareDataSource 实现，别人加 Wind 实现接口。详见记忆 `platform-architecture`。
+
 ## 1. 目的
 
 统一三市场数据口径，**杜绝回测与实盘数据偏差**。拉取 → 清洗 → 存储 → 实时推送，全市场统一 schema，支撑所有模型运行。关键设计：**回测历史数据 schema 现在就和未来 XTP 实时行情对齐**，20 天等待期回测结果零迁移切 live。

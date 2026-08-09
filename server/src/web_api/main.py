@@ -907,6 +907,369 @@ def screen_etf_api(limit: int = 100,
     return [{"ts_code": r[0], "name": r[1], "management": r[2], "fund_type": r[3]} for r in rows]
 
 
+# --- LLM 用量监控看板（PT2，llm_usage 表已就绪 migration 0011）---
+
+@app.get("/api/llm-usage/summary")
+def llm_usage_summary(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """LLM 用量汇总：今日/本月（按 provider/model）+ 近 7 天趋势。"""
+    with get_conn() as conn:
+        cur = conn.execute("""
+            SELECT provider, model, count(*),
+                   COALESCE(sum(input_tokens),0), COALESCE(sum(output_tokens),0),
+                   COALESCE(avg(latency_ms),0),
+                   CASE WHEN count(*)>0 THEN round(sum(CASE WHEN success THEN 1 ELSE 0 END)*100.0/count(*),1) ELSE 0 END
+            FROM llm_usage WHERE ts::date = current_date
+            GROUP BY provider, model ORDER BY count(*) DESC
+        """)
+        today = [{"provider": r[0], "model": r[1], "calls": r[2], "input_tokens": int(r[3]),
+                  "output_tokens": int(r[4]), "avg_latency_ms": int(r[5]), "success_rate": float(r[6])}
+                 for r in cur.fetchall()]
+        cur = conn.execute("""
+            SELECT provider, model, count(*), COALESCE(sum(input_tokens),0), COALESCE(sum(output_tokens),0),
+                   COALESCE(avg(latency_ms),0),
+                   CASE WHEN count(*)>0 THEN round(sum(CASE WHEN success THEN 1 ELSE 0 END)*100.0/count(*),1) ELSE 0 END
+            FROM llm_usage WHERE date_trunc('month', ts) = date_trunc('month', current_date)
+            GROUP BY provider, model ORDER BY count(*) DESC
+        """)
+        month = [{"provider": r[0], "model": r[1], "calls": r[2], "input_tokens": int(r[3]),
+                  "output_tokens": int(r[4]), "avg_latency_ms": int(r[5]), "success_rate": float(r[6])}
+                 for r in cur.fetchall()]
+        cur = conn.execute("""
+            SELECT ts::date AS d, count(*), COALESCE(sum(input_tokens+output_tokens),0), COALESCE(avg(latency_ms),0)
+            FROM llm_usage WHERE ts >= current_date - interval '7 days'
+            GROUP BY d ORDER BY d
+        """)
+        trend = [{"date": str(r[0]), "calls": r[1], "total_tokens": int(r[2]), "avg_latency_ms": int(r[3])}
+                 for r in cur.fetchall()]
+    return {"today": today, "month": month, "trend": trend}
+
+
+# --- 数据源管理（PT3 平台化数据层） ---
+
+class DataSourceReq(BaseModel):
+    provider: str
+    name: str
+    credentials: str = ""
+    params: str | None = None
+    usage_limit: int | None = None
+    enabled: bool = True
+
+
+@app.get("/api/data-sources")
+def list_data_sources(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, provider, name, credentials_encrypted IS NOT NULL, params, usage_limit, enabled, updated_at FROM data_source_config ORDER BY provider")
+        rows = cur.fetchall()
+    return [{"id": r[0], "provider": r[1], "name": r[2], "has_credentials": bool(r[3]),
+             "params": r[4], "usage_limit": r[5], "enabled": r[6],
+             "updated_at": str(r[7]) if r[7] else None} for r in rows]
+
+
+@app.post("/api/data-sources")
+def create_data_source(req: DataSourceReq, payload: dict = Depends(require_role("admin"))):
+    from src.web_api.crypto_utils import encrypt
+    enc = encrypt(req.credentials) if req.credentials else None
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO data_source_config (provider, name, credentials_encrypted, params, usage_limit, enabled) "
+            "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+            (req.provider, req.name, enc, req.params, req.usage_limit, req.enabled))
+        conn.commit()
+    audit_log(payload["username"], "data_source_create", req.provider)
+    return {"id": cur.fetchone()[0]}
+
+
+@app.put("/api/data-sources/{dsid}")
+def update_data_source(dsid: int, req: DataSourceReq, payload: dict = Depends(require_role("admin"))):
+    from src.web_api.crypto_utils import encrypt
+    enc = encrypt(req.credentials) if req.credentials else None
+    with get_conn() as conn:
+        if enc is not None:
+            conn.execute("UPDATE data_source_config SET provider=%s, name=%s, credentials_encrypted=%s, params=%s, usage_limit=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                         (req.provider, req.name, enc, req.params, req.usage_limit, req.enabled, dsid))
+        else:
+            conn.execute("UPDATE data_source_config SET provider=%s, name=%s, params=%s, usage_limit=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                         (req.provider, req.name, req.params, req.usage_limit, req.enabled, dsid))
+        conn.commit()
+    audit_log(payload["username"], "data_source_update", f"id={dsid}")
+    return {"ok": True}
+
+
+@app.delete("/api/data-sources/{dsid}")
+def delete_data_source(dsid: int, payload: dict = Depends(require_role("admin"))):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM data_source_config WHERE id=%s", (dsid,))
+        conn.commit()
+    audit_log(payload["username"], "data_source_delete", f"id={dsid}")
+    return {"ok": True}
+
+
+@app.post("/api/data-sources/{dsid}/test")
+def test_data_source(dsid: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    from src.data_platform.data_source import _REGISTRY
+    with get_conn() as conn:
+        cur = conn.execute("SELECT provider, credentials_encrypted, params FROM data_source_config WHERE id=%s", (dsid,))
+        r = cur.fetchone()
+    if not r:
+        return {"ok": False, "error": "数据源不存在"}
+    cls = _REGISTRY.get(r[0])
+    if not cls:
+        return {"ok": False, "error": f"provider {r[0]} 未注册（需实现 DataSource 子类）"}
+    ds = cls(credentials_encrypted=r[1], params=r[2])
+    ok = ds.test_connection()
+    return {"ok": ok, "error": "" if ok else "连接测试失败，看日志"}
+
+
+# --- 后台任务管理（PT1 平台化核心） ---
+
+@app.get("/api/tasks")
+def list_tasks_api(status: str | None = None, limit: int = 100,
+                   payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    from src.task_manager import list_tasks
+    return {"items": list_tasks(status=status, limit=limit)}
+
+
+@app.get("/api/tasks/{task_id}")
+def get_task_api(task_id: str,
+                 payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    from src.task_manager import get_task
+    t = get_task(task_id)
+    if not t:
+        raise HTTPException(404, "任务不存在")
+    return t
+
+
+@app.post("/api/tasks/{task_id}/terminate")
+def terminate_task_api(task_id: str,
+                       payload: dict = Depends(require_role("trader", "admin"))):
+    from src.task_manager import terminate_task, log_task
+    terminate_task(task_id)
+    log_task(task_id, "WARN", f"用户 {payload['username']} 终止任务")
+    audit_log(payload["username"], "task_terminate", task_id)
+    return {"ok": True}
+
+
+@app.post("/api/tasks/{task_id}/force-delete")
+def force_delete_task_api(task_id: str,
+                          payload: dict = Depends(require_role("admin"))):
+    from src.task_manager import force_delete_task
+    force_delete_task(task_id)
+    audit_log(payload["username"], "task_force_delete", task_id)
+    return {"ok": True}
+
+
+@app.post("/api/tasks/detect-stuck")
+def detect_stuck_api(payload: dict = Depends(require_role("admin"))):
+    from src.task_manager import detect_stuck
+    count = detect_stuck()
+    return {"stuck_count": count}
+
+
+# --- 消息通道管理（PT4 平台化消息层） ---
+
+class ChannelReq(BaseModel):
+    provider: str
+    name: str
+    credentials: str = ""
+    params: str | None = None
+    enabled: bool = True
+
+
+@app.get("/api/channels")
+def list_channels(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, provider, name, credentials_encrypted IS NOT NULL, params, enabled, updated_at FROM channel_config ORDER BY provider")
+        rows = cur.fetchall()
+    return [{"id": r[0], "provider": r[1], "name": r[2], "has_credentials": bool(r[3]),
+             "params": r[4], "enabled": r[5], "updated_at": str(r[6]) if r[6] else None} for r in rows]
+
+
+@app.post("/api/channels")
+def create_channel(req: ChannelReq, payload: dict = Depends(require_role("admin"))):
+    from src.web_api.crypto_utils import encrypt
+    enc = encrypt(req.credentials) if req.credentials else None
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO channel_config (provider, name, credentials_encrypted, params, enabled) "
+            "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (req.provider, req.name, enc, req.params, req.enabled))
+        conn.commit()
+    audit_log(payload["username"], "channel_create", req.provider)
+    return {"id": cur.fetchone()[0]}
+
+
+@app.put("/api/channels/{cid}")
+def update_channel(cid: int, req: ChannelReq, payload: dict = Depends(require_role("admin"))):
+    from src.web_api.crypto_utils import encrypt
+    enc = encrypt(req.credentials) if req.credentials else None
+    with get_conn() as conn:
+        if enc is not None:
+            conn.execute("UPDATE channel_config SET provider=%s, name=%s, credentials_encrypted=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                         (req.provider, req.name, enc, req.params, req.enabled, cid))
+        else:
+            conn.execute("UPDATE channel_config SET provider=%s, name=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                         (req.provider, req.name, req.params, req.enabled, cid))
+        conn.commit()
+    audit_log(payload["username"], "channel_update", f"id={cid}")
+    return {"ok": True}
+
+
+@app.delete("/api/channels/{cid}")
+def delete_channel(cid: int, payload: dict = Depends(require_role("admin"))):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM channel_config WHERE id=%s", (cid,))
+        conn.commit()
+    audit_log(payload["username"], "channel_delete", f"id={cid}")
+    return {"ok": True}
+
+
+@app.post("/api/channels/{cid}/test")
+def test_channel(cid: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    from src.alert_notify.channel import _REGISTRY
+    from src.web_api.crypto_utils import decrypt
+    with get_conn() as conn:
+        cur = conn.execute("SELECT provider, credentials_encrypted FROM channel_config WHERE id=%s", (cid,))
+        r = cur.fetchone()
+    if not r:
+        return {"ok": False, "error": "通道不存在"}
+    cls = _REGISTRY.get(r[0])
+    if not cls:
+        return {"ok": False, "error": f"provider {r[0]} 未注册（需实现 MessageChannel 子类）"}
+    cred = decrypt(r[1]) if r[1] else ""
+    ch = cls(cred)
+    ok = ch.test()
+    return {"ok": ok, "error": "" if ok else "发送失败，看日志"}
+
+
+# --- 交易通道管理（PT5 平台化交易层） ---
+
+class BrokerReq(BaseModel):
+    provider: str
+    name: str
+    credentials: str = ""           # JSON 字符串（如 {"app_id":"...","app_secret":"..."}）
+    params: str | None = None
+    enabled: bool = True
+
+
+@app.get("/api/brokers")
+def list_brokers(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, provider, name, credentials_encrypted IS NOT NULL, params, enabled, updated_at FROM broker_config ORDER BY provider")
+        rows = cur.fetchall()
+    return [{"id": r[0], "provider": r[1], "name": r[2], "has_credentials": bool(r[3]),
+             "params": r[4], "enabled": r[5], "updated_at": str(r[6]) if r[6] else None} for r in rows]
+
+
+@app.post("/api/brokers")
+def create_broker(req: BrokerReq, payload: dict = Depends(require_role("admin"))):
+    from src.web_api.crypto_utils import encrypt
+    enc = encrypt(req.credentials) if req.credentials else None
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO broker_config (provider, name, credentials_encrypted, params, enabled) "
+            "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (req.provider, req.name, enc, req.params, req.enabled))
+        conn.commit()
+    audit_log(payload["username"], "broker_create", req.provider)
+    return {"id": cur.fetchone()[0]}
+
+
+@app.put("/api/brokers/{bid}")
+def update_broker(bid: int, req: BrokerReq, payload: dict = Depends(require_role("admin"))):
+    from src.web_api.crypto_utils import encrypt
+    enc = encrypt(req.credentials) if req.credentials else None
+    with get_conn() as conn:
+        if enc is not None:
+            conn.execute("UPDATE broker_config SET provider=%s, name=%s, credentials_encrypted=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                         (req.provider, req.name, enc, req.params, req.enabled, bid))
+        else:
+            conn.execute("UPDATE broker_config SET provider=%s, name=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                         (req.provider, req.name, req.params, req.enabled, bid))
+        conn.commit()
+    audit_log(payload["username"], "broker_update", f"id={bid}")
+    return {"ok": True}
+
+
+@app.delete("/api/brokers/{bid}")
+def delete_broker(bid: int, payload: dict = Depends(require_role("admin"))):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM broker_config WHERE id=%s", (bid,))
+        conn.commit()
+    audit_log(payload["username"], "broker_delete", f"id={bid}")
+    return {"ok": True}
+
+
+@app.post("/api/brokers/{bid}/test")
+def test_broker(bid: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    from src.strategy_framework.broker import _REGISTRY
+    with get_conn() as conn:
+        cur = conn.execute("SELECT provider, credentials_encrypted, params FROM broker_config WHERE id=%s", (bid,))
+        r = cur.fetchone()
+    if not r:
+        return {"ok": False, "error": "通道不存在"}
+    cls = _REGISTRY.get(r[0])
+    if not cls:
+        return {"ok": False, "error": f"provider {r[0]} 未注册（需实现 Broker 子类）"}
+    b = cls(credentials_encrypted=r[1], params=r[2])
+    ok = b.test_connection()
+    return {"ok": ok, "error": "" if ok else "凭证不完整或连接失败（真连 vnpy 在服务器）"}
+
+
+# --- 风控规则管理（PT6 平台化风控） ---
+
+class RiskRuleReq(BaseModel):
+    name: str
+    type: str
+    params: str = "{}"               # JSON: {max_pct:0.1} 等
+    enabled: bool = True
+
+
+@app.get("/api/risk-rules")
+def list_risk_rules(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, name, type, params, enabled, updated_at FROM risk_rules ORDER BY id")
+        rows = cur.fetchall()
+    return [{"id": r[0], "name": r[1], "type": r[2], "params": r[3],
+             "enabled": r[4], "updated_at": str(r[5]) if r[5] else None} for r in rows]
+
+
+@app.get("/api/risk-rules/types")
+def list_risk_rule_types(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """列已注册的规则类型（前端下拉）"""
+    from src.risk_control.risk_rule import _REGISTRY
+    return {"types": list(_REGISTRY.keys())}
+
+
+@app.post("/api/risk-rules")
+def create_risk_rule(req: RiskRuleReq, payload: dict = Depends(require_role("admin"))):
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO risk_rules (name, type, params, enabled) VALUES (%s,%s,%s,%s) RETURNING id",
+            (req.name, req.type, req.params, req.enabled))
+        conn.commit()
+    audit_log(payload["username"], "risk_rule_create", req.type)
+    return {"id": cur.fetchone()[0]}
+
+
+@app.put("/api/risk-rules/{rid}")
+def update_risk_rule(rid: int, req: RiskRuleReq, payload: dict = Depends(require_role("admin"))):
+    with get_conn() as conn:
+        conn.execute("UPDATE risk_rules SET name=%s, type=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                     (req.name, req.type, req.params, req.enabled, rid))
+        conn.commit()
+    audit_log(payload["username"], "risk_rule_update", f"id={rid}")
+    return {"ok": True}
+
+
+@app.delete("/api/risk-rules/{rid}")
+def delete_risk_rule(rid: int, payload: dict = Depends(require_role("admin"))):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM risk_rules WHERE id=%s", (rid,))
+        conn.commit()
+    audit_log(payload["username"], "risk_rule_delete", f"id={rid}")
+    return {"ok": True}
+
+
 # --- 审计日志 ---
 
 @app.get("/api/audit")
