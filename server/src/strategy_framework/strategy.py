@@ -153,13 +153,13 @@ class Strategy:
         decision = RiskControl.get().check_order(order, "")
         if not decision.approved:
             return
-        # Order dataclass 给 adapter（类型契约一致；check_order 收 dict）
+        final = decision.adjusted or order  # B8 风控覆写：用 adjusted（如截断 volume），无则原值
         from .adapters import Order
         self.adapter.send_order(Order(
-            symbol=self.symbol,
-            action=sig.action.name,
-            volume=sig.volume or 100,
-            price=sig.price or 0,
+            symbol=final.get("symbol", self.symbol),
+            action=final.get("action", sig.action.name),
+            volume=final.get("volume", sig.volume or 100),
+            price=final.get("price", sig.price or 0),
             order_type="limit",
         ))
 

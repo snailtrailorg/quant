@@ -106,6 +106,22 @@ def pull_cb_daily(start_date: str, end_date: str | None = None) -> pd.DataFrame:
     return df
 
 
+def pull_cb_basic(ts_code: str) -> dict:
+    """拉单只可转债基本信息（条款字段，cb_basic 接口）。
+
+    返回 df.iloc[0].to_dict()（含 ts_code/bond_short_name/conv_price/coupon_rate/
+    maturity_date/redemption_clause/put_clause 等）。失败或空返回 {}（不抛）。
+    """
+    try:
+        pro = get_pro()
+        df = pro.cb_basic(ts_code=ts_code)
+    except Exception:
+        return {}
+    if df is None or df.empty:
+        return {}
+    return df.iloc[0].to_dict()
+
+
 def pull_minute(ts_code: str, freq: str, start_date: str, end_date: str | None = None) -> pd.DataFrame:
     """拉取分钟线（stk_mins 接口，需 2000 积分）。
 
@@ -123,13 +139,14 @@ def pull_minute(ts_code: str, freq: str, start_date: str, end_date: str | None =
         return pd.DataFrame()
     # stk_mins 列: ts_code, trade_time, open, high, low, close, vol, amount
     df["adj_factor"] = None
-    # 加 trade_date 列（从 trade_time 提取），便于 to_save_rows 统一处理
-    df["trade_date"] = df["trade_time"].str[:8]
+    # 加 trade_date 列（从 trade_time 提取 YYYYMMDD，便于统一处理）
+    df["trade_date"] = df["trade_time"].str[:10].str.replace("-", "")
     return df
 
 
 def to_save_rows_min(df: pd.DataFrame, freq: str) -> list[tuple]:
     """分钟线 DataFrame → 写入 DB 行列表（trade_time 作为 ts）。"""
+    from ..schema import to_vt_symbol
     rows = []
     for _, row in df.iterrows():
         ts_code = row.get("ts_code", "")

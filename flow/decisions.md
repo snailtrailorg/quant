@@ -10,6 +10,34 @@
 - 否决的方案 & 原因:
 -->
 
+## 2026-08-10 · 文档/待办/记忆治理 + Codex 失效转 Claude 直接做
+
+- **背景**：多轮变更（A股只读废止/tier移除/平台化/full-subagent）后，待办/文档/记忆脱节：待办状态标错 11 项 + 描述过时 + 重复；6 份架构文档过时（A股只读/tier/Amazon2023）；记忆落后（D2-D5/Phase1-4 已完成未反映）。同时 Codex（subcodex-mcp）跑复杂任务返 Ark 400（function_call invalid escape + 52 万 token 循环），full-subagent 铁律无法执行。
+- **决定**：
+  1. **待办.md 重写**：修正 11 项状态（#2/#7/#8/#29/PI4/PI5 -> ✅；#20/#3/#37/#31/#4 -> 🔄）+ 描述按最新方案更新（#4 行情驱动细化 tick->BarGenerator->on_bar+PG暖机 / #6 持仓对接 / #22 标的池端点 / #27 账户绑定）+ 竞品 13 项刚需补入 + 去重（#1+#20/#7+reconcile/#25+E1）
+  2. **架构文档过时更新**（5 份）：00-总体设计/02-strategy-framework/03-astock-analysis/04-convertible-etf/09-scheduler 同步 2026-08-03/08-07 决策（A股实盘开关 + 删 AStockReadonlyAdapter + 删 tier + Amazon2023->Alibaba Linux 3）；01-llm-gateway 已用"2026-08-07 简化"标注（准，不改）
+  3. **记忆更新**：project-status/session-handoff 更新到 D2-D5+Phase1-4 完成 + 剩余清单；ai-layer-decision 更新工具白名单（place_order 2026-08-03 放开，仅 modify_risk_rule/modify_strategy_params 禁）；MEMORY.md 索引 3 行更新
+  4. **需求文档过时**：Amazon Linux 2023 -> Alibaba Cloud Linux 3（12 处）+ A 股只读 2 处 -> 可实盘
+  5. **Codex 失效处理**：Ark 400 是 Ark 侧 function calling bug（用户直接 codex hello 能用，subcodex runStreamed 复杂任务暴露 invalid escape），根因非 Contract/非配置错。**当前豁免 full-subagent 铁律，Claude 直接做**（用户确认 2026-08-10）。修需 cc-switch 换 provider（未做，留待用户决定）
+- **不删文档**：过时的保留，只更新内容或加废止标注（AStockReadonlyAdapter 类注释掉 + "2026-08-03 废止"标注）
+- **影响**：待办.md 成单一真相源（状态准 + 竞品刚需补入）；架构文档与决策一致；记忆反映当前状态；下棒读 待办.md + 进展.md 顶部即可定位
+- **参考**：踩坑 2026-08-10 Codex Ark400 + [[subagent-full-mode]] + 待办.md 竞品刚需段
+
+---
+
+## 2026-08-09 · 自包含任务文档体系（三层配套 + 8 字段 + 硬约束）
+
+- **背景**：待办 #1-#42 粗粒度（事项+说明），做任务要读整个项目（A1 改 engine 跨 6 文件）。用户要"后续任务顺畅、经济、不卡、不乱"--让每个待办仅需本模块知识，不需整个项目上下文。
+- **决定**：建三层文档配套让待办自包含：
+  1. **接口契约字典** `docs/architecture/接口契约.md`：6 大平台接口 + 关键数据结构 + 跨模块回调（跨模块，所有任务共用）
+  2. **模块契约** `docs/architecture/模块契约/<module>.md`：本模块 public API + 依赖 + 被调 + 读写表 + 不变量（逐模块，已 3/10：data_platform/data_sync/strategy_framework）
+  3. **任务模板** `flow/规范/任务模板.md`：8 字段（目标/依赖/产出/限定范围/接口契约/验收/mock/参考）+ mock 库；硬约束：限定范围 ≤3 文件 + 参考 ≤2 份
+  - 任务"接口契约"字段含新加+现有调用签名 -> 做任务时不读代码；写任务时一次性填（前期成本换后续顺畅）
+- **否决**：① 待办表加更多列（粗粒度不够，任务要签名+mock+验收命令）；② 每任务一个 Agent 全权处理（不可控，违背"限定范围"防越界）
+- **验证**：A2（数据质量校验 #30）端到端验证--做 A2 只读 A2.md + 接口契约 + data_platform 模块契约 + db.py save_bars 段，**未读 engine/schema/main**，零卡壳，66 单测全过。
+- **影响**：后续所有待办按 `docs/任务/<id>.md` 写；模块契约逐模块补（剩 7 份：web_api/risk_control/scheduler/llm_gateway/alert_notify/task_manager/feishu_bot）。
+- **参考**：`docs/architecture/接口契约.md` + `flow/规范/任务模板.md` + `docs/architecture/模块契约/` + `docs/任务/A2.md`（验证样本）
+
 ## 2026-08-03 · 飞书机器人扫码接入方案（lark_oapi.register_app 官方 SDK）
 
 - **背景**：用户要飞书配置 DB 化 + 扫码添加机器人+开通权限。评估两版参考文档（旧版猜测端点，升级版用官方 SDK）。

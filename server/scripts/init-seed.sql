@@ -36,6 +36,8 @@
 \set ETF_LIST_FILTER          'none'
 \set TRADE_CAL_SCHEDULE       '0 9 1 1 *'
 \set TRADE_CAL_FILTER         'none'
+\set ASTOCK_MINUTE_SCHEDULE   '0 16 * * 1-5'
+\set ASTOCK_MINUTE_FILTER     'trade_day'
 
 
 -- ============================================================
@@ -72,7 +74,9 @@ INSERT INTO sync_config (id, name, tushare_api, pg_table, data_type, sync_mode, 
     ('cb_basic',     '可转债基本信息', 'pro.cb_basic',    'cb_basic_info',   'convertible','full',        :'CB_BASIC_SCHEDULE',     :'CB_BASIC_FILTER',     'true', '可转债条款/转股价/到期日等'),
     ('etf_daily',    'ETF日线行情',    'pro.fund_daily',  'bar_1D',          'etf',        'incremental', :'ETF_DAILY_SCHEDULE',    :'ETF_DAILY_FILTER',    'true', 'ETF日线OHLCV'),
     ('etf_list',     'ETF基金列表',    'pro.fund_basic',  'etf_basic_info',  'etf',        'full',        :'ETF_LIST_SCHEDULE',     :'ETF_LIST_FILTER',     'true', 'ETF基金基本信息'),
-    ('trade_cal',    '交易日历',       'pro.trade_cal',   'trade_cal',       'astock',     'full',        :'TRADE_CAL_SCHEDULE',    :'TRADE_CAL_FILTER',    'true', 'SSE交易日历，is_trading_day依据')
+    ('trade_cal',    '交易日历',       'pro.trade_cal',   'trade_cal',       'astock',     'full',        :'TRADE_CAL_SCHEDULE',    :'TRADE_CAL_FILTER',    'true', 'SSE交易日历，is_trading_day依据'),
+    ('astock_minute',      'A股分钟线1分', 'pro.stk_mins', 'bar_1min', 'astock', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股1分钟K线，per-symbol拉取（stk_mins需2000积分，全市场量大）'),
+    ('astock_minute_5min', 'A股分钟线5分', 'pro.stk_mins', 'bar_5min', 'astock', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股5分钟K线，per-symbol拉取')
 ON CONFLICT (id) DO NOTHING;
 
 

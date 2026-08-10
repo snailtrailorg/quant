@@ -166,20 +166,51 @@ class DailySelectionEngine:
 # ——— 分钟级研判引擎（占位，T10 后续实现） ———
 
 class MinuteAnalysisEngine:
-    """盘中分钟级研判模型。
+    """盘中分钟级研判模型（on_bar 已实现，D2 2026-08-10）。
 
     实时订阅 1min/5min K 线 → 因子计算 → 信号 → 推送 Web 看板。
-    T10 实现 on_bar 实时处理，目前占位。
+    实时行情订阅（tick→BarGenerator→on_bar）属 #4 实盘化范畴。
     """
     def __init__(self):
         pass
 
-    def on_bar(self, bar: dict) -> dict:
-        """收到分钟 K 线 → 实时研判。"""
-        from src.strategy_framework import BarContext
-        ctx = BarContext(
-            close=bar.get("close", 0), high=bar.get("high", 0),
-            low=bar.get("low", 0), open_=bar.get("open", 0),
-            volume=bar.get("volume", 0),
-        )
-        return {"action": "HOLD", "signal": "暂未实现"}
+    def on_bar(self, bar: dict, history: list[dict] | None = None) -> dict:
+        """收到分钟 K 线 实时研判（bar + history 因子计算）。
+
+        bar: {ts, open, high, low, close, volume}（1min/5min）
+        history: 过去 bar 列表（构建因子上下文，防未来函数；None 时只用当前 bar）
+        返回 {"action", "score", "rating", "conclusion", "factors"}
+        """
+        history = history or []
+        close = bar.get("close", 0)
+        volume = bar.get("volume", 0)
+
+        # sma_20: 最近 20 根收盘均值（含当前 close）
+        closes = [h.get("close", 0) for h in history] + [close]
+        window = closes[-20:]
+        sma_20 = sum(window) / len(window) if window else close
+        ma_dev = (close / sma_20 - 1) if sma_20 else 0
+
+        # momentum: 相对 history 首根（空时 0）
+        first_close = history[0].get("close") if history else None
+        momentum = (close / first_close - 1) if first_close else 0
+
+        # vol_ratio: 当前量 / 近 5 根均量（history<5 时 1）
+        recent_vols = [h.get("volume", 0) for h in history[-5:]]
+        vol_ratio = (volume / (sum(recent_vols) / len(recent_vols) + 1)) if recent_vols else 1
+
+        score = ma_dev * 2 + momentum * 1.5 + vol_ratio * 0.5
+        rating = "BUY" if score > 0.3 else "AVOID" if score < -0.3 else "HOLD"
+        action = {"BUY": "BUY", "AVOID": "SELL", "HOLD": "HOLD"}[rating]
+
+        conclusion = (f"均线偏离={ma_dev:.3f}, 动量={momentum:.3f}, "
+                      f"量比={vol_ratio:.2f}, 综合评分={score:.3f}")
+
+        return {
+            "action": action,
+            "score": round(score, 3),
+            "rating": rating,
+            "conclusion": conclusion,
+            "factors": {"ma_dev": round(ma_dev, 3), "momentum": round(momentum, 3),
+                        "vol_ratio": round(vol_ratio, 2)},
+        }

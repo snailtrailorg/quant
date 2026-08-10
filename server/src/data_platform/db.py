@@ -52,8 +52,49 @@ def ensure_table(freq: str) -> None:
         conn.commit()
 
 
+def validate_bars(rows: list[tuple]) -> list[tuple]:
+    """入库前校验（A2 #30）：剔 open/high/low/close=0 的行 + 标 ts 断点 warning（不剔）。
+
+    Args:
+        rows: 11 字段元组 (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)
+    Returns:
+        清洗后 rows（剔 ohlc=0；ts 断点 per-symbol 相邻 >7 天记 warning，不剔）
+    """
+    import logging
+    from collections import defaultdict
+    logger = logging.getLogger("data_platform")
+    if not rows:
+        return rows
+    # 1. 剔 ohlc=0（坏数据）
+    clean = [r for r in rows if not (r[3] == 0 or r[4] == 0 or r[5] == 0 or r[6] == 0)]
+    removed = len(rows) - len(clean)
+    if removed:
+        logger.warning(f"validate_bars: 剔除 ohlc=0 的行 {removed} 条")
+    if not clean:
+        return clean
+    # 2. 标 ts 断点（per-symbol 相邻 >7 天，记 warning 不剔）
+    by_symbol: dict = defaultdict(list)
+    for r in clean:
+        by_symbol[r[0]].append(r)
+    for sym, sym_rows in by_symbol.items():
+        sym_rows.sort(key=lambda x: x[2])  # 按 ts 排序
+        for i in range(1, len(sym_rows)):
+            prev_ts, curr_ts = sym_rows[i - 1][2], sym_rows[i][2]
+            if hasattr(prev_ts, "date") and hasattr(curr_ts, "date"):
+                gap = (curr_ts.date() - prev_ts.date()).days
+                if gap > 7:
+                    logger.warning(f"validate_bars: {sym} ts 断点 {prev_ts}~{curr_ts} 间隔 {gap} 天")
+    return clean
+
+
 def save_bars(freq: str, rows: list[tuple]) -> int:
-    """批量写入 K 线，冲突跳过。返回写入行数。"""
+    """批量写入 K 线，冲突跳过。返回写入行数。
+
+    入库前校验：validate_bars 剔 ohlc=0 + 标 ts 断点（A2 #30）。
+    """
+    if not rows:
+        return 0
+    rows = validate_bars(rows)
     if not rows:
         return 0
     ensure_table(freq)

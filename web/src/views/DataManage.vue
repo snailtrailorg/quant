@@ -115,7 +115,7 @@ const progress = ref({})
 let pollTimer = null
 const role = ref(localStorage.getItem('role') || 'viewer')
 
-const PER_SYMBOL_IDS = ['astock_daily', 'etf_daily', 'cb_daily']
+const PER_SYMBOL_IDS = ['astock_daily', 'etf_daily', 'cb_daily', 'astock_minute', 'astock_minute_5min']
 const isPerSymbol = id => PER_SYMBOL_IDS.includes(id)
 const goSymbols = row => router.push(`/data-manage/${row.id}`)
 

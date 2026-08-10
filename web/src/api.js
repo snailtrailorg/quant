@@ -28,6 +28,10 @@ export const login = (username, password) =>
 
 export const getMe = () => api.get('/auth/me')
 
+export const getDataIntegrity = freq => api.get('/data-integrity', { params: { freq } })
+
+export const getDataSourceUsage = () => api.get('/data-source-usage')
+
 export const getStrategies = () => api.get('/strategy')
 export const startStrategy = id => api.post(`/strategy/${id}/start`)
 export const stopStrategy = id => api.post(`/strategy/${id}/stop`)
@@ -62,6 +66,10 @@ export const deleteDataSource = (id) => api.delete(`/data-sources/${id}`)
 export const testDataSource = (id) => api.post(`/data-sources/${id}/test`)
 
 export const getTasks = (status) => api.get('/tasks', { params: status ? { status } : {} })
+export const getBacktests = () => api.get('/backtest')
+export const createBacktest = (data) => api.post('/backtest', data)
+export const getBacktestRun = (runId) => api.get(`/backtest/${runId}`)
+export const getBacktestStream = (runId, symbol) => api.get(`/backtest/${runId}/${symbol}/stream`)
 export const getTaskDetail = (id) => api.get(`/tasks/${id}`)
 export const terminateTask = (id) => api.post(`/tasks/${id}/terminate`)
 export const forceDeleteTask = (id) => api.post(`/tasks/${id}/force-delete`)
@@ -99,6 +107,7 @@ export const getPools = () => api.get('/pool')
 export const createPool = data => api.post('/pool', data)
 export const verifyStrategy = id => api.post(`/strategy/${id}/verify`)
 export const createStrategy = data => api.post('/strategy', data)
+export const getFactorList = () => api.get('/factors')
 export const updateStrategy = (id, data) => api.put(`/strategy/${id}`, data)
 
 export const getSyncConfigs = () => api.get('/sync/config')

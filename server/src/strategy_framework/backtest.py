@@ -6,7 +6,7 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
@@ -38,6 +38,9 @@ class BacktestResult:
     win_rate: float = 0.0          # 胜率
     max_drawdown_pct: float = 0.0  # 最大回撤
     sharpe_ratio: float = 0.0     # 夏普比率（年化）
+    volatility: float = 0.0       # 年化波动率（B5 #21）
+    sortino_ratio: float = 0.0    # 索提诺比率（下行，B5 #21）
+    # α/β/信息率/基准收益 TODO（需基准数据，后续基准接入后补）
     total_trades: int = 0          # 总交易次数
     # 明细
     daily_values: list = field(default_factory=list)   # 每日净值
@@ -93,7 +96,8 @@ class BacktestEngine:
         self.slippage = slippage
 
     def run(self, config: StrategyConfig, bars: list[dict],
-            shares_per_trade: int = 100) -> BacktestResult:
+            shares_per_trade: int = 100,
+            on_bar_callback: Callable | None = None) -> BacktestResult:
         """运行回测。
 
         Args:
@@ -137,7 +141,7 @@ class BacktestEngine:
             wins = 0
             total_closed = 0
 
-            for bar in bars:
+            for i, bar in enumerate(bars):
                 adapter.set_bar(bar)
 
                 # 策略计算（传入历史）
@@ -177,6 +181,20 @@ class BacktestEngine:
                     "close": close,
                     "value": round(portfolio_value, 2),
                 })
+
+                # B1: on_bar 回调（B3 推 progress/equity/trades 到 Valkey，§三① 契约）
+                if on_bar_callback:
+                    on_bar_callback(bar, {
+                        "position": position,
+                        "avg_price": avg_price,
+                        "equity": portfolio_value,
+                        "cash": cash,
+                        "trades": [{"ts": str(t.ts)[:19], "symbol": t.symbol, "action": t.action,
+                                    "volume": t.volume, "price": t.price} for t in adapter.trades],
+                        "log": "",
+                        "progress": {"current": i + 1, "total": len(bars),
+                                     "pct": round((i + 1) / len(bars) * 100, 1)},
+                    })
 
             # 清仓
             if position > 0 and bars:
@@ -230,8 +248,15 @@ class BacktestEngine:
             avg_return = np.mean(returns)
             std_return = np.std(returns)
             sharpe = (avg_return - 0.02 / 252) / std_return * np.sqrt(252) if std_return > 0 else 0
+            # 波动率（年化）+ 索提诺（下行 std）（B5 #21）
+            volatility = float(std_return * np.sqrt(252) * 100)
+            downside = [r for r in returns if r < 0]
+            downside_std = np.std(downside) if downside else 0
+            sortino = (avg_return - 0.02 / 252) / downside_std * np.sqrt(252) if downside_std > 0 else 0
         else:
             sharpe = 0
+            volatility = 0.0
+            sortino = 0.0
 
         # 胜率（从主循环传入）
         win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
@@ -245,6 +270,8 @@ class BacktestEngine:
             win_rate=round(win_rate, 1),
             max_drawdown_pct=round(max_dd, 2),
             sharpe_ratio=round(sharpe, 2),
+            volatility=round(volatility, 2),
+            sortino_ratio=round(sortino, 2),
             total_trades=len(trades),
             daily_values=daily_values,
             trades=[{
@@ -257,6 +284,8 @@ class BacktestEngine:
                 "total_return_pct": round(total_return, 2),
                 "max_drawdown_pct": round(max_dd, 2),
                 "sharpe_ratio": round(sharpe, 2),
+                "volatility": round(volatility, 2),
+                "sortino_ratio": round(sortino, 2),
                 "win_rate": round(win_rate, 1),
                 "total_trades": len(trades),
                 "commission_rate": self.commission_rate,

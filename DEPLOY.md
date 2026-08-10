@@ -1,7 +1,7 @@
 # 多市场混合量化交易平台 · 生产部署指南
 
 > 部署到与 SafeBox **同一服务器**，严格隔离。新服务器迁移/全新部署均用本指南。
-> 目标 OS：Amazon Linux 2023 | 部署路径：`/data/websites/snailtrail.org/quant/` | 域名：`quant.snailtrail.org`
+> 目标 OS：Alibaba Cloud Linux 3 | 部署路径：`/data/websites/snailtrail.org/quant/` | 域名：`quant.snailtrail.org`
 
 ## 目标架构
 

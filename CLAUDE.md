@@ -58,11 +58,18 @@
 - 进展条/交接只带「指针 + 增量」，不重抄内容。
 - **联网核实**走本机 `spe curl`（WebSearch 不可用，返回幻觉；WebFetch 域安全校验后端不通）。
 - **多语言国际化（i18n）**：Web 前端按浏览器语言自动切换中/英文；LLM 回复按输入语言自然回复（2026-08-07 移除 lang 注入与飞书 per-机器人 lang 配置，简化设置）；日志统一英文。
-
+- **待办自包含**：新待办按 `docs/任务/<id>.md`（`flow/规范/任务模板.md` 8 字段）写，做任务时只读「任务文件 + `docs/architecture/接口契约.md` + 本模块契约 `docs/architecture/模块契约/<module>.md`」，零代码阅读。硬约束：限定范围 ≤3 文件 + 参考 ≤2 份。前期写文档成本换后续每任务顺畅。A2 端到端验证成功（2026-08-09，66 单测全过）。
 ### 外部待确认 gate（不阻塞开发，但影响实盘）
 - 中泰 XTP 门槛/品种放行/费率（用户问客户经理）
 - Tushare 积分是否到 2000（分钟线硬门槛，但用户说一次性购买可接受）
 - DeepSeek/GLM 具体型号规格（V4/GLM-5.2 的 context/supports_tools，接入时按官方填）
+
+## Subagent Mode: full-subagent
+
+所有代码修改必须通过 `mcp__subcodex__run` 调用 subcodex 执行（full-subagent 模式）：
+
+- **Claude Code**：分析需求、制定计划、编写 Codex Contract（`docs/任务/<id>.md` 按任务模板，含接口契约+限定范围+验收）、验证结果、收尾（进展/待办/decisions）
+- **Subcodex (Codex)**：所有文件编辑、代码生成、重构、单元测试
 
 ## 文档维护（精要）
 
@@ -74,10 +81,14 @@
 
 - 工作流程（五段循环/进展日志接力/评审）：`flow/规范/工作流程.md`
 - 文档自检 hook：`flow/规范/hook机制.md`
+- 任务模板（待办自包含写法规范，8 字段 + mock 库）：`flow/规范/任务模板.md`
 - 架构设计：`docs/architecture/00-总体设计.md`（含 11 份模块文档索引）
+- 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
+- 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（data_platform / data_sync / strategy_framework / llm_gateway / astock_analysis / web_api 已写 6 份，D2-D5 所需已齐，余待补）
+- 批量实施设计（A-E 模块拆分 + 接口签名 + 边界）：`docs/批量实施设计.md`
 - 竞品需求对照分析：`docs/竞品需求对照分析.md`（25 项逐条分析 + 工作提纲）
 
 ## 项目知识（durable，随项目积累 ↓）
 
-全局记忆路径：`~/.claude/projects/-home-bernard-Projects-Quantitative/memory/MEMORY.md`
-当前 7 条记忆覆盖：选型决策 / 数据层 / RBAC / 部署 / AI 层 / 项目状态 / 联网限制。
+全局记忆路径：`~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`
+当前 18 条记忆覆盖：联网限制 / 券商选型 / 数据回测层 / RBAC / 部署 / AI 层 / 项目状态 / 本地启动 / XTP SDK / 实盘开关 / 策略实盘化 / 策略体系 / 回测可视化 / 飞书 / 会话交接 / 平台化 / full-subagent / 自包含任务文档。

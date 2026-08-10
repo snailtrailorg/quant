@@ -19,6 +19,8 @@ const routes = [
       // 策略
       { path: 'strategy', name: 'strategy', component: () => import('./views/Strategy.vue') },
       { path: 'backtest', name: 'backtest', component: () => import('./views/Backtest.vue') },
+      { path: 'backtest/:id', name: 'backtest-run', component: () => import('./views/BacktestRun.vue') },
+      { path: 'backtest/:id/view/:symbol', name: 'backtest-view', component: () => import('./views/BacktestView.vue') },
       { path: 'pool', name: 'pool', component: () => import('./views/Pool.vue') },
       { path: 'factors', name: 'factors', component: () => import('./views/Factors.vue') },
 
@@ -38,6 +40,7 @@ const routes = [
       { path: 'health', name: 'health', component: () => import('./views/Health.vue'), meta: { admin: true } },
       { path: 'logs', name: 'logs', component: () => import('./views/Logs.vue'), meta: { admin: true } },
       { path: 'data-manage', name: 'data-manage', component: () => import('./views/DataManage.vue'), meta: { admin: true } },
+      { path: 'data-integrity', name: 'data-integrity', component: () => import('./views/DataIntegrity.vue'), meta: { admin: true } },
       { path: 'data-manage/:syncId', name: 'symbol-manage', component: () => import('./views/SymbolManage.vue'), meta: { admin: true } },
       { path: 'audit', name: 'audit', component: () => import('./views/Audit.vue'), meta: { admin: true } },
       { path: 'llm-models', name: 'llm-models', component: () => import('./views/LLMModels.vue'), meta: { admin: true } },

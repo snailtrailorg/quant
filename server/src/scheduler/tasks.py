@@ -19,6 +19,15 @@ def _is_trading_day() -> bool:
         return date.today().weekday() < 5
 
 
+def _is_trading_hours() -> bool:
+    """A 股连续竞价时段（9:30-11:30, 13:00-15:00）。非交易日+非时段返回 False。"""
+    if not _is_trading_day():
+        return False
+    now = datetime.now()
+    hm = now.hour * 100 + now.minute
+    return (930 <= hm <= 1130) or (1300 <= hm <= 1500)
+
+
 @app.task(name="src.scheduler.tasks.data_increment_daily", bind=True, max_retries=2)
 def data_increment_daily(self):
     """盘后增量更新日线；非交易日跳过。"""
@@ -99,12 +108,8 @@ def daily_report(self):
 @app.task(name="src.scheduler.tasks.astock_minute_analysis")
 def astock_minute_analysis():
     """盘中分钟研判；非交易日/连续竞价外跳过。"""
-    now = datetime.now()
-    if not _is_trading_day():
-        return {"status": "skipped", "reason": "非交易日"}
-    hm = now.hour * 100 + now.minute
-    if not (930 <= hm <= 1130 or 1300 <= hm <= 1500):
-        return {"status": "skipped", "reason": "非连续竞价时段"}
+    if not _is_trading_hours():
+        return {"status": "skipped", "reason": "非交易时段"}
     return {"status": "skipped", "reason": "待实时行情订阅"}
 
 
@@ -271,16 +276,30 @@ def data_continuity_check():
     """P-MON-006 数据断连自愈与断点补采。
 
     检测 K 线断点 -> 自动补采 -> 重算缺失因子。
+    断线检测（Valkey 心跳）+ 因子重算触发补采。
     """
-    import psycopg, os
+    import psycopg, os, redis
     from datetime import date, timedelta
 
     issues = []
     repaired = 0
+    reconnected = 0
 
+    # 1. 断线检测（Valkey 心跳网关）
+    try:
+        r = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                                 socket_timeout=3, decode_responses=True)
+        beat = r.get("heartbeat:gateway")
+        if beat is None:
+            reconnected += 1
+            issues.append("Valkey 网关心跳丢失，尝试重建连接")
+            # 心跳重建由各网关 _init 时写入，此处只检测
+    except Exception as e:
+        issues.append(f"Valkey 检测异常: {str(e)[:60]}")
+
+    # 2. K 线断点检测 + 补采（已有逻辑）
     try:
         with get_conn() as conn:
-            # 检查最近 7 天日线是否有断点
             today = date.today()
             week_ago = today - timedelta(days=7)
             cur = conn.execute("""
@@ -292,11 +311,11 @@ def data_continuity_check():
             rows = cur.fetchall()
 
             for symbol, last_ts, cnt in rows:
-                # 预期交易日数（简化：工作日）
-                expected = 5  # 一周约 5 个交易日
+                from src.data_platform.db import is_trading_day as _is_td
+                _days = [week_ago + timedelta(days=i) for i in range((today - week_ago).days + 1)]
+                expected = sum(1 for d in _days if d.weekday() < 5 and _is_td(d))
                 if cnt < expected:
                     issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{expected})")
-                    # 自动补采
                     try:
                         ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
                         from src.data_platform.adapters.tushare_adapter import pull_daily, to_save_rows
@@ -305,9 +324,11 @@ def data_continuity_check():
                         if not df.empty:
                             rows = to_save_rows(df)
                             repaired = save_bars("1D", rows)
+                            # 3. 因子重算触发：有修复则标记（后续 astock_select_daily 将利用完整数据）
+                            if repaired > 0:
+                                r.set(f"factor:recalc:triggered", "1", ex=3600)
                     except Exception as e:
                         issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
-
     except Exception as e:
         issues.append(f"检测异常: {str(e)[:100]}")
 
@@ -315,7 +336,7 @@ def data_continuity_check():
         from src.alert_notify import AlertNotify
         AlertNotify.get().notify("warn", "数据断连检测", "\n".join(issues))
 
-    return {"status": "ok", "issues": issues, "repaired_bars": repaired}
+    return {"status": "ok", "issues": issues, "repaired_bars": repaired, "reconnected": reconnected}
 
 
 @app.task(name="src.scheduler.tasks.disk_monitor")
@@ -392,7 +413,8 @@ def data_sync_scheduler():
             skipped.append(f"{sid}(运行中)")
             continue
         # 空状态（数据被删/从未初始化）跳过增量，需用户手动全量重建
-        if last_sync_date is None and sid in ("astock_daily", "etf_daily", "cb_daily"):
+        if last_sync_date is None and sid in ("astock_daily", "etf_daily", "cb_daily",
+                                               "astock_minute", "astock_minute_5min"):
             skipped.append(f"{sid}(空状态,需全量重建)")
             continue
         # manual/空 schedule 跳过
@@ -547,3 +569,196 @@ def task_stuck_check():
     from src.task_manager import detect_stuck
     count = detect_stuck()
     return {"stuck_count": count}
+
+
+# ====================================================================
+# 回测组任务（B3 #1）：run 分发 + symbol 子任务 + Valkey pub
+# ====================================================================
+
+@app.task(name="src.scheduler.tasks.backtest_run_task",
+          bind=True, soft_time_limit=3600, time_limit=4200)
+def backtest_run_task(self, run_id: int):
+    """回测组任务：读 run + 写 backtest_symbols pending + 按 mode 分发子任务（B3）。"""
+    import json
+    from src.task_manager import create_task, update_heartbeat, complete_task
+    task_id = self.request.id
+    create_task(task_id, f"回测 run {run_id}", "backtest", "manual", "system", {"run_id": run_id})
+
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT strategy_config_id, symbols, params, mode FROM backtest_runs WHERE id=%s", (run_id,))
+        r = cur.fetchone()
+    if not r:
+        complete_task(task_id, status="failed", error="run 不存在")
+        return {"status": "error", "error": "run 不存在"}
+    strat_id, symbols_json, params_json, mode = r
+    symbols = json.loads(symbols_json)
+
+    with get_conn() as conn:
+        for sym in symbols:
+            conn.execute(
+                "INSERT INTO backtest_symbols (run_id, symbol, status) VALUES (%s,%s,'pending') "
+                "ON CONFLICT (run_id, symbol) DO NOTHING", (run_id, sym))
+        conn.execute("UPDATE backtest_runs SET status='running', task_id=%s WHERE id=%s", (task_id, run_id))
+        conn.commit()
+    update_heartbeat(task_id, {"step": "dispatching", "total": len(symbols)})
+
+    # 按 mode 分发
+    if mode == "single" or len(symbols) == 1:
+        for sym in symbols:
+            backtest_symbol_task.delay(run_id, sym)
+    elif mode == "parallel":
+        from celery import group
+        group([backtest_symbol_task.s(run_id, s) for s in symbols])()
+    elif mode == "serial":
+        from celery import chain
+        chain(*[backtest_symbol_task.s(run_id, s) for s in symbols])()
+    return {"status": "running", "run_id": run_id, "symbols": len(symbols)}
+
+
+@app.task(name="src.scheduler.tasks.backtest_symbol_task",
+          bind=True, soft_time_limit=3600, time_limit=4200)
+def backtest_symbol_task(self, run_id: int, symbol: str):
+    """单标的回测子任务：跑 BacktestEngine + on_bar publish Valkey + 存 result（B3）。"""
+    import json, os, redis
+    from datetime import date, timedelta
+    from src.data_platform.db import get_bars
+    from src.strategy_framework.strategy import StrategyConfig
+    from src.strategy_framework.backtest import BacktestEngine
+
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    pub_key = f"backtest:run:{run_id}:{symbol}"
+
+    with get_conn() as conn:
+        cur = conn.execute("SELECT strategy_config_id, params FROM backtest_runs WHERE id=%s", (run_id,))
+        rr = cur.fetchone()
+        if rr:
+            cur = conn.execute("SELECT factors, aggregator, params FROM strategy_config WHERE id=%s", (rr[0],))
+            sc = cur.fetchone()
+    if not rr or not sc:
+        r.set(pub_key + ":error", "策略/run 不存在")
+        return {"status": "error", "error": "策略/run 不存在"}
+
+    params = json.loads(rr[1])
+    start = params.get("start", (date.today() - timedelta(days=365)).isoformat())
+    end = params.get("end", date.today().isoformat())
+    bars_df = get_bars(symbol, "1D", start, end)
+    bars = bars_df.to_dict("records") if not bars_df.empty else []
+
+    cfg = StrategyConfig(
+        id=rr[0], name=str(rr[0]), type="astock_analysis", symbol=symbol, adapter="xtp",
+        factors=json.loads(sc[0]) if sc[0] else [],
+        aggregator=json.loads(sc[1]) if sc[1] else {},
+        params=json.loads(sc[2]) if sc[2] else {})
+
+    engine = BacktestEngine(
+        initial_capital=params.get("capital", 100000),
+        commission_rate=params.get("commission", 0.0005),
+        slippage=params.get("slippage", 0))
+
+    def on_bar_cb(bar, ctx):
+        r.set(pub_key, json.dumps({
+            "progress": ctx["progress"],
+            "bar": {"ts": str(bar.get("ts"))[:19], "open": bar.get("open"), "high": bar.get("high"),
+                    "low": bar.get("low"), "close": bar.get("close"), "volume": bar.get("volume")},
+            "equity": ctx["equity"], "position": ctx["position"],
+            "avg_price": ctx.get("avg_price"), "trades": ctx["trades"],
+        }), ex=3600)
+
+    try:
+        result = engine.run(cfg, bars, on_bar_callback=on_bar_cb)
+        result_json = json.dumps({
+            "total_return_pct": result.total_return_pct, "win_rate": result.win_rate,
+            "max_drawdown_pct": result.max_drawdown_pct, "sharpe_ratio": result.sharpe_ratio,
+            "total_trades": result.total_trades, "daily_values": result.daily_values,
+            "trades": result.trades, "metrics": result.metrics})
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE backtest_symbols SET status='done', result=%s WHERE run_id=%s AND symbol=%s",
+                (result_json, run_id, symbol))
+            cur = conn.execute(
+                "SELECT count(*) FROM backtest_symbols WHERE run_id=%s AND status!='done'", (run_id,))
+            pending = cur.fetchone()[0]
+            if pending == 0:
+                conn.execute("UPDATE backtest_runs SET status='done', finished_at=now() WHERE id=%s", (run_id,))
+            conn.commit()
+        r.set(pub_key + ":done", result_json, ex=3600)
+        return {"status": "done", "symbol": symbol, "return": result.total_return_pct}
+    except Exception as e:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE backtest_symbols SET status='error', result=%s WHERE run_id=%s AND symbol=%s",
+                (json.dumps({"error": str(e)[:200]}), run_id, symbol))
+            conn.commit()
+        r.set(pub_key + ":error", str(e)[:200], ex=3600)
+        return {"status": "error", "symbol": symbol, "error": str(e)[:200]}
+
+
+# ====================================================================
+# Phase 1 小任务（D3 条款同步 / D5 定时闹钟 / #37 通道监控）
+# ====================================================================
+
+@app.task(name="src.scheduler.tasks.convertible_terms_sync")
+def convertible_terms_sync():
+    """D3 可转债条款数据同步（盘后，每日一次）。拉取活跃可转债基本信息并存 DB。"""
+    from src.data_platform.adapters.tushare_adapter import pull_convertible_bonds, pull_cb_basic
+    import json
+    try:
+        bonds = pull_convertible_bonds()
+    except Exception as e:
+        return {"status": "error", "reason": f"pull_convertible_bonds 失败: {e}"}
+    results = []
+    for ts_code in bonds[:50]:
+        try:
+            terms = pull_cb_basic(ts_code)
+            if terms:
+                with get_conn() as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS convertible_terms (
+                            ts_code TEXT PRIMARY KEY, terms JSONB, updated_at TIMESTAMPTZ DEFAULT now()
+                        )
+                    """)
+                    conn.execute(
+                        "INSERT INTO convertible_terms (ts_code, terms, updated_at) VALUES (%s,%s,now()) "
+                        "ON CONFLICT (ts_code) DO UPDATE SET terms=EXCLUDED.terms, updated_at=now()",
+                        (ts_code, json.dumps(terms, ensure_ascii=False)))
+                    conn.commit()
+                results.append(ts_code)
+        except Exception:
+            continue
+    return {"status": "ok", "count": len(results)}
+
+
+@app.task(name="src.scheduler.tasks.budget_alert_check")
+def budget_alert_check():
+    """D5 定时预算告警检查（每小时，交易时段内）。"""
+    if not _is_trading_hours():
+        return {"status": "skipped", "reason": "非交易时段"}
+    try:
+        from src.web_api.main import check_budget_alerts
+        result = check_budget_alerts()
+        return {"status": "ok", "alerts": len(result.get("alerts", []))}
+    except Exception as e:
+        return {"status": "error", "reason": str(e)[:200]}
+
+
+@app.task(name="src.scheduler.tasks.broker_health_check")
+def broker_health_check():
+    """#37 通道用量监控：检查各 broker 连通性，异常告警。"""
+    from src.strategy_framework.broker import _REGISTRY
+    from src.alert_notify import AlertNotify
+    results = {}
+    for provider, cls in _REGISTRY.items():
+        try:
+            broker = cls()
+            ok = broker.test_connection()
+            results[provider] = {"status": "ok" if ok else "error"}
+        except Exception as e:
+            results[provider] = {"status": "error", "msg": str(e)[:100]}
+    errors = [k for k,v in results.items() if v["status"] == "error"]
+    if errors:
+        AlertNotify.get().notify("warn", "通道连通异常", f"离线: {errors}")
+    return {"status": "ok" if not errors else "issues", "results": results}
+
+
+

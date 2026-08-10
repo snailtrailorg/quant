@@ -71,6 +71,22 @@ app.conf.update(
             "options": {"queue": "risk"},
         },
         "risk-sweep": {
+        "convertible-terms-sync": {
+            "task": "src.scheduler.tasks.convertible_terms_sync",
+            "schedule": 86400.0,
+            "options": {"queue": "data"},
+        },
+        "budget-alert-check": {
+            "task": "src.scheduler.tasks.budget_alert_check",
+            "schedule": 3600.0,
+            "options": {"queue": "risk"},
+        },
+        "broker-health-check": {
+            "task": "src.scheduler.tasks.broker_health_check",
+            "schedule": 21600.0,
+            "options": {"queue": "risk"},
+        },
+
             "task": "src.scheduler.tasks.risk_sweep",
             "schedule": 60.0,  # 1min
             "options": {"queue": "risk"},

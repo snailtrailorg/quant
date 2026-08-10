@@ -1,5 +1,6 @@
-"""告警/通知 —— 企业微信/Discord/Server酱，分级路由+配额聚合。
+"""告警/通知 -- 统一走 MessageChannel（channel_config DB），分级路由+去重+配额。
 
+PI1 迁移（2026-08-08）：_channels .env -> channel_config DB（get_channel）。
 所有模块通过 notify(level, title, body) 推送，不直接接触渠道。
 """
 
@@ -10,7 +11,6 @@ import hashlib
 import logging
 from typing import Literal
 import redis
-import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -20,7 +20,7 @@ Level = Literal["info", "warn", "critical"]
 
 
 class AlertNotify:
-    """告警/通知单例。"""
+    """告警/通知单例（PI1：渠道走 MessageChannel DB）。"""
 
     _instance = None
 
@@ -29,11 +29,6 @@ class AlertNotify:
             os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
             decode_responses=True,
         )
-        self._channels = {
-            "wechat_work": os.environ.get("WECHAT_WORK_WEBHOOK", ""),  # 企业微信群机器人
-            "discord": os.environ.get("DISCORD_WEBHOOK", ""),
-            "serverchan": os.environ.get("SERVERCHAN_KEY", ""),  # Server酱（备用）
-        }
 
     @classmethod
     def get(cls) -> "AlertNotify":
@@ -51,12 +46,15 @@ class AlertNotify:
             return alert_id
 
         target = channel or self._route(level)
-        msg = self._format(level, title, body)
 
-        if target and self._channels.get(target):
-            self._send(target, msg)
+        # PI1：走 MessageChannel（channel_config DB）
+        from src.alert_notify.channel import get_channel
+        ch = get_channel(target)
+        if ch:
+            if not self._quota_exceeded(target):
+                ch.send(title, body, level)
         else:
-            logger.warning(f"无可用渠道({level}): {title}")
+            logger.warning(f"无可用渠道({level}/{target}): {title}（在 Web 消息通道页配 channel_config）")
 
         self._record(alert_id, level, title, body, target)
         return alert_id
@@ -68,39 +66,8 @@ class AlertNotify:
     # ── 路由 ──
 
     def _route(self, level: Level) -> str:
-        """按级别路由渠道。优先企业微信+Discord，Server酱备用。"""
-        if level == "critical":
-            return "wechat_work"  # 即时
-        elif level == "warn":
-            return "wechat_work"
-        return "wechat_work"  # info 也走企业微信（配额宽松）
-
-    def _format(self, level: Level, title: str, body: str) -> str:
-        emoji = {"info": "ℹ️", "warn": "⚠️", "critical": "🔴"}[level]
-        return f"{emoji} [{level.upper()}] {title}\n{body}"
-
-    # ── 发送 ──
-
-    def _send(self, channel: str, msg: str) -> bool:
-        url = self._channels.get(channel, "")
-        if not url:
-            return False
-        # 配额检查（Server酱免费版日限）
-        if channel == "serverchan" and self._quota_exceeded("serverchan"):
-            logger.warning("Server酱日配额超限，跳过")
-            return False
-        try:
-            if channel == "discord":
-                httpx.post(url, json={"content": msg[:2000]}, timeout=10)
-            elif channel == "wechat_work":
-                httpx.post(url, json={"msgtype": "text", "text": {"content": msg}}, timeout=10)
-            elif channel == "serverchan":
-                httpx.post(f"https://sctapi.ftqq.com/{url}.send",
-                           data={"title": msg[:32], "desp": msg}, timeout=10)
-            return True
-        except Exception as e:
-            logger.error(f"发送失败({channel}): {e}")
-            return False
+        """按级别路由渠道（都走 wechat_work，配额宽松；critical 可加 discord）。"""
+        return "wechat_work"
 
     # ── 去重 + 配额 ──
 
@@ -112,20 +79,20 @@ class AlertNotify:
         k = f"alert:dedup:{key}"
         if self._redis.exists(k):
             return True
-        self._redis.setex(k, 60, "1")  # 60s 去重窗口
+        self._redis.setex(k, 60, "1")
         return False
 
     def _append_body(self, key: str, body: str):
         """合并追加 body。"""
-        k = f"alert:body:{key}"
-        self._redis.append(k, f"\n---\n{body}")
+        self._redis.append(f"alert:body:{key}", f"\n---\n{body}")
 
     def _quota_exceeded(self, channel: str) -> bool:
-        """Server酱免费版日配额检查。"""
+        """日配额检查（#39，默认 100 条/天/渠道，ALERT_DAILY_QUOTA 可配）。"""
         k = f"alert:quota:{channel}:{time.strftime('%Y%m%d')}"
         used = int(self._redis.get(k) or 0)
-        limit = 5  # Server酱免费版 5 条/天
+        limit = int(os.environ.get("ALERT_DAILY_QUOTA", "100"))
         if used >= limit:
+            logger.warning(f"渠道 {channel} 日配额超限 {limit}，跳过")
             return True
         self._redis.incr(k)
         self._redis.expire(k, 86400)
@@ -138,4 +105,4 @@ class AlertNotify:
             "channel": channel, "ts": str(time.time()),
         })
         self._redis.lpush("alert:history", alert_id)
-        self._redis.ltrim("alert:history", 0, 999)  # 保留最近 1000 条
+        self._redis.ltrim("alert:history", 0, 999)

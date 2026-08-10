@@ -1,81 +1,132 @@
 <template>
-  <el-card>
-    <template #header>回测中心</template>
-    <el-form :model="form" label-width="120px">
-      <el-form-item label="选择策略">
-        <el-select v-model="form.strategyId" placeholder="选择策略" style="width: 300px">
-          <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="回测区间">
-        <el-date-picker v-model="form.dateRange" type="daterange" start-placeholder="开始" end-placeholder="结束" style="width: 300px" />
-      </el-form-item>
-      <el-form-item label="初始资金">
-        <el-input-number v-model="form.capital" :min="10000" :step="100000" style="width: 200px" />
-      </el-form-item>
-      <el-form-item label="手续费率">
-        <el-input-number v-model="form.commission" :min="0" :step="0.0001" :precision="4" style="width: 200px" />
-      </el-form-item>
-      <el-form-item label="每笔股数">
-        <el-input-number v-model="form.shares" :min="100" :step="100" style="width: 200px" />
-      </el-form-item>
-      <el-form-item>
-        <el-button type="primary" @click="runBacktest" :loading="loading">开始回测</el-button>
-      </el-form-item>
-    </el-form>
+  <div>
+    <el-card>
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <span>回测运行列表</span>
+          <el-button type="primary" @click="showForm = true">新建回测</el-button>
+        </div>
+      </template>
+      <el-table :data="runs" stripe v-loading="loading" @row-click="goDetail">
+        <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="strategy_id" label="策略" />
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="mode" label="模式" width="80" />
+        <el-table-column label="标的" min-width="100">
+          <template #default="{ row }">{{ row.symbols?.length || 0 }} 个</template>
+        </el-table-column>
+        <el-table-column label="创建时间" width="160">
+          <template #default="{ row }">{{ row.created_at?.slice(0, 19) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="160" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click.stop="goDetail(row)">详情</el-button>
+            <el-button size="small" v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)">终止</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
 
-    <el-divider v-if="result" />
-    <div v-if="result">
-      <el-row :gutter="20" style="margin-bottom: 20px">
-        <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">总收益</div><div class="value">{{ result.total_return_pct }}%</div></div></el-card></el-col>
-        <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">最大回撤</div><div class="value">{{ result.max_drawdown_pct }}%</div></div></el-card></el-col>
-        <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">夏普比率</div><div class="value">{{ result.sharpe_ratio }}</div></div></el-card></el-col>
-        <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">交易次数</div><div class="value">{{ result.total_trades }}</div></div></el-card></el-col>
-      </el-row>
-      <el-card>
-        <template #header>交易明细</template>
-        <el-table :data="result.trades" stripe max-height="400">
-          <el-table-column prop="ts" label="时间" width="180" />
-          <el-table-column prop="action" label="方向" width="80" />
-          <el-table-column prop="volume" label="数量" width="80" />
-          <el-table-column prop="price" label="价格" width="100" />
-          <el-table-column prop="commission" label="佣金" width="100" />
-        </el-table>
-      </el-card>
-    </div>
-    <el-alert v-if="error" type="error" :title="error" :closable="false" style="margin-top: 20px" />
-  </el-card>
+    <!-- 新建回测弹窗 -->
+    <el-dialog v-model="showForm" title="新建回测" width="500px">
+      <el-form :model="form" label-width="100px">
+        <el-form-item label="策略">
+          <el-select v-model="form.strategyId" placeholder="选择策略" style="width: 100%">
+            <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标的池">
+          <el-select v-model="form.poolId" placeholder="选择标的池" clearable style="width: 100%">
+            <el-option v-for="p in pools" :key="p.id" :label="p.name" :value="p.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="回测区间">
+          <el-date-picker v-model="form.dateRange" type="daterange" start-placeholder="开始" end-placeholder="结束" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="模式">
+          <el-select v-model="form.mode" style="width: 100%">
+            <el-option label="并行" value="parallel" />
+            <el-option label="串行" value="serial" />
+            <el-option label="单只" value="single" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="初始资金">
+          <el-input-number v-model="form.capital" :min="10000" :step="100000" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showForm = false">取消</el-button>
+        <el-button type="primary" @click="submitRun" :loading="submitting">开始回测</el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getStrategies } from '../api'
+import { getBacktests, createBacktest, getStrategies } from '../api'
+import api from '../api'
 
+const router = useRouter()
+const runs = ref([])
 const strategies = ref([])
+const pools = ref([])
 const loading = ref(false)
-const result = ref(null)
-const error = ref('')
-const form = ref({
-  strategyId: '', dateRange: null, capital: 1000000,
-  commission: 0.0005, shares: 1000,
-})
+const submitting = ref(false)
+const showForm = ref(false)
+const form = ref({ strategyId: '', poolId: '', dateRange: null, mode: 'parallel', capital: 1000000 })
 
-onMounted(async () => { strategies.value = await getStrategies() })
+const statusType = (s) => ({ running: 'warning', done: 'success', error: 'danger', pending: 'info' }[s] || 'info')
 
-const runBacktest = async () => {
-  if (!form.value.strategyId) { ElMessage.warning('请选择策略'); return }
-  loading.value = true; result.value = null; error.value = ''
-  try {
-    // TODO: 调 POST /api/backtest（后端端点待加）
-    ElMessage.info('回测 API 待实现，后端 BacktestEngine 已就绪')
-  } catch (e) { error.value = e.detail || e.message || '回测失败' }
+const loadRuns = async () => {
+  loading.value = true
+  try { runs.value = await getBacktests() } catch (e) { ElMessage.error('加载回测列表失败') }
   finally { loading.value = false }
 }
-</script>
 
-<style scoped>
-.stat { text-align: center; padding: 12px 0; }
-.stat .label { color: #909399; font-size: 13px; }
-.stat .value { font-size: 24px; font-weight: bold; color: #303133; margin-top: 4px; }
-</style>
+const goDetail = (row) => router.push(`/backtest/${row.id}`)
+
+const cancelRun = async (row) => {
+  // TODO: 终止回测端点（temporarily via terminate_task）
+  try {
+    await api.post(`/tasks/${row.task_id}/terminate`)
+    ElMessage.success('已终止')
+    await loadRuns()
+  } catch (e) { ElMessage.error('终止失败') }
+}
+
+const submitRun = async () => {
+  if (!form.value.strategyId) { ElMessage.warning('请选择策略'); return }
+  submitting.value = true
+  try {
+    const payload = {
+      strategy_config_id: form.value.strategyId,
+      pool_id: form.value.poolId || null,
+      mode: form.value.mode,
+      params: {
+        capital: form.value.capital,
+        commission: 0.0005,
+        start: form.value.dateRange?.[0]?.toISOString().slice(0, 10),
+        end: form.value.dateRange?.[1]?.toISOString().slice(0, 10),
+      },
+    }
+    await createBacktest(payload)
+    ElMessage.success('已提交回测')
+    showForm.value = false
+    await loadRuns()
+  } catch (e) { ElMessage.error('提交失败') }
+  finally { submitting.value = false }
+}
+
+onMounted(async () => {
+  strategies.value = await getStrategies()
+  // TODO: pools 端点（/api/pools 待后端实现）
+  await loadRuns()
+})
+</script>

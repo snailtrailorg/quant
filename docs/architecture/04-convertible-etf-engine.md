@@ -104,17 +104,17 @@ LLM网关 ─> 可转债条款解读(强赎/下修/回售) ─> 影响因子(如
 | 回测/实盘 schema 对齐 | 现在 Tushare/AkShare 数据 schema 就对齐 XTP 实时 | 零迁移 |
 | 费率建模 | 分市场、注意沪深差异+最低佣金+ETF免5 | 回测贴近实盘 |
 
-## 11. Linux 编译与踩坑指南（Amazon Linux 2023）
+## 11. Linux 编译与踩坑指南（Alibaba Cloud Linux 3（OpenAnolis/al8/RHEL8 系））
 
-vnpy_xtp 包装中泰 XTP C++ SDK（`libxtptraderapi.so`），在 Amazon Linux 2023 上安装需注意：
+vnpy_xtp 包装中泰 XTP C++ SDK（`libxtptraderapi.so`），在 Alibaba Cloud Linux 3（OpenAnolis/al8/RHEL8 系） 上安装需注意：
 
 ```bash
-# 1. 装编译依赖（Amazon Linux 2023 用 dnf）
+# 1. 装编译依赖（Alibaba Cloud Linux 3（OpenAnolis/al8/RHEL8 系） 用 dnf）
 sudo dnf install -y gcc-c++ make openssl-devel python3.10-devel
 
 # 2. libstdc++ 版本要匹配 XTP SDK 编译时依赖的 GLIBCXX
 #    若运行时报 "GLIBCXX_3.4.XX not found"：
-#    - 确认 XTP SDK 的 .so 是为 RHEL/Amazon Linux 系编译（非 Ubuntu 版）
+#    - 确认 XTP SDK 的 .so 是为 RHEL/Alibaba Cloud Linux 系编译（非 Ubuntu 版）
 #    - 必要时用对应版本的 .so，或在与部署机同环境上重编 vnpy_xtp
 ldconfig -p | grep libstdc++.so.6   # 查可用 GLIBCXX 版本
 strings /usr/lib64/libstdc++.so.6 | grep GLIBCXX
@@ -125,6 +125,6 @@ sudo sh -c "echo $XTP_LIB_DIR > /etc/ld.so.conf.d/xtp.conf && ldconfig"
 # 或在 systemd unit 里设 Environment=LD_LIBRARY_PATH=/opt/xtp/lib
 ```
 
-**关键原则**：XTP `.so` 必须与**部署机同 glibc/libstdc++ 环境**构建。开发机是 Fedora（与 amzn2023 同 dnf/RPM 系，glibc 兼容性好），但**最终 .so 必须在 Amazon Linux 2023 上验证**，不能把 Ubuntu 编译的 .so 直接拿到 amzn2023 跑。中泰提供的 SDK 若分 CentOS/Ubuntu 版，选 CentOS 版（amzn2023 与 RHEL 系兼容）。
+**关键原则**：XTP `.so` 必须与**部署机同 glibc/libstdc++ 环境**构建。开发机是 Fedora（与 Alibaba Cloud Linux 3 同 dnf/RPM 系，glibc 兼容性好），但**最终 .so 必须在 Alibaba Cloud Linux 3（OpenAnolis/al8/RHEL8 系） 上验证**，不能把 Ubuntu 编译的 .so 直接拿到 Alibaba Cloud Linux 3 跑。中泰提供的 SDK 若分 CentOS/Ubuntu 版，选 CentOS 版（Alibaba Cloud Linux 3 与 RHEL 系兼容）。
 
 待中泰确认 XTP SDK 具体分发形态后，本节回填实际 .so 路径与版本号。

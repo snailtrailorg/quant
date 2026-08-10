@@ -27,6 +27,7 @@ def _get_pro():
     from src.data_platform.data_source import get_data_source
     ds = get_data_source("tushare")
     if ds:
+        ds.record_usage(provider="tushare", api_name="get_pro")
         return ds.get_client()
     import tushare as ts
     return ts.pro_api(os.environ.get("TUSHARE_TOKEN", ""))
@@ -386,6 +387,54 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
+_MINUTE_FREQ = {"astock_minute": "1min", "astock_minute_5min": "5min"}
+
+
+def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = None,
+                        progress_cb: Callable | None = None) -> dict:
+    """A股分钟线同步（per-symbol 循环 + stk_mins 分段，stk_mins 不支持按日全市场拉）。
+
+    freq 由 sync_id 决定（astock_minute=1min / astock_minute_5min=5min）。
+    增量：start = last_sync_date+1 ~ today；回补：start = backfill_from ~ today。
+    逐只 _fetch_minute_and_save（内部分段，处理 stk_mins 8000 条限制）。
+    """
+    sync_id = cfg["id"]
+    freq = _MINUTE_FREQ.get(sync_id)
+    if freq is None:
+        return {"pulled": 0, "saved": 0, "start": end_date, "failed_dates": [],
+                "expected_days": None, "actual_days": None}
+
+    if backfill_from:
+        start = backfill_from
+    else:
+        last = cfg.get("last_sync_date") or (date.today() - timedelta(days=7)).strftime("%Y%m%d")
+        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
+        if start > end_date:
+            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [],
+                    "expected_days": 0, "actual_days": 0}
+
+    ts_codes = _list_static_ts_codes("astock")
+    total = len(ts_codes)
+    total_pulled = 0
+    total_saved = 0
+    failed: list[str] = []
+    for i, tc in enumerate(ts_codes, 1):
+        try:
+            df, saved = _fetch_minute_and_save(tc, freq, start, end_date)
+            if df is not None and not df.empty:
+                total_pulled += len(df)
+                total_saved += saved
+        except Exception as ex:
+            failed.append(f"{tc}:{type(ex).__name__}:{str(ex)[:40]}")
+        if progress_cb:
+            progress_cb(i, total, tc)
+        time.sleep(0.15)
+
+    return {"pulled": total_pulled, "saved": total_saved, "start": start,
+            "failed_dates": failed, "expected_days": None,
+            "actual_days": total - len(failed)}
+
+
 # --- 工具函数 ---
 
 def _daily_to_rows(df: pd.DataFrame) -> list[tuple]:
@@ -431,6 +480,8 @@ _HANDLERS = {
     "etf_daily": _sync_etf_daily,
     "etf_list": _sync_etf_list,
     "trade_cal": _sync_trade_cal,
+    "astock_minute": _sync_astock_minute,
+    "astock_minute_5min": _sync_astock_minute,
 }
 
 
@@ -438,25 +489,76 @@ _HANDLERS = {
 # per-symbol 同步 / 回补 / 删除（完整性驱动，非游标驱动）
 # ====================================================================
 
-# 支持 per-symbol 全量重建的 sync_id（类型级 sync 在 last_sync_date=NULL 时走全量）
-_PER_SYMBOL_SYNC_IDS = {"astock_daily", "etf_daily", "cb_daily"}
+# per-symbol 同步元数据：sync_id -> (freq, table, kind, bar_type)
+#   freq:     K 线频率（bar 表 freq 列 + save_bars 表后缀）
+#   table:    PG 表名（bar_1D / bar_1min / bar_5min）
+#   kind:     标的来源（astock/etf/cb，对应静态信息表 + tushare api）
+#   bar_type: daily（按交易日，pro.daily/fund_daily/cb_daily）/ minute（stk_mins per-symbol 拉取）
+_PER_SYMBOL_META: dict[str, tuple[str, str, str, str]] = {
+    "astock_daily":       ("1D",   "bar_1D",   "astock", "daily"),
+    "etf_daily":          ("1D",   "bar_1D",   "etf",    "daily"),
+    "cb_daily":           ("1D",   "bar_1D",   "cb",     "daily"),
+    "astock_minute":      ("1min", "bar_1min", "astock", "minute"),
+    "astock_minute_5min": ("5min", "bar_5min", "astock", "minute"),
+}
+_PER_SYMBOL_SYNC_IDS = set(_PER_SYMBOL_META)
+
+# 分钟线 stk_mins 单次返回上限 8000 条，按频率算每段最大天数（1min 33 天 / 5min 166 天）
+_BARS_PER_DAY = {"1min": 240, "5min": 48, "15min": 16, "30min": 8, "60min": 4}
+_STK_MINS_MAX_BARS = 8000
 
 # 各 sync_id 对应的：tushare 拉取 API / 静态信息表 / ts_code 来源
 # astock_daily -> pro.daily(ts_code=) / asset_static_info
 # etf_daily    -> pro.fund_daily(ts_code=) / etf_basic_info
 # cb_daily     -> pro.cb_daily(ts_code=) / cb_basic_info（注：cb_daily 按日期拉全量更高效，per-symbol 仍支持）
+# astock_minute/_5min -> pro.stk_mins(ts_code=,freq=) / asset_static_info（per-symbol only，不支持按日全市场）
 
 _TUSHARE_MIN_DATE = os.environ.get("SYNC_START_DATE", "20100101")  # 全量起点，.env 可配（默认 2010）
 
 
+def _split_minute_range(start: str, end: str, freq: str) -> list[tuple[str, str]]:
+    """按 stk_mins 8000 条限制把日期区间分段（自然日粒度）。
+
+    1min: 240 根/日 -> 33 天/段；5min: 48 根/日 -> 166 天/段。
+    超过单段上限的区间拆成多段，每段单独调 stk_mins（避免单次返回被截断丢数据）。
+    """
+    bpd = _BARS_PER_DAY.get(freq, 240)
+    max_days = max(1, _STK_MINS_MAX_BARS // bpd)
+    days = pd.date_range(start=start, end=end, freq="D")
+    if len(days) == 0:
+        return []
+    segs: list[tuple[str, str]] = []
+    seg_start = start
+    cnt = 0
+    for d in days:
+        cnt += 1
+        if cnt >= max_days:
+            segs.append((seg_start, d.strftime("%Y%m%d")))
+            nxt = d + timedelta(days=1)
+            seg_start = nxt.strftime("%Y%m%d")
+            cnt = 0
+    if seg_start <= end:
+        segs.append((seg_start, end))
+    return segs
+
+
 def _get_pro_api(sync_id: str):
-    """返回 (pro, api_fn, ts_code_kind)。ts_code_kind 标识该标的 ts_code 来源表。"""
+    """返回 (pro, api_fn, kind, freq, bar_type)。
+
+    日线：api_fn = pro.daily/fund_daily/cb_daily（按 ts_code 拉取，返回 trade_date）。
+    分钟线：api_fn = pro.stk_mins（per-symbol，返回 trade_time，需 freq + datetime 格式）。
+    分钟线 per-symbol 拉取实际走 _fetch_minute_and_save（pull_minute），api_fn 仅作占位。
+    不支持的 sync_id 返回 (pro, None, None, None, None)。
+    """
     pro = _get_pro()
-    kind = {"astock_daily": "astock", "etf_daily": "etf", "cb_daily": "cb"}.get(sync_id)
-    if kind is None:
-        return pro, None, None
+    meta = _PER_SYMBOL_META.get(sync_id)
+    if meta is None:
+        return pro, None, None, None, None
+    freq, _table, kind, bar_type = meta
+    if bar_type == "minute":
+        return pro, pro.stk_mins, kind, freq, bar_type
     api_map = {"astock": pro.daily, "etf": pro.fund_daily, "cb": pro.cb_daily}
-    return pro, api_map[kind], kind
+    return pro, api_map[kind], kind, freq, bar_type
 
 
 def _list_static_ts_codes(kind: str) -> list[str]:
@@ -485,12 +587,12 @@ def _get_list_date(kind: str, ts_code: str) -> str:
     return s if s >= _TUSHARE_MIN_DATE else _TUSHARE_MIN_DATE
 
 
-def _local_bar_range(vt_symbol: str) -> tuple[str | None, str | None, int]:
-    """查 bar_1D 该标的本地首末日 + 条数。表不存在返回空（新库容错）。"""
+def _local_bar_range(vt_symbol: str, table: str = "bar_1D") -> tuple[str | None, str | None, int]:
+    """查指定 bar 表该标的本地首末日 + 条数。表不存在返回空（新库容错）。"""
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT min(ts)::date, max(ts)::date, count(*) FROM bar_1D WHERE symbol=%s",
+                f"SELECT min(ts)::date, max(ts)::date, count(*) FROM {table} WHERE symbol=%s",
                 (vt_symbol,))
             row = cur.fetchone()
     except psycopg.errors.UndefinedTable:
@@ -500,12 +602,16 @@ def _local_bar_range(vt_symbol: str) -> tuple[str | None, str | None, int]:
     return str(row[0]).replace("-", ""), str(row[1]).replace("-", ""), int(row[2])
 
 
-def _local_trade_dates(vt_symbol: str) -> list[str]:
-    """查 bar_1D 该标的本地已有交易日列表（YYYYMMDD 升序）。表不存在返回空。"""
+def _local_trade_dates(vt_symbol: str, table: str = "bar_1D") -> list[str]:
+    """查指定 bar 表该标的本地已有交易日列表（YYYYMMDD 升序，去重）。
+
+    日线表每日一行；分钟线表每日多行，distinct date(ts) 去重。表不存在返回空。
+    """
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT to_char(ts, 'YYYYMMDD') FROM bar_1D WHERE symbol=%s ORDER BY ts ASC",
+                f"SELECT DISTINCT to_char(ts, 'YYYYMMDD') FROM {table} "
+                f"WHERE symbol=%s ORDER BY 1",
                 (vt_symbol,))
             return [r[0] for r in cur.fetchall()]
     except psycopg.errors.UndefinedTable:
@@ -544,14 +650,16 @@ def _expected_trade_dates(api_fn, start: str, end: str) -> list[str]:
     return [d.strftime("%Y%m%d") for d in pd.date_range(start=start, end=end, freq="B")]
 
 
-def _find_gaps(api_fn, kind: str, ts_code: str, first: str, last: str) -> list[tuple[str, str]]:
-    """找该标的的缺口段。
+def _find_gaps(api_fn, kind: str, ts_code: str, first: str, last: str,
+               table: str = "bar_1D") -> list[tuple[str, str]]:
+    """找该标的的缺口段（按交易日粒度，日线/分钟线通用）。
 
     扫描范围只限本地数据区间（first~last）+ 尾部（last~今天），不扫上市日到今天全程
     （老股全程要调几十次 trade_cal，且本地已有数据说明那区间基本完整）。
     若要补上市日到 first 之间的早期缺口，用回补或全量重建。
 
     比对预期交易日（trade_cal）与本地已有交易日，返回连续缺口段 [(start,end), ...]。
+    分钟线同样按交易日找缺口（一天多根视为一天有数据），缺口段再交给分钟线拉取按 stk_mins 限制分小段。
     """
     from src.data_platform.schema import to_vt_symbol
     vt = to_vt_symbol(ts_code)
@@ -563,7 +671,7 @@ def _find_gaps(api_fn, kind: str, ts_code: str, first: str, last: str) -> list[t
     scan_start = first
     scan_end = today
     expected = _expected_trade_dates(api_fn, scan_start, scan_end)
-    local_set = set(_local_trade_dates(vt))
+    local_set = set(_local_trade_dates(vt, table))
 
     missing = [d for d in expected if d not in local_set]
     if not missing:
@@ -616,21 +724,85 @@ def _wrap_result(df, used: str, cnt: int, start: str, end: str) -> dict:
             "local_count_before": cnt}
 
 
+def _fetch_minute_and_save(ts_code: str, freq: str, start: str, end: str,
+                           overwrite: bool = False) -> "tuple[pd.DataFrame | None, int]":
+    """分钟线分段拉取入库（stk_mins per-symbol + 8000 条分段）。
+
+    返回 (concat_df, saved)。overwrite=True 覆盖写（回补），False 冲突跳过（增量/全量）。
+    每段单独调 pull_minute（按 09:00~15:00 交易时段），避免单次返回被截断丢数据。
+    """
+    from src.data_platform.adapters.tushare_adapter import pull_minute, to_save_rows_min
+    from src.data_platform.db import save_bars, save_bars_overwrite
+    save_fn = save_bars_overwrite if overwrite else save_bars
+    total_df: list[pd.DataFrame] = []
+    total_saved = 0
+    for s, e in _split_minute_range(start, end, freq):
+        df = pull_minute(ts_code, freq, f"{s} 09:00:00", f"{e} 15:00:00")
+        if df is None or df.empty:
+            continue
+        rows = to_save_rows_min(df, freq)
+        total_saved += save_fn(freq, rows)
+        total_df.append(df)
+    if not total_df:
+        return None, 0
+    return pd.concat(total_df, ignore_index=True), total_saved
+
+
+def _wrap_minute_result(df, used: str, cnt: int, start: str, end: str) -> dict:
+    """分钟线结果封装（pulled/saved 用 len(df)，与日线 _wrap_result 一致）。"""
+    if df is None or df.empty:
+        return {"status": "empty", "pulled": 0, "saved": 0,
+                "range": [start, end], "mode_used": used, "local_count_before": cnt}
+    actual_first = str(df["trade_time"].min())[:10].replace("-", "")
+    actual_last = str(df["trade_time"].max())[:10].replace("-", "")
+    return {"status": "success", "pulled": len(df), "saved": len(df),
+            "range": [actual_first, actual_last], "mode_used": used,
+            "local_count_before": cnt}
+
+
 def sync_symbol(sync_id: str, ts_code: str, mode: str = "auto") -> dict:
     """单标的智能同步（完整性驱动）。
 
-    mode='auto'：空 -> 从上市日起全量；有数据 -> 从 max(ts)+1 增量到今天。
+    mode='auto'：空 -> 从上市日起全量；有数据 -> 找缺口段逐段补。
+    日线按 trade_cal 找缺失交易日；分钟线同样按交易日找缺口（再按 stk_mins 限制分小段拉）。
     返回 {status, pulled, saved, range:[首,末], mode_used}
     """
     from src.data_platform.schema import to_vt_symbol
-    pro, api_fn, kind = _get_pro_api(sync_id)
-    if api_fn is None:
+    pro, api_fn, kind, freq, bar_type = _get_pro_api(sync_id)
+    if kind is None:
         return {"status": "error", "error": f"不支持 per-symbol 同步: {sync_id}"}
 
     today = date.today().strftime("%Y%m%d")
     vt = to_vt_symbol(ts_code)
-    first, last, cnt = _local_bar_range(vt)
+    table = _PER_SYMBOL_META[sync_id][1]
+    first, last, cnt = _local_bar_range(vt, table)
 
+    # 分钟线分支：stk_mins per-symbol + 8000 条分段
+    if bar_type == "minute":
+        if mode == "auto":
+            if cnt == 0:
+                start = _get_list_date(kind, ts_code)
+                df, _saved = _fetch_minute_and_save(ts_code, freq, start, today)
+                return _wrap_minute_result(df, "full", cnt, start, today)
+            gaps = _find_gaps(api_fn, kind, ts_code, first, last, table=table)
+            total_pulled = 0
+            gap_ranges = []
+            for g_start, g_end in gaps:
+                df, _s = _fetch_minute_and_save(ts_code, freq, g_start, g_end)
+                if df is not None and not df.empty:
+                    total_pulled += len(df)
+                    gap_ranges.append([g_start, g_end])
+            return {"status": "uptodate" if not gap_ranges else "success",
+                    "pulled": total_pulled, "saved": total_pulled,
+                    "range": [first, last], "mode_used": "incremental",
+                    "gaps_filled": gap_ranges, "local_count_before": cnt}
+        elif mode == "full":
+            start = _get_list_date(kind, ts_code)
+            df, _saved = _fetch_minute_and_save(ts_code, freq, start, today)
+            return _wrap_minute_result(df, "full", cnt, start, today)
+        return {"status": "error", "error": f"未知 mode: {mode}"}
+
+    # 日线分支（原逻辑）
     if mode == "auto":
         if cnt == 0:
             # 空 -> 从上市日起全量
@@ -671,10 +843,21 @@ def backfill_symbol(sync_id: str, ts_code: str, start: str, end: str) -> dict:
     """
     from src.data_platform.schema import to_vt_symbol
     from src.data_platform.db import save_bars_overwrite
-    pro, api_fn, kind = _get_pro_api(sync_id)
-    if api_fn is None:
+    pro, api_fn, kind, freq, bar_type = _get_pro_api(sync_id)
+    if kind is None:
         return {"status": "error", "error": f"不支持 per-symbol 回补: {sync_id}"}
 
+    # 分钟线分支：分段 stk_mins + 覆盖写
+    if bar_type == "minute":
+        df, _saved = _fetch_minute_and_save(ts_code, freq, start, end, overwrite=True)
+        if df is None or df.empty:
+            return {"status": "empty", "pulled": 0, "saved": 0, "range": [start, end]}
+        actual_first = str(df["trade_time"].min())[:10].replace("-", "")
+        actual_last = str(df["trade_time"].max())[:10].replace("-", "")
+        return {"status": "success", "pulled": len(df), "saved": len(df),
+                "range": [actual_first, actual_last], "overwritten": True}
+
+    # 日线分支（原逻辑）
     try:
         df = api_fn(ts_code=ts_code, start_date=start, end_date=end)
     except Exception as e:
@@ -695,13 +878,21 @@ def backfill_symbol(sync_id: str, ts_code: str, start: str, end: str) -> dict:
 
 
 def delete_symbol(sync_id: str, ts_code: str) -> dict:
-    """删除单标的本地数据。再次同步即完整重建。"""
+    """删除单标的本地数据。再次同步即完整重建。日线删 bar_1D，分钟线删 bar_1min/5min。"""
     from src.data_platform.schema import to_vt_symbol
+    meta = _PER_SYMBOL_META.get(sync_id)
+    if meta is None:
+        return {"status": "error", "error": f"不支持 per-symbol 删除: {sync_id}"}
+    table = meta[1]
     vt = to_vt_symbol(ts_code)
     with get_conn() as conn:
-        cur = conn.execute("DELETE FROM bar_1D WHERE symbol=%s", (vt,))
-        deleted = cur.rowcount
-        conn.commit()
+        try:
+            cur = conn.execute(f'DELETE FROM {table} WHERE symbol=%s', (vt,))
+            deleted = cur.rowcount
+            conn.commit()
+        except psycopg.errors.UndefinedTable:
+            deleted = 0
+            conn.commit()
     return {"status": "success", "deleted": deleted, "symbol": vt}
 
 
@@ -710,7 +901,7 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
 
     遍历该类型全部标的，逐只 sync_symbol(auto)。progress_cb(i, total, ts_code) 写进度。
     """
-    pro, api_fn, kind = _get_pro_api(sync_id)
+    pro, api_fn, kind, freq, bar_type = _get_pro_api(sync_id)
     if kind is None:
         return {"status": "error", "error": f"不支持全量同步: {sync_id}"}
 
@@ -748,11 +939,12 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
     Returns: {items:[{ts_code,name,list_date,local_count,local_first,local_last}], total}
     """
     from src.data_platform.schema import to_vt_symbol
-    _, _, kind = _get_pro_api(sync_id)
+    _, _, kind, _freq, _bar_type = _get_pro_api(sync_id)
     if kind is None:
         return {"items": [], "total": 0}
     table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
     name_col = "bond_short_name" if kind == "cb" else "name"
+    bar_table = _PER_SYMBOL_META[sync_id][1]
 
     like = f"%{q}%" if q else "%"
     with get_conn() as conn:
@@ -776,7 +968,7 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT symbol, count(*), min(ts), max(ts) FROM bar_1D "
+                f"SELECT symbol, count(*), min(ts), max(ts) FROM {bar_table} "
                 "WHERE symbol = ANY(%s) GROUP BY symbol",
                 (list(vts.keys()),))
             for sym, cnt, mn, mx in cur.fetchall():

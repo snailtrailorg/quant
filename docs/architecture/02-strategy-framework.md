@@ -39,7 +39,7 @@ class Strategy:
     id: str                        # 实例ID（一个标的一个实例）
     symbol: str                    # 标的，如 SH.603xxx / 113xxx / BTCUSDT-PERP
     config: StrategyConfig         # Web 配置：因子列表+权重+参数
-    adapter: ExecutionAdapter      # 执行适配器（A股只读/XTP/加密）
+    adapter: ExecutionAdapter      # 执行适配器（A股可实盘（受 astock 分项开关控制）/XTP/加密）
 
     def on_bar(self, bar: Bar) -> None:
         fv = self.compute_factors(bar)
@@ -99,8 +99,9 @@ class ExecutionAdapter:
     def cancel_order(self, order_id: str) -> None: ...
     def query_position(self) -> list[Position]: ...
 
-class AStockReadonlyAdapter(ExecutionAdapter):
-    def send_order(self, order): raise PermissionError("A股只读，永久禁下单")
+# ⚠️ 2026-08-03 决策已废止：A 股走 XTPAdapter（受 astock 分项开关控制），AStockReadonlyAdapter 已删（保留历史）
+# class AStockReadonlyAdapter(ExecutionAdapter):
+#     def send_order(self, order): raise PermissionError("A股只读，永久禁下单")
 
 class XTPAdapter(ExecutionAdapter):       # vnpy_xtp 网关
     def send_order(self, order): return self.gateway.send_order(...)

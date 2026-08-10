@@ -24,6 +24,7 @@ class RiskDecision:
     approved: bool
     reason: str
     severity: Level = "info"
+    adjusted: dict | None = None  # B8 风控覆写（修正后的 order，如超仓位截断 volume；None=不覆写）
 
 
 @dataclass
@@ -64,9 +65,30 @@ class RiskControl:
             os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
             decode_responses=True,
         )
-        self._rules = dict(DEFAULT_RULES)
+        self._rules = self._load_rules_from_db() or dict(DEFAULT_RULES)
         self._HALT_KEY = "risk:halted"
         self._HALT_REASON_KEY = "risk:halt_reason"
+
+    @staticmethod
+    def _load_rules_from_db():
+        """PI2：从 risk_rules DB 读参数（type=global/etf_conv/crypto）。无则 fallback DEFAULT_RULES。
+
+        注意：RiskRule 接口（PT6，type=max_position 等单规则）独立，保留新规则扩展。
+        risk_control 用 dict 参数（global/etf_conv/crypto），与 RiskRule 单规则抽象不同，
+        故 risk_control 自己读 risk_rules（type=global/etf_conv/crypto），不用 load_rules_from_db。
+        """
+        import json
+        try:
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                cur = conn.execute("SELECT type, params FROM risk_rules WHERE enabled=true")
+                rules = {}
+                for r in cur.fetchall():
+                    if r[0] in ("global", "etf_conv", "crypto"):
+                        rules[r[0]] = json.loads(r[1]) if r[1] else {}
+            return rules if rules else None
+        except Exception:
+            return None
 
     @classmethod
     def get(cls) -> "RiskControl":

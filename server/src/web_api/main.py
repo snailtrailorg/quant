@@ -338,6 +338,52 @@ def get_account(aid: int, payload: dict = Depends(require_perm("account_keys")))
 
 # ——— 日志/告警 ———
 
+class LogAnalyzeReq(BaseModel):
+    logs: list[dict] | None = None
+    task_id: str | None = None
+
+
+def _analyze_logs_with_llm(logs: list[dict]) -> str:
+    """LLM 归因异常日志，返回分析文本（D4 #34）。caller=log_analyze。"""
+    if not logs:
+        return "无异常日志"
+    from src.llm_gateway import gateway
+    log_text = "\n".join(
+        f"[{l.get('level','')}] {l.get('module') or l.get('step_name') or ''}: {l.get('msg') or l.get('message','')}"
+        for l in logs
+    )
+    try:
+        resp = gateway.chat(
+            messages=[
+                {"role": "system", "content": "你是运维归因助手，分析异常日志的根因并给出排查建议，用中文回复"},
+                {"role": "user", "content": f"以下是异常日志，请分析可能原因并给出排查建议：\n{log_text}"},
+            ],
+            role="viewer",
+            caller="log_analyze",
+        )
+        return resp.content if resp and resp.content else "（LLM 无响应，请检查 API key）"
+    except Exception as e:
+        return f"（LLM 暂不可用: {e}）"
+
+
+@app.post("/api/log/analyze")
+def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """AI 日志归因：传 logs 或 task_id，LLM 分析根因（D4 #34）。"""
+    logs = []
+    if req.logs:
+        logs = req.logs
+    elif req.task_id:
+        from src.task_manager import get_task
+        task = get_task(req.task_id)
+        if not task:
+            raise HTTPException(404, f"任务 {req.task_id} 不存在")
+        logs = task.get("logs", [])
+    # 过滤 ERROR/WARN（INFO/DEBUG 不归因）
+    logs = [l for l in logs if l.get("level", "").upper() in ("ERROR", "WARN")]
+    analysis = _analyze_logs_with_llm(logs)
+    return {"analysis": analysis, "log_count": len(logs), "logs": logs}
+
+
 @app.get("/api/log")
 def get_logs(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """运行日志（占位，接真实日志存储）。"""
@@ -402,6 +448,18 @@ def astock_selection(date: str = "", payload: dict = Depends(require_role("viewe
 
 
 # ——— 风控 ———
+
+@app.get("/api/convertible/terms")
+def convertible_terms(ts_code: str, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """可转债条款 LLM 解读（D3 #33）。"""
+    from src.data_platform.adapters.tushare_adapter import pull_cb_basic
+    from src.astock_analysis.convertible_terms import analyze_convertible_terms
+    terms = pull_cb_basic(ts_code)
+    if not terms:
+        raise HTTPException(404, f"可转债 {ts_code} 条款未找到")
+    result = analyze_convertible_terms(terms)
+    return {"ts_code": ts_code, "summary": result["summary"], "terms": result["raw_terms"]}
+
 
 @app.get("/api/risk/state")
 def risk_state(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
@@ -946,6 +1004,91 @@ def llm_usage_summary(payload: dict = Depends(require_role("viewer", "analyst", 
 
 # --- 数据源管理（PT3 平台化数据层） ---
 
+class LlmBudgetReq(BaseModel):
+    provider: str | None = None
+    daily_token_limit: int | None = None
+    monthly_cost_limit: float | None = None
+    alert_threshold_pct: int = 80
+    enabled: bool = True
+
+
+def check_budget_alerts() -> dict:
+    """检查所有 enabled budget，超阈值发告警。返回 {checked, alerts}（D5 #38）。"""
+    from src.alert_notify.channel import get_channel
+    alerts = []
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, provider, daily_token_limit, monthly_cost_limit, alert_threshold_pct, enabled "
+            "FROM llm_budget WHERE enabled=true"
+        )
+        budgets = cur.fetchall()
+    for b in budgets:
+        b_id, b_provider, b_daily_limit, b_monthly_cost, b_threshold, b_enabled = b
+        if not b_daily_limit:
+            continue
+        sql = "SELECT COALESCE(sum(input_tokens+output_tokens),0) FROM llm_usage WHERE ts::date=current_date"
+        params = []
+        if b_provider:
+            sql += " AND provider=%s"
+            params.append(b_provider)
+        with get_conn() as conn:
+            cur = conn.execute(sql, params)
+            today = cur.fetchone()[0] or 0
+        limit = b_daily_limit * b_threshold // 100
+        if today > limit:
+            provider_name = b_provider or "全局"
+            try:
+                ch = get_channel("wechat_work")
+                ch.send(
+                    title="LLM 预算预警",
+                    body=f"{provider_name} 今日 {today} token 超阈值 {limit}（{b_threshold}%）",
+                    level="warn",
+                )
+                sent = True
+            except Exception:
+                sent = False
+            alerts.append({"provider": provider_name, "today_tokens": today, "limit": b_daily_limit,
+                           "threshold": limit, "sent": sent})
+    return {"checked": len(budgets), "alerts": alerts}
+
+
+@app.get("/api/llm-budget")
+def list_llm_budget(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """列出预算配置（D5 #38）。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, provider, daily_token_limit, monthly_cost_limit, "
+            "alert_threshold_pct, enabled, updated_at FROM llm_budget ORDER BY id"
+        )
+        rows = cur.fetchall()
+    return [{"id": r[0], "provider": r[1], "daily_token_limit": r[2],
+             "monthly_cost_limit": float(r[3]) if r[3] else None,
+             "alert_threshold_pct": r[4], "enabled": r[5],
+             "updated_at": str(r[6]) if r[6] else None} for r in rows]
+
+
+@app.put("/api/llm-budget/{bid}")
+def update_llm_budget(bid: int, req: LlmBudgetReq,
+                      payload: dict = Depends(require_perm("strategy_control"))):
+    """更新预算配置。"""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE llm_budget SET provider=%s, daily_token_limit=%s, monthly_cost_limit=%s, "
+            "alert_threshold_pct=%s, enabled=%s, updated_at=now() WHERE id=%s",
+            (req.provider, req.daily_token_limit, req.monthly_cost_limit,
+             req.alert_threshold_pct, req.enabled, bid),
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@app.post("/api/llm-budget/check")
+def check_budget(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """手动触发预算告警检查。"""
+    result = check_budget_alerts()
+    return result
+
+
 class DataSourceReq(BaseModel):
     provider: str
     name: str
@@ -1270,6 +1413,22 @@ def delete_risk_rule(rid: int, payload: dict = Depends(require_role("admin"))):
     return {"ok": True}
 
 
+# --- 因子 + 三账对账（#2 + #7） ---
+
+@app.get("/api/factors")
+def list_factors_api(category: str | None = None,
+                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    from src.strategy_framework.factor import list_factors
+    return {"items": list_factors(category)}
+
+
+@app.get("/api/reconcile")
+def reconcile_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """三账对账（signal_log/order_log/trade_log 比对，同步执行）。"""
+    from src.scheduler.tasks import reconcile_three_books
+    return reconcile_three_books.apply().get()
+
+
 # --- 审计日志 ---
 
 @app.get("/api/audit")
@@ -1278,3 +1437,201 @@ def get_audit(payload: dict = Depends(require_perm("user_mgmt"))):
         cur = conn.execute("SELECT id, ts, actor, action, detail FROM audit_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
     return [{"id": r[0], "ts": str(r[1]) if r[1] else None, "actor": r[2], "action": r[3], "detail": r[4]} for r in rows]
+
+
+# --- 数据完整性看板（A3 #9）---
+
+@app.get("/api/data-integrity")
+def data_integrity_api(freq: str = "1D",
+                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """数据完整性看板：每标的本地条数 vs 预期，算完整性%。
+
+    freq: 1D（按 trade_cal 交易日）/ 1min / 5min（按自然日 × bars_per_day）。
+    返回 {items:[{symbol, local_count, first, last, expected, pct, status}], summary}
+    status: complete(>=99%) / partial(>0%) / missing(0)
+    """
+    if freq not in ("1D", "1min", "5min"):
+        return {"error": "freq 必须是 1D/1min/5min"}
+    table = "bar_1D" if freq == "1D" else f"bar_{freq}"
+    bars_per_day = {"1D": 1, "1min": 240, "5min": 48}[freq]
+    with get_conn() as conn:
+        try:
+            cur = conn.execute(
+                f"SELECT symbol, count(*), min(ts)::date, max(ts)::date FROM {table} GROUP BY symbol ORDER BY symbol")
+            rows = cur.fetchall()
+        except Exception:
+            return {"items": [], "summary": {"total": 0, "complete": 0, "partial": 0, "missing": 0}}
+        if freq == "1D":
+            cur = conn.execute("SELECT cal_date FROM trade_cal WHERE is_open=1")
+            day_set = {r[0] for r in cur.fetchall()}
+        else:
+            day_set = None
+
+    items = []
+    complete = partial = missing = 0
+    for sym, cnt, first, last in rows:
+        if not first or not last or cnt == 0:
+            missing += 1
+            items.append({"symbol": sym, "local_count": cnt, "first": None, "last": None,
+                          "expected": 0, "pct": 0, "status": "missing"})
+            continue
+        if freq == "1D":
+            # trade_cal 可能不全（只近年同步），fallback 工作日估算取大值
+            tc_count = sum(1 for d in day_set if first <= d <= last) if day_set else 0
+            workday_est = (last - first).days * 5 // 7  # 每周 5 工作日粗估
+            expected = max(tc_count, workday_est)
+        else:
+            expected = ((last - first).days + 1) * bars_per_day
+        pct = round(cnt / expected * 100, 1) if expected else 0
+        status = "complete" if pct >= 99 else ("partial" if pct > 0 else "missing")
+        if status == "complete": complete += 1
+        elif status == "partial": partial += 1
+        else: missing += 1
+        items.append({"symbol": sym, "local_count": cnt, "first": str(first), "last": str(last),
+                      "expected": expected, "pct": pct, "status": status})
+    return {"items": items, "summary": {"total": len(items), "complete": complete,
+                                        "partial": partial, "missing": missing}}
+
+
+# --- 数据源用量监控（A4 #36）---
+
+@app.get("/api/data-source-usage")
+def data_source_usage_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """数据源调用量监控：by provider 今日聚合 + 7 天趋势。"""
+    with get_conn() as conn:
+        try:
+            cur = conn.execute("""
+                SELECT provider,
+                    coalesce(sum(calls), 0) as calls,
+                    count(*) as records,
+                    sum(case when success then 0 else 1 end) as failures,
+                    coalesce(round(avg(latency_ms)), 0) as avg_latency
+                FROM data_source_usage
+                WHERE ts >= date_trunc('day', now())
+                GROUP BY provider ORDER BY calls DESC NULLS LAST
+            """)
+            today = [{"provider": r[0], "calls": r[1], "records": r[2],
+                      "failures": r[3], "avg_latency": r[4]} for r in cur.fetchall()]
+            cur = conn.execute("""
+                SELECT to_char(date_trunc('day', ts), 'YYYYMMDD') as day,
+                       provider, coalesce(sum(calls), 0)
+                FROM data_source_usage
+                WHERE ts >= now() - interval '7 days'
+                GROUP BY day, provider ORDER BY day, provider
+            """)
+            trend = [{"day": r[0], "provider": r[1], "calls": r[2]} for r in cur.fetchall()]
+        except Exception:
+            return {"today": [], "trend": []}
+    return {"today": today, "trend": trend}
+
+
+# --- 回测组（B3 #1）---
+
+@app.post("/api/backtest")
+def create_backtest_api(body: dict = Body(...),
+                        payload: dict = Depends(require_perm("strategy_control"))):
+    """启动回测 run：写 backtest_runs + Celery backtest_run_task。"""
+    import json
+    strategy_id = body.get("strategy_config_id")
+    symbols = body.get("symbols", [])
+    pool_id = body.get("pool_id")
+    if pool_id:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT symbol FROM pool_symbols WHERE pool_id=%s", (pool_id,))
+            symbols = [r[0] for r in cur.fetchall()]
+    if not symbols or not strategy_id:
+        return {"error": "需 strategy_config_id + symbols/pool_id"}
+    params = body.get("params", {})
+    mode = body.get("mode", "single")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO backtest_runs (strategy_config_id, symbols, params, mode, status) "
+            "VALUES (%s,%s,%s,%s,'pending') RETURNING id",
+            (strategy_id, json.dumps(symbols), json.dumps(params), mode))
+        run_id = cur.fetchone()[0]
+        conn.commit()
+    from src.scheduler.tasks import backtest_run_task
+    task = backtest_run_task.delay(run_id)
+    audit_log(payload["username"], "backtest_create", f"run {run_id}")
+    return {"run_id": run_id, "task_id": task.id}
+
+
+@app.get("/api/backtest")
+def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    import json
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, strategy_config_id, symbols, mode, status, created_at, finished_at, summary_metrics "
+            "FROM backtest_runs ORDER BY id DESC LIMIT 100")
+        rows = cur.fetchall()
+    return [{"id": r[0], "strategy_config_id": r[1], "symbols": json.loads(r[2]) if r[2] else [],
+             "mode": r[3], "status": r[4], "created_at": str(r[5]) if r[5] else None,
+             "finished_at": str(r[6]) if r[6] else None,
+             "summary": json.loads(r[7]) if r[7] else {}} for r in rows]
+
+
+@app.get("/api/backtest/{run_id}")
+def get_backtest_api(run_id: int,
+                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    import json
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, strategy_config_id, symbols, params, mode, status, summary_metrics "
+            "FROM backtest_runs WHERE id=%s", (run_id,))
+        r = cur.fetchone()
+        if not r:
+            return {"error": "run 不存在"}
+        cur = conn.execute(
+            "SELECT symbol, status, result FROM backtest_symbols WHERE run_id=%s ORDER BY symbol", (run_id,))
+        syms = cur.fetchall()
+    return {"id": r[0], "strategy_config_id": r[1], "symbols": json.loads(r[2]),
+            "params": json.loads(r[3]), "mode": r[4], "status": r[5],
+            "summary": json.loads(r[6]) if r[6] else {},
+            "symbols_detail": [{"symbol": s[0], "status": s[1], "result": json.loads(s[2]) if s[2] else {}}
+                              for s in syms]}
+
+
+@app.get("/api/backtest/{run_id}/{symbol}/stream")
+def backtest_stream_api(run_id: int, symbol: str,
+                        payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """SSE 单标的实时（轮询 Valkey backtest:run:{run_id}:{symbol}）。"""
+    import os, redis, json, asyncio
+    from fastapi.responses import StreamingResponse
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    key = f"backtest:run:{run_id}:{symbol}"
+
+    async def gen():
+        for _ in range(720):  # 最多 6 分钟
+            done = r.get(key + ":done")
+            if done:
+                yield f"data: {done}\n\n"
+                break
+            err = r.get(key + ":error")
+            if err:
+                yield f"data: {json.dumps({'error': err})}\n\n"
+                break
+            frame = r.get(key)
+            if frame:
+                yield f"data: {frame}\n\n"
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+# --- WS 流式聊天（D1 #24）---
+
+@app.websocket("/ws/chat")
+async def ws_chat(ws):
+    """WS 流式聊天：gateway.chat_stream 流式推。caller=web_chat。"""
+    await ws.accept()
+    from src.llm_gateway import gateway
+    try:
+        while True:
+            data = await ws.receive_json()
+            messages = data.get("messages", [])
+            role = data.get("role", "viewer")
+            async for chunk in gateway.chat_stream(messages, role=role, caller="web_chat"):
+                await ws.send_text(chunk)
+            await ws.send_text("[DONE]")
+    except Exception:
+        pass
