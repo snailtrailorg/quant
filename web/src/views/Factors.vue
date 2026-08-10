@@ -45,21 +45,17 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { getFactorList } from '../api'
 
 const factors = ref([])
 const showDialog = ref(false)
 const newFactor = ref({ name: '', category: 'trend', expr: '' })
 
-const load = () => {
-  // 预置因子
-  factors.value = [
-    { name: 'ma_dev', category: 'trend', description: '均线偏离度', params: { n: 20 } },
-    { name: 'rsi', category: 'trend', description: 'RSI', params: { n: 14 } },
-    { name: 'volume_ratio', category: 'trend', description: '量比', params: { n: 5 } },
-    { name: 'double_low', category: 'convertible', description: '可转债双低', params: {} },
-    { name: 'funding_rate', category: 'crypto', description: '资金费率', params: {} },
-    { name: 'dsl', category: 'custom', description: 'DSL 表达式因子', params: {} },
-  ]
+const load = async () => {
+  try {
+    const r = await getFactorList()
+    factors.value = r.items || []
+  } catch (e) { ElMessage.error('加载因子失败') }
 }
 const createFactor = () => {
   // TODO: 调后端创建 DSL 因子

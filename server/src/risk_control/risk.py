@@ -45,6 +45,7 @@ DEFAULT_RULES = {
         "single_position_pct": 0.15,  # 单标的仓位 15%
         "max_trades_per_day": 20,
         "strict_stop_loss": True,
+        "max_single_amount": 100000,  # 单笔金额上限（#29 风控覆写：超限截断 volume）
     },
     "crypto": {
         "leverage_max": 5,
@@ -186,7 +187,17 @@ class RiskControl:
     def _check_etf_conv(self, order: dict) -> RiskDecision:
         """场内（可转债/ETF）风控。"""
         rules = self._rules["etf_conv"]
-        # 单标的仓位、日内次数等检查（简化：需接入持仓/订单数据）
+        # #29 风控覆写：单笔金额超限截断 volume（不只 reject，能修正）
+        price = float(order.get("price", 0) or 0)
+        volume = float(order.get("volume", 0) or 0)
+        max_amount = rules.get("max_single_amount", 100000)
+        amount = price * volume
+        if price > 0 and amount > max_amount:
+            new_vol = int(max_amount / price)
+            if new_vol <= 0:
+                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}，截断后 volume=0", severity="warn")
+            adjusted = {**order, "volume": new_vol}
+            return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限，截断 volume {int(volume)}->{new_vol}", adjusted=adjusted, severity="warn")
         return RiskDecision(approved=True, reason="场内风控通过")
 
     def _check_crypto(self, order: dict) -> RiskDecision:

@@ -50,26 +50,31 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getStrategies } from '../api'
+import { getPools, createPoolApi, deletePoolApi } from '../api'
 
 const pools = ref([])
 const showDialog = ref(false)
 const newPool = ref({ id: '', name: '', category: 'astock', symbolsStr: '', description: '' })
 
 const load = async () => {
-  // TODO: 调 GET /api/pool
-  pools.value = [
-    { id: 'astock-pool', name: 'A股核心池', category: 'astock', symbols: ['600000.SHSE'], description: '核心A股标的' },
-    { id: 'conv-pool', name: '可转债池', category: 'convertible', symbols: ['128044.SZSE','110092.SHSE'], description: '可转债轮动池' },
-    { id: 'crypto-pool', name: '加密永续池', category: 'crypto', symbols: ['BTCUSDT-PERP.BINANCE'], description: 'BTC/ETH永续' },
-  ]
+  try { pools.value = await getPools() } catch (e) { ElMessage.error('加载标的池失败') }
 }
 const createPool = async () => {
-  // TODO: 调 POST /api/pool
-  ElMessage.success('标的池创建（API 待接）')
-  showDialog.value = false
+  if (!newPool.value.id || !newPool.value.name) { ElMessage.warning('ID 和名称必填'); return }
+  try {
+    await createPoolApi(newPool.value)
+    ElMessage.success('已保存')
+    showDialog.value = false
+    newPool.value = { id: '', name: '', category: 'astock', symbolsStr: '', description: '' }
+    await load()
+  } catch (e) { ElMessage.error('保存失败') }
 }
-const editPool = row => ElMessage.info('编辑待实现')
-const delPool = row => { pools.value = pools.value.filter(p => p.id !== row.id); ElMessage.success('已删除') }
+const editPool = row => {
+  newPool.value = { id: row.id, name: row.name, category: row.category || 'astock', symbolsStr: (row.symbols || []).join('\n'), description: row.description || '' }
+  showDialog.value = true
+}
+const delPool = async row => {
+  try { await deletePoolApi(row.id); ElMessage.success('已删除'); await load() } catch (e) { ElMessage.error('删除失败') }
+}
 onMounted(load)
 </script>

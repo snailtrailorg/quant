@@ -291,20 +291,59 @@ def verify_strategy(sid: str, payload: dict = Depends(require_perm("strategy_con
 
 @app.get("/api/position")
 def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """当前持仓（占位，实盘后接真实数据）。"""
-    return {"positions": [], "total_value": 0, "total_pnl": 0, "total_pnl_pct": 0}
+    """当前持仓（account_snapshot 总资产 + trade_log 累计持仓，#6）。"""
+    with get_conn() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+        snap = cur.fetchone()
+        conn.execute("CREATE TABLE IF NOT EXISTS trade_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), order_id BIGINT, symbol TEXT, action TEXT, volume INT, price NUMERIC, commission NUMERIC)")
+        cur = conn.execute("SELECT symbol, COALESCE(SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END),0) FROM trade_log GROUP BY symbol")
+        positions = [{"symbol": r[0], "volume": int(r[1])} for r in cur.fetchall() if r[1] and r[1] != 0]
+    total_value = float(snap[0]) if snap else 0
+    initial = float(snap[2]) if snap and snap[2] else 1000000
+    total_pnl = (total_value - initial) if snap else 0
+    return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl, "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0}
 
 
 @app.get("/api/pnl")
 def get_pnl(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """盈亏曲线（占位）。"""
-    return {"curve": [], "today_pnl": 0, "total_pnl": 0, "total_pnl_pct": 0}
+    """盈亏曲线（account_snapshot 时间序列，#6）。"""
+    with get_conn() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        cur = conn.execute("SELECT ts, total_value, daily_pnl FROM account_snapshot ORDER BY ts DESC LIMIT 90")
+        rows = cur.fetchall()
+    curve = [{"ts": str(r[0])[:19], "value": float(r[1]) if r[1] else 0, "daily_pnl": float(r[2]) if r[2] else 0} for r in reversed(rows)]
+    today_pnl = curve[-1]["daily_pnl"] if curve else 0
+    initial = 1000000
+    total_pnl = (curve[-1]["value"] - initial) if curve else 0
+    return {"curve": curve, "today_pnl": today_pnl, "total_pnl": total_pnl, "total_pnl_pct": round(total_pnl/initial*100, 2)}
 
 
 @app.get("/api/orders")
 def get_orders(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """订单记录（占位）。"""
-    return {"orders": [], "total": 0}
+    """订单记录（order_log 最近 100，#6）。"""
+    with get_conn() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS order_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), strategy_id TEXT, symbol TEXT, action TEXT, volume INT, price NUMERIC, status TEXT DEFAULT 'submitted')")
+        cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status FROM order_log ORDER BY ts DESC LIMIT 100")
+        rows = cur.fetchall()
+    return {"orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6]} for r in rows], "total": len(rows)}
+
+
+@app.get("/api/dashboard")
+def get_dashboard(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """Dashboard 量化指标（account_snapshot + 回测绩效，#10）。"""
+    with get_conn() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+        snap = cur.fetchone()
+        cur = conn.execute("SELECT COUNT(*) FROM backtest_runs WHERE status='done'")
+        bt = cur.fetchone()
+    total_value = float(snap[0]) if snap else 0
+    initial = float(snap[2]) if snap and snap[2] else 1000000
+    total_pnl = (total_value - initial) if snap else 0
+    return {"total_value": total_value, "total_pnl": total_pnl,
+            "total_pnl_pct": round(total_pnl / initial * 100, 2) if (snap and initial) else 0,
+            "daily_pnl": float(snap[1]) if snap else 0, "backtest_count": bt[0]}
 
 
 # ——— 账户管理（Admin） ———
@@ -1527,6 +1566,123 @@ def data_source_usage_api(payload: dict = Depends(require_role("viewer", "analys
 
 # --- 回测组（B3 #1）---
 
+class PoolReq(BaseModel):
+    id: str
+    name: str
+    category: str = "astock"
+    symbolsStr: str = ""
+    description: str = ""
+
+
+@app.get("/api/pool")
+def list_pools(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """标的池列表（含 symbols，#22）。"""
+    with get_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS pools (
+            id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
+            id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
+            symbol TEXT, UNIQUE(pool_id, symbol))""")
+        cur = conn.execute(
+            "SELECT p.id, p.name, p.category, p.description, ps.symbol "
+            "FROM pools p LEFT JOIN pool_symbols ps ON ps.pool_id=p.id ORDER BY p.id")
+        rows = cur.fetchall()
+    pools = {}
+    for pid, pname, pcat, pdesc, sym in rows:
+        if pid not in pools:
+            pools[pid] = {"id": pid, "name": pname, "category": pcat, "description": pdesc, "symbols": []}
+        if sym:
+            pools[pid]["symbols"].append(sym)
+    return list(pools.values())
+
+
+@app.post("/api/pool")
+def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_control"))):
+    """新建/更新标的池（#22）。"""
+    symbols = [s.strip() for s in (req.symbolsStr or "").split("\n") if s.strip()]
+    with get_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS pools (
+            id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
+            id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
+            symbol TEXT, UNIQUE(pool_id, symbol))""")
+        conn.execute(
+            "INSERT INTO pools (id, name, category, description) VALUES (%s,%s,%s,%s) "
+            "ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, description=EXCLUDED.description",
+            (req.id, req.name, req.category, req.description))
+        conn.execute("DELETE FROM pool_symbols WHERE pool_id=%s", (req.id,))
+        for sym in symbols:
+            conn.execute("INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s,%s) ON CONFLICT DO NOTHING", (req.id, sym))
+        conn.commit()
+    return {"ok": True, "id": req.id, "count": len(symbols)}
+
+
+@app.delete("/api/pool/{pid}")
+
+class StrategyAccountReq(BaseModel):
+    strategy_id: str
+    account_id: str
+    broker_provider: str = "xtp"
+    initial_capital: float = 1000000
+    leverage: int = 1
+
+
+@app.get("/api/strategy_account")
+def list_strategy_account(strategy_id: str | None = None, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """策略-账户绑定列表（可按 strategy_id 过滤，#27）。"""
+    with get_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
+            id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
+            initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
+            created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+        if strategy_id:
+            cur = conn.execute(
+                "SELECT id, strategy_id, account_id, broker_provider, initial_capital, leverage, created_at "
+                "FROM strategy_account WHERE strategy_id=%s ORDER BY id", (strategy_id,))
+        else:
+            cur = conn.execute(
+                "SELECT id, strategy_id, account_id, broker_provider, initial_capital, leverage, created_at "
+                "FROM strategy_account ORDER BY id")
+        rows = cur.fetchall()
+    return [{"id": r[0], "strategy_id": r[1], "account_id": r[2], "broker_provider": r[3],
+             "initial_capital": float(r[4]) if r[4] else 0, "leverage": r[5],
+             "created_at": str(r[6]) if r[6] else None} for r in rows]
+
+
+@app.post("/api/strategy_account")
+def bind_strategy_account(req: StrategyAccountReq, payload: dict = Depends(require_perm("strategy_control"))):
+    """绑定策略-账户（#27）。"""
+    with get_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
+            id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
+            initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
+            created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+        conn.execute(
+            "INSERT INTO strategy_account (strategy_id, account_id, broker_provider, initial_capital, leverage) "
+            "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (strategy_id, account_id) DO UPDATE SET "
+            "broker_provider=EXCLUDED.broker_provider, initial_capital=EXCLUDED.initial_capital, leverage=EXCLUDED.leverage",
+            (req.strategy_id, req.account_id, req.broker_provider, req.initial_capital, req.leverage))
+        conn.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/strategy_account/{said}")
+def unbind_strategy_account(said: int, payload: dict = Depends(require_perm("strategy_control"))):
+    """解绑策略-账户（#27）。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM strategy_account WHERE id=%s", (said,))
+        conn.commit()
+    return {"ok": True}
+
+
+def delete_pool(pid: str, payload: dict = Depends(require_perm("strategy_control"))):
+    """删除标的池（CASCADE 删 symbols，#22）。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM pools WHERE id=%s", (pid,))
+        conn.commit()
+    return {"ok": True}
+
+
 @app.post("/api/backtest")
 def create_backtest_api(body: dict = Body(...),
                         payload: dict = Depends(require_perm("strategy_control"))):
@@ -1554,6 +1710,25 @@ def create_backtest_api(body: dict = Body(...),
     task = backtest_run_task.delay(run_id)
     audit_log(payload["username"], "backtest_create", f"run {run_id}")
     return {"run_id": run_id, "task_id": task.id}
+
+
+@app.get("/api/broker-usage")
+def broker_usage(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """通道调用量监控（#37，broker_usage 表聚合）。"""
+    with get_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS broker_usage (
+            id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
+            provider TEXT, action TEXT, symbol TEXT, success BOOLEAN, latency_ms INT)""")
+        cur = conn.execute(
+            "SELECT provider, COUNT(*), COALESCE(AVG(latency_ms),0), "
+            "CASE WHEN COUNT(*)>0 THEN round(SUM(CASE WHEN success THEN 1 ELSE 0 END)*100.0/COUNT(*),1) ELSE 0 END "
+            "FROM broker_usage WHERE ts::date=current_date GROUP BY provider ORDER BY COUNT(*) DESC")
+        today = [{"provider": r[0], "calls": r[1], "avg_latency_ms": int(r[2]), "success_rate": float(r[3])} for r in cur.fetchall()]
+        cur = conn.execute(
+            "SELECT ts::date AS d, COUNT(*), COALESCE(AVG(latency_ms),0) FROM broker_usage "
+            "WHERE ts >= current_date - interval '7 days' GROUP BY d ORDER BY d")
+        trend = [{"date": str(r[0]), "calls": r[1], "avg_latency_ms": int(r[2])} for r in cur.fetchall()]
+    return {"today": today, "trend": trend}
 
 
 @app.get("/api/backtest")
@@ -1589,6 +1764,23 @@ def get_backtest_api(run_id: int,
             "summary": json.loads(r[6]) if r[6] else {},
             "symbols_detail": [{"symbol": s[0], "status": s[1], "result": json.loads(s[2]) if s[2] else {}}
                               for s in syms]}
+
+
+@app.get("/api/backtest/{run_id}/summary")
+def backtest_summary(run_id: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """回测组汇总：标的绩效平均+排名（#22）。"""
+    import json
+    with get_conn() as conn:
+        cur = conn.execute("SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
+        rows = cur.fetchall()
+    metrics_keys = ["total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades"]
+    results = []
+    for sym, result_json in rows:
+        r = json.loads(result_json) if result_json else {}
+        results.append({"symbol": sym, **{k: r.get(k, 0) for k in metrics_keys}})
+    ranked = sorted(results, key=lambda x: x.get("total_return_pct", 0), reverse=True)
+    avg = {k: round(sum(r[k] for r in results) / len(results), 3) for k in metrics_keys} if results else {}
+    return {"run_id": run_id, "count": len(results), "avg": avg, "ranked": ranked}
 
 
 @app.get("/api/backtest/{run_id}/{symbol}/stream")

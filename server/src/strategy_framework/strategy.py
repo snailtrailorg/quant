@@ -26,6 +26,10 @@ class Signal:
     volume: float = 0.0
     price: float = 0.0
     reason: str = ""
+    # ActionSignal 扩展（#3，策略表单可配）
+    volume_type: str = "SHARES"  # SHARES（股数）/ PERCENT（资金百分比，需账户资产）/ ALL_IN（全仓）
+    price_type: str = "LIMIT"    # MARKET（市价）/ LIMIT（限价）
+    order_validity: str = "DAY"  # DAY / GTC
 
 
 # ——— 信号聚合 ———
@@ -155,13 +159,24 @@ class Strategy:
             return
         final = decision.adjusted or order  # B8 风控覆写：用 adjusted（如截断 volume），无则原值
         from .adapters import Order
-        self.adapter.send_order(Order(
-            symbol=final.get("symbol", self.symbol),
-            action=final.get("action", sig.action.name),
-            volume=final.get("volume", sig.volume or 100),
-            price=final.get("price", sig.price or 0),
-            order_type="limit",
-        ))
+        import time as _t
+        _t0 = _t.time()
+        try:
+            self.adapter.send_order(Order(
+                symbol=final.get("symbol", self.symbol),
+                action=final.get("action", sig.action.name),
+                volume=final.get("volume", sig.volume or 100),
+                price=final.get("price", sig.price or 0),
+                order_type="market" if sig.price_type == "MARKET" else "limit",
+            ))
+            from .broker import record_broker_usage
+            record_broker_usage(getattr(self.config, "adapter", ""), sig.action.name, self.symbol,
+                                success=True, latency_ms=int((_t.time() - _t0) * 1000))
+        except Exception:
+            from .broker import record_broker_usage
+            record_broker_usage(getattr(self.config, "adapter", ""), sig.action.name, self.symbol,
+                                success=False, latency_ms=int((_t.time() - _t0) * 1000))
+            raise
 
     # ——— 工厂 ———
 

@@ -84,7 +84,7 @@
 - 任务模板（待办自包含写法规范，8 字段 + mock 库）：`flow/规范/任务模板.md`
 - 架构设计：`docs/architecture/00-总体设计.md`（含 11 份模块文档索引）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
-- 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（data_platform / data_sync / strategy_framework / llm_gateway / astock_analysis / web_api 已写 6 份，D2-D5 所需已齐，余待补）
+- 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（13 份全写完：data_platform/data_sync/strategy_framework/llm_gateway/astock_analysis/web_api/risk_control/scheduler/alert_notify/feishu_bot/task_manager/strategies/adapters）
 - 批量实施设计（A-E 模块拆分 + 接口签名 + 边界）：`docs/批量实施设计.md`
 - 竞品需求对照分析：`docs/竞品需求对照分析.md`（25 项逐条分析 + 工作提纲）
 

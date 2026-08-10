@@ -54,6 +54,27 @@
         <el-form-item label="表达式">
           <el-input v-model="editForm.dslExpr" type="textarea" :rows="3" placeholder="如：ma_dev * 0.6 + rsi * 0.4" />
         </el-form-item>
+
+        <el-divider content-position="left">执行规则（ActionSignal）</el-divider>
+        <el-form-item label="仓位类型">
+          <el-select v-model="editForm.volumeType" style="width: 100%">
+            <el-option label="股数（SHARES）" value="SHARES" />
+            <el-option label="资金百分比（PERCENT）" value="PERCENT" />
+            <el-option label="全仓（ALL_IN）" value="ALL_IN" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="价格类型">
+          <el-select v-model="editForm.priceType" style="width: 100%">
+            <el-option label="限价（LIMIT）" value="LIMIT" />
+            <el-option label="市价（MARKET）" value="MARKET" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="有效期">
+          <el-select v-model="editForm.orderValidity" style="width: 100%">
+            <el-option label="当日（DAY）" value="DAY" />
+            <el-option label="撤单前有效（GTC）" value="GTC" />
+          </el-select>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -74,7 +95,7 @@ const strategies = ref([])
 const availableFactors = ref([])
 const editVisible = ref(false)
 const saving = ref(false)
-const editForm = ref({ id: '', name: '', symbol: '', enabled: true, factors: [], aggregator: { threshold_buy: 0.3, threshold_sell: -0.3 }, dslExpr: '' })
+const editForm = ref({ id: '', name: '', symbol: '', enabled: true, factors: [], aggregator: { threshold_buy: 0.3, threshold_sell: -0.3 }, dslExpr: '', volumeType: 'SHARES', priceType: 'LIMIT', orderValidity: 'DAY' })
 
 const load = async () => { strategies.value = await getStrategies() }
 const loadFactors = async () => { const r = await getFactorList(); availableFactors.value = r.items || [] }
@@ -88,6 +109,9 @@ const openEdit = (row) => {
     factors: (row.factors || []).map(f => ({ name: f.name, weight: f.weight, params: f.params || {} })),
     aggregator: { ...row.aggregator } || { threshold_buy: 0.3, threshold_sell: -0.3 },
     dslExpr: row.params?.dsl_expr || '',
+    volumeType: row.params?.volume_type || 'SHARES',
+    priceType: row.params?.price_type || 'LIMIT',
+    orderValidity: row.params?.order_validity || 'DAY',
   }
   editVisible.value = true
 }
@@ -101,7 +125,12 @@ const onFactorChange = (f) => {
 const saveEdit = async () => {
   saving.value = true
   try {
-    const params = editForm.value.dslExpr ? { dsl_expr: editForm.value.dslExpr } : {}
+    const params = {
+      ...(editForm.value.dslExpr ? { dsl_expr: editForm.value.dslExpr } : {}),
+      volume_type: editForm.value.volumeType,
+      price_type: editForm.value.priceType,
+      order_validity: editForm.value.orderValidity,
+    }
     await updateStrategy(editForm.value.id, {
       name: editForm.value.name,
       symbol: editForm.value.symbol,

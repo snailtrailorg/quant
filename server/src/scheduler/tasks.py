@@ -742,6 +742,36 @@ def budget_alert_check():
         return {"status": "error", "reason": str(e)[:200]}
 
 
+
+@app.task(name="src.scheduler.tasks.static_list_sync")
+def static_list_sync():
+    """F-DATA-004 静态标的清单同步（定期拉 stock_basic + 标记退市）。"""
+    try:
+        from src.data_platform.adapters.tushare_adapter import get_pro
+        pro = get_pro()
+    except Exception:
+        return {"status": "skipped", "reason": "tushare 未配"}
+    synced = 0
+    try:
+        with get_conn() as conn:
+            conn.execute("""CREATE TABLE IF NOT EXISTS static_symbols (
+                ts_code TEXT PRIMARY KEY, name TEXT, industry TEXT, list_status TEXT,
+                delisted BOOLEAN DEFAULT false, updated_at TIMESTAMPTZ DEFAULT now())""")
+            df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    conn.execute(
+                        "INSERT INTO static_symbols (ts_code,name,industry,list_status,delisted) VALUES (%s,%s,%s,'L',false) "
+                        "ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name,industry=EXCLUDED.industry,"
+                        "list_status='L',delisted=false,updated_at=now()",
+                        (row["ts_code"], row.get("name",""), row.get("industry","")))
+                    synced += 1
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"static_list_sync 失败: {e}")
+        return {"status": "error", "reason": str(e)[:100]}
+    return {"status": "ok", "synced": synced}
+
 @app.task(name="src.scheduler.tasks.broker_health_check")
 def broker_health_check():
     """#37 通道用量监控：检查各 broker 连通性，异常告警。"""

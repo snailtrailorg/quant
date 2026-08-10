@@ -18,14 +18,18 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { getReconcile } from '../api'
 
 const issues = ref([])
 const hasIssues = computed(() => issues.value.length > 0)
 const summary = computed(() => hasIssues.value ? `发现 ${issues.value.length} 项异常` : '三账一致，无异常')
 
 const load = async () => {
-  // TODO: 调 GET /api/reconcile（后端 Celery 任务已有）
-  issues.value = []
+  try {
+    const r = await getReconcile()
+    issues.value = (r.issues || []).map(issue => ({ type: '异常', count: 1, detail: issue }))
+  } catch (e) { ElMessage.error('对账查询失败') }
 }
 onMounted(load)
 </script>
