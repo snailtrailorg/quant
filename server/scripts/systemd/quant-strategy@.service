@@ -1,0 +1,21 @@
+[Unit]
+Description=Quant Strategy %i (实盘策略)
+After=network.target postgresql.service redis.service
+Requires=postgresql.service redis.service
+
+[Service]
+Type=simple
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
+Environment=QT_QPA_PLATFORM=offscreen
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strategy_runner.main --id %i
+Restart=always
+RestartSec=30
+MemoryMax=512M
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

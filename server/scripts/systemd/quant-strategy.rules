@@ -1,0 +1,9 @@
+// polkit 规则：允许 quant 用户控制 quant-strategy@* 服务（待办 #14）
+// 部署到 /etc/polkit-1/rules.d/10-quant-strategy.rules
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit").startsWith("quant-strategy@") &&
+        subject.user == "quant") {
+        return polkit.Result.YES;
+    }
+});
