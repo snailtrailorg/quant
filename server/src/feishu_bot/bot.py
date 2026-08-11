@@ -174,7 +174,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     else:
         role = check_user(open_id)
         if not role:
-            client.send_text(open_id, "未授权，无法使用", receive_id_type)
+            client.send_text(receive_id, "未授权，无法使用", receive_id_type)
             return
 
     try:
@@ -197,7 +197,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
             for tc in resp.tool_calls:
                 if tc["name"] in operational_names:
                     card = build_confirm_card(tc["name"], tc.get("arguments", {}))
-                    client.send_card(open_id, card, receive_id_type)
+                    client.send_card(receive_id, card, receive_id_type)
                     has_operational = True
                 else:
                     result = execute_read_tool(tc["name"], tc.get("arguments", {}))
@@ -205,9 +205,9 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
             if has_operational:
                 return  # 操作类等用户确认，不继续 loop
         if resp and resp.content:
-            client.send_text(open_id, resp.content[:4000], receive_id_type)
+            client.send_text(receive_id, resp.content[:4000], receive_id_type)
         else:
-            client.send_text(open_id, "（LLM 无响应）", receive_id_type)
+            client.send_text(receive_id, "（LLM 无响应）", receive_id_type)
     except Exception as e:
         logger.error(f"飞书消息处理失败: {e}")
         client.send_text(open_id, f"处理失败: {e}", receive_id_type)

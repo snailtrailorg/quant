@@ -135,7 +135,7 @@ GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 ## 7. 安全
 
 - 仅内网/VPN 访问，防火墙仅开必要端口。
-- **RBAC**（单系统多用户，非多租户）：Viewer/Operator/Admin 三角色，JWT 认证 + endpoint 权限装饰器；数据共享不加 user_id 隔离。
+- **RBAC**（单系统多用户，非多租户）：Viewer/Analyst/Trader/Admin 四角色（2026-08-02 Operator 拆 Trader+Analyst），JWT 认证 + endpoint 权限装饰器；数据共享不加 user_id 隔离。
 - API 密钥本地加密存储（AES + 密钥在环境变量），前端永不返回明文；**仅 Admin 管理**，Operator/Viewer 不见。
 - 自然语言查询的工具集**按角色过滤 + 白名单只读**，下单类工具不在网关注册范围（01 文档已锁）。
 - 操作审计：所有 mutation（启停策略/改参数/熔断/改风控/改密钥）写 `audit_log(actor, ...)`，Admin 可查。

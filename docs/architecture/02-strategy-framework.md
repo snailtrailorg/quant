@@ -20,7 +20,7 @@
 
 ## 3. 边界与非目标
 
-- **不做**：回测引擎本身（用 VeighNa CtaBacktestingEngine）、交易网关（用 vnpy 网关）。
+- **不做：回测引擎已自建 BacktestEngine（纯 Python，不依赖 vnpy CtaBacktestingEngine）、交易网关（用 vnpy 网关）。
 - **不早期做**：Web 端写任意 Python + 沙箱（留作最后 5%）。
 - **非目标**：不做图形化拖拽策略编辑器（Web 表单 + DSL 即可）。
 
@@ -143,11 +143,9 @@ class OKXPerpAdapter(ExecutionAdapter): ...
 ## 8. 回测 / 实盘同构
 
 ```python
-# 回测
-engine = CtaBacktestingEngine()
-engine.set_data(data_platform.get_bar(...))   # 历史数据
-engine.add_strategy(MyStrategy, config)
-engine.run_backtesting()
+# 回测（自建 BacktestEngine，纯 Python）
+engine = BacktestEngine(initial_capital=1_000_000, commission_rate=0.0005)
+result = engine.run(config, bars, on_bar_callback=callback)
 
 # 实盘
 adapter = XTPAdapter(...)

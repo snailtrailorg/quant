@@ -1,15 +1,15 @@
 [Unit]
-Description=Quant Platform FastAPI Backend
-After=network-online.target postgresql.service valkey.service
+Description=Quant Platform FastAPI Backend (%i)
+After=network-online.target postgresql.service redis.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=%i
-WorkingDirectory=__PROJECT_DIR__
-EnvironmentFile=__PROJECT_DIR__/.env
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=__PROJECT_DIR__/venv/bin/uvicorn src.web_api.main:app --host 127.0.0.1 --port 8000
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/uvicorn src.web_api.main:app --host 127.0.0.1 --port 8001
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

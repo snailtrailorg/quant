@@ -1,17 +1,18 @@
 [Unit]
-Description=Quant Platform Celery Beat Scheduler
-After=network-online.target valkey.service quant-celery-worker@%i.service
+Description=Quant Platform Celery Beat (%i)
+After=network-online.target postgresql.service redis.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=%i
-WorkingDirectory=__PROJECT_DIR__
-EnvironmentFile=__PROJECT_DIR__/.env
-ExecStart=__PROJECT_DIR__/venv/bin/celery -A src.scheduler beat --loglevel=info --schedule /tmp/quant-celerybeat-schedule-%i
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
+Environment=QT_QPA_PLATFORM=offscreen
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/celery -A src.scheduler beat --loglevel=info --schedule /tmp/quant-celerybeat-schedule
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=30
+TimeoutStopSec=60
 KillSignal=SIGTERM
 
 [Install]

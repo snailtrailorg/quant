@@ -8,7 +8,7 @@
   4. LD_LIBRARY_PATH=vendor/xtp/lib（import vnpy_xtp 要加载 .so）
 
 运行（服务器）：
-  cd /data/websites/snailtrail.org/quant/server
+  cd /data/websites/snailtrail.cc/quant/server
   LD_LIBRARY_PATH=$PWD/vendor/xtp/lib QT_QPA_PLATFORM=offscreen venv/bin/python scripts/test_xtp_trading.py
 
 A 股三重只读铁律：本脚本只测可转债/ETF（510050），不碰 A 股股票。

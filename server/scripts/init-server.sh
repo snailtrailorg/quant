@@ -58,11 +58,11 @@ else
     echo "已建 quant 用户"
 fi
 # 目录
-sudo mkdir -p /data/websites/snailtrail.org/quant/{server,web} /var/log/quant
-sudo chown -R quant:quant /data/websites/snailtrail.org/quant /var/log/quant
+sudo mkdir -p /data/websites/snailtrail.cc/quant/{server,web} /var/log/quant
+sudo chown -R quant:quant /data/websites/snailtrail.cc/quant /var/log/quant
 # nginx 读 web 静态文件
 sudo usermod -a -G quant nginx 2>/dev/null || true
-sudo chmod 750 /data/websites/snailtrail.org/quant /data/websites/snailtrail.org/quant/web
+sudo chmod 750 /data/websites/snailtrail.cc/quant /data/websites/snailtrail.cc/quant/web
 
 echo ""
 echo "=== 4. 验证 ==="
@@ -72,7 +72,7 @@ PGPASSWORD="$PGPWD" psql -U quant -h 127.0.0.1 -d quant -c "SELECT current_user,
 redis-cli ping
 # quant 用户 + 目录
 id quant
-ls -ld /data/websites/snailtrail.org/quant /data/websites/snailtrail.org/quant/server /data/websites/snailtrail.org/quant/web
+ls -ld /data/websites/snailtrail.cc/quant /data/websites/snailtrail.cc/quant/server /data/websites/snailtrail.cc/quant/web
 
 echo ""
 echo "✅ 服务器环境初始化完成"

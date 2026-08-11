@@ -1,15 +1,15 @@
 [Unit]
-Description=Quant Platform Celery Worker
-After=network-online.target postgresql.service valkey.service
+Description=Quant Platform Celery Worker (%i)
+After=network-online.target postgresql.service redis.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=%i
-WorkingDirectory=__PROJECT_DIR__
-EnvironmentFile=__PROJECT_DIR__/.env
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=__PROJECT_DIR__/venv/bin/celery -A src.scheduler worker -Q celery,risk,data,analysis -c 2 --loglevel=info
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/celery -A src.scheduler worker -Q celery,risk,data,analysis -c 2 --loglevel=info
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

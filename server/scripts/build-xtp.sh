@@ -7,7 +7,7 @@
 # ====================================================================
 set -euo pipefail
 
-SERVER_DIR="/data/websites/snailtrail.org/quant/server"
+SERVER_DIR="/data/websites/snailtrail.cc/quant/server"
 VENV="$SERVER_DIR/venv"
 XTP_DIR="$SERVER_DIR/vendor/xtp"
 PY="python3.11"   # 写死 python3.11，项目统一

@@ -10,7 +10,7 @@ A股个股的**纯分析**模块：日线选股 + 分钟级研判，输出操作
 2. **分钟级研判模型**：量价结构、均线趋势、背离指标、日内强弱，实时输出操作建议。
 3. **标准化输出**：建议存 PG `astock_analysis` 表，供 Web 看板展示。
 4. **LLM 增强分析**：把因子+信号+研报/公告喂 LLM 网关，生成自然语言研判。
-5. **物理禁下单**：复用策略框架的 `XTPAdapter（2026-08-03 废止 AStockReadonlyAdapter，A股走 XTPAdapter）`，`send_order` 永久 raise。
+5. **可实盘**（受 astock 分项开关控制，2026-08-03 废止只读铁律）。
 
 ## 3. 边界与非目标
 
@@ -31,7 +31,7 @@ A股个股的**纯分析**模块：日线选股 + 分钟级研判，输出操作
 ### 5.1 模型接口
 ```python
 class AStockAnalysisStrategy(Strategy):
-    adapter = XTPAdapter（2026-08-03 废止 AStockReadonlyAdapter，A股走 XTPAdapter）()         # 受 astock 分项开关控制
+    adapter = XTPAdapter()  # 受 astock 分项开关控制
     def on_bar(self, bar: Bar): ...           # 分钟级研判
     def on_daily_close(self, daily: Bar): ... # 日线选股
     def output(self) -> AnalysisResult: ...   # 输出建议

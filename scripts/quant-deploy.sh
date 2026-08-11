@@ -1,7 +1,7 @@
 #!/bin/bash
 ########################################################################################################################
 # quant-deploy.sh - 部署工具 for 多市场混合量化交易平台
-# 部署到新服务器（120.24.235.98），与 safebox 共存时严格隔离（db4/5/6 避开 safebox db0）：
+# 部署到新服务器（quant.snailtrail.cc），与 safebox 共存时严格隔离（db4/5/6 避开 safebox db0）：
 #   - clear-redis 只清 db2(VALKEY)/db3(CELERY)，绝不用 FLUSHALL（会清掉 safebox db0）
 #   - restart-web 用 reload httpd（不断现有连接，不影响 safebox）
 #   - clear-pgsql 严格 DROP DATABASE quant（不碰 safebox 库）
@@ -16,12 +16,18 @@
 set -euo pipefail
 
 #-----------------------------------------------------------------------------------------------------------------------
-# 服务器配置（MODIFY TO MATCH YOUR SERVER）
+# 服务器配置（MODIFY TO MATCH YOUR SERVER）—— 单一配置源：改环境只动这里
 #-----------------------------------------------------------------------------------------------------------------------
-PROJECT_PATH="${PROJECT_PATH:-/data/websites/snailtrail.org/quant/server}"   # 后端代码+venv+.env
-WEB_PATH="${WEB_PATH:-/data/websites/snailtrail.org/quant/web}"               # 前端 dist
-SEED_SQL="${SEED_SQL:-/data/websites/snailtrail.org/quant/server/scripts/init-seed.sql}"
-SCHEMA_SQL="${SCHEMA_SQL:-/data/websites/snailtrail.org/quant/server/scripts/init-schema.sql}"
+SERVER_DOMAIN="${SERVER_DOMAIN:-quant.snailtrail.cc}"            # 服务器域名/IP
+SITE_ROOT="${SITE_ROOT:-/data/websites/snailtrail.cc/quant}"      # 站点根（server/ + web/）
+PROJECT_PATH="${PROJECT_PATH:-$SITE_ROOT/server}"                # 后端代码+venv+.env
+WEB_PATH="${WEB_PATH:-$SITE_ROOT/web}"                           # 前端 dist
+SEED_SQL="${SEED_SQL:-$PROJECT_PATH/scripts/init-seed.sql}"
+SCHEMA_SQL="${SCHEMA_SQL:-$PROJECT_PATH/scripts/init-schema.sql}"
+
+# 运行身份 + 端口（service 文件 + health 检查共用，单一来源）
+QUANT_USER="${QUANT_USER:-quant}"                                # service User= + venv owner
+WEB_API_PORT="${WEB_API_PORT:-8001}"                             # uvicorn 监听端口
 
 # systemd 服务名（模板式 @quant 实例）
 WEB_API_SERVICE="${WEB_API_SERVICE:-quant-web-api@quant}"
@@ -30,6 +36,11 @@ CELERY_BEAT_SERVICE="${CELERY_BEAT_SERVICE:-quant-celery-beat@quant}"
 PGSQL_SERVICE="${PGSQL_SERVICE:-postgresql-18}"
 REDIS_SERVICE="${REDIS_SERVICE:-redis}"
 WEB_SERVICE="${WEB_SERVICE:-nginx}"
+
+# systemd/polkit 安装目标
+SYSTEMD_DST="${SYSTEMD_DST:-/etc/systemd/system}"
+POLKIT_DST="${POLKIT_DST:-/etc/polkit-1/rules.d}"
+SYSTEMD_SRC="${SYSTEMD_SRC:-$PROJECT_PATH/scripts/systemd}"      # 源码里的 service 模板
 
 # 数据库
 PG_DB="${PG_DB:-quant}"
@@ -51,15 +62,19 @@ SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-
 # 命令行 + 运行时状态
 #-----------------------------------------------------------------------------------------------------------------------
 USER=""
-SERVER="${SERVER:-120.24.235.98}"    # 默认新服务器 IP，可用环境变量或 --server 覆盖
+SERVER="${SERVER:-$SERVER_DOMAIN}"    # 默认域名，可用环境变量或 --server 覆盖
 DRY_RUN=false
 
 DEPLOY_TASKS=()
 RESTART_SERVER=false
 RESTART_CELERY=false
 RESTART_WEB=false
+RESTART_FEISHU=false
 RESTART_PGSQL=false
 RESTART_REDIS=false
+FIX_VENV=false
+INSTALL_SERVICES=false
+ENABLE_SERVICES=false
 CLEAR_PGSQL=false
 CLEAR_REDIS=false
 INIT_SEED=false
@@ -76,7 +91,7 @@ Usage: $0 --server HOST [--user USER] [--dry-run] ACTION...
 部署代码、重启服务、初始化数据库到远程服务器（与 safebox 隔离）。
 
 Global options:
-  --server HOST          目标服务器（默认 120.24.235.98，可用环境变量 SERVER 覆盖）
+  --server HOST          目标服务器（默认 quant.snailtrail.cc，可用环境变量 SERVER 覆盖）
   --user USER            SSH 用户（默认当前用户）
   --dry-run              预览不执行
   -h, --help
@@ -94,17 +109,20 @@ Actions（按给定顺序执行，至少一个）:
   clear-pgsql            DROP+CREATE quant 库（destructive，停 quant 服务，不碰 safebox 库）
                          跑 init-seed.sql 重建 sync_config 种子后重启服务
   clear-redis            只清 db2(VALKEY)+db3(CELERY)（destructive，绝不 FLUSHALL，不碰 safebox db0）
-migrate                alembic upgrade head（schema 版本迁移，主用，quant 用户跑）
+  fix-venv               sed venv/bin/* shebang -> PROJECT_PATH（迁路径后修 203/EXEC，保留 .so）
+  install-services       lint 占位符 + cp service/polkit -> /etc + daemon-reload（不 enable）
+  enable-services        enable 核心 4 服务（web-api/celery-worker/beat/feishu-bot@*，strategy 按需不 enable）
+  migrate                alembic upgrade head（schema 版本迁移，主用，quant 用户跑）
   pip-install            pip install -r requirements.txt（装新依赖，如 croniter，deploy 后跑）
   init-schema            跑 init-schema.sql 集中建表（备用，postgres 用户跑）
   init-seed              跑 init-seed.sql 初始化 sync_config 种子（幂等，不覆盖已有）
 
 Examples:
-  # 首次部署（服务器 IP 用默认 120.24.235.98，无需 --server）
-  $0 deploy ./server /data/websites/snailtrail.org/quant/server --exclude .env migrate init-seed restart-server restart-celery
+  # 首次部署（服务器 IP 用默认 quant.snailtrail.cc，无需 --server）
+  $0 deploy ./server /data/websites/snailtrail.cc/quant/server --exclude .env migrate init-seed restart-server restart-celery
 
   # 日常更新后端
-  $0 deploy ./server /data/websites/snailtrail.org/quant/server --exclude .env restart-server restart-celery
+  $0 deploy ./server /data/websites/snailtrail.cc/quant/server --exclude .env restart-server restart-celery
 
   # 清 quant 库重建
   $0 clear-pgsql restart-server restart-celery
@@ -154,8 +172,12 @@ while [[ $# -gt 0 ]]; do
         restart-server) HAS_ACTION=true; RESTART_SERVER=true; shift ;;
         restart-celery) HAS_ACTION=true; RESTART_CELERY=true; shift ;;
         restart-web) HAS_ACTION=true; RESTART_WEB=true; shift ;;
+        restart-feishu) HAS_ACTION=true; RESTART_FEISHU=true; shift ;;
         restart-pgsql) HAS_ACTION=true; RESTART_PGSQL=true; shift ;;
         restart-redis) HAS_ACTION=true; RESTART_REDIS=true; shift ;;
+        fix-venv) HAS_ACTION=true; FIX_VENV=true; shift ;;
+        install-services) HAS_ACTION=true; INSTALL_SERVICES=true; shift ;;
+        enable-services) HAS_ACTION=true; ENABLE_SERVICES=true; shift ;;
         clear-pgsql) HAS_ACTION=true; CLEAR_PGSQL=true; shift ;;
         clear-redis) HAS_ACTION=true; CLEAR_REDIS=true; shift ;;
         init-seed) HAS_ACTION=true; INIT_SEED=true; shift ;;
@@ -216,11 +238,15 @@ if $DRY_RUN; then
     $INIT_SEED && echo "🔍  跑 init-seed.sql 初始化 sync_config 种子"
     $RESTART_SERVER && echo "🔍  restart $WEB_API_SERVICE"
     $RESTART_CELERY && echo "🔍  restart $CELERY_WORKER_SERVICE + $CELERY_BEAT_SERVICE"
+    $RESTART_FEISHU && echo "🔍  restart feishu bots (自动检测)"
     $RESTART_WEB && echo "🔍  reload $WEB_SERVICE (不影响 safebox)"
     $RESTART_PGSQL && echo "🔍  restart $PGSQL_SERVICE (共享,短暂断连)"
     $RESTART_REDIS && echo "🔍  restart $REDIS_SERVICE (共享,短暂断连)"
     $CLEAR_PGSQL && echo "🔍🔥 clear-pgsql: DROP+CREATE quant 库 + init-seed (不碰 safebox)"
     $CLEAR_REDIS && echo "🔍🔥 clear-redis: FLUSHDB db$VALKEY_DB + db$CELERY_DB (绝不 FLUSHALL)"
+    $FIX_VENV && echo "🔍  fix-venv: sed venv/bin/* shebang -> $PROJECT_PATH"
+    $INSTALL_SERVICES && echo "🔍  install-services: lint + cp service/polkit + daemon-reload"
+    $ENABLE_SERVICES && echo "🔍  enable-services: 核心 4 服务 enable"
     echo "🔍 Dry-run done."
     exit 0
 fi
@@ -334,10 +360,56 @@ restart_server() {
     echo "✅ restart-server done."
 }
 
+# 服务就绪稳定检查（检测 crash-loop）：轮询 is-active，连续 running 才算稳
+_stabilize() {
+    local svc="$1" tries="${2:-4}"
+    local prev=""
+    for i in $(seq 1 $tries); do
+        sleep 2
+        prev=$(ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl is-active $svc 2>/dev/null" || true)
+        if [[ "$prev" == "active" ]]; then
+            # 再确认一次（crash-loop 会在 activating/activating 间跳）
+            sleep 2
+            local again=$(ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl is-active $svc 2>/dev/null" || true)
+            [[ "$again" == "active" ]] && return 0
+        fi
+    done
+    return 1
+}
+
 restart_celery() {
     echo "ℹ️ Restart $CELERY_WORKER_SERVICE + $CELERY_BEAT_SERVICE..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE && echo '✅ worker:' \$(sudo systemctl is-active $CELERY_WORKER_SERVICE) 'beat:' \$(sudo systemctl is-active $CELERY_BEAT_SERVICE)"
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE"
+    # 稳定检查（crash-loop 检测）
+    for svc in $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE; do
+        if _stabilize "$svc"; then
+            echo "  ✅ $svc active (稳定)"
+        else
+            echo "  ⚠️ $svc 未稳定（可能 crash-loop，看 journalctl -u $svc -n 30）"
+        fi
+    done
     echo "✅ restart-celery done."
+}
+
+
+restart_feishu() {
+    echo "ℹ️ Restart feishu bots..."
+    local bots
+    bots=$(ssh $SSH_OPTS "$SSH_TARGET" "systemctl list-units 'quant-feishu-bot@*' --no-legend --type=service --state=active,running 2>/dev/null | awk '{print \$1}'")
+    if [[ -z "$bots" ]]; then
+        echo "⚠️ 无 running 的 feishu bot（skipped）"
+        return
+    fi
+    for bot in $bots; do
+        echo "  restart $bot"
+        ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $bot"
+        if _stabilize "$bot"; then
+            echo "  ✅ $bot active (稳定)"
+        else
+            echo "  ⚠️ $bot 未稳定（看 journalctl -u $bot -n 30）"
+        fi
+    done
+    echo "✅ restart-feishu done."
 }
 
 restart_web() {
@@ -357,6 +429,59 @@ restart_redis() {
 }
 
 #-----------------------------------------------------------------------------------------------------------------------
+# venv shebang 修复（迁路径后 venv/bin/* 指向旧路径 -> 203/EXEC）
+#-----------------------------------------------------------------------------------------------------------------------
+fix_venv() {
+    echo "ℹ️ Fix venv shebangs -> $PROJECT_PATH/venv/bin/..."
+    # sudo（michael 无权读 quant 的 750 venv）；跳过 activate*（无 venv shebang）；
+    # sed '1s' 只改首行匹配 #!...venv/bin/ 的脚本，无匹配则 no-op（幂等）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo find $PROJECT_PATH/venv/bin -maxdepth 1 -type f ! -name 'activate*' -exec sed -i '1s|^#!.*venv/bin/|#!$PROJECT_PATH/venv/bin/|' {} + && echo '✅ venv shebang 已同步到 $PROJECT_PATH'"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+# 安装 systemd 服务 + polkit（lint 占位符 -> cp -> daemon-reload）
+#-----------------------------------------------------------------------------------------------------------------------
+install_services() {
+    echo "ℹ️ Install systemd services + polkit rules..."
+    ssh $SSH_OPTS "$SSH_TARGET" bash <<REMOTE
+set -euo pipefail
+SRC='$SYSTEMD_SRC'
+[[ -d "\$SRC" ]] || { echo "❌ 源码 systemd 目录不存在: \$SRC（先 deploy）"; exit 1; }
+
+echo "  lint: 检查 service 文件无占位符（__X__）/User=%i..."
+for f in \$SRC/*.service; do
+    if grep -qE '__[A-Z_]+__|User=%i' "\$f"; then
+        echo "❌ \$f 有占位符或 User=%i（需写实路径/User=$QUANT_USER）"
+        grep -nE '__[A-Z_]+__|User=%i' "\$f"
+        exit 1
+    fi
+done
+echo "  ✅ lint 通过"
+
+echo "  cp service 模板 -> $SYSTEMD_DST/"
+sudo cp \$SRC/quant-*.service $SYSTEMD_DST/
+
+echo "  cp polkit rules -> $POLKIT_DST/"
+sudo cp \$SRC/*.rules $POLKIT_DST/ 2>/dev/null || echo "  ⚠️ 无 .rules 文件"
+
+sudo systemctl daemon-reload
+echo "✅ install-services done（未 enable，用 enable-services 或手动 enable）"
+REMOTE
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
+# enable 核心服务（web-api/celery-worker/celery-beat/feishu-bot@*），strategy 不 enable（按需）
+#-----------------------------------------------------------------------------------------------------------------------
+enable_services() {
+    echo "ℹ️ Enable core services（strategy@ 按需，不 enable）..."
+    # 动态收集 running 的 feishu bot 实例名
+    local feishu
+    feishu=$(ssh $SSH_OPTS "$SSH_TARGET" "systemctl list-units 'quant-feishu-bot@*' --no-legend --type=service --state=active 2>/dev/null | awk '{print \$1}'" || true)
+    local cores="$WEB_API_SERVICE $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $feishu"
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl enable $cores 2>&1 | grep -v 'Created symlink\|^$' || true; echo '✅ enabled: $cores'"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
 # 执行（按顺序）
 #-----------------------------------------------------------------------------------------------------------------------
 for task in "${DEPLOY_TASKS[@]}"; do
@@ -370,10 +495,14 @@ $INIT_SCHEMA && init_schema
 $INIT_SEED && init_seed
 $CLEAR_PGSQL && clear_pgsql
 $CLEAR_REDIS && clear_redis
+$INSTALL_SERVICES && install_services
+$FIX_VENV && fix_venv
 $RESTART_WEB && restart_web
 $RESTART_REDIS && restart_redis
 $RESTART_PGSQL && restart_pgsql
 $RESTART_CELERY && restart_celery
+$RESTART_FEISHU && restart_feishu
 $RESTART_SERVER && restart_server
+$ENABLE_SERVICES && enable_services
 
 echo "✅ All operations completed."
