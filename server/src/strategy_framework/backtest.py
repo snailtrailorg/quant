@@ -40,7 +40,10 @@ class BacktestResult:
     sharpe_ratio: float = 0.0     # 夏普比率（年化）
     volatility: float = 0.0       # 年化波动率（B5 #21）
     sortino_ratio: float = 0.0    # 索提诺比率（下行，B5 #21）
-    # α/β/信息率/基准收益 TODO（需基准数据，后续基准接入后补）
+    alpha: float = 0.0           # α（P3-2，需基准数据，默认 0）
+    beta: float = 0.0            # β（P3-2，需基准数据，默认 0）
+    information_ratio: float = 0.0  # 信息率（P3-2）
+    benchmark_return: float = 0.0   # 基准收益（P3-2）
     total_trades: int = 0          # 总交易次数
     # 明细
     daily_values: list = field(default_factory=list)   # 每日净值

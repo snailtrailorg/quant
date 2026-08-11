@@ -30,6 +30,18 @@
             <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="操作" width="200">
+          <template #default="{ row }">
+            <el-select v-model="row.role" size="small" style="width: 90px" @change="(v) => onRoleChange(row.id, v)">
+              <el-option label="Admin" value="admin" />
+              <el-option label="Trader" value="trader" />
+              <el-option label="Analyst" value="analyst" />
+              <el-option label="Viewer" value="viewer" />
+            </el-select>
+            <el-button size="small" :type="row.enabled ? 'warning' : 'success'" link @click="onToggleEnabled(row)">{{ row.enabled ? '禁用' : '启用' }}</el-button>
+            <el-button size="small" type="danger" link @click="onDeleteUser(row.id)" :disabled="row.username === 'admin'">删除</el-button>
+          </template>
+        </el-table-column>
       </el-table>
     </div>
 
@@ -75,8 +87,9 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getAccounts, getUsers, inviteUser, changePassword } from '../api'
+import api from '../api'
 
 const accounts = ref([])
 const users = ref([])
@@ -116,4 +129,15 @@ const onChangePwd = async () => {
 }
 
 onMounted(load)
+
+const onRoleChange = async (uid, role) => {
+  try { await api.put(`/user/${uid}?role=${role}`); ElMessage.success('角色已改') } catch { ElMessage.error('改角色失败') }
+}
+const onToggleEnabled = async (row) => {
+  try { await api.put(`/user/${row.id}?enabled=${!row.enabled}`); row.enabled = !row.enabled; ElMessage.success(row.enabled ? '已启用' : '已禁用') } catch { ElMessage.error('操作失败') }
+}
+const onDeleteUser = async (uid) => {
+  await ElMessageBox.confirm('确认删除该用户？', { type: 'warning' })
+  try { await api.delete(`/user/${uid}`); ElMessage.success('已删除'); users.value = await getUsers() } catch { ElMessage.error('删除失败') }
+}
 </script>

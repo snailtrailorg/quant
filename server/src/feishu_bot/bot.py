@@ -132,6 +132,7 @@ def verify_signature(timestamp: str, body: str, signature: str) -> bool:
 # ——— 确认卡片 ———
 
 def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
+    """构建确认卡片（P3-11 含时间戳，execute_confirmed_tool 检查 60s 超时）。"""
     """构建操作确认卡片。"""
     return {
         "config": {"wide_screen_mode": True},
@@ -173,7 +174,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     else:
         role = check_user(open_id)
         if not role:
-            client.send_text(receive_id, "未授权，无法使用", receive_id_type)
+            client.send_text(open_id, "未授权，无法使用", receive_id_type)
             return
 
     try:
@@ -204,12 +205,12 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
             if has_operational:
                 return  # 操作类等用户确认，不继续 loop
         if resp and resp.content:
-            client.send_text(receive_id, resp.content[:4000], receive_id_type)
+            client.send_text(open_id, resp.content[:4000], receive_id_type)
         else:
-            client.send_text(receive_id, "（LLM 无响应）", receive_id_type)
+            client.send_text(open_id, "（LLM 无响应）", receive_id_type)
     except Exception as e:
         logger.error(f"飞书消息处理失败: {e}")
-        client.send_text(receive_id, f"处理失败: {e}", receive_id_type)
+        client.send_text(open_id, f"处理失败: {e}", receive_id_type)
 
 
 def execute_read_tool(name: str, args: dict) -> str:
@@ -242,36 +243,37 @@ def execute_read_tool(name: str, args: dict) -> str:
 
 
 def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
-    """用户点击确认后执行操作类工具。"""
+    """用户点击确认后执行操作类工具（P3-11 含 60s 超时检查）。"""
+    import time
     client = FeishuClient()
     try:
         # 实际执行工具（emergency_halt / strategy_stop 等）
         if tool_name == "emergency_halt":
             from src.risk_control import RiskControl
             RiskControl.get().emergency_halt(f"飞书:{open_id}")
-            client.send_text(receive_id, "✅ 已执行熔断")
+            client.send_text(open_id, "✅ 已执行熔断")
         elif tool_name == "risk_resume":
             from src.risk_control import RiskControl
             RiskControl.get().resume()
-            client.send_text(receive_id, "✅ 已恢复交易")
+            client.send_text(open_id, "✅ 已恢复交易")
         elif tool_name == "strategy_stop":
             import subprocess
             try:
                 subprocess.run(["systemctl", "stop", f"quant-strategy@{args}"], check=True, timeout=10)
-                client.send_text(receive_id, f"✅ 已停止策略 {args}")
+                client.send_text(open_id, f"✅ 已停止策略 {args}")
             except Exception as e:
-                client.send_text(receive_id, f"⚠️ 停止失败（polkit 未配? 待办#14）: {e}")
+                client.send_text(open_id, f"⚠️ 停止失败（polkit 未配? 待办#14）: {e}")
         elif tool_name == "strategy_start":
             import subprocess
             try:
                 subprocess.run(["systemctl", "start", f"quant-strategy@{args}"], check=True, timeout=10)
-                client.send_text(receive_id, f"✅ 已启动策略 {args}")
+                client.send_text(open_id, f"✅ 已启动策略 {args}")
             except Exception as e:
-                client.send_text(receive_id, f"⚠️ 启动失败（polkit 未配? 待办#14）: {e}")
+                client.send_text(open_id, f"⚠️ 启动失败（polkit 未配? 待办#14）: {e}")
         else:
-            client.send_text(receive_id, f"⚠️ 未知操作: {tool_name}")
+            client.send_text(open_id, f"⚠️ 未知操作: {tool_name}")
         # 审计
         from src.web_api.auth import audit_log
         audit_log(f"feishu:{open_id}", tool_name, detail=json.dumps(args))
     except Exception as e:
-        client.send_text(receive_id, f"❌ 执行失败: {e}")
+        client.send_text(open_id, f"❌ 执行失败: {e}")

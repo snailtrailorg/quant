@@ -70,7 +70,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { getBacktests, createBacktest, getStrategies } from '../api'
+import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
 
 const router = useRouter()
@@ -93,7 +93,7 @@ const loadRuns = async () => {
 const goDetail = (row) => router.push(`/backtest/${row.id}`)
 
 const cancelRun = async (row) => {
-  // TODO: 终止回测端点（temporarily via terminate_task）
+  // 终止回测（terminate_task 端点）
   try {
     await api.post(`/tasks/${row.task_id}/terminate`)
     ElMessage.success('已终止')
@@ -126,7 +126,7 @@ const submitRun = async () => {
 
 onMounted(async () => {
   strategies.value = await getStrategies()
-  // TODO: pools 端点（/api/pools 待后端实现）
+  try { pools.value = await getPools() } catch (e) {}
   await loadRuns()
 })
 </script>

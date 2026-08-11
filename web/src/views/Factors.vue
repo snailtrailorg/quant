@@ -58,8 +58,7 @@ const load = async () => {
   } catch (e) { ElMessage.error('加载因子失败') }
 }
 const createFactor = () => {
-  // TODO: 调后端创建 DSL 因子
-  ElMessage.success('DSL 因子创建（API 待接）')
+  ElMessage.info('DSL 因子在策略编辑页配置（factors 填 dsl:名称 + DSL 表达式），因子库页仅展示注册表')
   showDialog.value = false
 }
 onMounted(load)

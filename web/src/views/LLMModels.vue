@@ -58,15 +58,43 @@
       </el-form-item>
     </el-form>
   </el-card>
+
+  <!-- P2-3 LLM 预算预警 -->
+  <el-card style="margin-top: 20px" v-loading="budgetLoading">
+    <template #header>
+      <div style="display: flex; justify-content: space-between; align-items: center">
+        <span>AI 预算预警</span>
+        <el-button size="small" @click="checkBudget" :loading="checking">检查告警</el-button>
+      </div>
+    </template>
+    <el-table :data="budgets" stripe size="small">
+      <el-table-column prop="provider" label="Provider" width="120"><template #default="{ row }">{{ row.provider || '全局' }}</template></el-table-column>
+      <el-table-column prop="daily_token_limit" label="日Token上限" width="120" />
+      <el-table-column prop="alert_threshold_pct" label="预警阈值%" width="100" />
+      <el-table-column prop="enabled" label="启用" width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
+      <el-table-column prop="updated_at" label="更新时间"><template #default="{ row }">{{ row.updated_at?.slice(0,19) || '-' }}</template></el-table-column>
+    </el-table>
+    <el-alert v-if="budgetCheck" :type="budgetCheck.alerts?.length ? 'warning' : 'success'" :closable="false" style="margin-top: 12px">
+      {{ budgetCheck.alerts?.length ? `${budgetCheck.alerts.length} 项超阈值` : '无超阈值（检查了 ' + budgetCheck.checked + ' 项）' }}
+    </el-alert>
+  </el-card>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import api from '../api'
 
 const models = ref([])
 const usage = ref({ today: [], month: [], trend: [] })
+const budgets = ref([])
+const budgetLoading = ref(false)
+const budgetCheck = ref(null)
+const checking = ref(false)
+
+const loadBudget = async () => { budgetLoading.value = true; try { budgets.value = await api.get('/llm-budget') } catch {} finally { budgetLoading.value = false } }
+const checkBudget = async () => { checking.value = true; try { budgetCheck.value = await api.post('/llm-budget/check') } catch { ElMessage.error('检查失败') } finally { checking.value = false } }
 const form = ref(emptyForm())
 const saving = ref(false)
 const testing = ref(0)
@@ -77,7 +105,7 @@ function emptyForm() {
 
 const load = async () => { models.value = await getLLMModels() }
 const loadUsage = async () => { usage.value = await getLLMUsage() }
-onMounted(() => { load(); loadUsage() })
+onMounted(() => { load(); loadUsage(); loadBudget() })
 
 const onEdit = (row) => { form.value = { ...row, api_key: '' } }
 const resetForm = () => { form.value = emptyForm() }

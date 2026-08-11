@@ -199,6 +199,30 @@ def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
              "email": r[4], "email_verified": r[5], "created_at": str(r[6])} for r in rows]
 
 
+@app.put("/api/user/{uid}")
+def update_user(uid: int, role: str = None, enabled: bool = None,
+                payload: dict = Depends(require_perm("user_mgmt"))):
+    """P4-4 改用户角色/禁用。"""
+    with get_conn() as conn:
+        if role is not None:
+            conn.execute("UPDATE users SET role=%s WHERE id=%s", (role, uid))
+        if enabled is not None:
+            conn.execute("UPDATE users SET enabled=%s WHERE id=%s", (enabled, uid))
+        conn.commit()
+    audit_log(payload["username"], "update_user", str(uid), f"role={role} enabled={enabled}")
+    return {"ok": True}
+
+
+@app.delete("/api/user/{uid}")
+def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
+    """P4-4 删除用户。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM users WHERE id=%s", (uid,))
+        conn.commit()
+    audit_log(payload["username"], "delete_user", str(uid))
+    return {"ok": True}
+
+
 # --- 策略管理（DB 驱动） ---
 
 @app.get("/api/strategy")
@@ -264,6 +288,11 @@ def start_strategy(sid: str, payload: dict = Depends(require_perm("strategy_cont
         conn.execute("UPDATE strategy_config SET enabled=true WHERE id=%s", (sid,))
         conn.commit()
     audit_log(payload["username"], "strategy_start", sid)
+    try:
+        import subprocess
+        subprocess.run(["systemctl", "start", f"quant-strategy@{sid}"], timeout=10, capture_output=True)
+    except Exception:
+        pass
     return {"id": sid, "status": "running"}
 
 
@@ -274,6 +303,11 @@ def stop_strategy(sid: str, payload: dict = Depends(require_perm("strategy_contr
         conn.execute("UPDATE strategy_config SET enabled=false WHERE id=%s", (sid,))
         conn.commit()
     audit_log(payload["username"], "strategy_stop", sid)
+    try:
+        import subprocess
+        subprocess.run(["systemctl", "stop", f"quant-strategy@{sid}"], timeout=10, capture_output=True)
+    except Exception:
+        pass
     return {"id": sid, "status": "stopped"}
 
 
@@ -375,6 +409,36 @@ def get_account(aid: int, payload: dict = Depends(require_perm("account_keys")))
     return {"id": row[0], "name": row[1], "exchange": row[2], "api_key_hint": row[3], "enabled": row[4]}
 
 
+@app.post("/api/account")
+def create_account(req: dict = Body(...), payload: dict = Depends(require_perm("account_keys"))):
+    """P4-5 创建账户。"""
+    with get_conn() as conn:
+        k = (req.get("name", ""), req.get("exchange", ""), req.get("api_key_hint", ""), req.get("enabled", True))
+        cur = conn.execute("INSERT INTO accounts (name, exchange, api_key_hint, enabled) VALUES (%s,%s,%s,%s) RETURNING id", k)
+        conn.commit()
+        return {"id": cur.fetchone()[0]}
+
+
+@app.put("/api/account/{aid}")
+def update_account(aid: int, req: dict = Body(...), payload: dict = Depends(require_perm("account_keys"))):
+    """P4-5 更新账户。"""
+    with get_conn() as conn:
+        for k in ("name", "exchange", "api_key_hint", "enabled"):
+            if k in req:
+                conn.execute(f"UPDATE accounts SET {k}=%s WHERE id=%s", (req[k], aid))
+        conn.commit()
+    return {"ok": True}
+
+
+@app.delete("/api/account/{aid}")
+def delete_account(aid: int, payload: dict = Depends(require_perm("account_keys"))):
+    """P4-5 删除账户。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM accounts WHERE id=%s", (aid,))
+        conn.commit()
+    return {"ok": True}
+
+
 # ——— 日志/告警 ———
 
 class LogAnalyzeReq(BaseModel):
@@ -425,12 +489,17 @@ def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_role("viewer
 
 @app.get("/api/log")
 def get_logs(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """运行日志（占位，接真实日志存储）。"""
-    return {"logs": [
-        {"ts": "2026-07-24T14:00:00", "level": "INFO", "module": "risk", "msg": "风控扫描正常"},
-        {"ts": "2026-07-24T13:59:00", "level": "INFO", "module": "data", "msg": "日线增量完成"},
-        {"ts": "2026-07-24T13:00:00", "level": "WARN", "module": "strategy", "msg": "双低轮动触发"},
-    ]}
+    """运行日志（P3-1 接 task_logs 真实日志，不再占位）。"""
+    with get_conn() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS task_logs (
+            id BIGSERIAL PRIMARY KEY, task_id TEXT, level TEXT, message TEXT,
+            step_name TEXT, sql_or_api TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+        cur = conn.execute(
+            "SELECT level, message, step_name, created_at FROM task_logs "
+            "ORDER BY created_at DESC LIMIT 200")
+        rows = cur.fetchall()
+    return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
+                      "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
 
 
 @app.get("/api/alert")
@@ -455,21 +524,65 @@ class ChatReq(BaseModel):
 
 @app.post("/api/chat")
 def chat(req: ChatReq, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """自然语言查询 → LLM 网关（只读工具）。"""
+    """自然语言查询 → LLM 网关（只读工具直执闭环，P1-4）。"""
     try:
         from src.llm_gateway import gateway
         from src.llm_gateway.gateway import READ_TOOLS
-        resp = gateway.chat(
-            messages=[{"role": "user", "content": req.message}],
-            tools=READ_TOOLS,
-            role=payload["role"],
-            timeout=30,
-            retries=0,
-            caller="web_chat",
-        )
+        messages = [{"role": "user", "content": req.message}]
+        resp = None
+        for _ in range(3):  # max 3 轮工具调用
+            resp = gateway.chat(
+                messages=messages, tools=READ_TOOLS, role=payload["role"],
+                timeout=30, retries=0, caller="web_chat",
+            )
+            if not resp.tool_calls:
+                break
+            # 执行工具 + 结果回填（P1-4 闭环）
+            messages.append({"role": "assistant", "content": resp.content or ""})
+            for tc in resp.tool_calls:
+                result = _execute_readonly_tool(tc["name"], tc.get("arguments", "{}"))
+                messages.append({"role": "user", "content": f"[工具 {tc['name']} 结果] {result}"})
         return {"reply": resp.content or "（LLM 无响应，请检查 API key）", "usage": resp.usage}
     except Exception as e:
         return {"reply": f"（LLM 暂不可用: {e}）", "usage": {}}
+
+
+def _execute_readonly_tool(tool_name: str, args: str) -> str:
+    """执行只读工具，返回结果文本（P1-4 LLM 工具闭环）。"""
+    import json
+    try:
+        params = json.loads(args) if isinstance(args, str) else (args or {})
+    except Exception:
+        params = {}
+    try:
+        if tool_name == "query_risk_state":
+            from src.risk_control import RiskControl
+            rc = RiskControl.get()
+            return f"熔断: {rc.is_halted()}, 原因: {rc.halt_reason()}"
+        elif tool_name == "get_astock_analysis":
+            from src.astock_analysis import DailySelectionEngine
+            results = DailySelectionEngine(top_n=5).run()
+            return str([{"symbol": r.symbol, "rating": r.rating, "score": r.score} for r in results])
+        elif tool_name == "query_position":
+            with get_conn() as conn:
+                cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+                row = cur.fetchone()
+            return f"总资产: {float(row[0]) if row else 0}"
+        elif tool_name == "query_pnl":
+            with get_conn() as conn:
+                cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+                row = cur.fetchone()
+            if row:
+                return f"总资产: {float(row[0])}, 今日盈亏: {float(row[1])}, 初始资金: {float(row[2])}"
+            return "无盈亏数据"
+        elif tool_name == "query_strategy_status":
+            with get_conn() as conn:
+                cur = conn.execute("SELECT id, name, enabled FROM strategy_config ORDER BY id")
+                rows = cur.fetchall()
+            return str([{"id": r[0], "name": r[1], "enabled": r[2]} for r in rows])
+        return f"工具 {tool_name} 未实现"
+    except Exception as e:
+        return f"工具执行失败: {e}"
 
 
 # ——— A 股分析 ———
@@ -1108,8 +1221,8 @@ def list_llm_budget(payload: dict = Depends(require_role("viewer", "analyst", "t
 
 @app.put("/api/llm-budget/{bid}")
 def update_llm_budget(bid: int, req: LlmBudgetReq,
-                      payload: dict = Depends(require_perm("strategy_control"))):
-    """更新预算配置。"""
+                      payload: dict = Depends(require_role("admin"))):
+    """更新预算配置（P3-13 权限修正：admin only）。"""
     with get_conn() as conn:
         conn.execute(
             "UPDATE llm_budget SET provider=%s, daily_token_limit=%s, monthly_cost_limit=%s, "
@@ -1118,6 +1231,7 @@ def update_llm_budget(bid: int, req: LlmBudgetReq,
              req.alert_threshold_pct, req.enabled, bid),
         )
         conn.commit()
+    audit_log(payload["username"], "update_llm_budget", str(bid))
     return {"ok": True}
 
 
@@ -1614,10 +1728,9 @@ def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_con
         for sym in symbols:
             conn.execute("INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s,%s) ON CONFLICT DO NOTHING", (req.id, sym))
         conn.commit()
+    audit_log(payload["username"], "create_pool", req.id)
     return {"ok": True, "id": req.id, "count": len(symbols)}
 
-
-@app.delete("/api/pool/{pid}")
 
 class StrategyAccountReq(BaseModel):
     strategy_id: str
@@ -1663,6 +1776,7 @@ def bind_strategy_account(req: StrategyAccountReq, payload: dict = Depends(requi
             "broker_provider=EXCLUDED.broker_provider, initial_capital=EXCLUDED.initial_capital, leverage=EXCLUDED.leverage",
             (req.strategy_id, req.account_id, req.broker_provider, req.initial_capital, req.leverage))
         conn.commit()
+    audit_log(payload["username"], "bind_strategy_account", req.strategy_id)
     return {"ok": True}
 
 
@@ -1675,6 +1789,7 @@ def unbind_strategy_account(said: int, payload: dict = Depends(require_perm("str
     return {"ok": True}
 
 
+@app.delete("/api/pool/{pid}")
 def delete_pool(pid: str, payload: dict = Depends(require_perm("strategy_control"))):
     """删除标的池（CASCADE 删 symbols，#22）。"""
     with get_conn() as conn:
@@ -1812,16 +1927,40 @@ def backtest_stream_api(run_id: int, symbol: str,
 
 # --- WS 流式聊天（D1 #24）---
 
+@app.websocket("/ws/market")
+async def ws_market(ws, token: str = Query(...)):
+    """P3-18 WS 行情推送（占位，实盘后推送实时行情）。"""
+    from .auth import verify_jwt
+    try:
+        payload = verify_jwt(token)
+    except Exception:
+        await ws.close(code=4001, reason="token 无效")
+        return
+    await ws.accept()
+    try:
+        while True:
+            await ws.send_json({"type": "ping", "msg": "行情 WS 待实盘数据接入"})
+            await asyncio.sleep(30)
+    except Exception:
+        pass
+
+
 @app.websocket("/ws/chat")
-async def ws_chat(ws):
-    """WS 流式聊天：gateway.chat_stream 流式推。caller=web_chat。"""
+async def ws_chat(ws, token: str = Query(...)):
+    """WS 流式聊天（token query 认证，role 从 JWT 取非客户端，P0-3 修复）。"""
+    from .auth import verify_jwt
+    try:
+        payload = verify_jwt(token)
+    except Exception:
+        await ws.close(code=4001, reason="token 无效")
+        return
+    role = payload.get("role", "viewer")
     await ws.accept()
     from src.llm_gateway import gateway
     try:
         while True:
             data = await ws.receive_json()
             messages = data.get("messages", [])
-            role = data.get("role", "viewer")
             async for chunk in gateway.chat_stream(messages, role=role, caller="web_chat"):
                 await ws.send_text(chunk)
             await ws.send_text("[DONE]")

@@ -92,6 +92,7 @@ import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe } from '../api'
+import api from '../api'
 import Footer from '../components/Footer.vue'
 import { setLang } from '../i18n'
 
@@ -106,7 +107,8 @@ const lang = ref(locale.value)
 getMe().then(me => { username.value = me.username; role.value = me.role })
 
 const onLangChange = v => setLang(v)
-const logout = () => {
+const logout = async () => {
+  try { await api.post('/auth/logout') } catch {}
   localStorage.removeItem('token')
   localStorage.removeItem('role')
   router.push('/login')

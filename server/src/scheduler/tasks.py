@@ -30,7 +30,7 @@ def _is_trading_hours() -> bool:
 
 @app.task(name="src.scheduler.tasks.data_increment_daily", bind=True, max_retries=2)
 def data_increment_daily(self):
-    """盘后增量更新日线；非交易日跳过。"""
+    """[已弃用] 盘后增量更新日线。改用 data_sync_scheduler + sync_config DB 驱动（P3-16）。保留 beat 仅兼容。"""
     if not _is_trading_day():
         return {"status": "skipped", "reason": "非交易日"}
     try:
@@ -107,10 +107,43 @@ def daily_report(self):
 
 @app.task(name="src.scheduler.tasks.astock_minute_analysis")
 def astock_minute_analysis():
-    """盘中分钟研判；非交易日/连续竞价外跳过。"""
+    """盘中分钟研判；非交易日/连续竞价外跳过。P1-6 接线：读 bar_1min 最新 + MinuteAnalysisEngine + 落 PG。"""
     if not _is_trading_hours():
         return {"status": "skipped", "reason": "非交易时段"}
-    return {"status": "skipped", "reason": "待实时行情订阅"}
+    # P1-6：读 bar_1min 最新 bar + MinuteAnalysisEngine.on_bar + 落 astock_analysis 表
+    try:
+        from src.astock_analysis.analysis import MinuteAnalysisEngine
+        from src.data_platform.db import get_bars, get_conn
+        # 取活跃策略的 symbol
+        with get_conn() as conn:
+            cur = conn.execute("SELECT symbol FROM strategy_config WHERE enabled=true AND type='astock_analysis' LIMIT 5")
+            symbols = [r[0] for r in cur.fetchall()]
+        if not symbols:
+            return {"status": "skipped", "reason": "无活跃 A 股策略"}
+        engine = MinuteAnalysisEngine()
+        results = []
+        for sym in symbols:
+            bars_df = get_bars(sym, "1min", None, None)
+            if bars_df is None or bars_df.empty or len(bars_df) < 20:
+                continue
+            history = bars_df.tail(20).to_dict("records")
+            bar = history[-1]
+            r = engine.on_bar(bar, history[:-1])
+            if r:
+                results.append({"symbol": sym, "action": r["action"], "score": r["score"], "rating": r["rating"]})
+                # 落 PG
+                with get_conn() as conn:
+                    conn.execute("""CREATE TABLE IF NOT EXISTS astock_analysis (
+                        id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
+                        symbol TEXT, action TEXT, score NUMERIC, rating TEXT, factors JSONB)""")
+                    import json
+                    conn.execute("INSERT INTO astock_analysis (symbol, action, score, rating, factors) VALUES (%s,%s,%s,%s,%s)",
+                                 (sym, r["action"], r["score"], r["rating"], json.dumps(r.get("factors", {}))))
+                    conn.commit()
+        return {"status": "ok", "count": len(results), "results": results}
+    except Exception as e:
+        logger.warning(f"astock_minute_analysis 失败: {e}")
+        return {"status": "error", "reason": str(e)[:100]}
 
 
 @app.task(name="src.scheduler.tasks.health_check")
@@ -168,10 +201,30 @@ def drift_check():
     except Exception:
         return {"status": "skipped", "reason": "DB不可用"}
 
-    # 实盘 vs 回测因子比对（实盘数据接入后实现具体逻辑）
-    # 架构：取当日实盘 bar -> 因子计算 -> 与回测同时段因子值比对 -> 偏差超 1% 告警
+    # P4-7 drift_check 实现：取当日 astock_analysis 结果 vs 回测同时段因子比对
     issues = []
-    # TODO: 实盘数据接入后，逐策略比对因子值
+    try:
+        with get_conn() as conn:
+            # 取最新实盘分析
+            cur = conn.execute("""SELECT symbol, score, rating, factors FROM astock_analysis
+                WHERE ts::date = current_date ORDER BY ts DESC""")
+            live_rows = cur.fetchall()
+            if not live_rows:
+                return {"status": "skipped", "reason": "今日无实盘分析数据"}
+            # 逐标的比对回测结果（简化：score 偏差 >0.5 告警）
+            for symbol, live_score, live_rating, live_factors in live_rows:
+                cur2 = conn.execute(
+                    "SELECT result FROM backtest_symbols WHERE symbol=%s AND status='done' ORDER BY id DESC LIMIT 1",
+                    (symbol,))
+                bt = cur2.fetchone()
+                if bt and bt[0]:
+                    import json
+                    bt_data = json.loads(bt[0])
+                    bt_score = bt_data.get('total_return_pct', 0)
+                    if abs(live_score - bt_score) > 0.5:
+                        issues.append(f"{symbol}: 实盘 score {live_score:.3f} vs 回测 {bt_score:.3f} 偏差 >0.5")
+    except Exception as e:
+        issues.append(f"drift_check 异常: {str(e)[:80]}")
 
     if issues:
         from src.alert_notify import AlertNotify

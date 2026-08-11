@@ -17,9 +17,18 @@
           <el-button size="small" link type="primary" @click.stop="onRowClick(row)">📊</el-button>
         </template>
       </el-table-column>
+      <el-table-column label="AI条款解读" width="100">
+        <template #default="{ row }">
+          <el-button size="small" link type="success" @click.stop="showTerms(row)">🤖条款</el-button>
+        </template>
+      </el-table-column>
     </el-table>
     <div style="margin-top: 12px; color:#999;font-size:12px">点击行查看K线 · 数据来源：Tushare cb_daily + cb_basic</div>
     <KlineDialog v-model="klineVisible" :symbol="klineSymbol" :name="klineName" />
+    <el-dialog v-model="termsVisible" :title="`AI 条款解读 - ${termsSymbol}`" width="600px">
+      <el-input v-model="termsResult" type="textarea" :rows="10" readonly v-loading="termsLoading" />
+      <template #footer><el-button @click="termsVisible = false">关闭</el-button></template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -35,6 +44,10 @@ const filters = ref({ limit: 100 })
 const klineVisible = ref(false)
 const klineSymbol = ref('')
 const klineName = ref('')
+const termsVisible = ref(false)
+const termsSymbol = ref('')
+const termsResult = ref('')
+const termsLoading = ref(false)
 
 const screen = async () => {
   loading.value = true
@@ -48,5 +61,16 @@ const onRowClick = (row) => {
   klineSymbol.value = row.ts_code
   klineName.value = row.name
   klineVisible.value = true
+}
+const showTerms = async (row) => {
+  termsSymbol.value = row.ts_code
+  termsVisible.value = true
+  termsLoading.value = true
+  termsResult.value = ''
+  try {
+    const r = await api.get('/convertible/terms', { params: { ts_code: row.ts_code } })
+    termsResult.value = r.summary || '（无解读）'
+  } catch (e) { termsResult.value = '解读失败（LLM 或 Tushare 不可用）' }
+  finally { termsLoading.value = false }
 }
 </script>

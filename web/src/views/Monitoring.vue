@@ -22,46 +22,53 @@
               <el-descriptions-item label="标的">{{ s.symbol }}</el-descriptions-item>
               <el-descriptions-item label="类型">{{ s.type }}</el-descriptions-item>
               <el-descriptions-item label="回测验证">{{ s.backtest_verified ? '✓' : '✗' }}</el-descriptions-item>
-              <el-descriptions-item label="标的池">{{ s.pool_id || '未绑定' }}</el-descriptions-item>
+              <el-descriptions-item label="资产">¥{{ formatNum(s._equity) }}</el-descriptions-item>
             </el-descriptions>
           </div>
-          <div ref="charts" style="height: 200px"></div>
-          <div v-if="!s.enabled" style="text-align: center; color: #999; line-height: 200px">策略未运行</div>
+          <div style="height: 200px">
+            <v-chart v-if="s._curve?.length" :option="chartOption(s)" autoresize style="height: 200px" />
+            <div v-else style="text-align: center; color: #999; line-height: 200px">暂无净值数据（strategy_runner 写入后显示）</div>
+          </div>
         </el-card>
       </el-col>
     </el-row>
-    <el-alert v-if="!strategies.length" type="info" :closable="false">暂无运行中策略</el-alert>
+    <el-alert v-if="!strategies.length" type="info" :closable="false">暂无策略</el-alert>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
-import * as echarts from 'echarts'
-import { getStrategies } from '../api'
+import { ref, onMounted } from 'vue'
+import { getStrategies, getPnl } from '../api'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
+
+use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const strategies = ref([])
 const loading = ref(false)
-const charts = ref([])
+const formatNum = (n) => (n || 0).toFixed(0)
+const chartOption = (s) => ({
+  tooltip: { trigger: 'axis' },
+  grid: { left: 40, right: 10, top: 10, bottom: 20 },
+  xAxis: { type: 'category', data: (s._curve || []).map(c => c.ts?.slice(5, 10)) },
+  yAxis: { type: 'value', scale: true },
+  series: [{ type: 'line', data: (s._curve || []).map(c => c.value), smooth: true, lineStyle: { width: 2 }, areaStyle: { opacity: 0.1 } }],
+})
 
 const load = async () => {
   loading.value = true
   try {
     strategies.value = await getStrategies()
-    await nextTick()
-    // 渲染图表
-    strategies.value.forEach((s, i) => {
-      const el = charts.value[i]
-      if (!el) return
-      const chart = echarts.init(el)
-      // 占位：实盘数据接入后用真实 K 线
-      chart.setOption({
-        xAxis: { type: 'category', data: ['--','--','--','--','--'] },
-        yAxis: { type: 'value' },
-        series: [{ type: 'line', data: [0,0,0,0,0], smooth: true }],
-        tooltip: { trigger: 'axis' },
-        grid: { left: 40, right: 10, top: 10, bottom: 20 },
-      })
-    })
+    // P2-9：加载盈亏曲线（PnL 全局，分策略后可按 symbol 查）
+    try {
+      const pnl = await getPnl()
+      const curve = pnl.curve || []
+      const equity = pnl.total_value || 0
+      strategies.value.forEach(s => { s._curve = curve; s._equity = equity })
+    } catch { /* 无数据 */ }
   } finally { loading.value = false }
 }
 onMounted(load)

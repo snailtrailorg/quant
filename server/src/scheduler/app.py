@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime
 from celery import Celery
+from celery.schedules import crontab
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -89,6 +90,11 @@ app.conf.update(
             "task": "src.scheduler.tasks.static_list_sync",
             "schedule": 604800.0,
             "options": {"queue": "data"},
+        },
+        "daily-report": {
+            "task": "src.scheduler.tasks.daily_report",
+            "schedule": crontab(hour=16, minute=30),
+            "options": {"queue": "risk"},
         },
         "broker-health-check": {
             "task": "src.scheduler.tasks.broker_health_check",

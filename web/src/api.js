@@ -131,3 +131,7 @@ export const registerUser = (token, username, password) => api.post('/auth/regis
 export const forgotPassword = email => api.post('/auth/forgot-password', { email })
 export const resetPassword = (token, new_password) => api.post('/auth/reset-password', { token, new_password })
 export const changePassword = (old_password, new_password) => api.post('/auth/change-password', { old_password, new_password })
+export const getLiveTrading = api.get('/live-trading')
+export const updateLiveTrading = (market, enabled) => api.put(`/live-trading/${market}?enabled=${enabled}`)
+export const logAnalyze = (data) => api.post('/log/analyze', data)
+export const logoutApi = () => api.post('/auth/logout')

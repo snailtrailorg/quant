@@ -61,12 +61,20 @@ class BarContext:
         self._history = history or []
 
     def sma(self, n: int) -> float:
-        """简单移动平均：取最近 n 根 K 线收盘价均值（含当前）。"""
+        """简单移动平均。P4-1 缓存：同 bar 多次调 sma(n) 只算一次。"""
+        cache_key = f"sma_{n}"
+        if not hasattr(self, "_sma_cache"):
+            self._sma_cache = {}
+        if cache_key in self._sma_cache:
+            return self._sma_cache[cache_key]
         closes = [h.get("close", 0) for h in self._history[-(n-1):]] if self._history else []
         closes.append(self.close)
         if len(closes) < n:
-            return sum(closes) / len(closes) if closes else self.close
-        return sum(closes[-n:]) / n
+            result = sum(closes) / len(closes) if closes else self.close
+        else:
+            result = sum(closes[-n:]) / n
+        self._sma_cache[cache_key] = result
+        return result
 
     @property
     def history(self) -> list[dict]:
@@ -126,8 +134,6 @@ def _safe_eval(expr: str, ctx: dict[str, float]) -> float:
             func = _eval(node.func)
             args = [_eval(a) for a in node.args]
             return func(*args)
-        elif isinstance(node, ast.Attribute):
-            return getattr(_eval(node.value), node.attr)
         raise TypeError(f"不支持的表达式节点: {type(node).__name__}")
 
     return float(_eval(tree.body))
@@ -162,8 +168,18 @@ class MADevFactor(Factor):
 @register_factor("rsi", category="trend", params={"n": 14})
 class RSIFactor(Factor):
     def compute(self, ctx: BarContext) -> float:
-        # 简化实现
-        return 50.0
+        n = self.params.get("n", 14)
+        closes = [h.get("close", 0) for h in ctx.history[-n:]] + [ctx.close]
+        if len(closes) < 2:
+            return 50.0
+        gains, losses = [], []
+        for i in range(1, len(closes)):
+            diff = closes[i] - closes[i - 1]
+            gains.append(max(diff, 0))
+            losses.append(max(-diff, 0))
+        avg_gain = sum(gains) / len(gains)
+        avg_loss = sum(losses) / len(losses) if sum(losses) > 0 else 0.0001
+        return round(100 - 100 / (1 + avg_gain / avg_loss), 2)
 
 
 @register_factor("volume_ratio", category="trend", params={"n": 5})
@@ -176,7 +192,7 @@ class VolumeRatioFactor(Factor):
                  description="可转债双低: price + premium_rate * 100")
 class DoubleLowFactor(Factor):
     def compute(self, ctx: BarContext) -> float:
-        return -ctx.close  # 简化：价格越低越好（负值，后续聚合反向）
+        return -ctx.close  # 简化。真双低=price+premium_rate*100 需 conv_price（BarContext 待扩展）
 
 
 @register_factor("funding_rate", category="crypto",

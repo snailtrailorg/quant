@@ -66,7 +66,9 @@ class AlertNotify:
     # ── 路由 ──
 
     def _route(self, level: Level) -> str:
-        """按级别路由渠道（都走 wechat_work，配额宽松；critical 可加 discord）。"""
+        """按级别路由渠道（P3-4 分级：critical 走 discord+wechat，warn/info 走 wechat）。"""
+        if level == "critical":
+            return "discord"
         return "wechat_work"
 
     # ── 去重 + 配额 ──
@@ -99,10 +101,22 @@ class AlertNotify:
         return False
 
     def _record(self, alert_id: str, level: Level, title: str, body: str, channel: str):
-        """记录到 Valkey（供 Web 展示）。"""
+        """记录到 Valkey（实时看板）+ PG alert_history（持久化，P3-5）。"""
         self._redis.hset(f"alert:{alert_id}", mapping={
             "level": level, "title": title, "body": body[:500],
             "channel": channel, "ts": str(time.time()),
         })
         self._redis.lpush("alert:history", alert_id)
         self._redis.ltrim("alert:history", 0, 999)
+        # P3-5 持久化到 PG
+        try:
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                conn.execute("""CREATE TABLE IF NOT EXISTS alert_history (
+                    id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
+                    level TEXT, title TEXT, body TEXT, channel TEXT)""")
+                conn.execute("INSERT INTO alert_history (level, title, body, channel) VALUES (%s,%s,%s,%s)",
+                             (level, title, body[:1000], channel))
+                conn.commit()
+        except Exception:
+            pass

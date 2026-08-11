@@ -172,14 +172,54 @@ class Strategy:
             from .broker import record_broker_usage
             record_broker_usage(getattr(self.config, "adapter", ""), sig.action.name, self.symbol,
                                 success=True, latency_ms=int((_t.time() - _t0) * 1000))
+            self._log_signal_order(sig, final)  # P1-3 三账数据来源
         except Exception:
             from .broker import record_broker_usage
             record_broker_usage(getattr(self.config, "adapter", ""), sig.action.name, self.symbol,
                                 success=False, latency_ms=int((_t.time() - _t0) * 1000))
             raise
 
+
+    def _log_signal_order(self, sig: Signal, final_order: dict) -> None:
+        """写 signal_log + order_log（三账对账数据来源，P1-3）。回测 monkey-patch 跳过。"""
+        try:
+            from ..data_platform.db import get_conn
+            with get_conn() as conn:
+                conn.execute("""CREATE TABLE IF NOT EXISTS signal_log (
+                    id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
+                    strategy_id TEXT, symbol TEXT, action TEXT, score NUMERIC, price NUMERIC)""")
+                conn.execute("""CREATE TABLE IF NOT EXISTS order_log (
+                    id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
+                    strategy_id TEXT, symbol TEXT, action TEXT, volume INT, price NUMERIC,
+                    status TEXT DEFAULT 'submitted', signal_id BIGINT)""")
+                cur = conn.execute(
+                    "INSERT INTO signal_log (strategy_id,symbol,action,score,price) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+                    (self.config.id, self.symbol, sig.action.name, sig.score, sig.price))
+                sig_id = cur.fetchone()[0]
+                conn.execute(
+                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id) VALUES (%s,%s,%s,%s,%s,%s)",
+                    (self.config.id, self.symbol, final_order.get("action", sig.action.name),
+                     final_order.get("volume", 100), final_order.get("price", 0), sig_id))
+                conn.commit()
+        except Exception:
+            pass  # 回测/无 DB 跳
+
     # ——— 工厂 ———
 
     @classmethod
     def from_config(cls, config: StrategyConfig, adapter) -> "Strategy":
-        return cls(config, adapter)
+        """P1-1 策略类型注册制：按 config.type 分发到注册的子类，默认基类。"""
+        strategy_cls = _STRATEGY_REGISTRY.get(config.type, cls)
+        return strategy_cls(config, adapter)
+
+
+# 策略类型注册表 + 装饰器（P1-1）
+_STRATEGY_REGISTRY: dict[str, type] = {}
+
+
+def register_strategy(type_name: str):
+    """策略子类注册装饰器。from_config 按 type 查此表分发。"""
+    def decorator(cls):
+        _STRATEGY_REGISTRY[type_name] = cls
+        return cls
+    return decorator

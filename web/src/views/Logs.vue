@@ -2,8 +2,21 @@
   <el-row :gutter="20">
     <el-col :span="14">
       <el-card>
-        <template #header>运行日志</template>
-        <el-table :data="logs" stripe height="500">
+        <template #header>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <span>运行日志</span>
+            <div style="display: flex; gap: 8px; align-items: center">
+              <el-select v-model="levelFilter" size="small" style="width: 100px" placeholder="级别" clearable>
+                <el-option label="全部" value="" />
+                <el-option label="ERROR" value="ERROR" />
+                <el-option label="WARN" value="WARN" />
+                <el-option label="INFO" value="INFO" />
+              </el-select>
+              <el-button type="primary" size="small" @click="showAnalyze = true" :disabled="!errorLogs.length">AI 归因（{{ errorLogs.length }} 条异常）</el-button>
+            </div>
+          </div>
+        </template>
+        <el-table :data="filteredLogs" stripe height="500">
           <el-table-column prop="ts" label="时间" width="160">
             <template #default="{ row }">{{ row.ts.replace('T', ' ').slice(0, 19) }}</template>
           </el-table-column>
@@ -34,13 +47,40 @@
       </el-card>
     </el-col>
   </el-row>
+
+  <el-dialog v-model="showAnalyze" title="AI 日志归因" width="600px">
+    <el-alert type="warning" :closable="false" style="margin-bottom: 16px">对 {{ errorLogs.length }} 条 ERROR/WARN 日志进行 AI 归因分析。</el-alert>
+    <el-input v-model="analysisResult" type="textarea" :rows="10" readonly placeholder="点击分析按钮..." />
+    <template #footer>
+      <el-button @click="showAnalyze = false">关闭</el-button>
+      <el-button type="primary" @click="doAnalyze" :loading="analyzing">分析</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { getLogs, getAlerts } from '../api'
+import { ref, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { getLogs, getAlerts, logAnalyze } from '../api'
 const logs = ref([])
 const alerts = ref([])
+const showAnalyze = ref(false)
+const analyzing = ref(false)
+const analysisResult = ref('')
+const levelFilter = ref('')
+const filteredLogs = computed(() => {
+  if (!levelFilter.value) return logs.value
+  return logs.value.filter(l => l.level === levelFilter.value)
+})
+const errorLogs = computed(() => (logs.value || []).filter(l => l.level === 'ERROR' || l.level === 'WARN'))
+const doAnalyze = async () => {
+  analyzing.value = true; analysisResult.value = ''
+  try {
+    const r = await logAnalyze({ logs: errorLogs.value })
+    analysisResult.value = r.analysis || '无分析结果'
+  } catch (e) { ElMessage.error('归因失败') }
+  finally { analyzing.value = false }
+}
 onMounted(async () => {
   try { logs.value = (await getLogs()).logs || [] } catch {}
   try { alerts.value = (await getAlerts()).alerts || [] } catch {}

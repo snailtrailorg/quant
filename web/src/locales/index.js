@@ -1,6 +1,6 @@
 export default {
   zh: {
-    app: { title: '人工智能开发学习' },
+    app: { title: '多市场混合量化交易平台' },
     nav: {
       dashboard: '总览',
       trade: '交易工作台',
@@ -78,10 +78,20 @@ export default {
       resistance: '阻力',
       conclusion: '结论',
     },
+    backtest: { title: '回测中心', run: '运行', summary: '汇总', detail: '详情', view: '可视化' },
+    trading: { title: '实盘看板', positions: '持仓', orders: '订单', pnl: '盈亏曲线' },
+    monitoring: { title: '策略监控', equity: '净值', drawdown: '回撤' },
+    pool: { title: '标的池', create: '创建', add: '加入池' },
+    factors: { title: '因子库', create: '新建', dsl: 'DSL表达式' },
+    log: { title: '日志', analyze: 'AI归因', analyzeResult: '归因结果' },
+    account: { title: '账户管理', create: '创建', delete: '删除', disable: '禁用' },
+    brokers: { title: '交易通道', usage: '通道用量' },
+    channels: { title: '消息通道', test: '测试' },
+    llm: { title: 'AI模型', budget: '预算预警', check: '检查告警' },
     user: { role: '角色', logout: '退出' },
   },
   en: {
-    app: { title: '人工智能开发学习' },
+    app: { title: 'Multi-Market Quant Trading Platform' },
     nav: {
       dashboard: 'Dashboard',
       trade: 'Trade',
@@ -159,6 +169,16 @@ export default {
       resistance: 'Resistance',
       conclusion: 'Conclusion',
     },
+    backtest: { title: 'Backtest', run: 'Run', summary: 'Summary', detail: 'Detail', view: 'Visualization' },
+    trading: { title: 'Trading', positions: 'Positions', orders: 'Orders', pnl: 'PnL Curve' },
+    monitoring: { title: 'Monitoring', equity: 'Equity', drawdown: 'Drawdown' },
+    pool: { title: 'Pools', create: 'Create', add: 'Add to Pool' },
+    factors: { title: 'Factors', create: 'New', dsl: 'DSL Expression' },
+    log: { title: 'Logs', analyze: 'AI Analyze', analyzeResult: 'Analysis' },
+    account: { title: 'Account', create: 'Create', delete: 'Delete', disable: 'Disable' },
+    brokers: { title: 'Brokers', usage: 'Usage' },
+    channels: { title: 'Channels', test: 'Test' },
+    llm: { title: 'AI Models', budget: 'Budget', check: 'Check Alert' },
     user: { role: 'Role', logout: 'Logout' },
   },
 }

@@ -8,9 +8,9 @@
     </template>
     <div class="chat-body" ref="body">
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
-        <div class="bubble">{{ msg.content }}</div>
+        <div class="bubble" v-html="msg.content"></div>
       </div>
-      <div v-if="loading" class="msg assistant"><div class="bubble">思考中...</div></div>
+      <div v-if="loading" class="msg assistant"><div class="bubble">{{ streamingText || '思考中...' }}</div></div>
     </div>
     <div class="chat-input">
       <el-input
@@ -40,6 +40,7 @@ const messages = ref([
 const input = ref('')
 const loading = ref(false)
 const body = ref(null)
+const streamingText = ref('')
 
 const scroll = () => nextTick(() => { if (body.value) body.value.scrollTop = body.value.scrollHeight })
 
@@ -49,10 +50,42 @@ const onSend = async () => {
   messages.value.push({ role: 'user', content: text })
   input.value = ''
   loading.value = true
+  streamingText.value = ''
   scroll()
   try {
-    const res = await chat(text)
-    messages.value.push({ role: 'assistant', content: res.reply })
+    // P2-10：优先 WS 流式，fallback POST
+    const token = localStorage.getItem('token')
+    if (token && window.WebSocket) {
+      await new Promise((resolve) => {
+        const ws = new WebSocket(`ws://${location.host}/ws/chat?token=${token}`)
+        let connected = false
+        ws.onopen = () => {
+          connected = true
+          ws.send(JSON.stringify({ messages: [{ role: 'user', content: text }] }))
+        }
+        ws.onmessage = (e) => {
+          if (e.data === '[DONE]') { ws.close(); resolve() }
+          else { streamingText.value += e.data; scroll() }
+        }
+        ws.onerror = () => { if (!connected) resolve() }
+        ws.onclose = () => { resolve() }
+        setTimeout(() => { if (ws.readyState === 1) {} else resolve() }, 25000)
+      }).then(() => {
+        if (streamingText.value) {
+          messages.value.push({ role: 'assistant', content: streamingText.value.replace(/\n/g, '<br>') })
+          streamingText.value = ''
+        } else {
+          throw new Error('ws 空')
+        }
+      }).catch(async () => {
+        // fallback POST
+        const res = await chat(text)
+        messages.value.push({ role: 'assistant', content: res.reply.replace(/\n/g, '<br>') })
+      })
+    } else {
+      const res = await chat(text)
+      messages.value.push({ role: 'assistant', content: res.reply.replace(/\n/g, '<br>') })
+    }
   } catch (e) {
     messages.value.push({ role: 'assistant', content: '查询失败: ' + (e.detail || e.message || '未知错误') })
   } finally {

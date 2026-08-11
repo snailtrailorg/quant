@@ -201,11 +201,26 @@ class RiskControl:
         return RiskDecision(approved=True, reason="场内风控通过")
 
     def _check_crypto(self, order: dict) -> RiskDecision:
-        """加密专属风控。"""
+        """加密专属风控（P3-9 补全：杠杆+逐仓+日亏损+单笔金额）。"""
         rules = self._rules["crypto"]
         leverage = order.get("leverage", 1)
         if leverage > rules["leverage_max"]:
             return RiskDecision(approved=False, reason=f"杠杆 {leverage}x 超上限 {rules['leverage_max']}x", severity="warn")
+        # 日亏损熔断
+        daily_limit = rules.get("daily_loss_limit", 0.05)
+        state = self._get_global_state("")
+        if state.daily_loss >= daily_limit:
+            return RiskDecision(approved=False, reason=f"加密日亏损 {state.daily_loss:.1%} 超限 {daily_limit:.0%}", severity="critical")
+        # 单笔金额截断（P3-9 补全，复用 max_single_amount）
+        price = float(order.get("price", 0) or 0)
+        volume = float(order.get("volume", 0) or 0)
+        max_amount = rules.get("max_single_amount", 500000)
+        amount = price * volume
+        if price > 0 and amount > max_amount:
+            new_vol = int(max_amount / price)
+            if new_vol <= 0:
+                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}", severity="warn")
+            return RiskDecision(approved=True, reason=f"单笔截断 {int(volume)}->{new_vol}", adjusted={**order, "volume": new_vol}, severity="warn")
         return RiskDecision(approved=True, reason="加密风控通过")
 
     # ── 全局状态（从数据中台/账户读取，简化） ──

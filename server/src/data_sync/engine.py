@@ -457,9 +457,17 @@ def _daily_to_rows(df: pd.DataFrame) -> list[tuple]:
 
 
 def _save_bars(rows: list[tuple]) -> int:
-    """写入 bar_1D 表。"""
+    """写入 bar_1D 表。P3-15：save_bars 内部已有 validate_bars，这里补充 validate_bar_quality 调用。"""
     if not rows:
         return 0
+    # P3-15: 调用 validate_bar_quality（去重/异常gap/vol=0）
+    try:
+        from src.data_platform.adapters.tushare_adapter import validate_bar_quality
+        quality = validate_bar_quality(rows)
+        if quality.get("issues"):
+            logger.warning(f"数据质量校验: {quality['issues']}")
+    except Exception:
+        pass
     from src.data_platform.db import save_bars
     return save_bars("1D", rows)
 
@@ -562,7 +570,21 @@ def _get_pro_api(sync_id: str):
 
 
 def _list_static_ts_codes(kind: str) -> list[str]:
-    """从静态信息表取全部 ts_code（Tushare 格式，如 600000.SH）。"""
+    """从静态信息表取全部 ts_code（Tushare 格式）。
+
+    P3-14：优先读 static_symbols（P1-6 static_list_sync 写的表，含退市标记），
+    fallback 到旧 asset_static_info / etf_basic_info / cb_basic_info。
+    """
+    # P3-14: 优先 static_symbols
+    try:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT ts_code FROM static_symbols WHERE coalesce(delisted, false) = false ORDER BY ts_code")
+            rows = cur.fetchall()
+        if rows:
+            return [r[0] for r in rows]
+    except Exception:
+        pass
+    # fallback 旧表
     table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
     with get_conn() as conn:
         cur = conn.execute(f"SELECT ts_code FROM {table} ORDER BY ts_code")
