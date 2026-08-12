@@ -43,14 +43,13 @@ class DailySelectionEngine:
         self._factors = self._register_astock_factors()
 
     def _register_astock_factors(self) -> list[dict]:
-        """注册 A 股专用因子。"""
-        # 复用已有因子
-        factors = []
-        for name in ["ma_dev", "rsi", "volume_ratio"]:
-            entry = get_factor(name)
-            if entry:
-                factors.append(entry)
-        return factors
+        """注册 A 股选股因子。
+
+        选股只用静态因子（needs_history=0）--动态因子需历史窗口，扫全市场成本太高。
+        动态因子（ma_dev/rsi/volume_ratio 等）只用于策略。
+        """
+        from src.strategy_framework.factor import list_factors
+        return list_factors(category="trend", static_only=True)
 
     def run(self, trade_date: str | None = None) -> list[AnalysisResult]:
         """运行日线选股，返回排名结果。"""

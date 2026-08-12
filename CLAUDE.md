@@ -61,7 +61,6 @@
 ### 外部待确认 gate（不阻塞开发，但影响实盘）
 - 中泰 XTP 门槛/品种放行/费率（用户问客户经理）
 - Tushare 积分是否到 2000（分钟线硬门槛，但用户说一次性购买可接受）
-- DeepSeek/GLM 具体型号规格（V4/GLM-5.2 的 context/supports_tools，接入时按官方填）
 
 ## 文档维护（精要）
 
@@ -77,6 +76,7 @@
 - 架构设计：`docs/architecture/00-总体设计.md`（总体设计 10 节，14 份参考文档已合并）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（13 份全写完）
+- 本地开发部署（一键脚本 + 排错）：`scripts/LOCAL-DEPLOY.md`（用 `bash scripts/dev-start.sh start`，不要手动起服务）
 
 ## 项目知识（durable，随项目积累 ↓）
 

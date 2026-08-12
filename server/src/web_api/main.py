@@ -85,6 +85,14 @@ def startup():
     init_users_table()
     if ensure_default_admin():
         print("✓ 创建默认 admin（admin/admin123，请改密码）")
+    # 加载自定义因子（因子平台化）
+    try:
+        from src.strategy_framework.factor import load_factors_from_db
+        loaded = load_factors_from_db()
+        if loaded:
+            print(f"✓ 加载自定义因子: {', '.join(loaded)}")
+    except Exception:
+        pass  # 表可能未创建
 
 
 @app.get("/health")
@@ -253,12 +261,14 @@ def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("s
 
 @app.put("/api/strategy/{sid}")
 def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(require_perm("strategy_control"))):
-    """更新策略配置（含因子校验）。"""
+    """更新策略配置（含因子校验；Python 模式跳过因子校验）。"""
     import psycopg, json
-    from src.strategy_framework.factor import validate_strategy_factors
-    v = validate_strategy_factors(req.symbol, req.factors)
-    if not v["valid"]:
-        raise HTTPException(400, f"因子不兼容: {v['message']}")
+    # Python 模式（#15）跳过因子校验
+    if req.params.get("mode") != "python":
+        from src.strategy_framework.factor import validate_strategy_factors
+        v = validate_strategy_factors(req.symbol, req.factors)
+        if not v["valid"]:
+            raise HTTPException(400, f"因子不兼容: {v['message']}")
     with get_conn() as conn:
         cur = conn.execute("SELECT factors, aggregator FROM strategy_config WHERE id=%s", (sid,))
         old = cur.fetchone()
@@ -276,15 +286,20 @@ def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(requi
 
 @app.post("/api/strategy/{sid}/start")
 def start_strategy(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
-    """启动策略。未通过回测验证禁止实盘（EXE-003）。"""
-    import psycopg
+    """启动策略。未通过回测验证禁止实盘（EXE-003）。策略必须绑定标的或标的池（F-POOL-003）。"""
+    import psycopg, json
     with get_conn() as conn:
-        cur = conn.execute("SELECT backtest_verified FROM strategy_config WHERE id=%s", (sid,))
+        cur = conn.execute("SELECT backtest_verified, symbol, params FROM strategy_config WHERE id=%s", (sid,))
         row = cur.fetchone()
         if not row:
             raise HTTPException(404, "策略不存在")
         if not row[0]:
             raise HTTPException(403, "策略未通过回测验证，禁止实盘。请先运行回测。")
+        symbol, params_raw = row[1], row[2]
+        params = json.loads(params_raw) if isinstance(params_raw, str) else (params_raw or {})
+        # F-POOL-003：策略必须绑定标的或标的池
+        if not symbol and not params.get("pool_id"):
+            raise HTTPException(400, "策略未绑定标的或标的池，禁止启动。请在策略编辑页设置 symbol 或 pool_id。")
         conn.execute("UPDATE strategy_config SET enabled=true WHERE id=%s", (sid,))
         conn.commit()
     audit_log(payload["username"], "strategy_start", sid)
@@ -320,6 +335,173 @@ def verify_strategy(sid: str, payload: dict = Depends(require_perm("strategy_con
         conn.commit()
     audit_log(payload["username"], "verify_strategy", sid, detail="回测验证通过")
     return {"id": sid, "backtest_verified": True}
+
+
+@app.post("/api/strategy/validate-python")
+def validate_python_code(code: dict = Body(...), payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+    """校验 Python 策略代码：语法检查 + AST 安全校验（#15）。"""
+    from src.strategy_framework.strategy import _check_ast_blacklist
+    code_str = code.get("code", "")
+    forbidden = _check_ast_blacklist(code_str)
+    if forbidden:
+        return {"valid": False, "error": forbidden}
+    return {"valid": True}
+
+
+@app.post("/api/strategy/validate-params")
+def validate_params_api(body: dict = Body(...),
+                        payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+    """校验策略参数定义 + 参数值（parameter_defs 系统）。"""
+    from src.strategy_framework.strategy import (
+        validate_parameter_defs, validate_params_against_defs, build_default_params
+    )
+    defs = body.get("parameter_defs", [])
+    params = body.get("params", {})
+    err = validate_parameter_defs(defs)
+    if err:
+        return {"valid": False, "error": err}
+    err = validate_params_against_defs(params, defs)
+    if err:
+        return {"valid": False, "error": err}
+    return {"valid": True, "defaults": build_default_params(defs)}
+
+
+# --- 实盘任务（live_task，策略与标的分离） ---
+
+@app.get("/api/live-task")
+def list_live_tasks(status: str | None = None,
+                    payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """列实盘任务。"""
+    import json
+    with get_conn() as conn:
+        if status:
+            cur = conn.execute(
+                "SELECT id, name, strategy_id, symbol, params, status, account_id, initial_capital, created_at "
+                "FROM live_task WHERE status=%s ORDER BY id DESC", (status,))
+        else:
+            cur = conn.execute(
+                "SELECT id, name, strategy_id, symbol, params, status, account_id, initial_capital, created_at "
+                "FROM live_task ORDER BY id DESC")
+        rows = cur.fetchall()
+    return [{"id": r[0], "name": r[1], "strategy_id": r[2], "symbol": r[3],
+             "params": json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {}),
+             "status": r[5], "account_id": r[6], "initial_capital": float(r[7]) if r[7] else None,
+             "created_at": str(r[8]) if r[8] else None} for r in rows]
+
+
+@app.post("/api/live-task")
+def create_live_task(body: dict = Body(...),
+                     payload: dict = Depends(require_perm("strategy_control"))):
+    """创建实盘任务：选策略+标的+任务参数值。创建时构建 strategy_snapshot。"""
+    import json
+    from src.strategy_framework.strategy import (
+        validate_parameter_defs, validate_params_against_defs, build_default_params
+    )
+    name = body.get("name", "")
+    strategy_id = body.get("strategy_id", "")
+    symbol = body.get("symbol", "")
+    params = body.get("params", {})
+    account_id = body.get("account_id")
+    initial_capital = body.get("initial_capital", 1000000)
+
+    if not name or not strategy_id or not symbol:
+        raise HTTPException(400, "name/strategy_id/symbol 必填")
+
+    # 读策略配置
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, name, type, symbol, adapter, enabled, factors, aggregator, risk, params, backtest_verified "
+            "FROM strategy_config WHERE id=%s", (strategy_id,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, f"策略 {strategy_id} 不存在")
+    if not row[10]:
+        raise HTTPException(403, "策略未通过回测验证，禁止实盘")
+
+    sc_params = json.loads(row[9]) if isinstance(row[9], str) else (row[9] or {})
+    defs = sc_params.get("parameter_defs", [])
+
+    # 校验参数定义
+    err = validate_parameter_defs(defs)
+    if err:
+        raise HTTPException(400, f"策略参数定义错误: {err}")
+
+    # 合并默认值 + 用户传入参数
+    merged_params = {**build_default_params(defs), **params}
+    err = validate_params_against_defs(merged_params, defs)
+    if err:
+        raise HTTPException(400, f"参数值错误: {err}")
+
+    # 构建策略快照（创建时固化，后续改策略不影响）
+    strategy_snapshot = {
+        "id": row[0], "name": row[1], "type": row[2],
+        "adapter": row[4], "factors": row[6] if isinstance(row[6], list) else json.loads(row[6] or "[]"),
+        "aggregator": row[7] if isinstance(row[7], dict) else json.loads(row[7] or "{}"),
+        "risk": row[8] if isinstance(row[8], dict) else json.loads(row[8] or "{}"),
+        "params": sc_params,  # 含 mode/python_code/parameter_defs
+    }
+
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO live_task (name, strategy_id, symbol, params, strategy_snapshot, status, "
+            "account_id, initial_capital) VALUES (%s,%s,%s,%s,%s,'pending',%s,%s) RETURNING id",
+            (name, strategy_id, symbol, json.dumps(merged_params), json.dumps(strategy_snapshot),
+             account_id, initial_capital))
+        task_id = cur.fetchone()[0]
+        conn.commit()
+    audit_log(payload["username"], "create_live_task", f"task {task_id} strategy={strategy_id} symbol={symbol}")
+    return {"id": task_id, "status": "pending"}
+
+
+@app.post("/api/live-task/{tid}/start")
+def start_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
+    """启动实盘任务。"""
+    import subprocess
+    with get_conn() as conn:
+        cur = conn.execute("SELECT status, strategy_id FROM live_task WHERE id=%s", (tid,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "实盘任务不存在")
+        conn.execute("UPDATE live_task SET status='running', updated_at=now() WHERE id=%s", (tid,))
+        conn.commit()
+    audit_log(payload["username"], "start_live_task", f"task {tid}")
+    try:
+        subprocess.run(["systemctl", "start", f"quant-strategy@{tid}"], timeout=10, capture_output=True)
+    except Exception:
+        pass
+    return {"id": tid, "status": "running"}
+
+
+@app.post("/api/live-task/{tid}/stop")
+def stop_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
+    """停止实盘任务。"""
+    import subprocess
+    with get_conn() as conn:
+        conn.execute("UPDATE live_task SET status='stopped', updated_at=now() WHERE id=%s", (tid,))
+        conn.commit()
+    audit_log(payload["username"], "stop_live_task", f"task {tid}")
+    try:
+        subprocess.run(["systemctl", "stop", f"quant-strategy@{tid}"], timeout=10, capture_output=True)
+    except Exception:
+        pass
+    return {"id": tid, "status": "stopped"}
+
+
+@app.delete("/api/live-task/{tid}")
+def delete_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
+    """删除实盘任务（仅 stopped/error 可删）。"""
+    with get_conn() as conn:
+        cur = conn.execute("SELECT status FROM live_task WHERE id=%s", (tid,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "实盘任务不存在")
+        if row[0] == "running":
+            raise HTTPException(400, "运行中的任务不可删除，请先停止")
+        conn.execute("DELETE FROM live_task WHERE id=%s", (tid,))
+        conn.commit()
+    audit_log(payload["username"], "delete_live_task", f"task {tid}")
+    return {"ok": True}
+
 
 # ——— 持仓/盈亏 ———
 
@@ -1569,10 +1751,81 @@ def delete_risk_rule(rid: int, payload: dict = Depends(require_role("admin"))):
 # --- 因子 + 三账对账（#2 + #7） ---
 
 @app.get("/api/factors")
-def list_factors_api(category: str | None = None,
+def list_factors_api(category: str | None = None, static_only: bool = False,
                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     from src.strategy_framework.factor import list_factors
-    return {"items": list_factors(category)}
+    return {"items": list_factors(category, static_only=static_only)}
+
+
+@app.post("/api/factors")
+def create_factor_api(req: dict = Body(...),
+                       payload: dict = Depends(require_perm("strategy_control"))):
+    """创建自定义因子（因子平台化）。"""
+    from src.strategy_framework.factor import register_custom_factor
+    try:
+        result = register_custom_factor(
+            name=req.get("name", ""),
+            category=req.get("category", "custom"),
+            code=req.get("code", ""),
+            description=req.get("description", ""),
+            params=req.get("params", {}),
+            needs_history=int(req.get("needs_history", 0)),
+        )
+        audit_log(payload["username"], "create_factor", req.get("name", ""))
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.put("/api/factors/{name}")
+def update_factor_api(name: str, req: dict = Body(...),
+                       payload: dict = Depends(require_perm("strategy_control"))):
+    """更新自定义因子。"""
+    from src.strategy_framework.factor import register_custom_factor
+    try:
+        result = register_custom_factor(
+            name=name,
+            category=req.get("category", "custom"),
+            code=req.get("code", ""),
+            description=req.get("description", ""),
+            params=req.get("params", {}),
+            needs_history=int(req.get("needs_history", 0)),
+        )
+        audit_log(payload["username"], "update_factor", name)
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/factors/{name}")
+def delete_factor_api(name: str,
+                       payload: dict = Depends(require_perm("strategy_control"))):
+    """删除自定义因子。"""
+    from src.strategy_framework.factor import delete_custom_factor
+    ok = delete_custom_factor(name)
+    if not ok:
+        raise HTTPException(404, f"因子 {name} 不存在或非自定义因子")
+    audit_log(payload["username"], "delete_factor", name)
+    return {"ok": True}
+
+
+@app.post("/api/factors/validate")
+def validate_factor_code_api(code: dict = Body(...),
+                              payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+    """校验因子 Python 代码。"""
+    from src.strategy_framework.factor import _check_ast_blacklist, _make_factor_class
+    code_str = code.get("code", "")
+    name = code.get("name", "test")
+    # AST 校验
+    forbidden = _check_ast_blacklist(code_str)
+    if forbidden:
+        return {"valid": False, "error": forbidden}
+    # 编译校验
+    try:
+        _make_factor_class(name, code_str, {})
+        return {"valid": True}
+    except ValueError as e:
+        return {"valid": False, "error": str(e)}
 
 
 @app.get("/api/reconcile")
@@ -1801,7 +2054,10 @@ def delete_pool(pid: str, payload: dict = Depends(require_perm("strategy_control
 @app.post("/api/backtest")
 def create_backtest_api(body: dict = Body(...),
                         payload: dict = Depends(require_perm("strategy_control"))):
-    """启动回测 run：写 backtest_runs + Celery backtest_run_task。"""
+    """启动回测 run：写 backtest_runs + Celery backtest_run_task。
+
+    支持 symbol_params：per-symbol 参数覆盖。
+    """
     import json
     strategy_id = body.get("strategy_config_id")
     symbols = body.get("symbols", [])
@@ -1813,12 +2069,14 @@ def create_backtest_api(body: dict = Body(...),
     if not symbols or not strategy_id:
         return {"error": "需 strategy_config_id + symbols/pool_id"}
     params = body.get("params", {})
+    symbol_params = body.get("symbol_params", {})  # per-symbol 参数覆盖
     mode = body.get("mode", "single")
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO backtest_runs (strategy_config_id, symbols, params, mode, status) "
-            "VALUES (%s,%s,%s,%s,'pending') RETURNING id",
-            (strategy_id, json.dumps(symbols), json.dumps(params), mode))
+            "INSERT INTO backtest_runs (strategy_config_id, symbols, params, symbol_params, mode, status) "
+            "VALUES (%s,%s,%s,%s,%s,'pending') RETURNING id",
+            (strategy_id, json.dumps(symbols), json.dumps(params),
+             json.dumps(symbol_params), mode))
         run_id = cur.fetchone()[0]
         conn.commit()
     from src.scheduler.tasks import backtest_run_task

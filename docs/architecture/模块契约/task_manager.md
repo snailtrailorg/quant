@@ -22,7 +22,8 @@ server/src/task_manager.py   # 单文件，10 个模块级函数（非类）
 create_task(task_id, name, task_type, trigger_type, trigger_user, params=None) -> None
     # INSERT ... ON CONFLICT (id) DO UPDATE（可重试，幂等）
     # status='running'，progress 初始化 {current:0,total:0,pct:0,step:""}
-    # task_type: backtest/sync/ai/trade；trigger_type: manual/schedule/event
+    # task_type: backtest/sync/ai/trade/strategy；trigger_type: manual/schedule/event
+    # 关联：backtest_runs.task_id / live_task.task_id 指向 tasks.id
 update_heartbeat(task_id, progress=None) -> None
     # progress=None 只刷 last_heartbeat；有值则同步写 progress JSON
 complete_task(task_id, status="completed", error=None) -> None

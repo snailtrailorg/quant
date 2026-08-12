@@ -32,15 +32,19 @@
     </el-card>
 
     <!-- 新建回测弹窗 -->
-    <el-dialog v-model="showForm" title="新建回测" width="500px">
+    <el-dialog v-model="showForm" title="新建回测" width="640px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="策略">
-          <el-select v-model="form.strategyId" placeholder="选择策略" style="width: 100%">
+          <el-select v-model="form.strategyId" placeholder="选择策略" style="width: 100%" @change="onStrategyChange">
             <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="标的">
+          <el-input v-model="form.symbolsStr" type="textarea" :rows="2"
+            placeholder="多个标的用逗号分隔，如 600000.SHSE,600001.SHSE" />
+        </el-form-item>
         <el-form-item label="标的池">
-          <el-select v-model="form.poolId" placeholder="选择标的池" clearable style="width: 100%">
+          <el-select v-model="form.poolId" placeholder="或选标的池（覆盖上面）" clearable style="width: 100%">
             <el-option v-for="p in pools" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
@@ -57,6 +61,23 @@
         <el-form-item label="初始资金">
           <el-input-number v-model="form.capital" :min="10000" :step="100000" style="width: 100%" />
         </el-form-item>
+
+        <!-- 统一参数 -->
+        <el-divider content-position="left">统一参数（所有标的共用）</el-divider>
+        <ParameterForm v-if="parameterDefs.length" :defs="parameterDefs" v-model="form.params" />
+        <div v-else style="color: #999; font-size: 12px; padding-left: 100px">该策略未定义参数</div>
+
+        <!-- per-symbol 参数（高级） -->
+        <el-divider content-position="left">
+          <el-checkbox v-model="form.useSymbolParams">高级：per-symbol 参数覆盖</el-checkbox>
+        </el-divider>
+        <template v-if="form.useSymbolParams">
+          <div style="color: #999; font-size: 12px; margin-bottom: 8px; padding-left: 100px">
+            JSON 格式：{ "600000.SHSE": {"buy_threshold": 0.03}, ... }
+          </div>
+          <el-input v-model="form.symbolParamsStr" type="textarea" :rows="4"
+            placeholder='{"600000.SHSE": {"buy_threshold": 0.03}}' />
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="showForm = false">取消</el-button>
@@ -72,6 +93,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
+import ParameterForm from '../components/ParameterForm.vue'
 
 const router = useRouter()
 const runs = ref([])
@@ -80,7 +102,17 @@ const pools = ref([])
 const loading = ref(false)
 const submitting = ref(false)
 const showForm = ref(false)
-const form = ref({ strategyId: '', poolId: '', dateRange: null, mode: 'parallel', capital: 1000000 })
+const parameterDefs = ref([])
+const form = ref({
+  strategyId: '', poolId: '', symbolsStr: '', dateRange: null, mode: 'parallel', capital: 1000000,
+  params: {}, useSymbolParams: false, symbolParamsStr: '',
+})
+
+const onStrategyChange = (sid) => {
+  const s = strategies.value.find(x => x.id === sid)
+  parameterDefs.value = s?.params?.parameter_defs || []
+  form.value.params = {}
+}
 
 const statusType = (s) => ({ running: 'warning', done: 'success', error: 'danger', pending: 'info' }[s] || 'info')
 
@@ -105,8 +137,20 @@ const submitRun = async () => {
   if (!form.value.strategyId) { ElMessage.warning('请选择策略'); return }
   submitting.value = true
   try {
+    // 解析 symbols 字符串
+    let symbols = []
+    if (form.value.symbolsStr) {
+      symbols = form.value.symbolsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean)
+    }
+    // 解析 per-symbol 参数
+    let symbolParams = {}
+    if (form.value.useSymbolParams && form.value.symbolParamsStr) {
+      try { symbolParams = JSON.parse(form.value.symbolParamsStr) }
+      catch { ElMessage.error('per-symbol 参数 JSON 格式错误'); submitting.value = false; return }
+    }
     const payload = {
       strategy_config_id: form.value.strategyId,
+      symbols,
       pool_id: form.value.poolId || null,
       mode: form.value.mode,
       params: {
@@ -114,7 +158,9 @@ const submitRun = async () => {
         commission: 0.0005,
         start: form.value.dateRange?.[0]?.toISOString().slice(0, 10),
         end: form.value.dateRange?.[1]?.toISOString().slice(0, 10),
+        ...form.value.params,
       },
+      ...(Object.keys(symbolParams).length ? { symbol_params: symbolParams } : {}),
     }
     await createBacktest(payload)
     ElMessage.success('已提交回测')

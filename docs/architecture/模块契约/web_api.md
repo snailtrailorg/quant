@@ -56,12 +56,14 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/PUT/DELETE | admin | PT4（channel_config CRUD） |
 | 交易通道 | `/api/brokers` `/api/brokers/{bid}/{test}` | GET/POST/PUT/DELETE | admin | PT5（broker_config CRUD） |
 | 风控规则 | `/api/risk-rules` `/api/risk-rules/{types,{rid}}` | GET/POST/PUT/DELETE | admin | PT6（risk_rules CRUD） |
-| 因子 | `/api/factors` | GET | viewer+ | `list_factors()` 注册表 |
+| 因子 | `/api/factors` `/api/factors/{name}` `/api/factors/validate` | GET/POST/PUT/DELETE | viewer+ / strategy_control | 因子 CRUD（预置+自定义）+ 代码校验 |
+| 策略校验 | `/api/strategy/validate-python` `/api/strategy/validate-params` | POST | analyst+ | Python 代码 AST 校验 + parameter_defs 校验 |
+| **实盘任务** | `/api/live-task` `/api/live-task/{tid}/{start,stop}` `/api/live-task/{tid}` | GET/POST/DELETE | viewer+ / strategy_control | 策略与标的分离（live_task CRUD，一标的一进程） |
 | 对账 | `/api/reconcile` | GET | viewer+ | `scheduler.reconcile_three_books`（三账） |
 | 审计 | `/api/audit` | GET | admin | audit_log 查询 |
 | 数据完整性 | `/api/data-integrity` | GET | viewer+ | A3（freq 1D/1min/5min + 标的数） |
 | 数据源用量 | `/api/data-source-usage` | GET | viewer+ | A4（data_source_usage 看板） |
-| 回测 | `/api/backtest` `/api/backtest/{run_id}` `/api/backtest/{run_id}/{symbol}/stream` | POST/GET | analyst+ | B3（创建/列表/详情/SSE 流） |
+| 回测 | `/api/backtest` `/api/backtest/{run_id}` `/api/backtest/{run_id}/{symbol}/stream` `/api/backtest/{run_id}/summary` | POST/GET | analyst+ | B3（创建含 symbol_params/列表/详情/SSE 流/汇总） |
 
 ### Pydantic 模型（main.py，请求体）
 `LoginReq` / `UserCreate` / `StrategyConfig` / `InviteReq` / `RegisterReq` / `ForgotReq` / `ResetReq` / `ChangePwdReq` / `ChatReq`(message) / `LLMModelReq` / `FeishuUpdateReq` / `DataSourceReq` / `ChannelReq` / `BrokerReq` / `RiskRuleReq`
@@ -140,7 +142,9 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 | 表 | 写（端点） | 读（端点） |
 |---|---|---|
 | `users` / `audit_log` | auth（create_user/invite/register + audit_log） | /api/user / /api/audit |
-| `strategy_config` | /api/strategy POST/PUT | /api/strategy GET |
+| `strategy_config` | /api/strategy POST/PUT | /api/strategy GET + /api/live-task POST（读快照） |
+| `live_task` | /api/live-task POST/DELETE + start/stop | /api/live-task GET + strategy_runner 启动读 |
+| `factor_def` | /api/factors POST/PUT/DELETE | /api/factors GET + load_factors_from_db |
 | `live_trading_config` | /api/live-trading/{market} PUT | /api/live-trading GET |
 | `llm_model_config` | /api/llm-models CRUD | gateway._load_models_from_db（间接） |
 | `llm_usage` | gateway._log_usage（间接） | /api/llm-usage/summary |
@@ -203,3 +207,4 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 
 ## 修订记录
 - 2026-08-10 初版（基于代码核实：main.py 路由 grep 85 条 + import 依赖 + DB 表操作 + 抽样端点 chat/llm-usage/auth/strategy）
+- 2026-08-11 加 live_task（策略与标的分离）+ 因子 CRUD（factor_def）+ validate-params/validate-python + 回测 symbol_params

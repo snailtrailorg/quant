@@ -20,6 +20,7 @@
         <el-sub-menu index="strategy">
           <template #title><el-icon><Setting /></el-icon>{{ t('nav.strategyLab') }}</template>
           <el-menu-item index="/strategy"><el-icon><List /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
+          <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTask') }}</el-menu-item>
           <el-menu-item index="/backtest"><el-icon><Histogram /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
           <el-menu-item index="/pool"><el-icon><FolderOpened /></el-icon>{{ t('nav.pool') }}</el-menu-item>
           <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>

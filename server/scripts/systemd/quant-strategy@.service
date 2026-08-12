@@ -9,7 +9,7 @@ User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/server
 EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strategy_runner.main --id %i
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strategy_runner.main --task-id %i
 Restart=always
 RestartSec=30
 MemoryMax=512M

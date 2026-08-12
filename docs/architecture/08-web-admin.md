@@ -39,12 +39,34 @@ DELETE /api/account/{id}
 
 ### 5.2 策略
 ```
+# 策略配置（配方，不绑标的）
 GET    /api/strategy                 # 列策略配置
 POST   /api/strategy                 # 新建（写 strategy_config）
-PUT    /api/strategy/{id}            # 改配置（参数热生效）
-POST   /api/strategy/{id}/start
-POST   /api/strategy/{id}/stop
-GET    /api/strategy/{id}/status     # 运行态
+PUT    /api/strategy/{id}            # 改配置（含 parameter_defs 参数定义）
+POST   /api/strategy/{id}/start      # 旧路径（兼容）
+POST   /api/strategy/{id}/stop       # 旧路径（兼容）
+POST   /api/strategy/validate-python # Python 代码 AST 校验
+POST   /api/strategy/validate-params # parameter_defs + 参数值校验
+
+# 实盘任务（策略与标的分离，一标的一进程）
+GET    /api/live-task                # 列实盘任务
+POST   /api/live-task                # 创建（选策略+标的+任务参数值，构建 strategy_snapshot）
+POST   /api/live-task/{id}/start     # 启动 systemd quant-strategy@<id>
+POST   /api/live-task/{id}/stop
+DELETE /api/live-task/{id}           # 删（仅 stopped/error）
+
+# 因子库（预置 + 自定义 DB 因子）
+GET    /api/factors                  # 列因子（含 needs_history/is_custom）
+POST   /api/factors                  # 新建自定义因子（Python 代码）
+PUT    /api/factors/{name}           # 改
+DELETE /api/factors/{name}           # 删
+POST   /api/factors/validate         # 因子代码校验
+
+# 回测（多标的 + per-symbol 参数）
+POST   /api/backtest                 # 创建（symbols/pool_id + params + symbol_params）
+GET    /api/backtest                 # 列表
+GET    /api/backtest/{run_id}        # 详情
+GET    /api/backtest/{run_id}/summary # 汇总（平均+排名）
 ```
 
 ### 5.3 交易/持仓/盈亏
@@ -123,14 +145,14 @@ GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 | 页面 | 内容 |
 |---|---|
 | 账户管理 | API 密钥加密存储、启停 |
-| 策略管理 | 策略列表、启停、参数表单、因子选择+权重、DSL 编辑器 |
+| 策略管理 | 策略配方（因子+权重+DSL/Python代码+参数定义）+ 实盘任务（选策略+标的+参数值）+ 回测（多标的+per-symbol 参数） |
 | A 股分析看板 | 选股结果、评级、分钟研判实时 |
 | 实盘交易看板 | 持仓/订单/盈亏曲线/成交 |
 | 风控中心 | 全局/分市场规则、一键熔断按钮、触发日志 |
 | 日志告警 | 运行/报错/交易日志、告警历史 |
 | AI 助手 | 聊天框，自然语言查平台 |
 
-策略配置页含**因子多选+权重输入+DSL 表达式编辑器**（受限语法高亮+校验），是"配置驱动模型"的核心 UI。
+策略配置页含**因子多选+权重+DSL/Python 代码框（双模式）+ 参数定义编辑器**。实盘任务页读策略 `parameter_defs` **动态生成参数表单**，选标的（直接/池/池子集）+ 填任务参数值。回测页支持 per-symbol 参数覆盖（高级模式）。
 
 ## 7. 安全
 

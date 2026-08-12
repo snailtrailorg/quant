@@ -683,7 +683,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
     pub_key = f"backtest:run:{run_id}:{symbol}"
 
     with get_conn() as conn:
-        cur = conn.execute("SELECT strategy_config_id, params FROM backtest_runs WHERE id=%s", (run_id,))
+        cur = conn.execute("SELECT strategy_config_id, params, symbol_params FROM backtest_runs WHERE id=%s", (run_id,))
         rr = cur.fetchone()
         if rr:
             cur = conn.execute("SELECT factors, aggregator, params FROM strategy_config WHERE id=%s", (rr[0],))
@@ -693,16 +693,25 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
         return {"status": "error", "error": "策略/run 不存在"}
 
     params = json.loads(rr[1])
+    # per-symbol 参数覆盖（symbol_params 列，可能为 NULL）
+    symbol_params_all = json.loads(rr[2]) if rr[2] else {}
+    per_symbol = symbol_params_all.get(symbol, {}) if isinstance(symbol_params_all, dict) else {}
     start = params.get("start", (date.today() - timedelta(days=365)).isoformat())
     end = params.get("end", date.today().isoformat())
     bars_df = get_bars(symbol, "1D", start, end)
     bars = bars_df.to_dict("records") if not bars_df.empty else []
 
+    # 合并参数：策略级 params + per-symbol 覆盖
+    strategy_params = json.loads(sc[2]) if sc[2] else {}
+    merged_params = {**strategy_params, **per_symbol}
+    # 移除 parameter_defs 元数据（不是参数值）
+    merged_params.pop("parameter_defs", None)
+
     cfg = StrategyConfig(
         id=rr[0], name=str(rr[0]), type="astock_analysis", symbol=symbol, adapter="xtp",
         factors=json.loads(sc[0]) if sc[0] else [],
         aggregator=json.loads(sc[1]) if sc[1] else {},
-        params=json.loads(sc[2]) if sc[2] else {})
+        params=merged_params)
 
     engine = BacktestEngine(
         initial_capital=params.get("capital", 100000),

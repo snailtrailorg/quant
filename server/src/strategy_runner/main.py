@@ -91,7 +91,8 @@ def _warmup_history(symbol: str) -> list:
 
 def main():
     parser = argparse.ArgumentParser(description="策略实盘化入口")
-    parser.add_argument("--id", required=True, help="strategy_config.id")
+    parser.add_argument("--task-id", help="live_task.id（新架构：策略与标的分离）")
+    parser.add_argument("--id", help="strategy_config.id（旧架构兼容）")
     parser.add_argument("--verbose", action="store_true", help="详细日志")
     args = parser.parse_args()
 
@@ -104,42 +105,75 @@ def main():
         logger.error("vnpy 未安装，策略实盘需要 vnpy 环境")
         sys.exit(1)
 
-    # 1. 读策略配置
-    from src.data_platform.db import get_conn
-
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT id, name, type, symbol, adapter, enabled, factors, "
-            "aggregator, params, backtest_verified "
-            "FROM strategy_config WHERE id=%s",
-            (args.id,),
-        )
-        row = cur.fetchone()
-    if not row:
-        logger.error("策略 %s 不存在", args.id)
+    if not args.task_id and not args.id:
+        logger.error("必须提供 --task-id（新）或 --id（旧）")
         sys.exit(1)
 
-    sid, name, s_type, symbol, adapter_type, enabled, factors, aggregator, params, bt_verified = row
-    # DB TEXT 列存 JSON 字符串，需 json.loads（P3 修复：服务器 psycopg 不自动解析）
+    # 1. 读 live_task（新架构）或 strategy_config（旧架构兼容）
+    from src.data_platform.db import get_conn
     import json as _json
-    factors = _json.loads(factors) if isinstance(factors, str) else (factors or [])
-    aggregator = _json.loads(aggregator) if isinstance(aggregator, str) else (aggregator or {})
-    params = _json.loads(params) if isinstance(params, str) else (params or {})
-    if not enabled or not bt_verified:
-        logger.warning("策略 %s 未启用或未回测验证，跳过", sid)
-        sys.exit(0)
 
-    # 读 strategy_account 绑定账户（#27）
-    initial_capital = 1000000
-    try:
+    if args.task_id:
+        # 新架构：策略与标的分离
         with get_conn() as conn:
-            cur = conn.execute("SELECT account_id, broker_provider, initial_capital FROM strategy_account WHERE strategy_id=%s LIMIT 1", (sid,))
-            sa = cur.fetchone()
-        if sa:
-            initial_capital = float(sa[2]) if sa[2] else 1000000
-            logger.info("策略 %s 绑定账户 %s (%s, 资金 %s)", sid, sa[0], sa[1], initial_capital)
-    except Exception as e:
-        logger.warning("读 strategy_account 失败（用默认资金）: %s", e)
+            cur = conn.execute(
+                "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
+                "status, account_id, initial_capital FROM live_task WHERE id=%s",
+                (args.task_id,))
+            row = cur.fetchone()
+        if not row:
+            logger.error("实盘任务 %s 不存在", args.task_id)
+            sys.exit(1)
+        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital = row
+        if status == "stopped":
+            logger.info("实盘任务 %s 已停止，退出", tid)
+            sys.exit(0)
+        task_params = _json.loads(task_params_raw) if isinstance(task_params_raw, str) else (task_params_raw or {})
+        snapshot = _json.loads(snapshot_raw) if isinstance(snapshot_raw, str) else (snapshot_raw or {})
+        # 从快照构建 StrategyConfig 参数
+        sid = snapshot.get("id", strategy_id)
+        name = snapshot.get("name", task_name)
+        s_type = snapshot.get("type", "astock_analysis")
+        adapter_type = snapshot.get("adapter", "xtp")
+        factors = snapshot.get("factors", [])
+        aggregator = snapshot.get("aggregator", {})
+        # params：策略快照的 params（含 mode/python_code）+ 任务级参数覆盖
+        base_params = snapshot.get("params", {})
+        # 任务级参数覆盖策略级（mode/python_code 等保留策略级，数值参数用任务级）
+        params = {**base_params, **task_params}
+        logger.info("实盘任务 %s (策略 %s, 标的 %s) 启动", tid, sid, symbol)
+    else:
+        # 旧架构兼容：从 strategy_config 读
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT id, name, type, symbol, adapter, enabled, factors, "
+                "aggregator, params, backtest_verified FROM strategy_config WHERE id=%s",
+                (args.id,))
+            row = cur.fetchone()
+        if not row:
+            logger.error("策略 %s 不存在", args.id)
+            sys.exit(1)
+        sid, name, s_type, symbol, adapter_type, enabled, factors, aggregator, params, bt_verified = row
+        factors = _json.loads(factors) if isinstance(factors, str) else (factors or [])
+        aggregator = _json.loads(aggregator) if isinstance(aggregator, str) else (aggregator or {})
+        params = _json.loads(params) if isinstance(params, str) else (params or {})
+        if not enabled or not bt_verified:
+            logger.warning("策略 %s 未启用或未回测验证，跳过", sid)
+            sys.exit(0)
+        tid = None
+        account_id = None
+        initial_capital = 1000000
+        # 旧架构读 strategy_account
+        try:
+            with get_conn() as conn:
+                cur = conn.execute("SELECT account_id, broker_provider, initial_capital FROM strategy_account WHERE strategy_id=%s LIMIT 1", (sid,))
+                sa = cur.fetchone()
+            if sa:
+                initial_capital = float(sa[2]) if sa[2] else 1000000
+                account_id = sa[0]
+                logger.info("策略 %s 绑定账户 %s (%s, 资金 %s)", sid, sa[0], sa[1], initial_capital)
+        except Exception as e:
+            logger.warning("读 strategy_account 失败（用默认资金）: %s", e)
 
     # 2. 建 MainEngine + XtpGateway
     event_engine = EventEngine()
@@ -160,7 +194,7 @@ def main():
     adapter = XTPAdapter(gateway=gateway, event_engine=event_engine)
     cfg = StrategyConfig(
         id=sid, name=name, type=s_type, symbol=symbol, adapter=adapter_type,
-        enabled=enabled, factors=factors or [], aggregator=aggregator or {},
+        enabled=True, factors=factors or [], aggregator=aggregator or {},
         params=params or {},
     )
     strategy = Strategy.from_config(cfg, adapter)
