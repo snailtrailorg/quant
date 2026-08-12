@@ -120,16 +120,21 @@ def save_bars_overwrite(freq: str, rows: list[tuple]) -> int:
 
 
 def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
-    """查询 K 线，返回 DataFrame。"""
+    """查询 K 线，返回 DataFrame。
+
+    用 cursor.fetchall 替代 pd.read_sql 避免 pandas/psycopg 不兼容警告。
+    """
     ensure_table(freq)
     select_sql = BAR_TABLE_SELECT.format(freq=freq)
     with get_conn() as conn:
-        df = pd.read_sql_query(
-            select_sql,
-            conn,
-            params=(symbol, start, end),
-            parse_dates=["ts"],
-        )
+        cur = conn.execute(select_sql, (symbol, start, end))
+        rows = cur.fetchall()
+        cols = [d[0] for d in cur.description] if cur.description else []
+        if not rows:
+            return pd.DataFrame(columns=cols)
+        df = pd.DataFrame(rows, columns=cols)
+        if "ts" in cols:
+            df["ts"] = pd.to_datetime(df["ts"])
         return df
 
 

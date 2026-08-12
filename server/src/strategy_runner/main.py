@@ -225,7 +225,11 @@ def main():
 
     def on_vnpy_bar(bar):
         d = _bar_to_dict(bar)
-        strategy.on_bar(d, list(history))  # history 不含当前（防未来）
+        sig = strategy.on_bar(d, list(history))  # history 不含当前（防未来）
+        logger.info("BAR %s close=%.2f vol=%.0f signal=%s",
+                     d.get("ts", "?").strftime("%H:%M") if hasattr(d.get("ts"), "strftime") else d.get("ts", "?"),
+                     d.get("close", 0), d.get("volume", 0),
+                     sig.action.name if sig else "NONE")
         history.append(d)
         if len(history) > 100:
             history.pop(0)
@@ -295,7 +299,7 @@ def main():
                         first_row = cur.fetchone()
                         daily_base = float(first_row[0]) if first_row else total
                         daily_pnl = total - daily_base
-                        conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital))
+                        conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital or 1000000))
                         conn.commit()
                 except Exception as e:
                     logger.warning("写 account_snapshot 失败: %s", e)

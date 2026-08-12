@@ -5,7 +5,7 @@
 //   sudo cp 49-quant.rules /etc/polkit-1/rules.d/
 //   sudo systemctl restart polkit
 //
-// 覆盖待办 #14（策略 polkit）+ #36（飞书 polkit）
+// 覆盖待办 #14（策略 polkit）+ 飞书 bot systemd 控制
 
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
