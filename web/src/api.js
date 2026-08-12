@@ -126,6 +126,10 @@ export const startLiveTask = id => api.post(`/live-task/${id}/start`)
 export const stopLiveTask = id => api.post(`/live-task/${id}/stop`)
 export const deleteLiveTask = id => api.delete(`/live-task/${id}`)
 
+// 系统配置（admin 可改，celery_concurrency 支持动态生效）
+export const getSystemConfig = () => api.get('/system-config')
+export const updateSystemConfig = (key, value) => api.put(`/system-config/${key}`, { value })
+
 export const getSyncConfigs = () => api.get('/sync/config')
 export const updateSyncConfig = (id, data) => api.put('/sync/config/' + id, data)
 export const triggerSync = id => api.post('/sync/trigger/' + id)

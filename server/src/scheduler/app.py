@@ -1,7 +1,8 @@
 """调度层 —— Celery + beat 定时任务。
 
 时区 Asia/Shanghai；A 股任务带 is_trading_day 跳过非交易日。
-启动: celery -A src.scheduler.app worker -B -c 2 --loglevel=info
+启动: celery -A src.scheduler.app worker -B --loglevel=info
+  （并发度从 system_config.celery_concurrency 读，不再用 -c 硬编码；运行时 Web 可动态调）
 """
 
 from __future__ import annotations
@@ -15,6 +16,24 @@ load_dotenv()
 
 VALKEY_URL = os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0")
 
+
+def _load_celery_concurrency() -> int:
+    """从 system_config 表读 celery_concurrency（DB 优先，fallback 环境变量/默认 2）。
+
+    worker 启动时调用一次；运行时由 Web API 动态 pool_grow/shrink 调整。
+    """
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute("SELECT value FROM system_config WHERE key='celery_concurrency'")
+            r = cur.fetchone()
+            if r:
+                return int(r[0])
+    except Exception:
+        pass  # 表未建或 DB 不可达，用 fallback
+    return int(os.environ.get("CELERY_CONCURRENCY", "2"))
+
+
 app = Celery(
     "quant",
     broker=VALKEY_URL,
@@ -27,7 +46,7 @@ app.conf.update(
     enable_utc=True,
     task_serializer="json",
     accept_content=["json"],
-    worker_concurrency=2,  # 低配 ECS 限流
+    worker_concurrency=_load_celery_concurrency(),  # 从 system_config 读（运行时可动态调）
     task_track_started=True,
     task_soft_time_limit=300,  # 5 分钟超时
     beat_schedule={

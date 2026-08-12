@@ -51,6 +51,7 @@ const routes = [
       { path: 'brokers', name: 'brokers', component: () => import('./views/Brokers.vue'), meta: { admin: true } },
       { path: 'risk-rules', name: 'risk-rules', component: () => import('./views/RiskRules.vue'), meta: { admin: true } },
       { path: 'feishu', name: 'feishu', component: () => import('./views/FeishuConnect.vue'), meta: { admin: true } },
+      { path: 'system-config', name: 'system-config', component: () => import('./views/SystemConfig.vue'), meta: { admin: true } },
     ],
   },
 ]

@@ -100,6 +100,98 @@ def health():
     return {"status": "ok", "version": "0.1.0"}
 
 
+# --- 系统配置（system_config，admin 可改，部分项支持动态生效） ---
+
+def _adjust_celery_concurrency(new_value: int) -> dict:
+    """动态调整 Celery worker 并发度（via broker 发 pool_grow/shrink 控制命令）。
+
+    Web API 进程通过 Celery app 连同一个 Valkey broker，control 命令经 broker 推到 worker。
+    """
+    try:
+        from src.scheduler.app import app as celery_app
+        insp = celery_app.control.inspect()
+        stats = insp.stats() or {}
+        if not stats:
+            return {"applied": False, "reason": "无 worker 在线（DB 已更新，下次 worker 启动生效）"}
+        results = {}
+        for worker_name, info in stats.items():
+            current = info.get("pool", {}).get("max-concurrency", 2)
+            delta = new_value - current
+            if delta > 0:
+                celery_app.control.pool_grow(delta, destination=[worker_name])
+                results[worker_name] = f"{current} -> {new_value} (grow {delta})"
+            elif delta < 0:
+                celery_app.control.pool_shrink(-delta, destination=[worker_name])
+                results[worker_name] = f"{current} -> {new_value} (shrink {-delta})"
+            else:
+                results[worker_name] = f"{current} (无变化)"
+        return {"applied": True, "workers": results}
+    except Exception as e:
+        return {"applied": False, "reason": f"动态调整失败（DB 已更新，下次 worker 启动生效）: {e}"}
+
+
+@app.get("/api/system-config")
+def list_system_config(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """列系统配置（viewer+ 只读）。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT key, value, value_type, description, updated_at, updated_by "
+            "FROM system_config ORDER BY key")
+        rows = cur.fetchall()
+    return {"items": [{"key": r[0], "value": r[1], "value_type": r[2], "description": r[3],
+                       "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]} for r in rows]}
+
+
+@app.put("/api/system-config/{key}")
+def update_system_config(key: str, body: dict = Body(...),
+                          payload: dict = Depends(require_role("admin"))):
+    """更新系统配置（仅 admin）。部分 key 支持动态生效（如 celery_concurrency）。"""
+    import json
+    value = body.get("value")
+    if value is None:
+        raise HTTPException(400, "缺 value 字段")
+    with get_conn() as conn:
+        cur = conn.execute("SELECT value_type FROM system_config WHERE key=%s", (key,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, f"系统配置 {key} 不存在")
+        value_type = row[0]
+        # 类型校验 + 规范化
+        if value_type == "int":
+            try: value = str(int(value))
+            except: raise HTTPException(400, f"{key} 需 int 值")
+        elif value_type == "float":
+            try: value = str(float(value))
+            except: raise HTTPException(400, f"{key} 需 float 值")
+        elif value_type == "bool":
+            value = "true" if value in (True, "true", "1", 1) else "false"
+        elif value_type == "json":
+            try: value = json.dumps(value) if not isinstance(value, str) else value
+            except: pass
+        conn.execute(
+            "UPDATE system_config SET value=%s, updated_at=now(), updated_by=%s WHERE key=%s",
+            (str(value), payload["username"], key))
+        conn.commit()
+    audit_log(payload["username"], "update_system_config", key, str(value))
+
+    # 动态生效：celery_concurrency 即时 pool_grow/shrink
+    dynamic_result = None
+    if key == "celery_concurrency":
+        dynamic_result = _adjust_celery_concurrency(int(value))
+    return {"key": key, "value": value, "dynamic": dynamic_result}
+
+
+@app.get("/api/system-config/{key}")
+def get_system_config(key: str, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """取单个系统配置。"""
+    with get_conn() as conn:
+        cur = conn.execute("SELECT value, value_type, description FROM system_config WHERE key=%s", (key,))
+        r = cur.fetchone()
+    if not r:
+        raise HTTPException(404, f"系统配置 {key} 不存在")
+    return {"key": key, "value": r[0], "value_type": r[1], "description": r[2]}
+
+
 # ——— 认证 ———
 
 @app.post("/api/auth/login")
