@@ -91,31 +91,8 @@ def verify_jwt(token: str) -> dict:
 # ——— 用户管理（PG） ———
 
 def init_users_table():
-    """初始化用户表 + 审计表。"""
-    with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'viewer',
-                enabled BOOLEAN DEFAULT true,
-                created_at TIMESTAMPTZ DEFAULT now()
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id BIGSERIAL PRIMARY KEY,
-                actor TEXT NOT NULL,
-                action TEXT NOT NULL,
-                target TEXT,
-                detail TEXT,
-                old_value TEXT,
-                new_value TEXT,
-                ts TIMESTAMPTZ DEFAULT now()
-            )
-        """)
-        conn.commit()
+    """初始化用户表 + 审计表（表已在 migration 0001 创建，保留接口兼容，不再 DDL）。"""
+    return
 
 
 def hash_password(password: str) -> str:

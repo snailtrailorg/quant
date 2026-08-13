@@ -300,7 +300,7 @@ def main():
                     import datetime as _dt2
                     today_str = _dt2.datetime.now().strftime('%Y-%m-%d')
                     with get_conn() as conn:
-                        conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC)")
+                        conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
                         cur = conn.execute("SELECT total_value FROM account_snapshot WHERE ts::date=%s ORDER BY ts ASC LIMIT 1", (today_str,))
                         first_row = cur.fetchone()
                         daily_base = float(first_row[0]) if first_row else total

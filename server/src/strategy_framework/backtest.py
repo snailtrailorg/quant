@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 import threading
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable
@@ -150,6 +151,7 @@ class BacktestEngine:
             history: list[dict] = []  # 累积历史 K 线
             wins = 0
             total_closed = 0
+            buy_queue = deque()
 
             for i, bar in enumerate(bars):
                 adapter.set_bar(bar)
@@ -169,15 +171,22 @@ class BacktestEngine:
                                 total = position * avg_price + trade.volume * trade.price
                                 position += trade.volume
                                 avg_price = total / position if position > 0 else 0
+                                buy_queue.append((trade.volume, trade.price))
                         elif trade.action == "SELL":
                             if position >= trade.volume:
                                 proceeds = trade.price * trade.volume - trade.commission
                                 cash += proceeds
-                                # 胜负判定：卖出价 > 持仓均价
-                                # 简化：FIFO 逐笔配对待实现（当前用均价法，多笔分批时胜率可能偏差）
-                                if trade.price > avg_price:
-                                    wins += 1
-                                total_closed += 1
+                                # FIFO 逐笔配对胜率判定
+                                remaining = trade.volume
+                                while remaining > 0 and buy_queue:
+                                    buy_vol, buy_price = buy_queue.popleft()
+                                    match_vol = min(remaining, buy_vol)
+                                    if trade.price > buy_price:
+                                        wins += 1
+                                    total_closed += 1
+                                    remaining -= match_vol
+                                    if buy_vol > match_vol:
+                                        buy_queue.appendleft((buy_vol - match_vol, buy_price))
                                 position -= trade.volume
                                 if position == 0:
                                     avg_price = 0.0

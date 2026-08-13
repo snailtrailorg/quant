@@ -114,9 +114,7 @@ class AlertNotify:
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
-                conn.execute("""CREATE TABLE IF NOT EXISTS alert_history (
-                    id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-                    level TEXT, title TEXT, body TEXT, channel TEXT)""")
+                conn.execute("SELECT 1 FROM alert_history LIMIT 1")
                 conn.execute("INSERT INTO alert_history (level, title, body, channel) VALUES (%s,%s,%s,%s)",
                              (level, title, body[:1000], channel))
                 conn.commit()

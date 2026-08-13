@@ -41,21 +41,10 @@ def _log(sync_id: str, mode: str, start: str, end: str, pulled: int, saved: int,
          failed_dates: list[str] | None = None, expected_days: int | None = None,
          actual_days: int | None = None):
     with get_conn() as conn:
-        # 确保 sync_log 表存在（CREATE TABLE IF NOT EXISTS 幂等，但避免重复 DDL）
+        # 校验 sync_log 表存在
         global _sync_log_table_created
         if not _sync_log_table_created:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS sync_log (
-                    id BIGSERIAL PRIMARY KEY,
-                    sync_id TEXT NOT NULL,
-                    ts TIMESTAMPTZ DEFAULT now(),
-                    mode TEXT, start_date TEXT, end_date TEXT,
-                    rows_pulled INTEGER DEFAULT 0, rows_saved INTEGER DEFAULT 0,
-                    duration_ms INTEGER DEFAULT 0, status TEXT DEFAULT 'running',
-                    error TEXT, failed_dates TEXT,
-                    expected_days INTEGER, actual_days INTEGER
-                )
-            """)
+            conn.execute("SELECT 1 FROM sync_log LIMIT 1")
             _sync_log_table_created = True
         conn.execute(
             "INSERT INTO sync_log (sync_id, mode, start_date, end_date, rows_pulled, rows_saved, "
@@ -265,12 +254,7 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
     pro = _get_pro()
     df = pro.stock_basic(list_status="L")
     with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS asset_static_info (
-                ts_code TEXT PRIMARY KEY, name TEXT, industry TEXT,
-                market TEXT, list_status TEXT, list_date TEXT, delist_date TEXT
-            )
-        """)
+        conn.execute("SELECT 1 FROM asset_static_info LIMIT 1")
         for _, r in df.iterrows():
             conn.execute("""
                 INSERT INTO asset_static_info (ts_code, name, industry, market, list_status, list_date, delist_date)
@@ -312,14 +296,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
     pro = _get_pro()
     df = pro.cb_basic()
     with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS cb_basic_info (
-                ts_code TEXT PRIMARY KEY, bond_short_name TEXT, stk_code TEXT, stk_short_name TEXT,
-                maturity TEXT, par NUMERIC, issue_price NUMERIC, conv_price NUMERIC,
-                conv_start_date TEXT, conv_end_date TEXT, maturity_date TEXT,
-                coupon_rate NUMERIC, rate_clause TEXT, list_date TEXT, delist_date TEXT
-            )
-        """)
+        conn.execute("SELECT 1 FROM cb_basic_info LIMIT 1")
         for _, r in df.iterrows():
             conn.execute("""
                 INSERT INTO cb_basic_info (ts_code, bond_short_name, stk_code, stk_short_name,
@@ -363,12 +340,7 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
     pro = _get_pro()
     df = pro.fund_basic(market="E")
     with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS etf_basic_info (
-                ts_code TEXT PRIMARY KEY, name TEXT, management TEXT,
-                fund_type TEXT, invest_type TEXT, list_date TEXT
-            )
-        """)
+        conn.execute("SELECT 1 FROM etf_basic_info LIMIT 1")
         for _, r in df.iterrows():
             conn.execute("""
                 INSERT INTO etf_basic_info (ts_code, name, management, fund_type, invest_type, list_date)

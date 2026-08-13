@@ -371,18 +371,7 @@ class LLMGateway:
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
-                try:
-                    conn.execute("""
-                        CREATE TABLE IF NOT EXISTS llm_usage (
-                            id BIGSERIAL PRIMARY KEY,
-                            ts TIMESTAMPTZ DEFAULT now(),
-                            provider TEXT, model TEXT,
-                            input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
-                            latency_ms INTEGER, success BOOLEAN, error_type TEXT, caller TEXT
-                        )
-                    """)
-                except Exception:
-                    pass
+                conn.execute("SELECT 1 FROM llm_usage LIMIT 1")
                 conn.execute(
                     "INSERT INTO llm_usage (provider, model, input_tokens, output_tokens, "
                     "latency_ms, success, error_type, caller) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",

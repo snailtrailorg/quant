@@ -97,9 +97,7 @@ def record_broker_usage(provider: str, action: str, symbol: str = "", success: b
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
-            conn.execute("""CREATE TABLE IF NOT EXISTS broker_usage (
-                id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-                provider TEXT, action TEXT, symbol TEXT, success BOOLEAN, latency_ms INT)""")
+            conn.execute("SELECT 1 FROM broker_usage LIMIT 1")
             conn.execute("INSERT INTO broker_usage (provider,action,symbol,success,latency_ms) VALUES (%s,%s,%s,%s,%s)",
                          (provider, action, symbol, success, latency_ms))
             conn.commit()

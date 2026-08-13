@@ -20,6 +20,20 @@ logger = logging.getLogger("feishu_bot")
 _token_lock = threading.Lock()
 
 
+def _get_max_tool_turns() -> int:
+    """从 system_config 表读取 LLM 最大工具调用轮次，默认 5。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute("SELECT value FROM system_config WHERE key='llm_max_tool_turns'")
+            row = cur.fetchone()
+            if row:
+                return int(row[0])
+    except Exception:
+        pass
+    return 5
+
+
 class FeishuClient:
     """飞书开放平台 API 客户端。"""
 
@@ -195,7 +209,8 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
         messages = [{"role": "user", "content": text}]
         resp = None
         # 工具调用 loop：读类直接执行回 LLM，操作类发确认卡片后等用户确认
-        for _ in range(5):
+        max_turns = _get_max_tool_turns()
+        for _ in range(max_turns):
             resp = gateway.chat(messages, role=role, tools=READ_TOOLS, caller="feishu")
             if not resp.tool_calls:
                 break

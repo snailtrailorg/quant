@@ -190,6 +190,142 @@ CREATE TABLE IF NOT EXISTS trade_cal (
 ALTER TABLE trade_cal OWNER TO quant;
 
 -- ============================================================
+-- 11. account_snapshot（账户快照/盈亏）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS account_snapshot (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    total_value NUMERIC NOT NULL,
+    daily_pnl NUMERIC DEFAULT 0,
+    initial_capital NUMERIC NOT NULL DEFAULT 1000000
+);
+ALTER TABLE account_snapshot OWNER TO quant;
+
+-- ============================================================
+-- 12. accounts（交易所账户，含加密 API key/secret）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS accounts (
+    id SERIAL PRIMARY KEY,
+    name TEXT,
+    exchange TEXT NOT NULL,
+    api_key_enc TEXT,
+    api_secret_enc TEXT,
+    api_key_hint TEXT,
+    enabled BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE accounts OWNER TO quant;
+
+-- ============================================================
+-- 13. alert_history（告警历史）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS alert_history (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    level TEXT,
+    title TEXT,
+    body TEXT,
+    channel TEXT
+);
+ALTER TABLE alert_history OWNER TO quant;
+
+-- ============================================================
+-- 14. astock_analysis（A股分析结果）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS astock_analysis (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    symbol TEXT,
+    action TEXT,
+    score NUMERIC,
+    rating TEXT,
+    factors JSONB
+);
+ALTER TABLE astock_analysis OWNER TO quant;
+
+-- ============================================================
+-- 15. broker_usage（券商调用统计）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS broker_usage (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    provider TEXT,
+    action TEXT,
+    symbol TEXT,
+    success BOOLEAN,
+    latency_ms INTEGER
+);
+ALTER TABLE broker_usage OWNER TO quant;
+
+-- ============================================================
+-- 16. convertible_terms（可转债条款）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS convertible_terms (
+    ts_code TEXT PRIMARY KEY,
+    terms JSONB,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE convertible_terms OWNER TO quant;
+
+-- ============================================================
+-- 17. signal_log（策略信号）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS signal_log (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    strategy_id TEXT,
+    symbol TEXT,
+    action TEXT,
+    score NUMERIC,
+    price NUMERIC
+);
+ALTER TABLE signal_log OWNER TO quant;
+
+-- ============================================================
+-- 18. order_log（订单）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS order_log (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    strategy_id TEXT,
+    symbol TEXT,
+    action TEXT,
+    volume INTEGER,
+    price NUMERIC,
+    status TEXT DEFAULT 'submitted',
+    signal_id BIGINT
+);
+ALTER TABLE order_log OWNER TO quant;
+
+-- ============================================================
+-- 19. trade_log（成交）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS trade_log (
+    id BIGSERIAL PRIMARY KEY,
+    ts TIMESTAMPTZ DEFAULT now(),
+    order_id BIGINT,
+    symbol TEXT,
+    action TEXT,
+    volume INTEGER,
+    price NUMERIC,
+    commission NUMERIC
+);
+ALTER TABLE trade_log OWNER TO quant;
+
+-- ============================================================
+-- 20. static_symbols（静态标的列表）
+-- ============================================================
+CREATE TABLE IF NOT EXISTS static_symbols (
+    ts_code TEXT PRIMARY KEY,
+    name TEXT,
+    industry TEXT,
+    list_status TEXT,
+    delisted BOOLEAN DEFAULT false,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE static_symbols OWNER TO quant;
+
+-- ============================================================
 -- 验证
 -- ============================================================
 \echo '✓ schema 初始化完成（所有表 OWNER=quant）:'

@@ -63,13 +63,7 @@ def store_api_key(name: str, exchange: str, api_key: str, api_secret: str = "") 
     enc_secret = encrypt(api_secret) if api_secret else ""
     hint = mask(api_key)
     with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS accounts (
-                id SERIAL PRIMARY KEY, name TEXT, exchange TEXT NOT NULL,
-                api_key_enc TEXT, api_secret_enc TEXT, api_key_hint TEXT,
-                enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now()
-            )
-        """)
+        conn.execute("SELECT 1 FROM accounts LIMIT 1")
         conn.execute("""
             INSERT INTO accounts (name, exchange, api_key_enc, api_secret_enc, api_key_hint)
             VALUES (%s,%s,%s,%s,%s)

@@ -260,13 +260,8 @@ class Strategy:
         try:
             from ..data_platform.db import get_conn
             with get_conn() as conn:
-                conn.execute("""CREATE TABLE IF NOT EXISTS signal_log (
-                    id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-                    strategy_id TEXT, symbol TEXT, action TEXT, score NUMERIC, price NUMERIC)""")
-                conn.execute("""CREATE TABLE IF NOT EXISTS order_log (
-                    id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-                    strategy_id TEXT, symbol TEXT, action TEXT, volume INT, price NUMERIC,
-                    status TEXT DEFAULT 'submitted', signal_id BIGINT)""")
+                conn.execute("SELECT 1 FROM signal_log LIMIT 1")
+                conn.execute("SELECT 1 FROM order_log LIMIT 1")
                 cur = conn.execute(
                     "INSERT INTO signal_log (strategy_id,symbol,action,score,price) VALUES (%s,%s,%s,%s,%s) RETURNING id",
                     (self.config.id, self.symbol, sig.action.name, sig.score, sig.price))

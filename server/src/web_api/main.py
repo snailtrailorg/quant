@@ -6,6 +6,8 @@
 from __future__ import annotations
 from src.data_platform.db import get_conn
 import os, json, logging, psycopg, redis, subprocess, uuid
+import requests
+import pandas as pd
 from typing import Literal
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -600,15 +602,15 @@ def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trad
     """当前持仓（account_snapshot 总资产 + trade_log 累计持仓，#6）。"""
     with get_conn() as conn:
         try:
-            conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+            conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
         except Exception:
-            logger.warning("get_position: account_snapshot 表已存在（忽略）")
+            logger.warning("get_position: account_snapshot 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
         snap = cur.fetchone()
         try:
-            conn.execute("CREATE TABLE IF NOT EXISTS trade_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), order_id BIGINT, symbol TEXT, action TEXT, volume INT, price NUMERIC, commission NUMERIC)")
+            conn.execute("SELECT 1 FROM trade_log LIMIT 1")
         except Exception:
-            logger.warning("get_position: trade_log 表已存在（忽略）")
+            logger.warning("get_position: trade_log 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT symbol, COALESCE(SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END),0) FROM trade_log GROUP BY symbol")
         positions = [{"symbol": r[0], "volume": int(r[1])} for r in cur.fetchall() if r[1] and r[1] != 0]
     total_value = float(snap[0]) if snap else 0
@@ -622,9 +624,9 @@ def get_pnl(payload: dict = Depends(require_role("viewer", "analyst", "trader", 
     """盈亏曲线（account_snapshot 时间序列，#6）。"""
     with get_conn() as conn:
         try:
-            conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+            conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
         except Exception:
-            logger.warning("get_pnl: account_snapshot 表已存在（忽略）")
+            logger.warning("get_pnl: account_snapshot 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT ts, total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 90")
         rows = cur.fetchall()
     curve = [{"ts": str(r[0])[:19], "value": float(r[1]) if r[1] else 0, "daily_pnl": float(r[2]) if r[2] else 0} for r in reversed(rows)]
@@ -639,9 +641,9 @@ def get_orders(payload: dict = Depends(require_role("viewer", "analyst", "trader
     """订单记录（order_log 最近 100，#6）。"""
     with get_conn() as conn:
         try:
-            conn.execute("CREATE TABLE IF NOT EXISTS order_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), strategy_id TEXT, symbol TEXT, action TEXT, volume INT, price NUMERIC, status TEXT DEFAULT 'submitted')")
+            conn.execute("SELECT 1 FROM order_log LIMIT 1")
         except Exception:
-            logger.warning("get_orders: order_log 表已存在（忽略）")
+            logger.warning("get_orders: order_log 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status FROM order_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
     return {"orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6]} for r in rows], "total": len(rows)}
@@ -652,9 +654,9 @@ def get_dashboard(payload: dict = Depends(require_role("viewer", "analyst", "tra
     """Dashboard 量化指标（account_snapshot + 回测绩效，#10）。"""
     with get_conn() as conn:
         try:
-            conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+            conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
         except Exception:
-            logger.warning("get_dashboard: account_snapshot 表已存在（忽略）")
+            logger.warning("get_dashboard: account_snapshot 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
         snap = cur.fetchone()
         cur = conn.execute("SELECT COUNT(*) FROM backtest_runs WHERE status='done'")
@@ -674,13 +676,9 @@ def list_accounts(payload: dict = Depends(require_perm("account_keys"))):
     """列券商/交易所账户（密钥不返回明文）。"""
     with get_conn() as conn:
         try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS accounts (
-                    id SERIAL PRIMARY KEY, name TEXT, exchange TEXT NOT NULL,
-                    api_key_hint TEXT, enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now()
-                )""")
+            conn.execute("SELECT 1 FROM accounts LIMIT 1")
         except Exception:
-            logger.warning("list_accounts: accounts 表已存在（忽略）")
+            logger.warning("list_accounts: accounts 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT id, name, exchange, api_key_hint, enabled, created_at FROM accounts ORDER BY id")
         rows = cur.fetchall()
     return [{"id": r[0], "name": r[1], "exchange": r[2], "api_key_hint": r[3],
@@ -779,9 +777,10 @@ def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_role("viewer
 def get_logs(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """运行日志（P3-1 接 task_logs 真实日志，不再占位）。"""
     with get_conn() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS task_logs (
-            id BIGSERIAL PRIMARY KEY, task_id TEXT, level TEXT, message TEXT,
-            step_name TEXT, sql_or_api TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+        try:
+            conn.execute("SELECT 1 FROM task_logs LIMIT 1")
+        except Exception:
+            logger.warning("get_logs: task_logs 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute(
             "SELECT level, message, step_name, created_at FROM task_logs "
             "ORDER BY created_at DESC LIMIT 200")
@@ -1141,7 +1140,6 @@ def feishu_delete(fid: int, payload: dict = Depends(require_perm("feishu_config"
 def feishu_test(fid: int, payload: dict = Depends(require_perm("feishu_config"))):
     """测机器人连接。"""
     from src.web_api.crypto_utils import decrypt
-    import requests
     with get_conn() as conn:
         cur = conn.execute("SELECT app_id, app_secret_encrypted FROM feishu_config WHERE id=%s", (fid,))
         r = cur.fetchone()
@@ -1328,7 +1326,6 @@ def get_kline_api(symbol: str, days: int = 0,
     from src.data_platform.db import get_bars
     from src.data_platform.schema import to_vt_symbol
     from datetime import date, timedelta
-    import pandas as pd
     end = date.today()
     start = end - timedelta(days=days) if days > 0 else date(2010, 1, 1)
     vt = to_vt_symbol(symbol)
@@ -2045,16 +2042,13 @@ def list_pools(payload: dict = Depends(require_role("viewer", "analyst", "trader
     """标的池列表（含 symbols，#22）。"""
     with get_conn() as conn:
         try:
-            conn.execute("""CREATE TABLE IF NOT EXISTS pools (
-                id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+            conn.execute("SELECT 1 FROM pools LIMIT 1")
         except Exception:
-            logger.warning("list_pools: pools 表已存在（忽略）")
+            logger.warning("list_pools: pools 表不存在（需运行 alembic upgrade head）")
         try:
-            conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
-                id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
-                symbol TEXT, UNIQUE(pool_id, symbol))""")
+            conn.execute("SELECT 1 FROM pool_symbols LIMIT 1")
         except Exception:
-            logger.warning("list_pools: pool_symbols 表已存在（忽略）")
+            logger.warning("list_pools: pool_symbols 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute(
             "SELECT p.id, p.name, p.category, p.description, ps.symbol "
             "FROM pools p LEFT JOIN pool_symbols ps ON ps.pool_id=p.id ORDER BY p.id")
@@ -2074,16 +2068,13 @@ def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_con
     symbols = [s.strip() for s in (req.symbolsStr or "").split("\n") if s.strip()]
     with get_conn() as conn:
         try:
-            conn.execute("""CREATE TABLE IF NOT EXISTS pools (
-                id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+            conn.execute("SELECT 1 FROM pools LIMIT 1")
         except Exception:
-            logger.warning("create_pool: pools 表已存在（忽略）")
+            logger.warning("create_pool: pools 表不存在（需运行 alembic upgrade head）")
         try:
-            conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
-                id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
-                symbol TEXT, UNIQUE(pool_id, symbol))""")
+            conn.execute("SELECT 1 FROM pool_symbols LIMIT 1")
         except Exception:
-            logger.warning("create_pool: pool_symbols 表已存在（忽略）")
+            logger.warning("create_pool: pool_symbols 表不存在（需运行 alembic upgrade head）")
         conn.execute(
             "INSERT INTO pools (id, name, category, description) VALUES (%s,%s,%s,%s) "
             "ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, description=EXCLUDED.description",
@@ -2109,12 +2100,9 @@ def list_strategy_account(strategy_id: str | None = None, payload: dict = Depend
     """策略-账户绑定列表（可按 strategy_id 过滤，#27）。"""
     with get_conn() as conn:
         try:
-            conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
-                id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
-                initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
-                created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+            conn.execute("SELECT 1 FROM strategy_account LIMIT 1")
         except Exception:
-            logger.warning("list_strategy_account: strategy_account 表已存在（忽略）")
+            logger.warning("list_strategy_account: strategy_account 表不存在（需运行 alembic upgrade head）")
         if strategy_id:
             cur = conn.execute(
                 "SELECT id, strategy_id, account_id, broker_provider, initial_capital, leverage, created_at "
@@ -2134,12 +2122,9 @@ def bind_strategy_account(req: StrategyAccountReq, payload: dict = Depends(requi
     """绑定策略-账户（#27）。"""
     with get_conn() as conn:
         try:
-            conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
-                id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
-                initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
-                created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+            conn.execute("SELECT 1 FROM strategy_account LIMIT 1")
         except Exception:
-            logger.warning("bind_strategy_account: strategy_account 表已存在（忽略）")
+            logger.warning("bind_strategy_account: strategy_account 表不存在（需运行 alembic upgrade head）")
         conn.execute(
             "INSERT INTO strategy_account (strategy_id, account_id, broker_provider, initial_capital, leverage) "
             "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (strategy_id, account_id) DO UPDATE SET "
@@ -2206,11 +2191,9 @@ def broker_usage(payload: dict = Depends(require_role("viewer", "analyst", "trad
     """通道调用量监控（#37，broker_usage 表聚合）。"""
     with get_conn() as conn:
         try:
-            conn.execute("""CREATE TABLE IF NOT EXISTS broker_usage (
-                id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-                provider TEXT, action TEXT, symbol TEXT, success BOOLEAN, latency_ms INT)""")
+            conn.execute("SELECT 1 FROM broker_usage LIMIT 1")
         except Exception:
-            logger.warning("broker_usage: broker_usage 表已存在（忽略）")
+            logger.warning("broker_usage: broker_usage 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute(
             "SELECT provider, COUNT(*), COALESCE(AVG(latency_ms),0), "
             "CASE WHEN COUNT(*)>0 THEN round(SUM(CASE WHEN success THEN 1 ELSE 0 END)*100.0/COUNT(*),1) ELSE 0 END "

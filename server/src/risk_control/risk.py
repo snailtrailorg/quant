@@ -235,17 +235,9 @@ class RiskControl:
         import os
         try:
             with get_conn() as conn:
-                # 建表（幂等）
+                # 校验表存在
                 try:
-                    conn.execute("""
-                        CREATE TABLE IF NOT EXISTS account_snapshot (
-                            id BIGSERIAL PRIMARY KEY,
-                            ts TIMESTAMPTZ DEFAULT now(),
-                            total_value NUMERIC NOT NULL,
-                            daily_pnl NUMERIC DEFAULT 0,
-                            initial_capital NUMERIC NOT NULL DEFAULT 1000000
-                        )
-                    """)
+                    conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
                 except Exception:
                     pass
                 conn.commit()

@@ -36,6 +36,9 @@ _engine = create_engine(
     pool_recycle=1800,  # 30 分钟回收，避免长连接超时
 )
 
+# 已建表的 freq 集合，避免每次 save_bars/get_bars 重复 DDL
+_ensured_tables: set = set()
+
 
 def get_conn() -> psycopg.Connection:
     """从连接池获取 psycopg 连接（with 退出还池，保留 psycopg 裸 SQL 风格）。"""
@@ -49,10 +52,13 @@ def get_engine():
 
 def ensure_table(freq: str) -> None:
     """确保 K 线表存在，自动建表。"""
+    if freq in _ensured_tables:
+        return
     ddl = BAR_TABLE_DDL.format(freq=freq)
     with get_conn() as conn:
         conn.execute(ddl)
         conn.commit()
+    _ensured_tables.add(freq)
 
 
 def validate_bars(rows: list[tuple]) -> list[tuple]:
@@ -173,12 +179,37 @@ def is_trading_day(d: date | None = None) -> bool:
 
 
 def init_trade_calendar(year: int) -> None:
-    """初始化交易日历表（需已从 Tushare 拉取数据存入）。"""
+    """初始化交易日历表（表已在 migration 0001 创建，保留接口兼容，不再 DDL）。"""
+    return
+
+
+def verify_schema() -> list[str]:
+    """启动时校验所有基础设施表是否存在。缺失则 log warning，不自动创建。"""
+    import logging
+    logger = logging.getLogger("data_platform")
+    required_tables = [
+        "users", "audit_log", "sync_config", "sync_log",
+        "account_snapshot", "accounts", "alert_history", "astock_analysis",
+        "broker_usage", "convertible_terms", "signal_log", "order_log",
+        "trade_log", "static_symbols",
+        "system_config", "llm_model_config", "llm_usage",
+        "feishu_config", "live_trading_config", "live_task",
+        "pools", "pool_symbols", "strategy_account",
+        "broker_config", "risk_rules", "channel_config",
+        "tasks", "task_logs", "factor_def",
+        "backtest_runs", "backtest_symbols",
+        "data_source_config", "data_source_usage",
+        "llm_budget", "user_tokens",
+    ]
+    missing = []
     with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS trade_cal (
-                exchange TEXT, cal_date DATE, is_open INT, pretrade_date DATE,
-                PRIMARY KEY(exchange, cal_date)
-            )
-        """)
-        conn.commit()
+        for table in required_tables:
+            try:
+                conn.execute(f"SELECT 1 FROM {table} LIMIT 1")
+            except Exception:
+                missing.append(table)
+    if missing:
+        logger.warning(f"数据库缺少表，请运行 alembic upgrade head: {missing}")
+    else:
+        logger.info("数据库 schema 校验通过")
+    return missing

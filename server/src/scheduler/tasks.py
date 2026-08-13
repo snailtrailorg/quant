@@ -133,12 +133,7 @@ def astock_minute_analysis():
                 results.append({"symbol": sym, "action": r["action"], "score": r["score"], "rating": r["rating"]})
                 # 落 PG
                 with get_conn() as conn:
-                    try:
-                        conn.execute("""CREATE TABLE IF NOT EXISTS astock_analysis (
-                            id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-                            symbol TEXT, action TEXT, score NUMERIC, rating TEXT, factors JSONB)""")
-                    except Exception:
-                        pass
+                    conn.execute("SELECT 1 FROM astock_analysis LIMIT 1")
                     import json
                     conn.execute("INSERT INTO astock_analysis (symbol, action, score, rating, factors) VALUES (%s,%s,%s,%s,%s)",
                                  (sym, r["action"], r["score"], r["rating"], json.dumps(r.get("factors", {}))))
@@ -248,50 +243,17 @@ def reconcile_three_books():
 
     try:
         with get_conn() as conn:
-            # 建对账表（幂等）
+            # 校验表存在
             try:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS signal_log (
-                        id BIGSERIAL PRIMARY KEY,
-                        ts TIMESTAMPTZ DEFAULT now(),
-                        strategy_id TEXT,
-                        symbol TEXT,
-                        action TEXT,
-                        score NUMERIC,
-                        price NUMERIC
-                    )
-                """)
+                conn.execute("SELECT 1 FROM signal_log LIMIT 1")
             except Exception:
                 pass
             try:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS order_log (
-                        id BIGSERIAL PRIMARY KEY,
-                        ts TIMESTAMPTZ DEFAULT now(),
-                        strategy_id TEXT,
-                        symbol TEXT,
-                        action TEXT,
-                        volume INT,
-                        price NUMERIC,
-                        status TEXT DEFAULT 'submitted',
-                        signal_id BIGINT
-                    )
-                """)
+                conn.execute("SELECT 1 FROM order_log LIMIT 1")
             except Exception:
                 pass
             try:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS trade_log (
-                        id BIGSERIAL PRIMARY KEY,
-                        ts TIMESTAMPTZ DEFAULT now(),
-                        order_id BIGINT,
-                        symbol TEXT,
-                        action TEXT,
-                        volume INT,
-                        price NUMERIC,
-                        commission NUMERIC
-                    )
-                """)
+                conn.execute("SELECT 1 FROM trade_log LIMIT 1")
             except Exception:
                 pass
             conn.commit()
@@ -785,11 +747,7 @@ def convertible_terms_sync():
             terms = pull_cb_basic(ts_code)
             if terms:
                 with get_conn() as conn:
-                    conn.execute("""
-                        CREATE TABLE IF NOT EXISTS convertible_terms (
-                            ts_code TEXT PRIMARY KEY, terms JSONB, updated_at TIMESTAMPTZ DEFAULT now()
-                        )
-                    """)
+                    conn.execute("SELECT 1 FROM convertible_terms LIMIT 1")
                     conn.execute(
                         "INSERT INTO convertible_terms (ts_code, terms, updated_at) VALUES (%s,%s,now()) "
                         "ON CONFLICT (ts_code) DO UPDATE SET terms=EXCLUDED.terms, updated_at=now()",
@@ -827,9 +785,7 @@ def static_list_sync():
     synced = 0
     try:
         with get_conn() as conn:
-            conn.execute("""CREATE TABLE IF NOT EXISTS static_symbols (
-                ts_code TEXT PRIMARY KEY, name TEXT, industry TEXT, list_status TEXT,
-                delisted BOOLEAN DEFAULT false, updated_at TIMESTAMPTZ DEFAULT now())""")
+            conn.execute("SELECT 1 FROM static_symbols LIMIT 1")
             df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
             if df is not None and not df.empty:
                 for _, row in df.iterrows():

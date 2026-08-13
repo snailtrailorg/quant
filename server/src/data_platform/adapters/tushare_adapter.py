@@ -297,7 +297,7 @@ def save_daily_basic(df: pd.DataFrame) -> int:
             _safe_float(r.get("circ_mv")) if pd.notna(r.get("circ_mv")) else None,
         ))
     with get_conn() as conn:
-        conn.execute(DAILY_BASIC_DDL)
+        # daily_basic 表已在 migration 0001 创建，不再运行时 DDL
         with conn.cursor() as cur:
             cur.executemany(DAILY_BASIC_INSERT, rows)
         conn.commit()
