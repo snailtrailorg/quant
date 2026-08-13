@@ -11,6 +11,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 
 revision: str = "0027"
@@ -66,7 +67,7 @@ def upgrade() -> None:
         sa.Column("action", sa.Text()),
         sa.Column("score", sa.Numeric()),
         sa.Column("rating", sa.Text()),
-        sa.Column("factors", sa.JSONB()),
+        sa.Column("factors", JSONB()),
         if_not_exists=True,
     )
 
@@ -87,7 +88,7 @@ def upgrade() -> None:
     op.create_table(
         "convertible_terms",
         sa.Column("ts_code", sa.Text(), primary_key=True),
-        sa.Column("terms", sa.JSONB()),
+        sa.Column("terms", JSONB()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
         if_not_exists=True,
     )
