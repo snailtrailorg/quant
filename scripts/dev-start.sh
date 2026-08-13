@@ -10,8 +10,8 @@
 #   bash scripts/dev-start.sh logs      # 查看后端日志（tail -f）
 #
 # 前置（一次性，已做过则跳过）：
-#   sudo bash scripts/init-db.sh        # 建 PG quant 角色/库
-#   bash scripts/init-valkey.sh         # 起 Valkey
+#   sudo bash scripts/dev-init-db.sh        # 建 PG quant 角色/库
+#   bash scripts/dev-init-valkey.sh         # 起 Valkey
 #   cd server && ./venv/bin/pip install -r requirements.txt
 #   cd web && npm install
 #
@@ -41,7 +41,7 @@ check_prereq() {
     green "  PG: ✓"
   else
     red "  PG: ✗ 未启动或 quant 角色未建"
-    red "  → 运行: sudo bash scripts/init-db.sh"
+    red "  → 运行: sudo bash scripts/dev-init-db.sh"
     return 1
   fi
   # Valkey
@@ -49,7 +49,7 @@ check_prereq() {
     green "  Valkey: ✓"
   else
     red "  Valkey: ✗ 未启动"
-    red "  → 运行: bash scripts/init-valkey.sh"
+    red "  → 运行: bash scripts/dev-init-valkey.sh"
     return 1
   fi
   # venv

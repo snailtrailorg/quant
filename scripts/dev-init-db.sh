@@ -2,7 +2,7 @@
 # 初始化量化平台 PostgreSQL（本地 dev）
 # - quant 角色专属 trust 免密（其他 app 认证不变）
 # - 无需 postgres 密码：临时翻 trust → 建角色/库/扩展 → 还原 + 留 quant 专属行
-# 用法:  sudo bash scripts/init-db.sh
+# 用法:  sudo bash scripts/dev-init-db.sh
 set -euo pipefail
 
 # --- 找 pg_hba.conf ---

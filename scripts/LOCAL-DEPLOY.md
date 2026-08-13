@@ -28,8 +28,8 @@ bash scripts/dev-start.sh logs       # tail -f 后端日志
 `scripts/dev-start.sh start` 顺序执行：
 
 1. **前置检查**（失败给出修复命令）：
-   - PG（`pg_isready -U quant -d quant`）— 没起 → `sudo bash scripts/init-db.sh`
-   - Valkey（`valkey-cli ping`）— 没起 → `bash scripts/init-valkey.sh`
+   - PG（`pg_isready -U quant -d quant`）— 没起 → `sudo bash scripts/dev-init-db.sh`
+   - Valkey（`valkey-cli ping`）— 没起 → `bash scripts/dev-init-valkey.sh`
    - venv（`server/venv/bin/python`）— 没建 → `cd server && python3.10 -m venv venv && ./venv/bin/pip install -r requirements.txt`
    - node_modules（`web/node_modules`）— 没装 → `cd web && npm install`
 2. **跑迁移**：`cd server && alembic upgrade head`
@@ -42,10 +42,10 @@ bash scripts/dev-start.sh logs       # tail -f 后端日志
 
 ```bash
 # 1. PG：建 quant 角色 + 库 + pgvector（需 sudo 改 pg_hba）
-sudo bash scripts/init-db.sh
+sudo bash scripts/dev-init-db.sh
 
 # 2. Valkey
-bash scripts/init-valkey.sh
+bash scripts/dev-init-valkey.sh
 
 # 3. 后端依赖（venv 用 Python 3.10，不用 3.14，详见 CLAUDE.md 技术栈约束）
 cd server
@@ -64,8 +64,8 @@ cp server/.env.example server/.env
 
 | 现象 | 原因 / 解决 |
 |---|---|
-| `PG: ✗ 未启动` | `sudo bash scripts/init-db.sh` 建角色/库 |
-| `Valkey: ✗ 未启动` | `bash scripts/init-valkey.sh` |
+| `PG: ✗ 未启动` | `sudo bash scripts/dev-init-db.sh` 建角色/库 |
+| `Valkey: ✗ 未启动` | `bash scripts/dev-init-valkey.sh` |
 | `venv: ✗ 不存在` | `cd server && python3.10 -m venv venv && ./venv/bin/pip install -r requirements.txt` |
 | `node_modules: ✗` | `cd web && npm install` |
 | 后端启动失败 | `bash scripts/dev-start.sh logs` 看日志；常见是端口占用（`lsof -i :8000`）或迁移报错 |

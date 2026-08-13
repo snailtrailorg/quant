@@ -190,7 +190,7 @@
 - **决定**: 参考 safebox 重构为三目录：
   - `server/`：后端（src/ + scripts/init-seed.sql + systemd/ + requirements.txt + .env + venv/），整体 rsync 部署
   - `web/`：前端（原 src/web_ui/），npm build 后部署 dist
-  - `scripts/`：开发机部署工具（deploy-*.sh/quant-deploy.sh）+ 本地 dev 脚本（init-db.sh/init-valkey.sh/verify.sh），**不传服务器**
+  - `scripts/`：开发机部署工具（deploy-*.sh/quant-deploy.sh）+ 本地 dev 脚本（dev-init-db.sh/dev-init-valkey.sh/verify.sh），**不传服务器**
 - **.env 隔离**: 本地 `server/.env`（trust 免密）vs 远程 `.env`（md5 密码），deploy `--exclude .env` 不覆盖
 - **远程结构不变**: PROJECT_PATH/src/+... 与重构前一致，服务器已部署代码无缝；下次 deploy-server.sh 同步新结构，rsync --delete 清理误传的 deploy 脚本
 - **影响**: 本地开发启动改 `cd server` / `cd web`；部署脚本简化（一个 deploy 传 server/）；import 路径不变（`src.web_api`，WorkingDirectory=server）

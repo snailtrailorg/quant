@@ -11,7 +11,7 @@
   - `docs/architecture/`（00-总体设计 ～ 11-feishu-lark，12 份架构文档 + 接口契约 + 模块契约 13 份）
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `systemd/` + `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
-- `scripts/` - 开发机部署工具（`deploy-*.sh`/`quant-deploy.sh`）+ 本地 dev 脚本（`init-db.sh`/`init-valkey.sh`/`verify.sh`）。**不传服务器**
+- `scripts/` - 开发机部署工具（`deploy-*.sh`/`quant-deploy.sh`）+ 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`verify.sh`）。**不传服务器**
 - **判据**：协调/推进项目的 → `flow/`；要交付的内容 → `docs/`（知识/文档）或 `server/src/`（代码）
 
 ## 开工前必读
