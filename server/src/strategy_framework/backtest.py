@@ -4,14 +4,20 @@
 """
 
 from __future__ import annotations
+import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+import logging
+
 from .strategy import Strategy, StrategyConfig, Signal, Action, SignalAggregator
 from .adapters import ExecutionAdapter, Order, Position
+
+logger = logging.getLogger("backtest")
+_patch_lock = threading.Lock()
 
 
 @dataclass
@@ -122,7 +128,7 @@ class BacktestEngine:
         if not v["valid"]:
             return BacktestResult(metrics={"error": "防未来函数校验失败", "details": v["warnings"]})
 
-        # 回测模式：跳过风控（monkey-patch）
+        # 回测模式：跳过风控（monkey-patch，线程安全）
         import src.strategy_framework.strategy as strat_mod
         original_place_order = strat_mod.Strategy.place_order
         def _bt_place_order(self, sig: Signal):
@@ -133,7 +139,8 @@ class BacktestEngine:
                 price=sig.price or adapter._current_bar.get("close", 0),
             )
             adapter.send_order(order)
-        strat_mod.Strategy.place_order = _bt_place_order
+        with _patch_lock:
+            strat_mod.Strategy.place_order = _bt_place_order
 
         try:
             cash = self.initial_capital
@@ -167,6 +174,7 @@ class BacktestEngine:
                                 proceeds = trade.price * trade.volume - trade.commission
                                 cash += proceeds
                                 # 胜负判定：卖出价 > 持仓均价
+                                # 简化：FIFO 逐笔配对待实现（当前用均价法，多笔分批时胜率可能偏差）
                                 if trade.price > avg_price:
                                     wins += 1
                                 total_closed += 1
@@ -207,8 +215,9 @@ class BacktestEngine:
 
             final_value = cash
         finally:
-            # 恢复
-            strat_mod.Strategy.place_order = original_place_order
+            # 恢复（线程安全）
+            with _patch_lock:
+                strat_mod.Strategy.place_order = original_place_order
 
         # 计算指标
         return self._calculate(
@@ -384,8 +393,8 @@ def precheck_backtest_data(config: StrategyConfig, bars: list[dict]) -> dict:
                 diff = (curr.date() - prev.date()).days
                 if diff > 7:  # 日线超过 7 天间隔判定为断点
                     gaps += 1
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("时序连续性检查异常: %s", e)
     if gaps > 0:
         issues.append(f"时序断点 {gaps} 处")
     else:

@@ -73,7 +73,7 @@ const role = ref(localStorage.getItem('role') || 'viewer')
 const statusType = s => ({ running: 'warning', completed: 'success', failed: 'danger', stuck: 'danger', terminated: 'info', paused: 'info' }[s] || '')
 const statusLabel = s => ({ running: '运行中', completed: '已完成', failed: '失败', stuck: '卡死', terminated: '已终止', paused: '已暂停' }[s] || s)
 
-const load = async () => { tasks.value = (await getTasks(filterStatus.value)).items || [] }
+const load = async () => { try { tasks.value = (await getTasks(filterStatus.value)).items || [] } catch (e) { console.error(e) } }
 onMounted(load)
 
 const onDetail = async (id) => {

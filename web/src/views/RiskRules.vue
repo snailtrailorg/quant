@@ -51,8 +51,10 @@ function emptyForm() {
 }
 
 const load = async () => {
-  rules.value = await getRiskRules()
-  types.value = (await getRiskRuleTypes()).types || []
+  try {
+    rules.value = await getRiskRules()
+    types.value = (await getRiskRuleTypes()).types || []
+  } catch (e) { console.error(e) }
 }
 onMounted(load)
 

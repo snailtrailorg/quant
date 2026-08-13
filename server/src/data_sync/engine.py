@@ -15,11 +15,14 @@ from datetime import date, timedelta
 from typing import Any, Callable
 import psycopg
 import pandas as pd
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_URL = os.environ.get("QUANT_DB_URL", "postgresql://quant@127.0.0.1:5432/quant")
+logger = logging.getLogger("data_sync")
+
+_sync_log_table_created = False
 
 
 def _get_pro():
@@ -38,19 +41,22 @@ def _log(sync_id: str, mode: str, start: str, end: str, pulled: int, saved: int,
          failed_dates: list[str] | None = None, expected_days: int | None = None,
          actual_days: int | None = None):
     with get_conn() as conn:
-        # 确保 sync_log 表存在（CREATE TABLE IF NOT EXISTS 幂等，避免新库缺表）
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sync_log (
-                id BIGSERIAL PRIMARY KEY,
-                sync_id TEXT NOT NULL,
-                ts TIMESTAMPTZ DEFAULT now(),
-                mode TEXT, start_date TEXT, end_date TEXT,
-                rows_pulled INTEGER DEFAULT 0, rows_saved INTEGER DEFAULT 0,
-                duration_ms INTEGER DEFAULT 0, status TEXT DEFAULT 'running',
-                error TEXT, failed_dates TEXT,
-                expected_days INTEGER, actual_days INTEGER
-            )
-        """)
+        # 确保 sync_log 表存在（CREATE TABLE IF NOT EXISTS 幂等，但避免重复 DDL）
+        global _sync_log_table_created
+        if not _sync_log_table_created:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS sync_log (
+                    id BIGSERIAL PRIMARY KEY,
+                    sync_id TEXT NOT NULL,
+                    ts TIMESTAMPTZ DEFAULT now(),
+                    mode TEXT, start_date TEXT, end_date TEXT,
+                    rows_pulled INTEGER DEFAULT 0, rows_saved INTEGER DEFAULT 0,
+                    duration_ms INTEGER DEFAULT 0, status TEXT DEFAULT 'running',
+                    error TEXT, failed_dates TEXT,
+                    expected_days INTEGER, actual_days INTEGER
+                )
+            """)
+            _sync_log_table_created = True
         conn.execute(
             "INSERT INTO sync_log (sync_id, mode, start_date, end_date, rows_pulled, rows_saved, "
             "duration_ms, status, error, failed_dates, expected_days, actual_days) "
@@ -123,47 +129,45 @@ def sync(sync_id: str, backfill_from: str | None = None,
     # 防重用心跳锁（进程被杀后 TTL 自然过期，不再卡死；last_status 只作展示，不作防重依据）
     from .sync_lock import SyncLock
     lock = SyncLock(sync_id)
-    if not lock.acquire():
-        return {"status": "skipped", "reason": "上次同步仍在运行"}
-    lock.start_heartbeat()
+    with lock:
+        if not lock.acquired:
+            return {"status": "skipped", "reason": "上次同步仍在运行"}
 
-    _mark_running(sync_id, True)
-    t0 = time.time()
-    end_date = date.today().strftime("%Y%m%d")
+        _mark_running(sync_id, True)
+        t0 = time.time()
+        end_date = date.today().strftime("%Y%m%d")
 
-    try:
-        handler = _HANDLERS.get(sync_id)
-        if handler:
-            r = handler(cfg, end_date, backfill_from, progress_cb=progress_cb)
-            pulled = r.get("pulled", 0)
-            saved = r.get("saved", 0)
-            start_date = r.get("start", end_date)
-            failed_dates = r.get("failed_dates", [])
-            expected_days = r.get("expected_days")
-            actual_days = r.get("actual_days")
-        else:
-            pulled, saved, start_date = 0, 0, end_date
-            failed_dates, expected_days, actual_days = [], None, None
-        status = "partial" if failed_dates else "success"
-        duration_ms = int((time.time() - t0) * 1000)
-        _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
-             status, "", failed_dates, expected_days, actual_days)
-        # 回补模式不推进 last_sync_date 游标（只补历史，不动增量进度）
-        if not backfill_from:
-            _update_sync_state(sync_id, end_date, saved)
-        _mark_running(sync_id, False)
-        lock.release()
-        return {"status": status, "rows_pulled": pulled, "rows_saved": saved,
-                "duration_ms": duration_ms, "failed_dates": failed_dates,
-                "expected_days": expected_days, "actual_days": actual_days,
-                "backfill": bool(backfill_from)}
+        try:
+            handler = _HANDLERS.get(sync_id)
+            if handler:
+                r = handler(cfg, end_date, backfill_from, progress_cb=progress_cb)
+                pulled = r.get("pulled", 0)
+                saved = r.get("saved", 0)
+                start_date = r.get("start", end_date)
+                failed_dates = r.get("failed_dates", [])
+                expected_days = r.get("expected_days")
+                actual_days = r.get("actual_days")
+            else:
+                pulled, saved, start_date = 0, 0, end_date
+                failed_dates, expected_days, actual_days = [], None, None
+            status = "partial" if failed_dates else "success"
+            duration_ms = int((time.time() - t0) * 1000)
+            _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
+                 status, "", failed_dates, expected_days, actual_days)
+            # 回补模式不推进 last_sync_date 游标（只补历史，不动增量进度）
+            if not backfill_from:
+                _update_sync_state(sync_id, end_date, saved)
+            _mark_running(sync_id, False)
+            return {"status": status, "rows_pulled": pulled, "rows_saved": saved,
+                    "duration_ms": duration_ms, "failed_dates": failed_dates,
+                    "expected_days": expected_days, "actual_days": actual_days,
+                    "backfill": bool(backfill_from)}
 
-    except Exception as e:
-        duration_ms = int((time.time() - t0) * 1000)
-        _log(sync_id, cfg["mode"], "", end_date, 0, 0, duration_ms, "error", str(e)[:200])
-        _mark_running(sync_id, False)
-        lock.release()
-        return {"status": "error", "error": str(e)[:200], "duration_ms": duration_ms}
+        except Exception as e:
+            duration_ms = int((time.time() - t0) * 1000)
+            _log(sync_id, cfg["mode"], "", end_date, 0, 0, duration_ms, "error", str(e)[:200])
+            _mark_running(sync_id, False)
+            return {"status": "error", "error": str(e)[:200], "duration_ms": duration_ms}
 
 
 # --- 通用按日批量拉取（去静默吞异常 + 完整性校验） ---
@@ -466,8 +470,8 @@ def _save_bars(rows: list[tuple]) -> int:
         quality = validate_bar_quality(rows)
         if quality.get("issues"):
             logger.warning(f"数据质量校验: {quality['issues']}")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("validate_bar_quality 异常: %s", e)
     from src.data_platform.db import save_bars
     return save_bars("1D", rows)
 
@@ -582,8 +586,8 @@ def _list_static_ts_codes(kind: str) -> list[str]:
             rows = cur.fetchall()
         if rows:
             return [r[0] for r in rows]
-    except Exception:
-        pass
+    except (psycopg.errors.UndefinedTable, Exception) as e:
+        logger.warning("查询 static_symbols 失败: %s", e)
     # fallback 旧表
     table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
     with get_conn() as conn:
@@ -968,18 +972,20 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
     name_col = "bond_short_name" if kind == "cb" else "name"
     bar_table = _PER_SYMBOL_META[sync_id][1]
 
-    like = f"%{q}%" if q else "%"
+    q_escaped = q.replace('%', '\\%').replace('_', '\\_') if q else ""
+    like = f"%{q_escaped}%" if q else "%"
     with get_conn() as conn:
-        cur = conn.execute(
-            f"SELECT ts_code, {name_col}, list_date FROM {table} "
-            f"WHERE ts_code ILIKE %s OR {name_col} ILIKE %s "
-            f"ORDER BY ts_code LIMIT %s OFFSET %s",
-            (like, like, size, (page - 1) * size))
-        rows = cur.fetchall()
-        cur = conn.execute(
-            f"SELECT count(*) FROM {table} WHERE ts_code ILIKE %s OR {name_col} ILIKE %s",
-            (like, like))
-        total = cur.fetchone()[0] or 0
+        with conn.transaction():
+            cur = conn.execute(
+                f"SELECT ts_code, {name_col}, list_date FROM {table} "
+                f"WHERE ts_code ILIKE %s OR {name_col} ILIKE %s "
+                f"ORDER BY ts_code LIMIT %s OFFSET %s",
+                (like, like, size, (page - 1) * size))
+            rows = cur.fetchall()
+            cur = conn.execute(
+                f"SELECT count(*) FROM {table} WHERE ts_code ILIKE %s OR {name_col} ILIKE %s",
+                (like, like))
+            total = cur.fetchone()[0] or 0
 
     if not rows:
         return {"items": [], "total": total}

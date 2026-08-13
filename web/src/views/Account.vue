@@ -134,7 +134,7 @@ const onRoleChange = async (uid, role) => {
   try { await api.put(`/user/${uid}?role=${role}`); ElMessage.success('角色已改') } catch { ElMessage.error('改角色失败') }
 }
 const onToggleEnabled = async (row) => {
-  try { await api.put(`/user/${row.id}?enabled=${!row.enabled}`); row.enabled = !row.enabled; ElMessage.success(row.enabled ? '已启用' : '已禁用') } catch { ElMessage.error('操作失败') }
+  try { await api.put(`/user/${row.id}?enabled=${!row.enabled}`); ElMessage.success(row.enabled ? '已禁用' : '已启用'); await load() } catch { ElMessage.error('操作失败') }
 }
 const onDeleteUser = async (uid) => {
   await ElMessageBox.confirm('确认删除该用户？', { type: 'warning' })

@@ -87,6 +87,7 @@ class AlertNotify:
     def _append_body(self, key: str, body: str):
         """合并追加 body。"""
         self._redis.append(f"alert:body:{key}", f"\n---\n{body}")
+        self._redis.expire(f"alert:body:{key}", 86400)
 
     def _quota_exceeded(self, channel: str) -> bool:
         """日配额检查（#39，默认 100 条/天/渠道，ALERT_DAILY_QUOTA 可配）。"""
@@ -96,6 +97,7 @@ class AlertNotify:
         if used >= limit:
             logger.warning(f"渠道 {channel} 日配额超限 {limit}，跳过")
             return True
+        self._redis.setnx(k, 0)
         self._redis.incr(k)
         self._redis.expire(k, 86400)
         return False

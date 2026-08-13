@@ -7,6 +7,7 @@ Trader（交易：启停策略/熔断/下单）与 Analyst（研究：策略/回
 from __future__ import annotations
 from src.data_platform.db import get_conn
 import os
+import re
 import time
 import bcrypt
 import secrets
@@ -14,13 +15,18 @@ from typing import Literal
 from datetime import datetime, timedelta
 import jwt
 import psycopg
+import logging
 from fastapi import HTTPException, Header
 from dotenv import load_dotenv
 
 load_dotenv()
 
+_logger = logging.getLogger("quant")
+
 Role = Literal["viewer", "analyst", "trader", "admin"]
 JWT_SECRET = os.environ.get("JWT_SECRET", "quant-dev-secret-change-me")
+if JWT_SECRET == "quant-dev-secret-change-me":
+    _logger.warning("JWT_SECRET 使用默认值，生产环境请通过环境变量设置独立密钥")
 JWT_ALGO = "HS256"
 JWT_TTL_HOURS = 24
 
@@ -38,7 +44,7 @@ PERMISSIONS = {
 def require_role(*allowed: Role):
     """FastAPI 依赖：检查 JWT 角色是否在允许列表中。"""
     def checker(authorization: str = Header(...)):
-        token = authorization.replace("Bearer ", "")
+        token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
         payload = verify_jwt(token)
         role = payload.get("role", "viewer")
         if role not in allowed:
@@ -50,7 +56,7 @@ def require_role(*allowed: Role):
 def require_perm(perm: str):
     """FastAPI 依赖：检查 JWT 角色是否有指定权限。"""
     def checker(authorization: str = Header(...)):
-        token = authorization.replace("Bearer ", "")
+        token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
         payload = verify_jwt(token)
         role = payload.get("role", "viewer")
         perms = PERMISSIONS.get(role, set())
@@ -119,6 +125,8 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, stored: str) -> bool:
     """bcrypt 验证（兼容旧 sha256：非 bcrypt 哈希返回 False 触发重置）。"""
+    if not stored:
+        return False
     try:
         return bcrypt.checkpw(password.encode(), stored.encode())
     except (ValueError, TypeError):
@@ -275,7 +283,9 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
     with get_conn() as conn:
         cur = conn.execute("SELECT password_hash FROM users WHERE id=%s", (user_id,))
         row = cur.fetchone()
-        if not row or not verify_password(old_password, row[0]):
+        if not row or row[0] is None:
+            raise HTTPException(400, "用户密码未设置")
+        if not verify_password(old_password, row[0]):
             return False
         conn.execute("UPDATE users SET password_hash=%s WHERE id=%s",
                      (hash_password(new_password), user_id))

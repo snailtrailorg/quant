@@ -133,16 +133,19 @@ def astock_minute_analysis():
                 results.append({"symbol": sym, "action": r["action"], "score": r["score"], "rating": r["rating"]})
                 # 落 PG
                 with get_conn() as conn:
-                    conn.execute("""CREATE TABLE IF NOT EXISTS astock_analysis (
-                        id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-                        symbol TEXT, action TEXT, score NUMERIC, rating TEXT, factors JSONB)""")
+                    try:
+                        conn.execute("""CREATE TABLE IF NOT EXISTS astock_analysis (
+                            id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
+                            symbol TEXT, action TEXT, score NUMERIC, rating TEXT, factors JSONB)""")
+                    except Exception:
+                        pass
                     import json
                     conn.execute("INSERT INTO astock_analysis (symbol, action, score, rating, factors) VALUES (%s,%s,%s,%s,%s)",
                                  (sym, r["action"], r["score"], r["rating"], json.dumps(r.get("factors", {}))))
                     conn.commit()
         return {"status": "ok", "count": len(results), "results": results}
     except Exception as e:
-        logger.warning(f"astock_minute_analysis 失败: {e}")
+        logger.exception("astock_minute_analysis 失败")
         return {"status": "error", "reason": str(e)[:100]}
 
 
@@ -246,42 +249,51 @@ def reconcile_three_books():
     try:
         with get_conn() as conn:
             # 建对账表（幂等）
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS signal_log (
-                    id BIGSERIAL PRIMARY KEY,
-                    ts TIMESTAMPTZ DEFAULT now(),
-                    strategy_id TEXT,
-                    symbol TEXT,
-                    action TEXT,
-                    score NUMERIC,
-                    price NUMERIC
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS order_log (
-                    id BIGSERIAL PRIMARY KEY,
-                    ts TIMESTAMPTZ DEFAULT now(),
-                    strategy_id TEXT,
-                    symbol TEXT,
-                    action TEXT,
-                    volume INT,
-                    price NUMERIC,
-                    status TEXT DEFAULT 'submitted',
-                    signal_id BIGINT
-                )
-            """)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS trade_log (
-                    id BIGSERIAL PRIMARY KEY,
-                    ts TIMESTAMPTZ DEFAULT now(),
-                    order_id BIGINT,
-                    symbol TEXT,
-                    action TEXT,
-                    volume INT,
-                    price NUMERIC,
-                    commission NUMERIC
-                )
-            """)
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS signal_log (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts TIMESTAMPTZ DEFAULT now(),
+                        strategy_id TEXT,
+                        symbol TEXT,
+                        action TEXT,
+                        score NUMERIC,
+                        price NUMERIC
+                    )
+                """)
+            except Exception:
+                pass
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS order_log (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts TIMESTAMPTZ DEFAULT now(),
+                        strategy_id TEXT,
+                        symbol TEXT,
+                        action TEXT,
+                        volume INT,
+                        price NUMERIC,
+                        status TEXT DEFAULT 'submitted',
+                        signal_id BIGINT
+                    )
+                """)
+            except Exception:
+                pass
+            try:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS trade_log (
+                        id BIGSERIAL PRIMARY KEY,
+                        ts TIMESTAMPTZ DEFAULT now(),
+                        order_id BIGINT,
+                        symbol TEXT,
+                        action TEXT,
+                        volume INT,
+                        price NUMERIC,
+                        commission NUMERIC
+                    )
+                """)
+            except Exception:
+                pass
             conn.commit()
 
             # 比对逻辑（实盘数据接入后实现具体核对）
@@ -337,6 +349,7 @@ def data_continuity_check():
     issues = []
     repaired = 0
     reconnected = 0
+    r = None
 
     # 1. 断线检测（Valkey 心跳网关）
     try:
@@ -379,7 +392,8 @@ def data_continuity_check():
                             repaired = save_bars("1D", rows)
                             # 3. 因子重算触发：有修复则标记（后续 astock_select_daily 将利用完整数据）
                             if repaired > 0:
-                                r.set(f"factor:recalc:triggered", "1", ex=3600)
+                                if r is not None:
+                                    r.set(f"factor:recalc:triggered", "1", ex=3600)
                     except Exception as e:
                         issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
     except Exception as e:
@@ -459,9 +473,6 @@ def data_sync_scheduler():
     now = datetime.now(timezone.utc)
 
     for sid, schedule, enabled, last_status, last_sync_date, last_sync_ts, trade_day_filter in configs:
-        if not enabled:
-            skipped.append(sid)
-            continue
         if last_status == "running":
             skipped.append(f"{sid}(运行中)")
             continue
@@ -519,7 +530,6 @@ def sync_all_symbols(self, sync_id: str):
 
     r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
     key = f"sync:progress:{sync_id}"
-    db_url = os.environ.get("QUANT_DB_URL", "postgresql://quant@127.0.0.1:5432/quant")
 
     def _mark(status: str, count: int = 0):
         """更新 sync_config.last_status/last_sync_count，让 DataManage 页看到进度。"""
@@ -786,7 +796,8 @@ def convertible_terms_sync():
                         (ts_code, json.dumps(terms, ensure_ascii=False)))
                     conn.commit()
                 results.append(ts_code)
-        except Exception:
+        except Exception as e:
+            logger.warning("convertible_terms_sync 处理 %s 失败: %s", ts_code, e)
             continue
     return {"status": "ok", "count": len(results)}
 

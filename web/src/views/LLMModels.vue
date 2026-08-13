@@ -103,8 +103,8 @@ function emptyForm() {
   return { name: '', provider: '', model: '', api_key: '', base_url: '', priority: 10, enabled: false, context_window: 32768, supports_tools: true, max_input_tokens: null, max_output_tokens: null, temperature: null }
 }
 
-const load = async () => { models.value = await getLLMModels() }
-const loadUsage = async () => { usage.value = await getLLMUsage() }
+const load = async () => { try { models.value = await getLLMModels() } catch (e) { console.error(e) } }
+const loadUsage = async () => { try { usage.value = await getLLMUsage() } catch (e) { console.error(e) } }
 onMounted(() => { load(); loadUsage(); loadBudget() })
 
 const onEdit = (row) => { form.value = { ...row, api_key: '' } }

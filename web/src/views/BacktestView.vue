@@ -85,8 +85,8 @@ onMounted(async () => {
     const data = await getBacktestRun(runId)
     const symData = data.symbols?.find(s => s.symbol === symbol) || {}
     result.value = symData.result || {}
-    trades.value = result.value.trades || []
-    dailyValues.value = result.value.daily_values || []
+    trades.value = symData.result?.trades || []
+    dailyValues.value = symData.result?.daily_values || []
     // 计算回撤曲线
     let peak = 0
     drawdownData.value = (result.value.daily_values || []).map(d => {
@@ -96,25 +96,26 @@ onMounted(async () => {
     })
 
     // P2-12: SSE 实时流（回测运行时）
-    const token = localStorage.getItem('token')
-    if (token && data.status === 'running') {
-      eventSource = new EventSource(`/api/backtest/${runId}/${symbol}/stream?token=${token}`)
+    if (data.status === 'running') {
+      eventSource = new EventSource(`/api/backtest/${runId}/${symbol}/stream`)
       eventSource.onmessage = (e) => {
-        const frame = JSON.parse(e.data)
-        if (frame.error) { eventSource.close(); return }
-        if (frame.daily_values) { dailyValues.value = frame.daily_values }
-        if (frame.trades) { trades.value = frame.trades }
-        if (frame.total_return_pct !== undefined) {
-          result.value = frame
-          eventSource.close()
-        }
+        try {
+          const frame = JSON.parse(e.data)
+          if (frame.error) { eventSource.close(); eventSource = null; return }
+          if (frame.daily_values) { dailyValues.value = frame.daily_values }
+          if (frame.trades) { trades.value = frame.trades }
+          if (frame.total_return_pct !== undefined) {
+            result.value = frame
+            eventSource.close(); eventSource = null
+          }
+        } catch (e) { /* ignore malformed frame */ }
       }
     }
   } catch (e) { ElMessage.error('加载可视化数据失败') }
   finally { loading.value = false }
 })
 
-onUnmounted(() => { if (eventSource) eventSource.close() })
+onUnmounted(() => { if (eventSource) { eventSource.onmessage = null; eventSource.close(); eventSource = null } })
 </script>
 
 <style scoped>

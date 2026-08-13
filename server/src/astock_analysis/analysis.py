@@ -4,6 +4,7 @@
 """
 
 from __future__ import annotations
+import logging
 from datetime import date, datetime, timedelta
 from dataclasses import dataclass, field
 from typing import Any
@@ -14,6 +15,8 @@ from src.strategy_framework import (
     create_adapter, list_factors, register_factor, get_factor,
 )
 from src.data_platform import platform, to_vt_symbol, parse_vt_symbol
+
+logger = logging.getLogger("astock_analysis")
 
 
 @dataclass
@@ -37,8 +40,9 @@ class AnalysisResult:
 class DailySelectionEngine:
     """日线选股模型：多因子打分 → 排序 → 输出。"""
 
-    def __init__(self, top_n: int = 30):
+    def __init__(self, top_n: int = 30, max_stocks: int | None = None):
         self.top_n = top_n
+        self._max_stocks = max_stocks or 50
         # 注册 A 股因子
         self._factors = self._register_astock_factors()
 
@@ -65,12 +69,13 @@ class DailySelectionEngine:
 
         # 2. 获取日线数据（批量）
         results = []
-        for ts_code in stocks[:50]:  # 先限 50 只测试，后续全量
+        for ts_code in stocks[:self._max_stocks]:  # 分批处理，避免全量堵塞
             try:
                 result = self._analyze_single(pro, ts_code, trade_date)
                 if result:
                     results.append(result)
-            except Exception:
+            except Exception as e:
+                logger.warning("分析 %s 失败: %s", ts_code, e)
                 continue
 
         # 3. 排序输出

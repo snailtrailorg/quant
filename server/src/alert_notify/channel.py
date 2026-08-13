@@ -96,6 +96,8 @@ def get_channel(provider: str) -> MessageChannel | None:
         if not r:
             return None
         cred = decrypt(r[0]) if r[0] else ""
+        if not cred:
+            raise ValueError("通道凭证为空")
         return cls(cred)
     except Exception as e:
         logger.warning(f"读 channel_config({provider}) 失败: {e}")

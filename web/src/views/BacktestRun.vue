@@ -9,10 +9,10 @@
     </template>
 
     <el-row :gutter="20" style="margin-bottom: 20px">
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">总收益</div><div class="value">{{ run.total_return_pct }}%</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">胜率</div><div class="value">{{ run.win_rate }}%</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">夏普</div><div class="value">{{ run.sharpe_ratio }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">最大回撤</div><div class="value">{{ run.max_drawdown_pct }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">总收益</div><div class="value">{{ run.total_return_pct ?? '-' }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">胜率</div><div class="value">{{ run.win_rate ?? '-' }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">夏普</div><div class="value">{{ run.sharpe_ratio ?? '-' }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">最大回撤</div><div class="value">{{ run.max_drawdown_pct ?? '-' }}%</div></div></el-card></el-col>
     </el-row>
 
     <el-card>

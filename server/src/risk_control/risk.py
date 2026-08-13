@@ -151,7 +151,8 @@ class RiskControl:
                     "SELECT enabled FROM live_trading_config WHERE market=%s", (market,))
                 row = cur.fetchone()
             return bool(row and row[0])
-        except Exception:
+        except Exception as e:
+            logger.warning("is_live_trading_allowed 检查异常: %s", e)
             return False
 
     # ── 前置校验 ──
@@ -172,9 +173,10 @@ class RiskControl:
 
         # 3. 全局风控
         state = self._get_global_state(account)
-        if state.total_drawdown >= self._rules["global"]["max_drawdown"]:
+        global_rules = self._rules.get("global", {})
+        if state.total_drawdown >= global_rules.get("max_drawdown", 0.15):
             return RiskDecision(approved=False, reason=f"总回撤 {state.total_drawdown:.1%} 超限", severity="critical")
-        if state.daily_loss >= self._rules["global"]["daily_loss_limit"]:
+        if state.daily_loss >= global_rules.get("daily_loss_limit", 0.05):
             return RiskDecision(approved=False, reason=f"单日亏损 {state.daily_loss:.1%} 超限，仅平不开", severity="warn")
 
         # 4. 分市场检查
@@ -230,19 +232,22 @@ class RiskControl:
 
         无持仓时返回 0.0（无风险）。实盘开始后自动生效。
         """
-        import os, psycopg
+        import os
         try:
             with get_conn() as conn:
                 # 建表（幂等）
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS account_snapshot (
-                        id BIGSERIAL PRIMARY KEY,
-                        ts TIMESTAMPTZ DEFAULT now(),
-                        total_value NUMERIC NOT NULL,
-                        daily_pnl NUMERIC DEFAULT 0,
-                        initial_capital NUMERIC NOT NULL DEFAULT 1000000
-                    )
-                """)
+                try:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS account_snapshot (
+                            id BIGSERIAL PRIMARY KEY,
+                            ts TIMESTAMPTZ DEFAULT now(),
+                            total_value NUMERIC NOT NULL,
+                            daily_pnl NUMERIC DEFAULT 0,
+                            initial_capital NUMERIC NOT NULL DEFAULT 1000000
+                        )
+                    """)
+                except Exception:
+                    pass
                 conn.commit()
                 # 读最新快照
                 cur = conn.execute(
@@ -262,7 +267,7 @@ class RiskControl:
     def update_account_snapshot(self, total_value: float, daily_pnl: float = 0,
                                  initial_capital: float = 1_000_000):
         """更新账户快照（策略引擎/交易引擎调用，供风控读取）。"""
-        import os, psycopg
+        import os
         with get_conn() as conn:
             conn.execute(
                 "INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s,%s,%s)",
@@ -276,5 +281,9 @@ class RiskControl:
 
     def update_rules(self, rules: dict) -> None:
         """更新风控规则（Admin）。"""
+        allowed_keys = {"global", "etf_conv", "crypto"}
+        for k in rules:
+            if k not in allowed_keys:
+                raise ValueError(f"非法规则键: {k}")
         self._rules.update(rules)
         logger.info(f"风控规则更新: {rules}")

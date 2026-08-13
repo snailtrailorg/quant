@@ -37,5 +37,5 @@ const filteredLogs = computed(() => {
   if (filterAction.value) r = r.filter(l => l.action?.includes(filterAction.value))
   return r
 })
-onMounted(async () => { logs.value = await getAudit() })
+onMounted(async () => { try { logs.value = await getAudit() } catch (e) { console.error(e) } })
 </script>

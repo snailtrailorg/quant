@@ -17,12 +17,12 @@ from src.web_api.crypto_utils import encrypt
 
 logger = logging.getLogger("feishu_bot")
 VALKEY_URL = os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4")
+_redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True)
 
 
 def _set_session(session_id: str, data: dict, expire: int = 600) -> None:
     """存扫码会话状态到 Valkey。"""
-    r = redis.Redis.from_url(VALKEY_URL, decode_responses=True)
-    r.setex(f"feishu:session:{session_id}", expire, json.dumps(data, ensure_ascii=False))
+    _redis.setex(f"feishu:session:{session_id}", expire, json.dumps(data, ensure_ascii=False))
 
 
 @celery_app.task(name="src.feishu_bot.tasks.feishu_register_task", bind=True)

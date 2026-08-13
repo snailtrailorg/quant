@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 import json
-import threading
+import concurrent.futures
 from fastapi import APIRouter, Request, HTTPException
 from .bot import (
     verify_signature, check_user, process_message_async,
@@ -13,6 +13,8 @@ from .bot import (
 )
 
 router = APIRouter(prefix="/lark", tags=["feishu"])
+
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=10)
 
 
 @router.post("/webhook")
@@ -23,7 +25,7 @@ async def webhook(request: Request):
     data = json.loads(body_str)
 
     # 签名校验
-    timestamp = request.headers.get("X-Lark-Signature", "")  # 简化
+    timestamp = request.headers.get("X-Lark-Request-Timestamp", "")  # 简化
     if not verify_signature(timestamp, body_str, request.headers.get("X-Lark-Signature", "")):
         raise HTTPException(403, "签名校验失败")
 
@@ -45,12 +47,7 @@ async def webhook(request: Request):
 
     # 后台处理（立即返回，不阻塞 3s 超时）
     receive_id = msg.get("chat_id", open_id)
-    thread = threading.Thread(
-        target=process_message_async,
-        args=(open_id, text, "chat_id" if receive_id != open_id else "open_id"),
-        daemon=True,
-    )
-    thread.start()
+    _executor.submit(process_message_async, open_id, text, "chat_id" if receive_id != open_id else "open_id")
 
     return {"code": 0}  # 立即返回，3s 内
 
@@ -66,9 +63,6 @@ async def card_callback(request: Request):
         return {"challenge": data["challenge"]}
 
     # 提取卡片按钮值
-    for item in data.get("event", {}).get("action", {}).get("value", {}).items() if isinstance(data.get("event", {}).get("action", {}).get("value"), dict) else []:
-        pass  # 简化
-
     action_data = data.get("event", {}).get("action", {}).get("value", {})
     if action_data.get("action") == "confirm":
         open_id = data.get("event", {}).get("operator", {}).get("open_id", "")

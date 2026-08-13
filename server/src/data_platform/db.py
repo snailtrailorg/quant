@@ -12,7 +12,10 @@ from dotenv import load_dotenv
 
 from .schema import BAR_TABLE_DDL, BAR_TABLE_INSERT, BAR_TABLE_INSERT_OVERWRITE, BAR_TABLE_SELECT, parse_vt_symbol
 
-load_dotenv()  # 读 .env
+_dotenv_loaded = False
+if not _dotenv_loaded:
+    load_dotenv()  # 读 .env
+    _dotenv_loaded = True
 
 
 def get_conn_url() -> str:
@@ -87,6 +90,9 @@ def validate_bars(rows: list[tuple]) -> list[tuple]:
     return clean
 
 
+_VALID_FREQS = {'1min', '5min', '15min', '30min', '60min', '1d'}
+
+
 def save_bars(freq: str, rows: list[tuple]) -> int:
     """批量写入 K 线，冲突跳过。返回写入行数。
 
@@ -97,6 +103,7 @@ def save_bars(freq: str, rows: list[tuple]) -> int:
     rows = validate_bars(rows)
     if not rows:
         return 0
+    assert freq in _VALID_FREQS, f"非法 freq: {freq}"
     ensure_table(freq)
     insert_sql = BAR_TABLE_INSERT.format(freq=freq)  # freq 是内部值，安全
     with get_conn() as conn:
@@ -127,12 +134,18 @@ def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
     ensure_table(freq)
     select_sql = BAR_TABLE_SELECT.format(freq=freq)
     with get_conn() as conn:
-        cur = conn.execute(select_sql, (symbol, start, end))
-        rows = cur.fetchall()
-        cols = [d[0] for d in cur.description] if cur.description else []
+        with conn.cursor() as cur:
+            cur.execute(select_sql, (symbol, start, end))
+            rows = cur.fetchall()
+            cols = [d[0] for d in cur.description] if cur.description else []
         if not rows:
             return pd.DataFrame(columns=cols)
         df = pd.DataFrame(rows, columns=cols)
+        # 显式转换数值列为 float64（psycopg3 Decimal 可能存为 object dtype）
+        _numeric_cols = ['open', 'high', 'low', 'close', 'volume', 'amount', 'adj_factor']
+        for _col in _numeric_cols:
+            if _col in df.columns:
+                df[_col] = pd.to_numeric(df[_col], errors='coerce')
         if "ts" in cols:
             df["ts"] = pd.to_datetime(df["ts"])
         return df

@@ -11,6 +11,7 @@ A 股股票走 XTPAdapter（中泰 XTP 能交易 A 股），受 astock 分项开
 """
 
 from __future__ import annotations
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import time
@@ -95,6 +96,7 @@ class XTPAdapter(ExecutionAdapter):
         self._cid2vt: dict = {}
         self._vt2cid: dict = {}
         self._cid_seq = 0
+        self._lock = threading.Lock()
         if self._event_engine:
             from vnpy.event import Event
             from vnpy.trader.event import EVENT_ORDER, EVENT_TRADE, EVENT_POSITION, EVENT_ACCOUNT
@@ -107,19 +109,23 @@ class XTPAdapter(ExecutionAdapter):
 
     def _on_order(self, event) -> None:
         d = event.data
-        self._orders[d.vt_orderid] = d
+        with self._lock:
+            self._orders[d.vt_orderid] = d
 
     def _on_trade(self, event) -> None:
         d = event.data
-        self._trades[d.vt_tradeid] = d
+        with self._lock:
+            self._trades[d.vt_tradeid] = d
 
     def _on_position(self, event) -> None:
         d = event.data
-        self._positions[d.vt_positionid] = d
+        with self._lock:
+            self._positions[d.vt_positionid] = d
 
     def _on_account(self, event) -> None:
         d = event.data
-        self._accounts[d.accountid] = d
+        with self._lock:
+            self._accounts[d.accountid] = d
 
     # ── 工具 ──
 
@@ -155,16 +161,18 @@ class XTPAdapter(ExecutionAdapter):
             reference=client_id,
         )
         vt_orderid = self._gateway.send_order(req)
-        self._cid2vt[client_id] = vt_orderid
-        self._vt2cid[vt_orderid] = client_id
+        with self._lock:
+            self._cid2vt[client_id] = vt_orderid
+            self._vt2cid[vt_orderid] = client_id
         return client_id
 
     def cancel_order(self, order_id: str) -> None:
         if self._gateway is None:
             return
         from vnpy.trader.object import CancelRequest
-        vt_orderid = self._cid2vt.get(order_id, order_id)
-        od = self._orders.get(vt_orderid)
+        with self._lock:
+            vt_orderid = self._cid2vt.get(order_id, order_id)
+            od = self._orders.get(vt_orderid)
         if od:
             # vnpy cancel 要纯 orderid（不含 gateway 前缀）+ symbol + exchange
             req = CancelRequest(orderid=od.orderid, symbol=od.symbol, exchange=od.exchange)
@@ -179,32 +187,38 @@ class XTPAdapter(ExecutionAdapter):
     def query_position(self) -> list[Position]:
         if self._gateway is None:
             return []
-        before = set(self._positions.keys())
+        with self._lock:
+            before = set(self._positions.keys())
         self._gateway.query_position()
         self._wait_update(self._positions, before, timeout=2.0)
-        return [
-            Position(
-                symbol=p.vt_symbol,
-                volume=int(p.volume),
-                avg_price=float(p.price),
-                pnl=float(getattr(p, "pnl", 0.0) or 0.0),
-            )
-            for p in self._positions.values()
-        ]
+        with self._lock:
+            return [
+                Position(
+                    symbol=p.vt_symbol,
+                    volume=int(p.volume),
+                    avg_price=float(p.price),
+                    pnl=float(getattr(p, "pnl", 0.0) or 0.0),
+                )
+                for p in self._positions.values()
+            ]
 
     def query_account(self) -> list:
         if self._gateway is None:
             return []
-        before = set(self._accounts.keys())
+        with self._lock:
+            before = set(self._accounts.keys())
         self._gateway.query_account()
         self._wait_update(self._accounts, before, timeout=2.0)
-        return list(self._accounts.values())
+        with self._lock:
+            return list(self._accounts.values())
 
     def query_orders(self) -> list:
-        return list(self._orders.values())
+        with self._lock:
+            return list(self._orders.values())
 
     def query_trades(self) -> list:
-        return list(self._trades.values())
+        with self._lock:
+            return list(self._trades.values())
 
     @staticmethod
     def _wait_update(cache: dict, before: set, timeout: float = 2.0) -> None:

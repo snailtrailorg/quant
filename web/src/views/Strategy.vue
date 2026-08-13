@@ -53,7 +53,7 @@
               <el-option v-for="fac in availableFactors" :key="fac.name" :label="`${fac.name} (${fac.category})`" :value="fac.name" />
             </el-select>
             <el-input-number v-model="f.weight" :min="0" :max="2" :step="0.1" :precision="2" style="width: 120px" />
-            <el-button size="small" type="danger" @click="editForm.factors.splice(i, 1)">删</el-button>
+            <el-button size="small" type="danger" @click="removeFactor(i)">删</el-button>
           </div>
           <el-button size="small" @click="addFactor">+ 添加因子</el-button>
 
@@ -346,7 +346,8 @@ const saveEdit = async () => {
   finally { saving.value = false }
 }
 
-const onStart = async id => { await startStrategy(id); ElMessage.success('已启动'); load() }
-const onStop = async id => { await stopStrategy(id); ElMessage.success('已停止'); load() }
+const onStart = async id => { try { await startStrategy(id); ElMessage.success('已启动'); load() } catch (e) { console.error(e); ElMessage.error('启动失败') } }
+const onStop = async id => { try { await stopStrategy(id); ElMessage.success('已停止'); load() } catch (e) { console.error(e); ElMessage.error('停止失败') } }
+const removeFactor = (i) => { editForm.value.factors = editForm.value.factors.filter((_, idx) => idx !== i) }
 onMounted(async () => { await load(); await loadFactors() })
 </script>

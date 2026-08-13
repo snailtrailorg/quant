@@ -106,7 +106,7 @@ const username = ref('')
 const role = ref('')
 const lang = ref(locale.value)
 
-getMe().then(me => { username.value = me.username; role.value = me.role })
+getMe().then(me => { username.value = me.username; role.value = me.role }).catch(e => { console.error(e); username.value = ''; role.value = '' })
 
 const onLangChange = v => setLang(v)
 const logout = async () => {

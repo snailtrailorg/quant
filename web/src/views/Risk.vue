@@ -56,9 +56,9 @@ const loadLive = async () => {
   try {
     const data = await getLiveTrading()
     if (Array.isArray(data)) {
-      liveTradingMarkets.value.forEach(m => {
+      liveTradingMarkets.value = liveTradingMarkets.value.map(m => {
         const found = data.find(d => d.market === m.market)
-        if (found) m.enabled = found.enabled
+        return found ? { ...m, enabled: found.enabled } : m
       })
     } else if (data && typeof data === 'object') {
       liveTradingMarkets.value.forEach(m => { m.enabled = !!data[m.market] })
@@ -78,12 +78,16 @@ const onToggleLive = async (market, enabled) => {
 }
 
 const onHalt = async () => {
-  await ElMessageBox.confirm(t('risk.confirmHalt'), { type: 'warning' })
-  await riskHalt(); ElMessage.success('已熔断'); load()
+  try {
+    await ElMessageBox.confirm(t('risk.confirmHalt'), { type: 'warning' })
+    await riskHalt(); ElMessage.success('已熔断'); load()
+  } catch (e) { console.error(e) }
 }
 const onResume = async () => {
-  await ElMessageBox.confirm(t('risk.confirmResume'), { type: 'warning' })
-  await riskResume(); ElMessage.success('已恢复'); load()
+  try {
+    await ElMessageBox.confirm(t('risk.confirmResume'), { type: 'warning' })
+    await riskResume(); ElMessage.success('已恢复'); load()
+  } catch (e) { console.error(e) }
 }
 onMounted(async () => { await load(); await loadLive() })
 </script>

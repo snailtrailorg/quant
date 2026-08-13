@@ -33,7 +33,8 @@ const emit = defineEmits(['update:modelValue'])
 const vals = ref({ ...props.modelValue })
 
 // 当 defs 变化时，用默认值填充
-watch(() => props.defs, (newDefs) => {
+watch(() => props.defs, (newDefs, oldDefs) => {
+  if (JSON.stringify(newDefs) === JSON.stringify(oldDefs)) return
   const newVals = {}
   for (const def of (newDefs || [])) {
     newVals[def.name] = props.modelValue[def.name] !== undefined

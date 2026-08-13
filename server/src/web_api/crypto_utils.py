@@ -8,27 +8,34 @@ from src.data_platform.db import get_conn
 import os
 import base64
 import hashlib
+import threading
+import logging
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_logger = logging.getLogger("quant")
 
 # 从环境变量获取加密密钥（首次启动自动生成）
 def _get_encryption_key() -> bytes:
     key = os.environ.get("ENCRYPTION_KEY", "")
     if not key:
         # 从 JWT_SECRET 派生（开发期，生产应独立配置）
+        _logger.warning("ENCRYPTION_KEY 未设置，从 JWT_SECRET 派生。生产环境应设置独立 ENCRYPTION_KEY 环境变量")
         secret = os.environ.get("JWT_SECRET", "quant-dev-secret-change-me")
         key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode()).digest()).decode()
     return key.encode()
 
 
 _fernet = None
+_fernet_lock = threading.Lock()
 
 def _get_fernet() -> Fernet:
     global _fernet
-    if _fernet is None:
-        _fernet = Fernet(_get_encryption_key())
+    with _fernet_lock:
+        if _fernet is None:
+            _fernet = Fernet(_get_encryption_key())
     return _fernet
 
 

@@ -67,7 +67,7 @@ const load = async () => {
       const pnl = await getPnl()
       const curve = pnl.curve || []
       const equity = pnl.total_value || 0
-      strategies.value.forEach(s => { s._curve = curve; s._equity = equity })
+      strategies.value = strategies.value.map(s => ({ ...s, _curve: curve, _equity: equity }))
     } catch { /* 无数据 */ }
   } finally { loading.value = false }
 }

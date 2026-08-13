@@ -36,7 +36,7 @@ import { getStrategies, getDashboard } from '../api'
 const strategies = ref([])
 const dashboard = ref({})
 onMounted(async () => {
-  strategies.value = await getStrategies()
+  try { strategies.value = await getStrategies() } catch (e) { console.error(e) }
   try { dashboard.value = await getDashboard() } catch (e) {}
 })
 </script>

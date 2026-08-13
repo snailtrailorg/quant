@@ -47,6 +47,8 @@ class DataSource(ABC):
 class TushareDataSource(DataSource):
     """Tushare 数据源（token 从 data_source_config DB 读，.env fallback）。"""
 
+    provider = "tushare"
+
     def __init__(self, credentials_encrypted: str | None = None, params: str | None = None):
         self._credentials_encrypted = credentials_encrypted
         self._params = json.loads(params) if params else {}

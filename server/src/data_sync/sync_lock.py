@@ -16,9 +16,12 @@ import os
 import uuid
 import threading
 import redis
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger("data_sync")
 
 _TTL_SEC = 60          # 锁 TTL 60 秒，心跳每 20 秒刷一次（留 40 秒余量）
 _HEARTBEAT_INTERVAL = 20  # 后台心跳间隔
@@ -32,13 +35,16 @@ class SyncLock:
         self.key = f"sync:lock:{sync_id}"
         self.token = str(uuid.uuid4())
         self.ttl = ttl
-        self._r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+        self._r = None
         self.acquired = False
+        self._heartbeat_ok = True
         self._hb_thread: threading.Thread | None = None
         self._hb_stop = threading.Event()
 
     def acquire(self) -> bool:
         """SET NX EX 抢锁。成功返回 True；锁已被持有返回 False。"""
+        if self._r is None:
+            self._r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
         self.acquired = self._r.set(self.key, self.token, nx=True, ex=self.ttl) is not None
         return self.acquired
 
@@ -57,8 +63,9 @@ class SyncLock:
                 )
                 try:
                     self._r.eval(lua, 1, self.key, self.token, self.ttl)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("心跳异常: %s", e)
+                    self._heartbeat_ok = False
 
         self._hb_thread = threading.Thread(target=_beat, daemon=True)
         self._hb_thread.start()
@@ -73,8 +80,8 @@ class SyncLock:
         )
         try:
             self._r.eval(lua, 1, self.key, self.token, self.ttl)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("heartbeat 刷新异常: %s", e)
 
     def release(self):
         """释放锁。只删自己的（token 校验）。"""
@@ -87,8 +94,8 @@ class SyncLock:
         )
         try:
             self._r.eval(lua, 1, self.key, self.token)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("release 异常: %s", e)
         self.acquired = False
 
     def __enter__(self):

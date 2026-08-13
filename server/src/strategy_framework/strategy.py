@@ -5,10 +5,14 @@ Python 代码模式（#15）允许用户写自定义 on_bar 逻辑，替代 DSL 
 """
 
 from __future__ import annotations
+import logging
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from .factor import Factor, BarContext, list_factors, get_factor, DSLFactor, _FACTOR_REGISTRY, _check_ast_blacklist
+from .broker import record_broker_usage
+
+logger = logging.getLogger("strategy")
 
 
 # ——— 信号定义 ———
@@ -105,7 +109,13 @@ def validate_parameter_defs(defs):
 
 def build_default_params(defs):
     """从 parameter_defs 构建默认参数值 dict。"""
-    return {d["name"]: d.get("default") for d in (defs or [])}
+    result = {}
+    for d in (defs or []):
+        v = d.get("default")
+        if v is None:
+            continue
+        result[d["name"]] = v
+    return result
 
 
 def validate_params_against_defs(params, defs):
@@ -204,6 +214,7 @@ class Strategy:
             try:
                 result[f.name] = f.compute(ctx)
             except Exception as e:
+                logger.warning("因子 %s 计算失败: %s", f.name, e)
                 result[f.name] = 0.0
         return result
 
@@ -215,14 +226,14 @@ class Strategy:
         order = {
             "symbol": self.symbol,
             "action": sig.action.name,
-            "volume": sig.volume or 100,
-            "price": sig.price or 0,
+            "volume": sig.volume if sig.volume is not None else 100,
+            "price": sig.price if sig.price is not None else 0,
             "reason": sig.reason,
         }
         decision = RiskControl.get().check_order(order, "")
         if not decision.approved:
             return
-        final = decision.adjusted or order  # B8 风控覆写：用 adjusted（如截断 volume），无则原值
+        final = decision.adjusted if decision.adjusted is not None else order  # B8 风控覆写：用 adjusted（如截断 volume），无则原值
         from .adapters import Order
         import time as _t
         _t0 = _t.time()
@@ -230,19 +241,18 @@ class Strategy:
             self.adapter.send_order(Order(
                 symbol=final.get("symbol", self.symbol),
                 action=final.get("action", sig.action.name),
-                volume=final.get("volume", sig.volume or 100),
-                price=final.get("price", sig.price or 0),
+                volume=final.get("volume", sig.volume if sig.volume is not None else 100),
+                price=final.get("price", sig.price if sig.price is not None else 0),
                 order_type="market" if sig.price_type == "MARKET" else "limit",
             ))
-            from .broker import record_broker_usage
-            record_broker_usage(getattr(self.config, "adapter", ""), sig.action.name, self.symbol,
-                                success=True, latency_ms=int((_t.time() - _t0) * 1000))
-            self._log_signal_order(sig, final)  # P1-3 三账数据来源
         except Exception:
-            from .broker import record_broker_usage
-            record_broker_usage(getattr(self.config, "adapter", ""), sig.action.name, self.symbol,
+            record_broker_usage(self.config.adapter, sig.action.name, self.symbol,
                                 success=False, latency_ms=int((_t.time() - _t0) * 1000))
             raise
+        else:
+            record_broker_usage(self.config.adapter, sig.action.name, self.symbol,
+                                success=True, latency_ms=int((_t.time() - _t0) * 1000))
+            self._log_signal_order(sig, final)  # P1-3 三账数据来源
 
 
     def _log_signal_order(self, sig: Signal, final_order: dict) -> None:
@@ -266,8 +276,8 @@ class Strategy:
                     (self.config.id, self.symbol, final_order.get("action", sig.action.name),
                      final_order.get("volume", 100), final_order.get("price", 0), sig_id))
                 conn.commit()
-        except Exception:
-            pass  # 回测/无 DB 跳
+        except Exception as e:
+            logger.warning("记录 signal/order 日志失败: %s", e)
 
     # ——— 工厂 ———
 

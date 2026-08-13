@@ -41,9 +41,9 @@ fi
 # 2. XTP 可达性
 echo ""
 echo "=== 2. XTP 可达性 ==="
-timeout 5 bash -c '</dev/tcp/119.3.103.38/6002' 2>&1 && green "  行情端口可达" || { red "  行情端口不可达"; XTP_DOWN=1; }
-timeout 5 bash -c '</dev/tcp/122.112.139.0/6102' 2>&1 && green "  交易端口可达" || { red "  交易端口不可达"; XTP_DOWN=1; }
-[ -n "${XTP_DOWN:-}" ] && { red "XTP 不可达，无法测全链路（网络/白名单问题）"; exit 1; }
+timeout 5 bash -c '</dev/tcp/119.3.103.38/6002' 2>&1 && green "  行情端口可达" || red "  行情端口不可达（警告：无行情数据，策略不产生信号）"
+timeout 5 bash -c '</dev/tcp/122.112.139.0/6102' 2>&1 && green "  交易端口可达" || { red "  交易端口不可达"; TD_DOWN=1; }
+[ -n "${TD_DOWN:-}" ] && { red "XTP 交易端口不可达，无法测全链路（网络/白名单问题）"; exit 1; }
 
 # 3. 确认测试策略 + live_task 存在
 echo ""
@@ -59,6 +59,10 @@ if [ -z "$TASK_ID" ]; then
   TASK_ID=$(psql -U quant -d quant -At -c "INSERT INTO live_task (name, strategy_id, symbol, params, strategy_snapshot, status, initial_capital) VALUES ('交易时段联调-浦发银行','$STRAT_ID','$SYMBOL','{}','{}','pending',1000000) RETURNING id" 2>/dev/null | head -1)
   CLEANUP_TASK=1
   green "  新建 live_task id=$TASK_ID (strategy=$STRAT_ID, symbol=$SYMBOL)"
+  if [ -z "$TASK_ID" ]; then
+    red "创建 live_task 失败（INSERT 未返回 id），无法继续测试"
+    exit 1
+  fi
 else
   green "  找到测试 live_task id=$TASK_ID"
 fi
@@ -80,7 +84,7 @@ echo "=== 6. account_snapshot 是否写入（每 60s 一次）==="
 psql -U quant -d quant -c "SELECT ts, total_value, daily_pnl FROM account_snapshot ORDER BY ts DESC LIMIT 3" 2>&1 | head -8
 
 # 清理临时 task
-if [ -n "${CLEANUP_TASK:-}" ]; then
+if [ -n "${CLEANUP_TASK:-}" ] && [ -n "$TASK_ID" ]; then
   psql -U quant -d quant -At -c "DELETE FROM live_task WHERE id=$TASK_ID" >/dev/null 2>&1
   echo ""
   yellow "已清理临时 live_task $TASK_ID"

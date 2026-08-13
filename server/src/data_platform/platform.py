@@ -55,7 +55,7 @@ class DataPlatform:
 
     # ——— 实时（占位，T04 实现） ———
 
-    def get_realtime(self, symbol: str) -> dict:
+    def get_realtime(self, symbol: str) -> dict | None:
         return None  # P3-7 暂未实现，返回 None 不崩("T04 实现 Valkey 实时")
 
     def subscribe(self, symbol: str, freq: str, handler: Callable):
@@ -66,15 +66,15 @@ class DataPlatform:
 
     # ——— 基本面/条款 ———
 
-    def get_fundamental(self, symbol: str) -> dict:
+    def get_fundamental(self, symbol: str) -> dict | None:
         """A 股基本面（Tushare fina_indicator）。"""
         return None  # P3-7 暂未实现，返回 None 不崩("T04 实现")
 
-    def get_convertible_terms(self, symbol: str) -> dict:
+    def get_convertible_terms(self, symbol: str) -> dict | None:
         """可转债条款（强赎/下修/回售）。"""
         return None  # P3-7 暂未实现，返回 None 不崩("T04 实现")
 
-    def get_funding_rate(self, symbol: str) -> float:
+    def get_funding_rate(self, symbol: str) -> float | None:
         """加密资金费率（币安/OKX API）。"""
         return None  # P3-7 暂未实现，返回 None 不崩("T05 实现")
 

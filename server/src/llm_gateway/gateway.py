@@ -86,6 +86,8 @@ class LLMGateway:
 
     def __init__(self, config_path: str | Path | None = None):
         self._models = self._load_models_from_db()  # list[dict] 按 priority 排序
+        if not self._models:
+            logger.warning("LLM 网关初始化：无 enabled 模型")
         self._failover = self._load_failover_config(config_path)
         self._failed_counts: dict[str, int] = {}
         self._last_fail_time: dict[str, float] = {}
@@ -369,15 +371,18 @@ class LLMGateway:
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS llm_usage (
-                        id BIGSERIAL PRIMARY KEY,
-                        ts TIMESTAMPTZ DEFAULT now(),
-                        provider TEXT, model TEXT,
-                        input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
-                        latency_ms INTEGER, success BOOLEAN, error_type TEXT, caller TEXT
-                    )
-                """)
+                try:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS llm_usage (
+                            id BIGSERIAL PRIMARY KEY,
+                            ts TIMESTAMPTZ DEFAULT now(),
+                            provider TEXT, model TEXT,
+                            input_tokens INTEGER DEFAULT 0, output_tokens INTEGER DEFAULT 0,
+                            latency_ms INTEGER, success BOOLEAN, error_type TEXT, caller TEXT
+                        )
+                    """)
+                except Exception:
+                    pass
                 conn.execute(
                     "INSERT INTO llm_usage (provider, model, input_tokens, output_tokens, "
                     "latency_ms, success, error_type, caller) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -390,7 +395,7 @@ class LLMGateway:
         """failover 策略读 config.yaml（模型配置已 DB 化，tiers/providers 段已删）。"""
         path = config_path or Path(__file__).parent / "config.yaml"
         try:
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 cfg = yaml.safe_load(f)
             return cfg.get("failover", {})
         except Exception:

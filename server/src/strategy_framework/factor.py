@@ -104,6 +104,9 @@ _FACTOR_SAFE_BUILTINS = {
     "print": print,
 }
 
+import logging
+_logger = logging.getLogger("factor")
+
 
 def _make_factor_class(name: str, code: str, default_params: dict) -> type:
     """编译用户 Python 代码为 Factor 子类。
@@ -166,11 +169,9 @@ def load_factors_from_db() -> list[str]:
                 }
                 loaded.append(name)
             except Exception as e:
-                import logging
-                logging.getLogger("factor").warning("加载自定义因子 %s 失败: %s", name, e)
+                _logger.warning("加载自定义因子 %s 失败: %s", name, e)
     except Exception as e:
-        import logging
-        logging.getLogger("factor").warning("从 DB 加载因子失败（表可能未创建）: %s", e)
+        _logger.warning("从 DB 加载因子失败（表可能未创建）: %s", e)
     return loaded
 
 
@@ -380,6 +381,7 @@ class VolumeRatioFactor(Factor):
                  description="可转债双低: price + premium_rate * 100")
 class DoubleLowFactor(Factor):
     def compute(self, ctx: BarContext) -> float:
+        _logger.warning("DoubleLowFactor 返回占位符 -ctx.close（真双低需 conv_price，BarContext 待扩展）")
         return -ctx.close  # 简化。真双低=price+premium_rate*100 需 conv_price（BarContext 待扩展）
 
 

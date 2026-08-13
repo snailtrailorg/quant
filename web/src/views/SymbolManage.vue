@@ -216,9 +216,11 @@ const stopProgress = () => { if (progressTimer) { clearInterval(progressTimer); 
 
 onMounted(async () => {
   await load()
-  const p = await api.get(`/sync/all/${syncId}/progress`)
-  progress.value = p
-  if (p.status === 'running') { allRunning.value = true; startProgress() }
+  try {
+    const p = await api.get(`/sync/all/${syncId}/progress`)
+    progress.value = p
+    if (p.status === 'running') { allRunning.value = true; startProgress() }
+  } catch (e) { console.error(e) }
 })
 onUnmounted(stopProgress)
 </script>

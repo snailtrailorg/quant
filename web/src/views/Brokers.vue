@@ -66,7 +66,7 @@ function emptyForm() {
   return { provider: 'xtp', name: '', credentials: '', enabled: true }
 }
 
-const load = async () => { brokers.value = await getBrokers() }
+const load = async () => { try { brokers.value = await getBrokers() } catch (e) { console.error(e) } }
 onMounted(async () => { await load(); await loadUsage() })
 
 const onEdit = (row) => { form.value = { ...row, credentials: '' } }

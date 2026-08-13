@@ -114,6 +114,8 @@ const currentSync = ref(null)  // 当前异步同步任务 {sid, name, task_id}
 const progress = ref({})
 let pollTimer = null
 const role = ref(localStorage.getItem('role') || 'viewer')
+const _pollingActive = ref(false)
+const setRowStatus = (id, status) => { configs.value = configs.value.map(c => c.id === id ? { ...c, status } : c) }
 
 const PER_SYMBOL_IDS = ['astock_daily', 'etf_daily', 'cb_daily', 'astock_minute', 'astock_minute_5min']
 const isPerSymbol = id => PER_SYMBOL_IDS.includes(id)
@@ -147,6 +149,7 @@ const notifyResult = (row, p, prefix) => {
 // 轮询类型级同步进度（异步化后 HTTP 立即返回 task_id，前端轮询 /sync/trigger/{sid}/progress）
 const startPoll = (row, name, task_id) => {
   stopPoll()
+  _pollingActive.value = true
   currentSync.value = { sid: row.id, name, task_id }
   let idleTicks = 0
   pollTimer = setInterval(async () => {
@@ -154,39 +157,38 @@ const startPoll = (row, name, task_id) => {
       const p = await api.get(`/sync/trigger/${row.id}/progress`, { params: { task_id } })
       progress.value = p
       if (p.status === 'running') {
-        row.status = 'running'
+        setRowStatus(row.id, 'running')
         idleTicks = 0
       } else if (p.status === 'idle') {
-        // hash 过期且 Celery 未就绪（worker 未起？）-- 累计等待，超 30s 放弃
         if (++idleTicks > 15) {
           stopPoll()
           ElMessage.warning(`${name}: 任务状态查询超时（worker 可能未运行）`)
-          currentSync.value = null; progress.value = {}; row.status = 'idle'
+          currentSync.value = null; progress.value = {}; setRowStatus(row.id, 'idle')
         }
       } else {
-        // success/partial/error 完成
         stopPoll()
         notifyResult(row, p, name)
         currentSync.value = null; progress.value = {}
-        row.status = 'idle'
+        setRowStatus(row.id, 'idle')
         await load()
       }
     } catch (e) { /* ignore 单次轮询失败 */ }
   }, 2000)
 }
-const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null }; _pollingActive.value = false }
 
 const onTrigger = async (row) => {
-  row.status = 'running'
+  if (_pollingActive.value) return
+  setRowStatus(row.id, 'running')
   try {
     const r = await api.post(`/sync/trigger/${row.id}`)
     if (r.status === 'submitted') {
       startPoll(row, `${row.name} 同步`, r.task_id)
     } else {
       notifyResult(row, r, `${row.name} 同步`)
-      row.status = 'idle'
+      setRowStatus(row.id, 'idle')
     }
-  } catch (e) { ElMessage.error('提交失败'); row.status = 'idle' }
+  } catch (e) { ElMessage.error('提交失败'); setRowStatus(row.id, 'idle') }
 }
 
 const onBackfill = async (row) => {
@@ -202,16 +204,16 @@ const onBackfill = async (row) => {
       cancelButtonText: '取消',
       type: 'warning',
     })
-    row.status = 'running'
+    setRowStatus(row.id, 'running')
     try {
       const r = await api.post(`/sync/trigger/${row.id}`, null, { params: { backfill_from: value } })
       if (r.status === 'submitted') {
         startPoll(row, `${row.name} 回补 ${value}`, r.task_id)
       } else {
         notifyResult(row, r, `${row.name} 回补 ${value}`)
-        row.status = 'idle'
+        setRowStatus(row.id, 'idle')
       }
-    } catch (e) { ElMessage.error('提交失败'); row.status = 'idle' }
+    } catch (e) { ElMessage.error('提交失败'); setRowStatus(row.id, 'idle') }
   } catch (e) {
     // 用户取消 prompt，不动状态
   }

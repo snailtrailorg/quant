@@ -100,7 +100,7 @@ class Bar:
             close=Decimal(str(row["close"])),
             volume=Decimal(str(row.get("vol", 0))),
             amount=Decimal(str(row.get("amount", 0))),
-            adj_factor=Decimal(str(row["adj_factor"])) if row.get("adj_factor") else None,
+            adj_factor=Decimal(str(row["adj_factor"])) if row.get("adj_factor") is not None else None,
             source="tushare",
         )
 

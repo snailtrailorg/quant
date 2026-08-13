@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 from src.data_platform.db import get_conn
-import os
+import os, json, logging, psycopg, redis, subprocess, uuid
 from typing import Literal
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,6 +13,18 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger("web_api")
+
+# Redis 连接池（各端点复用，避免每次请求新建连接）
+_redis_pool = redis.ConnectionPool.from_url(
+    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+    decode_responses=True,
+)
+_redis_pool_feishu = redis.ConnectionPool.from_url(
+    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4"),
+    decode_responses=True,
+)
 
 from .auth import (
     create_jwt, authenticate, create_user, require_role, require_perm,
@@ -91,8 +103,8 @@ def startup():
         loaded = load_factors_from_db()
         if loaded:
             print(f"✓ 加载自定义因子: {', '.join(loaded)}")
-    except Exception:
-        pass  # 表可能未创建
+    except Exception as e:
+        logger.warning("startup: 加载自定义因子失败（表可能未创建）: %s", e)
 
 
 @app.get("/health")
@@ -146,7 +158,6 @@ def list_system_config(payload: dict = Depends(require_role("viewer", "analyst",
 def update_system_config(key: str, body: dict = Body(...),
                           payload: dict = Depends(require_role("admin"))):
     """更新系统配置（仅 admin）。部分 key 支持动态生效（如 celery_concurrency）。"""
-    import json
     value = body.get("value")
     if value is None:
         raise HTTPException(400, "缺 value 字段")
@@ -159,15 +170,15 @@ def update_system_config(key: str, body: dict = Body(...),
         # 类型校验 + 规范化
         if value_type == "int":
             try: value = str(int(value))
-            except: raise HTTPException(400, f"{key} 需 int 值")
+            except Exception: raise HTTPException(400, f"{key} 需 int 值")
         elif value_type == "float":
             try: value = str(float(value))
-            except: raise HTTPException(400, f"{key} 需 float 值")
+            except Exception: raise HTTPException(400, f"{key} 需 float 值")
         elif value_type == "bool":
-            value = "true" if value in (True, "true", "1", 1) else "false"
+            value = "true" if value in (True, "true", "True", "1", 1) else "false"
         elif value_type == "json":
             try: value = json.dumps(value) if not isinstance(value, str) else value
-            except: pass
+            except Exception: pass
         conn.execute(
             "UPDATE system_config SET value=%s, updated_at=now(), updated_by=%s WHERE key=%s",
             (str(value), payload["username"], key))
@@ -291,7 +302,6 @@ def create_user_api(req: UserCreate, payload: dict = Depends(require_perm("user_
 
 @app.get("/api/user")
 def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
-    import psycopg
     with get_conn() as conn:
         cur = conn.execute("SELECT id, username, role, enabled, email, email_verified, created_at FROM users ORDER BY id")
         rows = cur.fetchall()
@@ -328,18 +338,16 @@ def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
 @app.get("/api/strategy")
 def list_strategies(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """列策略配置（从 DB 读）。"""
-    import psycopg, json
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, type, symbol, adapter, enabled, factors, aggregator, backtest_verified FROM strategy_config ORDER BY id")
+        cur = conn.execute("SELECT id, name, type, symbol, adapter, enabled, factors, aggregator, risk, params, backtest_verified FROM strategy_config ORDER BY id")
         rows = cur.fetchall()
     return [{"id": r[0], "name": r[1], "type": r[2], "symbol": r[3], "adapter": r[4],
-             "enabled": r[5], "factors": r[6], "aggregator": r[7], "backtest_verified": r[8]} for r in rows]
+             "enabled": r[5], "factors": r[6], "aggregator": r[7], "risk": r[8], "params": r[9], "backtest_verified": r[10]} for r in rows]
 
 
 @app.post("/api/strategy")
 def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("strategy_control"))):
     """新建策略配置。"""
-    import psycopg, json
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO strategy_config (id, name, type, symbol, adapter, enabled, factors, aggregator, risk, params) "
@@ -354,7 +362,6 @@ def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("s
 @app.put("/api/strategy/{sid}")
 def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(require_perm("strategy_control"))):
     """更新策略配置（含因子校验；Python 模式跳过因子校验）。"""
-    import psycopg, json
     # Python 模式（#15）跳过因子校验
     if req.params.get("mode") != "python":
         from src.strategy_framework.factor import validate_strategy_factors
@@ -379,7 +386,6 @@ def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(requi
 @app.post("/api/strategy/{sid}/start")
 def start_strategy(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
     """启动策略。未通过回测验证禁止实盘（EXE-003）。策略必须绑定标的或标的池（F-POOL-003）。"""
-    import psycopg, json
     with get_conn() as conn:
         cur = conn.execute("SELECT backtest_verified, symbol, params FROM strategy_config WHERE id=%s", (sid,))
         row = cur.fetchone()
@@ -392,36 +398,32 @@ def start_strategy(sid: str, payload: dict = Depends(require_perm("strategy_cont
         # F-POOL-003：策略必须绑定标的或标的池
         if not symbol and not params.get("pool_id"):
             raise HTTPException(400, "策略未绑定标的或标的池，禁止启动。请在策略编辑页设置 symbol 或 pool_id。")
-        conn.execute("UPDATE strategy_config SET enabled=true WHERE id=%s", (sid,))
+        conn.execute("UPDATE strategy_config SET enabled=true WHERE id=%s AND enabled=false AND backtest_verified=true", (sid,))
         conn.commit()
     audit_log(payload["username"], "strategy_start", sid)
     try:
-        import subprocess
         subprocess.run(["systemctl", "start", f"quant-strategy@{sid}"], timeout=10, capture_output=True)
     except Exception:
-        pass
+        logger.error("start_strategy: systemctl start quant-strategy@%s 失败", sid, exc_info=True)
     return {"id": sid, "status": "running"}
 
 
 @app.post("/api/strategy/{sid}/stop")
 def stop_strategy(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
-    import psycopg
     with get_conn() as conn:
         conn.execute("UPDATE strategy_config SET enabled=false WHERE id=%s", (sid,))
         conn.commit()
     audit_log(payload["username"], "strategy_stop", sid)
     try:
-        import subprocess
         subprocess.run(["systemctl", "stop", f"quant-strategy@{sid}"], timeout=10, capture_output=True)
     except Exception:
-        pass
+        logger.error("stop_strategy: systemctl stop quant-strategy@%s 失败", sid, exc_info=True)
     return {"id": sid, "status": "stopped"}
 
 
 @app.post("/api/strategy/{sid}/verify")
 def verify_strategy(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
     """标记策略已通过回测验证。"""
-    import psycopg
     with get_conn() as conn:
         conn.execute("UPDATE strategy_config SET backtest_verified=true WHERE id=%s", (sid,))
         conn.commit()
@@ -464,7 +466,6 @@ def validate_params_api(body: dict = Body(...),
 def list_live_tasks(status: str | None = None,
                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """列实盘任务。"""
-    import json
     with get_conn() as conn:
         if status:
             cur = conn.execute(
@@ -485,7 +486,6 @@ def list_live_tasks(status: str | None = None,
 def create_live_task(body: dict = Body(...),
                      payload: dict = Depends(require_perm("strategy_control"))):
     """创建实盘任务：选策略+标的+任务参数值。创建时构建 strategy_snapshot。"""
-    import json
     from src.strategy_framework.strategy import (
         validate_parameter_defs, validate_params_against_defs, build_default_params
     )
@@ -548,7 +548,6 @@ def create_live_task(body: dict = Body(...),
 @app.post("/api/live-task/{tid}/start")
 def start_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
     """启动实盘任务。"""
-    import subprocess
     with get_conn() as conn:
         cur = conn.execute("SELECT status, strategy_id FROM live_task WHERE id=%s", (tid,))
         row = cur.fetchone()
@@ -558,24 +557,23 @@ def start_live_task(tid: int, payload: dict = Depends(require_perm("strategy_con
         conn.commit()
     audit_log(payload["username"], "start_live_task", f"task {tid}")
     try:
-        subprocess.run(["systemctl", "start", f"quant-strategy@{tid}"], timeout=10, capture_output=True)
+        subprocess.run(["systemctl", "start", f"quant-live-task@{tid}"], timeout=10, capture_output=True)
     except Exception:
-        pass
+        logger.error("start_live_task: systemctl start quant-live-task@%s 失败", tid, exc_info=True)
     return {"id": tid, "status": "running"}
 
 
 @app.post("/api/live-task/{tid}/stop")
 def stop_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
     """停止实盘任务。"""
-    import subprocess
     with get_conn() as conn:
         conn.execute("UPDATE live_task SET status='stopped', updated_at=now() WHERE id=%s", (tid,))
         conn.commit()
     audit_log(payload["username"], "stop_live_task", f"task {tid}")
     try:
-        subprocess.run(["systemctl", "stop", f"quant-strategy@{tid}"], timeout=10, capture_output=True)
+        subprocess.run(["systemctl", "stop", f"quant-live-task@{tid}"], timeout=10, capture_output=True)
     except Exception:
-        pass
+        logger.error("stop_live_task: systemctl stop quant-live-task@%s 失败", tid, exc_info=True)
     return {"id": tid, "status": "stopped"}
 
 
@@ -601,14 +599,20 @@ def delete_live_task(tid: int, payload: dict = Depends(require_perm("strategy_co
 def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """当前持仓（account_snapshot 总资产 + trade_log 累计持仓，#6）。"""
     with get_conn() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        except Exception:
+            logger.warning("get_position: account_snapshot 表已存在（忽略）")
         cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
         snap = cur.fetchone()
-        conn.execute("CREATE TABLE IF NOT EXISTS trade_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), order_id BIGINT, symbol TEXT, action TEXT, volume INT, price NUMERIC, commission NUMERIC)")
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS trade_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), order_id BIGINT, symbol TEXT, action TEXT, volume INT, price NUMERIC, commission NUMERIC)")
+        except Exception:
+            logger.warning("get_position: trade_log 表已存在（忽略）")
         cur = conn.execute("SELECT symbol, COALESCE(SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END),0) FROM trade_log GROUP BY symbol")
         positions = [{"symbol": r[0], "volume": int(r[1])} for r in cur.fetchall() if r[1] and r[1] != 0]
     total_value = float(snap[0]) if snap else 0
-    initial = float(snap[2]) if snap and snap[2] else 1000000
+    initial = float(snap[2]) if snap and snap[2] is not None else 1000000
     total_pnl = (total_value - initial) if snap else 0
     return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl, "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0}
 
@@ -617,12 +621,15 @@ def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trad
 def get_pnl(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """盈亏曲线（account_snapshot 时间序列，#6）。"""
     with get_conn() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
-        cur = conn.execute("SELECT ts, total_value, daily_pnl FROM account_snapshot ORDER BY ts DESC LIMIT 90")
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        except Exception:
+            logger.warning("get_pnl: account_snapshot 表已存在（忽略）")
+        cur = conn.execute("SELECT ts, total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 90")
         rows = cur.fetchall()
     curve = [{"ts": str(r[0])[:19], "value": float(r[1]) if r[1] else 0, "daily_pnl": float(r[2]) if r[2] else 0} for r in reversed(rows)]
     today_pnl = curve[-1]["daily_pnl"] if curve else 0
-    initial = 1000000
+    initial = float(rows[0][3]) if rows and rows[0][3] is not None else 1000000
     total_pnl = (curve[-1]["value"] - initial) if curve else 0
     return {"curve": curve, "today_pnl": today_pnl, "total_pnl": total_pnl, "total_pnl_pct": round(total_pnl/initial*100, 2)}
 
@@ -631,7 +638,10 @@ def get_pnl(payload: dict = Depends(require_role("viewer", "analyst", "trader", 
 def get_orders(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """订单记录（order_log 最近 100，#6）。"""
     with get_conn() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS order_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), strategy_id TEXT, symbol TEXT, action TEXT, volume INT, price NUMERIC, status TEXT DEFAULT 'submitted')")
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS order_log (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), strategy_id TEXT, symbol TEXT, action TEXT, volume INT, price NUMERIC, status TEXT DEFAULT 'submitted')")
+        except Exception:
+            logger.warning("get_orders: order_log 表已存在（忽略）")
         cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status FROM order_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
     return {"orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6]} for r in rows], "total": len(rows)}
@@ -641,13 +651,16 @@ def get_orders(payload: dict = Depends(require_role("viewer", "analyst", "trader
 def get_dashboard(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """Dashboard 量化指标（account_snapshot + 回测绩效，#10）。"""
     with get_conn() as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        try:
+            conn.execute("CREATE TABLE IF NOT EXISTS account_snapshot (id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(), total_value NUMERIC, daily_pnl NUMERIC DEFAULT 0, initial_capital NUMERIC DEFAULT 1000000)")
+        except Exception:
+            logger.warning("get_dashboard: account_snapshot 表已存在（忽略）")
         cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
         snap = cur.fetchone()
         cur = conn.execute("SELECT COUNT(*) FROM backtest_runs WHERE status='done'")
         bt = cur.fetchone()
     total_value = float(snap[0]) if snap else 0
-    initial = float(snap[2]) if snap and snap[2] else 1000000
+    initial = float(snap[2]) if snap and snap[2] is not None else 1000000
     total_pnl = (total_value - initial) if snap else 0
     return {"total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl / initial * 100, 2) if (snap and initial) else 0,
@@ -659,13 +672,15 @@ def get_dashboard(payload: dict = Depends(require_role("viewer", "analyst", "tra
 @app.get("/api/account")
 def list_accounts(payload: dict = Depends(require_perm("account_keys"))):
     """列券商/交易所账户（密钥不返回明文）。"""
-    import psycopg
     with get_conn() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS accounts (
-                id SERIAL PRIMARY KEY, name TEXT, exchange TEXT NOT NULL,
-                api_key_hint TEXT, enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now()
-            )""")
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id SERIAL PRIMARY KEY, name TEXT, exchange TEXT NOT NULL,
+                    api_key_hint TEXT, enabled BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT now()
+                )""")
+        except Exception:
+            logger.warning("list_accounts: accounts 表已存在（忽略）")
         cur = conn.execute("SELECT id, name, exchange, api_key_hint, enabled, created_at FROM accounts ORDER BY id")
         rows = cur.fetchall()
     return [{"id": r[0], "name": r[1], "exchange": r[2], "api_key_hint": r[3],
@@ -674,7 +689,6 @@ def list_accounts(payload: dict = Depends(require_perm("account_keys"))):
 
 @app.get("/api/account/{aid}")
 def get_account(aid: int, payload: dict = Depends(require_perm("account_keys"))):
-    import psycopg
     with get_conn() as conn:
         cur = conn.execute("SELECT id, name, exchange, api_key_hint, enabled, created_at FROM accounts WHERE id=%s", (aid,))
         row = cur.fetchone()
@@ -779,8 +793,7 @@ def get_logs(payload: dict = Depends(require_role("viewer", "analyst", "trader",
 @app.get("/api/alert")
 def get_alerts(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """告警历史（从 Valkey 读取）。"""
-    import redis, os, json
-    r = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+    r = redis.Redis(connection_pool=_redis_pool)
     ids = r.lrange("alert:history", 0, 99)
     alerts = []
     for aid in ids:
@@ -809,6 +822,8 @@ def chat(req: ChatReq, payload: dict = Depends(require_role("viewer", "analyst",
                 messages=messages, tools=READ_TOOLS, role=payload["role"],
                 timeout=30, retries=0, caller="web_chat",
             )
+            if resp is None:
+                return {"reply": "LLM 返回空", "usage": {}}
             if not resp.tool_calls:
                 break
             # 执行工具 + 结果回填（P1-4 闭环）
@@ -823,7 +838,6 @@ def chat(req: ChatReq, payload: dict = Depends(require_role("viewer", "analyst",
 
 def _execute_readonly_tool(tool_name: str, args: str) -> str:
     """执行只读工具，返回结果文本（P1-4 LLM 工具闭环）。"""
-    import json
     try:
         params = json.loads(args) if isinstance(args, str) else (args or {})
     except Exception:
@@ -1044,7 +1058,6 @@ def feishu_list(payload: dict = Depends(require_perm("feishu_config"))):
 @app.post("/api/feishu/connect")
 def feishu_connect(payload: dict = Depends(require_perm("feishu_config"))):
     """扫码创建/连接飞书机器人。"""
-    import uuid
     session_id = str(uuid.uuid4())
     from src.feishu_bot.tasks import feishu_register_task
     feishu_register_task.delay(session_id)
@@ -1053,8 +1066,7 @@ def feishu_connect(payload: dict = Depends(require_perm("feishu_config"))):
 
 @app.get("/api/feishu/status/{session_id}")
 def feishu_status(session_id: str, payload: dict = Depends(require_perm("feishu_config"))):
-    import os, redis, json
-    r = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4"), decode_responses=True)
+    r = redis.Redis(connection_pool=_redis_pool_feishu)
     data = r.get(f"feishu:session:{session_id}")
     if not data:
         return {"status": "pending"}
@@ -1064,7 +1076,6 @@ def feishu_status(session_id: str, payload: dict = Depends(require_perm("feishu_
 @app.post("/api/feishu/{fid}/start")
 def feishu_start(fid: int, payload: dict = Depends(require_perm("feishu_config"))):
     """启动机器人长连接（systemctl start quant-feishu-bot@<id>，要 polkit）。"""
-    import subprocess
     try:
         subprocess.run(["systemctl", "start", f"quant-feishu-bot@{fid}"], check=True, timeout=10)
         with get_conn() as conn:
@@ -1081,7 +1092,6 @@ def feishu_start(fid: int, payload: dict = Depends(require_perm("feishu_config")
 @app.post("/api/feishu/{fid}/stop")
 def feishu_stop(fid: int, payload: dict = Depends(require_perm("feishu_config"))):
     """停止机器人长连接。"""
-    import subprocess
     try:
         subprocess.run(["systemctl", "stop", f"quant-feishu-bot@{fid}"], check=True, timeout=10)
         with get_conn() as conn:
@@ -1116,7 +1126,6 @@ def feishu_update(fid: int, req: FeishuUpdateReq, payload: dict = Depends(requir
 @app.delete("/api/feishu/{fid}")
 def feishu_delete(fid: int, payload: dict = Depends(require_perm("feishu_config"))):
     """删除机器人配置。"""
-    import subprocess
     try:
         subprocess.run(["systemctl", "stop", f"quant-feishu-bot@{fid}"], check=False, timeout=10)
     except Exception:
@@ -1181,8 +1190,7 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
 def trigger_progress_api(sid: str, task_id: str | None = None,
                          payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """查类型级同步进度（Valkey sync:type:{sid}，无则 Celery AsyncResult 兜底）。"""
-    import os, redis
-    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    r = redis.Redis(connection_pool=_redis_pool)
     data = r.hgetall(f"sync:type:{sid}")
     _INT_FIELDS = {"done", "total", "pct", "rows_pulled", "rows_saved",
                    "expected_days", "actual_days", "failed_dates_count"}
@@ -1262,8 +1270,7 @@ def sync_all_api(sid: str, payload: dict = Depends(require_perm("data_sync"))):
 def sync_all_progress_api(sid: str, task_id: str | None = None,
                            payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """查全量重建进度（Valkey sync:progress:{sid}，无则 Celery AsyncResult 兜底）。"""
-    import os, redis
-    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    r = redis.Redis(connection_pool=_redis_pool)
     data = r.hgetall(f"sync:progress:{sid}")
     _INT_FIELDS = {"done", "total", "pct", "ok", "saved", "failed_count"}
     if data:
@@ -2037,11 +2044,17 @@ class PoolReq(BaseModel):
 def list_pools(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """标的池列表（含 symbols，#22）。"""
     with get_conn() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS pools (
-            id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
-            id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
-            symbol TEXT, UNIQUE(pool_id, symbol))""")
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS pools (
+                id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+        except Exception:
+            logger.warning("list_pools: pools 表已存在（忽略）")
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
+                id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
+                symbol TEXT, UNIQUE(pool_id, symbol))""")
+        except Exception:
+            logger.warning("list_pools: pool_symbols 表已存在（忽略）")
         cur = conn.execute(
             "SELECT p.id, p.name, p.category, p.description, ps.symbol "
             "FROM pools p LEFT JOIN pool_symbols ps ON ps.pool_id=p.id ORDER BY p.id")
@@ -2060,11 +2073,17 @@ def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_con
     """新建/更新标的池（#22）。"""
     symbols = [s.strip() for s in (req.symbolsStr or "").split("\n") if s.strip()]
     with get_conn() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS pools (
-            id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
-            id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
-            symbol TEXT, UNIQUE(pool_id, symbol))""")
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS pools (
+                id TEXT PRIMARY KEY, name TEXT, category TEXT, description TEXT, created_at TIMESTAMPTZ DEFAULT now())""")
+        except Exception:
+            logger.warning("create_pool: pools 表已存在（忽略）")
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS pool_symbols (
+                id BIGSERIAL PRIMARY KEY, pool_id TEXT REFERENCES pools(id) ON DELETE CASCADE,
+                symbol TEXT, UNIQUE(pool_id, symbol))""")
+        except Exception:
+            logger.warning("create_pool: pool_symbols 表已存在（忽略）")
         conn.execute(
             "INSERT INTO pools (id, name, category, description) VALUES (%s,%s,%s,%s) "
             "ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, description=EXCLUDED.description",
@@ -2089,10 +2108,13 @@ class StrategyAccountReq(BaseModel):
 def list_strategy_account(strategy_id: str | None = None, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """策略-账户绑定列表（可按 strategy_id 过滤，#27）。"""
     with get_conn() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
-            id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
-            initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
-            created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
+                id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
+                initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
+                created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+        except Exception:
+            logger.warning("list_strategy_account: strategy_account 表已存在（忽略）")
         if strategy_id:
             cur = conn.execute(
                 "SELECT id, strategy_id, account_id, broker_provider, initial_capital, leverage, created_at "
@@ -2111,10 +2133,13 @@ def list_strategy_account(strategy_id: str | None = None, payload: dict = Depend
 def bind_strategy_account(req: StrategyAccountReq, payload: dict = Depends(require_perm("strategy_control"))):
     """绑定策略-账户（#27）。"""
     with get_conn() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
-            id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
-            initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
-            created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS strategy_account (
+                id BIGSERIAL PRIMARY KEY, strategy_id TEXT, account_id TEXT, broker_provider TEXT,
+                initial_capital NUMERIC DEFAULT 1000000, leverage INT DEFAULT 1,
+                created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(strategy_id, account_id))""")
+        except Exception:
+            logger.warning("bind_strategy_account: strategy_account 表已存在（忽略）")
         conn.execute(
             "INSERT INTO strategy_account (strategy_id, account_id, broker_provider, initial_capital, leverage) "
             "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (strategy_id, account_id) DO UPDATE SET "
@@ -2150,7 +2175,6 @@ def create_backtest_api(body: dict = Body(...),
 
     支持 symbol_params：per-symbol 参数覆盖。
     """
-    import json
     strategy_id = body.get("strategy_config_id")
     symbols = body.get("symbols", [])
     pool_id = body.get("pool_id")
@@ -2159,7 +2183,7 @@ def create_backtest_api(body: dict = Body(...),
             cur = conn.execute("SELECT symbol FROM pool_symbols WHERE pool_id=%s", (pool_id,))
             symbols = [r[0] for r in cur.fetchall()]
     if not symbols or not strategy_id:
-        return {"error": "需 strategy_config_id + symbols/pool_id"}
+        raise HTTPException(400, "需 strategy_config_id + symbols/pool_id")
     params = body.get("params", {})
     symbol_params = body.get("symbol_params", {})  # per-symbol 参数覆盖
     mode = body.get("mode", "single")
@@ -2181,9 +2205,12 @@ def create_backtest_api(body: dict = Body(...),
 def broker_usage(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """通道调用量监控（#37，broker_usage 表聚合）。"""
     with get_conn() as conn:
-        conn.execute("""CREATE TABLE IF NOT EXISTS broker_usage (
-            id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
-            provider TEXT, action TEXT, symbol TEXT, success BOOLEAN, latency_ms INT)""")
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS broker_usage (
+                id BIGSERIAL PRIMARY KEY, ts TIMESTAMPTZ DEFAULT now(),
+                provider TEXT, action TEXT, symbol TEXT, success BOOLEAN, latency_ms INT)""")
+        except Exception:
+            logger.warning("broker_usage: broker_usage 表已存在（忽略）")
         cur = conn.execute(
             "SELECT provider, COUNT(*), COALESCE(AVG(latency_ms),0), "
             "CASE WHEN COUNT(*)>0 THEN round(SUM(CASE WHEN success THEN 1 ELSE 0 END)*100.0/COUNT(*),1) ELSE 0 END "
@@ -2198,7 +2225,6 @@ def broker_usage(payload: dict = Depends(require_role("viewer", "analyst", "trad
 
 @app.get("/api/backtest")
 def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    import json
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT id, strategy_config_id, symbols, mode, status, created_at, finished_at, summary_metrics "
@@ -2213,14 +2239,13 @@ def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", 
 @app.get("/api/backtest/{run_id}")
 def get_backtest_api(run_id: int,
                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    import json
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT id, strategy_config_id, symbols, params, mode, status, summary_metrics "
             "FROM backtest_runs WHERE id=%s", (run_id,))
         r = cur.fetchone()
         if not r:
-            return {"error": "run 不存在"}
+            raise HTTPException(404, "run 不存在")
         cur = conn.execute(
             "SELECT symbol, status, result FROM backtest_symbols WHERE run_id=%s ORDER BY symbol", (run_id,))
         syms = cur.fetchall()
@@ -2234,7 +2259,6 @@ def get_backtest_api(run_id: int,
 @app.get("/api/backtest/{run_id}/summary")
 def backtest_summary(run_id: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """回测组汇总：标的绩效平均+排名（#22）。"""
-    import json
     with get_conn() as conn:
         cur = conn.execute("SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
         rows = cur.fetchall()
@@ -2252,9 +2276,8 @@ def backtest_summary(run_id: int, payload: dict = Depends(require_role("viewer",
 def backtest_stream_api(run_id: int, symbol: str,
                         payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """SSE 单标的实时（轮询 Valkey backtest:run:{run_id}:{symbol}）。"""
-    import os, redis, json, asyncio
     from fastapi.responses import StreamingResponse
-    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    r = redis.Redis(connection_pool=_redis_pool)
     key = f"backtest:run:{run_id}:{symbol}"
 
     async def gen():

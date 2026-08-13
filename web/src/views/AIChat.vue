@@ -8,7 +8,7 @@
     </template>
     <div class="chat-body" ref="body">
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
-        <div class="bubble" v-html="msg.content"></div>
+        <div class="bubble" v-text="msg.content"></div>
       </div>
       <div v-if="loading" class="msg assistant"><div class="bubble">{{ streamingText || '思考中...' }}</div></div>
     </div>
@@ -30,7 +30,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onUnmounted } from 'vue'
 import { Promotion } from '@element-plus/icons-vue'
 import { chat } from '../api'
 
@@ -39,14 +39,19 @@ const messages = ref([
 ])
 const input = ref('')
 const loading = ref(false)
+const sending = ref(false)
 const body = ref(null)
 const streamingText = ref('')
+let ws = null
 
 const scroll = () => nextTick(() => { if (body.value) body.value.scrollTop = body.value.scrollHeight })
 
+onUnmounted(() => { if (ws) { ws.close(); ws = null } })
+
 const onSend = async () => {
   const text = input.value.trim()
-  if (!text) return
+  if (!text || sending.value) return
+  sending.value = true
   messages.value.push({ role: 'user', content: text })
   input.value = ''
   loading.value = true
@@ -57,19 +62,21 @@ const onSend = async () => {
     const token = localStorage.getItem('token')
     if (token && window.WebSocket) {
       await new Promise((resolve) => {
-        const ws = new WebSocket(`ws://${location.host}/ws/chat?token=${token}`)
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+        ws = new WebSocket(`${protocol}//${location.host}/ws/chat`)
         let connected = false
         ws.onopen = () => {
           connected = true
+          ws.send(JSON.stringify({ type: 'auth', token }))
           ws.send(JSON.stringify({ messages: [{ role: 'user', content: text }] }))
         }
         ws.onmessage = (e) => {
-          if (e.data === '[DONE]') { ws.close(); resolve() }
+          if (e.data === '[DONE]') { ws.close(); ws = null; resolve() }
           else { streamingText.value += e.data; scroll() }
         }
         ws.onerror = () => { if (!connected) resolve() }
         ws.onclose = () => { resolve() }
-        setTimeout(() => { if (ws.readyState === 1) {} else resolve() }, 25000)
+        setTimeout(() => { if (ws && ws.readyState === 1) {} else resolve() }, 25000)
       }).then(() => {
         if (streamingText.value) {
           messages.value.push({ role: 'assistant', content: streamingText.value.replace(/\n/g, '<br>') })
@@ -87,9 +94,11 @@ const onSend = async () => {
       messages.value.push({ role: 'assistant', content: res.reply.replace(/\n/g, '<br>') })
     }
   } catch (e) {
-    messages.value.push({ role: 'assistant', content: '查询失败: ' + (e.detail || e.message || '未知错误') })
+    console.error(e)
+    messages.value.push({ role: 'assistant', content: '查询失败，请稍后重试' })
   } finally {
     loading.value = false
+    sending.value = false
     scroll()
   }
 }

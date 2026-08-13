@@ -20,17 +20,24 @@ def _send_email_sync(to: str, subject: str, html_body: str) -> bool:
         print(f"[DEV] 邮件未配置 -> {to}\n[DEV] 主题={subject}\n[DEV] 内容={html_body}")
         return True
 
+    smtp_from = os.environ.get("SMTP_FROM")
+    smtp_host = os.environ.get("SMTP_HOST")
+    smtp_port = os.environ.get("SMTP_PORT", "587")
+    if not smtp_from or not smtp_host:
+        _logger.warning("SMTP_FROM 或 SMTP_HOST 未配置，跳过邮件发送")
+        return False
+
     msg = MIMEMultipart()
-    msg["From"] = os.environ["SMTP_FROM"]
+    msg["From"] = smtp_from
     msg["To"] = to
     msg["Subject"] = subject
     msg.attach(MIMEText(html_body, "html"))
 
     try:
-        with smtplib.SMTP(os.environ["SMTP_HOST"], int(os.environ["SMTP_PORT"])) as server:
+        with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
             server.starttls()
             server.login(os.environ["SMTP_USERNAME"], os.environ["SMTP_PASSWORD"])
-            server.sendmail(os.environ["SMTP_FROM"], to, msg.as_string())
+            server.sendmail(smtp_from, to, msg.as_string())
         return True
     except (smtplib.SMTPException, OSError) as e:
         _logger.exception(f"Email send failed: {e}")
@@ -43,8 +50,9 @@ async def send_email(to: str, subject: str, html_body: str) -> bool:
     return await loop.run_in_executor(None, _send_email_sync, to, subject, html_body)
 
 
-async def send_invite_email(email: str, token: str, base_url: str = os.environ.get("BASE_URL", "https://120.24.235.98")) -> bool:
+async def send_invite_email(email: str, token: str, base_url: str = "") -> bool:
     """发送邀请开通邮件。"""
+    base_url = base_url or os.environ.get("BASE_URL", "https://120.24.235.98")
     register_url = f"{base_url}/register?token={token}"
     subject = "量化交易平台 · 邀请开通"
     body = f"""
@@ -63,8 +71,9 @@ async def send_invite_email(email: str, token: str, base_url: str = os.environ.g
     return await send_email(email, subject, body)
 
 
-async def send_password_reset_email(email: str, token: str, base_url: str = os.environ.get("BASE_URL", "https://120.24.235.98")) -> bool:
+async def send_password_reset_email(email: str, token: str, base_url: str = "") -> bool:
     """发送密码重置邮件。"""
+    base_url = base_url or os.environ.get("BASE_URL", "https://120.24.235.98")
     reset_url = f"{base_url}/reset-password?token={token}"
     subject = "量化交易平台 · 密码重置"
     body = f"""

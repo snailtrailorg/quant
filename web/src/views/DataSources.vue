@@ -62,8 +62,8 @@ function emptyForm() {
   return { provider: 'tushare', name: '', credentials: '', usage_limit: null, enabled: true }
 }
 
-const load = async () => { sources.value = await getDataSources() }
-const loadUsage = async () => { usage.value = await getDataSourceUsage() }
+const load = async () => { try { sources.value = await getDataSources() } catch (e) { console.error(e) } }
+const loadUsage = async () => { try { usage.value = await getDataSourceUsage() } catch (e) { console.error(e) } }
 onMounted(() => { load(); loadUsage() })
 
 const onEdit = (row) => { form.value = { ...row, credentials: '' } }

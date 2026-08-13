@@ -38,7 +38,7 @@ def _build_xtp_setting() -> dict:
                 return {
                     "账号": cred.get("app_id", ""),
                     "密码": cred.get("app_secret", ""),
-                    "客户号": int(cred.get("client_id", params.get("client_id", 1))),
+                    "客户号": int(cred.get("client_id", params.get("client_id", 1)) or 1),
                     "行情地址": params.get("md_host", ""),
                     "行情端口": int(params.get("md_port", 0) or 0),
                     "交易地址": params.get("td_host", ""),
@@ -185,6 +185,7 @@ def main():
         gateway = main_engine.add_gateway(XtpGateway, "XTP")
     except Exception as e:
         logger.error("XtpGateway 加载失败: %s", e)
+        main_engine.close()
         sys.exit(1)
 
     # 3. 建策略实例
@@ -226,10 +227,12 @@ def main():
     def on_vnpy_bar(bar):
         d = _bar_to_dict(bar)
         sig = strategy.on_bar(d, list(history))  # history 不含当前（防未来）
+        sig_action = getattr(sig, 'action', None)
+        sig_name = sig_action.name if sig_action else "NONE"
         logger.info("BAR %s close=%.2f vol=%.0f signal=%s",
                      d.get("ts", "?").strftime("%H:%M") if hasattr(d.get("ts"), "strftime") else d.get("ts", "?"),
                      d.get("close", 0), d.get("volume", 0),
-                     sig.action.name if sig else "NONE")
+                     sig_name)
         history.append(d)
         if len(history) > 100:
             history.pop(0)
@@ -269,22 +272,25 @@ def main():
                     if r and not r[0]:
                         logger.info('策略 %s 被 Web 停止，退出', sid)
                         break
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("读 strategy_config 失败: %s", e)
             # 因子重算触发（#31，data_continuity_check 补采后设标记 -> 重填 history）
             try:
                 if _r.get("factor:recalc:triggered"):
                     history[:] = _warmup_history(symbol)
                     _r.delete("factor:recalc:triggered")
                     logger.info("因子重算触发：重填 %d 根历史 bar", len(history))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("因子重算触发检查失败: %s", e)
             # 心跳检查 + 断线重连
             if hasattr(gateway, "is_connected") and not gateway.is_connected():
                 logger.warning("网关断连，尝试重连")
-                gateway.connect(setting)
-                history[:] = _warmup_history(symbol)  # 断线补缺口：重连后从 PG 重填（#4）
-                logger.info("断线补缺口：重填 %d 根历史 bar", len(history))
+                try:
+                    gateway.connect(setting)
+                    history[:] = _warmup_history(symbol)  # 断线补缺口：重连后从 PG 重填（#4）
+                    logger.info("断线补缺口：重填 %d 根历史 bar", len(history))
+                except Exception as e:
+                    logger.warning("重连失败: %s", e)
             # 定期写 account_snapshot（#6，每 60s query_account -> PG）
             if counter % 6 == 0:
                 try:
@@ -299,13 +305,14 @@ def main():
                         first_row = cur.fetchone()
                         daily_base = float(first_row[0]) if first_row else total
                         daily_pnl = total - daily_base
-                        conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital or 1000000))
+                        conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital if initial_capital is not None else 1000000))
                         conn.commit()
                 except Exception as e:
                     logger.warning("写 account_snapshot 失败: %s", e)
     except KeyboardInterrupt:
         logger.info("策略 %s 停止", sid)
     finally:
+        _r.close()
         main_engine.close()
 
 

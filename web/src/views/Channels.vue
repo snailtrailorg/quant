@@ -47,7 +47,7 @@ function emptyForm() {
   return { provider: 'wechat_work', name: '', credentials: '', enabled: true }
 }
 
-const load = async () => { channels.value = await getChannels() }
+const load = async () => { try { channels.value = await getChannels() } catch (e) { console.error(e) } }
 onMounted(load)
 
 const onEdit = (row) => { form.value = { ...row, credentials: '' } }

@@ -38,7 +38,7 @@ class MaxPositionRule(RiskRule):
         self.max_pct = max_pct
     def check(self, order, context):
         current = context.get("position_pct", 0)
-        if current + order.get("pct", 0) > self.max_pct:
+        if current + (order.get("pct") or 0) > self.max_pct:
             return RiskCheckResult(False, f"超持仓限额 {self.max_pct}")
         return RiskCheckResult(True)
     def get_params(self):
@@ -50,7 +50,7 @@ class MaxSingleOrderRule(RiskRule):
     def __init__(self, max_amount: float = 100000):
         self.max_amount = max_amount
     def check(self, order, context):
-        amount = order.get("amount", 0)
+        amount = order.get("amount") or 0
         if amount > self.max_amount:
             return RiskCheckResult(False, f"超单笔限额 {self.max_amount}")
         return RiskCheckResult(True)
@@ -63,7 +63,7 @@ class DailyLossLimitRule(RiskRule):
     def __init__(self, max_loss: float = 50000):
         self.max_loss = max_loss
     def check(self, order, context):
-        today_loss = context.get("today_loss", 0)
+        today_loss = context.get("today_loss") or 0
         if today_loss < -self.max_loss:
             return RiskCheckResult(False, f"超日亏损限额 {self.max_loss}")
         return RiskCheckResult(True)

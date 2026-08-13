@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 logger = logging.getLogger("feishu_bot")
+_token_lock = threading.Lock()
 
 
 class FeishuClient:
@@ -42,57 +43,64 @@ class FeishuClient:
 
     def _get_token(self) -> str:
         """获取 tenant_access_token。"""
-        if self._token and time.time() < self._token_expires - 60:
-            return self._token
-        if not self.app_id or not self.app_secret:
-            return ""
-        try:
-            resp = httpx.post(
-                "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-                json={"app_id": self.app_id, "app_secret": self.app_secret},
-                timeout=10,
-            )
-            data = resp.json()
-            self._token = data.get("tenant_access_token", "")
-            self._token_expires = time.time() + data.get("expire", 7200)
-            return self._token
-        except Exception as e:
-            logger.error(f"获取 token 失败: {e}")
-            return ""
+        with _token_lock:
+            if self._token and time.time() < self._token_expires - 60:
+                return self._token
+            if not self.app_id or not self.app_secret:
+                return ""
+            try:
+                resp = httpx.post(
+                    "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                    json={"app_id": self.app_id, "app_secret": self.app_secret},
+                    timeout=10,
+                )
+                data = resp.json()
+                self._token = data.get("tenant_access_token", "")
+                self._token_expires = time.time() + data.get("expire", 7200)
+                return self._token
+            except Exception as e:
+                logger.error(f"获取 token 失败: {e}")
+                return ""
 
     def send_text(self, receive_id: str, text: str, receive_id_type: str = "open_id"):
         """发送文本消息。"""
         token = self._get_token()
         if not token:
             return
-        httpx.post(
-            "https://open.feishu.cn/open-apis/im/v1/messages",
-            params={"receive_id_type": receive_id_type},
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "receive_id": receive_id,
-                "msg_type": "text",
-                "content": json.dumps({"text": text}),
-            },
-            timeout=10,
-        )
+        try:
+            httpx.post(
+                "https://open.feishu.cn/open-apis/im/v1/messages",
+                params={"receive_id_type": receive_id_type},
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "receive_id": receive_id,
+                    "msg_type": "text",
+                    "content": json.dumps({"text": text}),
+                },
+                timeout=10,
+            )
+        except httpx.HTTPError as e:
+            logger.warning("飞书发送消息失败: %s", e)
 
     def send_card(self, receive_id: str, card: dict, receive_id_type: str = "open_id"):
         """发送交互卡片（操作确认）。"""
         token = self._get_token()
         if not token:
             return
-        httpx.post(
-            "https://open.feishu.cn/open-apis/im/v1/messages",
-            params={"receive_id_type": receive_id_type},
-            headers={"Authorization": f"Bearer {token}"},
-            json={
-                "receive_id": receive_id,
-                "msg_type": "interactive",
-                "content": json.dumps(card),
-            },
-            timeout=10,
-        )
+        try:
+            httpx.post(
+                "https://open.feishu.cn/open-apis/im/v1/messages",
+                params={"receive_id_type": receive_id_type},
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "receive_id": receive_id,
+                    "msg_type": "interactive",
+                    "content": json.dumps(card),
+                },
+                timeout=10,
+            )
+        except httpx.HTTPError as e:
+            logger.warning("飞书发送消息失败: %s", e)
 
 
 # ——— 用户鉴权 + 角色映射 ———
@@ -104,11 +112,14 @@ FEISHU_USERS: dict[str, str] = {}  # {"ou_xxx": "admin", ...}
 def load_feishu_users():
     """从环境变量加载授权用户（格式: user_id:role,user_id:role）。"""
     raw = os.environ.get("LARK_AUTHORIZED_USERS", "")
-    FEISHU_USERS.clear()
+    new_users = {}
     for pair in raw.split(","):
         if ":" in pair:
             uid, role = pair.strip().split(":", 1)
-            FEISHU_USERS[uid] = role
+            new_users[uid] = role
+    FEISHU_USERS.clear()
+    FEISHU_USERS.update(new_users)
+    return FEISHU_USERS
 
 
 def check_user(open_id: str) -> str | None:
@@ -157,8 +168,8 @@ def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
 
 def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None):
     if receive_id is None: receive_id = open_id
-    print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
     """后台线程：消息 → LLM 网关 → 回复/确认卡片。per-机器人 role（机器人=登录账号）。"""
+    print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
     client = FeishuClient()
     role = "viewer"
     if fid:

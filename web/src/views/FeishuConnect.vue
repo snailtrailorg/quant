@@ -153,15 +153,19 @@ const onTest = async (id) => {
 }
 
 const onStart = async (id) => {
-  const r = await feishuStart(id)
-  if (r.ok) { ElMessage.success('已启动'); load() }
-  else ElMessage.error('失败：' + r.error)
+  try {
+    const r = await feishuStart(id)
+    if (r.ok) { ElMessage.success('已启动'); load() }
+    else ElMessage.error('失败：' + r.error)
+  } catch (e) { console.error(e); ElMessage.error('启动失败') }
 }
 
 const onStop = async (id) => {
-  const r = await feishuStop(id)
-  if (r.ok) { ElMessage.success('已停止'); load() }
-  else ElMessage.error('失败：' + r.error)
+  try {
+    const r = await feishuStop(id)
+    if (r.ok) { ElMessage.success('已停止'); load() }
+    else ElMessage.error('失败：' + r.error)
+  } catch (e) { console.error(e); ElMessage.error('停止失败') }
 }
 
 const onDelete = async (id) => {
