@@ -45,7 +45,7 @@
 - **Python 版本**：服务器 `120.24.235.98` = 3.11（venv 3.11.13），本地开发机 = 3.10。**不用 3.14**——根因：vnpy 4.4.0 硬 pin `pyside6==6.8.2.1`，该版本 `requires_python <3.14`，3.14 上 pip 装不上 vnpy 4.4.0；resolver 回退 vnpy 4.0.0 与 vnpy_binance 2026.7.23 错配（`Exchange.GLOBAL` 缺失致 import 崩）。纯 Python 依赖（numpy/pandas/psycopg/PySide6 6.11/fastapi/celery 等）在 3.14 全 OK，卡点单一在上游 vnpy 的 PySide6 pin，等 vnpy 放宽即解（2026-08-03 实测）。改版本要严格评估 + 客户确认，不擅动。
 - **PostgreSQL 18 + pgvector + Valkey**（Redis 协议兼容）。弃 TimescaleDB / 重型向量库。
 - **vnpy 核心 + vnpy_xtp**（交易+行情接口）为第三方成熟组件，不重复造轮；**回测自建 BacktestEngine**（纯 Python，不依赖 vnpy CtaBacktestingEngine）。
-- **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade + `deploy-server.sh migrate`），不手动 ALTER。`init-schema.sql` 保留备用，各 handler 的 `CREATE TABLE IF NOT EXISTS` 保留兜底。
+- **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade + `deploy-server.sh migrate`），不手动 ALTER。`init-schema.sql` 保留作手工运维参考。**运行时不再 `CREATE TABLE IF NOT EXISTS`**（2026-08-13 清零，原 30 处全部入迁移 0027）；`db.py` 的 `verify_schema()` 启动时校验表存在并告警，动态表 `bar_{freq}` 保留 `ensure_table()` 但用 `_ensured_tables` 集合避免重复 DDL。
 - **策略实盘化架构**：每策略独立子进程（systemd `quant-strategy@<id>`）+ 独立 vnpy MainEngine + XtpGateway 实时驱动（tick->BarGenerator->on_bar）+ XTPAdapter 下单。取 vnpy Gateway 弃全局 MainEngine。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
 
 ### 协作约束

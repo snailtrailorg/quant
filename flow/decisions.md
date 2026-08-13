@@ -255,3 +255,17 @@
 - **影响**：待办加平台化任务项 PT1~PT8；提议 CLAUDE.md 平台架构约束加"平台化通用接口"条（等确认）
 
 ---
+
+## 2026-08-13 · DDL 全部入迁移 + 运行时 DDL 清零 + LLM 配置入 DB
+
+- **背景**：全面代码检视发现 30+ 处运行时 `CREATE TABLE IF NOT EXISTS` 分散在 15 文件，其中 10 张表（account_snapshot/accounts/alert_history/astock_analysis/broker_usage/convertible_terms/signal_log/order_log/trade_log/static_symbols）完全无迁移覆盖，靠运行时兜底创建；LLM 工具调用上限 `for _ in range(5)` 硬编码。
+- **决定**：
+  1. **迁移 0027 统一 10 张表**：新建 `0027_consolidate_runtime_tables.py`，down_revision=0026，迁移链单一 head 0027（链 0017->0022->0019->0018->0021->0020->0023 非数字序但线性有效，不合并旧迁移--生产已跑，合并破坏历史）
+  2. **运行时 DDL 清零**：15 文件 30 处全删，`init_users_table`/`init_trade_calendar` 改 no-op 保接口兼容；`db.py` 加 `verify_schema()` 启动校验（查表存在，缺则 warning 不创建）；动态表 `bar_{freq}` 保留 `ensure_table()` 但用 `_ensured_tables` 集合避免重复 DDL
+  3. **LLM 工具调用上限入 `system_config`**：key=`llm_max_tool_turns`（int，种子=5），`bot.py` 的 `_get_max_tool_turns()` 读取 fallback 5，管理员 Web 动态调整
+  4. **FIFO 胜率配对**：`backtest.py` 用 `collections.deque` 逐笔配对替代均价法
+- **否决**：合并旧迁移文件（26 个生产已跑，合并破坏 `alembic_version` 历史）
+- **影响文档**：`CLAUDE.md`（技术栈约束 schema 段改"运行时不再 CREATE TABLE"）；记忆 `project-status` + `session-handoff`
+- **部署提醒**：服务器需 `alembic upgrade head` 应用 0027
+
+---
