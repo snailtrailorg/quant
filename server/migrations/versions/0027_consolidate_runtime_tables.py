@@ -5,6 +5,7 @@ Revises: 0026
 Create Date: 2026-08-13
 
 从各 handler 中提取的运行时表，统一迁移管理。
+幂等：if_not_exists=True，服务器上已被运行时 DDL 创建的表跳过（2026-08-13 部署发现 DuplicateTable）。
 """
 from typing import Sequence, Union
 
@@ -27,6 +28,7 @@ def upgrade() -> None:
         sa.Column("total_value", sa.Numeric(), nullable=False),
         sa.Column("daily_pnl", sa.Numeric(), server_default="0"),
         sa.Column("initial_capital", sa.Numeric(), nullable=False, server_default="1000000"),
+        if_not_exists=True,
     )
 
     # 2. accounts（交易所账户，含加密 API key/secret）
@@ -40,6 +42,7 @@ def upgrade() -> None:
         sa.Column("api_key_hint", sa.Text()),
         sa.Column("enabled", sa.Boolean(), server_default=sa.text("true")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        if_not_exists=True,
     )
 
     # 3. alert_history（告警历史）
@@ -51,6 +54,7 @@ def upgrade() -> None:
         sa.Column("title", sa.Text()),
         sa.Column("body", sa.Text()),
         sa.Column("channel", sa.Text()),
+        if_not_exists=True,
     )
 
     # 4. astock_analysis（A股分析结果）
@@ -63,6 +67,7 @@ def upgrade() -> None:
         sa.Column("score", sa.Numeric()),
         sa.Column("rating", sa.Text()),
         sa.Column("factors", sa.JSONB()),
+        if_not_exists=True,
     )
 
     # 5. broker_usage（券商调用统计）
@@ -75,6 +80,7 @@ def upgrade() -> None:
         sa.Column("symbol", sa.Text()),
         sa.Column("success", sa.Boolean()),
         sa.Column("latency_ms", sa.Integer()),
+        if_not_exists=True,
     )
 
     # 6. convertible_terms（可转债条款）
@@ -83,6 +89,7 @@ def upgrade() -> None:
         sa.Column("ts_code", sa.Text(), primary_key=True),
         sa.Column("terms", sa.JSONB()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        if_not_exists=True,
     )
 
     # 7. signal_log（策略信号）
@@ -95,6 +102,7 @@ def upgrade() -> None:
         sa.Column("action", sa.Text()),
         sa.Column("score", sa.Numeric()),
         sa.Column("price", sa.Numeric()),
+        if_not_exists=True,
     )
 
     # 8. order_log（订单）
@@ -109,6 +117,7 @@ def upgrade() -> None:
         sa.Column("price", sa.Numeric()),
         sa.Column("status", sa.Text(), server_default="submitted"),
         sa.Column("signal_id", sa.BigInteger()),
+        if_not_exists=True,
     )
 
     # 9. trade_log（成交）
@@ -122,6 +131,7 @@ def upgrade() -> None:
         sa.Column("volume", sa.Integer()),
         sa.Column("price", sa.Numeric()),
         sa.Column("commission", sa.Numeric()),
+        if_not_exists=True,
     )
 
     # 10. static_symbols（静态标的列表）
@@ -133,6 +143,7 @@ def upgrade() -> None:
         sa.Column("list_status", sa.Text()),
         sa.Column("delisted", sa.Boolean(), server_default=sa.text("false")),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
+        if_not_exists=True,
     )
 
 
