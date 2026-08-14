@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('backtest.detailTitle', { id: $route.params.id }) }}</span>
-        <el-button @click="$router.back()">{{ t('common.return') }}</el-button>
+        <el-button size="small" @click="$router.back()">{{ t('common.return') }}</el-button>
         <el-button type="success" size="small" @click="markVerified" :disabled="!run.strategy_config_id">{{ t('backtest.markVerified') }}</el-button>
       </div>
     </template>

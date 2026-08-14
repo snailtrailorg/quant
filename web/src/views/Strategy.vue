@@ -154,13 +154,13 @@
           <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
           <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
           <el-table-column :label="t('common.action')" width="80">
-            <template #default="{ row }"><el-button size="small" type="danger" link @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
+            <template #default="{ row }"><el-button size="small" type="danger" @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
           </el-table-column>
         </el-table>
       </el-form>
       <template #footer>
-        <el-button @click="editVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
+        <el-button size="small" @click="editVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button size="small" type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

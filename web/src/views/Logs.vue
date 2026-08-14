@@ -52,8 +52,8 @@
     <el-alert type="warning" :closable="false" style="margin-bottom: 16px">{{ t('log.analyzeHint', { n: errorLogs.length }) }}</el-alert>
     <el-input v-model="analysisResult" type="textarea" :rows="10" readonly :placeholder="t('log.phAnalyze')" />
     <template #footer>
-      <el-button @click="showAnalyze = false">{{ t('common.close') }}</el-button>
-      <el-button type="primary" @click="doAnalyze" :loading="analyzing">{{ t('log.analyze') }}</el-button>
+      <el-button size="small" @click="showAnalyze = false">{{ t('common.close') }}</el-button>
+      <el-button size="small" type="primary" @click="doAnalyze" :loading="analyzing">{{ t('log.analyze') }}</el-button>
     </template>
   </el-dialog>
 </template>

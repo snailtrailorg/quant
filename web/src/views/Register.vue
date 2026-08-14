@@ -46,7 +46,7 @@
     <el-dialog v-model="termsVisible" :title="t('register.termsTitle')" width="560px">
       <pre class="terms-body">{{ termsText }}</pre>
       <template #footer>
-        <el-button type="primary" @click="termsVisible = false">{{ t('common.ok') }}</el-button>
+        <el-button size="small" type="primary" @click="termsVisible = false">{{ t('common.ok') }}</el-button>
       </template>
     </el-dialog>
   </div>

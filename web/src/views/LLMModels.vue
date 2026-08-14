@@ -2,7 +2,7 @@
   <el-card>
     <template #header>{{ t('llm.configTitle') }}</template>
     <el-card shadow="never" style="margin-bottom: 12px">
-      <template #header>{{ t('llm.usageTitle') }}<el-button @click="loadUsage" size="small" link>{{ t('common.refresh') }}</el-button></template>
+      <template #header>{{ t('llm.usageTitle') }}<el-button @click="loadUsage" size="small" style="margin-left: 8px">{{ t('common.refresh') }}</el-button></template>
       <el-table :data="usage.month" stripe size="small">
         <el-table-column prop="provider" label="Provider" width="120" />
         <el-table-column prop="model" :label="t('llm.model')" />
@@ -34,7 +34,7 @@
       <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
           <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-          <el-button size="small" type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button size="small" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
           <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
@@ -53,8 +53,8 @@
       <el-form-item :label="t('llm.priority')"><el-input-number v-model="form.priority" :min="1" :max="100" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button @click="resetForm">{{ t('common.reset') }}</el-button>
+        <el-button size="small" type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button size="small" @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
   </el-card>

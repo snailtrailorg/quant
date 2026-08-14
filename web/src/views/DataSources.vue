@@ -26,7 +26,7 @@
       <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
           <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-          <el-button size="small" type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button size="small" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
           <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
@@ -40,8 +40,8 @@
       <el-form-item :label="t('common.dailyLimit')"><el-input-number v-model="form.usage_limit" :min="0" controls-position="right" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button @click="resetForm">{{ t('common.reset') }}</el-button>
+        <el-button size="small" type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button size="small" @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
   </el-card>

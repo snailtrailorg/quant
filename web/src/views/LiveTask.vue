@@ -22,7 +22,7 @@
         <template #default="{ row }">
           <el-button v-if="row.status !== 'running'" size="small" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running'" size="small" type="danger" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
-          <el-button v-if="row.status !== 'running'" size="small" type="danger" link @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.status !== 'running'" size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -57,8 +57,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="save" :loading="saving">{{ t('liveTask.createBtn') }}</el-button>
+        <el-button size="small" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button size="small" type="primary" @click="save" :loading="saving">{{ t('liveTask.createBtn') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

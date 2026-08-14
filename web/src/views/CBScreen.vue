@@ -14,12 +14,12 @@
       <el-table-column prop="maturity_date" :label="t('screen.maturityDate')" width="100" />
       <el-table-column :label="t('screen.kline')" width="60">
         <template #default="{ row }">
-          <el-button size="small" link type="primary" @click.stop="onRowClick(row)">📊</el-button>
+          <el-button size="small" @click.stop="onRowClick(row)">📊</el-button>
         </template>
       </el-table-column>
       <el-table-column :label="t('screen.aiTerms')" width="100">
         <template #default="{ row }">
-          <el-button size="small" link type="success" @click.stop="showTerms(row)">{{ t('screen.termsBtn') }}</el-button>
+          <el-button size="small" type="primary" @click.stop="showTerms(row)">{{ t('screen.termsBtn') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -27,7 +27,7 @@
     <KlineDialog v-model="klineVisible" :symbol="klineSymbol" :name="klineName" />
     <el-dialog v-model="termsVisible" :title="t('screen.aiTermsTitle', { symbol: termsSymbol })" width="600px">
       <el-input v-model="termsResult" type="textarea" :rows="10" readonly v-loading="termsLoading" />
-      <template #footer><el-button @click="termsVisible = false">{{ t('common.close') }}</el-button></template>
+      <template #footer><el-button size="small" @click="termsVisible = false">{{ t('common.close') }}</el-button></template>
     </el-dialog>
   </el-card>
 </template>

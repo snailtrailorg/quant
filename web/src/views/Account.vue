@@ -10,7 +10,7 @@
           <el-input v-model="inviteEmail" :placeholder="t('account.phInviteEmail')" prefix-icon="Message" style="width: 280px" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="onInvite" :loading="inviting">{{ t('account.invite') }}</el-button>
+          <el-button size="small" type="primary" @click="onInvite" :loading="inviting">{{ t('account.invite') }}</el-button>
         </el-form-item>
       </el-form>
       <el-table :data="users" stripe size="small" style="margin-top: 12px">
@@ -19,7 +19,7 @@
         <el-table-column prop="role" :label="t('user.role')" width="100">
           <template #default="{ row }"><el-tag size="small">{{ row.role }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="email" :label="t('account.email')" />
+        <el-table-column prop="email" :label="t('account.email')" min-width="160" show-overflow-tooltip />
         <el-table-column :label="t('account.emailVerified')" width="90">
           <template #default="{ row }">
             <el-tag :type="row.email_verified ? 'success' : 'info'" size="small">{{ row.email_verified ? '✓' : '✗' }}</el-tag>
@@ -30,26 +30,26 @@
             <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.action')" width="200">
+        <el-table-column :label="t('common.action')" width="270">
           <template #default="{ row }">
-            <el-select v-model="row.role" size="small" style="width: 90px"
-              :disabled="row.username === currentUsername || (row.role === 'admin' && adminCount <= 1)"
-              @change="(v) => onRoleChange(row.id, v)">
-              <el-option label="Admin" value="admin" />
-              <el-option label="Trader" value="trader" />
-              <el-option label="Analyst" value="analyst" />
-              <el-option label="Viewer" value="viewer" />
-            </el-select>
-            <el-button size="small" :type="row.enabled ? 'warning' : 'success'" link @click="onToggleEnabled(row)"
-              :disabled="row.username === currentUsername || (row.role === 'admin' && adminCount <= 1)">
-              {{ row.enabled ? t('common.disable') : t('common.enable') }}
-            </el-button>
-            <el-button size="small" type="danger" link @click="onDeleteUser(row)"
-              :disabled="row.username === currentUsername || (row.role === 'admin' && adminCount <= 1)">
-              <span v-if="row.username === currentUsername">{{ t('account.cantDeleteSelf') }}</span>
-              <span v-else-if="row.role === 'admin' && adminCount <= 1">{{ t('account.cantDeleteLastAdmin') }}</span>
-              <span v-else>{{ t('common.delete') }}</span>
-            </el-button>
+            <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
+              <el-select v-model="row.role" size="small" style="width: 96px"
+                :disabled="locked(row)" :title="lockedReason(row)"
+                @change="(v) => onRoleChange(row.id, v)">
+                <el-option label="Admin" value="admin" />
+                <el-option label="Trader" value="trader" />
+                <el-option label="Analyst" value="analyst" />
+                <el-option label="Viewer" value="viewer" />
+              </el-select>
+              <el-button size="small" :type="row.enabled ? 'warning' : 'success'" @click="onToggleEnabled(row)"
+                :disabled="locked(row)" :title="lockedReason(row)">
+                {{ row.enabled ? t('common.disable') : t('common.enable') }}
+              </el-button>
+              <el-button size="small" type="danger" @click="onDeleteUser(row)"
+                :disabled="locked(row)" :title="lockedReason(row)">
+                {{ t('common.delete') }}
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -60,20 +60,20 @@
     <!-- 改密码 -->
     <div style="margin-bottom: 20px">
       <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.changePwd') }}</h3>
-      <el-form label-width="100px" style="max-width: 400px" @submit.prevent="onChangePwd">
+      <el-form label-position="top" style="max-width: 480px" @submit.prevent="onChangePwd">
         <el-form-item :label="t('account.oldPwd')">
           <el-input v-model="pwdForm.old_password" type="password" show-password />
         </el-form-item>
         <el-form-item :label="t('account.newPwd')">
           <el-input v-model="pwdForm.new_password" type="password" show-password />
         </el-form-item>
-        <div style="color: #909399; font-size: 12px; margin: -10px 0 10px 100px">{{ t('common.passwordRule') }}</div>
+        <div class="pwd-rule">{{ t('common.passwordRule') }}</div>
         <el-form-item :label="t('register.confirmPwd')">
           <el-input v-model="pwdForm.confirm" type="password" show-password
             :class="{ 'mismatch': pwdForm.confirm && pwdForm.confirm !== pwdForm.new_password }" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
+          <el-button size="small" type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -119,6 +119,11 @@ const pwdForm = ref({ old_password: '', new_password: '', confirm: '' })
 
 // 最后一个 admin 不能删（始终至少保留一个）
 const adminCount = computed(() => users.value.filter(u => u.role === 'admin').length)
+// 行锁定（自己 / 末位 admin）：角色、启停、删除均禁用，title 提示原因
+const locked = row => row.username === currentUsername.value || (row.role === 'admin' && adminCount.value <= 1)
+const lockedReason = row => row.username === currentUsername.value
+  ? t('account.cantDeleteSelf')
+  : (row.role === 'admin' && adminCount.value <= 1 ? t('account.cantDeleteLastAdmin') : '')
 
 const load = async () => {
   try {
@@ -177,4 +182,5 @@ const onDeleteUser = async (row) => {
 
 <style scoped>
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
+.pwd-rule { color: #909399; font-size: 12px; margin: -14px 0 14px; }
 </style>

@@ -4,7 +4,7 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('backtest.runList') }}</span>
-          <el-button type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
+          <el-button size="small" type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
         </div>
       </template>
       <el-table :data="runs" stripe v-loading="loading" @row-click="goDetail">
@@ -80,8 +80,8 @@
         </template>
       </el-form>
       <template #footer>
-        <el-button @click="showForm = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitRun" :loading="submitting">{{ t('backtest.startRun') }}</el-button>
+        <el-button size="small" @click="showForm = false">{{ t('common.cancel') }}</el-button>
+        <el-button size="small" type="primary" @click="submitRun" :loading="submitting">{{ t('backtest.startRun') }}</el-button>
       </template>
     </el-dialog>
   </div>

@@ -17,7 +17,7 @@
         v-model="input" :placeholder="t('chat.ph')"
         @keyup.enter="onSend" :disabled="loading" clearable>
         <template #append>
-          <el-button @click="onSend" :loading="loading" :icon="Promotion">{{ t('chat.send') }}</el-button>
+          <el-button size="small" @click="onSend" :loading="loading" :icon="Promotion">{{ t('chat.send') }}</el-button>
         </template>
       </el-input>
       <div style="margin-top: 8px">

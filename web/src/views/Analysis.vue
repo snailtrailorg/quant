@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('analysis.title') }}</span>
-        <el-button @click="load" :loading="loading">{{ t('analysis.refresh') }}</el-button>
+        <el-button size="small" @click="load" :loading="loading">{{ t('analysis.refresh') }}</el-button>
       </div>
     </template>
     <el-table :data="results" stripe>
@@ -34,8 +34,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showPoolDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="confirmAddPool" :loading="adding">{{ t('analysis.addBtn') }}</el-button>
+        <el-button size="small" @click="showPoolDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button size="small" type="primary" @click="confirmAddPool" :loading="adding">{{ t('analysis.addBtn') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

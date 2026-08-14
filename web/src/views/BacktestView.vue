@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('backtest.viewTitle', { symbol }) }}</span>
-        <el-button @click="$router.back()">{{ t('common.return') }}</el-button>
+        <el-button size="small" @click="$router.back()">{{ t('common.return') }}</el-button>
       </div>
     </template>
 

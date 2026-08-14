@@ -77,8 +77,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="save" :loading="saving">{{ t('factors.save') }}</el-button>
+        <el-button size="small" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button size="small" type="primary" @click="save" :loading="saving">{{ t('factors.save') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

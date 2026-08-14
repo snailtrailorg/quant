@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <div>
-          <el-button @click="$router.back()" size="small" link>← {{ t('common.return') }}</el-button>
+          <el-button @click="$router.back()" size="small">← {{ t('common.return') }}</el-button>
           <span style="margin-left: 8px">{{ t('symbol.listTitle', { title, n: total }) }}</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: center">
@@ -56,8 +56,8 @@
           :title="t('symbol.backfillHint')" />
       </el-form>
       <template #footer>
-        <el-button @click="bfVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="doBackfill" :loading="bfLoading">{{ t('symbol.backfill') }}</el-button>
+        <el-button size="small" @click="bfVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button size="small" type="primary" @click="doBackfill" :loading="bfLoading">{{ t('symbol.backfill') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

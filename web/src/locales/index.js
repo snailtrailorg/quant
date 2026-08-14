@@ -677,8 +677,8 @@ export default {
       roleChanged: '角色已改',
       roleChangeFailed: '改角色失败',
       confirmDeleteUser: '确认删除该用户？',
-      cantDeleteSelf: '当前账户（不可删）',
-      cantDeleteLastAdmin: '末位管理员（不可删）',
+      cantDeleteSelf: '当前登录账户，不可修改或删除',
+      cantDeleteLastAdmin: '最后一个管理员，不可修改或删除',
     },
     task: {
       title: '后台任务管理（统一监控 + 卡死检测 + 强制删除）',
@@ -1474,8 +1474,8 @@ export default {
       roleChanged: 'Role changed',
       roleChangeFailed: 'Role change failed',
       confirmDeleteUser: 'Confirm delete this user?',
-      cantDeleteSelf: 'Current account (protected)',
-      cantDeleteLastAdmin: 'Last admin (protected)',
+      cantDeleteSelf: 'This is your current account — protected from changes',
+      cantDeleteLastAdmin: 'Last administrator — protected from changes',
     },
     task: {
       title: 'Background Task Management (unified monitor + stuck detection + force delete)',

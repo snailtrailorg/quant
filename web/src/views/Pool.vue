@@ -40,8 +40,8 @@
         <el-form-item :label="t('common.description')"><el-input v-model="newPool.description" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="createPool">{{ t('pool.createBtn') }}</el-button>
+        <el-button size="small" @click="showDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button size="small" type="primary" @click="createPool">{{ t('pool.createBtn') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

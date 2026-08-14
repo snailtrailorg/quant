@@ -22,7 +22,7 @@
       </el-table-column>
       <el-table-column :label="t('screen.kline')" width="60">
         <template #default="{ row }">
-          <el-button size="small" link type="primary" @click.stop="onRowClick(row)">📊</el-button>
+          <el-button size="small" @click.stop="onRowClick(row)">📊</el-button>
         </template>
       </el-table-column>
     </el-table>
