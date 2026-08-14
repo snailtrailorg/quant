@@ -1,11 +1,12 @@
-"""告警/通知 —— 企业微信/Discord/Server酱，分级路由+配额聚合。
+"""通知中心 —— 站内铃铛（PG notifications）+ 按规则外部推送。
 
 用法:
-    from src.alert_notify import AlertNotify
-    AlertNotify.get().notify("critical", "熔断", "总回撤超限")
-    AlertNotify.get().report("盘后报告", "今日盈亏+...")
+    from src.alert_notify import notify
+    notify("critical", "email", "邮件发送最终失败", "收件人...")   # 站内 + 按规则外推
+    from src.alert_notify import report
+    report("盘后报告", "今日盈亏+...")                             # 订阅型：站内 + 外推
 """
 
-from .notify import AlertNotify
+from .notify import notify, report, visible_categories, should_push_external, cleanup, CATEGORY_ROLES
 
-__all__ = ["AlertNotify"]
+__all__ = ["notify", "report", "visible_categories", "should_push_external", "cleanup", "CATEGORY_ROLES"]

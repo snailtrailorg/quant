@@ -95,6 +95,16 @@ app.conf.update(
             "schedule": 60.0,
             "options": {"queue": "risk"},
         },
+        "email-outbox-sweep": {
+            "task": "src.scheduler.tasks.email_outbox_sweep",
+            "schedule": 60.0,
+            "options": {"queue": "risk"},
+        },
+        "notifications-cleanup": {
+            "task": "src.scheduler.tasks.notifications_cleanup",
+            "schedule": 86400.0,
+            "options": {"queue": "risk"},
+        },
         "convertible-terms-sync": {
             "task": "src.scheduler.tasks.convertible_terms_sync",
             "schedule": 86400.0,

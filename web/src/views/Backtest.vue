@@ -4,7 +4,7 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('backtest.runList') }}</span>
-          <el-button size="small" type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
+          <el-button type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
         </div>
       </template>
       <el-table :data="runs" stripe v-loading="loading" @row-click="goDetail">
@@ -24,8 +24,8 @@
         </el-table-column>
         <el-table-column :label="t('common.action')" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click.stop="goDetail(row)">{{ t('common.detail') }}</el-button>
-            <el-button size="small" v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)">{{ t('backtest.terminate') }}</el-button>
+            <el-button type="primary" @click.stop="goDetail(row)">{{ t('common.detail') }}</el-button>
+            <el-button v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)">{{ t('backtest.terminate') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -80,8 +80,8 @@
         </template>
       </el-form>
       <template #footer>
-        <el-button size="small" @click="showForm = false">{{ t('common.cancel') }}</el-button>
-        <el-button size="small" type="primary" @click="submitRun" :loading="submitting">{{ t('backtest.startRun') }}</el-button>
+        <el-button type="primary" @click="showForm = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="submitRun" :loading="submitting">{{ t('backtest.startRun') }}</el-button>
       </template>
     </el-dialog>
   </div>

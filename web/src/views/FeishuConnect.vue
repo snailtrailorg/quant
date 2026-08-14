@@ -3,30 +3,30 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('feishu.title') }}</span>
-        <el-button size="small" type="primary" @click="onConnect" :loading="loading">{{ t('feishu.addBtn') }}</el-button>
+        <el-button type="primary" @click="onConnect" :loading="loading">{{ t('feishu.addBtn') }}</el-button>
       </div>
     </template>
 
-    <el-table :data="robots" stripe size="small">
+    <el-table :data="robots" stripe>
       <el-table-column prop="id" label="ID" width="50" />
       <el-table-column prop="name" :label="t('common.name')" width="120" />
       <el-table-column prop="app_id" label="App ID" />
       <el-table-column :label="t('feishu.sysRole')" width="90">
         <template #default="{ row }">
-          <el-tag :type="roleType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
+          <el-tag :type="roleType(row.role)">{{ roleLabel(row.role) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="description" :label="t('common.remark')" />
       <el-table-column :label="t('common.status')" width="70">
-        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag></template>
+        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag></template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="310">
         <template #default="{ row }">
-          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-          <el-button v-if="!row.enabled" size="small" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
-          <el-button v-else size="small" type="warning" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
-          <el-button size="small" @click="onSetting(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
+          <el-button v-if="!row.enabled" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
+          <el-button v-else type="warning" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
+          <el-button type="primary" @click="onSetting(row)">{{ t('common.edit') }}</el-button>
+          <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -40,7 +40,7 @@
           <p style="font-size: 13px; color: #999">{{ t('feishu.validFor', { n: countdown }) }}</p>
         </div>
         <el-result v-if="status === 'done'" icon="success" :title="t('feishu.connectSuccess')" :sub-title="t('feishu.connectSuccessSub')">
-          <template #extra><el-button size="small" type="primary" @click="scanVisible = false">{{ t('feishu.done') }}</el-button></template>
+          <template #extra><el-button type="primary" @click="scanVisible = false">{{ t('feishu.done') }}</el-button></template>
         </el-result>
         <el-alert v-if="status === 'error'" type="error" :title="errorMsg" show-icon :closable="false" />
       </div>
@@ -60,8 +60,8 @@
         </el-form-item>
         <el-form-item :label="t('common.remark')"><el-input v-model="settingForm.description" type="textarea" :rows="2" /></el-form-item>
         <el-form-item>
-          <el-button size="small" type="primary" @click="onSaveSetting" :loading="savingSetting">{{ t('common.confirm') }}</el-button>
-          <el-button size="small" @click="settingVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="onSaveSetting" :loading="savingSetting">{{ t('common.confirm') }}</el-button>
+          <el-button type="primary" @click="settingVisible = false">{{ t('common.cancel') }}</el-button>
         </el-form-item>
       </el-form>
     </el-dialog>

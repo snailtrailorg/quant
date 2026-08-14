@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('pool.manageTitle') }}</span>
-        <el-button type="primary" size="small" @click="showDialog = true">{{ t('pool.createTitle') }}</el-button>
+        <el-button type="primary" @click="showDialog = true">{{ t('pool.createTitle') }}</el-button>
       </div>
     </template>
     <el-table :data="pools" stripe>
@@ -16,8 +16,8 @@
       <el-table-column prop="description" :label="t('common.description')" />
       <el-table-column :label="t('common.action')" width="150">
         <template #default="{ row }">
-          <el-button size="small" @click="editPool(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="delPool(row)">{{ t('common.delete') }}</el-button>
+          <el-button type="primary" @click="editPool(row)">{{ t('common.edit') }}</el-button>
+          <el-button type="danger" @click="delPool(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -40,8 +40,8 @@
         <el-form-item :label="t('common.description')"><el-input v-model="newPool.description" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button size="small" @click="showDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button size="small" type="primary" @click="createPool">{{ t('pool.createBtn') }}</el-button>
+        <el-button type="primary" @click="showDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="createPool">{{ t('pool.createBtn') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

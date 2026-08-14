@@ -4,7 +4,7 @@
       <div style="display:flex;justify-content:space-between;align-items:center">
         <span>{{ t('task.title') }}</span>
         <div style="display:flex;gap:8px;align-items:center">
-          <el-select v-model="filterStatus" size="small" style="width:120px" @change="load">
+          <el-select v-model="filterStatus" style="width:120px" @change="load">
             <el-option :label="t('common.all')" value="" />
             <el-option :label="t('task.statusRunning')" value="running" />
             <el-option :label="t('task.statusCompleted')" value="completed" />
@@ -12,17 +12,17 @@
             <el-option :label="t('task.statusStuck')" value="stuck" />
             <el-option :label="t('task.statusTerminated')" value="terminated" />
           </el-select>
-          <el-button size="small" @click="load">{{ t('common.refresh') }}</el-button>
-          <el-button size="small" type="warning" @click="onDetectStuck" v-if="role==='admin'">{{ t('task.detectStuck') }}</el-button>
+          <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+          <el-button type="warning" @click="onDetectStuck" v-if="role==='admin'">{{ t('task.detectStuck') }}</el-button>
         </div>
       </div>
     </template>
-    <el-table :data="tasks" stripe size="small">
+    <el-table :data="tasks" stripe>
       <el-table-column prop="id" :label="t('task.taskId')" width="120" show-overflow-tooltip />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="type" :label="t('common.type')" width="80" />
       <el-table-column :label="t('common.status')" width="90">
-        <template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag></template>
+        <template #default="{ row }"><el-tag :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag></template>
       </el-table-column>
       <el-table-column :label="t('task.progress')" width="140">
         <template #default="{ row }">{{ row.progress?.pct || 0 }}% ({{ row.progress?.current || 0 }}/{{ row.progress?.total || 0 }})</template>
@@ -32,21 +32,21 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
-          <el-button size="small" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>
-          <el-button size="small" type="warning" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)">{{ t('task.terminate') }}</el-button>
-          <el-button size="small" type="danger" @click="onForceDelete(row.id)" v-if="role==='admin'">{{ t('task.forceDelete') }}</el-button>
+          <el-button type="primary" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>
+          <el-button type="warning" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)">{{ t('task.terminate') }}</el-button>
+          <el-button type="danger" @click="onForceDelete(row.id)" v-if="role==='admin'">{{ t('task.forceDelete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <el-dialog v-model="detailVisible" :title="t('task.detailTitle')" width="700px">
       <div v-if="detail">
-        <p>{{ t('common.name') }}: {{ detail.name }} | {{ t('common.type') }}: {{ detail.type }} | {{ t('common.status') }}: <el-tag :type="statusType(detail.status)" size="small">{{ statusLabel(detail.status) }}</el-tag></p>
+        <p>{{ t('common.name') }}: {{ detail.name }} | {{ t('common.type') }}: {{ detail.type }} | {{ t('common.status') }}: <el-tag :type="statusType(detail.status)">{{ statusLabel(detail.status) }}</el-tag></p>
         <p>{{ t('task.params') }}: {{ JSON.stringify(detail.params) }}</p>
         <p v-if="detail.error_message" style="color:#f56c6c">{{ t('task.error') }}: {{ detail.error_message }}</p>
         <el-divider />
         <h4>{{ t('task.execLogs') }}</h4>
-        <el-table :data="detail.logs" stripe size="small" max-height="300">
+        <el-table :data="detail.logs" stripe max-height="300">
           <el-table-column prop="level" :label="t('log.level')" width="70" />
           <el-table-column prop="message" :label="t('log.content')" />
           <el-table-column prop="step_name" :label="t('task.step')" width="100" />

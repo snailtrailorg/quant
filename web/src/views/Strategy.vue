@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('strategy.title') }}</span>
-        <el-button type="primary" size="small" @click="openCreate">{{ t('strategy.create') }}</el-button>
+        <el-button type="primary" @click="openCreate">{{ t('strategy.create') }}</el-button>
       </div>
     </template>
     <el-table :data="strategies" stripe>
@@ -16,9 +16,9 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="280">
         <template #default="{ row }">
-          <el-button size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="success" @click="onStart(row.id)" v-if="!row.enabled">{{ t('strategy.start') }}</el-button>
-          <el-button size="small" type="danger" @click="onStop(row.id)" v-if="row.enabled">{{ t('strategy.stop') }}</el-button>
+          <el-button type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button type="success" @click="onStart(row.id)" v-if="!row.enabled">{{ t('strategy.start') }}</el-button>
+          <el-button type="danger" @click="onStop(row.id)" v-if="row.enabled">{{ t('strategy.stop') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -53,9 +53,9 @@
               <el-option v-for="fac in availableFactors" :key="fac.name" :label="`${fac.name} (${fac.category})`" :value="fac.name" />
             </el-select>
             <el-input-number v-model="f.weight" :min="0" :max="2" :step="0.1" :precision="2" style="width: 120px" />
-            <el-button size="small" type="danger" @click="removeFactor(i)">{{ t('strategy.removeFactor') }}</el-button>
+            <el-button type="danger" @click="removeFactor(i)">{{ t('strategy.removeFactor') }}</el-button>
           </div>
-          <el-button size="small" @click="addFactor">{{ t('strategy.addFactor') }}</el-button>
+          <el-button type="primary" @click="addFactor">{{ t('strategy.addFactor') }}</el-button>
 
           <el-divider content-position="left">{{ t('strategy.signalAgg') }}</el-divider>
           <el-form-item :label="t('strategy.thresholdBuy')">
@@ -81,7 +81,7 @@
               </div>
               <PythonEditor v-model="editForm.pythonCode" :height="350" />
               <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
-                <el-button size="small" @click="validateCode" :loading="validating">{{ t('strategy.codeValidate') }}</el-button>
+                <el-button type="primary" @click="validateCode" :loading="validating">{{ t('strategy.codeValidate') }}</el-button>
                 <span v-if="codeValid === true" style="color: var(--el-color-success)">✅ {{ t('strategy.codeValid') }}</span>
                 <span v-else-if="codeValid === false" style="color: var(--el-color-danger)">❌ {{ codeError }}</span>
               </div>
@@ -108,11 +108,11 @@
               <el-input-number v-model="pd.max" :placeholder="t('strategy.phMax')" style="width: 110px" :controls="false" />
               <el-input-number v-model="pd.step" :placeholder="t('strategy.phStep')" style="width: 100px" :controls="false" />
             </template>
-            <el-button size="small" type="danger" @click="editForm.parameterDefs.splice(i, 1)">{{ t('common.delete') }}</el-button>
+            <el-button type="danger" @click="editForm.parameterDefs.splice(i, 1)">{{ t('common.delete') }}</el-button>
           </div>
-          <el-input v-model="pd.description" :placeholder="t('strategy.phDesc')" style="margin-top: 6px" size="small" />
+          <el-input v-model="pd.description" :placeholder="t('strategy.phDesc')" style="margin-top: 6px" />
         </div>
-        <el-button size="small" @click="addParamDef">{{ t('strategy.addParam') }}</el-button>
+        <el-button type="primary" @click="addParamDef">{{ t('strategy.addParam') }}</el-button>
 
         <el-divider content-position="left">{{ t('strategy.execRule') }}</el-divider>
         <el-form-item :label="t('strategy.volumeType')">
@@ -145,22 +145,22 @@
               <el-option label="OKX" value="okx" />
             </el-select>
             <el-input-number v-model="bindForm.initial_capital" :min="10000" :step="100000" style="width: 180px" />
-            <el-button size="small" type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">{{ t('common.bind') }}</el-button>
-            <el-button size="small" @click="loadBinds" :disabled="!editForm.id">{{ t('common.refresh') }}</el-button>
+            <el-button type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">{{ t('common.bind') }}</el-button>
+            <el-button type="primary" @click="loadBinds" :disabled="!editForm.id">{{ t('common.refresh') }}</el-button>
           </div>
         </el-form-item>
-        <el-table v-if="binds.length" :data="binds" stripe size="small" style="margin-bottom: 12px">
+        <el-table v-if="binds.length" :data="binds" stripe style="margin-bottom: 12px">
           <el-table-column prop="account_id" :label="t('common.account')" />
           <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
           <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
           <el-table-column :label="t('common.action')" width="80">
-            <template #default="{ row }"><el-button size="small" type="danger" @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
+            <template #default="{ row }"><el-button type="danger" @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
           </el-table-column>
         </el-table>
       </el-form>
       <template #footer>
-        <el-button size="small" @click="editVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button size="small" type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
+        <el-button type="primary" @click="editVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

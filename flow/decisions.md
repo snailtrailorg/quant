@@ -3,6 +3,17 @@
 > 记"过程决策 + 为什么"。**追加,不删改**——下一棒最值钱的上下文。
 > (架构 / 产品级的"为什么"按 `flow/规范/文档维护SOP.md` 进 `CLAUDE.md`;这里记项目怎么推进的过程决策。)
 
+---
+
+## 2026-08-14 · 通知中心（站内铃铛闭环）三项设计决策 · 用户拍板
+
+- **背景**：邮件最终失败只进系统日志，前台看不到，用户会认为"系统不稳定"而非 SMTP 问题；旧 alert_notify 只外推+Valkey 易失历史，无站内通知中心。
+- **决策（用户）**：
+  1. **可见范围按类别×角色**：email→仅 admin（邀请邮件失败只有 admin 看得懂）；risk/task→admin+trader；data→admin+analyst；system→admin。viewer 无可见类别（铃铛隐藏）。
+  2. **外部通道只主动推实盘紧急**（risk+critical）；其余仅站内。订阅型（盘后报告 report()）保留外推。⚠️ 行为变化：磁盘/接口健康/对账 critical 不再外推（仅站内）——如需恢复改 `should_push_external` 一处。
+  3. **告警历史直接从 Valkey 切 PG notifications**，旧数据不迁移（易失本就不可靠）。
+- **实现**：迁移 0030 `notifications` 表；`alert_notify.notify(level, category, title, body, source_ref)` 统一门面（去重/配额保留，Valkey 仅存去重键）；顶栏铃铛 60s 轮询+全部确认+按类别跳转；留存清理 beat（acked>7d/全部>30d）；Logs 页「告警历史」→「通知历史」读新表；7 处旧 AlertNotify 调用全部迁移（tasks.py×6+task_manager）；`/api/alert` 删除换 `/api/notifications`+`ack-all`。
+
 <!-- 模板:
 ## YYYY-MM-DD · <决策标题>
 - 背景:

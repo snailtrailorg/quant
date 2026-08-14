@@ -1,18 +1,18 @@
 <template>
   <el-dialog v-model="visible" :title="title" width="90%" top="3vh" @open="onOpen" @closed="onClose" destroy-on-close>
     <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; align-items: center">
-      <el-radio-group v-model="period" size="small" @change="onPeriodChange">
+      <el-radio-group v-model="period" @change="onPeriodChange">
         <el-radio-button value="day">{{ t('kline.dayK') }}</el-radio-button>
         <el-radio-button value="week">{{ t('kline.weekK') }}</el-radio-button>
         <el-radio-button value="month">{{ t('kline.monthK') }}</el-radio-button>
       </el-radio-group>
-      <el-select v-model="mainIndicator" size="small" :placeholder="t('kline.mainIndicator')" style="width: 140px" @change="onMainChange">
+      <el-select v-model="mainIndicator" :placeholder="t('kline.mainIndicator')" style="width: 140px" @change="onMainChange">
         <el-option :label="t('kline.none')" value="" />
         <el-option label="MA" value="MA" />
         <el-option label="BOLL" value="BOLL" />
         <el-option label="SAR" value="SAR" />
       </el-select>
-      <el-select v-model="subIndicator" size="small" :placeholder="t('kline.subIndicator')" style="width: 140px" @change="onSubChange">
+      <el-select v-model="subIndicator" :placeholder="t('kline.subIndicator')" style="width: 140px" @change="onSubChange">
         <el-option :label="t('kline.none')" value="" />
         <el-option label="VOL" value="VOL" />
         <el-option label="MACD" value="MACD" />

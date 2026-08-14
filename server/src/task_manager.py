@@ -133,11 +133,9 @@ def detect_stuck(timeout_s: int = 300) -> int:
     return len(stuck_ids)
 
 def notify_on_failure(title: str, body: str, provider: str = "wechat_work") -> None:
-    """任务失败告警（PT7 跨层联动，复用 MessageChannel）。"""
+    """任务失败通知（PT7 跨层联动）→ 通知中心（站内铃铛；warn 级不外推，按 2026-08-14 推送规则）。"""
     try:
-        from src.alert_notify.channel import get_channel
-        ch = get_channel(provider)
-        if ch:
-            ch.send(title, body, level="error")
+        from src.alert_notify import notify
+        notify("warn", "task", title, body)
     except Exception as e:
         logger.warning(f"告警发送失败: {e}")

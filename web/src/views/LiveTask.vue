@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('liveTask.title') }}</span>
-        <el-button type="primary" size="small" @click="openCreate">{{ t('liveTask.create') }}</el-button>
+        <el-button type="primary" @click="openCreate">{{ t('liveTask.create') }}</el-button>
       </div>
     </template>
     <el-table :data="tasks" stripe>
@@ -13,16 +13,16 @@
       <el-table-column prop="symbol" :label="t('common.symbol')" width="150" />
       <el-table-column :label="t('common.status')" width="100">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.status)" size="small">{{ row.status }}</el-tag>
+          <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" width="150" />
       <el-table-column prop="initial_capital" :label="t('liveTask.capital')" width="120" />
       <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
-          <el-button v-if="row.status !== 'running'" size="small" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
-          <el-button v-if="row.status === 'running'" size="small" type="danger" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
-          <el-button v-if="row.status !== 'running'" size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
+          <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
+          <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -57,8 +57,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button size="small" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button size="small" type="primary" @click="save" :loading="saving">{{ t('liveTask.createBtn') }}</el-button>
+        <el-button type="primary" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="save" :loading="saving">{{ t('liveTask.createBtn') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

@@ -3,14 +3,14 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <div>
-          <el-button @click="$router.back()" size="small">← {{ t('common.return') }}</el-button>
+          <el-button type="primary" @click="$router.back()">← {{ t('common.return') }}</el-button>
           <span style="margin-left: 8px">{{ t('symbol.listTitle', { title, n: total }) }}</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: center">
-          <el-input v-model="q" :placeholder="t('symbol.phSearch')" size="small" style="width: 180px" clearable @keyup.enter="onSearch" />
-          <el-button @click="onSearch" size="small">{{ t('common.search') }}</el-button>
-          <el-button @click="load" size="small">{{ t('common.refresh') }}</el-button>
-          <el-button type="primary" size="small" @click="onSyncAll" :loading="allRunning">{{ t('symbol.syncAll') }}</el-button>
+          <el-input v-model="q" :placeholder="t('symbol.phSearch')" style="width: 180px" clearable @keyup.enter="onSearch" />
+          <el-button type="primary" @click="onSearch">{{ t('common.search') }}</el-button>
+          <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+          <el-button type="primary" @click="onSyncAll" :loading="allRunning">{{ t('symbol.syncAll') }}</el-button>
         </div>
       </div>
     </template>
@@ -56,8 +56,8 @@
           :title="t('symbol.backfillHint')" />
       </el-form>
       <template #footer>
-        <el-button size="small" @click="bfVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button size="small" type="primary" @click="doBackfill" :loading="bfLoading">{{ t('symbol.backfill') }}</el-button>
+        <el-button type="primary" @click="bfVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="doBackfill" :loading="bfLoading">{{ t('symbol.backfill') }}</el-button>
       </template>
     </el-dialog>
   </el-card>
@@ -94,14 +94,14 @@ const columns = computed(() => [
     key: 'local', title: t('symbol.localData'), width: 240,
     cellRenderer: ({ row }) => row.local_count > 0
       ? h('span', { style: 'font-size: 12px' }, t('symbol.localSummary', { n: row.local_count, first: row.local_first, last: row.local_last }))
-      : h(ElTag, { size: 'small', type: 'info' }, () => t('symbol.empty'))
+      : h(ElTag, { type: 'info' }, () => t('symbol.empty'))
   },
   {
     key: 'actions', title: t('common.action'), width: 280, fixed: 'right',
     cellRenderer: ({ row }) => h('div', { style: 'display: flex; gap: 4px' }, [
-      h(ElButton, { size: 'small', type: 'primary', loading: row._loading, onClick: () => onSync(row) }, () => t('symbol.sync')),
-      h(ElButton, { size: 'small', type: 'warning', onClick: () => onBackfill(row) }, () => t('symbol.backfill')),
-      h(ElButton, { size: 'small', type: 'danger', onClick: () => onDelete(row) }, () => t('common.delete')),
+      h(ElButton, { type: 'primary', loading: row._loading, onClick: () => onSync(row) }, () => t('symbol.sync')),
+      h(ElButton, { type: 'warning', onClick: () => onBackfill(row) }, () => t('symbol.backfill')),
+      h(ElButton, { type: 'danger', onClick: () => onDelete(row) }, () => t('common.delete')),
     ])
   },
 ])

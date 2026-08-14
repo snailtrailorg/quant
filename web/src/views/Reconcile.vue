@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('reconcile.title') }}</span>
-        <el-button @click="load" size="small">{{ t('common.refresh') }}</el-button>
+        <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
       </div>
     </template>
     <el-alert :title="summary" :type="hasIssues ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: 20px" />

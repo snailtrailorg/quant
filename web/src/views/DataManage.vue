@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('dataManage.title') }}</span>
-        <el-button @click="load" size="small">{{ t('common.refresh') }}</el-button>
+        <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
       </div>
     </template>
     <el-card v-if="currentSync" shadow="never" style="margin-bottom: 12px">
@@ -19,17 +19,17 @@
     <el-table :data="configs" stripe v-loading="loading">
       <el-table-column prop="name" :label="t('dataManage.dataType')" width="160" />
       <el-table-column prop="data_type" :label="t('dataManage.category')" width="80">
-        <template #default="{ row }"><el-tag size="small">{{ row.data_type }}</el-tag></template>
+        <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
       </el-table-column>
       <el-table-column prop="mode" :label="t('common.mode')" width="80" />
       <el-table-column :label="t('dataManage.cronSchedule')" width="200">
         <template #default="{ row }">
-          <el-input v-model="row.schedule" size="small" style="width: 170px" :placeholder="t('dataManage.phCron')" @change="onScheduleChange(row)" />
+          <el-input v-model="row.schedule" style="width: 170px" :placeholder="t('dataManage.phCron')" @change="onScheduleChange(row)" />
         </template>
       </el-table-column>
       <el-table-column :label="t('dataManage.tradeDayFilter')" width="120">
         <template #default="{ row }">
-          <el-select v-model="row.trade_day_filter" size="small" style="width: 100px" @change="onScheduleChange(row)">
+          <el-select v-model="row.trade_day_filter" style="width: 100px" @change="onScheduleChange(row)">
             <el-option :label="t('dataManage.filterNone')" value="none" />
             <el-option :label="t('dataManage.filterWorkday')" value="workday" />
             <el-option :label="t('dataManage.filterTradeDay')" value="trade_day" />
@@ -38,7 +38,7 @@
       </el-table-column>
       <el-table-column :label="t('common.status')" width="80">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'running' ? 'warning' : row.status === 'idle' ? 'success' : 'danger'" size="small">
+          <el-tag :type="row.status === 'running' ? 'warning' : row.status === 'idle' ? 'success' : 'danger'">
             {{ row.status === 'idle' ? t('dataManage.idle') : row.status === 'running' ? t('task.statusRunning') : row.status }}
           </el-tag>
         </template>
@@ -51,15 +51,15 @@
       </el-table-column>
       <el-table-column :label="t('common.enable')" width="60">
         <template #default="{ row }">
-          <el-switch v-model="row.enabled" @change="onToggle(row)" size="small" />
+          <el-switch v-model="row.enabled" @change="onToggle(row)" />
         </template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="290">
         <template #default="{ row }">
-          <el-button size="small" type="primary" @click="onTrigger(row)" :loading="row.status === 'running'">{{ t('dataManage.syncBtn') }}</el-button>
-          <el-button size="small" type="warning" @click="onBackfill(row)" v-if="row.mode === 'incremental'">{{ t('symbol.backfill') }}</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row)" v-if="role === 'admin'">{{ t('common.delete') }}</el-button>
-          <el-button size="small" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>
+          <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'">{{ t('dataManage.syncBtn') }}</el-button>
+          <el-button type="warning" @click="onBackfill(row)" v-if="row.mode === 'incremental'">{{ t('symbol.backfill') }}</el-button>
+          <el-button type="danger" @click="onDelete(row)" v-if="role === 'admin'">{{ t('common.delete') }}</el-button>
+          <el-button type="primary" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -80,7 +80,7 @@
         </el-table-column>
         <el-table-column prop="status" :label="t('common.status')" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'success' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'" size="small">{{ row.status }}</el-tag>
+            <el-tag :type="row.status === 'success' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('dataManage.tradeDay')" width="100">

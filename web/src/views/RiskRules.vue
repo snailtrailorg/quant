@@ -1,17 +1,17 @@
 <template>
   <el-card>
     <template #header>{{ t('riskRule.title') }}</template>
-    <el-table :data="rules" stripe size="small">
+    <el-table :data="rules" stripe>
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="type" :label="t('common.type')" width="160" />
       <el-table-column prop="params" :label="t('riskRule.params')" />
       <el-table-column :label="t('common.enable')" width="80">
-        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
+        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="180">
         <template #default="{ row }">
-          <el-button size="small" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -29,8 +29,8 @@
       </el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button size="small" type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button size="small" @click="resetForm">{{ t('common.reset') }}</el-button>
+        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button type="primary" @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
   </el-card>

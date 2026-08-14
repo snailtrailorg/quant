@@ -3,8 +3,8 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('backtest.detailTitle', { id: $route.params.id }) }}</span>
-        <el-button size="small" @click="$router.back()">{{ t('common.return') }}</el-button>
-        <el-button type="success" size="small" @click="markVerified" :disabled="!run.strategy_config_id">{{ t('backtest.markVerified') }}</el-button>
+        <el-button type="primary" @click="$router.back()">{{ t('common.return') }}</el-button>
+        <el-button type="success" @click="markVerified" :disabled="!run.strategy_config_id">{{ t('backtest.markVerified') }}</el-button>
       </div>
     </template>
 
@@ -19,7 +19,7 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('backtest.symbolResults') }}</span>
-          <el-button size="small" @click="loadSummary" :loading="summaryLoading">{{ t('backtest.groupSummary') }}</el-button>
+          <el-button type="primary" @click="loadSummary" :loading="summaryLoading">{{ t('backtest.groupSummary') }}</el-button>
         </div>
       </template>
       <el-alert v-if="summary" type="info" :closable="false" style="margin-bottom: 12px">
@@ -40,7 +40,7 @@
         </el-table-column>
         <el-table-column :label="t('common.action')" width="120">
           <template #default="{ row }">
-            <el-button size="small" @click.stop="goView(row)">{{ t('backtest.viewBtn') }}</el-button>
+            <el-button type="primary" @click.stop="goView(row)">{{ t('backtest.viewBtn') }}</el-button>
           </template>
         </el-table-column>
       </el-table>

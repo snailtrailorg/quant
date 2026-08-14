@@ -49,7 +49,9 @@ export const createUser = (username, password, role) =>
 
 export const getAccounts = () => api.get('/account')
 export const getLogs = () => api.get('/log')
-export const getAlerts = () => api.get('/alert')
+export const getEmailOutbox = () => api.get('/email-outbox')
+export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
+export const ackAllNotifications = () => api.post('/notifications/ack-all')
 export const chat = message => api.post('/chat', { message })
 
 export const getLLMModels = () => api.get('/llm-models')

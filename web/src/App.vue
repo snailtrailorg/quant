@@ -1,6 +1,8 @@
 <template>
-  <router-view />
-  <Footer />
+  <el-config-provider size="default">
+    <router-view />
+    <Footer />
+  </el-config-provider>
 </template>
 
 <script setup>

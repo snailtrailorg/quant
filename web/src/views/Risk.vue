@@ -11,8 +11,8 @@
         <el-descriptions-item :label="t('risk.leverageMax')">{{ state.rules?.crypto?.leverage_max || 5 }}x</el-descriptions-item>
       </el-descriptions>
       <div style="margin-top: 20px; display: flex; gap: 12px">
-        <el-button size="small" type="danger" @click="onHalt" :disabled="state.halted">{{ t('risk.halt') }}</el-button>
-        <el-button size="small" type="success" @click="onResume" :disabled="!state.halted">{{ t('risk.resume') }}</el-button>
+        <el-button type="danger" @click="onHalt" :disabled="state.halted">{{ t('risk.halt') }}</el-button>
+        <el-button type="success" @click="onResume" :disabled="!state.halted">{{ t('risk.resume') }}</el-button>
       </div>
     </el-card>
 

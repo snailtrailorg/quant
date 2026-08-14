@@ -3,24 +3,24 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('factors.title') }}</span>
-        <el-button type="primary" size="small" @click="openCreate">{{ t('factors.create') }}</el-button>
+        <el-button type="primary" @click="openCreate">{{ t('factors.create') }}</el-button>
       </div>
     </template>
     <el-table :data="factors" stripe>
       <el-table-column prop="name" :label="t('common.name')" width="150" />
       <el-table-column :label="t('factors.category')" width="100">
-        <template #default="{ row }"><el-tag size="small">{{ row.category }}</el-tag></template>
+        <template #default="{ row }"><el-tag>{{ row.category }}</el-tag></template>
       </el-table-column>
       <el-table-column :label="t('common.type')" width="80">
         <template #default="{ row }">
-          <el-tag v-if="row.is_custom" type="warning" size="small">{{ t('factors.custom') }}</el-tag>
-          <el-tag v-else type="info" size="small">{{ t('factors.preset') }}</el-tag>
+          <el-tag v-if="row.is_custom" type="warning">{{ t('factors.custom') }}</el-tag>
+          <el-tag v-else type="info">{{ t('factors.preset') }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column :label="t('factors.staticFactor') + '/' + t('factors.dynamicFactor')" width="100">
         <template #default="{ row }">
-          <el-tag v-if="row.needs_history === 0" type="success" size="small">{{ t('factors.staticFactor') }}</el-tag>
-          <el-tag v-else type="danger" size="small">{{ t('factors.dynamicFactor') }}({{ row.needs_history }})</el-tag>
+          <el-tag v-if="row.needs_history === 0" type="success">{{ t('factors.staticFactor') }}</el-tag>
+          <el-tag v-else type="danger">{{ t('factors.dynamicFactor') }}({{ row.needs_history }})</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="description" :label="t('common.description')" />
@@ -29,8 +29,8 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="150" v-if="hasCustom">
         <template #default="{ row }">
-          <el-button v-if="row.is_custom" size="small" @click="openEdit(row)">{{ t('factors.edit') }}</el-button>
-          <el-button v-if="row.is_custom" size="small" type="danger" @click="onDelete(row.name)">{{ t('factors.delete') }}</el-button>
+          <el-button type="primary" v-if="row.is_custom" @click="openEdit(row)">{{ t('factors.edit') }}</el-button>
+          <el-button v-if="row.is_custom" type="danger" @click="onDelete(row.name)">{{ t('factors.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -69,7 +69,7 @@
             </div>
             <PythonEditor v-model="form.code" :height="300" />
             <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
-              <el-button size="small" @click="validateCode" :loading="validating">{{ t('factors.validate') }}</el-button>
+              <el-button type="primary" @click="validateCode" :loading="validating">{{ t('factors.validate') }}</el-button>
               <span v-if="codeValid === true" style="color: var(--el-color-success)">✅ {{ t('factors.codeValid') }}</span>
               <span v-else-if="codeValid === false" style="color: var(--el-color-danger)">❌ {{ codeError }}</span>
             </div>
@@ -77,8 +77,8 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button size="small" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button size="small" type="primary" @click="save" :loading="saving">{{ t('factors.save') }}</el-button>
+        <el-button type="primary" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="save" :loading="saving">{{ t('factors.save') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

@@ -100,8 +100,8 @@ def daily_report(self):
     except Exception:
         pass
 
-    from src.alert_notify import AlertNotify
-    AlertNotify.get().report("盘后报告", body)
+    from src.alert_notify import report
+    report("盘后报告", body)
     return {"status": "ok", "body": body[:200]}
 
 
@@ -176,8 +176,8 @@ def health_check():
     # 异常告警
     errors = [k for k,v in results.items() if v["status"] == "error"]
     if errors:
-        from src.alert_notify import AlertNotify
-        AlertNotify.get().notify("critical", "接口健康异常", f"离线: {errors}", channel=None)
+        from src.alert_notify import notify
+        notify("critical", "system", "接口健康异常", f"离线: {errors}")
 
     return {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "results": results}
 
@@ -225,8 +225,8 @@ def drift_check():
         issues.append(f"drift_check 异常: {str(e)[:80]}")
 
     if issues:
-        from src.alert_notify import AlertNotify
-        AlertNotify.get().notify("critical", "因子漂移告警", f"实盘-回测因子偏差超限: {issues}")
+        from src.alert_notify import notify
+        notify("critical", "risk", "因子漂移告警", f"实盘-回测因子偏差超限: {issues}")
 
     return {"status": "ok", "running_strategies": len(running), "drift_issues": issues}
 
@@ -292,8 +292,8 @@ def reconcile_three_books():
         issues.append(f"对账异常: {str(e)[:100]}")
 
     if issues:
-        from src.alert_notify import AlertNotify
-        AlertNotify.get().notify("critical", "三账对账异常", "\n".join(issues))
+        from src.alert_notify import notify
+        notify("critical", "risk", "三账对账异常", "\n".join(issues))
 
     return {"status": "ok" if not issues else "issues", "issues": issues}
 
@@ -362,8 +362,8 @@ def data_continuity_check():
         issues.append(f"检测异常: {str(e)[:100]}")
 
     if issues:
-        from src.alert_notify import AlertNotify
-        AlertNotify.get().notify("warn", "数据断连检测", "\n".join(issues))
+        from src.alert_notify import notify
+        notify("warn", "data", "数据断连检测", "\n".join(issues))
 
     return {"status": "ok", "issues": issues, "repaired_bars": repaired, "reconnected": reconnected}
 
@@ -400,8 +400,8 @@ def disk_monitor():
         pass
 
     if issues:
-        from src.alert_notify import AlertNotify
-        AlertNotify.get().notify("critical", "磁盘告警", "\n".join(issues))
+        from src.alert_notify import notify
+        notify("critical", "system", "磁盘告警", "\n".join(issues))
 
     return {"status": "ok" if not issues else "issues", "stats": stats, "issues": issues}
 
@@ -805,7 +805,7 @@ def static_list_sync():
 def broker_health_check():
     """#37 通道用量监控：检查各 broker 连通性，异常告警。"""
     from src.strategy_framework.broker import _REGISTRY
-    from src.alert_notify import AlertNotify
+    from src.alert_notify import notify
     results = {}
     for provider, cls in _REGISTRY.items():
         try:
@@ -816,8 +816,30 @@ def broker_health_check():
             results[provider] = {"status": "error", "msg": str(e)[:100]}
     errors = [k for k,v in results.items() if v["status"] == "error"]
     if errors:
-        AlertNotify.get().notify("warn", "通道连通异常", f"离线: {errors}")
+        notify("warn", "system", "通道连通异常", f"离线: {errors}")
     return {"status": "ok" if not errors else "issues", "results": results}
 
 
 
+
+
+@app.task(name="src.scheduler.tasks.email_outbox_sweep")
+def email_outbox_sweep():
+    """发件箱扫描：重发到期待发邮件（指数退避由 next_attempt_at 控制，beat 每分钟调）。"""
+    from src.web_api.email_service import sweep
+    try:
+        return {"processed": sweep(3)}
+    except Exception as e:
+        logger.exception(f"email outbox sweep failed: {e}")
+        return {"processed": 0, "error": str(e)}
+
+
+@app.task(name="src.scheduler.tasks.notifications_cleanup")
+def notifications_cleanup():
+    """通知留存清理（每日）：已确认>7天、全部>30天删除。"""
+    from src.alert_notify import cleanup
+    try:
+        return cleanup()
+    except Exception as e:
+        logger.exception(f"notifications cleanup failed: {e}")
+        return {"error": str(e)}

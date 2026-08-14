@@ -1,7 +1,13 @@
-"""告警/通知 -- 统一走 MessageChannel（channel_config DB），分级路由+去重+配额。
+"""通知中心 —— 站内（PG notifications 表）+ 按规则外部推送（MessageChannel）。
 
-PI1 迁移（2026-08-08）：_channels .env -> channel_config DB（get_channel）。
-所有模块通过 notify(level, title, body) 推送，不直接接触渠道。
+2026-08-14 设计决策（详见 flow/decisions.md）：
+- 所有事件统一 notify(level, category, title, body) → 落 PG（持久、重启不丢、前台铃铛可见）
+- 类别×角色可见矩阵（谁能在铃铛/通知历史里看到）：
+    email → admin；risk/task → admin+trader；data → admin+analyst；system → admin
+- 外部通道（企微/Discord 等）只主动推「实盘紧急」= risk+critical；其余仅站内（订阅型推送未来扩展）
+- 去重（1min 同 title+level+category，Valkey）+ 渠道日配额保留
+- report()（盘后报告）为订阅型：站内记 info + 外部照推
+- 替代原 Valkey alert:history（易失）；旧 AlertNotify 类废弃移除
 """
 
 from __future__ import annotations
@@ -17,106 +23,106 @@ load_dotenv()
 logger = logging.getLogger("alert_notify")
 
 Level = Literal["info", "warn", "critical"]
+Category = Literal["email", "risk", "task", "data", "system"]
+
+# 类别 × 角色可见矩阵（铃铛/通知历史按当前用户角色过滤）
+CATEGORY_ROLES: dict[str, list[str]] = {
+    "email": ["admin"],                 # 邀请/开通邮件失败 → 仅 admin 看得懂
+    "risk": ["admin", "trader"],        # 熔断/漂移/对账异常
+    "task": ["admin", "trader"],        # 任务失败/卡死（影响交易执行）
+    "data": ["admin", "analyst"],       # 数据断连/同步异常
+    "system": ["admin"],                # 接口健康/磁盘/通道
+}
 
 
-class AlertNotify:
-    """告警/通知单例（PI1：渠道走 MessageChannel DB）。"""
+def visible_categories(role: str) -> list[str]:
+    """当前角色可见的通知类别。"""
+    return [c for c, roles in CATEGORY_ROLES.items() if role in roles]
 
-    _instance = None
 
-    def __init__(self):
-        self._redis = redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-            decode_responses=True,
-        )
+def should_push_external(category: str, level: str) -> bool:
+    """外部通道主动推送规则：仅实盘紧急（risk+critical）。其余站内即可（订阅型走 report）。"""
+    return category == "risk" and level == "critical"
 
-    @classmethod
-    def get(cls) -> "AlertNotify":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
 
-    def notify(self, level: Level, title: str, body: str,
-               channel: str | None = None) -> str:
-        """发送告警。channel=None 按 level 路由。返回 alert_id。"""
-        alert_id = self._dedup_key(title, level)
-        # 去重：1min 内同标题合并
-        if self._is_deduped(alert_id):
-            self._append_body(alert_id, body)
-            return alert_id
+def _redis() -> redis.Redis:
+    return redis.Redis.from_url(
+        os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
 
-        target = channel or self._route(level)
 
-        # PI1：走 MessageChannel（channel_config DB）
-        from src.alert_notify.channel import get_channel
-        ch = get_channel(target)
-        if ch:
-            if not self._quota_exceeded(target):
-                ch.send(title, body, level)
-        else:
-            logger.warning(f"无可用渠道({level}/{target}): {title}（在 Web 消息通道页配 channel_config）")
+def notify(level: Level, category: Category, title: str, body: str = "",
+           source_ref: str | None = None) -> int | None:
+    """通知统一入口：落 PG（站内铃铛可见）+ 按规则外部推送。返回通知 id；去重命中返回 None。"""
+    r = _redis()
+    key = f"notify:dedup:{hashlib.md5(f'{title}:{level}:{category}'.encode()).hexdigest()[:12]}"
+    if r.exists(key):
+        return None  # 1min 内同标题去重
+    r.setex(key, 60, "1")
 
-        self._record(alert_id, level, title, body, target)
-        return alert_id
+    # 1. 站内：落 PG
+    notif_id = None
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO notifications (level, category, title, body, source_ref) "
+                "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+                (level, category, title, body[:2000], source_ref))
+            conn.commit()
+            notif_id = cur.fetchone()[0]
+    except Exception as e:
+        logger.error("notification insert failed: %s", e)
 
-    def report(self, title: str, body: str, channel: str = "wechat_work") -> None:
-        """盘后报告分发（info 级，完整内容）。"""
-        self.notify("info", title, body, channel)
+    # 2. 外部：仅实盘紧急
+    if should_push_external(category, level):
+        _push_channel(level, title, body)
+    return notif_id
 
-    # ── 路由 ──
 
-    def _route(self, level: Level) -> str:
-        """按级别路由渠道（P3-4 分级：critical 走 discord+wechat，warn/info 走 wechat）。"""
-        if level == "critical":
-            return "discord"
-        return "wechat_work"
+def report(title: str, body: str, channel: str = "wechat_work") -> None:
+    """订阅型报告分发（盘后报告等）：站内记 info + 外部照推（属用户订阅，不占主动推送规则）。"""
+    notify("info", "system", title, body[:2000])
+    _push_channel("info", title, body, channel=channel)
 
-    # ── 去重 + 配额 ──
 
-    def _dedup_key(self, title: str, level: Level) -> str:
-        return hashlib.md5(f"{title}:{level}".encode()).hexdigest()[:12]
+def _push_channel(level: Level, title: str, body: str, channel: str | None = None) -> None:
+    """外部通道推送（分级路由 + 日配额）。"""
+    target = channel or ("discord" if level == "critical" else "wechat_work")
+    from src.alert_notify.channel import get_channel
+    ch = get_channel(target)
+    if not ch:
+        logger.warning("无可用渠道(%s/%s): %s（在 Web 消息通道页配 channel_config）", level, target, title)
+        return
+    if _quota_exceeded(target):
+        return
+    try:
+        ch.send(title, body, level)
+    except Exception as e:
+        logger.error("channel send failed (%s): %s", target, e)
 
-    def _is_deduped(self, key: str) -> bool:
-        """1min 内同标题去重。"""
-        k = f"alert:dedup:{key}"
-        if self._redis.exists(k):
-            return True
-        self._redis.setex(k, 60, "1")
-        return False
 
-    def _append_body(self, key: str, body: str):
-        """合并追加 body。"""
-        self._redis.append(f"alert:body:{key}", f"\n---\n{body}")
-        self._redis.expire(f"alert:body:{key}", 86400)
+def _quota_exceeded(channel: str) -> bool:
+    """日配额（#39，默认 100 条/天/渠道）。"""
+    r = _redis()
+    k = f"alert:quota:{channel}:{time.strftime('%Y%m%d')}"
+    used = int(r.get(k) or 0)
+    limit = int(os.environ.get("ALERT_DAILY_QUOTA", "100"))
+    if used >= limit:
+        logger.warning("渠道 %s 日配额超限 %s，跳过", channel, limit)
+        return True
+    r.setnx(k, 0)
+    r.incr(k)
+    r.expire(k, 86400)
+    return False
 
-    def _quota_exceeded(self, channel: str) -> bool:
-        """日配额检查（#39，默认 100 条/天/渠道，ALERT_DAILY_QUOTA 可配）。"""
-        k = f"alert:quota:{channel}:{time.strftime('%Y%m%d')}"
-        used = int(self._redis.get(k) or 0)
-        limit = int(os.environ.get("ALERT_DAILY_QUOTA", "100"))
-        if used >= limit:
-            logger.warning(f"渠道 {channel} 日配额超限 {limit}，跳过")
-            return True
-        self._redis.setnx(k, 0)
-        self._redis.incr(k)
-        self._redis.expire(k, 86400)
-        return False
 
-    def _record(self, alert_id: str, level: Level, title: str, body: str, channel: str):
-        """记录到 Valkey（实时看板）+ PG alert_history（持久化，P3-5）。"""
-        self._redis.hset(f"alert:{alert_id}", mapping={
-            "level": level, "title": title, "body": body[:500],
-            "channel": channel, "ts": str(time.time()),
-        })
-        self._redis.lpush("alert:history", alert_id)
-        self._redis.ltrim("alert:history", 0, 999)
-        # P3-5 持久化到 PG
-        try:
-            from src.data_platform.db import get_conn
-            with get_conn() as conn:
-                conn.execute("SELECT 1 FROM alert_history LIMIT 1")
-                conn.execute("INSERT INTO alert_history (level, title, body, channel) VALUES (%s,%s,%s,%s)",
-                             (level, title, body[:1000], channel))
-                conn.commit()
-        except Exception:
-            pass
+def cleanup(retention_acked_days: int = 7, retention_all_days: int = 30) -> dict:
+    """留存清理（beat 每日）：已确认>7天删除，全部>30天删除。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur1 = conn.execute("DELETE FROM notifications WHERE status='acked' AND acked_at < now() - make_interval(days=>%s)",
+                            (retention_acked_days,))
+        cur2 = conn.execute("DELETE FROM notifications WHERE created_at < now() - make_interval(days=>%s)",
+                            (retention_all_days,))
+        conn.commit()
+        return {"acked_expired": cur1.rowcount, "all_expired": cur2.rowcount}

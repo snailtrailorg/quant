@@ -10,30 +10,30 @@
           <el-input v-model="inviteEmail" :placeholder="t('account.phInviteEmail')" prefix-icon="Message" style="width: 280px" />
         </el-form-item>
         <el-form-item>
-          <el-button size="small" type="primary" @click="onInvite" :loading="inviting">{{ t('account.invite') }}</el-button>
+          <el-button type="primary" @click="onInvite" :loading="inviting">{{ t('account.invite') }}</el-button>
         </el-form-item>
       </el-form>
-      <el-table :data="users" stripe size="small" style="margin-top: 12px">
+      <el-table :data="users" stripe style="margin-top: 12px">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="username" :label="t('account.username')" width="120" />
         <el-table-column prop="role" :label="t('user.role')" width="100">
-          <template #default="{ row }"><el-tag size="small">{{ row.role }}</el-tag></template>
+          <template #default="{ row }"><el-tag>{{ row.role }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="email" :label="t('account.email')" min-width="160" show-overflow-tooltip />
         <el-table-column :label="t('account.emailVerified')" width="90">
           <template #default="{ row }">
-            <el-tag :type="row.email_verified ? 'success' : 'info'" size="small">{{ row.email_verified ? '✓' : '✗' }}</el-tag>
+            <el-tag :type="row.email_verified ? 'success' : 'info'">{{ row.email_verified ? '✓' : '✗' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('common.status')" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
+            <el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column :label="t('common.action')" width="270">
           <template #default="{ row }">
             <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
-              <el-select v-model="row.role" size="small" style="width: 96px"
+              <el-select v-model="row.role" style="width: 96px"
                 :disabled="locked(row)" :title="lockedReason(row)"
                 @change="(v) => onRoleChange(row.id, v)">
                 <el-option label="Admin" value="admin" />
@@ -41,11 +41,11 @@
                 <el-option label="Analyst" value="analyst" />
                 <el-option label="Viewer" value="viewer" />
               </el-select>
-              <el-button size="small" :type="row.enabled ? 'warning' : 'success'" @click="onToggleEnabled(row)"
+              <el-button type="primary" :type="row.enabled ? 'warning' : 'success'" @click="onToggleEnabled(row)"
                 :disabled="locked(row)" :title="lockedReason(row)">
                 {{ row.enabled ? t('common.disable') : t('common.enable') }}
               </el-button>
-              <el-button size="small" type="danger" @click="onDeleteUser(row)"
+              <el-button type="danger" @click="onDeleteUser(row)"
                 :disabled="locked(row)" :title="lockedReason(row)">
                 {{ t('common.delete') }}
               </el-button>
@@ -73,7 +73,7 @@
             :class="{ 'mismatch': pwdForm.confirm && pwdForm.confirm !== pwdForm.new_password }" />
         </el-form-item>
         <el-form-item>
-          <el-button size="small" type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
+          <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -83,13 +83,13 @@
     <!-- API 密钥管理 -->
     <div>
       <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.apiKeys') }}</h3>
-      <el-table :data="accounts" stripe size="small">
+      <el-table :data="accounts" stripe>
         <el-table-column prop="name" :label="t('common.name')" width="150" />
         <el-table-column prop="exchange" :label="t('account.exchange')" width="120" />
         <el-table-column prop="api_key_hint" :label="t('account.apiKey')" />
         <el-table-column :label="t('common.status')" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
+            <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
           </template>
         </el-table-column>
       </el-table>

@@ -7,7 +7,7 @@
           <el-table-column prop="name" :label="t('health.service')" width="120" />
           <el-table-column :label="t('common.status')" width="80">
             <template #default="{ row }">
-              <el-tag :type="row.status === 'ok' ? 'success' : 'danger'" size="small">{{ row.status }}</el-tag>
+              <el-tag :type="row.status === 'ok' ? 'success' : 'danger'">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="detail" :label="t('common.detail')" />

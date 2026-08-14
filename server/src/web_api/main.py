@@ -9,7 +9,7 @@ import os, json, logging, psycopg, redis, subprocess, uuid
 import requests
 import pandas as pd
 from typing import Literal
-from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Request
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -241,12 +241,13 @@ def _request_base(request: Request) -> str:
 
 
 @app.post("/api/auth/invite")
-async def invite_user_api(req: InviteReq, request: Request, payload: dict = Depends(require_perm("user_mgmt"))):
-    """admin 邀请：填 email 发邀请邮件（默认 Viewer）。"""
+async def invite_user_api(req: InviteReq, request: Request, background_tasks: BackgroundTasks,
+                          payload: dict = Depends(require_perm("user_mgmt"))):
+    """admin 邀请：填 email 发邀请邮件（默认 Viewer）。邮件后台发送，接口立即返回（SMTP 慢不阻塞）。"""
     token = invite_user(req.email)
     if not token:
-        raise HTTPException(400, "该邮箱已注册或邀请失败")
-    await send_invite_email(req.email, token, _request_base(request))
+        raise HTTPException(400, "该邮箱已注册（如需重发邀请，请先删除该账号或换邮箱）")
+    background_tasks.add_task(send_invite_email, req.email, token, _request_base(request))
     audit_log(payload["username"], "invite_user", req.email)
     return {"status": "invited", "email": req.email}
 
@@ -261,7 +262,7 @@ def verify_invite_token(token: str):
 
 
 @app.post("/api/auth/register")
-async def register_api(req: RegisterReq, request: Request):
+async def register_api(req: RegisterReq, request: Request, background_tasks: BackgroundTasks):
     """自助开通：凭 invite token 建用户（默认 Viewer）。"""
     try:
         validate_password(req.password)
@@ -271,11 +272,8 @@ async def register_api(req: RegisterReq, request: Request):
     if not user:
         raise HTTPException(400, "token 无效/已用/过期，或用户名已存在")
     audit_log(user["username"], "self_register")
-    # 开通成功通知邮件（带条款）；失败不影响开通结果
-    try:
-        await send_activation_email(user["email"], user["username"], _request_base(request))
-    except Exception as e:
-        print(f"[register] activation email failed (ignored): {e}", flush=True)
+    # 开通通知邮件后台发送（带条款，内容大发送慢，不阻塞注册响应）
+    background_tasks.add_task(send_activation_email, user["email"], user["username"], _request_base(request))
     return {"status": "registered", "username": user["username"], "email": user["email"]}
 
 
@@ -286,12 +284,12 @@ def terms_api():
 
 
 @app.post("/api/auth/forgot-password")
-async def forgot_password_api(req: ForgotReq, request: Request):
-    """找回密码：发重置邮件（不泄露 email 是否存在）。"""
+async def forgot_password_api(req: ForgotReq, request: Request, background_tasks: BackgroundTasks):
+    """找回密码：发重置邮件（后台发送，SMTP 慢/失败不阻塞接口；不泄露 email 是否存在）。"""
     token = forgot_password(req.email)
     if not token:
         return {"status": "sent"}  # email 不存在也返回 sent（防枚举）
-    await send_password_reset_email(req.email, token, _request_base(request))
+    background_tasks.add_task(send_password_reset_email, req.email, token, _request_base(request))
     return {"status": "sent"}
 
 
@@ -839,17 +837,70 @@ def get_logs(payload: dict = Depends(require_role("viewer", "analyst", "trader",
                       "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
 
 
-@app.get("/api/alert")
-def get_alerts(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """告警历史（从 Valkey 读取）。"""
-    r = redis.Redis(connection_pool=_redis_pool)
-    ids = r.lrange("alert:history", 0, 99)
-    alerts = []
-    for aid in ids:
-        data = r.hgetall(f"alert:{aid}")
-        if data:
-            alerts.append({"id": aid, **data})
-    return {"alerts": alerts, "total": len(alerts)}
+@app.get("/api/email-outbox")
+def email_outbox_api(payload: dict = Depends(require_perm("user_mgmt"))):
+    """发件箱状态（持久化 + 指数退避重发）：pending 重发中 / sent 已发 / failed 重试耗尽。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, to_email, subject, status, attempts, next_attempt_at, last_error, created_at, sent_at "
+            "FROM email_outbox ORDER BY id DESC LIMIT 50")
+        rows = cur.fetchall()
+    return {"items": [{
+        "id": r[0], "to": r[1], "subject": r[2], "status": r[3], "attempts": r[4],
+        "next_attempt_at": str(r[5])[:19] if r[5] else None,
+        "last_error": r[6], "created_at": str(r[7])[:19], "sent_at": str(r[8])[:19] if r[8] else None,
+    } for r in rows]}
+
+
+@app.get("/api/notifications")
+def notifications_api(status: str = "active", limit: int = 50,
+                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """通知中心（站内铃铛/通知历史共用）。按当前角色过滤可见类别（email→admin 等）。"""
+    from src.alert_notify import visible_categories
+    cats = visible_categories(payload.get("role", "viewer"))
+    if not cats:
+        return {"items": [], "count": 0}
+    cond = "" if status == "all" else "AND status=%s"
+    params = [tuple(cats)]
+    if status != "all":
+        params.append(status)
+    params.append(min(limit, 200))
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, level, category, title, body, source_ref, status, created_at, acked_at "
+            f"FROM notifications WHERE category = ANY(%s) {cond} "
+            "ORDER BY id DESC LIMIT %s", tuple(params))
+        rows = cur.fetchall()
+        cur2 = conn.execute(
+            "SELECT count(*) FROM notifications WHERE category = ANY(%s) AND status='active'",
+            (tuple(cats),))
+        active_count = cur2.fetchone()[0]
+    return {
+        "items": [{
+            "id": r[0], "level": r[1], "category": r[2], "title": r[3], "body": r[4],
+            "source_ref": r[5], "status": r[6],
+            "created_at": str(r[7])[:19] if r[7] else "",
+            "acked_at": str(r[8])[:19] if r[8] else None,
+        } for r in rows],
+        "count": active_count,
+    }
+
+
+@app.post("/api/notifications/ack-all")
+def notifications_ack_all(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """全部确认：当前角色可见类别的 active → acked。"""
+    from src.alert_notify import visible_categories
+    cats = visible_categories(payload.get("role", "viewer"))
+    if not cats:
+        return {"acked": 0}
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE notifications SET status='acked', acked_by=%s, acked_at=now() "
+            "WHERE category = ANY(%s) AND status='active'",
+            (payload.get("username", ""), tuple(cats)))
+        conn.commit()
+    audit_log(payload["username"], "notifications_ack_all", f"n={cur.rowcount}")
+    return {"acked": cur.rowcount}
 
 
 # ——— 自然语言查询 ———

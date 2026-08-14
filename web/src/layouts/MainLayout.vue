@@ -4,7 +4,7 @@
       <div style="color: #fff; padding: 20px; font-size: 18px; font-weight: bold; text-align: center">
         {{ t('app.title') }}
       </div>
-      <el-menu :default-active="route.path" router background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF" style="padding-bottom: 28px">
+      <el-menu :default-active="route.path" router background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF" style="padding-bottom: 28px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
         <!-- 首页 -->
         <el-menu-item index="/"><el-icon><DataLine /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
 
@@ -71,12 +71,35 @@
       <el-header style="background: #fff; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between">
         <div></div>
         <div style="display: flex; align-items: center; gap: 16px">
-          <el-select v-model="lang" @change="onLangChange" size="small" style="width: 100px">
+          <el-select v-model="lang" @change="onLangChange" style="width: 100px">
             <el-option label="中文" value="zh" />
             <el-option label="English" value="en" />
           </el-select>
+
+          <!-- 通知铃铛（按角色可见类别；viewer 无可见类别不显示） -->
+          <el-popover v-if="bellVisible" placement="bottom-end" :width="380" trigger="click">
+            <template #reference>
+              <el-badge :value="notifCount" :hidden="!notifCount" :max="99">
+                <el-button type="primary" circle>🔔</el-button>
+              </el-badge>
+            </template>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
+              <b>{{ t('notify.title') }}</b>
+              <el-button v-if="notifCount" size="small" type="primary" @click="onAckAll">{{ t('notify.ackAll') }}</el-button>
+            </div>
+            <div style="max-height: 320px; overflow-y: auto">
+              <div v-if="!notifs.length" style="color: #909399; font-size: 13px; text-align: center; padding: 20px 0">{{ t('notify.empty') }}</div>
+              <div v-for="n in notifs" :key="n.id" @click="goCategory(n.category)"
+                style="padding: 8px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
+                <span :class="['dot', n.level]"></span>
+                <b style="font-size: 13px">{{ n.title }}</b>
+                <div style="color: #909399; font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
+              </div>
+            </div>
+          </el-popover>
+
           <el-tag>{{ username }} ({{ role }})</el-tag>
-          <el-button size="small" @click="logout">{{ t('user.logout') }}</el-button>
+          <el-button type="primary" @click="logout">{{ t('user.logout') }}</el-button>
         </div>
       </el-header>
       <el-main style="padding-bottom: 30px">
@@ -87,10 +110,10 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getMe } from '../api'
+import { getMe, getNotifications, ackAllNotifications } from '../api'
 import api from '../api'
 import { setLang } from '../i18n'
 
@@ -104,6 +127,27 @@ const lang = ref(locale.value)
 
 getMe().then(me => { username.value = me.username; role.value = me.role }).catch(e => { console.error(e); username.value = ''; role.value = '' })
 
+// ——— 通知铃铛（60s 轮询；viewer 无可见类别不显示）———
+const notifs = ref([])
+const notifCount = ref(0)
+let notifTimer = null
+const bellVisible = computed(() => ['admin', 'trader', 'analyst'].includes(role.value))
+const loadNotifs = async () => {
+  if (!bellVisible.value) return
+  try {
+    const r = await getNotifications('active', 20)
+    notifs.value = r.items || []
+    notifCount.value = r.count || 0
+  } catch {}
+}
+const onAckAll = async () => {
+  try { await ackAllNotifications(); await loadNotifs() } catch {}
+}
+// 类别 → 页面路由（点击通知直达）
+const goCategory = c => router.push({ email: '/logs', task: '/tasks', risk: '/risk', data: '/data-integrity', system: '/logs' }[c] || '/')
+onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })
+onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
+
 const onLangChange = v => setLang(v)
 const logout = async () => {
   try { await api.post('/auth/logout') } catch {}
@@ -112,3 +156,11 @@ const logout = async () => {
   router.push('/login')
 }
 </script>
+
+<style scoped>
+/* 通知级别色点（critical 红 / warn 橙 / info 灰），与 el-tag 语义色一致 */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.dot.critical { background: #f56c6c; }
+.dot.warn { background: #e6a23c; }
+.dot.info { background: #909399; }
+</style>

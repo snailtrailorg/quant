@@ -1,20 +1,20 @@
 <template>
   <el-card>
     <template #header>{{ t('channels.manageTitle') }}</template>
-    <el-table :data="channels" stripe size="small">
+    <el-table :data="channels" stripe>
       <el-table-column prop="provider" label="Provider" width="120" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column :label="t('common.credential')" width="80">
-        <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'" size="small">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
+        <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
       <el-table-column :label="t('common.enable')" width="80">
-        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
+        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
-          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-          <el-button size="small" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
+          <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -26,8 +26,8 @@
       <el-form-item :label="t('common.credentialWebhook')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button size="small" type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button size="small" @click="resetForm">{{ t('common.reset') }}</el-button>
+        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button type="primary" @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
   </el-card>

@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('chat.title') }}</span>
-        <el-tag size="small">{{ t('chat.tag') }}</el-tag>
+        <el-tag>{{ t('chat.tag') }}</el-tag>
       </div>
     </template>
     <div class="chat-body" ref="body">
@@ -17,13 +17,13 @@
         v-model="input" :placeholder="t('chat.ph')"
         @keyup.enter="onSend" :disabled="loading" clearable>
         <template #append>
-          <el-button size="small" @click="onSend" :loading="loading" :icon="Promotion">{{ t('chat.send') }}</el-button>
+          <el-button type="primary" @click="onSend" :loading="loading" :icon="Promotion">{{ t('chat.send') }}</el-button>
         </template>
       </el-input>
       <div style="margin-top: 8px">
-        <el-button size="small" @click="quick(t('chat.qPosition'))">{{ t('chat.qPosition') }}</el-button>
-        <el-button size="small" @click="quick(t('chat.qPnl'))">{{ t('chat.qPnl') }}</el-button>
-        <el-button size="small" @click="quick(t('chat.qStatus'))">{{ t('chat.qStatus') }}</el-button>
+        <el-button type="primary" @click="quick(t('chat.qPosition'))">{{ t('chat.qPosition') }}</el-button>
+        <el-button type="primary" @click="quick(t('chat.qPnl'))">{{ t('chat.qPnl') }}</el-button>
+        <el-button type="primary" @click="quick(t('chat.qStatus'))">{{ t('chat.qStatus') }}</el-button>
       </div>
     </div>
   </el-card>
@@ -81,7 +81,7 @@ const onSend = async () => {
         setTimeout(() => { if (ws && ws.readyState === 1) {} else resolve() }, 25000)
       }).then(() => {
         if (streamingText.value) {
-          messages.value.push({ role: 'assistant', content: streamingText.value.replace(/\n/g, '<br>') })
+          messages.value.push({ role: 'assistant', content: streamingText.value })
           streamingText.value = ''
         } else {
           throw new Error('ws 空')
@@ -89,11 +89,11 @@ const onSend = async () => {
       }).catch(async () => {
         // fallback POST
         const res = await chat(text)
-        messages.value.push({ role: 'assistant', content: res.reply.replace(/\n/g, '<br>') })
+        messages.value.push({ role: 'assistant', content: res.reply })
       })
     } else {
       const res = await chat(text)
-      messages.value.push({ role: 'assistant', content: res.reply.replace(/\n/g, '<br>') })
+      messages.value.push({ role: 'assistant', content: res.reply })
     }
   } catch (e) {
     console.error(e)

@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('dataIntegrity.title', { n: summary.total || 0 }) }}</span>
-        <el-radio-group v-model="freq" size="small" @change="load">
+        <el-radio-group v-model="freq" @change="load">
           <el-radio-button value="1D">{{ t('dataIntegrity.daily') }}</el-radio-button>
           <el-radio-button value="1min">{{ t('dataIntegrity.min1') }}</el-radio-button>
           <el-radio-button value="5min">{{ t('dataIntegrity.min5') }}</el-radio-button>

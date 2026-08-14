@@ -3,14 +3,14 @@
     <template #header>{{ t('audit.title') }}</template>
     <el-form :inline="true" style="margin-bottom: 12px">
       <el-form-item :label="t('audit.actor')">
-        <el-input v-model="filterActor" :placeholder="t('audit.phActor')" size="small" clearable style="width:140px" />
+        <el-input v-model="filterActor" :placeholder="t('audit.phActor')" clearable style="width:140px" />
       </el-form-item>
       <el-form-item :label="t('common.action')">
-        <el-input v-model="filterAction" :placeholder="t('audit.phAction')" size="small" clearable style="width:160px" />
+        <el-input v-model="filterAction" :placeholder="t('audit.phAction')" clearable style="width:160px" />
       </el-form-item>
       <el-form-item>
-        <el-button type="primary" size="small" @click="load">{{ t('common.filter') }}</el-button>
-        <el-button size="small" @click="filterActor='';filterAction='';load()">{{ t('common.reset') }}</el-button>
+        <el-button type="primary" @click="load">{{ t('common.filter') }}</el-button>
+        <el-button type="primary" @click="filterActor='';filterAction='';load()">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
     <el-table :data="filteredLogs" stripe>

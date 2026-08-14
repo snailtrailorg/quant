@@ -8,9 +8,9 @@
       <el-table-column :label="t('common.configValue')" width="180">
         <template #default="{ row }">
           <el-input-number v-if="row.value_type === 'int' || row.value_type === 'float'"
-            v-model="row.editValue" :step="1" size="small" style="width: 140px" />
+            v-model="row.editValue" :step="1" style="width: 140px" />
           <el-switch v-else-if="row.value_type === 'bool'" v-model="row.editValue" />
-          <el-input v-else v-model="row.editValue" size="small" style="width: 160px" />
+          <el-input v-else v-model="row.editValue" style="width: 160px" />
         </template>
       </el-table-column>
       <el-table-column prop="value_type" :label="t('common.type')" width="80" />
@@ -20,7 +20,7 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="120">
         <template #default="{ row }">
-          <el-button size="small" type="primary" @click="save(row)" :loading="row._saving">{{ t('common.save') }}</el-button>
+          <el-button type="primary" @click="save(row)" :loading="row._saving">{{ t('common.save') }}</el-button>
         </template>
       </el-table-column>
     </el-table>

@@ -14,7 +14,6 @@
       <el-form v-else @submit.prevent="onRegister" class="register-form">
         <p class="welcome">{{ t('register.welcome', { app: t('app.title') }) }}</p>
         <div class="email-box">{{ t('register.inviteEmail') }}: <b>{{ email }}</b></div>
-        <p class="role-hint">{{ t('register.roleHint') }}</p>
 
         <el-form-item>
           <el-input v-model="form.username" :placeholder="t('login.username')" prefix-icon="User" size="large" />
@@ -43,10 +42,10 @@
     </el-card>
 
     <!-- 条款弹窗 -->
-    <el-dialog v-model="termsVisible" :title="t('register.termsTitle')" width="560px">
+    <el-dialog v-model="termsVisible" :title="t('register.termsTitle')" width="80%" top="6vh">
       <pre class="terms-body">{{ termsText }}</pre>
       <template #footer>
-        <el-button size="small" type="primary" @click="termsVisible = false">{{ t('common.ok') }}</el-button>
+        <el-button type="primary" @click="termsVisible = false">{{ t('common.ok') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -110,12 +109,11 @@ const onRegister = async () => {
 .state-msg.error { color: #f56c6c; line-height: 1.8; }
 .register-form { padding: 20px 28px 8px; }
 .welcome { text-align: center; color: #303133; font-size: 15px; margin: 4px 0 12px; }
-.email-box { background: #f5f7fa; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #606266; margin-bottom: 8px; }
-.role-hint { color: #e6a23c; font-size: 12px; line-height: 1.6; margin: 0 0 14px; }
+.email-box { background: #f5f7fa; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #606266; margin-bottom: 14px; }
 .pwd-rule { color: #909399; font-size: 12px; margin: -8px 0 10px; }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
 .terms-cb { margin-bottom: 4px; }
 .back-login { text-align: center; margin: 8px 0 18px; }
 .link { color: #409eff; font-size: 13px; text-decoration: none; }
-.terms-body { white-space: pre-wrap; font-family: inherit; font-size: 13px; color: #606266; line-height: 1.7; margin: 0; }
+.terms-body { white-space: pre-wrap; font-family: inherit; font-size: 16px; color: #606266; line-height: 1.7; margin: 0; }
 </style>

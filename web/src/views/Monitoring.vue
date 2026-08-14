@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('monitoring.title') }}</span>
-        <el-button @click="load" size="small">{{ t('common.refresh') }}</el-button>
+        <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
       </div>
     </template>
     <el-row :gutter="16" v-loading="loading">
@@ -12,13 +12,13 @@
           <template #header>
             <div style="display: flex; justify-content: space-between; align-items: center">
               <span>{{ s.name }}</span>
-              <el-tag :type="s.enabled ? 'success' : 'info'" size="small">
+              <el-tag :type="s.enabled ? 'success' : 'info'">
                 {{ s.enabled ? t('strategy.statusRunning') : t('strategy.statusStopped') }}
               </el-tag>
             </div>
           </template>
           <div style="margin-bottom: 12px">
-            <el-descriptions :column="2" size="small" border>
+            <el-descriptions :column="2" border>
               <el-descriptions-item :label="t('common.symbol')">{{ s.symbol }}</el-descriptions-item>
               <el-descriptions-item :label="t('common.type')">{{ s.type }}</el-descriptions-item>
               <el-descriptions-item :label="t('monitoring.backtestVerified')">{{ s.backtest_verified ? '✓' : '✗' }}</el-descriptions-item>

@@ -2,8 +2,8 @@
   <el-card>
     <template #header>{{ t('llm.configTitle') }}</template>
     <el-card shadow="never" style="margin-bottom: 12px">
-      <template #header>{{ t('llm.usageTitle') }}<el-button @click="loadUsage" size="small" style="margin-left: 8px">{{ t('common.refresh') }}</el-button></template>
-      <el-table :data="usage.month" stripe size="small">
+      <template #header>{{ t('llm.usageTitle') }}<el-button type="primary" @click="loadUsage" style="margin-left: 8px">{{ t('common.refresh') }}</el-button></template>
+      <el-table :data="usage.month" stripe>
         <el-table-column prop="provider" label="Provider" width="120" />
         <el-table-column prop="model" :label="t('llm.model')" />
         <el-table-column prop="calls" :label="t('llm.calls')" width="80" />
@@ -12,30 +12,30 @@
         </el-table-column>
         <el-table-column prop="avg_latency_ms" :label="t('llm.latencyMs')" width="80" />
         <el-table-column :label="t('llm.successRateCol')" width="80">
-          <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'" size="small">{{ row.success_rate }}%</el-tag></template>
+          <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'">{{ row.success_rate }}%</el-tag></template>
         </el-table-column>
       </el-table>
       <div style="font-size: 12px; color: #999; margin-top: 8px">
         {{ t('llm.trend7d') }}<span v-for="tr in usage.trend" :key="tr.date" style="margin-right: 10px">{{ tr.date.slice(5) }} {{tr.calls}}/{{tr.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">{{ t('llm.noTrend') }}</span>
       </div>
     </el-card>
-    <el-table :data="models" stripe size="small">
+    <el-table :data="models" stripe>
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="provider" label="Provider" width="120" />
       <el-table-column prop="model" :label="t('llm.model')" />
       <el-table-column :label="t('llm.key')" width="80">
-        <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'" size="small">{{ row.has_key ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
+        <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'">{{ row.has_key ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
       <el-table-column prop="priority" :label="t('llm.priority')" width="80" />
       <el-table-column :label="t('common.enable')" width="80">
-        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
+        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
-          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-          <el-button size="small" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
+          <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -53,8 +53,8 @@
       <el-form-item :label="t('llm.priority')"><el-input-number v-model="form.priority" :min="1" :max="100" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button size="small" type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button size="small" @click="resetForm">{{ t('common.reset') }}</el-button>
+        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button type="primary" @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
   </el-card>
@@ -64,14 +64,14 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('llm.budgetTitle') }}</span>
-        <el-button size="small" @click="checkBudget" :loading="checking">{{ t('llm.check') }}</el-button>
+        <el-button type="primary" @click="checkBudget" :loading="checking">{{ t('llm.check') }}</el-button>
       </div>
     </template>
-    <el-table :data="budgets" stripe size="small">
+    <el-table :data="budgets" stripe>
       <el-table-column prop="provider" label="Provider" width="120"><template #default="{ row }">{{ row.provider || t('llm.global') }}</template></el-table-column>
       <el-table-column prop="daily_token_limit" :label="t('llm.dailyTokenLimit')" width="120" />
       <el-table-column prop="alert_threshold_pct" :label="t('llm.alertThreshold')" width="100" />
-      <el-table-column prop="enabled" :label="t('common.enable')" width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
+      <el-table-column prop="enabled" :label="t('common.enable')" width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
       <el-table-column prop="updated_at" :label="t('common.updatedAt')"><template #default="{ row }">{{ row.updated_at?.slice(0,19) || '-' }}</template></el-table-column>
     </el-table>
     <el-alert v-if="budgetCheck" :type="budgetCheck.alerts?.length ? 'warning' : 'success'" :closable="false" style="margin-top: 12px">

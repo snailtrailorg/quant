@@ -14,18 +14,18 @@ from email.mime.multipart import MIMEMultipart
 _logger = logging.getLogger("quant")
 
 
-def _send_email_sync(to: str, subject: str, html_body: str) -> bool:
-    """底层同步发送邮件。"""
+def _send_email_sync(to: str, subject: str, html_body: str) -> str | None:
+    """底层同步发送邮件。成功返回 None，失败返回错误描述（供发件箱记录 last_error）。"""
     if not os.environ.get("SMTP_USERNAME"):
         print(f"[DEV] 邮件未配置 -> {to}\n[DEV] 主题={subject}\n[DEV] 内容={html_body}")
-        return True
+        return None
 
     smtp_from = os.environ.get("SMTP_FROM")
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_port = os.environ.get("SMTP_PORT", "587")
     if not smtp_from or not smtp_host:
         _logger.warning("SMTP_FROM 或 SMTP_HOST 未配置，跳过邮件发送")
-        return False
+        return "SMTP_FROM 或 SMTP_HOST 未配置"
 
     msg = MIMEMultipart()
     msg["From"] = smtp_from
@@ -34,20 +34,100 @@ def _send_email_sync(to: str, subject: str, html_body: str) -> bool:
     msg.attach(MIMEText(html_body, "html"))
 
     try:
-        with smtplib.SMTP(smtp_host, int(smtp_port)) as server:
+        with smtplib.SMTP(smtp_host, int(smtp_port), timeout=60) as server:
             server.starttls()
             server.login(os.environ["SMTP_USERNAME"], os.environ["SMTP_PASSWORD"])
             server.sendmail(smtp_from, to, msg.as_string())
-        return True
+        _logger.info("email sent: to=%s subject=%s", to, subject)
+        return None
     except (smtplib.SMTPException, OSError) as e:
-        _logger.exception(f"Email send failed: {e}")
-        return False
+        _logger.error("email send failed: to=%s subject=%s err=%s", to, subject, e)
+        return str(e) or type(e).__name__
 
 
-async def send_email(to: str, subject: str, html_body: str) -> bool:
-    """异步发送邮件（run_in_executor 不阻塞 FastAPI）。"""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _send_email_sync, to, subject, html_body)
+# ——— 发件箱（持久化 + 指数退避重发；进程重启不丢，Celery beat 每分钟扫描）———
+
+MAX_ATTEMPTS = 6  # 失败 6 次后标 failed（退避 1→2→4→8→16→30 分钟，约 1 小时）
+
+
+def _backoff_seconds(failed_count: int) -> int:
+    """第 failed_count 次失败后的下次等待：60*2^(n-1)，封顶 30 分钟。"""
+    return min(60 * (2 ** (failed_count - 1)), 1800)
+
+
+def _final_failure_notify(to: str, subject: str, err: str, outbox_id: int) -> None:
+    """重试耗尽 → 通知中心（critical/email，admin 铃铛可见，点击直达发件箱）。失败不影响主流程。"""
+    try:
+        from src.alert_notify import notify
+        notify("critical", "email", "邮件发送最终失败",
+               f"收件人: {to}\n主题: {subject}\n重试 {MAX_ATTEMPTS} 次耗尽\n错误: {err}",
+               source_ref=str(outbox_id))
+    except Exception as e:
+        _logger.error("final failure notify error: %s", e)
+
+
+def queue_email(to: str, subject: str, html_body: str) -> int:
+    """入队（落 PG）。返回 outbox id；发送由 try_row 立即试发或 beat 扫描重发。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO email_outbox (to_email, subject, html_body) VALUES (%s,%s,%s) RETURNING id",
+            (to, subject, html_body))
+        conn.commit()
+        return cur.fetchone()[0]
+
+
+def _try_row_sync(outbox_id: int) -> None:
+    """认领（pending→sending）并单次发送；成功标 sent，失败按指数退避排下次，超上限标 failed。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE email_outbox SET status='sending' "
+            "WHERE id=%s AND status='pending' AND next_attempt_at<=now() "
+            "RETURNING id, to_email, subject, html_body, attempts", (outbox_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.rollback()
+            return
+        conn.commit()
+    _, to, subject, body, attempts = row
+    err = _send_email_sync(to, subject, body)
+    with get_conn() as conn:
+        if err is None:
+            conn.execute(
+                "UPDATE email_outbox SET status='sent', sent_at=now(), last_error=NULL WHERE id=%s", (outbox_id,))
+        else:
+            n = attempts + 1
+            if n >= MAX_ATTEMPTS:
+                conn.execute(
+                    "UPDATE email_outbox SET status='failed', attempts=%s, last_error=%s WHERE id=%s",
+                    (n, err, outbox_id))
+                _final_failure_notify(to, subject, err, outbox_id)
+            else:
+                conn.execute(
+                    "UPDATE email_outbox SET status='pending', attempts=%s, next_attempt_at=now()+make_interval(secs=>%s), last_error=%s WHERE id=%s",
+                    (n, _backoff_seconds(n), err, outbox_id))
+        conn.commit()
+
+
+async def try_row(outbox_id: int) -> None:
+    """立即试发一次（接口后台任务调用；失败留给 beat 重发）。"""
+    await asyncio.get_running_loop().run_in_executor(None, _try_row_sync, outbox_id)
+
+
+def sweep(limit: int = 3) -> int:
+    """扫描到期待发邮件并逐封发送（Celery beat 每分钟调；limit 限制单轮防超 Celery 5min 时限）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id FROM email_outbox WHERE status='pending' AND next_attempt_at<=now() ORDER BY id LIMIT %s",
+            (limit,))
+        ids = [r[0] for r in cur.fetchall()]
+    for i in ids:
+        _try_row_sync(i)
+    if ids:
+        _logger.info("email outbox swept: %d row(s)", len(ids))
+    return len(ids)
 
 
 def _resolve_base_url(request_base: str = "") -> str:
@@ -91,12 +171,13 @@ async def send_invite_email(email: str, token: str, request_base: str = "") -> b
                点击开通账号</a>
         </p>
         <p style="color: #666; font-size: 14px;">链接 3 天内有效。开通后默认 Viewer 角色，管理员可提升权限。</p>
-        <p style="color: #999; font-size: 12px;">如果不是您本人操作，请忽略此邮件。</p>
     </body></html>
     """
     # 邀请邮件审计日志（who/ base_url/ 链接），便于排查"链接不对"
     _logger.info("send invite email: to=%s base_url=%s register_url=%s", email, base_url, register_url)
-    return await send_email(email, subject, body)
+    outbox_id = queue_email(email, subject, body)
+    await try_row(outbox_id)  # 立即试发一次；失败由发件箱指数退避重发
+    return True
 
 
 async def send_password_reset_email(email: str, token: str, request_base: str = "") -> bool:
@@ -117,7 +198,9 @@ async def send_password_reset_email(email: str, token: str, request_base: str = 
         <p style="color: #999; font-size: 12px;">如果不是您本人操作，请忽略此邮件。</p>
     </body></html>
     """
-    return await send_email(email, subject, body)
+    outbox_id = queue_email(email, subject, body)
+    await try_row(outbox_id)  # 立即试发一次；失败由发件箱指数退避重发
+    return True
 
 
 async def send_activation_email(email: str, username: str, request_base: str = "") -> bool:
@@ -140,8 +223,10 @@ async def send_activation_email(email: str, username: str, request_base: str = "
         </p>
         <hr/>
         <p style="color: #666; font-size: 14px;">以下是《平台使用条款》，开通即视为您已阅读并同意：</p>
-        <div style="font-size: 12px; color: #606266; line-height: 1.7; white-space: pre-wrap;">{terms_html}</div>
+        <div style="font-size: 14px; color: #606266; line-height: 1.7; white-space: pre-wrap;">{terms_html}</div>
     </body></html>
     """
     _logger.info("send activation email: to=%s username=%s base_url=%s", email, username, base_url)
-    return await send_email(email, subject, body)
+    outbox_id = queue_email(email, subject, body)
+    await try_row(outbox_id)  # 立即试发一次；失败由发件箱指数退避重发
+    return True
