@@ -1,60 +1,60 @@
 <template>
   <el-card>
-    <template #header>LLM 模型配置（DB 化，多模型不限种类）</template>
+    <template #header>{{ t('llm.configTitle') }}</template>
     <el-card shadow="never" style="margin-bottom: 12px">
-      <template #header>📊 用量监控（本月）<el-button @click="loadUsage" size="small" link>刷新</el-button></template>
+      <template #header>{{ t('llm.usageTitle') }}<el-button @click="loadUsage" size="small" link>{{ t('common.refresh') }}</el-button></template>
       <el-table :data="usage.month" stripe size="small">
         <el-table-column prop="provider" label="Provider" width="120" />
-        <el-table-column prop="model" label="型号" />
-        <el-table-column prop="calls" label="调用" width="80" />
-        <el-table-column label="Token(入/出)" width="160">
+        <el-table-column prop="model" :label="t('llm.model')" />
+        <el-table-column prop="calls" :label="t('llm.calls')" width="80" />
+        <el-table-column :label="t('llm.tokenCol')" width="160">
           <template #default="{ row }">{{ row.input_tokens.toLocaleString() }} / {{ row.output_tokens.toLocaleString() }}</template>
         </el-table-column>
-        <el-table-column prop="avg_latency_ms" label="延迟ms" width="80" />
-        <el-table-column label="成功率" width="80">
+        <el-table-column prop="avg_latency_ms" :label="t('llm.latencyMs')" width="80" />
+        <el-table-column :label="t('llm.successRateCol')" width="80">
           <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'" size="small">{{ row.success_rate }}%</el-tag></template>
         </el-table-column>
       </el-table>
       <div style="font-size: 12px; color: #999; margin-top: 8px">
-        近7天：<span v-for="t in usage.trend" :key="t.date" style="margin-right: 10px">{{ t.date.slice(5) }} {{t.calls}}次/{{t.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">（暂无）</span>
+        {{ t('llm.trend7d') }}<span v-for="tr in usage.trend" :key="tr.date" style="margin-right: 10px">{{ tr.date.slice(5) }} {{tr.calls}}/{{tr.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">{{ t('llm.noTrend') }}</span>
       </div>
     </el-card>
     <el-table :data="models" stripe size="small">
       <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" label="名称" />
+      <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="provider" label="Provider" width="120" />
-      <el-table-column prop="model" label="型号" />
-      <el-table-column label="Key" width="80">
-        <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'" size="small">{{ row.has_key ? '已配' : '未配' }}</el-tag></template>
+      <el-table-column prop="model" :label="t('llm.model')" />
+      <el-table-column :label="t('llm.key')" width="80">
+        <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'" size="small">{{ row.has_key ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="priority" label="优先级" width="80" />
-      <el-table-column label="启用" width="80">
+      <el-table-column prop="priority" :label="t('llm.priority')" width="80" />
+      <el-table-column :label="t('common.enable')" width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="220">
+      <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
-          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">测试</el-button>
-          <el-button size="small" type="primary" @click="onEdit(row)">编辑</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row.id)">删除</el-button>
+          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
+          <el-button size="small" type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <el-divider />
-    <h3 style="font-size: 16px; margin-bottom: 12px">{{ form.id ? '编辑模型' : '添加模型' }}</h3>
+    <h3 style="font-size: 16px; margin-bottom: 12px">{{ form.id ? t('llm.editModel') : t('llm.addModel') }}</h3>
     <el-form :model="form" label-width="100px" inline>
-      <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
-      <el-form-item label="Provider"><el-input v-model="form.provider" placeholder="deepseek/glm/..." /></el-form-item>
-      <el-form-item label="型号"><el-input v-model="form.model" /></el-form-item>
-      <el-form-item label="API Key"><el-input v-model="form.api_key" type="password" show-password placeholder="编辑时留空不改" /></el-form-item>
-      <el-form-item label="Base URL"><el-input v-model="form.base_url" /></el-form-item>
-      <el-form-item label="最大输入tokens"><el-input-number v-model="form.max_input_tokens" :min="0" controls-position="right" placeholder="留空=不限" /></el-form-item>
-      <el-form-item label="最大输出tokens"><el-input-number v-model="form.max_output_tokens" :min="0" controls-position="right" placeholder="留空=默认" /></el-form-item>
-      <el-form-item label="优先级"><el-input-number v-model="form.priority" :min="1" :max="100" /></el-form-item>
-      <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
+      <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
+      <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('llm.phProvider')" /></el-form-item>
+      <el-form-item :label="t('llm.model')"><el-input v-model="form.model" /></el-form-item>
+      <el-form-item :label="t('llm.apiKey')"><el-input v-model="form.api_key" type="password" show-password :placeholder="t('common.phEditNoChange')" /></el-form-item>
+      <el-form-item :label="t('llm.baseUrl')"><el-input v-model="form.base_url" /></el-form-item>
+      <el-form-item :label="t('llm.maxInputTokens')"><el-input-number v-model="form.max_input_tokens" :min="0" controls-position="right" :placeholder="t('llm.phInputTokens')" /></el-form-item>
+      <el-form-item :label="t('llm.maxOutputTokens')"><el-input-number v-model="form.max_output_tokens" :min="0" controls-position="right" :placeholder="t('llm.phOutputTokens')" /></el-form-item>
+      <el-form-item :label="t('llm.priority')"><el-input-number v-model="form.priority" :min="1" :max="100" /></el-form-item>
+      <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? '更新' : '添加' }}</el-button>
-        <el-button @click="resetForm">重置</el-button>
+        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
   </el-card>
@@ -63,29 +63,31 @@
   <el-card style="margin-top: 20px" v-loading="budgetLoading">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>AI 预算预警</span>
-        <el-button size="small" @click="checkBudget" :loading="checking">检查告警</el-button>
+        <span>{{ t('llm.budgetTitle') }}</span>
+        <el-button size="small" @click="checkBudget" :loading="checking">{{ t('llm.check') }}</el-button>
       </div>
     </template>
     <el-table :data="budgets" stripe size="small">
-      <el-table-column prop="provider" label="Provider" width="120"><template #default="{ row }">{{ row.provider || '全局' }}</template></el-table-column>
-      <el-table-column prop="daily_token_limit" label="日Token上限" width="120" />
-      <el-table-column prop="alert_threshold_pct" label="预警阈值%" width="100" />
-      <el-table-column prop="enabled" label="启用" width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
-      <el-table-column prop="updated_at" label="更新时间"><template #default="{ row }">{{ row.updated_at?.slice(0,19) || '-' }}</template></el-table-column>
+      <el-table-column prop="provider" label="Provider" width="120"><template #default="{ row }">{{ row.provider || t('llm.global') }}</template></el-table-column>
+      <el-table-column prop="daily_token_limit" :label="t('llm.dailyTokenLimit')" width="120" />
+      <el-table-column prop="alert_threshold_pct" :label="t('llm.alertThreshold')" width="100" />
+      <el-table-column prop="enabled" :label="t('common.enable')" width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')"><template #default="{ row }">{{ row.updated_at?.slice(0,19) || '-' }}</template></el-table-column>
     </el-table>
     <el-alert v-if="budgetCheck" :type="budgetCheck.alerts?.length ? 'warning' : 'success'" :closable="false" style="margin-top: 12px">
-      {{ budgetCheck.alerts?.length ? `${budgetCheck.alerts.length} 项超阈值` : '无超阈值（检查了 ' + budgetCheck.checked + ' 项）' }}
+      {{ budgetCheck.alerts?.length ? t('llm.alertsOver', { n: budgetCheck.alerts.length }) : t('llm.alertsOk', { n: budgetCheck.checked }) }}
     </el-alert>
   </el-card>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 
+const { t } = useI18n()
 const models = ref([])
 const usage = ref({ today: [], month: [], trend: [] })
 const budgets = ref([])
@@ -94,7 +96,7 @@ const budgetCheck = ref(null)
 const checking = ref(false)
 
 const loadBudget = async () => { budgetLoading.value = true; try { budgets.value = await api.get('/llm-budget') } catch {} finally { budgetLoading.value = false } }
-const checkBudget = async () => { checking.value = true; try { budgetCheck.value = await api.post('/llm-budget/check') } catch { ElMessage.error('检查失败') } finally { checking.value = false } }
+const checkBudget = async () => { checking.value = true; try { budgetCheck.value = await api.post('/llm-budget/check') } catch { ElMessage.error(t('llm.checkFailed')) } finally { checking.value = false } }
 const form = ref(emptyForm())
 const saving = ref(false)
 const testing = ref(0)
@@ -115,17 +117,17 @@ const onSave = async () => {
   try {
     if (form.value.id) await updateLLMModel(form.value.id, form.value)
     else await createLLMModel(form.value)
-    ElMessage.success('保存成功')
+    ElMessage.success(t('common.saveSuccess'))
     resetForm()
     load()
-  } catch (e) { ElMessage.error(e.detail || '保存失败') }
+  } catch (e) { ElMessage.error(e.detail || t('common.saveFailed')) }
   finally { saving.value = false }
 }
 
 const onDelete = async (id) => {
-  await ElMessageBox.confirm('确认删除此模型？', '提示', { type: 'warning' })
+  await ElMessageBox.confirm(t('riskRule.confirmDelete'), t('common.tip'), { type: 'warning' })
   await deleteLLMModel(id)
-  ElMessage.success('已删除')
+  ElMessage.success(t('common.deleteSuccess'))
   load()
 }
 
@@ -133,9 +135,9 @@ const onTest = async (id) => {
   testing.value = id
   try {
     const r = await testLLMModel(id)
-    if (r.ok) ElMessage.success('连接成功：' + (r.reply || ''))
-    else ElMessage.error('失败：' + r.error)
-  } catch (e) { ElMessage.error('测试失败') }
+    if (r.ok) ElMessage.success(t('llm.connectOkReply', { reply: r.reply || '' }))
+    else ElMessage.error(t('common.failedPrefix') + r.error)
+  } catch (e) { ElMessage.error(t('common.testFailed')) }
   finally { testing.value = 0 }
 }
 </script>

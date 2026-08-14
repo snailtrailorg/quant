@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('strategy.title') }}</span>
-        <el-button type="primary" size="small" @click="openCreate">新建策略</el-button>
+        <el-button type="primary" size="small" @click="openCreate">{{ t('strategy.create') }}</el-button>
       </div>
     </template>
     <el-table :data="strategies" stripe>
@@ -11,12 +11,12 @@
       <el-table-column prop="type" :label="t('strategy.type')" />
       <el-table-column :label="t('strategy.status')">
         <template #default="{ row }">
-          <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '运行中' : '已停' }}</el-tag>
+          <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? t('strategy.statusRunning') : t('strategy.statusStopped') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="280">
+      <el-table-column :label="t('common.action')" width="280">
         <template #default="{ row }">
-          <el-button size="small" @click="openEdit(row)">编辑</el-button>
+          <el-button size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
           <el-button size="small" type="success" @click="onStart(row.id)" v-if="!row.enabled">{{ t('strategy.start') }}</el-button>
           <el-button size="small" type="danger" @click="onStop(row.id)" v-if="row.enabled">{{ t('strategy.stop') }}</el-button>
         </template>
@@ -24,21 +24,21 @@
     </el-table>
 
     <!-- 编辑弹窗 -->
-    <el-dialog v-model="editVisible" title="编辑策略" width="720px" :close-on-click-modal="false">
+    <el-dialog v-model="editVisible" :title="t('strategy.editTitle')" width="720px" :close-on-click-modal="false">
       <el-form :model="editForm" label-width="100px" v-loading="saving">
-        <el-form-item label="名称">
+        <el-form-item :label="t('common.name')">
           <el-input v-model="editForm.name" />
         </el-form-item>
-        <el-form-item label="启用">
+        <el-form-item :label="t('strategy.enable')">
           <el-switch v-model="editForm.enabled" />
         </el-form-item>
         <div style="color: #999; font-size: 12px; margin: -10px 0 10px 100px">
-          策略不绑标的，标的由实盘任务/回测任务指定
+          {{ t('strategy.hintNoSymbol') }}
         </div>
 
         <!-- 模式切换 -->
         <el-divider content-position="left">{{ t('strategy.mode') }}</el-divider>
-        <el-form-item label="执行模式">
+        <el-form-item :label="t('strategy.mode')">
           <el-radio-group v-model="editForm.mode">
             <el-radio-button value="dsl">{{ t('strategy.dslMode') }}</el-radio-button>
             <el-radio-button value="python">{{ t('strategy.pythonMode') }}</el-radio-button>
@@ -47,26 +47,26 @@
 
         <!-- DSL 模式 -->
         <template v-if="editForm.mode === 'dsl'">
-          <el-divider content-position="left">因子配置</el-divider>
+          <el-divider content-position="left">{{ t('strategy.factorConfig') }}</el-divider>
           <div v-for="(f, i) in editForm.factors" :key="i" style="margin-bottom: 12px; display: flex; gap: 8px; align-items: center">
-            <el-select v-model="f.name" placeholder="选择因子" style="width: 180px" @change="onFactorChange(f)">
+            <el-select v-model="f.name" :placeholder="t('strategy.phFactor')" style="width: 180px" @change="onFactorChange(f)">
               <el-option v-for="fac in availableFactors" :key="fac.name" :label="`${fac.name} (${fac.category})`" :value="fac.name" />
             </el-select>
             <el-input-number v-model="f.weight" :min="0" :max="2" :step="0.1" :precision="2" style="width: 120px" />
-            <el-button size="small" type="danger" @click="removeFactor(i)">删</el-button>
+            <el-button size="small" type="danger" @click="removeFactor(i)">{{ t('strategy.removeFactor') }}</el-button>
           </div>
-          <el-button size="small" @click="addFactor">+ 添加因子</el-button>
+          <el-button size="small" @click="addFactor">{{ t('strategy.addFactor') }}</el-button>
 
-          <el-divider content-position="left">信号聚合</el-divider>
-          <el-form-item label="买入阈值">
+          <el-divider content-position="left">{{ t('strategy.signalAgg') }}</el-divider>
+          <el-form-item :label="t('strategy.thresholdBuy')">
             <el-input-number v-model="editForm.aggregator.threshold_buy" :step="0.1" :precision="2" />
           </el-form-item>
-          <el-form-item label="卖出阈值">
+          <el-form-item :label="t('strategy.thresholdSell')">
             <el-input-number v-model="editForm.aggregator.threshold_sell" :step="0.1" :precision="2" />
           </el-form-item>
 
-          <el-divider content-position="left">DSL 表达式（可选）</el-divider>
-          <el-form-item label="表达式">
+          <el-divider content-position="left">{{ t('strategy.dslExprTitle') }}</el-divider>
+          <el-form-item :label="t('strategy.expression')">
             <el-input v-model="editForm.dslExpr" type="textarea" :rows="3" :placeholder="t('strategy.dslHint')" />
           </el-form-item>
         </template>
@@ -90,77 +90,77 @@
         </template>
 
         <!-- 参数定义 -->
-        <el-divider content-position="left">参数定义（创建任务时动态生成表单）</el-divider>
+        <el-divider content-position="left">{{ t('strategy.paramDef') }}</el-divider>
         <div v-for="(pd, i) in editForm.parameterDefs" :key="i" style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 4px">
           <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
-            <el-input v-model="pd.name" placeholder="参数名" style="width: 140px" />
-            <el-select v-model="pd.type" placeholder="类型" style="width: 100px">
-              <el-option label="数字" value="number" />
-              <el-option label="布尔" value="boolean" />
-              <el-option label="字符串" value="string" />
-              <el-option label="选择" value="select" />
+            <el-input v-model="pd.name" :placeholder="t('strategy.phParamName')" style="width: 140px" />
+            <el-select v-model="pd.type" :placeholder="t('common.type')" style="width: 100px">
+              <el-option :label="t('strategy.optNumber')" value="number" />
+              <el-option :label="t('strategy.optBoolean')" value="boolean" />
+              <el-option :label="t('strategy.optString')" value="string" />
+              <el-option :label="t('strategy.optSelect')" value="select" />
             </el-select>
-            <el-input v-model="pd.label" placeholder="标签" style="width: 120px" />
-            <el-input v-model="pd.default" placeholder="默认值" style="width: 100px" v-if="pd.type !== 'boolean'" />
+            <el-input v-model="pd.label" :placeholder="t('strategy.phLabel')" style="width: 120px" />
+            <el-input v-model="pd.default" :placeholder="t('strategy.phDefault')" style="width: 100px" v-if="pd.type !== 'boolean'" />
             <el-switch v-model="pd.default" v-else />
             <template v-if="pd.type === 'number'">
-              <el-input-number v-model="pd.min" placeholder="最小" style="width: 110px" :controls="false" />
-              <el-input-number v-model="pd.max" placeholder="最大" style="width: 110px" :controls="false" />
-              <el-input-number v-model="pd.step" placeholder="步长" style="width: 100px" :controls="false" />
+              <el-input-number v-model="pd.min" :placeholder="t('strategy.phMin')" style="width: 110px" :controls="false" />
+              <el-input-number v-model="pd.max" :placeholder="t('strategy.phMax')" style="width: 110px" :controls="false" />
+              <el-input-number v-model="pd.step" :placeholder="t('strategy.phStep')" style="width: 100px" :controls="false" />
             </template>
-            <el-button size="small" type="danger" @click="editForm.parameterDefs.splice(i, 1)">删</el-button>
+            <el-button size="small" type="danger" @click="editForm.parameterDefs.splice(i, 1)">{{ t('common.delete') }}</el-button>
           </div>
-          <el-input v-model="pd.description" placeholder="描述（可选）" style="margin-top: 6px" size="small" />
+          <el-input v-model="pd.description" :placeholder="t('strategy.phDesc')" style="margin-top: 6px" size="small" />
         </div>
-        <el-button size="small" @click="addParamDef">+ 添加参数</el-button>
+        <el-button size="small" @click="addParamDef">{{ t('strategy.addParam') }}</el-button>
 
-        <el-divider content-position="left">执行规则（ActionSignal）</el-divider>
-        <el-form-item label="仓位类型">
+        <el-divider content-position="left">{{ t('strategy.execRule') }}</el-divider>
+        <el-form-item :label="t('strategy.volumeType')">
           <el-select v-model="editForm.volumeType" style="width: 100%">
-            <el-option label="股数（SHARES）" value="SHARES" />
-            <el-option label="资金百分比（PERCENT）" value="PERCENT" />
-            <el-option label="全仓（ALL_IN）" value="ALL_IN" />
+            <el-option :label="t('strategy.optShares')" value="SHARES" />
+            <el-option :label="t('strategy.optPercent')" value="PERCENT" />
+            <el-option :label="t('strategy.optAllIn')" value="ALL_IN" />
           </el-select>
         </el-form-item>
-        <el-form-item label="价格类型">
+        <el-form-item :label="t('strategy.priceType')">
           <el-select v-model="editForm.priceType" style="width: 100%">
-            <el-option label="限价（LIMIT）" value="LIMIT" />
-            <el-option label="市价（MARKET）" value="MARKET" />
+            <el-option :label="t('strategy.optLimit')" value="LIMIT" />
+            <el-option :label="t('strategy.optMarket')" value="MARKET" />
           </el-select>
         </el-form-item>
-        <el-form-item label="有效期">
+        <el-form-item :label="t('strategy.validity')">
           <el-select v-model="editForm.orderValidity" style="width: 100%">
-            <el-option label="当日（DAY）" value="DAY" />
-            <el-option label="撤单前有效（GTC）" value="GTC" />
+            <el-option :label="t('strategy.optDay')" value="DAY" />
+            <el-option :label="t('strategy.optGtc')" value="GTC" />
           </el-select>
         </el-form-item>
 
-        <el-divider content-position="left">账户绑定（P2-2）</el-divider>
-        <el-form-item label="绑定账户">
+        <el-divider content-position="left">{{ t('strategy.accountBind') }}</el-divider>
+        <el-form-item :label="t('strategy.bindAccount')">
           <div style="display: flex; gap: 8px; align-items: center">
-            <el-input v-model="bindForm.account_id" placeholder="账户 ID（如 253191001822）" style="width: 220px" />
+            <el-input v-model="bindForm.account_id" :placeholder="t('strategy.phAccountId')" style="width: 220px" />
             <el-select v-model="bindForm.broker_provider" style="width: 120px">
               <el-option label="XTP" value="xtp" />
-              <el-option label="币安" value="binance" />
+              <el-option :label="t('common.binance')" value="binance" />
               <el-option label="OKX" value="okx" />
             </el-select>
             <el-input-number v-model="bindForm.initial_capital" :min="10000" :step="100000" style="width: 180px" />
-            <el-button size="small" type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">绑定</el-button>
-            <el-button size="small" @click="loadBinds" :disabled="!editForm.id">刷新</el-button>
+            <el-button size="small" type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">{{ t('common.bind') }}</el-button>
+            <el-button size="small" @click="loadBinds" :disabled="!editForm.id">{{ t('common.refresh') }}</el-button>
           </div>
         </el-form-item>
         <el-table v-if="binds.length" :data="binds" stripe size="small" style="margin-bottom: 12px">
-          <el-table-column prop="account_id" label="账户" />
-          <el-table-column prop="broker_provider" label="通道" width="80" />
-          <el-table-column prop="initial_capital" label="资金" width="120" />
-          <el-table-column label="操作" width="80">
-            <template #default="{ row }"><el-button size="small" type="danger" link @click="doUnbind(row.id)">解绑</el-button></template>
+          <el-table-column prop="account_id" :label="t('common.account')" />
+          <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
+          <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
+          <el-table-column :label="t('common.action')" width="80">
+            <template #default="{ row }"><el-button size="small" type="danger" link @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
           </el-table-column>
         </el-table>
       </el-form>
       <template #footer>
-        <el-button @click="editVisible = false">取消</el-button>
-        <el-button type="primary" @click="saveEdit" :loading="saving">保存</el-button>
+        <el-button @click="editVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
   </el-card>
@@ -236,13 +236,13 @@ const doBind = async () => {
   binding.value = true
   try {
     await api.post('/strategy_account', { ...bindForm.value, strategy_id: editForm.value.id })
-    ElMessage.success('绑定成功')
+    ElMessage.success(t('common.bindSuccess'))
     await loadBinds()
-  } catch { ElMessage.error('绑定失败') }
+  } catch { ElMessage.error(t('common.bindFailed')) }
   finally { binding.value = false }
 }
 const doUnbind = async (id) => {
-  try { await api.delete(`/strategy_account/${id}`); ElMessage.success('已解绑'); await loadBinds() } catch { ElMessage.error('解绑失败') }
+  try { await api.delete(`/strategy_account/${id}`); ElMessage.success(t('common.unbindSuccess')); await loadBinds() } catch { ElMessage.error(t('common.unbindFailed')) }
 }
 
 const load = async () => { strategies.value = await getStrategies() }
@@ -299,19 +299,19 @@ const validateCode = async () => {
       ElMessage.success(t('strategy.codeValid'))
     } else {
       codeValid.value = false
-      codeError.value = res.error || '校验失败'
+      codeError.value = res.error || t('strategy.validateFailed')
       ElMessage.error(t('strategy.codeInvalid') + ': ' + (res.error || ''))
     }
   } catch (e) {
     codeValid.value = false
-    codeError.value = e?.message || '校验请求失败'
-    ElMessage.error('校验请求失败')
+    codeError.value = e?.message || t('strategy.validateReqFailed')
+    ElMessage.error(t('strategy.validateReqFailed'))
   }
   finally { validating.value = false }
 }
 
 const saveEdit = async () => {
-  if (!editForm.value.id || !editForm.value.name) { ElMessage.warning('ID 和名称必填'); return }
+  if (!editForm.value.id || !editForm.value.name) { ElMessage.warning(t('strategy.idNameRequired')); return }
   saving.value = true
   try {
     const params = {
@@ -339,15 +339,15 @@ const saveEdit = async () => {
     } else {
       await updateStrategy(editForm.value.id, payload)
     }
-    ElMessage.success('已保存')
+    ElMessage.success(t('common.saveSuccess'))
     editVisible.value = false
     await load()
-  } catch (e) { ElMessage.error('保存失败') }
+  } catch (e) { ElMessage.error(t('common.saveFailed')) }
   finally { saving.value = false }
 }
 
-const onStart = async id => { try { await startStrategy(id); ElMessage.success('已启动'); load() } catch (e) { console.error(e); ElMessage.error('启动失败') } }
-const onStop = async id => { try { await stopStrategy(id); ElMessage.success('已停止'); load() } catch (e) { console.error(e); ElMessage.error('停止失败') } }
+const onStart = async id => { try { await startStrategy(id); ElMessage.success(t('common.started')); load() } catch (e) { console.error(e); ElMessage.error(t('common.startFailed')) } }
+const onStop = async id => { try { await stopStrategy(id); ElMessage.success(t('common.stopped')); load() } catch (e) { console.error(e); ElMessage.error(t('common.stopFailed')) } }
 const removeFactor = (i) => { editForm.value.factors = editForm.value.factors.filter((_, idx) => idx !== i) }
 onMounted(async () => { await load(); await loadFactors() })
 </script>

@@ -12,9 +12,8 @@
         <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%">{{ t('login.submit') }}</el-button>
       </el-form>
       <p style="text-align: center; margin-top: 12px">
-        <router-link to="/forgot-password" style="color: #409eff; font-size: 13px">找回密码</router-link>
+        <router-link to="/forgot-password" style="color: #409eff; font-size: 13px">{{ t('login.forgotPassword') }}</router-link>
       </p>
-      <Footer style="margin-top: 16px" />
     </el-card>
   </div>
 </template>
@@ -25,7 +24,6 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { login } from '../api'
-import Footer from '../components/Footer.vue'
 
 const { t } = useI18n()
 const router = useRouter()

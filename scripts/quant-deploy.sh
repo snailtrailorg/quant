@@ -345,8 +345,19 @@ clear_redis() {
 
 restart_server() {
     echo "ℹ️ Restart $WEB_API_SERVICE..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $WEB_API_SERVICE && echo '✅ ' \$(sudo systemctl is-active $WEB_API_SERVICE)"
-    # 轮询等 health 就绪（uvicorn+vnpy import 启动慢，单次 curl 太早会误报失败）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $WEB_API_SERVICE"
+    # 1. is-active 稳定校验：systemd 单元本身必须 active。
+    #    防僵尸进程占 8001（非 systemd 的旧 uvicorn）→ 新单元 bind 失败 crash-loop，
+    #    但下方 health 打到僵尸进程会假成功。is-active 在 crash-loop 时≠active，能抓到。
+    if ! _stabilize "$WEB_API_SERVICE" 15; then
+        echo "❌ $WEB_API_SERVICE 未稳定 active（crash-loop 或 8001 被非 systemd 进程占用）"
+        echo "   诊断：ssh 到服务器跑 'sudo ss -ltnp | grep 8001'（看占端口 PID+启动时间）"
+        echo "         'sudo systemctl status $WEB_API_SERVICE'（看单元是否 failed/restart-loop）"
+        echo "   修复：sudo systemctl stop $WEB_API_SERVICE && sudo kill <僵尸PID> && sudo systemctl start $WEB_API_SERVICE"
+        return 1
+    fi
+    echo "  ✅ $WEB_API_SERVICE active (稳定)"
+    # 2. health 检查（此时打到的是 systemd 起的新进程）
     local ok=0
     for i in $(seq 1 15); do
         if ssh $SSH_OPTS "$SSH_TARGET" 'curl -sf http://127.0.0.1:8001/health' >/dev/null 2>&1; then
@@ -356,7 +367,10 @@ restart_server() {
         fi
         sleep 2
     done
-    [ $ok -eq 0 ] && echo "⚠️ health check 失败（30s 未就绪，看 journalctl -u $WEB_API_SERVICE -n 50）"
+    if [ $ok -eq 0 ]; then
+        echo "⚠️ health check 失败（30s 未就绪，看 journalctl -u $WEB_API_SERVICE -n 50）"
+        return 1
+    fi
     echo "✅ restart-server done."
 }
 

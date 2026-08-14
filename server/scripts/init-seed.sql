@@ -84,6 +84,7 @@ ON CONFLICT (id) DO NOTHING;
 -- system_config 种子数据（LLM 最大工具调用轮次等）
 -- ============================================================
 INSERT INTO system_config (key, value, value_type, description) VALUES ('llm_max_tool_turns', '5', 'int', 'LLM 单次对话最大工具调用轮次') ON CONFLICT (key) DO NOTHING;
+INSERT INTO system_config (key, value, value_type, description) VALUES ('base_url', '', 'text', '邮件链接 base（邀请/重置密码）；留空=自动取访问域名，填 https://your.domain 覆盖') ON CONFLICT (key) DO NOTHING;
 
 
 -- ============================================================

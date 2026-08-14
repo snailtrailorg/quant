@@ -2,33 +2,33 @@
   <el-card v-loading="loading">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>回测可视化 - {{ symbol }}</span>
-        <el-button @click="$router.back()">返回</el-button>
+        <span>{{ t('backtest.viewTitle', { symbol }) }}</span>
+        <el-button @click="$router.back()">{{ t('common.return') }}</el-button>
       </div>
     </template>
 
     <el-row :gutter="20" style="margin-bottom: 20px">
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">总收益</div><div class="value">{{ result.total_return_pct }}%</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">胜率</div><div class="value">{{ result.win_rate }}%</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">夏普</div><div class="value">{{ result.sharpe_ratio }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">最大回撤</div><div class="value">{{ result.max_drawdown_pct }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.totalReturn') }}</div><div class="value">{{ result.total_return_pct }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.winRate') }}</div><div class="value">{{ result.win_rate }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.sharpe') }}</div><div class="value">{{ result.sharpe_ratio }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.maxDrawdown') }}</div><div class="value">{{ result.max_drawdown_pct }}%</div></div></el-card></el-col>
     </el-row>
 
     <el-tabs v-model="activeTab">
-      <el-tab-pane label="净值曲线" name="equity">
+      <el-tab-pane :label="t('backtest.equityCurve')" name="equity">
         <v-chart :option="equityOption" autoresize style="height: 400px" />
       </el-tab-pane>
-      <el-tab-pane label="回撤曲线（P3-3）" name="drawdown">
+      <el-tab-pane :label="t('backtest.drawdownCurve')" name="drawdown">
         <v-chart :option="drawdownOption" autoresize style="height: 400px" v-if="drawdownData.length" />
-        <div v-else style="height:400px;display:flex;align-items:center;justify-content:center;color:#999">暂无回撤数据</div>
+        <div v-else style="height:400px;display:flex;align-items:center;justify-content:center;color:#999">{{ t('backtest.noDrawdown') }}</div>
       </el-tab-pane>
-      <el-tab-pane label="交易明细" name="trades">
+      <el-tab-pane :label="t('backtest.trades')" name="trades">
         <el-table :data="trades" stripe max-height="400">
-          <el-table-column prop="ts" label="时间" width="180" />
-          <el-table-column prop="action" label="方向" width="80" />
-          <el-table-column prop="volume" label="数量" width="80" />
-          <el-table-column prop="price" label="价格" width="100" />
-          <el-table-column prop="commission" label="佣金" width="100" />
+          <el-table-column prop="ts" :label="t('trading.time')" width="180" />
+          <el-table-column prop="action" :label="t('trading.direction')" width="80" />
+          <el-table-column prop="volume" :label="t('trading.volume')" width="80" />
+          <el-table-column prop="price" :label="t('trading.price')" width="100" />
+          <el-table-column prop="commission" :label="t('backtest.commission')" width="100" />
         </el-table>
       </el-tab-pane>
     </el-tabs>
@@ -38,6 +38,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -46,6 +47,7 @@ import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/compon
 import VChart from 'vue-echarts'
 import { getBacktestRun } from '../api'
 
+const { t } = useI18n()
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
 const route = useRoute()
@@ -61,12 +63,12 @@ let eventSource = null
 
 const equityOption = computed(() => ({
   tooltip: { trigger: 'axis' },
-  legend: { data: ['净值'] },
+  legend: { data: [t('trading.equity')] },
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
   xAxis: { type: 'category', data: dailyValues.value.map(d => d.ts?.slice(0, 10)) },
   yAxis: { type: 'value', scale: true },
   series: [{
-    name: '净值', type: 'line', data: dailyValues.value.map(d => d.value),
+    name: t('trading.equity'), type: 'line', data: dailyValues.value.map(d => d.value),
     smooth: true, lineStyle: { width: 2 }, areaStyle: { opacity: 0.1 },
   }],
 }))
@@ -76,7 +78,7 @@ const drawdownOption = computed(() => ({
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
   xAxis: { type: 'category', data: drawdownData.value.map(d => d.ts?.slice(0, 10)) },
   yAxis: { type: 'value', scale: true },
-  series: [{ name: '回撤', type: 'line', data: drawdownData.value.map(d => d.dd), smooth: true, lineStyle: { width: 2, color: '#f56c6c' }, areaStyle: { opacity: 0.1, color: '#f56c6c' } }],
+  series: [{ name: t('backtest.drawdown'), type: 'line', data: drawdownData.value.map(d => d.dd), smooth: true, lineStyle: { width: 2, color: '#f56c6c' }, areaStyle: { opacity: 0.1, color: '#f56c6c' } }],
 }))
 
 onMounted(async () => {
@@ -87,7 +89,6 @@ onMounted(async () => {
     result.value = symData.result || {}
     trades.value = symData.result?.trades || []
     dailyValues.value = symData.result?.daily_values || []
-    // 计算回撤曲线
     let peak = 0
     drawdownData.value = (result.value.daily_values || []).map(d => {
       const v = d.value
@@ -95,7 +96,6 @@ onMounted(async () => {
       return { ts: d.ts, dd: peak > 0 ? ((peak - v) / peak * 100) : 0 }
     })
 
-    // P2-12: SSE 实时流（回测运行时）
     if (data.status === 'running') {
       eventSource = new EventSource(`/api/backtest/${runId}/${symbol}/stream`)
       eventSource.onmessage = (e) => {
@@ -111,7 +111,7 @@ onMounted(async () => {
         } catch (e) { /* ignore malformed frame */ }
       }
     }
-  } catch (e) { ElMessage.error('加载可视化数据失败') }
+  } catch (e) { ElMessage.error(t('backtest.loadViewFailed')) }
   finally { loading.value = false }
 })
 

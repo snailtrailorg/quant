@@ -2,66 +2,66 @@
   <el-card>
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>飞书机器人管理（per-机器人角色 = 登录账号权限级别）</span>
-        <el-button type="primary" @click="onConnect" :loading="loading">🔗 扫码添加机器人</el-button>
+        <span>{{ t('feishu.title') }}</span>
+        <el-button type="primary" @click="onConnect" :loading="loading">{{ t('feishu.addBtn') }}</el-button>
       </div>
     </template>
 
     <el-table :data="robots" stripe size="small">
       <el-table-column prop="id" label="ID" width="50" />
-      <el-table-column prop="name" label="名称" width="120" />
+      <el-table-column prop="name" :label="t('common.name')" width="120" />
       <el-table-column prop="app_id" label="App ID" />
-      <el-table-column label="角色" width="90">
+      <el-table-column :label="t('feishu.sysRole')" width="90">
         <template #default="{ row }">
           <el-tag :type="roleType(row.role)" size="small">{{ roleLabel(row.role) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="description" label="备注" />
-      <el-table-column label="状态" width="70">
-        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag></template>
+      <el-table-column prop="description" :label="t('common.remark')" />
+      <el-table-column :label="t('common.status')" width="70">
+        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="310">
+      <el-table-column :label="t('common.action')" width="310">
         <template #default="{ row }">
-          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">测试</el-button>
-          <el-button v-if="!row.enabled" size="small" type="success" @click="onStart(row.id)">启动</el-button>
-          <el-button v-else size="small" type="warning" @click="onStop(row.id)">停止</el-button>
-          <el-button size="small" type="primary" @click="onSetting(row)">设置</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row.id)">删</el-button>
+          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
+          <el-button v-if="!row.enabled" size="small" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
+          <el-button v-else size="small" type="warning" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
+          <el-button size="small" type="primary" @click="onSetting(row)">{{ t('common.edit') }}</el-button>
+          <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <!-- 扫码弹窗 -->
-    <el-dialog v-model="scanVisible" title="扫码连接飞书机器人" width="360px">
+    <el-dialog v-model="scanVisible" :title="t('feishu.scanTitle')" width="360px">
       <div style="text-align: center">
         <div v-if="status === 'scanning'">
-          <img v-if="qrImg" :src="qrImg" width="220" alt="二维码" />
-          <p v-else>二维码生成中...</p>
-          <p style="font-size: 13px; color: #999">有效期：{{ countdown }}s</p>
+          <img v-if="qrImg" :src="qrImg" width="220" :alt="t('feishu.qrAlt')" />
+          <p v-else>{{ t('feishu.qrGenerating') }}</p>
+          <p style="font-size: 13px; color: #999">{{ t('feishu.validFor', { n: countdown }) }}</p>
         </div>
-        <el-result v-if="status === 'done'" icon="success" title="连接成功" sub-title="凭证已配置（默认 viewer 角色，可设置改）">
-          <template #extra><el-button type="primary" @click="scanVisible = false">完成</el-button></template>
+        <el-result v-if="status === 'done'" icon="success" :title="t('feishu.connectSuccess')" :sub-title="t('feishu.connectSuccessSub')">
+          <template #extra><el-button type="primary" @click="scanVisible = false">{{ t('feishu.done') }}</el-button></template>
         </el-result>
         <el-alert v-if="status === 'error'" type="error" :title="errorMsg" show-icon :closable="false" />
       </div>
     </el-dialog>
 
     <!-- 设置弹窗 -->
-    <el-dialog v-model="settingVisible" :title="`设置 - ${settingForm.name || ''}`" width="480px">
+    <el-dialog v-model="settingVisible" :title="t('feishu.settingTitle', { name: settingForm.name || '' })" width="480px">
       <el-form :model="settingForm" label-width="90px">
-        <el-form-item label="名称"><el-input v-model="settingForm.name" /></el-form-item>
-        <el-form-item label="系统角色">
+        <el-form-item :label="t('common.name')"><el-input v-model="settingForm.name" /></el-form-item>
+        <el-form-item :label="t('feishu.sysRole')">
           <el-select v-model="settingForm.role" style="width: 100%">
-            <el-option label="Viewer（只读：查持仓/盈亏/状态）" value="viewer" />
-            <el-option label="Analyst（研究：策略/回测/数据）" value="analyst" />
-            <el-option label="Trader（交易：启停策略/熔断/下单）" value="trader" />
-            <el-option label="Admin（全权：+恢复/配置）" value="admin" />
+            <el-option :label="t('feishu.optViewer')" value="viewer" />
+            <el-option :label="t('feishu.optAnalyst')" value="analyst" />
+            <el-option :label="t('feishu.optTrader')" value="trader" />
+            <el-option :label="t('feishu.optAdmin')" value="admin" />
           </el-select>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="settingForm.description" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item :label="t('common.remark')"><el-input v-model="settingForm.description" type="textarea" :rows="2" /></el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="onSaveSetting" :loading="savingSetting">确认</el-button>
-          <el-button @click="settingVisible = false">取消</el-button>
+          <el-button type="primary" @click="onSaveSetting" :loading="savingSetting">{{ t('common.confirm') }}</el-button>
+          <el-button @click="settingVisible = false">{{ t('common.cancel') }}</el-button>
         </el-form-item>
       </el-form>
     </el-dialog>
@@ -70,9 +70,11 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getFeishuList, feishuConnect, feishuStatus, feishuStart, feishuStop, feishuDelete, feishuUpdate, testFeishu } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { t } = useI18n()
 const robots = ref([])
 const loading = ref(false)
 const testing = ref(0)
@@ -115,13 +117,13 @@ const onConnect = async () => {
         } else if (r.status === 'error') {
           clearInterval(pollTimer); clearInterval(cdTimer)
           status.value = 'error'
-          errorMsg.value = r.error || '连接失败'
+          errorMsg.value = r.error || t('feishu.connectFailed')
         }
       } catch (e) { /* 忽略单次轮询失败 */ }
     }, 2000)
   } catch (e) {
     status.value = 'error'
-    errorMsg.value = e.detail || '发起连接失败'
+    errorMsg.value = e.detail || t('feishu.connectFailed')
   }
   finally { loading.value = false }
 }
@@ -135,10 +137,10 @@ const onSaveSetting = async () => {
   savingSetting.value = true
   try {
     await feishuUpdate(settingForm.value.id, settingForm.value)
-    ElMessage.success('设置已更新（后续消息生效）')
+    ElMessage.success(t('feishu.settingUpdated'))
     settingVisible.value = false
     load()
-  } catch (e) { ElMessage.error(e.detail || '更新失败') }
+  } catch (e) { ElMessage.error(e.detail || t('feishu.updateFailed')) }
   finally { savingSetting.value = false }
 }
 
@@ -146,32 +148,32 @@ const onTest = async (id) => {
   testing.value = id
   try {
     const r = await testFeishu(id)
-    if (r.ok) ElMessage.success('连接成功')
-    else ElMessage.error('失败：' + r.error)
-  } catch (e) { ElMessage.error('测试失败') }
+    if (r.ok) ElMessage.success(t('common.connectSuccess'))
+    else ElMessage.error(t('common.failedPrefix') + r.error)
+  } catch (e) { ElMessage.error(t('common.testFailed')) }
   finally { testing.value = 0 }
 }
 
 const onStart = async (id) => {
   try {
     const r = await feishuStart(id)
-    if (r.ok) { ElMessage.success('已启动'); load() }
-    else ElMessage.error('失败：' + r.error)
-  } catch (e) { console.error(e); ElMessage.error('启动失败') }
+    if (r.ok) { ElMessage.success(t('common.started')); load() }
+    else ElMessage.error(t('common.failedPrefix') + r.error)
+  } catch (e) { console.error(e); ElMessage.error(t('common.startFailed')) }
 }
 
 const onStop = async (id) => {
   try {
     const r = await feishuStop(id)
-    if (r.ok) { ElMessage.success('已停止'); load() }
-    else ElMessage.error('失败：' + r.error)
-  } catch (e) { console.error(e); ElMessage.error('停止失败') }
+    if (r.ok) { ElMessage.success(t('common.stopped')); load() }
+    else ElMessage.error(t('common.failedPrefix') + r.error)
+  } catch (e) { console.error(e); ElMessage.error(t('common.stopFailed')) }
 }
 
 const onDelete = async (id) => {
-  await ElMessageBox.confirm('确认删除此机器人？', '提示', { type: 'warning' })
+  await ElMessageBox.confirm(t('feishu.confirmDeleteBot'), t('common.tip'), { type: 'warning' })
   await feishuDelete(id)
-  ElMessage.success('已删除')
+  ElMessage.success(t('common.deleteSuccess'))
   load()
 }
 </script>

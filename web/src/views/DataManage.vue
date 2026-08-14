@@ -2,8 +2,8 @@
   <el-card>
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>数据同步管理</span>
-        <el-button @click="load" size="small">刷新</el-button>
+        <span>{{ t('dataManage.title') }}</span>
+        <el-button @click="load" size="small">{{ t('common.refresh') }}</el-button>
       </div>
     </template>
     <el-card v-if="currentSync" shadow="never" style="margin-bottom: 12px">
@@ -17,79 +17,79 @@
       </div>
     </el-card>
     <el-table :data="configs" stripe v-loading="loading">
-      <el-table-column prop="name" label="数据类型" width="160" />
-      <el-table-column prop="data_type" label="品类" width="80">
+      <el-table-column prop="name" :label="t('dataManage.dataType')" width="160" />
+      <el-table-column prop="data_type" :label="t('dataManage.category')" width="80">
         <template #default="{ row }"><el-tag size="small">{{ row.data_type }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="mode" label="模式" width="80" />
-      <el-table-column label="cron 调度" width="200">
+      <el-table-column prop="mode" :label="t('common.mode')" width="80" />
+      <el-table-column :label="t('dataManage.cronSchedule')" width="200">
         <template #default="{ row }">
-          <el-input v-model="row.schedule" size="small" style="width: 170px" placeholder="如 30 16 * * 1-5" @change="onScheduleChange(row)" />
+          <el-input v-model="row.schedule" size="small" style="width: 170px" :placeholder="t('dataManage.phCron')" @change="onScheduleChange(row)" />
         </template>
       </el-table-column>
-      <el-table-column label="交易日过滤" width="120">
+      <el-table-column :label="t('dataManage.tradeDayFilter')" width="120">
         <template #default="{ row }">
           <el-select v-model="row.trade_day_filter" size="small" style="width: 100px" @change="onScheduleChange(row)">
-            <el-option label="不过滤" value="none" />
-            <el-option label="工作日" value="workday" />
-            <el-option label="交易日" value="trade_day" />
+            <el-option :label="t('dataManage.filterNone')" value="none" />
+            <el-option :label="t('dataManage.filterWorkday')" value="workday" />
+            <el-option :label="t('dataManage.filterTradeDay')" value="trade_day" />
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="状态" width="80">
+      <el-table-column :label="t('common.status')" width="80">
         <template #default="{ row }">
           <el-tag :type="row.status === 'running' ? 'warning' : row.status === 'idle' ? 'success' : 'danger'" size="small">
-            {{ row.status === 'idle' ? '空闲' : row.status === 'running' ? '运行中' : row.status }}
+            {{ row.status === 'idle' ? t('dataManage.idle') : row.status === 'running' ? t('task.statusRunning') : row.status }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="last_sync_count" label="上次同步" width="100">
-        <template #default="{ row }">{{ row.last_sync_count || 0 }} 条</template>
+      <el-table-column prop="last_sync_count" :label="t('dataManage.lastSync')" width="100">
+        <template #default="{ row }">{{ t('dataManage.rowsCount', { n: row.last_sync_count || 0 }) }}</template>
       </el-table-column>
-      <el-table-column prop="last_sync_ts" label="同步时间" width="160">
+      <el-table-column prop="last_sync_ts" :label="t('dataManage.syncTime')" width="160">
         <template #default="{ row }">{{ row.last_sync_ts ? row.last_sync_ts.slice(0,16).replace('T',' ') : '-' }}</template>
       </el-table-column>
-      <el-table-column label="启用" width="60">
+      <el-table-column :label="t('common.enable')" width="60">
         <template #default="{ row }">
           <el-switch v-model="row.enabled" @change="onToggle(row)" size="small" />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="290">
+      <el-table-column :label="t('common.action')" width="290">
         <template #default="{ row }">
-          <el-button size="small" type="primary" @click="onTrigger(row)" :loading="row.status === 'running'">同步</el-button>
-          <el-button size="small" type="warning" @click="onBackfill(row)" v-if="row.mode === 'incremental'">回补</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row)" v-if="role === 'admin'">删除</el-button>
-          <el-button size="small" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">管理标的</el-button>
+          <el-button size="small" type="primary" @click="onTrigger(row)" :loading="row.status === 'running'">{{ t('dataManage.syncBtn') }}</el-button>
+          <el-button size="small" type="warning" @click="onBackfill(row)" v-if="row.mode === 'incremental'">{{ t('symbol.backfill') }}</el-button>
+          <el-button size="small" type="danger" @click="onDelete(row)" v-if="role === 'admin'">{{ t('common.delete') }}</el-button>
+          <el-button size="small" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <el-divider />
     <el-card>
-      <template #header>同步日志</template>
+      <template #header>{{ t('dataManage.syncLogs') }}</template>
       <el-table :data="logs" stripe max-height="300">
-        <el-table-column prop="sync_id" label="任务" width="120" />
-        <el-table-column prop="ts" label="时间" width="160">
+        <el-table-column prop="sync_id" :label="t('dataManage.task')" width="120" />
+        <el-table-column prop="ts" :label="t('common.time')" width="160">
           <template #default="{ row }">{{ row.ts.slice(0,16).replace('T',' ') }}</template>
         </el-table-column>
-        <el-table-column prop="mode" label="模式" width="80" />
-        <el-table-column prop="rows_pulled" label="拉取" width="80" />
-        <el-table-column prop="rows_saved" label="入库" width="80" />
-        <el-table-column prop="duration_ms" label="耗时" width="80">
+        <el-table-column prop="mode" :label="t('common.mode')" width="80" />
+        <el-table-column prop="rows_pulled" :label="t('dataManage.pulled')" width="80" />
+        <el-table-column prop="rows_saved" :label="t('dataManage.saved')" width="80" />
+        <el-table-column prop="duration_ms" :label="t('dataManage.duration')" width="80">
           <template #default="{ row }">{{ row.duration_ms }}ms</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="80">
+        <el-table-column prop="status" :label="t('common.status')" width="80">
           <template #default="{ row }">
             <el-tag :type="row.status === 'success' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'" size="small">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="交易日" width="100">
+        <el-table-column :label="t('dataManage.tradeDay')" width="100">
           <template #default="{ row }">
             <span v-if="row.expected_days != null">{{ row.actual_days }}/{{ row.expected_days }}</span>
             <span v-else style="color:#999">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="缺口" min-width="180">
+        <el-table-column :label="t('dataManage.gap')" min-width="180">
           <template #default="{ row }">
             <span v-if="row.failed_dates" style="color:#f56c6c; font-size:12px">{{ row.failed_dates }}</span>
             <span v-else style="color:#999">-</span>
@@ -102,10 +102,12 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import api from '../api'
 
+const { t } = useI18n()
 const router = useRouter()
 const configs = ref([])
 const logs = ref([])
@@ -130,19 +132,19 @@ const load = async () => {
 }
 const onScheduleChange = async (row) => {
   await api.put(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled, trade_day_filter: row.trade_day_filter })
-  ElMessage.success(`${row.name} 调度已更新`)
+  ElMessage.success(t('dataManage.scheduleUpdated', { name: row.name }))
 }
 const onToggle = async (row) => {
   await api.put(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled })
-  ElMessage.success(`${row.name} ${row.enabled ? '已启用' : '已停用'}`)
+  ElMessage.success(`${row.name} ${row.enabled ? t('common.enabled') : t('common.disabled')}`)
 }
 
 // 异步同步完成提示（适配轮询 progress 结果，用 failed_dates_count）
 const notifyResult = (row, p, prefix) => {
-  if (p.status === 'error') { ElMessage.error(`${prefix} 失败: ${p.error || ''}`); return }
-  let msg = `${prefix}: 拉取${p.rows_pulled || 0} 入库${p.rows_saved || 0}`
-  if (p.expected_days) msg += ` (${p.actual_days}/${p.expected_days}交易日)`
-  if (p.failed_dates_count) msg += ` 缺口${p.failed_dates_count}天`
+  if (p.status === 'error') { ElMessage.error(t('dataManage.syncFailedMsg', { name: prefix, error: p.error || '' })); return }
+  let msg = t('dataManage.syncResultMsg', { name: prefix, pulled: p.rows_pulled || 0, saved: p.rows_saved || 0 })
+  if (p.expected_days) msg += t('dataManage.tradeDayPart', { actual: p.actual_days, expected: p.expected_days })
+  if (p.failed_dates_count) msg += t('dataManage.gapPart', { n: p.failed_dates_count })
   ElMessage[p.failed_dates_count ? 'warning' : 'success'](msg)
 }
 
@@ -162,7 +164,7 @@ const startPoll = (row, name, task_id) => {
       } else if (p.status === 'idle') {
         if (++idleTicks > 15) {
           stopPoll()
-          ElMessage.warning(`${name}: 任务状态查询超时（worker 可能未运行）`)
+          ElMessage.warning(t('dataManage.pollTimeout', { name }))
           currentSync.value = null; progress.value = {}; setRowStatus(row.id, 'idle')
         }
       } else {
@@ -183,12 +185,12 @@ const onTrigger = async (row) => {
   try {
     const r = await api.post(`/sync/trigger/${row.id}`)
     if (r.status === 'submitted') {
-      startPoll(row, `${row.name} 同步`, r.task_id)
+      startPoll(row, t('dataManage.syncTaskName', { name: row.name }), r.task_id)
     } else {
-      notifyResult(row, r, `${row.name} 同步`)
+      notifyResult(row, r, t('dataManage.syncTaskName', { name: row.name }))
       setRowStatus(row.id, 'idle')
     }
-  } catch (e) { ElMessage.error('提交失败'); setRowStatus(row.id, 'idle') }
+  } catch (e) { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(row.id, 'idle') }
 }
 
 const onBackfill = async (row) => {
@@ -196,24 +198,24 @@ const onBackfill = async (row) => {
   const d = new Date(); d.setDate(d.getDate() - 30)
   const def = d.toISOString().slice(0, 10).replace(/-/g, '')
   try {
-    const { value } = await ElMessageBox.prompt('起始日期 YYYYMMDD（如 20260626）', `回补 ${row.name}`, {
+    const { value } = await ElMessageBox.prompt(t('dataManage.backfillPrompt'), t('dataManage.backfillTitle', { name: row.name }), {
       inputValue: def,
       inputPattern: /^\d{8}$/,
-      inputErrorMessage: '日期格式须为 YYYYMMDD',
-      confirmButtonText: '回补',
-      cancelButtonText: '取消',
+      inputErrorMessage: t('dataManage.dateFormatError'),
+      confirmButtonText: t('symbol.backfill'),
+      cancelButtonText: t('common.cancel'),
       type: 'warning',
     })
     setRowStatus(row.id, 'running')
     try {
       const r = await api.post(`/sync/trigger/${row.id}`, null, { params: { backfill_from: value } })
       if (r.status === 'submitted') {
-        startPoll(row, `${row.name} 回补 ${value}`, r.task_id)
+        startPoll(row, t('dataManage.backfillTaskName', { name: row.name, value }), r.task_id)
       } else {
-        notifyResult(row, r, `${row.name} 回补 ${value}`)
+        notifyResult(row, r, t('dataManage.backfillTaskName', { name: row.name, value }))
         setRowStatus(row.id, 'idle')
       }
-    } catch (e) { ElMessage.error('提交失败'); setRowStatus(row.id, 'idle') }
+    } catch (e) { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(row.id, 'idle') }
   } catch (e) {
     // 用户取消 prompt，不动状态
   }
@@ -221,9 +223,9 @@ const onBackfill = async (row) => {
 
 const onDelete = async (row) => {
   try {
-    await ElMessageBox.confirm(`确认删除 ${row.name} 的全部数据？此操作不可恢复`, '高危确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('dataManage.confirmDeleteAll', { name: row.name }), t('task.highRiskConfirm'), { type: 'warning' })
     await api.delete(`/sync/data/${row.id}`)
-    ElMessage.success('数据已删除')
+    ElMessage.success(t('dataManage.dataDeleted'))
     await load()
   } catch {}
 }

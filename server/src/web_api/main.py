@@ -9,7 +9,7 @@ import os, json, logging, psycopg, redis, subprocess, uuid
 import requests
 import pandas as pd
 from typing import Literal
-from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -32,8 +32,10 @@ from .auth import (
     create_jwt, authenticate, create_user, require_role, require_perm,
     audit_log, ensure_default_admin, init_users_table, PERMISSIONS,
     invite_user, register_user, forgot_password, reset_password, change_password, verify_token,
+    validate_password, guard_user_mutation,
 )
-from .email_service import send_invite_email, send_password_reset_email
+from .email_service import send_invite_email, send_password_reset_email, send_activation_email
+from .terms import get_terms
 
 app = FastAPI(title="量化交易平台 API", version="0.1.0")
 from src.feishu_bot.router import router as feishu_router
@@ -231,13 +233,20 @@ def logout(payload: dict = Depends(require_role("viewer", "analyst", "trader", "
 
 # ——— 邀请制用户管理 ———
 
+def _request_base(request: Request) -> str:
+    """从请求推导 base_url（scheme://host），用 X-Forwarded-* 避免 nginx 后 scheme 错成 http。"""
+    scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{scheme}://{host}".rstrip("/")
+
+
 @app.post("/api/auth/invite")
-async def invite_user_api(req: InviteReq, payload: dict = Depends(require_perm("user_mgmt"))):
+async def invite_user_api(req: InviteReq, request: Request, payload: dict = Depends(require_perm("user_mgmt"))):
     """admin 邀请：填 email 发邀请邮件（默认 Viewer）。"""
     token = invite_user(req.email)
     if not token:
         raise HTTPException(400, "该邮箱已注册或邀请失败")
-    await send_invite_email(req.email, token)
+    await send_invite_email(req.email, token, _request_base(request))
     audit_log(payload["username"], "invite_user", req.email)
     return {"status": "invited", "email": req.email}
 
@@ -252,28 +261,47 @@ def verify_invite_token(token: str):
 
 
 @app.post("/api/auth/register")
-def register_api(req: RegisterReq):
+async def register_api(req: RegisterReq, request: Request):
     """自助开通：凭 invite token 建用户（默认 Viewer）。"""
+    try:
+        validate_password(req.password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     user = register_user(req.token, req.username, req.password)
     if not user:
         raise HTTPException(400, "token 无效/已用/过期，或用户名已存在")
     audit_log(user["username"], "self_register")
+    # 开通成功通知邮件（带条款）；失败不影响开通结果
+    try:
+        await send_activation_email(user["email"], user["username"], _request_base(request))
+    except Exception as e:
+        print(f"[register] activation email failed (ignored): {e}", flush=True)
     return {"status": "registered", "username": user["username"], "email": user["email"]}
 
 
+@app.get("/api/terms")
+def terms_api():
+    """平台使用条款（公开，注册页 + 开通邮件共用单一源）。"""
+    return get_terms()
+
+
 @app.post("/api/auth/forgot-password")
-async def forgot_password_api(req: ForgotReq):
+async def forgot_password_api(req: ForgotReq, request: Request):
     """找回密码：发重置邮件（不泄露 email 是否存在）。"""
     token = forgot_password(req.email)
     if not token:
         return {"status": "sent"}  # email 不存在也返回 sent（防枚举）
-    await send_password_reset_email(req.email, token)
+    await send_password_reset_email(req.email, token, _request_base(request))
     return {"status": "sent"}
 
 
 @app.post("/api/auth/reset-password")
 def reset_password_api(req: ResetReq):
     """凭 reset token 重置密码。"""
+    try:
+        validate_password(req.new_password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     ok = reset_password(req.token, req.new_password)
     if not ok:
         raise HTTPException(400, "token 无效/已用/过期")
@@ -283,6 +311,10 @@ def reset_password_api(req: ResetReq):
 @app.post("/api/auth/change-password")
 def change_password_api(req: ChangePwdReq, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """改密码：需旧密码验证。"""
+    try:
+        validate_password(req.new_password)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     ok = change_password(int(payload["sub"]), req.old_password, req.new_password)
     if not ok:
         raise HTTPException(400, "旧密码错误")
@@ -314,7 +346,18 @@ def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
 @app.put("/api/user/{uid}")
 def update_user(uid: int, role: str = None, enabled: bool = None,
                 payload: dict = Depends(require_perm("user_mgmt"))):
-    """P4-4 改用户角色/禁用。"""
+    """改用户角色/禁用。保护：不能动自己、不能移除最后一个启用的管理员。"""
+    with get_conn() as conn:
+        cur = conn.execute("SELECT username, role, enabled FROM users WHERE id=%s", (uid,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "用户不存在")
+    t_username, t_role, t_enabled = row
+    # 本次是否剥夺一个启用 admin 身份（降级到非 admin 或 禁用）
+    removes_admin = (t_role == "admin" and t_enabled) and (
+        (role is not None and role != "admin") or (enabled is False)
+    )
+    guard_user_mutation(t_username, payload["username"], removes_admin=removes_admin)
     with get_conn() as conn:
         if role is not None:
             conn.execute("UPDATE users SET role=%s WHERE id=%s", (role, uid))
@@ -327,7 +370,14 @@ def update_user(uid: int, role: str = None, enabled: bool = None,
 
 @app.delete("/api/user/{uid}")
 def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
-    """P4-4 删除用户。"""
+    """删除用户。保护：不能动自己、不能移除最后一个启用的管理员。"""
+    with get_conn() as conn:
+        cur = conn.execute("SELECT username, role, enabled FROM users WHERE id=%s", (uid,))
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "用户不存在")
+    t_username, t_role, t_enabled = row
+    guard_user_mutation(t_username, payload["username"], removes_admin=(t_role == "admin" and t_enabled))
     with get_conn() as conn:
         conn.execute("DELETE FROM users WHERE id=%s", (uid,))
         conn.commit()

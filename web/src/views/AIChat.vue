@@ -2,28 +2,28 @@
   <el-card style="height: calc(100vh - 140px); display: flex; flex-direction: column">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>🤖 AI 助手（自然语言查询）</span>
-        <el-tag size="small">只读工具 · 下单类不开放</el-tag>
+        <span>{{ t('chat.title') }}</span>
+        <el-tag size="small">{{ t('chat.tag') }}</el-tag>
       </div>
     </template>
     <div class="chat-body" ref="body">
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
         <div class="bubble" v-text="msg.content"></div>
       </div>
-      <div v-if="loading" class="msg assistant"><div class="bubble">{{ streamingText || '思考中...' }}</div></div>
+      <div v-if="loading" class="msg assistant"><div class="bubble">{{ streamingText || t('chat.thinking') }}</div></div>
     </div>
     <div class="chat-input">
       <el-input
-        v-model="input" placeholder="输入查询，如：现在持仓多少？今天盈亏？BTC策略什么状态？"
+        v-model="input" :placeholder="t('chat.ph')"
         @keyup.enter="onSend" :disabled="loading" clearable>
         <template #append>
-          <el-button @click="onSend" :loading="loading" :icon="Promotion">发送</el-button>
+          <el-button @click="onSend" :loading="loading" :icon="Promotion">{{ t('chat.send') }}</el-button>
         </template>
       </el-input>
       <div style="margin-top: 8px">
-        <el-button size="small" @click="quick('查持仓')">查持仓</el-button>
-        <el-button size="small" @click="quick('今天盈亏')">今天盈亏</el-button>
-        <el-button size="small" @click="quick('策略运行状态')">策略状态</el-button>
+        <el-button size="small" @click="quick(t('chat.qPosition'))">{{ t('chat.qPosition') }}</el-button>
+        <el-button size="small" @click="quick(t('chat.qPnl'))">{{ t('chat.qPnl') }}</el-button>
+        <el-button size="small" @click="quick(t('chat.qStatus'))">{{ t('chat.qStatus') }}</el-button>
       </div>
     </div>
   </el-card>
@@ -31,11 +31,13 @@
 
 <script setup>
 import { ref, nextTick, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Promotion } from '@element-plus/icons-vue'
 import { chat } from '../api'
 
+const { t } = useI18n()
 const messages = ref([
-  { role: 'assistant', content: '你好，我是 AI 助手。可以帮你查持仓、盈亏、策略状态、A股研判等。输入查询即可。' }
+  { role: 'assistant', content: t('chat.greeting') }
 ])
 const input = ref('')
 const loading = ref(false)
@@ -95,7 +97,7 @@ const onSend = async () => {
     }
   } catch (e) {
     console.error(e)
-    messages.value.push({ role: 'assistant', content: '查询失败，请稍后重试' })
+    messages.value.push({ role: 'assistant', content: t('chat.failed') })
   } finally {
     loading.value = false
     sending.value = false

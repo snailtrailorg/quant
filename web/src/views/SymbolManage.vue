@@ -3,14 +3,14 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <div>
-          <el-button @click="$router.back()" size="small" link>← 返回</el-button>
-          <span style="margin-left: 8px">{{ title }} · 标的列表（{{ total }} 只，虚拟滚动）</span>
+          <el-button @click="$router.back()" size="small" link>← {{ t('common.return') }}</el-button>
+          <span style="margin-left: 8px">{{ t('symbol.listTitle', { title, n: total }) }}</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: center">
-          <el-input v-model="q" placeholder="搜代码/名称" size="small" style="width: 180px" clearable @keyup.enter="onSearch" />
-          <el-button @click="onSearch" size="small">搜索</el-button>
-          <el-button @click="load" size="small">刷新</el-button>
-          <el-button type="primary" size="small" @click="onSyncAll" :loading="allRunning">全量同步全部</el-button>
+          <el-input v-model="q" :placeholder="t('symbol.phSearch')" size="small" style="width: 180px" clearable @keyup.enter="onSearch" />
+          <el-button @click="onSearch" size="small">{{ t('common.search') }}</el-button>
+          <el-button @click="load" size="small">{{ t('common.refresh') }}</el-button>
+          <el-button type="primary" size="small" @click="onSyncAll" :loading="allRunning">{{ t('symbol.syncAll') }}</el-button>
         </div>
       </div>
     </template>
@@ -44,31 +44,33 @@
     </div>
 
     <!-- 回补弹窗 -->
-    <el-dialog v-model="bfVisible" :title="`回补 ${bfSymbol}`" width="420px">
+    <el-dialog v-model="bfVisible" :title="t('symbol.backfillTitle', { symbol: bfSymbol })" width="420px">
       <el-form label-width="80px">
-        <el-form-item label="起始">
-          <el-input v-model="bfForm.start" placeholder="YYYYMMDD 如 20260626" />
+        <el-form-item :label="t('symbol.start')">
+          <el-input v-model="bfForm.start" :placeholder="t('symbol.phDate')" />
         </el-form-item>
-        <el-form-item label="结束">
-          <el-input v-model="bfForm.end" placeholder="YYYYMMDD 如 20260726" />
+        <el-form-item :label="t('symbol.end')">
+          <el-input v-model="bfForm.end" :placeholder="t('symbol.phDate')" />
         </el-form-item>
         <el-alert type="warning" :closable="false" show-icon
-          title="回补会覆盖本地已有数据（手动回补优先级高于增量）" />
+          :title="t('symbol.backfillHint')" />
       </el-form>
       <template #footer>
-        <el-button @click="bfVisible = false">取消</el-button>
-        <el-button type="primary" @click="doBackfill" :loading="bfLoading">回补</el-button>
+        <el-button @click="bfVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="doBackfill" :loading="bfLoading">{{ t('symbol.backfill') }}</el-button>
       </template>
     </el-dialog>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, ElButton, ElTag } from 'element-plus'
 import api from '../api'
 
+const { t } = useI18n()
 const route = useRoute()
 const syncId = route.params.syncId
 const title = ref(syncId)
@@ -83,28 +85,27 @@ const taskId = ref('')
 const idleSince = ref(0)
 let progressTimer = null
 
-// 虚拟滚动 columns（cellRenderer 用 h 函数）
-const columns = [
-  { key: 'ts_code', dataKey: 'ts_code', title: '代码', width: 120 },
-  { key: 'name', dataKey: 'name', title: '名称', width: 120 },
-  { key: 'list_date', dataKey: 'list_date', title: '上市日', width: 110 },
+// 虚拟滚动 columns（computed 响应语言切换；cellRenderer 用 h 函数）
+const columns = computed(() => [
+  { key: 'ts_code', dataKey: 'ts_code', title: t('symbol.code'), width: 120 },
+  { key: 'name', dataKey: 'name', title: t('common.name'), width: 120 },
+  { key: 'list_date', dataKey: 'list_date', title: t('symbol.listDate'), width: 110 },
   {
-    key: 'local', title: '本地数据', width: 240,
+    key: 'local', title: t('symbol.localData'), width: 240,
     cellRenderer: ({ row }) => row.local_count > 0
-      ? h('span', { style: 'font-size: 12px' }, `${row.local_count} 根 · ${row.local_first} ~ ${row.local_last}`)
-      : h(ElTag, { size: 'small', type: 'info' }, () => '空')
+      ? h('span', { style: 'font-size: 12px' }, t('symbol.localSummary', { n: row.local_count, first: row.local_first, last: row.local_last }))
+      : h(ElTag, { size: 'small', type: 'info' }, () => t('symbol.empty'))
   },
   {
-    key: 'actions', title: '操作', width: 280, fixed: 'right',
+    key: 'actions', title: t('common.action'), width: 280, fixed: 'right',
     cellRenderer: ({ row }) => h('div', { style: 'display: flex; gap: 4px' }, [
-      h(ElButton, { size: 'small', type: 'primary', loading: row._loading, onClick: () => onSync(row) }, () => '同步'),
-      h(ElButton, { size: 'small', type: 'warning', onClick: () => onBackfill(row) }, () => '回补'),
-      h(ElButton, { size: 'small', type: 'danger', onClick: () => onDelete(row) }, () => '删除'),
+      h(ElButton, { size: 'small', type: 'primary', loading: row._loading, onClick: () => onSync(row) }, () => t('symbol.sync')),
+      h(ElButton, { size: 'small', type: 'warning', onClick: () => onBackfill(row) }, () => t('symbol.backfill')),
+      h(ElButton, { size: 'small', type: 'danger', onClick: () => onDelete(row) }, () => t('common.delete')),
     ])
   },
-]
+])
 
-// 一次加载全部（size=9999），el-table-v2 虚拟滚动只渲染可见行
 const load = async () => {
   loading.value = true
   try {
@@ -115,24 +116,22 @@ const load = async () => {
 }
 const onSearch = () => load()
 
-// 单只同步
 const onSync = async (row) => {
   row._loading = true
   try {
     const r = await api.post(`/sync/symbol/${syncId}/${row.ts_code}`, { mode: 'auto' }, { timeout: 120000 })
     if (r.status === 'uptodate') {
-      ElMessage.info(`${row.ts_code} 已是最新`)
+      ElMessage.info(t('symbol.uptodate', { code: row.ts_code }))
     } else if (r.status === 'success') {
-      ElMessage.success(`${row.ts_code} ${r.mode_used === 'full' ? '全量' : '增量'}拉取${r.pulled} 入库${r.saved} (${r.range[0]}~${r.range[1]})`)
+      ElMessage.success(t('symbol.syncResult', { code: row.ts_code, mode: r.mode_used === 'full' ? t('backtest.modeSingle') : '', pulled: r.pulled, saved: r.saved, range: `${r.range[0]}~${r.range[1]}` }))
     } else {
-      ElMessage.warning(`${row.ts_code} ${r.status}: ${r.error || ''}`)
+      ElMessage.warning(t('symbol.syncWarn', { code: row.ts_code, status: r.status, error: r.error || '' }))
     }
     await load()
-  } catch (e) { ElMessage.error(e.detail || e.message || '同步失败') }
+  } catch (e) { ElMessage.error(e.detail || e.message || t('symbol.syncFailed')) }
   finally { row._loading = false }
 }
 
-// 回补
 const bfVisible = ref(false)
 const bfSymbol = ref('')
 const bfForm = ref({ start: '', end: '' })
@@ -150,37 +149,35 @@ const doBackfill = async () => {
     const r = await api.post(`/sync/symbol/${syncId}/${bfSymbol.value}/backfill`,
       { start: bfForm.value.start, end: bfForm.value.end }, { timeout: 120000 })
     if (r.status === 'success') {
-      ElMessage.success(`${bfSymbol.value} 回补${r.pulled}条 覆盖入库 (${r.range[0]}~${r.range[1]})`)
+      ElMessage.success(t('symbol.backfillResult', { code: bfSymbol.value, pulled: r.pulled, range: `${r.range[0]}~${r.range[1]}` }))
       bfVisible.value = false
       await load()
     } else if (r.status === 'empty') {
-      ElMessage.warning(`${bfSymbol.value} 该区间无数据`)
+      ElMessage.warning(t('symbol.backfillEmpty', { code: bfSymbol.value }))
     } else {
-      ElMessage.error(r.error || '回补失败')
+      ElMessage.error(r.error || t('symbol.backfillFailed'))
     }
-  } catch (e) { ElMessage.error(e.detail || e.message || '回补失败') }
+  } catch (e) { ElMessage.error(e.detail || e.message || t('symbol.backfillFailed')) }
   finally { bfLoading.value = false }
 }
 
-// 删除
 const onDelete = async (row) => {
   try {
-    await ElMessageBox.confirm(`确认删除 ${row.ts_code} 的本地数据？再次同步即完整重建`, '确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('symbol.confirmDelete', { code: row.ts_code }), t('common.confirm'), { type: 'warning' })
     const r = await api.delete(`/sync/symbol/${syncId}/${row.ts_code}`)
-    ElMessage.success(`${row.ts_code} 已删除 ${r.deleted} 行`)
+    ElMessage.success(t('symbol.deletedRows', { code: row.ts_code, n: r.deleted }))
     await load()
-  } catch (e) { if (e !== 'cancel') ElMessage.error('删除失败') }
+  } catch (e) { if (e !== 'cancel') ElMessage.error(t('common.deleteFailed')) }
 }
 
-// 全量同步（Celery 后台）
 const onSyncAll = async () => {
   try {
-    await ElMessageBox.confirm(`全量同步 ${title.value} 全部标的？后台执行，约数分钟到数十分钟。`, '全量同步', { type: 'warning' })
+    await ElMessageBox.confirm(t('symbol.confirmSyncAll', { title: title.value }), t('symbol.syncAllTitle'), { type: 'warning' })
     const r = await api.post(`/sync/all/${syncId}`)
-    ElMessage.success(`已提交后台任务 ${r.task_id.slice(0, 8)}`)
+    ElMessage.success(t('symbol.taskSubmitted', { id: r.task_id.slice(0, 8) }))
     allRunning.value = true
     startProgress()
-  } catch (e) { if (e !== 'cancel') ElMessage.error('提交失败') }
+  } catch (e) { if (e !== 'cancel') ElMessage.error(t('symbol.submitFailed')) }
 }
 
 const startProgress = () => {
@@ -196,13 +193,13 @@ const startProgress = () => {
         idleSince.value += 2
         if (idleSince.value > 30) {
           allRunning.value = false
-          ElMessage.warning('任务状态查询失败（可能未启动或 worker 未运行）')
+          ElMessage.warning(t('symbol.statusQueryFailed'))
           stopProgress()
         }
       } else {
         allRunning.value = false
         if (p.status === 'success' || p.status === 'partial') {
-          ElMessage.success(`全量完成: ${p.ok || 0}/${p.total} 成功, 入库 ${p.saved || 0}, 失败 ${p.failed_count || 0}`)
+          ElMessage.success(t('symbol.syncAllDone', { ok: p.ok || 0, total: p.total, saved: p.saved || 0, failed: p.failed_count || 0 }))
           stopProgress()
           await load()
         } else if (p.status === 'error') {

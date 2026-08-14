@@ -12,7 +12,7 @@ import time
 import bcrypt
 import secrets
 from typing import Literal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import jwt
 import psycopg
 import logging
@@ -100,6 +100,31 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
+def validate_password(password: str) -> None:
+    """密码复杂度校验：≥8 位，需含字母和数字。不达标抛 ValueError（前端 register/change-password 同规则）。"""
+    if not password or len(password) < 8:
+        raise ValueError("密码至少 8 位")
+    if not re.search(r"[A-Za-z]", password):
+        raise ValueError("密码需包含字母")
+    if not re.search(r"[0-9]", password):
+        raise ValueError("密码需包含数字")
+
+
+def guard_user_mutation(target_username: str, current_username: str, removes_admin: bool) -> None:
+    """账户变更保护（DELETE / PUT user 共用，两条不变量，防两类锁定）：
+    1. 不能动自己 —— 管理页不得删/改角色/禁用"自己"那行（自我锁定）；
+    2. 不能移除最后一个启用的管理员 —— 任何使启用 admin 数降为 0 的操作都拒（管理锁定）。
+    removes_admin：本次操作是否剥夺一个"启用 admin"身份（删/降级/禁用 且目标当前是启用 admin），由调用方算。
+    """
+    if target_username == current_username:
+        raise HTTPException(400, "不能修改或删除当前登录的账户")
+    if removes_admin:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT count(*) FROM users WHERE role='admin' AND enabled=true")
+            if cur.fetchone()[0] <= 1:
+                raise HTTPException(400, "不能移除最后一个启用的管理员")
+
+
 def verify_password(password: str, stored: str) -> bool:
     """bcrypt 验证（兼容旧 sha256：非 bcrypt 哈希返回 False 触发重置）。"""
     if not stored:
@@ -175,10 +200,10 @@ def ensure_default_admin():
 
 # ——— 邀请制用户管理（邀请/开通/改密码/找回）———
 
-def create_token(email: str, token_type: str, user_id: int | None = None, hours: int = 168) -> str:
-    """生成 token 存 user_tokens（默认 7 天，password_reset 1 小时）。"""
+def create_token(email: str, token_type: str, user_id: int | None = None, hours: int = 72) -> str:
+    """生成 token 存 user_tokens（默认 3 天，password_reset 1 小时）。"""
     token = secrets.token_urlsafe(32)
-    expires = datetime.utcnow() + timedelta(hours=hours)
+    expires = datetime.now(timezone.utc) + timedelta(hours=hours)
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO user_tokens (user_id, email, token, type, expires_at) VALUES (%s,%s,%s,%s,%s)",
@@ -196,7 +221,7 @@ def verify_token(token: str, token_type: str) -> dict | None:
         row = cur.fetchone()
     if not row or row[4]:  # used
         return None
-    if row[3] < datetime.utcnow():  # expired
+    if row[3] < datetime.now(timezone.utc):  # expired（DB 列 timestamptz aware，用 aware UTC 比较）
         return None
     return {"id": row[0], "user_id": row[1], "email": row[2]}
 
@@ -208,12 +233,12 @@ def _mark_token_used(token_id: int):
 
 
 def invite_user(email: str) -> str | None:
-    """admin 邀请：检查 email 未注册，生成 invite token（7 天）。"""
+    """admin 邀请：检查 email 未注册，生成 invite token（3 天）。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT id FROM users WHERE email=%s", (email,))
         if cur.fetchone():
             return None  # 已注册
-    return create_token(email, "invite", hours=168)
+    return create_token(email, "invite", hours=72)
 
 
 def register_user(token: str, username: str, password: str) -> dict | None:

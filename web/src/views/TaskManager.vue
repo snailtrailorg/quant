@@ -2,55 +2,55 @@
   <el-card>
     <template #header>
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <span>后台任务管理（统一监控 + 卡死检测 + 强制删除）</span>
+        <span>{{ t('task.title') }}</span>
         <div style="display:flex;gap:8px;align-items:center">
           <el-select v-model="filterStatus" size="small" style="width:120px" @change="load">
-            <el-option label="全部" value="" />
-            <el-option label="运行中" value="running" />
-            <el-option label="已完成" value="completed" />
-            <el-option label="失败" value="failed" />
-            <el-option label="卡死" value="stuck" />
-            <el-option label="已终止" value="terminated" />
+            <el-option :label="t('common.all')" value="" />
+            <el-option :label="t('task.statusRunning')" value="running" />
+            <el-option :label="t('task.statusCompleted')" value="completed" />
+            <el-option :label="t('task.statusFailed')" value="failed" />
+            <el-option :label="t('task.statusStuck')" value="stuck" />
+            <el-option :label="t('task.statusTerminated')" value="terminated" />
           </el-select>
-          <el-button size="small" @click="load">刷新</el-button>
-          <el-button size="small" type="warning" @click="onDetectStuck" v-if="role==='admin'">卡死检测</el-button>
+          <el-button size="small" @click="load">{{ t('common.refresh') }}</el-button>
+          <el-button size="small" type="warning" @click="onDetectStuck" v-if="role==='admin'">{{ t('task.detectStuck') }}</el-button>
         </div>
       </div>
     </template>
     <el-table :data="tasks" stripe size="small">
-      <el-table-column prop="id" label="任务ID" width="120" show-overflow-tooltip />
-      <el-table-column prop="name" label="名称" />
-      <el-table-column prop="type" label="类型" width="80" />
-      <el-table-column label="状态" width="90">
+      <el-table-column prop="id" :label="t('task.taskId')" width="120" show-overflow-tooltip />
+      <el-table-column prop="name" :label="t('common.name')" />
+      <el-table-column prop="type" :label="t('common.type')" width="80" />
+      <el-table-column :label="t('common.status')" width="90">
         <template #default="{ row }"><el-tag :type="statusType(row.status)" size="small">{{ statusLabel(row.status) }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="进度" width="140">
+      <el-table-column :label="t('task.progress')" width="140">
         <template #default="{ row }">{{ row.progress?.pct || 0 }}% ({{ row.progress?.current || 0 }}/{{ row.progress?.total || 0 }})</template>
       </el-table-column>
-      <el-table-column prop="last_heartbeat" label="心跳" width="150">
+      <el-table-column prop="last_heartbeat" :label="t('task.heartbeat')" width="150">
         <template #default="{ row }">{{ row.last_heartbeat ? row.last_heartbeat.slice(0,19).replace('T',' ') : '-' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="220">
+      <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
-          <el-button size="small" @click="onDetail(row.id)">详情</el-button>
-          <el-button size="small" type="warning" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)">终止</el-button>
-          <el-button size="small" type="danger" @click="onForceDelete(row.id)" v-if="role==='admin'">强制删除</el-button>
+          <el-button size="small" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>
+          <el-button size="small" type="warning" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)">{{ t('task.terminate') }}</el-button>
+          <el-button size="small" type="danger" @click="onForceDelete(row.id)" v-if="role==='admin'">{{ t('task.forceDelete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="detailVisible" title="任务详情" width="700px">
+    <el-dialog v-model="detailVisible" :title="t('task.detailTitle')" width="700px">
       <div v-if="detail">
-        <p>名称: {{ detail.name }} | 类型: {{ detail.type }} | 状态: <el-tag :type="statusType(detail.status)" size="small">{{ statusLabel(detail.status) }}</el-tag></p>
-        <p>参数: {{ JSON.stringify(detail.params) }}</p>
-        <p v-if="detail.error_message" style="color:#f56c6c">错误: {{ detail.error_message }}</p>
+        <p>{{ t('common.name') }}: {{ detail.name }} | {{ t('common.type') }}: {{ detail.type }} | {{ t('common.status') }}: <el-tag :type="statusType(detail.status)" size="small">{{ statusLabel(detail.status) }}</el-tag></p>
+        <p>{{ t('task.params') }}: {{ JSON.stringify(detail.params) }}</p>
+        <p v-if="detail.error_message" style="color:#f56c6c">{{ t('task.error') }}: {{ detail.error_message }}</p>
         <el-divider />
-        <h4>执行日志（最近50条）</h4>
+        <h4>{{ t('task.execLogs') }}</h4>
         <el-table :data="detail.logs" stripe size="small" max-height="300">
-          <el-table-column prop="level" label="级别" width="70" />
-          <el-table-column prop="message" label="内容" />
-          <el-table-column prop="step_name" label="步骤" width="100" />
-          <el-table-column prop="created_at" label="时间" width="150">
+          <el-table-column prop="level" :label="t('log.level')" width="70" />
+          <el-table-column prop="message" :label="t('log.content')" />
+          <el-table-column prop="step_name" :label="t('task.step')" width="100" />
+          <el-table-column prop="created_at" :label="t('common.time')" width="150">
             <template #default="{ row }">{{ row.created_at ? row.created_at.slice(0,19).replace('T',' ') : '' }}</template>
           </el-table-column>
         </el-table>
@@ -61,9 +61,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getTasks, getTaskDetail, terminateTask, forceDeleteTask, detectStuck } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { t } = useI18n()
 const tasks = ref([])
 const filterStatus = ref('')
 const detailVisible = ref(false)
@@ -71,7 +73,7 @@ const detail = ref(null)
 const role = ref(localStorage.getItem('role') || 'viewer')
 
 const statusType = s => ({ running: 'warning', completed: 'success', failed: 'danger', stuck: 'danger', terminated: 'info', paused: 'info' }[s] || '')
-const statusLabel = s => ({ running: '运行中', completed: '已完成', failed: '失败', stuck: '卡死', terminated: '已终止', paused: '已暂停' }[s] || s)
+const statusLabel = s => ({ running: t('task.statusRunning'), completed: t('task.statusCompleted'), failed: t('task.statusFailed'), stuck: t('task.statusStuck'), terminated: t('task.statusTerminated'), paused: t('task.statusPaused') }[s] || s)
 
 const load = async () => { try { tasks.value = (await getTasks(filterStatus.value)).items || [] } catch (e) { console.error(e) } }
 onMounted(load)
@@ -81,20 +83,20 @@ const onDetail = async (id) => {
   detailVisible.value = true
 }
 const onTerminate = async (id) => {
-  await ElMessageBox.confirm('确认终止此任务？', '提示', { type: 'warning' })
+  await ElMessageBox.confirm(t('task.confirmTerminate'), t('common.tip'), { type: 'warning' })
   await terminateTask(id)
-  ElMessage.success('已终止')
+  ElMessage.success(t('task.terminated'))
   load()
 }
 const onForceDelete = async (id) => {
-  await ElMessageBox.confirm('确认强制删除此任务（卡死清理）？', '高危确认', { type: 'warning' })
+  await ElMessageBox.confirm(t('task.confirmForceDelete'), t('task.highRiskConfirm'), { type: 'warning' })
   await forceDeleteTask(id)
-  ElMessage.success('已删除')
+  ElMessage.success(t('common.deleteSuccess'))
   load()
 }
 const onDetectStuck = async () => {
   const r = await detectStuck()
-  ElMessage.success(`标记 ${r.stuck_count} 个卡死任务`)
+  ElMessage.success(t('task.markedStuck', { n: r.stuck_count }))
   load()
 }
 </script>

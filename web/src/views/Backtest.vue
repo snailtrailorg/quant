@@ -3,85 +3,85 @@
     <el-card>
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>回测运行列表</span>
-          <el-button type="primary" @click="showForm = true">新建回测</el-button>
+          <span>{{ t('backtest.runList') }}</span>
+          <el-button type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
         </div>
       </template>
       <el-table :data="runs" stripe v-loading="loading" @row-click="goDetail">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="strategy_id" label="策略" />
-        <el-table-column prop="status" label="状态" width="100">
+        <el-table-column prop="strategy_id" :label="t('backtest.strategy')" />
+        <el-table-column prop="status" :label="t('common.status')" width="100">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="mode" label="模式" width="80" />
-        <el-table-column label="标的" min-width="100">
-          <template #default="{ row }">{{ row.symbols?.length || 0 }} 个</template>
+        <el-table-column prop="mode" :label="t('backtest.mode')" width="80" />
+        <el-table-column :label="t('common.symbol')" min-width="100">
+          <template #default="{ row }">{{ t('backtest.symbolCount', { n: row.symbols?.length || 0 }) }}</template>
         </el-table-column>
-        <el-table-column label="创建时间" width="160">
+        <el-table-column :label="t('common.createdAt')" width="160">
           <template #default="{ row }">{{ row.created_at?.slice(0, 19) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column :label="t('common.action')" width="160" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click.stop="goDetail(row)">详情</el-button>
-            <el-button size="small" v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)">终止</el-button>
+            <el-button size="small" @click.stop="goDetail(row)">{{ t('common.detail') }}</el-button>
+            <el-button size="small" v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)">{{ t('backtest.terminate') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
 
     <!-- 新建回测弹窗 -->
-    <el-dialog v-model="showForm" title="新建回测" width="640px">
+    <el-dialog v-model="showForm" :title="t('backtest.create')" width="640px">
       <el-form :model="form" label-width="100px">
-        <el-form-item label="策略">
-          <el-select v-model="form.strategyId" placeholder="选择策略" style="width: 100%" @change="onStrategyChange">
+        <el-form-item :label="t('backtest.strategy')">
+          <el-select v-model="form.strategyId" :placeholder="t('backtest.phStrategy')" style="width: 100%" @change="onStrategyChange">
             <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="标的">
+        <el-form-item :label="t('common.symbol')">
           <el-input v-model="form.symbolsStr" type="textarea" :rows="2"
-            placeholder="多个标的用逗号分隔，如 600000.SHSE,600001.SHSE" />
+            :placeholder="t('backtest.phSymbols')" />
         </el-form-item>
-        <el-form-item label="标的池">
-          <el-select v-model="form.poolId" placeholder="或选标的池（覆盖上面）" clearable style="width: 100%">
+        <el-form-item :label="t('backtest.pool')">
+          <el-select v-model="form.poolId" :placeholder="t('backtest.phPool')" clearable style="width: 100%">
             <el-option v-for="p in pools" :key="p.id" :label="p.name" :value="p.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="回测区间">
-          <el-date-picker v-model="form.dateRange" type="daterange" start-placeholder="开始" end-placeholder="结束" style="width: 100%" />
+        <el-form-item :label="t('backtest.dateRange')">
+          <el-date-picker v-model="form.dateRange" type="daterange" :start-placeholder="t('common.startDate')" :end-placeholder="t('common.endDate')" style="width: 100%" />
         </el-form-item>
-        <el-form-item label="模式">
+        <el-form-item :label="t('backtest.mode')">
           <el-select v-model="form.mode" style="width: 100%">
-            <el-option label="并行" value="parallel" />
-            <el-option label="串行" value="serial" />
-            <el-option label="单只" value="single" />
+            <el-option :label="t('backtest.modeParallel')" value="parallel" />
+            <el-option :label="t('backtest.modeSerial')" value="serial" />
+            <el-option :label="t('backtest.modeSingle')" value="single" />
           </el-select>
         </el-form-item>
-        <el-form-item label="初始资金">
+        <el-form-item :label="t('common.initialCapital')">
           <el-input-number v-model="form.capital" :min="10000" :step="100000" style="width: 100%" />
         </el-form-item>
 
         <!-- 统一参数 -->
-        <el-divider content-position="left">统一参数（所有标的共用）</el-divider>
+        <el-divider content-position="left">{{ t('backtest.unifiedParams') }}</el-divider>
         <ParameterForm v-if="parameterDefs.length" :defs="parameterDefs" v-model="form.params" />
-        <div v-else style="color: #999; font-size: 12px; padding-left: 100px">该策略未定义参数</div>
+        <div v-else style="color: #999; font-size: 12px; padding-left: 100px">{{ t('backtest.noParams') }}</div>
 
         <!-- per-symbol 参数（高级） -->
         <el-divider content-position="left">
-          <el-checkbox v-model="form.useSymbolParams">高级：per-symbol 参数覆盖</el-checkbox>
+          <el-checkbox v-model="form.useSymbolParams">{{ t('backtest.advSymbolParams') }}</el-checkbox>
         </el-divider>
         <template v-if="form.useSymbolParams">
           <div style="color: #999; font-size: 12px; margin-bottom: 8px; padding-left: 100px">
-            JSON 格式：{ "600000.SHSE": {"buy_threshold": 0.03}, ... }
+            {{ t('backtest.jsonHint') }}
           </div>
           <el-input v-model="form.symbolParamsStr" type="textarea" :rows="4"
             placeholder='{"600000.SHSE": {"buy_threshold": 0.03}}' />
         </template>
       </el-form>
       <template #footer>
-        <el-button @click="showForm = false">取消</el-button>
-        <el-button type="primary" @click="submitRun" :loading="submitting">开始回测</el-button>
+        <el-button @click="showForm = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="submitRun" :loading="submitting">{{ t('backtest.startRun') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -90,11 +90,13 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
 
+const { t } = useI18n()
 const router = useRouter()
 const runs = ref([])
 const strategies = ref([])
@@ -118,35 +120,32 @@ const statusType = (s) => ({ running: 'warning', done: 'success', error: 'danger
 
 const loadRuns = async () => {
   loading.value = true
-  try { runs.value = await getBacktests() } catch (e) { ElMessage.error('加载回测列表失败') }
+  try { runs.value = await getBacktests() } catch (e) { ElMessage.error(t('backtest.loadFailed')) }
   finally { loading.value = false }
 }
 
 const goDetail = (row) => router.push(`/backtest/${row.id}`)
 
 const cancelRun = async (row) => {
-  // 终止回测（terminate_task 端点）
   try {
     await api.post(`/tasks/${row.task_id}/terminate`)
-    ElMessage.success('已终止')
+    ElMessage.success(t('backtest.terminated'))
     await loadRuns()
-  } catch (e) { ElMessage.error('终止失败') }
+  } catch (e) { ElMessage.error(t('backtest.terminateFailed')) }
 }
 
 const submitRun = async () => {
-  if (!form.value.strategyId) { ElMessage.warning('请选择策略'); return }
+  if (!form.value.strategyId) { ElMessage.warning(t('backtest.selectStrategy')); return }
   submitting.value = true
   try {
-    // 解析 symbols 字符串
     let symbols = []
     if (form.value.symbolsStr) {
       symbols = form.value.symbolsStr.split(/[,，\s]+/).map(s => s.trim()).filter(Boolean)
     }
-    // 解析 per-symbol 参数
     let symbolParams = {}
     if (form.value.useSymbolParams && form.value.symbolParamsStr) {
       try { symbolParams = JSON.parse(form.value.symbolParamsStr) }
-      catch { ElMessage.error('per-symbol 参数 JSON 格式错误'); submitting.value = false; return }
+      catch { ElMessage.error(t('backtest.jsonError')); submitting.value = false; return }
     }
     const payload = {
       strategy_config_id: form.value.strategyId,
@@ -163,10 +162,10 @@ const submitRun = async () => {
       ...(Object.keys(symbolParams).length ? { symbol_params: symbolParams } : {}),
     }
     await createBacktest(payload)
-    ElMessage.success('已提交回测')
+    ElMessage.success(t('backtest.submitted'))
     showForm.value = false
     await loadRuns()
-  } catch (e) { ElMessage.error('提交失败') }
+  } catch (e) { ElMessage.error(t('backtest.submitFailed')) }
   finally { submitting.value = false }
 }
 

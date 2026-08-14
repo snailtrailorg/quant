@@ -2,8 +2,8 @@
   <el-card>
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>多策略实时监控看板</span>
-        <el-button @click="load" size="small">刷新</el-button>
+        <span>{{ t('monitoring.title') }}</span>
+        <el-button @click="load" size="small">{{ t('common.refresh') }}</el-button>
       </div>
     </template>
     <el-row :gutter="16" v-loading="loading">
@@ -13,31 +13,32 @@
             <div style="display: flex; justify-content: space-between; align-items: center">
               <span>{{ s.name }}</span>
               <el-tag :type="s.enabled ? 'success' : 'info'" size="small">
-                {{ s.enabled ? '运行中' : '已停' }}
+                {{ s.enabled ? t('strategy.statusRunning') : t('strategy.statusStopped') }}
               </el-tag>
             </div>
           </template>
           <div style="margin-bottom: 12px">
             <el-descriptions :column="2" size="small" border>
-              <el-descriptions-item label="标的">{{ s.symbol }}</el-descriptions-item>
-              <el-descriptions-item label="类型">{{ s.type }}</el-descriptions-item>
-              <el-descriptions-item label="回测验证">{{ s.backtest_verified ? '✓' : '✗' }}</el-descriptions-item>
-              <el-descriptions-item label="资产">¥{{ formatNum(s._equity) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('common.symbol')">{{ s.symbol }}</el-descriptions-item>
+              <el-descriptions-item :label="t('common.type')">{{ s.type }}</el-descriptions-item>
+              <el-descriptions-item :label="t('monitoring.backtestVerified')">{{ s.backtest_verified ? '✓' : '✗' }}</el-descriptions-item>
+              <el-descriptions-item :label="t('monitoring.equity')">¥{{ formatNum(s._equity) }}</el-descriptions-item>
             </el-descriptions>
           </div>
           <div style="height: 200px">
             <v-chart v-if="s._curve?.length" :option="chartOption(s)" autoresize style="height: 200px" />
-            <div v-else style="text-align: center; color: #999; line-height: 200px">暂无净值数据（strategy_runner 写入后显示）</div>
+            <div v-else style="text-align: center; color: #999; line-height: 200px">{{ t('monitoring.noEquityHint') }}</div>
           </div>
         </el-card>
       </el-col>
     </el-row>
-    <el-alert v-if="!strategies.length" type="info" :closable="false">暂无策略</el-alert>
+    <el-alert v-if="!strategies.length" type="info" :closable="false">{{ t('monitoring.noStrategy') }}</el-alert>
   </el-card>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getStrategies, getPnl } from '../api'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -45,6 +46,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 
+const { t } = useI18n()
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const strategies = ref([])
@@ -62,7 +64,6 @@ const load = async () => {
   loading.value = true
   try {
     strategies.value = await getStrategies()
-    // P2-9：加载盈亏曲线（PnL 全局，分策略后可按 symbol 查）
     try {
       const pnl = await getPnl()
       const curve = pnl.curve || []

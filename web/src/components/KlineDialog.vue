@@ -2,18 +2,18 @@
   <el-dialog v-model="visible" :title="title" width="90%" top="3vh" @open="onOpen" @closed="onClose" destroy-on-close>
     <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; align-items: center">
       <el-radio-group v-model="period" size="small" @change="onPeriodChange">
-        <el-radio-button label="日K" />
-        <el-radio-button label="周K" />
-        <el-radio-button label="月K" />
+        <el-radio-button value="day">{{ t('kline.dayK') }}</el-radio-button>
+        <el-radio-button value="week">{{ t('kline.weekK') }}</el-radio-button>
+        <el-radio-button value="month">{{ t('kline.monthK') }}</el-radio-button>
       </el-radio-group>
-      <el-select v-model="mainIndicator" size="small" placeholder="主图指标" style="width: 140px" @change="onMainChange">
-        <el-option label="无" value="" />
+      <el-select v-model="mainIndicator" size="small" :placeholder="t('kline.mainIndicator')" style="width: 140px" @change="onMainChange">
+        <el-option :label="t('kline.none')" value="" />
         <el-option label="MA" value="MA" />
         <el-option label="BOLL" value="BOLL" />
         <el-option label="SAR" value="SAR" />
       </el-select>
-      <el-select v-model="subIndicator" size="small" placeholder="副图指标" style="width: 140px" @change="onSubChange">
-        <el-option label="无" value="" />
+      <el-select v-model="subIndicator" size="small" :placeholder="t('kline.subIndicator')" style="width: 140px" @change="onSubChange">
+        <el-option :label="t('kline.none')" value="" />
         <el-option label="VOL" value="VOL" />
         <el-option label="MACD" value="MACD" />
         <el-option label="KDJ" value="KDJ" />
@@ -23,7 +23,7 @@
         <el-option label="BIAS" value="BIAS" />
         <el-option label="OBV" value="OBV" />
       </el-select>
-      <span style="color: #999; font-size: 12px">{{ symbol }} · {{ dataCount }} 根K线</span>
+      <span style="color: #999; font-size: 12px">{{ t('kline.barCount', { symbol, n: dataCount }) }}</span>
     </div>
     <div ref="chartRef" style="width: 100%; height: 500px"></div>
   </el-dialog>
@@ -31,9 +31,11 @@
 
 <script setup>
 import { ref, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { init, dispose } from 'klinecharts'
 import api from '../api'
 
+const { t } = useI18n()
 const props = defineProps({
   modelValue: Boolean,
   symbol: String,
@@ -47,7 +49,7 @@ watch(visible, v => emit('update:modelValue', v))
 
 const chartRef = ref(null)
 const title = ref('')
-const period = ref('日K')
+const period = ref('day')
 const mainIndicator = ref('MA')
 const subIndicator = ref('VOL')
 const dataCount = ref(0)
@@ -55,7 +57,7 @@ let chart = null
 let allData = []
 
 const onOpen = async () => {
-  title.value = `${props.name || props.symbol} · K线图`
+  title.value = t('kline.title', { name: props.name || props.symbol })
   await nextTick()
   await loadChart()
 }
@@ -138,14 +140,14 @@ async function loadChart() {
 }
 
 function getPeriodConfig() {
-  if (period.value === '周K') return { type: 'week', span: 1 }
-  if (period.value === '月K') return { type: 'month', span: 1 }
+  if (period.value === 'week') return { type: 'week', span: 1 }
+  if (period.value === 'month') return { type: 'month', span: 1 }
   return { type: 'day', span: 1 }
 }
 
 function getPeriodData() {
-  if (period.value === '周K') return aggregateKline(allData, 5)
-  if (period.value === '月K') return aggregateKline(allData, 20)
+  if (period.value === 'week') return aggregateKline(allData, 5)
+  if (period.value === 'month') return aggregateKline(allData, 20)
   return allData
 }
 

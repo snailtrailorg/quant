@@ -15,14 +15,16 @@
       </el-form-item>
     </div>
     <div v-if="!defs || defs.length === 0" style="color: #999; font-size: 12px; padding-left: 100px">
-      该策略未定义可配置参数
+      {{ t('common.noParams') }}
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const props = defineProps({
   defs: { type: Array, default: () => [] },
   modelValue: { type: Object, default: () => ({}) },

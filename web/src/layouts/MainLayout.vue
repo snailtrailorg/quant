@@ -4,7 +4,7 @@
       <div style="color: #fff; padding: 20px; font-size: 18px; font-weight: bold; text-align: center">
         {{ t('app.title') }}
       </div>
-      <el-menu :default-active="route.path" router background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF">
+      <el-menu :default-active="route.path" router background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF" style="padding-bottom: 28px">
         <!-- 首页 -->
         <el-menu-item index="/"><el-icon><DataLine /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
 
@@ -76,15 +76,12 @@
             <el-option label="English" value="en" />
           </el-select>
           <el-tag>{{ username }} ({{ role }})</el-tag>
-          <el-button size="small" @click="logout">退出</el-button>
+          <el-button size="small" @click="logout">{{ t('user.logout') }}</el-button>
         </div>
       </el-header>
-      <el-main>
+      <el-main style="padding-bottom: 30px">
         <router-view />
       </el-main>
-      <el-footer style="background: #f5f7fa; border-top: 1px solid #eee; height: auto; padding: 0">
-        <Footer />
-      </el-footer>
     </el-container>
   </el-container>
 </template>
@@ -95,7 +92,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe } from '../api'
 import api from '../api'
-import Footer from '../components/Footer.vue'
 import { setLang } from '../i18n'
 
 const { t, locale } = useI18n()

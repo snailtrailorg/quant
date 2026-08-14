@@ -7,27 +7,27 @@
       </div>
     </template>
     <el-table :data="factors" stripe>
-      <el-table-column prop="name" label="名称" width="150" />
-      <el-table-column label="类别" width="100">
+      <el-table-column prop="name" :label="t('common.name')" width="150" />
+      <el-table-column :label="t('factors.category')" width="100">
         <template #default="{ row }"><el-tag size="small">{{ row.category }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="类型" width="80">
+      <el-table-column :label="t('common.type')" width="80">
         <template #default="{ row }">
-          <el-tag v-if="row.is_custom" type="warning" size="small">自定义</el-tag>
-          <el-tag v-else type="info" size="small">预置</el-tag>
+          <el-tag v-if="row.is_custom" type="warning" size="small">{{ t('factors.custom') }}</el-tag>
+          <el-tag v-else type="info" size="small">{{ t('factors.preset') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="静态/动态" width="100">
+      <el-table-column :label="t('factors.staticFactor') + '/' + t('factors.dynamicFactor')" width="100">
         <template #default="{ row }">
-          <el-tag v-if="row.needs_history === 0" type="success" size="small">静态</el-tag>
-          <el-tag v-else type="danger" size="small">动态({{ row.needs_history }})</el-tag>
+          <el-tag v-if="row.needs_history === 0" type="success" size="small">{{ t('factors.staticFactor') }}</el-tag>
+          <el-tag v-else type="danger" size="small">{{ t('factors.dynamicFactor') }}({{ row.needs_history }})</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="description" label="描述" />
-      <el-table-column label="参数" width="200">
+      <el-table-column prop="description" :label="t('common.description')" />
+      <el-table-column :label="t('factors.paramsCol')" width="200">
         <template #default="{ row }">{{ JSON.stringify(row.params) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="150" v-if="hasCustom">
+      <el-table-column :label="t('common.action')" width="150" v-if="hasCustom">
         <template #default="{ row }">
           <el-button v-if="row.is_custom" size="small" @click="openEdit(row)">{{ t('factors.edit') }}</el-button>
           <el-button v-if="row.is_custom" size="small" type="danger" @click="onDelete(row.name)">{{ t('factors.delete') }}</el-button>
@@ -36,36 +36,36 @@
     </el-table>
 
     <!-- 编辑弹窗 -->
-    <el-dialog v-model="dialogVisible" :title="isEditing ? '编辑因子' : '新建因子'" width="720px" :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="isEditing ? t('factors.editFactor') : t('factors.createFactor')" width="720px" :close-on-click-modal="false">
       <el-form :model="form" label-width="100px" v-loading="saving">
-        <el-form-item label="因子名称">
+        <el-form-item :label="t('factors.factorName')">
           <el-input v-model="form.name" :disabled="isEditing" />
         </el-form-item>
-        <el-form-item label="适配品类">
+        <el-form-item :label="t('factors.adaptCategory')">
           <el-select v-model="form.category" style="width: 100%">
-            <el-option label="趋势" value="trend" />
-            <el-option label="均值回归" value="meanrev" />
-            <el-option label="可转债" value="convertible" />
-            <el-option label="加密" value="crypto" />
-            <el-option label="通用" value="custom" />
+            <el-option :label="t('factors.catTrend')" value="trend" />
+            <el-option :label="t('factors.catMeanrev')" value="meanrev" />
+            <el-option :label="t('factors.catConvertible')" value="convertible" />
+            <el-option :label="t('factors.catCrypto')" value="crypto" />
+            <el-option :label="t('factors.catCustom')" value="custom" />
           </el-select>
         </el-form-item>
-        <el-form-item label="描述">
+        <el-form-item :label="t('common.description')">
           <el-input v-model="form.description" />
         </el-form-item>
-        <el-form-item label="默认参数">
-          <el-input v-model="form.paramsStr" placeholder='如 {"n": 20}' />
+        <el-form-item :label="t('factors.defaultParams')">
+          <el-input v-model="form.paramsStr" :placeholder="t('factors.phParams')" />
         </el-form-item>
-        <el-form-item label="历史窗口">
+        <el-form-item :label="t('factors.historyWindow')">
           <el-input-number v-model="form.needsHistory" :min="0" :step="1" />
           <div style="color: #999; font-size: 12px; margin-top: 4px">
-            0=静态因子（只用当前 bar，可选股+策略）；>0=动态因子（需历史窗口N，只能用于策略）
+            {{ t('factors.historyHint') }}
           </div>
         </el-form-item>
-        <el-form-item label="Python 代码">
+        <el-form-item :label="t('factors.pythonCode')">
           <div style="width: 100%">
             <div style="margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary)">
-              定义 compute(ctx, **params) 函数，ctx 有 close/high/low/open_/volume/history/sma() 方法
+              {{ t('factors.codeHint') }}
             </div>
             <PythonEditor v-model="form.code" :height="300" />
             <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
@@ -77,7 +77,7 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="save" :loading="saving">{{ t('factors.save') }}</el-button>
       </template>
     </el-dialog>
@@ -123,7 +123,7 @@ const load = async () => {
   try {
     const r = await getFactorList()
     factors.value = r.items || []
-  } catch (e) { ElMessage.error('加载因子失败') }
+  } catch (e) { ElMessage.error(t('factors.loadFailed')) }
 }
 
 const openCreate = () => {
@@ -160,18 +160,18 @@ const validateCode = async () => {
       ElMessage.success(t('factors.codeValid'))
     } else {
       codeValid.value = false
-      codeError.value = res.error || '校验失败'
-      ElMessage.error(t('factors.codeValid') + ': ' + (res.error || ''))
+      codeError.value = res.error || t('factors.validateFailed')
+      ElMessage.error(t('factors.codeInvalid') + ': ' + (res.error || ''))
     }
   } catch (e) {
     codeValid.value = false
-    codeError.value = e?.message || '校验请求失败'
+    codeError.value = e?.message || t('factors.validateReqFailed')
   }
   finally { validating.value = false }
 }
 
 const save = async () => {
-  if (!form.value.name) { ElMessage.warning('名称必填'); return }
+  if (!form.value.name) { ElMessage.warning(t('factors.nameRequired')); return }
   saving.value = true
   try {
     let params = {}
@@ -186,22 +186,22 @@ const save = async () => {
     }
     if (isEditing.value) {
       await updateFactor(form.value.name, data)
-      ElMessage.success('已更新')
+      ElMessage.success(t('common.updateSuccess'))
     } else {
       await createFactor(data)
-      ElMessage.success('已创建')
+      ElMessage.success(t('common.createSuccess'))
     }
     dialogVisible.value = false
     await load()
-  } catch (e) { ElMessage.error('保存失败: ' + (e?.error || e?.message || '')) }
+  } catch (e) { ElMessage.error(t('common.saveFailed') + ': ' + (e?.error || e?.message || '')) }
   finally { saving.value = false }
 }
 
 const onDelete = async (name) => {
   try {
-    await ElMessageBox.confirm(`确认删除因子 "${name}"？`, '确认')
+    await ElMessageBox.confirm(t('factors.confirmDelete', { name }), t('common.confirm'))
     await deleteFactor(name)
-    ElMessage.success('已删除')
+    ElMessage.success(t('common.deleteSuccess'))
     await load()
   } catch { /* 取消 */ }
 }

@@ -1,33 +1,33 @@
 <template>
   <el-card>
-    <template #header>消息通道管理（平台化消息层，统一告警/AI 输出渠道）</template>
+    <template #header>{{ t('channels.manageTitle') }}</template>
     <el-table :data="channels" stripe size="small">
       <el-table-column prop="provider" label="Provider" width="120" />
-      <el-table-column prop="name" label="名称" />
-      <el-table-column label="凭证" width="80">
-        <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'" size="small">{{ row.has_credentials ? '已配' : '未配' }}</el-tag></template>
+      <el-table-column prop="name" :label="t('common.name')" />
+      <el-table-column :label="t('common.credential')" width="80">
+        <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'" size="small">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="启用" width="80">
+      <el-table-column :label="t('common.enable')" width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column label="操作" width="220">
+      <el-table-column :label="t('common.action')" width="220">
         <template #default="{ row }">
-          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">测试</el-button>
-          <el-button size="small" type="primary" @click="onEdit(row)">编辑</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row.id)">删除</el-button>
+          <el-button size="small" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
+          <el-button size="small" type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button size="small" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
     <el-divider />
-    <h3 style="font-size: 16px; margin-bottom: 12px">{{ form.id ? '编辑通道' : '添加通道' }}</h3>
+    <h3 style="font-size: 16px; margin-bottom: 12px">{{ form.id ? t('channels.editTitle') : t('channels.addTitle') }}</h3>
     <el-form :model="form" label-width="100px" inline>
-      <el-form-item label="Provider"><el-input v-model="form.provider" placeholder="wechat_work/discord/serverchan" /></el-form-item>
-      <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
-      <el-form-item label="凭证(webhook/key)"><el-input v-model="form.credentials" type="password" show-password placeholder="编辑时留空不改" /></el-form-item>
-      <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
+      <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('channels.phProvider')" /></el-form-item>
+      <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
+      <el-form-item :label="t('common.credentialWebhook')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" /></el-form-item>
+      <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? '更新' : '添加' }}</el-button>
-        <el-button @click="resetForm">重置</el-button>
+        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
   </el-card>
@@ -35,9 +35,11 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getChannels, createChannel, updateChannel, deleteChannel, testChannel } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
+const { t } = useI18n()
 const channels = ref([])
 const form = ref(emptyForm())
 const saving = ref(false)
@@ -58,17 +60,17 @@ const onSave = async () => {
   try {
     if (form.value.id) await updateChannel(form.value.id, form.value)
     else await createChannel(form.value)
-    ElMessage.success('保存成功')
+    ElMessage.success(t('common.saveSuccess'))
     resetForm()
     load()
-  } catch (e) { ElMessage.error(e.detail || '保存失败') }
+  } catch (e) { ElMessage.error(e.detail || t('common.saveFailed')) }
   finally { saving.value = false }
 }
 
 const onDelete = async (id) => {
-  await ElMessageBox.confirm('确认删除此通道？', '提示', { type: 'warning' })
+  await ElMessageBox.confirm(t('riskRule.confirmDelete'), t('common.tip'), { type: 'warning' })
   await deleteChannel(id)
-  ElMessage.success('已删除')
+  ElMessage.success(t('common.deleteSuccess'))
   load()
 }
 
@@ -76,9 +78,9 @@ const onTest = async (id) => {
   testing.value = id
   try {
     const r = await testChannel(id)
-    if (r.ok) ElMessage.success('发送成功')
-    else ElMessage.error('失败：' + r.error)
-  } catch (e) { ElMessage.error('测试失败') }
+    if (r.ok) ElMessage.success(t('common.sendSuccess'))
+    else ElMessage.error(t('common.failedPrefix') + r.error)
+  } catch (e) { ElMessage.error(t('common.testFailed')) }
   finally { testing.value = 0 }
 }
 </script>

@@ -1,8 +1,28 @@
 <template>
-  <div style="text-align: center; padding: 8px 0; color: #999; font-size: 12px">
-    <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener" style="color: #999; text-decoration: none">粤ICP备2026111649号</a>
+  <div class="icp-footer">
+    <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener">粤ICP备2026111649号</a>
   </div>
 </template>
 
 <script setup>
 </script>
+
+<style scoped>
+.icp-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  font-size: 12px;
+  background: #f5f7fa;
+  border-top: 1px solid #eaecef;
+  z-index: 100;
+}
+.icp-footer a {
+  color: #999;
+  text-decoration: none;
+}
+</style>
