@@ -144,23 +144,58 @@ GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 
 | 页面 | 内容 |
 |---|---|
-| 账户管理 | API 密钥加密存储、启停 |
+| 个人中心 `/profile` | 头像（点头像更换：36系统图标/上传裁剪）、昵称、改密码、注销（所有角色可见） |
+| 账户管理 | 用户列表（角色/邮箱/昵称/状态/上次登录/邀请人）+ 邀请发送 + 邀请记录（撤销）+ API 密钥 |
 | 策略管理 | 策略配方（因子+权重+DSL/Python代码+参数定义）+ 实盘任务（选策略+标的+参数值）+ 回测（多标的+per-symbol 参数） |
 | A 股分析看板 | 选股结果、评级、分钟研判实时 |
 | 实盘交易看板 | 持仓/订单/盈亏曲线/成交 |
-| 风控中心 | 全局/分市场规则、一键熔断按钮、触发日志 |
-| 日志告警 | 运行/报错/交易日志、告警历史 |
+| 风控中心 | 全局/分市场规则、一键熔断按钮、三级开关、触发日志 |
+| 日志告警 | 运行/报错/交易日志 + 通知历史 + 邮件发件箱（指数退避状态） |
 | AI 助手 | 聊天框，自然语言查平台 |
+| 系统配置 | 邮件发信配置（SMTP 整组+测试）+ 通用配置项 |
+| 顶栏 | 头像+昵称下拉（个人中心/退出）+ 语言切换 + 通知铃铛（按角色过滤类别） |
 
 策略配置页含**因子多选+权重+DSL/Python 代码框（双模式）+ 参数定义编辑器**。实盘任务页读策略 `parameter_defs` **动态生成参数表单**，选标的（直接/池/池子集）+ 填任务参数值。回测页支持 per-symbol 参数覆盖（高级模式）。
+
+## 6.5 用户管理（邀请制完整链路）
+
+### 邀请流程
+```
+admin 填邮箱（语言=当前界面语言）→ POST /api/auth/invite
+→ user_tokens 落 invite token（72h 有效, 含 revoked 撤销标记）
+→ 邮件走发件箱（指数退避重发）→ 被邀请者点链接
+→ /register?token=... 验证 → 设用户名+密码（≥8位字母数字+二次确认）
+→ 条款强制阅读（全语言堆叠, 滚到底解锁确认）→ 开通（默认 Viewer）
+→ 自动发开通通知邮件（附登录链接+条款全文）
+```
+
+### 账户保护（两条不变量）
+- **管理页**：不能动自己（`guard_user_mutation`，删/改角色/禁用均拦截）。末位 admin 无需显式规则——user_mgmt 仅 admin 持有 + 不能动自己 ⇒ 操作者若是另一 admin 则目标非末位，不可达
+- **自助注销**：唯一启用的 admin 不能注销自己（`guard_self_deactivate`，此路径真实可达）
+
+### 软删除/注销
+- admin 删除和用户自助注销共用 `soft_delete_user()`：deleted_at + email/nickname 置空 + username 加后缀释放 + 头像文件清理
+- 登录/列表过滤已注销；自助注销额外做 JWT token 拉黑
+
+### 头像系统
+- `users.avatar_url` 三态：空=按昵称 hash 从 36 图标确定性选 / `/icons/icon_NN.png`=系统图标 / `/api/static/avatars/user_{id}.jpg?t=`=上传
+- 上传：vue-cropper 裁剪 1:1 → Pillow 256px JPEG → 覆盖式文件名（`deploy-server.sh` EXCLUDES 排除 `static/avatars/` 防 rsync --delete）
+
+### 邮件发件箱（email_outbox）
+- 持久化+指数退避（1→2→4→8→16→30min，6 次耗尽标 failed → 通知中心铃铛）
+- 三封邮件（邀请/重置/开通）全走发件箱；接口 BackgroundTasks 后台发送
+- SMTP 配置走 system_config（smtp_* 五项，密码 Fernet 加密，弃 .env）；测试邮件按钮
 
 ## 7. 安全
 
 - 仅内网/VPN 访问，防火墙仅开必要端口。
-- **RBAC**（单系统多用户，非多租户）：Viewer/Analyst/Trader/Admin 四角色（2026-08-02 Operator 拆 Trader+Analyst），JWT 认证 + endpoint 权限装饰器；数据共享不加 user_id 隔离。
-- API 密钥本地加密存储（AES + 密钥在环境变量），前端永不返回明文；**仅 Admin 管理**，Operator/Viewer 不见。
-- 自然语言查询的工具集**按角色过滤 + 白名单只读**，下单类工具不在网关注册范围（01 文档已锁）。
-- 操作审计：所有 mutation（启停策略/改参数/熔断/改风控/改密钥）写 `audit_log(actor, ...)`，Admin 可查。
+- **RBAC**（单系统多用户，非多租户）：Viewer/Analyst/Trader/Admin 四角色，JWT 认证（24h + jti 黑名单，logout 即失效）+ endpoint 权限装饰器；数据共享不加 user_id 隔离。
+- **登录**：用户名或邮箱（含 @ 按 email 查）；被禁账户返回 ACCOUNT_DISABLED 错误码（不误报密码错）。
+- API 密钥本地加密存储（Fernet），前端永不返回明文；**仅 Admin 管理**。
+- 密码策略：≥8 位含字母数字（前后端统一校验）；bcrypt 哈希。
+- 自然语言查询的工具集**按角色过滤 + 白名单只读**。
+- 操作审计：所有 mutation 写 `audit_log(actor, ...)`。
+- **错误码化**：`ApiError(status, CODE, 中文兜底)` → `{detail, code}`；前端 `apiErr(e)` 优先本地化。
 
 ## 8. 与其它模块交互
 
@@ -183,4 +218,4 @@ GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 | 密钥 | 加密存储+不返明文 | 安全 |
 | 策略配置 UI | 表单+因子选择+DSL编辑器 | 配置驱动模型 |
 | 自然语言查询 | 转发 LLM 网关+只读工具 | 便利但权限锁死 |
-| 国际化 | vue-i18n 按浏览器语言自动切换中/英文 | 跟终端语言习惯，日志统一英文 |
+| 国际化 | N 语言注册表（en 缺省） | 加语言=加条目零逻辑改动；条款全语言堆叠 |

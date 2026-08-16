@@ -2,7 +2,7 @@
 
 > `AGENTS.md` 软链到本文件，两个工具读同一份。**真相源在文件里，不在对话里。**
 > 本文件是**运行时合同**：精要规则 + 约束 + 指针。完整详规在 `flow/规范/`。
-> 项目记忆在 `~/.claude/projects/-home-bernard-Projects-Quantitative/memory/`（持久化，跨会话）。
+> 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/`（持久化，跨会话）。
 
 ## 目录地图
 
@@ -56,8 +56,9 @@
 - 解决问题从根本上解，不打补丁。
 - 进展条/交接只带「指针 + 增量」，不重抄内容。
 - **联网核实**走本机 `spe curl`（WebSearch 不可用，返回幻觉；WebFetch 域安全校验后端不通）。
-- **多语言国际化（i18n）**：Web 前端按浏览器语言自动切换中/英文；LLM 回复按输入语言自然回复（2026-08-07 移除 lang 注入与飞书 per-机器人 lang 配置，简化设置）；日志统一英文。
-- **待办自包含**：新待办按 `docs/任务/<id>.md`（`flow/规范/任务模板.md` 8 字段）写，做任务时只读「任务文件 + `docs/architecture/接口契约.md` + 本模块契约 `docs/architecture/模块契约/<module>.md`」，零代码阅读。硬约束：限定范围 ≤3 文件 + 参考 ≤2 份。前期写文档成本换后续每任务顺畅。A2 端到端验证成功（2026-08-09，66 单测全过）。任务文件历史在 `docs/obsolete/`。
+- **多语言国际化（N 语言架构）**：注册表驱动（en 为缺省），加语言=只加条目零逻辑改动。页面按浏览器语言自动切换；条款全语言纵向堆叠；邮件跟操作者界面语言；LLM 按输入语言自然回复。详见记忆 `multilang-architecture`。
+- **后端错误码化**：用户流程错误统一 `ApiError(status, CODE, 中文兜底)` → `{detail, code}`；前端 `apiErr(e)` 优先 `err.<CODE>` 本地化。加新码=后端定码+前端 err 命名空间加条目。
+- **待办自包含**：新待办按 `docs/任务/<id>.md`（`flow/规范/任务模板.md` 8 字段）写，做任务时只读「任务文件 + `docs/architecture/接口契约.md` + 本模块契约 `docs/architecture/模块契约/<module>.md`」，零代码阅读。硬约束：限定范围 ≤3 文件 + 参考 ≤2 份。
 ### 外部待确认 gate（不阻塞开发，但影响实盘）
 - 中泰 XTP 门槛/品种放行/费率（用户问客户经理）
 - Tushare 积分是否到 2000（分钟线硬门槛，但用户说一次性购买可接受）
@@ -81,4 +82,4 @@
 ## 项目知识（durable，随项目积累 ↓）
 
 全局记忆路径：`~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`
-当前 20 条记忆覆盖：联网限制 / 券商选型 / 数据回测层 / RBAC / 部署 / AI 层 / 项目状态 / 本地启动 / XTP SDK / 实盘开关 / 策略实盘化 / 策略体系 / 回测可视化 / 飞书 / 飞书400bug / 会话交接 / 平台化 / full-subagent / 自包含任务文档。
+当前 20 条记忆覆盖：联网限制 / 券商选型 / 数据回测层 / RBAC / 部署 / AI 层 / 本地启动 / XTP SDK / 实盘开关 / 策略实盘化 / 策略体系 / 回测可视化 / 飞书 / 平台化 / Schema迁移 / 前端设计规范 / N语言架构 / 用户UI偏好 / 技术陷阱 / 自包含任务文档。
