@@ -23,7 +23,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { login } from '../api'
+import { login, apiErr } from '../api'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -38,7 +38,7 @@ const onLogin = async () => {
     localStorage.setItem('role', res.role)
     router.push('/')
   } catch (e) {
-    ElMessage.error(t('login.error'))
+    ElMessage.error(apiErr(e, t('login.error')))
   } finally {
     loading.value = false
   }

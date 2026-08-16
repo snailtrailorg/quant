@@ -20,7 +20,7 @@
       <el-table-column :label="t('common.status')" width="70">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="310">
+      <el-table-column :label="t('common.action')" width="340">
         <template #default="{ row }">
           <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
           <el-button v-if="!row.enabled" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>

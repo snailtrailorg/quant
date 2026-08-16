@@ -1,4 +1,5 @@
 import axios from 'axios'
+import i18n from './i18n'
 
 const api = axios.create({ baseURL: '/api', timeout: 30000 })
 
@@ -20,6 +21,13 @@ api.interceptors.response.use(
     return Promise.reject(err.response?.data || err)
   }
 )
+
+// 错误码本地化：后端返回 code 时显示 err.<CODE> 翻译（N 语言），无映射回落 detail/消息
+export function apiErr(e, fallback = '') {
+  const g = i18n.global
+  if (e?.code && g.te('err.' + e.code)) return g.t('err.' + e.code)
+  return e?.detail || e?.message || fallback
+}
 
 export default api
 
@@ -52,6 +60,9 @@ export const getLogs = () => api.get('/log')
 export const getEmailOutbox = () => api.get('/email-outbox')
 export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
 export const ackAllNotifications = () => api.post('/notifications/ack-all')
+export const getSmtpConfig = () => api.get('/smtp-config')
+export const saveSmtpConfig = (data) => api.put('/smtp-config', data)
+export const sendTestEmail = (data) => api.post('/email/test', data)
 export const chat = message => api.post('/chat', { message })
 
 export const getLLMModels = () => api.get('/llm-models')
@@ -144,10 +155,12 @@ export const getOrders = () => api.get('/orders')
 export const getPnl = () => api.get('/pnl')
 
 // 邀请制用户管理
-export const inviteUser = email => api.post('/auth/invite', { email })
+export const inviteUser = (email, lang) => api.post('/auth/invite', { email, lang })
+export const getInvites = () => api.get('/invites')
+export const revokeInvite = id => api.post(`/invites/${id}/revoke`)
 export const verifyInviteToken = token => api.get(`/auth/invite/verify`, { params: { token } })
-export const registerUser = (token, username, password) => api.post('/auth/register', { token, username, password })
-export const forgotPassword = email => api.post('/auth/forgot-password', { email })
+export const registerUser = (token, username, password, lang) => api.post('/auth/register', { token, username, password, lang })
+export const forgotPassword = (email, lang) => api.post('/auth/forgot-password', { email, lang })
 export const resetPassword = (token, new_password) => api.post('/auth/reset-password', { token, new_password })
 export const changePassword = (old_password, new_password) => api.post('/auth/change-password', { old_password, new_password })
 export const getTerms = () => api.get('/terms')

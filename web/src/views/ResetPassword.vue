@@ -20,7 +20,7 @@ import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { resetPassword } from '../api'
+import { resetPassword, apiErr } from '../api'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -36,7 +36,7 @@ const onSubmit = async () => {
     await resetPassword(token, password.value)
     ElMessage.success(t('reset.success'))
     router.push('/login')
-  } catch (e) { ElMessage.error(e.detail || e.message || t('reset.failed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('reset.failed'))) }
   finally { loading.value = false }
 }
 </script>

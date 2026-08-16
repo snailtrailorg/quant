@@ -11,6 +11,7 @@ const routes = [
     children: [
       // 总览
       { path: '', name: 'dashboard', component: () => import('./views/Dashboard.vue') },
+      { path: 'profile', name: 'profile', component: () => import('./views/Profile.vue') },
 
       // 交易
       { path: 'trading', name: 'trading', component: () => import('./views/Trading.vue') },

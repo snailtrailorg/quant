@@ -31,11 +31,13 @@
       <el-table-column :label="t('common.enable')" width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="220">
+      <el-table-column :label="t('common.action')" width="270">
         <template #default="{ row }">
-          <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-          <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
+            <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
+            <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
+            <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>

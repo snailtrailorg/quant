@@ -1,10 +1,16 @@
 """平台使用条款（单一真相源：注册页 /api/terms 拉取 + 开通邮件引用，避免双份维护）。
 
+多语言设计（N 语言，en 为缺省）：
+- TERMS: dict[lang, text] —— 新增语言只需加一个 key，页面/邮件自动遍历展示
+- LANG_NAMES: 语言注册表（语言码 → 本族语名称，用于条款分节标题）
+- get_terms_items(): 返回 [{lang, name, body}] 结构化列表（前端不感知具体语言）
+
 访问权限原则：受邀用户仅 Viewer（只读）/ 可能 Analyst（研究）；
 交易（Trader）与管理（Admin）权限不向受邀用户开放（运营方持有）。
 """
 
-TERMS_ZH = """平台使用条款（最后更新：2026 年 8 月）
+TERMS: dict[str, str] = {
+    "zh": """平台使用条款（最后更新：2026 年 8 月）
 一、接受条款
 首次登录或使用本平台即视为您已阅读并同意本条款；如不同意，请停止使用。
 二、服务性质
@@ -28,10 +34,8 @@ TERMS_ZH = """平台使用条款（最后更新：2026 年 8 月）
 十、隐私
 平台可能记录您的操作与使用日志，用于运维、安全审计与服务改进。
 十一、条款变更
-运营方保留随时修订本条款的权利，修订后的条款自公布之日起生效。"""
-
-
-TERMS_EN = """Terms of Use (Last updated: Aug 2026)
+运营方保留随时修订本条款的权利，修订后的条款自公布之日起生效。""",
+    "en": """Terms of Use (Last updated: Aug 2026)
 1. Acceptance
 By logging in or using the platform for the first time, you agree to these terms. If you do not agree, stop using it.
 2. Nature of Service
@@ -55,9 +59,27 @@ To the maximum extent permitted by law, the operator is not liable for any direc
 10. Privacy
 The platform may log your operations and usage for operations, security audit, and service improvement.
 11. Changes to Terms
-The operator reserves the right to revise these terms at any time; revised terms take effect upon publication."""
+The operator reserves the right to revise these terms at any time; revised terms take effect upon publication.""",
+}
+
+# 语言注册表：语言码 → 本族语名称（条款分节标题/语言切换选项共用；新增语言在此登记）
+LANG_NAMES: dict[str, str] = {
+    "zh": "中文",
+    "en": "English",
+}
+
+
+def available_langs() -> list[str]:
+    """已实现的语言列表（TERMS 与 LANG_NAMES 的交集，注册表驱动）。"""
+    return [lang for lang in TERMS if lang in LANG_NAMES]
+
+
+def get_terms_items() -> list[dict]:
+    """条款结构化列表 [{lang, name, body}]，页面/邮件遍历展示，不感知具体语言。"""
+    return [{"lang": lang, "name": LANG_NAMES[lang], "body": TERMS[lang]}
+            for lang in available_langs()]
 
 
 def get_terms() -> dict:
-    """返回中英文条款（注册页 + 开通邮件共用）。"""
-    return {"zh": TERMS_ZH, "en": TERMS_EN}
+    """兼容旧调用方：{lang: body} 映射。"""
+    return dict(TERMS)

@@ -16,6 +16,9 @@
       <el-table :data="users" stripe style="margin-top: 12px">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="username" :label="t('account.username')" width="120" />
+        <el-table-column prop="nickname" :label="t('profile.nickname')" width="120">
+          <template #default="{ row }">{{ row.nickname || '-' }}</template>
+        </el-table-column>
         <el-table-column prop="role" :label="t('user.role')" width="100">
           <template #default="{ row }"><el-tag>{{ row.role }}</el-tag></template>
         </el-table-column>
@@ -27,8 +30,12 @@
         </el-table-column>
         <el-table-column :label="t('common.status')" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
+            <el-tag v-if="row.deactivated" type="info">{{ t('account.statusDeactivated') }}</el-tag>
+            <el-tag v-else :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
           </template>
+        </el-table-column>
+        <el-table-column prop="last_login_at" :label="t('account.lastLogin')" width="150">
+          <template #default="{ row }">{{ row.last_login_at || '-' }}</template>
         </el-table-column>
         <el-table-column :label="t('common.action')" width="270">
           <template #default="{ row }">
@@ -55,28 +62,27 @@
       </el-table>
     </div>
 
-    <el-divider />
-
-    <!-- 改密码 -->
+    <!-- 邀请记录（批次B 可观测：待注册/已用/已过期/已撤销 + 撤销） -->
     <div style="margin-bottom: 20px">
-      <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.changePwd') }}</h3>
-      <el-form label-position="top" style="max-width: 480px" @submit.prevent="onChangePwd">
-        <el-form-item :label="t('account.oldPwd')">
-          <el-input v-model="pwdForm.old_password" type="password" show-password />
-        </el-form-item>
-        <el-form-item :label="t('account.newPwd')">
-          <el-input v-model="pwdForm.new_password" type="password" show-password />
-        </el-form-item>
-        <div class="pwd-rule">{{ t('common.passwordRule') }}</div>
-        <el-form-item :label="t('register.confirmPwd')">
-          <el-input v-model="pwdForm.confirm" type="password" show-password
-            :class="{ 'mismatch': pwdForm.confirm && pwdForm.confirm !== pwdForm.new_password }" />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
-        </el-form-item>
-      </el-form>
+      <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.inviteLog') }}</h3>
+      <el-table :data="invites" stripe>
+        <el-table-column prop="email" :label="t('account.email')" min-width="200" show-overflow-tooltip />
+        <el-table-column :label="t('common.status')" width="110">
+          <template #default="{ row }">
+            <el-tag :type="inviteStatusType(row.status)">{{ t('account.inviteStatus.' + row.status) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" :label="t('common.createdAt')" width="160" />
+        <el-table-column prop="expires_at" :label="t('account.inviteExpires')" width="160" />
+        <el-table-column :label="t('common.action')" width="110">
+          <template #default="{ row }">
+            <el-button v-if="row.status === 'pending'" type="warning" @click="onRevoke(row)">{{ t('account.inviteRevoke') }}</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
     </div>
+
+    <el-divider />
 
     <el-divider />
 
@@ -104,32 +110,40 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getAccounts, getUsers, inviteUser, changePassword, getMe } from '../api'
+import { getAccounts, getUsers, inviteUser, getMe, apiErr, getInvites, revokeInvite } from '../api'
 import api from '../api'
-import { validatePassword } from '../password'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const accounts = ref([])
 const users = ref([])
 const currentUsername = ref('')
 const inviteEmail = ref('')
 const inviting = ref(false)
-const changingPwd = ref(false)
-const pwdForm = ref({ old_password: '', new_password: '', confirm: '' })
 
-// 最后一个 admin 不能删（始终至少保留一个）
-const adminCount = computed(() => users.value.filter(u => u.role === 'admin').length)
-// 行锁定（自己 / 末位 admin）：角色、启停、删除均禁用，title 提示原因
-const locked = row => row.username === currentUsername.value || (row.role === 'admin' && adminCount.value <= 1)
-const lockedReason = row => row.username === currentUsername.value
-  ? t('account.cantDeleteSelf')
-  : (row.role === 'admin' && adminCount.value <= 1 ? t('account.cantDeleteLastAdmin') : '')
+// 行锁定（自己）：角色、启停、删除均禁用，title 提示原因
+// （末位 admin 无需前端锁定：user_mgmt 仅 admin + 不动自己 ⇒ 末位 admin 行不可达）
+const locked = row => row.username === currentUsername.value || row.deactivated
+const lockedReason = row => row.username === currentUsername.value ? t('account.cantDeleteSelf') : ''
 
+const invites = ref([])
+const inviteStatusType = s => ({ pending: 'warning', used: 'success', expired: 'info', revoked: 'danger' }[s] || 'info')
 const load = async () => {
   try {
     accounts.value = await getAccounts()
     users.value = await getUsers()
+    invites.value = (await getInvites()).items || []
   } catch (e) { ElMessage.error(t('common.loadFailed')) }
+}
+const onRevoke = async (row) => {
+  try {
+    await ElMessageBox.confirm(t('account.inviteRevokeConfirm', { email: row.email }), t('common.tip'), { type: 'warning' })
+    await revokeInvite(row.id)
+    ElMessage.success(t('account.inviteRevoked'))
+    invites.value = (await getInvites()).items || []
+  } catch (e) {
+    if (e === 'cancel') return
+    ElMessage.error(apiErr(e, t('common.operationFailed')))
+  }
 }
 // 当前登录用户（不能删自己）
 getMe().then(me => { currentUsername.value = me.username }).catch(() => {})
@@ -138,34 +152,21 @@ const onInvite = async () => {
   if (!inviteEmail.value) { ElMessage.warning(t('account.fillEmail')); return }
   inviting.value = true
   try {
-    await inviteUser(inviteEmail.value)
+    await inviteUser(inviteEmail.value, locale.value)
     ElMessage.success(t('account.inviteSent', { email: inviteEmail.value }))
     inviteEmail.value = ''
     users.value = await getUsers()
-  } catch (e) { ElMessage.error(e.detail || e.message || t('account.inviteFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('account.inviteFailed'))) }
   finally { inviting.value = false }
-}
-
-const onChangePwd = async () => {
-  if (!pwdForm.value.old_password || !pwdForm.value.new_password) { ElMessage.warning(t('account.fillPwd')); return }
-  if (!validatePassword(pwdForm.value.new_password)) { ElMessage.warning(t('common.passwordWeak')); return }
-  if (pwdForm.value.new_password !== pwdForm.value.confirm) { ElMessage.warning(t('common.passwordMismatch')); return }
-  changingPwd.value = true
-  try {
-    await changePassword(pwdForm.value.old_password, pwdForm.value.new_password)
-    ElMessage.success(t('account.pwdChanged'))
-    pwdForm.value = { old_password: '', new_password: '', confirm: '' }
-  } catch (e) { ElMessage.error(e.detail || e.message || t('account.changeFailed')) }
-  finally { changingPwd.value = false }
 }
 
 onMounted(load)
 
 const onRoleChange = async (uid, role) => {
-  try { await api.put(`/user/${uid}?role=${role}`); ElMessage.success(t('account.roleChanged')) } catch (e) { ElMessage.error(e?.detail || t('account.roleChangeFailed')); await load() }
+  try { await api.put(`/user/${uid}?role=${role}`); ElMessage.success(t('account.roleChanged')) } catch (e) { ElMessage.error(apiErr(e, t('account.roleChangeFailed'))); await load() }
 }
 const onToggleEnabled = async (row) => {
-  try { await api.put(`/user/${row.id}?enabled=${!row.enabled}`); ElMessage.success(row.enabled ? t('common.disabled') : t('common.enabled')); await load() } catch (e) { ElMessage.error(e?.detail || t('common.operationFailed')); await load() }
+  try { await api.put(`/user/${row.id}?enabled=${!row.enabled}`); ElMessage.success(row.enabled ? t('common.disabled') : t('common.enabled')); await load() } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))); await load() }
 }
 const onDeleteUser = async (row) => {
   try {
@@ -175,12 +176,10 @@ const onDeleteUser = async (row) => {
     users.value = await getUsers()
   } catch (e) {
     if (e === 'cancel') return  // 用户取消确认
-    ElMessage.error(e?.detail || t('common.deleteFailed'))
+    ElMessage.error(apiErr(e, t('common.deleteFailed')))
   }
 }
 </script>
 
 <style scoped>
-.mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
-.pwd-rule { color: #909399; font-size: 12px; margin: -14px 0 14px; }
 </style>

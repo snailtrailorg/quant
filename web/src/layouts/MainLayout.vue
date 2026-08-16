@@ -71,9 +71,8 @@
       <el-header style="background: #fff; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between">
         <div></div>
         <div style="display: flex; align-items: center; gap: 16px">
-          <el-select v-model="lang" @change="onLangChange" style="width: 100px">
-            <el-option label="中文" value="zh" />
-            <el-option label="English" value="en" />
+          <el-select v-model="lang" @change="onLangChange" style="width: 110px">
+            <el-option v-for="l in LANGUAGES" :key="l.code" :label="l.label" :value="l.code" />
           </el-select>
 
           <!-- 通知铃铛（按角色可见类别；viewer 无可见类别不显示） -->
@@ -93,13 +92,25 @@
                 style="padding: 8px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
                 <span :class="['dot', n.level]"></span>
                 <b style="font-size: 13px">{{ n.title }}</b>
+                <div v-if="n.body" class="notif-body">{{ n.body }}</div>
                 <div style="color: #909399; font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
               </div>
             </div>
           </el-popover>
 
-          <el-tag>{{ username }} ({{ role }})</el-tag>
-          <el-button type="primary" @click="logout">{{ t('user.logout') }}</el-button>
+          <!-- 用户区：头像 + 昵称下拉（个人中心/退出），替换原文字 tag（批次C） -->
+          <el-dropdown trigger="click" @command="onUserCommand">
+            <div style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 8px; border-radius: 6px;">
+              <Avatar :url="avatarUrl" :name="nickname || username" size="sm" />
+              <span style="font-size: 14px">{{ nickname || username }}</span>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item command="profile">{{ t('profile.title') }}</el-dropdown-item>
+                <el-dropdown-item command="logout" divided>{{ t('user.logout') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </el-header>
       <el-main style="padding-bottom: 30px">
@@ -115,17 +126,25 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe, getNotifications, ackAllNotifications } from '../api'
 import api from '../api'
-import { setLang } from '../i18n'
+import { setLang, LANGUAGES } from '../i18n'
+import Avatar from '../components/Avatar.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
 const username = ref('')
+const nickname = ref('')
+const avatarUrl = ref('')
 const role = ref('')
 const lang = ref(locale.value)
 
-getMe().then(me => { username.value = me.username; role.value = me.role }).catch(e => { console.error(e); username.value = ''; role.value = '' })
+getMe().then(me => { username.value = me.username; role.value = me.role; nickname.value = me.nickname || ''; avatarUrl.value = me.avatar_url || '' }).catch(e => { console.error(e); username.value = ''; role.value = '' })
+// 用户下拉命令（个人中心/退出）
+const onUserCommand = (cmd) => {
+  if (cmd === 'profile') router.push('/profile')
+  else if (cmd === 'logout') logout()
+}
 
 // ——— 通知铃铛（60s 轮询；viewer 无可见类别不显示）———
 const notifs = ref([])
@@ -163,4 +182,5 @@ const logout = async () => {
 .dot.critical { background: #f56c6c; }
 .dot.warn { background: #e6a23c; }
 .dot.info { background: #909399; }
+.notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
 </style>

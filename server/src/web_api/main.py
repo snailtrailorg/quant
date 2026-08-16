@@ -32,14 +32,32 @@ from .auth import (
     create_jwt, authenticate, create_user, require_role, require_perm,
     audit_log, ensure_default_admin, init_users_table, PERMISSIONS,
     invite_user, register_user, forgot_password, reset_password, change_password, verify_token,
-    validate_password, guard_user_mutation,
+    validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
 )
-from .email_service import send_invite_email, send_password_reset_email, send_activation_email
-from .terms import get_terms
+from .email_service import send_invite_email, send_password_reset_email, send_activation_email, queue_email, try_row
+from .terms import get_terms, get_terms_items
+from .errors import ApiError
 
 app = FastAPI(title="量化交易平台 API", version="0.1.0")
+
+
+@app.exception_handler(ApiError)
+async def api_error_handler(request, exc: ApiError):
+    """错误码化响应：detail(中文兜底) + 顶层 code（前端 err.<CODE> 本地化）。"""
+    from fastapi.responses import JSONResponse
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail, "code": exc.code})
+
+
 from src.feishu_bot.router import router as feishu_router
 app.include_router(feishu_router)
+
+# ——— 头像静态服务（批次C）：挂 /api/static/avatars —— nginx 已代理 /api/，零额外配置同源可达 ———
+import os as _os
+from pathlib import Path as _Path
+from fastapi.staticfiles import StaticFiles as _StaticFiles
+_AVATAR_DIR = _Path(__file__).resolve().parents[2] / "static" / "avatars"
+_AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/api/static", _StaticFiles(directory=str(_AVATAR_DIR.parent)), name="static")
 
 # CORS（前端 Vue3 开发用）
 app.add_middleware(
@@ -76,14 +94,17 @@ class StrategyConfig(BaseModel):
 
 class InviteReq(BaseModel):
     email: str
+    lang: str = "en"   # 邀请者操作界面语言（邮件语言跟随，未匹配回落 en）
 
 class RegisterReq(BaseModel):
     token: str
     username: str
     password: str
+    lang: str = "en"   # 注册者操作界面语言（开通邮件跟随）
 
 class ForgotReq(BaseModel):
     email: str
+    lang: str = "en"   # 请求者操作界面语言（重置邮件跟随）
 
 class ResetReq(BaseModel):
     token: str
@@ -146,54 +167,143 @@ def _adjust_celery_concurrency(new_value: int) -> dict:
         return {"applied": False, "reason": f"动态调整失败（DB 已更新，下次 worker 启动生效）: {e}"}
 
 
+@app.get("/api/smtp-config")
+def smtp_config_api(payload: dict = Depends(require_perm("user_mgmt"))):
+    """邮件发信配置（整组读取；password 不回传明文，只回 password_set 标记）。"""
+    with get_conn() as conn:
+        cur = conn.execute("SELECT key, value FROM system_config WHERE key LIKE 'smtp_%'")
+        cfg = {k: v for k, v in cur.fetchall()}
+    return {
+        "host": cfg.get("smtp_host", ""),
+        "port": cfg.get("smtp_port", "587"),
+        "security": cfg.get("smtp_security", "auto"),
+        "username": cfg.get("smtp_username", ""),
+        "password_set": bool(cfg.get("smtp_password")),
+        "from": cfg.get("smtp_from", ""),
+    }
+
+
+@app.put("/api/smtp-config")
+def smtp_config_save_api(body: dict = Body(...),
+                         payload: dict = Depends(require_perm("user_mgmt"))):
+    """邮件发信配置整组保存。password 留空=保持不变；security ∈ auto/ssl/starttls。"""
+    security = str(body.get("security", "auto")).strip() or "auto"
+    if security not in ("auto", "ssl", "starttls"):
+        raise ApiError(400, "SMTP_SECURITY_INVALID", "security 需为 auto / ssl / starttls")
+    port = str(body.get("port", "587")).strip() or "587"
+    try:
+        int(port)
+    except ValueError:
+        raise ApiError(400, "SMTP_PORT_INVALID", "port 需为数字")
+    from .crypto_utils import encrypt
+    values = {
+        "smtp_host": str(body.get("host", "")).strip(),
+        "smtp_port": port,
+        "smtp_security": security,
+        "smtp_username": str(body.get("username", "")).strip(),
+        "smtp_from": str(body.get("from", "")).strip(),
+    }
+    with get_conn() as conn:
+        for k, v in values.items():
+            conn.execute(
+                "INSERT INTO system_config (key, value, value_type, description) "
+                "VALUES (%s, %s, 'text', '') ON CONFLICT (key) DO UPDATE SET value=%s, updated_at=now()",
+                (k, v, v))
+        pwd = str(body.get("password", "") or "").strip()
+        if pwd:  # 留空=不变
+            conn.execute(
+                "INSERT INTO system_config (key, value, value_type, description) "
+                "VALUES ('smtp_password', %s, 'password', 'SMTP 密码（加密）') "
+                "ON CONFLICT (key) DO UPDATE SET value=%s, updated_at=now()",
+                (encrypt(pwd), encrypt(pwd)))
+        conn.commit()
+    audit_log(payload["username"], "smtp_config_save",
+              f"host={values['smtp_host']} port={port} security={security} pwd={'***' if pwd else 'unchanged'}")
+    return {"ok": True}
+
+
+@app.post("/api/email/test")
+async def email_test_api(body: dict = Body(...), request: Request = None,
+                         background_tasks: BackgroundTasks = None,
+                         payload: dict = Depends(require_perm("user_mgmt"))):
+    """发送测试邮件（走发件箱，立即可在 Logs 页看结果；失败自动指数退避重试）。"""
+    to = str(body.get("to", "")).strip()
+    if not to or "@" not in to:
+        raise ApiError(400, "EMAIL_INVALID", "请填有效收件邮箱")
+    subject = "测试邮件 · 人工智能开发学习平台"
+    html = ("<html><body style='font-family:sans-serif'><h3>✅ 测试邮件</h3>"
+            "<p>这是一封配置验证邮件。收到即表示 SMTP 发信配置正确。</p></body></html>")
+    outbox_id = queue_email(to, subject, html)
+    background_tasks.add_task(try_row, outbox_id)
+    audit_log(payload["username"], "email_test", to)
+    return {"queued": True, "outbox_id": outbox_id}
+
+
 @app.get("/api/system-config")
 def list_system_config(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """列系统配置（viewer+ 只读）。"""
+    """列系统配置（viewer+ 只读）。password 型不回传明文，返回空值 + has_value 标记。"""
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT key, value, value_type, description, updated_at, updated_by "
             "FROM system_config ORDER BY key")
         rows = cur.fetchall()
-    return {"items": [{"key": r[0], "value": r[1], "value_type": r[2], "description": r[3],
-                       "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]} for r in rows]}
+    items = []
+    for r in rows:
+        value = r[1]
+        if r[2] == "password":
+            items.append({"key": r[0], "value": "", "has_value": bool(value),
+                          "value_type": r[2], "description": r[3],
+                          "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]})
+        else:
+            items.append({"key": r[0], "value": value, "value_type": r[2], "description": r[3],
+                          "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]})
+    return {"items": items}
 
 
 @app.put("/api/system-config/{key}")
 def update_system_config(key: str, body: dict = Body(...),
                           payload: dict = Depends(require_role("admin"))):
-    """更新系统配置（仅 admin）。部分 key 支持动态生效（如 celery_concurrency）。"""
+    """更新系统配置（仅 admin）。部分 key 支持动态生效（如 celery_concurrency）。
+    password 型：留空=不修改（400 提示），非空=Fernet 加密存储。"""
     value = body.get("value")
     if value is None:
-        raise HTTPException(400, "缺 value 字段")
+        raise ApiError(400, "CONFIG_VALUE_INVALID", "缺 value 字段")
     with get_conn() as conn:
         cur = conn.execute("SELECT value_type FROM system_config WHERE key=%s", (key,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(404, f"系统配置 {key} 不存在")
+            raise ApiError(404, "CONFIG_KEY_NOT_FOUND", f"系统配置 {key} 不存在")
         value_type = row[0]
         # 类型校验 + 规范化
         if value_type == "int":
             try: value = str(int(value))
-            except Exception: raise HTTPException(400, f"{key} 需 int 值")
+            except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 int 值")
         elif value_type == "float":
             try: value = str(float(value))
-            except Exception: raise HTTPException(400, f"{key} 需 float 值")
+            except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 float 值")
         elif value_type == "bool":
             value = "true" if value in (True, "true", "True", "1", 1) else "false"
         elif value_type == "json":
             try: value = json.dumps(value) if not isinstance(value, str) else value
             except Exception: pass
+        elif value_type == "password":
+            value = str(value).strip()
+            if not value:
+                raise ApiError(400, "CONFIG_PASSWORD_EMPTY", "password 型留空=不修改；如需更换请填新值")
+            from .crypto_utils import encrypt
+            value = encrypt(value)
         conn.execute(
             "UPDATE system_config SET value=%s, updated_at=now(), updated_by=%s WHERE key=%s",
             (str(value), payload["username"], key))
         conn.commit()
-    audit_log(payload["username"], "update_system_config", key, str(value))
+    audit_log(payload["username"], "update_system_config", key, "(password)" if value_type == "password" else str(value))
 
     # 动态生效：celery_concurrency 即时 pool_grow/shrink
     dynamic_result = None
     if key == "celery_concurrency":
         dynamic_result = _adjust_celery_concurrency(int(value))
-    return {"key": key, "value": value, "dynamic": dynamic_result}
+    shown = "(password updated)" if value_type == "password" else value
+    return {"key": key, "value": shown, "dynamic": dynamic_result}
 
 
 @app.get("/api/system-config/{key}")
@@ -203,32 +313,56 @@ def get_system_config(key: str, payload: dict = Depends(require_role("viewer", "
         cur = conn.execute("SELECT value, value_type, description FROM system_config WHERE key=%s", (key,))
         r = cur.fetchone()
     if not r:
-        raise HTTPException(404, f"系统配置 {key} 不存在")
+        raise ApiError(404, "CONFIG_KEY_NOT_FOUND", f"系统配置 {key} 不存在")
     return {"key": key, "value": r[0], "value_type": r[1], "description": r[2]}
 
 
 # ——— 认证 ———
 
 @app.post("/api/auth/login")
-def login(req: LoginReq):
-    user = authenticate(req.username, req.password)
+def login(req: LoginReq, request: Request):
+    user = authenticate(req.username, req.password)  # 支持 用户名 或 邮箱（含 @）
     if not user:
-        raise HTTPException(401, "用户名或密码错误")
+        raise ApiError(401, "INVALID_CREDENTIALS", "用户名或密码错误")
     token = create_jwt(str(user["id"]), user["username"], user["role"])
-    audit_log(user["username"], "login")
+    # A3: 记录上次登录（时间 + IP，X-Forwarded-For 取真实来源）
+    client_ip = (request.headers.get("x-forwarded-for") or request.client.host or "")[:45]
+    try:
+        with get_conn() as conn:
+            conn.execute("UPDATE users SET last_login_at=now(), last_login_ip=%s WHERE id=%s",
+                         (client_ip, user["id"]))
+            conn.commit()
+    except Exception as e:
+        print(f"[login] last_login update failed (ignored): {e}", flush=True)
+    audit_log(user["username"], "login", detail=client_ip)
     return {"token": token, "role": user["role"], "username": user["username"]}
 
 
 @app.get("/api/auth/me")
 def me(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    nickname, avatar_url = payload["username"], None
+    try:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT nickname, avatar_url FROM users WHERE id=%s", (payload["sub"],))
+            r = cur.fetchone()
+        if r:
+            nickname, avatar_url = r[0] or payload["username"], r[1]
+    except Exception:
+        pass
     return {"user_id": payload["sub"], "username": payload["username"], "role": payload["role"],
+            "nickname": nickname, "avatar_url": avatar_url,
             "permissions": list(PERMISSIONS.get(payload["role"], set()))}
 
 
 @app.post("/api/auth/logout")
-def logout(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    audit_log(payload["username"], "logout")
-    return {"ok": True}
+def logout(authorization: str = Header(...),
+           payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """登出：token 加入黑名单立即失效（A4）+ 审计。"""
+    from .auth import revoke_jwt
+    token = authorization[7:] if authorization.lower().startswith("bearer ") else authorization
+    revoked = revoke_jwt(token)
+    audit_log(payload["username"], "logout", detail=f"revoked={revoked}")
+    return {"ok": True, "revoked": revoked}
 
 
 # ——— 邀请制用户管理 ———
@@ -240,16 +374,157 @@ def _request_base(request: Request) -> str:
     return f"{scheme}://{host}".rstrip("/")
 
 
+@app.get("/api/user/profile")
+def profile_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """个人中心：当前用户资料（批次C）。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT username, nickname, role, avatar_url, email FROM users WHERE id=%s", (payload["sub"],))
+        r = cur.fetchone()
+    if not r:
+        raise ApiError(404, "USER_NOT_FOUND", "用户不存在")
+    return {"username": r[0], "nickname": r[1], "role": r[2], "avatar_url": r[3], "email": r[4]}
+
+
+@app.put("/api/user/profile")
+def profile_update_api(body: dict = Body(...),
+                       payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """更新昵称（批次C；仅昵称可自助改，角色/用户名只读）。"""
+    nickname = str(body.get("nickname", "")).strip()[:20]
+    if not nickname:
+        raise ApiError(400, "NICKNAME_REQUIRED", "昵称不能为空")
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET nickname=%s WHERE id=%s", (nickname, payload["sub"]))
+        conn.commit()
+    audit_log(payload["username"], "update_profile", f"nickname={nickname}")
+    return {"ok": True}
+
+
+@app.post("/api/user/avatar")
+def avatar_upload_api(body: dict = Body(...),
+                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """设置头像（批次C+）：{icon:"icon_NN.png"} 选系统卡通图标（public/icons，36 个）
+    或 {avatar_base64} 上传（裁剪 1:1 → Pillow 统一 256px JPEG 存 static/avatars，
+    固定文件名 user_{id}.jpg 覆盖旧图无孤儿，URL 带 ?t= 防缓存）。"""
+    import base64 as _b64
+    # 1) 系统图标：仅允许 icon_NN.png（0-35），防路径注入
+    icon = str(body.get("icon", "") or "").strip()
+    if icon:
+        import re as _re
+        if not _re.fullmatch(r"icon_(?:[0-2]\d|3[0-5])\.png", icon):
+            raise ApiError(400, "AVATAR_INVALID", "无效的系统图标")
+        url = f"/icons/{icon}"
+        with get_conn() as conn:
+            conn.execute("UPDATE users SET avatar_url=%s, avatar_updated_at=now() WHERE id=%s",
+                         (url, payload["sub"]))
+            conn.commit()
+        audit_log(payload["username"], "avatar_icon", icon)
+        return {"avatar_url": url}
+    import io as _io
+    import time as _time
+    data = str(body.get("avatar_base64", ""))
+    if data.startswith("data:"):
+        data = data.split(",", 1)[-1]
+    try:
+        raw = _b64.b64decode(data)
+    except Exception:
+        raise ApiError(400, "AVATAR_INVALID", "头像数据无效")
+    if len(raw) > 2 * 1024 * 1024:
+        raise ApiError(400, "AVATAR_TOO_LARGE", "图片不能超过 2MB")
+    try:
+        from PIL import Image
+        img = Image.open(_io.BytesIO(raw))
+        img.load()
+        if img.format not in ("JPEG", "PNG", "WEBP"):
+            raise ApiError(400, "AVATAR_FORMAT", "仅支持 JPG、PNG、WebP 格式")
+        # 中心方形裁剪（裁剪器已 1:1，此处兜底）→ RGB → 256px
+        w, h = img.size
+        side = min(w, h)
+        img = img.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        img = img.resize((256, 256), Image.LANCZOS)
+        fname = f"user_{payload['sub']}.jpg"
+        img.save(_AVATAR_DIR / fname, "JPEG", quality=85)
+    except ApiError:
+        raise
+    except Exception:
+        raise ApiError(400, "AVATAR_INVALID", "图片解析失败")
+    url = f"/api/static/avatars/{fname}?t={int(_time.time())}"
+    with get_conn() as conn:
+        conn.execute("UPDATE users SET avatar_url=%s, avatar_updated_at=now() WHERE id=%s",
+                     (url, payload["sub"]))
+        conn.commit()
+    audit_log(payload["username"], "avatar_upload")
+    return {"avatar_url": url}
+
+
+@app.post("/api/user/deactivate")
+def deactivate_api(authorization: str = Header(...),
+                   payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """自助注销（批次D）：软删+脱敏+token 拉黑。末位 admin 不可注销自己（该路径真实可达）。"""
+    guard_self_deactivate(int(payload["sub"]))
+    soft_delete_user(int(payload["sub"]))
+    from .auth import revoke_jwt
+    token = authorization[7:] if authorization.lower().startswith("bearer ") else authorization
+    revoke_jwt(token)
+    _af = _AVATAR_DIR / f"user_{payload['sub']}.jpg"
+    if _af.exists():
+        _af.unlink()
+    audit_log(payload["username"], "self_deactivate")
+    return {"ok": True}
+
+
+@app.get("/api/invites")
+def invites_api(payload: dict = Depends(require_perm("user_mgmt"))):
+    """邀请记录列表（批次B 可观测）：待注册/已用/已过期/已撤销。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, email, expires_at, used, revoked, created_at "
+            "FROM user_tokens WHERE type='invite' ORDER BY id DESC LIMIT 200")
+        rows = cur.fetchall()
+    from datetime import datetime as _dt
+    now = _dt.now()
+    items = []
+    for r in rows:
+        status = ("revoked" if r[4] else "used" if r[3]
+                  else "expired" if (r[2] and str(r[2]) < str(now)) else "pending")
+        items.append({"id": r[0], "email": r[1],
+                      "expires_at": str(r[2])[:19] if r[2] else None,
+                      "status": status, "created_at": str(r[5])[:19]})
+    return {"items": items}
+
+
+@app.post("/api/invites/{tid}/revoke")
+def invite_revoke_api(tid: int, payload: dict = Depends(require_perm("user_mgmt"))):
+    """撤销邀请（仅未使用的可撤；批次B）。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE user_tokens SET revoked=true WHERE id=%s AND type='invite' AND used=false AND revoked=false RETURNING id",
+            (tid,))
+        r = cur.fetchone()
+        conn.commit()
+    if not r:
+        raise ApiError(400, "INVITE_NOT_REVOKABLE", "仅未使用的邀请可撤销")
+    audit_log(payload["username"], "invite_revoke", str(tid))
+    return {"ok": True}
+
+
 @app.post("/api/auth/invite")
 async def invite_user_api(req: InviteReq, request: Request, background_tasks: BackgroundTasks,
                           payload: dict = Depends(require_perm("user_mgmt"))):
     """admin 邀请：填 email 发邀请邮件（默认 Viewer）。邮件后台发送，接口立即返回（SMTP 慢不阻塞）。"""
-    token = invite_user(req.email)
+    email = (req.email or "").strip()
+    # 轻量格式校验：防手滑（如 hotmailcom 少点直接被 SMTP 拒）
+    domain = email.split("@")[-1] if "@" in email else ""
+    if "@" not in email or "." not in domain:
+        raise ApiError(400, "EMAIL_INVALID_FORMAT", "邮箱格式无效（检查是否漏了 . 或 @）")
+    token = invite_user(email)
     if not token:
-        raise HTTPException(400, "该邮箱已注册（如需重发邀请，请先删除该账号或换邮箱）")
-    background_tasks.add_task(send_invite_email, req.email, token, _request_base(request))
-    audit_log(payload["username"], "invite_user", req.email)
-    return {"status": "invited", "email": req.email}
+        raise ApiError(400, "EMAIL_REGISTERED", "该邮箱已注册（如需重发邀请，请先删除该账号或换邮箱）")
+    background_tasks.add_task(send_invite_email, email, token, _request_base(request), req.lang)
+    audit_log(payload["username"], "invite_user", email)
+    return {"status": "invited", "email": email}
 
 
 @app.get("/api/auth/invite/verify")
@@ -257,30 +532,28 @@ def verify_invite_token(token: str):
     """验证 invite token 有效性（前端开通页用）。"""
     t = verify_token(token, "invite")
     if not t:
-        raise HTTPException(400, "token 无效或已过期")
+        raise ApiError(400, "TOKEN_INVALID_OR_EXPIRED", "token 无效或已过期")
     return {"valid": True, "email": t["email"]}
 
 
 @app.post("/api/auth/register")
 async def register_api(req: RegisterReq, request: Request, background_tasks: BackgroundTasks):
     """自助开通：凭 invite token 建用户（默认 Viewer）。"""
-    try:
-        validate_password(req.password)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    validate_password(req.password)  # 不达标直接抛 ApiError(含错误码)
     user = register_user(req.token, req.username, req.password)
     if not user:
-        raise HTTPException(400, "token 无效/已用/过期，或用户名已存在")
+        raise ApiError(400, "TOKEN_OR_USERNAME_INVALID", "token 无效/已用/过期，或用户名已存在")
     audit_log(user["username"], "self_register")
     # 开通通知邮件后台发送（带条款，内容大发送慢，不阻塞注册响应）
-    background_tasks.add_task(send_activation_email, user["email"], user["username"], _request_base(request))
+    background_tasks.add_task(send_activation_email, user["email"], user["username"], _request_base(request), req.lang)
     return {"status": "registered", "username": user["username"], "email": user["email"]}
 
 
 @app.get("/api/terms")
 def terms_api():
-    """平台使用条款（公开，注册页 + 开通邮件共用单一源）。"""
-    return get_terms()
+    """平台使用条款（公开，注册页 + 开通邮件共用单一源）。
+    返回 items: [{lang, name, body}] —— N 语言注册表驱动，前端遍历展示不感知具体语言。"""
+    return {"items": get_terms_items()}
 
 
 @app.post("/api/auth/forgot-password")
@@ -289,33 +562,27 @@ async def forgot_password_api(req: ForgotReq, request: Request, background_tasks
     token = forgot_password(req.email)
     if not token:
         return {"status": "sent"}  # email 不存在也返回 sent（防枚举）
-    background_tasks.add_task(send_password_reset_email, req.email, token, _request_base(request))
+    background_tasks.add_task(send_password_reset_email, req.email, token, _request_base(request), req.lang)
     return {"status": "sent"}
 
 
 @app.post("/api/auth/reset-password")
 def reset_password_api(req: ResetReq):
     """凭 reset token 重置密码。"""
-    try:
-        validate_password(req.new_password)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    validate_password(req.new_password)  # 不达标直接抛 ApiError(含错误码)
     ok = reset_password(req.token, req.new_password)
     if not ok:
-        raise HTTPException(400, "token 无效/已用/过期")
+        raise ApiError(400, "TOKEN_INVALID_OR_EXPIRED", "token 无效或已用/过期")
     return {"status": "reset"}
 
 
 @app.post("/api/auth/change-password")
 def change_password_api(req: ChangePwdReq, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """改密码：需旧密码验证。"""
-    try:
-        validate_password(req.new_password)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    validate_password(req.new_password)  # 不达标直接抛 ApiError(含错误码)
     ok = change_password(int(payload["sub"]), req.old_password, req.new_password)
     if not ok:
-        raise HTTPException(400, "旧密码错误")
+        raise ApiError(400, "OLD_PASSWORD_WRONG", "旧密码错误")
     audit_log(payload["username"], "change_password")
     return {"status": "changed"}
 
@@ -329,33 +596,31 @@ def create_user_api(req: UserCreate, payload: dict = Depends(require_perm("user_
         audit_log(payload["username"], "create_user", req.username, f"role={req.role}")
         return {"id": uid, "username": req.username, "role": req.role}
     except ValueError as e:
-        raise HTTPException(409, str(e))
+        raise ApiError(409, "USERNAME_EXISTS", str(e))
 
 
 @app.get("/api/user")
 def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, username, role, enabled, email, email_verified, created_at FROM users ORDER BY id")
+        cur = conn.execute("SELECT id, username, nickname, role, enabled, email, email_verified, created_at, "
+                           "last_login_at, deleted_at FROM users ORDER BY id")
         rows = cur.fetchall()
-    return [{"id": r[0], "username": r[1], "role": r[2], "enabled": r[3],
-             "email": r[4], "email_verified": r[5], "created_at": str(r[6])} for r in rows]
+    return [{"id": r[0], "username": r[1], "nickname": r[2], "role": r[3],
+             "enabled": r[4] and not r[9], "deactivated": bool(r[9]),
+             "email": r[5], "email_verified": r[6], "created_at": str(r[7])[:19],
+             "last_login_at": str(r[8])[:19] if r[8] else None} for r in rows]
 
 
 @app.put("/api/user/{uid}")
 def update_user(uid: int, role: str = None, enabled: bool = None,
                 payload: dict = Depends(require_perm("user_mgmt"))):
-    """改用户角色/禁用。保护：不能动自己、不能移除最后一个启用的管理员。"""
+    """改用户角色/禁用。保护：不能动自己（末位 admin 由 user_mgmt=admin-only + 不动自己 隐式保证）。"""
     with get_conn() as conn:
-        cur = conn.execute("SELECT username, role, enabled FROM users WHERE id=%s", (uid,))
+        cur = conn.execute("SELECT username FROM users WHERE id=%s", (uid,))
         row = cur.fetchone()
     if not row:
-        raise HTTPException(404, "用户不存在")
-    t_username, t_role, t_enabled = row
-    # 本次是否剥夺一个启用 admin 身份（降级到非 admin 或 禁用）
-    removes_admin = (t_role == "admin" and t_enabled) and (
-        (role is not None and role != "admin") or (enabled is False)
-    )
-    guard_user_mutation(t_username, payload["username"], removes_admin=removes_admin)
+        raise ApiError(404, "USER_NOT_FOUND", "用户不存在")
+    guard_user_mutation(row[0], payload["username"])
     with get_conn() as conn:
         if role is not None:
             conn.execute("UPDATE users SET role=%s WHERE id=%s", (role, uid))
@@ -368,17 +633,19 @@ def update_user(uid: int, role: str = None, enabled: bool = None,
 
 @app.delete("/api/user/{uid}")
 def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
-    """删除用户。保护：不能动自己、不能移除最后一个启用的管理员。"""
+    """删除用户。保护：不能动自己（末位 admin 由 user_mgmt=admin-only + 不动自己 隐式保证）。"""
     with get_conn() as conn:
-        cur = conn.execute("SELECT username, role, enabled FROM users WHERE id=%s", (uid,))
+        cur = conn.execute("SELECT username FROM users WHERE id=%s", (uid,))
         row = cur.fetchone()
     if not row:
-        raise HTTPException(404, "用户不存在")
-    t_username, t_role, t_enabled = row
-    guard_user_mutation(t_username, payload["username"], removes_admin=(t_role == "admin" and t_enabled))
-    with get_conn() as conn:
-        conn.execute("DELETE FROM users WHERE id=%s", (uid,))
-        conn.commit()
+        raise ApiError(404, "USER_NOT_FOUND", "用户不存在")
+    guard_user_mutation(row[0], payload["username"])
+    soft_delete_user(uid)  # 批次D：软删+脱敏（审计/关联数据保留）
+    # 清头像文件
+    import os as _os
+    _af = _AVATAR_DIR / f"user_{uid}.jpg"
+    if _af.exists():
+        _af.unlink()
     audit_log(payload["username"], "delete_user", str(uid))
     return {"ok": True}
 
@@ -861,7 +1128,7 @@ def notifications_api(status: str = "active", limit: int = 50,
     if not cats:
         return {"items": [], "count": 0}
     cond = "" if status == "all" else "AND status=%s"
-    params = [tuple(cats)]
+    params = [cats]
     if status != "all":
         params.append(status)
     params.append(min(limit, 200))
@@ -873,7 +1140,7 @@ def notifications_api(status: str = "active", limit: int = 50,
         rows = cur.fetchall()
         cur2 = conn.execute(
             "SELECT count(*) FROM notifications WHERE category = ANY(%s) AND status='active'",
-            (tuple(cats),))
+            (cats,))
         active_count = cur2.fetchone()[0]
     return {
         "items": [{
@@ -897,7 +1164,7 @@ def notifications_ack_all(payload: dict = Depends(require_role("viewer", "analys
         cur = conn.execute(
             "UPDATE notifications SET status='acked', acked_by=%s, acked_at=now() "
             "WHERE category = ANY(%s) AND status='active'",
-            (payload.get("username", ""), tuple(cats)))
+            (payload.get("username", ""), cats))
         conn.commit()
     audit_log(payload["username"], "notifications_ack_all", f"n={cur.rowcount}")
     return {"acked": cur.rowcount}

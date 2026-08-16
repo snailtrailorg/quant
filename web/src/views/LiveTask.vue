@@ -18,7 +18,7 @@
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" width="150" />
       <el-table-column prop="initial_capital" :label="t('liveTask.capital')" width="120" />
-      <el-table-column :label="t('common.action')" width="220">
+      <el-table-column :label="t('common.action')" width="250">
         <template #default="{ row }">
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>

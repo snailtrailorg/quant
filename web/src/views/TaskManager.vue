@@ -30,11 +30,13 @@
       <el-table-column prop="last_heartbeat" :label="t('task.heartbeat')" width="150">
         <template #default="{ row }">{{ row.last_heartbeat ? row.last_heartbeat.slice(0,19).replace('T',' ') : '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="220">
+      <el-table-column :label="t('common.action')" width="300">
         <template #default="{ row }">
-          <el-button type="primary" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>
-          <el-button type="warning" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)">{{ t('task.terminate') }}</el-button>
-          <el-button type="danger" @click="onForceDelete(row.id)" v-if="role==='admin'">{{ t('task.forceDelete') }}</el-button>
+          <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
+            <el-button type="primary" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>
+            <el-button type="warning" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)">{{ t('task.terminate') }}</el-button>
+            <el-button type="danger" @click="onForceDelete(row.id)" v-if="role==='admin'">{{ t('task.forceDelete') }}</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>

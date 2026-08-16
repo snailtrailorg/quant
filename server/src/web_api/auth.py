@@ -69,23 +69,53 @@ def require_perm(perm: str):
 # ——— JWT ———
 
 def create_jwt(user_id: str, username: str, role: Role) -> str:
+    import uuid
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
         "exp": datetime.utcnow() + timedelta(hours=JWT_TTL_HOURS),
         "iat": datetime.utcnow(),
+        "jti": uuid.uuid4().hex,  # 登出黑名单用（logout 置 Valkey jwt:bl:{jti}）
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGO)
 
 
 def verify_jwt(token: str) -> dict:
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
     except jwt.ExpiredSignatureError:
         raise HTTPException(401, "token 过期")
     except jwt.InvalidTokenError:
         raise HTTPException(401, "token 无效")
+    # 登出黑名单（A4）：旧 token 无 jti 跳过（24h 过渡期后全部带 jti）
+    jti = payload.get("jti")
+    if jti:
+        import redis as _redis
+        import os as _os
+        r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+        if r.exists(f"jwt:bl:{jti}"):
+            raise HTTPException(401, "token 已登出")
+    return payload
+
+
+def revoke_jwt(token: str) -> bool:
+    """把 token 的 jti 加入黑名单（TTL=剩余寿命）。登出即失效。"""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGO])
+    except jwt.InvalidTokenError:
+        return False
+    jti = payload.get("jti")
+    if not jti:
+        return False  # 旧 token 无 jti（自然过期兜底）
+    import redis as _redis
+    import os as _os
+    from datetime import datetime as _dt
+    r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+    remaining = payload["exp"] - int(_dt.utcnow().timestamp())
+    if remaining > 0:
+        r.setex(f"jwt:bl:{jti}", remaining, "1")
+    return True
 
 
 # ——— 用户管理（PG） ———
@@ -101,28 +131,25 @@ def hash_password(password: str) -> str:
 
 
 def validate_password(password: str) -> None:
-    """密码复杂度校验：≥8 位，需含字母和数字。不达标抛 ValueError（前端 register/change-password 同规则）。"""
+    """密码复杂度校验：≥8 位，需含字母和数字。不达标抛 ApiError（细分错误码，前端 err.<CODE> 本地化）。"""
+    from .errors import ApiError
     if not password or len(password) < 8:
-        raise ValueError("密码至少 8 位")
+        raise ApiError(400, "PASSWORD_TOO_SHORT", "密码至少 8 位")
     if not re.search(r"[A-Za-z]", password):
-        raise ValueError("密码需包含字母")
+        raise ApiError(400, "PASSWORD_NO_LETTER", "密码需包含字母")
     if not re.search(r"[0-9]", password):
-        raise ValueError("密码需包含数字")
+        raise ApiError(400, "PASSWORD_NO_DIGIT", "密码需包含数字")
 
 
-def guard_user_mutation(target_username: str, current_username: str, removes_admin: bool) -> None:
-    """账户变更保护（DELETE / PUT user 共用，两条不变量，防两类锁定）：
-    1. 不能动自己 —— 管理页不得删/改角色/禁用"自己"那行（自我锁定）；
-    2. 不能移除最后一个启用的管理员 —— 任何使启用 admin 数降为 0 的操作都拒（管理锁定）。
-    removes_admin：本次操作是否剥夺一个"启用 admin"身份（删/降级/禁用 且目标当前是启用 admin），由调用方算。
-    """
+def guard_user_mutation(target_username: str, current_username: str) -> None:
+    """账户变更保护（DELETE / PUT user 共用，单一不变量）：
+    不能动自己 —— 管理页不得删/改角色/禁用"自己"那行（防自我锁定）。
+    注：「末位 admin 保护」已移除（2026-08-15）：user_mgmt 仅 admin 持有 + 不能动自己
+    ⇒ 最后一个 admin 永远不可能被他人变更（他人必是另一个 admin ⇒ 目标不是末位），原规则不可达。
+    """  # noqa: D418
+    from .errors import ApiError
     if target_username == current_username:
-        raise HTTPException(400, "不能修改或删除当前登录的账户")
-    if removes_admin:
-        with get_conn() as conn:
-            cur = conn.execute("SELECT count(*) FROM users WHERE role='admin' AND enabled=true")
-            if cur.fetchone()[0] <= 1:
-                raise HTTPException(400, "不能移除最后一个启用的管理员")
+        raise ApiError(400, "SELF_MUTATION_FORBIDDEN", "不能修改或删除当前登录的账户")
 
 
 def verify_password(password: str, stored: str) -> bool:
@@ -151,20 +178,59 @@ def create_user(username: str, password: str, role: Role = "viewer") -> int:
             raise ValueError(f"用户 {username} 已存在")
 
 
-def authenticate(username: str, password: str) -> dict | None:
-    """验证用户，返回 {id, username, role} 或 None。"""
+def authenticate(account: str, password: str) -> dict | None:
+    """验证用户（支持 用户名 或 邮箱 登录：含 @ 按 email 查），返回 {id, username, role} 或 None。
+    密码正确但账户被禁 → 抛 ApiError(ACCOUNT_DISABLED)（登录端点区分提示，不再误报密码错误）。
+    已注销（deleted_at）视同不存在。"""
     init_users_table()
+    field = "email" if "@" in account else "username"
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, username, password_hash, role, enabled FROM users WHERE username=%s",
-            (username,),
+            f"SELECT id, username, password_hash, role, enabled FROM users "
+            f"WHERE {field}=%s AND deleted_at IS NULL",
+            (account,),
         )
         row = cur.fetchone()
-        if not row or not row[4]:
-            return None
-        if not verify_password(password, row[2]):
-            return None
-        return {"id": row[0], "username": row[1], "role": row[3]}
+    if not row:
+        return None
+    if not verify_password(password, row[2]):
+        return None
+    if not row[4]:
+        from .errors import ApiError
+        raise ApiError(403, "ACCOUNT_DISABLED", "账号已被禁用，请联系管理员")
+    return {"id": row[0], "username": row[1], "role": row[3]}
+
+
+def soft_delete_user(user_id: int) -> None:
+    """软删除/注销（批次D，admin 删除与自助注销共用）：
+    deleted_at 置时间 + email/昵称脱敏置空 + username 加后缀释放占用 + 头像文件清理由调用方做。"""
+    import secrets as _secrets
+    with get_conn() as conn:
+        cur = conn.execute("SELECT username FROM users WHERE id=%s AND deleted_at IS NULL", (user_id,))
+        row = cur.fetchone()
+        if not row:
+            return
+        new_name = f"{row[0]}_deleted_{_secrets.token_hex(3)}"
+        conn.execute(
+            "UPDATE users SET deleted_at=now(), email=NULL, nickname=NULL, "
+            "avatar_url=NULL, username=%s WHERE id=%s", (new_name, user_id))
+        conn.commit()
+
+
+def guard_self_deactivate(user_id: int) -> None:
+    """自助注销保护（批次D）：唯一启用的 admin 不可注销自己。
+    注：管理页删除路径无此约束（guard_user_mutation 注释——不可达）；自助注销是用户直接对自己
+    的终局操作，末位 admin 场景在此路径真实可达，须设防。"""
+    from .errors import ApiError
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT role FROM users WHERE id=%s AND deleted_at IS NULL AND enabled=true", (user_id,))
+        row = cur.fetchone()
+        if row and row[0] == "admin":
+            cur2 = conn.execute(
+                "SELECT count(*) FROM users WHERE role='admin' AND enabled=true AND deleted_at IS NULL")
+            if cur2.fetchone()[0] <= 1:
+                raise ApiError(400, "LAST_ADMIN_PROTECTED", "最后一个管理员不可注销自己")
 
 
 def audit_log(actor: str, action: str, target: str = "", detail: str = "",
@@ -213,13 +279,13 @@ def create_token(email: str, token_type: str, user_id: int | None = None, hours:
 
 
 def verify_token(token: str, token_type: str) -> dict | None:
-    """校验 token（未用过 + 未过期）。"""
+    """校验 token（未用过 + 未撤销 + 未过期）。"""
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, user_id, email, expires_at, used FROM user_tokens WHERE token=%s AND type=%s",
+            "SELECT id, user_id, email, expires_at, used, revoked FROM user_tokens WHERE token=%s AND type=%s",
             (token, token_type))
         row = cur.fetchone()
-    if not row or row[4]:  # used
+    if not row or row[4] or row[5]:  # used / revoked
         return None
     if row[3] < datetime.now(timezone.utc):  # expired（DB 列 timestamptz aware，用 aware UTC 比较）
         return None

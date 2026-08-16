@@ -19,9 +19,9 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { forgotPassword } from '../api'
+import { forgotPassword, apiErr } from '../api'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const email = ref('')
 const loading = ref(false)
 
@@ -29,9 +29,9 @@ const onSubmit = async () => {
   if (!email.value) { ElMessage.warning(t('forgot.fillEmail')); return }
   loading.value = true
   try {
-    await forgotPassword(email.value)
+    await forgotPassword(email.value, locale.value)
     ElMessage.success(t('forgot.success'))
-  } catch { ElMessage.error(t('forgot.failed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('forgot.failed'))) }
   finally { loading.value = false }
 }
 </script>

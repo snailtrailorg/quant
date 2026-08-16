@@ -27,10 +27,12 @@
             :class="{ 'mismatch': form.confirm && form.confirm !== form.password }" />
         </el-form-item>
 
-        <el-checkbox v-model="agreed" class="terms-cb">
-          {{ t('register.termsLabel') }}
-          <a href="javascript:void(0)" @click="termsVisible = true" class="link">{{ t('register.termsLink') }}</a>
-        </el-checkbox>
+        <!-- 勾选框不可直接切换：点击仅打开条款弹窗，同意状态只能由弹窗内滚到底后的确认按钮写入（强制阅读） -->
+        <div class="terms-row" @click="termsVisible = true">
+          <el-checkbox :model-value="agreed" />
+          <span>{{ t('register.termsLabel') }}</span>
+          <a href="javascript:void(0)" class="link">{{ t('register.termsLink') }}</a>
+        </div>
 
         <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%; margin-top: 12px"
           :disabled="!form.username || !form.password || !form.confirm || !agreed">{{ t('register.submit') }}</el-button>
@@ -41,22 +43,29 @@
       </p>
     </el-card>
 
-    <!-- 条款弹窗 -->
-    <el-dialog v-model="termsVisible" :title="t('register.termsTitle')" width="80%" top="6vh">
-      <pre class="terms-body">{{ termsText }}</pre>
+    <!-- 条款弹窗：中英双语纵向全量，滚动到底才能确认（确认按钮始终可见） -->
+    <el-dialog v-model="termsVisible" :title="t('register.termsTitle')" width="80%" top="6vh"
+      @open="onTermsOpen">
+      <div ref="termsScrollRef" class="terms-scroll" @scroll="onTermsScroll">
+        <template v-for="(item, i) in terms" :key="item.lang">
+          <h4 class="terms-lang" :style="i ? 'margin-top: 24px' : ''">{{ item.name }}</h4>
+          <pre class="terms-body">{{ item.body }}</pre>
+        </template>
+      </div>
       <template #footer>
-        <el-button type="primary" @click="termsVisible = false">{{ t('common.ok') }}</el-button>
+        <span v-if="!termsRead" class="scroll-hint">{{ t('register.termsScrollHint') }}</span>
+        <el-button type="primary" :disabled="!termsRead" @click="agreeTerms">{{ t('register.termsAgree') }}</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { verifyInviteToken, registerUser, getTerms } from '../api'
+import { verifyInviteToken, registerUser, getTerms, apiErr } from '../api'
 import { validatePassword } from '../password'
 
 const { t, locale } = useI18n()
@@ -69,11 +78,28 @@ const email = ref('')
 const loading = ref(false)
 const agreed = ref(false)
 const termsVisible = ref(false)
-const termsText = ref('')
+const terms = ref([])
+const termsScrollRef = ref(null)
+const termsRead = ref(false)  // 滚到底才 true（内容不足一屏时打开即 true）
 const form = ref({ username: '', password: '', confirm: '' })
 
-// 条款从后端 /api/terms 取（单一源，与开通邮件一致），按当前语言展示
-getTerms().then(r => { termsText.value = r[locale.value] || r.zh }).catch(() => {})
+// 条款从后端 /api/terms 取（单一源，与开通邮件一致）；中英双语纵向全量展示
+// 条款从后端 /api/terms 取 items [{lang,name,body}]（注册表驱动，前端不感知具体语言）
+getTerms().then(r => { terms.value = r.items || [] }).catch(() => {})
+
+// 打开弹窗重置阅读状态；内容不满一屏（无滚动条）直接视为已读
+const onTermsOpen = () => {
+  termsRead.value = false
+  nextTick(() => {
+    const el = termsScrollRef.value
+    if (el && el.scrollHeight <= el.clientHeight + 4) termsRead.value = true
+  })
+}
+const onTermsScroll = (e) => {
+  const el = e.target
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 4) termsRead.value = true
+}
+const agreeTerms = () => { agreed.value = true; termsVisible.value = false }
 
 onMounted(async () => {
   if (!token) { verifying.value = false; return }
@@ -92,10 +118,10 @@ const onRegister = async () => {
   if (!agreed.value) { ElMessage.warning(t('register.agreeRequired')); return }
   loading.value = true
   try {
-    await registerUser(token, form.value.username, form.value.password)
+    await registerUser(token, form.value.username, form.value.password, locale.value)
     ElMessage.success(t('register.success'))
     router.push('/login')
-  } catch (e) { ElMessage.error(e.detail || e.message || t('register.failed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('register.failed'))) }
   finally { loading.value = false }
 }
 </script>
@@ -112,8 +138,11 @@ const onRegister = async () => {
 .email-box { background: #f5f7fa; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #606266; margin-bottom: 14px; }
 .pwd-rule { color: #909399; font-size: 12px; margin: -8px 0 10px; }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
-.terms-cb { margin-bottom: 4px; }
+.terms-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer; user-select: none; }
 .back-login { text-align: center; margin: 8px 0 18px; }
 .link { color: #409eff; font-size: 13px; text-decoration: none; }
+.terms-scroll { max-height: 65vh; overflow-y: auto; padding: 0 8px; }
+.terms-lang { color: #303133; font-size: 16px; margin: 16px 0 8px; }
 .terms-body { white-space: pre-wrap; font-family: inherit; font-size: 16px; color: #606266; line-height: 1.7; margin: 0; }
+.scroll-hint { color: #e6a23c; font-size: 13px; margin-right: 12px; }
 </style>

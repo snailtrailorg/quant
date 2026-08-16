@@ -14,18 +14,52 @@ from email.mime.multipart import MIMEMultipart
 _logger = logging.getLogger("quant")
 
 
-def _send_email_sync(to: str, subject: str, html_body: str) -> str | None:
-    """底层同步发送邮件。成功返回 None，失败返回错误描述（供发件箱记录 last_error）。"""
-    if not os.environ.get("SMTP_USERNAME"):
-        print(f"[DEV] 邮件未配置 -> {to}\n[DEV] 主题={subject}\n[DEV] 内容={html_body}")
+def _smtp_config() -> tuple[str, int, str, str, str, str] | None:
+    """SMTP 配置：仅读 system_config（Web「系统配置」页维护，单一真相源，2026-08-14 弃 .env）。
+    返回 (host, port, security, username, password, from) 或 None（未配置）。
+    security: auto（按端口推断 RFC 8314：465→ssl，其余→starttls）/ ssl / starttls。"""
+    cfg = {}
+    try:
+        from src.data_platform.db import get_conn
+        from src.web_api.crypto_utils import decrypt
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT key, value FROM system_config WHERE key LIKE 'smtp_%'")
+            for k, v in cur.fetchall():
+                if v is None or str(v).strip() == "":
+                    continue
+                cfg[k] = decrypt(v) if k == "smtp_password" else str(v).strip()
+    except Exception as e:
+        _logger.error("read smtp config from DB failed: %s", e)
         return None
+    if not cfg.get("smtp_username"):
+        return None  # 未配置
+    security = cfg.get("smtp_security", "auto")
+    # auto：按端口推断（RFC 8314 业界约定）
+    if security == "auto":
+        security = "ssl" if cfg.get("smtp_port", "587") == "465" else "starttls"
+    return (
+        cfg.get("smtp_host", ""),
+        int(cfg.get("smtp_port", "587") or 587),
+        security,
+        cfg["smtp_username"],
+        cfg.get("smtp_password", ""),
+        cfg.get("smtp_from") or cfg["smtp_username"],
+    )
 
-    smtp_from = os.environ.get("SMTP_FROM")
-    smtp_host = os.environ.get("SMTP_HOST")
-    smtp_port = os.environ.get("SMTP_PORT", "587")
-    if not smtp_from or not smtp_host:
-        _logger.warning("SMTP_FROM 或 SMTP_HOST 未配置，跳过邮件发送")
-        return "SMTP_FROM 或 SMTP_HOST 未配置"
+
+def _send_email_sync(to: str, subject: str, html_body: str) -> str | None:
+    """底层同步发送邮件。成功返回 None，失败返回错误描述（供发件箱记录 last_error）。
+    未配置：本地开发可 .env SMTP_DEV=true 显式开打印模式（不真发）；否则视为失败（→重试→铃铛）。"""
+    conf = _smtp_config()
+    if conf is None:
+        if os.environ.get("SMTP_DEV") == "true":
+            print(f"[DEV] SMTP 未配置（打印模式） -> {to}\n[DEV] 主题={subject}\n[DEV] 内容={html_body}")
+            return None
+        return "SMTP 未配置（Web 系统设置→系统配置 填 smtp_* 五项）"
+    smtp_host, smtp_port, security, smtp_username, smtp_password, smtp_from = conf
+    if not smtp_host:
+        return "SMTP 未配置 smtp_host"
 
     msg = MIMEMultipart()
     msg["From"] = smtp_from
@@ -34,9 +68,12 @@ def _send_email_sync(to: str, subject: str, html_body: str) -> str | None:
     msg.attach(MIMEText(html_body, "html"))
 
     try:
-        with smtplib.SMTP(smtp_host, int(smtp_port), timeout=60) as server:
-            server.starttls()
-            server.login(os.environ["SMTP_USERNAME"], os.environ["SMTP_PASSWORD"])
+        # security 已解析为 ssl（隐式，SMTP_SSL）/ starttls（明文连接后升级）
+        cls = smtplib.SMTP_SSL if security == "ssl" else smtplib.SMTP
+        with cls(smtp_host, smtp_port, timeout=60) as server:
+            if security != "ssl":
+                server.starttls()
+            server.login(smtp_username, smtp_password)
             server.sendmail(smtp_from, to, msg.as_string())
         _logger.info("email sent: to=%s subject=%s", to, subject)
         return None
@@ -156,77 +193,156 @@ def _resolve_base_url(request_base: str = "") -> str:
     return "https://quant.snailtrail.cc"
 
 
-async def send_invite_email(email: str, token: str, request_base: str = "") -> bool:
-    """发送邀请开通邮件。"""
-    base_url = _resolve_base_url(request_base)
-    register_url = f"{base_url}/register?token={token}"
-    subject = "量化交易平台 · 邀请开通"
-    body = f"""
-    <html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+# ——— 邮件模板（N 语言 dict，en 为缺省；新增语言 = 加一个条目，逻辑零改动）———
+# 语言来源：操作界面当前语言（前端随请求传 lang），未匹配回落 en。
+
+_BTN = 'style="display: inline-block; padding: 12px 24px; background: {color}; color: white; text-decoration: none; border-radius: 6px;"'
+
+INVITE_TPL: dict[str, dict[str, str]] = {
+    "zh": {
+        "subject": "人工智能开发学习平台 · 邀请开通",
+        "body": """<html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>📧 邀请开通</h2>
-        <p>您被邀请开通量化交易平台账号。</p>
+        <p>您被邀请开通平台账号。</p>
         <p style="margin: 20px 0;">
-            <a href="{register_url}" style="display: inline-block; padding: 12px 24px;
-               background: #409eff; color: white; text-decoration: none; border-radius: 6px;">
-               点击开通账号</a>
+            <a href="{register_url}" {btn}>点击开通账号</a>
         </p>
-        <p style="color: #666; font-size: 14px;">链接 3 天内有效。开通后默认 Viewer 角色，管理员可提升权限。</p>
-    </body></html>
-    """
-    # 邀请邮件审计日志（who/ base_url/ 链接），便于排查"链接不对"
-    _logger.info("send invite email: to=%s base_url=%s register_url=%s", email, base_url, register_url)
-    outbox_id = queue_email(email, subject, body)
-    await try_row(outbox_id)  # 立即试发一次；失败由发件箱指数退避重发
-    return True
+        <p style="color: #666; font-size: 14px;">链接 3 天内有效。</p>
+    </body></html>""",
+    },
+    "en": {
+        "subject": "AI Development Learning · You're Invited",
+        "body": """<html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>📧 You're Invited</h2>
+        <p>You are invited to open an account on the platform.</p>
+        <p style="margin: 20px 0;">
+            <a href="{register_url}" {btn}>Open Account</a>
+        </p>
+        <p style="color: #666; font-size: 14px;">Link valid for 3 days.</p>
+    </body></html>""",
+    },
+}
 
-
-async def send_password_reset_email(email: str, token: str, request_base: str = "") -> bool:
-    """发送密码重置邮件。"""
-    base_url = _resolve_base_url(request_base)
-    reset_url = f"{base_url}/reset-password?token={token}"
-    subject = "量化交易平台 · 密码重置"
-    body = f"""
-    <html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+RESET_TPL: dict[str, dict[str, str]] = {
+    "zh": {
+        "subject": "人工智能开发学习平台 · 密码重置",
+        "body": """<html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>🔐 密码重置</h2>
         <p>您请求重置密码。</p>
         <p style="margin: 20px 0;">
-            <a href="{reset_url}" style="display: inline-block; padding: 12px 24px;
-               background: #f56c6c; color: white; text-decoration: none; border-radius: 6px;">
-               点击重置密码</a>
+            <a href="{reset_url}" {btn_red}>点击重置密码</a>
         </p>
         <p style="color: #666; font-size: 14px;">链接 1 小时内有效。</p>
         <p style="color: #999; font-size: 12px;">如果不是您本人操作，请忽略此邮件。</p>
-    </body></html>
-    """
-    outbox_id = queue_email(email, subject, body)
-    await try_row(outbox_id)  # 立即试发一次；失败由发件箱指数退避重发
-    return True
+    </body></html>""",
+    },
+    "en": {
+        "subject": "AI Development Learning · Password Reset",
+        "body": """<html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>🔐 Password Reset</h2>
+        <p>You requested a password reset.</p>
+        <p style="margin: 20px 0;">
+            <a href="{reset_url}" {btn_red}>Reset Password</a>
+        </p>
+        <p style="color: #666; font-size: 14px;">Link valid for 1 hour.</p>
+        <p style="color: #999; font-size: 12px;">If this wasn't you, please ignore this email.</p>
+    </body></html>""",
+    },
+}
 
-
-async def send_activation_email(email: str, username: str, request_base: str = "") -> bool:
-    """开通成功通知邮件：附登录链接 +《平台使用条款》全文。"""
-    from .terms import TERMS_ZH
-    base_url = _resolve_base_url(request_base)
-    login_url = f"{base_url}/login"
-    # 条款 pre-wrap 渲染（HTML 转义换行）
-    terms_html = TERMS_ZH.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-    subject = "账号已开通 · 人工智能开发学习平台"
-    body = f"""
-    <html><body style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">
+ACTIVATION_TPL: dict[str, dict[str, str]] = {
+    "zh": {
+        "subject": "账号已开通 · 人工智能开发学习平台",
+        "body": """<html><body style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">
         <h2>✅ 账号开通成功</h2>
         <p>您的账号已开通，可登录使用。</p>
         <p>用户名：<b>{username}</b><br/>
-           初始权限：Viewer（只读，可查看持仓/盈亏/状态等）。交易及管理权限不向受邀用户开放。</p>
+           权限：Viewer。</p>
         <p style="margin: 20px 0;">
-            <a href="{login_url}" style="display: inline-block; padding: 12px 24px;
-               background: #409eff; color: white; text-decoration: none; border-radius: 6px;">点击登录</a>
+            <a href="{login_url}" {btn}>点击登录</a>
         </p>
-        <hr/>
-        <p style="color: #666; font-size: 14px;">以下是《平台使用条款》，开通即视为您已阅读并同意：</p>
-        <div style="font-size: 14px; color: #606266; line-height: 1.7; white-space: pre-wrap;">{terms_html}</div>
-    </body></html>
-    """
-    _logger.info("send activation email: to=%s username=%s base_url=%s", email, username, base_url)
+        <hr/>{terms_stacked}
+    </body></html>""",
+    },
+    "en": {
+        "subject": "Account Activated · AI Development Learning",
+        "body": """<html><body style="font-family: sans-serif; max-width: 560px; margin: 0 auto;">
+        <h2>✅ Account Activated</h2>
+        <p>Your account is ready. You can sign in now.</p>
+        <p>Username: <b>{username}</b><br/>
+           Role: Viewer.</p>
+        <p style="margin: 20px 0;">
+            <a href="{login_url}" {btn}>Sign In</a>
+        </p>
+        <hr/>{terms_stacked}
+    </body></html>""",
+    },
+}
+
+
+def normalize_lang(lang: str | None) -> str:
+    """语言归一化：请求语言在已实现语言内则用之，否则回落 en（国际通用缺省）。"""
+    lang = (lang or "").strip().lower()
+    from .terms import available_langs
+    return lang if lang in available_langs() else "en"
+
+
+def _render(tpl_table: dict, lang: str, **fields) -> tuple[str, str]:
+    """按语言选模板（en 缺省）并填充占位符，返回 (subject, body)。"""
+    tpl = tpl_table.get(lang) or tpl_table["en"]
+    btn = _BTN.format(color="#409eff")
+    btn_red = _BTN.format(color="#f56c6c")
+    body = tpl["body"].format(btn=btn, btn_red=btn_red, **fields)
+    return tpl["subject"], body
+
+
+def _terms_stacked_html() -> str:
+    """条款全语言纵向堆叠（注册表驱动，新增语言自动包含；引言双语固定说明）。"""
+    from .terms import get_terms_items
+    parts = [
+        '<p style="color: #666; font-size: 14px;">以下是《平台使用条款》，请务必认真阅读：<br/>'
+        'Terms of Use in all available languages below. Please read carefully:</p>'
+    ]
+    for i, item in enumerate(get_terms_items()):
+        h_style = 'style="color: #303133;' + (' margin-top: 24px;' if i else '') + '"'
+        text = (item["body"].replace("&", "&amp;").replace("<", "&lt;")
+                .replace(">", "&gt;").replace("\n", "<br>"))
+        parts.append(f'<h3 {h_style}>{item["name"]}</h3>')
+        parts.append(f'<div style="font-size: 14px; color: #606266; line-height: 1.7; white-space: pre-wrap;">{text}</div>')
+    return "\n".join(parts)
+
+
+async def send_invite_email(email: str, token: str, request_base: str = "", lang: str = "en") -> bool:
+    """发送邀请开通邮件（语言=邀请者操作界面语言，en 缺省）。"""
+    base_url = _resolve_base_url(request_base)
+    register_url = f"{base_url}/register?token={token}"
+    lang = normalize_lang(lang)
+    subject, body = _render(INVITE_TPL, lang, register_url=register_url)
+    _logger.info("send invite email: to=%s lang=%s base_url=%s register_url=%s", email, lang, base_url, register_url)
     outbox_id = queue_email(email, subject, body)
-    await try_row(outbox_id)  # 立即试发一次；失败由发件箱指数退避重发
+    await try_row(outbox_id)
+    return True
+
+
+async def send_password_reset_email(email: str, token: str, request_base: str = "", lang: str = "en") -> bool:
+    """发送密码重置邮件（语言=请求者操作界面语言，en 缺省）。"""
+    base_url = _resolve_base_url(request_base)
+    reset_url = f"{base_url}/reset-password?token={token}"
+    lang = normalize_lang(lang)
+    subject, body = _render(RESET_TPL, lang, reset_url=reset_url)
+    outbox_id = queue_email(email, subject, body)
+    await try_row(outbox_id)
+    return True
+
+
+async def send_activation_email(email: str, username: str, request_base: str = "", lang: str = "en") -> bool:
+    """开通成功通知邮件：登录链接 + 条款全语言纵向堆叠（语言=注册者操作界面语言）。"""
+    base_url = _resolve_base_url(request_base)
+    login_url = f"{base_url}/login"
+    lang = normalize_lang(lang)
+    subject, body = _render(ACTIVATION_TPL, lang, username=username, login_url=login_url,
+                            terms_stacked=_terms_stacked_html())
+    _logger.info("send activation email: to=%s username=%s lang=%s base_url=%s", email, username, lang, base_url)
+    outbox_id = queue_email(email, subject, body)
+    await try_row(outbox_id)
     return True

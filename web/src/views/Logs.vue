@@ -40,7 +40,8 @@
             </template>
           </el-table-column>
           <el-table-column prop="category" :label="t('log.notifyCategory')" width="80" />
-          <el-table-column prop="title" :label="t('log.titleCol')" />
+          <el-table-column prop="title" :label="t('log.titleCol')" width="150" />
+          <el-table-column prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
           <el-table-column prop="created_at" :label="t('common.time')" width="150" />
         </el-table>
       </el-card>
