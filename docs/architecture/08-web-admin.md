@@ -17,7 +17,7 @@
 ## 3. 边界与非目标
 
 - **不做**：交易引擎逻辑、风控规则计算、数据清洗——都调后端 API。
-- **非目标**：不做公开访问，仅内网/VPN 访问；不做多用户权限（个人平台单用户）。
+- **非目标**：不做公开注册（admin 邀请制）；不做多租户（单系统多用户 RBAC 四角色）。
 - **后端** FastAPI（Python），**前端** Vue3 + Element Plus。
 
 ## 4. 依赖
@@ -95,7 +95,9 @@ GET    /api/risk/log                 # 风控触发记录
 ### 5.6 日志/告警
 ```
 GET    /api/log?level=&module=&from=&to=
-GET    /api/alert?from=&to=
+GET    /api/notifications?status=&limit=   # 通知中心（role 过滤类别）
+POST   /api/notifications/ack-all            # 全部确认
+GET    /api/email-outbox                      # 邮件发件箱状态
 ```
 
 ### 5.7 自然语言查询
@@ -126,7 +128,7 @@ GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 
 **角色与权限矩阵**（RBAC，非多租户；所有用户共享数据，仅权限分层）：
 
-| 操作 | Viewer | Operator | Admin |
+| 操作 | Viewer | Analyst | Trader | Admin |
 |---|:--:|:--:|:--:|
 | 查看持仓/盈亏/研判/日志 | ✅ | ✅ | ✅ |
 | 启停策略 / 改策略参数 | ❌ | ✅ | ✅ |
@@ -138,7 +140,7 @@ GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 
 实现：每个 endpoint 加权限装饰器（`@require_role("admin")` / `@require_role("operator","admin")`）；JWT 携带 role，中间件校验。所有 mutation 写 `audit_log(actor, action, target, ts, detail)`。
 
-**账号与角色**：支持多个登录账号，每个账号绑一个角色（`user` 表 `role` 字段）；同一角色可有多个账号（如多个 Operator、多个 Viewer），无数量限制。Admin 可建/改/禁用/删账号。非多租户——所有账号共享同一套数据与交易系统，差异仅在角色权限。
+**账号与角色**：支持多个登录账号，每个账号绑一个角色（`user` 表 `role` 字段）；同一角色可有多个账号（如多个 Trader、多个 Viewer），无数量限制。Admin 可建/改/禁用/删账号。非多租户——所有账号共享同一套数据与交易系统，差异仅在角色权限。
 
 ## 6. 页面结构（前端）
 

@@ -20,7 +20,7 @@
 2. `flow/plan.md` — 当前计划（**契约**，未确认不要偏离）
 3. `flow/进展.md` **顶部一条** — 上一棒交接棒（做了啥 / 产出路径 / 下一步）
 4. `flow/待办.md` - 当前待办跟踪表（**单一真相源**，进展/decisions 不再重复列待办）
-5. 项目记忆: `~/.claude/projects/-home-bernard-Projects-Quantitative/memory/MEMORY.md`（跨会话持久化，含所有关键决策与选型）
+5. 项目记忆: `~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（跨会话持久化，含所有关键决策与选型）
 
 ## 收工前必做
 
@@ -81,5 +81,4 @@
 
 ## 项目知识（durable，随项目积累 ↓）
 
-全局记忆路径：`~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`
-当前 20 条记忆覆盖：联网限制 / 券商选型 / 数据回测层 / RBAC / 部署 / AI 层 / 本地启动 / XTP SDK / 实盘开关 / 策略实盘化 / 策略体系 / 回测可视化 / 飞书 / 平台化 / Schema迁移 / 前端设计规范 / N语言架构 / 用户UI偏好 / 技术陷阱 / 自包含任务文档。
+全局记忆索引：`~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（每条一行+指向，新增记忆必须同步索引）
