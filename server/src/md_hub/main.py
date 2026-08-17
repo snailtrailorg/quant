@@ -83,6 +83,10 @@ class MinuteAggregator:
             self._last_acc.clear()
         b = self._buckets.get(symbol)
         if b is None:
+            # 冷启动基线（2026-08-17 晚实测缺陷：首个桶无上桶基线会把"当日累计全量"当桶内增量——
+            # 首见 tick 的累计值设为基线，首桶只计其后增量，与 vnpy 首tick建基线语义一致）
+            if symbol not in self._last_acc:
+                self._last_acc[symbol] = (tick.volume or 0.0, getattr(tick, "turnover", 0) or 0.0)
             self._buckets[symbol] = {
                 "minute": t.replace(second=0, microsecond=0), "open": tick.last_price, "high": tick.last_price,
                 "low": tick.last_price, "close": tick.last_price,

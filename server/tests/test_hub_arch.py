@@ -35,9 +35,17 @@ class TestMinuteAggregator:
         agg.on_tick("X.SHSE", _tick(0, 5, 10.0, 1000))
         agg.on_tick("X.SHSE", _tick(0, 30, 10.1, 1500))
         bar1 = agg.on_tick("X.SHSE", _tick(1, 2, 10.2, 2000))
-        assert bar1["volume"] == 1500  # minute-0 桶末累计 1500 − 上桶末(无=0)
+        assert bar1["volume"] == 500   # minute-0 桶末累计 1500 − 首tick基线 1000（冷启动基线语义）
         bar2 = agg.on_tick("X.SHSE", _tick(2, 2, 10.3, 3500))
         assert bar2["volume"] == 500   # minute-1 桶末累计 2000 − 上桶末 1500（3500 属 minute-2 桶）
+
+    def test_cold_start_mid_day_cumulative(self):
+        """冷启动缺陷回归（2026-08-17 晚实测）：日内中途起算，首桶 volume 绝不吃当日累计全量。"""
+        agg = MinuteAggregator()
+        agg.on_tick("X.SHSE", _tick(0, 5, 10.0, 23_900_000))    # 首见 tick=全天累计 2390万
+        agg.on_tick("X.SHSE", _tick(0, 40, 10.1, 23_900_500))   # 桶内仅 +500
+        bar = agg.on_tick("X.SHSE", _tick(1, 2, 10.2, 23_901_000))
+        assert bar["volume"] == 500  # 只计首 tick 之后的增量，不是 2390 万
 
     def test_ohlc(self):
         agg = MinuteAggregator()
