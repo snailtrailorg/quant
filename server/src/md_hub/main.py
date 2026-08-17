@@ -327,19 +327,18 @@ def main() -> None:
     def _desired_symbols() -> set[str]:
         try:
             from src.data_platform.db import get_conn
-            with get_conn() as conn:
+            with get_conn() as conn:   # 影子查询必须在 with 内——曾因缩进在块外用到已还池连接被静默吞（2026-08-17 实测 subs=0）
                 cur = conn.execute(
                     "SELECT DISTINCT symbol FROM live_task WHERE status='running' AND symbol IS NOT NULL")
                 rows = {x[0] for x in cur.fetchall() if x[0]}
-            # 影子订阅（阶段 0 对比用，system_config hub_shadow_symbols 逗号分隔）
-            try:
-                cur = conn.execute("SELECT value FROM system_config WHERE key='hub_shadow_symbols'")
-                row = cur.fetchone()
-                if row and row[0]:
-                    rows |= {s.strip() for s in row[0].split(",") if s.strip()}
-            except Exception:
-                pass
-            return rows
+                try:
+                    cur = conn.execute("SELECT value FROM system_config WHERE key='hub_shadow_symbols'")
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        rows |= {s.strip() for s in row[0].split(",") if s.strip()}
+                except Exception as e:
+                    logger.warning("读 hub_shadow_symbols 失败: %s", e)
+                return rows
         except Exception as e:
             logger.warning("读订阅真相源失败（沿用旧集）: %s", e)
             return subscribed
@@ -359,6 +358,7 @@ def main() -> None:
         # 评审 C3：除 diff 外，每 60s 无条件全量幂等重放（XTP 重连不恢复订阅 + 启动竞态双兜底）
         replay_all = force or (int(time.time()) % 60 < 10)
         if replay_all or want != subscribed:
+            logger.info("订阅同步：%s（共 %d）", sorted(want), len(want))
             for s in want:
                 _subscribe(s)
             subscribed = want
