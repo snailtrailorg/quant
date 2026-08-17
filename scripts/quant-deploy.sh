@@ -466,6 +466,11 @@ feishu_bot_units() {
 }
 
 restart_hub() {
+    # 首次部署单元尚未安装（install-services 在链尾）——容忍跳过，不中断部署链
+    if ! ssh $SSH_OPTS "$SSH_TARGET" "systemctl list-unit-files '$MD_HUB_SERVICE' --no-legend 2>/dev/null | grep -q ."; then
+        echo "⏭️  skip restart-hub（单元未安装，稍后 install-services 装）"
+        return 0
+    fi
     echo "ℹ️ Restart $MD_HUB_SERVICE..."
     ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $MD_HUB_SERVICE"
     if _stabilize "$MD_HUB_SERVICE"; then
