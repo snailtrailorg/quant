@@ -269,7 +269,7 @@ def main():
     gateway.connect(setting)
 
     # 5. 行情驱动：EVENT_TICK -> BarGenerator -> strategy.on_bar（#4 核心）
-    from vnpy.trader.event import EVENT_TICK
+    from vnpy.trader.event import EVENT_TICK, EVENT_TRADE
     from vnpy.trader.utility import BarGenerator
     from vnpy.trader.object import SubscribeRequest
     from vnpy.trader.constant import Exchange
@@ -285,9 +285,16 @@ def main():
             "volume": float(bar.volume) if bar.volume else 0,
         }
 
+    _last_bar = {"ts": None}  # F-8 bar 级幂等：同 ts 重复投递只处理一次
+
     @_guard("on_bar")
     def on_vnpy_bar(bar):
         d = _bar_to_dict(bar)
+        ts_key = str(d.get("ts"))
+        if ts_key == _last_bar["ts"]:
+            logger.warning("重复 bar 丢弃: %s", ts_key)
+            return
+        _last_bar["ts"] = ts_key
         sig = strategy.on_bar(d, list(history))  # history 不含当前（防未来）
         sig_action = getattr(sig, 'action', None)
         sig_name = sig_action.name if sig_action else "NONE"
@@ -310,6 +317,43 @@ def main():
         bg.update_tick(event.data)
 
     event_engine.register(EVENT_TICK, on_tick)
+
+    # SC1（#46/F-7）：成交回报落 trade_log——positions/三账对账从此有真实数据源
+    def _write_trade(d) -> None:
+        """TradeData → trade_log。幂等：trade_ref 唯一索引 + ON CONFLICT DO NOTHING。"""
+        from vnpy.trader.constant import Direction
+        try:
+            action = "BUY" if d.direction == Direction.LONG else "SELL"
+            vt = getattr(d, "vt_orderid", "")
+            with adapter._lock:
+                cid = adapter._vt2cid.get(vt)
+            order_db_id, strategy_of = None, sid
+            with get_conn() as conn:
+                if cid:
+                    cur = conn.execute(
+                        "SELECT id, strategy_id FROM order_log WHERE client_order_id=%s ORDER BY id DESC LIMIT 1",
+                        (cid,))
+                    row = cur.fetchone()
+                    if row:
+                        order_db_id, strategy_of = row[0], row[1] or sid
+                cur = conn.execute(
+                    "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING RETURNING id",
+                    (getattr(d, "datetime", None), strategy_of, order_db_id, getattr(d, "symbol", symbol),
+                     action, float(getattr(d, "volume", 0) or 0), float(getattr(d, "price", 0) or 0),
+                     getattr(d, "vt_tradeid", None) or None))
+                if cur.fetchone():
+                    logger.info("成交入库: %s %s %s@%s (order_db=%s)", getattr(d, "symbol", symbol),
+                                action, getattr(d, "volume", 0), getattr(d, "price", 0), order_db_id)
+                conn.commit()
+        except Exception as e:
+            logger.warning("trade_log 写入失败: %s", e)
+
+    @_guard("on_trade")
+    def on_trade(event):
+        _write_trade(event.data)
+
+    event_engine.register(EVENT_TRADE, on_trade)
 
     # 订阅 symbol（vt_symbol SHSE -> vnpy Exchange SSE 映射）
     raw, ex = parse_vt_symbol(symbol)
@@ -335,10 +379,55 @@ def main():
     _r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
     counter = 0
     _halt_state = {"was": False}  # 熔断沿检测（SB2，F-41：进入熔断的瞬间撤在场单）
+
+    def _startup_reconcile() -> None:
+        """SC2：启动对账（v1）。在场委托可见化 + 当日成交补录。
+
+        v1 策略：发现残留委托只告警不自动撤（防误杀人工单）；成交补录靠 trade_ref 幂等。
+        """
+        try:
+            from vnpy.trader.constant import Status
+            working = [o for o in (adapter.query_orders() or [])
+                       if getattr(o, "status", None) in (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)]
+            if working:
+                desc = "; ".join(
+                    f"{o.symbol} {getattr(o.direction, 'value', '?')} {o.volume}@{o.price}"
+                    for o in working[:10])
+                logger.warning("启动对账：%d 笔在场委托: %s", len(working), desc)
+                _alert(f"启动对账发现 {len(working)} 笔在场委托（任务 {sid}）",
+                       desc + " —— 疑似上次会话残留，请确认并决定是否人工撤销。")
+            trades = adapter.query_trades() or []
+            n_new = 0
+            for t in trades:
+                before = _tick_state["count"]  # noqa: F841（占位，实际以 _write_trade 内部判断为准）
+                _write_trade(t)
+                n_new += 1
+            if trades:
+                logger.info("启动对账：补录当日成交 %d 笔（trade_ref 幂等去重）", n_new)
+            # 提交中残留（WAL 崩溃窗口证据）：上一会话 submitting 但无对应成交/委托 → 标记
+            try:
+                with get_conn() as conn:
+                    cur = conn.execute(
+                        "SELECT id, symbol, action, volume FROM order_log WHERE strategy_id=%s "
+                        "AND status='submitting' AND ts::date=current_date", (sid,))
+                    orphans = cur.fetchall()
+                for oid, osym, oact, ovol in orphans:
+                    logger.warning("WAL 残留 submitting 单 id=%s %s %s %s（上会话崩溃窗口），待人工核对", oid, osym, oact, ovol)
+                if orphans:
+                    _alert(f"WAL 残留 {len(orphans)} 笔 submitting 委托（任务 {sid}）",
+                           "上一会话在'记账后、确认前'中断。请对照券商委托列表核对后人工处理。")
+            except Exception as e:
+                logger.warning("WAL 残留检查失败: %s", e)
+        except Exception as e:
+            logger.warning("启动对账失败: %s", e)
+
     try:
         while True:
             time.sleep(10)
             counter += 1
+            if counter == 1:
+                # SC2：首轮（登录已完成）做启动对账
+                _startup_reconcile()
             # P4-3 停止条件热检查（每 60s）：
             # 新架构查自己的 live_task.status（stop_live_task 置 stopped）；
             # 旧架构查 strategy_config.enabled。2026-08-17 踩坑：新架构误查旧架构字段，

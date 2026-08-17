@@ -221,58 +221,103 @@ class Strategy:
     # ——— 下单 ———
 
     def place_order(self, sig: Signal) -> None:
-        """下单：前置风控 → ExecutionAdapter。"""
+        """下单：本地校验 → 前置风控 → WAL 记账 → 发单 → 状态流转（SC1，F-4/F-27/F-28）。
+
+        时序铁律：submitting 先落库再发单——崩溃窗口内残留 submitting 可被启动对账认领，
+        绝不允许"交易所有单、系统无痕"（F-4）。记账失败则放弃下单（fail-closed）。
+        """
         from ..risk_control.risk import RiskControl  # 延迟导入
+        # SC3（F-28）源头拦截：无效数量/价格的信号直接丢弃（0 值废单洪水根除）
+        volume = sig.volume if sig.volume else 0
+        price = sig.price if sig.price else 0
+        if volume <= 0 or price <= 0:
+            logger.warning("信号无效丢弃 volume=%s price=%s (%s %s): %s",
+                           volume, price, self.symbol, sig.action.name, sig.reason)
+            return
         order = {
             "symbol": self.symbol,
             "action": sig.action.name,
-            "volume": sig.volume if sig.volume is not None else 100,
-            "price": sig.price if sig.price is not None else 0,
+            "volume": volume,
+            "price": price,
             "reason": sig.reason,
+            "strategy_id": self.config.id,  # SC3：供 max_trades_per_day 计数
         }
         decision = RiskControl.get().check_order(order, "")
         if not decision.approved:
             return
         final = decision.adjusted if decision.adjusted is not None else order  # B8 风控覆写：用 adjusted（如截断 volume），无则原值
+        # WAL（F-4）：先写 signal_log + order_log(submitting)
+        sig_id, order_row_id = self._log_signal_order(sig, final, status="submitting")
+        if order_row_id is None:
+            logger.error("WAL 记账失败，放弃本次下单（fail-closed）: %s %s", self.symbol, sig.action.name)
+            return
         from .adapters import Order
         import time as _t
         _t0 = _t.time()
         try:
-            self.adapter.send_order(Order(
+            client_id = self.adapter.send_order(Order(
                 symbol=final.get("symbol", self.symbol),
                 action=final.get("action", sig.action.name),
-                volume=final.get("volume", sig.volume if sig.volume is not None else 100),
-                price=final.get("price", sig.price if sig.price is not None else 0),
+                volume=final.get("volume", volume),
+                price=final.get("price", price),
                 order_type="market" if sig.price_type == "MARKET" else "limit",
             ))
-        except Exception:
+        except Exception as e:
             record_broker_usage(self.config.adapter, sig.action.name, self.symbol,
                                 success=False, latency_ms=int((_t.time() - _t0) * 1000))
+            self._update_order_status(order_row_id, "send_failed", error=str(e)[:500])
             raise
-        else:
+        # F-27：adapter 返回空委托号=委托未真实发出（gateway 对不支持的类型/断线返回 ""/伪造"0"）
+        if not client_id:
             record_broker_usage(self.config.adapter, sig.action.name, self.symbol,
-                                success=True, latency_ms=int((_t.time() - _t0) * 1000))
-            self._log_signal_order(sig, final)  # P1-3 三账数据来源
+                                success=False, latency_ms=int((_t.time() - _t0) * 1000))
+            self._update_order_status(order_row_id, "send_failed", error="adapter 返回空委托号（委托未发出）")
+            logger.error("send_order 无有效委托号，标记 send_failed: %s %s", self.symbol, sig.action.name)
+            return
+        record_broker_usage(self.config.adapter, sig.action.name, self.symbol,
+                            success=True, latency_ms=int((_t.time() - _t0) * 1000))
+        self._update_order_status(order_row_id, "submitted", client_order_id=client_id)
 
+    def _log_signal_order(self, sig: Signal, final_order: dict, status: str = "submitted") -> tuple:
+        """写 signal_log + order_log（三账对账数据来源，P1-3；SC1 起带 status 流转）。
 
-    def _log_signal_order(self, sig: Signal, final_order: dict) -> None:
-        """写 signal_log + order_log（三账对账数据来源，P1-3）。回测 monkey-patch 跳过。"""
+        返回 (signal_id, order_id)；失败返回 (None, None)。回测 monkey-patch 跳过。
+        """
         try:
             from ..data_platform.db import get_conn
             with get_conn() as conn:
-                conn.execute("SELECT 1 FROM signal_log LIMIT 1")
-                conn.execute("SELECT 1 FROM order_log LIMIT 1")
                 cur = conn.execute(
                     "INSERT INTO signal_log (strategy_id,symbol,action,score,price) VALUES (%s,%s,%s,%s,%s) RETURNING id",
                     (self.config.id, self.symbol, sig.action.name, sig.score, sig.price))
                 sig_id = cur.fetchone()[0]
-                conn.execute(
-                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id) VALUES (%s,%s,%s,%s,%s,%s)",
+                cur = conn.execute(
+                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                     (self.config.id, self.symbol, final_order.get("action", sig.action.name),
-                     final_order.get("volume", 100), final_order.get("price", 0), sig_id))
+                     final_order.get("volume", 100), final_order.get("price", 0), sig_id, status))
+                order_id = cur.fetchone()[0]
                 conn.commit()
+                return sig_id, order_id
         except Exception as e:
             logger.warning("记录 signal/order 日志失败: %s", e)
+            return None, None
+
+    @staticmethod
+    def _update_order_status(order_row_id: int, status: str,
+                             client_order_id: str | None = None, error: str | None = None) -> None:
+        """SC1：order_log 状态流转（submitting→submitted/send_failed；成交/撤单由 trade/事件推进）。"""
+        try:
+            from ..data_platform.db import get_conn
+            with get_conn() as conn:
+                if client_order_id is not None:
+                    conn.execute("UPDATE order_log SET status=%s, client_order_id=%s, error=%s WHERE id=%s",
+                                 (status, client_order_id, error, order_row_id))
+                else:
+                    conn.execute("UPDATE order_log SET status=%s, error=%s WHERE id=%s",
+                                 (status, error, order_row_id))
+                conn.commit()
+        except Exception as e:
+            logger.warning("更新 order_log 状态失败 (id=%s -> %s): %s", order_row_id, status, e)
 
     # ——— 工厂 ———
 

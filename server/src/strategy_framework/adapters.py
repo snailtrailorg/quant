@@ -161,6 +161,12 @@ class XTPAdapter(ExecutionAdapter):
             reference=client_id,
         )
         vt_orderid = self._gateway.send_order(req)
+        # F-27（2026-08-17）：vnpy_xtp 对不支持的交易所/类型返回 ""，TD 断线时 insertOrder
+        # 返回 0 → vt_orderid 形如 "XTP.0"——两者都是"委托未真实发出"，必须识别为失败
+        orderid_part = vt_orderid.rsplit(".", 1)[-1] if vt_orderid else ""
+        if not vt_orderid or orderid_part == "0":
+            logger.error("网关拒绝/未发出委托（vt_orderid=%r symbol=%s）", vt_orderid, order.symbol)
+            return None
         with self._lock:
             self._cid2vt[client_id] = vt_orderid
             self._vt2cid[vt_orderid] = client_id

@@ -231,6 +231,27 @@ class RiskControl:
             return RiskDecision(approved=False, reason=f"委托数量无效: {volume}", severity="critical")
         if price <= 0:
             return RiskDecision(approved=False, reason="委托价格无效（缺失则无法评估金额，fail-closed）", severity="critical")
+        # SC3（F-28 频次护栏）：max_trades_per_day 实装——按 order_log 当日有效单计数
+        strategy_id = order.get("strategy_id")
+        max_trades = rules.get("max_trades_per_day", 0)
+        if strategy_id and max_trades:
+            try:
+                import datetime as _dt
+                today = _dt.datetime.now().strftime('%Y-%m-%d')
+                with get_conn() as conn:
+                    cur = conn.execute(
+                        "SELECT COUNT(*) FROM order_log WHERE strategy_id=%s AND ts::date=%s "
+                        "AND status IN ('submitting','submitted','part_filled','filled')",
+                        (strategy_id, today))
+                    n = cur.fetchone()[0]
+                if n >= max_trades:
+                    return RiskDecision(approved=False,
+                                        reason=f"当日已下 {n} 单达上限 {max_trades}（max_trades_per_day）",
+                                        severity="warn")
+            except Exception as e:
+                # 计数失败 fail-closed（PG 故障时 _get_global_state 已先拒，这里是双保险）
+                logger.warning("max_trades_per_day 计数失败（fail-closed 拒单）: %s", e)
+                return RiskDecision(approved=False, reason=f"交易频次校验失败: {e}", severity="critical")
         # #29 风控覆写：单笔金额超限截断 volume（不只 reject，能修正）
         max_amount = rules.get("max_single_amount", 100000)
         amount = price * volume
