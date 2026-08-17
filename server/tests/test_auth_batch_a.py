@@ -51,17 +51,32 @@ def test_authenticate_wrong_password_none():
 
 
 def test_jwt_jti_and_blacklist():
-    """create_jwt 带 jti；黑名单命中 → 401。"""
+    """create_jwt 带 jti；黑名单命中 → 401。SD1 后 verify_jwt 增加账号状态查询，需 mock。"""
+
+    class UConn:  # F-45 账号状态检查：enabled 正常
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **k):
+            class C:
+                def fetchone(self):
+                    return (True, None)
+            return C()
+
     token = auth_mod.create_jwt("1", "alice", "viewer")
-    payload = auth_mod.verify_jwt(token)          # 未在黑名单 → 正常
-    assert payload["jti"]
-    # 加入黑名单后再验 → 401
-    r = MagicMock()
-    r.exists.return_value = 1
-    with patch("redis.Redis.from_url", return_value=r):
-        with pytest.raises(Exception) as e:
-            auth_mod.verify_jwt(token)
-        assert "登出" in str(e.value.detail) or e.value.status_code == 401
+    with patch.object(auth_mod, "get_conn", lambda: UConn()):
+        payload = auth_mod.verify_jwt(token)      # 未在黑名单 → 正常
+        assert payload["jti"]
+        # 加入黑名单后再验 → 401
+        r = MagicMock()
+        r.exists.return_value = 1
+        with patch("redis.Redis.from_url", return_value=r):
+            with pytest.raises(Exception) as e:
+                auth_mod.verify_jwt(token)
+            assert "登出" in str(e.value.detail) or e.value.status_code == 401
 
 
 def test_revoke_jwt_sets_blacklist():

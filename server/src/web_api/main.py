@@ -60,9 +60,12 @@ _AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/static", _StaticFiles(directory=str(_AVATAR_DIR.parent)), name="static")
 
 # CORS（前端 Vue3 开发用）
+# SD2（F-58）：CORS 白名单化。默认生产域名；本地 dev 走 vite 同源代理不受影响；
+# 跨域开发场景用 CORS_ORIGINS 环境变量覆盖（逗号分隔）
+_CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "https://quant.snailtrail.cc").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 生产改具体域名
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -739,9 +742,25 @@ def stop_strategy(sid: str, payload: dict = Depends(require_perm("strategy_contr
 
 
 @app.post("/api/strategy/{sid}/verify")
-def verify_strategy(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
-    """标记策略已通过回测验证。"""
+def verify_strategy(sid: str, body: dict = Body(default={}), payload: dict = Depends(require_perm("strategy_control"))):
+    """标记策略已通过回测验证。
+
+    SD2（F-44）：回测门禁需真实证据——须提供属于该策略且状态 done 的 run_id，
+    或该策略存在至少一条已完成回测；否则拒绝。
+    """
+    run_id = body.get("run_id")
     with get_conn() as conn:
+        if run_id is not None:
+            cur = conn.execute(
+                "SELECT status FROM backtest_runs WHERE id=%s AND strategy_config_id=%s", (run_id, sid))
+            row = cur.fetchone()
+            if not row or row[0] != "done":
+                raise HTTPException(400, f"回测证据无效: run_id={run_id}（须属于该策略且状态 done）")
+        else:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM backtest_runs WHERE strategy_config_id=%s AND status='done'", (sid,))
+            if cur.fetchone()[0] == 0:
+                raise HTTPException(403, "该策略无已完成回测，禁止标记验证（需真实回测证据，F-44）")
         conn.execute("UPDATE strategy_config SET backtest_verified=true WHERE id=%s", (sid,))
         conn.commit()
     audit_log(payload["username"], "verify_strategy", sid, detail="回测验证通过")

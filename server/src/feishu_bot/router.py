@@ -4,6 +4,8 @@
 """
 
 from __future__ import annotations
+import os
+import logging
 import json
 import concurrent.futures
 from fastapi import APIRouter, Request, HTTPException
@@ -11,6 +13,8 @@ from .bot import (
     verify_signature, check_user, process_message_async,
     execute_confirmed_tool, FeishuClient, load_feishu_users,
 )
+
+logger = logging.getLogger("feishu_bot.router")
 
 router = APIRouter(prefix="/lark", tags=["feishu"])
 
@@ -62,9 +66,26 @@ async def card_callback(request: Request):
     if "challenge" in data:
         return {"challenge": data["challenge"]}
 
+    # SD2（F-33）重放防护：event_id 5 分钟内只接受一次（伪造/重发的回调直接丢弃）
+    event_id = data.get("event_id") or data.get("header", {}).get("event_id")
+    if event_id:
+        try:
+            import redis as _redis
+            r = _redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+            if not r.set(f"feishu:card:{event_id}", "1", nx=True, ex=300):
+                logger.warning("重复卡片回调丢弃: event_id=%s", event_id)
+                return {"code": 0}
+        except Exception as e:
+            logger.warning("卡片去重检查失败（放行，风险自负）: %s", e)
+
     # 提取卡片按钮值
     action_data = data.get("event", {}).get("action", {}).get("value", {})
     if action_data.get("action") == "confirm":
+        # SD2（F-33）时效校验：60s 窗口外（含无 ts 的旧卡片）拒绝执行
+        from .bot import card_action_fresh
+        if not card_action_fresh(action_data):
+            logger.warning("卡片确认超时/无时间戳拒绝执行: tool=%s", action_data.get("tool"))
+            return {"code": 0}
         open_id = data.get("event", {}).get("operator", {}).get("open_id", "")
         tool = action_data.get("tool", "")
         args = action_data.get("args", {})

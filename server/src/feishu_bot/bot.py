@@ -157,8 +157,8 @@ def verify_signature(timestamp: str, body: str, signature: str) -> bool:
 # ——— 确认卡片 ———
 
 def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
-    """构建确认卡片（P3-11 含时间戳，execute_confirmed_tool 检查 60s 超时）。"""
-    """构建操作确认卡片。"""
+    """构建操作确认卡片。按钮 value 携带 ts：确认时校验 60s 时效（SD2，F-33 防重放）。"""
+    import time as _t
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -170,12 +170,21 @@ def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
              "content": f"**操作**: {tool_name}\n**参数**: {json.dumps(args, ensure_ascii=False)}\n**原因**: {reason or 'LLM 触发'}"}},
             {"tag": "action", "actions": [
                 {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 确认执行"},
-                 "type": "primary", "value": {"action": "confirm", "tool": tool_name, "args": args}},
+                 "type": "primary", "value": {"action": "confirm", "tool": tool_name, "args": args, "ts": int(_t.time())}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 取消"},
-                 "type": "danger", "value": {"action": "cancel", "tool": tool_name}},
+                 "type": "danger", "value": {"action": "cancel", "tool": tool_name, "ts": int(_t.time())}},
             ]},
         ],
     }
+
+
+def card_action_fresh(value: dict, max_age_s: int = 60) -> bool:
+    """SD2（F-33）：卡片按钮时效校验。无 ts 的旧卡片一律视为过期（部署前发出的卡片不可重放）。"""
+    ts = value.get("ts")
+    if not isinstance(ts, (int, float)):
+        return False
+    import time as _t
+    return (_t.time() - ts) <= max_age_s
 
 
 # ——— 后台处理（3s 超时绕开） ———

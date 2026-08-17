@@ -26,6 +26,14 @@ _logger = logging.getLogger("quant")
 Role = Literal["viewer", "analyst", "trader", "admin"]
 JWT_SECRET = os.environ.get("JWT_SECRET", "quant-dev-secret-change-me")
 if JWT_SECRET == "quant-dev-secret-change-me":
+    # SD1（F-32）：默认密钥+实盘开关=可伪造任意角色 token（含解密凭证链），组合必须拒绝启动
+    try:
+        from src.data_platform.settings import is_live_trading_enabled
+        _live = is_live_trading_enabled()
+    except Exception:
+        _live = False
+    if _live:
+        raise RuntimeError("生产配置错误：ENABLE_LIVE_TRADING=true 时禁止默认 JWT_SECRET，请在 .env 设置独立密钥")
     _logger.warning("JWT_SECRET 使用默认值，生产环境请通过环境变量设置独立密钥")
 JWT_ALGO = "HS256"
 JWT_TTL_HOURS = 24
@@ -96,6 +104,20 @@ def verify_jwt(token: str) -> dict:
         r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
         if r.exists(f"jwt:bl:{jti}"):
             raise HTTPException(401, "token 已登出")
+    # SD1（F-45）：账号状态即时校验——禁用/注销后存量 token 立即失效（原来最长 24h 仍有效）
+    username = payload.get("username")
+    if username:
+        try:
+            with get_conn() as conn:
+                cur = conn.execute("SELECT enabled, deleted_at FROM users WHERE username=%s", (username,))
+                row = cur.fetchone()
+            if not row or not row[0] or row[1]:
+                raise HTTPException(401, "账号已禁用或注销")
+        except HTTPException:
+            raise
+        except Exception as e:
+            # users 表不可读：认证不可用即拒绝（fail-closed，SD1）
+            raise HTTPException(401, f"账号状态校验失败: {e}")
     return payload
 
 
@@ -246,6 +268,20 @@ def audit_log(actor: str, action: str, target: str = "", detail: str = "",
         conn.commit()
 
 
+def _default_admin_password() -> str:
+    """SD1（F-46）：实盘模式下初始/重置密码随机生成（防"恢复备份→admin/admin123 自动复活"）。"""
+    try:
+        from src.data_platform.settings import is_live_trading_enabled
+        if is_live_trading_enabled():
+            import secrets as _sec
+            pwd = _sec.token_urlsafe(12)
+            _logger.critical("生产模式：admin 初始密码已随机生成（仅本次打印，请立即登录修改）: %s", pwd)
+            return pwd
+    except Exception:
+        pass
+    return "admin123"
+
+
 def ensure_default_admin():
     """确保有默认 admin 账号（首次启动）+ 旧 sha256 密码重置为 bcrypt。"""
     init_users_table()
@@ -253,12 +289,12 @@ def ensure_default_admin():
         cur = conn.execute("SELECT password_hash FROM users WHERE username='admin'")
         row = cur.fetchone()
         if not row:
-            create_user("admin", "admin123", "admin")
+            create_user("admin", _default_admin_password(), "admin")
             return True
-        # 旧 sha256 密码（非 $2b$ 开头）重置为 bcrypt（admin123）
+        # 旧 sha256 密码（非 $2b$ 开头）重置为 bcrypt
         if not row[0].startswith("$2b$"):
             conn.execute("UPDATE users SET password_hash=%s WHERE username='admin'",
-                         (hash_password("admin123"),))
+                         (hash_password(_default_admin_password()),))
             conn.commit()
             return True
         return False
