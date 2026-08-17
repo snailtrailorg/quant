@@ -80,3 +80,8 @@
 - **服务器加 2G swap**（1.8G 内存跑不动 runner 的 XTP 合约加载尖峰，全局 OOM 实锤）；runner MemoryMax=1G。
 - **部署实例清单真相源 = DB**（feishu_config），不再"收集 active 实例"（会把误启的幽灵转正）；install-services 以 root 跑 + restart polkit + 输出 unit 状态快照。
 - **当天验证结果**：tick→bar→on_bar→signal→risk→XTP order 全链通（证据在进展.md §0）；trade_log 写入缺失转 #46。
+
+## 2026-08-17 · XTP 改共享行情进程架构（用户拍板）+ 稳定性检查方法论先行
+
+- **架构决定**：XTP 侧改"共享行情 hub 进程（持有 XTP 连接+合约表）+ N 个轻策略 worker"，用实时性换内存（国内市场 tick 密度低，分钟 bar 足够）。与"修正版 B 每策略独立进程"的隔离性权衡：进程隔离弱化为"hub 单点 + worker 独立"，hub 稳定性要求因此**更高**。设计前必须先做稳定性需求书。
+- **流程决定**：动手检查/改架构前，先审定 `flow/规范/稳定性检查方法论.md`（五轴枚举矩阵 + 四层检查手段 + 双盲交叉验收），检查按方法论执行，防经验式清单遗漏。crypto 侧维持独立进程（无内存痛点，纯 API 轻量）。
