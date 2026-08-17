@@ -377,9 +377,9 @@ REMOTE_SCRIPT
 }
 
 clear_redis() {
-    echo "🔥 DESTRUCTIVE: 清 Redis db$VALKEY_DB(VALKEY) + db$CELERY_DB(CELERY)（绝不 FLUSHALL，不碰 safebox db0）..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo $REDIS_CLI -n $VALKEY_DB FLUSHDB && sudo $REDIS_CLI -n $CELERY_DB FLUSHDB"
-    echo "✅ Redis db$VALKEY_DB + db$CELERY_DB 已清（safebox db0 未动）。"
+    echo "🔥 DESTRUCTIVE: 清 Redis db$VALKEY_DB(VALKEY) + db$CELERY_DB(broker) + db$CELERY_RESULT_DB(result)（绝不 FLUSHALL，不碰 safebox db0）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo $REDIS_CLI -n $VALKEY_DB FLUSHDB && sudo $REDIS_CLI -n $CELERY_DB FLUSHDB && sudo $REDIS_CLI -n $CELERY_RESULT_DB FLUSHDB"
+    echo "✅ Redis db$VALKEY_DB + db$CELERY_DB + db$CELERY_RESULT_DB 已清（safebox db0 未动）。"
 }
 
 restart_server() {
