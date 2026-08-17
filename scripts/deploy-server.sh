@@ -19,6 +19,7 @@ EXCLUDES=(
     --exclude '*.pyc'
     --exclude .pytest_cache/
     --exclude static/avatars/   # 用户上传的头像（运行时数据，rsync --delete 不删）
+    --exclude runtime/          # SE2: celerybeat schedule 等运行时文件（F-47，--delete 不删）
 )
 
 # 路径/SERVER 默认值在 quant-deploy.sh 单一配置源，此处不重复

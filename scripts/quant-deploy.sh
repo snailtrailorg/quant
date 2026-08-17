@@ -33,6 +33,7 @@ WEB_API_PORT="${WEB_API_PORT:-8001}"                             # uvicorn 监�
 WEB_API_SERVICE="${WEB_API_SERVICE:-quant-web-api@quant}"
 CELERY_WORKER_SERVICE="${CELERY_WORKER_SERVICE:-quant-celery-worker@quant}"
 CELERY_BEAT_SERVICE="${CELERY_BEAT_SERVICE:-quant-celery-beat@quant}"
+CELERY_RISK_SERVICE="${CELERY_RISK_SERVICE:-quant-celery-risk@quant}"   # SE2: risk 队列专属，防饿死（F-48）
 PGSQL_SERVICE="${PGSQL_SERVICE:-postgresql-18}"
 REDIS_SERVICE="${REDIS_SERVICE:-redis}"
 WEB_SERVICE="${WEB_SERVICE:-nginx}"
@@ -252,6 +253,40 @@ if $DRY_RUN; then
 fi
 
 #-----------------------------------------------------------------------------------------------------------------------
+# SE3 部署闸门（F-15/F-53/F-54）：交易时段+实盘任务运行 → 拒绝；代码无变化 → 跳过重启
+#-----------------------------------------------------------------------------------------------------------------------
+trading_guard() {
+    if [[ "${FORCE_DEPLOY:-0}" == "1" ]]; then
+        echo "⚠️ FORCE_DEPLOY=1，跳过交易时段闸门（自担风险）"
+        return 0
+    fi
+    local state
+    state=$(ssh $SSH_OPTS "$SSH_TARGET" "
+        active=\$(systemctl list-units 'quant-live-task@*' 'quant-strategy@*' --state=active --no-legend 2>/dev/null | wc -l)
+        day=\$(date +%u); hm=\$(date +%H%M); in_sess=0
+        if [ \$day -le 5 ] && { [ \$hm -ge 0915 ] && [ \$hm -le 1135 ] || [ \$hm -ge 1255 ] && [ \$hm -le 1505 ]; }; then in_sess=1; fi
+        echo \$in_sess \$active")
+    read -r in_sess active <<< "$state"
+    if [[ "$in_sess" == "1" && "${active:-0}" -gt 0 ]]; then
+        echo "❌ 交易时段且有 ${active} 个实盘任务运行中，拒绝部署（F-15）。FORCE_DEPLOY=1 可强行覆盖" >&2
+        exit 1
+    fi
+    echo "✅ 部署闸门通过（非交易时段或无运行中实盘任务）"
+}
+
+remote_code_hash() {
+    ssh $SSH_OPTS "$SSH_TARGET" "cd '$PROJECT_PATH' && find src -name '*.py' -not -path '*__pycache__*' -exec md5sum {} + 2>/dev/null | sort | md5sum"
+}
+
+# 代码变更时让实盘任务吃到新代码（闸门已保证非交易时段才走到这）
+restart_live_tasks() {
+    ssh $SSH_OPTS "$SSH_TARGET" "
+        for u in \$(systemctl list-units 'quant-live-task@*' 'quant-strategy@*' --state=active --no-legend 2>/dev/null | awk '{print \$1}'); do
+            echo "  restart \$u"; sudo systemctl restart "\$u"
+        done"
+}
+
+#-----------------------------------------------------------------------------------------------------------------------
 # 核心函数
 #-----------------------------------------------------------------------------------------------------------------------
 rsync_deploy() {
@@ -392,10 +427,10 @@ _stabilize() {
 }
 
 restart_celery() {
-    echo "ℹ️ Restart $CELERY_WORKER_SERVICE + $CELERY_BEAT_SERVICE..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE"
+    echo "ℹ️ Restart $CELERY_WORKER_SERVICE + $CELERY_BEAT_SERVICE + $CELERY_RISK_SERVICE..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE"
     # 稳定检查（crash-loop 检测）
-    for svc in $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE; do
+    for svc in $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE; do
         if _stabilize "$svc"; then
             echo "  ✅ $svc active (稳定)"
         else
@@ -521,17 +556,28 @@ enable_services() {
         echo "  ⚠️ feishu_config 不可读，飞书不 enable（避免转正幽灵实例）"
         feishu=""
     fi
-    local cores="$WEB_API_SERVICE $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $feishu"
+    local cores="$WEB_API_SERVICE $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE $feishu"
     ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl enable $cores 2>&1 | grep -v 'Created symlink\|^$' || true; echo '✅ enabled: $cores'"
 }
 
 #-----------------------------------------------------------------------------------------------------------------------
 # 执行（按顺序）
 #-----------------------------------------------------------------------------------------------------------------------
+trading_guard
+PRE_CODE_HASH=$(remote_code_hash)
+
 for task in "${DEPLOY_TASKS[@]}"; do
     IFS='|' read -r local_path remote_path excludes_csv <<< "$task"
     rsync_deploy "$local_path" "$remote_path" "$excludes_csv"
 done
+
+# SE3 选择性重启：代码指纹没变就跳过服务重启（F-53：不"动辄停服务"）
+POST_CODE_HASH=$(remote_code_hash)
+CODE_CHANGED=1
+if [[ -n "$PRE_CODE_HASH" && "$PRE_CODE_HASH" == "$POST_CODE_HASH" ]]; then
+    CODE_CHANGED=0
+    echo "ℹ️ 代码指纹无变化，跳过服务重启（unit/migrate 动作仍执行）"
+fi
 
 $MIGRATE && migrate
 $PIP_INSTALL && pip_install
@@ -541,12 +587,26 @@ $CLEAR_PGSQL && clear_pgsql
 $CLEAR_REDIS && clear_redis
 $INSTALL_SERVICES && install_services
 $FIX_VENV && fix_venv
-$RESTART_WEB && restart_web
+if $RESTART_WEB; then
+    if [[ $CODE_CHANGED -eq 1 ]]; then restart_web; else echo "⏭️  skip restart-web（代码无变化）"; fi
+fi
 $RESTART_REDIS && restart_redis
 $RESTART_PGSQL && restart_pgsql
-$RESTART_CELERY && restart_celery
-$RESTART_FEISHU && restart_feishu
-$RESTART_SERVER && restart_server
+if $RESTART_CELERY; then
+    if [[ $CODE_CHANGED -eq 1 ]]; then restart_celery; else echo "⏭️  skip restart-celery（代码无变化）"; fi
+fi
+if $RESTART_FEISHU; then
+    if [[ $CODE_CHANGED -eq 1 ]]; then restart_feishu; else echo "⏭️  skip restart-feishu（代码无变化）"; fi
+fi
+if $RESTART_SERVER; then
+    if [[ $CODE_CHANGED -eq 1 ]]; then restart_server; else echo "⏭️  skip restart-server（代码无变化）"; fi
+fi
 $ENABLE_SERVICES && enable_services
+
+# SE3：代码变更时让实盘任务吃到新代码（闸门已确保非交易时段/无任务冲突）
+if [[ $CODE_CHANGED -eq 1 ]] && { $RESTART_SERVER || $RESTART_CELERY; }; then
+    echo "ℹ️ 代码已变更，重启运行中的实盘任务以加载新代码..."
+    restart_live_tasks
+fi
 
 echo "✅ All operations completed."

@@ -1,0 +1,20 @@
+[Unit]
+Description=Quant Platform Celery Risk Worker (risk 队列专属，防长任务饿死告警巡检 F-48)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quant
+Group=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/celery -A src.scheduler worker -Q risk -c 1 --loglevel=info
+Restart=always
+RestartSec=10
+MemoryMax=512M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

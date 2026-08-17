@@ -52,12 +52,18 @@ def _redis() -> redis.Redis:
 
 def notify(level: Level, category: Category, title: str, body: str = "",
            source_ref: str | None = None) -> int | None:
-    """通知统一入口：落 PG（站内铃铛可见）+ 按规则外部推送。返回通知 id；去重命中返回 None。"""
-    r = _redis()
-    key = f"notify:dedup:{hashlib.md5(f'{title}:{level}:{category}'.encode()).hexdigest()[:12]}"
-    if r.exists(key):
-        return None  # 1min 内同标题去重
-    r.setex(key, 60, "1")
+    """通知统一入口：落 PG（站内铃铛可见）+ 按规则外部推送。返回通知 id；去重命中返回 None。
+
+    SE1（F-52）：Valkey 故障时降级——跳过去重继续发（告警不能与被监控对象共死）。
+    """
+    try:
+        r = _redis()
+        key = f"notify:dedup:{hashlib.md5(f'{title}:{level}:{category}'.encode()).hexdigest()[:12]}"
+        if r.exists(key):
+            return None  # 1min 内同标题去重
+        r.setex(key, 60, "1")
+    except Exception as e:
+        logger.warning("去重键不可用（Valkey 故障？），跳过去重继续发送: %s", e)
 
     # 1. 站内：落 PG
     notif_id = None

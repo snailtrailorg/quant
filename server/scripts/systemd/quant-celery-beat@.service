@@ -9,7 +9,8 @@ User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/server
 EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/celery -A src.scheduler beat --loglevel=info --schedule /tmp/quant-celerybeat-schedule
+ExecStartPre=/usr/bin/mkdir -p /data/websites/snailtrail.cc/quant/server/runtime
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/celery -A src.scheduler beat --loglevel=info --schedule /data/websites/snailtrail.cc/quant/server/runtime/celerybeat-schedule
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

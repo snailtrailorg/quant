@@ -15,6 +15,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 VALKEY_URL = os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0")
+# SE1（F-35）：celery 独立 db（.env 的 CELERY_BROKER_URL/CELERY_RESULT_BACKEND 此前从未被读，
+# broker/backend 直连 VALKEY_URL=db0 与业务键（熔断/JWT 黑名单/锁/去重）混装——一次故障全带走
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL") or VALKEY_URL
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND") or CELERY_BROKER_URL
 
 
 def _load_celery_concurrency() -> int:
@@ -36,8 +40,8 @@ def _load_celery_concurrency() -> int:
 
 app = Celery(
     "quant",
-    broker=VALKEY_URL,
-    backend=VALKEY_URL,
+    broker=CELERY_BROKER_URL,
+    backend=CELERY_RESULT_BACKEND,
     include=["src.scheduler.tasks", "src.feishu_bot.tasks"],
 )
 
