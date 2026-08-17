@@ -140,3 +140,5 @@ _REGISTRY: dict[str, type[RiskRule]]              # max_position / max_single_or
 
 ## 修订记录
 - 2026-08-11 初版（基于代码核实：risk.py:1-264 / risk_rule.py:1-106 / __init__.py 全读）
+
+> ⚠️ 2026-08-17 语义变更（WAL 时序/order_prefix/fail-closed/verify 证据门禁等）：见 `docs/architecture/接口契约.md` 末节「今日语义变更」。

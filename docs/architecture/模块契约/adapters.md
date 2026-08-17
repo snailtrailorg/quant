@@ -135,3 +135,5 @@ create_adapter(adapter_type: str, gateway=None, event_engine=None) -> ExecutionA
 
 ## 修订记录
 - 2026-08-10 初版（基于代码核实：adapters.py 全读 + backtest.py BacktestAdapter + 被调 grep）
+
+> ⚠️ 2026-08-17 语义变更（WAL 时序/order_prefix/fail-closed/verify 证据门禁等）：见 `docs/architecture/接口契约.md` 末节「今日语义变更」。

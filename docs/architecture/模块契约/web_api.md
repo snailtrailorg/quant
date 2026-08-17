@@ -208,3 +208,5 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 ## 修订记录
 - 2026-08-10 初版（基于代码核实：main.py 路由 grep 85 条 + import 依赖 + DB 表操作 + 抽样端点 chat/llm-usage/auth/strategy）
 - 2026-08-11 加 live_task（策略与标的分离）+ 因子 CRUD（factor_def）+ validate-params/validate-python + 回测 symbol_params
+
+> ⚠️ 2026-08-17 语义变更（WAL 时序/order_prefix/fail-closed/verify 证据门禁等）：见 `docs/architecture/接口契约.md` 末节「今日语义变更」。
