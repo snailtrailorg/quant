@@ -90,6 +90,66 @@ def _warmup_history(symbol: str) -> list:
     return history
 
 
+# ——— SA 稳定性加固（2026-08-17 稳定性检查 SA1/SA2，F-26/F-24/F-25/F-18）———
+
+def _guard(name: str):
+    """handler 包装：任何异常（用户策略代码/PG/风控 KeyError 等）只记日志不上抛。
+
+    vnpy EventEngine 事件线程对 handler 异常零保护（engine.py 只捕 Empty），一次异常=线程
+    静默死亡=永久失聪（F-26）。本包装把"失聪"降级为"跳过本条事件+告警日志"。
+    """
+    def deco(fn):
+        def wrapped(*args, **kwargs):
+            try:
+                return fn(*args, **kwargs)
+            except Exception:
+                logger.exception("handler %s 异常（已拦截，事件线程存活）", name)
+                try:
+                    _alert(f"策略任务 handler 异常: {name}", "事件已跳过，策略继续运行。详见 journalctl。")
+                except Exception:
+                    pass  # 守卫绝不放行任何异常（纵深防御）
+        return wrapped
+    return deco
+
+
+def _in_astock_session(now=None) -> bool:
+    """A 股交易时段（周一~周五 9:31-11:30 / 13:01-15:00）。
+
+    节假日不感知——调用方必须叠加"今日已收到过 tick"条件，防止假日误判断流。
+    """
+    import datetime as _dt
+    now = now or _dt.datetime.now()
+    if now.weekday() >= 5:
+        return False
+    hm = now.hour * 100 + now.minute
+    return (931 <= hm <= 1130) or (1301 <= hm <= 1500)
+
+
+def _sd_notify(msg: str) -> None:
+    """systemd notify（喂 WATCHDOG 看门狗）。无 NOTIFY_SOCKET（本地/手工运行）时静默跳过。"""
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    try:
+        import socket
+        if addr.startswith("@"):
+            addr = "\0" + addr[1:]
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+            s.connect(addr)
+            s.sendall(msg.encode())
+    except Exception:
+        pass  # 喂狗失败不杀主流程（systemd 会重启，靠 Restart 兜底）
+
+
+def _alert(title: str, body: str = "") -> None:
+    """runner 侧告警：走通知中心（站内铃铛+外部推送），失败仅记日志绝不影响交易主流程。"""
+    try:
+        from src.alert_notify.notify import notify
+        notify("critical", "system", title, body)
+    except Exception as e:
+        logger.warning("告警发送失败（%s）: %s", title, e)
+
+
 def main():
     parser = argparse.ArgumentParser(description="策略实盘化入口")
     parser.add_argument("--task-id", help="live_task.id（新架构：策略与标的分离）")
@@ -225,6 +285,7 @@ def main():
             "volume": float(bar.volume) if bar.volume else 0,
         }
 
+    @_guard("on_bar")
     def on_vnpy_bar(bar):
         d = _bar_to_dict(bar)
         sig = strategy.on_bar(d, list(history))  # history 不含当前（防未来）
@@ -240,7 +301,12 @@ def main():
 
     bg = BarGenerator(on_vnpy_bar)
 
+    _tick_state = {"last_ts": 0.0, "count": 0}  # GIL 下原子读写，无需锁
+
+    @_guard("on_tick")
     def on_tick(event):
+        _tick_state["last_ts"] = time.time()
+        _tick_state["count"] += 1
         bg.update_tick(event.data)
 
     event_engine.register(EVENT_TICK, on_tick)
@@ -249,12 +315,20 @@ def main():
     raw, ex = parse_vt_symbol(symbol)
     ex_vnpy = {"SHSE": "SSE", "SZSE": "SZSE", "BSE": "BSE"}.get(ex, ex)
     exchange = getattr(Exchange, ex_vnpy, None)
-    if exchange:
-        main_engine.subscribe(SubscribeRequest(symbol=raw, exchange=exchange), "XTP")
-        logger.info("策略 %s (%s) 启动，订阅 %s", sid, name, symbol)
-    else:
+    if not exchange:
         logger.error("无法解析交易所: %s（vt_symbol=%s）", ex, symbol)
         sys.exit(1)
+    sub_req = SubscribeRequest(symbol=raw, exchange=exchange)
+
+    def _resubscribe():
+        """幂等重订阅。XTP 断线重连后不恢复订阅（F-25），周期性重放是兜底（F-24 启动竞态同治）。"""
+        try:
+            main_engine.subscribe(sub_req, "XTP")
+        except Exception as e:
+            logger.warning("重订阅失败: %s", e)
+
+    _resubscribe()
+    logger.info("策略 %s (%s) 启动，订阅 %s", sid, name, symbol)
 
     # 6. 保持运行（事件循环）
     import os as _os, redis as _redis
@@ -293,15 +367,43 @@ def main():
                     logger.info("因子重算触发：重填 %d 根历史 bar", len(history))
             except Exception as e:
                 logger.warning("因子重算触发检查失败: %s", e)
-            # 心跳检查 + 断线重连
-            if hasattr(gateway, "is_connected") and not gateway.is_connected():
-                logger.warning("网关断连，尝试重连")
-                try:
-                    gateway.connect(setting)
-                    history[:] = _warmup_history(symbol)  # 断线补缺口：重连后从 PG 重填（#4）
-                    logger.info("断线补缺口：重填 %d 根历史 bar", len(history))
-                except Exception as e:
-                    logger.warning("重连失败: %s", e)
+            # ——— SA 加固主循环（每 10s 一轮）———
+            # 1) 喂 systemd 看门狗（WatchdogSec 由 unit 配置，挂死→systemd 重启）
+            _sd_notify("WATCHDOG=1")
+            # 2) EventEngine 线程存活（F-26）：死了≠进程死，必须显式检测；告警后退出交给 systemd 拉起
+            _ev_thread = getattr(event_engine, "_thread", None)
+            if _ev_thread is not None and not _ev_thread.is_alive():
+                logger.critical("EventEngine 事件线程已死亡，退出待 systemd 重启")
+                _alert(f"实盘任务事件线程死亡: {sid}", "runner 将自动重启；请查 journalctl 定位首个异常")
+                os._exit(1)
+            # 3) tick 新鲜度（F-18/F-25）：交易时段断流检测。
+            #    仅当今日已收到过 tick 才升级到退出（节假日/盘前零 tick 安全）；
+            #    120s 告警，300s 告警+退出重启（也覆盖事件线程挂死但未死、订阅丢失等一切断流形态）
+            _stale = time.time() - _tick_state["last_ts"] if _tick_state["last_ts"] else None
+            if _in_astock_session():
+                if _tick_state["count"] > 0 and _stale is not None and _stale > 120:
+                    if _stale > 300:
+                        logger.critical("tick 断流 %.0fs（>300s），退出待 systemd 重启恢复订阅", _stale)
+                        _alert(f"实盘任务 tick 断流 {_stale:.0f}s，自动重启恢复: {sid}",
+                               "重启后自动重放订阅并暖机。若反复出现请查 XTP 行情链路。")
+                        os._exit(1)
+                    elif counter % 6 == 0:  # 告警限频：每 60s 至多一条
+                        logger.error("tick 断流 %.0fs（今日已收 %d 条）", _stale, _tick_state["count"])
+                        _alert(f"实盘任务 tick 断流 {_stale:.0f}s: {sid}",
+                               f"今日已收 {_tick_state['count']} 条 tick 后断流，120-300s 内未恢复将自动重启。")
+                # 4) 幂等重订阅（F-24/F-25）：交易时段每 60s 重放一次，兜住"重连后订阅丢失"
+                if counter % 6 == 0:
+                    _resubscribe()
+            # 5) Valkey 心跳（供巡检/看板；失联只记日志）
+            try:
+                _r.hset(f"quant:hb:task:{tid or sid}", mapping={
+                    "pid": os.getpid(), "ts": time.time(),
+                    "last_tick_ts": _tick_state["last_ts"] or 0,
+                    "ticks": _tick_state["count"], "bars": len(history),
+                })
+                _r.expire(f"quant:hb:task:{tid or sid}", 90)
+            except Exception as e:
+                logger.warning("写心跳失败: %s", e)
             # 定期写 account_snapshot（#6，每 60s query_account -> PG）
             if counter % 6 == 0:
                 try:
