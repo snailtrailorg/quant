@@ -32,6 +32,7 @@ class RiskState:
     halted: bool
     total_drawdown: float
     daily_loss: float
+    available: bool = True  # SB1（F-29）：False=快照数据源故障，check_order 必须 fail-closed 拒单
 
 
 # ——— 风控规则配置（默认，可 Web 改） ———
@@ -66,9 +67,30 @@ class RiskControl:
             os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
             decode_responses=True,
         )
-        self._rules = self._load_rules_from_db() or dict(DEFAULT_RULES)
+        # SB2（F-30/F-23）：DEFAULT 兜底合并保证三个 key 永远存在（部分规则不再 KeyError 杀事件线程）；
+        # _rules_loaded_at 支撑 60s 热加载（Web 改规则对长活进程生效）
+        self._rules = self._merged_rules(self._load_rules_from_db())
+        self._rules_loaded_at = time.time()
         self._HALT_KEY = "risk:halted"
         self._HALT_REASON_KEY = "risk:halt_reason"
+
+    @staticmethod
+    def _merged_rules(loaded: dict | None) -> dict:
+        """DEFAULT 与 DB 规则按键合并，保证 global/etf_conv/crypto 三 key 完整。"""
+        loaded = loaded or {}
+        return {k: {**base, **loaded.get(k, {})} for k, base in DEFAULT_RULES.items()}
+
+    def _maybe_reload_rules(self, ttl: float = 60.0) -> None:
+        """SB2（F-23）：每 60s 重读规则，Web 修改对运行中进程生效。加载失败保留旧规则（有规则好过没规则）。"""
+        if time.time() - self._rules_loaded_at < ttl:
+            return
+        self._rules_loaded_at = time.time()
+        try:
+            fresh = self._load_rules_from_db()
+            if fresh is not None:
+                self._rules = self._merged_rules(fresh)
+        except Exception as e:
+            logger.warning("风控规则热加载失败（沿用旧规则）: %s", e)
 
     @staticmethod
     def _load_rules_from_db():
@@ -132,7 +154,7 @@ class RiskControl:
         if any(symbol.endswith(s) for s in (".SHSE", ".SZSE", ".SSE")):
             if code.startswith(("11", "12")):   # 沪/深可转债
                 return "convertible"
-            if code.startswith(("51", "15", "56")):  # ETF（沪51/深15/跨市56）
+            if code.startswith(("51", "15", "56", "58")):  # ETF（沪51/深15/跨市56/科创58，SB3-F-42 补 58 防绕分项开关）
                 return "etf"
             return "astock"  # A 股股票（60/00/30 开头），走 XTP astock 分项
         return None
@@ -159,8 +181,16 @@ class RiskControl:
 
     def check_order(self, order: dict, account: str = "") -> RiskDecision:
         """所有自动交易 send_order 前必调。"""
+        # SB2（F-23）：规则热加载（60s TTL，失败沿用旧规则）
+        self._maybe_reload_rules()
         # 1. 熔断检查
-        if self.is_halted():
+        try:
+            halted = self.is_halted()
+        except Exception as e:
+            # Valkey 不可达：按熔断处理（SB2，更保守——fail-closed）
+            logger.error("熔断状态读取失败，按熔断拒单: %s", e)
+            return RiskDecision(approved=False, reason=f"熔断状态不可读（Valkey 故障），保守拒单: {e}", severity="critical")
+        if halted:
             return RiskDecision(approved=False, reason=f"熔断中: {self.halt_reason()}", severity="critical")
 
         # 2. 实盘开关（三级 AND：.env 总闸 + Web 分项 live_trading_config）
@@ -173,11 +203,16 @@ class RiskControl:
 
         # 3. 全局风控
         state = self._get_global_state(account)
+        # SB1（F-29）fail-closed：快照数据源故障/无数据时拒绝一切新单（故障时保护必须更紧不能更松）
+        if not state.available:
+            return RiskDecision(approved=False, reason="风控状态不可用（快照数据源故障或无数据，fail-closed），等待快照恢复", severity="critical")
         global_rules = self._rules.get("global", {})
         if state.total_drawdown >= global_rules.get("max_drawdown", 0.15):
             return RiskDecision(approved=False, reason=f"总回撤 {state.total_drawdown:.1%} 超限", severity="critical")
         if state.daily_loss >= global_rules.get("daily_loss_limit", 0.05):
-            return RiskDecision(approved=False, reason=f"单日亏损 {state.daily_loss:.1%} 超限，仅平不开", severity="warn")
+            # SB2（F-31）：日亏限额只禁开仓，SELL/平仓放行——否则触发限额后连止损都做不了
+            if str(order.get("action", "")).upper() != "SELL":
+                return RiskDecision(approved=False, reason=f"单日亏损 {state.daily_loss:.1%} 超限，禁止开仓（平仓放行）", severity="warn")
 
         # 4. 分市场检查
         if ".BINANCE" in symbol or ".OKX" in symbol or "PERP" in symbol:
@@ -188,10 +223,15 @@ class RiskControl:
 
     def _check_etf_conv(self, order: dict) -> RiskDecision:
         """场内（可转债/ETF）风控。"""
-        rules = self._rules["etf_conv"]
-        # #29 风控覆写：单笔金额超限截断 volume（不只 reject，能修正）
+        rules = self._rules["etf_conv"]  # _merged_rules 保证存在（SB2-F-30）
+        # SB3（F-43/F-28 风控层兜底）：数量/价格无效直接拒——0 值单绕过金额上限且是废单
         price = float(order.get("price", 0) or 0)
         volume = float(order.get("volume", 0) or 0)
+        if volume <= 0:
+            return RiskDecision(approved=False, reason=f"委托数量无效: {volume}", severity="critical")
+        if price <= 0:
+            return RiskDecision(approved=False, reason="委托价格无效（缺失则无法评估金额，fail-closed）", severity="critical")
+        # #29 风控覆写：单笔金额超限截断 volume（不只 reject，能修正）
         max_amount = rules.get("max_single_amount", 100000)
         amount = price * volume
         if price > 0 and amount > max_amount:
@@ -228,33 +268,33 @@ class RiskControl:
     # ── 全局状态（从数据中台/账户读取，简化） ──
 
     def _get_global_state(self, account: str) -> RiskState:
-        """获取账户全局风控状态：从 PG 读持仓 + 每日净值计算回撤/亏损。
+        """获取账户全局风控状态：从 PG 读最新快照计算回撤/亏损。
 
-        无持仓时返回 0.0（无风险）。实盘开始后自动生效。
+        SB1（F-29/F-34）fail-closed：数据源故障或无任何快照 → available=False，
+        check_order 据此拒单——绝不允许"故障时限制归零继续交易"。
         """
-        import os
         try:
             with get_conn() as conn:
-                # 校验表存在
-                try:
-                    conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
-                except Exception:
-                    pass
-                conn.commit()
                 # 读最新快照
                 cur = conn.execute(
                     "SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
                 row = cur.fetchone()
                 if not row:
-                    return RiskState(halted=self.is_halted(), total_drawdown=0.0, daily_loss=0.0)
+                    logger.warning("account_snapshot 无数据（风控 fail-closed，等待首个快照）")
+                    return RiskState(halted=self.is_halted(), total_drawdown=0.0, daily_loss=0.0, available=False)
                 total_value, daily_pnl, initial = float(row[0]), float(row[1] or 0), float(row[2])
                 # 总回撤 = (初始资金 - 当前总值) / 初始资金
                 drawdown = max(0, (initial - total_value) / initial) if initial > 0 else 0
                 # 单日亏损 = |daily_pnl| / 初始资金（亏损为正）
                 daily_loss = abs(min(0, daily_pnl)) / initial if initial > 0 else 0
                 return RiskState(halted=self.is_halted(), total_drawdown=drawdown, daily_loss=daily_loss)
-        except Exception:
-            return RiskState(halted=self.is_halted(), total_drawdown=0.0, daily_loss=0.0)
+        except Exception as e:
+            logger.error("风控全局状态读取失败（fail-closed 拒单）: %s", e)
+            try:
+                halted = self.is_halted()
+            except Exception:
+                halted = True  # Valkey 也挂：按熔断（最保守）
+            return RiskState(halted=halted, total_drawdown=0.0, daily_loss=0.0, available=False)
 
     def update_account_snapshot(self, total_value: float, daily_pnl: float = 0,
                                  initial_capital: float = 1_000_000):

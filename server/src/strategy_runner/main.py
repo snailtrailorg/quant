@@ -334,6 +334,7 @@ def main():
     import os as _os, redis as _redis
     _r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
     counter = 0
+    _halt_state = {"was": False}  # 熔断沿检测（SB2，F-41：进入熔断的瞬间撤在场单）
     try:
         while True:
             time.sleep(10)
@@ -404,22 +405,47 @@ def main():
                 _r.expire(f"quant:hb:task:{tid or sid}", 90)
             except Exception as e:
                 logger.warning("写心跳失败: %s", e)
+            # 6) 熔断沿触发：撤销全部在场委托（SB2，F-41——熔断只拦新单不撤旧单=熔断期间仍建仓）
+            try:
+                from src.risk_control.risk import RiskControl
+                halted_now = RiskControl.get().is_halted()
+            except Exception:
+                halted_now = _halt_state["was"]  # Valkey 不可达时保持上一状态（check_order 侧已保守拒单）
+            if halted_now and not _halt_state["was"]:
+                logger.critical("检测到熔断，撤销全部在场委托")
+                _alert(f"熔断触发，已自动撤销在场委托: {sid}", "check_order 已拒新单；在场委托撤销结果见 journalctl。")
+                try:
+                    from vnpy.trader.constant import Status
+                    working = (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)
+                    for od in (adapter.query_orders() or []):
+                        if getattr(od, "status", None) in working:
+                            try:
+                                adapter.cancel_order(od.vt_orderid)
+                            except Exception as ce:
+                                logger.warning("撤单失败 %s: %s", od.vt_orderid, ce)
+                except Exception as e:
+                    logger.error("熔断撤单流程异常: %s", e)
+            _halt_state["was"] = halted_now
             # 定期写 account_snapshot（#6，每 60s query_account -> PG）
             if counter % 6 == 0:
                 try:
                     accounts = adapter.query_account() or []
-                    total = sum(float(getattr(a, "balance", 0)) for a in accounts) if accounts else initial_capital
-                    # P3-10 daily_pnl = 今日首次快照基准的偏差
-                    import datetime as _dt2
-                    today_str = _dt2.datetime.now().strftime('%Y-%m-%d')
-                    with get_conn() as conn:
-                        conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
-                        cur = conn.execute("SELECT total_value FROM account_snapshot WHERE ts::date=%s ORDER BY ts ASC LIMIT 1", (today_str,))
-                        first_row = cur.fetchone()
-                        daily_base = float(first_row[0]) if first_row else total
-                        daily_pnl = total - daily_base
-                        conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital if initial_capital is not None else 1000000))
-                        conn.commit()
+                    if not accounts:
+                        # SB1（F-34）：查不到账户（TD 断线/查询超时）绝不写假值——
+                        # 旧逻辑把 initial_capital 当总资产写入，恰好把风控回撤"归零回正"
+                        logger.warning("query_account 无结果（TD 断线？），跳过本轮快照（不写假值）")
+                    else:
+                        total = sum(float(getattr(a, "balance", 0)) for a in accounts)
+                        # P3-10 daily_pnl = 今日首次快照基准的偏差
+                        import datetime as _dt2
+                        today_str = _dt2.datetime.now().strftime('%Y-%m-%d')
+                        with get_conn() as conn:
+                            cur = conn.execute("SELECT total_value FROM account_snapshot WHERE ts::date=%s ORDER BY ts ASC LIMIT 1", (today_str,))
+                            first_row = cur.fetchone()
+                            daily_base = float(first_row[0]) if first_row else total
+                            daily_pnl = total - daily_base
+                            conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital if initial_capital is not None else 1000000))
+                            conn.commit()
                 except Exception as e:
                     logger.warning("写 account_snapshot 失败: %s", e)
     except KeyboardInterrupt:
