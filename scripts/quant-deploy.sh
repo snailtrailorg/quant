@@ -47,9 +47,11 @@ SYSTEMD_SRC="${SYSTEMD_SRC:-$PROJECT_PATH/scripts/systemd}"      # 源码里的 
 PG_DB="${PG_DB:-quant}"
 PG_USER="${PG_USER:-quant}"
 
-# Redis db 分配（避开 safebox db0/db1）
-VALKEY_DB="${VALKEY_DB:-2}"      # VALKEY_URL：心跳锁/进度/session
-CELERY_DB="${CELERY_DB:-3}"      # CELERY_BROKER/RESULT
+# Redis db 分配（对齐服务器 .env 实际值：safebox=db0/db1，quant=业务db4/broker db5/result db6）
+# 2026-08-17 修正：原默认 db2/db3 与服务器实际不符，clear-redis 会清错库
+VALKEY_DB="${VALKEY_DB:-4}"      # VALKEY_URL：心跳锁/熔断/JWT黑名单/去重
+CELERY_DB="${CELERY_DB:-5}"      # CELERY_BROKER_URL
+CELERY_RESULT_DB="${CELERY_RESULT_DB:-6}"  # CELERY_RESULT_BACKEND
 
 # Redis CLI（safebox 用 redis6-cli）
 REDIS_CLI="${REDIS_CLI:-/usr/bin/redis-cli}"
@@ -275,7 +277,9 @@ trading_guard() {
 }
 
 remote_code_hash() {
-    ssh $SSH_OPTS "$SSH_TARGET" "cd '$PROJECT_PATH' && find src -name '*.py' -not -path '*__pycache__*' -exec md5sum {} + 2>/dev/null | sort | md5sum"
+    # 注意：michael 无权 cd 进 750 quant 目录（2026-08-17 踩坑同款），用 sudo find 免 cd；
+    # 取不到指纹（空）时上层按 CODE_CHANGED=1 处理（宁可多重启不漏重启）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo find '$PROJECT_PATH/src' -name '*.py' -not -path '*__pycache__*' -exec md5sum {} + 2>/dev/null | sort | md5sum"
 }
 
 # 代码变更时让实盘任务吃到新代码（闸门已保证非交易时段才走到这）
