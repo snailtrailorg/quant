@@ -264,6 +264,7 @@ def main() -> None:
             pass
 
     ee = EventEngine()
+    ee.start()   # 绕开 MainEngine 必须自启（构造不启动，_active=False → 线程未活）
     gw = ThinGateway(ee, "XTP")
     md_api = XtpMdApi(gw)
     gw.md_api = md_api

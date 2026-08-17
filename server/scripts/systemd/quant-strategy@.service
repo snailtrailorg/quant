@@ -4,6 +4,7 @@ Description=Quant Strategy %i (旧架构 strategy_config 直启)
 After=network-online.target
 Wants=network-online.target
 # 5 次/5 分钟失败后放弃进 Failed → 触发 OnFailure 告警（防无限重启风暴，F-1）
+OnFailure=quant-task-failed@%i.service
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
@@ -18,7 +19,6 @@ ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strat
 WatchdogSec=90
 NotifyAccess=main
 # 失败终态 → 钩子单元发告警（F-13）
-OnFailure=quant-task-failed@%i.service
 Restart=always
 RestartSec=30
 # 512M 会被 XTP 全市场合约加载尖峰打爆（OOM SIGKILL，2026-08-17 实测）

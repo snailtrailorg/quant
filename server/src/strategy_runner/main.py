@@ -195,6 +195,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
                 pass
 
     ee = EventEngine()
+    ee.start()   # 同 md_hub：绕开 MainEngine 必须自启
     gw = ThinTdGateway(ee, "XTP")
     td_api = XtpTdApi(gw)
     gw.td_api = td_api
