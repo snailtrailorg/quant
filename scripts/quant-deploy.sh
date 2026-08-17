@@ -406,17 +406,38 @@ restart_celery() {
 }
 
 
+# 飞书 bot 实例清单的真相源：feishu_config DB（enabled 的 id）。
+# 不用"正在运行的实例"——那会把幽灵实例（如 @multi-user 误启）每次部署转正（2026-08-17 踩坑）。
+# DB 不可达时 fallback 到 active 列表（保守：只重启不新增）。
+feishu_bot_units() {
+    local ids
+    ids=$(ssh $SSH_OPTS "$SSH_TARGET" "sudo -u quant psql -d $PG_DB -tAc 'SELECT id FROM feishu_config WHERE enabled' 2>/dev/null" | tr '\n' ' ')
+    if [[ -n "${ids// /}" ]]; then
+        local units=""
+        for id in $ids; do
+            units="$units quant-feishu-bot@${id}.service"
+        done
+        echo "$units"
+    else
+        echo "__FALLBACK__"
+    fi
+}
+
 restart_feishu() {
     echo "ℹ️ Restart feishu bots..."
     local bots
-    bots=$(ssh $SSH_OPTS "$SSH_TARGET" "systemctl list-units 'quant-feishu-bot@*' --no-legend --type=service --state=active,running 2>/dev/null | awk '{print \$1}'")
+    bots=$(feishu_bot_units)
+    if [[ "$bots" == "__FALLBACK__" ]]; then
+        echo "  ⚠️ feishu_config 不可读，fallback 到 active 实例（不新增）"
+        bots=$(ssh $SSH_OPTS "$SSH_TARGET" "systemctl list-units 'quant-feishu-bot@*' --no-legend --type=service --state=active,running 2>/dev/null | awk '{print \$1}'")
+    fi
     if [[ -z "$bots" ]]; then
-        echo "⚠️ 无 running 的 feishu bot（skipped）"
+        echo "⚠️ 无 feishu bot（skipped）"
         return
     fi
     for bot in $bots; do
         echo "  restart $bot"
-        ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $bot"
+        ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $bot" || { echo "  ⚠️ $bot 不存在或启动失败"; continue; }
         if _stabilize "$bot"; then
             echo "  ✅ $bot active (稳定)"
         else
@@ -457,7 +478,8 @@ fix_venv() {
 #-----------------------------------------------------------------------------------------------------------------------
 install_services() {
     echo "ℹ️ Install systemd services + polkit rules..."
-    ssh $SSH_OPTS "$SSH_TARGET" bash <<REMOTE
+    # 整块用 root 跑：PROJECT_PATH 树是 750 quant:quant，michael 无法穿越（test -d/glob/cp 全废）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo bash -s" <<REMOTE
 set -euo pipefail
 SRC='$SYSTEMD_SRC'
 [[ -d "\$SRC" ]] || { echo "❌ 源码 systemd 目录不存在: \$SRC（先 deploy）"; exit 1; }
@@ -479,6 +501,10 @@ echo "  cp polkit rules -> $POLKIT_DST/"
 sudo cp \$SRC/*.rules $POLKIT_DST/ 2>/dev/null || echo "  ⚠️ 无 .rules 文件"
 
 sudo systemctl daemon-reload
+# polkit rules.d 在 al8 上不热加载，必须 restart polkit 才认新规则（2026-08-17 实测踩坑）
+sudo systemctl restart polkit
+echo "  当前 quant-* 单元状态快照（人工扫一眼，防幽灵实例）："
+systemctl list-unit-files 'quant-*' --no-legend | grep -v '^$' || true
 echo "✅ install-services done（未 enable，用 enable-services 或手动 enable）"
 REMOTE
 }
@@ -488,9 +514,13 @@ REMOTE
 #-----------------------------------------------------------------------------------------------------------------------
 enable_services() {
     echo "ℹ️ Enable core services（strategy@ 按需，不 enable）..."
-    # 动态收集 running 的 feishu bot 实例名
+    # 飞书实例来自 feishu_config DB（真相源），不收集 active 实例（防幽灵转正，2026-08-17）
     local feishu
-    feishu=$(ssh $SSH_OPTS "$SSH_TARGET" "systemctl list-units 'quant-feishu-bot@*' --no-legend --type=service --state=active 2>/dev/null | awk '{print \$1}'" || true)
+    feishu=$(feishu_bot_units)
+    if [[ "$feishu" == "__FALLBACK__" ]]; then
+        echo "  ⚠️ feishu_config 不可读，飞书不 enable（避免转正幽灵实例）"
+        feishu=""
+    fi
     local cores="$WEB_API_SERVICE $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $feishu"
     ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl enable $cores 2>&1 | grep -v 'Created symlink\|^$' || true; echo '✅ enabled: $cores'"
 }

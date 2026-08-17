@@ -8,6 +8,7 @@ systemd: systemctl start quant-strategy@<id>
 """
 import argparse
 import logging
+import os
 import sys
 import time
 
@@ -263,17 +264,27 @@ def main():
         while True:
             time.sleep(10)
             counter += 1
-            # P4-3 参数热加载：每 60s 重读 strategy_config，如果 enabled=false 则退出
+            # P4-3 停止条件热检查（每 60s）：
+            # 新架构查自己的 live_task.status（stop_live_task 置 stopped）；
+            # 旧架构查 strategy_config.enabled。2026-08-17 踩坑：新架构误查旧架构字段，
+            # 策略未 enable 的任务每 60s 自杀重启，history 永远攒不满出不了信号。
             if counter % 6 == 0:
                 try:
                     with get_conn() as conn:
-                        cur = conn.execute('SELECT enabled FROM strategy_config WHERE id=%s', (sid,))
-                        r = cur.fetchone()
-                    if r and not r[0]:
-                        logger.info('策略 %s 被 Web 停止，退出', sid)
-                        break
+                        if tid is not None:
+                            cur = conn.execute('SELECT status FROM live_task WHERE id=%s', (tid,))
+                            r = cur.fetchone()
+                            if r and r[0] == 'stopped':
+                                logger.info('实盘任务 %s 被 Web 停止，退出', tid)
+                                break
+                        else:
+                            cur = conn.execute('SELECT enabled FROM strategy_config WHERE id=%s', (sid,))
+                            r = cur.fetchone()
+                            if r and not r[0]:
+                                logger.info('策略 %s 被 Web 停止，退出', sid)
+                                break
                 except Exception as e:
-                    logger.warning("读 strategy_config 失败: %s", e)
+                    logger.warning("停止条件检查失败: %s", e)
             # 因子重算触发（#31，data_continuity_check 补采后设标记 -> 重填 history）
             try:
                 if _r.get("factor:recalc:triggered"):
@@ -312,8 +323,14 @@ def main():
     except KeyboardInterrupt:
         logger.info("策略 %s 停止", sid)
     finally:
-        _r.close()
-        main_engine.close()
+        try:
+            _r.close()
+            main_engine.close()
+        except Exception:
+            pass
+    # XTP/vnpy 原生库在解释器拆除阶段会 abort（status=6/ABRT，2026-08-17 实测），
+    # 清理完成后硬退出跳过原生 teardown——退出码干净，systemd 不误判失败重启。
+    os._exit(0)
 
 
 if __name__ == "__main__":

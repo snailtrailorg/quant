@@ -1,5 +1,5 @@
 [Unit]
-Description=Quant Strategy %i (旧架构 strategy_config 直启)
+Description=Quant Live Task %i (实盘任务，策略+标的分离)
 # 不 Requires 具体 pg/redis 服务名（各机命名不一，写错=永远起不来）；runner 首查失败退出，Restart=always 自愈
 After=network-online.target
 Wants=network-online.target
@@ -10,7 +10,7 @@ User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/server
 EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strategy_runner.main --id %i
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strategy_runner.main --task-id %i
 Restart=always
 RestartSec=30
 # 512M 会被 XTP 全市场合约加载尖峰打爆（OOM SIGKILL，2026-08-17 实测）

@@ -1,5 +1,5 @@
-// polkit 规则：允许 quant 用户管理 quant-strategy@* 和 quant-feishu-bot@* systemd 实例
-// （Web 后端 web-api 跑 quant 用户，通过 systemctl start/stop 控制策略/飞书子进程）
+// polkit 规则：允许 quant 用户管理 quant-strategy@* / quant-live-task@* / quant-feishu-bot@* systemd 实例
+// （Web 后端 web-api 跑 quant 用户，通过 systemctl start/stop 控制策略/实盘任务/飞书子进程）
 //
 // 部署（服务器，一次性）：
 //   sudo cp 49-quant.rules /etc/polkit-1/rules.d/
@@ -11,6 +11,7 @@ polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
         subject.user == "quant" &&
         (action.lookup("unit").startsWith("quant-strategy@") ||
+         action.lookup("unit").startsWith("quant-live-task@") ||
          action.lookup("unit").startsWith("quant-feishu-bot@"))) {
         return polkit.Result.YES;
     }
