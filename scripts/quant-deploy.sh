@@ -467,7 +467,7 @@ feishu_bot_units() {
 
 restart_hub() {
     # 首次部署单元尚未安装（install-services 在链尾）——容忍跳过，不中断部署链
-    if ! ssh $SSH_OPTS "$SSH_TARGET" "systemctl list-unit-files '$MD_HUB_SERVICE' --no-legend 2>/dev/null | grep -q ."; then
+    if ! ssh $SSH_OPTS "$SSH_TARGET" "systemctl cat '$MD_HUB_SERVICE' >/dev/null 2>&1"; then
         echo "⏭️  skip restart-hub（单元未安装，稍后 install-services 装）"
         return 0
     fi
@@ -610,21 +610,21 @@ $CLEAR_REDIS && clear_redis
 $INSTALL_SERVICES && install_services
 $FIX_VENV && fix_venv
 if $RESTART_WEB; then
-    if [[ $CODE_CHANGED -eq 1 ]]; then restart_web; else echo "⏭️  skip restart-web（代码无变化）"; fi
+    if [[ $CODE_CHANGED -eq 1 || "${FORCE_RESTART:-0}" == "1" ]]; then restart_web; else echo "⏭️  skip restart-web（代码无变化）"; fi
 fi
 $RESTART_REDIS && restart_redis
 $RESTART_PGSQL && restart_pgsql
 if $RESTART_CELERY; then
-    if [[ $CODE_CHANGED -eq 1 ]]; then restart_celery; else echo "⏭️  skip restart-celery（代码无变化）"; fi
+    if [[ $CODE_CHANGED -eq 1 || "${FORCE_RESTART:-0}" == "1" ]]; then restart_celery; else echo "⏭️  skip restart-celery（代码无变化）"; fi
 fi
 if $RESTART_FEISHU; then
-    if [[ $CODE_CHANGED -eq 1 ]]; then restart_feishu; else echo "⏭️  skip restart-feishu（代码无变化）"; fi
+    if [[ $CODE_CHANGED -eq 1 || "${FORCE_RESTART:-0}" == "1" ]]; then restart_feishu; else echo "⏭️  skip restart-feishu（代码无变化）"; fi
 fi
 if $RESTART_HUB; then
-    if [[ $CODE_CHANGED -eq 1 ]]; then restart_hub; else echo "⏭️  skip restart-hub（代码无变化）"; fi
+    if [[ $CODE_CHANGED -eq 1 || "${FORCE_RESTART:-0}" == "1" ]]; then restart_hub; else echo "⏭️  skip restart-hub（代码无变化）"; fi
 fi
 if $RESTART_SERVER; then
-    if [[ $CODE_CHANGED -eq 1 ]]; then restart_server; else echo "⏭️  skip restart-server（代码无变化）"; fi
+    if [[ $CODE_CHANGED -eq 1 || "${FORCE_RESTART:-0}" == "1" ]]; then restart_server; else echo "⏭️  skip restart-server（代码无变化）"; fi
 fi
 $ENABLE_SERVICES && enable_services
 
