@@ -75,6 +75,8 @@
 - 文档自检 hook：`flow/规范/hook机制.md`
 - 任务模板（待办自包含写法规范，8 字段 + mock 库）：`flow/规范/任务模板.md`
 - 架构设计：`docs/architecture/00-总体设计.md`（总体设计 10 节，14 份参考文档已合并）
+- 实盘稳定性：`docs/architecture/12-实盘稳定性设计.md`（风险清单/监控/守则）；稳定性检查台账 `flow/稳定性检查矩阵.md`（F-1~F-59）
+- 共享行情 Hub（ST7）：`docs/architecture/13-需求书.md` + `14-设计.md` v2（hub=纯数据面单实例 MD，worker=TD-only；Valkey Streams 分发+租约 fencing；影子期 bar_hub/bar_shadow diff 门禁）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（13 份全写完）
 - 本地开发部署（一键脚本 + 排错）：`scripts/LOCAL-DEPLOY.md`（用 `bash scripts/dev-start.sh start`，不要手动起服务）
