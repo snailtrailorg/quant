@@ -34,6 +34,7 @@ WEB_API_SERVICE="${WEB_API_SERVICE:-quant-web-api@quant}"
 CELERY_WORKER_SERVICE="${CELERY_WORKER_SERVICE:-quant-celery-worker@quant}"
 CELERY_BEAT_SERVICE="${CELERY_BEAT_SERVICE:-quant-celery-beat@quant}"
 CELERY_RISK_SERVICE="${CELERY_RISK_SERVICE:-quant-celery-risk@quant}"   # SE2: risk 队列专属，防饿死（F-48）
+MD_HUB_SERVICE="${MD_HUB_SERVICE:-quant-md-hub@quant}"                 # ST7: 共享行情 hub
 PGSQL_SERVICE="${PGSQL_SERVICE:-postgresql-18}"
 REDIS_SERVICE="${REDIS_SERVICE:-redis}"
 WEB_SERVICE="${WEB_SERVICE:-nginx}"
@@ -71,6 +72,7 @@ DRY_RUN=false
 DEPLOY_TASKS=()
 RESTART_SERVER=false
 RESTART_CELERY=false
+RESTART_HUB=false
 RESTART_WEB=false
 RESTART_FEISHU=false
 RESTART_PGSQL=false
@@ -174,6 +176,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         restart-server) HAS_ACTION=true; RESTART_SERVER=true; shift ;;
         restart-celery) HAS_ACTION=true; RESTART_CELERY=true; shift ;;
+        restart-hub) HAS_ACTION=true; RESTART_HUB=true; shift ;;
         restart-web) HAS_ACTION=true; RESTART_WEB=true; shift ;;
         restart-feishu) HAS_ACTION=true; RESTART_FEISHU=true; shift ;;
         restart-pgsql) HAS_ACTION=true; RESTART_PGSQL=true; shift ;;
@@ -264,7 +267,7 @@ trading_guard() {
     fi
     local state
     state=$(ssh $SSH_OPTS "$SSH_TARGET" "
-        active=\$(systemctl list-units 'quant-live-task@*' 'quant-strategy@*' --state=active --no-legend 2>/dev/null | wc -l)
+        active=\$(systemctl list-units 'quant-live-task@*' 'quant-strategy@*' 'quant-md-hub@*' --state=active --no-legend 2>/dev/null | wc -l)
         day=\$(date +%u); hm=\$(date +%H%M); in_sess=0
         if [ \$day -le 5 ] && { [ \$hm -ge 0915 ] && [ \$hm -le 1135 ] || [ \$hm -ge 1255 ] && [ \$hm -le 1505 ]; }; then in_sess=1; fi
         echo \$in_sess \$active")
@@ -462,6 +465,16 @@ feishu_bot_units() {
     fi
 }
 
+restart_hub() {
+    echo "ℹ️ Restart $MD_HUB_SERVICE..."
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $MD_HUB_SERVICE"
+    if _stabilize "$MD_HUB_SERVICE"; then
+        echo "  ✅ $MD_HUB_SERVICE active (稳定)"
+    else
+        echo "  ⚠️ $MD_HUB_SERVICE 未稳定（journalctl -u $MD_HUB_SERVICE -n 30）"
+    fi
+}
+
 restart_feishu() {
     echo "ℹ️ Restart feishu bots..."
     local bots
@@ -560,7 +573,7 @@ enable_services() {
         echo "  ⚠️ feishu_config 不可读，飞书不 enable（避免转正幽灵实例）"
         feishu=""
     fi
-    local cores="$WEB_API_SERVICE $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE $feishu"
+    local cores="$WEB_API_SERVICE $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE $MD_HUB_SERVICE $feishu"
     ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl enable $cores 2>&1 | grep -v 'Created symlink\|^$' || true; echo '✅ enabled: $cores'"
 }
 
@@ -601,6 +614,9 @@ if $RESTART_CELERY; then
 fi
 if $RESTART_FEISHU; then
     if [[ $CODE_CHANGED -eq 1 ]]; then restart_feishu; else echo "⏭️  skip restart-feishu（代码无变化）"; fi
+fi
+if $RESTART_HUB; then
+    if [[ $CODE_CHANGED -eq 1 ]]; then restart_hub; else echo "⏭️  skip restart-hub（代码无变化）"; fi
 fi
 if $RESTART_SERVER; then
     if [[ $CODE_CHANGED -eq 1 ]]; then restart_server; else echo "⏭️  skip restart-server（代码无变化）"; fi

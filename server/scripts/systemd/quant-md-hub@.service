@@ -1,0 +1,27 @@
+[Unit]
+Description=Quant MD Hub (共享行情：XTP MD + 分钟聚合 + Valkey Streams 分发)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
+Environment=QT_QPA_PLATFORM=offscreen
+ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.md_hub.main
+WatchdogSec=90
+NotifyAccess=main
+OnFailure=quant-task-failed@%n.service
+Restart=always
+RestartSec=30
+# 合约表尖峰同 direct runner（500-700M 预算）
+MemoryMax=1G
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

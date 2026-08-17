@@ -150,6 +150,116 @@ def _alert(title: str, body: str = "") -> None:
         logger.warning("告警发送失败（%s）: %s", title, e)
 
 
+def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital):
+    """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。"""
+    import datetime as _dt
+    from src.data_platform.db import get_conn as _get_conn  # 评审 S2：stop_check 用
+    from vnpy.event import EventEngine
+    from vnpy.trader.gateway import BaseGateway
+    from vnpy_xtp.gateway.xtp_gateway import XtpTdApi
+    from src.strategy_framework.strategy import Strategy, StrategyConfig
+    from src.strategy_framework.adapters import XTPAdapter
+    from src.strategy_runner.hub_worker import run as hub_worker_run
+
+    logger.info("任务 %s 以 hub 模式启动（策略 %s 标的 %s）", tid or sid, sid, symbol)
+    setting = _build_xtp_setting()
+    boot_epoch = int(time.time())   # 评审 S8：秒级 epoch（分钟级同分钟重启会撞 id）
+
+    class ThinTdGateway(BaseGateway):
+        """TD-only 壳：事件转发 + 抽象方法转发 td_api（零 MD 零合约表，R-BR1/R-CAP1）。"""
+
+        def connect(self, s: dict) -> None:
+            self.td_api.connect(s["账号"], s["密码"], int(s["客户号"]), s["交易地址"],
+                                int(s["交易端口"]), s.get("授权码", ""), 3)
+
+        def subscribe(self, req) -> None:  # hub 模式 worker 无行情
+            pass
+
+        def send_order(self, req) -> str:
+            return self.td_api.send_order(req)
+
+        def cancel_order(self, req) -> None:
+            self.td_api.cancel_order(req)
+
+        def query_account(self) -> None:
+            self.td_api.query_account()
+
+        def query_position(self) -> None:
+            self.td_api.query_position()
+
+        def close(self) -> None:
+            try:
+                if getattr(self.td_api, "connect_status", False):
+                    self.td_api.exit()
+            except Exception:
+                pass
+
+    ee = EventEngine()
+    gw = ThinTdGateway(ee, "XTP")
+    td_api = XtpTdApi(gw)
+    gw.td_api = td_api
+    gw.connect(setting)   # 只连 TD（R-TD1：hub 零 TD，worker 零 MD）
+
+    adapter = XTPAdapter(gateway=gw, event_engine=ee,
+                         order_prefix=f"t{tid or sid}:e{boot_epoch}:")
+    cfg = StrategyConfig(id=sid, name=name, type=s_type, symbol=symbol, adapter="xtp",
+                         enabled=True, factors=factors or [], aggregator=aggregator or {}, params=params or {})
+    strategy = Strategy.from_config(cfg, adapter)
+
+    # 评审 C2：冻结的真实抓手——包 adapter.send_order（下单唯一咽喉，strategy.place_order 必经）。
+    # 冻结期 BUY 拒绝（返回 None → SC1 记 send_failed，账实一致）；SELL 放行（保止损能力）。
+    frozen: dict = {"now": False, "sticky": False}
+    _orig_send = adapter.send_order
+
+    from src.strategy_runner.hub_worker import frozen_allows as _frozen_allows
+
+    def _gated_send(order):
+        if not _frozen_allows(order.action, frozen):
+            logger.warning("冻结期拒绝 BUY 委托: %s %s", order.symbol, order.action)
+            _alert(f"任务 {tid or sid} 冻结期拦截 BUY: {order.symbol}",
+                   "hub 心跳丢失/bar 停更/不可信数据；SELL 放行。")
+            return None
+        return _orig_send(order)
+
+    adapter.send_order = _gated_send
+
+    history = _warmup_history(symbol)
+
+    def _stop_check() -> bool:
+        try:
+            with _get_conn() as conn:
+                if tid is not None:
+                    cur = conn.execute("SELECT status FROM live_task WHERE id=%s", (tid,))
+                    r_ = cur.fetchone()
+                    return bool(r_ and r_[0] == "stopped")
+                cur = conn.execute("SELECT enabled FROM strategy_config WHERE id=%s", (sid,))
+                r_ = cur.fetchone()
+                return bool(r_ and not r_[0])
+        except Exception:
+            return False
+
+    def _reconcile() -> None:
+        """hub worker 启动/重连对账（SC2 同语义简版）。"""
+        try:
+            from vnpy.trader.constant import Status
+            working = [o for o in (adapter.query_orders() or [])
+                       if getattr(o, "status", None) in (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)]
+            if working:
+                _alert(f"hub worker 对账发现 {len(working)} 笔在场委托（任务 {tid or sid}）", "疑似残留，请人工确认。")
+        except Exception as e:
+            logger.warning("hub worker 对账失败: %s", e)
+
+    _reconcile()
+    hub_worker_run({
+        "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
+        "strategy": strategy, "adapter": adapter, "event_engine": ee,
+        "td_api": td_api, "history": history, "frozen": frozen,
+        "initial_capital": initial_capital,
+        "warmup_pg": lambda: _warmup_history(symbol),
+        "stop_check": _stop_check, "reconcile": _reconcile,
+    })
+
+
 def main():
     parser = argparse.ArgumentParser(description="策略实盘化入口")
     parser.add_argument("--task-id", help="live_task.id（新架构：策略与标的分离）")
@@ -236,7 +346,23 @@ def main():
         except Exception as e:
             logger.warning("读 strategy_account 失败（用默认资金）: %s", e)
 
-    # 2. 建 MainEngine + XtpGateway
+    # 1.5 md_mode 分派（ST7）：live_task.params.md_mode 覆盖 system_config 全局默认（评审 S5）
+    def _md_mode() -> str:
+        try:
+            with get_conn() as conn:
+                cur = conn.execute("SELECT value FROM system_config WHERE key='md_mode'")
+                row = cur.fetchone()
+                return (params.get("md_mode") or (row[0] if row else None) or "direct").lower()
+        except Exception:
+            return (params.get("md_mode") or "direct").lower()
+
+    if _md_mode() == "hub":
+        _run_hub_mode(sid=sid, tid=tid, name=name, s_type=s_type, symbol=symbol,
+                      factors=factors, aggregator=aggregator, params=params,
+                      initial_capital=initial_capital)
+        return
+
+    # 2. 建 MainEngine + XtpGateway（direct 模式）
     event_engine = EventEngine()
     main_engine = MainEngine(event_engine)
 
@@ -305,6 +431,22 @@ def main():
         history.append(d)
         if len(history) > 100:
             history.pop(0)
+        # ST7 阶段 0 影子落库（bar_shadow，R-BR20 diff 的 direct 侧；1 次/分钟，同步写可接受）。
+        # 评审 S5：vnpy bar.datetime=分钟首，hub=分钟末——shadow 统一 +1min 对齐口径，diff 才可比
+        try:
+            from src.data_platform.db import get_conn as _gc
+            from datetime import timedelta as _td
+            with _gc() as _conn:
+                _conn.execute(
+                    "INSERT INTO bar_shadow (symbol, ts, open, high, low, close, volume, amount) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol, ts) DO UPDATE "
+                    "SET open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
+                    "volume=EXCLUDED.volume, amount=EXCLUDED.amount",
+                    (symbol, d["ts"] + _td(minutes=1), d["open"], d["high"], d["low"], d["close"],
+                     d["volume"], getattr(bar, "turnover", 0) or 0))
+                _conn.commit()
+        except Exception as _se:
+            logger.debug("bar_shadow 落库失败（影子期可容忍）: %s", _se)
 
     bg = BarGenerator(on_vnpy_bar)
 

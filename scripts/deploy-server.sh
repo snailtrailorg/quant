@@ -31,5 +31,6 @@ sudo -u michael /home/michael/.local/bin/quant-deploy.sh \
     migrate \
     restart-server \
     restart-celery \
+    restart-hub \
     restart-feishu \
     "$@"

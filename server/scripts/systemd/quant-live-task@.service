@@ -1,8 +1,8 @@
 [Unit]
 Description=Quant Live Task %i (实盘任务，策略+标的分离)
 # 不 Requires 具体 pg/redis 服务名（各机命名不一，写错=永远起不来）；runner 首查失败退出，Restart=always 自愈
-After=network-online.target
-Wants=network-online.target
+After=network-online.target quant-md-hub@quant.service
+Wants=network-online.target quant-md-hub@quant.service
 # 5 次/5 分钟失败后放弃进 Failed → 触发 OnFailure 告警（防无限重启风暴，F-1）
 StartLimitIntervalSec=300
 StartLimitBurst=5

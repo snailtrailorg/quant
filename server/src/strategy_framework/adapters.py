@@ -11,7 +11,10 @@ A 股股票走 XTPAdapter（中泰 XTP 能交易 A 股），受 astock 分项开
 """
 
 from __future__ import annotations
+import logging
 import threading
+
+logger = logging.getLogger(__name__)
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import time
@@ -84,7 +87,8 @@ class XTPAdapter(ExecutionAdapter):
     query_orders/trades 纯靠事件推送（XTP 网关无主动查委托/成交接口）。
     """
 
-    def __init__(self, gateway=None, event_engine=None):
+    def __init__(self, gateway=None, event_engine=None, order_prefix: str = ""):
+        self._order_prefix = order_prefix  # R-BR10：多 worker 唯一性 {tid}:{epoch} 前缀
         self._gateway = gateway  # vnpy_xtp.XtpGateway 实例
         self._event_engine = event_engine or (gateway.event_engine if gateway else None)
         # 事件缓存
@@ -149,7 +153,7 @@ class XTPAdapter(ExecutionAdapter):
         direction = Direction.LONG if order.action.upper() == "BUY" else Direction.SHORT
         otype = OrderType.MARKET if order.order_type == "market" else OrderType.LIMIT
         self._cid_seq += 1
-        client_id = order.client_id or f"c{self._cid_seq}"
+        client_id = order.client_id or f"{self._order_prefix}c{self._cid_seq}"
         req = OrderRequest(
             symbol=sym,
             exchange=_vnpy_exchange(ex),
