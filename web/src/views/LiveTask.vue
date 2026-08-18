@@ -68,7 +68,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies } from '../api'
+import { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies , apiErr } from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
 
 const { t } = useI18n()
@@ -120,7 +120,7 @@ const save = async () => {
     ElMessage.success(t('common.createSuccess'))
     dialogVisible.value = false
     await load()
-  } catch (e) { ElMessage.error(t('common.createFailed') + ': ' + (e?.error || e?.message || '')) }
+  } catch (e) { ElMessage.error(t('common.createFailed') + ': ' + apiErr(e)) }
   finally { saving.value = false }
 }
 

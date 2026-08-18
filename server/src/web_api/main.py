@@ -778,7 +778,7 @@ def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(requi
         from src.strategy_framework.factor import validate_strategy_factors
         v = validate_strategy_factors(req.symbol, req.factors)
         if not v["valid"]:
-            raise HTTPException(400, f"因子不兼容: {v['message']}")
+            raise ApiError(400, "FACTOR_INCOMPATIBLE", f"因子不兼容: {v['message']}")
     with get_conn() as conn:
         cur = conn.execute("SELECT factors, aggregator FROM strategy_config WHERE id=%s", (sid,))
         old = cur.fetchone()
@@ -801,14 +801,14 @@ def start_strategy(sid: str, payload: dict = Depends(require_perm("strategy_cont
         cur = conn.execute("SELECT backtest_verified, symbol, params FROM strategy_config WHERE id=%s", (sid,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(404, "策略不存在")
+            raise ApiError(404, "STRATEGY_NOT_FOUND", "策略不存在")
         if not row[0]:
-            raise HTTPException(403, "策略未通过回测验证，禁止实盘。请先运行回测。")
+            raise ApiError(403, "STRATEGY_NOT_VERIFIED", "策略未通过回测验证，禁止实盘。请先运行回测。")
         symbol, params_raw = row[1], row[2]
         params = json.loads(params_raw) if isinstance(params_raw, str) else (params_raw or {})
         # F-POOL-003：策略必须绑定标的或标的池
         if not symbol and not params.get("pool_id"):
-            raise HTTPException(400, "策略未绑定标的或标的池，禁止启动。请在策略编辑页设置 symbol 或 pool_id。")
+            raise ApiError(400, "STRATEGY_NO_SYMBOL", "策略未绑定标的或标的池，禁止启动。请在策略编辑页设置 symbol 或 pool_id。")
         conn.execute("UPDATE strategy_config SET enabled=true WHERE id=%s AND enabled=false AND backtest_verified=true", (sid,))
         conn.commit()
     audit_log(payload["username"], "strategy_start", sid)
@@ -846,12 +846,12 @@ def verify_strategy(sid: str, body: dict = Body(default={}), payload: dict = Dep
                 "SELECT status FROM backtest_runs WHERE id=%s AND strategy_config_id=%s", (run_id, sid))
             row = cur.fetchone()
             if not row or row[0] != "done":
-                raise HTTPException(400, f"回测证据无效: run_id={run_id}（须属于该策略且状态 done）")
+                raise ApiError(400, "BACKTEST_EVIDENCE_INVALID", f"回测证据无效: run_id={run_id}（须属于该策略且状态 done）")
         else:
             cur = conn.execute(
                 "SELECT COUNT(*) FROM backtest_runs WHERE strategy_config_id=%s AND status='done'", (sid,))
             if cur.fetchone()[0] == 0:
-                raise HTTPException(403, "该策略无已完成回测，禁止标记验证（需真实回测证据，F-44）")
+                raise ApiError(403, "NO_DONE_BACKTEST", "该策略无已完成回测，禁止标记验证（需真实回测证据，F-44）")
         conn.execute("UPDATE strategy_config SET backtest_verified=true WHERE id=%s", (sid,))
         conn.commit()
     audit_log(payload["username"], "verify_strategy", sid, detail="回测验证通过")
@@ -895,7 +895,7 @@ def create_live_task(body: dict = Body(...),
     initial_capital = body.get("initial_capital", 1000000)
 
     if not name or not strategy_id or not symbol:
-        raise HTTPException(400, "name/strategy_id/symbol 必填")
+        raise ApiError(400, "MISSING_FIELDS", "name/strategy_id/symbol 必填")
 
     # 读策略配置
     with get_conn() as conn:
@@ -904,9 +904,9 @@ def create_live_task(body: dict = Body(...),
             "FROM strategy_config WHERE id=%s", (strategy_id,))
         row = cur.fetchone()
     if not row:
-        raise HTTPException(404, f"策略 {strategy_id} 不存在")
+        raise ApiError(404, "STRATEGY_NOT_FOUND", f"策略 {strategy_id} 不存在")
     if not row[10]:
-        raise HTTPException(403, "策略未通过回测验证，禁止实盘")
+        raise ApiError(403, "STRATEGY_NOT_VERIFIED", "策略未通过回测验证，禁止实盘")
 
     sc_params = json.loads(row[9]) if isinstance(row[9], str) else (row[9] or {})
     defs = sc_params.get("parameter_defs", [])
@@ -914,13 +914,13 @@ def create_live_task(body: dict = Body(...),
     # 校验参数定义
     err = validate_parameter_defs(defs)
     if err:
-        raise HTTPException(400, f"策略参数定义错误: {err}")
+        raise ApiError(400, "PARAM_DEFS_INVALID", f"策略参数定义错误: {err}")
 
     # 合并默认值 + 用户传入参数
     merged_params = {**build_default_params(defs), **params}
     err = validate_params_against_defs(merged_params, defs)
     if err:
-        raise HTTPException(400, f"参数值错误: {err}")
+        raise ApiError(400, "PARAM_INVALID", f"参数值错误: {err}")
 
     # 构建策略快照（创建时固化，后续改策略不影响）
     strategy_snapshot = {
@@ -950,7 +950,7 @@ def start_live_task(tid: int, payload: dict = Depends(require_perm("strategy_con
         cur = conn.execute("SELECT status, strategy_id FROM live_task WHERE id=%s", (tid,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(404, "实盘任务不存在")
+            raise ApiError(404, "LIVE_TASK_NOT_FOUND", "实盘任务不存在")
         conn.execute("UPDATE live_task SET status='running', updated_at=now() WHERE id=%s", (tid,))
         conn.commit()
     audit_log(payload["username"], "start_live_task", f"task {tid}")
@@ -982,9 +982,9 @@ def delete_live_task(tid: int, payload: dict = Depends(require_perm("strategy_co
         cur = conn.execute("SELECT status FROM live_task WHERE id=%s", (tid,))
         row = cur.fetchone()
         if not row:
-            raise HTTPException(404, "实盘任务不存在")
+            raise ApiError(404, "LIVE_TASK_NOT_FOUND", "实盘任务不存在")
         if row[0] == "running":
-            raise HTTPException(400, "运行中的任务不可删除，请先停止")
+            raise ApiError(400, "LIVE_TASK_RUNNING", "运行中的任务不可删除，请先停止")
         conn.execute("DELETE FROM live_task WHERE id=%s", (tid,))
         conn.commit()
     audit_log(payload["username"], "delete_live_task", f"task {tid}")
@@ -2341,6 +2341,60 @@ def create_factor_api(req: dict = Body(...),
         raise HTTPException(400, str(e))
 
 
+@app.post("/api/factors/preview")
+def preview_factor_api(body: dict = Body(...),
+                       payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+    """因子试算（链条打磨#5）：真实 bar 喂 compute 看输出序列——写完因子不必搭策略+回测才能看结果。
+
+    body: {code, symbol?, freq?('1D'|'1min'), bars?(默认 60), params?{}}
+    返回 {values: [{ts, value}], stats: {min,max,mean,last,count}, error?}
+    """
+    import math
+    from src.strategy_framework.factor import _make_factor_class, BarContext
+    from src.data_platform.db import get_bars
+    code = body.get("code", "")
+    symbol = body.get("symbol", "600000.SHSE")
+    freq = body.get("freq", "1D")
+    n = max(10, min(int(body.get("bars", 60)), 500))
+    params = body.get("params") or {}
+    if freq not in ("1D", "1min", "5min"):
+        raise ApiError(400, "FACTOR_PREVIEW_FREQ", "freq 仅支持 1D/1min/5min")
+    try:
+        factor_cls = _make_factor_class("preview", code, params)
+        factor = factor_cls()
+    except Exception as e:
+        return {"error": f"因子编译失败: {str(e)[:200]}"}
+    from datetime import datetime as _dt, timedelta as _td
+    end, start = _dt.now(), _dt.now() - _td(days=365 if freq == "1D" else 14)
+    df = get_bars(symbol, freq, start, end)
+    if df is None or df.empty:
+        return {"error": f"无数据: {symbol} {freq}"}
+    bars = df.tail(n).to_dict("records")
+    values, errors = [], 0
+    for i, bar in enumerate(bars):
+        hist = bars[:i]
+        ctx = BarContext(close=float(bar["close"]), high=float(bar["high"]), low=float(bar["low"]),
+                         open_=float(bar["open"]), volume=float(bar.get("volume") or 0),
+                         history=[{"close": float(h["close"]), "high": float(h["high"]),
+                                   "low": float(h["low"]), "open": float(h["open"]),
+                                   "volume": float(h.get("volume") or 0)} for h in hist])
+        try:
+            v = factor.compute(ctx)
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                v = None
+            values.append({"ts": str(bar["ts"])[:19], "value": round(float(v), 6) if v is not None else None})
+        except Exception:
+            errors += 1
+            values.append({"ts": str(bar["ts"])[:19], "value": None})
+    nums = [v["value"] for v in values if v["value"] is not None]
+    stats = {"count": len(nums), "errors": errors,
+             "min": round(min(nums), 6) if nums else None,
+             "max": round(max(nums), 6) if nums else None,
+             "mean": round(sum(nums) / len(nums), 6) if nums else None,
+             "last": nums[-1] if nums else None}
+    return {"values": values, "stats": stats}
+
+
 @app.post("/api/factors/validate")
 def validate_factor_code_api(code: dict = Body(...),
                               payload: dict = Depends(require_role("analyst", "trader", "admin"))):
@@ -2386,7 +2440,7 @@ def delete_factor_api(name: str,
     from src.strategy_framework.factor import delete_custom_factor
     ok = delete_custom_factor(name)
     if not ok:
-        raise HTTPException(404, f"因子 {name} 不存在或非自定义因子")
+        raise ApiError(404, "FACTOR_NOT_FOUND", f"因子 {name} 不存在或非自定义因子")
     audit_log(payload["username"], "delete_factor", name)
     return {"ok": True}
 
@@ -2635,7 +2689,7 @@ def create_backtest_api(body: dict = Body(...),
             cur = conn.execute("SELECT symbol FROM pool_symbols WHERE pool_id=%s", (pool_id,))
             symbols = [r[0] for r in cur.fetchall()]
     if not symbols or not strategy_id:
-        raise HTTPException(400, "需 strategy_config_id + symbols/pool_id")
+        raise ApiError(400, "MISSING_FIELDS", "需 strategy_config_id + symbols/pool_id")
     params = body.get("params", {})
     symbol_params = body.get("symbol_params", {})  # per-symbol 参数覆盖
     mode = body.get("mode", "single")
@@ -2677,10 +2731,12 @@ def broker_usage(payload: dict = Depends(require_role("viewer", "analyst", "trad
 def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, strategy_config_id, symbols, mode, status, created_at, finished_at, summary_metrics "
-            "FROM backtest_runs ORDER BY id DESC LIMIT 100")
+            "SELECT b.id, b.strategy_config_id, b.symbols, b.mode, b.status, b.created_at, b.finished_at, b.summary_metrics, "
+            "(SELECT s.task_id FROM backtest_symbols s WHERE s.run_id=b.id AND s.task_id IS NOT NULL LIMIT 1) "
+            "FROM backtest_runs b ORDER BY b.id DESC LIMIT 100")
         rows = cur.fetchall()
     return [{"id": r[0], "strategy_config_id": r[1], "symbols": json.loads(r[2]) if r[2] else [],
+             "task_id": r[8],
              "mode": r[3], "status": r[4], "created_at": str(r[5]) if r[5] else None,
              "finished_at": str(r[6]) if r[6] else None,
              "summary": json.loads(r[7]) if r[7] else {}} for r in rows]
@@ -2695,15 +2751,33 @@ def get_backtest_api(run_id: int,
             "FROM backtest_runs WHERE id=%s", (run_id,))
         r = cur.fetchone()
         if not r:
-            raise HTTPException(404, "run 不存在")
+            raise ApiError(404, "BACKTEST_NOT_FOUND", "run 不存在")
         cur = conn.execute(
-            "SELECT symbol, status, result FROM backtest_symbols WHERE run_id=%s ORDER BY symbol", (run_id,))
+            "SELECT symbol, status, result, task_id FROM backtest_symbols WHERE run_id=%s ORDER BY symbol",
+            (run_id,))
         syms = cur.fetchall()
-    return {"id": r[0], "strategy_config_id": r[1], "symbols": json.loads(r[2]),
+    # 链条打磨#16（2026-08-19）：补前端实际读取的形状——顶层绩效四卡（此前恒 '-'）+
+    # symbols 改对象数组（此前字符串数组致状态列空白）+ 顶层 task_id（终止按钮 #17）
+    _mk = [_s for _s in syms if _s[1] == "done"]
+    _agg = {}
+    for k in ("total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades"):
+        vals = [float((json.loads(_s[2]) or {}).get(k) or 0) for _s in _mk if _s[2]]
+        _agg[k] = round(sum(vals) / len(vals), 3) if vals else None
+    _run_task = next((_s[3] for _s in syms if _s[3]), None)
+    return {"id": r[0], "strategy_config_id": r[1],
+            "symbols": [{"symbol": _s[0], "status": _s[1], "task_id": _s[3],
+                         "result": json.loads(_s[2]) if _s[2] else {}} for _s in syms],
+            "symbols_list": json.loads(r[2]),
             "params": json.loads(r[3]), "mode": r[4], "status": r[5],
             "summary": json.loads(r[6]) if r[6] else {},
-            "symbols_detail": [{"symbol": s[0], "status": s[1], "result": json.loads(s[2]) if s[2] else {}}
-                              for s in syms]}
+            "task_id": _run_task,
+            "total_return_pct": _agg.get("total_return_pct"),
+            "win_rate": _agg.get("win_rate"),
+            "max_drawdown_pct": _agg.get("max_drawdown_pct"),
+            "sharpe_ratio": _agg.get("sharpe_ratio"),
+            "total_trades": _agg.get("total_trades"),
+            "symbols_detail": [{"symbol": _s[0], "status": _s[1], "result": json.loads(_s[2]) if _s[2] else {}}
+                              for _s in syms]}
 
 
 @app.get("/api/backtest/{run_id}/summary")

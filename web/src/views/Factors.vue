@@ -23,6 +23,9 @@
           <el-tag v-else type="danger">{{ t('factors.dynamicFactor') }}({{ row.needs_history }})</el-tag>
         </template>
       </el-table-column>
+      <el-table-column :label="t('factors.usedBy')" width="90">
+        <template #default="{ row }">{{ usedByCount(row.name) }}</template>
+      </el-table-column>
       <el-table-column prop="description" :label="t('common.description')" />
       <el-table-column :label="t('factors.paramsCol')" width="200">
         <template #default="{ row }">{{ JSON.stringify(row.params) }}</template>
@@ -70,6 +73,7 @@
             <PythonEditor v-model="form.code" :height="300" />
             <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
               <el-button type="primary" @click="validateCode" :loading="validating">{{ t('factors.validate') }}</el-button>
+              <el-button type="success" @click="previewFactor" :loading="previewing">{{ t('factors.preview') }}</el-button>
               <span v-if="codeValid === true" style="color: var(--el-color-success)">✅ {{ t('factors.codeValid') }}</span>
               <span v-else-if="codeValid === false" style="color: var(--el-color-danger)">❌ {{ codeError }}</span>
             </div>
@@ -81,14 +85,30 @@
         <el-button type="primary" @click="save" :loading="saving">{{ t('factors.save') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 链条打磨#5：试算结果抽屉 -->
+    <el-drawer v-model="previewVisible" :title="t('factors.previewTitle')" size="50%">
+      <div v-if="previewError" style="color: var(--el-color-danger)">{{ previewError }}</div>
+      <template v-else-if="previewData">
+        <el-descriptions :column="5" border size="small" style="margin-bottom: 16px">
+          <el-descriptions-item :label="t('factors.pvCount')">{{ previewData.stats.count }}</el-descriptions-item>
+          <el-descriptions-item :label="t('factors.pvErrors')">{{ previewData.stats.errors }}</el-descriptions-item>
+          <el-descriptions-item :label="t('factors.pvMin')">{{ previewData.stats.min }}</el-descriptions-item>
+          <el-descriptions-item :label="t('factors.pvMax')">{{ previewData.stats.max }}</el-descriptions-item>
+          <el-descriptions-item :label="t('factors.pvLast')">{{ previewData.stats.last }}</el-descriptions-item>
+        </el-descriptions>
+        <div ref="previewChart" style="height: 300px"></div>
+      </template>
+    </el-drawer>
   </el-card>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getFactorList, createFactor, updateFactor, deleteFactor, validateFactorCode } from '../api'
+import { getFactorList, createFactor, updateFactor, deleteFactor, validateFactorCode , apiErr } from '../api'
+import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 
 const { t } = useI18n()
@@ -149,6 +169,44 @@ const openEdit = (row) => {
   dialogVisible.value = true
 }
 
+const previewing = ref(false)
+const previewVisible = ref(false)
+const previewData = ref(null)
+const previewError = ref('')
+const previewChart = ref(null)
+const previewFactor = async () => {
+  previewing.value = true
+  try {
+    const res = await api.post('/factors/preview', {
+      code: form.value.code, symbol: '600000.SHSE', freq: '1D', bars: 60,
+      params: (() => { try { return JSON.parse(form.value.params || '{}') } catch { return {} } })(),
+    })
+    if (res.error) {
+      previewError.value = res.error
+      previewData.value = null
+    } else {
+      previewError.value = ''
+      previewData.value = res
+      previewVisible.value = true
+      await nextTick()
+      const echarts = (await import('echarts')).default || (await import('echarts'))
+      const chart = echarts.init(previewChart.value)
+      const vals = res.values.filter(v => v.value !== null)
+      chart.setOption({
+        tooltip: { trigger: 'axis' },
+        xAxis: { type: 'category', data: vals.map(v => v.ts.slice(5, 16)) },
+        yAxis: { type: 'value', scale: true },
+        series: [{ type: 'line', data: vals.map(v => v.value), showSymbol: false }],
+        grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      })
+    }
+  } catch (e) {
+    previewError.value = e?.detail || String(e)
+    previewData.value = null
+    previewVisible.value = true
+  } finally { previewing.value = false }
+}
+
 const validateCode = async () => {
   validating.value = true
   codeValid.value = null
@@ -175,7 +233,8 @@ const save = async () => {
   saving.value = true
   try {
     let params = {}
-    try { params = JSON.parse(form.value.paramsStr || '{}') } catch { params = {} }
+    try { params = JSON.parse(form.value.paramsStr || '{}') }
+    catch { ElMessage.error(t('factors.paramsInvalid')); saving.value = false; return }
     const data = {
       name: form.value.name,
       category: form.value.category,
@@ -193,7 +252,7 @@ const save = async () => {
     }
     dialogVisible.value = false
     await load()
-  } catch (e) { ElMessage.error(t('common.saveFailed') + ': ' + (e?.error || e?.message || '')) }
+  } catch (e) { ElMessage.error(t('common.saveFailed') + ': ' + apiErr(e)) }
   finally { saving.value = false }
 }
 
@@ -206,5 +265,16 @@ const onDelete = async (name) => {
   } catch { /* 取消 */ }
 }
 
-onMounted(load)
+const strategyUsages = ref([])
+const usedByCount = (fname) => strategyUsages.value.filter(names => names.includes(fname)).length
+const loadUsages = async () => {
+  try {
+    const sts = await api.get('/strategy')
+    strategyUsages.value = (sts || []).map(s => {
+      try { return ((typeof s.factors === 'string' ? JSON.parse(s.factors) : s.factors) || []).map(f => f.name) }
+      catch { return [] }
+    })
+  } catch { strategyUsages.value = [] }
+}
+onMounted(() => { load(); loadUsages() })
 </script>

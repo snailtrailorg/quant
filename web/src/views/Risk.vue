@@ -19,6 +19,10 @@
     <!-- P2-1 实盘三级开关分项 -->
     <el-card style="margin-top: 20px">
       <template #header>{{ t('risk.liveSwitchTitle') }}</template>
+      <!-- 链条打磨#21：.env 总闸状态（三级开关第一级——关则分项全无效） -->
+      <el-alert v-if="masterEnabled === false" type="error" :closable="false" style="margin-bottom: 12px">
+        {{ t('risk.masterOff') }}
+      </el-alert>
       <el-table :data="liveTradingMarkets" stripe>
         <el-table-column prop="market" :label="t('risk.market')" width="150" />
         <el-table-column :label="t('risk.label')">
@@ -54,17 +58,17 @@ const liveTradingMarkets = ref([
 ])
 
 const load = async () => { state.value = await getRiskState() }
+const masterEnabled = ref(null)
 const loadLive = async () => {
   try {
+    // 链条打磨#21：适配 {master_enabled, items} 形状（此前按数组/按 market 键对象解析→恒 false）
     const data = await getLiveTrading()
-    if (Array.isArray(data)) {
-      liveTradingMarkets.value = liveTradingMarkets.value.map(m => {
-        const found = data.find(d => d.market === m.market)
-        return found ? { ...m, enabled: found.enabled } : m
-      })
-    } else if (data && typeof data === 'object') {
-      liveTradingMarkets.value.forEach(m => { m.enabled = !!data[m.market] })
-    }
+    masterEnabled.value = data?.master_enabled ?? null
+    const items = Array.isArray(data?.items) ? data.items : []
+    liveTradingMarkets.value = liveTradingMarkets.value.map(m => {
+      const found = items.find(d => d.market === m.market)
+      return { ...m, enabled: found ? !!found.enabled : false }
+    })
   } catch (e) { /* 无配置时全 false */ }
 }
 const onToggleLive = async (market, enabled) => {
