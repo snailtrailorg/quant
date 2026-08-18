@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-18 · ST2 持仓真相源 + PUT→POST + schema 生成式基线（三联决策）
+
+- **ST2（消 D2）**：持仓真相=券商 query_position 快照（`position_snapshot` 当前状态表：每批同事务 DELETE+INSERT，空批可表示空仓）+ `position_refresh` 心跳（stale≠空仓）。写入点=60s 循环取返回值（**否决** EVENT_POSITION handler——direct 模式 vnpy init_query 每 4s 常推会散批+15 倍量级）；TD 断线守卫内不写假空仓。trade_log 推导降级为 /api/reconcile 第四比对（归因）。生产实证 direction=Net——端点不过滤 direction。
+- **PUT→POST 硬切（A 案）**：对齐业界趋势（Google AIP-136 等避免 PUT）。16 端点+前端 17+契约 19 处；**路由遮蔽教训**（参数化 POST 路由会吃后注册的静态路由）→ 4 静态路由调序 + 结构化顺序断言（test 锁全路由注册序）。结构化顺序断言模式可复用于任何路由变更。
+- **#48 schema 生成式基线**：期望清单=迁移链 scratch 产物（schema_expectations.txt，**禁手写**——手写清单必腐有仓内实锤）；verify_schema=纯函数单向存在性（expected⊆actual），告警路由归入口层；四入口接线（web/runner/hub/celery 父进程）。**每加迁移必须重跑生成命令**（db.py load_schema_expectations docstring）并提交。
+- 八段工作线（方案→审核→代码→审核→本地测试→部署→生产测试→提交）同日定型为默认流程。
+
 ## 2026-08-18 · S6 修订：断流不自杀 + 安全判定挪下单时刻 + 双层监控（内部 health_monitor / 外部 Zabbix@NAS）
 
 - **决定**：①hub/direct 的 tick 断流自杀（300s os._exit）删除，只告警（文案带 runbook）；staleness 基线一律**时段作用域**（进入沿清零）。②BUY 安全判定从后台定时器预计算的 `frozen["now"]` 改为 **send_order 时刻事实检查**（`buy_ok_check`：bar<300s+hub 心跳），日历/交易所规则从动作路径清零；sticky 冻结（untrusted/gap 污染事实）保留。③监控双层：内部 `src/health_monitor/`（30s beat，症状型规则+沿检测+health_event 落库+自身心跳供外部反监）；外部 Zabbix server 装 **NAS**（常在线+自带通知），agent 装 quant 服务器，标准模板+systemd 插件+`/metrics` Prometheus 格式拉取。
