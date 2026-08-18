@@ -171,6 +171,31 @@ def metrics():
     return PlainTextResponse(render_prometheus(collect()), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
+# --- 健康监控（15 号 SM2：组件矩阵 + 事件流，admin）---
+
+@app.get("/api/health/components")
+def health_components_api(payload: dict = Depends(require_role("admin"))):
+    """组件实时矩阵：collector 快照（systemd unit / 依赖 / hub 心跳 / 任务心跳）。
+
+    与 /metrics 同源同口径（collector.collect），本端点给 Web 健康页用（带鉴权）。
+    """
+    from src.health_monitor.collector import collect
+    return collect()
+
+
+@app.get("/api/health/events")
+def health_events_api(limit: int = 100, payload: dict = Depends(require_role("admin"))):
+    """health_event 事件流（触发/恢复沿历史，30 天保留期，倒序）。"""
+    limit = max(1, min(limit, 500))
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT ts, rule_id, component, severity, detail FROM health_event "
+            "ORDER BY ts DESC LIMIT %s", (limit,))
+        rows = cur.fetchall()
+    return {"events": [{"ts": str(r[0])[:19], "rule": r[1], "component": r[2],
+                        "severity": r[3], "detail": r[4] or ""} for r in rows]}
+
+
 # --- 系统配置（system_config，admin 可改，部分项支持动态生效） ---
 
 def _adjust_celery_concurrency(new_value: int) -> dict:

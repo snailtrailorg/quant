@@ -183,6 +183,20 @@ class TestEndpoints:
         from src.web_api.main import app
         return TestClient(app)
 
+    @pytest.fixture
+    def admin_client(self):
+        """鉴权端点测试：patch verify_jwt 伪造 admin payload（require_role 是每次新建的闭包，
+        dependency_overrides 键对不上，走真实链路+假 JWT 更贴近生产）。"""
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        from src.web_api import auth as _auth
+        from unittest.mock import patch as _patch
+        with _patch.object(_auth, "verify_jwt",
+                           return_value={"sub": "1", "username": "admin", "role": "admin"}):
+            client = TestClient(app)
+            client.headers.update({"Authorization": "Bearer test-token"})
+            yield client
+
     def test_healthz_ok_no_deps(self, client):
         r = client.get("/healthz")
         assert r.status_code == 200 and r.json()["status"] == "ok"
@@ -195,3 +209,32 @@ class TestEndpoints:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/plain")
         assert "# HELP quant_unit_up" in r.text
+
+    def test_components_endpoint_returns_collector_shape(self, admin_client, monkeypatch):
+        """SM2：组件矩阵端点 = collector 快照原样（与 /metrics 同源同口径）。"""
+        from src.health_monitor import collector
+        fake = _snap(ts=123.0)
+        monkeypatch.setattr(collector, "collect", lambda: fake)
+        r = admin_client.get("/api/health/components")
+        assert r.status_code == 200
+        body = r.json()
+        assert "units" in body and "deps" in body and "hub" in body
+        assert body["hub"]["gen"] == 10
+
+    def test_events_endpoint_queries_health_event(self, admin_client):
+        """SM2：事件流端点读 health_event 倒序 + limit 传参。"""
+        from unittest.mock import MagicMock
+        from unittest.mock import patch
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.execute.return_value.fetchall.return_value = [
+            ("2026-08-18 14:00:00+08", "unit_down", "quant-md-hub@quant", "critical", "ActiveState=failed")]
+        from src.web_api import main as web_main
+        with patch.object(web_main, "get_conn", return_value=mock_conn):
+            r = admin_client.get("/api/health/events", params={"limit": 50})
+        assert r.status_code == 200
+        evts = r.json()["events"]
+        assert evts and evts[0]["rule"] == "unit_down" and evts[0]["severity"] == "critical"
+        sql = mock_conn.execute.call_args.args[0]
+        assert "health_event" in sql and "DESC" in sql
+        assert mock_conn.execute.call_args.args[1] == (50,)
