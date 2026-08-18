@@ -2,6 +2,8 @@
 
 > `AGENTS.md` 软链到本文件，两个工具读同一份。**真相源在文件里，不在对话里。**
 > 本文件是**运行时合同**：精要规则 + 约束 + 指针。完整详规在 `flow/规范/`。
+>
+> **分层铁律**（2026-08-19 模块归位，tests/test_layering.py 断言守门）：`quant_common`（层 0 底座，禁业务依赖）← 数据/服务层 ← 应用层 ← 入口层（web_api/feishu_bot 组合根）；下层禁 import 上层（lazy 计入）；共享工具放 `quant_common`、业务逻辑不寄生 HTTP 入口。
 > 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/`（持久化，跨会话）。
 
 ## 目录地图
