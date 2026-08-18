@@ -43,6 +43,60 @@ def get_pro():
     return _pro
 
 
+# ——— 复权因子（2026-08-18 多频盲审 A/B-F1：bar_1D 契约=未复权价+逐行 adj_factor）———
+
+_adj_degraded = {"ts": 0.0}   # 进程级降级标记（每小时最多告警一次，避免轰炸）
+
+
+def _adj_degraded_alert(e: Exception) -> None:
+    """因子接口降级告警（限频）：积分未到账/接口异常时，日线同步继续（因子 NULL），
+    不崩——积分到账后下次同步或手动回补自动恢复。"""
+    import time as _time, logging as _logging
+    now = _time.time()
+    if now - _adj_degraded["ts"] < 3600:
+        return
+    _adj_degraded["ts"] = now
+    _logging.getLogger("tushare_adapter").warning("adj_factor 接口降级（积分未到账/接口异常），日线同步继续无因子: %s", e)
+    try:
+        from src.alert_notify.notify import notify
+        notify("warn", "system", "复权因子接口降级",
+               "Tushare adj_factor 不可用（积分未到账或接口异常）。日线同步继续（因子 NULL），"
+               "跨除权日因子暂不可用；积分到账后触发手动回补即可恢复。")
+    except Exception:
+        pass
+
+
+def pull_adj_factor_by_date(trade_date: str) -> pd.DataFrame | None:
+    """全市场单日复权因子（pro.adj_factor trade_date 模式，与按日全市场日线同步同构）。
+
+    Returns:
+        DataFrame[ts_code, trade_date, adj_factor]；当日无数据返回空 df；
+        **接口降级（权限/异常）返回 None**——调用方按"因子缺失"处理，同步绝不因此中断。
+    """
+    pro = get_pro()
+    try:
+        df = pro.adj_factor(trade_date=trade_date)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        return df[["ts_code", "trade_date", "adj_factor"]]
+    except Exception as e:
+        _adj_degraded_alert(e)
+        return None
+
+
+def pull_adj_factor_by_code(ts_code: str, start_date: str, end_date: str) -> pd.DataFrame | None:
+    """单标的区间复权因子（修复路径用）。降级语义同 pull_adj_factor_by_date。"""
+    pro = get_pro()
+    try:
+        df = pro.adj_factor(ts_code=ts_code, start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        return df[["ts_code", "trade_date", "adj_factor"]]
+    except Exception as e:
+        _adj_degraded_alert(e)
+        return None
+
+
 # ——— 日线拉取 ———
 
 def get_daily_symbols() -> list[str]:
@@ -59,14 +113,15 @@ def get_daily_symbols() -> list[str]:
 
 
 def pull_daily(ts_code: str, start_date: str, end_date: str | None = None,
-               adj: str = "qfq") -> pd.DataFrame:
+               adj: str | None = None) -> pd.DataFrame:
     """从 Tushare 拉取单只标的日线。
 
     Args:
         ts_code: Tushare 代码，如 "600000.SH"
         start_date: 开始日期 "YYYYMMDD"
         end_date: 结束日期，默认今天
-        adj: 复权类型 ("qfq" 前复权 / "hfq" 后复权 / None 不复权)
+        adj: 复权类型（默认 **None 不复权**——2026-08-18 多频盲审 A-F1：bar_1D 契约=未复权价+逐行
+             adj_factor，修复路径曾用 qfq 价混入同表造成口径跳变；复权在计算侧用因子做）
 
     Returns:
         DataFrame 列: ts_code, trade_date, open, high, low, close, pre_close,

@@ -368,6 +368,41 @@ def data_continuity_check():
     return {"status": "ok", "issues": issues, "repaired_bars": repaired, "reconnected": reconnected}
 
 
+@app.task(name="src.scheduler.tasks.adj_factor_backfill_task",
+          bind=True, soft_time_limit=3600, time_limit=4200)
+def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str | None = None):
+    """复权因子回填（A/B-F1：bar_1D 历史全 NULL）。手动触发（积分到账后），降级即返回不抛。"""
+    import redis as _redis, os as _os
+    from src.data_sync.engine import backfill_adj_factor
+    from src.task_manager import create_task, update_heartbeat, complete_task
+    task_id = self.request.id
+    create_task(task_id, "复权因子回填", "sync", "manual", "system",
+                {"start": start_date, "end": end_date})
+    r = _redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    key = "sync:adj-factor"
+
+    def progress_cb(i: int, total: int, current: str):
+        r.hset(key, mapping={"status": "running", "done": i, "total": total, "current": current,
+                             "pct": round(i / total * 100, 1) if total else 0})
+        r.expire(key, 7200)
+        update_heartbeat(task_id, {"current": i, "total": total, "step": current})
+
+    try:
+        result = backfill_adj_factor(start_date, end_date, progress_cb=progress_cb)
+        result["rows_saved"] = result.pop("updated", 0)
+        r.hset(key, mapping={"status": result["status"],
+                             "done": result.get("processed", 0), "total": result.get("days", 0)})
+        r.expire(key, 7200)
+        complete_task(task_id, "completed" if result["status"] == "success" else "failed",
+                      None if result["status"] == "success" else str(result.get("reason", ""))[:200])
+        return result
+    except Exception as e:
+        r.hset(key, mapping={"status": "error", "error": str(e)[:100]})
+        r.expire(key, 7200)
+        complete_task(task_id, "failed", str(e)[:200])
+        raise
+
+
 @app.task(name="src.scheduler.tasks.health_monitor_check")
 def health_monitor_check():
     """15-服务监控：30s 采集判定（unit 状态/依赖/心跳 + 沿检测 + health_event 落库 + 告警）。

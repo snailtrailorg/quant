@@ -1602,6 +1602,19 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
     return {"status": "submitted", "task_id": task.id}
 
 
+@app.post("/api/sync/adj-factor-backfill")
+def adj_factor_backfill_api(start_date: str | None = None, end_date: str | None = None,
+                            payload: dict = Depends(require_perm("data_sync"))):
+    """复权因子回填（A/B-F1：bar_1D 历史全 NULL）。Tushare 积分到账后手动触发一次即可。
+
+    降级安全：积分未到账时任务返回 degraded（不抛异常不崩），到账后重新触发续填。
+    """
+    from src.scheduler.tasks import adj_factor_backfill_task
+    task = adj_factor_backfill_task.delay(start_date, end_date)
+    audit_log(payload["username"], "adj_factor_backfill", f"{start_date or '全历史'}~{end_date or '今'}")
+    return {"status": "submitted", "task_id": task.id, "progress": "sync:adj-factor"}
+
+
 @app.get("/api/sync/trigger/{sid}/progress")
 def trigger_progress_api(sid: str, task_id: str | None = None,
                          payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):

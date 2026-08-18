@@ -413,23 +413,41 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
 
 # --- 工具函数 ---
 
-def _daily_to_rows(df: pd.DataFrame) -> list[tuple]:
-    """通用 daily DataFrame -> bar_1D 行列表。"""
+def _daily_to_rows(df: pd.DataFrame, adj_map: dict | None = None) -> list[tuple]:
+    """通用 daily DataFrame -> bar_1D 行列表。adj_map={ts_code: 复权因子}（降级时 None→NULL）。"""
     from src.data_platform.schema import to_vt_symbol
     from src.data_platform.adapters.tushare_adapter import _safe_float
+    adj_map = adj_map or {}
     rows = []
     for _, row in df.iterrows():
         ts_code = row.get("ts_code", "")
         vt_sym = to_vt_symbol(ts_code)
         trade_date = pd.Timestamp(row["trade_date"]).to_pydatetime()
+        adj_raw = adj_map.get(ts_code)
+        # 保 None（不套 _safe_float——其缺省 0.0，0 是合法因子值会毒化复权计算）
+        adj_val = float(adj_raw) if adj_raw is not None and pd.notna(adj_raw) else None
         rows.append((
             vt_sym, "1D", trade_date,
             _safe_float(row["open"]), _safe_float(row["high"]), _safe_float(row["low"]),
             _safe_float(row["close"]),
             _safe_float(row.get("vol", 0)), _safe_float(row.get("amount", 0)),
-            None, "tushare",
+            adj_val, "tushare",
         ))
     return rows
+
+
+def _adj_map_for_df(df: pd.DataFrame) -> dict:
+    """当日全市场复权因子 {ts_code: factor}。**降级返回 {}——同步继续，因子 NULL**
+    （A/B-F1 契约：积分未到账不阻塞日线同步；到账后回补 adj_factor 即恢复）。"""
+    try:
+        from src.data_platform.adapters.tushare_adapter import pull_adj_factor_by_date
+        td = str(df["trade_date"].iloc[0])
+        fdf = pull_adj_factor_by_date(td)
+        if fdf is None or fdf.empty:
+            return {}
+        return dict(zip(fdf["ts_code"], fdf["adj_factor"]))
+    except Exception:
+        return {}
 
 
 def _save_bars(rows: list[tuple]) -> int:
@@ -450,7 +468,59 @@ def _save_bars(rows: list[tuple]) -> int:
 
 def _daily_to_save_fn(df: pd.DataFrame) -> int:
     """daily DataFrame -> 行 -> 入库（_sync_by_trade_date 的 save_fn 适配）。"""
-    return _save_bars(_daily_to_rows(df))
+    return _save_bars(_daily_to_rows(df, _adj_map_for_df(df)))
+
+
+def backfill_adj_factor(start_date: str | None = None, end_date: str | None = None,
+                        progress_cb: Callable | None = None) -> dict:
+    """回填 bar_1D 的 adj_factor（A/B-F1：历史全 NULL）。
+
+    按交易日拉全市场因子 → 批量 UPDATE（只填 NULL 行，不覆盖非空）。
+    **降级容错**（积分未到账）：首个交易日因子接口返回 None 即返回 degraded 状态，
+    不抛异常——积分到账后重新触发即可。
+    """
+    from src.data_platform.adapters.tushare_adapter import pull_adj_factor_by_date
+    from src.data_platform.schema import to_vt_symbol
+
+    with get_conn() as conn:
+        sql = "SELECT DISTINCT ts::date FROM bar_1d WHERE adj_factor IS NULL"
+        params: list = []
+        if start_date:
+            sql += " AND ts::date >= %s"
+            params.append(start_date)
+        if end_date:
+            sql += " AND ts::date <= %s"
+            params.append(end_date)
+        cur = conn.execute(sql + " ORDER BY 1", params)
+        dates = [r[0] for r in cur.fetchall()]
+    if not dates:
+        return {"status": "success", "days": 0, "updated": 0, "reason": "无 NULL 因子行"}
+
+    updated = 0
+    done = 0
+    for d in dates:
+        td = d.strftime("%Y%m%d") if hasattr(d, "strftime") else str(d).replace("-", "")
+        fdf = pull_adj_factor_by_date(td)
+        if fdf is None:
+            return {"status": "degraded", "days": len(dates), "processed": done, "updated": updated,
+                    "reason": "复权因子接口不可用（积分未到账？）——已处理 %d/%d 日，到账后重新触发续填" % (done, len(dates))}
+        if not fdf.empty:
+            rows = [(float(f), to_vt_symbol(tc), d)
+                    for tc, f in zip(fdf["ts_code"], fdf["adj_factor"]) if pd.notna(f)]
+            if rows:
+                with get_conn() as conn:
+                    with conn.cursor() as cur:   # 池化连接无 executemany，走 cursor（同 db.py 模式）
+                        cur.executemany(
+                            "UPDATE bar_1d SET adj_factor=%s WHERE symbol=%s AND ts::date=%s "
+                            "AND adj_factor IS NULL",
+                            rows)
+                    conn.commit()
+                updated += len(rows)
+        done += 1
+        if progress_cb:
+            progress_cb(done, len(dates), td)
+        time.sleep(0.3)   # 限速：adj_factor 按积分档限流，保守 200 次/分
+    return {"status": "success", "days": len(dates), "processed": done, "updated": updated}
 
 
 # --- 路由表 ---
