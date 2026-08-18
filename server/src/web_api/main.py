@@ -995,7 +995,12 @@ def delete_live_task(tid: int, payload: dict = Depends(require_perm("strategy_co
 
 @app.get("/api/position")
 def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """当前持仓（account_snapshot 总资产 + trade_log 累计持仓，#6）。"""
+    """当前持仓（ST2：券商 position_snapshot 快照=真相源；trade_log 推导已挪 /api/reconcile 归因）。
+
+    stale 语义（N-S5）：position_refresh.ts 距今 >600s 或从未写过 → stale=True——
+    "停更/从未跑过"≠"空仓"（空仓=refresh 新鲜且 rows=0），前端可据 stale 标注陈旧。
+    """
+    import datetime as _pdt
     with get_conn() as conn:
         try:
             conn.execute("SELECT 1 FROM account_snapshot LIMIT 1")
@@ -1003,16 +1008,34 @@ def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trad
             logger.warning("get_position: account_snapshot 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
         snap = cur.fetchone()
+        refresh_ts, refresh_rows = None, 0
+        positions = []
         try:
-            conn.execute("SELECT 1 FROM trade_log LIMIT 1")
+            cur = conn.execute("SELECT ts, rows FROM position_refresh ORDER BY ts DESC LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                refresh_ts, refresh_rows = row[0], row[1]
+            cur = conn.execute(
+                "SELECT symbol, direction, volume, frozen, cost_price, pnl FROM position_snapshot "
+                "WHERE volume != 0")
+            positions = [{"symbol": r[0], "direction": r[1], "volume": int(r[2]),
+                          "frozen": int(r[3] or 0),
+                          "cost_price": float(r[4]) if r[4] is not None else None,
+                          "pnl": float(r[5]) if r[5] is not None else None}
+                         for r in cur.fetchall()]
         except Exception:
-            logger.warning("get_position: trade_log 表不存在（需运行 alembic upgrade head）")
-        cur = conn.execute("SELECT symbol, COALESCE(SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END),0) FROM trade_log GROUP BY symbol")
-        positions = [{"symbol": r[0], "volume": int(r[1])} for r in cur.fetchall() if r[1] and r[1] != 0]
+            logger.warning("get_position: position_snapshot 未就绪（需 alembic 0043 + 任务运行）")
+    stale = True
+    if refresh_ts is not None:
+        ts_aware = refresh_ts if refresh_ts.tzinfo else refresh_ts.replace(tzinfo=_pdt.timezone.utc)
+        stale = (_pdt.datetime.now(_pdt.timezone.utc) - ts_aware).total_seconds() > 600
     total_value = float(snap[0]) if snap else 0
     initial = float(snap[2]) if snap and snap[2] is not None else 1000000
     total_pnl = (total_value - initial) if snap else 0
-    return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl, "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0}
+    return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl,
+            "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0,
+            "snapshot_ts": str(refresh_ts)[:19] if refresh_ts else None,
+            "snapshot_rows": refresh_rows, "stale": stale}
 
 
 @app.get("/api/pnl")

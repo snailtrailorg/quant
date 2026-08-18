@@ -36,6 +36,9 @@ class Position:
     volume: int
     avg_price: float
     pnl: float = 0.0
+    direction: str = "long"     # ST2（N-S3）：XTP 映射含 NET/LONG/SHORT（两融 Short 行）
+    frozen: int = 0             # 冻结量；available = volume - frozen（T+1 可卖）
+    yd_volume: int = 0          # 昨仓
 
 
 class ExecutionAdapter(ABC):
@@ -197,10 +200,22 @@ class XTPAdapter(ExecutionAdapter):
     def query_position(self) -> list[Position]:
         if self._gateway is None:
             return []
+        # ST2（N-S6）：查询前清缓存——只增不删的缓存会让清仓标的变幽灵仓（XTP 不再回报该行，
+        # 旧值永存直到进程重启）。清空后键集变化恰好也是 _wait_update 的提前退出信号。
         with self._lock:
-            before = set(self._positions.keys())
+            self._positions.clear()
         self._gateway.query_position()
-        self._wait_update(self._positions, before, timeout=2.0)
+        # O-S1：XTP 逐标的逐行推送（每标的一行），_wait_update 的"首个键即退"会读到跨 poll tick
+        # 的子集→部分批次入真相表。此处改"键集连续两拍稳定"（200ms 无新行）才算收齐。
+        deadline = time.time() + 2.0
+        prev_keys = None
+        while time.time() < deadline:
+            time.sleep(0.1)
+            with self._lock:
+                keys = frozenset(self._positions.keys())
+            if keys and keys == prev_keys:
+                break
+            prev_keys = keys
         with self._lock:
             return [
                 Position(
@@ -208,6 +223,9 @@ class XTPAdapter(ExecutionAdapter):
                     volume=int(p.volume),
                     avg_price=float(p.price),
                     pnl=float(getattr(p, "pnl", 0.0) or 0.0),
+                    direction=getattr(p.direction, "value", "long"),
+                    frozen=int(getattr(p, "frozen", 0) or 0),
+                    yd_volume=int(getattr(p, "yd_volume", 0) or 0),
                 )
                 for p in self._positions.values()
             ]

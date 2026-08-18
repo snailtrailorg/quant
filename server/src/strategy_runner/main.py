@@ -131,6 +131,45 @@ def session_edge(cur: bool, was: bool) -> bool:
     return cur and not was
 
 
+def _flush_positions(adapter, account_id, task_id) -> None:
+    """ST2 持仓真相源写批（N 审 v2）：60s 循环取 query_position() 返回值，单事务覆盖式写。
+
+    - position_snapshot = 当前状态表：DELETE 该账户旧行 + INSERT 当前批（N-F1：清仓 0 行回报
+      也能表示空仓；行数常数无需保留期）
+    - position_refresh 心跳同事务 upsert（rows=本批行数）——区分"空仓"与"停更"（N-S5）
+    - account_id 为真相维度（N-S4：query_position 回报=全账户仓位，与任务标的无关）
+    - 失败仅日志，不阻断主循环
+    """
+    try:
+        from src.data_platform.db import get_conn
+        acct = str(account_id) if account_id else "default"
+        positions = adapter.query_position() or []
+        with get_conn() as conn:
+            conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", (acct,))
+            if positions:
+                # O-F1：池化连接无 executemany（F 审同款坑）——走 cursor；
+                # O-S8：ON CONFLICT 幂等——两任务同账户同拍写时 last-write-wins 而非互崩
+                with conn.cursor() as cur:
+                    cur.executemany(
+                        "INSERT INTO position_snapshot (account_id, symbol, direction, volume, frozen, "
+                        "cost_price, pnl, yd_volume, task_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                        "ON CONFLICT (account_id, symbol, direction) DO UPDATE SET volume=EXCLUDED.volume, "
+                        "frozen=EXCLUDED.frozen, cost_price=EXCLUDED.cost_price, pnl=EXCLUDED.pnl, "
+                        "yd_volume=EXCLUDED.yd_volume, task_id=EXCLUDED.task_id",
+                        [(acct, p.symbol, getattr(p, "direction", "long"), int(p.volume),
+                          int(getattr(p, "frozen", 0) or 0), float(p.avg_price or 0),
+                          float(getattr(p, "pnl", 0) or 0), int(getattr(p, "yd_volume", 0) or 0),
+                          str(task_id) if task_id is not None else None) for p in positions])
+            conn.execute(
+                "INSERT INTO position_refresh (account_id, ts, rows, task_id) VALUES (%s, now(), %s, %s) "
+                "ON CONFLICT (account_id) DO UPDATE SET ts=now(), rows=%s, task_id=%s",
+                (acct, len(positions), str(task_id) if task_id is not None else None,
+                 len(positions), str(task_id) if task_id is not None else None))
+            conn.commit()
+    except Exception as e:
+        logger.warning("ST2 持仓快照写批失败（不阻断）: %s", e)
+
+
 def _sd_notify(msg: str) -> None:
     """systemd notify（喂 WATCHDOG 看门狗）。无 NOTIFY_SOCKET（本地/手工运行）时静默跳过。"""
     addr = os.environ.get("NOTIFY_SOCKET")
@@ -156,7 +195,8 @@ def _alert(title: str, body: str = "") -> None:
         logger.warning("告警发送失败（%s）: %s", title, e)
 
 
-def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital):
+def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,
+                  account_id=None):
     """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。"""
     import datetime as _dt
     from src.data_platform.db import get_conn as _get_conn  # 评审 S2：stop_check 用
@@ -269,6 +309,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     _reconcile()
     ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
+        "account_id": account_id,
         "strategy": strategy, "adapter": adapter, "event_engine": ee,
         "td_api": td_api, "history": history, "frozen": frozen,
         "initial_capital": initial_capital,
@@ -385,7 +426,7 @@ def main():
     if _md_mode() == "hub":
         _run_hub_mode(sid=sid, tid=tid, name=name, s_type=s_type, symbol=symbol,
                       factors=factors, aggregator=aggregator, params=params,
-                      initial_capital=initial_capital)
+                      initial_capital=initial_capital, account_id=account_id)
         return
 
     # 2. 建 MainEngine + XtpGateway（direct 模式）
@@ -733,6 +774,8 @@ def main():
                             daily_base = float(first_row[0]) if first_row else total
                             daily_pnl = total - daily_base
                             conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital if initial_capital is not None else 1000000))
+                            # ST2：同拍写持仓真相批（N-v2：取返回值单事务覆盖，非 EVENT_POSITION handler）
+                            _flush_positions(adapter, account_id, tid)
                             conn.commit()
                 except Exception as e:
                     logger.warning("写 account_snapshot 失败: %s", e)

@@ -258,6 +258,28 @@ def reconcile_three_books():
                 pass
             conn.commit()
 
+            # 4. ST2 持仓双源 diff（2026-08-18，N 建议：快照真相 vs trade_log 推导=账实分离持续验证器）
+            try:
+                # O-F2：两侧符号命名空间不同（快照=vt_symbol "600000.SSE" vs trade_log=裸 "600000"）
+                # ——join 前必须归一，否则永不命中→每小时误报
+                cur = conn.execute("""
+                    SELECT COALESCE(s.sym, t.sym) AS sym,
+                           COALESCE(s.snap_vol, 0) AS snap_vol,
+                           COALESCE(t.derived_vol, 0) AS derived_vol
+                    FROM (SELECT split_part(symbol, '.', 1) AS sym, SUM(volume) AS snap_vol
+                          FROM position_snapshot WHERE direction != 'short' GROUP BY 1) s
+                    FULL OUTER JOIN (
+                        SELECT split_part(symbol, '.', 1) AS sym,
+                               SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END) AS derived_vol
+                        FROM trade_log GROUP BY 1) t ON s.sym = t.sym
+                    WHERE COALESCE(s.snap_vol, 0) != COALESCE(t.derived_vol, 0)""")
+                for sym, sv, dv in cur.fetchall():
+                    # O-S2：trade_log 全历史推导（含上线前底仓/场外单）天然有持续差异——
+                    # 展示给对账页（issues）即可，归因与处置靠人；不加码告警频率
+                    issues.append(f"持仓账实分离: {sym} 券商快照={sv} trade_log推导={dv}")
+            except Exception:
+                pass   # 表未就绪静默（与上方三表探测一致，O-S2）
+
             # 比对逻辑（实盘数据接入后实现具体核对）
             # 1. 信号无委托：signal_log 中有记录但 order_log 中无对应 signal_id
             cur = conn.execute("""

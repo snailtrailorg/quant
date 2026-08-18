@@ -315,6 +315,8 @@ def run(ctx: dict) -> None:
                 logger.warning("心跳写失败: %s", e)
             # 快照（每 60s≈12 个 timer，评审 S1；断线不写假值 SB1）
             if snap_counter % 12 == 0:
+                # ST2（O-F3）：持仓真相批与快照同守卫——先验 query_account，TD 断线时双跳过
+                # （否则断线返回 [] 会把真实持仓写成"新鲜空仓"=假真相，恰是 N-S5 要防的）
                 try:
                     accounts = adapter.query_account() or []
                     if accounts:
@@ -330,6 +332,9 @@ def run(ctx: dict) -> None:
                                          "VALUES (%s,%s,%s)",
                                          (total, total - base, initial_capital))
                             conn.commit()
+                        # ST2：TD 在线才写持仓批（ThinTdGateway 无 vnpy init_query 常推，须显式查）
+                        from src.strategy_runner.main import _flush_positions
+                        _flush_positions(adapter, ctx.get("account_id"), tid)
                 except Exception as e:
                     logger.warning("快照写失败: %s", e)
             # 熔断沿撤在场单（评审 S1，F-41）

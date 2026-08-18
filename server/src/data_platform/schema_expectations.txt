@@ -34,6 +34,8 @@ notifications :: id,level,category,title,body,source_ref,status,created_at,acked
 order_log :: id,ts,strategy_id,symbol,action,volume,price,status,signal_id,client_order_id,error
 pool_symbols :: id,pool_id,symbol
 pools :: id,name,category,description,created_at
+position_refresh :: account_id,ts,rows,task_id
+position_snapshot :: account_id,symbol,direction,volume,frozen,cost_price,pnl,yd_volume,task_id,ts
 risk_rules :: id,name,type,params,enabled,created_at,updated_at
 signal_log :: id,ts,strategy_id,symbol,action,score,price
 static_symbols :: ts_code,name,industry,list_status,delisted,updated_at
