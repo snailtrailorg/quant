@@ -285,6 +285,14 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="详细日志")
     args = parser.parse_args()
 
+    # #48：启动时列级校验（schema 漂移=本地不复现的服务器 500 源，F-16/0038 实锤）
+    try:
+        from src.data_platform.db import verify_schema
+        from src.health_monitor.monitor import report_schema_findings
+        report_schema_findings(verify_schema())
+    except Exception as e:
+        logger.warning("schema 校验异常（不阻断启动）: %s", e)
+
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

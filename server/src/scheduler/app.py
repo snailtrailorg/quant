@@ -45,6 +45,14 @@ app = Celery(
     include=["src.scheduler.tasks", "src.feishu_bot.tasks"],
 )
 
+# #48：列级校验挂 celery 父进程（import 期一次；prefork 子进程 fork 不重复执行）
+try:
+    from src.data_platform.db import verify_schema
+    from src.health_monitor.monitor import report_schema_findings
+    report_schema_findings(verify_schema())
+except Exception:
+    pass   # broker/db 未就绪的极早期导入窗口静默（web/runner 入口会再报）
+
 app.conf.update(
     timezone="Asia/Shanghai",
     enable_utc=True,

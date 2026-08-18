@@ -192,33 +192,61 @@ def init_trade_calendar(year: int) -> None:
     return
 
 
-def verify_schema() -> list[str]:
-    """启动时校验所有基础设施表是否存在。缺失则 log warning，不自动创建。"""
+def load_schema_expectations() -> dict[str, set[str]]:
+    """加载链生成的期望清单（schema_expectations.txt，50 表）。
+
+    生成方式（#48 L-S-A 生成式，禁手写）：
+      PGPASSWORD=… psql -d quant -q -c "DROP SCHEMA IF EXISTS chain_scratch CASCADE; CREATE SCHEMA chain_scratch;"
+      QUANT_DB_URL=… PGOPTIONS="-c search_path=chain_scratch" python -m alembic upgrade head
+      psql -At -c "SELECT table_name||' :: '||string_agg(column_name, ',' ORDER BY ordinal_position)
+                   FROM information_schema.columns WHERE table_schema='chain_scratch'
+                   GROUP BY table_name ORDER BY table_name;" > src/data_platform/schema_expectations.txt
+      （用完 DROP SCHEMA chain_scratch CASCADE）——每加迁移重跑并提交。
+    """
+    import os
+    exp: dict[str, set[str]] = {}
+    path = os.path.join(os.path.dirname(__file__), "schema_expectations.txt")
+    try:
+        with open(path) as f:
+            for line in f:
+                if " :: " in line:
+                    t, cols = line.strip().split(" :: ", 1)
+                    exp[t] = set(c.strip() for c in cols.split(","))
+    except FileNotFoundError:
+        pass
+    return exp
+
+
+def verify_schema() -> dict[str, list[str]]:
+    """列级校验（#48 v2，L 审修正案）：expected ⊆ actual 单向存在性比对。
+
+    - 期望来源=迁移链生成的 schema_expectations.txt（非手写清单——手写必腐，仓内已有实锤）
+    - 单条 information_schema 查询拿全部列（非逐表探测）
+    - **纯函数返回 findings，不做告警**——db.py 是最底层模块，告警路由归入口层
+      （web startup / runner / hub / celery 父进程，复用 monitor 容错范式），避免依赖倒置
+    - 只比缺列（0038 类问题）；不比 data_type/多余列（链外遗留不阻断）
+    """
     import logging
     logger = logging.getLogger("data_platform")
-    required_tables = [
-        "users", "audit_log", "sync_config", "sync_log",
-        "account_snapshot", "accounts", "alert_history", "astock_analysis",
-        "broker_usage", "convertible_terms", "signal_log", "order_log",
-        "trade_log", "static_symbols",
-        "system_config", "llm_model_config", "llm_usage",
-        "feishu_config", "live_trading_config", "live_task",
-        "pools", "pool_symbols", "strategy_account",
-        "broker_config", "risk_rules", "channel_config",
-        "tasks", "task_logs", "factor_def",
-        "backtest_runs", "backtest_symbols",
-        "data_source_config", "data_source_usage",
-        "llm_budget", "user_tokens",
-    ]
-    missing = []
+    expected = load_schema_expectations()
+    if not expected:
+        # M-S1：文件缺失=校验被静默禁用，本身必须可见——哨兵交给入口层路由
+        logger.warning("schema_expectations.txt 缺失或为空，列级校验被禁用（哨兵上报）")
+        return {"missing_tables": [], "missing_columns": {}, "expectations_missing": True}
     with get_conn() as conn:
-        for table in required_tables:
-            try:
-                conn.execute(f"SELECT 1 FROM {table} LIMIT 1")
-            except Exception:
-                missing.append(table)
-    if missing:
-        logger.warning(f"数据库缺少表，请运行 alembic upgrade head: {missing}")
+        cur = conn.execute(
+            "SELECT table_name, column_name FROM information_schema.columns "
+            "WHERE table_schema='public' AND table_name = ANY(%s)",
+            (list(expected.keys()),))
+        actual: dict[str, set[str]] = {}
+        for t, c in cur.fetchall():
+            actual.setdefault(t, set()).add(c)
+    missing_tables = sorted(set(expected) - set(actual))
+    missing_columns = {t: sorted(expected[t] - actual.get(t, set()))
+                       for t in expected if t in actual and expected[t] - actual[t]}
+    if missing_tables or missing_columns:
+        logger.warning("schema 校验发现缺失（alembic upgrade head 或查迁移链）: 表%s 列%s",
+                       missing_tables, missing_columns)
     else:
-        logger.info("数据库 schema 校验通过")
-    return missing
+        logger.info("数据库 schema 列级校验通过（%d 表）", len(expected))
+    return {"missing_tables": missing_tables, "missing_columns": missing_columns}

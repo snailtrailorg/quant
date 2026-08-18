@@ -82,9 +82,11 @@ def upgrade() -> None:
         sa.Column("actual_days", sa.Integer()),
     )
 
-    # 5. bar_1D（K线，统一 schema 对齐 XTP）
+    # 5. bar_1d（K线，统一 schema 对齐 XTP）。2026-08-18 #48 修正：原名 "bar_1D" 经
+    #    SQLAlchemy 引号化建出大写表，而运行时代码不带引号（PG 折叠小写）——fresh 环境会
+    #    双表分裂（链建大写壳+数据流进运行时小写表），服务器 bar_1D 孤儿即此来源
     op.create_table(
-        "bar_1D",
+        "bar_1d",
         sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
         sa.Column("symbol", sa.Text(), nullable=False),
         sa.Column("freq", sa.Text(), nullable=False, server_default="1D"),
@@ -99,7 +101,7 @@ def upgrade() -> None:
         sa.Column("source", sa.Text(), nullable=False, server_default="tushare"),
         sa.UniqueConstraint("symbol", "ts"),
     )
-    op.create_index("idx_bar_1d_symbol_ts", "bar_1D", ["symbol", sa.text("ts DESC")])
+    op.create_index("idx_bar_1d_symbol_ts", "bar_1d", ["symbol", sa.text("ts DESC")])
 
     # 6. daily_basic（A股基本面）
     op.create_table(
@@ -185,8 +187,8 @@ def downgrade() -> None:
     op.drop_table("asset_static_info")
     op.drop_index("idx_daily_basic_ts_code", "daily_basic")
     op.drop_table("daily_basic")
-    op.drop_index("idx_bar_1d_symbol_ts", "bar_1D")
-    op.drop_table("bar_1D")
+    op.drop_index("idx_bar_1d_symbol_ts", "bar_1d")
+    op.drop_table("bar_1d")
     op.drop_table("sync_log")
     op.drop_table("sync_config")
     op.drop_table("audit_log")

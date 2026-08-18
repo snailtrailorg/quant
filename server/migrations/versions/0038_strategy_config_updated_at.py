@@ -22,10 +22,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TABLE strategy_config ADD COLUMN IF NOT EXISTS updated_at "
-        "timestamptz DEFAULT now()"
-    )
+    # 2026-08-18 #48 scratch 跑链实锤：本迁移假设表已存在（前 alembic 遗留），fresh run 到此必炸
+    # （表要到 0042 才被收编创建，且 0042 的建表已含 updated_at）。加表存在守卫：
+    # 已应用环境（表在）行为不变；fresh run 跳过本条，由 0042 建全形。
+    op.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (SELECT 1 FROM information_schema.tables
+                       WHERE table_schema = current_schema() AND table_name = 'strategy_config')
+            THEN
+                ALTER TABLE strategy_config ADD COLUMN IF NOT EXISTS updated_at
+                    timestamptz DEFAULT now();
+            END IF;
+        END $$;
+    """)
 
 
 def downgrade() -> None:

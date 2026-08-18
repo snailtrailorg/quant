@@ -214,6 +214,14 @@ return 0
 
 
 def main() -> None:
+    # #48：启动时列级校验（hub 侧同款）
+    try:
+        from src.data_platform.db import verify_schema
+        from src.health_monitor.monitor import report_schema_findings
+        report_schema_findings(verify_schema())
+    except Exception as e:
+        logger.warning("schema 校验异常（不阻断启动）: %s", e)
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     if EventEngine is None:
         logger.error("vnpy 未安装")

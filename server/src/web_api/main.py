@@ -123,6 +123,13 @@ class ChangePwdReq(BaseModel):
 @app.on_event("startup")
 def startup():
     init_users_table()
+    # #48：启动时列级校验（纯函数 → 入口层路由告警；失败不阻断启动）
+    try:
+        from src.data_platform.db import verify_schema
+        from src.health_monitor.monitor import report_schema_findings
+        report_schema_findings(verify_schema())
+    except Exception as e:
+        logger.warning("startup: schema 校验异常（不阻断）: %s", e)
     if ensure_default_admin():
         print("✓ 创建默认 admin（admin/admin123，请改密码）")
     # 加载自定义因子（因子平台化）
