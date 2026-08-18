@@ -32,6 +32,10 @@ class ConvertibleDoubleLowStrategy(Strategy):
         sig = self._aggregator.aggregate(factor_values)
         if sig and sig.action != Action.HOLD:
             sig.symbol = self.symbol
-            sig.volume = self.config.params.get("shares_per_trade", 100)
+            # R-S3a：price 回填（此前恒 0 → SC3 丢弃 → 实盘零下单）+ 执行规则接线（同基类）
+            sig.price = sig.price or bar.get("close", 0)
+            sig.volume = sig.volume or self.config.params.get("shares_per_trade", 100)
+            sig.price_type = self.config.params.get("price_type", "LIMIT")
+            sig.order_validity = self.config.params.get("order_validity", "DAY")
             self.place_order(sig)
         return sig

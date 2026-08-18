@@ -198,12 +198,89 @@ class Strategy:
         sig = self._aggregator.aggregate(fv)
         sig.symbol = self.symbol
         if sig.action != Action.HOLD:
+            # 链条打磨#2/#12（2026-08-19）：聚合信号回填执行规则——此前 volume/price 恒 0
+            # → SC3 丢弃 → 因子模式实盘零下单（回测因 monkey-patch 固定 100 股假成交）
+            sig.price = sig.price or ctx.close
+            sig.volume = self._resolve_volume(sig, ctx.close)
+            # R-S3b：执行规则接线——此前聚合信号恒默认 LIMIT/DAY，用户选 MARKET/GTC 被静默忽略
+            sig.price_type = self._param("price_type", "LIMIT")
+            sig.order_validity = self._param("order_validity", "DAY")
             self.place_order(sig)
         return sig
 
     def on_tick(self, tick: dict) -> None:
         """收到 Tick → 实时处理。"""
         pass
+
+    def _resolve_volume(self, sig: Signal, price: float) -> float:
+        """执行规则三档（#12，R-F1 修订：方向感知资金口径）。
+
+        BUY  = 可用资金口径（总资产−持仓市值；满仓→0 → SC3 拦截，不下废单）
+        SELL = 持仓口径（本 symbol 持仓量；PERCENT=持仓×pct / ALL_IN=全部持仓）
+               ——SELL ALL_IN 的"全仓"语义=清仓该标的，不是现金÷price（R-F1：原实现
+               会让卖单量>持仓→XTP 拒单→止损保护失效）
+        持仓来源 position_snapshot（ST2 真相源，direction != 'short'）。查询失败 →
+        告警+降级 SHARES 100（不拒单，风险随信号下发）。
+        """
+        from enum import Enum as _E
+        vt = self._param("volume_type", "SHARES")
+        is_sell = getattr(getattr(sig, "action", None), "name", "") == "SELL"
+        try:
+            if vt in ("PERCENT", "ALL_IN"):
+                if is_sell:
+                    held = self._held_volume()
+                    if held <= 0:
+                        return 0   # 无持仓可卖——SC3 拦截（非静默）
+                    if vt == "ALL_IN":
+                        return held
+                    pct = float(self._param("volume_pct", 10)) / 100.0
+                    return max(0, int(held * pct / 100) * 100)   # A股整百
+                # BUY：可用资金口径（总资产−持仓市值 近似）
+                total = self._latest_total_value()
+                held_value = self._held_value()
+                cash = max(0.0, total - held_value)
+                if vt == "ALL_IN":
+                    base = cash
+                else:
+                    base = cash * (float(self._param("volume_pct", 10)) / 100.0)
+                return max(0, int(base / price / 100) * 100) if price > 0 else 0
+        except Exception as e:
+            logger.warning("PERCENT/ALL_IN 资产/持仓查询失败，降级 SHARES 100: %s", e)
+        return float(self._param("volume", 100))
+
+    def _held_volume(self) -> int:
+        """本 symbol 持仓量（ST2 position_snapshot 真相源；SELL 口径）。"""
+        from ..data_platform.db import get_conn
+        from ..data_platform.schema import to_vt_symbol
+        vt = self.symbol if "." in self.symbol else to_vt_symbol(self.symbol)
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT COALESCE(SUM(volume),0) FROM position_snapshot "
+                "WHERE symbol=%s AND direction != 'short'", (vt,))
+            return int(cur.fetchone()[0] or 0)
+
+    def _held_value(self) -> float:
+        """持仓总市值近似（position_snapshot.pnl 与 cost_price 无市值列——用最新快照总资产差。
+        R 注：近似口径，精确需行情乘持仓——成本价×量做下界近似。"""
+        from ..data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT COALESCE(SUM(cost_price * volume),0) FROM position_snapshot "
+                "WHERE direction != 'short'")
+            return float(cur.fetchone()[0] or 0)
+
+    def _param(self, key, default=None):
+        p = self.config.params
+        return (p.get(key, default) if isinstance(p, dict) else default) or default
+
+    def _latest_total_value(self) -> float:
+        from ..data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+            row = cur.fetchone()
+        if not row or not row[0]:
+            raise RuntimeError("account_snapshot 无数据")
+        return float(row[0])
 
     # ——— 因子计算 ———
 

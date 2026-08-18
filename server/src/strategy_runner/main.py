@@ -241,6 +241,15 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="详细日志")
     args = parser.parse_args()
 
+    # 链条打磨#1：runner 启动加载自定义因子（实盘进程此前永不加载）
+    try:
+        from src.strategy_framework.factor import load_factors_from_db
+        _lf = load_factors_from_db()
+        if _lf:
+            logger.info("加载自定义因子: %s", ", ".join(_lf))
+    except Exception as e:
+        logger.warning("自定义因子加载失败: %s", e)
+
     # #48：启动时列级校验（schema 漂移=本地不复现的服务器 500 源，F-16/0038 实锤）
     try:
         from src.data_platform.db import verify_schema

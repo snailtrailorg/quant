@@ -735,15 +735,25 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
     # per-symbol 参数覆盖（symbol_params 列，可能为 NULL）
     symbol_params_all = json.loads(rr[2]) if rr[2] else {}
     per_symbol = symbol_params_all.get(symbol, {}) if isinstance(symbol_params_all, dict) else {}
+    # R-S4：任务级因子 lazy 重载——celery 启动早于 PG 时 import 期加载静默失败，
+    # 且 Web 改因子只更新 web 进程注册表；每次回测任务头重读 DB（幂等，代价一次 SELECT）
+    try:
+        from src.strategy_framework.factor import load_factors_from_db
+        load_factors_from_db()
+    except Exception:
+        pass
+
     start = params.get("start", (date.today() - timedelta(days=365)).isoformat())
     end = params.get("end", date.today().isoformat())
     bars_df = get_bars(symbol, "1D", start, end)
     bars = bars_df.to_dict("records") if not bars_df.empty else []
 
-    # 合并参数：策略级 params + per-symbol 覆盖
+    # 合并参数（链条打磨#14）：parameter_defs 默认值 → 策略级 params → per-symbol 覆盖。
+    # 此前不合并默认值——同一策略缺省参数下回测与实盘（live_task 走 build_default_params）行为不同
     strategy_params = json.loads(sc[2]) if sc[2] else {}
-    merged_params = {**strategy_params, **per_symbol}
-    # 移除 parameter_defs 元数据（不是参数值）
+    from src.strategy_framework.strategy import build_default_params
+    defs = strategy_params.get("parameter_defs") or []
+    merged_params = {**build_default_params(defs), **strategy_params, **per_symbol}
     merged_params.pop("parameter_defs", None)
 
     cfg = StrategyConfig(
@@ -768,6 +778,20 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
 
     try:
         result = engine.run(cfg, bars, on_bar_callback=on_bar_cb)
+        # 链条打磨#15：预检/防未来失败（engine 返回 metrics.error 而非抛异常）→ 置 failed
+        # 此前照常 status='done' + 存全 0 指标——预检形同虚设
+        _pc_err = (result.metrics or {}).get("error")
+        if _pc_err:
+            _detail = json.dumps({"error": _pc_err,
+                                  "issues": (result.metrics or {}).get("issues") or (result.metrics or {}).get("details")},
+                                 ensure_ascii=False)
+            with get_conn() as conn:
+                conn.execute(
+                    "UPDATE backtest_symbols SET status='failed', result=%s WHERE run_id=%s AND symbol=%s",
+                    (_detail, run_id, symbol))
+                conn.commit()
+            r.set(pub_key + ":error", _pc_err, ex=3600)
+            return {"status": "failed", "symbol": symbol, "error": _pc_err}
         result_json = json.dumps({
             "total_return_pct": result.total_return_pct, "win_rate": result.win_rate,
             "max_drawdown_pct": result.max_drawdown_pct, "sharpe_ratio": result.sharpe_ratio,
@@ -778,10 +802,17 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
                 "UPDATE backtest_symbols SET status='done', result=%s WHERE run_id=%s AND symbol=%s",
                 (result_json, run_id, symbol))
             cur = conn.execute(
-                "SELECT count(*) FROM backtest_symbols WHERE run_id=%s AND status!='done'", (run_id,))
+                "SELECT count(*) FROM backtest_symbols WHERE run_id=%s AND status NOT IN ('done','failed','error')",
+                (run_id,))
             pending = cur.fetchone()[0]
             if pending == 0:
-                conn.execute("UPDATE backtest_runs SET status='done', finished_at=now() WHERE id=%s", (run_id,))
+                # R-S5：全败 run 置 failed（全 done 才 done）——防零成功回测过 F-44 验证门
+                cur2 = conn.execute(
+                    "SELECT count(*) FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
+                ok_cnt = cur2.fetchone()[0]
+                run_status = 'done' if ok_cnt > 0 else 'failed'
+                conn.execute("UPDATE backtest_runs SET status=%s, finished_at=now() WHERE id=%s",
+                             (run_status, run_id))
             conn.commit()
         r.set(pub_key + ":done", result_json, ex=3600)
         return {"status": "done", "symbol": symbol, "return": result.total_return_pct}

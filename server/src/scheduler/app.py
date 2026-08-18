@@ -45,6 +45,15 @@ app = Celery(
     include=["src.scheduler.tasks", "src.feishu_bot.tasks"],
 )
 
+# 自定义因子加载（链条打磨#1：worker 进程此前永不加载——回测/实盘"未知因子"直接失败）
+try:
+    from src.strategy_framework.factor import load_factors_from_db
+    _loaded_f = load_factors_from_db()
+    if _loaded_f:
+        print(f"✓ 加载自定义因子: {', '.join(_loaded_f)}")
+except Exception:
+    pass   # 表未建/DB 未就绪的早期导入窗口静默
+
 # #48：列级校验挂 celery 父进程（import 期一次；prefork 子进程 fork 不重复执行）
 try:
     from src.data_platform.db import verify_schema

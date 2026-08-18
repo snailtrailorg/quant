@@ -296,6 +296,85 @@ _DT_FUNCS = {
 }
 
 
+# 链条打磨#8（2026-08-19）：DSL 历史窗口函数——表达式可引用序列（如 ma20 = mean(close,20)）。
+# 语义：xxx 为当前值（float），xxx_n（下标访问不存在）——用函数形式 mean(close,20) 取
+# 最近 20 根（含当前）close 的均值；序列源 = ctx.history + 当前 bar。
+def _series(ctx: BarContext, name: str) -> list[float]:
+    """从 ctx 提取命名序列（含当前 bar）。name: close/high/low/open/volume。"""
+    key = "open" if name == "open" else name
+    hist = [h.get(key, 0) for h in (ctx._history or [])]
+    cur = getattr(ctx, key if key != "open" else "open_", 0) or 0
+    return hist + [cur]
+
+
+def _w_mean(seq: list, n: int) -> float:
+    w = seq[-n:] if n and n > 0 else seq
+    return sum(w) / len(w) if w else 0.0
+
+
+def _w_std(seq: list, n: int) -> float:
+    w = seq[-n:] if n and n > 0 else seq
+    if len(w) < 2:
+        return 0.0
+    m = sum(w) / len(w)
+    return (sum((x - m) ** 2 for x in w) / len(w)) ** 0.5
+
+
+def _w_max(seq: list, n: int) -> float:
+    return max(seq[-n:]) if n and n > 0 else (max(seq) if seq else 0.0)
+
+
+def _w_min(seq: list, n: int) -> float:
+    return min(seq[-n:]) if n and n > 0 else (min(seq) if seq else 0.0)
+
+
+def _w_ema(seq: list, n: int) -> float:
+    w = seq[-(n * 2):] if n and n > 0 else seq
+    if not w:
+        return 0.0
+    k = 2 / (n + 1)
+    e = w[0]
+    for x in w[1:]:
+        e = x * k + e * (1 - k)
+    return e
+
+
+def _w_rsi(seq: list, n: int) -> float:
+    w = seq[-(n + 1):] if n and n > 0 else seq
+    if len(w) < 2:
+        return 50.0
+    gains = losses = 0.0
+    for i in range(1, len(w)):
+        d = w[i] - w[i - 1]
+        gains += max(d, 0)
+        losses += max(-d, 0)
+    if gains + losses == 0:
+        return 50.0
+    return 100 * gains / (gains + losses)
+
+
+def _w_slope(seq: list, n: int) -> float:
+    w = seq[-n:] if n and n > 0 else seq
+    if len(w) < 2:
+        return 0.0
+    k = len(w)
+    xs = list(range(k))
+    mx = sum(xs) / k
+    my = sum(w) / k
+    num = sum((xs[i] - mx) * (w[i] - my) for i in range(k))
+    den = sum((x - mx) ** 2 for x in xs)
+    return num / den if den else 0.0
+
+
+def _w_avevol(seq: list, n: int) -> float:
+    """平均换手率近似（volume 序列的均值比当前）。"""
+    return _w_mean(seq, n)
+
+
+_DSL_WINDOW_FUNCS = {"mean": _w_mean, "std": _w_std, "max": _w_max, "min": _w_min,
+                     "ema": _w_ema, "rsi": _w_rsi, "slope": _w_slope, "avevol": _w_avevol}
+
+
 def _safe_eval(expr: str, ctx: dict[str, float]) -> float:
     """安全 eval：AST 白名单，只允许算术+索引+白名单函数。"""
     if len(expr) > 500:  # 表达式长度限制
@@ -322,6 +401,13 @@ def _safe_eval(expr: str, ctx: dict[str, float]) -> float:
         elif isinstance(node, ast.Call):
             func = _eval(node.func)
             args = [_eval(a) for a in node.args]
+            if node.keywords:
+                # R-F2：kwargs 不再静默丢弃——白名单内转关键字参（mean(close,n=3)）
+                kwnames = [kw.arg for kw in node.keywords]
+                if any(k is None for k in kwnames) or len(set(kwnames)) != len(kwnames):
+                    raise TypeError("DSL 不支持 **kwargs")
+                kw_args = [_eval(kw.value) for kw in node.keywords]
+                return func(*args, **dict(zip(kwnames, kw_args)))
             return func(*args)
         raise TypeError(f"不支持的表达式节点: {type(node).__name__}")
 
@@ -339,10 +425,38 @@ class DSLFactor(Factor):
         self.params = {"expr": expr}
 
     def compute(self, ctx: BarContext) -> float:
-        return _safe_eval(self.expr, {
+        # 链条打磨#8：窗口函数（mean(close,20) 取 ctx.history 序列含当前 bar）。
+        # AST 预处理：窗口调用第一参的裸 Name（close 等）改写为字符串字面量——
+        # 纯算术处 Name 不动（close 仍是当前标量）；`close` 名与值由此二义消解。
+        tree = ast.parse(self.expr, mode="eval")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+                    and node.func.id in _DSL_WINDOW_FUNCS and node.args:
+                a0 = node.args[0]
+                if isinstance(a0, ast.Call):
+                    raise TypeError(f"DSL 窗口函数不支持嵌套: {node.func.id}({ast.unparse(a0)})——写成自定义因子")
+                if isinstance(a0, ast.Name):
+                    node.args[0] = ast.Constant(value=a0.id)
+        expr = ast.unparse(tree)
+        env: dict = {
             "close": ctx.close, "high": ctx.high, "low": ctx.low,
             "open_": ctx.open_, "volume": ctx.volume,
-        })
+        }
+        for fname, fn in _DSL_WINDOW_FUNCS.items():
+            def _mk(fname_=fname, f=fn):
+                def _call(name_or_val, n=None):
+                    # R-F2：静默错值比崩溃更危险——非序列名/未知名一律抛
+                    if not isinstance(name_or_val, str):
+                        raise TypeError(
+                            f"{fname_}() 第一参必须是字段名（close/high/low/open/volume），"
+                            f"收到表达式值 {name_or_val!r}——如需对表达式取窗口，先写成自定义因子")
+                    if name_or_val not in ("close", "high", "low", "open", "volume"):
+                        raise NameError(f"{fname_}() 未知字段: {name_or_val}")
+                    seq = _series(ctx, name_or_val)
+                    return f(seq, n) if n else f(seq, 0)
+                return _call
+            env[fname] = _mk()
+        return _safe_eval(expr, env)
 
 
 # ——— 预置因子 ———
