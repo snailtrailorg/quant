@@ -36,3 +36,5 @@ bar_hub（写）· system_config（读）· live_task（读）
 - tick 断流自杀已删：只告警（文案带 runbook）；基线=时段作用域（`sess_ticks`/`sess_last_tick`，进入沿清零）
 - 心跳新增 `sess_ticks` 字段（/metrics 有对应 counter）
 - 启动时 health_monitor schema 校验（入口路由）
+
+- 共享工具直连 quant_common（原模块级 import strategy_runner——连带 vnpy 链已解）

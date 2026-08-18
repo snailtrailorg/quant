@@ -127,3 +127,5 @@ _REGISTRY: dict[str, type[MessageChannel]]   # wechat_work / discord / servercha
 
 ## 修订记录
 - 2026-08-11 初版（基于代码核实：notify.py:1-108 / channel.py:1-102 / __init__.py 全读）
+
+- 新增 safe_notify（never-raise 包装，收编三处重复 try/except notify 模式）

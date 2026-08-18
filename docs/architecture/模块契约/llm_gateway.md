@@ -162,3 +162,5 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 
 ## 修订记录
 - 2026-08-10 初版（基于代码核实：gateway.py 402 行全读 + 接口契约字典 §6）
+
+- check_budget_alerts 已入本模块（budget.py，原寄生 web_api.main；随迁 notify 化——预算预警进站内铃铛）

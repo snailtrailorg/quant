@@ -222,3 +222,5 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 
 ## 修订记录
 - 2026-08-09 初版（基于代码核实：db/schema/data_source/tushare_adapter/platform/settings 全读）
+
+- audit_log 已入本模块（data_platform/audit.py，原寄生 web_api.auth——feishu_bot 曾因此反向 import 顶层）

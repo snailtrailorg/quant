@@ -63,3 +63,7 @@ systemd `quant-live-task@{tid}` / `quant-strategy@{sid}`；Web `POST /api/live-t
 2. vnpy 事件线程 handler 必须 `_guard` 包裹（一次异常=永久失聪）
 3. 进程退出走 `os._exit(0)`（XTP 原生库 teardown ABRT）
 4. 交易时段外 BUY 拒（回放防护）；SELL 永不放行限制（保止损）
+
+## 增量（2026-08-19 模块归位）
+- 五件套（guard/session/sd_notify）已迁 quant_common，本模块经别名+alert 回调注入消费（晚绑定保 patch 语义）
+- build_xtp_setting 已迁 strategy_framework/broker（本模块留别名 `_build_xtp_setting`）
