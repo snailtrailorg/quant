@@ -109,7 +109,9 @@ def save_bars(freq: str, rows: list[tuple]) -> int:
     rows = validate_bars(rows)
     if not rows:
         return 0
-    assert freq in _VALID_FREQS, f"非法 freq: {freq}"
+    # 大小写不敏感（写路径历史用 "1D" 读路径混用 "1d"；表名 PG 折叠同表。
+    # 2026-08-18 盲审 F2：a28a5fa 加 assert 后 "1D" 被拒，日线同步静默断 11 天——教训：校验收紧必须 grep 全部调用点）
+    assert freq.lower() in _VALID_FREQS, f"非法 freq: {freq}"
     ensure_table(freq)
     insert_sql = BAR_TABLE_INSERT.format(freq=freq)  # freq 是内部值，安全
     with get_conn() as conn:
