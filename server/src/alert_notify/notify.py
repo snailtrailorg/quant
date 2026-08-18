@@ -81,9 +81,22 @@ def notify(level: Level, category: Category, title: str, body: str = "",
     except Exception as e:
         logger.error("notification insert failed: %s", e)
 
-    # 2. 外部：仅实盘紧急
+    # 2. 外部：紧急（risk/system + critical）。E-4：外推层 15min 同标题节流——60s 循环告警
+    # （断流类）若不限频会在 ~1.5h 耗尽通道日配额，挤占真正的交易紧急（熔断/对账）；
+    # E-5：节流键/配额检查全部 fail-open——Valkey 故障时直接推（告警不能与被监控对象共死）
     if should_push_external(category, level):
-        _push_channel(level, title, body)
+        throttled = False
+        try:
+            er = _redis()
+            ekey = f"notify:external:{hashlib.md5(title.encode()).hexdigest()[:12]}"
+            if er.exists(ekey):
+                throttled = True
+            else:
+                er.setex(ekey, 900, "1")
+        except Exception as e:
+            logger.warning("外推节流键不可用（Valkey 故障？），跳过节流直接推送: %s", e)
+        if not throttled:
+            _push_channel(level, title, body)
     return notif_id
 
 

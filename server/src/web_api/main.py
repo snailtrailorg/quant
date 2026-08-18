@@ -1615,6 +1615,19 @@ def adj_factor_backfill_api(start_date: str | None = None, end_date: str | None 
     return {"status": "submitted", "task_id": task.id, "progress": "sync:adj-factor"}
 
 
+@app.get("/api/sync/adj-factor-backfill/progress")
+def adj_factor_backfill_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """复权因子回填进度（Valkey sync:adj-factor hash；status=degraded 表示积分未到账降级）。"""
+    r = redis.Redis(connection_pool=_redis_pool)
+    data = r.hgetall("sync:adj-factor")
+    out = {}
+    for k, v in data.items():
+        ks = k.decode() if isinstance(k, bytes) else k
+        vs = v.decode() if isinstance(v, bytes) else v
+        out[ks] = int(vs) if ks in ("done", "total", "pct") and vs.lstrip("-").isdigit() else vs
+    return out or {"status": "idle"}
+
+
 @app.get("/api/sync/trigger/{sid}/progress")
 def trigger_progress_api(sid: str, task_id: str | None = None,
                          payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):

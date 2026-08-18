@@ -476,14 +476,23 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     """回填 bar_1D 的 adj_factor（A/B-F1：历史全 NULL）。
 
     按交易日拉全市场因子 → 批量 UPDATE（只填 NULL 行，不覆盖非空）。
-    **降级容错**（积分未到账）：首个交易日因子接口返回 None 即返回 degraded 状态，
-    不抛异常——积分到账后重新触发即可。
+    E/F 盲审修订（2026-08-18）：
+    - **只扫股票行**（F-S1：adj_factor 接口实测只含沪深京股票，ETF 因子在 fund_adj、转债无——
+      不限定则回填永不收敛且每次全量空转 ~4h）
+    - **范围谓词**（F-F1：`ts::date=%s` 用不上索引实测 3.68s/日，`ts>=d AND ts<d+1` 0.20s/日，18x）
+    - updated 用 cursor.rowcount 真实受影响行数（F-S3：提交行数虚报含 0 命中）
+    - **降级容错**（积分未到账）：首个交易日因子接口返回 None 即返回 degraded 状态，
+      不抛异常——积分到账后重新触发即可。
     """
+    from datetime import date as _date, timedelta as _td
     from src.data_platform.adapters.tushare_adapter import pull_adj_factor_by_date
     from src.data_platform.schema import to_vt_symbol
 
     with get_conn() as conn:
-        sql = "SELECT DISTINCT ts::date FROM bar_1d WHERE adj_factor IS NULL"
+        sql = ("SELECT DISTINCT ts::date FROM bar_1d WHERE adj_factor IS NULL "
+               # 只扫股票行：asset_static_info 是 A 股静态表（ETF/转债不在其中）
+               "AND symbol IN (SELECT DISTINCT REPLACE(REPLACE(REPLACE(ts_code,'.SH','.SHSE'),"
+               "'.SZ','.SZSE'),'.BJ','.BSE') FROM asset_static_info)")
         params: list = []
         if start_date:
             sql += " AND ts::date >= %s"
@@ -494,28 +503,31 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
         cur = conn.execute(sql + " ORDER BY 1", params)
         dates = [r[0] for r in cur.fetchall()]
     if not dates:
-        return {"status": "success", "days": 0, "updated": 0, "reason": "无 NULL 因子行"}
+        return {"status": "success", "days": 0, "updated": 0, "reason": "无 NULL 因子行（股票范围）"}
 
     updated = 0
     done = 0
     for d in dates:
-        td = d.strftime("%Y%m%d") if hasattr(d, "strftime") else str(d).replace("-", "")
+        d = _date.fromisoformat(str(d)) if isinstance(d, str) else d
+        next_d = d + _td(days=1)
+        td = d.strftime("%Y%m%d")
         fdf = pull_adj_factor_by_date(td)
         if fdf is None:
             return {"status": "degraded", "days": len(dates), "processed": done, "updated": updated,
                     "reason": "复权因子接口不可用（积分未到账？）——已处理 %d/%d 日，到账后重新触发续填" % (done, len(dates))}
         if not fdf.empty:
-            rows = [(float(f), to_vt_symbol(tc), d)
+            rows = [(float(f), to_vt_symbol(tc), d, next_d)
                     for tc, f in zip(fdf["ts_code"], fdf["adj_factor"]) if pd.notna(f)]
             if rows:
                 with get_conn() as conn:
                     with conn.cursor() as cur:   # 池化连接无 executemany，走 cursor（同 db.py 模式）
                         cur.executemany(
-                            "UPDATE bar_1d SET adj_factor=%s WHERE symbol=%s AND ts::date=%s "
-                            "AND adj_factor IS NULL",
+                            "UPDATE bar_1d SET adj_factor=%s WHERE symbol=%s "
+                            "AND ts >= %s AND ts < %s AND adj_factor IS NULL",
                             rows)
                     conn.commit()
-                updated += len(rows)
+                    rc = cur.rowcount
+                    updated += rc if isinstance(rc, int) and rc > 0 else 0   # F-S3：真实受影响行数（驱动 -1/异常防御）
         done += 1
         if progress_cb:
             progress_cb(done, len(dates), td)
@@ -937,7 +949,17 @@ def backfill_symbol(sync_id: str, ts_code: str, start: str, end: str) -> dict:
     if "trade_date" not in df.columns:
         return {"status": "error", "error": f"响应缺 trade_date 列: {list(df.columns)[:4]}"}
 
-    rows = _daily_to_rows(df)
+    # F-F2：单标的回补也带因子——_daily_to_rows 不传 adj_map 时全 NULL，叠加 overwrite 的
+    # DO UPDATE 会把已回填的 adj_factor 清回 NULL（E/F 盲审实测的数据破坏路径）；
+    # 拉不到因子（降级）时 COALESCE 兜底不清空（schema.py BAR_TABLE_INSERT_OVERWRITE）
+    try:
+        from src.data_platform.adapters.tushare_adapter import pull_adj_factor_by_code
+        fdf = pull_adj_factor_by_code(ts_code, start, end)
+        adj_map = (dict(zip(fdf["ts_code"], fdf["adj_factor"]))
+                   if fdf is not None and not fdf.empty else {})
+    except Exception:
+        adj_map = {}
+    rows = _daily_to_rows(df, adj_map)
     saved = save_bars_overwrite("1D", rows)  # 覆盖
     actual_first = str(df["trade_date"].min())
     actual_last = str(df["trade_date"].max())

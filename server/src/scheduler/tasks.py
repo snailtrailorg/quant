@@ -369,7 +369,7 @@ def data_continuity_check():
 
 
 @app.task(name="src.scheduler.tasks.adj_factor_backfill_task",
-          bind=True, soft_time_limit=3600, time_limit=4200)
+          bind=True, soft_time_limit=7200, time_limit=7500)   # F-F1：全量 ~50min，留余量；被杀可重触发续填
 def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str | None = None):
     """复权因子回填（A/B-F1：bar_1D 历史全 NULL）。手动触发（积分到账后），降级即返回不抛。"""
     import redis as _redis, os as _os

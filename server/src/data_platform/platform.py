@@ -21,7 +21,7 @@ class DataPlatform:
     # ——— 历史数据 ———
 
     def get_bar(self, symbol: str, freq: str, start: date, end: date,
-                adj: str = "qfq") -> pd.DataFrame:
+                adj: str | None = None) -> pd.DataFrame:
         """获取历史 K 线（从 PG 读，若缺失则从 Tushare 拉取）。
 
         Args:
@@ -36,7 +36,7 @@ class DataPlatform:
         return df
 
     def ensure_daily(self, ts_code: str, start_date: str, end_date: str | None = None,
-                     adj: str = "qfq") -> int:
+                     adj: str | None = None) -> int:
         """确保日线数据在 PG 中（拉取+写入，幂等）。返回写入行数。"""
         df = tushare.pull_daily(ts_code, start_date, end_date, adj=adj)
         if df.empty:

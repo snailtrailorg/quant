@@ -29,7 +29,7 @@ try:
 except ImportError:
     EventEngine = None
 
-from src.strategy_runner.main import _guard, _sd_notify, _alert, _in_astock_session  # SA 机制复用
+from src.strategy_runner.main import _guard, _sd_notify, _alert, _in_astock_session, session_edge  # SA 机制复用
 
 BAR_STREAM_PREFIX = "hub:bars:"
 LEASE_KEY = "hub:lease"

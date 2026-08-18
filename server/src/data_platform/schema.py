@@ -138,7 +138,9 @@ INSERT INTO bar_{freq} (symbol, freq, ts, open, high, low, close, volume, amount
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (symbol, ts) DO UPDATE SET
     open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close,
-    volume = EXCLUDED.volume, amount = EXCLUDED.amount, adj_factor = EXCLUDED.adj_factor, source = EXCLUDED.source
+    volume = EXCLUDED.volume, amount = EXCLUDED.amount,
+    adj_factor = COALESCE(EXCLUDED.adj_factor, bar_{freq}.adj_factor),   -- F-F2：回补覆盖不得把已回填因子清回 NULL
+    source = EXCLUDED.source
 """
 
 BAR_TABLE_SELECT = """

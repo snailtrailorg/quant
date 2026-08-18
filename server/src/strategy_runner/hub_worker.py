@@ -123,7 +123,7 @@ def _write_trade_log(d, adapter, sid: str, symbol: str) -> None:
 def run(ctx: dict) -> None:
     """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen,
              warmup_pg, stop_check, reconcile, initial_capital, logger}"""
-    from src.strategy_runner.main import _guard, _sd_notify, _alert, _in_astock_session
+    from src.strategy_runner.main import _guard, _sd_notify, _alert, _in_astock_session, session_edge
 
     r = _valkey()
     tid = ctx["tid"]

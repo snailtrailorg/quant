@@ -101,7 +101,10 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     # R6 交易时段 tick 停滞（盲审 C-S1：删自杀后"半开连接/线程挂死但主循环活着"只剩告警抓手）
     hub = snap.get("hub")
     if _in_session() and hub:
-        prev = int(state.get("prev_sess_ticks", -1) or -1)
+        # E-3：哨兵用 None 判缺失——`or -1` 会把合法值 0 钳成 -1（hub 时段中重启 sess_ticks=0
+        # 恰是 R6 目标场景，曾永远累加不起来）
+        _prev = state.get("prev_sess_ticks")
+        prev = int(_prev) if _prev is not None else -1
         stalled = prev >= 0 and prev == hub["sess_ticks"]
         state["sess_stall"] = (state["sess_stall"] + 1) if stalled else 0
         if state["sess_stall"] >= 2:   # ≥2 轮（约 60-90s）零增长，时段内正常 cadence ~3s/tick
@@ -144,29 +147,35 @@ def run_check() -> dict:
     """
     from .collector import collect, _valkey
     snap = collect()
-    state = {"hub_lost_streak": 0, "sess_stall": 0, "prev_sess_ticks": -1}
+    state = {"hub_lost_streak": 0, "sess_stall": 0, "prev_sess_ticks": None}
     new_events: list[dict] = []
     recovered: list[dict] = []
     valkey_ok = False
-
-    findings, state = evaluate(snap, state)   # 纯判定先做——存储挂了也要有结果
+    r = None
 
     try:
         r = _valkey()
-        # 载入跨轮状态
+        # 载入跨轮状态（E-3：0 是合法值，用 None 判缺失）
         state["hub_lost_streak"] = int(r.get(_R4_STREAK_KEY) or 0)
         state["sess_stall"] = int(r.get(_R6_STALL_KEY) or 0)
-        state["prev_sess_ticks"] = int(r.get(_R6_PREV_KEY) or -1)
-        findings, state = evaluate(snap, state)   # 用历史状态重判（R4/R6 连续轮证据）
+        _prev = r.get(_R6_PREV_KEY)
+        state["prev_sess_ticks"] = int(_prev) if _prev is not None else None
         valkey_ok = True
     except Exception as e:
         logger.warning("health_monitor Valkey 状态载入失败（本轮按无历史状态判定）: %s", e)
 
+    findings, state = evaluate(snap, state)   # 纯判定一次（E 简化：去掉双重 evaluate）
+
     if valkey_ok:
         try:
-            findings += _detect_restarts(snap, r)   # 计数沿事件：直发不进状态机（D-F4）
+            # D-F4（E-2 实锤重修）：计数沿事件直发且**完全绕过电平状态机**——不设 state 键、
+            # 不参与恢复扫描（此前只是并进 findings，30s 后必跟假"恢复"，实测复现）
+            restart_events = _detect_restarts(snap, r)
+            findings += restart_events
+            new_events += restart_events
 
-            current = {(f["rule_id"], f["component"]): f for f in findings}
+            current = {(f["rule_id"], f["component"]): f for f in findings
+                       if f["rule_id"] != "unit_restarted"}
             for key, f in current.items():
                 state_key = _STATE_PREFIX + f["rule_id"] + ":" + f["component"]
                 if not r.get(state_key):

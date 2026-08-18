@@ -72,7 +72,12 @@ def pull_adj_factor_by_date(trade_date: str) -> pd.DataFrame | None:
     Returns:
         DataFrame[ts_code, trade_date, adj_factor]；当日无数据返回空 df；
         **接口降级（权限/异常）返回 None**——调用方按"因子缺失"处理，同步绝不因此中断。
+    F 评审修订：1h 闩锁——降级确认后本进程 1h 内直接返回 None 不再打失败接口
+    （省 Tushare 配额 + 降级期同步提速），积分到账后最长 1h 自动重试。
     """
+    import time as _t
+    if _t.time() - _adj_degraded["ts"] < 3600:
+        return None
     pro = get_pro()
     try:
         df = pro.adj_factor(trade_date=trade_date)
