@@ -97,7 +97,7 @@ class LLMGateway:
     def _load_models_from_db(self) -> list[dict]:
         """从 DB 读 enabled 模型（按 priority 全局排序），API key 解密。"""
         from src.data_platform.db import get_conn
-        from src.web_api.crypto_utils import decrypt
+        from src.quant_common.crypto import decrypt
         try:
             with get_conn() as conn:
                 cur = conn.execute(

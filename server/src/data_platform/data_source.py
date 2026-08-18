@@ -57,7 +57,7 @@ class TushareDataSource(DataSource):
         """解密 token（DB 优先，.env fallback）。"""
         if self._credentials_encrypted:
             try:
-                from src.web_api.crypto_utils import decrypt
+                from src.quant_common.crypto import decrypt
                 return decrypt(self._credentials_encrypted)
             except Exception as e:
                 logger.warning(f"解密 Tushare token 失败: {e}")

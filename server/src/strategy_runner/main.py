@@ -22,51 +22,9 @@ except ImportError:
     EventEngine = None
 
 
-def _build_xtp_setting() -> dict:
-    """组装 vnpy XtpGateway SETTING（中文 key）。优先 Broker DB（PI3），fallback .env XTP_TEST_*（开发期）。
-
-    Broker DB: credentials_encrypted={app_id,app_secret,client_id,auth_code} + params={td_host,td_port,md_host,md_port}
-    .env: XTP_TEST_ACCOUNT/PASSWORD/CLIENT_ID/QUOTE_HOST/QUOTE_PORT/TRADE_HOST/TRADE_PORT/KEY
-    """
-    # 优先 Broker DB
-    try:
-        from src.strategy_framework.broker import get_broker
-        broker = get_broker("xtp")
-        if broker:
-            cred = broker.get_credentials()
-            params = broker._params or {}
-            if cred.get("app_id"):
-                return {
-                    "账号": cred.get("app_id", ""),
-                    "密码": cred.get("app_secret", ""),
-                    "客户号": int(cred.get("client_id", params.get("client_id", 1)) or 1),
-                    "行情地址": params.get("md_host", ""),
-                    "行情端口": int(params.get("md_port", 0) or 0),
-                    "交易地址": params.get("td_host", ""),
-                    "交易端口": int(params.get("td_port", 0) or 0),
-                    "行情协议": "TCP",
-                    "授权码": cred.get("auth_code", ""),
-                    "日志级别": "INFO",
-                }
-    except Exception as e:
-        logger.warning("Broker DB 取 XTP 凭证失败，fallback .env: %s", e)
-
-    # fallback .env（开发期 broker_config 未配）
-    import os
-    from dotenv import load_dotenv
-    load_dotenv()
-    return {
-        "账号": os.environ.get("XTP_TEST_ACCOUNT", ""),
-        "密码": os.environ.get("XTP_TEST_PASSWORD", ""),
-        "客户号": int(os.environ.get("XTP_TEST_CLIENT_ID", "1")),
-        "行情地址": os.environ.get("XTP_TEST_QUOTE_HOST", ""),
-        "行情端口": int(os.environ.get("XTP_TEST_QUOTE_PORT", "0") or 0),
-        "交易地址": os.environ.get("XTP_TEST_TRADE_HOST", ""),
-        "交易端口": int(os.environ.get("XTP_TEST_TRADE_PORT", "0") or 0),
-        "行情协议": "TCP",
-        "授权码": os.environ.get("XTP_TEST_KEY", ""),
-        "日志级别": "INFO",
-    }
+# 2026-08-19 模块归位：build_xtp_setting 搬 strategy_framework/broker（hub/runner 双消费方）；
+# 此别名保 tests/scripts 旧 import 兼容
+from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
 
 
 def _warmup_history(symbol: str) -> list:
@@ -91,45 +49,6 @@ def _warmup_history(symbol: str) -> list:
 
 
 # ——— SA 稳定性加固（2026-08-17 稳定性检查 SA1/SA2，F-26/F-24/F-25/F-18）———
-
-def _guard(name: str):
-    """handler 包装：任何异常（用户策略代码/PG/风控 KeyError 等）只记日志不上抛。
-
-    vnpy EventEngine 事件线程对 handler 异常零保护（engine.py 只捕 Empty），一次异常=线程
-    静默死亡=永久失聪（F-26）。本包装把"失聪"降级为"跳过本条事件+告警日志"。
-    """
-    def deco(fn):
-        def wrapped(*args, **kwargs):
-            try:
-                return fn(*args, **kwargs)
-            except Exception:
-                logger.exception("handler %s 异常（已拦截，事件线程存活）", name)
-                try:
-                    _alert(f"策略任务 handler 异常: {name}", "事件已跳过，策略继续运行。详见 journalctl。")
-                except Exception:
-                    pass  # 守卫绝不放行任何异常（纵深防御）
-        return wrapped
-    return deco
-
-
-def _in_astock_session(now=None) -> bool:
-    """A 股交易时段（周一~周五 9:31-11:30 / 13:01-15:00）。
-
-    节假日不感知——调用方必须叠加"今日已收到过 tick"条件，防止假日误判断流。
-    """
-    import datetime as _dt
-    now = now or _dt.datetime.now()
-    if now.weekday() >= 5:
-        return False
-    hm = now.hour * 100 + now.minute
-    return (931 <= hm <= 1130) or (1301 <= hm <= 1500)
-
-
-def session_edge(cur: bool, was: bool) -> bool:
-    """交易时段进入沿（False→True）。staleness 基线在沿上清零：跨日/午休/竞价窗口
-    都不继承旧基线（S6 修订；盲审 C 简化：三处循环共用，勿内联各写一份）。"""
-    return cur and not was
-
 
 def _flush_positions(adapter, account_id, task_id) -> None:
     """ST2 持仓真相源写批（N 审 v2）：60s 循环取 query_position() 返回值，单事务覆盖式写。
@@ -170,29 +89,25 @@ def _flush_positions(adapter, account_id, task_id) -> None:
         logger.warning("ST2 持仓快照写批失败（不阻断）: %s", e)
 
 
-def _sd_notify(msg: str) -> None:
-    """systemd notify（喂 WATCHDOG 看门狗）。无 NOTIFY_SOCKET（本地/手工运行）时静默跳过。"""
-    addr = os.environ.get("NOTIFY_SOCKET")
-    if not addr:
-        return
-    try:
-        import socket
-        if addr.startswith("@"):
-            addr = "\0" + addr[1:]
-        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
-            s.connect(addr)
-            s.sendall(msg.encode())
-    except Exception:
-        pass  # 喂狗失败不杀主流程（systemd 会重启，靠 Restart 兜底）
+# 2026-08-19 模块归位：guard/sd_notify/session 来自 quant_common（本包禁止依赖告警层，
+# alert 回调在此注入——safe_notify 收编三处重复 try/except notify 模式）
+from src.quant_common.session import in_astock_session as _in_astock_session, session_edge
+from src.quant_common.guard import guard as _guard_base, sd_notify as _sd_notify
 
 
 def _alert(title: str, body: str = "") -> None:
-    """runner 侧告警：走通知中心（站内铃铛+外部推送），失败仅记日志绝不影响交易主流程。"""
-    try:
-        from src.alert_notify.notify import notify
-        notify("critical", "system", title, body)
-    except Exception as e:
-        logger.warning("告警发送失败（%s）: %s", title, e)
+    """runner 侧告警：never-raise（safe_notify），绝不影响交易主流程。"""
+    from src.alert_notify.notify import safe_notify
+    safe_notify("critical", title, body)
+
+
+def _guard(name):
+    """守卫+告警注入（quant_common.guard 是无告警纯版）。
+
+    alert 用 lambda 晚绑定模块全局 _alert——测试 patch src.strategy_runner.main._alert
+    对已装饰 handler 仍生效（P-S6 patch 语义；直接传 _alert 会在装饰期固化=假绿）。
+    """
+    return _guard_base(name, alert=lambda title, body="": _alert(title, body))
 
 
 def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,

@@ -255,17 +255,9 @@ def guard_self_deactivate(user_id: int) -> None:
                 raise ApiError(400, "LAST_ADMIN_PROTECTED", "最后一个管理员不可注销自己")
 
 
-def audit_log(actor: str, action: str, target: str = "", detail: str = "",
-              old_value: str = "", new_value: str = ""):
-    """写审计日志（含新旧值对比）。"""
-    init_users_table()
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO audit_log (actor, action, target, detail, old_value, new_value) "
-            "VALUES (%s,%s,%s,%s,%s,%s)",
-            (actor, action, target, detail, old_value, new_value),
-        )
-        conn.commit()
+# 2026-08-19 模块归位：audit_log 下沉 data_platform/audit（feishu_bot 曾因此反向 import 顶层）；
+# 此 re-export 保本模块旧调用方零改动
+from src.data_platform.audit import audit_log  # noqa: F401
 
 
 def _default_admin_password() -> str:

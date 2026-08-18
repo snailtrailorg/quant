@@ -833,7 +833,7 @@ def budget_alert_check():
     if not _is_trading_hours():
         return {"status": "skipped", "reason": "非交易时段"}
     try:
-        from src.web_api.main import check_budget_alerts
+        from src.llm_gateway.budget import check_budget_alerts
         result = check_budget_alerts()
         return {"status": "ok", "alerts": len(result.get("alerts", []))}
     except Exception as e:
@@ -893,7 +893,7 @@ def broker_health_check():
 @app.task(name="src.scheduler.tasks.email_outbox_sweep")
 def email_outbox_sweep():
     """发件箱扫描：重发到期待发邮件（指数退避由 next_attempt_at 控制，beat 每分钟调）。"""
-    from src.web_api.email_service import sweep
+    from src.email_service import sweep
     try:
         return {"processed": sweep(3)}
     except Exception as e:

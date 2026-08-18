@@ -21,7 +21,7 @@ def _smtp_config() -> tuple[str, int, str, str, str, str] | None:
     cfg = {}
     try:
         from src.data_platform.db import get_conn
-        from src.web_api.crypto_utils import decrypt
+        from src.quant_common.crypto import decrypt
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT key, value FROM system_config WHERE key LIKE 'smtp_%'")
@@ -283,7 +283,7 @@ ACTIVATION_TPL: dict[str, dict[str, str]] = {
 def normalize_lang(lang: str | None) -> str:
     """语言归一化：请求语言在已实现语言内则用之，否则回落 en（国际通用缺省）。"""
     lang = (lang or "").strip().lower()
-    from .terms import available_langs
+    from src.quant_common.terms import available_langs
     return lang if lang in available_langs() else "en"
 
 
@@ -298,7 +298,7 @@ def _render(tpl_table: dict, lang: str, **fields) -> tuple[str, str]:
 
 def _terms_stacked_html() -> str:
     """条款全语言纵向堆叠（注册表驱动，新增语言自动包含；引言双语固定说明）。"""
-    from .terms import get_terms_items
+    from src.quant_common.terms import get_terms_items
     parts = [
         '<p style="color: #666; font-size: 14px;">以下是《平台使用条款》，请务必认真阅读：<br/>'
         'Terms of Use in all available languages below. Please read carefully:</p>'

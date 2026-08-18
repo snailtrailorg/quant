@@ -34,7 +34,7 @@ from .auth import (
     invite_user, register_user, forgot_password, reset_password, change_password, verify_token,
     validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
 )
-from .email_service import send_invite_email, send_password_reset_email, send_activation_email, queue_email, try_row
+from src.email_service import send_invite_email, send_password_reset_email, send_activation_email, queue_email, try_row
 from .terms import get_terms, get_terms_items
 from .errors import ApiError
 
@@ -261,7 +261,7 @@ def smtp_config_save_api(body: dict = Body(...),
         int(port)
     except ValueError:
         raise ApiError(400, "SMTP_PORT_INVALID", "port 需为数字")
-    from .crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     values = {
         "smtp_host": str(body.get("host", "")).strip(),
         "smtp_port": port,
@@ -356,7 +356,7 @@ def update_system_config(key: str, body: dict = Body(...),
             value = str(value).strip()
             if not value:
                 raise ApiError(400, "CONFIG_PASSWORD_EMPTY", "password 型留空=不修改；如需更换请填新值")
-            from .crypto_utils import encrypt
+            from src.quant_common.crypto import encrypt
             value = encrypt(value)
         conn.execute(
             "UPDATE system_config SET value=%s, updated_at=now(), updated_by=%s WHERE key=%s",
@@ -1458,7 +1458,7 @@ def list_llm_models(payload: dict = Depends(require_perm("llm_config"))):
 
 @app.post("/api/llm-models")
 def create_llm_model(req: LLMModelReq, payload: dict = Depends(require_perm("llm_config"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.api_key) if req.api_key else ""
     with get_conn() as conn:
         cur = conn.execute(
@@ -1471,7 +1471,7 @@ def create_llm_model(req: LLMModelReq, payload: dict = Depends(require_perm("llm
 
 @app.post("/api/llm-models/{mid}")
 def update_llm_model(mid: int, req: LLMModelReq, payload: dict = Depends(require_perm("llm_config"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.api_key) if req.api_key else None
     with get_conn() as conn:
         if enc is not None:
@@ -1500,7 +1500,7 @@ def delete_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"
 
 @app.post("/api/llm-models/{mid}/test")
 def test_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"))):
-    from src.web_api.crypto_utils import decrypt
+    from src.quant_common.crypto import decrypt
     from openai import OpenAI
     with get_conn() as conn:
         cur = conn.execute("SELECT api_key_encrypted, base_url, model FROM llm_model_config WHERE id=%s", (mid,))
@@ -1611,7 +1611,7 @@ def feishu_delete(fid: int, payload: dict = Depends(require_perm("feishu_config"
 @app.post("/api/feishu/{fid}/test")
 def feishu_test(fid: int, payload: dict = Depends(require_perm("feishu_config"))):
     """测机器人连接。"""
-    from src.web_api.crypto_utils import decrypt
+    from src.quant_common.crypto import decrypt
     with get_conn() as conn:
         cur = conn.execute("SELECT app_id, app_secret_encrypted FROM feishu_config WHERE id=%s", (fid,))
         r = cur.fetchone()
@@ -1947,44 +1947,8 @@ class LlmBudgetReq(BaseModel):
     enabled: bool = True
 
 
-def check_budget_alerts() -> dict:
-    """检查所有 enabled budget，超阈值发告警。返回 {checked, alerts}（D5 #38）。"""
-    from src.alert_notify.channel import get_channel
-    alerts = []
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT id, provider, daily_token_limit, monthly_cost_limit, alert_threshold_pct, enabled "
-            "FROM llm_budget WHERE enabled=true"
-        )
-        budgets = cur.fetchall()
-    for b in budgets:
-        b_id, b_provider, b_daily_limit, b_monthly_cost, b_threshold, b_enabled = b
-        if not b_daily_limit:
-            continue
-        sql = "SELECT COALESCE(sum(input_tokens+output_tokens),0) FROM llm_usage WHERE ts::date=current_date"
-        params = []
-        if b_provider:
-            sql += " AND provider=%s"
-            params.append(b_provider)
-        with get_conn() as conn:
-            cur = conn.execute(sql, params)
-            today = cur.fetchone()[0] or 0
-        limit = b_daily_limit * b_threshold // 100
-        if today > limit:
-            provider_name = b_provider or "全局"
-            try:
-                ch = get_channel("wechat_work")
-                ch.send(
-                    title="LLM 预算预警",
-                    body=f"{provider_name} 今日 {today} token 超阈值 {limit}（{b_threshold}%）",
-                    level="warn",
-                )
-                sent = True
-            except Exception:
-                sent = False
-            alerts.append({"provider": provider_name, "today_tokens": today, "limit": b_daily_limit,
-                           "threshold": limit, "sent": sent})
-    return {"checked": len(budgets), "alerts": alerts}
+# 2026-08-19 模块归位：check_budget_alerts 搬 llm_gateway/budget（业务逻辑不寄生 HTTP 入口）
+from src.llm_gateway.budget import check_budget_alerts  # noqa: F401
 
 
 @app.get("/api/llm-budget")
@@ -2045,7 +2009,7 @@ def list_data_sources(payload: dict = Depends(require_role("viewer", "analyst", 
 
 @app.post("/api/data-sources")
 def create_data_source(req: DataSourceReq, payload: dict = Depends(require_role("admin"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
         cur = conn.execute(
@@ -2059,7 +2023,7 @@ def create_data_source(req: DataSourceReq, payload: dict = Depends(require_role(
 
 @app.post("/api/data-sources/{dsid}")
 def update_data_source(dsid: int, req: DataSourceReq, payload: dict = Depends(require_role("admin"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
         if enc is not None:
@@ -2164,7 +2128,7 @@ def list_channels(payload: dict = Depends(require_role("viewer", "analyst", "tra
 
 @app.post("/api/channels")
 def create_channel(req: ChannelReq, payload: dict = Depends(require_role("admin"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
         cur = conn.execute(
@@ -2178,7 +2142,7 @@ def create_channel(req: ChannelReq, payload: dict = Depends(require_role("admin"
 
 @app.post("/api/channels/{cid}")
 def update_channel(cid: int, req: ChannelReq, payload: dict = Depends(require_role("admin"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
         if enc is not None:
@@ -2204,7 +2168,7 @@ def delete_channel(cid: int, payload: dict = Depends(require_role("admin"))):
 @app.post("/api/channels/{cid}/test")
 def test_channel(cid: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     from src.alert_notify.channel import _REGISTRY
-    from src.web_api.crypto_utils import decrypt
+    from src.quant_common.crypto import decrypt
     with get_conn() as conn:
         cur = conn.execute("SELECT provider, credentials_encrypted FROM channel_config WHERE id=%s", (cid,))
         r = cur.fetchone()
@@ -2240,7 +2204,7 @@ def list_brokers(payload: dict = Depends(require_role("viewer", "analyst", "trad
 
 @app.post("/api/brokers")
 def create_broker(req: BrokerReq, payload: dict = Depends(require_role("admin"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
         cur = conn.execute(
@@ -2254,7 +2218,7 @@ def create_broker(req: BrokerReq, payload: dict = Depends(require_role("admin"))
 
 @app.post("/api/brokers/{bid}")
 def update_broker(bid: int, req: BrokerReq, payload: dict = Depends(require_role("admin"))):
-    from src.web_api.crypto_utils import encrypt
+    from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
         if enc is not None:

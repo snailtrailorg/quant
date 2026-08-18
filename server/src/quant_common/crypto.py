@@ -1,10 +1,8 @@
-"""密钥 AES 加密工具 -- S-MKT-003。
+"""加密工具（从 web_api/crypto_utils.py 归位，2026-08-19 P 审）。
 
-API key 加密入库，前端脱敏，仅支持重新录入。
+死代码 store_api_key/get_api_key（DB 耦合且全仓零调用）随迁删除——记录于 decisions.md。
 """
-
 from __future__ import annotations
-from src.data_platform.db import get_conn
 import os
 import base64
 import hashlib
@@ -17,7 +15,7 @@ load_dotenv()
 
 _logger = logging.getLogger("quant")
 
-# 从环境变量获取加密密钥（首次启动自动生成）
+
 def _get_encryption_key() -> bytes:
     key = os.environ.get("ENCRYPTION_KEY", "")
     if not key:
@@ -30,6 +28,7 @@ def _get_encryption_key() -> bytes:
 
 _fernet = None
 _fernet_lock = threading.Lock()
+
 
 def _get_fernet() -> Fernet:
     global _fernet
@@ -54,30 +53,3 @@ def mask(key: str, visible: int = 4) -> str:
     if len(key) <= visible:
         return "***"
     return key[:visible] + "***" + key[-2:]
-
-
-def store_api_key(name: str, exchange: str, api_key: str, api_secret: str = "") -> None:
-    """加密存储 API key 到 accounts 表。"""
-    import psycopg
-    enc_key = encrypt(api_key)
-    enc_secret = encrypt(api_secret) if api_secret else ""
-    hint = mask(api_key)
-    with get_conn() as conn:
-        conn.execute("SELECT 1 FROM accounts LIMIT 1")
-        conn.execute("""
-            INSERT INTO accounts (name, exchange, api_key_enc, api_secret_enc, api_key_hint)
-            VALUES (%s,%s,%s,%s,%s)
-            ON CONFLICT (id) DO UPDATE SET api_key_enc=EXCLUDED.api_key_enc, api_secret_enc=EXCLUDED.api_secret_enc, api_key_hint=EXCLUDED.api_key_hint
-        """, (name, exchange, enc_key, enc_secret, hint))
-        conn.commit()
-
-
-def get_api_key(account_id: int) -> tuple[str, str]:
-    """解密读取 API key（仅后端使用，前端不可见）。"""
-    import psycopg
-    with get_conn() as conn:
-        cur = conn.execute("SELECT api_key_enc, api_secret_enc FROM accounts WHERE id=%s", (account_id,))
-        row = cur.fetchone()
-        if not row:
-            return "", ""
-        return decrypt(row[0]) if row[0] else "", decrypt(row[1]) if row[1] else ""

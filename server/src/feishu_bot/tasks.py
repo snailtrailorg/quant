@@ -13,7 +13,7 @@ import lark_oapi as lark
 
 from src.scheduler.app import app as celery_app
 from src.data_platform.db import get_conn
-from src.web_api.crypto_utils import encrypt
+from src.quant_common.crypto import encrypt
 
 logger = logging.getLogger("feishu_bot")
 VALKEY_URL = os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4")

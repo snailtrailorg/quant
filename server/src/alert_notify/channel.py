@@ -87,7 +87,7 @@ def get_channel(provider: str) -> MessageChannel | None:
         return None
     try:
         from src.data_platform.db import get_conn
-        from src.web_api.crypto_utils import decrypt
+        from src.quant_common.crypto import decrypt
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT credentials_encrypted FROM channel_config "

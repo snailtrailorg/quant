@@ -123,7 +123,17 @@ def _write_trade_log(d, adapter, sid: str, symbol: str) -> None:
 def run(ctx: dict) -> None:
     """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen,
              warmup_pg, stop_check, reconcile, initial_capital, logger}"""
-    from src.strategy_runner.main import _guard, _sd_notify, _alert, _in_astock_session, session_edge
+    # 2026-08-19 归位：直连 quant_common（原经 strategy_runner.main——main↔hub_worker 互指
+    # 且连带加载入口模块级 vnpy import；Q 审：上一轮 replace 静默未中）
+    from src.quant_common.session import in_astock_session as _in_astock_session, session_edge
+    from src.quant_common.guard import guard as _guard_base, sd_notify as _sd_notify
+    from src.alert_notify.notify import safe_notify
+
+    def _alert(title: str, body: str = "") -> None:
+        safe_notify("critical", title, body)
+
+    def _guard(name):
+        return _guard_base(name, alert=lambda title, body="": _alert(title, body))
 
     r = _valkey()
     tid = ctx["tid"]

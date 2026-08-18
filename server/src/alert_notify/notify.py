@@ -100,6 +100,15 @@ def notify(level: Level, category: Category, title: str, body: str = "",
     return notif_id
 
 
+def safe_notify(level: Level, title: str, body: str = "") -> None:
+    """never-raise 包装（2026-08-19 模块归位 P 审：收编 runner/_alert、monitor._notify、
+    alert_failed 三处重复的 try/except notify 模式——调用方不再自裹）。"""
+    try:
+        notify(level, "system", title, body)
+    except Exception as e:
+        logger.warning("safe_notify 发送失败（吞掉，调用方主流程不受影响）: %s", e)
+
+
 def report(title: str, body: str, channel: str = "wechat_work") -> None:
     """订阅型报告分发（盘后报告等）：站内记 info + 外部照推（属用户订阅，不占主动推送规则）。"""
     notify("info", "system", title, body[:2000])

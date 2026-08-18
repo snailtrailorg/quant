@@ -29,7 +29,18 @@ try:
 except ImportError:
     EventEngine = None
 
-from src.strategy_runner.main import _guard, _sd_notify, _alert, _in_astock_session, session_edge  # SA 机制复用
+# 2026-08-19 模块归位：共享工具直连 quant_common（原寄生 strategy_runner.main——连带 vnpy 链）
+from src.quant_common.session import in_astock_session as _in_astock_session, session_edge
+from src.quant_common.guard import guard as _guard_base, sd_notify as _sd_notify
+from src.alert_notify.notify import safe_notify
+
+
+def _alert(title: str, body: str = "") -> None:
+    safe_notify("critical", title, body)
+
+
+def _guard(name):
+    return _guard_base(name, alert=lambda title, body="": _alert(title, body))  # 晚绑定保 patch 语义
 
 BAR_STREAM_PREFIX = "hub:bars:"
 LEASE_KEY = "hub:lease"
@@ -249,7 +260,7 @@ def main() -> None:
     # ——— 行情接入（ThinGateway + MdApi，零 TD）———
     from vnpy.trader.gateway import BaseGateway
     from vnpy_xtp.gateway.xtp_gateway import XtpMdApi
-    from src.strategy_runner.main import _build_xtp_setting
+    from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
 
     class ThinGateway(BaseGateway):
         """仅事件转发；7 个抽象方法全量 stub（hub 数据面永不交易，R-HALT1 代码级保证）。"""

@@ -27,7 +27,7 @@ def test_feishu_client_init_from_db():
     mock_conn.execute.return_value = mock_cur
 
     with patch("src.data_platform.db.get_conn", return_value=mock_conn), \
-         patch("src.web_api.crypto_utils.decrypt", return_value="decrypted_app_secret"):
+         patch("src.quant_common.crypto.decrypt", return_value="decrypted_app_secret"):
         client = FeishuClient()
 
     assert client.app_id == "cli_aafcd6f818b8dbd1"

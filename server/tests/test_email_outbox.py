@@ -1,5 +1,5 @@
 """发件箱指数退避单测：_backoff_seconds 曲线（1→2→4→8→16→30 分钟封顶）。"""
-from src.web_api.email_service import _backoff_seconds, MAX_ATTEMPTS
+from src.email_service import _backoff_seconds, MAX_ATTEMPTS
 
 
 def test_backoff_curve():
@@ -23,7 +23,7 @@ def test_smtp_config_db_only():
     """SMTP 仅读 DB（2026-08-14 弃 .env）：DB username 存在即用 DB 值，.env 不参与。"""
     import os
     from unittest.mock import patch, MagicMock
-    from src.web_api.email_service import _smtp_config
+    from src.email_service import _smtp_config
     mock = MagicMock()
     mock.__enter__.return_value = mock
     cur = MagicMock()
@@ -31,7 +31,7 @@ def test_smtp_config_db_only():
                                 ("smtp_host", "db.host"), ("smtp_from", "db@from")]
     mock.execute.return_value = cur
     with patch("src.data_platform.db.get_conn", return_value=mock), \
-         patch("src.web_api.crypto_utils.decrypt", return_value="dbpass"), \
+         patch("src.quant_common.crypto.decrypt", return_value="dbpass"), \
          patch.dict(os.environ, {"SMTP_USERNAME": "envuser", "SMTP_HOST": "env.host"}, clear=False):
         # .env 有值也不参与（单一真相源）；auto→587 推断为 starttls
         assert _smtp_config() == ("db.host", 587, "starttls", "dbuser@x.com", "dbpass", "db@from")
@@ -41,7 +41,7 @@ def test_smtp_config_unconfigured():
     """DB 无配置 → None；未开 SMTP_DEV 时发送返回错误（走重试→failed→铃铛）。"""
     import os
     from unittest.mock import patch, MagicMock
-    from src.web_api.email_service import _smtp_config, _send_email_sync
+    from src.email_service import _smtp_config, _send_email_sync
     mock = MagicMock()
     mock.__enter__.return_value = mock
     cur = MagicMock()
@@ -62,12 +62,12 @@ def test_smtp_port_465_uses_ssl():
     import os
     from unittest.mock import patch, MagicMock
     import smtplib
-    from src.web_api.email_service import _send_email_sync
+    from src.email_service import _send_email_sync
 
     conf = ("h", 465, "ssl", "u", "p", "f@x.com")
-    with patch("src.web_api.email_service._smtp_config", return_value=conf), \
-         patch("src.web_api.email_service.smtplib.SMTP_SSL") as ssl_cls, \
-         patch("src.web_api.email_service.smtplib.SMTP") as plain_cls:
+    with patch("src.email_service._smtp_config", return_value=conf), \
+         patch("src.email_service.smtplib.SMTP_SSL") as ssl_cls, \
+         patch("src.email_service.smtplib.SMTP") as plain_cls:
         _send_email_sync("a@b.c", "s", "<p>x</p>")
     ssl_cls.assert_called_once_with("h", 465, timeout=60)
     plain_cls.assert_not_called()
@@ -76,9 +76,9 @@ def test_smtp_port_465_uses_ssl():
     srv.login.assert_called_once()
 
     conf587 = ("h", 587, "starttls", "u", "p", "f@x.com")
-    with patch("src.web_api.email_service._smtp_config", return_value=conf587), \
-         patch("src.web_api.email_service.smtplib.SMTP_SSL") as ssl_cls2, \
-         patch("src.web_api.email_service.smtplib.SMTP") as plain_cls2:
+    with patch("src.email_service._smtp_config", return_value=conf587), \
+         patch("src.email_service.smtplib.SMTP_SSL") as ssl_cls2, \
+         patch("src.email_service.smtplib.SMTP") as plain_cls2:
         _send_email_sync("a@b.c", "s", "<p>x</p>")
     plain_cls2.assert_called_once_with("h", 587, timeout=60)
     ssl_cls2.assert_not_called()

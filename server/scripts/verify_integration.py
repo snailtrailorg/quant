@@ -29,7 +29,8 @@ def verify_strategy_runner():
     """验证 strategy_runner 模块可导入。"""
     print("\n=== 1. strategy_runner ===")
     try:
-        from src.strategy_runner.main import _build_xtp_setting, _warmup_history, main
+        from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
+        from src.strategy_runner.main import _warmup_history, main
         check("模块导入", True, "src.strategy_runner.main 成功导入")
     except ImportError as e:
         check("模块导入", False, str(e))

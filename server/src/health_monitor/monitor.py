@@ -49,24 +49,13 @@ def report_schema_findings(findings: dict) -> None:
     _write_event("schema_drift", "database", "critical", detail)
 
 
-def _in_session() -> bool:
-    """A 股交易时段（本地轻量副本，与 strategy_runner._in_astock_session 同步维护——
-    此处不能 import strategy_runner.main：会把 vnpy 拉进 celery worker）。"""
-    import datetime as _dt
-    now = _dt.datetime.now()
-    if now.weekday() >= 5:
-        return False
-    hm = now.hour * 100 + now.minute
-    return (931 <= hm <= 1130) or (1301 <= hm <= 1500)
+from src.quant_common.session import in_astock_session as _in_session  # 2026-08-19 归位：删本地复制体
 
 
 def _notify(severity: str, title: str, body: str) -> None:
-    try:
-        from src.alert_notify.notify import notify
-        # critical 走 system 类——should_push_external 已覆盖 system+critical 外推（D-F6）
-        notify("critical" if severity == "critical" else "warn", "system", title, body)
-    except Exception as e:
-        logger.warning("告警发送失败: %s", e)
+    """safe_notify 化（P 审：收编三处重复 try/except notify）——critical 走 system 类外推（D-F6）。"""
+    from src.alert_notify.notify import safe_notify
+    safe_notify("critical" if severity == "critical" else "warn", title, body)
 
 
 def _write_event(rule_id: str, component: str, severity: str, detail: str) -> None:

@@ -14,7 +14,7 @@ def test_tushare_env_fallback():
 def test_tushare_db_token_decrypt():
     """有 DB 配置，token 解密"""
     from src.data_platform.data_source import TushareDataSource
-    with patch("src.web_api.crypto_utils.decrypt", return_value="db-token"):
+    with patch("src.quant_common.crypto.decrypt", return_value="db-token"):
         ds = TushareDataSource(credentials_encrypted="enc-blob")
         assert ds._get_token() == "db-token"
 

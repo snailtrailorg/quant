@@ -1,6 +1,6 @@
 """N 语言兼容性单测：注册表驱动 + en 缺省回落（2026-08-15 架构约束：加语言=加条目，逻辑零改动）。"""
 from src.web_api.terms import get_terms_items, available_langs, LANG_NAMES, TERMS
-from src.web_api.email_service import normalize_lang, _render, INVITE_TPL
+from src.email_service import normalize_lang, _render, INVITE_TPL
 
 
 def test_terms_registry_driven():

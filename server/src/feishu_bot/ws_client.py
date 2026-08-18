@@ -12,7 +12,7 @@ import lark_oapi as lark
 from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
 from src.data_platform.db import get_conn
-from src.web_api.crypto_utils import decrypt
+from src.quant_common.crypto import decrypt
 from src.feishu_bot.bot import process_message_async
 
 logger = logging.getLogger("feishu_bot")

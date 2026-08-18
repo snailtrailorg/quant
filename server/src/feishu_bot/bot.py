@@ -40,7 +40,7 @@ class FeishuClient:
     def __init__(self):
         # 从 DB feishu_config 读凭证（弃 .env LARK_*，配置 DB 化）
         from src.data_platform.db import get_conn
-        from src.web_api.crypto_utils import decrypt
+        from src.quant_common.crypto import decrypt
         try:
             with get_conn() as conn:
                 cur = conn.execute(
@@ -308,7 +308,7 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
         else:
             client.send_text(open_id, f"⚠️ 未知操作: {tool_name}")
         # 审计
-        from src.web_api.auth import audit_log
+        from src.data_platform.audit import audit_log
         audit_log(f"feishu:{open_id}", tool_name, detail=json.dumps(args))
     except Exception as e:
         client.send_text(open_id, f"❌ 执行失败: {e}")

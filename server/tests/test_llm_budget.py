@@ -23,7 +23,7 @@ def test_list_budget():
 
 def test_check_budget_alert():
     """超阈值（usage=9000 > limit 10000*80%=8000）-> 发告警。"""
-    from src.web_api.main import check_budget_alerts
+    from src.llm_gateway.budget import check_budget_alerts
     mock_conn = MagicMock()
     mock_conn.__enter__.return_value = mock_conn
     cur_budget = MagicMock()
@@ -31,20 +31,20 @@ def test_check_budget_alert():
     cur_usage = MagicMock()
     cur_usage.fetchone.return_value = (9000,)
     mock_conn.execute.side_effect = [cur_budget, cur_usage]
-    mock_channel = MagicMock()
-    mock_channel.send.return_value = True
-    with patch("src.web_api.main.get_conn", return_value=mock_conn), \
-         patch("src.alert_notify.channel.get_channel", return_value=mock_channel):
+    # 2026-08-19 归位后语义（P 建议）：预算告警走通知中心 notify（进站内铃铛），不再直推渠道
+    with patch("src.data_platform.db.get_conn", return_value=mock_conn), \
+         patch.object(__import__("src.alert_notify.notify", fromlist=["notify"]), "notify") as mock_notify:
         r = check_budget_alerts()
     assert r["checked"] >= 1
     assert len(r["alerts"]) >= 1
     assert r["alerts"][0]["sent"] is True
-    mock_channel.send.assert_called_once()
+    mock_notify.assert_called_once()
+    assert mock_notify.call_args.args[0] == "warn"
 
 
 def test_check_budget_no_alert():
     """未超阈值（usage=5000 < limit 8000）-> 不发告警。"""
-    from src.web_api.main import check_budget_alerts
+    from src.llm_gateway.budget import check_budget_alerts
     mock_conn = MagicMock()
     mock_conn.__enter__.return_value = mock_conn
     cur_budget = MagicMock()
@@ -52,9 +52,8 @@ def test_check_budget_no_alert():
     cur_usage = MagicMock()
     cur_usage.fetchone.return_value = (5000,)
     mock_conn.execute.side_effect = [cur_budget, cur_usage]
-    mock_channel = MagicMock()
-    with patch("src.web_api.main.get_conn", return_value=mock_conn), \
-         patch("src.alert_notify.channel.get_channel", return_value=mock_channel):
+    with patch("src.data_platform.db.get_conn", return_value=mock_conn), \
+         patch.object(__import__("src.alert_notify.notify", fromlist=["notify"]), "notify") as mock_notify:
         r = check_budget_alerts()
     assert len(r["alerts"]) == 0
-    mock_channel.send.assert_not_called()
+    mock_notify.assert_not_called()

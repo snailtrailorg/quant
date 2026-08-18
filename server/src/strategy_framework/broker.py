@@ -38,7 +38,7 @@ class _BaseBroker(Broker):
         if not self._cred_enc:
             return {}
         try:
-            from src.web_api.crypto_utils import decrypt
+            from src.quant_common.crypto import decrypt
             raw = decrypt(self._cred_enc)
             return json.loads(raw) if raw else {}
         except Exception as e:
@@ -103,3 +103,49 @@ def record_broker_usage(provider: str, action: str, symbol: str = "", success: b
             conn.commit()
     except Exception as e:
         logger.warning(f"broker_usage 写失败: {e}")
+
+
+def build_xtp_setting() -> dict:
+    """组装 vnpy XtpGateway SETTING（中文 key）。Broker DB 优先（PI3），.env XTP_TEST_* fallback。
+
+    2026-08-19 从 strategy_runner.main 归位（hub/runner 双消费方；无 vnpy import——中文 key
+    是普通字符串，层序不破）。
+    """
+    import logging
+    import os
+    logger = logging.getLogger("strategy_framework")
+    try:
+        broker = get_broker("xtp")
+        if broker:
+            cred = broker.get_credentials()
+            params = broker._params or {}
+            if cred.get("app_id"):
+                return {
+                    "账号": cred.get("app_id", ""),
+                    "密码": cred.get("app_secret", ""),
+                    "客户号": int(cred.get("client_id", params.get("client_id", 1)) or 1),
+                    "行情地址": params.get("md_host", ""),
+                    "行情端口": int(params.get("md_port", 0) or 0),
+                    "交易地址": params.get("td_host", ""),
+                    "交易端口": int(params.get("td_port", 0) or 0),
+                    "行情协议": "TCP",
+                    "授权码": cred.get("auth_code", ""),
+                    "日志级别": "INFO",
+                }
+    except Exception as e:
+        logger.warning("Broker DB 取 XTP 凭证失败，fallback .env: %s", e)
+
+    from dotenv import load_dotenv
+    load_dotenv()
+    return {
+        "账号": os.environ.get("XTP_TEST_ACCOUNT", ""),
+        "密码": os.environ.get("XTP_TEST_PASSWORD", ""),
+        "客户号": int(os.environ.get("XTP_TEST_CLIENT_ID", "1")),
+        "行情地址": os.environ.get("XTP_TEST_QUOTE_HOST", ""),
+        "行情端口": int(os.environ.get("XTP_TEST_QUOTE_PORT", "0") or 0),
+        "交易地址": os.environ.get("XTP_TEST_TRADE_HOST", ""),
+        "交易端口": int(os.environ.get("XTP_TEST_TRADE_PORT", "0") or 0),
+        "行情协议": "TCP",
+        "授权码": os.environ.get("XTP_TEST_KEY", ""),
+        "日志级别": "INFO",
+    }
