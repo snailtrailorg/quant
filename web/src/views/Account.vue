@@ -163,10 +163,10 @@ const onInvite = async () => {
 onMounted(load)
 
 const onRoleChange = async (uid, role) => {
-  try { await api.put(`/user/${uid}?role=${role}`); ElMessage.success(t('account.roleChanged')) } catch (e) { ElMessage.error(apiErr(e, t('account.roleChangeFailed'))); await load() }
+  try { await api.post(`/user/${uid}?role=${role}`); ElMessage.success(t('account.roleChanged')) } catch (e) { ElMessage.error(apiErr(e, t('account.roleChangeFailed'))); await load() }
 }
 const onToggleEnabled = async (row) => {
-  try { await api.put(`/user/${row.id}?enabled=${!row.enabled}`); ElMessage.success(row.enabled ? t('common.disabled') : t('common.enabled')); await load() } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))); await load() }
+  try { await api.post(`/user/${row.id}?enabled=${!row.enabled}`); ElMessage.success(row.enabled ? t('common.disabled') : t('common.enabled')); await load() } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))); await load() }
 }
 const onDeleteUser = async (row) => {
   try {

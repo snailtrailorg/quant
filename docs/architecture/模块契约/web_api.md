@@ -37,26 +37,26 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 系统 | `/health` | GET | 无 | 健康检查 |
 | 认证 | `/api/auth/*` | POST/GET | viewer+（部分 user_mgmt） | login/me/logout/invite/invite/verify/register/forgot/reset/change-password |
 | 用户管理 | `/api/user` | POST/GET | user_mgmt（Admin） | create/list 用户 |
-| 策略 | `/api/strategy` `/api/strategy/{sid}/{start,stop,verify}` | GET/POST/PUT/POST | viewer+ / strategy_control | CRUD + 启停 + 回测验证标记 |
+| 策略 | `/api/strategy` `/api/strategy/{sid}/{start,stop,verify}` | GET/POST/POST/POST | viewer+ / strategy_control | CRUD + 启停 + 回测验证标记 |
 | 持仓/盈亏/订单/账户 | `/api/position` `/api/pnl` `/api/orders` `/api/account` `/api/account/{aid}` | GET | viewer+ | 读查询（XTP query） |
 | 日志/告警 | `/api/log` `/api/alert` | GET | viewer+ | 系统/告警日志 |
 | **聊天（AI）** | `/api/chat` | POST | viewer+ | `gateway.chat(tools=READ_TOOLS, caller="web_chat")` |
 | **WS 流式（AI）** | `/ws/chat` | WS | viewer+ | `gateway.chat_stream`（D1） |
 | A股分析 | `/api/astock/selection` | GET | viewer+ | `DailySelectionEngine.run` |
 | 风控 | `/api/risk/state` `/api/risk/halt` `/api/risk/resume` | GET/POST | viewer+ / halt | RiskControl 查/熔断/恢复 |
-| 实盘开关 | `/api/live-trading` `/api/live-trading/{market}` | GET/PUT | viewer+ / strategy_control | 三级第二级（5 分项） |
-| LLM模型管理 | `/api/llm-models` `/api/llm-models/{mid}/{test}` | GET/POST/PUT/DELETE | admin | CRUD + 测试 + reload_models |
-| 飞书 | `/api/feishu/{list,connect,status,{fid}/{start,stop,test}}` `/api/feishu/{fid}` | GET/POST/PUT/DELETE | admin | 多机器人管理 |
-| 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/PUT/DELETE | viewer+ / strategy_control | 同步配置 + 触发 + 标的 + 进度 |
+| 实盘开关 | `/api/live-trading` `/api/live-trading/{market}` | GET/POST | viewer+ / strategy_control | 三级第二级（5 分项） |
+| LLM模型管理 | `/api/llm-models` `/api/llm-models/{mid}/{test}` | GET/POST/POST/DELETE | admin | CRUD + 测试 + reload_models |
+| 飞书 | `/api/feishu/{list,connect,status,{fid}/{start,stop,test}}` `/api/feishu/{fid}` | GET/POST/POST/DELETE | admin | 多机器人管理 |
+| 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/POST/DELETE | viewer+ / strategy_control | 同步配置 + 触发 + 标的 + 进度 |
 | K线 | `/api/kline/{symbol}` | GET | viewer+ | `get_bars` + `to_vt_symbol` |
 | 筛选 | `/api/screen/{astock,cb,etf}` | GET | viewer+ | 标的筛选（daily_basic） |
 | **LLM用量** | `/api/llm-usage/summary` | GET | viewer+ | 今日/本月/7天趋势（llm_usage 聚合） |
-| 数据源管理 | `/api/data-sources` `/api/data-sources/{dsid}/{test}` | GET/POST/PUT/DELETE | admin | PT3（data_source_config CRUD） |
+| 数据源管理 | `/api/data-sources` `/api/data-sources/{dsid}/{test}` | GET/POST/POST/DELETE | admin | PT3（data_source_config CRUD） |
 | 后台任务 | `/api/tasks` `/api/tasks/{task_id}/{terminate,force-delete}` `/api/tasks/detect-stuck` | GET/POST | viewer+ | PT1（list/get/终止/强删/卡死检测） |
-| 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/PUT/DELETE | admin | PT4（channel_config CRUD） |
-| 交易通道 | `/api/brokers` `/api/brokers/{bid}/{test}` | GET/POST/PUT/DELETE | admin | PT5（broker_config CRUD） |
-| 风控规则 | `/api/risk-rules` `/api/risk-rules/{types,{rid}}` | GET/POST/PUT/DELETE | admin | PT6（risk_rules CRUD） |
-| 因子 | `/api/factors` `/api/factors/{name}` `/api/factors/validate` | GET/POST/PUT/DELETE | viewer+ / strategy_control | 因子 CRUD（预置+自定义）+ 代码校验 |
+| 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/POST/DELETE | admin | PT4（channel_config CRUD） |
+| 交易通道 | `/api/brokers` `/api/brokers/{bid}/{test}` | GET/POST/POST/DELETE | admin | PT5（broker_config CRUD） |
+| 风控规则 | `/api/risk-rules` `/api/risk-rules/{types,{rid}}` | GET/POST/POST/DELETE | admin | PT6（risk_rules CRUD） |
+| 因子 | `/api/factors` `/api/factors/{name}` `/api/factors/validate` | GET/POST/POST/DELETE | viewer+ / strategy_control | 因子 CRUD（预置+自定义）+ 代码校验 |
 | 策略校验 | `/api/strategy/validate-python` `/api/strategy/validate-params` | POST | analyst+ | Python 代码 AST 校验 + parameter_defs 校验 |
 | **实盘任务** | `/api/live-task` `/api/live-task/{tid}/{start,stop}` `/api/live-task/{tid}` | GET/POST/DELETE | viewer+ / strategy_control | 策略与标的分离（live_task CRUD，一标的一进程） |
 | 对账 | `/api/reconcile` | GET | viewer+ | `scheduler.reconcile_three_books`（三账） |
@@ -142,10 +142,10 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 | 表 | 写（端点） | 读（端点） |
 |---|---|---|
 | `users` / `audit_log` | auth（create_user/invite/register + audit_log） | /api/user / /api/audit |
-| `strategy_config` | /api/strategy POST/PUT | /api/strategy GET + /api/live-task POST（读快照） |
+| `strategy_config` | /api/strategy POST/POST | /api/strategy GET + /api/live-task POST（读快照） |
 | `live_task` | /api/live-task POST/DELETE + start/stop | /api/live-task GET + strategy_runner 启动读 |
-| `factor_def` | /api/factors POST/PUT/DELETE | /api/factors GET + load_factors_from_db |
-| `live_trading_config` | /api/live-trading/{market} PUT | /api/live-trading GET |
+| `factor_def` | /api/factors POST/POST/DELETE | /api/factors GET + load_factors_from_db |
+| `live_trading_config` | /api/live-trading/{market} POST | /api/live-trading GET |
 | `llm_model_config` | /api/llm-models CRUD | gateway._load_models_from_db（间接） |
 | `llm_usage` | gateway._log_usage（间接） | /api/llm-usage/summary |
 | `llm_budget` | D5 端点待加 | D5 告警逻辑待 |
@@ -200,7 +200,7 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 
 ### D4 日志归因 / D5 预算端点（待加）
 - D4：`/api/log/analyze`（POST，传日志片段 -> gateway.chat 归因，caller="log_analyze"）
-- D5：`/api/llm-budget`（GET/PUT）+ 告警逻辑（llm_usage 聚合 vs llm_budget 阈值 -> MessageChannel）
+- D5：`/api/llm-budget`（GET/POST）+ 告警逻辑（llm_usage 聚合 vs llm_budget 阈值 -> MessageChannel）
 - 两者均加在 main.py，参照 `/api/chat` + `/api/llm-usage/summary` 模式
 
 ---

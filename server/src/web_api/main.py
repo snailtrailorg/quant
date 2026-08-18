@@ -242,7 +242,7 @@ def smtp_config_api(payload: dict = Depends(require_perm("user_mgmt"))):
     }
 
 
-@app.put("/api/smtp-config")
+@app.post("/api/smtp-config")
 def smtp_config_save_api(body: dict = Body(...),
                          payload: dict = Depends(require_perm("user_mgmt"))):
     """邮件发信配置整组保存。password 留空=保持不变；security ∈ auto/ssl/starttls。"""
@@ -319,7 +319,7 @@ def list_system_config(payload: dict = Depends(require_role("viewer", "analyst",
     return {"items": items}
 
 
-@app.put("/api/system-config/{key}")
+@app.post("/api/system-config/{key}")
 def update_system_config(key: str, body: dict = Body(...),
                           payload: dict = Depends(require_role("admin"))):
     """更新系统配置（仅 admin）。部分 key 支持动态生效（如 celery_concurrency）。
@@ -445,7 +445,7 @@ def profile_api(payload: dict = Depends(require_role("viewer", "analyst", "trade
     return {"username": r[0], "nickname": r[1], "role": r[2], "avatar_url": r[3], "email": r[4]}
 
 
-@app.put("/api/user/profile")
+@app.post("/api/user/profile")
 def profile_update_api(body: dict = Body(...),
                        payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """更新昵称（批次C；仅昵称可自助改，角色/用户名只读）。"""
@@ -670,7 +670,7 @@ def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
              "last_login_at": str(r[8])[:19] if r[8] else None} for r in rows]
 
 
-@app.put("/api/user/{uid}")
+@app.post("/api/user/{uid}")
 def update_user(uid: int, role: str = None, enabled: bool = None,
                 payload: dict = Depends(require_perm("user_mgmt"))):
     """改用户角色/禁用。保护：不能动自己（末位 admin 由 user_mgmt=admin-only + 不动自己 隐式保证）。"""
@@ -735,7 +735,35 @@ def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("s
     return {"id": req.id, "status": "created"}
 
 
-@app.put("/api/strategy/{sid}")
+@app.post("/api/strategy/validate-python")
+def validate_python_code(code: dict = Body(...), payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+    """校验 Python 策略代码：语法检查 + AST 安全校验（#15）。"""
+    from src.strategy_framework.strategy import _check_ast_blacklist
+    code_str = code.get("code", "")
+    forbidden = _check_ast_blacklist(code_str)
+    if forbidden:
+        return {"valid": False, "error": forbidden}
+    return {"valid": True}
+
+@app.post("/api/strategy/validate-params")
+def validate_params_api(body: dict = Body(...),
+                        payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+    """校验策略参数定义 + 参数值（parameter_defs 系统）。"""
+    from src.strategy_framework.strategy import (
+        validate_parameter_defs, validate_params_against_defs, build_default_params
+    )
+    defs = body.get("parameter_defs", [])
+    params = body.get("params", {})
+    err = validate_parameter_defs(defs)
+    if err:
+        return {"valid": False, "error": err}
+    err = validate_params_against_defs(params, defs)
+    if err:
+        return {"valid": False, "error": err}
+    return {"valid": True, "defaults": build_default_params(defs)}
+
+
+@app.post("/api/strategy/{sid}")
 def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(require_perm("strategy_control"))):
     """更新策略配置（含因子校验；Python 模式跳过因子校验）。"""
     # Python 模式（#15）跳过因子校验
@@ -821,35 +849,6 @@ def verify_strategy(sid: str, body: dict = Body(default={}), payload: dict = Dep
         conn.commit()
     audit_log(payload["username"], "verify_strategy", sid, detail="回测验证通过")
     return {"id": sid, "backtest_verified": True}
-
-
-@app.post("/api/strategy/validate-python")
-def validate_python_code(code: dict = Body(...), payload: dict = Depends(require_role("analyst", "trader", "admin"))):
-    """校验 Python 策略代码：语法检查 + AST 安全校验（#15）。"""
-    from src.strategy_framework.strategy import _check_ast_blacklist
-    code_str = code.get("code", "")
-    forbidden = _check_ast_blacklist(code_str)
-    if forbidden:
-        return {"valid": False, "error": forbidden}
-    return {"valid": True}
-
-
-@app.post("/api/strategy/validate-params")
-def validate_params_api(body: dict = Body(...),
-                        payload: dict = Depends(require_role("analyst", "trader", "admin"))):
-    """校验策略参数定义 + 参数值（parameter_defs 系统）。"""
-    from src.strategy_framework.strategy import (
-        validate_parameter_defs, validate_params_against_defs, build_default_params
-    )
-    defs = body.get("parameter_defs", [])
-    params = body.get("params", {})
-    err = validate_parameter_defs(defs)
-    if err:
-        return {"valid": False, "error": err}
-    err = validate_params_against_defs(params, defs)
-    if err:
-        return {"valid": False, "error": err}
-    return {"valid": True, "defaults": build_default_params(defs)}
 
 
 # --- 实盘任务（live_task，策略与标的分离） ---
@@ -1095,7 +1094,7 @@ def create_account(req: dict = Body(...), payload: dict = Depends(require_perm("
         return {"id": cur.fetchone()[0]}
 
 
-@app.put("/api/account/{aid}")
+@app.post("/api/account/{aid}")
 def update_account(aid: int, req: dict = Body(...), payload: dict = Depends(require_perm("account_keys"))):
     """P4-5 更新账户。"""
     with get_conn() as conn:
@@ -1384,7 +1383,7 @@ def list_live_trading(payload: dict = Depends(require_role("viewer", "analyst", 
     }
 
 
-@app.put("/api/live-trading/{market}")
+@app.post("/api/live-trading/{market}")
 def update_live_trading(market: str, enabled: bool = Query(...),
                         payload: dict = Depends(require_perm("live_trading_control"))):
     """开/关某品种实盘分项（trader/admin）。需 .env 总闸也开才真生效。"""
@@ -1440,7 +1439,7 @@ def create_llm_model(req: LLMModelReq, payload: dict = Depends(require_perm("llm
     return {"id": cur.fetchone()[0]}
 
 
-@app.put("/api/llm-models/{mid}")
+@app.post("/api/llm-models/{mid}")
 def update_llm_model(mid: int, req: LLMModelReq, payload: dict = Depends(require_perm("llm_config"))):
     from src.web_api.crypto_utils import encrypt
     enc = encrypt(req.api_key) if req.api_key else None
@@ -1550,7 +1549,7 @@ class FeishuUpdateReq(BaseModel):
     role: str | None = None
     description: str | None = None
 
-@app.put("/api/feishu/{fid}")
+@app.post("/api/feishu/{fid}")
 def feishu_update(fid: int, req: FeishuUpdateReq, payload: dict = Depends(require_perm("feishu_config"))):
     """改机器人配置（名称/角色/备注）。修改后 role 对后续消息生效。"""
     with get_conn() as conn:
@@ -1608,7 +1607,7 @@ def list_sync_config(payload: dict = Depends(require_role("viewer", "analyst", "
     return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "data_type": r[4], "sync_mode": r[5], "schedule": r[6], "trade_day_filter": r[7], "enabled": r[8], "last_sync_date": r[9], "last_sync_ts": str(r[10]) if r[10] else None, "last_sync_count": r[11], "last_status": r[12], "description": r[13]} for r in rows]
 
 
-@app.put("/api/sync/config/{sid}")
+@app.post("/api/sync/config/{sid}")
 def update_sync_config_api(sid: str, body: dict, payload: dict = Depends(require_perm("data_sync"))):
     with get_conn() as conn:
         conn.execute("UPDATE sync_config SET schedule=%s, enabled=%s, trade_day_filter=%s WHERE id=%s",
@@ -1779,9 +1778,16 @@ def delete_sync_data_api(sid: str, payload: dict = Depends(require_perm("data_sy
 @app.get("/api/sync/log")
 def get_sync_logs_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, sync_id, mode, start, end, pulled, saved, status, ts FROM sync_log ORDER BY ts DESC LIMIT 100")
+        # 列名对齐写入侧（engine._log）：start_date/end_date/rows_pulled/rows_saved——
+        # 原查询写成 start/end（PG 保留字+列不存在）→ 端点自出生即 500，2026-08-18 生产验证顺带发现
+        cur = conn.execute(
+            "SELECT id, sync_id, mode, start_date, end_date, rows_pulled, rows_saved, "
+            "duration_ms, status, ts FROM sync_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
-    return [{"id": r[0], "sync_id": r[1], "mode": r[2], "start": r[3], "end": r[4], "pulled": r[5], "saved": r[6], "status": r[7], "ts": str(r[8]) if r[8] else None} for r in rows]
+    return [{"id": r[0], "sync_id": r[1], "mode": r[2],
+             "start": str(r[3]) if r[3] else None, "end": str(r[4]) if r[4] else None,
+             "rows_pulled": r[5], "rows_saved": r[6], "duration_ms": r[7],
+             "status": r[8], "ts": str(r[9]) if r[9] else None} for r in rows]
 
 
 @app.get("/api/kline/{symbol}")
@@ -1966,22 +1972,6 @@ def list_llm_budget(payload: dict = Depends(require_role("viewer", "analyst", "t
              "updated_at": str(r[6]) if r[6] else None} for r in rows]
 
 
-@app.put("/api/llm-budget/{bid}")
-def update_llm_budget(bid: int, req: LlmBudgetReq,
-                      payload: dict = Depends(require_role("admin"))):
-    """更新预算配置（P3-13 权限修正：admin only）。"""
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE llm_budget SET provider=%s, daily_token_limit=%s, monthly_cost_limit=%s, "
-            "alert_threshold_pct=%s, enabled=%s, updated_at=now() WHERE id=%s",
-            (req.provider, req.daily_token_limit, req.monthly_cost_limit,
-             req.alert_threshold_pct, req.enabled, bid),
-        )
-        conn.commit()
-    audit_log(payload["username"], "update_llm_budget", str(bid))
-    return {"ok": True}
-
-
 @app.post("/api/llm-budget/check")
 def check_budget(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """手动触发预算告警检查。"""
@@ -1996,6 +1986,21 @@ class DataSourceReq(BaseModel):
     params: str | None = None
     usage_limit: int | None = None
     enabled: bool = True
+
+@app.post("/api/llm-budget/{bid}")
+def update_llm_budget(bid: int, req: LlmBudgetReq,
+                      payload: dict = Depends(require_role("admin"))):
+    """更新预算配置（P3-13 权限修正：admin only）。"""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE llm_budget SET provider=%s, daily_token_limit=%s, monthly_cost_limit=%s, "
+            "alert_threshold_pct=%s, enabled=%s, updated_at=now() WHERE id=%s",
+            (req.provider, req.daily_token_limit, req.monthly_cost_limit,
+             req.alert_threshold_pct, req.enabled, bid),
+        )
+        conn.commit()
+    audit_log(payload["username"], "update_llm_budget", str(bid))
+    return {"ok": True}
 
 
 @app.get("/api/data-sources")
@@ -2022,7 +2027,7 @@ def create_data_source(req: DataSourceReq, payload: dict = Depends(require_role(
     return {"id": cur.fetchone()[0]}
 
 
-@app.put("/api/data-sources/{dsid}")
+@app.post("/api/data-sources/{dsid}")
 def update_data_source(dsid: int, req: DataSourceReq, payload: dict = Depends(require_role("admin"))):
     from src.web_api.crypto_utils import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
@@ -2141,7 +2146,7 @@ def create_channel(req: ChannelReq, payload: dict = Depends(require_role("admin"
     return {"id": cur.fetchone()[0]}
 
 
-@app.put("/api/channels/{cid}")
+@app.post("/api/channels/{cid}")
 def update_channel(cid: int, req: ChannelReq, payload: dict = Depends(require_role("admin"))):
     from src.web_api.crypto_utils import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
@@ -2217,7 +2222,7 @@ def create_broker(req: BrokerReq, payload: dict = Depends(require_role("admin"))
     return {"id": cur.fetchone()[0]}
 
 
-@app.put("/api/brokers/{bid}")
+@app.post("/api/brokers/{bid}")
 def update_broker(bid: int, req: BrokerReq, payload: dict = Depends(require_role("admin"))):
     from src.web_api.crypto_utils import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
@@ -2294,7 +2299,7 @@ def create_risk_rule(req: RiskRuleReq, payload: dict = Depends(require_role("adm
     return {"id": cur.fetchone()[0]}
 
 
-@app.put("/api/risk-rules/{rid}")
+@app.post("/api/risk-rules/{rid}")
 def update_risk_rule(rid: int, req: RiskRuleReq, payload: dict = Depends(require_role("admin"))):
     with get_conn() as conn:
         conn.execute("UPDATE risk_rules SET name=%s, type=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
@@ -2342,7 +2347,25 @@ def create_factor_api(req: dict = Body(...),
         raise HTTPException(400, str(e))
 
 
-@app.put("/api/factors/{name}")
+@app.post("/api/factors/validate")
+def validate_factor_code_api(code: dict = Body(...),
+                              payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+    """校验因子 Python 代码。"""
+    from src.strategy_framework.factor import _check_ast_blacklist, _make_factor_class
+    code_str = code.get("code", "")
+    name = code.get("name", "test")
+    # AST 校验
+    forbidden = _check_ast_blacklist(code_str)
+    if forbidden:
+        return {"valid": False, "error": forbidden}
+    # 编译校验
+    try:
+        _make_factor_class(name, code_str, {})
+        return {"valid": True}
+    except ValueError as e:
+        return {"valid": False, "error": str(e)}
+
+@app.post("/api/factors/{name}")
 def update_factor_api(name: str, req: dict = Body(...),
                        payload: dict = Depends(require_perm("strategy_control"))):
     """更新自定义因子。"""
@@ -2372,25 +2395,6 @@ def delete_factor_api(name: str,
         raise HTTPException(404, f"因子 {name} 不存在或非自定义因子")
     audit_log(payload["username"], "delete_factor", name)
     return {"ok": True}
-
-
-@app.post("/api/factors/validate")
-def validate_factor_code_api(code: dict = Body(...),
-                              payload: dict = Depends(require_role("analyst", "trader", "admin"))):
-    """校验因子 Python 代码。"""
-    from src.strategy_framework.factor import _check_ast_blacklist, _make_factor_class
-    code_str = code.get("code", "")
-    name = code.get("name", "test")
-    # AST 校验
-    forbidden = _check_ast_blacklist(code_str)
-    if forbidden:
-        return {"valid": False, "error": forbidden}
-    # 编译校验
-    try:
-        _make_factor_class(name, code_str, {})
-        return {"valid": True}
-    except ValueError as e:
-        return {"valid": False, "error": str(e)}
 
 
 @app.get("/api/reconcile")

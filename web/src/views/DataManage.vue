@@ -38,7 +38,7 @@
       </el-table-column>
       <el-table-column :label="t('common.status')" width="80">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'running' ? 'warning' : row.status === 'idle' ? 'success' : 'danger'">
+          <el-tag :type="row.status === 'idle' ? 'success' : (row.status === 'running' || row.status === 'partial') ? 'warning' : 'danger'">
             {{ row.status === 'idle' ? t('dataManage.idle') : row.status === 'running' ? t('task.statusRunning') : row.status }}
           </el-tag>
         </template>
@@ -126,16 +126,16 @@ const goSymbols = row => router.push(`/data-manage/${row.id}`)
 const load = async () => {
   loading.value = true
   try {
-    configs.value = await api.get('/sync/config')
+    configs.value = (await api.get('/sync/config')).map(c => ({ ...c, status: c.last_status ?? 'idle' }))
     logs.value = await api.get('/sync/log')
   } finally { loading.value = false }
 }
 const onScheduleChange = async (row) => {
-  await api.put(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled, trade_day_filter: row.trade_day_filter })
+  await api.post(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled, trade_day_filter: row.trade_day_filter })
   ElMessage.success(t('dataManage.scheduleUpdated', { name: row.name }))
 }
 const onToggle = async (row) => {
-  await api.put(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled })
+  await api.post(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled })
   ElMessage.success(`${row.name} ${row.enabled ? t('common.enabled') : t('common.disabled')}`)
 }
 

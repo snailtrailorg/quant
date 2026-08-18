@@ -154,7 +154,7 @@ const saveNickname = async () => {
   if (!me.value.nickname?.trim()) { ElMessage.warning(t('profile.nicknameRequired')); return }
   savingNick.value = true
   try {
-    await api.put('/user/profile', { nickname: me.value.nickname.trim() })
+    await api.post('/user/profile', { nickname: me.value.nickname.trim() })
     ElMessage.success(t('common.saveSuccess'))
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { savingNick.value = false }

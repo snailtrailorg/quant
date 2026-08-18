@@ -33,7 +33,7 @@
 ```
 GET    /api/account                 # 列账户（密钥不返回明文）
 POST   /api/account                  # 新增（密钥加密存储）
-PUT    /api/account/{id}             # 改
+POST    /api/account/{id}             # 改
 DELETE /api/account/{id}
 ```
 
@@ -42,7 +42,7 @@ DELETE /api/account/{id}
 # 策略配置（配方，不绑标的）
 GET    /api/strategy                 # 列策略配置
 POST   /api/strategy                 # 新建（写 strategy_config）
-PUT    /api/strategy/{id}            # 改配置（含 parameter_defs 参数定义）
+POST    /api/strategy/{id}            # 改配置（含 parameter_defs 参数定义）
 POST   /api/strategy/{id}/start      # 旧路径（兼容）
 POST   /api/strategy/{id}/stop       # 旧路径（兼容）
 POST   /api/strategy/validate-python # Python 代码 AST 校验
@@ -58,7 +58,7 @@ DELETE /api/live-task/{id}           # 删（仅 stopped/error）
 # 因子库（预置 + 自定义 DB 因子）
 GET    /api/factors                  # 列因子（含 needs_history/is_custom）
 POST   /api/factors                  # 新建自定义因子（Python 代码）
-PUT    /api/factors/{name}           # 改
+POST    /api/factors/{name}           # 改
 DELETE /api/factors/{name}           # 删
 POST   /api/factors/validate         # 因子代码校验
 
@@ -88,7 +88,7 @@ WS     /ws/astock/realtime?symbol=   # 分钟级实时研判
 GET    /api/risk/state
 POST   /api/risk/halt                # 一键熔断
 POST   /api/risk/resume
-PUT    /api/risk/rules               # 改风控规则
+POST    /api/risk/rules               # 改风控规则
 GET    /api/risk/log                 # 风控触发记录
 ```
 
@@ -121,7 +121,7 @@ POST   /api/auth/logout
 GET    /api/auth/me                  # 当前用户+角色
 GET    /api/user                     # 列用户（Admin）
 POST   /api/user                     # 建用户（Admin）
-PUT    /api/user/{id}                # 改角色/密码（Admin）
+POST    /api/user/{id}                # 改角色/密码（Admin）
 DELETE /api/user/{id}                # 删用户（Admin）
 GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 ```
