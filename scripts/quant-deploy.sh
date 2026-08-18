@@ -146,6 +146,9 @@ while [[ $# -gt 0 ]]; do
         --server) SERVER="$2"; shift 2 ;;
         --user) USER="$2"; shift 2 ;;
         --dry-run) DRY_RUN=true; shift ;;
+        # F-15 显式覆盖（2026-08-18）：所有者明确指令时用——命令行参数形式可穿过 sudo
+        # 单命令规则（env_reset 会吃环境变量）；效果等同 FORCE_DEPLOY=1
+        --force) FORCE_DEPLOY=1; shift ;;
         -h|--help) usage; exit 0 ;;
         --*) echo "❌ 未知全局选项: $1" >&2; usage; exit 1 ;;
         *) break ;;
