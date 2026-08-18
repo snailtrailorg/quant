@@ -134,6 +134,7 @@ export default {
       reconcile: '三账对账',
       account: '账户管理',
       health: '健康检查',
+      help: '操作指南',
       logs: '运行日志',
       audit: '审计日志',
       channels: '消息通道',
@@ -190,6 +191,11 @@ export default {
       fillNewPwd: '请填新密码',
       success: '重置成功，请登录',
       failed: '重置失败',
+    },
+
+    help: {
+      index: '总览', factors: '因子', strategy: '策略', backtest: '回测', live: '实盘',
+      loadFailed: '帮助内容加载失败',
     },
     risk: {
       state: '风控状态',
@@ -1039,6 +1045,7 @@ export default {
       reconcile: 'Reconcile',
       account: 'Account',
       health: 'Health',
+      help: 'Guide',
       logs: 'Logs',
       audit: 'Audit',
       channels: 'Channels',
@@ -1095,6 +1102,11 @@ export default {
       fillNewPwd: 'Please enter new password',
       success: 'Reset successful, please sign in',
       failed: 'Reset failed',
+    },
+
+    help: {
+      index: 'Overview', factors: 'Factors', strategy: 'Strategy', backtest: 'Backtest', live: 'Live',
+      loadFailed: 'Failed to load help content',
     },
     risk: {
       state: 'Risk State',

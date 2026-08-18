@@ -39,6 +39,7 @@ const routes = [
 
       // 系统 (Admin)
       { path: 'account', name: 'account', component: () => import('./views/Account.vue'), meta: { admin: true } },
+      { path: 'help', name: 'help', component: () => import('./views/Help.vue') },
       { path: 'health', name: 'health', component: () => import('./views/Health.vue'), meta: { admin: true } },
       { path: 'logs', name: 'logs', component: () => import('./views/Logs.vue'), meta: { admin: true } },
       { path: 'data-manage', name: 'data-manage', component: () => import('./views/DataManage.vue'), meta: { admin: true } },

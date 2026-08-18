@@ -368,9 +368,14 @@ def run(ctx: dict) -> None:
                 except Exception as e:
                     logger.error("熔断撤单异常: %s", e)
             halt_state["was"] = halted_now
-            # factor:recalc（评审 S1）
+            # factor:recalc（评审 S1）；链条打磨#6：兼作因子热重载钩子
             try:
                 if r.get("factor:recalc:triggered"):
+                    try:
+                        from src.strategy_framework.factor import load_factors_from_db
+                        load_factors_from_db()
+                    except Exception:
+                        pass
                     _rewarm()
                     r.delete("factor:recalc:triggered")
                     logger.info("因子重算触发：重暖机 %d 根", len(history))

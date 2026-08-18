@@ -144,6 +144,28 @@ def startup():
 
 # ——— 标准暴露端（15-服务监控设计：k8s 探针约定 + Prometheus 格式）———
 
+# ——— 操作指导书（链条打磨批次 4：Web 内置帮助）———
+
+_GUIDE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "docs", "操作指导")  # server/docs/操作指导（随 rsync 部署；根 docs/ 不上传）
+_GUIDES = {"index": "索引.md", "factors": "01-因子.md", "strategy": "02-策略.md",
+           "backtest": "03-回测.md", "live": "04-实盘.md"}
+
+
+@app.get("/api/help/{topic}")
+def get_help_api(topic: str,
+                 payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """操作指导书内容（markdown 原文，前端渲染）。topic: index/factors/strategy/backtest/live。"""
+    fname = _GUIDES.get(topic)
+    if not fname:
+        raise ApiError(404, "HELP_NOT_FOUND", f"未知帮助主题: {topic}")
+    path = os.path.join(_GUIDE_DIR, fname)
+    try:
+        with open(path, encoding="utf-8") as f:
+            return {"topic": topic, "content": f.read()}
+    except FileNotFoundError:
+        return {"topic": topic, "content": "# 帮助内容未找到\n\n指导书文件缺失，请检查部署。", "missing": True}
+
+
 @app.get("/healthz")
 @app.get("/health")   # 兼容旧路径
 def healthz():

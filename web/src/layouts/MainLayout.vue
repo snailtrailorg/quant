@@ -50,6 +50,7 @@
           <el-menu-item index="/data-manage"><el-icon><Download /></el-icon>{{ t('nav.dataManage') }}</el-menu-item>
           <el-menu-item index="/data-integrity"><el-icon><DataAnalysis /></el-icon>{{ t('nav.dataIntegrity') }}</el-menu-item>
           <el-menu-item index="/health"><el-icon><FirstAidKit /></el-icon>{{ t('nav.health') }}</el-menu-item>
+          <el-menu-item index="/help"><el-icon><QuestionFilled /></el-icon>{{ t('nav.help') }}</el-menu-item>
           <el-menu-item index="/logs"><el-icon><Document /></el-icon>{{ t('nav.logs') }}</el-menu-item>
         </el-sub-menu>
 
@@ -121,6 +122,7 @@
 </template>
 
 <script setup>
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'

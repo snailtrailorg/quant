@@ -609,8 +609,14 @@ def main():
                 except Exception as e:
                     logger.warning("停止条件检查失败: %s", e)
             # 因子重算触发（#31，data_continuity_check 补采后设标记 -> 重填 history）
+            # 链条打磨#6：同标记兼作因子热重载钩子（Web 改因子后 runner 不重启即生效）
             try:
                 if _r.get("factor:recalc:triggered"):
+                    try:
+                        from src.strategy_framework.factor import load_factors_from_db
+                        load_factors_from_db()
+                    except Exception:
+                        pass
                     history[:] = _warmup_history(symbol)
                     _r.delete("factor:recalc:triggered")
                     logger.info("因子重算触发：重填 %d 根历史 bar", len(history))
