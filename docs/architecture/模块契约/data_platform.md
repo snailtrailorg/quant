@@ -23,6 +23,17 @@ server/src/data_platform/
 
 ## 一、public API（稳定，可跨模块调用）
 
+### schema 校验（#48 v2，2026-08-18）
+```python
+load_schema_expectations() -> dict[str, set[str]]   # 读 schema_expectations.txt（链生成物，禁手写）
+verify_schema() -> {"missing_tables": [...], "missing_columns": {t: [c]}, "expectations_missing"?: True}
+    # 纯函数单向存在性（expected ⊆ actual，不比型不比多余列）；单条 information_schema 查询。
+    # 告警路由归入口层（health_monitor.report_schema_findings）——db 层不引告警依赖。
+    # 四入口接线：web startup / strategy_runner / md_hub / celery 父进程
+```
+- **期望基线生成命令**（每加迁移必跑并提交，见 db.py docstring）：scratch schema 跑链 → dump → DROP SCHEMA
+- 不变量：`save_bars_overwrite` 与 `save_bars` 同款校验（大小写不敏感 freq + validate_bars）
+
 ### db.py
 ```python
 get_conn() -> psycopg.Connection
