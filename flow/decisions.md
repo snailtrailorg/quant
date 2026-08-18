@@ -5,6 +5,14 @@
 
 ---
 
+## 2026-08-19 · 模块归位：quant_common 底座 + 分层断言测试（消 6 条层级违规）
+
+- **起因**：用户质询"多轮修改后高内聚低耦合还成立吗"——依赖图实测 6 条层级违规，根因全是"共享工具/逻辑寄生错误位置"（crypto 在 web_api/时段工具在 runner/预算检查在 HTTP 入口/审计在 auth），非发散性腐化。
+- **决定**：建 `quant_common`（层 0，crypto 纯函数/session/guard 回调注入/terms 注册表，白名单 cryptography+dotenv）；audit_log→data_platform；build_xtp_setting→strategy_framework/broker；check_budget_alerts→llm_gateway（随迁 notify 化——预算预警从直推企微改进站内铃铛）；email_service 独立模块。原址留 re-export 保兼容。
+- **守门**：`test_layering.py` 4 断言（quant_common 纯度/层级禁上行含 lazy/历史违规边回归锁/第三方白名单）——分层从理念变测试，违规即 CI 红。
+- **豁免登记**（唯一双向环）：data_platform↔alert_notify（tushare 同步告警，横向服务，回调注入为未来优化项）。
+- **教训**：s.replace 无 assert=静默 no-op（hub_worker"直连"宣称不实被 Q 实锤）；py_compile+全绿测试都抓不到顶层双定义/静默未中的搬移——**assert 是搬移手术的必备缝合线**。
+
 ## 2026-08-18 · ST2 持仓真相源 + PUT→POST + schema 生成式基线（三联决策）
 
 - **ST2（消 D2）**：持仓真相=券商 query_position 快照（`position_snapshot` 当前状态表：每批同事务 DELETE+INSERT，空批可表示空仓）+ `position_refresh` 心跳（stale≠空仓）。写入点=60s 循环取返回值（**否决** EVENT_POSITION handler——direct 模式 vnpy init_query 每 4s 常推会散批+15 倍量级）；TD 断线守卫内不写假空仓。trade_log 推导降级为 /api/reconcile 第四比对（归因）。生产实证 direction=Net——端点不过滤 direction。
