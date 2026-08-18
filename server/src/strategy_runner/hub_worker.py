@@ -56,9 +56,30 @@ class BarMsgState:
         return "ok"
 
 
+def _hub_alive(r) -> bool:
+    """hub 心跳存在（TTL 内）。存储不可查时返回 True——断流会自然使 bar 过期，不在此路径阻断。"""
+    try:
+        return r.exists(HB_KEY) == 1
+    except Exception:
+        return True
+
+
+def buy_ok_check(frozen: dict, stats: dict, hub_alive: bool, now: float) -> bool:
+    """send_order 时刻事实检查（S6 修订，纯函数供测试）：BUY 需 bar 新鲜（<300s）+ hub 心跳在。
+    无日历依赖：非交易时段天然无信号下单，误拒方向安全。"""
+    if frozen.get("sticky"):
+        return False
+    fresh = stats.get("last_bar_wall", 0) and (now - stats["last_bar_wall"] < FROZEN_STALE_BAR_S)
+    return bool(fresh) and hub_alive
+
+
 def frozen_allows(action: str, frozen: dict) -> bool:
-    """冻结期 BUY 拒 / SELL 放（R-AV2，与 SB F-31 同哲学）。C2 网关与测试共用同一判定。"""
-    if not frozen.get("now"):
+    """sticky 冻结（数据污染事实：untrusted bar / 流 gap）期 BUY 拒 / SELL 放（R-AV2，与 SB F-31 同哲学）。
+
+    S6 修订（2026-08-18）：只判 sticky——动态新鲜度（hub 心跳/bar 停更）不再进 frozen["now"]
+    参与下单判定，改由 send_order 时刻的 buy_ok 事实检查完成（ctx 注入）。C2 网关与测试共用同一判定。
+    """
+    if not frozen.get("sticky"):
         return True
     return str(action).upper() == "SELL"
 
@@ -112,7 +133,9 @@ def run(ctx: dict) -> None:
     gname = f"task-{tid}"
     cname = f"w-{os.getpid()}"
     state = BarMsgState()
-    stats = {"last_bar_wall": 0.0, "bars": 0, "dropped_stale": 0, "dropped_dup": 0}
+    # last_bar_wall=进程累计；sess_bar_wall=时段内基线（S6 修订：沿上清零，昨夜回放 bar 不污染今晨判定）
+    stats = {"last_bar_wall": 0.0, "bars": 0, "dropped_stale": 0, "dropped_dup": 0,
+             "sess_bar_wall": 0.0}
     hb_task_key = f"quant:hb:task:{tid}"
 
     # ——— EVENT_TRADE → trade_log（评审 S1 四件套之一）———
@@ -158,6 +181,10 @@ def run(ctx: dict) -> None:
 
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
 
+    # ——— send_order 时刻事实检查（S6 修订）：BUY 需 bar 新鲜（<300s）+ hub 心跳在 ———
+    # 检查器由 ctx 注入 C2 网关（main._gated_send）；纯逻辑在模块级 buy_ok_check 供测试
+    ctx["buy_ok"] = lambda: buy_ok_check(frozen, stats, _hub_alive(r), time.time())
+
     def _alert_throttled(title: str, body: str) -> None:
         _alert(title, body)   # notify 自带 1min 同标题去重
 
@@ -200,6 +227,8 @@ def run(ctx: dict) -> None:
                "volume": float(fields["volume"] or 0)}
         sig = strategy.on_bar(bar, list(history))
         stats["last_bar_wall"] = time.time()
+        if _in_astock_session():
+            stats["sess_bar_wall"] = stats["last_bar_wall"]
         stats["bars"] += 1
         state.max_ts = ts_n
         history.append(bar)
@@ -224,6 +253,7 @@ def run(ctx: dict) -> None:
 
     # ——— 主循环（评审 S7 伪代码；TimeoutError 归 RedisError，评审 B3）———
     last_timer = 0.0
+    sess_was = _in_astock_session()   # 时段沿检测（S6 修订：沿上清 sess_bar_wall 基线）
     td_status_was = True
     halt_state = {"was": False}
     snap_counter = 0
@@ -246,18 +276,21 @@ def run(ctx: dict) -> None:
             if ctx["stop_check"]():
                 logger.info("任务 %s 收到停止，退出", tid)
                 break
-            # hub 心跳 + bar 停更 → 动态冻结（sticky 不被解，评审 C2）
-            try:
-                hub_alive = r.exists(HB_KEY) == 1
-            except Exception:
-                hub_alive = True
-            bar_stale = (_in_astock_session() and stats["bars"] > 0 and stats["last_bar_wall"]
-                         and time.time() - stats["last_bar_wall"] > FROZEN_STALE_BAR_S)
+            # hub 心跳 + bar 停更 → 盲视观测（S6 修订：frozen["now"] 只喂心跳/告警，
+            # 下单判定在 send_order 时刻由 buy_ok 完成；基线=时段内 bar，跨日/假日不误报）
+            sess_now = _in_astock_session()
+            if sess_now and not sess_was:
+                stats["sess_bar_wall"] = 0.0
+            sess_was = sess_now
+            hub_alive = _hub_alive(r)
+            bar_stale = (sess_now and stats["sess_bar_wall"]
+                         and time.time() - stats["sess_bar_wall"] > FROZEN_STALE_BAR_S)
             new_dyn = (not hub_alive) or bool(bar_stale)
             if new_dyn and not frozen.get("now"):
-                logger.error("冻结开仓（hub_alive=%s bar_stale=%s）", hub_alive, bar_stale)
-                _alert_throttled(f"任务 {tid} 冻结开仓（hub{'心跳丢失' if not hub_alive else ' bar 停更'}）",
-                                 "BUY 拒绝/SELL 放行，恢复自动解冻。")
+                logger.error("盲视状态（hub_alive=%s bar_stale=%s）——BUY 将在下单时刻被拒",
+                             hub_alive, bool(bar_stale))
+                _alert_throttled(f"任务 {tid} 盲视（hub{'心跳丢失' if not hub_alive else ' bar 停更'}）",
+                                 "BUY 在下单时刻被拒/SELL 放行；数据恢复自动解除。")
             frozen["now"] = new_dyn or bool(frozen.get("sticky"))
             # 心跳（R-OBS2）
             try:

@@ -135,9 +135,49 @@ def startup():
         logger.warning("startup: 加载自定义因子失败（表可能未创建）: %s", e)
 
 
-@app.get("/health")
-def health():
+# ——— 标准暴露端（15-服务监控设计：k8s 探针约定 + Prometheus 格式）———
+
+@app.get("/healthz")
+@app.get("/health")   # 兼容旧路径
+def healthz():
+    """liveness：进程活着即 ok（不查依赖）。nginx/Zabbix 外部探活用。"""
     return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/readyz")
+def readyz():
+    """readiness：依赖可达才 200（PG + Valkey），不可达 503。部署闸门/流量入口用。"""
+    checks: dict = {}
+    try:
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+        checks["postgres"] = "ok"
+    except Exception as e:
+        checks["postgres"] = f"fail: {str(e)[:80]}"
+    try:
+        import redis as _redis, os as _os
+        _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                              socket_timeout=2).ping()
+        checks["valkey"] = "ok"
+    except Exception as e:
+        checks["valkey"] = f"fail: {str(e)[:80]}"
+    ok = all(v == "ok" for v in checks.values())
+    if not ok:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=503, content={"status": "unavailable", "checks": checks})
+    return {"status": "ok", "checks": checks}
+
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus 文本格式（text/plain; version=0.0.4）——业界交换标准。
+
+    Zabbix HTTP agent（Prometheus pattern 预处理）/ Prometheus / Grafana 通吃。
+    Phase 2 Zabbix 落地时在 nginx 层限源（只许 NAS Zabbix/内网）。
+    """
+    from src.health_monitor.collector import collect, render_prometheus
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(render_prometheus(collect()), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 # --- 系统配置（system_config，admin 可改，部分项支持动态生效） ---

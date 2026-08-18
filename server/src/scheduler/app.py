@@ -134,5 +134,11 @@ app.conf.update(
             "schedule": 21600.0,
             "options": {"queue": "risk"},
         },
+        # 15-服务监控：30s 症状型判定（unit/依赖/心跳，沿检测去重），S6 修订配套
+        "health-monitor": {
+            "task": "src.scheduler.tasks.health_monitor_check",
+            "schedule": 30.0,
+            "options": {"queue": "risk"},
+        },
     },
 )

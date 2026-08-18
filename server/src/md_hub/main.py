@@ -276,7 +276,10 @@ def main() -> None:
     agg = MinuteAggregator()
     seqs: dict[str, int] = {}
     seqs_lock = threading.Lock()   # 评审 B4：事件线程 on_tick 与主循环 flush 并发 _publish
-    stats = {"ticks": 0, "bars": 0, "last_tick_wall": 0.0, "first_tick_today": False}
+    # ticks/bars=进程累计（观测）；sess_*=时段内基线（S6 修订：进入交易时段的沿上清零，
+    # 跨日/午休/竞价窗口都不继承旧基线——昨夜回放 tick 不再污染今晨断流判定）
+    stats = {"ticks": 0, "bars": 0, "last_tick_wall": 0.0,
+             "sess_ticks": 0, "sess_last_tick": 0.0}
     pgw = _PGWriter()
     pgw.start()
 
@@ -286,7 +289,9 @@ def main() -> None:
         symbol = _project_symbol(tick)
         stats["ticks"] += 1
         stats["last_tick_wall"] = time.time()
-        stats["first_tick_today"] = True
+        if _in_astock_session():
+            stats["sess_ticks"] += 1
+            stats["sess_last_tick"] = stats["last_tick_wall"]
         bar = agg.on_tick(symbol, tick)
         if bar:
             _publish(bar)
@@ -372,6 +377,7 @@ def main() -> None:
 
     # ——— 主循环 ———
     counter = 0
+    sess_was = _in_astock_session()   # 时段沿检测（S6 修订：沿上清 sess_* 基线）
     flush_points = {1130, 1500}   # 11:30:05 / 15:00:05 双 flush（评审 S2）
     try:
         while True:
@@ -414,21 +420,32 @@ def main() -> None:
                 r.hset(HB_KEY, mapping={
                     "pid": os.getpid(), "gen": gen, "subs": len(subscribed),
                     "ticks": stats["ticks"], "bars": stats["bars"],
+                    "sess_ticks": stats["sess_ticks"],
                     "last_tick_ts": stats["last_tick_wall"] or 0, "dropped_pg": pgw.dropped,
                 })
                 r.expire(HB_KEY, 90)
             except Exception as e:
                 logger.warning("心跳写失败: %s", e)
-            # tick 断流自杀（评审 S6：hub 活着但行情死=全场静默失明）
-            # 评审 C3：零 tick 主动告警（永不自杀——无基线；只叫人）
-            if _in_astock_session() and stats["ticks"] == 0 and counter % 30 == 0:
-                _alert("hub 交易时段零 tick（订阅可能未生效/XTP 异常）", f"订阅 {len(subscribed)} 个标的，请查 journalctl")
-            if _in_astock_session() and stats["first_tick_today"] and stats["last_tick_wall"]:
-                stale = time.time() - stats["last_tick_wall"]
-                if stale > 300:
-                    logger.critical("hub tick 断流 %.0fs，退出待 systemd 重启（重连+重订阅）", stale)
-                    _alert(f"行情 hub tick 断流 {stale:.0f}s，自动重启恢复", "")
-                    os._exit(1)
+            # tick 断流检测（S6 修订 2026-08-18：只告警不自杀——重启是 liveness 工具不是疗法，
+            # 数据缺席的原因在平台/网络/交易所规则，重启一概治不了；进程级故障由 watchdog/事件线程检查兜）
+            # 基线=本时段内首 tick（进入沿清零）：跨日回放 tick/假日/竞价静默窗口都不再误判
+            sess_now = _in_astock_session()
+            if sess_now and not sess_was:
+                stats["sess_ticks"] = 0
+                stats["sess_last_tick"] = 0.0
+            sess_was = sess_now
+            if sess_now and stats["sess_ticks"] == 0 and counter % 30 == 0:
+                _alert("hub 交易时段零 tick（订阅可能未生效/XTP 异常）",
+                       f"订阅 {len(subscribed)} 个标的。runbook：journalctl -u quant-md-hub@quant；"
+                       f"确认 MD 连接后可手动 systemctl restart quant-md-hub@quant。")
+            if sess_now and stats["sess_ticks"] > 0 and stats["sess_last_tick"]:
+                _stale = time.time() - stats["sess_last_tick"]
+                if _stale > 300 and counter % 6 == 0:   # 每 60s 一条，避免轰炸
+                    logger.critical("hub tick 断流 %.0fs（时段内已收 %d 条，只告警不自杀）",
+                                    _stale, stats["sess_ticks"])
+                    _alert(f"行情 hub tick 断流 {_stale:.0f}s",
+                           f"时段内已收 {stats['sess_ticks']} 条后断流。runbook：查 journalctl -u quant-md-hub@quant；"
+                           f"确认为行情源/网络问题后可手动 systemctl restart quant-md-hub@quant（worker 会自动暖机补缺）。")
     except KeyboardInterrupt:
         pass
     finally:

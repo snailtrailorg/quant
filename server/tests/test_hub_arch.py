@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from src.md_hub.main import MinuteAggregator
-from src.strategy_runner.hub_worker import BarMsgState, frozen_allows
+from src.strategy_runner.hub_worker import BarMsgState, frozen_allows, buy_ok_check
 
 TZ = ZoneInfo("Asia/Shanghai")
 
@@ -114,11 +114,40 @@ class TestBarMsgState:
 
 
 class TestFreezeGate:
-    def test_sell_passes_when_frozen(self):
-        assert frozen_allows("SELL", {"now": True}) is True
+    """S6 修订（2026-08-18）后语义：frozen_allows 只判 sticky（数据污染事实）；
+    动态新鲜度（hub 心跳/bar 停更）由 buy_ok_check 在 send_order 时刻判定。"""
 
-    def test_buy_rejected_when_frozen(self):
-        assert frozen_allows("BUY", {"now": True}) is False
+    def test_sell_passes_when_sticky(self):
+        assert frozen_allows("SELL", {"sticky": True}) is True
 
-    def test_all_pass_when_not_frozen(self):
-        assert frozen_allows("BUY", {"now": False}) is True
+    def test_buy_rejected_when_sticky(self):
+        assert frozen_allows("BUY", {"sticky": True}) is False
+
+    def test_all_pass_when_not_sticky(self):
+        # 动态 frozen["now"]=True 是纯观测字段，不再拦截下单（拦截责任移到 buy_ok_check）
+        assert frozen_allows("BUY", {"now": True, "sticky": False}) is True
+        assert frozen_allows("SELL", {"now": True, "sticky": False}) is True
+
+
+class TestBuyOkCheck:
+    """send_order 时刻事实检查（S6 修订核心）：BUY 需 bar 新鲜 + hub 心跳，无日历依赖。"""
+
+    def test_fresh_bar_and_hub_alive_allows_buy(self):
+        stats = {"last_bar_wall": 1000.0}
+        assert buy_ok_check({"sticky": False}, stats, True, 1000.0 + 299) is True
+
+    def test_stale_bar_rejects_buy(self):
+        stats = {"last_bar_wall": 1000.0}
+        assert buy_ok_check({"sticky": False}, stats, True, 1000.0 + 301) is False
+
+    def test_hub_dead_rejects_buy_even_if_bar_fresh(self):
+        stats = {"last_bar_wall": 1000.0}
+        assert buy_ok_check({"sticky": False}, stats, False, 1000.0 + 10) is False
+
+    def test_sticky_rejects_buy_regardless(self):
+        stats = {"last_bar_wall": 1000.0}
+        assert buy_ok_check({"sticky": True}, stats, True, 1000.0 + 10) is False
+
+    def test_no_bar_yet_rejects_buy(self):
+        # 昨夜回放 bar 不算：基线跨日污染防护——重启后未收任何 bar 前不开仓
+        assert buy_ok_check({"sticky": False}, {"last_bar_wall": 0.0}, True, 99999.0) is False

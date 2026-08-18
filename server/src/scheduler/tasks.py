@@ -368,6 +368,16 @@ def data_continuity_check():
     return {"status": "ok", "issues": issues, "repaired_bars": repaired, "reconnected": reconnected}
 
 
+@app.task(name="src.scheduler.tasks.health_monitor_check")
+def health_monitor_check():
+    """15-服务监控：30s 采集判定（unit 状态/依赖/心跳 + 沿检测 + health_event 落库 + 告警）。
+
+    S6 修订的配套观测面——断流类问题只告警不动作，这里是告警的聚合点之一。
+    """
+    from src.health_monitor.monitor import run_check
+    return run_check()
+
+
 @app.task(name="src.scheduler.tasks.disk_monitor")
 def disk_monitor():
     """F-OPS-002 服务器磁盘监控，超阈值告警。"""

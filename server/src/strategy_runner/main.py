@@ -208,17 +208,27 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     strategy = Strategy.from_config(cfg, adapter)
 
     # 评审 C2：冻结的真实抓手——包 adapter.send_order（下单唯一咽喉，strategy.place_order 必经）。
-    # 冻结期 BUY 拒绝（返回 None → SC1 记 send_failed，账实一致）；SELL 放行（保止损能力）。
+    # S6 修订（2026-08-18）：两段判定——①sticky 冻结（untrusted/gap=数据污染事实）BUY 拒/SELL 放；
+    # ②动态新鲜度（bar 停更/hub 心跳）在 send_order 时刻按事实判定（ctx["buy_ok"] 由 hub_worker.run
+    # 注入），不再依赖后台定时器预计算的 frozen["now"]——日历/节奏预期从动作路径清零。
     frozen: dict = {"now": False, "sticky": False}
     _orig_send = adapter.send_order
+    ctx: dict = {}   # hub_worker.run 的上下文（buy_ok 在 run 内注入）
 
     from src.strategy_runner.hub_worker import frozen_allows as _frozen_allows
 
     def _gated_send(order):
         if not _frozen_allows(order.action, frozen):
-            logger.warning("冻结期拒绝 BUY 委托: %s %s", order.symbol, order.action)
+            logger.warning("sticky 冻结拒绝 BUY 委托: %s %s", order.symbol, order.action)
             _alert(f"任务 {tid or sid} 冻结期拦截 BUY: {order.symbol}",
-                   "hub 心跳丢失/bar 停更/不可信数据；SELL 放行。")
+                   "不可信 bar / 流序号 gap（数据污染事实）；重启任务解冻。SELL 放行。")
+            return None
+        _buy_ok = ctx.get("buy_ok")
+        if str(order.action).upper() == "BUY" and not (_buy_ok and _buy_ok()):
+            # 检查器缺失时保守拒（fail-closed）；非交易时段天然无信号，误拒方向安全
+            logger.warning("下单时刻拒 BUY（bar 过期/hub 心跳丢失）: %s", order.symbol)
+            _alert(f"任务 {tid or sid} 拦截 BUY（数据不新鲜）: {order.symbol}",
+                   "bar 停更>300s 或 hub 心跳丢失；SELL 放行，恢复后自动放行。")
             return None
         return _orig_send(order)
 
@@ -251,7 +261,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
             logger.warning("hub worker 对账失败: %s", e)
 
     _reconcile()
-    hub_worker_run({
+    ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
         "strategy": strategy, "adapter": adapter, "event_engine": ee,
         "td_api": td_api, "history": history, "frozen": frozen,
@@ -259,6 +269,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         "warmup_pg": lambda: _warmup_history(symbol),
         "stop_check": _stop_check, "reconcile": _reconcile,
     })
+    hub_worker_run(ctx)
 
 
 def main():
@@ -451,12 +462,17 @@ def main():
 
     bg = BarGenerator(on_vnpy_bar)
 
-    _tick_state = {"last_ts": 0.0, "count": 0}  # GIL 下原子读写，无需锁
+    # last_ts/count=进程累计（观测）；sess_*=时段内基线（S6 修订：沿上清零，跨日回放 tick 不污染断流判定）
+    _tick_state = {"last_ts": 0.0, "count": 0,
+                   "sess_last_ts": 0.0, "sess_count": 0}  # GIL 下原子读写，无需锁
 
     @_guard("on_tick")
     def on_tick(event):
         _tick_state["last_ts"] = time.time()
         _tick_state["count"] += 1
+        if _in_astock_session():
+            _tick_state["sess_last_ts"] = _tick_state["last_ts"]
+            _tick_state["sess_count"] += 1
         bg.update_tick(event.data)
 
     event_engine.register(EVENT_TICK, on_tick)
@@ -521,6 +537,7 @@ def main():
     import os as _os, redis as _redis
     _r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
     counter = 0
+    sess_was = _in_astock_session()   # 时段沿检测（S6 修订：沿上清 sess_* 基线）
     _halt_state = {"was": False}  # 熔断沿检测（SB2，F-41：进入熔断的瞬间撤在场单）
 
     def _startup_reconcile() -> None:
@@ -609,21 +626,25 @@ def main():
                 logger.critical("EventEngine 事件线程已死亡，退出待 systemd 重启")
                 _alert(f"实盘任务事件线程死亡: {sid}", "runner 将自动重启；请查 journalctl 定位首个异常")
                 os._exit(1)
-            # 3) tick 新鲜度（F-18/F-25）：交易时段断流检测。
-            #    仅当今日已收到过 tick 才升级到退出（节假日/盘前零 tick 安全）；
-            #    120s 告警，300s 告警+退出重启（也覆盖事件线程挂死但未死、订阅丢失等一切断流形态）
-            _stale = time.time() - _tick_state["last_ts"] if _tick_state["last_ts"] else None
-            if _in_astock_session():
-                if _tick_state["count"] > 0 and _stale is not None and _stale > 120:
-                    if _stale > 300:
-                        logger.critical("tick 断流 %.0fs（>300s），退出待 systemd 重启恢复订阅", _stale)
-                        _alert(f"实盘任务 tick 断流 {_stale:.0f}s，自动重启恢复: {sid}",
-                               "重启后自动重放订阅并暖机。若反复出现请查 XTP 行情链路。")
-                        os._exit(1)
-                    elif counter % 6 == 0:  # 告警限频：每 60s 至多一条
-                        logger.error("tick 断流 %.0fs（今日已收 %d 条）", _stale, _tick_state["count"])
-                        _alert(f"实盘任务 tick 断流 {_stale:.0f}s: {sid}",
-                               f"今日已收 {_tick_state['count']} 条 tick 后断流，120-300s 内未恢复将自动重启。")
+            # 3) tick 新鲜度（F-18/F-25，S6 修订 2026-08-18）：断流只告警不退出——
+            #    重启治不了平台/网络问题，进程级故障由 watchdog/事件线程检查兜。
+            #    基线=本时段内首 tick（进入沿清零）：跨日回放/假日/竞价静默窗口不误判。
+            sess_now = _in_astock_session()
+            if sess_now and not sess_was:
+                _tick_state["sess_last_ts"] = 0.0
+                _tick_state["sess_count"] = 0
+            sess_was = sess_now
+            _sess_stale = (time.time() - _tick_state["sess_last_ts"]) if _tick_state["sess_last_ts"] else None
+            if sess_now:
+                if _tick_state["sess_count"] == 0 and counter % 30 == 0:
+                    _alert(f"实盘任务交易时段零 tick: {sid}",
+                           "订阅可能未生效/XTP 异常。runbook：journalctl 查 MD 连接；确认后可手动重启任务。")
+                if _tick_state["sess_count"] > 0 and _sess_stale is not None and _sess_stale > 120 and counter % 6 == 0:
+                    _lvl = logger.critical if _sess_stale > 300 else logger.error
+                    _lvl("tick 断流 %.0fs（时段内已收 %d 条，只告警不退出）", _sess_stale, _tick_state["sess_count"])
+                    _alert(f"实盘任务 tick 断流 {_sess_stale:.0f}s: {sid}",
+                           f"时段内已收 {_tick_state['sess_count']} 条后断流。"
+                           f"runbook：查 journalctl 与 XTP 行情链路；确认为行情源问题后可手动重启任务（暖机自动补缺）。")
                 # 4) 幂等重订阅（F-24/F-25）：交易时段每 60s 重放一次，兜住"重连后订阅丢失"
                 if counter % 6 == 0:
                     _resubscribe()
@@ -632,7 +653,8 @@ def main():
                 _r.hset(f"quant:hb:task:{tid or sid}", mapping={
                     "pid": os.getpid(), "ts": time.time(),
                     "last_tick_ts": _tick_state["last_ts"] or 0,
-                    "ticks": _tick_state["count"], "bars": len(history),
+                    "ticks": _tick_state["count"], "sess_ticks": _tick_state["sess_count"],
+                    "bars": len(history),
                 })
                 _r.expire(f"quant:hb:task:{tid or sid}", 90)
             except Exception as e:
