@@ -728,9 +728,24 @@ def list_strategies(payload: dict = Depends(require_role("viewer", "analyst", "t
              "enabled": r[5], "factors": r[6], "aggregator": r[7], "risk": r[8], "params": r[9], "backtest_verified": r[10]} for r in rows]
 
 
+def _validate_strategy_category(stype: str, symbol: str, factors: list) -> dict:
+    """#10 品类校验：symbol 空时按 type 推断（convertible→cb / etf→etf / 其余→astock）。"""
+    from src.strategy_framework.factor import validate_strategy_factors
+    sym = symbol or ""
+    if not sym:
+        t = (stype or "").lower()
+        cat = "cb" if "convertible" in t or "cb" in t else ("etf" if "etf" in t else "astock")
+        sym = {"cb": "113000.SHSE", "etf": "510300.SHSE", "astock": "600000.SHSE"}[cat]  # 探测代号
+    return validate_strategy_factors(sym, factors)
+
+
 @app.post("/api/strategy")
 def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("strategy_control"))):
     """新建策略配置。"""
+    # 链条打磨#10：品类校验（create 此前完全无校验；update 用空 symbol 假阴性）
+    _v = _validate_strategy_category(req.type, req.symbol, req.factors)
+    if not _v["valid"]:
+        raise ApiError(400, "FACTOR_INCOMPATIBLE", _v["message"])
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO strategy_config (id, name, type, symbol, adapter, enabled, factors, aggregator, risk, params) "
@@ -773,12 +788,16 @@ def validate_params_api(body: dict = Body(...),
 @app.post("/api/strategy/{sid}")
 def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(require_perm("strategy_control"))):
     """更新策略配置（含因子校验；Python 模式跳过因子校验）。"""
-    # Python 模式（#15）跳过因子校验
+    # Python 模式（#15）跳过因子校验；#10：symbol 空时查旧值（UI 恒空 → 此前 detect 假阴性）
     if req.params.get("mode") != "python":
-        from src.strategy_framework.factor import validate_strategy_factors
-        v = validate_strategy_factors(req.symbol, req.factors)
-        if not v["valid"]:
-            raise ApiError(400, "FACTOR_INCOMPATIBLE", f"因子不兼容: {v['message']}")
+        _sym = req.symbol
+        if not _sym:
+            with get_conn() as conn:
+                _r = conn.execute("SELECT symbol FROM strategy_config WHERE id=%s", (sid,)).fetchone()
+                _sym = _r[0] if _r else ""
+        _v = _validate_strategy_category(req.type, _sym, req.factors)
+        if not _v["valid"]:
+            raise ApiError(400, "FACTOR_INCOMPATIBLE", _v["message"])
     with get_conn() as conn:
         cur = conn.execute("SELECT factors, aggregator FROM strategy_config WHERE id=%s", (sid,))
         old = cur.fetchone()
@@ -2436,8 +2455,21 @@ def update_factor_api(name: str, req: dict = Body(...),
 @app.delete("/api/factors/{name}")
 def delete_factor_api(name: str,
                        payload: dict = Depends(require_perm("strategy_control"))):
-    """删除自定义因子。"""
+    """删除自定义因子。链条打磨#4：先查引用（strategy_config.factors JSON）——删掉在用因子策略启动即崩。"""
     from src.strategy_framework.factor import delete_custom_factor
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, factors FROM strategy_config")
+        used_by = []
+        for sid_, fjson in cur.fetchall():
+            try:
+                fl = json.loads(fjson) if fjson else []
+                if any(f.get("name") == name for f in fl):
+                    used_by.append(sid_)
+            except Exception:
+                continue
+    if used_by:
+        raise ApiError(409, "FACTOR_IN_USE",
+                       f"因子 {name} 被策略引用: {', '.join(used_by)}——先在策略中移除再删除")
     ok = delete_custom_factor(name)
     if not ok:
         raise ApiError(404, "FACTOR_NOT_FOUND", f"因子 {name} 不存在或非自定义因子")

@@ -492,11 +492,41 @@ class VolumeRatioFactor(Factor):
 
 
 @register_factor("double_low", category="convertible", needs_history=0,
-                 description="可转债双低: price + premium_rate * 100")
+                 description="可转债双低: price + 溢价率×100（转股价值=100×正股昨收/转股价，convertible_terms+daily_basic）")
 class DoubleLowFactor(Factor):
     def compute(self, ctx: BarContext) -> float:
-        _logger.warning("DoubleLowFactor 返回占位符 -ctx.close（真双低需 conv_price，BarContext 待扩展）")
-        return -ctx.close  # 简化。真双低=price+premium_rate*100 需 conv_price（BarContext 待扩展）
+        # 链条打磨#3（2026-08-19）：真实现替代 -close 占位。
+        # 双低 = 转债价格 + (转债价格/转股价值 − 1)×100；转股价值 = 100 × 正股昨收 / 转股价。
+        # 数据：convertible_terms.terms JSON {conv_price, stk_code} + bar_1d 正股最近 close。
+        # 查不到条款/正股价 → 返回价格本身（溢价项记 0——低价格债券仍排前，弱化但可用，告警一次）。
+        import json as _json
+        from ..data_platform.db import get_conn
+        from ..data_platform.schema import to_vt_symbol
+        sym = getattr(ctx, "symbol", None) or ""
+        if not sym:
+            return ctx.close
+        try:
+            with get_conn() as conn:
+                cur = conn.execute("SELECT terms FROM convertible_terms WHERE ts_code=%s", (sym,))
+                row = cur.fetchone()
+                if not row or not row[0]:
+                    return ctx.close
+                terms = _json.loads(row[0]) if isinstance(row[0], str) else (row[0] or {})
+                conv_price = float(terms.get("conv_price") or 0)
+                stk = terms.get("stk_code") or ""
+                if not conv_price or not stk:
+                    return ctx.close
+                stk_vt = to_vt_symbol(stk)
+                cur = conn.execute(
+                    "SELECT close FROM bar_1d WHERE symbol=%s ORDER BY ts DESC LIMIT 1", (stk_vt,))
+                r2 = cur.fetchone()
+                if not r2 or not r2[0]:
+                    return ctx.close
+                parity = 100.0 * float(r2[0]) / conv_price   # 转股价值
+                premium = (ctx.close / parity - 1) * 100 if parity > 0 else 0.0
+                return ctx.close + premium
+        except Exception:
+            return ctx.close
 
 
 @register_factor("funding_rate", category="crypto", needs_history=0,

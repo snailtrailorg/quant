@@ -17,8 +17,9 @@
       <el-table-column :label="t('common.action')" width="280">
         <template #default="{ row }">
           <el-button type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button type="success" @click="onStart(row.id)" v-if="!row.enabled">{{ t('strategy.start') }}</el-button>
-          <el-button type="danger" @click="onStop(row.id)" v-if="row.enabled">{{ t('strategy.stop') }}</el-button>
+          <!-- 链条打磨#22：旧架构启停已移除（实盘启停统一 LiveTask 页——新架构唯一入口） -->
+          <el-tag v-if="row.backtest_verified" type="success" size="small">✓ {{ t('strategy.verified') }}</el-tag>
+          <el-tag v-else type="info" size="small">{{ t('strategy.unverified') }}</el-tag>
         </template>
       </el-table-column>
     </el-table>
@@ -48,12 +49,21 @@
         <!-- DSL 模式 -->
         <template v-if="editForm.mode === 'dsl'">
           <el-divider content-position="left">{{ t('strategy.factorConfig') }}</el-divider>
-          <div v-for="(f, i) in editForm.factors" :key="i" style="margin-bottom: 12px; display: flex; gap: 8px; align-items: center">
-            <el-select v-model="f.name" :placeholder="t('strategy.phFactor')" style="width: 180px" @change="onFactorChange(f)">
-              <el-option v-for="fac in availableFactors" :key="fac.name" :label="`${fac.name} (${fac.category})`" :value="fac.name" />
-            </el-select>
-            <el-input-number v-model="f.weight" :min="0" :max="2" :step="0.1" :precision="2" style="width: 120px" />
-            <el-button type="danger" @click="removeFactor(i)">{{ t('strategy.removeFactor') }}</el-button>
+          <div v-for="(f, i) in editForm.factors" :key="i" style="margin-bottom: 12px">
+            <div style="display: flex; gap: 8px; align-items: center">
+              <el-select v-model="f.name" :placeholder="t('strategy.phFactor')" style="width: 180px" @change="onFactorChange(f)">
+                <el-option v-for="fac in availableFactors" :key="fac.name" :label="`${fac.name} (${fac.category})`" :value="fac.name" />
+              </el-select>
+              <el-input-number v-model="f.weight" :min="0" :max="2" :step="0.1" :precision="2" style="width: 120px" />
+              <el-button type="danger" @click="removeFactor(i)">{{ t('strategy.removeFactor') }}</el-button>
+            </div>
+            <!-- 链条打磨#9：因子参数子表单（按因子 schema 动态展开——此前 params 锁死默认值改不了） -->
+            <div v-if="factorSchema(f.name).length" style="display: flex; gap: 12px; margin: 6px 0 0 188px; flex-wrap: wrap">
+              <div v-for="p in factorSchema(f.name)" :key="p.k" style="display: flex; align-items: center; gap: 4px">
+                <span style="font-size: 12px; color: var(--el-text-color-secondary)">{{ p.k }}:</span>
+                <el-input-number v-model="f.params[p.k]" :step="1" size="small" style="width: 110px" />
+              </div>
+            </div>
           </div>
           <el-button type="primary" @click="addFactor">{{ t('strategy.addFactor') }}</el-button>
 
@@ -170,7 +180,7 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { getStrategies, startStrategy, stopStrategy, updateStrategy, createStrategy, getFactorList, validatePythonCode } from '../api'
+import { getStrategies, updateStrategy, createStrategy, getFactorList, validatePythonCode } from '../api'
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 
@@ -287,6 +297,14 @@ const onFactorChange = (f) => {
   const fac = availableFactors.value.find(x => x.name === f.name)
   if (fac) f.params = { ...fac.params }
 }
+// #9：因子参数 schema（数值型 params 展开为可编辑项）
+const factorSchema = (name) => {
+  const fac = availableFactors.value.find(x => x.name === name)
+  if (!fac || !fac.params) return []
+  return Object.entries(fac.params)
+    .filter(([, v]) => typeof v === 'number')
+    .map(([k, v]) => ({ k, default: v }))
+}
 
 const validateCode = async () => {
   validating.value = true
@@ -346,8 +364,6 @@ const saveEdit = async () => {
   finally { saving.value = false }
 }
 
-const onStart = async id => { try { await startStrategy(id); ElMessage.success(t('common.started')); load() } catch (e) { console.error(e); ElMessage.error(t('common.startFailed')) } }
-const onStop = async id => { try { await stopStrategy(id); ElMessage.success(t('common.stopped')); load() } catch (e) { console.error(e); ElMessage.error(t('common.stopFailed')) } }
 const removeFactor = (i) => { editForm.value.factors = editForm.value.factors.filter((_, idx) => idx !== i) }
 onMounted(async () => { await load(); await loadFactors() })
 </script>

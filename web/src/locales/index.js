@@ -240,6 +240,8 @@ export default {
       statusRunning: '运行中',
       statusStopped: '已停',
       enable: '启用',
+      verified: '已验证',
+      unverified: '未验证',
       hintNoSymbol: '策略不绑标的，标的由实盘任务/回测任务指定',
       factorConfig: '因子配置',
       phFactor: '选择因子',

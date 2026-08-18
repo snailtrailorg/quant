@@ -27,7 +27,7 @@ except ImportError:
 from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
 
 
-def _warmup_history(symbol: str) -> list:
+def _warmup_history(symbol: str, n: int = 100) -> list:
     """PG 暖机：读历史 bar 填充 history（因子初始化 / 断线补缺口，#4）。返回 list。"""
     history = []
     try:
@@ -35,7 +35,7 @@ def _warmup_history(symbol: str) -> list:
         from datetime import datetime as _dt, timedelta
         bars_df = get_bars(symbol, "1min", _dt.now() - timedelta(days=30), _dt.now())
         if not bars_df.empty:
-            for _, row in bars_df.tail(100).iterrows():
+            for _, row in bars_df.tail(min(n, 500)).iterrows():
                 history.append({
                     "ts": row["ts"],
                     "open": float(row["open"]), "high": float(row["high"]),

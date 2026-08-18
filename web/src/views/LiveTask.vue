@@ -39,7 +39,11 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="t('common.symbol')">
-          <el-input v-model="form.symbol" :placeholder="t('liveTask.phSymbol')" />
+          <!-- 链条打磨#20：标的搜索下拉（asset_static_info；此前纯手输无校验） -->
+          <el-select v-model="form.symbol" filterable remote :remote-method="searchSymbols"
+                     :loading="symbolSearching" :placeholder="t('liveTask.phSymbol')" style="width: 100%">
+            <el-option v-for="sym in symbolOptions" :key="sym" :label="sym" :value="sym" />
+          </el-select>
         </el-form-item>
 
         <el-divider content-position="left">{{ t('liveTask.taskParams') }}</el-divider>
@@ -50,7 +54,9 @@
 
         <el-divider content-position="left">{{ t('common.account') }}</el-divider>
         <el-form-item :label="t('liveTask.accountId')">
-          <el-input v-model="form.account_id" :placeholder="t('liveTask.phAccountId')" />
+          <el-select v-model="form.account_id" :placeholder="t('liveTask.phAccountId')" style="width: 100%">
+            <el-option v-for="a in accounts" :key="a.id" :label="`${a.name} (${a.id})`" :value="a.id" />
+          </el-select>
         </el-form-item>
         <el-form-item :label="t('liveTask.initialCapital')">
           <el-input-number v-model="form.initial_capital" :min="10000" :step="100000" />
@@ -68,12 +74,27 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies , apiErr } from '../api'
+import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, apiErr } from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
 
 const { t } = useI18n()
 const tasks = ref([])
 const strategies = ref([])
+const accounts = ref([])
+const symbolOptions = ref([])
+const symbolSearching = ref(false)
+const loadAccounts = async () => {
+  try { accounts.value = await api.get('/account') || [] } catch { accounts.value = [] }
+}
+const searchSymbols = async (q) => {
+  if (!q || q.length < 2) { symbolOptions.value = []; return }
+  symbolSearching.value = true
+  try {
+    const r = await api.get('/sync/symbols/astock_daily', { params: { q, page: 1, size: 20 } })
+    symbolOptions.value = (r.items || []).slice(0, 20).map(i => i.ts_code)
+  } catch { symbolOptions.value = [] }
+  finally { symbolSearching.value = false }
+}
 const dialogVisible = ref(false)
 const saving = ref(false)
 const parameterDefs = ref([])
@@ -90,7 +111,11 @@ const load = async () => {
   try { tasks.value = await getLiveTasks() } catch { ElMessage.error(t('common.loadFailed')) }
 }
 const loadStrategies = async () => {
-  try { strategies.value = await getStrategies() } catch { strategies.value = [] }
+  try {
+    // 链条打磨#20：只列 backtest_verified 策略（三级开关第三级——未验证的选了也是 403 后置暴露）
+    const all = await getStrategies()
+    strategies.value = (all || []).filter(s => s.backtest_verified)
+  } catch { strategies.value = [] }
 }
 
 const onStrategyChange = (sid) => {
@@ -139,5 +164,5 @@ const onDelete = async (id) => {
   } catch { /* 取消 */ }
 }
 
-onMounted(async () => { await load(); await loadStrategies() })
+onMounted(async () => { await load(); await loadStrategies(); await loadAccounts() })
 </script>
