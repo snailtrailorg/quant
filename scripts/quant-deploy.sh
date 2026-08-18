@@ -163,6 +163,8 @@ SSH_TARGET="${USER:+$USER@}$SERVER"
 #-----------------------------------------------------------------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        # --force 也允许出现在动作序列任意位置（deploy-server.sh 把透传参数排在动作之后）
+        --force) FORCE_DEPLOY=1; shift ;;
         deploy)
             HAS_ACTION=true
             [[ $# -lt 3 ]] && { echo "❌ deploy 需要 LOCAL REMOTE" >&2; exit 1; }
