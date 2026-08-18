@@ -74,12 +74,27 @@ def _get_config(sync_id: str) -> dict:
                 "last_sync_ts": row[9], "last_status": row[10]}
 
 
-def _update_sync_state(sync_id: str, last_date: str, count: int):
+def _update_sync_state(sync_id: str, last_date: str, count: int, status: str = "idle"):
+    """写终态（G-审 2026-08-18：status 支持 idle/partial/failed；调用方必须在本函数之后
+    不再调 _mark_running(False)——后者会无条件覆盖回 'idle'）。"""
     with get_conn() as conn:
         conn.execute(
-            "UPDATE sync_config SET last_sync_date=%s, last_sync_ts=now(), last_sync_count=%s, last_status='idle' WHERE id=%s",
-            (last_date, count, sync_id))
+            "UPDATE sync_config SET last_sync_date=%s, last_sync_ts=now(), last_sync_count=%s, last_status=%s WHERE id=%s",
+            (last_date, count, status, sync_id))
         conn.commit()
+
+
+def _alert_sync_failure(sync_id: str, status: str, failed_dates: list) -> None:
+    """同步失败主动告警（G 建议 2026-08-18：F2 断 11 天才被发现的真因是无人盯 sync_log）。
+    warn 级站内铃铛（notify 同标题 1min 去重），失败持续多轮靠 last_status=partial/failed 可见。"""
+    try:
+        from src.alert_notify.notify import notify
+        notify("warn", "data", f"数据同步 {status}: {sync_id}",
+               f"失败 {len(failed_dates)} 项：{'; '.join(failed_dates[:5])}"
+               f"{'...' if len(failed_dates) > 5 else ''}。游标已按语义处理，缺口将自动重试；"
+               f"持续失败请查 sync_log 详情。")
+    except Exception as e:
+        logger.warning("同步失败告警发送失败（不阻塞同步流程）: %s", e)
 
 
 def _expected_trading_days(start: str, end: str) -> int:
@@ -128,25 +143,60 @@ def sync(sync_id: str, backfill_from: str | None = None,
 
         try:
             handler = _HANDLERS.get(sync_id)
-            if handler:
-                r = handler(cfg, end_date, backfill_from, progress_cb=progress_cb)
-                pulled = r.get("pulled", 0)
-                saved = r.get("saved", 0)
-                start_date = r.get("start", end_date)
-                failed_dates = r.get("failed_dates", [])
-                expected_days = r.get("expected_days")
-                actual_days = r.get("actual_days")
-            else:
-                pulled, saved, start_date = 0, 0, end_date
-                failed_dates, expected_days, actual_days = [], None, None
+            if not handler:
+                # H-S1：路由表外 id（DB 行不受代码控制，真实可达）——原代码会以 0/0 假 success
+                # 推进游标且触发 r 未定义 NameError（双记日志）。显式 error 返回，不动游标。
+                duration_ms = int((time.time() - t0) * 1000)
+                _log(sync_id, cfg["mode"], "", end_date, 0, 0, duration_ms,
+                     "error", f"无 handler 路由: {sync_id}")
+                _mark_running(sync_id, False)
+                return {"status": "error", "error": f"无 handler 路由: {sync_id}",
+                        "duration_ms": duration_ms}
+            r = handler(cfg, end_date, backfill_from, progress_cb=progress_cb)
+            pulled = r.get("pulled", 0)
+            saved = r.get("saved", 0)
+            start_date = r.get("start", end_date)
+            failed_dates = r.get("failed_dates", [])
+            expected_days = r.get("expected_days")
+            actual_days = r.get("actual_days")
             status = "partial" if failed_dates else "success"
             duration_ms = int((time.time() - t0) * 1000)
             _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
                  status, "", failed_dates, expected_days, actual_days)
-            # 回补模式不推进 last_sync_date 游标（只补历史，不动增量进度）
+            # ——— 游标推进（F2 根因收尾 2026-08-18，G 审修订 + H 修）———
+            # 三态只作用于**返回 last_success_date 键**的 handler（_sync_by_trade_date 系：
+            # astock_daily/etf_daily/astock_basic）。其余（分钟线=per-symbol 失败粒度、cb_daily、
+            # list/trade_cal）维持无条件推进——分钟线若被卷入三态，200 积分下全市场失败会
+            # 冻游标 → beat 每 30min 重试风暴。
+            # 全失败仍刷 last_sync_ts（G-S3：调度器以旧 ts 算 next_run 会连发重试）。
             if not backfill_from:
-                _update_sync_state(sync_id, end_date, saved)
-            _mark_running(sync_id, False)
+                if "last_success_date" in r:
+                    if failed_dates and r["last_success_date"] is None:
+                        # 全失败：游标不动（旧值），标 failed——下轮增量自动重试整个窗口。
+                        # H-S2：last_sync_date 为 NULL（新配置首同步即全失败）时 fallback 用
+                        # 窗口起点**前一日**——写起点本身会让下轮 start=起点+1 永久跳过起点日
+                        _fallback = cfg["last_sync_date"] or (
+                            date.fromisoformat(
+                                f"{start_date[:4]}-{start_date[4:6]}-{start_date[6:8]}"
+                            ) - timedelta(days=1)).strftime("%Y%m%d")
+                        _advance = (_fallback, 0, "failed")
+                    elif failed_dates:
+                        # 部分失败：推到**连续成功末日**（G-Q1a：最大成功日会永久跳过中间失败日；
+                        # 后段已入库日下轮重拉由 upsert 幂等兜底）
+                        _advance = (r["last_success_date"], saved, "partial")
+                    else:
+                        _advance = (end_date, saved, "idle")
+                else:
+                    _advance = (end_date, saved, "idle")
+            else:
+                _advance = None   # 回补不推进游标（现状）
+            _mark_running(sync_id, False)   # G-S2：先清 running（置 idle），终态随后覆盖——
+            #   若顺序颠倒，partial/failed 会被本行无条件覆盖回 idle（测试锁死此顺序）
+            if _advance is not None:
+                _update_sync_state(sync_id, *_advance)
+            if failed_dates:
+                # H 口径统一：告警用终态（failed/partial，与 sync_config.last_status 一致）
+                _alert_sync_failure(sync_id, _advance[2] if _advance else status, failed_dates)
             return {"status": status, "rows_pulled": pulled, "rows_saved": saved,
                     "duration_ms": duration_ms, "failed_dates": failed_dates,
                     "expected_days": expected_days, "actual_days": actual_days,
@@ -176,6 +226,10 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
     total_pulled = 0
     total_saved = 0
     failed_dates: list[str] = []
+    # F2 根因（G 审）：连续成功末日——第一个失败日之前的最后成功日；空 df 记成功（G-S4：
+    # 节假日 freq="B" 会拉到空数据，若记失败游标永久卡死在节前）
+    last_success_date: str | None = None
+    broken = False
 
     for i, d in enumerate(date_range, 1):
         trade_date = d.strftime("%Y%m%d")
@@ -185,6 +239,7 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
                 if "trade_date" not in df.columns:
                     # 防御：异常响应缺关键列，给明确报错（避免下游 KeyError 隐晦）
                     failed_dates.append(f"{trade_date}:响应缺trade_date列,cols={list(df.columns)[:4]}")
+                    broken = True
                     if progress_cb:
                         progress_cb(i, total, trade_date)
                     continue
@@ -194,6 +249,11 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
         except Exception as e:
             # 不再静默 continue：记失败日期 + 类型 + 原因，整体继续
             failed_dates.append(f"{trade_date}:{type(e).__name__}:{str(e)[:40]}")
+            broken = True
+        else:
+            # 成功（含空 df）：仅在尚未出现失败时推进连续末日（broken 后不再追——重拉由幂等兜底）
+            if not broken:
+                last_success_date = trade_date
         if progress_cb:
             progress_cb(i, total, trade_date)
         if sleep_s:
@@ -206,6 +266,7 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
         "failed_dates": failed_dates,
         "expected_days": expected_days,
         "actual_days": len(date_range) - len(failed_dates),
+        "last_success_date": last_success_date,   # None=全失败；三态仅 sync() 对含此键者生效
     }
 
 

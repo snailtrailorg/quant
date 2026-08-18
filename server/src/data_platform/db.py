@@ -122,9 +122,16 @@ def save_bars(freq: str, rows: list[tuple]) -> int:
 
 
 def save_bars_overwrite(freq: str, rows: list[tuple]) -> int:
-    """批量写入 K 线，冲突覆盖（回补用，体现手动回补优先级高于增量）。"""
+    """批量写入 K 线，冲突覆盖（回补用，体现手动回补优先级高于增量）。
+
+    2026-08-18 G 审对齐：与 save_bars 同款校验（大小写不敏感 freq + validate_bars）——
+    覆盖路径此前零校验（垃圾 freq 直接建野表/脏行直入）。"""
     if not rows:
         return 0
+    rows = validate_bars(rows)
+    if not rows:
+        return 0
+    assert freq.lower() in _VALID_FREQS, f"非法 freq: {freq}"
     ensure_table(freq)
     insert_sql = BAR_TABLE_INSERT_OVERWRITE.format(freq=freq)
     with get_conn() as conn:
