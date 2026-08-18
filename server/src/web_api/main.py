@@ -146,22 +146,13 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
-    """readiness：依赖可达才 200（PG + Valkey），不可达 503。部署闸门/流量入口用。"""
-    checks: dict = {}
-    try:
-        with get_conn() as conn:
-            conn.execute("SELECT 1")
-        checks["postgres"] = "ok"
-    except Exception as e:
-        checks["postgres"] = f"fail: {str(e)[:80]}"
-    try:
-        import redis as _redis, os as _os
-        _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-                              socket_timeout=2).ping()
-        checks["valkey"] = "ok"
-    except Exception as e:
-        checks["valkey"] = f"fail: {str(e)[:80]}"
-    ok = all(v == "ok" for v in checks.values())
+    """readiness：依赖可达才 200（PG + Valkey），不可达 503。部署闸门/流量入口用。
+    依赖探测复用 health_monitor.collect（盲审 D：与 /metrics 同一口径，不另养第二套探测）。"""
+    from src.health_monitor.collector import collect
+    snap = collect()
+    checks = {dep: ("ok" if ok else f"fail: {str(snap['deps'].get(f'{dep}_err', ''))[:60]}")
+              for dep, ok in snap.get("deps", {}).items() if isinstance(ok, bool)}
+    ok = all(v == "ok" for v in checks.values()) if checks else False
     if not ok:
         from fastapi.responses import JSONResponse
         return JSONResponse(status_code=503, content={"status": "unavailable", "checks": checks})

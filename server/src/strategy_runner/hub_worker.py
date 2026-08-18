@@ -64,9 +64,16 @@ def _hub_alive(r) -> bool:
         return True
 
 
-def buy_ok_check(frozen: dict, stats: dict, hub_alive: bool, now: float) -> bool:
-    """send_order 时刻事实检查（S6 修订，纯函数供测试）：BUY 需 bar 新鲜（<300s）+ hub 心跳在。
-    无日历依赖：非交易时段天然无信号下单，误拒方向安全。"""
+def buy_ok_check(frozen: dict, stats: dict, hub_alive: bool, now: float,
+                 in_session: bool = True) -> bool:
+    """send_order 时刻事实检查（S6 修订，纯函数供测试）：BUY 需 交易时段 + bar 新鲜（<300s）+ hub 心跳。
+
+    交易时段门（盲审 C-F2 2026-08-18）：XTP 测试平台夜间回放白昼行情——bar 流动且锚新鲜，
+    worker 重启后 max_ts 失忆不 R-DL1 去重，回放 bar 会真实驱动下单（重复消费旧数据）。
+    时段外拒 BUY 属业务正确（A 股连续竞价时段外委托不可成交），误拒方向安全；SELL 不受限（R-AV2）。
+    """
+    if not in_session:
+        return False
     if frozen.get("sticky"):
         return False
     fresh = stats.get("last_bar_wall", 0) and (now - stats["last_bar_wall"] < FROZEN_STALE_BAR_S)
@@ -181,9 +188,10 @@ def run(ctx: dict) -> None:
 
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
 
-    # ——— send_order 时刻事实检查（S6 修订）：BUY 需 bar 新鲜（<300s）+ hub 心跳在 ———
+    # ——— send_order 时刻事实检查（S6 修订）：交易时段 + bar 新鲜（<300s）+ hub 心跳 ———
     # 检查器由 ctx 注入 C2 网关（main._gated_send）；纯逻辑在模块级 buy_ok_check 供测试
-    ctx["buy_ok"] = lambda: buy_ok_check(frozen, stats, _hub_alive(r), time.time())
+    ctx["buy_ok"] = lambda: buy_ok_check(frozen, stats, _hub_alive(r), time.time(),
+                                         in_session=_in_astock_session())
 
     def _alert_throttled(title: str, body: str) -> None:
         _alert(title, body)   # notify 自带 1min 同标题去重
@@ -225,12 +233,14 @@ def run(ctx: dict) -> None:
         bar = {"ts": ts_n, "open": float(fields["open"]), "high": float(fields["high"]),
                "low": float(fields["low"]), "close": float(fields["close"]),
                "volume": float(fields["volume"] or 0)}
-        sig = strategy.on_bar(bar, list(history))
+        # bar 已接受：先落锚+去重水位，再驱动策略（盲审 C-F1 2026-08-18——place_order 在 on_bar
+        # 内同步执行，若锚在 on_bar 之后更新，开盘/午后首根 bar 的 BUY 会读到昨日旧锚被确定性误拒）
         stats["last_bar_wall"] = time.time()
         if _in_astock_session():
             stats["sess_bar_wall"] = stats["last_bar_wall"]
-        stats["bars"] += 1
         state.max_ts = ts_n
+        sig = strategy.on_bar(bar, list(history))
+        stats["bars"] += 1
         history.append(bar)
         if len(history) > 100:
             history.pop(0)
@@ -279,7 +289,7 @@ def run(ctx: dict) -> None:
             # hub 心跳 + bar 停更 → 盲视观测（S6 修订：frozen["now"] 只喂心跳/告警，
             # 下单判定在 send_order 时刻由 buy_ok 完成；基线=时段内 bar，跨日/假日不误报）
             sess_now = _in_astock_session()
-            if sess_now and not sess_was:
+            if session_edge(sess_now, sess_was):
                 stats["sess_bar_wall"] = 0.0
             sess_was = sess_now
             hub_alive = _hub_alive(r)

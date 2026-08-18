@@ -31,11 +31,12 @@ def test_viewer_sees_nothing():
 
 
 def test_external_push_only_risk_critical():
-    """外部通道只推实盘紧急（risk+critical）；其余站内。"""
+    """外部通道只推紧急（risk/system + critical）；其余站内。D-F6 修订后 system+critical 也外推。"""
     assert should_push_external("risk", "critical") is True
     assert should_push_external("risk", "warn") is False
     assert should_push_external("email", "critical") is False   # 邮件失败不外推
-    assert should_push_external("system", "critical") is False  # 磁盘/接口也不外推
+    assert should_push_external("system", "critical") is True   # 2026-08-18 D-F6：基础设施紧急到人
+    assert should_push_external("system", "warn") is False      # 磁盘/接口 warn 级仍站内
     assert should_push_external("task", "warn") is False
 
 

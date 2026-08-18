@@ -125,6 +125,12 @@ def _in_astock_session(now=None) -> bool:
     return (931 <= hm <= 1130) or (1301 <= hm <= 1500)
 
 
+def session_edge(cur: bool, was: bool) -> bool:
+    """交易时段进入沿（False→True）。staleness 基线在沿上清零：跨日/午休/竞价窗口
+    都不继承旧基线（S6 修订；盲审 C 简化：三处循环共用，勿内联各写一份）。"""
+    return cur and not was
+
+
 def _sd_notify(msg: str) -> None:
     """systemd notify（喂 WATCHDOG 看门狗）。无 NOTIFY_SOCKET（本地/手工运行）时静默跳过。"""
     addr = os.environ.get("NOTIFY_SOCKET")
@@ -466,6 +472,26 @@ def main():
     _tick_state = {"last_ts": 0.0, "count": 0,
                    "sess_last_ts": 0.0, "sess_count": 0}  # GIL 下原子读写，无需锁
 
+    # S6 修订·direct 下单门（盲审 C-F2 2026-08-18）：与 hub 模式 buy_ok 同语义——BUY 需
+    # 交易时段 + tick 新鲜（<300s）。测试平台夜间回放会驱动 on_bar→place_order，无此门则回放
+    # 数据真实下单（重复消费旧数据）；时段外拒 BUY 属业务正确，SELL 不受限（R-AV2）。
+    _orig_send_direct = adapter.send_order
+
+    def _gated_send_direct(order):
+        if str(order.action).upper() == "BUY":
+            if not _in_astock_session():
+                logger.warning("交易时段外拒 BUY（回放/闭市防护）: %s", order.symbol)
+                _alert(f"任务 {tid or sid} 拦截 BUY（交易时段外）: {order.symbol}", "SELL 放行。")
+                return None
+            _fresh = _tick_state["last_ts"] and (time.time() - _tick_state["last_ts"] < 300)
+            if not _fresh:
+                logger.warning("下单时刻拒 BUY（tick 过期）: %s", order.symbol)
+                _alert(f"任务 {tid or sid} 拦截 BUY（数据不新鲜）: {order.symbol}", "tick 停更>300s；SELL 放行。")
+                return None
+        return _orig_send_direct(order)
+
+    adapter.send_order = _gated_send_direct
+
     @_guard("on_tick")
     def on_tick(event):
         _tick_state["last_ts"] = time.time()
@@ -630,7 +656,7 @@ def main():
             #    重启治不了平台/网络问题，进程级故障由 watchdog/事件线程检查兜。
             #    基线=本时段内首 tick（进入沿清零）：跨日回放/假日/竞价静默窗口不误判。
             sess_now = _in_astock_session()
-            if sess_now and not sess_was:
+            if session_edge(sess_now, sess_was):
                 _tick_state["sess_last_ts"] = 0.0
                 _tick_state["sess_count"] = 0
             sess_was = sess_now
@@ -642,8 +668,8 @@ def main():
                 if _tick_state["sess_count"] > 0 and _sess_stale is not None and _sess_stale > 120 and counter % 6 == 0:
                     _lvl = logger.critical if _sess_stale > 300 else logger.error
                     _lvl("tick 断流 %.0fs（时段内已收 %d 条，只告警不退出）", _sess_stale, _tick_state["sess_count"])
-                    _alert(f"实盘任务 tick 断流 {_sess_stale:.0f}s: {sid}",
-                           f"时段内已收 {_tick_state['sess_count']} 条后断流。"
+                    _alert(f"实盘任务 tick 断流: {sid}",
+                           f"已断流 {_sess_stale:.0f}s（时段内已收 {_tick_state['sess_count']} 条）。"
                            f"runbook：查 journalctl 与 XTP 行情链路；确认为行情源问题后可手动重启任务（暖机自动补缺）。")
                 # 4) 幂等重订阅（F-24/F-25）：交易时段每 60s 重放一次，兜住"重连后订阅丢失"
                 if counter % 6 == 0:

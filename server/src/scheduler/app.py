@@ -138,7 +138,8 @@ app.conf.update(
         "health-monitor": {
             "task": "src.scheduler.tasks.health_monitor_check",
             "schedule": 30.0,
-            "options": {"queue": "risk"},
+            # expires：worker 停机期间过期消息丢弃，防恢复后连环补跑（盲审 D 陷阱 7）
+            "options": {"queue": "risk", "expires": 25},
         },
     },
 )

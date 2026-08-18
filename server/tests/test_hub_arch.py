@@ -151,3 +151,13 @@ class TestBuyOkCheck:
     def test_no_bar_yet_rejects_buy(self):
         # 昨夜回放 bar 不算：基线跨日污染防护——重启后未收任何 bar 前不开仓
         assert buy_ok_check({"sticky": False}, {"last_bar_wall": 0.0}, True, 99999.0) is False
+
+    def test_out_of_session_rejects_buy_even_if_fresh(self):
+        """盲审 C-F2：测试平台夜间回放——bar 流动且锚新鲜，但回放数据驱动的 BUY 属重复消费旧数据（worker 重启后
+        max_ts 失忆不 R-DL1 去重），必须拒。时段外拒 BUY 属业务正确（A 股时段外委托不可成交）。"""
+        stats = {"last_bar_wall": 1000.0}
+        assert buy_ok_check({"sticky": False}, stats, True, 1000.0 + 5, in_session=False) is False
+
+    def test_in_session_fresh_allows_buy(self):
+        stats = {"last_bar_wall": 1000.0}
+        assert buy_ok_check({"sticky": False}, stats, True, 1000.0 + 5, in_session=True) is True

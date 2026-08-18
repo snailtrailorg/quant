@@ -430,7 +430,7 @@ def main() -> None:
             # 数据缺席的原因在平台/网络/交易所规则，重启一概治不了；进程级故障由 watchdog/事件线程检查兜）
             # 基线=本时段内首 tick（进入沿清零）：跨日回放 tick/假日/竞价静默窗口都不再误判
             sess_now = _in_astock_session()
-            if sess_now and not sess_was:
+            if session_edge(sess_now, sess_was):
                 stats["sess_ticks"] = 0
                 stats["sess_last_tick"] = 0.0
             sess_was = sess_now
@@ -443,7 +443,7 @@ def main() -> None:
                 if _stale > 300 and counter % 6 == 0:   # 每 60s 一条，避免轰炸
                     logger.critical("hub tick 断流 %.0fs（时段内已收 %d 条，只告警不自杀）",
                                     _stale, stats["sess_ticks"])
-                    _alert(f"行情 hub tick 断流 {_stale:.0f}s",
+                    _alert("行情 hub tick 断流",
                            f"时段内已收 {stats['sess_ticks']} 条后断流。runbook：查 journalctl -u quant-md-hub@quant；"
                            f"确认为行情源/网络问题后可手动 systemctl restart quant-md-hub@quant（worker 会自动暖机补缺）。")
     except KeyboardInterrupt:

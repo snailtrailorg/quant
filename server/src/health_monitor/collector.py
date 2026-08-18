@@ -31,7 +31,11 @@ def _valkey():
 
 
 def systemctl_units(units: list[str]) -> dict:
-    """批量取 ActiveState/SubState/NRestarts。返回 {unit: {...}}；非 systemd 环境返回空 dict。"""
+    """批量取 ActiveState/SubState/NRestarts。返回 {unit: {...}}；非 systemd 环境返回空 dict。
+
+    注意（盲审 D-F5）：返回空 = 采集失败/无证据，调用方必须区分"证据缺失"与"证据健康"，
+    不能据此判 unit 全健康或清 unit_down 恢复沿。
+    """
     if not units:
         return {}
     try:
@@ -53,11 +57,6 @@ def systemctl_units(units: list[str]) -> dict:
         return result
     except Exception:
         return {}
-
-
-def discover_feishu_units(units: dict) -> list[str]:
-    """从已采集的 units 集合外发现 feishu 实例（列表来自 systemctl list-units，调用方按需）。"""
-    return [u for u in units if u.startswith("quant-feishu-bot@")]
 
 
 def collect(now: float | None = None) -> dict:
@@ -121,18 +120,24 @@ def collect(now: float | None = None) -> dict:
 
 def render_prometheus(snap: dict) -> str:
     """快照 → Prometheus 文本格式（text/plain; version=0.0.4）。业界交换标准，
-    Zabbix HTTP agent + Prometheus pattern 预处理 / Grafana / Prometheus 通吃。"""
-    lines: list[str] = []
+    Zabbix HTTP agent + Prometheus pattern 预处理 / Grafana / Prometheus 通吃。
 
-    def emit(metric: str, value, help_text: str, labels: dict | None = None) -> None:
-        if metric not in [l.split(" ")[0] for l in lines if l.startswith("# HELP")]:
-            lines.append(f"# HELP {metric} {help_text}")
-            lines.append(f"# TYPE {metric} gauge")
+    盲审 D-F3（2026-08-18）：按指标族分组输出（HELP/TYPE 每族一组且在所有样本之前）——
+    逐行穿插去重会产生重复 HELP 行，严格解析器（Prometheus/OpenMetrics）会整个 target 拒收。
+    """
+    families: dict[str, list[str]] = {}   # metric -> [HELP 行, TYPE 行, ...样本]
+    order: list[str] = []
+
+    def emit(metric: str, value, help_text: str, labels: dict | None = None,
+             mtype: str = "gauge") -> None:
+        if metric not in families:
+            families[metric] = [f"# HELP {metric} {help_text}", f"# TYPE {metric} {mtype}"]
+            order.append(metric)
         if labels:
             lab = ",".join(f'{k}="{v}"' for k, v in labels.items())
-            lines.append(f"{metric}{{{lab}}} {value}")
+            families[metric].append(f"{metric}{{{lab}}} {value}")
         else:
-            lines.append(f"{metric} {value}")
+            families[metric].append(f"{metric} {value}")
 
     def b(v) -> int:
         return 1 if v else 0
@@ -154,18 +159,21 @@ def render_prometheus(snap: dict) -> str:
     if hub:
         emit("quant_hub_gen", hub["gen"], "hub generation (fencing)")
         emit("quant_hub_subs", hub["subs"], "subscribed symbols")
-        emit("quant_hub_ticks_total", hub["ticks"], "ticks since process start")
-        emit("quant_hub_sess_ticks_total", hub["sess_ticks"], "ticks within current session")
-        emit("quant_hub_bars_total", hub["bars"], "bars since process start")
-        emit("quant_hub_dropped_pg_total", hub["dropped_pg"], "bars dropped by PG writer")
+        emit("quant_hub_ticks_total", hub["ticks"], "ticks since process start", mtype="counter")
+        emit("quant_hub_sess_ticks_total", hub["sess_ticks"], "ticks within current session", mtype="counter")
+        emit("quant_hub_bars_total", hub["bars"], "bars since process start", mtype="counter")
+        emit("quant_hub_dropped_pg_total", hub["dropped_pg"], "bars dropped by PG writer", mtype="counter")
         if hub["tick_age"] is not None:
             emit("quant_hub_tick_age_seconds", round(hub["tick_age"], 1), "seconds since last tick (wall)")
 
     for tid, t in snap.get("tasks", {}).items():
         emit("quant_task_up", 1, "task heartbeat key present", {"task": tid, "md": t["md"]})
-        emit("quant_task_bars_total", t["bars"], "bars consumed", {"task": tid})
+        emit("quant_task_bars_total", t["bars"], "bars consumed", {"task": tid}, mtype="counter")
         emit("quant_task_frozen", t["frozen"], "frozen flag (observability)", {"task": tid})
         if t["lag"] is not None:
             emit("quant_task_lag_seconds", round(t["lag"], 1), "seconds since last bar", {"task": tid})
 
+    lines: list[str] = []
+    for metric in order:
+        lines.extend(families[metric])
     return "\n".join(lines) + "\n"

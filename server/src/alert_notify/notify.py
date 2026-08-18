@@ -41,8 +41,10 @@ def visible_categories(role: str) -> list[str]:
 
 
 def should_push_external(category: str, level: str) -> bool:
-    """外部通道主动推送规则：仅实盘紧急（risk+critical）。其余站内即可（订阅型走 report）。"""
-    return category == "risk" and level == "critical"
+    """外部通道主动推送规则：实盘紧急（risk+critical）+ 基础设施紧急（system+critical，
+    2026-08-18 盲审 D-F6：health_monitor 的 dep_down/unit_down 类 critical 若只落站内铃铛，
+    恰在最需要告警的时刻到不了人）。其余站内即可（订阅型走 report）。"""
+    return level == "critical" and category in ("risk", "system")
 
 
 def _redis() -> redis.Redis:
