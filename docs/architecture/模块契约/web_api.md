@@ -210,3 +210,9 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 - 2026-08-11 加 live_task（策略与标的分离）+ 因子 CRUD（factor_def）+ validate-params/validate-python + 回测 symbol_params
 
 > ⚠️ 2026-08-17 语义变更（WAL 时序/order_prefix/fail-closed/verify 证据门禁等）：见 `docs/architecture/接口契约.md` 末节「今日语义变更」。
+
+
+## 增量（2026-08-19 链条打磨）
+- 新端点：`POST /api/factors/preview`（试算）/ `GET /api/help/{topic}`（指导书 md）/ backtest 详情 v2 形状（顶层四卡+task_id+symbols 对象数组）
+- 因子删除引用守卫（409 FACTOR_IN_USE）；策略 create/update 品类校验（symbol 空按 type 推断）
+- 本链 17 处 HTTPException→ApiError（14 码）；指导书内容源 server/docs/操作指导（rsync 部署）

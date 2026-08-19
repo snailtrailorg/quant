@@ -201,3 +201,11 @@ class BacktestEngine:
 ## 修订记录
 - 2026-08-09 初版
 - 2026-08-11 因子平台化（DB 自定义）+ 静态/动态区分 + Python 代码框 + 参数定义系统 + 策略与任务分离（live_task）
+
+
+## 增量（2026-08-19 链条打磨）
+- **执行规则方向感知**（`_resolve_volume`）：SELL=持仓口径（PERCENT 持仓×pct/ALL_IN 清仓——position_snapshot）/ BUY=可用资金口径（总资产−持仓市值近似）；失败降级 SHARES 100
+- **因子模式 Signal 回填**：聚合后自动填 price=close + volume（按规则推导）+ price_type/order_validity（从 params 读——此前恒默认）
+- **DSL 窗口函数**：mean/std/max/min/ema/rsi/slope/avevol（AST 预处理：窗口位裸 Name→字符串；嵌套/表达式入参/未知名抛异常）
+- **double_low 真实现**：convertible_terms 转股价+bar_1d 正股昨收 → 转股价值溢价
+- `_warmup_history(symbol, n=100)` 窗口参数化（上限 500）

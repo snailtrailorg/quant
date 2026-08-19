@@ -79,6 +79,7 @@
 - 架构设计：`docs/architecture/00-总体设计.md`（总体设计 10 节，14 份参考文档已合并）
 - 实盘稳定性：`docs/architecture/12-实盘稳定性设计.md`（风险清单/监控/守则）；稳定性检查台账 `flow/稳定性检查矩阵.md`（F-1~F-59）
 - 服务监控（S6 修订）：`docs/architecture/15-服务监控设计.md`（断流不自杀/下单时刻判定/health_monitor 内层+Zabbix@NAS 外层//healthz /readyz /metrics=Prometheus）
+- 操作指导书（面向使用者）：`docs/操作指导/`（索引+因子/策略/回测/实盘四册，server/docs 镜像随 rsync 部署）+ Web 内置 `/help`（`/api/help/{topic}`）
 - 多频率数据（16 号 v2.1 定稿，影子门禁后实施）：`docs/architecture/16-多频率数据设计.md`（慢路径日线直读+日界沿/快路径分钟；复权逐行因子链；NULL 因子=1.0 降级；盘口 Phase 2）
 - 共享行情 Hub（ST7）：`docs/architecture/13-需求书.md` + `14-设计.md` v2（hub=纯数据面单实例 MD，worker=TD-only；Valkey Streams 分发+租约 fencing；影子期 bar_hub/bar_shadow diff 门禁）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
