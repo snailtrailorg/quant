@@ -353,6 +353,11 @@ def main() -> None:
     md_status_was = False
 
     def _desired_symbols() -> set[str]:
+        """订阅真相源（三源）：running 任务标的 ∪ system_config 白名单 ∪ 池标的。
+
+        池源（2026-08-19 分钟数据策略：XTP hub 自攒为主）：所有配置了 minute_history_start
+        的池的成员自动进订阅——即使没有 running 任务在该标的上，hub 也会为它积累分钟 bar。
+        """
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:   # 影子查询必须在 with 内——曾因缩进在块外用到已还池连接被静默吞（2026-08-17 实测 subs=0）
@@ -366,6 +371,18 @@ def main() -> None:
                         rows |= {s.strip() for s in row[0].split(",") if s.strip()}
                 except Exception as e:
                     logger.warning("读 hub_shadow_symbols 失败: %s", e)
+                # 池源：minute_history_start 非空的池的成员（XTP 自攒分钟数据）
+                try:
+                    cur = conn.execute(
+                        "SELECT DISTINCT ps.symbol FROM pool_symbols ps "
+                        "JOIN pools p ON p.id = ps.pool_id "
+                        "WHERE p.minute_history_start IS NOT NULL")
+                    pool_rows = {x[0] for x in cur.fetchall() if x[0]}
+                    if pool_rows:
+                        rows |= pool_rows
+                        logger.info("池源订阅 +%d 标的", len(pool_rows))
+                except Exception as e:
+                    logger.warning("读池订阅源失败: %s", e)
                 return rows
         except Exception as e:
             logger.warning("读订阅真相源失败（沿用旧集）: %s", e)
