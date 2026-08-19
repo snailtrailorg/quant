@@ -2625,13 +2625,14 @@ def list_pools(payload: dict = Depends(require_role("viewer", "analyst", "trader
         except Exception:
             logger.warning("list_pools: pool_symbols 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute(
-            "SELECT p.id, p.name, p.category, p.description, ps.symbol "
+            "SELECT p.id, p.name, p.category, p.description, ps.symbol, p.minute_history_start "
             "FROM pools p LEFT JOIN pool_symbols ps ON ps.pool_id=p.id ORDER BY p.id")
         rows = cur.fetchall()
     pools = {}
-    for pid, pname, pcat, pdesc, sym in rows:
+    for pid, pname, pcat, pdesc, sym, mhs in rows:
         if pid not in pools:
-            pools[pid] = {"id": pid, "name": pname, "category": pcat, "description": pdesc, "symbols": []}
+            pools[pid] = {"id": pid, "name": pname, "category": pcat, "description": pdesc,
+                          "symbols": [], "minute_history_start": str(mhs) if mhs else None}
         if sym:
             pools[pid]["symbols"].append(sym)
     return list(pools.values())
@@ -2717,6 +2718,65 @@ def unbind_strategy_account(said: int, payload: dict = Depends(require_perm("str
         conn.execute("DELETE FROM strategy_account WHERE id=%s", (said,))
         conn.commit()
     return {"ok": True}
+
+
+@app.post("/api/pool/{pid}/symbol")
+def add_pool_symbol_api(pid: str, body: dict = Body(...),
+                        payload: dict = Depends(require_perm("strategy_control"))):
+    """单标的入池（链条打磨：替代全量覆盖式 POST /api/pool——修并发覆盖竞态）。
+
+    body: {symbol}——接受 vt 格式（600000.SHSE）或 Tushare 格式（600000.SH），归一到 vt。
+    """
+    from src.data_platform.schema import to_vt_symbol, vt_to_ts
+    raw = (body.get("symbol") or "").strip()
+    if not raw:
+        raise ApiError(400, "MISSING_FIELDS", "symbol 必填")
+    if "." not in raw:
+        raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
+    vt = to_vt_symbol(raw)
+    ts = vt_to_ts(vt)   # 校验可转换（防垃圾格式入池后同步空转——S-F1）
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM pools WHERE id=%s", (pid,))
+        if not cur.fetchone():
+            raise ApiError(404, "POOL_NOT_FOUND", f"池 {pid} 不存在")
+        conn.execute(
+            "INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s, %s) "
+            "ON CONFLICT (pool_id, symbol) DO NOTHING", (pid, vt))
+        conn.commit()
+    audit_log(payload["username"], "pool_add_symbol", pid, vt)
+    return {"status": "added", "symbol": vt, "ts_code": ts}
+
+
+@app.delete("/api/pool/{pid}/symbol/{sym}")
+def del_pool_symbol_api(pid: str, sym: str,
+                        payload: dict = Depends(require_perm("strategy_control"))):
+    """单标的移出池。"""
+    from src.data_platform.schema import to_vt_symbol
+    vt = to_vt_symbol(sym)
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM pool_symbols WHERE pool_id=%s AND symbol=%s RETURNING id",
+                           (pid, vt))
+        deleted = cur.fetchone()
+        conn.commit()
+    if not deleted:
+        raise ApiError(404, "POOL_SYMBOL_NOT_FOUND", f"{vt} 不在池 {pid}")
+    audit_log(payload["username"], "pool_del_symbol", pid, vt)
+    return {"status": "removed", "symbol": vt}
+
+
+@app.get("/api/pool/{pid}/minute-status")
+def pool_minute_status_api(pid: str,
+                           payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """池分钟数据覆盖状态（每标的 bar_1min 最后 ts——首轮回补可能 11.5h，进度可见是必须项）。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT ps.symbol, COALESCE(b.last_ts::text, '') FROM pool_symbols ps "
+            "LEFT JOIN (SELECT symbol, MAX(ts) AS last_ts FROM bar_1min GROUP BY symbol) b "
+            "ON b.symbol = ps.symbol WHERE ps.pool_id=%s ORDER BY ps.symbol", (pid,))
+        rows = cur.fetchall()
+    return {"pool_id": pid, "symbols": [
+        {"symbol": r[0], "last_ts": r[1][:19] if r[1] else None, "covered": bool(r[1])}
+        for r in rows]}
 
 
 @app.delete("/api/pool/{pid}")

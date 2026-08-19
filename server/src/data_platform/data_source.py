@@ -14,7 +14,19 @@ logger = logging.getLogger("data_source")
 
 
 class DataSource(ABC):
-    """数据源接口。"""
+    """数据源接口。
+
+    限速（2026-08-19 T 审）：`get_rate_limit(api_name)` 具体方法（非 abstract——
+    带默认实现，AkShare stub 零改动，未来 Wind 不强制实现）。配置归
+    `data_source_config.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
+    params 分界：秘密→credentials_encrypted；运维参数（rate_limits/base_url）→params。
+    """
+
+    DEFAULT_RATE_LIMITS: dict[str, float] = {}   # 子类覆写：api_name -> 最小间隔秒
+
+    def __init__(self, credentials_encrypted: str | None = None, params: str | None = None):
+        self._credentials_encrypted = credentials_encrypted
+        self._params = json.loads(params) if params else {}
 
     @abstractmethod
     def get_client(self):
@@ -23,6 +35,19 @@ class DataSource(ABC):
     @abstractmethod
     def test_connection(self) -> bool:
         """测试连接，返回是否成功。"""
+
+    def get_rate_limit(self, api_name: str) -> float:
+        """该 API 两次调用最小间隔（秒）。0=不限。
+
+        params.rate_limits 覆盖类级 DEFAULT_RATE_LIMITS；值非法回落默认+告警一次，不崩同步。
+        键=数据源接口名（Tushare 即 pro.xxx 的 xxx，与 sync_config.tushare_api 词汇表对齐）。
+        """
+        limits = {**self.DEFAULT_RATE_LIMITS, **(self._params.get("rate_limits") or {})}
+        try:
+            return float(limits.get(api_name, 0.0))
+        except (TypeError, ValueError):
+            logger.warning("rate_limits[%s]=%r 非法，回落默认", api_name, limits.get(api_name))
+            return float(self.DEFAULT_RATE_LIMITS.get(api_name, 0.0))
 
     def record_usage(self, api_calls: int = 1, api_name: str = "",
                     success: bool = True, latency_ms: int = 0,
@@ -49,9 +74,16 @@ class TushareDataSource(DataSource):
 
     provider = "tushare"
 
-    def __init__(self, credentials_encrypted: str | None = None, params: str | None = None):
-        self._credentials_encrypted = credentials_encrypted
-        self._params = json.loads(params) if params else {}
+    # 类级默认限速（T 审：= engine 今日硬编码值，DB 无 rate_limits 时行为不变）
+    DEFAULT_RATE_LIMITS = {
+        "stk_mins": 0.15,       # 分钟线 per-symbol
+        "adj_factor": 0.3,       # 复权因子回补
+        "daily": 0.5,            # 日线按交易日
+        "fund_daily": 0.5,
+        "cb_daily": 0.5,
+        "trade_cal": 0.5,
+        "stock_basic": 0.5,
+    }
 
     def _get_token(self) -> str:
         """解密 token（DB 优先，.env fallback）。"""

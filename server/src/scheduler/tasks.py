@@ -425,6 +425,18 @@ def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str 
         raise
 
 
+@app.task(name="src.scheduler.tasks.pool_minute_sync_task",
+          bind=True, soft_time_limit=320, time_limit=350)
+def pool_minute_sync_task(self):
+    """池驱动分钟同步（S+T 审 2026-08-19：engine 编排+scheduler 薄壳第 4 例）。
+
+    每 5 分钟 beat；sync_pools_minute 自带时间盒 280s + SyncLock 防重叠 + sync_log 可观测。
+    stk_mins 限速 1 次/分钟（Valkey 全局闸门），首轮全量可能跨多轮完成（幂等续补）。
+    """
+    from src.data_sync.pool_minute import sync_pools_minute
+    return sync_pools_minute()
+
+
 @app.task(name="src.scheduler.tasks.health_monitor_check")
 def health_monitor_check():
     """15-服务监控：30s 采集判定（unit 状态/依赖/心跳 + 沿检测 + health_event 落库 + 告警）。

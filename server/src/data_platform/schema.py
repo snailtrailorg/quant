@@ -28,6 +28,21 @@ EXCHANGE_TS_MAP["SZSE"] = "SZ"
 EXCHANGE_TS_MAP["BSE"] = "BJ"
 
 
+def vt_to_ts(vt_symbol: str) -> str:
+    """vnpy vt_symbol → Tushare ts_code（to_vt_symbol 对偶；S-F1：pool_symbols 全链 vt 格式
+    vs stk_mins 要 Tushare 格式——不转换永久空转）。
+
+    >>> vt_to_ts("600000.SHSE")
+    "600000.SH"
+    >>> vt_to_ts("000001.SZSE")
+    "000001.SZ"
+    """
+    if "." not in vt_symbol:
+        return vt_symbol
+    sym, ex = vt_symbol.rsplit(".", 1)
+    return f"{sym}.{EXCHANGE_TS_MAP.get(ex.upper(), ex.upper())}"
+
+
 def to_vt_symbol(ts_code: str) -> str:
     """Tushare ts_code → vnpy vt_symbol。
 
