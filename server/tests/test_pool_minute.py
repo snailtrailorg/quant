@@ -15,13 +15,13 @@ class TestGetRateLimit:
     def test_no_params_falls_back_to_class_defaults(self):
         from src.data_platform.data_source import TushareDataSource
         ds = TushareDataSource()
-        assert ds.get_rate_limit("stk_mins") == 0.15
+        assert ds.get_rate_limit("stk_mins") == 3600.0   # 2026-08-19 改为 1 次/小时
         assert ds.get_rate_limit("ghost_api") == 0.0   # 未知接口不限
 
     def test_invalid_value_tolerated(self):
         from src.data_platform.data_source import TushareDataSource
         ds = TushareDataSource(params='{"rate_limits": {"stk_mins": "bad"}}')
-        assert ds.get_rate_limit("stk_mins") == 0.15   # 非法回落默认
+        assert ds.get_rate_limit("stk_mins") == 3600.0   # 2026-08-19 改为 1 次/小时   # 非法回落默认
 
 
 class TestVtToTs:

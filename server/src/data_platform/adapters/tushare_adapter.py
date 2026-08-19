@@ -418,3 +418,57 @@ def validate_bar_quality(df: pd.DataFrame) -> dict:
         "original_count": total,
         "dedupped": int(dup_count) if dup_count > 0 else 0,
     }
+
+
+# ─── 三档数据第一档：全局定时同步 pull 函数（U 审 2026-08-19）───
+
+def pull_stk_limit(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """每日涨跌停价格（全市场单日，盘前 08:40 Tushare 更新）。"""
+    pro = get_pro()
+    return pro.stk_limit(trade_date=trade_date)
+
+def pull_moneyflow(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """个股资金流向（全市场单日，20 列大中小单）。"""
+    pro = get_pro()
+    return pro.moneyflow(trade_date=trade_date)
+
+def pull_margin_detail(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """融资融券明细（全市场单日，T+1）。"""
+    pro = get_pro()
+    return pro.margin_detail(trade_date=trade_date)
+
+def pull_top_list(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """龙虎榜每日明细。"""
+    pro = get_pro()
+    return pro.top_list(trade_date=trade_date)
+
+def pull_block_trade(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """大宗交易。"""
+    pro = get_pro()
+    return pro.block_trade(trade_date=trade_date)
+
+def pull_cyq_perf(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """每日筹码及胜率汇总（全市场单日）。"""
+    pro = get_pro()
+    return pro.cyq_perf(trade_date=trade_date)
+
+def pull_forecast(ann_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """业绩预告（按公告日增量）。"""
+    pro = get_pro()
+    return pro.forecast(ann_date=ann_date)
+
+def pull_namechange(ts_code: str = "", start_date: str = "", end_date: str = "") -> pd.DataFrame:
+    """股票曾用名（ST 识别）。全量重建模式。"""
+    pro = get_pro()
+    kwargs = {"ts_code": ts_code} if ts_code else {}
+    if start_date: kwargs["start_date"] = start_date
+    if end_date: kwargs["end_date"] = end_date
+    return pro.namechange(**kwargs)
+
+def pull_concept(trade_date: str = "", ts_code: str = "") -> pd.DataFrame:
+    """概念板块列表。全量重建模式。"""
+    pro = get_pro()
+    kwargs = {}
+    if trade_date: kwargs["trade_date"] = trade_date
+    if ts_code: kwargs["ts_code"] = ts_code
+    return pro.concept(**kwargs)

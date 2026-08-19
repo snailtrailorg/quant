@@ -612,6 +612,13 @@ def sync_all_symbols(self, sync_id: str):
         raise
 
 
+# 第一档全局同步的 soft_time_limit 覆盖映射（U-3：全市场 batch 拉取带限速必超 300s 默认值）
+_TIER1_TIME_LIMITS = {
+    "moneyflow_sync": 600, "margin_detail_sync": 600, "cyq_perf_sync": 600,
+    "top_list_sync": 600, "block_trade_sync": 300,
+}
+
+
 @app.task(name="src.scheduler.tasks.sync_via_celery",
           bind=True, soft_time_limit=3600, time_limit=4200)
 def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):

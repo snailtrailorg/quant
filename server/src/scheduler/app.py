@@ -88,7 +88,7 @@ app.conf.update(
         },
         "sync-scheduler": {
             "task": "src.scheduler.tasks.data_sync_scheduler",
-            "schedule": 1800.0,
+            "schedule": 300.0,   # U-4: 300s 才对得上 cron 窗口（08:45 等分钟级 schedule）
             "options": {"queue": "data"},
         },
         "disk-monitor": {

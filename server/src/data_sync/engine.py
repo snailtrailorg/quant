@@ -612,6 +612,169 @@ _HANDLERS = {
 }
 
 
+# ═══ 三档数据第一档：全局定时同步 handler（U 审 2026-08-19）═══
+# 通用模式：pull(trade_date) → DataFrame → 逐行 upsert 到专用表
+# soft_time_limit 由 celery task 侧覆盖（≥600s），此处只做数据层
+
+def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
+                        float_cols: list[str] | None = None, text_cols: list[str] | None = None):
+    """工厂：生成第一档按日批量同步 handler。
+
+    Args:
+        table: 目标表名（如 'stk_limit'）
+        pull_fn_name: tushare_adapter 里的 pull 函数名（如 'pull_stk_limit'）
+        pk_cols: 主键列（用于 ON CONFLICT）
+        float_cols: NUMERIC 列名列表
+        text_cols: TEXT 列名列表
+    """
+    import importlib
+    adapter = importlib.import_module("src.data_platform.adapters.tushare_adapter")
+    pull_fn = getattr(adapter, pull_fn_name)
+    all_cols = (float_cols or []) + (text_cols or [])
+    conflict = ", ".join(pk_cols)
+    updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in all_cols if c not in pk_cols)
+
+    def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
+                 progress_cb=None) -> dict:
+        """通用第一档同步：按 trade_date 拉全市场 → upsert。"""
+        from src.data_platform.db import get_conn as _gc
+        # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日）
+        if backfill_from:
+            start_ts = backfill_from
+        else:
+            _last = cfg.get("last_sync_date") or (date.today() - timedelta(days=3)).strftime("%Y%m%d")
+            start_ts = (pd.Timestamp(_last) + timedelta(days=1)).strftime("%Y%m%d")
+        if start_ts > end_date:
+            return {"pulled": 0, "saved": 0, "start": start_ts, "failed_dates": [], "expected_days": 0, "actual_days": 0}
+
+        date_range = pd.date_range(start=start_ts, end=end_date, freq="B")
+        total_pulled = total_saved = 0
+        failed_dates = []
+        for d in date_range:
+            td = d.strftime("%Y%m%d")
+            try:
+                # forecast 按 ann_date 拉（公告日驱动），其余按 trade_date
+                if "ann_date" in pull_fn.__code__.co_varnames:
+                    df = pull_fn(ann_date=td)
+                else:
+                    df = pull_fn(trade_date=td)
+                if df is not None and not df.empty:
+                    # 修 2026-08-19：insert_cols 含 PK，placeholders 必须同长（原漏 PK 导致每日 INSERT 失败）
+                    insert_cols = pk_cols + [c for c in all_cols if c not in pk_cols]
+                    placeholders = ", ".join(["%s"] * len(insert_cols))
+                    cols_sql = ", ".join(insert_cols)
+                    upsert = (f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders}) "
+                              f"ON CONFLICT ({conflict}) DO UPDATE SET {updates}" if updates else
+                              f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders}) "
+                              f"ON CONFLICT ({conflict}) DO NOTHING")
+                    with _gc() as conn:
+                        with conn.cursor() as cur:
+                            for _, row in df.iterrows():
+                                vals = []
+                                for c in insert_cols:
+                                    v = row.get(c)
+                                    if c in (float_cols or []):
+                                        vals.append(adapter._safe_float(v) if v is not None else None)
+                                    else:
+                                        vals.append(str(v) if v is not None else None)
+                                cur.execute(upsert, vals)
+                        conn.commit()
+                    total_pulled += len(df)
+                    total_saved += len(df)
+            except Exception as e:
+                failed_dates.append(f"{td}:{type(e).__name__}:{str(e)[:40]}")
+            if progress_cb:
+                progress_cb(len(date_range), len(date_range), td)
+            time.sleep(0.3)   # 限速：500 次/分内
+        return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
+                "failed_dates": failed_dates,
+                "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates)}
+
+    return _handler
+
+
+def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str],
+                              text_cols: list[str]):
+    """工厂：生成全量重建 handler（每周一跑，DELETE 全表后 INSERT）。"""
+    import importlib
+    adapter = importlib.import_module("src.data_platform.adapters.tushare_adapter")
+    pull_fn = getattr(adapter, pull_fn_name)
+
+    def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
+                 progress_cb=None) -> dict:
+        from src.data_platform.db import get_conn as _gc
+        df = pull_fn(trade_date=end_date) if "trade_date" in pull_fn.__code__.co_varnames else pull_fn()
+        if df is None or df.empty:
+            return {"pulled": 0, "saved": 0, "start": "", "failed_dates": ["空数据"], "expected_days": 1, "actual_days": 0}
+        cols = list(df.columns)
+        placeholders = ", ".join(["%s"] * len(cols))
+        cols_sql = ", ".join(cols)
+        with _gc() as conn:
+            conn.execute(f"DELETE FROM {table}")
+            with conn.cursor() as cur:
+                for _, row in df.iterrows():
+                    vals = [str(row[c]) if row[c] is not None else None for c in cols]
+                    cur.execute(f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})", vals)
+            conn.commit()
+        return {"pulled": len(df), "saved": len(df), "start": "full",
+                "failed_dates": [], "expected_days": 1, "actual_days": 1}
+
+    return _handler
+
+
+# 注册 9 个 handler（按迁移 0045 表结构）
+_TIER1_FLOAT_COLS = {
+    "stk_limit": ["pre_close", "up_limit", "down_limit"],
+    "moneyflow": ["buy_sm_vol","buy_sm_amount","sell_sm_vol","sell_sm_amount",
+                   "buy_md_vol","buy_md_amount","sell_md_vol","sell_md_amount",
+                   "buy_lg_vol","buy_lg_amount","sell_lg_vol","sell_lg_amount",
+                   "buy_elg_vol","buy_elg_amount","sell_elg_vol","sell_elg_amount",
+                   "net_mf_vol","net_mf_amount"],
+    "margin_detail": ["rzye","rqye","rzmre","rqyl","rzche","rqchl","rqmcl","rzrqye"],
+    "top_list": ["close","pct_change","turnover_rate","amount","l_sell","l_buy","l_amount","net_amount","net_rate","amount_rate","float_values"],
+    "block_trade": ["price","vol","amount"],
+    "cyq_perf": ["his_low","his_high","cost_5pct","cost_15pct","cost_50pct","cost_85pct","cost_95pct","weight_avg","winner_rate"],
+    "forecast": ["p_change_min","p_change_max","net_profit_min","net_profit_max","last_parent_net"],
+}
+_TIER1_TEXT_COLS = {
+    "stk_limit": [],
+    "moneyflow": [],
+    "margin_detail": [],
+    "top_list": ["name","reason"],
+    "block_trade": ["buyer","seller"],
+    "cyq_perf": [],
+    "forecast": ["type","summary","change_reason","first_ann_date"],
+    "namechange": ["name","start_date","end_date","ann_date","change_reason"],
+    "concept": ["name"],
+}
+
+# 按日批量的（7 个）
+_TIER1_BATCH = {
+    "stk_limit_sync":     ("stk_limit",     "pull_stk_limit",     ["trade_date","ts_code"]),
+    "moneyflow_sync":     ("moneyflow",     "pull_moneyflow",     ["ts_code","trade_date"]),
+    "margin_detail_sync": ("margin_detail", "pull_margin_detail", ["trade_date","ts_code"]),
+    "top_list_sync":      ("top_list",      "pull_top_list",      ["trade_date","ts_code"]),
+    "block_trade_sync":   ("block_trade",   "pull_block_trade",   ["ts_code","trade_date"]),
+    "cyq_perf_sync":      ("cyq_perf",      "pull_cyq_perf",      ["ts_code","trade_date"]),
+    "forecast_sync":      ("forecast",      "pull_forecast",      ["ts_code","ann_date","end_date"]),
+}
+for _sid, (_tbl, _pull, _pk) in _TIER1_BATCH.items():
+    _HANDLERS[_sid] = _make_tier1_handler(
+        _tbl, _pull, _pk,
+        float_cols=_TIER1_FLOAT_COLS.get(_tbl, []),
+        text_cols=_TIER1_TEXT_COLS.get(_tbl, []))
+
+# 全量重建的（2 个）
+_TIER1_FULL = {
+    "namechange_sync": ("namechange", "pull_namechange", ["ts_code","name","start_date"]),
+    "concept_sync":    ("concept",    "pull_concept",    ["ts_code"]),
+}
+for _sid, (_tbl, _pull, _pk) in _TIER1_FULL.items():
+    _HANDLERS[_sid] = _make_full_rebuild_handler(
+        _tbl, _pull, _pk, text_cols=_TIER1_TEXT_COLS.get(_tbl, []))
+
+
+
 # ====================================================================
 # per-symbol 同步 / 回补 / 删除（完整性驱动，非游标驱动）
 # ====================================================================
