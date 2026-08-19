@@ -2610,6 +2610,7 @@ class PoolReq(BaseModel):
     category: str = "astock"
     symbolsStr: str = ""
     description: str = ""
+    minute_history_start: str | None = None   # YYYY-MM-DD；空=不拉分钟历史
 
 
 @app.get("/api/pool")
@@ -2651,10 +2652,13 @@ def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_con
             conn.execute("SELECT 1 FROM pool_symbols LIMIT 1")
         except Exception:
             logger.warning("create_pool: pool_symbols 表不存在（需运行 alembic upgrade head）")
+        mhs = req.minute_history_start or None
         conn.execute(
-            "INSERT INTO pools (id, name, category, description) VALUES (%s,%s,%s,%s) "
-            "ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, description=EXCLUDED.description",
-            (req.id, req.name, req.category, req.description))
+            "INSERT INTO pools (id, name, category, description, minute_history_start) VALUES (%s,%s,%s,%s,%s) "
+            "ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, "
+            "description=EXCLUDED.description, "
+            "minute_history_start=COALESCE(EXCLUDED.minute_history_start, pools.minute_history_start)",
+            (req.id, req.name, req.category, req.description, mhs))
         conn.execute("DELETE FROM pool_symbols WHERE pool_id=%s", (req.id,))
         for sym in symbols:
             conn.execute("INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s,%s) ON CONFLICT DO NOTHING", (req.id, sym))

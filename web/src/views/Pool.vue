@@ -163,9 +163,9 @@ const savePool = async () => {
   if (!np.id || !np.name) { ElMessage.warning(t('pool.idNameRequired')); return }
   try {
     const symbols = np.symbolsStr.split('\n').map(s => s.trim()).filter(Boolean)
-    await createPoolApi({ id: np.id, name: np.name, category: np.category, description: np.description, symbols })
+    await createPoolApi({ id: np.id, name: np.name, category: np.category, description: np.description, symbols, minute_history_start: np.minuteStart })
     if (np.minuteStart) {
-      ElMessage.info(t('pool.minuteStartSavedHint'))
+      // 已随 createPoolApi 一起提交（minute_history_start 字段）
     }
     ElMessage.success(t('common.saveSuccess'))
     showDialog.value = false
