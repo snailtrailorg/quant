@@ -152,11 +152,14 @@ app.conf.update(
             "options": {"queue": "risk"},
         },
         # 15-服务监控：30s 症状型判定（unit/依赖/心跳，沿检测去重），S6 修订配套
-        "pool-minute-sync": {
-            "task": "src.scheduler.tasks.pool_minute_sync_task",
-            "schedule": 300.0,
-            "options": {"queue": "data", "expires": 290},
-        },
+        # 池分钟同步（已建未启用——Tushare stk_mins 是独立产品包 2000 元/年，
+        # 全局 1 次/小时不够用；先靠 XTP hub 自攒，买包后启用 Tushare 为主源+XTP 校验。
+        # 启用方法：取消注释此 beat + data_source_config.params 配 rate_limits）
+        # "pool-minute-sync": {
+        #     "task": "src.scheduler.tasks.pool_minute_sync_task",
+        #     "schedule": 300.0,
+        #     "options": {"queue": "data", "expires": 290},
+        # },
         "health-monitor": {
             "task": "src.scheduler.tasks.health_monitor_check",
             "schedule": 30.0,
