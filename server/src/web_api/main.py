@@ -1697,6 +1697,28 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
     return {"status": "submitted", "task_id": task.id}
 
 
+@app.post("/api/sync/pool-minute/trigger")
+def trigger_pool_minute_api(payload: dict = Depends(require_perm("data_sync"))):
+    """手动触发池分钟同步（beat 300s 也会自动跑；手动用于首建池后立即拉取）。"""
+    from src.scheduler.tasks import pool_minute_sync_task
+    task = pool_minute_sync_task.delay()
+    audit_log(payload["username"], "trigger_pool_minute", "")
+    return {"status": "submitted", "task_id": task.id}
+
+
+@app.get("/api/sync/pool-minute/progress")
+def pool_minute_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """池分钟同步进度（Valkey sync:pool:minute hash）。"""
+    r = redis.Redis(connection_pool=_redis_pool)
+    data = r.hgetall("sync:pool:minute")
+    out = {}
+    for k, v in data.items():
+        ks = k.decode() if isinstance(k, bytes) else k
+        vs = v.decode() if isinstance(v, bytes) else v
+        out[ks] = vs
+    return out or {"status": "idle"}
+
+
 @app.post("/api/sync/adj-factor-backfill")
 def adj_factor_backfill_api(start_date: str | None = None, end_date: str | None = None,
                             payload: dict = Depends(require_perm("data_sync"))):
