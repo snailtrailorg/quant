@@ -76,7 +76,7 @@ class TushareDataSource(DataSource):
 
     # 类级默认限速（T 审：= engine 今日硬编码值，DB 无 rate_limits 时行为不变）
     DEFAULT_RATE_LIMITS = {
-        "stk_mins": 0.15,       # 分钟线 per-symbol
+        "stk_mins": 3600.0,     # 分钟线 per-symbol（实测 1 次/小时，2026-08-19）
         "adj_factor": 0.3,       # 复权因子回补
         "daily": 0.5,            # 日线按交易日
         "fund_daily": 0.5,
