@@ -18,7 +18,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index("idx_daily_basic_trade_date", "daily_basic", ["trade_date"])
+    # if_not_exists：防半途状态（alembic 僵死持锁/中断后索引已建但版本号未写，重跑不炸）
+    op.create_index("idx_daily_basic_trade_date", "daily_basic", ["trade_date"],
+                    if_not_exists=True)
 
 
 def downgrade() -> None:
