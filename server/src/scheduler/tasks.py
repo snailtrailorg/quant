@@ -425,6 +425,14 @@ def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str 
         raise
 
 
+@app.task(name="src.scheduler.tasks.pool_data_sync_task",
+          bind=True, soft_time_limit=320, time_limit=350)
+def pool_data_sync_task(self):
+    """池内深度数据同步（三档第二档，2026-08-19）。独立于已禁用的分钟同步。"""
+    from src.data_sync.pool_data import sync_pools_data
+    return sync_pools_data()
+
+
 @app.task(name="src.scheduler.tasks.pool_minute_sync_task",
           bind=True, soft_time_limit=320, time_limit=350)
 def pool_minute_sync_task(self):
