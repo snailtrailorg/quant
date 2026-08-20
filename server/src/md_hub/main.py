@@ -457,6 +457,8 @@ def main() -> None:
 
         先 flush 在桶分钟防丢最后一根，再 SDK 原生退订——原 _sync_subscriptions 只加不减，
         移除标的的 tick 白收（带宽/CPU+latest_tick 键残留到 TTL）。
+        补盲审 G1：EXCHANGE_VT2XTP 无 BSE 键——.get() 取 None 静默跳过（与 _subscribe 对称，
+        BSE 端到端本就不通，防 KeyError 噪音刷 warning）。
         """
         try:
             bar = agg.flush_symbol(sym)
@@ -464,9 +466,10 @@ def main() -> None:
                 _publish(bar)
             raw, ex = sym.rsplit(".", 1)
             e = _EX.get(ex)
-            if e:
-                from vnpy_xtp.gateway.xtp_gateway import EXCHANGE_VT2XTP
-                md_api.unSubscribeMarketData(raw, 1, EXCHANGE_VT2XTP[e])
+            from vnpy_xtp.gateway.xtp_gateway import EXCHANGE_VT2XTP
+            xtp_ex = EXCHANGE_VT2XTP.get(e) if e else None
+            if xtp_ex is not None:
+                md_api.unSubscribeMarketData(raw, 1, xtp_ex)
                 logger.info("退订 %s（生命周期结束）", sym)
         except Exception as e:
             logger.warning("退订失败 %s: %s", sym, e)
@@ -475,17 +478,20 @@ def main() -> None:
         nonlocal subscribed
         want = _desired_symbols()
         # 评审 C3：除 diff 外，每 60s 无条件全量幂等重放（XTP 重连不恢复订阅 + 启动竞态双兜底）
+        # 补盲审 S1 修正（2026-08-20）：replay 窗口（每分钟 :00-:09 例行触发，非仅重连）同样
+        # 先退订 removed——否则落在窗口内的移除（临时过期/出池）永不被 SDK 退订（订阅泄漏）
         replay_all = force or (int(time.time()) % 60 < 10)
+        removed = subscribed - want
         if replay_all:
-            # 重放只订不退：重连后 XTP 侧订阅清零，subscribed 记录的是期望集非连接实况
+            for s in removed:
+                _unsubscribe(s)   # 重连场景 removed 通常空集（XTP 侧已清零），幂等无害
             if want != subscribed or force:
-                logger.info("订阅重放（共 %d）", len(want))
+                logger.info("订阅重放（共 %d，退 %d）", len(want), len(removed))
             for s in want:
                 _subscribe(s)
             subscribed = want
             return
         added = want - subscribed
-        removed = subscribed - want
         if added or removed:
             for s in added:
                 _subscribe(s)

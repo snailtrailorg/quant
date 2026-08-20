@@ -68,6 +68,7 @@ class DailySelectionEngine:
         GROUP BY ts_code
     )
     SELECT db.ts_code, a.name, a.industry,
+           to_char(latest.dd, 'YYYYMMDD') AS snap,
            db.close, db.turnover_rate,
            db.total_mv, db.circ_mv,
            (db.close / NULLIF(ma.ma20, 0) - 1) AS ma_dev,
@@ -146,7 +147,7 @@ class DailySelectionEngine:
                               f"{k}={v:.4f}" if v is not None else f"{k}=缺"
                               for k, v in fv.items()))
             results.append(AnalysisResult(
-                ts=trade_date or "",
+                ts=row.get("snap") or trade_date or "",
                 symbol=ts_code,
                 vt_symbol=to_vt_symbol(ts_code),
                 score=float(row["score"]),

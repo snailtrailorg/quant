@@ -106,6 +106,10 @@ def get_quote(ts_code: str, force: bool = False) -> dict | None:
         "source": "tencent",
     }
     if quote["last"] is None:
+        try:
+            r.set(key, "null", ex=30)   # 无效代码同样负缓存（补盲审 B1）
+        except Exception:
+            pass
         return None
     try:
         r.set(key, json.dumps(quote, ensure_ascii=False), ex=QUOTE_TTL)

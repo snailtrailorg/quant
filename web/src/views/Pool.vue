@@ -28,7 +28,7 @@
                   <el-table-column :label="t('common.action')" width="150">
                     <template #default="{ row: s }">
                       <el-button type="primary" @click="gotoDetail(s.symbol)">{{ t('common.detail') }}</el-button>
-                      <el-button type="danger" size="small" @click="removeSymbol(row.id, s.symbol)">✕</el-button>
+                      <el-button type="danger" @click="removeSymbol(row.id, s.symbol)">✕</el-button>
                     </template>
                   </el-table-column>
                 </el-table>

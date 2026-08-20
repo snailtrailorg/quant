@@ -20,6 +20,7 @@ SLOW_KEY_PREFIX = "detail:slow:"
 SLOW_TTL = 600
 ONDEMAND_KEY_PREFIX = "detail:ondemand:"
 ONDEMAND_TTL = 300
+INTRADAY_KEY = "intraday:tencent:"   # 分时缓存（补盲审 G4：60s TTL/30s 负缓存）
 
 
 def _r():
@@ -74,7 +75,7 @@ def _touch_transient_sub(vt: str) -> None:
                 "(SELECT symbol FROM hub_transient_subs ORDER BY expire_at DESC OFFSET 100)")
             conn.commit()
     except Exception as e:
-        logger.debug("临时订阅 upsert 失败（不影响详情）: %s", e)
+        logger.warning("临时订阅 upsert 失败（不影响详情，排查 hub 源不生效先看这）: %s", e)
 
 
 # ── 分时曲线（17 号蓝图 K 线 Tab"日/分钟"的分钟半边，2026-08-20 补）──
@@ -85,29 +86,50 @@ def get_intraday(symbol: str) -> dict | None:
     XTP 是纯实时流无历史回放——临时订阅标的 hub 只有"订阅时刻起"的段，池内标的
     当日 hub 也可能因重启有洞；腾讯分时是唯一当天全天免费源。bar_hub 的价值在
     次日起的自攒全天（+腾讯不可用时兜底）。
+    补盲审 G4：腾讯结果 60s TTL + 失败 30s 负缓存（与 quote 同模式，防腾讯不可用
+    期间每 30s 轮询同步阻塞 5s）。
     """
     ts_code, vt = _normalize(symbol)
+    try:
+        cached = _r().get(INTRADAY_KEY + ts_code)
+        if cached:
+            return None if cached == "null" else json.loads(cached)
+    except Exception:
+        pass
     r = _intraday_from_tencent(ts_code)
-    if r:
-        return r
-    return _intraday_from_hub(vt)
+    if r is None:
+        r = _intraday_from_hub(vt)   # 腾讯死时的兜底（仅接受当日数据，见内）
+    if r is None:
+        try:
+            _r().set(INTRADAY_KEY + ts_code, "null", ex=30)
+        except Exception:
+            pass
+        return None
+    try:
+        _r().set(INTRADAY_KEY + ts_code, json.dumps(r, ensure_ascii=False), ex=60)
+    except Exception:
+        pass
+    return r
 
 
 def _intraday_from_hub(vt: str) -> dict | None:
+    """hub 兜底（腾讯不可用时）：**只接受当日数据**（补盲审 G2——原取最新日，
+    临时订阅过期后会端出上一交易日曲线冒充当日）。"""
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT ts::date FROM bar_hub WHERE symbol=%s ORDER BY ts DESC LIMIT 1", (vt,))
+                "SELECT to_char(ts::date, 'YYYYMMDD') FROM bar_hub WHERE symbol=%s "
+                "AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1", (vt,))
             row = cur.fetchone()
             if not row:
                 return None
             d = row[0]
             cur = conn.execute(
                 "SELECT to_char(ts, 'HH24:MI'), close, volume, amount FROM bar_hub "
-                "WHERE symbol=%s AND ts::date=%s ORDER BY ts", (vt, d))
+                "WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts", (vt,))
             rows = cur.fetchall()
-        # hub 兜底场景（腾讯不可用）：当日不足 30 点说明只有零星数据，宁缺勿残段
+        # 当日点数不足（临时订阅标的当日只从订阅时刻攒起）→ 宁缺勿残段
         if not rows or len(rows) < 30:
             return None
         points, cum_v, cum_a = [], 0.0, 0.0
@@ -116,7 +138,7 @@ def _intraday_from_hub(vt: str) -> dict | None:
             cum_a += float(amount or 0)
             points.append({"t": t, "price": float(close), "volume": float(volume or 0),
                            "avg": round(cum_a / cum_v, 3) if cum_v > 0 else float(close)})
-        return {"date": str(d), "source": "hub", "points": points}
+        return {"date": d, "source": "hub", "points": points}
     except Exception as e:
         logger.warning("分时 bar_hub 读取失败: %s", e)
         return None
@@ -148,10 +170,11 @@ def _intraday_from_tencent(ts_code: str) -> dict | None:
                            "avg": round(cum_a / (cum_v * 100), 4) if cum_v > 0 and cum_a > 0 else price,
                            "cum_v": cum_v})
         # 分钟量 = 累计差分（先取差再删键——上一行的 cum_v 已 pop，用滚动 prev）
+        # ×100 归一股（补盲审 G3：腾讯累计量是手，hub 路径是股，不归一差 100 倍）
         prev_cum = 0.0
         for pt in points:
             cur = pt.pop("cum_v")
-            pt["volume"] = max(0.0, cur - prev_cum)
+            pt["volume"] = max(0.0, (cur - prev_cum) * 100)
             prev_cum = cur
         return {"date": d, "source": "tencent", "points": points}
     except Exception as e:

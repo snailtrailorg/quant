@@ -16,7 +16,7 @@
             <el-tag :type="quote?.source === 'hub' ? 'success' : 'warning'">
               {{ quote?.source === 'hub' ? t('stockDetail.srcHub') : (quote ? t('stockDetail.srcTencent') : t('stockDetail.noQuote')) }}
             </el-tag>
-            <el-button type="primary" @click="fetchDetail">{{ t('common.refresh') }}</el-button>
+            <el-button type="primary" @click="refreshAll">{{ t('common.refresh') }}</el-button>
           </div>
         </div>
       </template>
@@ -26,7 +26,7 @@
           <div v-if="quote" class="snap">
             <span class="price" :class="priceClass">{{ quote.last }}</span>
             <span class="chg" :class="priceClass">
-              {{ quote.chg ?? '-' }} ({{ quote.pct_chg ?? '-' }}%)
+              {{ quote.chg ?? '-' }} ({{ pctChg == null ? '-' : pctChg.toFixed(2) }}%)
             </span>
             <div class="meta">
               <span>{{ t('stockDetail.turnover') }}: {{ quote.turnover_rate ?? '-' }}%</span>
@@ -47,14 +47,14 @@
             <tbody>
               <tr v-for="i in 5" :key="'a' + i" class="ask">
                 <td>{{ t('stockDetail.ask') }}{{ 6 - i }}</td>
-                <td>{{ quote.ask?.[5 - i] ?? '-' }}</td>
-                <td>{{ quote.ask_v?.[5 - i] ?? '-' }}</td>
+                <td>{{ fmtDepth(quote.ask?.[5 - i]) }}</td>
+                <td>{{ fmtDepth(quote.ask_v?.[5 - i]) }}</td>
               </tr>
               <tr><td colspan="3" class="mid">—— {{ quote.last }} ——</td></tr>
               <tr v-for="i in 5" :key="'b' + i" class="bid">
                 <td>{{ t('stockDetail.bid') }}{{ i }}</td>
-                <td>{{ quote.bid?.[i - 1] ?? '-' }}</td>
-                <td>{{ quote.bid_v?.[i - 1] ?? '-' }}</td>
+                <td>{{ fmtDepth(quote.bid?.[i - 1]) }}</td>
+                <td>{{ fmtDepth(quote.bid_v?.[i - 1]) }}</td>
               </tr>
             </tbody>
           </table>
@@ -72,7 +72,7 @@
               <el-radio-button label="intraday">{{ t('stockDetail.kIntraday') }}</el-radio-button>
             </el-radio-group>
             <span v-if="intraday.date" style="margin-left:12px;color:#909399">
-              {{ intraday.date }}（{{ intraday.source }}）
+              {{ intraday.date }}（{{ srcName(intraday.source) }}）
             </span>
           </div>
           <template v-if="klineMode === 'day'">
@@ -80,8 +80,8 @@
             <el-empty v-else :description="t('stockDetail.noData')" :image-size="60" />
           </template>
           <template v-else>
-            <v-chart v-if="intraday.points?.length" :option="intradayOption" autoresize style="height:420px" />
-            <el-empty v-else :description="t('stockDetail.noData')" :image-size="60" />
+            <v-chart v-if="intraday.points?.length" :option="intradayOption" autoresize style="height:420px" v-loading="intradayLoading" />
+            <el-empty v-else :description="t('stockDetail.noData')" :image-size="60" v-loading="intradayLoading" />
           </template>
         </el-tab-pane>
 
@@ -117,7 +117,7 @@
             <el-row :gutter="16">
               <el-col :xs="24" :md="12">
                 <el-card shadow="hover">
-                  <template #header>{{ t('stockDetail.fIncome') }}（{{ detail.finance.income?.ann_date }}）</template>
+                  <template #header>{{ t('stockDetail.fIncome') }}（{{ detail.finance.income?.ann_date || '-' }}）</template>
                   <div class="frow"><span>{{ t('stockDetail.revenue') }}</span><b>{{ yi(detail.finance.income?.total_revenue) }}</b></div>
                   <div class="frow"><span>{{ t('stockDetail.netProfit') }}</span><b>{{ yi(detail.finance.income?.n_income) }}</b></div>
                   <div class="frow"><span>EPS</span><b>{{ detail.finance.income?.basic_eps ?? '-' }}</b></div>
@@ -126,7 +126,7 @@
               </el-col>
               <el-col :xs="24" :md="12">
                 <el-card shadow="hover">
-                  <template #header>{{ t('stockDetail.fIndicator') }}（{{ detail.finance.indicator?.end_date }}）</template>
+                  <template #header>{{ t('stockDetail.fIndicator') }}（{{ detail.finance.indicator?.end_date || '-' }}）</template>
                   <div class="frow"><span>ROE</span><b>{{ pct(detail.finance.indicator?.roe) }}</b></div>
                   <div class="frow"><span>ROA</span><b>{{ pct(detail.finance.indicator?.roa) }}</b></div>
                   <div class="frow"><span>{{ t('stockDetail.grossMargin') }}</span><b>{{ pct(detail.finance.indicator?.gross_margin) }}</b></div>
@@ -184,33 +184,58 @@ const analysis = ref('')
 const analyzing = ref(false)
 const canAnalyze = ['analyst', 'trader', 'admin'].includes(localStorage.getItem('role') || '')
 let timer = null
+let detailSeq = 0, intradaySeq = 0
+const intradayLoading = ref(false)
 
 const EVENT_TAG = { top_list: 'danger', block_trade: 'warning', share_float: 'primary', pledge: 'info' }
 
-const priceClass = computed(() =>
-  (quote.value?.pct_chg ?? 0) >= 0 ? 'up' : 'down')   // A 股习惯：红涨绿跌
+// 补盲审 S1：hub 源 tick 无 pct_chg（vnpy 只有 pre_close）——缺失时用 last/pre_close 计算，
+// 否则 ?? 0 恒判涨红。平盘/未知归中性灰。
+const pctChg = computed(() => {
+  const q = quote.value
+  if (!q) return null
+  if (q.pct_chg != null) return q.pct_chg
+  if (q.last != null && q.pre_close > 0) return (q.last / q.pre_close - 1) * 100
+  return null
+})
+const priceClass = computed(() => {
+  const p = pctChg.value
+  return p == null ? 'flat' : p > 0 ? 'up' : p < 0 ? 'down' : 'flat'
+})
+const fmtDepth = v => (v > 0 ? v : '-')   // B8：hub 缺档价 0 不显示假档位
+const srcName = s => s === 'hub' ? t('stockDetail.srcHub') : s === 'tencent' ? t('stockDetail.srcTencent') : (s || '-')
 
-const fmtVol = v => v == null ? '-' : (v >= 1e8 ? (v / 1e8).toFixed(2) + '亿股' : v >= 1e4 ? (v / 1e4).toFixed(2) + '万股' : v + '股')
-const fmtAmt = v => v == null ? '-' : (v >= 1e8 ? (v / 1e8).toFixed(2) + '亿元' : v >= 1e4 ? (v / 1e4).toFixed(2) + '万元' : v + '元')
-const yi = v => v == null ? '-' : (v / 1e8).toFixed(2) + ' 亿'
+const fmtVol = v => v == null ? '-' : (v >= 1e8 ? (v / 1e8).toFixed(2) + t('stockDetail.uYi') + t('stockDetail.uGu') : v >= 1e4 ? (v / 1e4).toFixed(2) + t('stockDetail.uWan') + t('stockDetail.uGu') : v + t('stockDetail.uGu'))
+const fmtAmt = v => v == null ? '-' : (v >= 1e8 ? (v / 1e8).toFixed(2) + t('stockDetail.uYi') + t('stockDetail.uYuan') : v >= 1e4 ? (v / 1e4).toFixed(2) + t('stockDetail.uWan') + t('stockDetail.uYuan') : v + t('stockDetail.uYuan'))
+const yi = v => v == null ? '-' : (v / 1e8).toFixed(2) + ' ' + t('stockDetail.uYi')
 const pct = v => v == null ? '-' : v + '%'
 
 function eventText(row) {
-  if (row.type === 'top_list') return `${row.detail || ''} 收 ${row.close ?? '-'} 净买 ${row.net_amount ?? '-'}万`
-  if (row.type === 'block_trade') return `${row.price ?? '-'}元 ${row.vol ?? '-'}万股 ${row.amount ?? '-'}万元 ${row.buyer || ''} → ${row.seller || ''}`
-  if (row.type === 'share_float') return `${row.float_share ?? '-'}万股 (${row.float_ratio ?? '-'}%) ${row.holder || ''}`
-  if (row.type === 'pledge') return `${t('stockDetail.ev_pledge')}: ${row.pledge_count ?? '-'} 笔, ${row.pledge_ratio ?? '-'}%`
+  const U = { gu: t('stockDetail.uGu'), wan: t('stockDetail.uWan'), yuan: t('stockDetail.uYuan'), bi: t('stockDetail.uBi') }
+  if (row.type === 'top_list') return `${row.detail || ''} ${t('stockDetail.evClose')} ${row.close ?? '-'} ${t('stockDetail.evNet')} ${row.net_amount ?? '-'}${U.wan}`
+  if (row.type === 'block_trade') return `${row.price ?? '-'}${U.yuan} ${row.vol ?? '-'}${U.wan}${U.gu} ${row.amount ?? '-'}${U.wan}${U.yuan} ${row.buyer || ''} → ${row.seller || ''}`
+  if (row.type === 'share_float') return `${row.float_share ?? '-'}${U.wan}${U.gu} (${row.float_ratio ?? '-'}%) ${row.holder || ''}`
+  if (row.type === 'pledge') return `${t('stockDetail.ev_pledge')}: ${row.pledge_count ?? '-'} ${U.bi}, ${row.pledge_ratio ?? '-'}%`
   return ''
 }
 
-async function fetchDetail() {
-  loading.value = true
+function refreshAll() {
+  fetchDetail()
+  fetchKline()
+  if (klineMode.value === 'intraday') fetchIntraday()
+}
+
+async function fetchDetail(silent = false) {
+  // 补盲审 G1/G2：轮询静默（不遮罩不 toast，防 30s 风暴/闪屏）；B7：序号守卫防乱序覆盖
+  const seq = ++detailSeq
+  if (!silent) loading.value = true
   try {
-    detail.value = await stockDetail(symbol)
+    const d = await stockDetail(symbol)
+    if (seq === detailSeq) detail.value = d
   } catch (e) {
-    ElMessage.error(apiErr(e))
+    if (!silent && seq === detailSeq) ElMessage.error(apiErr(e))
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -221,13 +246,19 @@ async function fetchKline() {
   } catch { klineData.value = [] }
 }
 
-async function fetchIntraday() {
+async function fetchIntraday(silent = false) {
+  const seq = ++intradaySeq
+  if (!silent) intradayLoading.value = true
   try {
-    intraday.value = await stockIntraday(symbol) || {}
-  } catch { intraday.value = {} }
+    const d = await stockIntraday(symbol) || {}
+    if (seq === intradaySeq) intraday.value = d
+  } catch { /* 分时失败保留旧数据 */ }
+  finally { if (!silent) intradayLoading.value = false }
 }
 
-function onKlineMode(m) { if (m === 'intraday' && !intraday.value.points?.length) fetchIntraday() }
+function onKlineMode(m) {
+  if (m === 'intraday' && !intraday.value.points?.length) fetchIntraday()
+}
 
 async function doAnalyze() {
   analyzing.value = true
@@ -325,7 +356,11 @@ function nearestChipIdx(dist, price) {
 onMounted(() => {
   fetchDetail()
   fetchKline()
-  timer = setInterval(fetchDetail, 30000)   // 盘中 30s 刷新快照
+  // 补盲审 S2：分时模式活跃时轮询也刷（原只拉一次当天冻结）；G2：轮询静默
+  timer = setInterval(() => {
+    fetchDetail(true)
+    if (klineMode.value === 'intraday') fetchIntraday(true)
+  }, 30000)
 })
 onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>
@@ -335,6 +370,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .snap .chg { font-size: 16px; font-weight: 600; }
 .up { color: #f56c6c; }
 .down { color: #67c23a; }
+.flat { color: #909399; }
 .meta { display: flex; gap: 18px; color: #606266; flex-wrap: wrap; font-size: 13px; margin-top: 10px; }
 .depth { width: 100%; border-collapse: collapse; font-size: 13px; }
 .depth td { padding: 2px 8px; border-bottom: 1px solid #f0f2f5; }

@@ -1389,11 +1389,13 @@ def _execute_readonly_tool(tool_name: str, args: str) -> str:
 
 @app.get("/api/astock/selection")
 def astock_selection(date: str = "", payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """当日选股结果。"""
+    """当日选股结果（横截面：一档表全市场一次 SQL）。date=YYYYMMDD 历史截面。"""
+    import re
     from src.astock_analysis import DailySelectionEngine
-    trade_date = date or __import__("datetime").date.today().strftime("%Y%m%d")
+    if date and not re.fullmatch(r"\d{8}", date):
+        raise ApiError(400, "PARAM_INVALID", "date 需为 YYYYMMDD")
     engine = DailySelectionEngine(top_n=20)
-    results = engine.run(trade_date=trade_date)
+    results = engine.run(trade_date=date or None)
     return [{"symbol": r.symbol, "vt_symbol": r.vt_symbol, "score": r.score,
              "rating": r.rating, "support": r.support, "resistance": r.resistance,
              "conclusion": r.conclusion} for r in results]
