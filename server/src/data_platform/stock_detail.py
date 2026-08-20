@@ -116,9 +116,16 @@ def _build_slow(ts_code: str) -> dict:
     block: dict = {}
     try:
         with get_conn() as conn:
+            # 清单双表容错：static_symbols（F-DATA-004，周级 beat）可能落后/未同步——
+            # fallback asset_static_info（astock_list 日链，2026-08-20 生产实测踩到）
             cur = conn.execute(
                 "SELECT name, industry FROM static_symbols WHERE ts_code=%s", (ts_code,))
             row = cur.fetchone()
+            if not row:
+                cur = conn.execute(
+                    "SELECT name, industry FROM asset_static_info "
+                    "WHERE ts_code=%s AND list_status='L'", (ts_code,))
+                row = cur.fetchone()
             block["name"], block["industry"] = (row[0], row[1]) if row else (None, None)
             cur = conn.execute(
                 "SELECT COUNT(*) FROM pool_symbols ps JOIN pools p ON p.id=ps.pool_id "
