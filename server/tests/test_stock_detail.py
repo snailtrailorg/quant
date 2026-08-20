@@ -125,6 +125,39 @@ class TestStockDetail:
             sd._slow_block("600000.SH")
         assert not store2, "不完整块不应缓存"
 
+    def test_touch_transient_sub_upsert_and_evict(self):
+        """看过即订阅：upsert 续期 + 上限 100 挤最旧（XTP 为主路径，2026-08-20 用户裁定）。"""
+        from src.data_platform import stock_detail as sd
+        calls = []
+
+        class _Cur:
+            def execute(self, sql, params=None):
+                calls.append((sql, params))
+                return MagicMock(fetchall=MagicMock(return_value=[]))
+
+        class _Conn:
+            def execute(self, sql, params=None): return _Cur().execute(sql, params)
+            def commit(self): pass
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        from src.data_platform import db as _db
+        with patch.object(_db, "get_conn", return_value=_Conn()) as _mg, \
+             patch.object(sd, "logger"):
+            sd._touch_transient_sub("600519.SHSE")
+        upserts = [c for c in calls if "INSERT INTO hub_transient_subs" in c[0]]
+        evicts = [c for c in calls if "OFFSET 100" in c[0]]
+        assert upserts and upserts[0][1] == ("600519.SHSE",) and "30 minutes" in upserts[0][0]
+        assert evicts, "应执行挤旧清理"
+
+    def test_touch_transient_sub_fail_silent(self):
+        """订阅失败不影响详情（吞 debug 不抛）。"""
+        from src.data_platform import stock_detail as sd
+        from src.data_platform import db as _db
+        with patch.object(_db, "get_conn", side_effect=RuntimeError("db down")), \
+             patch.object(sd, "logger"):
+            sd._touch_transient_sub("600519.SHSE")   # 不抛即过
+
     def test_detail_json_serializable(self):
         """整体可序列化（Decimal/date 曾炸缓存写）——allow_nan=False 对齐 starlette（O 审 S2）。"""
         from src.data_platform import stock_detail as sd
@@ -135,7 +168,8 @@ class TestStockDetail:
                       "name_changes": []})
         with patch.object(sd, "_r", return_value=r), \
              patch.object(sd, "_build_slow", return_value=block), \
-             patch.object(sd, "_quote_block", return_value=None):
+             patch.object(sd, "_quote_block", return_value=None), \
+             patch.object(sd, "_touch_transient_sub"):   # 不真写订阅表
             d = sd.get_stock_detail("600000.SH")
         json.dumps(d, allow_nan=False)   # 不抛即过
 

@@ -66,8 +66,23 @@
     <el-card style="margin-top:16px">
       <el-tabs v-model="activeTab">
         <el-tab-pane :label="t('stockDetail.kline')" name="kline">
-          <v-chart v-if="klineData.length" :option="klineOption" autoresize style="height:420px" />
-          <el-empty v-else :description="t('stockDetail.noData')" :image-size="60" />
+          <div style="margin-bottom:8px">
+            <el-radio-group v-model="klineMode" @change="onKlineMode">
+              <el-radio-button label="day">{{ t('stockDetail.kDay') }}</el-radio-button>
+              <el-radio-button label="intraday">{{ t('stockDetail.kIntraday') }}</el-radio-button>
+            </el-radio-group>
+            <span v-if="intraday.date" style="margin-left:12px;color:#909399">
+              {{ intraday.date }}（{{ intraday.source }}）
+            </span>
+          </div>
+          <template v-if="klineMode === 'day'">
+            <v-chart v-if="klineData.length" :option="klineOption" autoresize style="height:420px" />
+            <el-empty v-else :description="t('stockDetail.noData')" :image-size="60" />
+          </template>
+          <template v-else>
+            <v-chart v-if="intraday.points?.length" :option="intradayOption" autoresize style="height:420px" />
+            <el-empty v-else :description="t('stockDetail.noData')" :image-size="60" />
+          </template>
         </el-tab-pane>
 
         <el-tab-pane :label="t('stockDetail.moneyflow')" name="moneyflow">
@@ -150,7 +165,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { BarChart, LineChart, CandlestickChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { stockDetail, stockAnalyze, getKline, apiErr } from '../api'
+import { stockDetail, stockAnalyze, getKline, stockIntraday, apiErr } from '../api'
 
 const { t } = useI18n()
 use([CanvasRenderer, BarChart, LineChart, CandlestickChart,
@@ -162,7 +177,9 @@ const loading = ref(false)
 const detail = ref({})
 const quote = computed(() => detail.value.quote)
 const activeTab = ref('kline')
+const klineMode = ref('day')
 const klineData = ref([])
+const intraday = ref({})
 const analysis = ref('')
 const analyzing = ref(false)
 const canAnalyze = ['analyst', 'trader', 'admin'].includes(localStorage.getItem('role') || '')
@@ -204,6 +221,14 @@ async function fetchKline() {
   } catch { klineData.value = [] }
 }
 
+async function fetchIntraday() {
+  try {
+    intraday.value = await stockIntraday(symbol) || {}
+  } catch { intraday.value = {} }
+}
+
+function onKlineMode(m) { if (m === 'intraday' && !intraday.value.points?.length) fetchIntraday() }
+
 async function doAnalyze() {
   analyzing.value = true
   try {
@@ -231,6 +256,33 @@ const klineOption = computed(() => {
         itemStyle: { color: up, color0: down, borderColor: up, borderColor0: down } },
       { name: t('stockDetail.volume'), type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
         data: klineData.value.map(d => ({ value: d.volume, itemStyle: { color: d.close >= d.open ? up : down } })) },
+    ],
+  }
+})
+
+const intradayOption = computed(() => {
+  const pts = intraday.value.points || []
+  const up = '#f56c6c', down = '#67c23a'
+  const first = pts[0]?.price ?? 0
+  return {
+    tooltip: { trigger: 'axis' },
+    legend: { data: [t('stockDetail.price'), t('stockDetail.avgPrice')] },
+    grid: [{ left: '8%', right: '3%', top: '8%', height: '56%' }, { left: '8%', right: '3%', top: '72%', height: '18%' }],
+    xAxis: [{ type: 'category', data: pts.map(p => p.t), boundaryGap: false },
+            { type: 'category', gridIndex: 1, data: pts.map(p => p.t), axisLabel: { show: false }, boundaryGap: false }],
+    yAxis: [{ type: 'value', scale: true },
+            { type: 'value', gridIndex: 1, axisLabel: { show: false }, splitLine: { show: false } }],
+    series: [
+      { name: t('stockDetail.price'), type: 'line', data: pts.map(p => p.price), showSymbol: false,
+        lineStyle: { width: 1.5 },
+        areaStyle: { opacity: 0.06 },
+        markLine: { symbol: 'none', silent: true,
+          lineStyle: { color: '#909399', type: 'dashed' },
+          data: [{ yAxis: first }], label: { formatter: String(first) } } },
+      { name: t('stockDetail.avgPrice'), type: 'line', data: pts.map(p => p.avg), showSymbol: false,
+        lineStyle: { width: 1, color: '#e6a23c' }, itemStyle: { color: '#e6a23c' } },
+      { name: t('stockDetail.volume'), type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
+        data: pts.map(p => ({ value: p.volume, itemStyle: { color: p.price >= (p.avg ?? p.price) ? up : down } })) },
     ],
   }
 })

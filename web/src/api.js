@@ -174,5 +174,6 @@ export const logoutApi = () => api.post('/auth/logout')
 // 三档详情页（17 号 §5）
 export const stockSearch = (q) => api.get('/stock/search', { params: { q } })
 export const stockDetail = (symbol) => api.get(`/stock/${symbol}/detail`)
+export const stockIntraday = (symbol) => api.get(`/stock/${symbol}/intraday`)
 export const stockAnalyze = (symbol) => api.post(`/stock/${symbol}/analyze`)
 export const getKline = (symbol, days = 0) => api.get(`/kline/${symbol}`, { params: { days } })

@@ -389,10 +389,12 @@ def main() -> None:
     md_status_was = False
 
     def _desired_symbols() -> set[str]:
-        """订阅真相源（三源）：running 任务标的 ∪ system_config 白名单 ∪ 池标的。
+        """订阅真相源（四源）：running 任务标的 ∪ system_config 白名单 ∪ 池标的 ∪ 临时订阅。
 
         池源（2026-08-19 分钟数据策略：XTP hub 自攒为主）：所有配置了 minute_history_start
         的池的成员自动进订阅——即使没有 running 任务在该标的上，hub 也会为它积累分钟 bar。
+        临时源（2026-08-20 三档详情页"看过即订阅"，用户裁定 XTP 为主路径）：expire_at>now
+        的行——过期即不可见=自动退订（30min TTL 由详情页每次打开续期）。
         """
         try:
             from src.data_platform.db import get_conn
@@ -419,6 +421,18 @@ def main() -> None:
                         logger.info("池源订阅 +%d 标的", len(pool_rows))
                 except Exception as e:
                     logger.warning("读池订阅源失败: %s", e)
+                # 临时源（详情页看过即订阅，TTL 自动退订；顺带清理过期行防表膨胀）
+                try:
+                    cur = conn.execute(
+                        "SELECT symbol FROM hub_transient_subs WHERE expire_at > now()")
+                    trans_rows = {x[0] for x in cur.fetchall() if x[0]}
+                    if trans_rows:
+                        rows |= trans_rows
+                        logger.info("临时源订阅 +%d 标的", len(trans_rows))
+                    conn.execute("DELETE FROM hub_transient_subs WHERE expire_at <= now()")
+                    conn.commit()
+                except Exception as e:
+                    logger.warning("读临时订阅源失败: %s", e)
                 return rows
         except Exception as e:
             logger.warning("读订阅真相源失败（沿用旧集）: %s", e)

@@ -1959,6 +1959,14 @@ def stock_detail_api(symbol: str,
     return d
 
 
+@app.get("/api/stock/{symbol}/intraday")
+def stock_intraday_api(symbol: str,
+                       payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """当日分时曲线（17 号 K 线 Tab 分钟半边）：bar_hub（池内自攒）→ 腾讯分时降级。"""
+    from src.data_platform.stock_detail import get_intraday
+    return get_intraday(symbol) or {"date": None, "source": None, "points": []}
+
+
 @app.post("/api/stock/{symbol}/analyze")
 def analyze_stock_api(symbol: str,
                       payload: dict = Depends(require_role("analyst", "trader", "admin"))):

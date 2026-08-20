@@ -45,13 +45,115 @@ def _normalize(symbol: str) -> tuple[str, str]:
 
 
 def get_stock_detail(symbol: str) -> dict:
-    """详情页聚合主入口。永不抛异常（各块独立降级），坏块为 null/[]。"""
+    """详情页聚合主入口。永不抛异常（各块独立降级），坏块为 null/[]。
+
+    副作用（2026-08-20 用户裁定 XTP 为主路径）：upsert 30min 临时订阅——hub ≤30s
+    订阅生效后 latest_tick 有值，前端 30s 轮询自动从腾讯快照切 hub 实时；失败不影响详情。
+    """
     ts_code, vt = _normalize(symbol)
+    _touch_transient_sub(vt)
     return {
         "symbol": vt, "ts_code": ts_code,
         **_slow_block(ts_code),
         "quote": _quote_block(ts_code, vt),
     }
+
+
+def _touch_transient_sub(vt: str) -> None:
+    """看过即订阅：续 30min TTL；上限 100 只挤 expire 最旧（XTP 100 只 tick≈200/s 无压力）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO hub_transient_subs (symbol, expire_at) "
+                "VALUES (%s, now() + interval '30 minutes') "
+                "ON CONFLICT (symbol) DO UPDATE SET expire_at = now() + interval '30 minutes'",
+                (vt,))
+            conn.execute(
+                "DELETE FROM hub_transient_subs WHERE symbol IN "
+                "(SELECT symbol FROM hub_transient_subs ORDER BY expire_at DESC OFFSET 100)")
+            conn.commit()
+    except Exception as e:
+        logger.debug("临时订阅 upsert 失败（不影响详情）: %s", e)
+
+
+# ── 分时曲线（17 号蓝图 K 线 Tab"日/分钟"的分钟半边，2026-08-20 补）──
+
+def get_intraday(symbol: str) -> dict | None:
+    """当日分时：源 1 bar_hub（hub 自攒分钟，池内订阅标的）；降级源 2 腾讯分时接口。
+
+    返回 {date, source, points: [{t, price, avg, volume}]}，avg=到该时刻 VWAP。
+    """
+    ts_code, vt = _normalize(symbol)
+    r = _intraday_from_hub(vt)
+    if r:
+        return r
+    return _intraday_from_tencent(ts_code)
+
+
+def _intraday_from_hub(vt: str) -> dict | None:
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT ts::date FROM bar_hub WHERE symbol=%s ORDER BY ts DESC LIMIT 1", (vt,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            d = row[0]
+            cur = conn.execute(
+                "SELECT to_char(ts, 'HH24:MI'), close, volume, amount FROM bar_hub "
+                "WHERE symbol=%s AND ts::date=%s ORDER BY ts", (vt, d))
+            rows = cur.fetchall()
+        if not rows:
+            return None
+        points, cum_v, cum_a = [], 0.0, 0.0
+        for t, close, volume, amount in rows:
+            cum_v += float(volume or 0)
+            cum_a += float(amount or 0)
+            points.append({"t": t, "price": float(close), "volume": float(volume or 0),
+                           "avg": round(cum_a / cum_v, 3) if cum_v > 0 else float(close)})
+        return {"date": str(d), "source": "hub", "points": points}
+    except Exception as e:
+        logger.warning("分时 bar_hub 读取失败: %s", e)
+        return None
+
+
+def _intraday_from_tencent(ts_code: str) -> dict | None:
+    """腾讯分时（累计口径差分成分钟量；VWAP=累计额/累计量）。"""
+    try:
+        import requests
+        from .market_snapshot import _tencent_sym
+        resp = requests.get(
+            f"https://web.ifzq.gtimg.cn/appstock/app/minute/query?code={_tencent_sym(ts_code)}",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=5)
+        resp.raise_for_status()
+        data = (resp.json().get("data") or {}).get(_tencent_sym(ts_code)) or {}
+        rows = ((data.get("data") or {}).get("data")) or []
+        d = (data.get("data") or {}).get("date") or ""
+        if not rows:
+            return None
+        points = []
+        for line in rows:
+            p = line.split()
+            if len(p) < 3:
+                continue
+            t, price = p[0], float(p[1])
+            cum_v, cum_a = float(p[2]), float(p[3]) if len(p) > 3 else 0.0
+            hhmm = f"{t[:2]}:{t[2:]}" if len(t) == 4 else t
+            points.append({"t": hhmm, "price": price,
+                           "avg": round(cum_a / (cum_v * 100), 4) if cum_v > 0 and cum_a > 0 else price,
+                           "cum_v": cum_v})
+        # 分钟量 = 累计差分（先取差再删键——上一行的 cum_v 已 pop，用滚动 prev）
+        prev_cum = 0.0
+        for pt in points:
+            cur = pt.pop("cum_v")
+            pt["volume"] = max(0.0, cur - prev_cum)
+            prev_cum = cur
+        return {"date": d, "source": "tencent", "points": points}
+    except Exception as e:
+        logger.warning("腾讯分时拉取失败 %s: %s", ts_code, e)
+        return None
 
 
 # ── analyze 缓存封装（B10：web_api 不 import 私有 _r）──
