@@ -12,7 +12,7 @@ import pandas as pd
 from typing import Literal
 from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Request, BackgroundTasks, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -408,8 +408,27 @@ def get_system_config(key: str, payload: dict = Depends(require_role("viewer", "
 
 # ——— 认证 ———
 
+# P4 轻量限流（审计 B-服务层 OWASP API4）：内存滑窗（单进程足够——部署单 uvicorn worker），
+# login 10 次/分/IP（防爆破）、forgot 3 次/分/IP（防邮件轰炸）。重启清零可接受。
+_RATE_LIMITS: dict[str, dict[str, list[float]]] = {}
+_RATE_RULES = {"login": (10, 60), "forgot": (3, 60)}
+
+def _rate_limited(bucket: str, key: str) -> bool:
+    import time as _t
+    limit, window = _RATE_RULES[bucket]
+    now = _t.time()
+    store = _RATE_LIMITS.setdefault(bucket, {}).setdefault(key, [])
+    store[:] = [ts for ts in store if now - ts < window]
+    if len(store) >= limit:
+        return True
+    store.append(now)
+    return False
+
+
 @app.post("/api/auth/login")
 def login(req: LoginReq, request: Request):
+    if _rate_limited("login", request.client.host if request.client else "?"):
+        raise ApiError(429, "RATE_LIMITED", "尝试过于频繁，请稍后再试")
     user = authenticate(req.username, req.password)  # 支持 用户名 或 邮箱（含 @）
     if not user:
         raise ApiError(401, "INVALID_CREDENTIALS", "用户名或密码错误")
@@ -648,6 +667,8 @@ def terms_api():
 @app.post("/api/auth/forgot-password")
 async def forgot_password_api(req: ForgotReq, request: Request, background_tasks: BackgroundTasks):
     """找回密码：发重置邮件（后台发送，SMTP 慢/失败不阻塞接口；不泄露 email 是否存在）。"""
+    if _rate_limited("forgot", request.client.host if request.client else "?"):   # P4：防邮件轰炸
+        raise ApiError(429, "RATE_LIMITED", "请求过于频繁，请稍后再试")
     token = forgot_password(req.email)
     if not token:
         return {"status": "sent"}  # email 不存在也返回 sent（防枚举）
@@ -1496,6 +1517,9 @@ def update_live_trading(market: str, enabled: bool = Query(...),
 
 class LLMModelReq(BaseModel):
     name: str
+    # P4（审计 A-架构 A3）：provider 白名单 enforcement——CLAUDE.md 铁律"运行期只用国内
+    # LLM"此前零代码强制（自由 str 可配 openai/anthropic 任意兼容端点）。白名单=DeepSeek/GLM
+    # 及 OpenAI 兼容协议自定义端点（协议≠供应商）；接新供应商走代码评审加白名单
     provider: str
     model: str
     api_key: str = ""
@@ -1503,6 +1527,15 @@ class LLMModelReq(BaseModel):
     context_window: int = 32768
     supports_tools: bool = True
     max_input_tokens: int | None = None
+
+    @field_validator("provider")
+    @classmethod
+    def _provider_whitelist(cls, v: str) -> str:
+        allowed = {"deepseek", "glm", "zhipu", "qwen", "custom"}
+        v = (v or "").strip().lower()
+        if v not in allowed:
+            raise ValueError(f"provider 需为 {sorted(allowed)} 之一（运行期国内模型铁律，接新供应商走代码评审）")
+        return v
     max_output_tokens: int | None = None
     temperature: float | None = None
     priority: int = 10

@@ -54,6 +54,23 @@ def _module_edges():
                 segs = [s for s in m.group(1).split(".") if s]
                 if segs and segs[0] != src_mod:
                     edges.add((src_mod, segs[0]))
+            # P4 修复（2026-08-20 审计 A1/A-架构）：相对 import 通道原不扫描——
+            # `from ..web_api import x` 铁律测试照样全绿（factor.py 5 处实际在用此通道）
+            depth = len(parts) - 1   # 当前文件距 src/ 的包深度
+            for m in re.finditer(r"(?:from|import)\s+(\.+)([\w.]*)", txt):
+                up = len(m.group(1))
+                rest = m.group(2).split(".")[0]
+                if not rest:
+                    continue
+                # up 级相对 = 从当前包向上 up 层；target 顶层包名 = parts[depth-up]（粗粒度：
+                # 只取第一个外部段，模块内相对引用不含包名跳过）
+                if up > depth:
+                    continue
+                target_pkg = parts[depth - up]
+                if target_pkg.endswith(".py"):
+                    target_pkg = target_pkg[:-3]
+                if target_pkg and target_pkg != src_mod:
+                    edges.add((src_mod, target_pkg))
     return edges
 
 

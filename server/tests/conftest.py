@@ -1,4 +1,8 @@
 """pytest 配置：gateway fixture mock DB/配置（不连真实 DB/文件）。"""
+import os
+# P4（2026-08-20）：crypto 密钥回退链收紧后（公开常量→进程随机），测试必须用固定测试密钥
+# （否则随机钥解不开任何预加密 fixture；这也是改动正确暴露——本地 .env 此前一直无 JWT_SECRET）
+os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-not-for-prod")
 import pytest
 from unittest.mock import patch
 
