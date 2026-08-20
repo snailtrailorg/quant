@@ -36,7 +36,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `data_increment_daily` | beat 每天 | 盘后日线增量（`platform.ensure_daily`）；非交易日跳；max_retries=2 |
 | `astock_select_daily` | beat 每天 | 每日 A 股选股（`DailySelectionEngine`）；非交易日跳；max_retries=1 |
 | `data_increment_crypto` | beat 15min | 加密 K 线增量（占位，待币安/OKX 配置） |
-| `data_sync_scheduler` | beat 30min | 扫 `sync_config` 按 cron + 交易日日历触发 `data_sync.sync` |
+| `data_sync_scheduler` | beat 5min | 扫 `sync_config` 按 cron + 交易日日历触发 `data_sync.sync`（三档一档 2026-08-19 起 300s） |
 | `sync_via_celery(sync_id, backfill_from=None)` | web `.delay` | 类型级同步（HTTP 立即返回 task_id；进度写 Valkey `sync:type:{sid}` + task_manager） |
 | `sync_all_symbols(sync_id)` | web `.delay` | 全市场全量 per-symbol 同步（`engine.sync_all`；进度 Valkey `sync:progress:{sid}`） |
 | `backtest_run_task(run_id)` | web `.delay` | 回测组分发：写 backtest_symbols pending + 按 mode（single/parallel/serial）分发子任务 |
@@ -54,6 +54,8 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `static_list_sync` | beat 7天 | F-DATA-004 静态标的清单（`stock_basic`，存 static_symbols） |
 | `broker_health_check` | beat 6h | #37 通道连通性（遍历 `broker._REGISTRY` 调 `test_connection`），异常告警 |
 | `astock_minute_analysis` | （任务） | 盘中分钟研判（占位，待实时行情订阅） |
+| `pool_data_sync_task` | beat 5min | 池内深度数据同步（三档二档：`pool_data.sync_pools_data`，queue=data expires=290，soft_time_limit=320） |
+| `pool_minute_sync_task` | beat 注释态 | 池分钟同步（Tushare stk_mins 收费未启用，基础设施保留） |
 
 > beat 定时表完整定义在 `app.conf.beat_schedule`（实盘改 crontab）。每个任务 `options={"queue": "data"/"analysis"/"risk"}` 分队列。
 

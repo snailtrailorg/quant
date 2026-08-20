@@ -182,7 +182,8 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `account_snapshot` | `risk.update_account_snapshot`（幂等建） | `risk._get_global_state` |
 | `llm_usage` | `gateway._log_usage`（幂等建） | web_api（用量看板） |
 
-> 各 handler 内含 `CREATE TABLE IF NOT EXISTS` 兜底（新库容错）；正式 schema 走 alembic migration（0001/0013/0014/0015/0016/0017/0022）。
+> 三档数据 19 张新表（stk_limit 等 9 张一档 + income 等 10 张二档）由 data_sync/pool_data 经本模块 adapter 拉取写入，详见 [17-三档数据与详情页](../17-三档数据与详情页.md)。
+> schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，现 0046；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（71 表生成式基线）。
 
 ---
 

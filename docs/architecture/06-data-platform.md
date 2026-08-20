@@ -1,5 +1,7 @@
 # 06 - 数据中台
 
+> **三档数据供给（2026-08-19 U 审定稿）**：选股/深度/详情页数据按消费模式分三档（全局批量 9 表 + 池内 per-symbol 10 表 + 按需实时不落库），一档二档已上线。详见 [17-三档数据与详情页](17-三档数据与详情页.md)。
+
 > **平台化集成（2026-08-08）**：DataSource 接口（PT3，src/data_platform/data_source.py + data_source_config 表），TushareDataSource 实现，别人加 Wind 实现接口。详见记忆 `platform-architecture`。
 
 ## 1. 目的

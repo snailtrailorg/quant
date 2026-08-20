@@ -14,7 +14,9 @@
 ## 文件结构
 ```
 server/src/data_sync/
-├── engine.py        # 同步引擎核心（800 行）
+├── engine.py        # 同步引擎核心 + _HANDLERS 注册表 + _make_tier1_handler 工厂（三档一档）
+├── pool_data.py     # 池内深度数据同步（三档二档，独立模块不进 _HANDLERS）
+├── pool_minute.py   # 池分钟同步（Tushare stk_mins 收费，beat 注释禁用态）
 ├── sync_lock.py     # Valkey 心跳锁
 └── __init__.py      # 导出 sync/sync_symbol/backfill_symbol/delete_symbol/sync_all
 ```
@@ -53,6 +55,26 @@ sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict
     # 返回 {status, total, ok, failed_count, saved, failed:list}
 
 list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> dict
+```
+
+### tier1 handler 工厂（三档一档，17 号文档 §3）
+```python
+_make_tier1_handler(table, pull_fn_name, pk_cols, float_cols=None, text_cols=None) -> handler
+    # 工厂生成 batch_date 逐日拉取 handler，注册进 _HANDLERS[sync_config.id]
+    # 两模式：批量日期循环（游标增量+backfill_from 含当日）与全量重建（namechange/concept 整表换）
+    # upsert：insert_cols = pk + 非pk；placeholders 必须与列同长（曾漏 PK 致每日静默失败）
+    # forecast 按 ann_date 拉非 trade_date（handler 按 pull 函数签名自动区分）
+```
+
+### pool_data.py（三档二档，池成员驱动非 sync_config）
+```python
+sync_pools_data(timebox_s: int = 280) -> dict
+    # 池内 astock 标的 × 10 类深度数据（财务四表/筹码分布/十大股东/分红/质押/解禁/股东人数）
+    # _get_pool_ts_codes(): pools JOIN pool_symbols WHERE category='astock'（出池自动停更）
+    # 时间盒到即收工下轮续 + SyncLock("pool_data") 防重叠 + 必写日志护栏（FATAL/skipped 也落 sync_log）
+    # 返回 {status: done|partial|timebox|skipped|idle|error, symbols, saved, errors[:5]}
+    # 被 scheduler.pool_data_sync_task（beat 300s）与 web POST /api/sync/pool-data/trigger 调用
+```
     # 列标的 + 本地数据状态（批量聚合查 bar 表，一次 ANY 查询非逐只）
     # 返回 {items:[{ts_code, name, list_date, local_count, local_first, local_last}], total}
 ```

@@ -10,7 +10,7 @@
 
 - `flow/` — 控制层（项目"怎么跑"）：章程 / 计划 / 进展 / 决策 / 踩坑 / 任务 / 规范
 - `docs/` — 内容层（项目"做出什么"）：
-  - `docs/architecture/`（00-总体设计 ～ 11-feishu-lark，12 份架构文档 + 接口契约 + 模块契约 13 份）
+  - `docs/architecture/`（00-总体设计 ～ 17-三档数据，17 份架构文档 + 接口契约 + 模块契约 18 份）
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `systemd/` + `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
 - `scripts/` - 开发机部署工具（`deploy-*.sh`/`quant-deploy.sh`）+ 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`verify.sh`）。**不传服务器**
@@ -81,6 +81,7 @@
 - 服务监控（S6 修订）：`docs/architecture/15-服务监控设计.md`（断流不自杀/下单时刻判定/health_monitor 内层+Zabbix@NAS 外层//healthz /readyz /metrics=Prometheus）
 - 操作指导书（面向使用者）：`docs/操作指导/`（索引+因子/策略/回测/实盘四册，server/docs 镜像随 rsync 部署）+ Web 内置 `/help`（`/api/help/{topic}`）
 - 多频率数据（16 号 v2.1 定稿，影子门禁后实施）：`docs/architecture/16-多频率数据设计.md`（慢路径日线直读+日界沿/快路径分钟；复权逐行因子链；NULL 因子=1.0 降级；盘口 Phase 2）
+- 三档数据与详情页（17 号，U 审 21 项）：`docs/architecture/17-三档数据与详情页.md`（一档批量+二档池内已上线，三档详情页+横切待做；含 U 审裁定与坑）
 - 共享行情 Hub（ST7）：`docs/architecture/13-需求书.md` + `14-设计.md` v2（hub=纯数据面单实例 MD，worker=TD-only；Valkey Streams 分发+租约 fencing；影子期 bar_hub/bar_shadow diff 门禁）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（18 份，2026-08-19 增 quant_common/email_service）
