@@ -219,7 +219,9 @@ class LLMGateway:
         if role == "admin":
             allowed += ADMIN_TOOLS
         allowed = [t for t in allowed if t.name not in FORBIDDEN_TOOLS]
-        if tools:
+        # None=角色默认白名单；[]=显式无工具（三档 analyze 踩到：空列表意图被无视
+        # → LLM 看到工具集自发请求"查询更多信息"，非循环 chat 直接吐过渡语）
+        if tools is not None:
             req_names = {t.name for t in tools}
             allowed = [t for t in allowed if t.name in req_names]
         return [

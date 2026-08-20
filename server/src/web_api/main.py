@@ -1932,9 +1932,11 @@ def search_stock_api(q: str = "", payload: dict = Depends(require_role("viewer",
             (q + "%", "%" + q + "%"))
         rows = cur.fetchall()
         if not rows:
+            # asset_static_info 无 list_status 过滤：该表 astock_list 链全量拉的就是上市股
+            # （列历史性 NULL，2026-08-20 生产实测）
             cur = conn.execute(
                 "SELECT ts_code, name, industry FROM asset_static_info "
-                "WHERE list_status='L' AND (ts_code ILIKE %s OR name ILIKE %s) "
+                "WHERE ts_code ILIKE %s OR name ILIKE %s "
                 "ORDER BY ts_code LIMIT 20",
                 (q + "%", "%" + q + "%"))
             rows = cur.fetchall()
@@ -2001,6 +2003,7 @@ def analyze_stock_api(symbol: str,
             ],
             role=payload.get("role", "analyst"),
             caller="stock_analyze",
+            tools=[],   # 分析无工具：防模型自发请求查询（_filter_tools None=角色默认白名单）
         )
         text = resp.content if resp and resp.content else ""
     except Exception as e:

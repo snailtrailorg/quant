@@ -65,6 +65,15 @@ def test_filter_viewer_cannot_override(gateway):
     evil = [Tool(name="emergency_halt", description="", input_schema={})]
     assert gateway._filter_tools("viewer", evil) == []
 
+def test_filter_empty_list_means_no_tools(gateway):
+    """三档 analyze 踩到（2026-08-20）：[] = 显式无工具；None = 角色默认白名单。
+
+    原 `if tools:` 把空列表意图无视 → LLM 看到工具集自发请求查询，非循环 chat 吐过渡语。
+    """
+    assert gateway._filter_tools("viewer", []) == []
+    assert gateway._filter_tools("admin", []) == []
+    assert gateway._filter_tools("viewer", None) != []   # None 语义不变
+
 def test_filter_trader_has_halt_no_resume(gateway):
     tools = gateway._filter_tools("trader", None)
     names = [t["function"]["name"] for t in tools]

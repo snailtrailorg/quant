@@ -122,9 +122,9 @@ def _build_slow(ts_code: str) -> dict:
                 "SELECT name, industry FROM static_symbols WHERE ts_code=%s", (ts_code,))
             row = cur.fetchone()
             if not row:
+                # asset_static_info 列 list_status 历史性 NULL，不做该过滤（表本身即上市清单）
                 cur = conn.execute(
-                    "SELECT name, industry FROM asset_static_info "
-                    "WHERE ts_code=%s AND list_status='L'", (ts_code,))
+                    "SELECT name, industry FROM asset_static_info WHERE ts_code=%s", (ts_code,))
                 row = cur.fetchone()
             block["name"], block["industry"] = (row[0], row[1]) if row else (None, None)
             cur = conn.execute(

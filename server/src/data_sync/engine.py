@@ -323,7 +323,7 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
                 ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name, industry=EXCLUDED.industry,
                     list_status=EXCLUDED.list_status
             """, (r.get("ts_code"), r.get("name"), r.get("industry"), r.get("market"),
-                  r.get("list_status"), str(r.get("list_date","")), str(r.get("delist_date",""))))
+                  r.get("list_status") or "L", str(r.get("list_date","")), str(r.get("delist_date",""))))
         conn.commit()
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
