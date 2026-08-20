@@ -135,6 +135,11 @@ class MinuteAggregator:
                 bars.append(self._finalize(symbol, b))
         return bars
 
+    def flush_symbol(self, symbol: str) -> Optional[dict]:
+        """单标的退订前 flush（2026-08-20 退订机制配套）：防丢在桶最后一分钟。"""
+        b = self._buckets.pop(symbol, None)
+        return self._finalize(symbol, b) if b else None
+
     def _finalize(self, symbol: str, b: dict) -> dict:
         from datetime import timedelta
         prev = self._last_acc.get(symbol)
@@ -447,15 +452,46 @@ def main() -> None:
         except Exception as e:
             logger.warning("订阅失败 %s: %s", sym, e)
 
+    def _unsubscribe(sym: str) -> None:
+        """退订（2026-08-20 生命周期闭环：出池/临时订阅过期/白名单摘除/live_task 停）。
+
+        先 flush 在桶分钟防丢最后一根，再 SDK 原生退订——原 _sync_subscriptions 只加不减，
+        移除标的的 tick 白收（带宽/CPU+latest_tick 键残留到 TTL）。
+        """
+        try:
+            bar = agg.flush_symbol(sym)
+            if bar:
+                _publish(bar)
+            raw, ex = sym.rsplit(".", 1)
+            e = _EX.get(ex)
+            if e:
+                from vnpy_xtp.gateway.xtp_gateway import EXCHANGE_VT2XTP
+                md_api.unSubscribeMarketData(raw, 1, EXCHANGE_VT2XTP[e])
+                logger.info("退订 %s（生命周期结束）", sym)
+        except Exception as e:
+            logger.warning("退订失败 %s: %s", sym, e)
+
     def _sync_subscriptions(force: bool = False) -> None:
         nonlocal subscribed
         want = _desired_symbols()
         # 评审 C3：除 diff 外，每 60s 无条件全量幂等重放（XTP 重连不恢复订阅 + 启动竞态双兜底）
         replay_all = force or (int(time.time()) % 60 < 10)
-        if replay_all or want != subscribed:
-            logger.info("订阅同步：%s（共 %d）", sorted(want), len(want))
+        if replay_all:
+            # 重放只订不退：重连后 XTP 侧订阅清零，subscribed 记录的是期望集非连接实况
+            if want != subscribed or force:
+                logger.info("订阅重放（共 %d）", len(want))
             for s in want:
                 _subscribe(s)
+            subscribed = want
+            return
+        added = want - subscribed
+        removed = subscribed - want
+        if added or removed:
+            for s in added:
+                _subscribe(s)
+            for s in removed:
+                _unsubscribe(s)
+            logger.info("订阅同步：+%d -%d（共 %d）", len(added), len(removed), len(want))
             subscribed = want
 
     _sync_subscriptions(force=True)
