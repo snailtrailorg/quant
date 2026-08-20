@@ -55,6 +55,14 @@ sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict
     # 返回 {status, total, ok, failed_count, saved, failed:list}
 
 list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> dict
+    # 列标的 + 本地数据状态（批量聚合查 bar 表，一次 ANY 查询非逐只）
+    # 返回 {items:[{ts_code, name, list_date, local_count, local_first, local_last}], total}
+    # （P3 回写 2026-08-20：此两行原错位漂到 pool_data 代码块尾，归位）
+
+backfill_adj_factor(start_date: str | None = None, end_date: str | None = None) -> dict
+    # 复权因子回填（A/B-F1：bar_1D 历史全 NULL）——pull_adj_factor_by_date 全市场逐日拉，
+    # UPDATE bar_1D.adj_factor；积分未到账降级返回 {"status":"degraded"} 不抛（engine.py:535）
+    # 被 scheduler.adj_factor_backfill_task（web 手动 .delay）调用（P3 回写 2026-08-20 补）
 ```
 
 ### tier1 handler 工厂（三档一档，17 号文档 §3）
@@ -79,9 +87,6 @@ sync_pools_data(timebox_s: int = 280, full: bool = False, symbols: list[str] | N
     # 被 scheduler.pool_data_sync_task（beat 300s + 周日 full 校准）与 web
     #   POST /api/sync/pool-data/trigger?full= 与入池端点（symbols 回补）调用
 ```
-    # 列标的 + 本地数据状态（批量聚合查 bar 表，一次 ANY 查询非逐只）
-    # 返回 {items:[{ts_code, name, list_date, local_count, local_first, local_last}], total}
-```
 
 ### sync_lock.py
 ```python
@@ -103,7 +108,7 @@ class SyncLock:
 ### 路由/元数据
 - `_PER_SYMBOL_META: dict[str, tuple]` - `{sync_id -> (freq, table, kind, bar_type)}`，5 条（3 日线 + 2 分钟线）
 - `_PER_SYMBOL_SYNC_IDS = set(_PER_SYMBOL_META)`
-- `_HANDLERS: dict[str, Callable]` - `{sync_id -> type 级 handler}`，10 条
+- `_HANDLERS: dict[str, Callable]` - `{sync_id -> type 级 handler}`，**19 条**（engine.py:601 基础 10 + 三档一档 9：`_TIER1_BATCH` 7 批量 + `_TIER1_FULL` 2 全量重建，循环注册）（P3 回写 2026-08-20：原"10 条"为一档上线前数量）
 - `_MINUTE_FREQ = {"astock_minute":"1min", "astock_minute_5min":"5min"}`
 - `_TUSHARE_MIN_DATE` - 全量起点（.env SYNC_START_DATE，默认 20100101）
 
@@ -124,10 +129,12 @@ class SyncLock:
 ### 日线内部
 - `_fetch_and_save(api_fn, ts_code, start, end, save_fn) -> df | None`
 - `_wrap_result(df, used, cnt, start, end) -> dict`
-- `_daily_to_rows(df) -> list[tuple]` / `_save_bars(rows) -> int` / `_daily_to_save_fn(df) -> int`
+- `_daily_to_rows(df, adj_map: dict | None = None) -> list[tuple]` / `_save_bars(rows) -> int` / `_daily_to_save_fn(df) -> int`
+    # adj_map 第二参：按 ts_code 映射复权因子（回填链路用）（P3 回写 2026-08-20 补）
 
-### type 级 handler（10 个）
-- `_sync_astock_daily` / `_sync_astock_basic` / `_sync_astock_list` / `_sync_cb_daily` / `_sync_cb_basic` / `_sync_etf_daily` / `_sync_etf_list` / `_sync_trade_cal` / `_sync_astock_minute`（1min+5min 共用）
+### type 级 handler（基础 10 个 sync_id 9 函数 + tier1 工厂 9 个）
+- 基础：`_sync_astock_daily` / `_sync_astock_basic` / `_sync_astock_list` / `_sync_cb_daily` / `_sync_cb_basic` / `_sync_etf_daily` / `_sync_etf_list` / `_sync_trade_cal` / `_sync_astock_minute`（1min+5min 共用）
+- tier1（`_make_tier1_handler`/`_make_full_rebuild_handler` 批量注册 9 个 sync_id，见 17 号 §3）：stk_limit_sync / moneyflow_sync / margin_detail_sync / top_list_sync / block_trade_sync / cyq_perf_sync / forecast_sync / namechange_sync / concept_sync（P3 回写 2026-08-20 补）
 
 ### 通用工具
 - `_get_pro()` - 从 data_source DB 读 Tushare（.env fallback）
@@ -176,7 +183,7 @@ class SyncLock:
 | `daily_basic` | `_sync_astock_basic`（save_daily_basic） | - |
 | `data_source_config` | - | `_get_pro`（经 get_data_source） |
 | 一档 9 表（stk_limit/moneyflow/margin_detail/top_list/block_trade/cyq_perf/forecast/namechange/concept） | tier1 handler 工厂（batch/全量重建） | - |
-| 二档 10 表（income/balancesheet/cashflow/fina_indicator/cyq_chips/top10_holders/dividend/pledge_stat/share_float/stk_holdernumber） | `pool_data._upsert_rows`（幂等 upsert） | 详情页（三档，未实施） |
+| 二档 10 表（income/balancesheet/cashflow/fina_indicator/cyq_chips/top10_holders/dividend/pledge_stat/share_float/stk_holdernumber） | `pool_data._upsert_rows`（幂等 upsert） | 详情页三档已实施（`stock_detail` 池内直读：筹码/财务块）（P3 回写 2026-08-20：原"未实施"过时） |
 | `pool_data_cursor` | `pool_data._advance_cursors`（游标推进，迁移 0047） | `pool_data._load_cursors` |
 
 ---

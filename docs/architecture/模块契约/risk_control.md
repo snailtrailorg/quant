@@ -39,7 +39,8 @@ RiskControl.get() -> RiskControl                  # 单例（__init__ 连 Valkey
 ```python
 RiskDecision: approved: bool / reason: str / severity: Level="info" / adjusted: dict | None = None
     # adjusted = B8 风控覆写（如超仓位截断 volume 后的修正 order；None=不覆写）
-RiskState: halted: bool / total_drawdown: float / daily_loss: float
+RiskState: halted: bool / total_drawdown: float / daily_loss: float / available: bool = True
+    # available=False = 快照数据源故障（SB1/F-29），check_order 必须 fail-closed 拒单（P3 回写 2026-08-20 补）
 Level = Literal["info", "warn", "critical"]
 ```
 
@@ -58,10 +59,10 @@ _REGISTRY: dict[str, type[RiskRule]]              # max_position / max_single_or
 
 ## 二、内部 API（不保证稳定，改模块时才能动）
 
-- `RiskControl._market_of(symbol) -> str | None`：vt_symbol → convertible/etf/astock/binance_perp/okx_perp/None（兼容 SHSE/SZSE/SSE 后缀；11/12 可转债、51/15/56 ETF、60/00/30 A 股）
+- `RiskControl._market_of(symbol) -> str | None`：vt_symbol → convertible/etf/astock/binance_perp/okx_perp/None（兼容 SHSE/SZSE/SSE 后缀；11/12 可转债、51/15/56/58 ETF（SB3-F-42 补科创 58）、60/00/30 A 股）（P3 回写 2026-08-20 补 58）
 - `RiskControl._load_rules_from_db()`（静态）：读 risk_rules 表，无配置 fallback `DEFAULT_RULES`
 - `RiskControl._check_etf_conv(order) / _check_crypto(order)`：分市场检查（#29 单笔金额超限截断 volume 返回 adjusted）
-- `RiskControl._get_global_state(account) -> RiskState`：读 account_snapshot 最新行算回撤/亏损；无数据返回 0.0；异常返回 0.0（不抛）
+- `RiskControl._get_global_state(account) -> RiskState`：读 account_snapshot 最新行算回撤/亏损。**fail-closed**（risk.py:325-359）：无快照 / 读异常 / 陈旧>300s（快照写频 60s，2026-08-20 P1 新鲜度）→ `available=False` → `check_order` 拒单；Valkey 也挂时按熔断（最保守）。绝无"故障时限制归零放行"（P3 回写 2026-08-20，原文"无数据/异常返回 0.0"为 SB1 前旧语义）
 - `RiskControl._HALT_KEY="risk:halted"` / `_HALT_REASON_KEY="risk:halt_reason"`
 - `DEFAULT_RULES`：global（max_drawdown=0.15/daily_loss_limit=0.05）/ etf_conv（single_position_pct/max_trades_per_day/strict_stop_loss/max_single_amount）/ crypto（leverage_max=5/margin_mode=isolated/pin_protection/daily_loss_limit）
 
@@ -90,6 +91,7 @@ _REGISTRY: dict[str, type[RiskRule]]              # max_position / max_single_or
 | `scheduler.tasks.daily_report` | `is_halted`（盘后报告内容） |
 | `feishu_bot.bot` | `emergency_halt` / `resume`（LLM 工具调用）/ `is_halted` |
 | `llm_gateway.gateway` | 注册 `emergency_halt` 为 Tool（ trader/admin 可调） |
+| `strategy_runner.main` / `hub_worker` | `RiskControl.get().is_halted()`——熔断联动撤在场单（main.py:669）与 worker 停止条件（hub_worker.py:374）；下单路径经 `strategy.place_order` 走 `check_order`（P3 回写 2026-08-20 补） |
 
 > 改 `check_order` / `_market_of` 签名影响**策略下单链 + 飞书/Web 熔断**——慎改。
 
@@ -101,9 +103,9 @@ _REGISTRY: dict[str, type[RiskRule]]              # max_position / max_single_or
 |---|---|---|
 | `risk_rules` | web_api（CRUD 端点） | `RiskControl._load_rules_from_db`（type=global/etf_conv/crypto）/ `risk_rule.load_rules_from_db`（type=max_position 等） |
 | `live_trading_config` | web_api（实盘开关端点） | `RiskControl.is_live_trading_allowed` |
-| `account_snapshot` | `RiskControl.update_account_snapshot`（INSERT；`_get_global_state` 内 `CREATE TABLE IF NOT EXISTS` 兜底） | `RiskControl._get_global_state` |
+| `account_snapshot` | `RiskControl.update_account_snapshot`（INSERT） | `RiskControl._get_global_state`（含 300s 新鲜度判定） |
 
-> account_snapshot DDL 在 `_get_global_state`/`update_account_snapshot` 内幂等建；正式 schema 走 alembic migration。
+> account_snapshot DDL 走 alembic migration（运行时 DDL 已于 2026-08-13 清零，模块内无 CREATE TABLE）。（P3 回写 2026-08-20：删"幂等建 CREATE TABLE"旧述）
 
 ---
 
@@ -111,9 +113,11 @@ _REGISTRY: dict[str, type[RiskRule]]              # max_position / max_single_or
 
 - **熔断永远直读 Valkey**：`is_halted()` 每次查 `risk:halted`，禁 `self._halted` 内存缓存（多进程一致性）
 - **三级开关 AND**：`.env ENABLE_LIVE_TRADING`（`settings.is_live_trading_enabled()`）+ Web `live_trading_config` 分项（`is_live_trading_allowed(market)`，在 `check_order` 前置）+ 策略 `enabled`+`backtest_verified`（策略层/scheduler 检查）。任一关 → 拒单
-- **check_order 不抛**：熔断/未授权/超限都返回 `RiskDecision(approved=False, reason, severity)`；account_snapshot 读失败返回 0.0（无风险放行）
+- **check_order 不抛**：熔断/未授权/超限都返回 `RiskDecision(approved=False, reason, severity)`；**fail-closed**（SB1）：account_snapshot 无快照/读异常/陈旧>300s → `available=False` → 拒单；Valkey 不可达按熔断拒单——故障时保护必须更紧不能更松（P3 回写 2026-08-20，原文"读失败返回 0.0（无风险放行）"为方向反写的旧语义）
+- **规则热加载（SB2/F-23）**：`_maybe_reload_rules()` 60s TTL 重读 risk_rules，Web 修改对长活进程生效；加载失败沿用旧规则（risk.py:83）（P3 回写 2026-08-20 补）
+- **日亏/总回撤只禁开仓（F-31 + F5.2）**：`daily_loss_limit`/`max_drawdown` 触线仅拒 BUY，SELL/平仓放行——否则触线后连止损都做不了（risk.py:227-235）（P3 回写 2026-08-20 补）
 - **风控覆写（B8/#29）**：`RiskDecision.adjusted` 非 None 时调用方用 adjusted（如超 max_single_amount 截断 volume）；`strategy.place_order` 已支持
-- **market 判定**：`_market_of` 未知品种返回 None（拒单"未授权实盘品种"）；可转债 11/12、ETF 51/15/56、A 股走 astock 分项
+- **market 判定**：`_market_of` 未知品种返回 None（拒单"未授权实盘品种"）；可转债 11/12、ETF 51/15/56/58、A 股走 astock 分项
 - **RiskRule vs RiskControl 独立**：见上文 ⚠️；`risk_control` 不调 `load_rules_from_db`
 
 ---

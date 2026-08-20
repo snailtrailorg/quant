@@ -258,19 +258,21 @@ def pull_trade_cal(year: int) -> list[tuple]:
 
     init_trade_calendar(year)
     rows = []
-    pro = get_conn()
-    with pro.cursor() as cur:
-        for _, r in df.iterrows():
-            rows.append((
-                r["exchange"], r["cal_date"], int(r["is_open"]),
-                r.get("pretrade_date"),
-            ))
-        cur.executemany(
-            "INSERT INTO trade_cal (exchange, cal_date, is_open, pretrade_date) "
-            "VALUES (%s,%s,%s,%s) ON CONFLICT (exchange, cal_date) DO NOTHING",
-            rows,
-        )
-        pro.commit()
+    # DB 优化（2026-08-21 盘点）：全仓唯一不带 with 的连接——泄漏实锤，改池化用法
+    from .db import get_conn as _get_pooled_conn
+    with _get_pooled_conn() as pro:
+        with pro.cursor() as cur:
+            for _, r in df.iterrows():
+                rows.append((
+                    r["exchange"], r["cal_date"], int(r["is_open"]),
+                    r.get("pretrade_date"),
+                ))
+            cur.executemany(
+                "INSERT INTO trade_cal (exchange, cal_date, is_open, pretrade_date) "
+                "VALUES (%s,%s,%s,%s) ON CONFLICT (exchange, cal_date) DO NOTHING",
+                rows,
+            )
+            pro.commit()
     return rows
 
 

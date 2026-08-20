@@ -10,14 +10,19 @@
 ## 文件结构
 ```
 server/src/data_platform/
-├── db.py              # PG 连接池 + K 线读写 + 交易日历
+├── db.py              # PG 连接池 + K 线读写（validate_bars）+ 交易日历 + verify_schema
 ├── schema.py          # Bar dataclass + vt_symbol 转换 + DDL 模板
-├── data_source.py     # DataSource 接口 + TushareDataSource（DB 化凭证）
+├── data_source.py     # DataSource 接口（get_rate_limit）+ Tushare/AkShare 实现（DB 化凭证）
 ├── platform.py        # DataPlatform 单例（统一入口，部分占位）
 ├── settings.py        # 环境变量集中读取
+├── audit.py           # audit_log（原寄生 web_api.auth，2026-08-19 归位）
+├── market_snapshot.py # 三档腾讯实时快照（quote:tencent 60s TTL）
+├── stock_detail.py    # 三档详情聚合层（quote 降级链+慢变块缓存）
+├── schema_expectations.txt  # verify_schema 期望基线（迁移链生成物，禁手写）
 └── adapters/
     └── tushare_adapter.py  # Tushare 拉取 + DataFrame->rows 转换 + 质量校验
 ```
+（P3 回写 2026-08-20：补 audit/market_snapshot/stock_detail/schema_expectations.txt 四文件）
 
 ---
 
@@ -46,17 +51,19 @@ ensure_table(freq: str) -> None
 save_bars(freq: str, rows: list[tuple]) -> int
     # 批量写 K 线，ON CONFLICT DO NOTHING（冲突跳过）。返回 len(rows)
     # rows 11 字段：(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)
-    # A2 待改：开头加 rows = validate_bars(rows)
+    # 开头已接线 rows = validate_bars(rows)（db.py:112；A2 已实现，P3 回写 2026-08-20 撤"A2 待改"）
 save_bars_overwrite(freq: str, rows: list[tuple]) -> int
     # 批量写，ON CONFLICT DO UPDATE（回补覆盖）。返回 len(rows)
 get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame
     # 查 K 线，列：symbol/freq/ts/open/high/low/close/volume/amount/adj_factor/source
+validate_bars(rows: list[tuple]) -> list[tuple]
+    # A2 已实现（db.py:64）：剔 ohlc=0 行 + 标 ts 断点 warning（不剔）；save_bars/save_bars_overwrite 开头调用
 get_trade_calendar(year: int) -> list[date]
     # 从 trade_cal 表读 SSE 交易日（is_open=1）
 is_trading_day(d: date | None = None) -> bool
     # d 默认今天；查 trade_cal，查不到回退工作日
 init_trade_calendar(year: int) -> None
-    # 建 trade_cal 表（幂等），数据由 tushare_adapter.pull_trade_cal 写
+    # no-op（表在 migration 0001；运行时 DDL 清零后保留签名兼容，db.py:193）（P3 回写 2026-08-20，原"建表幂等"过时）
 ```
 
 ### schema.py
@@ -98,6 +105,14 @@ pull_trade_cal(year: int) -> list[tuple]        # 写 trade_cal 表
 pull_convertible_bonds() -> list[str]           # ts_code 列表
 pull_etf_list() -> list[str]
 pull_daily_basic(ts_code, start_date, end_date=None) -> pd.DataFrame  # PE/PB/市值
+pull_cb_basic(ts_code) -> dict                  # 可转债条款（D3）（P3 回写 2026-08-20 补）
+get_daily_symbols() -> list[str]                # 当日有行情的标的清单（P3 回写 2026-08-20 补）
+pull_adj_factor_by_date(trade_date) / pull_adj_factor_by_code(ts_code, start, end)
+    # 复权因子（by_date 全市场批 / by_code 单标的；adj_factor_backfill 用）（P3 回写 2026-08-20 补）
+# 三档一档 9 个 pull（tier1 handler 工厂按名取用，2026-08-19）：
+pull_stk_limit / pull_moneyflow / pull_margin_detail / pull_top_list
+pull_block_trade / pull_cyq_perf / pull_forecast / pull_namechange / pull_concept
+    # 签名 pull_x(trade_date, end_date=None)；namechange/concept 全量重建式（P3 回写 2026-08-20 补）
 # 转换（DataFrame -> rows 11 字段元组）：
 to_save_rows(df, freq="1D") -> list[tuple]      # 日线（trade_date 列作 ts）
 to_save_rows_min(df, freq) -> list[tuple]       # 分钟线（trade_time 列作 ts）
@@ -106,6 +121,8 @@ save_daily_basic(df) -> int                     # 写 daily_basic 表
 # 质量校验：
 validate_bar_quality(df) -> dict                # {valid, issues, clean_count, ...}
 ```
+
+> `DataSource.get_rate_limit(api_name)`（data_source.py:39，2026-08-19 T 审加）：限速注册表查询（按 API 名）；另 `AkShareDataSource`（data_source.py:142）已注册——当前仅腾讯快照走直调，AkShare 东财被反爬弃用（三档 U-2 实施教训）。（P3 回写 2026-08-20 补）
 
 ### market_snapshot.py（三档项 13，非池实时价）
 ```python
@@ -162,12 +179,12 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | 本文件 | 依赖 | 用途 |
 |---|---|---|
 | db.py | sqlalchemy / psycopg（外部） | 连接池 + 裸 SQL |
-| data_source.py | `src.web_api.crypto_utils.decrypt` | 解密 DB 凭证 |
+| data_source.py | `src.quant_common.crypto.decrypt` | 解密 DB 凭证（2026-08-19 归位后路径；原 `web_api.crypto_utils` 循环依赖已解）（P3 回写 2026-08-20） |
 | tushare_adapter.py | `.schema.to_vt_symbol` | ts_code -> vt_symbol |
 | platform.py | `.db` / `.schema` / `.adapters.tushare_adapter` | 组合 |
 | settings.py | dotenv | 读 .env |
 
-> ⚠️ `data_platform` 依赖 `web_api.crypto_utils`（解密）--`web_api` 反过来依赖 `data_platform`（get_conn）。这是**循环依赖**，当前靠函数内 import 延迟打破。改签名注意。
+> 曾有 `data_platform` ⇄ `web_api.crypto_utils` 循环依赖——2026-08-19 模块归位后加解密在 `quant_common.crypto`（层 0），循环已解。（P3 回写 2026-08-20）
 
 ---
 
@@ -205,14 +222,14 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `llm_usage` | `gateway._log_usage`（幂等建） | web_api（用量看板） |
 
 > 三档数据 19 张新表（stk_limit 等 9 张一档 + income 等 10 张二档）由 data_sync/pool_data 经本模块 adapter 拉取写入，详见 [17-三档数据与详情页](../17-三档数据与详情页.md)。
-> schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，现 0046；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（71 表生成式基线）。
+> schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，**head 0049**；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（**73 表**生成式基线，"表 :: 列"每表一行；每加迁移必重跑生成命令并提交）。（P3 回写 2026-08-20：head 0046→0049、71 表→73 表，改指向生成式文件不手抄数字）
 
 ---
 
 ## 六、不变量
 
 - **vt_symbol**：`raw.EXCHANGE`（`600000.SHSE`），转换走 `schema.to_vt_symbol/to_ts_code`
-- **freq**：`1D` / `1min` / `5min` / `15min` / `30min` / `60min`（bar 表后缀 = freq）
+- **freq**：`1D` / `1min` / `5min` / `15min` / `30min` / `60min`（bar 表后缀 = freq）。**写入口径以 `db._VALID_FREQS` 白名单为准（db.py:101，2026-08-20 扩）**：11 项超集 `{'1min','5min','15min','30min','60min','1h','4h','1d','1H','4H','1D'}`（大小写兼容）——`schema.Freq` Literal 是其子集，两者非同一集合（P3 回写 2026-08-20 注明）
 - **ts**：`TIMESTAMPTZ`，A 股 +08:00，加密 UTC
 - **rows 11 字段顺序**：`(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)`--`save_bars`/`save_bars_overwrite`/`to_save_rows`/`to_save_rows_min` 一致
 - **get_conn**：`with` 退出还池；不手动 close

@@ -10,8 +10,8 @@
 
 - `flow/` — 控制层（项目"怎么跑"）：章程 / 计划 / 进展 / 决策 / 踩坑 / 任务 / 规范
 - `docs/` — 内容层（项目"做出什么"）：
-  - `docs/architecture/`（00-总体设计 ～ 17-三档数据，17 份架构文档 + 接口契约 + 模块契约 18 份）
-- `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `systemd/` + `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync
+  - `docs/architecture/`（00-总体设计 ～ 17-三档数据，18 份架构文档 + 接口契约 + 模块契约 18 份）（P3 回写 2026-08-20：17→18 实数）
+- `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
 - `scripts/` - 开发机部署工具（`deploy-*.sh`/`quant-deploy.sh`）+ 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`verify.sh`）。**不传服务器**
 - **判据**：协调/推进项目的 → `flow/`；要交付的内容 → `docs/`（知识/文档）或 `server/src/`（代码）
@@ -48,7 +48,7 @@
 - **PostgreSQL 18 + pgvector + Valkey**（Redis 协议兼容）。弃 TimescaleDB / 重型向量库。
 - **vnpy 核心 + vnpy_xtp**（交易+行情接口）为第三方成熟组件，不重复造轮；**回测自建 BacktestEngine**（纯 Python，不依赖 vnpy CtaBacktestingEngine）。
 - **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade + `deploy-server.sh migrate`），不手动 ALTER。`init-schema.sql` 保留作手工运维参考。**运行时不再 `CREATE TABLE IF NOT EXISTS`**（2026-08-13 清零，原 30 处全部入迁移 0027）；`db.py` 的 `verify_schema()` 启动时校验表存在并告警，动态表 `bar_{freq}` 保留 `ensure_table()` 但用 `_ensured_tables` 集合避免重复 DDL。
-- **策略实盘化架构**：每策略独立子进程（systemd `quant-strategy@<id>`）+ 独立 vnpy MainEngine + XtpGateway 实时驱动（tick->BarGenerator->on_bar）+ XTPAdapter 下单。取 vnpy Gateway 弃全局 MainEngine。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
+- **策略实盘化架构**：每任务独立子进程（systemd `quant-live-task@{tid}`，live_task 单元模板；旧 `quant-strategy@<id>` 仅为废架构遗留兼容）（P3 回写 2026-08-20 单元名归真）+ 独立 vnpy MainEngine + XtpGateway 实时驱动（tick->BarGenerator->on_bar）+ XTPAdapter 下单。取 vnpy Gateway 弃全局 MainEngine。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
 
 ### 协作约束
 - **产出落文件**，不留在对话里。
@@ -61,9 +61,10 @@
 - **多语言国际化（N 语言架构）**：注册表驱动（en 为缺省），加语言=只加条目零逻辑改动。页面按浏览器语言自动切换；条款全语言纵向堆叠；邮件跟操作者界面语言；LLM 按输入语言自然回复。详见记忆 `multilang-architecture`。
 - **后端错误码化**：用户流程错误统一 `ApiError(status, CODE, 中文兜底)` → `{detail, code}`；前端 `apiErr(e)` 优先 `err.<CODE>` 本地化。加新码=后端定码+前端 err 命名空间加条目。
 - **待办自包含**：新待办按 `docs/任务/<id>.md`（`flow/规范/任务模板.md` 8 字段）写，做任务时只读「任务文件 + `docs/architecture/接口契约.md` + 本模块契约 `docs/architecture/模块契约/<module>.md`」，零代码阅读。硬约束：限定范围 ≤3 文件 + 参考 ≤2 份。
-### 外部待确认 gate（不阻塞开发，但影响实盘）
-- 中泰 XTP 门槛/品种放行/费率（用户问客户经理）
-- Tushare 积分是否到 2000（分钟线硬门槛，但用户说一次性购买可接受）
+### 外部 gate（状态见 `flow/待办.md` 外部 gate 表，单一真相源；P3 回写 2026-08-20 改已确认态）
+- ~~中泰 XTP 门槛/品种放行/费率~~ ✅ 已确认（2026-08-10 用户确认：测试账户能当正式账号用，无差别）
+- ~~Tushare 积分是否到 2000~~ ✅ 已确认：积分 200 日线够用；分钟线从 XTP 测试平台自攒（stk_mins 产品包 2000 元/年可选后启）
+- 币安/欧易 API ⛔ 未开通（加密实盘待接，不阻塞开发）
 
 ## 文档维护（精要）
 

@@ -4,18 +4,19 @@
 > 配套：`docs/architecture/接口契约.md`（6 大接口 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么端点"。
 
 ## 职责
-FastAPI Web 后端，~85 端点。RBAC 认证（JWT + 四角色）+ 策略/持仓/风控/实盘开关/LLM/飞书/同步/回测业务端点 + 平台化管理端点（数据源/通道/任务/规则/模型）。
+FastAPI Web 后端，~163 端点（main.py 3100+ 行）。RBAC 认证（JWT + 四角色）+ 策略/持仓/风控/实盘开关/LLM/飞书/同步/回测业务端点 + 平台化管理端点（数据源/通道/任务/规则/模型）。（P3 回写 2026-08-20：原"~85 端点"为 2026-08-10 时点数）
 启动 `uvicorn src.web_api.main:app --port 8000`；前端 Vue3 调用；飞书 router 内嵌。
 
 ## 文件结构
 ```
 server/src/web_api/
-├── main.py           # FastAPI app + ~85 端点（1494 行）
+├── main.py           # FastAPI app + ~163 端点（3100+ 行）
 ├── auth.py           # JWT + RBAC + 用户管理 + 邀请/重置 + audit_log
-├── crypto_utils.py   # AES encrypt/decrypt（凭证加密）
-├── email_service.py  # 邀请/重置邮件发送
+├── errors.py         # ApiError(status, CODE, 中文兜底) → {detail, code} 错误码机制
+├── terms.py          # i18n 条款 re-export（注册表本体在 quant_common/terms.py）
 └── __init__.py
 ```
+> 2026-08-19 模块归位：`crypto_utils.py` → `quant_common/crypto.py`（encrypt/decrypt/mask）；`email_service.py` → 顶层 `src/email_service/`——两者均已不在本目录。（P3 回写 2026-08-20）
 > 飞书端点经 `src.feishu_bot.router` 以 `app.include_router` 内嵌（非本目录文件，但 URL 空间归 web_api）。
 
 ---
@@ -30,7 +31,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 # 返回 payload = {"sub": user_id, "username": , "role": }
 ```
 
-### 端点分组（27 组，~85 路由）
+### 端点分组（~45 组，163 路由；P3 回写 2026-08-20：原"27 组 ~85 路由"为 2026-08-10 时点数，下表只列主干部，完整清单以 main.py 路由注册为准）
 
 | 组 | 前缀 | 方法 | RBAC | 说明 |
 |---|---|---|---|---|
@@ -47,7 +48,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 实盘开关 | `/api/live-trading` `/api/live-trading/{market}` | GET/POST | viewer+ / strategy_control | 三级第二级（5 分项） |
 | LLM模型管理 | `/api/llm-models` `/api/llm-models/{mid}/{test}` | GET/POST/POST/DELETE | admin | CRUD + 测试 + reload_models |
 | 飞书 | `/api/feishu/{list,connect,status,{fid}/{start,stop,test}}` `/api/feishu/{fid}` | GET/POST/POST/DELETE | admin | 多机器人管理 |
-| 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/POST/DELETE | viewer+ / strategy_control | 同步配置 + 触发 + 标的 + 进度 |
+| 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/POST/DELETE | viewer+ / **data_sync**（P3 回写 2026-08-20：原写 strategy_control 有误，实况 require_perm("data_sync")，analyst/admin 有此权限） | 同步配置 + 触发 + 标的 + 进度 |
 | 池深度同步（三档二档） | `/api/sync/pool-data/{trigger,progress}` + `/api/sync/pool-minute/{trigger,progress}`（注释态） | POST/GET | data_sync / viewer+ | trigger 支持 `?full=true` 全量校准；progress 读 sync_log 最新一轮（2026-08-20 修正，原读错键恒 idle）；入池端点 POST /api/pool/{pid}/symbol 对 astock 池自动投 symbols 回补 |
 | K线 | `/api/kline/{symbol}` | GET | viewer+ | `get_bars` + `to_vt_symbol` |
 | 标的搜索（三档项 13） | `/api/stock/search?q=` | GET | viewer+ | static_symbols 前缀/模糊 LIMIT 20，返回 [{ts_code,name,industry,symbol}] |
@@ -68,6 +69,22 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 数据完整性 | `/api/data-integrity` | GET | viewer+ | A3（freq 1D/1min/5min + 标的数） |
 | 数据源用量 | `/api/data-source-usage` | GET | viewer+ | A4（data_source_usage 看板） |
 | 回测 | `/api/backtest` `/api/backtest/{run_id}` `/api/backtest/{run_id}/{symbol}/stream` `/api/backtest/{run_id}/summary` | POST/GET | analyst+ | B3（创建含 symbol_params/列表/详情/SSE 流/汇总） |
+| 标的池 | `/api/pool` `/api/pool/{pid}` `/api/pool/{pid}/{symbol,minute-status}` | GET/POST/DELETE | viewer+ / strategy_control | 池 CRUD + 入池（astock 池自动投 symbols 回补）+ 池分钟状态 |
+| 策略-账户绑定 | `/api/strategy_account` `/api/strategy_account/{said}` | GET/POST/DELETE | viewer+ / strategy_control | #27 绑定关系 CRUD |
+| LLM 预算 | `/api/llm-budget` `/api/llm-budget/{check,{bid}}` | GET/POST | viewer+ | D5（预算 CRUD + 手动检查；告警逻辑在 llm_gateway/budget.py） |
+| 站内通知 | `/api/notifications` `/api/notifications/ack-all` | GET/POST | viewer+ | 通知中心（active 历史 + 全部已读） |
+| 系统配置 | `/api/system-config` `/api/system-config/{key}` | GET/POST | viewer+ | system_config 键值（md_mode/celery_concurrency 等） |
+| SMTP 配置 | `/api/smtp-config` `/api/email/test` `/api/email-outbox` | GET/POST | user_mgmt（admin） | 邮件服务器配置 + 测试 + 发件箱 |
+| 邀请管理 | `/api/invites` `/api/invites/{tid}/revoke` | GET/POST | user_mgmt（admin） | 邀请链接列表 + 撤销 |
+| Dashboard | `/api/dashboard` | GET | viewer+ | 账户快照/持仓聚合看板 |
+| 可转债条款 | `/api/convertible/terms` | GET | viewer+ | D3（cb_basic 拉取 + LLM 解读） |
+| 通道用量 | `/api/broker-usage` | GET | viewer+ | #37（broker_usage 聚合看板） |
+| i18n 条款 | `/api/terms` | GET | viewer+ | TERMS 注册表全语言 |
+| 分时（三档项 16） | `/api/stock/{symbol}/intraday` | GET | viewer+ | 当日分时（腾讯全天优先→bar_hub 兜底） |
+| 日志归因 | `/api/log/analyze` | POST | viewer+ | D4（LLM 归因，caller="log_analyze"） |
+| 预算告警检查 | `check_budget_alerts`（非 HTTP，llm_gateway/budget.py） | - | - | beat `budget_alert_check` 1h 调（2026-08-19 已迁出本模块） |
+
+> 上表为 2026-08-20 P3 回写补全的缺失组（原表漏列 13 组）；`/api/help/{topic}` `/api/health/*` `/api/risk-rules` 等见各增量节。
 
 ### Pydantic 模型（main.py，请求体）
 `LoginReq` / `UserCreate` / `StrategyConfig` / `InviteReq` / `RegisterReq` / `ForgotReq` / `ResetReq` / `ChangePwdReq` / `ChatReq`(message) / `LLMModelReq` / `FeishuUpdateReq` / `DataSourceReq` / `ChannelReq` / `BrokerReq` / `RiskRuleReq`
@@ -79,16 +96,17 @@ authenticate(username, password) -> dict | None      # 返回 user 行
 create_user(username, password, role) -> int         # 抛 ValueError（重复）
 require_role(*roles) / require_perm(perm) -> Depends  # 守卫
 audit_log(username, action, target="", detail="")    # 写 audit_log
-ensure_default_admin() -> bool                       # 启动建 admin/admin123
+ensure_default_admin() -> bool     # 启动建 admin（实况 SD1：实盘模式密码=secrets.token_urlsafe(12) 随机生成、仅启动日志打印一次；非实盘 fallback "admin123"）（P3 回写 2026-08-20，原"admin/admin123"描述会误导登录）
 init_users_table() -> None                           # 幂等建 users
 invite_user / register_user / forgot_password / reset_password / change_password / verify_token
 PERMISSIONS: dict[str, set[str]]                     # 角色 -> 权限集
 ```
 
-### crypto_utils.py
+### crypto（已迁 quant_common，P3 回写 2026-08-20）
 ```python
-encrypt(plaintext: str) -> str    # AES 加密（凭证入库前）
-decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
+# web_api/crypto_utils.py 已不存在；凭证加解统一走 quant_common.crypto：
+from src.quant_common.crypto import encrypt, decrypt, mask
+# ApiError 错误码机制见 web_api/errors.py：ApiError(status, CODE, 中文兜底) → {detail, code}
 ```
 
 ---
@@ -111,7 +129,7 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 | `src.data_platform.schema.to_vt_symbol` | K线/筛选端点 |
 | `src.data_platform.settings.is_live_trading_enabled` | 实盘开关端点（第一级） |
 | `src.data_platform.data_source._REGISTRY` | 数据源端点枚举 provider |
-| `src.web_api.auth` / `crypto_utils` / `email_service` | 认证 + 加密 + 邮件 |
+| `src.web_api.auth` / `errors` + `src.quant_common.crypto` + `src.email_service` | 认证 + 错误码 + 凭证加解 + 邮件（P3 回写 2026-08-20：crypto/email 已迁出本目录） |
 | `src.feishu_bot.router` / `.tasks` | 飞书 router 内嵌 + register 任务 |
 | `src.strategy_framework.factor`（validate_strategy_factors / list_factors） | 策略校验 + 因子端点 |
 | `src.strategy_framework.broker._REGISTRY` | 交易通道端点枚举 provider |
@@ -152,7 +170,7 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 | `live_trading_config` | /api/live-trading/{market} POST | /api/live-trading GET |
 | `llm_model_config` | /api/llm-models CRUD | gateway._load_models_from_db（间接） |
 | `llm_usage` | gateway._log_usage（间接） | /api/llm-usage/summary |
-| `llm_budget` | D5 端点待加 | D5 告警逻辑待 |
+| `llm_budget` | /api/llm-budget CRUD（UPDATE provider/daily_token_limit/monthly_cost_limit 等） | /api/llm-budget + budget.check_budget_alerts（llm_usage 聚合比对）（P3 回写 2026-08-20：原"待加"已过时） |
 | `feishu_config` | /api/feishu CRUD | feishu_bot 读 |
 | `data_source_config` | /api/data-sources CRUD | get_data_source（间接） |
 | `data_source_usage` | record_usage（间接） | /api/data-source-usage |
@@ -174,8 +192,8 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 - **RBAC 守卫**：所有受保护端点 `Depends(require_role(...))` 或 `Depends(require_perm(...))`；`/health` 无守卫
 - **JWT**：`create_jwt` 签发；前端 `Authorization: Bearer <token>`；payload = `{sub, username, role}`
 - **audit_log**：所有操作类端点（create/update/delete/halt/start/stop）写 audit_log
-- **启动初始化**：`startup` 建 users 表 + 默认 admin（admin/admin123，需改密码）
-- **CORS**：`allow_origins=["*"]`（开发），生产改具体域名
+- **启动初始化**：`startup` 建 users 表 + 默认 admin（SD1 实况：实盘模式密码随机生成仅日志打印一次；非实盘才用 admin123，需改密码）（P3 回写 2026-08-20）
+- **CORS**：白名单（F-58/SD2）——`CORS_ORIGINS` 环境变量（逗号分隔），缺省 `https://quant.snailtrail.cc`；非白名单域拒跨域（P3 回写 2026-08-20，原 `allow_origins=["*"]` 已改）
 - **延迟 import**：端点函数内 `from src.X import Y`（破循环 + 减启动开销）
 - **凭证加密**：所有 `_encrypted` 字段经 `crypto_utils.encrypt/decrypt`（data_source/broker/channel/llm_model/feishu）
 - **平台化 _REGISTRY**：数据源/通道/规则端点用 `_REGISTRY.keys()` 枚举可选 provider/type
@@ -202,10 +220,9 @@ decrypt(ciphertext: str) -> str   # AES 解密（凭证出库后）
 2. migration 建 `*_config` 表（credentials_encrypted/params/enabled）
 3. main.py 加 CRUD 端点（参照 /api/channels 模式）
 
-### D4 日志归因 / D5 预算端点（待加）
-- D4：`/api/log/analyze`（POST，传日志片段 -> gateway.chat 归因，caller="log_analyze"）
-- D5：`/api/llm-budget`（GET/POST）+ 告警逻辑（llm_usage 聚合 vs llm_budget 阈值 -> MessageChannel）
-- 两者均加在 main.py，参照 `/api/chat` + `/api/llm-usage/summary` 模式
+### D4 日志归因 / D5 预算端点（已存在，P3 回写 2026-08-20：原"待加"过时）
+- D4：`POST /api/log/analyze`（viewer+，传日志片段 -> gateway.chat 归因，caller="log_analyze"）
+- D5：`GET /api/llm-budget` + `POST /api/llm-budget/{bid}`（预算 CRUD）+ `POST /api/llm-budget/check`（手动检查）；告警逻辑在 `llm_gateway/budget.check_budget_alerts()`（beat `budget_alert_check` 1h 调，2026-08-19 模块归位迁出 web_api）
 
 ---
 

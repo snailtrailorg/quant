@@ -37,10 +37,19 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """在线模式：连接数据库并执行迁移。"""
+    """在线模式：连接数据库并执行迁移。
+
+    DB 优化防线（2026-08-21，锁链事件根治——18 号文档 §1.7）：alembic DDL 带
+    lock_timeout=15s——被长事务堵时快速失败（报锁冲突）而非无限排队闷死部署管道。
+    注意 CREATE INDEX 仍非 CONCURRENTLY（存量 50 迁移历史惯性；新索引走 CONCURRENTLY
+    的约定记 18 号 §2 规范）。
+    """
+    import os
+    stmt_ms = int(os.environ.get("QUANT_DB_STMT_TIMEOUT_MS", "3600000"))   # 迁移本身放宽 1h
     connectable = create_engine(
         config.get_main_option("sqlalchemy.url"),
         poolclass=pool.NullPool,
+        connect_args={"options": f"-c statement_timeout={stmt_ms} -c lock_timeout=15000"},
     )
     with connectable.connect() as connection:
         context.configure(connection=connection, compare_type=True)

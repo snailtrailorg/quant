@@ -313,17 +313,18 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
                       progress_cb: Callable | None = None) -> dict:
     """A股股票列表全量同步。"""
     pro = _get_pro()
-    df = pro.stock_basic(list_status="L")
+    df = pro.stock_basic(list_status="L")   # DB 优化：网络拉取在事务外（2026-08-21 盘点）
+    rows = [(r.get("ts_code"), r.get("name"), r.get("industry"), r.get("market"),
+             r.get("list_status") or "L", str(r.get("list_date", "")), str(r.get("delist_date", "")))
+            for _, r in df.iterrows()]
     with get_conn() as conn:
-        conn.execute("SELECT 1 FROM asset_static_info LIMIT 1")
-        for _, r in df.iterrows():
-            conn.execute("""
+        with conn.cursor() as cur:
+            cur.executemany("""
                 INSERT INTO asset_static_info (ts_code, name, industry, market, list_status, list_date, delist_date)
                 VALUES (%s,%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name, industry=EXCLUDED.industry,
                     list_status=EXCLUDED.list_status
-            """, (r.get("ts_code"), r.get("name"), r.get("industry"), r.get("market"),
-                  r.get("list_status") or "L", str(r.get("list_date","")), str(r.get("delist_date",""))))
+            """, rows)
         conn.commit()
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
@@ -355,11 +356,16 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """可转债基本信息全量同步。"""
     pro = _get_pro()
-    df = pro.cb_basic()
+    df = pro.cb_basic()   # DB 优化：拉取在事务外
+    rows = [(r.get("ts_code"), r.get("bond_short_name"), r.get("stk_code"), r.get("stk_short_name"),
+             str(r.get("maturity", "")), r.get("par"), r.get("issue_price"), r.get("conv_price"),
+             str(r.get("conv_start_date", "")), str(r.get("conv_end_date", "")),
+             str(r.get("maturity_date", "")), r.get("coupon_rate"), r.get("rate_clause"),
+             str(r.get("list_date", "")), str(r.get("delist_date", "")))
+            for _, r in df.iterrows()]
     with get_conn() as conn:
-        conn.execute("SELECT 1 FROM cb_basic_info LIMIT 1")
-        for _, r in df.iterrows():
-            conn.execute("""
+        with conn.cursor() as cur:
+            cur.executemany("""
                 INSERT INTO cb_basic_info (ts_code, bond_short_name, stk_code, stk_short_name,
                     maturity, par, issue_price, conv_price, conv_start_date, conv_end_date,
                     maturity_date, coupon_rate, rate_clause, list_date, delist_date)
@@ -367,11 +373,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                 ON CONFLICT (ts_code) DO UPDATE SET bond_short_name=EXCLUDED.bond_short_name,
                     conv_price=EXCLUDED.conv_price, maturity_date=EXCLUDED.maturity_date,
                     rate_clause=EXCLUDED.rate_clause
-            """, (r.get("ts_code"), r.get("bond_short_name"), r.get("stk_code"), r.get("stk_short_name"),
-                  str(r.get("maturity","")), r.get("par"), r.get("issue_price"), r.get("conv_price"),
-                  str(r.get("conv_start_date","")), str(r.get("conv_end_date","")),
-                  str(r.get("maturity_date","")), r.get("coupon_rate"), r.get("rate_clause"),
-                  str(r.get("list_date","")), str(r.get("delist_date",""))))
+            """, rows)
         conn.commit()
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
@@ -399,16 +401,17 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """ETF基金列表全量同步。"""
     pro = _get_pro()
-    df = pro.fund_basic(market="E")
+    df = pro.fund_basic(market="E")   # DB 优化：拉取在事务外
+    rows = [(r.get("ts_code"), r.get("name"), r.get("management"),
+             r.get("fund_type"), r.get("invest_type"), str(r.get("list_date", "")))
+            for _, r in df.iterrows()]
     with get_conn() as conn:
-        conn.execute("SELECT 1 FROM etf_basic_info LIMIT 1")
-        for _, r in df.iterrows():
-            conn.execute("""
+        with conn.cursor() as cur:
+            cur.executemany("""
                 INSERT INTO etf_basic_info (ts_code, name, management, fund_type, invest_type, list_date)
                 VALUES (%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name, management=EXCLUDED.management
-            """, (r.get("ts_code"), r.get("name"), r.get("management"),
-                  r.get("fund_type"), r.get("invest_type"), str(r.get("list_date",""))))
+            """, rows)
         conn.commit()
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
@@ -669,6 +672,9 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                               f"ON CONFLICT ({conflict}) DO NOTHING")
                     with _gc() as conn:
                         with conn.cursor() as cur:
+                            # DB 优化（2026-08-21 盘点）：逐行 execute（单日全市场 ~5000 次往返）
+                            # → executemany 一次提交（psycopg3 pipeline，db.py save_bars 同款范式）
+                            batch = []
                             for _, row in df.iterrows():
                                 vals = []
                                 for c in insert_cols:
@@ -677,7 +683,8 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                                         vals.append(adapter._safe_float(v) if v is not None else None)
                                     else:
                                         vals.append(str(v) if v is not None else None)
-                                cur.execute(upsert, vals)
+                                batch.append(tuple(vals))
+                            cur.executemany(upsert, batch)
                         conn.commit()
                     total_pulled += len(df)
                     total_saved += len(df)
@@ -710,11 +717,13 @@ def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str]
         placeholders = ", ".join(["%s"] * len(cols))
         cols_sql = ", ".join(cols)
         with _gc() as conn:
+            # DB 优化（2026-08-21 盘点）：DELETE+逐行 INSERT 单事务（表随周增长持锁越长）
+            # → executemany 一次提交（缩短 DELETE→INSERT 间的锁窗口）
             conn.execute(f"DELETE FROM {table}")
             with conn.cursor() as cur:
-                for _, row in df.iterrows():
-                    vals = [str(row[c]) if row[c] is not None else None for c in cols]
-                    cur.execute(f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})", vals)
+                batch = [tuple(str(row[c]) if row[c] is not None else None for c in cols)
+                         for _, row in df.iterrows()]
+                cur.executemany(f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})", batch)
             conn.commit()
         return {"pulled": len(df), "saved": len(df), "start": "full",
                 "failed_dates": [], "expected_days": 1, "actual_days": 1}

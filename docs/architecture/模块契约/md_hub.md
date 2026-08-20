@@ -17,7 +17,7 @@
 - fencing：租约 `hub:lease`（SET NX EX30 + Lua CAS 续期）；`gen = INCR hub:gen` 永不回退；被抢占让位 exit(3)
 - 订阅真相源（**四源**）：`live_task(running).symbol ∪ system_config.hub_shadow_symbols ∪ minute_history_start 池成员 ∪ hub_transient_subs(30min TTL 临时)`，30s diff + 60s 幂等重放 + **双向 diff 退订**（2026-08-20 生命周期闭环：出池/临时过期/白名单摘除/task 停统一 SDK 原生 unSubscribeMarketData；退订前 flush_symbol 落在桶最后一分钟；**replay 窗口（每分钟 :00-:09 例行）同样退订 removed**——补盲审 S1：原"只订不退"使落在窗口内的移除永不被退订，SDK 级订阅泄漏）
 - 落库：`bar_hub` 表（独立线程批量，ON CONFLICT 幂等，有界队列不反压分发）
-- 心跳：`quant:hb:md-hub`（pid/gen/subs/ticks/bars/last_tick_ts，TTL 90s）；tick 断流 300s（时段+已有tick）自杀重启
+- 心跳：`quant:hb:md-hub`（pid/gen/subs/ticks/bars/last_tick_ts，TTL 90s）；tick 断流 300s（时段+已有tick基线）**只告警（文案带 runbook），不自杀**（S6 修订；P3 回写 2026-08-20：原文"自杀重启"为 S6 前旧语义，与 15 号设计/下方增量节一致化）
 - 复用 strategy_runner 的 `_guard/_sd_notify/_alert/_in_astock_session`（SA 机制）
 
 ## 依赖
@@ -35,6 +35,7 @@ bar_hub（写）· system_config（读）· live_task（读）
 
 ## 增量（2026-08-18 S6 修订）
 - tick 断流自杀已删：只告警（文案带 runbook）；基线=时段作用域（`sess_ticks`/`sess_last_tick`，进入沿清零）
+- ⚠️ 待修代码清单（P3 回写 2026-08-20 注，本批不改代码）：`md_hub/main.py` 模块 docstring 末行仍写"心跳/看门狗/tick 断流自杀（R-AV1/S6）"——与 S6 实况（只告警）不符，下批改代码时同步更新 docstring
 - 心跳新增 `sess_ticks` 字段（/metrics 有对应 counter）
 - 启动时 health_monitor schema 校验（入口路由）
 

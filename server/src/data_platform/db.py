@@ -28,12 +28,30 @@ def get_conn_url() -> str:
 
 # SQLAlchemy 连接池（pool_size=10 + max_overflow=20，pre_ping 自动检测断连）
 # URL 转 postgresql+psycopg:// 给 SQLAlchemy（psycopg3 驱动）
+#
+# DB 优化防线（2026-08-21，18 号文档 §1.7 + 锁链事件根治）：
+# - statement_timeout：杀"SQL 本身跑太久"（默认 60s；web 进程由 systemd 环境覆盖 10s）
+# - idle_in_transaction_session_timeout：杀"事务开着不干活"（psycopg 非 autocommit +
+#   SELECT 不 commit 的读块在全仓普遍存在——服务端兜底比逐点修治本）
+# - lock_timeout：杀"等锁闷死"（10s——alembic DDL 被长事务堵时快速失败而非无限排队）
+# 注意：statement_timeout 杀不住"等网络/锁"的会话——那由 idle_in_tx/lock_timeout 各管一段。
+def _db_session_options() -> dict:
+    import os as _os
+    stmt_ms = int(_os.environ.get("QUANT_DB_STMT_TIMEOUT_MS", "60000"))
+    idle_ms = int(_os.environ.get("QUANT_DB_IDLE_TX_TIMEOUT_MS", "300000"))
+    lock_ms = int(_os.environ.get("QUANT_DB_LOCK_TIMEOUT_MS", "10000"))
+    return {"options": f"-c statement_timeout={stmt_ms} "
+                       f"-c idle_in_transaction_session_timeout={idle_ms} "
+                       f"-c lock_timeout={lock_ms}"}
+
+
 _engine = create_engine(
     get_conn_url().replace("postgresql://", "postgresql+psycopg://", 1),
     pool_size=10,
     max_overflow=20,
     pool_pre_ping=True,
     pool_recycle=1800,  # 30 分钟回收，避免长连接超时
+    connect_args=_db_session_options(),
 )
 
 # 已建表的 freq 集合，避免每次 save_bars/get_bars 重复 DDL

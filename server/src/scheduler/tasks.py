@@ -354,6 +354,10 @@ def data_continuity_check():
         issues.append(f"Valkey 检测异常: {str(e)[:60]}")
 
     # 2. K 线断点检测 + 补采（已有逻辑）
+    # DB 优化（2026-08-21 盘点重灾 #2）：原 SELECT 开事务后循环内逐标的 Tushare 网络拉取+补写
+    # ——事务悬挂到函数尾随标的数放大（idle in transaction + 事务跨网络）。改：检测查询先
+    # 关连接（fetchall 后块内无活事务），补采的 save_bars 各自短事务。
+    # P1 顺带修（审计 B5 当日必误报）：expected 原含"今天"——盘中跑恒报"缺今天"。
     try:
         with get_conn() as conn:
             today = date.today()
@@ -366,26 +370,26 @@ def data_continuity_check():
             """, (week_ago,))
             rows = cur.fetchall()
 
-            for symbol, last_ts, cnt in rows:
-                from src.data_platform.db import is_trading_day as _is_td
-                _days = [week_ago + timedelta(days=i) for i in range((today - week_ago).days + 1)]
-                expected = sum(1 for d in _days if d.weekday() < 5 and _is_td(d))
-                if cnt < expected:
-                    issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{expected})")
-                    try:
-                        ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
-                        from src.data_platform.adapters.tushare_adapter import pull_daily, to_save_rows
-                        from src.data_platform.db import save_bars
-                        df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
-                        if not df.empty:
-                            rows = to_save_rows(df)
-                            repaired = save_bars("1D", rows)
-                            # 3. 因子重算触发：有修复则标记（后续 astock_select_daily 将利用完整数据）
-                            if repaired > 0:
-                                if r is not None:
-                                    r.set(f"factor:recalc:triggered", "1", ex=3600)
-                    except Exception as e:
-                        issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
+        from src.data_platform.db import is_trading_day as _is_td
+        _days = [week_ago + timedelta(days=i) for i in range((today - week_ago).days)]
+        expected = sum(1 for d in _days if d.weekday() < 5 and _is_td(d))   # 不含今天
+        for symbol, last_ts, cnt in rows:
+            if cnt < expected:
+                issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{expected})")
+                try:
+                    ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
+                    from src.data_platform.adapters.tushare_adapter import pull_daily, to_save_rows
+                    from src.data_platform.db import save_bars
+                    df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
+                    if not df.empty:
+                        rws = to_save_rows(df)
+                        repaired = save_bars("1D", rws)
+                        # 3. 因子重算触发：有修复则标记（后续 astock_select_daily 将利用完整数据）
+                        if repaired > 0:
+                            if r is not None:
+                                r.set(f"factor:recalc:triggered", "1", ex=3600)
+                except Exception as e:
+                    issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
     except Exception as e:
         issues.append(f"检测异常: {str(e)[:100]}")
 
@@ -951,18 +955,23 @@ def static_list_sync():
         return {"status": "skipped", "reason": "tushare 未配"}
     synced = 0
     try:
+        # DB 优化（2026-08-21 盘点重灾 #1）：原"SELECT 开事务→事务内 pro.stock_basic() 网络拉取→
+        # 逐行 upsert 5400 行"——锁链事件同族（事务跨网络+逐行）。改：先无事务拉取，
+        # 再 executemany 批量落库（网络抖动不再持锁；5400 次往返→1 次）。
+        df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
+        if df is None or df.empty:
+            return {"status": "ok", "synced": 0}
+        rows = [(r["ts_code"], r.get("name", "") or "", r.get("industry", "") or "")
+                for _, r in df.iterrows()]
         with get_conn() as conn:
-            conn.execute("SELECT 1 FROM static_symbols LIMIT 1")
-            df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
-            if df is not None and not df.empty:
-                for _, row in df.iterrows():
-                    conn.execute(
-                        "INSERT INTO static_symbols (ts_code,name,industry,list_status,delisted) VALUES (%s,%s,%s,'L',false) "
-                        "ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name,industry=EXCLUDED.industry,"
-                        "list_status='L',delisted=false,updated_at=now()",
-                        (row["ts_code"], row.get("name",""), row.get("industry","")))
-                    synced += 1
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO static_symbols (ts_code,name,industry,list_status,delisted) VALUES (%s,%s,%s,'L',false) "
+                    "ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name,industry=EXCLUDED.industry,"
+                    "list_status='L',delisted=false,updated_at=now()",
+                    rows)
             conn.commit()
+        synced = len(rows)
     except Exception as e:
         logger.warning(f"static_list_sync 失败: {e}")
         return {"status": "error", "reason": str(e)[:100]}

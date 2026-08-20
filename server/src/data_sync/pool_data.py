@@ -90,9 +90,11 @@ def _upsert_rows(table, pk_cols, core_map, df, ts_code):
               f"ON CONFLICT ({conflict}) DO UPDATE SET {updates}" if updates else
               f"INSERT INTO {table} ({', '.join(insert_cols)}) VALUES ({placeholders}) "
               f"ON CONFLICT ({conflict}) DO NOTHING")
-    saved = 0
+    # DB 优化（2026-08-21 盘点）：逐行 execute → executemany 一次提交（财务表 121 行/标的
+    # 历史全量时 3802 行 3802 次往返→10 次）
     with _pdb.get_conn() as conn:
         with conn.cursor() as cur:
+            batch = []
             for _, row in df.iterrows():
                 vals = []
                 for c in insert_cols:
@@ -106,9 +108,10 @@ def _upsert_rows(table, pk_cols, core_map, df, ts_code):
                     else:
                         v = row.get(c)
                         vals.append(str(v) if v is not None else None)
-                cur.execute(upsert, vals)
-                saved += 1
+                batch.append(tuple(vals))
+            cur.executemany(upsert, batch)
         conn.commit()
+    saved = len(batch)
     return saved
 
 def _is_num(v):

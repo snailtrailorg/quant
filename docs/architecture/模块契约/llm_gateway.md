@@ -11,9 +11,11 @@
 ```
 server/src/llm_gateway/
 ├── gateway.py     # LLMGateway 类 + 单例 gateway + 工具白名单
-├── config.yaml     # failover 策略（retry_wait_s / circuit_breaker），模型配置已 DB 化
-└── __init__.py     # 暴露 gateway 单例
+├── budget.py      # check_budget_alerts 预算告警（原寄生 web_api.main，2026-08-19 归位）
+├── config.yaml    # failover 策略（retry_wait_s / circuit_breaker），模型配置已 DB 化
+└── __init__.py    # 暴露 gateway 单例
 ```
+（P3 回写 2026-08-20：补 budget.py）
 
 ---
 
@@ -39,7 +41,9 @@ gateway.chat(messages: list[dict], *,
 # messages: OpenAI 格式 [{"role":"system/user/assistant","content":"..."}]
 # tools: 传入时与角色白名单取交集（调用方只能缩小，不能越权）
 # role: 决定可用工具范围（viewer/analyst=读类；trader=+halt+启停；admin=+resume）
-# caller: 调用方标识，写 llm_usage.caller（feishu/web_chat/daily_report/health_check/astock/test）
+# caller: 调用方标识，写 llm_usage.caller
+#   实况取值（P3 回写 2026-08-20）：feishu / web_chat / daily_report / health_check /
+#   astock（选股 LLM 研判）/ convertible_terms / stock_analyze（三档详情 AI 分析）/ log_analyze（D4）/ test
 # 返回 LLMResponse；全失败返回 LLMResponse(content="", usage={"error":"所有 provider 不可用"})，不抛
 ```
 
@@ -94,9 +98,9 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 | `yaml`（外部） | 读 config.yaml failover 段 |
 | `dotenv`（外部） | 读 .env |
 | `src.data_platform.db.get_conn` | 读 llm_model_config / 写 llm_usage |
-| `src.web_api.crypto_utils.decrypt` | 解密 api_key_encrypted |
+| `src.quant_common.crypto.decrypt` | 解密 api_key_encrypted（2026-08-19 归位；原 `web_api.crypto_utils` 循环依赖已解）（P3 回写 2026-08-20） |
 
-> ⚠️ `llm_gateway` 依赖 `web_api.crypto_utils`（解密）；`web_api` 反过来依赖 `llm_gateway`（/api/chat）。**循环依赖**，当前靠函数内 import 延迟打破（`_load_models_from_db` / `_log_usage` 内 import）。改签名注意。
+> 曾有 `llm_gateway` ⇄ `web_api`（crypto_utils/chat）循环依赖，靠函数内 import 打破——crypto 归位 `quant_common` 后解环；web_api 依赖 llm_gateway 方向保留。
 
 ---
 
@@ -106,11 +110,14 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 |---|---|
 | `web_api.main` `/api/chat` | `gateway.chat(messages, tools=READ_TOOLS, role=, caller="web_chat")` |
 | `web_api.main` `/ws/chat` | `gateway.chat_stream(...)`（D1 WS 流式） |
+| `web_api.main` `/api/stock/{symbol}/analyze` | `gateway.chat(..., caller="stock_analyze")`（三档 AI 分析）（P3 回写 2026-08-20 补） |
+| `web_api.main` `/api/log/analyze` | `gateway.chat(..., caller="log_analyze")`（D4 已实现，原 alert_notify 预留位撤销）（P3 回写 2026-08-20） |
 | `web_api.main` `/api/llm-models/*` | 直接 SQL 读写 `llm_model_config`（不经 gateway）+ `gateway.reload_models()` |
 | `astock_analysis.analysis` `enhance_with_llm` | `gateway.chat([...], role="viewer", caller="astock")` |
-| `scheduler.tasks` 盘后报告 | `gateway.chat(..., caller="daily_report")` |
+| `astock_analysis.convertible_terms` | `gateway.chat(..., caller="convertible_terms")`（D3）（P3 回写 2026-08-20 补） |
+| `scheduler.tasks` 盘后报告/健康检查 | `gateway.chat(..., caller="daily_report"/"health_check")` |
+| `scheduler.tasks.budget_alert_check` | `llm_gateway.budget.check_budget_alerts()`（本模块内）（P3 回写 2026-08-20 补） |
 | `feishu_bot.bot` | `gateway.chat(..., role=<机器人角色>, caller="feishu")` |
-| `alert_notify` | 预留 AI 告警归因（D4，caller 待定） |
 
 > 改 `chat` / `chat_stream` 签名影响 web_api + astock + scheduler + feishu_bot。慎改，优先加参数带默认值。
 
@@ -121,10 +128,10 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 | 表 | 写 | 读 |
 |---|---|---|
 | `llm_model_config` | web_api（/api/llm-models 端点） | `gateway._load_models_from_db`（启动 + reload_models） |
-| `llm_usage` | `gateway._log_usage`（每次调用，幂等 `CREATE TABLE IF NOT EXISTS` 兜底） | web_api `/api/llm-usage/summary`（用量看板） |
-| `llm_budget` | web_api（D5 端点待加） | D5 告警逻辑待（预算阈值 vs llm_usage 聚合） |
+| `llm_usage` | `gateway._log_usage`（每次调用；**SELECT 1 探测表存在**（gateway.py:383），无 CREATE TABLE——schema 全走迁移）（P3 回写 2026-08-20） | web_api `/api/llm-usage/summary`（用量看板） |
+| `llm_budget` | web_api `/api/llm-budget` CRUD（已存在） | `budget.check_budget_alerts`（预算阈值 vs llm_usage 聚合；beat 1h）（P3 回写 2026-08-20：原"D5 端点待加"过时） |
 
-> `llm_usage` / `llm_budget` 正式 schema 走 migration（0011 llm_usage / 0020 llm_budget）；gateway 内 `CREATE TABLE IF NOT EXISTS` 兜底（新库容错）。
+> `llm_usage` / `llm_budget` 正式 schema 走 migration（0011 llm_usage / 0020 llm_budget）；gateway 内无运行时 DDL（P3 回写 2026-08-20：删"CREATE TABLE IF NOT EXISTS 兜底"旧述）。
 
 ---
 

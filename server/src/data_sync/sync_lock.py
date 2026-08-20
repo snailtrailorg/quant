@@ -44,7 +44,11 @@ class SyncLock:
     def acquire(self) -> bool:
         """SET NX EX 抢锁。成功返回 True；锁已被持有返回 False。"""
         if self._r is None:
-            self._r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+            # DB 优化（2026-08-21 审计 A-数据层 A3）：补 socket_timeout——四处 Valkey 客户端
+            # 唯一裸奔的一处，抖动时 celery worker 卡死在拿锁
+            self._r = redis.from_url(
+                os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                socket_timeout=5, socket_connect_timeout=5)
         self.acquired = self._r.set(self.key, self.token, nx=True, ex=self.ttl) is not None
         return self.acquired
 

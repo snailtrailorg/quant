@@ -25,7 +25,9 @@ server/src/scheduler/
 app: Celery                        # name="quant", broker/backend=VALKEY_URL
     # include=["src.scheduler.tasks", "src.feishu_bot.tasks"]
 # 启动：celery -A src.scheduler.app worker -B -c 2 --loglevel=info
-# 配置：timezone="Asia/Shanghai" / enable_utc=True / worker_concurrency=2
+# 配置：timezone="Asia/Shanghai" / enable_utc=True / worker_concurrency 从 system_config 读
+#       （app.py `_load_celery_concurrency()`：DB key=celery_concurrency 优先，fallback 环境变量/默认 2，
+#        运行时 Web 改 system_config 即调，不再 -c 硬编码）（P3 回写 2026-08-20）
 #       task_soft_time_limit=300（5min）/ task_track_started=True
 # beat_schedule：见下「beat 定时表」
 ```
@@ -56,6 +58,10 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `astock_minute_analysis` | （任务） | 盘中分钟研判（占位，待实时行情订阅） |
 | `pool_data_sync_task` | beat 5min + 周日 04:07 full | 池内深度数据同步（三档二档：`pool_data.sync_pools_data`，queue=data expires=290/3600，soft_time_limit=320；周日轮 `pool-data-full-calibrate` kwargs full=True 全量校准；web 入池端点 delay(symbols=) 定向回补） |
 | `pool_minute_sync_task` | beat 注释态 | 池分钟同步（Tushare stk_mins 收费未启用，基础设施保留） |
+| `adj_factor_backfill_task` | web `.delay` | 复权因子回填（A/B-F1，`engine.backfill_adj_factor`；手动触发，积分未到账降级返回不抛；任务纳入 task_manager）（P3 回写 2026-08-20 补） |
+| `health_monitor_check` | beat 30s（queue=risk **expires=25**，停机窗消息过期防连环补跑） | 15 号服务监控：30s 采集判定（unit/依赖/心跳+沿检测+health_event 落库+告警；S6"只告警不动作"的聚合点）（P3 回写 2026-08-20 补） |
+| `email_outbox_sweep` | beat 60s | 发件箱扫描重发（`email_service.sweep(3)`，指数退避由 next_attempt_at 控制）（P3 回写 2026-08-20 补） |
+| `notifications_cleanup` | beat 每天 | 通知留存清理（`alert_notify.cleanup`：已确认>7 天、全部>30 天删）（P3 回写 2026-08-20 补） |
 
 > beat 定时表完整定义在 `app.conf.beat_schedule`（实盘改 crontab）。每个任务 `options={"queue": "data"/"analysis"/"risk"}` 分队列。
 
@@ -69,7 +75,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 - `sync_via_celery.progress_cb(i, total, current)`：进度回调（写 Valkey `sync:type:{sid}` + `update_heartbeat`）
 - `backtest_symbol_task.on_bar_cb(bar, ctx)`：每 bar publish Valkey `backtest:run:{run_id}:{symbol}`
 
-> ⚠️ **app.py beat_schedule 缩进错乱**：`"risk-sweep"` 条目（app.py:73）的 `}` 在文件末尾（:98），其间 `convertible-terms-sync`/`budget-alert-check`/`static-list-sync`/`broker-health-check` 四条按 `{}` 匹配**实际嵌套在 risk-sweep dict 内**，beat 顶层不会调度这四条。疑似合并残留——**TODO 核实修复**（修后本表 beat 列需重核）。
+> （P3 回写 2026-08-20：删"beat_schedule 缩进错乱 TODO 核实"警告——该合并残留已修，beat 顶层正常调度全部条目）
 
 ---
 
@@ -86,11 +92,11 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | tasks.py | `data_sync.engine`（sync/sync_all）/ `data_sync.sync` | 同步执行 |
 | tasks.py | `task_manager`（create_task/update_heartbeat/complete_task/log_task/notify_on_failure/detect_stuck） | 异步任务统一管理 |
 | tasks.py | `strategy_framework`（StrategyConfig/BacktestEngine） | 回测子任务 |
-| tasks.py | `web_api.main.check_budget_alerts` | 预算告警（函数内 import） |
+| tasks.py | `llm_gateway.budget.check_budget_alerts` | 预算告警（函数内 import，tasks.py:936）（P3 回写 2026-08-20：原"web_api.main.check_budget_alerts 反向依赖"已随 2026-08-19 模块归位迁入 llm_gateway/budget.py，scheduler→web_api 反向依赖不复存在） |
 | tasks.py | `strategy_framework.broker._REGISTRY` | 通道健康检查 |
 | app.py | celery / croniter（外部）/ dotenv | 调度框架 + cron 解析 + .env |
 
-> ⚠️ `scheduler` → `web_api.main`（check_budget_alerts）是**反向依赖**（web_api 反过来被 scheduler 调），靠函数内 import 延迟打破。改签名注意。
+> ⚠️ 曾有 `scheduler` → `web_api.main`（check_budget_alerts）反向依赖，靠函数内 import 延迟打破——已随 2026-08-19 模块归位消除（P3 回写 2026-08-20）。
 
 ---
 
@@ -114,9 +120,11 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `backtest_runs` | `backtest_run_task`（status=running/task_id）/ `backtest_symbol_task`（status=done/finished_at） | 两个回测任务（strategy_config_id/symbols/params/mode） |
 | `backtest_symbols` | `backtest_run_task`（INSERT pending）/ `backtest_symbol_task`（status=done/error+result） | `backtest_symbol_task`（count pending 判 run 完成） |
 | `bar_1D` | `data_continuity_check`（断点补采 `save_bars`） | `data_continuity_check`（近 7 天 cnt 检测） |
-| `convertible_terms` | `convertible_terms_sync`（CREATE+UPSERT） | — |
-| `static_symbols` | `static_list_sync`（CREATE+UPSERT） | — |
-| `signal_log`/`order_log`/`trade_log` | `reconcile_three_books`（CREATE TABLE IF NOT EXISTS 兜底） | `reconcile_three_books`（三账比对） |
+| `convertible_terms` | `convertible_terms_sync`（UPSERT；DDL 在迁移，运行时零 DDL） | — |
+| `static_symbols` | `static_list_sync`（UPSERT；同上） | — |
+| `signal_log`/`order_log`/`trade_log` | `reconcile_three_books`（比对写回；表在迁移 0039，**无 CREATE TABLE 兜底**） | `reconcile_three_books`（三账比对） |
+
+> （P3 回写 2026-08-20：删三处"CREATE/CREATE TABLE IF NOT EXISTS 兜底"旧述——运行时 DDL 已清零，tasks.py 内零 CREATE TABLE，schema 全走 alembic）
 
 **Valkey 键**（前端轮询 / 跨任务通信）：
 - `sync:progress:{sid}` / `sync:type:{sid}`（同步进度 hash）
@@ -128,7 +136,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 ## 六、不变量
 
 - **时区**：`Asia/Shanghai` + `enable_utc=True`；A 股任务用本地时间判交易时段
-- **并发限流**：`worker_concurrency=2`（低配 ECS）；重任务（回测/全量同步）单独放宽 `soft_time_limit=3600`/`time_limit=4200`
+- **并发限流**：`worker_concurrency` 从 `system_config.celery_concurrency` 动态读（DB 优先，fallback env/默认 2；P3 回写 2026-08-20，原"=2 硬编码"过时）；重任务（回测/全量同步）单独放宽 `soft_time_limit=3600`/`time_limit=4200`
 - **默认超时**：`task_soft_time_limit=300`（5min），超时 Celery 杀任务
 - **A 股任务跳过**：`_is_trading_day`/`_is_trading_hours` 返回 False → 返回 `{"status":"skipped","reason":...}`，不抛
 - **进度写 Valkey**：所有长任务（同步/回测）进度 hash + expire（1h），前端轮询；完成态存结果字段
@@ -153,4 +161,5 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 ---
 
 ## 修订记录
-- 2026-08-11 初版（基于代码核实：app.py:1-99 / tasks.py:1-794 / __init__.py 全读；beat_schedule 缩进问题待核实）
+- 2026-08-11 初版（基于代码核实：app.py:1-99 / tasks.py:1-794 / __init__.py 全读）
+- 2026-08-20 P3 回写：补 4 任务（adj_factor_backfill/health_monitor_check/email_outbox_sweep/notifications_cleanup）；撤"beat 缩进错乱"警告（已修）；check_budget_alerts 迁址；删运行时 DDL 旧述；worker_concurrency 改 system_config 动态
