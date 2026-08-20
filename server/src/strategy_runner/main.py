@@ -712,6 +712,20 @@ def main():
     except KeyboardInterrupt:
         logger.info("策略 %s 停止", sid)
     finally:
+        # P1 修复（2026-08-20 双盲审计 A3）：live_task 状态回写——原只在 Web 路径写，
+        # systemd stop/StartLimit Failed/机器重启后 status 永久残留 running
+        # （Web 假运行中 + hub _desired_symbols 永续订阅）。
+        if tid is not None:
+            try:
+                with get_conn() as conn:
+                    cur = conn.execute('SELECT status FROM live_task WHERE id=%s', (tid,))
+                    r = cur.fetchone()
+                    if r and r[0] == 'running':
+                        conn.execute("UPDATE live_task SET status='stopped' WHERE id=%s", (tid,))
+                        conn.commit()
+                        logger.info("退出回写 live_task %s → stopped", tid)
+            except Exception as e:
+                logger.warning("退出状态回写失败: %s", e)
         try:
             _r.close()
             main_engine.close()

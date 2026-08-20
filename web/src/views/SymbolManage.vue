@@ -68,6 +68,7 @@ import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, ElButton, ElTag } from 'element-plus'
+import { apiErr } from '../api'
 import api from '../api'
 
 const { t } = useI18n()
@@ -128,7 +129,7 @@ const onSync = async (row) => {
       ElMessage.warning(t('symbol.syncWarn', { code: row.ts_code, status: r.status, error: r.error || '' }))
     }
     await load()
-  } catch (e) { ElMessage.error(e.detail || e.message || t('symbol.syncFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('symbol.syncFailed'))) }
   finally { row._loading = false }
 }
 
@@ -157,7 +158,7 @@ const doBackfill = async () => {
     } else {
       ElMessage.error(r.error || t('symbol.backfillFailed'))
     }
-  } catch (e) { ElMessage.error(e.detail || e.message || t('symbol.backfillFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('symbol.backfillFailed'))) }
   finally { bfLoading.value = false }
 }
 

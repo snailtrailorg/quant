@@ -193,6 +193,8 @@ class Strategy:
             open_=bar.get("open", 0),
             volume=bar.get("volume", 0),
             history=history or [],
+            symbol=self.symbol,          # P2-2026-08-20：double_low 等跨表因子接通
+            bar_ts=bar.get("ts"),        # P2：时点约束（防回测前视）
         )
         fv = self.compute_factors(ctx)
         sig = self._aggregator.aggregate(fv)
@@ -249,13 +251,19 @@ class Strategy:
         return float(self._param("volume", 100))
 
     def _held_volume(self) -> int:
-        """本 symbol 持仓量（ST2 position_snapshot 真相源；SELL 口径）。"""
+        """本 symbol **可卖**持仓量（ST2 position_snapshot 真相源；SELL 口径）。
+
+        P0-4 修复（2026-08-20 双盲审计 S2）：原 SUM(volume) 含冻结仓——T+1 当日买入量
+        计入 SELL 口径 → ALL_IN 超卖 → 交易所拒单 → 止损失效（R-F1 要防的正是这个）。
+        可卖 = volume - frozen（快照列语义）；frozen 缺行时退化 volume-yd_volume 不可靠，
+        直接 volume - COALESCE(frozen,0)。
+        """
         from ..data_platform.db import get_conn
         from ..data_platform.schema import to_vt_symbol
         vt = self.symbol if "." in self.symbol else to_vt_symbol(self.symbol)
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT COALESCE(SUM(volume),0) FROM position_snapshot "
+                "SELECT COALESCE(SUM(volume - COALESCE(frozen,0)),0) FROM position_snapshot "
                 "WHERE symbol=%s AND direction != 'short'", (vt,))
             return int(cur.fetchone()[0] or 0)
 
@@ -311,6 +319,19 @@ class Strategy:
             logger.warning("信号无效丢弃 volume=%s price=%s (%s %s): %s",
                            volume, price, self.symbol, sig.action.name, sig.reason)
             return
+        # P0-4 兜底（2026-08-20 双盲审计 S1/S2）：SELL 统一截断到可卖仓——覆盖全部策略路径
+        # （覆写 on_bar 的预置策略/Python 模式原本绕过 _resolve_volume 的持仓口径）。
+        # T+1 当日买入冻结仓计入 → 超卖 → 交易所拒单 → 止损失效。
+        if sig.action.name == "SELL":
+            try:
+                sellable = self._held_volume()
+                if sellable < volume:   # 复审边界a：sellable==0 也截断（当日买入当日止损场景零可卖不发废单）
+                    logger.warning("SELL 截断到可卖仓 %d（请求 %d，T+1 冻结/持仓不足）",
+                                   sellable, volume)
+                    volume = sellable
+                    sig.volume = sellable
+            except Exception as e:
+                logger.warning("可卖仓查询失败，SELL 按原量提交（快照故障由风控 fail-closed 兜）: %s", e)
         order = {
             "symbol": self.symbol,
             "action": sig.action.name,
@@ -318,6 +339,7 @@ class Strategy:
             "price": price,
             "reason": sig.reason,
             "strategy_id": self.config.id,  # SC3：供 max_trades_per_day 计数
+            "validity": getattr(sig, "order_validity", "DAY"),   # P2：GTC 曾读了不传（R-S3b 半接线）
         }
         decision = RiskControl.get().check_order(order, "")
         if not decision.approved:
@@ -330,6 +352,8 @@ class Strategy:
             return
         from .adapters import Order
         import time as _t
+        if final.get("validity") == "GTC":
+            logger.warning("XTP 限价单无 GTC 语义，按当日有效（DAY）发出——配置降级声明（P2）")
         _t0 = _t.time()
         try:
             client_id = self.adapter.send_order(Order(
@@ -452,6 +476,8 @@ class StrategyContext:
             open_=bar.get("open", 0),
             volume=bar.get("volume", 0),
             history=history or [],
+            symbol=self.symbol,          # P2：同基类 on_bar（get_factor 路径）
+            bar_ts=bar.get("ts"),
         )
 
     # ——— 只读数据 ———
@@ -537,6 +563,10 @@ class PythonStrategy(Strategy):
         self._ctx = StrategyContext(config.id, config.symbol)
         self._compiled = None
         if self._user_code:
+            # P0-1（双盲审计 F1.2 纵深）：保存路径已校验，运行侧再拦一次——覆盖存量旧代码
+            _forbidden = _check_ast_blacklist(self._user_code)
+            if _forbidden:
+                raise ValueError(f"策略代码安全校验失败: {_forbidden}")
             try:
                 self._compiled = compile(self._user_code, "<strategy>", "exec")
             except SyntaxError as e:

@@ -235,26 +235,42 @@ def test_feishu_client_send_card():
 # ---------------------------------------------------------------------------
 
 def test_verify_signature():
-    """verify_signature 正确校验飞书 Webhook 签名。"""
-    from src.feishu_bot.bot import verify_signature
+    """官方事件签名（P0 复审修正后算法）：sha256(头ts+头nonce+EncryptKey+body)。"""
+    from src.feishu_bot.bot import verify_event_signature
 
     secret = "test_secret_123"
     timestamp = "1723536000"
+    nonce = "abc123"
     body = '{"challenge": "test_challenge"}'
 
-    expected_sig = hashlib.sha256(f"{timestamp}{secret}{body}".encode()).hexdigest()
+    expected_sig = hashlib.sha256(f"{timestamp}{nonce}{secret}{body}".encode()).hexdigest()
 
+    with patch.dict(os.environ, {"LARK_ENCRYPT_KEY": secret}):
+        assert verify_event_signature(timestamp, nonce, body, expected_sig) is True
+        assert verify_event_signature(timestamp, nonce, body, "wrong_sig") is False
+
+
+def test_verify_card_signature():
+    """官方卡片签名：sha1(头ts+头nonce+token+body)；未配 token fail-closed 拒。"""
+    import hashlib as _h
+    from src.feishu_bot.bot import verify_card_signature
+
+    secret = "tok_123"
+    ts, nonce, body = "1723536000", "n1", '{"x":1}'
+    sig = _h.sha1(f"{ts}{nonce}{secret}{body}".encode()).hexdigest()
     with patch.dict(os.environ, {"LARK_VERIFICATION_TOKEN": secret}):
-        assert verify_signature(timestamp, body, expected_sig) is True
-        assert verify_signature(timestamp, body, "wrong_sig") is False
+        assert verify_card_signature(ts, nonce, body, sig) is True
+        assert verify_card_signature(ts, nonce, body, "bad") is False
+    with patch.dict(os.environ, {"LARK_VERIFICATION_TOKEN": ""}):
+        assert verify_card_signature(ts, nonce, body, sig) is False   # fail-closed
 
 
 def test_verify_signature_no_secret():
-    """未配置 LARK_VERIFICATION_TOKEN 时跳过校验（返回 True）。"""
-    from src.feishu_bot.bot import verify_signature
+    """未配置 Encrypt Key 时事件签名跳过（兼容纯 token 模式）。"""
+    from src.feishu_bot.bot import verify_event_signature
 
     with patch.dict(os.environ, {}, clear=True):
-        assert verify_signature("ts", "body", "sig") is True
+        assert verify_event_signature("ts", "n", "body", "sig") is True
 
 
 # ---------------------------------------------------------------------------

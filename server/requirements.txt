@@ -14,7 +14,9 @@ vnpy-okx                   # OKX 网关（永续合约）
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pyjwt>=2.8                 # JWT 认证
-passlib[bcrypt]>=1.7       # 密码哈希（生产）
+bcrypt>=4.0            # 密码哈希（P2：passlib 死依赖移除——src 零 import 直用 bcrypt；原靠 passlib 传递带入未声明）
+pandas>=2.0           # P2：直接依赖显式声明（原靠 vnpy/tushare 传递带入，上游一变即 ImportError）
+numpy>=1.26            # P2：同上（直接依赖显式声明）
 python-multipart>=0.0.9    # 表单/上传
 
 # === 数据库 / 缓存 / 向量 ===

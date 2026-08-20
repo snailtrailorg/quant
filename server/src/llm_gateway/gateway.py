@@ -317,19 +317,26 @@ class LLMGateway:
                     base_url=conf["base_url"],
                 )
                 kwargs = dict(model=conf["model"], messages=messages, stream=True)
+                # P2 修复（2026-08-20 双盲审计 A-D 组）：include_usage 让末 chunk 带 token 用量
+                # ——原流式恒记 0，ws_chat 全部 token 不入 llm_usage（预算检查系统性低估）
+                kwargs["stream_options"] = {"include_usage": True}
                 if openai_tools:
                     kwargs["tools"] = openai_tools
                     kwargs["tool_choice"] = "auto"
                 if conf.get("max_output_tokens"):
                     kwargs["max_tokens"] = conf["max_output_tokens"]
                 stream = await client.chat.completions.create(**kwargs)
+                usage_in = usage_out = 0
                 async for chunk in stream:
+                    if getattr(chunk, "usage", None):   # include_usage 的末 chunk
+                        usage_in = getattr(chunk.usage, "prompt_tokens", 0) or 0
+                        usage_out = getattr(chunk.usage, "completion_tokens", 0) or 0
                     delta = chunk.choices[0].delta if chunk.choices else None
                     if delta and delta.content:
                         yield delta.content
                 latency = int((time.time() - t0) * 1000)
                 self._reset_fail(prov)
-                self._log_usage(prov, conf["model"], 0, 0, latency,
+                self._log_usage(prov, conf["model"], usage_in, usage_out, latency,
                                 success=True, caller=caller)
                 return
             except Exception as e:

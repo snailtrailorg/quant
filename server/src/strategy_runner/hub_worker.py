@@ -163,11 +163,29 @@ def run(ctx: dict) -> None:
     ee.register(__import__("vnpy.trader.event", fromlist=["EVENT_TRADE"]).EVENT_TRADE, on_trade)
 
     # ——— 消费组（先建组后回放，评审陷阱 6）———
+    # P0-3 修复（2026-08-20 双盲审计 A1）：原组残留时 xreadgroup ">" 从旧组水位续消费——
+    # 重启窗内 30-40 根 bar 重新驱动 on_bar，frozen_allows 放行 SELL = 重复下单。
+    # 重启即销毁旧组重建（新组从 $ 起）：停机窗消息永不重放（丢的 bar 由暖机/gap 路径从
+    # DB 补，绝不重复消费）。双保险：下方 max_ts 持久化过滤。
+    try:
+        r.xgroup_destroy(stream, gname)
+    except Exception:
+        pass   # 组不存在（首启）属正常
     try:
         r.xgroup_create(stream, gname, id="$", mkstream=True)
     except Exception as e:
         if "BUSYGROUP" not in str(e):
             logger.warning("XGROUP CREATE 失败: %s", e)
+
+    # P0-3 配套：max_ts 持久化恢复（R-DL1 跨重启去重——曾进程内存失忆）
+    _mts_key = f"hub:worker:max_ts:{symbol}"
+    try:
+        _saved = r.get(_mts_key)
+        if _saved:
+            state.max_ts = _saved
+            logger.info("跨重启水位恢复 max_ts=%s", _saved)
+    except Exception as e:
+        logger.warning("水位恢复读取失败（从空水位起）: %s", e)
 
     # ——— 暖机：只填 history 绝不调 on_bar（评审 F3）———
     def _warmup_from_stream(hist: list, upto_ts: str | None = None) -> list:
@@ -249,6 +267,10 @@ def run(ctx: dict) -> None:
         if _in_astock_session():
             stats["sess_bar_wall"] = stats["last_bar_wall"]
         state.max_ts = ts_n
+        try:
+            r.set(_mts_key, ts_n)   # P0-3：水位持久化（重启恢复，防 SELL 重放）
+        except Exception:
+            pass   # 持久化失败不阻断（组重建已挡住停机窗重放，此为纵深第二层）
         sig = strategy.on_bar(bar, list(history))
         stats["bars"] += 1
         history.append(bar)

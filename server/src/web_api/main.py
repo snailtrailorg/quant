@@ -6,10 +6,11 @@
 from __future__ import annotations
 from src.data_platform.db import get_conn
 import os, json, logging, psycopg, redis, subprocess, uuid
+import asyncio   # P0-8：SSE/WS 流式 await asyncio.sleep 一直缺 import（审计实测一帧即 NameError 断流）
 import requests
 import pandas as pd
 from typing import Literal
-from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, Header, Query, Body, Request, BackgroundTasks, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -679,6 +680,10 @@ def change_password_api(req: ChangePwdReq, payload: dict = Depends(require_role(
 
 @app.post("/api/user")
 def create_user_api(req: UserCreate, payload: dict = Depends(require_perm("user_mgmt"))):
+    from .auth import validate_password
+    validate_password(req.password)   # P0-复审残留：admin 建用户原无校验（>72 字节 500）
+    if req.role not in ("admin", "trader", "analyst", "viewer"):   # P2 A4：角色白名单
+        raise ApiError(400, "ROLE_INVALID", f"非法角色: {req.role}")
     try:
         uid = create_user(req.username, req.password, req.role)
         audit_log(payload["username"], "create_user", req.username, f"role={req.role}")
@@ -768,6 +773,13 @@ def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("s
     _v = _validate_strategy_category(req.type, req.symbol, req.factors)
     if not _v["valid"]:
         raise ApiError(400, "FACTOR_INCOMPATIBLE", _v["message"])
+    # P0-1 修复（双盲审计 F1.2 + 复审修正）：键名实为 python_code、判据用 params.mode
+    # （原 type=="python" 恒假 + 读 "code" 键 → 校验整体 no-op）
+    if (req.params or {}).get("mode") == "python":
+        from src.strategy_framework.strategy import _check_ast_blacklist
+        _forbidden = _check_ast_blacklist((req.params or {}).get("python_code", ""))
+        if _forbidden:
+            raise ApiError(400, "CODE_FORBIDDEN", f"策略代码安全校验失败: {_forbidden}")
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO strategy_config (id, name, type, symbol, adapter, enabled, factors, aggregator, risk, params) "
@@ -820,6 +832,12 @@ def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(requi
         _v = _validate_strategy_category(req.type, _sym, req.factors)
         if not _v["valid"]:
             raise ApiError(400, "FACTOR_INCOMPATIBLE", _v["message"])
+    else:
+        # P0-1 修复（双盲审计 F1.2 + 复审修正）：读 python_code 键（原 "code" 恒空 → no-op）
+        from src.strategy_framework.strategy import _check_ast_blacklist
+        _forbidden = _check_ast_blacklist(req.params.get("python_code", ""))
+        if _forbidden:
+            raise ApiError(400, "CODE_FORBIDDEN", f"策略代码安全校验失败: {_forbidden}")
     with get_conn() as conn:
         cur = conn.execute("SELECT factors, aggregator FROM strategy_config WHERE id=%s", (sid,))
         old = cur.fetchone()
@@ -3113,8 +3131,9 @@ def backtest_stream_api(run_id: int, symbol: str,
 # --- WS 流式聊天（D1 #24）---
 
 @app.websocket("/ws/market")
-async def ws_market(ws, token: str = Query(...)):
-    """P3-18 WS 行情推送（占位，实盘后推送实时行情）。"""
+async def ws_market(ws: WebSocket, token: str = Query(...)):
+    """P3-18 WS 行情推送（占位，实盘后推送实时行情）。
+    P0-8：ws 参数缺 WebSocket 注解时被当 query 参数——accept() 对 str 调用必炸。"""
     from .auth import verify_jwt
     try:
         payload = verify_jwt(token)
@@ -3131,16 +3150,25 @@ async def ws_market(ws, token: str = Query(...)):
 
 
 @app.websocket("/ws/chat")
-async def ws_chat(ws, token: str = Query(...)):
-    """WS 流式聊天（token query 认证，role 从 JWT 取非客户端，P0-3 修复）。"""
+async def ws_chat(ws: WebSocket, token: str = Query(None)):
+    """WS 流式聊天（P0-8/P2 修复：ws 注解补齐；token 支持 query 或首帧 {"type":"auth","token"}
+    双通道——前端 AIChat 发首帧 auth 不带 query，原契约只认 query 导致流式握手必败静默降级 POST）。"""
     from .auth import verify_jwt
+    await ws.accept()
+    if not token:
+        # 首帧认证（5s 超时防挂连接）
+        try:
+            first = await asyncio.wait_for(ws.receive_json(), timeout=5)
+            if first.get("type") == "auth":
+                token = first.get("token")
+        except Exception:
+            token = None
     try:
-        payload = verify_jwt(token)
+        payload = verify_jwt(token or "")
     except Exception:
         await ws.close(code=4001, reason="token 无效")
         return
     role = payload.get("role", "viewer")
-    await ws.accept()
     from src.llm_gateway import gateway
     try:
         while True:

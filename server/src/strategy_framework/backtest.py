@@ -65,6 +65,7 @@ class BacktestAdapter(ExecutionAdapter):
         self.trades: list[Trade] = []
         self._current_bar: dict = {}
         self._commission_rate: float = 0.0005  # 万五
+        self._slippage: float = 0.0
 
     def set_bar(self, bar: dict):
         self._current_bar = bar
@@ -72,8 +73,15 @@ class BacktestAdapter(ExecutionAdapter):
     def set_commission(self, rate: float):
         self._commission_rate = rate
 
+    def set_slippage(self, slip: float):
+        self._slippage = slip
+
     def send_order(self, order: Order) -> str:
-        price = self._current_bar.get("close", 0)
+        # P0-6 修复（2026-08-20 双盲审计 B1）：slippage 曾是死参数——BUY 按 close*(1+slip)
+        # 吃进、SELL 按 close*(1-slip) 出货，负滑点让回测系统性偏乐观
+        base = self._current_bar.get("close", 0)
+        slip = self._slippage if self._slippage >= 0 else 0.0
+        price = base * (1 + slip) if order.action == "BUY" else base * (1 - slip)
         ts = self._current_bar.get("ts", datetime.now())
         commission = price * order.volume * self._commission_rate
         self.trades.append(Trade(
@@ -117,6 +125,7 @@ class BacktestEngine:
         """
         adapter = BacktestAdapter()
         adapter.set_commission(self.commission_rate)
+        adapter.set_slippage(self.slippage)   # P0-6：slippage 接线（曾死参）
         strategy = Strategy.from_config(config, adapter)
 
         # 回测数据完整性预检
@@ -162,7 +171,9 @@ class BacktestEngine:
                 history.append(bar)
 
                 # 处理成交
-                for trade in adapter.trades:
+                # P0-6 修复（双盲审计 B2 幻影成交）：资金不足/持仓不足的 Trade 从明细移除——
+                # 原实现静默跳过配账但 trades/total_trades/胜率照录未成交单
+                for trade in list(adapter.trades):
                     if trade.ts == bar.get("ts") and trade.symbol == config.symbol:
                         if trade.action == "BUY":
                             cost = trade.price * trade.volume + trade.commission
@@ -172,6 +183,8 @@ class BacktestEngine:
                                 position += trade.volume
                                 avg_price = total / position if position > 0 else 0
                                 buy_queue.append((trade.volume, trade.price))
+                            else:
+                                adapter.trades.remove(trade)   # 未成交不入明细
                         elif trade.action == "SELL":
                             if position >= trade.volume:
                                 proceeds = trade.price * trade.volume - trade.commission
@@ -190,6 +203,8 @@ class BacktestEngine:
                                 position -= trade.volume
                                 if position == 0:
                                     avg_price = 0.0
+                            else:
+                                adapter.trades.remove(trade)   # 未成交不入明细
 
                 # 每日净值
                 close = bar.get("close", 0)
@@ -392,6 +407,8 @@ def precheck_backtest_data(config: StrategyConfig, bars: list[dict]) -> dict:
         checks.append(f"✓ 数据量 {len(bars)} >= 最大窗口 {max_window}")
 
     # 2. 时序连续性（相邻 bar 日期间隔合理）
+    # P0-6 修复（2026-08-20 双盲审计 F3.3）：阈值 7 天把春节(8-10 自然日)/国庆长假全判断点——
+    # 跨任何长假的回测整体 failed。15 天=覆盖最长法定假期+缓冲；真断点（停牌数月/数据缺失）仍拦。
     ts_list = [b.get("ts") for b in bars if b.get("ts")]
     gaps = 0
     for i in range(1, len(ts_list)):
@@ -400,7 +417,7 @@ def precheck_backtest_data(config: StrategyConfig, bars: list[dict]) -> dict:
             curr = ts_list[i]
             if hasattr(prev, "date") and hasattr(curr, "date"):
                 diff = (curr.date() - prev.date()).days
-                if diff > 7:  # 日线超过 7 天间隔判定为断点
+                if diff > 15:  # 日线超过 15 天间隔判定为断点（长假豁免）
                     gaps += 1
         except Exception as e:
             logger.warning("时序连续性检查异常: %s", e)

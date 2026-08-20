@@ -595,7 +595,7 @@ export default {
     },
     trading: {
       title: '实盘交易看板',
-      positions: '持仓',
+      positions: '持仓', loadFailed: '持仓/账户数据加载失败——显示可能不是真实空仓,请刷新或检查服务',
       orders: '订单',
       pnl: '盈亏曲线',
       totalAssets: '总资产',
@@ -1533,7 +1533,7 @@ export default {
     },
     trading: {
       title: 'Live Trading Dashboard',
-      positions: 'Positions',
+      positions: 'Positions', loadFailed: 'Position/account data failed to load — empty tables may not reflect real holdings, refresh or check services',
       orders: 'Orders',
       pnl: 'PnL Curve',
       totalAssets: 'Total Assets',

@@ -509,7 +509,10 @@ def main() -> None:
     flush_points = {1130, 1500}   # 11:30:05 / 15:00:05 双 flush（评审 S2）
     try:
         while True:
-            time.sleep(10)
+            # P1 修复（2026-08-20 双盲审计双盲同判）：原 sleep(10) 与 5s flush 窗口
+            # （5<=second<10）相位耦合——约一半实例永不在 11:30:05/15:00:05 醒来，
+            # 收盘末桶蒸发。步长 5s 必命中窗口（与 _sync_subscriptions 的 %60 重放同理）。
+            time.sleep(5)
             counter += 1
             _sd_notify("WATCHDOG=1")
             # 租约续期（Lua CAS，评审）：失败=让位退出（另一 hub 在位或存储异常区分告警）

@@ -166,7 +166,7 @@ export const forgotPassword = (email, lang) => api.post('/auth/forgot-password',
 export const resetPassword = (token, new_password) => api.post('/auth/reset-password', { token, new_password })
 export const changePassword = (old_password, new_password) => api.post('/auth/change-password', { old_password, new_password })
 export const getTerms = () => api.get('/terms')
-export const getLiveTrading = api.get('/live-trading')
+export const getLiveTrading = () => api.get("/live-trading")
 export const updateLiveTrading = (market, enabled) => api.post(`/live-trading/${market}?enabled=${enabled}`)
 export const logAnalyze = (data) => api.post('/log/analyze', data)
 export const logoutApi = () => api.post('/auth/logout')

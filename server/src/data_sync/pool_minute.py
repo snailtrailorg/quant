@@ -146,15 +146,20 @@ def sync_pools_minute(timebox_s: int = 280) -> dict:
 
 
 def _log_pool(pool_id, total: int, synced: int, errors: list, timeout: bool) -> None:
-    """sync_log 可观测（S-S3：池同步不入 sync_log=重蹈'断 11 天才发现'教训）。"""
+    """sync_log 可观测（S-S3：池同步不入 sync_log=重蹈'断 11 天才发现'教训）。
+
+    P1 修复（2026-08-20 双盲审计三盲同判）：原 INSERT 列名 start/end/pulled/saved 与
+    sync_log 真实列 start_date/end_date/rows_pulled/rows_saved 错配——每次必 UndefinedColumn
+    被 except:pass 吞，sync_log 从未写入成功（护栏自己坏了）。pass→logger.error 也不再吞。
+    """
     try:
         with _pdb.get_conn() as conn:
             conn.execute(
-                "INSERT INTO sync_log (sync_id, ts, mode, start, end, pulled, saved, duration_ms, status, error, failed_dates) "
+                "INSERT INTO sync_log (sync_id, ts, mode, start_date, end_date, rows_pulled, rows_saved, duration_ms, status, error, failed_dates) "
                 "VALUES (%s, now(), %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                ("pool_minute", "", "", "", 0, synced, 0,
+                ("pool_minute", "beat", "", "", total, synced, 0,
                  "timeout" if timeout else ("done" if not errors else "partial"),
                  "", "; ".join(errors[:3])[:200]))
             conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("pool_minute sync_log 写入失败（原列名错配 2026-08-20 修复后仍失败需查）: %s", e)

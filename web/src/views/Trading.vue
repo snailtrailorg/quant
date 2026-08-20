@@ -6,6 +6,8 @@
         <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
       </div>
     </template>
+    <el-alert v-if="loadFailed" type="error" :closable="false" show-icon
+              :title="$t('trading.loadFailed')" style="margin-bottom: 12px" />
     <el-row :gutter="20" style="margin-bottom: 20px">
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalAssets') }}</div><div class="value">¥{{ formatNum(pnlData.total_value) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.todayPnl') }}</div><div class="value" :style="{color: pnlData.today_pnl >= 0 ? '#67c23a' : '#f56c6c'}">¥{{ formatNum(pnlData.today_pnl) }}</div></div></el-card></el-col>
@@ -74,10 +76,13 @@ const pnlChartOption = computed(() => ({
   series: [{ name: t('trading.equity'), type: 'line', data: (pnlData.value.curve || []).map(c => c.value), smooth: true }],
 }))
 const formatNum = (n) => (n || 0).toFixed(0)
+const loadFailed = ref(false)
 const load = async () => {
-  try { positionData.value = await getPosition() } catch {}
-  try { ordersData.value = await getOrders() } catch {}
-  try { pnlData.value = await getPnl() } catch {}
+  // P2（审计 C3）：静默空表=交易系统假空显示
+  loadFailed.value = false
+  try { positionData.value = await getPosition() } catch { loadFailed.value = true }
+  try { ordersData.value = await getOrders() } catch { }
+  try { pnlData.value = await getPnl() } catch { }
 }
 onMounted(load)
 </script>

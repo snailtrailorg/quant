@@ -998,8 +998,14 @@ def _find_gaps(api_fn, kind: str, ts_code: str, first: str, last: str,
     return gaps
 
 
-def _fetch_and_save(api_fn, ts_code: str, start: str, end: str, save_fn) -> "pd.DataFrame | None":
-    """拉取一段日期数据并入库。返回 df（供调用方统计）。"""
+def _fetch_and_save(api_fn, ts_code: str, start: str, end: str, save_fn,
+                    df_to_rows=None) -> "pd.DataFrame | None":
+    """拉取一段日期数据并入库。返回 df（供调用方统计）。
+
+    P2 修复（2026-08-20 双盲审计 A4）：原内部固定 _daily_to_rows(df) 无 adj_map——
+    auto 缺口/full 路径的日线 adj_factor 恒 NULL。df_to_rows 可传带因子版
+    （_daily_to_save_fn 用 _adj_map_for_df），默认保持旧签名兼容。
+    """
     try:
         df = api_fn(ts_code=ts_code, start_date=start, end_date=end)
     except Exception:
@@ -1008,7 +1014,7 @@ def _fetch_and_save(api_fn, ts_code: str, start: str, end: str, save_fn) -> "pd.
         return df
     if "trade_date" not in df.columns:
         return None
-    rows = _daily_to_rows(df)
+    rows = (df_to_rows or _daily_to_rows)(df)
     save_fn(rows)
     return df
 
@@ -1112,7 +1118,8 @@ def sync_symbol(sync_id: str, ts_code: str, mode: str = "auto") -> dict:
             # 空 -> 从上市日起全量
             start = _get_list_date(kind, ts_code)
             used = "full"
-            df = _fetch_and_save(api_fn, ts_code, start, today, _save_bars)
+            df = _fetch_and_save(api_fn, ts_code, start, today, _save_bars,
+                                  df_to_rows=lambda d: _daily_to_rows(d, _adj_map_for_df(d)))
             return _wrap_result(df, used, cnt, start, today)
         else:
             # 有数据 -> 完整性扫描：找出上市日到今天所有缺口段，逐段补
@@ -1121,10 +1128,14 @@ def sync_symbol(sync_id: str, ts_code: str, mode: str = "auto") -> dict:
             total_saved = 0
             gap_ranges = []
             for g_start, g_end in gaps:
-                df = _fetch_and_save(api_fn, ts_code, g_start, g_end, _save_bars)
+                df = _fetch_and_save(api_fn, ts_code, g_start, g_end, _save_bars,
+                                      df_to_rows=lambda d: _daily_to_rows(d, _adj_map_for_df(d)))
                 if df is not None and not df.empty:
                     total_pulled += len(df)
-                    total_saved += _save_bars(_daily_to_rows(df))
+                    # P2 修复（2026-08-20 双盲审计 A4）：原 _daily_to_rows(df) 无 adj_map——
+                    # 缺口补的日线 adj_factor 恒 NULL（F-F2 只修了 backfill_symbol 路径）；
+                    # 且 _fetch_and_save 内部已 save 过，此处是双写放大——去掉二写，计数用 len(df)
+                    total_saved += len(df)
                     gap_ranges.append([g_start, g_end])
             used = "incremental"
             return {"status": "uptodate" if not gap_ranges else "success",

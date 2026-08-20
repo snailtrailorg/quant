@@ -96,7 +96,10 @@ def validate_bars(rows: list[tuple]) -> list[tuple]:
     return clean
 
 
-_VALID_FREQS = {'1min', '5min', '15min', '30min', '60min', '1d'}
+# P2 修复（2026-08-20 双盲审计）：与 schema.Freq Literal（1H/4H/1D）及历史小写口径并存的
+# 超集白名单——原两套互斥，按 Literal 传 "1H" 会被 assert 拒（2026-08-18 "1D 被拒断 11 天"同族坑）
+_VALID_FREQS = {'1min', '5min', '15min', '30min', '60min', '1h', '4h', '1d',
+                '1H', '4H', '1D'}
 
 
 def save_bars(freq: str, rows: list[tuple]) -> int:

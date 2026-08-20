@@ -71,7 +71,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getFeishuList, feishuConnect, feishuStatus, feishuStart, feishuStop, feishuDelete, feishuUpdate, testFeishu } from '../api'
+import {apiErr,  getFeishuList, feishuConnect, feishuStatus, feishuStart, feishuStop, feishuDelete, feishuUpdate, testFeishu } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -123,7 +123,7 @@ const onConnect = async () => {
     }, 2000)
   } catch (e) {
     status.value = 'error'
-    errorMsg.value = e.detail || t('feishu.connectFailed')
+    errorMsg.value = apiErr(e, t('feishu.connectFailed'))
   }
   finally { loading.value = false }
 }
@@ -140,7 +140,7 @@ const onSaveSetting = async () => {
     ElMessage.success(t('feishu.settingUpdated'))
     settingVisible.value = false
     load()
-  } catch (e) { ElMessage.error(e.detail || t('feishu.updateFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('feishu.updateFailed'))) }
   finally { savingSetting.value = false }
 }
 

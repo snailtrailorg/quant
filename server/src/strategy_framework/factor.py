@@ -27,10 +27,25 @@ class _AstBlacklistChecker(ast.NodeVisitor):
         raise ValueError("禁止 import")
     def visit_ImportFrom(self, node):
         raise ValueError("禁止 from ... import")
+    # P0-1 修复（2026-08-20 双盲审计 F1 实测复现）：属性链逃逸——
+    # `ctx.__init__.__globals__` / `(1).__class__.__base__.__subclasses__()` 拿 __import__/os。
+    # 黑名单式只拦 Import+裸 Name 拦不住字面量属性穿越。禁一切双下划线属性访问
+    # +禁 getattr/eval/exec 族 Name 调用（_FORBIDDEN_BUILTINS 已含）。
+    def visit_Attribute(self, node):
+        # P0-1 修复（2026-08-20 双盲审计 F1 实测复现）：属性链逃逸——
+        # `ctx.__init__.__globals__` / `(1).__class__.__base__.__subclasses__()` 拿 __import__/os。
+        # 用户因子/策略代码无任何合法下划线属性需求——一并拦（白名单语义从严）。
+        if node.attr.startswith("_"):
+            raise ValueError(f"禁止访问下划线属性: {node.attr}（沙箱逃逸面）")
+        self.generic_visit(node)
 
 
 def _check_ast_blacklist(code: str) -> str | None:
-    """检查 Python 代码的 AST 安全。返回违规描述，None 表示安全。"""
+    """检查 Python 代码的 AST 安全。返回违规描述，None 表示安全。
+
+    P0-1（2026-08-20）：新增 Attribute 拦截（dunder/私有）——堵属性链逃逸；
+    执行侧再加 signal 超时（_run_user_code）防 while True 挂死。
+    """
     try:
         tree = ast.parse(code, "<factor>", "exec")
         _AstBlacklistChecker().visit(tree)
@@ -43,6 +58,30 @@ def _check_ast_blacklist(code: str) -> str | None:
         return f"语法错误: {e}"
     except ValueError as e:
         return str(e)
+
+
+def run_user_code_sandboxed(code: str, namespace: dict, timeout_s: int = 5) -> None:
+    """带超时执行用户代码（P0-1 配套：while True/重循环挂死防线）。
+
+    P0 复审修正（2026-08-20）：signal.alarm 仅主线程可用——web 因子端点是 sync def
+    跑线程池，装 alarm 必抛 ValueError 致四个因子 API 全坏。改为：主线程用 alarm，
+    线程池内跳过超时（定义期 exec 只跑 def 语句毫秒级，死循环风险在 compute 调用期，
+    由调用方试算循环量界兜底；AST 属性拦截已堵 RCE 主面）。
+    """
+    import signal as _signal
+    import threading as _threading
+    in_main = _threading.current_thread() is _threading.main_thread()
+    if in_main:
+        def _timeout(signum, frame):
+            raise TimeoutError(f"用户代码执行超过 {timeout_s}s")
+        _old = _signal.signal(_signal.SIGALRM, _timeout)
+        _signal.alarm(timeout_s)
+    try:
+        exec(compile(code, "<user-code>", "exec"), namespace)
+    finally:
+        if in_main:
+            _signal.alarm(0)
+            _signal.signal(_signal.SIGALRM, _old)
 
 
 # ——— 因子注册表 ———
@@ -124,7 +163,9 @@ def _make_factor_class(name: str, code: str, default_params: dict) -> type:
     # 编译 + exec 在受限 namespace
     ns = {"__builtins__": _FACTOR_SAFE_BUILTINS}
     try:
-        exec(code, ns)
+        run_user_code_sandboxed(code, ns, timeout_s=5)   # P0-1：超时防 while True 挂死
+    except TimeoutError as e:
+        raise ValueError(f"因子代码执行超时: {e}")
     except Exception as e:
         raise ValueError(f"因子代码编译失败: {e}")
 
@@ -239,14 +280,21 @@ def delete_custom_factor(name: str) -> bool:
 # ——— Factor 基类 ———
 
 class BarContext:
-    """因子计算上下文（从 K 线数据构建）。"""
+    """因子计算上下文（从 K 线数据构建）。
+
+    symbol：当前标的（double_low 等跨表因子需要；P2-2026-08-20 接通——原 getattr 永空，
+    "双低"实为"最低价"占位）。默认空串向后兼容。
+    """
     def __init__(self, close: float, high: float, low: float,
-                 open_: float, volume: float, history: list[dict] | None = None):
+                 open_: float, volume: float, history: list[dict] | None = None,
+                 symbol: str = "", bar_ts=None):
         self.close = close
         self.high = high
         self.low = low
         self.open_ = open_
         self.volume = volume
+        self.symbol = symbol
+        self.bar_ts = bar_ts   # P2：时点约束（double_low 防前视）
         self._history = history or []
 
     def sma(self, n: int) -> float:
@@ -505,6 +553,9 @@ class DoubleLowFactor(Factor):
         sym = getattr(ctx, "symbol", None) or ""
         if not sym:
             return ctx.close
+        # P2（双盲审计 F4 前视修复）：正股价必须 <= 当前 bar 时点——原 ORDER BY ts DESC LIMIT 1
+        # 取查询时刻最新（回测 2024 年用 2026 年正股价）。ctx.bar_ts 由 Strategy 传入。
+        bar_ts = getattr(ctx, "bar_ts", None)
         try:
             with get_conn() as conn:
                 cur = conn.execute("SELECT terms FROM convertible_terms WHERE ts_code=%s", (sym,))
@@ -518,7 +569,8 @@ class DoubleLowFactor(Factor):
                     return ctx.close
                 stk_vt = to_vt_symbol(stk)
                 cur = conn.execute(
-                    "SELECT close FROM bar_1d WHERE symbol=%s ORDER BY ts DESC LIMIT 1", (stk_vt,))
+                    "SELECT close FROM bar_1d WHERE symbol=%s AND (%s IS NULL OR ts <= %s) "
+                    "ORDER BY ts DESC LIMIT 1", (stk_vt, bar_ts, bar_ts))
                 r2 = cur.fetchone()
                 if not r2 or not r2[0]:
                     return ctx.close

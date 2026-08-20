@@ -141,6 +141,23 @@ class RiskControl:
 
     # ── 实盘开关（三级 AND：.env 总闸 + Web 分项 + 策略级） ──
 
+    def _symbol_exposure(self, symbol: str) -> tuple[float, float]:
+        """标的当前市值与账户总值（single_position_pct 判定用；快照缺失返回 (0,0)=不拦）。"""
+        try:
+            from ..data_platform.db import get_conn
+            from ..data_platform.schema import to_vt_symbol
+            vt = to_vt_symbol(symbol)
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "SELECT COALESCE(SUM(cost_price*volume),0) FROM position_snapshot WHERE symbol=%s", (vt,))
+                held = float(cur.fetchone()[0] or 0)
+                cur = conn.execute(
+                    "SELECT total_value FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+                row = cur.fetchone()
+                return held, float(row[0]) if row else 0.0
+        except Exception:
+            return 0.0, 0.0
+
     def _market_of(self, symbol: str) -> str | None:
         """从 vt_symbol 判实盘分项市场。
         返回 convertible/etf/astock/binance_perp/okx_perp；未知品种返回 None（拒单）。
@@ -208,7 +225,10 @@ class RiskControl:
             return RiskDecision(approved=False, reason="风控状态不可用（快照数据源故障或无数据，fail-closed），等待快照恢复", severity="critical")
         global_rules = self._rules.get("global", {})
         if state.total_drawdown >= global_rules.get("max_drawdown", 0.15):
-            return RiskDecision(approved=False, reason=f"总回撤 {state.total_drawdown:.1%} 超限", severity="critical")
+            # P0 修复（2026-08-20 双盲审计 F5.2）：总回撤熔断曾连 SELL/止损一起拒——触线后
+            # 只能持仓看戏，与 F-31 同错。对齐日亏语义：只禁开仓，平仓放行。
+            if str(order.get("action", "")).upper() != "SELL":
+                return RiskDecision(approved=False, reason=f"总回撤 {state.total_drawdown:.1%} 超限，禁止开仓（平仓放行）", severity="critical")
         if state.daily_loss >= global_rules.get("daily_loss_limit", 0.05):
             # SB2（F-31）：日亏限额只禁开仓，SELL/平仓放行——否则触发限额后连止损都做不了
             if str(order.get("action", "")).upper() != "SELL":
@@ -252,6 +272,20 @@ class RiskControl:
                 # 计数失败 fail-closed（PG 故障时 _get_global_state 已先拒，这里是双保险）
                 logger.warning("max_trades_per_day 计数失败（fail-closed 拒单）: %s", e)
                 return RiskDecision(approved=False, reason=f"交易频次校验失败: {e}", severity="critical")
+        # P2 修复（2026-08-20 双盲审计 F5.1）：single_position_pct 原只有默认值零判定——
+        # 规则表展示存在但闸不存在（认知误导）。实装：BUY 后标的市值/账户总值 超限拒单。
+        if str(order.get("action", "")).upper() == "BUY":
+            try:
+                pct_limit = float(rules.get("single_position_pct", 0.15))
+                sym = order.get("symbol", "")
+                held_val, total_val = self._symbol_exposure(sym)
+                after = held_val + price * volume
+                if total_val > 0 and after / total_val > pct_limit * 1.05:   # 5% 容差防边界抖动
+                    return RiskDecision(approved=False,
+                                        reason=f"单标的仓位 {after/total_val:.1%} 将超限 {pct_limit:.0%}（single_position_pct）",
+                                        severity="warn")
+            except Exception as e:
+                logger.warning("single_position_pct 检查失败（放行——暴露度计算依赖快照，极端故障由 fail-closed 兜）: %s", e)
         # #29 风控覆写：单笔金额超限截断 volume（不只 reject，能修正）
         max_amount = rules.get("max_single_amount", 100000)
         amount = price * volume
@@ -296,14 +330,21 @@ class RiskControl:
         """
         try:
             with get_conn() as conn:
-                # 读最新快照
+                # 读最新快照（P1 修复 2026-08-20 双盲审计 F5.3：带新鲜度——原只看最新一条，
+                # runner 死/TD 断线后风控永远用最后一帧（drawdown 冻结/daily_pnl 陈旧）=陈旧 fail-open。
+                # 快照写频 60s（runner 循环），>5min 即判陈旧拒单）
                 cur = conn.execute(
-                    "SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+                    "SELECT total_value, daily_pnl, initial_capital, "
+                    "EXTRACT(EPOCH FROM (now() - ts)) FROM account_snapshot ORDER BY ts DESC LIMIT 1")
                 row = cur.fetchone()
                 if not row:
                     logger.warning("account_snapshot 无数据（风控 fail-closed，等待首个快照）")
                     return RiskState(halted=self.is_halted(), total_drawdown=0.0, daily_loss=0.0, available=False)
                 total_value, daily_pnl, initial = float(row[0]), float(row[1] or 0), float(row[2])
+                age_s = float(row[3] or 0)
+                if age_s > 300:
+                    logger.warning("账户快照陈旧 %.0fs（runner 死/断线？fail-closed 拒单）", age_s)
+                    return RiskState(halted=self.is_halted(), total_drawdown=0.0, daily_loss=0.0, available=False)
                 # 总回撤 = (初始资金 - 当前总值) / 初始资金
                 drawdown = max(0, (initial - total_value) / initial) if initial > 0 else 0
                 # 单日亏损 = |daily_pnl| / 初始资金（亏损为正）

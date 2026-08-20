@@ -153,10 +153,15 @@ def hash_password(password: str) -> str:
 
 
 def validate_password(password: str) -> None:
-    """密码复杂度校验：≥8 位，需含字母和数字。不达标抛 ApiError（细分错误码，前端 err.<CODE> 本地化）。"""
+    """密码复杂度校验：≥8 位，需含字母和数字。不达标抛 ApiError（细分错误码，前端 err.<CODE> 本地化）。
+
+    上限 72 字节：bcrypt 5.x 对 >72 字节抛 ValueError→500（2026-08-20 双盲审计实测复现，P0-9）。
+    """
     from .errors import ApiError
     if not password or len(password) < 8:
         raise ApiError(400, "PASSWORD_TOO_SHORT", "密码至少 8 位")
+    if len(password.encode()) > 72:
+        raise ApiError(400, "PASSWORD_TOO_LONG", "密码至多 72 字节（bcrypt 限制）")
     if not re.search(r"[A-Za-z]", password):
         raise ApiError(400, "PASSWORD_NO_LETTER", "密码需包含字母")
     if not re.search(r"[0-9]", password):

@@ -50,7 +50,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage } from '../api'
+import {apiErr,  getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -79,7 +79,7 @@ const onSave = async () => {
     ElMessage.success(t('common.saveSuccess'))
     resetForm()
     load()
-  } catch (e) { ElMessage.error(e.detail || t('common.saveFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { saving.value = false }
 }
 

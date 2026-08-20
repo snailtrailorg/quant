@@ -145,12 +145,23 @@ def check_user(open_id: str) -> str | None:
 
 # ——— 签名校验 ———
 
-def verify_signature(timestamp: str, body: str, signature: str) -> bool:
-    """校验飞书 Webhook 签名。"""
+def verify_event_signature(header_ts: str, nonce: str, body: str, signature: str) -> bool:
+    """校验飞书事件回调签名（P0 复审修正 2026-08-20，官方算法——SDK 源码级确认）：
+    sha256(HTTP 头 X-Lark-Timestamp + X-Lark-Nonce + Encrypt Key + body)。"""
+    secret = os.environ.get("LARK_ENCRYPT_KEY", "")
+    if not secret:
+        return True  # 未配置 Encrypt Key 则跳过（兼容纯 token 校验模式；卡片路径另有 fail-closed）
+    sig = hashlib.sha256(f"{header_ts}{nonce}{secret}{body}".encode()).hexdigest()
+    return sig == signature
+
+
+def verify_card_signature(header_ts: str, nonce: str, body: str, signature: str) -> bool:
+    """校验飞书卡片回调签名（P0 复审修正 2026-08-20，官方算法）：
+    sha1(HTTP 头 X-Lark-Timestamp + X-Lark-Nonce + Verification Token + body)。"""
     secret = os.environ.get("LARK_VERIFICATION_TOKEN", "")
     if not secret:
-        return True  # 未配置则跳过（开发期）
-    sig = hashlib.sha256(f"{timestamp}{secret}{body}".encode()).hexdigest()
+        return False   # 卡片是操作执行面：未配置即拒（fail-closed，P0-2）
+    sig = hashlib.sha1(f"{header_ts}{nonce}{secret}{body}".encode()).hexdigest()
     return sig == signature
 
 
@@ -278,8 +289,18 @@ def execute_read_tool(name: str, args: dict) -> str:
 
 
 def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
-    """用户点击确认后执行操作类工具（P3-11 含 60s 超时检查）。"""
+    """用户点击确认后执行操作类工具（P3-11 含 60s 超时检查）。
+
+    P0-2 顺带修（审计 B5）：args 原样拼 systemd 单元名永远畸形——json 解析取 id。
+    """
     import time
+    import json as _json
+    try:  # args 可能是 {"id": N} 的 JSON 串或纯 id
+        _a = _json.loads(args) if isinstance(args, str) and args.strip().startswith("{") else args
+        _sid = _a.get("id", _a) if isinstance(_a, dict) else _a
+        args = str(_sid)
+    except Exception:
+        pass
     client = FeishuClient()
     try:
         # 实际执行工具（emergency_halt / strategy_stop 等）

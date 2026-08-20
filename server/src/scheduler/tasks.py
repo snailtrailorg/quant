@@ -209,7 +209,9 @@ def drift_check():
             live_rows = cur.fetchall()
             if not live_rows:
                 return {"status": "skipped", "reason": "今日无实盘分析数据"}
-            # 逐标的比对回测结果（简化：score 偏差 >0.5 告警）
+            # 逐标的比对回测结果
+            # P2 修复（2026-08-20 双盲审计 B4）：原"因子 score vs 回测收益率"量纲错位——
+            # 告警恒噪或恒哑。改两维各按量纲阈值：评级背离（方向性）+收益率偏差>15pct。
             for symbol, live_score, live_rating, live_factors in live_rows:
                 cur2 = conn.execute(
                     "SELECT result FROM backtest_symbols WHERE symbol=%s AND status='done' ORDER BY id DESC LIMIT 1",
@@ -218,9 +220,13 @@ def drift_check():
                 if bt and bt[0]:
                     import json
                     bt_data = json.loads(bt[0])
-                    bt_score = bt_data.get('total_return_pct', 0)
-                    if abs(live_score - bt_score) > 0.5:
-                        issues.append(f"{symbol}: 实盘 score {live_score:.3f} vs 回测 {bt_score:.3f} 偏差 >0.5")
+                    bt_ret = bt_data.get('total_return_pct', 0)
+                    # 维度 1：评级背离（回测正收益 vs 实盘 AVOID / 回测负收益 vs 实盘 BUY）
+                    if (bt_ret > 5 and live_rating == "AVOID") or (bt_ret < -5 and live_rating == "BUY"):
+                        issues.append(f"{symbol}: 评级背离 实盘={live_rating} vs 回测收益 {bt_ret:.1f}%")
+                    # 维度 2：因子分异常（|score|>1.5 出界的坏数据面）
+                    if abs(live_score) > 1.5:
+                        issues.append(f"{symbol}: 实盘因子分出界 {live_score:.3f}")
     except Exception as e:
         issues.append(f"drift_check 异常: {str(e)[:80]}")
 
@@ -527,11 +533,38 @@ def data_sync_scheduler():
     except Exception:
         return {"status": "error", "reason": "DB不可用"}
 
-    now = datetime.now(timezone.utc)
+    # P1 修复（2026-08-20 双盲审计 A2）：cron 全链统一北京时区——原 now=UTC 而 last_sync_ts
+    # 是 timestamptz（psycopg 返回 UTC aware），croniter 拿表面值算 → "工作日 16:30" 实际
+    # 北京次日 00:30 触发（8 条任务全在凌晨跑，cron 1-5 还按 UTC 星期）。init-seed 的
+    # cron 值全部按北京时间书写，此处归一后语义即恢复声明。
+    TZ_CN = timezone(timedelta(hours=8))
+    now = datetime.now(TZ_CN)
 
     for sid, schedule, enabled, last_status, last_sync_date, last_sync_ts, trade_day_filter in configs:
         if last_status == "running":
-            skipped.append(f"{sid}(运行中)")
+            # P1 修复（2026-08-20 双盲审计 A2）：僵尸 running 复位——OOM/SIGKILL 后无代码
+            # 复位（_mark_running(False) 只在进程活着时执行）→ beat 永久 skip 该同步。
+            # 判定：last_sync_ts 超 2h 未更新（最长任务 sync_all ~70min 留余量）=进程已死。
+            _stale = False
+            if last_sync_ts:
+                try:
+                    _age = (now - last_sync_ts.astimezone(TZ_CN)).total_seconds()
+                    _stale = _age > 7200
+                except Exception:
+                    _stale = False
+            if _stale:
+                try:
+                    from src.data_platform.db import get_conn as _gc
+                    with _gc() as _c:
+                        _c.execute("UPDATE sync_config SET last_status='idle' WHERE id=%s", (sid,))
+                        _c.commit()
+                    skipped.append(f"{sid}(僵尸running已复位)")
+                    logger.warning("同步 %s 僵尸 running（%.0f 分钟未更新）已复位 idle", sid,
+                                   (now - last_sync_ts.astimezone(TZ_CN)).total_seconds() / 60)
+                except Exception:
+                    skipped.append(f"{sid}(运行中)")
+            else:
+                skipped.append(f"{sid}(运行中)")
             continue
         # 空状态（数据被删/从未初始化）跳过增量，需用户手动全量重建
         if last_sync_date is None and sid in ("astock_daily", "etf_daily", "cb_daily",
@@ -543,8 +576,9 @@ def data_sync_scheduler():
             skipped.append(f"{sid}(手动)")
             continue
 
-        # cron 解析：从上次同步时间算下次到点
-        base = last_sync_ts or (now - timedelta(days=7))
+        # cron 解析：从上次同步时间算下次到点（P1：base 也归一北京时区，与 now 同基准）
+        base = last_sync_ts.astimezone(TZ_CN) if last_sync_ts else (now - timedelta(days=7))
+        base = base.replace(tzinfo=None) if hasattr(base, "tzinfo") else base   # croniter 用 naive 本地时
         try:
             cron = croniter(schedule, base)
             next_run = cron.get_next(datetime)
@@ -552,7 +586,7 @@ def data_sync_scheduler():
             skipped.append(f"{sid}(cron无效:{schedule})")
             continue
 
-        if next_run > now:
+        if next_run > now.replace(tzinfo=None):   # 同基准 naive 比较（P1 时区归一）
             skipped.append(f"{sid}(未到周期)")
             continue
 
@@ -936,18 +970,26 @@ def static_list_sync():
 
 @app.task(name="src.scheduler.tasks.broker_health_check")
 def broker_health_check():
-    """#37 通道用量监控：检查各 broker 连通性，异常告警。"""
-    from src.strategy_framework.broker import _REGISTRY
+    """#37 通道用量监控：检查各 broker 连通性，异常告警。
+
+    P1 修复（2026-08-20 双盲审计）：原 cls() 裸构造无凭证必 test_connection=False——
+    每 6h 必报"全通道离线"假告警（告警疲劳）。改走 get_broker()（Broker DB 真凭证），
+    未配置的通道报 skipped 不告警。
+    """
+    from src.strategy_framework.broker import get_broker
     from src.alert_notify import notify
     results = {}
-    for provider, cls in _REGISTRY.items():
+    for provider in ("xtp", "binance", "okx"):
         try:
-            broker = cls()
+            broker = get_broker(provider)
+            if broker is None:
+                results[provider] = {"status": "skipped", "msg": "未配置凭证"}
+                continue
             ok = broker.test_connection()
             results[provider] = {"status": "ok" if ok else "error"}
         except Exception as e:
             results[provider] = {"status": "error", "msg": str(e)[:100]}
-    errors = [k for k,v in results.items() if v["status"] == "error"]
+    errors = [k for k, v in results.items() if v["status"] == "error"]
     if errors:
         notify("warn", "system", "通道连通异常", f"离线: {errors}")
     return {"status": "ok" if not errors else "issues", "results": results}
