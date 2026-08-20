@@ -48,7 +48,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | LLM模型管理 | `/api/llm-models` `/api/llm-models/{mid}/{test}` | GET/POST/POST/DELETE | admin | CRUD + 测试 + reload_models |
 | 飞书 | `/api/feishu/{list,connect,status,{fid}/{start,stop,test}}` `/api/feishu/{fid}` | GET/POST/POST/DELETE | admin | 多机器人管理 |
 | 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/POST/DELETE | viewer+ / strategy_control | 同步配置 + 触发 + 标的 + 进度 |
-| 池深度同步（三档二档） | `/api/sync/pool-data/{trigger,progress}` + `/api/sync/pool-minute/{trigger,progress}`（注释态） | POST/GET | data_sync / viewer+ | 池内 per-symbol 深度数据手动触发与进度（progress 读错键待修，17 号 §8） |
+| 池深度同步（三档二档） | `/api/sync/pool-data/{trigger,progress}` + `/api/sync/pool-minute/{trigger,progress}`（注释态） | POST/GET | data_sync / viewer+ | trigger 支持 `?full=true` 全量校准；progress 读 sync_log 最新一轮（2026-08-20 修正，原读错键恒 idle）；入池端点 POST /api/pool/{pid}/symbol 对 astock 池自动投 symbols 回补 |
 | K线 | `/api/kline/{symbol}` | GET | viewer+ | `get_bars` + `to_vt_symbol` |
 | 筛选 | `/api/screen/{astock,cb,etf}` | GET | viewer+ | 标的筛选（daily_basic） |
 | **LLM用量** | `/api/llm-usage/summary` | GET | viewer+ | 今日/本月/7天趋势（llm_usage 聚合） |

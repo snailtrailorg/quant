@@ -158,6 +158,14 @@ app.conf.update(
             "schedule": 300.0,
             "options": {"queue": "data", "expires": 290},
         },
+        # 二档周日全量校准（O-F1/6）：增量窗口兜底——迟到公告/上游改历史/长期失败冻结的
+        # 游标（full 推进游标=窗口解冻）。04:07 错峰（避开 04:00 备份/03:xx 其他任务）
+        "pool-data-full-calibrate": {
+            "task": "src.scheduler.tasks.pool_data_sync_task",
+            "schedule": crontab(day_of_week=0, hour=4, minute=7),
+            "options": {"queue": "data", "expires": 3600},
+            "kwargs": {"full": True},
+        },
         # 池分钟同步（已建未启用——Tushare stk_mins 是独立产品包 2000 元/年，
         # 全局 1 次/小时不够用；先靠 XTP hub 自攒，买包后启用 Tushare 为主源+XTP 校验。
         # 启用方法：取消注释此 beat + data_source_config.params 配 rate_limits）

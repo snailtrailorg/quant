@@ -54,7 +54,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `static_list_sync` | beat 7天 | F-DATA-004 静态标的清单（`stock_basic`，存 static_symbols） |
 | `broker_health_check` | beat 6h | #37 通道连通性（遍历 `broker._REGISTRY` 调 `test_connection`），异常告警 |
 | `astock_minute_analysis` | （任务） | 盘中分钟研判（占位，待实时行情订阅） |
-| `pool_data_sync_task` | beat 5min | 池内深度数据同步（三档二档：`pool_data.sync_pools_data`，queue=data expires=290，soft_time_limit=320） |
+| `pool_data_sync_task` | beat 5min + 周日 04:07 full | 池内深度数据同步（三档二档：`pool_data.sync_pools_data`，queue=data expires=290/3600，soft_time_limit=320；周日轮 `pool-data-full-calibrate` kwargs full=True 全量校准；web 入池端点 delay(symbols=) 定向回补） |
 | `pool_minute_sync_task` | beat 注释态 | 池分钟同步（Tushare stk_mins 收费未启用，基础设施保留） |
 
 > beat 定时表完整定义在 `app.conf.beat_schedule`（实盘改 crontab）。每个任务 `options={"queue": "data"/"analysis"/"risk"}` 分队列。

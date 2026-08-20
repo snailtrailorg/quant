@@ -68,12 +68,16 @@ _make_tier1_handler(table, pull_fn_name, pk_cols, float_cols=None, text_cols=Non
 
 ### pool_data.py（三档二档，池成员驱动非 sync_config）
 ```python
-sync_pools_data(timebox_s: int = 280) -> dict
+sync_pools_data(timebox_s: int = 280, full: bool = False, symbols: list[str] | None = None) -> dict
     # 池内 astock 标的 × 10 类深度数据（财务四表/筹码分布/十大股东/分红/质押/解禁/股东人数）
     # _get_pool_ts_codes(): pools JOIN pool_symbols WHERE category='astock'（出池自动停更）
     # 时间盒到即收工下轮续 + SyncLock("pool_data") 防重叠 + 必写日志护栏（FATAL/skipped 也落 sync_log）
+    # 增量（2026-08-20）：财务四表窗口 [cursor, today]（含起点重叠幂等），游标 pool_data_cursor
+    #   表级（迁移 0047）；推进=该表覆盖全部标的；dividend 窗口实测无效维持全量
+    # full=True 全量校准（游标照常推进）；symbols=[ts] 定向回补（入池触发，无窗口不推进游标）
     # 返回 {status: done|partial|timebox|skipped|idle|error, symbols, saved, errors[:5]}
-    # 被 scheduler.pool_data_sync_task（beat 300s）与 web POST /api/sync/pool-data/trigger 调用
+    # 被 scheduler.pool_data_sync_task（beat 300s + 周日 full 校准）与 web
+    #   POST /api/sync/pool-data/trigger?full= 与入池端点（symbols 回补）调用
 ```
     # 列标的 + 本地数据状态（批量聚合查 bar 表，一次 ANY 查询非逐只）
     # 返回 {items:[{ts_code, name, list_date, local_count, local_first, local_last}], total}
@@ -171,6 +175,9 @@ class SyncLock:
 | `trade_cal` | `_sync_trade_cal`（pull_trade_cal） | `_expected_trade_dates`/`_expected_trading_days` |
 | `daily_basic` | `_sync_astock_basic`（save_daily_basic） | - |
 | `data_source_config` | - | `_get_pro`（经 get_data_source） |
+| 一档 9 表（stk_limit/moneyflow/margin_detail/top_list/block_trade/cyq_perf/forecast/namechange/concept） | tier1 handler 工厂（batch/全量重建） | - |
+| 二档 10 表（income/balancesheet/cashflow/fina_indicator/cyq_chips/top10_holders/dividend/pledge_stat/share_float/stk_holdernumber） | `pool_data._upsert_rows`（幂等 upsert） | 详情页（三档，未实施） |
+| `pool_data_cursor` | `pool_data._advance_cursors`（游标推进，迁移 0047） | `pool_data._load_cursors` |
 
 ---
 

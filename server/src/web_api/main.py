@@ -1698,25 +1698,33 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
 
 
 @app.post("/api/sync/pool-data/trigger")
-def trigger_pool_data_api(payload: dict = Depends(require_perm("data_sync"))):
-    """手动触发池内深度数据同步（beat 300s 也自动跑）。"""
+def trigger_pool_data_api(full: bool = False, payload: dict = Depends(require_perm("data_sync"))):
+    """手动触发池内深度数据同步（beat 300s 也自动跑）。
+
+    full=true 全量校准（无视游标窗口）——定期跑防上游改历史漏数据。
+    """
     from src.scheduler.tasks import pool_data_sync_task
-    task = pool_data_sync_task.delay()
-    audit_log(payload["username"], "trigger_pool_data", "")
-    return {"status": "submitted", "task_id": task.id}
+    task = pool_data_sync_task.delay(full=full)
+    audit_log(payload["username"], "trigger_pool_data", "full" if full else "")
+    return {"status": "submitted", "task_id": task.id, "full": full}
 
 
 @app.get("/api/sync/pool-data/progress")
 def pool_data_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """池深度数据同步进度（Valkey sync:pool:minute hash——与池分钟共用进度命名空间）。"""
-    r = redis.Redis(connection_pool=_redis_pool)
-    data = r.hgetall("sync:pool:minute")
-    out = {}
-    for k, v in data.items():
-        ks = k.decode() if isinstance(k, bytes) else k
-        vs = v.decode() if isinstance(v, bytes) else v
-        out[ks] = vs
-    return out or {"status": "idle"}
+    """池深度数据同步进度——读 sync_log 最新一轮。
+
+    2026-08-20 修正：原读 Valkey sync:pool:minute（池分钟同步的键，pool_data 从不写）→ 恒 idle。
+    pool_data 结果落 sync_log（sync_id='pool_data'），rows_pulled 列存标的数。
+    """
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT ts, rows_pulled, rows_saved, status, error FROM sync_log "
+            "WHERE sync_id='pool_data' ORDER BY ts DESC LIMIT 1")
+        r = cur.fetchone()
+    if not r:
+        return {"status": "idle", "reason": "无同步记录"}
+    return {"status": r[3], "symbols": r[1], "saved": r[2],
+            "error": r[4] or "", "ts": str(r[0]) if r[0] else None}
 
 
 @app.post("/api/sync/pool-minute/trigger")
@@ -2784,15 +2792,21 @@ def add_pool_symbol_api(pid: str, body: dict = Body(...),
     vt = to_vt_symbol(raw)
     ts = vt_to_ts(vt)   # 校验可转换（防垃圾格式入池后同步空转——S-F1）
     with get_conn() as conn:
-        cur = conn.execute("SELECT id FROM pools WHERE id=%s", (pid,))
-        if not cur.fetchone():
+        cur = conn.execute("SELECT id, category FROM pools WHERE id=%s", (pid,))
+        row = cur.fetchone()
+        if not row:
             raise ApiError(404, "POOL_NOT_FOUND", f"池 {pid} 不存在")
         conn.execute(
             "INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s, %s) "
             "ON CONFLICT (pool_id, symbol) DO NOTHING", (pid, vt))
         conn.commit()
+    # 二档深度数据回补（U 审项 9）：增量游标只认窗口，新标的的历史靠这一投——
+    # 异步不阻塞响应；非 astock 池不投（pool_data 只拉 astock）
+    if row[1] == "astock":
+        from src.scheduler.tasks import pool_data_sync_task
+        pool_data_sync_task.delay(symbols=[ts])
     audit_log(payload["username"], "pool_add_symbol", pid, vt)
-    return {"status": "added", "symbol": vt, "ts_code": ts}
+    return {"status": "added", "symbol": vt, "ts_code": ts, "backfill": row[1] == "astock"}
 
 
 @app.delete("/api/pool/{pid}/symbol/{sym}")

@@ -46,6 +46,7 @@ namechange :: ts_code,name,start_date,end_date,ann_date,change_reason
 notifications :: id,level,category,title,body,source_ref,status,created_at,acked_by,acked_at
 order_log :: id,ts,strategy_id,symbol,action,volume,price,status,signal_id,client_order_id,error
 pledge_stat :: ts_code,end_date,pledge_count,unrest_pledge,rest_pledge,total_share,pledge_ratio
+pool_data_cursor :: table_name,last_pull_date,updated_at
 pool_symbols :: id,pool_id,symbol
 pools :: id,name,category,description,created_at,minute_history_start
 position_refresh :: account_id,ts,rows,task_id
