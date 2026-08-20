@@ -61,7 +61,7 @@ list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> dict
 
 backfill_adj_factor(start_date: str | None = None, end_date: str | None = None) -> dict
     # 复权因子回填（A/B-F1：bar_1D 历史全 NULL）——pull_adj_factor_by_date 全市场逐日拉，
-    # UPDATE bar_1D.adj_factor；积分未到账降级返回 {"status":"degraded"} 不抛（engine.py:535）
+    # UPDATE bar_1D.adj_factor；积分未到账降级返回 {"status":"degraded"} 不抛（engine.py:538）
     # 被 scheduler.adj_factor_backfill_task（web 手动 .delay）调用（P3 回写 2026-08-20 补）
 ```
 
@@ -108,7 +108,7 @@ class SyncLock:
 ### 路由/元数据
 - `_PER_SYMBOL_META: dict[str, tuple]` - `{sync_id -> (freq, table, kind, bar_type)}`，5 条（3 日线 + 2 分钟线）
 - `_PER_SYMBOL_SYNC_IDS = set(_PER_SYMBOL_META)`
-- `_HANDLERS: dict[str, Callable]` - `{sync_id -> type 级 handler}`，**19 条**（engine.py:601 基础 10 + 三档一档 9：`_TIER1_BATCH` 7 批量 + `_TIER1_FULL` 2 全量重建，循环注册）（P3 回写 2026-08-20：原"10 条"为一档上线前数量）
+- `_HANDLERS: dict[str, Callable]` - `{sync_id -> type 级 handler}`，**19 条**（engine.py:604 基础 10 + 三档一档 9：`_TIER1_BATCH` 7 批量 + `_TIER1_FULL` 2 全量重建，循环注册）（P3 回写 2026-08-20：原"10 条"为一档上线前数量）
 - `_MINUTE_FREQ = {"astock_minute":"1min", "astock_minute_5min":"5min"}`
 - `_TUSHARE_MIN_DATE` - 全量起点（.env SYNC_START_DATE，默认 20100101）
 

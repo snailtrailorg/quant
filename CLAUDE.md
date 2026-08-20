@@ -10,7 +10,7 @@
 
 - `flow/` — 控制层（项目"怎么跑"）：章程 / 计划 / 进展 / 决策 / 踩坑 / 任务 / 规范
 - `docs/` — 内容层（项目"做出什么"）：
-  - `docs/architecture/`（00-总体设计 ～ 17-三档数据，18 份架构文档 + 接口契约 + 模块契约 18 份）（P3 回写 2026-08-20：17→18 实数）
+  - `docs/architecture/`（00-总体设计 ～ 18-数据库操作规范，19 份架构文档 + 接口契约 + 模块契约 18 份）（P3 回写 2026-08-20：原文"17 份"实数 18（00～17）；同日 DB 盘点批次新增 18 号后现 19 份）
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
 - `scripts/` - 开发机部署工具（`deploy-*.sh`/`quant-deploy.sh`）+ 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`verify.sh`）。**不传服务器**

@@ -92,7 +92,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | tasks.py | `data_sync.engine`（sync/sync_all）/ `data_sync.sync` | 同步执行 |
 | tasks.py | `task_manager`（create_task/update_heartbeat/complete_task/log_task/notify_on_failure/detect_stuck） | 异步任务统一管理 |
 | tasks.py | `strategy_framework`（StrategyConfig/BacktestEngine） | 回测子任务 |
-| tasks.py | `llm_gateway.budget.check_budget_alerts` | 预算告警（函数内 import，tasks.py:936）（P3 回写 2026-08-20：原"web_api.main.check_budget_alerts 反向依赖"已随 2026-08-19 模块归位迁入 llm_gateway/budget.py，scheduler→web_api 反向依赖不复存在） |
+| tasks.py | `llm_gateway.budget.check_budget_alerts` | 预算告警（函数内 import，tasks.py:940）（P3 回写 2026-08-20：原"web_api.main.check_budget_alerts 反向依赖"已随 2026-08-19 模块归位迁入 llm_gateway/budget.py，scheduler→web_api 反向依赖不复存在） |
 | tasks.py | `strategy_framework.broker._REGISTRY` | 通道健康检查 |
 | app.py | celery / croniter（外部）/ dotenv | 调度框架 + cron 解析 + .env |
 

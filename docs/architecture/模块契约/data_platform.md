@@ -51,19 +51,19 @@ ensure_table(freq: str) -> None
 save_bars(freq: str, rows: list[tuple]) -> int
     # 批量写 K 线，ON CONFLICT DO NOTHING（冲突跳过）。返回 len(rows)
     # rows 11 字段：(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)
-    # 开头已接线 rows = validate_bars(rows)（db.py:112；A2 已实现，P3 回写 2026-08-20 撤"A2 待改"）
+    # 开头已接线 rows = validate_bars(rows)（save_bars/save_bars_overwrite 开头；A2 已实现，P3 回写 2026-08-20 撤"A2 待改"）
 save_bars_overwrite(freq: str, rows: list[tuple]) -> int
     # 批量写，ON CONFLICT DO UPDATE（回补覆盖）。返回 len(rows)
 get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame
     # 查 K 线，列：symbol/freq/ts/open/high/low/close/volume/amount/adj_factor/source
 validate_bars(rows: list[tuple]) -> list[tuple]
-    # A2 已实现（db.py:64）：剔 ohlc=0 行 + 标 ts 断点 warning（不剔）；save_bars/save_bars_overwrite 开头调用
+    # A2 已实现（db.py:82）：剔 ohlc=0 行 + 标 ts 断点 warning（不剔）；save_bars/save_bars_overwrite 开头调用
 get_trade_calendar(year: int) -> list[date]
     # 从 trade_cal 表读 SSE 交易日（is_open=1）
 is_trading_day(d: date | None = None) -> bool
     # d 默认今天；查 trade_cal，查不到回退工作日
 init_trade_calendar(year: int) -> None
-    # no-op（表在 migration 0001；运行时 DDL 清零后保留签名兼容，db.py:193）（P3 回写 2026-08-20，原"建表幂等"过时）
+    # no-op（表在 migration 0001；运行时 DDL 清零后保留签名兼容，db.py:211）（P3 回写 2026-08-20，原"建表幂等"过时）
 ```
 
 ### schema.py
@@ -147,7 +147,8 @@ get_stock_detail(symbol) -> dict
     # 被 web_api GET /api/stock/{symbol}/detail（薄壳）与 POST /analyze 调用
 ```
 
-### platform.py（DataPlatform 单例 `platform`）```python
+### platform.py（DataPlatform 单例 `platform`）
+```python
 platform.get_bar(symbol, freq, start, end, adj="qfq") -> pd.DataFrame
 platform.ensure_daily(ts_code, start_date, end_date=None, adj="qfq") -> int
 platform.ensure_minute(ts_code, freq, start_date, end_date=None) -> int
@@ -229,7 +230,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 ## 六、不变量
 
 - **vt_symbol**：`raw.EXCHANGE`（`600000.SHSE`），转换走 `schema.to_vt_symbol/to_ts_code`
-- **freq**：`1D` / `1min` / `5min` / `15min` / `30min` / `60min`（bar 表后缀 = freq）。**写入口径以 `db._VALID_FREQS` 白名单为准（db.py:101，2026-08-20 扩）**：11 项超集 `{'1min','5min','15min','30min','60min','1h','4h','1d','1H','4H','1D'}`（大小写兼容）——`schema.Freq` Literal 是其子集，两者非同一集合（P3 回写 2026-08-20 注明）
+- **freq**：`1D` / `1min` / `5min` / `15min` / `30min` / `60min`（bar 表后缀 = freq）。**写入口径以 `db._VALID_FREQS` 白名单为准（db.py:119，2026-08-20 扩）**：11 项超集 `{'1min','5min','15min','30min','60min','1h','4h','1d','1H','4H','1D'}`（大小写兼容）——`schema.Freq` Literal 是其子集，两者非同一集合（P3 回写 2026-08-20 注明）
 - **ts**：`TIMESTAMPTZ`，A 股 +08:00，加密 UTC
 - **rows 11 字段顺序**：`(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)`--`save_bars`/`save_bars_overwrite`/`to_save_rows`/`to_save_rows_min` 一致
 - **get_conn**：`with` 退出还池；不手动 close

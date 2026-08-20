@@ -1,4 +1,4 @@
-account_snapshot :: id,ts,total_value,daily_pnl,initial_capital
+account_snapshot :: id,ts,total_value,daily_pnl,initial_capital,available_cash
 accounts :: id,name,exchange,api_key_enc,api_secret_enc,api_key_hint,enabled,created_at
 alembic_version :: version_num
 alert_history :: id,ts,level,title,body,channel

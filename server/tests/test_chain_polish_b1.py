@@ -76,8 +76,9 @@ class TestResolveVolume:
         st = _strategy("ALL_IN")
         conn = MagicMock()
         conn.__enter__.return_value = conn
+        # _available_cash → None（DB 优化批后首个查询，无该列数据退化旧口径）；
         # _latest_total_value → 1,000,000；_held_value → 100,000 → cash=900,000
-        conn.execute.return_value.fetchone.side_effect = [(1000000,), (100000.0,)]
+        conn.execute.return_value.fetchone.side_effect = [None, (1000000,), (100000.0,)]
         import src.data_platform.db as db
         with patch.object(db, "get_conn", return_value=conn):
             v = st._resolve_volume(SimpleNamespace(action=SimpleNamespace(name="BUY")), 9.0)

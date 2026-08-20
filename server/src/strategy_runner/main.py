@@ -695,6 +695,10 @@ def main():
                         logger.warning("query_account 无结果（TD 断线？），跳过本轮快照（不写假值）")
                     else:
                         total = sum(float(getattr(a, "balance", 0)) for a in accounts)
+                        # DB 优化批（2026-08-21 审计 F4.1）：可用资金（vnpy AccountData 无 available
+                        # 字段，XTP 现金账户 balance-frozen 近似）——PERCENT/ALL_IN sizing 真口径
+                        avail = sum(max(0.0, float(getattr(a, "balance", 0)) - float(getattr(a, "frozen", 0) or 0))
+                                    for a in accounts)
                         # P3-10 daily_pnl = 今日首次快照基准的偏差
                         import datetime as _dt2
                         today_str = _dt2.datetime.now().strftime('%Y-%m-%d')
@@ -703,7 +707,8 @@ def main():
                             first_row = cur.fetchone()
                             daily_base = float(first_row[0]) if first_row else total
                             daily_pnl = total - daily_base
-                            conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) VALUES (%s, %s, %s)", (total, daily_pnl, initial_capital if initial_capital is not None else 1000000))
+                            conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital, available_cash) VALUES (%s, %s, %s, %s)",
+                                         (total, daily_pnl, initial_capital if initial_capital is not None else 1000000, avail))
                             # ST2：同拍写持仓真相批（N-v2：取返回值单事务覆盖，非 EVENT_POSITION handler）
                             _flush_positions(adapter, account_id, tid)
                             conn.commit()

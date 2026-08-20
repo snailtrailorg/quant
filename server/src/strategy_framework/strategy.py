@@ -237,10 +237,15 @@ class Strategy:
                         return held
                     pct = float(self._param("volume_pct", 10)) / 100.0
                     return max(0, int(held * pct / 100) * 100)   # A股整百
-                # BUY：可用资金口径（总资产−持仓市值 近似）
-                total = self._latest_total_value()
-                held_value = self._held_value()
-                cash = max(0.0, total - held_value)
+                # BUY：可用资金口径——优先快照 available_cash（DB 优化批 2026-08-21，审计 F4.1：
+                # 原总资产-持仓成本近似在多策略共账户时合计超配）；无该列数据退化旧口径
+                avail_cash = self._available_cash()
+                if avail_cash is not None and avail_cash >= 0:
+                    cash = avail_cash
+                else:
+                    total = self._latest_total_value()
+                    held_value = self._held_value()
+                    cash = max(0.0, total - held_value)
                 if vt == "ALL_IN":
                     base = cash
                 else:
@@ -289,6 +294,20 @@ class Strategy:
         if not row or not row[0]:
             raise RuntimeError("account_snapshot 无数据")
         return float(row[0])
+
+    def _available_cash(self) -> float | None:
+        """快照可用资金（DB 优化批 2026-08-21，审计 F4.1）：无该列数据/无快照返回 None
+        （调用方退化旧口径 total-held 近似）。"""
+        from ..data_platform.db import get_conn
+        try:
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "SELECT available_cash FROM account_snapshot "
+                    "WHERE available_cash IS NOT NULL ORDER BY ts DESC LIMIT 1")
+                row = cur.fetchone()
+            return float(row[0]) if row else None
+        except Exception:
+            return None
 
     # ——— 因子计算 ———
 

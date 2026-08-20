@@ -46,10 +46,14 @@ def run_migrations_online() -> None:
     """
     import os
     stmt_ms = int(os.environ.get("QUANT_DB_STMT_TIMEOUT_MS", "3600000"))   # 迁移本身放宽 1h
+    # 兼容外部 PGOPTIONS（期望基线生成流程用它切 scratch schema——connect_args 会覆盖
+    # libpq 环境变量，此处透传保生成链可用）
+    import shlex as _shlex
+    _ext_opts = os.environ.get("PGOPTIONS", "")
     connectable = create_engine(
         config.get_main_option("sqlalchemy.url"),
         poolclass=pool.NullPool,
-        connect_args={"options": f"-c statement_timeout={stmt_ms} -c lock_timeout=15000"},
+        connect_args={"options": f"-c statement_timeout={stmt_ms} -c lock_timeout=15000 {_ext_opts}"},
     )
     with connectable.connect() as connection:
         context.configure(connection=connection, compare_type=True)

@@ -141,7 +141,7 @@ class TestOWiringContracts:
     def test_direct_flush_inside_else_branch(self):
         """direct 的 flush 在快照 else 分支内（TD 断线跳过快照时不刷持仓）。"""
         src = open("src/strategy_runner/main.py").read()
-        i_insert = src.index("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital)")
+        i_insert = src.index("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital, available_cash)")   # DB 优化批 2026-08-21 加列
         i_flush = src.index("_flush_positions(adapter, account_id, tid)")
         assert i_flush > i_insert, "direct flush 应在快照写库之后（同 else 分支）"
 
