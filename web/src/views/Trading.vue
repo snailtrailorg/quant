@@ -17,6 +17,11 @@
         <el-table :data="positionData.positions || []" stripe>
           <el-table-column prop="symbol" :label="t('common.symbol')" width="120" />
           <el-table-column prop="volume" :label="t('trading.volume')" width="80" />
+          <el-table-column :label="t('common.action')" width="110">
+            <template #default="{ row }">
+              <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </el-tab-pane>
       <el-tab-pane :label="t('trading.orders')">
@@ -43,11 +48,15 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getPosition, getOrders, getPnl } from '../api'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
+
+const router = useRouter()
+const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 

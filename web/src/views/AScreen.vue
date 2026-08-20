@@ -25,6 +25,11 @@
           <el-button type="primary" @click.stop="onRowClick(row)">📊</el-button>
         </template>
       </el-table-column>
+      <el-table-column :label="t('common.action')" width="100">
+        <template #default="{ row }">
+          <el-button type="primary" @click.stop="gotoDetail(row.ts_code)">{{ t('common.detail') }}</el-button>
+        </template>
+      </el-table-column>
     </el-table>
     <div style="margin-top: 12px">
       <span style="color:#999;font-size:12px">{{ t('screen.astockHint') }}</span>
@@ -35,11 +40,14 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import KlineDialog from '../components/KlineDialog.vue'
 
+const router = useRouter()
+const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const { t } = useI18n()
 const loading = ref(false)
 const results = ref([])

@@ -17,9 +17,10 @@
       <el-table-column prop="support" :label="t('analysis.support')" width="100" />
       <el-table-column prop="resistance" :label="t('analysis.resistance')" width="100" />
       <el-table-column prop="conclusion" :label="t('analysis.conclusion')" />
-      <el-table-column :label="t('common.action')" width="120">
+      <el-table-column :label="t('common.action')" width="190">
         <template #default="{ row }">
           <el-button type="primary" @click="addToPool(row)">{{ t('pool.add') }}</el-button>
+          <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -43,11 +44,14 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getAstockSelection, getPools, createPoolApi } from '../api'
 
 const { t } = useI18n()
+const router = useRouter()
+const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const results = ref([])
 const loading = ref(false)
 const pools = ref([])

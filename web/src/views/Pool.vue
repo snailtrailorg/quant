@@ -25,8 +25,9 @@
                       </el-tag>
                     </template>
                   </el-table-column>
-                  <el-table-column :label="t('common.action')" width="80">
+                  <el-table-column :label="t('common.action')" width="150">
                     <template #default="{ row: s }">
+                      <el-button type="primary" @click="gotoDetail(s.symbol)">{{ t('common.detail') }}</el-button>
                       <el-button type="danger" size="small" @click="removeSymbol(row.id, s.symbol)">✕</el-button>
                     </template>
                   </el-table-column>
@@ -102,11 +103,14 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api, { getPools, createPoolApi, deletePoolApi } from '../api'
 
 const { t } = useI18n()
+const router = useRouter()
+const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const pools = ref([])
 const showDialog = ref(false)
 const expanded = ref([])

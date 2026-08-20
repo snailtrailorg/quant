@@ -18,8 +18,9 @@
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" width="150" />
       <el-table-column prop="initial_capital" :label="t('liveTask.capital')" width="120" />
-      <el-table-column :label="t('common.action')" width="250">
+      <el-table-column :label="t('common.action')" width="320">
         <template #default="{ row }">
+          <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
@@ -72,11 +73,14 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, apiErr } from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
 
+const router = useRouter()
+const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const { t } = useI18n()
 const tasks = ref([])
 const strategies = ref([])

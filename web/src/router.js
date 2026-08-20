@@ -28,6 +28,7 @@ const routes = [
 
       // 分析
       { path: 'analysis', name: 'analysis', component: () => import('./views/Analysis.vue') },
+      { path: 'stock/:symbol', name: 'stock-detail', component: () => import('./views/StockDetail.vue') },
       { path: 'ascreen', name: 'ascreen', component: () => import('./views/AScreen.vue') },
       { path: 'cbscreen', name: 'cbscreen', component: () => import('./views/CBScreen.vue') },
       { path: 'etfscreen', name: 'etfscreen', component: () => import('./views/ETFScreen.vue') },
