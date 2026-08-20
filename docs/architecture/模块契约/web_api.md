@@ -50,6 +50,9 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/POST/DELETE | viewer+ / strategy_control | 同步配置 + 触发 + 标的 + 进度 |
 | 池深度同步（三档二档） | `/api/sync/pool-data/{trigger,progress}` + `/api/sync/pool-minute/{trigger,progress}`（注释态） | POST/GET | data_sync / viewer+ | trigger 支持 `?full=true` 全量校准；progress 读 sync_log 最新一轮（2026-08-20 修正，原读错键恒 idle）；入池端点 POST /api/pool/{pid}/symbol 对 astock 池自动投 symbols 回补 |
 | K线 | `/api/kline/{symbol}` | GET | viewer+ | `get_bars` + `to_vt_symbol` |
+| 标的搜索（三档项 13） | `/api/stock/search?q=` | GET | viewer+ | static_symbols 前缀/模糊 LIMIT 20，返回 [{ts_code,name,industry,symbol}] |
+| 标的详情（三档项 14） | `/api/stock/{symbol}/detail` | GET | viewer+ | 薄壳→`data_platform/stock_detail.get_stock_detail`（聚合禁寄生 web_api） |
+| AI 标的分析（三档项 15） | `/api/stock/{symbol}/analyze` | POST | analyst+ | LLM 网关 caller=stock_analyze，10min 缓存，SYMBOL_NOT_FOUND/LLM_UNAVAILABLE |
 | 筛选 | `/api/screen/{astock,cb,etf}` | GET | viewer+ | 标的筛选（daily_basic） |
 | **LLM用量** | `/api/llm-usage/summary` | GET | viewer+ | 今日/本月/7天趋势（llm_usage 聚合） |
 | 数据源管理 | `/api/data-sources` `/api/data-sources/{dsid}/{test}` | GET/POST/POST/DELETE | admin | PT3（data_source_config CRUD） |

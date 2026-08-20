@@ -13,6 +13,7 @@
 ## 行为契约
 
 - 分发：`XADD hub:bars:{symbol}` MAXLEN~5000，字段 `gen/seq/ts/pub_ts/untrusted/ohlc/volume/amount/tick_count`
+- 最新 tick：`SET hub:latest_tick:{symbol}` TTL 65s（三档项 12，2026-08-20）——价量+五档+涨跌停，每 tick 写；断流 65s 自动过期（消费方 `stock_detail._quote_block` 降级腾讯源）
 - fencing：租约 `hub:lease`（SET NX EX30 + Lua CAS 续期）；`gen = INCR hub:gen` 永不回退；被抢占让位 exit(3)
 - 订阅真相源：`live_task(running).symbol ∪ system_config.hub_shadow_symbols`，30s diff + 60s 幂等重放
 - 落库：`bar_hub` 表（独立线程批量，ON CONFLICT 幂等，有界队列不反压分发）

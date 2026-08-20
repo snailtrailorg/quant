@@ -107,8 +107,30 @@ save_daily_basic(df) -> int                     # 写 daily_basic 表
 validate_bar_quality(df) -> dict                # {valid, issues, clean_count, ...}
 ```
 
-### platform.py（DataPlatform 单例 `platform`）
+### market_snapshot.py（三档项 13，非池实时价）
 ```python
+get_quote(ts_code, force=False) -> dict | None
+    # 腾讯 qt.gtimg.cn 单股按需（U-2 实施选型，2026-08-20：akshare 东财被反爬 RST）
+    # 返回 {ts, name, last, pct_chg, volume(手), amount(万), high/low/open/pre_close,
+    #       upper_limit/lower_limit, turnover_rate, pe, float_mv/total_mv(亿),
+    #       bid/bid_v/ask/ask_v(五档), source: "tencent"}
+    # Valkey quote:tencent:{ts_code} 60s TTL；源不可达返回 None（调用方降级）
+```
+
+### stock_detail.py（三档项 14+17，详情聚合层）
+```python
+get_stock_detail(symbol) -> dict
+    # 任意格式 symbol 归一 → {symbol, ts_code, name, industry, in_pool, limit,
+    #   moneyflow(近5日), events(龙虎榜/大宗/解禁/质押合并 20 条), name_changes,
+    #   chips(池内直读/非池按需), finance(池内直读/非池按需), quote}
+    # quote 降级链：hub:latest_tick:{vt}（秒级）→ 腾讯(60s TTL) → null；不缓存
+    # 慢变块 Valkey detail:slow:{ts} 10min——完整块才缓存（部分降级不落防缺块 10min）
+    # 非池按需 detail:ondemand:{kind}:{ts} 5min（"null" 字串缓存空结果防穿透）
+    # 永不抛异常：各块独立降级，坏块 null/[]
+    # 被 web_api GET /api/stock/{symbol}/detail（薄壳）与 POST /analyze 调用
+```
+
+### platform.py（DataPlatform 单例 `platform`）```python
 platform.get_bar(symbol, freq, start, end, adj="qfq") -> pd.DataFrame
 platform.ensure_daily(ts_code, start_date, end_date=None, adj="qfq") -> int
 platform.ensure_minute(ts_code, freq, start_date, end_date=None) -> int

@@ -47,6 +47,8 @@ LEASE_KEY = "hub:lease"
 GEN_KEY = "hub:gen"
 HB_KEY = "quant:hb:md-hub"
 SURRENDER_KEY = "hub:surrender"
+LATEST_TICK_PREFIX = "hub:latest_tick:"   # 三档项 12：详情页实时快照（tick 自带五档，U-2 修正 #2 零订阅变化）
+LATEST_TICK_TTL = 65                      # 断流 65s 自动过期——详情页不展示陈旧价，降级腾讯/DB
 STREAM_MAXLEN = 5000          # ≈20 交易日分钟 bar（评审：慢消费者 3 周不读才可能被剪）
 PG_FLUSH_INTERVAL = 10.0      # bar 落库批量间隔（独立线程，R-BR7 不反压分发）
 PG_QUEUE_MAX = 5000           # 落库缓冲上限（溢出丢最旧+告警，有界保证）
@@ -224,6 +226,39 @@ return 0
 """
 
 
+def _write_latest_tick(r, symbol: str, tick, fail_ts: dict) -> None:
+    """三档项 12：最新 tick 快照落 Valkey（价量+五档+涨跌停，TTL 65s）。
+
+    O 盲审修正：字段名 limit_up/limit_down（vnpy TickData 实名，非 upper_limit）；
+    0 价过滤前置（与 agg B4 同款，防竞价 0.00 上屏）；连续失败 60s 退避
+    （Valkey 半死时防每 tick 3s 阻塞拖死 tick→bar 主链）。
+    模块级（可单测——闭包形态曾让字段名错误零覆盖藏身，O 审 S1）。
+    """
+    if not tick.last_price or tick.last_price <= 0:
+        return
+    now = time.time()
+    if symbol in fail_ts and now - fail_ts[symbol] < 60:
+        return   # 退避窗口内跳过（连败后不再每 tick 撞 Valkey）
+    try:
+        r.set(LATEST_TICK_PREFIX + symbol, json.dumps({
+            "ts": tick.datetime.isoformat() if tick.datetime else None,
+            "name": getattr(tick, "name", ""),
+            "last": tick.last_price,
+            "open": tick.open_price, "high": tick.high_price, "low": tick.low_price,
+            "pre_close": tick.pre_close,
+            "upper_limit": tick.limit_up, "lower_limit": tick.limit_down,
+            "volume": tick.volume, "amount": getattr(tick, "turnover", 0) or 0.0,
+            "bid": [tick.bid_price_1, tick.bid_price_2, tick.bid_price_3, tick.bid_price_4, tick.bid_price_5],
+            "bid_v": [tick.bid_volume_1, tick.bid_volume_2, tick.bid_volume_3, tick.bid_volume_4, tick.bid_volume_5],
+            "ask": [tick.ask_price_1, tick.ask_price_2, tick.ask_price_3, tick.ask_price_4, tick.ask_price_5],
+            "ask_v": [tick.ask_volume_1, tick.ask_volume_2, tick.ask_volume_3, tick.ask_volume_4, tick.ask_volume_5],
+        }), ex=LATEST_TICK_TTL)
+        fail_ts.pop(symbol, None)
+    except Exception as e:
+        fail_ts[symbol] = now
+        logger.debug("latest_tick 写失败 %s: %s", symbol, e)
+
+
 def main() -> None:
     # #48：启动时列级校验（hub 侧同款）
     try:
@@ -295,8 +330,8 @@ def main() -> None:
     agg = MinuteAggregator()
     seqs: dict[str, int] = {}
     seqs_lock = threading.Lock()   # 评审 B4：事件线程 on_tick 与主循环 flush 并发 _publish
+    _lt_fail_ts: dict[str, float] = {}   # latest_tick 连败退避表（O 审 M6）
     # ticks/bars=进程累计（观测）；sess_*=时段内基线（S6 修订：进入交易时段的沿上清零，
-    # 跨日/午休/竞价窗口都不继承旧基线——昨夜回放 tick 不再污染今晨断流判定）
     stats = {"ticks": 0, "bars": 0, "last_tick_wall": 0.0,
              "sess_ticks": 0, "sess_last_tick": 0.0}
     pgw = _PGWriter()
@@ -311,6 +346,7 @@ def main() -> None:
         if _in_astock_session():
             stats["sess_ticks"] += 1
             stats["sess_last_tick"] = stats["last_tick_wall"]
+        _write_latest_tick(r, symbol, tick, _lt_fail_ts)
         bar = agg.on_tick(symbol, tick)
         if bar:
             _publish(bar)
