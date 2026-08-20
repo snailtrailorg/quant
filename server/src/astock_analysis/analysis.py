@@ -5,16 +5,10 @@
 
 from __future__ import annotations
 import logging
-from datetime import date, datetime, timedelta
 from dataclasses import dataclass, field
-from typing import Any
 import pandas as pd
 
-from src.strategy_framework import (
-    Strategy, StrategyConfig, Signal, Action, BarContext, SignalAggregator,
-    create_adapter, list_factors, register_factor, get_factor,
-)
-from src.data_platform import platform, to_vt_symbol, parse_vt_symbol
+from src.data_platform import to_vt_symbol
 
 logger = logging.getLogger("astock_analysis")
 
@@ -35,116 +29,132 @@ class AnalysisResult:
     llm_summary: str = ""
 
 
-# ——— 日线选股引擎 ———
+# ——— 日线选股引擎（2026-08-20 项 5 重写：一档横截面，全市场一次 SQL 零 API）———
+
+# 横截面因子注册表（配置驱动铁律：加因子=加条目，引擎零改动）。
+# direction：1 越大越好 / -1 越小越好；col=横截面 SQL 输出列。
+SELECTION_FACTORS: dict[str, dict] = {
+    "net_mf_pct":   {"weight": 2.0, "direction": 1, "col": "net_mf_pct",   "desc": "主力净流入/流通市值"},
+    "lg_flow_pct":  {"weight": 1.0, "direction": 1, "col": "lg_flow_pct",  "desc": "大单净额/流通市值"},
+    "winner_rate":  {"weight": 1.5, "direction": 1, "col": "winner_rate",  "desc": "获利盘比例(cyq_perf)"},
+    "ma_dev":       {"weight": 1.5, "direction": 1, "col": "ma_dev",       "desc": "均线偏离(45自然日窗≈30交易日)"},
+}
+
 
 class DailySelectionEngine:
-    """日线选股模型：多因子打分 → 排序 → 输出。"""
+    """日线选股模型（横截面版）：一档表全市场批量 → 因子 rank 归一 → 加权打分 → 排序。
+
+    数据源全部本地（daily_basic/moneyflow/cyq_perf 一二档 + asset_static_info 清单），
+    替代原逐标的打 Tushare API（50 只上限+每只 1 次调用）——U 审项 5 原意。
+    ST/退市过滤在 SQL 层（asset 名含 ST/退剔除）。
+    """
 
     def __init__(self, top_n: int = 30, max_stocks: int | None = None):
         self.top_n = top_n
-        self._max_stocks = max_stocks or 50
-        # 注册 A 股因子
-        self._factors = self._register_astock_factors()
+        self._max_stocks = max_stocks or 6000   # 防呆上限（>全市场 5533；O 审 S2：曾 5000 实际截断 533 只）
 
-    def _register_astock_factors(self) -> list[dict]:
-        """注册 A 股选股因子。
-
-        选股只用静态因子（needs_history=0）--动态因子需历史窗口，扫全市场成本太高。
-        动态因子（ma_dev/rsi/volume_ratio 等）只用于策略。
-        """
-        from src.strategy_framework.factor import list_factors
-        return list_factors(category="trend", static_only=True)
+    _XSECTION_SQL = """
+    WITH latest AS (
+        SELECT MAX(trade_date) AS dd,
+               to_char(MAX(trade_date), 'YYYYMMDD') AS ds
+        FROM daily_basic
+        WHERE trade_date <= COALESCE(%(snap_date)s::date, '2999-12-31'::date)
+    ),
+    ma AS (
+        SELECT ts_code, AVG(close) AS ma20, COUNT(*) AS n,
+               MIN(close) AS lo20, MAX(close) AS hi20
+        FROM daily_basic, latest
+        WHERE trade_date >= (latest.dd - 45) AND trade_date <= latest.dd
+        GROUP BY ts_code
+    )
+    SELECT db.ts_code, a.name, a.industry,
+           db.close, db.turnover_rate,
+           db.total_mv, db.circ_mv,
+           (db.close / NULLIF(ma.ma20, 0) - 1) AS ma_dev,
+           ma.lo20, ma.hi20,
+           mf.net_mf_amount / NULLIF(db.circ_mv * 10000, 0) AS net_mf_pct,
+           (mf.buy_lg_amount - mf.sell_lg_amount) / NULLIF(db.circ_mv * 10000, 0) AS lg_flow_pct,
+           cp.winner_rate
+    FROM daily_basic db
+    JOIN latest ON db.trade_date = latest.dd
+    JOIN ma ON ma.ts_code = db.ts_code AND ma.n >= 10
+    JOIN asset_static_info a ON a.ts_code = db.ts_code
+         AND a.name NOT LIKE '%%ST%%' AND a.name NOT LIKE '%%退%%'
+    LEFT JOIN moneyflow mf ON mf.ts_code = db.ts_code AND mf.trade_date = latest.ds
+    LEFT JOIN cyq_perf cp ON cp.ts_code = db.ts_code AND cp.trade_date = latest.ds
+    WHERE db.close > 0 AND db.circ_mv > 0
+    """
 
     def run(self, trade_date: str | None = None) -> list[AnalysisResult]:
-        """运行日线选股，返回排名结果。"""
-        from src.data_platform.adapters.tushare_adapter import get_pro
+        """横截面选股。trade_date=YYYYMMDD 历史快照（该日截面）；None=最新日。
 
-        trade_date = trade_date or date.today().strftime("%Y%m%d")
-        pro = get_pro()
-
-        # 1. 获取股票列表
-        stocks = self._get_stock_list(pro)
-        if not stocks:
+        O 盲审修正（2026-08-20）：
+        - S1 行级缺因子：按该行可用因子重分配权重（行级 weighted mean）——
+          个别行 LEFT JOIN 落空不再 NaN 沉底静默剔除
+        - S2 全量无截断：A 股 5533 > 旧上限 5000 曾被任意截断且无 ORDER BY 不确定
+        - S3 trade_date 显式支持：SQL 取 <= 所传日的最新截面（原被静默忽略标签错位）
+        - G5 裸连接：cursor.fetchall+DataFrame（同 db.py 模式，pd.read_sql 对池化
+          连接发 UserWarning）
+        - G7 因子跳过告警：数据面退化（如 cyq_perf 未同步）可见
+        """
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(self._XSECTION_SQL,
+                            {"snap_date": trade_date})   # None→COALESCE 不限
+                cols = [d.name for d in cur.description]
+                df = pd.DataFrame(cur.fetchall(), columns=cols)
+        if df.empty:
             return []
+        df = df.head(self._max_stocks)
 
-        # 2. 获取日线数据（批量）
-        results = []
-        for ts_code in stocks[:self._max_stocks]:  # 分批处理，避免全量堵塞
-            try:
-                result = self._analyze_single(pro, ts_code, trade_date)
-                if result:
-                    results.append(result)
-            except Exception as e:
-                logger.warning("分析 %s 失败: %s", ts_code, e)
+        # 因子 rank(pct) 归一 [-1,1]；列级缺数（notna<30）跳过+告警；行级按可用因子重分配权重
+        score = pd.Series(0.0, index=df.index)
+        w_sum = pd.Series(0.0, index=df.index)
+        for name, spec in SELECTION_FACTORS.items():
+            col = df.get(spec["col"])
+            if col is None or col.notna().sum() < 30:
+                logger.warning("选股因子 %s 数据不足（notna=%s）——本轮不参与打分",
+                               name, 0 if col is None else int(col.notna().sum()))
                 continue
-
-        # 3. 排序输出
-        results.sort(key=lambda r: r.score, reverse=True)
-        return results[:self.top_n]
-
-    def _get_stock_list(self, pro) -> list[str]:
-        """获取 A 股列表。"""
-        try:
-            df = pro.query("stock_basic", exchange="", list_status="L",
-                           fields="ts_code,name,industry")
-            return df["ts_code"].tolist() if df is not None and not df.empty else []
-        except Exception:
+            r = col.rank(pct=True).sub(0.5).mul(2 * spec["direction"])
+            valid = r.notna()
+            score = score + r.fillna(0.0) * spec["weight"] * valid
+            w_sum = w_sum + spec["weight"] * valid
+        usable = w_sum > 0
+        if not usable.any():
             return []
+        score = (score / w_sum)[usable]
+        df = df[usable]
 
-    def _analyze_single(self, pro, ts_code: str, trade_date: str) -> AnalysisResult | None:
-        """分析单只股票。"""
-        import numpy as np
+        df = df.assign(score=score.round(3)).sort_values("score", ascending=False)
 
-        # 拉近 60 天日线
-        start = (datetime.strptime(trade_date, "%Y%m%d") - timedelta(days=90)).strftime("%Y%m%d")
-        try:
-            df = pro.daily(ts_code=ts_code, start_date=start, end_date=trade_date)
-        except Exception:
-            return None
-        if df is None or df.empty or len(df) < 20:
-            return None
-
-        df = df.sort_values("trade_date")
-        close = df["close"].values
-        volume = df["vol"].values
-        latest = df.iloc[-1]
-
-        # 计算因子
-        sma_20 = np.mean(close[-20:]) if len(close) >= 20 else close[-1]
-        ma_dev = latest["close"] / sma_20 - 1
-
-        # 动量
-        momentum = (latest["close"] / close[0] - 1) if len(close) > 1 else 0
-
-        # 成交量比
-        vol_ratio = latest["vol"] / (np.mean(volume[-5:]) + 1) if len(volume) >= 5 else 1
-
-        # 复合评分
-        score = ma_dev * 2 + momentum * 1.5 + vol_ratio * 0.5
-
-        # 支撑/阻力（简单：近 20 日高低）
-        support = float(np.min(close[-20:])) if len(close) >= 20 else float(latest["low"])
-        resistance = float(np.max(close[-20:])) if len(close) >= 20 else float(latest["high"])
-
-        # 评级
-        rating = "BUY" if score > 0.3 else "AVOID" if score < -0.3 else "HOLD"
-
-        vt_sym = to_vt_symbol(ts_code)
-        conclusion = (f"均线偏离={ma_dev:.3f}, 动量={momentum:.3f}, "
-                      f"量比={vol_ratio:.2f}, 综合评分={score:.3f}")
-
-        return AnalysisResult(
-            ts=trade_date,
-            symbol=ts_code,
-            vt_symbol=vt_sym,
-            score=round(score, 3),
-            rating=rating,
-            factors={"ma_dev": round(ma_dev, 3), "momentum": round(momentum, 3),
-                     "vol_ratio": round(vol_ratio, 2)},
-            support=round(support, 2),
-            resistance=round(resistance, 2),
-            conclusion=conclusion,
-        )
+        # rating 分位在 top_n 内算（O 审 G4：全市场分位使 top30 恒 BUY 无区分度）
+        top = df.head(self.top_n)
+        q_hi, q_lo = top["score"].quantile(0.85), top["score"].quantile(0.15)
+        results = []
+        for _, row in top.iterrows():
+            rating = "BUY" if row["score"] >= q_hi else "AVOID" if row["score"] <= q_lo else "HOLD"
+            ts_code = row["ts_code"]
+            # conclusion 用因子原值（O 审 G9：rank 是分位不是量纲，原值才可读）
+            fv = {k: (None if pd.isna(row.get(spec["col"])) else float(row[spec["col"]]))
+                  for k, spec in SELECTION_FACTORS.items()}
+            conclusion = (f"{row['name']}({row['industry']}) 收{row['close']:.2f} "
+                          f"评分={row['score']:.3f}; " + ", ".join(
+                              f"{k}={v:.4f}" if v is not None else f"{k}=缺"
+                              for k, v in fv.items()))
+            results.append(AnalysisResult(
+                ts=trade_date or "",
+                symbol=ts_code,
+                vt_symbol=to_vt_symbol(ts_code),
+                score=float(row["score"]),
+                rating=rating,
+                factors=fv,
+                support=round(float(row["lo20"] or 0), 2),
+                resistance=round(float(row["hi20"] or 0), 2),
+                conclusion=conclusion,
+            ))
+        return results
 
     def enhance_with_llm(self, results: list[AnalysisResult]) -> list[AnalysisResult]:
         """用 LLM 增强分析——为高评分股票生成自然语言研判（需 LLM 网关可用）。"""

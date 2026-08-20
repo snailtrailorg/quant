@@ -35,18 +35,26 @@ class AnalysisResult:
     llm_summary: str = ""        # LLM 增强研判（enhance_with_llm 填）
 ```
 
-### DailySelectionEngine（日线选股，已实现）
+### DailySelectionEngine（日线选股，2026-08-20 横截面重写：U 审项 5）
 ```python
-DailySelectionEngine(top_n: int = 30)
-    # __init__ 注册 A 股因子（复用 strategy_framework 的 ma_dev/rsi/volume_ratio）
+DailySelectionEngine(top_n: int = 30, max_stocks: int | None = None)
+    # max_stocks 默认 5000（防呆上限）——横截面批量全市场，不再逐标的打 API
 
 .run(trade_date: str | None = None) -> list[AnalysisResult]
-    # trade_date 默认今天（YYYYMMDD）；取前 50 只（限流测试）打分排序返回 top_n
-    # 内部：get_pro() -> stock_basic -> 逐只 daily(近 90 天) -> 因子 -> 排序
+    # 一次 SQL 全市场横截面（daily_basic 45 日窗口 + LEFT JOIN moneyflow/cyq_perf
+    # + asset_static_info ST/退过滤），Pandas 因子 rank(pct) 归一 [-1,1] 加权打分
+    # → 降序 top_n；rating=分位（BUY≥q85 / AVOID≤q15 / HOLD）
+    # 数据源全部本地零 API（原实现逐标的 pro.daily 50 只上限）；trade_date 参数
+    # 仅透传到结果 ts（横截面永远取 MAX(trade_date) 最新日——历史日查询不再支持）
+    # 缺数因子列（notna<30，如 cyq_perf 未同步）整体跳过（中性），权重按活跃因子重分配
 
-.enhance_with_llm(results: list[AnalysisResult]) -> list[AnalysisResult]
-    # 为前 5 只高评分股票生成 LLM 自然语言研判（填 llm_summary，caller="astock"）
-    # LLM 不可用时 llm_summary="（LLM 暂不可用）"，不抛
+SELECTION_FACTORS: dict[str, dict]   # 横截面因子注册表（配置驱动：加因子=加条目）
+    # net_mf_pct 主力净流入/流通市值 ×2 / lg_flow_pct 大单净额 ×1
+    # winner_rate 获利盘(cyq_perf) ×1.5 / ma_dev 20日均线偏离 ×1.5
+    # 每项 {weight, direction(1/-1), col(SQL 列), desc}
+
+.enhance_with_llm(results) -> list[AnalysisResult]
+    # 前 5 只 LLM 研判（caller="astock"），不可用时 llm_summary 占位不抛（未改）
 ```
 
 ### MinuteAnalysisEngine（分钟级研判，**D2 待实现**）
@@ -61,13 +69,8 @@ MinuteAnalysisEngine()
 
 ## 二、内部 API（不保证稳定，改模块时才能动）
 
-- `DailySelectionEngine._register_astock_factors()`：注册 A 股因子（复用 `get_factor("ma_dev"/"rsi"/"volume_ratio")`）
-- `DailySelectionEngine._get_stock_list(pro) -> list[str]`：查 `stock_basic`（exchange="" list_status="L"）
-- `DailySelectionEngine._analyze_single(pro, ts_code, trade_date) -> AnalysisResult | None`：
-  - 拉 90 天日线 `pro.daily`（<20 行返回 None）
-  - 因子：sma_20 / ma_dev / momentum / vol_ratio
-  - 评分 `ma_dev*2 + momentum*1.5 + vol_ratio*0.5`
-  - 评级 `BUY(score>0.3) / AVOID(score<-0.3) / HOLD`
+- `DailySelectionEngine._XSECTION_SQL`：横截面 SQL（CTE latest/ma + 三 LEFT/JOIN；date 型 daily_basic 与 text 型 moneyflow/cyq_perf 的 trade_date 键以 to_char 桥接）
+- `SELECTION_FACTORS` 常量：见 public API 节（注册表即配置）
   - 支撑/阻力：近 20 日 min/max
 
 ---
