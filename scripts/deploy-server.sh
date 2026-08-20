@@ -24,9 +24,7 @@ EXCLUDES=(
 
 # 路径/SERVER 默认值在 quant-deploy.sh 单一配置源，此处不重复
 # 顺序：deploy -> fix-venv -> pip-install -> migrate -> restart-services
-# --preserve-env=FORCE_RESTART：sudo 默认清环境（2026-08-20 实证：FORCE_RESTART=1 被 sudo 吞，
-# "文件新+进程旧"中间态无法强制重启）
-sudo -u michael --preserve-env=FORCE_RESTART /home/michael/.local/bin/quant-deploy.sh \
+sudo -u michael /home/michael/.local/bin/quant-deploy.sh \
     deploy "$LOCAL" "$REMOTE" "${EXCLUDES[@]}" \
     fix-venv \
     pip-install \
