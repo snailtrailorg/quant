@@ -82,7 +82,8 @@
 - 服务监控（S6 修订）：`docs/architecture/15-服务监控设计.md`（断流不自杀/下单时刻判定/health_monitor 内层+Zabbix@NAS 外层//healthz /readyz /metrics=Prometheus）
 - 操作指导书（面向使用者）：`docs/操作指导/`（索引+因子/策略/回测/实盘四册，server/docs 镜像随 rsync 部署）+ Web 内置 `/help`（`/api/help/{topic}`）
 - 多频率数据（16 号 v2.1 定稿，影子门禁后实施）：`docs/architecture/16-多频率数据设计.md`（慢路径日线直读+日界沿/快路径分钟；复权逐行因子链；NULL 因子=1.0 降级；盘口 Phase 2）
-- 三档数据与详情页（17 号，U 审 21 项）：`docs/architecture/17-三档数据与详情页.md`（一档批量+二档池内已上线，三档详情页+横切待做；含 U 审裁定与坑）
+- 三档数据与详情页（17 号，U 审 21 项）：`docs/architecture/17-三档数据与详情页.md`（2026-08-20 三档 6 项+项 5 选股全上线；剩项 18 监控/项 11 质量/项 4 时点实测；含 U 审裁定与坑）
+- 数据库操作规范（18 号，2026-08-21 定稿）：`docs/architecture/18-数据库操作规范.md`（全仓写路径盘点/写路径五规范：executemany+事务禁跨网络+DDL CONCURRENTLY/超时分层 web 10s·同步 60s·idle_tx 5min/长事务告警 R7/pg_stat_activity 诊断钥匙——锁链事件根治）
 - 共享行情 Hub（ST7）：`docs/architecture/13-需求书.md` + `14-设计.md` v2（hub=纯数据面单实例 MD，worker=TD-only；Valkey Streams 分发+租约 fencing；影子期 bar_hub/bar_shadow diff 门禁）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（18 份，2026-08-19 增 quant_common/email_service）
