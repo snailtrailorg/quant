@@ -115,6 +115,19 @@ def collect(now: float | None = None) -> dict:
         snap["deps"]["postgres"] = False
         snap["deps"]["postgres_err"] = str(e)[:80]
 
+    # 18 号 §4.2 长事务告警（DB 优化批 2026-08-21）：idle in transaction >3min 计数
+    # （参数防线 5min 前的预警窗，留人工介入）。PG 探活顺路查询，失败不阻断。
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM pg_stat_activity "
+                "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+                "AND state = 'idle in transaction' "
+                "AND xact_start < now() - interval '3 minutes'")
+            snap["db_idle_tx_stale"] = int(cur.fetchone()[0] or 0)
+    except Exception:
+        pass
+
     return snap
 
 

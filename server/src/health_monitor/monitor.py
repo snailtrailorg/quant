@@ -102,6 +102,14 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
             out.append({"rule_id": "dep_down", "component": dep, "severity": "critical",
                         "detail": str(deps.get(f"{dep}_err", ""))[:200]})
 
+    # R7 长事务预警（18 号 §4.2，DB 优化批 2026-08-21）：idle in transaction >3min——
+    # 参数防线（idle_in_tx 5min）杀掉前的预警窗，留人工 pg_terminate 介入（诊断钥匙见 18 号 §4.3）
+    stale_tx = snap.get("db_idle_tx_stale")
+    if stale_tx:
+        out.append({"rule_id": "db_idle_tx_stale", "component": "postgres", "severity": "warning",
+                    "detail": f"{stale_tx} 个 idle in transaction 事务超 3 分钟（防线 5min 兜杀，"
+                              f"诊断：18 号 §4.3 pg_stat_activity）"})
+
     # R4 hub 心跳丢失（Valkey 可达但 key 过期 = hub 进程未续）
     # D-F2：需连续 2 轮——hub 设计内重启（deploy/自愈）首跳心跳要 60s+，单轮闪断不告警
     hub_missing = bool(deps.get("valkey")) and snap.get("hub") is None
