@@ -105,7 +105,9 @@ def _intraday_from_hub(vt: str) -> dict | None:
                 "SELECT to_char(ts, 'HH24:MI'), close, volume, amount FROM bar_hub "
                 "WHERE symbol=%s AND ts::date=%s ORDER BY ts", (vt, d))
             rows = cur.fetchall()
-        if not rows:
+        # 当日点数不足（临时订阅标的当日只从订阅时刻攒起）→ 降级腾讯给全天完整分时；
+        # 次日起 hub 自攒全天数据自然接管
+        if not rows or len(rows) < 30:
             return None
         points, cum_v, cum_a = [], 0.0, 0.0
         for t, close, volume, amount in rows:
