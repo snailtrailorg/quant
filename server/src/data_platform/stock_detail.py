@@ -80,15 +80,17 @@ def _touch_transient_sub(vt: str) -> None:
 # ── 分时曲线（17 号蓝图 K 线 Tab"日/分钟"的分钟半边，2026-08-20 补）──
 
 def get_intraday(symbol: str) -> dict | None:
-    """当日分时：源 1 bar_hub（hub 自攒分钟，池内订阅标的）；降级源 2 腾讯分时接口。
+    """当日分时：腾讯全天优先 → bar_hub 兜底（2026-08-20 用户反馈修正）。
 
-    返回 {date, source, points: [{t, price, avg, volume}]}，avg=到该时刻 VWAP。
+    XTP 是纯实时流无历史回放——临时订阅标的 hub 只有"订阅时刻起"的段，池内标的
+    当日 hub 也可能因重启有洞；腾讯分时是唯一当天全天免费源。bar_hub 的价值在
+    次日起的自攒全天（+腾讯不可用时兜底）。
     """
     ts_code, vt = _normalize(symbol)
-    r = _intraday_from_hub(vt)
+    r = _intraday_from_tencent(ts_code)
     if r:
         return r
-    return _intraday_from_tencent(ts_code)
+    return _intraday_from_hub(vt)
 
 
 def _intraday_from_hub(vt: str) -> dict | None:
@@ -105,8 +107,7 @@ def _intraday_from_hub(vt: str) -> dict | None:
                 "SELECT to_char(ts, 'HH24:MI'), close, volume, amount FROM bar_hub "
                 "WHERE symbol=%s AND ts::date=%s ORDER BY ts", (vt, d))
             rows = cur.fetchall()
-        # 当日点数不足（临时订阅标的当日只从订阅时刻攒起）→ 降级腾讯给全天完整分时；
-        # 次日起 hub 自攒全天数据自然接管
+        # hub 兜底场景（腾讯不可用）：当日不足 30 点说明只有零星数据，宁缺勿残段
         if not rows or len(rows) < 30:
             return None
         points, cum_v, cum_a = [], 0.0, 0.0
