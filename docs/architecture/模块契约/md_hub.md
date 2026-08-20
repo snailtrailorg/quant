@@ -15,7 +15,7 @@
 - 分发：`XADD hub:bars:{symbol}` MAXLEN~5000，字段 `gen/seq/ts/pub_ts/untrusted/ohlc/volume/amount/tick_count`
 - 最新 tick：`SET hub:latest_tick:{symbol}` TTL 65s（三档项 12，2026-08-20）——价量+五档+涨跌停，每 tick 写；断流 65s 自动过期（消费方 `stock_detail._quote_block` 降级腾讯源）
 - fencing：租约 `hub:lease`（SET NX EX30 + Lua CAS 续期）；`gen = INCR hub:gen` 永不回退；被抢占让位 exit(3)
-- 订阅真相源（**四源**）：`live_task(running).symbol ∪ system_config.hub_shadow_symbols ∪ minute_history_start 池成员 ∪ hub_transient_subs(30min TTL 临时)`，30s diff + 60s 幂等重放 + **双向 diff 退订**（2026-08-20 生命周期闭环：出池/临时过期/白名单摘除/task 停统一 SDK 原生 unSubscribeMarketData；退订前 flush_symbol 落在桶最后一分钟；重放分支只订不退——重连后 XTP 清零语义）
+- 订阅真相源（**四源**）：`live_task(running).symbol ∪ system_config.hub_shadow_symbols ∪ minute_history_start 池成员 ∪ hub_transient_subs(30min TTL 临时)`，30s diff + 60s 幂等重放 + **双向 diff 退订**（2026-08-20 生命周期闭环：出池/临时过期/白名单摘除/task 停统一 SDK 原生 unSubscribeMarketData；退订前 flush_symbol 落在桶最后一分钟；**replay 窗口（每分钟 :00-:09 例行）同样退订 removed**——补盲审 S1：原"只订不退"使落在窗口内的移除永不被退订，SDK 级订阅泄漏）
 - 落库：`bar_hub` 表（独立线程批量，ON CONFLICT 幂等，有界队列不反压分发）
 - 心跳：`quant:hb:md-hub`（pid/gen/subs/ticks/bars/last_tick_ts，TTL 90s）；tick 断流 300s（时段+已有tick）自杀重启
 - 复用 strategy_runner 的 `_guard/_sd_notify/_alert/_in_astock_session`（SA 机制）
