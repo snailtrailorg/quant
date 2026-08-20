@@ -72,8 +72,8 @@ class DailySelectionEngine:
            db.total_mv, db.circ_mv,
            (db.close / NULLIF(ma.ma20, 0) - 1) AS ma_dev,
            ma.lo20, ma.hi20,
-           mf.net_mf_amount / NULLIF(db.circ_mv * 10000, 0) AS net_mf_pct,
-           (mf.buy_lg_amount - mf.sell_lg_amount) / NULLIF(db.circ_mv * 10000, 0) AS lg_flow_pct,
+           mf.net_mf_amount / NULLIF(db.circ_mv, 0) AS net_mf_pct,
+           (mf.buy_lg_amount - mf.sell_lg_amount) / NULLIF(db.circ_mv, 0) AS lg_flow_pct,
            cp.winner_rate
     FROM daily_basic db
     JOIN latest ON db.trade_date = latest.dd
@@ -83,6 +83,8 @@ class DailySelectionEngine:
     LEFT JOIN moneyflow mf ON mf.ts_code = db.ts_code AND mf.trade_date = latest.ds
     LEFT JOIN cyq_perf cp ON cp.ts_code = db.ts_code AND cp.trade_date = latest.ds
     WHERE db.close > 0 AND db.circ_mv > 0
+    -- 金额单位全为万元（moneyflow 与 circ_mv 同单位直除——2026-08-20 生产实证：
+    -- 曾 ÷circ_mv*10000 多除 1 万倍致原值恒 0.0000；rank 打分不受单调变换影响）
     """
 
     def run(self, trade_date: str | None = None) -> list[AnalysisResult]:
