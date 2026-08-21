@@ -7,6 +7,12 @@ quant 用 psycopg（非 asyncpg），无 SQLAlchemy ORM 模型，所以：
 """
 from logging.config import fileConfig
 import os
+import sys
+
+# 双盲 B-S1（2026-08-21，部署阻断）：0051 起迁移 import 应用代码（quant_common.crypto）——
+# 服务器 console script（venv/bin/alembic）的 sys.path[0]=venv/bin 不含项目根，
+# 本地 python -m alembic（cwd 入 path）掩盖了此坑。显式插入 server 根。
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alembic import context
 from sqlalchemy import pool, create_engine

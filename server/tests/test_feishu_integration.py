@@ -280,6 +280,20 @@ class TestImBotBatch1:
         monkeypatch.delenv("LARK_VERIFICATION_TOKEN")
         assert bot.verify_card_signature(ts, nonce, body, good2) is False
 
+    def test_db_error_falls_back_env(self, monkeypatch):
+        """B-B4:DB 挂(get_conn 抛)→ 签名/授权都回落 env(批 1 降级路径)。"""
+        from src.feishu_bot import bot
+        import hashlib as _h
+        from src.data_platform import db as _db
+        monkeypatch.setattr(_db, "get_conn", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
+        monkeypatch.setenv("LARK_VERIFICATION_TOKEN", "tok_env")
+        ts, nonce, body = "1", "n", "{}"
+        good = _h.sha1(f"{ts}{nonce}tok_env{body}".encode()).hexdigest()
+        assert bot.verify_card_signature(ts, nonce, body, good) is True
+        monkeypatch.setenv("LARK_AUTHORIZED_USERS", "ou_y:analyst")
+        bot.FEISHU_USERS.clear()
+        assert bot.check_user("ou_y") == "analyst"
+
     def test_check_user_table_first_env_fallback(self, monkeypatch):
         from src.feishu_bot import bot
         # 表有授权行
