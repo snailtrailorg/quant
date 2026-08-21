@@ -35,6 +35,8 @@ fina_indicator :: ts_code,ann_date,end_date,eps,roe,roa,gross_margin,netprofit_m
 forecast :: ts_code,ann_date,end_date,type,p_change_min,p_change_max,net_profit_min,net_profit_max,last_parent_net,first_ann_date,summary,change_reason
 health_event :: id,ts,rule_id,component,severity,detail
 hub_transient_subs :: symbol,expire_at
+im_bot_config :: id,provider,name,description,default_role,lang,enabled,priority,credentials_encrypted,params,created_at,updated_at
+im_bot_users :: id,bot_id,im_user_id,role,created_at
 income :: ts_code,ann_date,end_date,report_type,total_revenue,revenue,total_profit,n_income,n_income_attr_p,basic_eps,diluted_eps,rd_exp,raw_json
 live_task :: id,name,strategy_id,symbol,params,strategy_snapshot,status,task_id,systemd_unit,account_id,initial_capital,created_at,updated_at
 live_trading_config :: market,enabled,updated_at

@@ -232,6 +232,67 @@ def test_feishu_client_send_card():
 
 # ---------------------------------------------------------------------------
 # 签名校验
+# ——— IM 统一接入批 1（19 号 v2 §5：表主源 + env 兜底过渡）———
+
+class TestImBotBatch1:
+    """签名/授权读 im_bot_config,env 兜底;皆空 fail-closed(卡片)。"""
+
+    def _mock_conn(self, monkeypatch, creds_row=None, users_rows=None):
+        from unittest.mock import MagicMock
+        import json as _json
+
+        cur = MagicMock()
+        # _im_bot_secret 单查;check_user 单查——按调用 SQL 区分返回
+        def _execute(sql, params=None):
+            c = MagicMock()
+            if "im_bot_users" in sql:
+                c.fetchone.return_value = users_rows
+            else:
+                c.fetchone.return_value = ((creds_row,) if isinstance(creds_row, str) else creds_row)
+            return c
+
+        class _Conn:
+            def execute(self, sql, params=None): return _execute(sql, params)
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+
+        from src.data_platform import db as _db
+        monkeypatch.setattr(_db, "get_conn", lambda: _Conn())
+
+    def test_secret_table_first_env_fallback(self, monkeypatch):
+        """表有 verification_token → 用表值(env 不同值不干扰);表空 → env 兜底。"""
+        from src.feishu_bot import bot
+        import json as _json, hashlib as _h
+        creds = _json.dumps({"verification_token": "tok_from_db", "app_id": "cli_x"})
+        # 表路:patch decrypt 回原文(避免真 crypto 依赖)
+        monkeypatch.setattr("src.quant_common.crypto.decrypt", lambda s: s)
+        self._mock_conn(monkeypatch, creds_row=creds)
+        ts, nonce, body = "1", "n", "{}"
+        good = _h.sha1(f"{ts}{nonce}tok_from_db{body}".encode()).hexdigest()
+        assert bot.verify_card_signature(ts, nonce, body, good) is True
+        assert bot.verify_card_signature(ts, nonce, body, "bad") is False
+        # env 兜底:表查无(None)+env 配了
+        self._mock_conn(monkeypatch, creds_row=None)
+        monkeypatch.setenv("LARK_VERIFICATION_TOKEN", "tok_from_env")
+        good2 = _h.sha1(f"{ts}{nonce}tok_from_env{body}".encode()).hexdigest()
+        assert bot.verify_card_signature(ts, nonce, body, good2) is True
+        # 皆空 fail-closed
+        monkeypatch.delenv("LARK_VERIFICATION_TOKEN")
+        assert bot.verify_card_signature(ts, nonce, body, good2) is False
+
+    def test_check_user_table_first_env_fallback(self, monkeypatch):
+        from src.feishu_bot import bot
+        # 表有授权行
+        self._mock_conn(monkeypatch, users_rows=("admin",))
+        assert bot.check_user("ou_x") == "admin"
+        # 表无 → env 层
+        self._mock_conn(monkeypatch, users_rows=None)
+        monkeypatch.setenv("LARK_AUTHORIZED_USERS", "ou_x:trader")
+        bot.FEISHU_USERS.clear()
+        assert bot.check_user("ou_x") == "trader"
+        assert bot.check_user("ou_unknown") is None
+
+
 # ---------------------------------------------------------------------------
 
 def test_verify_signature():

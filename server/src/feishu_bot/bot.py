@@ -119,12 +119,16 @@ class FeishuClient:
 
 # ——— 用户鉴权 + 角色映射 ———
 
-# 授权飞书 user_id → 平台角色
+# 授权飞书 user_id → 平台角色(env 兜底缓存;主真相源=im_bot_users 表)
 FEISHU_USERS: dict[str, str] = {}  # {"ou_xxx": "admin", ...}
 
 
 def load_feishu_users():
-    """从环境变量加载授权用户（格式: user_id:role,user_id:role）。"""
+    """从环境变量加载授权用户（格式: user_id:role,user_id:role）——env 兜底层。
+
+    IM 统一接入批 1（19 号 v2）：主真相源=im_bot_users 表（per-bot），表空/查询失败
+    回落此 env 层（过渡期双轨，批 2 退役 env）。
+    """
     raw = os.environ.get("LARK_AUTHORIZED_USERS", "")
     new_users = {}
     for pair in raw.split(","):
@@ -137,18 +141,60 @@ def load_feishu_users():
 
 
 def check_user(open_id: str) -> str | None:
-    """检查飞书用户是否授权，返回角色或 None。"""
+    """检查飞书用户是否授权，返回角色或 None。
+
+    批 1 语义：先查 im_bot_users（全部 feishu bot 行的授权并集——webhook 暂无 per-bot
+    路由，批 2 的 URL bid 才精确 per-bot），查无回落 env 层，再无=未授权（fail-closed）。
+    """
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT u.role FROM im_bot_users u JOIN im_bot_config b ON b.id=u.bot_id "
+                "WHERE u.im_user_id=%s AND b.provider='feishu' AND b.enabled "
+                "ORDER BY CASE u.role WHEN 'admin' THEN 0 WHEN 'trader' THEN 1 "
+                "WHEN 'analyst' THEN 2 ELSE 3 END LIMIT 1", (open_id,))
+            row = cur.fetchone()
+            if row:
+                return row[0]
+    except Exception as e:
+        logger.warning("im_bot_users 查询失败（回落 env 授权层）: %s", e)
     if not FEISHU_USERS:
         load_feishu_users()
     return FEISHU_USERS.get(open_id)
 
 
-# ——— 签名校验 ———
+# ——— 签名校验（批 1：主源 im_bot_config，env 兜底——19 号 v2 §5 过渡双轨）———
+
+def _im_bot_secret(field: str, env_key: str) -> str:
+    """取签名密钥:im_bot_config 任一 enabled feishu 行的 credentials.{field}（批 1 全局
+    近似——单 bot 现状足够；批 2 URL bid 精确 per-bot）；无行/无字段/解密失败回落 env。"""
+    try:
+        import json as _json
+        from src.quant_common.crypto import decrypt
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT credentials_encrypted FROM im_bot_config "
+                "WHERE provider='feishu' AND enabled AND credentials_encrypted IS NOT NULL "
+                "ORDER BY id LIMIT 1")
+            row = cur.fetchone()
+            if row:
+                creds = _json.loads(decrypt(row[0]))
+                v = creds.get(field)
+                if v:
+                    return v
+    except Exception as e:
+        logger.debug("im_bot_config 密钥读取失败（回落 env %s）: %s", env_key, e)
+    return os.environ.get(env_key, "")
+
 
 def verify_event_signature(header_ts: str, nonce: str, body: str, signature: str) -> bool:
     """校验飞书事件回调签名（P0 复审修正 2026-08-20，官方算法——SDK 源码级确认）：
-    sha256(HTTP 头 X-Lark-Timestamp + X-Lark-Nonce + Encrypt Key + body)。"""
-    secret = os.environ.get("LARK_ENCRYPT_KEY", "")
+    sha256(HTTP 头 X-Lark-Timestamp + X-Lark-Nonce + Encrypt Key + body)。
+
+    批 1：密钥主源=im_bot_config.credentials.encrypt_key，env 兜底。"""
+    secret = _im_bot_secret("encrypt_key", "LARK_ENCRYPT_KEY")
     if not secret:
         return True  # 未配置 Encrypt Key 则跳过（兼容纯 token 校验模式；卡片路径另有 fail-closed）
     sig = hashlib.sha256(f"{header_ts}{nonce}{secret}{body}".encode()).hexdigest()
@@ -157,8 +203,11 @@ def verify_event_signature(header_ts: str, nonce: str, body: str, signature: str
 
 def verify_card_signature(header_ts: str, nonce: str, body: str, signature: str) -> bool:
     """校验飞书卡片回调签名（P0 复审修正 2026-08-20，官方算法）：
-    sha1(HTTP 头 X-Lark-Timestamp + X-Lark-Nonce + Verification Token + body)。"""
-    secret = os.environ.get("LARK_VERIFICATION_TOKEN", "")
+    sha1(HTTP 头 X-Lark-Timestamp + X-Lark-Nonce + Verification Token + body)。
+
+    批 1：密钥主源=im_bot_config.credentials.verification_token，env 兜底；
+    两处皆空=fail-closed 拒（卡片是操作执行面，P0-2）。"""
+    secret = _im_bot_secret("verification_token", "LARK_VERIFICATION_TOKEN")
     if not secret:
         return False   # 卡片是操作执行面：未配置即拒（fail-closed，P0-2）
     sig = hashlib.sha1(f"{header_ts}{nonce}{secret}{body}".encode()).hexdigest()
