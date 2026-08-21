@@ -2,7 +2,7 @@
 
 register_app 同步阻塞，放 Celery worker 跑（不阻塞 web-api）。
 on_qr_code 回调存 Valkey（前端轮询拿二维码）；
-成功后凭证加密存 DB feishu_config + Valkey 存 done 状态。
+成功后凭证加密存 DB im_bot_config(批 2)+ Valkey 存 done 状态。
 """
 from __future__ import annotations
 import os
@@ -93,13 +93,33 @@ def feishu_register_task(self, session_id: str):
         except Exception as e:
             logger.warning(f"获取飞书应用名称失败: {e}")
 
-        # 加密存 DB feishu_config（含 name）
-        enc_secret = encrypt(app_secret) if app_secret else ""
+        # 批 2(19 号 v2):存 im_bot_config 统一表——同 app_id 重扫=更新凭证(ON CONFLICT
+        # route_key),不再堆重复行(修批 1 审计 A-S1 揭示的旧行为)
+        import json as _json
+        from src.im_bot.credentials import save_bot_credentials, get_bot_credentials
         with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO feishu_config (name, app_id, app_secret_encrypted, role, enabled) VALUES (%s,%s,%s,%s,true)",
-                (app_name, app_id, enc_secret, "viewer"))
-            conn.commit()
+            cur = conn.execute(
+                "SELECT id, credentials_encrypted FROM im_bot_config "
+                "WHERE provider='feishu' AND params->>'route_key'=%s", (app_id,))
+            row = cur.fetchone()
+            if row:
+                # 已存在(重扫/重连现有):合并凭证(保已有 token/ek)
+                save_bot_credentials(row[0], {"app_id": app_id, "app_secret": app_secret})
+                conn.execute(
+                    "UPDATE im_bot_config SET name=%s, enabled=true, updated_at=now() WHERE id=%s",
+                    (app_name, row[0]))
+                conn.commit()
+                bot_row_id = row[0]
+            else:
+                creds = {"app_id": app_id, "app_secret": app_secret}
+                conn.execute(
+                    "INSERT INTO im_bot_config (provider, name, default_role, enabled, "
+                    "credentials_encrypted, params) VALUES ('feishu', %s, 'viewer', true, %s, %s::jsonb) "
+                    "RETURNING id",
+                    (app_name, encrypt(_json.dumps(creds, ensure_ascii=False)),
+                     _json.dumps({"route_key": app_id})))
+                bot_row_id = cur.fetchone()[0]
+                conn.commit()
 
         _set_session(session_id, {"status": "done", "app_id": app_id}, expire=600)
         logger.info(f"feishu register done: app_id={app_id}")

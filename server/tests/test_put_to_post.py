@@ -25,7 +25,7 @@ POST_ENDPOINTS = [
     "/api/account/1",
     "/api/live-trading/astock",
     "/api/llm-models/1",
-    "/api/feishu/1",
+    "/api/im-bots/1",
     "/api/sync/config/astock_daily",
     "/api/llm-budget/1",
     "/api/data-sources/1",

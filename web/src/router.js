@@ -53,7 +53,8 @@ const routes = [
       { path: 'channels', name: 'channels', component: () => import('./views/Channels.vue'), meta: { admin: true } },
       { path: 'brokers', name: 'brokers', component: () => import('./views/Brokers.vue'), meta: { admin: true } },
       { path: 'risk-rules', name: 'risk-rules', component: () => import('./views/RiskRules.vue'), meta: { admin: true } },
-      { path: 'feishu', name: 'feishu', component: () => import('./views/FeishuConnect.vue'), meta: { admin: true } },
+      { path: 'im-bots', name: 'im-bots', component: () => import('./views/ImBots.vue'), meta: { admin: true } },
+      { path: 'feishu', redirect: '/im-bots' },   // 19 号批 2:旧路由重定向
       { path: 'system-config', name: 'system-config', component: () => import('./views/SystemConfig.vue'), meta: { admin: true } },
     ],
   },

@@ -34,24 +34,43 @@ def _get_max_tool_turns() -> int:
     return 5
 
 
-class FeishuClient:
-    """飞书开放平台 API 客户端。"""
+# 批 2(19 号 v2):per-bot 客户端单例——修两个现状隐患:①多 bot 时 FeishuClient() 不带
+# fid 回复走"最新 enabled"的凭证而非收消息的 bot;②每消息 new 实例 token 缓存形同虚设。
+_CLIENTS: dict[int | None, "FeishuClient"] = {}
+_clients_lock = threading.Lock()
 
-    def __init__(self):
-        # 从 DB feishu_config 读凭证（弃 .env LARK_*，配置 DB 化）
+
+def get_feishu_client(bot_id: int | None = None) -> "FeishuClient":
+    """per-bot FeishuClient 单例(bot_id=None=最新 enabled 行,向后兼容旧调用)。"""
+    with _clients_lock:
+        if bot_id not in _CLIENTS:
+            _CLIENTS[bot_id] = FeishuClient(bot_id)
+        return _CLIENTS[bot_id]
+
+
+class FeishuClient:
+    """飞书开放平台 API 客户端(批 2:凭证读 im_bot_config 统一表)。"""
+
+    def __init__(self, bot_id: int | None = None):
+        from src.im_bot.credentials import get_bot_credentials
         from src.data_platform.db import get_conn
-        from src.quant_common.crypto import decrypt
+        creds = {}
         try:
-            with get_conn() as conn:
-                cur = conn.execute(
-                    "SELECT app_id, app_secret_encrypted FROM feishu_config WHERE enabled=true ORDER BY id DESC LIMIT 1")
-                r = cur.fetchone()
-            self.app_id = r[0] if r else ""
-            self.app_secret = decrypt(r[1]) if r and r[1] else ""
+            if bot_id is None:
+                # 兼容旧调用:最新 enabled feishu 行
+                with get_conn() as conn:
+                    cur = conn.execute(
+                        "SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
+                        "ORDER BY id DESC LIMIT 1")
+                    row = cur.fetchone()
+                bot_id = row[0] if row else None
+            if bot_id is not None:
+                creds = get_bot_credentials(bot_id)
         except Exception as e:
             logger.warning(f"DB 读飞书配置失败: {e}")
-            self.app_id = ""
-            self.app_secret = ""
+        self.bot_id = bot_id
+        self.app_id = creds.get("app_id", "")
+        self.app_secret = creds.get("app_secret", "")
         self._token: str = ""
         self._token_expires: float = 0
 
@@ -253,13 +272,13 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     if receive_id is None: receive_id = open_id
     """后台线程：消息 → LLM 网关 → 回复/确认卡片。per-机器人 role（机器人=登录账号）。"""
     print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
-    client = FeishuClient()
+    client = get_feishu_client(fid)   # 批 2:per-bot 单例(修多 bot 回复走错凭证隐患)
     role = "viewer"
     if fid:
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
-                cur = conn.execute("SELECT role FROM feishu_config WHERE id=%s", (fid,))
+                cur = conn.execute("SELECT default_role FROM im_bot_config WHERE id=%s AND provider='feishu'", (fid,))
                 r = cur.fetchone()
                 if r:
                     role = r[0]

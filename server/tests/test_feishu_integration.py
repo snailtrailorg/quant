@@ -16,19 +16,12 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def test_feishu_client_init_from_db():
-    """FeishuClient.__init__ 从 DB 读 feishu_config，app_id/app_secret 正确解密。"""
+    """FeishuClient(bot_id) 经 get_bot_credentials 读 im_bot_config(批 2 切新表)。"""
     from src.feishu_bot.bot import FeishuClient
 
-    mock_row = ("cli_aafcd6f818b8dbd1", "encrypted_secret_here")
-    mock_cur = MagicMock()
-    mock_cur.fetchone.return_value = mock_row
-    mock_conn = MagicMock()
-    mock_conn.__enter__.return_value = mock_conn
-    mock_conn.execute.return_value = mock_cur
-
-    with patch("src.data_platform.db.get_conn", return_value=mock_conn), \
-         patch("src.quant_common.crypto.decrypt", return_value="decrypted_app_secret"):
-        client = FeishuClient()
+    with patch("src.im_bot.credentials.get_bot_credentials",
+               return_value={"app_id": "cli_aafcd6f818b8dbd1", "app_secret": "decrypted_app_secret"}):
+        client = FeishuClient(bot_id=10)
 
     assert client.app_id == "cli_aafcd6f818b8dbd1"
     assert client.app_secret == "decrypted_app_secret"
@@ -36,18 +29,24 @@ def test_feishu_client_init_from_db():
     assert client._token_expires == 0
 
 
+def test_feishu_client_perbot_singleton():
+    """批 2:get_feishu_client 同 bot_id 返回同实例(修多 bot 走错凭证+token 每消息重取)。"""
+    from src.feishu_bot import bot as _bot
+    _bot._CLIENTS.clear()
+    with patch("src.im_bot.credentials.get_bot_credentials",
+               return_value={"app_id": "cli_x", "app_secret": "s"}):
+        c1 = _bot.get_feishu_client(10)
+        c2 = _bot.get_feishu_client(10)
+    assert c1 is c2
+    assert _bot.get_feishu_client(11) is not c1
+
+
 def test_feishu_client_init_no_db():
-    """DB 无 feishu_config，app_id/app_secret 为空，不抛异常。"""
+    """无凭证（表空）app_id/app_secret 为空，不抛异常。"""
     from src.feishu_bot.bot import FeishuClient
 
-    mock_cur = MagicMock()
-    mock_cur.fetchone.return_value = None
-    mock_conn = MagicMock()
-    mock_conn.__enter__.return_value = mock_conn
-    mock_conn.execute.return_value = mock_cur
-
-    with patch("src.data_platform.db.get_conn", return_value=mock_conn):
-        client = FeishuClient()
+    with patch("src.im_bot.credentials.get_bot_credentials", return_value={}):
+        client = FeishuClient(bot_id=999)
 
     assert client.app_id == ""
     assert client.app_secret == ""
@@ -56,9 +55,10 @@ def test_feishu_client_init_no_db():
 def test_feishu_client_init_db_error():
     """DB 查询抛异常，app_id 为空，不崩溃。"""
     from src.feishu_bot.bot import FeishuClient
+    from src.data_platform import db as _db
 
-    with patch("src.data_platform.db.get_conn", side_effect=Exception("DB error")):
-        client = FeishuClient()
+    with patch.object(_db, "get_conn", side_effect=Exception("DB error")):
+        client = FeishuClient(bot_id=999)
 
     assert client.app_id == ""
     assert client.app_secret == ""

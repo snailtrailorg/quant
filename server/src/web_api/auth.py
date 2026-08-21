@@ -45,7 +45,7 @@ PERMISSIONS = {
     "analyst": {"read", "strategy_control", "data_sync", "system_config"},   # 研究：策略/回测/数据同步/系统配置
     "trader":  {"read", "strategy_control", "halt", "trade", "live_trading_control"},  # 交易：策略启停/熔断/下单/实盘开关
     "admin":   {"read", "strategy_control", "data_sync", "halt", "resume", "trade", "live_trading_control",
-                 "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "feishu_config"},
+                 "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "im_bots_config"},
 }
 
 

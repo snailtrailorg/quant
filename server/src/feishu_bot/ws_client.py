@@ -1,6 +1,6 @@
 """飞书长连接客户端（lark.ws.Client 常驻进程）。
 
-从 DB feishu_config 读凭证，维持 WebSocket 长连接接收消息（不需要公网 webhook）。
+从 DB im_bot_config 读凭证(批 2)，维持 WebSocket 长连接接收消息（不需要公网 webhook）。
 systemd quant-feishu-bot@quant.service 管理（auto_reconnect=True 自动重连）。
 
 启动：python -m src.feishu_bot.ws_client
@@ -12,7 +12,6 @@ import lark_oapi as lark
 from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
 from src.data_platform.db import get_conn
-from src.quant_common.crypto import decrypt
 from src.feishu_bot.bot import process_message_async
 
 logger = logging.getLogger("feishu_bot")
@@ -20,16 +19,21 @@ _FID = None  # 当前机器人 id（main 设置，on_message 用）
 
 
 def load_feishu_credentials(fid=None) -> tuple[str, str]:
-    """从 DB 读飞书配置。fid 指定机器人 id，None 读最新 enabled（兼容）。"""
-    with get_conn() as conn:
-        if fid:
-            cur = conn.execute("SELECT app_id, app_secret_encrypted FROM feishu_config WHERE id=%s", (fid,))
-        else:
-            cur = conn.execute("SELECT app_id, app_secret_encrypted FROM feishu_config WHERE enabled=true ORDER BY id DESC LIMIT 1")
-        r = cur.fetchone()
-    if not r:
-        raise RuntimeError("未配置飞书机器人（feishu_config 无记录），请先扫码接入")
-    return r[0], decrypt(r[1])
+    """从 im_bot_config 读飞书凭证(批 2,19 号 v2)。
+    fid 指定机器人 id，None 读最新 enabled（兼容）。"""
+    from src.im_bot.credentials import get_bot_credentials
+    creds = get_bot_credentials(fid) if fid else {}
+    if not creds:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
+                "ORDER BY id DESC LIMIT 1")
+            row = cur.fetchone()
+        if row:
+            creds = get_bot_credentials(row[0])
+    if not creds.get("app_id") or not creds.get("app_secret"):
+        raise RuntimeError("未配置飞书机器人（im_bot_config 无有效凭证），请先扫码接入或在 Web 补录")
+    return creds["app_id"], creds["app_secret"]
 
 
 def on_message(data) -> None:

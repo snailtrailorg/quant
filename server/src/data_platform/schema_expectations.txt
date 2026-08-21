@@ -30,7 +30,6 @@ dividend :: ts_code,end_date,ann_date,div_proc,stk_div,cash_div,cash_div_tax,rec
 email_outbox :: id,to_email,subject,html_body,status,attempts,next_attempt_at,last_error,created_at,sent_at
 etf_basic_info :: ts_code,name,management,fund_type,invest_type,list_date
 factor_def :: id,name,category,description,code,params,created_at,updated_at,needs_history
-feishu_config :: id,app_id,app_secret_encrypted,verification_token_encrypted,encrypt_key_encrypted,event_types,enabled,created_at,updated_at,name,role,description
 fina_indicator :: ts_code,ann_date,end_date,eps,roe,roa,gross_margin,netprofit_margin,current_ratio,quick_ratio,debt_to_assets,assets_turn,revenue_ps,bps,ocfps,roe_yearly,netprofit_yoy,revenue_yoy,raw_json
 forecast :: ts_code,ann_date,end_date,type,p_change_min,p_change_max,net_profit_min,net_profit_max,last_parent_net,first_ann_date,summary,change_reason
 health_event :: id,ts,rule_id,component,severity,detail
