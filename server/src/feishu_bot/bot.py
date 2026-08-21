@@ -177,7 +177,7 @@ def _im_bot_secret(field: str, env_key: str) -> str:
             cur = conn.execute(
                 "SELECT credentials_encrypted FROM im_bot_config "
                 "WHERE provider='feishu' AND enabled AND credentials_encrypted IS NOT NULL "
-                "ORDER BY id LIMIT 1")
+                "ORDER BY id DESC LIMIT 1")   # A-G3:与 FeishuClient/ws_client 选行方向一致(最新)
             row = cur.fetchone()
             if row:
                 creds = _json.loads(decrypt(row[0]))
@@ -185,7 +185,7 @@ def _im_bot_secret(field: str, env_key: str) -> str:
                 if v:
                     return v
     except Exception as e:
-        logger.debug("im_bot_config 密钥读取失败（回落 env %s）: %s", env_key, e)
+        logger.warning("im_bot_config 密钥读取失败 field=%s（回落 env %s）: %s", field, env_key, e)
     return os.environ.get(env_key, "")
 
 

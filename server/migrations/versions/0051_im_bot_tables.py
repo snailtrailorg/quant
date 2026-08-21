@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.Column("enabled", sa.Boolean(), server_default=sa.text("false")),
         sa.Column("priority", sa.Integer(), server_default=sa.text("0")),
         sa.Column("credentials_encrypted", sa.Text()),   # 加密 JSON(仅 secret 字段)
-        sa.Column("params", sa.JSON(), server_default=sa.text("'{}'::jsonb")),
+        sa.Column("params", sa.dialects.postgresql.JSONB(), server_default=sa.text("'{}'::jsonb")),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
         sa.PrimaryKeyConstraint("id"),
@@ -54,40 +54,53 @@ def upgrade() -> None:
     # ── feishu_config 全列数据迁移 ──
     from src.quant_common.crypto import decrypt, encrypt
     import json
+    import logging as _logging
+    _log = _logging.getLogger("alembic.migration")
+    _failed = {"n": 0}
 
     def _dec(v: str | None) -> str:
-        """容错解密:旧密文可能是历史密钥时代加密(本地公开常量期),解不开置空——
-        恰落入 env 兜底过渡(19 号 v2 §5 批 1),不阻塞迁移。"""
+        """容错解密:解不开置空(env 兜底过渡)。失败计数,迁移收尾 loud warning
+        (双盲 A-S2:静默重加密垃圾+零告警会让批 2 切表时 bot 静默死亡无人知)。"""
         if not v:
             return ""
         try:
             return decrypt(v)
         except Exception:
+            _failed["n"] += 1
             return ""
 
     conn = op.get_bind()
+    # 双盲 A-S1:扫码流程可 INSERT 重复 app_id 行(旧行不停用)——DISTINCT ON 取最新,
+    # 防撞 uq_imbot_provider_route 使整个迁移事务回滚
     rows = conn.execute(sa.text(
-        "SELECT id, app_id, app_secret_encrypted, verification_token_encrypted, "
-        "encrypt_key_encrypted, enabled, name, role, description "
-        "FROM feishu_config")).fetchall()
+        "SELECT DISTINCT ON (app_id) id, app_id, app_secret_encrypted, "
+        "verification_token_encrypted, encrypt_key_encrypted, enabled, name, role, description "
+        "FROM feishu_config ORDER BY app_id, id DESC")).fetchall()
     for (fid, app_id, secret_enc, tok_enc, ek_enc, enabled, name, role, desc) in rows:
         creds = {"app_id": app_id or "", "app_secret": _dec(secret_enc)}
-        # 旧列已有 token/ek(扫码流程曾写)——能解则搬运;解不开置空走 env 兜底
         tok, ek = _dec(tok_enc), _dec(ek_enc)
         if tok:
             creds["verification_token"] = tok
         if ek:
             creds["encrypt_key"] = ek
+        # 双盲 A-G1:旧表 role 无 CHECK 且 web 更新端点曾裸收字符串——归一四角色,防撞 CHECK
+        role_norm = role if role in ("viewer", "analyst", "trader", "admin") else "viewer"
+        # 双盲 A-S2:creds 全空(解密全失败)存 NULL 而非重加密空值垃圾——批 2 切表前可见
+        creds_enc = encrypt(json.dumps(creds, ensure_ascii=False)) if any(
+            creds.get(k) for k in ("app_secret", "verification_token", "encrypt_key")) else None
         conn.execute(sa.text(
             "INSERT INTO im_bot_config (id, provider, name, description, default_role, "
             "enabled, priority, credentials_encrypted, params) "
             "VALUES (:id, 'feishu', :name, :desc, :role, :enabled, 0, :creds, :params)"),
-            {"id": fid, "name": name, "desc": desc, "role": role or "viewer",
-             "enabled": bool(enabled), "creds": encrypt(json.dumps(creds, ensure_ascii=False)),
+            {"id": fid, "name": name, "desc": desc, "role": role_norm,
+             "enabled": bool(enabled), "creds": creds_enc,
              "params": json.dumps({"route_key": app_id or ""})})
     # 序列拨正(显式 id 插入后)
     if rows:
         conn.execute(sa.text("SELECT setval('im_bot_config_id_seq', (SELECT MAX(id) FROM im_bot_config))"))
+    if _failed["n"]:
+        _log.warning("[0051] %d 个旧密文解密失败已置空(密钥轮换/历史密钥?)——credentials 存 NULL,"
+                     "签名/授权走 env 兜底;批 2 切 FeishuClient 前须用当轮密钥在 Web 重录凭证!", _failed["n"])
     # event_types 死列明示丢弃(19 号 v2 §2)
 
 
