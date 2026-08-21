@@ -827,15 +827,6 @@ export default {
       field: { appId: 'App ID', appSecret: 'App Secret',
                verifyToken: 'Verification Token', encryptKey: 'Encrypt Key' },
     },
-    imBots: {
-      title: 'IM Bots', addBot: 'Add Bot', editBot: 'Edit Bot',
-      providerCol: 'Platform', defaultRole: 'Default Role', users: 'Authorized Users', roleCol: 'Role',
-      qrTitle: 'Scan to Connect', qrHint: 'Scan with the platform app, choose connect/create', qrBtn: 'QR Onboarding',
-      phName: 'Bot name', phKeepBlank: 'Leave blank to keep',
-      provider: { feishu: 'Feishu', dingtalk: 'DingTalk', wecom: 'WeCom', telegram: 'Telegram' },
-      field: { appId: 'App ID', appSecret: 'App Secret',
-               verifyToken: 'Verification Token', encryptKey: 'Encrypt Key' },
-    },
     feishu: {
       title: '飞书机器人管理（per-机器人角色 = 登录账号权限级别）',
       addBtn: '🔗 扫码添加机器人',
@@ -911,6 +902,9 @@ export default {
       deactivateConfirm: '确认注销账号？注销后无法恢复，个人信息将被脱敏',
     },
     err: {
+      PROVIDER_INVALID: '未知 IM 平台', BOT_NOT_FOUND: '机器人不存在', BOT_DUPLICATE: '同平台已有相同 App ID 的机器人',
+      ROLE_INVALID: '非法角色', NOT_INTERACTIVE: '该平台走手动添加', NOT_IMPLEMENTED: '该平台辅助接入待实现',
+      SAVE_FAILED: '保存失败', RATE_LIMITED: '请求过于频繁', PASSWORD_TOO_LONG: '密码至多 72 字节',
       FACTOR_INCOMPATIBLE: '含与策略品类不兼容的因子', STRATEGY_NOT_FOUND: '策略不存在',
       STRATEGY_NOT_VERIFIED: '策略未通过回测验证（三级开关第三级）', STRATEGY_NO_SYMBOL: '策略未绑定标的',
       BACKTEST_EVIDENCE_INVALID: '回测证据无效（须属于该策略且状态 done）', NO_DONE_BACKTEST: '该策略无已完成回测',
@@ -1764,6 +1758,15 @@ export default {
       pwdSet: 'Set — leave blank to keep',
       pwdEmpty: 'Not set',
     },
+    imBots: {
+      title: 'IM Bots', addBot: 'Add Bot', editBot: 'Edit Bot',
+      providerCol: 'Platform', defaultRole: 'Default Role', users: 'Authorized Users', roleCol: 'Role',
+      qrTitle: 'Scan to Connect', qrHint: 'Scan with the platform app, choose connect/create', qrBtn: 'QR Onboarding',
+      phName: 'Bot name', phKeepBlank: 'Leave blank to keep',
+      provider: { feishu: 'Feishu', dingtalk: 'DingTalk', wecom: 'WeCom', telegram: 'Telegram' },
+      field: { appId: 'App ID', appSecret: 'App Secret',
+               verifyToken: 'Verification Token', encryptKey: 'Encrypt Key' },
+    },
     feishu: {
       title: 'Feishu Bot Management (per-bot role = login account permission level)',
       addBtn: '🔗 Scan to Add Bot',
@@ -1839,6 +1842,9 @@ export default {
       deactivateConfirm: 'Deactivate your account? This cannot be undone; personal info will be anonymized',
     },
     err: {
+      PROVIDER_INVALID: 'Unknown IM platform', BOT_NOT_FOUND: 'Bot not found', BOT_DUPLICATE: 'A bot with the same App ID already exists',
+      ROLE_INVALID: 'Invalid role', NOT_INTERACTIVE: 'This platform uses manual setup', NOT_IMPLEMENTED: 'Onboarding for this platform not yet implemented',
+      SAVE_FAILED: 'Save failed', RATE_LIMITED: 'Too many requests', PASSWORD_TOO_LONG: 'Password max 72 bytes',
       FACTOR_INCOMPATIBLE: 'Contains factors incompatible with strategy category', STRATEGY_NOT_FOUND: 'Strategy not found',
       STRATEGY_NOT_VERIFIED: 'Strategy not backtest-verified (level 3 switch)', STRATEGY_NO_SYMBOL: 'Strategy has no symbol bound',
       BACKTEST_EVIDENCE_INVALID: 'Invalid backtest evidence (must belong to strategy, status done)', NO_DONE_BACKTEST: 'No done backtest for this strategy',

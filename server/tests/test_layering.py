@@ -17,6 +17,7 @@ LAYER = {
     "data_platform": 1, "alert_notify": 2, "task_manager": 2, "strategy_framework": 2,
     "risk_control": 2, "astock_analysis": 2, "llm_gateway": 2, "strategies": 2,
     "strategy_runner": 3, "md_hub": 3, "data_sync": 3, "scheduler": 3, "health_monitor": 3,
+    "im_bot": 3,   # 19 号 §3:IM 统一接入服务层(Provider/凭证/用户)
     "web_api": 4, "feishu_bot": 4,
     "email_service": 2,
 }
@@ -56,19 +57,22 @@ def _module_edges():
                     edges.add((src_mod, segs[0]))
             # P4 修复（2026-08-20 审计 A1/A-架构）：相对 import 通道原不扫描——
             # `from ..web_api import x` 铁律测试照样全绿（factor.py 5 处实际在用此通道）
-            depth = len(parts) - 1   # 当前文件距 src/ 的包深度
+            depth = len(parts) - 1   # 当前文件距 src/ 的包深度(文件所在包的层数)
             for m in re.finditer(r"(?:from|import)\s+(\.+)([\w.]*)", txt):
-                up = len(m.group(1))
+                dots = len(m.group(1))
                 rest = m.group(2).split(".")[0]
                 if not rest:
                     continue
-                # up 级相对 = 从当前包向上 up 层；target 顶层包名 = parts[depth-up]（粗粒度：
-                # 只取第一个外部段，模块内相对引用不含包名跳过）
-                if up > depth:
-                    continue
-                target_pkg = parts[depth - up]
+                # B-S3 修正:n 点 = 向上 n-1 层(1 点=本包内,2 点=父包)。target 包 =
+                # 向上后所在包的下一个段。up_level 超出 src/ 根=不可能(语法上合法但我们的
+                # 包结构内只会在 src/ 内)——越界按 src 根处理报最强嫌疑。
+                up_level = dots - 1
+                base_idx = depth - up_level          # target 段在 parts 里的索引
+                if base_idx < 0 or base_idx >= len(parts):
+                    continue                          # 理论不可达
+                target_pkg = parts[base_idx] if base_idx < depth else rest
                 if target_pkg.endswith(".py"):
-                    target_pkg = target_pkg[:-3]
+                    target_pkg = target_pkg[:-1].split(".")[0] if False else (parts[base_idx][:-3] if base_idx == depth else target_pkg)
                 if target_pkg and target_pkg != src_mod:
                     edges.add((src_mod, target_pkg))
     return edges

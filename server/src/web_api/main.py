@@ -1650,16 +1650,24 @@ def im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_perm("im
     if req.default_role not in ("viewer", "analyst", "trader", "admin"):
         raise ApiError(400, "ROLE_INVALID", f"非法角色: {req.default_role}")
     import json as _json
+    from src.quant_common.crypto import encrypt as _encrypt
     route = req.credentials.get("app_id") or req.credentials.get("client_id") or \
             req.credentials.get("corp_id") or ""
-    has_secret = any(req.credentials.get(k) for k in
-                     ("app_secret", "client_secret", "secret"))
+    has_any = any(v for v in req.credentials.values())
+    # A-G1: 同 (provider, route_key) 预检(撞唯一索引裸 500→错误码化;两个空 route_key 也撞)
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT 1 FROM im_bot_config WHERE provider=%s AND params->>'route_key'=%s",
+            (req.provider, route))
+        if cur.fetchone():
+            raise ApiError(400, "BOT_DUPLICATE", f"同 {req.provider} 已有 route_key={route or '(空)'} 的机器人")
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO im_bot_config (provider, name, description, default_role, enabled, "
             "credentials_encrypted, params) VALUES (%s,%s,%s,%s,false,%s,%s::jsonb) RETURNING id",
             (req.provider, req.name, req.description, req.default_role,
-             _json.dumps(req.credentials, ensure_ascii=False) if has_secret else None,
+             # B-S2 修复:原漏 encrypt——明文落密文列且 get_bot_credentials 解密必炸(静默死 bot)
+             _encrypt(_json.dumps(req.credentials, ensure_ascii=False)) if has_any else None,
              _json.dumps({"route_key": route})))
         bid = cur.fetchone()[0]
         conn.commit()
@@ -1731,9 +1739,11 @@ def im_bots_stop(bid: int, payload: dict = Depends(require_perm("im_bots_config"
     p = get_im_provider(row[0])
     if p and p.MODE in ("websocket", "hybrid"):
         try:
-            subprocess.run(["systemctl", "stop", f"quant-feishu-bot@{bid}"], check=False, timeout=10)
-        except Exception:
-            pass
+            subprocess.run(["systemctl", "stop", f"quant-feishu-bot@{bid}"], check=True, timeout=10)
+        except subprocess.CalledProcessError as e:
+            return {"ok": False, "error": f"systemctl 失败: {e}"}   # A-G9:失败不置 enabled(状态归真)
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
     with get_conn() as conn:
         conn.execute("UPDATE im_bot_config SET enabled=false, updated_at=now() WHERE id=%s", (bid,))
         conn.commit()

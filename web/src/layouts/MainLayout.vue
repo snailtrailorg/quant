@@ -60,7 +60,7 @@
           <el-menu-item index="/account"><el-icon><Key /></el-icon>{{ t('nav.account') }}</el-menu-item>
           <el-menu-item index="/audit"><el-icon><Tickets /></el-icon>{{ t('nav.audit') }}</el-menu-item>
           <el-menu-item index="/llm-models"><el-icon><ChatDotRound /></el-icon>{{ t('nav.llmModels') }}</el-menu-item>
-          <el-menu-item index="/im-bots"><el-icon><ChatDotRound /></el-icon>{{ t('nav.feishu') }}</el-menu-item>
+          <el-menu-item index="/im-bots"><el-icon><ChatDotRound /></el-icon>{{ t('nav.imBots') }}</el-menu-item>
           <el-menu-item index="/system-config"><el-icon><Tools /></el-icon>{{ t('nav.systemConfig') }}</el-menu-item>
           <el-menu-item index="/data-sources"><el-icon><Connection /></el-icon>{{ t('nav.dataSources') }}</el-menu-item>
           <el-menu-item index="/channels"><el-icon><ChatDotRound /></el-icon>{{ t('nav.channels') }}</el-menu-item>

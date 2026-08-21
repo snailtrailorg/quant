@@ -129,7 +129,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { apiErr } from '../api'
 
 const { t } = useI18n()
@@ -201,7 +201,10 @@ const testBot = async id => {
     r.ok ? ElMessage.success(r.detail || 'OK') : ElMessage.error(r.detail || r.error || 'FAIL')
   } catch (e) { ElMessage.error(apiErr(e)) }
 }
-const delBot = async id => { try { await api.delete(`/im-bots/${id}`); await load() } catch (e) { ElMessage.error(apiErr(e)) } }
+const delBot = async id => {
+  try { await ElMessageBox.confirm(t('common.confirmDelete'), t('common.tip'), { type: 'warning' }) } catch { return }
+  try { await api.delete(`/im-bots/${id}`); await load() } catch (e) { ElMessage.error(apiErr(e)) }
+}
 
 const openEdit = row => {
   editForm.value = { name: row.name, description: row.description || '', default_role: row.default_role, credentials: {} }

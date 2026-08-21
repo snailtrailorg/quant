@@ -17,7 +17,7 @@ import pytest
 
 def test_feishu_client_init_from_db():
     """FeishuClient(bot_id) 经 get_bot_credentials 读 im_bot_config(批 2 切新表)。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     with patch("src.im_bot.credentials.get_bot_credentials",
                return_value={"app_id": "cli_aafcd6f818b8dbd1", "app_secret": "decrypted_app_secret"}):
@@ -31,7 +31,7 @@ def test_feishu_client_init_from_db():
 
 def test_feishu_client_perbot_singleton():
     """批 2:get_feishu_client 同 bot_id 返回同实例(修多 bot 走错凭证+token 每消息重取)。"""
-    from src.feishu_bot import bot as _bot
+    from src.im_bot import feishu_client as _bot
     _bot._CLIENTS.clear()
     with patch("src.im_bot.credentials.get_bot_credentials",
                return_value={"app_id": "cli_x", "app_secret": "s"}):
@@ -43,7 +43,7 @@ def test_feishu_client_perbot_singleton():
 
 def test_feishu_client_init_no_db():
     """无凭证（表空）app_id/app_secret 为空，不抛异常。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     with patch("src.im_bot.credentials.get_bot_credentials", return_value={}):
         client = FeishuClient(bot_id=999)
@@ -54,7 +54,7 @@ def test_feishu_client_init_no_db():
 
 def test_feishu_client_init_db_error():
     """DB 查询抛异常，app_id 为空，不崩溃。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
     from src.data_platform import db as _db
 
     with patch.object(_db, "get_conn", side_effect=Exception("DB error")):
@@ -70,7 +70,7 @@ def test_feishu_client_init_db_error():
 
 def test_feishu_client_get_token():
     """_get_token mock httpx.post，验证 token 获取和缓存。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     # mock httpx 返回正常 token
     mock_resp = MagicMock()
@@ -95,7 +95,7 @@ def test_feishu_client_get_token():
 
 def test_feishu_client_get_token_no_credentials():
     """无 app_id/app_secret 返回空 token。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     with patch("src.data_platform.db.get_conn"):
         client = FeishuClient()
@@ -108,7 +108,7 @@ def test_feishu_client_get_token_no_credentials():
 
 def test_feishu_client_get_token_cached():
     """token 未过期时不重新请求。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
     import time
 
     with patch("src.data_platform.db.get_conn"):
@@ -127,7 +127,7 @@ def test_feishu_client_get_token_cached():
 
 def test_feishu_client_get_token_expired():
     """token 过期后重新请求。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
     import time
 
     mock_resp = MagicMock()
@@ -148,7 +148,7 @@ def test_feishu_client_get_token_expired():
 
 def test_feishu_client_get_token_api_failure():
     """飞书 API 返回异常，返回空 token。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     with patch("src.data_platform.db.get_conn"):
         client = FeishuClient()
@@ -167,7 +167,7 @@ def test_feishu_client_get_token_api_failure():
 
 def test_feishu_client_send_text():
     """send_text mock httpx.post，验证正确调飞书 API。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     with patch("src.data_platform.db.get_conn"):
         client = FeishuClient()
@@ -194,7 +194,7 @@ def test_feishu_client_send_text():
 
 def test_feishu_client_send_text_no_token():
     """无 token 时不发送消息。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     with patch("src.data_platform.db.get_conn"):
         client = FeishuClient()
@@ -208,7 +208,7 @@ def test_feishu_client_send_text_no_token():
 
 def test_feishu_client_send_card():
     """send_card 发送交互卡片，msg_type=interactive。"""
-    from src.feishu_bot.bot import FeishuClient
+    from src.im_bot.feishu_client import FeishuClient
 
     with patch("src.data_platform.db.get_conn"):
         client = FeishuClient()
@@ -311,7 +311,7 @@ class TestImBotBatch1:
 
 def test_verify_signature():
     """官方事件签名（P0 复审修正后算法）：sha256(头ts+头nonce+EncryptKey+body)。"""
-    from src.feishu_bot.bot import verify_event_signature
+    from src.im_bot.feishu_client import verify_event_signature
 
     secret = "test_secret_123"
     timestamp = "1723536000"
@@ -328,7 +328,7 @@ def test_verify_signature():
 def test_verify_card_signature():
     """官方卡片签名：sha1(头ts+头nonce+token+body)；未配 token fail-closed 拒。"""
     import hashlib as _h
-    from src.feishu_bot.bot import verify_card_signature
+    from src.im_bot.feishu_client import verify_card_signature
 
     secret = "tok_123"
     ts, nonce, body = "1723536000", "n1", '{"x":1}'
@@ -342,7 +342,7 @@ def test_verify_card_signature():
 
 def test_verify_signature_no_secret():
     """未配置 Encrypt Key 时事件签名跳过（兼容纯 token 模式）。"""
-    from src.feishu_bot.bot import verify_event_signature
+    from src.im_bot.feishu_client import verify_event_signature
 
     with patch.dict(os.environ, {}, clear=True):
         assert verify_event_signature("ts", "n", "body", "sig") is True
@@ -360,13 +360,13 @@ def test_feishu_webhook_message_flow():
     2. 读类工具直接执行并返回结果
     3. 最终回复发送给用户
     """
-    from src.feishu_bot.bot import process_message_async, FeishuClient
+    from src.im_bot.feishu_client import process_message_async, FeishuClient
     from src.llm_gateway import gateway as llm_gateway
     from src.llm_gateway.gateway import LLMResponse
 
     with patch.object(llm_gateway, "chat", return_value=LLMResponse(content="您好，我是量化交易助手。当前风控状态正常。")) as mock_chat, \
-         patch("src.feishu_bot.bot.FeishuClient.send_text") as mock_send, \
-         patch("src.feishu_bot.bot.check_user", return_value="analyst"):
+         patch("src.im_bot.feishu_client.FeishuClient.send_text") as mock_send, \
+         patch("src.im_bot.feishu_client.check_user", return_value="analyst"):
         process_message_async("ou_test_user", "查一下风控状态", "open_id")
 
     # 验证 LLM 被调用
@@ -381,10 +381,10 @@ def test_feishu_webhook_message_flow():
 
 def test_feishu_webhook_message_unauthorized():
     """未授权用户收到拒绝消息。"""
-    from src.feishu_bot.bot import process_message_async
+    from src.im_bot.feishu_client import process_message_async
 
-    with patch("src.feishu_bot.bot.FeishuClient.send_text") as mock_send, \
-         patch("src.feishu_bot.bot.check_user", return_value=None):
+    with patch("src.im_bot.feishu_client.FeishuClient.send_text") as mock_send, \
+         patch("src.im_bot.feishu_client.check_user", return_value=None):
         process_message_async("ou_unauthorized", "查持仓", "open_id")
 
     mock_send.assert_called_once()
@@ -393,13 +393,13 @@ def test_feishu_webhook_message_unauthorized():
 
 def test_feishu_process_message_with_tool():
     """消息触发读类工具调用，工具结果回传 LLM 后回复。"""
-    from src.feishu_bot.bot import process_message_async, FeishuClient
+    from src.im_bot.feishu_client import process_message_async, FeishuClient
     from src.llm_gateway import gateway as llm_gateway
     from src.llm_gateway.gateway import LLMResponse
 
     with patch.object(llm_gateway, "chat") as mock_chat, \
-         patch("src.feishu_bot.bot.FeishuClient.send_text") as mock_send, \
-         patch("src.feishu_bot.bot.check_user", return_value="trader"):
+         patch("src.im_bot.feishu_client.FeishuClient.send_text") as mock_send, \
+         patch("src.im_bot.feishu_client.check_user", return_value="trader"):
         # 第一轮：LLM 返回工具调用（query_risk_state）
         # 第二轮：LLM 返回最终回复
         mock_chat.side_effect = [

@@ -32,6 +32,12 @@ class IMBotProvider(ABC):
     def required_fields(self) -> set[str]:
         return {f["key"] for f in self.FIELD_SCHEMA if f.get("secret")}
 
+    # ── 连接生命周期(B-G1:19 号 §1 声明面补齐;默认 no-op——纯 webhook 型无长连接)──
+    def connect(self, bot_id: int, on_message) -> None:
+        """启动长连接(websocket/long_poll 型;webhook 型无需)。"""
+    def shutdown(self, bot_id: int) -> None:
+        """停长连接。"""
+
     # ── 通道行为 ──
     @abstractmethod
     def send_text(self, bot_id: int, receive_id: str, receive_id_type: str, text: str) -> bool:

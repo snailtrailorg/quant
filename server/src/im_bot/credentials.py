@@ -27,9 +27,17 @@ def get_bot_credentials(bot_id: int) -> dict:
         return {}
 
 
+def _provider_secret_fields(provider: str) -> set[str]:
+    """FIELD_SCHEMA 的 secret 字段集(双盲 A-S2:名单硬编码与 schema 脱节——补录
+    verification_token 不在名单→has_secret=False→credentials 写 NULL 凭证丢)。"""
+    from .base import get_im_provider
+    p = get_im_provider(provider)
+    return p.required_fields if p else set()
+
+
 def save_bot_credentials(bot_id: int, creds: dict, partial: bool = True) -> bool:
     """写凭证(整 JSON 重加密)。partial=True 时与现值合并(表单只改部分字段)。
-    同步维护 params.route_key=creds 里第一个 *id 类字段(飞书=app_id)。
+    有任一非空字段即存(schema 推导,不再要求必须有 secret——A-G2 只填 app_id 也保单真相源)。
     """
     from src.data_platform.db import get_conn
     from src.quant_common.crypto import encrypt
@@ -38,12 +46,11 @@ def save_bot_credentials(bot_id: int, creds: dict, partial: bool = True) -> bool
     route = creds.get("app_id") or creds.get("client_id") or creds.get("corp_id") or ""
     try:
         with get_conn() as conn:
-            has_secret = any(creds.get(k) for k in
-                             ("app_secret", "client_secret", "secret", "app_token"))
+            has_any = any(v for v in creds.values())
             conn.execute(
                 "UPDATE im_bot_config SET credentials_encrypted=%s, "
                 "params = COALESCE(params,'{}'::jsonb) || %s::jsonb, updated_at=now() WHERE id=%s",
-                (encrypt(json.dumps(creds, ensure_ascii=False)) if has_secret else None,
+                (encrypt(json.dumps(creds, ensure_ascii=False)) if has_any else None,
                  json.dumps({"route_key": route}), bot_id))
             conn.commit()
         return True

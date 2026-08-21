@@ -25,13 +25,13 @@ class FeishuProvider(IMBotProvider):
 
     # ── 通道行为(委托 feishu_bot.bot 的生产实现,bot_id 定位凭证)──
     def send_text(self, bot_id: int, receive_id: str, receive_id_type: str, text: str) -> bool:
-        from ..feishu_bot.bot import FeishuClient
+        from .feishu_client import FeishuClient
         client = FeishuClient(bot_id)
         client.send_text(receive_id, text, receive_id_type)
         return True
 
     def send_card(self, bot_id: int, receive_id: str, receive_id_type: str, card: dict) -> bool:
-        from ..feishu_bot.bot import FeishuClient
+        from .feishu_client import FeishuClient
         client = FeishuClient(bot_id)
         client.send_card(receive_id, card, receive_id_type)
         return True
@@ -39,7 +39,7 @@ class FeishuProvider(IMBotProvider):
     def verify_callback(self, bot_id: int, headers: dict, body: str):
         """批 2:飞书回调仍走 feishu_bot/router 旧路径(用户飞书后台已配 URL 不动,
         通用 /api/im-bots/{bid}/callback 批 3 强制)——此实现为通用入口预置。"""
-        from ..feishu_bot.bot import verify_card_signature, verify_event_signature
+        from .feishu_client import verify_card_signature, verify_event_signature
         ts = headers.get("X-Lark-Timestamp", "")
         nonce = headers.get("X-Lark-Nonce", "")
         sig = headers.get("X-Lark-Signature", "")

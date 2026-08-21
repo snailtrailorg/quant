@@ -112,13 +112,14 @@ def feishu_register_task(self, session_id: str):
                 bot_row_id = row[0]
             else:
                 creds = {"app_id": app_id, "app_secret": app_secret}
+                # B-S1 修复:RETURNING 走 conn.execute 自己的游标(原 cur 是上方 SELECT 的
+                # 耗尽游标,fetchone 返 None[0] TypeError——扫码新增 bot 必崩);返回值无人用,删
                 conn.execute(
                     "INSERT INTO im_bot_config (provider, name, default_role, enabled, "
                     "credentials_encrypted, params) VALUES ('feishu', %s, 'viewer', true, %s, %s::jsonb) "
-                    "RETURNING id",
+                    "ON CONFLICT (provider, (params->>'route_key')) DO NOTHING",
                     (app_name, encrypt(_json.dumps(creds, ensure_ascii=False)),
                      _json.dumps({"route_key": app_id})))
-                bot_row_id = cur.fetchone()[0]
                 conn.commit()
 
         _set_session(session_id, {"status": "done", "app_id": app_id}, expire=600)
