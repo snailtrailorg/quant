@@ -3,9 +3,7 @@
 from __future__ import annotations
 import asyncio
 import logging
-import os
 import json
-import redis
 from fastapi import APIRouter, Depends, Request, Body, WebSocket, WebSocketDisconnect, Query
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
@@ -13,11 +11,6 @@ from ..models import (ChatReq, LLMModelReq, LlmBudgetReq)
 from src.data_platform.db import get_conn
 
 logger = logging.getLogger("web_api")
-
-_redis_pool = redis.ConnectionPool.from_url(
-    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-    decode_responses=True,
-)
 
 router = APIRouter(tags=["chat"])
 

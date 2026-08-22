@@ -1,6 +1,7 @@
 """15-服务监控 测试：判定规则（纯函数）+ Prometheus 渲染 + 暴露端。
 2026-08-18 盲审 C/D 修订后语义：evaluate 返回 (findings, state)；R1 跳过 auto-restart；
 R4 需连续 2 轮；R6 交易时段 tick 停滞；HELP 按族唯一。"""
+import time
 import pytest
 
 
@@ -175,6 +176,38 @@ class TestRenderPrometheus:
 
 
 # ——— 暴露端 ———
+
+    def test_tier_staleness_branches(self):
+        """项 18：tier_freshness 三分支（iso 串 / %Y%m%d 日期串 / None 未同步）。
+
+        盲审遗留（2026-08-22）：render_prometheus tier 分支原零测试覆盖。
+        """
+        import re
+        from datetime import datetime, timezone, timedelta
+        from src.health_monitor.collector import render_prometheus
+        iso = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+        d = (datetime.now(timezone.utc) - timedelta(hours=26)).strftime("%Y%m%d")
+        dt_d = datetime.strptime(d, "%Y%m%d").replace(tzinfo=timezone.utc)
+        snap = self._snap()
+        snap["tier_freshness"] = [
+            {"sync_id": "moneyflow_sync", "last_ts": iso, "kind": "tier1"},
+            {"sync_id": "pool_data:income", "last_ts": d, "kind": "tier2"},
+            {"sync_id": "concept_sync", "last_ts": None, "kind": "tier1"},
+        ]
+        text = render_prometheus(snap)
+        # iso 串：2h 前 -> 2.0（容差防跨 0.05 舍入边界）
+        m = re.search(r'quant_tier_table_staleness_hours\{sync_id="moneyflow_sync",kind="tier1"\} ([\d.]+)', text)
+        assert m and abs(float(m.group(1)) - 2.0) <= 0.11
+        # 日期串（二档游标原样）：按当日 00:00 UTC 起算
+        m = re.search(r'quant_tier_table_staleness_hours\{sync_id="pool_data:income",kind="tier2"\} ([\d.]+)', text)
+        expected = (time.time() - dt_d.timestamp()) / 3600
+        assert m and abs(float(m.group(1)) - expected) <= 0.11
+        # None（从未同步）：-1 哨兵
+        assert 'quant_tier_table_staleness_hours{sync_id="concept_sync",kind="tier1"} -1' in text
+        # HELP/TYPE 在样本之前（D-F3 同族约束）
+        assert text.index("# HELP quant_tier_table_staleness_hours") \
+            < text.index("quant_tier_table_staleness_hours{")
+
 
 class TestEndpoints:
     @pytest.fixture

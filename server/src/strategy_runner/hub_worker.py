@@ -122,7 +122,7 @@ def _write_trade_log(d, adapter, sid: str, symbol: str) -> None:
 
 def run(ctx: dict) -> None:
     """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen,
-             warmup_pg, stop_check, reconcile, initial_capital, logger}"""
+             warmup_pg, stop_check, reconcile, logger}"""
     # 2026-08-19 归位：直连 quant_common（原经 strategy_runner.main——main↔hub_worker 互指
     # 且连带加载入口模块级 vnpy import；Q 审：上一轮 replace 静默未中）
     from src.quant_common.session import in_astock_session as _in_astock_session, session_edge
@@ -145,7 +145,6 @@ def run(ctx: dict) -> None:
     td_api = ctx.get("td_api")
     history = ctx["history"]
     frozen = ctx["frozen"]            # 与 _run_hub_mode 的 send_order 网关共享同一 dict（评审 C2）
-    initial_capital = ctx.get("initial_capital") or 1000000
     stream = BAR_STREAM_PREFIX + symbol
     gname = f"task-{tid}"
     cname = f"w-{os.getpid()}"
@@ -353,6 +352,9 @@ def run(ctx: dict) -> None:
                     accounts = adapter.query_account() or []
                     if accounts:
                         from src.data_platform.db import get_conn
+                        # #10 口径修正（2026-08-22）：initial_capital 列=账户基线净值，
+                        # 不再用 live_task 配置资金（策略级 100 万 vs 账户级 10 亿错配）。
+                        from src.strategy_runner.main import _account_baseline_capital
                         total = sum(float(getattr(a, "balance", 0)) for a in accounts)
                         today = datetime.now().strftime("%Y-%m-%d")
                         with get_conn() as conn:
@@ -362,7 +364,7 @@ def run(ctx: dict) -> None:
                             base = float(first[0]) if first else total
                             conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) "
                                          "VALUES (%s,%s,%s)",
-                                         (total, total - base, initial_capital))
+                                         (total, total - base, _account_baseline_capital(total)))
                             conn.commit()
                         # ST2：TD 在线才写持仓批（ThinTdGateway 无 vnpy init_query 常推，须显式查）
                         from src.strategy_runner.main import _flush_positions

@@ -215,8 +215,14 @@ class Strategy:
         pass
 
     def _is_crypto(self) -> bool:
-        """判断是否为加密市场（无 A 股整百手约束）。"""
-        return self.config.adapter in ("binance_perp", "okx_perp")
+        """判断是否为加密市场（无 A 股整百手约束）。
+
+        反向判断（盲审遗留 2026-08-22）：原白名单 in ("binance_perp","okx_perp") 在新增
+        加密适配器时会静默回落 A 股整百取整--小单截断恒 0 直接丢单（盲审 A-1 同族失效模式）；
+        反向 != "xtp" 的失效模式是未知适配器拿到 float 量、由网关显式拒单（响亮失败），
+        方向更安全。
+        """
+        return self.config.adapter != "xtp"
 
     def _resolve_volume(self, sig: Signal, price: float) -> float:
         """执行规则三档（#12，R-F1 修订：方向感知资金口径）。

@@ -89,6 +89,31 @@ def _flush_positions(adapter, account_id, task_id) -> None:
         logger.warning("ST2 持仓快照写批失败（不阻断）: %s", e)
 
 
+_account_baseline: float | None = None
+
+
+def _account_baseline_capital(total: float) -> float:
+    """账户基线净值（#10 口径修正 2026-08-22）。
+
+    account_snapshot.initial_capital 原写 live_task 配置资金（策略级，默认 100 万），
+    而 total_value 是账户级真值（如测试账户 10 亿）--total_pnl 虚增 9.99 亿、风控回撤
+    分母错配。改：基线=该账户首条快照 total_value（跟踪起点净值）；无历史（首次跟踪）
+    以当前查询值为基线。进程内缓存（基线不随运行漂移）。
+    """
+    global _account_baseline
+    if _account_baseline is None:
+        try:
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts ASC LIMIT 1")
+                row = cur.fetchone()
+            _account_baseline = float(row[0]) if row and row[0] else total
+        except Exception as e:
+            logger.warning("读账户基线净值失败（以当前值为基线）: %s", e)
+            _account_baseline = total
+    return _account_baseline
+
+
 # 2026-08-19 模块归位：guard/sd_notify/session 来自 quant_common（本包禁止依赖告警层，
 # alert 回调在此注入——safe_notify 收编三处重复 try/except notify 模式）
 from src.quant_common.session import in_astock_session as _in_astock_session, session_edge
@@ -708,7 +733,7 @@ def main():
                             daily_base = float(first_row[0]) if first_row else total
                             daily_pnl = total - daily_base
                             conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital, available_cash) VALUES (%s, %s, %s, %s)",
-                                         (total, daily_pnl, initial_capital if initial_capital is not None else 1000000, avail))
+                                         (total, daily_pnl, _account_baseline_capital(total), avail))
                             # ST2：同拍写持仓真相批（N-v2：取返回值单事务覆盖，非 EVENT_POSITION handler）
                             _flush_positions(adapter, account_id, tid)
                             conn.commit()

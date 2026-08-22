@@ -97,3 +97,77 @@ class TestTierFreshness:
         with patch.object(db, "get_conn", side_effect=Exception("PG down")):
             result = _check_tier_freshness()
         assert result == []
+
+# ── 状态翻转告警过滤（盲审遗留 2026-08-22）──
+
+class _FakeR:
+    """Valkey set 语义的最小假件（smembers/delete/sadd）。"""
+
+    def __init__(self, initial=None):
+        self.store = set(initial or ())
+
+    def smembers(self, key):
+        return self.store
+
+    def delete(self, key):
+        self.store = set()
+
+    def sadd(self, key, *vals):
+        self.store.update(vals)
+
+
+class TestTierAlertFilter:
+
+    def _stale(self, *sids):
+        return [{"sync_id": s, "last_ts": None, "age_hours": None, "kind": "tier1"}
+                for s in sids]
+
+    def test_first_run_all_new(self):
+        """首跑（无历史状态）-> 全部视为新增告警。"""
+        from src.scheduler.tasks import _tier_alert_filter
+        fake = _FakeR()
+        with patch("redis.Redis.from_url", return_value=fake):
+            new, recovered = _tier_alert_filter(self._stale("a", "b"))
+        assert {t["sync_id"] for t in new} == {"a", "b"}
+        assert recovered == set()
+        assert fake.store == {"a", "b"}   # 状态已写入
+
+    def test_persistent_stale_suppressed(self):
+        """持续 stale（状态未变）-> 不再告警（原 1h 一跑每天 24 条噪音/表）。"""
+        from src.scheduler.tasks import _tier_alert_filter
+        fake = _FakeR({"a", "b"})
+        with patch("redis.Redis.from_url", return_value=fake):
+            new, recovered = _tier_alert_filter(self._stale("a", "b"))
+        assert new == []
+        assert recovered == set()
+
+    def test_new_entry_alerts(self):
+        """状态扩大 -> 仅新变 stale 的条目告警。"""
+        from src.scheduler.tasks import _tier_alert_filter
+        fake = _FakeR({"a"})
+        with patch("redis.Redis.from_url", return_value=fake):
+            new, recovered = _tier_alert_filter(self._stale("a", "b"))
+        assert [t["sync_id"] for t in new] == ["b"]
+        assert recovered == set()
+
+    def test_recovery_reported_once(self):
+        """部分恢复 -> 恢复集返回（调用方发一条恢复行）；再次全恢复 -> 空。"""
+        from src.scheduler.tasks import _tier_alert_filter
+        fake = _FakeR({"a", "b"})
+        with patch("redis.Redis.from_url", return_value=fake):
+            new, recovered = _tier_alert_filter(self._stale("a"))
+        assert new == []
+        assert recovered == {"b"}
+        assert fake.store == {"a"}
+        with patch("redis.Redis.from_url", return_value=fake):
+            new, recovered = _tier_alert_filter([])
+        assert new == []
+        assert recovered == {"a"}   # 最后一个也恢复
+
+    def test_valkey_down_fail_open(self):
+        """Valkey 不可用 -> fail-open 全量报（告警宁可重复不可丢）。"""
+        from src.scheduler.tasks import _tier_alert_filter
+        with patch("redis.Redis.from_url", side_effect=ConnectionError("valkey down")):
+            new, recovered = _tier_alert_filter(self._stale("a"))
+        assert {t["sync_id"] for t in new} == {"a"}
+        assert recovered == set()

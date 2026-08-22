@@ -84,6 +84,7 @@ class TestPositionEndpoint:
         conn.execute.side_effect = [
             None,                                   # SELECT 1 account_snapshot
             MagicMock(fetchone=lambda: (1000000, 0, 1000000)),  # 总资产
+            MagicMock(fetchone=lambda: (1000000,)),  # 账户基线（#10：首条快照净值）
             MagicMock(fetchone=lambda: None),       # refresh 无行
         ]
         import src.web_api.routes.trading as trading_route
@@ -101,6 +102,7 @@ class TestPositionEndpoint:
         conn.execute.side_effect = [
             None,
             MagicMock(fetchone=lambda: (1000000, 0, 1000000)),
+            MagicMock(fetchone=lambda: (1000000,)),   # 账户基线（#10）
             MagicMock(fetchone=lambda: (fresh_ts, 0)),   # refresh 新鲜且 rows=0
             MagicMock(fetchall=lambda: []),               # 快照空
         ]
@@ -110,6 +112,28 @@ class TestPositionEndpoint:
         body = r.json()
         assert body["stale"] is False and body["positions"] == []   # 新鲜空=真空仓
         assert body["snapshot_rows"] == 0
+
+    def test_total_pnl_uses_account_baseline_not_config(self):
+        """#10 口径修正（2026-08-22）：initial=账户首条快照净值，非 initial_capital 列。
+
+        测试账户场景：total_value=10 亿、列值=策略配置 100 万 -> 原口径 total_pnl 虚增
+        9.99 亿；改后以基线 10 亿起算 -> pnl=0。
+        """
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.side_effect = [
+            None,
+            MagicMock(fetchone=lambda: (1_000_000_000, 0, 1_000_000)),   # 最新快照
+            MagicMock(fetchone=lambda: (1_000_000_000,)),                 # 首条快照=基线
+            MagicMock(fetchone=lambda: None),                             # refresh 无行
+        ]
+        import src.web_api.routes.trading as trading_route
+        with self._auth(), patch.object(trading_route, "get_conn", return_value=conn):
+            r = self._client().get("/api/position", headers={"Authorization": "Bearer t"})
+        body = r.json()
+        assert body["total_value"] == 1_000_000_000
+        assert body["total_pnl"] == 0
+        assert body["total_pnl_pct"] == 0
 
 
 class TestAdapterGhostCache:
@@ -197,3 +221,55 @@ class TestRealConnectionSmoke:
                 conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", ("smoke_test_acct",))
                 conn.execute("DELETE FROM position_refresh WHERE account_id=%s", ("smoke_test_acct",))
                 conn.commit()
+
+
+class TestAccountBaseline:
+    """#10 口径修正：写入端 initial_capital 列=账户基线净值。"""
+
+    def _reset(self):
+        from src.strategy_runner import main as runner_main
+        runner_main._account_baseline = None
+        return runner_main
+
+    def test_baseline_from_first_snapshot(self):
+        """有历史快照 -> 基线=首条 total_value（而非传入当前值/live_task 配置）。"""
+        runner_main = self._reset()
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (1_000_000_000,)
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            v = runner_main._account_baseline_capital(5_000_000)
+        assert v == 1_000_000_000
+
+    def test_no_history_uses_current_value(self):
+        """无历史（首次跟踪）-> 以当前查询值为基线。"""
+        runner_main = self._reset()
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = None
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            v = runner_main._account_baseline_capital(5_000_000)
+        assert v == 5_000_000
+
+    def test_baseline_cached_across_calls(self):
+        """进程内缓存：第二次调用不再查库（基线不随运行漂移）。"""
+        runner_main = self._reset()
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (1_000_000_000,)
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            v1 = runner_main._account_baseline_capital(5_000_000)
+            v2 = runner_main._account_baseline_capital(9_000_000)
+        assert v1 == v2 == 1_000_000_000
+        assert conn.execute.call_count == 1
+
+    def test_db_error_falls_back_to_current(self):
+        """查库失败 -> 以当前值为基线（不抛，快照写入不阻断）。"""
+        runner_main = self._reset()
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", side_effect=Exception("PG down")):
+            v = runner_main._account_baseline_capital(5_000_000)
+        assert v == 5_000_000

@@ -129,11 +129,11 @@ def collect(now: float | None = None) -> dict:
         pass
 
     # 项 18：三档 19 张新表新鲜度（2026-08-21）
+    # 表清单单一真相源：src/data_platform/tier_tables.py（tasks.py 同源，盲审遗留收敛）
     try:
+        from src.data_platform.tier_tables import TIER1_SYNC_IDS, TIER2_ALL_TABLES
         _tier = []
-        for sid in ["stk_limit_sync", "moneyflow_sync", "margin_detail_sync",
-                      "top_list_sync", "block_trade_sync", "cyq_perf_sync",
-                      "forecast_sync", "namechange_sync", "concept_sync"]:
+        for sid in TIER1_SYNC_IDS:
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT ts FROM sync_log WHERE sync_id=%s AND status='success' "
@@ -143,9 +143,7 @@ def collect(now: float | None = None) -> dict:
                 _tier.append({"sync_id": sid, "last_ts": row[0].isoformat() if row[0] else None, "kind": "tier1"})
             else:
                 _tier.append({"sync_id": sid, "last_ts": None, "kind": "tier1"})
-        for tbl in ["income", "balancesheet", "cashflow", "fina_indicator",
-                     "cyq_chips", "top10_holders", "dividend", "pledge_stat",
-                     "share_float", "stk_holdernumber"]:
+        for tbl in TIER2_ALL_TABLES:
             with get_conn() as conn:
                 cur = conn.execute("SELECT last_pull_date FROM pool_data_cursor WHERE table_name=%s", (tbl,))
                 row = cur.fetchone()

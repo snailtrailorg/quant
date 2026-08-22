@@ -6,13 +6,8 @@ from ..errors import ApiError
 from ..models import (DataSourceReq, ChannelReq, BrokerReq)
 from src.data_platform.db import get_conn
 import logging
-import os, redis
 
 logger = logging.getLogger("web_api")
-_redis_pool = redis.ConnectionPool.from_url(
-    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-    decode_responses=True,
-)
 
 router = APIRouter(tags=["mgmt"])
 

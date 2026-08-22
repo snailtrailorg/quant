@@ -5,19 +5,11 @@ from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
 from ..models import (IMBotCreateReq, IMBotUpdateReq, IMBotUserReq)
 from src.data_platform.db import get_conn
+from ..redis_pool import feishu_redis_client
 import logging
-import os, redis, json, uuid, subprocess
+import json, uuid, subprocess
 
 logger = logging.getLogger("web_api")
-
-_redis_pool = redis.ConnectionPool.from_url(
-    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-    decode_responses=True,
-)
-_redis_pool_feishu = redis.ConnectionPool.from_url(
-    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4"),
-    decode_responses=True,
-)
 
 router = APIRouter(tags=["im_bots"])
 
@@ -98,7 +90,7 @@ def im_bots_onboarding(provider: str, payload: dict = Depends(require_perm("im_b
 @router.get("/api/im-bots/onboarding-status/{ticket}")
 def im_bots_onboarding_status(ticket: str, payload: dict = Depends(require_perm("im_bots_config"))):
     """轮询接入状态(通用状态机:pending/scanning/done/error;飞书 Valkey feishu:session)。"""
-    r = redis.Redis(connection_pool=_redis_pool_feishu)
+    r = feishu_redis_client()
     data = r.get(f"feishu:session:{ticket}")
     if not data:
         return {"status": "pending"}

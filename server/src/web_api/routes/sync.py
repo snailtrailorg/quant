@@ -5,20 +5,13 @@ from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
 from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, LogAnalyzeReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
 from src.data_platform.db import get_conn
+from ..redis_pool import redis_client
 import logging
 import json
-import os
-import redis
 
 logger = logging.getLogger("web_api")
 
 router = APIRouter(tags=["sync"])
-
-# Redis 连接池（各端点复用，避免每次请求新建连接）
-_redis_pool = redis.ConnectionPool.from_url(
-    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-    decode_responses=True,
-)
 
 
 @router.get("/api/sync/config")
@@ -90,7 +83,7 @@ def trigger_pool_minute_api(payload: dict = Depends(require_perm("data_sync"))):
 @router.get("/api/sync/pool-minute/progress")
 def pool_minute_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """池分钟同步进度（Valkey sync:pool:minute hash）。"""
-    r = redis.Redis(connection_pool=_redis_pool)
+    r = redis_client()
     data = r.hgetall("sync:pool:minute")
     out = {}
     for k, v in data.items():
@@ -116,7 +109,7 @@ def adj_factor_backfill_api(start_date: str | None = None, end_date: str | None 
 @router.get("/api/sync/adj-factor-backfill/progress")
 def adj_factor_backfill_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """复权因子回填进度（Valkey sync:adj-factor hash；status=degraded 表示积分未到账降级）。"""
-    r = redis.Redis(connection_pool=_redis_pool)
+    r = redis_client()
     data = r.hgetall("sync:adj-factor")
     out = {}
     for k, v in data.items():
@@ -130,7 +123,7 @@ def adj_factor_backfill_progress_api(payload: dict = Depends(require_role("viewe
 def trigger_progress_api(sid: str, task_id: str | None = None,
                          payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """查类型级同步进度（Valkey sync:type:{sid}，无则 Celery AsyncResult 兜底）。"""
-    r = redis.Redis(connection_pool=_redis_pool)
+    r = redis_client()
     data = r.hgetall(f"sync:type:{sid}")
     _INT_FIELDS = {"done", "total", "pct", "rows_pulled", "rows_saved",
                    "expected_days", "actual_days", "failed_dates_count"}
@@ -210,7 +203,7 @@ def sync_all_api(sid: str, payload: dict = Depends(require_perm("data_sync"))):
 def sync_all_progress_api(sid: str, task_id: str | None = None,
                            payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     """查全量重建进度（Valkey sync:progress:{sid}，无则 Celery AsyncResult 兜底）。"""
-    r = redis.Redis(connection_pool=_redis_pool)
+    r = redis_client()
     data = r.hgetall(f"sync:progress:{sid}")
     _INT_FIELDS = {"done", "total", "pct", "ok", "saved", "failed_count"}
     if data:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from src.data_platform.db import get_conn
+from src.data_platform.tier_tables import TIER1_SYNC_IDS, TIER2_INCREMENTAL_TABLES
 from datetime import date, datetime, timezone
 import logging
 
@@ -327,16 +328,9 @@ def reconcile_three_books():
 
 
 # ── 项 18 三档新表新鲜度检测 ──
-
-_TIER1_SYNC_IDS = [
-    "stk_limit_sync", "moneyflow_sync", "margin_detail_sync",
-    "top_list_sync", "block_trade_sync", "cyq_perf_sync",
-    "forecast_sync", "namechange_sync", "concept_sync",
-]
-
+# 表清单单一真相源：src/data_platform/tier_tables.py（collector.py 同源，盲审遗留收敛）
 # 二档仅 4 张增量表有游标（盲审 A-2：_advance_cursors 只推 incremental 表，
 # 其余 6 张非增量表每次全量拉、无游标无 per-table sync_log--由 pool_data 任务心跳覆盖）
-_TIER2_TABLES = ["income", "balancesheet", "cashflow", "fina_indicator"]
 
 _TIER1_THRESHOLD_HOURS = 48   # 日频盘后族，跨周末/节假日容忍
 _TIER2_THRESHOLD_HOURS = 192  # 8 天，财务季频大容忍
@@ -364,10 +358,10 @@ def _check_tier_freshness() -> list[dict]:
                 "SELECT DISTINCT ON (sync_id) sync_id, ts "
                 "FROM sync_log WHERE sync_id = ANY(%s) AND status = 'success' "
                 "ORDER BY sync_id, ts DESC",
-                (_TIER1_SYNC_IDS,))
+                 (TIER1_SYNC_IDS,))
             rows = cur.fetchall()
             seen = {r[0] for r in rows}
-            for sid in _TIER1_SYNC_IDS:
+            for sid in TIER1_SYNC_IDS:
                 if sid in seen:
                     last_ts = rows[[r[0] for r in rows].index(sid)][1]
                     if last_ts.tzinfo is None:
@@ -385,7 +379,7 @@ def _check_tier_freshness() -> list[dict]:
             # 二档：pool_data_cursor 各表最新游标日期（仅 4 张增量表）
             cur = conn.execute("SELECT table_name, last_pull_date FROM pool_data_cursor")
             cursor_rows = {r[0]: r[1] for r in cur.fetchall()}
-            for tbl in _TIER2_TABLES:
+            for tbl in TIER2_INCREMENTAL_TABLES:
                 last_date = cursor_rows.get(tbl)
                 if last_date:
                     last_dt = datetime.strptime(last_date, "%Y%m%d").replace(tzinfo=timezone.utc)
@@ -423,6 +417,32 @@ def _check_tier_freshness() -> list[dict]:
         return []
 
 
+def _tier_alert_filter(stale: list[dict]) -> tuple[list[dict], set[str]]:
+    """tier stale 状态翻转过滤（盲审遗留 2026-08-22）。
+
+    检测 1h 一跑、notify 去重仅 60s：持续 stale 会逐小时重报（每天 24 条噪音/表）。
+    改电平语义：仅「新变 stale」的条目参与告警；全部恢复时返回恢复集（发一条恢复行）。
+    状态存 Valkey（无 TTL）；Valkey 不可用 fail-open 退回全量报（告警宁可重复不可丢）。
+
+    返回 (参与告警的条目, 恢复的 sync_id 集合)。
+    """
+    import os
+    import redis
+    key = "tier_stale:prev"
+    try:
+        r = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                                 socket_timeout=3, decode_responses=True)
+        prev = set(r.smembers(key))
+        cur = {t["sync_id"] for t in stale}
+        r.delete(key)
+        if cur:
+            r.sadd(key, *cur)
+        return [t for t in stale if t["sync_id"] not in prev], prev - cur
+    except Exception as e:
+        logger.warning("tier 告警状态存取失败（fail-open 全量报）: %s", e)
+        return stale, set()
+
+
 @app.task(name="src.scheduler.tasks.data_continuity_check")
 def data_continuity_check():
     """P-MON-006 数据断连自愈与断点补采。
@@ -451,13 +471,15 @@ def data_continuity_check():
     except Exception as e:
         issues.append(f"Valkey 检测异常: {str(e)[:60]}")
 
-    # 2. 三档新表新鲜度检测（项 18，2026-08-21）
-    tier_stale = _check_tier_freshness()
+    # 2. 三档新表新鲜度检测（项 18，2026-08-21；状态翻转告警 2026-08-22）
+    tier_stale, tier_recovered = _tier_alert_filter(_check_tier_freshness())
     for t in tier_stale:
         sid = t["sync_id"]
         last = t["last_ts"] or "从未同步"
         age = f"{t['age_hours']}h" if t['age_hours'] else "N/A"
         issues.append(f"[{t['kind']}] {sid}: 最新={last}, 距今={age}")
+    if tier_recovered:
+        issues.append(f"[tier] 新鲜度恢复: {', '.join(sorted(tier_recovered))}")
 
     # 3. K 线断点检测 + 补采（已有逻辑）
     # DB 优化（2026-08-21 盘点重灾 #2）：原 SELECT 开事务后循环内逐标的 Tushare 网络拉取+补写

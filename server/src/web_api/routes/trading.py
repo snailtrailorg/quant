@@ -5,9 +5,7 @@ from ..errors import ApiError
 from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, LogAnalyzeReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
 from src.data_platform.db import get_conn
 import logging
-import os, redis
 logger = logging.getLogger("web_api")
-_redis_pool = redis.ConnectionPool.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
 
 router = APIRouter(tags=["trading"])
 
@@ -191,6 +189,11 @@ def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trad
             logger.warning("get_position: account_snapshot 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
         snap = cur.fetchone()
+        # #10 口径修正（2026-08-22）：initial=账户首条快照净值（数据基线）。原读
+        # initial_capital 列（live_task 策略级配置资金，默认 100 万）与账户级 total_value
+        # （如测试账户 10 亿）错配 -> total_pnl 虚增 9.99 亿。列值仅作无历史时兜底。
+        cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts ASC LIMIT 1")
+        first = cur.fetchone()
         refresh_ts, refresh_rows = None, 0
         positions = []
         try:
@@ -213,7 +216,7 @@ def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trad
         ts_aware = refresh_ts if refresh_ts.tzinfo else refresh_ts.replace(tzinfo=_pdt.timezone.utc)
         stale = (_pdt.datetime.now(_pdt.timezone.utc) - ts_aware).total_seconds() > 600
     total_value = float(snap[0]) if snap else 0
-    initial = float(snap[2]) if snap and snap[2] is not None else 1000000
+    initial = float(first[0]) if first and first[0] else (float(snap[2]) if snap and snap[2] is not None else 1000000)
     total_pnl = (total_value - initial) if snap else 0
     return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0,
@@ -231,9 +234,13 @@ def get_pnl(payload: dict = Depends(require_role("viewer", "analyst", "trader", 
             logger.warning("get_pnl: account_snapshot 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT ts, total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 90")
         rows = cur.fetchall()
+        # #10 口径修正（2026-08-22）：initial=账户首条快照净值（数据基线），列值兜底。
+        # 原取 rows[0][3]（最新行的策略级配置资金）与账户级净值错配 -> total_pnl 虚增。
+        cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts ASC LIMIT 1")
+        first = cur.fetchone()
     curve = [{"ts": str(r[0])[:19], "value": float(r[1]) if r[1] else 0, "daily_pnl": float(r[2]) if r[2] else 0} for r in reversed(rows)]
     today_pnl = curve[-1]["daily_pnl"] if curve else 0
-    initial = float(rows[0][3]) if rows and rows[0][3] is not None else 1000000
+    initial = float(first[0]) if first and first[0] else (float(rows[-1][3]) if rows and rows[-1][3] is not None else 1000000)
     total_pnl = (curve[-1]["value"] - initial) if curve else 0
     return {"curve": curve, "today_pnl": today_pnl, "total_pnl": total_pnl, "total_pnl_pct": round(total_pnl/initial*100, 2)}
 
@@ -315,10 +322,13 @@ def get_dashboard(payload: dict = Depends(require_role("viewer", "analyst", "tra
             logger.warning("get_dashboard: account_snapshot 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
         snap = cur.fetchone()
+        # #10 口径修正（2026-08-22）：initial=账户首条快照净值（数据基线），列值兜底（同 /api/position）
+        cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts ASC LIMIT 1")
+        first = cur.fetchone()
         cur = conn.execute("SELECT COUNT(*) FROM backtest_runs WHERE status='done'")
         bt = cur.fetchone()
     total_value = float(snap[0]) if snap else 0
-    initial = float(snap[2]) if snap and snap[2] is not None else 1000000
+    initial = float(first[0]) if first and first[0] else (float(snap[2]) if snap and snap[2] is not None else 1000000)
     total_pnl = (total_value - initial) if snap else 0
     return {"total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl / initial * 100, 2) if (snap and initial) else 0,

@@ -291,3 +291,25 @@ class TestRunStatusGates:
         src = open("src/scheduler/tasks.py").read()
         i = src.index("load_factors_from_db")   # 至少两处：任务头+无（scheduler/app 另文件）
         assert "R-S4" in src
+
+    def test_unknown_adapter_treated_as_crypto(self):
+        """盲审遗留（2026-08-22）：_is_crypto 反向判断 != "xtp"。
+
+        未知适配器（如新增 binance_spot 不在旧白名单）必须走 crypto float 路径：
+        旧白名单会静默回落 A 股整百取整--held=500、30% 卖 -> int(1.5)*100=100 而非 150，
+        量小者恒 0 直接丢单（盲审 A-1 同族失效模式）。
+        """
+        from src.strategy_framework.strategy import Strategy, StrategyConfig
+        cfg = StrategyConfig(
+            id="t1", name="t", type="crypto_perp", symbol="BTCUSDT.BINANCE", adapter="binance_spot",
+            factors=[], aggregator={"threshold_buy": 0.5, "threshold_sell": -0.5},
+            params={"mode": "python", "python_code": "def on_bar(ctx):\n    return ctx.hold()\n",
+                    "volume_type": "PERCENT", "volume_pct": 30})
+        st = Strategy.from_config(cfg, MagicMock())
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (500,)   # _held_volume
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            v = st._resolve_volume(SimpleNamespace(action=SimpleNamespace(name="SELL")), 9.0)
+        assert v == 150.0   # 500 × 30%，float 不取整
