@@ -24,8 +24,16 @@ load_dotenv()
 _logger = logging.getLogger("quant")
 
 Role = Literal["viewer", "analyst", "trader", "admin"]
-JWT_SECRET = os.environ.get("JWT_SECRET", "quant-dev-secret-change-me")
-if JWT_SECRET == "quant-dev-secret-change-me":
+# JWT_SECRET 优先级：SECRET_KEY 派生 > JWT_SECRET 环境变量 > 默认值
+_secret_key = os.environ.get("SECRET_KEY", "")
+if _secret_key:
+    from src.quant_common.crypto import _derive_key
+    JWT_SECRET = _derive_key(_secret_key, b"jwt")
+else:
+    JWT_SECRET = os.environ.get("JWT_SECRET", "quant-dev-secret-change-me")
+if _secret_key:
+    pass  # 根密钥派生，无告警
+elif JWT_SECRET == "quant-dev-secret-change-me":
     # SD1（F-32）：默认密钥+实盘开关=可伪造任意角色 token（含解密凭证链），组合必须拒绝启动
     try:
         from src.data_platform.settings import is_live_trading_enabled

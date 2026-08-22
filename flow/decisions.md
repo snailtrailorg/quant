@@ -121,3 +121,12 @@
 
 - **架构决定**：XTP 侧改"共享行情 hub 进程（持有 XTP 连接+合约表）+ N 个轻策略 worker"，用实时性换内存（国内市场 tick 密度低，分钟 bar 足够）。与"修正版 B 每策略独立进程"的隔离性权衡：进程隔离弱化为"hub 单点 + worker 独立"，hub 稳定性要求因此**更高**。设计前必须先做稳定性需求书。
 - **流程决定**：动手检查/改架构前，先审定 `flow/规范/稳定性检查方法论.md`（五轴枚举矩阵 + 四层检查手段 + 双盲交叉验收），检查按方法论执行，防经验式清单遗漏。crypto 侧维持独立进程（无内存痛点，纯 API 轻量）。
+
+## 2026-08-22 · SECRET_KEY 根密钥方案（用户拍板）
+
+- **问题**：需两个独立密钥 JWT_SECRET + ENCRYPTION_KEY，漏设一个就告警，JWT 轮换会孤儿化加密凭证
+- **决策**：一个根密钥 `SECRET_KEY`，HKDF-SHA256 派生子密钥（`info=b"jwt"` → JWT 签名，`info=b"encrypt"` → Fernet 加密）
+- **优先级**：SECRET_KEY（推荐，无告警）→ ENCRYPTION_KEY 单独设置（向后兼容）→ JWT_SECRET 单独设置 → JWT_SECRET sha256 派生（旧行为，告警）→ 进程内随机密钥（重启孤儿化，critical）
+- **技术选型**：HKDF（RFC 5869，已含在 cryptography 库中），salt=None + info 域分离
+- **迁移**：脚本更新为从 SECRET_KEY 派生新密钥，旧密钥仍从 JWT_SECRET 派生
+- **向后兼容**：JWT_SECRET / ENCRYPTION_KEY 环境变量仍可单独设置，SECRET_KEY 未设时行为不变
