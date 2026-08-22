@@ -9,7 +9,8 @@ from src.llm_gateway.gateway import LLMResponse
 
 def test_log_analyze_with_logs():
     """传 logs 直接归因，过滤 INFO/DEBUG。"""
-    from src.web_api.main import log_analyze, LogAnalyzeReq
+    from src.web_api.routes.auth_routes import log_analyze
+    from src.web_api.models import LogAnalyzeReq
     req = LogAnalyzeReq(logs=[
         {"level": "ERROR", "module": "risk", "msg": "拒单：仓位超限"},
         {"level": "WARN", "module": "strategy", "msg": "信号被熔断"},
@@ -24,7 +25,8 @@ def test_log_analyze_with_logs():
 
 def test_log_analyze_no_logs():
     """无日志返回占位，不调 LLM。"""
-    from src.web_api.main import log_analyze, LogAnalyzeReq
+    from src.web_api.routes.auth_routes import log_analyze
+    from src.web_api.models import LogAnalyzeReq
     req = LogAnalyzeReq(logs=[])
     r = log_analyze(req, payload={"username": "admin", "role": "admin"})
     assert r["log_count"] == 0

@@ -326,12 +326,110 @@ def reconcile_three_books():
     return {"status": "ok" if not issues else "issues", "issues": issues}
 
 
+# ── 项 18 三档新表新鲜度检测 ──
+
+_TIER1_SYNC_IDS = [
+    "stk_limit_sync", "moneyflow_sync", "margin_detail_sync",
+    "top_list_sync", "block_trade_sync", "cyq_perf_sync",
+    "forecast_sync", "namechange_sync", "concept_sync",
+]
+
+# 二档仅 4 张增量表有游标（盲审 A-2：_advance_cursors 只推 incremental 表，
+# 其余 6 张非增量表每次全量拉、无游标无 per-table sync_log--由 pool_data 任务心跳覆盖）
+_TIER2_TABLES = ["income", "balancesheet", "cashflow", "fina_indicator"]
+
+_TIER1_THRESHOLD_HOURS = 48   # 日频盘后族，跨周末/节假日容忍
+_TIER2_THRESHOLD_HOURS = 192  # 8 天，财务季频大容忍
+
+
+def _check_tier_freshness() -> list[dict]:
+    """三档 19 张新表新鲜度检测。
+
+    一档 9 表：查 sync_log 最新 status='success' 行 ts，超 48h 告警。
+    二档 10 表：查 pool_data_cursor 最新游标日期，超 8 天告警。
+    异常返回空列表不抛。
+
+    返回 [{"sync_id": str, "last_ts": str|None, "age_hours": float|None, "kind": str}]，
+    仅含超阈值条目。
+    """
+    from datetime import datetime, timezone
+    try:
+        from src.data_platform.db import get_conn
+        stale = []
+        now = datetime.now(timezone.utc)
+
+        with get_conn() as conn:
+            # 一档：按 sync_id 取最新 success 行 ts
+            cur = conn.execute(
+                "SELECT DISTINCT ON (sync_id) sync_id, ts "
+                "FROM sync_log WHERE sync_id = ANY(%s) AND status = 'success' "
+                "ORDER BY sync_id, ts DESC",
+                (_TIER1_SYNC_IDS,))
+            rows = cur.fetchall()
+            seen = {r[0] for r in rows}
+            for sid in _TIER1_SYNC_IDS:
+                if sid in seen:
+                    last_ts = rows[[r[0] for r in rows].index(sid)][1]
+                    if last_ts.tzinfo is None:
+                        last_ts = last_ts.replace(tzinfo=timezone.utc)
+                    age_h = (now - last_ts).total_seconds() / 3600
+                    if age_h > _TIER1_THRESHOLD_HOURS:
+                        stale.append({
+                            "sync_id": sid, "last_ts": last_ts.isoformat(),
+                            "age_hours": round(age_h, 1), "kind": "tier1"})
+                else:
+                    stale.append({
+                        "sync_id": sid, "last_ts": None,
+                        "age_hours": None, "kind": "tier1"})
+
+            # 二档：pool_data_cursor 各表最新游标日期（仅 4 张增量表）
+            cur = conn.execute("SELECT table_name, last_pull_date FROM pool_data_cursor")
+            cursor_rows = {r[0]: r[1] for r in cur.fetchall()}
+            for tbl in _TIER2_TABLES:
+                last_date = cursor_rows.get(tbl)
+                if last_date:
+                    last_dt = datetime.strptime(last_date, "%Y%m%d").replace(tzinfo=timezone.utc)
+                    age_h = (now - last_dt).total_seconds() / 3600
+                    if age_h > _TIER2_THRESHOLD_HOURS:
+                        stale.append({
+                            "sync_id": f"pool_data:{tbl}", "last_ts": last_dt.isoformat(),
+                            "age_hours": round(age_h, 1), "kind": "tier2"})
+                else:
+                    stale.append({
+                        "sync_id": f"pool_data:{tbl}", "last_ts": None,
+                        "age_hours": None, "kind": "tier2"})
+
+            # 二档任务心跳（盲审 A-2）：非增量 6 表无游标，由 pool_data 任务整体
+            # done 心跳覆盖（任务 done = 全部 10 表都拉过一轮）
+            cur = conn.execute(
+                "SELECT ts FROM sync_log WHERE sync_id='pool_data' AND status='done' "
+                "ORDER BY ts DESC LIMIT 1")
+            row = cur.fetchone()
+            if row and row[0]:
+                pd_ts = row[0] if row[0].tzinfo else row[0].replace(tzinfo=timezone.utc)
+                age_h = (now - pd_ts).total_seconds() / 3600
+                if age_h > _TIER2_THRESHOLD_HOURS:
+                    stale.append({
+                        "sync_id": "pool_data", "last_ts": pd_ts.isoformat(),
+                        "age_hours": round(age_h, 1), "kind": "tier2"})
+            else:
+                stale.append({
+                    "sync_id": "pool_data", "last_ts": None,
+                    "age_hours": None, "kind": "tier2"})
+
+        return stale
+    except Exception as e:
+        logger.warning("三档新鲜度检测异常（降级跳过）: %s", e)
+        return []
+
+
 @app.task(name="src.scheduler.tasks.data_continuity_check")
 def data_continuity_check():
     """P-MON-006 数据断连自愈与断点补采。
 
     检测 K 线断点 -> 自动补采 -> 重算缺失因子。
     断线检测（Valkey 心跳）+ 因子重算触发补采。
+    三档新表新鲜度检测（项 18，2026-08-21）。
     """
     import psycopg, os, redis
     from datetime import date, timedelta
@@ -353,7 +451,15 @@ def data_continuity_check():
     except Exception as e:
         issues.append(f"Valkey 检测异常: {str(e)[:60]}")
 
-    # 2. K 线断点检测 + 补采（已有逻辑）
+    # 2. 三档新表新鲜度检测（项 18，2026-08-21）
+    tier_stale = _check_tier_freshness()
+    for t in tier_stale:
+        sid = t["sync_id"]
+        last = t["last_ts"] or "从未同步"
+        age = f"{t['age_hours']}h" if t['age_hours'] else "N/A"
+        issues.append(f"[{t['kind']}] {sid}: 最新={last}, 距今={age}")
+
+    # 3. K 线断点检测 + 补采（已有逻辑）
     # DB 优化（2026-08-21 盘点重灾 #2）：原 SELECT 开事务后循环内逐标的 Tushare 网络拉取+补写
     # ——事务悬挂到函数尾随标的数放大（idle in transaction + 事务跨网络）。改：检测查询先
     # 关连接（fetchall 后块内无活事务），补采的 save_bars 各自短事务。

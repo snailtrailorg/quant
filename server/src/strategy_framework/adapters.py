@@ -24,7 +24,7 @@ import time
 class Order:
     symbol: str
     action: str  # BUY / SELL
-    volume: int = 0
+    volume: float = 0   # A股=int 股数；crypto=float（BTC 可下 0.001--盲审 A-1 根修，int 截断丢整单）
     price: float = 0.0
     order_type: str = "limit"  # limit / market
     client_id: str = ""

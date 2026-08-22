@@ -18,6 +18,17 @@ def _strategy(volume_type="SHARES", params=None):
     return Strategy.from_config(cfg, MagicMock())
 
 
+def _crypto_strategy(volume_type="SHARES", params=None):
+    """crypto 策略辅助（无 A 股整百手约束）。"""
+    from src.strategy_framework.strategy import Strategy, StrategyConfig
+    cfg = StrategyConfig(
+        id="t1", name="t", type="crypto_perp", symbol="BTCUSDT.BINANCE", adapter="binance_perp",
+        factors=[], aggregator={"threshold_buy": 0.5, "threshold_sell": -0.5},
+        params={"mode": "python", "python_code": "def on_bar(ctx):\n    return ctx.hold()\n",
+                "volume_type": volume_type, **(params or {})})
+    return Strategy.from_config(cfg, MagicMock())
+
+
 class TestResolveVolume:
     def test_shares_default(self):
         st = _strategy()
@@ -90,6 +101,68 @@ class TestResolveVolume:
         import src.data_platform.db as db
         with patch.object(db, "get_conn", side_effect=Exception("PG down")):
             assert st._resolve_volume(SimpleNamespace(), 9.0) == 100
+
+    # ── P2 卖零股残留：crypto 无整百手约束 ──
+
+    def test_crypto_percent_sell_uses_held_not_rounding(self):
+        """crypto PERCENT 100% SELL：held=1 → 1，非 0（A 股整百取整在 crypto 上恒 0 问题）。"""
+        st = _crypto_strategy("PERCENT", {"volume_pct": 100})
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (1,)
+        import src.data_platform.db as db
+        from src.strategy_framework.strategy import Action
+        with patch.object(db, "get_conn", return_value=conn):
+            v = st._resolve_volume(SimpleNamespace(action=SimpleNamespace(name="SELL")), 9.0)
+        assert v == 1   # 整百取整应得 0，crypto 去约束后得 1
+
+    def test_crypto_percent_buy_no_lot_rounding(self):
+        """crypto PERCENT BUY：无整百约束，精确按资金÷价格计算。"""
+        st = _crypto_strategy("PERCENT", {"volume_pct": 10})
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.side_effect = [(1000000,), (0.0,)]
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            # 10%×1,000,000=100,000÷9.0=11,111.11 -> float 原值（盲审 A-1，非 11100 整百）
+            sig = SimpleNamespace(action=SimpleNamespace(name="BUY"))
+            assert st._resolve_volume(sig, 9.0) == pytest.approx(100000 / 9.0)
+
+    def test_crypto_partial_sell_fractional(self):
+        """crypto 部分卖出 held×pct<1：float 模型下 >0（盲审 A-1：int 截断恒 0 变体）。"""
+        st = _crypto_strategy("PERCENT", {"volume_pct": 50})
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (1,)
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            v = st._resolve_volume(SimpleNamespace(action=SimpleNamespace(name="SELL")), 9.0)
+        assert v == pytest.approx(0.5)   # int(1*0.5)=0 的截断已根除
+
+    def test_crypto_buy_small_cash_fractional(self):
+        """crypto BUY base/price<1：float 模型下 >0 不丢单（盲审 A-1）。"""
+        st = _crypto_strategy("PERCENT", {"volume_pct": 10})
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        # 10%×500,000=50,000÷60,000=0.83 -> float 原值（int 截断曾丢整单）
+        conn.execute.return_value.fetchone.side_effect = [(500000,), (0.0,)]
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            v = st._resolve_volume(SimpleNamespace(action=SimpleNamespace(name="BUY")), 60000.0)
+        assert v == pytest.approx(50000 / 60000)
+
+    def test_astock_percent_sell_unchanged(self):
+        """A 股 PERCENT 100% SELL：整百手约束不变。"""
+        st = _strategy("PERCENT", {"volume_pct": 100})
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (150,)
+        from src.strategy_framework.strategy import Action
+        import src.data_platform.db as db
+        with patch.object(db, "get_conn", return_value=conn):
+            v = st._resolve_volume(SimpleNamespace(action=SimpleNamespace(name="SELL")), 9.0)
+        # 全卖 150 股 → 整百取整得 100（150*1.0/100*100=100）
+        assert v == 100
 
 
 class TestSignalBackfill:

@@ -87,7 +87,7 @@
 - IM 统一接入（19 号，2026-08-21 批 1+2 上线）：`docs/architecture/19-IM统一接入设计.md`（IMBotProvider 抽象/im_bot_config+im_bot_users 统一表/凭证异构 JSON/动态 FIELD_SCHEMA 表单/接入向导状态机；接新 IM=实现子类+配置零平台改动）
 - 共享行情 Hub（ST7）：`docs/architecture/13-需求书.md` + `14-设计.md` v2（hub=纯数据面单实例 MD，worker=TD-only；Valkey Streams 分发+租约 fencing；影子期 bar_hub/bar_shadow diff 门禁）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
-- 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（18 份，2026-08-19 增 quant_common/email_service）
+- 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（19 份，2026-08-21 增 web_api）+ im_bot
 - 本地开发部署（一键脚本 + 排错）：`scripts/LOCAL-DEPLOY.md`（用 `bash scripts/dev-start.sh start`，不要手动起服务）
 
 ## 项目知识（durable，随项目积累 ↓）

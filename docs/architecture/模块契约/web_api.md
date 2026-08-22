@@ -4,16 +4,29 @@
 > 配套：`docs/architecture/接口契约.md`（6 大接口 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么端点"。
 
 ## 职责
-FastAPI Web 后端，~163 端点（main.py 3100+ 行）。RBAC 认证（JWT + 四角色）+ 策略/持仓/风控/实盘开关/LLM/飞书/同步/回测业务端点 + 平台化管理端点（数据源/通道/任务/规则/模型）。（P3 回写 2026-08-20：原"~85 端点"为 2026-08-10 时点数）
+FastAPI Web 后端，166 端点（12 个 APIRouter 分组）。RBAC 认证（JWT + 四角色）+ 策略/持仓/风控/实盘开关/LLM/飞书/同步/回测业务端点 + 平台化管理端点（数据源/通道/任务/规则/模型）。
 启动 `uvicorn src.web_api.main:app --port 8000`；前端 Vue3 调用；飞书 router 内嵌。
 
 ## 文件结构
 ```
 server/src/web_api/
-├── main.py           # FastAPI app + ~163 端点（3100+ 行）
+├── main.py           # FastAPI 引导（~125 行，app 创建 + CORS + startup + include_router）
 ├── auth.py           # JWT + RBAC + 用户管理 + 邀请/重置 + audit_log
 ├── errors.py         # ApiError(status, CODE, 中文兜底) → {detail, code} 错误码机制
 ├── terms.py          # i18n 条款 re-export（注册表本体在 quant_common/terms.py）
+├── models.py         # Pydantic 请求体模型（22 个，从 main.py 迁出）
+├── routes/
+│   ├── system.py     # /health /readyz /metrics /系统配置 /通知 /邮件 /条款 /帮助
+│   ├── auth_routes.py # /api/auth/* /api/user /api/invites /api/log
+│   ├── strategy.py   # /api/strategy* /api/factors* /api/strategy_account
+│   ├── trading.py    # /api/live-task /api/live-trading /api/position /api/account /api/dashboard
+│   ├── risk.py       # /api/risk* /api/risk-rules /api/reconcile /api/audit /api/data-integrity
+│   ├── sync.py       # /api/sync/* /api/data-source-usage
+│   ├── backtest.py   # /api/backtest* /api/pool* /api/broker-usage
+│   ├── stock.py      # /api/stock/* /api/kline /api/screen* /api/convertible
+│   ├── chat.py       # /api/chat /ws/* /api/llm-* /api/astock/selection
+│   ├── mgmt.py       # /api/data-sources /api/channels /api/brokers /api/tasks
+│   └── im_bots.py    # /api/im-bots/*（19 号批 2）
 └── __init__.py
 ```
 > 2026-08-19 模块归位：`crypto_utils.py` → `quant_common/crypto.py`（encrypt/decrypt/mask）；`email_service.py` → 顶层 `src/email_service/`——两者均已不在本目录。（P3 回写 2026-08-20）
@@ -227,6 +240,7 @@ from src.quant_common.crypto import encrypt, decrypt, mask
 ---
 
 ## 修订记录
+- 2026-08-21 P4 大项：main.py 拆 12 个 APIRouter（routes/ 目录），models.py 迁出 Pydantic 模型，main.py 缩至 125 行
 - 2026-08-10 初版（基于代码核实：main.py 路由 grep 85 条 + import 依赖 + DB 表操作 + 抽样端点 chat/llm-usage/auth/strategy）
 - 2026-08-11 加 live_task（策略与标的分离）+ 因子 CRUD（factor_def）+ validate-params/validate-python + 回测 symbol_params
 

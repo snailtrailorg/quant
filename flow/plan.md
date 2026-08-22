@@ -1,33 +1,21 @@
 # 计划 (plan) —— 契约
 
 > 经确认后执行。要偏离，**先改这里**再动手。
-> 架构定稿，代码从零开始。外部gate：中泰XTP门槛/费率待确认（不影响Tushare积分的分钟线回测，用户说一次性购买可接受）。
+> 架构定稿，代码从零开始。
 
-## 里程碑
+## 里程碑状态
 
-- [ ] **M1 — 核心基础设施可运行**（Python3.10 venv + PG/Valkey 部署 + 数据中台日线管线 + LLM 网关 150 行定稿）
-- [ ] **M2 — 策略框架 + 回测跑通**（统一 Strategy/Factor/DSL + 可转债双低策略回测在 Tushare 历史数据上跑通）
-- [ ] **M3 — 加密合约实盘 + 风控 + 告警**（BTC/ETH 测试网/实盘 CTA 策略、风控前置校验、告警推送）
-- [ ] **M4 — Web 后台 + 飞书 + RBAC**（前端登录、策略管理、看板、自然语言查询、飞书熔断）
-- [ ] **M5 — 调度 + 联调 + 部署**（Celery 定时任务、分时休眠、systemd 服务、全链路验证）
+| 里程碑 | 状态 |
+|---|---|
+| **M1** — 核心基础设施（venv + PG/Valkey + 数据中台 + LLM 网关） | ✅ 已完成 |
+| **M2** — 策略框架 + 回测（Strategy/Factor/DSL/BacktestEngine） | ✅ 已完成 |
+| **M3** — 加密合约实盘 + 风控 + 告警 | ✅ 已完成（加密合约网关待API开通） |
+| **M4** — Web 后台 + 飞书 + RBAC | ✅ 已完成 |
+| **M5** — 调度 + 联调 + 部署 | ✅ 已完成 |
 
-## 任务拆解
+## 当前焦点
 
-### M1 核心基础设施
-
-| 任务 | 负责角色 | 输入 | 产出 | 验收标准 |
-|---|---|---|---|---|
-| **T01** 建 Python3.10 venv + 依赖清单 | Claude Code | 技术栈(00 §9) | `requirements.txt`，`venv/` | `pip install -r requirements.txt` 无报错，vnpy 可 import |
-| **T02** 部署 PostgreSQL + pgvector + Valkey 本地开发环境 | Claude Code | 06-数据中台 | 启动脚本 `scripts/init-db.sh`，`scripts/init-valkey.sh` | 本地 psql 连上，Valkey ping 通 |
-| **T03** 数据中台：Tushare/AkShare 日线拉取管线 + 清洗复权 + PG 写入 | Claude Code | 06-数据中台，Tushare token | `src/data_platform/` 模块，含 `get_bar()`/`save_bar()`/`is_trading_day()` | 拉取 A 股/可转债/ETF 日线存 PG，`get_bar()` 返回正确 DataFrame |
-| **T04** 数据中台：统一 K 线 schema 定稿 + schema 对齐 XTP 实时 | Claude Code | 06-数据中台 §6.1 | `src/data_platform/schema.py`，vt_symbol 格式 | schema 字段名/类型与 XTP 实时行情一致，`parse_vt_symbol()` 拆解正确 |
-| **T05** LLM 网关：chat() + chat_stream() + 路由+容灾+工具白名单 | Claude Code | 01-LLM 网关 | `src/llm_gateway/` 模块，含 `LLMGateway` 类、YAML 配置、OpenAI 兼容客户端 | 调 DeepSeek/GLM 发消息成功，tier 路由正确，工具白名单过滤生效，`lang` 参数注入 prompt |
-| **T06** 日志框架 + 配置管理（YAML 驱动 + 加密密钥读取） | Claude Code | 无 | `src/quant_common/`（log/ config/ crypto） | 日志按模块输出，密钥从环境变量/AES 读 |
-
-### M2 策略框架 + 回测
-
-| 任务 | 负责角色 | 输入 | 产出 | 验收标准 |
-|---|---|---|---|---|
+见 `flow/待办.md`（单一真相源，按优先级排列）。
 | **T07** 策略框架：Strategy 基类 + Factor 注册制 + SignalAggregator + DSL 表达式引擎 | Claude Code | 02-策略框架 | `src/strategy_framework/` 模块 | 预置因子注册 → Web 可选 → 配置实例化策略 → on_bar 计算 → 信号输出 |
 | **T08** ExecutionAdapter 三实现：AStockReadonlyAdapter(raise) / XTPAdapter / BinancePerpAdapter | Claude Code | 02-策略框架 §5.5 | `src/strategy_framework/adapters/` | A股 adapter 调 send_order 抛 PermissionError；XTP adapter 含 `parse_vt_symbol()` |
 | **T09** 可转债双低策略 + Tushare 历史回测 | Claude Code | 04-可转债ETF §5.2，02 §8 | `src/strategies/convertible_doublelow.py` + 回测 notebook | VeighNa 回测引擎加载策略 + 历史数据 → 盈亏曲线 + 交易记录 |

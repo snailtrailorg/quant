@@ -214,6 +214,10 @@ class Strategy:
         """收到 Tick → 实时处理。"""
         pass
 
+    def _is_crypto(self) -> bool:
+        """判断是否为加密市场（无 A 股整百手约束）。"""
+        return self.config.adapter in ("binance_perp", "okx_perp")
+
     def _resolve_volume(self, sig: Signal, price: float) -> float:
         """执行规则三档（#12，R-F1 修订：方向感知资金口径）。
 
@@ -236,6 +240,8 @@ class Strategy:
                     if vt == "ALL_IN":
                         return held
                     pct = float(self._param("volume_pct", 10)) / 100.0
+                    if self._is_crypto():
+                        return max(0.0, held * pct)   # crypto float（盲审 A-1：int 截断小持仓恒 0）
                     return max(0, int(held * pct / 100) * 100)   # A股整百
                 # BUY：可用资金口径——优先快照 available_cash（DB 优化批 2026-08-21，审计 F4.1：
                 # 原总资产-持仓成本近似在多策略共账户时合计超配）；无该列数据退化旧口径
@@ -250,6 +256,8 @@ class Strategy:
                     base = cash
                 else:
                     base = cash * (float(self._param("volume_pct", 10)) / 100.0)
+                if self._is_crypto():
+                    return max(0.0, base / price) if price > 0 else 0   # crypto float（盲审 A-1）
                 return max(0, int(base / price / 100) * 100) if price > 0 else 0
         except Exception as e:
             logger.warning("PERCENT/ALL_IN 资产/持仓查询失败，降级 SHARES 100: %s", e)

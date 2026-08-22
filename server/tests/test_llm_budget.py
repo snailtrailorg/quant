@@ -8,13 +8,13 @@ from unittest.mock import patch, MagicMock
 
 def test_list_budget():
     """列预算配置（mock get_conn）。"""
-    from src.web_api.main import list_llm_budget
+    from src.web_api.routes.chat import list_llm_budget
     mock_conn = MagicMock()
     mock_conn.__enter__.return_value = mock_conn
     cur = MagicMock()
     cur.fetchall.return_value = [(1, None, 100000, None, 80, True, None)]
     mock_conn.execute.return_value = cur
-    with patch("src.web_api.main.get_conn", return_value=mock_conn):
+    with patch("src.web_api.routes.chat.get_conn", return_value=mock_conn):
         r = list_llm_budget(payload={"username": "admin", "role": "admin"})
     assert len(r) == 1
     assert r[0]["daily_token_limit"] == 100000

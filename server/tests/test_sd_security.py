@@ -107,7 +107,8 @@ class TestCardFreshness:
 
 class TestVerifyEvidenceGate:
     def test_no_runs_rejected(self):
-        from src.web_api import main as web_main
+        from src.data_platform import db as data_db
+        from src.web_api.routes.strategy import verify_strategy
 
         class C:
             def __enter__(self):
@@ -122,13 +123,14 @@ class TestVerifyEvidenceGate:
                         return (0,)
                 return Cur()
 
-        with patch.object(web_main, "get_conn", lambda: C()):
+        with patch.object(data_db, "get_conn", lambda: C()):
             with pytest.raises(Exception) as e:
-                web_main.verify_strategy("some-strategy", body={}, payload={"username": "tester"})
+                verify_strategy("some-strategy", body={}, payload={"username": "tester"})
         assert e.value.status_code == 403
 
     def test_invalid_run_rejected(self):
-        from src.web_api import main as web_main
+        from src.data_platform import db as data_db
+        from src.web_api.routes.strategy import verify_strategy
 
         class C:
             def __enter__(self):
@@ -143,7 +145,7 @@ class TestVerifyEvidenceGate:
                         return ("failed",)  # 状态非 done
                 return Cur()
 
-        with patch.object(web_main, "get_conn", lambda: C()):
+        with patch.object(data_db, "get_conn", lambda: C()):
             with pytest.raises(Exception) as e:
-                web_main.verify_strategy("s1", body={"run_id": 5}, payload={"username": "tester"})
+                verify_strategy("s1", body={"run_id": 5}, payload={"username": "tester"})
         assert e.value.status_code == 400

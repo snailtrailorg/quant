@@ -285,7 +285,7 @@ class TestStockApiEndpoints:
         with patch.object(sd, "_r", return_value=r), \
              patch.object(sd, "get_stock_detail", return_value=fake_detail), \
              patch.object(gw, "chat", return_value=fake_resp) as mc, \
-             patch("src.web_api.main.audit_log") as ma:   # B7：防真写 audit_log
+             patch("src.web_api.routes.stock.audit_log") as ma:   # B7：防真写 audit_log
             r1 = admin_client.post("/api/stock/600519.SH/analyze")
             r2 = admin_client.post("/api/stock/600519.SHSE/analyze")   # M3：异型 symbol 同 key
         assert r1.status_code == 200 and r1.json()["cached"] is False

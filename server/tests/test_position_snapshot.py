@@ -86,8 +86,8 @@ class TestPositionEndpoint:
             MagicMock(fetchone=lambda: (1000000, 0, 1000000)),  # 总资产
             MagicMock(fetchone=lambda: None),       # refresh 无行
         ]
-        import src.web_api.main as web_main
-        with self._auth(), patch.object(web_main, "get_conn", return_value=conn):
+        import src.web_api.routes.trading as trading_route
+        with self._auth(), patch.object(trading_route, "get_conn", return_value=conn):
             r = self._client().get("/api/position", headers={"Authorization": "Bearer t"})
         body = r.json()
         assert body["stale"] is True and body["positions"] == []   # 从未跑≠空仓
@@ -104,8 +104,8 @@ class TestPositionEndpoint:
             MagicMock(fetchone=lambda: (fresh_ts, 0)),   # refresh 新鲜且 rows=0
             MagicMock(fetchall=lambda: []),               # 快照空
         ]
-        import src.web_api.main as web_main
-        with self._auth(), patch.object(web_main, "get_conn", return_value=conn):
+        import src.web_api.routes.trading as trading_route
+        with self._auth(), patch.object(trading_route, "get_conn", return_value=conn):
             r = self._client().get("/api/position", headers={"Authorization": "Bearer t"})
         body = r.json()
         assert body["stale"] is False and body["positions"] == []   # 新鲜空=真空仓

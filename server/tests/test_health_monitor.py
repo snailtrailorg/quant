@@ -229,8 +229,8 @@ class TestEndpoints:
         mock_conn.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = [
             ("2026-08-18 14:00:00+08", "unit_down", "quant-md-hub@quant", "critical", "ActiveState=failed")]
-        from src.web_api import main as web_main
-        with patch.object(web_main, "get_conn", return_value=mock_conn):
+        from src.web_api.routes import system as system_route
+        with patch.object(system_route, "get_conn", return_value=mock_conn):
             r = admin_client.get("/api/health/events", params={"limit": 50})
         assert r.status_code == 200
         evts = r.json()["events"]

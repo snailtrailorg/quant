@@ -4,7 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 def test_llm_usage_summary_structure():
-    from src.web_api.main import llm_usage_summary
+    from src.web_api.routes.chat import llm_usage_summary
     result = llm_usage_summary(payload={"username": "test", "role": "admin"})
     assert "today" in result
     assert "month" in result
@@ -15,7 +15,7 @@ def test_llm_usage_summary_structure():
 
 
 def test_llm_usage_summary_fields():
-    from src.web_api.main import llm_usage_summary
+    from src.web_api.routes.chat import llm_usage_summary
     result = llm_usage_summary(payload={"username": "test", "role": "admin"})
     # 若有数据，验证字段
     for row in result["month"]:

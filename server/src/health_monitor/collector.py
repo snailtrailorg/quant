@@ -128,6 +128,35 @@ def collect(now: float | None = None) -> dict:
     except Exception:
         pass
 
+    # 项 18：三档 19 张新表新鲜度（2026-08-21）
+    try:
+        _tier = []
+        for sid in ["stk_limit_sync", "moneyflow_sync", "margin_detail_sync",
+                      "top_list_sync", "block_trade_sync", "cyq_perf_sync",
+                      "forecast_sync", "namechange_sync", "concept_sync"]:
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "SELECT ts FROM sync_log WHERE sync_id=%s AND status='success' "
+                    "ORDER BY ts DESC LIMIT 1", (sid,))
+                row = cur.fetchone()
+            if row:
+                _tier.append({"sync_id": sid, "last_ts": row[0].isoformat() if row[0] else None, "kind": "tier1"})
+            else:
+                _tier.append({"sync_id": sid, "last_ts": None, "kind": "tier1"})
+        for tbl in ["income", "balancesheet", "cashflow", "fina_indicator",
+                     "cyq_chips", "top10_holders", "dividend", "pledge_stat",
+                     "share_float", "stk_holdernumber"]:
+            with get_conn() as conn:
+                cur = conn.execute("SELECT last_pull_date FROM pool_data_cursor WHERE table_name=%s", (tbl,))
+                row = cur.fetchone()
+            if row:
+                _tier.append({"sync_id": f"pool_data:{tbl}", "last_ts": row[0], "kind": "tier2"})
+            else:
+                _tier.append({"sync_id": f"pool_data:{tbl}", "last_ts": None, "kind": "tier2"})
+        snap["tier_freshness"] = _tier
+    except Exception:
+        pass
+
     return snap
 
 
@@ -185,6 +214,25 @@ def render_prometheus(snap: dict) -> str:
         emit("quant_task_frozen", t["frozen"], "frozen flag (observability)", {"task": tid})
         if t["lag"] is not None:
             emit("quant_task_lag_seconds", round(t["lag"], 1), "seconds since last bar", {"task": tid})
+
+    for t in snap.get("tier_freshness") or []:
+        ts = t.get("last_ts")
+        if ts is not None:
+            try:
+                if isinstance(ts, str):
+                    from datetime import datetime, timezone
+                    dt = datetime.fromisoformat(ts) if "T" in ts else datetime.strptime(ts, "%Y%m%d").replace(tzinfo=timezone.utc)
+                    age = max(0, (time.time() - dt.timestamp()) / 3600)
+                else:
+                    age = 0
+                emit("quant_tier_table_staleness_hours", round(age, 1),
+                     "hours since last successful sync", {"sync_id": t["sync_id"], "kind": t["kind"]})
+            except Exception:
+                emit("quant_tier_table_staleness_hours", -1,
+                     "hours since last successful sync", {"sync_id": t["sync_id"], "kind": t["kind"]})
+        else:
+            emit("quant_tier_table_staleness_hours", -1,
+                 "hours since last successful sync", {"sync_id": t["sync_id"], "kind": t["kind"]})
 
     lines: list[str] = []
     for metric in order:
