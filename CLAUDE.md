@@ -4,13 +4,20 @@
 > 本文件是**运行时合同**：精要规则 + 约束 + 指针。完整详规在 `flow/规范/`。
 >
 > **分层铁律**（2026-08-19 模块归位，tests/test_layering.py 断言守门）：`quant_common`（层 0 底座，禁业务依赖）← 数据/服务层 ← 应用层 ← 入口层（web_api/feishu_bot 组合根）；下层禁 import 上层（lazy 计入）；共享工具放 `quant_common`、业务逻辑不寄生 HTTP 入口。
-> 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/`（持久化，跨会话）。
+> 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（持久化，跨会话）。
+  - 服务器部署信息：`server-info.md`（IP/OS/路径/分库/备份/密钥）
+  - 部署机制：`deploy-mechanism.md`（三权分立/脚本/闸门/安全边界）
+  - 服务列表：`server-services.md`（systemd/Polkit/Nginx/日志）
 
 ## 目录地图
 
 - `flow/` — 控制层（项目"怎么跑"）：章程 / 计划 / 进展 / 决策 / 踩坑 / 任务 / 规范
 - `docs/` — 内容层（项目"做出什么"）：
   - `docs/architecture/`（00-总体设计 ～ 19-IM统一接入，20 份架构文档 + 接口契约 + 模块契约 19 份）（P3 回写 2026-08-20：原文"17 份"实数 18（00～17）；同日 DB 盘点批次新增 18 号后现 19 份）
+  - `docs/操作指导/`（面向使用者，索引+因子/策略/回测/实盘四册，server/docs 镜像随 rsync 部署）
+  - `docs/reference/`（外部参考资料，Tushare API 文档等，参考用非原创——`README.md` 有索引）
+  - `docs/obsolete/`（废弃文档归档，保留历史不删除——`README.md` 有归档清单与替代文档对照）
+  - `docs/任务/`（自包含任务文件，做任务时只读任务文件+接口契约+模块契约即可动手）
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
 - `scripts/` - 开发机部署工具（`deploy-*.sh`/`quant-deploy.sh`）+ 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`verify.sh`）。**不传服务器**
