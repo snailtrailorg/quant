@@ -129,6 +129,10 @@ TUSHARE_TOKEN=你的tushare_token
 DEEPSEEK_API_KEY=你的deepseek_key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 
+# 根密钥（推荐，自动派生 JWT_SECRET + ENCRYPTION_KEY）
+# 生成：python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+SECRET_KEY=你的根密钥
+
 # 实盘开关（生产环境设 false）
 ENABLE_LIVE_TRADING=false
 ```
@@ -433,3 +437,5 @@ sudo journalctl -u quant-feishu-bot@<id> -n 50 --no-pager
 - Web 服务器配置 HTTPS（certbot/Let's Encrypt）
 - Redis 仅监听 127.0.0.1
 - API 密钥全部加密存储（系统自动 AES），不暴露明文
+- 密钥管理：一个 `SECRET_KEY` 环境变量，HKDF 派生 `JWT_SECRET`（JWT 签名）和 `ENCRYPTION_KEY`（Fernet 加密凭证）。**不要丢失** `SECRET_KEY`——丢失后所有已加密凭证（XTP 密钥、Tushare token、LLM API key 等）无法解密
+- 生成 SECRET_KEY：`python3 -c "import secrets; print(secrets.token_urlsafe(48))"`
