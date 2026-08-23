@@ -180,5 +180,11 @@ app.conf.update(
             # expires：worker 停机期间过期消息丢弃，防恢复后连环补跑（盲审 D 陷阱 7）
             "options": {"queue": "risk", "expires": 25},
         },
+        # SA4：Failed 实盘单元 reconciler（CrashLoopBackOff 退避自动 reset-failed + start）
+        "sa4-reconciler": {
+            "task": "src.scheduler.tasks.sa4_reconciler",
+            "schedule": 300.0,
+            "options": {"queue": "risk", "expires": 290},
+        },
     },
 )

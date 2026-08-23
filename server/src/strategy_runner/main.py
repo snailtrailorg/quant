@@ -26,6 +26,47 @@ except ImportError:
 # 此别名保 tests/scripts 旧 import 兼容
 from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
 
+# --- SA4 退出码分类（sysexits 惯例；单元 Restart=on-failure + RestartPreventExitStatus=78）---
+EX_OK = 0          # 正常停止（任务 stopped/策略 disabled）--on-failure 不拉起（F-36 churn 根修）
+EX_TEMPFAIL = 75   # 瞬态（依赖探活退避耗尽）--systemd 重启 + reconciler 接管
+EX_CONFIG = 78     # 永久配置错误（任务/策略不存在、凭证缺失、symbol 解析失败）--不重启，Failed 告警人工
+
+
+def _pg_alive() -> bool:
+    """PG 探活（SA4 依赖探活的硬依赖项；Valkey 运行期已全路径容忍，不阻塞启动）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+def _wait_for_deps(max_wait: float = 600.0) -> bool:
+    """SA4 启动依赖探活 + 进程内指数退避（5->10->20->40->60s 封顶）。
+
+    服务器重启序（PG 慢于 runner）旧逻辑首查即崩 -> 5 次/5min 打穿 StartLimit ->
+    Failed 死透等人工。改：进程内等依赖恢复（期间喂 systemd watchdog 防 90s 误杀），
+    耗尽（默认 10min）返回 False 由上层 EX_TEMPFAIL 退出--systemd RestartSec 后重试，
+    Failed 后 reconciler 兜底。返回 True = 依赖就绪。
+    """
+    delays = [5, 10, 20, 40]
+    waited = 0.0
+    while True:
+        if _pg_alive():
+            if waited:
+                logger.info("依赖探活：PG 恢复（等待 %.0fs）", waited)
+            return True
+        _sd_notify("WATCHDOG=1")   # 探活期间照常喂狗，防 WatchdogSec 误杀
+        d = delays.pop(0) if delays else 60
+        waited += d
+        if waited >= max_wait:
+            logger.error("依赖探活退避耗尽（PG %.0fs 不可达）", waited)
+            return False
+        logger.warning("PG 未就绪，%.0fs 后重试（已等 %.0fs）", d, waited)
+        time.sleep(d)
+
 
 def _warmup_history(symbol: str, n: int = 100) -> list:
     """PG 暖机：读历史 bar 填充 history（因子初始化 / 断线补缺口，#4）。返回 list。"""
@@ -290,11 +331,17 @@ def main():
 
     if MainEngine is None:
         logger.error("vnpy 未安装，策略实盘需要 vnpy 环境")
-        sys.exit(1)
+        sys.exit(EX_CONFIG)
 
     if not args.task_id and not args.id:
         logger.error("必须提供 --task-id（新）或 --id（旧）")
-        sys.exit(1)
+        sys.exit(EX_CONFIG)
+
+    # SA4：启动依赖探活 + 指数退避（服务器重启序 PG 慢启不再 5 连崩打穿 StartLimit）
+    if not _wait_for_deps():
+        _alert("实盘任务依赖探活退避耗尽",
+               "PG 持续不可达超 10 分钟，runner 以 EX_TEMPFAIL 退出待 systemd/reconciler 重试。")
+        sys.exit(EX_TEMPFAIL)
 
     # 1. 读 live_task（新架构）或 strategy_config（旧架构兼容）
     from src.data_platform.db import get_conn
@@ -310,7 +357,7 @@ def main():
             row = cur.fetchone()
         if not row:
             logger.error("实盘任务 %s 不存在", args.task_id)
-            sys.exit(1)
+            sys.exit(EX_CONFIG)
         tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital = row
         if status == "stopped":
             logger.info("实盘任务 %s 已停止，退出", tid)
@@ -339,7 +386,7 @@ def main():
             row = cur.fetchone()
         if not row:
             logger.error("策略 %s 不存在", args.id)
-            sys.exit(1)
+            sys.exit(EX_CONFIG)
         sid, name, s_type, symbol, adapter_type, enabled, factors, aggregator, params, bt_verified = row
         factors = _json.loads(factors) if isinstance(factors, str) else (factors or [])
         aggregator = _json.loads(aggregator) if isinstance(aggregator, str) else (aggregator or {})
@@ -389,7 +436,7 @@ def main():
     except Exception as e:
         logger.error("XtpGateway 加载失败: %s", e)
         main_engine.close()
-        sys.exit(1)
+        sys.exit(EX_CONFIG)
 
     # 3. 建策略实例
     from src.strategy_framework.strategy import Strategy, StrategyConfig
@@ -407,7 +454,7 @@ def main():
     setting = _build_xtp_setting()
     if not setting.get("账号") or not setting.get("交易地址"):
         logger.error("XTP 凭证不完整（broker_config 无 xtp 记录，且 .env XTP_TEST_* 未配）")
-        sys.exit(1)
+        sys.exit(EX_CONFIG)
     gateway.connect(setting)
 
     # 5. 行情驱动：EVENT_TICK -> BarGenerator -> strategy.on_bar（#4 核心）
@@ -544,7 +591,7 @@ def main():
     exchange = getattr(Exchange, ex_vnpy, None)
     if not exchange:
         logger.error("无法解析交易所: %s（vt_symbol=%s）", ex, symbol)
-        sys.exit(1)
+        sys.exit(EX_CONFIG)
     sub_req = SubscribeRequest(symbol=raw, exchange=exchange)
 
     def _resubscribe():

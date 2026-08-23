@@ -1,6 +1,6 @@
 [Unit]
 Description=Quant Strategy %i (旧架构 strategy_config 直启)
-# 不 Requires 具体 pg/redis 服务名（各机命名不一，写错=永远起不来）；runner 首查失败退出，Restart=always 自愈
+# 不 Requires 具体 pg/redis 服务名（各机命名不一，写错=永远起不来）；runner 启动探活退避等依赖（SA4）
 After=network-online.target
 Wants=network-online.target
 # 5 次/5 分钟失败后放弃进 Failed → 触发 OnFailure 告警（防无限重启风暴，F-1）
@@ -19,7 +19,10 @@ ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strat
 WatchdogSec=90
 NotifyAccess=main
 # 失败终态 → 钩子单元发告警（F-13）
-Restart=always
+# SA4（2026-08-23）：Restart=always -> on-failure，正常停止 exit(0) 不再拉起（F-36 churn 根修）；
+# 退出码 78（EX_CONFIG 永久配置错误）不重启直接 Failed -> OnFailure 告警人工处理
+Restart=on-failure
+RestartPreventExitStatus=78
 RestartSec=30
 # 512M 会被 XTP 全市场合约加载尖峰打爆（OOM SIGKILL，2026-08-17 实测）
 MemoryMax=1G

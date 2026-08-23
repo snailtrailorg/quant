@@ -1155,3 +1155,123 @@ def notifications_cleanup():
     except Exception as e:
         logger.exception(f"notifications cleanup failed: {e}")
         return {"error": str(e)}
+
+
+# --- SA4：Failed 实盘单元 reconciler（CrashLoopBackOff，2026-08-23）---
+
+SA4_BACKOFF_BASE = 300   # 首次自动拉起后退避基数（秒）
+SA4_BACKOFF_CAP = 3600   # 退避封顶 1h
+SA4_STABLE_SECS = 600    # 单元稳定 active 超此时长清退避计数（短暂失败不累积惩罚）
+SA4_KEY_PREFIX = "quant:sa4:backoff:"
+
+
+def _sa4_systemctl(*args):
+    """systemctl 调用（quant 用户经 polkit）；异常/超时返回 None（D-F5：采集失败≠健康）。"""
+    import subprocess
+    try:
+        return subprocess.run(["systemctl", *args], capture_output=True, text=True, timeout=10)
+    except Exception as e:
+        logger.warning("sa4: systemctl %s 失败: %s", " ".join(args), e)
+        return None
+
+
+def _sa4_units(state: str) -> list[str]:
+    """按状态列 quant-live-task@* 单元名（含 .service 后缀）。"""
+    r = _sa4_systemctl("list-units", "quant-live-task@*", "--state", state,
+                       "--no-legend", "--plain", "--no-pager")
+    if r is None or r.returncode != 0:
+        return []
+    return [ln.split()[0] for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def _sa4_backoff_delay(attempts: int) -> float:
+    """第 attempts 次自动拉起后、下次允许拉起前须等待的时长（指数退避封顶）。"""
+    if attempts <= 0:
+        return 0.0
+    return min(SA4_BACKOFF_BASE * (2 ** (attempts - 1)), SA4_BACKOFF_CAP)
+
+
+@app.task(name="src.scheduler.tasks.sa4_reconciler")
+def sa4_reconciler():
+    """SA4 reconciler：扫 Failed 实盘单元，依赖健康则按退避自动 reset-failed + start。
+
+    - live_task 已停/已删：只 reset-failed 清状态不拉起（尊重用户停止意图）
+    - PG 不可达：本轮整体跳过（fail-safe--依赖未恢复不盲拉，runner 自身有 systemd Restart 兜底）
+    - 退避计数 Valkey（quant:sa4:backoff:{unit}，TTL 1 天）：300s*2^(n-1) 封顶 1h；
+      单元稳定 active 超 10min 计数清零
+    """
+    import os
+    import time as _time
+    import redis as _redis
+
+    failed = _sa4_units("failed")
+    active = _sa4_units("active")
+    result = {"failed": len(failed), "restarted": [], "reset_only": [], "skipped": {}}
+
+    # fail-safe：PG 不可达时 runner 的探活也过不了，盲拉只添乱
+    try:
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+    except Exception as e:
+        return {"status": "skipped", "reason": f"PG 不可达: {e}"}
+
+    r = None
+    try:
+        r = _redis.Redis.from_url(
+            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+        r.ping()
+    except Exception as e:
+        logger.warning("sa4: Valkey 不可达（退避计数不可用，按首档拉起）: %s", e)
+
+    now = _time.time()
+    # 稳定 active -> 清退避计数（下次失败从 300s 重新起算）
+    if r is not None:
+        for unit in active:
+            try:
+                key = SA4_KEY_PREFIX + unit
+                data = r.hgetall(key)
+                if data and now - float(data.get("ts", 0)) >= SA4_STABLE_SECS:
+                    r.delete(key)
+            except Exception:
+                pass
+
+    from src.alert_notify import notify
+    for unit in failed:
+        # 用户意图校验：live_task 已停/已删 -> 只清状态不拉起
+        tid = unit.split("@", 1)[1].rsplit(".service", 1)[0]
+        try:
+            with get_conn() as conn:
+                cur = conn.execute("SELECT status FROM live_task WHERE id=%s", (tid,))
+                row = cur.fetchone()
+        except Exception as e:
+            result["skipped"][unit] = f"查 live_task 失败: {e}"
+            continue
+        if row is None or row[0] != "running":
+            _sa4_systemctl("reset-failed", unit)
+            result["reset_only"].append(unit)
+            logger.info("sa4: %s live_task=%s，只清 Failed 状态不拉起", unit, row[0] if row else "已删")
+            continue
+        # 退避窗口
+        key = SA4_KEY_PREFIX + unit
+        data = r.hgetall(key) if r is not None else {}
+        attempts = int(data.get("attempts", 0))
+        if attempts and now - float(data.get("ts", 0)) < _sa4_backoff_delay(attempts):
+            result["skipped"][unit] = "退避窗口内"
+            continue
+        _sa4_systemctl("reset-failed", unit)
+        sr = _sa4_systemctl("start", unit)
+        if sr is None or sr.returncode != 0:
+            result["skipped"][unit] = f"start 失败: {(sr.stderr or '').strip()[:100] if sr else 'timeout'}"
+            continue
+        if r is not None:
+            r.hset(key, mapping={"attempts": attempts + 1, "ts": _time.time()})
+            r.expire(key, 86400)
+        result["restarted"].append(unit)
+        logger.warning("sa4: %s 自动拉起（第 %d 次，下次退避 %.0fs）",
+                       unit, attempts + 1, _sa4_backoff_delay(attempts + 1))
+        try:
+            notify("warn", "system", f"SA4 自动重启实盘单元: {unit}",
+                   f"第 {attempts + 1} 次自动拉起；若再失败将退避 {_sa4_backoff_delay(attempts + 1):.0f}s。")
+        except Exception:
+            pass
+    return result

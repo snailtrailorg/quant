@@ -16,7 +16,9 @@ def main() -> None:
     unit = sys.argv[1] if len(sys.argv) > 1 else "unknown-unit"
     title = f"实盘单元失败: {unit}"
     body = ("该 systemd 单元进入 Failed（StartLimit 5 次/5 分钟耗尽，或看门狗/显式失败）。"
-            "已停止自动重启，需人工介入：journalctl -u {unit} -n 50 定位后 systemctl reset-failed + start。"
+            "SA4 reconciler 将在依赖健康且退避窗口（首次 5 分钟，指数翻倍封顶 1 小时）后自动"
+            " reset-failed + start；若退出码为 78（EX_CONFIG 永久配置错误）不会自动重启，"
+            "需人工 journalctl -u {unit} -n 50 定位后修复再 systemctl reset-failed + start。"
             ).format(unit=unit)
     try:
         from src.alert_notify.notify import notify
