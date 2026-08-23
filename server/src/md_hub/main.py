@@ -423,7 +423,9 @@ def main() -> None:
                     pool_rows = {x[0] for x in cur.fetchall() if x[0]}
                     if pool_rows:
                         rows |= pool_rows
-                        logger.info("池源订阅 +%d 标的", len(pool_rows))
+                        # 2026-08-23 降噪：15s 轮询每轮都打=噪音；实际订阅变化由
+                        # _sync_subscriptions 的「订阅同步：+N -M」日志呈现，轮询内部态降 debug
+                        logger.debug("池源订阅 +%d 标的", len(pool_rows))
                 except Exception as e:
                     logger.warning("读池订阅源失败: %s", e)
                 # 临时源（详情页看过即订阅，TTL 自动退订；顺带清理过期行防表膨胀）
@@ -433,7 +435,7 @@ def main() -> None:
                     trans_rows = {x[0] for x in cur.fetchall() if x[0]}
                     if trans_rows:
                         rows |= trans_rows
-                        logger.info("临时源订阅 +%d 标的", len(trans_rows))
+                        logger.debug("临时源订阅 +%d 标的", len(trans_rows))  # 降噪同上
                     conn.execute("DELETE FROM hub_transient_subs WHERE expire_at <= now()")
                     conn.commit()
                 except Exception as e:
