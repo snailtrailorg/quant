@@ -478,7 +478,8 @@ restart_hub() {
     fi
     echo "ℹ️ Restart $MD_HUB_SERVICE..."
     ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $MD_HUB_SERVICE"
-    if _stabilize "$MD_HUB_SERVICE"; then
+    # hub 加载 XTP 全市场合约慢（默认 4 次 ~16s 必误报，2026-08-23 两次部署实测）--加长到 ~60s
+    if _stabilize "$MD_HUB_SERVICE" 15; then
         echo "  ✅ $MD_HUB_SERVICE active (稳定)"
     else
         echo "  ⚠️ $MD_HUB_SERVICE 未稳定（journalctl -u $MD_HUB_SERVICE -n 30）"
