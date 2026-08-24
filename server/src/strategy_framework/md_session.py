@@ -17,6 +17,42 @@ from datetime import datetime
 
 logger = logging.getLogger("md_session")
 
+# ——— 注册 quant_common.session 的市场配置回调（层 0 底座不直接依赖 data_platform）———
+def _market_config_provider(market: str) -> dict | None:
+    """从 market_session 表加载市场配置供 quant_common.session.in_session 消费。
+
+    calendar_dates 在此解析（从 DB 取 Tushare 交易日历），quant_common 只拿纯集合作判定。
+    """
+    import json
+    from src.quant_common.session import _load_market_config  # trigger cache init
+    from src.data_platform.db import get_conn, get_trade_calendar
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT calendar, session_rules, tz FROM market_session WHERE name=%s",
+                (market,))
+            row = cur.fetchone()
+        if row:
+            cal, rules, tz = row
+            rules = json.loads(rules) if isinstance(rules, str) else rules
+            cfg = {"calendar": cal, "session_rules": rules, "tz": tz, "calendar_dates": None}
+            # 将 tushare_sse/szse 解析为 dates 集（quant_common 不碰 DB 的代价在此）
+            if cal in ("tushare_sse", "tushare_szse"):
+                from datetime import date as _d
+                cal_dates = get_trade_calendar(_d.today().year)
+                if cal_dates:
+                    cfg["calendar_dates"] = set(cal_dates)
+            return cfg
+    except Exception:
+        pass
+    return None
+
+try:
+    from src.quant_common.session import set_config_provider
+    set_config_provider(_market_config_provider)
+except Exception:
+    pass  # 测试/早期导入窗口静默
+
 
 def is_trading_day(today: datetime | None = None) -> bool:
     """交易日（数据中台日历优先；缺失保守按工作日）。"""
