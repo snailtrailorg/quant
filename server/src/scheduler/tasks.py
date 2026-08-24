@@ -1274,4 +1274,44 @@ def sa4_reconciler():
                    f"第 {attempts + 1} 次自动拉起；若再失败将退避 {_sa4_backoff_delay(attempts + 1):.0f}s。")
         except Exception:
             pass
+    # --- L3 意图调和（2026-08-24 韧性分层模型）：DB=running 但 systemd 无实例的漂移恢复 ---
+    # 任务 8 躺 2.5 天实锤（2026-08-24）：systemctl stop 后 DB 残留 running，服务器重启后
+    # 无人拉起（单元 disabled）。心跳（TTL 90s）已过期但无人比对。L3 职责：DB 期望状态 ->
+    # systemd 实际状态的调和，从裸停止/从未启动状态恢复。
+    # 退避计数与 L1 的 Failed 恢复共用（quant:sa4:backoff:{unit}，同键不冲突）。
+    try:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT id FROM live_task WHERE status='running'")
+            running_tids = [str(r[0]) for r in cur.fetchall()]
+        # 复用本轮已采集的 active/failed 列表（不重复 systemctl 调用）
+        actives = set(active)
+        faileds = set(failed)
+        for tid in running_tids:
+            unit = f"quant-live-task@{tid}.service"
+            if unit in actives or unit in faileds:
+                continue
+            key = SA4_KEY_PREFIX + unit
+            data = r.hgetall(key) if r else {}
+            attempts = int(data.get("attempts", 0))
+            if attempts and _time.time() - float(data.get("ts", 0)) < _sa4_backoff_delay(attempts):
+                result.setdefault("l3_skipped", []).append(unit)
+                continue
+            sr = _sa4_systemctl("start", unit)
+            if sr is None or sr.returncode != 0:
+                result.setdefault("l3_failed", []).append(unit)
+                continue
+            if r is not None:
+                r.hset(key, mapping={"attempts": attempts + 1, "ts": _time.time()})
+                r.expire(key, 86400)
+            result.setdefault("l3_restarted", []).append(unit)
+            logger.warning("L3 意图调和：DB=running 但单元缺失，拉起 %s", unit)
+            try:
+                notify("warn", "system", f"L3 拉起实盘单元: {unit}",
+                       "DB=running 但 systemd 无实例（任务 8 同款状态漂移），已自动拉起。"
+                       "若预期停用请先在 Web 停止任务（DB 状态同步更新）。")
+            except Exception:
+                pass
+    except Exception as e:
+        logger.warning("L3 意图调和失败: %s", e)
+    
     return result

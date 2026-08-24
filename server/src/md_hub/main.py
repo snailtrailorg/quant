@@ -301,6 +301,7 @@ def main() -> None:
     from vnpy.trader.gateway import BaseGateway
     from vnpy_xtp.gateway.xtp_gateway import XtpMdApi
     from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
+    from src.strategy_framework.md_session import XtpMdSession
 
     class ThinGateway(BaseGateway):
         """仅事件转发；7 个抽象方法全量 stub（hub 数据面永不交易，R-HALT1 代码级保证）。"""
@@ -331,6 +332,8 @@ def main() -> None:
     gw = ThinGateway(ee, "XTP")
     md_api = XtpMdApi(gw)
     gw.md_api = md_api
+    # L2 会话管理（韧性分层模型 2026-08-24）：定时续航 + 反应式重登，进程内闭环永不退出
+    md_sess = XtpMdSession(md_api)
 
     agg = MinuteAggregator()
     seqs: dict[str, int] = {}
@@ -338,7 +341,7 @@ def main() -> None:
     _lt_fail_ts: dict[str, float] = {}   # latest_tick 连败退避表（O 审 M6）
     # ticks/bars=进程累计（观测）；sess_*=时段内基线（S6 修订：进入交易时段的沿上清零，
     stats = {"ticks": 0, "bars": 0, "last_tick_wall": 0.0,
-             "sess_ticks": 0, "sess_last_tick": 0.0}
+             "sess_ticks": 0, "sess_last_tick": 0.0, "sess_enter_ts": 0.0}
     pgw = _PGWriter()
     pgw.start()
 
@@ -381,6 +384,15 @@ def main() -> None:
     from vnpy.event import EventEngine as _EE
     from vnpy.trader.event import EVENT_TICK
     ee.register(EVENT_TICK, on_tick)
+
+    # MD 生命周期可见化（2026-08-24 僵尸会话事件）：连接/断开/重登日志走 EVENT_LOG，
+    # 此前只注册 EVENT_TICK 全被丢弃 -- hub 侧会话状态完全不可观测，诊断只能靠猜
+    from vnpy.trader.event import EVENT_LOG
+
+    @_guard("hub.on_log")
+    def on_log(event):
+        logger.info("[gw] %s", getattr(event.data, "msg", event.data))
+    ee.register(EVENT_LOG, on_log)
 
     # ——— 连接 + 订阅（真相源=DB，30s diff + 60s 幂等重放，R-SUB）———
     setting = _build_xtp_setting()
@@ -508,6 +520,10 @@ def main() -> None:
     # ——— 主循环 ———
     counter = 0
     sess_was = _in_astock_session()   # 时段沿检测（S6 修订：沿上清 sess_* 基线）
+
+    if sess_was:
+        # 盘中启动（人工/自愈重启场景）：时段起点=启动时刻，零 tick 宽限从这起算
+        stats["sess_enter_ts"] = time.time()
     flush_points = {1130, 1500}   # 11:30:05 / 15:00:05 双 flush（评审 S2）
     try:
         while True:
@@ -566,19 +582,43 @@ def main() -> None:
             if session_edge(sess_now, sess_was):
                 stats["sess_ticks"] = 0
                 stats["sess_last_tick"] = 0.0
+                if sess_now:
+                    stats["sess_enter_ts"] = time.time()
             sess_was = sess_now
+            # --- L2 会话自愈（韧性分层模型 2026-08-24）---
+            # 定时续航：交易日 09:10（开盘前）换新鲜会话。XTP 日切 ≈23:53 丢会话且 SDK
+            # 单次重登失败即永久静默（2026-08-24 实锤）--预测性维护，18 小时无效重试归零。
+            if md_sess.schedule_due():
+                logger.info("定时续航：交易日开盘前重登 MD 会话")
+                md_sess.renew()
+            # 反应式重登：盘中症状驱动（零 tick 超宽限=僵尸会话 / 断流超 5min），
+            # 进程内重登不重启进程（分层规则：退出只属于进程域故障，数据流症状永不触达 L1）
+            _symptom = (sess_now and stats["sess_ticks"] == 0
+                        and stats["sess_enter_ts"]
+                        and time.time() - stats["sess_enter_ts"] > 600)
+            if not _symptom and sess_now and stats["sess_ticks"] > 0 and stats["sess_last_tick"]:
+                _symptom = time.time() - stats["sess_last_tick"] > 300
+            if _symptom and md_sess.retry_ready():
+                logger.warning("MD 症状驱动重登（僵尸会话/断流）")
+                _alert("hub MD 反应式重登",
+                       "盘中零 tick 超 10 分钟或断流超 5 分钟，进程内重登会话（不重启进程）。"
+                       "持续未恢复请查 XTP 平台状态。")
+                md_sess.renew()
+            # 数据恢复 -> 清反应式退避（下轮症状从头起算）
+            if stats["sess_last_tick"] and time.time() - stats["sess_last_tick"] < 60:
+                md_sess.on_recovered()
             if sess_now and stats["sess_ticks"] == 0 and counter % 30 == 0:
-                _alert("hub 交易时段零 tick（订阅可能未生效/XTP 异常）",
-                       f"订阅 {len(subscribed)} 个标的。runbook：journalctl -u quant-md-hub@quant；"
-                       f"确认 MD 连接后可手动 systemctl restart quant-md-hub@quant。")
+                _alert("hub 交易时段零 tick（僵尸会话嫌疑）",
+                       f"订阅 {len(subscribed)} 个标的。进程内自动重登中（定时续航/反应式，"
+                       f"不重启进程）；持续未恢复请查 XTP 平台状态与 journalctl [gw] 日志。")
             if sess_now and stats["sess_ticks"] > 0 and stats["sess_last_tick"]:
                 _stale = time.time() - stats["sess_last_tick"]
                 if _stale > 300 and counter % 6 == 0:   # 每 60s 一条，避免轰炸
                     logger.critical("hub tick 断流 %.0fs（时段内已收 %d 条，只告警不自杀）",
                                     _stale, stats["sess_ticks"])
                     _alert("行情 hub tick 断流",
-                           f"时段内已收 {stats['sess_ticks']} 条后断流。runbook：查 journalctl -u quant-md-hub@quant；"
-                           f"确认为行情源/网络问题后可手动 systemctl restart quant-md-hub@quant（worker 会自动暖机补缺）。")
+                           f"时段内已收 {stats['sess_ticks']} 条后断流。进程内自动重登中；"
+                           f"持续未恢复请查 XTP 平台状态（journalctl 滤 [gw] 看 MD 生命周期）。")
     except KeyboardInterrupt:
         pass
     finally:

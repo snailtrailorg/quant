@@ -25,6 +25,7 @@ except ImportError:
 # 2026-08-19 模块归位：build_xtp_setting 搬 strategy_framework/broker（hub/runner 双消费方）；
 # 此别名保 tests/scripts 旧 import 兼容
 from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
+from src.strategy_framework.md_session import XtpMdSession
 
 # --- SA4 退出码分类（sysexits 惯例；单元 Restart=on-failure + RestartPreventExitStatus=78）---
 EX_OK = 0          # 正常停止（任务 stopped/策略 disabled）--on-failure 不拉起（F-36 churn 根修）
@@ -456,6 +457,9 @@ def main():
         logger.error("XTP 凭证不完整（broker_config 无 xtp 记录，且 .env XTP_TEST_* 未配）")
         sys.exit(EX_CONFIG)
     gateway.connect(setting)
+    # L2 会话管理（韧性分层模型 2026-08-24）：direct 模式 MD 登录失败（如 user already
+    # exists 会话槽冲突）vnpy_xtp 不重试即永久死（2026-08-24 实锤）--定时续航+反应式重登
+    md_sess = XtpMdSession(gateway.md_api)
 
     # 5. 行情驱动：EVENT_TICK -> BarGenerator -> strategy.on_bar（#4 核心）
     from vnpy.trader.event import EVENT_TICK, EVENT_TRADE
@@ -515,7 +519,8 @@ def main():
 
     # last_ts/count=进程累计（观测）；sess_*=时段内基线（S6 修订：沿上清零，跨日回放 tick 不污染断流判定）
     _tick_state = {"last_ts": 0.0, "count": 0,
-                   "sess_last_ts": 0.0, "sess_count": 0}  # GIL 下原子读写，无需锁
+                   "sess_last_ts": 0.0, "sess_count": 0,
+                   "sess_enter_ts": 0.0}  # GIL 下原子读写，无需锁
 
     # S6 修订·direct 下单门（盲审 C-F2 2026-08-18）：与 hub 模式 buy_ok 同语义——BUY 需
     # 交易时段 + tick 新鲜（<300s）。测试平台夜间回放会驱动 on_bar→place_order，无此门则回放
@@ -609,6 +614,10 @@ def main():
     _r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
     counter = 0
     sess_was = _in_astock_session()   # 时段沿检测（S6 修订：沿上清 sess_* 基线）
+
+    if sess_was:
+        # 盘中启动（人工/自愈重启场景）：时段起点=启动时刻，L2 零 tick 宽限从这起算
+        _tick_state["sess_enter_ts"] = time.time()
     _halt_state = {"was": False}  # 熔断沿检测（SB2，F-41：进入熔断的瞬间撤在场单）
 
     def _startup_reconcile() -> None:
@@ -711,17 +720,43 @@ def main():
                 _tick_state["sess_last_ts"] = 0.0
                 _tick_state["sess_count"] = 0
             sess_was = sess_now
+            # --- L2 会话自愈（韧性分层模型 2026-08-24）---
+            # 定时续航：交易日 09:10 开盘前换新鲜会话（XTP 日切 ≈23:53 丢会话，2026-08-24 实锤）
+            try:
+                if md_sess.schedule_due():
+                    logger.info("定时续航：交易日开盘前重登 MD 会话（任务 %s）", sid or tid)
+                    md_sess.renew()
+            except Exception as e:
+                logger.warning("MD 定时续航检查失败: %s", e)
+            # 反应式重登：盘中症状驱动（零 tick 超宽限=僵尸会话 / 断流超 5min）
+            try:
+                _sess_enter = _tick_state.get("sess_enter_ts", 0.0)
+                _symptom = (sess_now and _tick_state["sess_count"] == 0
+                            and _sess_enter and time.time() - _sess_enter > 600)
+                if not _symptom and sess_now and _tick_state["sess_count"] > 0 and _tick_state["sess_last_ts"]:
+                    _symptom = time.time() - _tick_state["sess_last_ts"] > 300
+                if _symptom and md_sess.retry_ready():
+                    logger.warning("MD 症状驱动重登（僵尸会话/断流，任务 %s）", sid or tid)
+                    _alert("实盘任务 MD 反应式重登",
+                           f"盘中零 tick 超 10 分钟或断流超 5 分钟（任务 {sid or tid}），"
+                           f"进程内重登行情会话（不重启进程）。持续未恢复请查 XTP 平台状态。")
+                    md_sess.renew()
+                if _tick_state["sess_last_ts"] and time.time() - _tick_state["sess_last_ts"] < 60:
+                    md_sess.on_recovered()
+            except Exception as e:
+                logger.warning("MD 反应式重登检查失败: %s", e)
             _sess_stale = (time.time() - _tick_state["sess_last_ts"]) if _tick_state["sess_last_ts"] else None
             if sess_now:
                 if _tick_state["sess_count"] == 0 and counter % 30 == 0:
                     _alert(f"实盘任务交易时段零 tick: {sid}",
-                           "订阅可能未生效/XTP 异常。runbook：journalctl 查 MD 连接；确认后可手动重启任务。")
+                           "订阅可能未生效/XTP 异常。进程内自动重登中（定时续航/反应式，不重启进程）；"
+                           "持续未恢复请查 XTP 平台状态与 journalctl 中 [gw] 日志。")
                 if _tick_state["sess_count"] > 0 and _sess_stale is not None and _sess_stale > 120 and counter % 6 == 0:
                     _lvl = logger.critical if _sess_stale > 300 else logger.error
                     _lvl("tick 断流 %.0fs（时段内已收 %d 条，只告警不退出）", _sess_stale, _tick_state["sess_count"])
                     _alert(f"实盘任务 tick 断流: {sid}",
                            f"已断流 {_sess_stale:.0f}s（时段内已收 {_tick_state['sess_count']} 条）。"
-                           f"runbook：查 journalctl 与 XTP 行情链路；确认为行情源问题后可手动重启任务（暖机自动补缺）。")
+                           f"进程内自动重登中；持续未恢复请查 XTP 平台状态与 journalctl 中 [gw] 日志。")
                 # 4) 幂等重订阅（F-24/F-25）：交易时段每 60s 重放一次，兜住"重连后订阅丢失"
                 if counter % 6 == 0:
                     _resubscribe()
