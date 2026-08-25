@@ -208,3 +208,53 @@ class TestPolicyAndFactory:
         kw = r.connection_pool.connection_kwargs
         assert kw.get("socket_timeout") == 3
         assert kw.get("decode_responses") is True
+
+
+class TestCopyLockAndGrace:
+    """双盲审 P1 收尾：告警文案与迁移前 hub 逐字对齐 + zombie_grace 经监督器透传。"""
+
+    @staticmethod
+    def _sup(alerts, *, policy=None, context=None):
+        from src.strategy_framework.runtime.mdlink import MdSessionSupervisor
+        session = MagicMock()
+        counters = MagicMock()
+        counters.apply_edge.return_value = False
+        counters.stalled.return_value = None
+        counters.zombie.return_value = False
+        counters.sess_count = 0
+        clock = {"t": 1000.0}
+        sup = MdSessionSupervisor(
+            session, counters, lambda t, b="": alerts.append((t, b)),
+            role="hub", policy=policy, context=context, now=lambda: clock["t"])
+        return sup, session, counters, clock
+
+    def test_zero_tick_copy_matches_old_hub(self):
+        """零tick告警：标题与「订阅 N 个标的。」前缀逐字还原（role=hub）。"""
+        alerts = []
+        sup, _, counters, clock = self._sup(alerts, context=lambda: "订阅 3 个标的。")
+        sup.tick(True, True)                    # 首见起算
+        clock["t"] += 200.0                     # 过 150s 节奏
+        sup.tick(True, True)
+        assert alerts, "零tick告警应已触发"
+        title, body = alerts[0]
+        assert title == "hub 交易时段零 tick（僵尸会话嫌疑）"
+        assert body.startswith("订阅 3 个标的。 进程内自动重登中")
+
+    def test_stall_copy_matches_old_hub(self):
+        """断流告警标题含「行情 」前缀（老 hub 文案），与零tick标题不一致是有意还原。"""
+        alerts = []
+        sup, _, counters, clock = self._sup(alerts)
+        counters.stalled.return_value = 400.0   # >300 触发
+        counters.zombie.return_value = False
+        sup.tick(True, True)
+        clock["t"] += 60.0                      # 过 30s 节奏
+        sup.tick(True, True)
+        stall = [a for a in alerts if "断流" in a[0]]
+        assert stall and stall[0][0] == "行情 hub tick 断流"
+
+    def test_grace_passthrough_via_supervisor(self):
+        """AlertPolicy.zombie_grace 经监督器透传到 counters.zombie（单一来源兑现）。"""
+        from src.strategy_framework.runtime.alerts import AlertPolicy
+        sup, _, counters, _ = self._sup([], policy=AlertPolicy(zombie_grace=300))
+        sup.tick(True, True)
+        assert counters.zombie.call_args.kwargs.get("grace") == 300

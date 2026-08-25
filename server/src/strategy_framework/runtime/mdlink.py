@@ -26,12 +26,14 @@ class MdSessionSupervisor:
 
     def __init__(self, session, counters, alert, *,
                  role: str = "hub", policy: AlertPolicy | None = None,
+                 context: Callable[[], str] | None = None,
                  now: Callable[[], float] | None = None):
         self._session = session
         self._counters = counters
         self._alert = alert
         self._role = role
         self.policy = policy or AlertPolicy()
+        self._context = context   # 告警正文前缀（如订阅数）——hub 老文案「订阅 N 个标的。」
         self._now = now or time.time
         self._anchors: dict[str, float] = {"zero": 0.0, "stall": 0.0}   # 告警节奏锚
 
@@ -57,7 +59,8 @@ class MdSessionSupervisor:
 
         # 2) 反应式重登（症状驱动 + 退避到点）：零 tick 超宽限=僵尸会话 / 断流超线
         stalled = self._counters.stalled(now=now)
-        symptom = (self._counters.zombie(now=now, trading_day=trading_day)
+        symptom = (self._counters.zombie(now=now, trading_day=trading_day,
+                                         grace=p.zombie_grace)   # 双盲审 P1：透传，单一来源
                    or (stalled is not None and stalled > p.stall_error))
         if symptom and self._session.retry_ready():
             logger.warning("[%s] MD 症状驱动重登（僵尸会话/断流）", self._role)
@@ -71,18 +74,20 @@ class MdSessionSupervisor:
             self._session.on_recovered()
 
         # 4) 例行告警（双通道限频，hub counter%30/%6 等值节奏；首见只起算不告警）
+        # 文案与老 hub 逐字对齐（双盲审 P1：断流标题「行情 hub tick 断流」/零tick正文订阅数前缀）
+        prefix = f"{self._context()} " if self._context else ""
         if in_session and self._counters.sess_count == 0:
             if self._paced("zero", now, p.zero_tick_alert_period):
                 self._alert(f"{self._role} 交易时段零 tick（僵尸会话嫌疑）",
-                            "进程内自动重登中（定时续航/反应式，不重启进程）；"
-                            "持续未恢复请查 XTP 平台状态与 journalctl [gw] 日志。")
+                            f"{prefix}进程内自动重登中（定时续航/反应式，不重启进程）；"
+                            f"持续未恢复请查 XTP 平台状态与 journalctl 中 [gw] 日志。")
         else:
             self._anchors["zero"] = 0.0
         if stalled is not None and stalled > p.stall_error:
             if self._paced("stall", now, p.stall_alert_period):
                 logger.critical("[%s] tick 断流 %.0fs（时段内已收 %d 条，只告警不自杀）",
                                 self._role, stalled, self._counters.sess_count)
-                self._alert(f"{self._role} tick 断流",
+                self._alert(f"行情 {self._role} tick 断流",
                             f"时段内已收 {self._counters.sess_count} 条后断流。"
                             f"进程内自动重登中；持续未恢复请查 XTP 平台状态"
                             f"（journalctl 滤 [gw] 看 MD 生命周期）。")

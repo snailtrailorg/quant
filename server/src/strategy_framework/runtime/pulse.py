@@ -58,10 +58,18 @@ class SessionCounters:
         """当前时段态（沿检测后的缓存值）。"""
         return self._was
 
-    def zombie(self, now: float | None = None, trading_day: bool = True) -> bool:
-        """僵尸会话判定——委托 md_session.zombie_session 纯函数（唯一实现）。"""
+    def zombie(self, now: float | None = None, trading_day: bool = True,
+               grace: float | None = None) -> bool:
+        """僵尸会话判定——委托 md_session.zombie_session 纯函数（唯一实现）。
+
+        grace 透传（双盲审 P1）：AlertPolicy.zombie_grace 必须能真正生效——
+        此前不透传恒用默认 600，与 hub 恰好等值纯属巧合（单一来源承诺落空）。
+        """
         now = now if now is not None else time.time()
-        return zombie_session(self._was, self.sess_count, self.sess_enter_ts, now, trading_day)
+        if grace is None:
+            return zombie_session(self._was, self.sess_count, self.sess_enter_ts, now, trading_day)
+        return zombie_session(self._was, self.sess_count, self.sess_enter_ts, now, trading_day,
+                              grace=grace)
 
     def stalled(self, now: float | None = None) -> float | None:
         """断流秒数；时段内无任何数据（无基线）时 None。"""

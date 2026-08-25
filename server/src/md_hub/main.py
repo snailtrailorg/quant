@@ -235,7 +235,8 @@ def main() -> None:
         BSE 端到端本就不通，防 KeyError 噪音刷 warning）。
         双盲审 P2：unSubscribeMarketData 前判 LOGGED_IN 态——非登录态（SDK 断线/
         重登窗口）裸调 C 面有炸回调线程风险，跳过+debug（与守卫 subscribe 软防护
-        对称；重连后的全量重放以 desired 集为准，漏退订会被下轮 diff 补上）。
+        对称）。注意：跳过后订阅账本仍按 want 记账，被跳过的退订对下轮 diff 不可见——
+        真实兜底是重连/重登后的全量重放（服务端订阅清零，以 desired 重建），非 diff。
         """
         try:
             bar = agg.flush_symbol(sym)
@@ -302,8 +303,9 @@ def main() -> None:
                 last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=pgw.dropped)
 
     # L2 监督器（韧性分层模型）：定时续航/反应式重登/恢复/零tick告警/断流告警五段内聚；
-    # 默认 AlertPolicy=hub 现值（600/300/150/30/60），行为值不变
-    sup = MdSessionSupervisor(md_sess, counters, _alert, role="hub")
+    # 默认 AlertPolicy=hub 现值（600/300/150/30/60），告警文案与老 hub 逐字对齐
+    sup = MdSessionSupervisor(md_sess, counters, _alert, role="hub",
+                              context=lambda: f"订阅 {len(sm.current)} 个标的。")
 
     _td_cache: dict = {"d": None, "v": True}
 
@@ -317,6 +319,8 @@ def main() -> None:
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗
                       event_engines=(ee,),                          # 事件线程存活（R-BR12，死→exit 1）
+                      on_fatal=lambda reason: _alert(f"行情 hub {reason}，自动重启",
+                                                     "实例退出由 systemd 接管；请查 journalctl 定位首个异常。"),
                       fatal_exit_code=1)
     loop.every("lease-renew", 5.0, _lease_renew)    # 租约 30s TTL，5s 一续（失败 exit 5 在钩子内自带）
     loop.every("md-edge", 0.0, _md_edge)            # 重连沿检测：每步

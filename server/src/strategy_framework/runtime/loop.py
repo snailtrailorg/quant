@@ -36,6 +36,7 @@ class EngineLoop:
                  now: Callable[[], float] | None = None,
                  watchdog: Callable[[], None] | None = None,
                  event_engines: tuple = (),
+                 on_fatal: Callable[[str], None] | None = None,
                  fatal_exit_code: int = 1):
         self.name = name
         self.step = step
@@ -43,6 +44,7 @@ class EngineLoop:
         self._now = now or time.monotonic
         self._watchdog = watchdog
         self._event_engines = tuple(e for e in event_engines if e is not None)
+        self._on_fatal = on_fatal
         self._fatal_exit_code = fatal_exit_code
         self._hooks: list[Hook] = []
 
@@ -65,6 +67,17 @@ class EngineLoop:
             return self.step
         return max(0.0, min(min(due) - now, self.step))
 
+    def _fatal(self, reason: str) -> None:
+        """进程域退出：on_fatal 告警（双盲审 P1——Restart=always 单元 OnFailure 不触发，
+        首报告警不能等 StartLimit 撞满）→ critical → os._exit。"""
+        logger.critical("[%s] %s，退出待 systemd 重启", self.name, reason)
+        if self._on_fatal is not None:
+            try:
+                self._on_fatal(reason)
+            except Exception as e:
+                logger.warning("[%s] on_fatal 回调失败: %s", self.name, e)
+        os._exit(self._fatal_exit_code)
+
     def _preflight(self) -> None:
         """每步前置：喂狗 + 事件线程存活。"""
         if self._watchdog is not None:
@@ -75,8 +88,7 @@ class EngineLoop:
         for ee in self._event_engines:
             t = getattr(ee, "_thread", None)
             if t is not None and not t.is_alive():
-                logger.critical("[%s] EventEngine 事件线程已死亡，退出待 systemd 重启", self.name)
-                os._exit(self._fatal_exit_code)
+                self._fatal("EventEngine 事件线程已死亡")
 
     def _dispatch(self) -> None:
         now = self._now()
@@ -87,8 +99,7 @@ class EngineLoop:
                 h.fn()
             except Exception as e:
                 if h.failure == "exit":
-                    logger.critical("[%s] 钩子 %s 失败（failure=exit）: %s", self.name, h.name, e)
-                    os._exit(self._fatal_exit_code)
+                    self._fatal(f"钩子 {h.name} 失败（failure=exit）: {e}")
                 logger.warning("[%s] 钩子 %s 失败（继续）: %s", self.name, h.name, e)
             if h.period > 0:
                 h.next_due = now + h.period

@@ -94,6 +94,45 @@ class SubscriptionManager:            # 收编 hub _sync_subscriptions（491-515
     def poll(self, now: float | None = None) -> None
 ```
 
+## 双盲审核（2026-08-25 收卷）与 P1 修复记录
+
+**判定双同：无 P0、需小修后部署**。两审独立做了老/新 hub 机械对照（含 parts.py 字节级 diff），结论一致：数据面（租约/flush/心跳键/订阅/L2 阈值退避）等值无回归；守卫 RLock 设计与测试最扎实。
+
+**P1×5 已全部修复**（修复后全量 559 绿）：
+1. `AlertPolicy.zombie_grace` 死旋钮 → pulse.zombie 加 grace 透传 + 监督器传 policy 值 + 测试
+2. 事件线程死亡告警丢失（Restart=always 下 OnFailure 不触发）→ EngineLoop 加 `on_fatal` 回调（含钩子 exit 路径）+ hub 接 `_alert` + 测试
+3. 告警文案漂移两处 → 断流标题恢复「行情 hub tick 断流」、零tick正文恢复「订阅 N 个标的。」前缀（supervisor 加 `context` 参数）+ 文案锁测试
+4. 超集锁测试同义反复 → 重写为双向机械锁（消费方锁：8 字段必须仍被 collector 读取；生产方锁：writer 全量透传）
+5. G2 冒烟缺失 → **形态定稿为 `server/scripts/run_hub_postverify.py`（部署后观察生产 hub）**：hub 是单实例租约架构，影子冒烟实例会按设计让位退出且 bar 落库与产重叠——独立实例结构上不成立。postverify 断言：①零 SEGV/Traceback/重启（gen 不变）②心跳 TTL+8 旧字段③bar 持续增长
+
+**确证的行为差异（非回归，知情接受）**：重放从 `%60<10` 相位窗改 60s 确定性周期（**修复**而非等值——旧法 1/3 分钟可能错过整窗）；zombie 判定新增 trading_day 门（有益）；告警节奏锚从进程相位改症状起点（首报恒 +period，更冷静）；sess_ticks 出沿清零（夜间心跳为 0，纯观测）；收盘后不再空调 on_recovered；启动 t0 多一次幂等重放。
+
+**P2 落档**：`_unsubscribe` 跳过退订的注释改为如实表述（真实兜底=重连后全量重放）；`main.py` 338 行超验收 ≤320——**waiver**（行为等值优先于行数指标，不再为凑数拆函数）；schedule_due 每步查 is_trading_day DB（老同病，批 3 随 mdlink 门控一并处置）；md_hub.md 模块契约回写欠账（批 3 文档批）。
+
+**下一步门**：G4 盘外部署 → 服务器跑 `run_hub_postverify.py --minutes 5`（G2）→ 观察一交易日。
+
+## 真实行为映射表（双盲审核对结论落档，替代实现期自报版）
+
+| 老 hub（6415e8c） | 新落位 | 等值性 |
+|---|---|---|
+| L533 sleep(5) | EngineLoop step=5 到期驱动 | 等值+消相位漂移 |
+| L535 喂狗 | loop.watchdog | 等值 |
+| L538-546 租约续期/exit 5/容忍一轮 | every("lease-renew",5,_lease_renew) | **逐字等值**（字节级 diff 证实） |
+| L548-552 事件线程死→告警+exit 1 | loop on_fatal+event_engines | 等值（P1-2 修复后告警恢复） |
+| L554-558 MD 重连沿→force 重放 | every("md-edge",0)→sm.on_reconnect_edge | 等值 |
+| L559-560 counter%3 订阅 diff | every("subs-poll",15,sm.poll) | 等值 |
+| L497 %60<10 重放窗 | every("subs-replay",60,sm.replay) | **改善**（确定性，见差异清单） |
+| L562-566 双 flush 窗口 | every("flush",5,_flush) 逻辑逐字 | 等值（命中性≥旧） |
+| L568-577 心跳 hset 8 键 | every("heartbeat",5)→HeartbeatWriter | 8 键同名同义仅增 ts（双向锁测试） |
+| L581-587 时段沿+enter_ts | counters.apply_edge（sup.tick 内聚） | 等值（±5s，600s 宽限下无意义） |
+| L591-606 定时续航/反应式 | sup.tick 段1/2（AlertPolicy 600/300 同值） | 等值（grace 透传 P1 修复后） |
+| L608-609 恢复<60s→on_recovered | sup.tick 段3 | 等值 |
+| L610-613 零tick告警 counter%30 | sup 段4（150s/30s 同值，锚改症状起点） | 值等值，相位差 |
+| L614-621 断流告警 counter%6 | 同上 | 值等值（P1-3 修复后文案逐字同） |
+| L348-360 on_tick 计数 | stats 保留+盘中喂 counters.on_data | 等值（老 sess_last_tick 本就仅盘中写） |
+| L491-515 订阅同步全家 | SubscriptionManager | 语义等值（removed 先退/兜底/日志同） |
+| parts（聚合器/PG写/租约/ThinGateway） | parts.py | **字节级一致**（程序化 diff 证实） |
+
 ## 验收标准
 1. `venv/bin/python -m pytest tests/test_runtime_*.py -q` 全绿；全量 `pytest tests/ -q` 绿；分层 4 绿
 2. 心跳超集锁：`test_runtime_pulse` 断言 writer 输出 ⊇ 消费方清单（hub 键 `{pid,gen,subs,ticks,bars,sess_ticks,dropped_pg,last_tick_ts}` 对照 `health_monitor/collector.py`）

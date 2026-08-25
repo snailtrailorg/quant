@@ -81,11 +81,29 @@ class TestHeartbeatWriter:
         HeartbeatWriter(r, "k").beat()        # 不抛即通过
 
     def test_superset_principle(self):
-        """超集锁：writer 输出必须包含消费方（collector）所需字段——由 base 提供时全量透传。"""
+        """超集锁（双盲审 P1-3 重写：双向机械锁，不再是自证同义反复）。
+
+        ① 消费方锁：hub 心跳候选字段必须仍被 collector 读取（collector 演进时此处红，
+        提醒同步本测试与 hub _heartbeat）；② 生产方锁：writer 全量透传候选字段。"""
+        import inspect
+        from src.health_monitor import collector
         from src.strategy_framework.runtime.pulse import HeartbeatWriter
-        r = MagicMock()
         hub_fields = {"pid": 1, "gen": 5, "subs": 2, "ticks": 100, "bars": 50,
                       "sess_ticks": 30, "dropped_pg": 0, "last_tick_ts": 1.0}
+        collector_src = inspect.getsource(collector)
+        for k in hub_fields:
+            assert k in collector_src, f"collector 不再读 {k}？同步更新超集锁与 hub 心跳"
+        r = MagicMock()
         HeartbeatWriter(r, "k", base=lambda: dict(hub_fields)).beat()
         written = set(r.hset.call_args.kwargs["mapping"])
         assert set(hub_fields) <= written     # 旧字段一个不少（只增不改）
+
+    def test_zombie_grace_passthrough(self):
+        """grace 透传（双盲审 P1）：AlertPolicy.zombie_grace 真正生效，不再恒 600。"""
+        from src.strategy_framework.runtime.pulse import SessionCounters
+        c = SessionCounters()
+        c.apply_edge(True)
+        # 默认 600：400s 不判死
+        assert c.zombie(now=c.sess_enter_ts + 400, trading_day=True) is False
+        # grace=300：400s 判死
+        assert c.zombie(now=c.sess_enter_ts + 400, trading_day=True, grace=300) is True

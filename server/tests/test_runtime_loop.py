@@ -118,3 +118,27 @@ class TestPreflight:
         with patch("src.strategy_framework.runtime.loop.os._exit") as ex:
             loop.run(stop_after_iterations=2)
         assert ex.call_args_list[0].args == (1,)
+
+
+class TestOnFatal:
+    def test_event_thread_death_alerts_before_exit(self):
+        """双盲审 P1：Restart=always 下 OnFailure 不触发——on_fatal 必须先告警再退。"""
+        clock = FakeClock()
+        ee = MagicMock()
+        ee._thread.is_alive.return_value = False
+        calls = []
+        loop = _loop(clock, event_engines=(ee,), on_fatal=calls.append)
+        loop.every("n", 0, lambda: None)
+        with patch("src.strategy_framework.runtime.loop.os._exit") as ex:
+            loop.run(stop_after_iterations=2)
+        assert calls and calls[0] == "EventEngine 事件线程已死亡"   # 告警先行（mock 不真退故可重复）
+        assert ex.call_args_list[0].args == (1,)
+
+    def test_hook_exit_fatal_alerts(self):
+        clock = FakeClock()
+        calls = []
+        loop = _loop(clock, on_fatal=calls.append)
+        loop.every("f", 0, lambda: (_ for _ in ()).throw(RuntimeError("x")), failure="exit")
+        with patch("src.strategy_framework.runtime.loop.os._exit"):
+            loop.run(stop_after_iterations=1)
+        assert len(calls) == 1 and "f" in calls[0]
