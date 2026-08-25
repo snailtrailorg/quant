@@ -3,15 +3,12 @@
 覆盖：
 - _zombie_session：零 tick 宽限 / 有 tick 不判死 / 非交易日 / 非时段 / 边界
 - XtpMdSession：schedule_due 时刻/交易日/去重、retry_ready 退避
-- renew 清场升级（2026-08-25）：已登录态先 logout / 死 socket 直登 / 未确认补 logout /
-  logout 旧签名兜底 / on_recovered 清 _last_retry_ts + 打屏守卫
+- renew 守卫契约（批 1）：驱动 md.relogin / 已确认-未确认 / 异常计退避 / 无守卫后端拒绝 /
+  on_recovered 清 _last_retry_ts + 打屏守卫（清场逻辑在 test_md_api_guard）
 - is_trading_day：日历优先、工作日 fallback
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from unittest.mock import patch, MagicMock
-import time
-
-import pytest
 
 from src.strategy_framework.md_session import is_trading_day, zombie_session
 
@@ -85,13 +82,14 @@ class TestXtpMdSession:
         with patch("src.strategy_framework.md_session.is_trading_day", return_value=False):
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 10)) is False
 
-    def test_renew_calls_login_server(self):
-        """renew() -> md_api.login_server()。"""
+    def test_renew_calls_relogin(self):
+        """renew() -> md.relogin()（批 1 起走守卫官方序列）。"""
         from src.strategy_framework.md_session import XtpMdSession
         md = MagicMock()
+        md.relogin.return_value = True
         sess = XtpMdSession(md)
         assert sess.renew() is True
-        md.login_server.assert_called_once()
+        md.relogin.assert_called_once()
 
     def test_renew_md_none(self):
         """md_api 不存在 -> False。"""
@@ -138,74 +136,54 @@ class TestXtpMdSession:
         assert sess._backoff == 300
 
 
-# ── XtpMdSession renew 清场升级（2026-08-25 runner 半开连接实锤）──
+# ── XtpMdSession renew 守卫契约（批 1：teardown 移交 GuardedXtpMdApi）──
 
-class TestRenewTeardown:
-    """renew() 的 logout 清场 + 登录结果同步确认（2026-08-25 修订）。"""
+class TestRenewGuardContract:
+    """renew() 只驱动 md.relogin()，清场/确认逻辑全在守卫（test_md_api_guard）。"""
 
     @staticmethod
-    def _md(logged_in: bool, login_ok: bool):
+    def _md(relogin_return=True):
         md = MagicMock()
-        md.connect_status = logged_in
-        md.login_status = logged_in
-
-        def _login():
-            if login_ok:
-                md.login_status = True   # 真实 login_server 成功时同步置位
-        md.login_server.side_effect = _login
+        md.relogin.return_value = relogin_return
         return md
 
-    def test_logout_first_when_logged_in(self):
-        """已登录态（含半开）：先 logout 清场再 login（EISCONN 根治）。"""
+    def test_confirmed_relogin(self):
+        """relogin True -> 返回 True，日志「已确认」，退避翻倍。"""
         from src.strategy_framework.md_session import XtpMdSession
-        md = self._md(logged_in=True, login_ok=True)
-        order = []
-        md.logout.side_effect = lambda *a: order.append("logout")
-        md.login_server.side_effect = lambda: (order.append("login"),
-                                               setattr(md, "login_status", True))
-        assert XtpMdSession(md).renew() is True
-        assert order == ["logout", "login"]
-
-    def test_dead_socket_direct_login(self):
-        """socket 已死（connect_status False，hub 日切场景）：直登不 logout。"""
-        from src.strategy_framework.md_session import XtpMdSession
-        md = self._md(logged_in=False, login_ok=True)
-        assert XtpMdSession(md).renew() is True
-        md.logout.assert_not_called()
-        md.login_server.assert_called_once()
-
-    def test_unconfirmed_login_logout_after(self):
-        """login 未确认（服务端槽占用）：login 后补一发 logout 给下轮清槽。"""
-        from src.strategy_framework.md_session import XtpMdSession
-        md = self._md(logged_in=False, login_ok=False)
-        assert XtpMdSession(md).renew() is True
-        md.logout.assert_called_once_with()   # 仅登录失败后的清场那一次
-
-    def test_logout_legacy_signature_fallback(self):
-        """logout() 无参 TypeError -> logout(0) 旧签名兜底，不致命。"""
-        from src.strategy_framework.md_session import XtpMdSession
-        md = self._md(logged_in=True, login_ok=True)
-        calls = []
-
-        def _lo(*args):
-            if not args:
-                raise TypeError("logout() missing 1 required positional argument")
-            calls.append(args[0])
-        md.logout.side_effect = _lo
-        assert XtpMdSession(md).renew() is True
-        assert calls == [0]
-
-    def test_renew_returns_attempted_even_if_rejected(self):
-        """服务端拒绝（未确认）也返回 True：发起过动作，退避后引擎会再驱动。"""
-        from src.strategy_framework.md_session import XtpMdSession
-        sess = XtpMdSession(self._md(logged_in=False, login_ok=False))
+        sess = XtpMdSession(self._md(True))
         assert sess.renew() is True
-        assert sess.retry_ready(sess._last_retry_ts + 61) is True
+        assert sess._backoff == 60
+        assert sess.retry_ready(sess._last_retry_ts + 5) is False
+
+    def test_unconfirmed_still_attempted(self):
+        """relogin False（服务端槽占用）-> 仍返回 True（已发起），日志「未确认」，退避照翻。"""
+        from src.strategy_framework.md_session import XtpMdSession
+        sess = XtpMdSession(self._md(False))
+        assert sess.renew() is True
+        assert sess._backoff == 60
+
+    def test_exception_backoff_protected(self):
+        """SdkLifecycleError -> False 且计入退避（防持续抛错无节奏重试）。"""
+        from src.strategy_framework.md_session import XtpMdSession
+        from src.strategy_framework.md_api_guard import SdkLifecycleError
+        md = self._md()
+        md.relogin.side_effect = SdkLifecycleError("relogin 在 idle 态非法")
+        sess = XtpMdSession(md)
+        assert sess.renew() is False
+        assert sess._backoff == 60
+        assert sess.retry_ready(sess._last_retry_ts + 5) is False
+        assert sess.retry_ready(sess._last_retry_ts + 65) is True
+
+    def test_no_relogin_backend_rejected(self):
+        """后端无 relogin（未接守卫）-> 警告拒发，退避不动。"""
+        from src.strategy_framework.md_session import XtpMdSession
+        md = MagicMock(spec=["login_server"])   # 无 relogin 面
+        assert XtpMdSession(md).renew() is False
 
     def test_on_recovered_resets_last_retry(self):
         """恢复清 _last_retry_ts：下次症状立即触发（不等退避）。"""
         from src.strategy_framework.md_session import XtpMdSession
-        sess = XtpMdSession(self._md(logged_in=False, login_ok=True))
+        sess = XtpMdSession(self._md(True))
         sess.renew()
         assert sess._last_retry_ts > 0
         sess.on_recovered()
@@ -216,7 +194,7 @@ class TestRenewTeardown:
         """打屏守卫：连续两次恢复只打第一条日志（2026-08-25 hub 每 5s 刷屏根治）。"""
         import logging as _logging
         from src.strategy_framework.md_session import XtpMdSession
-        sess = XtpMdSession(self._md(logged_in=False, login_ok=True))
+        sess = XtpMdSession(self._md(True))
         sess.renew()
         with caplog.at_level(_logging.INFO, logger="md_session"):
             sess.on_recovered()

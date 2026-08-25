@@ -126,49 +126,30 @@ class XtpMdSession(MdSessionBase):
         self._last_retry_ts = 0.0       # 上次反应式重登时刻
         self._backoff = self.BACKOFF_START
 
-    def _logout_quietly(self) -> None:
-        """尽力优雅登出：半开连接（TCP 在但会话失效）上直接 login() 必 EISCONN +
-        服务端 "user already exists"（2026-08-25 runner 实锤）--先 logout 通知服务端
-        释放会话槽再重登。logout 签名跨版本不稳（部分带 session 参数），失败不致命
-        （状态归位即可，下一轮重试再清）。
-        """
-        md = self._md
-        try:
-            logout = getattr(md, "logout", None)
-            if callable(logout):
-                try:
-                    logout()
-                except TypeError:
-                    logout(0)   # 旧版签名带 session 参数
-            md.connect_status = False
-            md.login_status = False
-        except Exception as e:
-            logger.debug("MD logout 清场未生效: %s", e)
-
     def renew(self) -> bool:
-        """重登 = SDK 认可路径 login_server()（onDisconnected 内部同款调用）。
+        """重登 = 守卫官方序列 ``relogin()``（Logout→Login，批 1 移交 GuardedXtpMdApi）。
 
-        不 exit 不重建 API 对象：连接级问题进程内闭环（分层规则：退出只属于进程域故障）。
-        2026-08-25 修订：①已登录态先 logout 清场（半开 socket 上 login 必 OS:106）；
-        ②quote login 同步返回，login_status 即结果，未确认时再补一发 logout 给下一轮
-        清出服务端会话槽。每次发起后退避翻倍（封顶），on_recovered 清零。
+        MdSessionBase 契约不变：返回是否发起了重登动作；后端异常在此终结
+        （L2 无退出路径）。每次发起后退避翻倍（封顶），on_recovered 清零。
         """
         if self._md is None:
             return False
+        relogin = getattr(self._md, "relogin", None)
+        if not callable(relogin):
+            logger.warning("MD 后端无 relogin（应接 GuardedXtpMdApi），跳过重登")
+            return False
         try:
-            if getattr(self._md, "connect_status", False):
-                self._logout_quietly()
-            self._md.login_server()
-            ok = bool(getattr(self._md, "login_status", False))
-            if not ok:
-                self._logout_quietly()
+            ok = bool(relogin())
             self._last_retry_ts = time.time()
             self._backoff = min(self._backoff * 2, self.BACKOFF_CAP)
             logger.info("MD 会话重登已发起（定时续航或反应式，%s，下次退避 %.0fs）",
                         "已确认" if ok else "未确认", self._backoff)
             return True
         except Exception as e:
-            logger.warning("MD 重登发起失败: %s", e)
+            # 异常也计入退避：防后端持续抛错时无节奏重试
+            self._last_retry_ts = time.time()
+            self._backoff = min(self._backoff * 2, self.BACKOFF_CAP)
+            logger.warning("MD 重登发起失败（%.0fs 后重试）: %s", self._backoff, e)
             return False
 
     def schedule_due(self, now: datetime | None = None) -> bool:

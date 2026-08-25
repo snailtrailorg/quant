@@ -299,8 +299,8 @@ def main() -> None:
 
     # ——— 行情接入（ThinGateway + MdApi，零 TD）———
     from vnpy.trader.gateway import BaseGateway
-    from vnpy_xtp.gateway.xtp_gateway import XtpMdApi
     from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
+    from src.strategy_framework.md_api_guard import GuardedXtpMdApi
     from src.strategy_framework.md_session import XtpMdSession
 
     class ThinGateway(BaseGateway):
@@ -330,7 +330,7 @@ def main() -> None:
     ee = EventEngine()
     ee.start()   # 绕开 MainEngine 必须自启（构造不启动，_active=False → 线程未活）
     gw = ThinGateway(ee, "XTP")
-    md_api = XtpMdApi(gw)
+    md_api = GuardedXtpMdApi(gw)   # 批1：SDK 生命周期守卫（SEGV 结构性绝迹）
     gw.md_api = md_api
     # L2 会话管理（韧性分层模型 2026-08-24）：定时续航 + 反应式重登，进程内闭环永不退出
     md_sess = XtpMdSession(md_api)

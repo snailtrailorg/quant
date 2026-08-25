@@ -25,6 +25,7 @@ except ImportError:
 # 2026-08-19 模块归位：build_xtp_setting 搬 strategy_framework/broker（hub/runner 双消费方）；
 # 此别名保 tests/scripts 旧 import 兼容
 from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
+from src.strategy_framework.md_api_guard import GuardedXtpMdApi
 from src.strategy_framework.md_session import XtpMdSession
 
 # --- SA4 退出码分类（sysexits 惯例；单元 Restart=on-failure + RestartPreventExitStatus=78）---
@@ -438,6 +439,9 @@ def main():
         logger.error("XtpGateway 加载失败: %s", e)
         main_engine.close()
         sys.exit(EX_CONFIG)
+    # 批1（2026-08-25 SEGV 终结防御）：connect 前整体替换为守卫——XtpGateway.__init__
+    # 自建 md_api 且 connect() 只调用不重建，此点是官方确认的唯一注入窗
+    gateway.md_api = GuardedXtpMdApi(gateway)
 
     # 3. 建策略实例
     from src.strategy_framework.strategy import Strategy, StrategyConfig
