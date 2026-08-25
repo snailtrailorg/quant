@@ -63,6 +63,21 @@ def test_build_xtp_setting_client_id_override():
         assert over["客户号"] == 2
 
 
+def test_build_xtp_setting_client_id_override_db_path():
+    """双盲审 P2：client_id 覆写 Broker DB 路客户号——DB 记录/params 默认 1 号
+    也须被 runner 独立号压过（覆写单机制在 build 内两条路径都要生效）。"""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from src.strategy_framework.broker import build_xtp_setting
+    fake_broker = SimpleNamespace(
+        get_credentials=lambda: {"app_id": "acc", "app_secret": "sec", "client_id": "1"},
+        _params={"md_host": "h", "md_port": 1, "td_host": "t", "td_port": 2, "client_id": 1},
+    )
+    with patch("src.strategy_framework.broker.get_broker", return_value=fake_broker):
+        assert build_xtp_setting(client_id=2)["客户号"] == 2
+        assert build_xtp_setting()["客户号"] == 1   # 不传参时 DB 默认原样
+
+
 def test_get_xtp_param_fallback_default():
     """broker_config 无 xtp 记录/异常：回 default（runner 未配号时行为不变）。"""
     from src.strategy_framework.broker import get_xtp_param

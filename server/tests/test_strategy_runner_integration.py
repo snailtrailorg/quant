@@ -88,6 +88,45 @@ def test_build_xtp_setting_broker_db_exception():
 
 
 # ---------------------------------------------------------------------------
+# ST7 双轨会话身份校验（双盲审 P2）：_resolve_client_id
+# ---------------------------------------------------------------------------
+
+def test_resolve_client_id_valid():
+    """合法独立号：字符串整型转 int 原样返回。"""
+    from src.strategy_runner.main import _resolve_client_id
+    with patch("src.strategy_runner.main.get_xtp_param", return_value="2"):
+        assert _resolve_client_id() == 2
+
+
+def test_resolve_client_id_unconfigured_warns(caplog):
+    """未配置/读取失败（回 None 不可区分）：仅 warning，返回 None（→1 号，不阻塞）。"""
+    import logging
+    from src.strategy_runner.main import _resolve_client_id
+    with patch("src.strategy_runner.main.get_xtp_param", return_value=None), \
+         caplog.at_level(logging.WARNING, logger="strategy_runner"):
+        assert _resolve_client_id() is None
+    assert any("共用 1 号" in r.message for r in caplog.records)
+
+
+def test_resolve_client_id_non_int_exits_config():
+    """配了但非整数：EX_CONFIG(78) 快速失败（永久配置错，不重启）。"""
+    from src.strategy_runner.main import _resolve_client_id, EX_CONFIG
+    with patch("src.strategy_runner.main.get_xtp_param", return_value="abc"):
+        with pytest.raises(SystemExit) as ei:
+            _resolve_client_id()
+    assert ei.value.code == EX_CONFIG
+
+
+def test_resolve_client_id_conflicts_hub_exits_config():
+    """配成 1（与 hub 同号）：明确撞号配置错，EX_CONFIG(78)。"""
+    from src.strategy_runner.main import _resolve_client_id, EX_CONFIG
+    with patch("src.strategy_runner.main.get_xtp_param", return_value="1"):
+        with pytest.raises(SystemExit) as ei:
+            _resolve_client_id()
+    assert ei.value.code == EX_CONFIG
+
+
+# ---------------------------------------------------------------------------
 # _warmup_history 测试
 # ---------------------------------------------------------------------------
 

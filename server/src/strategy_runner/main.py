@@ -302,6 +302,31 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     hub_worker_run(ctx)
 
 
+def _resolve_client_id() -> int | None:
+    """ST7 双轨会话身份校验（双盲审 P2）：读 broker_config.params.client_id_runner。
+
+    XTP 规则=同账号同 client_id 仅一个 MD 会话（官方 CreateQuoteApi 注释），
+    hub 固定 1 号——direct 轨须配独立号：
+    - 未配置/读取失败（get_xtp_param 异常与缺键都回 None，不可区分）：warning
+      后返回 None（→ DB/env 默认 1 号，与 hub 撞号风险自担），不阻塞启动；
+    - 配了但非整数：EX_CONFIG 快速失败（永久配置错，不重启，人工改配置）；
+    - 配成 1（与 hub 同号，撞号配置错）：同上 EX_CONFIG。
+    """
+    direct_id = get_xtp_param("client_id_runner")
+    if not direct_id:
+        logger.warning("client_id_runner 未配置或读取失败，与 hub 共用 1 号（可能撞号）")
+        return None
+    try:
+        resolved = int(direct_id)
+    except (TypeError, ValueError):
+        logger.error("client_id_runner 配置非法: %r（须为整数）", direct_id)
+        sys.exit(EX_CONFIG)
+    if resolved == 1:
+        logger.error("client_id_runner=1 与 hub 同号（同账号同号仅一个 MD 会话），须配独立号")
+        sys.exit(EX_CONFIG)
+    return resolved
+
+
 def main():
     parser = argparse.ArgumentParser(description="策略实盘化入口")
     parser.add_argument("--task-id", help="live_task.id（新架构：策略与标的分离）")
@@ -456,13 +481,9 @@ def main():
     strategy = Strategy.from_config(cfg, adapter)
 
     # 4. 从 Broker DB 取凭证（PI3）+ connect
-    setting = _build_xtp_setting()
-    # ST7 双轨会话身份（2026-08-25）：XTP 规则=同账号同 client_id 仅一个 MD 会话
-    # （官方 CreateQuoteApi 注释），hub（1 号）与 direct runner 必然撞号——direct 轨
-    # 用通道级配置 broker_config.params.client_id_runner 的独立号
-    _direct_id = get_xtp_param("client_id_runner")
-    if _direct_id:
-        setting["客户号"] = int(_direct_id)
+    # ST7 双轨会话身份（2026-08-25）：direct 轨独立 client_id，校验/退出语义见
+    # _resolve_client_id docstring；覆写经 build 参数完成（去双机制，双盲审 P2）
+    setting = _build_xtp_setting(client_id=_resolve_client_id())
     if not setting.get("账号") or not setting.get("交易地址"):
         logger.error("XTP 凭证不完整（broker_config 无 xtp 记录，且 .env XTP_TEST_* 未配）")
         sys.exit(EX_CONFIG)

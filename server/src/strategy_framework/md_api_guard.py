@@ -39,7 +39,7 @@ class SdkState(enum.Enum):
     IDLE = "idle"          # C 对象未建——此态任何 C 方法调用都可能 SEGV
     CREATED = "created"    # createQuoteApi 已建，未登录
     LOGGED_IN = "logged_in"
-    DEAD = "dead"          # 已释放（当前无进入路径，留作 exit 后防误用）
+    DEAD = "dead"          # 已关闭（close() 落位；此后 relogin/login_server 必拒）
 
 
 class SdkLifecycleError(RuntimeError):
@@ -118,18 +118,37 @@ class GuardedXtpMdApi(XtpMdApi):
                 self._logout_quietly()   # 未确认：给下一轮清服务端会话槽（user already exists）
             return ok
 
+    def close(self) -> None:
+        """显式终态落位（双盲审 P2）：DEAD 后 relogin/login_server 必拒（态门已有）。
+
+        连接在（connect_status True，含 LOGGED_IN/半开 CREATED）先尽力 logout 清
+        服务端会话槽（_logout_quietly，签名跨版本兜底）；否则直接 DEAD。
+        幂等：DEAD 态重复 close no-op。"""
+        with self._lock:
+            if self._state is SdkState.DEAD:
+                return
+            if self.connect_status:
+                self._logout_quietly()
+            self._state = SdkState.DEAD
+
     # ——— SDK 回调线程安全面（永不抛）———
 
     def login_server(self) -> bool:
         """覆写：父类 onDisconnected 在 SDK 线程调用本方法——任何异常都炸回调线程。
         非法态 no-op 返回 False；合法态执行登录并返回同步结果。
         全程持锁（P1）：与引擎线程的 connect/relogin 互斥（onDisconnected 持锁再入，
-        RLock 同线程可重入）。"""
+        RLock 同线程可重入）。
+        双盲审 P2：_login 全体 try 包——登录路径任何异常（如 query_contract 边界
+        错误）仅 warning 返回 False，回调线程「永不抛」是结构保障不只靠态门。"""
         with self._lock:
             if self._state in (SdkState.IDLE, SdkState.DEAD):
                 logger.warning("login_server 在 %s 态被拒（C 对象不可用）", self._state.value)
                 return False
-            return self._login()
+            try:
+                return self._login()
+            except Exception as e:
+                logger.warning("login_server 登录路径异常（回调线程兜底不抛）: %s", e)
+                return False
 
     def onDisconnected(self, reason: int) -> None:
         """断开回调（SDK 线程，持锁）：旧会话余音甄别后走父类单次自动重登。
@@ -151,7 +170,11 @@ class GuardedXtpMdApi(XtpMdApi):
             super().onDisconnected(reason)
 
     def subscribe(self, req) -> None:
-        """软防护：非 LOGGED_IN 态 no-op+debug（重放场景需要，勿抛）。"""
+        """软防护：非 LOGGED_IN 态 no-op+debug（重放场景需要，勿抛）。
+
+        有意无锁（双盲审 P2）：_state 裸读存在竞态——最坏读到旧值多/漏一次幂等
+        订阅（重放周期会补齐），换取调用方永不被引擎线程的重登序列阻塞；无害取舍。
+        """
         if self._state is not SdkState.LOGGED_IN:
             logger.debug("subscribe 在 %s 态跳过（%s）", self._state.value, req.symbol)
             return

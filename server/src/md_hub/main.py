@@ -80,7 +80,7 @@ def main() -> None:
 
     # ——— 行情接入（ThinGateway + MdApi，零 TD）———
     from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
-    from src.strategy_framework.md_api_guard import GuardedXtpMdApi
+    from src.strategy_framework.md_api_guard import GuardedXtpMdApi, SdkState
     from src.strategy_framework.md_session import XtpMdSession, is_trading_day
     from src.strategy_framework.runtime.loop import EngineLoop
     from src.strategy_framework.runtime.mdlink import MdSessionSupervisor
@@ -233,6 +233,9 @@ def main() -> None:
         移除标的的 tick 白收（带宽/CPU+latest_tick 键残留到 TTL）。
         补盲审 G1：EXCHANGE_VT2XTP 无 BSE 键——.get() 取 None 静默跳过（与 _subscribe 对称，
         BSE 端到端本就不通，防 KeyError 噪音刷 warning）。
+        双盲审 P2：unSubscribeMarketData 前判 LOGGED_IN 态——非登录态（SDK 断线/
+        重登窗口）裸调 C 面有炸回调线程风险，跳过+debug（与守卫 subscribe 软防护
+        对称；重连后的全量重放以 desired 集为准，漏退订会被下轮 diff 补上）。
         """
         try:
             bar = agg.flush_symbol(sym)
@@ -242,9 +245,14 @@ def main() -> None:
             e = _EX.get(ex)
             from vnpy_xtp.gateway.xtp_gateway import EXCHANGE_VT2XTP
             xtp_ex = EXCHANGE_VT2XTP.get(e) if e else None
-            if xtp_ex is not None:
-                md_api.unSubscribeMarketData(raw, 1, xtp_ex)
-                logger.info("退订 %s（生命周期结束）", sym)
+            if xtp_ex is None:
+                return
+            if md_api.state is not SdkState.LOGGED_IN:
+                logger.debug("退订跳过 %s（MD 态 %s 非登录态，待重连后 diff 补齐）",
+                             sym, md_api.state.value)
+                return
+            md_api.unSubscribeMarketData(raw, 1, xtp_ex)
+            logger.info("退订 %s（生命周期结束）", sym)
         except Exception as e:
             logger.warning("退订失败 %s: %s", sym, e)
 

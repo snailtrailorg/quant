@@ -123,6 +123,13 @@ class TestCallbackThreadSafety:
         assert md.login_server() is False
         assert calls == []
 
+    def test_login_server_login_path_exception_swallowed(self):
+        """双盲审 P2：_login 内任何异常（query_contract 抛错）——login_server
+        不抛、返回 False（回调线程「永不抛」的结构性保障，不只靠态门）。"""
+        md, calls = _connected(login_result=0)
+        md.query_contract = lambda: (_ for _ in ()).throw(RuntimeError("sdk edge"))
+        assert md.login_server() is False   # 不抛即通过
+
     def test_on_disconnected_relogin_via_override(self):
         """onDisconnected（SDK 线程，超余音窗）→ 状态 CREATED → 父类单次重登走本类覆写。"""
         md, calls = _connected(login_result=0)
@@ -161,6 +168,45 @@ class TestSubscribeGuard:
         md.subscribeMarketData = lambda *a: sm_calls.append(a)
         md.subscribe(self._req())
         assert len(sm_calls) == 1
+
+
+class TestCloseDeadState:
+    """close() 落位 DEAD（双盲审 P2）：连接在先 logout 清服务端会话槽；
+    DEAD 后 relogin/login_server 必拒（态门已有）；幂等。"""
+
+    def test_close_logged_in_logout_then_dead(self):
+        """LOGGED_IN 态 close：先 logout（清会话槽）再转 DEAD。"""
+        md, calls = _connected(login_result=0)
+        calls.clear()
+        md.close()
+        assert md.state is SdkState.DEAD
+        assert [c[0] for c in calls] == ["logout"]
+
+    def test_close_disconnected_direct_dead(self):
+        """未连接（connect_status False）close：直接 DEAD，零 C 调用。"""
+        md, calls = _connected(login_result=1)   # 首登失败 -> CREATED，未连
+        calls.clear()
+        md.close()
+        assert md.state is SdkState.DEAD
+        assert calls == []
+
+    def test_dead_rejects_relogin_and_login_server(self):
+        """DEAD 后 relogin 抛 SdkLifecycleError / login_server 返回 False。"""
+        md, calls = _connected(login_result=0)
+        md.close()
+        calls.clear()
+        with pytest.raises(SdkLifecycleError):
+            md.relogin()
+        assert md.login_server() is False
+        assert calls == []   # 两条路径均零 C 调用
+
+    def test_close_idempotent(self):
+        """DEAD 态重复 close no-op（不再触 logout）。"""
+        md, calls = _connected(login_result=0)
+        md.close()
+        calls.clear()
+        md.close()
+        assert calls == [] and md.state is SdkState.DEAD
 
 
 class TestLogoutSignature:
