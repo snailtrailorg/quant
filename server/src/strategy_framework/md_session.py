@@ -116,7 +116,10 @@ class XtpMdSession(MdSessionBase):
     - 反应式：盘中症状兜底（续航漏掉的/盘中突发的），退避 30s 指数封顶 5min。
     """
 
-    RENEW_HM = (9, 10)          # 续航时刻（交易日，开盘前）
+    RENEW_HM = (9, 10)          # 续航窗口起（交易日，开盘前）
+    RENEW_END_HM = (9, 30)      # 续航窗口止（开盘）——盘中启动的进程已有新鲜登录，续航只会
+                                # 自杀式 churn（2026-08-25 14:05 实锤：14:05:05 登录成功 →
+                                # 14:05:22 无谓 renew 把健康会话 logout，槽回收竞态又自盲 10min）
     BACKOFF_START = 30.0        # 反应式重登起始退避
     BACKOFF_CAP = 300.0         # 封顶 5min
 
@@ -158,8 +161,9 @@ class XtpMdSession(MdSessionBase):
             return False
         if not is_trading_day(now):
             return False
-        if (now.hour, now.minute) < self.RENEW_HM:
-            return False
+        hm = (now.hour, now.minute)
+        if hm < self.RENEW_HM or hm >= self.RENEW_END_HM:
+            return False   # 窗口外不续航：盘中启动=已有新鲜登录，重登只会 churn
         self._renewed_date = now.date()
         return True
 

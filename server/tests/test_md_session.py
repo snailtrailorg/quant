@@ -67,13 +67,21 @@ class TestZombieSession:
 
 class TestXtpMdSession:
     def test_schedule_due_on_time(self):
-        """交易日 09:10 前 -> False；09:10 后 -> True（当日去重）。"""
+        """交易日：09:10 前 False；窗口内 09:10/09:29 True（当日去重）；09:30 后 False。"""
         from src.strategy_framework.md_session import XtpMdSession
         sess = XtpMdSession(MagicMock())
         with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 9)) is False
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 10)) is True
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 11)) is False  # 当日去重
+
+    def test_schedule_due_window_end(self):
+        """窗口外（开盘后启动）：不续航——盘中启动已有新鲜登录，重登只会自杀式 churn
+        （2026-08-25 14:05 实锤）。"""
+        from src.strategy_framework.md_session import XtpMdSession
+        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+            assert XtpMdSession(MagicMock()).schedule_due(datetime(2026, 8, 25, 9, 30)) is False
+            assert XtpMdSession(MagicMock()).schedule_due(datetime(2026, 8, 25, 14, 5)) is False
 
     def test_schedule_due_non_trading_day(self):
         """非交易日 -> False。"""
