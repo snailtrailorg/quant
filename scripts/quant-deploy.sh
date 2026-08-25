@@ -300,9 +300,17 @@ remote_code_hash() {
 verify_imports() {
     echo "ℹ️ 部署物导入冒烟（rsync 后/重启前——2026-08-25 实锤：exclude 未锚定把
   runtime/ 整包排除出部署，服务重启后才 ModuleNotFoundError 暴露）..."
-    ssh $SSH_OPTS "$SSH_TARGET" "cd '$PROJECT_PATH' && for m in src.md_hub.main src.strategy_runner.main src.web_api.main src.scheduler.app src.strategy_framework.runtime.loop src.strategy_framework.md_api_guard; do
-        venv/bin/python -c \"import \\\$m\" 2>/dev/null || { echo \"❌ 导入失败: \\\$m——中止重启（服务未动，线上仍跑旧代码；查包完整性/语法）\" >&2; exit 1; }
-    done && echo '✅ 导入冒烟通过（全部入口模块可导入）'"
+    # michael 无权 cd 进 750 quant 目录（2026-08-17 踩坑同款）——root heredoc 免 cd，
+    # 带服务的 .env 环境跑（部分模块 import 期读环境变量）
+    ssh $SSH_OPTS "$SSH_TARGET" bash <<REMOTE_SCRIPT
+set -euo pipefail
+cd $PROJECT_PATH
+set -a; source .env; set +a
+for m in src.md_hub.main src.strategy_runner.main src.web_api.main src.scheduler.app src.strategy_framework.runtime.loop src.strategy_framework.md_api_guard; do
+    sudo -u quant venv/bin/python -c "import \$m" || { echo "❌ 导入失败: \$m——中止重启（服务未动，线上仍跑旧代码）" >&2; exit 1; }
+done
+echo "✅ 导入冒烟通过（全部入口模块可导入）"
+REMOTE_SCRIPT
 }
 
 # 代码变更时让实盘任务吃到新代码（闸门已保证非交易时段才走到这）
