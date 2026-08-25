@@ -37,7 +37,23 @@
 
 **改** `XtpMdSession.renew() -> bool`（`md_session.py`）：调 `md.relogin()`（bool=已确认/未确认，退避照旧翻倍）；`SdkLifecycleError` 捕获→warning+False。
 
-## 验收标准
+## 验收结果（2026-08-25 执行记录）
+1. ✅ FSM 矩阵 14 例 + session 契约 6 例，全量 487 绿，分层 4 绿，pyflakes 零新增
+2. ✅ G2 真机冒烟（服务器，`--client-id 2`）：登录→tick 3→relogin 往返→tick 3→干净退出，exit=0 零 SEGV
+3. ✅ G4 部署：hub 一次稳定；「已确认」relogin 生产首秀；任务 8 client 2 登录成功
+4. ⏳ 明早 09:10 窗口内定时续航观察（收官项）
+
+## 批内新发现与追加修复（均已完成）
+- **XTP 会话规则实锤**（官方 CreateQuoteApi 注释）：同账号同 client_id 仅一个 MD 会话——
+  hub(1)/runner(1) 撞号即 08-22 起任务 8 "user already exists" 全部真相。修复：runner
+  独立号 `broker_config.params.client_id_runner=2`（bf9d7a5），双轨恢复（14:15 起落数）
+- **定时续航窗口化**（7d9fcaf）：原 schedule_due 是"09:10 后未续过"——盘中启动的进程会
+  立刻无谓 renew 健康会话（14:05 自杀式 churn + 槽回收竞态自盲 10min 实锤）。改窗口
+  09:10-09:30，盘中启动零续航
+- 冒烟进程退出未 logout → 僵尸会话被下一登录清算（10200006 断线）——后续批 2 冒烟套件
+  增加收尾 logout
+
+## 验收标准（原定）
 1. `cd server && venv/bin/python -m pytest tests/test_md_api_guard.py tests/test_md_session.py -q` 全绿（含 FSM 矩阵：**connect 序内 heartbeat 位置断言**——今日 SEGV 的回归锁）
 2. `venv/bin/python -m pytest tests/ -q` 全量绿；`venv/bin/python -m pytest tests/test_layering.py -q` 绿
 3. `cd server && LD_LIBRARY_PATH=vendor/xtp/lib QT_QPA_PLATFORM=offscreen venv/bin/python scripts/run_md_lifecycle.py` 退出码 0，输出含「登录成功」「tick>0」「relogin 往返 OK」「干净退出」（真机；dev 机到测试平台网络不通 OS:115 实测——**冒烟在服务器跑**，部署前用 /tmp 暂存 + PYTHONPATH 前置零生产触碰）
