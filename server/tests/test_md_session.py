@@ -225,21 +225,3 @@ class TestRenewTeardown:
             n_second = sum(1 for r in caplog.records if "MD 数据恢复" in r.getMessage())
         assert n_first == 1
         assert n_second == 1   # 第二次不再新增
-
-
-# ── arm_sdk_heartbeat（2026-08-25：SDK 心跳，官方要求 Login 前设置）──
-
-class TestArmSdkHeartbeat:
-    def test_sets_interval(self):
-        """Login 前设置心跳间隔，默认 15s。"""
-        from src.strategy_framework.md_session import arm_sdk_heartbeat
-        md = MagicMock()
-        arm_sdk_heartbeat(md)
-        md.setHeartBeatInterval.assert_called_once_with(15)
-
-    def test_sdk_without_api_not_fatal(self):
-        """SDK 不支持该方法（旧版/签名变化）：警告兜底不抛。"""
-        from src.strategy_framework.md_session import arm_sdk_heartbeat
-        md = MagicMock()
-        md.setHeartBeatInterval.side_effect = RuntimeError("not supported")
-        arm_sdk_heartbeat(md)   # 不抛即通过

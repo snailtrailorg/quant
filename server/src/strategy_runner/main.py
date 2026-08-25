@@ -25,7 +25,7 @@ except ImportError:
 # 2026-08-19 模块归位：build_xtp_setting 搬 strategy_framework/broker（hub/runner 双消费方）；
 # 此别名保 tests/scripts 旧 import 兼容
 from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
-from src.strategy_framework.md_session import XtpMdSession, arm_sdk_heartbeat
+from src.strategy_framework.md_session import XtpMdSession
 
 # --- SA4 退出码分类（sysexits 惯例；单元 Restart=on-failure + RestartPreventExitStatus=78）---
 EX_OK = 0          # 正常停止（任务 stopped/策略 disabled）--on-failure 不拉起（F-36 churn 根修）
@@ -438,7 +438,6 @@ def main():
         logger.error("XtpGateway 加载失败: %s", e)
         main_engine.close()
         sys.exit(EX_CONFIG)
-    arm_sdk_heartbeat(gateway.md_api)   # 官方要求 Login 前设置；半开连接察觉提速（见 md_session）
 
     # 3. 建策略实例
     from src.strategy_framework.strategy import Strategy, StrategyConfig

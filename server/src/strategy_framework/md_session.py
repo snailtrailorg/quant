@@ -77,18 +77,6 @@ def zombie_session(sess_now: bool, sess_ticks: int, sess_enter_ts: float,
                 and sess_enter_ts and now - sess_enter_ts > grace)
 
 
-def arm_sdk_heartbeat(md_api, interval: int = 15) -> None:
-    """SDK 心跳（XTP 官方文档：SetHeartBeatInterval 必须在 Login 前调用；
-    vnpy_xtp 未调，走 SDK 配置默认）。半开连接（服务端悄悄作废会话，如日切）
-    靠心跳尽早被 SDK 察觉 → OnDisconnected → 官方 Login 重登路径
-    （2026-08-25 定位：SDK 对静默会话失效零感知，仅连接级心跳可借）。
-    """
-    try:
-        md_api.setHeartBeatInterval(interval)
-    except Exception as e:
-        logger.warning("SDK 心跳设置未生效（SDK 默认值兜底）: %s", e)
-
-
 class MdSessionBase:
     """行情会话契约：定时续航 + 反应式重登。
 
