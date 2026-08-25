@@ -19,7 +19,10 @@ EXCLUDES=(
     --exclude '*.pyc'
     --exclude .pytest_cache/
     --exclude static/avatars/   # 用户上传的头像（运行时数据，rsync --delete 不删）
-    --exclude runtime/          # SE2: celerybeat schedule 等运行时文件（F-47，--delete 不删）
+    --exclude /runtime/         # SE2: celerybeat schedule 等运行时文件（F-47，--delete 不删）。
+                                # 2026-08-25 踩坑：必须锚定根（/）——未锚定的 runtime/ 匹配任意
+                                # 层级，把 src/strategy_framework/runtime/ 整包排除出部署，
+                                # hub 上线即 ModuleNotFoundError ×3 进 Failed
 )
 
 # 路径/SERVER 默认值在 quant-deploy.sh 单一配置源，此处不重复
