@@ -285,9 +285,16 @@ trading_guard() {
 }
 
 remote_code_hash() {
-    # 注意：michael 无权 cd 进 750 quant 目录（2026-08-17 踩坑同款），用 sudo find 免 cd；
-    # 取不到指纹（空）时上层按 CODE_CHANGED=1 处理（宁可多重启不漏重启）
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo find '$PROJECT_PATH/src' -name '*.py' -not -path '*__pycache__*' -exec md5sum {} + 2>/dev/null | sort | md5sum"
+    # SE3 指纹四切片（2026-08-25 止血）：src/*.py + systemd 单元 + requirements + migrations
+    # ——原只指纹 *.py，单元/依赖/迁移变更不触发重启（缺口实锤）。michael 无权 cd 进 750
+    # quant 目录（2026-08-17 踩坑同款），统一 sudo find 免 cd；取不到指纹（空）时上层按
+    # CODE_CHANGED=1 处理（宁可多重启不漏重启）
+    ssh $SSH_OPTS "$SSH_TARGET" "
+        { sudo find '$PROJECT_PATH/src' -name '*.py' -not -path '*__pycache__*' -exec md5sum {} + 2>/dev/null
+          sudo find '$PROJECT_PATH/scripts/systemd' -type f -exec md5sum {} + 2>/dev/null
+          sudo md5sum '$PROJECT_PATH/requirements.txt' 2>/dev/null
+          sudo find '$PROJECT_PATH/migrations/versions' -type f -exec md5sum {} + 2>/dev/null
+        } | sort | md5sum"
 }
 
 # 代码变更时让实盘任务吃到新代码（闸门已保证非交易时段才走到这）
@@ -343,8 +350,13 @@ init_schema() {
 
 migrate() {
     echo "ℹ️ alembic upgrade head（schema 版本迁移，用 quant 用户跑，owner 自动 quant）..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo -u quant bash -c 'cd $PROJECT_PATH && venv/bin/alembic upgrade head'" || \
-        echo "⚠️ migrate 失败（venv/bin/alembic 是否已装？alembic.ini 是否已部署？）"
+    # 2026-08-25 止血：原 `|| echo` 吞错续行——代码已推+schema 未到位+服务照常重启 =
+    # 新代码跑旧 schema 的静默漂移（最危险中间态）。改：失败中止（此时服务尚未重启，
+    # 磁盘新代码未被任何进程加载，属可恢复态：修好后重跑部署即可，rsync 幂等）
+    if ! ssh $SSH_OPTS "$SSH_TARGET" "sudo -u quant bash -c 'cd $PROJECT_PATH && venv/bin/alembic upgrade head'"; then
+        echo "❌ migrate 失败——中止部署链（服务未重启、新代码未被加载；查 venv/bin/alembic 与 alembic.ini）" >&2
+        return 1
+    fi
     echo "✅ migrate done."
 }
 
@@ -392,7 +404,10 @@ clear_redis() {
 
 restart_server() {
     echo "ℹ️ Restart $WEB_API_SERVICE..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $WEB_API_SERVICE"
+    # 2026-08-25 止血：restart 类命令失败不杀链（健康判定交给 _stabilize）——链断会跳过
+    # 后续 restart_live_tasks，实盘任务滞留旧代码（当日实锤：hub 段断链，任务 8 盲跑 15min）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $WEB_API_SERVICE" || \
+        echo "⚠️ $WEB_API_SERVICE restart 命令失败——链条继续，由下方稳定检查判定健康"
     # 1. is-active 稳定校验：systemd 单元本身必须 active。
     #    防僵尸进程占 8001（非 systemd 的旧 uvicorn）→ 新单元 bind 失败 crash-loop，
     #    但下方 health 打到僵尸进程会假成功。is-active 在 crash-loop 时≠active，能抓到。
@@ -440,7 +455,9 @@ _stabilize() {
 
 restart_celery() {
     echo "ℹ️ Restart $CELERY_WORKER_SERVICE + $CELERY_BEAT_SERVICE + $CELERY_RISK_SERVICE..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE"
+    # 2026-08-25 止血：同 restart_server——restart 命令失败不杀链
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE" || \
+        echo "⚠️ celery restart 命令失败——链条继续，由下方稳定检查判定健康"
     # 稳定检查（crash-loop 检测）
     for svc in $CELERY_WORKER_SERVICE $CELERY_BEAT_SERVICE $CELERY_RISK_SERVICE; do
         if _stabilize "$svc"; then
@@ -477,7 +494,9 @@ restart_hub() {
         return 0
     fi
     echo "ℹ️ Restart $MD_HUB_SERVICE..."
-    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $MD_HUB_SERVICE"
+    # 2026-08-25 止血：同 restart_server——restart 命令失败不杀链（当日 hub 段断链实锤）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo systemctl restart $MD_HUB_SERVICE" || \
+        echo "⚠️ $MD_HUB_SERVICE restart 命令失败——链条继续，由下方稳定检查判定健康"
     # hub 加载 XTP 全市场合约慢（默认 4 次 ~16s 必误报，2026-08-23 两次部署实测）--加长到 ~60s
     if _stabilize "$MD_HUB_SERVICE" 15; then
         echo "  ✅ $MD_HUB_SERVICE active (稳定)"
