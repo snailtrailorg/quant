@@ -297,6 +297,14 @@ remote_code_hash() {
         } | sort | md5sum"
 }
 
+verify_imports() {
+    echo "ℹ️ 部署物导入冒烟（rsync 后/重启前——2026-08-25 实锤：exclude 未锚定把
+  runtime/ 整包排除出部署，服务重启后才 ModuleNotFoundError 暴露）..."
+    ssh $SSH_OPTS "$SSH_TARGET" "cd '$PROJECT_PATH' && for m in src.md_hub.main src.strategy_runner.main src.web_api.main src.scheduler.app src.strategy_framework.runtime.loop src.strategy_framework.md_api_guard; do
+        venv/bin/python -c \"import \\\$m\" 2>/dev/null || { echo \"❌ 导入失败: \\\$m——中止重启（服务未动，线上仍跑旧代码；查包完整性/语法）\" >&2; exit 1; }
+    done && echo '✅ 导入冒烟通过（全部入口模块可导入）'"
+}
+
 # 代码变更时让实盘任务吃到新代码（闸门已保证非交易时段才走到这）
 restart_live_tasks() {
     ssh $SSH_OPTS "$SSH_TARGET" "
@@ -625,6 +633,9 @@ if [[ -n "$PRE_CODE_HASH" && "$PRE_CODE_HASH" == "$POST_CODE_HASH" ]]; then
     CODE_CHANGED=0
     echo "ℹ️ 代码指纹无变化，跳过服务重启（unit/migrate 动作仍执行）"
 fi
+
+# 部署物导入冒烟门（2026-08-25 踩坑后新增）：指纹判断之后、任何重启/migrate 之前
+verify_imports
 
 $MIGRATE && migrate
 $PIP_INSTALL && pip_install

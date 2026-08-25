@@ -19,6 +19,13 @@ import subprocess
 import sys
 import time
 
+# 路径 bootstrap（与 run_md_lifecycle 同款——scripts/ 下的脚本 sys.path[0] 是本目录，
+# 必须补 server/ 根才能 import src.*；2026-08-25 两次同坑后固化为固定开头）
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SRV = os.path.join(_HERE, "..")
+if os.path.isdir(os.path.join(_SRV, "src")):
+    sys.path.insert(0, _SRV)
+
 UNIT = "quant-md-hub@quant"
 HB_KEY = "quant:hb:md-hub"
 HUB_FIELDS = ["pid", "gen", "subs", "ticks", "bars", "sess_ticks", "dropped_pg", "last_tick_ts"]
