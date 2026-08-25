@@ -48,6 +48,8 @@ def main() -> int:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--wait", type=int, default=30, help="每段等 tick 上限秒数")
+    ap.add_argument("--client-id", type=int, default=SETTING["客户号"],
+                    help="XTP client_id（会话身份；换号可避开与生产 hub 同槽竞争）")
     args = ap.parse_args()
 
     state = {"ticks": 0, "first_ts": 0.0}
@@ -88,7 +90,7 @@ def main() -> int:
     gw.md_api = md
 
     # ——— 1. 登录（同步返回）———
-    md.connect(SETTING["账号"], SETTING["密码"], SETTING["客户号"],
+    md.connect(SETTING["账号"], SETTING["密码"], args.client_id,
                SETTING["行情地址"], int(SETTING["行情端口"]),
                SETTING["行情协议"], SETTING["日志级别"])
     if md.state is not SdkState.LOGGED_IN or not md.login_status:
