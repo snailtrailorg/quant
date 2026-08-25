@@ -105,11 +105,16 @@ def record_broker_usage(provider: str, action: str, symbol: str = "", success: b
         logger.warning(f"broker_usage 写失败: {e}")
 
 
-def build_xtp_setting() -> dict:
+def build_xtp_setting(client_id: int | None = None) -> dict:
     """组装 vnpy XtpGateway SETTING（中文 key）。Broker DB 优先（PI3），.env XTP_TEST_* fallback。
 
     2026-08-19 从 strategy_runner.main 归位（hub/runner 双消费方；无 vnpy import——中文 key
     是普通字符串，层序不破）。
+
+    client_id 覆写（2026-08-25）：XTP 平台规则=同账号同 client_id 仅一个 MD 会话
+    （官方 CreateQuoteApi 注释：多个客户端须用不同 client_id）——hub 与 direct runner
+    消费同一 broker 记录必然撞号（08-22 起任务 8 "user already exists" 全部真相）。
+    runner 侧传独立号（通道级配置 broker_config.params.client_id_runner）。
     """
     import logging
     import os
@@ -120,7 +125,7 @@ def build_xtp_setting() -> dict:
             cred = broker.get_credentials()
             params = broker._params or {}
             if cred.get("app_id"):
-                return {
+                setting = {
                     "账号": cred.get("app_id", ""),
                     "密码": cred.get("app_secret", ""),
                     "客户号": int(cred.get("client_id", params.get("client_id", 1)) or 1),
@@ -132,12 +137,15 @@ def build_xtp_setting() -> dict:
                     "授权码": cred.get("auth_code", ""),
                     "日志级别": "INFO",
                 }
+                if client_id:
+                    setting["客户号"] = int(client_id)
+                return setting
     except Exception as e:
         logger.warning("Broker DB 取 XTP 凭证失败，fallback .env: %s", e)
 
     from dotenv import load_dotenv
     load_dotenv()
-    return {
+    setting = {
         "账号": os.environ.get("XTP_TEST_ACCOUNT", ""),
         "密码": os.environ.get("XTP_TEST_PASSWORD", ""),
         "客户号": int(os.environ.get("XTP_TEST_CLIENT_ID", "1")),
@@ -149,3 +157,17 @@ def build_xtp_setting() -> dict:
         "授权码": os.environ.get("XTP_TEST_KEY", ""),
         "日志级别": "INFO",
     }
+    if client_id:
+        setting["客户号"] = int(client_id)
+    return setting
+
+
+def get_xtp_param(key: str, default=None):
+    """读 broker_config xtp 记录 params JSON 的指定键（通道级配置正位）；缺省/异常回 default。"""
+    try:
+        broker = get_broker("xtp")
+        if broker:
+            return (broker._params or {}).get(key, default)
+    except Exception:
+        pass
+    return default

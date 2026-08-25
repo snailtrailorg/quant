@@ -24,7 +24,7 @@ except ImportError:
 
 # 2026-08-19 模块归位：build_xtp_setting 搬 strategy_framework/broker（hub/runner 双消费方）；
 # 此别名保 tests/scripts 旧 import 兼容
-from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
+from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting, get_xtp_param
 from src.strategy_framework.md_api_guard import GuardedXtpMdApi
 from src.strategy_framework.md_session import XtpMdSession
 
@@ -457,6 +457,12 @@ def main():
 
     # 4. 从 Broker DB 取凭证（PI3）+ connect
     setting = _build_xtp_setting()
+    # ST7 双轨会话身份（2026-08-25）：XTP 规则=同账号同 client_id 仅一个 MD 会话
+    # （官方 CreateQuoteApi 注释），hub（1 号）与 direct runner 必然撞号——direct 轨
+    # 用通道级配置 broker_config.params.client_id_runner 的独立号
+    _direct_id = get_xtp_param("client_id_runner")
+    if _direct_id:
+        setting["客户号"] = int(_direct_id)
     if not setting.get("账号") or not setting.get("交易地址"):
         logger.error("XTP 凭证不完整（broker_config 无 xtp 记录，且 .env XTP_TEST_* 未配）")
         sys.exit(EX_CONFIG)
