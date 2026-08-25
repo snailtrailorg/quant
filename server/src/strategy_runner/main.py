@@ -719,6 +719,11 @@ def main():
             if session_edge(sess_now, sess_was):
                 _tick_state["sess_last_ts"] = 0.0
                 _tick_state["sess_count"] = 0
+                if sess_now:
+                    # 进沿写时段起点（hub 同款）：反应式重登的零 tick 宽限从此起算。
+                    # 缺此行 = 盘外启动的进程整时段 _symptom 恒假，反应式重登死路
+                    # （2026-08-25 实锤：昨 18:32 部署重启的 runner 今早 09:31-10:13 零重试）。
+                    _tick_state["sess_enter_ts"] = time.time()
             sess_was = sess_now
             # --- L2 会话自愈（韧性分层模型 2026-08-24）---
             # 定时续航：交易日 09:10 开盘前换新鲜会话（XTP 日切 ≈23:53 丢会话，2026-08-24 实锤）

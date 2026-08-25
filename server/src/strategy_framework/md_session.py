@@ -126,19 +126,46 @@ class XtpMdSession(MdSessionBase):
         self._last_retry_ts = 0.0       # 上次反应式重登时刻
         self._backoff = self.BACKOFF_START
 
+    def _logout_quietly(self) -> None:
+        """尽力优雅登出：半开连接（TCP 在但会话失效）上直接 login() 必 EISCONN +
+        服务端 "user already exists"（2026-08-25 runner 实锤）--先 logout 通知服务端
+        释放会话槽再重登。logout 签名跨版本不稳（部分带 session 参数），失败不致命
+        （状态归位即可，下一轮重试再清）。
+        """
+        md = self._md
+        try:
+            logout = getattr(md, "logout", None)
+            if callable(logout):
+                try:
+                    logout()
+                except TypeError:
+                    logout(0)   # 旧版签名带 session 参数
+            md.connect_status = False
+            md.login_status = False
+        except Exception as e:
+            logger.debug("MD logout 清场未生效: %s", e)
+
     def renew(self) -> bool:
         """重登 = SDK 认可路径 login_server()（onDisconnected 内部同款调用）。
 
         不 exit 不重建 API 对象：连接级问题进程内闭环（分层规则：退出只属于进程域故障）。
-        每次发起后退避翻倍（封顶），on_recovered 清零。
+        2026-08-25 修订：①已登录态先 logout 清场（半开 socket 上 login 必 OS:106）；
+        ②quote login 同步返回，login_status 即结果，未确认时再补一发 logout 给下一轮
+        清出服务端会话槽。每次发起后退避翻倍（封顶），on_recovered 清零。
         """
         if self._md is None:
             return False
         try:
+            if getattr(self._md, "connect_status", False):
+                self._logout_quietly()
             self._md.login_server()
+            ok = bool(getattr(self._md, "login_status", False))
+            if not ok:
+                self._logout_quietly()
             self._last_retry_ts = time.time()
             self._backoff = min(self._backoff * 2, self.BACKOFF_CAP)
-            logger.info("MD 会话重登已发起（定时续航或反应式，下次退避 %.0fs）", self._backoff)
+            logger.info("MD 会话重登已发起（定时续航或反应式，%s，下次退避 %.0fs）",
+                        "已确认" if ok else "未确认", self._backoff)
             return True
         except Exception as e:
             logger.warning("MD 重登发起失败: %s", e)
@@ -162,6 +189,13 @@ class XtpMdSession(MdSessionBase):
         return now - self._last_retry_ts >= self._backoff
 
     def on_recovered(self) -> None:
+        """数据恢复：清退避计数（下次症状从头起算）。
+
+        _last_retry_ts 必须一并清零：不清则打屏守卫（``or self._last_retry_ts``）永真，
+        「MD 数据恢复」日志随健康检查每轮刷屏（2026-08-25 hub 实测 5s/条）；清零后
+        retry_ready 回到"首次症状立即触发"语义。
+        """
         if self._backoff != self.BACKOFF_START or self._last_retry_ts:
             logger.info("MD 数据恢复，反应式退避清零")
         self._backoff = self.BACKOFF_START
+        self._last_retry_ts = 0.0
