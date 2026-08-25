@@ -211,3 +211,34 @@ class TestRenewGuardContract:
             n_second = sum(1 for r in caplog.records if "MD 数据恢复" in r.getMessage())
         assert n_first == 1
         assert n_second == 1   # 第二次不再新增
+
+# ── 双盲审 P1-2（2026-08-25）：续航未确认回滚重试 ──
+
+class TestUnconfirmedRenewRetry:
+    def test_unconfirmed_renew_rolls_back_and_retries_in_window(self):
+        """09:10 续航未确认：当日标记回滚 + 窗口内按退避重试（开盘 10min 盲区根修）。"""
+        from src.strategy_framework.md_session import XtpMdSession
+        from datetime import datetime as _dt
+        md = MagicMock()
+        md.relogin.return_value = False
+        sess = XtpMdSession(md)
+        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+            assert sess.schedule_due(_dt(2026, 8, 26, 9, 10)) is True
+            assert sess.renew() is True                 # 未确认
+            assert sess._renewed_date is None           # 回滚
+            assert sess.schedule_due(_dt(2026, 8, 26, 9, 11)) is False   # 退避未到不紧循环
+            sess._last_retry_ts -= 120                  # 模拟退避已过
+            assert sess.schedule_due(_dt(2026, 8, 26, 9, 12)) is True    # 窗口内可再续
+
+    def test_confirmed_renew_marks_day_done(self):
+        """已确认：当日标记保持，窗口内不再续航。"""
+        from src.strategy_framework.md_session import XtpMdSession
+        from datetime import datetime as _dt, date as _d
+        md = MagicMock()
+        md.relogin.return_value = True
+        sess = XtpMdSession(md)
+        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+            assert sess.schedule_due(_dt(2026, 8, 26, 9, 10)) is True
+            assert sess.renew() is True
+            assert sess._renewed_date == _d(2026, 8, 26)
+            assert sess.schedule_due(_dt(2026, 8, 26, 9, 12)) is False

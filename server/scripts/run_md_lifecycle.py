@@ -48,8 +48,8 @@ def main() -> int:
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--wait", type=int, default=30, help="每段等 tick 上限秒数")
-    ap.add_argument("--client-id", type=int, default=SETTING["客户号"],
-                    help="XTP client_id（会话身份；换号可避开与生产 hub 同槽竞争）")
+    ap.add_argument("--client-id", type=int, default=2,
+                    help="XTP client_id（会话身份）；缺省 2 避开生产 hub 的 1 号槽（双盲审）")
     args = ap.parse_args()
 
     state = {"ticks": 0, "first_ts": 0.0}

@@ -145,6 +145,11 @@ class XtpMdSession(MdSessionBase):
             ok = bool(relogin())
             self._last_retry_ts = time.time()
             self._backoff = min(self._backoff * 2, self.BACKOFF_CAP)
+            if not ok and self._renewed_date:
+                # 双盲审 P1-2（2026-08-25）：定时续航未确认（开盘前槽回收竞态）时当日
+                # 标记必须回滚，窗口内按退避重试——否则唯一兜底=反应式宽限（进沿+600s
+                # ≈ 09:40），开盘最贵 10 分钟盲区。relogin 已带 -2 清场，紧接重试成功率高。
+                self._renewed_date = None
             logger.info("MD 会话重登已发起（定时续航或反应式，%s，下次退避 %.0fs）",
                         "已确认" if ok else "未确认", self._backoff)
             return True
@@ -164,6 +169,10 @@ class XtpMdSession(MdSessionBase):
         hm = (now.hour, now.minute)
         if hm < self.RENEW_HM or hm >= self.RENEW_END_HM:
             return False   # 窗口外不续航：盘中启动=已有新鲜登录，重登只会 churn
+        # 双盲审 P1-2（2026-08-25）：未确认回滚后窗口内重试须按退避节奏（防 10s 紧循环）；
+        # 首航 _last_retry_ts=0 即刻触发
+        if not self.retry_ready():
+            return False
         self._renewed_date = now.date()
         return True
 

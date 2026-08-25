@@ -37,6 +37,12 @@
 
 **改** `XtpMdSession.renew() -> bool`（`md_session.py`）：调 `md.relogin()`（bool=已确认/未确认，退避照旧翻倍）；`SdkLifecycleError` 捕获→warning+False。
 
+## 双盲审核（2026-08-25 收卷，A/B 独立同判）
+
+**总判定双同：可保留在产、无 P0**。B 附加 `.so` 实证：vnxtpmd 无 `gil_scoped_release` → C 方法全程持 GIL → 线程交错无 SEGV 级后果。热修已随卷落地：**P1-2 续航未确认回滚重试**（schedule_due 预落当日标记 + renew 丢弃 ok 值 → 09:10 未确认则开盘盲至 ~09:40；修=未确认回滚 `_renewed_date` + 窗口内按退避重试，489 绿）。
+
+剩余发现按批次归口（详见 flow/待办.md 批 2/5 清单）：P1 守卫加锁+intentional-logout（批 2 mdlink）、P1 阻塞 login vs WatchdogSec 90s（批 2）、P1 restart_server 稳定检查杀链（批 5）、P1 指纹空兜底死代码（批 5）、P2×8（client_id 校验/参数双机制/_unsubscribe 态门/DEAD 落位/login_server 永不抛结构化/凭证 env 化/补用例/多任务共号文档化）。
+
 ## 验收结果（2026-08-25 执行记录）
 1. ✅ FSM 矩阵 14 例 + session 契约 6 例，全量 487 绿，分层 4 绿，pyflakes 零新增
 2. ✅ G2 真机冒烟（服务器，`--client-id 2`）：登录→tick 3→relogin 往返→tick 3→干净退出，exit=0 零 SEGV
