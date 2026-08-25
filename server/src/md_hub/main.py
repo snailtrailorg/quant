@@ -301,7 +301,7 @@ def main() -> None:
     from vnpy.trader.gateway import BaseGateway
     from vnpy_xtp.gateway.xtp_gateway import XtpMdApi
     from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
-    from src.strategy_framework.md_session import XtpMdSession
+    from src.strategy_framework.md_session import XtpMdSession, arm_sdk_heartbeat
 
     class ThinGateway(BaseGateway):
         """仅事件转发；7 个抽象方法全量 stub（hub 数据面永不交易，R-HALT1 代码级保证）。"""
@@ -332,6 +332,7 @@ def main() -> None:
     gw = ThinGateway(ee, "XTP")
     md_api = XtpMdApi(gw)
     gw.md_api = md_api
+    arm_sdk_heartbeat(md_api)   # 官方要求 Login 前设置；半开连接察觉提速（见 md_session）
     # L2 会话管理（韧性分层模型 2026-08-24）：定时续航 + 反应式重登，进程内闭环永不退出
     md_sess = XtpMdSession(md_api)
 
