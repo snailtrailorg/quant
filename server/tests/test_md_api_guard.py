@@ -3,7 +3,12 @@
 策略：真实例化 GuardedXtpMdApi（Python 子类有 __dict__，实例级打桩可遮蔽继承的
 C 绑定方法），绝不触网、不建真 C 会话——构造安全，SEGV 的前提是「构造前调方法」，
 那正是状态机要拦的。测试本身如果 SEGV，就是守卫失效的直接证据。
+
+批 2 增补（双盲审 P1）：RLock 互斥 + 旧会话断开余音甄别（onDisconnected 在
+登录成功后 5s 窗口内到达且现态 LOGGED_IN → 跳过父类自动重登防 churn）。
 """
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -119,8 +124,9 @@ class TestCallbackThreadSafety:
         assert calls == []
 
     def test_on_disconnected_relogin_via_override(self):
-        """onDisconnected（SDK 线程）→ 状态 CREATED → 父类单次重登走本类覆写。"""
+        """onDisconnected（SDK 线程，超余音窗）→ 状态 CREATED → 父类单次重登走本类覆写。"""
         md, calls = _connected(login_result=0)
+        md._last_login_ts = time.time() - 10      # 老化锚点：越过 5s 余音窗
         calls.clear()
         md.onDisconnected(0)
         assert md.state is SdkState.LOGGED_IN
@@ -170,3 +176,120 @@ class TestLogoutSignature:
         md.logout = _lo
         assert md.relogin() is True
         assert got == [0]
+
+
+class TestDisconnectEcho:
+    """旧会话余音甄别（双盲审 P1）：relogin 的 logout 触发旧会话断开回调，
+    迟到于新 login 成功时若走父类自动重登，新鲜会话将被再 logout（churn 实锤）。"""
+
+    def test_echo_right_after_fresh_relogin_skipped(self):
+        """刚 relogin 成功即收到 onDisconnected：跳过父类重登，login 不再被调。"""
+        md, calls = _connected(login_result=0)
+        assert md.relogin() is True                # 新 login 成功 -> _last_login_ts 刷新
+        calls.clear()
+        md.onDisconnected(0)                       # 旧会话余音（<5s 到达）
+        assert not any(c[0] == "login" for c in calls)
+        assert md.state is SdkState.LOGGED_IN      # 新会话未被搅动
+
+    def test_echo_after_fresh_connect_skipped(self):
+        """首登成功后立刻断开回调（同窗语义）：同样不触发父类重登。"""
+        md, calls = _connected(login_result=0)
+        assert md._last_login_ts > 0               # 登录成功记锚（余音甄别依据）
+        calls.clear()
+        md.onDisconnected(0)
+        assert not any(c[0] == "login" for c in calls)
+        assert md.state is SdkState.LOGGED_IN
+
+    def test_stale_beyond_window_goes_parent(self):
+        """超 5s 窗口的断开：真断链，照走父类（转 CREATED + 单次自动重登）。"""
+        md, calls = _connected(login_result=0)
+        md._last_login_ts = time.time() - 10
+        calls.clear()
+        md.onDisconnected(0)
+        assert any(c[0] == "login" for c in calls)
+        assert md.state is SdkState.LOGGED_IN
+
+    def test_created_state_goes_parent(self):
+        """CREATED 态 onDisconnected 照走父类（余音判据要求 LOGGED_IN）。"""
+        md, calls = _connected(login_result=1)     # 首登失败 -> CREATED
+        md.login = lambda *a: (calls.append(["login"]), 0)[1]   # 本轮恢复
+        calls.clear()
+        md.onDisconnected(0)
+        assert any(c[0] == "login" for c in calls)
+        assert md.state is SdkState.LOGGED_IN
+
+
+class TestLocking:
+    """RLock 互斥（双盲审 P1）：引擎面（connect/relogin）与 SDK 回调面
+    （onDisconnected/login_server）全程持锁，重登序列不与回调交叉。"""
+
+    def test_relogin_holds_lock_through_login(self):
+        """互斥证据：relogin 全程持锁，慢 login 期间其他线程拿不到锁。"""
+        md, calls = _connected(login_result=0)
+        in_login = threading.Event()
+        release = threading.Event()
+
+        def _slow_login(*a):
+            in_login.set()
+            release.wait(5)
+            return 0
+        md.login = _slow_login
+        t = threading.Thread(target=md.relogin, daemon=True)
+        t.start()
+        assert in_login.wait(5)                    # 已进入锁内 login
+        got = md._lock.acquire(timeout=0.3)
+        if got:
+            md._lock.release()
+        assert got is False                        # 锁仍被 relogin 持有
+        release.set()
+        t.join(5)
+        assert md.state is SdkState.LOGGED_IN
+
+    def test_on_disconnected_during_relogin_queues_then_echo_skipped(self):
+        """端到端：relogin 持锁期间 SDK 线程 onDisconnected 排队，锁释放后判余音
+        跳过——不 churn、不死锁，全程只此一发 login。"""
+        md, calls = _connected(login_result=0)
+        in_login = threading.Event()
+        release = threading.Event()
+        logins = []
+
+        def _slow_login(*a):
+            logins.append(1)
+            in_login.set()
+            release.wait(5)
+            return 0
+        md.login = _slow_login
+        t = threading.Thread(target=md.relogin, daemon=True)
+        t.start()
+        assert in_login.wait(5)
+        d = threading.Thread(target=md.onDisconnected, args=(0,), daemon=True)
+        d.start()
+        time.sleep(0.2)                            # 排队中（relogin 未放锁）
+        release.set()
+        t.join(5)
+        d.join(5)
+        assert not d.is_alive()                    # 未死锁
+        assert len(logins) == 1                    # 仅 relogin 那一发；余音未再登
+        assert md.state is SdkState.LOGGED_IN
+
+    def test_login_server_holds_lock(self):
+        """login_server（回调面）同样全程持锁。"""
+        md, calls = _connected(login_result=0)
+        in_login = threading.Event()
+        release = threading.Event()
+
+        def _slow_login(*a):
+            in_login.set()
+            release.wait(5)
+            return 0
+        md.login = _slow_login
+        t = threading.Thread(target=md.login_server, daemon=True)
+        t.start()
+        assert in_login.wait(5)
+        got = md._lock.acquire(timeout=0.3)
+        if got:
+            md._lock.release()
+        assert got is False
+        release.set()
+        t.join(5)
+        assert md.state is SdkState.LOGGED_IN
