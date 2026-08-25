@@ -87,11 +87,16 @@ def main() -> int:
                 problems.append(f"gen 变化 {gen_first}->{gen}（窗口内重启）")
         except Exception as e:
             problems.append(f"心跳读失败: {e}")
-        # ③ 数据流动
+        # ③ 数据流动（校准 2026-08-25：测试平台晚间不推回放——无新数据在盘外是常态，
+        # 降级 info；仅盘中心跳 sess_ticks>0 却不落 bar 才是真故障，保持 fail）
         try:
             bars_now = _bar_count()
             if bars_last is not None and bars_now <= bars_last:
-                problems.append(f"bar_hub 未增长（{bars_last}->{bars_now}）")
+                sess = r.hget(HB_KEY, "sess_ticks")
+                if sess and int(sess) > 0:
+                    problems.append(f"有 tick 但 bar_hub 未增长（{bars_last}->{bars_now}）")
+                else:
+                    print(f"  ℹ️ 盘外无回放，bar 不增长属正常（{bars_now}）")
             bars_last = bars_now
         except Exception as e:
             problems.append(f"bar 计数失败: {e}")
