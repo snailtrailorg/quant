@@ -40,7 +40,7 @@
 ## 验收标准
 1. `cd server && venv/bin/python -m pytest tests/test_md_api_guard.py tests/test_md_session.py -q` 全绿（含 FSM 矩阵：**connect 序内 heartbeat 位置断言**——今日 SEGV 的回归锁）
 2. `venv/bin/python -m pytest tests/ -q` 全量绿；`venv/bin/python -m pytest tests/test_layering.py -q` 绿
-3. `cd server && LD_LIBRARY_PATH=vendor/xtp/lib QT_QPA_PLATFORM=offscreen venv/bin/python ../scripts/smoke/run_md_lifecycle.py` 退出码 0，输出含「登录成功」「tick>0」「relogin 往返 OK」「干净退出」（真机，7×24 可跑）
+3. `cd server && LD_LIBRARY_PATH=vendor/xtp/lib QT_QPA_PLATFORM=offscreen venv/bin/python scripts/run_md_lifecycle.py` 退出码 0，输出含「登录成功」「tick>0」「relogin 往返 OK」「干净退出」（真机；dev 机到测试平台网络不通 OS:115 实测——**冒烟在服务器跑**，部署前用 /tmp 暂存 + PYTHONPATH 前置零生产触碰）
 4. G4（盘外）：随下次部署上线，观察 hub 正常收 tick + 09:10 续航日志
 
 ## mock 方式
