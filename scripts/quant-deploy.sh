@@ -300,9 +300,9 @@ remote_code_hash() {
 verify_imports() {
     echo "ℹ️ 部署物导入冒烟（rsync 后/重启前——2026-08-25 实锤：exclude 未锚定把
   runtime/ 整包排除出部署，服务重启后才 ModuleNotFoundError 暴露）..."
-    # michael 无权 cd 进 750 quant 目录（2026-08-17 踩坑同款）——root heredoc 免 cd，
-    # 带服务的 .env 环境跑（部分模块 import 期读环境变量）
-    ssh $SSH_OPTS "$SSH_TARGET" bash <<REMOTE_SCRIPT
+    # michael 无权 cd 进 750 quant 目录（2026-08-17 踩坑同款）——整块 sudo bash -s 以
+    # root 跑（踩坑记录解法），python 以 quant 跑保环境一致，带 .env（部分模块 import 期读环境变量）
+    ssh $SSH_OPTS "$SSH_TARGET" "sudo bash -s" <<REMOTE_SCRIPT
 set -euo pipefail
 cd $PROJECT_PATH
 set -a; source .env; set +a
