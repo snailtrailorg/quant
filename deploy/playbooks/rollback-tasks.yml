@@ -1,0 +1,130 @@
+# rollback-tasks.yml —— 回滚共享任务清单
+# 被 release.yml rescue（自动回滚，免 confirm）与 rollback.yml（独立跑，须 -e confirm=true）复用
+
+- name: 回滚 —— confirm 显式确认闸（独立跑时；release.yml 自动回滚路径免确认）
+  ansible.builtin.assert:
+    that: (rollback_from_release | default(false) | bool) or (confirm | default(false) | bool)
+    msg: "独立回滚需 -e confirm=true 显式确认（紧急回滚不吃交易窗口硬闸——设计稿 §3 语义）"
+
+- name: 回滚 —— 告警（盘中回滚风险打印；3b 接通知中心）
+  ansible.builtin.shell: echo "⚠ ROLLBACK $(TZ=Asia/Shanghai date '+%F %T') target={{ rollback_target | default('(待解析)') }}"
+  changed_when: false
+
+- name: 回滚 —— 目标解析（独立跑缺省：当前指向之前最近的已部署版）
+  ansible.builtin.shell: |
+    set -u
+    root='{{ deploy_root }}'
+    cur=$(readlink -f "$root/server" 2>/dev/null || true)
+    [ -n "$cur" ] && [ -d "$cur" ] || { echo ""; exit 0; }
+    cur_id=$(basename "$cur")
+    prev=""
+    for d in "$root/releases"/*/; do
+      [ -e "$d/.deployed" ] || continue
+      id=$(basename "$d")
+      if [[ "$id" < "$cur_id" ]] && [[ -z "$prev" || "$id" > "$prev" ]]; then
+        prev="$id"
+      fi
+    done
+    echo "$prev"
+  args:
+    executable: /bin/bash
+  register: rollback_target_resolved
+  changed_when: false
+  when: (rollback_target | default('')) | length == 0
+
+- name: 回滚 —— 目标固化
+  ansible.builtin.set_fact:
+    rollback_target: "{{ rollback_target_resolved.stdout | default('') }}"
+  when: (rollback_target | default('')) | length == 0
+
+- name: 回滚 —— 目标目录与 .deployed 标记采集（flip 前防指向 staged 半成品/不存在版）
+  ansible.builtin.stat:
+    path: "{{ deploy_root }}/releases/{{ rollback_target | default('x') }}/.deployed"
+  register: rollback_target_stat
+
+- name: 回滚 —— 目标存在断言
+  ansible.builtin.assert:
+    that:
+      - (rollback_target | default('')) | length > 0
+      - rollback_target_stat.stat.exists | default(false)
+    msg: "回滚目标不存在或未经完整发布（无 .deployed 标记）: {{ rollback_target | default('(空)') }}"
+
+- name: 回滚 —— 受影响波名单（独立跑=全部非空波；release include 时=触碰过的波名清单）
+  ansible.builtin.set_fact:
+    rb_wave_names: >-
+      {{ rollback_waves | default([])
+         if (rollback_waves | default([]) | length > 0)
+         else (deploy_waves | map(attribute='name') | list) }}
+
+- name: 回滚 —— 波次对象解析（名单 → deploy_waves 全对象，供 include_tasks/wave.yml）
+  ansible.builtin.set_fact:
+    rollback_waves_resolved: "{{ deploy_waves | selectattr('name', 'in', rb_wave_names) | list }}"
+
+- name: 回滚 —— flip 回上一 release（原子：ln -sfn + mv -T）
+  ansible.builtin.command: "{{ quant_flip_cmd }} {{ rollback_target }}"
+  changed_when: true
+
+- name: 回滚 —— 重启受影响波 + 稳定窗
+  include_tasks: wave.yml
+  loop: "{{ rollback_waves_resolved }}"
+  loop_control:
+    loop_var: wave
+  when: wave.units | default([]) | length > 0
+
+- name: 回滚复验 —— 版本收敛断言（全部 postverify 单元收敛于回滚目标）
+  ansible.builtin.shell: |
+    set -u
+    root='{{ deploy_root }}'
+    link=$(readlink -f "$root/server")
+    rc=0
+    for unit in {% for u in deploy_postverify_units %}'{{ u }}' {% endfor %}; do
+      pid=$(systemctl {{ deploy_systemctl_extra }} show -p MainPID --value "$unit" 2>/dev/null || true)
+      if [ -z "$pid" ] || [ "$pid" = "0" ]; then
+        echo "✗ $unit MainPID 为空（未运行）"; rc=1; continue
+      fi
+      if ! cwd=$({{ deploy_proc_cwd_read }} "/proc/$pid/cwd" 2>/dev/null); then
+        echo "✗ $unit /proc/$pid/cwd 不可读"; rc=1; continue
+      fi
+      if [ "$cwd" != "$link" ]; then
+        echo "✗ $unit cwd=$cwd ≠ server=$link"; rc=1
+      else
+        echo "✓ $unit 收敛于 $link"
+      fi
+    done
+    exit $rc
+  changed_when: false
+
+- name: 回滚复验 —— /healthz（200）
+  ansible.builtin.uri:
+    url: "{{ (deploy_waves | selectattr('healthz', 'defined') | list | first).healthz }}"
+    status_code: 200
+  when: deploy_waves | selectattr('healthz', 'defined') | list | length > 0
+
+- name: 回滚收尾 —— pip freeze diff 报告（venv 漂移可见——设计稿 §3）
+  ansible.builtin.shell: |
+    set -u
+    var='{{ deploy_root }}/var'
+    base="$var/pip-freeze-latest.txt"
+    now_ts=$(date +%Y%m%d%H%M%S)
+    out="$var/rollback-freeze-diff-$now_ts.txt"
+    cur=$({{ quant_pip_cmd }} freeze 2>/dev/null || true)
+    if [ ! -f "$base" ]; then
+      printf '（无基线快照 pip-freeze-latest.txt——venv 漂移不可比）\n' | tee "$out"
+      exit 0
+    fi
+    # 双盲审修补: $$ 可预测路径有符号链接抢占面——改 mktemp 私有临时文件
+    cur_t=$(mktemp /tmp/rb_cur.XXXXXX)
+    base_t=$(mktemp /tmp/rb_base.XXXXXX)
+    trap 'rm -f "$cur_t" "$base_t"' EXIT
+    printf '%s\n' "$cur" | sort > "$cur_t"
+    sort "$base" > "$base_t"
+    {
+      echo "== 回滚后 venv vs 基线快照 diff（无输出=零漂移） =="
+      diff "$base_t" "$cur_t" || true
+    } | tee "$out"
+  register: freeze_diff
+  changed_when: false
+
+- name: 回滚收尾 —— diff 摘要回显
+  ansible.builtin.debug:
+    msg: "{{ freeze_diff.stdout }}"

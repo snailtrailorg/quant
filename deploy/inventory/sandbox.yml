@@ -1,0 +1,8 @@
+# 沙箱 inventory（3a 全部场景在此跑；ansible_connection=local 零远程触碰）
+# 所有路径参数见 inventory/group_vars/sandbox.yml —— 全部指向 deploy/tests/sandbox_root/ 沙箱树
+sandbox:
+  hosts:
+    localhost:
+      ansible_connection: local
+      # ansible-core 2.17 要求目标侧 python >= 3.10（本机系统 3.10 在位；默认 3.14 不必要）
+      ansible_python_interpreter: /usr/bin/python3.10

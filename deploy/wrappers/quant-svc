@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# quant-svc —— quant-* 服务 systemctl 的唯一白名单通道（sudoers QUANT_DEPLOY_SYS）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-svc。
+#   白名单命令=deploy 不可写的 wrapper（改本文件内容=提权，批3设计稿 §2）。
+#   沙箱（3a）：源码直接调用，不经 sudo。
+#
+# 语法细节（设计稿 §2，v3.2 复核 A-1）:
+#   - sudoers `*` 通配吃空格，systemctl 族不裸列白名单——`systemctl restart quant-web sshd`
+#     会整行匹配 `quant-*` 造成任意 unit DoS 面。systemctl 全部动词收进本 wrapper 严参校验。
+#   - 无 `|` 交替符（sudoers 不支持），逐动词逐行走 Cmnd_Alias。
+#
+# 用法: quant-svc <verb> [unit]
+#   verb 白名单: restart|start|stop|status|is-active|daemon-reload
+#   unit 校验:   ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$（防夹带任意单元名）
+#   daemon-reload 不收 unit；其余 verb 必收且仅收一个 unit。
+#
+# 环境变量:
+#   QUANT_SVC_OPTS —— 附加 systemctl 选项（沙箱注入 --user；生产必须为空：
+#                     sudoers env_reset 默认清空环境，见设计稿 §2）。
+#                     注意值为受控常量，绝不拼用户输入。
+set -euo pipefail
+
+usage() { echo "用法: quant-svc <verb> [unit]  verb ∈ restart|start|stop|status|is-active|daemon-reload" >&2; exit 2; }
+
+[ $# -ge 1 ] && [ $# -le 2 ] || usage
+verb=$1
+unit=${2:-}
+
+case "$verb" in
+  restart|start|stop|status|is-active)
+    [ $# -eq 2 ] || { echo "✗ verb '$verb' 必须恰好带一个 unit 参数" >&2; exit 2; }
+    ;;
+  daemon-reload)
+    [ $# -eq 1 ] || { echo "✗ daemon-reload 不收 unit 参数" >&2; exit 2; }
+    ;;
+  *)
+    echo "✗ verb 不在白名单: $verb" >&2
+    exit 2
+    ;;
+esac
+
+if [ $# -eq 2 ]; then
+  # 严参校验：unit 名形如 quant-xxx / quant-xxx@inst.service（实例段允许大写数字下划线连字符）
+  if [[ ! "$unit" =~ ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$ ]]; then
+    echo "✗ unit 名非法（须匹配 ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\\.service\$）: $unit" >&2
+    exit 2
+  fi
+fi
+
+# QUANT_SVC_OPTS 白名单展开（双盲审修补: 仅允许空或 --user，其余拒——防环境注入拼进 systemctl；
+#   值虽为受控常量，白名单让"受控"成为机制而非约定）
+svc_opts=${QUANT_SVC_OPTS:-}
+case "$svc_opts" in
+  ""|--user) ;;
+  *) echo "✗ QUANT_SVC_OPTS 非法（仅允许空或 --user）: $svc_opts" >&2; exit 2 ;;
+esac
+
+# 场景 3 沙箱实测教训（真 systemctl 交互才验得出）:
+#   StartLimitBurst 耗尽后，systemctl restart/start 在 StartLimitIntervalSec 窗口内会被拒
+#   （Start request repeated too quickly）——回滚波次重启一个 crash-loop 判死单元时直接翻车。
+#   故 restart/start 动词先 reset-failed（幂等；活动单元上 no-op），不加新 verb、不动 sudoers 面。
+case "$verb" in
+  restart|start)
+    systemctl $svc_opts reset-failed ${unit:+"$unit"} >/dev/null 2>&1 || true
+    ;;
+esac
+
+exec systemctl $svc_opts "$verb" ${unit:+"$unit"}

@@ -1,0 +1,478 @@
+# release.yml —— 工件化发布主流程（批3设计稿 v3.2 §3 严格落地）
+#
+# 用法（从 deploy/ 目录）:
+#   沙箱: .venv/bin/ansible-playbook playbooks/release.yml -i inventory/sandbox.yml
+#   生产(3b): .venv/bin/ansible-playbook playbooks/release.yml -i inventory/quant-prod.yml
+#
+# 结构（设计稿 §3）:
+#   pre_tasks  —— preflight 断言（交易窗口/磁盘/rsync/四切片指纹采集）+ release_id 校验
+#   阶段 2-5   —— block（未切换）: synchronize/导入冒烟/DDL 门/pip/迁移；rescue=清 staged+fail
+#   阶段 6-8   —— block（已切换）: flip/单元安装/波次/postverify；rescue=include rollback+fail
+#   post_tasks —— 仅成功路径可达: 已切换标记/freeze 滚动/GC（孤儿 staged+保留 N=5）
+#
+# 退出码语义（设计稿修死）: rescue 路径一律 fail: 收尾——中止/回滚=非零退出+告警，CI 门不吃假绿
+---
+- hosts: all            # 以 -i 选择环境（设计稿写 quant-prod；沙箱场景同文件跑）
+  gather_facts: false
+  environment: "{{ deploy_wrapper_env }}"
+  vars:
+    ts: "{{ lookup('pipe', 'date +%Y%m%d%H%M') }}"
+    git_sha: "{{ lookup('pipe', 'git -C ' + (playbook_dir | dirname | dirname) + ' rev-parse --short=7 HEAD') }}"
+    release_id: "{{ deploy_release_id | default(ts ~ '-' ~ git_sha) }}"
+
+  pre_tasks:
+    - name: preflight —— release_id 格式断言（与 wrapper 同款正则）
+      ansible.builtin.assert:
+        that: release_id is match(deploy_release_id_regex)
+        msg: "release_id 非法: {{ release_id }}（须 {{ deploy_release_id_regex }}）"
+
+    - name: preflight —— 当前时刻采集（TZ=Asia/Shanghai 显式；deploy_fake_now 供确定性测试，格式 uHHMM）
+      ansible.builtin.shell: |
+        fake='{{ deploy_fake_now | default("") }}'
+        if [ -n "$fake" ]; then echo "$fake"; else TZ=Asia/Shanghai date +%u%H%M; fi
+      register: now_raw
+      changed_when: false
+      check_mode: false          # 只读探针：--check 下也须真跑（断言依赖其输出）
+
+    - name: preflight —— 交易窗口判定（周一~周五 09:15-11:35 / 12:55-15:05）
+      ansible.builtin.set_fact:
+        in_window: >-
+          {{ (deploy_trading_windows | selectattr('begin', 'le', now_raw.stdout[1:] | int)
+                                        | selectattr('end', 'ge', now_raw.stdout[1:] | int)
+                                        | list | length > 0)
+             and (now_raw.stdout[:1] | int <= 5) }}
+
+    - name: preflight —— 交易窗口断言（盘中拒绝；force 需显式确认）
+      ansible.builtin.assert:
+        that: (not (in_window and deploy_trading_window_enforce | bool)) or (force | default(false) | bool)
+        msg: "盘中（TZ=Asia/Shanghai）拒绝发布；自担风险须显式 -e force=true"
+
+    - name: preflight —— 盘中强制发布告警（操作者留痕；3b 接通知中心）
+      ansible.builtin.debug:
+        msg: "⚠ force=true 于交易窗口内发布——自担风险，操作者留痕"
+      when: (in_window and deploy_trading_window_enforce | bool) and (force | default(false) | bool)
+
+    - name: preflight —— 磁盘余量采集
+      ansible.builtin.command: df -BM --output=avail {{ deploy_root }}
+      register: df_free
+      changed_when: false
+      check_mode: false          # 只读探针
+
+    - name: preflight —— 磁盘余量断言（≥ {{ deploy_min_disk_mb }}M）
+      ansible.builtin.assert:
+        that: df_free.stdout_lines[-1] | regex_replace('[^0-9]', '') | int >= deploy_min_disk_mb
+        msg: "磁盘余量不足: {{ df_free.stdout_lines[-1] }}（要求 ≥ {{ deploy_min_disk_mb }}M）"
+
+    - name: preflight —— rsync 在位检查（synchronize 前提；服务器仍按 §7 assert）
+      ansible.builtin.command: rsync --version
+      register: rsync_ok
+      failed_when: false
+      changed_when: false
+      check_mode: false          # 只读探针
+
+    - name: preflight —— rsync 断言
+      ansible.builtin.assert:
+        that: rsync_ok.rc == 0
+        msg: "rsync 不在位（目标机与控制机均需）"
+
+    - name: preflight —— 目录就位（releases/ var/）
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ deploy_root }}/releases"
+        - "{{ deploy_root }}/var"
+
+    - name: preflight —— 上一版（当前 server 指向）四切片指纹采集（排 __pycache__；空输出=视为变更）
+      ansible.builtin.shell: |
+        set -u
+        root='{{ deploy_root }}'
+        cur=$(readlink -f "$root/server" 2>/dev/null || true)
+        if [ -z "$cur" ] || [ ! -d "$cur" ]; then echo "__MISSING__"; exit 0; fi
+        echo "$cur"
+        fp_dir() {
+          # 双盲审修补: 先剥路径再哈希——md5sum 输出含路径，release_id 不同即指纹不同，
+          # 会让 units_changed 等对路径误敏感（同内容不同 release_id 误报变更）
+          find "$1" -name __pycache__ -prune -o -type f -print0 2>/dev/null \
+            | sort -z | xargs -0 -r md5sum 2>/dev/null | awk '{print $1}' | md5sum | cut -d' ' -f1
+        }
+        for slice in {% for s in deploy_slices %}'{{ s }}' {% endfor %}; do
+          p="$cur/$slice"
+          if [ -d "$p" ]; then fp=$(fp_dir "$p")
+          elif [ -f "$p" ]; then fp=$(md5sum "$p" | cut -d' ' -f1)
+          else fp=""; fi          # 空输出=视为变更（防御）
+          echo "$slice=$fp"
+        done
+      register: prev_fp
+      changed_when: false
+      check_mode: false          # 只读探针
+
+    - name: preflight —— 上一版事实固化（回滚目标 + 切片指纹字典）
+      ansible.builtin.set_fact:
+        prev_release_id: "{{ (prev_fp.stdout_lines[0] | basename) if prev_fp.stdout_lines[0] != '__MISSING__' else '' }}"
+        prev_slice_fp: "{{ dict(prev_fp.stdout_lines[1:] | select('search', '=') | map('split', '=')) }}"
+
+    - name: preflight —— 波次实例 DB 真相源接线检查（3b 落实；live + feishu 双通道）
+      ansible.builtin.assert:
+        that:
+          - deploy_task_units_source != 'db' or (deploy_task_units_db_cmd | default('')) | length > 0
+          - deploy_task_units_source != 'db' or (deploy_task_units_db_cmd_feishu | default('')) | length > 0
+        msg: >-
+          deploy_task_units_source=db 但 DB 查询命令未接线（3b：quant 只读通道——
+          live_task status='running' / im_bot_config enabled，两 cmd 均须非空）
+
+    - name: preflight —— 波次实例清单采集（DB 真相源；live_task running；不收 active 单元——幽灵前科）
+      ansible.builtin.shell: "{{ deploy_task_units_db_cmd }}"
+      register: task_units_db
+      when: deploy_task_units_source == 'db'
+      changed_when: false
+
+    - name: preflight —— DB 真相源结果解析（每行一个 unit 名）
+      ansible.builtin.set_fact:
+        deploy_task_units_live: "{{ task_units_db.stdout_lines | default([]) }}"
+      when: deploy_task_units_source == 'db' and task_units_db is succeeded
+
+    - name: preflight —— feishu 波次实例采集（DB 真相源；im_bot_config enabled）
+      ansible.builtin.shell: "{{ deploy_task_units_db_cmd_feishu }}"
+      register: task_units_feishu_db
+      when: deploy_task_units_source == 'db'
+      changed_when: false
+
+    - name: preflight —— feishu 真相源结果解析（每行一个 unit 名）
+      ansible.builtin.set_fact:
+        deploy_task_units_feishu: "{{ task_units_feishu_db.stdout_lines | default([]) }}"
+      when: deploy_task_units_source == 'db' and task_units_feishu_db is succeeded
+
+  tasks:
+    # ================= 阶段 2-5：未切换（rescue=清 staged + fail） =================
+    - name: 阶段 2-5（未切换）
+      block:
+        - name: 阶段 2 —— staged 目录就位（rsync 不建父目录；--check 下也真建——空目录为唯一豁免副作用，中断残留由 GC 兜底）
+          ansible.builtin.file:
+            path: "{{ deploy_root }}/releases/{{ release_id }}"
+            state: directory
+            mode: "0755"
+          check_mode: false
+
+        - name: 阶段 2 —— 白名单切片同步 → releases/{{ release_id }}/
+          ansible.posix.synchronize:
+            src: "{{ deploy_stage_root }}/{{ item.path }}{{ '/' if item.dir else '' }}"
+            dest: "{{ deploy_root }}/releases/{{ release_id }}/{{ item.path }}{{ '/' if item.dir else '' }}"
+            rsync_opts:
+              - "--exclude=__pycache__"
+              - "--exclude=*.pyc"
+              - "--delete"
+          loop: "{{ deploy_sync_whitelist }}"
+
+        - name: 阶段 2 —— RELEASE 标记写入（本版 id；沙箱 healthz 桩回带）
+          ansible.builtin.copy:
+            content: "{{ release_id }}"
+            dest: "{{ deploy_root }}/releases/{{ release_id }}/RELEASE"
+            mode: "0644"
+
+        - name: 阶段 2 —— staged 四切片指纹采集
+          ansible.builtin.shell: |
+            set -u
+            rel='{{ deploy_root }}/releases/{{ release_id }}'
+            fp_dir() {
+              # 同 preflight: 先剥路径再哈希（内容敏感，release_id 无关）
+              find "$1" -name __pycache__ -prune -o -type f -print0 2>/dev/null \
+                | sort -z | xargs -0 -r md5sum 2>/dev/null | awk '{print $1}' | md5sum | cut -d' ' -f1
+            }
+            for slice in {% for s in deploy_slices %}'{{ s }}' {% endfor %}; do
+              p="$rel/$slice"
+              if [ -d "$p" ]; then fp=$(fp_dir "$p")
+              elif [ -f "$p" ]; then fp=$(md5sum "$p" | cut -d' ' -f1)
+              else fp=""; fi
+              echo "$slice=$fp"
+            done
+          register: staged_fp
+          changed_when: false
+
+        - name: 阶段 2 —— 切片变更判定（requirements→pip 真装；scripts/systemd→单元安装通道）
+          ansible.builtin.set_fact:
+            staged_slice_fp: "{{ dict(staged_fp.stdout_lines | default([]) | select('search', '=') | map('split', '=')) }}"
+            req_changed: "{{ prev_slice_fp.get('requirements.txt', '') != dict(staged_fp.stdout_lines | default([]) | select('search', '=') | map('split', '=')).get('requirements.txt', '') }}"
+
+        - name: 阶段 3 —— py_compile 全量 + 六入口导入冒烟（quant-importsmoke-wrapper，带 shared/.env）
+          ansible.builtin.command: "{{ quant_importsmoke_cmd }} {{ release_id }}"
+          changed_when: true
+
+        - name: 阶段 4 —— 本版新增迁移的破坏性 DDL 门（新增=staged 与上一版的 versions/ 目录 diff，实现注记①）
+          ansible.builtin.shell: |
+            set -u
+            rel='{{ deploy_root }}/releases/{{ release_id }}'
+            prev=$(readlink -f '{{ deploy_root }}/server' 2>/dev/null || true)
+            a=$(mktemp); b=$(mktemp); trap 'rm -f "$a" "$b"' EXIT
+            ls -1 "$rel/migrations/versions" 2>/dev/null | sort > "$a"
+            if [ -n "$prev" ] && [ -d "$prev/migrations/versions" ]; then
+              ls -1 "$prev/migrations/versions" | sort > "$b"
+            else
+              : > "$b"                       # 无上一版（首次发布）：全部视为新增
+            fi
+            news=$(comm -23 "$a" "$b")
+            [ -z "$news" ] && { echo "（无新增迁移）"; exit 0; }
+            rc=0
+            while IFS= read -r f; do
+              # 双盲审修补: 先截 upgrade→downgrade 段再匹配（downgrade 的破坏性 DDL 是合法回滚路径，不拦）；
+              # 双形态正则——裸 SQL（op.execute("DROP TABLE/COLUMN"、"ALTER COLUMN ... TYPE"）+ pythonic（op.drop_* / alter_column type_）
+              hits=$(awk '/^def upgrade/,/^def downgrade/' "$rel/migrations/versions/$f" 2>/dev/null \
+                     | grep -nE 'DROP[[:space:]]+(TABLE|COLUMN)|ALTER[[:space:]]+COLUMN[^;]*TYPE|op\.(drop_table|drop_column|drop_index)|alter_column.*type_' \
+                     || true)
+              if [ -n "$hits" ]; then
+                echo "✗ 破坏性 DDL 命中: $f"
+                echo "$hits"
+                rc=1
+              fi
+            done <<< "$news"
+            exit $rc
+          register: ddl_gate
+          changed_when: false
+          when: not (allow_contract | default(false) | bool)
+
+        - name: 阶段 4 —— allow_contract 显式标记（禁用自动清理/回滚，人工 runbook 接管）
+          ansible.builtin.set_fact:
+            auto_rollback_disabled: true
+          when: allow_contract | default(false) | bool
+
+        - name: 阶段 5 —— pip freeze 快照（经 stdout 返回；quant 不写 var/）
+          ansible.builtin.command: "{{ quant_pip_cmd }} freeze"
+          register: pip_freeze_before
+          changed_when: false
+
+        - name: 阶段 5 —— freeze 快照落 var/（pre-install 状态，rollback diff 基准；deploy 写权）
+          ansible.builtin.copy:
+            content: "{{ pip_freeze_before.stdout }}"
+            dest: "{{ deploy_root }}/var/pip-freeze-{{ release_id }}.txt"
+            mode: "0644"
+
+        - name: 阶段 5 —— pip 预检（--dry-run；坏 requirements 在此拦截）
+          ansible.builtin.command: "{{ quant_pip_cmd }} dry-run {{ release_id }}"
+          changed_when: false
+
+        - name: 阶段 5 —— pip 真装（指纹变化才装）
+          ansible.builtin.command: "{{ quant_pip_cmd }} install {{ release_id }}"
+          when: req_changed | bool
+
+        - name: 阶段 5 —— 迁移实跑（quant-alembic-wrapper upgrade head）
+          ansible.builtin.command: "{{ quant_alembic_cmd }} {{ release_id }}"
+          changed_when: true
+
+      rescue:
+        - name: rescue(2-5) —— 清理 staged（allow_contract 时保留供人工处置）
+          ansible.builtin.file:
+            path: "{{ deploy_root }}/releases/{{ release_id }}"
+            state: absent
+          when: not (auto_rollback_disabled | default(false) | bool)
+
+        - name: rescue(2-5) —— 中止收尾（非零退出，CI 门不吃假绿）
+          ansible.builtin.fail:
+            msg: >-
+              发布中止于未切换阶段（staged 已清理，线上未触碰除 venv 依赖追加——见部署日志）。
+              失败任务: {{ ansible_failed_task.name | default('(rescue 内失败)') }}
+              {% if auto_rollback_disabled | default(false) | bool %}
+              【allow_contract=true：staged 保留于 releases/{{ release_id }}/，人工 runbook 接管】{% endif %}
+
+    # ================= 阶段 6-8：已切换（rescue=自动回滚 + fail） =================
+    - name: 阶段 6-8（已切换）
+      block:
+        - name: 阶段 6 —— 原子切换（quant-flip-server：ln -sfn + mv -T）
+          ansible.builtin.command: "{{ quant_flip_cmd }} {{ release_id }}"
+          changed_when: true
+
+        - name: 阶段 6 —— 单元变更判定（scripts/systemd 切片指纹）
+          ansible.builtin.set_fact:
+            units_changed: "{{ prev_slice_fp.get('scripts/systemd', '') != staged_slice_fp.get('scripts/systemd', '') }}"
+
+        - name: 阶段 6 —— 单元安装通道（仅单元变更走此通道——场景 6；cp + daemon-reload）
+          ansible.builtin.command: "{{ quant_install_units_cmd }} {{ release_id }}"
+          when: units_changed | bool
+          changed_when: true
+
+        - name: 阶段 7 —— 波次重启 + 稳定窗（web→celery→feishu→hub→task）
+          include_tasks: wave.yml
+          loop: "{{ deploy_waves }}"
+          loop_control:
+            loop_var: wave
+          when: wave.units | length > 0
+
+        - name: 阶段 8 —— 波次命令层失败终判（续行≠维持混合态——统一回滚，设计稿语义修死）
+          ansible.builtin.assert:
+            that: not (wave_failed | default(false) | bool)
+            msg: "存在命令层失败的波（见上方登记）——不维持混合态运行，统一回滚"
+
+        - name: 阶段 8 —— /healthz（200）
+          ansible.builtin.uri:
+            url: "{{ (deploy_waves | selectattr('healthz', 'defined') | list | first).healthz }}"
+            status_code: 200
+          register: postverify_hz
+          when: deploy_waves | selectattr('healthz', 'defined') | list | length > 0
+
+        - name: 阶段 8 —— healthz 回带版本断言（沙箱桩；生产无此字段）
+          ansible.builtin.assert:
+            that: postverify_hz.json.release == release_id
+            msg: "healthz 报告版本 {{ postverify_hz.json.release | default('(无)') }} ≠ 本次 {{ release_id }}"
+          when:
+            - postverify_hz.json is defined
+            - postverify_healthz_release | bool
+
+        - name: 阶段 8 —— /readyz（200）
+          ansible.builtin.uri:
+            url: "{{ (deploy_waves | selectattr('readyz', 'defined') | list | first).readyz }}"
+            status_code: 200
+          when: deploy_waves | selectattr('readyz', 'defined') | list | length > 0
+
+        - name: 阶段 8 —— hub 心跳复现（gen+8 字段；文件模式）
+          ansible.builtin.shell: |
+            set -u
+            f='{{ deploy_hub_hb_file }}'
+            [ -f "$f" ] || { echo "✗ hub 心跳文件缺失: $f" >&2; exit 1; }
+            age=$(( $(date +%s) - $(stat -c %Y "$f") ))
+            [ "$age" -le 10 ] || { echo "✗ hub 心跳过期（${age}s 无更新）" >&2; exit 1; }
+            '{{ deploy_root }}'/shared/venv/bin/python - "$f" <<'PYEOF'
+            import json, sys
+            data = json.load(open(sys.argv[1]))
+            need = ["gen", "ts", "unit", "state", "bar_count", "stream_lag_ms", "xtp_ok", "valkey_ok", "lease"]
+            missing = [k for k in need if k not in data]
+            if missing:
+                print(f"✗ hub 心跳缺字段: {missing}", file=sys.stderr)
+                sys.exit(1)
+            print("✓ hub 心跳 gen+8 字段齐备")
+            PYEOF
+          when: deploy_hub_hb_mode == 'file'
+          changed_when: false
+
+        - name: 阶段 8 —— hub 心跳复现（gen+8 字段；redis 模式——3b 首跑验证）
+          ansible.builtin.shell: |
+            set -u
+            '{{ deploy_root }}'/shared/venv/bin/python - <<'PYEOF'
+            import json, sys
+            import redis
+            r = redis.Redis.from_url("{{ deploy_hub_hb_redis_url | default('redis://127.0.0.1:6379/4') }}")
+            raw = r.get("{{ deploy_hub_hb_redis_key }}")
+            if not raw:
+                print("✗ hub 心跳键缺失", file=sys.stderr); sys.exit(1)
+            data = json.loads(raw)
+            need = ["gen", "ts", "unit", "state", "bar_count", "stream_lag_ms", "xtp_ok", "valkey_ok", "lease"]
+            missing = [k for k in need if k not in data]
+            if missing:
+                print(f"✗ hub 心跳缺字段: {missing}", file=sys.stderr); sys.exit(1)
+            print("✓ hub 心跳 gen+8 字段齐备")
+            PYEOF
+          when: deploy_hub_hb_mode == 'redis'
+          changed_when: false
+
+        - name: 阶段 8 —— 版本收敛断言（readlink -f server == /proc/<MainPID>/cwd；终判——降级续行的旧版进程在此 fail）
+          ansible.builtin.shell: |
+            set -u
+            root='{{ deploy_root }}'
+            link=$(readlink -f "$root/server")
+            rc=0
+            for unit in {% for u in deploy_postverify_units %}'{{ u }}' {% endfor %}; do
+              pid=$(systemctl {{ deploy_systemctl_extra }} show -p MainPID --value "$unit" 2>/dev/null || true)
+              if [ -z "$pid" ] || [ "$pid" = "0" ]; then
+                echo "✗ $unit MainPID 为空（未运行）"; rc=1; continue
+              fi
+              if ! cwd=$({{ deploy_proc_cwd_read }} "/proc/$pid/cwd" 2>/dev/null); then
+                echo "✗ $unit /proc/$pid/cwd 不可读"; rc=1; continue
+              fi
+              # 规范路径比较（设计稿实现注意：readlink -f 后无尾 /，进程实际 cwd 亦无尾 /，两侧均为规范路径）
+              if [ "$cwd" != "$link" ]; then
+                echo "✗ $unit cwd=$cwd ≠ server=$link（钉旧版进程）"; rc=1
+              else
+                echo "✓ $unit 收敛于 $link"
+              fi
+            done
+            exit $rc
+          changed_when: false
+
+      rescue:
+        - name: rescue(6-8) —— 回滚事实固化（目标=上一版；受影响波=本次触碰过的波）
+          ansible.builtin.set_fact:
+            rollback_target: "{{ prev_release_id | default('') }}"
+            rollback_waves: "{{ waves_touched | default([]) }}"
+            rollback_from_release: true
+
+        - name: rescue(6-8) —— 自动回滚（flip 回上一版 + 重启受影响波 + 复验 + freeze diff）
+          include_tasks: rollback-tasks.yml
+          when: (prev_release_id | default('')) | length > 0
+
+        - name: rescue(6-8) —— 回滚收尾（非零退出+告警；schema 已前进不回滚——expand-only 前提经 DDL 门保证）
+          ansible.builtin.fail:
+            msg: >-
+              发布失败已自动回滚（代码已回旧版；schema 已前进不回滚——expand-only 前提经 DDL 门保证）。
+              失败任务: {{ ansible_failed_task.name | default('(rescue 内失败)') }}
+              {% if (prev_release_id | default('')) | length == 0 %}
+              【首次发布无上一版可回滚——人工处置】{% endif %}
+              【告警：3b 接通知中心】
+
+  post_tasks:
+    - name: 收尾 —— 本版已切换标记（GC 依据）
+      ansible.builtin.file:
+        path: "{{ deploy_root }}/releases/{{ release_id }}/.deployed"
+        state: touch
+        mode: "0644"
+
+    - name: 收尾 —— freeze 快照在位检查（--check 下 pip 阶段被跳过时无此文件）
+      ansible.builtin.stat:
+        path: "{{ deploy_root }}/var/pip-freeze-{{ release_id }}.txt"
+      register: freeze_snap
+
+    - name: 收尾 —— freeze 快照滚动为 latest（下次 rollback diff 基准）
+      ansible.builtin.copy:
+        remote_src: true
+        src: "{{ deploy_root }}/var/pip-freeze-{{ release_id }}.txt"
+        dest: "{{ deploy_root }}/var/pip-freeze-latest.txt"
+        mode: "0644"
+      when: freeze_snap.stat.exists | default(false)
+
+    - name: 收尾 —— GC（孤儿 staged 清理 + 旧版按字典序保留 N={{ deploy_keep_releases }}；跳过 server 指向项与 /proc 钉住项）
+      ansible.builtin.shell: |
+        set -u
+        rel='{{ deploy_root }}/releases'
+        cur=$(readlink -f '{{ deploy_root }}/server' 2>/dev/null || true)
+        [ -n "$cur" ] || { echo "（无 server 指向，跳过 GC）"; exit 0; }
+        # /proc 钉住项：任何进程 cwd 指向的 release（清理竞态防护——设计稿验收标准 1）
+        # 双盲审修补: 与 postverify 同通道（deploy_proc_cwd_read）——生产换特权读取通道时两处一致生效
+        pinned=""
+        for d in /proc/[0-9]*; do
+          w=$({{ deploy_proc_cwd_read }} "$d/cwd" 2>/dev/null || true)
+          case "$w" in
+            "$rel"/*) pinned="$pinned ${w#"$rel"/}" ;;
+          esac
+        done
+        is_pinned() { case " $pinned " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+        # 1) 孤儿 staged（无 .deployed 标记=从未切换成功的中断残留，下次部署顺带 GC）
+        for d in "$rel"/*/; do
+          [ -d "$d" ] || continue
+          id=$(basename "$d")
+          [ -e "$d/.deployed" ] && continue
+          [ "$rel/$id" = "$cur" ] && continue
+          if is_pinned "$id"; then echo "跳过钉住孤儿: $id"; continue; fi
+          rm -rf "$d" && echo "GC 孤儿 staged: $id"
+        done
+        # 2) 已部署版按 release_id 字典序保留 N 个（含当前指向版；跳过钉住项）
+        done_ids=$(for d in "$rel"/*/; do
+          [ -e "$d/.deployed" ] && basename "$d"
+        done | sort)
+        remove=""
+        for id in $done_ids; do
+          [ "$rel/$id" = "$cur" ] && continue
+          if is_pinned "$id"; then echo "跳过钉住项: $id"; continue; fi
+          remove="$remove $id"
+        done
+        # 双盲审修补: cut -d' ' -f2-/f1-N 链在前导空格下错位（off-by-one）——改数组切片，删字典序最旧的 over 个
+        # （坑: bash 数组长度语法的花括号+井号连写子串，会被 ansible 解析器当 jinja 注释起止符，syntax-check 即挂）
+        remove_ids=($remove)
+        keep=$(( {{ deploy_keep_releases }} - 1 ))     # 当前指向版占 1 个名额
+        over=$(( $(echo $remove | wc -w) - keep ))
+        if [ "$over" -gt 0 ]; then
+          for id in "${remove_ids[@]:0:$over}"; do
+            rm -rf "$rel/$id" && echo "GC 旧版: $id"
+          done
+        fi
+        exit 0
+      args:
+        executable: /bin/bash
+      changed_when: true

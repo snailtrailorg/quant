@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# run-current —— 经 server 链接进入当前 release 再 exec（批3设计稿 §4）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，固定安装于 <root>/bin/run-current。
+#   固定路径、不经 server 链接自举——避免"切链接导致下次 run-current 自身变化"的耦合。
+#
+# 机制:
+#   CUR=$(readlink -f <root>/server) → cd "$CUR" → exec <root>/shared/venv/bin/python "$@"
+#   进程 cwd=releases/<id> —— 这是 postverify 版本收敛断言
+#   （readlink -f server == /proc/<MainPID>/cwd）的依据。
+#
+# 推论（设计稿 §4 写明）: crash 后 systemd 重启=解析新版本（钉住仅进程存活期有效）；
+#   运行期经 server 链接字符串读盘的代码=钉版本旁路，3b 前排查一句。
+set -euo pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)     # <root>/bin
+ROOT=$(cd "$HERE/.." && pwd)            # <root>
+CUR=$(readlink -f "$ROOT/server")
+cd "$CUR"
+exec "$ROOT/shared/venv/bin/python" "$@"

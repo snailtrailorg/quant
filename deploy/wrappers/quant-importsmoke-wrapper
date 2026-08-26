@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# quant-importsmoke-wrapper —— 导入冒烟通道（sudoers QUANT_DEPLOY_QUANT，以 quant 跑）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-importsmoke-wrapper。
+#
+# 动作（设计稿 §3 阶段 3，验证矩阵"代码"行）:
+#   1) py_compile 全量（staged 树内所有 .py，排 __pycache__）
+#   2) 六入口导入冒烟——与生产 ExecStart 入口集一致（web/celery/beat+risk 同源/feishu/hub/live-task）
+#   带 shared/.env 跑（导入期配置副作用与线上一致；.env 属 quant 600，本 wrapper 以 quant 跑）
+#
+# 严参校验:
+#   release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$；cwd 锁定 releases/<release_id>
+#
+# 环境变量:
+#   QUANT_DEPLOY_ROOT —— 部署根（生产默认 /data/websites/snailtrail.cc/quant）
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+
+[ $# -eq 1 ] || { echo "用法: quant-importsmoke-wrapper <release_id>" >&2; exit 2; }
+release_id=$1
+
+if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
+  echo "✗ release_id 非法（须匹配 ^[0-9]{12}-[a-f0-9]{7,}\$）: $release_id" >&2
+  exit 2
+fi
+
+REL="$ROOT/releases/$release_id"
+[ -d "$REL" ] || { echo "✗ release 目录不存在: $REL" >&2; exit 1; }
+
+PY="$ROOT/shared/venv/bin/python"
+[ -x "$PY" ] || { echo "✗ shared/venv 解释器不存在: $PY" >&2; exit 1; }
+
+# 1) py_compile 全量（语法层；排 __pycache__，staged 树内无 venv）
+cd "$REL"
+find . -name __pycache__ -prune -o -name '*.py' -print0 | xargs -0 -r "$PY" -m py_compile
+
+# 2) 六入口导入冒烟（带 shared/.env）
+set -a
+# shellcheck disable=SC1091
+[ -f "$ROOT/shared/.env" ] && . "$ROOT/shared/.env"
+set +a
+
+"$PY" - <<'EOF'
+# 六入口与生产 ExecStart 集合一致（server/scripts/systemd/*.service 实测盘点）
+import importlib
+import sys
+
+entries = [
+    "src.web_api.main",             # quant-web-api（uvicorn app）
+    "src.scheduler",                # quant-celery-worker / beat / risk（celery -A）
+    "src.feishu_bot.ws_client",     # quant-feishu-bot
+    "src.md_hub.main",              # quant-md-hub
+    "src.strategy_runner.main",     # quant-live-task
+    "src.strategy_runner.alert_failed",  # quant-task-failed 告警钩子
+]
+
+bad = []
+for mod in entries:
+    try:
+        importlib.import_module(mod)
+    except Exception as exc:  # noqa: BLE001 —— 冒烟要的是任何失败，不只 ImportError
+        bad.append(f"{mod}: {exc!r}")
+
+if bad:
+    print("✗ 导入冒烟失败:", file=sys.stderr)
+    print("\n".join(bad), file=sys.stderr)
+    sys.exit(1)
+print(f"✓ 导入冒烟通过: {len(entries)} 入口")
+EOF

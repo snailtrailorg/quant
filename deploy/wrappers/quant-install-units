@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# quant-install-units —— 单元文件安装通道（sudoers QUANT_DEPLOY_ROOT，root 属主）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-install-units。
+#   场景 6 的执行通道（设计稿 §2 注）：仅单元文件有变更的 release 走此处 + 受影响波 stabilize。
+#
+# 动作: releases/<release_id>/scripts/systemd/*.service → cp 到单元目录 + daemon-reload
+#   生产:  /etc/systemd/system + systemctl daemon-reload（root）
+#   沙箱:  QUANT_UNIT_DEST（~/.config/systemd/user）+ systemctl --user daemon-reload（QUANT_SVC_OPTS）
+#
+# 严参校验:
+#   release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$；源目录必须存在且至少含一个 .service
+#   单元文件名逐一匹配 ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$（防夹带任意单元）
+#
+# 环境变量:
+#   QUANT_DEPLOY_ROOT —— 部署根（生产默认 /data/websites/snailtrail.cc/quant）
+#   QUANT_UNIT_DEST   —— 单元安装目录（生产默认 /etc/systemd/system）
+#   QUANT_SVC_OPTS    —— daemon-reload 附加选项（沙箱 --user；生产为空）
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+DEST=${QUANT_UNIT_DEST:-/etc/systemd/system}
+
+[ $# -eq 1 ] || { echo "用法: quant-install-units <release_id>" >&2; exit 2; }
+release_id=$1
+
+if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
+  echo "✗ release_id 非法（须匹配 ^[0-9]{12}-[a-f0-9]{7,}\$）: $release_id" >&2
+  exit 2
+fi
+
+SRC="$ROOT/releases/$release_id/scripts/systemd"
+if [ ! -d "$SRC" ]; then
+  echo "✗ 单元源目录不存在: $SRC" >&2
+  exit 1
+fi
+
+shopt -s nullglob
+units=("$SRC"/*.service)
+[ ${#units[@]} -ge 1 ] || { echo "✗ 无 .service 文件可装: $SRC" >&2; exit 1; }
+
+for f in "${units[@]}"; do
+  base=$(basename "$f")
+  if [[ ! "$base" =~ ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$ ]]; then
+    echo "✗ 单元名非法（拒绝夹带）: $base" >&2
+    exit 2
+  fi
+  # 安全校验（拷贝前，双盲审修补①）: 拒符号链接 + 真实路径必须收敛在本次 release 目录内
+  #   ——防 staged 树内藏链接把任意文件（含 /etc 下敏感单元）以 root 属主复制进单元目录
+  if [ -L "$f" ]; then
+    echo "✗ 拒绝符号链接单元: $f" >&2
+    exit 2
+  fi
+  real=$(realpath -e "$f" 2>/dev/null) || { echo "✗ realpath 解析失败: $f" >&2; exit 2; }
+  case "$real" in
+    "$ROOT/releases/$release_id"/*) ;;
+    *) echo "✗ 单元真实路径逃逸 release 目录: $real" >&2; exit 2 ;;
+  esac
+done
+
+# QUANT_SVC_OPTS 白名单展开（仅空或 --user；其余拒——防环境注入拼进 systemctl）
+svc_opts=${QUANT_SVC_OPTS:-}
+case "$svc_opts" in
+  ""|--user) ;;
+  *) echo "✗ QUANT_SVC_OPTS 非法（仅允许空或 --user）: $svc_opts" >&2; exit 2 ;;
+esac
+
+# 内容校验（双盲审修补②）: 生产系统管理器通道（svc_opts 为空）逐单元须含 'User=quant'
+#   ——防发布源删 User 行使服务以 root 跑。沙箱 --user 管理器自身即非 root 且 user 单元
+#   不接受跨用户 User=（无此威胁面），跳过。
+if [ -z "$svc_opts" ]; then
+  for f in "${units[@]}"; do
+    if ! grep -q '^User=quant' "$f"; then
+      echo "✗ 单元缺 'User=quant'（防以 root 运行）: $(basename "$f")" >&2
+      exit 2
+    fi
+  done
+fi
+
+mkdir -p "$DEST"
+install -m 644 -o root -g root "${units[@]}" "$DEST/" 2>/dev/null \
+  || install -m 644 "${units[@]}" "$DEST/"   # 沙箱无 root 属主权，退化为当前用户属主
+systemctl $svc_opts daemon-reload
+echo "✓ 已安装 ${#units[@]} 个单元并 daemon-reload → $DEST"

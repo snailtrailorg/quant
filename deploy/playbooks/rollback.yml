@@ -1,0 +1,14 @@
+# rollback.yml —— 回滚独立入口（可独立跑；自动回滚路径见 release.yml rescue）
+#
+# 盘中语义（设计稿 §3）: 不吃交易窗口硬闸——紧急回滚恰发生在盘中；
+#   改为告警打印 + -e confirm=true 显式确认
+#
+# 独立用法（从 deploy/ 目录，生产 3b）:
+#   .venv/bin/ansible-playbook playbooks/rollback.yml -i inventory/quant-prod.yml -e confirm=true \
+#     [-e rollback_target=<release_id>]        # 缺省=字典序紧邻当前指向之前的最近已部署版
+---
+- hosts: all
+  gather_facts: false
+  environment: "{{ deploy_wrapper_env }}"
+  tasks:
+    - include_tasks: rollback-tasks.yml

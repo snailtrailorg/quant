@@ -1,0 +1,30 @@
+# 全组通用参数（sandbox 与 quant-prod 共用的结构/验证参数，设计稿 §3）
+---
+# ---- release_id 约束（wrapper 同款正则，preflight 断言）----
+deploy_release_id_regex: '^[0-9]{12}-[a-f0-9]{7,}$'
+
+# ---- 前置断言参数 ----
+deploy_min_disk_mb: 500              # 磁盘余量闸（设计稿 §3 preflight；venv 重建 1.5G 闸属 3b-1 步骤 1）
+deploy_trading_windows:              # 交易窗口（TZ=Asia/Shanghai 显式判定；周一~周五）
+  - {begin: 915, end: 1135}
+  - {begin: 1255, end: 1505}
+
+# ---- 四切片指纹（排 __pycache__；空输出=视为变更——设计稿 §3 preflight）----
+# scripts 取 systemd 子树：单元变更判据（场景 6 install-units 触发条件）
+deploy_slices: [src, migrations, scripts/systemd, requirements.txt]
+
+# ---- 发布同步白名单（设计稿 §3：synchronize 白名单清单，非全树 rsync）----
+deploy_sync_whitelist:
+  - {path: src, dir: true}
+  - {path: migrations, dir: true}
+  - {path: scripts, dir: true}
+  - {path: alembic.ini, dir: false}
+  - {path: requirements.txt, dir: false}
+
+# ---- 波次稳定窗（设计稿 §3 注记②：无原生 dwell，循环实现）----
+deploy_dwell_seconds: 30             # is-active 需连续保持的秒数（沙箱压缩覆盖）
+deploy_dwell_poll: 2                 # 采样间隔
+deploy_dwell_max_wait: 120           # 单元总等待上限（含反复重启拉锯）
+
+# ---- 清理策略（设计稿 §3 post_tasks）----
+deploy_keep_releases: 5              # 按 release_id 字典序保留 N 个已部署版

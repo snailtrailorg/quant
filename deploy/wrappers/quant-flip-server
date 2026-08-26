@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# quant-flip-server —— server 符号链接原子切换（sudoers QUANT_DEPLOY_ROOT，root 属主）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-flip-server。
+#   机制点透（设计稿 §1）：所在父目录 quant/ 750 组位 r-x 无 w——deploy 无法自行建/改链接，
+#   本 wrapper 是唯一修改通道（这是权限独立的实现，非仅约定）。
+#
+# 原子切换（设计稿 §3 阶段 6 / §2 注）:
+#   ln -sfn <target> server.tmp && mv -T server.tmp server
+#   mv -T 为同文件系统 rename(2)，观察者要么见旧链接要么见新链接，无中间态。
+#
+# 严参校验（设计稿 §2：无参校验的 wrapper 等于允许任意 cwd 提权跑命令）:
+#   release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$（bash 正则无 \d，用 [0-9]）
+#   target 锁定为 <root>/releases/<release_id>——不接受任意路径（防 cwd/相对路径注入）
+#   目标不存在（未 staged 完）即拒。
+#
+# 环境变量:
+#   QUANT_DEPLOY_ROOT —— 部署根（生产默认 /data/websites/snailtrail.cc/quant；沙箱注入沙箱树）
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+
+[ $# -eq 1 ] || { echo "用法: quant-flip-server <release_id>" >&2; exit 2; }
+release_id=$1
+
+if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
+  echo "✗ release_id 非法（须匹配 ^[0-9]{12}-[a-f0-9]{7,}\$）: $release_id" >&2
+  exit 2
+fi
+
+target="$ROOT/releases/$release_id"
+if [ ! -d "$target" ]; then
+  echo "✗ 目标 release 不存在（先 synchronize 再 flip）: $target" >&2
+  exit 1
+fi
+
+# 原子切换：临时链接 + rename 覆盖
+ln -sfn "$target" "$ROOT/server.tmp"
+mv -T "$ROOT/server.tmp" "$ROOT/server"
+echo "✓ server → $target"

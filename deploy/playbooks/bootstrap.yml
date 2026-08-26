@@ -1,0 +1,128 @@
+# bootstrap.yml —— 切换编排步骤 2 的服务器侧准备（骨架级，3b-2 完善后才能对 prod 真跑）
+#
+# 【3a 状态】仅 --syntax-check 通过；pre_tasks 启用断言（缺省拒）+ 任务体总闸
+#   bootstrap_enabled（缺省 false）——双闸：断言被 -e bootstrap_dry_assert=false 绕过时
+#   任务体仍零动作（双盲审修补选型：保 when 闸在任务体）。3b-2 首跑前逐任务核对
+#   设计稿 §1 权限矩阵 / §2 sudoers 规格 / §5 步骤 2。
+#
+# 用法（3b）:
+#   .venv/bin/ansible-playbook playbooks/bootstrap.yml -i inventory/quant-prod.yml -e bootstrap_enabled=true
+#   （需一次性经 michael break-glass 通道提供 root become——runbook 3b 成文）
+---
+- hosts: all
+  gather_facts: false
+  become: false            # 3b：经显式 become 提权（break-glass 通道），3a 不涉及
+  vars:
+    bootstrap_deploy_user: deploy
+    bootstrap_sudoers_path: /etc/sudoers.d/quant-deploy
+
+  pre_tasks:
+    - name: bootstrap —— 启用闸检查（3a 缺省关闭：骨架只过 syntax-check 不真跑）
+      ansible.builtin.assert:
+        that: bootstrap_enabled | default(false) | bool
+        msg: "bootstrap 未启用（3a 骨架阶段）。对 prod 真跑须 -e bootstrap_enabled=true 且逐任务过 3b 核对清单"
+        quiet: true
+      when: (bootstrap_dry_assert | default(true)) | bool
+
+  tasks:
+    - name: 任务体总闸（bootstrap_enabled 缺省 false——误跑零动作；block 级 when 应用到每个子任务）
+      when: bootstrap_enabled | default(false) | bool
+      block:
+        # ---------- deploy 用户与组（设计稿 §1 前置事实：必须入 quant 组穿越 750） ----------
+        - name: 【3b】deploy 用户创建 + 入 quant 组（组位 r-x 穿越用——michael 2026-08-17 同款墙）
+          ansible.builtin.user:
+            name: "{{ bootstrap_deploy_user }}"
+            groups: quant
+            append: true
+            shell: /bin/bash
+            create_home: true
+
+        # ---------- sudoers 白名单（设计稿 §2；落盘前 visudo -cf） ----------
+        - name: 【3b】sudoers 白名单下发（wrapper 化通道；无 | 交替符、* 吃空格故 systemctl 族不裸列）
+          ansible.builtin.template:
+            src: "{{ playbook_dir }}/../templates/sudoers-quant-deploy.j2"
+            dest: "{{ bootstrap_sudoers_path }}"
+            owner: root
+            group: root
+            mode: "0440"
+            validate: "/usr/sbin/visudo -cf %s"
+
+        - name: 【3b】requiretty 检查（sudoers 不得启用 requiretty——NOPASSWD 非交互必需）
+          ansible.builtin.shell: |
+            if grep -rE '^[^#]*\brequiretty\b' /etc/sudoers /etc/sudoers.d/ 2>/dev/null; then
+              echo "✗ 检测到 requiretty——须移除"; exit 1
+            fi
+            echo "✓ 无 requiretty"
+          changed_when: false
+
+        # ---------- SSH 密钥（设计稿 §2：禁 command=；加 no-forwarding 族；from= 待出口 IP 确认） ----------
+        - name: 【3b】deploy authorized_keys（禁 command=——与 Ansible 多命令冲突，写明禁防后人好心加）
+          ansible.posix.authorized_key:
+            user: "{{ bootstrap_deploy_user }}"
+            key: "{{ bootstrap_deploy_pubkey | default('REPLACE_ME_3B') }}"
+            key_options: "no-port-forwarding,no-agent-forwarding,no-pty"
+            # from= 限源 IP：与用户确认出口 IP 固定性后再加（家宽自锁风险）——3b 决策项
+            state: present
+
+        # ---------- 目录权限矩阵（设计稿 §1 表格逐行） ----------
+        - name: 【3b】目录权限矩阵 —— releases/ 与 var/（deploy 全权）
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: "{{ bootstrap_deploy_user }}"
+            group: "{{ bootstrap_deploy_user }}"
+            mode: "0755"
+          loop:
+            - "{{ deploy_root }}/releases"
+            - "{{ deploy_root }}/var"
+
+        - name: 【3b】目录权限矩阵 —— shared/ 树（quant:quant；目录 700 非 600——无 x 位 quant 自己都进不去）
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            owner: quant
+            group: quant
+            mode: "{{ item.mode }}"
+          loop:
+            - {path: "{{ deploy_root }}/shared", mode: "0700"}
+            - {path: "{{ deploy_root }}/shared/venv", mode: "0755"}
+            - {path: "{{ deploy_root }}/shared/runtime", mode: "0700"}
+            - {path: "{{ deploy_root }}/shared/static/avatars", mode: "0700"}
+
+        - name: 【3b】shared/.env 属主（quant:quant 600，deploy 不可读——secrets 隔离）
+          ansible.builtin.file:
+            path: "{{ deploy_root }}/shared/.env"
+            owner: quant
+            group: quant
+            mode: "0600"
+
+        # ---------- wrapper 族安装（root:root 755——白名单命令=deploy 不可写） ----------
+        - name: 【3b】wrapper 族安装 → /usr/local/sbin（root:root 755；改 wrapper 内容=提权）
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../wrappers/{{ item }}"
+            dest: "/usr/local/sbin/{{ item }}"
+            owner: root
+            group: root
+            mode: "0755"
+          loop:
+            - quant-svc
+            - quant-flip-server
+            - quant-install-units
+            - quant-alembic-wrapper
+            - quant-importsmoke-wrapper
+            - quant-pip-wrapper
+
+        - name: 【3b】run-current 安装 → {{ deploy_root }}/bin/（固定路径，不经 server 链接自举——设计稿 §4）
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../run-current"
+            dest: "{{ deploy_root }}/bin/run-current"
+            owner: root
+            group: root
+            mode: "0755"
+
+        # ---------- 收尾自检（设计稿验收标准 2 的前置） ----------
+        - name: 【3b】权限验证 —— 白名单命令可达性（deploy 视角 dry 语法检查）
+          ansible.builtin.shell: |
+            # 两类手测在 3b-2 验收：白名单过、越权拒（sudo 非白名单命令须密码/拒绝）
+            sudo -l -U {{ bootstrap_deploy_user }} || true
+          changed_when: false

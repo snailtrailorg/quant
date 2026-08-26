@@ -1,0 +1,2 @@
+# 沙箱 requirements —— 有意为空（沙箱不装真依赖；venv 预置 alembic/sqlalchemy/psycopg）
+# 场景 1（坏 requirements）由 run_scenarios.sh 往 staging 注入不存在包名，走本地 pip 真验

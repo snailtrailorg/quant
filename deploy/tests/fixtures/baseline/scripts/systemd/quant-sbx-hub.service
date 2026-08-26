@@ -1,0 +1,17 @@
+[Unit]
+Description=Quant SBX hub 桩（心跳 gen+8 字段复现）
+After=default.target
+# StartLimit* 归 [Unit] 段（systemd 官方位置；[Service] 内仅为兼容别名）
+StartLimitIntervalSec=30
+StartLimitBurst=2
+
+[Service]
+Type=simple
+WorkingDirectory=__SBX_ROOT__/shared
+EnvironmentFile=__SBX_ROOT__/shared/.env
+ExecStart=__SBX_ROOT__/bin/run-current -m src.sbx.hub
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

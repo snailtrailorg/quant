@@ -1,0 +1,58 @@
+# 沙箱组参数 —— 全部路径指向 deploy/tests/sandbox_root/ 沙箱树（零生产触碰）
+# 开发机禁 sudo：systemctl 走 systemd --user（QUANT_SVC_OPTS=--user），wrapper 直接调用不经 sudo
+---
+# ---- 根与包装器 ----
+deploy_root: "{{ lookup('env', 'HOME') }}/Projects/quant/deploy/tests/sandbox_root/quant"
+deploy_wrapper_dir: "{{ playbook_dir }}/../wrappers"   # 源码住仓库（3b bootstrap 才装 /usr/local/sbin）
+deploy_sudo_root: ""                 # 生产: sudo（sudoers QUANT_DEPLOY_ROOT）
+deploy_sudo_quant: ""                # 生产: sudo -u quant（sudoers QUANT_DEPLOY_QUANT）
+quant_svc_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-svc') | trim }}"
+quant_flip_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-server') | trim }}"
+quant_install_units_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-install-units') | trim }}"
+quant_alembic_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-alembic-wrapper') | trim }}"
+quant_importsmoke_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-importsmoke-wrapper') | trim }}"
+quant_pip_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pip-wrapper') | trim }}"
+
+# wrapper 环境注入（生产为 {}：wrapper 内置默认即生产路径）
+deploy_wrapper_env:
+  QUANT_DEPLOY_ROOT: "{{ deploy_root }}"
+  QUANT_SVC_OPTS: "--user"           # 沙箱单元在 systemd --user 管理器
+  QUANT_UNIT_DEST: "{{ lookup('env', 'HOME') }}/.config/systemd/user"
+
+# 只读 systemctl 查询附加参数（postverify 的 show/is-active 直查，不经 sudo 通道）
+deploy_systemctl_extra: "--user"
+
+# ---- 发布源（staging 由 make_sandbox_root.sh 生成，场景注入点）----
+deploy_stage_root: "{{ lookup('env', 'HOME') }}/Projects/quant/deploy/tests/sandbox_root/stage"
+
+# ---- 波次（结构对齐生产；沙箱用 quant-sbx-* 假单元，RestartSec=1/StartLimitBurst=2 压缩时间尺度）----
+deploy_waves:
+  - name: web
+    units: [quant-sbx-web.service]
+    healthz: "http://127.0.0.1:18923/healthz"
+    readyz: "http://127.0.0.1:18923/readyz"
+  - name: celery
+    units: [quant-sbx-celery.service]
+  - name: feishu
+    units: []                        # 沙箱无此波道具
+  - name: hub
+    units: [quant-sbx-hub.service]
+  - name: task
+    units: []                        # 生产由 DB 真相源填充；沙箱静态空
+deploy_postverify_units: [quant-sbx-web.service, quant-sbx-celery.service, quant-sbx-hub.service]
+
+# ---- 验证参数（沙箱压缩/桩化）----
+deploy_dwell_seconds: 4              # 压缩稳定窗
+deploy_dwell_poll: 1
+deploy_dwell_max_wait: 15
+deploy_trading_window_enforce: false # 沙箱不碰线上，窗口闸降级（窗口逻辑由 run_scenarios.sh 附加断言覆盖）
+deploy_task_units_source: static     # 生产: db（live_task running / im_bot_config enabled 真相源）
+deploy_task_units_static: []
+deploy_task_units_db_cmd_feishu: ""  # 沙箱无 DB 真相源道具（source=static，preflight 不查）
+postverify_healthz_release: true     # 沙箱 healthz 桩回带 release_id（生产 web_api 无此字段，3b 校正）
+deploy_hub_hb_mode: file             # 生产: redis（quant:hb:md-hub，3b 首跑验证）
+deploy_hub_hb_file: "{{ deploy_root }}/shared/runtime/hub_hb.json"
+
+# ---- 版本收敛断言的 /proc 读取通道 ----
+# 沙箱同用户可读；生产 deploy 用户读 quant 进程 /proc/<pid>/cwd 需特权通道——3b 落实（见报告注意点）
+deploy_proc_cwd_read: "readlink"

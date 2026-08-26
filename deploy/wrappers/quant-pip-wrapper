@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# quant-pip-wrapper —— venv 依赖管理通道（sudoers QUANT_DEPLOY_QUANT，以 quant 跑）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-pip-wrapper。
+#   设计稿 §1：shared/venv 服务以 quant 只读执行，pip 由本 wrapper 以 quant 跑。
+#
+# 子命令（设计稿 §3 阶段 5 / §3 rollback freeze diff）:
+#   freeze                —— pip freeze 输出到 stdout（quant 不写 var/；
+#                            ansible 会话捕获后落 var/，deploy 写权——设计稿 §3 注）
+#   dry-run <release_id>  —— pip install --dry-run -r <staged>/requirements.txt 预检
+#                            （解析失败即非零退出——场景 1 坏 requirements 的拦截点）
+#   install <release_id>  —— 真装（调用侧按指纹变化才触发）
+#
+# 严参校验:
+#   子命令白名单 freeze|dry-run|install；release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$
+#
+# 环境变量:
+#   QUANT_DEPLOY_ROOT —— 部署根（生产默认 /data/websites/snailtrail.cc/quant）
+#   QUANT_PIP_INDEX   —— pip 索引（默认清华镜像，与 server/requirements.txt 头部约定一致）
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+INDEX=${QUANT_PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
+
+[ $# -ge 1 ] && [ $# -le 2 ] || { echo "用法: quant-pip-wrapper freeze|dry-run <release_id>|install <release_id>" >&2; exit 2; }
+sub=$1
+release_id=${2:-}
+
+PIP="$ROOT/shared/venv/bin/pip"
+[ -x "$PIP" ] || { echo "✗ shared/venv pip 不存在: $PIP" >&2; exit 1; }
+
+case "$sub" in
+  freeze)
+    [ $# -eq 1 ] || { echo "✗ freeze 不收参数" >&2; exit 2; }
+    exec "$PIP" freeze
+    ;;
+  dry-run|install)
+    [ $# -eq 2 ] || { echo "✗ $sub 必须带 release_id" >&2; exit 2; }
+    ;;
+  *)
+    echo "✗ 子命令不在白名单: $sub" >&2
+    exit 2
+    ;;
+esac
+
+if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
+  echo "✗ release_id 非法（须匹配 ^[0-9]{12}-[a-f0-9]{7,}\$）: $release_id" >&2
+  exit 2
+fi
+
+REQ="$ROOT/releases/$release_id/requirements.txt"
+[ -f "$REQ" ] || { echo "✗ requirements.txt 不存在: $REQ" >&2; exit 1; }
+
+if [ "$sub" = "dry-run" ]; then
+  # 预检：解析/下载校验，不改 venv；解析不了（坏包名/冲突）即非零退出
+  exec "$PIP" install --dry-run -i "$INDEX" -r "$REQ"
+else
+  exec "$PIP" install -i "$INDEX" -r "$REQ"
+fi

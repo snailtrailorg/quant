@@ -1,0 +1,9 @@
+# 控制机（开发机 Fedora）ansible 环境 —— 批3设计稿 §7 前置矩阵
+# 3a 实测定案（2026-08-26，python3.10 venv + 清华镜像实测）：
+#   ansible-core 2.17.14 + ansible.posix 2.2.2（collection 已 vendor 进 deploy/collections/）
+# 安装:
+#   python3.10 -m venv deploy/.venv
+#   deploy/.venv/bin/pip install -r deploy/requirements.txt \
+#     -i https://pypi.tuna.tsinghua.edu.cn/simple
+#   deploy/.venv/bin/ansible-galaxy collection install ansible.posix -p deploy/collections
+ansible-core==2.17.14

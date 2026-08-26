@@ -1,0 +1,16 @@
+# 量化平台 deploy 用户 sudo 白名单（批3设计稿 §2 规格，2026-08-26 v3.2）
+#
+# 语法红线（改前必读）:
+#   - sudoers 无 `|` 交替符——逐动词逐行
+#   - `*` 通配匹配含空格——凡带参命令一律 wrapper 化（systemctl 族不裸列白名单：
+#     `systemctl restart quant-web sshd` 会整行匹配 `quant-*` = 任意 unit DoS 面）
+#   - 全部白名单命令 = root/quant 属主、deploy 不可写的 wrapper 脚本（改 wrapper 内容=提权）
+#   - wrapper 严参校验: release_id ^\d{12}-[a-f0-9]{7,}$ 且限定 releases/ 下；
+#     unit ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$
+Cmnd_Alias QUANT_DEPLOY_ROOT = /usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-install-units
+Cmnd_Alias QUANT_DEPLOY_SYS  = /usr/local/sbin/quant-svc
+Cmnd_Alias QUANT_DEPLOY_QUANT = /usr/local/sbin/quant-alembic-wrapper, \
+                                /usr/local/sbin/quant-importsmoke-wrapper, \
+                                /usr/local/sbin/quant-pip-wrapper
+deploy ALL=(root)  NOPASSWD: QUANT_DEPLOY_ROOT, QUANT_DEPLOY_SYS
+deploy ALL=(quant) NOPASSWD: QUANT_DEPLOY_QUANT

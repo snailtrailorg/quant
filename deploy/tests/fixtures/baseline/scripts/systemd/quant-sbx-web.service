@@ -1,0 +1,20 @@
+[Unit]
+Description=Quant SBX web 桩 v1（healthz/readyz；单元变更场景用 v1/v2 标记判定）
+After=default.target
+# StartLimit* 归 [Unit] 段（systemd 官方位置；[Service] 内仅为兼容别名）
+StartLimitIntervalSec=30
+StartLimitBurst=2
+
+[Service]
+Type=simple
+# WorkingDirectory 指 shared——不得指穿过 server 链接的路径（设计稿 §4：lazy import 混版教训）
+# 进程最终 cwd=releases/<id> 由 run-current 的 cd 决定
+WorkingDirectory=__SBX_ROOT__/shared
+EnvironmentFile=__SBX_ROOT__/shared/.env
+ExecStart=__SBX_ROOT__/bin/run-current -m src.sbx.web
+# RestartSec=1/StartLimitBurst=2 压缩时间尺度（设计稿 §6 沙箱道具）
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=default.target

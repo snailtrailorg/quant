@@ -1,0 +1,13 @@
+# 生产 inventory —— 3b 切换编排步骤 2（bootstrap deploy 用户后）才启用，3a 仅占位 + --syntax-check
+# 硬约束（批3任务）：不 ssh 任何远程；本组的任何 playbook 在 3a 阶段绝不真跑
+quant-prod:
+  hosts:
+    quant.snailtrail.cc:
+      ansible_host: 120.24.235.98
+      ansible_port: 22
+      ansible_user: deploy            # 3b-2 bootstrap 创建（设计稿 §5 步骤 2）
+      # prod 侧主机密钥收紧（双盲审修补）: 全局 host_key_checking=False 只留给沙箱 local 连接，
+      #   远程主机走 accept-new（TOFU: 首连自动接受、再连变更即拒）
+      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
+      # al8 默认 python3.6 过老（ansible-core 2.17 需 >=3.10）——设计稿 §7: dnf install python39 rsync
+      ansible_python_interpreter: /usr/bin/python3.9

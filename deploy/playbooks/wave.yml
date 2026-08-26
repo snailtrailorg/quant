@@ -1,0 +1,83 @@
+# wave.yml —— 单波重启 + 稳定窗验证（release.yml / rollback.yml 以 include_tasks 复用，循环变量 wave）
+#
+# 判型语义（设计稿 §3 实现注记③）:
+#   命令层（quant-svc restart）失败 → failed_when:false 吞没，登记 wave_failed 续行——
+#     续行只为编排完整+信息收集（后续波跑完=回滚时受影响面全量），终判在 postverify
+#   验证层（dwell 稳定窗/healthz）失败 → 不吞没，直接穿透到外层 block 的 rescue → 自动回滚
+---
+# 本波事实复位（wave_failed 为跨波累积的终判标记；this_wave_cmd_failed 仅本波内生效）
+- name: 波 {{ wave.name }} —— 本波命令层失败复位
+  ansible.builtin.set_fact:
+    this_wave_cmd_failed: false
+
+- name: 波 {{ wave.name }} —— 本波计入触碰清单（回滚时只重启受影响波）
+  ansible.builtin.set_fact:
+    waves_touched: "{{ (waves_touched | default([])) + [wave.name] }}"
+
+- name: 波 {{ wave.name }} —— 重启（命令层失败=登记续行，编排完整+信息收集）
+  ansible.builtin.command: "{{ quant_svc_cmd }} restart {{ item }}"
+  register: wave_restart
+  failed_when: false          # 命令层吞没（设计稿注记③）
+  changed_when: true
+  loop: "{{ wave.units }}"
+
+- name: 波 {{ wave.name }} —— 命令层失败登记（终判移交 postverify）
+  ansible.builtin.set_fact:
+    this_wave_cmd_failed: true
+    wave_failed: true
+  when: wave_restart.results | selectattr('rc', 'defined') | selectattr('rc', 'ne', 0) | list | length > 0
+
+- name: 波 {{ wave.name }} —— 命令层失败告警（续行）
+  ansible.builtin.debug:
+    msg: "⚠ 波 {{ wave.name }} 重启命令层失败（跳过本波稳定窗，终判在 postverify→统一回滚）"
+  when: this_wave_cmd_failed | bool
+
+- name: 波 {{ wave.name }} —— dwell 稳定窗（is-active 连续 ≥{{ deploy_dwell_seconds }}s；failed/StartLimit 即刻判死）
+  ansible.builtin.shell: |
+    set -u
+    fail=0
+    for unit in {% for u in wave.units %}'{{ u }}' {% endfor %}; do
+      deadline=$(( $(date +%s) + {{ deploy_dwell_max_wait }} ))
+      ok_since=0
+      stable=0
+      while [ "$(date +%s)" -lt "$deadline" ]; do
+        state=$({{ quant_svc_cmd }} is-active "$unit" 2>/dev/null || true)
+        now=$(date +%s)
+        if [ "$state" = "active" ]; then
+          [ "$ok_since" -eq 0 ] && ok_since=$now
+          if [ $(( now - ok_since )) -ge {{ deploy_dwell_seconds }} ]; then stable=1; break; fi
+        else
+          ok_since=0
+          if [ "$state" = "failed" ]; then
+            echo "✗ $unit 进入 failed（StartLimit 判死）——dwell 即刻中止"
+            fail=1
+            break
+          fi
+        fi
+        sleep {{ deploy_dwell_poll }}
+      done
+      [ "$fail" -eq 1 ] && break
+      if [ "$stable" -ne 1 ]; then
+        echo "✗ $unit 稳定窗超时（未连续 active ≥ {{ deploy_dwell_seconds }}s）"
+        fail=1
+        break
+      fi
+      echo "✓ $unit 稳定（连续 active ≥ {{ deploy_dwell_seconds }}s）"
+    done
+    exit $fail
+  args:
+    executable: /bin/bash
+  when: not (this_wave_cmd_failed | bool)
+  changed_when: false
+
+- name: 波 {{ wave.name }} —— healthz 自证（验证层：失败穿透外层 rescue）
+  ansible.builtin.uri:
+    url: "{{ wave.healthz }}"
+    status_code: 200
+  register: wave_hz
+  retries: 3
+  delay: 1
+  until: wave_hz.status | default(0) == 200   # 双盲审修补: 无 until 的 retries 是 no-op——瞬时 503 需真收敛重试
+  when:
+    - wave.healthz is defined
+    - not (this_wave_cmd_failed | bool)

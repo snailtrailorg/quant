@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# quant-alembic-wrapper —— 数据库迁移执行通道（sudoers QUANT_DEPLOY_QUANT，以 quant 跑）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-alembic-wrapper。
+#   设计稿 §2：无参校验的 wrapper 等于允许任意 cwd 以 quant 跑 alembic——故严参校验。
+#
+# 动作（设计稿 §3 阶段 5）:
+#   cd releases/<release_id> → 以 shared/venv 解释器执行 alembic upgrade head
+#   venv 路径恒定 shared/venv（不随 release 变），staged 树自带 alembic.ini/migrations。
+#   DB 连串由 shared/.env 提供（生产 .env 属 quant 600，deploy 不可读——本 wrapper 以 quant 跑才读得到，
+#   这正是它进 (quant) sudoers 组的原因）。
+#
+# 严参校验:
+#   release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$；cwd 锁定 releases/<release_id>（不收任意路径）
+#
+# 环境变量:
+#   QUANT_DEPLOY_ROOT —— 部署根（生产默认 /data/websites/snailtrail.cc/quant）
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+
+[ $# -eq 1 ] || { echo "用法: quant-alembic-wrapper <release_id>" >&2; exit 2; }
+release_id=$1
+
+if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
+  echo "✗ release_id 非法（须匹配 ^[0-9]{12}-[a-f0-9]{7,}\$）: $release_id" >&2
+  exit 2
+fi
+
+REL="$ROOT/releases/$release_id"
+[ -d "$REL" ] || { echo "✗ release 目录不存在: $REL" >&2; exit 1; }
+[ -f "$REL/alembic.ini" ] || { echo "✗ 缺 alembic.ini: $REL" >&2; exit 1; }
+
+PY="$ROOT/shared/venv/bin/python"
+[ -x "$PY" ] || { echo "✗ shared/venv 解释器不存在: $PY" >&2; exit 1; }
+
+# 带服务环境（DB 连串）执行；cwd 锁定在 staged release
+set -a
+# shellcheck disable=SC1091
+[ -f "$ROOT/shared/.env" ] && . "$ROOT/shared/.env"
+set +a
+
+cd "$REL"
+exec "$PY" -m alembic upgrade head
