@@ -31,7 +31,7 @@ echo "== 4 wrappers 装位（root 属主 755；quant-dbro 唯一 quant 属主）
 install -m 755 -o root -g root \
   "$SRC"/quant-{svc,flip-server,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned} \
   /usr/local/sbin/
-install -m 755 -o quant -g quant "$SRC/quant-dbro" /usr/local/sbin/
+install -m 755 -o quant -g quant "$SRC/quant-dbro" "$SRC/quant-hbcheck" /usr/local/sbin/
 
 echo "== 5 bin/run-current + releases/（deploy 属主）=="
 mkdir -p "$Q/bin" "$Q/releases" "$Q/var"

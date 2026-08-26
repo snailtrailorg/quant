@@ -366,23 +366,11 @@
           when: deploy_hub_hb_mode == 'file'
           changed_when: false
 
-        - name: 阶段 8 —— hub 心跳复现（gen+8 字段；redis 模式——3b 首跑验证）
-          ansible.builtin.shell: |
-            set -u
-            '{{ deploy_root }}'/shared/venv/bin/python - <<'PYEOF'
-            import json, sys
-            import redis
-            r = redis.Redis.from_url("{{ deploy_hub_hb_redis_url | default('redis://127.0.0.1:6379/4') }}")
-            raw = r.get("{{ deploy_hub_hb_redis_key }}")
-            if not raw:
-                print("✗ hub 心跳键缺失", file=sys.stderr); sys.exit(1)
-            data = json.loads(raw)
-            need = ["gen", "ts", "unit", "state", "bar_count", "stream_lag_ms", "xtp_ok", "valkey_ok", "lease"]
-            missing = [k for k in need if k not in data]
-            if missing:
-                print(f"✗ hub 心跳缺字段: {missing}", file=sys.stderr); sys.exit(1)
-            print("✓ hub 心跳 gen+8 字段齐备")
-            PYEOF
+        - name: 阶段 8 —— hub 心跳复现（redis 模式——quant-hbcheck wrapper：真实 HASH schema+TTL 判活）
+          ansible.builtin.command: sudo -u quant /usr/local/sbin/quant-hbcheck
+          register: hb_check
+          changed_when: false
+          failed_when: hb_check.rc != 0
           when: deploy_hub_hb_mode == 'redis'
           changed_when: false
 

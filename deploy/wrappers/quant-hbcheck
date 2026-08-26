@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# quant-hbcheck —— hub 心跳健康检查（sudoers QUANT_DEPLOY_QUANT，以 quant 跑）
+#
+# 属主约束（3b bootstrap 落实）: quant:quant 755（本体以 quant 跑才能读 shared/.env 与
+# 执行 shared venv——deploy 无权直跑 venv，七跑实锤 EACCES）。
+#
+# 检查对象=真实 hub 心跳：redis HASH quant:hb:md-hub，8 字段
+# （pid/gen/subs/ticks/bars/sess_ticks/last_tick_ts/dropped_pg）+ TTL>0 判活
+# （writer expire 90s）。沙箱 file 模式的 JSON 串道具与本检查无关（形态不同）。
+#
+# 环境变量（env_reset 下仅控制机/本机直跑可设）:
+#   QUANT_DEPLOY_ROOT / QUANT_HB_REDIS_URL / QUANT_HB_KEY
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+set -a
+# shellcheck disable=SC1091
+[ -f "$ROOT/shared/.env" ] && . "$ROOT/shared/.env"
+set +a
+URL=${QUANT_HB_REDIS_URL:-${VALKEY_URL:-redis://127.0.0.1:6379/4}}
+KEY=${QUANT_HB_KEY:-quant:hb:md-hub}
+
+"$ROOT/shared/venv/bin/python" - "$URL" "$KEY" <<'PYEOF'
+import sys
+import redis
+
+url, key = sys.argv[1], sys.argv[2]
+r = redis.Redis.from_url(url, socket_timeout=3)
+ttl = r.ttl(key)
+if ttl is None or ttl <= 0:
+    print(f"✗ hub 心跳键缺失或已过期: {key}（TTL={ttl}）", file=sys.stderr)
+    sys.exit(1)
+fields = set(r.hkeys(key))
+need = {"pid", "gen", "subs", "ticks", "bars", "sess_ticks", "last_tick_ts", "dropped_pg"}
+missing = need - fields
+if missing:
+    print(f"✗ hub 心跳缺字段: {sorted(missing)}（现有 {sorted(fields)}）", file=sys.stderr)
+    sys.exit(1)
+print(f"✓ hub 心跳 TTL={ttl}s，8 字段齐备，gen={r.hget(key, 'gen')}")
+PYEOF

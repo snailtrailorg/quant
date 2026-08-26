@@ -16,6 +16,7 @@ Cmnd_Alias QUANT_DEPLOY_SYS  = /usr/local/sbin/quant-svc
 Cmnd_Alias QUANT_DEPLOY_QUANT = /usr/local/sbin/quant-alembic-wrapper, \
                                 /usr/local/sbin/quant-importsmoke-wrapper, \
                                 /usr/local/sbin/quant-pip-wrapper, \
-                                /usr/local/sbin/quant-dbro
+                                /usr/local/sbin/quant-dbro, \
+                                /usr/local/sbin/quant-hbcheck
 deploy ALL=(root)  NOPASSWD: QUANT_DEPLOY_ROOT, QUANT_DEPLOY_SYS
 deploy ALL=(quant) NOPASSWD: QUANT_DEPLOY_QUANT
