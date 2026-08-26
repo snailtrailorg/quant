@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/server
-EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
+EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.feishu_bot.ws_client %i
+ExecStart=/data/websites/snailtrail.cc/quant/shared/venv/bin/python -m src.feishu_bot.ws_client %i
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

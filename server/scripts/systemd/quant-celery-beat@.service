@@ -7,10 +7,10 @@ Wants=network-online.target
 Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/server
-EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
+EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStartPre=/usr/bin/mkdir -p /data/websites/snailtrail.cc/quant/server/runtime
-ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/celery -A src.scheduler beat --loglevel=info --schedule /data/websites/snailtrail.cc/quant/server/runtime/celerybeat-schedule
+ExecStartPre=/usr/bin/mkdir -p /data/websites/snailtrail.cc/quant/shared/runtime
+ExecStart=/data/websites/snailtrail.cc/quant/shared/venv/bin/celery -A src.scheduler beat --loglevel=info --schedule /data/websites/snailtrail.cc/quant/shared/runtime/celerybeat-schedule
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

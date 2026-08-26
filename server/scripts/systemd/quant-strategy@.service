@@ -12,9 +12,9 @@ StartLimitBurst=5
 Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/server
-EnvironmentFile=/data/websites/snailtrail.cc/quant/server/.env
+EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/data/websites/snailtrail.cc/quant/server/venv/bin/python -m src.strategy_runner.main --id %i
+ExecStart=/data/websites/snailtrail.cc/quant/shared/venv/bin/python -m src.strategy_runner.main --id %i
 # 看门狗：runner 每 10s 喂狗（_sd_notify），挂死 90s 无喂 → systemd 强杀重启（F-3）
 WatchdogSec=90
 NotifyAccess=main
