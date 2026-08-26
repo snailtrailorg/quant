@@ -25,7 +25,7 @@ import sys
 import redis
 
 url, key = sys.argv[1], sys.argv[2]
-r = redis.Redis.from_url(url, socket_timeout=3)
+r = redis.Redis.from_url(url, socket_timeout=3, decode_responses=True)  # bytes/str 比较坑修正
 ttl = r.ttl(key)
 if ttl is None or ttl <= 0:
     print(f"✗ hub 心跳键缺失或已过期: {key}（TTL={ttl}）", file=sys.stderr)
