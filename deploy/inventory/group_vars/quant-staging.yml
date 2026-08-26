@@ -1,19 +1,55 @@
-# staging 彩排差异面（其余继承 all.yml 同产）
+# staging 彩排组参数（2026-08-26）——镜像 quant-prod 全集保真，
+# 仅四处彩排差异：①交易窗不强制（随时彩排）②波次缩减 web/celery/hub（feishu/task 连外网不入）
+# ③XTP md_host 已指 127.0.0.1（连不上即刻拒绝，防黑洞挂起>Watchdog）④波次源=static
+---
+# ---- 根与包装器（sudoers 白名单通道，设计稿 §2）----
 deploy_root: /data/websites/snailtrail.cc/quant
+deploy_wrapper_dir: /usr/local/sbin
+deploy_sudo_root: "sudo"             # deploy ALL=(root) NOPASSWD: QUANT_DEPLOY_ROOT/SYS
+deploy_sudo_quant: "sudo -u quant"   # deploy ALL=(quant) NOPASSWD: QUANT_DEPLOY_QUANT
+quant_svc_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-svc') | trim }}"
+quant_flip_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-server') | trim }}"
+quant_install_units_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-install-units') | trim }}"
+quant_pinned_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pinned') | trim }}"   # v3.3: 被钉 release 探测（root 特权读 /proc/cwd）
+quant_alembic_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-alembic-wrapper') | trim }}"
+quant_importsmoke_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-importsmoke-wrapper') | trim }}"
+quant_pip_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pip-wrapper') | trim }}"
+quant_dbro_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-dbro') | trim }}"      # v3.3: 波次实例 DB 真相源（quant 属主 wrapper，PG peer 免密）
 
-# 交易窗不强制（随时彩排）
-deploy_trading_window_enforce: false
+# 生产 wrapper 走内置默认路径，无需环境注入
+deploy_wrapper_env: {}
+deploy_systemctl_extra: ""
 
-# 波次缩减：web（本地 PG/Valkey）+ celery（本地 broker）+ hub（XTP 指瞬时拒绝地址，
-# MD 挂着走 L2 退避——验管道不验行情）。feishu/live-task 连外网，不入彩排。
-deploy_task_units_source: static
+# ---- 发布源（控制机仓库 server/ 树；synchronize 白名单切片见 all.yml）----
+deploy_stage_root: "{{ lookup('env', 'HOME') }}/Projects/quant/server"
+
+# ---- 波次（设计稿 §3：web→celery→feishu→hub→task）----
 deploy_waves:
   - name: web
-    units: ["quant-web-api@quant.service"]
+    units: [quant-web-api@quant.service]
+    healthz: "http://127.0.0.1:8001/healthz"
+    readyz: "http://127.0.0.1:8001/readyz"
   - name: celery
-    units: ["quant-celery-worker@quant.service"]
+    units: [quant-celery-worker@quant.service]
   - name: hub
-    units: ["quant-md-hub@quant.service"]
+    units: [quant-md-hub@quant.service]
+deploy_postverify_units: "{{ deploy_waves | map(attribute='units') | flatten }}"
 
-# 真实心跳检查（本地 Valkey——hub 真进程写真 HASH）
-deploy_hub_hb_mode: redis
+
+# ---- 验证参数 ----
+deploy_trading_window_enforce: false  # 盘中硬闸（force 需 -e force=true 且打印自担风险）
+deploy_task_units_source: static         # 波次 task/feishu 实例清单真相源 = DB
+deploy_task_units_static: []  # staging 波次静态（DB 真相源通道仍可手验）
+deploy_task_units_live: []            # DB 真相源采集后覆写（live_task running）
+deploy_task_units_feishu: []          # DB 真相源采集后覆写（im_bot_config enabled）
+# v3.3 接线: quant 只读查询走 quant-dbro wrapper（quant 属主，DB 连接封装其内走 PG peer
+# 免密——.env deploy 不可读的解法；替代 v3.2 的 $QUANT_DB_RO 环境变量通道）。
+# 固定 SQL 与单元名拼装见 wrappers/quant-dbro；空/未装位则 preflight 拒。
+# 单元名按 server 实况：quant-live-task@{id}（trading.py）/ quant-feishu-bot@{id}（im_bots.py）；
+# feishu 波次真相源= im_bot_config（19 号 IM 统一接入后，feishu_config 已并入，provider 过滤）
+deploy_task_units_db_cmd: "{{ quant_dbro_cmd }} live"
+deploy_task_units_db_cmd_feishu: "{{ quant_dbro_cmd }} feishu"
+postverify_healthz_release: false    # 生产 healthz 无 release 字段（版本收敛由 quant-pinned 通道承载）
+deploy_hub_hb_mode: redis            # quant:hb:md-hub：gen+8 字段（3b 首跑验证）
+deploy_hub_hb_redis_key: "quant:hb:md-hub"
+deploy_hub_hb_redis_url: "redis://127.0.0.1:6379/4"   # 与 key 同源参数化（3b 按服务器 Valkey 实况校正）
