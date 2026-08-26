@@ -4,7 +4,7 @@ Description=Quant task failed hook: %i (告警后自动退出)
 [Service]
 Type=oneshot
 User=quant
-WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 # %N=失败单元全名 %i=实例名；走通知中心（站内铃铛+外部推送），失败仅记 journal
-ExecStart=/data/websites/snailtrail.cc/quant/shared/venv/bin/python -m src.strategy_runner.alert_failed "%N"
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.strategy_runner.alert_failed "%N"

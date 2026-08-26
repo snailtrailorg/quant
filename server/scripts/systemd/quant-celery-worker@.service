@@ -6,10 +6,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=quant
-WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/data/websites/snailtrail.cc/quant/shared/venv/bin/celery -A src.scheduler worker -Q celery,risk,data,analysis --loglevel=info
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler worker -Q celery,risk,data,analysis --loglevel=info
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

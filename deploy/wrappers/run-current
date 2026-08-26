@@ -1,0 +1,15 @@
+#!/bin/bash
+# run-current —— 版本解析包装器（批3 v3.3 §4：钉版本入口，9 单元 ExecStart 统一形态）
+#
+# 语义：readlink 解析 server 符号链接 → cd 到真实 release 目录 → exec shared venv python。
+# 进程 cwd/sys.path 钉死在**启动时**的版本目录；切换后新重启=新版本，已跑进程=旧目录（不可变）。
+# 固定路径安装：/data/websites/snailtrail.cc/quant/bin/run-current（root:root 755，不经
+# server 链接自举——避免"切链接导致下次 run-current 自身变化"耦合）。
+# WorkingDirectory 约束见设计稿：单元必须指 shared（不得穿 server 链接——lazy import 会
+# 解析到新版本=同进程混合代码）。
+set -euo pipefail
+Q=/data/websites/snailtrail.cc/quant
+CUR=$(readlink -f "$Q/server")
+[ -d "$CUR" ] || { echo "run-current: server 链接解析失败（$Q/server）" >&2; exit 1; }
+cd "$CUR"
+exec "$Q/shared/venv/bin/python" "$@"

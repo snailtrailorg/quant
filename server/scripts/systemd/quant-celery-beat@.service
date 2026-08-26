@@ -6,11 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=quant
-WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QT_QPA_PLATFORM=offscreen
 ExecStartPre=/usr/bin/mkdir -p /data/websites/snailtrail.cc/quant/shared/runtime
-ExecStart=/data/websites/snailtrail.cc/quant/shared/venv/bin/celery -A src.scheduler beat --loglevel=info --schedule /data/websites/snailtrail.cc/quant/shared/runtime/celerybeat-schedule
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler beat --loglevel=info --schedule /data/websites/snailtrail.cc/quant/shared/runtime/celerybeat-schedule
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

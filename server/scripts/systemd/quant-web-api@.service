@@ -6,14 +6,14 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=quant
-WorkingDirectory=/data/websites/snailtrail.cc/quant/server
+WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QT_QPA_PLATFORM=offscreen
 # DB 优化防线（2026-08-21，18 号 §1.7）：web 进程 SQL 10s 超时（同步族默认 60s）——
 # 端点不挂长查询；idle_in_tx 60s（web 快速进出，防读块悬挂）
 Environment=QUANT_DB_STMT_TIMEOUT_MS=10000
 Environment=QUANT_DB_IDLE_TX_TIMEOUT_MS=60000
-ExecStart=/data/websites/snailtrail.cc/quant/shared/venv/bin/uvicorn src.web_api.main:app --host 127.0.0.1 --port 8001
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m uvicorn src.web_api.main:app --host 127.0.0.1 --port 8001
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
