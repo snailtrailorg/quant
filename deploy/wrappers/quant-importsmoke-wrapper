@@ -4,7 +4,7 @@
 # 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-importsmoke-wrapper。
 #
 # 动作（设计稿 §3 阶段 3，验证矩阵"代码"行）:
-#   1) py_compile 全量（staged 树内所有 .py，排 __pycache__）
+#   1) ast.parse 语法全量（纯读零写入——staged 属 deploy、wrapper 以 quant 跑，写 pyc 必拒）
 #   2) 六入口导入冒烟——与生产 ExecStart 入口集一致（web/celery/beat+risk 同源/feishu/hub/live-task）
 #   带 shared/.env 跑（导入期配置副作用与线上一致；.env 属 quant 600，本 wrapper 以 quant 跑）
 #
@@ -31,17 +31,37 @@ REL="$ROOT/releases/$release_id"
 PY="$ROOT/shared/venv/bin/python"
 [ -x "$PY" ] || { echo "✗ shared/venv 解释器不存在: $PY" >&2; exit 1; }
 
-# 1) py_compile 全量（语法层；排 __pycache__，staged 树内无 venv）
+# 1) 语法全量检查（ast.parse 纯读——2026-08-26 首次真机发布实锤：staged 属 deploy，
+#    本 wrapper 以 quant 跑，py_compile 写 __pycache__ 必 Permission denied；
+#    ast.parse 同等语法覆盖且零写入，版本树保持纯代码无 pyc 污染）
 cd "$REL"
-find . -name __pycache__ -prune -o -name '*.py' -print0 | xargs -0 -r "$PY" -m py_compile
+"$PY" -B - <<'EOF'
+import ast
+import pathlib
+import sys
 
-# 2) 六入口导入冒烟（带 shared/.env）
+bad = []
+for p in sorted(pathlib.Path(".").rglob("*.py")):
+    if "__pycache__" in p.parts:
+        continue
+    try:
+        ast.parse(p.read_text(encoding="utf-8"), filename=str(p))
+    except SyntaxError as exc:
+        bad.append(f"{p}: {exc}")
+if bad:
+    print("✗ 语法检查失败:", file=sys.stderr)
+    print("\n".join(bad), file=sys.stderr)
+    sys.exit(1)
+print("✓ 语法检查通过（ast.parse 纯读，零 pyc 写入）")
+EOF
+
+# 2) 六入口导入冒烟（带 shared/.env；-B 禁 pyc 写入——staged 只读面）
 set -a
 # shellcheck disable=SC1091
 [ -f "$ROOT/shared/.env" ] && . "$ROOT/shared/.env"
 set +a
 
-"$PY" - <<'EOF'
+"$PY" -B - <<'EOF'
 # 六入口与生产 ExecStart 集合一致（server/scripts/systemd/*.service 实测盘点）
 import importlib
 import sys
