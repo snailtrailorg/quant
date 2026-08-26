@@ -34,9 +34,9 @@ install -m 755 -o root -g root \
 install -m 755 -o quant -g quant "$SRC/quant-dbro" /usr/local/sbin/
 
 echo "== 5 bin/run-current + releases/（deploy 属主）=="
-mkdir -p "$Q/bin" "$Q/releases"
+mkdir -p "$Q/bin" "$Q/releases" "$Q/var"
 install -m 755 -o root -g root "$SRC/run-current" "$Q/bin/run-current"
-chown deploy:deploy "$Q/releases"
+chown deploy:deploy "$Q/releases" "$Q/var"   # var=部署状态区（指纹/freeze 快照）——3b-1 曾建为 quant 属主，此处归位
 
 echo "== 6 目标机前置（python3.11 已在=venv 同源；rsync assert）=="
 /usr/bin/python3.11 --version
