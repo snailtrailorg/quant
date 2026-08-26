@@ -36,7 +36,12 @@ install -m 755 -o quant -g quant "$SRC/quant-dbro" /usr/local/sbin/
 echo "== 5 bin/run-current + releases/（deploy 属主）=="
 mkdir -p "$Q/bin" "$Q/releases" "$Q/var"
 install -m 755 -o root -g root "$SRC/run-current" "$Q/bin/run-current"
-chown deploy:deploy "$Q/releases" "$Q/var"   # var=部署状态区（指纹/freeze 快照）——3b-1 曾建为 quant 属主，此处归位
+chown deploy:deploy "$Q/releases" "$Q/var"
+# 首版回滚锚（六跑实锤）：手工 init 版无 .deployed 标记——阶段 6-8 失败时回滚目标
+# 断言拒（"未经完整发布"），翻转后悬空。init 是合法已部署态，此处补标记。
+for r in "$Q"/releases/*; do
+  [ -d "$r" ] && touch "$r/.deployed"
+done   # var=部署状态区（指纹/freeze 快照）——3b-1 曾建为 quant 属主，此处归位
 
 echo "== 6 目标机前置（python3.11 已在=venv 同源；rsync assert）=="
 /usr/bin/python3.11 --version

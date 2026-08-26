@@ -10,7 +10,7 @@
 #
 # 严参校验:
 #   release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$；源目录必须存在且至少含一个 .service
-#   单元文件名逐一匹配 ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$（防夹带任意单元）
+#   单元文件名逐一匹配 ^quant-[a-z-]+(@[A-Za-z0-9_-]*)?\.service$（防夹带任意单元）
 #
 # 环境变量:
 #   QUANT_DEPLOY_ROOT —— 部署根（生产默认 /data/websites/snailtrail.cc/quant）
@@ -41,7 +41,7 @@ units=("$SRC"/*.service)
 
 for f in "${units[@]}"; do
   base=$(basename "$f")
-  if [[ ! "$base" =~ ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$ ]]; then
+  if [[ ! "$base" =~ ^quant-[a-z-]+(@[A-Za-z0-9_-]*)?\.service$ ]]; then
     echo "✗ 单元名非法（拒绝夹带）: $base" >&2
     exit 2
   fi
