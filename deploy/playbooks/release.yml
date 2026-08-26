@@ -17,11 +17,16 @@
   gather_facts: false
   environment: "{{ deploy_wrapper_env }}"
   vars:
-    ts: "{{ lookup('pipe', 'date +%Y%m%d%H%M') }}"
-    git_sha: "{{ lookup('pipe', 'git -C ' + (playbook_dir | dirname | dirname) + ' rev-parse --short=7 HEAD') }}"
-    release_id: "{{ deploy_release_id | default(ts ~ '-' ~ git_sha) }}"
+    # 2026-08-26 五跑实锤：vars 段的 lookup 惰性求值——play 跨分钟时 ts 每次引用重算，
+    # staged 目录（1608）与 wrapper 参数（1609）错位 → 阶段 5 "requirements 不存在"。
+    # 修：首任务 set_fact 一次性物化（此后全 play 引用同一值）。
+    release_id_raw: "{{ deploy_release_id | default(lookup('pipe', 'date +%Y%m%d%H%M') ~ '-' ~ lookup('pipe', 'git -C ' + (playbook_dir | dirname | dirname) + ' rev-parse --short=7 HEAD')) }}"
 
   pre_tasks:
+    - name: release_id 一次性物化（防 lookup 惰性跨分钟重算——staged/参数错位根修）
+      ansible.builtin.set_fact:
+        release_id: "{{ release_id_raw }}"
+
     - name: preflight —— release_id 格式断言（与 wrapper 同款正则）
       ansible.builtin.assert:
         that: release_id is match(deploy_release_id_regex)
