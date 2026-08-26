@@ -56,12 +56,21 @@ print("✓ 语法检查通过（ast.parse 纯读，零 pyc 写入）")
 EOF
 
 # 2) 六入口导入冒烟（带 shared/.env；-B 禁 pyc 写入——staged 只读面）
+#
+# 2026-08-26 二修：导入期相对路径副作用（如 makedirs static/avatars）落在 cwd——
+# 生产 cwd=quant 属主 server/ 无事，冒烟 cwd 若是 deploy 属主 staged/ 则 EACCES。
+# 通用解：cwd 换 mktemp 沙盒（副作用无害落地、即弃），PYTHONPATH 指 staged——
+# 模块解析仍全量来自 staged，导入语义与生产一致。
 set -a
 # shellcheck disable=SC1091
 [ -f "$ROOT/shared/.env" ] && . "$ROOT/shared/.env"
 set +a
 
-"$PY" -B - <<'EOF'
+SMOKE_CWD=$(mktemp -d /tmp/quant-smoke.XXXXXX)
+trap 'rm -rf "$SMOKE_CWD"' EXIT
+cd "$SMOKE_CWD"
+
+PYTHONPATH="$REL${PYTHONPATH:+:$PYTHONPATH}" "$PY" -B - <<'EOF'
 # 六入口与生产 ExecStart 集合一致（server/scripts/systemd/*.service 实测盘点）
 import importlib
 import sys
