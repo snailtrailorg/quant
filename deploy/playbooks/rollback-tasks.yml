@@ -71,26 +71,28 @@
     loop_var: wave
   when: wave.units | default([]) | length > 0
 
-- name: 回滚复验 —— 版本收敛断言（全部 postverify 单元收敛于回滚目标）
+- name: 回滚复验 —— 版本收敛断言（quant-pinned 特权通道；与 postverify/GC 共用——双盲 P1）
   ansible.builtin.shell: |
     set -u
     root='{{ deploy_root }}'
     link=$(readlink -f "$root/server")
     rc=0
+    # ① 每单元在跑（MainPID 非空；show 为只读查询，deploy 可直查）
     for unit in {% for u in deploy_postverify_units %}'{{ u }}' {% endfor %}; do
       pid=$(systemctl {{ deploy_systemctl_extra }} show -p MainPID --value "$unit" 2>/dev/null || true)
       if [ -z "$pid" ] || [ "$pid" = "0" ]; then
-        echo "✗ $unit MainPID 为空（未运行）"; rc=1; continue
-      fi
-      if ! cwd=$({{ deploy_proc_cwd_read }} "/proc/$pid/cwd" 2>/dev/null); then
-        echo "✗ $unit /proc/$pid/cwd 不可读"; rc=1; continue
-      fi
-      if [ "$cwd" != "$link" ]; then
-        echo "✗ $unit cwd=$cwd ≠ server=$link"; rc=1
-      else
-        echo "✓ $unit 收敛于 $link"
+        echo "✗ $unit MainPID 为空（未运行）"; rc=1
       fi
     done
+    # ② 被钉集合须恰为 {回滚目标}（v3.3: quant-pinned——与 release.yml postverify/GC 同通道）
+    pinned=$({{ quant_pinned_cmd }} 2>/dev/null || true)
+    pinned_flat=$(printf '%s\n' "$pinned" | sort -u | paste -sd, -)
+    if [ "$pinned_flat" != "{{ rollback_target | default('') }}" ]; then
+      echo "✗ 回滚后未收敛: 被钉集合=[$pinned_flat] ≠ 目标 [{{ rollback_target | default('(空)') }}]"
+      rc=1
+    else
+      echo "✓ 全部 quant-* 进程收敛于 $link"
+    fi
     exit $rc
   changed_when: false
 

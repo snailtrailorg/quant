@@ -8,6 +8,9 @@
 #   5 中断残留         孤儿 staged 顺带 GC（+GC 逻辑）                 期望零
 #   6 单元变更         quant-install-units 通道+受影响波 stabilize     期望零+新单元落位
 #
+#   附加行: A0 交易窗口闸 / W install-units 负例 / D quant-dbro 负例（v3.3）/
+#           P quant-pinned 负例+假 proc 树（v3.3）——均为 wrapper 级直接断言
+#
 # 每场景断言 ansible-playbook 退出码（非零场景必须非零、成功场景必须零）；
 # 末尾汇总表，任一不符则整体非零（CI 门不吃假绿——设计稿退出码语义）。
 #
@@ -107,6 +110,57 @@ if [ $W1 -eq 2 ] && [ $W2 -eq 2 ]; then
   scenario_row W "wrapper负例" "exit 2" "$W1/$W2" "PASS（拒链接+拒缺User）"
 else
   scenario_row W "wrapper负例" "exit 2" "$W1/$W2" "FAIL"
+  FAILED=$((FAILED + 1))
+fi
+
+# ---------- 附加断言: quant-dbro 负例（v3.3——越权 which/多余参数/沙箱 SQL 错误非零） ----------
+# 沙箱模式 QUANT_DBRO_SQL_DIR 道具: <which>.out=stdout，<which>.err=模拟 DB 错误；
+# 每个场景的 preflight 已顺带回归 wrapper 正通道（sandbox group_vars source=db 走空清单道具）
+echo "[D] quant-dbro 负例（严参校验 + DB 错误非零退出）"
+DBRO=$DEPLOY/wrappers/quant-dbro
+DT=$(mktemp -d)
+"$DBRO" >/dev/null 2>&1; D1=$?                                # 负例1: 缺参
+"$DBRO" drop >/dev/null 2>&1; D2=$?                           # 负例2: 越权 which
+"$DBRO" live extra >/dev/null 2>&1; D3=$?                     # 负例3: 多余参数
+printf 'ERROR: relation "live_task" does not exist\n' > "$DT/live.err"
+QUANT_DBRO_SQL_DIR=$DT "$DBRO" live >/dev/null 2>&1; D4=$?    # 负例4: 沙箱 SQL 错误→非零
+rm -f "$DT/live.err"
+printf 'quant-live-task@8.service\n' > "$DT/live.out"
+QUANT_DBRO_SQL_DIR=$DT "$DBRO" live >"$DT/got" 2>/dev/null; D5=$?
+grep -qx 'quant-live-task@8.service' "$DT/got" || D5=99       # 正例回读: 单元名每行一个
+rm -rf "$DT"
+if [ $D1 -eq 2 ] && [ $D2 -eq 2 ] && [ $D3 -eq 2 ] && [ $D4 -ne 0 ] && [ $D4 -ne 2 ] && [ $D5 -eq 0 ]; then
+  scenario_row D "dbro负例" "2/2/2/非零" "$D1/$D2/$D3/$D4" "PASS（严参+错误非零+正例回读）"
+else
+  scenario_row D "dbro负例" "2/2/2/非零" "$D1/$D2/$D3/$D4" "FAIL（D5=$D5）"
+  FAILED=$((FAILED + 1))
+fi
+
+# ---------- 附加断言: quant-pinned 负例 + 假 proc 树确定性（v3.3） ----------
+# QUANT_PINNED_CWD_DIR 道具: <dir>/<pid>/cwd 形态假树——去重(101/102 同版)/跳过(103 dangling)/
+# 过滤(104 非 releases 形态)；严参（多余参数/QUANT_SVC_OPTS 白名单外均 exit 2）
+echo "[P] quant-pinned 负例与假 proc 树探测"
+PIN=$DEPLOY/wrappers/quant-pinned
+PT=$(mktemp -d)
+RA=$PT/releases/202608260100-0000aaa
+mkdir -p "$PT"/101 "$PT"/102 "$PT"/103 "$PT"/104 "$RA" "$PT/shared"
+ln -s "$RA" "$PT/101/cwd"                    # 钉 release（去重样本一）
+ln -s "$RA" "$PT/102/cwd"                    # 钉同一 release（去重样本二）
+ln -s /nonexistent-sbx-probe "$PT/103/cwd"   # dangling 链接 → 无权读/消失类跳过
+ln -s "$PT/shared" "$PT/104/cwd"             # 非 */releases/* 形态 → 过滤
+RB=$PT/releases/202608260200-0000bbb
+mkdir -p "$RB" "$PT"/105
+ln -s "$RB" "$PT/105/cwd"                     # 双版本被钉（B7：postverify 终判正例的输入形态）
+QUANT_PINNED_CWD_DIR=$PT "$PIN" >"$PT/got" 2>/dev/null; P1=$?
+"$PIN" unexpected >/dev/null 2>&1; P2=$?                            # 负例: 多余参数
+QUANT_SVC_OPTS=--root "$PIN" >/dev/null 2>&1; P3=$?                 # 负例: QUANT_SVC_OPTS 白名单外
+P_OK=0
+[ "$(cat "$PT/got" | tr '\n' ',')" = "202608260100-0000aaa,202608260200-0000bbb," ] || P_OK=1  # 去重+过滤+双版本两行
+rm -rf "$PT"
+if [ $P1 -eq 0 ] && [ $P2 -eq 2 ] && [ $P3 -eq 2 ] && [ $P_OK -eq 0 ]; then
+  scenario_row P "pinned探测" "0/2/2" "$P1/$P2/$P3" "PASS（去重+跳过+过滤+严参）"
+else
+  scenario_row P "pinned探测" "0/2/2" "$P1/$P2/$P3" "FAIL（确定性=$P_OK）"
   FAILED=$((FAILED + 1))
 fi
 

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# quant-pinned —— 被钉 release 清单探测通道（sudoers QUANT_DEPLOY_ROOT，root 属主）
+#
+# 属主约束（3b bootstrap 落实）: root:root 755，部署于 /usr/local/sbin/quant-pinned。
+#   只读特权通道: deploy 用户无权读 quant 进程的 /proc/<pid>/cwd（内核 ptrace 保护，
+#   同 UID 才可读）——postverify 版本收敛断言与 GC 钉住探测**共用本通道**（双盲 P1
+#   共用要求: 两处各走各的通道会出现"收敛判过、GC 却删掉在跑版本"的劈叉）。
+#
+# 动作（设计稿 §2 v3.3）:
+#   枚举 quant-* 服务单元（systemctl list-units + show MainPID）→ 读 /proc/<pid>/cwd
+#   → 过滤 */releases/<release_id> 形态 → sort -u 去重输出被钉 release_id 清单（每行一个）。
+#   无进程（MainPID=0）/ 无权读 / 进程已消失: 跳过——探测语义，不因跳过而非零退出。
+#
+# 严参校验:
+#   不收任何参数（本通道无参化设计——sudoers `*` 吃空格，夹带参数即拒）
+#
+# 环境变量:
+#   QUANT_SVC_OPTS       —— systemctl 附加选项（沙箱注入 --user；仅允许空或 --user，
+#                           同 quant-svc 白名单展开——生产 sudoers env_reset 清空）
+#   QUANT_PINNED_CWD_DIR —— 沙箱模式: 假 proc 树根（<dir>/<pid>/cwd 形态），跳过
+#                           systemctl 枚举直接扫假树，供套件确定性测试（去重/跳过/过滤）；
+#                           生产为空走真 systemctl + 真 /proc。
+set -euo pipefail
+
+[ $# -eq 0 ] || { echo "用法: quant-pinned（不收参数）" >&2; exit 2; }
+
+# QUANT_SVC_OPTS 白名单展开（同 quant-svc: 仅空或 --user，防环境注入拼进 systemctl）
+svc_opts=${QUANT_SVC_OPTS:-}
+case "$svc_opts" in
+  ""|--user) ;;
+  *) echo "✗ QUANT_SVC_OPTS 非法（仅允许空或 --user）: $svc_opts" >&2; exit 2 ;;
+esac
+
+# 候选收集: 输出所有 */releases/* 形态 cwd 的 basename（未去重未过滤——终段统一处理）
+collect() {
+  local d unit pid w
+  if [ -n "${QUANT_PINNED_CWD_DIR:-}" ]; then
+    # 沙箱假 proc 树: <dir>/<pid>/cwd（确定性道具，不依赖真单元/真进程）
+    for d in "$QUANT_PINNED_CWD_DIR"/[0-9]*; do
+      [ -d "$d" ] || continue
+      w=$(readlink "$d/cwd" 2>/dev/null || true)
+      case "$w" in */releases/*) printf '%s\n' "${w##*/}" ;; esac
+    done
+  else
+    # 真通道: quant-* 服务单元 → MainPID → /proc/<pid>/cwd（无进程/无权读/消失均跳过）
+    while IFS= read -r unit; do
+      [ -n "$unit" ] || continue
+      pid=$(systemctl $svc_opts show -p MainPID --value "$unit" 2>/dev/null || true)
+      [ -n "$pid" ] && [ "$pid" != "0" ] || continue
+      w=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+      case "$w" in */releases/*) printf '%s\n' "${w##*/}" ;; esac
+    done < <(systemctl $svc_opts list-units --type=service --all --no-legend --plain 'quant-*' 2>/dev/null | awk '{print $1}')
+  fi
+}
+
+# 终段: release_id 形态过滤（与全族 wrapper 同款正则——非此形态的 cwd 不算"钉 release"）
+#   + sort -u 去重。grep 无命中 rc=1，|| true 吞掉（空清单是合法结果——探测不因此非零）。
+pinned=$(collect 2>/dev/null | grep -E '^[0-9]{12}-[a-f0-9]{7,}$' | sort -u || true)
+[ -n "$pinned" ] && printf '%s\n' "$pinned"
+exit 0

@@ -9,9 +9,11 @@ deploy_sudo_quant: "sudo -u quant"   # deploy ALL=(quant) NOPASSWD: QUANT_DEPLOY
 quant_svc_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-svc') | trim }}"
 quant_flip_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-server') | trim }}"
 quant_install_units_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-install-units') | trim }}"
+quant_pinned_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pinned') | trim }}"   # v3.3: 被钉 release 探测（root 特权读 /proc/cwd）
 quant_alembic_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-alembic-wrapper') | trim }}"
 quant_importsmoke_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-importsmoke-wrapper') | trim }}"
 quant_pip_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pip-wrapper') | trim }}"
+quant_dbro_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-dbro') | trim }}"      # v3.3: 波次实例 DB 真相源（quant 属主 wrapper，PG peer 免密）
 
 # 生产 wrapper 走内置默认路径，无需环境注入
 deploy_wrapper_env: {}
@@ -42,15 +44,14 @@ deploy_task_units_source: db         # 波次 task/feishu 实例清单真相源 
 deploy_task_units_static: []
 deploy_task_units_live: []            # DB 真相源采集后覆写（live_task running）
 deploy_task_units_feishu: []          # DB 真相源采集后覆写（im_bot_config enabled）
-# 3b 接线的 quant 只读查询通道（.env deploy 不可读，须 wrapper 化后替换 $QUANT_DB_RO 段）——空则 preflight 拒。
+# v3.3 接线: quant 只读查询走 quant-dbro wrapper（quant 属主，DB 连接封装其内走 PG peer
+# 免密——.env deploy 不可读的解法；替代 v3.2 的 $QUANT_DB_RO 环境变量通道）。
+# 固定 SQL 与单元名拼装见 wrappers/quant-dbro；空/未装位则 preflight 拒。
 # 单元名按 server 实况：quant-live-task@{id}（trading.py）/ quant-feishu-bot@{id}（im_bots.py）；
 # feishu 波次真相源= im_bot_config（19 号 IM 统一接入后，feishu_config 已并入，provider 过滤）
-deploy_task_units_db_cmd: >-
-  $QUANT_DB_RO -c "SELECT 'quant-live-task@' || id || '.service' FROM live_task WHERE status = 'running'"
-deploy_task_units_db_cmd_feishu: >-
-  $QUANT_DB_RO -c "SELECT 'quant-feishu-bot@' || id || '.service' FROM im_bot_config WHERE enabled AND provider = 'feishu'"
-postverify_healthz_release: false    # 生产 healthz 无 release 字段（版本收敛由 /proc cwd 断言承载）
+deploy_task_units_db_cmd: "{{ quant_dbro_cmd }} live"
+deploy_task_units_db_cmd_feishu: "{{ quant_dbro_cmd }} feishu"
+postverify_healthz_release: false    # 生产 healthz 无 release 字段（版本收敛由 quant-pinned 通道承载）
 deploy_hub_hb_mode: redis            # quant:hb:md-hub：gen+8 字段（3b 首跑验证）
 deploy_hub_hb_redis_key: "quant:hb:md-hub"
 deploy_hub_hb_redis_url: "redis://127.0.0.1:6379/4"   # 与 key 同源参数化（3b 按服务器 Valkey 实况校正）
-deploy_proc_cwd_read: "readlink"     # 3b：deploy 用户读 quant 进程 /proc/cwd 需特权通道，届时落实

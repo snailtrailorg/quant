@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# quant-dbro —— 波次实例 DB 真相源只读查询通道（sudoers QUANT_DEPLOY_QUANT，以 quant 跑）
+#
+# 属主约束（3b bootstrap 落实）: quant:quant 755，部署于 /usr/local/sbin/quant-dbro。
+#   quant 属主（非 root）原因: 本体经 (quant) sudoers 以 quant 执行，DB 连接（PG peer
+#   免密）封装在 quant 侧——deploy 不可读 shared/.env，这正是本 wrapper 存在的理由
+#   （替代 v3.2 的 deploy_task_units_db_cmd 通道：$QUANT_DB_RO 环境变量需 deploy 侧
+#   持有连串，与 .env 属 quant 600 deploy 不可读矛盾——连接下沉到 wrapper 才解得开）。
+#
+# 动作（设计稿 §2 v3.3 / §3 波次真相源采集）:
+#   quant-dbro live    → live_task status='running' 的单元名清单（task 波）
+#   quant-dbro feishu  → im_bot_config enabled 且 provider='feishu' 的单元名清单（feishu 波）
+#   （0051 后 feishu_config 已并入 im_bot_config——19 号 IM 统一接入，provider 过滤）
+#   固定 SQL 内封不收外部 SQL；输出单元名每行一个（psql -tA）；DB 错误非零退出。
+#
+# 严参校验:
+#   which 白名单 live|feishu；恰一个参数（sudoers `*` 吃空格——多余参数即拒，防夹带）
+#
+# 环境变量:
+#   QUANT_DBRO_SQL_DIR —— 沙箱模式: 指向假 SQL 输出文件目录（<which>.out=stdout 道具；
+#                         <which>.err 在位=模拟 DB 错误非零退出）供套件测试。
+#                         生产为空（sudoers env_reset 亦会清空）走下方真 psql。
+set -euo pipefail
+
+usage() { echo "用法: quant-dbro <which>  which ∈ live|feishu" >&2; exit 2; }
+
+[ $# -eq 1 ] || usage
+which_arg=$1
+
+case "$which_arg" in
+  live|feishu) ;;
+  *) echo "✗ which 不在白名单（须 live|feishu）: $which_arg" >&2; exit 2 ;;
+esac
+
+# 固定 SQL（单元名拼装与 server/src 实况一致: trading.py quant-live-task@{tid} /
+# im_bots.py quant-feishu-bot@{bid}；live_task.status 有索引 ix_live_task_status）
+case "$which_arg" in
+  live)
+    sql="SELECT 'quant-live-task@' || id || '.service' FROM live_task WHERE status = 'running'"
+    ;;
+  feishu)
+    sql="SELECT 'quant-feishu-bot@' || id || '.service' FROM im_bot_config WHERE enabled AND provider = 'feishu'"
+    ;;
+esac
+
+# 沙箱模式: 假 SQL 输出文件（套件负例/回归道具；生产 QUANT_DBRO_SQL_DIR 为空不走此分支）
+if [ -n "${QUANT_DBRO_SQL_DIR:-}" ]; then
+  sbx_dir=$QUANT_DBRO_SQL_DIR
+  if [ -f "$sbx_dir/$which_arg.err" ]; then
+    echo "✗ 沙箱模拟 DB 错误（$sbx_dir/$which_arg.err 在位）:" >&2
+    cat "$sbx_dir/$which_arg.err" >&2
+    exit 1
+  fi
+  [ -f "$sbx_dir/$which_arg.out" ] || { echo "✗ 沙箱假 SQL 输出缺失: $sbx_dir/$which_arg.out" >&2; exit 1; }
+  cat "$sbx_dir/$which_arg.out"
+  exit 0
+fi
+
+# 真 psql: 以 quant OS 用户走 PG peer 免密（unix socket，无连串无密码——连接封装于此）。
+#   -tA 每行一个值无表头；ON_ERROR_STOP 保证 SQL/DB 错误非零退出（psql 缺省对 -c 错误
+#   不保证非零）。DB 用户/库名与 server/.env QUANT_DB_URL 同源（quant@quant），
+#   3b-2 首跑按服务器实况核对 socket 可达性。
+exec psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc "$sql"

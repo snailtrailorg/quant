@@ -1,4 +1,4 @@
-# release.yml —— 工件化发布主流程（批3设计稿 v3.2 §3 严格落地）
+# release.yml —— 工件化发布主流程（批3设计稿 v3.3 §3 严格落地）
 #
 # 用法（从 deploy/ 目录）:
 #   沙箱: .venv/bin/ansible-playbook playbooks/release.yml -i inventory/sandbox.yml
@@ -6,6 +6,7 @@
 #
 # 结构（设计稿 §3）:
 #   pre_tasks  —— preflight 断言（交易窗口/磁盘/rsync/四切片指纹采集）+ release_id 校验
+#                 + 特权 wrapper 在位（v3.3: quant-dbro/quant-pinned）
 #   阶段 2-5   —— block（未切换）: synchronize/导入冒烟/DDL 门/pip/迁移；rescue=清 staged+fail
 #   阶段 6-8   —— block（已切换）: flip/单元安装/波次/postverify；rescue=include rollback+fail
 #   post_tasks —— 仅成功路径可达: 已切换标记/freeze 滚动/GC（孤儿 staged+保留 N=5）
@@ -113,14 +114,31 @@
         prev_release_id: "{{ (prev_fp.stdout_lines[0] | basename) if prev_fp.stdout_lines[0] != '__MISSING__' else '' }}"
         prev_slice_fp: "{{ dict(prev_fp.stdout_lines[1:] | select('search', '=') | map('split', '=')) }}"
 
-    - name: preflight —— 波次实例 DB 真相源接线检查（3b 落实；live + feishu 双通道）
+    - name: preflight —— 波次实例 DB 真相源接线检查（v3.3 quant-dbro wrapper 通道；live + feishu 双通道）
       ansible.builtin.assert:
         that:
           - deploy_task_units_source != 'db' or (deploy_task_units_db_cmd | default('')) | length > 0
           - deploy_task_units_source != 'db' or (deploy_task_units_db_cmd_feishu | default('')) | length > 0
         msg: >-
-          deploy_task_units_source=db 但 DB 查询命令未接线（3b：quant 只读通道——
+          deploy_task_units_source=db 但 DB 查询命令未接线（v3.3: quant-dbro wrapper——
           live_task status='running' / im_bot_config enabled，两 cmd 均须非空）
+
+    - name: preflight —— 特权 wrapper 在位检查（v3.3 quant-dbro/quant-pinned 存在且可执行）
+      ansible.builtin.shell: |
+        set -u
+        rc=0
+        for w in quant-dbro quant-pinned; do
+          p='{{ deploy_wrapper_dir }}/'"$w"
+          if [ ! -x "$p" ]; then
+            echo "✗ wrapper 不存在或不可执行: $p（prod 由 3b-2 bootstrap 装位 /usr/local/sbin；沙箱为仓库 wrappers/）" >&2
+            rc=1
+          fi
+        done
+        exit $rc
+      register: wrapper_probe
+      failed_when: wrapper_probe.rc != 0
+      changed_when: false
+      check_mode: false          # 只读探针：--check 下也须真跑（缺位即拒，不吃假绿）
 
     - name: preflight —— 波次实例清单采集（DB 真相源；live_task running；不收 active 单元——幽灵前科）
       ansible.builtin.shell: "{{ deploy_task_units_db_cmd }}"
@@ -363,27 +381,34 @@
           when: deploy_hub_hb_mode == 'redis'
           changed_when: false
 
-        - name: 阶段 8 —— 版本收敛断言（readlink -f server == /proc/<MainPID>/cwd；终判——降级续行的旧版进程在此 fail）
+        - name: 阶段 8 —— 版本收敛断言（quant-pinned 特权通道；终判——降级续行的旧版进程在此 fail）
           ansible.builtin.shell: |
             set -u
             root='{{ deploy_root }}'
             link=$(readlink -f "$root/server")
             rc=0
+            # ① server 指向即本次 release（flip 正确性；readlink -f 后无尾 /）
+            if [ "$(basename "$link")" != "{{ release_id }}" ]; then
+              echo "✗ server 指向 $link ≠ 本次 {{ release_id }}"; rc=1
+            fi
+            # ② 每单元在跑（MainPID 非空——dwell 之外的终判兜底；show 为只读查询，deploy 可直查）
             for unit in {% for u in deploy_postverify_units %}'{{ u }}' {% endfor %}; do
               pid=$(systemctl {{ deploy_systemctl_extra }} show -p MainPID --value "$unit" 2>/dev/null || true)
               if [ -z "$pid" ] || [ "$pid" = "0" ]; then
-                echo "✗ $unit MainPID 为空（未运行）"; rc=1; continue
-              fi
-              if ! cwd=$({{ deploy_proc_cwd_read }} "/proc/$pid/cwd" 2>/dev/null); then
-                echo "✗ $unit /proc/$pid/cwd 不可读"; rc=1; continue
-              fi
-              # 规范路径比较（设计稿实现注意：readlink -f 后无尾 /，进程实际 cwd 亦无尾 /，两侧均为规范路径）
-              if [ "$cwd" != "$link" ]; then
-                echo "✗ $unit cwd=$cwd ≠ server=$link（钉旧版进程）"; rc=1
-              else
-                echo "✓ $unit 收敛于 $link"
+                echo "✗ $unit MainPID 为空（未运行）"; rc=1
               fi
             done
+            # ③ 特权通道收敛终判（v3.3）: quant-pinned 输出去重被钉 release_id 清单
+            #    （与 GC 钉住探测共用——双盲 P1 共用要求），被钉集合须恰为 {本次 release_id}——
+            #    任何旧版进程/空集合（无进程跑新版）均 fail → 回滚
+            pinned=$({{ quant_pinned_cmd }} 2>/dev/null || true)
+            pinned_flat=$(printf '%s\n' "$pinned" | sort -u | paste -sd, -)
+            if [ "$pinned_flat" != "{{ release_id }}" ]; then
+              echo "✗ 版本未收敛: 被钉集合=[$pinned_flat] ≠ 本次 [{{ release_id }}]（钉旧版进程或无新版进程）"
+              rc=1
+            else
+              echo "✓ 全部 quant-* 进程收敛于 $link"
+            fi
             exit $rc
           changed_when: false
 
@@ -427,21 +452,19 @@
         mode: "0644"
       when: freeze_snap.stat.exists | default(false)
 
-    - name: 收尾 —— GC（孤儿 staged 清理 + 旧版按字典序保留 N={{ deploy_keep_releases }}；跳过 server 指向项与 /proc 钉住项）
+    - name: 收尾 —— GC（孤儿 staged 清理 + 旧版按字典序保留 N={{ deploy_keep_releases }}；跳过 server 指向项与被钉项）
       ansible.builtin.shell: |
         set -u
         rel='{{ deploy_root }}/releases'
         cur=$(readlink -f '{{ deploy_root }}/server' 2>/dev/null || true)
         [ -n "$cur" ] || { echo "（无 server 指向，跳过 GC）"; exit 0; }
-        # /proc 钉住项：任何进程 cwd 指向的 release（清理竞态防护——设计稿验收标准 1）
-        # 双盲审修补: 与 postverify 同通道（deploy_proc_cwd_read）——生产换特权读取通道时两处一致生效
-        pinned=""
-        for d in /proc/[0-9]*; do
-          w=$({{ deploy_proc_cwd_read }} "$d/cwd" 2>/dev/null || true)
-          case "$w" in
-            "$rel"/*) pinned="$pinned ${w#"$rel"/}" ;;
-          esac
-        done
+        # 被钉项：quant-pinned 特权通道（v3.3——与 postverify 版本收敛断言共用，双盲 P1 共用要求；
+        # v3.2 为 deploy_proc_cwd_read 直扫 /proc，prod deploy 用户无权读 quant 进程 cwd）
+        # 双盲 P2-B2：通道故障（非零）跳过本轮 GC 并告警——不因探测失败把被钉版当孤儿删
+        if ! pinned=$({{ quant_pinned_cmd }} 2>/dev/null); then
+          echo "（quant-pinned 通道故障，本轮 GC 跳过——人工核查后下轮再清）"; exit 0
+        fi
+        pinned=$(printf '%s\n' "$pinned" | tr '\n' ' ')
         is_pinned() { case " $pinned " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
         # 1) 孤儿 staged（无 .deployed 标记=从未切换成功的中断残留，下次部署顺带 GC）
         for d in "$rel"/*/; do

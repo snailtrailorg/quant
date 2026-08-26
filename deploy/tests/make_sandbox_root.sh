@@ -39,6 +39,12 @@ systemctl --user reset-failed 'quant-sbx-*' 2>/dev/null || true
 rm -rf "$SBX"
 mkdir -p "$ROOT/bin" "$ROOT/releases" "$ROOT/shared/runtime" "$ROOT/var" "$STAGE"
 
+# --- 1b) dbro 假 SQL 输出道具（v3.3 quant-dbro 沙箱模式；空清单=波次 task/feishu 与静态空等值，
+#         每个场景顺带回归 wrapper 通道接线；错误注入道具由 run_scenarios.sh 临时目录自建） ---
+mkdir -p "$SBX/dbro"
+: > "$SBX/dbro/live.out"
+: > "$SBX/dbro/feishu.out"
+
 # --- 2) staging 基线（__SBX_ROOT__ 占位符替换为实际沙箱根） ---
 cp -a "$FIX/." "$STAGE/"
 grep -rl '__SBX_ROOT__' "$STAGE" | while IFS= read -r f; do

@@ -96,8 +96,8 @@
             group: quant
             mode: "0600"
 
-        # ---------- wrapper 族安装（root:root 755——白名单命令=deploy 不可写） ----------
-        - name: 【3b】wrapper 族安装 → /usr/local/sbin（root:root 755；改 wrapper 内容=提权）
+        # ---------- wrapper 族安装（白名单命令=deploy 不可写——改 wrapper 内容=提权） ----------
+        - name: 【3b】wrapper 族安装 → /usr/local/sbin（root:root 755；含 v3.3 quant-pinned 特权读通道）
           ansible.builtin.copy:
             src: "{{ playbook_dir }}/../wrappers/{{ item }}"
             dest: "/usr/local/sbin/{{ item }}"
@@ -108,9 +108,19 @@
             - quant-svc
             - quant-flip-server
             - quant-install-units
+            - quant-pinned          # v3.3: 被钉 release 探测（root 属主——/proc/<pid>/cwd 特权读）
             - quant-alembic-wrapper
             - quant-importsmoke-wrapper
             - quant-pip-wrapper
+
+        - name: 【3b】quant-dbro 安装 → /usr/local/sbin（quant:quant 755——v3.3 唯一非 root 属主 wrapper：
+                     本体经 (quant) sudoers 以 quant 跑，DB 连接封装其内走 PG peer 免密）
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../wrappers/quant-dbro"
+            dest: /usr/local/sbin/quant-dbro
+            owner: quant
+            group: quant
+            mode: "0755"
 
         - name: 【3b】run-current 安装 → {{ deploy_root }}/bin/（固定路径，不经 server 链接自举——设计稿 §4）
           ansible.builtin.copy:

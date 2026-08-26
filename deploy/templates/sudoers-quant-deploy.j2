@@ -1,4 +1,6 @@
-# 量化平台 deploy 用户 sudo 白名单（批3设计稿 §2 规格，2026-08-26 v3.2）
+Defaults env_reset
+# 防御性显式声明（双盲 P2）：沙箱 env 通道安全性依赖 env_reset，不赌宿主缺省
+# 量化平台 deploy 用户 sudo 白名单（批3设计稿 §2 规格，2026-08-26 v3.3）
 #
 # 语法红线（改前必读）:
 #   - sudoers 无 `|` 交替符——逐动词逐行
@@ -6,11 +8,14 @@
 #     `systemctl restart quant-web sshd` 会整行匹配 `quant-*` = 任意 unit DoS 面）
 #   - 全部白名单命令 = root/quant 属主、deploy 不可写的 wrapper 脚本（改 wrapper 内容=提权）
 #   - wrapper 严参校验: release_id ^\d{12}-[a-f0-9]{7,}$ 且限定 releases/ 下；
-#     unit ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$
-Cmnd_Alias QUANT_DEPLOY_ROOT = /usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-install-units
+#     unit ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$；which ∈ live|feishu（quant-dbro）
+#   - quant-dbro 为 quant 属主（唯一例外: 本体即以 quant 跑，DB 连接封装其内走 PG peer 免密）
+Cmnd_Alias QUANT_DEPLOY_ROOT = /usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-install-units, \
+                               /usr/local/sbin/quant-pinned
 Cmnd_Alias QUANT_DEPLOY_SYS  = /usr/local/sbin/quant-svc
 Cmnd_Alias QUANT_DEPLOY_QUANT = /usr/local/sbin/quant-alembic-wrapper, \
                                 /usr/local/sbin/quant-importsmoke-wrapper, \
-                                /usr/local/sbin/quant-pip-wrapper
+                                /usr/local/sbin/quant-pip-wrapper, \
+                                /usr/local/sbin/quant-dbro
 deploy ALL=(root)  NOPASSWD: QUANT_DEPLOY_ROOT, QUANT_DEPLOY_SYS
 deploy ALL=(quant) NOPASSWD: QUANT_DEPLOY_QUANT
