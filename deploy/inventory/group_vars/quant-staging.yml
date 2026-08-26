@@ -1,0 +1,19 @@
+# staging 彩排差异面（其余继承 all.yml 同产）
+deploy_root: /data/websites/snailtrail.cc/quant
+
+# 交易窗不强制（随时彩排）
+deploy_trading_window_enforce: false
+
+# 波次缩减：web（本地 PG/Valkey）+ celery（本地 broker）+ hub（XTP 指瞬时拒绝地址，
+# MD 挂着走 L2 退避——验管道不验行情）。feishu/live-task 连外网，不入彩排。
+deploy_task_units_source: static
+deploy_waves:
+  - name: web
+    units: ["quant-web-api@quant.service"]
+  - name: celery
+    units: ["quant-celery-worker@quant.service"]
+  - name: hub
+    units: ["quant-md-hub@quant.service"]
+
+# 真实心跳检查（本地 Valkey——hub 真进程写真 HASH）
+deploy_hub_hb_mode: redis

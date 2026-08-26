@@ -1,0 +1,10 @@
+# 本地保真彩排（2026-08-26）：与 quant-prod 同路径/同权限/同 sudoers，
+# 走真 ssh（deploy@127.0.0.1 同一密钥）——管道全链零分叉。
+quant-staging:
+  hosts:
+    staging.local:
+      ansible_host: 127.0.0.1
+      ansible_port: 22
+      ansible_user: deploy
+      ansible_ssh_private_key_file: ~/.ssh/quant_deploy_ed25519
+      ansible_python_interpreter: /usr/bin/python3
