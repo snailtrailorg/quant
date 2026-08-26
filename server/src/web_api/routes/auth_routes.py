@@ -23,7 +23,12 @@ logger = logging.getLogger("web_api")
 router = APIRouter(tags=["auth_routes"])
 
 # ——— 头像静态服务目录（同 main.py 保持一致） ———
-_AVATAR_DIR = _Path(__file__).resolve().parents[3] / "static" / "avatars"   # routes/ 深一级（盲审 C）
+# 2026-08-26 3b 修正：运行时数据位=shared 层（与 main.py 同源同默认；版本树内逐版丢失且 quant 无权写）。
+# 开发机回退：shared 位不存在（无 /data）时用代码树相对位，与 main.py 回退链同构。
+_AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR",
+                                   "/data/websites/snailtrail.cc/quant/shared/static/avatars"))
+if not _AVATAR_DIR.is_dir():
+    _AVATAR_DIR = _Path(__file__).resolve().parents[3] / "static" / "avatars"
 
 # P4 轻量限流（审计 B-服务层 OWASP API4）：内存滑窗（单进程足够——部署单 uvicorn worker），
 # login 10 次/分/IP（防爆破）、forgot 3 次/分/IP（防邮件轰炸）。重启清零可接受。

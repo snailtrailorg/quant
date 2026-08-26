@@ -32,10 +32,19 @@ from src.feishu_bot.router import router as feishu_router
 app.include_router(feishu_router)
 
 # --- 头像静态服务（批次C）：挂 /api/static/avatars -- nginx 已代理 /api/，零额外配置同源可达 ---
+# 2026-08-26 3b 修正：头像是运行时数据，位置=shared 层（AVATAR_DIR 环境变量可覆盖）。
+# 原 <版本树>/static/avatars 两宗罪：工件化后落在 deploy 属主 releases/<id> 内——
+# ① quant mkdir/写入 EACCES（3b-2 首发导入冒烟拦截）；② 与 3b-1 数据外置位不符且逐版丢失。
 from pathlib import Path as _Path
 from fastapi.staticfiles import StaticFiles as _StaticFiles
-_AVATAR_DIR = _Path(__file__).resolve().parents[2] / "static" / "avatars"
-_AVATAR_DIR.mkdir(parents=True, exist_ok=True)
+_AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR",
+                                   "/data/websites/snailtrail.cc/quant/shared/static/avatars"))
+try:
+    _AVATAR_DIR.mkdir(parents=True, exist_ok=True)   # 服务器：shared 属 quant，服务/冒烟（均 quant）有权
+except PermissionError:
+    # 开发机回退：无 /data shared 层（权限拒）→ 代码树相对位，保持本地可跑
+    _AVATAR_DIR = _Path(__file__).resolve().parents[2] / "static" / "avatars"
+    _AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/static", _StaticFiles(directory=str(_AVATAR_DIR.parent)), name="static")
 
 # CORS（前端 Vue3 开发用）
