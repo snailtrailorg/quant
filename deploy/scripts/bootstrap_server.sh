@@ -38,9 +38,9 @@ mkdir -p "$Q/bin" "$Q/releases"
 install -m 755 -o root -g root "$SRC/run-current" "$Q/bin/run-current"
 chown deploy:deploy "$Q/releases"
 
-echo "== 6 目标机前置（python39/rsync）=="
-dnf install -y python39 rsync >/dev/null 2>&1 || true
-/usr/bin/python3.9 --version && rsync --version | head -1
+echo "== 6 目标机前置（python3.11 已在=venv 同源；rsync assert）=="
+/usr/bin/python3.11 --version
+rsync --version | head -1
 
 echo "== 7 权限验证（白名单过/越权拒/dbro 通）=="
 sudo -u deploy sudo -n /usr/local/sbin/quant-svc status quant-md-hub@quant.service >/dev/null \
@@ -50,7 +50,7 @@ if sudo -u deploy sudo -n systemctl restart sshd >/dev/null 2>&1; then
 else
   echo "✅ ② 越权被拒"
 fi
-if UNITS=$(sudo -u deploy sudo -n /usr/local/sbin/quant-dbro live); then
+if UNITS=$(sudo -u deploy sudo -n -u quant /usr/local/sbin/quant-dbro live); then
   echo "✅ ③ dbro 通：$UNITS"
 else
   echo "⚠️ ③ dbro 不通（PG peer/socket 路径——3b-2 首跑前核对项，见设计稿 P2-4）"

@@ -11,4 +11,4 @@ quant-prod:
       #   远程主机走 accept-new（TOFU: 首连自动接受、再连变更即拒）
       ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
       # al8 默认 python3.6 过老（ansible-core 2.17 需 >=3.10）——设计稿 §7: dnf install python39 rsync
-      ansible_python_interpreter: /usr/bin/python3.9
+      ansible_python_interpreter: /usr/bin/python3.11  # 服务器已有（venv 同源），免装 python39
