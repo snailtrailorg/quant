@@ -65,11 +65,10 @@ class XReadSleeper:
     def __init__(self, r, stream, group, consumer, on_batch): ...
     def __call__(self, seconds: float) -> None: ...   # EngineLoop 的 sleeper 协议
 ```
-**never-raise 契约（P1 双同）**：`__call__` 内自吞 redis 异常（Timeout 归类静默；其他类
-告警+睡 1s 重试——对齐现 worker L303-311 行为）。**禁止向 EngineLoop.run 抛出**：loop 的
+**never-raise 契约（P1 双同；v2.1 复核 A 扩界）**：`__call__` **边界全异常不外抛**（含 on_batch 批处理回调内的异常——同样穿 finally 静默死）；redis Timeout 归类静默，其他类**吞后睡 1s 返回、下轮再试**（禁无界内旋重试——长断时 `__call__` 不返会饿死心跳/停止/看门狗钩子，与现 worker catch-continue 结构等价）。**禁止向 EngineLoop.run 抛出**：loop 的
 sleep 位无 try/except（loop.py:111），异常传穿将命中 worker finally 的 `os._exit(0)`
 =干净退出码 → systemd 不重启 → **任务静默死**（2026-08-20 A3 事故类）。
-**NOGROUP 处置（v2 定案）**：遇 NOGROUP 以 `EX_TEMPFAIL=75` 退出交 systemd 重启 →
+**NOGROUP 处置（v2.1 复核双同修死）**：遇 NOGROUP 在 sleeper 内**直接 `os._exit(75)`**（禁 `sys.exit`——SystemExit 传穿 run 会命中 finally 的 `os._exit(0)` 吞成退出码 0=自设陷阱反噬；NOGROUP 时组已不存在无清理可跳）→ 交 systemd 重启 →
 run() 启动段的组重建（现 L164-177，P0-3 语义）接手——复用 SA4 退避，替代现状的
 1Hz 告警死循环永不恢复。
 **线程模型（v2 写死）**：单线程同步——on_batch 在 loop 线程内联执行，与钩子同线程
@@ -114,7 +113,7 @@ def _stop_hook():          # loop.every("stop-check", period, _stop_hook)
 - 各切片独立 commit，单 revert 机制上够；回滚窗均须盘外
 
 ## mock 方式
-XReadSleeper 用 fakeredis 流注入（deploy/tests 既有道具思想）；trading.py 六件用 MagicMock adapter/PG；frozen/buy_ok 既有测试零修改语义级整体搬。
+XReadSleeper 用 fakeredis 流注入（deploy/tests 既有道具思想）；trading.py 六件用 MagicMock adapter/PG；frozen/buy_ok 测试**整体迁移改挂** trading.py（语义零漂移由测试随迁保证——挂点必改，非零修改，见产出表声明）。
 
 ## 实施切分
 - **4a**：trading.py 提取+互指消灭（纯移动+测试收编+挂点测试改接；direct 循环结构不动、调用点重接）
@@ -126,7 +125,7 @@ XReadSleeper 用 fakeredis 流注入（deploy/tests 既有道具思想）；trad
 |---|---|---|---|
 | reconcile_orders | 只告警在场委托 | 在场委托+成交补录+WAL 残留（runner 超集） | **行为增强**——启动与每次 TD 重连沿均变化，知情接受 |
 | snapshot_cycle | 无 available_cash、两事务 | 含 available_cash、单事务（direct 形态） | 行为统一（worker 落库多一列，无消费者受扰） |
-| 停止检查节奏 | worker 5s / direct 60s | 统一 5s（worker 值，更灵敏） | 值变化 |
+| 停止检查节奏 | worker 5s / direct 60s | **各自保持**（worker 5s/direct 60s——v2.1 复核双同裁定：统一即违反 direct 冻结， trading.stop_due 单源双节奏参数化） | 无变化（v2 原案撤回） |
 | 熔断/重算告警文案 | 两版字句微差 | 统一 direct 版文案 | 文案统一 |
 | write_trade 日志 | worker 版无 RETURNING 详情 | 统一 RETURNING 版 | 观测增强 |
 
