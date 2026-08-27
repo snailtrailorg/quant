@@ -77,6 +77,10 @@ export const createDataSource = (data) => api.post('/data-sources', data)
 export const updateDataSource = (id, data) => api.post(`/data-sources/${id}`, data)
 export const deleteDataSource = (id) => api.delete(`/data-sources/${id}`)
 export const testDataSource = (id) => api.post(`/data-sources/${id}/test`)
+// 积分档四层限流（2026-08-27）：预设表/切档/单参数覆写+熔断参数（写端点走项目 PUT→POST 硬切约定）
+export const getPointsPresets = (provider) => api.get(`/datasource/${provider}/points-presets`)
+export const setPointsTier = (provider, tier) => api.post(`/datasource/${provider}/points-tier`, { tier })
+export const setRateLimitOverride = (provider, data) => api.post(`/datasource/${provider}/rate-limit-override`, data)
 
 export const getTasks = (status) => api.get('/tasks', { params: status ? { status } : {} })
 export const getBacktests = () => api.get('/backtest')

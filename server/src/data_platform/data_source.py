@@ -45,6 +45,31 @@ class DataSource(ABC):
         self._credentials_encrypted = credentials_encrypted
         self._params = json.loads(params) if params else {}
 
+    def get_param(self, *keys, default=None):
+        """按命名空间路径读 params——get_param("circuit_breaker", "fail_threshold")。
+
+        通用参数读取器（B 层）：路径任一层不存在 / 中途非 dict → 回 default，
+        不抛异常（运维参数非必填，非法配置不崩同步）。
+        """
+        v = self._params
+        for k in keys:
+            if not isinstance(v, dict):
+                return default
+            v = v.get(k)
+        return v if v is not None else default
+
+    def get_param_float(self, *keys, default: float, lo: float, hi: float) -> float:
+        """读 float + 范围钳位（防呆护栏在后端，不信任前端/DB 里的手写值）。
+
+        非法（None/非数字字符串）回落 default + 告警；越界钳到 [lo, hi]。
+        """
+        v = self.get_param(*keys, default=default)
+        try:
+            return max(lo, min(hi, float(v)))
+        except (TypeError, ValueError):
+            logger.warning("params.%s=%r 非法，回落 %s", ".".join(keys), v, default)
+            return default
+
     @abstractmethod
     def get_client(self):
         """返回数据源客户端（如 tushare pro 对象、Wind 客户端）。"""
@@ -131,6 +156,56 @@ class TushareDataSource(DataSource):
         "trade_cal": 0.5,
         "stock_basic": 0.5,
     }
+
+    # 积分档预设（四层限流 L1）：Web 下拉选择存 params.points_tier，切换即全量更新。
+    # Tushare 官方积分 200/2000/5000 三档对应每分钟频控换算为最小间隔秒——
+    # 官方调整限额时改这里走部署；个别接口临时应急用 params.rate_limits 覆写（L2）。
+    POINTS_PRESETS = {
+        200: {   # 现状档（积分 200：多数接口 ~120 次/分钟内实测受限更严，stk_mins 1 次/小时）
+            "stk_mins": 3600.0, "adj_factor": 0.3,
+            "daily": 0.5, "daily_basic": 0.5, "fund_daily": 0.5,
+            "cb_daily": 0.5, "trade_cal": 0.5, "stock_basic": 0.5,
+        },
+        2000: {  # 积分 2000（约 500 次/分钟 → 0.2s 级；stk_mins 分钟线仍受限）
+            "stk_mins": 0.3, "adj_factor": 0.15,
+            "daily": 0.2, "daily_basic": 0.2, "fund_daily": 0.2,
+            "cb_daily": 0.2, "trade_cal": 0.2, "stock_basic": 0.2,
+        },
+        5000: {  # 积分 5000（约 1000 次/分钟 → 0.1s 级）
+            "stk_mins": 0.12, "adj_factor": 0.06,
+            "daily": 0.1, "daily_basic": 0.1, "fund_daily": 0.1,
+            "cb_daily": 0.1, "trade_cal": 0.1, "stock_basic": 0.1,
+        },
+    }
+
+    def get_rate_limit(self, api_name: str) -> float:
+        """该 API 两次调用最小间隔（秒）。0=不限。四层解析（2026-08-27 积分档）：
+
+        - L0 DEFAULT_RATE_LIMITS（代码兜底，最保守——= 现状 200 积分实测值）
+        - L1 params.points_tier 选中积分档预设批量覆盖（200/2000/5000，见 POINTS_PRESETS）
+        - L2 params.rate_limits 单参数覆写（只覆盖显式写的键——Tushare 调个别值应急用）
+        - L3 params.rate_time_overrides 时段乘数（interval /= multiplier，>1=更快）
+
+        points_tier 不存在时 = 三级老行为，向后兼容；非法值各层独立回落+告警不崩。
+        """
+        limits = dict(self.DEFAULT_RATE_LIMITS)  # L0
+        tier = self._params.get("points_tier")   # L1
+        if tier:
+            try:
+                preset = self.POINTS_PRESETS.get(int(tier))
+                if preset:
+                    limits.update(preset)
+                else:
+                    logger.warning("points_tier=%r 无对应预设，跳过预设层", tier)
+            except (TypeError, ValueError):
+                logger.warning("points_tier=%r 非法，跳过预设层", tier)
+        limits.update(self._params.get("rate_limits") or {})  # L2
+        try:
+            interval = float(limits.get(api_name, 0.0))
+        except (TypeError, ValueError):
+            logger.warning("rate_limits[%s]=%r 非法，回落默认", api_name, limits.get(api_name))
+            interval = float(self.DEFAULT_RATE_LIMITS.get(api_name, 0.0))
+        return self._apply_time_overrides(interval)  # L3
 
     def _get_token(self) -> str:
         """解密 token（DB 优先，.env fallback）。"""

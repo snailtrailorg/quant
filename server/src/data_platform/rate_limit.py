@@ -8,8 +8,10 @@
 设计决策（任务文件 §设计决策）：
 - D1 限速在 engine 侧（编排节奏），adapter pull_* 零改动
 - D2 熔断按 DataSource 级（Tushare 配额共享体，任何接口打穿都封整个账号）——非 API 级
-- D3 间隔三级覆盖（DataSource.get_rate_limit）：类默认 → params.rate_limits →
-  params.rate_time_overrides 时段乘数（interval /= multiplier，>1=更快=间隔缩短）
+- D3 间隔四层覆盖（DataSource.get_rate_limit，Tushare）：类默认 → points_tier 积分档预设
+  → params.rate_limits 单参数覆写 → params.rate_time_overrides 时段乘数（interval /=
+  multiplier，>1=更快=间隔缩短）；熔断参数（fail_threshold/reset_timeout）从
+  params.circuit_breaker 读，代码默认兜底（2026-08-27 积分档批次）
 """
 from __future__ import annotations
 
@@ -83,10 +85,17 @@ class CircuitBreaker:
     OPEN = "open"
     HALF_OPEN = "half_open"
 
-    def __init__(self, fail_threshold: int = 5, reset_timeout: float = 60.0,
-                 clock: Callable[[], float] = time.monotonic):
-        self._fail_threshold = fail_threshold
-        self._reset_timeout = reset_timeout
+    def __init__(self, fail_threshold: int | None = None, reset_timeout: float | None = None,
+                 clock: Callable[[], float] = time.monotonic, ds=None):
+        """ds 有则从 data_source_config.params.circuit_breaker 读熔断参数（显式实参 >
+        params 配置 > 代码默认兜底）。ds 无 get_param（测试替身/未继承基类）跳过。"""
+        if ds is not None:
+            gp = getattr(ds, "get_param", None)
+            if callable(gp):
+                fail_threshold = fail_threshold or gp("circuit_breaker", "fail_threshold")
+                reset_timeout = reset_timeout or gp("circuit_breaker", "reset_timeout")
+        self._fail_threshold = int(fail_threshold or 5)
+        self._reset_timeout = float(reset_timeout or 60.0)
         self._clock = clock
         self._lock = threading.Lock()
         self._state = self.CLOSED
@@ -159,7 +168,9 @@ def rate_limit_context(ds, api_name: str,
     """
     provider = getattr(ds, "provider", type(ds).__name__)
     with _REGISTRY_LOCK:
-        breaker = _BREAKERS.setdefault(provider, CircuitBreaker())
+        if provider not in _BREAKERS:   # 首次构造从 ds.params.circuit_breaker 读熔断参数
+            _BREAKERS[provider] = CircuitBreaker(ds=ds)
+        breaker = _BREAKERS[provider]
         limiter = _LIMITERS.setdefault((provider, api_name), RateLimiter())
     if not breaker.allow():
         raise CircuitOpenError(

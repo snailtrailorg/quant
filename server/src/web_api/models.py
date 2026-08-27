@@ -109,6 +109,20 @@ class DataSourceReq(BaseModel):
     usage_limit: int | None = None
     enabled: bool = True
 
+class PointsTierReq(BaseModel):
+    """积分档切换（四层限流 L1）：tier 必须在 POINTS_PRESETS 键中（后端校验）。"""
+    tier: int
+
+class RateLimitOverrideReq(BaseModel):
+    """单参数限速覆写（L2）或熔断参数写入（params.circuit_breaker）。
+
+    - api_name+value 非空：覆写（value=null 删除覆写回落预设）
+    - circuit_breaker 非空：写熔断参数 {"fail_threshold": int, "reset_timeout": float}
+    """
+    api_name: str | None = None
+    value: float | None = None
+    circuit_breaker: dict | None = None
+
 class ChannelReq(BaseModel):
     provider: str
     name: str
