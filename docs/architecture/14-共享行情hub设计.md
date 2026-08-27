@@ -113,7 +113,7 @@ worker 单元：+`After= + Wants= quant-md-hub@quant.service`（启动顺带拉�
 - 阶段 0 影子：hub 起着无 worker；direct runner 落 bar_shadow 表；每日 diff `bar_hub vs bar_shadow`（OHLCV+amount 逐根，ts 口径已对齐）≥5 交易日零差异（R-BR20）
 - 阶段 1：1 个任务切 hub 模式与 direct 并存（MD 多连接允许）
 - 阶段 2：全量切流；hub 改写 bar_1min；direct 保留 ≥1 迭代可回滚
-- 全程走 deploy-server.sh（SE3 闸门覆盖 quant-md-hub@*）
+- 全程走 deploy/ Ansible release（波次+postverify 覆盖 quant-md-hub@*；原 SE3 闸门语义已随 bash 链封存并入管道）
 
 ## 6. 验收与注入（R-OBS3）
 新增注入：hub kill -9（gen+1/worker 暖机补齐）/ 双 hub 抢租约 / 同 bar 重复 XADD / 11:30+15:00 双 flush / 断流 300s 自杀 / worker SIGSTOP（XAUTOCLAIM 认领）/ worker 盘中重启暖机等价（对照 direct 重启）/ Valkey 停 10s（socket_timeout 路径）。
