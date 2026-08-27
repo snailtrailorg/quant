@@ -19,6 +19,9 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 import time
 
+# 持仓稳定窗秒数（O-S1"键集连续两拍稳定"）：模块常量便于测试收窄（等待原语审计 P2-1）
+POSITION_STABLE_WINDOW_S = 2.0
+
 
 @dataclass
 class Order:
@@ -201,21 +204,32 @@ class XTPAdapter(ExecutionAdapter):
         if self._gateway is None:
             return []
         # ST2（N-S6）：查询前清缓存——只增不删的缓存会让清仓标的变幽灵仓（XTP 不再回报该行，
-        # 旧值永存直到进程重启）。清空后键集变化恰好也是 _wait_update 的提前退出信号。
+        # 旧值永存直到进程重启）。
         with self._lock:
             self._positions.clear()
         self._gateway.query_position()
-        # O-S1：XTP 逐标的逐行推送（每标的一行），_wait_update 的"首个键即退"会读到跨 poll tick
-        # 的子集→部分批次入真相表。此处改"键集连续两拍稳定"（200ms 无新行）才算收齐。
-        deadline = time.time() + 2.0
+        # O-S1：XTP 逐标的逐行推送（每标的一行），"首个键即退"会读到跨 poll tick 的子集
+        # →部分批次入真相表。此处"键集连续两拍稳定"（200ms 无新行）才算收齐。
+        # 超时可观测（P2-1，守则原则 2）：稳定窗耗尽时分级——有行未稳=部分快照告警；
+        # 零行=空仓合法常态降 info 不刷屏（trading 60s 循环调用）。
+        deadline = time.time() + POSITION_STABLE_WINDOW_S
         prev_keys = None
+        keys = frozenset()   # 预置：窗口参数异常（≤0）时循环零拍也不致 NameError
+        stable = False
         while time.time() < deadline:
             time.sleep(0.1)
             with self._lock:
                 keys = frozenset(self._positions.keys())
             if keys and keys == prev_keys:
+                stable = True
                 break
             prev_keys = keys
+        if not stable:
+            if keys:
+                logger.warning("持仓稳定窗 %.1fs 未达成（现 %d 行）——返回部分快照，对账注意",
+                               POSITION_STABLE_WINDOW_S, len(keys))
+            else:
+                logger.info("持仓查询 %.1fs 零回报——空仓或查询无响应", POSITION_STABLE_WINDOW_S)
         with self._lock:
             return [
                 Position(
@@ -249,13 +263,18 @@ class XTPAdapter(ExecutionAdapter):
             return list(self._trades.values())
 
     @staticmethod
-    def _wait_update(cache: dict, before: set, timeout: float = 2.0) -> None:
-        """轮询等事件推送更新缓存（vnpy 查询是异步）。"""
+    def _wait_update(cache: dict, before: set, timeout: float = 2.0) -> bool:
+        """轮询等事件推送更新缓存（vnpy 查询是异步）。
+
+        返回 False=超时且已告警（P2-1 超时可观测：缓存内容可能是部分/旧值）。
+        """
         deadline = time.time() + timeout
         while time.time() < deadline:
             if set(cache.keys()) != before:
-                return
+                return True
             time.sleep(0.1)
+        logger.warning("查询更新等待超时（%.1fs）——缓存 %d 项可能是部分/旧值", timeout, len(cache))
+        return False
 
 
 # --- 加密适配器基类 ---

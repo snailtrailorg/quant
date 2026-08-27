@@ -122,7 +122,17 @@ stop_all() {
   local bp=$(backend_pid) fp=$(frontend_pid)
   [ -n "$bp" ] && { kill "$bp" 2>/dev/null || true; green "  后端已停 (pid $bp)"; } || yellow "  后端未运行"
   [ -n "$fp" ] && { kill "$fp" 2>/dev/null || true; green "  前端已停 (pid $fp)"; } || yellow "  前端未运行"
-  sleep 1
+  # 条件轮询（P2-2）：等进程真退（kill -0 失败即退出/消亡）——探测置于 while 条件
+  # （set -e 下非条件位置的非零会直炸）；超时 best-effort 提示继续，不引入 kill -9
+  local waited=0
+  while [ "$waited" -lt 20 ]; do
+    { [ -z "$bp" ] || ! kill -0 "$bp" 2>/dev/null; } && \
+    { [ -z "$fp" ] || ! kill -0 "$fp" 2>/dev/null; } && break
+    sleep 0.25; waited=$((waited+1))
+  done
+  if [ "$waited" -ge 20 ]; then
+    yellow "  进程 5s 未退出（后台可能仍在收尾）"
+  fi
 }
 
 show_status() {
@@ -169,7 +179,7 @@ case "$ACTION" in
     echo "   停止: bash scripts/dev-start.sh stop"
     ;;
   stop)    stop_all ;;
-  restart) stop_all; sleep 1; check_prereq; start_backend; start_frontend; show_status ;;
+  restart) stop_all; check_prereq; start_backend; start_frontend; show_status ;;
   status)  show_status ;;
   logs)    tail_logs ;;
   *)

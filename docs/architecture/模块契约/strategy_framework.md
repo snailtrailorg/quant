@@ -216,7 +216,7 @@ set_config_provider(_market_config_provider)   # quant_common.session 的市场�
 - `factor._FACTOR_REGISTRY` / `_safe_eval` / `_DT_OPS` / `_DT_FUNCS` / `_FACTOR_SAFE_BUILTINS`
 - `factor._AstBlacklistChecker` / `_make_factor_class`
 - `factor.CATEGORY_COMPAT` / `FACTOR_EXCLUSIVE` / `filter_factors_by_category`
-- `adapters._vnpy_exchange` / `XTPAdapter._on_*`（事件回调）/ `_wait_update` / `parse_vt_symbol`
+- `adapters._vnpy_exchange` / `XTPAdapter._on_*`（事件回调）/ `_wait_update(cache, before, timeout=2.0) -> bool`（False=超时且已告警，P2-1 超时可观测）/ `POSITION_STABLE_WINDOW_S`（持仓稳定窗常量，测试可 patch）/ `parse_vt_symbol`
 - `backtest.BacktestAdapter.set_bar/set_commission` / `BacktestEngine._calculate`
 
 ---
