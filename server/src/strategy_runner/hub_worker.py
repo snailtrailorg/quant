@@ -1,7 +1,8 @@
 """hub 模式 worker（ST7，设计 14 v2 §3）。评审③修订版。
 
 由 strategy_runner.main 在 md_mode=hub 时调用 run()：TD-only 接入 + Valkey Streams 消费
-+ SA/SB/SC 机制全复用（含 direct 主循环四件套：trade_log/快照/熔断沿/recalc，评审 S1）。
++ SA/SB/SC 机制全复用（含 direct 主循环四件套：trade_log/快照/熔断沿/recalc，评审 S1——
+批 4a 起四件套与 frozen/buy_ok 单源化于 strategy_runner.trading，本文件不再有本地副本）。
 """
 from __future__ import annotations
 
@@ -10,11 +11,12 @@ import os
 import time
 from datetime import datetime
 
+from src.strategy_runner import trading
+
 logger = logging.getLogger("hub_worker")
 
 BAR_STREAM_PREFIX = "hub:bars:"
 HB_KEY = "quant:hb:md-hub"
-FROZEN_STALE_BAR_S = 300     # 交易时段无新 bar 冻结（评审 S6 worker 侧防线）
 STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
 
 
@@ -64,62 +66,6 @@ def _hub_alive(r) -> bool:
         return True
 
 
-def buy_ok_check(frozen: dict, stats: dict, hub_alive: bool, now: float,
-                 in_session: bool = True) -> bool:
-    """send_order 时刻事实检查（S6 修订，纯函数供测试）：BUY 需 交易时段 + bar 新鲜（<300s）+ hub 心跳。
-
-    交易时段门（盲审 C-F2 2026-08-18）：XTP 测试平台夜间回放白昼行情——bar 流动且锚新鲜，
-    worker 重启后 max_ts 失忆不 R-DL1 去重，回放 bar 会真实驱动下单（重复消费旧数据）。
-    时段外拒 BUY 属业务正确（A 股连续竞价时段外委托不可成交），误拒方向安全；SELL 不受限（R-AV2）。
-    """
-    if not in_session:
-        return False
-    if frozen.get("sticky"):
-        return False
-    fresh = stats.get("last_bar_wall", 0) and (now - stats["last_bar_wall"] < FROZEN_STALE_BAR_S)
-    return bool(fresh) and hub_alive
-
-
-def frozen_allows(action: str, frozen: dict) -> bool:
-    """sticky 冻结（数据污染事实：untrusted bar / 流 gap）期 BUY 拒 / SELL 放（R-AV2，与 SB F-31 同哲学）。
-
-    S6 修订（2026-08-18）：只判 sticky——动态新鲜度（hub 心跳/bar 停更）不再进 frozen["now"]
-    参与下单判定，改由 send_order 时刻的 buy_ok 事实检查完成（ctx 注入）。C2 网关与测试共用同一判定。
-    """
-    if not frozen.get("sticky"):
-        return True
-    return str(action).upper() == "SELL"
-
-
-def _write_trade_log(d, adapter, sid: str, symbol: str) -> None:
-    """TradeData → trade_log（SC1 同款，供 EVENT_TRADE 与启动/重连对账共用）。幂等 trade_ref。"""
-    try:
-        from vnpy.trader.constant import Direction
-        from src.data_platform.db import get_conn
-        action = "BUY" if d.direction == Direction.LONG else "SELL"
-        vt = getattr(d, "vt_orderid", "")
-        with adapter._lock:
-            cid = adapter._vt2cid.get(vt)
-        order_db_id, strategy_of = None, sid
-        with get_conn() as conn:
-            if cid:
-                cur = conn.execute(
-                    "SELECT id, strategy_id FROM order_log WHERE client_order_id=%s ORDER BY id DESC LIMIT 1",
-                    (cid,))
-                row = cur.fetchone()
-                if row:
-                    order_db_id, strategy_of = row[0], row[1] or sid
-            conn.execute(
-                "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING",
-                (getattr(d, "datetime", None), strategy_of, order_db_id, getattr(d, "symbol", symbol),
-                 action, float(getattr(d, "volume", 0) or 0), float(getattr(d, "price", 0) or 0),
-                 getattr(d, "vt_tradeid", None) or None))
-            conn.commit()
-    except Exception as e:
-        logger.warning("trade_log 写入失败: %s", e)
-
-
 def run(ctx: dict) -> None:
     """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen,
              warmup_pg, stop_check, reconcile, logger}"""
@@ -154,10 +100,10 @@ def run(ctx: dict) -> None:
              "sess_bar_wall": 0.0}
     hb_task_key = f"quant:hb:task:{tid}"
 
-    # ——— EVENT_TRADE → trade_log（评审 S1 四件套之一）———
+    # ——— EVENT_TRADE → trade_log（评审 S1 四件套之一；4a 单源化 trading）———
     @_guard("hub.on_trade")
     def on_trade(event):
-        _write_trade_log(event.data, adapter, sid, symbol)
+        trading.write_trade_log(event.data, adapter, sid, symbol)
 
     ee.register(__import__("vnpy.trader.event", fromlist=["EVENT_TRADE"]).EVENT_TRADE, on_trade)
 
@@ -216,9 +162,9 @@ def run(ctx: dict) -> None:
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
 
     # ——— send_order 时刻事实检查（S6 修订）：交易时段 + bar 新鲜（<300s）+ hub 心跳 ———
-    # 检查器由 ctx 注入 C2 网关（main._gated_send）；纯逻辑在模块级 buy_ok_check 供测试
-    ctx["buy_ok"] = lambda: buy_ok_check(frozen, stats, _hub_alive(r), time.time(),
-                                         in_session=_in_astock_session())
+    # 检查器由 ctx 注入 C2 网关（main._gated_send）；纯逻辑在 trading.buy_ok_check 供测试
+    ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r), time.time(),
+                                                in_session=_in_astock_session())
 
     def _alert_throttled(title: str, body: str) -> None:
         _alert(title, body)   # notify 自带 1min 同标题去重
@@ -298,6 +244,7 @@ def run(ctx: dict) -> None:
     td_status_was = True
     halt_state = {"was": False}
     snap_counter = 0
+    _baseline_cache = {"baseline": None}   # 账户基线净值进程级缓存（4a 随快照单源化改调用方持有）
     try:
         while True:
             try:
@@ -325,7 +272,7 @@ def run(ctx: dict) -> None:
             sess_was = sess_now
             hub_alive = _hub_alive(r)
             bar_stale = (sess_now and stats["sess_bar_wall"]
-                         and time.time() - stats["sess_bar_wall"] > FROZEN_STALE_BAR_S)
+                         and time.time() - stats["sess_bar_wall"] > trading.FROZEN_STALE_BAR_S)
             new_dyn = (not hub_alive) or bool(bar_stale)
             if new_dyn and not frozen.get("now"):
                 logger.error("盲视状态（hub_alive=%s bar_stale=%s）——BUY 将在下单时刻被拒",
@@ -344,75 +291,25 @@ def run(ctx: dict) -> None:
                 r.expire(hb_task_key, 90)
             except Exception as e:
                 logger.warning("心跳写失败: %s", e)
-            # 快照（每 60s≈12 个 timer，评审 S1；断线不写假值 SB1）
+            # 快照（每 60s≈12 个 timer，评审 S1；4a 单源化 trading.snapshot_cycle——direct 形态：
+            # 含 available_cash 列/单事务/SB1 断线不写假值+快照持仓批同守卫，知情差异②——
+            # worker 落库多一列，无消费者受扰）
             if snap_counter % 12 == 0:
-                # ST2（O-F3）：持仓真相批与快照同守卫——先验 query_account，TD 断线时双跳过
-                # （否则断线返回 [] 会把真实持仓写成"新鲜空仓"=假真相，恰是 N-S5 要防的）
-                try:
-                    accounts = adapter.query_account() or []
-                    if accounts:
-                        from src.data_platform.db import get_conn
-                        # #10 口径修正（2026-08-22）：initial_capital 列=账户基线净值，
-                        # 不再用 live_task 配置资金（策略级 100 万 vs 账户级 10 亿错配）。
-                        from src.strategy_runner.main import _account_baseline_capital
-                        total = sum(float(getattr(a, "balance", 0)) for a in accounts)
-                        today = datetime.now().strftime("%Y-%m-%d")
-                        with get_conn() as conn:
-                            cur = conn.execute("SELECT total_value FROM account_snapshot WHERE ts::date=%s "
-                                               "ORDER BY ts ASC LIMIT 1", (today,))
-                            first = cur.fetchone()
-                            base = float(first[0]) if first else total
-                            conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital) "
-                                         "VALUES (%s,%s,%s)",
-                                         (total, total - base, _account_baseline_capital(total)))
-                            conn.commit()
-                        # ST2：TD 在线才写持仓批（ThinTdGateway 无 vnpy init_query 常推，须显式查）
-                        from src.strategy_runner.main import _flush_positions
-                        _flush_positions(adapter, ctx.get("account_id"), tid)
-                except Exception as e:
-                    logger.warning("快照写失败: %s", e)
-            # 熔断沿撤在场单（评审 S1，F-41）
-            try:
-                from src.risk_control.risk import RiskControl
-                halted_now = RiskControl.get().is_halted()
-            except Exception:
-                halted_now = halt_state["was"]
-            if halted_now and not halt_state["was"]:
-                logger.critical("检测到熔断，撤销全部在场委托")
-                _alert_throttled(f"熔断触发，已撤在场委托: {sid}", "")
-                try:
-                    from vnpy.trader.constant import Status
-                    working = (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)
-                    for od in (adapter.query_orders() or []):
-                        if getattr(od, "status", None) in working:
-                            try:
-                                adapter.cancel_order(od.vt_orderid)
-                            except Exception as ce:
-                                logger.warning("撤单失败 %s: %s", od.vt_orderid, ce)
-                except Exception as e:
-                    logger.error("熔断撤单异常: %s", e)
-            halt_state["was"] = halted_now
-            # factor:recalc（评审 S1）；链条打磨#6：兼作因子热重载钩子
-            try:
-                if r.get("factor:recalc:triggered"):
-                    try:
-                        from src.strategy_framework.factor import load_factors_from_db
-                        load_factors_from_db()
-                    except Exception:
-                        pass
-                    _rewarm()
-                    r.delete("factor:recalc:triggered")
-                    logger.info("因子重算触发：重暖机 %d 根", len(history))
-            except Exception as e:
-                logger.warning("recalc 检查失败: %s", e)
+                trading.snapshot_cycle(adapter, ctx.get("account_id"), tid, _baseline_cache)
+            # 熔断沿撤在场单（评审 S1，F-41；4a 单源化 trading.halt_edge_cancel——文案统一 direct 版）
+            trading.halt_edge_cancel(adapter, halt_state, sid)
+            # factor:recalc（评审 S1）；链条打磨#6：兼作因子热重载钩子（4a 单源化 trading.recalc_hook）
+            trading.recalc_hook(r, _rewarm, history)
             # TD 重连沿 → 重跑对账（R-BR11）+ 成交补录
+            # 4a 注：ctx["reconcile"] 已升级 runner 超集（内含成交补录，知情差异①），下方
+            # 补录循环保留=幂等冗余（trade_ref ON CONFLICT），4b 迁骨架时随钩子接线收敛
             td_status = bool(getattr(td_api, "connect_status", True))
             if td_status and not td_status_was:
                 logger.info("TD 重连沿，重跑对账+成交补录")
                 try:
                     ctx["reconcile"]()
                     for t in (adapter.query_trades() or []):
-                        _write_trade_log(t, adapter, sid, symbol)
+                        trading.write_trade_log(t, adapter, sid, symbol)
                 except Exception as e:
                     logger.warning("重连对账失败: %s", e)
             td_status_was = td_status

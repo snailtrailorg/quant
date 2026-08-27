@@ -8,7 +8,9 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from src.md_hub.main import MinuteAggregator
-from src.strategy_runner.hub_worker import BarMsgState, frozen_allows, buy_ok_check
+from src.strategy_runner.hub_worker import BarMsgState
+# 批 4a：frozen/buy_ok 单源化于 trading（挂点改接——语义断言零修改）
+from src.strategy_runner.trading import buy_ok_check, frozen_allows
 
 TZ = ZoneInfo("Asia/Shanghai")
 

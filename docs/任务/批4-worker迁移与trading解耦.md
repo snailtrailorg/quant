@@ -128,6 +128,9 @@ XReadSleeper 用 fakeredis 流注入（deploy/tests 既有道具思想）；trad
 | 停止检查节奏 | worker 5s / direct 60s | **各自保持**（worker 5s/direct 60s——v2.1 复核双同裁定：统一即违反 direct 冻结， trading.stop_due 单源双节奏参数化） | 无变化（v2 原案撤回） |
 | 熔断/重算告警文案 | 两版字句微差 | 统一 direct 版文案 | 文案统一 |
 | write_trade 日志 | worker 版无 RETURNING 详情 | 统一 RETURNING 版 | 观测增强 |
+| （4a 双盲审补录三条）停止检查 DB 异常 | worker 静默 | warning 告警（direct 版形态；返回值恒 False 不变） | 观测增强——PG 故障期 ~12 条/min/worker 属预期 |
+| reconcile 告警标签 | worker `tid or sid` | `sid`（统一 direct 版） | 运维 tid 反查策略需一步 |
+| 快照失败日志文案 | worker「快照写失败」 | 「写 account_snapshot 失败」（direct 版） | 观测面统一 |
 
 ## 参考文档
 1. `docs/任务/批2-runtime骨架与hub首迁.md`（骨架契约+行为映射表范式）
