@@ -1,7 +1,12 @@
-// polkit 规则：允许 quant 用户管理 quant-strategy@* / quant-live-task@* / quant-feishu-bot@* systemd 实例
-// （Web 后端 web-api 跑 quant 用户，通过 systemctl start/stop 控制策略/实盘任务/飞书子进程）
+// polkit 规则：允许 quant 用户管理 quant-strategy@* / quant-live-task@* / quant-feishu-bot@* /
+// quant-md-hub@* systemd 实例（Web 后端 web-api 跑 quant 用户，通过 systemctl start/stop 控制
+// 策略/实盘任务/飞书子进程；celery reconciler 亦以 quant 跑，L3 调和需 start md-hub——
+// 批5 2026-08-27 增 quant-md-hub@* 放行，不加则 L3 扩面空转，两件必须同批）。
 //
-// 部署（服务器，一次性）：
+// 注意（al8 systemd 239）：polkit 的 manage-units 不分动词（start/stop/restart 一放全放）；
+// web-api（同 quant 用户）间接受益可 stop hub=数据面 DoS，与既有 live-task stop 权限同量级，知情接受。
+//
+// 部署（服务器，一次性——管道不覆盖 .rules，须手工，见任务文件 3b 验收）：
 //   sudo cp 49-quant.rules /etc/polkit-1/rules.d/
 //   sudo systemctl restart polkit
 //
@@ -12,7 +17,8 @@ polkit.addRule(function(action, subject) {
         subject.user == "quant" &&
         (action.lookup("unit").startsWith("quant-strategy@") ||
          action.lookup("unit").startsWith("quant-live-task@") ||
-         action.lookup("unit").startsWith("quant-feishu-bot@"))) {
+         action.lookup("unit").startsWith("quant-feishu-bot@") ||
+         action.lookup("unit").startsWith("quant-md-hub@"))) {
         return polkit.Result.YES;
     }
 });

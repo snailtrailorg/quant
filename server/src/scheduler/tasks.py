@@ -1163,6 +1163,12 @@ SA4_BACKOFF_BASE = 300   # 首次自动拉起后退避基数（秒）
 SA4_BACKOFF_CAP = 3600   # 退避封顶 1h
 SA4_STABLE_SECS = 600    # 单元稳定 active 超此时长清退避计数（短暂失败不累积惩罚）
 SA4_KEY_PREFIX = "quant:sa4:backoff:"
+# 批5 L3 扩面（2026-08-27，docs/任务/批5-L3扩面与polkit配套.md）：
+# md-hub 常开语义 + 三重熔断键（D1）；strategy@* 以 is-enabled 显式意图为判定源（D2）
+SA4_HUB_UNIT = "quant-md-hub@quant.service"      # hub 期望表条目（系统单例数据面，常开）
+SA4_HUB_LEASE_KEY = "hub:lease"                  # 租约 fencing 键（在场=对端实例持有 -> 让位）
+SA4_HUB_MAINT_KEY = "quant:maintenance:md-hub"   # 维护标记（人工停 hub 前打，默认 TTL 4h 防遗忘）
+SA4_ALERT_TTL = 3600                             # 维护/78 告警去重窗（防 300s 周期刷屏）
 
 
 def _sa4_systemctl(*args):
@@ -1176,12 +1182,99 @@ def _sa4_systemctl(*args):
 
 
 def _sa4_units(state: str) -> list[str]:
-    """按状态列 quant-live-task@* 单元名（含 .service 后缀）。"""
-    r = _sa4_systemctl("list-units", "quant-live-task@*", "--state", state,
-                       "--no-legend", "--plain", "--no-pager")
+    """按状态列受管单元名（批5 三源扩面：live-task + md-hub + strategy，含 .service 后缀）。
+
+    一次 list-units 传三模式（systemctl 支持多 pattern，省两次调用）；采集失败返回空（D-F5）。
+    """
+    r = _sa4_systemctl("list-units", "quant-live-task@*", "quant-md-hub@*", "quant-strategy@*",
+                       "--state", state, "--no-legend", "--plain", "--no-pager")
     if r is None or r.returncode != 0:
         return []
     return [ln.split()[0] for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def _sa4_strategy_unit_files() -> list[str]:
+    """列 quant-strategy@* 单元文件名（D2 v2 候选集；是否期望在跑由 is-enabled 显式意图决定）。"""
+    r = _sa4_systemctl("list-unit-files", "quant-strategy@*", "--no-legend", "--no-pager")
+    if r is None or r.returncode != 0:
+        return []
+    return [ln.split()[0] for ln in r.stdout.splitlines() if ln.strip()]
+
+
+def _desired_units(conn) -> list[tuple[str, str]]:
+    """声明式期望表（批5 目标 2）：三处真相源归一为 [(unit, source)]，L3 调和循环统一消费。
+
+    - live_task running -> quant-live-task@{tid}（source=live_task，DB 行）
+    - quant-strategy@* -> systemctl is-enabled=enabled 且无 live_task 关联（source=strategy）。
+      废架构兼容单元：**enabled DB 行不作拉起依据**（D2 v2——镜像实锤 2-3 行 enabled 无
+      live_task 关联，按 DB 拉会部署首周期即拉废 runner）；仅显式 enable 过且无关联才期望在跑，
+      is-enabled 与 live_task 并存时排除防双拉（v2.1 去重护栏）
+    - md-hub -> 常开（source=builtin，系统单例数据面无 DB 行，永远该在跑）
+    """
+    cur = conn.execute("SELECT id FROM live_task WHERE status='running'")
+    desired = [(f"quant-live-task@{row[0]}.service", "live_task") for row in cur.fetchall()]
+    cur = conn.execute(
+        "SELECT DISTINCT strategy_id FROM live_task WHERE strategy_id IS NOT NULL")
+    linked_sids = {str(row[0]) for row in cur.fetchall()}
+    for unit in _sa4_strategy_unit_files():
+        sid = unit.split("@", 1)[1].rsplit(".service", 1)[0]
+        if sid in linked_sids:
+            continue  # 该策略已有 live_task 承载（live-task@{tid} 在跑），strategy@{id} 不双拉
+        r = _sa4_systemctl("is-enabled", unit)
+        if r is not None and r.returncode == 0 and r.stdout.strip() == "enabled":
+            desired.append((unit, "strategy"))
+    desired.append((SA4_HUB_UNIT, "builtin"))
+    return desired
+
+
+def _sa4_exec_status(unit: str):
+    """读单元 ExecMainStatus（最后退出码；信号死=信号号）。采集失败返回 None（按崩溃处理）。"""
+    r = _sa4_systemctl("show", unit, "--property=ExecMainStatus", "--value")
+    if r is None or r.returncode != 0:
+        return None
+    try:
+        return int(r.stdout.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _sa4_hub_guards(r):
+    """md-hub 拉起前置熔断（D1 三重的前两重；第三重退避与 L1 共键，在调用方）。
+
+    返回 (ok, reason)：
+    - Valkey 不可达/键操作异常 -> fail-closed 跳过（分区期盲拉第二实例会短暂破坏 fencing）
+    - 租约键在场 -> 让位跳过（对端实例持有，正常运维态不告警）
+    - 维护标记在场 -> 跳过 + 告警（人工维护窗；标记自带 TTL 4h 防裸奔遗忘）
+    """
+    if r is None:
+        return False, "valkey-down"
+    try:
+        if r.exists(SA4_HUB_LEASE_KEY):
+            return False, "lease-held"
+        if r.exists(SA4_HUB_MAINT_KEY):
+            return False, "maintenance"
+    except Exception as e:
+        logger.warning("sa4: hub 熔断键查询异常（fail-closed 跳过）: %s", e)
+        return False, "valkey-error"
+    return True, ""
+
+
+def _sa4_alert_once(r, dedup_key: str, title: str, body: str):
+    """去重告警（Valkey 键 TTL 内只发一次）——维护标记/78 配置错防 300s 周期刷屏。
+
+    r 不可用或键操作失败时退化为本周期直发一次（由 beat 周期天然限频）。
+    """
+    try:
+        from src.alert_notify import notify
+        if r is not None:
+            try:
+                if r.set(dedup_key, "1", nx=True, ex=SA4_ALERT_TTL) is None:
+                    return  # 去重窗内已发过
+            except Exception:
+                pass
+        notify("warn", "system", title, body)
+    except Exception:
+        pass
 
 
 def _sa4_backoff_delay(attempts: int) -> float:
@@ -1193,12 +1286,16 @@ def _sa4_backoff_delay(attempts: int) -> float:
 
 @app.task(name="src.scheduler.tasks.sa4_reconciler")
 def sa4_reconciler():
-    """SA4 reconciler：扫 Failed 实盘单元，依赖健康则按退避自动 reset-failed + start。
+    """SA4 reconciler：L1 Failed 恢复（live-task）+ L3 期望表调和（三源，批5 扩面）。
 
-    - live_task 已停/已删：只 reset-failed 清状态不拉起（尊重用户停止意图）
+    - L1（现状逻辑零改动，仅扫描面随三源扩）：Failed live-task 单元，live_task 已停/已删只清
+      状态不拉起；退避计数 Valkey（quant:sa4:backoff:{unit}，TTL 1 天）300s*2^(n-1) 封顶 1h
+    - L3（批5）：_desired_units 三源归一（live_task running / strategy is-enabled 且无关联 /
+      hub 常开）-> systemd 实际状态调和。覆盖 active 缺失漂移 + **failed 态**（ExecMainStatus
+      区分：78=配置错跳过告警人工，其他=崩溃 reset-failed+start 走熔断，D1 v2 P0-1）；
+      md-hub 拉起前三重熔断：租约（Valkey 不可达 fail-closed）+ 维护标记 + 退避共键
     - PG 不可达：本轮整体跳过（fail-safe--依赖未恢复不盲拉，runner 自身有 systemd Restart 兜底）
-    - 退避计数 Valkey（quant:sa4:backoff:{unit}，TTL 1 天）：300s*2^(n-1) 封顶 1h；
-      单元稳定 active 超 10min 计数清零
+    - 单元稳定 active 超 10min 清退避计数（批5 随扫描面泛化到 hub/strategy）
     """
     import os
     import time as _time
@@ -1224,7 +1321,7 @@ def sa4_reconciler():
         logger.warning("sa4: Valkey 不可达（退避计数不可用，按首档拉起）: %s", e)
 
     now = _time.time()
-    # 稳定 active -> 清退避计数（下次失败从 300s 重新起算）
+    # 稳定 active -> 清退避计数（下次失败从 300s 重新起算；批5 随扫描面泛化到 hub/strategy）
     if r is not None:
         for unit in active:
             try:
@@ -1237,6 +1334,10 @@ def sa4_reconciler():
 
     from src.alert_notify import notify
     for unit in failed:
+        # 职责边界（v2.1）：L1 只处理 live-task Failed（退避/清零/已停检查现状不动）；
+        # md-hub/strategy 的 failed 归下方 L3 段（三重熔断 + ExecMainStatus 区分）
+        if not unit.startswith("quant-live-task@"):
+            continue
         # 用户意图校验：live_task 已停/已删 -> 只清状态不拉起
         tid = unit.split("@", 1)[1].rsplit(".service", 1)[0]
         try:
@@ -1274,28 +1375,67 @@ def sa4_reconciler():
                    f"第 {attempts + 1} 次自动拉起；若再失败将退避 {_sa4_backoff_delay(attempts + 1):.0f}s。")
         except Exception:
             pass
-    # --- L3 意图调和（2026-08-24 韧性分层模型）：DB=running 但 systemd 无实例的漂移恢复 ---
-    # 任务 8 躺 2.5 天实锤（2026-08-24）：systemctl stop 后 DB 残留 running，服务器重启后
-    # 无人拉起（单元 disabled）。心跳（TTL 90s）已过期但无人比对。L3 职责：DB 期望状态 ->
-    # systemd 实际状态的调和，从裸停止/从未启动状态恢复。
-    # 退避计数与 L1 的 Failed 恢复共用（quant:sa4:backoff:{unit}，同键不冲突）。
+    # --- L3 意图调和（2026-08-24 韧性分层模型；批5 扩面三源）：期望表 -> systemd 实际状态 ---
+    # 任务 8 躺 2.5 天实锤（systemctl stop 后 DB 残留 running 无人拉起）；hub 停 2.5 天同类
+    # 事故（2026-08-25 SEGV 后 failed 15 分钟无人拉起）证明覆盖面必须从 live-task 扩至三源。
+    # 期望表 _desired_units（三处真相源归一）：live_task running / strategy is-enabled / hub 常开。
+    # 退避计数与 L1 的 Failed 恢复共用（quant:sa4:backoff:{unit}，同键幂等防双拉：
+    # 先到者写计数，后到者在退避窗内跳过）。
     try:
         with get_conn() as conn:
-            cur = conn.execute("SELECT id FROM live_task WHERE status='running'")
-            running_tids = [str(r[0]) for r in cur.fetchall()]
+            desired = _desired_units(conn)
         # 复用本轮已采集的 active/failed 列表（不重复 systemctl 调用）
         actives = set(active)
         faileds = set(failed)
-        for tid in running_tids:
-            unit = f"quant-live-task@{tid}.service"
-            if unit in actives or unit in faileds:
+        for unit, source in desired:
+            if unit in actives:
                 continue
+            need_reset = False
+            if unit in faileds:
+                if source == "live_task":
+                    continue  # L1 段已处理（v2.1 职责边界）
+                # md-hub/strategy failed：ExecMainStatus 区分（D1 v2 P0-1——failed 黑洞根修）
+                if _sa4_exec_status(unit) == 78:
+                    # EX_CONFIG 永久配置错：自动拉起无意义，跳过 + 告警人工（去重窗内一次）
+                    result.setdefault("l3_config_failed", []).append(unit)
+                    _sa4_alert_once(r, f"quant:sa4:alert78:{unit}",
+                                    f"L3 跳过配置错单元: {unit}",
+                                    "ExecMainStatus=78（EX_CONFIG）自动拉起无意义，"
+                                    "请人工修复后 systemctl reset-failed + start。")
+                    logger.warning("L3: %s ExecMainStatus=78 配置错，跳过拉起待人工", unit)
+                    continue
+                need_reset = True  # 崩溃 failed（含 StartLimit 打穿）-> 拉起前先清 failed 态
+            # md-hub 前置熔断（D1 前两重）：租约（Valkey 不可达 fail-closed）/维护标记
+            if source == "builtin":
+                ok, reason = _sa4_hub_guards(r)
+                if not ok:
+                    if reason == "maintenance":
+                        _sa4_alert_once(r, f"quant:sa4:alert-maint:{unit}",
+                                        f"L3 维护窗跳过拉起: {unit}",
+                                        f"维护标记 {SA4_HUB_MAINT_KEY} 在场，hub 不自动拉起；"
+                                        "维护完成请删标记（标记 TTL 4h 自动过期）。")
+                    elif reason == "valkey-down":
+                        # fail-closed 但要让植物人可见：直发一次（r 不可用无法跨周期去重，
+                        # 由 beat 300s 周期限频）
+                        logger.warning("L3: %s Valkey 不可达，fail-closed 跳过拉起", unit)
+                        try:
+                            notify("warn", "system", f"L3 fail-closed 跳过拉起: {unit}",
+                                   "Valkey 不可达无法验 hub 租约，本轮不拉起"
+                                   "（防盲拉第二实例短暂破坏 fencing）。")
+                        except Exception:
+                            pass
+                    result.setdefault("l3_guards", {})[unit] = reason
+                    continue
+            # 退避窗口（与 L1 共键；r 不可用按首档——hub 已被上方 fail-closed 拦下，
+            # 此处仅 live-task/strategy 走到）
             key = SA4_KEY_PREFIX + unit
             data = r.hgetall(key) if r else {}
             attempts = int(data.get("attempts", 0))
             if attempts and _time.time() - float(data.get("ts", 0)) < _sa4_backoff_delay(attempts):
                 result.setdefault("l3_skipped", []).append(unit)
                 continue
+            if need_reset:
+                _sa4_systemctl("reset-failed", unit)
             sr = _sa4_systemctl("start", unit)
             if sr is None or sr.returncode != 0:
                 result.setdefault("l3_failed", []).append(unit)
@@ -1304,14 +1444,14 @@ def sa4_reconciler():
                 r.hset(key, mapping={"attempts": attempts + 1, "ts": _time.time()})
                 r.expire(key, 86400)
             result.setdefault("l3_restarted", []).append(unit)
-            logger.warning("L3 意图调和：DB=running 但单元缺失，拉起 %s", unit)
+            logger.warning("L3 意图调和：期望源=%s 在但单元缺失/崩溃 failed，拉起 %s", source, unit)
             try:
-                notify("warn", "system", f"L3 拉起实盘单元: {unit}",
-                       "DB=running 但 systemd 无实例（任务 8 同款状态漂移），已自动拉起。"
-                       "若预期停用请先在 Web 停止任务（DB 状态同步更新）。")
+                notify("warn", "system", f"L3 拉起单元: {unit}",
+                       f"期望源={source}，systemd 无实例或崩溃 failed，已自动拉起。"
+                       "若预期停用：live-task 先在 Web 停止任务；hub 打维护标记或 systemctl mask。")
             except Exception:
                 pass
     except Exception as e:
         logger.warning("L3 意图调和失败: %s", e)
-    
+
     return result

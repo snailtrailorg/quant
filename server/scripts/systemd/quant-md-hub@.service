@@ -15,9 +15,15 @@ Environment=QT_QPA_PLATFORM=offscreen
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.md_hub.main
 WatchdogSec=90
 NotifyAccess=main
-Restart=always
+# 批5（2026-08-27）对齐 SA4（D3 退出矩阵）：on-failure + Prevent 覆盖
+#   78=EX_CONFIG 配置错（Failed 告警人工）/ 3=让位（对端在位不抢，交 L3 300s 轮询接管）/
+#   4=租约重试耗尽（同上——on-failure 下不 Prevent 会 30s 后再抢，5 次打穿 StartLimit 进 failed 黑洞）
+#   5=续租丢（对端接管）仍拉：重启正确；exit 0 正常停不对抗
+Restart=on-failure
+RestartPreventExitStatus=78 3 4
 RestartSec=30
-# 合约表尖峰同 direct runner（500-700M 预算）
+# 合约表尖峰同 direct runner（500-700M 预算）；MemoryHigh 先限流后击杀（12 号 §2.5 落地）
+MemoryHigh=768M
 MemoryMax=1G
 CPUQuota=50%
 StandardOutput=journal
