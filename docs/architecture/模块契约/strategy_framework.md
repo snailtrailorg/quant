@@ -15,8 +15,19 @@ server/src/strategy_framework/
 ├── factor.py       # Factor 基类 + BarContext + 注册制 + DSL 安全 eval + 自定义因子 DB 化 + 静态/动态区分 + AST 校验
 ├── adapters.py     # ExecutionAdapter + Order/Position + XTP/CryptoPerp/Backtest Adapter + 工厂
 ├── backtest.py     # BacktestEngine + BacktestResult/Trade + 防未来函数 + 数据预检 + symbol_params
-└── broker.py       # Broker ABC + XTP/Binance/OKXBroker + get_broker() + record_broker_usage()
+├── broker.py       # Broker ABC + XTP/Binance/OKXBroker + get_broker() + record_broker_usage() + build_xtp_setting()
+├── md_api_guard.py # GuardedXtpMdApi：XTP 行情 SDK 生命周期守卫（状态机+RLock，批 1）
+├── md_session.py   # MdSessionBase 契约 + XtpMdSession + is_trading_day/zombie_session（L2 会话层）
+└── runtime/        # 引擎运行时骨架（批 2；hub/worker 已迁，direct 冻结批 6 退役）
+    ├── loop.py     # EngineLoop + Hook：到期驱动钩子循环
+    ├── pulse.py    # SessionCounters + HeartbeatWriter
+    ├── mdlink.py   # MdSessionSupervisor（L2 会话监督器）
+    ├── alerts.py   # AlertPolicy + make_alert/make_guard/make_valkey 三件套
+    ├── subs.py     # SubscriptionManager（订阅 diff/幂等重放）
+    └── xsleeper.py # XReadSleeper（worker 双节奏 sleeper，批 4b）
 ```
+
+> 注：`runtime/` 拟改名 `enginekit/`（批 3c 计划未执行）——契约按现名 `strategy_framework/runtime/` 写。
 
 ---
 
@@ -111,6 +122,92 @@ class BacktestEngine:
     # 逐标的调用时由调用方合并 symbol_params（见 scheduler.tasks.backtest_symbol_task）
 ```
 
+### runtime/（引擎运行时骨架——批 2 落地；hub/worker 已迁，direct 冻结批 6 退役）
+
+> 详见 `模块契约/md_hub.md`（hub 侧接线+钩子表）与 `模块契约/strategy_runner.md`（worker 侧钩子表）。
+
+```python
+# loop.py —— 到期驱动钩子循环（废 while True + sleep + counter%N 相位耦合）
+@dataclass Hook: name / period(秒，0=每步) / fn / failure("log"|"exit")
+class EngineLoop:
+    __init__(*, name, step=5.0, sleeper=None, now=None, watchdog=None,
+                 event_engines=(), on_fatal=None, fatal_exit_code=1)
+    every(name, period, fn, failure="log")   # 注册钩子；重名拒绝（防静默覆盖）
+    run(stop_after_iterations=0)             # 永续：睡距最近到期(上限 step)→preflight→分发
+# sleeper/now 皆可注入（假时钟确定性测试零真实等待）；preflight=喂狗+事件线程存活(死→on_fatal+os._exit)
+
+# pulse.py —— 时段作用域计数 + 心跳
+class SessionCounters:                # 事件线程写 on_data / 主循环读（GIL 原子，vnxtpmd 全程持 GIL 已实证）
+    on_data(in_session)                       # tick/bar 到达
+    apply_edge(in_session) -> bool            # 沿处理：进沿 True+写 enter_ts+清基线（盘中首调视为进沿）
+    zombie(now=None, trading_day=True, grace=None) -> bool   # 委托 md_session.zombie_session（唯一实现，grace 透传）
+    stalled(now=None) -> float | None         # 断流秒数；时段内无基线 None
+class HeartbeatWriter:
+    __init__(r, key, ttl=90, base=None); beat(**extra) -> None   # hset+expire；失败仅警告；ts 兜底
+
+# mdlink.py —— L2 会话监督器
+class MdSessionSupervisor:
+    __init__(session, counters, alert, *, role="hub", policy: AlertPolicy=None,
+                 context=None, now=None)
+    tick(in_session, trading_day) -> None     # 永不抛。五段：沿→定时续航→反应式重登(症状+退避)→恢复
+                                              # →例行告警(零tick/断流双通道限频)；段首 stalled 源头门
+                                              # （非盘中恒 None，D1——防未来无条件喂引擎夜间误告警）
+
+# alerts.py —— 告警策略 + 三件套工厂
+@dataclass AlertPolicy: zombie_grace=600 / stall_error=300 / zero_tick_alert_period=150 /
+                        stall_alert_period=30 / recover_window=60     # 默认=hub 现值（批 2 迁移行为不变）
+make_alert() -> Callable[[str, str], None]   # safe_notify 包装，never-raise（告警通道故障不反噬主流程）
+make_guard(name, alert)                      # quant_common.guard 包装（事件线程 handler 守卫，F-26）
+make_valkey()                                # VALKEY_URL 连接，socket_timeout=3（监控件不被存储拖死）
+
+# subs.py —— 订阅管理
+class SubscriptionManager:
+    __init__(desired: Callable[[], set[str]], subscribe, unsubscribe)  # 纯逻辑不持周期（节奏由引擎注册）
+    current -> set[str]                       # 已同步集（拷贝；心跳 subs 计数用）
+    poll()                                    # diff 增删（先加后退；期望集读失败沿用旧集）
+    replay()                                  # 全量幂等重放：**先退 removed** 再全量订（防订阅泄漏）
+    on_reconnect_edge()                       # 重连沿强制重放（XTP 重连不恢复订阅）
+
+# xsleeper.py —— worker 双节奏 sleeper（批 4b）
+class XReadSleeper:                           # EngineLoop.sleeper 协议实现
+    __init__(r, stream, group, consumer, on_batch)
+    __call__(seconds)                         # block=min(500, 距到期 ms)、钳 1ms 禁 BLOCK 0
+# never-raise：边界全异常不外抛(含 on_batch)；Timeout 静默/其他吞后睡 1s 下轮再试(禁内旋)；
+# NOGROUP → os._exit(75) 交 systemd 重启→组重建；单线程模型(on_batch 在 loop 线程内联，禁后台线程)
+```
+
+### md_api_guard.py（XTP 行情 SDK 生命周期守卫，批 1——2026-08-25 SEGV 事故终结防御）
+
+```python
+class SdkState(Enum): IDLE / CREATED / LOGGED_IN / DEAD
+class SdkLifecycleError(RuntimeError)         # SDK 非法时刻调用——Python 拦截，永不到 C 层
+class GuardedXtpMdApi(XtpMdApi):              # 四入口（状态机 IDLE→CREATED→LOGGED_IN；引擎/回调两面 RLock 互斥）
+    connect(userid, password, client_id, server_ip, server_port,
+            quote_protocol, log_level)        # 唯一建 C 对象+首登入口（createQuoteApi→心跳 15s→login）
+    relogin() -> bool                         # 引擎面（严格态校验）：-2 官方序列（LOGGED_IN 先 logout 清场再 login）
+    login_server() -> bool                    # SDK 回调线程面（父类 onDisconnected 调用）——永不抛
+    subscribe(req)                            # 软防护：非 LOGGED_IN 态 no-op（幂等重放需要，勿抛）
+    close()                                   # DEAD 落位（幂等；连接在则先尽力 logout 清服务端会话槽）
+    state -> SdkState                         # onDisconnected 余音甄别：登录后 5s 内断开回声跳过（防新鲜会话 churn）
+```
+
+### md_session.py（L2 会话层契约，韧性分层模型——L1 systemd / L2 本模块 / L3 reconciler）
+
+```python
+class MdSessionBase:            # 引擎只依赖本契约；平台知识（日切时刻/重登手法）封子类——接新平台=实现子类
+    renew() -> bool                     # 换新会话（幂等；返回是否发起）
+    schedule_due(now=None) -> bool      # 定时续航时刻已到（子类持时刻表+当日去重）
+    retry_ready(now=None) -> bool       # 反应式重登退避已到点
+    on_recovered()                      # 数据恢复清退避（_last_retry_ts 一并清——防恢复日志刷屏）
+class XtpMdSession(MdSessionBase):      # 续航窗口 09:10-09:30（盘中启动不续航——防新鲜会话 churn）；
+                                       # 反应式退避 30s 指数封顶 300s；续航未确认当日标记回滚（窗口内按退避重试）
+is_trading_day(today=None) -> bool      # 交易日判定+按日缓存（D2 三坑规约：键=参数 date/只缓存 DB 成功读/
+                                       # _reset_td_cache() 测试钩子；日历盘中变更最迟次日生效——知情落档）
+zombie_session(sess_now, sess_ticks, sess_enter_ts, now, trading_day, grace=600) -> bool
+                                       # 僵尸会话判定唯一实现（时段+交易日+零 tick 超宽限；有过 tick 再断流不在此列）
+set_config_provider(_market_config_provider)   # quant_common.session 的市场配置回调（DB 侧注入，层 0 不碰 DB）
+```
+
 ---
 
 ## 二、内部 API（不保证稳定）
@@ -132,7 +229,10 @@ class BacktestEngine:
 | `data_platform.schema` | `to_vt_symbol`（adapters） |
 | `data_platform` | `get_bars`（回测取数） |
 | `data_platform.db` | 自定义因子 CRUD（factor_def 表） |
-| 外部 | `vnpy`（XTPAdapter 延迟 import）/ `numpy` / `pandas` |
+| `data_platform`（lazy） | md_session：市场配置回调/交易日历（is_trading_day 缓存） |
+| `alert_notify.notify` | runtime.alerts：safe_notify（make_alert/make_guard） |
+| `quant_common`（guard/session） | runtime.alerts 守卫包装；md_session 注册市场配置回调 |
+| 外部 | `vnpy`（XTPAdapter/md_api_guard 延迟 import）/ `numpy` / `pandas` / `redis`（make_valkey） |
 
 ---
 
@@ -141,7 +241,8 @@ class BacktestEngine:
 | 调用方 | 调什么 |
 |---|---|
 | `web_api.main` | 策略 CRUD + 实盘任务 CRUD（`/api/live-task`）+ 回测 + 因子 CRUD + 参数校验 |
-| `strategy_runner`（C2） | 读 live_task + strategy_snapshot → `Strategy.from_config` → `on_bar` |
+| `md_hub`（批 2 起） | runtime 五模块（loop/pulse/mdlink/alerts/subs）+ `GuardedXtpMdApi` + `XtpMdSession` + `build_xtp_setting` |
+| `strategy_runner`（C2） | 读 live_task + strategy_snapshot → `Strategy.from_config` → `on_bar`；批 4 起另消费 `GuardedXtpMdApi`/`XtpMdSession`/runtime（loop·pulse·alerts·xsleeper，worker 侧） |
 | `scheduler.tasks` | `backtest_symbol_task` 合并 symbol_params → `BacktestEngine.run` |
 | `astock_analysis` | `DailySelectionEngine`（用 `list_factors(static_only=True)`） |
 
@@ -198,7 +299,8 @@ class BacktestEngine:
 
 ---
 
-## 修订记录
+## 最近变更
+- 2026-08-27（批 4c）：批 3 挂账清偿——runtime 六模块（含批 4b xsleeper）/md_api_guard/md_session public 面回写；3c 改名 enginekit 注记（未做，契约按现名）；依赖/被调表补 runtime 消费方
 - 2026-08-09 初版
 - 2026-08-11 因子平台化（DB 自定义）+ 静态/动态区分 + Python 代码框 + 参数定义系统 + 策略与任务分离（live_task）
 

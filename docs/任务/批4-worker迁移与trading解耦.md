@@ -24,6 +24,7 @@
 | `server/src/strategy_runner/hub_worker.py` | 重写 | 437→~280 行：`XReadSleeper` 接 `EngineLoop(sleeper=…)`；定时段（快照/熔断沿/因子重算/TD 重连沿/事件线程检查/心跳）全部 `loop.every()`；流消费本体留 run() |
 | `server/src/strategy_runner/main.py` | 修改 | direct **循环结构不动**；交易件内联块改调 trading.py（~-150 行重接）；worker 分派接线新 hub_worker（v2 措辞消『不动 vs 删』矛盾）|
 | `server/src/strategy_framework/runtime/` | 小改 | 见"设计决策"三条 |
+| `deploy/inventory/group_vars/quant-staging.yml` | 修改 | staging 波次源 static→db（对齐 prod 同走 DB 真相源/quant-dbro wrapper，彩排即验证该通道，消第十坑盲区；static 通道保留可手动覆写） |
 | `server/tests/test_trading.py` | 新建 | 六共享件单测（从既有散测试收编+补）；**v2 如实声明**：`test_position_snapshot.py:158-170` 是源码文本断言（直读 main/hub_worker 源码找 `_flush_positions` 内联），内联挪走即红——**挂点测试须改接 trading.py**（"原测试零修改"不实，双盲 B 实锤）；test_hub_arch 的 frozen/buy_ok import 同理改挂 |
 | `server/scripts/run_worker_smoke.py` | 新建 | G2 道具（v2 补）：本地 fakeredis 流+stub TD 起真 worker 进程，断言 XReadSleeper 节奏/钩子分发/心跳字段——批 2 曾因缺真机冒烟判 P1 的教训不复犯 |
 | `server/tests/test_hub_worker_migration.py` | 新建 | XReadSleeper 节奏/钩子接线矩阵 |
@@ -80,7 +81,7 @@ Restart=on-failure 拉起 = F-36 churn 倒退）。设计：
 ```python
 def _stop_hook():          # loop.every("stop-check", period, _stop_hook)
     if trading.stop_due(...):
-        # finally 等价清理（现 worker finally L432-437 语义）：xgroup_del + 告警
+        # finally 等价清理（现 worker finally L432-437 语义）：xgroup_del 清理（告警仅 logger.info——旧版等价，无外推告警）
         ...; os._exit(0)   # 正常停止码——Restart=on-failure 不拉起（SA4 分类）
 ```
 
