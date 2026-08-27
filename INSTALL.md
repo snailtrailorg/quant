@@ -1,14 +1,27 @@
-# 安装指南（组件级手动装配）
+# 安装指南（独立实例部署手册）
 
-> **读者定位（2026-08-28 明确）**：本指南是**组件级手动装配手册**——写给需要理解系统怎么拼起来、
-> 做排障或最小试用的开发者。**正式安装的唯一路径是 `deploy/` 工件化管道**（bootstrap 装机+
-> releases 不可变工件+自动回滚，操作手册 `deploy/DEPLOY.md`）——不是"二选一"，是角色不同。
-> 手动装配的布局与 systemd 单元 expectations 有差异（工件化 venv/.env 在 `shared/`）。
->
-> **产品化重写待办**：本文件未来将重写为"独立实例部署者手册"（单一路径+前置条件+首次配置，
-> 删手动装配）——触发点=批 6 收口/首个独立实例交付时（见 flow/待办.md 常规线）。
+> **读者**：独立部署本平台一套实例的人（自有服务器/交付场景）。假设读者不了解本项目内部历史，
+> 只需要：按步骤得到一套运行中的系统。
+> **姊妹文档**：装完后日常发布/回滚 → `deploy/DEPLOY.md`；日常使用 → `docs/操作指导/索引.md`。
+> **诚实声明**：本手册由在产形态反推成文（2026-08-28），各阶段组件均在生产验证过，
+> 但"干净机器整链首装"未演练——首个独立实例交付时请按册走一遍并把偏差回改本文件（守则：过/未验分列）。
 
-## 1. 环境要求
+## 0. 安装弧总览
+
+| 阶段 | 在哪台机器 | 干什么 | 一次性？ |
+|---|---|---|---|
+| A 基础设施 | 服务器 | 系统包/PG+pgvector/Valkey/Nginx | 是 |
+| B 管道装机 | 控制机→服务器 | Ansible bootstrap：deploy 用户+sudoers+9 wrapper+9 systemd 单元 | 是 |
+| C 应用首装 | 控制机+服务器 | shared 层（.env/venv）→ 首次 release（建 schema）→ 前端 | 是 |
+| D 首次配置 | 浏览器 | 改密/数据源/AI/IM/告警 | 是 |
+| E 验证 | 任意 | healthz/心跳/数据全量同步 | 是 |
+| 日常 | 控制机 | 发布/回滚三命令+备份 | 持续 |
+
+预期总时长：基础设施+装机约 1 小时；数据全量同步 30-60 分钟（后台）。
+
+---
+
+## 1. 前置条件
 
 ### 1.1 服务器规格
 
@@ -17,433 +30,211 @@
 | CPU | 2 核 | 4 核+ |
 | 内存 | 4 GB | 8 GB+ |
 | 磁盘 | 20 GB | 40 GB+（历史数据约 3GB） |
-| 操作系统 | 任意现代 Linux（RHEL/CentOS/Debian/Ubuntu 等） | RHEL 系（dnf/yum）或 Debian 系（apt） |
+| OS | RHEL 系（dnf）或 Debian 系（apt），任意现代发行版 | Alibaba Cloud Linux 3 / Rocky 9 |
 
 ### 1.2 软件依赖
 
-| 软件 | 版本要求 | 说明 |
+| 软件 | 版本 | 说明 |
 |---|---|---|
-| **Python** | 3.10 或 3.11（不支持 3.14，vnpy 兼容性） | 实盘交易需 vnpy_xtp 编译 |
-| **PostgreSQL** | 15+（推荐 18） | 需 pgvector 扩展 |
-| **Redis / Valkey** | 6.0+ | Valkey 是 Redis 协议兼容的开源替代 |
-| **Node.js** | 18+ | 仅前端构建用，服务器可不需要 |
-| **Web 服务器** | Nginx 或 Apache | 反代 FastAPI + 静态文件 |
-| **C 编译器 + Python dev** | gcc / python3-dev | vnpy_xtp 编译需要 |
+| Python | **3.10 或 3.11（不支持 3.14）** | vnpy 4.4.0 的 PySide6 pin 所致；纯 Python 组件 3.10-3.13 均可，实盘卡点在 vnpy_xtp |
+| PostgreSQL | 15+（推荐 18） | 需 **pgvector** 扩展 |
+| Valkey（或 Redis） | 6.0+ | Valkey 是 Redis 协议兼容开源替代 |
+| Node.js | 18+ | 仅前端构建用，可装在控制机，服务器不需要 |
+| Nginx | 任意稳定版 | 反代 API + 前端静态 |
+| gcc / python3-devel | — | vnpy_xtp 编译（仅实盘需要） |
 
-> **vnpy_xtp 注意**：如需 A 股/可转债/ETF 实盘交易（中泰 XTP），需编译 vnpy_xtp。纯 Python 依赖（FastAPI/Celery 等）在 Python 3.10-3.13 全部兼容，卡点仅在 vnpy 的 PySide6 pin。
+### 1.3 账号与密钥清单（开工前备齐）
+
+- [ ] **Tushare token**（数据源，[tushare.pro](https://tushare.pro) 注册获取；200 积分即可跑日线）
+- [ ] **LLM API key** 至少一个（DeepSeek 主 / GLM 备——运行期 AI 只用国内模型）
+- [ ] **根密钥 SECRET_KEY**：`python3 -c "import secrets; print(secrets.token_urlsafe(48))"` 现场生成——HKDF 派生 JWT 签名钥+凭证加密钥，**丢了所有已存凭证不可解密，务必备份**
+- [ ] 可选：中泰 XTP 账户+SDK（A 股/可转债/ETF 实盘）；飞书自建应用（IM 机器人）
+- [ ] 控制机 → 服务器 root 的 ssh 一次（仅 bootstrap 阶段用；此后 root 退出部署通道）
+
+### 1.4 控制机要求
+
+git / python3 / 能 ssh 到服务器。其余由仓库 `deploy/requirements.txt` 自装。
 
 ---
 
-## 2. 系统准备
+## 2. 阶段 A · 基础设施（服务器，root）
 
-### 2.1 安装系统包
+### 2.1 系统包
 
-**RHEL 系（Fedora / CentOS / Rocky / AlmaLinux / Alibaba Cloud Linux）：**
+**RHEL 系：**
 ```bash
-sudo dnf install -y postgresql-server postgresql-devel redis python3.11 python3.11-devel gcc gcc-c++ make
+dnf install -y postgresql-server postgresql-devel valkey nginx git rsync
+# Python 3.11（若系统默认非 3.10/3.11）：dnf install -y python3.11 python3.11-devel gcc gcc-c++ make
+```
+**Debian 系：**
+```bash
+apt install -y postgresql postgresql-server-dev-all valkey nginx git rsync
+apt install -y python3.11 python3.11-dev gcc g++ make   # 按发行版调整
 ```
 
-**Debian 系（Ubuntu / Debian）：**
-```bash
-sudo apt update && sudo apt install -y postgresql postgresql-server-dev-all redis-server python3.11 python3.11-dev gcc g++ make
-```
-
-### 2.2 启动 PostgreSQL
+### 2.2 PostgreSQL：初始化 + pgvector + 角色/库
 
 ```bash
-# RHEL 系
-sudo postgresql-setup --initdb
-sudo systemctl enable --now postgresql
+postgresql-setup --initdb          # RHEL 系；Debian 系安装即初始化
+systemctl enable --now postgresql valkey nginx
 
-# Debian 系通常自动初始化
-sudo systemctl enable --now postgresql
-```
+# pgvector：按发行版装（dnf install postgresql16-vector / apt install postgresql-16-pgvector，
+# 或源码：https://github.com/pgvector/pgvector）
 
-确保 `pg_hba.conf` 允许本地密码连接（`md5` 或 `scram-sha-256`）。
-
-### 2.3 创建数据库和用户
-
-```bash
-sudo -u postgres psql <<SQL
-CREATE USER quant WITH PASSWORD '你的强密码';
+sudo -u postgres psql <<'SQL'
+CREATE ROLE quant LOGIN PASSWORD '自定强密码';
 CREATE DATABASE quant OWNER quant;
 \c quant
-CREATE EXTENSION IF NOT EXISTS vector;  -- pgvector
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 SQL
 ```
 
-### 2.4 启动 Redis
+> Valkey/PG 仅监听 127.0.0.1 即可（平台组件全部同机）；分库约定：Valkey db4=业务 / db5=celery broker / db6=celery result（多应用共机时避开他方 db）。
+
+### 2.3 Nginx
+
+仓库提供样例 `server/scripts/nginx/quant.conf`——复制到 `/etc/nginx/conf.d/` 后改两处：
+`server_name` 与证书路径（HTTPS 用 certbot 或自有证书；前端静态 root 见 §4.3 说明，路径变量化为你的部署根）。
+
+---
+
+## 3. 阶段 B · 部署管道装机（控制机，一次性）
 
 ```bash
-sudo systemctl enable --now redis      # 或 redis6 / valkey
-# 验证
-redis-cli ping                        # PONG
+git clone <你的仓库地址> && cd quant/deploy
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+```
+
+**指向你的服务器**：`deploy/inventory/quant-prod.yml` 改 `ansible_host`（IP/域名）与 `ansible_user`；
+`deploy/inventory/group_vars/all.yml` 按需改部署根路径（默认 `/data/websites/<你的域>/quant`）。
+
+**bootstrap（特权层装机）**：
+```bash
+.venv/bin/ansible-playbook -i inventory/quant-prod.yml playbooks/bootstrap.yml -e bootstrap_enabled=true
+```
+自动完成：deploy 用户+quant 组、sudoers 白名单、9 只特权 wrapper（`/usr/local/sbin/quant-*`）、
+`run-current`、9 个 systemd 单元模板（`server/scripts/systemd/` 为真相源）、目录权限矩阵
+（`releases/` `var/` `shared/`）。此后 **root/michael 退出部署通道**。
+
+验证：
+```bash
+.venv/bin/ansible quant-prod -i inventory/quant-prod.yml -m shell -a \
+  'id deploy; ls /usr/local/sbin/ | grep quant- | wc -l; systemctl list-unit-files "quant-*" --no-legend | wc -l'
+# 预期：deploy 用户存在 / wrapper ≥9 / 单元模板 ≥9
 ```
 
 ---
 
-## 3. 部署后端
+## 4. 阶段 C · 应用首装（一次性）
 
-### 3.1 克隆代码
+### 4.1 shared 层
 
-```bash
-git clone <你的仓库地址> /opt/quant
-cd /opt/quant/server
-```
-
-### 3.2 创建虚拟环境
-
-```bash
-python3.11 -m venv venv
-source venv/bin/activate
-# 注：工件化布局（deploy/ 管道）venv 在 shared/venv 并由 wrapper 以 quant 运行——
-# 手动路径仅适用于不入 systemd 单元的裸跑/试用
-```
-
-### 3.3 安装依赖
-
-```bash
-pip install -r requirements.txt
-```
-
-> 如在中国大陆，可加镜像加速：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt`
-
-### 3.4 配置环境变量
-
-```bash
-bash scripts/init-env.sh
-```
-
-交互式填写：
-- PostgreSQL 连接地址和密码
-- Redis/Valkey 地址
-- Tushare 数据源 token
-- AI 模型 API key（DeepSeek/火山方舟/GLM，可后配）
-- 数据同步起始日期（默认全量，磁盘紧张改 `20200101`）
-
-或手动创建 `.env` 文件（参照 `.env.example`）：
+**`.env`**（quant 用户属主 600，deploy 不可读）：从 `server/.env.example` 复制为
+`<部署根>/shared/.env`，逐键填写：
 
 ```ini
-# 数据库
 QUANT_DB_URL=postgresql://quant:密码@127.0.0.1:5432/quant
-
-# Redis
-VALKEY_URL=redis://127.0.0.1:6379/0
-
-# 数据源
-TUSHARE_TOKEN=你的tushare_token
-
-# AI 模型（至少配一个）
-DEEPSEEK_API_KEY=你的deepseek_key
+VALKEY_URL=redis://127.0.0.1:6379/4        # db4=业务（§2.2 约定）
+CELERY_BROKER_URL=redis://127.0.0.1:6379/5
+CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/6
+TUSHARE_TOKEN=...
+DEEPSEEK_API_KEY=...                        # LLM 至少一个；GLM 备可选
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-
-# 根密钥（推荐，自动派生 JWT_SECRET + ENCRYPTION_KEY）
-# 生成：python3 -c "import secrets; print(secrets.token_urlsafe(48))"
-SECRET_KEY=你的根密钥
-
-# 实盘开关（生产环境设 false）
-ENABLE_LIVE_TRADING=false
+SECRET_KEY=...                              # §1.3 生成的根密钥，务必备份
+ENABLE_LIVE_TRADING=false                   # 三级开关的总闸；装完默认关
+# SYNC_START_DATE=20200101                  # 磁盘紧张时收窄全量起点
 ```
 
-### 3.5 初始化数据库 Schema
+**venv**（`<部署根>/shared/venv/`，quant 属主）：
+```bash
+python3.11 -m venv <部署根>/shared/venv
+<部署根>/shared/venv/bin/pip install -r server/requirements.txt
+```
+
+**可选：vnpy_xtp 编译**（仅 A 股/可转债/ETF 实盘）：
+```bash
+# 中泰 XTP SDK（.so）下载放 server/vendor/xtp/lib/（xtp.zts.com.cn/service/download）
+PATH=<部署根>/shared/venv/bin:$PATH CPATH=server/vendor/xtp/include \
+LIBRARY_PATH=server/vendor/xtp/lib \
+<部署根>/shared/venv/bin/pip install --no-build-isolation vnpy_xtp
+```
+
+### 4.2 首次发布（建 schema + 起服务）
 
 ```bash
-cd /opt/quant/server
-alembic upgrade head                          # 创建所有表
-psql -d quant -f scripts/init-seed.sql       # 插入同步配置种子
+cd deploy && .venv/bin/ansible-playbook -i inventory/quant-prod.yml playbooks/release.yml
+```
+管道自动：代码切片同步 releases/<id> → 导入冒烟 → pip 指纹比对 → **alembic upgrade head（建全表）**
+→ 原子切换 server 链接 → 波次起服务 → postverify（healthz/readyz/心跳/版本收敛）。
+失败自动回滚。发布后三证核对见 `deploy/DEPLOY.md`。
+
+**种子数据（管道外，一次性）**：
+```bash
+# 服务器上（quant 身份可连库）：
+psql -U quant -d quant -f <部署根>/server/scripts/init-seed.sql
 ```
 
-### 3.6 编译 vnpy_xtp（仅实盘需要）
+### 4.3 前端（管道不含前端——每次发版都要做）
 
 ```bash
-# 仅当需要 A 股/可转债/ETF 实盘交易时
-# 需下载中泰 XTP SDK（.so 文件）放到 vendor/xtp/lib/
-# 参考: https://xtp.zts.com.cn/service/download
-PATH=venv/bin:$PATH CPATH=vendor/xtp/include LIBRARY_PATH=vendor/xtp/lib \
-    pip install --no-build-isolation vnpy_xtp
+# 控制机构建：
+cd web && npm install && npm run build          # 产物 dist/
+# 上传到服务器前端目录（Nginx 静态 root，独立于 releases 版本树）：
+rsync -a --delete dist/ <服务器>:<部署根>/web/
 ```
+> Ansible 管道只管 `server/` 五切片（src/migrations/scripts/alembic.ini/requirements.txt）；
+> 前端是独立静态目录，发版节奏自行掌握（`--delete` 安全：目录内只有构建产物）。
 
 ---
 
-## 4. 部署前端
+## 5. 阶段 D · 首次配置（浏览器）
 
-### 4.1 构建
+1. 打开 `https://<你的域>` → 默认管理员 **admin / admin123 → 立即改密**
+2. 管理设置 → 数据源管理：Tushare token 入库（积分档下拉选 200 档即可起步；升级积分一键切档）
+3. 管理设置 → AI 模型：添加 DeepSeek（主）/GLM（备），priority 小者优先自动容灾
+4. 可选：IM 接入向导（飞书扫码）；告警通道（邮件等）
+5. 数据管理 → 全量同步（约 30-60 分钟，后台跑；进度看数据完整性看板）
+
+## 6. 阶段 E · 验证
 
 ```bash
-cd /opt/quant/web
-npm install
-npm run build    # 产物在 dist/
+curl -s https://<你的域>/healthz        # {"status":"ok",...}
+curl -s https://<你的域>/readyz         # 就绪探针
+sudo -u quant /usr/local/sbin/quant-hbcheck   # 行情 hub 心跳（8 字段）——需已起 hub 单元
 ```
-
-### 4.2 配置 Web 服务器
-
-**Nginx 示例：**
-```nginx
-server {
-    listen 443 ssl;
-    server_name your-domain.com;
-
-    ssl_certificate     /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    # 前端静态文件
-    root /opt/quant/web/dist;
-    location / {
-        try_files $uri $uri/ /index.html;
-    }
-
-    # API 反代
-    location /api/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    # WebSocket
-    location /ws/ {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-```
-
-**Apache 示例：** 参见 `server/scripts/nginx/quant.conf`
+浏览器走一遍：登录/看板有数/因子页/回测一次冒烟。到此安装完成。
 
 ---
 
-## 5. 配置 systemd 服务
+## 7. 日常运维
 
-### 5.1 Web API
+- **升级/回滚**：`deploy/DEPLOY.md` 三命令（彩排→发布→回滚）——不要手工改 releases 目录
+- **备份**：`server/scripts/backup-db.sh`（pg_dump+gzip 保 7 天）入 crontab：`0 2 * * * <路径>/backup-db.sh`
+- **日志**：`journalctl -u "quant-*" -n 100 --no-pager`（九单元模板，`@` 后为实例名）
+- **实盘开启**：三级开关（.env 总闸 `ENABLE_LIVE_TRADING` + Web 分项 + 策略 `backtest_verified`）——见操作指导·实盘册
 
-```bash
-sudo tee /etc/systemd/system/quant-web-api.service > /dev/null <<'EOF'
-[Unit]
-Description=Quant Web API
-After=network.target postgresql.service redis.service
-
-[Service]
-Type=simple
-User=quant
-WorkingDirectory=/opt/quant/server
-EnvironmentFile=/opt/quant/server/.env
-ExecStart=/opt/quant/server/venv/bin/uvicorn src.web_api.main:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-### 5.2 Celery Worker + Beat
-
-```bash
-sudo tee /etc/systemd/system/quant-celery-worker.service > /dev/null <<'EOF'
-[Unit]
-Description=Quant Celery Worker
-After=network.target redis.service
-
-[Service]
-Type=simple
-User=quant
-WorkingDirectory=/opt/quant/server
-EnvironmentFile=/opt/quant/server/.env
-ExecStart=/opt/quant/server/venv/bin/celery -A src.scheduler.app worker -c 2 --loglevel=info
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo tee /etc/systemd/system/quant-celery-beat.service > /dev/null <<'EOF'
-[Unit]
-Description=Quant Celery Beat
-After=redis.service
-
-[Service]
-Type=simple
-User=quant
-WorkingDirectory=/opt/quant/server
-EnvironmentFile=/opt/quant/server/.env
-ExecStart=/opt/quant/server/venv/bin/celery -A src.scheduler.app beat --loglevel=info
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-### 5.3 策略实盘进程（模板，按需启用）
-
-```bash
-sudo tee /etc/systemd/system/quant-strategy@.service > /dev/null <<'EOF'
-[Unit]
-Description=Quant Strategy %i
-After=network.target postgresql.service redis.service
-
-[Service]
-Type=simple
-User=quant
-WorkingDirectory=/opt/quant/server
-EnvironmentFile=/opt/quant/server/.env
-Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/opt/quant/server/venv/bin/python -m src.strategy_runner.main --id %i
-Restart=always
-RestartSec=10
-MemoryMax=512M
-CPUQuota=50%
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Web 控制 systemd（polkit 规则）
-sudo tee /etc/polkit-1/rules.d/10-quant-strategy.rules > /dev/null <<'EOF'
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.systemd1.manage-units" &&
-        action.lookup("unit").startsWith("quant-strategy@") &&
-        subject.user == "quant") {
-        return polkit.Result.YES;
-    }
-});
-EOF
-```
-
-### 5.4 启动全部服务
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now quant-web-api quant-celery-worker quant-celery-beat
-
-# 验证
-curl http://127.0.0.1:8000/health    # {"status":"ok","version":"0.1.0"}
-```
-
-首次启动自动创建默认管理员（admin/admin123，**首次登录请改密码**）。
-
----
-
-## 6. 飞书机器人（可选）
-
-如需飞书移动干预（AI 查询 + 熔断确认）：
-
-1. 登录 Web -> 系统设置 -> 飞书配置 -> 扫码接入
-2. 创建 systemd 服务：
-
-```bash
-sudo tee /etc/systemd/system/quant-feishu-bot@.service > /dev/null <<'EOF'
-[Unit]
-Description=Quant Feishu Bot %i
-After=network.target redis.service
-
-[Service]
-Type=simple
-User=quant
-WorkingDirectory=/opt/quant/server
-EnvironmentFile=/opt/quant/server/.env
-Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/opt/quant/server/venv/bin/python -m src.feishu_bot.ws_client %i
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now quant-feishu-bot@<飞书配置ID>
-```
-
----
-
-## 7. 数据初始化
-
-### 7.1 全量同步（约 30-60 分钟）
-
-登录 Web -> 数据管理 -> 选择同步类型 -> "全量同步全部"。
-
-或命令行：
-```bash
-cd /opt/quant/server
-source venv/bin/activate
-python -c "from src.data_sync.engine import sync; sync('astock_daily')"
-```
-
-### 7.2 配置 AI 模型（可选但推荐）
-
-登录 Web -> 系统设置 -> AI 模型 -> 添加：
-- Provider: `deepseek` / `ark` / `glm`
-- Model: `deepseek-chat` / `ark-code-latest` / `glm-4-flash`
-- API Key: 你的 key
-- Base URL: 模型 API 地址
-- Priority: 数字越小越优先（多模型 fallback）
-
----
-
-## 8. 常见问题
+### 常见问题
 
 | 症状 | 原因 | 解决 |
 |---|---|---|
-| `psql: password authentication failed` | DB 密码不对 | 检查 `.env` 的 `QUANT_DB_URL` |
-| `relation "xxx" does not exist` | schema 未初始化 | `alembic upgrade head` |
-| 前端白屏 | 路由 history 未 fallback | Web 服务器配置 `try_files $uri /index.html` |
-| Celery 不执行 | Redis 未连 | `redis-cli ping` 确认；检查 `VALKEY_URL` |
-| `vnpy_xtp import error` | vnpy_xtp 未编译 | 参见 §3.6（仅实盘需要） |
-| 飞书无回复 | AI 模型配额用完 | Web 加 fallback 模型（低 priority） |
-| 磁盘满 | 历史数据 3GB | `.env` 改 `SYNC_START_DATE=20200101` |
-| LLM 无响应 | API key 无效/配额满 | Web -> AI 模型 -> 测试；加 fallback |
+| `psql: password authentication failed` | DB 密码不对 | 查 `shared/.env` 的 `QUANT_DB_URL` |
+| `relation "xxx" does not exist` | schema 未建 | 首次发布未跑/失败——重跑 release（含 alembic） |
+| 前端白屏 | 路由 history 未 fallback | Nginx `try_files $uri $uri/ /index.html` |
+| Celery 不执行 | Valkey 未连 | `valkey-cli ping`；查 `VALKEY_URL` db 号 |
+| `vnpy_xtp import error` | 未编译 | §4.1 可选段（仅实盘需要） |
+| LLM 无响应 | key 无效/配额满 | Web→AI 模型→测试；加低 priority 备模型 |
+| 磁盘满 | 历史数据增长 | `.env` 收窄 `SYNC_START_DATE`；旧 releases 自动 GC 保 5 版 |
+| 发布失败自动回滚 | 见管道日志八阶段哪一段 | `deploy/DEPLOY.md` 已知边界（crash-loop 冷却窗等） |
+
+## 8. 安全清单
+
+- `shared/.env` 属主 quant 600（bootstrap 已设）；SECRET_KEY **离线备份**（丢失=已存凭证全部不可解）
+- 默认 admin 密码首登必改；`ENABLE_LIVE_TRADING` 装机默认 false
+- PG/Valkey 仅监听 127.0.0.1；Nginx 上 HTTPS
+- API 密钥全部 AES 加密入库（自动）；deploy 用户不可读 `.env`（三权分立见 deploy/DEPLOY.md）
+- 定期跑备份脚本并演练过一次恢复
 
 ---
 
-## 9. 日常运维
-
-### 更新代码
-
-```bash
-cd /opt/quant
-git pull
-cd server && source venv/bin/activate && pip install -r requirements.txt
-alembic upgrade head    # 如有新迁移
-sudo systemctl restart quant-web-api quant-celery-worker quant-celery-beat
-```
-
-### 更新前端
-
-```bash
-cd /opt/quant/web
-npm run build
-# rsync dist/ 到 Web 服务器静态目录
-```
-
-### 数据库备份
-
-```bash
-# 参见 server/scripts/backup-db.sh（pg_dump + gzip + 保留 7 天）
-# 加入 crontab:
-crontab -e
-# 0 2 * * * /opt/quant/server/scripts/backup-db.sh
-```
-
-### 日志查看
-
-```bash
-sudo journalctl -u quant-web-api -n 50 --no-pager
-sudo journalctl -u quant-celery-worker -n 50 --no-pager
-sudo journalctl -u quant-feishu-bot@<id> -n 50 --no-pager
-```
-
----
-
-## 10. 安全建议
-
-- `.env` 文件 `chmod 600`，不提交到 git
-- 修改默认 admin 密码
-- `ENABLE_LIVE_TRADING=false` 生产环境默认关闭
-- 定期备份数据库
-- Web 服务器配置 HTTPS（certbot/Let's Encrypt）
-- Redis 仅监听 127.0.0.1
-- API 密钥全部加密存储（系统自动 AES），不暴露明文
-- 密钥管理：一个 `SECRET_KEY` 环境变量，HKDF 派生 `JWT_SECRET`（JWT 签名）和 `ENCRYPTION_KEY`（Fernet 加密凭证）。**不要丢失** `SECRET_KEY`——丢失后所有已加密凭证（XTP 密钥、Tushare token、LLM API key 等）无法解密
-- 生成 SECRET_KEY：`python3 -c "import secrets; print(secrets.token_urlsafe(48))"`
+*本手册随平台演进修订（批 6 收口/direct 退役等形态变化时更新对应段）；历史手动装配版在 git 史可考。*
