@@ -121,7 +121,9 @@ def _load_ds_params(provider: str) -> tuple[int, dict]:
 
 
 def _save_ds_params(dsid: int, params: dict) -> None:
-    """params 整体写回（读-改-写，单行 UPDATE 无并发窗口风险）。"""
+    """params 整体写回（读-改-写）。双盲补审修正：有 last-writer-wins 窗口
+    （两 admin 并发、或 cb 与 rate_limits 两端点并发丢一边修改）——admin 低频可接受，
+    根治需 SELECT FOR UPDATE 同事务。"""
     with get_conn() as conn:
         conn.execute("UPDATE data_source_config SET params=%s, updated_at=now() WHERE id=%s",
                      (json.dumps(params, ensure_ascii=False), dsid))
