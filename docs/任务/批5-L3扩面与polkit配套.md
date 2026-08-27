@@ -41,10 +41,12 @@
 - 熔断②：**维护标记** `quant:maintenance:md-hub` Valkey 键在场 → 跳过+告警一次。**db 号以 shared/.env VALKEY_URL 为准（=db0，v2 修正原 -n 4 笔误——照抄即哑炮）**：`valkey-cli -u "$(grep VALKEY_URL shared/.env | cut -d= -f2-)" SET quant:maintenance:md-hub 1 EX 14400`（默认 TTL 4h 防遗忘=hub 长期裸奔）
 - 熔断③：退避计数与 L1 共键 `quant:sa4:backoff:quant-md-hub@quant.service`；**stable-clear 循环随期望表泛化**（v2 修：原只扫 live-task 模式——hub 稳定跑 10min 后计数不清零，只挂一次也会被退避拖到 3600s）
 - **failed 态归位（v2 P0-1 根修）**：L3 对 failed 态不再排除——按 `ExecMainStatus` 区分：`=78`（EX_CONFIG 配置错）跳过+告警人工；**其他（含 StartLimit 崩溃）→ reset-failed+start 走同一套三重熔断+退避**。L1 的 `_sa4_units` 模式随期望表一并泛化（`quant-live-task@*` + `quant-md-hub@*` + `quant-strategy@*`），限定范围解冻此一处
+- **L1/L3 对 failed 的职责边界（v2.1 复核 B 定）**：L1 段只处理 **live-task** 的 Failed（现状不动——它有完整的退避/清零/已停检查）；**md-hub/strategy 的 failed 归 L3 段处理**（走三重熔断+ExecMainStatus 区分）。共享退避键幂等防双拉：先到者写计数，后到者退避窗内跳过
 
 ### D2：strategy@* 的期望语义——**v2 改判：systemctl is-enabled 显式意图（镜像实锤否决原案）**
 - **原案被否决**：双盲 A/B 各自查镜像库实锤——`strategy_config` 有 2-3 行 `enabled=true` 无 live_task 关联（editest/livetest/test-live-pipeline），**原规则部署首周期即拉起废 runner**（XTP 400-600M/个，1.8G 生产机容量风险；backtest_verified=f 只挡下单不挡进程）
-- **v2 定案**：判定源=**`systemctl is-enabled quant-strategy@{id}`**（操作者显式 `systemctl enable` 过才拉——废架构单元没人 enable 过，零误拉）。enabled DB 行不再作为拉起依据，仅作信息注记
+- **v2 定案**：判定源=**`systemctl is-enabled quant-strategy@{id}` 且无 live_task 关联**（v2.1 复核 B 补去重护栏——is-enabled 与 live_task 并存时防双拉；废架构单元没人 enable 过，零误拉）。enabled DB 行不再作为拉起依据，仅作信息注记
+- systemctl 侧残留同步审计（v2.1 补）：`systemctl list-unit-files 'quant-strategy@*'`——与 DB 审计互为镜像，"没人 enable 过"须实证非假设
 - **部署前置审计步骤**（v2 新增，G4 演练①前置）：
   ```sql
   SELECT id FROM strategy_config WHERE enabled AND id NOT IN (SELECT strategy_id FROM live_task WHERE strategy_id IS NOT NULL);
@@ -68,7 +70,7 @@
 **知情差异**：人工 `systemctl stop` 后 L3 在 300s 内拉回（desired=常开）——**这是 L3 新增行为，与单元 Restart 变更无关**（v2 修正原混淆）。操作纪律写进操作指导：**人工停 hub = 打维护标记或 systemctl mask**。
 
 ## 验收标准
-1. `pytest tests/test_sa4_reconciler.py -q` 全绿（18 存量+新增 ≥8）；全量绿；分层绿
+1. `pytest tests/test_sa4_reconciler.py -q` 全绿（18 存量+新增 ≥12）；全量绿；分层绿
 2. `grep -c 'quant-md-hub' scripts/systemd/49-quant.rules` ≥1（polkit 放行）
 3. `grep 'Restart=\|RestartPreventExitStatus\|MemoryHigh' scripts/systemd/quant-md-hub@.service` 三行齐（Prevent 含 `78 3 4`）
 3b. **.rules 服务器侧实装**（v2 P1-2：管道不覆盖——quant-install-units 只 glob *.service，.rules 无自动通道）：
@@ -76,14 +78,18 @@
    # michael 通道手工（文件头自述同款）
    scp server/scripts/systemd/49-quant.rules michael@120.24.235.98:~/3b2/
    ssh michael@120.24.235.98 'sudo cp ~/3b2/49-quant.rules /etc/polkit-1/rules.d/ && sudo systemctl restart polkit'
-   # 验收（服务器侧，不是仓库 grep）：
-   ssh deploy@… 'sudo -n /usr/local/sbin/quant-svc start quant-md-hub@quant.service'  # polkit 放行实测
+   # 验收（服务器侧，不是仓库 grep；v2.1 复核 A 修正：quant-svc 走 sudoers=root 通道
+   # ——root 调 systemd 不触发 polkit，测不到放行！须以 quant 身份直跑 systemctl）：
+   sudo -u quant systemctl start quant-md-hub@quant.service && echo 'polkit 放行实测过'
+   # （若 sudoers 拒 quant→root systemctl：经 celery 触发一次 reconciler 实测同等效力）
    ```
 4. **G4 演练**（盘外，真机，v2 扩七步）：
    ① 前置审计（D2 SQL）+首周期验证零 strategy 单元被拉
    ② stop md-hub → ≤300s L3 自动拉起+告警
    ③ 打维护标记（db0）→ stop → 300s 后仍 dead（不拉）→ 删标记 → 拉回
-   ④ **failed 态演练**（v2 P0-1 验收）：注入 crash-loop（坏入口单元 60s）→ StartLimit → failed → ≤300s L3 reset-failed+拉起；对比 78-failed（systemctl 一键模拟）→ L3 不拉+告警
+   ④ **failed 态演练**（v2 P0-1 验收）：
+      a. 崩溃 failed：注入坏入口（临时 ExecStart 指向不存在模块 60s 窗）→ StartLimit → failed → ≤300s L3 reset-failed+拉起
+      b. 78 failed：quant-svc start 前置设 `systemctl set-property` 或临时 wrapper 退出 78（简单法：`systemctl start quant-sbx-78probe@tmp` 一次性单元 ExecStart=/bin/sh -c 'exit 78' RestartPreventExitStatus=78 → failed）→ L3 不拉+告警人工
    ⑤ 一交易日无事故
 5. 一交易日无事故（含 hub 单元 Restart 语义变更后首个 crash/stop 路径——如无自然发生则彩排注入）
 
