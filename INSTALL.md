@@ -1,6 +1,11 @@
 # 安装指南
 
 > 面向使用者：按步骤全新部署一套系统。适用于 Linux 服务器环境。
+>
+> **生产级/可重复安装优先走 Ansible 工件化管道**（`deploy/`——bootstrap 装机+releases 不可变工件+
+> 彩排先行+自动回滚，操作手册见 `deploy/DEPLOY.md`）；本指南的手动路径用于理解各组件与最小安装，
+> 手动装出的布局与 systemd 单元 expectations 有差异（工件化布局 venv/.env 在 `shared/`），
+> 二者取舍见 DEPLOY.md。
 
 ## 1. 环境要求
 
@@ -90,6 +95,8 @@ cd /opt/quant/server
 ```bash
 python3.11 -m venv venv
 source venv/bin/activate
+# 注：工件化布局（deploy/ 管道）venv 在 shared/venv 并由 wrapper 以 quant 运行——
+# 手动路径仅适用于不入 systemd 单元的裸跑/试用
 ```
 
 ### 3.3 安装依赖

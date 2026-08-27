@@ -96,4 +96,4 @@ bash scripts/verify.sh
 
 - **实盘 XTP 连接**：需 `broker_config` DB 配 XTP 凭证或 `.env XTP_TEST_*`，见 `docs/architecture/模块契约/strategy_framework.md`
 - **飞书**：需 `feishu_config` DB 配凭证 + 扫码，见 `docs/architecture/11-feishu-lark.md`
-- **生产部署**：`deploy/` Ansible 管道（彩排先行，见记忆 deploy-mechanism）——旧 bash 链已封存 `scripts/retired/` 勿用
+- **生产部署**：`deploy/DEPLOY.md`（Ansible 三命令+彩排先行+回滚）
