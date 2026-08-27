@@ -62,6 +62,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `health_monitor_check` | beat 30s（queue=risk **expires=25**，停机窗消息过期防连环补跑） | 15 号服务监控：30s 采集判定（unit/依赖/心跳+沿检测+health_event 落库+告警；S6"只告警不动作"的聚合点）（P3 回写 2026-08-20 补） |
 | `email_outbox_sweep` | beat 60s | 发件箱扫描重发（`email_service.sweep(3)`，指数退避由 next_attempt_at 控制）（P3 回写 2026-08-20 补） |
 | `notifications_cleanup` | beat 每天 | 通知留存清理（`alert_notify.cleanup`：已确认>7 天、全部>30 天删）（P3 回写 2026-08-20 补） |
+| `sa4_reconciler` | beat 300s（queue=risk expires=290） | **SA4 重启恢复 + L3 三源意图调和（批5 扩 2026-08-27）**。L1：Failed 单元退避恢复（live-task 限定，reset-failed+start，Valkey `quant:sa4:backoff:{unit}` 300s*2^n 封顶 1h，稳定>10min 清零，PG 不可达整体跳过）。L3：`_desired_units(conn)` 期望表三源（live_task running / strategy `is-enabled` 且无关联 / md-hub 常开）→ active+failed 双态调和（failed 按 ExecMainStatus 区分 78 跳过+1h 去重告警 / 崩溃 reset-failed+start 走三重熔断）→ md-hub 熔断（租约 fail-closed 含 Valkey 不可达 / 维护标记 `quant:maintenance:md-hub` db0 / 退避共键） |
 
 > beat 定时表完整定义在 `app.conf.beat_schedule`（实盘改 crontab）。每个任务 `options={"queue": "data"/"analysis"/"risk"}` 分队列。
 
@@ -74,6 +75,11 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 - `sync_all_symbols._mark(status, count)` / `progress_cb(i, total, ts_code)`：进度回调（写 sync_config + Valkey）
 - `sync_via_celery.progress_cb(i, total, current)`：进度回调（写 Valkey `sync:type:{sid}` + `update_heartbeat`）
 - `backtest_symbol_task.on_bar_cb(bar, ctx)`：每 bar publish Valkey `backtest:run:{run_id}:{symbol}`
+- `_desired_units(conn) -> list[tuple[unit, source]]`：声明式期望表（批5）——live_task running→live-task@{tid}；strategy 按 `systemctl is-enabled`==enabled 且无 live_task 关联（**enabled DB 行不作拉起依据**——镜像实锤 2-3 行会误拉废 runner）；md-hub 常开末位 (builtin)
+- `_sa4_units(state) -> list[str]`：list-units 三模式（live-task+md-hub+strategy）
+- `_sa4_exec_status(unit) -> int|None`：ExecMainStatus 读（78 判据）；None→按崩溃 fail-open（一周期自愈）
+- `_sa4_hub_guards(r) -> str|None`：md-hub 三重熔断——lease-held / maintenance / 退避窗；Valkey 不可达 fail-closed
+- `_sa4_alert_once(r, key, title, body)`：1h SET NX EX 去重窗（78/维护电平告警防 288 条/天疲劳）
 
 > （P3 回写 2026-08-20：删"beat_schedule 缩进错乱 TODO 核实"警告——该合并残留已修，beat 顶层正常调度全部条目）
 
@@ -163,3 +169,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 ## 修订记录
 - 2026-08-11 初版（基于代码核实：app.py:1-99 / tasks.py:1-794 / __init__.py 全读）
 - 2026-08-20 P3 回写：补 4 任务（adj_factor_backfill/health_monitor_check/email_outbox_sweep/notifications_cleanup）；撤"beat 缩进错乱"警告（已修）；check_budget_alerts 迁址；删运行时 DDL 旧述；worker_concurrency 改 system_config 动态
+
+
+## 最近变更
+- 2026-08-27 批5：sa4_reconciler 扩 L3 三源调和（期望表/failed 双态/三重熔断），详规 `docs/任务/批5-L3扩面与polkit配套.md` v2.1
