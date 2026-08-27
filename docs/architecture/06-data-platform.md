@@ -1,6 +1,8 @@
 # 06 - 数据中台
 
 > **三档数据供给（2026-08-19 U 审定稿）**：选股/深度/详情页数据按消费模式分三档（全局批量 9 表 + 池内 per-symbol 10 表 + 按需实时不落库），一档二档已上线。详见 [17-三档数据与详情页](17-三档数据与详情页.md)。
+>
+> **限流治理三件（2026-08-27 落地）**：RateLimiter 声明式限速 + 三级覆盖 + 数据源熔断，见 §9。
 
 > **平台化集成（2026-08-08）**：DataSource 接口（PT3，src/data_platform/data_source.py + data_source_config 表），TushareDataSource 实现，别人加 Wind 实现接口。详见记忆 `platform-architecture`。
 
@@ -98,7 +100,18 @@ Tushare/AkShare ──定时增量──> 清洗(复权/停牌/异常) ──> P
 - **前视偏差**：只用当日收盘后可得的数据做日线回测，分钟线严格按时间戳。
 - **幸存者偏差**：选股回测用当时点的成分股，不用最新指数成分。
 
-## 9. 与其它模块交互
+## 9. 限流治理三件（2026-08-27 落地，`data_platform/rate_limit.py`）
+
+> 来源：`docs/reference/多资产量化数据中台架构升级方案.md` 评审（对 60%/错 40%/过度 100%）——三件做、三件不做有理由。设计决策详规：`docs/任务/限流治理吸收.md`（D1-D3）。
+
+1. **RateLimiter + rate_limit_context**：线程安全间隔执行（`time.monotonic` 基准），`with rate_limit_context(api_name)` 声明式上下文管理器收编 data_sync/engine 五处散点 `time.sleep`——engine 零裸 sleep，限速值从 DataSource 取。
+2. **限流三级覆盖**：`DataSource.DEFAULT_RATE_LIMITS` 类默认 → `params.rate_limits` DB 覆盖 → **`params.rate_time_overrides` 动态时段规则**（`[{"window":"16:00-20:00","multiplier":2.5}]` 乘 QPS——盘后放宽/竞价降速，只改"多快"不改"是什么"）。
+3. **数据源熔断 CircuitBreaker**：连续失败 5 次 → Open 快速失败（Engine 只捕 `CircuitOpenError` 跳过本轮）→ 60s 后 Half-open 放一次探测，成功关/失败再开。**按 DataSource 实例级**（非 API 级）：Tushare 账号是配额共享体，熔断粒度对齐封禁粒度。模式同 LLM 网关熔断。
+
+**三件不做有理由**：四层元数据（等第 2 市场）/分布式限流（等第 2 实例，单实例内存计数足够）/Grafana 看板（等 SM1 Zabbix）。
+**限速位置裁定**：限速在 engine 侧（调用方编排节奏）不在 adapter 侧（被调方单次调用属性）——adapter 的 pull_* 已是零 sleep 纯函数。
+
+## 10. 与其它模块交互
 
 - **策略框架（02）**：`get_bar`/`subscribe` 喂策略；`Bar` 对象 schema 对齐实盘。
 - **A股分析（03）/可转债ETF（04）/加密（05）**：都是数据消费者。
@@ -106,7 +119,7 @@ Tushare/AkShare ──定时增量──> 清洗(复权/停牌/异常) ──> P
 - **调度层（09）**：定时增量更新任务。
 - **Web 后台（08）**：看数据覆盖/质量。
 
-## 10. 关键设计决策
+## 11. 关键设计决策
 
 | 决策 | 选择 | 理由 |
 |---|---|---|
@@ -116,4 +129,5 @@ Tushare/AkShare ──定时增量──> 清洗(复权/停牌/异常) ──> P
 | 向量库 | pgvector | 复用 PG，不引 Milvus |
 | 实时 | Valkey | 已有，复用 |
 | schema 对齐 | 现在就对齐 XTP 实时 | 零迁移是核心设计 |
+| 限流/熔断 | engine 侧声明式 + DataSource 级熔断（§9） | 编排节奏归 engine；配额=账号级，熔断对齐封禁粒度 |
 | QUANTAXIS | 弃用 | 停更+坑，自建清洗层替代 |

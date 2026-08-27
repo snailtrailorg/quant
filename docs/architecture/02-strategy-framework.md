@@ -3,6 +3,8 @@
 > **平台化集成（2026-08-08）**：Broker 接口（PT5）+ Task 统一任务（PT1）。XTPAdapter/Binance/OKXBroker 实现。详见记忆 `platform-architecture`。
 >
 > **因子平台化 + 双模式 + 任务分离（2026-08-11）**：① 因子 DB 化（`factor_def` 表，用户 Web 写 Python 自定义因子）+ 静态/动态区分（`needs_history`）；② 双模式策略执行（DSL + Python 代码框 `PythonStrategy`）；③ 参数定义系统（`parameter_defs`，任务动态表单）；④ 策略与实盘/回测任务分离（`live_task` 表，一标的一进程，策略快照隔离）。
+>
+> **运行时重构（2026-08-25~27，批 1/2/4）**：SDK 生命周期守卫（`md_api_guard.py`）+ 共享引擎骨架（`runtime/`）+ 交易域单源化（`strategy_runner/trading.py` 九单元）——三引擎复制主循环与 XTP SDK 裸调的结构性根治，**见 §11**。设计背景：12 号 §2.9/2.10；落地状态：`flow/待办.md` 重构表。
 
 ## 1. 目的
 
@@ -170,7 +172,7 @@ class OKXPerpAdapter(ExecutionAdapter): ...
   "strategy_id": "ma_trend", "symbol": "600000.SHSE",
   "params": {"buy_threshold": 0.03},          // 任务级参数值（覆盖策略默认）
   "strategy_snapshot": {...},                  // 创建时策略快照（隔离，改策略不影响已跑任务）
-  "status": "running", "task_id": 42, "systemd_unit": "quant-strategy@1",
+  "status": "running", "task_id": 42, "systemd_unit": "quant-live-task@1",
   "account_id": "253191001822", "initial_capital": 1000000
 }
 ```
@@ -239,3 +241,45 @@ for symbol in symbols:
 | 实盘执行模型 | 一标的一进程（live_task） | 实盘重稳定，独立重启互不影响，资源不够加机器 |
 | 参数系统 | parameter_defs 声明 + 任务填值 | 自文档化，前端动态表单，校验自动化 |
 | 任意 Python | 受限 namespace + AST 校验 + systemd 隔离 | 安全风险可控，DSL/Python 代码框覆盖大部分需求 |
+
+## 11. 运行时骨架与 SDK 守卫（2026-08-25 一日三事故驱动，批 1/2/4 落地）
+
+> 背景：SEGV 崩溃循环（setHeartBeatInterval 在 createQuoteApi 之前调 C）+ 反应式重登死路（三份复制主循环漂移）+ XTP 半开陷阱——详见 12 号 §2.9。三个组件均已部署生产。
+
+### 11.1 SDK 生命周期守卫 `md_api_guard.py`（批 1）
+
+**GuardedXtpMdApi（XtpMdApi 守卫子类）四态状态机**：
+
+```
+IDLE ──createQuoteApi──> CREATED ──login──> LOGGED_IN
+（C 对象未建，任何       （已建未登录）        │ logout/onDisconnected
+ C 方法调用都可能 SEGV）                       ▼
+                                            CREATED（可重登）
+DEAD ←──────────────── close() ───────────────┘（此后 relogin/login 必拒）
+```
+
+- **官方时序只在 `connect()` 内发生**：createQuoteApi→setHeartBeatInterval→login，非法时刻调用抛 `SdkLifecycleError`（Python 异常），**永不到 C 层**——SEGV 类事故结构性绝迹
+- **有意不含 RELOGGING 态**：quote login 同步返回，logout→login 在 `relogin()` 一次调用内完成，中间态对外不可观测
+- 线程模型：引擎面（connect/relogin）与 SDK 回调面（onDisconnected→login_server）全程 RLock 互斥；`login_server` 永不抛；`subscribe` 软防护（非 LOGGED_IN 态 no-op，供周期幂等重放）
+- 官方语义出处：`docs/reference/xtp-sdks/` header 注释（Login -2 = 须先 logout；SetHeartBeatInterval 必须在 Login 之前）
+
+### 11.2 共享引擎骨架 `runtime/`（批 2，hub 首迁；批 4，worker 迁）
+
+单点化三引擎（hub/runner/worker）复制主循环的公共职责，**三引擎退化为声明式钩子**：
+
+| 模块 | 职责 |
+|---|---|
+| `loop.py` EngineLoop | **到期驱动**钩子调度（废 counter%N 相位耦合——hub 10s/5s flush 窗口历史坑的结构性根治） |
+| `mdlink.py` MdSessionSupervisor | L2 会话自愈收编（定时续航/反应式重登/退避，12 号 §2.8 硬规则 2 的实现位） |
+| `pulse.py` | 心跳（Valkey HASH）+ 看门狗喂狗 |
+| `subs.py` SubscriptionManager | 订阅幂等重放（60s 周期 diff） |
+| `alerts.py` AlertPolicy | 告警策略（去重/级别） |
+| `xsleeper.py` | 阻塞读休眠（XReadSleeper——Redis BLOCK 0 永久阻塞的结构性防御，批 4b 双盲 P1 产物） |
+
+### 11.3 交易域单源化 `strategy_runner/trading.py`（批 4a，九单元）
+
+下单时刻安全判定/持仓快照/冻结语义/对账等九个交易域单元从 main.py/hub_worker.py 提取为单源（双盲 AST 级 diff 证九单元与原实现逐字一致）：`buy_ok_check`（下单时刻新鲜度判定，15 号平面 D）/ `frozen_allows`（sticky 冻结，SELL 放行）/ `write_trade_log` / `snapshot_cycle`（持仓真相源 60s 覆盖）/ `halt_edge_cancel`（熔断沿撤单）/ `recalc_hook` / `stop_due` / `reconcile_orders`（启动对账，12 号 §2.1）/ `_flush_positions`。
+
+**direct 模式冻结**（批 4）：修复照做、迁移不做——所有新工作落 hub 模式，direct 退役走批 6 收口。
+
+> 细节与签名：模块契约 `strategy_framework.md`（runtime/guard）+ `strategy_runner.md`（trading.py 九单元/direct 冻结语义）。

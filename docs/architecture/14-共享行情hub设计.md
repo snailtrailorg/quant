@@ -2,6 +2,11 @@
 
 > 需求门禁：`13-共享行情hub需求书.md`。v2 修订自对抗评审（盲审②，`flow/稳定性检查/盲审hub设计-代理B.md`）：修 3 致命（F1 gen 自砖/F2 分钟口径毒化/F3 回放无抓手）+ 8 严重 + 采纳 5 项简化，修订清单见 §10。
 > 技术前提（已核源码）：`XtpMdApi/XtpTdApi(gateway)` 仅依赖 gateway 的 `gateway_name` + BaseGateway 事件转发，可独立构造（xtp_gateway.py:268-289/459-487）；**BaseGateway 有 7 个抽象方法须全量 stub**（gateway.py:160-260）；TdApi.connect 的 `log_level` 是 int（LOGLEVEL_VT2XTP["INFO"]=3）、MdApi 的 protocol 是 str "TCP"；tick.datetime 已挂 Asia/Shanghai tz-aware（xtp_gateway.py:312-314）；XTP tick.qty 是**当日累计成交量**（须差分）。
+>
+> **当前状态（2026-08-27）**：hub 已在产；主循环已迁 `strategy_framework/runtime/` 骨架（批 2，EngineLoop
+> 到期驱动 + MdSessionSupervisor 收编 L2 自愈，行为值不变——差异见模块契约 md_hub.md「行为差异」节）；
+> L3 调和扩面至 hub 单元（批 5，`_desired_units` 三源归一）。**阶段 0 影子期进行中**（bar_hub vs
+> bar_shadow 双轨 diff，08-26 起重新计数——状态见 13 号头部注记）；切阶段 1 与 direct 退役走批 6。
 
 ## 1. 总体拓扑（v1 不变）
 
