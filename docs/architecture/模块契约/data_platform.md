@@ -12,7 +12,8 @@
 server/src/data_platform/
 ├── db.py              # PG 连接池 + K 线读写（validate_bars）+ 交易日历 + verify_schema
 ├── schema.py          # Bar dataclass + vt_symbol 转换 + DDL 模板
-├── data_source.py     # DataSource 接口（get_rate_limit）+ Tushare/AkShare 实现（DB 化凭证）
+├── data_source.py     # DataSource 接口（get_param*/get_rate_limit）+ Tushare/AkShare 实现（DB 化凭证 + 积分档预设）
+├── rate_limit.py      # 限流+熔断三件套：RateLimiter/CircuitBreaker/rate_limit_context（2026-08-27 限流治理新建）
 ├── platform.py        # DataPlatform 单例（统一入口，部分占位）
 ├── settings.py        # 环境变量集中读取
 ├── audit.py           # audit_log（原寄生 web_api.auth，2026-08-19 归位）
@@ -87,10 +88,65 @@ BAR_TABLE_SELECT       # SELECT ... WHERE symbol=%s AND ts BETWEEN %s AND %s
 
 ### data_source.py（DataSource 接口，详见接口契约 §1.1）
 ```python
-DataSource(ABC): get_client() / test_connection() / record_usage(api_calls=1)
-TushareDataSource(DataSource)   # token DB 优先 .env fallback
-get_data_source(provider: str) -> DataSource | None   # 工厂，无配置返回 None
+DataSource(ABC)
+    __init__(credentials_encrypted: str | None = None, params: str | None = None)
+        # params = 运维参数 JSON（分界：秘密→credentials_encrypted；points_tier/rate_limits/
+        # rate_time_overrides/circuit_breaker/base_url→params）
+    get_client() / test_connection()                    # abstract
+    get_param(*keys, default=None)                      # （新增 2026-08-27）命名空间路径读 params：
+        # get_param("circuit_breaker", "fail_threshold")；路径断/中途非 dict 回 default 不抛
+    get_param_float(*keys, default: float, lo: float, hi: float) -> float
+        # （新增 2026-08-27）读 float + 范围钳位：非法回落 default+告警，越界钳 [lo, hi]
+        # ——防呆护栏在后端，不信任 DB 手写值
+    get_rate_limit(api_name: str) -> float              # 两次调用最小间隔秒（0=不限）。基类三级：
+        # DEFAULT_RATE_LIMITS → params.rate_limits → params.rate_time_overrides 时段乘数
+        # （interval /= multiplier，>1=更快；窗口支持跨零点 "22:00-02:00"，首条命中即生效）
+    record_usage(api_calls=1, api_name="", success=True, latency_ms=0, provider="")
+        # 写 data_source_usage 表（失败不抛）；provider 缺省从 self.provider 取
+TushareDataSource(DataSource)    # token DB 优先 .env fallback
+    DEFAULT_RATE_LIMITS          # 类级默认 8 档（stk_mins 3600 / daily 0.5 / adj_factor 0.3 ...，= 200 积分现状实测）
+    POINTS_PRESETS               # （新增 2026-08-27 积分档批次）{200/2000/5000: {api: 间隔秒}}——
+        # 官方积分档频控换算表；Web 下拉选档存 params.points_tier，官方调限额改这里走部署
+    get_rate_limit(api_name)     # 覆写基类，四层解析（L0←L1←L2←L3，后者覆盖前者）：
+        # L0 DEFAULT_RATE_LIMITS（代码兜底最保守）← L1 params.points_tier 选中档预设批量覆盖
+        # ← L2 params.rate_limits 单参数覆写（应急调个别接口）← L3 时段乘数
+        # points_tier 不存在=三级老行为向后兼容；非法值各层独立回落+告警不崩同步
+AkShareDataSource(DataSource)    # stub 未注册 _REGISTRY（东财被反爬弃用，三档 U-2 教训）
+get_data_source(provider: str) -> DataSource | None    # 工厂（DB enabled 行实例化），无配置返回 None
 ```
+
+### rate_limit.py（限流+熔断三件套，2026-08-27 限流治理吸收新建，`docs/任务/限流治理吸收.md`）
+```python
+class CircuitOpenError(RuntimeError)
+    # 熔断打开抛出——engine 循环捕获记 failed_dates 下轮续（幂等），不重试不打爆
+
+class RateLimiter:
+    # 线程安全最小间隔执行器：「占位」语义（并发第二者排在上次占位+间隔后，不踩踏）
+    __init__(interval=0.0, clock=time.monotonic, sleep=time.sleep)  # clock/sleep 可注入（测试假时钟）
+    acquire(api_name="", interval: float | None = None) -> float
+        # 阻塞至距上次调用满间隔，返回实际等待秒（首次=0）；interval 显式传入则覆盖
+        # （rate_limit_context 每次现取四层值刷新——时段乘数随时段变化）
+    set_interval(interval)        # 非法值按 0=不限
+
+class CircuitBreaker:
+    # 三态 Closed→Open（连续失败≥阈值）→Half-open（reset_timeout 到点只放一次探测）
+    # →成功回 Closed / 失败再 Open。DataSource 级（D2：Tushare 配额共享体，任何接口打穿封整个账号）
+    __init__(fail_threshold=None, reset_timeout=None, clock=..., ds=None)
+        # ds 有则从 ds.get_param("circuit_breaker", ...) 读参（显式实参 > params 配置 >
+        # 代码默认 fail_threshold=5 / reset_timeout=60s；走 get_param_float 钳位语义，DB 垃圾值不崩）
+    state -> "closed"|"open"|"half_open"
+    allow() -> bool               # Open 未到 reset_timeout 拒；到点转 Half-open 放一次探测
+    record_success() / record_failure()
+
+rate_limit_context(ds, api_name: str, min_interval: float | None = None)   # @contextmanager
+    # 声明式：with rate_limit_context(ds, "daily"): pull_daily(...)
+    # 进 = 熔断检查（Open→raise CircuitOpenError）+ 间隔等待（ds.get_rate_limit(api_name) 现取；
+    #   min_interval 显式覆盖 = engine sleep_s 兼容路径）
+    # 出 = 成败入账（异常先 record_failure 再原样上抛）
+    # 进程内注册表 _LIMITERS[(provider, api_name)] / _BREAKERS[provider]（单实例内存计数，不做分布式）
+reset_registries()               # 测试隔离用；运行期勿调（丢熔断记忆）
+```
+> 设计决策 D1：限速在 engine 侧（编排节奏），adapter pull_* 零改动。
 
 ### tushare_adapter.py
 ```python
@@ -122,7 +178,7 @@ save_daily_basic(df) -> int                     # 写 daily_basic 表
 validate_bar_quality(df) -> dict                # {valid, issues, clean_count, ...}
 ```
 
-> `DataSource.get_rate_limit(api_name)`（data_source.py:39，2026-08-19 T 审加）：限速注册表查询（按 API 名）；另 `AkShareDataSource`（data_source.py:142）已注册——当前仅腾讯快照走直调，AkShare 东财被反爬弃用（三档 U-2 实施教训）。（P3 回写 2026-08-20 补）
+> （2026-08-27 回写：原注"get_rate_limit 三级 + AkShare 已注册"已并入上方 data_source.py 块——限速现四层（积分档批次），AkShare 实为未注册 stub）
 
 ### market_snapshot.py（三档项 13，非池实时价）
 ```python
@@ -181,6 +237,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 |---|---|---|
 | db.py | sqlalchemy / psycopg（外部） | 连接池 + 裸 SQL |
 | data_source.py | `src.quant_common.crypto.decrypt` | 解密 DB 凭证（2026-08-19 归位后路径；原 `web_api.crypto_utils` 循环依赖已解）（P3 回写 2026-08-20） |
+| rate_limit.py | （纯 stdlib：threading/contextlib/time，零跨模块依赖） | 限流+熔断自包含（2026-08-27 新增行） |
 | tushare_adapter.py | `.schema.to_vt_symbol` | ts_code -> vt_symbol |
 | platform.py | `.db` / `.schema` / `.adapters.tushare_adapter` | 组合 |
 | settings.py | dotenv | 读 .env |
@@ -193,16 +250,18 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 
 | 调用方 | 调什么 |
 |---|---|
-| `data_sync.engine` | `get_conn` / `save_bars` / `save_bars_overwrite` / `get_data_source`（_get_pro） |
+| `data_sync.engine` | `get_conn` / `save_bars` / `save_bars_overwrite` / `get_data_source`（_get_pro）/ **`rate_limit.rate_limit_context`（5 处拉取点：_sync_by_trade_date / _sync_astock_minute / backfill_adj_factor / tier1 handler / sync_all，2026-08-27）** |
+| `data_sync.pool_minute` | `get_data_source` + `get_rate_limit("stk_mins")`（Valkey 全局闸门取间隔） |
 | `strategy_framework.backtest` | `get_bars` |
 | `astock_analysis.analysis` | `get_bars` / `is_trading_day` |
 | `web_api.main` | `get_conn`（大量端点）/ `get_bars`（K线端点） |
+| `web_api.routes.mgmt` | `_REGISTRY` / `DEFAULT_RATE_LIMITS` / `POINTS_PRESETS` / `get_rate_limit` / `get_param_float`（积分档三端点 GET points-presets / POST points-tier / POST rate-limit-override，2026-08-27 数据源管理页） |
 | `risk_control.risk` | `get_conn`（check_order / account_snapshot） |
 | `scheduler.tasks` | `get_conn` / `is_trading_day` / `platform` |
 | `llm_gateway.gateway` | `get_conn`（llm_usage 写） |
 | `alert_notify.notify` | `get_conn` |
 | `task_manager` | `get_conn`（tasks/task_logs） |
-| `feishu_bot.bot` | `get_conn`（feishu_config 读） |
+| `im_bot.feishu_client`（经 `feishu_bot` 薄壳） | `get_conn`（im_bot_config / im_bot_users 读，2026-08-21 起替代原 feishu_config 直读） |
 
 > 改 `get_conn` / `save_bars` / `get_bars` 签名影响**几乎全项目**--慎改，优先加新函数不破旧。
 
@@ -215,7 +274,8 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `bar_1D` / `bar_1min` / `bar_5min` | `db.save_bars` / `save_bars_overwrite` | `db.get_bars`（回测/分析/K线端点） |
 | `daily_basic` | `tushare_adapter.save_daily_basic` | web_api（筛选端点） |
 | `trade_cal` | `tushare_adapter.pull_trade_cal` | `db.get_trade_calendar` / `is_trading_day` |
-| `data_source_config` | web_api（数据源端点） | `data_source.get_data_source` |
+| `data_source_config` | web_api（数据源端点 + 积分档三端点写 params.points_tier/rate_limits/circuit_breaker，2026-08-27） | `data_source.get_data_source` |
+| `data_source_usage` | `DataSource.record_usage`（API 用量，A4 #36） | web_api（用量看板） |
 | `broker_config` | web_api（交易通道端点） | `broker.get_broker` |
 | `channel_config` | web_api（消息通道端点） | `channel.get_channel` |
 | `live_trading_config` | web_api（实盘开关端点） | `risk.is_live_trading_allowed` |
@@ -223,7 +283,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `llm_usage` | `gateway._log_usage`（幂等建） | web_api（用量看板） |
 
 > 三档数据 19 张新表（stk_limit 等 9 张一档 + income 等 10 张二档）由 data_sync/pool_data 经本模块 adapter 拉取写入，详见 [17-三档数据与详情页](../17-三档数据与详情页.md)。
-> schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，**head 0049**；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（**73 表**生成式基线，"表 :: 列"每表一行；每加迁移必重跑生成命令并提交）。（P3 回写 2026-08-20：head 0046→0049、71 表→73 表，改指向生成式文件不手抄数字）
+> schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，**head 0053**；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（**74 表**生成式基线，"表 :: 列"每表一行；每加迁移必重跑生成命令并提交）。（2026-08-27 回写：head 0049→0053、73 表→74 表——0051 建 im_bot 两表、0052 DROP feishu_config、0050/0053 加列建表）
 
 ---
 
@@ -237,6 +297,8 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 - **save_bars**：`ensure_table` 兜底建表（新 freq 安全）
 - **is_trading_day**：查 trade_cal，查不到回退工作日（不抛）
 - **stk_mins**：per-symbol 接口（不支持按日全市场），2000 积分，单次 8000 条（超限分段，见 engine._split_minute_range）
+- **限流四层**（2026-08-27 积分档批次）：`TushareDataSource.get_rate_limit` 解析序 **L0** `DEFAULT_RATE_LIMITS`（代码兜底）← **L1** `params.points_tier` 积分档预设（`POINTS_PRESETS` 200/2000/5000）← **L2** `params.rate_limits` 单参数覆写 ← **L3** `params.rate_time_overrides` 时段乘数；非法值各层独立回落+告警不崩同步。**熔断 DataSource 级**（D2），参数 `params.circuit_breaker`（代码默认 fail_threshold=5 / reset_timeout=60s）
+- **params 分界**：秘密→`credentials_encrypted`；运维参数（points_tier/rate_limits/rate_time_overrides/circuit_breaker/base_url）→`params` JSON；数值一律经 `get_param_float` 钳位（不信任前端/DB 手写值）
 
 ---
 
@@ -247,6 +309,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 2. `data_source._REGISTRY["wind"] = WindDataSource`
 3. Web 配 `data_source_config`（provider='wind'，credentials 加密）
 4. 不改 engine（`_get_pro` 走 `get_data_source`）
+5. 限速可选（2026-08-27 起）：子类设 `DEFAULT_RATE_LIMITS`（有积分档再设 `POINTS_PRESETS`）即自动进 `rate_limit_context` 体系，engine 拉取点零改动
 
 ### 加新 K 线频率（如 15min）
 1. migration 建 `bar_15min` 表（复用 `BAR_TABLE_DDL.format(freq="15min")`）
@@ -265,3 +328,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 - 2026-08-09 初版（基于代码核实：db/schema/data_source/tushare_adapter/platform/settings 全读）
 
 - audit_log 已入本模块（data_platform/audit.py，原寄生 web_api.auth——feishu_bot 曾因此反向 import 顶层）
+- 2026-08-27 回写：限流治理吸收三件套（rate_limit.py 新建：RateLimiter/CircuitBreaker/rate_limit_context）+ 积分档四层（data_source.py：get_param/get_param_float/POINTS_PRESETS 200/2000/5000/get_rate_limit L0-L3）；补 data_source_usage 表、mgmt 积分档三端点被调；schema head 0049→0053（74 表）
+
+## 最近变更
+- 2026-08-27 限流治理吸收 + 积分档预设四层限流（`docs/任务/限流治理吸收.md`；双盲补审 fa1f123 全修后产上部署）

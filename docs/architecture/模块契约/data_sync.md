@@ -15,8 +15,9 @@
 ```
 server/src/data_sync/
 ├── engine.py        # 同步引擎核心 + _HANDLERS 注册表 + _make_tier1_handler 工厂（三档一档）
+│                    #   限流：5 处拉取点走 data_platform.rate_limit.rate_limit_context（2026-08-27）
 ├── pool_data.py     # 池内深度数据同步（三档二档，独立模块不进 _HANDLERS）
-├── pool_minute.py   # 池分钟同步（Tushare stk_mins 收费，beat 注释禁用态）
+├── pool_minute.py   # 池分钟同步（Tushare stk_mins 收费，beat 注释禁用态；stk_mins 硬限=Valkey 全局闸门）
 ├── sync_lock.py     # Valkey 心跳锁
 └── __init__.py      # 导出 sync/sync_symbol/backfill_symbol/delete_symbol/sync_all
 ```
@@ -88,6 +89,20 @@ sync_pools_data(timebox_s: int = 280, full: bool = False, symbols: list[str] | N
     #   POST /api/sync/pool-data/trigger?full= 与入池端点（symbols 回补）调用
 ```
 
+### pool_minute.py（池驱动分钟同步，beat 注释禁用态 + stk_mins 硬限闸门）
+```python
+sync_pools_minute(timebox_s: int = 280) -> dict
+    # 池内 bar_1min 缺口标的逐只补（minute_history_start 配置的池）；时间盒 + SyncLock("pool_minute")
+    # + sync_log 可观测；进度 Valkey hash sync:pool:minute（24h TTL）
+    # 被 scheduler.pool_minute_sync_task 调（beat 注释态——Tushare stk_mins 收费未启用）
+_stk_mins_gate(r, timeout_s=65) -> None
+    # stk_mins Valkey 全局闸门（SET NX EX 有界等待，key ds:tushare:rl:stk_mins——禁含 token）：
+    # 间隔从 DataSource.get_rate_limit("stk_mins") 现取（四层可调）；超时抛 RateLimited
+    # ——engine 路径记 failed 下轮续；HTTP 路径转 ApiError(429)。1 次/小时级间隔用进程外闸门
+    # （进程内 sleep 会占死 worker），这是 engine 分钟线循环不取 stk_mins 档的对应物
+RateLimited(Exception)   # 闸门等待超时
+```
+
 ### sync_lock.py
 ```python
 class SyncLock:
@@ -136,9 +151,19 @@ class SyncLock:
 - 基础：`_sync_astock_daily` / `_sync_astock_basic` / `_sync_astock_list` / `_sync_cb_daily` / `_sync_cb_basic` / `_sync_etf_daily` / `_sync_etf_list` / `_sync_trade_cal` / `_sync_astock_minute`（1min+5min 共用）
 - tier1（`_make_tier1_handler`/`_make_full_rebuild_handler` 批量注册 9 个 sync_id，见 17 号 §3）：stk_limit_sync / moneyflow_sync / margin_detail_sync / top_list_sync / block_trade_sync / cyq_perf_sync / forecast_sync / namechange_sync / concept_sync（P3 回写 2026-08-20 补）
 
+### 限流替换（限流治理吸收 2026-08-27，五处 sleep 硬编码 → rate_limit_context）
+- `_sync_by_trade_date` 循环体：`rate_limit_context(ds, api_name, min_interval=sleep_s)`——api_name 由 `_api_name_of(cfg)` 取（如 'daily'/'daily_basic'）；sleep_s 显式传入则覆盖间隔（兼容旧调用，测试传 0 关等待），None=走 DataSource 四层配置
+- `_sync_astock_minute` per-symbol 循环：档取 **"daily"**（原 0.15s 硬编码）。**故意不用 stk_mins 档**——3600s 会卡成每小时一只；stk_mins 硬限归 pool_minute 的 Valkey 全局闸门 `_stk_mins_gate` 管
+- `backfill_adj_factor` 逐日：档 "adj_factor"（原 sleep(0.3)，默认档同为 0.3s）
+- `_make_tier1_handler`（一档逐日）：档 "daily"（原 0.3s 硬编码）
+- `sync_all` per-symbol 循环：档 "daily"（原 0.15s 硬编码）
+- 熔断打开 → `CircuitOpenError` → 各循环 except 记 failed_dates/failed 下轮续（幂等 upsert 兜底，不重试不打爆）；间隔四层解析见 data_platform 契约（L0 默认←L1 积分档←L2 单参覆写←L3 时段乘数）
+- `ds = get_data_source("tushare") or TushareDataSource()`——DB 无配置回落类级默认限速
+
 ### 通用工具
 - `_get_pro()` - 从 data_source DB 读 Tushare（.env fallback）
-- `_sync_by_trade_date(pro_api_fn, save_fn, start, end, sleep_s, progress_cb) -> dict` - 按日批量拉取
+- `_api_name_of(cfg) -> str` - cfg["api"]（'pro.daily'）→ 接口名（'daily'，与 rate_limits 键词汇表对齐）（2026-08-27 新增）
+- `_sync_by_trade_date(pro_api_fn, save_fn, start, end, sleep_s=None, progress_cb=None, api_name="daily") -> dict` - 按日批量拉取（限速走 rate_limit_context，见上节）
 - `_log(sync_id, mode, start, end, pulled, saved, duration_ms, status, error, failed_dates, expected_days, actual_days)` - 写 sync_log
 - `_mark_running(sync_id, running)` / `_get_config(sync_id) -> dict` / `_update_sync_state(sync_id, last_date, count)`
 - `_expected_trading_days(start, end) -> int`
@@ -151,9 +176,11 @@ class SyncLock:
 |---|---|
 | `data_platform.db` | `get_conn` / `save_bars` / `save_bars_overwrite` |
 | `data_platform.adapters.tushare_adapter` | `pull_daily`/`pull_minute`/`pull_cb_daily`/`pull_trade_cal`/`to_save_rows`/`to_save_rows_min`/`save_daily_basic` |
-| `data_platform.data_source` | `get_data_source`（`_get_pro` DB 化） |
+| `data_platform.data_source` | `get_data_source`（`_get_pro` DB 化）+ `get_rate_limit`（pool_minute 闸门取间隔） |
+| `data_platform.rate_limit` | `rate_limit_context`（engine 5 处拉取点限流+熔断，2026-08-27） |
 | `data_platform.schema` | `to_vt_symbol` |
 | `sync_lock.SyncLock` | 防重心跳锁 |
+| `alert_notify.notify` | `_alert_sync_failure`（失败告警）/ pool_minute `safe_notify` |
 | 外部 | pandas / redis / croniter（scheduler 用，本模块不直接） |
 
 ---
@@ -196,7 +223,7 @@ class SyncLock:
 - **防重**：`SyncLock`（Valkey 心跳锁，TTL 60s，后台 20s 刷）；进程被杀 TTL 过期自愈；`last_status` 只展示，**不作防重依据**
 - **回补**：`backfill_from` 不推进 `last_sync_date` 游标（只补历史）
 - **空状态跳过**：`last_sync_date=NULL` 的 per-symbol 类型，`data_sync_scheduler` 跳过增量（避免首跑全市场超时）
-- **分钟线**：stk_mins per-only（不支持按日全市场）+ 8000 条分段（`_split_minute_range`）
+- **分钟线**：stk_mins per-only（不支持按日全市场）+ 8000 条分段（`_split_minute_range`）；**限速双轨**（2026-08-27）——engine 分钟线循环节奏取 daily 档（`rate_limit_context(ds, "daily")`，故意不用 stk_mins 3600s 档防卡死），stk_mins 硬限归 `pool_minute._stk_mins_gate` Valkey 全局闸门（跨进程有界等待）
 - **per-symbol 缺口**：按交易日粒度找（`_find_gaps`，trade_cal 比对本地 distinct date）；分钟线缺口段再按 stk_mins 限制分小段
 - **vt_symbol / freq / ts**：见接口契约 §五 不变量
 
@@ -223,3 +250,7 @@ class SyncLock:
 
 ## 修订记录
 - 2026-08-09 初版（基于 engine.py + sync_lock.py 全读核实）
+- 2026-08-27 回写：限流治理吸收——engine 5 处 sleep 硬编码 → `rate_limit_context`（新增「限流替换」节 + `_api_name_of`）；补 pool_minute 节（`_stk_mins_gate` Valkey 闸门/sync_pools_minute/RateLimited）；依赖表补 rate_limit/alert_notify
+
+## 最近变更
+- 2026-08-27 限流治理吸收（`docs/任务/限流治理吸收.md`）：限速节奏从代码硬编码改 DataSource 四层配置驱动；分钟线 stk_mins 档归 pool_minute 闸门
