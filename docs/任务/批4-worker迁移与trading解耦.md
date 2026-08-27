@@ -10,7 +10,7 @@
 ## 目标
 1. **hub_worker 迁上 runtime 骨架**：437 行 worker 的 5s 定时段全部退化为 `EngineLoop.every()` 钩子（XReadSleeper 双节奏注入），主循环只留流消费本体
 2. **trading.py 落地**：交易域六共享件从 main/hub_worker 提取，消灭 `hub_worker → main` 反向 import（main:357/370 实证互指）
-3. **direct 模式冻结**：不迁骨架（修复照做、迁移不做）；批 6 随 ST7 阶段 1 退役
+3. **direct 模式冻结**（v2 措辞修死）：**循环结构与节奏不动**；交易件调用点重接 trading.py（语义零漂移由测试保证）；trading.py 内修复=改 trading.py 双模式受益；direct 独有 bug（如 _gated_send_direct）就地修；骨架化=不做。批 6 随 ST7 阶段 1 退役。**漂移面论断**：4a 后六件已单源化，残余双份仅循环脚手架（喂狗/事件检查/心跳）——冻结期可接受
 4. **批 2 遗留三输入一并解决**：mdlink 断流门控定案 / schedule_due 每步 DB 同治 / 行为统一
 
 ## 依赖（就绪）
@@ -22,13 +22,14 @@
 |---|---|---|
 | `server/src/strategy_runner/trading.py` | 新建 ~260 行 | `write_trade_log` / `snapshot_cycle`（账户+持仓单事务，含 SB1 不写假值）/ `halt_edge_cancel` / `recalc_hook` / `stop_due`（tid/sid 双态单实现）/ `reconcile_orders`（runner 超集：在场委托+WAL 残留+成交补录） |
 | `server/src/strategy_runner/hub_worker.py` | 重写 | 437→~280 行：`XReadSleeper` 接 `EngineLoop(sleeper=…)`；定时段（快照/熔断沿/因子重算/TD 重连沿/事件线程检查/心跳）全部 `loop.every()`；流消费本体留 run() |
-| `server/src/strategy_runner/main.py` | 修改 | direct 段 **不动**（冻结）；删被 trading.py 取代的内联块（~-150 行）；worker 分派接线新 hub_worker |
+| `server/src/strategy_runner/main.py` | 修改 | direct **循环结构不动**；交易件内联块改调 trading.py（~-150 行重接）；worker 分派接线新 hub_worker（v2 措辞消『不动 vs 删』矛盾）|
 | `server/src/strategy_framework/runtime/` | 小改 | 见"设计决策"三条 |
-| `server/tests/test_trading.py` | 新建 | 六共享件单测（从既有散测试收编+补） |
+| `server/tests/test_trading.py` | 新建 | 六共享件单测（从既有散测试收编+补）；**v2 如实声明**：`test_position_snapshot.py:158-170` 是源码文本断言（直读 main/hub_worker 源码找 `_flush_positions` 内联），内联挪走即红——**挂点测试须改接 trading.py**（"原测试零修改"不实，双盲 B 实锤）；test_hub_arch 的 frozen/buy_ok import 同理改挂 |
+| `server/scripts/run_worker_smoke.py` | 新建 | G2 道具（v2 补）：本地 fakeredis 流+stub TD 起真 worker 进程，断言 XReadSleeper 节奏/钩子分发/心跳字段——批 2 曾因缺真机冒烟判 P1 的教训不复犯 |
 | `server/tests/test_hub_worker_migration.py` | 新建 | XReadSleeper 节奏/钩子接线矩阵 |
 
 ## 限定范围
-不碰：direct 主循环（冻结）、hub（批 2 已迁）、frozen/buy_ok 语义（原函数原测试整体搬 trading.py，零漂移铁律）、bar 口径/心跳字段。
+不碰：direct 主循环结构（冻结）、hub（批 2 已迁）、bar 口径。**frozen/buy_ok 归属（v2 定案消矛盾）**：函数体与测试整体搬 trading.py、main/hub_worker 改 import——语义零漂移由测试整体迁移保证（非『零修改』，挂点必改，见产出表 v2 声明）。
 
 ## 设计决策（三处，批 2 输入的定案）
 
@@ -54,30 +55,80 @@
   "超集"重定义=两模式字段并集皆合法（consumer 按 `md` 字段区分），非 worker 写全并集
 - 消费方实测（B）：collector 只读 `{md,bars,lag,frozen}` 四字段；direct 专属字段无 task 级消费者——锁测试如实锁四个+残留断言（同键切模式旧字段残留至 TTL，无消费者读，无害落档）
 
-## XReadSleeper 规格（批 2 任务文件遗留契约的落地）
+## XReadSleeper 规格（v2：补异常契约/停止路径/线程模型——双盲审 P1 双同主区）
 ```python
 class XReadSleeper:
     """EngineLoop.sleeper 注入：xreadgroup block 读取 + 到期唤醒双节奏。
     block 毫秒数 = min(500, 距下一钩子到期剩余毫秒)——定时钩子不可能被繁忙流饿死
-    （数学保证：block 上限收敛到最近到期点）。消息到达即回调处理。"""
+    （双盲 A/B 独立核证：sleeper 至多 500ms 必返 → loop 每迭代走 dispatch，
+    5s 钩子最坏延迟=500ms+单批处理时长，与现 worker 等值）。"""
     def __init__(self, r, stream, group, consumer, on_batch): ...
     def __call__(self, seconds: float) -> None: ...   # EngineLoop 的 sleeper 协议
 ```
+**never-raise 契约（P1 双同）**：`__call__` 内自吞 redis 异常（Timeout 归类静默；其他类
+告警+睡 1s 重试——对齐现 worker L303-311 行为）。**禁止向 EngineLoop.run 抛出**：loop 的
+sleep 位无 try/except（loop.py:111），异常传穿将命中 worker finally 的 `os._exit(0)`
+=干净退出码 → systemd 不重启 → **任务静默死**（2026-08-20 A3 事故类）。
+**NOGROUP 处置（v2 定案）**：遇 NOGROUP 以 `EX_TEMPFAIL=75` 退出交 systemd 重启 →
+run() 启动段的组重建（现 L164-177，P0-3 语义）接手——复用 SA4 退避，替代现状的
+1Hz 告警死循环永不恢复。
+**线程模型（v2 写死）**：单线程同步——on_batch 在 loop 线程内联执行，与钩子同线程
+（与现 worker 主线程 process_batch 一致；frozen/history 裸 dict 无并发险）。**禁止后台线程**。
+
+### 停止路径（P1 双同——worker 是首个需优雅停的引擎）
+EngineLoop.run() 是 NoReturn 无停止通道——**不得用 failure="exit" 接 stop**（exit 1 →
+Restart=on-failure 拉起 = F-36 churn 倒退）。设计：
+```python
+def _stop_hook():          # loop.every("stop-check", period, _stop_hook)
+    if trading.stop_due(...):
+        # finally 等价清理（现 worker finally L432-437 语义）：xgroup_del + 告警
+        ...; os._exit(0)   # 正常停止码——Restart=on-failure 不拉起（SA4 分类）
+```
+
+### 钩子全清单（v2 补全——A/B 双同"原清单缺四项"）
+| 钩子 | period | 现位置（worker 行号） | 备注 |
+|---|---|---|---|
+| xread 流消费 | sleeper 注入 | 304-311 | run() 本体 |
+| 停止检查 | 5s | 317-319 | **v2 补**（原清单漏） |
+| 看门狗+事件线程 | 步进 | 316+419-424 | EngineLoop 内建 |
+| 时段沿 sess_bar_wall 清零 | 步进 | 322-325 | **v2 补** |
+| 盲视判定+告警（hub 心跳/bar 停更） | 步进 | 326-335 | **v2 补**（喂 frozen 字段） |
+| 心跳写 | 5s | 337-346 | D3 字段定案 |
+| 快照+持仓批 | 60s | 348-373 | trading.snapshot_cycle |
+| 熔断沿撤单 | 步进 | 374-394 | trading.halt_edge_cancel |
+| 因子重算 | 5s | 396-407 | trading.recalc_hook |
+| TD 重连沿对账 | 步进 | 409-418 | trading.reconcile_orders |
+| xautoclaim 僵尸认领 | 5s | 425-431 | **v2 补** |
 
 ## 验收标准
 1. `pytest tests/ -q` 全量绿；分层 4 绿；pyflakes 零新增
 2. `git grep 'from src.strategy_runner.main import' src/strategy_runner/hub_worker.py` 归零（互指消灭）
 3. `wc -l hub_worker.py` ≤300 且 `grep -c 'counter %\|snap_counter' hub_worker.py` = 0
-4. **G2 冒烟**（staging 彩排环境）：staging 波次源改 db 后（本批顺带，消第十坑盲区），彩排发布含 worker 钩子节奏验证（假流+假钩子矩阵已在单测，彩排验发布路径本身）
-5. G4 盘外部署 + **一交易日观察**（worker 上的 live_task 8 转测 hub 模式留批 6——direct 冻结期任务 8 仍 direct，观察对象=无直接生产消费者时的回归面，以测试+彩排为门）
+4. **G2 冒烟**：`run_worker_smoke.py` 本地真进程全绿（XReadSleeper 节奏/心跳字段/停止路径含 NOGROUP 75 退出）+ staging 彩排发布路径过（staging 波次源改 db 入 4b 产出表——v2 补）
+5. G4 盘外部署 + **一交易日观察（v2 观察对象重界定）**：worker 无生产实例，但 **trading.py 有直接生产消费者=任务 8（direct）**——观察内容=任务 8 的快照/心跳/trade_log/停止指标（部署 task 波重启恰好行使启动对账路径；熔断沿仅熔断时行使）；另观察 hub（D1/D2 改动的在产面：零告警风暴+09:10 续航正常）
+
+### 回滚（v2 补——四要素补齐；双盲 A/B 同指"revert 无生产风险"系误判）
+- **零 DB 迁移**（trading.py 只写既有表）——回滚=代码级，走批 3 已建成管道（release 翻转/rollback-tasks，机制现成仅引用）
+- **4a 回滚**：revert + 盘外重发布 → 任务 8 回内联版（波及 task 波重启）
+- **4b 回滚**：worker 无产上实例零风险；但 D1/D2 动在产 hub/direct 共用层——revert + 重发布 + hub 重启（租约让位设计保证安全）
+- 各切片独立 commit，单 revert 机制上够；回滚窗均须盘外
 
 ## mock 方式
 XReadSleeper 用 fakeredis 流注入（deploy/tests 既有道具思想）；trading.py 六件用 MagicMock adapter/PG；frozen/buy_ok 既有测试零修改语义级整体搬。
 
 ## 实施切分
-- **4a**：trading.py 提取+互指消灭（纯移动+测试收编，direct 不动）
+- **4a**：trading.py 提取+互指消灭（纯移动+测试收编+挂点测试改接；direct 循环结构不动、调用点重接）
 - **4b**：worker 迁骨架+XReadSleeper+D1/D2/D3+staging 波次源改 db
 - **4c**：文档（md_hub.md/strategy_framework 契约回写挂账清偿）
+
+### 知情差异清单（v2 补——双盲 B 指出 reconcile『超集』非整体搬，行为变化必须落档）
+| 件 | worker 现行为 | 统一后 | 性质 |
+|---|---|---|---|
+| reconcile_orders | 只告警在场委托 | 在场委托+成交补录+WAL 残留（runner 超集） | **行为增强**——启动与每次 TD 重连沿均变化，知情接受 |
+| snapshot_cycle | 无 available_cash、两事务 | 含 available_cash、单事务（direct 形态） | 行为统一（worker 落库多一列，无消费者受扰） |
+| 停止检查节奏 | worker 5s / direct 60s | 统一 5s（worker 值，更灵敏） | 值变化 |
+| 熔断/重算告警文案 | 两版字句微差 | 统一 direct 版文案 | 文案统一 |
+| write_trade 日志 | worker 版无 RETURNING 详情 | 统一 RETURNING 版 | 观测增强 |
 
 ## 参考文档
 1. `docs/任务/批2-runtime骨架与hub首迁.md`（骨架契约+行为映射表范式）
