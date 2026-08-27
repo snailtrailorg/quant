@@ -61,8 +61,8 @@
 |---|---|---|
 | 0 KeyboardInterrupt | 不拉 | 正常停（always 也不对抗显式 stop——v2 修正原概念错误） |
 | 1 vnpy 缺/事件线程死 | **拉** | 进程域故障，重启正确 |
-| 3 让位 | **不拉**（Prevent） | 对端在位不抢；L3 300s 轮询在租约释放后接管 |
-| 4 租约重试耗尽 | **不拉**（Prevent） | 同上 |
+| 3 让位 | **拉**（v2.2 修：Prevent 只留 78——含 3 时部署波次必炸，staging 实锤） | RestartSec 30s 等租约过期后重试 |
+| 4 租约重试耗尽 | **拉**（v2.2 同修） | 同上 |
 | 5 续租丢 | **拉** | "systemd 将接管"告警文案即此意 |
 | 78 EX_CONFIG | **不拉**（Prevent） | 配置错 Failed 告警人工 |
 | StartLimit 打穿 | failed→**L3 按 ExecMainStatus 区分**（D1 v2） | SEGV 同款形态不再无人管 |
