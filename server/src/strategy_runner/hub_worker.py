@@ -1,8 +1,10 @@
-"""hub 模式 worker（ST7，设计 14 v2 §3）。评审③修订版。
+"""hub 模式 worker（ST7，设计 14 v2 §3）。批 4b（2026-08-27）迁 runtime 骨架。
 
 由 strategy_runner.main 在 md_mode=hub 时调用 run()：TD-only 接入 + Valkey Streams 消费
-+ SA/SB/SC 机制全复用（含 direct 主循环四件套：trade_log/快照/熔断沿/recalc，评审 S1——
-批 4a 起四件套与 frozen/buy_ok 单源化于 strategy_runner.trading，本文件不再有本地副本）。
++ SA/SB/SC 机制全复用。交易四件套与 frozen/buy_ok 自 4a 单源化于 strategy_runner.trading；
+批 4b：5s 定时段逐项退化为 EngineLoop.every() 钩子（XReadSleeper 双节奏注入）；停止路径=
+_stop_hook 清理+os._exit(0)（不用 failure=exit）；心跳只写自有 7 字段+ts（D3）；三件套收编
+runtime.alerts。钩子全清单 11 项与知情差异见 docs/任务/批4-worker迁移与trading解耦.md。
 """
 from __future__ import annotations
 
@@ -11,6 +13,10 @@ import os
 import time
 from datetime import datetime
 
+from src.strategy_framework.runtime.alerts import make_alert, make_guard, make_valkey
+from src.strategy_framework.runtime.loop import EngineLoop
+from src.strategy_framework.runtime.pulse import HeartbeatWriter
+from src.strategy_framework.runtime.xsleeper import XReadSleeper
 from src.strategy_runner import trading
 
 logger = logging.getLogger("hub_worker")
@@ -18,25 +24,16 @@ logger = logging.getLogger("hub_worker")
 BAR_STREAM_PREFIX = "hub:bars:"
 HB_KEY = "quant:hb:md-hub"
 STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
+# 批 2 骨架三件套（与 hub 同款；_valkey 保留别名供测试/冒烟注入 fake）
+_alert = make_alert()
+_valkey = make_valkey
 
-
-def _valkey():
-    import redis
-    return redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-                                decode_responses=True, socket_timeout=3)
-
-
-def _norm_ts(v) -> str:
-    """ts 归一化（评审 S4：PG str() 与流 isoformat 格式断裂——统一 fromisoformat→isoformat）。"""
+def _norm_ts(v) -> str:   # ts 归一化（评审 S4：PG str() 与流 isoformat 断裂）
     try:
         return datetime.fromisoformat(str(v)).isoformat()
-    except Exception:
-        return str(v)
+    except Exception: return str(v)
 
-
-class BarMsgState:
-    """worker 侧消息序号/去重状态（gen 分区内 seq 连续，R-BR6/R-DL2）。"""
-
+class BarMsgState:   # worker 侧消息序号/去重状态（gen 分区内 seq 连续，R-BR6/R-DL2）
     def __init__(self):
         self.gen = 0
         self.seq = 0
@@ -57,36 +54,20 @@ class BarMsgState:
         self.seq = seq
         return "ok"
 
-
-def _hub_alive(r) -> bool:
-    """hub 心跳存在（TTL 内）。存储不可查时返回 True——断流会自然使 bar 过期，不在此路径阻断。"""
+def _hub_alive(r) -> bool:   # hub 心跳存在（TTL 内）；存储不可查返回 True（断流自然使 bar 过期）
     try:
         return r.exists(HB_KEY) == 1
-    except Exception:
-        return True
-
+    except Exception: return True
 
 def run(ctx: dict) -> None:
-    """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen,
-             warmup_pg, stop_check, reconcile, logger}"""
-    # 2026-08-19 归位：直连 quant_common（原经 strategy_runner.main——main↔hub_worker 互指
-    # 且连带加载入口模块级 vnpy import；Q 审：上一轮 replace 静默未中）
+    """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen, warmup_pg, stop_check, reconcile}"""
+    # 2026-08-19 归位：直连 quant_common（原经 main 互指且连带加载入口模块级 vnpy import）
     from src.quant_common.session import in_astock_session as _in_astock_session, session_edge
-    from src.quant_common.guard import guard as _guard_base, sd_notify as _sd_notify
-    from src.alert_notify.notify import safe_notify
-
-    def _alert(title: str, body: str = "") -> None:
-        safe_notify("critical", title, body)
-
-    def _guard(name):
-        return _guard_base(name, alert=lambda title, body="": _alert(title, body))
+    from src.quant_common.guard import sd_notify as _sd_notify
 
     r = _valkey()
-    tid = ctx["tid"]
-    sid = ctx["sid"]
-    symbol = ctx["symbol"]
-    strategy = ctx["strategy"]
-    adapter = ctx["adapter"]
+    tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
+    strategy, adapter = ctx["strategy"], ctx["adapter"]
     ee = ctx["event_engine"]          # 评审 C1：键名统一
     td_api = ctx.get("td_api")
     history = ctx["history"]
@@ -100,22 +81,18 @@ def run(ctx: dict) -> None:
              "sess_bar_wall": 0.0}
     hb_task_key = f"quant:hb:task:{tid}"
 
-    # ——— EVENT_TRADE → trade_log（评审 S1 四件套之一；4a 单源化 trading）———
-    @_guard("hub.on_trade")
+    # ——— EVENT_TRADE → trade_log（评审 S1；4a 单源化 trading）———
+    @make_guard("hub.on_trade", _alert)
     def on_trade(event):
         trading.write_trade_log(event.data, adapter, sid, symbol)
 
     ee.register(__import__("vnpy.trader.event", fromlist=["EVENT_TRADE"]).EVENT_TRADE, on_trade)
-
     # ——— 消费组（先建组后回放，评审陷阱 6）———
-    # P0-3 修复（2026-08-20 双盲审计 A1）：原组残留时 xreadgroup ">" 从旧组水位续消费——
-    # 重启窗内 30-40 根 bar 重新驱动 on_bar，frozen_allows 放行 SELL = 重复下单。
-    # 重启即销毁旧组重建（新组从 $ 起）：停机窗消息永不重放（丢的 bar 由暖机/gap 路径从
-    # DB 补，绝不重复消费）。双保险：下方 max_ts 持久化过滤。
+    # P0-3 修复（2026-08-20 双盲审计 A1）：重启即销毁旧组重建（新组从 $ 起）——原组残留时 ">" 从旧水位
+    # 续消费，重启窗内 bar 重驱动 on_bar=重复下单；丢的 bar 由暖机/gap 从 DB 补，双保险=下方 max_ts 过滤。
     try:
         r.xgroup_destroy(stream, gname)
-    except Exception:
-        pass   # 组不存在（首启）属正常
+    except Exception: pass   # 组不存在（首启）属正常
     try:
         r.xgroup_create(stream, gname, id="$", mkstream=True)
     except Exception as e:
@@ -131,7 +108,6 @@ def run(ctx: dict) -> None:
             logger.info("跨重启水位恢复 max_ts=%s", _saved)
     except Exception as e:
         logger.warning("水位恢复读取失败（从空水位起）: %s", e)
-
     # ——— 暖机：只填 history 绝不调 on_bar（评审 F3）———
     def _warmup_from_stream(hist: list, upto_ts: str | None = None) -> list:
         """流回放填 history。upto_ts 截断（rewarm 时防未来泄漏，评审 S4）。"""
@@ -145,8 +121,7 @@ def run(ctx: dict) -> None:
                     continue                       # 只灌当前消息之前的（防未来）
                 if ts_n and ts_n not in seen:
                     bars.append({"ts": ts_n, "open": float(f["open"]), "high": float(f["high"]),
-                                 "low": float(f["low"]), "close": float(f["close"]),
-                                 "volume": float(f["volume"] or 0)})
+                                 "low": float(f["low"]), "close": float(f["close"]), "volume": float(f["volume"] or 0)})
                     seen.add(ts_n)
             hist.extend(bars)
             logger.info("hub 暖机：流回放补 %d 根（history 总 %d）", len(bars), len(hist))
@@ -160,17 +135,11 @@ def run(ctx: dict) -> None:
         history[:] = fresh[-100:]
 
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
-
-    # ——— send_order 时刻事实检查（S6 修订）：交易时段 + bar 新鲜（<300s）+ hub 心跳 ———
-    # 检查器由 ctx 注入 C2 网关（main._gated_send）；纯逻辑在 trading.buy_ok_check 供测试
+    # ——— send_order 时刻事实检查（S6）：交易时段+bar 新鲜+hub 心跳；纯逻辑在 trading.buy_ok_check，检查器由 ctx 注入 C2 网关 ———
     ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r), time.time(),
                                                 in_session=_in_astock_session())
-
-    def _alert_throttled(title: str, body: str) -> None:
-        _alert(title, body)   # notify 自带 1min 同标题去重
-
-    # ——— 消息处理（guard 保护，R-BR12）———
-    @_guard("hub.on_msg")
+    # ——— 消息处理（guard 保护，R-BR12；告警走 _alert——notify 自带 1min 同标题去重）———
+    @make_guard("hub.on_msg", _alert)
     def handle_msg(fields: dict) -> None:
         ts_n = _norm_ts(fields.get("ts", ""))
         # R-DL1 持久去重（评审 S7）：ts 回退/重复（含 flush 迟到 tick 重复桶）一律丢弃
@@ -184,7 +153,7 @@ def run(ctx: dict) -> None:
         if kind == "gen_jump":
             logger.info("hub 代次切换 -> gen=%s，重暖机补缺口", state.gen)
             _rewarm(upto_ts=ts_n)
-            _alert_throttled(f"行情 hub 重启（代次 {state.gen}），任务 {tid} 已补暖机", "")
+            _alert(f"行情 hub 重启（代次 {state.gen}），任务 {tid} 已补暖机", "")
         elif kind == "dup_or_reorder":
             stats["dropped_dup"] += 1
             return
@@ -192,7 +161,7 @@ def run(ctx: dict) -> None:
             logger.warning("seq 跳变（gap），重暖机并冻结直至人工确认")
             frozen["sticky"] = True   # gap 冻结 sticky（评审 C2：只能重启解）
             _rewarm(upto_ts=ts_n)
-            _alert_throttled(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 bar_hub 表。")
+            _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 bar_hub 表。")
         # pub_ts 超龄丢弃（R-DL3）
         pub_ts = float(fields.get("pub_ts", 0) or 0)
         if pub_ts and _in_astock_session() and (time.time() - pub_ts) > STALE_PUB_S:
@@ -201,21 +170,19 @@ def run(ctx: dict) -> None:
         if str(fields.get("untrusted", "0")).lower() in ("1", "true"):
             frozen["sticky"] = True
             logger.error("untrusted bar（断线失真），冻结: %s", fields.get("ts"))
-            _alert_throttled(f"不可信 bar，冻结任务 {tid}（{symbol}）", "断线跨分钟失真，重启任务解冻。")
+            _alert(f"不可信 bar，冻结任务 {tid}（{symbol}）", "断线跨分钟失真，重启任务解冻。")
             return
         bar = {"ts": ts_n, "open": float(fields["open"]), "high": float(fields["high"]),
                "low": float(fields["low"]), "close": float(fields["close"]),
                "volume": float(fields["volume"] or 0)}
-        # bar 已接受：先落锚+去重水位，再驱动策略（盲审 C-F1 2026-08-18——place_order 在 on_bar
-        # 内同步执行，若锚在 on_bar 之后更新，开盘/午后首根 bar 的 BUY 会读到昨日旧锚被确定性误拒）
+        # bar 已接受：先落锚+去重水位再驱动策略（盲审 C-F1——锚后更新则首根 bar 的 BUY 读到昨日旧锚被确定性误拒）
         stats["last_bar_wall"] = time.time()
         if _in_astock_session():
             stats["sess_bar_wall"] = stats["last_bar_wall"]
         state.max_ts = ts_n
         try:
-            r.set(_mts_key, ts_n)   # P0-3：水位持久化（重启恢复，防 SELL 重放）
-        except Exception:
-            pass   # 持久化失败不阻断（组重建已挡住停机窗重放，此为纵深第二层）
+            r.set(_mts_key, ts_n)   # P0-3：水位持久化（重启恢复，防 SELL 重放；失败不阻断）
+        except Exception: pass
         sig = strategy.on_bar(bar, list(history))
         stats["bars"] += 1
         history.append(bar)
@@ -238,95 +205,93 @@ def run(ctx: dict) -> None:
                 logger.warning("XACK 失败: %s", e)
         return len(ids)
 
-    # ——— 主循环（评审 S7 伪代码；TimeoutError 归 RedisError，评审 B3）———
-    last_timer = 0.0
-    sess_was = _in_astock_session()   # 时段沿检测（S6 修订：沿上清 sess_bar_wall 基线）
+    # ——— 批 4b：EngineLoop 编排（旧 5s 定时段逐项退化为钩子；11 项清单/period 见设计）———
+    sess_was = _in_astock_session()   # 时段沿检测基态
     td_status_was = True
     halt_state = {"was": False}
-    snap_counter = 0
-    _baseline_cache = {"baseline": None}   # 账户基线净值进程级缓存（4a 随快照单源化改调用方持有）
+    _baseline_cache = {"baseline": None}   # 账户基线缓存（4a 起调用方持有）
+    hb = HeartbeatWriter(r, hb_task_key, ttl=90)
+
+    def _stop_hook():
+        """停止路径（设计裁定不用 failure=exit——Restart=on-failure 拉起=F-36 churn 倒退）：
+        清理=旧 finally 语义（xgroup_del）+ os._exit(0) 正常停止码（SA4 分类，不触发重启）。"""
+        if not ctx["stop_check"]():
+            return
+        logger.info("任务 %s 收到停止，退出", tid)
+        try:
+            r.xgroup_del(stream, gname)
+        except Exception: pass
+        os._exit(0)
+
+    def _sess_edge():
+        nonlocal sess_was
+        sess_now = _in_astock_session()
+        if session_edge(sess_now, sess_was):
+            stats["sess_bar_wall"] = 0.0   # S6 修订：沿上清基线
+        sess_was = sess_now
+
+    def _blind_watch():
+        """盲视观测（S6）：frozen["now"] 只喂心跳/告警，下单判定由 send_order 时刻的 buy_ok 做。"""
+        sess_now = _in_astock_session()
+        hub_alive = _hub_alive(r)
+        bar_stale = (sess_now and stats["sess_bar_wall"]
+                     and time.time() - stats["sess_bar_wall"] > trading.FROZEN_STALE_BAR_S)
+        new_dyn = (not hub_alive) or bool(bar_stale)
+        if new_dyn and not frozen.get("now"):
+            logger.error("盲视状态（hub_alive=%s bar_stale=%s）——BUY 将在下单时刻被拒",
+                         hub_alive, bool(bar_stale))
+            _alert(f"任务 {tid} 盲视（hub{'心跳丢失' if not hub_alive else ' bar 停更'}）",
+                   "BUY 在下单时刻被拒/SELL 放行；数据恢复自动解除。")
+        frozen["now"] = new_dyn or bool(frozen.get("sticky"))
+
+    def _heartbeat():
+        """心跳（D3 定案）：只写 worker 自有 7 字段+ts（md 字段区分模式；无 tick 源不冒充）。"""
+        hb.beat(pid=os.getpid(), md="hub", gen=state.gen,
+                last_bar_ts=stats["last_bar_wall"] or 0,
+                lag=(time.time() - stats["last_bar_wall"]) if stats["last_bar_wall"] else -1,
+                bars=stats["bars"], frozen=int(frozen.get("now", False)))
+
+    def _td_reconnect():
+        """TD 重连沿 → 重跑对账（R-BR11；ctx["reconcile"]=runner 超集含成交补录，4b 收敛冗余循环）。"""
+        nonlocal td_status_was
+        td_status = bool(getattr(td_api, "connect_status", True))
+        if td_status and not td_status_was:
+            logger.info("TD 重连沿，重跑对账（含成交补录）")
+            try:
+                ctx["reconcile"]()
+            except Exception as e:
+                logger.warning("重连对账失败: %s", e)
+        td_status_was = td_status
+
+    def _zombie_claim():
+        """僵尸 pending 认领并处理（评审 S3：认领即消费，幂等靠 ts 去重）。"""
+        try:
+            _next, claims = r.xautoclaim(stream, gname, cname, min_idle_time=60000, count=20)
+            if claims:
+                process_batch([(stream, claims)])
+        except Exception: pass
+
+    loop = EngineLoop(
+        name=f"live-task-{tid}", step=5.0,
+        sleeper=XReadSleeper(r, stream, gname, cname, process_batch),  # 流消费=sleeper 注入
+        watchdog=lambda: _sd_notify("WATCHDOG=1"), event_engines=(ee,),  # 喂狗+事件线程存活（R-BR12）
+        on_fatal=lambda reason: _alert(f"任务 {tid} {reason}，自动重启",
+                                       "worker 退出由 systemd 接管；请查 journalctl 定位首个异常。"))
+    loop.every("stop-check", 5.0, _stop_hook)        # 停止（P4-3；清理+exit 0 在钩子内）
+    loop.every("sess-edge", 0.0, _sess_edge)         # 时段沿清 sess_bar_wall 基线：每步
+    loop.every("blind-watch", 0.0, _blind_watch)     # 盲视判定+告警（喂 frozen 字段）：每步
+    loop.every("heartbeat", 5.0, _heartbeat)         # 心跳（D3 七字段+ts）
+    loop.every("snapshot", 60.0, lambda: trading.snapshot_cycle(  # 快照+持仓批（旧 12 拍=60s）
+        adapter, ctx.get("account_id"), tid, _baseline_cache))
+    loop.every("halt-edge", 0.0, lambda: trading.halt_edge_cancel(adapter, halt_state, sid))  # 熔断沿撤在场单
+    loop.every("factor-recalc", 5.0, lambda: trading.recalc_hook(r, _rewarm, history))  # 因子重算+热重载
+    loop.every("td-reconnect", 0.0, _td_reconnect)   # TD 重连沿对账：每步
+    loop.every("zombie-claim", 5.0, _zombie_claim)   # xautoclaim 僵尸认领（评审 S3）
     try:
-        while True:
-            try:
-                batch = r.xreadgroup(gname, cname, {stream: ">"}, count=10, block=500)
-                if batch:
-                    process_batch(batch)
-            except Exception as e:
-                # 连接异常（含 redis TimeoutError）睡 1s 重试；BLOCK 超时返回空表不走这
-                if "Timeout" not in type(e).__name__:
-                    logger.warning("XREADGROUP 异常: %s", e)
-                    time.sleep(1)
-            if time.time() - last_timer < 5:
-                continue
-            last_timer = time.time()
-            snap_counter += 1
-            _sd_notify("WATCHDOG=1")
-            if ctx["stop_check"]():
-                logger.info("任务 %s 收到停止，退出", tid)
-                break
-            # hub 心跳 + bar 停更 → 盲视观测（S6 修订：frozen["now"] 只喂心跳/告警，
-            # 下单判定在 send_order 时刻由 buy_ok 完成；基线=时段内 bar，跨日/假日不误报）
-            sess_now = _in_astock_session()
-            if session_edge(sess_now, sess_was):
-                stats["sess_bar_wall"] = 0.0
-            sess_was = sess_now
-            hub_alive = _hub_alive(r)
-            bar_stale = (sess_now and stats["sess_bar_wall"]
-                         and time.time() - stats["sess_bar_wall"] > trading.FROZEN_STALE_BAR_S)
-            new_dyn = (not hub_alive) or bool(bar_stale)
-            if new_dyn and not frozen.get("now"):
-                logger.error("盲视状态（hub_alive=%s bar_stale=%s）——BUY 将在下单时刻被拒",
-                             hub_alive, bool(bar_stale))
-                _alert_throttled(f"任务 {tid} 盲视（hub{'心跳丢失' if not hub_alive else ' bar 停更'}）",
-                                 "BUY 在下单时刻被拒/SELL 放行；数据恢复自动解除。")
-            frozen["now"] = new_dyn or bool(frozen.get("sticky"))
-            # 心跳（R-OBS2）
-            try:
-                r.hset(hb_task_key, mapping={
-                    "pid": os.getpid(), "md": "hub", "gen": state.gen,
-                    "last_bar_ts": stats["last_bar_wall"] or 0,
-                    "lag": (time.time() - stats["last_bar_wall"]) if stats["last_bar_wall"] else -1,
-                    "bars": stats["bars"], "frozen": int(frozen.get("now", False)),
-                })
-                r.expire(hb_task_key, 90)
-            except Exception as e:
-                logger.warning("心跳写失败: %s", e)
-            # 快照（每 60s≈12 个 timer，评审 S1；4a 单源化 trading.snapshot_cycle——direct 形态：
-            # 含 available_cash 列/单事务/SB1 断线不写假值+快照持仓批同守卫，知情差异②——
-            # worker 落库多一列，无消费者受扰）
-            if snap_counter % 12 == 0:
-                trading.snapshot_cycle(adapter, ctx.get("account_id"), tid, _baseline_cache)
-            # 熔断沿撤在场单（评审 S1，F-41；4a 单源化 trading.halt_edge_cancel——文案统一 direct 版）
-            trading.halt_edge_cancel(adapter, halt_state, sid)
-            # factor:recalc（评审 S1）；链条打磨#6：兼作因子热重载钩子（4a 单源化 trading.recalc_hook）
-            trading.recalc_hook(r, _rewarm, history)
-            # TD 重连沿 → 重跑对账（R-BR11）+ 成交补录
-            # 4a 注：ctx["reconcile"] 已升级 runner 超集（内含成交补录，知情差异①），下方
-            # 补录循环保留=幂等冗余（trade_ref ON CONFLICT），4b 迁骨架时随钩子接线收敛
-            td_status = bool(getattr(td_api, "connect_status", True))
-            if td_status and not td_status_was:
-                logger.info("TD 重连沿，重跑对账+成交补录")
-                try:
-                    ctx["reconcile"]()
-                    for t in (adapter.query_trades() or []):
-                        trading.write_trade_log(t, adapter, sid, symbol)
-                except Exception as e:
-                    logger.warning("重连对账失败: %s", e)
-            td_status_was = td_status
-            # 事件线程存活（R-BR12）
-            et = getattr(ee, "_thread", None)
-            if et is not None and not et.is_alive():
-                logger.critical("worker 事件线程死亡，退出待重启")
-                _alert(f"hub worker 事件线程死亡（任务 {tid}），自动重启", "")
-                os._exit(1)
-            # 僵尸 pending 认领并处理（评审 S3：认领即消费，幂等靠 ts 去重）
-            try:
-                _next, claims = r.xautoclaim(stream, gname, cname, min_idle_time=60000, count=20)
-                if claims:
-                    process_batch([(stream, claims)])
-            except Exception:
-                pass
-    finally:
+        loop.run()   # 永续（XReadSleeper never-raise 保证 sleep 位不抛；停止/NOGROUP 带码直达）
+    except KeyboardInterrupt:
+        pass
+    finally:   # 原生库拆除规避（同 hub/direct）；正常停止/NOGROUP 已在钩子/sleeper 内带码直达
         try:
             r.xgroup_del(stream, gname)
         except Exception:

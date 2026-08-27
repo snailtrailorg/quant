@@ -7,10 +7,21 @@
   on_recovered 清 _last_retry_ts + 打屏守卫（清场逻辑在 test_md_api_guard）
 - is_trading_day：日历优先、工作日 fallback
 """
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from src.strategy_framework.md_session import is_trading_day, zombie_session
+
+
+@pytest.fixture(autouse=True)
+def _fresh_td_cache():
+    """D2 按日缓存防跨测试污染（坑③）：每测试前后清——mock 后缓存脏值=假绿假红。"""
+    from src.strategy_framework.md_session import _reset_td_cache
+    _reset_td_cache()
+    yield
+    _reset_td_cache()
 
 
 # ── is_trading_day ──
@@ -31,6 +42,48 @@ class TestIsTradingDay:
         with patch("src.data_platform.platform.is_trading_day", side_effect=RuntimeError):
             assert is_trading_day(datetime(2026, 8, 24)) is True   # 周一
             assert is_trading_day(datetime(2026, 8, 22)) is False  # 周六
+
+
+class TestTradingDayCache:
+    """批 4b D2：按日缓存下沉 is_trading_day 本体——三坑规约逐条锁。"""
+
+    def test_cache_key_is_param_date(self):
+        """坑①：键=参数的 date（非 now().date()）——同日只打一次 DB，异日各打。"""
+        calls = []
+        with patch("src.data_platform.platform.is_trading_day",
+                   side_effect=lambda d: calls.append(d) or True):
+            assert is_trading_day(datetime(2026, 8, 24)) is True
+            assert is_trading_day(datetime(2026, 8, 24, 14, 30)) is True   # 同日（时刻不同）走缓存
+            assert is_trading_day(datetime(2026, 8, 25)) is True           # 异日=新键
+        assert calls == [date(2026, 8, 24), date(2026, 8, 25)]
+
+    def test_db_failure_not_cached(self):
+        """坑②：只缓存 DB 成功读——失败回退 weekday 值不缓存（假日撞 DB 抖动不得被
+        当交易日冻结一天：恢复后下一调用即拿到真值）。"""
+        with patch("src.data_platform.platform.is_trading_day", side_effect=RuntimeError):
+            assert is_trading_day(datetime(2026, 8, 24)) is True   # 周一回退
+        with patch("src.data_platform.platform.is_trading_day", return_value=False):
+            assert is_trading_day(datetime(2026, 8, 24)) is False  # 未吃上周一缓存
+
+    def test_reset_hook_forces_refetch(self):
+        """坑③：_reset_td_cache() 清缓存——测试可重置（防 mock 后缓存脏值）。"""
+        n = []
+        with patch("src.data_platform.platform.is_trading_day",
+                   side_effect=lambda d: n.append(1) or True):
+            assert is_trading_day(datetime(2026, 8, 24)) is True
+            from src.strategy_framework.md_session import _reset_td_cache
+            _reset_td_cache()
+            assert is_trading_day(datetime(2026, 8, 24)) is True
+        assert len(n) == 2   # 重置后重打 DB
+
+    def test_false_value_cached_correctly(self):
+        """False 是合法缓存值（非 None 判定）——假日缓存后不再打 DB。"""
+        calls = []
+        with patch("src.data_platform.platform.is_trading_day",
+                   side_effect=lambda d: calls.append(d) or False):
+            assert is_trading_day(datetime(2026, 10, 1)) is False
+            assert is_trading_day(datetime(2026, 10, 1)) is False
+        assert len(calls) == 1
 
 
 # ── zombie_session ──

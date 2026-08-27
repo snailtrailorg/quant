@@ -166,6 +166,55 @@ class TestSwallow:
         sup.tick(True, True)
 
 
+class TestOutOfSessionStallGate:
+    """批 4b D1：源头统一门——stalled = counters.stalled(now) if in_session else None。
+    一次覆盖段 2 症状腿与段 4 告警腿（夜间回放不误告警/不 renew 刷退避）。
+    对现 hub 是结构性空操作（apply_edge 出沿即清 sess_last_ts→stalled 恒 None），
+    防御价值在未来无条件喂 on_data 的引擎。worker 是 TD-only 无监督器（设计写明防误读）。"""
+
+    def _gated(self, in_session):
+        """非盘中但带断流基线（未来无条件喂引擎的形态）：stalled() 本可返回 400s。"""
+        return _sup(counters=_counters(in_session=in_session, count=5, last_ts=600.0), t=1000.0)
+
+    def test_out_of_session_no_stall_symptom(self):
+        sup, session, _, alert, _ = self._gated(False)
+        session.retry_ready.return_value = True
+        sup.tick(False, True)                     # 400s 断流但非盘中
+        session.renew.assert_not_called()         # 症状腿被门控（不 renew 刷退避）
+        alert.assert_not_called()                 # 告警腿被门控
+
+    def test_out_of_session_no_stall_alert(self):
+        sup, session, _, alert, clock = self._gated(False)
+        sup.tick(False, True)                     # 首见
+        clock["t"] += 120.0
+        sup.tick(False, True)                     # 过 30s 节奏点仍不告警
+        assert alert.call_count == 0
+
+    def test_out_of_session_no_recovery(self):
+        sup, session, _, _, _ = self._gated(False)
+        sup.tick(False, True)                     # stalled=None：不算数据恢复
+        session.on_recovered.assert_not_called()
+
+    def test_in_session_same_counters_still_symptom(self):
+        """对照：同基线盘中（400s>300s）→ 反应式重登照常（门只挡非盘中，行为值不变）。"""
+        sup, session, _, alert, _ = self._gated(True)
+        session.retry_ready.return_value = True
+        sup.tick(True, True)
+        session.renew.assert_called_once()
+        assert alert.call_count == 1
+
+    def test_stalled_not_consulted_out_of_session(self):
+        """门在源头：非盘中连 counters.stalled() 都不调（真计数器出沿已清，MagicMock 可证）。"""
+        counters = MagicMock()
+        counters.apply_edge.return_value = False
+        counters.stalled.return_value = 400.0
+        counters.zombie.return_value = False
+        counters.sess_count = 5
+        sup = MdSessionSupervisor(MagicMock(), counters, MagicMock(), now=lambda: 1000.0)
+        sup.tick(False, True)
+        counters.stalled.assert_not_called()
+
+
 class TestPolicyAndFactory:
     def test_policy_defaults_match_hub(self):
         """默认值=hub 现值（迁移行为不变的锁）：600/300/150/30/60。"""

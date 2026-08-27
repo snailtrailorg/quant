@@ -307,15 +307,6 @@ def main() -> None:
     sup = MdSessionSupervisor(md_sess, counters, _alert, role="hub",
                               context=lambda: f"订阅 {len(sm.current)} 个标的。")
 
-    _td_cache: dict = {"d": None, "v": True}
-
-    def _trading_day() -> bool:
-        """交易日（按日缓存——is_trading_day 走 DB 查 trade_cal，不能每步打）。"""
-        d = datetime.now().date()
-        if _td_cache["d"] != d:
-            _td_cache["d"], _td_cache["v"] = d, is_trading_day()
-        return _td_cache["v"]
-
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗
                       event_engines=(ee,),                          # 事件线程存活（R-BR12，死→exit 1）
@@ -329,7 +320,10 @@ def main() -> None:
     loop.every("flush", 5.0, _flush)                # 双 flush 窗口判断（逻辑原样保留）
     loop.every("heartbeat", 5.0, _heartbeat)        # 心跳（R-OBS1）
     loop.every("l2-supervise", 0.0,                 # L2 会话自愈：每步
-               lambda: sup.tick(in_session=_in_astock_session(), trading_day=_trading_day()))
+               # 批 4b D2：交易日按日缓存下沉 md_session.is_trading_day 本体——hub 侧
+               # _trading_day 缓存删除（等值消重：原缓存键同为当日，schedule_due 内部
+               # 裸打 DB 一并消掉）
+               lambda: sup.tick(in_session=_in_astock_session(), trading_day=is_trading_day()))
     try:
         loop.run()   # 永续（到期驱动；进程域退出在钩子/骨架内 os._exit 带码）
     except KeyboardInterrupt:

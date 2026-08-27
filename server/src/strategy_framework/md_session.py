@@ -54,12 +54,35 @@ except Exception:
     pass  # 测试/早期导入窗口静默
 
 
+_TD_CACHE: dict = {}   # date -> bool（D2 按日缓存：schedule_due 每步都在打 DB，一处修）
+
+
+def _reset_td_cache() -> None:
+    """清按日缓存（D2 坑③：测试钩子——mock 后缓存脏值=假绿假红，跨测试必重置）。"""
+    _TD_CACHE.clear()
+
+
 def is_trading_day(today: datetime | None = None) -> bool:
-    """交易日（数据中台日历优先；缺失保守按工作日）。"""
+    """交易日（数据中台日历优先；缺失保守按工作日）。
+
+    D2 按日缓存（批 4b，缓存下沉本体）：schedule_due 内部每步（hub 5s / direct 10s）
+    都在裸打 DB——缓存进本体一处修，hub 消自身缓存、direct 消裸查。三坑规约：
+    ①键=**参数的 date**（非 now().date()——schedule_due 显式传 now、测试传固定日期）；
+    ②**只缓存 DB 成功读**——失败回退 weekday 值不缓存（假日撞 DB 抖动不得被当交易日
+    冻结一天）；③测试用 ``_reset_td_cache()`` 清（防跨测试污染）。
+    知情差异落档：日历盘中变更最迟次日生效；与 in_session 的 60s 配置缓存新鲜度不一致
+    （hub 迁移前已是每日级，等价）。
+    """
     today = today or datetime.now()
+    key = today.date()
+    cached = _TD_CACHE.get(key)
+    if cached is not None:
+        return cached
     try:
         from src.data_platform import platform
-        return platform.is_trading_day(today.date())
+        v = bool(platform.is_trading_day(key))
+        _TD_CACHE[key] = v
+        return v
     except Exception:
         return today.weekday() < 5
 

@@ -52,13 +52,18 @@ class MdSessionSupervisor:
         if self._counters.apply_edge(in_session):
             self._anchors = {"zero": 0.0, "stall": 0.0}   # 新时段新节奏（告警从沿起算）
 
+        # D1 源头统一门（批 4b 双盲审定案）：stalled 只在盘中取值，非盘中恒 None——一次
+        # 覆盖段 2 症状腿与段 4 告警腿（只门其一则未来无条件喂 on_data 的引擎夜间仍 renew
+        # 刷退避）。对现 hub 是结构性空操作（apply_edge 出沿即清 sess_last_ts → stalled()
+        # 恒 None），行为值不变铁律精确成立；防御价值在未来无条件喂引擎（夜间回放不误告警）。
+        stalled = self._counters.stalled(now) if in_session else None
+
         # 1) 定时续航（当日一次）：开盘前换新鲜会话——XTP 日切丢会话的预测性维护
         if self._session.schedule_due():
             logger.info("[%s] 定时续航：交易日开盘前重登 MD 会话", self._role)
             self._session.renew()
 
         # 2) 反应式重登（症状驱动 + 退避到点）：零 tick 超宽限=僵尸会话 / 断流超线
-        stalled = self._counters.stalled(now=now)
         symptom = (self._counters.zombie(now=now, trading_day=trading_day,
                                          grace=p.zombie_grace)   # 双盲审 P1：透传，单一来源
                    or (stalled is not None and stalled > p.stall_error))

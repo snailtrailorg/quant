@@ -1,6 +1,7 @@
 # staging 彩排组参数（2026-08-26）——镜像 quant-prod 全集保真，
-# 仅四处彩排差异：①交易窗不强制（随时彩排）②波次缩减 web/celery/hub（feishu/task 连外网不入）
-# ③XTP md_host 已指 127.0.0.1（连不上即刻拒绝，防黑洞挂起>Watchdog）④波次源=static
+# 仅三处彩排差异：①交易窗不强制（随时彩排）②波次缩减 web/celery/hub（feishu/task 连外网不入）
+# ③XTP md_host 已指 127.0.0.1（连不上即刻拒绝，防黑洞挂起>Watchdog）
+# （批 4b 原差异④波次源 static→db 已对齐 prod——彩排即验证 DB 真相源通道，消盲区）
 ---
 # ---- 根与包装器（sudoers 白名单通道，设计稿 §2）----
 deploy_root: /data/websites/snailtrail.cc/quant
@@ -38,8 +39,8 @@ deploy_postverify_units: "{{ deploy_waves | map(attribute='units') | flatten }}"
 
 # ---- 验证参数 ----
 deploy_trading_window_enforce: false  # 盘中硬闸（force 需 -e force=true 且打印自担风险）
-deploy_task_units_source: static         # 波次 task/feishu 实例清单真相源 = DB
-deploy_task_units_static: []  # staging 波次静态（DB 真相源通道仍可手验）
+deploy_task_units_source: db  # 批 4b：staging 彩排第十坑盲区根治——彩排环境与 prod 同走 DB 真相源（quant-dbro wrapper），彩排即验证该通道
+deploy_task_units_static: []  # static 通道仍可用（手动覆写演练）；db 源采集为空时波次仅 web/celery/hub
 deploy_task_units_live: []            # DB 真相源采集后覆写（live_task running）
 deploy_task_units_feishu: []          # DB 真相源采集后覆写（im_bot_config enabled）
 # v3.3 接线: quant 只读查询走 quant-dbro wrapper（quant 属主，DB 连接封装其内走 PG peer
