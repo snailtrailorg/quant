@@ -20,7 +20,8 @@
   - `docs/任务/`（自包含任务文件，做任务时只读任务文件+接口契约+模块契约即可动手）
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
-- `scripts/` - 开发机部署工具（`deploy-*.sh`/`quant-deploy.sh`）+ 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`verify.sh`）。**不传服务器**
+- `deploy/` - **工件化交付（现行，2026-08-26 起在管生产）**：Ansible playbooks（release/rollback/bootstrap 三剧本八阶段+自动回滚）+ inventory（quant-prod/quant-staging 彩排）+ wrappers（quant-svc 等 9 只特权通道）+ collections vendor + 六场景失败注入。**发布=彩排绿后跑 release.yml**（详见记忆 deploy-mechanism）
+- `scripts/` - 旧 bash 部署链（**已退役待封存**，保留一个回滚周期）+ 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`dev-start.sh`/`verify.sh`）。**不传服务器**
 - **判据**：协调/推进项目的 → `flow/`；要交付的内容 → `docs/`（知识/文档）或 `server/src/`（代码）
 
 ## 开工前必读
@@ -82,6 +83,8 @@
 ## 详规索引
 
 - 工作流程（五段循环/进展日志接力/评审）：`flow/规范/工作流程.md`
+- **八步法（强制交付流程，2026-08-26 起）**：`flow/规范/八步法.md`（方案→双盲审→编码→双盲审→单测→提交→部署→集成测试，顺序强制，审核一律独立双盲）
+- 运行时架构对标与重构依据：`docs/architecture/20-运行时架构对标与差距分析.md`（三根源）+ `12-实盘稳定性设计.md` §2.9/2.10（批次表）
 - 文档自检 hook：`flow/规范/hook机制.md`
 - 任务模板（待办自包含写法规范，8 字段 + mock 库）：`flow/规范/任务模板.md`
 - 架构设计：`docs/architecture/00-总体设计.md`（总体设计 10 节，14 份参考文档已合并）
@@ -96,6 +99,7 @@
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（19 份，2026-08-21 增 web_api）+ im_bot
 - 本地开发部署（一键脚本 + 排错）：`scripts/LOCAL-DEPLOY.md`（用 `bash scripts/dev-start.sh start`，不要手动起服务）
+- **发布/回滚/彩排**：`deploy/` 目录（现行 Ansible 管道；彩排先行的完整制度见记忆 deploy-mechanism 与 docs/任务/批3-工件化交付.md）
 
 ## 项目知识（durable，随项目积累 ↓）
 
