@@ -63,7 +63,7 @@ fi
 
 echo "== 8 初始 release + server 链接（代码树入 releases；.deployed 标记=回滚锚）=="
 if [ ! -L "$Q/server" ]; then
-  INIT_ID="$(date +%Y%m%d%H%M)-stginit"
+  INIT_ID="$(date +%Y%m%d%H%M)-0000abc"   # hex 合规（stginit 曾违反 wrapper 正则——回滚 flip 必败，双盲审 A 实锤未进提交）
   mkdir -p "$Q/releases/$INIT_ID"
   for item in src migrations scripts vendor tests docs alembic.ini requirements.txt; do
     [ -e "$REPO/server/$item" ] && cp -a "$REPO/server/$item" "$Q/releases/$INIT_ID/"

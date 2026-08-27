@@ -22,6 +22,8 @@ fi
 
 echo "== 3 authorized_keys（限制项；from= 暂缓待出口 IP 确认）=="
 install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
+[ -s "$SRC/quant_deploy_ed25519.pub" ] && [ "$(wc -c < "$SRC/quant_deploy_ed25519.pub")" -gt 80 ] \
+  || { echo "❌ 公钥缺失或异常（<80B）——防空串静默坑（2026-08-27 双盲审 P2）" >&2; exit 1; }
 printf 'no-port-forwarding,no-agent-forwarding,no-pty %s\n' "$(cat "$SRC/quant_deploy_ed25519.pub")" \
   > /home/deploy/.ssh/authorized_keys
 chown deploy:deploy /home/deploy/.ssh/authorized_keys
@@ -49,7 +51,7 @@ rsync --version | head -1
 
 echo "== 7 权限验证（白名单过/越权拒/dbro 通）=="
 sudo -u deploy sudo -n /usr/local/sbin/quant-svc status quant-md-hub@quant.service >/dev/null \
-  && echo "✅ ① 白名单过"
+  && echo "✅ ① 白名单过" || { echo "❌ ① 白名单未过" >&2; exit 1; }
 if sudo -u deploy sudo -n systemctl restart sshd >/dev/null 2>&1; then
   echo "❌ ② 越权竟然过了——sudoers 有洞，立即停用" >&2; exit 1
 else

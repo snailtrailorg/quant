@@ -122,6 +122,14 @@
             group: quant
             mode: "0755"
 
+        - name: 【3b】quant-hbcheck 安装（2026-08-27 双盲审 P1-2 补——曾漏装：新机 bootstrap 后阶段 8 才撞缺位必回滚）
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../wrappers/quant-hbcheck"
+            dest: /usr/local/sbin/quant-hbcheck
+            owner: quant
+            group: quant
+            mode: "0755"
+
         - name: 【3b】run-current 安装 → {{ deploy_root }}/bin/（固定路径，不经 server 链接自举——设计稿 §4）
           ansible.builtin.copy:
             src: "{{ playbook_dir }}/../run-current"

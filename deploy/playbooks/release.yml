@@ -132,7 +132,7 @@
       ansible.builtin.shell: |
         set -u
         rc=0
-        for w in quant-dbro quant-pinned; do
+        for w in quant-dbro quant-pinned quant-hbcheck; do   # 2026-08-27 P1-2：hbcheck 曾漏探针
           p='{{ deploy_wrapper_dir }}/'"$w"
           if [ ! -x "$p" ]; then
             echo "✗ wrapper 不存在或不可执行: $p（prod 由 3b-2 bootstrap 装位 /usr/local/sbin；沙箱为仓库 wrappers/）" >&2
@@ -367,9 +367,8 @@
           changed_when: false
 
         - name: 阶段 8 —— hub 心跳复现（redis 模式——quant-hbcheck wrapper：真实 HASH schema+TTL 判活）
-          ansible.builtin.command: sudo -u quant /usr/local/sbin/quant-hbcheck
+          ansible.builtin.command: "{{ quant_hbcheck_cmd | default('sudo -u quant ' ~ deploy_wrapper_dir ~ '/quant-hbcheck') }}"
           register: hb_check
-          changed_when: false
           failed_when: hb_check.rc != 0
           when: deploy_hub_hb_mode == 'redis'
           changed_when: false

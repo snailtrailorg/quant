@@ -27,8 +27,15 @@ router = APIRouter(tags=["auth_routes"])
 # 开发机回退：shared 位不存在（无 /data）时用代码树相对位，与 main.py 回退链同构。
 _AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR",
                                    "/data/websites/snailtrail.cc/quant/shared/static/avatars"))
-if not _AVATAR_DIR.is_dir():
+# 2026-08-27 双盲审 P1-1：Path.is_dir() 遇 EACCES 会 raise（非返回 False）——staging 建成后
+# 开发机 import 即崩（test_log_analyze 实锤）。对齐 main.py 回退机制：except OSError 判回退。
+try:
+    _avatar_ok = _AVATAR_DIR.is_dir()
+except OSError:
+    _avatar_ok = False
+if not _avatar_ok:
     _AVATAR_DIR = _Path(__file__).resolve().parents[3] / "static" / "avatars"
+    _AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 
 # P4 轻量限流（审计 B-服务层 OWASP API4）：内存滑窗（单进程足够——部署单 uvicorn worker），
 # login 10 次/分/IP（防爆破）、forgot 3 次/分/IP（防邮件轰炸）。重启清零可接受。
