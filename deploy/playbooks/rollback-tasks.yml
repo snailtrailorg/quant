@@ -56,6 +56,31 @@
          if (rollback_waves | default([]) | length > 0)
          else (deploy_waves | map(attribute='name') | list) }}
 
+# 2026-08-27 产上演练实锤：独立入口缺 dbro 采集（release.yml pre_tasks 有）——
+# live/feishu 清单恒空 → 任务 8/feishu 不被回滚波次重启 → 收敛断言抓"钉新版"。
+# 修：波次解析前补同款采集（static 源跳过）。
+- name: 回滚 pre —— 波次实例 DB 真相源采集（live；与 release pre_tasks 同款）
+  ansible.builtin.shell: "{{ deploy_task_units_db_cmd }}"
+  register: rb_units_live
+  when: deploy_task_units_source == 'db'
+  changed_when: false
+
+- name: 回滚 pre —— live 清单解析
+  ansible.builtin.set_fact:
+    deploy_task_units_live: "{{ rb_units_live.stdout_lines | default([]) }}"
+  when: deploy_task_units_source == 'db' and rb_units_live is succeeded
+
+- name: 回滚 pre —— feishu 实例采集
+  ansible.builtin.shell: "{{ deploy_task_units_db_cmd_feishu }}"
+  register: rb_units_feishu
+  when: deploy_task_units_source == 'db'
+  changed_when: false
+
+- name: 回滚 pre —— feishu 清单解析
+  ansible.builtin.set_fact:
+    deploy_task_units_feishu: "{{ rb_units_feishu.stdout_lines | default([]) }}"
+  when: deploy_task_units_source == 'db' and rb_units_feishu is succeeded
+
 - name: 回滚 —— 波次对象解析（名单 → deploy_waves 全对象，供 include_tasks/wave.yml）
   ansible.builtin.set_fact:
     rollback_waves_resolved: "{{ deploy_waves | selectattr('name', 'in', rb_wave_names) | list }}"
