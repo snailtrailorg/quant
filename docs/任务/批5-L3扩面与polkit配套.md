@@ -5,7 +5,7 @@
 > **v2（2026-08-27 步 2 双盲审修订）**：A/B 双同"需修订后复审"（P0×2+P1×7）。
 > P0-1 failed 态黑洞（三处机制均不管——目标 1 引用的 SEGV 实证未被修复）→ failed 态按 ExecMainStatus
 > 区分 78/崩溃并扩 L1 模式随期望表泛化；P0-2 strategy_config 镜像实锤 2-3 行 enabled 无 live_task
-> （部署首周期即拉废 runner）→ 判定源改 systemctl is-enabled 显式意图；P1 全项吸收（维护标记 db0/
+> （部署首周期即拉废 runner）→ 判定源改 systemctl is-enabled 显式意图；P1 全项吸收（维护标记（db 号随 VALKEY_URL）/
 > .rules 手工通道显式化/回滚段/exit 1-5 矩阵+RestartPreventExitStatus=3 4/退避衰减泛化/Valkey
 > 不可达 fail-closed/polkit 239 不分动词）。
 > 前置：批 4 代码完成（staging 彩排/部署/观察日可与本批并行——纯调度层改动独立于引擎）。
@@ -23,7 +23,7 @@
 ## 产出
 | 文件 | 动作 | 内容 |
 |---|---|---|
-| `server/src/scheduler/tasks.py` | 修改 sa4_reconciler | ①期望表：`_desired_units(conn)` 返回 `[(unit, source)]`——live_task running→live-task@{tid}；**strategy@* 按 `systemctl is-enabled` 显式意图**（v2 D2）；md-hub→常开 ②调和循环统一消费期望表（active+failed 双态调和——failed 按 ExecMainStatus 区分 78/崩溃，v2 D1）③md-hub 三重熔断：租约键（Valkey 不可达 fail-closed）+维护标记（db0）+退避共键；stable-clear 随期望表泛化 ④`_sa4_units` 模式泛化三源 |
+| `server/src/scheduler/tasks.py` | 修改 sa4_reconciler | ①期望表：`_desired_units(conn)` 返回 `[(unit, source)]`——live_task running→live-task@{tid}；**strategy@* 按 `systemctl is-enabled` 显式意图**（v2 D2）；md-hub→常开 ②调和循环统一消费期望表（active+failed 双态调和——failed 按 ExecMainStatus 区分 78/崩溃，v2 D1）③md-hub 三重熔断：租约键（Valkey 不可达 fail-closed）+维护标记（db 号随 VALKEY_URL）+退避共键；stable-clear 随期望表泛化 ④`_sa4_units` 模式泛化三源 |
 | `server/scripts/systemd/49-quant.rules` | 修改 | polkit 增 `quant-md-hub@*.service` manage-units 放行（quant 用户；al8 systemd 239 **不分动词**——一放即该单元全部管理动作，v2 纠正动词措辞）。web-api（同 quant）间接受益可 stop hub=数据面 DoS，与既有 live-task stop 权限同量级，知情接受 |
 | `server/scripts/systemd/quant-md-hub@.service` | 修改 | `Restart=always`→`on-failure`；`RestartPreventExitStatus=78 3 4`（v2 扩 D3 矩阵）；加 `MemoryHigh=768M` |
 | `server/tests/test_sa4_reconciler.py` | 修改 | 补 L3 测试 ≥12（v2 扩）：期望表三源归一/漂移拉起/退避共键+stable-clear 泛化/md-hub 三重前置（租约在场/维护标记/在场不拉）/**Valkey 不可达 fail-closed**/**failed 78 不拉 vs 崩溃拉**（ExecMainStatus 区分）/strategy@* is-enabled 门槛（enabled DB 行不拉）/租约 30s 残留跳过不写退避。`_sa4_units` 签名泛化后存量 18 测 mock 形状同步 |
@@ -38,7 +38,7 @@
 ### D1：md-hub 的 desired state 语义——**常开 + 三重熔断（v2：failed 态归位 L3 + Valkey fail-closed）**
 - live_task/strategy 的期望来自 DB 行；md-hub 无 DB 行——**常开**（系统单例数据面，永远该在跑）
 - 熔断①：**租约键** `hub:lease` 在场=另一实例持有 fencing → 跳过拉起（让位语义）。**Valkey 不可达=fail-closed**（跳过+告警——分区时 fail-open 拉第二实例会短暂破坏 fencing）
-- 熔断②：**维护标记** `quant:maintenance:md-hub` Valkey 键在场 → 跳过+告警一次。**db 号以 shared/.env VALKEY_URL 为准（=db0，v2 修正原 -n 4 笔误——照抄即哑炮）**：`valkey-cli -u "$(grep VALKEY_URL shared/.env | cut -d= -f2-)" SET quant:maintenance:md-hub 1 EX 14400`（默认 TTL 4h 防遗忘=hub 长期裸奔）
+- 熔断②：**维护标记** `quant:maintenance:md-hub` Valkey 键在场 → 跳过+告警一次。**db 号以 shared/.env VALKEY_URL 实时解析为准（产=4，本地/彩排=0——复盘盲审 P1 修正：v2 曾误写死 db0，照抄即哑炮=维护窗内 L3 照拉）**：`valkey-cli -u "$(grep VALKEY_URL shared/.env | cut -d= -f2-)" SET quant:maintenance:md-hub 1 EX 14400`（默认 TTL 4h 防遗忘=hub 长期裸奔）
 - 熔断③：退避计数与 L1 共键 `quant:sa4:backoff:quant-md-hub@quant.service`；**stable-clear 循环随期望表泛化**（v2 修：原只扫 live-task 模式——hub 稳定跑 10min 后计数不清零，只挂一次也会被退避拖到 3600s）
 - **failed 态归位（v2 P0-1 根修）**：L3 对 failed 态不再排除——按 `ExecMainStatus` 区分：`=78`（EX_CONFIG 配置错）跳过+告警人工；**其他（含 StartLimit 崩溃）→ reset-failed+start 走同一套三重熔断+退避**。L1 的 `_sa4_units` 模式随期望表一并泛化（`quant-live-task@*` + `quant-md-hub@*` + `quant-strategy@*`），限定范围解冻此一处
 - **L1/L3 对 failed 的职责边界（v2.1 复核 B 定）**：L1 段只处理 **live-task** 的 Failed（现状不动——它有完整的退避/清零/已停检查）；**md-hub/strategy 的 failed 归 L3 段处理**（走三重熔断+ExecMainStatus 区分）。共享退避键幂等防双拉：先到者写计数，后到者退避窗内跳过
@@ -72,7 +72,7 @@
 ## 验收标准
 1. `pytest tests/test_sa4_reconciler.py -q` 全绿（18 存量+新增 ≥12）；全量绿；分层绿
 2. `grep -c 'quant-md-hub' scripts/systemd/49-quant.rules` ≥1（polkit 放行）
-3. `grep 'Restart=\|RestartPreventExitStatus\|MemoryHigh' scripts/systemd/quant-md-hub@.service` 三行齐（Prevent 含 `78 3 4`）
+3. `grep 'Restart=\|RestartPreventExitStatus\|MemoryHigh' scripts/systemd/quant-md-hub@.service` 三行齐（Prevent=`78`，v2.2 定稿——含 3/4 时部署波次必炸，staging 实锤）
 3b. **.rules 服务器侧实装**（v2 P1-2：管道不覆盖——quant-install-units 只 glob *.service，.rules 无自动通道）：
    ```bash
    # michael 通道手工（文件头自述同款）
@@ -86,7 +86,7 @@
 4. **G4 演练**（盘外，真机，v2 扩七步）：
    ① 前置审计（D2 SQL）+首周期验证零 strategy 单元被拉
    ② stop md-hub → ≤300s L3 自动拉起+告警
-   ③ 打维护标记（db0）→ stop → 300s 后仍 dead（不拉）→ 删标记 → 拉回
+   ③ 打维护标记（db 号以 VALKEY_URL 解析为准，产=4）→ **打完必须 EXISTS 复验才许 stop** → stop → 300s 后仍 dead（不拉）→ 删标记 → 拉回
    ④ **failed 态演练**（v2 P0-1 验收）：
       a. 崩溃 failed：注入坏入口（临时 ExecStart 指向不存在模块 60s 窗）→ StartLimit → failed → ≤300s L3 reset-failed+拉起
       b. 78 failed：quant-svc start 前置设 `systemctl set-property` 或临时 wrapper 退出 78（简单法：`systemctl start quant-sbx-78probe@tmp` 一次性单元 ExecStart=/bin/sh -c 'exit 78' RestartPreventExitStatus=78 → failed）→ L3 不拉+告警人工
