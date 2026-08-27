@@ -24,3 +24,13 @@ def gateway():
          patch.object(LLMGateway, "_load_failover_config", return_value=TEST_FAILOVER):
         gw = LLMGateway()
         yield gw
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """限流/熔断注册表进程级（D2 跨轮记忆是运行期特性）——测试间清零，
+    防熔断失败计数跨测试累积误开（engine 路径 now 走 rate_limit_context）。"""
+    from src.data_platform import rate_limit
+    rate_limit.reset_registries()
+    yield
+    rate_limit.reset_registries()

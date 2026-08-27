@@ -211,16 +211,29 @@ def sync(sync_id: str, backfill_from: str | None = None,
 
 # --- 通用按日批量拉取（去静默吞异常 + 完整性校验） ---
 
+def _api_name_of(cfg: dict) -> str:
+    """cfg["api"]（如 'pro.daily'）→ 接口名（'daily'，与 rate_limits 键词汇表对齐）。"""
+    return str(cfg.get("api", "")).rsplit(".", 1)[-1] or "daily"
+
+
 def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
-                        start: str, end: str, sleep_s: float = 0.5,
-                        progress_cb: Callable | None = None) -> dict:
+                        start: str, end: str, sleep_s: float | None = None,
+                        progress_cb: Callable | None = None,
+                        api_name: str = "daily") -> dict:
     """按交易日逐日批量拉取 + 写入。
 
     单日失败不中断整体，记入 failed_dates（含失败原因），不再静默 continue。
     用 trade_cal 校验预期交易日 vs 实际成功日。
 
+    限速（限流治理吸收 2026-08-27）：循环间 sleep 收编 rate_limit_context——间隔从
+    DataSource 三级取；sleep_s 显式传入则覆盖间隔（兼容旧调用，测试传 0 关闭等待），
+    None=走配置。api_name=接口名（_api_name_of）决定用哪档。
+
     Returns: {pulled, saved, failed_dates, expected_days, actual_days}
     """
+    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from src.data_platform.rate_limit import rate_limit_context
+    ds = get_data_source("tushare") or TushareDataSource()   # DB 无配置回落类级默认限速
     date_range = pd.date_range(start=start, end=end, freq="B")
     total = len(date_range)
     total_pulled = 0
@@ -234,7 +247,8 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
     for i, d in enumerate(date_range, 1):
         trade_date = d.strftime("%Y%m%d")
         try:
-            df = pro_api_fn(trade_date=trade_date)
+            with rate_limit_context(ds, api_name, min_interval=sleep_s):
+                df = pro_api_fn(trade_date=trade_date)
             if df is not None and not df.empty:
                 if "trade_date" not in df.columns:
                     # 防御：异常响应缺关键列，给明确报错（避免下游 KeyError 隐晦）
@@ -256,8 +270,6 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
                 last_success_date = trade_date
         if progress_cb:
             progress_cb(i, total, trade_date)
-        if sleep_s:
-            time.sleep(sleep_s)
 
     expected_days = _expected_trading_days(start, end)
     return {
@@ -285,7 +297,7 @@ def _sync_astock_daily(cfg: dict, end_date: str, backfill_from: str | None = Non
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
     r = _sync_by_trade_date(pro.daily, _daily_to_save_fn, start, end_date,
-                            progress_cb=progress_cb)
+                            api_name=_api_name_of(cfg), progress_cb=progress_cb)
     r["start"] = start
     return r
 
@@ -304,7 +316,7 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
     r = _sync_by_trade_date(pro.daily_basic, lambda df: save_daily_basic(df), start, end_date,
-                            progress_cb=progress_cb)
+                            api_name=_api_name_of(cfg), progress_cb=progress_cb)
     r["start"] = start
     return r
 
@@ -392,7 +404,7 @@ def _sync_etf_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
     r = _sync_by_trade_date(pro.fund_daily, _daily_to_save_fn, start, end_date,
-                            progress_cb=progress_cb)
+                            api_name=_api_name_of(cfg), progress_cb=progress_cb)
     r["start"] = start
     return r
 
@@ -453,6 +465,9 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [],
                     "expected_days": 0, "actual_days": 0}
 
+    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from src.data_platform.rate_limit import rate_limit_context
+    ds = get_data_source("tushare") or TushareDataSource()
     ts_codes = _list_static_ts_codes("astock")
     total = len(ts_codes)
     total_pulled = 0
@@ -460,7 +475,10 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
     failed: list[str] = []
     for i, tc in enumerate(ts_codes, 1):
         try:
-            df, saved = _fetch_minute_and_save(tc, freq, start, end_date)
+            # 限速（限流治理吸收）：节奏档取 daily（原 0.15s 硬编码→三级可调）；
+            # stk_mins 档（3600s）归 pool_minute 的 Valkey 全局闸门管——此处若用会卡成每小时一只
+            with rate_limit_context(ds, "daily"):
+                df, saved = _fetch_minute_and_save(tc, freq, start, end_date)
             if df is not None and not df.empty:
                 total_pulled += len(df)
                 total_saved += saved
@@ -468,7 +486,6 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
             failed.append(f"{tc}:{type(ex).__name__}:{str(ex)[:40]}")
         if progress_cb:
             progress_cb(i, total, tc)
-        time.sleep(0.15)
 
     return {"pulled": total_pulled, "saved": total_saved, "start": start,
             "failed_dates": failed, "expected_days": None,
@@ -551,6 +568,9 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     from datetime import date as _date, timedelta as _td
     from src.data_platform.adapters.tushare_adapter import pull_adj_factor_by_date
     from src.data_platform.schema import to_vt_symbol
+    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from src.data_platform.rate_limit import rate_limit_context
+    ds = get_data_source("tushare") or TushareDataSource()
 
     with get_conn() as conn:
         sql = ("SELECT DISTINCT ts::date FROM bar_1d WHERE adj_factor IS NULL "
@@ -575,7 +595,9 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
         d = _date.fromisoformat(str(d)) if isinstance(d, str) else d
         next_d = d + _td(days=1)
         td = d.strftime("%Y%m%d")
-        fdf = pull_adj_factor_by_date(td)
+        # 限速（限流治理吸收）：原 sleep(0.3) → 三级可调（默认档同为 0.3s）
+        with rate_limit_context(ds, "adj_factor"):
+            fdf = pull_adj_factor_by_date(td)
         if fdf is None:
             return {"status": "degraded", "days": len(dates), "processed": done, "updated": updated,
                     "reason": "复权因子接口不可用（积分未到账？）——已处理 %d/%d 日，到账后重新触发续填" % (done, len(dates))}
@@ -595,7 +617,6 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
         done += 1
         if progress_cb:
             progress_cb(done, len(dates), td)
-        time.sleep(0.3)   # 限速：adj_factor 按积分档限流，保守 200 次/分
     return {"status": "success", "days": len(dates), "processed": done, "updated": updated}
 
 
@@ -641,6 +662,9 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                  progress_cb=None) -> dict:
         """通用第一档同步：按 trade_date 拉全市场 → upsert。"""
         from src.data_platform.db import get_conn as _gc
+        from src.data_platform.data_source import get_data_source, TushareDataSource
+        from src.data_platform.rate_limit import rate_limit_context
+        ds = get_data_source("tushare") or TushareDataSource()
         # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日）
         if backfill_from:
             start_ts = backfill_from
@@ -656,11 +680,13 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
         for d in date_range:
             td = d.strftime("%Y%m%d")
             try:
-                # forecast 按 ann_date 拉（公告日驱动），其余按 trade_date
-                if "ann_date" in pull_fn.__code__.co_varnames:
-                    df = pull_fn(ann_date=td)
-                else:
-                    df = pull_fn(trade_date=td)
+                # forecast 按 ann_date 拉（公告日驱动），其余按 trade_date；
+                # 限速（限流治理吸收）：原 0.3s 硬编码 → rate_limit_context 三级可调（daily 档）
+                with rate_limit_context(ds, "daily"):
+                    if "ann_date" in pull_fn.__code__.co_varnames:
+                        df = pull_fn(ann_date=td)
+                    else:
+                        df = pull_fn(trade_date=td)
                 if df is not None and not df.empty:
                     # 修 2026-08-19：insert_cols 含 PK，placeholders 必须同长（原漏 PK 导致每日 INSERT 失败）
                     insert_cols = pk_cols + [c for c in all_cols if c not in pk_cols]
@@ -692,7 +718,6 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                 failed_dates.append(f"{td}:{type(e).__name__}:{str(e)[:40]}")
             if progress_cb:
                 progress_cb(len(date_range), len(date_range), td)
-            time.sleep(0.3)   # 限速：500 次/分内
         return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
                 "failed_dates": failed_dates,
                 "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates)}
@@ -1238,6 +1263,9 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
     pro, api_fn, kind, freq, bar_type = _get_pro_api(sync_id)
     if kind is None:
         return {"status": "error", "error": f"不支持全量同步: {sync_id}"}
+    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from src.data_platform.rate_limit import rate_limit_context
+    ds = get_data_source("tushare") or TushareDataSource()
 
     ts_codes = _list_static_ts_codes(kind)
     total = len(ts_codes)
@@ -1248,8 +1276,10 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
     for i, tc in enumerate(ts_codes, 1):
         try:
             # 全量重建：强制 full（从上市日起全历史），不走 auto 完整性扫描
-            # （auto 只补 first~last 缺口，不补上市日到 first 的早期缺口）
-            r = sync_symbol(sync_id, tc, mode="full")
+            # （auto 只补 first~last 缺口，不补上市日到 first 的早期缺口）；
+            # 限速（限流治理吸收）：原 0.15s 硬编码 → rate_limit_context 三级可调（daily 档）
+            with rate_limit_context(ds, "daily"):
+                r = sync_symbol(sync_id, tc, mode="full")
             if r.get("status") in ("success", "uptodate", "empty"):
                 ok += 1
                 total_saved += r.get("saved", 0)
@@ -1259,8 +1289,6 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
             failed.append(f"{tc}:{type(e).__name__}:{str(e)[:40]}")
         if progress_cb:
             progress_cb(i, total, tc)
-        # 限频友好：每只之间小睡
-        time.sleep(0.15)
 
     return {"status": "partial" if failed else "success",
             "total": total, "ok": ok, "failed_count": len(failed),

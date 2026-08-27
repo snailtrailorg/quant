@@ -9,8 +9,23 @@ import os
 import json
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 logger = logging.getLogger("data_source")
+
+
+def _hm_valid(hm: str) -> bool:
+    """HH:MM 合法（00-23:00-59，两位补零——窗口比较靠字符串定宽，"9:00" 这类非法）。"""
+    if len(hm) != 5 or hm[2] != ":" or not hm[:2].isdigit() or not hm[3:].isdigit():
+        return False
+    return int(hm[:2]) <= 23 and int(hm[3:]) <= 59
+
+
+def _hm_in_window(now: str, start: str, end: str) -> bool:
+    """now 是否落在 [start, end]（含端点）；start>end 视为跨零点窗口（如 22:00-02:00）。"""
+    if start <= end:
+        return start <= now <= end
+    return now >= start or now <= end
 
 
 class DataSource(ABC):
@@ -18,8 +33,10 @@ class DataSource(ABC):
 
     限速（2026-08-19 T 审）：`get_rate_limit(api_name)` 具体方法（非 abstract——
     带默认实现，AkShare stub 零改动，未来 Wind 不强制实现）。配置归
-    `data_source_config.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
-    params 分界：秘密→credentials_encrypted；运维参数（rate_limits/base_url）→params。
+    `data_source_config.params` JSON：{"rate_limits": {"stk_mins": 60, ...},
+    "rate_time_overrides": [{"window":"16:00-20:00","multiplier":2.5}]}。
+    params 分界：秘密→credentials_encrypted；运维参数（rate_limits/rate_time_overrides/
+    base_url）→params。
     """
 
     DEFAULT_RATE_LIMITS: dict[str, float] = {}   # 子类覆写：api_name -> 最小间隔秒
@@ -39,15 +56,44 @@ class DataSource(ABC):
     def get_rate_limit(self, api_name: str) -> float:
         """该 API 两次调用最小间隔（秒）。0=不限。
 
-        params.rate_limits 覆盖类级 DEFAULT_RATE_LIMITS；值非法回落默认+告警一次，不崩同步。
-        键=数据源接口名（Tushare 即 pro.xxx 的 xxx，与 sync_config.tushare_api 词汇表对齐）。
+        三级覆盖（限流治理吸收 2026-08-27，D3）：
+        1. 类级 DEFAULT_RATE_LIMITS（代码默认）
+        2. params.rate_limits（DB 覆盖，{"api": 秒}）
+        3. params.rate_time_overrides 时段乘数——当前墙钟命中窗口则 interval /= multiplier
+           （multiplier>1=更快=间隔缩短，如盘后 ×2；格式 [{"window":"16:00-20:00",
+           "multiplier":2.5}]，支持跨零点 "22:00-02:00"，首条命中即生效）
+
+        值非法回落默认+告警，不崩同步。键=数据源接口名（Tushare 即 pro.xxx 的 xxx，
+        与 sync_config.tushare_api 词汇表对齐）。
         """
         limits = {**self.DEFAULT_RATE_LIMITS, **(self._params.get("rate_limits") or {})}
         try:
-            return float(limits.get(api_name, 0.0))
+            interval = float(limits.get(api_name, 0.0))
         except (TypeError, ValueError):
             logger.warning("rate_limits[%s]=%r 非法，回落默认", api_name, limits.get(api_name))
-            return float(self.DEFAULT_RATE_LIMITS.get(api_name, 0.0))
+            interval = float(self.DEFAULT_RATE_LIMITS.get(api_name, 0.0))
+        return self._apply_time_overrides(interval)
+
+    def _apply_time_overrides(self, interval: float) -> float:
+        """第三级：时段乘数——当前时刻（HH:MM）命中某条 window 则 interval /= multiplier。
+
+        非法条目（窗口格式错/multiplier≤0/非数）跳过+告警；interval<=0（不限速）不受影响。
+        """
+        rules = self._params.get("rate_time_overrides")
+        if not rules or interval <= 0:
+            return interval
+        now_hm = datetime.now().strftime("%H:%M")
+        for rule in rules if isinstance(rules, list) else []:
+            try:
+                start_s, end_s = (s.strip() for s in str(rule["window"]).split("-"))
+                multiplier = float(rule["multiplier"])
+                if multiplier <= 0 or not (_hm_valid(start_s) and _hm_valid(end_s)):
+                    raise ValueError("非法时段条目")
+                if _hm_in_window(now_hm, start_s, end_s):
+                    return interval / multiplier
+            except Exception:
+                logger.warning("rate_time_overrides 条目非法已跳过: %r", rule)
+        return interval
 
     def record_usage(self, api_calls: int = 1, api_name: str = "",
                     success: bool = True, latency_ms: int = 0,
@@ -79,6 +125,7 @@ class TushareDataSource(DataSource):
         "stk_mins": 3600.0,     # 分钟线 per-symbol（实测 1 次/小时，2026-08-19）
         "adj_factor": 0.3,       # 复权因子回补
         "daily": 0.5,            # 日线按交易日
+        "daily_basic": 0.5,      # 基本面指标（2026-08-27 补：engine 收编 sleep 后走此档）
         "fund_daily": 0.5,
         "cb_daily": 0.5,
         "trade_cal": 0.5,
