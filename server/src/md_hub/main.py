@@ -82,7 +82,8 @@ def main() -> None:
     # ——— 行情接入（ThinGateway + MdApi，零 TD）———
     from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
     from src.strategy_framework.md_api_guard import GuardedXtpMdApi, SdkState
-    from src.strategy_framework.md_session import XtpMdSession, is_trading_day
+    from src.strategy_framework.md_session import (
+        XtpMdSession, is_trading_day, load_xtp_window_cfg)
     from src.strategy_framework.runtime.loop import EngineLoop
     from src.strategy_framework.runtime.mdlink import MdSessionSupervisor
     from src.strategy_framework.runtime.pulse import HeartbeatWriter, SessionCounters
@@ -94,7 +95,10 @@ def main() -> None:
     md_api = GuardedXtpMdApi(gw)   # 批1：SDK 生命周期守卫（SEGV 结构性绝迹）
     gw.md_api = md_api
     # L2 会话（韧性分层模型 2026-08-24）：定时续航+反应式重登，批 2 起由 MdSessionSupervisor 在主循环节拍内驱动
-    md_sess = XtpMdSession(md_api)
+    # 每日连接窗（P2 批 08-28）：lead/lag>0 时窗开沿=续航单原语建连（relogin 直登）、
+    # 窗关沿=guard.suspend（logout 保持 CREATED）；任一 0=禁用（旧行为）
+    _lead, _lag = load_xtp_window_cfg()
+    md_sess = XtpMdSession(md_api, lead_min=_lead, lag_min=_lag)
 
     agg = MinuteAggregator()
     seqs: dict[str, int] = {}
@@ -164,7 +168,8 @@ def main() -> None:
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB）———
     setting = _build_xtp_setting()
     md_api.connect(setting["账号"], setting["密码"], int(setting["客户号"]),
-                   setting["行情地址"], int(setting["行情端口"]), setting.get("行情协议", "TCP"), 3)
+                   setting["行情地址"], int(setting["行情端口"]), setting.get("行情协议", "TCP"), 3,
+                   defer_login=not md_sess.window_open())   # 窗关启动只建 C 对象（CREATED），窗开沿 relogin 直登
 
     from vnpy.trader.object import SubscribeRequest
     from vnpy.trader.constant import Exchange
@@ -267,8 +272,13 @@ def main() -> None:
     # 语义原样（SubscriptionManager），节奏由下方钩子注册——15s diff / 60s 全量重放
     # （替换 %60<10 窗口法：同效果，无相位耦合）
     sm = SubscriptionManager(desired=_desired_symbols, subscribe=_subscribe, unsubscribe=_unsubscribe)
-    sm.replay()   # 启动全量订阅（旧 _sync_subscriptions(force=True)）
-    logger.info("hub 就绪，初始订阅 %d", len(sm.current))
+    if md_sess.window_open():
+        sm.replay()   # 启动全量订阅（旧 _sync_subscriptions(force=True)）
+        logger.info("hub 就绪，初始订阅 %d", len(sm.current))
+    else:
+        # 窗关启动（P2 批 08-28）：订阅不预放（guard 非 LOGGED_IN 态 no-op，账实会错）——
+        # 窗开沿 relogin → connect_status True → _md_edge 上升沿强制全量重放，账实自然对齐
+        logger.info("hub 窗关启动（lead=%d/lag=%d，defer_login），订阅待窗开沿重放", _lead, _lag)
 
     # ——— 主循环（批 2：EngineLoop 到期驱动；喂狗/事件线程存活检查内建骨架）———
     def _md_edge() -> None:

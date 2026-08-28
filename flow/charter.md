@@ -3,11 +3,11 @@
 > 立项填。所有 Agent 开工要读的第一份。
 
 - **项目名**: 多市场混合量化交易平台
-- **目标**(做成什么样算成功,一句话): 个人私有化部署的多市场量化交易平台，A股/可转债/ETF/加密永续合约全自动交易（实盘三级开关控制），带 Web 可视化管理 + 飞书移动干预 + AI 辅助研判，仅国内模型，单系统 RBAC。
+- **目标**(做成什么样算成功,一句话): 个人私有化部署的多市场量化交易平台，A股/可转债/场内基金（ETF/LOF/封基/REITs）/加密永续合约全自动交易（实盘三级开关控制），带 Web 可视化管理 + 飞书移动干预 + AI 辅助研判，仅国内模型，单系统 RBAC。
 - **范围**:
   - 做:
     - A 股个股：日线选股 + 分钟级研判 + 实盘交易（走中泰 XTP，受 astock 分项开关控制）
-    - 可转债 / 场内 ETF：全自动 T+0 程序化交易（中泰 XTP + vnpy_xtp，Linux 原生）
+    - 可转债 / 场内基金（ETF/LOF/封基/REITs，分项键 `etf`）：全自动 T+0 程序化交易（中泰 XTP + vnpy_xtp，Linux 原生）
     - 加密货币永续合约：BTC/ETH 全自动 CTA/网格/对冲（币安/OKX，vnpy 加密网关）
     - 统一数据中台：Tushare(主) + AkShare(补) + 币安/OKX WS -> PostgreSQL+pgvector+Valkey；回测与实盘 schema 对齐零迁移
     - 配置驱动策略框架：统一 Strategy 基类 + Factor 注册制 + 信号聚合 + DSL 表达式，Web 端配置，非硬编码
@@ -33,7 +33,7 @@
   - 数据库：PostgreSQL 18 + pgvector + Valkey（Redis 协议兼容），弃 TimescaleDB/重型向量库
   - 运行期 AI 仅国内模型（DeepSeek/GLM），不接 Anthropic/OpenAI
   - 实盘三级开关（.env ENABLE_LIVE_TRADING 总闸 + Web live_trading_config 分项 + 策略 enabled+backtest_verified，详见 CLAUDE.md）
-  - 可转债/ETF/A股实盘中泰 XTP + vnpy_xtp（待券商确认门槛/品种/费率，外部 gate）
+  - 可转债/场内基金/A股实盘中泰 XTP + vnpy_xtp（待券商确认门槛/品种/费率，外部 gate）
   - 回测数据 schema 与实盘对齐（20 天 XTP 等待期零迁移）
   - 单系统 RBAC 非多租户（数据共享，不加 user_id 隔离，只加 audit_log.actor）
   - 联网核实走本机 `spe curl`（WebSearch/WebFetch 不可用）
@@ -43,7 +43,7 @@
   - 多语言国际化：Web 前端按浏览器语言自动切换中/英文；LLM 回复/飞书回复/告警推送按用户语言偏好输出；日志统一英文
 - **成功标准**(尽量可衡量):
   - A 股分析：每日选股结果 + 分钟级实时研判推送到 Web 看板
-  - 可转债/ETF：双低轮动策略在 Tushare 历史数据回测通过，实盘小资金稳定运行
+  - 可转债/场内基金：双低轮动策略在 Tushare 历史数据回测通过，实盘小资金稳定运行
   - 加密合约：4H/1H CTA 策略在币安/OKX 回测+实盘验证
   - Web 后台：策略启停/参数改/持仓/盈亏/风控/日志全功能可用
   - 飞书：自然语言查持仓/盈亏 + 一键熔断（带确认）成功

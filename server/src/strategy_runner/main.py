@@ -134,6 +134,15 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     setting = _build_xtp_setting()
     boot_epoch = int(time.time())   # 评审 S8：秒级 epoch（分钟级同分钟重启会撞 id）
 
+    # 每日连接窗·TD 侧（P2 批 08-28，A/B 双盲审）：窗开建连/窗关启动不连（窗开沿由
+    # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout，exit 循环无
+    # 实证不冒——工程分级，TD 全窗化二期）。lead/lag 任一 0=禁用日窗（永久连接）。
+    from datetime import datetime as _dtnow   # 盲审 A-P0：函数级导入（模块头部无 datetime）
+    from src.strategy_framework.md_session import is_trading_day as _itd
+    from src.strategy_framework.md_session import load_xtp_window_cfg, xtp_session_window_open
+    _lead, _lag = load_xtp_window_cfg()
+    _td_open = xtp_session_window_open(_dtnow.now(), _lead, _lag, trading_day=_itd())
+
     class ThinTdGateway(BaseGateway):
         """TD-only 壳：事件转发 + 抽象方法转发 td_api（零 MD 零合约表，R-BR1/R-CAP1）。"""
 
@@ -168,7 +177,10 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     gw = ThinTdGateway(ee, "XTP")
     td_api = XtpTdApi(gw)
     gw.td_api = td_api
-    gw.connect(setting)   # 只连 TD（R-TD1：hub 零 TD，worker 零 MD）
+    if _td_open:
+        gw.connect(setting)   # 只连 TD（R-TD1：hub 零 TD，worker 零 MD）
+    else:
+        logger.info("TD 窗关启动（lead=%d/lag=%d），连接待窗开沿", _lead, _lag)
 
     adapter = XTPAdapter(gateway=gw, event_engine=ee,
                          order_prefix=f"t{tid or sid}:e{boot_epoch}:")
@@ -212,7 +224,8 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         知情差异①——worker 由只告警在场委托升级，启动与 TD 重连沿均变化，知情接受）。"""
         trading.reconcile_orders(adapter, sid, symbol)
 
-    _reconcile()
+    if _td_open:
+        _reconcile()   # B-P1-1：TD 在线才有对账意义——窗关启动跳过，窗开沿 connect 后由 TD 重连沿触发
     ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
         "account_id": account_id,
@@ -221,6 +234,8 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         "initial_capital": initial_capital,
         "warmup_pg": lambda: _warmup_history(symbol),
         "stop_check": _stop_check, "reconcile": _reconcile,
+        "td_connect": lambda: gw.connect(setting),      # 窗开沿建连（P2 批 08-28）
+        "td_window": (_lead, _lag),                     # 同窗参数（worker 轮询）
     })
     hub_worker_run(ctx)
 

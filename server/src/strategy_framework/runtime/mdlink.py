@@ -36,6 +36,8 @@ class MdSessionSupervisor:
         self._context = context   # 告警正文前缀（如订阅数）——hub 老文案「订阅 N 个标的。」
         self._now = now or time.time
         self._anchors: dict[str, float] = {"zero": 0.0, "stall": 0.0}   # 告警节奏锚
+        self._window_closed = False   # 每日连接窗开→关沿检测（P2 批 08-28）
+        self._boot_alert_date = ""    # 窗开首航告警当日去重（盲审 A-P1-2）
 
     def tick(self, in_session: bool, trading_day: bool) -> None:
         """主循环节拍（每 5-10s 一调）：沿→续航→反应式→恢复→例行告警。永不抛。"""
@@ -49,6 +51,21 @@ class MdSessionSupervisor:
     def _tick(self, in_session: bool, trading_day: bool) -> None:
         p = self.policy
         now = self._now()
+
+        # 0) 每日连接窗闸（P2 批 08-28，A/B 双盲审）：窗关沿→挂起一次（logout 保持
+        #    CREATED）；窗关期跳过全部会话段（段 4 告警已由 in_session=False 天然静默，
+        #    此闸是纵深）。窗开恢复=段 1 单原语（renew→relogin 直登，_renewed_date 去重
+        #    天然互锁——B-P0：不做独立 connect 原语，防 08-25 式槽回收 churn）。
+        #    `is True` 严格判定：非窗 session（无该方法/mock auto-mock）永不误关。
+        wcd = getattr(self._session, "window_close_due", None)
+        if callable(wcd) and wcd() is True:
+            if not self._window_closed:
+                logger.info("[%s] 每日连接窗关，挂起 MD 会话（logout 保持 CREATED）", self._role)
+                self._session.close_for_window()
+                self._window_closed = True
+            return
+        self._window_closed = False
+
         if self._counters.apply_edge(in_session):
             self._anchors = {"zero": 0.0, "stall": 0.0}   # 新时段新节奏（告警从沿起算）
 
@@ -62,6 +79,16 @@ class MdSessionSupervisor:
         if self._session.schedule_due():
             logger.info("[%s] 定时续航：交易日开盘前重登 MD 会话", self._role)
             self._session.renew()
+            # 窗开首航未确认显式告警（B-P1-2：9:05-9:31 in_session=False，反应式/段 4
+            # 全静默——失败最迟 9:41 zombie 才可见，须在此补洞）。当日一次直告（盲审
+            # A-P1-2：_paced 首见只起算+限频 3600>续航窗 25min=死代码，改日期去重）
+            li = getattr(self._session, "logged_in", None)
+            today = time.strftime("%Y-%m-%d")
+            if callable(li) and not li() and self._boot_alert_date != today:
+                self._boot_alert_date = today
+                self._alert(f"{self._role} MD 窗开建连未确认",
+                            "开盘前定时续航已发起但会话未确认，按退避自动重试中；"
+                            "持续失败请查 XTP 平台状态（journalctl 滤 [gw] 看 MD 生命周期）。")
 
         # 2) 反应式重登（症状驱动 + 退避到点）：零 tick 超宽限=僵尸会话 / 断流超线
         symptom = (self._counters.zombie(now=now, trading_day=trading_day,

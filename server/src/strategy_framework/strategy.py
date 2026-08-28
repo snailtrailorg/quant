@@ -1,6 +1,6 @@
 """策略框架 · Strategy 基类 + 信号聚合 + Python 代码模式。
 
-所有策略（A股分析/可转债ETF/加密合约）共用此基类，差异下沉到 ExecutionAdapter。
+所有策略（A股分析/可转债场内基金/加密合约）共用此基类，差异下沉到 ExecutionAdapter。
 Python 代码模式（#15）允许用户写自定义 on_bar 逻辑，替代 DSL 因子组合。
 """
 
@@ -68,7 +68,7 @@ class StrategyConfig:
     name: str
     type: str  # "astock_analysis" / "convertible_t0" / "crypto_perp"
     symbol: str
-    adapter: str  # "xtp"（可转债/ETF/A股股票，中泰XTP）/ "binance_perp" / "okx_perp"
+    adapter: str  # "xtp"（可转债/场内基金/A股股票，中泰XTP）/ "binance_perp" / "okx_perp"
     enabled: bool = True
     factors: list[dict] = field(default_factory=list)  # [{"name":"ma_dev","weight":0.6,"params":{}}, ...]
     aggregator: dict = field(default_factory=lambda: {"method":"weighted_sum","threshold_buy":0.3,"threshold_sell":-0.3})
@@ -149,7 +149,7 @@ def validate_params_against_defs(params, defs):
 
 
 class Strategy:
-    """统一策略基类。所有策略（A股分析/可转债 ETF/加密合约）继承此基类。"""
+    """统一策略基类。所有策略（A股分析/可转债场内基金/加密合约）继承此基类。"""
 
     def __init__(self, config: StrategyConfig, adapter):
         self.id = config.id

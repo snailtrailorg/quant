@@ -1,6 +1,6 @@
 """策略框架 · ExecutionAdapter 执行适配器。
 
-场内 XTP（可转债/ETF/A 股股票，中泰 XTP 通道）/ 加密币安/OKX 两种实现。
+场内 XTP（可转债/场内基金（ETF/LOF/封基/REITs）/A 股股票，中泰 XTP 通道）/ 加密币安/OKX 两种实现。分项键 etf=场内基金全体。
 
 实盘下单三级开关（AND）：
 1. .env ENABLE_LIVE_TRADING（总闸，settings.is_live_trading_enabled）
@@ -75,7 +75,7 @@ class ExecutionAdapter(ABC):
         return []
 
 
-# --- 场内 XTP 适配器（vnpy_xtp 网关，可转债/ETF/A 股股票） ---
+# --- 场内 XTP 适配器（vnpy_xtp 网关，可转债/场内基金/A 股股票） ---
 
 def _vnpy_exchange(ex: str):
     """项目交易所后缀 -> vnpy Exchange 枚举（延迟 import）。"""
@@ -87,7 +87,7 @@ def _vnpy_exchange(ex: str):
 class XTPAdapter(ExecutionAdapter):
     """中泰 XTP 交易适配器（底层 vnpy_xtp.XtpGateway）。
 
-    交易品种：可转债/ETF/A 股股票（中泰 XTP 通道），受三级开关控制
+    交易品种：可转债/场内基金/A 股股票（中泰 XTP 通道），受三级开关控制
     （astock/etf/convertible 分项）。vnpy 4.0 查询事件驱动：调 gateway.query_position/account()
     后异步推 EVENT_POSITION/ACCOUNT，本类注册监听收集到缓存，query_xxx 触发后轮询等结果。
     query_orders/trades 纯靠事件推送（XTP 网关无主动查委托/成交接口）。
@@ -306,7 +306,7 @@ class CryptoPerpAdapter(ExecutionAdapter):
 
 def create_adapter(adapter_type: str, gateway=None, event_engine=None) -> ExecutionAdapter:
     """创建适配器实例。XTPAdapter 可传 event_engine 注册事件监听。
-    A 股股票/可转债/ETF 统一走 'xtp'（中泰 XTP 通道）。
+    A 股股票/可转债/场内基金统一走 'xtp'（中泰 XTP 通道）。
     """
     mapping = {
         "xtp": XTPAdapter,

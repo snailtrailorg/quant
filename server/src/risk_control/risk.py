@@ -171,7 +171,11 @@ class RiskControl:
         if any(symbol.endswith(s) for s in (".SHSE", ".SZSE", ".SSE")):
             if code.startswith(("11", "12")):   # 沪/深可转债
                 return "convertible"
-            if code.startswith(("51", "15", "56", "58")):  # ETF（沪51/深15/跨市56/科创58，SB3-F-42 补 58 防绕分项开关）
+            if code.startswith(("50", "51", "56", "58")) or code.startswith(("15", "16", "18")):
+                # 场内基金全体（P2 批 08-28 产品范围语义修正，用户裁定：非仅 ETF）——
+                # 沪 50x（封基/LOF/REITs 混合段）+51/56/58（ETF，588 科创 ETF 在 58；519 场外
+                # 申赎码沿用旧代码收讫，无害）；深 15（ETF，含 150 分级残余）/16（LOF）/18
+                # （184 封基+180 REITs）。分项键 etf 保留（=场内基金全体，DB/前端兼容）
                 return "etf"
             return "astock"  # A 股股票（60/00/30 开头），走 XTP astock 分项
         return None

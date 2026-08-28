@@ -67,6 +67,7 @@ class GuardedXtpMdApi(XtpMdApi):
     def __init__(self, gateway):
         super().__init__(gateway)
         self._state = SdkState.IDLE
+        self._suspended = False   # 每日连接窗挂起标志（P2 批 08-28，A-P1-1）
         self._lock = threading.RLock()
         self._last_login_ts = 0.0   # 最近一次登录成功时刻（余音甄别锚）
 
@@ -78,9 +79,14 @@ class GuardedXtpMdApi(XtpMdApi):
 
     def connect(self, userid: str, password: str, client_id: int,
                 server_ip: str, server_port: int, quote_protocol: str,
-                log_level: int) -> None:
+                log_level: int, defer_login: bool = False) -> None:
         """建 C 对象 + 心跳 + 首登。成功→LOGGED_IN；登录失败→CREATED（可 relogin）。
-        全程持锁（P1）：与 SDK 回调线程的 onDisconnected/login_server 互斥。"""
+        全程持锁（P1）：与 SDK 回调线程的 onDisconnected/login_server 互斥。
+
+        defer_login=True（每日连接窗盘外启动，P2 批 08-28）：只建 C 对象+心跳→停在
+        CREATED——窗开沿由 supervisor 段 1 的 renew→relogin（CREATED 直登）补首登，
+        保证 relogin 永不遇 IDLE 态抛错（A-P1-2/B-P0 冷态配套）。
+        """
         with self._lock:
             if self._state not in (SdkState.IDLE, SdkState.DEAD):
                 raise SdkLifecycleError(f"connect 在 {self._state.value} 态非法（已连接过）")
@@ -102,6 +108,9 @@ class GuardedXtpMdApi(XtpMdApi):
             except Exception as e:
                 logger.warning("SDK 心跳设置未生效（SDK 默认值兜底）: %s", e)
 
+            if defer_login:
+                logger.info("MD defer_login：C 对象已建（CREATED），窗开沿 relogin 直登")
+                return
             self._login()
 
     def relogin(self) -> bool:
@@ -111,6 +120,10 @@ class GuardedXtpMdApi(XtpMdApi):
         with self._lock:
             if self._state in (SdkState.IDLE, SdkState.DEAD):
                 raise SdkLifecycleError(f"relogin 在 {self._state.value} 态非法（C 对象不可用）")
+            if self._suspended:
+                # 窗开沿引擎独占解除挂起（A-P1-1）：relogin 是唯一合法恢复路径
+                self._suspended = False
+                logger.info("MD 挂起解除（窗开沿 relogin），恢复登录序列")
             if self._state is SdkState.LOGGED_IN:
                 self._logout_quietly()
             ok = self._login()
@@ -131,6 +144,20 @@ class GuardedXtpMdApi(XtpMdApi):
                 self._logout_quietly()
             self._state = SdkState.DEAD
 
+    def suspend(self) -> None:
+        """每日连接窗盘后挂起（P2 批 2026-08-28）：logout 清服务端会话槽但**保持
+        CREATED 态**——次日窗开沿 relogin（CREATED 直登）可续。区别于 close()
+        （终态 DEAD，进程退出专用）；幂等，非 LOGGED_IN 态 no-op。
+        _suspended 标志（代码盲审 A-P1-1）：logout 会触发 onDisconnected 余音，此时
+        态已 CREATED、余音滤（要求 LOGGED_IN）不中→父类自动重登→**15:11 夜间自动
+        重连、窗关失效**——标志闸死 SDK 回调线程的 login_server，由 relogin（引擎
+        窗开沿调用）独占解除。"""
+        with self._lock:
+            if self._state is SdkState.LOGGED_IN:
+                self._logout_quietly()
+                self._state = SdkState.CREATED
+            self._suspended = True
+
     # ——— SDK 回调线程安全面（永不抛）———
 
     def login_server(self) -> bool:
@@ -139,8 +166,13 @@ class GuardedXtpMdApi(XtpMdApi):
         全程持锁（P1）：与引擎线程的 connect/relogin 互斥（onDisconnected 持锁再入，
         RLock 同线程可重入）。
         双盲审 P2：_login 全体 try 包——登录路径任何异常（如 query_contract 边界
-        错误）仅 warning 返回 False，回调线程「永不抛」是结构保障不只靠态门。"""
+        错误）仅 warning 返回 False，回调线程「永不抛」是结构保障不只靠态门。
+        _suspended（A-P1-1）：挂起期禁自动重登（窗关语义），静默 False——余音到点
+        自然灭，窗口噪音零。"""
         with self._lock:
+            if self._suspended:
+                logger.debug("login_server 挂起期被拒（每日连接窗关，窗开沿 relogin 恢复）")
+                return False
             if self._state in (SdkState.IDLE, SdkState.DEAD):
                 logger.warning("login_server 在 %s 态被拒（C 对象不可用）", self._state.value)
                 return False

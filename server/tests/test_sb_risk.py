@@ -141,6 +141,16 @@ class TestMarketOf:
         assert rc._market_of("159915.SZSE") == "etf"
         assert rc._market_of("BTCUSDT.BINANCE") == "binance_perp"
 
+    def test_listed_funds_all_segments(self, rc):
+        """P2 批 08-28：场内基金全体入 etf 分项（沪 50x/51/56/58 + 深 15/16/18）。"""
+        for sym in ("500058.SHSE", "501000.SHSE", "502000.SHSE",   # 沪 封基/LOF
+                    "508000.SHSE",                                  # 沪 REITs
+                    "510300.SHSE", "517800.SHSE", "560010.SHSE", "588000.SHSE",  # 沪 ETF 各段
+                    "159915.SZSE", "150018.SZSE",                   # 深 ETF(含分级残余)
+                    "160211.SZSE", "166005.SZSE",                   # 深 LOF
+                    "180101.SZSE", "184801.SZSE"):                  # 深 REITs/封基
+            assert rc._market_of(sym) == "etf", sym
+
 
 class TestOrderValidity:
     def test_zero_price_rejected(self, rc):

@@ -37,11 +37,11 @@ class TestIsTradingDay:
         with patch("src.data_platform.platform.is_trading_day", return_value=False):
             assert is_trading_day(datetime(2026, 8, 24)) is False
 
-    def test_calendar_fails_weekday_fallback(self):
-        """日历异常时周一->True，周六->False。"""
+    def test_calendar_fails_natural_day_fallback(self):
+        """日历异常→当自然日（用户裁定 2026-08-28：周六也 True，weekday 故障点消除）。"""
         with patch("src.data_platform.platform.is_trading_day", side_effect=RuntimeError):
             assert is_trading_day(datetime(2026, 8, 24)) is True   # 周一
-            assert is_trading_day(datetime(2026, 8, 22)) is False  # 周六
+            assert is_trading_day(datetime(2026, 8, 22)) is True   # 周六（自然日语义）
 
 
 class TestTradingDayCache:
@@ -295,3 +295,88 @@ class TestUnconfirmedRenewRetry:
             assert sess.renew() is True
             assert sess._renewed_date == _d(2026, 8, 26)
             assert sess.schedule_due(_dt(2026, 8, 26, 9, 12)) is False
+
+
+class TestSessionWindow:
+    """P2 批 08-28 每日连接窗：纯函数表驱动 + XtpMdSession 窗化 + fail-open 日历。"""
+
+    def test_window_open_table(self):
+        from src.strategy_framework.md_session import xtp_session_window_open
+        from datetime import datetime as _dt
+        T = lambda h, m: _dt(2026, 8, 28, h, m)
+        # 默认 lead=lag=10：9:05 开（9:15−10）~ 15:10 关（15:00+10，含 15:00 整分钟）
+        assert xtp_session_window_open(T(9, 4), 10, 10) is False
+        assert xtp_session_window_open(T(9, 5), 10, 10) is True
+        assert xtp_session_window_open(T(11, 30), 10, 10) is True     # 午休不断
+        assert xtp_session_window_open(T(15, 0), 10, 10) is True      # 收盘整分钟仍开（B-P2④）
+        assert xtp_session_window_open(T(15, 9), 10, 10) is True
+        assert xtp_session_window_open(T(15, 10), 10, 10) is False   # 15:10=断开时刻（A-P2①）
+        assert xtp_session_window_open(T(15, 11), 10, 10) is False
+        # 任一 0=禁用恒开
+        assert xtp_session_window_open(T(3, 0), 0, 10) is True
+        assert xtp_session_window_open(T(23, 0), 10, 0) is True
+        # 非交易日（窗启用时关）
+        assert xtp_session_window_open(T(10, 0), 10, 10, trading_day=False) is False
+
+    def test_window_open_cross_hour_arithmetic(self):
+        """真分钟算术回归（伪十进制 915-95=820 跨小时错，9:15-95min 实为 7:40）。"""
+        from src.strategy_framework.md_session import xtp_session_window_open
+        from datetime import datetime as _dt
+        T = lambda h, m: _dt(2026, 8, 28, h, m)
+        assert xtp_session_window_open(T(7, 39), 95, 10) is False
+        assert xtp_session_window_open(T(7, 40), 95, 10) is True
+
+    def test_window_open_lead_clamped(self):
+        """lead 越界钳 600：开沿=9:15−600min（负→全日开）。"""
+        from src.strategy_framework.md_session import xtp_session_window_open
+        from datetime import datetime as _dt
+        assert xtp_session_window_open(_dt(2026, 8, 28, 0, 5), 700, 10) is True
+
+    def test_renew_hm_derived_from_lead(self):
+        from src.strategy_framework.md_session import XtpMdSession
+        assert XtpMdSession(MagicMock(), lead_min=10, lag_min=10).RENEW_HM == (9, 5)
+        assert XtpMdSession(MagicMock(), lead_min=95, lag_min=10).RENEW_HM == (7, 40)
+        assert XtpMdSession(MagicMock()).RENEW_HM == (9, 10)   # 无窗=类默认（旧行为）
+
+    def test_window_close_due_and_suspend(self):
+        from src.strategy_framework.md_session import XtpMdSession
+        from datetime import datetime as _dt
+        md = MagicMock()
+        sess = XtpMdSession(md, lead_min=10, lag_min=10)
+        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+            assert sess.window_close_due(_dt(2026, 8, 28, 20, 0)) is True
+            assert sess.window_close_due(_dt(2026, 8, 28, 10, 0)) is False
+        assert sess.close_for_window() is True
+        md.suspend.assert_called_once()
+        disabled = XtpMdSession(MagicMock())   # 禁用日窗
+        assert disabled.window_close_due(_dt(2026, 8, 28, 20, 0)) is False
+        from types import SimpleNamespace
+        ok_md = MagicMock(); ok_md.state = SimpleNamespace(name="LOGGED_IN")
+        assert XtpMdSession(ok_md).logged_in() is True
+        assert XtpMdSession(SimpleNamespace()).logged_in() is True   # 后端无 state 属性→None→恒 True
+
+    def test_is_trading_day_fail_open_natural_day(self):
+        """用户裁定 08-28：日历读不到=当自然日（周六也 True）——weekday 故障点消除。"""
+        from datetime import datetime as _dt
+        from src.strategy_framework import md_session as ms
+        ms._reset_td_cache()
+        with patch("src.data_platform.platform.is_trading_day", side_effect=RuntimeError("DB 挂")):
+            assert ms.is_trading_day(_dt(2026, 8, 29)) is True   # 周六
+            assert ms.is_trading_day(_dt(2026, 8, 30)) is True   # 周日
+        ms._reset_td_cache()
+
+
+class TestTdConnectDue:
+    """P2 批 08-28（代码盲审 B-P1/A-P1-3）：TD 窗开建连判定——交易日门+60s 节流。"""
+
+    def test_throttle_and_no_window(self):
+        from src.strategy_runner.hub_worker import _td_connect_due
+        from datetime import datetime as _dt
+        t0 = 1_000_000.0
+        assert _td_connect_due(t0, None, 0.0, _dt(2026, 8, 28, 9, 6)) is False   # 无窗配置
+        assert _td_connect_due(t0, (10, 10), t0 - 30, _dt(2026, 8, 28, 9, 6)) is False  # 60s 节流内
+        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+            assert _td_connect_due(t0, (10, 10), t0 - 61, _dt(2026, 8, 28, 9, 6)) is True
+            assert _td_connect_due(t0, (10, 10), t0 - 61, _dt(2026, 8, 28, 20, 0)) is False  # 窗外
+            # 周末（日历读不到=自然日语义下 is_trading_day=True，但显式 False 时拒）
+            assert _td_connect_due(t0, (10, 10), t0 - 61, _dt(2026, 8, 29, 9, 6)) is True

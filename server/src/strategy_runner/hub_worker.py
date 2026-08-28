@@ -59,6 +59,16 @@ def _hub_alive(r) -> bool:   # hub 心跳存在（TTL 内）；存储不可查�
         return r.exists(HB_KEY) == 1
     except Exception: return True
 
+def _td_connect_due(now: float, win, last_conn_ts: float, dt_now) -> bool:
+    """TD 窗开沿建连判定（P2 批 08-28，代码盲审 B-P1）：交易日门（消周末窗读"开"的
+    churn 触发）+ 60s 节流（防每步 5s createTraderApi 循环——失败不 release，08-25
+    MD 槽回收同型）。纯函数供单测。"""
+    if not win or now - last_conn_ts < 60.0:
+        return False
+    from src.strategy_framework.md_session import is_trading_day, xtp_session_window_open
+    return xtp_session_window_open(dt_now, win[0], win[1], trading_day=is_trading_day())
+
+
 def run(ctx: dict) -> None:
     """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen, warmup_pg, stop_check, reconcile}"""
     # 2026-08-19 归位：直连 quant_common（原经 main 互指且连带加载入口模块级 vnpy import）
@@ -208,6 +218,7 @@ def run(ctx: dict) -> None:
     # ——— 批 4b：EngineLoop 编排（旧 5s 定时段逐项退化为钩子；11 项清单/period 见设计）———
     sess_was = _in_astock_session()   # 时段沿检测基态
     td_status_was = True
+    _td_conn_ts = [0.0]   # TD 窗开建连 60s 节流锚（P2 批 08-28，B-P1；容器型便 nonlocal 闭包）
     halt_state = {"was": False}
     _baseline_cache = {"baseline": None}   # 账户基线缓存（4a 起调用方持有）
     hb = HeartbeatWriter(r, hb_task_key, ttl=90)
@@ -252,7 +263,9 @@ def run(ctx: dict) -> None:
                 bars=stats["bars"], frozen=int(frozen.get("now", False)))
 
     def _td_reconnect():
-        """TD 重连沿 → 重跑对账（R-BR11；ctx["reconcile"]=runner 超集含成交补录，4b 收敛冗余循环）。"""
+        """TD 重连沿 → 重跑对账（R-BR11；ctx["reconcile"]=runner 超集含成交补录，4b 收敛冗余循环）。
+        窗开沿建连（P2 批 08-28，A-P1-1）：窗开且未连 → ctx["td_connect"]()——盘外窗关
+        启动的进程由此腿补首连，连上后下一沿触发对账（B-P1-1 启动对账条件化的配对）。"""
         nonlocal td_status_was
         td_status = bool(getattr(td_api, "connect_status", True))
         if td_status and not td_status_was:
@@ -261,6 +274,15 @@ def run(ctx: dict) -> None:
                 ctx["reconcile"]()
             except Exception as e:
                 logger.warning("重连对账失败: %s", e)
+        if not td_status:
+            from datetime import datetime as _dt
+            if _td_connect_due(time.time(), ctx.get("td_window"), _td_conn_ts[0], _dt.now()):
+                _td_conn_ts[0] = time.time()
+                logger.info("TD 连接窗开沿，建连（60s 节流+交易日门）")
+                try:
+                    ctx["td_connect"]()
+                except Exception as e:
+                    logger.warning("TD 窗开建连失败（60s 后重试）: %s", e)
         td_status_was = td_status
 
     def _zombie_claim():

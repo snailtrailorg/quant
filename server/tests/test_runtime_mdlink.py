@@ -307,3 +307,49 @@ class TestCopyLockAndGrace:
         sup, _, counters, _ = self._sup([], policy=AlertPolicy(zombie_grace=300))
         sup.tick(True, True)
         assert counters.zombie.call_args.kwargs.get("grace") == 300
+
+
+class TestSessionWindowGate:
+    """P2 批 08-28：窗闸——窗关沿挂起一次+段跳过；窗开恢复；非窗 session 恒开。"""
+
+    def _sup(self, sess, counters=None, alert=None):
+        from src.strategy_framework.runtime.mdlink import MdSessionSupervisor
+        c = counters or MagicMock()
+        c.stalled.return_value = None   # 段 3 比较需要数值/None
+        c.zombie.return_value = False
+        c.apply_edge.return_value = False
+        return MdSessionSupervisor(sess, c, alert or (lambda *a: None))
+
+    def test_closed_window_suspends_once_and_skips_segments(self):
+        sess = MagicMock()
+        sess.window_close_due.return_value = True
+        sess.close_for_window.return_value = True
+        sup = self._sup(sess)
+        sup._tick(True, True)
+        sess.close_for_window.assert_called_once()
+        sess.schedule_due.assert_not_called()   # 段 1 跳过
+        sess.renew.assert_not_called()
+        sup._tick(True, True)                   # 第二 tick：挂起仍一次
+        sess.close_for_window.assert_called_once()
+
+    def test_reopen_resumes_segments(self):
+        sess = MagicMock()
+        sess.window_close_due.return_value = True
+        sess.close_for_window.return_value = True
+        sess.schedule_due.return_value = True
+        sess.logged_in.return_value = True
+        sup = self._sup(sess)
+        sup._tick(True, True)
+        sess.window_close_due.return_value = False   # 窗开
+        sup._tick(True, True)
+        sess.schedule_due.assert_called_once()        # 恢复段 1
+        sess.renew.assert_called_once()
+
+    def test_non_window_session_never_gated(self):
+        """无 window_close_due 的 session（旧契约/mock auto 不误伤）：`is True` 严格判定。"""
+        sess = MagicMock(spec=["schedule_due", "renew", "retry_ready", "on_recovered"])
+        sess.schedule_due.return_value = True
+        sess.retry_ready.return_value = True
+        sup = self._sup(sess)
+        sup._tick(True, True)
+        sess.schedule_due.assert_called_once()

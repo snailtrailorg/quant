@@ -57,6 +57,47 @@ except Exception:
 _TD_CACHE: dict = {}   # date -> bool（D2 按日缓存：schedule_due 每步都在打 DB，一处修）
 
 
+# ——— 每日连接窗（P2 批 2026-08-28，双盲审定型）———
+# 纯函数供 MD(supervisor)与 TD(worker)两处轮询（A 补充点②）；main 层读配置传纯参。
+# 窗沿锚点：开=9:15 集合竞价（TD 最早挂单/竞价 tick）−lead；关=15:00 收盘+lag
+# （15:01 收盘根 flush 15:01:05-30 先于关沿 ✓）。任一键=0 → 禁用（永久连接，旧行为）。
+_XTP_OPEN_ANCHOR_HM = (9, 15)      # 集合竞价开始
+_XTP_CLOSE_ANCHOR_HM = (15, 0)     # 收盘
+_WINDOW_MAX_MIN = 600              # lead/lag 上限（10h），越界钳制
+
+
+def _clamp_min(v, default: int) -> int:
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return default
+    return 0 if n <= 0 else min(n, _WINDOW_MAX_MIN)
+
+
+def xtp_session_window_open(now: datetime, lead_min: int, lag_min: int,
+                            trading_day: bool | None = None) -> bool:
+    """XTP/A 股每日连接窗判定（纯函数，A/B 双盲审）。
+
+    - lead/lag 任一 <=0：日窗禁用 → 恒 True（永久连接，旧行为逃生门）
+    - 交易日由调用方传入（MD 侧 is_trading_day 的 weekday 回退在 A 股语境已是
+      fail-open——交易日⊂工作日，读失败→当工作日→连，永不漏连；A 补充点①零改动裁定）
+    - 窗内含 15:00 整分钟（收盘竞价回报尾窗），比 in_session 宽——勿互替（B-P2④）
+    """
+    if (int(lead_min) <= 0) or (int(lag_min) <= 0):
+        return True
+    if trading_day is False:
+        return False
+    # 真分钟算术（伪十进制 hm 减法跨小时会错：9:15-95min=7:40 而 915-95=820）
+    cur = now.hour * 60 + now.minute
+    oh, om = _XTP_OPEN_ANCHOR_HM
+    ch, cm = _XTP_CLOSE_ANCHOR_HM
+    open_min = (oh * 60 + om) - _clamp_min(lead_min, 10)
+    close_min = (ch * 60 + cm) + _clamp_min(lag_min, 10)
+    # 开沿含整分（9:05:00 即建连）、关沿排他（15:10:00 即属窗外=断开时刻，用户语义
+    # 「15:10 logout 并关闭」——盲审 A-P2① 边界口径）
+    return open_min <= cur < close_min
+
+
 def _reset_td_cache() -> None:
     """清按日缓存（D2 坑③：测试钩子——mock 后缓存脏值=假绿假红，跨测试必重置）。"""
     _TD_CACHE.clear()
@@ -84,7 +125,39 @@ def is_trading_day(today: datetime | None = None) -> bool:
         _TD_CACHE[key] = v
         return v
     except Exception:
-        return today.weekday() < 5
+        # 用户裁定（2026-08-28）：读不到日历=当自然日（每天都是交易日）——错误方向统一为
+        # "白连无害"，绝不漏连。原 weekday<5 回退自身是故障源（时区/服务器时钟错→
+        # weekday 判错日→漏连）；fail-open 到自然日后该故障点彻底消失。
+        return True
+
+
+def load_xtp_window_cfg(default_lead: int = 10, default_lag: int = 10) -> tuple[int, int]:
+    """读 system_config 每日连接窗两键（P2 批 08-28；main 层启动读一次传纯参，改动重启生效）。
+
+    `xtp_session_lead_min`/`xtp_session_lag_min`，默认 10/10；**任一 <=0 = 禁用日窗**
+    （永久连接，旧行为逃生门）。DB 不可达用默认。lazy import 同 _market_config_provider
+    先例（本模块允许 DB 边界，quant_common 层 0 保持纯净）。
+    """
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT key, value FROM system_config WHERE key IN "
+                "('xtp_session_lead_min', 'xtp_session_lag_min')")
+            kv = dict(cur.fetchall())
+
+        def _num(key: str, d: int) -> int:
+            raw = kv.get(key)
+            if raw is None or raw == "":
+                return d
+            try:
+                return int(raw)
+            except ValueError:
+                return d
+
+        return _num("xtp_session_lead_min", default_lead), _num("xtp_session_lag_min", default_lag)
+    except Exception:
+        return default_lead, default_lag
 
 
 def zombie_session(sess_now: bool, sess_ticks: int, sess_enter_ts: float,
@@ -139,18 +212,33 @@ class XtpMdSession(MdSessionBase):
     - 反应式：盘中症状兜底（续航漏掉的/盘中突发的），退避 30s 指数封顶 5min。
     """
 
-    RENEW_HM = (9, 10)          # 续航窗口起（交易日，开盘前）
+    RENEW_HM = (9, 10)          # 续航窗口起（交易日，开盘前；lead 配置时由构造覆盖）
     RENEW_END_HM = (9, 30)      # 续航窗口止（开盘）——盘中启动的进程已有新鲜登录，续航只会
                                 # 自杀式 churn（2026-08-25 14:05 实锤：14:05:05 登录成功 →
                                 # 14:05:22 无谓 renew 把健康会话 logout，槽回收竞态又自盲 10min）
+    _XTP_OPEN_HM = (9, 15)      # 窗开锚=集合竞价（与模块级 xtp_session_window_open 一致）
+    _XTP_CLOSE_HM = (15, 0)
     BACKOFF_START = 30.0        # 反应式重登起始退避
     BACKOFF_CAP = 300.0         # 封顶 5min
 
-    def __init__(self, md_api):
+    def __init__(self, md_api, lead_min: int = 0, lag_min: int = 0):
+        """lead/lag>0 时启用每日连接窗（P2 批 08-28，双盲审定型）：
+
+        - 窗开沿建连**不做独立 connect**——复用本类 schedule_due→renew→relogin 单原语
+          （B-P0 互锁：_renewed_date 当日去重天然置位，双原语并发会重演 08-25 churn）；
+          relogin 在 CREATED 态=直登（guard 已证），配合 main 侧 defer_login 启动即冷态可建。
+        - 续航窗起随 lead 推导（9:15−lead），收盘后由 supervisor 调 close_for_window()
+          （官方序列 Logout，窗关态本类的反应式腿由 in_session=False 天然灭+supervisor 窗闸双保险）。
+        """
         self._md = md_api
         self._renewed_date = None       # 定时续航当日去重
         self._last_retry_ts = 0.0       # 上次反应式重登时刻
         self._backoff = self.BACKOFF_START
+        self._lead = _clamp_min(lead_min, 10)
+        self._lag = _clamp_min(lag_min, 10)
+        if self._lead > 0:
+            open_min = (self._XTP_OPEN_HM[0] * 60 + self._XTP_OPEN_HM[1]) - self._lead
+            self.RENEW_HM = (open_min // 60, open_min % 60)   # 实例级覆盖（类默认留给无窗模式）
 
     def renew(self) -> bool:
         """重登 = 守卫官方序列 ``relogin()``（Logout→Login，批 1 移交 GuardedXtpMdApi）。
@@ -204,6 +292,40 @@ class XtpMdSession(MdSessionBase):
         if not self._last_retry_ts:
             return True  # 从未重试过：首次症状立刻触发，不等待
         return now - self._last_retry_ts >= self._backoff
+
+    def logged_in(self) -> bool:
+        """会话确认态（supervisor 窗开首航告警用）；非 guard 后端无 state 时恒 True。"""
+        st = getattr(self._md, "state", None)
+        return True if st is None else getattr(st, "name", "") == "LOGGED_IN"
+
+    # ——— 每日连接窗（P2 批 08-28；supervisor 每 5s 轮询=定时器，非一次性判定）———
+
+    def window_open(self, now: datetime | None = None) -> bool:
+        """窗开判定（交易日读不到=当自然日，is_trading_day 本体 fail-open）。"""
+        now = now or datetime.now()
+        return xtp_session_window_open(now, self._lead, self._lag,
+                                        trading_day=is_trading_day(now))
+
+    def window_close_due(self, now: datetime | None = None) -> bool:
+        """窗关沿（已登录且窗外 → 该挂起）。lead/lag=0 恒 False（禁用日窗不断开）。"""
+        if self._lead <= 0 or self._lag <= 0:
+            return False
+        return not self.window_open(now)
+
+    def close_for_window(self) -> bool:
+        """窗关主动挂起=guard.suspend()（logout 清槽保持 CREATED，次日窗开沿
+        relogin 直登）。非 guard 后端无 suspend → 返回 False 由 supervisor 告警。"""
+        suspend = getattr(self._md, "suspend", None)
+        if not callable(suspend):
+            logger.warning("MD 后端无 suspend（应接 GuardedXtpMdApi），窗关断开跳过")
+            return False
+        try:
+            suspend()
+            logger.info("MD 会话窗关挂起（logout，保持 CREATED 待窗开直登）")
+            return True
+        except Exception as e:
+            logger.warning("MD 窗关挂起失败: %s", e)
+            return False
 
     def on_recovered(self) -> None:
         """数据恢复：清退避计数（下次症状从头起算）。
