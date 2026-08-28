@@ -433,6 +433,7 @@ def main():
         }
 
     _last_bar = {"ts": None}  # F-8 bar 级幂等：同 ts 重复投递只处理一次
+    _shadow_first = {"seen": False}   # P2 修复批(08-28 双轨四分类①):vnpy 首笔无基线,首根跳落库
 
     @_guard("on_bar")
     def on_vnpy_bar(bar):
@@ -454,20 +455,27 @@ def main():
             history.pop(0)
         # ST7 阶段 0 影子落库（bar_shadow，R-BR20 diff 的 direct 侧；1 次/分钟，同步写可接受）。
         # 评审 S5：vnpy bar.datetime=分钟首，hub=分钟末——shadow 统一 +1min 对齐口径，diff 才可比
-        try:
-            from src.data_platform.db import get_conn as _gc
-            from datetime import timedelta as _td
-            with _gc() as _conn:
-                _conn.execute(
-                    "INSERT INTO bar_shadow (symbol, ts, open, high, low, close, volume, amount) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol, ts) DO UPDATE "
-                    "SET open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
-                    "volume=EXCLUDED.volume, amount=EXCLUDED.amount",
-                    (symbol, d["ts"] + _td(minutes=1), d["open"], d["high"], d["low"], d["close"],
-                     d["volume"], getattr(bar, "turnover", 0) or 0))
-                _conn.commit()
-        except Exception as _se:
-            logger.debug("bar_shadow 落库失败（影子期可容忍）: %s", _se)
+        # P2 修复批（08-28）：vnpy BarGenerator 进程首笔无 last_tick 基线，首根恒 V=0/OHLC 平
+        #   （双轨四分类①）——跳过落库；豁免以本日志为准（盲审 B-P1-2：不按时刻枚举，盘中崩溃
+        #   重启后首根同样跳）。策略计算链不动（上游生态行为，另案）。
+        if not _shadow_first["seen"]:
+            _shadow_first["seen"] = True
+            logger.info("shadow 首根跳过（基线根）: %s", ts_key)
+        else:
+            try:
+                from src.data_platform.db import get_conn as _gc
+                from datetime import timedelta as _td
+                with _gc() as _conn:
+                    _conn.execute(
+                        "INSERT INTO bar_shadow (symbol, ts, open, high, low, close, volume, amount) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol, ts) DO UPDATE "
+                        "SET open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
+                        "volume=EXCLUDED.volume, amount=EXCLUDED.amount",
+                        (symbol, d["ts"] + _td(minutes=1), d["open"], d["high"], d["low"], d["close"],
+                         d["volume"], getattr(bar, "turnover", 0) or 0))
+                    _conn.commit()
+            except Exception as _se:
+                logger.debug("bar_shadow 落库失败（影子期可容忍）: %s", _se)
 
     bg = BarGenerator(on_vnpy_bar)
 

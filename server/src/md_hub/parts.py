@@ -38,6 +38,20 @@ def _project_symbol(tick) -> str:
     return f"{tick.symbol}.{'SHSE' if ex == 'SSE' else ex}"
 
 
+def _in_bar_session(t: datetime) -> bool:
+    """分钟 bar 聚合喂入门（P2 双轨修复批 2026-08-28，双轨四分类②④）。
+
+    09:30:00 起喂（含）、11:30:00 起滤（修后 11:30 孤儿桶/伪 bar 不再产）、13:00 起喂、
+    15:00:xx 含（收盘竞价快照必须喂进 [15:00] 桶）、15:01:00 起滤（后到竞价快照=当日缺根，
+    盲审 A-P2-5 已知边界）。盘前快照（仿真源 09:26~09:30）不喂 → 冷启动基线顺延至
+    09:30 后首笔——与 vnpy BarGenerator 首笔建基线语义一致化。
+    盲审 A-P1-2/B-P2-3 钉死：仅作用于 agg.on_tick 喂入；stats/counters/_write_latest_tick
+    （详情页盘前快照）一律不受影响。
+    """
+    hm = t.hour * 100 + t.minute
+    return (930 <= hm < 1130) or (1300 <= hm < 1501)
+
+
 class MinuteAggregator:
     """tick → 分钟 bar（分钟末标注，Tushare 口径）。
 
@@ -98,8 +112,27 @@ class MinuteAggregator:
         }
         return bar
 
-    def flush_all(self) -> list[dict]:
-        """定时 flush（11:30:05/15:00:05，评审 S2）：finalize 全部在桶。"""
+    def flush_minute(self, minute_slot: int) -> list[dict]:
+        """分窗 finalize（main._flush 三窗用）：只收 b["minute"] 时分数==minute_slot 的桶。
+
+        P2 修复批（2026-08-28）替代 flush_all 的分窗版：收盘 15:00:0x 快照开 [15:00] 桶后，
+        半熟桶须等竞价快照聚齐（15:01 窗）才 finalize——原 flush_all 在 15:00:05 无差别收，
+        把只含一笔、不含竞价量的 [15:00] 桶落库（V=0，双轨四分类③）。
+        pop 语义幂等（盲审 B-P1-1：宽窗内多次执行不重复产出）；tick 路径已 finalize 的桶
+        早已 pop，天然无重复。
+        """
+        bars = []
+        for symbol in list(self._buckets.keys()):
+            b = self._buckets.get(symbol)
+            if b and b["minute"].hour * 60 + b["minute"].minute == minute_slot:
+                del self._buckets[symbol]
+                bars.append(self._finalize(symbol, b))
+        return bars
+
+    def flush_rest(self) -> list[dict]:
+        """日终兜底（15:01 窗 flush_minute 后调用，代码盲审 A-P2-b）：分窗化后滞留的
+        陈旧桶（盘中断流标的尾桶，如 [11:25] 后无 tick）当日收口，防次日 C4 跨日清桶
+        丢根；迟收值不变（untrusted 双门限照常标记稀疏）。"""
         bars = []
         for symbol in list(self._buckets.keys()):
             b = self._buckets.pop(symbol, None)
@@ -119,8 +152,10 @@ class MinuteAggregator:
         amount = max(0.0, b["amt_acc"] - (prev[1] if prev else 0.0))
         self._last_acc[symbol] = (b["vol_acc"], b["amt_acc"])
         span = (b["last_tick"] - b["first_tick"]).total_seconds()
-        # 评审 S6：收盘/午休末桶（11:29/14:59 起）按构造稀疏——豁免双门限，防每日误冻结
-        closing = b["minute"].hour * 60 + b["minute"].minute in (11 * 60 + 29, 14 * 60 + 59)
+        # 评审 S6：收盘/午休末桶（11:29/14:59 起）按构造稀疏——豁免双门限，防每日误冻结；
+        # 15:00 桶同豁免（P2 修复批盲审 A-P1-1：仅 1~2 笔竞价快照，不豁免则每日 15:01 根
+        # untrusted=True 被消费方滤丢收盘竞价根）
+        closing = b["minute"].hour * 60 + b["minute"].minute in (11 * 60 + 29, 14 * 60 + 59, 15 * 60)
         untrusted = (not closing) and span < 30 and b["count"] < 3   # 双门限（评审）
         return {
             "symbol": symbol,

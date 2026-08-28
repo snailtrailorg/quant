@@ -26,6 +26,7 @@ from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import
     ThinGateway,
     _LEASE_RENEW_LUA,
     _PGWriter,
+    _in_bar_session,
     _lease_boot,
     _project_symbol,
     _write_latest_tick,
@@ -117,6 +118,11 @@ def main() -> None:
             # supervisor 的断流症状/告警不会在盘外（夜间回放停止/假日静默）误触（行为值不变铁律）
             counters.on_data(True)
         _write_latest_tick(r, symbol, tick, _lt_fail_ts)
+        if not _in_bar_session(tick.datetime):
+            # P2 修复批（08-28 双轨四分类②④）：盘前/午休尾/收盘后快照不进聚合器。
+            # 位置钉死（盲审 A-P1-2/B-P2-3）：latest_tick/stats/counters 已执行照常，
+            # 仅拦 agg 喂入——盘前快照照上详情页，心跳字段语义不变。
+            return
         bar = agg.on_tick(symbol, tick)
         if bar:
             _publish(bar)
@@ -286,14 +292,23 @@ def main() -> None:
         except Exception as e:
             logger.error("租约续期异常（容忍一轮）: %s", e)
 
-    flush_points = {1130, 1500}   # 11:30:05 / 15:00:05 双 flush（评审 S2）
+    # 三窗分窗 finalize（P2 修复批 08-28 替代 flush_all 双点；盲审 B-P1-1 加宽 5~30s：
+    # 钩子实际间隔 5s+δ>原窗宽 5s，straddle 相位会整窗 miss——pop 语义幂等，宽窗安全）：
+    #   11:30 窗收 11:29 桶 / 15:00 窗收 14:59 桶 / 15:01 窗收 15:00 桶（竞价快照聚齐后，
+    #   原半熟落库 V=0 即双轨四分类③）
+    flush_slots = {1130: 11 * 60 + 29, 1500: 14 * 60 + 59, 1501: 15 * 60}
 
     def _flush() -> None:
-        """双 flush 窗口（分钟末后 5s，评审 S7 避开 :00-:04 进 tick 窗口；步长 5s 必命中）。"""
         now = datetime.now()
-        if now.hour * 100 + now.minute in flush_points and 5 <= now.second < 10:
-            for bar in agg.flush_all():
+        hm = now.hour * 100 + now.minute
+        slot = flush_slots.get(hm)
+        if slot is not None and 5 <= now.second < 30:
+            for bar in agg.flush_minute(slot):
                 _publish(bar)
+            if hm == 1501:
+                # 日终兜底（代码盲审 A-P2-b）：收当日一切滞留桶（断流标的尾根），防次日丢根
+                for bar in agg.flush_rest():
+                    _publish(bar)
 
     hb = HeartbeatWriter(r, HB_KEY, ttl=90)   # R-OBS1；超集原则：旧字段名一字不改，只增 ts
 
@@ -317,7 +332,7 @@ def main() -> None:
     loop.every("md-edge", 0.0, _md_edge)            # 重连沿检测：每步
     loop.every("subs-poll", 15.0, sm.poll)          # 订阅 diff（旧 counter%3 = 15s）
     loop.every("subs-replay", 60.0, sm.replay)      # 全量幂等重放（旧 %60<10 窗口法 = 60s）
-    loop.every("flush", 5.0, _flush)                # 双 flush 窗口判断（逻辑原样保留）
+    loop.every("flush", 5.0, _flush)                # 三窗分窗 finalize（P2 修复批 08-28）
     loop.every("heartbeat", 5.0, _heartbeat)        # 心跳（R-OBS1）
     loop.every("l2-supervise", 0.0,                 # L2 会话自愈：每步
                # 批 4b D2：交易日按日缓存下沉 md_session.is_trading_day 本体——hub 侧

@@ -26,12 +26,13 @@ parts.py 的公共件在 main.py 顶部 import 重导出——既有测试导入
 
 | 符号 | 签名 | 说明 |
 |---|---|---|
-| `MinuteAggregator` | `on_tick(symbol, tick) -> dict\|None`；`flush_all() -> list[dict]`；`flush_symbol(symbol) -> dict\|None` | 分钟聚合（分钟末标注/累计差分含冷启动基线/跨日清零/untrusted 双门限+收盘桶豁免）；flush_symbol=退订前防丢在桶最后一分钟 |
+| `MinuteAggregator` | `on_tick(symbol, tick) -> dict\|None`；`flush_minute(minute_slot) -> list[dict]`；`flush_symbol(symbol) -> dict\|None` | 分钟聚合（分钟末标注/累计差分含冷启动基线/跨日清零/untrusted 双门限+收盘桶豁免 11:29/14:59/15:00）；flush_minute=三窗分窗 finalize（pop 幂等，P2 修复批 08-28 替代 flush_all）；flush_symbol=退订前防丢在桶最后一分钟 |
 | `_PGWriter` | `push(bar)`；daemon 线程 | bar 批量落库（10s 批/有界队列 5000 溢出丢最旧，不反压分发） |
 | `_lease_boot(r)` / `_lease_acquire(r)` | `-> (uuid, gen)` | 租约启动（先拿权再连行情）：3 次重试；真让位 SystemExit(3)，耗尽 os._exit(4)；区分存储不可达与 NX 失败 |
 | `_write_latest_tick(r, symbol, tick, fail_ts)` | | 最新 tick 快照（0 价过滤前置/连败 60s 退避防半死 Valkey 拖死主链） |
 | `ThinGateway` | BaseGateway 子类 | 仅事件转发；connect/send_order 等抽象方法全 stub（数据面禁交易 R-HALT1 代码级保证） |
 | `_project_symbol(tick)` | TickData→`600000.SHSE` | vnpy SSE→项目 SHSE |
+| `_in_bar_session(t)` | `datetime -> bool` | 聚合喂入门（P2 修复批 08-28）：`930<=hm<1130 or 1300<=hm<1501`——盘前/午休尾/收盘后快照不进聚合，冷启动基线顺延至 09:30 后首笔（与 vnpy 首笔建基线一致化）；仅拦 agg 喂入，latest_tick/心跳不受影响 |
 | `LEASE_KEY`/`GEN_KEY`/`SURRENDER_KEY`/`_LEASE_RENEW_LUA` | 常量 | 租约三键 + Lua CAS 续期脚本 |
 
 ## 行为契约
@@ -55,7 +56,7 @@ EngineLoop(loop.py, step=5s) ──到期驱动──
  │                           ├─ XtpMdSession(md_session)：定时续航+反应式重登
  │                           └─ AlertPolicy(alerts)：600/300/150/30/60（=hub 现值）
  ├─ subs-poll / subs-replay / md-edge ▶ SubscriptionManager(subs) ─▶ GuardedXtpMdApi(md_api_guard)
- └─ lease-renew / flush ───▶ parts（租约 Lua / MinuteAggregator 双 flush 窗口）
+ └─ lease-renew / flush ───▶ parts（租约 Lua / MinuteAggregator 三窗分窗 finalize）
 横切：make_alert / make_guard / make_valkey（alerts）三件套；quant_common.session 时段判定
 ```
 
@@ -69,7 +70,7 @@ EngineLoop(loop.py, step=5s) ──到期驱动──
 | `md-edge` | 每步 | MD 重连沿 → 强制全量重放（XTP 重连不恢复订阅） |
 | `subs-poll` | 15s | 订阅 diff（旧 counter%3） |
 | `subs-replay` | 60s | 全量幂等重放（旧 %60<10 窗口法——差异见下） |
-| `flush` | 5s | 双 flush 窗口判断（11:30:05/15:00:05，逻辑原样） |
+| `flush` | 5s | 三窗分窗 finalize（11:30 窗收 11:29 桶/15:00 窗收 14:59 桶/15:01 窗收 15:00 桶；宽窗 5~30s，pop 幂等——P2 修复批 08-28，双轨四分类③） |
 | `heartbeat` | 5s | 心跳写（R-OBS1） |
 | `l2-supervise` | 每步 | L2 五段（沿→续航→反应式→恢复→例行告警）；交易日查询=md_session.is_trading_day 按日缓存（D2 下沉） |
 | （内建 preflight） | 每步 | 喂狗 + 事件线程存活（R-BR12，死→exit 1） |

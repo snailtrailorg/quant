@@ -7,7 +7,10 @@ from datetime import datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from src.md_hub.main import MinuteAggregator
+from src.md_hub.parts import _in_bar_session
 from src.strategy_runner.hub_worker import BarMsgState
 # 批 4a：frozen/buy_ok 单源化于 trading（挂点改接——语义断言零修改）
 from src.strategy_runner.trading import buy_ok_check, frozen_allows
@@ -15,9 +18,10 @@ from src.strategy_runner.trading import buy_ok_check, frozen_allows
 TZ = ZoneInfo("Asia/Shanghai")
 
 
-def _tick(minute: int, second: float, price: float, vol_acc: float, amt_acc: float = 0.0):
+def _tick(minute: int, second: float, price: float, vol_acc: float, amt_acc: float = 0.0,
+          hour: int = 10):
     return SimpleNamespace(
-        datetime=datetime(2026, 8, 17, 10, minute, int(second), int((second % 1) * 1e6), tzinfo=TZ),
+        datetime=datetime(2026, 8, 17, hour, minute, int(second), int((second % 1) * 1e6), tzinfo=TZ),
         last_price=price, volume=vol_acc, turnover=amt_acc,
     )
 
@@ -72,12 +76,52 @@ class TestMinuteAggregator:
         bar2 = agg2.on_tick("Y.SHSE", _tick(1, 2, 10.0, 300))
         assert bar2["untrusted"] is False
 
-    def test_flush_all(self):
-        """S2：定时 flush 在桶（11:30/15:00 尾桶不依赖下一 tick）。"""
+    def test_flush_minute_selective_and_idempotent(self):
+        """P2 修复批(08-28):分窗 finalize 替代 flush_all——11:30 窗只收 11:29 桶,
+        15:01 窗只收 15:00 桶(收盘竞价聚齐后);pop 语义幂等(盲审 B-P1-1 宽窗重跑无重复)。"""
         agg = MinuteAggregator()
-        agg.on_tick("X.SHSE", _tick(59, 30, 10.0, 100))
-        bars = agg.flush_all()
-        assert len(bars) == 1 and bars[0]["ts"].minute == 0 and bars[0]["ts"].hour == 11
+        agg.on_tick("X.SHSE", _tick(29, 30, 10.0, 100, hour=11))   # [11:29] 桶在桶
+        agg.on_tick("Y.SHSE", _tick(0, 10, 9.07, 1_000, hour=15))  # [15:00] 桶在桶
+        bars = agg.flush_minute(11 * 60 + 29)
+        assert [b["symbol"] for b in bars] == ["X.SHSE"]
+        assert agg.flush_minute(11 * 60 + 29) == []   # pop 幂等
+        assert agg.flush_minute(10 * 60 + 29) == []   # 其他 slot 不误收
+        bars2 = agg.flush_minute(15 * 60)
+        assert [b["symbol"] for b in bars2] == ["Y.SHSE"]
+
+    def test_flush_minute_closing_volume_and_untrusted_exempt(self):
+        """15:00 桶:竞价快照累计差=收盘量(四分类③修复语义);单笔稀疏不误报
+        untrusted(盲审 A-P1-1:closing 豁免集含 900,防消费方滤丢收盘竞价根)。"""
+        agg = MinuteAggregator()
+        agg.on_tick("Y.SHSE", _tick(0, 5, 9.07, 10_000, hour=15))            # 首笔建基线
+        agg.on_tick("Y.SHSE", _tick(0, 8, 9.07, 10_000 + 862_300, hour=15))  # 竞价量跳变
+        [bar] = agg.flush_minute(15 * 60)
+        assert bar["volume"] == 862_300
+        assert bar["untrusted"] is False
+
+    def test_flush_rest_end_of_day(self):
+        """15:01 窗日终兜底(代码盲审 A-P2-b):盘中断流滞留桶([10:25] 后无 tick)
+        当日收口防次日丢根。"""
+        agg = MinuteAggregator()
+        agg.on_tick("Z.SHSE", _tick(25, 30, 10.0, 100))
+        [bar] = agg.flush_rest()
+        assert bar["symbol"] == "Z.SHSE"
+        assert bar["ts"].hour == 10 and bar["ts"].minute == 26
+
+
+class TestInBarSession:
+    """P2 修复批(08-28 双轨四分类②④):分钟 bar 聚合喂入门表驱动。"""
+
+    @pytest.mark.parametrize("h,m,ok", [
+        (9, 26, False), (9, 29, False),   # 盘前伪 bar 源(仿真快照 09:26~09:30)
+        (9, 30, True), (11, 29, True),    # 上午连续竞价
+        (11, 30, False), (12, 59, False),  # 午休(11:30 孤儿桶防护)
+        (13, 0, True), (14, 59, True),    # 下午连续竞价
+        (15, 0, True),                    # 收盘竞价快照必须喂([15:00] 桶)
+        (15, 1, False),                   # 后到竞价快照=当日缺根(已知边界 A-P2-5)
+    ])
+    def test_table(self, h, m, ok):
+        assert _in_bar_session(datetime(2026, 8, 28, h, m, tzinfo=TZ)) is ok
 
 
 class TestBarMsgState:
