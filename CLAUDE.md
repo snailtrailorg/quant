@@ -60,6 +60,7 @@
 - **策略实盘化架构**：每任务独立子进程（systemd `quant-live-task@{tid}`，live_task 单元模板；旧 `quant-strategy@<id>` 仅为废架构遗留兼容）（P3 回写 2026-08-20 单元名归真）+ 独立 vnpy MainEngine + XtpGateway 实时驱动（tick->BarGenerator->on_bar）+ XTPAdapter 下单。取 vnpy Gateway 弃全局 MainEngine。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
 
 ### 协作约束
+- **禁直接 ssh/scp 服务器**：bernard 持 deploy 密钥能连但仅白名单受限——连上也是死路，失败后换姿势重试纯浪费 token；服务器一切操作唯一通道=`deploy/.venv` 的 ansible（账号权限全景见记忆 accounts-permissions）。
 - **产出落文件**，不留在对话里。
 - 先 plan 后 act，计划即契约；要改先改 `flow/plan.md`。
 - 一会话一焦点。
