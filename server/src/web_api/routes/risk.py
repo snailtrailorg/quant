@@ -17,7 +17,7 @@ def risk_state(payload: dict = Depends(require_role("viewer", "analyst", "trader
     # P1-1（web-design 05 §5.3 B#3）：水位仪表数据——回撤/日亏/快照年龄（>300s=fail-closed 拒 BUY 可见）
     metrics = {}
     try:
-        st = rc._get_global_state()
+        st = rc._get_global_state("")
         metrics = {"total_drawdown": st.total_drawdown, "daily_loss": st.daily_loss,
                    "available": st.available}
     except Exception as e:

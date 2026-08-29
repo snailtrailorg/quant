@@ -290,14 +290,20 @@ def reconcile_three_books():
                     try:
                         conn.execute("""
                             INSERT INTO reconcile_issue (symbol, issue_type, detail, broker_qty, derived_qty)
-                            VALUES (%s, 'position_diff', %s, %s, %s)
+                            SELECT %s, 'position_diff', %s, %s, %s
+                            WHERE NOT EXISTS (   -- 终审 P1-5：豁免基准内不开新单（差异较基准扩大才再告警）
+                              SELECT 1 FROM reconcile_issue e
+                              WHERE e.symbol = %s AND e.issue_type = 'position_diff'
+                                AND e.status = 'exempt'
+                                AND (e.exempt_until IS NULL OR e.exempt_until >= current_date)
+                                AND ABS(%s - %s) <= COALESCE(e.exempt_qty, 0))
                             ON CONFLICT (symbol, issue_type) WHERE status = 'open'
                             DO UPDATE SET broker_qty = EXCLUDED.broker_qty,
                                           derived_qty = EXCLUDED.derived_qty,
                                           detail = EXCLUDED.detail,
                                           updated_at = now()
                             """,
-                            (sym, f"券商快照={sv} trade_log推导={dv}", sv, dv))
+                            (sym, f"券商快照={sv} trade_log推导={dv}", sv, dv, sym, sv, dv))
                     except Exception as _e:
                         logging.getLogger("scheduler").warning("reconcile_issue 双写失败（不阻断）: %s", _e)
             except Exception:

@@ -43,7 +43,7 @@
       </el-menu>
     </el-aside>
     <el-container>
-      <el-header style="background: #fff; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between">
+      <el-header style="background: var(--bg-surface); border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between">
         <div></div>
         <div style="display: flex; align-items: center; gap: 16px">
           <!-- P3-2（04 §4.1）：侧边栏折叠（240↔64 图标模式，记忆状态） -->
@@ -133,7 +133,8 @@ import { QuestionFilled, DataBoard, DataAnalysis, Search, MagicStick, SetUp, Tim
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
          ChatDotRound } from '@element-plus/icons-vue'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe, getNotifications, ackAllNotifications } from '../api'
@@ -189,7 +190,6 @@ const loadMyPerms = async () => {
 }
 import { Moon, Sunny } from '@element-plus/icons-vue'
 import Help from '../views/Help.vue'
-import { watch } from 'vue'
 
 // P1-4：急停（熔断=轻确认,04 §4.5——所有可登录角色可触发,后端 require_perm 兜底）
 const onEmergencyHalt = async () => {

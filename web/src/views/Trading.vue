@@ -12,7 +12,7 @@
     <el-row :gutter="20" style="margin-bottom: 20px">
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalAssets') }}</div><div class="value">¥{{ formatNum(pnlData.total_value) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.todayPnl') }}</div><div class="value" :style="{color: (pnlData.today_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.today_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.today_pnl) }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalPnl') }}</div><div class="value" :style="{color: (pnlData.total_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.total_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.total_pnl) }} ({{ pnlData.total_pnl_pct || 0 }}%)"</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalPnl') }}</div><div class="value" :style="{color: (pnlData.total_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.total_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.total_pnl) }} ({{ pnlData.total_pnl_pct || 0 }}%)</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.positionCount') }}</div><div class="value">{{ positionData.positions?.length || 0 }}</div></div></el-card></el-col>
     </el-row>
     <el-tabs>

@@ -80,7 +80,10 @@ def load_role_permissions() -> dict:
                 (denies if eff == "deny" else grants).add(res)
         merged = {}
         for role, base in PERMISSIONS.items():
-            allow = (base | roles.get(role, {}).get("allow", set())) - roles.get(role, {}).get("deny", set())
+            tab = roles.get(role, {})
+            # 终审 P1-4 修正：表有该 role 的 allow 行 → 全量以表为准（撤权/全量重写生效）；
+            # 表无行（未管理过的角色）→ 字典兜底。deny 行始终从结果里减（10 §1 deny 优先）。
+            allow = (tab["allow"] if tab["allow"] else base) - tab["deny"]
             merged[role] = allow
         for role, gd in roles.items():
             if role not in PERMISSIONS:

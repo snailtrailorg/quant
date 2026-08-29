@@ -62,7 +62,7 @@
       </el-col>
       <el-col :span="9">
         <el-card shadow="never">
-          <template #header><div style="display:flex; justify-content:space-between">{{ t('dash.liveTasks') }}<el-button text size="small" @click="$router.push('/livetask')">{{ t('dash.more') }}→</el-button></div></template>
+          <template #header><div style="display:flex; justify-content:space-between">{{ t('dash.liveTasks') }}<el-button text size="small" @click="$router.push('/live-task')">{{ t('dash.more') }}→</el-button></div></template>
           <div v-for="task in liveTasks.slice(0, 5)" :key="task.id" class="task-row">
             <span class="dot" :class="task.status" />{{ task.name }}
             <span style="color: var(--text-secondary)">{{ task.symbol }}</span>
