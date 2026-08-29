@@ -53,7 +53,7 @@
           <el-table-column prop="action" :label="t('trading.direction')" width="80">
             <template #default="{ row }">
               <!-- BUY=买入红(A股习惯)/SELL=卖出绿;中文化 05 §5.2 要点 3 -->
-              <el-tag size="small" :type="row.action === 'BUY' ? 'danger' : 'success'">{{ row.action === 'BUY' ? t('dash.buy') : t('dash.sell') }}</el-tag>
+              <el-tag size="small" :type="row.action === 'BUY' ? 'danger' : 'success'">{{ row.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column prop="volume" :label="t('trading.volume')" width="80" class-name="num" />

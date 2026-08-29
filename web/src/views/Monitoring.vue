@@ -22,7 +22,7 @@
               <el-descriptions-item :label="t('common.symbol')">{{ s.symbol }}</el-descriptions-item>
               <el-descriptions-item :label="t('common.type')">{{ s.type }}</el-descriptions-item>
               <el-descriptions-item :label="t('monitoring.backtestVerified')">{{ s.backtest_verified ? '✓' : '✗' }}</el-descriptions-item>
-              <el-descriptions-item :label="t('monitoring.equity')">¥{{ formatNum(s._equity) }}</el-descriptions-item>
+              <el-descriptions-item :label="t('monitoring.equity')">—</el-descriptions-item>
             </el-descriptions>
           </div>
           <div style="height: 200px">

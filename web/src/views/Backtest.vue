@@ -130,7 +130,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
@@ -224,10 +224,11 @@ const submitRun = async () => {
 }
 
 let pollTimer = null
+onUnmounted(() => clearInterval(pollTimer))
 onMounted(async () => {
   // P2-4：URL 预填（策略页"发起回测"深链 ?strategy=）
-  const pre = new URLSearchParams(location.hash.split('?')[1] || '').get('strategy')
-  if (pre) { showForm.value = true; form.value.strategyId = pre }
+  const pre = route.query.strategy   // B-P1-5:history 路由,深链读 query
+  if (pre) { showForm.value = true; form.value.strategyId = String(pre) }
   pollTimer = setInterval(() => { if (runs.value.some(r => r.status === 'running')) loadRuns() }, 5000)
   strategies.value = await getStrategies()
   try { pools.value = await getPools() } catch (e) {}
@@ -235,4 +236,3 @@ onMounted(async () => {
 })
 </script>
 
-onUnmounted(() => clearInterval(pollTimer))

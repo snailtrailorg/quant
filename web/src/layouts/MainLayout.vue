@@ -32,7 +32,7 @@
           <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="ops">
+        <el-sub-menu index="ops" v-if="['admin', 'analyst'].includes(role)">
           <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
           <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.gData') }}</el-menu-item>
           <el-menu-item index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
@@ -52,8 +52,8 @@
           <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼） -->
           <el-button type="danger" size="small" @click="onEmergencyHalt">{{ t('risk.halt') }}</el-button>
 
-          <!-- P1-4：数据健康灯（含市场状态;抽屉自含诊断摘要——权限指纹未就绪前不做跨页路由） -->
-          <el-popover placement="bottom-end" :width="320" trigger="click">
+          <!-- P1-4：数据健康灯（admin-only 端点,非 admin 隐藏——B-P2-8 修正恒黄误报） -->
+          <el-popover v-if="role === 'admin'" placement="bottom-end" :width="320" trigger="click">
             <template #reference>
               <span :style="{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }">
                 <span class="dot" :class="healthLevel" style="width:10px;height:10px;border-radius:50%;display:inline-block" />

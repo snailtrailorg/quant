@@ -48,7 +48,7 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="240" fixed="right">
         <template #default="{ row }">
-          <template v-if="row.status === 'open'">
+          <template v-if="row.status === 'open' && canHandle">
             <el-button size="small" @click="act(row, 'verify')">{{ t('reconcile.verify') }}</el-button>
             <el-button size="small" @click="act(row, 'exempt')">{{ t('reconcile.exempt') }}</el-button>
             <el-button size="small" type="info" plain @click="act(row, 'ignore')">{{ t('reconcile.ignore') }}</el-button>
@@ -103,6 +103,7 @@ import { getReconcile } from '../api'
 import api from '../api'
 
 const { t } = useI18n()
+const canHandle = ['trader', 'admin'].includes(localStorage.getItem('role') || 'viewer')
 const rawIssues = ref([])
 const diffRows = ref([])
 const hasIssues = computed(() => diffRows.value.some(r => r.status === 'open'))

@@ -3,6 +3,7 @@ export default {
     app: { title: '蜗牛量化交易' },
     common: {
       action: '操作',
+      copy: '复制',
       edit: '编辑',
       delete: '删除',
       save: '保存',
@@ -355,7 +356,7 @@ export default {
       addFailed: '加入失败',
     },
     stockDetail: {
-      fullChart: 'Full indicators',
+      fullChart: '全指标图表',
       inPool: '池内', notPool: '非池', srcHub: 'hub 实时', srcTencent: '腾讯快照', noQuote: '暂无行情',
       turnover: '换手', volume: '量', amount: '额', high: '最高', low: '最低',
       limitUp: '涨停', limitDown: '跌停', ask: '卖', bid: '买',
@@ -457,6 +458,7 @@ export default {
       confirmDelete: '确认删除此规则？',
     },
     reconcile: {
+      firstSeen: '首次发现',
       openCount: '待处理差异 {n} 项（处置后消失）',
       rerun: '重新对账', rerunDone: '对账已重跑',
       manualOrder: '场外单登记', resetBtn: '清零确认',
@@ -556,8 +558,8 @@ export default {
       strategyStatus: '策略运行状态',
     },
     health: {
-      hubWindow: 'MD hub daily window: connect 9:05 / disconnect 15:10 (quiet off-window is normal)',
-      shadowDone: 'Shadow dual-track: mission complete (switched to hub mode 08-28)',
+      hubWindow: '行情 hub 每日连接窗：9:05 建连 / 15:10 断开（盘外静默为正常形态）',
+      shadowDone: '影子双轨：已完成使命（08-28 切换 hub 模式）',
       apiHealth: '接口健康',
       disk: '磁盘监控',
       service: '服务',
@@ -1057,16 +1059,9 @@ export default {
       text: '风控保护中（{reason}）：BUY 已拒，SELL（平仓/止损）正常放行',
       halted: '已熔断', frozen: '数据冻结',
     },
-    perm: {
-      title: 'Permissions', note: 'Backend-enforced · menus are visualization · fully audited. Effective within 60s or re-login.',
-    },
-    sellGuard: {
-      text: 'Risk guard active ({reason}): BUY rejected, SELL (close/stop-loss) passes',
-      halted: 'halted', frozen: 'frozen',
-    },
     layout: {
-      healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
-      helpTitle: 'Help', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):',
+      healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页（监控→健康）',
+      helpTitle: '帮助', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：',
     },
     notify: {
       title: '通知',
@@ -1078,6 +1073,7 @@ export default {
     app: { title: 'SnailQuant Trading' },
     common: {
       action: 'Action',
+      copy: 'Copy',
       edit: 'Edit',
       delete: 'Delete',
       save: 'Save',
@@ -1318,6 +1314,7 @@ export default {
     },
     strategy: {
       verifyCol: 'Verified', lastBtCol: 'Last backtest',
+      verified: 'Verified', unverified: 'Unverified',
       runBacktest: 'Backtest', saveAndBacktest: 'Save & backtest',
       snapshotIsolation: '{n} running task(s) still use the old snapshot; this edit does not affect them',
       deleteBlocked: 'Strategy has {n} running task(s); stop them before deleting',
@@ -1428,7 +1425,7 @@ export default {
       addFailed: 'Add failed',
     },
     stockDetail: {
-      fullChart: '全指标图表',
+      fullChart: 'Full indicators',
       inPool: 'In Pool', notPool: 'Not in Pool', srcHub: 'hub realtime', srcTencent: 'Tencent snapshot', noQuote: 'No quote',
       turnover: 'Turnover', volume: 'Vol', amount: 'Amt', high: 'High', low: 'Low',
       limitUp: 'Limit Up', limitDown: 'Limit Down', ask: 'Ask', bid: 'Bid',
@@ -1520,6 +1517,7 @@ export default {
       confirmDelete: 'Confirm delete this rule?',
     },
     reconcile: {
+      firstSeen: 'First seen',
       openCount: '{n} open issues (clear after handling)',
       rerun: 'Re-run', rerunDone: 'Reconcile re-run done',
       manualOrder: 'Manual order', resetBtn: 'Reset baseline',
@@ -1619,8 +1617,8 @@ export default {
       strategyStatus: 'Strategy Status',
     },
     health: {
-      hubWindow: '行情 hub 每日连接窗：9:05 建连 / 15:10 断开（盘外静默为正常形态）',
-      shadowDone: '影子双轨：已完成使命（08-28 切换 hub 模式）',
+      hubWindow: 'MD hub daily window: connect 9:05 / disconnect 15:10 (quiet off-window is normal)',
+      shadowDone: 'Shadow dual-track: mission complete (switched to hub mode 08-28)',
       apiHealth: 'API Health',
       disk: 'Disk Usage',
       service: 'Service',
@@ -2103,9 +2101,16 @@ export default {
       testSent: 'Submitted — check result in Logs → Email Outbox',
       hint: 'Group save takes effect immediately (no restart); password encrypted & never echoed, blank = keep; test email goes through outbox (auto-retries on failure)',
     },
+    perm: {
+      title: 'Permissions', note: 'Backend-enforced · menus are visualization · fully audited. Effective within 60s or re-login.',
+    },
+    sellGuard: {
+      text: 'Risk guard active ({reason}): BUY rejected, SELL (close/stop-loss) passes',
+      halted: 'halted', frozen: 'frozen',
+    },
     layout: {
-      healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页(监控→健康)',
-      helpTitle: '帮助', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：',
+      healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
+      helpTitle: 'Help', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):',
     },
     notify: {
       title: 'Notifications',

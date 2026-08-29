@@ -204,6 +204,8 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
+const router = useRouter()
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getStrategies, updateStrategy, createStrategy, getFactorList, validatePythonCode } from '../api'
 import api from '../api'
@@ -295,8 +297,8 @@ const lastRun = (row) => {
   return runs[0] || null
 }
 const runningTasksFor = (sid) => liveTasksAll.value.filter(x => x.strategy_id === sid && x.status === 'running')
-const gotoVerifiedRun = (row) => { const r = lastRun(row); if (r) window.location.hash = `#/backtest/${r.id}` }
-const runBacktest = (row) => { window.location.hash = `#/backtest?strategy=${row.id}` }
+const gotoVerifiedRun = (row) => { const r = lastRun(row); if (r) router.push(`/backtest/${r.id}`) }
+const runBacktest = (row) => { router.push({ path: '/backtest', query: { strategy: row.id } }) }
 const onCopy = async (row) => {
   try {
     const copy = { ...row, id: row.id + '_copy', name: row.name + ' (副本)' }
@@ -314,7 +316,7 @@ const onDelete = async (row) => {
 }
 const saveAndBacktest = async () => {
   await saveEdit()
-  if (editForm.value.id) window.location.hash = `#/backtest?strategy=${editForm.value.id}`
+  if (editForm.value.id) router.push({ path: '/backtest', query: { strategy: editForm.value.id } })
 }
 const loadFactors = async () => { const r = await getFactorList(); availableFactors.value = r.items || [] }
 const openCreate = () => {

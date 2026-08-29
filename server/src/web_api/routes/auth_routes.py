@@ -116,7 +116,10 @@ def update_permissions(role: str, body: dict, payload: dict = Depends(require_ro
     from src.data_platform.db import get_conn as _gc
     if role not in ("viewer", "analyst", "trader", "admin"):
         raise HTTPException(400, "BAD_ROLE")
-    keys = list(set(body.get("permissions", []) or []))
+    keys = sorted(set(body.get("permissions", []) or []))
+    if not keys:
+        # 终审 A-P2-11：空集会让 load 回退字典=全撤权失效（空集歧义）——权限键集合不允许为空
+        raise HTTPException(400, "EMPTY_PERMISSIONS", "权限集不可为空（至少保留 read）")
     with _gc() as conn:
         conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "
                      "AND dimension='api'", (role,))

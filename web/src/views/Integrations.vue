@@ -18,6 +18,7 @@ import Channels from './Channels.vue'
 import ImBots from './ImBots.vue'
 import LLMModels from './LLMModels.vue'
 import SystemConfig from './SystemConfig.vue'
+import Account from './Account.vue'
 const { t } = useI18n()
 const route = useRoute()
 const tabs = [
@@ -27,6 +28,7 @@ const tabs = [
   { k: 'mail', label: '邮件 SMTP', c: SystemConfig },
   { k: 'llm', label: 'LLM 模型', c: LLMModels },
   { k: 'sources', label: '数据源', c: DataSources },
+  { k: 'account', label: '账户与用户', c: Account },
 ]
 const tab = ref(route.query.tab || 'brokers')
 const current = computed(() => (tabs.find(x => x.k === tab.value) || tabs[0]).c)

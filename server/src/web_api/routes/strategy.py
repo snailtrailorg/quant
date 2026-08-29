@@ -37,6 +37,21 @@ def list_strategies(payload: dict = Depends(require_role("viewer", "analyst", "t
              "enabled": r[5], "factors": r[6], "aggregator": r[7], "risk": r[8], "params": r[9], "backtest_verified": r[10]} for r in rows]
 
 
+@router.delete("/api/strategy/{sid}")
+def delete_strategy_api(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
+    """删除策略（web-design P2-1）：运行中任务引用时拒（FACTOR_IN_USE 同精神——防删在用配方）。"""
+    with get_conn() as conn:
+        cur = conn.execute("SELECT COUNT(*) FROM live_task WHERE strategy_id=%s AND status='running'", (sid,))
+        if cur.fetchone()[0]:
+            raise ApiError(409, "STRATEGY_IN_USE", "有运行中实盘任务使用该策略，请先停止任务")
+        cur = conn.execute("DELETE FROM strategy_config WHERE id=%s RETURNING id", (sid,))
+        if not cur.fetchone():
+            raise ApiError(404, "STRATEGY_NOT_FOUND", "策略不存在")
+        conn.commit()
+    audit_log(payload.get("username", ""), "strategy_delete", sid)
+    return {"ok": True}
+
+
 @router.post("/api/strategy")
 def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("strategy_control"))):
     """新建策略配置。"""

@@ -62,7 +62,7 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getBacktestRun, verifyStrategy } from '../api'
 import api from '../api'
 
@@ -83,8 +83,7 @@ const loadSummary = async () => {
 }
 
 const createLiveFromRun = () => {
-  // 深链 LiveTask 创建（预填策略）；参数由用户在创建弹窗确认
-  window.location.hash = `#/livetask?strategy=${run.value.strategy_config_id}`
+  router.push({ path: '/live-task', query: { strategy: run.value.strategy_config_id } })
 }
 const markVerified = async () => {
   try {

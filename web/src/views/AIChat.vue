@@ -60,14 +60,17 @@ const renderMd = (src) => {
     let h = esc(seg)
       .replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    // 表格行（含 | 的连续行）→ <table>
-    h = h.split('\n').map(line =>
-      line.trim().startsWith('|') && line.trim().endsWith('|')
-        ? '<tr>' + line.trim().slice(1, -1).split('|').map(c => `<td>${c.trim()}</td>`).join('') + '</tr>'
-        : line)
-      .join('\n')
-    if (h.includes('<tr>')) h = `<table class="md-tab">${h}</table>`
-    return h.replace(/\n/g, '<br>')
+    // 表格行（连续 | 行成组,非表格行不裹进 table——A-P2-13 修正非法嵌套）
+    const outRows = []
+    let tbl = []
+    const flush = () => { if (tbl.length) { outRows.push('<table class="md-tab">' + tbl.join('') + '</table>'); tbl = [] } }
+    for (const line of h.split('\n')) {
+      if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
+        tbl.push('<tr>' + line.trim().slice(1, -1).split('|').map(c => `<td>${c.trim()}</td>`).join('') + '</tr>')
+      } else { flush(); outRows.push(line) }
+    }
+    flush()
+    return outRows.join('<br>')
   }).join('')
 }
 // P2-12：停止生成（关闭 WS 流）

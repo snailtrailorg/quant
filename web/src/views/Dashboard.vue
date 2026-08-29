@@ -4,24 +4,24 @@
     <!-- 告警条：critical/warn 未读置顶 -->
     <el-alert v-if="alerts.length" type="error" show-icon :closable="false" style="margin-bottom: 16px">
       <template #title>
-        {{ t('dash.alertBar', { n: alerts.length }) }}
-        <el-button size="small" text type="primary" @click="$router.push('/monitoring')" style="margin-left: 8px">{{ t('dash.handleNow') }}</el-button>
+        {{ t('dashboard.alertBar', { n: alerts.length }) }}
+        <el-button size="small" text type="primary" @click="$router.push('/monitoring')" style="margin-left: 8px">{{ t('dashboard.handleNow') }}</el-button>
       </template>
     </el-alert>
 
     <!-- 空态三步引导（05 §5.0-1：零数据首访态） -->
     <el-card v-if="emptyState" style="margin-bottom: 20px">
       <div style="text-align: center; padding: 24px 0">
-        <div style="font-size: var(--fs-page); font-weight: 600; margin-bottom: 16px">{{ t('dash.welcome') }}</div>
+        <div style="font-size: var(--fs-page); font-weight: 600; margin-bottom: 16px">{{ t('dashboard.welcome') }}</div>
         <el-steps :active="emptyStep" align-center style="max-width: 720px; margin: 0 auto">
-          <el-step :title="t('dash.step1')" :description="t('dash.step1d')" />
-          <el-step :title="t('dash.step2')" :description="t('dash.step2d')" />
-          <el-step :title="t('dash.step3')" :description="t('dash.step3d')" />
+          <el-step :title="t('dashboard.step1')" :description="t('dashboard.step1d')" />
+          <el-step :title="t('dashboard.step2')" :description="t('dashboard.step2d')" />
+          <el-step :title="t('dashboard.step3')" :description="t('dashboard.step3d')" />
         </el-steps>
         <div style="margin-top: 20px">
-          <el-button type="primary" @click="$router.push('/factors')">{{ t('dash.goFactors') }}</el-button>
-          <el-button @click="$router.push('/strategy')">{{ t('dash.goStrategy') }}</el-button>
-          <el-button @click="$router.push('/backtest')">{{ t('dash.goBacktest') }}</el-button>
+          <el-button type="primary" @click="$router.push('/factors')">{{ t('dashboard.goFactors') }}</el-button>
+          <el-button @click="$router.push('/strategy')">{{ t('dashboard.goStrategy') }}</el-button>
+          <el-button @click="$router.push('/backtest')">{{ t('dashboard.goBacktest') }}</el-button>
         </div>
       </div>
     </el-card>
@@ -37,16 +37,16 @@
         <div class="kpi-num" :class="pnlClass(dashboard.daily_pnl)">{{ pnlArrow(dashboard.daily_pnl) }} {{ fmtMoney(dashboard.daily_pnl) }}</div>
       </div></el-card></el-col>
       <el-col :span="5"><el-card shadow="never"><div class="kpi">
-        <div class="klabel">{{ t('trading.totalPnl') }}（{{ t('dash.sinceInception') }}）</div>
+        <div class="klabel">{{ t('trading.totalPnl') }}（{{ t('dashboard.sinceInception') }}）</div>
         <div class="kpi-num" :class="pnlClass(dashboard.total_pnl)">{{ pnlArrow(dashboard.total_pnl) }} {{ fmtMoney(dashboard.total_pnl) }}</div>
       </div></el-card></el-col>
       <el-col :span="5"><el-card shadow="never"><div class="kpi">
-        <div class="klabel">{{ t('dash.riskGauge') }}</div>
+        <div class="klabel">{{ t('dashboard.riskGauge') }}</div>
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
         <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: 4px" />
       </div></el-card></el-col>
       <el-col :span="4"><el-card shadow="never"><div class="kpi">
-        <div class="klabel">{{ t('dash.tasksRunning') }}</div>
+        <div class="klabel">{{ t('dashboard.tasksRunning') }}</div>
         <div class="kpi-num">{{ liveTasks.filter(x => x.status === 'running').length }}/{{ liveTasks.length }}</div>
       </div></el-card></el-col>
     </el-row>
@@ -55,26 +55,26 @@
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :span="15">
         <el-card shadow="never">
-          <template #header>{{ t('dash.equityCurve') }}</template>
+          <template #header>{{ t('dashboard.equityCurve') }}</template>
           <v-chart v-if="curve.length" :option="curveOption" autoresize style="height: 280px" />
-          <div v-else class="empty-cell">{{ t('dash.noCurve') }}</div>
+          <div v-else class="empty-cell">{{ t('dashboard.noCurve') }}</div>
         </el-card>
       </el-col>
       <el-col :span="9">
         <el-card shadow="never">
-          <template #header><div style="display:flex; justify-content:space-between">{{ t('dash.liveTasks') }}<el-button text size="small" @click="$router.push('/live-task')">{{ t('dash.more') }}→</el-button></div></template>
+          <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.liveTasks') }}<el-button text size="small" @click="$router.push('/live-task')">{{ t('dashboard.more') }}→</el-button></div></template>
           <div v-for="task in liveTasks.slice(0, 5)" :key="task.id" class="task-row">
             <span class="dot" :class="task.status" />{{ task.name }}
             <span style="color: var(--text-secondary)">{{ task.symbol }}</span>
             <el-tag size="small" :type="{ running: 'success', stopped: 'info', error: 'danger', frozen: 'primary', pending: 'warning' }[task.status] || 'info'">{{ task.status }}</el-tag>
           </div>
-          <div v-if="!liveTasks.length" class="empty-cell">{{ t('dash.noTasks') }}</div>
+          <div v-if="!liveTasks.length" class="empty-cell">{{ t('dashboard.noTasks') }}</div>
         </el-card>
         <!-- 今日事件（简化：今日 risk/data 类通知） -->
         <el-card shadow="never" style="margin-top: 16px">
-          <template #header>{{ t('dash.todayEvents') }}</template>
+          <template #header>{{ t('dashboard.todayEvents') }}</template>
           <div v-for="n in todayEvents.slice(0, 4)" :key="n.id" class="evt-row">⚠ {{ n.title }}</div>
-          <div v-if="!todayEvents.length" class="empty-cell">{{ t('dash.noEvents') }}</div>
+          <div v-if="!todayEvents.length" class="empty-cell">{{ t('dashboard.noEvents') }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -82,36 +82,36 @@
     <!-- 底排：持仓 Top5 / 今日订单流 / 数据健康 / 最近回测 -->
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :span="6"><el-card shadow="never">
-        <template #header><div style="display:flex; justify-content:space-between">{{ t('dash.topPositions') }}<el-button text size="small" @click="$router.push('/trading')">{{ t('dash.more') }}→</el-button></div></template>
+        <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.topPositions') }}<el-button text size="small" @click="$router.push('/trading')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="p in topPositions" :key="p.symbol" class="pos-row">
           <span>{{ (p.symbol || '').split('.')[0] }}</span>
           <span class="num" :class="pnlClass(p.pnl)">{{ pnlArrow(p.pnl) }} {{ fmtMoney(p.pnl) }}</span>
         </div>
-        <div v-if="!topPositions.length" class="empty-cell">{{ t('dash.noPositions') }}</div>
+        <div v-if="!topPositions.length" class="empty-cell">{{ t('dashboard.noPositions') }}</div>
       </el-card></el-col>
       <el-col :span="6"><el-card shadow="never">
-        <template #header>{{ t('dash.todayOrders') }}</template>
+        <template #header>{{ t('dashboard.todayOrders') }}</template>
         <div v-for="o in todayOrders.slice(0, 6)" :key="o.id" class="evt-row">
-          <el-tag size="small" :type="o.action === 'BUY' ? 'danger' : 'success'">{{ o.action === 'BUY' ? t('dash.buy') : t('dash.sell') }}</el-tag>
+          <el-tag size="small" :type="o.action === 'BUY' ? 'danger' : 'success'">{{ o.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
           {{ (o.symbol || '').split('.')[0] }} ×{{ o.volume }}
-          <span style="color: var(--text-secondary)">{{ (o.created_at || '').slice(5, 16) }}</span>
+          <span style="color: var(--text-secondary)">{{ (o.ts || '').slice(5, 16) }}</span>
         </div>
-        <div v-if="!todayOrders.length" class="empty-cell">{{ t('dash.noOrders') }}</div>
+        <div v-if="!todayOrders.length" class="empty-cell">{{ t('dashboard.noOrders') }}</div>
       </el-card></el-col>
       <el-col :span="6"><el-card shadow="never">
-        <template #header><div style="display:flex; justify-content:space-between">{{ t('dash.dataHealth') }}<el-button text size="small" @click="$router.push('/data-integrity')">{{ t('dash.more') }}→</el-button></div></template>
-        <div class="evt-row">{{ t('dash.complete') }}: <b class="num" style="color: var(--success)">{{ integrity.complete || 0 }}</b></div>
-        <div class="evt-row">{{ t('dash.missing') }}: <b class="num" style="color: var(--critical)">{{ integrity.missing || 0 }}</b></div>
-        <div class="evt-row" style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('dash.dataHealthNote') }}</div>
+        <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.dataHealth') }}<el-button text size="small" @click="$router.push('/data-integrity')">{{ t('dashboard.more') }}→</el-button></div></template>
+        <div class="evt-row">{{ t('dashboard.complete') }}: <b class="num" style="color: var(--success)">{{ integrity.complete || 0 }}</b></div>
+        <div class="evt-row">{{ t('dashboard.missing') }}: <b class="num" style="color: var(--critical)">{{ integrity.missing || 0 }}</b></div>
+        <div class="evt-row" style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('dashboard.dataHealthNote') }}</div>
       </el-card></el-col>
       <el-col :span="6"><el-card shadow="never">
-        <template #header><div style="display:flex; justify-content:space-between">{{ t('dash.recentBacktests') }}<el-button text size="small" @click="$router.push('/backtest')">{{ t('dash.more') }}→</el-button></div></template>
+        <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.recentBacktests') }}<el-button text size="small" @click="$router.push('/backtest')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="b in recentBacktests.slice(0, 4)" :key="b.id" class="evt-row">
           #{{ b.id }}
           <span :class="b.status === 'done' ? 'up' : ''">{{ b.summary?.total_return != null ? (b.summary.total_return * 100).toFixed(1) + '%' : b.status }}</span>
           <span style="color: var(--text-secondary)">{{ (b.created_at || '').slice(5, 10) }}</span>
         </div>
-        <div v-if="!recentBacktests.length" class="empty-cell">{{ t('dash.noBacktests') }}</div>
+        <div v-if="!recentBacktests.length" class="empty-cell">{{ t('dashboard.noBacktests') }}</div>
       </el-card></el-col>
     </el-row>
   </div>
@@ -158,7 +158,7 @@ const topPositions = computed(() => [...(positions.value || [])]
   .sort((a, b) => Math.abs(b.pnl || 0) - Math.abs(a.pnl || 0)).slice(0, 5))
 const todayOrders = computed(() => {
   const today = new Date().toISOString().slice(0, 10)
-  return (orders.value || []).filter(o => (o.created_at || '').startsWith(today))
+  return (orders.value || []).filter(o => (o.ts || '').startsWith(today))
 })
 const emptyState = computed(() => !liveTasks.value.length && !recentBacktests.value.length)
 const emptyStep = computed(() => !strategies.value.length ? 0 : recentBacktests.value.length ? 3 : 1)
@@ -178,13 +178,13 @@ onMounted(async () => {
     async () => { dashboard.value = await getDashboard() },
     async () => { const p = await getPnl(); curve.value = p.curve || [] },
     async () => { positions.value = (await api.get('/position')).positions || [] },
-    async () => { orders.value = await getOrders() },
+    async () => { orders.value = (await getOrders()).orders || [] },   // A-P0-1:后端返 {orders,total}
     async () => { liveTasks.value = await getLiveTasks() },
     async () => { const n = await getNotifications('active', 50)
                   const items = n.items || n || []
                   alerts.value = items.filter(x => ['critical', 'warn', 'error'].includes(x.level || x.severity || ''))
                   todayEvents.value = items.filter(x => ['risk', 'data'].includes(x.category)) },
-    async () => { integrity.value = await getDataIntegrity('1d') },
+    async () => { integrity.value = (await getDataIntegrity('1D'))?.summary || await getDataIntegrity('1D') },   // A-P2-9:大小写+summary 形状
     async () => { recentBacktests.value = (await getBacktests()).slice(0, 4) },
     async () => { const r = await getRiskState(); riskMetrics.value = r.metrics || {} },
   ]

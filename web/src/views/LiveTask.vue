@@ -202,5 +202,8 @@ const onDelete = async (row) => {
   } catch { /* 取消 */ }
 }
 
-onMounted(async () => { await load(); await loadStrategies(); await loadAccounts() })
+onMounted(async () => {
+  const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
+  if (pre) { showCreate = showCreate || true; form.value.strategy_id = String(pre) }
+  await load(); await loadStrategies(); await loadAccounts() })
 </script>
