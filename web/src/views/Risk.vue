@@ -1,5 +1,7 @@
 <template>
   <div>
+    <SellGuardBanner v-if="state.halted" />
+
     <el-card>
       <template #header>{{ t('risk.state') }}</template>
       <el-alert :title="state.halted ? t('risk.halted') : t('risk.normal')"
@@ -97,6 +99,7 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { getRiskState, riskHalt, riskResume, getLiveTrading, updateLiveTrading } from '../api'
+import SellGuardBanner from '../components/SellGuardBanner.vue'
 
 const { t } = useI18n()
 const state = ref({ halted: false, reason: '', rules: { global: { max_drawdown: 0.15, daily_loss_limit: 0.05 }, crypto: { leverage_max: 5 } } })

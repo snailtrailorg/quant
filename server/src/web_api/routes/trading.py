@@ -1,4 +1,4 @@
-import json, subprocess
+import json, subprocess, time
 from fastapi import APIRouter, Depends, Request, Body, Header, HTTPException, Query
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
@@ -26,10 +26,32 @@ def list_live_tasks(status: str | None = None,
                 "SELECT id, name, strategy_id, symbol, params, status, account_id, initial_capital, created_at "
                 "FROM live_task ORDER BY id DESC")
         rows = cur.fetchall()
-    return [{"id": r[0], "name": r[1], "strategy_id": r[2], "symbol": r[3],
-             "params": json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {}),
-             "status": r[5], "account_id": r[6], "initial_capital": float(r[7]) if r[7] else None,
-             "created_at": str(r[8]) if r[8] else None} for r in rows]
+    # P1-5（web-design 05 §5.8/06 B#5）：合并 worker 心跳（md_mode/lag/bars/frozen/gen）——
+    # 任务"活着吗、行情新鲜吗、冻没冻"三问列表页直答
+    hb = {}
+    try:
+        import redis as _redis, os as _os
+        r_ = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4"),
+                                   decode_responses=True, socket_timeout=1)
+        for rid, *_ in rows:
+            h = r_.hgetall(f"quant:hb:task:{rid}")
+            if h:
+                hb[rid] = h
+    except Exception:
+        pass
+    out = []
+    for r in rows:
+        h = hb.get(r[0], {})
+        out.append({"id": r[0], "name": r[1], "strategy_id": r[2], "symbol": r[3],
+                    "params": json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {}),
+                    "status": r[5], "account_id": r[6], "initial_capital": float(r[7]) if r[7] else None,
+                    "created_at": str(r[8]) if r[8] else None,
+                    "md_mode": (h.get("md") if h else None) or (json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {})).get("md_mode") or "direct",
+                    "lag": float(h["lag"]) if h.get("lag") not in (None, "", "-1") else (float(h["lag"]) if h.get("lag") == "-1" else None),
+                    "bars": int(h["bars"]) if h.get("bars") else 0,
+                    "frozen": h.get("frozen") == "1",
+                    "hb_age_s": (time.time() - float(h["ts"])) if h.get("ts") else None})
+    return out
 
 
 @router.post("/api/live-task")

@@ -77,27 +77,25 @@
           </el-select>
 
           <!-- 通知铃铛（按角色可见类别；viewer 无可见类别不显示） -->
-          <el-popover v-if="bellVisible" placement="bottom-end" :width="380" trigger="click">
-            <template #reference>
-              <el-badge :value="notifCount" :hidden="!notifCount" :max="99">
-                <el-button type="primary" circle>🔔</el-button>
-              </el-badge>
-            </template>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px">
-              <b>{{ t('notify.title') }}</b>
+          <!-- P1-6（05 §5.0-2）：通知中心 480 抽屉替代 popover（结构化 body+精确路由） -->
+          <el-badge v-if="bellVisible" :value="notifCount" :hidden="!notifCount" :max="99">
+            <el-button type="primary" circle @click="notifDrawer = true">🔔</el-button>
+          </el-badge>
+          <el-drawer v-model="notifDrawer" :title="t('notify.title')" size="480px">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 8px">
               <el-button v-if="notifCount" size="small" type="primary" @click="onAckAll">{{ t('notify.ackAll') }}</el-button>
             </div>
-            <div style="max-height: 320px; overflow-y: auto">
+            <div style="overflow-y: auto">
               <div v-if="!notifs.length" style="color: #909399; font-size: 13px; text-align: center; padding: 20px 0">{{ t('notify.empty') }}</div>
               <div v-for="n in notifs" :key="n.id" @click="goCategory(n.category)"
-                style="padding: 8px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
+                style="padding: 10px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
                 <span :class="['dot', n.level]"></span>
                 <b style="font-size: 13px">{{ n.title }}</b>
                 <div v-if="n.body" class="notif-body">{{ n.body }}</div>
                 <div style="color: #909399; font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
               </div>
             </div>
-          </el-popover>
+          </el-drawer>
 
           <!-- 用户区：头像 + 昵称下拉（个人中心/退出），替换原文字 tag（批次C） -->
           <el-dropdown trigger="click" @command="onUserCommand">
@@ -165,7 +163,29 @@ const onAckAll = async () => {
   try { await ackAllNotifications(); await loadNotifs() } catch {}
 }
 // 类别 → 页面路由（点击通知直达）
+// P1-4：急停（熔断=轻确认,04 §4.5——所有可登录角色可触发,后端 require_perm 兜底）
+const onEmergencyHalt = async () => {
+  try {
+    await ElMessageBox.confirm(t('risk.confirmHalt'), t('common.confirm'), { type: 'warning' })
+    const { riskHalt } = await import('../api')
+    await riskHalt(); ElMessage.success(t('risk.halted'))
+  } catch (e) { if (e?.response) ElMessage.error(String(e)) }
+}
+// P1-4：数据健康灯摘要（抽屉自含诊断;权限感知——不跨页路由）
+const notifDrawer = ref(false)
+const healthLevel = ref('ok')
+const healthItems = ref([])
+const loadHealth = async () => {
+  try {
+    const { getHealthComponents } = await import('../api')
+    const comps = await getHealthComponents()
+    const items = (comps.items || comps || []).map(c => ({ k: c.name || c.component || 'svc', ok: (c.status || 'ok') === 'ok', v: c.status || 'ok' }))
+    healthItems.value = items.slice(0, 8)
+    healthLevel.value = items.some(i => !i.ok) ? 'critical' : 'ok'
+  } catch { healthItems.value = [{ k: 'health', ok: false, v: '—' }]; healthLevel.value = 'warn' }
+}
 const goCategory = c => router.push({ email: '/system-config', task: '/tasks', risk: '/risk', data: '/data-integrity', system: '/health' }[c] || '/')
+loadHealth()
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })
 onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
 

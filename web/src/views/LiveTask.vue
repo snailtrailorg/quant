@@ -10,10 +10,22 @@
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="strategy_id" :label="t('liveTask.strategy')" width="150" />
-      <el-table-column prop="symbol" :label="t('common.symbol')" width="150" />
-      <el-table-column :label="t('common.status')" width="100">
+      <el-table-column prop="symbol" :label="t('common.symbol')" width="130" />
+      <!-- P1-5（06 B#5）：md_mode/行情 lag/bars 消费/frozen——活着吗/新鲜吗/冻没冻直答 -->
+      <el-table-column :label="t('liveTask.mdMode')" width="90">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
+          <el-tag size="small" :type="row.md_mode === 'hub' ? 'primary' : 'info'">{{ row.md_mode }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('liveTask.lag')" width="90" class-name="num">
+        <template #default="{ row }">
+          <span :style="{ color: (row.lag ?? 999) > 5 ? 'var(--warn)' : 'var(--success)' }">{{ row.lag != null ? row.lag.toFixed(1) + 's' : '—' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="bars" :label="t('liveTask.bars')" width="90" class-name="num" />
+      <el-table-column :label="t('common.status')" width="110">
+        <template #default="{ row }">
+          <el-tag :type="statusType(row.status)" size="small">{{ row.frozen ? 'frozen ❄' : row.status }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" width="150" />
@@ -22,6 +34,7 @@
         <template #default="{ row }">
           <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
+          <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)">{{ t('liveTask.unfreeze') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)">{{ t('common.stop') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row)">{{ t('common.delete') }}</el-button>
         </template>
@@ -62,7 +75,13 @@
         <el-form-item :label="t('liveTask.initialCapital')">
           <el-input-number v-model="form.initial_capital" :min="10000" :step="100000" />
         </el-form-item>
-      </el-form>
+      
+        <el-form-item :label="t('liveTask.mdMode')">
+          <el-radio-group v-model="form.md_mode">
+            <el-radio value="hub">hub（默认）</el-radio>
+            <el-radio value="direct">direct（待退役）</el-radio>
+          </el-radio-group>
+        </el-form-item></el-form>
       <template #footer>
         <el-button type="primary" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="save" :loading="saving">{{ t('liveTask.createBtn') }}</el-button>
@@ -104,7 +123,7 @@ const saving = ref(false)
 const parameterDefs = ref([])
 const form = ref({
   name: '', strategy_id: '', symbol: '', params: {},
-  account_id: '', initial_capital: 1000000,
+  account_id: '', initial_capital: 1000000, md_mode: 'hub',
 })
 
 const statusType = (s) => ({
@@ -153,6 +172,14 @@ const save = async () => {
   finally { saving.value = false }
 }
 
+// P1-5/06 B#6 冻结处置闭环:重启解冻(frozen 是 worker 态,重启清退)
+const onUnfreeze = async (row) => {
+  try {
+    await ElMessageBox.confirm(t('liveTask.confirmUnfreeze'), t('common.confirm'), { type: 'warning' })
+    await stopLiveTask(row.id); await startLiveTask(row.id)
+    ElMessage.success(t('common.success')); load()
+  } catch (e) { if (e?.response) ElMessage.error(t('common.failed')) }
+}
 const onStart = async (id) => {
   try { await startLiveTask(id); ElMessage.success(t('common.started')); load() }
   catch (e) { ElMessage.error(t('common.startFailed')) }

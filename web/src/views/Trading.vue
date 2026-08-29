@@ -1,5 +1,6 @@
 <template>
-  <el-card>
+  <SellGuardBanner />
+    <el-card>
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('trading.title') }}</span>
@@ -52,6 +53,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import SellGuardBanner from '../components/SellGuardBanner.vue'
 import { getPosition, getOrders, getPnl } from '../api'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'

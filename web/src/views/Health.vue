@@ -1,7 +1,12 @@
 <template>
   <el-row :gutter="20">
     <el-col :span="12">
-      <el-card>
+      <!-- P1-7（09-A8）：md-hub 每日连接窗状态 + 影子双轨灰度进度（08-28 批6a 已切换 hub 模式,影子对照终结） -->
+    <el-alert type="info" :closable="false" style="margin-bottom: 14px">
+      {{ t('health.hubWindow') }} · {{ t('health.shadowDone') }}
+    </el-alert>
+
+    <el-card>
         <template #header>{{ t('health.apiHealth') }}</template>
         <el-table :data="healthData" stripe>
           <el-table-column prop="name" :label="t('health.service')" width="120" />
