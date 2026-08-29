@@ -48,6 +48,8 @@ JWT_TTL_HOURS = 24
 
 # ——— 权限矩阵（4 级：Admin/Trader/Analyst/Viewer）——
 
+# P3-7（web-design 10 §6 阶段 A）：字典保留为 fallback（表空/DB 故障时行为兜底，改权限不发版）；
+# 运行时真源=permission 表（60s 缓存热加载），_load_permissions() 合并 deny>allow>默认拒绝。
 PERMISSIONS = {
     "viewer":  {"read"},
     "analyst": {"read", "strategy_control", "data_sync", "system_config"},   # 研究：策略/回测/数据同步/系统配置
@@ -55,6 +57,43 @@ PERMISSIONS = {
     "admin":   {"read", "strategy_control", "data_sync", "halt", "resume", "trade", "live_trading_control",
                  "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "im_bots_config"},
 }
+
+_PERM_CACHE: dict = {"at": 0.0, "roles": None}
+_PERM_TTL = 60.0
+
+
+def load_role_permissions() -> dict:
+    """角色→权限集（api 维）。表读失败/空 → fallback 字典（行为零变化）。"""
+    import time as _t
+    now = _t.time()
+    if _PERM_CACHE["roles"] is not None and now - _PERM_CACHE["at"] < _PERM_TTL:
+        return _PERM_CACHE["roles"]
+    try:
+        from src.data_platform.db import get_conn as _gc
+        with _gc() as conn:
+            cur = conn.execute(
+                "SELECT subject_id, resource, effect FROM permission "
+                "WHERE subject_type='role' AND dimension='api'")
+            roles: dict = {}
+            for sid, res, eff in cur.fetchall():
+                grants, denies = roles.setdefault(sid, {"allow": set(), "deny": set()})
+                (denies if eff == "deny" else grants).add(res)
+        merged = {}
+        for role, base in PERMISSIONS.items():
+            allow = (base | roles.get(role, {}).get("allow", set())) - roles.get(role, {}).get("deny", set())
+            merged[role] = allow
+        for role, gd in roles.items():
+            if role not in PERMISSIONS:
+                merged[role] = gd["allow"] - gd["deny"]
+        _PERM_CACHE.update(at=now, roles=merged)
+        return merged
+    except Exception:
+        return PERMISSIONS
+
+
+def invalidate_perm_cache() -> None:
+    """权限变更后即刻生效（10 §3：指纹重编译）。"""
+    _PERM_CACHE.update(at=0.0, roles=None)
 
 
 def require_role(*allowed: Role):
@@ -75,7 +114,7 @@ def require_perm(perm: str):
         token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
         payload = verify_jwt(token)
         role = payload.get("role", "viewer")
-        perms = PERMISSIONS.get(role, set())
+        perms = load_role_permissions().get(role, set())   # P3-7：真源=permission 表
         if perm not in perms:
             raise HTTPException(403, f"角色 {role} 无 {perm} 权限")
         return payload

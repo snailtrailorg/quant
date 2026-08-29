@@ -108,6 +108,8 @@ export default {
       passwordWeak: '密码不符合复杂度要求',
     },
     nav: {
+      gResearch: '策略研究', gLive: '实盘交易', gRisk: '风险控制', gOps: '系统管理',
+      gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性', permissions: '权限管理',
       dashboard: '总览',
       trade: '交易工作台',
       strategyLab: '策略实验室',
@@ -1048,9 +1050,15 @@ export default {
       testSent: '已提交，到「运行日志→邮件发件箱」看结果',
       hint: '整组保存即时生效（无需重启）；密码加密存储不回显，留空=不修改；测试邮件走发件箱（失败自动重试，结果见发件箱）',
     },
+    perm: {
+      title: '权限管理', note: '后端强制生效 · 菜单只是显性化 · 变更全程审计。改完即时生效（60s 内或重登）。',
+    },
     sellGuard: {
       text: '风控保护中（{reason}）：BUY 已拒，SELL（平仓/止损）正常放行',
       halted: '已熔断', frozen: '数据冻结',
+    },
+    perm: {
+      title: 'Permissions', note: 'Backend-enforced · menus are visualization · fully audited. Effective within 60s or re-login.',
     },
     sellGuard: {
       text: 'Risk guard active ({reason}): BUY rejected, SELL (close/stop-loss) passes',
@@ -1058,6 +1066,7 @@ export default {
     },
     layout: {
       healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
+      helpTitle: 'Help', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):',
     },
     notify: {
       title: '通知',
@@ -1174,6 +1183,8 @@ export default {
       passwordWeak: 'Password does not meet complexity requirements',
     },
     nav: {
+      gResearch: 'Research', gLive: 'Live Trading', gRisk: 'Risk Control', gOps: 'System',
+      gData: 'Data Ops', gIntegrations: 'Integrations', gObserve: 'Observability', permissions: 'Permissions',
       dashboard: 'Dashboard',
       trade: 'Trade',
       strategyLab: 'Strategies',
@@ -2094,6 +2105,7 @@ export default {
     },
     layout: {
       healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页(监控→健康)',
+      helpTitle: '帮助', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：',
     },
     notify: {
       title: 'Notifications',

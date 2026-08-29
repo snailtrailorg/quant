@@ -78,18 +78,56 @@ def login(req: LoginReq, request: Request):
 
 @router.get("/api/auth/me")
 def me(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    nickname, avatar_url = payload["username"], None
+    nickname, avatar_url, db_role = payload["username"], None, None
     try:
         with get_conn() as conn:
-            cur = conn.execute("SELECT nickname, avatar_url FROM users WHERE id=%s", (payload["sub"],))
+            cur = conn.execute("SELECT nickname, avatar_url, role FROM users WHERE id=%s", (payload["sub"],))
             r = cur.fetchone()
         if r:
-            nickname, avatar_url = r[0] or payload["username"], r[1]
+            nickname, avatar_url, db_role = r[0] or payload["username"], r[1], r[2]
     except Exception:
         pass
-    return {"user_id": payload["sub"], "username": payload["username"], "role": payload["role"],
+    # P3-7（10 §7 差距 6）：role 以 DB 为准——修 JWT 24h 不刷新（改角色即时生效）；
+    # permissions 同步换查表真源
+    from ..auth import load_role_permissions
+    role = db_role or payload["role"]
+    return {"user_id": payload["sub"], "username": payload["username"], "role": role,
             "nickname": nickname, "avatar_url": avatar_url,
-            "permissions": list(PERMISSIONS.get(payload["role"], set()))}
+            "permissions": sorted(load_role_permissions().get(role, set()))}
+
+
+@router.get("/api/permissions")
+def get_permissions(payload: dict = Depends(require_role("admin"))):
+    """P3-7（10 §4）：权限管理——角色×权限键矩阵（api 维）。"""
+    from ..auth import load_role_permissions
+    all_keys = ["read", "strategy_control", "data_sync", "halt", "resume", "trade",
+                "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
+                "system_config", "llm_config", "im_bots_config"]
+    roles = load_role_permissions()
+    return {"keys": all_keys,
+            "roles": {r: sorted(roles.get(r, set())) for r in ("viewer", "analyst", "trader", "admin")}}
+
+
+@router.post("/api/permissions/{role}")
+def update_permissions(role: str, body: dict, payload: dict = Depends(require_role("admin"))):
+    """改角色权限集（全量重写该 role 的 allow 集；系统安全策略键不受影响——halt 全员/resume-admin
+    等由 require_perm 调用点固定，此处只管理键集合本身）。"""
+    from ..auth import invalidate_perm_cache
+    from src.data_platform.db import get_conn as _gc
+    if role not in ("viewer", "analyst", "trader", "admin"):
+        raise HTTPException(400, "BAD_ROLE")
+    keys = list(set(body.get("permissions", []) or []))
+    with _gc() as conn:
+        conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "
+                     "AND dimension='api'", (role,))
+        for k in keys:
+            conn.execute(
+                "INSERT INTO permission (subject_type, subject_id, dimension, resource, effect, updated_by) "
+                "VALUES ('role', %s, 'api', %s, 'allow', %s)",
+                (role, k, payload.get("username", "")))
+        conn.commit()
+    invalidate_perm_cache()
+    return {"role": role, "permissions": keys}
 
 
 @router.post("/api/auth/logout")

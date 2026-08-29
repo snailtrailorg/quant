@@ -1,69 +1,44 @@
 <template>
   <el-container style="height: 100vh">
-    <el-aside width="220px" style="background: #304156">
+    <el-aside :width="collapsed ? '64px' : '240px'" style="background: var(--bg-sidebar); transition: width .2s">
       <div style="color: #fff; padding: 20px; font-size: 18px; font-weight: bold; text-align: center">
         {{ t('app.title') }}
       </div>
-      <el-menu :default-active="route.path" router background-color="#304156" text-color="#bfcbd9" active-text-color="#409EFF" style="padding-bottom: 28px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
-        <!-- 首页 -->
-        <el-menu-item index="/"><el-icon><DataLine /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
+      <el-menu :default-active="route.path" router background-color="var(--bg-sidebar)" text-color="#bfcbd9" active-text-color="#FFFFFF" style="padding-bottom: 28px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
+        <!-- P3-9（web-design 03 v2.1）：菜单 v2.1 四组 16 项——组标题与菜单项同字号;组内流程序 -->
+        <el-menu-item index="/"><el-icon><DataBoard /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
 
-        <!-- 交易工作台 -->
-        <el-sub-menu index="trade">
-          <template #title><el-icon><Money /></el-icon>{{ t('nav.trade') }}</template>
-          <el-menu-item index="/trading"><el-icon><Wallet /></el-icon>{{ t('nav.trading') }}</el-menu-item>
-          <el-menu-item index="/monitoring"><el-icon><Monitor /></el-icon>{{ t('nav.monitoring') }}</el-menu-item>
-          <el-menu-item index="/tasks"><el-icon><List /></el-icon>{{ t('nav.tasks') }}</el-menu-item>
-        </el-sub-menu>
-
-        <!-- 策略实验室 -->
-        <el-sub-menu index="strategy">
-          <template #title><el-icon><Setting /></el-icon>{{ t('nav.strategyLab') }}</template>
-          <el-menu-item index="/strategy"><el-icon><List /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
-          <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTask') }}</el-menu-item>
-          <el-menu-item index="/backtest"><el-icon><Histogram /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
-          <el-menu-item index="/pool"><el-icon><FolderOpened /></el-icon>{{ t('nav.pool') }}</el-menu-item>
-          <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>
-        </el-sub-menu>
-
-        <!-- 数据分析 -->
-        <el-sub-menu index="analysis">
-          <template #title><el-icon><TrendCharts /></el-icon>{{ t('nav.dataAnalysis') }}</template>
-          <!-- P3-9（03 v2.1 菜单）：三屏归一 → 选股器（tab 内分 A股/转债/ETF） -->
+        <el-sub-menu index="research">
+          <template #title><el-icon><DataAnalysis /></el-icon>{{ t('nav.gResearch') }}</template>
           <el-menu-item index="/screener"><el-icon><Search /></el-icon>{{ t('nav.screener') }}</el-menu-item>
+          <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>
+          <el-menu-item index="/strategy"><el-icon><SetUp /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
+          <el-menu-item index="/backtest"><el-icon><Timer /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
           <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.analysis') }}</el-menu-item>
-          <el-menu-item index="/chat"><el-icon><ChatDotRound /></el-icon>{{ t('nav.chat') }}</el-menu-item>
+          <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.pool') }}</el-menu-item>
         </el-sub-menu>
 
-        <!-- 风控 -->
-        <el-sub-menu index="risk">
-          <template #title><el-icon><Warning /></el-icon>{{ t('nav.riskSection') }}</template>
-          <el-menu-item index="/risk"><el-icon><Shield /></el-icon>{{ t('nav.risk') }}</el-menu-item>
+        <el-sub-menu index="live">
+          <template #title><el-icon><Monitor /></el-icon>{{ t('nav.gLive') }}</template>
+          <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.trading') }}</el-menu-item>
+          <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTask') }}</el-menu-item>
+          <el-menu-item index="/monitoring"><el-icon><Odometer /></el-icon>{{ t('nav.monitoring') }}</el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu index="riskgrp">
+          <template #title><el-icon><Warning /></el-icon>{{ t('nav.gRisk') }}</template>
+          <el-menu-item index="/risk"><el-icon><CircleCheck /></el-icon>{{ t('nav.risk') }}</el-menu-item>
           <el-menu-item index="/reconcile"><el-icon><ScaleToOriginal /></el-icon>{{ t('nav.reconcile') }}</el-menu-item>
-          <el-menu-item index="/risk-rules"><el-icon><Setting /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
+          <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
         </el-sub-menu>
 
-        <!-- 系统运维（Admin + Analyst 可见，Trader/Viewer 不可见） -->
-        <el-sub-menu index="system" v-if="['admin', 'analyst'].includes(role)">
-          <template #title><el-icon><Tools /></el-icon>{{ t('nav.ops') }}</template>
-          <el-menu-item index="/data-manage"><el-icon><Download /></el-icon>{{ t('nav.dataManage') }}</el-menu-item>
-          <el-menu-item index="/data-integrity"><el-icon><DataAnalysis /></el-icon>{{ t('nav.dataIntegrity') }}</el-menu-item>
-          <el-menu-item index="/health"><el-icon><FirstAidKit /></el-icon>{{ t('nav.health') }}</el-menu-item>
-          <el-menu-item index="/help"><el-icon><QuestionFilled /></el-icon>{{ t('nav.help') }}</el-menu-item>
-          <el-menu-item index="/logs"><el-icon><Document /></el-icon>{{ t('nav.logs') }}</el-menu-item>
-        </el-sub-menu>
-
-        <!-- 账户设置（仅 Admin） -->
-        <el-sub-menu index="account-group" v-if="role === 'admin'">
-          <template #title><el-icon><User /></el-icon>{{ t('nav.settings') }}</template>
-          <el-menu-item index="/account"><el-icon><Key /></el-icon>{{ t('nav.account') }}</el-menu-item>
-          <el-menu-item index="/audit"><el-icon><Tickets /></el-icon>{{ t('nav.audit') }}</el-menu-item>
-          <el-menu-item index="/llm-models"><el-icon><ChatDotRound /></el-icon>{{ t('nav.llmModels') }}</el-menu-item>
-          <el-menu-item index="/im-bots"><el-icon><ChatDotRound /></el-icon>{{ t('nav.imBots') }}</el-menu-item>
-          <el-menu-item index="/system-config"><el-icon><Tools /></el-icon>{{ t('nav.systemConfig') }}</el-menu-item>
-          <el-menu-item index="/data-sources"><el-icon><Connection /></el-icon>{{ t('nav.dataSources') }}</el-menu-item>
-          <el-menu-item index="/channels"><el-icon><ChatDotRound /></el-icon>{{ t('nav.channels') }}</el-menu-item>
-          <el-menu-item index="/brokers"><el-icon><Wallet /></el-icon>{{ t('nav.brokers') }}</el-menu-item>
+        <el-sub-menu index="ops">
+          <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
+          <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.gData') }}</el-menu-item>
+          <el-menu-item index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
+          <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.gObserve') }}</el-menu-item>
+          <el-menu-item v-if="role === 'admin'" index="/permissions"><el-icon><Lock /></el-icon>{{ t('nav.permissions') }}</el-menu-item>
+          <el-menu-item index="/chat"><el-icon><ChatDotRound /></el-icon>{{ t('nav.chat') }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -71,6 +46,27 @@
       <el-header style="background: #fff; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between">
         <div></div>
         <div style="display: flex; align-items: center; gap: 16px">
+          <!-- P3-2（04 §4.1）：侧边栏折叠（240↔64 图标模式，记忆状态） -->
+          <el-button size="small" text @click="collapsed = !collapsed">{{ collapsed ? '»' : '«' }}</el-button>
+
+          <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼） -->
+          <el-button type="danger" size="small" @click="onEmergencyHalt">{{ t('risk.halt') }}</el-button>
+
+          <!-- P1-4：数据健康灯（含市场状态;抽屉自含诊断摘要——权限指纹未就绪前不做跨页路由） -->
+          <el-popover placement="bottom-end" :width="320" trigger="click">
+            <template #reference>
+              <span :style="{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }">
+                <span class="dot" :class="healthLevel" style="width:10px;height:10px;border-radius:50%;display:inline-block" />
+                <span style="font-size: 12px">{{ t('layout.healthLight') }}</span>
+              </span>
+            </template>
+            <b>{{ t('layout.healthSummary') }}</b>
+            <div v-for="h in healthItems" :key="h.k" style="display:flex; justify-content:space-between; padding:4px 0; font-size:13px">
+              <span>{{ h.k }}</span><span :class="h.ok ? 'up' : 'down'">{{ h.v }}</span>
+            </div>
+            <div style="color: #909399; font-size: 12px; margin-top: 6px">{{ t('layout.healthNote') }}</div>
+          </el-popover>
+
           <el-select v-model="lang" @change="onLangChange" style="width: 110px">
             <el-option v-for="l in LANGUAGES" :key="l.code" :label="l.label" :value="l.code" />
           </el-select>
@@ -96,7 +92,14 @@
             </div>
           </el-drawer>
 
-          <!-- 用户区：头像 + 昵称下拉（个人中心/退出），替换原文字 tag（批次C） -->
+          <!-- P3-8（09-B8）：帮助抽屉（全角色）+ P3-2 暗色切换（盯盘场景） -->
+          <el-button circle @click="helpDrawer = true"><el-icon><QuestionFilled /></el-icon></el-button>
+          <el-drawer v-model="helpDrawer" :title="t('layout.helpTitle')" size="480px">
+            <Help />
+          </el-drawer>
+          <el-switch v-model="dark" :active-icon="Moon" :inactive-icon="Sunny" @change="onDark" />
+
+          <!-- 用户区：头像 + 昵称下拉（个人中心/退出 + 我的权限玻璃盒，10 §4） -->
           <el-dropdown trigger="click" @command="onUserCommand">
             <div style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 8px; border-radius: 6px;">
               <Avatar :url="avatarUrl" :name="nickname || username" size="sm" />
@@ -105,6 +108,7 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item command="profile">{{ t('profile.title') }}</el-dropdown-item>
+                <el-dropdown-item command="myperms">{{ t('layout.myPerms') }}</el-dropdown-item>
                 <el-dropdown-item command="logout" divided>{{ t('user.logout') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -115,11 +119,20 @@
         <router-view />
       </el-main>
     </el-container>
-  </el-container>
+    <!-- 我的权限玻璃盒（10 §4：被授予/拒绝的依据用户随时可见） -->
+  <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="420px">
+    <div style="margin-bottom: 8px; color: var(--text-secondary)">{{ t('layout.myPermsNote') }}</div>
+    <el-tag v-for="p in myPerms" :key="p" style="margin: 4px">{{ p }}</el-tag>
+    <div v-if="!myPerms.length" style="color: var(--text-secondary)">—</div>
+  </el-dialog>
+</el-container>
 </template>
 
 <script setup>
-import { QuestionFilled } from '@element-plus/icons-vue'
+import { QuestionFilled, DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
+         TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
+         ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
+         ChatDotRound } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -142,6 +155,7 @@ getMe().then(me => { username.value = me.username; role.value = me.role; nicknam
 // 用户下拉命令（个人中心/退出）
 const onUserCommand = (cmd) => {
   if (cmd === 'profile') router.push('/profile')
+  else if (cmd === 'myperms') { loadMyPerms(); showMyPerms.value = true }
   else if (cmd === 'logout') logout()
 }
 
@@ -162,6 +176,21 @@ const onAckAll = async () => {
   try { await ackAllNotifications(); await loadNotifs() } catch {}
 }
 // 类别 → 页面路由（点击通知直达）
+// P3-2/P3-8：折叠+暗色+帮助抽屉+我的权限玻璃盒
+const collapsed = ref(localStorage.getItem('sidebar-collapsed') === '1')
+const dark = ref(localStorage.getItem('theme-dark') === '1')
+const onDark = v => { document.documentElement.classList.toggle('dark', v); localStorage.setItem('theme-dark', v ? '1' : '0') }
+if (dark.value) document.documentElement.classList.add('dark')
+const helpDrawer = ref(false)
+const myPerms = ref([])
+const showMyPerms = ref(false)
+const loadMyPerms = async () => {
+  try { const { getMe } = await import('../api'); myPerms.value = (await getMe()).permissions || [] } catch {}
+}
+import { Moon, Sunny } from '@element-plus/icons-vue'
+import Help from '../views/Help.vue'
+import { watch } from 'vue'
+
 // P1-4：急停（熔断=轻确认,04 §4.5——所有可登录角色可触发,后端 require_perm 兜底）
 const onEmergencyHalt = async () => {
   try {
