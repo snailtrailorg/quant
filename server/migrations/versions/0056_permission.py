@@ -43,10 +43,11 @@ def upgrade() -> None:
     )""")
     for role, perms in _ROLE_PERMS.items():
         for p in perms:
+            # alembic op.execute 不收 psycopg 参数元组；role/p 为本文件硬编码字面量，拼接零注入面
             op.execute(
                 "INSERT INTO permission (subject_type, subject_id, dimension, resource, effect, note) "
-                "VALUES ('role', %s, 'api', %s, 'allow', 'P3-7 seed') "
-                "ON CONFLICT DO NOTHING", (role, p))
+                f"VALUES ('role', '{role}', 'api', '{p}', 'allow', 'P3-7 seed') "
+                "ON CONFLICT DO NOTHING")
 
 
 def downgrade() -> None:
