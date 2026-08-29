@@ -3,6 +3,15 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（6 大接口 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么端点"。
 
+## 最近变更（web-design 重设计施工,2026-08-30）
+
+- **风控**:GET `/api/risk/state` 扩展 `metrics{total_drawdown,daily_loss,available,snapshot_age_s}`（水位仪表+fail-closed 可见,P1-1）；GET `/api/risk/log?action=&limit=`（risk_log 决策面板——check_order 出口统一写入 approve/reject/adjust）
+- **对账处置台**（P1-2,迁移 0055 reconcile_issue 表,旧 issues 字符串双写兼容期保留）：GET `/api/reconcile/issues`；POST `/api/reconcile/issues/{id}/verify|ignore|exempt`（exempt 仅 user_mgmt=admin,标的级豁免基准 exempt_qty/until,差异超基准重开——scheduler 双写处过滤）；POST `/api/reconcile/manual-order`（场外单登记,admin）；POST `/api/reconcile/reset`（清零基线,admin）
+- **实盘任务**：GET `/api/live-task` 每行合并 worker 心跳（md_mode/lag/bars/frozen/hb_age_s——Valkey quant:hb:task:{id}）
+- **权限 A+B**（P3-7,迁移 0056 permission 表+四角色 seed=原字典逐条,行为零变化）：`require_perm` 底层换查表（60s 缓存,表空/故障回退字典;**表有 allow 行则全量以表为准**=撤权生效）；GET `/api/permissions`（admin,矩阵）/ POST `/api/permissions/{role}`（admin,全量重写 allow 集,invalidate 缓存即时生效）；`/auth/me` role 改读 DB（修 JWT 24h 滞留）+permissions 随查表
+- **回测**：GET `/api/backtest` 列表 `_safe_json` 防御（坏 JSON 行降级不 500,H11）
+- **引擎**（strategy_framework/backtest.py,P2-5）：费用摩擦参数化 `set_fees(stamp_tax/transfer_fee/limit_lock)`——印花税仅卖出 0.05%+过户费双边 0.001%+一字板（high==low）不可成交拒单返回 None（调用方已兼容）
+
 ## 职责
 FastAPI Web 后端，166 端点（12 个 APIRouter 分组）。RBAC 认证（JWT + 四角色）+ 策略/持仓/风控/实盘开关/LLM/飞书/同步/回测业务端点 + 平台化管理端点（数据源/通道/任务/规则/模型）。
 启动 `uvicorn src.web_api.main:app --port 8000`；前端 Vue3 调用；飞书 router 内嵌。
