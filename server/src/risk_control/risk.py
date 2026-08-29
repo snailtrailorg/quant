@@ -201,7 +201,26 @@ class RiskControl:
     # ── 前置校验 ──
 
     def check_order(self, order: dict, account: str = "") -> RiskDecision:
-        """所有自动交易 send_order 前必调。"""
+        """所有自动交易 send_order 前必调。
+
+        P1-1（web-design 06 B#2）：出口统一落 risk_log（approve/reject/adjust 可筛）——
+        风控页决策面板数据源。写库失败只 warning 不阻断下单路径（日志是审计面非控制面）。
+        """
+        d = self._check_order_inner(order, account)
+        try:
+            action = "approve" if d.approved else ("adjust" if "截断" in (d.reason or "") else "reject")
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO risk_log (action, symbol, rule, detail, severity) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (action, order.get("symbol", ""), d.rule if hasattr(d, "rule") else None,
+                     d.reason, d.severity))
+                conn.commit()
+        except Exception as e:
+            logger.warning("risk_log 写入失败（不阻断）: %s", e)
+        return d
+
+    def _check_order_inner(self, order: dict, account: str = "") -> RiskDecision:
         # SB2（F-23）：规则热加载（60s TTL，失败沿用旧规则）
         self._maybe_reload_rules()
         # 1. 熔断检查

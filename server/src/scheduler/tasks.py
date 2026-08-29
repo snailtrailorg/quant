@@ -284,6 +284,22 @@ def reconcile_three_books():
                     # O-S2：trade_log 全历史推导（含上线前底仓/场外单）天然有持续差异——
                     # 展示给对账页（issues）即可，归因与处置靠人；不加码告警频率
                     issues.append(f"持仓账实分离: {sym} 券商快照={sv} trade_log推导={dv}")
+                    # P1-2（web-design 05 §5.4）：结构化差异单双写（旧字符串兼容期保留，勿误修#11）。
+                    # upsert 语义：open 单在位则刷新数量/时间（first_seen 保留）；豁免基准内
+                    # （|diff|<=exempt_qty 且豁免期内）不再开新单。
+                    try:
+                        conn.execute("""
+                            INSERT INTO reconcile_issue (symbol, issue_type, detail, broker_qty, derived_qty)
+                            VALUES (%s, 'position_diff', %s, %s, %s)
+                            ON CONFLICT (symbol, issue_type) WHERE status = 'open'
+                            DO UPDATE SET broker_qty = EXCLUDED.broker_qty,
+                                          derived_qty = EXCLUDED.derived_qty,
+                                          detail = EXCLUDED.detail,
+                                          updated_at = now()
+                            """,
+                            (sym, f"券商快照={sv} trade_log推导={dv}", sv, dv))
+                    except Exception as _e:
+                        logging.getLogger("scheduler").warning("reconcile_issue 双写失败（不阻断）: %s", _e)
             except Exception:
                 pass   # 表未就绪静默（与上方三表探测一致，O-S2）
 
