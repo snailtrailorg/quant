@@ -219,11 +219,11 @@ def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", 
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT b.id, b.strategy_config_id, b.symbols, b.mode, b.status, b.created_at, b.finished_at, b.summary_metrics, "
-            "(SELECT s.task_id FROM backtest_symbols s WHERE s.run_id=b.id AND s.task_id IS NOT NULL LIMIT 1) "
+            "b.task_id "
             "FROM backtest_runs b ORDER BY b.id DESC LIMIT 100")
         rows = cur.fetchall()
     return [{"id": r[0], "strategy_config_id": r[1], "symbols": _safe_json(r[2], []),
-             "task_id": r[8],
+             "task_id": r[8],   # H11 根修(backtest_symbols 无 task_id 列——原子查询 UndefinedColumn=500 真因,改 runs 级)
              "mode": r[3], "status": r[4], "created_at": str(r[5]) if r[5] else None,
              "finished_at": str(r[6]) if r[6] else None,
              "summary": _safe_json(r[7], {})} for r in rows]
