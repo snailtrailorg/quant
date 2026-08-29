@@ -65,6 +65,13 @@
             {{ t('factors.historyHint') }}
           </div>
         </el-form-item>
+        <el-form-item :label="t('factors.pvParams')">
+          <el-input v-model="preview.symbol" style="width: 150px" placeholder="600000.SHSE" />
+          <el-select v-model="preview.freq" style="width: 80px; margin-left: 6px">
+            <el-option v-for="f in ['1D','1min','5min']" :key="f" :value="f" :label="f" />
+          </el-select>
+          <el-input-number v-model="preview.bars" :min="20" :max="500" :step="20" style="margin-left: 6px" />
+        </el-form-item>
         <el-form-item :label="t('factors.pythonCode')">
           <div style="width: 100%">
             <div style="margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary)">
@@ -172,13 +179,15 @@ const openEdit = (row) => {
 const previewing = ref(false)
 const previewVisible = ref(false)
 const previewData = ref(null)
+// P2-7（05 §5.5 要点 1）：试算三参数放开——不同标的/频率的行为差异正是研究内容
+const preview = ref({ symbol: '600000.SHSE', freq: '1D', bars: 60 })
 const previewError = ref('')
 const previewChart = ref(null)
 const previewFactor = async () => {
   previewing.value = true
   try {
     const res = await api.post('/factors/preview', {
-      code: form.value.code, symbol: '600000.SHSE', freq: '1D', bars: 60,
+      code: form.value.code, symbol: preview.symbol, freq: preview.freq, bars: preview.bars,
       params: (() => { try { return JSON.parse(form.value.params || '{}') } catch { return {} } })(),
     })
     if (res.error) {

@@ -14,18 +14,42 @@
           <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? t('strategy.statusRunning') : t('strategy.statusStopped') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="280">
+      <!-- P2-1（05 §5.6）：验证✓独立成列（证据链可点）+最近回测列；操作列发起回测/编辑/复制/删除。
+           链条打磨#22：策略无启停是设计（实盘启停唯一入口=LiveTask）；symbol:"" 是契约——勿修 -->
+      <el-table-column :label="t('strategy.verifyCol')" width="110">
         <template #default="{ row }">
-          <el-button type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
-          <!-- 链条打磨#22：旧架构启停已移除（实盘启停统一 LiveTask 页——新架构唯一入口） -->
-          <el-tag v-if="row.backtest_verified" type="success" size="small">✓ {{ t('strategy.verified') }}</el-tag>
+          <el-tag v-if="row.backtest_verified" type="success" size="small" style="cursor:pointer"
+                  @click="gotoVerifiedRun(row)">✓ {{ t('strategy.verified') }}</el-tag>
           <el-tag v-else type="info" size="small">{{ t('strategy.unverified') }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('strategy.lastBtCol')" width="150">
+        <template #default="{ row }">
+          <span v-if="lastRun(row)" style="cursor:pointer" @click="$router.push(`/backtest/${lastRun(row).id}`)">
+            <span :class="(lastRun(row).summary?.total_return ?? 0) >= 0 ? 'up' : 'down'">
+              {{ ((lastRun(row).summary?.total_return ?? 0) * 100).toFixed(1) }}%
+            </span>
+            <span style="color: var(--text-secondary); font-size: var(--fs-foot)"> #{{ lastRun(row).id }}</span>
+          </span>
+          <span v-else style="color: var(--text-secondary)">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="300" fixed="right">
+        <template #default="{ row }">
+          <el-button type="primary" size="small" @click="runBacktest(row)">{{ t('strategy.runBacktest') }}</el-button>
+          <el-button size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button size="small" @click="onCopy(row)">{{ t('common.copy') }}</el-button>
+          <el-button size="small" type="danger" @click="onDelete(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
 
     <!-- 编辑弹窗 -->
     <el-dialog v-model="editVisible" :title="t('strategy.editTitle')" width="720px" :close-on-click-modal="false">
+      <!-- P2-2（05 §5.6 要点 4）：快照隔离横幅——改在跑策略不影响存量任务（快照固化） -->
+      <el-alert v-if="runningTasksFor(editForm.id).length" type="warning" :closable="false" style="margin-bottom: 12px">
+        {{ t('strategy.snapshotIsolation', { n: runningTasksFor(editForm.id).length }) }}
+      </el-alert>
       <el-form :model="editForm" label-width="100px" v-loading="saving">
         <el-form-item :label="t('common.name')">
           <el-input v-model="editForm.name" />
@@ -77,7 +101,7 @@
 
           <el-divider content-position="left">{{ t('strategy.dslExprTitle') }}</el-divider>
           <el-form-item :label="t('strategy.expression')">
-            <el-input v-model="editForm.dslExpr" type="textarea" :rows="3" :placeholder="t('strategy.dslHint')" />
+            <CodeEditor v-model="editForm.dslExpr" language="plaintext" :height="120" />
           </el-form-item>
         </template>
 
@@ -171,6 +195,7 @@
       <template #footer>
         <el-button type="primary" @click="editVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
+        <el-button type="success" @click="saveAndBacktest" :loading="saving">{{ t('strategy.saveAndBacktest') }}</el-button>
       </template>
     </el-dialog>
   </el-card>
@@ -179,10 +204,11 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getStrategies, updateStrategy, createStrategy, getFactorList, validatePythonCode } from '../api'
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
+import CodeEditor from '../components/CodeEditor.vue'
 
 const { t } = useI18n()
 const strategies = ref([])
@@ -256,6 +282,40 @@ const doUnbind = async (id) => {
 }
 
 const load = async () => { strategies.value = await getStrategies() }
+
+// P2-1：最近回测映射 + 证据链跳转 + 一键回测 + 复制/删除
+const backtestRuns = ref([])
+const liveTasksAll = ref([])
+const loadExtra = async () => {
+  try { backtestRuns.value = await api.get('/backtest') } catch { backtestRuns.value = [] }
+  try { liveTasksAll.value = await api.get('/live-task') } catch { liveTasksAll.value = [] }
+}
+const lastRun = (row) => {
+  const runs = backtestRuns.value.filter(b => b.strategy_config_id === row.id && b.status === 'done')
+  return runs[0] || null
+}
+const runningTasksFor = (sid) => liveTasksAll.value.filter(x => x.strategy_id === sid && x.status === 'running')
+const gotoVerifiedRun = (row) => { const r = lastRun(row); if (r) window.location.hash = `#/backtest/${r.id}` }
+const runBacktest = (row) => { window.location.hash = `#/backtest?strategy=${row.id}` }
+const onCopy = async (row) => {
+  try {
+    const copy = { ...row, id: row.id + '_copy', name: row.name + ' (副本)' }
+    delete copy.backtest_verified
+    await createStrategy(copy); ElMessage.success(t('common.success')); load()
+  } catch { ElMessage.error(t('common.failed')) }
+}
+const onDelete = async (row) => {
+  try {
+    const n = runningTasksFor(row.id).length
+    await ElMessageBox.confirm(n ? t('strategy.deleteBlocked', { n }) : t('strategy.confirmDeleteName', { name: row.name }),
+                               t('common.confirm'), { type: 'warning' })
+    await api.delete(`/strategy/${row.id}`); ElMessage.success(t('common.success')); load()
+  } catch (e) { if (e?.response) ElMessage.error(t('common.failed')) }
+}
+const saveAndBacktest = async () => {
+  await saveEdit()
+  if (editForm.value.id) window.location.hash = `#/backtest?strategy=${editForm.value.id}`
+}
 const loadFactors = async () => { const r = await getFactorList(); availableFactors.value = r.items || [] }
 const openCreate = () => {
   editForm.value = {
@@ -365,5 +425,7 @@ const saveEdit = async () => {
 }
 
 const removeFactor = (i) => { editForm.value.factors = editForm.value.factors.filter((_, idx) => idx !== i) }
-onMounted(async () => { await load(); await loadFactors() })
+onMounted(async () => {
+  loadExtra()
+  await load(); await loadFactors() })
 </script>

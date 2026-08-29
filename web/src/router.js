@@ -29,6 +29,7 @@ const routes = [
       // 分析
       { path: 'analysis', name: 'analysis', component: () => import('./views/Analysis.vue') },
       { path: 'stock/:symbol', name: 'stock-detail', component: () => import('./views/StockDetail.vue') },
+      { path: 'screener', name: 'screener', component: () => import('./views/Screener.vue') },   // P2-8 三合一（旧三路由保留兼容直链）
       { path: 'ascreen', name: 'ascreen', component: () => import('./views/AScreen.vue') },
       { path: 'cbscreen', name: 'cbscreen', component: () => import('./views/CBScreen.vue') },
       { path: 'etfscreen', name: 'etfscreen', component: () => import('./views/ETFScreen.vue') },

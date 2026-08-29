@@ -3,13 +3,44 @@
     <el-card>
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>{{ t('backtest.runList') }}</span>
-          <el-button type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
+          <span>
+            {{ t('backtest.runList') }}
+            <!-- P2-4（05 §5.7）：badge 摘要 -->
+            <el-tag size="small" style="margin-left: 8px">运行中 {{ runningCount }}</el-tag>
+            <el-tag size="small" type="info" style="margin-left: 4px">今日 {{ todayCount }}</el-tag>
+            <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">失败 {{ failedCount }}</el-tag>
+          </span>
+          <span>
+            <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: 8px">
+              <el-option v-for="st in ['running','done','failed','pending']" :key="st" :value="st" :label="st" />
+            </el-select>
+            <el-button type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
+          </span>
         </div>
       </template>
-      <el-table :data="runs" stripe v-loading="loading" @row-click="goDetail">
+      <el-table :data="filteredRuns" stripe v-loading="loading" @row-click="goDetail">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="strategy_id" :label="t('backtest.strategy')" />
+        <el-table-column prop="strategy_id" :label="t('backtest.strategy')">
+          <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>
+        </el-table-column>
+        <!-- P2-4：指标摘要——列表行直接给成绩，不用点进 Run 页 -->
+        <el-table-column :label="t('backtest.retCol')" width="90" class-name="num">
+          <template #default="{ row }">
+            <span v-if="row.summary?.total_return != null" :class="row.summary.total_return >= 0 ? 'up' : 'down'">
+              {{ (row.summary.total_return * 100).toFixed(1) }}%
+            </span><span v-else>—</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('backtest.ddCol')" width="80" class-name="num">
+          <template #default="{ row }">{{ row.summary?.max_drawdown != null ? (row.summary.max_drawdown * 100).toFixed(1) + '%' : '—' }}</template>
+        </el-table-column>
+        <!-- 失败原因透出（05 §5.7：failed 行点开见原因） -->
+        <el-table-column :label="t('backtest.reason')" width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="row.status === 'failed'" style="color: var(--critical)">{{ row.summary?.error || row.error || '—' }}</span>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" :label="t('common.status')" width="100">
           <template #default="{ row }">
             <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
@@ -36,7 +67,8 @@
       <el-form :model="form" label-width="100px">
         <el-form-item :label="t('backtest.strategy')">
           <el-select v-model="form.strategyId" :placeholder="t('backtest.phStrategy')" style="width: 100%" @change="onStrategyChange">
-            <el-option v-for="s in strategies" :key="s.id" :label="s.name" :value="s.id" />
+            <el-option v-for="st in strategies" :key="st.id" :value="st.id"
+                       :label="`${st.name}${st.backtest_verified ? ' ✓' : '（未验证）'}`" :disabled="false" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('common.symbol')">
@@ -50,6 +82,13 @@
         </el-form-item>
         <el-form-item :label="t('backtest.dateRange')">
           <el-date-picker v-model="form.dateRange" type="daterange" :start-placeholder="t('common.startDate')" :end-placeholder="t('common.endDate')" style="width: 100%" />
+          <div style="width: 100%; margin-top: 4px">
+            <el-button v-for="q in quickRanges" :key="q.label" size="small" text type="primary" @click="form.dateRange = q.range()">{{ q.label }}</el-button>
+          </div>
+        </el-form-item>
+        <el-form-item :label="t('backtest.commission')">
+          <el-input-number v-model="form.commissionRate" :min="0" :step="0.0001" :precision="4" />
+          <span style="margin-left: 8px; color: var(--text-secondary); font-size: var(--fs-foot)">万分之（默认 5=万5）</span>
         </el-form-item>
         <el-form-item :label="t('backtest.mode')">
           <el-select v-model="form.mode" style="width: 100%">
@@ -88,7 +127,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
@@ -107,7 +146,7 @@ const showForm = ref(false)
 const parameterDefs = ref([])
 const form = ref({
   strategyId: '', poolId: '', symbolsStr: '', dateRange: null, mode: 'parallel', capital: 1000000,
-  params: {}, useSymbolParams: false, symbolParamsStr: '',
+  params: {}, useSymbolParams: false, symbolParamsStr: '', commissionRate: 5,
 })
 
 const onStrategyChange = (sid) => {
@@ -118,6 +157,20 @@ const onStrategyChange = (sid) => {
 
 const statusType = (s) => ({ running: 'warning', done: 'success', error: 'danger', pending: 'info' }[s] || 'info')
 
+const filterStatus = ref('')
+const strategyName = (sid) => strategies.value.find(x => x.id === sid)?.name || sid
+const runningCount = computed(() => runs.value.filter(r => r.status === 'running').length)
+const todayCount = computed(() => runs.value.filter(r => (r.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length)
+const failedCount = computed(() => runs.value.filter(r => r.status === 'failed').length)
+const filteredRuns = computed(() => filterStatus.value ? runs.value.filter(r => r.status === filterStatus.value) : runs.value)
+// P2-6：区间快捷项
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d }
+const quickRanges = [
+  { label: t('backtest.r1m'), range: () => [daysAgo(30), new Date()] },
+  { label: t('backtest.r3m'), range: () => [daysAgo(90), new Date()] },
+  { label: t('backtest.r6m'), range: () => [daysAgo(182), new Date()] },
+  { label: t('backtest.r1y'), range: () => [daysAgo(365), new Date()] },
+]
 const loadRuns = async () => {
   loading.value = true
   try { runs.value = await getBacktests() } catch (e) { ElMessage.error(t('backtest.loadFailed')) }
@@ -170,9 +223,16 @@ const submitRun = async () => {
   finally { submitting.value = false }
 }
 
+let pollTimer = null
 onMounted(async () => {
+  // P2-4：URL 预填（策略页"发起回测"深链 ?strategy=）
+  const pre = new URLSearchParams(location.hash.split('?')[1] || '').get('strategy')
+  if (pre) { showForm.value = true; form.value.strategyId = pre }
+  pollTimer = setInterval(() => { if (runs.value.some(r => r.status === 'running')) loadRuns() }, 5000)
   strategies.value = await getStrategies()
   try { pools.value = await getPools() } catch (e) {}
   await loadRuns()
 })
 </script>
+
+onUnmounted(() => clearInterval(pollTimer))

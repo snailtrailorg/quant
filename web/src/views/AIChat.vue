@@ -8,16 +8,18 @@
     </template>
     <div class="chat-body" ref="body">
       <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
-        <div class="bubble" v-text="msg.content"></div>
+        <!-- P2-12（05 §5.9）：Markdown 渲染——量化回复必含代码与表格，纯文本不可读 -->
+        <div class="bubble md" v-html="renderMd(msg.content)"></div>
       </div>
       <div v-if="loading" class="msg assistant"><div class="bubble">{{ streamingText || t('chat.thinking') }}</div></div>
     </div>
     <div class="chat-input">
       <el-input
-        v-model="input" :placeholder="t('chat.ph')"
-        @keyup.enter="onSend" :disabled="loading" clearable>
+        v-model="input" :placeholder="t('chat.ph')" type="textarea" :rows="2"
+        @keydown.enter.exact.prevent="onSend" :disabled="loading">
         <template #append>
-          <el-button type="primary" @click="onSend" :loading="loading" :icon="Promotion">{{ t('chat.send') }}</el-button>
+          <el-button v-if="!loading" type="primary" @click="onSend" :icon="Promotion">{{ t('chat.send') }}</el-button>
+          <el-button v-else type="warning" @click="onStop">{{ t('chat.stopGen') }}</el-button>
         </template>
       </el-input>
       <div style="margin-top: 8px">
@@ -47,6 +49,29 @@ const streamingText = ref('')
 let ws = null
 
 const scroll = () => nextTick(() => { if (body.value) body.value.scrollTop = body.value.scrollHeight })
+
+// P2-12：mini Markdown 渲染（零依赖—— fenced code/inline code/bold/表格式行）。只读助手,
+// 内容源为 LLM 输出经后端只读工具——v-html 前做 HTML 转义防注入。
+const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const renderMd = (src) => {
+  const parts = String(src ?? '').split(/```/)
+  return parts.map((seg, i) => {
+    if (i % 2 === 1) return `<pre class="md-code">${esc(seg.replace(/^\w*\n/, ''))}</pre>`
+    let h = esc(seg)
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    // 表格行（含 | 的连续行）→ <table>
+    h = h.split('\n').map(line =>
+      line.trim().startsWith('|') && line.trim().endsWith('|')
+        ? '<tr>' + line.trim().slice(1, -1).split('|').map(c => `<td>${c.trim()}</td>`).join('') + '</tr>'
+        : line)
+      .join('\n')
+    if (h.includes('<tr>')) h = `<table class="md-tab">${h}</table>`
+    return h.replace(/\n/g, '<br>')
+  }).join('')
+}
+// P2-12：停止生成（关闭 WS 流）
+const onStop = () => { try { ws?.close() } catch {} loading.value = false }
 
 onUnmounted(() => { if (ws) { ws.close(); ws = null } })
 
@@ -117,3 +142,8 @@ const quick = q => { input.value = q; onSend() }
 .msg.assistant .bubble { background: #fff; color: #303133; border: 1px solid #e4e7ed; }
 .chat-input { margin-top: 12px; }
 </style>
+/* P2-12：Markdown 渲染样式（v-html 需 :deep） */
+.bubble.md :deep(pre.md-code) { background: #1e2430; color: #e6eaf2; padding: 10px; border-radius: 6px; overflow-x: auto; font-family: var(--font-num); font-size: 12px; }
+.bubble.md :deep(code) { background: rgba(31, 79, 216, 0.08); padding: 1px 4px; border-radius: 3px; font-family: var(--font-num); }
+.bubble.md :deep(table.md-tab) { border-collapse: collapse; margin: 6px 0; }
+.bubble.md :deep(table.md-tab td) { border: 1px solid var(--border-weak); padding: 3px 8px; font-size: 12px; }

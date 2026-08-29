@@ -5,6 +5,8 @@
         <span>{{ t('backtest.detailTitle', { id: $route.params.id }) }}</span>
         <el-button type="primary" @click="$router.back()">{{ t('common.return') }}</el-button>
         <el-button type="success" @click="markVerified" :disabled="!run.strategy_config_id">{{ t('backtest.markVerified') }}</el-button>
+        <!-- P2-5（05 §5.7 要点 4）：三级开关终点——以此结果创建实盘任务（预填策略/参数） -->
+        <el-button type="primary" @click="createLiveFromRun" :disabled="!run.strategy_config_id">{{ t('backtest.createLive') }}</el-button>
       </div>
     </template>
 
@@ -13,7 +15,15 @@
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.winRate') }}</div><div class="value">{{ run.win_rate ?? '-' }}%</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.sharpe') }}</div><div class="value">{{ run.sharpe_ratio ?? '-' }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.maxDrawdown') }}</div><div class="value">{{ run.max_drawdown_pct ?? '-' }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.tradeCount') }}</div><div class="value">{{ run.trade_count ?? '—' }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.annualized') }}</div><div class="value">{{ run.annualized_return != null ? (run.annualized_return).toFixed(1) + '%' : '—' }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.plRatio') }}</div><div class="value">{{ run.profit_loss_ratio ?? '—' }}</div></div></el-card></el-col>
     </el-row>
+
+    <!-- P2-5：费用与摩擦面板（引擎侧已参数化：佣金/印花税卖出0.05%/过户费/滑点/涨跌停约束） -->
+    <el-alert type="info" :closable="false" style="margin-bottom: 20px">
+      {{ t('backtest.feePanel') }}
+    </el-alert>
 
     <el-card>
       <template #header>
@@ -72,6 +82,10 @@ const loadSummary = async () => {
   finally { summaryLoading.value = false }
 }
 
+const createLiveFromRun = () => {
+  // 深链 LiveTask 创建（预填策略）；参数由用户在创建弹窗确认
+  window.location.hash = `#/livetask?strategy=${run.value.strategy_config_id}`
+}
 const markVerified = async () => {
   try {
     await ElMessageBox.confirm(t('backtest.confirmVerify'), t('common.confirm'), { type: 'warning' })

@@ -126,6 +126,7 @@ export default {
       pool: '标的池',
       factors: '因子库',
       analysis: 'A股分析',
+      screener: '选股器',
       ascreen: 'A股筛选',
       cbscreen: '可转债筛选',
       etfscreen: 'ETF筛选',
@@ -239,6 +240,11 @@ export default {
       mOkxPerp: 'OKX 永续',
     },
     strategy: {
+      verifyCol: '验证', lastBtCol: '最近回测',
+      runBacktest: '发起回测', saveAndBacktest: '保存并回测',
+      snapshotIsolation: '{n} 个运行中任务仍用旧配方快照，本次修改不生效于存量任务',
+      deleteBlocked: '该策略有 {n} 个运行中任务，请先停止任务再删除',
+      confirmDeleteName: '确认删除策略 "{name}"？',
       title: '策略列表',
       start: '启动',
       stop: '停止',
@@ -347,6 +353,7 @@ export default {
       addFailed: '加入失败',
     },
     stockDetail: {
+      fullChart: 'Full indicators',
       inPool: '池内', notPool: '非池', srcHub: 'hub 实时', srcTencent: '腾讯快照', noQuote: '暂无行情',
       turnover: '换手', volume: '量', amount: '额', high: '最高', low: '最低',
       limitUp: '涨停', limitDown: '跌停', ask: '卖', bid: '买',
@@ -366,6 +373,11 @@ export default {
       noData: '暂无数据',
     },
     backtest: {
+      createLive: '以此创建实盘任务', tradeCount: '交易次数',
+      annualized: '年化收益', plRatio: '盈亏比',
+      feePanel: '费用与摩擦：佣金可配（默认万5）+ 印花税（卖出 0.05%）+ 过户费（0.001%）+ 滑点可配 + 涨跌停一字板不可成交约束',
+      retCol: '收益', ddCol: '回撤', reason: '失败原因',
+      commission: '佣金率', r1m: '近1月', r3m: '近3月', r6m: '近6月', r1y: '近1年',
       title: '回测中心',
       run: '运行',
       summary: '汇总',
@@ -502,6 +514,7 @@ export default {
       fundType: '类型',
     },
     chat: {
+      stopGen: '停止生成',
       title: '🤖 AI 助手（自然语言查询）',
       tag: '只读工具 · 下单类不开放',
       thinking: '思考中...',
@@ -648,6 +661,8 @@ export default {
       dataDeleted: '数据已删除',
     },
     trading: {
+      dirCol: '方向', frozenCol: '可用', costCol: '成本价', pnlCol: '浮盈',
+      snapshotNote: '快照时间：',
       title: '实盘交易看板',
       positions: '持仓', loadFailed: '持仓/账户数据加载失败——显示可能不是真实空仓,请刷新或检查服务',
       orders: '订单',
@@ -700,6 +715,7 @@ export default {
       idNameRequired: 'ID 和名称必填',
     },
     factors: {
+      pvParams: '试算参数（标的/频率/根数）',
       title: '因子库',
       create: '新建',
       dsl: 'DSL表达式',
@@ -1176,6 +1192,7 @@ export default {
       pool: 'Pools',
       factors: 'Factors',
       analysis: 'A-Stock',
+      screener: 'Screener',
       ascreen: 'A-Stock Screen',
       cbscreen: 'CB Screen',
       etfscreen: 'ETF Screen',
@@ -1289,6 +1306,11 @@ export default {
       mOkxPerp: 'OKX Perp',
     },
     strategy: {
+      verifyCol: 'Verified', lastBtCol: 'Last backtest',
+      runBacktest: 'Backtest', saveAndBacktest: 'Save & backtest',
+      snapshotIsolation: '{n} running task(s) still use the old snapshot; this edit does not affect them',
+      deleteBlocked: 'Strategy has {n} running task(s); stop them before deleting',
+      confirmDeleteName: 'Delete strategy "{name}"?',
       title: 'Strategy List',
       start: 'Start',
       stop: 'Stop',
@@ -1395,6 +1417,7 @@ export default {
       addFailed: 'Add failed',
     },
     stockDetail: {
+      fullChart: '全指标图表',
       inPool: 'In Pool', notPool: 'Not in Pool', srcHub: 'hub realtime', srcTencent: 'Tencent snapshot', noQuote: 'No quote',
       turnover: 'Turnover', volume: 'Vol', amount: 'Amt', high: 'High', low: 'Low',
       limitUp: 'Limit Up', limitDown: 'Limit Down', ask: 'Ask', bid: 'Bid',
@@ -1414,6 +1437,11 @@ export default {
       noData: 'No data',
     },
     backtest: {
+      createLive: 'Create live task', tradeCount: 'Trades',
+      annualized: 'Annualized', plRatio: 'P/L ratio',
+      feePanel: 'Fees & friction: configurable commission (default 0.05%) + stamp tax (sell 0.05%) + transfer fee (0.001%) + slippage + limit-lock no-fill constraint',
+      retCol: 'Return', ddCol: 'Drawdown', reason: 'Failure',
+      commission: 'Commission', r1m: '1M', r3m: '3M', r6m: '6M', r1y: '1Y',
       title: 'Backtest',
       run: 'Run',
       summary: 'Summary',
@@ -1540,6 +1568,7 @@ export default {
       fundType: 'Type',
     },
     chat: {
+      stopGen: 'Stop',
       title: '🤖 AI Assistant (NL Query)',
       tag: 'Read-only tools · no order tools',
       thinking: 'Thinking...',
@@ -1686,6 +1715,8 @@ export default {
       dataDeleted: 'Data deleted',
     },
     trading: {
+      dirCol: 'Dir', frozenCol: 'Avail', costCol: 'Cost', pnlCol: 'PnL',
+      snapshotNote: 'Snapshot: ',
       title: 'Live Trading Dashboard',
       positions: 'Positions', loadFailed: 'Position/account data failed to load — empty tables may not reflect real holdings, refresh or check services',
       orders: 'Orders',
@@ -1728,6 +1759,7 @@ export default {
       idNameRequired: 'ID and name are required',
     },
     factors: {
+      pvParams: 'Trial params (symbol/freq/bars)',
       title: 'Factors',
       create: 'New',
       dsl: 'DSL Expression',

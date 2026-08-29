@@ -29,9 +29,8 @@
         <!-- 数据分析 -->
         <el-sub-menu index="analysis">
           <template #title><el-icon><TrendCharts /></el-icon>{{ t('nav.dataAnalysis') }}</template>
-          <el-menu-item index="/ascreen"><el-icon><Search /></el-icon>{{ t('nav.ascreen') }}</el-menu-item>
-          <el-menu-item index="/cbscreen"><el-icon><Coin /></el-icon>{{ t('nav.cbscreen') }}</el-menu-item>
-          <el-menu-item index="/etfscreen"><el-icon><Histogram /></el-icon>{{ t('nav.etfscreen') }}</el-menu-item>
+          <!-- P3-9（03 v2.1 菜单）：三屏归一 → 选股器（tab 内分 A股/转债/ETF） -->
+          <el-menu-item index="/screener"><el-icon><Search /></el-icon>{{ t('nav.screener') }}</el-menu-item>
           <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.analysis') }}</el-menu-item>
           <el-menu-item index="/chat"><el-icon><ChatDotRound /></el-icon>{{ t('nav.chat') }}</el-menu-item>
         </el-sub-menu>

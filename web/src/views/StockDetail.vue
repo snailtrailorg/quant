@@ -75,6 +75,9 @@
               {{ intraday.date }}（{{ srcName(intraday.source) }}）
             </span>
           </div>
+          <!-- P2-13（09-B9）：吸收 KlineDialog 指标全集（MA/BOLL/SAR 主图+7 副图指标） -->
+          <el-button size="small" @click="klineDlg = true" style="margin-left: 12px">{{ t('stockDetail.fullChart') }}</el-button>
+          <KlineDialog v-model="klineDlg" :symbol="symbol" />
           <template v-if="klineMode === 'day'">
             <v-chart v-if="klineData.length" :option="klineOption" autoresize style="height:420px" />
             <el-empty v-else :description="t('stockDetail.noData')" :image-size="60" />
@@ -159,6 +162,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import KlineDialog from '../components/KlineDialog.vue'
 import { ElMessage } from 'element-plus'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -173,6 +177,7 @@ use([CanvasRenderer, BarChart, LineChart, CandlestickChart,
 
 const route = useRoute()
 const symbol = String(route.params.symbol || '')
+const klineDlg = ref(false)
 const loading = ref(false)
 const detail = ref({})
 const quote = computed(() => detail.value.quote)

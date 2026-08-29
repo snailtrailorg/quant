@@ -63,9 +63,15 @@ class BacktestAdapter(ExecutionAdapter):
 
     def __init__(self):
         self.trades: list[Trade] = []
+        self.rejected_limit: list[dict] = []   # P2-5：涨跌停拒成交记录（05 §5.7 A股约束）
         self._current_bar: dict = {}
         self._commission_rate: float = 0.0005  # 万五
         self._slippage: float = 0.0
+        # P2-5（web-design 05 §5.7）：A股费用摩擦参数化——印花税（仅卖出，2023-08 减半后 0.05%）
+        # +过户费（0.001%，双边）；不做这些=系统性偏乐观（盲审一补充）
+        self._stamp_tax = 0.0005
+        self._transfer_fee = 0.00001
+        self._limit_lock = True   # 涨跌停不可成交约束（一字板近似：high==low）
 
     def set_bar(self, bar: dict):
         self._current_bar = bar
@@ -76,14 +82,37 @@ class BacktestAdapter(ExecutionAdapter):
     def set_slippage(self, slip: float):
         self._slippage = slip
 
-    def send_order(self, order: Order) -> str:
+    def set_fees(self, stamp_tax: float | None = None, transfer_fee: float | None = None,
+                 limit_lock: bool | None = None):
+        """P2-5 费用摩擦参数化入口（Web 发起回测可配）。"""
+        if stamp_tax is not None:
+            self._stamp_tax = max(0.0, stamp_tax)
+        if transfer_fee is not None:
+            self._transfer_fee = max(0.0, transfer_fee)
+        if limit_lock is not None:
+            self._limit_lock = limit_lock
+
+    def send_order(self, order: Order) -> str | None:
         # P0-6 修复（2026-08-20 双盲审计 B1）：slippage 曾是死参数——BUY 按 close*(1+slip)
         # 吃进、SELL 按 close*(1-slip) 出货，负滑点让回测系统性偏乐观
         base = self._current_bar.get("close", 0)
+        high = self._current_bar.get("high", base)
+        low = self._current_bar.get("low", base)
+        # P2-5 涨跌停不可成交（一字板近似）：BUY 遇一字涨停（high==low 且收在涨停）不成交；
+        # SELL 遇一字跌停不成交——真实世界挂单也排不进。近似口径：当日 high==low（无波动）
+        if self._limit_lock and high == low and high > 0:
+            self.rejected_limit.append({"ts": self._current_bar.get("ts"), "symbol": order.symbol,
+                                        "action": order.action, "reason": "limit_lock"})
+            return None
         slip = self._slippage if self._slippage >= 0 else 0.0
         price = base * (1 + slip) if order.action == "BUY" else base * (1 - slip)
         ts = self._current_bar.get("ts", datetime.now())
-        commission = price * order.volume * self._commission_rate
+        amount = price * order.volume
+        commission = amount * self._commission_rate
+        # 过户费双边；印花税仅卖出
+        commission += amount * self._transfer_fee
+        if order.action == "SELL":
+            commission += amount * self._stamp_tax
         self.trades.append(Trade(
             ts=ts, symbol=order.symbol, action=order.action,
             volume=order.volume, price=price, commission=commission,
