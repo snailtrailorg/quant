@@ -32,10 +32,6 @@
                     </template>
                   </el-table-column>
                 </el-table>
-                <div v-if="minuteProgress[row.id]" style="margin-top: 8px; font-size: 12px; color: var(--el-text-color-secondary)">
-                  {{ t('pool.minuteSyncProgress') }}: {{ minuteProgress[row.id].synced || 0 }}
-                  <span v-if="minuteProgress[row.id].pending"> / +{{ minuteProgress[row.id].pending }} {{ t('pool.pending') }}</span>
-                </div>
               </div>
             </template>
             <!-- 单标的添加 -->
@@ -116,7 +112,6 @@ const showDialog = ref(false)
 const expanded = ref([])
 const addSymbolInput = reactive({})
 const minuteStatus = reactive({})   // {pool_id: [{symbol,last_ts,covered}]}
-const minuteProgress = reactive({}) // {pool_id: {status,synced,pending}}
 const newPool = ref({ id: '', name: '', category: 'astock', symbolsStr: '', description: '', minuteStart: null, _edit: false })
 
 const load = async () => {
@@ -166,8 +161,8 @@ const savePool = async () => {
   const np = newPool.value
   if (!np.id || !np.name) { ElMessage.warning(t('pool.idNameRequired')); return }
   try {
-    const symbols = np.symbolsStr.split('\n').map(s => s.trim()).filter(Boolean)
-    await createPoolApi({ id: np.id, name: np.name, category: np.category, description: np.description, symbols, minute_history_start: np.minuteStart })
+    // H3（01 P0#5，数据丢失级）：后端 PoolReq 契约只收 symbolsStr（\n 分隔）——此前发 symbols 数组被忽略，保存即清空池标的
+    await createPoolApi({ id: np.id, name: np.name, category: np.category, description: np.description, symbolsStr: np.symbolsStr, minute_history_start: np.minuteStart })
     if (np.minuteStart) {
       // 已随 createPoolApi 一起提交（minute_history_start 字段）
     }

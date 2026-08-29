@@ -128,6 +128,7 @@ const goDetail = (row) => router.push(`/backtest/${row.id}`)
 
 const cancelRun = async (row) => {
   try {
+    await ElMessageBox.confirm(t('backtest.confirmTerminate'), t('common.confirm'), { type: 'warning' })
     await api.post(`/tasks/${row.task_id}/terminate`)
     ElMessage.success(t('backtest.terminated'))
     await loadRuns()

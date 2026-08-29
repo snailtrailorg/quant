@@ -165,7 +165,7 @@ const onAckAll = async () => {
   try { await ackAllNotifications(); await loadNotifs() } catch {}
 }
 // 类别 → 页面路由（点击通知直达）
-const goCategory = c => router.push({ email: '/logs', task: '/tasks', risk: '/risk', data: '/data-integrity', system: '/logs' }[c] || '/')
+const goCategory = c => router.push({ email: '/system-config', task: '/tasks', risk: '/risk', data: '/data-integrity', system: '/health' }[c] || '/')
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })
 onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
 

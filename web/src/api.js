@@ -40,7 +40,18 @@ export const getDataIntegrity = freq => api.get('/data-integrity', { params: { f
 
 export const getDataSourceUsage = () => api.get('/data-source-usage')
 
-export const getStrategies = () => api.get('/strategy')
+// H12（01 P0#7）：双重编码回填契约统一——api 层反序列化 factors/aggregator/params，
+// 字符串化 JSON 不再泄漏到视图（策略页直取对象/因子页防御 parse 并存的历史分叉在此收敛）
+const _parseIfStr = v => {
+  if (typeof v !== 'string' || !v) return v ?? null
+  try { return JSON.parse(v) } catch { return null }
+}
+export const getStrategies = async () => (await api.get('/strategy')).map(s => ({
+  ...s,
+  factors: _parseIfStr(s.factors) || [],
+  aggregator: _parseIfStr(s.aggregator) || {},
+  params: _parseIfStr(s.params) || {},
+}))
 export const startStrategy = id => api.post(`/strategy/${id}/start`)
 export const stopStrategy = id => api.post(`/strategy/${id}/stop`)
 

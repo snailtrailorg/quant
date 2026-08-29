@@ -64,12 +64,8 @@ const load = async () => {
   loading.value = true
   try {
     strategies.value = await getStrategies()
-    try {
-      const pnl = await getPnl()
-      const curve = pnl.curve || []
-      const equity = pnl.total_value || 0
-      strategies.value = strategies.value.map(s => ({ ...s, _curve: curve, _equity: equity }))
-    } catch { /* 无数据 */ }
+    // H6（01 P0#1）：原把单账户级 curve/total_value 塞进每个任务卡——每卡曲线实为同一条,误导。
+    // 先隐藏(移除共用数据注入);每任务独立曲线待 per-task pnl 端点(P4)后恢复
   } finally { loading.value = false }
 }
 onMounted(load)

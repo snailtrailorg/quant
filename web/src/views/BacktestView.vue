@@ -78,7 +78,7 @@ const drawdownOption = computed(() => ({
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
   xAxis: { type: 'category', data: drawdownData.value.map(d => d.ts?.slice(0, 10)) },
   yAxis: { type: 'value', scale: true },
-  series: [{ name: t('backtest.drawdown'), type: 'line', data: drawdownData.value.map(d => d.dd), smooth: true, lineStyle: { width: 2, color: '#f56c6c' }, areaStyle: { opacity: 0.1, color: '#f56c6c' } }],
+  series: [{ name: t('backtest.drawdown'), type: 'line', data: drawdownData.value.map(d => d.dd), smooth: true, lineStyle: { width: 2, color: '#0A7A54' }, areaStyle: { opacity: 0.1, color: '#0A7A54' } }],
 }))
 
 onMounted(async () => {

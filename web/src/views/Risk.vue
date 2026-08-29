@@ -90,10 +90,14 @@ const onHalt = async () => {
   } catch (e) { console.error(e) }
 }
 const onResume = async () => {
+  // H7（08 盲审#2）：恢复=输入确认(重新暴露风险才是强确认该在的地方);熔断保持轻确认
   try {
-    await ElMessageBox.confirm(t('risk.confirmResume'), { type: 'warning' })
+    const { value } = await ElMessageBox.prompt(
+      t('risk.resumePromptTip'), t('risk.resumePromptTitle'),
+      { type: 'warning', confirmButtonText: t('risk.resume') })
+    if (value?.trim() !== 'RESUME') { ElMessage.warning(t('risk.resumeMismatch')); return }
     await riskResume(); ElMessage.success(t('risk.resumed')); load()
-  } catch (e) { console.error(e) }
+  } catch (e) { if (e?.response) console.error(e) }
 }
 onMounted(async () => { await load(); await loadLive() })
 </script>

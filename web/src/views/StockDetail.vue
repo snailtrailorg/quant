@@ -35,8 +35,8 @@
               <span>{{ t('stockDetail.high') }}/{{ t('stockDetail.low') }}: {{ quote.high }}/{{ quote.low }}</span>
             </div>
             <div class="meta" style="margin-top:6px">
-              <span>{{ t('stockDetail.limitUp') }}: <b style="color:#f56c6c">{{ quote.upper_limit ?? detail.limit?.up_limit ?? '-' }}</b></span>
-              <span style="margin-left:16px">{{ t('stockDetail.limitDown') }}: <b style="color:#67c23a">{{ quote.lower_limit ?? detail.limit?.down_limit ?? '-' }}</b></span>
+              <span>{{ t('stockDetail.limitUp') }}: <b style="color:#C8102E">{{ quote.upper_limit ?? detail.limit?.up_limit ?? '-' }}</b></span>
+              <span style="margin-left:16px">{{ t('stockDetail.limitDown') }}: <b style="color:#0A7A54">{{ quote.lower_limit ?? detail.limit?.down_limit ?? '-' }}</b></span>
               <span style="margin-left:16px;color:#909399">{{ quote.ts }}</span>
             </div>
           </div>
@@ -273,7 +273,7 @@ async function doAnalyze() {
 }
 
 const klineOption = computed(() => {
-  const up = '#f56c6c', down = '#67c23a'
+  const up = '#C8102E', down = '#0A7A54'
   return {
     tooltip: { trigger: 'axis' },
     grid: [{ left: '8%', right: '3%', top: '6%', height: '58%' }, { left: '8%', right: '3%', top: '72%', height: '18%' }],
@@ -293,7 +293,7 @@ const klineOption = computed(() => {
 
 const intradayOption = computed(() => {
   const pts = intraday.value.points || []
-  const up = '#f56c6c', down = '#67c23a'
+  const up = '#C8102E', down = '#0A7A54'
   const first = pts[0]?.price ?? 0
   return {
     tooltip: { trigger: 'axis' },
@@ -342,7 +342,7 @@ const chipsOption = computed(() => {
       type: 'bar', data: dist.map(d => d[1]),
       itemStyle: { color: '#409eff' },
       markLine: quote.value?.last ? { symbol: 'none', data: [{ xAxis: nearestChipIdx(dist, quote.value.last), name: 'last' }],
-        lineStyle: { color: '#f56c6c', type: 'dashed' }, label: { formatter: String(quote.value.last) } } : undefined,
+        lineStyle: { color: '#C8102E', type: 'dashed' }, label: { formatter: String(quote.value.last) } } : undefined,
     }],
   }
 })
@@ -368,15 +368,15 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 <style scoped>
 .snap .price { font-size: 34px; font-weight: 700; margin-right: 10px; }
 .snap .chg { font-size: 16px; font-weight: 600; }
-.up { color: #f56c6c; }
-.down { color: #67c23a; }
+.up { color: #C8102E; }
+.down { color: #0A7A54; }
 .flat { color: #909399; }
 .meta { display: flex; gap: 18px; color: #606266; flex-wrap: wrap; font-size: 13px; margin-top: 10px; }
 .depth { width: 100%; border-collapse: collapse; font-size: 13px; }
 .depth td { padding: 2px 8px; border-bottom: 1px solid #f0f2f5; }
 .depth .mid { text-align: center; color: #909399; font-weight: 600; padding: 4px 0; }
-.depth .ask td:nth-child(2) { color: #67c23a; }
-.depth .bid td:nth-child(2) { color: #f56c6c; }
+.depth .ask td:nth-child(2) { color: #0A7A54; }
+.depth .bid td:nth-child(2) { color: #C8102E; }
 .frow { display: flex; justify-content: space-between; padding: 4px 0; }
 .analysis { white-space: pre-wrap; line-height: 1.7; background: #f8f9fb; padding: 14px; border-radius: 6px; }
 </style>

@@ -22,8 +22,8 @@
         <template #default="{ row }">
           <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
-          <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row.id)">{{ t('common.stop') }}</el-button>
-          <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)">{{ t('common.stop') }}</el-button>
+          <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -157,14 +157,21 @@ const onStart = async (id) => {
   try { await startLiveTask(id); ElMessage.success(t('common.started')); load() }
   catch (e) { ElMessage.error(t('common.startFailed')) }
 }
-const onStop = async (id) => {
-  try { await stopLiveTask(id); ElMessage.success(t('common.stopped')); load() }
-  catch (e) { ElMessage.error(t('common.stopFailed')) }
-}
-const onDelete = async (id) => {
+const onStop = async (row) => {
+  // H5（01 P0#2/05 §5.8）：停止=影响面 confirm（确认强度对称于代价——原停止无确认、删除反有，倒挂修正）
   try {
-    await ElMessageBox.confirm(t('liveTask.confirmDelete'), t('common.confirm'))
-    await deleteLiveTask(id); ElMessage.success(t('common.deleteSuccess')); load()
+    await ElMessageBox.confirm(t('liveTask.confirmStop'), t('common.confirm'), { type: 'warning' })
+    await stopLiveTask(row.id); ElMessage.success(t('common.stopped')); load()
+  } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(t('common.stopFailed')); else if (e?.response) ElMessage.error(t('common.stopFailed')) }
+}
+const onDelete = async (row) => {
+  // H5：删除=输入任务名确认（比停止更强——不可恢复操作）
+  try {
+    const { value } = await ElMessageBox.prompt(
+      t('liveTask.deletePromptTip', { name: row.name }), t('liveTask.deletePromptTitle'),
+      { type: 'warning', confirmButtonText: t('common.confirm') })
+    if (value?.trim() !== row.name) { ElMessage.warning(t('liveTask.deleteMismatch')); return }
+    await deleteLiveTask(row.id); ElMessage.success(t('common.deleteSuccess')); load()
   } catch { /* 取消 */ }
 }
 

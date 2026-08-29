@@ -5,10 +5,10 @@
         <el-card><div class="stat"><div class="label">{{ t('trading.totalAssets') }}</div><div class="value">¥{{ (dashboard.total_value || 0).toFixed(0) }}</div></div></el-card>
       </el-col>
       <el-col :span="6">
-        <el-card><div class="stat"><div class="label">{{ t('trading.todayPnl') }}</div><div class="value" :style="{color: (dashboard.daily_pnl||0) >= 0 ? '#67c23a' : '#f56c6c'}">¥{{ (dashboard.daily_pnl || 0).toFixed(0) }}</div></div></el-card>
+        <el-card><div class="stat"><div class="label">{{ t('trading.todayPnl') }}</div><div class="value" :style="{color: (dashboard.daily_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (dashboard.daily_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ (dashboard.daily_pnl || 0).toFixed(0) }}</div></div></el-card>
       </el-col>
       <el-col :span="6">
-        <el-card><div class="stat"><div class="label">{{ t('trading.totalPnl') }}</div><div class="value" :style="{color: (dashboard.total_pnl||0) >= 0 ? '#67c23a' : '#f56c6c'}">¥{{ (dashboard.total_pnl || 0).toFixed(0) }} ({{ dashboard.total_pnl_pct || 0 }}%)</div></div></el-card>
+        <el-card><div class="stat"><div class="label">{{ t('trading.totalPnl') }}</div><div class="value" :style="{color: (dashboard.total_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (dashboard.total_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ (dashboard.total_pnl || 0).toFixed(0) }} ({{ dashboard.total_pnl_pct || 0 }}%)"</div></div></el-card>
       </el-col>
       <el-col :span="6">
         <el-card><div class="stat"><div class="label">{{ t('dashboard.backtestStrategy') }}</div><div class="value">{{ dashboard.backtest_count ?? 0 }} / {{ strategies.length }}</div></div></el-card>

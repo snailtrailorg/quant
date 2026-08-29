@@ -126,13 +126,28 @@ const goSymbols = row => router.push(`/data-manage/${row.id}`)
 const load = async () => {
   loading.value = true
   try {
-    configs.value = (await api.get('/sync/config')).map(c => ({ ...c, status: c.last_status ?? 'idle' }))
+    configs.value = (await api.get('/sync/config')).map(c => ({ ...c, status: c.last_status ?? 'idle', _prevSchedule: c.schedule, _prevFilter: c.trade_day_filter }))
     logs.value = await api.get('/sync/log')
   } finally { loading.value = false }
 }
 const onScheduleChange = async (row) => {
-  await api.post(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled, trade_day_filter: row.trade_day_filter })
-  ElMessage.success(t('dataManage.scheduleUpdated', { name: row.name }))
+  // H10（01 §3.2）：表内裸输入不再直写库——confirm+取消回滚旧值（弹窗化编辑留 P3-4）
+  const prev = { schedule: row._prevSchedule ?? row.schedule, filter: row._prevFilter ?? row.trade_day_filter }
+  try {
+    await ElMessageBox.confirm(
+      t('dataManage.confirmSchedule', { name: row.name, cron: row.schedule }), t('common.confirm'), { type: 'warning' })
+  } catch {
+    row.schedule = prev.schedule; row.trade_day_filter = prev.filter   // 回滚,表内值还原
+    return
+  }
+  try {
+    await api.post(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled, trade_day_filter: row.trade_day_filter })
+    row._prevSchedule = row.schedule; row._prevFilter = row.trade_day_filter
+    ElMessage.success(t('dataManage.scheduleUpdated', { name: row.name }))
+  } catch (e) {
+    row.schedule = prev.schedule; row.trade_day_filter = prev.filter
+    ElMessage.error(t('dataManage.scheduleUpdateFailed'))
+  }
 }
 const onToggle = async (row) => {
   await api.post(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled })

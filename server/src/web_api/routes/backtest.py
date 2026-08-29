@@ -203,6 +203,17 @@ def broker_usage(payload: dict = Depends(require_role("viewer", "analyst", "trad
     return {"today": today, "trend": trend}
 
 
+def _safe_json(v, fallback):
+    """H11（01 P0#4）：中断残行/引擎写坏的 JSON 不再炸整页 500——单行降级+留痕。"""
+    if not v:
+        return fallback
+    try:
+        return json.loads(v)
+    except Exception:
+        logger.warning("backtest JSON 字段解析失败（降级 %r）: %r", type(fallback).__name__, str(v)[:120])
+        return fallback
+
+
 @router.get("/api/backtest")
 def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
     with get_conn() as conn:
@@ -211,11 +222,11 @@ def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", 
             "(SELECT s.task_id FROM backtest_symbols s WHERE s.run_id=b.id AND s.task_id IS NOT NULL LIMIT 1) "
             "FROM backtest_runs b ORDER BY b.id DESC LIMIT 100")
         rows = cur.fetchall()
-    return [{"id": r[0], "strategy_config_id": r[1], "symbols": json.loads(r[2]) if r[2] else [],
+    return [{"id": r[0], "strategy_config_id": r[1], "symbols": _safe_json(r[2], []),
              "task_id": r[8],
              "mode": r[3], "status": r[4], "created_at": str(r[5]) if r[5] else None,
              "finished_at": str(r[6]) if r[6] else None,
-             "summary": json.loads(r[7]) if r[7] else {}} for r in rows]
+             "summary": _safe_json(r[7], {})} for r in rows]
 
 
 @router.get("/api/backtest/{run_id}")

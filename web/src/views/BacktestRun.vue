@@ -74,6 +74,7 @@ const loadSummary = async () => {
 
 const markVerified = async () => {
   try {
+    await ElMessageBox.confirm(t('backtest.confirmVerify'), t('common.confirm'), { type: 'warning' })
     await verifyStrategy(run.value.strategy_config_id)
     ElMessage.success(t('backtest.markedVerified'))
   } catch (e) { ElMessage.error(t('backtest.markFailed')) }
