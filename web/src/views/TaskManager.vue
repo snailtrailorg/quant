@@ -17,7 +17,7 @@
         </div>
       </div>
     </template>
-    <el-table :data="tasks" stripe>
+    <el-table :data="tasks">
       <el-table-column prop="id" :label="t('task.taskId')" width="120" show-overflow-tooltip />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="type" :label="t('common.type')" width="80" />
@@ -48,7 +48,7 @@
         <p v-if="detail.error_message" style="color:#f56c6c">{{ t('task.error') }}: {{ detail.error_message }}</p>
         <el-divider />
         <h4>{{ t('task.execLogs') }}</h4>
-        <el-table :data="detail.logs" stripe max-height="300">
+        <el-table :data="detail.logs" max-height="300">
           <el-table-column prop="level" :label="t('log.level')" width="70" />
           <el-table-column prop="message" :label="t('log.content')" />
           <el-table-column prop="step_name" :label="t('task.step')" width="100" />

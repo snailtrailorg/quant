@@ -13,7 +13,7 @@
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" width="110" />
       </el-table>
     </el-card>
-    <el-table :data="sources" stripe>
+    <el-table :data="sources">
       <el-table-column prop="provider" label="Provider" width="120" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column :label="t('common.credential')" width="80">

@@ -16,7 +16,7 @@
         </span>
       </div>
     </el-card>
-    <el-table :data="configs" stripe v-loading="loading">
+    <el-table :data="configs" v-loading="loading">
       <el-table-column prop="name" :label="t('dataManage.dataType')" width="160" />
       <el-table-column prop="data_type" :label="t('dataManage.category')" width="80">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
@@ -24,16 +24,12 @@
       <el-table-column prop="mode" :label="t('common.mode')" width="80" />
       <el-table-column :label="t('dataManage.cronSchedule')" width="200">
         <template #default="{ row }">
-          <el-input v-model="row.schedule" style="width: 170px" :placeholder="t('dataManage.phCron')" @change="onScheduleChange(row)" />
+          <el-link type="primary" @click="openCron(row)">{{ row.schedule }}</el-link>
         </template>
       </el-table-column>
       <el-table-column :label="t('dataManage.tradeDayFilter')" width="120">
         <template #default="{ row }">
-          <el-select v-model="row.trade_day_filter" style="width: 100px" @change="onScheduleChange(row)">
-            <el-option :label="t('dataManage.filterNone')" value="none" />
-            <el-option :label="t('dataManage.filterWorkday')" value="workday" />
-            <el-option :label="t('dataManage.filterTradeDay')" value="trade_day" />
-          </el-select>
+          <span>{{ row.trade_day_filter }}</span>
         </template>
       </el-table-column>
       <el-table-column :label="t('common.status')" width="80">
@@ -67,7 +63,7 @@
     <el-divider />
     <el-card>
       <template #header>{{ t('dataManage.syncLogs') }}</template>
-      <el-table :data="logs" stripe max-height="300">
+      <el-table :data="logs" max-height="300">
         <el-table-column prop="sync_id" :label="t('dataManage.task')" width="120" />
         <el-table-column prop="ts" :label="t('common.time')" width="160">
           <template #default="{ row }">{{ row.ts.slice(0,16).replace('T',' ') }}</template>
@@ -97,6 +93,29 @@
         </el-table-column>
       </el-table>
     </el-card>
+  
+    <!-- Cron 编辑弹窗(05 §5.10) -->
+    <el-dialog v-model="cronDialog" :title="t('dataManage.cronEditTitle')" width="480px">
+      <el-form label-width="80px">
+        <el-form-item label="Cron">
+          <el-input v-model="cronForm.schedule" placeholder="30 16 * * 1-5" />
+        </el-form-item>
+        <el-form-item :label="t('dataManage.tpl')">
+          <el-button v-for="tpl in cronTemplates" :key="tpl.expr" size="small" text type="primary" @click="cronForm.schedule = tpl.expr">{{ tpl.label }}</el-button>
+        </el-form-item>
+        <el-form-item :label="t('dataManage.tradeDay')">
+          <el-select v-model="cronForm.trade_day_filter" style="width: 100%">
+            <el-option value="none" :label="t('dataManage.filterNone')" />
+            <el-option value="workday" :label="t('dataManage.filterWorkday')" />
+            <el-option value="trade_day" :label="t('dataManage.filterTradeDay')" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="cronDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="saveCron">{{ t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -247,3 +266,22 @@ const onDelete = async (row) => {
 onMounted(load)
 onUnmounted(stopPoll)
 </script>
+
+// Cron 弹窗化(05 §5.10)
+const cronDialog = ref(false)
+const cronForm = ref({ id: '', schedule: '', trade_day_filter: 'none' })
+const cronTemplates = [
+  { label: t('dataManage.tplDaily'), expr: '30 16 * * 1-5' },
+  { label: t('dataManage.tplMorning'), expr: '0 9 * * 1-5' },
+  { label: t('dataManage.tplWeekly'), expr: '0 9 * * 1' },
+]
+const openCron = (row) => {
+  cronForm.value = { id: row.id, schedule: row.schedule, trade_day_filter: row.trade_day_filter || 'none' }
+  cronDialog.value = true
+}
+const saveCron = async () => {
+  try {
+    await api.post(`/sync/config/${cronForm.value.id}`, { schedule: cronForm.value.schedule, enabled: true, trade_day_filter: cronForm.value.trade_day_filter })
+    cronDialog.value = false; ElMessage.success(t('common.success')); load()
+  } catch { ElMessage.error(t('common.failed')) }
+}

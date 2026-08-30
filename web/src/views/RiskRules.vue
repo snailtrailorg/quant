@@ -1,7 +1,7 @@
 <template>
   <el-card>
     <template #header>{{ t('riskRule.title') }}</template>
-    <el-table :data="rules" stripe>
+    <el-table :data="rules">
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="type" :label="t('common.type')" width="160" />
       <el-table-column prop="params" :label="t('riskRule.params')" />

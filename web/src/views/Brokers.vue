@@ -1,7 +1,7 @@
 <template>
   <el-card>
     <template #header>{{ t('brokers.manageTitle') }}</template>
-    <el-table :data="brokers" stripe>
+    <el-table :data="brokers">
       <el-table-column prop="provider" label="Provider" width="100" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column :label="t('common.credential')" width="80">
@@ -37,7 +37,7 @@
   <!-- P2-4 通道用量监控 -->
   <el-card style="margin-top: 20px" v-loading="usageLoading">
     <template #header>{{ t('brokers.usageTitle') }}</template>
-    <el-table :data="usage.today" stripe>
+    <el-table :data="usage.today">
       <el-table-column prop="provider" label="Provider" width="120" />
       <el-table-column prop="calls" :label="t('common.todayCalls')" width="100" />
       <el-table-column prop="avg_latency_ms" :label="t('common.avgLatency')" width="120" />

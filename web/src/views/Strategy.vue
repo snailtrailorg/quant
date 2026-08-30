@@ -6,7 +6,7 @@
         <el-button type="primary" @click="openCreate">{{ t('strategy.create') }}</el-button>
       </div>
     </template>
-    <el-table :data="strategies" stripe>
+    <el-table :data="strategies">
       <el-table-column prop="name" :label="t('strategy.name')" />
       <el-table-column prop="type" :label="t('strategy.type')" />
       <el-table-column :label="t('strategy.status')">
@@ -37,7 +37,7 @@
       <el-table-column :label="t('common.action')" width="300" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="runBacktest(row)">{{ t('strategy.runBacktest') }}</el-button>
-          <el-button size="small" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button size="small" @click="$router.push(`/strategy/${row.id}/edit`)">{{ t('common.edit') }}</el-button>
           <el-button size="small" @click="onCopy(row)">{{ t('common.copy') }}</el-button>
           <el-button size="small" type="danger" @click="onDelete(row)">{{ t('common.delete') }}</el-button>
         </template>
@@ -188,7 +188,7 @@
             <el-button type="primary" @click="loadBinds" :disabled="!editForm.id">{{ t('common.refresh') }}</el-button>
           </div>
         </el-form-item>
-        <el-table v-if="binds.length" :data="binds" stripe style="margin-bottom: 12px">
+        <el-table v-if="binds.length" :data="binds" style="margin-bottom: 12px">
           <el-table-column prop="account_id" :label="t('common.account')" />
           <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
           <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />

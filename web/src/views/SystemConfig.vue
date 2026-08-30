@@ -47,7 +47,7 @@
       <template #header>
         <span>{{ t('systemConfig.title') }}</span>
       </template>
-      <el-table :data="configs" stripe>
+      <el-table :data="configs">
         <el-table-column prop="key" :label="t('common.configKey')" width="200" />
         <el-table-column :label="t('common.configValue')" width="200">
           <template #default="{ row }">

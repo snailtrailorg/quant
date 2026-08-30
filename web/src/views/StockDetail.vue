@@ -24,7 +24,7 @@
       <el-row :gutter="20">
         <el-col :xs="24" :md="14">
           <div v-if="quote" class="snap">
-            <span class="price" :class="priceClass">{{ quote.last }}</span>
+            <span class="price" :class="priceClass">{{ quote.last }}{{ quote.last > quote.pre_close ? '▲' : quote.last < quote.pre_close ? '▼' : '' }}</span>
             <span class="chg" :class="priceClass">
               {{ quote.chg ?? '-' }} ({{ pctChg == null ? '-' : pctChg.toFixed(2) }}%)
             </span>
@@ -102,7 +102,7 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('stockDetail.events')" name="events">
-          <el-table :data="detail.events || []" stripe max-height="420">
+          <el-table :data="detail.events || []" max-height="420">
             <el-table-column prop="date" :label="t('stockDetail.date')" width="110" />
             <el-table-column :label="t('stockDetail.eventType')" width="120">
               <template #default="{ row }">

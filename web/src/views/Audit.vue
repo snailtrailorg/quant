@@ -13,7 +13,7 @@
         <el-button type="primary" @click="filterActor='';filterAction='';load()">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
-    <el-table :data="filteredLogs" stripe>
+    <el-table :data="filteredLogs">
       <el-table-column prop="ts" :label="t('common.time')" width="200">
         <template #default="{ row }">{{ row.ts.replace('T', ' ').slice(0, 19) }}</template>
       </el-table-column>

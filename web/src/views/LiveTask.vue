@@ -6,7 +6,7 @@
         <el-button type="primary" @click="openCreate">{{ t('liveTask.create') }}</el-button>
       </div>
     </template>
-    <el-table :data="tasks" stripe>
+    <el-table :data="tasks">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="strategy_id" :label="t('liveTask.strategy')" width="150" />

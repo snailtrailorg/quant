@@ -6,7 +6,7 @@
         <el-button type="primary" @click="load" :loading="loading">{{ t('analysis.refresh') }}</el-button>
       </div>
     </template>
-    <el-table :data="results" stripe>
+    <el-table :data="results">
       <el-table-column prop="symbol" :label="t('analysis.stock')" width="120" />
       <el-table-column prop="score" :label="t('analysis.score')" width="100" sortable />
       <el-table-column :label="t('analysis.rating')" width="100">

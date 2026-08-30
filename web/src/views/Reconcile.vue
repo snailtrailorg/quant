@@ -13,12 +13,14 @@
     <el-alert :title="summary" :type="hasIssues ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: 20px" />
 
     <!-- P1-2（web-design 05 §5.4）：差异处置台——结构化差异单+处置状态持久化+行展开证据链 -->
-    <el-table :data="diffRows" stripe size="small" row-key="id">
+    <el-table :data="diffRows" size="small" row-key="id">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: 4px 12px; color: var(--text-secondary); font-size: var(--fs-foot)">
             <div>{{ t('reconcile.firstSeen') }}: {{ row.first_seen || '—' }}</div>
             <div>{{ t('reconcile.evidence') }}: {{ row.detail || '—' }}</div>
+            <div>{{ t('reconcile.ordersFlow') }}: <el-link type="primary" @click="$router.push(`/trading`)">{{ t('reconcile.viewOrders') }}</el-link></div>
+            <div>{{ t('reconcile.posSnapshot') }}: <el-link type="primary" @click="$router.push(`/trading`)">{{ t('reconcile.viewPositions') }}</el-link></div>
             <div v-if="row.note">{{ t('reconcile.note') }}: {{ row.note }}</div>
             <div v-if="row.exempt_qty != null">{{ t('reconcile.exemptInfo', { q: row.exempt_qty, d: row.exempt_until || '—' }) }}</div>
           </div>

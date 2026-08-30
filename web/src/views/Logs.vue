@@ -16,7 +16,7 @@
             </div>
           </div>
         </template>
-        <el-table :data="filteredLogs" stripe height="500">
+        <el-table :data="filteredLogs" height="500">
           <el-table-column prop="ts" :label="t('common.time')" width="160">
             <template #default="{ row }">{{ row.ts.replace('T', ' ').slice(0, 19) }}</template>
           </el-table-column>
@@ -45,7 +45,7 @@
     <el-col :span="10">
       <el-card>
         <template #header>{{ t('log.notifyHistory') }}</template>
-        <el-table :data="notifs" stripe height="500">
+        <el-table :data="notifs" height="500">
           <el-table-column prop="level" :label="t('log.level')" width="90">
             <template #default="{ row }">
               <span :class="['ndot', row.level]"></span>{{ row.level }}
@@ -63,7 +63,7 @@
   <!-- 邮件发件箱（持久化 + 指数退避重发） -->
   <el-card style="margin-top: 20px">
     <template #header>{{ t('log.outboxTitle') }}</template>
-    <el-table :data="outbox" stripe max-height="300">
+    <el-table :data="outbox" max-height="300">
       <el-table-column prop="status" :label="t('common.status')" width="100">
         <template #default="{ row }">
           <el-tag :type="row.status === 'sent' ? 'success' : row.status === 'failed' ? 'danger' : 'warning'">

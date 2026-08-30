@@ -17,7 +17,7 @@
     </el-row>
     <el-tabs>
       <el-tab-pane :label="t('trading.positions')">
-        <el-table :data="positionData.positions || []" stripe size="small">
+        <el-table :data="positionData.positions || []" size="small">
           <el-table-column prop="symbol" :label="t('common.symbol')" width="110">
             <template #default="{ row }">
               <el-link type="primary" @click="gotoDetail(row.symbol)">{{ (row.symbol||'').split('.')[0] }}</el-link>
@@ -30,6 +30,9 @@
           <el-table-column prop="volume" :label="t('trading.volume')" width="80" class-name="num" />
           <el-table-column prop="frozen" :label="t('trading.frozenCol')" width="70" class-name="num" />
           <el-table-column prop="cost_price" :label="t('trading.costCol')" width="90" class-name="num" />
+          <el-table-column :label="t('trading.lastPrice')" width="75" class-name="num">
+            <template #default="{ row }">{{ lastPrices[row.symbol?.split('.')[0]] || '—' }}</template>
+          </el-table-column>
           <el-table-column :label="t('trading.pnlCol')" width="110" class-name="num">
             <template #default="{ row }">
               <span v-if="row.pnl != null" :class="row.pnl >= 0 ? 'up' : 'down'">{{ row.pnl >= 0 ? '▲' : '▼' }} {{ row.pnl.toFixed(0) }}</span>
@@ -85,7 +88,7 @@
         <div style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('trading.manualHint') }}</div>
       </el-tab-pane>
       <el-tab-pane :label="t('trading.orders')">
-        <el-table :data="ordersData.orders || []" stripe size="small">
+        <el-table :data="ordersData.orders || []" size="small">
           <el-table-column prop="ts" :label="t('trading.time')" width="150" />
           <el-table-column prop="symbol" :label="t('common.symbol')" width="110" />
           <el-table-column prop="action" :label="t('trading.direction')" width="80">

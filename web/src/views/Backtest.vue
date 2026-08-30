@@ -18,7 +18,7 @@
           </span>
         </div>
       </template>
-      <el-table :data="filteredRuns" stripe v-loading="loading" @row-click="goDetail">
+      <el-table :data="filteredRuns" v-loading="loading" @row-click="goDetail">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="strategy_id" :label="t('backtest.strategy')">
           <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>
@@ -33,6 +33,14 @@
         </el-table-column>
         <el-table-column :label="t('backtest.ddCol')" width="80" class-name="num">
           <template #default="{ row }">{{ row.summary?.max_drawdown != null ? (row.summary.max_drawdown * 100).toFixed(1) + '%' : '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('backtest.sharpeCol')" width="70" class-name="num">
+          <template #default="{ row }">{{ row.summary?.sharpe_ratio?.toFixed(2) ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('backtest.dateRangeCol')" width="160">
+          <template #default="{ row }">
+            {{ row.summary?.start?.slice(0,10) || (row.created_at||'').slice(0,10) }} ~ {{ row.summary?.end?.slice(0,10) || (row.finished_at||'').slice(5,10) }}
+          </template>
         </el-table-column>
         <!-- 失败原因透出（05 §5.7：failed 行点开见原因） -->
         <el-table-column :label="t('backtest.reason')" width="140" show-overflow-tooltip>

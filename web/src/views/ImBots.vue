@@ -22,7 +22,7 @@
       </div>
     </el-card>
 
-    <el-table :data="bots" stripe>
+    <el-table :data="bots">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column :label="t('imBots.providerCol')" width="100">
         <template #default="{ row }">
@@ -113,7 +113,7 @@
         </el-select>
         <el-button type="primary" @click="addUser">{{ t('common.add') }}</el-button>
       </div>
-      <el-table :data="botUsers" stripe max-height="300">
+      <el-table :data="botUsers" max-height="300">
         <el-table-column prop="im_user_id" label="IM User ID" min-width="220" show-overflow-tooltip />
         <el-table-column prop="role" :label="t('imBots.roleCol')" width="110" />
         <el-table-column :label="t('common.action')" width="90">

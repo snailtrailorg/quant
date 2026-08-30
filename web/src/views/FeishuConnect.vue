@@ -7,7 +7,7 @@
       </div>
     </template>
 
-    <el-table :data="robots" stripe>
+    <el-table :data="robots">
       <el-table-column prop="id" label="ID" width="50" />
       <el-table-column prop="name" :label="t('common.name')" width="120" />
       <el-table-column prop="app_id" label="App ID" />

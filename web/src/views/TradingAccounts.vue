@@ -7,7 +7,7 @@
         <el-button type="primary" size="small" @click="showForm = true">{{ t('common.create') }}</el-button>
       </div>
     </template>
-    <el-table :data="accounts" stripe v-loading="loading">
+    <el-table :data="accounts" v-loading="loading">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="exchange" :label="t('tradingAccounts.exchange')" width="120" />

@@ -126,6 +126,18 @@
     <el-tag v-for="p in myPerms" :key="p" style="margin: 4px">{{ p }}</el-tag>
     <div v-if="!myPerms.length" style="color: var(--text-secondary)">—</div>
   </el-dialog>
+  <!-- ⌘K 全局搜索(P1-4/03 §3.3) -->
+  <el-dialog v-model="cmdkVisible" :title="t('layout.search')" width="480px" :show-close="false">
+    <el-input v-model="cmdkQuery" :placeholder="t('layout.searchPh')" autofocus @input="filterCmdk" />
+    <div style="max-height: 300px; overflow-y: auto; margin-top: 8px">
+      <div v-for="item in cmdkResults" :key="item.path" @click="$router.push(item.path); cmdkVisible = false"
+        style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak); display: flex; justify-content: space-between">
+        <span>{{ item.label }}</span>
+        <span style="color: var(--text-secondary); font-size: 12px">{{ item.path }}</span>
+      </div>
+      <div v-if="!cmdkResults.length" style="color: var(--text-secondary); text-align: center; padding: 20px">{{ t('layout.noResults') }}</div>
+    </div>
+  </el-dialog>
 </el-container>
 </template>
 
@@ -235,3 +247,27 @@ const logout = async () => {
 .dot.info { background: #909399; }
 .notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
 </style>
+
+// ⌘K 全局搜索
+const cmdkVisible = ref(false)
+const cmdkQuery = ref('')
+const cmdkResults = ref([])
+const searchIndex = [
+  { label: '选股器', path: '/screener' }, { label: '股票池', path: '/pool' },
+  { label: '因子库', path: '/factors' }, { label: '策略', path: '/strategy' },
+  { label: '回测', path: '/backtest' }, { label: '每日研判', path: '/analysis' },
+  { label: '实盘任务', path: '/live-task' }, { label: '交易台', path: '/trading' },
+  { label: '风控总览', path: '/risk' }, { label: '三账对账', path: '/reconcile' },
+  { label: '数据中心', path: '/dataops' }, { label: '集成中心', path: '/integrations' },
+  { label: '健康与日志', path: '/observe' }, { label: '设置', path: '/settings' },
+  { label: 'AI 助手', path: '/chat' },
+]
+const filterCmdk = () => {
+  const q = cmdkQuery.value.toLowerCase()
+  cmdkResults.value = q ? searchIndex.filter(i => i.label.toLowerCase().includes(q) || i.path.includes(q)) : searchIndex
+}
+const onKeydown = (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); cmdkVisible.value = !cmdkVisible.value; filterCmdk() }
+}
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onKeydown))

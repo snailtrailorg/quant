@@ -25,7 +25,7 @@
           </div>
         </div>
       </template>
-      <el-table :data="pagedRows" stripe size="small" @selection-change="onSelChange">
+      <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
         <el-table-column type="selection" width="40" />
         <el-table-column prop="ts_code" label="Code" width="90" />
         <el-table-column prop="name" :label="t('screener.bondName')" width="80" show-overflow-tooltip />

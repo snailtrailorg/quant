@@ -23,7 +23,7 @@
         <div v-else style="height:400px;display:flex;align-items:center;justify-content:center;color:#999">{{ t('backtest.noDrawdown') }}</div>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.trades')" name="trades">
-        <el-table :data="trades" stripe max-height="400">
+        <el-table :data="trades" max-height="400">
           <el-table-column prop="ts" :label="t('trading.time')" width="180" />
           <el-table-column prop="action" :label="t('trading.direction')" width="80" />
           <el-table-column prop="volume" :label="t('trading.volume')" width="80" />

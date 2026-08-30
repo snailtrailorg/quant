@@ -8,7 +8,7 @@
 
     <el-card>
         <template #header>{{ t('health.apiHealth') }}</template>
-        <el-table :data="healthData" stripe>
+        <el-table :data="healthData">
           <el-table-column prop="name" :label="t('health.service')" width="120" />
           <el-table-column :label="t('common.status')" width="80">
             <template #default="{ row }">
@@ -22,7 +22,7 @@
     <el-col :span="12">
       <el-card>
         <template #header>{{ t('health.disk') }}</template>
-        <el-table :data="diskData" stripe>
+        <el-table :data="diskData">
           <el-table-column prop="path" :label="t('health.path')" width="150" />
           <el-table-column prop="used" :label="t('health.used')" width="120" />
           <el-table-column prop="total" :label="t('health.total')" width="120" />
@@ -47,7 +47,7 @@
         </el-tag>
       </span>
     </template>
-    <el-table :data="componentRows" stripe>
+    <el-table :data="componentRows">
       <el-table-column prop="component" :label="t('health.component')" min-width="200" />
       <el-table-column prop="kind" :label="t('health.kind')" width="110" />
       <el-table-column :label="t('common.status')" width="110">
@@ -64,7 +64,7 @@
   <!-- 15 号 SM2：健康事件流（触发/恢复沿历史） -->
   <el-card style="margin-top: 20px">
     <template #header>{{ t('health.events') }}</template>
-    <el-table :data="eventRows" stripe>
+    <el-table :data="eventRows">
       <el-table-column prop="ts" :label="t('health.time')" width="170" />
       <el-table-column :label="t('health.severity')" width="100">
         <template #default="{ row }">

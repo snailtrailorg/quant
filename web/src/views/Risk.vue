@@ -43,7 +43,7 @@
       <el-alert v-if="masterEnabled === false" type="error" :closable="false" style="margin-bottom: 12px">
         {{ t('risk.masterOff') }}
       </el-alert>
-      <el-table :data="liveTradingMarkets" stripe>
+      <el-table :data="liveTradingMarkets">
         <el-table-column prop="market" :label="t('risk.market')" width="150" />
         <el-table-column :label="t('risk.label')">
           <template #default="{ row }">{{ t(row.labelKey) }}</template>
@@ -76,7 +76,7 @@
           </el-radio-group>
         </div>
       </template>
-      <el-table :data="riskLogs" stripe size="small" max-height="420">
+      <el-table :data="riskLogs" size="small" max-height="420">
         <el-table-column prop="ts" :label="t('common.time')" width="160" />
         <el-table-column :label="t('risk.logAction')" width="90">
           <template #default="{ row }">

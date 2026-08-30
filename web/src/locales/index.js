@@ -380,7 +380,7 @@ export default {
       noData: '暂无数据',
     },
     backtest: {
-      createLive: '以此创建实盘任务', tradeCount: '交易次数',
+      createLive: '以此创建实盘任务', sharpeCol: '夏普', dateRangeCol: '区间', tradeCount: '交易次数',
       annualized: '年化收益', plRatio: '盈亏比',
       sampleThreshold: '样本门槛不足（区间 {d} 天<90 或标的 {s}<1），不可标记验证——防短区间混入证据链',
       feePanel: '费用与摩擦：佣金可配（默认万5）+ 印花税（卖出 0.05%）+ 过户费（0.001%）+ 滑点可配 + 涨跌停一字板不可成交约束',
@@ -470,7 +470,7 @@ export default {
       resetPromptTitle: '清零（输入确认）',
       resetPromptTip: '接受当前差异为新基线（次日开盘前用）。输入 RESET 确认',
       brokerQty: '券商持仓', derivedQty: '系统推导', diff: '差额',
-      evidence: '证据', note: '备注', volume: '数量',
+      evidence: '证据', ordersFlow: '订单流', viewOrders: '查看 →', posSnapshot: '持仓快照', viewPositions: '查看 →', note: '备注', volume: '数量',
       verify: '标记已核实', exempt: '登记豁免', ignore: '忽略本次',
       exemptTitle: '登记豁免（标的级）', exemptQty: '豁免数量', exemptUntil: '生效至',
       exemptHint: '差异较豁免基准扩大时将重新告警；豁免/清零仅 admin。',
@@ -654,6 +654,7 @@ export default {
       tradeDay: '交易日',
       gap: '缺口',
       scheduleUpdated: '{name} 调度已更新',
+      cronEditTitle: '编辑调度', tpl: '常用模板', tplDaily: '每日收盘后', tplMorning: '每交易日 09:00', tplWeekly: '每周一 09:00',
       confirmSchedule: '确认修改 {name} 的调度为「{cron}」？',
       scheduleUpdateFailed: '调度更新失败，已还原',
       syncFailedMsg: '{name} 失败: {error}',
@@ -676,7 +677,7 @@ export default {
       dailySummary: '当日汇总', totalTrades: '总笔数', buyCount: '买入笔数', sellCount: '卖出笔数',
       totalVolume: '总股数', buyAmount: '买入金额', sellAmount: '卖出金额',
       manualOrders: '人工单登记', manualHint: '登记底仓/场外手动单——回流进对账豁免基准,消除持续差异',
-      pnlPct: '浮盈%', mktValue: '市值',
+      lastPrice: '现价', pnlPct: '浮盈%', mktValue: '市值',
 
       title: '实盘交易看板',
       positions: '持仓', loadFailed: '持仓/账户数据加载失败——显示可能不是真实空仓,请刷新或检查服务',
@@ -1102,7 +1103,7 @@ export default {
     },
     layout: {
       healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页（监控→健康）',
-      helpTitle: '帮助', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：',
+      helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：',
     },
     notify: {
       title: '通知',
@@ -1490,7 +1491,7 @@ export default {
       noData: 'No data',
     },
     backtest: {
-      createLive: 'Create live task', tradeCount: 'Trades',
+      createLive: 'Create live task', sharpeCol: 'Sharpe', dateRangeCol: 'Range', tradeCount: 'Trades',
       annualized: 'Annualized', plRatio: 'P/L ratio',
       sampleThreshold: 'Sample threshold not met ({d}d<90 or {s}<1 symbols), cannot mark verified',
       feePanel: 'Fees & friction: configurable commission (default 0.05%) + stamp tax (sell 0.05%) + transfer fee (0.001%) + slippage + limit-lock no-fill constraint',
@@ -1570,7 +1571,7 @@ export default {
       resetPromptTitle: 'Reset baseline (type to confirm)',
       resetPromptTip: 'Accept current diffs as new baseline (use pre-open). Type RESET to confirm',
       brokerQty: 'Broker qty', derivedQty: 'Derived qty', diff: 'Diff',
-      evidence: 'Evidence', note: 'Note', volume: 'Volume',
+      evidence: 'Evidence', ordersFlow: 'Orders flow', viewOrders: 'View →', posSnapshot: 'Position snapshot', viewPositions: 'View →', note: 'Note', volume: 'Volume',
       verify: 'Verify', exempt: 'Exempt', ignore: 'Ignore',
       exemptTitle: 'Register exemption (per symbol)', exemptQty: 'Exempt qty', exemptUntil: 'Valid until',
       exemptHint: 'Diff growing beyond exempt baseline re-alerts; exempt/reset admin only.',
@@ -1754,6 +1755,7 @@ export default {
       tradeDay: 'Trade Day',
       gap: 'Gap',
       scheduleUpdated: '{name} schedule updated',
+      cronEditTitle: '编辑调度', tpl: '常用模板', tplDaily: '每日收盘后', tplMorning: '每交易日 09:00', tplWeekly: '每周一 09:00',
       confirmSchedule: 'Change schedule of {name} to "{cron}"?',
       scheduleUpdateFailed: 'Schedule update failed, reverted',
       syncFailedMsg: '{name} failed: {error}',
@@ -1776,7 +1778,7 @@ export default {
       dailySummary: 'Daily Summary', totalTrades: 'Trades', buyCount: 'Buy count', sellCount: 'Sell count',
       totalVolume: 'Total vol', buyAmount: 'Buy amt', sellAmount: 'Sell amt',
       manualOrders: 'Manual Orders', manualHint: 'Register base/off-exchange manual orders — feeds reconcile exempt baseline',
-      pnlPct: 'PnL%', mktValue: 'Mkt val',
+      lastPrice: 'Last', pnlPct: 'PnL%', mktValue: 'Mkt val',
 
       title: 'Live Trading Dashboard',
       positions: 'Positions', loadFailed: 'Position/account data failed to load — empty tables may not reflect real holdings, refresh or check services',
@@ -2171,7 +2173,7 @@ export default {
     },
     layout: {
       healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
-      helpTitle: 'Help', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):',
+      helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):',
     },
     notify: {
       title: 'Notifications',

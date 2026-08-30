@@ -19,6 +19,7 @@ const routes = [
 
       // 策略
       { path: 'strategy', name: 'strategy', component: () => import('./views/Strategy.vue') },
+      { path: 'strategy/:id/edit', name: 'strategyEdit', component: () => import('./views/StrategyEdit.vue') },
       { path: 'live-task', name: 'live-task', component: () => import('./views/LiveTask.vue') },
       { path: 'backtest', name: 'backtest', component: () => import('./views/Backtest.vue') },
       { path: 'backtest/:id', name: 'backtest-run', component: () => import('./views/BacktestRun.vue') },

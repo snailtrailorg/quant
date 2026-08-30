@@ -1,7 +1,7 @@
 <template>
   <el-card>
     <template #header>{{ t('channels.manageTitle') }}</template>
-    <el-table :data="channels" stripe>
+    <el-table :data="channels">
       <el-table-column prop="provider" label="Provider" width="120" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column :label="t('common.credential')" width="80">

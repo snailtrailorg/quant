@@ -6,7 +6,7 @@
         <el-button type="primary" @click="showDialog = true">{{ t('pool.createTitle') }}</el-button>
       </div>
     </template>
-    <el-table :data="pools" stripe :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand">
+    <el-table :data="pools" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: 8px 24px">

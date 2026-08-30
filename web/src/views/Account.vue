@@ -13,7 +13,7 @@
           <el-button type="primary" @click="onInvite" :loading="inviting">{{ t('account.invite') }}</el-button>
         </el-form-item>
       </el-form>
-      <el-table :data="users" stripe style="margin-top: 12px">
+      <el-table :data="users" style="margin-top: 12px">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="username" :label="t('account.username')" width="120" />
         <el-table-column prop="nickname" :label="t('profile.nickname')" width="120">
@@ -65,7 +65,7 @@
     <!-- 邀请记录（批次B 可观测：待注册/已用/已过期/已撤销 + 撤销） -->
     <div style="margin-bottom: 20px">
       <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.inviteLog') }}</h3>
-      <el-table :data="invites" stripe>
+      <el-table :data="invites">
         <el-table-column prop="email" :label="t('account.email')" min-width="200" show-overflow-tooltip />
         <el-table-column :label="t('common.status')" width="110">
           <template #default="{ row }">
@@ -89,7 +89,7 @@
     <!-- API 密钥管理 -->
     <div>
       <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.apiKeys') }}</h3>
-      <el-table :data="accounts" stripe>
+      <el-table :data="accounts">
         <el-table-column prop="name" :label="t('common.name')" width="150" />
         <el-table-column prop="exchange" :label="t('account.exchange')" width="120" />
         <el-table-column prop="api_key_hint" :label="t('account.apiKey')" />

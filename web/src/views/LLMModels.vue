@@ -3,7 +3,7 @@
     <template #header>{{ t('llm.configTitle') }}</template>
     <el-card shadow="never" style="margin-bottom: 12px">
       <template #header>{{ t('llm.usageTitle') }}<el-button type="primary" @click="loadUsage" style="margin-left: 8px">{{ t('common.refresh') }}</el-button></template>
-      <el-table :data="usage.month" stripe>
+      <el-table :data="usage.month">
         <el-table-column prop="provider" label="Provider" width="120" />
         <el-table-column prop="model" :label="t('llm.model')" />
         <el-table-column prop="calls" :label="t('llm.calls')" width="80" />
@@ -19,7 +19,7 @@
         {{ t('llm.trend7d') }}<span v-for="tr in usage.trend" :key="tr.date" style="margin-right: 10px">{{ tr.date.slice(5) }} {{tr.calls}}/{{tr.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">{{ t('llm.noTrend') }}</span>
       </div>
     </el-card>
-    <el-table :data="models" stripe>
+    <el-table :data="models">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" />
       <el-table-column prop="provider" label="Provider" width="120" />
@@ -69,7 +69,7 @@
         <el-button type="primary" @click="checkBudget" :loading="checking">{{ t('llm.check') }}</el-button>
       </div>
     </template>
-    <el-table :data="budgets" stripe>
+    <el-table :data="budgets">
       <el-table-column prop="provider" label="Provider" width="120"><template #default="{ row }">{{ row.provider || t('llm.global') }}</template></el-table-column>
       <el-table-column prop="daily_token_limit" :label="t('llm.dailyTokenLimit')" width="120" />
       <el-table-column prop="alert_threshold_pct" :label="t('llm.alertThreshold')" width="100" />

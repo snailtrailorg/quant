@@ -6,7 +6,7 @@
         <el-button type="primary" @click="openCreate">{{ t('factors.create') }}</el-button>
       </div>
     </template>
-    <el-table :data="factors" stripe>
+    <el-table :data="factors">
       <el-table-column prop="name" :label="t('common.name')" width="150" />
       <el-table-column :label="t('factors.category')" width="100">
         <template #default="{ row }"><el-tag>{{ row.category }}</el-tag></template>
@@ -47,7 +47,7 @@
 
     <!-- 被引用策略列表弹窗(P2-7) -->
     <el-dialog v-model="refsDlg" :title="t('factors.refsTitle', { name: refsFactor })" width="480px">
-      <el-table :data="refsList" stripe size="small">
+      <el-table :data="refsList" size="small">
         <el-table-column prop="name" :label="t('common.name')" />
         <el-table-column :label="t('factors.weightInStrategy')" width="80">
           <template #default="{ row }">

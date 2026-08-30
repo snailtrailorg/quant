@@ -46,7 +46,7 @@
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
         <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: 4px" />
       </div></el-card></el-col>
-      <el-col :span="4"><el-card shadow="never"><div class="kpi">
+      <el-col :span="5"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('dashboard.tasksRunning') }}</div>
         <div class="kpi-num">{{ liveTasks.filter(x => x.status === 'running').length }}/{{ liveTasks.length }}</div>
       </div></el-card></el-col>

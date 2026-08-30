@@ -16,5 +16,5 @@ watch(locale, () => { document.title = t('app.title') }, { immediate: true })
 </script>
 
 <style>
-body { margin: 0; font-family: 'Segoe UI', Roboto, sans-serif; }
+body { margin: 0; font-family: var(--font-ui); }
 </style>
