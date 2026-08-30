@@ -24,19 +24,39 @@
         </template>
       </el-table-column>
       <el-table-column :label="t('factors.usedBy')" width="90">
-        <template #default="{ row }">{{ usedByCount(row.name) }}</template>
+        <template #default="{ row }">
+          <el-link v-if="usedByCount(row.name)" type="primary" @click="showRefs(row.name)">{{ usedByCount(row.name) }} ↗</el-link>
+          <span v-else>—</span>
+        </template>
       </el-table-column>
       <el-table-column prop="description" :label="t('common.description')" />
       <el-table-column :label="t('factors.paramsCol')" width="200">
-        <template #default="{ row }">{{ JSON.stringify(row.params) }}</template>
-      </el-table-column>
-      <el-table-column :label="t('common.action')" width="150" v-if="hasCustom">
         <template #default="{ row }">
-          <el-button type="primary" v-if="row.is_custom" @click="openEdit(row)">{{ t('factors.edit') }}</el-button>
-          <el-button v-if="row.is_custom" type="danger" @click="onDelete(row.name)">{{ t('factors.delete') }}</el-button>
+          <el-tag v-for="(v, k) in (row.params || {})" :key="k" size="small" style="margin: 2px">{{ k }}={{ v }}</el-tag>
+          <span v-if="!row.params || !Object.keys(row.params).length">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="200" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" @click="previewFactorFor(row)">{{ t('factors.preview') }}</el-button>
+          <el-button v-if="row.is_custom" size="small" type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+          <el-button v-if="row.is_custom" size="small" type="danger" @click="onDelete(row.name)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 被引用策略列表弹窗(P2-7) -->
+    <el-dialog v-model="refsDlg" :title="t('factors.refsTitle', { name: refsFactor })" width="480px">
+      <el-table :data="refsList" stripe size="small">
+        <el-table-column prop="name" :label="t('common.name')" />
+        <el-table-column :label="t('factors.weightInStrategy')" width="80">
+          <template #default="{ row }">
+            {{ (row.factors || []).find(f => f.name === refsFactor)?.weight ?? '—' }}
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="!refsList.length" style="color: var(--text-secondary); text-align: center; padding: 20px">—</div>
+    </el-dialog>
 
     <!-- 编辑弹窗 -->
     <el-dialog v-model="dialogVisible" :title="isEditing ? t('factors.editFactor') : t('factors.createFactor')" width="720px" :close-on-click-modal="false">
@@ -287,3 +307,24 @@ const loadUsages = async () => {
 }
 onMounted(() => { load(); loadUsages() })
 </script>
+// P2-7(05 §5.5):被引用可点(弹策略列表+各策略权重)+操作列预设因子试算
+const refsDlg = ref(false)
+const refsList = ref([])
+const refsFactor = ref('')
+const showRefs = (fname) => {
+  refsFactor.value = fname
+  refsList.value = (strategies.value || []).filter(st =>
+    (st.factors || []).some(f => f.name === fname))
+  refsDlg.value = true
+}
+const previewFactorFor = async (row) => {
+  try {
+    const res = await api.post('/factors/preview', {
+      code: row.code || '', symbol: preview.value.symbol, freq: preview.value.freq, bars: preview.value.bars,
+      params: row.params || {},
+    })
+    if (res.error) { ElMessage.error(res.error); return }
+    previewData.value = res; previewVisible.value = true
+  } catch (e) { ElMessage.error(String(e)) }
+}
+import { ElMessage as _EM } from 'element-plus'

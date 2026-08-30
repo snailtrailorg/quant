@@ -245,6 +245,7 @@ export default {
     strategy: {
       verifyCol: '验证', lastBtCol: '最近回测',
       runBacktest: '发起回测', saveAndBacktest: '保存并回测',
+      needsDecl: '数据频率声明', needsDaily: '需要日线', needsMinute: '需要分钟线',
       snapshotIsolation: '{n} 个运行中任务仍用旧配方快照，本次修改不生效于存量任务',
       deleteBlocked: '该策略有 {n} 个运行中任务，请先停止任务再删除',
       confirmDeleteName: '确认删除策略 "{name}"？',
@@ -378,6 +379,7 @@ export default {
     backtest: {
       createLive: '以此创建实盘任务', tradeCount: '交易次数',
       annualized: '年化收益', plRatio: '盈亏比',
+      sampleThreshold: '样本门槛不足（区间 {d} 天<90 或标的 {s}<1），不可标记验证——防短区间混入证据链',
       feePanel: '费用与摩擦：佣金可配（默认万5）+ 印花税（卖出 0.05%）+ 过户费（0.001%）+ 滑点可配 + 涨跌停一字板不可成交约束',
       retCol: '收益', ddCol: '回撤', reason: '失败原因',
       commission: '佣金率', r1m: '近1月', r3m: '近3月', r6m: '近6月', r1y: '近1年',
@@ -726,6 +728,8 @@ export default {
     },
     factors: {
       pvParams: '试算参数（标的/频率/根数）',
+      refsTitle: '「{name}」被以下策略引用', weightInStrategy: '权重',
+
       title: '因子库',
       create: '新建',
       dsl: 'DSL表达式',
@@ -1349,6 +1353,7 @@ export default {
       verifyCol: 'Verified', lastBtCol: 'Last backtest',
       verified: 'Verified', unverified: 'Unverified',
       runBacktest: 'Backtest', saveAndBacktest: 'Save & backtest',
+      needsDecl: 'Data freq declaration', needsDaily: 'Needs daily', needsMinute: 'Needs minute',
       snapshotIsolation: '{n} running task(s) still use the old snapshot; this edit does not affect them',
       deleteBlocked: 'Strategy has {n} running task(s); stop them before deleting',
       confirmDeleteName: 'Delete strategy "{name}"?',
@@ -1480,6 +1485,7 @@ export default {
     backtest: {
       createLive: 'Create live task', tradeCount: 'Trades',
       annualized: 'Annualized', plRatio: 'P/L ratio',
+      sampleThreshold: 'Sample threshold not met ({d}d<90 or {s}<1 symbols), cannot mark verified',
       feePanel: 'Fees & friction: configurable commission (default 0.05%) + stamp tax (sell 0.05%) + transfer fee (0.001%) + slippage + limit-lock no-fill constraint',
       retCol: 'Return', ddCol: 'Drawdown', reason: 'Failure',
       commission: 'Commission', r1m: '1M', r3m: '3M', r6m: '6M', r1y: '1Y',
@@ -1807,6 +1813,8 @@ export default {
     },
     factors: {
       pvParams: 'Trial params (symbol/freq/bars)',
+      refsTitle: '"{name}" used by strategies', weightInStrategy: 'Weight',
+
       title: 'Factors',
       create: 'New',
       dsl: 'DSL Expression',

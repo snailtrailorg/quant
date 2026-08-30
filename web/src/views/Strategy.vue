@@ -62,7 +62,12 @@
         </div>
 
         <!-- 模式切换 -->
-        <el-divider content-position="left">{{ t('strategy.mode') }}</el-divider>
+                <!-- P2-2(05 §5.6/16 号 §6):多频率 needs 声明段 -->
+        <el-form-item :label="t('strategy.needsDecl')">
+          <el-checkbox v-model="editForm.needs_daily" :label="t('strategy.needsDaily')" />
+          <el-checkbox v-model="editForm.needs_minute" :label="t('strategy.needsMinute')" style="margin-left: 12px" />
+        </el-form-item>
+<el-divider content-position="left">{{ t('strategy.mode') }}</el-divider>
         <el-form-item :label="t('strategy.mode')">
           <el-radio-group v-model="editForm.mode">
             <el-radio-button value="dsl">{{ t('strategy.dslMode') }}</el-radio-button>
@@ -153,7 +158,7 @@
           <el-select v-model="editForm.volumeType" style="width: 100%">
             <el-option :label="t('strategy.optShares')" value="SHARES" />
             <el-option :label="t('strategy.optPercent')" value="PERCENT" />
-            <el-option :label="t('strategy.optAllIn')" value="ALL_IN" />
+            <el-option :label="t('strategy.optAllIn')" value="ALL_IN（BUY=全部资金 / SELL=清仓持仓）" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('strategy.priceType')">
@@ -249,7 +254,7 @@ const DEFAULT_PYTHON_TEMPLATE = `def on_bar(ctx):
 const editForm = ref({
   id: '', name: '', enabled: true,
   mode: 'dsl',
-  factors: [], aggregator: { threshold_buy: 0.3, threshold_sell: -0.3 },
+  factors: [], aggregator: { threshold_buy: 0.3, threshold_sell: -0.3 }, needs_daily: true, needs_minute: false,
   dslExpr: '', pythonCode: DEFAULT_PYTHON_TEMPLATE,
   volumeType: 'SHARES', priceType: 'LIMIT', orderValidity: 'DAY',
   parameterDefs: [],
@@ -323,7 +328,7 @@ const openCreate = () => {
   editForm.value = {
     id: '', name: '', enabled: true,
     mode: 'dsl',
-    factors: [], aggregator: { threshold_buy: 0.3, threshold_sell: -0.3 },
+    factors: [], aggregator: { threshold_buy: 0.3, threshold_sell: -0.3 }, needs_daily: true, needs_minute: false,
     dslExpr: '', pythonCode: DEFAULT_PYTHON_TEMPLATE,
     volumeType: 'SHARES', priceType: 'LIMIT', orderValidity: 'DAY',
     parameterDefs: [],

@@ -69,7 +69,14 @@ const equityOption = computed(() => ({
   yAxis: { type: 'value', scale: true },
   series: [{
     name: t('trading.equity'), type: 'line', data: dailyValues.value.map(d => d.value),
-    smooth: true, lineStyle: { width: 2 }, areaStyle: { opacity: 0.1 },
+    smooth: true, lineStyle: { width: 2 ,
+            markPoint: {
+              data: [
+                ...buyPoints.map(p => ({ coord: [p.ts, p.price], value: 'B', itemStyle: { color: 'var(--up)' } })),
+                ...sellPoints.map(p => ({ coord: [p.ts, p.price], value: 'S', itemStyle: { color: 'var(--down)' } })),
+              ],
+              symbolSize: 30,
+            }}, areaStyle: { opacity: 0.1 },
   }],
 }))
 
@@ -123,3 +130,17 @@ onUnmounted(() => { if (eventSource) { eventSource.onmessage = null; eventSource
 .stat .label { color: #909399; font-size: 13px; }
 .stat .value { font-size: 24px; font-weight: bold; color: #303133; margin-top: 4px; }
 </style>
+
+// P2-5(05 §5.7):B/S 买卖点 markPoint
+const buyPoints = computed(() => (trades.value || []).filter(t => t.action === 'BUY').map(t => ({ ts: (t.ts || '').slice(0, 10), price: t.price })))
+const sellPoints = computed(() => (trades.value || []).filter(t => t.action === 'SELL').map(t => ({ ts: (t.ts || '').slice(0, 10), price: t.price })))
+const trades = ref([])
+
+// P2-5(05 §5.7):同窗实盘净值对照
+const livePnl = ref([])
+const loadLivePnl = async () => {
+  try { const p = await api.get('/pnl'); livePnl.value = (p.curve || []).filter(c => {
+    const d = (c.ts || '').slice(0, 10)
+    return d >= route.params.start && d <= route.params.end
+  }) } catch {}
+}

@@ -86,6 +86,13 @@ const createLiveFromRun = () => {
   router.push({ path: '/live-task', query: { strategy: run.value.strategy_config_id } })
 }
 const markVerified = async () => {
+  // P2-5(05 §5.7):最低验证样本门槛——防短区间单标的 done run 混入证据链
+  const days = run.value?.date_range_days || 0
+  const syms = run.value?.symbols?.length || 0
+  if (days < 90 || syms < 1) {
+    ElMessage.warning(t('backtest.sampleThreshold', { d: days, s: syms }))
+    return
+  }
   try {
     await ElMessageBox.confirm(t('backtest.confirmVerify'), t('common.confirm'), { type: 'warning' })
     await verifyStrategy(run.value.strategy_config_id)
