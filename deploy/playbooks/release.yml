@@ -472,8 +472,7 @@
         cur=$(readlink -f '{{ deploy_root }}/server' 2>/dev/null || true)
         [ -n "$cur" ] || { echo "（无 server 指向，跳过 GC）"; exit 0; }
         # web 工件化批：web 链接指向目录本体（dirname(readlink)——含 legacy 形态）同款跳过，防删被指版=前端 404
-        curw_dir=$(readlink -f '{{ deploy_root }}/web' 2>/dev/null | xargs -r dirname) || true
-        [ -n "$curw_dir" ] || true
+        curw_dir=$(readlink -f '{{ deploy_root }}/web' 2>/dev/null | xargs -r dirname)
         # 被钉项：quant-pinned 特权通道（v3.3——与 postverify 版本收敛断言共用，双盲 P1 共用要求；
         # v3.2 为 deploy_proc_cwd_read 直扫 /proc，prod deploy 用户无权读 quant 进程 cwd）
         # 双盲 P2-B2：通道故障（非零）跳过本轮 GC 并告警——不因探测失败把被钉版当孤儿删
@@ -488,7 +487,7 @@
           id=$(basename "$d")
           [ -e "$d/.deployed" ] && continue
           [ "$rel/$id" = "$cur" ] && continue
-          [ "$d" = "$curw_dir" ] && continue
+          [ "$rel/$id" = "$curw_dir" ] && continue
           if is_pinned "$id"; then echo "跳过钉住孤儿: $id"; continue; fi
           rm -rf "$d" && echo "GC 孤儿 staged: $id"
         done
