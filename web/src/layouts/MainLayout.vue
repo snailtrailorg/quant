@@ -31,7 +31,7 @@
           <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="ops" v-if="['admin', 'analyst'].includes(role)">
+        <el-sub-menu index="ops" v-if="role === 'admin'">
           <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
           <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
           <el-menu-item index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
@@ -224,6 +224,17 @@ const loadHealth = async () => {
     healthItems.value = items.slice(0, 8)
     healthLevel.value = items.some(i => !i.ok) ? 'critical' : 'ok'
   } catch { healthItems.value = [{ k: 'health', ok: false, v: '—' }]; healthLevel.value = 'warn' }
+}
+// 13号审查:runbook 前端静态映射(category+code→帮助文档锚点)
+const runbookMap = {
+  'risk_halt': { path: '/help', anchor: '#risk' },
+  'risk_resume': { path: '/help', anchor: '#risk' },
+  'data_missing': { path: '/help', anchor: '#data' },
+  'task_failure': { path: '/live-task', anchor: '' },
+}
+const goRunbook = (cat, code) => {
+  const r = runbookMap[cat + '_' + code] || runbookMap[cat] || { path: '/help', anchor: '' }
+  router.push(r.path + (r.anchor ? r.anchor : ''))
 }
 const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')
 loadHealth()

@@ -39,6 +39,7 @@
       </el-form-item>
     </el-form>
     <div style="color: #909399; font-size: 12px">{{ t('smtp.hint') }}</div>
+    <el-link type="primary" @click="$router.push('/observe?tab=logs')" style="margin-top: 8px">{{ t('smtp.viewOutbox') }} →</el-link>
   </el-card>
 </template>
 

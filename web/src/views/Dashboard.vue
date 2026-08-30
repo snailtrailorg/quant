@@ -31,7 +31,9 @@
       <el-col :span="5"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.totalAssets') }}</div>
         <div class="kpi-num">{{ fmtMoney(dashboard.total_value) }}</div>
-        <div class="sparkline">{{ sparkline }}</div>
+        <svg class="sparkline-svg" width="100%" height="24" viewBox="0 0 100 24">
+          <polyline v-if="sparklinePoints.length" :points="sparklinePoints" fill="none" stroke="var(--up)" stroke-width="1.5" />
+        </svg>
       </div></el-card></el-col>
       <el-col :span="5"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.todayPnl') }}</div>
@@ -218,6 +220,12 @@ onMounted(async () => {
 // KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
 
 // KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
+const sparklinePoints = computed(() => {
+  const vals = rangeCurve.value.slice(-7).map(c => c.value)
+  if (vals.length < 2) return ''
+  const min = Math.min(...vals), max = Math.max(...vals), range = max - min || 1
+  return vals.map((v, i) => `${i * 100 / (vals.length - 1)},${24 - (v - min) / range * 20}`).join(' ')
+})
 const sparkline = computed(() => {
   const vals = curve.value.slice(-7).map(c => c.value)
   if (vals.length < 2) return ''

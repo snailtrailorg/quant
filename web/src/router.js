@@ -15,7 +15,7 @@ const routes = [
 
       // 交易
       { path: 'trading', name: 'trading', component: () => import('./views/Trading.vue') },
-      { path: 'monitoring', name: 'monitoring', component: () => import('./views/Monitoring.vue') },
+      { path: 'monitoring', redirect: '/live-task' },
 
       // 策略
       { path: 'strategy', name: 'strategy', component: () => import('./views/Strategy.vue') },
@@ -46,23 +46,23 @@ const routes = [
       { path: 'reconcile', name: 'reconcile', component: () => import('./views/Reconcile.vue') },
 
       // 系统 (Admin)
-      { path: 'account', name: 'account', component: () => import('./views/Account.vue'), meta: { admin: true } },
-      { path: 'help', name: 'help', component: () => import('./views/Help.vue') },
-      { path: 'health', name: 'health', component: () => import('./views/Health.vue'), meta: { admin: true } },
-      { path: 'logs', name: 'logs', component: () => import('./views/Logs.vue'), meta: { admin: true } },
-      { path: 'data-manage', name: 'data-manage', component: () => import('./views/DataManage.vue'), meta: { admin: true } },
-      { path: 'data-integrity', name: 'data-integrity', component: () => import('./views/DataIntegrity.vue'), meta: { admin: true } },
+      { path: 'account', redirect: '/settings?tab=users' },
+      { path: 'help', redirect: '/observe?tab=health' },
+      { path: 'health', redirect: '/observe?tab=health' },
+      { path: 'logs', redirect: '/observe?tab=logs' },
+      { path: 'data-manage', redirect: '/dataops?tab=sync' },
+      { path: 'data-integrity', redirect: '/dataops?tab=integrity' },
       { path: 'data-manage/:syncId', name: 'symbol-manage', component: () => import('./views/SymbolManage.vue'), meta: { admin: true } },
-      { path: 'audit', name: 'audit', component: () => import('./views/Audit.vue'), meta: { admin: true } },
-      { path: 'llm-models', name: 'llm-models', component: () => import('./views/LLMModels.vue'), meta: { admin: true } },
-      { path: 'data-sources', name: 'data-sources', component: () => import('./views/DataSources.vue'), meta: { admin: true } },
+      { path: 'audit', redirect: '/observe?tab=audit' },
+      { path: 'llm-models', redirect: '/integrations?tab=llm' },
+      { path: 'data-sources', redirect: '/integrations?tab=sources' },
       { path: 'tasks', redirect: '/dataops?tab=sched' },
-      { path: 'channels', name: 'channels', component: () => import('./views/Channels.vue'), meta: { admin: true } },
-      { path: 'brokers', name: 'brokers', component: () => import('./views/Brokers.vue'), meta: { admin: true } },
+      { path: 'channels', redirect: '/integrations?tab=push' },
+      { path: 'brokers', redirect: '/integrations?tab=brokers' },
       { path: 'risk-rules', name: 'risk-rules', component: () => import('./views/RiskRules.vue'), meta: { admin: true } },
-      { path: 'im-bots', name: 'im-bots', component: () => import('./views/ImBots.vue'), meta: { admin: true } },
+      { path: 'im-bots', redirect: '/integrations?tab=im' },
       { path: 'feishu', redirect: '/im-bots' },   // 19 号批 2:旧路由重定向
-      { path: 'system-config', name: 'system-config', component: () => import('./views/SystemConfig.vue'), meta: { admin: true } },
+      { path: 'system-config', redirect: '/settings?tab=run' },
     ],
   },
 ]
