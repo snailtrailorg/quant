@@ -8,11 +8,3 @@ quant-staging:
       ansible_user: deploy
       ansible_ssh_private_key_file: ~/.ssh/quant_deploy_ed25519
       ansible_python_interpreter: /usr/bin/python3
-
-quant_root:
-  hosts:
-    staging-root.local:
-      ansible_host: 127.0.0.1
-      ansible_port: 22
-      ansible_user: michael            # 本地 michael（同 prod 通道语义）
-      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
