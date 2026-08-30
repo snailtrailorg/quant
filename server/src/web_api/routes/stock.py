@@ -184,37 +184,25 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
                    b.conv_price, b.maturity_date,
                    cd.close AS bond_close,
                    sd.close AS stk_close,
-                   CASE WHEN b.conv_price > 0 AND sd.close > 0
+                   CASE WHEN b.conv_price > 0 AND sd.close > 0 AND cd.close > 0
                         THEN cd.close + 100.0 * b.conv_price / sd.close END AS double_low,
-                   CASE WHEN b.conv_price > 0 AND sd.close > 0
+                   CASE WHEN b.conv_price > 0 AND sd.close > 0 AND cd.close > 0
                         THEN (cd.close - 100.0 * b.conv_price / sd.close)
                              / (100.0 * b.conv_price / sd.close) * 100 END AS premium_pct
             FROM cb_basic_info b
             LEFT JOIN (
-                SELECT ts_code, close FROM cb_daily
-                WHERE trade_date = (SELECT max(trade_date) FROM cb_daily)
-            ) cd ON cd.ts_code = b.ts_code
+                SELECT symbol, close FROM bar_1d
+                WHERE ts::date = (SELECT max(ts)::date FROM bar_1d)
+            ) cd ON cd.symbol = replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE')
             LEFT JOIN (
                 SELECT d.ts_code, d.close FROM daily_basic d
                 WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)
-            ) sd ON ('%s.' || split_part(b.stk_code, '.', 1)) = sd.ts_code
-            WHERE b.delist_date IS NULL
+            ) sd ON b.stk_code = sd.ts_code
+            WHERE b.list_date <= to_char(now(), 'YYYYMMDD') AND (b.delist_date IS NULL OR b.delist_date > to_char(now(), 'YYYYMMDD'))
             ORDER BY double_low NULLS LAST
             LIMIT %s
         """, (limit,))
         rows = cur.fetchall()
-    out = []
-    for r in rows:
-        dl = _f(r[7])
-        pp = _f(r[8])
-        if double_low_max > 0 and (dl is None or dl > double_low_max): continue
-        if premium_max > 0 and (pp is None or pp > premium_max): continue
-        out.append({"ts_code": r[0], "name": r[1], "stk_code": r[2], "stk_name": r[3],
-                    "conv_price": _f(r[4]), "maturity_date": str(r[5]) if r[5] else "",
-                    "bond_close": _f(r[6]), "stk_close": _f(r[7 - 1]) if False else _f(r[7 - 1]) if False else None,
-                    "double_low": dl, "premium_pct": pp})
-    # stk_close 在 r[7-1]=r[6] 位置? 不——SQL 返回顺序: ts,name,stk_ts,stk_name,conv,maturity,bond_close,stk_close,double_low,premium → r[7]=stk_close,r[8]=dl,r[9]=pp
-    # 修正索引(上面 SQL SELECT 顺序: 0=ts,1=name,2=stk,3=stk_name,4=conv,5=mat,6=bond_close,7=stk_close,8=dl,9=pp)
     out = []
     for r in rows:
         dl, pp = _f(r[8]), _f(r[9])
