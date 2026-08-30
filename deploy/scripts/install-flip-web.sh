@@ -31,10 +31,13 @@ W="$Q/web"
 if [ -L "$W" ]; then
   echo "✓ ③ web 链接已在（no-op）: $(readlink "$W")"
 elif [ -d "$W" ]; then
+  rm -f "$Q/web.tmp"                                  # 08-30 prod 实测残留清理（dangling 链接）
   ts=$(date +%Y%m%d%H%M%S); legacy="$Q/releases/web-legacy-$ts"
-  mkdir -p "$Q/releases"
-  mv "$W" "$legacy/web" && touch "$legacy/.deployed"
-  ln -sfn "$legacy/web" "$Q/web.tmp" && mv -T "$Q/web.tmp" "$Q/web"
+  mkdir -p "$legacy"                                  # 08-30 prod 实测根因：父目录缺失致 mv 失败
+  mv "$W" "$legacy/web" || { echo "❌ mv 失败（web 未动）"; exit 1; }
+  touch "$legacy/.deployed"
+  ln -sfn "$legacy/web" "$Q/web.tmp"
+  mv -T "$Q/web.tmp" "$Q/web" || { echo "❌ 原子建链失败（web 已在 legacy，链接未换）"; exit 1; }
   echo "✓ ③ web 实目录→ $legacy/web 并建链（毫秒窗；.deployed 防 GC 孤儿删）"
 else
   echo "✓ ③ web 不存在（no-op；首次 release 建链）"
