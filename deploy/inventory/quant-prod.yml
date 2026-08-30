@@ -12,3 +12,11 @@ quant-prod:
       ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
       # al8 默认 python3.6 过老（ansible-core 2.17 需 >=3.10）——设计稿 §7: dnf install python39 rsync
       ansible_python_interpreter: /usr/bin/python3.11  # 服务器已有（venv 同源），免装 python39
+
+quant_root:
+  hosts:
+    quant.snailtrail.cc:
+      ansible_host: 120.24.235.98
+      ansible_port: 22
+      ansible_user: michael            # web 工件化装位通道（bootstrap-web.yml）——root 级 become 经 michael
+      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'

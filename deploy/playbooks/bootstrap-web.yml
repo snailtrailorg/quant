@@ -1,0 +1,72 @@
+---
+# bootstrap-web.yml —— web 工件化批装位 playbook（2026-08-30）
+#
+# 通道：michael ssh（root 不直连/deploy 无 sudo 的三权分立下，root 级装位经 michael become）
+# 运行（控制机 deploy/ 目录；--ask-pass=michael ssh 密码，--ask-become-pass=michael sudo 密码）：
+#   staging: .venv/bin/ansible-playbook -i inventory/quant-staging.yml playbooks/bootstrap-web.yml --ask-pass --ask-become-pass
+#   prod:    .venv/bin/ansible-playbook -i inventory/quant-prod.yml   playbooks/bootstrap-web.yml --ask-pass --ask-become-pass
+#
+# 三件套（幂等，可重复跑）：
+#   ① quant-flip-web wrapper → /usr/local/sbin（root 属主 755）
+#   ② sudoers 白名单 +flip-web（absent 才改；visudo 校验后才落）
+#   ③ web 链接迁移三分支（链接在=no-op/目录在=毫秒窗迁移/不存在=no-op）
+- hosts: quant_root
+  gather_facts: false
+  vars:
+    wrapper_src: "{{ playbook_dir }}/../wrappers/quant-flip-web"
+    qroot: /data/websites/snailtrail.cc/quant
+  tasks:
+    - name: 上传 wrapper → /tmp（暂存；root 装位由 become 完成）
+      ansible.builtin.copy:
+        src: "{{ wrapper_src }}"
+        dest: /tmp/quant-flip-web
+        mode: "0755"
+
+    - name: ① 装位 wrapper → /usr/local/sbin（root:root 755）
+      ansible.builtin.command: install -o root -g root -m 755 /tmp/quant-flip-web /usr/local/sbin/quant-flip-web
+      become: true
+      changed_when: true
+
+    - name: ② sudoers 现状采集
+      ansible.builtin.command: grep -c quant-flip-web /etc/sudoers.d/quant-deploy
+      become: true
+      register: sudoers_has
+      changed_when: false
+      failed_when: false
+
+    - name: ② sudoers 加白（absent 才改）
+      ansible.builtin.shell: |
+        set -eu
+        f=/etc/sudoers.d/quant-deploy
+        sed -i 's#/usr/local/sbin/quant-flip-server,#/usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-flip-web,#' "$f"
+        visudo -cf "$f" >/dev/null || { echo "✗ visudo 校验失败"; exit 1; }
+      become: true
+      when: (sudoers_has.stdout | default('0')) | int == 0
+      changed_when: true
+
+    - name: ③ web 迁移三分支（幂等；目录在=毫秒窗 mv+建链，链接/不存在=no-op）
+      ansible.builtin.shell: |
+        set -eu
+        W="{{ qroot }}/web"
+        if [ -L "$W" ]; then
+          echo "no-op: web 链接已在 → $(readlink "$W")"
+        elif [ -d "$W" ]; then
+          ts=$(date +%Y%m%d%H%M%S); legacy="{{ qroot }}/releases/web-legacy-$ts"
+          mkdir -p "{{ qroot }}/releases"
+          mv "$W" "$legacy/web" && touch "$legacy/.deployed"
+          ln -sfn "$legacy/web" "{{ qroot }}/web.tmp" && mv -T "{{ qroot }}/web.tmp" "$W"
+          echo "migrated: web → $legacy/web（毫秒窗）"
+        else
+          echo "no-op: web 不存在（首次 release 建链）"
+        fi
+      become: true
+      changed_when: true
+
+    - name: 验证 —— wrapper/sudoers/链接三态回读
+      ansible.builtin.shell: |
+        set -u
+        ls -l /usr/local/sbin/quant-flip-web
+        grep -o 'quant-flip-web' /etc/sudoers.d/quant-deploy | head -1
+        readlink "{{ qroot }}/web" 2>/dev/null || echo "（web 链接未建——staging 首次为正常）"
+      become: true
+      changed_when: false
