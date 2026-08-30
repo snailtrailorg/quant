@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# quant-flip-web —— web 符号链接原子切换（web 工件化批 2026-08-30，复刻 quant-flip-server 模式）
+#
+# 属主约束（同 flip-server）: root:root 755，部署于 /usr/local/sbin/quant-flip-web。
+#   父目录 quant/ 750 无 w——deploy 无法自行改链接，本 wrapper 是唯一修改通道。
+#
+# 原子切换: ln -sfn <target> web.tmp && mv -T web.tmp web（同 fs rename(2)，nginx 观察者无中间态）
+#
+# 严参校验（盲审 A-P1-1/B-P1-4，与 flip-server 差异点）:
+#   ①预检目标为 releases/<release_id>/web 子目录（非 release 根）——历史 release 无 web/，
+#     切过去=前端全 404，必须在 wrapper 层拒；
+#   ②web 现为实目录（bootstrap 未迁移）→ 明确报错引 bootstrap，不静默处理。
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+
+[ $# -eq 1 ] || { echo "用法: quant-flip-web <release_id>" >&2; exit 2; }
+release_id=$1
+
+if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
+  echo "✗ release_id 非法（须匹配 ^[0-9]{12}-[a-f0-9]{7,}\$）: $release_id" >&2
+  exit 2
+fi
+
+target="$ROOT/releases/$release_id/web"
+if [ ! -d "$target" ]; then
+  echo "✗ 目标无 web/ 工件（该 release 无前端产物——回滚到本批前历史版请走 legacy 兜底）: $target" >&2
+  exit 1
+fi
+if [ -d "$ROOT/web" ] && [ ! -L "$ROOT/web" ]; then
+  echo "✗ $ROOT/web 是实目录——先跑 bootstrap 迁移步骤（web 工件化批，一次性）" >&2
+  exit 1
+fi
+
+ln -sfn "$target" "$ROOT/web.tmp"
+mv -T "$ROOT/web.tmp" "$ROOT/web"
+echo "✓ web → $target"

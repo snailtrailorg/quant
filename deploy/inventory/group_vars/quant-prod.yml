@@ -8,6 +8,7 @@ deploy_sudo_root: "sudo"             # deploy ALL=(root) NOPASSWD: QUANT_DEPLOY_
 deploy_sudo_quant: "sudo -u quant"   # deploy ALL=(quant) NOPASSWD: QUANT_DEPLOY_QUANT
 quant_svc_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-svc') | trim }}"
 quant_flip_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-server') | trim }}"
+quant_flip_web_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-web') | trim }}"   # web 工件化批 2026-08-30
 quant_install_units_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-install-units') | trim }}"
 quant_pinned_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pinned') | trim }}"   # v3.3: 被钉 release 探测（root 特权读 /proc/cwd）
 quant_alembic_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-alembic-wrapper') | trim }}"

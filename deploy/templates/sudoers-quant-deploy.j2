@@ -10,7 +10,7 @@ Defaults env_reset
 #   - wrapper 严参校验: release_id ^\d{12}-[a-f0-9]{7,}$ 且限定 releases/ 下；
 #     unit ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$；which ∈ live|feishu（quant-dbro）
 #   - quant-dbro 为 quant 属主（唯一例外: 本体即以 quant 跑，DB 连接封装其内走 PG peer 免密）
-Cmnd_Alias QUANT_DEPLOY_ROOT = /usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-install-units, \
+Cmnd_Alias QUANT_DEPLOY_ROOT = /usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-flip-web, /usr/local/sbin/quant-install-units, \
                                /usr/local/sbin/quant-pinned
 Cmnd_Alias QUANT_DEPLOY_SYS  = /usr/local/sbin/quant-svc
 Cmnd_Alias QUANT_DEPLOY_QUANT = /usr/local/sbin/quant-alembic-wrapper, \

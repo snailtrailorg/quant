@@ -31,7 +31,7 @@ chmod 600 /home/deploy/.ssh/authorized_keys
 
 echo "== 4 wrappers 装位（root 属主 755；quant-dbro 唯一 quant 属主）=="
 install -m 755 -o root -g root \
-  "$SRC"/quant-{svc,flip-server,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned} \
+  "$SRC"/quant-{svc,flip-server,flip-web,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned} \
   /usr/local/sbin/
 install -m 755 -o quant -g quant "$SRC/quant-dbro" "$SRC/quant-hbcheck" /usr/local/sbin/
 
@@ -44,6 +44,22 @@ chown deploy:deploy "$Q/releases" "$Q/var"
 for r in "$Q"/releases/*; do
   [ -d "$r" ] && touch "$r/.deployed"
 done   # var=部署状态区（指纹/freeze 快照）——3b-1 曾建为 quant 属主，此处归位
+
+
+echo "== 5.5 web 工件化迁移（2026-08-30 批;三分支幂等——B-P0-2）=="
+W="$Q/web"
+if [ -L "$W" ]; then
+  echo "  web 链接已在（no-op）: $(readlink "$W")"
+elif [ -d "$W" ]; then
+  ts=$(date +%Y%m%d%H%M%S)
+  legacy="$Q/releases/web-legacy-$ts"
+  mkdir -p "$Q/releases"
+  mv "$W" "$legacy/web" && touch "$legacy/.deployed"
+  ln -sfn "$legacy/web" "$Q/web.tmp" && mv -T "$Q/web.tmp" "$Q/web"
+  echo "  web 实目录→归位 $legacy 并建链（毫秒窗;B-P1-3 形态统一+.deployed 防 GC 孤儿删）"
+else
+  echo "  web 不存在（no-op;首次 release 建链）"
+fi
 
 echo "== 6 目标机前置（python3.11 已在=venv 同源；rsync assert）=="
 /usr/bin/python3.11 --version

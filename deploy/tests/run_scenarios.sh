@@ -113,6 +113,24 @@ else
   FAILED=$((FAILED + 1))
 fi
 
+# ---------- 附加断言: quant-flip-web 负例（web 工件化批 2026-08-30——严参/无 web 工件/实目录拒） ----------
+echo "[W3] quant-flip-web 负例"
+FW=$DEPLOY/wrappers/quant-flip-web
+R_FW=202608260080-0000fff
+mkdir -p "$ROOT/releases/$R_FW"                              # 有 release 根、无 web/ 子目录（历史版形态）
+QUANT_DEPLOY_ROOT="$ROOT" bash "$FW" >/dev/null 2>&1; F1=$?  # 负例1: 缺参
+QUANT_DEPLOY_ROOT="$ROOT" bash "$FW" bad-id >/dev/null 2>&1; F2=$?   # 负例2: 非法 id
+QUANT_DEPLOY_ROOT="$ROOT" bash "$FW" "$R_FW" >/dev/null 2>&1; F3=$?  # 负例3: 目标无 web/（A-P1-1 核心）
+mkdir -p "$ROOT/web"                                          # 负例4 道具: web 实目录（未迁移形态）
+QUANT_DEPLOY_ROOT="$ROOT" bash "$FW" "$R_FW" >/dev/null 2>&1; F4=$?
+rm -rf "$ROOT/web" "$ROOT/releases/$R_FW"                     # 道具清理（校验全在切换前，零副作用）
+if [ $F1 -eq 2 ] && [ $F2 -eq 2 ] && [ $F3 -eq 1 ] && [ $F4 -eq 1 ]; then
+  scenario_row W3 "flip-web负例" "2/2/1/1" "$F1/$F2/$F3/$F4" "PASS（严参+无工件+实目录拒）"
+else
+  scenario_row W3 "flip-web负例" "2/2/1/1" "$F1/$F2/$F3/$F4" "FAIL"
+  FAILED=$((FAILED + 1))
+fi
+
 # ---------- 附加断言: quant-dbro 负例（v3.3——越权 which/多余参数/沙箱 SQL 错误非零） ----------
 # 沙箱模式 QUANT_DBRO_SQL_DIR 道具: <which>.out=stdout，<which>.err=模拟 DB 错误；
 # 每个场景的 preflight 已顺带回归 wrapper 正通道（sandbox group_vars source=db 走空清单道具）

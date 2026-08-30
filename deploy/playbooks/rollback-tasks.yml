@@ -152,6 +152,22 @@
   register: freeze_diff
   changed_when: false
 
+- name: 回滚收尾 —— web 链接跟随（web 工件化批 2026-08-30；置于主回滚成败之后——B-P0-1:web 失败不阻断救火）
+  ansible.builtin.shell: |
+    set -u
+    root='{{ deploy_root }}'
+    tgt="$root/releases/{{ rollback_target | default('') }}/web"
+    if [ -n "{{ rollback_target | default('') }}" ] && [ -d "$tgt" ]; then
+      {{ quant_flip_web_cmd }} {{ rollback_target }}
+      echo "✓ web → $tgt"
+    else
+      echo "⚠ 回滚目标 {{ rollback_target | default('(空)') }} 无 web/ 工件（本批前历史版）——web 链接保持现指向: $(readlink "$root/web" 2>/dev/null || echo '（无）')；GC 已防其被删"
+    fi
+  args:
+    executable: /bin/bash
+  failed_when: false
+  changed_when: true
+
 - name: 回滚收尾 —— diff 摘要回显
   ansible.builtin.debug:
     msg: "{{ freeze_diff.stdout }}"

@@ -39,11 +39,27 @@ chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/
 
 echo "== 5 wrappers + run-current 装位（同产路径）=="
 install -m 755 -o root -g root \
-  "$REPO"/deploy/wrappers/quant-{svc,flip-server,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned} \
+  "$REPO"/deploy/wrappers/quant-{svc,flip-server,flip-web,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned} \
   /usr/local/sbin/
 install -m 755 -o quant -g quant \
   "$REPO"/deploy/wrappers/quant-{dbro,hbcheck} /usr/local/sbin/
 install -m 755 -o root -g root "$REPO/deploy/wrappers/run-current" "$Q/bin/run-current"
+
+
+echo "== 5.5 web 工件化迁移（2026-08-30 批;三分支幂等——B-P0-2）=="
+W="$Q/web"
+if [ -L "$W" ]; then
+  echo "  web 链接已在（no-op）: $(readlink "$W")"
+elif [ -d "$W" ]; then
+  ts=$(date +%Y%m%d%H%M%S)
+  legacy="$Q/releases/web-legacy-$ts"
+  mkdir -p "$Q/releases"
+  mv "$W" "$legacy/web" && touch "$legacy/.deployed"
+  ln -sfn "$legacy/web" "$Q/web.tmp" && mv -T "$Q/web.tmp" "$Q/web"
+  echo "  web 实目录→归位 $legacy 并建链（毫秒窗;B-P1-3 形态统一+.deployed 防 GC 孤儿删）"
+else
+  echo "  web 不存在（no-op;首次 release 建链）"
+fi
 
 echo "== 6 venv 复刻（cp 现成树 + shebang 一次性重指 + 归 quant）=="
 if [ ! -x "$Q/shared/venv/bin/python" ]; then

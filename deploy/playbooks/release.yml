@@ -69,6 +69,14 @@
         that: df_free.stdout_lines[-1] | regex_replace('[^0-9]', '') | int >= deploy_min_disk_mb
         msg: "磁盘余量不足: {{ df_free.stdout_lines[-1] }}（要求 ≥ {{ deploy_min_disk_mb }}M）"
 
+    - name: preflight —— 前端构建（控制机 npm run build；web 工件化批 2026-08-30）
+      ansible.builtin.command: npm run build
+      args:
+        chdir: "{{ playbook_dir | dirname | dirname }}/web"
+      delegate_to: localhost
+      run_once: true
+      changed_when: true
+
     - name: preflight —— rsync 在位检查（synchronize 前提；服务器仍按 §7 assert）
       ansible.builtin.command: rsync --version
       register: rsync_ok
@@ -132,7 +140,7 @@
       ansible.builtin.shell: |
         set -u
         rc=0
-        for w in quant-dbro quant-pinned quant-hbcheck; do   # 2026-08-27 P1-2：hbcheck 曾漏探针
+        for w in quant-dbro quant-pinned quant-hbcheck quant-flip-web; do   # P1-2 教训+web 工件化批：flip-web 漏装会在阶段 6 server 已切后才爆=无谓回滚
           p='{{ deploy_wrapper_dir }}/'"$w"
           if [ ! -x "$p" ]; then
             echo "✗ wrapper 不存在或不可执行: $p（prod 由 3b-2 bootstrap 装位 /usr/local/sbin；沙箱为仓库 wrappers/）" >&2
@@ -187,6 +195,15 @@
               - "--exclude=*.pyc"
               - "--delete"
           loop: "{{ deploy_sync_whitelist }}"
+
+        - name: 阶段 2 —— web/dist 同步 → releases/<id>/web/（web 工件化批；不入白名单=不进 server 指纹体系）
+          ansible.posix.synchronize:
+            src: "{{ playbook_dir | dirname | dirname }}/web/dist/"
+            dest: "{{ deploy_root }}/releases/{{ release_id }}/web/"
+            rsync_opts:
+              - "--exclude=__pycache__"
+              - "--exclude=*.pyc"
+              - "--delete"
 
         - name: 阶段 2 —— RELEASE 标记写入（本版 id；沙箱 healthz 桩回带）
           ansible.builtin.copy:
@@ -302,6 +319,10 @@
       block:
         - name: 阶段 6 —— 原子切换（quant-flip-server：ln -sfn + mv -T）
           ansible.builtin.command: "{{ quant_flip_cmd }} {{ release_id }}"
+          changed_when: true
+
+        - name: 阶段 6 —— web 原子切换（quant-flip-web；前端工件随版，rollback/GC 配套）
+          ansible.builtin.command: "{{ quant_flip_web_cmd }} {{ release_id }}"
           changed_when: true
 
         - name: 阶段 6 —— 单元变更判定（scripts/systemd 切片指纹）
@@ -450,6 +471,9 @@
         rel='{{ deploy_root }}/releases'
         cur=$(readlink -f '{{ deploy_root }}/server' 2>/dev/null || true)
         [ -n "$cur" ] || { echo "（无 server 指向，跳过 GC）"; exit 0; }
+        # web 工件化批：web 链接指向目录本体（dirname(readlink)——含 legacy 形态）同款跳过，防删被指版=前端 404
+        curw_dir=$(readlink -f '{{ deploy_root }}/web' 2>/dev/null | xargs -r dirname) || true
+        [ -n "$curw_dir" ] || true
         # 被钉项：quant-pinned 特权通道（v3.3——与 postverify 版本收敛断言共用，双盲 P1 共用要求；
         # v3.2 为 deploy_proc_cwd_read 直扫 /proc，prod deploy 用户无权读 quant 进程 cwd）
         # 双盲 P2-B2：通道故障（非零）跳过本轮 GC 并告警——不因探测失败把被钉版当孤儿删
@@ -464,6 +488,7 @@
           id=$(basename "$d")
           [ -e "$d/.deployed" ] && continue
           [ "$rel/$id" = "$cur" ] && continue
+          [ "$d" = "$curw_dir" ] && continue
           if is_pinned "$id"; then echo "跳过钉住孤儿: $id"; continue; fi
           rm -rf "$d" && echo "GC 孤儿 staged: $id"
         done
@@ -474,6 +499,7 @@
         remove=""
         for id in $done_ids; do
           [ "$rel/$id" = "$cur" ] && continue
+          [ "$rel/$id" = "$curw_dir" ] && continue
           if is_pinned "$id"; then echo "跳过钉住项: $id"; continue; fi
           remove="$remove $id"
         done
