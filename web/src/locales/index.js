@@ -129,7 +129,7 @@ export default {
       pool: '标的池',
       factors: '因子库',
       analysis: 'A股分析',
-      screener: '选股器',
+      screener: '选股器', settings: '设置',
       ascreen: 'A股筛选',
       cbscreen: '可转债筛选',
       etfscreen: 'ETF筛选',
@@ -1052,6 +1052,13 @@ export default {
       testSent: '已提交，到「运行日志→邮件发件箱」看结果',
       hint: '整组保存即时生效（无需重启）；密码加密存储不回显，留空=不修改；测试邮件走发件箱（失败自动重试，结果见发件箱）',
     },
+    settings: {
+      run: '运行配置', users: '账号与邀请', perm: '权限管理', profile: '个人资料',
+    },
+    tradingAccounts: {
+      title: '交易账户', exchange: '交易所', apiKeyHint: 'API 密钥(回显)', apiKey: 'API 密钥标识',
+      empty: '暂无交易账户', confirmDelete: '确认删除账户 "{name}"？',
+    },
     perm: {
       title: '权限管理', note: '后端强制生效 · 菜单只是显性化 · 变更全程审计。改完即时生效（60s 内或重登）。',
     },
@@ -1199,7 +1206,7 @@ export default {
       pool: 'Pools',
       factors: 'Factors',
       analysis: 'A-Stock',
-      screener: 'Screener',
+      screener: 'Screener', settings: 'Settings',
       ascreen: 'A-Stock Screen',
       cbscreen: 'CB Screen',
       etfscreen: 'ETF Screen',
@@ -2100,6 +2107,13 @@ export default {
       testPh: 'Test recipient',
       testSent: 'Submitted — check result in Logs → Email Outbox',
       hint: 'Group save takes effect immediately (no restart); password encrypted & never echoed, blank = keep; test email goes through outbox (auto-retries on failure)',
+    },
+    settings: {
+      run: 'Run Config', users: 'Users & Invites', perm: 'Permissions', profile: 'Profile',
+    },
+    tradingAccounts: {
+      title: 'Trading Accounts', exchange: 'Exchange', apiKeyHint: 'API Key (hint)', apiKey: 'API Key hint',
+      empty: 'No trading accounts', confirmDelete: 'Delete account "{name}"?',
     },
     perm: {
       title: 'Permissions', note: 'Backend-enforced · menus are visualization · fully audited. Effective within 60s or re-login.',

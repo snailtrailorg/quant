@@ -33,6 +33,7 @@ const routes = [
       { path: 'dataops', name: 'dataops', component: () => import('./views/DataOps.vue') },
       { path: 'observe', name: 'observe', component: () => import('./views/Observe.vue') },
       { path: 'permissions', name: 'permissions', component: () => import('./views/Permissions.vue'), meta: { admin: true } },
+      { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue') },
       { path: 'screener', name: 'screener', component: () => import('./views/Screener.vue') },   // P2-8 三合一（旧三路由保留兼容直链）
       { path: 'ascreen', name: 'ascreen', component: () => import('./views/AScreen.vue') },
       { path: 'cbscreen', name: 'cbscreen', component: () => import('./views/CBScreen.vue') },

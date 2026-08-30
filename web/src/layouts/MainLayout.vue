@@ -38,7 +38,7 @@
           <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.gData') }}</el-menu-item>
           <el-menu-item index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
           <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.gObserve') }}</el-menu-item>
-          <el-menu-item v-if="role === 'admin'" index="/permissions"><el-icon><Lock /></el-icon>{{ t('nav.permissions') }}</el-menu-item>
+          <el-menu-item index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>

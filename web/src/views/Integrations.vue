@@ -17,18 +17,18 @@ import Brokers from './Brokers.vue'
 import Channels from './Channels.vue'
 import ImBots from './ImBots.vue'
 import LLMModels from './LLMModels.vue'
-import SystemConfig from './SystemConfig.vue'
-import Account from './Account.vue'
+import SmtpCard from '../components/SmtpCard.vue'
+import TradingAccounts from './TradingAccounts.vue'
 const { t } = useI18n()
 const route = useRoute()
 const tabs = [
   { k: 'brokers', label: '券商', c: Brokers },
   { k: 'push', label: '推送通道', c: Channels },
   { k: 'im', label: 'IM 机器人', c: ImBots },
-  { k: 'mail', label: '邮件 SMTP', c: SystemConfig },
+  { k: 'mail', label: '邮件 SMTP', c: SmtpCard },
   { k: 'llm', label: 'LLM 模型', c: LLMModels },
   { k: 'sources', label: '数据源', c: DataSources },
-  { k: 'account', label: '账户与用户', c: Account },
+  { k: 'trading', label: '交易账户', c: TradingAccounts },
 ]
 const tab = ref(route.query.tab || 'brokers')
 const current = computed(() => (tabs.find(x => x.k === tab.value) || tabs[0]).c)
