@@ -128,7 +128,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
@@ -137,6 +137,7 @@ import ParameterForm from '../components/ParameterForm.vue'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const runs = ref([])
 const strategies = ref([])
 const pools = ref([])

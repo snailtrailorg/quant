@@ -108,13 +108,14 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, apiErr } from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
 
 const router = useRouter()
+const route = useRoute()
 const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const { t } = useI18n()
 const tasks = ref([])
@@ -221,7 +222,7 @@ const onDelete = async (row) => {
 onMounted(async () => {
   enrichTasks()
   const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
-  if (pre) { showCreate = showCreate || true; form.value.strategy_id = String(pre) }
+  if (pre) { dialogVisible.value = true; form.value.strategy_id = String(pre) }
   await load(); await loadStrategies(); await loadAccounts() })
 
 // P1-5(05 §5.8):自愈时间线数据(NRestarts)+快照查看

@@ -109,6 +109,9 @@ export default {
       passwordWeak: '密码不符合复杂度要求',
     },
     nav: {
+      dataCenter: '数据中心', healthLogs: '健康与日志',
+      stockPool: '股票池', dailyInsight: '每日研判',
+      tradingDesk: '交易台', liveTasks: '实盘任务',
       gResearch: '策略研究', gLive: '实盘交易', gRisk: '风险控制', gOps: '系统管理',
       gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性', permissions: '权限管理',
       dashboard: '总览',
@@ -1217,6 +1220,9 @@ export default {
       passwordWeak: 'Password does not meet complexity requirements',
     },
     nav: {
+      dataCenter: 'Data Center', healthLogs: 'Health & Logs',
+      stockPool: 'Stock Pool', dailyInsight: 'Daily Insight',
+      tradingDesk: 'Trading Desk', liveTasks: 'Live Tasks',
       gResearch: 'Research', gLive: 'Live Trading', gRisk: 'Risk Control', gOps: 'System',
       gData: 'Data Ops', gIntegrations: 'Integrations', gObserve: 'Observability', permissions: 'Permissions',
       dashboard: 'Dashboard',

@@ -35,9 +35,9 @@ const routes = [
       { path: 'permissions', name: 'permissions', component: () => import('./views/Permissions.vue'), meta: { admin: true } },
       { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue') },
       { path: 'screener', name: 'screener', component: () => import('./views/Screener.vue') },   // P2-8 三合一（旧三路由保留兼容直链）
-      { path: 'ascreen', name: 'ascreen', component: () => import('./views/AScreen.vue') },
-      { path: 'cbscreen', name: 'cbscreen', component: () => import('./views/CBScreen.vue') },
-      { path: 'etfscreen', name: 'etfscreen', component: () => import('./views/ETFScreen.vue') },
+      { path: 'ascreen', redirect: '/screener?tab=astock' },
+      { path: 'cbscreen', redirect: '/screener?tab=cb' },
+      { path: 'etfscreen', redirect: '/screener?tab=etf' },
       { path: 'chat', name: 'chat', component: () => import('./views/AIChat.vue') },
 
       // 风控
@@ -55,7 +55,7 @@ const routes = [
       { path: 'audit', name: 'audit', component: () => import('./views/Audit.vue'), meta: { admin: true } },
       { path: 'llm-models', name: 'llm-models', component: () => import('./views/LLMModels.vue'), meta: { admin: true } },
       { path: 'data-sources', name: 'data-sources', component: () => import('./views/DataSources.vue'), meta: { admin: true } },
-      { path: 'tasks', name: 'tasks', component: () => import('./views/TaskManager.vue') },
+      { path: 'tasks', redirect: '/dataops?tab=sched' },
       { path: 'channels', name: 'channels', component: () => import('./views/Channels.vue'), meta: { admin: true } },
       { path: 'brokers', name: 'brokers', component: () => import('./views/Brokers.vue'), meta: { admin: true } },
       { path: 'risk-rules', name: 'risk-rules', component: () => import('./views/RiskRules.vue'), meta: { admin: true } },

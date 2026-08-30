@@ -199,6 +199,9 @@ const openEdit = (row) => {
 const previewing = ref(false)
 const previewVisible = ref(false)
 const previewData = ref(null)
+const strategies = ref([])
+const loadStrategies = async () => { try { strategies.value = (await api.get('/strategy')) || [] } catch {} }
+onMounted(loadStrategies)
 // P2-7（05 §5.5 要点 1）：试算三参数放开——不同标的/频率的行为差异正是研究内容
 const preview = ref({ symbol: '600000.SHSE', freq: '1D', bars: 60 })
 const previewError = ref('')

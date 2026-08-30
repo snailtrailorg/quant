@@ -72,8 +72,8 @@ const equityOption = computed(() => ({
     smooth: true, lineStyle: { width: 2 ,
             markPoint: {
               data: [
-                ...buyPoints.map(p => ({ coord: [p.ts, p.price], value: 'B', itemStyle: { color: 'var(--up)' } })),
-                ...sellPoints.map(p => ({ coord: [p.ts, p.price], value: 'S', itemStyle: { color: 'var(--down)' } })),
+                ...(buyPoints.value || []).map(p => ({ coord: [p.ts, p.price], value: 'B', itemStyle: { color: 'var(--up)' } })),
+                ...(sellPoints.value || []).map(p => ({ coord: [p.ts, p.price], value: 'S', itemStyle: { color: 'var(--down)' } })),
               ],
               symbolSize: 30,
             }}, areaStyle: { opacity: 0.1 },

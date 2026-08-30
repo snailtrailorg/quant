@@ -5,7 +5,7 @@
     <el-alert v-if="alerts.length" type="error" show-icon :closable="false" style="margin-bottom: 16px">
       <template #title>
         {{ t('dashboard.alertBar', { n: alerts.length }) }}
-        <el-button size="small" text type="primary" @click="$router.push('/monitoring')" style="margin-left: 8px">{{ t('dashboard.handleNow') }}</el-button>
+        <el-button size="small" text type="primary" @click="$router.push('/live-task')" style="margin-left: 8px">{{ t('dashboard.handleNow') }}</el-button>
       </template>
     </el-alert>
 

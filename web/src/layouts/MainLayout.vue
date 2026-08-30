@@ -14,16 +14,14 @@
           <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>
           <el-menu-item index="/strategy"><el-icon><SetUp /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
           <el-menu-item index="/backtest"><el-icon><Timer /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
-          <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.analysis') }}</el-menu-item>
-          <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.pool') }}</el-menu-item>
-          <el-menu-item index="/chat"><el-icon><ChatDotRound /></el-icon>{{ t('nav.chat') }}</el-menu-item>
+          <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.dailyInsight') }}</el-menu-item>
+          <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.stockPool') }}</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="live">
           <template #title><el-icon><Monitor /></el-icon>{{ t('nav.gLive') }}</template>
-          <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.trading') }}</el-menu-item>
-          <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTask') }}</el-menu-item>
-          <el-menu-item index="/monitoring"><el-icon><Odometer /></el-icon>{{ t('nav.monitoring') }}</el-menu-item>
+          <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
+          <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.tradingDesk') }}</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="riskgrp">
@@ -35,9 +33,9 @@
 
         <el-sub-menu index="ops" v-if="['admin', 'analyst'].includes(role)">
           <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
-          <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.gData') }}</el-menu-item>
+          <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
           <el-menu-item index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
-          <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.gObserve') }}</el-menu-item>
+          <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
           <el-menu-item index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
@@ -91,6 +89,9 @@
               </div>
             </div>
           </el-drawer>
+
+          <!-- 03 v2.1:AI 助手顶栏常驻入口(不占菜单位,全局只读工具) -->
+          <el-button circle @click="$router.push('/chat')"><el-icon><ChatDotRound /></el-icon></el-button>
 
           <!-- P3-8（09-B8）：帮助抽屉（全角色）+ P3-2 暗色切换（盯盘场景） -->
           <el-button circle @click="helpDrawer = true"><el-icon><QuestionFilled /></el-icon></el-button>
@@ -212,7 +213,7 @@ const loadHealth = async () => {
     healthLevel.value = items.some(i => !i.ok) ? 'critical' : 'ok'
   } catch { healthItems.value = [{ k: 'health', ok: false, v: '—' }]; healthLevel.value = 'warn' }
 }
-const goCategory = c => router.push({ email: '/system-config', task: '/tasks', risk: '/risk', data: '/data-integrity', system: '/health' }[c] || '/')
+const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')
 loadHealth()
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })
 onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
