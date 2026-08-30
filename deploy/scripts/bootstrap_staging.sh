@@ -31,7 +31,7 @@ echo "== 4 deploy 密钥装 localhost（彩排走真 ssh 全链）=="
 install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
 # 2026-08-26 踩坑：sudo bash 下 $HOME=/root——公钥 cat 空串静默通过 set -e，
 # authorized_keys 只剩 40 字节前缀。修：显式从调用者家目录取（SUDO_USER），缺失即硬失败。
-PUB="/home/${SUDO_USER:-bernard}/.ssh/quant_deploy_ed25519.pub"
+PUB="${PUB:-/home/${SUDO_USER:-bernard}/.ssh/quant_deploy_ed25519.pub}"   # 2026-08-30:密钥实际住 bernard 家——PUB= 可覆盖(michael sudo 时 SUDO_USER=michael 找错家)
 [ -f "$PUB" ] || { echo "❌ deploy 公钥不存在: $PUB" >&2; exit 1; }
 [ "$(wc -c < "$PUB")" -gt 80 ] || { echo "❌ 公钥文件异常（<80B）: $PUB" >&2; exit 1; }
 printf 'no-port-forwarding,no-agent-forwarding %s\n' "$(cat "$PUB")" > /home/deploy/.ssh/authorized_keys
