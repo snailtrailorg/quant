@@ -145,3 +145,9 @@ onMounted(async () => {
 <style scoped>
 .hub-meta { margin-left: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
 </style>
+
+// P3-5(05 §5.10):健康页 30s 自动轮询+手动刷新
+import { onUnmounted } from 'vue'
+let healthTimer = null
+onMounted(() => { healthTimer = setInterval(load, 30000) })
+onUnmounted(() => clearInterval(healthTimer))

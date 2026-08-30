@@ -22,7 +22,8 @@
       <el-table-column prop="target" :label="t('audit.target')" width="150" />
       <el-table-column prop="detail" :label="t('common.detail')" />
     </el-table>
-  </el-card>
+    <el-button size="small" type="primary" @click="exportCsv">{{ t('audit.exportCsv') }}</el-button>
+</el-card>
 </template>
 
 <script setup>
@@ -41,3 +42,13 @@ const filteredLogs = computed(() => {
 })
 onMounted(async () => { try { logs.value = await getAudit() } catch (e) { console.error(e) } })
 </script>
+
+// P3-5(05 §5.10):审计导出 CSV(合规刚需)
+const exportCsv = () => {
+  const rows = (auditData.value || []).map(a => [a.ts, a.username, a.action, a.detail].map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))
+  const csv = '\ufeff' + ['时间,用户,动作,详情', ...rows].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`; a.click()
+  URL.revokeObjectURL(url)
+}

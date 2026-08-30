@@ -560,6 +560,7 @@ export default {
       strategyStatus: '策略运行状态',
     },
     health: {
+      keyword: '关键字', level: '级别',
       hubWindow: '行情 hub 每日连接窗：9:05 建连 / 15:10 断开（盘外静默为正常形态）',
       shadowDone: '影子双轨：已完成使命（08-28 切换 hub 模式）',
       apiHealth: '接口健康',
@@ -796,7 +797,7 @@ export default {
       notifyHistory: '通知历史',
       notifyCategory: '类别',
     },
-    audit: {
+    audit: { exportCsv: '导出 CSV',
       title: '审计日志',
       actor: '操作人',
       phActor: '筛选操作人',
@@ -1656,6 +1657,7 @@ export default {
       strategyStatus: 'Strategy Status',
     },
     health: {
+      keyword: 'Keyword', level: 'Level',
       hubWindow: 'MD hub daily window: connect 9:05 / disconnect 15:10 (quiet off-window is normal)',
       shadowDone: 'Shadow dual-track: mission complete (switched to hub mode 08-28)',
       apiHealth: 'API Health',
@@ -1881,7 +1883,7 @@ export default {
       notifyHistory: 'Notification History',
       notifyCategory: 'Category',
     },
-    audit: {
+    audit: { exportCsv: 'Export CSV',
       title: 'Audit Log',
       actor: 'Actor',
       phActor: 'Filter actor',

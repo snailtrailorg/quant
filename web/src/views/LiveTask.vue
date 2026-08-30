@@ -30,7 +30,23 @@
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" width="150" />
       <el-table-column prop="initial_capital" :label="t('liveTask.capital')" width="120" />
-      <el-table-column :label="t('common.action')" width="320">
+            <el-table-column type="expand">
+        <template #default="{ row }">
+          <div style="padding: 8px 16px">
+            <!-- P1-5(05 §5.8/06 宝藏):自愈时间线 -->
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px">{{ t('liveTask.selfHeal') }}:</div>
+            <div style="font-size: 12px; font-family: var(--font-num)">
+              NRestarts: {{ row._n_restarts ?? '—' }} | 上次退出码: {{ row._last_exit ?? '—' }} | 心跳龄: {{ row.hb_age_s ? row.hb_age_s.toFixed(0) + 's' : '—' }}
+            </div>
+            <!-- P1-5(06 平台级宝藏):快照查看(strategy_snapshot) -->
+            <div v-if="row._snapshot" style="margin-top: 8px; font-size: 12px">
+              <div style="color: var(--text-secondary)">{{ t('liveTask.snapshotView') }}:</div>
+              <pre style="font-size: 11px; background: var(--bg-canvas); padding: 8px; border-radius: 4px; max-height: 200px; overflow: auto">{{ JSON.stringify(row._snapshot, null, 2) }}</pre>
+            </div>
+          </div>
+        </template>
+      </el-table-column>
+<el-table-column :label="t('common.action')" width="320">
         <template #default="{ row }">
           <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
@@ -203,7 +219,22 @@ const onDelete = async (row) => {
 }
 
 onMounted(async () => {
+  enrichTasks()
   const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
   if (pre) { showCreate = showCreate || true; form.value.strategy_id = String(pre) }
   await load(); await loadStrategies(); await loadAccounts() })
 </script>
+
+// P1-5(05 §5.8):自愈时间线数据(NRestarts)+快照查看
+const enrichTasks = async () => {
+  for (const task of tasks.value) {
+    try {
+      const detail = await api.get(`/live-task/${task.id}/detail`)
+      if (detail) {
+        task._n_restarts = detail.n_restarts
+        task._last_exit = detail.last_exit_code
+        task._snapshot = detail.strategy_snapshot
+      }
+    } catch {}
+  }
+}

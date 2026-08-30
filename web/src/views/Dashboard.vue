@@ -31,6 +31,7 @@
       <el-col :span="5"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.totalAssets') }}</div>
         <div class="kpi-num">{{ fmtMoney(dashboard.total_value) }}</div>
+        <div class="sparkline">{{ sparkline }}</div>
       </div></el-card></el-col>
       <el-col :span="5"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.todayPnl') }}</div>
@@ -55,8 +56,15 @@
     <el-row :gutter="16" style="margin-top: 16px">
       <el-col :span="15">
         <el-card shadow="never">
-          <template #header>{{ t('dashboard.equityCurve') }}</template>
-          <v-chart v-if="curve.length" :option="curveOption" autoresize style="height: 280px" />
+          <template #header>
+            <div style="display:flex; justify-content:space-between; align-items:center">
+              {{ t('dashboard.equityCurve') }}
+              <el-radio-group v-model="curveRange" size="small">
+                <el-radio-button v-for="r in ['1D','7D','1M','ALL']" :key="r" :value="r">{{ r }}</el-radio-button>
+              </el-radio-group>
+            </div>
+          </template>
+          <v-chart v-if="rangeCurve.length" :option="curveOption" autoresize style="height: 280px" />
           <div v-else class="empty-cell">{{ t('dashboard.noCurve') }}</div>
         </el-card>
       </el-col>
@@ -163,13 +171,29 @@ const todayOrders = computed(() => {
 const emptyState = computed(() => !liveTasks.value.length && !recentBacktests.value.length)
 const emptyStep = computed(() => !strategies.value.length ? 0 : recentBacktests.value.length ? 3 : 1)
 
+const curveRange = ref('1M')
+const rangeCurve = computed(() => {
+  const now = new Date(); const days = { '1D': 1, '7D': 7, '1M': 30, 'ALL': 9999 }[curveRange.value] || 30
+  const cutoff = new Date(now.getTime() - days * 86400000).toISOString().slice(0, 10)
+  return curve.value.filter(c => (c.ts || '').slice(0, 10) >= cutoff)
+})
+// 回撤序列(从峰值)
+const drawdownSeries = computed(() => {
+  let peak = -Infinity
+  return rangeCurve.value.map(c => { peak = Math.max(peak, c.value); return peak > 0 ? (c.value - peak) / peak * 100 : 0 })
+})
 const curveOption = computed(() => ({
   grid: { left: 60, right: 16, top: 16, bottom: 28 },
   tooltip: { trigger: 'axis' },
   xAxis: { type: 'category', data: curve.value.map(c => (c.ts || '').slice(5, 10)) },
   yAxis: { type: 'value', scale: true, axisLabel: { formatter: v => (v / 1e4).toFixed(0) + '万' } },
-  series: [{ type: 'line', data: curve.value.map(c => c.value), smooth: true, showSymbol: false,
-             lineStyle: { width: 2 }, areaStyle: { opacity: 0.08 } }],
+  yAxis: [{ type: 'value', scale: true }, { type: 'value', name: 'DD%', max: 0, splitLine: { show: false } }],
+  series: [
+    { type: 'line', data: rangeCurve.value.map(c => c.value), smooth: true, showSymbol: false,
+      lineStyle: { width: 2 }, areaStyle: { opacity: 0.08 } },
+    { type: 'line', yAxisIndex: 1, data: drawdownSeries.value, showSymbol: false,
+      lineStyle: { width: 1, color: '#909399' }, areaStyle: { opacity: 0.15, color: '#909399' } },
+  ],
 }))
 
 onMounted(async () => {
@@ -194,6 +218,7 @@ onMounted(async () => {
 
 <style scoped>
 .kpi { padding: 6px 0; }
+.sparkline { font-size: 12px; color: var(--text-secondary); }
 .klabel { color: var(--text-secondary); font-size: var(--fs-label); }
 .task-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
 .task-row:last-child { border-bottom: none; }
@@ -207,3 +232,12 @@ onMounted(async () => {
 .pos-row:last-child { border-bottom: none; }
 .empty-cell { color: var(--text-secondary); font-size: var(--fs-body); padding: 18px 0; text-align: center; }
 </style>
+
+// KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
+const sparkline = computed(() => {
+  const vals = curve.value.slice(-7).map(c => c.value)
+  if (vals.length < 2) return ''
+  const up = vals[vals.length - 1] >= vals[0]
+  const pct = ((vals[vals.length - 1] - vals[0]) / vals[0] * 100).toFixed(1)
+  return `${up ? '↗' : '↘'} ${pct}%`
+})

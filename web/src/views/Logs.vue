@@ -28,7 +28,19 @@
           <el-table-column prop="module" :label="t('log.module')" width="100" />
           <el-table-column prop="msg" :label="t('log.content')" />
         </el-table>
-      </el-card>
+        <!-- P3-5(05 §5.10):日志筛选 -->
+  <el-card style="margin-bottom: 14px">
+    <el-form inline>
+      <el-form-item><el-input v-model="logKw" :placeholder="t('logs.keyword')" clearable style="width: 200px" @change="filterLogs" /></el-form-item>
+      <el-form-item>
+        <el-select v-model="logLevel" :placeholder="t('logs.level')" clearable style="width: 100px" @change="filterLogs">
+          <el-option v-for="lv in ['ERROR','WARNING','INFO','DEBUG']" :key="lv" :value="lv" :label="lv" />
+        </el-select>
+      </el-form-item>
+      <el-form-item><el-date-picker v-model="logRange" type="datetimerange" style="width: 280px" @change="filterLogs" /></el-form-item>
+    </el-form>
+  </el-card>
+</el-card>
     </el-col>
     <el-col :span="10">
       <el-card>
@@ -118,3 +130,18 @@ onMounted(async () => {
 .ndot.warn { background: #e6a23c; }
 .ndot.info { background: #909399; }
 </style>
+
+// P3-5:日志筛选
+const logKw = ref('')
+const logLevel = ref('')
+const logRange = ref(null)
+const filteredLogs = computed(() => {
+  let items = logs.value || []
+  if (logKw.value) items = items.filter(l => JSON.stringify(l).toLowerCase().includes(logKw.value.toLowerCase()))
+  if (logLevel.value) items = items.filter(l => (l.level || '').toUpperCase() === logLevel.value)
+  if (logRange.value?.[0]) items = items.filter(l => new Date(l.ts || l.created_at) >= new Date(logRange.value[0]))
+  if (logRange.value?.[1]) items = items.filter(l => new Date(l.ts || l.created_at) <= new Date(logRange.value[1]))
+  return items
+})
+const filterLogs = () => {}
+import { computed } from 'vue'
