@@ -36,15 +36,53 @@
               <span v-else>—</span>
             </template>
           </el-table-column>
+          <el-table-column :label="t('trading.pnlPct')" width="70" class-name="num">
+            <template #default="{ row }">
+              <span v-if="row.cost_price > 0 && row.pnl != null" :class="row.pnl >= 0 ? 'up' : 'down'">
+                {{ (row.pnl / (row.cost_price * row.volume) * 100).toFixed(1) }}%
+              </span>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('trading.mktValue')" width="90" class-name="num">
+            <template #default="{ row }">{{ row.cost_price && row.volume ? fmtCn(row.cost_price * row.volume, 1) : '—' }}</template>
+          </el-table-column>
           <el-table-column :label="t('common.action')" width="90">
             <template #default="{ row }">
               <el-button type="primary" size="small" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
             </template>
           </el-table-column>
         </el-table>
-        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 6px">
-          {{ t('trading.snapshotNote') }}{{ positionData.snapshot_ts ? positionData.snapshot_ts.slice(0, 19) : '—' }}
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 6px; display: flex; justify-content: space-between">
+          <span>{{ t('trading.snapshotNote') }}{{ positionData.snapshot_ts ? positionData.snapshot_ts.slice(0, 19) : '—' }}</span>
+          <span>{{ t('trading.lastUpdate') }}: {{ lastUpdate }}</span>
         </div>
+      </el-tab-pane>
+      <!-- 05 §5.2 要点 5:盘后自动展示当日成交汇总 -->
+      <el-tab-pane :label="t('trading.dailySummary')">
+        <el-descriptions :column="3" border size="small">
+          <el-descriptions-item :label="t('trading.totalTrades')">{{ todayOrders.length }}</el-descriptions-item>
+          <el-descriptions-item :label="t('trading.buyCount')">{{ todayOrders.filter(o => o.action === 'BUY').length }}</el-descriptions-item>
+          <el-descriptions-item :label="t('trading.sellCount')">{{ todayOrders.filter(o => o.action === 'SELL').length }}</el-descriptions-item>
+          <el-descriptions-item :label="t('trading.totalVolume')">{{ todayOrders.reduce((s, o) => s + (o.volume || 0), 0) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('trading.buyAmount')">{{ fmtCn(todayOrders.filter(o => o.action === 'BUY').reduce((s, o) => s + (o.price || 0) * (o.volume || 0), 0), 1) }}</el-descriptions-item>
+          <el-descriptions-item :label="t('trading.sellAmount')">{{ fmtCn(todayOrders.filter(o => o.action === 'SELL').reduce((s, o) => s + (o.price || 0) * (o.volume || 0), 0), 1) }}</el-descriptions-item>
+        </el-descriptions>
+      </el-tab-pane>
+      <!-- 05 §5.2 要点 8:人工单登记(底仓/场外手动单回流对账豁免基准) -->
+      <el-tab-pane :label="t('trading.manualOrders')">
+        <el-form inline>
+          <el-form-item label="Symbol"><el-input v-model="manualForm.symbol" placeholder="600000" style="width: 100px" /></el-form-item>
+          <el-form-item :label="t('trading.direction')">
+            <el-select v-model="manualForm.action" style="width: 80px">
+              <el-option value="BUY" :label="t('dashboard.buy')" /><el-option value="SELL" :label="t('dashboard.sell')" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="t('trading.volume')"><el-input-number v-model="manualForm.volume" :step="100" style="width: 100px" /></el-form-item>
+          <el-form-item :label="t('trading.price')"><el-input-number v-model="manualForm.price" :step="0.01" :precision="2" style="width: 90px" /></el-form-item>
+          <el-form-item><el-button type="primary" @click="submitManual">{{ t('common.confirm') }}</el-button></el-form-item>
+        </el-form>
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('trading.manualHint') }}</div>
       </el-tab-pane>
       <el-tab-pane :label="t('trading.orders')">
         <el-table :data="ordersData.orders || []" stripe size="small">
@@ -103,15 +141,40 @@ const pnlChartOption = computed(() => ({
   series: [{ name: t('trading.equity'), type: 'line', data: (pnlData.value.curve || []).map(c => c.value), smooth: true }],
 }))
 const formatNum = (n) => (n || 0).toFixed(0)
+import { fmtCn } from '../utils/format'
 const loadFailed = ref(false)
+const lastUpdate = ref('—')
 const load = async () => {
   // P2（审计 C3）：静默空表=交易系统假空显示
   loadFailed.value = false
   try { positionData.value = await getPosition() } catch { loadFailed.value = true }
   try { ordersData.value = await getOrders() } catch { }
   try { pnlData.value = await getPnl() } catch { }
+  lastUpdate.value = new Date().toLocaleTimeString()
 }
-onMounted(load)
+// 05 §5.2 要点 2:现价/浮盈由行情快照联动,5s 轮询(盘中)/60s(盘后)
+const isTradingHours = () => {
+  const now = new Date(); const hm = now.getHours() * 100 + now.getMinutes(); const dw = now.getDay()
+  return dw >= 1 && dw <= 5 && ((hm >= 930 && hm < 1130) || (hm >= 1300 && hm < 1500))
+}
+const todayOrders = computed(() => {
+  const today = new Date().toISOString().slice(0, 10)
+  return (ordersData.value?.orders || []).filter(o => (o.ts || '').startsWith(today))
+})
+const manualForm = ref({ symbol: '', action: 'BUY', volume: 0, price: 0 })
+const submitManual = async () => {
+  try { await api.post('/reconcile/manual-order', { ...manualForm.value, note: '交易台人工单登记' }); ElMessage.success(t('common.success')) }
+  catch { ElMessage.error(t('common.failed')) }
+}
+import api from '../api'
+import { ElMessage } from 'element-plus'
+import { onUnmounted } from 'vue'
+let pollTimer = null
+onMounted(() => {
+  load()
+  pollTimer = setInterval(load, isTradingHours() ? 5000 : 60000)
+})
+onUnmounted(() => clearInterval(pollTimer))
 </script>
 
 <style scoped>

@@ -85,7 +85,11 @@
           </div>
         </el-form-item>
         <el-form-item :label="t('pool.symbolList')">
-          <el-input v-model="newPool.symbolsStr" type="textarea" :rows="4" :placeholder="t('pool.phSymbols')" />
+          <el-select v-model="poolSymbols" multiple filterable allow-create default-first-option
+            :placeholder="t('pool.phSymbols')" style="width: 100%" :reserve-keyword="true"
+            :remote-method="searchSymbols" remote :loading="symbolLoading">
+            <el-option v-for="sym in symbolOptions" :key="sym" :value="sym" :label="sym" />
+          </el-select>
         </el-form-item>
         <el-form-item :label="t('common.description')"><el-input v-model="newPool.description" /></el-form-item>
       </el-form>
@@ -186,3 +190,29 @@ const delPool = async row => {
 }
 onMounted(load)
 </script>
+
+// P2-9(05 §5.9):remote 标的搜索+分钟覆盖回补
+const poolSymbols = ref([])
+const symbolOptions = ref([])
+const symbolLoading = ref(false)
+const searchSymbols = async (query) => {
+  if (!query || query.length < 2) { symbolOptions.value = []; return }
+  symbolLoading.value = true
+  try {
+    const results = await api.get(`/stock/search?q=${encodeURIComponent(query)}&limit=20`)
+    symbolOptions.value = (results || []).map(r => r.symbol || r.ts_code || r)
+  } catch { symbolOptions.value = [query] }
+  finally { symbolLoading.value = false }
+}
+const backfillMinute = async (row) => {
+  try {
+    await api.post(`/sync/pool-data?pool_id=${row.id}&full=true`)
+    ElMessage.success(t('pool.backfillStarted', { name: row.name }))
+    if (row.minute_history_start) loadMinuteStatus(row.id)
+  } catch { ElMessage.error(t('common.failed')) }
+}
+import { watch } from 'vue'
+watch(() => showCreate.value, v => {
+  if (v) poolSymbols.value = (newPool.value.symbolsStr || '').split('\n').map(x => x.trim()).filter(Boolean)
+  else newPool.value.symbolsStr = poolSymbols.value.join('\n')
+})

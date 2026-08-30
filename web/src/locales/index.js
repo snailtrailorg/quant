@@ -666,7 +666,12 @@ export default {
     },
     trading: {
       dirCol: '方向', frozenCol: '可用', costCol: '成本价', pnlCol: '浮盈',
-      snapshotNote: '快照时间：',
+      snapshotNote: '快照时间：', lastUpdate: '最后更新',
+      dailySummary: '当日汇总', totalTrades: '总笔数', buyCount: '买入笔数', sellCount: '卖出笔数',
+      totalVolume: '总股数', buyAmount: '买入金额', sellAmount: '卖出金额',
+      manualOrders: '人工单登记', manualHint: '登记底仓/场外手动单——回流进对账豁免基准,消除持续差异',
+      pnlPct: '浮盈%', mktValue: '市值',
+
       title: '实盘交易看板',
       positions: '持仓', loadFailed: '持仓/账户数据加载失败——显示可能不是真实空仓,请刷新或检查服务',
       orders: '订单',
@@ -714,6 +719,7 @@ export default {
       minuteSyncProgress: 'Sync Progress',
       pending: 'Pending',
       phAddSymbol: 'Enter symbol (e.g. 600000.SHSE) to add',
+      backfillMinute: 'Backfill minute data', backfillStarted: '{name} backfill started',
       phSymbols: '一行一个 vt_symbol，如 600000.SHSE',
       loadFailed: '加载标的池失败',
       idNameRequired: 'ID 和名称必填',
@@ -1752,7 +1758,12 @@ export default {
     },
     trading: {
       dirCol: 'Dir', frozenCol: 'Avail', costCol: 'Cost', pnlCol: 'PnL',
-      snapshotNote: 'Snapshot: ',
+      snapshotNote: 'Snapshot: ', lastUpdate: 'Last update',
+      dailySummary: 'Daily Summary', totalTrades: 'Trades', buyCount: 'Buy count', sellCount: 'Sell count',
+      totalVolume: 'Total vol', buyAmount: 'Buy amt', sellAmount: 'Sell amt',
+      manualOrders: 'Manual Orders', manualHint: 'Register base/off-exchange manual orders — feeds reconcile exempt baseline',
+      pnlPct: 'PnL%', mktValue: 'Mkt val',
+
       title: 'Live Trading Dashboard',
       positions: 'Positions', loadFailed: 'Position/account data failed to load — empty tables may not reflect real holdings, refresh or check services',
       orders: 'Orders',
