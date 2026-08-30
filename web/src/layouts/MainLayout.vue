@@ -16,6 +16,7 @@
           <el-menu-item index="/backtest"><el-icon><Timer /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
           <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.analysis') }}</el-menu-item>
           <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.pool') }}</el-menu-item>
+          <el-menu-item index="/chat"><el-icon><ChatDotRound /></el-icon>{{ t('nav.chat') }}</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="live">
@@ -38,7 +39,6 @@
           <el-menu-item index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
           <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.gObserve') }}</el-menu-item>
           <el-menu-item v-if="role === 'admin'" index="/permissions"><el-icon><Lock /></el-icon>{{ t('nav.permissions') }}</el-menu-item>
-          <el-menu-item index="/chat"><el-icon><ChatDotRound /></el-icon>{{ t('nav.chat') }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>

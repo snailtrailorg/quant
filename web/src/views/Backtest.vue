@@ -208,7 +208,7 @@ const submitRun = async () => {
       mode: form.value.mode,
       params: {
         capital: form.value.capital,
-        commission: 0.0005,
+        commission: (form.value.commissionRate || 5) / 10000,   // A2:表单佣金(万分之)接入——原硬编码死控件
         start: form.value.dateRange?.[0]?.toISOString().slice(0, 10),
         end: form.value.dateRange?.[1]?.toISOString().slice(0, 10),
         ...form.value.params,
