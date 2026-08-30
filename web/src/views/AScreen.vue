@@ -44,7 +44,7 @@
           <template #default="{ row }">{{ row.turnover?.toFixed(1) || '—' }}</template>
         </el-table-column>
         <el-table-column :label="t('screener.marketCap')" width="90" class-name="num">
-          <template #default="{ row }">{{ fmtCn(row.total_mv, 1) }}</template>
+          <template #default="{ row }">{{ fmtCn(row.total_mv * 10000, 1) }}</template>
         </el-table-column>
       </el-table>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
@@ -87,7 +87,7 @@ const addToPool = async () => {
   if (!checked.value.size || !selectedPool.value) return
   const pool = pools.value.find(p => p.id === selectedPool.value)
   if (!pool) return
-  const symbols = [...checked.value].map(c => c.replace(/\.\w+$/, ''))
+  const symbols = [...checked.value]
   const existing = (pool.symbols || []).map(s => (s || '').split('.')[0])
   const merged = [...new Set([...existing, ...symbols])]
   try {

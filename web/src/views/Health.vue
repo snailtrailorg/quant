@@ -140,14 +140,17 @@ onMounted(async () => {
     eventRows.value = r.events || []
   } catch { /* 事件流加载失败不阻塞页面 */ }
 })
-</script>
-
-<style scoped>
-.hub-meta { margin-left: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
-</style>
 
 // P3-5(05 §5.10):健康页 30s 自动轮询+手动刷新
 import { onUnmounted } from 'vue'
 let healthTimer = null
 onMounted(() => { healthTimer = setInterval(load, 30000) })
 onUnmounted(() => clearInterval(healthTimer))
+
+// P3-5(05 §5.10):健康页 30s 自动轮询+手动刷新
+
+</script>
+<style scoped>
+.hub-meta { margin-left: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
+</style>
+

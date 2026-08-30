@@ -158,7 +158,7 @@
           <el-select v-model="editForm.volumeType" style="width: 100%">
             <el-option :label="t('strategy.optShares')" value="SHARES" />
             <el-option :label="t('strategy.optPercent')" value="PERCENT" />
-            <el-option :label="t('strategy.optAllIn')" value="ALL_IN（BUY=全部资金 / SELL=清仓持仓）" />
+            <el-option :label="t('strategy.optAllIn')" value="ALL_IN" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('strategy.priceType')">

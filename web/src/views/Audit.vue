@@ -41,7 +41,6 @@ const filteredLogs = computed(() => {
   return r
 })
 onMounted(async () => { try { logs.value = await getAudit() } catch (e) { console.error(e) } })
-</script>
 
 // P3-5(05 §5.10):审计导出 CSV(合规刚需)
 const exportCsv = () => {
@@ -52,3 +51,7 @@ const exportCsv = () => {
   const a = document.createElement('a'); a.href = url; a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`; a.click()
   URL.revokeObjectURL(url)
 }
+
+// P3-5(05 §5.10):审计导出 CSV(合规刚需)
+
+</script>

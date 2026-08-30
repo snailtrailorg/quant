@@ -1073,7 +1073,7 @@ export default {
     screener: {
       filters: '筛选条件', results: '结果', run: '筛选', addToPool: '加入股票池', selectPool: '选择池',
       added: '已添加 {n} 只标的到池', savedPlans: '已保存方案', savePlan: '保存当前方案', planName: '方案名称',
-      peMax: 'PE 上限', pbMax: 'PB 上限', mvMin: '市值下限(亿)', turnoverMin: '换手率下限(%)',
+      peMax: 'PE 上限', pbMax: 'PB 上限', mvMin: '市值下限(万元)', turnoverMin: '换手率下限(%)',
       marketCap: '市值', turnover: '换手率',
       cbFilters: '转债筛选', doubleLowMax: '双低下限', premiumMax: '溢价率上限(%)', remainingMin: '剩余年限下限',
       doubleLow: '双低', premium: '溢价率', convPrice: '转股价', maturity: '到期日', bondName: '转债名', stkName: '正股名',
@@ -1083,7 +1083,7 @@ export default {
     screener: {
       filters: 'Filters', results: 'Results', run: 'Screen', addToPool: 'Add to pool', selectPool: 'Select pool',
       added: 'Added {n} symbols to pool', savedPlans: 'Saved plans', savePlan: 'Save plan', planName: 'Plan name',
-      peMax: 'PE max', pbMax: 'PB max', mvMin: 'Market cap min (yi)', turnoverMin: 'Turnover min (%)',
+      peMax: 'PE max', pbMax: 'PB max', mvMin: 'Market cap min (wan)', turnoverMin: 'Turnover min (%)',
       marketCap: 'Mkt Cap', turnover: 'Turnover',
       cbFilters: 'CB Filters', doubleLowMax: 'Double-low max', premiumMax: 'Premium max (%)', remainingMin: 'Remaining yrs min',
       doubleLow: 'D-Low', premium: 'Premium', convPrice: 'Conv px', maturity: 'Maturity', bondName: 'Bond', stkName: 'Stock',

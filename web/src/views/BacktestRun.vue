@@ -87,7 +87,7 @@ const createLiveFromRun = () => {
 }
 const markVerified = async () => {
   // P2-5(05 §5.7):最低验证样本门槛——防短区间单标的 done run 混入证据链
-  const days = run.value?.date_range_days || 0
+  const days = run.value?.days || Math.round((new Date(run.value?.end_date || 0) - new Date(run.value?.start_date || 0)) / 86400000) || 0
   const syms = run.value?.symbols?.length || 0
   if (days < 90 || syms < 1) {
     ElMessage.warning(t('backtest.sampleThreshold', { d: days, s: syms }))

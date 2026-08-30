@@ -122,8 +122,14 @@ onMounted(async () => {
   try { notifs.value = (await getNotifications('all', 50)).items || [] } catch {}
   try { outbox.value = (await getEmailOutbox()).items || [] } catch {}
 })
-</script>
 
+// P3-5:日志筛选
+const logKw = ref('')
+const logLevel = ref('')
+const logRange = ref(null)
+// P3-5:日志筛选
+
+</script>
 <style scoped>
 .ndot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .ndot.critical { background: #f56c6c; }
@@ -131,17 +137,3 @@ onMounted(async () => {
 .ndot.info { background: #909399; }
 </style>
 
-// P3-5:日志筛选
-const logKw = ref('')
-const logLevel = ref('')
-const logRange = ref(null)
-const filteredLogs = computed(() => {
-  let items = logs.value || []
-  if (logKw.value) items = items.filter(l => JSON.stringify(l).toLowerCase().includes(logKw.value.toLowerCase()))
-  if (logLevel.value) items = items.filter(l => (l.level || '').toUpperCase() === logLevel.value)
-  if (logRange.value?.[0]) items = items.filter(l => new Date(l.ts || l.created_at) >= new Date(logRange.value[0]))
-  if (logRange.value?.[1]) items = items.filter(l => new Date(l.ts || l.created_at) <= new Date(logRange.value[1]))
-  return items
-})
-const filterLogs = () => {}
-import { computed } from 'vue'

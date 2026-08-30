@@ -223,7 +223,6 @@ onMounted(async () => {
   const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
   if (pre) { showCreate = showCreate || true; form.value.strategy_id = String(pre) }
   await load(); await loadStrategies(); await loadAccounts() })
-</script>
 
 // P1-5(05 §5.8):自愈时间线数据(NRestarts)+快照查看
 const enrichTasks = async () => {
@@ -238,3 +237,7 @@ const enrichTasks = async () => {
     } catch {}
   }
 }
+
+// P1-5(05 §5.8):自愈时间线数据(NRestarts)+快照查看
+
+</script>

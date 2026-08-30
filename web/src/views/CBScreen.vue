@@ -83,7 +83,7 @@ const addToPool = async () => {
   if (!checked.value.size || !selectedPool.value) return
   const pool = pools.value.find(p => p.id === selectedPool.value)
   if (!pool) return
-  const symbols = [...checked.value].map(c => c.replace(/\.\w+$/, ''))
+  const symbols = [...checked.value]
   const existing = (pool.symbols || []).map(s => (s || '').split('.')[0])
   const merged = [...new Set([...existing, ...symbols])]
   try {

@@ -185,7 +185,7 @@ const drawdownSeries = computed(() => {
 const curveOption = computed(() => ({
   grid: { left: 60, right: 16, top: 16, bottom: 28 },
   tooltip: { trigger: 'axis' },
-  xAxis: { type: 'category', data: curve.value.map(c => (c.ts || '').slice(5, 10)) },
+  xAxis: { type: 'category', data: rangeCurve.value.map(c => (c.ts || '').slice(5, 10)) },
   yAxis: { type: 'value', scale: true, axisLabel: { formatter: v => (v / 1e4).toFixed(0) + '万' } },
   yAxis: [{ type: 'value', scale: true }, { type: 'value', name: 'DD%', max: 0, splitLine: { show: false } }],
   series: [
@@ -214,6 +214,17 @@ onMounted(async () => {
   ]
   jobs.forEach(fn => fn().catch(() => {}))
 })
+
+// KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
+
+// KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
+const sparkline = computed(() => {
+  const vals = curve.value.slice(-7).map(c => c.value)
+  if (vals.length < 2) return ''
+  const up = vals[vals.length - 1] >= vals[0]
+  const pct = ((vals[vals.length - 1] - vals[0]) / vals[0] * 100).toFixed(1)
+  return `${up ? '↗' : '↘'} ${pct}%`
+})
 </script>
 
 <style scoped>
@@ -232,12 +243,3 @@ onMounted(async () => {
 .pos-row:last-child { border-bottom: none; }
 .empty-cell { color: var(--text-secondary); font-size: var(--fs-body); padding: 18px 0; text-align: center; }
 </style>
-
-// KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
-const sparkline = computed(() => {
-  const vals = curve.value.slice(-7).map(c => c.value)
-  if (vals.length < 2) return ''
-  const up = vals[vals.length - 1] >= vals[0]
-  const pct = ((vals[vals.length - 1] - vals[0]) / vals[0] * 100).toFixed(1)
-  return `${up ? '↗' : '↘'} ${pct}%`
-})

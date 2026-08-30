@@ -189,7 +189,6 @@ const delPool = async row => {
   try { await deletePoolApi(row.id); ElMessage.success(t('common.deleteSuccess')); await load() } catch (e) { ElMessage.error(t('common.deleteFailed')) }
 }
 onMounted(load)
-</script>
 
 // P2-9(05 §5.9):remote 标的搜索+分钟覆盖回补
 const poolSymbols = ref([])
@@ -216,3 +215,5 @@ watch(() => showCreate.value, v => {
   if (v) poolSymbols.value = (newPool.value.symbolsStr || '').split('\n').map(x => x.trim()).filter(Boolean)
   else newPool.value.symbolsStr = poolSymbols.value.join('\n')
 })
+
+</script>

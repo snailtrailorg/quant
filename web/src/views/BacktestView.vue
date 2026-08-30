@@ -123,19 +123,10 @@ onMounted(async () => {
 })
 
 onUnmounted(() => { if (eventSource) { eventSource.onmessage = null; eventSource.close(); eventSource = null } })
-</script>
-
-<style scoped>
-.stat { text-align: center; padding: 12px 0; }
-.stat .label { color: #909399; font-size: 13px; }
-.stat .value { font-size: 24px; font-weight: bold; color: #303133; margin-top: 4px; }
-</style>
 
 // P2-5(05 §5.7):B/S 买卖点 markPoint
 const buyPoints = computed(() => (trades.value || []).filter(t => t.action === 'BUY').map(t => ({ ts: (t.ts || '').slice(0, 10), price: t.price })))
 const sellPoints = computed(() => (trades.value || []).filter(t => t.action === 'SELL').map(t => ({ ts: (t.ts || '').slice(0, 10), price: t.price })))
-const trades = ref([])
-
 // P2-5(05 §5.7):同窗实盘净值对照
 const livePnl = ref([])
 const loadLivePnl = async () => {
@@ -144,3 +135,12 @@ const loadLivePnl = async () => {
     return d >= route.params.start && d <= route.params.end
   }) } catch {}
 }
+
+</script>
+
+
+<style scoped>
+.stat { text-align: center; padding: 12px 0; }
+.stat .label { color: #909399; font-size: 13px; }
+.stat .value { font-size: 24px; font-weight: bold; color: #303133; margin-top: 4px; }
+</style>

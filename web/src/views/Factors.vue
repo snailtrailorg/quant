@@ -306,7 +306,7 @@ const loadUsages = async () => {
   } catch { strategyUsages.value = [] }
 }
 onMounted(() => { load(); loadUsages() })
-</script>
+
 // P2-7(05 §5.5):被引用可点(弹策略列表+各策略权重)+操作列预设因子试算
 const refsDlg = ref(false)
 const refsList = ref([])
@@ -328,3 +328,7 @@ const previewFactorFor = async (row) => {
   } catch (e) { ElMessage.error(String(e)) }
 }
 import { ElMessage as _EM } from 'element-plus'
+
+// P2-7(05 §5.5):被引用可点(弹策略列表+各策略权重)+操作列预设因子试算
+
+</script>
