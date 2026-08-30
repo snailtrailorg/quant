@@ -1,13 +1,17 @@
 #!/bin/bash
 # ====================================================================
-# bootstrap_server.sh —— 3b-2 一次性加法安装（批3 设计稿 §5 步骤 2）
+# bootstrap_server.sh —— 一次性加法安装（批3 设计稿 §5 步骤 2；幂等可增量重跑）
 # 运行：服务器上 sudo bash bootstrap_server.sh（经 michael sudo 通道；root 不直连 ssh）
 # 性质：纯加法零服务影响；此后常态部署=root-ssh 零依赖（deploy 密钥+sudoers 白名单）
-# 前置：/home/michael/3b2/ 已 scp 进 9 wrapper+sudoers+9 单元+deploy 公钥
+# 前置：SRC 目录已就位（默认 /home/michael/3b2；web 工件化增量装位用
+#       SRC=<dir> sudo bash bootstrap_server.sh 覆盖——dir 内须有 deploy/wrappers/ 全套
+#       + deploy/templates/sudoers-quant-deploy.j2 + deploy/scripts/systemd/ 单元）
+# 幂等说明（web 工件化批 2026-08-30 增量）：wrapper 重装=sudoers 重写=幂等覆盖；
+#       web 迁移段三分支（链接在=no-op/目录在=迁移/不存在=no-op）。
 # ====================================================================
 set -euo pipefail
 Q=/data/websites/snailtrail.cc/quant
-SRC=/home/michael/3b2
+SRC=${SRC:-/home/michael/3b2}
 
 echo "== 1 deploy 用户（入 quant 组穿 750 父目录）=="
 id deploy >/dev/null 2>&1 || useradd -m -s /bin/bash deploy
