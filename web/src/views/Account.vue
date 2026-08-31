@@ -15,8 +15,8 @@
       </el-form>
       <el-table :data="users" style="margin-top: 12px">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="username" :label="t('account.username')" width="120" />
-        <el-table-column prop="nickname" :label="t('profile.nickname')" width="120">
+        <el-table-column prop="username" :label="t('account.username')" min-width="100" />
+        <el-table-column prop="nickname" :label="t('profile.nickname')" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ row.nickname || '-' }}</template>
         </el-table-column>
         <el-table-column prop="role" :label="t('user.role')" width="100">

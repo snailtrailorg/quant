@@ -9,7 +9,7 @@
     <el-card>
         <template #header>{{ t('health.apiHealth') }}</template>
         <el-table :data="healthData">
-          <el-table-column prop="name" :label="t('health.service')" width="120" />
+          <el-table-column prop="name" :label="t('health.service')" min-width="100" />
           <el-table-column :label="t('common.status')" width="80">
             <template #default="{ row }">
               <el-tag :type="row.status === 'ok' ? 'success' : 'danger'">{{ row.status }}</el-tag>
