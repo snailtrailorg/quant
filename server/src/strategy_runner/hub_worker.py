@@ -161,9 +161,12 @@ def run(ctx: dict) -> None:
             logger.warning("拒绝旧代次消息 gen=%s < %s（fencing）", fields["gen"], state.gen)
             return
         if kind == "gen_jump":
+            # 数据恢复：重暖机补缺口（从 bar 流触发是正确的——只有消费侧知道缺口多大）
+            # 告警：hub 重启是基础设施生命周期事件，由 hub 自身(monitor 断流检测+启动告警)报告，
+            #   不从消费侧推断（13号审查设计纠偏+用户架构直觉确认）——worker 重启后首根 gen
+            #   从 0 跳到当前值是必然，从这发告警=误报（盲审 A-P2① 的根修）
             logger.info("hub 代次切换 -> gen=%s，重暖机补缺口", state.gen)
             _rewarm(upto_ts=ts_n)
-            _alert(f"行情 hub 重启（代次 {state.gen}），任务 {tid} 已补暖机", "")
         elif kind == "dup_or_reorder":
             stats["dropped_dup"] += 1
             return
