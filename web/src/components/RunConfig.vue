@@ -2,7 +2,7 @@
   <!-- 运行配置卡(从 SystemConfig 拆出通用配置;设置·运行配置 tab 用,批 1 归位重组) -->
   <el-card>
     <template #header>{{ t('systemConfig.title') }}</template>
-    <el-table :data="configs" stripe>
+    <el-table :data="configs">
       <el-table-column prop="key" :label="t('common.configKey')" width="200" />
       <el-table-column :label="t('common.configValue')" width="200">
         <template #default="{ row }">

@@ -11,11 +11,11 @@
         <el-sub-menu index="research">
           <template #title><el-icon><DataAnalysis /></el-icon>{{ t('nav.gResearch') }}</template>
           <el-menu-item index="/screener"><el-icon><Search /></el-icon>{{ t('nav.screener') }}</el-menu-item>
+          <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.stockPool') }}</el-menu-item>
           <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>
           <el-menu-item index="/strategy"><el-icon><SetUp /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
           <el-menu-item index="/backtest"><el-icon><Timer /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
           <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.dailyInsight') }}</el-menu-item>
-          <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.stockPool') }}</el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu index="live">
@@ -31,12 +31,12 @@
           <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="ops" v-if="role === 'admin'">
+        <el-sub-menu index="ops" v-if="['admin', 'analyst'].includes(role)">
           <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
           <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
-          <el-menu-item index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
+          <el-menu-item v-if="role === 'admin'" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
           <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
-          <el-menu-item index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
+          <el-menu-item v-if="role === 'admin'" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -225,17 +225,7 @@ const loadHealth = async () => {
     healthLevel.value = items.some(i => !i.ok) ? 'critical' : 'ok'
   } catch { healthItems.value = [{ k: 'health', ok: false, v: '—' }]; healthLevel.value = 'warn' }
 }
-// 13号审查:runbook 前端静态映射(category+code→帮助文档锚点)
-const runbookMap = {
-  'risk_halt': { path: '/help', anchor: '#risk' },
-  'risk_resume': { path: '/help', anchor: '#risk' },
-  'data_missing': { path: '/help', anchor: '#data' },
-  'task_failure': { path: '/live-task', anchor: '' },
-}
-const goRunbook = (cat, code) => {
-  const r = runbookMap[cat + '_' + code] || runbookMap[cat] || { path: '/help', anchor: '' }
-  router.push(r.path + (r.anchor ? r.anchor : ''))
-}
+// runbook: 15号批零②——死代码已删;通知 runbook 接线待通知表加 code 字段后做(待办已立)
 const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')
 loadHealth()
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })

@@ -25,7 +25,7 @@
       <el-table-column prop="bars" :label="t('liveTask.bars')" width="90" class-name="num" />
       <el-table-column :label="t('common.status')" width="110">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.status)" size="small">{{ row.frozen ? 'frozen ❄' : row.status }}</el-tag>
+          <el-tag :type="statusType(row.status)" size="small">{{ row.frozen ? t('liveTask.stFrozen') + ' ❄' : enumZh(row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" width="150" />

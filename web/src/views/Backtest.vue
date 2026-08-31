@@ -51,7 +51,7 @@
         </el-table-column>
         <el-table-column prop="status" :label="t('common.status')" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.status)">{{ row.status }}</el-tag>
+            <el-tag :type="statusType(row.status)">{{ enumZh(row.status) }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="mode" :label="t('backtest.mode')" width="80" />
@@ -141,6 +141,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
+import { enumZh } from '../utils/format'
 import ParameterForm from '../components/ParameterForm.vue'
 
 const { t } = useI18n()
