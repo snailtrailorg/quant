@@ -191,7 +191,12 @@ const onAckAll = async () => {
 }
 // 类别 → 页面路由（点击通知直达）
 // P3-2/P3-8：折叠+暗色+帮助抽屉+我的权限玻璃盒
+// 14号 P0:侧栏 matchMedia 自动折叠(localStorage 记忆优先)
 const collapsed = ref(localStorage.getItem('sidebar-collapsed') === '1')
+const _mq = window.matchMedia('(max-width: 1706px)')
+const _onMq = e => { if (!localStorage.getItem('sidebar-collapsed')) collapsed.value = e.matches }
+_mq.addEventListener('change', _onMq)
+if (!localStorage.getItem('sidebar-collapsed')) collapsed.value = _mq.matches
 const dark = ref(localStorage.getItem('theme-dark') === '1')
 const onDark = v => { document.documentElement.classList.toggle('dark', v); localStorage.setItem('theme-dark', v ? '1' : '0') }
 if (dark.value) document.documentElement.classList.add('dark')

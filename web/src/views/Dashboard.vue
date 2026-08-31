@@ -27,32 +27,32 @@
     </el-card>
 
     <!-- KPI5 -->
-    <el-row :gutter="16">
-      <el-col :span="5"><el-card shadow="never"><div class="kpi">
+    <div style="display: flex; gap: 16px; margin-bottom: 0">
+      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.totalAssets') }}</div>
         <div class="kpi-num">{{ fmtMoney(dashboard.total_value) }}</div>
         <svg class="sparkline-svg" width="100%" height="24" viewBox="0 0 100 24">
           <polyline v-if="sparklinePoints.length" :points="sparklinePoints" fill="none" stroke="var(--up)" stroke-width="1.5" />
         </svg>
-      </div></el-card></el-col>
-      <el-col :span="5"><el-card shadow="never"><div class="kpi">
+      </div></el-card></div>
+      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.todayPnl') }}</div>
         <div class="kpi-num" :class="pnlClass(dashboard.daily_pnl)">{{ pnlArrow(dashboard.daily_pnl) }} {{ fmtMoney(dashboard.daily_pnl) }}</div>
-      </div></el-card></el-col>
-      <el-col :span="5"><el-card shadow="never"><div class="kpi">
+      </div></el-card></div>
+      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.totalPnl') }}（{{ t('dashboard.sinceInception') }}）</div>
         <div class="kpi-num" :class="pnlClass(dashboard.total_pnl)">{{ pnlArrow(dashboard.total_pnl) }} {{ fmtMoney(dashboard.total_pnl) }}</div>
-      </div></el-card></el-col>
-      <el-col :span="5"><el-card shadow="never"><div class="kpi">
+      </div></el-card></div>
+      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('dashboard.riskGauge') }}</div>
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
         <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: 4px" />
-      </div></el-card></el-col>
-      <el-col :span="5"><el-card shadow="never"><div class="kpi">
+      </div></el-card></div>
+      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('dashboard.tasksRunning') }}</div>
         <div class="kpi-num">{{ liveTasks.filter(x => x.status === 'running').length }}/{{ liveTasks.length }}</div>
-      </div></el-card></el-col>
-    </el-row>
+      </div></el-card></div>
+    </div>
 
     <!-- 权益曲线 + 实盘任务 -->
     <el-row :gutter="16" style="margin-top: 16px">

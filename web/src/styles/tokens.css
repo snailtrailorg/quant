@@ -40,15 +40,19 @@
   --font-num: "JetBrains Mono Web", ui-monospace, "SFMono-Regular", Consolas, monospace;
 
   /* —— 字号六级（04 §2 阶梯：25 KPI/18 页标题/14 卡片标题/13 正文基线/12 表头/11.5 注脚）—— */
-  --fs-kpi: 25px;
-  --fs-page: 18px;
+  /* 14号 §2.1 clamp 响应式字号(1280~2560 平滑缩放;midpoint=1920) */
+  --fs-kpi: clamp(21px, 25px + 0.25vw, 27px);
+  --fs-page: clamp(17px, 18px + 0.06vw, 18.5px);
   --fs-card: 14px;
-  --fs-body: 13px;
+  --fs-body: clamp(13px, 13px + 0.03vw, 13.5px);
   --fs-label: 12px;
   --fs-foot: 11.5px;
 
   /* —— 间距/圆角/阴影 —— */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
+  --lh-tight: 1.3;    /* 数字/KPI */
+  --lh-base: 1.5;     /* 正文 */
+  --lh-loose: 1.7;    /* 段落/描述 */
   --radius-s: 4px; --radius-m: 8px;
   --shadow-1: 0 1px 2px rgba(26, 34, 51, 0.06);
   --shadow-2: 0 4px 12px rgba(26, 34, 51, 0.10);
@@ -74,6 +78,10 @@
 
   --el-font-family: var(--font-ui);
   --el-font-size-base: var(--fs-body);
+  /* 14号 F4:EP 字号漏区补全 */
+  --el-form-label-font-size: var(--fs-label);
+  --el-dialog-title-font-size: var(--fs-card);
+  --el-tag-font-size: var(--fs-foot);
 
   /* 涨跌语义直通 EP 危险/成功不可混用——success 用 --success（青绿），
      danger 保持 EP 语义红（操作反馈），与 --up（数据方向红）分离 */
@@ -126,3 +134,11 @@ html.dark {
 
 /* —— focus-visible 键盘可达（04 §5 基础令牌）—— */
 :focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
+
+/* EP 组件字号覆写(非变量区) */
+.el-pagination { font-size: var(--fs-label); }
+.el-pagination button, .el-pagination .el-pager li { font-size: var(--fs-label); }
+
+/* 行高令牌绑定 */
+.kpi-num, .num { line-height: var(--lh-tight); }
+body, .el-table, .el-form-item__label { line-height: var(--lh-base); }
