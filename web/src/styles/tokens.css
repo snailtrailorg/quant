@@ -5,6 +5,19 @@
  * 全部在 #151D30 画布上 ≥4.5:1（04 §1.2 盲审修正）。
  */
 
+/* @font-face:JBMono latin 400/600(public/fonts/ 预生成,21+22KB;14号 P1) */
+@font-face {
+  font-family: "JBMono Web";
+  src: url("/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400; font-display: swap;
+}
+@font-face {
+  font-family: "JBMono Web";
+  src: url("/fonts/jetbrains-mono-latin-600-normal.woff2") format("woff2");
+  font-weight: 600; font-display: swap;
+}
+/* MiSans Web @font-face 待分包文件生成后补(cn-font-split,首屏<150KB 含 JBMono 43KB) */
+
 :root {
   /* —— 品牌 —— */
   --brand-600: #1F4FD8;   /* 主操作/选中/链接（替换模板蓝 #409EFF） */
@@ -37,7 +50,7 @@
   /* —— 字体（04 §2：中文栈 + 数字等宽 tabular）—— */
   --font-ui: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans",
              "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
-  --font-num: "JetBrains Mono Web", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --font-num: "JBMono Web", "MiSans Web", ui-monospace, "SFMono-Regular", Consolas, monospace;
 
   /* —— 字号六级（04 §2 阶梯：25 KPI/18 页标题/14 卡片标题/13 正文基线/12 表头/11.5 注脚）—— */
   /* 14号 §2.1 clamp 响应式字号(1280~2560 平滑缩放;midpoint=1920) */
