@@ -8,9 +8,9 @@
     </template>
     <el-table :data="tasks">
       <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" :label="t('common.name')" />
-      <el-table-column prop="strategy_id" :label="t('liveTask.strategy')" width="150" />
-      <el-table-column prop="symbol" :label="t('common.symbol')" width="130" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
+      <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" />
       <!-- P1-5（06 B#5）：md_mode/行情 lag/bars 消费/frozen——活着吗/新鲜吗/冻没冻直答 -->
       <el-table-column :label="t('liveTask.mdMode')" width="90">
         <template #default="{ row }">
@@ -28,7 +28,7 @@
           <el-tag :type="statusType(row.status)" size="small">{{ row.frozen ? t('liveTask.stFrozen') + ' ❄' : enumZh(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="account_id" :label="t('common.account')" width="150" />
+      <el-table-column prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="initial_capital" :label="t('liveTask.capital')" width="120" />
             <el-table-column type="expand">
         <template #default="{ row }">

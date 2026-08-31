@@ -56,7 +56,7 @@
           <span v-else style="color: var(--el-text-color-placeholder)">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="description" :label="t('common.description')" min-width="150" />
+      <el-table-column prop="description" min-width="180" show-overflow-tooltip :label="t('common.description')" />
       <el-table-column :label="t('common.action')" width="200">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="editPool(row)">{{ t('common.edit') }}</el-button>

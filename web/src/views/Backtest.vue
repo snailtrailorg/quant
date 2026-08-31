@@ -20,7 +20,7 @@
       </template>
       <el-table :data="filteredRuns" v-loading="loading" @row-click="goDetail">
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="strategy_id" :label="t('backtest.strategy')">
+        <el-table-column prop="strategy_id" :label="t('backtest.strategy')" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>
         </el-table-column>
         <!-- P2-4：指标摘要——列表行直接给成绩，不用点进 Run 页 -->
