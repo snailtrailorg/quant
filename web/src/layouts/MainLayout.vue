@@ -248,16 +248,6 @@ const logout = async () => {
   localStorage.removeItem('role')
   router.push('/login')
 }
-</script>
-
-<style scoped>
-/* 通知级别色点（critical 红 / warn 橙 / info 灰），与 el-tag 语义色一致 */
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-.dot.critical { background: #f56c6c; }
-.dot.warn { background: #e6a23c; }
-.dot.info { background: #909399; }
-.notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
-</style>
 
 // ⌘K 全局搜索
 const cmdkVisible = ref(false)
@@ -282,3 +272,13 @@ const onKeydown = (e) => {
 }
 onMounted(() => window.addEventListener('keydown', onKeydown))
 onUnmounted(() => window.removeEventListener('keydown', onKeydown))
+</script>
+
+<style scoped>
+/* 通知级别色点（critical 红 / warn 橙 / info 灰），与 el-tag 语义色一致 */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.dot.critical { background: #f56c6c; }
+.dot.warn { background: #e6a23c; }
+.dot.info { background: #909399; }
+.notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
+</style>

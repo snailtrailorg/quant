@@ -265,7 +265,6 @@ const onDelete = async (row) => {
 }
 onMounted(load)
 onUnmounted(stopPoll)
-</script>
 
 // Cron 弹窗化(05 §5.10)
 const cronDialog = ref(false)
@@ -285,3 +284,4 @@ const saveCron = async () => {
     cronDialog.value = false; ElMessage.success(t('common.success')); load()
   } catch { ElMessage.error(t('common.failed')) }
 }
+</script>
