@@ -34,6 +34,13 @@ export default api
 export const login = (username, password) =>
   api.post('/auth/login', { username, password })
 
+// W6 修(运维菜单真凶):meOnce 原居 router.js,经 `import('../router')` 动态导入时
+// chunk 拆分下 meOnce 导出丢失(undefined→TypeError 被静默吞→perms 恒空→权限门控
+// 菜单组全隐)——落户 api.js(无环),router/MainLayout/Reconcile 一律静态导入
+let _mePromise = null
+export const meOnce = () => (_mePromise ??= getMe().catch(() => { _mePromise = null; return null }))
+export const resetMeCache = () => { _mePromise = null }
+
 export const getMe = () => api.get('/auth/me')
 
 export const getDataIntegrity = freq => api.get('/data-integrity', { params: { freq } })

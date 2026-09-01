@@ -85,11 +85,11 @@ import api from '../api'
 const { t } = useI18n()
 // W5 残留修(W6 审 A-P2):localStorage role → /auth/me permissions(W4 权限驱动)
 const canHandle = ref(false)
-import('../router').then(async ({ meOnce }) => {
-  const me = (await meOnce()) || null
-  const perms = me?.permissions || []
-  canHandle.value = perms.includes('trade')
-})
+import { meOnce } from '../api'
+;(async () => {
+  const me = await meOnce()
+  canHandle.value = (me?.permissions || []).includes('trade')
+})()
 const rawIssues = ref([])
 const diffRows = ref([])
 const detailVisible = ref(false)

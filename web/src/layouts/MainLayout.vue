@@ -165,7 +165,7 @@ import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getMe, getNotifications, ackAllNotifications } from '../api'
+import { getMe, getNotifications, ackAllNotifications, meOnce, resetMeCache } from '../api'
 import api from '../api'
 import { setLang, LANGUAGES } from '../i18n'
 import Avatar from '../components/Avatar.vue'
@@ -186,8 +186,7 @@ const has = k => perms.value.includes(k)
 const navMap = ref({})
 const loadPerms = async () => {
   try {
-    const { meOnce } = await import('../router')
-    const me = (await meOnce()) || (await getMe().catch(() => null))
+    const me = await meOnce()
     if (!me) return
     perms.value = me.permissions || []
     role.value = me.role || role.value
@@ -241,8 +240,7 @@ const showMyPerms = ref(false)
 const myPermGroups = ref({ base: [], override: [], denied: [] })
 const loadMyPerms = async () => {
   try {
-    const { meOnce } = await import('../router')
-    const me = (await meOnce()) || (await (await import('../api')).getMe().catch(() => null))
+    const me = await meOnce()
     myPerms.value = me.permissions || []
     const src = me.perm_sources || {}
     const denied = me.denied || []
@@ -298,7 +296,7 @@ onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
 const onLangChange = v => setLang(v)
 const logout = async () => {
   try { await api.post('/auth/logout') } catch {}
-  try { const { resetMeCache } = await import('../router'); resetMeCache() } catch {}
+  try { resetMeCache() } catch {}
   perms.value = []; navMap.value = {}; role.value = ''   // 盲审 A/B-P1:换人登录不串旧权限
   localStorage.removeItem('token')
   localStorage.removeItem('role')

@@ -70,10 +70,7 @@ const routes = [
 const router = createRouter({ history: createWebHistory(), routes })
 
 // W5 nav 守卫:模块级 me promise 缓存(首航 await,刷新不丢;盲审 A-P1 时序方案)
-import { getMe } from './api'
-let mePromise = null
-const meOnce = () => (mePromise ??= getMe().catch(() => { mePromise = null; return null }))   // 失败不粘缓存,下次重试
-export const resetMeCache = () => { mePromise = null }
+import { meOnce } from './api'   // W6 修:meOnce 落户 api.js(动态导入 chunk 吞导出的真凶)
 
 router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('token')
