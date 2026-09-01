@@ -5,9 +5,9 @@ deploy_release_id_regex: '^[0-9]{12}-[a-f0-9]{7,}$'
 
 # ---- 前置断言参数 ----
 deploy_min_disk_mb: 500              # 磁盘余量闸（设计稿 §3 preflight；venv 重建 1.5G 闸属 3b-1 步骤 1）
-deploy_trading_windows:              # 发布禁区（TZ=Asia/Shanghai；周一~周五）。2026-09-01 用户裁定对齐：
-  - {begin: 915, end: 1130}          # 午休窗 11:30-13:00 可发（彩排绿前提，波次全落窗内硬止 13:00）——
-  - {begin: 1300, end: 1505}         # 原保守值 915-1135/1255-1505 各让 5 分钟缓冲给裁定边界
+deploy_trading_windows:              # 发布禁区（TZ=Asia/Shanghai；周一~周五）。
+  - {begin: 915, end: 1135}          # 午休可发窗=11:35-12:55（2026-09-01 用户裁定：前后各让 5 分钟
+  - {begin: 1255, end: 1505}         # 保健壮；彩排绿前提，波次全落窗内）
 
 # ---- 四切片指纹（排 __pycache__；空输出=视为变更——设计稿 §3 preflight）----
 # scripts 取 systemd 子树：单元变更判据（场景 6 install-units 触发条件）
