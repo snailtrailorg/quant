@@ -57,6 +57,7 @@ deploy_task_units_live: []           # dbro 采集后覆写（沙箱道具为空
 deploy_task_units_feishu: []         # dbro 采集后覆写（沙箱道具为空清单）
 deploy_task_units_db_cmd: "{{ quant_dbro_cmd }} live"
 deploy_task_units_db_cmd_feishu: "{{ quant_dbro_cmd }} feishu"
+deploy_postverify_probe: false        # W2：沙箱 web 桩无 /api/_probe（web.py:27）
 postverify_healthz_release: true     # 沙箱 healthz 桩回带 release_id（生产 web_api 无此字段，3b 校正）
 deploy_hub_hb_mode: file             # 生产: redis（quant:hb:md-hub，3b 首跑验证）
 deploy_hub_hb_file: "{{ deploy_root }}/shared/runtime/hub_hb.json"

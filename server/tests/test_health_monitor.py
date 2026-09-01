@@ -271,3 +271,52 @@ class TestEndpoints:
         sql = mock_conn.execute.call_args.args[0]
         assert "health_event" in sql and "DESC" in sql
         assert mock_conn.execute.call_args.args[1] == (50,)
+
+
+class TestApiProbe:
+    """W2（2026-09-01）：部署管道冒烟探针——六检查聚合/0=ok 判据/内卫 403。"""
+
+    def _probe(self, headers=None):
+        from unittest.mock import patch, MagicMock
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        conn = MagicMock(); conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = [0]
+        r = MagicMock(); r.ping.return_value = True; r.ttl.return_value = 60
+        with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+             patch("redis.Redis.from_url", return_value=r):
+            c = TestClient(app)
+            return c.get("/api/_probe", headers=headers or {})
+
+    def test_probe_all_ok_counts_zero_ok(self):
+        """全通 + 计数全 0 → ok=true（staging 空库不误红——盲审 A-P1 判据）。"""
+        resp = self._probe()
+        assert resp.status_code == 200
+        d = resp.json()
+        assert d["ok"] is True
+        assert d["checks"]["strategy_config"] == "ok:0"    # 0=ok
+        assert len(d["checks"]) == 6
+
+    def test_probe_single_fail_ok_false_still_200(self):
+        from unittest.mock import patch, MagicMock
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        conn = MagicMock(); conn.__enter__.return_value = conn
+        conn.execute.side_effect = RuntimeError("pg down")   # db+两计数都走 get_conn
+        r = MagicMock(); r.ping.return_value = True; r.ttl.return_value = 60
+        with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+             patch("redis.Redis.from_url", return_value=r):
+            resp = TestClient(app).get("/api/_probe")
+        assert resp.status_code == 200            # 恒 200，看 ok
+        assert resp.json()["ok"] is False
+        assert "pg down" in resp.json()["checks"]["db"]
+
+    def test_probe_public_ip_403(self):
+        assert self._probe({"X-Real-IP": "8.8.8.8"}).status_code == 403   # 注:203.0.113.x 是文档段,ipaddress 判 is_private=True
+
+    def test_probe_private_ip_allowed(self):
+        assert self._probe({"X-Real-IP": "10.1.2.3"}).status_code == 200
+
+    def test_probe_malformed_header_403(self):
+        """畸形头 fail-closed（盲审 B-P2）。"""
+        assert self._probe({"X-Real-IP": "not-an-ip"}).status_code == 403

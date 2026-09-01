@@ -12,6 +12,7 @@ deploy_trading_windows:              # 发布禁区（TZ=Asia/Shanghai；周一~
 # ---- 四切片指纹（排 __pycache__；空输出=视为变更——设计稿 §3 preflight）----
 # scripts 取 systemd 子树：单元变更判据（场景 6 install-units 触发条件）
 deploy_slices: [src, migrations, scripts/systemd, requirements.txt]
+deploy_postverify_probe: false        # W2 兜底：探针默认关（环境显式开；沙箱 web 桩无端点）
 
 # ---- 发布同步白名单（设计稿 §3：synchronize 白名单清单，非全树 rsync）----
 deploy_sync_whitelist:

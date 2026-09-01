@@ -367,6 +367,21 @@
             status_code: 200
           when: deploy_waves | selectattr('readyz', 'defined') | list | length > 0
 
+        - name: 阶段 8 —— /api/_probe 冒烟探针（W2：六检查聚合——进程活≠功能对）
+          ansible.builtin.uri:
+            url: "{{ (deploy_waves | selectattr('healthz', 'defined') | list | first).healthz | regex_replace('/healthz$', '/api/_probe') }}"
+            status_code: 200
+          register: postverify_probe
+          when: deploy_postverify_probe | default(false) | bool
+
+        - name: 阶段 8 —— 探针断言（全检查 ok；--check 干跑守卫同 release 版本断言）
+          ansible.builtin.assert:
+            that: postverify_probe.json.ok | bool
+            msg: "探针检查未全绿: {{ postverify_probe.json.checks | default({}) }}"
+          when:
+            - deploy_postverify_probe | default(false) | bool
+            - postverify_probe.json is defined
+
         - name: 阶段 8 —— hub 心跳复现（gen+8 字段；文件模式）
           ansible.builtin.shell: |
             set -u

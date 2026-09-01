@@ -51,6 +51,7 @@ deploy_task_units_feishu: []          # DB 真相源采集后覆写（im_bot_con
 # feishu 波次真相源= im_bot_config（19 号 IM 统一接入后，feishu_config 已并入，provider 过滤）
 deploy_task_units_db_cmd: "{{ quant_dbro_cmd }} live"
 deploy_task_units_db_cmd_feishu: "{{ quant_dbro_cmd }} feishu"
+deploy_postverify_probe: true         # W2：staging 探针开（彩排即真验证）
 postverify_healthz_release: false    # 生产 healthz 无 release 字段（版本收敛由 quant-pinned 通道承载）
 deploy_hub_hb_mode: redis            # quant:hb:md-hub：gen+8 字段（3b 首跑验证）
 deploy_hub_hb_redis_key: "quant:hb:md-hub"

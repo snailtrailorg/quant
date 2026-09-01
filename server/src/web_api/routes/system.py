@@ -36,6 +36,73 @@ def get_help_api(topic: str,
         return {"topic": topic, "content": "# 帮助内容未找到\n\n指导书文件缺失，请检查部署。", "missing": True}
 
 
+@router.get("/api/_probe")
+def api_probe(request: Request):
+    """部署管道冒烟探针（W2，P1-2 2026-09-01）：只读六检查聚合——进程活≠功能对
+    （backtest 500 类运行时错误 healthz/readyz 拦不住）。免账号免密钥：管道 localhost
+    直连（无代理头）；外封=nginx /readyz 同待遇 allowlist（装位前内卫兜底）。
+
+    计数判据：ok=查询成功，计数仅回显，**0=ok**（staging 空库首跑不误红——回滚好版本
+    是最大风险，盲审 A-P1）。内卫：X-Real-IP 非私网/畸形头 → 403 fail-closed。
+    """
+    import ipaddress
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        try:
+            if not ipaddress.ip_address(real_ip).is_private:
+                raise ApiError(403, "PROBE_FORBIDDEN", "探针仅内网/本机")
+        except ValueError:
+            raise ApiError(403, "PROBE_FORBIDDEN", "探针仅内网/本机")   # 畸形头 fail-closed
+
+    checks: dict = {}
+
+    def _chk(name, fn):
+        try:
+            checks[name] = f"ok:{fn()}"
+        except Exception as e:
+            checks[name] = f"fail: {str(e)[:60]}"
+
+    def _db():
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+        return "reachable"
+
+    def _count(sql):
+        def _q():
+            with get_conn() as conn:
+                return conn.execute(sql).fetchone()[0]
+        return _q
+
+    def _valkey():
+        import os, redis
+        r = redis.Redis.from_url(
+            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2)
+        r.ping()
+        return "pong"
+
+    def _hub_hb():
+        import os, redis
+        r = redis.Redis.from_url(
+            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2)
+        ttl = r.ttl("quant:hb:md-hub")
+        if ttl is None or ttl <= 0:
+            raise RuntimeError(f"hub 心跳不在场 (ttl={ttl})")
+        return f"ttl={ttl}s"
+
+    def _factors():
+        from src.strategy_framework.factor import list_factors
+        return len(list_factors())
+
+    _chk("db", _db)
+    _chk("factors", _factors)
+    _chk("strategy_config", _count("SELECT count(*) FROM strategy_config"))
+    _chk("notifications", _count("SELECT count(*) FROM notifications"))
+    _chk("valkey", _valkey)
+    _chk("hub_hb", _hub_hb)
+    ok = all(v.startswith("ok") for v in checks.values())
+    return {"ok": ok, "checks": checks}
+
+
 @router.get("/healthz")
 @router.get("/health")   # 兼容旧路径
 def healthz():
