@@ -9,13 +9,13 @@
     <el-card>
         <template #header>{{ t('health.apiHealth') }}</template>
         <el-table :data="healthData">
-          <el-table-column prop="name" :label="t('health.service')" min-width="100" />
+          <el-table-column prop="name" :label="t('health.service')" min-width="100" show-overflow-tooltip />
           <el-table-column :label="t('common.status')" width="80">
             <template #default="{ row }">
               <el-tag :type="row.status === 'ok' ? 'success' : 'danger'">{{ row.status }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="detail" :label="t('common.detail')" />
+          <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
         </el-table>
       </el-card>
     </el-col>
@@ -57,7 +57,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="detail" :label="t('common.detail')" min-width="260" />
+      <el-table-column prop="detail" :label="t('common.detail')" min-width="260" show-overflow-tooltip />
     </el-table>
   </el-card>
 

@@ -5,7 +5,7 @@
       <template #header>{{ t('llm.usageTitle') }}<el-button type="primary" @click="loadUsage" style="margin-left: 8px">{{ t('common.refresh') }}</el-button></template>
       <el-table :data="usage.month">
         <el-table-column prop="provider" label="Provider" width="120" />
-        <el-table-column prop="model" :label="t('llm.model')" />
+        <el-table-column prop="model" :label="t('llm.model')" show-overflow-tooltip />
         <el-table-column prop="calls" :label="t('llm.calls')" width="80" />
         <el-table-column :label="t('llm.tokenCol')" width="160">
           <template #default="{ row }">{{ row.input_tokens.toLocaleString() }} / {{ row.output_tokens.toLocaleString() }}</template>
@@ -21,9 +21,9 @@
     </el-card>
     <el-table :data="models">
       <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" :label="t('common.name')" />
+      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="provider" label="Provider" width="120" />
-      <el-table-column prop="model" :label="t('llm.model')" />
+      <el-table-column prop="model" :label="t('llm.model')" show-overflow-tooltip />
       <el-table-column :label="t('llm.key')" width="80">
         <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'">{{ row.has_key ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
@@ -74,7 +74,7 @@
       <el-table-column prop="daily_token_limit" :label="t('llm.dailyTokenLimit')" width="120" />
       <el-table-column prop="alert_threshold_pct" :label="t('llm.alertThreshold')" width="100" />
       <el-table-column prop="enabled" :label="t('common.enable')" width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
-      <el-table-column prop="updated_at" :label="t('common.updatedAt')"><template #default="{ row }">{{ row.updated_at?.slice(0,19) || '-' }}</template></el-table-column>
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" width="160"><template #default="{ row }">{{ row.updated_at?.slice(0,19) || '-' }}</template></el-table-column>
     </el-table>
     <el-alert v-if="budgetCheck" :type="budgetCheck.alerts?.length ? 'warning' : 'success'" :closable="false" style="margin-top: 12px">
       {{ budgetCheck.alerts?.length ? t('llm.alertsOver', { n: budgetCheck.alerts.length }) : t('llm.alertsOk', { n: budgetCheck.checked }) }}

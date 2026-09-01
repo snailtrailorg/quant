@@ -26,7 +26,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="module" :label="t('log.module')" width="100" />
-          <el-table-column prop="msg" :label="t('log.content')" />
+          <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
         </el-table>
         <!-- P3-5(05 §5.10):日志筛选 -->
   <el-card style="margin-bottom: 14px">
@@ -52,7 +52,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="category" :label="t('log.notifyCategory')" width="80" />
-          <el-table-column prop="title" :label="t('log.titleCol')" width="150" />
+          <el-table-column prop="title" :label="t('log.titleCol')" min-width="150" show-overflow-tooltip />
           <el-table-column prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
           <el-table-column prop="created_at" :label="t('common.time')" width="150" />
         </el-table>
@@ -71,7 +71,7 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="to" :label="t('log.outboxTo')" width="200" show-overflow-tooltip />
+      <el-table-column prop="to" :label="t('log.outboxTo')" min-width="200" show-overflow-tooltip />
       <el-table-column prop="subject" :label="t('log.outboxSubject')" min-width="180" show-overflow-tooltip />
       <el-table-column prop="next_attempt_at" :label="t('log.outboxNext')" width="160">
         <template #default="{ row }">{{ row.next_attempt_at || '-' }}</template>
