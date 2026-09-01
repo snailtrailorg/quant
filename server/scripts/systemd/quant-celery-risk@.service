@@ -9,7 +9,7 @@ User=quant
 Group=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
-ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler worker -Q risk -c 1 --loglevel=info
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler worker -Q risk,alerts_im,alerts_email,alerts_sms -c 1 --loglevel=info
 Restart=always
 RestartSec=10
 MemoryMax=512M

@@ -140,7 +140,7 @@ def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
     from src.data_platform.db import get_conn as _gc
     all_keys = ["read", "strategy_control", "data_sync", "halt", "resume", "trade",
                 "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
-                "system_config", "llm_config", "im_bots_config"]
+                "system_config", "llm_config", "im_bots_config", "alerts_config"]
     roles = load_role_permissions()
     overrides = []
     try:

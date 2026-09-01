@@ -17,6 +17,9 @@ RUNBOOK: dict[str, dict] = {
     "hub.maint":        {"label": "hub 维护窗跳过", "guide": "维护标记在场 hub 不自动拉起——维护完成删标记（TTL 4h 自动过期）。"},
     "unit.failed":      {"label": "单元 Failed", "guide": "OnFailure 钩子告警——journalctl -u <unit> 归因；EX_CONFIG(78) 类不重启需人工。"},
     "unit.config-err":  {"label": "单元配置错", "guide": "EX_CONFIG 78 配置错误不自动重启——核对任务配置/凭证后手动 start。"},
+    # ——— 批 7 告警分发（2026-09-02） ———
+    "alert.push-failed": {"label": "告警推送失败", "guide": "外推通道发送失败——设置→告警 查通道状态并测试；连续失败查 risk worker journalctl 归因。"},
+    "alert.test":        {"label": "告警测试", "guide": "设置→告警 的通道测试消息（人工触发），无行动项。"},
     # ——— 数据面（hub/worker） ———
     "deps.exhausted":   {"label": "依赖探活耗尽", "guide": "PG 持续不可达超 10 分钟——查 PG 服务与网络；runner 已退出待 systemd 重试。"},
     "frozen.stream":    {"label": "流异常冻结", "guide": "流序号跳变/不可信 bar（数据污染事实）——重启任务解冻；SELL 不受限。"},

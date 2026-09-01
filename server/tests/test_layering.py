@@ -28,6 +28,8 @@ EXEMPT_UPWARD = {
     ("task_manager", "alert_notify"),
     ("health_monitor", "data_platform"),
     ("llm_gateway", "alert_notify"),
+    ("alert_notify", "im_bot"),         # 批 7：告警出网经 IM 统一接入发送（服务间横向调用，
+                                        # 同 data_platform↔alert_notify 先例；im_bot 保持层 3 不动）
     ("strategy_runner", "alert_notify"),
     ("strategy_framework", "data_platform"),
 }

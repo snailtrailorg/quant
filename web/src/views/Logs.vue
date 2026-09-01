@@ -54,6 +54,16 @@
           <el-table-column prop="category" :label="t('log.notifyCategory')" width="80" />
           <el-table-column prop="title" :label="t('log.titleCol')" min-width="150" show-overflow-tooltip />
           <el-table-column prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
+          <el-table-column :label="t('alerts.dispatchCol')" width="110">
+            <template #default="{ row }">
+              <template v-if="row.level === 'info'"></template>
+              <span v-else-if="!row.dispatch" style="color: var(--flat)">?</span>
+              <template v-else>
+                <el-tag v-for="(v, ch) in row.dispatch" :key="ch" size="small" style="margin: 1px"
+                        :type="chipType(v)" :title="chipTitle(ch, v)">{{ chipLabel(ch, v) }}</el-tag>
+              </template>
+            </template>
+          </el-table-column>
           <el-table-column prop="created_at" :label="t('common.time')" width="150" />
         </el-table>
       </el-card>
@@ -97,6 +107,24 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getLogs, logAnalyze, getEmailOutbox, getNotifications } from '../api'
 const { t } = useI18n()
+
+// 批 7 推送结果 chips（dispatch jsonb 渲染契约：ok✓/queued○/skip|failed 带因/{}不显示/null=未明）
+const chipType = v => v === 'ok' || v === 'legacy' ? 'success' : (v === 'queued' || v === 'sending') ? 'info'
+  : v.startsWith('failed:') ? 'danger' : v.startsWith('skip:') ? 'warning' : 'info'
+const chipLabel = (ch, v) => {
+  const tag = { im: 'IM', email: t('alerts.channel.email'), sms: t('alerts.channel.sms'),
+                legacy: 'web', _chain: 'Ⓒ' }[ch] || ch
+  return v === 'ok' ? `${tag}✓` : (v === 'queued' || v === 'sending') ? `${tag}○` : v.startsWith('failed:') ? `${tag}✗` : `${tag}–`
+}
+const chipTitle = (ch, v) => {
+  if (v === 'ok') return t('alerts.dispatch.ok')
+  if (v === 'queued') return t('alerts.dispatch.queued')
+  if (v === 'sending') return t('alerts.dispatch.sending')
+  const reason = v.includes(':') ? v.split(':').slice(1).join(':') : ''
+  const key = `alerts.dispatch.${reason}`
+  const zh = t(key)
+  return zh !== key ? `${v.startsWith('skip:') ? t('alerts.dispatch.skip') : t('alerts.dispatch.failed')} · ${zh}` : v
+}
 const logs = ref([])
 const notifs = ref([])
 const outbox = ref([])

@@ -107,13 +107,14 @@ class FeishuClient:
                 logger.error(f"获取 token 失败: {e}")
                 return ""
 
-    def send_text(self, receive_id: str, text: str, receive_id_type: str = "open_id"):
-        """发送文本消息。"""
+    def send_text(self, receive_id: str, text: str, receive_id_type: str = "open_id") -> bool:
+        """发送文本消息。返回真实结局（批 7 · A2-P2/B2-P1：原吞异常返 None——告警分发
+        依赖 bool 回写审计列；现有调用点均忽略返回值，改 bool 零破坏）。"""
         token = self._get_token()
         if not token:
-            return
+            return False
         try:
-            httpx.post(
+            resp = httpx.post(
                 "https://open.feishu.cn/open-apis/im/v1/messages",
                 params={"receive_id_type": receive_id_type},
                 headers={"Authorization": f"Bearer {token}"},
@@ -124,8 +125,17 @@ class FeishuClient:
                 },
                 timeout=10,
             )
+            if resp.status_code != 200:
+                logger.warning("飞书发送消息 HTTP %s: %s", resp.status_code, resp.text[:120])
+                return False
+            body = resp.json()
+            if body.get("code") != 0:
+                logger.warning("飞书发送消息 code=%s: %s", body.get("code"), str(body.get("msg", ""))[:120])
+                return False
+            return True
         except httpx.HTTPError as e:
             logger.warning("飞书发送消息失败: %s", e)
+            return False
 
     def send_card(self, receive_id: str, card: dict, receive_id_type: str = "open_id"):
         """发送交互卡片（操作确认）。"""

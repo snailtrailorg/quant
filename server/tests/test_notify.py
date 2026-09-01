@@ -28,8 +28,9 @@ def test_notify_code_passthrough_to_insert():
     r.exists.return_value = 0
     with patch.object(N, "_redis", return_value=r), \
          patch("src.data_platform.db.get_conn", return_value=conn), \
-         patch.object(N, "should_push_external", return_value=False):
+         patch("src.alert_notify.dispatch.dispatch") as p_disp:   # 批7:外推改订阅分发(线程不进单测)
         N.notify("critical", "system", "t", "b", code="l3.failed")
+    p_disp.assert_called_once()
     sql = conn.execute.call_args[0][0]
     args = conn.execute.call_args[0][1]
     assert "code" in sql and "%s,%s,%s,%s,%s,%s" in sql
@@ -68,38 +69,31 @@ def test_runbook_consistency():
 
 
 def test_push_channel_appends_runbook_line():
-    """W3：外推组装——code 有映射时 body 尾部追加处置行；无 code 不追加。"""
+    """W3：外推组装——code 有映射时 body 尾部追加处置行；无 code 不追加。
+    （批7 改直测 _push_channel：notify→dispatch 线程链不进单测，组装语义不变）"""
     from unittest.mock import patch, MagicMock
     import importlib
     N = importlib.import_module("src.alert_notify.notify")
     sent = []
     ch = MagicMock(); ch.send.side_effect = lambda t, b, l: sent.append((t, b, l))
-    r = MagicMock(); r.exists.return_value = 0
-    with patch.object(N, "_redis", return_value=r), \
-         patch.object(N, "should_push_external", return_value=True), \
-         patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")), \
-         patch("src.alert_notify.channel.get_channel", return_value=ch), \
+    with patch("src.alert_notify.channel.get_channel", return_value=ch), \
          patch.object(N, "_quota_exceeded", return_value=False):
-        N.notify("critical", "system", "t", "b", code="l3.failed")
-        N.notify("critical", "system", "t2", "b2", code=None)
+        N._push_channel("critical", "t", "b", code="l3.failed")
+        N._push_channel("critical", "t2", "b2", code=None)
     assert "▸ 处置[L3 拉起失败]" in sent[0][1]
     assert "▸" not in sent[1][1]
 
 
 def test_push_channel_truncates_before_append():
-    """W3 盲审 A/B-P1：先截原 body 再拼行——5000 字符 body 不超通道限。"""
+    """W3 盲审 A/B-P1：先截原 body 再拼行——5000 字符 body 不超通道限。（批7 直测版）"""
     from unittest.mock import patch, MagicMock
     import importlib
     N = importlib.import_module("src.alert_notify.notify")
     sent = []
     ch = MagicMock(); ch.send.side_effect = lambda t, b, l: sent.append(b)
-    r = MagicMock(); r.exists.return_value = 0
-    with patch.object(N, "_redis", return_value=r), \
-         patch.object(N, "should_push_external", return_value=True), \
-         patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db")), \
-         patch("src.alert_notify.channel.get_channel", return_value=ch), \
+    with patch("src.alert_notify.channel.get_channel", return_value=ch), \
          patch.object(N, "_quota_exceeded", return_value=False):
-        N.notify("critical", "system", "t", "x" * 5000, code="l3.failed")
+        N._push_channel("critical", "t", "x" * 5000, code="l3.failed")
     body = sent[0]
     assert len(body) < 2600                       # 1900 截断 + 处置行,远离 4096 字节
     assert body.endswith(("。", "）", ")")) or "处置" in body[-600:]   # 处置行在尾部未截

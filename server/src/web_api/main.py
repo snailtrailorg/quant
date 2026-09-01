@@ -94,6 +94,7 @@ from .routes.sync import router as sync_router                # /api/sync/* /api
 from .routes.stock import router as stock_router              # /api/stock/* /api/kline /api/screen/*
 from .routes.chat import router as chat_router                # /api/chat /ws/chat /ws/market /api/llm-models /api/llm-*
 from .routes.im_bots import router as im_bots_router          # /api/im-bots/*
+from .routes.alerts import router as alerts_router              # /api/alerts/*（批7 告警订阅）
 from .routes.mgmt import router as mgmt_router                # /api/data-sources /api/channels /api/brokers /api/risk-rules /api/tasks
 from .routes.risk import router as risk_router                # /api/risk* /api/live-trading /api/reconcile /api/convertible
 from .routes.backtest import router as backtest_router        # /api/backtest* /api/pool* /api/broker-usage
@@ -106,6 +107,7 @@ app.include_router(sync_router)
 app.include_router(stock_router)
 app.include_router(chat_router)
 app.include_router(im_bots_router)
+app.include_router(alerts_router)
 app.include_router(mgmt_router)
 app.include_router(risk_router)
 app.include_router(backtest_router)

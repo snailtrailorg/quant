@@ -42,8 +42,16 @@ app = Celery(
     "quant",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=["src.scheduler.tasks", "src.feishu_bot.tasks"],
+    include=["src.scheduler.tasks", "src.feishu_bot.tasks", "src.scheduler.alert_tasks"],
 )
+
+# 批 7 告警三队列（显式全名映射——生产者 send_task 按名投递，此处兜路由）：
+# alerts_* 由 quant-celery-risk@ 专属消费（-c 1，与主 worker data/analysis 长任务隔离，B2-P5）
+app.conf.task_routes = {
+    "alerts.send_im": {"queue": "alerts_im"},
+    "alerts.send_email": {"queue": "alerts_email"},
+    "alerts.send_sms": {"queue": "alerts_sms"},
+}
 
 # 自定义因子加载（链条打磨#1：worker 进程此前永不加载——回测/实盘"未知因子"直接失败）
 try:

@@ -273,7 +273,10 @@ async def email_test_api(body: dict = Body(...), request: Request = None,
 
 @router.get("/api/system-config")
 def list_system_config(payload: dict = Depends(require_perm("read"))):
-    """列系统配置（viewer+ 只读）。password 型不回传明文，返回空值 + has_value 标记。"""
+    """列系统配置（viewer+ 只读）。password 型不回传明文，返回空值 + has_value 标记。
+    alert_sms_* 凭证走专用端点 /api/alerts/sms-config（alerts_config=admin 专属），通用面隐藏。"""
+    import re as _re
+    _block = lambda k: bool(_re.match(r"^alert_sms_", k))
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT key, value, value_type, description, updated_at, updated_by "
@@ -281,6 +284,8 @@ def list_system_config(payload: dict = Depends(require_perm("read"))):
         rows = cur.fetchall()
     items = []
     for r in rows:
+        if _block(r[0]):
+            continue
         value = r[1]
         if r[2] == "password":
             items.append({"key": r[0], "value": "", "has_value": bool(value),
@@ -297,6 +302,9 @@ def update_system_config(key: str, body: dict = Body(...),
                           payload: dict = Depends(require_perm("system_config"))):
     """更新系统配置（仅 admin）。部分 key 支持动态生效（如 celery_concurrency）。
     password 型：留空=不修改（400 提示），非空=Fernet 加密存储。"""
+    import re as _re
+    if _re.match(r"^alert_sms_", key):
+        raise ApiError(403, "FORBIDDEN", "短信凭证走 设置→告警→短信凭证（专用端点）")
     value = body.get("value")
     if value is None:
         raise ApiError(400, "CONFIG_VALUE_INVALID", "缺 value 字段")
@@ -340,7 +348,10 @@ def update_system_config(key: str, body: dict = Body(...),
 
 @router.get("/api/system-config/{key}")
 def get_system_config(key: str, payload: dict = Depends(require_perm("read"))):
-    """取单个系统配置。"""
+    """取单个系统配置。alert_sms_* 走专用端点（alerts_config=admin 专属），通用面 403。"""
+    import re as _re
+    if _re.match(r"^alert_sms_", key):
+        raise ApiError(403, "FORBIDDEN", "短信凭证走 设置→告警→短信凭证（专用端点）")
     with get_conn() as conn:
         cur = conn.execute("SELECT value, value_type, description FROM system_config WHERE key=%s", (key,))
         r = cur.fetchone()
@@ -386,7 +397,7 @@ def notifications_api(status: str = "active", limit: int = 50,
     params.append(min(limit, 200))
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, level, category, title, body, source_ref, status, created_at, acked_at, code "
+            "SELECT id, level, category, title, body, source_ref, status, created_at, acked_at, code, dispatch "
             f"FROM notifications WHERE category = ANY(%s) {cond} "
             "ORDER BY id DESC LIMIT %s", tuple(params))
         rows = cur.fetchall()
@@ -401,6 +412,8 @@ def notifications_api(status: str = "active", limit: int = 50,
             "created_at": str(r[7])[:19] if r[7] else "",
             "acked_at": str(r[8])[:19] if r[8] else None,
             "code": r[9],   # web 长尾批：结构化标识（runbook 映射键，未打码为 None）
+            # 批 7：投递结局审计（{ch: ok|queued|failed:<token>|skip:<token>}/{}=零外推/null=未跑完）
+            "dispatch": r[10],
         } for r in rows],
         "count": active_count,
     }

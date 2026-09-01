@@ -58,7 +58,8 @@ PERMISSIONS = {
     # 经回退字典全部可达=扩权回归。删键归位 admin-only（10 号"收紧 analyst"方向）。
     "trader":  {"read", "strategy_control", "halt", "trade", "live_trading_control"},  # 交易：策略启停/熔断/下单/实盘开关
     "admin":   {"read", "strategy_control", "data_sync", "halt", "resume", "trade", "live_trading_control",
-                 "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "im_bots_config"},
+                 "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "im_bots_config",
+                 "alerts_config"},   # 批7:DB 故障 fallback 亦含(admin 专属;analyst 无)
 }
 
 _PERM_CACHE: dict = {"at": 0.0, "roles": None, "users": {}}
@@ -68,7 +69,7 @@ _PERM_TTL = 60.0
 # 角色重写关掉）：锁键=提权链/自损链高危键——角色重写与 user override 双路径同锁;
 # admin 角色重写另有地板键（self-lockout 防线）
 LOCKED_PERM_KEYS = {"user_mgmt", "resume", "account_keys"}
-ADMIN_ROLE_FLOOR = LOCKED_PERM_KEYS | {"system_config"}
+ADMIN_ROLE_FLOOR = LOCKED_PERM_KEYS | {"system_config", "alerts_config"}   # 批7:告警路由/计费短信面同列自锁防线
 
 
 def load_role_permissions() -> dict:

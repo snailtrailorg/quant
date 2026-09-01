@@ -6,12 +6,14 @@
         <el-tab-pane name="run"><template #label><b>{{ t('settings.run') }}</b></template></el-tab-pane>
         <el-tab-pane name="users"><template #label><b>{{ t('settings.users') }}</b></template></el-tab-pane>
         <el-tab-pane v-if="isAdmin" name="perm"><template #label><b>{{ t('settings.perm') }}</b></template></el-tab-pane>
+        <el-tab-pane v-if="isAdmin" name="alerts"><template #label><b>{{ t('settings.alertsTab') }}</b></template></el-tab-pane>
         <el-tab-pane name="profile"><template #label><b>{{ t('settings.profile') }}</b></template></el-tab-pane>
       </el-tabs>
     </template>
     <RunConfig v-if="tab === 'run'" />
     <Account v-else-if="tab === 'users'" />
     <Permissions v-else-if="tab === 'perm'" />
+    <AlertSettings v-else-if="tab === 'alerts'" />
     <Profile v-else />
   </el-card>
 </template>
@@ -23,6 +25,7 @@ import { useI18n } from 'vue-i18n'
 import RunConfig from '../components/RunConfig.vue'
 import Account from './Account.vue'
 import Permissions from './Permissions.vue'
+import AlertSettings from './AlertSettings.vue'
 import Profile from './Profile.vue'
 
 const { t } = useI18n()

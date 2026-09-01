@@ -84,22 +84,15 @@ def notify(level: Level, category: Category, title: str, body: str = "",
     except Exception as e:
         logger.error("notification insert failed: %s", e)
 
-    # 2. 外部：紧急（risk/system + critical）。E-4：外推层 15min 同标题节流——60s 循环告警
-    # （断流类）若不限频会在 ~1.5h 耗尽通道日配额，挤占真正的交易紧急（熔断/对账）；
-    # E-5：节流键/配额检查全部 fail-open——Valkey 故障时直接推（告警不能与被监控对象共死）
-    if should_push_external(category, level):
-        throttled = False
-        try:
-            er = _redis()
-            ekey = f"notify:external:{hashlib.md5(title.encode()).hexdigest()[:12]}"
-            if er.exists(ekey):
-                throttled = True
-            else:
-                er.setex(ekey, 900, "1")
-        except Exception as e:
-            logger.warning("外推节流键不可用（Valkey 故障？），跳过节流直接推送: %s", e)
-        if not throttled:
-            _push_channel(level, title, body, code=code)
+    # 2. 外部：批 7 订阅分发（2026-09-02）——warn/critical 交 dispatch 异步三通道（IM/邮件/短信，
+    #    Celery 队列化，业务路径仅付一次 executor.submit）；info 到站内为止。
+    #    旧 15min 外推节流已移入 dispatch（原子 SET NX）；零 enabled 订阅时 dispatch 内置
+    #    过渡兜底沿用本模块 should_push_external/_push_channel 旧 webhook 规则。
+    try:
+        from src.alert_notify.dispatch import dispatch   # 惰性导入（B-P13：httpx/celery 不进 live-task 冷启动链）
+        dispatch(level, category, title, body, code=code, notif_id=notif_id)
+    except Exception as e:
+        logger.warning("alert dispatch 提交失败（站内不受影响）: %s", e)
     return notif_id
 
 
@@ -119,8 +112,8 @@ def report(title: str, body: str, channel: str = "wechat_work") -> None:
 
 
 def _push_channel(level: Level, title: str, body: str, code: str | None = None,
-                  channel: str | None = None) -> None:
-    """外部通道推送（分级路由 + 日配额）。
+                  channel: str | None = None, notif_id: int | None = None) -> bool:
+    """外部通道推送（webhook 渠道：分级路由 + 日配额）。返回是否送达（批 7：过渡兜底回写 legacy 态用）。
 
     W3（2026-09-01）：code 在 RUNBOOK 时 body 尾部追加处置行。截断纪律（盲审 A/B-P1）：
     discord content 上限 2000 字符/企微 markdown 4096 字节——**先截原 body 再拼行**，
@@ -132,9 +125,9 @@ def _push_channel(level: Level, title: str, body: str, code: str | None = None,
     ch = get_channel(target)
     if not ch:
         logger.warning("无可用渠道(%s/%s): %s（在 Web 消息通道页配 channel_config）", level, target, title)
-        return
+        return False
     if _quota_exceeded(target):
-        return
+        return False
     try:
         line = ""
         if code:
@@ -151,8 +144,10 @@ def _push_channel(level: Level, title: str, body: str, code: str | None = None,
             budget = 3900 - len(line.encode("utf-8"))
             out_body = body.encode("utf-8")[:max(budget, 0)].decode("utf-8", "ignore") + line
         ch.send(title, out_body, level)
+        return True
     except Exception as e:
         logger.error("channel send failed (%s): %s", target, e)
+        return False
 
 
 def _quota_exceeded(channel: str) -> bool:

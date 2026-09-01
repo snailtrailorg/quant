@@ -25,10 +25,8 @@ class FeishuProvider(IMBotProvider):
 
     # ── 通道行为(委托 feishu_bot.bot 的生产实现,bot_id 定位凭证)──
     def send_text(self, bot_id: int, receive_id: str, receive_id_type: str, text: str) -> bool:
-        from .feishu_client import FeishuClient
-        client = FeishuClient(bot_id)
-        client.send_text(receive_id, text, receive_id_type)
-        return True
+        from .feishu_client import get_feishu_client   # 批 7:单例(token TTL 复用,一告警多接收人不再逐人取 token)
+        return get_feishu_client(bot_id).send_text(receive_id, text, receive_id_type)
 
     def send_card(self, bot_id: int, receive_id: str, receive_id_type: str, card: dict) -> bool:
         from .feishu_client import FeishuClient
