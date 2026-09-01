@@ -15,8 +15,8 @@
 - `load_role_permissions()` → `load_effective_permissions(username, role)`:**user deny > user allow > role allow > 默认拒**(10 号 §3 合并序);user 维读失败 **fail-open=按角色**(盲审 A-P1:user 维无字典可回);缓存键带 username,**invalidate 保持全局清**(盲审 B-P1:现实现即全局清+单 worker 写后即生效,勿改按键清留 role 脏键)
 - `require_perm`/`/auth/me` 换 effective 版;**require_perm 改用 DB role**(盲审 A/B:现取 JWT role,降级后存量 token 24h 仍过检——verify_jwt 已查 users 行,顺带取 role 零成本,与 /auth/me 口径统一)
 - **GET /api/permissions 扩展**(admin):返回 `{api:{keys,roles:{}}, nav:{items,roles:{}}, data:{fields,roles:{}}, user_overrides:[...]}`;nav **建模修正**(盲审 A-P0-2):**resource=菜单 id+effect=三态值**(hidden|readonly|readwrite)——原案"resource 存三态"在唯一键 (subject,dimension,resource,effect) 下每 subject 仅容 3 行不可表示;nav items=后端常量(菜单 v2.1 四组 16 项),前端从 GET 拿(**MainLayout 菜单模板同步改消费此清单**——硬编码第二份漂移收编,盲审 A-P2);**subject_id 定死 username**(盲审 A/B-P1:0056 注释 user_id 弃——软删改名仅孤儿行无害);data fields=市场域+敏感级三档
-- **POST /api/permissions/user/{username}**(admin):body {dimension, resource, effect ∈ allow|deny|clear}——clear=删该行;写入带 updated_by 审计;invalidate 缓存(含该 user 键)
-- **POST /api/permissions/{role}** 扩 dimension 参数(缺省 api 兼容现前端);nav 三态=resource 存 hidden|readonly|readwrite(单值行,effect 恒 allow);data 同构
+- **POST /api/permissions/user/{username}**(admin):body {dimension, resource, effect ∈ allow|deny|clear}——clear=删该行;写入带 updated_by 审计;invalidate **全局清**(同上)
+- **POST /api/permissions/{role}** 扩 dimension 参数(缺省 api 兼容现前端);nav/data 同 api 的 delete-then-insert 全量重写模式,行=resource(菜单id/数据域id)+effect
 - **系统安全策略锁新建**(盲审 B-P0):锁键清单={user_mgmt,resume,account_keys}(提权链+自损链高危键)——**双路径同锁**:POST role 重写与 POST user override 均拒编辑锁键(UI 🔒+后端 400 PERMISSION_KEY_LOCKED);**这是行为变更**(现可编辑 halt/resume,锁后不可——release note 声明)+**自锁防线**(盲审 B-P1:admin 对自己/admin 角色 deny user_mgmt 类自损操作拒)
 
 ## 产出 2:Permissions.vue 三维矩阵重写(10 号 §4 原型)
