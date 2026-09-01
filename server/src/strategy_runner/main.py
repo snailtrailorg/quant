@@ -315,7 +315,6 @@ def main():
         sid = snapshot.get("id", strategy_id)
         name = snapshot.get("name", task_name)
         s_type = snapshot.get("type", "astock_analysis")
-        adapter_type = snapshot.get("adapter", "xtp")
         factors = snapshot.get("factors", [])
         aggregator = snapshot.get("aggregator", {})
         # params：策略快照的 params（含 mode/python_code）+ 任务级参数覆盖
@@ -334,7 +333,8 @@ def main():
         if not row:
             logger.error("策略 %s 不存在", args.id)
             sys.exit(EX_CONFIG)
-        sid, name, s_type, symbol, adapter_type, enabled, factors, aggregator, params, bt_verified = row
+        # adapter 列不取（批 6b：hub 路径 cfg 固定 "xtp"，盲审 A-P2 死变量）
+        sid, name, s_type, symbol, _adapter, enabled, factors, aggregator, params, bt_verified = row
         factors = _json.loads(factors) if isinstance(factors, str) else (factors or [])
         aggregator = _json.loads(aggregator) if isinstance(aggregator, str) else (aggregator or {})
         params = _json.loads(params) if isinstance(params, str) else (params or {})

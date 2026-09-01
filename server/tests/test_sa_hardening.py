@@ -117,15 +117,18 @@ class TestSessionConfig:
         # 手动构造一个跨夜配置：直接注入缓存。
         # 批 6b：provider 门在缓存检查之前——原经 main→md_session 的模块级 import 副作用
         # 隐式注册（direct 退役后该链消失），须本测试显式注册 stub 才走缓存路径
-        from src.quant_common.session import _load_market_config, set_config_provider
+        from src.quant_common.session import _load_market_config, set_config_provider, _CONFIG_PROVIDER
         set_config_provider(lambda m: None)
         cache = getattr(_load_market_config, "_cache", {})
         cfg = {"calendar": "always", "session_rules": [{"open": "21:00", "close": "02:30"}], "tz": "UTC"}
         cache["night"] = (cfg, time.time() + 60)
         _load_market_config._cache = cache
-        assert in_session("night", dt.datetime(2026, 8, 24, 22, 0)) is True
-        assert in_session("night", dt.datetime(2026, 8, 25, 2, 0)) is True
-        assert in_session("night", dt.datetime(2026, 8, 25, 3, 0)) is False
+        try:
+            assert in_session("night", dt.datetime(2026, 8, 24, 22, 0)) is True
+            assert in_session("night", dt.datetime(2026, 8, 25, 2, 0)) is True
+            assert in_session("night", dt.datetime(2026, 8, 25, 3, 0)) is False
+        finally:   # 盲审 A-P2：stub 不 restore=全局泄漏，未来测试踩雷
+            set_config_provider(_CONFIG_PROVIDER)
 
     def test_session_edge(self):
         """False->True 沿检测。"""

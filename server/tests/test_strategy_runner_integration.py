@@ -155,8 +155,8 @@ def test_tick_to_bar_to_strategy():
     )
     strategy = Strategy.from_config(cfg, mock_adapter)
 
-    # 2. 模拟 on_vnpy_bar 回调内部逻辑
-    #    main.py 的 on_vnpy_bar 做了三件事：
+    # 2. 模拟 bar→strategy 回调逻辑（direct on_vnpy_bar 批 6b 已退役，此处验
+    #    worker 侧等价三件事——策略语义与 direct 期相同）：
     #      a) 调 strategy.on_bar(d, history)
     #      b) 记录信号
     #      c) 更新 history（append + pop 维持 100 上限）

@@ -92,12 +92,7 @@
           <el-input-number v-model="form.initial_capital" :min="10000" :step="100000" />
         </el-form-item>
       
-        <el-form-item :label="t('liveTask.mdMode')">
-          <el-radio-group v-model="form.md_mode">
-            <el-radio value="hub">hub（默认）</el-radio>
-            <el-radio value="direct">direct（待退役）</el-radio>
-          </el-radio-group>
-        </el-form-item></el-form>
+        <!-- 批 6b：md_mode 单模式（hub），创建不再可选——direct 2026-09-01 退役 --></el-form>
       <template #footer>
         <el-button type="primary" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="save" :loading="saving">{{ t('liveTask.createBtn') }}</el-button>
@@ -140,7 +135,7 @@ const saving = ref(false)
 const parameterDefs = ref([])
 const form = ref({
   name: '', strategy_id: '', symbol: '', params: {},
-  account_id: '', initial_capital: 1000000, md_mode: 'hub',
+  account_id: '', initial_capital: 1000000,
 })
 
 const statusType = (s) => ({
