@@ -47,18 +47,20 @@
 - **加密合约**：币安/OKX 永续，vnpy 加密网关，低杠杆+逐仓。
 - **XTP 每日连接窗**（2026-08-28）：A 股 MD/TD 连接按交易日窗管理——`system_config` 键 `xtp_session_lead_min`/`xtp_session_lag_min`（默认 10/10，即 9:05 建连/15:10 断开，锚点=集合竞价 9:15/收盘 15:00）；任一 ≤0 =禁用（永久连接）。日历读不到=当自然日（fail-open，weekday 故障点消除）。窗内单原语建连（renew→relogin CREATED 直登），窗外 guard `suspend()` 挂起（logout 保持 CREATED）。worker TD 侧窗开沿 60s 节流建连（`_td_connect_due` 纯函数）。
 - **运行期 AI 只用国内模型**：DeepSeek（主）+ GLM（备），**不接 Claude/OpenAI 运行期**。Claude Code 仅作开发助手。LLM 网关按 `priority` 全局主备容灾。
-- **单系统 RBAC**：Admin/Trader/Analyst/Viewer 四角色，非多租户。权限真源=`permission` 表（migration 0056，subject_type=role|user × dimension=nav|api|data × effect=allow|deny），`require_perm` 60s 缓存查表（表空/故障回退字典），`/auth/me` role 读 DB（修 JWT 24h 滞留）。菜单按角色消费（analyst 隐集成中心/设置）。
+- **单系统 RBAC（2026-09-01 三维终态）**：Admin/Trader/Analyst/Viewer 四角色，非多租户。权限真源=`permission` 表（role|user × nav|api|data × allow|deny）；`load_effective_permissions`（user deny > user allow > role allow）；`require_perm` 全站统一（身份类 7 端点保留 require_role）+DB role（降级即时生效）；锁键 {user_mgmt,resume,account_keys} 双路径同锁；数据脱敏 `data_sensitivity`→detail|aggregated|count 七端点；菜单由 perms 驱动+nav 维守卫（hidden 拒/readonly 灰）；玻璃盒 perm_sources。管理=设置→权限管理三维矩阵（角色/用户双模式）。
 - **部署 OS**：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8）。开发机 Fedora（同 dnf/RPM 系）。
 - **回测与实盘 schema 对齐**：数据中台 schema 现在就和未来 XTP 实时行情一致，零迁移。回测费用摩擦：佣金可配+印花税(卖出 0.05%)+过户费(0.001%)+涨跌停一字板不可成交约束（`BacktestAdapter.set_fees`）。
 - **配置驱动非硬编码**：策略因子组合/权重/参数走 Web 配置 + DSL 表达式，每个策略都改代码是错误做法。
 - **平台化通用接口**：6 大接口抽象（DataSource/Broker/MessageChannel/Task/RiskRule/LLMProvider），结构接口按通用方向设计，实现可简化。业务菜单保留，管理设置类按通用化设计。
+
+- **部署窗三段**（2026-09-01 用户裁定）：交易日 盘前启动截止 8:55 / 午休 11:35 起-12:40 启动截止 / 盘后 15:05 起；闸拦启动时刻（pipeline `deploy_trading_windows`）；staging 彩排绿前提；部署命令一律落文件、输出为空先验状态再动。
 
 ### 技术栈约束
 - **Python 版本**：服务器 `120.24.235.98` = 3.11（venv 3.11.13），本地开发机 = 3.10。**不用 3.14**——根因：vnpy 4.4.0 硬 pin `pyside6==6.8.2.1`，该版本 `requires_python <3.14`，3.14 上 pip 装不上 vnpy 4.4.0；resolver 回退 vnpy 4.0.0 与 vnpy_binance 2026.7.23 错配（`Exchange.GLOBAL` 缺失致 import 崩）。纯 Python 依赖（numpy/pandas/psycopg/PySide6 6.11/fastapi/celery 等）在 3.14 全 OK，卡点单一在上游 vnpy 的 PySide6 pin，等 vnpy 放宽即解（2026-08-03 实测）。改版本要严格评估 + 客户确认，不擅动。
 - **PostgreSQL 18 + pgvector + Valkey**（Redis 协议兼容）。弃 TimescaleDB / 重型向量库。
 - **vnpy 核心 + vnpy_xtp**（交易+行情接口）为第三方成熟组件，不重复造轮；**回测自建 BacktestEngine**（纯 Python，不依赖 vnpy CtaBacktestingEngine）。
 - **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade，产上经 `quant-alembic-wrapper` 随 Ansible 管道执行），不手动 ALTER。`init-schema.sql` 保留作手工运维参考。**运行时不再 `CREATE TABLE IF NOT EXISTS`**（2026-08-13 清零，原 30 处全部入迁移 0027）；`db.py` 的 `verify_schema()` 启动时校验表存在并告警，动态表 `bar_{freq}` 保留 `ensure_table()` 但用 `_ensured_tables` 集合避免重复 DDL。
-- **策略实盘化架构**：每任务独立子进程（systemd `quant-live-task@{tid}`）+ XTPAdapter 下单。**过渡态（2026-08-28 批 6a 起）**：任务 8 与全局 `md_mode` 已切 **hub 模式**（worker=TD-only+消费 `hub:bars:*` 流，暖机=PG bar_1min 30 天+流回放 240 根双源）；direct 主循环保留至批 6b 退役（回滚=md_mode 改回+restart）。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
+- **策略实盘化架构（终态，2026-09-01 批 6b 收官）**：每任务独立子进程（systemd `quant-live-task@{tid}`）+ XTPAdapter 下单；**hub 模式唯一**（worker=TD-only+消费 `hub:bars:*` 流，暖机=PG bar_1min 30 天+流回放 240 根双源；EVENT_LOG 注册→`[gw]` TD 会话日志可见）；direct 已退役——`md_mode=direct → EX_CONFIG(78)` fail-fast，回滚仅整版本 rollback。bar_shadow 冻结（历史表）。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
 - **Web 前端**：Vue3 + Element Plus + 设计令牌体系（`web/src/styles/tokens.css`，04 号设计系统全文：四令牌四色相/暗色变体/六级字号/EP 整组 ramp）。**前端已纳入 Ansible 管道**（web 工件化批 2026-08-30：控制机 build→dist 同步到 `releases/<id>/web/`→`quant-flip-web` wrapper 原子切换→rollback/GC 配套），`web` 符号链接与 `server` 同层同版。菜单 v2.1 四组 16 项（策略研究/实盘交易/风险控制/系统管理）。旧路由 21 条全 redirect 到新壳。
 
 ### 协作约束
