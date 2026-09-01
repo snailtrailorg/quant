@@ -113,6 +113,7 @@ def test_degrade_to_direct_send():
          patch.object(D, "_throttled", MagicMock(return_value=False)), \
          patch.object(D, "_quota_exceeded", MagicMock(return_value=False)), \
          patch.object(D, "_get_producer", return_value=prod), \
+         patch.object(D, "_claim", return_value=True), \
          patch.object(D, "_send_one", return_value=(True, "ok")) as p_send:
         D._dispatch_async("critical", "risk", "t", "b", None, 42)
     p_send.assert_called_once()                          # 直发恰好一次
@@ -130,6 +131,7 @@ def test_sender_exception_isolated():
          patch.object(D, "_quota_exceeded", MagicMock(return_value=False)):
         prod = MagicMock(); prod.send_task.side_effect = Exception("down")
         with patch.object(D, "_get_producer", return_value=prod), \
+             patch.object(D, "_claim", return_value=True), \
              patch.object(D, "_send_one", side_effect=[Exception("boom"), (True, "ok")]):
             D._dispatch_async("critical", "risk", "t", "b", None, 1)
     assert ("email", "ok") in wb                          # 第二通道不受第一通道异常影响
@@ -187,7 +189,7 @@ def test_claim_guards_double_send():
     with patch("src.data_platform.db.get_conn", return_value=conn):
         assert D._claim(1, "sms") is True
     sql = conn.execute.call_args[0][0]
-    assert "'queued'" in sql and "jsonb_build_object(%s, 'sending')" in sql
+    assert "'queued'" in sql and "jsonb_build_object(%s::text, 'sending')" in sql
 
 
 def test_degrade_respects_claim():
@@ -355,3 +357,30 @@ def test_first_seen_already_enrolled_no_renotify():
          patch.object(N, "notify") as p_notify:
         FC.process_message_async("ou_known", "又一条", fid=10)
     p_up.assert_not_called(); p_notify.assert_not_called()
+
+
+def test_writeback_real_pg():
+    """真库回归（2026-09-02 生产实证教训）：jsonb_build_object 参数无 cast 时 PG 报
+    "could not determine data type"——mock 测不出，本测直连本地 PG 走真 SQL。"""
+    try:
+        import psycopg
+        conn = psycopg.connect("postgresql://quant@127.0.0.1:5432/quant", autocommit=True)
+    except Exception:
+        import pytest
+        pytest.skip("本地 PG 不可用（真库回归跳过）")
+    import importlib
+    D = importlib.import_module("src.alert_notify.dispatch")
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO notifications (level, category, title, body) "
+                    "VALUES ('warn', 'system', '回写真库回归', '') RETURNING id")
+        nid = cur.fetchone()[0]
+    try:
+        D._writeback(nid, "email", "queued")            # 之前此句抛 type 错→error log→列不动
+        D._writeback(nid, "email", "ok")
+        with conn.cursor() as cur:
+            cur.execute("SELECT dispatch FROM notifications WHERE id=%s", (nid,))
+            assert cur.fetchone()[0] == {"email": "ok"}
+    finally:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM notifications WHERE id=%s", (nid,))
+    conn.close()

@@ -102,11 +102,14 @@ def _writeback(notif_id: int | None, ch: str, value: str) -> None:
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
+            # 参数显式 ::text——psycopg3 无类型注解时 PG 对 jsonb_build_object 报
+            # "could not determine data type of parameter $1"（2026-09-02 生产实证:
+            # 发送链 fail-open 照常,审计回写全灭——mock 测不出,真库回归已补）
             sql = ("UPDATE notifications SET dispatch = COALESCE(dispatch,'{}'::jsonb) "
-                   "|| jsonb_build_object(%s, %s) WHERE id = %s")
+                   "|| jsonb_build_object(%s::text, %s::text) WHERE id = %s")
             params: list = [ch, value, notif_id]
             if guarded:
-                sql += " AND COALESCE(dispatch->>%s, '') !~ '^(ok|failed:|skip:)'"
+                sql += " AND COALESCE(dispatch->>%s::text, '') !~ '^(ok|failed:|skip:)'"
                 params.append(ch)
             conn.execute(sql, tuple(params))
             conn.commit()
@@ -125,8 +128,8 @@ def _claim(notif_id: int | None, ch: str) -> bool:
         with get_conn() as conn:
             cur = conn.execute(
                 "UPDATE notifications SET dispatch = COALESCE(dispatch,'{}'::jsonb) "
-                "|| jsonb_build_object(%s, 'sending') "
-                "WHERE id = %s AND COALESCE(dispatch->>%s, '') = 'queued'",
+                "|| jsonb_build_object(%s::text, 'sending') "
+                "WHERE id = %s AND COALESCE(dispatch->>%s::text, '') = 'queued'",
                 (ch, notif_id, ch))
             conn.commit()
             return cur.rowcount == 1
