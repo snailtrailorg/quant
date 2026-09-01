@@ -187,6 +187,7 @@ class TestDslPreview:
                                       "symbol": "600000.SHSE", "freq": "1D"}, {})
         assert len(out["values"]) == 120
         assert out["stats"]["errors"] == 0 and out["stats"]["last"] is not None
+        assert out["stats"]["last"] < 0   # 递增序列:均值<当前 → 偏离度为负(数值正确性)
 
     def test_preview_dsl_bad_expr_error_not_500(self):
         from unittest.mock import patch
@@ -199,5 +200,22 @@ class TestDslPreview:
         import pytest
         from src.web_api.errors import ApiError
         from src.web_api.routes.strategy import preview_factor_api
-        with pytest.raises(ApiError):
+        with pytest.raises(ApiError) as ei:
             preview_factor_api({"type": "js", "code": "close"}, {})
+        assert ei.value.code == "FACTOR_PREVIEW_TYPE"   # 盲审 A-P2：断错误码非仅类型
+
+    def test_preview_dsl_window_over_limit_error(self):
+        """窗口>500：显式 error 不截断（盲审 A/B-P1：截断=短窗错值换门回归）。"""
+        from unittest.mock import patch
+        from src.web_api.routes.strategy import preview_factor_api
+        with patch("src.data_platform.db.get_bars", return_value=self._bars_df(600)):
+            out = preview_factor_api({"type": "dsl", "code": "mean(close,600) / close - 1"}, {})
+        assert "error" in out and "500" in out["error"]
+
+    def test_preview_dsl_insufficient_data_error(self):
+        """数据不足以拉满窗口：显式 error（1D 取数窗 365 天≈243 根遇 mean(close,300) 场景）。"""
+        from unittest.mock import patch
+        from src.web_api.routes.strategy import preview_factor_api
+        with patch("src.data_platform.db.get_bars", return_value=self._bars_df(100)):
+            out = preview_factor_api({"type": "dsl", "code": "mean(close,120) / close - 1"}, {})
+        assert "error" in out and "120" in out["error"]

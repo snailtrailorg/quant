@@ -250,15 +250,19 @@ def preview_factor_api(body: dict = Body(...),
     n = max(10, min(int(body.get("bars", 60)), 500))
     params = body.get("params") or {}
     ftype = body.get("type", "python")
+    if ftype not in ("python", "dsl"):   # 盲审 A-P2：type 前置（双非法时先报 type）
+        raise ApiError(400, "FACTOR_PREVIEW_TYPE", "type 仅支持 python/dsl")
     if freq not in ("1D", "1min", "5min"):
         raise ApiError(400, "FACTOR_PREVIEW_FREQ", "freq 仅支持 1D/1min/5min")
-    if ftype not in ("python", "dsl"):
-        raise ApiError(400, "FACTOR_PREVIEW_TYPE", "type 仅支持 python/dsl")
+    max_n = 0
     try:
         if ftype == "dsl":
-            # 盲审 B-P1：bars 不足窗口 n 时 _w_mean 静默算前缀均值=错值——先验拉满
+            # 盲审 A/B-P1：短窗静默前缀均值=错值红线——窗口超预览上限/数据不足一律
+            # 显式 error，不截断不凑合（截断=错值换个门回来）
             max_n = validate_dsl_expr(code)
-            n = max(n, min(max_n, 500))
+            if max_n > 500:
+                return {"error": f"窗口 {max_n} 超预览上限 500 根——改小窗口或用回测链验证"}
+            n = max(n, max_n)
             factor = DSLFactor("preview", code)
         else:
             factor_cls = _make_factor_class("preview", code, params)
@@ -270,6 +274,8 @@ def preview_factor_api(body: dict = Body(...),
     df = get_bars(symbol, freq, start, end)
     if df is None or df.empty:
         return {"error": f"无数据: {symbol} {freq}"}
+    if max_n and len(df) < n:
+        return {"error": f"数据不足以拉满窗口 {n}（现 {len(df)} 根 {freq}）——窗口改小或用回测链"}
     bars = df.tail(n).to_dict("records")
     values, errors = [], 0
     for i, bar in enumerate(bars):

@@ -39,7 +39,7 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="200" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" @click="previewFactorFor(row)">{{ t('factors.preview') }}</el-button>
+          <el-button v-if="row.code" size="small" @click="previewFactorFor(row)">{{ t('factors.preview') }}</el-button>
           <el-button v-if="row.is_custom" size="small" type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
           <el-button v-if="row.is_custom" size="small" type="danger" @click="onDelete(row.name)">{{ t('common.delete') }}</el-button>
         </template>
