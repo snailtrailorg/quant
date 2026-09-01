@@ -17,30 +17,30 @@ SMOKE_PASS="${SMOKE_PASS:-admin123}"
 PASS=0; FAIL=0; FAILED=()
 
 # ── 登录（一次性，401 即死）──
-LOGIN=$(curl -s -o /tmp/smoke-login.json -w '%{http_code}' \
+TMPD=$(mktemp -d /tmp/smoke-web.XXXXXX); trap 'rm -rf "$TMPD"' EXIT   # 盲审 B-P2:固定名并发互踩/残留
+LOGIN=$(curl -s --max-time 10 -o "$TMPD/login.json" -w '%{http_code}' \
   -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
   -d "{\"username\":\"$SMOKE_USER\",\"password\":\"$SMOKE_PASS\"}")
 if [ "$LOGIN" != "200" ]; then
   echo "✗ 登录失败 HTTP $LOGIN（dev 缺省 admin/admin123；staging 用 SMOKE_USER/SMOKE_PASS）——中止不重试"
-  exit 1
+  exit 2   # 与端点红(1)区分：CI 可判"环境/凭证问题"vs"端点问题"
 fi
-TOKEN=$(python3 -c "import json;print(json.load(open('/tmp/smoke-login.json')).get('token',''))" 2>/dev/null)
-[ -n "$TOKEN" ] || { echo "✗ 登录响应无 token 字段"; exit 1; }
+TOKEN=$(python3 -c "import json;print(json.load(open('$TMPD/login.json')).get('token',''))" 2>/dev/null)
+[ -n "$TOKEN" ] || { echo "✗ 登录响应无 token 字段"; exit 2; }
 echo "✓ 登录 OK（$SMOKE_USER）"
-rm -f /tmp/smoke-login.json
 
 # check <名> <路径> <顶层形状断言（python 表达式，d=解析后 JSON）>
 check() {
   local name="$1" path="$2" shape="${3:-d is not None}"
   local code
-  code=$(curl -s -o /tmp/smoke-out.json -w '%{http_code}' \
+  code=$(curl -s --max-time 10 -o "$TMPD/out.json" -w '%{http_code}' \
     -H "Authorization: Bearer $TOKEN" "$BASE_URL$path")
   if [ "$code" != "200" ]; then
     echo "✗ $name  HTTP $code  $path"; FAIL=$((FAIL+1)); FAILED+=("$name"); return
   fi
   if ! python3 -c "
 import json, sys
-try: d = json.load(open('/tmp/smoke-out.json'))
+try: d = json.load(open('$TMPD/out.json'))
 except Exception: sys.exit(1)
 sys.exit(0 if ($shape) else 1)" 2>/dev/null; then
     echo "✗ $name  形状不符  $path"; FAIL=$((FAIL+1)); FAILED+=("$name"); return
@@ -71,7 +71,6 @@ check "回测列表"        "/api/backtest"                    'isinstance(d, di
 check "健康组件"        "/api/health/components"           'isinstance(d, dict) or isinstance(d, list)'
 check "帮助-index"      "/api/help/index"                  '"content" in d'
 
-rm -f /tmp/smoke-out.json
 echo "──────────"
 echo "冒烟结果: $PASS 绿 / $FAIL 红"
 [ $FAIL -gt 0 ] && { echo "红项: ${FAILED[*]}"; exit 1; }

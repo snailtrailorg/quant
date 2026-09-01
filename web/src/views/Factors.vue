@@ -84,12 +84,12 @@
           <el-input v-model="form.description" />
         </el-form-item>
         <el-form-item :label="t('factors.defaultParams')">
-          <el-input v-model="form.paramsStr" :placeholder="t('factors.phParams')" />
+          <el-input v-model="form.paramsStr" :placeholder="t('factors.phParams')" :disabled="form.ftype === 'dsl'" />
         </el-form-item>
         <el-form-item :label="t('factors.historyWindow')">
-          <el-input-number v-model="form.needsHistory" :min="0" :step="1" />
+          <el-input-number v-model="form.needsHistory" :min="0" :step="1" :disabled="form.ftype === 'dsl'" />
           <div style="color: #999; font-size: 12px; margin-top: 4px">
-            {{ t('factors.historyHint') }}
+            {{ form.ftype === 'dsl' ? t('factors.dslHistoryHint') : t('factors.historyHint') }}
           </div>
         </el-form-item>
         <el-form-item :label="t('factors.pvParams')">

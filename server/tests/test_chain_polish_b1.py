@@ -215,11 +215,11 @@ class TestDSLWindowFuncs:
         assert v == pytest.approx(5 / (13 / 3) - 1)
 
     def test_expr_arg_raises_not_silent(self):
-        """R-F2(a)：mean(close/2,5) 表达式入参——抛异常而非静默返回当前值。"""
+        """R-F2(a)：mean(close/2,5) 表达式入参——抛异常而非静默（web 长尾批单源根修：
+        拦截从 compute 期前移到构造期 ValueError）。"""
         from src.strategy_framework.factor import DSLFactor
-        f = DSLFactor("e1", "mean(close/2,5)")
-        with pytest.raises(TypeError):
-            f.compute(self._ctx([1, 2, 3, 4, 5]))
+        with pytest.raises(ValueError):
+            DSLFactor("e1", "mean(close/2,5)")
 
     def test_kwargs_accepted(self):
         """R-F2(b)：mean(close,n=3) kwargs 不再静默丢弃。"""
@@ -228,24 +228,22 @@ class TestDSLWindowFuncs:
         assert f.compute(self._ctx([1, 2, 3, 4, 5])) == pytest.approx(4.0)
 
     def test_nested_window_raises(self):
-        """R-F2(c)：嵌套窗口抛异常（外层窗口无效=静默错值）。"""
+        """R-F2(c)：嵌套窗口抛异常（外层窗口无效=静默错值）——构造期 ValueError。"""
         from src.strategy_framework.factor import DSLFactor
-        f = DSLFactor("e3", "mean(mean(close,3),10)")
-        with pytest.raises(TypeError):
-            f.compute(self._ctx(list(range(20))))
+        with pytest.raises(ValueError):
+            DSLFactor("e3", "mean(mean(close,3),10)")
 
     def test_unknown_field_raises(self):
-        """R-F2(d)：mean(foobar,3) 未知名抛异常而非返回 0。"""
+        """R-F2(d)：mean(foobar,3) 未知名抛异常而非返回 0——构造期 ValueError。"""
         from src.strategy_framework.factor import DSLFactor
-        f = DSLFactor("e4", "mean(foobar,3)")
-        with pytest.raises(NameError):
-            f.compute(self._ctx([1, 2, 3]))
+        with pytest.raises(ValueError):
+            DSLFactor("e4", "mean(foobar,3)")
 
     def test_blacklist_rejects_unknown(self):
+        """__import__ 攻击串——构造期 ValueError（属性调用禁）。"""
         from src.strategy_framework.factor import DSLFactor
-        f = DSLFactor("d5", "__import__('os').system('x')")
-        with pytest.raises(Exception):
-            f.compute(self._ctx([1, 2, 3]))
+        with pytest.raises(ValueError):
+            DSLFactor("d5", "__import__('os').system('x')")
 
 
 # ── #14 回测参数合并 + #15 预检置 failed（源码契约）──

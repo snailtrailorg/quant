@@ -243,10 +243,20 @@ def register_custom_factor(name: str, category: str, code: str,
     （validate_dsl_expr）+needs_history=最大窗口 n；不做 python 编译。
     Returns: {"id": int, "name": str, ...}
     """
-    if name.startswith("dsl:"):
-        raise ValueError("因子名禁用 dsl: 前缀（内联 DSL 路径保留字，会被策略层劫持）")
-    if ftype not in ("python", "dsl"):
+    if name.startswith("dsl:") or name == "dsl":
+        raise ValueError("因子名禁用 dsl: 前缀与 dsl 本名（内联 DSL 路径保留字/内置注册键）")
+    if ftype not in ("python", "dsl", None):
         raise ValueError(f"未知因子类型: {ftype}（python|dsl）")
+    if ftype is None:
+        # update 兼容（盲审 B-P2）：调用方不带 type 时读存量行——旧客户端/脚本编辑
+        # DSL 因子不致误降级 python（dsl 表达式过 python 编译链必炸）
+        try:
+            from ..data_platform.db import get_conn as _gc
+            with _gc() as _conn:
+                _r = _conn.execute("SELECT type FROM factor_def WHERE name=%s", (name,)).fetchone()
+            ftype = (_r[0] if _r else None) or "python"
+        except Exception:
+            ftype = "python"
 
     # 1. 校验（python=编译安全 / dsl=表达式静态校验）
     if ftype == "dsl":
@@ -386,7 +396,7 @@ _DT_FUNCS = {
 # 最近 20 根（含当前）close 的均值；序列源 = ctx.history + 当前 bar。
 def _series(ctx: BarContext, name: str) -> list[float]:
     """从 ctx 提取命名序列（含当前 bar）。name: close/high/low/open/volume。"""
-    key = "open" if name == "open" else name
+    key = "open" if name in ("open", "open_") else name
     hist = [h.get(key, 0) for h in (ctx._history or [])]
     cur = getattr(ctx, key if key != "open" else "open_", 0) or 0
     return hist + [cur]
@@ -499,20 +509,15 @@ def _safe_eval(expr: str, ctx: dict[str, float]) -> float:
     return float(_eval(tree.body))
 
 
-def validate_dsl_expr(expr: str) -> int:
-    """DSL 表达式静态校验（web 长尾批 2026-09-01，盲审 A/B-P0 根修）。
+# DSL 字段白名单（open 与 open_ 互为别名——历史字典键是 open，ctx 标量是 open_，
+# 双侧打通消"校验过/运行爆"漂移，盲审 A/B-P0）
+_DSL_FIELDS = {"close", "high", "low", "open", "open_", "volume"}
 
-    DSLFactor 构造零校验（parse 在 compute 每根 bar 跑）——坏表达式须在
-    register/load 期 ValueError（route 400 化），不得静默入库实盘才爆。
-    校验面 = parse + 窗口函数结构（嵌套/字段名/未知函数）+ 裸名白名单。
-    返回最大窗口 n（mean(close,20)→20）：DSL 因子 needs_history 由此定——
-    补 0 会误标静态因子混入 static_only 选股资格（盲审 B-P1）。
-    """
-    try:
-        tree = ast.parse(expr, mode="eval")
-    except SyntaxError as e:
-        raise ValueError(f"DSL 表达式语法错误: {e}") from e
-    fields = {"close", "high", "low", "open_", "volume"}
+
+def _preprocess_dsl_tree(tree) -> int:
+    """DSL AST 共享预处理+结构校验（单源——validate 与 DSLFactor 构造同走此路，
+    漂移在结构上不可能；改写就地生效：窗口首参裸名→字符串字面量，open_→open 归一）。
+    返回最大窗口 n。抛 ValueError。"""
     max_n = 0
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
@@ -528,18 +533,43 @@ def validate_dsl_expr(expr: str) -> int:
             if isinstance(a0, ast.Call):
                 raise ValueError(f"DSL 窗口函数不支持嵌套: {node.func.id}({ast.unparse(a0)})——写成自定义因子")
             if isinstance(a0, ast.Name):
-                if a0.id not in fields:
-                    raise ValueError(f"{node.func.id}() 未知字段: {a0.id}（{sorted(fields)}）")
-                node.args[0] = ast.Constant(value=a0.id)   # 同 compute 预处理
+                if a0.id not in _DSL_FIELDS:
+                    raise ValueError(f"{node.func.id}() 未知字段: {a0.id}（{sorted(_DSL_FIELDS)}）")
+                node.args[0] = ast.Constant(value="open" if a0.id == "open_" else a0.id)
+            elif isinstance(a0, ast.Constant) and isinstance(a0.value, str):
+                if a0.value not in _DSL_FIELDS:
+                    raise ValueError(f"{node.func.id}() 未知字段: {a0.value}（{sorted(_DSL_FIELDS)}）")
+            else:
+                raise ValueError(f"{node.func.id}() 首参须为字段名（表达式/数字不可——盲审 A-P1）")
+            # 窗口长度须常量（盲审 B-P2：mean(close,10+10) 静默算短窗=静默错值红线）
             for a in node.args[1:]:
                 if isinstance(a, ast.Constant) and isinstance(a.value, (int, float)):
                     max_n = max(max_n, int(a.value))
+                else:
+                    raise ValueError(f"{node.func.id}() 窗口长度须为整数常量")
             for kw in node.keywords:
-                if kw.arg == "n" and isinstance(kw.value, ast.Constant)                         and isinstance(kw.value.value, (int, float)):
-                    max_n = max(max_n, int(kw.value.value))
-        elif isinstance(node, ast.Name) and node.id not in fields                 and node.id not in _DSL_WINDOW_FUNCS:
-            raise ValueError(f"DSL 未知变量: {node.id}（字段: {sorted(fields)}）")
+                if kw.arg == "n":
+                    if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, (int, float)):
+                        max_n = max(max_n, int(kw.value.value))
+                    else:
+                        raise ValueError(f"{node.func.id}() 窗口长度 n= 须为整数常量")
+        elif isinstance(node, ast.Name) and node.id not in _DSL_FIELDS                 and node.id not in _DSL_WINDOW_FUNCS:
+            raise ValueError(f"DSL 未知变量: {node.id}（字段: {sorted(_DSL_FIELDS)}）")
     return max(max_n, 1)
+
+
+def validate_dsl_expr(expr: str) -> int:
+    """DSL 表达式静态校验（web 长尾批 2026-09-01，盲审 A/B-P0 根修）。
+
+    坏表达式须在 register/load 期 ValueError（route 400 化），不得静默入库实盘才爆。
+    与 DSLFactor 构造共享 _preprocess_dsl_tree 单源。返回最大窗口 n
+    （DSL 因子 needs_history 由此定，补 0 会误标静态因子）。
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as e:
+        raise ValueError(f"DSL 表达式语法错误: {e}") from e
+    return _preprocess_dsl_tree(tree)
 
 
 @register_factor("dsl", category="custom", description="受限 DSL 表达式因子", needs_history=0)
@@ -551,24 +581,21 @@ class DSLFactor(Factor):
         self.name = name
         self.expr = expr
         self.params = {"expr": expr}
+        # 构造期共享预处理（web 长尾批单源根修）：坏表达式在构造即 ValueError
+        # （register/load/内联三路全部构造期拦截）；compute 不再每根 bar 重复 parse。
+        try:
+            tree = ast.parse(expr, mode="eval")
+        except SyntaxError as e:
+            raise ValueError(f"DSL 表达式语法错误: {e}") from e
+        _preprocess_dsl_tree(tree)
+        self._expr_pp = ast.unparse(tree)
 
     def compute(self, ctx: BarContext) -> float:
-        # 链条打磨#8：窗口函数（mean(close,20) 取 ctx.history 序列含当前 bar）。
-        # AST 预处理：窗口调用第一参的裸 Name（close 等）改写为字符串字面量——
-        # 纯算术处 Name 不动（close 仍是当前标量）；`close` 名与值由此二义消解。
-        tree = ast.parse(self.expr, mode="eval")
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
-                    and node.func.id in _DSL_WINDOW_FUNCS and node.args:
-                a0 = node.args[0]
-                if isinstance(a0, ast.Call):
-                    raise TypeError(f"DSL 窗口函数不支持嵌套: {node.func.id}({ast.unparse(a0)})——写成自定义因子")
-                if isinstance(a0, ast.Name):
-                    node.args[0] = ast.Constant(value=a0.id)
-        expr = ast.unparse(tree)
+        # 预处理已在构造期完成（窗口首参裸名→字符串字面量；open_→open 归一）
+        expr = self._expr_pp
         env: dict = {
             "close": ctx.close, "high": ctx.high, "low": ctx.low,
-            "open_": ctx.open_, "volume": ctx.volume,
+            "open": ctx.open_, "open_": ctx.open_, "volume": ctx.volume,
         }
         for fname, fn in _DSL_WINDOW_FUNCS.items():
             def _mk(fname_=fname, f=fn):
@@ -578,7 +605,7 @@ class DSLFactor(Factor):
                         raise TypeError(
                             f"{fname_}() 第一参必须是字段名（close/high/low/open/volume），"
                             f"收到表达式值 {name_or_val!r}——如需对表达式取窗口，先写成自定义因子")
-                    if name_or_val not in ("close", "high", "low", "open", "volume"):
+                    if name_or_val not in ("close", "high", "low", "open", "volume", "open_"):
                         raise NameError(f"{fname_}() 未知字段: {name_or_val}")
                     seq = _series(ctx, name_or_val)
                     return f(seq, n) if n else f(seq, 0)
