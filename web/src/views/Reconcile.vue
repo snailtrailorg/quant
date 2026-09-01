@@ -101,8 +101,12 @@ const issueCols = computed(() => [
   { key: 'broker_qty', dataKey: 'broker_qty', title: t('reconcile.brokerQty'), width: 110, align: 'right' },
   { key: 'derived_qty', dataKey: 'derived_qty', title: t('reconcile.derivedQty'), width: 110, align: 'right' },
   { key: 'diff', dataKey: 'broker_qty', title: t('reconcile.diff'), width: 100, align: 'right',
-    cellRenderer: ({ rowData }) => rowData.broker_qty == null ? '—'
-      : `${(rowData.broker_qty - rowData.derived_qty) >= 0 ? '▲' : '▼'}${Math.abs(rowData.broker_qty - rowData.derived_qty)}` },
+    cellRenderer: ({ rowData }) => {
+      if (rowData.broker_qty == null) return '—'
+      const up = (rowData.broker_qty - rowData.derived_qty) >= 0
+      return h('span', { class: up ? 'cell-diff-up' : 'cell-diff-down' },
+        `${up ? '▲' : '▼'}${Math.abs(rowData.broker_qty - rowData.derived_qty)}`)
+    } },
   { key: 'first_seen', dataKey: 'first_seen', title: t('reconcile.firstSeen'), width: 160 },
   { key: 'status', dataKey: 'status', title: t('common.status'), width: 100,
     cellRenderer: ({ cellData }) => h(ElTag, { size: 'small',

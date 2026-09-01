@@ -50,9 +50,9 @@
         <template #default="{ row }">
           <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
-          <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)">{{ t('liveTask.unfreeze') }}</el-button>
+          <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)" :disabled="navReadonly">{{ t('liveTask.unfreeze') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
-          <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row)">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -95,7 +95,7 @@
         <!-- 批 6b：md_mode 单模式（hub），创建不再可选——direct 2026-09-01 退役 --></el-form>
       <template #footer>
         <el-button type="primary" @click="dialogVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="save" :loading="saving">{{ t('liveTask.createBtn') }}</el-button>
+        <el-button type="primary" @click="save" :loading="saving" :disabled="navReadonly">{{ t('liveTask.createBtn') }}</el-button>
       </template>
     </el-dialog>
   </el-card>

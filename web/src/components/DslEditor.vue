@@ -7,7 +7,7 @@
 // editor+卸载 dispose（对话框反复开关不叠重复补全）。
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 
-const props = defineProps({ modelValue: { type: String, default: '' } })
+const props = defineProps({ modelValue: { type: String, default: '' }, placeholder: { type: String, default: '' } })
 const emit = defineEmits(['update:modelValue'])
 const editorContainer = ref(null)
 let editor = null
@@ -21,6 +21,13 @@ const FIELDS = [
   { id: 'volume', doc: '当前 bar 成交量（标量）' },
 ]
 const FUNCS = [
+  // 纯标量函数（factor.py _DT_FUNCS 白名单,盲审 B-P2 补齐）
+  { id: 'abs', sig: 'abs(x)', doc: '绝对值' },
+  { id: 'sum', sig: 'sum(a, b, ...)', doc: '求和（标量）' },
+  { id: 'round', sig: 'round(x, ndigits?)', doc: '四舍五入' },
+  { id: 'float', sig: 'float(x)', doc: '转浮点' },
+  { id: 'int', sig: 'int(x)', doc: '转整数' },
+  // 窗口函数（8）
   { id: 'mean', sig: 'mean(field, n)', doc: '窗口 n 根（含当前）均值' },
   { id: 'std', sig: 'std(field, n)', doc: '窗口 n 根标准差' },
   { id: 'max', sig: 'max(field, n)', doc: '窗口 n 根最大值' },
@@ -78,9 +85,11 @@ async function ensureLanguage(monaco) {
   })
 }
 
+let disposed = false
 onMounted(async () => {
   const monaco = await import('monaco-editor')
   await ensureLanguage(monaco)
+  if (disposed || !editorContainer.value) return   // 盲审 A-P1:import 期间卸载——分离 DOM 上不建
   editor = monaco.editor.create(editorContainer.value, {
     value: props.modelValue || '',
     language: 'quant-dsl',
@@ -89,6 +98,7 @@ onMounted(async () => {
     scrollBeyondLastLine: false,
     fontSize: 13,
     automaticLayout: true,
+    placeholder: props.placeholder || undefined,
   })
   editor.onDidChangeModelContent(() => emit('update:modelValue', editor.getValue()))
 })
@@ -98,7 +108,8 @@ watch(() => props.modelValue, v => {
 })
 
 onUnmounted(() => {
-  // 实例级 dispose（全局语言注册保留——模块级单次语义）
+  // 实例级 dispose（全局语言注册保留——模块级单次语义）;disposed 拦 import 竞态
+  disposed = true
   editor?.dispose()
   editor = null
 })

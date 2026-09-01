@@ -36,10 +36,10 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="300" fixed="right">
         <template #default="{ row }">
-          <el-button type="primary" size="small" @click="runBacktest(row)">{{ t('strategy.runBacktest') }}</el-button>
-          <el-button size="small" @click="$router.push(`/strategy/${row.id}/edit`)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" @click="onCopy(row)">{{ t('common.copy') }}</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row)">{{ t('common.delete') }}</el-button>
+          <el-button type="primary" size="small" @click="runBacktest(row)" :disabled="navReadonly">{{ t('strategy.runBacktest') }}</el-button>
+          <el-button size="small" @click="$router.push(`/strategy/${row.id}/edit`)" :disabled="navReadonly">{{ t('common.edit') }}</el-button>
+          <el-button size="small" @click="onCopy(row)" :disabled="navReadonly">{{ t('common.copy') }}</el-button>
+          <el-button size="small" type="danger" @click="onDelete(row)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>

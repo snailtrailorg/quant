@@ -19,7 +19,8 @@
 /* 中文 Web 字体（W6 #3,2026-09-01）：NotoSansSC Web = Noto Sans SC (OFL) 子集化修改版
    ——RFN 合规用别名,勿改回原名;227 分片 unicode-range,http2 按需拉取(首屏命中 ~200KB);
    许可随附 public/fonts/OFL.txt;再生成: node scripts/split-font.mjs */
-@import url('/fonts/cjk/index.css');
+/* 加载方式:index.html <link>(非此处 @import——CSS 规范 @import 须前置所有规则,
+   排在 JBMono @font-face 后会被静默丢弃,W6 盲审 B-P0 实证) */
 
 :root {
   /* —— 品牌 —— */

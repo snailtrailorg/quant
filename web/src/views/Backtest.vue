@@ -64,7 +64,7 @@
         <el-table-column :label="t('common.action')" width="160" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" @click.stop="goDetail(row)">{{ t('common.detail') }}</el-button>
-            <el-button v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)">{{ t('backtest.terminate') }}</el-button>
+            <el-button v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)" :disabled="navReadonly">{{ t('backtest.terminate') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
