@@ -209,6 +209,7 @@ def load_factors_from_db() -> list[str]:
                         "name": name,
                         "category": category or "custom",
                         "params": {"expr": code},
+                        "code": code,   # W1（盲审 B-P1-2）：行内试算消费——entry 原无 code 全类型恒报错
                         "description": description or "",
                         "is_custom": True,
                         "needs_history": n,
@@ -221,6 +222,7 @@ def load_factors_from_db() -> list[str]:
                         "name": name,
                         "category": category or "custom",
                         "params": params_dict,
+                        "code": code,   # W1（盲审 B-P1-2）：同上
                         "description": description or "",
                         "is_custom": True,
                         "needs_history": int(needs_history or 0),
@@ -297,6 +299,7 @@ def register_custom_factor(name: str, category: str, code: str,
         _FACTOR_REGISTRY[name] = {
             "cls": functools.partial(DSLFactor, name, code),
             "name": name, "category": category, "params": {"expr": code},
+            "code": code,   # W1（盲审 B-P1-2）：行内试算消费
             "description": description, "is_custom": True,
             "needs_history": needs_history, "type": "dsl",
         }
@@ -304,6 +307,7 @@ def register_custom_factor(name: str, category: str, code: str,
         _FACTOR_REGISTRY[name] = {
             "cls": factor_cls,
             "name": name, "category": category, "params": params or {},
+            "code": code,   # W1（盲审 B-P1-2）：同上
             "description": description, "is_custom": True,
             "needs_history": needs_history, "type": "python",
         }

@@ -4,8 +4,9 @@
 
 ## 产出 1:DSL 因子试算(#5)
 
-- **后端** `server/src/web_api/routes/strategy.py` `preview_factor_api`(~L249):body 增 `type`(缺省 python,docstring 字段表同步——盲审 A-P2);`type=dsl` → `DSLFactor("preview", code)`(构造期即校验,ValueError→现有 error 返回路径)——喂 bar 循环/BarContext/stats 零改动(A 核对:别名坑不踩,history 键 'open' 与 _series 归一全对齐)
-- **前端** `web/src/views/Factors.vue`(盲审 A-P1/P2 修入):①**两个**试算提交体都要带 type——对话框 `previewFactor`(~L228 `type: form.ftype`)+表格行 `previewFactorFor`(~L340 `type: row.type`,DSL 行取 `row.params.expr` 作 code——registry entry 无 code 字段);②DSL 分支(L102-109)是**结构性无按钮**非 disabled——实现=DSL 块内加试算按钮(走 previewFactor);python 块原样
+- **后端** `server/src/web_api/routes/strategy.py` `preview_factor_api`(~L249):body 增 `type`(缺省 python,**白名单外 400**——盲审 B-P2;docstring 字段表同步);`type=dsl` → 先 `validate_dsl_expr(code)` 拿 max_n,**`n=max(n,max_n)`(≤500,盲审 B-P1:bars=60 遇 mean(close,120) 短窗静默算前缀均值=错值)**→ `DSLFactor("preview", code)`(ValueError→现有 error 返回路径)——喂 bar 循环/BarContext/stats 零改动(A 核对:别名坑不踩)
+- **后端补** `factor.py`:注册表 entry 补 `code` 字段(register/load 两分支——盲审 B-P1-2 存量 bug:entry 无 code,行内试算对全类型恒报"必须定义 compute")
+- **前端** `web/src/views/Factors.vue`(盲审 A-P1/B-P1-2 修入):①两个试算提交体——对话框 `previewFactor`(~L228 `type: form.ftype`)+表格行 `previewFactorFor`(~L340 `type: row.type||'python', code: row.code`——registry 补 code 后直取,python/dsl 通吃);②DSL 分支(L102-109)结构性无按钮——DSL 块内加试算按钮(走 previewFactor);python 块原样
 
 ## 产出 2:runbookOf 双调用消(#8)
 

@@ -84,10 +84,10 @@
                 style="padding: 10px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
                 <span :class="['dot', n.level]"></span>
                 <b style="font-size: 13px">{{ n.title }}</b>
-                <el-tag v-if="n.code && runbookOf(n.code)" size="small" effect="plain"
-                        style="margin-left: 6px">{{ runbookOf(n.code).label }}</el-tag>
+                <el-tag v-if="n.rb" size="small" effect="plain"
+                        style="margin-left: 6px">{{ n.rb.label }}</el-tag>
                 <div v-if="n.body" class="notif-body">{{ n.body }}</div>
-                <div v-if="n.code && runbookOf(n.code)" class="notif-guide">▸ {{ runbookOf(n.code).guide }}</div>
+                <div v-if="n.rb" class="notif-guide">▸ {{ n.rb.guide }}</div>
                 <div style="color: #909399; font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
               </div>
             </div>
@@ -185,7 +185,8 @@ const loadNotifs = async () => {
   if (!bellVisible.value) return
   try {
     const r = await getNotifications('active', 20)
-    notifs.value = r.items || []
+    // W1：runbook 预计算一行一次（原模板 4 处调用→0），旧通知 code=null→rb=null 不渲染
+    notifs.value = (r.items || []).map(n => ({ ...n, rb: runbookOf(n.code) }))
     notifCount.value = r.count || 0
   } catch {}
 }

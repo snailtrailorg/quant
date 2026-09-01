@@ -164,3 +164,40 @@ class TestDslFactorRegister:
         assert _FACTOR_REGISTRY["pyma"]["type"] == "python"
         assert "baddsl" not in _FACTOR_REGISTRY
         del _FACTOR_REGISTRY["dslma"], _FACTOR_REGISTRY["pyma"]
+
+
+class TestDslPreview:
+    """W1（2026-09-01）：preview 端点 dsl 分支——短窗拉满/坏表达式 error/非法 type 400。"""
+
+    def _bars_df(self, n=150):
+        import pandas as pd
+        from datetime import datetime, timedelta
+        base = datetime(2026, 8, 1)
+        return pd.DataFrame([{
+            "ts": base + timedelta(days=i), "open": 10.0, "high": 10.5,
+            "low": 9.5, "close": 10.0 + i * 0.01, "volume": 1000,
+        } for i in range(n)])
+
+    def test_preview_dsl_window_autoraise(self):
+        """mean(close,120)：请求缺省 bars=60 → 自动拉满 120 根（盲审 B-P1 短窗静默错值根修）。"""
+        from unittest.mock import patch
+        from src.web_api.routes.strategy import preview_factor_api
+        with patch("src.data_platform.db.get_bars", return_value=self._bars_df(150)):
+            out = preview_factor_api({"type": "dsl", "code": "mean(close,120) / close - 1",
+                                      "symbol": "600000.SHSE", "freq": "1D"}, {})
+        assert len(out["values"]) == 120
+        assert out["stats"]["errors"] == 0 and out["stats"]["last"] is not None
+
+    def test_preview_dsl_bad_expr_error_not_500(self):
+        from unittest.mock import patch
+        from src.web_api.routes.strategy import preview_factor_api
+        with patch("src.data_platform.db.get_bars", return_value=self._bars_df()):
+            out = preview_factor_api({"type": "dsl", "code": "avg(close,20)"}, {})
+        assert "error" in out and "avg" in out["error"]
+
+    def test_preview_bad_type_400(self):
+        import pytest
+        from src.web_api.errors import ApiError
+        from src.web_api.routes.strategy import preview_factor_api
+        with pytest.raises(ApiError):
+            preview_factor_api({"type": "js", "code": "close"}, {})

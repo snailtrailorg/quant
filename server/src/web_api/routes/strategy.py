@@ -238,22 +238,31 @@ def preview_factor_api(body: dict = Body(...),
                        payload: dict = Depends(require_role("analyst", "trader", "admin"))):
     """因子试算（链条打磨#5）：真实 bar 喂 compute 看输出序列——写完因子不必搭策略+回测才能看结果。
 
-    body: {code, symbol?, freq?('1D'|'1min'), bars?(默认 60), params?{}}
+    body: {code, type?('python'|'dsl',缺省 python), symbol?, freq?('1D'|'1min'), bars?(默认 60,DSL 自动拉到窗口 n), params?{}}
     返回 {values: [{ts, value}], stats: {min,max,mean,last,count}, error?}
     """
     import math
-    from src.strategy_framework.factor import _make_factor_class, BarContext
+    from src.strategy_framework.factor import _make_factor_class, BarContext, DSLFactor, validate_dsl_expr
     from src.data_platform.db import get_bars
     code = body.get("code", "")
     symbol = body.get("symbol", "600000.SHSE")
     freq = body.get("freq", "1D")
     n = max(10, min(int(body.get("bars", 60)), 500))
     params = body.get("params") or {}
+    ftype = body.get("type", "python")
     if freq not in ("1D", "1min", "5min"):
         raise ApiError(400, "FACTOR_PREVIEW_FREQ", "freq 仅支持 1D/1min/5min")
+    if ftype not in ("python", "dsl"):
+        raise ApiError(400, "FACTOR_PREVIEW_TYPE", "type 仅支持 python/dsl")
     try:
-        factor_cls = _make_factor_class("preview", code, params)
-        factor = factor_cls()
+        if ftype == "dsl":
+            # 盲审 B-P1：bars 不足窗口 n 时 _w_mean 静默算前缀均值=错值——先验拉满
+            max_n = validate_dsl_expr(code)
+            n = max(n, min(max_n, 500))
+            factor = DSLFactor("preview", code)
+        else:
+            factor_cls = _make_factor_class("preview", code, params)
+            factor = factor_cls()
     except Exception as e:
         return {"error": f"因子编译失败: {str(e)[:200]}"}
     from datetime import datetime as _dt, timedelta as _td

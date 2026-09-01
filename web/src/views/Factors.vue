@@ -105,6 +105,10 @@
             <div style="margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary)">
               {{ t('factors.dslHint') }}
             </div>
+            <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
+              <el-button type="success" size="small" @click="previewFactor" :loading="previewing">{{ t('factors.preview') }}</el-button>
+              <span style="font-size: 12px; color: var(--el-text-color-secondary)">{{ t('factors.dslPreviewHint') }}</span>
+            </div>
           </div>
         </el-form-item>
         <el-form-item v-else :label="t('factors.pythonCode')">
@@ -227,6 +231,7 @@ const previewFactor = async () => {
   try {
     const res = await api.post('/factors/preview', {
       code: form.value.code, symbol: preview.symbol, freq: preview.freq, bars: preview.bars,
+      type: form.value.ftype,
       params: (() => { try { return JSON.parse(form.value.params || '{}') } catch { return {} } })(),
     })
     if (res.error) {
@@ -340,7 +345,10 @@ const showRefs = (fname) => {
 const previewFactorFor = async (row) => {
   try {
     const res = await api.post('/factors/preview', {
-      code: row.code || '', symbol: preview.value.symbol, freq: preview.value.freq, bars: preview.value.bars,
+      // W1(盲审 B-P1-2):registry entry 现带 code/type(python 自定义/dsl 通吃;
+      // 预置因子无 code 不给试算入口)
+      code: row.code || '', type: row.code ? (row.type || 'python') : undefined,
+      symbol: preview.value.symbol, freq: preview.value.freq, bars: preview.value.bars,
       params: row.params || {},
     })
     if (res.error) { ElMessage.error(res.error); return }
