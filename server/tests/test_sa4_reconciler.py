@@ -412,6 +412,20 @@ class TestL3HubReconcile:
         assert "l3_restarted" not in result
         p_sys.assert_not_called()
 
+    def test_l3_start_failed_stderr_and_alert(self):
+        """P2(G4 ④a): systemctl start 失败 -> l3_failed 含 stderr + 告警发出(原版静默丢弃)。"""
+        from src.scheduler import tasks as T
+        valkey = _mk_valkey2()
+        result, _, p_notify = _run_l3(
+            valkey=valkey,
+            sys_return=_cp(returncode=1, stderr="Start request repeated too quickly"),
+        )
+        l3f = result.get("l3_failed", [])
+        assert len(l3f) == 1 and T.SA4_HUB_UNIT in l3f[0]
+        assert "repeated too quickly" in l3f[0]   # stderr 采集
+        assert p_notify.called                     # 告警发出(原版零告警)
+        assert "l3_restarted" not in result       # 未拉起成功
+
     def test_stable_clear_generalized_to_hub(self):
         """stable-clear 泛化（D1 v2 修）：hub 稳定 active 超 10min -> 共键计数被清。"""
         from src.scheduler import tasks as T

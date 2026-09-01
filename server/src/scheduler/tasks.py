@@ -1460,7 +1460,15 @@ def sa4_reconciler():
                 _sa4_systemctl("reset-failed", unit)
             sr = _sa4_systemctl("start", unit)
             if sr is None or sr.returncode != 0:
-                result.setdefault("l3_failed", []).append(unit)
+                # P2(G4 ④a): stderr 采集+告警——原版静默丢弃,持续失败会 300s 重试无人知
+                stderr = (sr.stderr or '').strip()[:100] if sr else 'timeout'
+                result.setdefault("l3_failed", []).append(f"{unit}: {stderr}")
+                try:
+                    notify("critical", "system", f"L3 拉起失败: {unit}",
+                           f"systemctl start 非零退出。stderr: {stderr}；"
+                           "L3 将按 beat 周期重试，持续失败请手动 journalctl -u {unit} 定位。")
+                except Exception:
+                    pass
                 continue
             if r is not None:
                 r.hset(key, mapping={"attempts": attempts + 1, "ts": _time.time()})

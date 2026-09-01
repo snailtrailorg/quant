@@ -12,20 +12,21 @@
 - **验收**:worker 启动后 journalctl 可见 TD `[gw]` 连接/登录日志
 
 ### 2. direct 主循环退役
-- **文件**:`server/src/strategy_runner/main.py` L393-702(~310 行)
-- **内容**:删除 direct 模式代码路径(MainEngine+XtpGateway 全栈);`_md_mode()` 改为仅读任务级 params(全局 md_mode 已=hub,不再回退 direct);入口直接调 `_run_hub_mode()`
-- **不退役**:入口分派骨架/_run_hub_mode/_warmup_history/SA4 退出码/依赖探活(worker 共用)
+- **文件**:`server/src/strategy_runner/main.py` L393-699(~307 行)
+- **内容**:删除 direct 模式代码路径(MainEngine+XtpGateway 全栈);**`_md_mode()` 改为 md_mode=direct → EX_CONFIG fail-fast**(盲审 B-P1:误设 direct 落入已删代码=静默装死,须显式拒);默认/未知一律走 `_run_hub_mode()`
+- **不退役**:入口分派骨架/_run_hub_mode/_warmup_history/SA4 退出码/依赖探活(worker 共用;**main.py:297 探活改指 EventEngine**——盲审 B-P2:删 MainEngine 后须同步)
+- **发布窗硬约束**:9:05 前或 15:01 后(盲审 B-P1:盘中发布 hub 随批重启→当分钟桶丢 bar+断线跨分钟→untrusted→worker sticky 冻结 BUY)
 - **回滚**:批 6b 发布后回滚=rollback.yml(direct 代码在旧 release 可恢复)
-- **清理**:direct 专属 import(MainEngine/XtpGateway 等)同步删;测试文件中 direct 相关用例跳过/删
+- **清理**:direct 专属 import(MainEngine/XtpGateway/GuardedXtpMdApi/XtpMdSession/_guard)同步删;**红测试 7 个非 ~15**(盲审 A/B 实测:test_sa4 3 个 patch MainEngine 删 patch 行保留+test_strategy_runner_integration 4 个 _resolve_client_id 属 direct 专属,随之删);live_task 状态回写(L677-696)随删——hub 路径无等价,靠 L3 兜底(现状非回归,风险节明示)
 
 ### 3. shadow 停写收尾
 - **现状**:bar_shadow 已无写入(worker 转 hub 后 on_vnpy_bar 不再执行);表保留历史供回溯
-- **动作**:①三查手册②标记"已退役"(已有);②scheduler 对账任务的 shadow 双写代码清除;③hub 模式无 shadow 侧——无需新代码
+- **动作**:~~scheduler 对账任务 shadow 双写代码清除~~(盲审 A-P1/B-P1:**scheduler/tasks.py 零 bar_shadow 引用**——全 src 唯一写方=main.py:485,已含于删除区,该项虚指删除);三查手册②节改写为 hub 单侧检查
 - **不删表**:历史数据保留
 
 ### 4. 三查②继任(hub 单侧健康检查)
 - **替换**:bar_hub vs bar_shadow diff → hub 单侧完整性(行数+缺口检测)
-- **指标**:①行数(9:31~15:00 应=241 根/符号)②hub 心跳(bars/gen/subs)③worker 心跳(bars/lag/frozen)
+- **指标**:①行数(ts **≤15:01**(盲审 B-P1:第 241 根=[15:00] 竞价桶 ts=15:01,按 ≤15:00 查恒少一根误报);窗口推导=9:31~11:30 120 分+13:01~15:01 121 分=241,来源 parts.py:41-52 `_in_bar_session`×分钟末标注;**容忍**:15:01 后到快照=240 已知边界/盘中重启丢段/中途新增订阅——主指标宜为**缺口检测**而非绝对行数)②hub 心跳(bars/gen/subs)③worker 心跳(bars/lag/frozen)
 - **落点**:flow/待办.md 三查手册②节改写(命令内联)
 
 ### 5. 模块契约回写
