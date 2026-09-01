@@ -171,15 +171,23 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
     from src.data_platform.db import get_conn as _gc
     if role not in ("viewer", "analyst", "trader", "admin"):
         raise HTTPException(400, "BAD_ROLE")
+    if dimension not in ("api", "nav", "data"):
+        raise HTTPException(400, "BAD_DIMENSION", "dimension ∈ api|nav|data")
     if dimension == "api":
         keys = set(body.get("permissions", []) or [])
         if not keys:
             # 终审 A-P2-11：空集会让 load 回退字典=全撤权失效（空集歧义）
             raise HTTPException(400, "EMPTY_PERMISSIONS", "权限集不可为空（至少保留 read）")
         current = set(load_role_permissions().get(role, set()))
-        preserved = (current | ADMIN_ROLE_FLOOR) & LOCKED_PERM_KEYS if role == "admin" \
-            else current & LOCKED_PERM_KEYS
-        keys = (keys - LOCKED_PERM_KEYS) | preserved      # 锁键恒保持现值（双路径同锁之一）
+        # 盲审 A-P1c 修：admin 地板=锁键+system_config（原 &LOCKED 把 FLOOR 的
+        # system_config 截成死代码——admin 重写可去 system_config=自锁防线失真）
+        if role == "admin":
+            floor_keys = LOCKED_PERM_KEYS | {"system_config"}
+            preserved = (current | ADMIN_ROLE_FLOOR) & floor_keys
+        else:
+            floor_keys = LOCKED_PERM_KEYS
+            preserved = current & LOCKED_PERM_KEYS
+        keys = (keys - floor_keys) | preserved            # 地板键恒保持现值（双路径同锁之一）
         out = sorted(keys)
         with _gc() as conn:
             conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "

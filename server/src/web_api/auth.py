@@ -137,12 +137,16 @@ def load_effective_permissions(username: str, role: str) -> tuple[set, dict]:
     if not username:
         return base, {p: "role-base" for p in base}
     key = (username, role)
-    if key not in _PERM_CACHE["users"]:
+    cached = _PERM_CACHE["users"].get(key)
+    if cached is None:
         try:
-            _PERM_CACHE["users"][key] = _load_user_api_overrides(username)
+            cached = _load_user_api_overrides(username)
+            _PERM_CACHE["users"][key] = cached
         except Exception:
-            _PERM_CACHE["users"][key] = (set(), set())   # fail-open=按角色
-    allows, denies = _PERM_CACHE["users"][key]
+            # 盲审 A-P1b：失败结果**不缓存**（users 槽无 TTL,缓存=一次 DB 抖动把该用户
+            # fail-open 冻结到下次 invalidate）——本次按角色返回,下次重试
+            cached = (set(), set())
+    allows, denies = cached
     denied = sorted(base & denies)
     perms = (base | allows) - denies
     sources = {p: ("user-override" if (p in allows and p not in base) else "role-base")
@@ -156,7 +160,8 @@ def require_role(*allowed: Role):
     def checker(authorization: str = Header(...)):
         token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
         payload = verify_jwt(token)
-        role = payload.get("role", "viewer")
+        # W4（盲审 B-P1）：require_role 同步改 DB role——降级后存量 token 不再 24h 越权
+        role = payload.get("db_role") or payload.get("role", "viewer")
         if role not in allowed:
             raise HTTPException(403, f"角色 {role} 无权限，需 {allowed}")
         return payload

@@ -59,6 +59,7 @@
             <el-radio-button value="count">{{ t('perm.sensCount') }}</el-radio-button>
           </el-radio-group>
           <div style="color: var(--text-secondary); font-size: 12px; margin-top: 8px">{{ t('perm.dataNote') }}</div>
+          <div style="color: var(--text-secondary); font-size: 12px; margin-top: 4px">{{ t('perm.dualTrackNote') }}</div>
         </el-tab-pane>
       </el-tabs>
       <el-button type="primary" @click="saveRole" :loading="saving" style="margin-top: 14px">{{ t('common.save') }}</el-button>
@@ -140,9 +141,10 @@ const load = async () => {
     dataFields.markets = r.data?.fields?.markets || []
     dataFields.sensitivity = r.data?.fields?.sensitivity || []
     for (const [rname, m] of Object.entries(r.data?.roles || {})) {
-      dataMarketSel[rname] = Object.entries(m).filter(([, e]) => e === 'allow').map(([k]) => k)
-      const sens = Object.entries(m).find(([k]) => dataFields.sensitivity.includes(k))
-      dataSensSel[rname] = sens ? sens[1] : ''
+      dataMarketSel[rname] = Object.entries(m)
+        .filter(([k, e]) => e === 'allow' && !k.startsWith('sensitivity:')).map(([k]) => k)
+      const sensKey = Object.keys(m).find(k => k.startsWith('sensitivity:'))
+      dataSensSel[rname] = sensKey ? sensKey.slice('sensitivity:'.length) : ''
     }
     overrides.value = r.user_overrides || []
   } catch { ElMessage.error(t('common.failed')) }
@@ -153,13 +155,17 @@ onMounted(load)
 const saveRole = async () => {
   saving.value = true
   try {
-    const r = await role.value
-    await api.post(`/permissions/${r}`, { permissions: apiSel[r] })
+    const r = role.value
+    // 盲审 A/B-P1a 修：敏感级编码 resource='sensitivity:<v>'+effect='allow'
+    // （原样上送撞后端白名单 allow|deny 必 400,且三连写已部分提交）
+    const res1 = await api.post(`/permissions/${r}`, { permissions: apiSel[r] })
     await api.post(`/permissions/${r}?dimension=nav`,
       { resources: Object.fromEntries(Object.entries(navSel[r] || {}).filter(([, v]) => v)) })
-    const dataRes = Object.fromEntries(dataMarketSel[r].map(m => [m, 'allow']))
-    if (dataSensSel[r]) dataRes[dataSensSel[r]] = dataSensSel[r] === 'detail' ? 'allow' : dataSensSel[r]
+    const dataRes = Object.fromEntries((dataMarketSel[r] || []).map(m => [m, 'allow']))
+    if (dataSensSel[r]) dataRes[`sensitivity:${dataSensSel[r]}`] = 'allow'
     await api.post(`/permissions/${r}?dimension=data`, { resources: dataRes })
+    if (res1?.preserved_locked?.length)
+      ElMessage.info(t('perm.preservedInfo') + ': ' + res1.preserved_locked.join(', '))
     ElMessage.success(t('common.success'))
     await load()
   } catch (e) { ElMessage.error(String(e?.response?.data?.detail || e)) }
