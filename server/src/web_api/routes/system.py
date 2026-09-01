@@ -312,7 +312,7 @@ def notifications_api(status: str = "active", limit: int = 50,
     params.append(min(limit, 200))
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, level, category, title, body, source_ref, status, created_at, acked_at "
+            "SELECT id, level, category, title, body, source_ref, status, created_at, acked_at, code "
             f"FROM notifications WHERE category = ANY(%s) {cond} "
             "ORDER BY id DESC LIMIT %s", tuple(params))
         rows = cur.fetchall()
@@ -326,6 +326,7 @@ def notifications_api(status: str = "active", limit: int = 50,
             "source_ref": r[5], "status": r[6],
             "created_at": str(r[7])[:19] if r[7] else "",
             "acked_at": str(r[8])[:19] if r[8] else None,
+            "code": r[9],   # web 长尾批：结构化标识（runbook 映射键，未打码为 None）
         } for r in rows],
         "count": active_count,
     }

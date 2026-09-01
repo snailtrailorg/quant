@@ -84,7 +84,10 @@
                 style="padding: 10px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
                 <span :class="['dot', n.level]"></span>
                 <b style="font-size: 13px">{{ n.title }}</b>
+                <el-tag v-if="n.code && runbookOf(n.code)" size="small" effect="plain"
+                        style="margin-left: 6px">{{ runbookOf(n.code).label }}</el-tag>
                 <div v-if="n.body" class="notif-body">{{ n.body }}</div>
+                <div v-if="n.code && runbookOf(n.code)" class="notif-guide">▸ {{ runbookOf(n.code).guide }}</div>
                 <div style="color: #909399; font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
               </div>
             </div>
@@ -230,7 +233,8 @@ const loadHealth = async () => {
     healthLevel.value = items.some(i => !i.ok) ? 'critical' : 'ok'
   } catch { healthItems.value = [{ k: 'health', ok: false, v: '—' }]; healthLevel.value = 'warn' }
 }
-// runbook: 15号批零②——死代码已删;通知 runbook 接线待通知表加 code 字段后做(待办已立)
+// runbook: web 长尾批 2026-09-01——通知表 code 字段已上(migration 0059),chip+一句话处置接线
+import { runbookOf } from '../utils/runbook' 
 const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')
 loadHealth()
 loadPerms()
@@ -277,4 +281,5 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .dot.warn { background: #e6a23c; }
 .dot.info { background: #909399; }
 .notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
+.notif-guide { color: var(--el-color-primary); font-size: 12px; line-height: 1.5; margin: 2px 0 2px 14px; }
 </style>

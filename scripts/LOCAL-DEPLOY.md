@@ -92,6 +92,13 @@ pkill -f "vite --port 5173"
 bash scripts/verify.sh
 ```
 
+Web API 冒烟门（B5，2026-09-01：登录+20 端点状态/形状断言，只打结构不打数据值；
+八步法步 5 的 W2 断言由它承接——dev 缺省 admin/admin123，staging 用 SMOKE_USER/SMOKE_PASS）：
+
+```bash
+bash scripts/smoke-web.sh
+```
+
 ## 不在本脚本范围
 
 - **实盘 XTP 连接**：需 `broker_config` DB 配 XTP 凭证或 `.env XTP_TEST_*`，见 `docs/architecture/模块契约/strategy_framework.md`

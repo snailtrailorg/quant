@@ -108,3 +108,59 @@ class TestPythonModeGetFactor:
         ctx._update({'close': 10.0}, [], {})
         with pytest.raises(ValueError, match="未知因子"):
             ctx.get_factor("nonexistent_factor")
+
+class TestDslFactorRegister:
+    """web 长尾批（2026-09-01，13号#2）：DSL 因子 register/load 校验面。"""
+
+    def test_validate_dsl_expr_window_and_plain(self):
+        """窗口表达式返回最大 n；纯算术返回 1（最小历史）。"""
+        from src.strategy_framework.factor import validate_dsl_expr
+        assert validate_dsl_expr("mean(close,20) / close - 1") == 20
+        assert validate_dsl_expr("max(high, 5) - min(low, 3)") == 5   # 取最大窗
+        assert validate_dsl_expr("close / high") == 1
+
+    def test_validate_dsl_expr_rejects(self):
+        """坏表达式 register 期 ValueError（盲审 A/B-P0：原构造零校验实盘才爆）。"""
+        from src.strategy_framework.factor import validate_dsl_expr
+        for bad in ["mean(close,20) /",            # 语法错
+                    "avg(close,20)",               # 未知函数
+                    "mean(mean(close,2),3)",       # 窗口嵌套
+                    "foo(close,20)",               # 未知函数
+                    "mean(bar,5)",                 # 未知字段
+                    "x + 1"]:                      # 未知变量
+            with pytest.raises(ValueError):
+                validate_dsl_expr(bad)
+
+    def test_register_rejects_dsl_prefix_name(self):
+        """dsl: 前缀名拒绝（strategy.py:175 内联路径劫持，盲审 B-P2）。"""
+        from src.strategy_framework.factor import register_custom_factor
+        with pytest.raises(ValueError, match="dsl:"):
+            register_custom_factor("dsl:evil", "custom", "close")
+
+    def test_register_dsl_validates_before_db(self):
+        """ftype=dsl 坏表达式在 DB 写入前 ValueError（不入库）。"""
+        from src.strategy_framework.factor import register_custom_factor
+        with pytest.raises(ValueError, match="DSL"):
+            register_custom_factor("bad_dsl", "custom", "not an expression!", ftype="dsl")
+
+    def test_load_dsl_registers_partial(self):
+        """load_factors_from_db 的 dsl 分流：partial 注册零参可调+needs_history=窗口 n。"""
+        from unittest.mock import patch, MagicMock
+        from src.strategy_framework.factor import load_factors_from_db, _FACTOR_REGISTRY
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchall.return_value = [
+            ("dslma", "custom", "d", "mean(close,20) / close - 1", "{}", 0, "dsl"),
+            ("pyma", "custom", "d", "def compute(ctx):\n    return ctx.close", "{}", 5, "python"),
+            ("baddsl", "custom", "d", "oops(", "{}", 0, "dsl"),
+        ]
+        with patch("src.data_platform.db.get_conn", return_value=conn):
+            loaded = load_factors_from_db()
+        assert set(loaded) == {"dslma", "pyma"}          # 坏表达式跳过不炸
+        e = _FACTOR_REGISTRY["dslma"]
+        assert e["type"] == "dsl" and e["needs_history"] == 20
+        inst = e["cls"]()                                  # 零参调用语义（strategy.py 消费面）
+        assert inst.expr == "mean(close,20) / close - 1"
+        assert _FACTOR_REGISTRY["pyma"]["type"] == "python"
+        assert "baddsl" not in _FACTOR_REGISTRY
+        del _FACTOR_REGISTRY["dslma"], _FACTOR_REGISTRY["pyma"]

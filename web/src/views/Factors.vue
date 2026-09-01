@@ -13,7 +13,8 @@
       </el-table-column>
       <el-table-column :label="t('common.type')" width="80">
         <template #default="{ row }">
-          <el-tag v-if="row.is_custom" type="warning">{{ t('factors.custom') }}</el-tag>
+          <el-tag v-if="row.type === 'dsl'" type="success">{{ t('factors.typeDsl') }}</el-tag>
+          <el-tag v-else-if="row.is_custom" type="warning">{{ t('factors.custom') }}</el-tag>
           <el-tag v-else type="info">{{ t('factors.preset') }}</el-tag>
         </template>
       </el-table-column>
@@ -61,6 +62,12 @@
     <!-- 编辑弹窗 -->
     <el-dialog v-model="dialogVisible" :title="isEditing ? t('factors.editFactor') : t('factors.createFactor')" width="720px" :close-on-click-modal="false">
       <el-form :model="form" label-width="100px" v-loading="saving">
+        <el-form-item :label="t('factors.factorType')">
+          <el-radio-group v-model="form.ftype" :disabled="isEditing">
+            <el-radio value="python">{{ t('factors.typePython') }}</el-radio>
+            <el-radio value="dsl">{{ t('factors.typeDsl') }}</el-radio>
+          </el-radio-group>
+        </el-form-item>
         <el-form-item :label="t('factors.factorName')">
           <el-input v-model="form.name" :disabled="isEditing" />
         </el-form-item>
@@ -92,7 +99,15 @@
           </el-select>
           <el-input-number v-model="preview.bars" :min="20" :max="500" :step="20" style="margin-left: 6px" />
         </el-form-item>
-        <el-form-item :label="t('factors.pythonCode')">
+        <el-form-item v-if="form.ftype === 'dsl'" :label="t('factors.exprLabel')">
+          <div style="width: 100%">
+            <el-input v-model="form.code" :placeholder="t('factors.dslPlaceholder')" style="font-family: monospace" />
+            <div style="margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary)">
+              {{ t('factors.dslHint') }}
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item v-else :label="t('factors.pythonCode')">
           <div style="width: 100%">
             <div style="margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary)">
               {{ t('factors.codeHint') }}
@@ -175,7 +190,7 @@ const load = async () => {
 
 const openCreate = () => {
   isEditing.value = false
-  form.value = { name: '', category: 'custom', description: '', code: DEFAULT_CODE, paramsStr: '{}', needsHistory: 0 }
+  form.value = { name: '', category: 'custom', description: '', code: DEFAULT_CODE, paramsStr: '{}', needsHistory: 0, ftype: 'python' }
   codeValid.value = null
   codeError.value = ''
   dialogVisible.value = true
@@ -190,6 +205,7 @@ const openEdit = (row) => {
     code: row.code || '',
     paramsStr: JSON.stringify(row.params || {}, null, 2),
     needsHistory: row.needs_history || 0,
+    ftype: row.type === 'dsl' ? 'dsl' : 'python',
   }
   codeValid.value = null
   codeError.value = ''
@@ -274,6 +290,7 @@ const save = async () => {
       code: form.value.code,
       params,
       needs_history: form.value.needsHistory,
+      type: form.value.ftype,
     }
     if (isEditing.value) {
       await updateFactor(form.value.name, data)

@@ -53,10 +53,13 @@ def _redis() -> redis.Redis:
 
 
 def notify(level: Level, category: Category, title: str, body: str = "",
-           source_ref: str | None = None) -> int | None:
+           source_ref: str | None = None, code: str | None = None) -> int | None:
     """通知统一入口：落 PG（站内铃铛可见）+ 按规则外部推送。返回通知 id；去重命中返回 None。
 
     SE1（F-52）：Valkey 故障时降级——跳过去重继续发（告警不能与被监控对象共死）。
+
+    code（web 长尾批 2026-09-01）：通知类型稳定标识（如 l3.failed/frozen.intercept），
+    前端 runbook 映射与结构化渲染的键。渐进打码——未打码调用点 None 兼容。
     """
     try:
         r = _redis()
@@ -73,9 +76,9 @@ def notify(level: Level, category: Category, title: str, body: str = "",
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO notifications (level, category, title, body, source_ref) "
-                "VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                (level, category, title, body[:2000], source_ref))
+                "INSERT INTO notifications (level, category, title, body, source_ref, code) "
+                "VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
+                (level, category, title, body[:2000], source_ref, code))
             conn.commit()
             notif_id = cur.fetchone()[0]
     except Exception as e:
@@ -100,11 +103,11 @@ def notify(level: Level, category: Category, title: str, body: str = "",
     return notif_id
 
 
-def safe_notify(level: Level, title: str, body: str = "") -> None:
+def safe_notify(level: Level, title: str, body: str = "", code: str | None = None) -> None:
     """never-raise 包装（2026-08-19 模块归位 P 审：收编 runner/_alert、monitor._notify、
     alert_failed 三处重复的 try/except notify 模式——调用方不再自裹）。"""
     try:
-        notify(level, "system", title, body)
+        notify(level, "system", title, body, code=code)
     except Exception as e:
         logger.warning("safe_notify 发送失败（吞掉，调用方主流程不受影响）: %s", e)
 

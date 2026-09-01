@@ -192,22 +192,40 @@ def load_factors_from_db() -> list[str]:
         from ..data_platform.db import get_conn
         with get_conn() as conn:
             rows = conn.execute(
-                "SELECT name, category, description, code, params, needs_history FROM factor_def"
+                "SELECT name, category, description, code, params, needs_history, type FROM factor_def"
             ).fetchall()
-        for name, category, description, code, params, needs_history in rows:
+        import functools
+        for name, category, description, code, params, needs_history, ftype in rows:
             import json
             params_dict = json.loads(params) if isinstance(params, str) else (params or {})
             try:
-                factor_cls = _make_factor_class(name, code, params_dict)
-                _FACTOR_REGISTRY[name] = {
-                    "cls": factor_cls,
-                    "name": name,
-                    "category": category or "custom",
-                    "params": params_dict,
-                    "description": description or "",
-                    "is_custom": True,
-                    "needs_history": int(needs_history or 0),
-                }
+                if ftype == "dsl":
+                    # web 长尾批（13号#2）：DSL 因子——静态校验（坏表达式启动期
+                    # 跳过并 warning，不炸进程）+ partial 注册（entry["cls"]() 零参
+                    # 调用语义不变，strategy.py 消费面零改，盲审 A 实核）
+                    n = validate_dsl_expr(code)
+                    _FACTOR_REGISTRY[name] = {
+                        "cls": functools.partial(DSLFactor, name, code),
+                        "name": name,
+                        "category": category or "custom",
+                        "params": {"expr": code},
+                        "description": description or "",
+                        "is_custom": True,
+                        "needs_history": n,
+                        "type": "dsl",
+                    }
+                else:
+                    factor_cls = _make_factor_class(name, code, params_dict)
+                    _FACTOR_REGISTRY[name] = {
+                        "cls": factor_cls,
+                        "name": name,
+                        "category": category or "custom",
+                        "params": params_dict,
+                        "description": description or "",
+                        "is_custom": True,
+                        "needs_history": int(needs_history or 0),
+                        "type": "python",
+                    }
                 loaded.append(name)
             except Exception as e:
                 _logger.warning("加载自定义因子 %s 失败: %s", name, e)
@@ -218,13 +236,25 @@ def load_factors_from_db() -> list[str]:
 
 def register_custom_factor(name: str, category: str, code: str,
                             description: str = "", params: dict | None = None,
-                            needs_history: int = 0) -> dict:
+                            needs_history: int = 0, ftype: str = "python") -> dict:
     """创建或更新自定义因子：编译代码 → 写 DB → 进注册表。
 
+    ftype="dsl"（web 长尾批 2026-09-01，13号#2）：code=受限表达式——静态校验
+    （validate_dsl_expr）+needs_history=最大窗口 n；不做 python 编译。
     Returns: {"id": int, "name": str, ...}
     """
-    # 1. 编译校验（安全）
-    factor_cls = _make_factor_class(name, code, params or {})
+    if name.startswith("dsl:"):
+        raise ValueError("因子名禁用 dsl: 前缀（内联 DSL 路径保留字，会被策略层劫持）")
+    if ftype not in ("python", "dsl"):
+        raise ValueError(f"未知因子类型: {ftype}（python|dsl）")
+
+    # 1. 校验（python=编译安全 / dsl=表达式静态校验）
+    if ftype == "dsl":
+        needs_history = validate_dsl_expr(code)
+        params = {"expr": code}
+        factor_cls = None
+    else:
+        factor_cls = _make_factor_class(name, code, params or {})
 
     # 2. 写 DB
     import json
@@ -238,28 +268,35 @@ def register_custom_factor(name: str, category: str, code: str,
         existing = cur.fetchone()
         if existing:
             conn.execute(
-                "UPDATE factor_def SET category=%s, description=%s, code=%s, params=%s, needs_history=%s, updated_at=now() WHERE name=%s",
-                (category, description, code, params_json, needs_history, name),
+                "UPDATE factor_def SET category=%s, description=%s, code=%s, params=%s, needs_history=%s, type=%s, updated_at=now() WHERE name=%s",
+                (category, description, code, params_json, needs_history, ftype, name),
             )
             fid = existing[0]
         else:
             cur = conn.execute(
-                "INSERT INTO factor_def (name, category, description, code, params, needs_history) VALUES (%s,%s,%s,%s,%s,%s) RETURNING id",
-                (name, category, description, code, params_json, needs_history),
+                "INSERT INTO factor_def (name, category, description, code, params, needs_history, type) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (name, category, description, code, params_json, needs_history, ftype),
             )
             fid = cur.fetchone()[0]
         conn.commit()
 
-    # 3. 更新注册表
-    _FACTOR_REGISTRY[name] = {
-        "cls": factor_cls,
-        "name": name,
-        "category": category,
-        "params": params or {},
-        "description": description,
-        "is_custom": True,
-        "needs_history": needs_history,
-    }
+    # 3. 更新注册表（dsl=partial 零参调用，与 load_factors_from_db 同形——POST 后
+    # 同进程立即可用，不等重启；盲审验收 ④ 实测抓出原版 cls=None 不可调）
+    if ftype == "dsl":
+        import functools
+        _FACTOR_REGISTRY[name] = {
+            "cls": functools.partial(DSLFactor, name, code),
+            "name": name, "category": category, "params": {"expr": code},
+            "description": description, "is_custom": True,
+            "needs_history": needs_history, "type": "dsl",
+        }
+    else:
+        _FACTOR_REGISTRY[name] = {
+            "cls": factor_cls,
+            "name": name, "category": category, "params": params or {},
+            "description": description, "is_custom": True,
+            "needs_history": needs_history, "type": "python",
+        }
     return {"id": fid, "name": name, "category": category, "is_custom": True, "needs_history": needs_history}
 
 
@@ -460,6 +497,49 @@ def _safe_eval(expr: str, ctx: dict[str, float]) -> float:
         raise TypeError(f"不支持的表达式节点: {type(node).__name__}")
 
     return float(_eval(tree.body))
+
+
+def validate_dsl_expr(expr: str) -> int:
+    """DSL 表达式静态校验（web 长尾批 2026-09-01，盲审 A/B-P0 根修）。
+
+    DSLFactor 构造零校验（parse 在 compute 每根 bar 跑）——坏表达式须在
+    register/load 期 ValueError（route 400 化），不得静默入库实盘才爆。
+    校验面 = parse + 窗口函数结构（嵌套/字段名/未知函数）+ 裸名白名单。
+    返回最大窗口 n（mean(close,20)→20）：DSL 因子 needs_history 由此定——
+    补 0 会误标静态因子混入 static_only 选股资格（盲审 B-P1）。
+    """
+    try:
+        tree = ast.parse(expr, mode="eval")
+    except SyntaxError as e:
+        raise ValueError(f"DSL 表达式语法错误: {e}") from e
+    fields = {"close", "high", "low", "open_", "volume"}
+    max_n = 0
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            raise ValueError("DSL 表达式不支持赋值")
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name):
+                raise ValueError("DSL 不支持属性/方法调用（仅白名单函数）")
+            if node.func.id not in _DSL_WINDOW_FUNCS:
+                raise ValueError(f"DSL 未知函数: {node.func.id}（白名单: {sorted(_DSL_WINDOW_FUNCS)}）")
+            if not node.args:
+                raise ValueError(f"{node.func.id}() 缺字段参数，如 {node.func.id}(close, 20)")
+            a0 = node.args[0]
+            if isinstance(a0, ast.Call):
+                raise ValueError(f"DSL 窗口函数不支持嵌套: {node.func.id}({ast.unparse(a0)})——写成自定义因子")
+            if isinstance(a0, ast.Name):
+                if a0.id not in fields:
+                    raise ValueError(f"{node.func.id}() 未知字段: {a0.id}（{sorted(fields)}）")
+                node.args[0] = ast.Constant(value=a0.id)   # 同 compute 预处理
+            for a in node.args[1:]:
+                if isinstance(a, ast.Constant) and isinstance(a.value, (int, float)):
+                    max_n = max(max_n, int(a.value))
+            for kw in node.keywords:
+                if kw.arg == "n" and isinstance(kw.value, ast.Constant)                         and isinstance(kw.value.value, (int, float)):
+                    max_n = max(max_n, int(kw.value.value))
+        elif isinstance(node, ast.Name) and node.id not in fields                 and node.id not in _DSL_WINDOW_FUNCS:
+            raise ValueError(f"DSL 未知变量: {node.id}（字段: {sorted(fields)}）")
+    return max(max_n, 1)
 
 
 @register_factor("dsl", category="custom", description="受限 DSL 表达式因子", needs_history=0)

@@ -225,6 +225,7 @@ def create_factor_api(req: dict = Body(...),
             description=req.get("description", ""),
             params=req.get("params", {}),
             needs_history=int(req.get("needs_history", 0)),
+            ftype=req.get("type", "python"),
         )
         audit_log(payload["username"], "create_factor", req.get("name", ""))
         return result
@@ -317,6 +318,7 @@ def update_factor_api(name: str, req: dict = Body(...),
             description=req.get("description", ""),
             params=req.get("params", {}),
             needs_history=int(req.get("needs_history", 0)),
+            ftype=req.get("type", "python"),
         )
         audit_log(payload["username"], "update_factor", name)
         return result

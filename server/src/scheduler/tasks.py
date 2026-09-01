@@ -178,7 +178,7 @@ def health_check():
     errors = [k for k,v in results.items() if v["status"] == "error"]
     if errors:
         from src.alert_notify import notify
-        notify("critical", "system", "接口健康异常", f"离线: {errors}")
+        notify("critical", "system", "接口健康异常", f"离线: {errors}", code="health.iface-down")
 
     return {"ts": time.strftime("%Y-%m-%d %H:%M:%S"), "results": results}
 
@@ -233,7 +233,7 @@ def drift_check():
 
     if issues:
         from src.alert_notify import notify
-        notify("critical", "risk", "因子漂移告警", f"实盘-回测因子偏差超限: {issues}")
+        notify("critical", "risk", "因子漂移告警", f"实盘-回测因子偏差超限: {issues}", code="factor.drift")
 
     return {"status": "ok", "running_strategies": len(running), "drift_issues": issues}
 
@@ -344,7 +344,7 @@ def reconcile_three_books():
 
     if issues:
         from src.alert_notify import notify
-        notify("critical", "risk", "三账对账异常", "\n".join(issues))
+        notify("critical", "risk", "三账对账异常", "\n".join(issues), code="reconcile.error")
 
     return {"status": "ok" if not issues else "issues", "issues": issues}
 
@@ -1150,7 +1150,7 @@ def broker_health_check():
             results[provider] = {"status": "error", "msg": str(e)[:100]}
     errors = [k for k, v in results.items() if v["status"] == "error"]
     if errors:
-        notify("warn", "system", "通道连通异常", f"离线: {errors}")
+        notify("warn", "system", "通道连通异常", f"离线: {errors}", code="health.channel-down")
     return {"status": "ok" if not errors else "issues", "results": results}
 
 
@@ -1394,7 +1394,8 @@ def sa4_reconciler():
                        unit, attempts + 1, _sa4_backoff_delay(attempts + 1))
         try:
             notify("warn", "system", f"SA4 自动重启实盘单元: {unit}",
-                   f"第 {attempts + 1} 次自动拉起；若再失败将退避 {_sa4_backoff_delay(attempts + 1):.0f}s。")
+                   f"第 {attempts + 1} 次自动拉起；若再失败将退避 {_sa4_backoff_delay(attempts + 1):.0f}s。",
+                   code="sa4.restart")
         except Exception:
             pass
     # --- L3 意图调和（2026-08-24 韧性分层模型；批5 扩面三源）：期望表 -> systemd 实际状态 ---
@@ -1466,7 +1467,8 @@ def sa4_reconciler():
                 try:
                     notify("critical", "system", f"L3 拉起失败: {unit}",
                            f"systemctl start 非零退出。stderr: {stderr}；"
-                           "L3 将按 beat 周期重试，持续失败请手动 journalctl -u {unit} 定位。")
+                           "L3 将按 beat 周期重试，持续失败请手动 journalctl -u {unit} 定位。",
+                           code="l3.failed")
                 except Exception:
                     pass
                 continue
@@ -1478,7 +1480,8 @@ def sa4_reconciler():
             try:
                 notify("warn", "system", f"L3 拉起单元: {unit}",
                        f"期望源={source}，systemd 无实例或崩溃 failed，已自动拉起。"
-                       "若预期停用：live-task 先在 Web 停止任务；hub 打维护标记或 systemctl mask。")
+                       "若预期停用：live-task 先在 Web 停止任务；hub 打维护标记或 systemctl mask。",
+                       code="l3.pull")
             except Exception:
                 pass
     except Exception as e:

@@ -101,10 +101,10 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
 from src.quant_common.guard import guard as _guard_base, sd_notify as _sd_notify
 
 
-def _alert(title: str, body: str = "") -> None:
+def _alert(title: str, body: str = "", code: str | None = None) -> None:
     """runner 侧告警：never-raise（safe_notify），绝不影响交易主流程。"""
     from src.alert_notify.notify import safe_notify
-    safe_notify("critical", title, body)
+    safe_notify("critical", title, body, code=code)
 
 
 def _guard(name):
@@ -207,14 +207,16 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         if not trading.frozen_allows(order.action, frozen):
             logger.warning("sticky 冻结拒绝 BUY 委托: %s %s", order.symbol, order.action)
             _alert(f"任务 {tid or sid} 冻结期拦截 BUY: {order.symbol}",
-                   "不可信 bar / 流序号 gap（数据污染事实）；重启任务解冻。SELL 放行。")
+                   "不可信 bar / 流序号 gap（数据污染事实）；重启任务解冻。SELL 放行。",
+                   code="frozen.intercept")
             return None
         _buy_ok = ctx.get("buy_ok")
         if str(order.action).upper() == "BUY" and not (_buy_ok and _buy_ok()):
             # 检查器缺失时保守拒（fail-closed）；非交易时段天然无信号，误拒方向安全
             logger.warning("下单时刻拒 BUY（bar 过期/hub 心跳丢失）: %s", order.symbol)
             _alert(f"任务 {tid or sid} 拦截 BUY（数据不新鲜）: {order.symbol}",
-                   "bar 停更>300s 或 hub 心跳丢失；SELL 放行，恢复后自动放行。")
+                   "bar 停更>300s 或 hub 心跳丢失；SELL 放行，恢复后自动放行。",
+                   code="buy.blocked")
             return None
         return _orig_send(order)
 
@@ -287,7 +289,8 @@ def main():
     # SA4：启动依赖探活 + 指数退避（服务器重启序 PG 慢启不再 5 连崩打穿 StartLimit）
     if not _wait_for_deps():
         _alert("实盘任务依赖探活退避耗尽",
-               "PG 持续不可达超 10 分钟，runner 以 EX_TEMPFAIL 退出待 systemd/reconciler 重试。")
+               "PG 持续不可达超 10 分钟，runner 以 EX_TEMPFAIL 退出待 systemd/reconciler 重试。",
+               code="deps.exhausted")
         sys.exit(EX_TEMPFAIL)
 
     # 1. 读 live_task（新架构）或 strategy_config（旧架构兼容）
