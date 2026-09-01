@@ -21,7 +21,7 @@ server/src/strategy_framework/
 ├── broker.py       # Broker ABC + XTP/Binance/OKXBroker + get_broker() + record_broker_usage() + build_xtp_setting()
 ├── md_api_guard.py # GuardedXtpMdApi：XTP 行情 SDK 生命周期守卫（状态机+RLock，批 1）
 ├── md_session.py   # MdSessionBase 契约 + XtpMdSession + is_trading_day/zombie_session（L2 会话层）
-└── runtime/        # 引擎运行时骨架（批 2；hub/worker 已迁，direct 冻结批 6 退役）
+└── runtime/        # 引擎运行时骨架（批 2；hub/worker 消费——direct 批 6b 已退役 2026-09-01）
     ├── loop.py     # EngineLoop + Hook：到期驱动钩子循环
     ├── pulse.py    # SessionCounters + HeartbeatWriter
     ├── mdlink.py   # MdSessionSupervisor（L2 会话监督器）
@@ -125,7 +125,7 @@ class BacktestEngine:
     # 逐标的调用时由调用方合并 symbol_params（见 scheduler.tasks.backtest_symbol_task）
 ```
 
-### runtime/（引擎运行时骨架——批 2 落地；hub/worker 已迁，direct 冻结批 6 退役）
+### runtime/（引擎运行时骨架——批 2 落地；hub/worker 消费——direct 批 6b 已退役 2026-09-01）
 
 > 详见 `模块契约/md_hub.md`（hub 侧接线+钩子表）与 `模块契约/strategy_runner.md`（worker 侧钩子表）。
 
@@ -245,7 +245,7 @@ set_config_provider(_market_config_provider)   # quant_common.session 的市场�
 |---|---|
 | `web_api.main` | 策略 CRUD + 实盘任务 CRUD（`/api/live-task`）+ 回测 + 因子 CRUD + 参数校验 |
 | `md_hub`（批 2 起） | runtime 五模块（loop/pulse/mdlink/alerts/subs）+ `GuardedXtpMdApi` + `XtpMdSession` + `build_xtp_setting` |
-| `strategy_runner`（C2） | 读 live_task + strategy_snapshot → `Strategy.from_config` → `on_bar`；批 4 起另消费 `GuardedXtpMdApi`/`XtpMdSession`/runtime（loop·pulse·alerts·xsleeper，worker 侧） |
+| `strategy_runner`（C2） | 读 live_task + strategy_snapshot → `Strategy.from_config` → `on_bar`；消费 runtime（loop·pulse·alerts·xsleeper，worker 侧；批 6b 起 GuardedXtpMdApi/XtpMdSession 仅 hub 侧消费） |
 | `scheduler.tasks` | `backtest_symbol_task` 合并 symbol_params → `BacktestEngine.run` |
 | `astock_analysis` | `DailySelectionEngine`（用 `list_factors(static_only=True)`） |
 
@@ -303,6 +303,7 @@ set_config_provider(_market_config_provider)   # quant_common.session 的市场�
 ---
 
 ## 最近变更
+- 2026-09-01（批 6b）：strategy_runner direct 退役——md_api_guard/md_session 的 runner 侧消费面清零（模块本体保留，hub 侧在用）
 - 2026-08-27（批 4c）：批 3 挂账清偿——runtime 六模块（含批 4b xsleeper）/md_api_guard/md_session public 面回写；3c 改名 enginekit 注记（未做，契约按现名）；依赖/被调表补 runtime 消费方
 - 2026-08-09 初版
 - 2026-08-11 因子平台化（DB 自定义）+ 静态/动态区分 + Python 代码框 + 参数定义系统 + 策略与任务分离（live_task）

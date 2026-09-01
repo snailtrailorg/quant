@@ -2,16 +2,17 @@
 
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量 + 已知差异。任务改本模块前读本文件。
 > 配套：`接口契约.md`（Order/Position/live_task/持仓真相源）+ `模块契约/md_hub.md`（hub 侧）+ `模块契约/strategy_framework.md`（runtime 骨架/SDK 守卫/L2 会话契约）。
-> 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架；direct 冻结（语义见 §二）。
+> 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架。
+> **批 6b（2026-09-01）：direct 退役**——hub 是唯一实盘行情模式（md_mode=direct → EX_CONFIG 拒绝），§二 改退役记录。
 
 ## 职责
-每 live_task 一个子进程（`quant-live-task@{id}`，systemd）：建 vnpy 引擎 + XTPAdapter →
-tick→bar→on_bar→信号→风控→下单；direct/hub 双模式；60s 快照/持仓真相批；SA/SB/SC 稳定性机制宿主。
+每 live_task 一个子进程（`quant-live-task@{id}`，systemd）：ThinTdGateway（TD-only）+ XTPAdapter +
+hub_worker 消费 `hub:bars:*` 流 → on_bar→信号→风控→下单（批 6b 起 hub 唯一模式）；60s 快照/持仓真相批；SA/SB/SC 稳定性机制宿主。
 
 ## 文件结构
 ```
 server/src/strategy_runner/
-├── main.py         # 入口+分派（--task-id 新 / --id 旧兼容）+ direct 主循环（冻结）+ hub 模式 ctx 组装（679 行）
+├── main.py         # 入口（--task-id 新 / --id 旧兼容）+ hub 模式 ctx 组装（382 行；direct 主循环批 6b 删）
 ├── trading.py      # 交易域九单元（4a 新建，306 行）——direct 与 hub worker 单源；依赖注入零模块级可变状态
 ├── hub_worker.py   # hub 模式 worker（4b 迁骨架，299 行）：EngineLoop 11 钩子 + XReadSleeper 流消费
 └── alert_failed.py # OnFailure 钩子（systemd quant-task-failed@ 调）
@@ -24,19 +25,19 @@ server/src/strategy_runner/
 ### main.py——入口与分派
 ```python
 main()                          # --task-id（live_task 新架构）/ --id（strategy_config 旧架构兼容）
-                                # 读任务→SA4 依赖探活→md_mode 分派（live_task.params.md_mode 覆盖
-                                # system_config 全局默认，评审 S5）→ hub: _run_hub_mode / direct: 内联
+                                # 读任务→SA4 依赖探活→md_mode 校验（批 6b：direct→EX_CONFIG fail-fast，
+                                # 其余一律 hub）→ _run_hub_mode
 # 退出码三分类（SA4）：EX_OK=0 正常停止（不拉起，F-36 churn 根修）/ EX_TEMPFAIL=75 瞬态
 #                     （systemd 重启+reconciler 接管）/ EX_CONFIG=78 永久配置错（不重启，Failed 告警人工）
 _wait_for_deps(max_wait=600) -> bool     # PG 探活指数退避 5→10→20→40→60 封顶（期间喂狗防 WatchdogSec 误杀）
-_resolve_client_id() -> int | None       # 双轨会话身份：client_id_runner 须独立号；=1 与 hub 撞号 EX_CONFIG
-_run_hub_mode(sid, tid, ...)             # ThinTdGateway（TD-only 壳）+ Strategy.from_config +
-                                          # _gated_send 网关包装 + ctx 组装 → hub_worker.run(ctx)
+_run_hub_mode(sid, tid, ...)             # ThinTdGateway（TD-only 壳）+ EVENT_LOG 注册（批 6b：TD 会话日志
+                                          # [gw] 可观测）+ Strategy.from_config + _gated_send 网关包装 +
+                                          # ctx 组装 → hub_worker.run(ctx)
 _warmup_history(symbol, n=100) -> list   # PG 暖机（worker 侧再叠流回放 _rewarm）
 _guard(name) / _alert(title, body)       # quant_common.guard + safe_notify（lambda 晚绑定保 patch 语义）
 ```
 
-### trading.py——交易域九单元（4a 单源化，direct 与 hub worker 共享）
+### trading.py——交易域九单元（4a 单源化；批 6b 起 hub worker 唯一消费方）
 ```python
 FROZEN_STALE_BAR_S = 300                      # bar 新鲜门限（buy_ok/盲视共用）
 buy_ok_check(frozen, stats, hub_alive, now, in_session=True) -> bool
@@ -86,31 +87,32 @@ _hub_alive(r) -> bool            # hub 心跳存在（TTL 内）；存储不可�
 - NOGROUP → 直接 `os._exit(75)`（禁 sys.exit——SystemExit 会被 finally 吞成退出码 0）→ systemd 重启 → run() 启动段组重建接手（P0-3）
 - 单线程模型：on_batch 在 loop 线程内联执行（frozen/history 裸 dict 无并发险）；**禁止后台线程**
 
-## 二、direct 模式冻结语义（4a/v2.1 裁定）
-- **循环结构与节奏不动**（10s while True + counter%N 保留）；交易件调用点重接 trading.py（九单元），语义零漂移由测试保证（挂点测试随迁改挂）
-- 残余双份仅循环脚手架（喂狗/事件线程检查/心跳）——冻结期可接受；**骨架化不做**，批 6 随 ST7 阶段 1 退役
-- trading.py 内修复=改一处双模式受益；direct 独有 bug（如 _gated_send_direct）就地修
+## 二、direct 退役记录（批 6b，2026-09-01）
+- 08-28 批 6a 切 hub（用户裁定跳门禁）→ 08-31 验证日全绿（241 根零丢失+窗开关闭环）→ 09-01 批 6b 删 direct 主体（main.py 702→382 行，MainEngine/XtpGateway/GuardedXtpMdApi/XtpMdSession/_resolve_client_id 全退）
+- 误设 md_mode=direct（任务级 params 或 system_config 全局）→ EX_CONFIG fail-fast（不静默装死，盲审 B-P1）
+- **知情取舍**：direct 的 live_task 退出回写（systemd stop 后 status 残 running）hub 路径无等价——L3 reconciler 按 DB 期望 300s 内拉回（手动 systemctl stop 会被撤销，停止必须走 Web，与 6a 现状同非回归）
+- bar_shadow 随 direct 退役停止写入（表保留历史回溯）；三查②改 hub 单侧完整性（见 flow/待办.md 手册）
 
 ## 三、内部关键结构（不保证稳定，改前看代码）
-- `_gated_send`（hub C2 网关）：sticky 冻结拒 BUY + ctx["buy_ok"] 下单时刻检查（缺失保守拒）；`_gated_send_direct`（direct）：时段外拒 BUY + tick<300s 新鲜门
+- `_gated_send`（C2 网关，下单唯一咽喉）：sticky 冻结拒 BUY + ctx["buy_ok"] 下单时刻检查（缺失保守拒）
 - worker `stats.sess_bar_wall`=时段作用域基线（沿上清零）；`BarMsgState.max_ts` 跨重启持久水位（`hub:worker:max_ts:{symbol}`，R-DL1）
 - 消费组：启动 destroy + create id=$（P0-3 防旧水位重复消费）；暖机只填 history 绝不调 on_bar（F3）
 - 停止条件：trading.stop_due 单源——新架构查 live_task.status；旧架构查 strategy_config.enabled
 
 ## 四、依赖
-vnpy（MainEngine/XtpGateway/BarGenerator/XtpTdApi）· strategy_framework（adapters.XTPAdapter / broker.build_xtp_setting / md_api_guard.GuardedXtpMdApi / md_session.XtpMdSession / runtime：loop·pulse·alerts·xsleeper）· trading（本包，4a）· quant_common（session/guard）· data_platform.db · alert_notify · health_monitor.report_schema_findings（启动校验）
+vnpy（EventEngine/XtpTdApi）· strategy_framework（adapters.XTPAdapter / broker.build_xtp_setting / runtime：loop·pulse·alerts·xsleeper）· trading（本包，4a）· quant_common（guard）· data_platform.db · alert_notify · health_monitor.report_schema_findings（启动校验）
 （worker 是 TD-only：**不接** MdSessionSupervisor/MD 会话——D1 防误读注记）
 
 ## 五、被谁调用
 systemd `quant-live-task@{tid}` / `quant-strategy@{sid}`；Web `POST /api/live-task/{id}/start|stop`（经 polkit）
 
 ## 六、读写表（增量，全量见代码）
-- **写**：order_log（WAL 时序）· trade_log（EVENT_TRADE+对账补录，幂等 trade_ref）· account_snapshot（60s，断线不写假值）· bar_shadow（direct 影子期）· position_snapshot/position_refresh（ST2 真相批，见接口契约）· live_task（退出 status→stopped 回写，P1 修复）
+- **写**：order_log（WAL 时序）· trade_log（EVENT_TRADE+对账补录，幂等 trade_ref）· account_snapshot（60s，断线不写假值）· position_snapshot/position_refresh（ST2 真相批，见接口契约）。~~bar_shadow~~（direct 影子期，批 6b 停写）~~live_task 退出回写~~（direct 专属，批 6b 随删，语义见 §二）
 - **读**：live_task（配置+停止条件）· bar_1min（暖机）· strategy_config / strategy_account（旧架构）
 - **Valkey**：hub:bars:{symbol}（worker 消费）· quant:hb:task:{tid}（心跳）· hub:worker:max_ts:{symbol}（水位）· factor:recalc:triggered（读+清）
 
 ## 七、不变量
-1. 下单唯一咽喉 `_gated_send`（hub）/_gated_send_direct（direct）——绕过它下单=绕过全部安全门
+1. 下单唯一咽喉 `_gated_send`——绕过它下单=绕过全部安全门
 2. vnpy 事件线程 handler 必须 _guard/make_guard 包裹（一次异常=永久失聪）
 3. 进程退出走 `os._exit`（XTP 原生库 teardown ABRT）：正常 0 / 瞬态与 NOGROUP 75——停止路径**不用** failure=exit（exit 1→Restart=on-failure 拉起=F-36 churn 倒退）
 4. 交易时段外 BUY 拒（回放防护）；SELL 永不放行限制（保止损）
@@ -118,7 +120,7 @@ systemd `quant-live-task@{tid}` / `quant-strategy@{sid}`；Web `POST /api/live-t
 
 ## 八、已知差异（知情接受——裁定全表见 docs/任务/批4-worker迁移与trading解耦.md v2.1）
 
-**4a 双模式统一八条**（语义零漂移的唯一例外）：
+**4a 双模式统一八条**（语义零漂移的唯一例外；批 6b 后 3/4 条的直接对象已退役，留档）：
 1. reconcile_orders=runner 超集（在场委托+成交补录+WAL 残留）——worker 由只告警升级，启动与每次 TD 重连沿均变化
 2. snapshot_cycle=direct 形态（含 available_cash、单事务）——worker 落库多一列，无消费者受扰
 3. 停止检查节奏各自保持（worker 5s / direct 60s，节奏在调用侧）——统一即违反 direct 冻结
@@ -133,5 +135,6 @@ systemd `quant-live-task@{tid}` / `quant-strategy@{sid}`；Web `POST /api/live-t
 10. 周期钩子首拍提前：注册即到期（next_due=now）——snapshot 首拍 60s→0s（启动即一拍；同批 2 hub 模式）
 
 ## 最近变更
+- 2026-09-01（批 6b）：direct 退役（702→382 行）+ EVENT_LOG 注册（TD [gw] 日志可观测）+ md_mode=direct→EX_CONFIG；测试面 -4（_resolve_client_id）-3 patch 行；§二 改退役记录，§四/六/七 同步
 - 2026-08-27（批 4c）：4a/4b 后 public 面全变（main 887→679 / hub_worker 437→299 / trading.py 新建 306）——本文件重写：入口分派/trading 九单元/钩子表 11 项/XReadSleeper 契约/direct 冻结语义/已知差异段（v2.1 八条+4b 两条）
 - 2026-08-19 模块归位：五件套（guard/session/sd_notify）迁 quant_common（本模块经别名+alert 回调注入消费）；build_xtp_setting 迁 strategy_framework/broker（留别名 `_build_xtp_setting`）

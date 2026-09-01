@@ -13,7 +13,8 @@ from unittest.mock import patch
 
 import pytest
 
-from src.strategy_runner.main import _guard, _in_astock_session, _sd_notify
+from src.quant_common.session import in_astock_session as _in_astock_session
+from src.strategy_runner.main import _guard, _sd_notify
 from src.quant_common.session import in_session, session_edge, _is_trading_day, _load_market_config
 
 

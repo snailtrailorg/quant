@@ -36,7 +36,6 @@ class TestExitCodes:
         from src.strategy_runner import main as m
         with patch.object(m, "_wait_for_deps", return_value=False), \
              patch.object(m, "_alert") as p_alert, \
-             patch.object(m, "MainEngine", MagicMock()), \
              patch("sys.argv", ["main", "--task-id", "8"]):
             with pytest.raises(SystemExit) as ei:
                 m.main()
@@ -52,7 +51,6 @@ class TestExitCodes:
         cur.fetchone.return_value = None
         conn.execute.return_value = cur
         with patch.object(m, "_wait_for_deps", return_value=True), \
-             patch.object(m, "MainEngine", MagicMock()), \
              patch("src.data_platform.db.get_conn", return_value=conn), \
              patch("sys.argv", ["main", "--task-id", "8"]):
             with pytest.raises(SystemExit) as ei:
@@ -68,7 +66,6 @@ class TestExitCodes:
         cur.fetchone.return_value = (8, "t", 1, "600000.SHSE", "{}", "{}", "stopped", None, None)
         conn.execute.return_value = cur
         with patch.object(m, "_wait_for_deps", return_value=True), \
-             patch.object(m, "MainEngine", MagicMock()), \
              patch("src.data_platform.db.get_conn", return_value=conn), \
              patch("sys.argv", ["main", "--task-id", "8"]):
             with pytest.raises(SystemExit) as ei:
