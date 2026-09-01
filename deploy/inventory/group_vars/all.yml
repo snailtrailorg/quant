@@ -12,7 +12,8 @@ deploy_trading_windows:              # 发布禁区（TZ=Asia/Shanghai；周一~
 
 # ---- 四切片指纹（排 __pycache__；空输出=视为变更——设计稿 §3 preflight）----
 # scripts 取 systemd 子树：单元变更判据（场景 6 install-units 触发条件）
-deploy_slices: [src, migrations, scripts/systemd, requirements.txt]
+deploy_slices: [src, migrations, scripts/systemd, requirements.txt, alembic.ini]
+                                     # 批 8 补 alembic.ini（同步白名单有而指纹无=完备性缺口——server_changed 判据须覆盖全部 server 输入）
 deploy_postverify_probe: false        # W2 兜底：探针默认关（环境显式开；沙箱 web 桩无端点）
 
 # ---- 发布同步白名单（设计稿 §3：synchronize 白名单清单，非全树 rsync）----
@@ -30,3 +31,7 @@ deploy_dwell_max_wait: 120           # 单元总等待上限（含反复重启�
 
 # ---- 清理策略（设计稿 §3 post_tasks）----
 deploy_keep_releases: 5              # 按 release_id 字典序保留 N 个已部署版
+# ---- 批 8 · 变更感知发布 ----
+# server_changed=false（四切片+units 指纹全一致）→ 快车道：跳阶段 3/5/7（导入冒烟/pip/alembic/波次重启），
+# 只走同步+双链 flip+postverify（pinned 断言=旧版）。逃生门：-e force_full=true 恒走全量。
+# dwell 压缩：-e deploy_dwell_seconds=10（快速模式，默认 30 保守值不变）。

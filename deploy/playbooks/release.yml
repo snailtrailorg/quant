@@ -235,9 +235,30 @@
             staged_slice_fp: "{{ dict(staged_fp.stdout_lines | default([]) | select('search', '=') | map('split', '=')) }}"
             req_changed: "{{ prev_slice_fp.get('requirements.txt', '') != dict(staged_fp.stdout_lines | default([]) | select('search', '=') | map('split', '=')).get('requirements.txt', '') }}"
 
+        # ---- 批 8 · 变更感知发布：server_changed=false（server 全切片指纹一致）→ 快车道 ----
+        # 判据完备性=deploy_slices 覆盖全部 server 输入（src/migrations/scripts/systemd/requirements.txt/alembic.ini）；
+        # 首发布（prev 空）/任一切片不同（含空指纹=视为变更既有防御）/force_full 逃生门 → 全量。
+        - name: 阶段 2 —— server 变更判定（批 8：web-only 发布走快车道的唯一判据）
+          ansible.builtin.set_fact:
+            server_changed: "{{ (prev_release_id | default('')) | length == 0
+                                or (force_full | default(false) | bool)
+                                or req_changed | bool
+                                or prev_slice_fp.get('src', '') != staged_slice_fp.get('src', '')
+                                or prev_slice_fp.get('migrations', '') != staged_slice_fp.get('migrations', '')
+                                or prev_slice_fp.get('scripts/systemd', '') != staged_slice_fp.get('scripts/systemd', '')
+                                or prev_slice_fp.get('alembic.ini', '') != staged_slice_fp.get('alembic.ini', '') }}"
+
+        - name: 阶段 2 —— 快车道通告（server 指纹一致：跳过阶段 3/5/7，只翻链+探针）
+          ansible.builtin.debug:
+            msg: >-
+              🚀 批 8 快车道：server 四切片+units 指纹与上一版 {{ prev_release_id }} 一致
+              —— 跳过导入冒烟/pip/迁移/波次重启（web-only 发布）；双链照切，postverify pinned 断言=旧版。
+          when: not (server_changed | bool)
+
         - name: 阶段 3 —— py_compile 全量 + 六入口导入冒烟（quant-importsmoke-wrapper，带 shared/.env）
           ansible.builtin.command: "{{ quant_importsmoke_cmd }} {{ release_id }}"
           changed_when: true
+          when: server_changed | bool   # 批 8：src 同内容=导入结果必然与上一版相同
 
         - name: 阶段 4 —— 本版新增迁移的破坏性 DDL 门（新增=staged 与上一版的 versions/ 目录 diff，实现注记①）
           ansible.builtin.shell: |
@@ -280,16 +301,19 @@
           ansible.builtin.command: "{{ quant_pip_cmd }} freeze"
           register: pip_freeze_before
           changed_when: false
+          when: server_changed | bool   # 批 8：venv 未动 freeze 必同
 
         - name: 阶段 5 —— freeze 快照落 var/（pre-install 状态，rollback diff 基准；deploy 写权）
           ansible.builtin.copy:
             content: "{{ pip_freeze_before.stdout }}"
             dest: "{{ deploy_root }}/var/pip-freeze-{{ release_id }}.txt"
             mode: "0644"
+          when: server_changed | bool   # 批 8
 
         - name: 阶段 5 —— pip 预检（--dry-run；坏 requirements 在此拦截）
           ansible.builtin.command: "{{ quant_pip_cmd }} dry-run {{ release_id }}"
           changed_when: false
+          when: server_changed | bool   # 批 8：requirements 同内容
 
         - name: 阶段 5 —— pip 真装（指纹变化才装）
           ansible.builtin.command: "{{ quant_pip_cmd }} install {{ release_id }}"
@@ -298,6 +322,7 @@
         - name: 阶段 5 —— 迁移实跑（quant-alembic-wrapper upgrade head）
           ansible.builtin.command: "{{ quant_alembic_cmd }} {{ release_id }}"
           changed_when: true
+          when: server_changed | bool   # 批 8：migrations 同内容=head 已在位（上一版实跑过）
 
       rescue:
         - name: rescue(2-5) —— 清理 staged（allow_contract 时保留供人工处置）
@@ -339,7 +364,14 @@
           loop: "{{ deploy_waves }}"
           loop_control:
             loop_var: wave
-          when: wave.units | length > 0
+          when: (wave.units | length > 0) and (server_changed | bool)
+          # 批 8：server 指纹一致=零单元需重启（web-only 发布）——waves_touched 保持空，
+          # 回滚语义自洽（rollback 只翻链零重启）；hub gen 不增=零扰交易进程。
+
+        - name: 阶段 7 —— 快车道跳过通告（波次全免——进程钉旧版目录运行同内容）
+          ansible.builtin.debug:
+            msg: "🚀 批 8 快车道：5 波次全部跳过（server 未变）——单元零重启，hub gen 不增"
+          when: not (server_changed | bool)
 
         - name: 阶段 8 —— 波次命令层失败终判（续行≠维持混合态——统一回滚，设计稿语义修死）
           ansible.builtin.assert:
@@ -431,11 +463,13 @@
             #    任何旧版进程/空集合（无进程跑新版）均 fail → 回滚
             pinned=$({{ quant_pinned_cmd }} 2>/dev/null || true)
             pinned_flat=$(printf '%s\n' "$pinned" | sort -u | paste -sd, -)
-            if [ "$pinned_flat" != "{{ release_id }}" ]; then
-              echo "✗ 版本未收敛: 被钉集合=[$pinned_flat] ≠ 本次 [{{ release_id }}]（钉旧版进程或无新版进程）"
+            # 批 8 三元：全量路径=收敛于本次；快车道（未重启）=收敛于上一版（进程钉旧目录跑同内容,期望态）
+            expected_pinned="{{ release_id if (server_changed | bool) else (prev_release_id | default('')) }}"
+            if [ "$pinned_flat" != "$expected_pinned" ]; then
+              echo "✗ 版本未收敛: 被钉集合=[$pinned_flat] ≠ 期望 [$expected_pinned]（server_changed={{ server_changed }}）"
               rc=1
             else
-              echo "✓ 全部 quant-* 进程收敛于 $link"
+              echo "✓ 全部 quant-* 进程收敛于 $expected_pinned（server_changed={{ server_changed }}）"
             fi
             exit $rc
           changed_when: false
