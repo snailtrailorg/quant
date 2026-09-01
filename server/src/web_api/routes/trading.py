@@ -51,6 +51,14 @@ def list_live_tasks(status: str | None = None,
                     "bars": int(h["bars"]) if h.get("bars") else 0,
                     "frozen": h.get("frozen") == "1",
                     "hb_age_s": (time.time() - float(h["ts"])) if h.get("ts") else None})
+    # W5 脱敏（盲审 B-P1 旁路集）：任务行含 symbol/account_id/initial_capital=持仓财务面
+    from ..auth import data_sensitivity
+    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
+    if sens in ("count", "aggregated"):
+        by_status: dict = {}
+        for t in out:
+            by_status[t.get("status") or "?"] = by_status.get(t.get("status") or "?", 0) + 1
+        return {"sensitivity": sens, "items": [], "count": len(out), "by_status": by_status}
     return out
 
 

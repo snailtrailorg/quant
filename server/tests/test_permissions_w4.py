@@ -175,6 +175,14 @@ class TestAuthMatrixW5:
         assert "/api/health/components" in blocked, "health 组件(admin→system_config)须拒 viewer"
         assert "/api/user" in blocked, "用户列表(admin→user_mgmt)须拒 viewer"
 
+
+    def test_analyst_blocked_on_system_config_gates(self):
+        """W5-P0 盲区补：analyst 不得过 system_config 域（字典删键后 16 门归位 admin-only）。"""
+        m = self._matrix_get("analyst")
+        # health 组件=admin→system_config 门(字典删键后 analyst 拒);data-sources GET
+        # 是 read 门(列表全员可见=迁移前即如此,非扩权)
+        assert m.get("/api/health/components") == 403, m.get("/api/health/components")
+
     def test_admin_passes_admin_domain(self):
         m = self._matrix_get("admin")
         for p, code in m.items():

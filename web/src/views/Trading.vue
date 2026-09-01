@@ -10,7 +10,10 @@
     <el-alert v-if="loadFailed" type="error" :closable="false" show-icon
               :title="$t('trading.loadFailed')" style="margin-bottom: 12px" />
     <el-row :gutter="20" style="margin-bottom: 20px">
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalAssets') }}</div><div class="value">¥{{ formatNum(pnlData.total_value) }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalAssets') }}</div>
+    <el-alert v-if="dataSens" type="info" :closable="false" style="margin: 8px 0">
+      {{ t('perm.sensLimited') }}: {{ dataSens }} — {{ positionData?.count ?? '—' }} {{ t('perm.sensCountUnit') }}
+    </el-alert><div class="value">¥{{ formatNum(pnlData.total_value) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.todayPnl') }}</div><div class="value" :style="{color: (pnlData.today_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.today_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.today_pnl) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalPnl') }}</div><div class="value" :style="{color: (pnlData.total_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.total_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.total_pnl) }} ({{ pnlData.total_pnl_pct || 0 }}%)</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.positionCount') }}</div><div class="value">{{ positionData.positions?.length || 0 }}</div></div></el-card></el-col>
@@ -146,12 +149,18 @@ const pnlChartOption = computed(() => ({
 const formatNum = (n) => (n || 0).toFixed(0)
 import { fmtCn } from '../utils/format'
 const loadFailed = ref(false)
+const dataSens = ref('')
 const lastUpdate = ref('—')
 const load = async () => {
   // P2（审计 C3）：静默空表=交易系统假空显示
   loadFailed.value = false
-  try { positionData.value = await getPosition() } catch { loadFailed.value = true }
-  try { ordersData.value = await getOrders() } catch { }
+  try {
+    positionData.value = await getPosition()
+    ordersData.value = await getOrders()
+    // W5：脱敏态(count/aggregated)不再渲染空表误读为无持仓——提示条替代
+    const sens = positionData.value?.sensitivity || 'detail'
+    if (sens !== 'detail') dataSens.value = sens
+  } catch { loadFailed.value = true }
   try { pnlData.value = await getPnl() } catch { }
   lastUpdate.value = new Date().toLocaleTimeString()
 }

@@ -139,7 +139,8 @@ const loadLog = async () => {
     if (r.sensitivity === 'count')
       riskSensSummary.value = `${r.count} ${t('perm.sensCountUnit')} (${r.first_ts || '—'} ~ ${r.last_ts || '—'})`
     else if (r.sensitivity === 'aggregated')
-      riskSensSummary.value = Object.entries(r.by_action || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')
+      riskSensSummary.value = Object.entries(r.by_action || {})
+        .map(([k, v]) => `${{ reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') }[k] || k}: ${v}`).join(' · ')
   } catch { riskLogs.value = []; riskSens.value = 'detail' }
 }
 const _gaugeColor = pct => pct >= 90 ? 'var(--critical)' : pct >= 75 ? 'var(--warn-fill)' : 'var(--success)'

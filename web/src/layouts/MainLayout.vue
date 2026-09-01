@@ -241,8 +241,8 @@ const showMyPerms = ref(false)
 const myPermGroups = ref({ base: [], override: [], denied: [] })
 const loadMyPerms = async () => {
   try {
-    const { getMe } = await import('../api')
-    const me = await getMe()
+    const { meOnce } = await import('../router')
+    const me = (await meOnce()) || (await (await import('../api')).getMe().catch(() => null))
     myPerms.value = me.permissions || []
     const src = me.perm_sources || {}
     const denied = me.denied || []
@@ -298,6 +298,8 @@ onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
 const onLangChange = v => setLang(v)
 const logout = async () => {
   try { await api.post('/auth/logout') } catch {}
+  try { const { resetMeCache } = await import('../router'); resetMeCache() } catch {}
+  perms.value = []; navMap.value = {}; role.value = ''   // 盲审 A/B-P1:换人登录不串旧权限
   localStorage.removeItem('token')
   localStorage.removeItem('role')
   router.push('/login')

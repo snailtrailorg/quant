@@ -264,7 +264,17 @@ def delete_risk_rule(rid: int, payload: dict = Depends(require_perm("risk_rules"
 def reconcile_api(payload: dict = Depends(require_perm("read"))):
     """三账对账（signal_log/order_log/trade_log 比对，同步执行）。"""
     from src.scheduler.tasks import reconcile_three_books
-    return reconcile_three_books.apply().get()
+    out = reconcile_three_books.apply().get()
+    # W5 脱敏（盲审 B-P1）：对账明细含 symbol 级数量快照=持仓面——count/aggregated 摘要化
+    from ..auth import data_sensitivity
+    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
+    if sens in ("count", "aggregated"):
+        issues = out.get("issues") if isinstance(out, dict) else None
+        n = len(issues) if isinstance(issues, list) else (out.get("count", 0) if isinstance(out, dict) else 0)
+        return {"sensitivity": sens, "summary": True, "count": n,
+                "raw": {k: v for k, v in out.items() if k not in ("issues",)}
+                        if isinstance(out, dict) else None}
+    return out
 
 
 @router.get("/api/audit")
