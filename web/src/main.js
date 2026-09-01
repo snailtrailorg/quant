@@ -19,3 +19,7 @@ app.use(ElementPlus)
 app.use(router)
 app.use(i18n)
 app.mount('#app')
+
+// W6 补（盲审 B-P2）：Monaco editor worker——缺配置时 word-based 补全降级+console 报错
+import editorWorker from 'monaco-editor/editor/editor.worker.js?worker'
+self.MonacoEnvironment = { getWorker: () => editorWorker }

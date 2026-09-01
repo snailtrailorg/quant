@@ -83,7 +83,13 @@ import { getReconcile } from '../api'
 import api from '../api'
 
 const { t } = useI18n()
-const canHandle = ['trader', 'admin'].includes(localStorage.getItem('role') || 'viewer')
+// W5 残留修(W6 审 A-P2):localStorage role → /auth/me permissions(W4 权限驱动)
+const canHandle = ref(false)
+import('../router').then(async ({ meOnce }) => {
+  const me = (await meOnce()) || null
+  const perms = me?.permissions || []
+  canHandle.value = perms.includes('trade')
+})
 const rawIssues = ref([])
 const diffRows = ref([])
 const detailVisible = ref(false)

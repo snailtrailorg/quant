@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('pool.manageTitle') }}</span>
-        <el-button type="primary" @click="showDialog = true">{{ t('pool.createTitle') }}</el-button>
+        <el-button type="primary" @click="showDialog = true" :disabled="navReadonly">{{ t('pool.createTitle') }}</el-button>
       </div>
     </template>
     <el-table :data="pools" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand">
@@ -11,6 +11,8 @@
         <template #default="{ row }">
           <div style="padding: 8px 24px">
             <!-- 覆盖状态（分钟历史池才显示） -->
+            <el-button size="small" type="warning" style="margin-bottom: 10px"
+                       :disabled="navReadonly" @click="backfillMinute(row)">{{ t('pool.backfillMinute') }}</el-button>
             <template v-if="row.minute_history_start">
               <div v-if="minuteStatus[row.id]" style="margin-bottom: 12px">
                 <el-table :data="minuteStatus[row.id]" size="small" max-height="300">
@@ -102,13 +104,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api, { getPools, createPoolApi, deletePoolApi } from '../api'
 
 const { t } = useI18n()
+const navReadonly = inject('navReadonly', ref(false))
 const router = useRouter()
 const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const pools = ref([])
