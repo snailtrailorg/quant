@@ -23,7 +23,7 @@ router = APIRouter(tags=["backtest"])
 
 
 @router.get("/api/pool")
-def list_pools(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_pools(payload: dict = Depends(require_perm("read"))):
     """标的池列表（含 symbols，#22）。"""
     with get_conn() as conn:
         try:
@@ -128,7 +128,7 @@ def del_pool_symbol_api(pid: str, sym: str,
 
 @router.get("/api/pool/{pid}/minute-status")
 def pool_minute_status_api(pid: str,
-                           payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                           payload: dict = Depends(require_perm("read"))):
     """池分钟数据覆盖状态（每标的 bar_1min 最后 ts——首轮回补可能 11.5h，进度可见是必须项）。"""
     with get_conn() as conn:
         cur = conn.execute(
@@ -184,7 +184,7 @@ def create_backtest_api(body: dict = Body(...),
 
 
 @router.get("/api/broker-usage")
-def broker_usage(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def broker_usage(payload: dict = Depends(require_perm("read"))):
     """通道调用量监控（#37，broker_usage 表聚合）。"""
     with get_conn() as conn:
         try:
@@ -215,7 +215,7 @@ def _safe_json(v, fallback):
 
 
 @router.get("/api/backtest")
-def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_backtest_api(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT b.id, b.strategy_config_id, b.symbols, b.mode, b.status, b.created_at, b.finished_at, b.summary_metrics, "
@@ -231,7 +231,7 @@ def list_backtest_api(payload: dict = Depends(require_role("viewer", "analyst", 
 
 @router.get("/api/backtest/{run_id}")
 def get_backtest_api(run_id: int,
-                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                     payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT id, strategy_config_id, symbols, params, mode, status, summary_metrics "
@@ -268,7 +268,7 @@ def get_backtest_api(run_id: int,
 
 
 @router.get("/api/backtest/{run_id}/summary")
-def backtest_summary(run_id: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def backtest_summary(run_id: int, payload: dict = Depends(require_perm("read"))):
     """回测组汇总：标的绩效平均+排名（#22）。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
@@ -285,7 +285,7 @@ def backtest_summary(run_id: int, payload: dict = Depends(require_role("viewer",
 
 @router.get("/api/backtest/{run_id}/{symbol}/stream")
 def backtest_stream_api(run_id: int, symbol: str,
-                        payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                        payload: dict = Depends(require_perm("read"))):
     """SSE 单标的实时（轮询 Valkey backtest:run:{run_id}:{symbol}）。"""
     from fastapi.responses import StreamingResponse
     r = redis.Redis(connection_pool=_redis_pool)

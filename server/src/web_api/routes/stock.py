@@ -11,7 +11,7 @@ router = APIRouter(tags=["stock"])
 
 
 @router.get("/api/stock/search")
-def search_stock_api(q: str = "", payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def search_stock_api(q: str = "", payload: dict = Depends(require_perm("read"))):
     """标的搜索（三档项 13）：ts_code 前缀或名称模糊，static_symbols 上市股。
 
     详情页/列表页跳转入口的输入框数据源；返回 [{ts_code, name, industry, symbol}]。
@@ -43,7 +43,7 @@ def search_stock_api(q: str = "", payload: dict = Depends(require_role("viewer",
 
 @router.get("/api/stock/{symbol}/detail")
 def stock_detail_api(symbol: str,
-                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                     payload: dict = Depends(require_perm("read"))):
     """标的详情聚合（三档项 14）：三源合一 + 按需选块。
 
     层位（17 号 §2）：聚合逻辑在 data_platform/stock_detail.py，本端点只做薄壳。
@@ -58,7 +58,7 @@ def stock_detail_api(symbol: str,
 
 @router.get("/api/stock/{symbol}/intraday")
 def stock_intraday_api(symbol: str,
-                       payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                       payload: dict = Depends(require_perm("read"))):
     """当日分时曲线（17 号 K 线 Tab 分钟半边）：bar_hub（池内自攒）→ 腾讯分时降级。"""
     from src.data_platform.stock_detail import get_intraday
     return get_intraday(symbol) or {"date": None, "source": None, "points": []}
@@ -66,7 +66,7 @@ def stock_intraday_api(symbol: str,
 
 @router.post("/api/stock/{symbol}/analyze")
 def analyze_stock_api(symbol: str,
-                      payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+                      payload: dict = Depends(require_perm("strategy_control"))):
     """AI 标的分析（三档项 15）：详情数据组 prompt → LLM 网关 → 分析文本。
 
     POST（触发计费）；同标的 10min 缓存（key 用 ts_code 归一——O 审 M3）。
@@ -122,7 +122,7 @@ def analyze_stock_api(symbol: str,
 
 @router.get("/api/kline/{symbol}")
 def get_kline_api(symbol: str, days: int = 0,
-                  payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                  payload: dict = Depends(require_perm("read"))):
     """K线数据（days=0 全历史，>0 按日历日截断；2026-08-04 端点误删恢复）。
 
     symbol 接受 ts_code（600000.SH）或 vt_symbol（600000.SHSE），内部 to_vt_symbol 转换查 bar_1D。
@@ -148,7 +148,7 @@ def get_kline_api(symbol: str, days: int = 0,
 @router.get("/api/screen/astock")
 def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
                       turnover_min: float = 0, limit: int = 100,
-                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                      payload: dict = Depends(require_perm("read"))):
     """A股基本面筛选（daily_basic 最新交易日 + join asset_static_info name）。"""
     _f = lambda x: float(x) if x is not None else None
     with get_conn() as conn:
@@ -175,7 +175,7 @@ def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
 @router.get("/api/screen/cb")
 def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: float = 0,
                   remaining_min: float = 0,
-                  payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                  payload: dict = Depends(require_perm("read"))):
     """可转债筛选（cb_basic_info + cb_daily + 正股 daily_basic → 双低/溢价率;05 §5.9）。"""
     _f = lambda x: float(x) if x is not None else None
     with get_conn() as conn:
@@ -217,7 +217,7 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
 
 @router.get("/api/screen/etf")
 def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
-                   payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                   payload: dict = Depends(require_perm("read"))):
     """ETF 基金筛选（etf_basic_info + 规模/费率/跟踪误差;05 §5.9）。"""
     _f = lambda x: float(x) if x is not None else None
     with get_conn() as conn:
@@ -237,7 +237,7 @@ def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
              "tracking_error": _f(r[7])} for r in rows]
 
 @router.get("/api/convertible/terms")
-def convertible_terms(ts_code: str, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def convertible_terms(ts_code: str, payload: dict = Depends(require_perm("read"))):
     """可转债条款 LLM 解读（D3 #33）。"""
     from src.data_platform.adapters.tushare_adapter import pull_cb_basic
     from src.astock_analysis.convertible_terms import analyze_convertible_terms

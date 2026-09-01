@@ -69,11 +69,27 @@ const routes = [
 
 const router = createRouter({ history: createWebHistory(), routes })
 
-router.beforeEach((to, from, next) => {
+// W5 nav 守卫:模块级 me promise 缓存(首航 await,刷新不丢;盲审 A-P1 时序方案)
+import { getMe } from './api'
+let mePromise = null
+const meOnce = () => (mePromise ??= getMe().catch(() => null))
+export const resetMeCache = () => { mePromise = null }
+
+router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('token')
   const publicPages = ['login', 'register', 'forgot-password', 'reset-password']
   if (!publicPages.includes(to.name) && !token) { next('/login'); return }
   if (to.meta?.admin && localStorage.getItem('role') !== 'admin') { next('/'); return }
+  // nav 维:hidden 拒路由+readonly 放行(标志经 me 消费方读取)。nav=UI 提示层,
+  // 执行面在 api 维(直连 API 不受 nav 限=设计)
+  if (token && !publicPages.includes(to.name)) {
+    const me = await meOnce()
+    const nav = me?.nav || {}
+    // 路由 path→菜单 id 映射(菜单 id=NAV_ITEMS 常量;route.path 去斜杠首段)
+    const menuId = to.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'
+    const state = nav[menuId]
+    if (state === 'hidden') { next('/'); return }
+  }
   next()
 })
 

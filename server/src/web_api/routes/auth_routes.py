@@ -94,9 +94,11 @@ def me(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admi
     perms, sources = load_effective_permissions(payload["username"], role)
     # W4 玻璃盒:来源标注（role-base/user-override）+被 user deny 的键;不含 updated_by（盲审 A-P2）
     denied = sources.pop("__denied__", [])
+    from ..auth import load_nav_map
     return {"user_id": payload["sub"], "username": payload["username"], "role": role,
             "nickname": nickname, "avatar_url": avatar_url,
-            "permissions": sorted(perms), "perm_sources": sources, "denied": denied}
+            "permissions": sorted(perms), "perm_sources": sources, "denied": denied,
+            "nav": load_nav_map(payload["username"], role)}
 
 
 # W4（10 §4）：nav 16 项/数据域清单——后端单源常量,前端从 GET 拿（不硬编码第二份）
@@ -132,7 +134,7 @@ def _load_dim(dimension: str) -> dict:
 
 
 @router.get("/api/permissions")
-def get_permissions(payload: dict = Depends(require_role("admin"))):
+def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
     """W4 三维矩阵（10 §4）：api 键+nav 三态+数据域+user override 全景。"""
     from ..auth import load_role_permissions
     from src.data_platform.db import get_conn as _gc
@@ -159,7 +161,7 @@ def get_permissions(payload: dict = Depends(require_role("admin"))):
 
 @router.post("/api/permissions/{role}")
 def update_permissions(role: str, body: dict, dimension: str = "api",
-                       payload: dict = Depends(require_role("admin"))):
+                       payload: dict = Depends(require_perm("user_mgmt"))):
     """改角色权限集。W4：dimension ∈ api|nav|data（缺省 api 兼容旧前端）。
 
     api 维=全量重写 allow 集；nav/data 维=全量重写 {resource: effect} 映射。
@@ -229,7 +231,7 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
 
 @router.post("/api/permissions/user/{username}")
 def update_user_override(username: str, body: dict,
-                         payload: dict = Depends(require_role("admin"))):
+                         payload: dict = Depends(require_perm("user_mgmt"))):
     """W4 C 阶段：per-user override（10 §4 用户视图=角色+override）。
 
     body: {dimension ∈ api|nav|data, resource, effect ∈ allow|deny|clear}
@@ -601,7 +603,7 @@ def _analyze_logs_with_llm(logs: list[dict]) -> str:
 
 
 @router.post("/api/log/analyze")
-def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_perm("strategy_control"))):
     """AI 日志归因：传 logs 或 task_id，LLM 分析根因（D4 #34）。"""
     logs = []
     if req.logs:
@@ -619,7 +621,7 @@ def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_role("viewer
 
 
 @router.get("/api/log")
-def get_logs(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def get_logs(payload: dict = Depends(require_perm("read"))):
     """运行日志（P3-1 接 task_logs 真实日志，不再占位）。"""
     with get_conn() as conn:
         try:

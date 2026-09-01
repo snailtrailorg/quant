@@ -23,7 +23,7 @@ _GUIDES = {"index": "索引.md", "factors": "01-因子.md", "strategy": "02-策�
 
 @router.get("/api/help/{topic}")
 def get_help_api(topic: str,
-                 payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                 payload: dict = Depends(require_perm("read"))):
     """操作指导书内容（markdown 原文，前端渲染）。topic: index/factors/strategy/backtest/live。"""
     fname = _GUIDES.get(topic)
     if not fname:
@@ -37,7 +37,7 @@ def get_help_api(topic: str,
 
 
 @router.get("/api/runbook")
-def runbook_api(payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+def runbook_api(payload: dict = Depends(require_perm("strategy_control"))):
     """通知 runbook 映射（W3 单源：站内 chip/处置行消费）。暂仅中文（多语言债）。"""
     from src.alert_notify.runbook import RUNBOOK
     return {"items": RUNBOOK}
@@ -147,7 +147,7 @@ def metrics():
 # --- 健康监控（15 号 SM2：组件矩阵 + 事件流，admin）---
 
 @router.get("/api/health/components")
-def health_components_api(payload: dict = Depends(require_role("admin"))):
+def health_components_api(payload: dict = Depends(require_perm("system_config"))):
     """组件实时矩阵：collector 快照（systemd unit / 依赖 / hub 心跳 / 任务心跳）。
 
     与 /metrics 同源同口径（collector.collect），本端点给 Web 健康页用（带鉴权）。
@@ -157,7 +157,7 @@ def health_components_api(payload: dict = Depends(require_role("admin"))):
 
 
 @router.get("/api/health/events")
-def health_events_api(limit: int = 100, payload: dict = Depends(require_role("admin"))):
+def health_events_api(limit: int = 100, payload: dict = Depends(require_perm("system_config"))):
     """health_event 事件流（触发/恢复沿历史，30 天保留期，倒序）。"""
     limit = max(1, min(limit, 500))
     with get_conn() as conn:
@@ -272,7 +272,7 @@ async def email_test_api(body: dict = Body(...), request: Request = None,
 
 
 @router.get("/api/system-config")
-def list_system_config(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_system_config(payload: dict = Depends(require_perm("read"))):
     """列系统配置（viewer+ 只读）。password 型不回传明文，返回空值 + has_value 标记。"""
     with get_conn() as conn:
         cur = conn.execute(
@@ -294,7 +294,7 @@ def list_system_config(payload: dict = Depends(require_role("viewer", "analyst",
 
 @router.post("/api/system-config/{key}")
 def update_system_config(key: str, body: dict = Body(...),
-                          payload: dict = Depends(require_role("admin"))):
+                          payload: dict = Depends(require_perm("system_config"))):
     """更新系统配置（仅 admin）。部分 key 支持动态生效（如 celery_concurrency）。
     password 型：留空=不修改（400 提示），非空=Fernet 加密存储。"""
     value = body.get("value")
@@ -339,7 +339,7 @@ def update_system_config(key: str, body: dict = Body(...),
 
 
 @router.get("/api/system-config/{key}")
-def get_system_config(key: str, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def get_system_config(key: str, payload: dict = Depends(require_perm("read"))):
     """取单个系统配置。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT value, value_type, description FROM system_config WHERE key=%s", (key,))
@@ -373,7 +373,7 @@ def email_outbox_api(payload: dict = Depends(require_perm("user_mgmt"))):
 
 @router.get("/api/notifications")
 def notifications_api(status: str = "active", limit: int = 50,
-                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                      payload: dict = Depends(require_perm("read"))):
     """通知中心（站内铃铛/通知历史共用）。按当前角色过滤可见类别（email→admin 等）。"""
     from src.alert_notify import visible_categories
     cats = visible_categories(payload.get("role", "viewer"))
@@ -407,7 +407,7 @@ def notifications_api(status: str = "active", limit: int = 50,
 
 
 @router.post("/api/notifications/ack-all")
-def notifications_ack_all(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def notifications_ack_all(payload: dict = Depends(require_perm("read"))):
     """全部确认：当前角色可见类别的 active → acked。"""
     from src.alert_notify import visible_categories
     cats = visible_categories(payload.get("role", "viewer"))

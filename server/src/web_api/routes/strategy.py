@@ -28,7 +28,7 @@ def _validate_strategy_category(stype: str, symbol: str, factors: list) -> dict:
 # --- 策略管理（DB 驱动） ---
 
 @router.get("/api/strategy")
-def list_strategies(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_strategies(payload: dict = Depends(require_perm("read"))):
     """列策略配置（从 DB 读）。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT id, name, type, symbol, adapter, enabled, factors, aggregator, risk, params, backtest_verified FROM strategy_config ORDER BY id")
@@ -78,7 +78,7 @@ def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("s
 
 
 @router.post("/api/strategy/validate-python")
-def validate_python_code(code: dict = Body(...), payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+def validate_python_code(code: dict = Body(...), payload: dict = Depends(require_perm("strategy_control"))):
     """校验 Python 策略代码：语法检查 + AST 安全校验（#15）。"""
     from src.strategy_framework.strategy import _check_ast_blacklist
     code_str = code.get("code", "")
@@ -89,7 +89,7 @@ def validate_python_code(code: dict = Body(...), payload: dict = Depends(require
 
 @router.post("/api/strategy/validate-params")
 def validate_params_api(body: dict = Body(...),
-                        payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+                        payload: dict = Depends(require_perm("strategy_control"))):
     """校验策略参数定义 + 参数值（parameter_defs 系统）。"""
     from src.strategy_framework.strategy import (
         validate_parameter_defs, validate_params_against_defs, build_default_params
@@ -207,7 +207,7 @@ def verify_strategy(sid: str, body: dict = Body(default={}), payload: dict = Dep
 
 @router.get("/api/factors")
 def list_factors_api(category: str | None = None, static_only: bool = False,
-                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                     payload: dict = Depends(require_perm("read"))):
     from src.strategy_framework.factor import list_factors
     return {"items": list_factors(category, static_only=static_only)}
 
@@ -235,7 +235,7 @@ def create_factor_api(req: dict = Body(...),
 
 @router.post("/api/factors/preview")
 def preview_factor_api(body: dict = Body(...),
-                       payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+                       payload: dict = Depends(require_perm("strategy_control"))):
     """因子试算（链条打磨#5）：真实 bar 喂 compute 看输出序列——写完因子不必搭策略+回测才能看结果。
 
     body: {code, type?('python'|'dsl',缺省 python), symbol?, freq?('1D'|'1min'), bars?(默认 60,DSL 自动拉到窗口 n), params?{}}
@@ -304,7 +304,7 @@ def preview_factor_api(body: dict = Body(...),
 
 @router.post("/api/factors/validate")
 def validate_factor_code_api(code: dict = Body(...),
-                              payload: dict = Depends(require_role("analyst", "trader", "admin"))):
+                              payload: dict = Depends(require_perm("strategy_control"))):
     """校验因子 Python 代码。"""
     from src.strategy_framework.factor import _check_ast_blacklist, _make_factor_class
     code_str = code.get("code", "")
@@ -369,7 +369,7 @@ def delete_factor_api(name: str,
 # --- 策略-账户绑定 ---
 
 @router.get("/api/strategy_account")
-def list_strategy_account(strategy_id: str | None = None, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_strategy_account(strategy_id: str | None = None, payload: dict = Depends(require_perm("read"))):
     """策略-账户绑定列表（可按 strategy_id 过滤，#27）。"""
     with get_conn() as conn:
         try:

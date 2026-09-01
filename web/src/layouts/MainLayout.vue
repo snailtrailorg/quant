@@ -161,7 +161,7 @@ import { QuestionFilled, DataBoard, DataAnalysis, Search, MagicStick, SetUp, Tim
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
          ChatDotRound } from '@element-plus/icons-vue'
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -182,13 +182,20 @@ const role = ref('')
 // 菜单由 perms 驱动(见 has());此前 L252 调用无定义,setup ReferenceError=登入白屏(盲审 A-P0)
 const perms = ref([])
 const has = k => perms.value.includes(k)
+// W5:复用 router 的 meOnce(守卫已拉过则零二次请求);readonly 供页面写按钮灰(UI 提示层)
+const navMap = ref({})
 const loadPerms = async () => {
   try {
-    const me = await getMe()
+    const { meOnce } = await import('../router')
+    const me = (await meOnce()) || (await getMe().catch(() => null))
+    if (!me) return
     perms.value = me.permissions || []
     role.value = me.role || role.value
+    navMap.value = me.nav || {}
   } catch {}
 }
+const navReadonly = computed(() => navMap.value[route.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'] === 'readonly')
+provide('navReadonly', navReadonly)
 const lang = ref(locale.value)
 
 getMe().then(me => { username.value = me.username; role.value = me.role; nickname.value = me.nickname || ''; avatarUrl.value = me.avatar_url || '' }).catch(e => { console.error(e); username.value = ''; role.value = '' })

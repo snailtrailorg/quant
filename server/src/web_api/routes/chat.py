@@ -19,7 +19,7 @@ router = APIRouter(tags=["chat"])
 
 
 @router.post("/api/chat")
-def chat(req: ChatReq, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def chat(req: ChatReq, payload: dict = Depends(require_perm("strategy_control"))):
     """自然语言查询 → LLM 网关（只读工具直执闭环，P1-4）。"""
     try:
         from src.llm_gateway import gateway
@@ -211,7 +211,7 @@ def test_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"))
 
 
 @router.get("/api/llm-usage/summary")
-def llm_usage_summary(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def llm_usage_summary(payload: dict = Depends(require_perm("read"))):
     """LLM 用量汇总：今日/本月（按 provider/model）+ 近 7 天趋势。"""
     with get_conn() as conn:
         cur = conn.execute("""
@@ -249,7 +249,7 @@ def llm_usage_summary(payload: dict = Depends(require_role("viewer", "analyst", 
 
 
 @router.get("/api/llm-budget")
-def list_llm_budget(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_llm_budget(payload: dict = Depends(require_perm("read"))):
     """列出预算配置（D5 #38）。"""
     with get_conn() as conn:
         cur = conn.execute(
@@ -264,7 +264,7 @@ def list_llm_budget(payload: dict = Depends(require_role("viewer", "analyst", "t
 
 
 @router.post("/api/llm-budget/check")
-def check_budget(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def check_budget(payload: dict = Depends(require_perm("read"))):
     """手动触发预算告警检查。"""
     from src.llm_gateway.budget import check_budget_alerts
     result = check_budget_alerts()
@@ -273,7 +273,7 @@ def check_budget(payload: dict = Depends(require_role("viewer", "analyst", "trad
 
 @router.post("/api/llm-budget/{bid}")
 def update_llm_budget(bid: int, req: LlmBudgetReq,
-                      payload: dict = Depends(require_role("admin"))):
+                      payload: dict = Depends(require_perm("llm_config"))):
     """更新预算配置（P3-13 权限修正：admin only）。"""
     with get_conn() as conn:
         conn.execute(
@@ -291,7 +291,7 @@ def update_llm_budget(bid: int, req: LlmBudgetReq,
 
 
 @router.get("/api/astock/selection")
-def astock_selection(date: str = "", payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def astock_selection(date: str = "", payload: dict = Depends(require_perm("read"))):
     """当日选股结果（横截面：一档表全市场一次 SQL）。date=YYYYMMDD 历史截面。"""
     import re
     from src.astock_analysis import DailySelectionEngine

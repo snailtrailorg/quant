@@ -11,7 +11,7 @@ router = APIRouter(tags=["risk"])
 
 
 @router.get("/api/risk/state")
-def risk_state(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def risk_state(payload: dict = Depends(require_perm("read"))):
     from src.risk_control import RiskControl
     rc = RiskControl.get()
     # P1-1（web-design 05 §5.3 B#3）：水位仪表数据——回撤/日亏/快照年龄（>300s=fail-closed 拒 BUY 可见）
@@ -35,7 +35,7 @@ def risk_state(payload: dict = Depends(require_role("viewer", "analyst", "trader
 
 @router.get("/api/risk/log")
 def risk_log_api(action: str = "", limit: int = 200,
-                 payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                 payload: dict = Depends(require_perm("read"))):
     """P1-1（06 B#2）：风控决策日志面板——拒单/覆写/放行三类可筛。"""
     with get_conn() as conn:
         sql = ("SELECT id, ts, action, symbol, rule, detail, severity FROM risk_log ")
@@ -47,7 +47,22 @@ def risk_log_api(action: str = "", limit: int = 200,
         args.append(min(int(limit), 1000))
         cur = conn.execute(sql, args)
         rows = cur.fetchall()
-    return {"items": [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "action": r[2],
+    # W5 数据脱敏（盲审 B-P1 旁路集）：count=仅计数/aggregated=按 action 聚合——
+    # symbol/rule/detail 属持仓与决策明细,count 用户不可见
+    from ..auth import data_sensitivity
+    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
+    if sens == "count":
+        return {"sensitivity": "count", "items": [], "count": len(rows),
+                "first_ts": str(rows[-1][1])[:19] if rows else None,
+                "last_ts": str(rows[0][1])[:19] if rows else None}
+    if sens == "aggregated":
+        agg: dict = {}
+        for r in rows:
+            agg[r[2]] = agg.get(r[2], 0) + 1
+        return {"sensitivity": "aggregated", "items": [], "count": len(rows),
+                "by_action": agg, "last_ts": str(rows[0][1])[:19] if rows else None}
+    return {"sensitivity": "detail",
+            "items": [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "action": r[2],
                        "symbol": r[3], "rule": r[4], "detail": r[5], "severity": r[6]}
                       for r in rows]}
 
@@ -56,7 +71,7 @@ def risk_log_api(action: str = "", limit: int = 200,
 
 @router.get("/api/reconcile/issues")
 def reconcile_issues_api(status: str = "",
-                         payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                         payload: dict = Depends(require_perm("read"))):
     """差异单列表（open 优先；结构化字段+处置状态持久化）。"""
     with get_conn() as conn:
         sql = ("SELECT id, symbol, issue_type, detail, broker_qty, derived_qty, status, "
@@ -71,7 +86,19 @@ def reconcile_issues_api(status: str = "",
         rows = cur.fetchall()
     def _n(v):
         return float(v) if v is not None else None
-    return {"items": [{"id": r[0], "symbol": r[1], "issue_type": r[2], "detail": r[3],
+    # W5 脱敏（盲审 B-P1 旁路集）：差异单含 symbol+两侧数量=持仓明细
+    from ..auth import data_sensitivity
+    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
+    if sens in ("count", "aggregated"):
+        by_status: dict = {}
+        by_type: dict = {}
+        for r in rows:
+            by_status[r[6]] = by_status.get(r[6], 0) + 1
+            by_type[r[2]] = by_type.get(r[2], 0) + 1
+        return {"sensitivity": sens, "items": [], "count": len(rows),
+                "by_status": by_status, "by_type": by_type}
+    return {"sensitivity": "detail",
+            "items": [{"id": r[0], "symbol": r[1], "issue_type": r[2], "detail": r[3],
                        "broker_qty": _n(r[4]), "derived_qty": _n(r[5]), "status": r[6],
                        "first_seen": str(r[7])[:19] if r[7] else None,
                        "updated_at": str(r[8])[:19] if r[8] else None,
@@ -94,13 +121,13 @@ def _issue_action(iid: int, status: str, payload: dict, note: str = None) -> dic
 
 
 @router.post("/api/reconcile/issues/{iid}/verify")
-def reconcile_verify(iid: int, payload: dict = Depends(require_role("trader", "admin"))):
+def reconcile_verify(iid: int, payload: dict = Depends(require_perm("trade"))):
     """标记已核实（人工确认该差异为预期，如已知底仓）。"""
     return _issue_action(iid, "verified", payload)
 
 
 @router.post("/api/reconcile/issues/{iid}/ignore")
-def reconcile_ignore(iid: int, payload: dict = Depends(require_role("trader", "admin"))):
+def reconcile_ignore(iid: int, payload: dict = Depends(require_perm("trade"))):
     """忽略本次（下次对账再现则重新 open）。"""
     return _issue_action(iid, "ignored", payload)
 
@@ -188,7 +215,7 @@ def risk_resume(payload: dict = Depends(require_perm("resume"))):
 
 
 @router.get("/api/risk-rules")
-def list_risk_rules(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_risk_rules(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute("SELECT id, name, type, params, enabled, updated_at FROM risk_rules ORDER BY id")
         rows = cur.fetchall()
@@ -197,14 +224,14 @@ def list_risk_rules(payload: dict = Depends(require_role("viewer", "analyst", "t
 
 
 @router.get("/api/risk-rules/types")
-def list_risk_rule_types(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_risk_rule_types(payload: dict = Depends(require_perm("read"))):
     """列已注册的规则类型（前端下拉）"""
     from src.risk_control.risk_rule import _REGISTRY
     return {"types": list(_REGISTRY.keys())}
 
 
 @router.post("/api/risk-rules")
-def create_risk_rule(req: RiskRuleReq, payload: dict = Depends(require_role("admin"))):
+def create_risk_rule(req: RiskRuleReq, payload: dict = Depends(require_perm("risk_rules"))):
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO risk_rules (name, type, params, enabled) VALUES (%s,%s,%s,%s) RETURNING id",
@@ -215,7 +242,7 @@ def create_risk_rule(req: RiskRuleReq, payload: dict = Depends(require_role("adm
 
 
 @router.post("/api/risk-rules/{rid}")
-def update_risk_rule(rid: int, req: RiskRuleReq, payload: dict = Depends(require_role("admin"))):
+def update_risk_rule(rid: int, req: RiskRuleReq, payload: dict = Depends(require_perm("risk_rules"))):
     with get_conn() as conn:
         conn.execute("UPDATE risk_rules SET name=%s, type=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
                      (req.name, req.type, req.params, req.enabled, rid))
@@ -225,7 +252,7 @@ def update_risk_rule(rid: int, req: RiskRuleReq, payload: dict = Depends(require
 
 
 @router.delete("/api/risk-rules/{rid}")
-def delete_risk_rule(rid: int, payload: dict = Depends(require_role("admin"))):
+def delete_risk_rule(rid: int, payload: dict = Depends(require_perm("risk_rules"))):
     with get_conn() as conn:
         conn.execute("DELETE FROM risk_rules WHERE id=%s", (rid,))
         conn.commit()
@@ -234,7 +261,7 @@ def delete_risk_rule(rid: int, payload: dict = Depends(require_role("admin"))):
 
 
 @router.get("/api/reconcile")
-def reconcile_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def reconcile_api(payload: dict = Depends(require_perm("read"))):
     """三账对账（signal_log/order_log/trade_log 比对，同步执行）。"""
     from src.scheduler.tasks import reconcile_three_books
     return reconcile_three_books.apply().get()
@@ -250,7 +277,7 @@ def get_audit(payload: dict = Depends(require_perm("user_mgmt"))):
 
 @router.get("/api/data-integrity")
 def data_integrity_api(freq: str = "1D",
-                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                      payload: dict = Depends(require_perm("read"))):
     """数据完整性看板：每标的本地条数 vs 预期，算完整性%。
 
     freq: 1D（按 trade_cal 交易日）/ 1min / 5min（按自然日 × bars_per_day）。

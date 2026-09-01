@@ -19,7 +19,7 @@ router = APIRouter(tags=["mgmt"])
 
 
 @router.get("/api/data-sources")
-def list_data_sources(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_data_sources(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute("SELECT id, provider, name, credentials_encrypted IS NOT NULL, params, usage_limit, enabled, updated_at FROM data_source_config ORDER BY provider")
         rows = cur.fetchall()
@@ -29,7 +29,7 @@ def list_data_sources(payload: dict = Depends(require_role("viewer", "analyst", 
 
 
 @router.post("/api/data-sources")
-def create_data_source(req: DataSourceReq, payload: dict = Depends(require_role("admin"))):
+def create_data_source(req: DataSourceReq, payload: dict = Depends(require_perm("system_config"))):
     from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
@@ -43,7 +43,7 @@ def create_data_source(req: DataSourceReq, payload: dict = Depends(require_role(
 
 
 @router.post("/api/data-sources/{dsid}")
-def update_data_source(dsid: int, req: DataSourceReq, payload: dict = Depends(require_role("admin"))):
+def update_data_source(dsid: int, req: DataSourceReq, payload: dict = Depends(require_perm("system_config"))):
     from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
@@ -59,7 +59,7 @@ def update_data_source(dsid: int, req: DataSourceReq, payload: dict = Depends(re
 
 
 @router.delete("/api/data-sources/{dsid}")
-def delete_data_source(dsid: int, payload: dict = Depends(require_role("admin"))):
+def delete_data_source(dsid: int, payload: dict = Depends(require_perm("system_config"))):
     with get_conn() as conn:
         conn.execute("DELETE FROM data_source_config WHERE id=%s", (dsid,))
         conn.commit()
@@ -68,7 +68,7 @@ def delete_data_source(dsid: int, payload: dict = Depends(require_role("admin"))
 
 
 @router.post("/api/data-sources/{dsid}/test")
-def test_data_source(dsid: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def test_data_source(dsid: int, payload: dict = Depends(require_perm("read"))):
     from src.data_platform.data_source import _REGISTRY
     with get_conn() as conn:
         cur = conn.execute("SELECT provider, credentials_encrypted, params FROM data_source_config WHERE id=%s", (dsid,))
@@ -132,7 +132,7 @@ def _save_ds_params(dsid: int, params: dict) -> None:
 
 @router.get("/api/datasource/{provider}/points-presets")
 def get_points_presets(provider: str,
-                       payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                       payload: dict = Depends(require_perm("read"))):
     """积分档预设表 + 当前档位 + 每 API 当前生效值（前端下拉/限速表格数据源）。"""
     cls = _preset_cls(provider)
     _, params = _load_ds_params(provider)
@@ -170,7 +170,7 @@ def get_points_presets(provider: str,
 
 @router.post("/api/datasource/{provider}/points-tier")
 def set_points_tier(provider: str, req: PointsTierReq,
-                    payload: dict = Depends(require_role("admin"))):
+                    payload: dict = Depends(require_perm("system_config"))):
     """切换积分档（写 params.points_tier），返回逐 API 生效值 diff（旧档 vs 新档）。"""
     cls = _preset_cls(provider)
     if req.tier not in cls.POINTS_PRESETS:
@@ -190,7 +190,7 @@ def set_points_tier(provider: str, req: PointsTierReq,
 
 @router.post("/api/datasource/{provider}/rate-limit-override")
 def set_rate_limit_override(provider: str, req: RateLimitOverrideReq,
-                            payload: dict = Depends(require_role("admin"))):
+                            payload: dict = Depends(require_perm("system_config"))):
     """单 API 限速覆写（L2）或熔断参数写入（params.circuit_breaker）。
 
     - {"api_name": "stk_mins", "value": 0.25}：覆写；value=null 删除覆写回落预设
@@ -243,14 +243,14 @@ def set_rate_limit_override(provider: str, req: RateLimitOverrideReq,
 
 @router.get("/api/tasks")
 def list_tasks_api(status: str | None = None, limit: int = 100,
-                   payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                   payload: dict = Depends(require_perm("read"))):
     from src.task_manager import list_tasks
     return {"items": list_tasks(status=status, limit=limit)}
 
 
 @router.get("/api/tasks/{task_id}")
 def get_task_api(task_id: str,
-                 payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                 payload: dict = Depends(require_perm("read"))):
     from src.task_manager import get_task
     t = get_task(task_id)
     if not t:
@@ -260,7 +260,7 @@ def get_task_api(task_id: str,
 
 @router.post("/api/tasks/{task_id}/terminate")
 def terminate_task_api(task_id: str,
-                       payload: dict = Depends(require_role("trader", "admin"))):
+                       payload: dict = Depends(require_perm("trade"))):
     from src.task_manager import terminate_task, log_task
     terminate_task(task_id)
     log_task(task_id, "WARN", f"用户 {payload['username']} 终止任务")
@@ -270,7 +270,7 @@ def terminate_task_api(task_id: str,
 
 @router.post("/api/tasks/{task_id}/force-delete")
 def force_delete_task_api(task_id: str,
-                          payload: dict = Depends(require_role("admin"))):
+                          payload: dict = Depends(require_perm("system_config"))):
     from src.task_manager import force_delete_task
     force_delete_task(task_id)
     audit_log(payload["username"], "task_force_delete", task_id)
@@ -278,7 +278,7 @@ def force_delete_task_api(task_id: str,
 
 
 @router.post("/api/tasks/detect-stuck")
-def detect_stuck_api(payload: dict = Depends(require_role("admin"))):
+def detect_stuck_api(payload: dict = Depends(require_perm("system_config"))):
     from src.task_manager import detect_stuck
     count = detect_stuck()
     return {"stuck_count": count}
@@ -288,7 +288,7 @@ def detect_stuck_api(payload: dict = Depends(require_role("admin"))):
 
 
 @router.get("/api/channels")
-def list_channels(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_channels(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute("SELECT id, provider, name, credentials_encrypted IS NOT NULL, params, enabled, updated_at FROM channel_config ORDER BY provider")
         rows = cur.fetchall()
@@ -297,7 +297,7 @@ def list_channels(payload: dict = Depends(require_role("viewer", "analyst", "tra
 
 
 @router.post("/api/channels")
-def create_channel(req: ChannelReq, payload: dict = Depends(require_role("admin"))):
+def create_channel(req: ChannelReq, payload: dict = Depends(require_perm("system_config"))):
     from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
@@ -311,7 +311,7 @@ def create_channel(req: ChannelReq, payload: dict = Depends(require_role("admin"
 
 
 @router.post("/api/channels/{cid}")
-def update_channel(cid: int, req: ChannelReq, payload: dict = Depends(require_role("admin"))):
+def update_channel(cid: int, req: ChannelReq, payload: dict = Depends(require_perm("system_config"))):
     from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
@@ -327,7 +327,7 @@ def update_channel(cid: int, req: ChannelReq, payload: dict = Depends(require_ro
 
 
 @router.delete("/api/channels/{cid}")
-def delete_channel(cid: int, payload: dict = Depends(require_role("admin"))):
+def delete_channel(cid: int, payload: dict = Depends(require_perm("system_config"))):
     with get_conn() as conn:
         conn.execute("DELETE FROM channel_config WHERE id=%s", (cid,))
         conn.commit()
@@ -336,7 +336,7 @@ def delete_channel(cid: int, payload: dict = Depends(require_role("admin"))):
 
 
 @router.post("/api/channels/{cid}/test")
-def test_channel(cid: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def test_channel(cid: int, payload: dict = Depends(require_perm("read"))):
     from src.alert_notify.channel import _REGISTRY
     from src.quant_common.crypto import decrypt
     with get_conn() as conn:
@@ -357,7 +357,7 @@ def test_channel(cid: int, payload: dict = Depends(require_role("viewer", "analy
 
 
 @router.get("/api/brokers")
-def list_brokers(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_brokers(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute("SELECT id, provider, name, credentials_encrypted IS NOT NULL, params, enabled, updated_at FROM broker_config ORDER BY provider")
         rows = cur.fetchall()
@@ -366,7 +366,7 @@ def list_brokers(payload: dict = Depends(require_role("viewer", "analyst", "trad
 
 
 @router.post("/api/brokers")
-def create_broker(req: BrokerReq, payload: dict = Depends(require_role("admin"))):
+def create_broker(req: BrokerReq, payload: dict = Depends(require_perm("system_config"))):
     from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
@@ -380,7 +380,7 @@ def create_broker(req: BrokerReq, payload: dict = Depends(require_role("admin"))
 
 
 @router.post("/api/brokers/{bid}")
-def update_broker(bid: int, req: BrokerReq, payload: dict = Depends(require_role("admin"))):
+def update_broker(bid: int, req: BrokerReq, payload: dict = Depends(require_perm("system_config"))):
     from src.quant_common.crypto import encrypt
     enc = encrypt(req.credentials) if req.credentials else None
     with get_conn() as conn:
@@ -396,7 +396,7 @@ def update_broker(bid: int, req: BrokerReq, payload: dict = Depends(require_role
 
 
 @router.delete("/api/brokers/{bid}")
-def delete_broker(bid: int, payload: dict = Depends(require_role("admin"))):
+def delete_broker(bid: int, payload: dict = Depends(require_perm("system_config"))):
     with get_conn() as conn:
         conn.execute("DELETE FROM broker_config WHERE id=%s", (bid,))
         conn.commit()
@@ -405,7 +405,7 @@ def delete_broker(bid: int, payload: dict = Depends(require_role("admin"))):
 
 
 @router.post("/api/brokers/{bid}/test")
-def test_broker(bid: int, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def test_broker(bid: int, payload: dict = Depends(require_perm("read"))):
     from src.strategy_framework.broker import _REGISTRY
     with get_conn() as conn:
         cur = conn.execute("SELECT provider, credentials_encrypted, params FROM broker_config WHERE id=%s", (bid,))

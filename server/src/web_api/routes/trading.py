@@ -14,7 +14,7 @@ LIVE_TRADING_MARKETS = ("convertible", "etf", "astock", "binance_perp", "okx_per
 
 @router.get("/api/live-task")
 def list_live_tasks(status: str | None = None,
-                    payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                    payload: dict = Depends(require_perm("read"))):
     """列实盘任务。"""
     with get_conn() as conn:
         if status:
@@ -166,7 +166,7 @@ def delete_live_task(tid: int, payload: dict = Depends(require_perm("strategy_co
 
 
 @router.get("/api/live-trading")
-def list_live_trading(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_live_trading(payload: dict = Depends(require_perm("read"))):
     """列实盘分项开关 + .env 总闸状态。三级 AND：总闸 AND 分项 AND 策略 enabled。"""
     from src.data_platform.settings import is_live_trading_enabled
     with get_conn() as conn:
@@ -197,7 +197,7 @@ def update_live_trading(market: str, enabled: bool = Query(...),
 
 
 @router.get("/api/position")
-def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def get_position(payload: dict = Depends(require_perm("read"))):
     """当前持仓（ST2：券商 position_snapshot 快照=真相源；trade_log 推导已挪 /api/reconcile 归因）。
 
     stale 语义（N-S5）：position_refresh.ts 距今 >600s 或从未写过 → stale=True——
@@ -240,14 +240,27 @@ def get_position(payload: dict = Depends(require_role("viewer", "analyst", "trad
     total_value = float(snap[0]) if snap else 0
     initial = float(first[0]) if first and first[0] else (float(snap[2]) if snap and snap[2] is not None else 1000000)
     total_pnl = (total_value - initial) if snap else 0
-    return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl,
+    # W5 脱敏（盲审 B-P1）：count=仅账户级计数+净值（设计判断：账户级总览保留）；
+    # aggregated=Σpnl 聚合（剔 symbol 级明细）；detail=现行为
+    from ..auth import data_sensitivity
+    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
+    if sens == "count":
+        return {"sensitivity": "count", "positions": [], "count": len(positions),
+                "total_value": total_value, "stale": stale}
+    if sens == "aggregated":
+        return {"sensitivity": "aggregated", "positions": [],
+                "count": len(positions), "sum_pnl": round(sum(p["pnl"] or 0 for p in positions), 2),
+                "total_value": total_value, "total_pnl": total_pnl,
+                "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0,
+                "snapshot_ts": str(refresh_ts)[:19] if refresh_ts else None, "stale": stale}
+    return {"sensitivity": "detail", "positions": positions, "total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0,
             "snapshot_ts": str(refresh_ts)[:19] if refresh_ts else None,
             "snapshot_rows": refresh_rows, "stale": stale}
 
 
 @router.get("/api/pnl")
-def get_pnl(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def get_pnl(payload: dict = Depends(require_perm("read"))):
     """盈亏曲线（account_snapshot 时间序列，#6）。"""
     with get_conn() as conn:
         try:
@@ -268,7 +281,7 @@ def get_pnl(payload: dict = Depends(require_role("viewer", "analyst", "trader", 
 
 
 @router.get("/api/orders")
-def get_orders(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def get_orders(payload: dict = Depends(require_perm("read"))):
     """订单记录（order_log 最近 100，#6）。"""
     with get_conn() as conn:
         try:
@@ -277,7 +290,17 @@ def get_orders(payload: dict = Depends(require_role("viewer", "analyst", "trader
             logger.warning("get_orders: order_log 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status FROM order_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
-    return {"orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6]} for r in rows], "total": len(rows)}
+    # W5 脱敏：剔 strategy_id/symbol/price（盲审 B-P1 聚合键）
+    from ..auth import data_sensitivity
+    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
+    if sens in ("count", "aggregated"):
+        by_status: dict = {}
+        for r in rows:
+            by_status[r[6]] = by_status.get(r[6], 0) + 1
+        return {"sensitivity": sens, "orders": [], "total": len(rows), "by_status": by_status}
+    return {"sensitivity": "detail",
+            "orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6]} for r in rows],
+            "total": len(rows)}
 
 
 @router.get("/api/account")
@@ -335,7 +358,7 @@ def delete_account(aid: int, payload: dict = Depends(require_perm("account_keys"
 
 
 @router.get("/api/dashboard")
-def get_dashboard(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def get_dashboard(payload: dict = Depends(require_perm("read"))):
     """Dashboard 量化指标（account_snapshot + 回测绩效，#10）。"""
     with get_conn() as conn:
         try:

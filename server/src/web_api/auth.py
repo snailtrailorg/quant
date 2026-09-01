@@ -125,6 +125,53 @@ def _load_user_api_overrides(username: str) -> tuple[set, set]:
     return allows, denies
 
 
+def data_sensitivity(username: str, role: str) -> str:
+    """W5：data 维敏感级（detail|aggregated|count，缺省 detail=现行为零变化）。
+
+    解析 resource='sensitivity:<v>' 行（W4 Permissions.vue 编码）。user 行覆盖
+    role 行（单值字段的 deny 语义=用户级值生效）；无任何配置=detail。读失败=detail。
+    """
+    try:
+        from src.data_platform.db import get_conn as _gc
+        with _gc() as conn:
+            rows = conn.execute(
+                "SELECT subject_type, subject_id, resource FROM permission "
+                "WHERE dimension='data' AND resource LIKE 'sensitivity:%'").fetchall()
+        role_v = user_v = None
+        for st, sid, res in rows:
+            v = res.split(":", 1)[1]
+            if st == "role" and sid == role:
+                role_v = v
+            elif st == "user" and sid == username:
+                user_v = v
+        return user_v or role_v or "detail"
+    except Exception:
+        return "detail"
+
+
+def load_nav_map(username: str, role: str) -> dict:
+    """W5：nav 维三态映射（resource=菜单id → hidden|readonly|readwrite）。
+
+    user 行覆盖 role 行（与 data 维同规则）；无配置={}（=readwrite 缺省，前端现行为）。
+    """
+    try:
+        from src.data_platform.db import get_conn as _gc
+        with _gc() as conn:
+            rows = conn.execute(
+                "SELECT subject_type, subject_id, resource, effect FROM permission "
+                "WHERE dimension='nav'").fetchall()
+        out: dict = {}
+        for st, sid, res, eff in rows:
+            if st == "role" and sid == role:
+                out[res] = eff
+        for st, sid, res, eff in rows:
+            if st == "user" and sid == username:
+                out[res] = eff
+        return out
+    except Exception:
+        return {}
+
+
 def load_effective_permissions(username: str, role: str) -> tuple[set, dict]:
     """W4 C 阶段：用户有效权限 = user deny > user allow > role allow（10 §3 合并序）。
 

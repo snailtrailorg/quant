@@ -15,7 +15,7 @@ router = APIRouter(tags=["sync"])
 
 
 @router.get("/api/sync/config")
-def list_sync_config(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def list_sync_config(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description FROM sync_config ORDER BY id")
         rows = cur.fetchall()
@@ -54,7 +54,7 @@ def trigger_pool_data_api(full: bool = False, payload: dict = Depends(require_pe
 
 
 @router.get("/api/sync/pool-data/progress")
-def pool_data_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def pool_data_progress_api(payload: dict = Depends(require_perm("read"))):
     """池深度数据同步进度——读 sync_log 最新一轮。
 
     2026-08-20 修正：原读 Valkey sync:pool:minute（池分钟同步的键，pool_data 从不写）→ 恒 idle。
@@ -81,7 +81,7 @@ def trigger_pool_minute_api(payload: dict = Depends(require_perm("data_sync"))):
 
 
 @router.get("/api/sync/pool-minute/progress")
-def pool_minute_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def pool_minute_progress_api(payload: dict = Depends(require_perm("read"))):
     """池分钟同步进度（Valkey sync:pool:minute hash）。"""
     r = redis_client()
     data = r.hgetall("sync:pool:minute")
@@ -107,7 +107,7 @@ def adj_factor_backfill_api(start_date: str | None = None, end_date: str | None 
 
 
 @router.get("/api/sync/adj-factor-backfill/progress")
-def adj_factor_backfill_progress_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def adj_factor_backfill_progress_api(payload: dict = Depends(require_perm("read"))):
     """复权因子回填进度（Valkey sync:adj-factor hash；status=degraded 表示积分未到账降级）。"""
     r = redis_client()
     data = r.hgetall("sync:adj-factor")
@@ -121,7 +121,7 @@ def adj_factor_backfill_progress_api(payload: dict = Depends(require_role("viewe
 
 @router.get("/api/sync/trigger/{sid}/progress")
 def trigger_progress_api(sid: str, task_id: str | None = None,
-                         payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                         payload: dict = Depends(require_perm("read"))):
     """查类型级同步进度（Valkey sync:type:{sid}，无则 Celery AsyncResult 兜底）。"""
     r = redis_client()
     data = r.hgetall(f"sync:type:{sid}")
@@ -157,7 +157,7 @@ def trigger_progress_api(sid: str, task_id: str | None = None,
 
 @router.get("/api/sync/symbols/{sid}")
 def list_symbols_api(sid: str, q: str = "", page: int = 1, size: int = 9999,
-                     payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                     payload: dict = Depends(require_perm("read"))):
     from src.data_sync.engine import list_symbols
     return list_symbols(sid, q=q, page=page, size=size)
 
@@ -201,7 +201,7 @@ def sync_all_api(sid: str, payload: dict = Depends(require_perm("data_sync"))):
 
 @router.get("/api/sync/all/{sid}/progress")
 def sync_all_progress_api(sid: str, task_id: str | None = None,
-                           payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                           payload: dict = Depends(require_perm("read"))):
     """查全量重建进度（Valkey sync:progress:{sid}，无则 Celery AsyncResult 兜底）。"""
     r = redis_client()
     data = r.hgetall(f"sync:progress:{sid}")
@@ -243,7 +243,7 @@ def delete_sync_data_api(sid: str, payload: dict = Depends(require_perm("data_sy
 
 
 @router.get("/api/sync/log")
-def get_sync_logs_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def get_sync_logs_api(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         # 列名对齐写入侧（engine._log）：start_date/end_date/rows_pulled/rows_saved——
         # 原查询写成 start/end（PG 保留字+列不存在）→ 端点自出生即 500，2026-08-18 生产验证顺带发现
@@ -260,7 +260,7 @@ def get_sync_logs_api(payload: dict = Depends(require_role("viewer", "analyst", 
 # --- 数据源用量监控（A4 #36）---
 
 @router.get("/api/data-source-usage")
-def data_source_usage_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def data_source_usage_api(payload: dict = Depends(require_perm("read"))):
     """数据源调用量监控：by provider 今日聚合 + 7 天趋势。"""
     with get_conn() as conn:
         try:
