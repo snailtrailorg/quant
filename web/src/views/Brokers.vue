@@ -24,7 +24,15 @@
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('brokers.phProvider')" /></el-form-item>
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item :label="t('common.credentialJson')">
-        <el-input v-model="form.credentials" type="password" show-password :placeholder="t('brokers.phCred')" style="width:340px" />
+        <!-- 15号批四: XTP field_schema 静态映射(消灭盲写 JSON;非 XTP 走原 password) -->
+        <div v-if="form.provider === 'xtp'" style="display: flex; flex-direction: column; gap: 6px">
+          <el-input v-model="credFields['td_host']" placeholder="交易地址 (如 122.112.139.0)" />
+          <el-input v-model="credFields['td_port']" placeholder="交易端口 (如 6102)" />
+          <el-input v-model="credFields['md_host']" placeholder="行情地址 (如 119.3.103.38)" />
+          <el-input v-model="credFields['md_port']" placeholder="行情端口 (如 6002)" />
+          <el-input v-model="credFields['client_id']" placeholder="客户号 (独立于 hub 的号)" />
+        </div>
+        <el-input v-else v-model="form.credentials" type="password" show-password :placeholder="t('brokers.phCred')" style="width:340px" />
       </el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
@@ -48,7 +56,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {apiErr,  getBrokers, createBroker, updateBroker, deleteBroker, testBroker } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -61,6 +69,13 @@ const saving = ref(false)
 const testing = ref(0)
 const usage = ref({})
 const usageLoading = ref(false)
+// 15号批四: XTP field_schema 静态映射(credFields 对象 ↔ credentials JSON 串)
+const credFields = ref({})
+watch(() => form.value.provider, (pv) => {
+  if (pv === 'xtp' && !Object.keys(credFields.value).length) {
+    try { credFields.value = JSON.parse(form.value.credentials || '{}') } catch { credFields.value = {} }
+  }
+}, { immediate: true })
 
 const loadUsage = async () => { usageLoading.value = true; try { usage.value = await api.get('/broker-usage') } catch {} finally { usageLoading.value = false } }
 
@@ -75,6 +90,7 @@ const onEdit = (row) => { form.value = { ...row, credentials: '' } }
 const resetForm = () => { form.value = emptyForm() }
 
 const onSave = async () => {
+  serializeCred()
   saving.value = true
   try {
     if (form.value.id) await updateBroker(form.value.id, form.value)
@@ -101,5 +117,12 @@ const onTest = async (id) => {
     else ElMessage.error(t('common.failedPrefix') + r.error)
   } catch (e) { ElMessage.error(t('common.testFailed')) }
   finally { testing.value = 0 }
+}
+
+// XTP field_schema 序列化:保存时 credFields→JSON 串
+const serializeCred = () => {
+  if (form.value.provider === 'xtp' && Object.keys(credFields.value).length) {
+    form.value.credentials = JSON.stringify(credFields.value)
+  }
 }
 </script>

@@ -230,11 +230,11 @@ const onTrigger = async (row) => {
 const onBackfill = async (row) => {
   // 默认起始日期：30 天前
   const d = new Date(); d.setDate(d.getDate() - 30)
-  const def = d.toISOString().slice(0, 10).replace(/-/g, '')
+  const def = d.toISOString().slice(0, 10)  // ISO 格式显示;提交时 .replace(/-/g,'') 转后端 YYYYMMDD
   try {
     const { value } = await ElMessageBox.prompt(t('dataManage.backfillPrompt'), t('dataManage.backfillTitle', { name: row.name }), {
       inputValue: def,
-      inputPattern: /^\d{8}$/,
+      inputPattern: /^\d{4}-\d{2}-\d{2}$/,
       inputErrorMessage: t('dataManage.dateFormatError'),
       confirmButtonText: t('symbol.backfill'),
       cancelButtonText: t('common.cancel'),

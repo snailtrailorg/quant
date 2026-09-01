@@ -233,6 +233,7 @@ const loadHealth = async () => {
 // runbook: 15号批零②——死代码已删;通知 runbook 接线待通知表加 code 字段后做(待办已立)
 const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')
 loadHealth()
+loadPerms()
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })
 onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
 
