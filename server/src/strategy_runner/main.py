@@ -10,7 +10,6 @@ systemd: systemctl start quant-live-task@<task_id>
 """
 import argparse
 import logging
-import os
 import sys
 import time
 
