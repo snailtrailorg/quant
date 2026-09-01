@@ -191,8 +191,11 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
                              / (100.0 * b.conv_price / sd.close) * 100 END AS premium_pct
             FROM cb_basic_info b
             LEFT JOIN (
+                -- W6 收官日修：原 ts::date = ... 铸型谓词索引用不上（表达式）→ 全表扫超 10s
+                -- 语句超时（prod 实证 QueryCanceled）。改 sargable 范围谓词（idx_bar_1d_ts 可用）。
                 SELECT symbol, close FROM bar_1d
-                WHERE ts::date = (SELECT max(ts)::date FROM bar_1d)
+                WHERE ts >= date_trunc('day', (SELECT max(ts) FROM bar_1d))
+                  AND ts < date_trunc('day', (SELECT max(ts) FROM bar_1d)) + interval '1 day'
             ) cd ON cd.symbol = replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE')
             LEFT JOIN (
                 SELECT d.ts_code, d.close FROM daily_basic d
