@@ -29,7 +29,7 @@
           <el-tag>{{ $t('imBots.provider.' + row.provider, row.provider) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="name" :label="t('common.name')" width="140" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
       <el-table-column prop="route_key" label="App ID" min-width="150" show-overflow-tooltip />
       <el-table-column :label="t('imBots.defaultRole')" width="100">
         <template #default="{ row }"><el-tag type="info">{{ row.default_role }}</el-tag></template>

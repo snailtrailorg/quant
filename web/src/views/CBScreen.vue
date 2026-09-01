@@ -28,8 +28,8 @@
       <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
         <el-table-column type="selection" width="40" />
         <el-table-column prop="ts_code" label="Code" width="90" />
-        <el-table-column prop="name" :label="t('screener.bondName')" width="80" show-overflow-tooltip />
-        <el-table-column prop="stk_name" :label="t('screener.stkName')" width="80" show-overflow-tooltip />
+        <el-table-column prop="name" :label="t('screener.bondName')" min-width="80" show-overflow-tooltip />
+        <el-table-column prop="stk_name" :label="t('screener.stkName')" min-width="80" show-overflow-tooltip />
         <el-table-column prop="bond_close" :label="t('trading.price')" width="65" class-name="num" />
         <el-table-column :label="t('screener.doubleLow')" width="70" class-name="num" sortable>
           <template #default="{ row }">{{ row.double_low?.toFixed(1) || '—' }}</template>

@@ -7,7 +7,7 @@
       </div>
     </template>
     <el-table :data="strategies">
-      <el-table-column prop="name" :label="t('strategy.name')" />
+      <el-table-column prop="name" :label="t('strategy.name')" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('strategy.type')" />
       <el-table-column :label="t('strategy.status')">
         <template #default="{ row }">
@@ -189,7 +189,7 @@
           </div>
         </el-form-item>
         <el-table v-if="binds.length" :data="binds" style="margin-bottom: 12px">
-          <el-table-column prop="account_id" :label="t('common.account')" />
+          <el-table-column prop="account_id" :label="t('common.account')" show-overflow-tooltip />
           <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
           <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
           <el-table-column :label="t('common.action')" width="80">

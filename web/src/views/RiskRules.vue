@@ -2,9 +2,9 @@
   <el-card>
     <template #header>{{ t('riskRule.title') }}</template>
     <el-table :data="rules">
-      <el-table-column prop="name" :label="t('common.name')" />
+      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" width="160" />
-      <el-table-column prop="params" :label="t('riskRule.params')" />
+      <el-table-column prop="params" :label="t('riskRule.params')" show-overflow-tooltip />
       <el-table-column :label="t('common.enable')" width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>

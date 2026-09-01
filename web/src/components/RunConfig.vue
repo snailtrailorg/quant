@@ -15,7 +15,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="value_type" :label="t('common.type')" width="80" />
-      <el-table-column prop="description" :label="t('risk.label')" />
+      <el-table-column prop="description" :label="t('risk.label')" show-overflow-tooltip />
       <el-table-column :label="t('common.updatedAt')" width="180">
         <template #default="{ row }">{{ row.updated_at }}</template>
       </el-table-column>

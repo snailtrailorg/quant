@@ -3,7 +3,7 @@
     <template #header>{{ t('brokers.manageTitle') }}</template>
     <el-table :data="brokers">
       <el-table-column prop="provider" label="Provider" width="100" />
-      <el-table-column prop="name" :label="t('common.name')" />
+      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column :label="t('common.credential')" width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>

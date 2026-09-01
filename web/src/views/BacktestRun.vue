@@ -36,7 +36,7 @@
         {{ t('backtest.groupAvg', { ret: summary.avg?.total_return_pct, wr: summary.avg?.win_rate, sh: summary.avg?.sharpe_ratio, n: summary.count }) }}
       </el-alert>
       <el-table :data="symbols" @row-click="goView">
-        <el-table-column prop="symbol" :label="t('common.symbol')" />
+        <el-table-column prop="symbol" :label="t('common.symbol')" show-overflow-tooltip />
         <el-table-column prop="status" :label="t('common.status')">
           <template #default="{ row }">
             <el-tag :type="row.status === 'done' ? 'success' : 'warning'">{{ row.status }}</el-tag>

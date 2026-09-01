@@ -45,7 +45,7 @@
       </el-alert>
       <el-table :data="liveTradingMarkets">
         <el-table-column prop="market" :label="t('risk.market')" width="150" />
-        <el-table-column :label="t('risk.label')">
+        <el-table-column :label="t('risk.label')" show-overflow-tooltip>
           <template #default="{ row }">{{ t(row.labelKey) }}</template>
         </el-table-column>
         <el-table-column :label="t('common.status')" width="120">

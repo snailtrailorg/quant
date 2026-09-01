@@ -74,7 +74,7 @@
         <el-alert type="warning" :closable="false" style="margin-bottom: 12px">{{ t('perm.overrideNote') }}</el-alert>
         <el-table :data="userOverrides(userSel)" size="small">
           <el-table-column prop="dimension" :label="t('perm.dim')" width="100" />
-          <el-table-column prop="resource" :label="t('perm.resource')" />
+          <el-table-column prop="resource" :label="t('perm.resource')" show-overflow-tooltip />
           <el-table-column prop="effect" :label="t('perm.effect')" width="90">
             <template #default="{ row }">
               <el-tag :type="row.effect === 'deny' ? 'danger' : 'success'" size="small">{{ row.effect }}</el-tag>

@@ -9,7 +9,7 @@
     </template>
     <el-table :data="accounts" v-loading="loading">
       <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="name" :label="t('common.name')" />
+      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="exchange" :label="t('tradingAccounts.exchange')" width="120" />
       <el-table-column :label="t('tradingAccounts.apiKeyHint')" width="180">
         <template #default="{ row }">

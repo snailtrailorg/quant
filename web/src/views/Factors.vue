@@ -7,7 +7,7 @@
       </div>
     </template>
     <el-table :data="factors">
-      <el-table-column prop="name" :label="t('common.name')" width="150" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="150" show-overflow-tooltip />
       <el-table-column :label="t('factors.category')" width="100">
         <template #default="{ row }"><el-tag>{{ row.category }}</el-tag></template>
       </el-table-column>
@@ -30,7 +30,7 @@
           <span v-else>—</span>
         </template>
       </el-table-column>
-      <el-table-column prop="description" :label="t('common.description')" />
+      <el-table-column prop="description" :label="t('common.description')" show-overflow-tooltip />
       <el-table-column :label="t('factors.paramsCol')" width="200">
         <template #default="{ row }">
           <el-tag v-for="(v, k) in (row.params || {})" :key="k" size="small" style="margin: 2px">{{ k }}={{ v }}</el-tag>

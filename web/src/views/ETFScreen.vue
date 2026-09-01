@@ -27,7 +27,7 @@
       <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
         <el-table-column type="selection" width="40" />
         <el-table-column prop="ts_code" label="Code" width="100" />
-        <el-table-column prop="name" :label="t('common.name')" width="120" show-overflow-tooltip />
+        <el-table-column prop="name" :label="t('common.name')" min-width="120" show-overflow-tooltip />
         <el-table-column prop="fund_type" :label="t('screener.fundType')" width="80" />
         <el-table-column :label="t('screener.fundScale')" width="90" class-name="num">
           <template #default="{ row }">{{ row.fund_scale != null ? fmtCn(row.fund_scale, 1) : '—' }}</template>

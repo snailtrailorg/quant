@@ -17,10 +17,10 @@
       <el-table-column prop="ts" :label="t('common.time')" width="200">
         <template #default="{ row }">{{ row.ts.replace('T', ' ').slice(0, 19) }}</template>
       </el-table-column>
-      <el-table-column prop="actor" :label="t('audit.actor')" width="120" />
+      <el-table-column prop="actor" :label="t('audit.actor')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="action" :label="t('common.action')" width="150" />
       <el-table-column prop="target" :label="t('audit.target')" width="150" />
-      <el-table-column prop="detail" :label="t('common.detail')" />
+      <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
     </el-table>
     <el-button size="small" type="primary" @click="exportCsv">{{ t('audit.exportCsv') }}</el-button>
 </el-card>

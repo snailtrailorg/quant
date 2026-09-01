@@ -36,7 +36,7 @@
       <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
         <el-table-column type="selection" width="40" />
         <el-table-column prop="ts_code" label="Code" width="100" />
-        <el-table-column prop="name" :label="t('common.name')" width="90" show-overflow-tooltip />
+        <el-table-column prop="name" :label="t('common.name')" min-width="90" show-overflow-tooltip />
         <el-table-column prop="close" :label="t('trading.price')" width="70" class-name="num" />
         <el-table-column prop="pe" label="PE" width="60" class-name="num" />
         <el-table-column prop="pb" label="PB" width="55" class-name="num" />
