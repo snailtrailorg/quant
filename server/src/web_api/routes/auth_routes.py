@@ -89,48 +89,188 @@ def me(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admi
         pass
     # P3-7（10 §7 差距 6）：role 以 DB 为准——修 JWT 24h 不刷新（改角色即时生效）；
     # permissions 同步换查表真源
-    from ..auth import load_role_permissions
+    from ..auth import load_effective_permissions
     role = db_role or payload["role"]
+    perms, sources = load_effective_permissions(payload["username"], role)
+    # W4 玻璃盒:来源标注（role-base/user-override）+被 user deny 的键;不含 updated_by（盲审 A-P2）
+    denied = sources.pop("__denied__", [])
     return {"user_id": payload["sub"], "username": payload["username"], "role": role,
             "nickname": nickname, "avatar_url": avatar_url,
-            "permissions": sorted(load_role_permissions().get(role, set()))}
+            "permissions": sorted(perms), "perm_sources": sources, "denied": denied}
+
+
+# W4（10 §4）：nav 16 项/数据域清单——后端单源常量,前端从 GET 拿（不硬编码第二份）
+NAV_ITEMS = [
+    {"id": "dashboard", "group": "base"},
+    {"id": "screener", "group": "research"}, {"id": "pool", "group": "research"},
+    {"id": "factors", "group": "research"}, {"id": "strategy", "group": "research"},
+    {"id": "backtest", "group": "research"}, {"id": "analysis", "group": "research"},
+    {"id": "live-task", "group": "live"}, {"id": "trading", "group": "live"},
+    {"id": "risk", "group": "riskgrp"}, {"id": "reconcile", "group": "riskgrp"},
+    {"id": "risk-rules", "group": "riskgrp"},
+    {"id": "dataops", "group": "ops"}, {"id": "integrations", "group": "ops"},
+    {"id": "observe", "group": "ops"}, {"id": "settings", "group": "ops"},
+]
+DATA_FIELDS = {"markets": ["astock", "convertible", "etf", "crypto"],
+               "sensitivity": ["detail", "aggregated", "count"]}
+
+
+def _load_dim(dimension: str) -> dict:
+    """角色→{resource: effect}（nav/data 维;行存在即显性配置）。"""
+    from src.data_platform.db import get_conn as _gc
+    try:
+        with _gc() as conn:
+            rows = conn.execute(
+                "SELECT subject_id, resource, effect FROM permission "
+                "WHERE subject_type='role' AND dimension=%s", (dimension,)).fetchall()
+        out: dict = {}
+        for sid, res, eff in rows:
+            out.setdefault(sid, {})[res] = eff
+        return out
+    except Exception:
+        return {}
 
 
 @router.get("/api/permissions")
 def get_permissions(payload: dict = Depends(require_role("admin"))):
-    """P3-7（10 §4）：权限管理——角色×权限键矩阵（api 维）。"""
+    """W4 三维矩阵（10 §4）：api 键+nav 三态+数据域+user override 全景。"""
     from ..auth import load_role_permissions
+    from src.data_platform.db import get_conn as _gc
     all_keys = ["read", "strategy_control", "data_sync", "halt", "resume", "trade",
                 "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
                 "system_config", "llm_config", "im_bots_config"]
     roles = load_role_permissions()
+    overrides = []
+    try:
+        with _gc() as conn:
+            rows = conn.execute(
+                "SELECT subject_id, dimension, resource, effect FROM permission "
+                "WHERE subject_type='user'").fetchall()
+        overrides = [{"username": r[0], "dimension": r[1], "resource": r[2], "effect": r[3]}
+                     for r in rows]
+    except Exception:
+        pass
     return {"keys": all_keys,
-            "roles": {r: sorted(roles.get(r, set())) for r in ("viewer", "analyst", "trader", "admin")}}
+            "roles": {r: sorted(roles.get(r, set())) for r in ("viewer", "analyst", "trader", "admin")},
+            "nav": {"items": NAV_ITEMS, "roles": _load_dim("nav")},
+            "data": {"fields": DATA_FIELDS, "roles": _load_dim("data")},
+            "user_overrides": overrides}
 
 
 @router.post("/api/permissions/{role}")
-def update_permissions(role: str, body: dict, payload: dict = Depends(require_role("admin"))):
-    """改角色权限集（全量重写该 role 的 allow 集；系统安全策略键不受影响——halt 全员/resume-admin
-    等由 require_perm 调用点固定，此处只管理键集合本身）。"""
-    from ..auth import invalidate_perm_cache
+def update_permissions(role: str, body: dict, dimension: str = "api",
+                       payload: dict = Depends(require_role("admin"))):
+    """改角色权限集。W4：dimension ∈ api|nav|data（缺省 api 兼容旧前端）。
+
+    api 维=全量重写 allow 集；nav/data 维=全量重写 {resource: effect} 映射。
+    锁键（W4 盲审 B-P0 新建——原"系统策略键已锁定"是幻觉）：LOCKED_PERM_KEYS
+    双路径同锁——角色重写自动地板保护（请求集被静默校正,锁键恒保持现值）;
+    admin 角色另加 ADMIN_ROLE_FLOOR（self-lockout 防线）。返回 preserved 提示校正。
+    """
+    from ..auth import invalidate_perm_cache, load_role_permissions, LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR
     from src.data_platform.db import get_conn as _gc
     if role not in ("viewer", "analyst", "trader", "admin"):
         raise HTTPException(400, "BAD_ROLE")
-    keys = sorted(set(body.get("permissions", []) or []))
-    if not keys:
-        # 终审 A-P2-11：空集会让 load 回退字典=全撤权失效（空集歧义）——权限键集合不允许为空
-        raise HTTPException(400, "EMPTY_PERMISSIONS", "权限集不可为空（至少保留 read）")
+    if dimension == "api":
+        keys = set(body.get("permissions", []) or [])
+        if not keys:
+            # 终审 A-P2-11：空集会让 load 回退字典=全撤权失效（空集歧义）
+            raise HTTPException(400, "EMPTY_PERMISSIONS", "权限集不可为空（至少保留 read）")
+        current = set(load_role_permissions().get(role, set()))
+        preserved = (current | ADMIN_ROLE_FLOOR) & LOCKED_PERM_KEYS if role == "admin" \
+            else current & LOCKED_PERM_KEYS
+        keys = (keys - LOCKED_PERM_KEYS) | preserved      # 锁键恒保持现值（双路径同锁之一）
+        out = sorted(keys)
+        with _gc() as conn:
+            conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "
+                         "AND dimension='api'", (role,))
+            for k in out:
+                conn.execute(
+                    "INSERT INTO permission (subject_type, subject_id, dimension, resource, effect, updated_by) "
+                    "VALUES ('role', %s, 'api', %s, 'allow', %s)",
+                    (role, k, payload.get("username", "")))
+            conn.commit()
+        invalidate_perm_cache()
+        return {"role": role, "permissions": out,
+                "preserved_locked": sorted(preserved & (set(body.get("permissions", [])) ^ preserved))}
+    # nav/data 维：body.resources = {resource: effect}
+    res_map = body.get("resources", {}) or {}
+    valid_res = {i["id"] for i in NAV_ITEMS} if dimension == "nav" \
+        else (set(DATA_FIELDS["markets"]) | set(DATA_FIELDS["sensitivity"]))
+    bad = set(res_map) - valid_res
+    if bad:
+        raise HTTPException(400, "BAD_RESOURCE", f"未知资源: {sorted(bad)}")
+    if dimension == "nav":
+        bad_eff = {v for v in res_map.values()} - {"hidden", "readonly", "readwrite"}
+    else:
+        bad_eff = {v for v in res_map.values()} - {"allow", "deny"}
+    if bad_eff:
+        raise HTTPException(400, "BAD_EFFECT", f"非法 effect: {sorted(bad_eff)}")
     with _gc() as conn:
         conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "
-                     "AND dimension='api'", (role,))
-        for k in keys:
+                     "AND dimension=%s", (role, dimension))
+        for res, eff in res_map.items():
             conn.execute(
                 "INSERT INTO permission (subject_type, subject_id, dimension, resource, effect, updated_by) "
-                "VALUES ('role', %s, 'api', %s, 'allow', %s)",
-                (role, k, payload.get("username", "")))
+                "VALUES ('role', %s, %s, %s, %s, %s)",
+                (role, dimension, res, eff, payload.get("username", "")))
         conn.commit()
     invalidate_perm_cache()
-    return {"role": role, "permissions": keys}
+    return {"role": role, "dimension": dimension, "resources": res_map}
+
+
+@router.post("/api/permissions/user/{username}")
+def update_user_override(username: str, body: dict,
+                         payload: dict = Depends(require_role("admin"))):
+    """W4 C 阶段：per-user override（10 §4 用户视图=角色+override）。
+
+    body: {dimension ∈ api|nav|data, resource, effect ∈ allow|deny|clear}
+    - clear=删该行（回到角色基线）
+    - 锁键（api 维 LOCKED_PERM_KEYS）双路径同锁 → 400 PERMISSION_KEY_LOCKED
+    - 自锁防线：目标用户是 admin 时拒 deny 其管理键（self-lockout,盲审 B-P1）
+    subject_id=username（W4 定死——0056 注释 user_id 弃,盲审 A/B-P1）。
+    """
+    from ..auth import invalidate_perm_cache, LOCKED_PERM_KEYS
+    from src.data_platform.db import get_conn as _gc
+    dimension = body.get("dimension", "api")
+    resource = body.get("resource", "")
+    effect = body.get("effect", "")
+    if dimension not in ("api", "nav", "data"):
+        raise HTTPException(400, "BAD_DIMENSION")
+    if effect not in ("allow", "deny", "clear"):
+        raise HTTPException(400, "BAD_EFFECT")
+    if not resource:
+        raise HTTPException(400, "BAD_RESOURCE", "resource 必填")
+    if dimension == "api":
+        if resource in LOCKED_PERM_KEYS:
+            raise HTTPException(400, "PERMISSION_KEY_LOCKED",
+                                f"{resource} 为系统策略锁键（双路径同锁,不可 override）")
+        # 自锁防线：目标用户是 admin 时,deny 其余管理键也拒（锁死后无 UI 恢复路径）
+        try:
+            with _gc() as conn:
+                trole = conn.execute("SELECT role FROM users WHERE username=%s",
+                                     (username,)).fetchone()
+            if trole and trole[0] == "admin" and effect == "deny" \
+                    and resource in ("system_config", "user_mgmt"):
+                raise HTTPException(400, "SELF_LOCK_RISK",
+                                    f"拒绝对 admin 用户 deny {resource}（自锁防线）")
+        except HTTPException:
+            raise
+        except Exception:
+            pass   # users 表不可读时放行校验（DB 写入本身也会失败兜底）
+    with _gc() as conn:
+        conn.execute("DELETE FROM permission WHERE subject_type='user' AND subject_id=%s "
+                     "AND dimension=%s AND resource=%s", (username, dimension, resource))
+        if effect != "clear":
+            conn.execute(
+                "INSERT INTO permission (subject_type, subject_id, dimension, resource, effect, updated_by) "
+                "VALUES ('user', %s, %s, %s, %s, %s)",
+                (username, dimension, resource, effect, payload.get("username", "")))
+        conn.commit()
+    invalidate_perm_cache()
+    audit_log(payload.get("username", ""), "perm_override",
+              f"{username}:{dimension}:{resource}:{effect}")
+    return {"username": username, "dimension": dimension, "resource": resource, "effect": effect}
 
 
 @router.post("/api/auth/logout")

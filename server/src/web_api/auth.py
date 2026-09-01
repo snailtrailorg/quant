@@ -58,8 +58,14 @@ PERMISSIONS = {
                  "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "im_bots_config"},
 }
 
-_PERM_CACHE: dict = {"at": 0.0, "roles": None}
+_PERM_CACHE: dict = {"at": 0.0, "roles": None, "users": {}}
 _PERM_TTL = 60.0
+
+# W4（盲审 B-P0 新建——原"系统策略键已锁定"是幻觉：require_perm 全表驱动,任何键今天都可被
+# 角色重写关掉）：锁键=提权链/自损链高危键——角色重写与 user override 双路径同锁;
+# admin 角色重写另有地板键（self-lockout 防线）
+LOCKED_PERM_KEYS = {"user_mgmt", "resume", "account_keys"}
+ADMIN_ROLE_FLOOR = LOCKED_PERM_KEYS | {"system_config"}
 
 
 def load_role_permissions() -> dict:
@@ -76,27 +82,73 @@ def load_role_permissions() -> dict:
                 "WHERE subject_type='role' AND dimension='api'")
             roles: dict = {}
             for sid, res, eff in cur.fetchall():
-                grants, denies = roles.setdefault(sid, {"allow": set(), "deny": set()})
-                (denies if eff == "deny" else grants).add(res)
+                # W4 修沉疴：原 `grants, denies = setdefault(...)` 解包的是 dict 的键
+                # （'allow'/'deny' 字符串）非值——表有行即 AttributeError 静默回退字典，
+                # 管理页保存过的权限从未生效（产线表恒空所以从未暴露;W4 基线测试首触发）
+                gd = roles.setdefault(sid, {"allow": set(), "deny": set()})
+                (gd["deny"] if eff == "deny" else gd["allow"]).add(res)
         merged = {}
         for role, base in PERMISSIONS.items():
             tab = roles.get(role, {})
             # 终审 P1-4 修正：表有该 role 的 allow 行 → 全量以表为准（撤权/全量重写生效）；
             # 表无行（未管理过的角色）→ 字典兜底。deny 行始终从结果里减（10 §1 deny 优先）。
-            allow = (tab["allow"] if tab["allow"] else base) - tab["deny"]
+            # W4 修沉疴②：无表行的角色 tab={} → tab["allow"] KeyError 同被空表掩盖
+            tab_allow = tab.get("allow") or set()
+            allow = (tab_allow if tab_allow else base) - tab.get("deny", set())
             merged[role] = allow
         for role, gd in roles.items():
             if role not in PERMISSIONS:
                 merged[role] = gd["allow"] - gd["deny"]
         _PERM_CACHE.update(at=now, roles=merged)
         return merged
-    except Exception:
+    except Exception as e:
+        _logger.warning("permission 表读取失败（回退字典）: %s", e)
         return PERMISSIONS
 
 
 def invalidate_perm_cache() -> None:
-    """权限变更后即刻生效（10 §3：指纹重编译）。"""
-    _PERM_CACHE.update(at=0.0, roles=None)
+    """权限变更后即刻生效（10 §3：指纹重编译）。全局清（W4 保持现语义——单 worker
+    写后即生效,勿改按键清留 role 脏键,盲审 B-P1）。"""
+    _PERM_CACHE.update(at=0.0, roles=None, users={})
+
+
+def _load_user_api_overrides(username: str) -> tuple[set, set]:
+    """user 维 api override →（allows, denies）。读失败 raise 由调用方决定 fail-open。"""
+    from src.data_platform.db import get_conn as _gc
+    with _gc() as conn:
+        cur = conn.execute(
+            "SELECT resource, effect FROM permission "
+            "WHERE subject_type='user' AND subject_id=%s AND dimension='api'", (username,))
+        allows, denies = set(), set()
+        for res, eff in cur.fetchall():
+            (denies if eff == "deny" else allows).add(res)
+    return allows, denies
+
+
+def load_effective_permissions(username: str, role: str) -> tuple[set, dict]:
+    """W4 C 阶段：用户有效权限 = user deny > user allow > role allow（10 §3 合并序）。
+
+    返回 (perms, sources)：sources 供玻璃盒标注来源（api 维）——
+    {"<perm>": "user-override" | "role-base"} + {"__denied__": [被 user deny 的 role 键]}。
+    user 维读失败 fail-open=按角色（user 维无字典可回,盲审 A-P1）。
+    """
+    roles = load_role_permissions()
+    base = set(roles.get(role, set()))
+    if not username:
+        return base, {p: "role-base" for p in base}
+    key = (username, role)
+    if key not in _PERM_CACHE["users"]:
+        try:
+            _PERM_CACHE["users"][key] = _load_user_api_overrides(username)
+        except Exception:
+            _PERM_CACHE["users"][key] = (set(), set())   # fail-open=按角色
+    allows, denies = _PERM_CACHE["users"][key]
+    denied = sorted(base & denies)
+    perms = (base | allows) - denies
+    sources = {p: ("user-override" if (p in allows and p not in base) else "role-base")
+               for p in perms}
+    sources["__denied__"] = denied
+    return perms, sources
 
 
 def require_role(*allowed: Role):
@@ -116,8 +168,10 @@ def require_perm(perm: str):
     def checker(authorization: str = Header(...)):
         token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
         payload = verify_jwt(token)
-        role = payload.get("role", "viewer")
-        perms = load_role_permissions().get(role, set())   # P3-7：真源=permission 表
+        # W4：DB role 优先（verify_jwt 已查 users 行,零成本——JWT role 仅旧 token 兜底）+
+        # effective 解析（user override 并入）
+        role = payload.get("db_role") or payload.get("role", "viewer")
+        perms, _ = load_effective_permissions(payload.get("username", ""), role)
         if perm not in perms:
             raise HTTPException(403, f"角色 {role} 无 {perm} 权限")
         return payload
@@ -159,10 +213,12 @@ def verify_jwt(token: str) -> dict:
     if username:
         try:
             with get_conn() as conn:
-                cur = conn.execute("SELECT enabled, deleted_at FROM users WHERE username=%s", (username,))
+                cur = conn.execute("SELECT enabled, deleted_at, role FROM users WHERE username=%s", (username,))
                 row = cur.fetchone()
             if not row or not row[0] or row[1]:
                 raise HTTPException(401, "账号已禁用或注销")
+            if row[2]:
+                payload["db_role"] = row[2]   # W4：require_perm 改用 DB role——降级后存量 token 不再 24h 越权
         except HTTPException:
             raise
         except Exception as e:

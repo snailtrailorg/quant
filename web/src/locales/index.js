@@ -1106,6 +1106,14 @@ export default {
     },
     perm: {
       title: '权限管理', note: '后端强制生效 · 菜单只是显性化 · 变更全程审计。改完即时生效（60s 内或重登）。',
+      modeRole: '角色基线', modeUser: '用户覆盖', pickUser: '选择用户…',
+      tabApi: 'API', tabNav: '菜单/页面', tabData: '数据',
+      navGroup: '分组', navState: '可见性', navHidden: '隐藏', navReadonly: '只读', navReadwrite: '读写',
+      dataMarkets: '市场域', dataSens: '数据敏感级', sensDetail: '明细', sensAgg: '聚合', sensCount: '计数',
+      dataNote: '数据维为编辑与存储层；执行面脱敏（持仓聚合/日志计数）在后续批次接线。',
+      overrideNote: '用户覆盖叠加在角色基线之上：deny 优先于 allow；移除覆盖即回到角色基线。',
+      addOverride: '添加覆盖', clear: '移除', dim: '维度', resource: '资源', effect: '效果',
+      lockedNote: '系统策略锁键（双路径同锁，不可编辑）',
     },
     sellGuard: {
       text: '风控保护中（{reason}）：BUY 已拒，SELL（平仓/止损）正常放行',
@@ -1113,7 +1121,7 @@ export default {
     },
     layout: {
       healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页（监控→健康）',
-      helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：',
+      helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：', myPermsDenied: '被用户规则拒绝（角色有但被覆盖）：',
     },
     notify: {
       title: '通知',
@@ -2185,6 +2193,14 @@ export default {
     },
     perm: {
       title: 'Permissions', note: 'Backend-enforced · menus are visualization · fully audited. Effective within 60s or re-login.',
+      modeRole: 'Role Baseline', modeUser: 'User Overrides', pickUser: 'Pick user…',
+      tabApi: 'API', tabNav: 'Menu/Pages', tabData: 'Data',
+      navGroup: 'Group', navState: 'Visibility', navHidden: 'Hidden', navReadonly: 'Read-only', navReadwrite: 'Read-write',
+      dataMarkets: 'Market Domains', dataSens: 'Data Sensitivity', sensDetail: 'Detail', sensAgg: 'Aggregated', sensCount: 'Counts',
+      dataNote: 'Data dimension is the editing/storage layer; enforcement masking lands in a later batch.',
+      overrideNote: 'User overrides stack on the role baseline: deny beats allow; clearing returns to baseline.',
+      addOverride: 'Add Override', clear: 'Remove', dim: 'Dimension', resource: 'Resource', effect: 'Effect',
+      lockedNote: 'System policy locked keys (dual-path lock, not editable)',
     },
     sellGuard: {
       text: 'Risk guard active ({reason}): BUY rejected, SELL (close/stop-loss) passes',
@@ -2192,7 +2208,7 @@ export default {
     },
     layout: {
       healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
-      helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):',
+      helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):', myPermsDenied: 'Denied by user rule (role has it, override blocks):',
     },
     notify: {
       title: 'Notifications',

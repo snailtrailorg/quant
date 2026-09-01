@@ -31,12 +31,12 @@
           <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu index="ops" v-if="['admin', 'analyst'].includes(role)">
+        <el-sub-menu index="ops" v-if="has('data_sync') || has('system_config')">
           <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
           <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
-          <el-menu-item v-if="role === 'admin'" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
+          <el-menu-item v-if="has('llm_config') || has('im_bots_config')" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
           <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
-          <el-menu-item v-if="role === 'admin'" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
+          <el-menu-item v-if="has('system_config')" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -124,9 +124,21 @@
       </el-main>
     </el-container>
     <!-- 我的权限玻璃盒（10 §4：被授予/拒绝的依据用户随时可见） -->
-  <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="420px">
+  <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="480px">
     <div style="margin-bottom: 8px; color: var(--text-secondary)">{{ t('layout.myPermsNote') }}</div>
-    <el-tag v-for="p in myPerms" :key="p" style="margin: 4px">{{ p }}</el-tag>
+    <!-- W4 玻璃盒:分组+来源(role-base/user-override)+被拒项(10 §4 去黑箱化) -->
+    <div v-if="myPermGroups.base.length" style="margin-bottom: 10px">
+      <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeRole') }}</div>
+      <el-tag v-for="p in myPermGroups.base" :key="p" style="margin: 3px">{{ p }}</el-tag>
+    </div>
+    <div v-if="myPermGroups.override.length" style="margin-bottom: 10px">
+      <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeUser') }}</div>
+      <el-tag v-for="p in myPermGroups.override" :key="p" type="warning" style="margin: 3px">{{ p }}</el-tag>
+    </div>
+    <div v-if="myPermGroups.denied.length">
+      <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('layout.myPermsDenied') }}</div>
+      <el-tag v-for="p in myPermGroups.denied" :key="p" type="danger" effect="plain" style="margin: 3px">{{ p }}</el-tag>
+    </div>
     <div v-if="!myPerms.length" style="color: var(--text-secondary)">—</div>
   </el-dialog>
   <!-- ⌘K 全局搜索(P1-4/03 §3.3) -->
@@ -166,6 +178,17 @@ const username = ref('')
 const nickname = ref('')
 const avatarUrl = ref('')
 const role = ref('')
+// W4 产出 0（白屏修复,15号批四虚报落地）:loadPerms 实现——/auth/me → permissions/role 双回填
+// 菜单由 perms 驱动(见 has());此前 L252 调用无定义,setup ReferenceError=登入白屏(盲审 A-P0)
+const perms = ref([])
+const has = k => perms.value.includes(k)
+const loadPerms = async () => {
+  try {
+    const me = await getMe()
+    perms.value = me.permissions || []
+    role.value = me.role || role.value
+  } catch {}
+}
 const lang = ref(locale.value)
 
 getMe().then(me => { username.value = me.username; role.value = me.role; nickname.value = me.nickname || ''; avatarUrl.value = me.avatar_url || '' }).catch(e => { console.error(e); username.value = ''; role.value = '' })
@@ -208,8 +231,20 @@ if (dark.value) document.documentElement.classList.add('dark')
 const helpDrawer = ref(false)
 const myPerms = ref([])
 const showMyPerms = ref(false)
+const myPermGroups = ref({ base: [], override: [], denied: [] })
 const loadMyPerms = async () => {
-  try { const { getMe } = await import('../api'); myPerms.value = (await getMe()).permissions || [] } catch {}
+  try {
+    const { getMe } = await import('../api')
+    const me = await getMe()
+    myPerms.value = me.permissions || []
+    const src = me.perm_sources || {}
+    const denied = me.denied || []
+    myPermGroups.value = {
+      base: myPerms.value.filter(p => (src[p] || 'role-base') === 'role-base'),
+      override: myPerms.value.filter(p => src[p] === 'user-override'),
+      denied,
+    }
+  } catch {}
 }
 import { Moon, Sunny } from '@element-plus/icons-vue'
 import Help from '../views/Help.vue'

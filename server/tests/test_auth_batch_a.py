@@ -63,7 +63,7 @@ def test_jwt_jti_and_blacklist():
         def execute(self, *a, **k):
             class C:
                 def fetchone(self):
-                    return (True, None)
+                    return (True, None, "viewer")   # W4:+role 列
             return C()
 
     token = auth_mod.create_jwt("1", "alice", "viewer")

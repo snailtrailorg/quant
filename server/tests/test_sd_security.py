@@ -71,7 +71,7 @@ class TestVerifyJwtUserStatus:
 
     def test_enabled_user_passes(self):
         token = auth_mod.create_jwt("1", "bob", "viewer")
-        with patch.object(auth_mod, "get_conn", lambda: self._conn((True, None))):
+        with patch.object(auth_mod, "get_conn", lambda: self._conn((True, None, "viewer"))):  # W4:+role 列
             assert auth_mod.verify_jwt(token)["username"] == "bob"
 
 
