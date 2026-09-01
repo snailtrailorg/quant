@@ -306,7 +306,10 @@ def test_backfill_from_env_idempotent():
     fake_env = {"ou_aaa": "admin", "ou_bbb": "weird-role"}
     mod = types.ModuleType("src.im_bot.feishu_client")
     mod.load_feishu_users = lambda: fake_env
+    guard = MagicMock(); guard.__enter__.return_value = guard
+    guard.execute.return_value.fetchone.return_value = [1]   # 唯一启用 feishu bot（护栏放行）
     with patch.dict(sys.modules, {"src.im_bot.feishu_client": mod}), \
+         patch("src.data_platform.db.get_conn", return_value=guard), \
          patch.object(U, "list_users", return_value=[]), \
          patch.object(U, "upsert_user", return_value={"ok": True}) as p_up:
         assert U.backfill_from_env(10) == 2
@@ -315,3 +318,12 @@ def test_backfill_from_env_idempotent():
         assert p_up.call_args_list[1][0][2] == "viewer"
     with patch.object(U, "list_users", return_value=[{"id": 1, "im_user_id": "ou_x", "role": "admin"}]):
         assert U.backfill_from_env(10) == 0   # 幂等：表非空 no-op
+    # 多 bot 护栏：启用 feishu bot>1 → 跳过（env 残留不越权灌入新 bot，2026-09-02 用户裁定）
+    guard2 = MagicMock(); guard2.__enter__.return_value = guard2
+    guard2.execute.return_value.fetchone.return_value = [2]
+    with patch.dict(sys.modules, {"src.im_bot.feishu_client": mod}), \
+         patch("src.data_platform.db.get_conn", return_value=guard2), \
+         patch.object(U, "list_users", return_value=[]), \
+         patch.object(U, "upsert_user", return_value={"ok": True}) as p_up2:
+        assert U.backfill_from_env(11) == 0
+        p_up2.assert_not_called()

@@ -15,6 +15,16 @@ def backfill_from_env(bot_id: int) -> int:
     try:
         if list_users(bot_id):
             return 0
+        # 多 bot 语义护栏（2026-09-02 用户裁定 .env 为待废弃残留、平台走多 bot）：
+        # env 授权层属"原始单 bot 时代"，仅当目标 bot 是唯一启用的 feishu bot 时回填——
+        # 多 bot 共存即语义不明（env 用户不该自动授权第二个 bot），跳过留人工管理。
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT count(*) FROM im_bot_config WHERE provider='feishu' AND enabled")
+            if (cur.fetchone()[0] or 0) != 1:
+                logger.info("backfill_from_env(%s) 跳过：启用的 feishu bot ≠1（多 bot 时代 env 残留不迁移）", bot_id)
+                return 0
         from .feishu_client import load_feishu_users
         env_users = load_feishu_users()
         if not env_users:
