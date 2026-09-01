@@ -50,7 +50,7 @@
           <el-switch v-model="row.enabled" @change="onToggle(row)" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="290">
+      <el-table-column :label="t('common.action')" width="400">
         <template #default="{ row }">
           <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'" :disabled="navReadonly">{{ t('dataManage.syncBtn') }}</el-button>
           <el-button type="warning" @click="onBackfill(row)" v-if="row.mode === 'incremental'">{{ t('symbol.backfill') }}</el-button>
