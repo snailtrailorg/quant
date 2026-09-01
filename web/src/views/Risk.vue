@@ -76,26 +76,27 @@
           </el-radio-group>
         </div>
       </template>
-      <el-table :data="riskLogs" size="small" max-height="420">
-        <el-table-column prop="ts" :label="t('common.time')" width="160" />
-        <el-table-column :label="t('risk.logAction')" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.action === 'reject' ? 'danger' : row.action === 'adjust' ? 'warning' : 'success'" size="small">
-              {{ { reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') }[row.action] || row.action }}
-            </el-tag>
+      <!-- W5 #2b：el-table-v2 虚拟滚动（风控日志 ≤1000 行真长表）；脱敏分支（count/aggregated 摘要态） -->
+      <template v-if="riskSens === 'detail'">
+        <el-auto-resizer>
+          <template #default="{ width }">
+            <el-table-v2 :columns="riskLogCols" :data="riskLogs" :width="width" :height="420"
+                         :row-height="44" fixed
+                         :row-class="({ rowIndex }) => rowIndex % 2 ? 'v2-zebra' : ''" />
           </template>
-        </el-table-column>
-        <el-table-column prop="symbol" label="Symbol" width="130" />
-        <el-table-column prop="detail" :label="t('risk.logDetail')" show-overflow-tooltip />
-        <el-table-column prop="severity" :label="t('risk.logSeverity')" width="90" />
-      </el-table>
+        </el-auto-resizer>
+      </template>
+      <el-alert v-else-if="riskSens" type="info" :closable="false" style="margin: 8px 0">
+        {{ t('perm.sensLimited') }}: {{ riskSens }} —
+        {{ riskSensSummary }}
+      </el-alert>
       <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 8px">{{ t('risk.sellAlwaysNote') }}</div>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { getRiskState, riskHalt, riskResume, getLiveTrading, updateLiveTrading } from '../api'
@@ -114,13 +115,32 @@ const liveTradingMarkets = ref([
 const load = async () => { state.value = await getRiskState() }
 
 // P1-1 水位仪表（05 §5.3：75/90 变色=纯 UI 档,不暗示引擎约束）
-import { computed } from 'vue'
 import api from '../api'
 const riskLogs = ref([])
+const riskSens = ref('detail')
+const riskSensSummary = ref('')
+// v2 列（cellRenderer:i18n 文案入 JS——v2 无 #default slot,盲审 A-P2）
+const riskLogCols = computed(() => [
+  { key: 'ts', dataKey: 'ts', title: t('common.time'), width: 160 },
+  { key: 'action', dataKey: 'action', title: t('risk.logAction'), width: 100, cellRenderer: ({ cellData }) => {
+      const map = { reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') }
+      return map[cellData] || cellData
+  } },
+  { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: 130 },
+  { key: 'detail', dataKey: 'detail', title: t('risk.logDetail'), width: 400, ellipsis: true },
+  { key: 'severity', dataKey: 'severity', title: t('risk.logSeverity'), width: 90 },
+])
 const logFilter = ref('')
 const loadLog = async () => {
-  try { riskLogs.value = (await api.get(`/risk/log${logFilter.value ? `?action=${logFilter.value}` : ''}`)).items || [] }
-  catch { riskLogs.value = [] }
+  try {
+    const r = await api.get(`/risk/log${logFilter.value ? `?action=${logFilter.value}` : ''}`)
+    riskSens.value = r.sensitivity || 'detail'
+    riskLogs.value = r.items || []
+    if (r.sensitivity === 'count')
+      riskSensSummary.value = `${r.count} ${t('perm.sensCountUnit')} (${r.first_ts || '—'} ~ ${r.last_ts || '—'})`
+    else if (r.sensitivity === 'aggregated')
+      riskSensSummary.value = Object.entries(r.by_action || {}).map(([k, v]) => `${k}: ${v}`).join(' · ')
+  } catch { riskLogs.value = []; riskSens.value = 'detail' }
 }
 const _gaugeColor = pct => pct >= 90 ? 'var(--critical)' : pct >= 75 ? 'var(--warn-fill)' : 'var(--success)'
 const gauges = computed(() => {
