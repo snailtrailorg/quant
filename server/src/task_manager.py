@@ -136,6 +136,6 @@ def notify_on_failure(title: str, body: str, provider: str = "wechat_work") -> N
     """任务失败通知（PT7 跨层联动）→ 通知中心（站内铃铛；warn 级不外推，按 2026-08-14 推送规则）。"""
     try:
         from src.alert_notify import notify
-        notify("warn", "task", title, body)
+        notify("warn", "task", title, body, code="task.failed")
     except Exception as e:
         logger.warning(f"告警发送失败: {e}")

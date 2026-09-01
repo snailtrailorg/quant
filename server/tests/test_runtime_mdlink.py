@@ -235,7 +235,7 @@ class TestPolicyAndFactory:
         with patch("src.strategy_framework.runtime.alerts.safe_notify") as sn:
             a = make_alert()
             a("T", "B")
-            sn.assert_called_once_with("critical", "T", "B")
+            sn.assert_called_once_with("critical", "T", "B", code=None)   # W3 签名扩展
             sn.side_effect = RuntimeError("channel down")
             a("T2")                               # 不抛即通过
 

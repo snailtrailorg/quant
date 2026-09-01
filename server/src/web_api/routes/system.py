@@ -36,6 +36,13 @@ def get_help_api(topic: str,
         return {"topic": topic, "content": "# 帮助内容未找到\n\n指导书文件缺失，请检查部署。", "missing": True}
 
 
+@router.get("/api/runbook")
+def runbook_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """通知 runbook 映射（W3 单源：站内 chip/处置行消费）。暂仅中文（多语言债）。"""
+    from src.alert_notify.runbook import RUNBOOK
+    return {"items": RUNBOOK}
+
+
 @router.get("/api/_probe")
 def api_probe(request: Request):
     """部署管道冒烟探针（W2，P1-2 2026-09-01）：只读六检查聚合——进程活≠功能对

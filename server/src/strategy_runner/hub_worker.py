@@ -174,7 +174,7 @@ def run(ctx: dict) -> None:
             logger.warning("seq 跳变（gap），重暖机并冻结直至人工确认")
             frozen["sticky"] = True   # gap 冻结 sticky（评审 C2：只能重启解）
             _rewarm(upto_ts=ts_n)
-            _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 bar_hub 表。")
+            _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 bar_hub 表。", code="frozen.stream")
         # pub_ts 超龄丢弃（R-DL3）
         pub_ts = float(fields.get("pub_ts", 0) or 0)
         if pub_ts and _in_astock_session() and (time.time() - pub_ts) > STALE_PUB_S:
@@ -183,7 +183,7 @@ def run(ctx: dict) -> None:
         if str(fields.get("untrusted", "0")).lower() in ("1", "true"):
             frozen["sticky"] = True
             logger.error("untrusted bar（断线失真），冻结: %s", fields.get("ts"))
-            _alert(f"不可信 bar，冻结任务 {tid}（{symbol}）", "断线跨分钟失真，重启任务解冻。")
+            _alert(f"不可信 bar，冻结任务 {tid}（{symbol}）", "断线跨分钟失真，重启任务解冻。", code="frozen.stream")
             return
         bar = {"ts": ts_n, "open": float(fields["open"]), "high": float(fields["high"]),
                "low": float(fields["low"]), "close": float(fields["close"]),
@@ -255,7 +255,7 @@ def run(ctx: dict) -> None:
             logger.error("盲视状态（hub_alive=%s bar_stale=%s）——BUY 将在下单时刻被拒",
                          hub_alive, bool(bar_stale))
             _alert(f"任务 {tid} 盲视（hub{'心跳丢失' if not hub_alive else ' bar 停更'}）",
-                   "BUY 在下单时刻被拒/SELL 放行；数据恢复自动解除。")
+                   "BUY 在下单时刻被拒/SELL 放行；数据恢复自动解除。", code="buy.blind")
         frozen["now"] = new_dyn or bool(frozen.get("sticky"))
 
     def _heartbeat():
@@ -301,7 +301,8 @@ def run(ctx: dict) -> None:
         sleeper=XReadSleeper(r, stream, gname, cname, process_batch),  # 流消费=sleeper 注入
         watchdog=lambda: _sd_notify("WATCHDOG=1"), event_engines=(ee,),  # 喂狗+事件线程存活（R-BR12）
         on_fatal=lambda reason: _alert(f"任务 {tid} {reason}，自动重启",
-                                       "worker 退出由 systemd 接管；请查 journalctl 定位首个异常。"))
+                                       "worker 退出由 systemd 接管；请查 journalctl 定位首个异常。",
+                                       code="runtime.fatal"))
     loop.every("stop-check", 5.0, _stop_hook)        # 停止（P4-3；清理+exit 0 在钩子内）
     loop.every("sess-edge", 0.0, _sess_edge)         # 时段沿清 sess_bar_wall 基线：每步
     loop.every("blind-watch", 0.0, _blind_watch)     # 盲视判定+告警（喂 frozen 字段）：每步

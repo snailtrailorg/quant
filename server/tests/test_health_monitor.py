@@ -110,7 +110,7 @@ class TestRunCheckChain:
         monkeypatch.setattr(db, "get_conn", _boom)
 
         notified = []
-        monkeypatch.setattr(monitor, "_notify", lambda sev, title, body: notified.append((sev, title)))
+        monkeypatch.setattr(monitor, "_notify", lambda sev, title, body, code=None: notified.append((sev, title)))   # W3 code 参
         monkeypatch.setattr(monitor, "_write_event", lambda *a, **k: None)
         monitor.run_check()
         assert any("valkey" in t for _, t in notified), "Valkey 宕机的 critical 必须仍被通知"

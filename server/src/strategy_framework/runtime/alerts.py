@@ -36,16 +36,17 @@ class AlertPolicy:
     recover_window: float = 60.0
 
 
-def make_alert() -> Callable[[str, str], None]:
+def make_alert() -> Callable[[str, str | None], None]:
     """统一告警入口（hub/_alert 收编）：critical 级 safe_notify。
 
     never-raise 由本包装自持（safe_notify 内部已兜，这里再兜一层——
     告警通道任何故障都不反噬主流程，测试可打桩 safe_notify 抛错验证）。
     """
 
-    def alert(title: str, body: str = "") -> None:
+    def alert(title: str, body: str = "", code: str | None = None) -> None:
+        # W3：code 逐点透传（盲审 A-P1——不硬编码默认码吞语义）
         try:
-            safe_notify("critical", title, body)
+            safe_notify("critical", title, body, code=code)
         except Exception as e:
             logger.warning("告警发送失败（吞没）: %s", e)
 

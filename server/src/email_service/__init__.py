@@ -96,9 +96,9 @@ def _final_failure_notify(to: str, subject: str, err: str, outbox_id: int) -> No
     """重试耗尽 → 通知中心（critical/email，admin 铃铛可见，点击直达发件箱）。失败不影响主流程。"""
     try:
         from src.alert_notify import notify
-        notify("critical", "email", "邮件发送最终失败",
+        notify("critical", "email", "邮件发送最终失败"
                f"收件人: {to}\n主题: {subject}\n重试 {MAX_ATTEMPTS} 次耗尽\n错误: {err}",
-               source_ref=str(outbox_id))
+               source_ref=str(outbox_id), code="email.failed")
     except Exception as e:
         _logger.error("final failure notify error: %s", e)
 

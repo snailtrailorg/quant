@@ -66,8 +66,8 @@ class TestEntryRouting:
     def test_report_routes_findings(self):
         from src.health_monitor import monitor
         notified, events = [], []
-        with patch.object(monitor, "_notify", side_effect=lambda *a: notified.append(a)), \
-             patch.object(monitor, "_write_event", side_effect=lambda *a: events.append(a)):
+        with patch.object(monitor, "_notify", side_effect=lambda *a, **k: notified.append(a)), \
+             patch.object(monitor, "_write_event", side_effect=lambda *a, **k: events.append(a)):
             monitor.report_schema_findings(
                 {"missing_tables": ["ghost"], "missing_columns": {"t": ["c"]}})
         assert notified and events

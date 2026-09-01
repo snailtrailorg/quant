@@ -139,7 +139,7 @@ def main() -> None:
                 seqs[bar["symbol"]] = seqs.get(bar["symbol"], 0) + 1   # 评审 B1：成功后才占号（失败不留洞）
             except Exception as e:
                 logger.error("XADD 失败（bar 丢失，告警）: %s", e)
-                _alert("hub XADD 失败（bar 丢失）", f"{bar['symbol']} {bar['ts']}")
+                _alert("hub XADD 失败（bar 丢失）", f"{bar['symbol']} {bar['ts']}", code="hub.xadd-fail")
                 return
         stats["bars"] += 1
         pgw.push(bar)
@@ -295,7 +295,7 @@ def main() -> None:
             renewed = r.eval(_LEASE_RENEW_LUA, 1, LEASE_KEY, my_uuid, "30")
             if not int(renewed):
                 logger.critical("租约续期失败（被抢占或丢失），退出")
-                _alert("行情 hub 租约丢失，实例退出", "另一实例在位或存储异常；systemd 将接管。")
+                _alert("行情 hub 租约丢失，实例退出", "另一实例在位或存储异常；systemd 将接管。", code="hub.lease-lost")
                 os._exit(5)
         except SystemExit:
             raise
@@ -335,8 +335,8 @@ def main() -> None:
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗
                       event_engines=(ee,),                          # 事件线程存活（R-BR12，死→exit 1）
-                      on_fatal=lambda reason: _alert(f"行情 hub {reason}，自动重启",
-                                                     "实例退出由 systemd 接管；请查 journalctl 定位首个异常。"),
+                      on_fatal=lambda reason: _alert(f"行情 hub {reason}，自动重启"
+                                                     "实例退出由 systemd 接管；请查 journalctl 定位首个异常。", code="runtime.fatal"),
                       fatal_exit_code=1)
     loop.every("lease-renew", 5.0, _lease_renew)    # 租约 30s TTL，5s 一续（失败 exit 5 在钩子内自带）
     loop.every("md-edge", 0.0, _md_edge)            # 重连沿检测：每步

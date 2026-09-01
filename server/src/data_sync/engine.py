@@ -89,10 +89,10 @@ def _alert_sync_failure(sync_id: str, status: str, failed_dates: list) -> None:
     warn 级站内铃铛（notify 同标题 1min 去重），失败持续多轮靠 last_status=partial/failed 可见。"""
     try:
         from src.alert_notify.notify import notify
-        notify("warn", "data", f"数据同步 {status}: {sync_id}",
+        notify("warn", "data", f"数据同步 {status}: {sync_id}"
                f"失败 {len(failed_dates)} 项：{'; '.join(failed_dates[:5])}"
                f"{'...' if len(failed_dates) > 5 else ''}。游标已按语义处理，缺口将自动重试；"
-               f"持续失败请查 sync_log 详情。")
+               f"持续失败请查 sync_log 详情。", code="sync.status")
     except Exception as e:
         logger.warning("同步失败告警发送失败（不阻塞同步流程）: %s", e)
 

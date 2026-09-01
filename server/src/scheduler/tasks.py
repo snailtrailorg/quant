@@ -545,7 +545,7 @@ def data_continuity_check():
 
     if issues:
         from src.alert_notify import notify
-        notify("warn", "data", "数据断连检测", "\n".join(issues))
+        notify("warn", "data", "数据断连检测", "\n".join(issues), code="data.disconn")
 
     return {"status": "ok", "issues": issues, "repaired_bars": repaired, "reconnected": reconnected}
 
@@ -656,7 +656,7 @@ def disk_monitor():
 
     if issues:
         from src.alert_notify import notify
-        notify("critical", "system", "磁盘告警", "\n".join(issues))
+        notify("critical", "system", "磁盘告警", "\n".join(issues), code="disk.warning")
 
     return {"status": "ok" if not issues else "issues", "stats": stats, "issues": issues}
 
@@ -1281,7 +1281,7 @@ def _sa4_hub_guards(r):
     return True, ""
 
 
-def _sa4_alert_once(r, dedup_key: str, title: str, body: str):
+def _sa4_alert_once(r, dedup_key: str, title: str, body: str, code: str | None = None):
     """去重告警（Valkey 键 TTL 内只发一次）——维护标记/78 配置错防 300s 周期刷屏。
 
     r 不可用或键操作失败时退化为本周期直发一次（由 beat 周期天然限频）。
@@ -1294,7 +1294,7 @@ def _sa4_alert_once(r, dedup_key: str, title: str, body: str):
                     return  # 去重窗内已发过
             except Exception:
                 pass
-        notify("warn", "system", title, body)
+        notify("warn", "system", title, body, code=code)
     except Exception:
         pass
 
@@ -1424,7 +1424,8 @@ def sa4_reconciler():
                     _sa4_alert_once(r, f"quant:sa4:alert78:{unit}",
                                     f"L3 跳过配置错单元: {unit}",
                                     "ExecMainStatus=78（EX_CONFIG）自动拉起无意义，"
-                                    "请人工修复后 systemctl reset-failed + start。")
+                                    "请人工修复后 systemctl reset-failed + start。",
+                                    code="unit.config-err")
                     logger.warning("L3: %s ExecMainStatus=78 配置错，跳过拉起待人工", unit)
                     continue
                 need_reset = True  # 崩溃 failed（含 StartLimit 打穿）-> 拉起前先清 failed 态
@@ -1436,7 +1437,8 @@ def sa4_reconciler():
                         _sa4_alert_once(r, f"quant:sa4:alert-maint:{unit}",
                                         f"L3 维护窗跳过拉起: {unit}",
                                         f"维护标记 {SA4_HUB_MAINT_KEY} 在场，hub 不自动拉起；"
-                                        "维护完成请删标记（标记 TTL 4h 自动过期）。")
+                                        "维护完成请删标记（标记 TTL 4h 自动过期）。",
+                                        code="hub.maint")
                     elif reason == "valkey-down":
                         # fail-closed 但要让植物人可见：直发一次（r 不可用无法跨周期去重，
                         # 由 beat 300s 周期限频）
@@ -1444,7 +1446,8 @@ def sa4_reconciler():
                         try:
                             notify("warn", "system", f"L3 fail-closed 跳过拉起: {unit}",
                                    "Valkey 不可达无法验 hub 租约，本轮不拉起"
-                                   "（防盲拉第二实例短暂破坏 fencing）。")
+                                   "（防盲拉第二实例短暂破坏 fencing）。",
+                                   code="l3.skip-valkey")
                         except Exception:
                             pass
                     result.setdefault("l3_guards", {})[unit] = reason

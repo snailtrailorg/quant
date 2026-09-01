@@ -99,7 +99,7 @@ def notify(level: Level, category: Category, title: str, body: str = "",
         except Exception as e:
             logger.warning("外推节流键不可用（Valkey 故障？），跳过节流直接推送: %s", e)
         if not throttled:
-            _push_channel(level, title, body)
+            _push_channel(level, title, body, code=code)
     return notif_id
 
 
@@ -118,8 +118,15 @@ def report(title: str, body: str, channel: str = "wechat_work") -> None:
     _push_channel("info", title, body, channel=channel)
 
 
-def _push_channel(level: Level, title: str, body: str, channel: str | None = None) -> None:
-    """外部通道推送（分级路由 + 日配额）。"""
+def _push_channel(level: Level, title: str, body: str, code: str | None = None,
+                  channel: str | None = None) -> None:
+    """外部通道推送（分级路由 + 日配额）。
+
+    W3（2026-09-01）：code 在 RUNBOOK 时 body 尾部追加处置行。截断纪律（盲审 A/B-P1）：
+    discord content 上限 2000 字符/企微 markdown 4096 字节——**先截原 body 再拼行**，
+    处置行永不落截断区（超限发送失败被通道层吞=告警静默丢，违 D-F1）；组装在配额
+    检查后（配额已尽免白拼）；顺手修既有隐患（原版外推传原始 body 未截）。
+    """
     target = channel or ("discord" if level == "critical" else "wechat_work")
     from src.alert_notify.channel import get_channel
     ch = get_channel(target)
@@ -129,7 +136,13 @@ def _push_channel(level: Level, title: str, body: str, channel: str | None = Non
     if _quota_exceeded(target):
         return
     try:
-        ch.send(title, body, level)
+        out_body = body[:1900]
+        if code:
+            from src.alert_notify.runbook import RUNBOOK
+            rb = RUNBOOK.get(code)
+            if rb:
+                out_body += f"\n▸ 处置[{rb['label']}]: {rb['guide']}"[:600]
+        ch.send(title, out_body, level)
     except Exception as e:
         logger.error("channel send failed (%s): %s", target, e)
 

@@ -183,6 +183,7 @@ let notifTimer = null
 const bellVisible = computed(() => ['admin', 'trader', 'analyst'].includes(role.value))
 const loadNotifs = async () => {
   if (!bellVisible.value) return
+  await ensureRunbook()
   try {
     const r = await getNotifications('active', 20)
     // W1：runbook 预计算一行一次（原模板 4 处调用→0），旧通知 code=null→rb=null 不渲染
@@ -235,7 +236,14 @@ const loadHealth = async () => {
   } catch { healthItems.value = [{ k: 'health', ok: false, v: '—' }]; healthLevel.value = 'warn' }
 }
 // runbook: web 长尾批 2026-09-01——通知表 code 字段已上(migration 0059),chip+一句话处置接线
-import { runbookOf } from '../utils/runbook' 
+// W3：runbook 后端单源——懒挂 loadNotifs 首载（bellVisible 门内，viewer 不白请求）；
+// fetch 失败（如发布切换窗 404）下次 loadNotifs 懒补；无映射=chip 静默不渲染（降级同旧）
+let runbookMap = null
+const ensureRunbook = async () => {
+  if (runbookMap) return
+  try { runbookMap = (await api.get('/runbook')).items || {} } catch {}
+}
+const runbookOf = code => (code && runbookMap && runbookMap[code]) || null 
 const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')
 loadHealth()
 loadPerms()

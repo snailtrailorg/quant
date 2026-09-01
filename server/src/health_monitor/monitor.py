@@ -33,9 +33,9 @@ def report_schema_findings(findings: dict) -> None:
     notify 的 1min 同标题去重收敛扇出；PG 不可达时 verify_schema 自身已抛，调用方 try 包住。
     """
     if findings.get("expectations_missing"):
-        _notify("warning", "[health] schema 校验被禁用",
+        _notify("warning", "[health] schema 校验被禁用"
                 "schema_expectations.txt 缺失（部署不完整？）——列级校验未生效。"
-                "runbook：重跑链生成命令（db.py load_schema_expectations docstring）并提交。")
+                "runbook：重跑链生成命令（db.py load_schema_expectations docstring）并提交。", code="health.schema-off")
         _write_event("schema_drift", "expectations", "warning", "expectations 文件缺失，校验禁用")
         return
     missing_t = findings.get("missing_tables") or []
@@ -43,19 +43,19 @@ def report_schema_findings(findings: dict) -> None:
     if not missing_t and not missing_c:
         return
     detail = f"缺表 {missing_t}；缺列 {missing_c}"
-    _notify("critical", "[health] schema 漂移：列级校验发现缺失",
+    _notify("critical", "[health] schema 漂移：列级校验发现缺失"
             f"{detail}\nrunbook：alembic upgrade head；升级后仍缺失=该表/列未被迁移链收编，"
-            f"参照 0042 模式补收编迁移。")
+            f"参照 0042 模式补收编迁移。", code="health.schema-drift")
     _write_event("schema_drift", "database", "critical", detail)
 
 
 from src.quant_common.session import in_astock_session as _in_session  # 2026-08-19 归位：删本地复制体
 
 
-def _notify(severity: str, title: str, body: str) -> None:
+def _notify(severity: str, title: str, body: str, code: str | None = None) -> None:
     """safe_notify 化（P 审：收编三处重复 try/except notify）——critical 走 system 类外推（D-F6）。"""
     from src.alert_notify.notify import safe_notify
-    safe_notify("critical" if severity == "critical" else "warn", title, body)
+    safe_notify("critical" if severity == "critical" else "warn", title, body, code=code)
 
 
 def _write_event(rule_id: str, component: str, severity: str, detail: str) -> None:
@@ -228,11 +228,11 @@ def run_check() -> dict:
         logger.log(logging.CRITICAL if f["severity"] == "critical" else logging.WARNING,
                    "[health] %s %s: %s", f["severity"].upper(), f["component"], f["detail"])
         _notify(f["severity"], f"[health] {f['component']} {f['rule_id']}",
-                f"{f['detail']}\nrunbook：15-服务监控设计.md §runbook。")
+                f"{f['detail']}\nrunbook：15-服务监控设计.md §runbook。", code="health.component")
         _write_event(f["rule_id"], f["component"], f["severity"], f["detail"])
     for rec in recovered:
         logger.info("[health] 恢复: %s %s", rec["component"], rec["rule_id"])
-        _notify("recovery", f"[health] 恢复: {rec['component']} {rec['rule_id']}", "")
+        _notify("recovery", f"[health] 恢复: {rec['component']} {rec['rule_id']}", "", code="health.recovery")
         _write_event(rec["rule_id"], rec["component"], "recovery", "")
 
     if int(snap["ts"]) % 86400 < 60:   # 每日一轮清理（epoch 取模，随 beat 周期命中一次）

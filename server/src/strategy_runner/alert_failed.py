@@ -22,7 +22,7 @@ def main() -> None:
             ).format(unit=unit)
     try:
         from src.alert_notify.notify import notify
-        nid = notify("critical", "system", title, body)
+        nid = notify("critical", "system", title, body, code="unit.failed")
         if nid:
             logger.info("已发告警 notification_id=%s: %s", nid, title)
         else:

@@ -21,10 +21,10 @@ logger = logging.getLogger("strategy_runner.trading")
 FROZEN_STALE_BAR_S = 300     # 交易时段无新 bar 冻结（评审 S6 worker 侧防线；buy_ok 门限）
 
 
-def _alert(title: str, body: str = "") -> None:
+def _alert(title: str, body: str = "", code: str | None = None) -> None:
     """交易域告警：never-raise（safe_notify），绝不影响交易主流程（与 main/hub_worker 同款）。"""
     from src.alert_notify.notify import safe_notify
-    safe_notify("critical", title, body)
+    safe_notify("critical", title, body, code=code)
 
 
 def buy_ok_check(frozen: dict, stats: dict, hub_alive: bool, now: float,
@@ -204,7 +204,7 @@ def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
         halted_now = halt_state["was"]  # Valkey 不可达时保持上一状态（check_order 侧已保守拒单）
     if halted_now and not halt_state["was"]:
         logger.critical("检测到熔断，撤销全部在场委托")
-        _alert(f"熔断触发，已自动撤销在场委托: {sid}", "check_order 已拒新单；在场委托撤销结果见 journalctl。")
+        _alert(f"熔断触发，已自动撤销在场委托: {sid}", "check_order 已拒新单；在场委托撤销结果见 journalctl。", code="risk.halt-edge")
         try:
             from vnpy.trader.constant import Status
             working = (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)
@@ -279,7 +279,7 @@ def reconcile_orders(adapter, sid, symbol=None) -> None:
                 for o in working[:10])
             logger.warning("启动对账：%d 笔在场委托: %s", len(working), desc)
             _alert(f"启动对账发现 {len(working)} 笔在场委托（任务 {sid}）",
-                   desc + " —— 疑似上次会话残留，请确认并决定是否人工撤销。")
+                   desc + " —— 疑似上次会话残留，请确认并决定是否人工撤销。", code="reconcile.open-orders")
         trades = adapter.query_trades() or []
         n_new = 0
         for t in trades:
@@ -299,7 +299,8 @@ def reconcile_orders(adapter, sid, symbol=None) -> None:
                 logger.warning("WAL 残留 submitting 单 id=%s %s %s %s（上会话崩溃窗口），待人工核对", oid, osym, oact, ovol)
             if orphans:
                 _alert(f"WAL 残留 {len(orphans)} 笔 submitting 委托（任务 {sid}）",
-                       "上一会话在'记账后、确认前'中断。请对照券商委托列表核对后人工处理。")
+                       "上一会话在'记账后、确认前'中断。请对照券商委托列表核对后人工处理。",
+                       code="reconcile.wal")
         except Exception as e:
             logger.warning("WAL 残留检查失败: %s", e)
     except Exception as e:
