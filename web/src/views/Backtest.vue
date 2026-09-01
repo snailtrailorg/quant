@@ -14,7 +14,7 @@
             <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: 8px">
               <el-option v-for="st in ['running','done','failed','pending']" :key="st" :value="st" :label="st" />
             </el-select>
-            <el-button type="primary" @click="showForm = true">{{ t('backtest.create') }}</el-button>
+            <el-button type="primary" @click="showForm = true" :disabled="navReadonly">{{ t('backtest.create') }}</el-button>
           </span>
         </div>
       </template>
@@ -135,7 +135,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -145,6 +145,7 @@ import { enumZh } from '../utils/format'
 import ParameterForm from '../components/ParameterForm.vue'
 
 const { t } = useI18n()
+const navReadonly = inject('navReadonly', ref(false))
 const router = useRouter()
 const route = useRoute()
 const runs = ref([])

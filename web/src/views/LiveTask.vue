@@ -49,9 +49,9 @@
 <el-table-column :label="t('common.action')" width="320">
         <template #default="{ row }">
           <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
-          <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)">{{ t('common.start') }}</el-button>
+          <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)">{{ t('liveTask.unfreeze') }}</el-button>
-          <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)">{{ t('common.stop') }}</el-button>
+          <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
@@ -102,7 +102,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -113,6 +113,7 @@ const router = useRouter()
 const route = useRoute()
 const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const { t } = useI18n()
+const navReadonly = inject('navReadonly', ref(false))
 const tasks = ref([])
 const strategies = ref([])
 const accounts = ref([])

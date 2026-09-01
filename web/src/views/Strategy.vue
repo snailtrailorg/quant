@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('strategy.title') }}</span>
-        <el-button type="primary" @click="openCreate">{{ t('strategy.create') }}</el-button>
+        <el-button type="primary" @click="!navReadonly && openCreate()" :disabled="navReadonly">{{ t('strategy.create') }}</el-button>
       </div>
     </template>
     <el-table :data="strategies">
@@ -207,7 +207,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 const router = useRouter()
@@ -218,6 +218,7 @@ import PythonEditor from '../components/PythonEditor.vue'
 import CodeEditor from '../components/CodeEditor.vue'
 
 const { t } = useI18n()
+const navReadonly = inject('navReadonly', ref(false))
 const strategies = ref([])
 const availableFactors = ref([])
 const editVisible = ref(false)

@@ -101,7 +101,7 @@
         </el-form-item>
         <el-form-item v-if="form.ftype === 'dsl'" :label="t('factors.exprLabel')">
           <div style="width: 100%">
-            <el-input v-model="form.code" :placeholder="t('factors.dslPlaceholder')" style="font-family: monospace" />
+            <DslEditor v-model="form.code" />
             <div style="margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary)">
               {{ t('factors.dslHint') }}
             </div>
@@ -156,6 +156,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFactorList, createFactor, updateFactor, deleteFactor, validateFactorCode , apiErr } from '../api'
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
+import DslEditor from '../components/DslEditor.vue'
 
 const { t } = useI18n()
 const factors = ref([])

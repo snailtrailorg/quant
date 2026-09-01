@@ -12,54 +12,32 @@
     </template>
     <el-alert :title="summary" :type="hasIssues ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: 20px" />
 
-    <!-- P1-2（web-design 05 §5.4）：差异处置台——结构化差异单+处置状态持久化+行展开证据链 -->
-    <el-table :data="diffRows" size="small" row-key="id">
-      <el-table-column type="expand">
-        <template #default="{ row }">
-          <div style="padding: 4px 12px; color: var(--text-secondary); font-size: var(--fs-foot)">
-            <div>{{ t('reconcile.firstSeen') }}: {{ row.first_seen || '—' }}</div>
-            <div>{{ t('reconcile.evidence') }}: {{ row.detail || '—' }}</div>
-            <div>{{ t('reconcile.ordersFlow') }}: <el-link type="primary" @click="$router.push(`/trading`)">{{ t('reconcile.viewOrders') }}</el-link></div>
-            <div>{{ t('reconcile.posSnapshot') }}: <el-link type="primary" @click="$router.push(`/trading`)">{{ t('reconcile.viewPositions') }}</el-link></div>
-            <div v-if="row.note">{{ t('reconcile.note') }}: {{ row.note }}</div>
-            <div v-if="row.exempt_qty != null">{{ t('reconcile.exemptInfo', { q: row.exempt_qty, d: row.exempt_until || '—' }) }}</div>
-          </div>
-        </template>
-      </el-table-column>
-      <el-table-column prop="symbol" label="Symbol" width="110" />
-      <el-table-column :label="t('reconcile.issueType')" width="130">
-        <template #default="{ row }">{{ issueTypeLabel(row.issue_type) }}</template>
-      </el-table-column>
-      <el-table-column prop="broker_qty" :label="t('reconcile.brokerQty')" width="110" class-name="num" />
-      <el-table-column prop="derived_qty" :label="t('reconcile.derivedQty')" width="110" class-name="num" />
-      <el-table-column :label="t('reconcile.diff')" width="100" class-name="num">
-        <template #default="{ row }">
-          <span v-if="row.broker_qty != null" :class="(row.broker_qty - row.derived_qty) >= 0 ? 'up' : 'down'">
-            {{ (row.broker_qty - row.derived_qty) >= 0 ? '▲' : '▼' }}{{ Math.abs(row.broker_qty - row.derived_qty) }}
-          </span>
-          <span v-else>—</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="first_seen" :label="t('reconcile.firstSeen')" width="160" />
-      <el-table-column :label="t('common.status')" width="100">
-        <template #default="{ row }">
-          <el-tag :type="{ open: 'danger', verified: 'success', ignored: 'info', exempt: 'warning' }[row.status] || 'info'" size="small">
-            {{ statusLabel(row.status) }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('common.action')" width="240" fixed="right">
-        <template #default="{ row }">
-          <template v-if="row.status === 'open' && canHandle">
-            <el-button size="small" @click="act(row, 'verify')">{{ t('reconcile.verify') }}</el-button>
-            <el-button size="small" @click="act(row, 'exempt')">{{ t('reconcile.exempt') }}</el-button>
-            <el-button size="small" type="info" plain @click="act(row, 'ignore')">{{ t('reconcile.ignore') }}</el-button>
-          </template>
-          <span v-else style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ row.handled_by || '—' }}</span>
-        </template>
-      </el-table-column>
-    </el-table>
+    <!-- W6：el-table-v2 虚拟滚动（≤500 行）+行点击详情抽屉（原 expand 列 v2 不支持——盲审重构）；
+         脱敏分支（count/aggregated 摘要，同 Risk 页范式） -->
+    <el-alert v-if="issuesSens && issuesSens !== 'detail'" type="info" :closable="false" style="margin: 8px 0">
+      {{ t('perm.sensLimited') }}: {{ issuesSens }} — {{ issuesSensSummary }}
+    </el-alert>
+    <el-auto-resizer v-else>
+      <template #default="{ width }">
+        <el-table-v2 :columns="issueCols" :data="diffRows" :width="width" :height="480"
+                     :row-height="48" fixed :row-event-handlers="{ onClick: ({ rowData }) => openDetail(rowData) }"
+                     :row-class="({ rowIndex }) => rowIndex % 2 ? 'v2-zebra' : ''" />
+      </template>
+    </el-auto-resizer>
     <div v-if="!diffRows.length" style="color: var(--text-secondary); padding: 16px 0">{{ t('reconcile.noIssue') }}</div>
+    <!-- 行详情抽屉（原 expand 面板 6 行证据链） -->
+    <el-drawer v-model="detailVisible" :title="t('reconcile.evidence')" size="360px">
+      <template v-if="detailRow">
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot); line-height: 2">
+          <div>{{ t('reconcile.firstSeen') }}: {{ detailRow.first_seen || '—' }}</div>
+          <div>{{ t('reconcile.evidence') }}: {{ detailRow.detail || '—' }}</div>
+          <div>{{ t('reconcile.ordersFlow') }}: <el-link type="primary" @click="$router.push(`/trading`)">{{ t('reconcile.viewOrders') }}</el-link></div>
+          <div>{{ t('reconcile.posSnapshot') }}: <el-link type="primary" @click="$router.push(`/trading`)">{{ t('reconcile.viewPositions') }}</el-link></div>
+          <div v-if="detailRow.note">{{ t('reconcile.note') }}: {{ detailRow.note }}</div>
+          <div v-if="detailRow.exempt_qty != null">{{ t('reconcile.exemptInfo', { q: detailRow.exempt_qty, d: detailRow.exempt_until || '—' }) }}</div>
+        </div>
+      </template>
+    </el-drawer>
 
     <!-- 原始 issues 摘要（兼容期保留——旧字符串通道，勿误修#11） -->
     <el-collapse v-if="rawIssues.length" style="margin-top: 12px">
@@ -108,6 +86,40 @@ const { t } = useI18n()
 const canHandle = ['trader', 'admin'].includes(localStorage.getItem('role') || 'viewer')
 const rawIssues = ref([])
 const diffRows = ref([])
+const detailVisible = ref(false)
+const detailRow = ref(null)
+const openDetail = row => { detailRow.value = row; detailVisible.value = true }
+const issuesSens = ref('detail')
+const issuesSensSummary = ref('')
+// W6 v2 列：i18n 与组件渲染入 JS(cellRenderer)——操作列 h(ElButton) 保组件形态
+import { h } from 'vue'
+import { ElButton, ElTag } from 'element-plus'
+const issueCols = computed(() => [
+  { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: 110 },
+  { key: 'issue_type', dataKey: 'issue_type', title: t('reconcile.issueType'), width: 130,
+    cellRenderer: ({ cellData }) => issueTypeLabel(cellData) },
+  { key: 'broker_qty', dataKey: 'broker_qty', title: t('reconcile.brokerQty'), width: 110, align: 'right' },
+  { key: 'derived_qty', dataKey: 'derived_qty', title: t('reconcile.derivedQty'), width: 110, align: 'right' },
+  { key: 'diff', dataKey: 'broker_qty', title: t('reconcile.diff'), width: 100, align: 'right',
+    cellRenderer: ({ rowData }) => rowData.broker_qty == null ? '—'
+      : `${(rowData.broker_qty - rowData.derived_qty) >= 0 ? '▲' : '▼'}${Math.abs(rowData.broker_qty - rowData.derived_qty)}` },
+  { key: 'first_seen', dataKey: 'first_seen', title: t('reconcile.firstSeen'), width: 160 },
+  { key: 'status', dataKey: 'status', title: t('common.status'), width: 100,
+    cellRenderer: ({ cellData }) => h(ElTag, { size: 'small',
+      type: ({ open: 'danger', verified: 'success', ignored: 'info', exempt: 'warning' })[cellData] || 'info' },
+      () => statusLabel(cellData)) },
+  { key: 'action', dataKey: 'status', title: t('common.action'), width: 250, fixed: 'right',
+    cellRenderer: ({ rowData }) => {
+      if (rowData.status === 'open' && canHandle) {
+        return h('span', { style: 'display:flex;gap:6px' }, [
+          h(ElButton, { size: 'small', onClick: e => { e.stopPropagation(); act(rowData, 'verify') } }, () => t('reconcile.verify')),
+          h(ElButton, { size: 'small', onClick: e => { e.stopPropagation(); act(rowData, 'exempt') } }, () => t('reconcile.exempt')),
+          h(ElButton, { size: 'small', type: 'info', plain: true, onClick: e => { e.stopPropagation(); act(rowData, 'ignore') } }, () => t('reconcile.ignore')),
+        ])
+      }
+      return h('span', { style: 'color:var(--text-secondary);font-size:var(--fs-foot)' }, rowData.handled_by || '—')
+    } },
+])
 const hasIssues = computed(() => diffRows.value.some(r => r.status === 'open'))
 const summary = computed(() => hasIssues.value
   ? t('reconcile.openCount', { n: diffRows.value.filter(r => r.status === 'open').length })
@@ -119,8 +131,15 @@ const statusLabel = st => ({ open: t('reconcile.stOpen'), verified: t('reconcile
   ignored: t('reconcile.stIgnored'), exempt: t('reconcile.stExempt') }[st] || st)
 
 const loadDiff = async () => {
-  try { diffRows.value = (await api.get('/reconcile/issues')).items || [] }
-  catch { diffRows.value = [] }
+  try {
+    const r = await api.get('/reconcile/issues')
+    issuesSens.value = r.sensitivity || 'detail'
+    diffRows.value = r.items || []
+    if (r.sensitivity === 'count')
+      issuesSensSummary.value = `${r.count} ${t('perm.sensCountUnit')}`
+    else if (r.sensitivity === 'aggregated')
+      issuesSensSummary.value = Object.entries(r.by_status || {}).map(([k, v]) => `${statusLabel(k) || k}: ${v}`).join(' · ')
+  } catch { diffRows.value = []; issuesSens.value = 'detail' }
 }
 const load = async () => {
   try { const r = await getReconcile(); rawIssues.value = r.issues || [] } catch { rawIssues.value = [] }

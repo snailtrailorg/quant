@@ -11,7 +11,7 @@
       <el-table-column :label="t('common.action')" width="180">
         <template #default="{ row }">
           <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <el-button type="danger" @click="onDelete(row.id)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -29,7 +29,7 @@
       </el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       <el-form-item>
-        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        <el-button type="primary" @click="onSave" :loading="saving" :disabled="navReadonly">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
         <el-button type="primary" @click="resetForm">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
@@ -37,12 +37,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {apiErr,  getRiskRules, getRiskRuleTypes, createRiskRule, updateRiskRule, deleteRiskRule } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
+const navReadonly = inject('navReadonly', ref(false))
 const rules = ref([])
 const types = ref([])
 const form = ref(emptyForm())

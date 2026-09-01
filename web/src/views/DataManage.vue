@@ -52,7 +52,7 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="290">
         <template #default="{ row }">
-          <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'">{{ t('dataManage.syncBtn') }}</el-button>
+          <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'" :disabled="navReadonly">{{ t('dataManage.syncBtn') }}</el-button>
           <el-button type="warning" @click="onBackfill(row)" v-if="row.mode === 'incremental'">{{ t('symbol.backfill') }}</el-button>
           <el-button type="danger" @click="onDelete(row)" v-if="role === 'admin'">{{ t('common.delete') }}</el-button>
           <el-button type="primary" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>
@@ -120,13 +120,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import api from '../api'
 
 const { t } = useI18n()
+const navReadonly = inject('navReadonly', ref(false))
 const router = useRouter()
 const configs = ref([])
 const logs = ref([])

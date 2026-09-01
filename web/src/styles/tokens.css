@@ -16,7 +16,10 @@
   src: url("/fonts/jetbrains-mono-latin-600-normal.woff2") format("woff2");
   font-weight: 600; font-display: swap;
 }
-/* MiSans Web @font-face 待分包文件生成后补(cn-font-split,首屏<150KB 含 JBMono 43KB) */
+/* 中文 Web 字体（W6 #3,2026-09-01）：NotoSansSC Web = Noto Sans SC (OFL) 子集化修改版
+   ——RFN 合规用别名,勿改回原名;227 分片 unicode-range,http2 按需拉取(首屏命中 ~200KB);
+   许可随附 public/fonts/OFL.txt;再生成: node scripts/split-font.mjs */
+@import url('/fonts/cjk/index.css');
 
 :root {
   /* —— 品牌 —— */
@@ -48,9 +51,9 @@
   --mkt-crypto: #7C5CFC;  /* 避开 warn 琥珀 */
 
   /* —— 字体（04 §2：中文栈 + 数字等宽 tabular）—— */
-  --font-ui: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans",
+  --font-ui: "NotoSansSC Web", -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans",
              "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
-  --font-num: "JBMono Web", "MiSans Web", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --font-num: "JBMono Web", "NotoSansSC Web", ui-monospace, "SFMono-Regular", Consolas, monospace;
 
   /* —— 字号六级（04 §2 阶梯：25 KPI/18 页标题/14 卡片标题/13 正文基线/12 表头/11.5 注脚）—— */
   /* 14号 §2.1 clamp 响应式字号(1280~2560 平滑缩放;midpoint=1920) */
