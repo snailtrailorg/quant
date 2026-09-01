@@ -327,3 +327,31 @@ def test_backfill_from_env_idempotent():
          patch.object(U, "upsert_user", return_value={"ok": True}) as p_up2:
         assert U.backfill_from_env(11) == 0
         p_up2.assert_not_called()
+
+
+# 首见登记（2026-09-02 用户裁定：per-bot 对话本就开放 default_role，补留痕+通知）
+def test_first_seen_enroll():
+    from src.im_bot import feishu_client as FC
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    # 第一条 SELECT=default_role 行；第二条 SELECT 1 im_bot_users=空(未登记)
+    conn.execute.return_value.fetchone.side_effect = [["viewer"], None]
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch.object(FC, "get_feishu_client"), \
+         patch("src.im_bot.users.upsert_user", return_value={"ok": True}) as p_up, \
+         patch.object(N, "notify") as p_notify:
+        FC.process_message_async("ou_new", "你好", fid=10)
+    p_up.assert_called_once_with(10, "ou_new", "viewer")
+    p_notify.assert_called_once()
+    assert p_notify.call_args.kwargs["code"] == "im.first-seen"
+
+
+def test_first_seen_already_enrolled_no_renotify():
+    from src.im_bot import feishu_client as FC
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchone.side_effect = [["viewer"], [1]]   # 已在表
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch.object(FC, "get_feishu_client"), \
+         patch("src.im_bot.users.upsert_user", return_value={"ok": True}) as p_up, \
+         patch.object(N, "notify") as p_notify:
+        FC.process_message_async("ou_known", "又一条", fid=10)
+    p_up.assert_not_called(); p_notify.assert_not_called()

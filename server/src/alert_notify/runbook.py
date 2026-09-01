@@ -20,6 +20,7 @@ RUNBOOK: dict[str, dict] = {
     # ——— 批 7 告警分发（2026-09-02） ———
     "alert.push-failed": {"label": "告警推送失败", "guide": "外推通道发送失败——设置→告警 查通道状态并测试；连续失败查 risk worker journalctl 归因。"},
     "alert.test":        {"label": "告警测试", "guide": "设置→告警 的通道测试消息（人工触发），无行动项。"},
+    "im.first-seen":     {"label": "飞书新用户首见", "guide": "首次给 bot 发消息者已按 default_role 自动登记（同时成告警收件人）——非预期则到 设置→集成→IM→用户管理 调整。"},
     # ——— 数据面（hub/worker） ———
     "deps.exhausted":   {"label": "依赖探活耗尽", "guide": "PG 持续不可达超 10 分钟——查 PG 服务与网络；runner 已退出待 systemd 重试。"},
     "frozen.stream":    {"label": "流异常冻结", "guide": "流序号跳变/不可信 bar（数据污染事实）——重启任务解冻；SELL 不受限。"},

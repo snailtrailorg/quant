@@ -304,6 +304,23 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
                 r = cur.fetchone()
                 if r:
                     role = r[0]
+                # 首见登记（2026-09-02 用户裁定）：per-bot 路径本就是"发消息即按 default_role 对话"
+                # （19 号批 2 设计）但此前零留痕——首见即入 im_bot_users + warn 通知 admin（骑批 7
+                # 告警链）。幂等：已在表则跳过；并发双见由 notify 60s 去重兜。
+                cur = conn.execute("SELECT 1 FROM im_bot_users WHERE bot_id=%s AND im_user_id=%s", (fid, open_id))
+                if not cur.fetchone():
+                    from src.im_bot.users import upsert_user
+                    if upsert_user(fid, open_id, role).get("ok"):
+                        logger.info(f"首见登记 bot={fid} open_id={open_id[:10]}… role={role}")
+                        try:
+                            from src.alert_notify.notify import notify
+                            notify("warn", "system",
+                                   f"飞书新用户首见登记（bot #{fid}）",
+                                   f"open_id={open_id} 已按 default_role={role} 登记为该 bot 用户——"
+                                   f"将同时成为告警推送收件人；如非预期请到 设置→集成→IM→用户管理 调整或移除。",
+                                   code="im.first-seen")
+                        except Exception as ne:
+                            logger.warning(f"首见登记通知失败(不影响对话): {ne}")
         except Exception as e:
             logger.warning(f"查飞书机器人 role 失败: {e}")
     else:
