@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-09-02 · 告警订阅分发架构：三通道 Celery 队列化+notifications.dispatch 全程审计（用户三轮裁定+双盲审三轮）
+
+- **订阅模型**：全局一套（alert_channel_sub 三行 im/email/sms），每通道独立类别多选+min_level 门槛（warn+ 可调）——取代旧 critical→discord 硬编码路由（channel_config webhook 链保留为过渡兜底，零订阅时回落，订阅配好自然失效）
+- **异步铁律（用户裁定）**：推送必须队列化不阻塞业务——notify() 同步增量=一次 queue.put；发送全在 risk worker（alerts_im/email/sms 三队列，-c 1 与长任务隔离）或降级 daemon 线程
+- **全程可审计（用户裁定）**：notifications.dispatch jsonb 回写——ok/queued/sending/failed:token/skip:token；{}=零外推终态,null=未跑完（死亡窗）——第四种"说不清"不存在；网页通知页 chips 可见
+- **双发窗封死**：claim 认领式（queued→sending 单向迁移,rowcount=1 才发）——降级直发与 worker 只有一方获得发送权（短信计费敏感）
+- **凭证面**：SMS 走 system_config 加密列（smtp 先例,Web 配零重启到位即通）；alerts_config 权限 admin 专属锁三处（analyst 有 system_config 不能触告警路由/计费面）
+- **分层层级**：celery 任务定义归 scheduler(3)；alert_notify(2)→im_bot(3) 走 EXEMPT_UPWARD 成文豁免
+- 详 docs/任务/批7-告警订阅分发.md（三轮双盲审 49 条全吸收的完整契约）
+
 ## 2026-08-19 · 分钟数据源策略：XTP 自攒为主，Tusharestk_mins 产品包后启（用户拍板）
 
 - **决定**：Tushare stk_mins 是独立产品包（2000 元/年），当前全局 1 次/小时不可用。池驱动分钟同步基础设施已建（`data_sync/pool_minute.py` + beat + 限速闸门 + API 端点）但** beat 禁用**——买包后取消注释 beat + `data_source_config.params` 配 `rate_limits` 即启用。
