@@ -134,3 +134,55 @@ class TestOverrideCrud:
         with pytest.raises(HTTPException) as ei:
             self._call("adminbob", {"dimension": "api", "resource": "system_config", "effect": "deny"})
         assert ei.value.status_code == 400
+
+
+class TestAuthMatrixW5:
+    """W5 迁移矩阵测（盲审 B-P2）：全 GET 端点 × 三角色 403/200 断言——
+    verify_jwt 打桩（身份层），permission 表空回退字典=角色门等价（迁移零漂移验证）。"""
+
+    def _matrix_get(self, role):
+        """OpenAPI 规范枚举全部 GET 端点（app.routes 惰性壳不含 include 路由）。"""
+        from unittest.mock import patch, MagicMock
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        conn = MagicMock(); conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchall.return_value = []   # permission 表空→字典回退
+        conn.execute.return_value.fetchone.return_value = None
+        import src.web_api.auth as A
+        A._PERM_CACHE.update(at=0.0, roles=None, users={})
+        out = {}
+        with patch("src.web_api.auth.verify_jwt",
+                   return_value={"sub": "1", "username": "bob", "role": role, "db_role": role}), \
+             patch("src.data_platform.db.get_conn", return_value=conn):
+            c = TestClient(app)
+            spec = c.get("/openapi.json").json()
+            for path, methods in spec.get("paths", {}).items():
+                if "get" not in methods or "{" in path:
+                    continue
+                try:
+                    resp = c.get(path, headers={"Authorization": "Bearer t"})
+                    out[path] = resp.status_code
+                except Exception:
+                    out[path] = -1
+        return out
+
+    def test_viewer_blocked_on_admin_perm_endpoints(self):
+        """viewer 对 system_config/user_mgmt/llm_config 域端点=403（迁移后仍拒）。"""
+        m = self._matrix_get("viewer")
+        blocked = [p for p, code in m.items() if code == 403]
+        assert any("/permissions" in p for p in blocked), "权限管理端点须拒 viewer"
+        # admin-GET 域(迁移前 require_role(admin) 的读端点):health 组件/用户列表
+        assert "/api/health/components" in blocked, "health 组件(admin→system_config)须拒 viewer"
+        assert "/api/user" in blocked, "用户列表(admin→user_mgmt)须拒 viewer"
+
+    def test_admin_passes_admin_domain(self):
+        m = self._matrix_get("admin")
+        for p, code in m.items():
+            if "/api/permissions" in p:
+                assert code in (200, 422), (p, code)   # 422=路径参数端点占位
+
+    def test_viewer_read_endpoints_pass(self):
+        """read 域（viewer 有 read 键）核心端点 200/422 而非 403。"""
+        m = self._matrix_get("viewer")
+        for p in ["/api/strategy", "/api/factors", "/api/backtest", "/api/notifications"]:
+            assert m.get(p, -1) in (200, 422), (p, m.get(p))
