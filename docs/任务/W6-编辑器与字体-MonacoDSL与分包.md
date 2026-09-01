@@ -4,7 +4,7 @@
 
 ## 产出 1:DslEditor(Monaco DSL 补全,#2a)
 
-- **新建** `web/src/components/DslEditor.vue`:仿 PythonEditor 封装——注册自定义语言 `quant-dsl`(tokenizer:字段/函数/数字/运算符)+ **completion provider**(trigger '.'与任意输入):
+- **新建** `web/src/components/DslEditor.vue`:**模块级单次注册+IDisposable**(盲审 A-P1:补全 provider 是 monaco 全局,对话框反复挂载会叠重复——注册提升模块级做一次,组件只建 editor 实例+卸载 dispose);tokenizer 运算符对齐 factor.py `_DT_OPS` 全集(+ - * / ** // % 与一元±,盲审 A-P2);completion(任意输入触发):
   - 字段:close/high/low/open/volume(+open_ 别名)——文档"当前 bar 标量"
   - 函数:mean/std/max/min/ema/rsi/slope/avevol——签名 `mean(field, n)`+文档"窗口 n 根(含当前)"
   - snippet:`mean(close,20) / close - 1` 模板
@@ -13,20 +13,21 @@
 
 ## 产出 2:中文 web 字体分包(#3)
 
-- **源字体决策**:MiSans 本机无源(需小米官网下载,直链不确定+体积大)——**首选探测 MiSans 直链(spe curl,单字重 Regular ~10MB);不成则 Noto Sans SC(系统 google-noto-sans-cjk 包,开源同权)替代**——目标=跨端统一中文渲染,非特定品牌(源差异记 decisions)
-- **工具**:`npm i -D cn-font-split`(7.4.3,registry 已通);脚本 `web/scripts/split-font.mjs`:输入源 ttf/otf → 输出 `public/fonts/cjk/` 子集(woff2+unicode-range CSS 片段)
-- **接线**:tokens.css 补 `@font-face MiSans Web`(或 `NotoSansSC Web`)系列——`font-display: swap`,子集 CSS import;`--font-ui` 栈把 Web 版插在系统 MiSans 前
-- **验收**:build 后 dist/fonts/cjk/ 子集齐;首屏中文由 Web 字体渲染(非系统回退);总增量控制在常用 3500 字子集 ≤300KB(盲审视点)
+- **源字体定案(盲审 A/B 修)**:MiSans **非开源**(小米自定义条款,子集再分发边界模糊——"开源同权"系误称,直链探测已失败)→ **Noto Sans SC 静态字重** `/usr/share/fonts/google-noto-sans-sc-fonts/NotoSansSC-Regular.otf`(盲审 A:cn-font-split 不吃 VF ttc,静态 otf 本机在库)
+- **OFL 合规三件(盲审 B-P0)**:①`public/fonts/OFL.txt` 随附(Noto 子集+**补 JBMono 历史欠账**);②子集=修改版,**禁用 Reserved Font Name**——CSS family 用别名 `NotoSansSC Web` 是合规机制非随意,注释注明勿"优化"掉;③wqy(GPL)不碰
+- **工具**:`npm i -D cn-font-split`(7.4.3;注意 postinstall 拉 wasm32-wasip1 运行时);脚本 `web/scripts/split-font.mjs`:静态 otf → `public/fonts/cjk/` 子集(woff2+unicode-range CSS)
+- **接线**:子集 CSS **改写 family** 为 `NotoSansSC Web`(盲审 A-P2:产物 CSS 用字体内部名须改写否则引用落空)→ tokens.css @font-face 系(font-display:swap);nginx http2 确认(盲审 B-P1:未证实——HTTP/1.1 下 100 分片×6 连接限制,FOUT 拉长;查 server nginx.conf 再定子集粒度)
+- **验收口径修(盲审 A-P1)**:**首屏命中 chunk 下载量 ≤150KB**(tokens.css:19 既有预算)——非"3500 字总子集"(表外字回退系统=设计,与"禁系统字体仍正确"矛盾口径废除)
 
 ## 产出 3:readonly 接线(W5 缓做)
 
-- 6 重点页 inject `navReadonly` → 主写按钮 :disabled+tooltip("只读(菜单权限)"):Strategy(新建/保存)/LiveTask(启动/停止)/Pool(回补)/BacktestRun(发起)/RiskRules(增删改)/DataOps(同步触发)
+- 5 页 inject `navReadonly`(指路修,盲审 B-P0:原 6 页三处错):Strategy(新建/保存)/LiveTask(启动/停止)/**Backtest.vue:17/131 submitRun(非 BacktestRun.vue)**/**DataManage.vue:55-56 同步触发(DataOps 是 tab 壳零按钮)**/RiskRules(增删改);**Pool 缓做**(回补按钮模板无挂点——需先补模板按钮,另记);已有 :disabled 合并规则 `:disabled="原条件 || navReadonly"`(Backtest.vue:7/9)
 - 执行面声明(已定):api 维服务端拒,UI 灰=提示层
 
 ## 产出 4:Reconcile v2(W5 缓做,交互重构)
 
-- expand 列 → **行点击详情抽屉**(el-drawer 右侧,内容=原 expand 面板四行)——v2 兼容形态
-- 表体 el-table→el-table-v2(≤500 行;列:4 数据列+操作列 cellRenderer 处置按钮);脱敏分支(count/aggregated 摘要,同 Risk 页范式)
+- expand 列 → **行点击详情抽屉**(el-drawer;内容=原 expand **6 行**:first_seen/detail/两 router 链接/note/exempt——盲审 A-P2 少记两条)
+- 表体 el-table→el-table-v2(≤500 行;现 8 列全迁:含 handled_by/note 落点明示;操作列 h(ElButton) 处置三钮);脱敏分支(count/aggregated 摘要,同 Risk 页范式)
 
 ## 验收
 1. build 绿+冒烟绿;DslEditor 输入 `mea` 弹补全(手验路径描述);DSL 保存/试算不回归
