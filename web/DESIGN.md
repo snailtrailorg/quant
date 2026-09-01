@@ -5,10 +5,12 @@
 
 ## 1. 全局机制（代码只写一处）
 
+> ⚠️ **字体与语义色已由 `src/styles/tokens.css`（04 号设计系统）取代**（2026-08-30 web 重设计批）——字体走 `var(--font-ui)` 中文栈（含 MiSans 回退），语义色走四令牌四色相（`--up/--down/--success/--critical`），EP 整组 ramp 同覆写。本节字体行仅为历史参考。
+
 | 机制 | 位置 | 控制什么 |
 |---|---|---|
 | `<el-config-provider size="default">` | `src/App.vue` | **全站所有 Element 组件的尺寸**（按钮/输入框/选择器/表格/标签/开关…）。改这一个值 = 全站变。页面**不得**再写 `size` 属性 |
-| 全局字体 | `src/App.vue` body 样式 | 字体家族统一 'Segoe UI', Roboto, sans-serif |
+| ~~全局字体~~ → **tokens.css** | `src/styles/tokens.css` `--font-ui` / `--font-num` | 字体家族+等宽数字+@font-face（JBMono Web 预生成）|
 | 文案 | `src/locales/index.js`（i18n） | 所有用户可见文案走 `t()`，zh/en key 1:1 |
 | 条款文本 | 后端 `server/src/web_api/terms.py`（`GET /api/terms`） | 注册页与开通邮件共用单一源 |
 
@@ -40,6 +42,8 @@
 - 禁用态用 `:disabled`；原因用 `title` 悬停提示，不改按钮文字。
 
 ## 4. 颜色系统（Element 语义色）
+
+> ⚠️ **本节已被 tokens.css 取代**（2026-08-30）——品牌色 #1F4FD8（替换 EP 默认蓝）+ EP 整组 ramp + 四令牌四色相（--up 红涨/--down 绿跌/--success 青绿/--critical 深红）+ 暗色变体。本节仅为历史参考，新页面一律用 `var(--*)` 令牌。
 
 - 状态展示统一用 `el-tag` + 语义 type：`success`=运行/已启用/成功 · `warning`=已停/部分 · `danger`=错误/已禁用 · `info`=只读/未验证/中性。
 - 语义色不自定义十六进制，直接用 Element 默认（primary #409eff 等），保证全站一致。
