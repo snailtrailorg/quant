@@ -296,3 +296,22 @@ def test_push_failed_loop_breaker():
     with patch.object(D, "_writeback_empty") as p_empty:
         D.dispatch("warn", "system", "告警推送失败[im]: x", "b", code="alert.push-failed", notif_id=3)
     p_empty.assert_called_once()
+
+
+# 19 号双轨收尾：env 授权层回填（2026-09-02，用户实证 open_id 在 env 而表空）
+def test_backfill_from_env_idempotent():
+    from src.im_bot import users as U
+    # 表空+env 有用户 → upsert；表非空 → 0（load_feishu_users 在函数内 import，sys.modules 注入）
+    import types, sys
+    fake_env = {"ou_aaa": "admin", "ou_bbb": "weird-role"}
+    mod = types.ModuleType("src.im_bot.feishu_client")
+    mod.load_feishu_users = lambda: fake_env
+    with patch.dict(sys.modules, {"src.im_bot.feishu_client": mod}), \
+         patch.object(U, "list_users", return_value=[]), \
+         patch.object(U, "upsert_user", return_value={"ok": True}) as p_up:
+        assert U.backfill_from_env(10) == 2
+        assert p_up.call_count == 2
+        # 非法角色回落 viewer
+        assert p_up.call_args_list[1][0][2] == "viewer"
+    with patch.object(U, "list_users", return_value=[{"id": 1, "im_user_id": "ou_x", "role": "admin"}]):
+        assert U.backfill_from_env(10) == 0   # 幂等：表非空 no-op

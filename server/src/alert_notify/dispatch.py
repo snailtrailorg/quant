@@ -209,6 +209,12 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
             cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s", (int(bot_id),))
             users = list({r[0] for r in cur.fetchall()})
         if not users:
+            # 19 号双轨收尾（2026-09-02）：表空则尝试 env 授权层一次性回填（扫码时代 open_id 在 env，
+            # 聊天一直靠 check_user 兜底——dispatch 与聊天路径应同源）
+            from src.im_bot.users import backfill_from_env, list_users
+            if backfill_from_env(int(bot_id)) > 0:
+                users = list({u["im_user_id"] for u in list_users(int(bot_id))})
+        if not users:
             return False, "no_binding"
         if provider_name != "feishu":
             logger.warning("alert im dispatch: provider %s not supported yet (bot %s)", provider_name, bot_id)

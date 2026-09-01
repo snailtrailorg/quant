@@ -201,9 +201,24 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
             elif n_bound == 0:
                 detail, ok = "无绑定用户（先在飞书对 bot 发送任意消息完成绑定）", False
             else:
+                # 批 8.5（2026-09-02）：send_text 已真实 bool（批 7 改造），测试升级为
+                # test_connection + 真发一条到全体绑定用户（email/sms 同款真发语义，e2e 闭环）
                 p = get_im_provider(b[0])
-                ok, detail = p.test_connection(int(row["target"])) if p else (False, "provider 缺失")
-                detail = "连接正常" if ok else (str(detail)[:80] or "连接失败")
+                if not p:
+                    ok, detail = False, "provider 缺失"
+                else:
+                    ok, detail = p.test_connection(int(row["target"]))
+                    if ok:
+                        with get_conn() as conn:
+                            cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s",
+                                               (int(row["target"]),))
+                            bound = [r[0] for r in cur.fetchall()]
+                        sent = sum(1 for u in bound
+                                   if p.send_text(int(row["target"]), u, "open_id", "[test] 告警通道测试——收到本条即 IM 告警链路已通"))
+                        detail = f"连接正常，测试消息已发 {sent}/{len(bound)} 位绑定用户" if sent else "连接正常但 0 人送达（查绑定/发送日志）"
+                        ok = sent > 0
+                    else:
+                        detail = str(detail)[:80] or "连接失败"
     elif ch == "email":
         # B 评 P3：只入队不同步试发——SMTP 60s > axios 30s，同步会让前端超时；
         # 发送由 beat sweep（60s 周期）兜，outbox 页可查（测试通知 code=alert.test 同步可见）

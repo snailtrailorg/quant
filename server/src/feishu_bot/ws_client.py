@@ -57,6 +57,11 @@ def on_message(data) -> None:
 
 
 def main() -> None:
+    # 2026-09-02：启动即回填（19 号双轨收尾——env 授权用户入表，告警 dispatch 同源可用）
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1].isdigit():
+        from src.im_bot.users import backfill_from_env
+        backfill_from_env(int(sys.argv[1]))
     import sys, logging
     global _FID
     _FID = sys.argv[1] if len(sys.argv) > 1 else None

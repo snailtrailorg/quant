@@ -7,6 +7,31 @@ logger = logging.getLogger("im_bot.users")
 _VALID_ROLES = ("viewer", "analyst", "trader", "admin")
 
 
+def backfill_from_env(bot_id: int) -> int:
+    """env 授权层一次性回填 im_bot_users（2026-09-02：19 号双轨收尾——表为主真相源，
+    env 扫码时代的 LARK_AUTHORIZED_USERS 从未迁入，聊天靠 check_user 兜底活着而告警
+    dispatch 只读表误判"无绑定"）。表非空=no-op（幂等）；角色非法回落 viewer。
+    返回回填行数。"""
+    try:
+        if list_users(bot_id):
+            return 0
+        from .feishu_client import load_feishu_users
+        env_users = load_feishu_users()
+        if not env_users:
+            return 0
+        n = 0
+        for open_id, role in env_users.items():
+            r = upsert_user(bot_id, open_id, role if role in _VALID_ROLES else "viewer")
+            if r.get("ok"):
+                n += 1
+        if n:
+            logger.info("im_bot_users 回填 bot=%s ← env 授权层 %d 行（19 号双轨收尾）", bot_id, n)
+        return n
+    except Exception as e:
+        logger.warning("backfill_from_env(%s) 失败（不影响主流程）: %s", bot_id, e)
+        return 0
+
+
 def list_users(bot_id: int) -> list[dict]:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
