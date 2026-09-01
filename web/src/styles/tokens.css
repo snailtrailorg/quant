@@ -56,14 +56,14 @@
              "Microsoft YaHei", "Segoe UI", Roboto, sans-serif;
   --font-num: "JBMono Web", "NotoSansSC Web", ui-monospace, "SFMono-Regular", Consolas, monospace;
 
-  /* —— 字号六级（04 §2 阶梯：25 KPI/18 页标题/14 卡片标题/13 正文基线/12 表头/11.5 注脚）—— */
-  /* 14号 §2.1 clamp 响应式字号(1280~2560 平滑缩放;midpoint=1920) */
-  --fs-kpi: clamp(21px, 25px + 0.25vw, 27px);
-  --fs-page: clamp(17px, 18px + 0.06vw, 18.5px);
-  --fs-card: 14px;
-  --fs-body: clamp(13px, 13px + 0.03vw, 13.5px);
-  --fs-label: 12px;
-  --fs-foot: 11.5px;
+  /* —— 字号六级（14号 v1.1 §2.1 三点校准 clamp @1280/@1707/@1920，单一驱动源=--fs-body；
+        公式勿凭感觉改——基准变按三点法重算斜率（斜率=Δpx/Δvw），14号 §4 末注）—— */
+  --fs-body:  clamp(12.5px, calc(9.5px + 0.234vw), 14px); /* @1280=12.5 | @1707=13.5 | @1920=14 */
+  --fs-kpi:   calc(var(--fs-body) * 1.92);
+  --fs-page:  calc(var(--fs-body) * 1.38);
+  --fs-card:  calc(var(--fs-body) * 1.0);
+  --fs-label: calc(var(--fs-body) * 0.92);
+  --fs-foot:  calc(var(--fs-body) * 0.87);
 
   /* —— 间距/圆角/阴影 —— */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-6: 24px; --sp-8: 32px;
@@ -95,6 +95,10 @@
 
   --el-font-family: var(--font-ui);
   --el-font-size-base: var(--fs-body);
+  /* 14号 §2.1 EP 字号组补全(small/extra-small/large 挂令牌,消灭 EP 原值残留) */
+  --el-font-size-small: var(--fs-label);
+  --el-font-size-extra-small: var(--fs-foot);
+  --el-font-size-large: var(--fs-page);
   /* 14号 F4:EP 字号漏区补全 */
   --el-form-label-font-size: var(--fs-label);
   --el-dialog-title-font-size: var(--fs-card);

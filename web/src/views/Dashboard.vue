@@ -26,37 +26,37 @@
       </div>
     </el-card>
 
-    <!-- KPI5 -->
-    <div style="display: flex; gap: 16px; margin-bottom: 0">
-      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
+    <!-- KPI5（14号 §2.3 flex 等分 + §2.4 <1280 降列换行） -->
+    <div class="kpi-row">
+      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.totalAssets') }}</div>
         <div class="kpi-num">{{ fmtMoney(dashboard.total_value) }}</div>
         <svg class="sparkline-svg" width="100%" height="24" viewBox="0 0 100 24">
           <polyline v-if="sparklinePoints.length" :points="sparklinePoints" fill="none" stroke="var(--up)" stroke-width="1.5" />
         </svg>
       </div></el-card></div>
-      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
+      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.todayPnl') }}</div>
         <div class="kpi-num" :class="pnlClass(dashboard.daily_pnl)">{{ pnlArrow(dashboard.daily_pnl) }} {{ fmtMoney(dashboard.daily_pnl) }}</div>
       </div></el-card></div>
-      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
+      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('trading.totalPnl') }}（{{ t('dashboard.sinceInception') }}）</div>
         <div class="kpi-num" :class="pnlClass(dashboard.total_pnl)">{{ pnlArrow(dashboard.total_pnl) }} {{ fmtMoney(dashboard.total_pnl) }}</div>
       </div></el-card></div>
-      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
+      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('dashboard.riskGauge') }}</div>
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
         <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: 4px" />
       </div></el-card></div>
-      <div style="flex: 1"><el-card shadow="never"><div class="kpi">
+      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('dashboard.tasksRunning') }}</div>
         <div class="kpi-num">{{ liveTasks.filter(x => x.status === 'running').length }}/{{ liveTasks.length }}</div>
       </div></el-card></div>
     </div>
 
-    <!-- 权益曲线 + 实盘任务 -->
-    <el-row :gutter="16" style="margin-top: 16px">
-      <el-col :span="15">
+    <!-- 权益曲线 + 实盘任务（14号 §2.4 :md/:xs 降列：<992 堆叠） -->
+    <el-row class="resp-row" :gutter="16" style="margin-top: 16px">
+      <el-col :xs="24" :sm="24" :md="15">
         <el-card shadow="never">
           <template #header>
             <div style="display:flex; justify-content:space-between; align-items:center">
@@ -70,7 +70,7 @@
           <div v-else class="empty-cell">{{ t('dashboard.noCurve') }}</div>
         </el-card>
       </el-col>
-      <el-col :span="9">
+      <el-col :xs="24" :sm="24" :md="9">
         <el-card shadow="never">
           <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.liveTasks') }}<el-button text size="small" @click="$router.push('/live-task')">{{ t('dashboard.more') }}→</el-button></div></template>
           <div v-for="task in liveTasks.slice(0, 5)" :key="task.id" class="task-row">
@@ -89,9 +89,9 @@
       </el-col>
     </el-row>
 
-    <!-- 底排：持仓 Top5 / 今日订单流 / 数据健康 / 最近回测 -->
-    <el-row :gutter="16" style="margin-top: 16px">
-      <el-col :span="6"><el-card shadow="never">
+    <!-- 底排：持仓 Top5 / 今日订单流 / 数据健康 / 最近回测（14号 §2.4：≥992 四列 / 768-991 两列 / <768 堆叠） -->
+    <el-row class="resp-row" :gutter="16" style="margin-top: 16px">
+      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.topPositions') }}<el-button text size="small" @click="$router.push('/trading')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="p in topPositions" :key="p.symbol" class="pos-row">
           <span>{{ (p.symbol || '').split('.')[0] }}</span>
@@ -99,7 +99,7 @@
         </div>
         <div v-if="!topPositions.length" class="empty-cell">{{ t('dashboard.noPositions') }}</div>
       </el-card></el-col>
-      <el-col :span="6"><el-card shadow="never">
+      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header>{{ t('dashboard.todayOrders') }}</template>
         <div v-for="o in todayOrders.slice(0, 6)" :key="o.id" class="evt-row">
           <el-tag size="small" :type="o.action === 'BUY' ? 'danger' : 'success'">{{ o.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
@@ -108,13 +108,13 @@
         </div>
         <div v-if="!todayOrders.length" class="empty-cell">{{ t('dashboard.noOrders') }}</div>
       </el-card></el-col>
-      <el-col :span="6"><el-card shadow="never">
+      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.dataHealth') }}<el-button text size="small" @click="$router.push('/data-integrity')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div class="evt-row">{{ t('dashboard.complete') }}: <b class="num" style="color: var(--success)">{{ integrity.complete || 0 }}</b></div>
         <div class="evt-row">{{ t('dashboard.missing') }}: <b class="num" style="color: var(--critical)">{{ integrity.missing || 0 }}</b></div>
         <div class="evt-row" style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('dashboard.dataHealthNote') }}</div>
       </el-card></el-col>
-      <el-col :span="6"><el-card shadow="never">
+      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.recentBacktests') }}<el-button text size="small" @click="$router.push('/backtest')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="b in recentBacktests.slice(0, 4)" :key="b.id" class="evt-row">
           #{{ b.id }}
@@ -237,6 +237,22 @@ const sparkline = computed(() => {
 
 <style scoped>
 .kpi { padding: 6px 0; }
+/* KPI flex 等分（14号 §2.3：flex:1 1 0 + min-width:0 + 卡内截断） */
+.kpi-row { display: flex; gap: 16px; margin-bottom: 0; }
+.kpi-cell { flex: 1 1 0; min-width: 0; }
+.klabel, .kpi-num { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* <1280 保底断点（14号 §2.2/§2.4，桌面优先不深度适配）：KPI 降列 3+2 换行 */
+@media (max-width: 1279px) {
+  .kpi-row { flex-wrap: wrap; }
+  .kpi-cell { flex: 1 1 30%; }
+}
+@media (max-width: 767px) {
+  .kpi-cell { flex: 1 1 100%; }
+}
+/* 栅格 :sm/:xs 堆叠后补纵向行距（el-row gutter 只有横向，ep flex-wrap 布局 row-gap 生效） */
+@media (max-width: 991px) {
+  .resp-row { row-gap: 16px; }
+}
 .sparkline { font-size: 12px; color: var(--text-secondary); }
 .klabel { color: var(--text-secondary); font-size: var(--fs-label); }
 .task-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }

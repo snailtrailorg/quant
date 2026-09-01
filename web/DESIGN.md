@@ -5,7 +5,7 @@
 
 ## 1. 全局机制（代码只写一处）
 
-> ⚠️ **字体与语义色已由 `src/styles/tokens.css`（04 号设计系统）取代**（2026-08-30 web 重设计批）——字体走 `var(--font-ui)` 中文栈（含 MiSans 回退），语义色走四令牌四色相（`--up/--down/--success/--critical`），EP 整组 ramp 同覆写。本节字体行仅为历史参考。
+> ⚠️ **字体/字号与语义色已由 `src/styles/tokens.css` 取代（04 号设计系统 + 14 号方案）**——字体走 `var(--font-ui)` 中文栈（含 MiSans 回退），字号走 14 号 §2.1 三点校准 clamp（@1280/@1707/@1920，单一驱动源 `--fs-body`），语义色走四令牌四色相（`--up/--down/--success/--critical`），EP 整组 ramp 同覆写。本节字体行仅为历史参考。
 
 | 机制 | 位置 | 控制什么 |
 |---|---|---|
@@ -43,7 +43,7 @@
 
 ## 4. 颜色系统（Element 语义色）
 
-> ⚠️ **本节已被 tokens.css 取代**（2026-08-30）——品牌色 #1F4FD8（替换 EP 默认蓝）+ EP 整组 ramp + 四令牌四色相（--up 红涨/--down 绿跌/--success 青绿/--critical 深红）+ 暗色变体。本节仅为历史参考，新页面一律用 `var(--*)` 令牌。
+> ⚠️ **本节已被 tokens.css 取代（04 号设计系统 + 14 号方案）**——品牌色 #1F4FD8（替换 EP 默认蓝 #409EFF）+ EP 整组 ramp + 四令牌四色相（--up 红涨/--down 绿跌/--success 青绿/--critical 深红）+ 暗色变体。本节仅为历史参考，新页面一律用 `var(--*)` 令牌。
 
 - 状态展示统一用 `el-tag` + 语义 type：`success`=运行/已启用/成功 · `warning`=已停/部分 · `danger`=错误/已禁用 · `info`=只读/未验证/中性。
 - 语义色不自定义十六进制，直接用 Element 默认（primary #409eff 等），保证全站一致。
