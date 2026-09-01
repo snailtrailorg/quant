@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# quant-journal —— quant-* 单元 journalctl 只读诊断通道（sudoers QUANT_DEPLOY_ROOT）
+#
+# 属主约束（同 quant-svc）: root:root 755，部署于 /usr/local/sbin/quant-journal。
+#   白名单命令=deploy 不可写的 wrapper（改本文件内容=提权）。
+#   沙箱（3a）：源码直接调用 journalctl（deploy 本机可读自己会话日志），不经 sudo。
+#
+# 为什么 wrapper 化: journalctl 带参（-u/--since），sudoers `*` 通配吃空格，裸列
+#   白名单=任意参数注入面（journalctl -o export 全量导出/读任意单元）。收进本
+#   wrapper 严参校验，deploy 只能读 quant-* 单元的日志，读不到 auth/sshd 等。
+#
+# 用法: quant-journal -u <unit> [--since <t>] [--until <t>] [-n N] [-p p] [-q]
+#   -u 必填，可重复（多单元一次拉）；校验 ^quant-[a-zA-Z0-9@._*-]+\.service$
+#     （锚定 quant- 前缀+.service 后缀；允许 * ? 通配——quant-live-task@* 这类
+#      批量查，最坏匹配全体 quant 单元，仍在 quant 域内）
+#   只读 flags 白名单: --since/--until/-n/-p/-q；--no-pager 强制注入
+#   其余任何参数（-o/--disk-usage/--vacuum 等）一律拒
+set -euo pipefail
+
+usage() { echo "用法: quant-journal -u <unit> [--since <t>] [--until <t>] [-n N] [-p p] [-q]" >&2; exit 2; }
+
+units=()
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u)
+      [ $# -ge 2 ] || usage
+      u=$2
+      printf '%s' "$u" | grep -qE '^quant-[a-zA-Z0-9@._*?-]+\.service$' || { echo "unit 名不合法: $u" >&2; exit 2; }
+      units+=(-u "$u")
+      shift 2
+      ;;
+    --since|--until|-n|-p)
+      [ $# -ge 2 ] || usage
+      args+=("$1" "$2")
+      shift 2
+      ;;
+    -q)
+      args+=("$1")
+      shift
+      ;;
+    --no-pager)
+      shift   # 强制注入，收下忽略
+      ;;
+    *)
+      echo "拒: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+[ ${#units[@]} -ge 1 ] || usage
+
+exec journalctl "${units[@]}" "${args[@]}" --no-pager

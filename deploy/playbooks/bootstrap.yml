@@ -109,6 +109,7 @@
             - quant-flip-server
             - quant-install-units
             - quant-pinned          # v3.3: 被钉 release 探测（root 属主——/proc/<pid>/cwd 特权读）
+            - quant-journal         # 2026-09-01: journalctl 只读诊断通道（三查需求，quant-* 域严参校验）
             - quant-alembic-wrapper
             - quant-importsmoke-wrapper
             - quant-pip-wrapper
