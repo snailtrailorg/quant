@@ -43,7 +43,7 @@
           </template>
         </el-table-column>
         <!-- 失败原因透出（05 §5.7：failed 行点开见原因） -->
-        <el-table-column :label="t('backtest.reason')" width="140" show-overflow-tooltip>
+        <el-table-column :label="t('backtest.reason')" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.status === 'failed'" style="color: var(--critical)">{{ row.summary?.error || row.error || '—' }}</span>
             <span v-else>—</span>
@@ -55,7 +55,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="mode" :label="t('backtest.mode')" width="80" />
-        <el-table-column :label="t('common.symbol')" min-width="100">
+        <el-table-column :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ t('backtest.symbolCount', { n: row.symbols?.length || 0 }) }}</template>
         </el-table-column>
         <el-table-column :label="t('common.createdAt')" width="160">

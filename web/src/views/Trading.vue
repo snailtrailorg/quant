@@ -21,7 +21,7 @@
     <el-tabs>
       <el-tab-pane :label="t('trading.positions')">
         <el-table :data="positionData.positions || []" size="small">
-          <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100">
+          <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
             <template #default="{ row }">
               <el-link type="primary" @click="gotoDetail(row.symbol)">{{ (row.symbol||'').split('.')[0] }}</el-link>
             </template>
@@ -93,7 +93,7 @@
       <el-tab-pane :label="t('trading.orders')">
         <el-table :data="ordersData.orders || []" size="small">
           <el-table-column prop="ts" :label="t('trading.time')" width="150" />
-          <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" />
+          <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
           <el-table-column prop="action" :label="t('trading.direction')" width="80">
             <template #default="{ row }">
               <!-- BUY=买入红(A股习惯)/SELL=卖出绿;中文化 05 §5.2 要点 3 -->

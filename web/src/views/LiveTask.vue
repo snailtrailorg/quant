@@ -10,7 +10,7 @@
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
       <el-table-column prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" />
+      <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
       <!-- P1-5（06 B#5）：md_mode/行情 lag/bars 消费/frozen——活着吗/新鲜吗/冻没冻直答 -->
       <el-table-column :label="t('liveTask.mdMode')" width="90">
         <template #default="{ row }">

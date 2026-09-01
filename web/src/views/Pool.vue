@@ -45,7 +45,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="id" label="ID" width="130" />
-      <el-table-column prop="name" :label="t('common.name')" width="160" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
       <el-table-column prop="category" :label="t('pool.category')" width="100" />
       <el-table-column :label="t('pool.symbolCount')" width="80" align="center">
         <template #default="{ row }">

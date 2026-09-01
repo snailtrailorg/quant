@@ -17,7 +17,7 @@
       </div>
     </el-card>
     <el-table :data="configs" v-loading="loading">
-      <el-table-column prop="name" :label="t('dataManage.dataType')" width="160" />
+      <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="160" show-overflow-tooltip />
       <el-table-column prop="data_type" :label="t('dataManage.category')" width="80">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
       </el-table-column>
@@ -85,7 +85,7 @@
             <span v-else style="color:#999">-</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('dataManage.gap')" min-width="180">
+        <el-table-column :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.failed_dates" style="color:#f56c6c; font-size:12px">{{ row.failed_dates }}</span>
             <span v-else style="color:#999">-</span>
