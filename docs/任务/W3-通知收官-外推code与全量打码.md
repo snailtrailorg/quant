@@ -5,20 +5,20 @@
 ## 产出 1:runbook 映射后端单源(#6 前置)
 
 - **新建** `server/src/alert_notify/runbook.py`:`RUNBOOK: dict[str, dict]`(code→{label,guide})——**从 web/src/utils/runbook.js 迁入 10 条+本批新增 ~15 条**(产出 3 的码表);漂移防线:双源→单源,前端改 API 消费
-- **新端点** `GET /api/runbook`(system.py;require_role viewer)返回 RUNBOOK
-- **前端** MainLayout:启动时 fetch 一次 `/api/runbook` 存模块级缓存,`runbookOf` 改查缓存(签名不变,模板零改);utils/runbook.js 删(或留空壳 re-export?——删,W1 刚上但未上产第二次,无兼容包袱)
+- **新端点** `GET /api/runbook`(system.py;**require_role 四角色枚举**——auth.py:102 平铺无层级,单写 viewer=仅 viewer 可达,admin 反 403,盲审 A-P1)返回 RUNBOOK;**RUNBOOK 暂仅中文**(多语言债声明,盲审 B)
+- **前端** MainLayout:**懒挂 loadNotifs 首载**(bellVisible 门内——viewer 无铃不白请求,盲审 A-P2);fetch 失败(如切换窗口 404)下次 loadNotifs 懒补一次;`runbookOf` 改查缓存(签名不变模板零改);utils/runbook.js 删
 
 ## 产出 2:外推通道带 code(#6)
 
 - `notify.py`:`notify(...)` 内 `_push_channel(level, title, body, code)` 签名扩展;`report()` 不动(订阅型无 code)
-- `channel.py` `send()`:body 尾部追加 `\n▸ 处置: {label}——{guide}`(code 在 RUNBOOK 时);channel send 签名怎么改——**不改 send**(通道实现多元),由 `_push_channel` 组装终 body 后传(通道层零感知)
-- 邮件通道同体(text body 追加行;不做 HTML 链接——站内通知页需登录,外链意义小,处置文字已够)
+- **终签名** `_push_channel(level, title, body, code=None, channel=None)`(盲审 B-P1:第 4 参现为 channel,字面改会炸 report())——组装在**配额检查后**(免白拼),**先截后拼按终长截**:discord content 上限 2000 字符/企微 4096 字节,原 body 截 1900 再拼处置行,处置行永不落截断区(盲审 A/B-P1:超限发送失败被 channel.py:38 吞=告警静默丢违 D-F1);**顺手修既有隐患**:外推现传原始 body 未截(notify.py:102)
+- alert_notify 无邮件通道(wechat_work/discord/serverchan 三通道,channel.py:76;email_service 是邀请邮件独立发件箱不收告警——盲审 A/B 勘误,原"邮件同体"行删)
 
 ## 产出 3:全量打码扫荡(#7)
 
 **wrapper 签名扩展四处**(code 透传):
 - `strategy_runner/trading.py _alert(title, body, code=None)`
-- `strategy_framework/runtime/alerts.py make_alert(...)` → code="runtime.guard"(通用守卫)
+- `strategy_framework/runtime/alerts.py make_alert(..., code=None)` **逐点传**(盲审 A-P1:硬编码吞语义——hub_worker.py:177/186 冻结/拦截应映射旧键 frozen.intercept/buy.blocked,257 盲视→buy.blind;mdlink 4 点逐定)
 - `health_monitor/monitor.py _notify(severity, title, body, code=None)`(调用点 3 处:schema 漂移→health.schema-drift/schema 禁用→health.schema-off/恢复→health.recovery;L58 通用组件告警→health.component)
 - `scheduler/tasks.py` 直调点剩余(已 6 码,余 ~6:逐点 grep 现场定)
 
@@ -26,6 +26,12 @@
 | 文件 | 码 |
 |---|---|
 | task_manager 任务失败 | task.failed |
+| trading.py 207 熔断沿 | risk.halt-edge |
+| trading.py 281 对账在场委托 | reconcile.open-orders |
+| trading.py 301 WAL 残留 | reconcile.wal |
+| runtime/mdlink 4 点 | 现场定(mdlink 族) |
+| md_hub make_alert 3 点 | 现场定 |
+| scheduler L548/659/1424/1436/1445 | data.disconn/disk.warning/unit.config-err/hub.maint/l3.skip-valkey |
 | tushare_adapter 复权降级 | data.adj-degrade |
 | llm_gateway/budget 预算预警 | llm.budget |
 | data_sync/engine 同步状态 | sync.status |
@@ -33,7 +39,8 @@
 | email_service 邮件最终失败 | email.failed |
 | strategy_runner/main 余点 | 现场定(预计 0-1) |
 
-**一致性测试**(防打码与映射漂移):`grep 全仓 code="..." 字面量 ⊆ RUNBOOK 键`(单测跑 collect+断言——打码必有映射,映射可多不可少)
+**一致性测试**:直调字面量 code ⊆ RUNBOOK 键;**盲区声明**(注释):wrapper 变量透传链(main.py _alert 剥 code/make_alert 产物注入)测不到,靠人工对照
+**白名单**(无码=设计):report() 订阅型 info/L105 盘后报告
 
 ## 验收
 1. pytest 全绿(+wrapper 透传测试/一致性测试/外推 body 追加行测试)
