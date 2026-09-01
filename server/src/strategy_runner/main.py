@@ -113,7 +113,7 @@ def _guard(name):
     alert 用 lambda 晚绑定模块全局 _alert——测试 patch src.strategy_runner.main._alert
     对已装饰 handler 仍生效（P-S6 patch 语义；直接传 _alert 会在装饰期固化=假绿）。
     """
-    return _guard_base(name, alert=lambda title, body="": _alert(title, body))
+    return _guard_base(name, alert=lambda title, body="": _alert(title, body, code="runtime.guard"))
 
 
 def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,

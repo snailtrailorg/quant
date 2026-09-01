@@ -33,7 +33,7 @@ def report_schema_findings(findings: dict) -> None:
     notify 的 1min 同标题去重收敛扇出；PG 不可达时 verify_schema 自身已抛，调用方 try 包住。
     """
     if findings.get("expectations_missing"):
-        _notify("warning", "[health] schema 校验被禁用"
+        _notify("warning", "[health] schema 校验被禁用",
                 "schema_expectations.txt 缺失（部署不完整？）——列级校验未生效。"
                 "runbook：重跑链生成命令（db.py load_schema_expectations docstring）并提交。", code="health.schema-off")
         _write_event("schema_drift", "expectations", "warning", "expectations 文件缺失，校验禁用")
@@ -43,7 +43,7 @@ def report_schema_findings(findings: dict) -> None:
     if not missing_t and not missing_c:
         return
     detail = f"缺表 {missing_t}；缺列 {missing_c}"
-    _notify("critical", "[health] schema 漂移：列级校验发现缺失"
+    _notify("critical", "[health] schema 漂移：列级校验发现缺失",
             f"{detail}\nrunbook：alembic upgrade head；升级后仍缺失=该表/列未被迁移链收编，"
             f"参照 0042 模式补收编迁移。", code="health.schema-drift")
     _write_event("schema_drift", "database", "critical", detail)

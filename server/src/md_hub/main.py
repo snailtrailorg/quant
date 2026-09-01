@@ -335,8 +335,9 @@ def main() -> None:
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗
                       event_engines=(ee,),                          # 事件线程存活（R-BR12，死→exit 1）
-                      on_fatal=lambda reason: _alert(f"行情 hub {reason}，自动重启"
-                                                     "实例退出由 systemd 接管；请查 journalctl 定位首个异常。", code="runtime.fatal"),
+                      on_fatal=lambda reason: _alert(f"行情 hub {reason}，自动重启",
+                                                     "实例退出由 systemd 接管；请查 journalctl 定位首个异常。",
+                                                     code="runtime.fatal"),
                       fatal_exit_code=1)
     loop.every("lease-renew", 5.0, _lease_renew)    # 租约 30s TTL，5s 一续（失败 exit 5 在钩子内自带）
     loop.every("md-edge", 0.0, _md_edge)            # 重连沿检测：每步

@@ -59,7 +59,7 @@ def _adj_degraded_alert(e: Exception) -> None:
     _logging.getLogger("tushare_adapter").warning("adj_factor 接口降级（积分未到账/接口异常），日线同步继续无因子: %s", e)
     try:
         from src.alert_notify.notify import notify
-        notify("warn", "system", "复权因子接口降级"
+        notify("warn", "system", "复权因子接口降级",
                "Tushare adj_factor 不可用（积分未到账或接口异常）。日线同步继续（因子 NULL），"
                "跨除权日因子暂不可用；积分到账后触发手动回补即可恢复。", code="data.adj-degrade")
     except Exception:

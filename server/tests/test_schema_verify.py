@@ -72,6 +72,9 @@ class TestEntryRouting:
                 {"missing_tables": ["ghost"], "missing_columns": {"t": ["c"]}})
         assert notified and events
         assert events[0][0] == "schema_drift"
+        # W3 盲审 A-P0 盲区防线：title/body 逗号被吞(隐式拼接)时 body 挤进 title——
+        # 断言三位置参齐+body 非空,此类回归当场红
+        assert len(notified[0]) == 3 and notified[0][2], notified[0]
 
     def test_report_noop_on_clean(self):
         from src.health_monitor import monitor

@@ -37,7 +37,7 @@ def get_help_api(topic: str,
 
 
 @router.get("/api/runbook")
-def runbook_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def runbook_api(payload: dict = Depends(require_role("analyst", "trader", "admin"))):
     """通知 runbook 映射（W3 单源：站内 chip/处置行消费）。暂仅中文（多语言债）。"""
     from src.alert_notify.runbook import RUNBOOK
     return {"items": RUNBOOK}

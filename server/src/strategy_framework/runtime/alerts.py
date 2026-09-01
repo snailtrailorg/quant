@@ -55,7 +55,7 @@ def make_alert() -> Callable[[str, str | None], None]:
 
 def make_guard(name: str, alert: Callable[[str, str], None]):
     """handler 守卫工厂（hub/_guard 收编）：异常拦截 + 告警钩子注入。"""
-    return _guard_base(name, alert=lambda title, body="": alert(title, body))
+    return _guard_base(name, alert=lambda title, body="": alert(title, body, code="runtime.guard"))
 
 
 def make_valkey():

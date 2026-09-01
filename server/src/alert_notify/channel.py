@@ -33,7 +33,20 @@ class _WebhookChannel(MessageChannel):
         import httpx
         try:
             r = httpx.post(self.webhook_url, json=payload, timeout=10)
-            return r.status_code == 200
+            if r.status_code != 200:
+                logger.warning(f"{self.__class__.__name__} HTTP {r.status_code}: {r.text[:120]}")
+                return False
+            # W3（盲审 B-P1b）：企微 webhook 失败仍返 200+errcode≠0——只查 HTTP=假成功
+            # （超限丢+配额照扣+零日志）。业务码非 0 一律失败可观测。
+            try:
+                body = r.json()
+                if isinstance(body, dict) and body.get("errcode", 0) != 0:
+                    logger.warning(f"{self.__class__.__name__} errcode={body.get('errcode')}: "
+                                   f"{str(body.get('errmsg', ''))[:120]}")
+                    return False
+            except Exception:
+                pass   # discord 等无业务码通道
+            return True
         except Exception as e:
             logger.warning(f"{self.__class__.__name__} 发送失败: {e}")
             return False

@@ -70,6 +70,7 @@ check "订单"            "/api/orders"                      'isinstance(d, dict
 check "回测列表"        "/api/backtest"                    'isinstance(d, dict) or isinstance(d, list)'
 check "健康组件"        "/api/health/components"           'isinstance(d, dict) or isinstance(d, list)'
 check "帮助-index"      "/api/help/index"                  '"content" in d'
+check "runbook 映射"     "/api/runbook"                     '"items" in d and len(d["items"]) > 20'
 
 echo "──────────"
 echo "冒烟结果: $PASS 绿 / $FAIL 红"

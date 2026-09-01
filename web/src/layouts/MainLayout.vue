@@ -241,7 +241,10 @@ const loadHealth = async () => {
 let runbookMap = null
 const ensureRunbook = async () => {
   if (runbookMap) return
-  try { runbookMap = (await api.get('/runbook')).items || {} } catch {}
+  try {
+    const items = (await api.get('/runbook')).items
+    if (items && Object.keys(items).length) runbookMap = items   // 空 200 不锁死,下轮懒补(盲审 A-P2)
+  } catch {}
 }
 const runbookOf = code => (code && runbookMap && runbookMap[code]) || null 
 const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')

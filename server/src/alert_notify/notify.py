@@ -136,12 +136,20 @@ def _push_channel(level: Level, title: str, body: str, code: str | None = None,
     if _quota_exceeded(target):
         return
     try:
-        out_body = body[:1900]
+        line = ""
         if code:
             from src.alert_notify.runbook import RUNBOOK
             rb = RUNBOOK.get(code)
             if rb:
-                out_body += f"\n▸ 处置[{rb['label']}]: {rb['guide']}"[:600]
+                line = f"\n▸ 处置[{rb['label']}]: {rb['guide']}"
+        # W3（盲审 A/B-P1a 修正版）：分通道截断——企微 markdown 限 4096 **字节**
+        # （chars≠bytes：1900 汉字=5700B 超限，通道层无二次截断=静默丢）；discord
+        # content 限 2000 字符。先截原 body 再拼行，处置行永不落截断区。
+        if target == "discord":
+            out_body = body[:max(1990 - len(line), 0)] + line
+        else:
+            budget = 3900 - len(line.encode("utf-8"))
+            out_body = body.encode("utf-8")[:max(budget, 0)].decode("utf-8", "ignore") + line
         ch.send(title, out_body, level)
     except Exception as e:
         logger.error("channel send failed (%s): %s", target, e)

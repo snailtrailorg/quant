@@ -34,7 +34,7 @@ def check_budget_alerts() -> dict:
             provider_name = b_provider or "全局"
             sent = False
             try:
-                notify("warn", "system", "LLM 预算预警"
+                notify("warn", "system", "LLM 预算预警",
                        f"{provider_name} 今日 {today} token 超阈值 {limit}（{b_threshold}%）", code="llm.budget")
                 sent = True
             except Exception:
