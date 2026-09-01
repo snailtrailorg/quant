@@ -16,6 +16,25 @@
 ## 当前焦点
 
 见 `flow/待办.md`（单一真相源，按优先级排列）。
+
+## 完美系统·挂账全清战役（2026-09-01 用户裁定排期）
+
+> **用户裁定**：系统不仅要实用，也要完美——8 条"接纳但缓做"挂账**全清**，逐批走八步法。
+> 约束：交易日部署一律 15:01 后；每批独立观察日；一会话一焦点一天一主批。
+
+| 日期 | 批 | 内容 | 部署窗 |
+|---|---|---|---|
+| 09-01 二(今) | (已排) | 15:12 三查 → 15:15 批 6b(direct 退役) → 15:20 web 长尾第一批 | 盘外 |
+| 09-02 三 | **W1 快赢批** | #5 DSL 因子试算(preview 支持 dsl) + #8 runbookOf 双调用消 + #7 顺手打码 | 当晚盘外 |
+| 09-03 四 | **W2 管道冒烟门** | #4 P1-2：探针账号/token 机制 + release postverify 端点断言 + 彩排六场景（W6 制度符合性声明必附） | staging 全验→prod 择机 |
+| 09-04 五 | **W3 通知收官批** | #6 外推通道带 code(企微卡片跳转+邮件链接) + #7 全量打码扫荡(剩余点位清零) | 当晚盘外 |
+| 09-05 六 | **W4 权限三维化·C** | #1 Permissions C 阶段(nav/api/data × role 矩阵 UI 核心，10 号 §C) | 周末无盘 |
+| 09-06 日 | **W5 权限 D+表格** | #1 D 阶段(user 维度/deny 语义/冲突仲裁) + #2b el-table-v2 虚拟滚动(高频表格) | 周末无盘 |
+| 09-07 一 | **W6 编辑器+字体** | #2a Monaco DSL 补全(语言定义) + #3 MiSans 分包(cn-font-split 工具链) | 盘外 |
+| 09-08 二 | **收官日** | 全站回归(smoke+build+pytest) + 8 项逐条验收 + 文档回写 + 复盘 | — |
+
+**排序逻辑**：快赢先行(#5/#8 半小时级)→管道工程居中(护住后续每批部署)→通知收官(#6+#7 合批清)→大前端组件批留周末(两整天不受交易窗切)→工具链批隔离收尾(#3 引入构建依赖单独验)→回归收官。
+**不变约束**：每批八步法全弧；W2 探针账号涉权限制度须 W6 声明；观察日叠加不豁免(各批各自计)。
 | **T07** 策略框架：Strategy 基类 + Factor 注册制 + SignalAggregator + DSL 表达式引擎 | Claude Code | 02-策略框架 | `src/strategy_framework/` 模块 | 预置因子注册 → Web 可选 → 配置实例化策略 → on_bar 计算 → 信号输出 |
 | **T08** ExecutionAdapter 三实现：AStockReadonlyAdapter(raise) / XTPAdapter / BinancePerpAdapter | Claude Code | 02-策略框架 §5.5 | `src/strategy_framework/adapters/` | A股 adapter 调 send_order 抛 PermissionError；XTP adapter 含 `parse_vt_symbol()` |
 | **T09** 可转债双低策略 + Tushare 历史回测 | Claude Code | 04-可转债ETF §5.2，02 §8 | `src/strategies/convertible_doublelow.py` + 回测 notebook | VeighNa 回测引擎加载策略 + 历史数据 → 盈亏曲线 + 交易记录 |
