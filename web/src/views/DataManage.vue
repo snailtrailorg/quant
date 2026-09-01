@@ -94,6 +94,20 @@
       </el-table>
     </el-card>
   
+    <!-- 回补弹窗(16号§3 第三次点名:prompt 正则只拦格式不拦非法日期,改 el-date-picker 组件校验) -->
+    <el-dialog v-model="backfillDialog" :title="t('dataManage.backfillTitle', { name: backfillForm.name })" width="420px">
+      <el-form label-width="90px" @submit.prevent>
+        <el-form-item :label="t('dataManage.backfillFrom')">
+          <el-date-picker v-model="backfillForm.date" type="date" value-format="YYYYMMDD"
+                          :disabled-date="d => d.getTime() > Date.now()" :clearable="false" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="backfillDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="warning" :disabled="!backfillForm.date" @click="submitBackfill">{{ t('symbol.backfill') }}</el-button>
+      </template>
+    </el-dialog>
+
     <!-- Cron 编辑弹窗(05 §5.10) -->
     <el-dialog v-model="cronDialog" :title="t('dataManage.cronEditTitle')" width="480px">
       <el-form label-width="80px">
@@ -228,32 +242,30 @@ const onTrigger = async (row) => {
   } catch (e) { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(row.id, 'idle') }
 }
 
-const onBackfill = async (row) => {
-  // 默认起始日期：30 天前
-  const d = new Date(); d.setDate(d.getDate() - 30)
-  const def = d.toISOString().slice(0, 10)  // ISO 格式显示;提交时 .replace(/-/g,'') 转后端 YYYYMMDD
+// 回补起始日期弹窗化（原 ElMessageBox.prompt 正则 /^\d{4}-\d{2}-\d{2}$/ 不拦非法日期如 20261332；
+// el-date-picker 组件级校验天然只出合法日期，且 value-format=YYYYMMDD 对齐后端契约 engine.sync 文档字符串）
+const backfillDialog = ref(false)
+const backfillForm = ref({ id: '', name: '', date: '' })
+const onBackfill = (row) => {
+  const d = new Date(); d.setDate(d.getDate() - 30)   // 默认起始：30 天前
+  backfillForm.value = { id: row.id, name: row.name, date: d.toISOString().slice(0, 10).replace(/-/g, '') }
+  backfillDialog.value = true
+}
+const submitBackfill = async () => {
+  const { id, date } = backfillForm.value
+  const row = configs.value.find(c => c.id === id)
+  if (!row || !date) return
+  backfillDialog.value = false
+  setRowStatus(id, 'running')
   try {
-    const { value } = await ElMessageBox.prompt(t('dataManage.backfillPrompt'), t('dataManage.backfillTitle', { name: row.name }), {
-      inputValue: def,
-      inputPattern: /^\d{4}-\d{2}-\d{2}$/,
-      inputErrorMessage: t('dataManage.dateFormatError'),
-      confirmButtonText: t('symbol.backfill'),
-      cancelButtonText: t('common.cancel'),
-      type: 'warning',
-    })
-    setRowStatus(row.id, 'running')
-    try {
-      const r = await api.post(`/sync/trigger/${row.id}`, null, { params: { backfill_from: value } })
-      if (r.status === 'submitted') {
-        startPoll(row, t('dataManage.backfillTaskName', { name: row.name, value }), r.task_id)
-      } else {
-        notifyResult(row, r, t('dataManage.backfillTaskName', { name: row.name, value }))
-        setRowStatus(row.id, 'idle')
-      }
-    } catch (e) { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(row.id, 'idle') }
-  } catch (e) {
-    // 用户取消 prompt，不动状态
-  }
+    const r = await api.post(`/sync/trigger/${id}`, null, { params: { backfill_from: date } })
+    if (r.status === 'submitted') {
+      startPoll(row, t('dataManage.backfillTaskName', { name: row.name, value: date }), r.task_id)
+    } else {
+      notifyResult(row, r, t('dataManage.backfillTaskName', { name: row.name, value: date }))
+      setRowStatus(id, 'idle')
+    }
+  } catch (e) { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(id, 'idle') }
 }
 
 const onDelete = async (row) => {
