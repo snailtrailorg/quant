@@ -61,6 +61,7 @@ def on_message(data) -> None:
 
 
 def main() -> None:
+    import sys   # 顶部导入（函数后段残留旧 import sys 会把 sys 变局部——12:03 prod feishu 波崩溃根因）
     # 补审E-8：单元实例名须为数字 bot id（quant-feishu-bot@{bid}）；非数字 fail-fast——
     # 原静默降级会让 _FID 污染流入 SQL DataError→首见整段死火回到零留痕盲区
     if len(sys.argv) < 2 or not sys.argv[1].isdigit():
