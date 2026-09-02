@@ -6,9 +6,9 @@
           <span>
             {{ t('backtest.runList') }}
             <!-- P2-4（05 §5.7）：badge 摘要 -->
-            <el-tag size="small" style="margin-left: 8px">运行中 {{ runningCount }}</el-tag>
-            <el-tag size="small" type="info" style="margin-left: 4px">今日 {{ todayCount }}</el-tag>
-            <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">失败 {{ failedCount }}</el-tag>
+            <el-tag size="small" style="margin-left: 8px">{{ t('backtest.runningTag') }} {{ runningCount }}</el-tag>
+            <el-tag size="small" type="info" style="margin-left: 4px">{{ t('backtest.todayTag') }} {{ todayCount }}</el-tag>
+            <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">{{ t('backtest.failedTag') }} {{ failedCount }}</el-tag>
           </span>
           <span>
             <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: 8px">
@@ -76,7 +76,7 @@
         <el-form-item :label="t('backtest.strategy')">
           <el-select v-model="form.strategyId" :placeholder="t('backtest.phStrategy')" style="width: 100%" @change="onStrategyChange">
             <el-option v-for="st in strategies" :key="st.id" :value="st.id"
-                       :label="`${st.name}${st.backtest_verified ? ' ✓' : '（未验证）'}`" :disabled="false" />
+                       :label="`${st.name}${st.backtest_verified ? ' ✓' : t('backtest.unverified')}`" :disabled="false" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('common.symbol')">
@@ -95,8 +95,14 @@
           </div>
         </el-form-item>
         <el-form-item :label="t('backtest.commission')">
-          <el-input-number v-model="form.commissionRate" :min="0" :step="0.0001" :precision="4" />
-          <span style="margin-left: 8px; color: var(--text-secondary); font-size: var(--fs-foot)">万分之（默认 5=万5）</span>
+          <!-- wd-20 §2.6：万 N select 消灭"默认 5=万5"歧义（万1/万2/万3/万5/自定义） -->
+          <el-select v-model="feePreset" style="width: 130px" @change="onFeePreset">
+            <el-option v-for="n in [1, 2, 3, 5]" :key="n" :value="String(n)" :label="`万${n}`" />
+            <el-option value="custom" :label="t('backtest.feeCustom')" />
+          </el-select>
+          <el-input-number v-if="feePreset === 'custom'" v-model="form.commissionRate"
+                           :min="0" :step="0.0001" :precision="4" style="margin-left: 8px" />
+          <span v-else style="margin-left: 8px; color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('backtest.feeUnit') }}</span>
         </el-form-item>
         <el-form-item :label="t('backtest.mode')">
           <el-select v-model="form.mode" style="width: 100%">
@@ -155,6 +161,8 @@ const strategies = ref([])
 const pools = ref([])
 const loading = ref(false)
 const submitting = ref(false)
+const feePreset = ref('5')   // wd-20 §2.6：万 N 预设（'5'=万5 默认档）
+const onFeePreset = (v) => { if (v !== 'custom') form.value.commissionRate = Number(v) }
 const showForm = ref(false)
 const parameterDefs = ref([])
 const form = ref({

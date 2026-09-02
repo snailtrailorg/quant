@@ -28,7 +28,7 @@
           </el-table-column>
           <!-- P2-11（05 §5.2/06 B#4）：API 已有字段全展示——direction/frozen/cost/pnl（现状只 2 列） -->
           <el-table-column prop="direction" :label="t('trading.dirCol')" width="70">
-            <template #default="{ row }"><el-tag size="small" :type="row.direction === 'short' ? 'danger' : 'primary'">{{ row.direction === 'short' ? '空' : '多' }}</el-tag></template>
+            <template #default="{ row }"><el-tag size="small" :type="row.direction === 'short' ? 'danger' : 'primary'">{{ row.direction === 'short' ? t('trading.shortTag') : t('trading.longTag') }}</el-tag></template>
           </el-table-column>
           <el-table-column prop="volume" :label="t('trading.volume')" width="80" class-name="num" />
           <el-table-column prop="frozen" :label="t('trading.frozenCol')" width="70" class-name="num" />
@@ -200,7 +200,7 @@ const todayOrders = computed(() => {
 })
 const manualForm = ref({ symbol: '', action: 'BUY', volume: 0, price: 0 })
 const submitManual = async () => {
-  try { await api.post('/reconcile/manual-order', { ...manualForm.value, note: '交易台人工单登记' }); ElMessage.success(t('common.success')) }
+  try { await api.post('/reconcile/manual-order', { ...manualForm.value, note: t('trading.manualNote') }); ElMessage.success(t('common.success')) }
   catch { ElMessage.error(t('common.failed')) }
 }
 import api from '../api'

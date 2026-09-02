@@ -190,7 +190,7 @@ const curveOption = computed(() => ({
   grid: { left: 60, right: 16, top: 16, bottom: 28 },
   tooltip: { trigger: 'axis' },
   xAxis: { type: 'category', data: rangeCurve.value.map(c => (c.ts || '').slice(5, 10)) },
-  yAxis: { type: 'value', scale: true, axisLabel: { formatter: v => (v / 1e4).toFixed(0) + '万' } },
+  yAxis: { type: 'value', scale: true, axisLabel: { formatter: v => (v / 1e4).toFixed(0) + t('trading.wanUnit') } },
   yAxis: [{ type: 'value', scale: true }, { type: 'value', name: 'DD%', max: 0, splitLine: { show: false } }],
   series: [
     { type: 'line', data: rangeCurve.value.map(c => c.value), smooth: true, showSymbol: false,

@@ -311,7 +311,7 @@ const gotoVerifiedRun = (row) => { const r = lastRun(row); if (r) router.push(`/
 const runBacktest = (row) => { router.push({ path: '/backtest', query: { strategy: row.id } }) }
 const onCopy = async (row) => {
   try {
-    const copy = { ...row, id: row.id + '_copy', name: row.name + ' (副本)' }
+    const copy = { ...row, id: row.id + '_copy', name: row.name + t('backtest.copySuffix') }
     delete copy.backtest_verified
     await createStrategy(copy); ElMessage.success(t('common.success')); load()
   } catch { ElMessage.error(t('common.failed')) }

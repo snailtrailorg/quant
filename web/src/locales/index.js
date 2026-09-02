@@ -357,6 +357,7 @@ export default {
       noData: '暂无数据',
     },
     backtest: {
+      runningTag: '运行中', feeCustom: '自定义', feeUnit: '（佣金按万分之计）', todayTag: '今日', failedTag: '失败', unverified: '（未验证）', copySuffix: ' (副本)', feeHint: '万分之（默认 5=万5）',
       createLive: '以此创建实盘任务', sharpeCol: '夏普', dateRangeCol: '区间', tradeCount: '交易次数',
       annualized: '年化收益', plRatio: '盈亏比',
       sampleThreshold: '证据不足：区间 {d} 天 / 成交 {s} 笔，未达 90 天 / 10 笔最低证据门槛——跑长区间或多标的后再标记',
@@ -613,6 +614,7 @@ export default {
       dataDeleted: '数据已删除',
     },
     trading: {
+      longTag: '多', shortTag: '空', manualNote: '交易台人工单登记', wanUnit: '万',
       dirCol: '方向', frozenCol: '可用', costCol: '成本价', pnlCol: '浮盈', orderRefCol: '委托号',
       snapshotNote: '快照时间：', staleWarn: '持仓快照已停更（>600s）——当前展示为最后快照，非实时空仓判定依据', snapshotRowsTip: '最后快照行数：{n}', lastUpdate: '最后更新',
       dailySummary: '当日汇总', totalTrades: '总笔数', buyCount: '买入笔数', sellCount: '卖出笔数',
@@ -1421,6 +1423,7 @@ export default {
       noData: 'No data',
     },
     backtest: {
+      runningTag: 'Running', feeCustom: 'Custom', feeUnit: '(commission in bps)', todayTag: 'Today', failedTag: 'Failed', unverified: ' (unverified)', copySuffix: ' (copy)', feeHint: 'In bps (default 5 = 0.05%)',
       minuteStart: 'Min Start',
       minuteStartLabel: '⭐ Minute-bar accumulation (start date)',
       phMinuteStart: 'e.g. 2026-01-01 (empty = off; set = pool symbols subscribe to hub)',
@@ -1677,6 +1680,7 @@ export default {
       dataDeleted: 'Data deleted',
     },
     trading: {
+      longTag: 'Long', shortTag: 'Short', manualNote: 'Manual order from trading desk', wanUnit: 'w',
       dirCol: 'Dir', frozenCol: 'Avail', costCol: 'Cost', pnlCol: 'PnL', orderRefCol: 'Order Ref',
       snapshotNote: 'Snapshot: ', staleWarn: 'Position snapshot is stale (>600s) — showing last snapshot, not a live flat position', snapshotRowsTip: 'Last snapshot rows: {n}', lastUpdate: 'Last update',
       dailySummary: 'Daily Summary', totalTrades: 'Trades', buyCount: 'Buy count', sellCount: 'Sell count',
