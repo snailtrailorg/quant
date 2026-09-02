@@ -27,27 +27,29 @@ def _register():
     from src.alert_notify import dispatch as D
     from src.data_platform.db import get_conn
 
-    def _still_enabled(ch: str) -> bool:
+    def _still_enabled(row: dict) -> bool:
+        """行级重查（批7.1 多目标）：入队后该行被关/删则 skip（计费敏感）。"""
         try:
             with get_conn() as conn:
                 cur = conn.execute(
-                    "SELECT enabled FROM alert_channel_sub WHERE channel=%s", (ch,))
+                    "SELECT enabled FROM alert_channel_sub WHERE id=%s", (row.get("id"),))
                 r = cur.fetchone()
                 return bool(r and r[0])
         except Exception as e:
-            logger.warning("re-check enabled(%s) failed: %s", ch, e)
+            logger.warning("re-check enabled(row %s) failed: %s", row.get("id"), e)
             return True   # 查不到按快照发（快照本身是入队时刻的有效订阅）
 
     def _finish(ch: str, row: dict, level: str, category: str, title: str,
-                body: str, code, notif_id) -> None:
-        if not _still_enabled(ch):
-            D._writeback(notif_id, ch, "skip:disabled")
+                body: str, code, notif_id, dkey=None) -> None:
+        dkey = dkey or ch   # 多目标：行级审计键（批7.1）
+        if not _still_enabled(row):
+            D._writeback(notif_id, dkey, "skip:disabled")
             return
-        if not D._claim(notif_id, ch):
+        if not D._claim(notif_id, dkey):
             # B 评 P2-4：降级直发已认领（send_task 响应超时但消息已达 broker 的双发窗）
             return
         ok, reason = D._send_one(row, level, category, title, body, code)
-        D._writeback(notif_id, ch, "ok" if ok else f"failed:{reason}")
+        D._writeback(notif_id, dkey, "ok" if ok else f"failed:{reason}")
         if not ok:
             # 终败站内通知（dispatch 对 code=alert.push-failed 有防环闸，只留站内）
             try:
@@ -59,16 +61,16 @@ def _register():
                 logger.error("push-failed notify error: %s", e)
 
     @app.task(name="alerts.send_im", soft_time_limit=15)
-    def send_im(row=None, level="", category="", title="", body="", code=None, notif_id=None):
-        _finish("im", row or {}, level, category, title, body, code, notif_id)
+    def send_im(row=None, level="", category="", title="", body="", code=None, notif_id=None, dkey=None):
+        _finish("im", row or {}, level, category, title, body, code, notif_id, dkey)
 
     @app.task(name="alerts.send_email", soft_time_limit=70)   # B 评 P3：≥SMTP 60s,防 soft 超时炸在 _try_row_sync 内致 outbox 行卡死 sending（sweep 只扫 pending）
-    def send_email(row=None, level="", category="", title="", body="", code=None, notif_id=None):
-        _finish("email", row or {}, level, category, title, body, code, notif_id)
+    def send_email(row=None, level="", category="", title="", body="", code=None, notif_id=None, dkey=None):
+        _finish("email", row or {}, level, category, title, body, code, notif_id, dkey)
 
     @app.task(name="alerts.send_sms", soft_time_limit=15)
-    def send_sms(row=None, level="", category="", title="", body="", code=None, notif_id=None):
-        _finish("sms", row or {}, level, category, title, body, code, notif_id)
+    def send_sms(row=None, level="", category="", title="", body="", code=None, notif_id=None, dkey=None):
+        _finish("sms", row or {}, level, category, title, body, code, notif_id, dkey)
 
     return send_im, send_email, send_sms
 

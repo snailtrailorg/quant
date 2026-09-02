@@ -1,8 +1,8 @@
 """Web 后端 · 告警订阅路由（批 7 · /api/alerts/*，docs/任务/批7-告警订阅分发.md）。
 
-全局一套订阅（im/email/sms 三行）+ 短信凭证专用端点 + 逐通道测试。
-权限 alerts_config（admin 专属——告警路由/计费短信面不给 analyst）。
-手机号回显打码；PUT 全量替换；target 含 * = 保留库值（smtp password 先例）。
+订阅 CRUD（批7.1 多目标：每通道可多行——多邮箱/多手机/多 bot；统一列表+行级增删改）
++ 短信凭证专用端点 + 行级测试。权限 alerts_config（admin 专属——告警路由/计费短信面不给
+analyst）。手机号回显打码；target 含 * = 保留库值（打码 sentinel，smtp password 先例）。
 """
 from __future__ import annotations
 
@@ -30,26 +30,43 @@ def _mask(channel: str, target: str | None) -> str | None:
     return target
 
 
-def _channels_from_db() -> list[dict]:
+def _channels_from_db(only_enabled: bool = False) -> list[dict]:
+    sql = ("SELECT id, channel, target, categories, min_level, enabled FROM alert_channel_sub "
+           + ("WHERE enabled" if only_enabled else "") + " ORDER BY id")
     with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT channel, target, categories, min_level, enabled FROM alert_channel_sub")
-        return [{"channel": r[0], "target": r[1], "categories": r[2] or [],
-                 "min_level": r[3], "enabled": r[4]} for r in cur.fetchall()]
+        cur = conn.execute(sql)
+        return [{"id": r[0], "channel": r[1], "target": r[2], "categories": r[3] or [],
+                 "min_level": r[4], "enabled": r[5]} for r in cur.fetchall()]
+
+
+def _validate_target(ch: str, target: str, bot_ids: set[int]) -> None:
+    """类型驱动校验（批7.1：IM=bot id / email=正则 / sms=大陆手机号）。"""
+    if ch == "email":
+        if not _EMAIL_RE.match(target):
+            raise ApiError(400, "BAD_REQUEST", "邮箱格式不合法")
+    elif ch == "sms":
+        if not _PHONE_RE.match(target):
+            raise ApiError(400, "BAD_REQUEST", "手机号格式不合法（仅支持中国大陆）")
+    elif ch == "im":
+        try:
+            bid = int(target)
+        except ValueError:
+            raise ApiError(400, "BAD_REQUEST", "IM 目标须为 bot id")
+        if bid not in bot_ids:
+            raise ApiError(400, "BAD_REQUEST", "IM 目标须为存在且启用的 bot")
+    else:
+        raise ApiError(400, "BAD_REQUEST", f"非法通道: {ch}")
 
 
 @router.get("/api/alerts/config")
 def alerts_config_get(payload: dict = Depends(require_perm("alerts_config"))):
+    """订阅列表（批7.1 多目标：统一列表+行级 CRUD，不再每通道单行）。"""
     from src.alert_notify.sms import sms_configured
     from src.alert_notify.dispatch import _LIMITS
-    channels = {r["channel"]: r for r in _channels_from_db()}
     out = []
-    for ch in ("im", "email", "sms"):
-        r = channels.get(ch, {"channel": ch, "target": None, "categories": [],
-                              "min_level": "critical" if ch == "sms" else "warn",
-                              "enabled": False})
+    for r in _channels_from_db():
         r = dict(r)
-        r["target"] = _mask(ch, r["target"])
+        r["target"] = _mask(r["channel"], r["target"])
         out.append(r)
     with get_conn() as conn:
         cur = conn.execute(
@@ -62,73 +79,92 @@ def alerts_config_get(payload: dict = Depends(require_perm("alerts_config"))):
             "quota": dict(_LIMITS)}
 
 
-@router.put("/api/alerts/config")
-def alerts_config_put(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
-    """全量替换：未出现的 channel 一律置 enabled=false；target 含 * = 保留库值（打码 sentinel）。"""
-    incoming = body.get("channels", [])
-    if len(incoming) > 3:
-        raise ApiError(400, "BAD_REQUEST", "channels 至多 im/email/sms 三项")
+@router.post("/api/alerts/config")
+def alerts_config_create(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
+    """新增订阅行（批7.1 多目标：统一列表+行级 CRUD）。"""
+    ch = body.get("channel")
+    target = (body.get("target") or "").strip()
+    cats = body.get("categories", [])
+    if not isinstance(cats, list) or any(c not in _CATEGORIES for c in cats):
+        raise ApiError(400, "BAD_REQUEST", "categories 须为 risk/task/data/system 子集")
+    min_level = body.get("min_level", "critical" if ch == "sms" else "warn")
+    if min_level not in ("warn", "critical"):
+        raise ApiError(400, "BAD_REQUEST", "min_level 须为 warn|critical")
+    enabled = bool(body.get("enabled"))
+    if enabled and not target:
+        raise ApiError(400, "TARGET_REQUIRED", "启用订阅须填目标")
     with get_conn() as conn:
-        cur = conn.execute("SELECT channel, target FROM alert_channel_sub")
-        stored = {r[0]: r[1] for r in cur.fetchall()}
-        bot_ids: set[int] = set()
         cur = conn.execute("SELECT id FROM im_bot_config WHERE enabled")
-        bot_ids = {r[0] for r in cur.fetchall()}
-
-        seen: set[str] = set()
-        for item in incoming:
-            ch = item.get("channel")
-            if ch not in ("im", "email", "sms"):
-                raise ApiError(400, "BAD_REQUEST", f"非法通道: {ch}")
-            if ch in seen:
-                raise ApiError(400, "BAD_REQUEST", f"通道重复: {ch}")
-            seen.add(ch)
-            cats = item.get("categories", [])
-            if not isinstance(cats, list) or any(c not in _CATEGORIES for c in cats):
-                raise ApiError(400, "BAD_REQUEST", "categories 须为 risk/task/data/system 子集")
-            if item.get("min_level", "warn") not in ("warn", "critical"):
-                raise ApiError(400, "BAD_REQUEST", "min_level 须为 warn|critical")
-            target = (item.get("target") or "").strip()
-            enabled = bool(item.get("enabled"))
-            if enabled and not target:
-                raise ApiError(400, "TARGET_REQUIRED", f"{ch} 通道启用须填目标")
-            if target and "*" in target:
-                target = stored.get(ch) or ""   # 打码 sentinel：保留库值
-                if enabled and not target:
-                    raise ApiError(400, "TARGET_REQUIRED", f"{ch} 通道启用须填目标")
-            if enabled and target:
-                if ch == "email" and not _EMAIL_RE.match(target):
-                    raise ApiError(400, "BAD_REQUEST", "邮箱格式不合法")
-                if ch == "sms" and not _PHONE_RE.match(target):
-                    raise ApiError(400, "BAD_REQUEST", "手机号格式不合法（仅支持中国大陆）")
-                if ch == "im":
-                    try:
-                        bid = int(target)
-                    except ValueError:
-                        raise ApiError(400, "BAD_REQUEST", "IM 目标须为 bot id")
-                    if bid not in bot_ids:
-                        raise ApiError(400, "BAD_REQUEST", "IM 目标须为存在且启用的 bot")
-            # UPSERT
-            import json as _json
-            conn.execute(
-                "INSERT INTO alert_channel_sub (channel, target, categories, min_level, enabled, updated_at) "
-                "VALUES (%s, %s, %s::jsonb, %s, %s, now()) "
-                "ON CONFLICT (channel) DO UPDATE SET "
-                "target=EXCLUDED.target, categories=EXCLUDED.categories, "
-                "min_level=EXCLUDED.min_level, enabled=EXCLUDED.enabled, updated_at=now()",
-                (ch, target or None, _json.dumps(cats), item.get("min_level", "warn"), enabled))
-        # 全量替换：未出现的通道禁用
-        for ch in ("im", "email", "sms"):
-            if ch not in seen:
-                conn.execute(
-                    "UPDATE alert_channel_sub SET enabled=false, updated_at=now() WHERE channel=%s", (ch,))
+        _validate_target(ch, target, {r[0] for r in cur.fetchall()})
+        import json as _json
+        cur = conn.execute(
+            "INSERT INTO alert_channel_sub (channel, target, categories, min_level, enabled) "
+            "VALUES (%s, %s, %s::jsonb, %s, %s) RETURNING id",
+            (ch, target or None, _json.dumps(cats), min_level, enabled))
+        new_id = cur.fetchone()[0]
         conn.commit()
+    audit_log(payload["username"], "alerts_config_create",
+              detail=f"#{new_id} {ch} {_mask(ch, target)}")
+    return {"id": new_id}
+
+
+def _load_row(row_id: int) -> dict:
     with get_conn() as conn:
-        cur = conn.execute("SELECT channel, target FROM alert_channel_sub")
-        new_stored = {r[0]: r[1] for r in cur.fetchall()}
-    audit_log(payload["username"], "alerts_config_save",   # A 评 P2-8：审计记新值（打码）而非仅旧值
-              detail="; ".join(f"{ch}: {item.get('enabled')}, {_mask(ch, new_stored.get(ch) or '')}"
-                               for item in incoming for ch in [item.get("channel")]))
+        cur = conn.execute(
+            "SELECT id, channel, target, categories, min_level, enabled "
+            "FROM alert_channel_sub WHERE id=%s", (row_id,))
+        r = cur.fetchone()
+    if not r:
+        raise ApiError(404, "ROW_NOT_FOUND", f"订阅行 {row_id} 不存在")
+    return {"id": r[0], "channel": r[1], "target": r[2], "categories": r[3] or [],
+            "min_level": r[4], "enabled": r[5]}
+
+
+@router.put("/api/alerts/config/{row_id}")
+def alerts_config_update(row_id: int, body: dict = Body(...),
+                         payload: dict = Depends(require_perm("alerts_config"))):
+    """改订阅行。target 含 * = 保留库值（打码 sentinel，smtp password 先例）。类型不可改（IM/email/sms
+    目标语义不同，改类型=删了重建）。"""
+    row = _load_row(row_id)
+    ch = row["channel"]
+    target = (body.get("target") if body.get("target") is not None else row["target"]) or ""
+    target = target.strip()
+    if "*" in target and row["target"]:
+        target = row["target"]           # sentinel：保持库值
+    cats = body.get("categories", row["categories"])
+    if not isinstance(cats, list) or any(c not in _CATEGORIES for c in cats):
+        raise ApiError(400, "BAD_REQUEST", "categories 须为 risk/task/data/system 子集")
+    min_level = body.get("min_level", row["min_level"])
+    if min_level not in ("warn", "critical"):
+        raise ApiError(400, "BAD_REQUEST", "min_level 须为 warn|critical")
+    enabled = bool(body.get("enabled", row["enabled"]))
+    if enabled and not target:
+        raise ApiError(400, "TARGET_REQUIRED", "启用订阅须填目标")
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM im_bot_config WHERE enabled")
+        _validate_target(ch, target, {r[0] for r in cur.fetchall()})
+        import json as _json
+        conn.execute(
+            "UPDATE alert_channel_sub SET target=%s, categories=%s::jsonb, "
+            "min_level=%s, enabled=%s, updated_at=now() WHERE id=%s",
+            (target or None, _json.dumps(cats), min_level, enabled, row_id))
+        conn.commit()
+    audit_log(payload["username"], "alerts_config_update",
+              detail=f"#{row_id} {ch} {item_desc(ch, target, enabled)}")
+
+
+def item_desc(ch, target, enabled):
+    return f"enabled={enabled}, target={_mask(ch, target) if target else '(空)'}"
+
+
+@router.delete("/api/alerts/config/{row_id}")
+def alerts_config_delete(row_id: int, payload: dict = Depends(require_perm("alerts_config"))):
+    row = _load_row(row_id)
+    with get_conn() as conn:
+        conn.execute("DELETE FROM alert_channel_sub WHERE id=%s", (row_id,))
+        conn.commit()
+    audit_log(payload["username"], "alerts_config_delete",
+              detail=f"#{row_id} {row['channel']} {_mask(row['channel'], row['target'] or '')}")
     return {"ok": True}
 
 
@@ -171,18 +207,13 @@ def sms_config_put(body: dict = Body(...), payload: dict = Depends(require_perm(
 @router.post("/api/alerts/test")
 def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
     """逐通道测试发送（绕节流/配额）；per-actor 60s 冷却；结果落 code=alert.test 站内通知。"""
-    ch = body.get("channel")
-    if ch not in ("im", "email", "sms"):
-        raise ApiError(400, "BAD_REQUEST", f"非法通道: {ch}")
+    row = _load_row(int(body.get("id") or 0))
+    ch = row["channel"]
     actor = payload["username"]
     r = get_redis()
-    cool = f"alert:test:cooldown:{actor}:{ch}"
-    if r.exists(cool):
-        raise ApiError(429, "TOO_MANY_REQUESTS", "测试冷却中（60s/通道）")
-    r.setex(cool, 60, "1")
-
-    rows = {x["channel"]: x for x in _channels_from_db()}
-    row = rows.get(ch)
+    cool = f"alert:test:cooldown:{actor}:{row['id']}"
+    if not r.set(cool, "1", nx=True, ex=60):   # 原子冷却（批7.1 行级）
+        raise ApiError(429, "TOO_MANY_REQUESTS", "测试冷却中（60s/订阅行）")
     detail, ok = "", False
     if ch == "im":
         from src.im_bot.base import get_im_provider

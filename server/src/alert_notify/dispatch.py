@@ -155,10 +155,12 @@ def _writeback_empty(notif_id: int | None) -> None:
 
 # ── 节流/配额（原子原语，fail-open）──
 
-def _throttled(ch: str, title: str) -> bool:
-    """SET NX EX 原子节流（返回 True=15min 内已派过）。Valkey 故障 fail-open。"""
+def _throttled(ch: str, title: str, row_id: int | None = None) -> bool:
+    """SET NX EX 原子节流（返回 True=15min 内已派过）。Valkey 故障 fail-open。
+    多目标：键含 row_id——同通道多行各自节流（不含则同通道第二行必被首行误杀）。"""
     try:
-        key = f"alert:throttle:{ch}:{hashlib.md5(title.encode()).hexdigest()[:12]}"
+        rk = f":{row_id}" if row_id is not None else ""
+        key = f"alert:throttle:{ch}{rk}:{hashlib.md5(title.encode()).hexdigest()[:12]}"
         return not _redis().set(key, "1", nx=True, ex=900)
     except Exception as e:
         logger.warning("throttle key unavailable (fail-open): %s", e)
@@ -279,9 +281,12 @@ def _load_channels() -> list[dict]:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT channel, target, categories, min_level FROM alert_channel_sub WHERE enabled")
-            return [{"channel": r[0], "target": r[1], "categories": r[2] or [],
-                     "min_level": r[3]} for r in cur.fetchall()]
+                "SELECT id, channel, target, categories, min_level FROM alert_channel_sub "
+                "WHERE enabled ORDER BY id")
+            # 2026-09-02 多目标修正：每通道可多行（多邮箱/多手机/多 bot）——行 id 进快照，
+            # 回写/节流键 = dkey=ch:row_id（ch 键会同行互撞：第二行必被节流/回写互相覆盖）
+            return [{"id": r[0], "channel": r[1], "target": r[2], "categories": r[3] or [],
+                     "min_level": r[4]} for r in cur.fetchall()]
     except Exception as e:
         logger.warning("load alert_channel_sub failed: %s", e)
         return []
@@ -313,14 +318,15 @@ def _dispatch_async(level: str, category: str, title: str, body: str,
         return
     for row in matched:
         ch = row["channel"]
-        if _throttled(ch, title):
-            _writeback(notif_id, ch, "skip:throttled")
+        dkey = f"{ch}:{row.get('id', '')}"   # 多目标：每行独立审计/节流键（ch 键同行互撞）
+        if _throttled(ch, title, row.get("id")):
+            _writeback(notif_id, dkey, "skip:throttled")
             continue
         if _quota_exceeded(ch):
-            _writeback(notif_id, ch, "skip:quota")
+            _writeback(notif_id, dkey, "skip:quota")
             continue
-        _writeback(notif_id, ch, "queued")          # 先写 queued 再投（A3-F3）+ 终态守卫（B3-1②）双保险
-        payload = {"row": row, "level": level, "category": category,
+        _writeback(notif_id, dkey, "queued")          # 先写 queued 再投（A3-F3）+ 终态守卫（B3-1②）双保险
+        payload = {"row": row, "dkey": dkey, "level": level, "category": category,
                    "title": str(title)[:500], "body": str(body)[:4000],
                    "code": code, "notif_id": notif_id}
         try:
@@ -330,14 +336,14 @@ def _dispatch_async(level: str, category: str, title: str, body: str,
             logger.warning("enqueue alerts_%s failed (degrade to direct send): %s", ch, e)
             try:
                 # B 评 P2-4：claim 认领（与 worker 竞争唯一发送权；worker 早完成则此处弃发）
-                if not _claim(notif_id, ch):
+                if not _claim(notif_id, dkey):
                     continue
                 ok, reason = _send_one(row, level, category, title, body, code)   # 降级直发（D-F1）
-                _writeback(notif_id, ch, "ok" if ok else f"failed:{reason}")
+                _writeback(notif_id, dkey, "ok" if ok else f"failed:{reason}")
             except Exception as e2:
                 # 异常隔离（⑦）：单通道降级直发抛不反噬其他通道
-                logger.error("direct send (%s) failed: %s", ch, e2)
-                _writeback(notif_id, ch, "failed:timeout")
+                logger.error("direct send (%s) failed: %s", dkey, e2)
+                _writeback(notif_id, dkey, "failed:timeout")
 
 
 def dispatch(level: str, category: str, title: str, body: str,

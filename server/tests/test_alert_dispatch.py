@@ -12,9 +12,9 @@ D = importlib.import_module("src.alert_notify.dispatch")
 N = importlib.import_module("src.alert_notify.notify")
 
 
-def _row(ch="im", target="10", cats=None, min_level="warn", enabled=True):
+def _row(ch="im", target="10", cats=None, min_level="warn", enabled=True, rid=1):
     return {"channel": ch, "target": target, "categories": cats or ["risk"],
-            "min_level": min_level, "enabled": enabled}
+            "min_level": min_level, "enabled": enabled, "id": rid}
 
 
 def _run(level="critical", category="risk", title="t", rows=None, **kw):
@@ -69,13 +69,13 @@ def test_empty_terminal_writeback():
 # ③ 节流 skip
 def test_throttle_skips_and_writeback():
     wb, sent = _run(_throttled=MagicMock(return_value=True))
-    assert not sent and ("im", "skip:throttled") in wb
+    assert not sent and ("im:1", "skip:throttled") in wb
 
 
 # ④ 配额 skip
 def test_quota_skips():
     wb, sent = _run(_quota_exceeded=MagicMock(return_value=True))
-    assert not sent and ("im", "skip:quota") in wb
+    assert not sent and ("im:1", "skip:quota") in wb
 
 
 # ⑤ fail-open：节流/配额 Valkey 故障 → 放行（容错在函数内部的 except——patch _redis 触发真实路径）
@@ -93,7 +93,7 @@ def test_failopen_valkey_down():
 # ⑥ 先写 queued 再投 + 队列名/任务名/payload 快照
 def test_enqueue_order_and_payload():
     wb, sent = _run()
-    assert ("im", "queued") in wb
+    assert ("im:1", "queued") in wb
     assert sent, "应投 alerts_im 队列"
     args, kwargs = sent[0]
     assert args[0] == "alerts.send_im"
@@ -101,6 +101,7 @@ def test_enqueue_order_and_payload():
     assert kwargs["expires"] == 3600
     assert kwargs["kwargs"]["row"]["target"] == "10"     # 行快照
     assert kwargs["kwargs"]["notif_id"] == 42
+    assert kwargs["kwargs"]["dkey"] == "im:1"   # 批7.1 行级审计键
 
 
 # ⑥b enqueue 失败 → 降级直发（不重打节流键——节流在投前已打）
@@ -117,12 +118,12 @@ def test_degrade_to_direct_send():
          patch.object(D, "_send_one", return_value=(True, "ok")) as p_send:
         D._dispatch_async("critical", "risk", "t", "b", None, 42)
     p_send.assert_called_once()                          # 直发恰好一次
-    assert ("im", "ok") in direct                        # 降级终态回写
+    assert ("im:1", "ok") in direct                        # 降级终态回写
 
 
 # ⑦ 异常隔离：单通道 sender 抛不反噬其他通道
 def test_sender_exception_isolated():
-    rows = [_row(ch="im"), _row(ch="email", target="a@b.c", cats=["risk"])]
+    rows = [_row(ch="im", rid=1), _row(ch="email", target="a@b.c", cats=["risk"], rid=2)]
     wb, sent = _run(rows=rows)
     assert len(sent) == 2                                 # im 抛了 email 照投（_send_one 只在降级路径调用；此处全走队列）
     with patch.object(D, "_load_channels", return_value=rows), \
@@ -134,7 +135,7 @@ def test_sender_exception_isolated():
              patch.object(D, "_claim", return_value=True), \
              patch.object(D, "_send_one", side_effect=[Exception("boom"), (True, "ok")]):
             D._dispatch_async("critical", "risk", "t", "b", None, 1)
-    assert ("email", "ok") in wb                          # 第二通道不受第一通道异常影响
+    assert ("email:2", "ok") in wb                          # 第二通道不受第一通道异常影响
 
 
 # ⑧ notify 接线：dispatch 被惰性调用；notif_id 透传

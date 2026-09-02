@@ -112,9 +112,11 @@ const { t } = useI18n()
 const chipType = v => v === 'ok' || v === 'legacy' ? 'success' : (v === 'queued' || v === 'sending') ? 'info'
   : v.startsWith('failed:') ? 'danger' : v.startsWith('skip:') ? 'warning' : 'info'
 const chipLabel = (ch, v) => {
+  const base = ch.split(':')[0]   // 批7.1 行级 dkey（email:12）剥后缀取通道名
+  const n = ch.includes(':') ? `·${ch.split(':')[1]}` : ''
   const tag = { im: 'IM', email: t('alerts.channel.email'), sms: t('alerts.channel.sms'),
-                legacy: 'web', _chain: 'Ⓒ' }[ch] || ch
-  return v === 'ok' ? `${tag}✓` : (v === 'queued' || v === 'sending') ? `${tag}○` : v.startsWith('failed:') ? `${tag}✗` : `${tag}–`
+                legacy: 'web', _chain: 'Ⓒ' }[base] || ch
+  return (v === 'ok' ? `${tag}✓` : (v === 'queued' || v === 'sending') ? `${tag}○` : v.startsWith('failed:') ? `${tag}✗` : `${tag}–`) + n
 }
 const chipTitle = (ch, v) => {
   if (v === 'ok') return t('alerts.dispatch.ok')
