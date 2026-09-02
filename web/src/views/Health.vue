@@ -12,7 +12,7 @@
           <el-table-column prop="name" :label="t('health.service')" min-width="100" show-overflow-tooltip />
           <el-table-column :label="t('common.status')" width="80">
             <template #default="{ row }">
-              <el-tag :type="row.status === 'ok' ? 'success' : 'danger'">{{ row.status }}</el-tag>
+              <StatusTag :value="row.status" />
             </template>
           </el-table-column>
           <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
@@ -79,6 +79,7 @@
 </template>
 
 <script setup>
+import StatusTag from '../components/StatusTag.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getHealth, getHealthComponents, getHealthEvents } from '../api'

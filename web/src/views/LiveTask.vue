@@ -25,7 +25,7 @@
       <el-table-column prop="bars" :label="t('liveTask.bars')" width="90" class-name="num" />
       <el-table-column :label="t('common.status')" width="110">
         <template #default="{ row }">
-          <el-tag :type="statusType(row.status)" size="small">{{ row.frozen ? t('liveTask.stFrozen') + ' ❄' : enumZh(row.status) }}</el-tag>
+          <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.frozen ? '❄' : '' }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
@@ -142,9 +142,6 @@ const form = ref({
   account_id: '', initial_capital: 1000000,
 })
 
-const statusType = (s) => ({
-  running: 'success', pending: 'info', stopped: 'warning', error: 'danger'
-}[s] || 'info')
 
 const load = async () => {
   try { tasks.value = await getLiveTasks() } catch { ElMessage.error(t('common.loadFailed')) }

@@ -51,7 +51,7 @@
         </el-table-column>
         <el-table-column prop="status" :label="t('common.status')" width="100">
           <template #default="{ row }">
-            <el-tag :type="statusType(row.status)">{{ enumZh(row.status) }}</el-tag>
+            <StatusTag :value="row.status" />
           </template>
         </el-table-column>
         <el-table-column prop="mode" :label="t('backtest.mode')" width="80" />
@@ -140,6 +140,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bs, pct } from '../utils/backtestSummary'
+import StatusTag from '../components/StatusTag.vue'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
 import { enumZh } from '../utils/format'
@@ -167,7 +168,6 @@ const onStrategyChange = (sid) => {
   form.value.params = {}
 }
 
-const statusType = (s) => ({ running: 'warning', done: 'success', error: 'danger', pending: 'info' }[s] || 'info')
 
 const filterStatus = ref('')
 const strategyName = (sid) => strategies.value.find(x => x.id === sid)?.name || sid

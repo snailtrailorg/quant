@@ -22,7 +22,7 @@
       <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" width="80" />
       <el-table-column :label="t('common.status')" width="90">
-        <template #default="{ row }"><el-tag :type="statusType(row.status)">{{ statusLabel(row.status) }}</el-tag></template>
+        <template #default="{ row }"><StatusTag :value="row.status" /></template>
       </el-table-column>
       <el-table-column :label="t('task.progress')" width="140">
         <template #default="{ row }">{{ row.progress?.pct || 0 }}% ({{ row.progress?.current || 0 }}/{{ row.progress?.total || 0 }})</template>
@@ -43,7 +43,7 @@
 
     <el-dialog v-model="detailVisible" :title="t('task.detailTitle')" width="720px">
       <div v-if="detail">
-        <p>{{ t('common.name') }}: {{ detail.name }} | {{ t('common.type') }}: {{ detail.type }} | {{ t('common.status') }}: <el-tag :type="statusType(detail.status)">{{ statusLabel(detail.status) }}</el-tag></p>
+        <p>{{ t('common.name') }}: {{ detail.name }} | {{ t('common.type') }}: {{ detail.type }} | {{ t('common.status') }}: <StatusTag :value="detail.status" /></p>
         <p>{{ t('task.params') }}: {{ JSON.stringify(detail.params) }}</p>
         <p v-if="detail.error_message" style="color:#f56c6c">{{ t('task.error') }}: {{ detail.error_message }}</p>
         <el-divider />
@@ -62,6 +62,7 @@
 </template>
 
 <script setup>
+import StatusTag from '../components/StatusTag.vue'
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getTasks, getTaskDetail, terminateTask, forceDeleteTask, detectStuck } from '../api'
@@ -74,8 +75,6 @@ const detailVisible = ref(false)
 const detail = ref(null)
 const role = ref(localStorage.getItem('role') || 'viewer')
 
-const statusType = s => ({ running: 'warning', completed: 'success', failed: 'danger', stuck: 'danger', terminated: 'info', paused: 'info' }[s] || '')
-const statusLabel = s => ({ running: t('task.statusRunning'), completed: t('task.statusCompleted'), failed: t('task.statusFailed'), stuck: t('task.statusStuck'), terminated: t('task.statusTerminated'), paused: t('task.statusPaused') }[s] || s)
 
 const load = async () => { try { tasks.value = (await getTasks(filterStatus.value)).items || [] } catch (e) { console.error(e) } }
 onMounted(load)

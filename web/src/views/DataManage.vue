@@ -34,9 +34,7 @@
       </el-table-column>
       <el-table-column :label="t('common.status')" width="80">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'idle' ? 'success' : (row.status === 'running' || row.status === 'partial') ? 'warning' : 'danger'">
-            {{ row.status === 'idle' ? t('dataManage.idle') : row.status === 'running' ? t('task.statusRunning') : row.status }}
-          </el-tag>
+          <StatusTag :value="row.status" />
         </template>
       </el-table-column>
       <el-table-column prop="last_sync_count" :label="t('dataManage.lastSync')" width="100">
@@ -76,7 +74,7 @@
         </el-table-column>
         <el-table-column prop="status" :label="t('common.status')" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'success' ? 'success' : row.status === 'partial' ? 'warning' : 'danger'">{{ row.status }}</el-tag>
+            <StatusTag :value="row.status" />
           </template>
         </el-table-column>
         <el-table-column :label="t('dataManage.tradeDay')" width="100">
@@ -134,6 +132,7 @@
 </template>
 
 <script setup>
+import StatusTag from '../components/StatusTag.vue'
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'

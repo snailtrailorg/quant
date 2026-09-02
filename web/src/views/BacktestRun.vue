@@ -39,7 +39,7 @@
         <el-table-column prop="symbol" :label="t('common.symbol')" show-overflow-tooltip />
         <el-table-column prop="status" :label="t('common.status')">
           <template #default="{ row }">
-            <el-tag :type="row.status === 'done' ? 'success' : 'warning'">{{ row.status }}</el-tag>
+            <StatusTag :value="row.status" />
           </template>
         </el-table-column>
         <el-table-column :label="t('backtest.returnCol')" min-width="120">
@@ -59,6 +59,7 @@
 </template>
 
 <script setup>
+import StatusTag from '../components/StatusTag.vue'
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'

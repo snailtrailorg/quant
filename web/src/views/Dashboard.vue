@@ -76,7 +76,7 @@
           <div v-for="task in liveTasks.slice(0, 5)" :key="task.id" class="task-row">
             <span class="dot" :class="task.status" />{{ task.name }}
             <span style="color: var(--text-secondary)">{{ task.symbol }}</span>
-            <el-tag size="small" :type="{ running: 'success', stopped: 'info', error: 'danger', frozen: 'primary', pending: 'warning' }[task.status] || 'info'">{{ task.status }}</el-tag>
+            <StatusTag :value="task.status" />
           </div>
           <div v-if="!liveTasks.length" class="empty-cell">{{ t('dashboard.noTasks') }}</div>
         </el-card>
@@ -134,6 +134,7 @@ import { getStrategies, getDashboard, getPnl, getOrders, getLiveTasks,
          getNotifications, getDataIntegrity, getBacktests, getRiskState } from '../api'
 import api from '../api'
 import { bs, pct } from '../utils/backtestSummary'
+import StatusTag from '../components/StatusTag.vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'

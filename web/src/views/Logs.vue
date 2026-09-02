@@ -76,9 +76,7 @@
     <el-table :data="outbox" max-height="300">
       <el-table-column prop="status" :label="t('common.status')" width="100">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'sent' ? 'success' : row.status === 'failed' ? 'danger' : 'warning'">
-            {{ row.status }}{{ row.status === 'pending' ? ` (${row.attempts})` : '' }}
-          </el-tag>
+          <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.status === 'pending' ? `(${row.attempts})` : '' }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="to" :label="t('log.outboxTo')" min-width="200" show-overflow-tooltip />
@@ -102,6 +100,7 @@
 </template>
 
 <script setup>
+import StatusTag from '../components/StatusTag.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
