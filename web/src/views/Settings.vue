@@ -1,36 +1,39 @@
 <template>
-  <!-- 设置四 tab(03 号 §3.3/09 号 A3:运行配置|账号与邀请|权限管理|个人资料;批 1 归位重组 2026-08-30) -->
+  <!-- 设置五 tab(03 号 §3.3/09 号 A3+wd-20 §2.2 TabsShell；批 7 增告警 tab) -->
   <el-card>
     <template #header>
-      <el-tabs v-model="tab" @tab-change="v => $router.replace({ query: { ...$route.query, tab: v } })">
-        <el-tab-pane name="run"><template #label><b>{{ t('settings.run') }}</b></template></el-tab-pane>
-        <el-tab-pane name="users"><template #label><b>{{ t('settings.users') }}</b></template></el-tab-pane>
-        <el-tab-pane v-if="isAdmin" name="perm"><template #label><b>{{ t('settings.perm') }}</b></template></el-tab-pane>
-        <el-tab-pane v-if="isAdmin" name="alerts"><template #label><b>{{ t('settings.alertsTab') }}</b></template></el-tab-pane>
-        <el-tab-pane name="profile"><template #label><b>{{ t('settings.profile') }}</b></template></el-tab-pane>
-      </el-tabs>
+      <TabsShell :tabs="visibleTabs" default-tab="run" v-slot="slotProps">
+        <RunConfig v-if="slotProps.tab === 'run'" />
+        <Account v-else-if="slotProps.tab === 'users'" />
+        <Permissions v-else-if="slotProps.tab === 'perm'" />
+        <AlertSettings v-else-if="slotProps.tab === 'alerts'" />
+        <Profile v-else />
+      </TabsShell>
     </template>
-    <RunConfig v-if="tab === 'run'" />
-    <Account v-else-if="tab === 'users'" />
-    <Permissions v-else-if="tab === 'perm'" />
-    <AlertSettings v-else-if="tab === 'alerts'" />
-    <Profile v-else />
   </el-card>
 </template>
-
 <script setup>
-import { ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useI18n } from 'vue-i18n'
+import { computed } from 'vue'
+import TabsShell from '../components/TabsShell.vue'
 import RunConfig from '../components/RunConfig.vue'
 import Account from './Account.vue'
 import Permissions from './Permissions.vue'
 import AlertSettings from './AlertSettings.vue'
 import Profile from './Profile.vue'
 
-const { t } = useI18n()
-const route = useRoute()
-const router = useRouter()
 const isAdmin = localStorage.getItem('role') === 'admin'
-const tab = ref(route.query.tab || 'run')
+// perm/alerts=admin 门控（页面自验兜底在其内）
+const visibleTabs = computed(() => isAdmin
+  ? [
+      { key: 'run', i18nKey: 'tabs.run' },
+      { key: 'users', i18nKey: 'tabs.users' },
+      { key: 'perm', i18nKey: 'tabs.perm' },
+      { key: 'alerts', i18nKey: 'tabs.alerts' },
+      { key: 'profile', i18nKey: 'tabs.profile' },
+    ]
+  : [
+      { key: 'run', i18nKey: 'tabs.run' },
+      { key: 'users', i18nKey: 'tabs.users' },
+      { key: 'profile', i18nKey: 'tabs.profile' },
+    ])
 </script>

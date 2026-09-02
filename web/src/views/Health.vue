@@ -82,7 +82,7 @@
 import StatusTag from '../components/StatusTag.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getHealth, getHealthComponents, getHealthEvents } from '../api'
+import { getHealthComponents, getHealthEvents } from '../api'
 
 const { t } = useI18n()
 const healthData = ref([])
@@ -121,26 +121,25 @@ const componentRows = computed(() => {
 
 const sevType = s => s === 'critical' ? 'danger' : s === 'recovery' ? 'success' : 'warning'
 
-onMounted(async () => {
+// wd-20 批一冒烟挖出双潜伏 bug 修复：①getHealth() 打 /api/health=404（后端 /health 无
+// 前缀且只回 liveness——服务卡恒 loadFailed）②setInterval(load) 但 load 未定义（每 30s
+// ReferenceError）。修：服务卡改用 getHealthComponents() 的 units（单请求喂两卡）
+const load = async () => {
   try {
-    const r = await getHealth()
-    if (r.results) {
-      healthData.value = Object.entries(r.results).map(([k, v]) => ({
-        name: k, status: v.status, detail: v.model || v.msg || '',
-      }))
-    }
-    if (r.stats) {
-      diskData.value = r.stats.filter(s => s.pct).map(s => ({
-        path: s.path, used: `${s.used_gb}GB`, total: `${s.total_gb}GB`, pct: s.pct,
-      }))
-    }
+    const r = await getHealthComponents()
+    snap.value = r
+    healthData.value = Object.entries(r.units || {}).map(([k, v]) => ({
+      name: k.replace('@quant.service', ''),
+      status: v.ActiveState === 'active' ? 'ok' : 'error',
+      detail: v.SubState && v.SubState !== 'running' && v.SubState !== 'dead' ? v.SubState : (v.ActiveState || ''),
+    }))
   } catch { healthData.value = [{ name: '-', status: 'error', detail: t('common.loadFailed') }] }
-  try { snap.value = await getHealthComponents() } catch { /* 组件矩阵加载失败不阻塞页面 */ }
   try {
     const r = await getHealthEvents()
     eventRows.value = r.events || []
   } catch { /* 事件流加载失败不阻塞页面 */ }
-})
+}
+onMounted(load)
 
 // P3-5(05 §5.10):健康页 30s 自动轮询+手动刷新
 import { onUnmounted } from 'vue'
