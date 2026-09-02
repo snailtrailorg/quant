@@ -37,6 +37,7 @@
             <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px">{{ t('liveTask.selfHeal') }}:</div>
             <div style="font-size: 12px; font-family: var(--font-num)">
               {{ t('liveTask.mdMode') }}: {{ row.md_mode || '—' }} | {{ t('liveTask.lag') }}: {{ row.lag_s ?? row.lag ?? '—' }}s | {{ t('liveTask.bars') }}: {{ row.bars ?? '—' }} | {{ t('common.status') }}: {{ row.status }}
+              | {{ t('liveTask.nRestarts') }}: {{ restartCount(row) }} | {{ t('liveTask.lastExit') }}: {{ lastExit(row) }}
             </div>
             <div v-if="row._timeline?.length" style="margin-top: 8px">
               <div style="color: var(--text-secondary); font-size: 12px">{{ t('liveTask.recentLogs') }}:</div>
@@ -233,6 +234,12 @@ const enrichTasks = async () => {
       task._timeline = (r?.logs || []).slice(0, 8)
     } catch { task._timeline = [] }
   }))
+}
+// wd-20 §1.5 裁定②：重启/退出码由 task_logs 时间线派生（启动条目数-1=重启数）
+const restartCount = row => Math.max((row._timeline || []).filter(l => (l.msg || '').includes('任务启动')).length - 1, 0)
+const lastExit = row => {
+  const e = (row._timeline || []).find(l => (l.msg || '').includes('退出'))
+  return e ? (e.msg.includes('退出码 0') ? '0' : e.msg.slice(0, 24)) : '—'
 }
 const toggleTimeline = async (row) => {
   row._open = !row._open

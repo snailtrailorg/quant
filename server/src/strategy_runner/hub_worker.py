@@ -232,6 +232,8 @@ def run(ctx: dict) -> None:
         if not ctx["stop_check"]():
             return
         logger.info("任务 %s 收到停止，退出", tid)
+        from src.strategy_runner.main import _log_timeline
+        _log_timeline(tid, "info", "任务停止：退出码 0（stop_live_task 置 stopped，清理 xgroup 后退出）")
         try:
             r.xgroup_del(stream, gname)
         except Exception: pass
@@ -318,6 +320,15 @@ def run(ctx: dict) -> None:
     except KeyboardInterrupt:
         pass
     finally:   # 原生库拆除规避（同 hub/direct）；正常停止/NOGROUP 已在钩子/sleeper 内带码直达
+        # wd-20 §1.5 裁定②：崩溃退出留痕（finally 捕获在飞异常——os._exit 前最后窗口）
+        import sys as _sys
+        _exc = _sys.exc_info()[0]
+        if _exc is not None:
+            try:
+                from src.strategy_runner.main import _log_timeline
+                _log_timeline(tid, "error", f"异常退出：{_exc.__name__}: {str(_sys.exc_info()[1])[:150]}")
+            except Exception:
+                pass
         try:
             r.xgroup_del(stream, gname)
         except Exception:

@@ -632,8 +632,7 @@ def get_logs(task_id: str | None = None, payload: dict = Depends(require_perm("r
         if task_id:
             cur = conn.execute(
                 "SELECT level, message, step_name, created_at FROM task_logs "
-                "WHERE task_id = %s OR task_id LIKE %s "
-                "ORDER BY created_at DESC LIMIT 100", (task_id, f"%{task_id}%"))
+                "WHERE task_id = %s ORDER BY created_at DESC LIMIT 100", (task_id,))   # 精确匹配（LIKE %live:1% 撞 live:12）
         else:
             cur = conn.execute(
                 "SELECT level, message, step_name, created_at FROM task_logs "

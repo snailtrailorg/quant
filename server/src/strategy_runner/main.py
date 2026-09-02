@@ -249,6 +249,19 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     hub_worker_run(ctx)
 
 
+def _log_timeline(tid, level: str, message: str) -> None:
+    """实盘任务生命周期事件落 task_logs（wd-20 §1.5 裁定②：时间线数据源，替代 quant-journal
+    部署便利通道——最小权限原则该通道后续撤）。task_id=live:{tid} 与 /api/log?task_id= 精确匹配。
+    never-raise：审计写入绝不影响交易主流程。"""
+    if tid is None:
+        return
+    try:
+        from src.task_manager import log_task
+        log_task(f"live:{tid}", level, message)
+    except Exception as e:
+        logger.warning("时间线写入失败(不阻断): %s", e)
+
+
 def main():
     parser = argparse.ArgumentParser(description="策略实盘化入口")
     parser.add_argument("--task-id", help="live_task.id（新架构：策略与标的分离）")
@@ -325,6 +338,7 @@ def main():
         # 任务级参数覆盖策略级（mode/python_code 等保留策略级，数值参数用任务级）
         params = {**base_params, **task_params}
         logger.info("实盘任务 %s (策略 %s, 标的 %s) 启动", tid, sid, symbol)
+        _log_timeline(tid, "info", f"任务启动：策略 {sid} 标的 {symbol}（hub 模式，systemd 重启亦走此=重启计数源）")
     else:
         # 旧架构兼容：从 strategy_config 读
         with get_conn() as conn:

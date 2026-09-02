@@ -320,7 +320,7 @@ export default {
     liveTask: {
       title: '实盘任务',
       create: '创建实盘任务',
-      recentLogs: '近期任务日志', selfHeal: '自愈时间线',
+      recentLogs: '近期任务日志', selfHeal: '自愈时间线', nRestarts: '重启', lastExit: '最后退出',
       createBtn: '创建',
       taskName: '任务名称',
       phName: '如：茅台均线策略',
@@ -1475,7 +1475,7 @@ export default {
     liveTask: {
       title: 'Live Tasks',
       create: 'Create Live Task',
-      recentLogs: 'Recent task logs', selfHeal: 'Self-heal timeline',
+      recentLogs: 'Recent task logs', selfHeal: 'Self-heal timeline', nRestarts: 'Restarts', lastExit: 'Last exit',
       createBtn: 'Create',
       taskName: 'Task Name',
       phName: 'e.g. Maotai MA Strategy',
