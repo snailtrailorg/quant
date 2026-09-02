@@ -54,7 +54,7 @@
     </div>
 
     <!-- 选择头像弹窗：系统图标 or 上传 -->
-    <el-dialog v-model="chooserVisible" :title="t('profile.chooseAvatar')" width="480px">
+    <el-dialog v-model="chooserVisible" :title="t('profile.chooseAvatar')" width="560px">
       <el-tabs v-model="chooserTab">
         <!-- 系统图标（36 个，点击即选） -->
         <el-tab-pane :label="t('profile.systemIcons')" name="icons">

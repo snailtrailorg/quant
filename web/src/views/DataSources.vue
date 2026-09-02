@@ -1,6 +1,6 @@
 <template>
   <el-card>
-    <template #header>{{ t('dataSources.title') }}</template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('dataSources.title') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
       <div style="font-weight: bold; margin-bottom: 8px">{{ t('dataSources.usageTitle') }}</div>
       <el-table :data="usage.today">
@@ -31,19 +31,19 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-divider />
-    <h3 style="font-size: 16px; margin-bottom: 12px">{{ form.id ? t('dataSources.editTitle') : t('dataSources.addTitle') }}</h3>
-    <el-form :model="form" label-width="100px" inline>
+    <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('dataSources.editTitle') : t('dataSources.addTitle')" width="560px">
+      <el-form :model="form" label-width="120px">
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('dataSources.phProvider')" /></el-form-item>
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item :label="t('common.credentialToken')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" /></el-form-item>
       <el-form-item :label="t('common.dailyLimit')"><el-input-number v-model="form.usage_limit" :min="0" controls-position="right" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
-      <el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dlg = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button type="primary" @click="resetForm">{{ t('common.reset') }}</el-button>
-      </el-form-item>
-    </el-form>
+      </template>
+    </el-dialog>
     <template v-if="tushareRow">
       <el-divider />
       <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('dataSources.tierTitle') }}</h3>
@@ -111,6 +111,7 @@ const sources = ref([])
 const usage = ref({ today: [], trend: [] })
 const form = ref(emptyForm())
 const saving = ref(false)
+const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）
 const testing = ref(0)
 
 // --- 积分档四层限流（tushare）：预设表 + 覆写 + 熔断参数 ---
@@ -130,8 +131,9 @@ const load = async () => {
 const loadUsage = async () => { try { usage.value = await getDataSourceUsage() } catch (e) { console.error(e) } }
 onMounted(() => { load(); loadUsage() })
 
-const onEdit = (row) => { form.value = { ...row, credentials: '' } }
+const onEdit = (row) => { form.value = { ...row, credentials: '' } ; dlg.value = true }
 const resetForm = () => { form.value = emptyForm() }
+const onAdd = () => { resetForm(); dlg.value = true }
 
 const loadPresets = async () => {
   if (!tushareRow.value) return
@@ -204,6 +206,7 @@ const onSave = async () => {
     else await createDataSource(form.value)
     ElMessage.success(t('common.saveSuccess'))
     resetForm()
+    dlg.value = false
     load()
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { saving.value = false }

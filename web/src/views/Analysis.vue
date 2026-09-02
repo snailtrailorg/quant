@@ -27,7 +27,7 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="showPoolDialog" :title="t('analysis.addPoolTitle')" width="400px">
+    <el-dialog v-model="showPoolDialog" :close-on-click-modal="false" :title="t('analysis.addPoolTitle')" width="420px">
       <el-form label-width="80px">
         <el-form-item :label="t('common.symbol')">{{ currentSymbol }}</el-form-item>
         <el-form-item :label="t('analysis.selectPool')">

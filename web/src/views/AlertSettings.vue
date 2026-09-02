@@ -47,7 +47,7 @@
     </div>
 
     <!-- 订阅编辑（新增/修改共用；类型驱动目标控件） -->
-    <el-dialog v-model="dlg" :title="isEdit ? t('alerts.editSub') : t('alerts.addSub')" width="520px">
+    <el-dialog v-model="dlg" :close-on-click-modal="false" :title="isEdit ? t('alerts.editSub') : t('alerts.addSub')" width="560px">
       <el-form label-width="90px">
         <el-form-item :label="t('common.type')">
           <el-select v-model="form.channel" style="width: 100%" :disabled="isEdit">
@@ -90,7 +90,7 @@
     </el-dialog>
 
     <!-- 短信凭证（专用端点,secret 只写不读） -->
-    <el-dialog v-model="smsDlg" :title="t('alerts.smsCred')" width="480px">
+    <el-dialog v-model="smsDlg" :close-on-click-modal="false" :title="t('alerts.smsCred')" width="560px">
       <el-form label-width="140px">
         <el-form-item label="AccessKey ID"><el-input v-model="smsForm.access_key_id" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
         <el-form-item label="AccessKey Secret"><el-input v-model="smsForm.access_key_secret" type="password" show-password :placeholder="t('alerts.phKeepBlank')" /></el-form-item>

@@ -91,7 +91,7 @@
     <div style="color: #909399; font-size: 12px; margin-top: 8px">{{ t('log.outboxHint') }}</div>
   </el-card>
 
-  <el-dialog v-model="showAnalyze" :title="t('log.aiTitle')" width="600px">
+  <el-dialog v-model="showAnalyze" :title="t('log.aiTitle')" width="720px">
     <el-alert type="warning" :closable="false" style="margin-bottom: 16px">{{ t('log.analyzeHint', { n: errorLogs.length }) }}</el-alert>
     <el-input v-model="analysisResult" type="textarea" :rows="10" readonly :placeholder="t('log.phAnalyze')" />
     <template #footer>

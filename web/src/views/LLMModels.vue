@@ -1,6 +1,6 @@
 <template>
   <el-card>
-    <template #header>{{ t('llm.configTitle') }}</template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.configTitle') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
     <el-card shadow="never" style="margin-bottom: 12px">
       <template #header>{{ t('llm.usageTitle') }}<el-button type="primary" @click="loadUsage" style="margin-left: 8px">{{ t('common.refresh') }}</el-button></template>
       <el-table :data="usage.month">
@@ -42,9 +42,8 @@
       </el-table-column>
     </el-table>
 
-    <el-divider />
-    <h3 style="font-size: 16px; margin-bottom: 12px">{{ form.id ? t('llm.editModel') : t('llm.addModel') }}</h3>
-    <el-form :model="form" label-width="100px" inline>
+    <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('llm.editModel') : t('llm.addModel')" width="560px">
+      <el-form :model="form" label-width="120px">
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('llm.phProvider')" /></el-form-item>
       <el-form-item :label="t('llm.model')"><el-input v-model="form.model" /></el-form-item>
@@ -54,11 +53,12 @@
       <el-form-item :label="t('llm.maxOutputTokens')"><el-input-number v-model="form.max_output_tokens" :min="0" controls-position="right" :placeholder="t('llm.phOutputTokens')" /></el-form-item>
       <el-form-item :label="t('llm.priority')"><el-input-number v-model="form.priority" :min="1" :max="100" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
-      <el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dlg = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button type="primary" @click="resetForm">{{ t('common.reset') }}</el-button>
-      </el-form-item>
-    </el-form>
+      </template>
+    </el-dialog>
   </el-card>
 
   <!-- P2-3 LLM 预算预警 -->
@@ -101,6 +101,7 @@ const loadBudget = async () => { budgetLoading.value = true; try { budgets.value
 const checkBudget = async () => { checking.value = true; try { budgetCheck.value = await api.post('/llm-budget/check') } catch { ElMessage.error(t('llm.checkFailed')) } finally { checking.value = false } }
 const form = ref(emptyForm())
 const saving = ref(false)
+const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）
 const testing = ref(0)
 
 function emptyForm() {
@@ -111,8 +112,9 @@ const load = async () => { try { models.value = await getLLMModels() } catch (e)
 const loadUsage = async () => { try { usage.value = await getLLMUsage() } catch (e) { console.error(e) } }
 onMounted(() => { load(); loadUsage(); loadBudget() })
 
-const onEdit = (row) => { form.value = { ...row, api_key: '' } }
+const onEdit = (row) => { form.value = { ...row, api_key: '' } ; dlg.value = true }
 const resetForm = () => { form.value = emptyForm() }
+const onAdd = () => { resetForm(); dlg.value = true }
 
 const onSave = async () => {
   saving.value = true
@@ -121,6 +123,7 @@ const onSave = async () => {
     else await createLLMModel(form.value)
     ElMessage.success(t('common.saveSuccess'))
     resetForm()
+    dlg.value = false
     load()
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { saving.value = false }

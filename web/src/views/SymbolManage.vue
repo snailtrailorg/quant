@@ -44,7 +44,7 @@
     </div>
 
     <!-- 回补弹窗 -->
-    <el-dialog v-model="bfVisible" :title="t('symbol.backfillTitle', { symbol: bfSymbol })" width="420px">
+    <el-dialog v-model="bfVisible" :close-on-click-modal="false" :title="t('symbol.backfillTitle', { symbol: bfSymbol })" width="420px">
       <el-form label-width="80px">
         <el-form-item :label="t('symbol.start')">
           <el-input v-model="bfForm.start" :placeholder="t('symbol.phDate')" />

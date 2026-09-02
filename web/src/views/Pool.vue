@@ -67,7 +67,7 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="showDialog" :title="t('pool.createTitle')" width="520px">
+    <el-dialog v-model="showDialog" :close-on-click-modal="false" :title="t('pool.createTitle')" width="560px">
       <el-form :model="newPool" label-width="110px">
         <el-form-item label="ID"><el-input v-model="newPool.id" :disabled="!!newPool._edit" /></el-form-item>
         <el-form-item :label="t('common.name')"><el-input v-model="newPool.name" /></el-form-item>

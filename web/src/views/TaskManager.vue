@@ -41,7 +41,7 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="detailVisible" :title="t('task.detailTitle')" width="700px">
+    <el-dialog v-model="detailVisible" :title="t('task.detailTitle')" width="720px">
       <div v-if="detail">
         <p>{{ t('common.name') }}: {{ detail.name }} | {{ t('common.type') }}: {{ detail.type }} | {{ t('common.status') }}: <el-tag :type="statusType(detail.status)">{{ statusLabel(detail.status) }}</el-tag></p>
         <p>{{ t('task.params') }}: {{ JSON.stringify(detail.params) }}</p>

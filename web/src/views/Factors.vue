@@ -47,7 +47,7 @@
     </el-table>
 
     <!-- 被引用策略列表弹窗(P2-7) -->
-    <el-dialog v-model="refsDlg" :title="t('factors.refsTitle', { name: refsFactor })" width="480px">
+    <el-dialog v-model="refsDlg" :title="t('factors.refsTitle', { name: refsFactor })" width="560px">
       <el-table :data="refsList" size="small">
         <el-table-column prop="name" :label="t('common.name')" />
         <el-table-column :label="t('factors.weightInStrategy')" width="80">

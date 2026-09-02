@@ -71,7 +71,7 @@
     </el-card>
 
     <!-- 新建回测弹窗 -->
-    <el-dialog v-model="showForm" :title="t('backtest.create')" width="640px">
+    <el-dialog v-model="showForm" :close-on-click-modal="false" :title="t('backtest.create')" width="720px">
       <el-form :model="form" label-width="100px">
         <el-form-item :label="t('backtest.strategy')">
           <el-select v-model="form.strategyId" :placeholder="t('backtest.phStrategy')" style="width: 100%" @change="onStrategyChange">

@@ -34,7 +34,7 @@
     <div v-if="!accounts.length && !loading" style="color: var(--text-secondary); padding: 20px; text-align: center">{{ t('tradingAccounts.empty') }}</div>
 
     <!-- 创建/编辑弹窗 -->
-    <el-dialog v-model="showForm" :title="form._edit ? t('common.edit') : t('common.create')" width="480px">
+    <el-dialog v-model="showForm" :close-on-click-modal="false" :title="form._edit ? t('common.edit') : t('common.create')" width="560px">
       <el-form :model="form" label-width="100px">
         <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
         <el-form-item :label="t('tradingAccounts.exchange')">

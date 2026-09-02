@@ -47,7 +47,7 @@
     </el-collapse>
 
     <!-- 登记豁免（标的级）：数量+生效期+原因 -->
-    <el-dialog v-model="exemptDlg" :title="t('reconcile.exemptTitle')" width="420px">
+    <el-dialog v-model="exemptDlg" :close-on-click-modal="false" :title="t('reconcile.exemptTitle')" width="420px">
       <el-form label-width="110px">
         <el-form-item :label="t('reconcile.exemptQty')"><el-input-number v-model="exemptForm.exempt_qty" :step="100" /></el-form-item>
         <el-form-item :label="t('reconcile.exemptUntil')"><el-date-picker v-model="exemptForm.exempt_until" value-format="YYYY-MM-DD" /></el-form-item>
@@ -61,7 +61,7 @@
     </el-dialog>
 
     <!-- 场外单登记 -->
-    <el-dialog v-model="openManual" :title="t('reconcile.manualOrder')" width="420px">
+    <el-dialog v-model="openManual" :close-on-click-modal="false" :title="t('reconcile.manualOrder')" width="420px">
       <el-form label-width="90px">
         <el-form-item label="Symbol"><el-input v-model="manualForm.symbol" placeholder="600000" /></el-form-item>
         <el-form-item :label="t('reconcile.volume')"><el-input-number v-model="manualForm.volume" :step="100" /></el-form-item>

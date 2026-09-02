@@ -1,6 +1,6 @@
 <template>
   <el-card>
-    <template #header>{{ t('channels.manageTitle') }}</template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('channels.manageTitle') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
     <el-table :data="channels">
       <el-table-column prop="provider" label="Provider" width="120" />
       <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
@@ -18,18 +18,18 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-divider />
-    <h3 style="font-size: 16px; margin-bottom: 12px">{{ form.id ? t('channels.editTitle') : t('channels.addTitle') }}</h3>
-    <el-form :model="form" label-width="100px" inline>
+    <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('channels.editTitle') : t('channels.addTitle')" width="560px">
+      <el-form :model="form" label-width="120px">
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('channels.phProvider')" /></el-form-item>
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item :label="t('common.credentialWebhook')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
-      <el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dlg = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-        <el-button type="primary" @click="resetForm">{{ t('common.reset') }}</el-button>
-      </el-form-item>
-    </el-form>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -43,6 +43,7 @@ const { t } = useI18n()
 const channels = ref([])
 const form = ref(emptyForm())
 const saving = ref(false)
+const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）
 const testing = ref(0)
 
 function emptyForm() {
@@ -52,8 +53,9 @@ function emptyForm() {
 const load = async () => { try { channels.value = await getChannels() } catch (e) { console.error(e) } }
 onMounted(load)
 
-const onEdit = (row) => { form.value = { ...row, credentials: '' } }
+const onEdit = (row) => { form.value = { ...row, credentials: '' } ; dlg.value = true }
 const resetForm = () => { form.value = emptyForm() }
+const onAdd = () => { resetForm(); dlg.value = true }
 
 const onSave = async () => {
   saving.value = true
@@ -62,6 +64,7 @@ const onSave = async () => {
     else await createChannel(form.value)
     ElMessage.success(t('common.saveSuccess'))
     resetForm()
+    dlg.value = false
     load()
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { saving.value = false }

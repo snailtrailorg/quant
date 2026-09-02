@@ -4,15 +4,21 @@
 
     <!-- 用户管理（邀请制） -->
     <div style="margin-bottom: 20px">
-      <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.userMgmt') }}</h3>
-      <el-form inline @submit.prevent="onInvite">
-        <el-form-item>
-          <el-input v-model="inviteEmail" :placeholder="t('account.phInviteEmail')" prefix-icon="Message" style="width: 280px" />
-        </el-form-item>
-        <el-form-item>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
+        <h3 style="font-size: 16px; margin: 0">{{ t('account.userMgmt') }}</h3>
+        <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
+      </div>
+      <el-dialog v-model="inviteDlg" :close-on-click-modal="false" :title="t('account.invite')" width="420px">
+        <el-form @submit.prevent="onInvite">
+          <el-form-item>
+            <el-input v-model="inviteEmail" :placeholder="t('account.phInviteEmail')" prefix-icon="Message" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="inviteDlg = false">{{ t('common.cancel') }}</el-button>
           <el-button type="primary" @click="onInvite" :loading="inviting">{{ t('account.invite') }}</el-button>
-        </el-form-item>
-      </el-form>
+        </template>
+      </el-dialog>
       <el-table :data="users" style="margin-top: 12px">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="username" :label="t('account.username')" min-width="100" show-overflow-tooltip />
@@ -119,6 +125,7 @@ const users = ref([])
 const currentUsername = ref('')
 const inviteEmail = ref('')
 const inviting = ref(false)
+const inviteDlg = ref(false)
 
 // 行锁定（自己）：角色、启停、删除均禁用，title 提示原因
 // （末位 admin 无需前端锁定：user_mgmt 仅 admin + 不动自己 ⇒ 末位 admin 行不可达）
@@ -154,7 +161,7 @@ const onInvite = async () => {
   try {
     await inviteUser(inviteEmail.value, locale.value)
     ElMessage.success(t('account.inviteSent', { email: inviteEmail.value }))
-    inviteEmail.value = ''
+    inviteEmail.value = ''; inviteDlg.value = false
     users.value = await getUsers()
   } catch (e) { ElMessage.error(apiErr(e, t('account.inviteFailed'))) }
   finally { inviting.value = false }

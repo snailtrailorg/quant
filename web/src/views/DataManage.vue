@@ -95,7 +95,7 @@
     </el-card>
   
     <!-- 回补弹窗(16号§3 第三次点名:prompt 正则只拦格式不拦非法日期,改 el-date-picker 组件校验) -->
-    <el-dialog v-model="backfillDialog" :title="t('dataManage.backfillTitle', { name: backfillForm.name })" width="420px">
+    <el-dialog v-model="backfillDialog" :close-on-click-modal="false" :title="t('dataManage.backfillTitle', { name: backfillForm.name })" width="420px">
       <el-form label-width="90px" @submit.prevent>
         <el-form-item :label="t('dataManage.backfillFrom')">
           <el-date-picker v-model="backfillForm.date" type="date" value-format="YYYYMMDD"
@@ -109,7 +109,7 @@
     </el-dialog>
 
     <!-- Cron 编辑弹窗(05 §5.10) -->
-    <el-dialog v-model="cronDialog" :title="t('dataManage.cronEditTitle')" width="480px">
+    <el-dialog v-model="cronDialog" :close-on-click-modal="false" :title="t('dataManage.cronEditTitle')" width="560px">
       <el-form label-width="80px">
         <el-form-item label="Cron">
           <el-input v-model="cronForm.schedule" placeholder="30 16 * * 1-5" />
