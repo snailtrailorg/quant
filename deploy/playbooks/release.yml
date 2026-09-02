@@ -127,6 +127,17 @@
         prev_release_id: "{{ (prev_fp.stdout_lines[0] | basename) if prev_fp.stdout_lines[0] != '__MISSING__' else '' }}"
         prev_slice_fp: "{{ dict(prev_fp.stdout_lines[1:] | select('search', '=') | map('split', '=')) }}"
 
+    # 补审B-P0：发布前被钉集合固化——快车道零重启不变量的断言基准。
+    # 此前期望=prev_release_id（链接指向）隐含"上次是全量"，连续第 2 次快车道必假红→好发布被回滚+全量重启。
+    - name: preflight —— 发布前被钉集合采集（quant-pinned 特权通道；失败=空串→断言 fail-closed）
+      ansible.builtin.shell: "set -o pipefail; {{ quant_pinned_cmd }} 2>/dev/null | sort -u | paste -sd, || true"
+      register: pinned_before_raw
+      changed_when: false
+
+    - name: preflight —— 被钉集合固化
+      ansible.builtin.set_fact:
+        pinned_before_flat: "{{ pinned_before_raw.stdout | default('') | trim }}"
+
     - name: preflight —— 波次实例 DB 真相源接线检查（v3.3 quant-dbro wrapper 通道；live + feishu 双通道）
       ansible.builtin.assert:
         that:
@@ -253,6 +264,7 @@
             msg: >-
               🚀 批 8 快车道：server 四切片+units 指纹与上一版 {{ prev_release_id }} 一致
               —— 跳过导入冒烟/pip/迁移/波次重启（web-only 发布）；双链照切，postverify pinned 断言=旧版。
+              ⚠️ shared/.env 与 shared/venv 是管道外输入（结构上不可指纹）——本轮若改过它们，须 -e force_full=true 重跑（补审A-P1）。
           when: not (server_changed | bool)
 
         - name: 阶段 3 —— py_compile 全量 + 六入口导入冒烟（quant-importsmoke-wrapper，带 shared/.env）
@@ -322,7 +334,8 @@
         - name: 阶段 5 —— 迁移实跑（quant-alembic-wrapper upgrade head）
           ansible.builtin.command: "{{ quant_alembic_cmd }} {{ release_id }}"
           changed_when: true
-          when: server_changed | bool   # 批 8：migrations 同内容=head 已在位（上一版实跑过）
+          # 补审A-4：恒跑（去 when 门）——幂等秒级非耗时大头，恢复批 8 前的 DB 漂移自愈性
+          # （备份恢复/人工 stamp 后指纹一致也会自愈到 head；migrations 同内容=空跑）
 
       rescue:
         - name: rescue(2-5) —— 清理 staged（allow_contract 时保留供人工处置）
@@ -365,12 +378,13 @@
           loop_control:
             loop_var: wave
           when: (wave.units | length > 0) and (server_changed | bool)
-          # 批 8：server 指纹一致=零单元需重启（web-only 发布）——waves_touched 保持空，
-          # 回滚语义自洽（rollback 只翻链零重启）；hub gen 不增=零扰交易进程。
+          # 批 8：server 指纹一致=零单元需重启（web-only 发布）——hub gen 不增=零扰交易进程。
+          # 回滚语义（补审A-P1 纠偏）：快车道失败时 waves_touched 未定义→rollback-tasks 缺省
+          # else 分支=翻链+全波次重启收敛（非"零重启"——顺带兜住崩溃自拉起钉新版的混合态）。
 
         - name: 阶段 7 —— 快车道跳过通告（波次全免——进程钉旧版目录运行同内容）
           ansible.builtin.debug:
-            msg: "🚀 批 8 快车道：5 波次全部跳过（server 未变）——单元零重启，hub gen 不增"
+            msg: "🚀 批 8 快车道：{{ deploy_waves | length }} 个波次全部跳过（server 未变）——单元零重启，hub gen 不增"
           when: not (server_changed | bool)
 
         - name: 阶段 8 —— 波次命令层失败终判（续行≠维持混合态——统一回滚，设计稿语义修死）
@@ -385,11 +399,12 @@
           register: postverify_hz
           when: deploy_waves | selectattr('healthz', 'defined') | list | length > 0
 
-        - name: 阶段 8 —— healthz 回带版本断言（沙箱桩；生产无此字段）
+        - name: 阶段 8 —— healthz 回带版本断言（沙箱桩读进程 cwd——快车道不重启必旧版假红，补审B-P1-3 仅全量断言）
           ansible.builtin.assert:
             that: postverify_hz.json.release == release_id
             msg: "healthz 报告版本 {{ postverify_hz.json.release | default('(无)') }} ≠ 本次 {{ release_id }}"
           when:
+            - server_changed | bool
             - postverify_hz.json is defined
             - postverify_healthz_release | bool
 
@@ -464,12 +479,31 @@
             pinned=$({{ quant_pinned_cmd }} 2>/dev/null || true)
             pinned_flat=$(printf '%s\n' "$pinned" | sort -u | paste -sd, -)
             # 批 8 三元：全量路径=收敛于本次；快车道（未重启）=收敛于上一版（进程钉旧目录跑同内容,期望态）
-            expected_pinned="{{ release_id if (server_changed | bool) else (prev_release_id | default('')) }}"
-            if [ "$pinned_flat" != "$expected_pinned" ]; then
-              echo "✗ 版本未收敛: 被钉集合=[$pinned_flat] ≠ 期望 [$expected_pinned]（server_changed={{ server_changed }}）"
-              rc=1
+            # 补审B-P0 修正版断言：
+            #   全量（server_changed）= 钉集恰为 {本次}（波次已重启收敛）
+            #   快车道 = 零重启不变量：钉集 ⊆ 发布前钉集 ∪ {本次}——连续 N 次快车道钉集不动；
+            #            中途 crash 被 systemd 拉起钉新版=同内容无损，容忍
+            if [ "{{ 'True' if (server_changed | bool) else 'False' }}" = "True" ]; then
+              expected_pinned="{{ release_id }}"
+              if [ "$pinned_flat" != "$expected_pinned" ]; then
+                echo "✗ 版本未收敛: 被钉集合=[$pinned_flat] ≠ 期望 [$expected_pinned]（全量路径）"; rc=1
+              else
+                echo "✓ 全部 quant-* 进程收敛于 $expected_pinned（全量路径）"
+              fi
             else
-              echo "✓ 全部 quant-* 进程收敛于 $expected_pinned（server_changed={{ server_changed }}）"
+              allowed=",{{ pinned_before_flat }},{{ release_id }},"
+              bad=""
+              for p in $(printf '%s\n' "$pinned" | sort -u); do
+                case "$allowed" in
+                  *",$p,"*) ;;
+                  *) bad="$bad $p";;
+                esac
+              done
+              if [ -n "$bad" ] || [ -z "$pinned_flat" ]; then
+                echo "✗ 快车道钉集越界: [$pinned_flat] ⊄ 发布前[{{ pinned_before_flat }}]+本次[{{ release_id }}] 越界:$bad"; rc=1
+              else
+                echo "✓ 快车道零重启不变量成立: 钉集[$pinned_flat] ⊆ 发布前 ∪ 本次"
+              fi
             fi
             exit $rc
           changed_when: false
@@ -480,6 +514,8 @@
             rollback_target: "{{ prev_release_id | default('') }}"
             rollback_waves: "{{ waves_touched | default([]) }}"
             rollback_from_release: true
+            # 补审B-P1：快车道失败=零触碰回滚（翻链即完成，秒级）——区分"零触碰"与"独立跑未定义"
+            rollback_zero_touch: "{{ not (server_changed | bool) }}"
 
         - name: rescue(6-8) —— 自动回滚（flip 回上一版 + 重启受影响波 + 复验 + freeze diff）
           include_tasks: rollback-tasks.yml

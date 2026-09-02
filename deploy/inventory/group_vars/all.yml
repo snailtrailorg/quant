@@ -14,6 +14,8 @@ deploy_trading_windows:              # 发布禁区（TZ=Asia/Shanghai；周一~
 # scripts 取 systemd 子树：单元变更判据（场景 6 install-units 触发条件）
 deploy_slices: [src, migrations, scripts/systemd, requirements.txt, alembic.ini]
                                      # 批 8 补 alembic.ini（同步白名单有而指纹无=完备性缺口——server_changed 判据须覆盖全部 server 输入）
+                                     # 注：scripts/ 非 systemd 子树=按需脚本（backup/init 等），新起进程经 run-current 即取新树，
+                                     # 故意不入指纹；shared/.env 与 shared/venv 管道外（quant 600 不可读），改它们须 -e force_full=true
 deploy_postverify_probe: false        # W2 兜底：探针默认关（环境显式开；沙箱 web 桩无端点）
 
 # ---- 发布同步白名单（设计稿 §3：synchronize 白名单清单，非全树 rsync）----

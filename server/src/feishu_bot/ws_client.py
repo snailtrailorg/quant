@@ -49,7 +49,11 @@ def on_message(data) -> None:
         chat_id = getattr(msg, "chat_id", "")
         receive_id = chat_id or open_id
         receive_id_type = "chat_id" if chat_id else "open_id"
-        process_message_async(open_id, text, receive_id_type, receive_id, _FID)
+        # 补审E-3：起后台线程处理（与 router/webhook 路径对齐）——原同步跑在 lark ws 的
+        # asyncio 事件循环上，LLM chat 阻塞期间 ping 停发可能被服务端断连
+        import threading
+        threading.Thread(target=process_message_async, daemon=True,
+                         args=(open_id, text, receive_id_type, receive_id, _FID)).start()
     except Exception as e:
         print(f"=== on_message ERROR: {e}", flush=True)
         import traceback; traceback.print_exc()
@@ -57,11 +61,13 @@ def on_message(data) -> None:
 
 
 def main() -> None:
+    # 补审E-8：单元实例名须为数字 bot id（quant-feishu-bot@{bid}）；非数字 fail-fast——
+    # 原静默降级会让 _FID 污染流入 SQL DataError→首见整段死火回到零留痕盲区
+    if len(sys.argv) < 2 or not sys.argv[1].isdigit():
+        raise SystemExit("用法: python -m src.feishu_bot.ws_client <bot_id>（数字——systemd 实例名）")
     # 2026-09-02：启动即回填（19 号双轨收尾——env 授权用户入表，告警 dispatch 同源可用）
-    import sys
-    if len(sys.argv) > 1 and sys.argv[1].isdigit():
-        from src.im_bot.users import backfill_from_env
-        backfill_from_env(int(sys.argv[1]))
+    from src.im_bot.users import backfill_from_env
+    backfill_from_env(int(sys.argv[1]))
     import sys, logging
     global _FID
     _FID = sys.argv[1] if len(sys.argv) > 1 else None

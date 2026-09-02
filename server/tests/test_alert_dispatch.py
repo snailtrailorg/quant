@@ -239,7 +239,7 @@ def test_writeback_contract():
         D._writeback(1, "im", "queued")
     sql = conn.execute.call_args[0][0]
     assert "COALESCE(dispatch,'{}'::jsonb) || jsonb_build_object" in sql
-    assert "!~ '^(ok|failed:|skip:)'" in sql
+    assert "!~ '^(ok|failed:|skip:|sending)'" in sql   # 补审E-5:sending 亦终态前置
     # 终态写无守卫
     with patch("src.data_platform.db.get_conn", return_value=conn):
         D._writeback(1, "im", "ok")

@@ -163,6 +163,7 @@ const onInvite = async () => {
     ElMessage.success(t('account.inviteSent', { email: inviteEmail.value }))
     inviteEmail.value = ''; inviteDlg.value = false
     users.value = await getUsers()
+    invites.value = (await getInvites()).items || []   // 补审F:邀请记录同步刷新
   } catch (e) { ElMessage.error(apiErr(e, t('account.inviteFailed'))) }
   finally { inviting.value = false }
 }

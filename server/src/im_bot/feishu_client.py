@@ -315,7 +315,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
                         try:
                             from src.alert_notify.notify import notify
                             notify("warn", "system",
-                                   f"飞书新用户首见登记（bot #{fid}）",
+                                   f"飞书新用户首见登记（bot #{fid} · {open_id[:8]}…）",   # 补审E-4:带 open_id 前缀防异用户同窗互吞
                                    f"open_id={open_id} 已按 default_role={role} 登记为该 bot 用户——"
                                    f"将同时成为告警推送收件人；如非预期请到 设置→集成→IM→用户管理 调整或移除。",
                                    code="im.first-seen")

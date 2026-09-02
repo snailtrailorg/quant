@@ -19,12 +19,12 @@
       <el-form :model="form" label-width="120px">
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item :label="t('common.type')">
-        <el-select v-model="form.type" style="width: 220px">
+        <el-select v-model="form.type" style="width: 100%">
           <el-option v-for="t in types" :key="t" :label="t" :value="t" />
         </el-select>
       </el-form-item>
       <el-form-item :label="t('riskRule.params')">
-        <el-input v-model="form.params" :placeholder="t('riskRule.phParams')" style="width:320px" />
+        <el-input v-model="form.params" :placeholder="t('riskRule.phParams')" />
       </el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>

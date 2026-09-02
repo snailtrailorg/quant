@@ -881,6 +881,9 @@ export default {
       markedStuck: '标记 {n} 个卡死任务',
     },
     brokers: {
+      phTdHost: '交易地址（如 122.112.139.0）', phTdPort: '交易端口（如 6102）',
+      phMdHost: '行情地址（如 119.3.103.38）', phMdPort: '行情端口（如 6002）',
+      phClientId: '客户号（独立于 hub 的号）',
       title: '交易通道',
       usage: '通道用量',
       manageTitle: '交易通道管理（平台化交易层，券商/交易所接入配置）',
@@ -2011,6 +2014,9 @@ export default {
       markedStuck: 'Marked {n} stuck tasks',
     },
     brokers: {
+      phTdHost: 'Trade host (e.g. 122.112.139.0)', phTdPort: 'Trade port (e.g. 6102)',
+      phMdHost: 'MD host (e.g. 119.3.103.38)', phMdPort: 'MD port (e.g. 6002)',
+      phClientId: 'Client ID (separate from hub)',
       title: 'Brokers',
       usage: 'Usage',
       manageTitle: 'Broker Management (platform trading layer)',

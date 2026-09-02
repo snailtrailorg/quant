@@ -109,7 +109,7 @@ def _writeback(notif_id: int | None, ch: str, value: str) -> None:
                    "|| jsonb_build_object(%s::text, %s::text) WHERE id = %s")
             params: list = [ch, value, notif_id]
             if guarded:
-                sql += " AND COALESCE(dispatch->>%s::text, '') !~ '^(ok|failed:|skip:)'"
+                sql += " AND COALESCE(dispatch->>%s::text, '') !~ '^(ok|failed:|skip:|sending)'"   # 补审E-5:sending 亦终态前置
                 params.append(ch)
             conn.execute(sql, tuple(params))
             conn.commit()
@@ -204,21 +204,22 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
     """IM 通道：target=bot_id，收件人=该 bot enabled 绑定用户全体（open_id 去重）。
     全成=ok；任一败=im_partial（A3-F9）。provider 限 feishu（B2-16，接第二家 IM 时扩展）。"""
     try:
+        bid = bid   # 补审E-7：脏 target 提前明确失败（原在 with 内 ValueError→timeout 错标）
         from src.data_platform.db import get_conn
         with get_conn() as conn:
-            cur = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s AND enabled", (int(bot_id),))
+            cur = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s AND enabled", (bid,))
             row = cur.fetchone()
             if not row:
                 return False, "disabled"
             provider_name = row[0]
-            cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s", (int(bot_id),))
+            cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s", (bid,))
             users = list({r[0] for r in cur.fetchall()})
         if not users:
             # 19 号双轨收尾（2026-09-02）：表空则尝试 env 授权层一次性回填（扫码时代 open_id 在 env，
             # 聊天一直靠 check_user 兜底——dispatch 与聊天路径应同源）
             from src.im_bot.users import backfill_from_env, list_users
-            if backfill_from_env(int(bot_id)) > 0:
-                users = list({u["im_user_id"] for u in list_users(int(bot_id))})
+            if backfill_from_env(bid) > 0:
+                users = list({u["im_user_id"] for u in list_users(bid)})
         if not users:
             return False, "no_binding"
         if provider_name != "feishu":
@@ -232,7 +233,7 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
         partial = False
         for uid in users:
             try:
-                if not provider.send_text(int(bot_id), uid, "open_id", text):
+                if not provider.send_text(bid, uid, "open_id", text):
                     partial = True
             except Exception as e:
                 logger.warning("im send to %s failed: %s", uid, e)

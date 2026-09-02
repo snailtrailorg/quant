@@ -29,6 +29,8 @@ def _register():
 
     def _still_enabled(row: dict) -> bool:
         """行级重查（批7.1 多目标）：入队后该行被关/删则 skip（计费敏感）。"""
+        if row.get("id") is None:
+            return True   # 补审C：批 7 旧格式在途 payload 无行 id——按快照发（WHERE id=NULL 恒空会误标 skip:disabled 丢发）
         try:
             with get_conn() as conn:
                 cur = conn.execute(

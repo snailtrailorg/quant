@@ -93,16 +93,27 @@ def alerts_config_create(body: dict = Body(...), payload: dict = Depends(require
     enabled = bool(body.get("enabled"))
     if enabled and not target:
         raise ApiError(400, "TARGET_REQUIRED", "启用订阅须填目标")
+    import json as _json
     with get_conn() as conn:
-        cur = conn.execute("SELECT id FROM im_bot_config WHERE enabled")
-        _validate_target(ch, target, {r[0] for r in cur.fetchall()})
-        import json as _json
-        cur = conn.execute(
-            "INSERT INTO alert_channel_sub (channel, target, categories, min_level, enabled) "
-            "VALUES (%s, %s, %s::jsonb, %s, %s) RETURNING id",
-            (ch, target or None, _json.dumps(cats), min_level, enabled))
-        new_id = cur.fetchone()[0]
-        conn.commit()
+        # 补审D-P1：门控恢复旧契约——启用且非空才验目标（禁用草稿/所引 bot 已下线的行可关可存）
+        if enabled and target:
+            cur = conn.execute("SELECT id FROM im_bot_config WHERE enabled")
+            _validate_target(ch, target, {r[0] for r in cur.fetchall()})
+        cur = conn.execute("SELECT count(*) FROM alert_channel_sub WHERE channel=%s", (ch,))
+        if cur.fetchone()[0] >= 10:   # 补审C：行数上限（扇出/配额 INCR/同行 UPDATE 无界）
+            raise ApiError(400, "BAD_REQUEST", "该通道订阅至多 10 行")
+        try:
+            cur = conn.execute(
+                "INSERT INTO alert_channel_sub (channel, target, categories, min_level, enabled) "
+                "VALUES (%s, %s, %s::jsonb, %s, %s) RETURNING id",
+                (ch, target or None, _json.dumps(cats), min_level, enabled))
+            new_id = cur.fetchone()[0]
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            if type(e).__name__ == "UniqueViolation":
+                raise ApiError(409, "DUPLICATE_SUB", "该订阅（通道+目标）已存在")
+            raise
     audit_log(payload["username"], "alerts_config_create",
               detail=f"#{new_id} {ch} {_mask(ch, target)}")
     return {"id": new_id}
@@ -140,15 +151,22 @@ def alerts_config_update(row_id: int, body: dict = Body(...),
     enabled = bool(body.get("enabled", row["enabled"]))
     if enabled and not target:
         raise ApiError(400, "TARGET_REQUIRED", "启用订阅须填目标")
+    import json as _json
     with get_conn() as conn:
-        cur = conn.execute("SELECT id FROM im_bot_config WHERE enabled")
-        _validate_target(ch, target, {r[0] for r in cur.fetchall()})
-        import json as _json
-        conn.execute(
-            "UPDATE alert_channel_sub SET target=%s, categories=%s::jsonb, "
-            "min_level=%s, enabled=%s, updated_at=now() WHERE id=%s",
-            (target or None, _json.dumps(cats), min_level, enabled, row_id))
-        conn.commit()
+        if enabled and target:   # 补审D-P1：门控同 POST
+            cur = conn.execute("SELECT id FROM im_bot_config WHERE enabled")
+            _validate_target(ch, target, {r[0] for r in cur.fetchall()})
+        try:
+            conn.execute(
+                "UPDATE alert_channel_sub SET target=%s, categories=%s::jsonb, "
+                "min_level=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                (target or None, _json.dumps(cats), min_level, enabled, row_id))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            if type(e).__name__ == "UniqueViolation":
+                raise ApiError(409, "DUPLICATE_SUB", "该订阅（通道+目标）已存在")
+            raise
     audit_log(payload["username"], "alerts_config_update",
               detail=f"#{row_id} {ch} {item_desc(ch, target, enabled)}")
 
@@ -207,7 +225,11 @@ def sms_config_put(body: dict = Body(...), payload: dict = Depends(require_perm(
 @router.post("/api/alerts/test")
 def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
     """逐通道测试发送（绕节流/配额）；per-actor 60s 冷却；结果落 code=alert.test 站内通知。"""
-    row = _load_row(int(body.get("id") or 0))
+    try:
+        _rid = int(body.get("id") or 0)
+    except (TypeError, ValueError):
+        raise ApiError(400, "BAD_REQUEST", "id 须为数字")
+    row = _load_row(_rid)
     ch = row["channel"]
     actor = payload["username"]
     r = get_redis()

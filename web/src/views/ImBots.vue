@@ -52,7 +52,7 @@
     </el-table>
 
     <!-- 添加向导 -->
-    <el-dialog v-model="showAdd" :title="t('imBots.addBot')" width="640px">
+    <el-dialog v-model="showAdd" :close-on-click-modal="false" :title="t('imBots.addBot')" width="560px">
       <el-form label-width="120px">
         <el-form-item :label="t('imBots.providerCol')">
           <el-select v-model="addForm.provider" style="width:100%" @change="onProviderChange">
@@ -84,7 +84,7 @@
     </el-dialog>
 
     <!-- 编辑(含凭证补录) -->
-    <el-dialog v-model="showEdit" :title="t('imBots.editBot')" width="640px">
+    <el-dialog v-model="showEdit" :close-on-click-modal="false" :title="t('imBots.editBot')" width="560px">
       <el-form label-width="120px">
         <el-form-item :label="t('common.name')"><el-input v-model="editForm.name" /></el-form-item>
         <el-form-item :label="t('common.remark')"><el-input v-model="editForm.description" /></el-form-item>
@@ -105,7 +105,7 @@
     </el-dialog>
 
     <!-- 用户授权管理 -->
-    <el-dialog v-model="showUsers" :title="`${t('imBots.users')} #${usersBotId}`" width="640px">
+    <el-dialog v-model="showUsers" :close-on-click-modal="false" :title="`${t('imBots.users')} #${usersBotId}`" width="560px">
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <el-input v-model="newUser.im_user_id" placeholder="ou_xxxxxxxx" style="width:280px" />
         <el-select v-model="newUser.role" style="width:130px">

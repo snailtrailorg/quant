@@ -25,13 +25,13 @@
       <el-form-item :label="t('common.credentialJson')">
         <!-- 15号批四: XTP field_schema 静态映射(消灭盲写 JSON;非 XTP 走原 password) -->
         <div v-if="form.provider === 'xtp'" style="display: flex; flex-direction: column; gap: 6px">
-          <el-input v-model="credFields['td_host']" placeholder="交易地址 (如 122.112.139.0)" />
-          <el-input v-model="credFields['td_port']" placeholder="交易端口 (如 6102)" />
-          <el-input v-model="credFields['md_host']" placeholder="行情地址 (如 119.3.103.38)" />
-          <el-input v-model="credFields['md_port']" placeholder="行情端口 (如 6002)" />
-          <el-input v-model="credFields['client_id']" placeholder="客户号 (独立于 hub 的号)" />
+          <el-input v-model="credFields['td_host']" :placeholder="t('brokers.phTdHost')" />
+          <el-input v-model="credFields['td_port']" :placeholder="t('brokers.phTdPort')" />
+          <el-input v-model="credFields['md_host']" :placeholder="t('brokers.phMdHost')" />
+          <el-input v-model="credFields['md_port']" :placeholder="t('brokers.phMdPort')" />
+          <el-input v-model="credFields['client_id']" :placeholder="t('brokers.phClientId')" />
         </div>
-        <el-input v-else v-model="form.credentials" type="password" show-password :placeholder="t('brokers.phCred')" style="width:340px" />
+        <el-input v-else v-model="form.credentials" type="password" show-password :placeholder="t('brokers.phCred')" />
       </el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>
@@ -87,8 +87,8 @@ function emptyForm() {
 const load = async () => { try { brokers.value = await getBrokers() } catch (e) { console.error(e) } }
 onMounted(async () => { await load(); await loadUsage() })
 
-const onEdit = (row) => { form.value = { ...row, credentials: '' } ; dlg.value = true }
-const resetForm = () => { form.value = emptyForm() }
+const onEdit = (row) => { form.value = { ...row, credentials: '' }; credFields.value = {} ; dlg.value = true }   // 补审F-P0:清字段防 A 凭据串进 C
+const resetForm = () => { form.value = emptyForm(); credFields.value = {} }   // 补审F-P0
 const onAdd = () => { resetForm(); dlg.value = true }
 
 const onSave = async () => {
