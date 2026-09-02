@@ -1036,6 +1036,8 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
                 run_status = 'done' if ok_cnt > 0 else 'failed'
                 conn.execute("UPDATE backtest_runs SET status=%s, finished_at=now() WHERE id=%s",
                              (run_status, run_id))
+                if run_status == 'done':
+                    write_summary_metrics(conn, run_id)   # wd-20 §1.3：成绩单写入方
             conn.commit()
         r.set(pub_key + ":done", result_json, ex=3600)
         return {"status": "done", "symbol": symbol, "return": result.total_return_pct}
@@ -1047,6 +1049,30 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
             conn.commit()
         r.set(pub_key + ":error", str(e)[:200], ex=3600)
         return {"status": "error", "symbol": symbol, "error": str(e)[:200]}
+
+
+def write_summary_metrics(conn, run_id: int) -> None:
+    """wd-20 §1.3：run 终态时聚合 done 符号成绩单（单点写入方——此前 summary_metrics 无写入方，
+    前端成绩单恒空）。键名：total_return_pct/max_drawdown_pct/sharpe/win_rate/trade_count。"""
+    cur = conn.execute(
+        "SELECT result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
+    rows = [json.loads(r[0]) for r in cur.fetchall() if r[0]]
+    if not rows:
+        return
+
+    def _avg(key):
+        vals = [float(r.get(key) or 0) for r in rows]
+        return round(sum(vals) / len(vals), 4) if vals else None
+
+    conn.execute(
+        "UPDATE backtest_runs SET summary_metrics=%s WHERE id=%s",
+        (json.dumps({
+            "total_return_pct": _avg("total_return_pct"),
+            "max_drawdown_pct": _avg("max_drawdown_pct"),
+            "sharpe": _avg("sharpe_ratio"),
+            "win_rate": _avg("win_rate"),
+            "trade_count": int(sum(int(r.get("total_trades") or 0) for r in rows)),
+        }), run_id))
 
 
 # ====================================================================

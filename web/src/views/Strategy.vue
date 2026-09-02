@@ -26,8 +26,8 @@
       <el-table-column :label="t('strategy.lastBtCol')" width="150">
         <template #default="{ row }">
           <span v-if="lastRun(row)" style="cursor:pointer" @click="$router.push(`/backtest/${lastRun(row).id}`)">
-            <span :class="(lastRun(row).summary?.total_return ?? 0) >= 0 ? 'up' : 'down'">
-              {{ ((lastRun(row).summary?.total_return ?? 0) * 100).toFixed(1) }}%
+            <span :class="(bs(lastRun(row)).ret ?? 0) >= 0 ? 'up' : 'down'">
+              {{ pct(bs(lastRun(row)).ret) }}
             </span>
             <span style="color: var(--text-secondary); font-size: var(--fs-foot)"> #{{ lastRun(row).id }}</span>
           </span>
@@ -37,7 +37,7 @@
       <el-table-column :label="t('common.action')" width="300" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="runBacktest(row)" :disabled="navReadonly">{{ t('strategy.runBacktest') }}</el-button>
-          <el-button size="small" @click="$router.push(`/strategy/${row.id}/edit`)" :disabled="navReadonly">{{ t('common.edit') }}</el-button>
+          <el-button size="small" @click="openEdit(row)" :disabled="navReadonly">{{ t('common.edit') }}</el-button>
           <el-button size="small" @click="onCopy(row)" :disabled="navReadonly">{{ t('common.copy') }}</el-button>
           <el-button size="small" type="danger" @click="onDelete(row)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
         </template>
@@ -45,12 +45,15 @@
     </el-table>
 
     <!-- 编辑弹窗 -->
-    <el-dialog v-model="editVisible" :title="t('strategy.editTitle')" width="720px" :close-on-click-modal="false">
+    <el-dialog v-model="editVisible" :title="editForm.isNew ? t('strategy.createTitle') : t('strategy.editTitle')" width="720px" :close-on-click-modal="false">
       <!-- P2-2（05 §5.6 要点 4）：快照隔离横幅——改在跑策略不影响存量任务（快照固化） -->
       <el-alert v-if="runningTasksFor(editForm.id).length" type="warning" :closable="false" style="margin-bottom: 12px">
         {{ t('strategy.snapshotIsolation', { n: runningTasksFor(editForm.id).length }) }}
       </el-alert>
       <el-form :model="editForm" label-width="100px" v-loading="saving">
+        <el-form-item label="ID">
+          <el-input v-model="editForm.id" :placeholder="t('strategy.idHint')" :disabled="!editForm.isNew" />
+        </el-form-item>
         <el-form-item :label="t('common.name')">
           <el-input v-model="editForm.name" />
         </el-form-item>
@@ -212,6 +215,7 @@ import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 const router = useRouter()
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { bs, pct } from '../utils/backtestSummary'
 import { getStrategies, updateStrategy, createStrategy, getFactorList, validatePythonCode } from '../api'
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
@@ -354,6 +358,9 @@ const openEdit = (row) => {
     priceType: row.params?.price_type || 'LIMIT',
     orderValidity: row.params?.order_validity || 'DAY',
     parameterDefs: row.params?.parameter_defs || [],
+    needs_daily: row.params?.needs_daily ?? true,
+    needs_minute: row.params?.needs_minute ?? false,
+    isNew: false,
   }
   codeValid.value = null
   codeError.value = ''
@@ -406,6 +413,8 @@ const saveEdit = async () => {
       price_type: editForm.value.priceType,
       order_validity: editForm.value.orderValidity,
       parameter_defs: editForm.value.parameterDefs.filter(pd => pd.name),
+      needs_daily: editForm.value.needs_daily,      // wd-16 数据需求声明（后端前瞻消费）
+      needs_minute: editForm.value.needs_minute,
     }
     if (editForm.value.mode === 'dsl') {
       if (editForm.value.dslExpr) params.dsl_expr = editForm.value.dslExpr

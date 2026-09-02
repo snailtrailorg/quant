@@ -26,8 +26,8 @@
         <!-- P2-4：指标摘要——列表行直接给成绩，不用点进 Run 页 -->
         <el-table-column :label="t('backtest.retCol')" width="90" class-name="num">
           <template #default="{ row }">
-            <span v-if="row.summary?.total_return != null" :class="row.summary.total_return >= 0 ? 'up' : 'down'">
-              {{ (row.summary.total_return * 100).toFixed(1) }}%
+            <span v-if="bs(row).ret != null" :class="bs(row).ret >= 0 ? 'up' : 'down'">
+              {{ pct(bs(row).ret) }}
             </span><span v-else>—</span>
           </template>
         </el-table-column>
@@ -139,6 +139,7 @@ import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { bs, pct } from '../utils/backtestSummary'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
 import { enumZh } from '../utils/format'

@@ -118,7 +118,7 @@
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.recentBacktests') }}<el-button text size="small" @click="$router.push('/backtest')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="b in recentBacktests.slice(0, 4)" :key="b.id" class="evt-row">
           #{{ b.id }}
-          <span :class="b.status === 'done' ? 'up' : ''">{{ b.summary?.total_return != null ? (b.summary.total_return * 100).toFixed(1) + '%' : b.status }}</span>
+          <span :class="b.status === 'done' ? 'up' : ''">{{ bs(b).ret != null ? pct(bs(b).ret) : b.status }}</span>
           <span style="color: var(--text-secondary)">{{ (b.created_at || '').slice(5, 10) }}</span>
         </div>
         <div v-if="!recentBacktests.length" class="empty-cell">{{ t('dashboard.noBacktests') }}</div>
@@ -133,6 +133,7 @@ import { useI18n } from 'vue-i18n'
 import { getStrategies, getDashboard, getPnl, getOrders, getLiveTasks,
          getNotifications, getDataIntegrity, getBacktests, getRiskState } from '../api'
 import api from '../api'
+import { bs, pct } from '../utils/backtestSummary'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'

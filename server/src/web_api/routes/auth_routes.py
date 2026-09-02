@@ -621,16 +621,23 @@ def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_perm("strate
 
 
 @router.get("/api/log")
-def get_logs(payload: dict = Depends(require_perm("read"))):
+def get_logs(task_id: str | None = None, payload: dict = Depends(require_perm("read"))):
     """运行日志（P3-1 接 task_logs 真实日志，不再占位）。"""
     with get_conn() as conn:
         try:
             conn.execute("SELECT 1 FROM task_logs LIMIT 1")
         except Exception:
             logger.warning("get_logs: task_logs 表不存在（需运行 alembic upgrade head）")
-        cur = conn.execute(
-            "SELECT level, message, step_name, created_at FROM task_logs "
-            "ORDER BY created_at DESC LIMIT 200")
+        # task_id 过滤（wd-20 §1.5 方案 A）：live-task 自愈时间线按任务取日志
+        if task_id:
+            cur = conn.execute(
+                "SELECT level, message, step_name, created_at FROM task_logs "
+                "WHERE task_id = %s OR task_id LIKE %s "
+                "ORDER BY created_at DESC LIMIT 100", (task_id, f"%{task_id}%"))
+        else:
+            cur = conn.execute(
+                "SELECT level, message, step_name, created_at FROM task_logs "
+                "ORDER BY created_at DESC LIMIT 200")
         rows = cur.fetchall()
     return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
                       "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}

@@ -296,7 +296,8 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
             conn.execute("SELECT 1 FROM order_log LIMIT 1")
         except Exception:
             logger.warning("get_orders: order_log 表不存在（需运行 alembic upgrade head）")
-        cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status FROM order_log ORDER BY ts DESC LIMIT 100")
+        cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status, client_order_id, error "
+                           "FROM order_log ORDER BY ts DESC LIMIT 100")   # wd-20 §1.4.3：补委托号/失败原因（0039 列）
         rows = cur.fetchall()
     # W5 脱敏：剔 strategy_id/symbol/price（盲审 B-P1 聚合键）
     from ..auth import data_sensitivity
@@ -307,7 +308,8 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
             by_status[r[6]] = by_status.get(r[6], 0) + 1
         return {"sensitivity": sens, "orders": [], "total": len(rows), "by_status": by_status}
     return {"sensitivity": "detail",
-            "orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6]} for r in rows],
+            "orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6],
+                        "client_order_id": r[7], "error": r[8]} for r in rows],
             "total": len(rows)}
 
 

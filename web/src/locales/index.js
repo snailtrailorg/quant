@@ -269,7 +269,7 @@ export default {
       codeValid: '代码校验通过',
       codeInvalid: '代码校验失败',
       create: '新建策略',
-      editTitle: '编辑策略',
+      editTitle: '编辑策略', createTitle: '新建策略', idHint: '策略唯一 ID（如 ma_cross_v1，保存后不可改）',
       statusRunning: '运行中',
       statusStopped: '已停',
       enable: '启用',
@@ -320,6 +320,7 @@ export default {
     liveTask: {
       title: '实盘任务',
       create: '创建实盘任务',
+      recentLogs: '近期任务日志', selfHeal: '自愈时间线',
       createBtn: '创建',
       taskName: '任务名称',
       phName: '如：茅台均线策略',
@@ -383,7 +384,7 @@ export default {
     backtest: {
       createLive: '以此创建实盘任务', sharpeCol: '夏普', dateRangeCol: '区间', tradeCount: '交易次数',
       annualized: '年化收益', plRatio: '盈亏比',
-      sampleThreshold: '样本门槛不足（区间 {d} 天<90 或标的 {s}<1），不可标记验证——防短区间混入证据链',
+      sampleThreshold: '证据不足：区间 {d} 天 / 成交 {s} 笔，未达 90 天 / 10 笔最低证据门槛——跑长区间或多标的后再标记',
       feePanel: '费用与摩擦：佣金可配（默认万5）+ 印花税（卖出 0.05%）+ 过户费（0.001%）+ 滑点可配 + 涨跌停一字板不可成交约束',
       retCol: '收益', ddCol: '回撤', reason: '失败原因',
       commission: '佣金率', r1m: '近1月', r3m: '近3月', r6m: '近6月', r1y: '近1年',
@@ -672,8 +673,8 @@ export default {
       dataDeleted: '数据已删除',
     },
     trading: {
-      dirCol: '方向', frozenCol: '可用', costCol: '成本价', pnlCol: '浮盈',
-      snapshotNote: '快照时间：', lastUpdate: '最后更新',
+      dirCol: '方向', frozenCol: '可用', costCol: '成本价', pnlCol: '浮盈', orderRefCol: '委托号',
+      snapshotNote: '快照时间：', staleWarn: '持仓快照已停更（>600s）——当前展示为最后快照，非实时空仓判定依据', snapshotRowsTip: '最后快照行数：{n}', lastUpdate: '最后更新',
       dailySummary: '当日汇总', totalTrades: '总笔数', buyCount: '买入笔数', sellCount: '卖出笔数',
       totalVolume: '总股数', buyAmount: '买入金额', sellAmount: '卖出金额',
       manualOrders: '人工单登记', manualHint: '登记底仓/场外手动单——回流进对账豁免基准,消除持续差异',
@@ -1425,7 +1426,7 @@ export default {
       codeValid: 'Code validation passed',
       codeInvalid: 'Code validation failed',
       create: 'New Strategy',
-      editTitle: 'Edit Strategy',
+      editTitle: 'Edit Strategy', createTitle: 'New Strategy', idHint: 'Unique strategy ID (e.g. ma_cross_v1, immutable after save)',
       statusRunning: 'Running',
       statusStopped: 'Stopped',
       enable: 'Enabled',
@@ -1474,6 +1475,7 @@ export default {
     liveTask: {
       title: 'Live Tasks',
       create: 'Create Live Task',
+      recentLogs: 'Recent task logs', selfHeal: 'Self-heal timeline',
       createBtn: 'Create',
       taskName: 'Task Name',
       phName: 'e.g. Maotai MA Strategy',
@@ -1537,7 +1539,7 @@ export default {
     backtest: {
       createLive: 'Create live task', sharpeCol: 'Sharpe', dateRangeCol: 'Range', tradeCount: 'Trades',
       annualized: 'Annualized', plRatio: 'P/L ratio',
-      sampleThreshold: 'Sample threshold not met ({d}d<90 or {s}<1 symbols), cannot mark verified',
+      sampleThreshold: 'Insufficient evidence: {d} days / {s} trades, below the 90-day / 10-trade minimum evidence bar',
       feePanel: 'Fees & friction: configurable commission (default 0.05%) + stamp tax (sell 0.05%) + transfer fee (0.001%) + slippage + limit-lock no-fill constraint',
       retCol: 'Return', ddCol: 'Drawdown', reason: 'Failure',
       commission: 'Commission', r1m: '1M', r3m: '3M', r6m: '6M', r1y: '1Y',
@@ -1816,8 +1818,8 @@ export default {
       dataDeleted: 'Data deleted',
     },
     trading: {
-      dirCol: 'Dir', frozenCol: 'Avail', costCol: 'Cost', pnlCol: 'PnL',
-      snapshotNote: 'Snapshot: ', lastUpdate: 'Last update',
+      dirCol: 'Dir', frozenCol: 'Avail', costCol: 'Cost', pnlCol: 'PnL', orderRefCol: 'Order Ref',
+      snapshotNote: 'Snapshot: ', staleWarn: 'Position snapshot is stale (>600s) — showing last snapshot, not a live flat position', snapshotRowsTip: 'Last snapshot rows: {n}', lastUpdate: 'Last update',
       dailySummary: 'Daily Summary', totalTrades: 'Trades', buyCount: 'Buy count', sellCount: 'Sell count',
       totalVolume: 'Total vol', buyAmount: 'Buy amt', sellAmount: 'Sell amt',
       manualOrders: 'Manual Orders', manualHint: 'Register base/off-exchange manual orders — feeds reconcile exempt baseline',

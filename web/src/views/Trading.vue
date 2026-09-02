@@ -13,7 +13,7 @@
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalAssets') }}</div>
     <el-alert v-if="dataSens" type="info" :closable="false" style="margin: 8px 0">
       {{ t('perm.sensLimited') }}: {{ dataSens }} — {{ positionData?.count ?? '—' }} {{ t('perm.sensCountUnit') }}
-    </el-alert><div class="value">¥{{ formatNum(pnlData.total_value) }}</div></div></el-card></el-col>
+    </el-alert><div class="value">¥{{ formatNum(positionData.total_value) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.todayPnl') }}</div><div class="value" :style="{color: (pnlData.today_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.today_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.today_pnl) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalPnl') }}</div><div class="value" :style="{color: (pnlData.total_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.total_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.total_pnl) }} ({{ pnlData.total_pnl_pct || 0 }}%)</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.positionCount') }}</div><div class="value">{{ positionData.positions?.length || 0 }}</div></div></el-card></el-col>
@@ -59,6 +59,15 @@
             </template>
           </el-table-column>
         </el-table>
+        <!-- wd-20 §1.6：stale 黄条——停更防被读成空仓（N-S5 语义：停更≠空仓） -->
+        <el-alert v-if="positionData.stale" type="warning" :closable="false" style="margin: 8px 0">
+          <template #title>
+            {{ t('trading.staleWarn') }}
+            <el-tooltip v-if="positionData.snapshot_rows != null" :content="t('trading.snapshotRowsTip', { n: positionData.snapshot_rows })">
+              <el-icon style="vertical-align: middle"><QuestionFilled /></el-icon>
+            </el-tooltip>
+          </template>
+        </el-alert>
         <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 6px; display: flex; justify-content: space-between">
           <span>{{ t('trading.snapshotNote') }}{{ positionData.snapshot_ts ? positionData.snapshot_ts.slice(0, 19) : '—' }}</span>
           <span>{{ t('trading.lastUpdate') }}: {{ lastUpdate }}</span>
@@ -103,6 +112,7 @@
           <el-table-column prop="volume" :label="t('trading.volume')" width="80" class-name="num" />
           <el-table-column prop="price" :label="t('trading.price')" width="90" class-name="num" />
           <el-table-column prop="status" :label="t('common.status')" width="90" />
+          <el-table-column prop="client_order_id" :label="t('trading.orderRefCol')" width="130" class-name="num" show-overflow-tooltip />
           <el-table-column prop="error" :label="t('backtest.reason')" show-overflow-tooltip />
         </el-table>
       </el-tab-pane>
@@ -139,6 +149,7 @@ use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 const positionData = ref({})
 const ordersData = ref({})
 const pnlData = ref({})
+const lastPrices = ref({})   // wd-20 §1.4.2：现价恢复（行情快照联动）
 const pnlChartOption = computed(() => ({
   tooltip: { trigger: 'axis' },
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
@@ -148,6 +159,8 @@ const pnlChartOption = computed(() => ({
 }))
 const formatNum = (n) => (n || 0).toFixed(0)
 import { fmtCn } from '../utils/format'
+import { stockDetail } from '../api'
+import { QuestionFilled } from '@element-plus/icons-vue'
 const loadFailed = ref(false)
 const dataSens = ref('')
 const lastUpdate = ref('—')
@@ -163,6 +176,18 @@ const load = async () => {
   } catch { loadFailed.value = true }
   try { pnlData.value = await getPnl() } catch { }
   lastUpdate.value = new Date().toLocaleTimeString()
+  loadPrices()   // wd-20 §1.4.2：现价随 5s/60s 轮询联动（不阻塞主 load）
+}
+const loadPrices = async () => {
+  const syms = [...new Set((positionData.value?.positions || [])
+    .map(p => p.symbol?.split('.')[0]).filter(Boolean))]
+  await Promise.all(syms.map(async s => {
+    try {
+      const d = await stockDetail(s)
+      const q = d?.quote
+      if (q?.last != null) lastPrices.value[s] = q.last
+    } catch { /* 单标的行情失败不阻塞其余 */ }
+  }))
 }
 // 05 §5.2 要点 2:现价/浮盈由行情快照联动,5s 轮询(盘中)/60s(盘后)
 const isTradingHours = () => {

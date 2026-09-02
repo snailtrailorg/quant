@@ -86,11 +86,13 @@ const createLiveFromRun = () => {
   router.push({ path: '/live-task', query: { strategy: run.value.strategy_config_id } })
 }
 const markVerified = async () => {
-  // P2-5(05 §5.7):最低验证样本门槛——防短区间单标的 done run 混入证据链
-  const days = run.value?.days || Math.round((new Date(run.value?.end_date || 0) - new Date(run.value?.start_date || 0)) / 86400000) || 0
-  const syms = run.value?.symbols?.length || 0
-  if (days < 90 || syms < 1) {
-    ElMessage.warning(t('backtest.sampleThreshold', { d: days, s: syms }))
+  // wd-20 §1.2 验证门（修 19 号 P0 死按钮：原读不存在的 run.days→恒拦）：
+  // span_days 后端单点派生；门槛常量 MIN_SPAN_DAYS=90 天 / MIN_TRADES=10 笔（05 §5.7 最低证据样本）
+  const MIN_SPAN_DAYS = 90, MIN_TRADES = 10
+  const days = run.value?.span_days ?? 0
+  const trades = run.value?.total_trades ?? 0
+  if (days < MIN_SPAN_DAYS || trades < MIN_TRADES) {
+    ElMessage.warning(t('backtest.sampleThreshold', { d: days, s: trades }))
     return
   }
   try {

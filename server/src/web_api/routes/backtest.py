@@ -234,13 +234,15 @@ def get_backtest_api(run_id: int,
                      payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, strategy_config_id, symbols, params, mode, status, summary_metrics "
+            "SELECT id, strategy_config_id, symbols, params, mode, status, summary_metrics, created_at, finished_at, task_id "
             "FROM backtest_runs WHERE id=%s", (run_id,))
         r = cur.fetchone()
         if not r:
             raise ApiError(404, "BACKTEST_NOT_FOUND", "run 不存在")
+        # H11 同款修复（详情端点漏修——backtest_symbols 无 task_id 列，原子查询 UndefinedColumn=500）：
+        # task_id 取 runs 级
         cur = conn.execute(
-            "SELECT symbol, status, result, task_id FROM backtest_symbols WHERE run_id=%s ORDER BY symbol",
+            "SELECT symbol, status, result FROM backtest_symbols WHERE run_id=%s ORDER BY symbol",
             (run_id,))
         syms = cur.fetchall()
     # 链条打磨#16（2026-08-19）：补前端实际读取的形状——顶层绩效四卡（此前恒 '-'）+
@@ -250,9 +252,27 @@ def get_backtest_api(run_id: int,
     for k in ("total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades"):
         vals = [float((json.loads(_s[2]) or {}).get(k) or 0) for _s in _mk if _s[2]]
         _agg[k] = round(sum(vals) / len(vals), 3) if vals else None
-    _run_task = next((_s[3] for _s in syms if _s[3]), None)
+    _run_task = r[9]   # H11：runs 级 task_id
+    # wd-20 §1.2 验证门派生字段（单点）：params 区间优先，回落 created_at→finished_at
+    import datetime as _dt
+
+    def _d(x):
+        try:
+            return _dt.date.fromisoformat(str(x)[:10])
+        except Exception:
+            return None
+
+    _p = json.loads(r[3]) or {}
+    _s0, _e0 = _d(_p.get("start")), _d(_p.get("end"))
+    if _s0 and _e0:
+        span_days = (_e0 - _s0).days + 1
+    elif r[7] and r[8]:
+        span_days = max((r[8].date() - r[7].date()).days + 1, 0)
+    else:
+        span_days = 0
     return {"id": r[0], "strategy_config_id": r[1],
-            "symbols": [{"symbol": _s[0], "status": _s[1], "task_id": _s[3],
+            "span_days": span_days,
+            "symbols": [{"symbol": _s[0], "status": _s[1],
                          "result": json.loads(_s[2]) if _s[2] else {}} for _s in syms],
             "symbols_list": json.loads(r[2]),
             "params": json.loads(r[3]), "mode": r[4], "status": r[5],

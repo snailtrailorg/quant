@@ -33,15 +33,17 @@
             <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: 8px 16px">
-            <!-- P1-5(05 §5.8/06 宝藏):自愈时间线 -->
+            <!-- wd-20 §1.5 方案 A：自愈时间线（task_logs 过滤渲染 + 行内事实字段） -->
             <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px">{{ t('liveTask.selfHeal') }}:</div>
             <div style="font-size: 12px; font-family: var(--font-num)">
-              NRestarts: {{ row._n_restarts ?? '—' }} | 上次退出码: {{ row._last_exit ?? '—' }} | 心跳龄: {{ row.hb_age_s ? row.hb_age_s.toFixed(0) + 's' : '—' }}
+              {{ t('liveTask.mdMode') }}: {{ row.md_mode || '—' }} | {{ t('liveTask.lag') }}: {{ row.lag_s ?? row.lag ?? '—' }}s | {{ t('liveTask.bars') }}: {{ row.bars ?? '—' }} | {{ t('common.status') }}: {{ row.status }}
             </div>
-            <!-- P1-5(06 平台级宝藏):快照查看(strategy_snapshot) -->
-            <div v-if="row._snapshot" style="margin-top: 8px; font-size: 12px">
-              <div style="color: var(--text-secondary)">{{ t('liveTask.snapshotView') }}:</div>
-              <pre style="font-size: 11px; background: var(--bg-canvas); padding: 8px; border-radius: 4px; max-height: 200px; overflow: auto">{{ JSON.stringify(row._snapshot, null, 2) }}</pre>
+            <div v-if="row._timeline?.length" style="margin-top: 8px">
+              <div style="color: var(--text-secondary); font-size: 12px">{{ t('liveTask.recentLogs') }}:</div>
+              <div v-for="(l, i) in row._timeline" :key="i" style="font-size: 11px; font-family: var(--font-num); display: flex; gap: 8px">
+                <span style="color: var(--text-secondary)">{{ l.ts?.slice(5, 16) }}</span>
+                <span :style="{ color: l.level === 'error' ? 'var(--critical)' : l.level === 'warning' ? 'var(--warn)' : 'inherit' }">{{ l.msg?.slice(0, 100) }}</span>
+              </div>
             </div>
           </div>
         </template>
@@ -216,22 +218,29 @@ const onDelete = async (row) => {
 }
 
 onMounted(async () => {
-  enrichTasks()
+  // wd-20 §1.5：enrichTasks 移到 load 之后（原在 tasks 为空时先跑=恒空转）
   const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
   if (pre) { dialogVisible.value = true; form.value.strategy_id = String(pre) }
-  await load(); await loadStrategies(); await loadAccounts() })
+  await load(); await loadStrategies(); await loadAccounts(); enrichTasks() })
 
-// P1-5(05 §5.8):自愈时间线数据(NRestarts)+快照查看
+// wd-20 §1.5 方案 A：自愈时间线（05 §5.8）——幽灵端点 /live-task/{id}/detail 已删
+// （19 号 P0：404 恒吞）。数据源两路：①列表行已有字段（NRestarts 语义近似=心跳龄/冻结/
+// md_mode 在列）②按需展开拉 task_logs?task_id= 过滤渲染
 const enrichTasks = async () => {
-  for (const task of tasks.value) {
+  await Promise.all(tasks.value.map(async task => {
     try {
-      const detail = await api.get(`/live-task/${task.id}/detail`)
-      if (detail) {
-        task._n_restarts = detail.n_restarts
-        task._last_exit = detail.last_exit_code
-        task._snapshot = detail.strategy_snapshot
-      }
-    } catch {}
+      const r = await api.get('/log', { params: { task_id: `live:${task.id}` } })
+      task._timeline = (r?.logs || []).slice(0, 8)
+    } catch { task._timeline = [] }
+  }))
+}
+const toggleTimeline = async (row) => {
+  row._open = !row._open
+  if (row._open && row._timeline == null) {
+    try {
+      const r = await api.get('/log', { params: { task_id: `live:${row.id}` } })
+      row._timeline = (r?.logs || []).slice(0, 8)
+    } catch { row._timeline = [] }
   }
 }
 
