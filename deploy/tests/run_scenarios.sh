@@ -253,7 +253,10 @@ for i in 1 2 3 4 5; do
   mkdir -p "$ROOT/releases/20260826000$i-0000dd$i"
   touch "$ROOT/releases/20260826000$i-0000dd$i/.deployed"
 done
-run_release "$R_NEW" >"$LOGDIR/s5.log" 2>&1
+# 批 8 快车道根因（2026-09-02 六场景门实证）: R_NEW 与基线同内容→零重启→钉=基线多占一 keep 槽→
+# 只删 dd1 不删 dd2——S5 的 keep-N 断言假设"钉=当前"。S5 测经典 GC 语义故显式 force_full；
+# 快车道下的 GC 形态（钉旧版被保留）由 S6b 新增断言覆盖。
+run_release "$R_NEW" -e force_full=true >"$LOGDIR/s5.log" 2>&1
 S5=$?
 echo "  rc=$S5（期望零）"
 [ $S5 -eq 0 ] || { FAILED=$((FAILED + 1)); tail -30 "$LOGDIR/s5.log"; }
@@ -288,6 +291,9 @@ echo "  rc=$S6B（期望零）"
 check "S6b: 单元安装通道 skipped（指纹对内容敏感、对 release_id 不敏感）" \
   awk '/^TASK \[/ { f = (/单元安装通道/) ? 1 : 0; next } f && /skipping/ { found = 1 } /^PLAY RECAP/ { exit } END { exit !found }' "$LOGDIR/s6b.log"
 check "S6b: server 链接 → $R_SAME" test "$(link_id)" = "$R_SAME"
+# 批 8 快车道 GC 形态断言（2026-09-02）：同内容再发布零重启→无已部署版被删（被钉基线+当前全保留）
+check "S6b: 快车道零删除（基线与上一发布版原样保留——被钉 bbb + 当前 ddd 全跳过）" \
+  bash -c "test -d '$ROOT/releases/$R_BASE' && test -d '$ROOT/releases/$R_NEW'"
 [ $S6B -eq 0 ] && scenario_row 6 "同内容再发布" "零" "$S6B" "PASS（units_changed=false）" || scenario_row 6 "同内容再发布" "零" "$S6B" "FAIL"
 
 # ---------- 汇总 ----------
