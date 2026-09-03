@@ -141,16 +141,21 @@
     </div>
     <div v-if="!myPerms.length" style="color: var(--text-secondary)">—</div>
   </el-dialog>
-  <!-- ⌘K 全局搜索(P1-4/03 §3.3) -->
-  <el-dialog v-model="cmdkVisible" :title="t('layout.search')" width="480px" :show-close="false">
-    <el-input v-model="cmdkQuery" :placeholder="t('layout.searchPh')" autofocus @input="filterCmdk" />
-    <div style="max-height: 300px; overflow-y: auto; margin-top: var(--sp-2)">
-      <div v-for="item in cmdkResults" :key="item.path" @click="$router.push(item.path); cmdkVisible = false"
-        style="padding: var(--sp-2) 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak); display: flex; justify-content: space-between">
-        <span>{{ item.label }}</span>
-        <span style="color: var(--text-secondary); font-size: 12px">{{ item.path }}</span>
+  <!-- ⌘K 全局搜索(P1-4/03 §3.3；wd-20 §2.6 WAI-ARIA combobox：roving ↑↓/Enter/Esc) -->
+  <el-dialog v-model="cmdkVisible" :title="t('layout.search')" width="480px" :show-close="false" @opened="focusCmdk">
+    <div role="combobox" aria-expanded="true" aria-haspopup="listbox" aria-label="global search">
+      <el-input ref="cmdkInputRef" v-model="cmdkQuery" :placeholder="t('layout.searchPh')"
+                role="searchbox" aria-controls="cmdk-listbox" aria-activedescendant="cmdk-opt-active"
+                @input="filterCmdk" @keydown="onCmdkKeys" />
+      <div id="cmdk-listbox" role="listbox" aria-label="results" style="max-height: 300px; overflow-y: auto; margin-top: var(--sp-2)">
+        <div v-for="(item, i) in cmdkResults" :key="item.path" role="option" :aria-selected="i === cmdkActive"
+             :id="i === cmdkActive ? 'cmdk-opt-active' : undefined" :class="['cmdk-opt', { active: i === cmdkActive }]"
+             @click="$router.push(item.path); cmdkVisible = false" @mouseenter="cmdkActive = i">
+          <span>{{ item.label }}</span>
+          <span style="color: var(--text-secondary); font-size: 12px">{{ item.path }}</span>
+        </div>
+        <div v-if="!cmdkResults.length" style="color: var(--text-secondary); text-align: center; padding: 20px">{{ t('layout.noResults') }}</div>
       </div>
-      <div v-if="!cmdkResults.length" style="color: var(--text-secondary); text-align: center; padding: 20px">{{ t('layout.noResults') }}</div>
     </div>
   </el-dialog>
 </el-container>
@@ -166,7 +171,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe, getNotifications, ackAllNotifications, meOnce, resetMeCache } from '../api'
-import api from '../api'
+import api, { getStrategies, getFactorList } from '../api'
 import { setLang, LANGUAGES } from '../i18n'
 import Avatar from '../components/Avatar.vue'
 
@@ -291,7 +296,7 @@ import { goCategoryPath } from '../utils/goCategory'
 const goCategory = c => router.push(goCategoryPath(c))   // wd-20 §2.6：映射抽 utils（与 Dashboard 共用）
 loadHealth()
 loadPerms()
-onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })
+onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000); loadDynamicIndex() })
 onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
 
 const onLangChange = v => setLang(v)
@@ -308,6 +313,18 @@ const logout = async () => {
 const cmdkVisible = ref(false)
 const cmdkQuery = ref('')
 const cmdkResults = ref([])
+const cmdkActive = ref(0)          // roving index（wd-20 §2.6）
+const cmdkInputRef = ref(null)
+const focusCmdk = () => cmdkInputRef.value?.focus?.()
+const onCmdkKeys = (e) => {
+  const n = cmdkResults.value.length
+  if (!n) return
+  if (e.key === 'ArrowDown') { e.preventDefault(); cmdkActive.value = (cmdkActive.value + 1) % n }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); cmdkActive.value = (cmdkActive.value - 1 + n) % n }
+  else if (e.key === 'Enter') { e.preventDefault(); const it = cmdkResults.value[cmdkActive.value]; if (it) { cmdkVisible.value = false; $routerPush(it.path) } }
+  else if (e.key === 'Escape') { cmdkVisible.value = false }
+}
+const $routerPush = p => router.push(p)
 const searchIndex = [
   { label: '选股器', path: '/screener' }, { label: '股票池', path: '/pool' },
   { label: '因子库', path: '/factors' }, { label: '策略', path: '/strategy' },
@@ -318,9 +335,22 @@ const searchIndex = [
   { label: '健康与日志', path: '/observe' }, { label: '设置', path: '/settings' },
   { label: 'AI 助手', path: '/chat' },
 ]
+// wd-20 §2.6 索引扩展：策略/因子/标的名（API 拉取，标签前缀区分；空态回落导航项）
+const dynamicIndex = ref([])
+const loadDynamicIndex = async () => {
+  try {
+    const [strategies, factors] = await Promise.all([getStrategies(), getFactorList()])
+    dynamicIndex.value = [
+      ...(strategies || []).map(s => ({ label: `▸ ${s.name}`, path: `/strategy` })),
+      ...(factors?.items || factors || []).map(f => ({ label: `ƒ ${f.name}`, path: `/factors` })),
+    ]
+  } catch { dynamicIndex.value = [] }
+}
 const filterCmdk = () => {
   const q = cmdkQuery.value.toLowerCase()
-  cmdkResults.value = q ? searchIndex.filter(i => i.label.toLowerCase().includes(q) || i.path.includes(q)) : searchIndex
+  const pool = [...searchIndex, ...dynamicIndex.value]
+  cmdkResults.value = q ? pool.filter(i => i.label.toLowerCase().includes(q) || i.path.includes(q)) : pool
+  cmdkActive.value = 0
 }
 const onKeydown = (e) => {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); cmdkVisible.value = !cmdkVisible.value; filterCmdk() }
@@ -337,4 +367,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .dot.info { background: var(--text-secondary); }
 .notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
 .notif-guide { color: var(--el-color-primary); font-size: 12px; line-height: 1.5; margin: 2px 0 2px 14px; }
+/* wd-20 §2.6 ⌘K combobox 选项 */
+.cmdk-opt { padding: var(--sp-2) 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak);
+  display: flex; justify-content: space-between; }
+.cmdk-opt.active { background: var(--el-fill-color-light); }
+.cmdk-opt.active span:first-child { color: var(--brand-600); font-weight: 600; }
 </style>
