@@ -44,14 +44,24 @@ for (let i = 0; i < 45; i++) {
 }
 if (!done) { console.log('✗ 回测未 done'); await b.close(); process.exit(2) }
 
-// 打开 BacktestRun 页，点「标记回测验证」
-await p.goto(`${BASE}/backtest/${runId}`, { waitUntil: 'networkidle2' }); await new Promise(r => setTimeout(r, 1200))
-const clicked = await p.evaluate(() => { const e = [...document.querySelectorAll('button')].find(b => b.textContent.includes('标记回测验证')); e?.click(); return !!e })
-await new Promise(r => setTimeout(r, 800))
+// 打开 BacktestRun 页，点「标记回测验证」——waitFor 轮询（固定 sleep 网络慢时假红）
+const waitFor = async (fn, timeout = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < timeout) { if (await fn()) return true; await new Promise(r => setTimeout(r, 400)) } return false }
+await p.goto(`${BASE}/backtest/${runId}`, { waitUntil: 'networkidle2' })
+// 等「标记回测验证」按钮非 disabled（run 数据加载完；否则 :disabled 点击空操作=假红）
+const btnReady = await waitFor(() => p.evaluate(() => {
+  const e = [...document.querySelectorAll('button')].find(b => b.textContent.includes('标记回测验证'))
+  return !!(e && !e.disabled)
+}))
+if (!btnReady) console.log('✗ 标记按钮 15s 未就绪（run 数据未加载？）')
+const clicked = btnReady ? await p.evaluate(() => { const e = [...document.querySelectorAll('button')].find(b => b.textContent.includes('标记回测验证')); e?.click(); return !!e }) : false
+// 等 el-message 拦截文案出现
+await waitFor(() => p.evaluate(() => !!document.querySelector('.el-message--warning .el-message__content')?.textContent?.trim()))
 const warn = await p.evaluate(() => document.querySelector('.el-message--warning .el-message__content')?.textContent?.trim() ?? '')
 console.log(`标记按钮点击=${clicked}`)
 console.log(`拦截文案=${warn}`)
 const ok = warn.includes('证据不足')
 console.log(ok ? '✓ 验证门拦截生效' : '✗ 验证门拦截未生效')
+const del = await api(`/api/backtest/${runId}`, { method: 'DELETE' })   // 清理测试 run，不污染回测列表
+console.log('清理测试 run:', del.status)
 await b.close()
 process.exit(ok ? 0 : 1)

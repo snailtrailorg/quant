@@ -63,6 +63,8 @@ if (run) {
   const detail = await api(`/api/backtest/${run.id}`)
   console.log('成绩单 summary_metrics:', JSON.stringify((detail.body?.summary_metrics) || (detail.body?.summary) || null))
   console.log('验证门字段 span_days/total_trades:', JSON.stringify(detail.body?.span_days ?? null), JSON.stringify(detail.body?.total_trades ?? null))
+  const del = await api(`/api/backtest/${run.id}`, { method: 'DELETE' })   // 清理测试 run，不污染回测列表
+  console.log('清理测试 run:', del.status)
 } else {
   console.log('✗ 90s 内未到终态（可能仍在 pending/running）')
   await b.close()

@@ -150,6 +150,19 @@ def delete_pool(pid: str, payload: dict = Depends(require_perm("strategy_control
     return {"ok": True}
 
 
+@router.delete("/api/backtest/{run_id}")
+def delete_backtest(run_id: int, payload: dict = Depends(require_perm("strategy_control"))):
+    """删除回测 run（backtest_symbols 随外键 ondelete=CASCADE 级联删）。
+
+    造数脚本（seed-backtest/verify-gate）收尾清理测试 run，避免污染回测列表/成绩单。
+    幂等：run 不存在时 DELETE 0 行仍返回 ok。
+    """
+    with get_conn() as conn:
+        conn.execute("DELETE FROM backtest_runs WHERE id=%s", (run_id,))
+        conn.commit()
+    return {"ok": True}
+
+
 @router.post("/api/backtest")
 def create_backtest_api(body: dict = Body(...),
                         payload: dict = Depends(require_perm("strategy_control"))):
