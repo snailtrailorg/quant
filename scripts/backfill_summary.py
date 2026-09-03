@@ -15,14 +15,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "server"))
+# 服务器侧跑时以环境变量覆盖（本地控制机 fallback 不变）：
+#   QUANT_DB_URL     —— prod 连串（source shared/.env 后注入；unix socket peer 免密）
+#   QUANT_SERVER_DIR —— 当前 release 的 server 目录（含 src/，供 import src.scheduler.tasks）
+SERVER_DIR = os.environ.get("QUANT_SERVER_DIR", str(Path(__file__).resolve().parent.parent / "server"))
+sys.path.insert(0, SERVER_DIR)
 
 import psycopg  # noqa: E402
 
-DSN = "postgresql://quant@127.0.0.1:5432/quant"
+DSN = os.environ.get("QUANT_DB_URL", "postgresql://quant@127.0.0.1:5432/quant")
 
 
 def _summary(done_results: list[dict]) -> dict:
