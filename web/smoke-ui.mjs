@@ -1,7 +1,7 @@
 // smoke-ui.mjs —— 前端运行时冒烟门（wd-20 收官日 #4，2026-09-03）
 // puppeteer 登录 prod 走真 DOM 逐页断言。覆盖 wd-20 §4 + 进展 09-03 晨条全链验证清单；
 // 无数据（prod 回测 0 done）的验证点显式 skip（不静默跳过），需造数验证。
-// 用法：cd web && SMOKE_PASS=xxx node smoke-ui.mjs  退出码：0=全绿，1=有失败/需造数。
+// 用法：cd web && SMOKE_PASS=xxx node smoke-ui.mjs  退出码：0=全绿，1=有失败（需造数项显式列出但不判红）。
 import puppeteer from 'puppeteer-core'
 
 const BASE = 'https://quant.snailtrail.cc'
@@ -25,7 +25,15 @@ p.on('console', m => { if (m.type() === 'error') errors.push(`[console.error] ${
 p.on('pageerror', e => errors.push(`[PAGEERROR] ${String(e).slice(0, 200)}`))
 p.on('response', r => { if (r.status() === 404 && r.url().includes('quant.snailtrail.cc')) errors.push(`[404] ${r.url().replace('https://quant.snailtrail.cc', '')}`) })
 
-const nav = async path => { await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}); await new Promise(r => setTimeout(r, 900)) }
+const nav = async path => {
+  let ok = true
+  await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { ok = false })
+  await new Promise(r => setTimeout(r, 900))
+  // 盲审 P2：goto 失败/超时被旧页 DOM 掩盖（断言读到上一页仍>50字=假绿）——检查 url 真切换
+  const cur = await p.url()
+  if (!cur.includes(path)) ok = false
+  if (!ok) assert(`导航 ${path}`, false, `当前 url=${cur}`)
+}
 const waitFor = async (fn, timeout = 12000) => { const t0 = Date.now(); while (Date.now() - t0 < timeout) { if (await fn()) return true; await new Promise(r => setTimeout(r, 400)) } return false }
 const count = sel => p.evaluate(s => document.querySelectorAll(s).length, sel)
 const texts = sel => p.evaluate(s => [...document.querySelectorAll(s)].map(e => e.textContent.trim()), sel)

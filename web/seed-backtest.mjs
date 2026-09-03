@@ -54,7 +54,8 @@ for (let i = 0; i < 45; i++) {
   await new Promise(r => setTimeout(r, 2000))
   const list = await api('/api/backtest')
   const runs = Array.isArray(list.body) ? list.body : (list.body?.runs || [])
-  run = runs.find(r => r.strategy_id === sid && (r.status === 'done' || r.status === 'failed'))
+  // 盲审 P1：列表端点返回 strategy_config_id（非 strategy_id），原 strategy_id 恒 undefined→永不命中
+  run = runs.find(r => r.strategy_config_id === sid && (r.status === 'done' || r.status === 'failed'))
   if (run) break
 }
 if (run) {
@@ -64,5 +65,7 @@ if (run) {
   console.log('验证门字段 span_days/total_trades:', JSON.stringify(detail.body?.span_days ?? null), JSON.stringify(detail.body?.total_trades ?? null))
 } else {
   console.log('✗ 90s 内未到终态（可能仍在 pending/running）')
+  await b.close()
+  process.exit(1)   // 盲审 P1：未到终态必须判红，防假绿
 }
 await b.close()

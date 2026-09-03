@@ -186,11 +186,13 @@ const load = async () => {
 }
 const loadPrices = async () => {
   const positions = positionData.value?.positions || []
-  await Promise.all(positions.map(async p => {
+  // 盲审 P2：filter 掉空 symbol + 去重（原 map 直接对 undefined/重复标的发请求）
+  const symbols = [...new Set(positions.map(p => p.symbol).filter(Boolean))]
+  await Promise.all(symbols.map(async symbol => {
     try {
-      const d = await stockDetail(p.symbol)   // 带后缀（detail 端点 to_vt_symbol 不推断交易所，去后缀=404）
+      const d = await stockDetail(symbol)   // 带后缀（detail 端点 to_vt_symbol 不推断交易所，去后缀=404）
       const q = d?.quote
-      if (q?.last != null) lastPrices.value[p.symbol?.split('.')[0]] = q.last
+      if (q?.last != null) lastPrices.value[symbol.split('.')[0]] = q.last
     } catch { /* 单标的行情失败不阻塞其余 */ }
   }))
 }

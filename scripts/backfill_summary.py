@@ -19,8 +19,10 @@ import os
 import sys
 from pathlib import Path
 
-# 服务器侧跑时以环境变量覆盖（本地控制机 fallback 不变）：
-#   QUANT_BACKFILL_DSN —— 连串；默认 unix socket peer 免密（quant-dbro 同款；prod TCP 127.0.0.1 需密码不可用）
+# 服务器侧跑时以环境变量覆盖：
+#   QUANT_BACKFILL_DSN —— 专用连串（注意：非全项目 QUANT_DB_URL——本脚本默认 unix socket peer 免密，
+#                         与 db.py 的 TCP QUANT_DB_URL 语义不同，勿按文档设 QUANT_DB_URL）。
+#                         默认 peer 认证需以 quant OS 用户跑；本地 dev（bernard）须显式设本变量。
 #   QUANT_SERVER_DIR   —— 当前 release 的 server 目录（含 src/，供 import src.scheduler.tasks）
 SERVER_DIR = os.environ.get("QUANT_SERVER_DIR", str(Path(__file__).resolve().parent.parent / "server"))
 sys.path.insert(0, SERVER_DIR)
