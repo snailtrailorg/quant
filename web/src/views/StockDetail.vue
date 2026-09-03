@@ -3,6 +3,7 @@
     <!-- 头部：快照 + 涨跌停空间 + 五档（8 内容区之 2 常驻） -->
     <el-card>
       <template #header>
+          <el-button type="primary" size="small" @click="goBack" style="margin-right: 8px">← {{ t('common.back') }}</el-button>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div>
             <span style="font-size:18px;font-weight:600">{{ detail.name || quote?.name || symbol }}</span>
@@ -172,6 +173,12 @@ import VChart from 'vue-echarts'
 import { stockDetail, stockAnalyze, getKline, stockIntraday, apiErr } from '../api'
 
 const { t } = useI18n()
+const goBack = () => {
+  // wd-20 §2.6 返回上下文：query.from 存在则回对应 tab，否则 router.back()
+  const from = route.query.from
+  if (from) { router.push({ path: String(from), query: { tab: route.query.tab } }); return }
+  router.back()
+}
 use([CanvasRenderer, BarChart, LineChart, CandlestickChart,
      GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent])
 

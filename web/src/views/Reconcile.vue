@@ -6,7 +6,7 @@
         <div>
           <el-button size="small" @click="openManual = true">{{ t('reconcile.manualOrder') }}</el-button>
           <el-button size="small" type="warning" @click="onReset">{{ t('reconcile.resetBtn') }}</el-button>
-          <el-button type="primary" @click="rerun">{{ t('reconcile.rerun') }}</el-button>
+          <el-button type="primary" :loading="rerunning" @click="rerun">{{ t('reconcile.rerun') }}</el-button>
         </div>
       </div>
     </template>
@@ -69,7 +69,7 @@
       </el-form>
       <template #footer>
         <el-button @click="openManual = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitManual">{{ t('common.confirm') }}</el-button>
+        <el-button type="primary" :loading="manualSubmitting" :disabled="!manualForm.symbol?.trim()" @click="submitManual">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
   </el-card>
@@ -155,9 +155,13 @@ const load = async () => {
   try { const r = await getReconcile(); rawIssues.value = r.issues || [] } catch { rawIssues.value = [] }
   await loadDiff()
 }
+const rerunning = ref(false)   // wd-20 §2.6 防重
 const rerun = async () => {
+  if (rerunning.value) return
+  rerunning.value = true
   try { await getReconcile(); await loadDiff(); ElMessage.success(t('reconcile.rerunDone')) }
   catch { ElMessage.error(t('reconcile.queryFailed')) }
+  finally { rerunning.value = false }
 }
 
 const act = async (row, kind) => {
@@ -173,20 +177,28 @@ const act = async (row, kind) => {
 
 const exemptDlg = ref(false)
 const exemptForm = ref({ id: 0, exempt_qty: 0, exempt_until: '', reason: '' })
+const exemptSubmitting = ref(false)   // wd-20 §2.6 防重
 const submitExempt = async () => {
+  if (exemptSubmitting.value) return
+  exemptSubmitting.value = true
   try {
     await api.post(`/reconcile/issues/${exemptForm.value.id}/exempt`, exemptForm.value)
     exemptDlg.value = false; ElMessage.success(t('common.success')); await loadDiff()
   } catch { ElMessage.error(t('common.failed')) }
+  finally { exemptSubmitting.value = false }
 }
 
 const openManual = ref(false)
 const manualForm = ref({ symbol: '', volume: 0, note: '' })
+const manualSubmitting = ref(false)   // wd-20 §2.6 防重
 const submitManual = async () => {
+  if (!manualForm.value.symbol?.trim() || manualSubmitting.value) return
+  manualSubmitting.value = true
   try {
     await api.post('/reconcile/manual-order', manualForm.value)
     openManual.value = false; ElMessage.success(t('common.success')); await loadDiff()
   } catch { ElMessage.error(t('common.failed')) }
+  finally { manualSubmitting.value = false }
 }
 
 const onReset = async () => {
