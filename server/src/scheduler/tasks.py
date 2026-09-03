@@ -1054,6 +1054,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
 def write_summary_metrics(conn, run_id: int) -> None:
     """wd-20 §1.3：run 终态时聚合 done 符号成绩单（单点写入方——此前 summary_metrics 无写入方，
     前端成绩单恒空）。键名：total_return_pct/max_drawdown_pct/sharpe/win_rate/trade_count。"""
+    import json   # 该文件惯例：函数内导入（模块级无 json——原 NameError 盲审复验抓出）
     cur = conn.execute(
         "SELECT result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
     rows = [json.loads(r[0]) for r in cur.fetchall() if r[0]]

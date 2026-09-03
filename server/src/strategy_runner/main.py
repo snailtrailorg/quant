@@ -257,7 +257,8 @@ def _log_timeline(tid, level: str, message: str) -> None:
         return
     try:
         from src.task_manager import log_task
-        log_task(f"live:{tid}", level, message)
+        # 盲审B-P5：level 统一大写（存量/同步侧为大写——Logs.vue 按大写匹配，小写会显示成 info 蓝）
+        log_task(f"live:{tid}", level.upper(), message)
     except Exception as e:
         logger.warning("时间线写入失败(不阻断): %s", e)
 

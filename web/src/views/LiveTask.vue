@@ -41,9 +41,9 @@
             </div>
             <div v-if="row._timeline?.length" style="margin-top: 8px">
               <div style="color: var(--text-secondary); font-size: 12px">{{ t('liveTask.recentLogs') }}:</div>
-              <div v-for="(l, i) in row._timeline" :key="i" style="font-size: 11px; font-family: var(--font-num); display: flex; gap: 8px">
+              <div v-for="(l, i) in row._timeline.slice(0, 8)" :key="i" style="font-size: 11px; font-family: var(--font-num); display: flex; gap: 8px">
                 <span style="color: var(--text-secondary)">{{ l.ts?.slice(5, 16) }}</span>
-                <span :style="{ color: l.level === 'error' ? 'var(--critical)' : l.level === 'warning' ? 'var(--warn)' : 'inherit' }">{{ l.msg?.slice(0, 100) }}</span>
+                <span :style="{ color: ['ERROR', 'error'].includes(l.level) ? 'var(--critical)' : ['WARNING', 'warning', 'WARN'].includes(l.level) ? 'var(--warn)' : 'inherit' }">{{ l.msg?.slice(0, 100) }}</span>
               </div>
             </div>
           </div>
@@ -145,8 +145,8 @@ const form = ref({
 
 
 const load = async () => {
-  try { tasks.value = await getLiveTasks() } catch { ElMessage.error(t('common.loadFailed')) }
-}
+  try { tasks.value = await getLiveTasks(); enrichTasks() } catch { ElMessage.error(t('common.loadFailed')) }
+}   // 盲审A-P2-8：load 后 enrich（start/stop 重建 tasks 后重启数不回落）
 const loadStrategies = async () => {
   try {
     // 链条打磨#20：只列 backtest_verified 策略（三级开关第三级——未验证的选了也是 403 后置暴露）
@@ -229,7 +229,7 @@ const enrichTasks = async () => {
   await Promise.all(tasks.value.map(async task => {
     try {
       const r = await api.get('/log', { params: { task_id: `live:${task.id}` } })
-      task._timeline = (r?.logs || []).slice(0, 8)
+      task._timeline = (r?.logs || []).slice(0, 100)   // 盲审A-P2-8：满窗计数（渲染侧 slice(0,8)）
     } catch { task._timeline = [] }
   }))
 }

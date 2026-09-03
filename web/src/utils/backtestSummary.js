@@ -1,7 +1,9 @@
 // wd-20 §1.3 · 回测成绩单键归一（消灭列表/策略页/首页三处各自拼写）
 // 旧数据（回填前）summary_metrics 为空 → 各值 null，消费方显示 '—'
 export const bs = (run) => {
-  const m = run?.summary_metrics || {}
+  // 盲审B-P0：后端两端点现名 summary（write_summary_metrics 写列 summary_metrics——
+  // GET 已带两者）——双键兜底，键名归一过渡
+  const m = run?.summary_metrics ?? run?.summary ?? {}
   return {
     ret: m.total_return_pct ?? null,
     dd: m.max_drawdown_pct ?? null,

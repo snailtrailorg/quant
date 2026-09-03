@@ -266,10 +266,16 @@ def get_backtest_api(run_id: int,
     _s0, _e0 = _d(_p.get("start")), _d(_p.get("end"))
     if _s0 and _e0:
         span_days = (_e0 - _s0).days + 1
-    elif r[7] and r[8]:
-        span_days = max((r[8].date() - r[7].date()).days + 1, 0)
     else:
-        span_days = 0
+        # 盲审B-P3：回退改 done 符号 result.start/end_date 聚合（引擎每符号都写）——
+        # 度量回测窗口而非执行时长（分钟级 run 用 created→finished 会恒 1 天被 90 门误拦）
+        _ss = [_d((json.loads(_x[2]) or {}).get("start_date")) for _x in syms if _x[1] == "done" and _x[2]]
+        _ee = [_d((json.loads(_x[2]) or {}).get("end_date")) for _x in syms if _x[1] == "done" and _x[2]]
+        _ss = [x for x in _ss if x]; _ee = [x for x in _ee if x]
+        if _ss and _ee:
+            span_days = (max(_ee) - min(_ss)).days + 1
+        else:
+            span_days = 0
     return {"id": r[0], "strategy_config_id": r[1],
             "span_days": span_days,
             "symbols": [{"symbol": _s[0], "status": _s[1],

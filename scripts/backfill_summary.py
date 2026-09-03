@@ -61,19 +61,23 @@ def main() -> int:
                 for run_id in ids:
                     cursor_id = run_id
                     cur.execute(
-                        "SELECT result FROM backtest_symbols WHERE run_id=%s AND status='done'",
+                        "SELECT 1 FROM backtest_symbols WHERE run_id=%s AND status='done'",
                         (run_id,))
-                    results = [json.loads(r[0]) for r in cur.fetchall() if r[0]]
-                    if not results:
+                    if not cur.fetchone():
                         continue
-                    summary = _summary(results)
-                    if args.dry_run and filled == 0:
-                        print(f"样例 run={run_id}: {summary}")
-                    if not args.dry_run:
-                        cur.execute(
-                            "UPDATE backtest_runs SET summary_metrics=%s WHERE id=%s",
-                            (json.dumps(summary), run_id))
+                    if args.dry_run:
+                        if filled == 0:
+                            cur.execute(
+                                "SELECT result FROM backtest_symbols WHERE run_id=%s AND status='done'",
+                                (run_id,))
+                            results = [json.loads(r[0]) for r in cur.fetchall() if r[0]]
+                            print(f"样例 run={run_id}: 结果 {len(results)} 符号")
+                    else:
+                        # 盲审B-P7：复用写入方单点（消灭手抄规则）+ 每批一 commit（18 号长事务规范）
+                        from src.scheduler.tasks import write_summary_metrics
+                        write_summary_metrics(conn, run_id)
                     filled += 1
+                conn.commit()   # 每批一提交
     print(f"{'[dry-run] ' if args.dry_run else ''}回填完成: {filled} 条 done run")
     return 0
 

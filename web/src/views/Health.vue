@@ -19,21 +19,6 @@
         </el-table>
       </el-card>
     </el-col>
-    <el-col :span="12">
-      <el-card>
-        <template #header>{{ t('health.disk') }}</template>
-        <el-table :data="diskData">
-          <el-table-column prop="path" :label="t('health.path')" width="150" />
-          <el-table-column prop="used" :label="t('health.used')" width="120" />
-          <el-table-column prop="total" :label="t('health.total')" width="120" />
-          <el-table-column :label="t('health.usage')" width="100">
-            <template #default="{ row }">
-              <el-progress :percentage="row.pct" :color="row.pct > 85 ? '#f56c6c' : '#67c23a'" :stroke-width="10" />
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
-    </el-col>
   </el-row>
 
   <!-- 15 号 SM2：组件矩阵（systemd unit / 依赖 / hub / 任务心跳，与 /metrics 同源） -->
@@ -86,7 +71,7 @@ import { getHealthComponents, getHealthEvents } from '../api'
 
 const { t } = useI18n()
 const healthData = ref([])
-const diskData = ref([])
+const diskData = ref([])   // 已无消费方（磁盘卡盲审A-P2-6 删除——collector 无磁盘源，恒空卡）
 const snap = ref(null)
 const eventRows = ref([])
 const hub = computed(() => snap.value?.hub || null)

@@ -25,6 +25,7 @@ const initial = () => {
 }
 const tab = ref(initial())
 const onTab = (v) => {
+  tab.value = v   // 盲审A-P0-1：EP el-tabs 点击只改内部 currentName 不回推 modelValue——不写则正文永不切
   if (props.memoryKey) sessionStorage.setItem(props.memoryKey, v)
   router.replace({ query: { ...route.query, tab: v } })
 }
@@ -32,11 +33,13 @@ const currentKey = computed(() => (props.tabs.some(x => x.key === tab.value) ? t
 const label = x => t(x.i18nKey)
 </script>
 <template>
-  <el-tabs :model-value="currentKey" @tab-change="onTab">
-    <el-tab-pane v-for="x in tabs" :key="x.key" :name="x.key">
-      <template #label><b>{{ label(x) }}<span v-if="x.badge" class="tb">{{ x.badge }}</span></b></template>
-    </el-tab-pane>
-  </el-tabs>
+  <slot name="tabs" :tab="currentKey">
+    <el-tabs :model-value="currentKey" @tab-change="onTab">
+      <el-tab-pane v-for="x in tabs" :key="x.key" :name="x.key">
+        <template #label><b>{{ label(x) }}<span v-if="x.badge" class="tb">{{ x.badge }}</span></b></template>
+      </el-tab-pane>
+    </el-tabs>
+  </slot>
   <slot :tab="currentKey" />
 </template>
 <style scoped>

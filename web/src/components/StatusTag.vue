@@ -1,9 +1,11 @@
 <script setup>
 // wd-20 §2.1 · 统一状态 Tag（中性灰底+彩点，文字恒 --text-primary——红绿只给数据）
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { statusMeta } from '../utils/status'
 const props = defineProps({ value: { type: String, required: true } })
-const meta = computed(() => statusMeta(props.value))
+const { t } = useI18n()
+const meta = computed(() => statusMeta(props.value, t))
 </script>
 <template>
   <span class="st" :title="value">{{ meta.zh }}<span :class="['dot', meta.dot]" /></span>

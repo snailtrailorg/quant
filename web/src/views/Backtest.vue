@@ -32,14 +32,14 @@
           </template>
         </el-table-column>
         <el-table-column :label="t('backtest.ddCol')" width="80" class-name="num">
-          <template #default="{ row }">{{ row.summary?.max_drawdown != null ? (row.summary.max_drawdown * 100).toFixed(1) + '%' : '—' }}</template>
+          <template #default="{ row }">{{ bs(row).dd != null ? pct(bs(row).dd) : '—' }}</template>
         </el-table-column>
         <el-table-column :label="t('backtest.sharpeCol')" width="70" class-name="num">
-          <template #default="{ row }">{{ row.summary?.sharpe_ratio?.toFixed(2) ?? '—' }}</template>
+          <template #default="{ row }">{{ bs(row).sharpe != null ? bs(row).sharpe.toFixed(2) : '—' }}</template>
         </el-table-column>
         <el-table-column :label="t('backtest.dateRangeCol')" width="160">
           <template #default="{ row }">
-            {{ row.summary?.start?.slice(0,10) || (row.created_at||'').slice(0,10) }} ~ {{ row.summary?.end?.slice(0,10) || (row.finished_at||'').slice(5,10) }}
+            {{ (row.created_at||'').slice(0,10) }} ~ {{ (row.finished_at||'').slice(5,10) || '…' }}
           </template>
         </el-table-column>
         <!-- 失败原因透出（05 §5.7：failed 行点开见原因） -->
@@ -149,7 +149,6 @@ import { bs, pct } from '../utils/backtestSummary'
 import StatusTag from '../components/StatusTag.vue'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
-import { enumZh } from '../utils/format'
 import ParameterForm from '../components/ParameterForm.vue'
 
 const { t } = useI18n()
@@ -228,7 +227,7 @@ const submitRun = async () => {
       mode: form.value.mode,
       params: {
         capital: form.value.capital,
-        commission: (form.value.commissionRate || 5) / 10000,   // A2:表单佣金(万分之)接入——原硬编码死控件
+        commission: (form.value.commissionRate ?? 5) / 10000,   // 盲审A-P3：?? 保 0（|| 会吞自定义 0）   // A2:表单佣金(万分之)接入——原硬编码死控件
         start: form.value.dateRange?.[0]?.toISOString().slice(0, 10),
         end: form.value.dateRange?.[1]?.toISOString().slice(0, 10),
         ...form.value.params,
