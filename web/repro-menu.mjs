@@ -1,4 +1,6 @@
 import puppeteer from 'puppeteer-core'
+const PASS = process.env.SMOKE_PASS
+if (!PASS) { console.error('需 SMOKE_PASS 环境变量（生产 admin 密码）'); process.exit(2) }
 const b = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome',
   headless: 'new', args: ['--no-sandbox', '--disable-gpu'] })
 const p = await b.newPage()
@@ -8,7 +10,7 @@ p.on('pageerror', e => logs.push(`[PAGEERROR] ${String(e).slice(0, 200)}`))
 await p.goto('https://quant.snailtrail.cc/login', { waitUntil: 'networkidle2', timeout: 30000 })
 await p.type('input', 'admin')
 const inputs = await p.$$('input')
-await inputs[1].type('tianran3B')
+await inputs[1].type(PASS)
 await p.click('button[type=button], .el-button--primary')
 // 时序探针:每秒读一次菜单组数,看 ops 是否迟到
 for (let i = 1; i <= 8; i++) {

@@ -214,7 +214,7 @@ const backfillMinute = async (row) => {
   } catch { ElMessage.error(t('common.failed')) }
 }
 import { watch } from 'vue'
-watch(() => showCreate.value, v => {
+watch(() => showDialog.value, v => {
   if (v) poolSymbols.value = (newPool.value.symbolsStr || '').split('\n').map(x => x.trim()).filter(Boolean)
   else newPool.value.symbolsStr = poolSymbols.value.join('\n')
 })
