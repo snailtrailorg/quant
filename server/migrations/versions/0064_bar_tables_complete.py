@@ -28,8 +28,8 @@ _BAR_TABLES = [
     ("bar_15min", "15min"),
     ("bar_30min", "30min"),
     ("bar_60min", "60min"),
-    ("bar_1h", "1h"),
-    ("bar_4h", "4h"),
+    ("bar_1h", "1H"),   # 与 Freq Literal（schema.py:12）及 bar_1d 的 server_default 口径对齐（大写）
+    ("bar_4h", "4H"),
 ]
 
 

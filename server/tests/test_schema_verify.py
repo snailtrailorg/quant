@@ -82,3 +82,31 @@ class TestEntryRouting:
             monitor.report_schema_findings({"missing_tables": [], "missing_columns": {}})
         n.assert_not_called()
         w.assert_not_called()
+
+
+class TestEnsureTableVerify:
+    """ensure_table 改 verify（2026-09-03）：校验存在+告警，不再运行时建表。"""
+
+    def test_caches_on_exist(self):
+        from src.data_platform import db
+        db._verified_tables.clear()
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = ("bar_1d",)  # to_regclass 命中（非 None）
+        with patch.object(db, "get_conn", return_value=conn):
+            db.ensure_table("1D")
+            db.ensure_table("1d")  # 同表（lower 后 bar_1d），第二次应缓存不查
+        assert conn.execute.call_count == 1   # 只查一次 to_regclass
+        db._verified_tables.clear()
+
+    def test_not_cached_on_missing(self):
+        from src.data_platform import db
+        db._verified_tables.clear()
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = (None,)  # to_regclass 未命中
+        with patch.object(db, "get_conn", return_value=conn):
+            db.ensure_table("60min")
+            db.ensure_table("60min")  # 表缺失不缓存，第二次仍查（迁移跑完能捡到）
+        assert conn.execute.call_count == 2
+        db._verified_tables.clear()

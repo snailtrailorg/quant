@@ -48,7 +48,7 @@ get_conn() -> psycopg.Connection
 get_engine() -> sqlalchemy.Engine
     # 给 alembic / pandas.read_sql / to_sql 用
 ensure_table(freq: str) -> None
-    # CREATE TABLE IF NOT EXISTS bar_{freq}（DDL 模板见 schema.py）
+    # to_regclass 校验 bar_{freq} 存在+告警，不建表（建表归迁移 0064，运行时不再 CREATE TABLE）
 save_bars(freq: str, rows: list[tuple]) -> int
     # 批量写 K 线，ON CONFLICT DO NOTHING（冲突跳过）。返回 len(rows)
     # rows 11 字段：(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)
@@ -79,8 +79,7 @@ parse_vt_symbol(vt_symbol: str) -> tuple[str, str]  # -> ("600000", "SHSE")
 TS_EXCHANGE_MAP = {"SH":"SHSE", "SZ":"SZSE", "BJ":"BSE", ...}  # Tushare->vnpy
 EXCHANGE_TS_MAP = {...}                                       # 反向
 
-# DDL/SQL 模板（.format(freq=...) 填充）：
-BAR_TABLE_DDL          # CREATE TABLE bar_{freq} ...
+# SQL 模板（.format(freq=...) 填充；建表 DDL 归迁移 0064，schema.py 不再保留 BAR_TABLE_DDL）：
 BAR_TABLE_INSERT       # INSERT ... ON CONFLICT DO NOTHING
 BAR_TABLE_INSERT_OVERWRITE  # INSERT ... ON CONFLICT DO UPDATE
 BAR_TABLE_SELECT       # SELECT ... WHERE symbol=%s AND ts BETWEEN %s AND %s
@@ -294,7 +293,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 - **ts**：`TIMESTAMPTZ`，A 股 +08:00，加密 UTC
 - **rows 11 字段顺序**：`(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)`--`save_bars`/`save_bars_overwrite`/`to_save_rows`/`to_save_rows_min` 一致
 - **get_conn**：`with` 退出还池；不手动 close
-- **save_bars**：`ensure_table` 兜底建表（新 freq 安全）
+- **save_bars**：`ensure_table` 校验表存在+告警（建表归迁移 0064，不再运行时 DDL）
 - **is_trading_day**：查 trade_cal，查不到回退工作日（不抛）
 - **stk_mins**：per-symbol 接口（不支持按日全市场），2000 积分，单次 8000 条（超限分段，见 engine._split_minute_range）
 - **限流四层**（2026-08-27 积分档批次）：`TushareDataSource.get_rate_limit` 解析序 **L0** `DEFAULT_RATE_LIMITS`（代码兜底）← **L1** `params.points_tier` 积分档预设（`POINTS_PRESETS` 200/2000/5000）← **L2** `params.rate_limits` 单参数覆写 ← **L3** `params.rate_time_overrides` 时段乘数；非法值各层独立回落+告警不崩同步。**熔断 DataSource 级**（D2），参数 `params.circuit_breaker`（代码默认 fail_threshold=5 / reset_timeout=60s）
@@ -312,9 +311,9 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 5. 限速可选（2026-08-27 起）：子类设 `DEFAULT_RATE_LIMITS`（有积分档再设 `POINTS_PRESETS`）即自动进 `rate_limit_context` 体系，engine 拉取点零改动
 
 ### 加新 K 线频率（如 15min）
-1. migration 建 `bar_15min` 表（复用 `BAR_TABLE_DDL.format(freq="15min")`）
+1. migration 建 `bar_15min` 表（0064 的 `_create_bar_table` 模式，结构同 bar_1d）
 2. `_PER_SYMBOL_META` 加一行（如 `astock_minute_15min`）
-3. `save_bars("15min", rows)` 自动工作（`ensure_table` 兜底）
+3. `save_bars("15min", rows)` 自动工作（表已由迁移建）
 
 ### 加新表（如财务指标）
 1. migration 建表 + DDL 兜底在 handler

@@ -73,19 +73,20 @@ def ensure_table(freq: str) -> None:
 
     2026-09-03：bar_{freq} 8 表已全部入迁移（0064 补齐 15min/30min/60min/1h/4h）。
     运行时只校验 + 告警——表不存在（迁移未跑）告警，后续 INSERT/SELECT 由 PG 报
-    relation does not exist。首次校验成功缓存，避免热路径重复 to_regclass 查询。
+    relation does not exist。首次校验成功缓存（键用 lower 后表名，"1H"/"1h" 同表不重复），
+    避免热路径重复 to_regclass 查询。
     """
-    if freq in _verified_tables:
-        return
     import logging
     logger = logging.getLogger("data_platform")
     table = f"bar_{freq.lower()}"
+    if table in _verified_tables:
+        return
     with get_conn() as conn:
         cur = conn.execute("SELECT to_regclass(%s)", (table,))
         if cur.fetchone()[0] is None:
             logger.warning("%s 表不存在（alembic upgrade head 建表，勿运行时 CREATE TABLE）", table)
             return   # 不缓存：下次再校验（迁移可能已跑）
-    _verified_tables.add(freq)
+    _verified_tables.add(table)
 
 
 def validate_bars(rows: list[tuple]) -> list[tuple]:
@@ -223,7 +224,7 @@ def init_trade_calendar(year: int) -> None:
 
 
 def load_schema_expectations() -> dict[str, set[str]]:
-    """加载链生成的期望清单（schema_expectations.txt，50 表）。
+    """加载链生成的期望清单（schema_expectations.txt，85 表，随迁移增长）。
 
     生成方式（#48 L-S-A 生成式，禁手写）：
       PGPASSWORD=… psql -d quant -q -c "DROP SCHEMA IF EXISTS chain_scratch CASCADE; CREATE SCHEMA chain_scratch;"
