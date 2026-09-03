@@ -319,11 +319,12 @@ def reconcile_three_books():
             if orphan_signals > 0:
                 issues.append(f"信号无委托: {orphan_signals} 笔")
 
-            # 2. 委托不成交（F-50 口径收紧：只告警「已提交未成交」——原 status!='filled' 恒真，
-            # 把 send_failed 失败单/submitting 僵尸单也误报成噪音）
+            # 2. 委托不成交（F-50 口径收紧：只告警「已提交/提交中 未成交」——原 status!='filled'
+            # 恒真，把 send_failed 失败单也误报成噪音；submitting 覆盖「写 WAL 后、send_order 回写
+            # 前崩溃」的僵尸单，不因收紧而漏报）
             cur = conn.execute("""
                 SELECT count(*) FROM order_log o
-                WHERE o.status = 'submitted'
+                WHERE o.status IN ('submitted','submitting')
                 AND NOT EXISTS (SELECT 1 FROM trade_log t WHERE t.order_id = o.id)
             """)
             unfilled = cur.fetchone()[0]
@@ -524,6 +525,7 @@ def data_continuity_check():
         from src.data_platform.db import is_trading_day as _is_td
         _days = [week_ago + timedelta(days=i) for i in range((today - week_ago).days)]
         expected = sum(1 for d in _days if d.weekday() < 5 and _is_td(d))   # 不含今天
+        repaired_any = False   # F-55：循环内逐标的写触发会导致 N 次 rewarm，改为循环外只写一次
         for symbol, last_ts, cnt in rows:
             if cnt < expected:
                 issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{expected})")
@@ -535,14 +537,14 @@ def data_continuity_check():
                     if not df.empty:
                         rws = to_save_rows(df)
                         repaired = save_bars("1D", rws)
-                        # 3. 因子重算触发：有修复则标记（后续 astock_select_daily 将利用完整数据）
                         if repaired > 0:
-                            if r is not None:
-                                # F-55（2026-09-03）：写变化值（原常量 "1"）——多 live-task worker
-                                # 各记 last_seen，常量值第二次触发无法区分。isoformat 微秒级唯一。
-                                r.set("factor:recalc:triggered", datetime.now().isoformat(), ex=3600)
+                            repaired_any = True
                 except Exception as e:
                     issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
+        # F-55（2026-09-03）：运行级只写一次触发标记（原循环内逐标的写，多 worker 每次 poll 读到
+        # 新值就 rewarm，N 个修复标的 → N 次重暖机）。写变化值（isoformat 微秒级唯一）
+        if repaired_any and r is not None:
+            r.set("factor:recalc:triggered", datetime.now().isoformat(), ex=3600)
     except Exception as e:
         issues.append(f"检测异常: {str(e)[:100]}")
 
@@ -735,10 +737,11 @@ def data_sync_scheduler():
 
         # cron 解析：从上次同步时间算下次到点（P1：base 也归一北京时区，与 now 同基准）
         base = last_sync_ts.astimezone(TZ_CN) if last_sync_ts else (now - timedelta(days=7))
-        # F-51（2026-09-03）：游标在未来钳制——last_sync_ts 被时钟回拨/手工改大时，croniter
-        # 算出的 next_run 恒在未来 → 该同步永久静默停摆。钳回 now（下次到点即触发）。
+        # F-51（2026-09-03）：游标在未来（时钟回拨/手工改大）视为不可信，base 锚回 7 天前等同
+        # 空游标——原「钳回 now」是空操作：croniter.get_next 从 now 算恒返回 now 之后的到点，
+        # next_run > now 恒真，同步仍永久停摆。锚回过去让 croniter 算最近到点判断是否逾期。
         if base > now:
-            base = now
+            base = now - timedelta(days=7)
         base = base.replace(tzinfo=None) if hasattr(base, "tzinfo") else base   # croniter 用 naive 本地时
         try:
             cron = croniter(schedule, base)

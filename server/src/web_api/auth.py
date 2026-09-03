@@ -259,9 +259,10 @@ def verify_jwt(token: str) -> dict:
     # 登出黑名单（A4）：旧 token 无 jti 跳过（24h 过渡期后全部带 jti）
     jti = payload.get("jti")
     if jti:
-        # F-59（2026-09-03）：复用共享连接池 + Valkey 挂降级放行——原每请求 from_url 建连
-        # 且 r.exists 无保护，Valkey 抖动即 500 认证全瘫。降级=跳过黑名单（登出 token 短暂
-        # 可用靠自然过期），账号禁用/注销仍由下方 PG fail-closed 兜底，不引入越权面。
+        # F-59（2026-09-03）：复用共享连接池 + Valkey 挂 fail-closed（401 非 500）——原每请求
+        # from_url 建连且 r.exists 无保护，Valkey 抖动即 500 认证全瘫。fail-closed：登出黑名单
+        # 安全敏感，Valkey 不可达时无法确认 token 未登出，应拒绝而非放行（放行会让已登出
+        # token 复活——logout 无 PG 兜底，PG 只兜底 deactivate）。
         try:
             from src.web_api.redis_pool import redis_client
             if redis_client().exists(f"jwt:bl:{jti}"):
@@ -269,7 +270,8 @@ def verify_jwt(token: str) -> dict:
         except HTTPException:
             raise
         except Exception as e:
-            _logger.warning("登出黑名单检查失败（Valkey 不可达，降级放行）: %s", e)
+            _logger.warning("登出黑名单检查失败（Valkey 不可达，fail-closed 拒绝）: %s", e)
+            raise HTTPException(401, "认证服务暂不可用，请稍后重试")
     # SD1（F-45）：账号状态即时校验——禁用/注销后存量 token 立即失效（原来最长 24h 仍有效）
     username = payload.get("username")
     if username:

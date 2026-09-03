@@ -1,11 +1,13 @@
 """SF1 长尾清尾单测（2026-09-03）：F-39/F-51/F-55/F-59 四项「仍存在」缺陷的修复锁。
 
 - F-39 cancel_order 退化路径：剥前缀得纯 orderid，非纯数字放弃盲撤
-- F-51 同步游标在未来钳制（base > now 时钳回 now，不再永久静默停摆）
+- F-51 同步游标在未来锚回过去（base>now 时锚回 now-7天，让 croniter 算最近到点判断逾期）
 - F-55 factor:recalc 多 worker 各记 last_seen，不删全局键（原单消费者抢删）
-- F-59 verify_jwt 复用连接池 + Valkey 挂降级放行（原每请求建连且无保护 → 认证全瘫）
+- F-59 verify_jwt 复用连接池 + Valkey 挂 fail-closed（401 非 500，原每请求建连且无保护 → 认证全瘫）
 """
 from unittest.mock import patch, MagicMock
+
+import pytest
 
 from datetime import datetime, timedelta, timezone
 
@@ -64,8 +66,8 @@ def test_sync_scheduler_clamps_future_cursor():
          patch("croniter.croniter", _Cron):
         tasks.data_sync_scheduler()
 
-    # base 被钳回 now 附近（±60s），而非 future 的 +10 天
-    assert abs((captured["base"] - now.replace(tzinfo=None)).total_seconds()) < 60
+    # base 被钳回过去（now-7天，等同空游标），让 croniter 算最近到点判断逾期
+    assert abs((captured["base"] - (now - timedelta(days=7)).replace(tzinfo=None)).total_seconds()) < 60
 
 
 # --- F-55 factor:recalc 多 worker 各记 last_seen ---
@@ -109,14 +111,19 @@ class _UConn:
         return _C()
 
 
-def test_verify_jwt_valkey_down_fails_open():
-    """Valkey 挂（redis_client 抛异常）→ 跳过黑名单放行（不 500 认证全瘫）。"""
+def test_verify_jwt_valkey_down_fails_closed():
+    """Valkey 挂（redis_client 抛异常）→ 黑名单检查 fail-closed（401 非 500，非放行）。
+
+    放行会让已登出 token 复活（logout 无 PG 兜底）——fail-closed 才是安全正确降级。
+    """
     from src.web_api import auth as auth_mod
+    from fastapi import HTTPException
     token = auth_mod.create_jwt("1", "alice", "viewer")
     with patch("src.web_api.redis_pool.redis_client", side_effect=Exception("conn down")), \
          patch.object(auth_mod, "get_conn", lambda: _UConn()):
-        payload = auth_mod.verify_jwt(token)
-    assert payload["jti"]           # 放行（黑名单未查，账号状态 PG 仍 fail-closed 兜底）
+        with pytest.raises(HTTPException) as e:
+            auth_mod.verify_jwt(token)
+    assert e.value.status_code == 401   # fail-closed：Valkey 挂不放行
 
 
 # --- F-40 query_account 断线清缓存 ---

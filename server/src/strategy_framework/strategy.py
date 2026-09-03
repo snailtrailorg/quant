@@ -446,13 +446,17 @@ class Strategy:
         """SC1：order_log 状态流转（submitting→submitted/send_failed；成交/撤单由 trade/事件推进）。
 
         F-50（2026-09-03）：加 vt_orderid（vnpy 委托号）——重启后 _vt2cid 进程内存丢失，
-        write_trade_log 靠 vt_orderid 反查 order_id。字段全量 SET（未传为 NULL，send_failed 时本就 NULL）。
+        write_trade_log 靠 vt_orderid 反查 order_id。client_order_id/vt_orderid 用 COALESCE
+        （未传不覆盖既有值，防未来「成交/撤单」流转漏传时清空关联键），error 直接 SET（需支持清空）。
         """
         try:
             from ..data_platform.db import get_conn
             with get_conn() as conn:
                 conn.execute(
-                    "UPDATE order_log SET status=%s, client_order_id=%s, error=%s, vt_orderid=%s WHERE id=%s",
+                    "UPDATE order_log SET status=%s, "
+                    "client_order_id=COALESCE(%s, client_order_id), "
+                    "error=%s, "
+                    "vt_orderid=COALESCE(%s, vt_orderid) WHERE id=%s",
                     (status, client_order_id, error, vt_orderid, order_row_id))
                 conn.commit()
         except Exception as e:

@@ -21,7 +21,13 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.execute("ALTER TABLE order_log ADD COLUMN IF NOT EXISTS vt_orderid TEXT")
+    # F-50（2026-09-03）：vt_orderid 索引——write_trade_log 重启后按 vt_orderid 逐笔反查，
+    # 无索引则 order_log 随下单量增长 seq scan（18 号规范：CONCURRENTLY 不锁写）
+    with op.get_context().autocommit_block():
+        op.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_order_log_vt_orderid ON order_log (vt_orderid)")
 
 
 def downgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_order_log_vt_orderid")
     op.execute("ALTER TABLE order_log DROP COLUMN IF EXISTS vt_orderid")
