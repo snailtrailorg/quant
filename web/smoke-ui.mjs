@@ -26,6 +26,7 @@ p.on('pageerror', e => errors.push(`[PAGEERROR] ${String(e).slice(0, 200)}`))
 p.on('response', r => { if (r.status() === 404 && r.url().includes('quant.snailtrail.cc')) errors.push(`[404] ${r.url().replace('https://quant.snailtrail.cc', '')}`) })
 
 const nav = async path => { await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}); await new Promise(r => setTimeout(r, 900)) }
+const waitFor = async (fn, timeout = 12000) => { const t0 = Date.now(); while (Date.now() - t0 < timeout) { if (await fn()) return true; await new Promise(r => setTimeout(r, 400)) } return false }
 const count = sel => p.evaluate(s => document.querySelectorAll(s).length, sel)
 const texts = sel => p.evaluate(s => [...document.querySelectorAll(s)].map(e => e.textContent.trim()), sel)
 const firstText = sel => p.evaluate(s => document.querySelector(s)?.textContent?.trim() ?? '', sel)
@@ -110,6 +111,7 @@ try {
 // ---- Trading 三值：总资产 / 现价列 / 失败原因列 ----
 try {
   await nav('/trading')
+  await waitFor(() => p.evaluate(() => [...document.querySelectorAll('.kpi-num')].some(e => e.textContent.includes('¥'))))
   assert('Trading 总资产', (await texts('.kpi-num')).some(v => v.includes('¥')), (await texts('.kpi-num')).filter(v => v.includes('¥'))[0] || '')
   const colOf = async label => p.evaluate(lb => [...document.querySelectorAll('.el-table__header th')].some(th => th.textContent.includes(lb)), label)
   assert('Trading 现价列', await colOf('现价'), (await texts('.el-table__header th')).join('/').slice(0, 100))
