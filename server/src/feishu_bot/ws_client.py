@@ -66,22 +66,6 @@ def main() -> None:
     # 原静默降级会让 _FID 污染流入 SQL DataError→首见整段死火回到零留痕盲区
     if len(sys.argv) < 2 or not sys.argv[1].isdigit():
         raise SystemExit("用法: python -m src.feishu_bot.ws_client <bot_id>（数字——systemd 实例名）")
-    # staging 彩排假 bot（2026-09-03 彩排盲区改进）：system_config feishu_mock_ws=true 时
-    # 跳过 Lark 长连接直接驻留——staging 波次能重启到本单元、跑满 main() 启动路径
-    # （argv 校验/导入，即 12:03 prod E-8 崩溃所在），不真连外网。prod 无此键=真实连接。
-    # 检查失败 fail-open 走真实路径（DB 不可达时整个彩排本就会挂，无需在此自锁）。
-    try:
-        from src.data_platform.db import get_conn
-        with get_conn() as conn:
-            _mock = conn.execute(
-                "SELECT value FROM system_config WHERE key='feishu_mock_ws'").fetchone()
-        if _mock and str(_mock[0]).strip().lower() in ("1", "true", "yes"):
-            print(f"feishu mock 模式: bot={sys.argv[1]} 驻留（不连 Lark）——staging 彩排假 bot", flush=True)
-            import threading
-            threading.Event().wait()  # 阻塞驻留，systemd 保持 running（dwell 通过）
-            return
-    except Exception:
-        pass
     # 2026-09-02：启动即回填（arch-19 双轨收尾——env 授权用户入表，告警 dispatch 同源可用）
     from src.im_bot.users import backfill_from_env
     backfill_from_env(int(sys.argv[1]))

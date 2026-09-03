@@ -103,18 +103,4 @@ else
 fi
 sudo -u quant "$Q/bin/run-current" -c "print('run-current OK')" 2>/dev/null \
   || sudo -u quant "$Q/bin/run-current" -c "print('run-current OK（回退链生效）')"
-echo "== 11 staging 假 feishu bot（彩排盲区改进 2026-09-03：波次能重启到 feishu 单元、跑满启动路径不连外网）=="
-# 幂等：种子入 dev DB（staging 与 dev 同 QUANT_DB_URL）；prod 独立 DB 永不受影响。
-# 非致命：DB 未起则跳过（首次 bootstrap 可能 DB 还没 init，彩排前再跑一次即可）。
-sudo -u quant "$Q/bin/run-current" -c "
-from src.data_platform.db import get_conn
-with get_conn() as conn:
-    row = conn.execute(\"SELECT id FROM im_bot_config WHERE provider='feishu' AND name='staging-mock'\").fetchone()
-    if not row:
-        conn.execute(\"INSERT INTO im_bot_config (provider, name, description, enabled, default_role) VALUES ('feishu', 'staging-mock', 'staging 彩排假 bot（不真连 Lark）', true, 'viewer')\")
-    conn.execute(\"INSERT INTO system_config (key, value, value_type, description) VALUES ('feishu_mock_ws', 'true', 'string', 'staging 彩排假 bot 开关（跳过长连接驻留）') ON CONFLICT (key) DO NOTHING\")
-    conn.commit()
-print('staging mock feishu bot + feishu_mock_ws seeded')
-" || echo "⚠️ staging 假 bot 种子失败（DB 未起？彩排前重跑本脚本或手动补）"
-
 echo "== staging 搭建完成（服务未启动——由彩排波次或手动 quant-svc 起）=="
