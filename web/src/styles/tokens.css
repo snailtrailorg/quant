@@ -3,6 +3,7 @@
  * Element Plus 整组 ramp 覆盖（只换 --el-color-primary 的话 hover/选中/disabled 仍模板蓝）。
  * 暗色：html.dark 切换（element-plus dark css-vars 在 main.js 引入）；暗色变体对比度
  * 全部在 #151D30 画布上 ≥4.5:1（04 §1.2 盲审修正）。
+ * 换色/换令牌操作 → DESIGN.md §4.1（换值=改本文件 :root+html.dark 两处；换档=先加定义再批量替换再 --update 基线）。
  */
 
 /* @font-face:JBMono latin 400/600(public/fonts/ 预生成,21+22KB;14号 P1) */

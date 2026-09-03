@@ -50,6 +50,24 @@
 - 状态展示统一用 `el-tag` + 语义 type：`success`=运行/已启用/成功 · `warning`=已停/部分 · `danger`=错误/已禁用 · `info`=只读/未验证/中性。
 - 语义色不自定义十六进制，直接用 Element 默认（primary #409eff 等），保证全站一致。
 
+### 4.1 换色 / 换令牌操作（2026-09-03 令牌尾批后定）
+
+令牌化完成后，换配色 = 改 `tokens.css`，**代码零改**（`var(--*)` 全站自动跟随）。分两种：
+
+**A. 只换色值**（最常见）：
+1. 改 `tokens.css` 里对应变量的值，**`:root` 与 `html.dark` 两处成对改**（漏一处 = 明/暗破相）；
+2. `scripts/check-tokens.sh` 基线**不动**（代码内联 hex 字面量数没变）。
+
+**B. 新增/重定义令牌**（换语义档，如加「数据好」档或拆档）：
+1. **先**在 `tokens.css` 加定义（+ 暗色变体）——先定令牌、再替换引用，别反过来；
+2. 批量替换代码旧引用 → 新令牌；
+3. 内联 hex 有增减时 `bash scripts/check-tokens.sh --update` 收紧基线。
+
+**三个注意点**：
+- 图表色走 `cssVar('--x')`（`getComputedStyle` 解析，见 `utils/cssVar.js`），换值跟随，但已渲染图表不即时重算（echarts `computed` 惰性求值）；
+- 语义色换值可以、换义不行：`--up/--down` 只指涨跌、`--success/--critical` 只指反馈/系统状态（绿=跌仅国内蜡烛图，别处绿色就是普通「好/成功」）；
+- 令牌门（`scripts/check-tokens.sh`）只扫 `views/+components/`，内联 px/hex 只许降不许升（基线首采/收紧用 `--update`）。
+
 ## 5. 表格规范
 
 - 无斑马纹（wd-04 §4.3 裁定清零，hover 高亮替代；wd-16 验收全站 0 残留——2026-09-03 改文就码，原 stripe 条款为失真残留）；尺寸跟随全局（不写 size）。
