@@ -21,7 +21,7 @@
     </el-col>
   </el-row>
 
-  <!-- 15 号 SM2：组件矩阵（systemd unit / 依赖 / hub / 任务心跳，与 /metrics 同源） -->
+  <!-- arch-15 SM2：组件矩阵（systemd unit / 依赖 / hub / 任务心跳，与 /metrics 同源） -->
   <el-card style="margin-top: 20px">
     <template #header>
       {{ t('health.components') }}
@@ -46,7 +46,7 @@
     </el-table>
   </el-card>
 
-  <!-- 15 号 SM2：健康事件流（触发/恢复沿历史） -->
+  <!-- arch-15 SM2：健康事件流（触发/恢复沿历史） -->
   <el-card style="margin-top: 20px">
     <template #header>{{ t('health.events') }}</template>
     <el-table :data="eventRows">

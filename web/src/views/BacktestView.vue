@@ -46,6 +46,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { getBacktestRun } from '../api'
+import { cssVar } from '../utils/cssVar'
 
 const { t } = useI18n()
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
@@ -72,8 +73,8 @@ const equityOption = computed(() => ({
     smooth: true, lineStyle: { width: 2 ,
             markPoint: {
               data: [
-                ...(buyPoints.value || []).map(p => ({ coord: [p.ts, p.price], value: 'B', itemStyle: { color: 'var(--up)' } })),
-                ...(sellPoints.value || []).map(p => ({ coord: [p.ts, p.price], value: 'S', itemStyle: { color: 'var(--down)' } })),
+                ...(buyPoints.value || []).map(p => ({ coord: [p.ts, p.price], value: 'B', itemStyle: { color: cssVar('--up') } })),
+                ...(sellPoints.value || []).map(p => ({ coord: [p.ts, p.price], value: 'S', itemStyle: { color: cssVar('--down') } })),
               ],
               symbolSize: 30,
             }}, areaStyle: { opacity: 0.1 },
@@ -85,7 +86,7 @@ const drawdownOption = computed(() => ({
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
   xAxis: { type: 'category', data: drawdownData.value.map(d => d.ts?.slice(0, 10)) },
   yAxis: { type: 'value', scale: true },
-  series: [{ name: t('backtest.drawdown'), type: 'line', data: drawdownData.value.map(d => d.dd), smooth: true, lineStyle: { width: 2, color: '#0A7A54' }, areaStyle: { opacity: 0.1, color: '#0A7A54' } }],  // 值=var(--down) 字面：canvas 不解析 var()，图表数据面用字面 hex（同 --ma-line 先例）
+  series: [{ name: t('backtest.drawdown'), type: 'line', data: drawdownData.value.map(d => d.dd), smooth: true, lineStyle: { width: 2, color: cssVar('--down') }, areaStyle: { opacity: 0.1, color: cssVar('--down') } }],
 }))
 
 onMounted(async () => {

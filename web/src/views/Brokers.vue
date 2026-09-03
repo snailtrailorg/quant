@@ -23,7 +23,7 @@
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('brokers.phProvider')" /></el-form-item>
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item :label="t('common.credentialJson')">
-        <!-- 15号批四: XTP field_schema 静态映射(消灭盲写 JSON;非 XTP 走原 password) -->
+        <!-- wd-15 批四: XTP field_schema 静态映射(消灭盲写 JSON;非 XTP 走原 password) -->
         <div v-if="form.provider === 'xtp'" style="display: flex; flex-direction: column; gap: 6px">
           <el-input v-model="credFields['td_host']" :placeholder="t('brokers.phTdHost')" />
           <el-input v-model="credFields['td_port']" :placeholder="t('brokers.phTdPort')" />
@@ -70,7 +70,7 @@ const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）
 const testing = ref(0)
 const usage = ref({})
 const usageLoading = ref(false)
-// 15号批四: XTP field_schema 静态映射(credFields 对象 ↔ credentials JSON 串)
+// wd-15 批四: XTP field_schema 静态映射(credFields 对象 ↔ credentials JSON 串)
 const credFields = ref({})
 watch(() => form.value.provider, (pv) => {
   if (pv === 'xtp' && !Object.keys(credFields.value).length) {

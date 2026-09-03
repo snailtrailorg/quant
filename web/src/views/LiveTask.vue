@@ -225,7 +225,7 @@ onMounted(async () => {
   await load(); await loadStrategies(); await loadAccounts(); enrichTasks() })
 
 // wd-20 §1.5 方案 A：自愈时间线（05 §5.8）——幽灵端点 /live-task/{id}/detail 已删
-// （19 号 P0：404 恒吞）。数据源两路：①列表行已有字段（NRestarts 语义近似=心跳龄/冻结/
+// （wd-19 P0：404 恒吞）。数据源两路：①列表行已有字段（NRestarts 语义近似=心跳龄/冻结/
 // md_mode 在列）②按需展开拉 task_logs?task_id= 过滤渲染
 const enrichTasks = async () => {
   await Promise.all(tasks.value.map(async task => {

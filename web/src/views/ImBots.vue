@@ -72,7 +72,7 @@
         </template>
         <el-form-item :label="t('imBots.defaultRole')">
           <el-select v-model="addForm.default_role" style="width:100%">
-            <el-option v-for="r in ['viewer','analyst','trader']" :key="r" :value="r" :label="r" />
+            <el-option v-for="r in ['viewer','analyst','trader','admin']" :key="r" :value="r" :label="r" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -90,7 +90,7 @@
         <el-form-item :label="t('common.remark')"><el-input v-model="editForm.description" /></el-form-item>
         <el-form-item :label="t('imBots.defaultRole')">
           <el-select v-model="editForm.default_role" style="width:100%">
-            <el-option v-for="r in ['viewer','analyst','trader']" :key="r" :value="r" :label="r" />
+            <el-option v-for="r in ['viewer','analyst','trader','admin']" :key="r" :value="r" :label="r" />
           </el-select>
         </el-form-item>
         <el-form-item v-for="f in editSchema" :key="f.key" :label="fieldLabel(f)">
@@ -109,7 +109,7 @@
       <div style="display:flex;gap:8px;margin-bottom:12px">
         <el-input v-model="newUser.im_user_id" placeholder="ou_xxxxxxxx" style="width:280px" />
         <el-select v-model="newUser.role" style="width:130px">
-          <el-option v-for="r in ['viewer','analyst','trader']" :key="r" :value="r" :label="r" />
+          <el-option v-for="r in ['viewer','analyst','trader','admin']" :key="r" :value="r" :label="r" />
         </el-select>
         <el-button type="primary" @click="addUser">{{ t('common.add') }}</el-button>
       </div>

@@ -116,6 +116,7 @@ const load = async () => { state.value = await getRiskState() }
 
 // P1-1 水位仪表（05 §5.3：75/90 变色=纯 UI 档,不暗示引擎约束）
 import api from '../api'
+import { cssVar } from '../utils/cssVar'
 const riskLogs = ref([])
 const riskSens = ref('detail')
 const riskSensSummary = ref('')
@@ -143,7 +144,7 @@ const loadLog = async () => {
         .map(([k, v]) => `${{ reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') }[k] || k}: ${v}`).join(' · ')
   } catch { riskLogs.value = []; riskSens.value = 'detail' }
 }
-const _gaugeColor = pct => pct >= 90 ? 'var(--critical)' : pct >= 75 ? 'var(--warn-fill)' : 'var(--success)'
+const _gaugeColor = pct => pct >= 90 ? cssVar('--critical') : pct >= 75 ? cssVar('--warn-fill') : cssVar('--success')
 const gauges = computed(() => {
   const m = state.value.metrics || {}
   const rules = state.value.rules || {}

@@ -183,7 +183,7 @@ const username = ref('')
 const nickname = ref('')
 const avatarUrl = ref('')
 const role = ref('')
-// W4 产出 0（白屏修复,15号批四虚报落地）:loadPerms 实现——/auth/me → permissions/role 双回填
+// W4 产出 0（白屏修复,wd-15 批四虚报落地）:loadPerms 实现——/auth/me → permissions/role 双回填
 // 菜单由 perms 驱动(见 has());此前 L252 调用无定义,setup ReferenceError=登入白屏(盲审 A-P0)
 const perms = ref([])
 const has = k => perms.value.includes(k)
@@ -230,7 +230,7 @@ const onAckAll = async () => {
 }
 // 类别 → 页面路由（点击通知直达）
 // P3-2/P3-8：折叠+暗色+帮助抽屉+我的权限玻璃盒
-// 14号 P0:侧栏 matchMedia 自动折叠(localStorage 记忆优先)
+// wd-14 P0:侧栏 matchMedia 自动折叠(localStorage 记忆优先)
 const collapsed = ref(localStorage.getItem('sidebar-collapsed') === '1')
 const _mq = window.matchMedia('(max-width: 1706px)')
 const _onMq = e => { if (!localStorage.getItem('sidebar-collapsed')) collapsed.value = e.matches }

@@ -26,7 +26,7 @@
       </div>
     </el-card>
 
-    <!-- KPI5（14号 §2.3 flex 等分 + §2.4 <1280 降列换行） -->
+    <!-- KPI5（wd-14 §2.3 flex 等分 + §2.4 <1280 降列换行） -->
     <div class="kpi-row">
       <KpiCard :label="t('trading.totalAssets')" :value="fmtMoney(dashboard.total_value)" :spark="sparkVals" />
       <KpiCard :label="t('trading.todayPnl')" :value="pnlArrow(dashboard.daily_pnl) + ' ' + fmtMoney(dashboard.daily_pnl)" :tone="pnlClass(dashboard.daily_pnl)" />
@@ -39,7 +39,7 @@
       <KpiCard :label="t('dashboard.tasksRunning')" :value="liveTasks.filter(x => x.status === 'running').length + '/' + liveTasks.length" />
     </div>
 
-    <!-- 权益曲线 + 实盘任务（14号 §2.4 :md/:xs 降列：<992 堆叠） -->
+    <!-- 权益曲线 + 实盘任务（wd-14 §2.4 :md/:xs 降列：<992 堆叠） -->
     <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
       <el-col :xs="24" :sm="24" :md="15">
         <el-card shadow="never">
@@ -74,7 +74,7 @@
       </el-col>
     </el-row>
 
-    <!-- 底排：持仓 Top5 / 今日订单流 / 数据健康 / 最近回测（14号 §2.4：≥992 四列 / 768-991 两列 / <768 堆叠） -->
+    <!-- 底排：持仓 Top5 / 今日订单流 / 数据健康 / 最近回测（wd-14 §2.4：≥992 四列 / 768-991 两列 / <768 堆叠） -->
     <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
       <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.topPositions') }}<el-button text size="small" @click="$router.push('/trading')">{{ t('dashboard.more') }}→</el-button></div></template>
@@ -121,6 +121,7 @@ import { getStrategies, getDashboard, getPnl, getOrders, getLiveTasks,
 import api from '../api'
 import { bs, pct } from '../utils/backtestSummary'
 import { goCategoryPath } from '../utils/goCategory'
+import { cssVar } from '../utils/cssVar'
 import StatusTag from '../components/StatusTag.vue'
 import KpiCard from '../components/KpiCard.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -160,7 +161,7 @@ const fmtMoney = v => {
   return `¥${n.toFixed(0)}`
 }
 const ddPct = computed(() => Math.min((riskMetrics.value.total_drawdown || 0) / 0.15 * 100, 100))
-const gaugeColor = computed(() => ddPct.value >= 90 ? 'var(--critical)' : ddPct.value >= 75 ? 'var(--warn-fill)' : 'var(--success)')
+const gaugeColor = computed(() => ddPct.value >= 90 ? cssVar('--critical') : ddPct.value >= 75 ? cssVar('--warn-fill') : cssVar('--success'))
 
 const topPositions = computed(() => [...(positions.value || [])]
   .sort((a, b) => Math.abs(b.pnl || 0) - Math.abs(a.pnl || 0)).slice(0, 5))
@@ -192,7 +193,7 @@ const curveOption = computed(() => ({
     { type: 'line', data: rangeCurve.value.map(c => c.value), smooth: true, showSymbol: false,
       lineStyle: { width: 2 }, areaStyle: { opacity: 0.08 } },
     { type: 'line', yAxisIndex: 1, data: drawdownSeries.value, showSymbol: false,
-      lineStyle: { width: 1, color: 'var(--text-secondary)' }, areaStyle: { opacity: 0.15, color: 'var(--text-secondary)' } },
+      lineStyle: { width: 1, color: cssVar('--text-secondary') }, areaStyle: { opacity: 0.15, color: cssVar('--text-secondary') } },
   ],
 }))
 
@@ -241,11 +242,11 @@ const sparkline = computed(() => {
 
 <style scoped>
 .kpi { padding: 6px 0; }
-/* KPI flex 等分（14号 §2.3：flex:1 1 0 + min-width:0 + 卡内截断） */
+/* KPI flex 等分（wd-14 §2.3：flex:1 1 0 + min-width:0 + 卡内截断） */
 .kpi-row { display: flex; gap: 16px; margin-bottom: 0; }
 .kpi-cell { flex: 1 1 0; min-width: 0; }
 .klabel, .kpi-num { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* <1280 保底断点（14号 §2.2/§2.4，桌面优先不深度适配）：KPI 降列 3+2 换行 */
+/* <1280 保底断点（wd-14 §2.2/§2.4，桌面优先不深度适配）：KPI 降列 3+2 换行 */
 @media (max-width: 1279px) {
   .kpi-row { flex-wrap: wrap; }
   .kpi-cell { flex: 1 1 30%; }

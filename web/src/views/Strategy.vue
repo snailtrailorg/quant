@@ -65,7 +65,7 @@
         </div>
 
         <!-- 模式切换 -->
-                <!-- P2-2(05 §5.6/16 号 §6):多频率 needs 声明段 -->
+                <!-- P2-2(wd-05 §5.6/arch-16 §6):多频率 needs 声明段 -->
         <el-form-item :label="t('strategy.needsDecl')">
           <el-checkbox v-model="editForm.needs_daily" :label="t('strategy.needsDaily')" />
           <el-checkbox v-model="editForm.needs_minute" :label="t('strategy.needsMinute')" style="margin-left: 12px" />

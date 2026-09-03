@@ -171,6 +171,7 @@ import { BarChart, LineChart, CandlestickChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, MarkLineComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { stockDetail, stockAnalyze, getKline, stockIntraday, apiErr } from '../api'
+import { cssVar } from '../utils/cssVar'
 
 const { t } = useI18n()
 const goBack = () => {
@@ -285,7 +286,7 @@ async function doAnalyze() {
 }
 
 const klineOption = computed(() => {
-  const up = 'var(--up)', down = 'var(--down)'
+  const up = cssVar('--up'), down = cssVar('--down')
   return {
     tooltip: { trigger: 'axis' },
     grid: [{ left: '8%', right: '3%', top: '6%', height: '58%' }, { left: '8%', right: '3%', top: '72%', height: '18%' }],
@@ -305,7 +306,7 @@ const klineOption = computed(() => {
 
 const intradayOption = computed(() => {
   const pts = intraday.value.points || []
-  const up = 'var(--up)', down = 'var(--down)'
+  const up = cssVar('--up'), down = cssVar('--down')
   const first = pts[0]?.price ?? 0
   return {
     tooltip: { trigger: 'axis' },
@@ -320,10 +321,10 @@ const intradayOption = computed(() => {
         lineStyle: { width: 1.5 },
         areaStyle: { opacity: 0.06 },
         markLine: { symbol: 'none', silent: true,
-          lineStyle: { color: 'var(--text-secondary)', type: 'dashed' },
+          lineStyle: { color: cssVar('--text-secondary'), type: 'dashed' },
           data: [{ yAxis: first }], label: { formatter: String(first) } } },
       { name: t('stockDetail.avgPrice'), type: 'line', data: pts.map(p => p.avg), showSymbol: false,
-        lineStyle: { width: 1, color: 'var(--ma-line)' }, itemStyle: { color: 'var(--ma-line)' } },
+        lineStyle: { width: 1, color: cssVar('--ma-line') }, itemStyle: { color: cssVar('--ma-line') } },
       { name: t('stockDetail.volume'), type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
         data: pts.map(p => ({ value: p.volume, itemStyle: { color: p.price >= (p.avg ?? p.price) ? up : down } })) },
     ],
@@ -352,9 +353,9 @@ const chipsOption = computed(() => {
     yAxis: { type: 'value', name: '%' },
     series: [{
       type: 'bar', data: dist.map(d => d[1]),
-      itemStyle: { color: 'var(--brand-600)' },
+      itemStyle: { color: cssVar('--brand-600') },
       markLine: quote.value?.last ? { symbol: 'none', data: [{ xAxis: nearestChipIdx(dist, quote.value.last), name: 'last' }],
-        lineStyle: { color: 'var(--up)', type: 'dashed' }, label: { formatter: String(quote.value.last) } } : undefined,
+        lineStyle: { color: cssVar('--up'), type: 'dashed' }, label: { formatter: String(quote.value.last) } } : undefined,
     }],
   }
 })

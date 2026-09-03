@@ -92,7 +92,7 @@
       </el-table>
     </el-card>
   
-    <!-- 回补弹窗(16号§3 第三次点名:prompt 正则只拦格式不拦非法日期,改 el-date-picker 组件校验) -->
+    <!-- 回补弹窗(wd-16 §3 第三次点名:prompt 正则只拦格式不拦非法日期,改 el-date-picker 组件校验) -->
     <el-dialog v-model="backfillDialog" :close-on-click-modal="false" :title="t('dataManage.backfillTitle', { name: backfillForm.name })" width="420px">
       <el-form label-width="90px" @submit.prevent>
         <el-form-item :label="t('dataManage.backfillFrom')">
