@@ -36,8 +36,8 @@
               <span>{{ t('stockDetail.high') }}/{{ t('stockDetail.low') }}: {{ quote.high }}/{{ quote.low }}</span>
             </div>
             <div class="meta" style="margin-top:6px">
-              <span>{{ t('stockDetail.limitUp') }}: <b style="color:#C8102E">{{ quote.upper_limit ?? detail.limit?.up_limit ?? '-' }}</b></span>
-              <span style="margin-left:var(--sp-4)">{{ t('stockDetail.limitDown') }}: <b style="color:#0A7A54">{{ quote.lower_limit ?? detail.limit?.down_limit ?? '-' }}</b></span>
+              <span>{{ t('stockDetail.limitUp') }}: <b style="color:var(--up)">{{ quote.upper_limit ?? detail.limit?.up_limit ?? '-' }}</b></span>
+              <span style="margin-left:var(--sp-4)">{{ t('stockDetail.limitDown') }}: <b style="color:var(--down)">{{ quote.lower_limit ?? detail.limit?.down_limit ?? '-' }}</b></span>
               <span style="margin-left:var(--sp-4);color:var(--text-secondary)">{{ quote.ts }}</span>
             </div>
           </div>
@@ -285,7 +285,7 @@ async function doAnalyze() {
 }
 
 const klineOption = computed(() => {
-  const up = '#C8102E', down = '#0A7A54'
+  const up = 'var(--up)', down = 'var(--down)'
   return {
     tooltip: { trigger: 'axis' },
     grid: [{ left: '8%', right: '3%', top: '6%', height: '58%' }, { left: '8%', right: '3%', top: '72%', height: '18%' }],
@@ -305,7 +305,7 @@ const klineOption = computed(() => {
 
 const intradayOption = computed(() => {
   const pts = intraday.value.points || []
-  const up = '#C8102E', down = '#0A7A54'
+  const up = 'var(--up)', down = 'var(--down)'
   const first = pts[0]?.price ?? 0
   return {
     tooltip: { trigger: 'axis' },
@@ -323,7 +323,7 @@ const intradayOption = computed(() => {
           lineStyle: { color: 'var(--text-secondary)', type: 'dashed' },
           data: [{ yAxis: first }], label: { formatter: String(first) } } },
       { name: t('stockDetail.avgPrice'), type: 'line', data: pts.map(p => p.avg), showSymbol: false,
-        lineStyle: { width: 1, color: '#e6a23c' }, itemStyle: { color: '#e6a23c' } },
+        lineStyle: { width: 1, color: 'var(--ma-line)' }, itemStyle: { color: 'var(--ma-line)' } },
       { name: t('stockDetail.volume'), type: 'bar', xAxisIndex: 1, yAxisIndex: 1,
         data: pts.map(p => ({ value: p.volume, itemStyle: { color: p.price >= (p.avg ?? p.price) ? up : down } })) },
     ],
@@ -354,7 +354,7 @@ const chipsOption = computed(() => {
       type: 'bar', data: dist.map(d => d[1]),
       itemStyle: { color: 'var(--brand-600)' },
       markLine: quote.value?.last ? { symbol: 'none', data: [{ xAxis: nearestChipIdx(dist, quote.value.last), name: 'last' }],
-        lineStyle: { color: '#C8102E', type: 'dashed' }, label: { formatter: String(quote.value.last) } } : undefined,
+        lineStyle: { color: 'var(--up)', type: 'dashed' }, label: { formatter: String(quote.value.last) } } : undefined,
     }],
   }
 })
@@ -380,12 +380,12 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 <style scoped>
 .snap .price { font-size: 34px; font-weight: 700; margin-right: 10px; }
 .snap .chg { font-size: 16px; font-weight: 600; }
-.up { color: #C8102E; }
-.down { color: #0A7A54; }
+.up { color: var(--up); }
+.down { color: var(--down); }
 .flat { color: var(--text-secondary); }
-.meta { display: flex; gap: 18px; color: #606266; flex-wrap: wrap; font-size: 13px; margin-top: 10px; }
+.meta { display: flex; gap: 18px; color: var(--text-secondary); flex-wrap: wrap; font-size: 13px; margin-top: 10px; }
 .depth { width: 100%; border-collapse: collapse; font-size: 13px; }
-.depth td { padding: 2px 8px; border-bottom: 1px solid #f0f2f5; }
+.depth td { padding: 2px 8px; border-bottom: 1px solid var(--border-weak); }
 .depth .mid { text-align: center; color: var(--text-secondary); font-weight: 600; padding: 4px 0; }
 .depth .ask td:nth-child(2) { color: #0A7A54; }
 .depth .bid td:nth-child(2) { color: #C8102E; }

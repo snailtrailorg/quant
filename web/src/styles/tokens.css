@@ -50,6 +50,7 @@
   --mkt-etf: #2E6BF0;
   --mkt-cb: #8F5CF0;
   --mkt-crypto: #7C5CFC;  /* 避开 warn 琥珀 */
+  --ma-line: #e6a23c;   /* 图表均线（warn-fill 同源琥珀——图表数据面专用，不入文本） */
 
   /* —— 字体（04 §2：中文栈 + 数字等宽 tabular）—— */
   --font-ui: "NotoSansSC Web", -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans",
