@@ -313,7 +313,10 @@ const save = async () => {
 
 const onDelete = async (name) => {
   try {
-    await ElMessageBox.confirm(t('factors.confirmDelete', { name }), t('common.confirm'))
+    // wd-20 §2.6：confirm 带被引用数（数据已有——usedByCount）
+    const n = usedByCount(name)
+    const msg = n ? t('factors.confirmDeleteRef', { name, n }) : t('factors.confirmDelete', { name })
+    await ElMessageBox.confirm(msg, t('common.confirm'), { type: n ? 'warning' : undefined })
     await deleteFactor(name)
     ElMessage.success(t('common.deleteSuccess'))
     await load()

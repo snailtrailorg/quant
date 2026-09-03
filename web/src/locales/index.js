@@ -304,7 +304,7 @@ export default {
     liveTask: {
       title: '实盘任务',
       create: '创建实盘任务',
-      recentLogs: '近期任务日志', selfHeal: '自愈时间线', nRestarts: '重启', lastExit: '最后退出',
+      recentLogs: '近期任务日志', selfHeal: '自愈时间线', symbolDetail: '个股', nRestarts: '重启', lastExit: '最后退出',
       createBtn: '创建',
       taskName: '任务名称',
       phName: '如：茅台均线策略',
@@ -726,6 +726,7 @@ export default {
       validateFailed: '校验失败',
       validateReqFailed: '校验请求失败',
       nameRequired: '名称必填',
+      confirmDeleteRef: '⚠ 因子 {name} 正被 {n} 个策略引用——删除后这些策略将无法运行！确认删除？',
       confirmDelete: '确认删除因子 "{name}"？',
     },
     log: {
@@ -1379,7 +1380,7 @@ export default {
     liveTask: {
       title: 'Live Tasks',
       create: 'Create Live Task',
-      recentLogs: 'Recent task logs', selfHeal: 'Self-heal timeline', nRestarts: 'Restarts', lastExit: 'Last exit',
+      recentLogs: 'Recent task logs', selfHeal: 'Self-heal timeline', symbolDetail: 'Symbol', nRestarts: 'Restarts', lastExit: 'Last exit',
       createBtn: 'Create',
       taskName: 'Task Name',
       phName: 'e.g. Maotai MA Strategy',
@@ -1797,6 +1798,7 @@ export default {
       validateFailed: 'Validation failed',
       validateReqFailed: 'Validation request failed',
       nameRequired: 'Name is required',
+      confirmDeleteRef: '⚠ Factor {name} is referenced by {n} strategies — deleting breaks them! Confirm?',
       confirmDelete: 'Confirm delete factor "{name}"?',
     },
     log: {

@@ -5,7 +5,7 @@
     <el-alert v-if="alerts.length" type="error" show-icon :closable="false" style="margin-bottom: var(--sp-4)">
       <template #title>
         {{ t('dashboard.alertBar', { n: alerts.length }) }}
-        <el-button size="small" text type="primary" @click="$router.push('/live-task')" style="margin-left: var(--sp-2)">{{ t('dashboard.handleNow') }}</el-button>
+        <el-button size="small" text type="primary" @click="onHandleAlert" style="margin-left: var(--sp-2)">{{ t('dashboard.handleNow') }}</el-button>
       </template>
     </el-alert>
 
@@ -129,11 +129,13 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getStrategies, getDashboard, getPnl, getOrders, getLiveTasks,
          getNotifications, getDataIntegrity, getBacktests, getRiskState } from '../api'
 import api from '../api'
 import { bs, pct } from '../utils/backtestSummary'
+import { goCategoryPath } from '../utils/goCategory'
 import StatusTag from '../components/StatusTag.vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -143,6 +145,7 @@ import VChart from 'vue-echarts'
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const { t } = useI18n()
+const router = useRouter()
 const strategies = ref([])
 const dashboard = ref({})
 const curve = ref([])
@@ -155,6 +158,11 @@ const integrity = ref({})
 const recentBacktests = ref([])
 const riskMetrics = ref({})
 
+const onHandleAlert = () => {
+  // wd-20 §2.6：告警条按最严重项类别跳（原盲跳 /live-task）
+  const top = alerts.value.find(a => a.level === 'critical') || alerts.value[0]
+  router.push(goCategoryPath(top?.category))
+}
 const pnlClass = v => (v || 0) >= 0 ? 'up' : 'down'
 const pnlArrow = v => (v || 0) >= 0 ? '▲' : '▼'
 const fmtMoney = v => {

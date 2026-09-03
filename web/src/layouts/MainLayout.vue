@@ -287,7 +287,8 @@ const ensureRunbook = async () => {
   } catch {}
 }
 const runbookOf = code => (code && runbookMap && runbookMap[code]) || null 
-const goCategory = c => router.push({ email: '/settings?tab=run', task: '/dataops?tab=sched', risk: '/risk', data: '/dataops?tab=integrity', system: '/observe?tab=health' }[c] || '/')
+import { goCategoryPath } from '../utils/goCategory'
+const goCategory = c => router.push(goCategoryPath(c))   // wd-20 §2.6：映射抽 utils（与 Dashboard 共用）
 loadHealth()
 loadPerms()
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000) })

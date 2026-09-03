@@ -51,7 +51,8 @@
       </el-table-column>
 <el-table-column :label="t('common.action')" width="320">
         <template #default="{ row }">
-          <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
+          <el-button type="primary" @click="toggleTimeline(row)">{{ t('common.detail') }}</el-button>
+          <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)" :disabled="navReadonly">{{ t('liveTask.unfreeze') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
