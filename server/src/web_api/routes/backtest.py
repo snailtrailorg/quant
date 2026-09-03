@@ -155,11 +155,20 @@ def delete_backtest(run_id: int, payload: dict = Depends(require_perm("strategy_
     """删除回测 run（backtest_symbols 随外键 ondelete=CASCADE 级联删）。
 
     造数脚本（seed-backtest/verify-gate）收尾清理测试 run，避免污染回测列表/成绩单。
-    幂等：run 不存在时 DELETE 0 行仍返回 ok。
+    幂等：run 不存在返回 ok。盲审 P2：状态守卫（非终态 409 防 FK 违例）+ 审计。
     """
     with get_conn() as conn:
+        cur = conn.execute("SELECT status FROM backtest_runs WHERE id=%s", (run_id,))
+        row = cur.fetchone()
+        if not row:
+            conn.commit()
+            return {"ok": True}   # 幂等：不存在返回 ok
+        if row[0] in ("pending", "running"):
+            conn.commit()
+            raise ApiError(409, "RUN_ACTIVE", f"run {run_id} 仍在 {row[0]}，仅终态可删")
         conn.execute("DELETE FROM backtest_runs WHERE id=%s", (run_id,))
         conn.commit()
+    audit_log(payload["username"], "backtest_delete", f"run {run_id}")
     return {"ok": True}
 
 

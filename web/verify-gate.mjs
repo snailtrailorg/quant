@@ -18,7 +18,7 @@ await p.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {})
 await new Promise(r => setTimeout(r, 1000))
 
 const api = (path, opt) => p.evaluate(async (u, o) => {
-  const r = await fetch(u, { headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('token') }, ...o })
+  const r = await fetch(u, { ...o, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('token'), ...(o?.headers || {}) } })
   return { status: r.status, body: await r.json().catch(() => ({})) }
 }, `${BASE}${path}`, opt)
 
@@ -52,16 +52,27 @@ const btnReady = await waitFor(() => p.evaluate(() => {
   const e = [...document.querySelectorAll('button')].find(b => b.textContent.includes('标记回测验证'))
   return !!(e && !e.disabled)
 }))
-if (!btnReady) console.log('✗ 标记按钮 15s 未就绪（run 数据未加载？）')
+if (!btnReady) {
+  console.log('✗ 标记按钮 15s 未就绪（run 数据未加载？），run 保留供排查')
+  await b.close()
+  process.exit(2)
+}
 const clicked = btnReady ? await p.evaluate(() => { const e = [...document.querySelectorAll('button')].find(b => b.textContent.includes('标记回测验证')); e?.click(); return !!e }) : false
-// 等 el-message 拦截文案出现
-await waitFor(() => p.evaluate(() => !!document.querySelector('.el-message--warning .el-message__content')?.textContent?.trim()))
+// 等「证据不足」拦截文案出现（避免残留 warning 假红）
+await waitFor(() => p.evaluate(() => {
+  const t = document.querySelector('.el-message--warning .el-message__content')?.textContent?.trim() ?? ''
+  return t.includes('证据不足')
+}))
 const warn = await p.evaluate(() => document.querySelector('.el-message--warning .el-message__content')?.textContent?.trim() ?? '')
 console.log(`标记按钮点击=${clicked}`)
 console.log(`拦截文案=${warn}`)
 const ok = warn.includes('证据不足')
 console.log(ok ? '✓ 验证门拦截生效' : '✗ 验证门拦截未生效')
-const del = await api(`/api/backtest/${runId}`, { method: 'DELETE' })   // 清理测试 run，不污染回测列表
-console.log('清理测试 run:', del.status)
+if (ok) {
+  const del = await api(`/api/backtest/${runId}`, { method: 'DELETE' })   // 成功才清理；失败保留 run 供排查
+  console.log('清理测试 run:', del.status)
+} else {
+  console.log('⚠ 验证门异常，run 保留供排查（排查后手动删）')
+}
 await b.close()
 process.exit(ok ? 0 : 1)

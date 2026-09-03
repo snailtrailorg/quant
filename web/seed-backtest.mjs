@@ -21,7 +21,7 @@ await new Promise(r => setTimeout(r, 1000))
 
 // 浏览器内 fetch（token 自动带）
 const api = (path, opt) => p.evaluate(async (u, o) => {
-  const r = await fetch(u, { headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('token') }, ...o })
+  const r = await fetch(u, { ...o, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + localStorage.getItem('token'), ...(o?.headers || {}) } })
   return { status: r.status, body: await r.json().catch(() => ({})) }
 }, `${BASE}${path}`, opt)
 
