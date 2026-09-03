@@ -387,8 +387,8 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .depth { width: 100%; border-collapse: collapse; font-size: 13px; }
 .depth td { padding: 2px 8px; border-bottom: 1px solid var(--border-weak); }
 .depth .mid { text-align: center; color: var(--text-secondary); font-weight: 600; padding: 4px 0; }
-.depth .ask td:nth-child(2) { color: #0A7A54; }
-.depth .bid td:nth-child(2) { color: #C8102E; }
+.depth .ask td:nth-child(2) { color: var(--down); }
+.depth .bid td:nth-child(2) { color: var(--up); }
 .frow { display: flex; justify-content: space-between; padding: 4px 0; }
 .analysis { white-space: pre-wrap; line-height: 1.7; background: #f8f9fb; padding: 14px; border-radius: 6px; }
 </style>

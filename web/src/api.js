@@ -131,20 +131,12 @@ export const createRiskRule = (data) => api.post('/risk-rules', data)
 export const updateRiskRule = (id, data) => api.post(`/risk-rules/${id}`, data)
 export const deleteRiskRule = (id) => api.delete(`/risk-rules/${id}`)
 
-// IM 统一接入(19 号批 2)
+// IM 统一接入(arch-19 批 2)
 export const getImBots = () => api.get('/im-bots')
 export const getImBotProviders = () => api.get('/im-bots/providers')
 export const createImBot = data => api.post('/im-bots', data)
 export const deleteImBot = id => api.delete(`/im-bots/${id}`)
 export const testImBot = id => api.post(`/im-bots/${id}/test`)
-export const getFeishuList = () => api.get('/feishu/list')
-export const feishuConnect = () => api.post('/feishu/connect')
-export const feishuUpdate = (id, data) => api.post(`/feishu/${id}`, data)
-export const feishuStatus = (sid) => api.get(`/feishu/status/${sid}`)
-export const feishuStart = (id) => api.post(`/feishu/${id}/start`)
-export const feishuStop = (id) => api.post(`/feishu/${id}/stop`)
-export const feishuDelete = (id) => api.delete(`/feishu/${id}`)
-export const testFeishu = (id) => api.post(`/feishu/${id}/test`)
 
 export const getHealthComponents = () => api.get('/health/components')
 export const getHealthEvents = (limit = 100) => api.get('/health/events', { params: { limit } })
@@ -198,7 +190,7 @@ export const updateLiveTrading = (market, enabled) => api.post(`/live-trading/${
 export const logAnalyze = (data) => api.post('/log/analyze', data)
 export const logoutApi = () => api.post('/auth/logout')
 
-// 三档详情页（17 号 §5）
+// 三档详情页（arch-17 §5）
 export const stockSearch = (q) => api.get('/stock/search', { params: { q } })
 export const stockDetail = (symbol) => api.get(`/stock/${symbol}/detail`)
 export const stockIntraday = (symbol) => api.get(`/stock/${symbol}/intraday`)

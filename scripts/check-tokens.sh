@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # wd-20 §2.3-C · 令牌防回退门：内联 px/hex 计数对比基线（只许降不许升）
-# 基线首采 2026-09-03：px=59 hex=131（K 线数据面色 #defa* 不计——图表数据非 UI 语义色）
+# 基线随批收紧（--update 落库）；两类豁免：#defa*（K 线数据面色，grep 排除不计）；Avatar.vue 调色板 6 hex（仍计数，但属身份区分色——允许存在、不要求令牌化，wd-20 §2.3-C）
 # 用法：bash scripts/check-tokens.sh [更新基线] —— CI/build 前钩子挂 exit 码
 set -u
 cd "$(dirname "$0")/.."

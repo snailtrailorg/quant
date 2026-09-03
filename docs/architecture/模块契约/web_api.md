@@ -35,11 +35,11 @@ server/src/web_api/
 │   ├── stock.py      # /api/stock/* /api/kline /api/screen* /api/convertible
 │   ├── chat.py       # /api/chat /ws/* /api/llm-* /api/astock/selection
 │   ├── mgmt.py       # /api/data-sources /api/channels /api/brokers /api/tasks
-│   └── im_bots.py    # /api/im-bots/*（19 号批 2）
+│   └── im_bots.py    # /api/im-bots/*（arch-19 批 2）
 └── __init__.py
 ```
 > 2026-08-19 模块归位：`crypto_utils.py` → `quant_common/crypto.py`（encrypt/decrypt/mask）；`email_service.py` → 顶层 `src/email_service/`——两者均已不在本目录。（P3 回写 2026-08-20）
-> 飞书端点经 `src.feishu_bot.router` 以 `app.include_router` 内嵌（非本目录文件，但 URL 空间归 web_api）。
+> 飞书 router 经 `src.feishu_bot.router` 以 `app.include_router` 内嵌（非本目录文件，但 URL 空间归 web_api）——URL 前缀 `/lark`（webhook/card 回调），旧 `/api/feishu/*` 管理端点已删（arch-19 IM 统一接入取代，P3 回写 2026-09-03）。
 
 ---
 
@@ -59,7 +59,8 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 |---|---|---|---|---|
 | 系统 | `/health` | GET | 无 | 健康检查 |
 | 认证 | `/api/auth/*` | POST/GET | viewer+（部分 user_mgmt） | login/me/logout/invite/invite/verify/register/forgot/reset/change-password |
-| 用户管理 | `/api/user` | POST/GET | user_mgmt（Admin） | create/list 用户 |
+| 用户管理 | `/api/user` `/api/user/{uid}` | POST/GET/POST/DELETE | user_mgmt（Admin） | create/list + 改角色/禁用（不动自己守卫）+ 软删（脱敏+清头像，批次 D） |
+| 用户自助 | `/api/user/profile` `/api/user/avatar` `/api/user/deactivate` | GET/POST | viewer+（本人） | 资料读 + 改昵称（仅昵称自助）/头像上传/自助停用（批次 C） |
 | 策略 | `/api/strategy` `/api/strategy/{sid}/{start,stop,verify}` | GET/POST/POST/POST | viewer+ / strategy_control | CRUD + 启停 + 回测验证标记 |
 | 持仓/盈亏/订单/账户 | `/api/position` `/api/pnl` `/api/orders` `/api/account` `/api/account/{aid}` | GET | viewer+ | 读查询（XTP query） |
 | 日志/告警 | `/api/log` `/api/alert` | GET | viewer+ | 系统/告警日志 |
@@ -69,7 +70,8 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 风控 | `/api/risk/state` `/api/risk/halt` `/api/risk/resume` | GET/POST | viewer+ / halt | RiskControl 查/熔断/恢复 |
 | 实盘开关 | `/api/live-trading` `/api/live-trading/{market}` | GET/POST | viewer+ / strategy_control | 三级第二级（5 分项） |
 | LLM模型管理 | `/api/llm-models` `/api/llm-models/{mid}/{test}` | GET/POST/POST/DELETE | admin | CRUD + 测试 + reload_models |
-| 飞书 | `/api/feishu/{list,connect,status,{fid}/{start,stop,test}}` `/api/feishu/{fid}` | GET/POST/POST/DELETE | admin | 多机器人管理 |
+| IM 统一接入 | `/api/im-bots` `/api/im-bots/providers` `/api/im-bots/onboarding/{provider}` `/api/im-bots/onboarding-status/{ticket}` `/api/im-bots/{bid}` `/api/im-bots/{bid}/{start,stop,test}` `/api/im-bots/{bid}/users[/{im_user_id}]` | GET/POST/DELETE | im_bots_config | arch-19：多 IM CRUD + 接入向导状态机（interactive 平台）+ 启停/测试 + bound_users 管理（取代已删的 `/api/feishu/*`） |
+| Lark 回调 | `/lark/{webhook,card/callback,test}` | POST/GET | 无（事件体/签名内校验） | feishu_bot.router 内嵌：Lark 事件回调入口 |
 | 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/POST/DELETE | viewer+ / **data_sync**（P3 回写 2026-08-20：原写 strategy_control 有误，实况 require_perm("data_sync")，analyst/admin 有此权限） | 同步配置 + 触发 + 标的 + 进度 |
 | 池深度同步（三档二档） | `/api/sync/pool-data/{trigger,progress}` + `/api/sync/pool-minute/{trigger,progress}`（注释态） | POST/GET | data_sync / viewer+ | trigger 支持 `?full=true` 全量校准；progress 读 sync_log 最新一轮（2026-08-20 修正，原读错键恒 idle）；入池端点 POST /api/pool/{pid}/symbol 对 astock 池自动投 symbols 回补 |
 | K线 | `/api/kline/{symbol}` | GET | viewer+ | `get_bars` + `to_vt_symbol` |
@@ -95,6 +97,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 策略-账户绑定 | `/api/strategy_account` `/api/strategy_account/{said}` | GET/POST/DELETE | viewer+ / strategy_control | #27 绑定关系 CRUD |
 | LLM 预算 | `/api/llm-budget` `/api/llm-budget/{check,{bid}}` | GET/POST | viewer+ | D5（预算 CRUD + 手动检查；告警逻辑在 llm_gateway/budget.py） |
 | 站内通知 | `/api/notifications` `/api/notifications/ack-all` | GET/POST | viewer+ | 通知中心（active 历史 + 全部已读） |
+| 通知 runbook | `/api/runbook` | GET | strategy_control | runbook 映射单源（通知 chip/处置行消费；暂仅中文——多语言债） |
 | 系统配置 | `/api/system-config` `/api/system-config/{key}` | GET/POST | viewer+ | system_config 键值（md_mode/celery_concurrency 等） |
 | SMTP 配置 | `/api/smtp-config` `/api/email/test` `/api/email-outbox` | GET/POST | user_mgmt（admin） | 邮件服务器配置 + 测试 + 发件箱 |
 | 邀请管理 | `/api/invites` `/api/invites/{tid}/revoke` | GET/POST | user_mgmt（admin） | 邀请链接列表 + 撤销 |
@@ -109,7 +112,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 > 上表为 2026-08-20 P3 回写补全的缺失组（原表漏列 13 组）；`/api/help/{topic}` `/api/health/*` `/api/risk-rules` 等见各增量节。
 
 ### Pydantic 模型（main.py，请求体）
-`LoginReq` / `UserCreate` / `StrategyConfig` / `InviteReq` / `RegisterReq` / `ForgotReq` / `ResetReq` / `ChangePwdReq` / `ChatReq`(message) / `LLMModelReq` / `FeishuUpdateReq` / `DataSourceReq` / `ChannelReq` / `BrokerReq` / `RiskRuleReq`
+`LoginReq` / `UserCreate` / `StrategyConfig` / `InviteReq` / `RegisterReq` / `ForgotReq` / `ResetReq` / `ChangePwdReq` / `ChatReq`(message) / `LLMModelReq` / `DataSourceReq` / `ChannelReq` / `BrokerReq` / `RiskRuleReq`
 
 ### auth.py public API
 ```python
@@ -193,7 +196,7 @@ from src.quant_common.crypto import encrypt, decrypt, mask
 | `llm_model_config` | /api/llm-models CRUD | gateway._load_models_from_db（间接） |
 | `llm_usage` | gateway._log_usage（间接） | /api/llm-usage/summary |
 | `llm_budget` | /api/llm-budget CRUD（UPDATE provider/daily_token_limit/monthly_cost_limit 等） | /api/llm-budget + budget.check_budget_alerts（llm_usage 聚合比对）（P3 回写 2026-08-20：原"待加"已过时） |
-| `feishu_config` | /api/feishu CRUD | feishu_bot 读 |
+| `im_bot_config` / `im_bot_users` | /api/im-bots CRUD + /api/im-bots/{bid}/users | im_bot 运行读 + 首见 open_id 登记 |
 | `data_source_config` | /api/data-sources CRUD | get_data_source（间接） |
 | `data_source_usage` | record_usage（间接） | /api/data-source-usage |
 | `channel_config` | /api/channels CRUD | get_channel（间接） |

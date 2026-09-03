@@ -29,6 +29,7 @@ const fontSize = computed(() => Math.round((sizes[props.size] || 40) * 0.42) + '
 // 缺省：36 个卡通图标按名字确定性选择（同一用户每次相同）
 const displayUrl = computed(() => props.url || `/icons/icon_${String(hashName(props.name) % 36).padStart(2, '0')}.png`)
 const initial = computed(() => (props.name || '?').charAt(0).toUpperCase())
+// 头像底色调色板：按名字 hash 区分"人色"（8 hue），语义=身份区分非 UI 状态色——令牌豁免（wd-20 §2.3-C），勿令牌化
 const COLORS = ['var(--brand-600)', '#67c23a', '#e6a23c', '#f56c6c', 'var(--text-secondary)', '#7a5fd0', '#2fa8c5', '#c25cc2']
 const color = computed(() => COLORS[hashName(props.name) % COLORS.length])
 </script>
