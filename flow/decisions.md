@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-09-03 · 冒烟门抓修 3 真 bug + 令牌/密码/staging 若干裁定
+
+- **canvas-var 走 cssVar 解析器**（用户裁定①）：批一 A 档把 echarts 图内色换 `var(--)`，但 canvas 不解析 var()（zrender 直传 fillStyle 静默丢弃）。裁定加 `utils/cssVar.js`（getComputedStyle 解析）替换全站 21 处，而非回退字面 hex——保住令牌单一源 + 暗色自适应。
+- **staging fixture 撤销 mock 分支**（用户澄清）：本地「量化交易助手」（dev DB id=2）真实可用、走 webhook 路径；`quant-feishu-bot@2` 长连接单元重启 dwell 不稳。撤销 ws_client mock 分支 + 假 bot 种子，staging 波次回退 web/celery/hub 三波次（feishu 长连接凭证待诊断）。
+- **令牌「不扩门 + 语义就近」**（用户裁定）：#999/#303133/#f8f9fb 等 EP 默认残留换语义就近令牌（接受变色）；令牌门**不扩** layouts；「绿=跌」只限国内蜡烛图，DataIntegrity complete `#67c23a`→`--success`。
+- **生产密码=临时测试密码**（用户澄清）：`tianran3B` 是为测试设的临时密码；环境变量化（SMOKE_PASS）后 repo 明文清零，无需改密码。
+
 ## 2026-09-02 · 告警订阅分发架构：三通道 Celery 队列化+notifications.dispatch 全程审计（用户三轮裁定+双盲审三轮）
 
 - **订阅模型**：全局一套（alert_channel_sub 三行 im/email/sms），每通道独立类别多选+min_level 门槛（warn+ 可调）——取代旧 critical→discord 硬编码路由（channel_config webhook 链保留为过渡兜底，零订阅时回落，订阅配好自然失效）
