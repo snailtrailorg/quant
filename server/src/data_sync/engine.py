@@ -622,6 +622,20 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     return {"status": "success", "days": len(dates), "processed": done, "updated": updated}
 
 
+def _sync_index_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
+                      progress_cb: Callable | None = None) -> dict:
+    """指数日线同步 handler（ptrade 批 1，接入 sync_config 体系）。
+
+    固定拉 000300.SH 沪深300（可配基准列表留 system_config.benchmark_symbols 后续）。
+    返回无 last_success_date 键 → sync() 走无条件推进（分钟线同款，防游标冻死）。
+    """
+    start = backfill_from or "20050408"
+    r = sync_benchmark_index("000300.SH", start=start, end=end_date)
+    return {"pulled": r.get("pulled", 0), "saved": r.get("saved", 0), "start": start,
+            "failed_dates": [] if r.get("status") == "success" else [f"index_daily:{r.get('status')}"],
+            "expected_days": None, "actual_days": None}
+
+
 # --- 路由表 ---
 
 _HANDLERS = {
@@ -635,6 +649,7 @@ _HANDLERS = {
     "trade_cal": _sync_trade_cal,
     "astock_minute": _sync_astock_minute,
     "astock_minute_5min": _sync_astock_minute,
+    "index_daily": _sync_index_daily,
 }
 
 

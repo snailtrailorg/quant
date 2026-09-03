@@ -312,6 +312,13 @@ def get_backtest_api(run_id: int,
             "win_rate": _agg.get("win_rate"),
             "max_drawdown_pct": _agg.get("max_drawdown_pct"),
             "sharpe_ratio": _agg.get("sharpe_ratio"),
+            "volatility": _agg.get("volatility"),
+            "sortino_ratio": _agg.get("sortino_ratio"),
+            "alpha": _agg.get("alpha"),
+            "beta": _agg.get("beta"),
+            "information_ratio": _agg.get("information_ratio"),
+            "benchmark_return": _agg.get("benchmark_return"),
+            "benchmark_volatility": _agg.get("benchmark_volatility"),
             "total_trades": _agg.get("total_trades"),
             "symbols_detail": [{"symbol": _s[0], "status": _s[1], "result": json.loads(_s[2]) if _s[2] else {}}
                               for _s in syms]}

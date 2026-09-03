@@ -38,6 +38,8 @@
 \set TRADE_CAL_FILTER         'none'
 \set ASTOCK_MINUTE_SCHEDULE   '0 16 * * 1-5'
 \set ASTOCK_MINUTE_FILTER     'trade_day'
+\set INDEX_DAILY_SCHEDULE     '30 16 * * 1-5'
+\set INDEX_DAILY_FILTER       'trade_day'
 
 
 -- ============================================================
@@ -76,7 +78,8 @@ INSERT INTO sync_config (id, name, tushare_api, pg_table, data_type, sync_mode, 
     ('etf_list',     'ETF基金列表',    'pro.fund_basic',  'etf_basic_info',  'etf',        'full',        :'ETF_LIST_SCHEDULE',     :'ETF_LIST_FILTER',     'true', 'ETF基金基本信息'),
     ('trade_cal',    '交易日历',       'pro.trade_cal',   'trade_cal',       'astock',     'full',        :'TRADE_CAL_SCHEDULE',    :'TRADE_CAL_FILTER',    'true', 'SSE交易日历，is_trading_day依据'),
     ('astock_minute',      'A股分钟线1分', 'pro.stk_mins', 'bar_1min', 'astock', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股1分钟K线，per-symbol拉取（stk_mins需2000积分，全市场量大）'),
-    ('astock_minute_5min', 'A股分钟线5分', 'pro.stk_mins', 'bar_5min', 'astock', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股5分钟K线，per-symbol拉取')
+    ('astock_minute_5min', 'A股分钟线5分', 'pro.stk_mins', 'bar_5min', 'astock', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股5分钟K线，per-symbol拉取'),
+    ('index_daily',  '基准指数日线',  'pro.index_daily', 'bar_index', 'index', 'incremental', :'INDEX_DAILY_SCHEDULE', :'INDEX_DAILY_FILTER', 'true', '沪深300基准指数日线，回测基准对比')
 ON CONFLICT (id) DO NOTHING;
 
 

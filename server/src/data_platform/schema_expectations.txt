@@ -18,6 +18,7 @@ bar_4h :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source
 bar_5min :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source
 bar_60min :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source
 bar_hub :: symbol,ts,open,high,low,close,volume,amount,untrusted
+bar_index :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source
 bar_shadow :: symbol,ts,open,high,low,close,volume,amount,untrusted
 block_trade :: ts_code,trade_date,price,vol,amount,buyer,seller
 broker_config :: id,provider,name,credentials_encrypted,params,enabled,created_at,updated_at

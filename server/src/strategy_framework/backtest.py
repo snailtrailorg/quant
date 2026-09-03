@@ -244,7 +244,7 @@ class BacktestEngine:
                     "ts": str(bar.get("ts")),   # 转 str：pandas Timestamp 不可 JSON 序列化（回测 result 存库崩溃→symbol error）
                     "cash": round(cash, 2),
                     "position": position,
-                    "avg_price": round(avg_price, 4),   # 持仓成本（ptrade 批 1：每日持仓盈亏）
+                    "avg_price": round(avg_price, 4),   # 加权买入均价（非 FIFO 成本：SELL 不减价，展示持仓盈亏用）
                     "close": close,
                     "value": round(portfolio_value, 2),
                 })
@@ -340,8 +340,13 @@ class BacktestEngine:
             if len(r_p) > 1 and len(r_b) > 1:
                 rf = 0.02 / 252
                 var_b = float(np.var(r_b, ddof=0))
-                beta = float(np.cov(r_p, r_b, ddof=0)[0, 1] / var_b) if var_b > 0 else 0.0
-                alpha = float((np.mean(r_p) - rf - beta * (np.mean(r_b) - rf)) * 252)
+                if var_b > 0:
+                    beta = float(np.cov(r_p, r_b, ddof=0)[0, 1] / var_b)
+                    alpha = float((np.mean(r_p) - rf - beta * (np.mean(r_b) - rf)) * 252)
+                else:
+                    # 基准恒定（β 不可算）：α/β 同归 0（Jensen α 无定义）
+                    beta = 0.0
+                    alpha = 0.0
                 active = [a - b for a, b in zip(r_p, r_b)]
                 active_std = float(np.std(active, ddof=0))
                 information_ratio = float(np.mean(active) / active_std * np.sqrt(252)) if active_std > 0 else 0.0

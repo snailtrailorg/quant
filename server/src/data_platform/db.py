@@ -173,7 +173,7 @@ def save_bars_overwrite(freq: str, rows: list[tuple]) -> int:
 
 
 def save_index_bars(rows: list[tuple]) -> int:
-    """批量写入指数日线到 bar_index 表（回测基准数据）。冲突跳过，返回写入行数。
+    """批量写入指数日线到 bar_index 表（回测基准数据）。冲突跳过，返回**实际插入行数**。
 
     rows 11 字段同 save_bars：(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)。
     """
@@ -187,11 +187,16 @@ def save_index_bars(rows: list[tuple]) -> int:
         with conn.cursor() as cur:
             cur.executemany(insert_sql, rows)
         conn.commit()
-        return len(rows)
+        rc = cur.rowcount
+        return rc if isinstance(rc, int) and rc > 0 else 0   # 幂等重同步时真实插入数（非 len(rows)）
 
 
 def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
-    """查询指数日线（bar_index），返回 DataFrame（symbol 为 vt_symbol 如 000300.SHSE）。"""
+    """查询指数日线（bar_index），返回 DataFrame（symbol 为 vt_symbol 如 000300.SHSE）。
+
+    与 get_bars 同款列转换（数值 float64 + ts datetime）。
+    """
+    cols = ["ts", "open", "high", "low", "close", "volume", "amount"]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -199,7 +204,13 @@ def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
                 "WHERE symbol=%s AND ts >= %s AND ts <= %s ORDER BY ts",
                 (symbol, start, end))
             rows = cur.fetchall()
-    return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume", "amount"])
+        if not rows:
+            return pd.DataFrame(columns=cols)
+        df = pd.DataFrame(rows, columns=cols)
+        for _col in ("open", "high", "low", "close", "volume", "amount"):
+            df[_col] = pd.to_numeric(df[_col], errors='coerce')
+        df["ts"] = pd.to_datetime(df["ts"])
+        return df
 
 
 def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
