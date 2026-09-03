@@ -188,7 +188,7 @@ const onChangePwd = async () => {
 </script>
 
 <style scoped>
-.mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
+.mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
 .pwd-rule { color: var(--text-secondary); font-size: 12px; margin: -14px 0 14px; }
 .info-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: 14px; }
 .info-label { color: var(--text-secondary); min-width: 60px; }

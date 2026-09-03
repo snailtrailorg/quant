@@ -22,7 +22,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="created_at" :label="t('common.createdAt')" width="160">
-        <template #default="{ row }">{{ (row.created_at || '').slice(0, 19) }}</template>
+        <template #default="{ row }">{{ fmtTime.full(row.created_at || '') }}</template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="150" fixed="right">
         <template #default="{ row }">
@@ -56,6 +56,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { fmtTime } from '../utils/fmtTime'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { apiErr } from '../api'
 

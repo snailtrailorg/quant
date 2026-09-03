@@ -12,7 +12,7 @@
         <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />
         <span style="font-size: 12px; color: #606266; white-space: nowrap">
           {{ progress.done || 0 }} / {{ progress.total || 0 }} · {{ progress.current || '' }}
-          <span v-if="progress.status === 'error'" style="color: #f56c6c">{{ progress.error }}</span>
+          <span v-if="progress.status === 'error'" style="color: var(--critical)">{{ progress.error }}</span>
         </span>
       </div>
     </el-card>
@@ -41,7 +41,7 @@
         <template #default="{ row }">{{ t('dataManage.rowsCount', { n: row.last_sync_count || 0 }) }}</template>
       </el-table-column>
       <el-table-column prop="last_sync_ts" :label="t('dataManage.syncTime')" width="160">
-        <template #default="{ row }">{{ row.last_sync_ts ? row.last_sync_ts.slice(0,16).replace('T',' ') : '-' }}</template>
+        <template #default="{ row }">{{ row.last_sync_ts ? fmtTime.s(row.last_sync_ts) : '-' }}</template>
       </el-table-column>
       <el-table-column :label="t('common.enable')" width="60">
         <template #default="{ row }">
@@ -64,7 +64,7 @@
       <el-table :data="logs" max-height="300">
         <el-table-column prop="sync_id" :label="t('dataManage.task')" width="120" />
         <el-table-column prop="ts" :label="t('common.time')" width="160">
-          <template #default="{ row }">{{ row.ts.slice(0,16).replace('T',' ') }}</template>
+          <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
         </el-table-column>
         <el-table-column prop="mode" :label="t('common.mode')" width="80" />
         <el-table-column prop="rows_pulled" :label="t('dataManage.pulled')" width="80" />
@@ -85,7 +85,7 @@
         </el-table-column>
         <el-table-column :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.failed_dates" style="color:#f56c6c; font-size:12px">{{ row.failed_dates }}</span>
+            <span v-if="row.failed_dates" style="color: var(--critical); font-size:12px">{{ row.failed_dates }}</span>
             <span v-else style="color:#999">-</span>
           </template>
         </el-table-column>
@@ -133,6 +133,7 @@
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
+import { fmtTime } from '../utils/fmtTime'
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'

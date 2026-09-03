@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --port 5173",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prebuild": "bash ../scripts/check-tokens.sh"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",

@@ -28,30 +28,15 @@
 
     <!-- KPI5（14号 §2.3 flex 等分 + §2.4 <1280 降列换行） -->
     <div class="kpi-row">
-      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
-        <div class="klabel">{{ t('trading.totalAssets') }}</div>
-        <div class="kpi-num">{{ fmtMoney(dashboard.total_value) }}</div>
-        <svg class="sparkline-svg" width="100%" height="24" viewBox="0 0 100 24">
-          <polyline v-if="sparklinePoints.length" :points="sparklinePoints" fill="none" stroke="var(--up)" stroke-width="1.5" />
-        </svg>
-      </div></el-card></div>
-      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
-        <div class="klabel">{{ t('trading.todayPnl') }}</div>
-        <div class="kpi-num" :class="pnlClass(dashboard.daily_pnl)">{{ pnlArrow(dashboard.daily_pnl) }} {{ fmtMoney(dashboard.daily_pnl) }}</div>
-      </div></el-card></div>
-      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
-        <div class="klabel">{{ t('trading.totalPnl') }}（{{ t('dashboard.sinceInception') }}）</div>
-        <div class="kpi-num" :class="pnlClass(dashboard.total_pnl)">{{ pnlArrow(dashboard.total_pnl) }} {{ fmtMoney(dashboard.total_pnl) }}</div>
-      </div></el-card></div>
+      <KpiCard :label="t('trading.totalAssets')" :value="fmtMoney(dashboard.total_value)" :spark="sparkVals" />
+      <KpiCard :label="t('trading.todayPnl')" :value="pnlArrow(dashboard.daily_pnl) + ' ' + fmtMoney(dashboard.daily_pnl)" :tone="pnlClass(dashboard.daily_pnl)" />
+      <KpiCard :label="t('trading.totalPnl') + '（' + t('dashboard.sinceInception') + '）'" :value="pnlArrow(dashboard.total_pnl) + ' ' + fmtMoney(dashboard.total_pnl)" :tone="pnlClass(dashboard.total_pnl)" />
       <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('dashboard.riskGauge') }}</div>
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
         <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: 4px" />
       </div></el-card></div>
-      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
-        <div class="klabel">{{ t('dashboard.tasksRunning') }}</div>
-        <div class="kpi-num">{{ liveTasks.filter(x => x.status === 'running').length }}/{{ liveTasks.length }}</div>
-      </div></el-card></div>
+      <KpiCard :label="t('dashboard.tasksRunning')" :value="liveTasks.filter(x => x.status === 'running').length + '/' + liveTasks.length" />
     </div>
 
     <!-- 权益曲线 + 实盘任务（14号 §2.4 :md/:xs 降列：<992 堆叠） -->
@@ -137,6 +122,7 @@ import api from '../api'
 import { bs, pct } from '../utils/backtestSummary'
 import { goCategoryPath } from '../utils/goCategory'
 import StatusTag from '../components/StatusTag.vue'
+import KpiCard from '../components/KpiCard.vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
@@ -236,6 +222,7 @@ const reload = () => loadAll()
 // KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
 
 // KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
+const sparkVals = computed(() => rangeCurve.value.slice(-7).map(c => c.value))
 const sparklinePoints = computed(() => {
   const vals = rangeCurve.value.slice(-7).map(c => c.value)
   if (vals.length < 2) return ''

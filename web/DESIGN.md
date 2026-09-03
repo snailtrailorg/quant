@@ -89,6 +89,7 @@
 5. **表单**：`label-width="120px"` 纵向禁 inline；L 档内容超高内滚（max-height）。
 6. **标题**：成对 i18n 键（`form.id ? 编辑X : 新建X`）；查看型「XX 详情」。
 7. **视觉零新增**：字号/圆角/间距全走 EP 主题令牌（dialog title 已挂 `--fs-card`），弹窗不引入新色。
+8. **容器页 tab 壳一律 TabsShell**（wd-20 §2.2）：新增带 tab 的容器页禁止手写 el-tabs 壳——统一 `components/TabsShell.vue`（query ?tab= 同步+sessionStorage 记忆+i18nKey label）。
 
 ## 9. 文字链例外清单（仅这些允许非按钮可点击）
 

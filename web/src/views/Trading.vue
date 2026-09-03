@@ -73,7 +73,7 @@
           </template>
         </el-alert>
         <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 6px; display: flex; justify-content: space-between">
-          <span>{{ t('trading.snapshotNote') }}{{ positionData.snapshot_ts ? positionData.snapshot_ts.slice(0, 19) : '—' }}</span>
+          <span>{{ t('trading.snapshotNote') }}{{ positionData.snapshot_ts ? fmtTime.full(positionData.snapshot_ts) : '—' }}</span>
           <span>{{ t('trading.lastUpdate') }}: {{ lastUpdate }}</span>
         </div>
       </el-tab-pane>
@@ -136,6 +136,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { fmtTime } from '../utils/fmtTime'
 import SellGuardBanner from '../components/SellGuardBanner.vue'
 import { getPosition, getOrders, getPnl } from '../api'
 import { use } from 'echarts/core'

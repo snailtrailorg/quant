@@ -42,7 +42,7 @@
             <div v-if="row._timeline?.length" style="margin-top: var(--sp-2)">
               <div style="color: var(--text-secondary); font-size: 12px">{{ t('liveTask.recentLogs') }}:</div>
               <div v-for="(l, i) in row._timeline.slice(0, 8)" :key="i" style="font-size: 11px; font-family: var(--font-num); display: flex; gap: 8px">
-                <span style="color: var(--text-secondary)">{{ l.ts?.slice(5, 16) }}</span>
+                <span style="color: var(--text-secondary)">{{ fmtTime.s(l.ts) }}</span>
                 <span :style="{ color: ['ERROR', 'error'].includes(l.level) ? 'var(--critical)' : ['WARNING', 'warning', 'WARN'].includes(l.level) ? 'var(--warn)' : 'inherit' }">{{ l.msg?.slice(0, 100) }}</span>
               </div>
             </div>
@@ -113,6 +113,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, apiErr } from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
+import { fmtTime } from '../utils/fmtTime'
 
 const router = useRouter()
 const route = useRoute()

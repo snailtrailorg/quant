@@ -132,12 +132,12 @@ const onRegister = async () => {
 .register-card :deep(.el-card__body) { padding: 0; }
 .banner { background: linear-gradient(90deg, #67c23a, #4e9e6b); color: #fff; padding: 18px 24px; font-size: 17px; font-weight: bold; }
 .state-msg { padding: 32px 24px; text-align: center; color: var(--text-secondary); }
-.state-msg.error { color: #f56c6c; line-height: 1.8; }
+.state-msg.error { color: var(--critical); line-height: 1.8; }
 .register-form { padding: 20px 28px 8px; }
 .welcome { text-align: center; color: #303133; font-size: 15px; margin: 4px 0 12px; }
 .email-box { background: #f5f7fa; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #606266; margin-bottom: 14px; }
 .pwd-rule { color: var(--text-secondary); font-size: 12px; margin: -8px 0 10px; }
-.mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
+.mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
 .terms-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer; user-select: none; }
 .back-login { text-align: center; margin: var(--sp-2) 0 18px; }
 .link { color: var(--brand-600); font-size: 13px; text-decoration: none; }

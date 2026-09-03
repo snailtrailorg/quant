@@ -18,7 +18,7 @@
         </template>
         <el-table :data="filteredLogs" height="500">
           <el-table-column prop="ts" :label="t('common.time')" width="160">
-            <template #default="{ row }">{{ row.ts.replace('T', ' ').slice(0, 19) }}</template>
+            <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
           </el-table-column>
           <el-table-column prop="level" :label="t('log.level')" width="80">
             <template #default="{ row }">
@@ -101,6 +101,7 @@
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
+import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
@@ -161,7 +162,7 @@ const logRange = ref(null)
 </script>
 <style scoped>
 .ndot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-.ndot.critical { background: #f56c6c; }
+.ndot.critical { background: var(--critical); }
 .ndot.warn { background: #e6a23c; }
 .ndot.info { background: var(--text-secondary); }
 </style>

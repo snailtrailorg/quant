@@ -45,7 +45,7 @@
       <div v-if="detail">
         <p>{{ t('common.name') }}: {{ detail.name }} | {{ t('common.type') }}: {{ detail.type }} | {{ t('common.status') }}: <StatusTag :value="detail.status" /></p>
         <p>{{ t('task.params') }}: {{ JSON.stringify(detail.params) }}</p>
-        <p v-if="detail.error_message" style="color:#f56c6c">{{ t('task.error') }}: {{ detail.error_message }}</p>
+        <p v-if="detail.error_message" style="color: var(--critical)">{{ t('task.error') }}: {{ detail.error_message }}</p>
         <el-divider />
         <h4>{{ t('task.execLogs') }}</h4>
         <el-table :data="detail.logs" max-height="300">
