@@ -144,7 +144,7 @@ def metrics():
     return PlainTextResponse(render_prometheus(collect()), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
-# --- 健康监控（15 号 SM2：组件矩阵 + 事件流，admin）---
+# --- 健康监控（arch-15 SM2：组件矩阵 + 事件流，admin）---
 
 @router.get("/api/health/components")
 def health_components_api(payload: dict = Depends(require_perm("system_config"))):

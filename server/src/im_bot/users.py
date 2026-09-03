@@ -8,7 +8,7 @@ _VALID_ROLES = ("viewer", "analyst", "trader", "admin")
 
 
 def backfill_from_env(bot_id: int) -> int:
-    """env 授权层一次性回填 im_bot_users（2026-09-02：19 号双轨收尾——表为主真相源，
+    """env 授权层一次性回填 im_bot_users（2026-09-02：arch-19双轨收尾——表为主真相源，
     env 扫码时代的 LARK_AUTHORIZED_USERS 从未迁入，聊天靠 check_user 兜底活着而告警
     dispatch 只读表误判"无绑定"）。表非空=no-op（幂等）；角色非法回落 viewer。
     返回回填行数。"""
@@ -35,7 +35,7 @@ def backfill_from_env(bot_id: int) -> int:
             if r.get("ok"):
                 n += 1
         if n:
-            logger.info("im_bot_users 回填 bot=%s ← env 授权层 %d 行（19 号双轨收尾）", bot_id, n)
+            logger.info("im_bot_users 回填 bot=%s ← env 授权层 %d 行（arch-19双轨收尾）", bot_id, n)
         return n
     except Exception as e:
         logger.warning("backfill_from_env(%s) 失败（不影响主流程）: %s", bot_id, e)

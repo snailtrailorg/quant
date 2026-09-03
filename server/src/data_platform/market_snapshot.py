@@ -6,7 +6,7 @@ U-2 裁定核心：非池实时价不走 Tushare pro.daily（盘中空是硬伤�
 stock/get 对非浏览器 TLS 一律断）→ 改腾讯 qt.gtimg.cn 单股按需：
 1 次请求自带五档+涨跌停价，多年公开接口无反爬，比全市场快照更贴三档"打开才拉"心智。
 
-层位（17 号 §2 裁定）：数据平台层，消费方不寄生 web_api。
+层位（arch-17 §2 裁定）：数据平台层，消费方不寄生 web_api。
 失败降级返回 None（详情页 quote 降级链 hub tick→腾讯→null）。
 """
 from __future__ import annotations

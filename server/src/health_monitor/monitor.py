@@ -1,6 +1,6 @@
 """健康监控判定：症状型规则 + 触发/恢复沿检测 + health_event 落库 + 告警。
 
-原则（15 号设计；2026-08-18 盲审 C/D 修订）：
+原则（arch-15设计；2026-08-18 盲审 C/D 修订）：
 - 动作只基于事实信号（unit 状态/心跳存在/依赖可达）；日历只做告警抑制
 - 沿检测去重：电平型规则（unit_down/dep_down/hub_hb_lost/task_blind）状态翻转才告警；
   计数型规则（unit_restarted）自带沿，绕过电平状态机（D-F4：否则每起重启 30s 后必跟假"恢复"）
@@ -102,13 +102,13 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
             out.append({"rule_id": "dep_down", "component": dep, "severity": "critical",
                         "detail": str(deps.get(f"{dep}_err", ""))[:200]})
 
-    # R7 长事务预警（18 号 §4.2，DB 优化批 2026-08-21）：idle in transaction >3min——
-    # 参数防线（idle_in_tx 5min）杀掉前的预警窗，留人工 pg_terminate 介入（诊断钥匙见 18 号 §4.3）
+    # R7 长事务预警（arch-18 §4.2，DB 优化批 2026-08-21）：idle in transaction >3min——
+    # 参数防线（idle_in_tx 5min）杀掉前的预警窗，留人工 pg_terminate 介入（诊断钥匙见 arch-18 §4.3）
     stale_tx = snap.get("db_idle_tx_stale")
     if stale_tx:
         out.append({"rule_id": "db_idle_tx_stale", "component": "postgres", "severity": "warning",
                     "detail": f"{stale_tx} 个 idle in transaction 事务超 3 分钟（防线 5min 兜杀，"
-                              f"诊断：18 号 §4.3 pg_stat_activity）"})
+                              f"诊断：arch-18 §4.3 pg_stat_activity）"})
 
     # R4 hub 心跳丢失（Valkey 可达但 key 过期 = hub 进程未续）
     # D-F2：需连续 2 轮——hub 设计内重启（deploy/自愈）首跳心跳要 60s+，单轮闪断不告警

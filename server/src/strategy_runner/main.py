@@ -1,6 +1,6 @@
 """策略实盘化入口（#4 修正版 B；批 6b 起 hub 模式唯一）。
 
-每任务独立子进程（hub 模式，ST7 14 号设计 v2）：
+每任务独立子进程（hub 模式，ST7 arch-14设计 v2）：
   live_task -> ThinTdGateway(TD-only) + XTPAdapter + hub_worker（消费 hub:bars:* 流）。
   direct 模式（进程内 MainEngine+XtpGateway 自采行情）2026-09-01 批 6b 退役——
   md_mode=direct 显式 EX_CONFIG 拒绝（历史 git 史可考）。

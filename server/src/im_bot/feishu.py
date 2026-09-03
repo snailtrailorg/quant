@@ -1,4 +1,4 @@
-"""飞书 Provider(19 号 v2 批 2)——适配层组合现有生产验证逻辑,行为零变化。
+"""飞书 Provider(arch-19 v2 批 2)——适配层组合现有生产验证逻辑,行为零变化。
 
 MODE='hybrid':消息走 ws 长连接(feishu_bot/ws_client),卡片回调走 webhook
 (feishu_bot/router,lark SDK 长连接丢卡片是现状)。

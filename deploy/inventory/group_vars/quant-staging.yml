@@ -51,7 +51,7 @@ deploy_task_units_feishu: []          # DB 真相源采集后覆写（im_bot_con
 # 免密——.env deploy 不可读的解法；替代 v3.2 的 $QUANT_DB_RO 环境变量通道）。
 # 固定 SQL 与单元名拼装见 wrappers/quant-dbro；空/未装位则 preflight 拒。
 # 单元名按 server 实况：quant-live-task@{id}（trading.py）/ quant-feishu-bot@{id}（im_bots.py）；
-# feishu 波次真相源= im_bot_config（19 号 IM 统一接入后，feishu_config 已并入，provider 过滤）
+# feishu 波次真相源= im_bot_config（arch-19 IM 统一接入后，feishu_config 已并入，provider 过滤）
 deploy_task_units_db_cmd: "{{ quant_dbro_cmd }} live"
 deploy_task_units_db_cmd_feishu: "{{ quant_dbro_cmd }} feishu"
 deploy_postverify_probe: true         # W2：staging 探针开（彩排即真验证）

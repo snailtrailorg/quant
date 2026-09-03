@@ -101,7 +101,7 @@ async def card_callback(request: Request):
         _sig = request.headers.get("X-Lark-Signature", "")
         from .bot import verify_card_signature, check_user, _im_bot_secret
         if not _im_bot_secret("verification_token", "LARK_VERIFICATION_TOKEN"):
-            logger.error("卡片确认拒绝执行：verification_token 未配置（表+env 皆空，fail-closed；19 号批 1 主源=im_bot_config）")
+            logger.error("卡片确认拒绝执行：verification_token 未配置（表+env 皆空，fail-closed；arch-19批 1 主源=im_bot_config）")
             return {"code": 0}
         if not verify_card_signature(_ts, _nonce, body.decode("utf-8"), _sig):
             logger.warning("卡片签名校验失败拒绝执行: open_id=%s tool=%s", open_id, tool)

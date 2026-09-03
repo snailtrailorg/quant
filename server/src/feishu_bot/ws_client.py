@@ -19,7 +19,7 @@ _FID = None  # 当前机器人 id（main 设置，on_message 用）
 
 
 def load_feishu_credentials(fid=None) -> tuple[str, str]:
-    """从 im_bot_config 读飞书凭证(批 2,19 号 v2)。
+    """从 im_bot_config 读飞书凭证(批 2, arch-19 v2)。
     fid 指定机器人 id，None 读最新 enabled（兼容）。"""
     from src.im_bot.credentials import get_bot_credentials
     creds = get_bot_credentials(fid) if fid else {}
@@ -82,7 +82,7 @@ def main() -> None:
             return
     except Exception:
         pass
-    # 2026-09-02：启动即回填（19 号双轨收尾——env 授权用户入表，告警 dispatch 同源可用）
+    # 2026-09-02：启动即回填（arch-19 双轨收尾——env 授权用户入表，告警 dispatch 同源可用）
     from src.im_bot.users import backfill_from_env
     backfill_from_env(int(sys.argv[1]))
     import sys, logging

@@ -200,7 +200,7 @@ def load_factors_from_db() -> list[str]:
             params_dict = json.loads(params) if isinstance(params, str) else (params or {})
             try:
                 if ftype == "dsl":
-                    # web 长尾批（13号#2）：DSL 因子——静态校验（坏表达式启动期
+                    # web 长尾批（wd-13 #2）：DSL 因子——静态校验（坏表达式启动期
                     # 跳过并 warning，不炸进程）+ partial 注册（entry["cls"]() 零参
                     # 调用语义不变，strategy.py 消费面零改，盲审 A 实核）
                     n = validate_dsl_expr(code)
@@ -241,7 +241,7 @@ def register_custom_factor(name: str, category: str, code: str,
                             needs_history: int = 0, ftype: str = "python") -> dict:
     """创建或更新自定义因子：编译代码 → 写 DB → 进注册表。
 
-    ftype="dsl"（web 长尾批 2026-09-01，13号#2）：code=受限表达式——静态校验
+    ftype="dsl"（web 长尾批 2026-09-01，wd-13 #2）：code=受限表达式——静态校验
     （validate_dsl_expr）+needs_history=最大窗口 n；不做 python 编译。
     Returns: {"id": int, "name": str, ...}
     """

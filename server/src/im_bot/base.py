@@ -1,4 +1,4 @@
-"""IM 统一接入抽象层(19 号 v2,2026-08-21 批 2)。
+"""IM 统一接入抽象层(arch-19 v2,2026-08-21 批 2)。
 
 IMBotProvider:完整 IM 接入面(区别于 MessageChannel=单向告警出站)。
 新平台=实现一个子类(那家的 API/签名/卡片适配)+locales 加字段词条,平台代码零改动。
@@ -32,7 +32,7 @@ class IMBotProvider(ABC):
     def required_fields(self) -> set[str]:
         return {f["key"] for f in self.FIELD_SCHEMA if f.get("secret")}
 
-    # ── 连接生命周期(B-G1:19 号 §1 声明面补齐;默认 no-op——纯 webhook 型无长连接)──
+    # ── 连接生命周期(B-G1:arch-19 §1 声明面补齐;默认 no-op——纯 webhook 型无长连接)──
     def connect(self, bot_id: int, on_message) -> None:
         """启动长连接(websocket/long_poll 型;webhook 型无需)。"""
     def shutdown(self, bot_id: int) -> None:

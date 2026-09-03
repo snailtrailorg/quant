@@ -46,7 +46,7 @@ def stock_detail_api(symbol: str,
                      payload: dict = Depends(require_perm("read"))):
     """标的详情聚合（三档项 14）：三源合一 + 按需选块。
 
-    层位（17 号 §2）：聚合逻辑在 data_platform/stock_detail.py，本端点只做薄壳。
+    层位（arch-17 §2）：聚合逻辑在 data_platform/stock_detail.py，本端点只做薄壳。
     未识别标的 404（与 analyze 口径一致，O 审 B4）。
     """
     from src.data_platform.stock_detail import get_stock_detail
@@ -59,7 +59,7 @@ def stock_detail_api(symbol: str,
 @router.get("/api/stock/{symbol}/intraday")
 def stock_intraday_api(symbol: str,
                        payload: dict = Depends(require_perm("read"))):
-    """当日分时曲线（17 号 K 线 Tab 分钟半边）：bar_hub（池内自攒）→ 腾讯分时降级。"""
+    """当日分时曲线（arch-17 K 线 Tab 分钟半边）：bar_hub（池内自攒）→ 腾讯分时降级。"""
     from src.data_platform.stock_detail import get_intraday
     return get_intraday(symbol) or {"date": None, "source": None, "points": []}
 

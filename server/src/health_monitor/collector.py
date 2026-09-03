@@ -115,7 +115,7 @@ def collect(now: float | None = None) -> dict:
         snap["deps"]["postgres"] = False
         snap["deps"]["postgres_err"] = str(e)[:80]
 
-    # 18 号 §4.2 长事务告警（DB 优化批 2026-08-21）：idle in transaction >3min 计数
+    # arch-18 §4.2 长事务告警（DB 优化批 2026-08-21）：idle in transaction >3min 计数
     # （参数防线 5min 前的预警窗，留人工介入）。PG 探活顺路查询，失败不阻断。
     try:
         with get_conn() as conn:

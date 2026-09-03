@@ -32,7 +32,7 @@ def _get_max_tool_turns() -> int:
     return 5
 
 
-# 批 2(19 号 v2):per-bot 客户端单例——修两个现状隐患:①多 bot 时 FeishuClient() 不带
+# 批 2(arch-19 v2):per-bot 客户端单例——修两个现状隐患:①多 bot 时 FeishuClient() 不带
 # fid 回复走"最新 enabled"的凭证而非收消息的 bot;②每消息 new 实例 token 缓存形同虚设。
 # 双盲 A-S1/B-G3:TTL 300s——凭证热更新(Web 改/重扫)最多 5 分钟后生效,跨进程各自过期;
 # 即时生效走 stop/start 端点(systemctl 重启进程清缓存)。
@@ -167,7 +167,7 @@ FEISHU_USERS: dict[str, str] = {}  # {"ou_xxx": "admin", ...}
 def load_feishu_users():
     """从环境变量加载授权用户（格式: user_id:role,user_id:role）——env 兜底层。
 
-    IM 统一接入批 1（19 号 v2）：主真相源=im_bot_users 表（per-bot），表空/查询失败
+    IM 统一接入批 1（arch-19 v2）：主真相源=im_bot_users 表（per-bot），表空/查询失败
     回落此 env 层（过渡期双轨，批 2 退役 env）。
     """
     raw = os.environ.get("LARK_AUTHORIZED_USERS", "")
@@ -205,7 +205,7 @@ def check_user(open_id: str) -> str | None:
     return FEISHU_USERS.get(open_id)
 
 
-# ——— 签名校验（批 1：主源 im_bot_config，env 兜底——19 号 v2 §5 过渡双轨）———
+# ——— 签名校验（批 1：主源 im_bot_config，env 兜底——arch-19 v2 §5 过渡双轨）———
 
 def _im_bot_secret(field: str, env_key: str) -> str:
     """取签名密钥:im_bot_config 任一 enabled feishu 行的 credentials.{field}（批 1 全局
@@ -305,7 +305,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
                 if r:
                     role = r[0]
                 # 首见登记（2026-09-02 用户裁定）：per-bot 路径本就是"发消息即按 default_role 对话"
-                # （19 号批 2 设计）但此前零留痕——首见即入 im_bot_users + warn 通知 admin（骑批 7
+                # （arch-19批 2 设计）但此前零留痕——首见即入 im_bot_users + warn 通知 admin（骑批 7
                 # 告警链）。幂等：已在表则跳过；并发双见由 notify 60s 去重兜。
                 cur = conn.execute("SELECT 1 FROM im_bot_users WHERE bot_id=%s AND im_user_id=%s", (fid, open_id))
                 if not cur.fetchone():

@@ -55,7 +55,7 @@ PERMISSIONS = {
     "analyst": {"read", "strategy_control", "data_sync"},   # 研究：策略/回测/数据同步。
     # W5 修 P0（盲审 B）：system_config 原为死键（迁移前 0 端点消费）——W5 迁移把 16 个
     # admin-only 门（数据源/通道/券商凭证 CRUD/system-config 写/health）挂上后 analyst
-    # 经回退字典全部可达=扩权回归。删键归位 admin-only（10 号"收紧 analyst"方向）。
+    # 经回退字典全部可达=扩权回归。删键归位 admin-only（wd-10"收紧 analyst"方向）。
     "trader":  {"read", "strategy_control", "halt", "trade", "live_trading_control"},  # 交易：策略启停/熔断/下单/实盘开关
     "admin":   {"read", "strategy_control", "data_sync", "halt", "resume", "trade", "live_trading_control",
                  "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "im_bots_config",

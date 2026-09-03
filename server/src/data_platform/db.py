@@ -29,7 +29,7 @@ def get_conn_url() -> str:
 # SQLAlchemy 连接池（pool_size=10 + max_overflow=20，pre_ping 自动检测断连）
 # URL 转 postgresql+psycopg:// 给 SQLAlchemy（psycopg3 驱动）
 #
-# DB 优化防线（2026-08-21，18 号文档 §1.7 + 锁链事件根治）：
+# DB 优化防线（2026-08-21，arch-18 文档 §1.7 + 锁链事件根治）：
 # - statement_timeout：杀"SQL 本身跑太久"（默认 60s；web 进程由 systemd 环境覆盖 10s）
 # - idle_in_transaction_session_timeout：杀"事务开着不干活"（psycopg 非 autocommit +
 #   SELECT 不 commit 的读块在全仓普遍存在——服务端兜底比逐点修治本）

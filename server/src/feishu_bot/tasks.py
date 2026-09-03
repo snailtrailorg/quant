@@ -93,7 +93,7 @@ def feishu_register_task(self, session_id: str):
         except Exception as e:
             logger.warning(f"获取飞书应用名称失败: {e}")
 
-        # 批 2(19 号 v2):存 im_bot_config 统一表——同 app_id 重扫=更新凭证(ON CONFLICT
+        # 批 2(arch-19 v2):存 im_bot_config 统一表——同 app_id 重扫=更新凭证(ON CONFLICT
         # route_key),不再堆重复行(修批 1 审计 A-S1 揭示的旧行为)
         import json as _json
         from src.im_bot.credentials import save_bot_credentials, get_bot_credentials

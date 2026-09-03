@@ -163,7 +163,7 @@ def run(ctx: dict) -> None:
         if kind == "gen_jump":
             # 数据恢复：重暖机补缺口（从 bar 流触发是正确的——只有消费侧知道缺口多大）
             # 告警：hub 重启是基础设施生命周期事件，由 hub 自身(monitor 断流检测+启动告警)报告，
-            #   不从消费侧推断（13号审查设计纠偏+用户架构直觉确认）——worker 重启后首根 gen
+            #   不从消费侧推断（arch-13 审查设计纠偏+用户架构直觉确认）——worker 重启后首根 gen
             #   从 0 跳到当前值是必然，从这发告警=误报（盲审 A-P2① 的根修）
             logger.info("hub 代次切换 -> gen=%s，重暖机补缺口", state.gen)
             _rewarm(upto_ts=ts_n)

@@ -1,6 +1,6 @@
 """标的详情聚合（三档第三档项 14+17）：三源合一 + 按需拉取 + Valkey 缓存。
 
-层位裁定（17 号 §2）：聚合逻辑在数据平台层，web_api 只做薄壳端点。
+层位裁定（arch-17 §2）：聚合逻辑在数据平台层，web_api 只做薄壳端点。
 
 数据源与降级链：
 - quote（实时）：hub latest_tick（池内订阅标的，秒级）→ 腾讯单股（非池，60s TTL）→ null
@@ -78,7 +78,7 @@ def _touch_transient_sub(vt: str) -> None:
         logger.warning("临时订阅 upsert 失败（不影响详情，排查 hub 源不生效先看这）: %s", e)
 
 
-# ── 分时曲线（17 号蓝图 K 线 Tab"日/分钟"的分钟半边，2026-08-20 补）──
+# ── 分时曲线（arch-17 蓝图 K 线 Tab"日/分钟"的分钟半边，2026-08-20 补）──
 
 def get_intraday(symbol: str) -> dict | None:
     """当日分时：腾讯全天优先 → bar_hub 兜底（2026-08-20 用户反馈修正）。
