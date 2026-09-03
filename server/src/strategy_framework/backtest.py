@@ -239,7 +239,7 @@ class BacktestEngine:
                 close = bar.get("close", 0)
                 portfolio_value = cash + position * close
                 daily_values.append({
-                    "ts": bar.get("ts"),
+                    "ts": str(bar.get("ts")),   # 转 str：pandas Timestamp 不可 JSON 序列化（回测 result 存库崩溃→symbol error）
                     "cash": round(cash, 2),
                     "position": position,
                     "close": close,
