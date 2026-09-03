@@ -19,7 +19,7 @@
     <el-card v-if="allRunning || progress.status === 'running' || progress.status === 'error'" shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; align-items: center; gap: 12px">
         <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />
-        <span style="font-size: 12px; color: #606266; white-space: nowrap">
+        <span style="font-size: 12px; color: var(--text-secondary); white-space: nowrap">
           {{ progress.done || 0 }} / {{ progress.total || 0 }} · {{ progress.current || '' }}
           <span v-if="progress.status === 'error'" style="color: var(--critical)">{{ progress.error }}</span>
         </span>

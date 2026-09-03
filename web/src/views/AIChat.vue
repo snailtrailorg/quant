@@ -136,13 +136,13 @@ const quick = q => { input.value = q; onSend() }
 </script>
 
 <style scoped>
-.chat-body { flex: 1; overflow-y: auto; padding: 12px; background: #f5f7fa; border-radius: 4px; }
+.chat-body { flex: 1; overflow-y: auto; padding: 12px; background: var(--bg-canvas); border-radius: 4px; }
 .msg { margin-bottom: 12px; display: flex; }
 .msg.user { justify-content: flex-end; }
 .msg.assistant { justify-content: flex-start; }
 .bubble { max-width: 70%; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .msg.user .bubble { background: var(--brand-600); color: #fff; }
-.msg.assistant .bubble { background: #fff; color: #303133; border: 1px solid #e4e7ed; }
+.msg.assistant .bubble { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-weak); }
 .chat-input { margin-top: 12px; }
 </style>
 /* P2-12：Markdown 渲染样式（v-html 需 :deep） */

@@ -194,6 +194,6 @@ const onChangePwd = async () => {
 .info-label { color: var(--text-secondary); min-width: 60px; }
 .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-height: 360px; overflow-y: auto; padding: 4px; }
 .icon-grid img { width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer; border: 3px solid transparent; }
-.icon-grid img:hover { border-color: #c0c4cc; }
+.icon-grid img:hover { border-color: var(--border-weak); }
 .icon-grid img.selected { border-color: var(--brand-600); }
 </style>

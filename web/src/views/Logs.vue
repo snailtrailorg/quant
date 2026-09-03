@@ -163,7 +163,7 @@ const logRange = ref(null)
 <style scoped>
 .ndot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .ndot.critical { background: var(--critical); }
-.ndot.warn { background: #e6a23c; }
+.ndot.warn { background: var(--warn-fill); }
 .ndot.info { background: var(--text-secondary); }
 </style>
 

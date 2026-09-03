@@ -10,7 +10,7 @@
       <div style="display: flex; align-items: center; gap: 12px">
         <span style="font-size: 13px; white-space: nowrap">{{ currentSync.name }}</span>
         <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />
-        <span style="font-size: 12px; color: #606266; white-space: nowrap">
+        <span style="font-size: 12px; color: var(--text-secondary); white-space: nowrap">
           {{ progress.done || 0 }} / {{ progress.total || 0 }} · {{ progress.current || '' }}
           <span v-if="progress.status === 'error'" style="color: var(--critical)">{{ progress.error }}</span>
         </span>
@@ -80,13 +80,13 @@
         <el-table-column :label="t('dataManage.tradeDay')" width="100">
           <template #default="{ row }">
             <span v-if="row.expected_days != null">{{ row.actual_days }}/{{ row.expected_days }}</span>
-            <span v-else style="color:#999">-</span>
+            <span v-else style="color:var(--text-secondary)">-</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.failed_dates" style="color: var(--critical); font-size:12px">{{ row.failed_dates }}</span>
-            <span v-else style="color:#999">-</span>
+            <span v-else style="color:var(--text-secondary)">-</span>
           </template>
         </el-table-column>
       </el-table>

@@ -17,8 +17,8 @@
   line-height: 22px;
   text-align: center;
   font-size: 12px;
-  background: #f5f7fa;
-  border-top: 1px solid #eaecef;
+  background: var(--bg-canvas);
+  border-top: 1px solid var(--border-weak);
   z-index: 100;
 }
 .icp-footer a {

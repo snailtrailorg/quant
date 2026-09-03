@@ -133,7 +133,7 @@
 
         <!-- 参数定义 -->
         <el-divider content-position="left">{{ t('strategy.paramDef') }}</el-divider>
-        <div v-for="(pd, i) in editForm.parameterDefs" :key="i" style="margin-bottom: 12px; padding: var(--sp-2); border: 1px solid #eee; border-radius: 4px">
+        <div v-for="(pd, i) in editForm.parameterDefs" :key="i" style="margin-bottom: 12px; padding: var(--sp-2); border: 1px solid var(--border-weak); border-radius: 4px">
           <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
             <el-input v-model="pd.name" :placeholder="t('strategy.phParamName')" style="width: 140px" />
             <el-select v-model="pd.type" :placeholder="t('common.type')" style="width: 100px">

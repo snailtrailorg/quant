@@ -41,7 +41,7 @@
       </el-menu>
     </el-aside>
     <el-container>
-      <el-header style="background: var(--bg-surface); border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between">
+      <el-header style="background: var(--bg-surface); border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; justify-content: space-between">
         <div></div>
         <div style="display: flex; align-items: center; gap: 16px">
           <!-- P3-2（04 §4.1）：侧边栏折叠（240↔64 图标模式，记忆状态） -->
@@ -81,7 +81,7 @@
             <div style="overflow-y: auto">
               <div v-if="!notifs.length" style="color: var(--text-secondary); font-size: 13px; text-align: center; padding: 20px 0">{{ t('notify.empty') }}</div>
               <div v-for="n in notifs" :key="n.id" @click="goCategory(n.category)"
-                style="padding: 10px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
+                style="padding: 10px 4px; border-bottom: 1px solid var(--border-weak); cursor: pointer">
                 <span :class="['dot', n.level]"></span>
                 <b style="font-size: 13px">{{ n.title }}</b>
                 <el-tag v-if="n.rb" size="small" effect="plain"
@@ -365,7 +365,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .dot.critical { background: var(--critical); }
 .dot.warn { background: var(--warn-fill); }
 .dot.info { background: var(--text-secondary); }
-.notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
+.notif-body { white-space: pre-wrap; color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
 .notif-guide { color: var(--el-color-primary); font-size: 12px; line-height: 1.5; margin: 2px 0 2px 14px; }
 /* wd-20 §2.6 ⌘K combobox 选项 */
 .cmdk-opt { padding: var(--sp-2) 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak);

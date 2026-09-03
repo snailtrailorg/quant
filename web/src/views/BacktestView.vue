@@ -20,7 +20,7 @@
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.drawdownCurve')" name="drawdown">
         <v-chart :option="drawdownOption" autoresize style="height: 400px" v-if="drawdownData.length" />
-        <div v-else style="height:400px;display:flex;align-items:center;justify-content:center;color:#999">{{ t('backtest.noDrawdown') }}</div>
+        <div v-else style="height:400px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">{{ t('backtest.noDrawdown') }}</div>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.trades')" name="trades">
         <el-table :data="trades" max-height="400">
@@ -143,5 +143,5 @@ const loadLivePnl = async () => {
 <style scoped>
 .stat { text-align: center; padding: 12px 0; }
 .stat .label { color: var(--text-secondary); font-size: 13px; }
-.stat .value { font-size: 24px; font-weight: bold; color: #303133; margin-top: 4px; }
+.stat .value { font-size: 24px; font-weight: bold; color: var(--text-primary); margin-top: 4px; }
 </style>
