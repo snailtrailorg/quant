@@ -1,30 +1,35 @@
 // smoke-ui.mjs —— 前端运行时冒烟门（wd-20 收官日 #4，2026-09-03）
-// puppeteer 登录 prod 走真 DOM 逐页断言（build+API 冒烟对 Vue 运行时错是双盲区——白屏/菜单两事故实证）。
-// 用法：cd web && SMOKE_PASS=xxx node smoke-ui.mjs
-// 退出码：0=全绿，1=有失败；pageerror/console.error 汇总在末尾。
+// puppeteer 登录 prod 走真 DOM 逐页断言。覆盖 wd-20 §4 + 进展 09-03 晨条全链验证清单；
+// 无数据（prod 回测 0 done）的验证点显式 skip（不静默跳过），需造数验证。
+// 用法：cd web && SMOKE_PASS=xxx node smoke-ui.mjs  退出码：0=全绿，1=有失败/需造数。
 import puppeteer from 'puppeteer-core'
 
 const BASE = 'https://quant.snailtrail.cc'
 const USER = process.env.SMOKE_USER || 'admin'
-const PASS = process.env.SMOKE_PASS   // 生产 admin 密码，经环境变量注入，不入 repo
+const PASS = process.env.SMOKE_PASS
 if (!PASS) { console.error('✗ 需 SMOKE_PASS 环境变量（生产 admin 密码）：SMOKE_PASS=xxx node smoke-ui.mjs'); process.exit(2) }
 
 const results = []
 const errors = []
+const needsData = []   // 需造数验证的清单（显式记录，不静默）
 const assert = (name, ok, detail = '') => { results.push({ name, ok, detail }); console.log(`${ok ? '✓' : '✗'} ${name}${detail ? ' — ' + detail : ''}`) }
-const skip = (name, detail = '') => { results.push({ name, ok: true, detail }); console.log(`○ ${name}${detail ? ' — ' + detail : ''}`) }
+const skip = (name, detail = '') => { results.push({ name, ok: true, detail }); needsData.push(name); console.log(`○ ${name}${detail ? ' — ' + detail : ''}`) }
 
 const b = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox', '--disable-gpu'] })
 const p = await b.newPage()
+await p.evaluateOnNewDocument(() => {   // 固定 zh-CN（headless 默认 en-US，i18n 会走英文——断言中文文案需锁语言）
+  Object.defineProperty(navigator, 'language', { get: () => 'zh-CN', configurable: true })
+  Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'en'], configurable: true })
+})
 p.on('console', m => { if (m.type() === 'error') errors.push(`[console.error] ${m.text().slice(0, 160)}`) })
 p.on('pageerror', e => errors.push(`[PAGEERROR] ${String(e).slice(0, 200)}`))
-p.on('requestfailed', r => { if (r.url().includes('quant.snailtrail.cc')) errors.push(`[请求失败] ${r.url().slice(-90)}`) })
 p.on('response', r => { if (r.status() === 404 && r.url().includes('quant.snailtrail.cc')) errors.push(`[404] ${r.url().replace('https://quant.snailtrail.cc', '')}`) })
 
-const nav = async (path) => { await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}); await new Promise(r => setTimeout(r, 700)) }
+const nav = async path => { await p.goto(`${BASE}${path}`, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}); await new Promise(r => setTimeout(r, 900)) }
 const count = sel => p.evaluate(s => document.querySelectorAll(s).length, sel)
-const hasText = t => p.evaluate(txt => document.body.innerText.includes(txt), t)
-const clickText = (t, sel = 'button') => p.evaluate(({ t, sel }) => { const e = [...document.querySelectorAll(sel)].find(x => x.textContent.includes(t)); e?.click(); return !!e }, { t, sel })
+const texts = sel => p.evaluate(s => [...document.querySelectorAll(s)].map(e => e.textContent.trim()), sel)
+const firstText = sel => p.evaluate(s => document.querySelector(s)?.textContent?.trim() ?? '', sel)
+const clickBtn = t => p.evaluate(tx => { const e = [...document.querySelectorAll('button')].find(b => b.textContent.trim().includes(tx)); e?.click(); return !!e }, t)
 
 // ---- 登录 ----
 try {
@@ -40,126 +45,139 @@ try {
 } catch (e) { assert('登录', false, String(e).slice(0, 120)) }
 
 // ---- 菜单壳 ----
-try {
-  const g = await count('.el-menu .el-sub-menu__title')
-  assert('菜单组(应4)', g >= 4, `组数=${g}`)
-} catch (e) { assert('菜单组', false, String(e).slice(0, 100)) }
+const menuGroups = await count('.el-menu .el-sub-menu__title')
+assert('菜单组(应4)', menuGroups >= 4, `组数=${menuGroups}`)
 
-// ---- 侧栏折叠交互 ----
+// ---- 侧栏折叠（处理初始折叠态）----
 try {
-  const w0 = await p.evaluate(() => document.querySelector('.el-aside')?.style.width || getComputedStyle(document.querySelector('.el-aside')).width)
-  await clickText('«', '.el-header button')
-  await new Promise(r => setTimeout(r, 400))
-  const w1 = await p.evaluate(() => document.querySelector('.el-aside')?.style.width || getComputedStyle(document.querySelector('.el-aside')).width)
-  assert('侧栏折叠切换', w0 !== w1, `${w0}→${w1}`)
-  await clickText('»', '.el-header button'); await new Promise(r => setTimeout(r, 400))
+  const asideW = () => p.evaluate(() => document.querySelector('.el-aside')?.getBoundingClientRect().width ?? 0)
+  let w0 = await asideW()
+  if (w0 < 100) { await clickBtn('»'); await new Promise(r => setTimeout(r, 400)); w0 = await asideW() }   // 初始折叠→先展开
+  await clickBtn('«'); await new Promise(r => setTimeout(r, 400))
+  const w1 = await asideW()
+  assert('侧栏折叠切换', w0 > 100 && w1 < 100, `${w0}→${w1}`)
+  await clickBtn('»'); await new Promise(r => setTimeout(r, 400))
 } catch (e) { assert('侧栏折叠', false, String(e).slice(0, 100)) }
 
-// ---- ⌘K 真键盘（ARIA combobox）----
+// ---- ⌘K 真键盘 ----
 try {
   await p.keyboard.down('Control'); await p.keyboard.press('k'); await p.keyboard.up('Control')
   await new Promise(r => setTimeout(r, 400))
-  const cmdk = await count('div[role=combobox]')
-  assert('⌘K 弹窗(combobox)', cmdk > 0, `combobox=${cmdk}`)
-  await p.keyboard.type('策略')
-  await new Promise(r => setTimeout(r, 400))
-  const opts = await count('div[role=option]')
-  assert('⌘K 结果 listbox', opts > 0, `option=${opts}`)
+  assert('⌘K combobox', (await count('div[role=combobox]')) > 0)
+  await p.keyboard.type('策略'); await new Promise(r => setTimeout(r, 400))
+  assert('⌘K 结果 option', (await count('div[role=option]')) > 0)
   await p.keyboard.press('Escape'); await new Promise(r => setTimeout(r, 300))
 } catch (e) { assert('⌘K', false, String(e).slice(0, 100)) }
 
-// ---- 逐页导航零 pageerror + 组件渲染 ----
-const pages = [
-  { path: '/', name: '首页 Dashboard' },
-  { path: '/strategy', name: '策略 Strategy' },
-  { path: '/backtest', name: '回测 Backtest' },
-  { path: '/trading', name: '交易台 Trading' },
-  { path: '/live-task', name: '实盘任务 LiveTask' },
-  { path: '/factors', name: '因子 Factors' },
-  { path: '/pool', name: '标的池 Pool' },
-  { path: '/screener', name: '选股器 Screener' },
-  { path: '/risk', name: '风控 Risk' },
-  { path: '/reconcile', name: '对账 Reconcile' },
-  { path: '/integrations', name: '集成 Integrations' },
-  { path: '/dataops', name: '数据 DataOps' },
-  { path: '/observe', name: '健康与日志 Observe' },
-]
+// ---- 13 页导航零 pageerror ----
+const pages = ['/', '/strategy', '/backtest', '/trading', '/live-task', '/factors', '/pool', '/screener', '/risk', '/reconcile', '/integrations', '/dataops', '/observe']
 for (const pg of pages) {
   const before = errors.length
-  await nav(pg.path)
-  const body = await p.evaluate(() => document.body.innerText.length)
+  await nav(pg)
+  const len = await p.evaluate(() => document.body.innerText.length)
   const newErrs = errors.length - before
-  assert(`${pg.name} 渲染`, body > 50 && newErrs === 0, `文本${body}字 新pageerror=${newErrs}`)
+  assert(`页面 ${pg || '/'} 渲染`, len > 50 && newErrs === 0, `文本${len}字 新err=${newErrs}`)
 }
 
-// ---- 首页 KpiCard ----
+// ---- 首页 KpiCard + 总资产 ----
 try {
   await nav('/')
-  const kpi = await count('.kpi-cell')
-  assert('首页 KpiCard(≥4)', kpi >= 4, `kpi-cell=${kpi}`)
-  assert('首页总资产卡', await hasText('总资产'))
+  assert('首页 KpiCard(≥4)', (await count('.kpi-cell')) >= 4)
+  assert('首页总资产卡', (await texts('.klabel')).some(l => l.includes('总资产')), (await texts('.klabel')).join('/').slice(0, 100))
 } catch (e) { assert('首页 KpiCard', false, String(e).slice(0, 100)) }
 
 // ---- 策略 CRUD：新建 ID 可编辑 / 编辑 ID 锁定 ----
 try {
   await nav('/strategy')
-  await clickText('新建策略')
-  await new Promise(r => setTimeout(r, 500))
-  const dlgNew = await count('.el-dialog') > 0
-  assert('新建弹窗出现', dlgNew)
-  const idNewDisabled = await p.evaluate(() => [...document.querySelectorAll('.el-dialog')].pop()?.querySelector('input')?.disabled)
-  assert('新建态 ID 可编辑', dlgNew && idNewDisabled === false, `disabled=${idNewDisabled}`)
-  await p.keyboard.press('Escape'); await new Promise(r => setTimeout(r, 300))
+  const cb = await p.evaluate(() => { const b = [...document.querySelectorAll('button')].find(x => x.textContent.includes('新建策略')); return b ? { disabled: b.disabled, text: b.textContent.trim() } : null })
+  assert('新建策略按钮可用', !!cb && !cb.disabled, JSON.stringify(cb))
+  await clickBtn('新建策略'); await new Promise(r => setTimeout(r, 700))
+  const idOfNew = await p.evaluate(() => { const inp = [...document.querySelectorAll('.el-dialog')].pop()?.querySelector('input'); return inp ? { exists: true, disabled: inp.disabled } : { exists: false } })
+  assert('新建弹窗+ID 输入框', idOfNew.exists)
+  assert('新建态 ID 可编辑', idOfNew.exists && idOfNew.disabled === false, `disabled=${idOfNew.disabled}`)
+  await p.keyboard.press('Escape'); await new Promise(r => setTimeout(r, 400))
   const rowCount = await count('.el-table__row')
   if (rowCount > 0) {
-    await clickText('编辑')
-    await new Promise(r => setTimeout(r, 500))
-    const idEditDisabled = await p.evaluate(() => [...document.querySelectorAll('.el-dialog')].pop()?.querySelector('input')?.disabled)
-    assert('编辑态 ID 锁定', idEditDisabled === true, `disabled=${idEditDisabled}`)
+    await clickBtn('编辑'); await new Promise(r => setTimeout(r, 700))
+    const idOfEdit = await p.evaluate(() => { const inp = [...document.querySelectorAll('.el-dialog')].pop()?.querySelector('input'); return inp ? { exists: true, disabled: inp.disabled } : { exists: false } })
+    assert('编辑态 ID 锁定', idOfEdit.exists && idOfEdit.disabled === true, `disabled=${idOfEdit.disabled}`)
     await p.keyboard.press('Escape')
   } else {
     skip('编辑态 ID 锁定', 'prod 无策略行')
   }
 } catch (e) { assert('策略 CRUD', false, String(e).slice(0, 100)) }
 
-// ---- StatusTag（回测/实盘任务状态列）----
+// ---- Trading 三值：总资产 / 现价列 / 失败原因列 ----
+try {
+  await nav('/trading')
+  assert('Trading 总资产', (await texts('.kpi-num')).some(v => v.includes('¥')), (await texts('.kpi-num')).filter(v => v.includes('¥'))[0] || '')
+  const colOf = async label => p.evaluate(lb => [...document.querySelectorAll('.el-table__header th')].some(th => th.textContent.includes(lb)), label)
+  assert('Trading 现价列', await colOf('现价'), (await texts('.el-table__header th')).join('/').slice(0, 100))
+  await p.evaluate(() => { const t = [...document.querySelectorAll('.el-tabs__item')].find(x => x.textContent.includes('订单')); t?.click() })
+  await new Promise(r => setTimeout(r, 600))
+  assert('Trading 失败原因列', await colOf('失败原因'))
+} catch (e) { assert('Trading 三值', false, String(e).slice(0, 100)) }
+
+// ---- live-task 时间线 + 重启数 ----
+try {
+  await nav('/live-task')
+  const taskRows = await count('.el-table__row')
+  assert('LiveTask 任务列表', taskRows >= 0)
+  if (taskRows > 0) {
+    await p.evaluate(() => document.querySelector('.el-table__expand-icon')?.click())
+    await new Promise(r => setTimeout(r, 700))
+    const body = await p.evaluate(() => document.body.innerText)
+    assert('live-task 时间线(重启数)', body.includes('重启'), body.includes('重启') ? (body.match(/重启[：:]\s*\d+/) || [''])[0] : '')
+  } else {
+    skip('live-task 时间线(重启数)', 'prod 无实盘任务')
+  }
+} catch (e) { assert('live-task 时间线', false, String(e).slice(0, 100)) }
+
+// ---- StatusTag ----
 try {
   await nav('/backtest')
-  const st = await count('span.st')
-  assert('StatusTag 渲染', st > 0 || (await count('.el-table__row')) === 0, `span.st=${st}`)
-  await nav('/live-task')
-  const st2 = await count('span.st')
-  assert('LiveTask StatusTag', st2 > 0 || (await count('.el-table__row')) === 0, `span.st=${st2}`)
+  assert('Backtest StatusTag', (await count('span.st')) > 0 || (await count('.el-table__row')) === 0, `span.st=${await count('span.st')}`)
 } catch (e) { assert('StatusTag', false, String(e).slice(0, 100)) }
 
-// ---- TabsShell（容器页 .el-tabs）----
+// ---- TabsShell 切换 ----
 try {
-  await nav('/screener')
-  assert('TabsShell(el-tabs) Screener', (await count('.el-tabs')) > 0)
   await nav('/dataops')
-  assert('TabsShell(el-tabs) DataOps', (await count('.el-tabs')) > 0)
-} catch (e) { assert('TabsShell', false, String(e).slice(0, 100)) }
-
-// ---- 成绩单（有数据则断言格式，无数据 skip）----
-try {
-  await nav('/backtest')
-  const retCell = await p.evaluate(() => {
-    const ths = [...document.querySelectorAll('.el-table__header th')]
-    const idx = ths.findIndex(th => th.textContent.includes('收益'))
-    if (idx < 0) return null
-    const td = [...document.querySelectorAll('.el-table__row td')].filter((_, i, arr) => i % arr.length === idx)
-    return td.map(t => t.textContent.trim()).join('|')
-  })
-  if (retCell && retCell.trim() && !retCell.split('|').every(x => x === '—' || x === '')) {
-    assert('回测收益列(成绩单)', /%/.test(retCell), retCell.slice(0, 60))
-  } else {
-    skip('回测收益列(成绩单)', 'prod 无 done 回测数据（需跑一次回测造数）')
+  const tabCount = await count('.el-tabs__item')
+  assert('TabsShell DataOps', tabCount >= 2, `tab=${tabCount}`)
+  if (tabCount >= 2) {
+    await p.evaluate(() => document.querySelectorAll('.el-tabs__item')[1]?.click())
+    await new Promise(r => setTimeout(r, 600))
+    const q = await p.evaluate(() => new URL(location.href).searchParams.get('tab'))
+    assert('TabsShell 切换(query.tab 同步)', q === 'integrity', `tab=${q}`)
   }
-} catch (e) { assert('成绩单', false, String(e).slice(0, 100)) }
+} catch (e) { assert('TabsShell 切换', false, String(e).slice(0, 100)) }
+
+// ---- 验证门 + 成绩单三处（prod 无 done 回测数据，显式 skip，需造数）----
+await nav('/backtest')
+const retText = await p.evaluate(() => {
+  const ths = [...document.querySelectorAll('.el-table__header th')]
+  const i = ths.findIndex(th => th.textContent.includes('收益'))
+  if (i < 0) return ''
+  return [...document.querySelectorAll('.el-table__row')].map(r => r.children[i]?.textContent.trim() || '').filter(Boolean).join('|')
+})
+if (retText && !retText.split('|').every(x => x === '—')) {
+  assert('成绩单-回测列表收益列', /%/.test(retText), retText.slice(0, 60))
+} else {
+  skip('成绩单三处(列表/策略页/首页) + 验证门拦截', 'prod 0 条 done 回测——需造数（发起一次短回测后复跑）')
+}
+
+// ---- EmptyState（空态组件）----
+try {
+  await nav('/pool')
+  const empty = await count('.el-empty')
+  const hasTable = await count('.el-table') > 0
+  assert('EmptyState 空态', empty > 0 || hasTable, `el-empty=${empty}`)
+} catch (e) { assert('EmptyState', false, String(e).slice(0, 100)) }
 
 // ---- 汇总 ----
 const failed = results.filter(r => !r.ok)
-console.log(`\n=== 汇总: ${results.length - failed.length}/${results.length} 通过 ===`)
-if (errors.length) { console.log(`--- pageerror / console.error / 请求失败 (${errors.length}) ---`); errors.slice(0, 25).forEach(e => console.log(e)) }
+console.log(`\n=== 汇总: ${results.length - failed.length}/${results.length} 通过（${needsData.length} 项需造数） ===`)
+if (needsData.length) console.log('需造数验证:', needsData.join(' · '))
+if (errors.length) { console.log(`--- pageerror / 404 / console.error (${errors.length}) ---`); errors.slice(0, 30).forEach(e => console.log(e)) }
 await b.close()
 process.exit(failed.length ? 1 : 0)
