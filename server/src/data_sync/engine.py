@@ -448,7 +448,7 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
 
     freq 由 sync_id 决定（astock_minute=1min / astock_minute_5min=5min）。
     增量：start = last_sync_date+1 ~ today；回补：start = backfill_from ~ today。
-    逐只 _fetch_minute_and_save（内部分段，处理 stk_mins 8000 条限制）。
+    逐只 _pull_minute（内部分段，处理 stk_mins 8000 条限制）+ _save_minute（DB 写在熔断上下文外）。
     """
     sync_id = cfg["id"]
     freq = _MINUTE_FREQ.get(sync_id)
@@ -1295,7 +1295,10 @@ def delete_symbol(sync_id: str, ts_code: str) -> dict:
 def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
     """全市场全量同步（Celery 调用）。
 
-    遍历该类型全部标的，逐只 sync_symbol(auto)。progress_cb(i, total, ts_code) 写进度。
+    遍历该类型全部标的，逐只强制 full（从上市日起全历史）。归因拆分（2026-09-03）：
+    熔断上下文只包 Tushare 拉取（_pull_daily_df/_pull_minute），DB 写（_save_bars/_save_minute）
+    在上下文外——不再经 sync_symbol（其 _fetch_and_save 吞 API 异常致归因反转）。
+    progress_cb(i, total, ts_code) 写进度。
     """
     pro, api_fn, kind, freq, bar_type = _get_pro_api(sync_id)
     if kind is None:

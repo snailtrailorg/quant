@@ -42,7 +42,7 @@ def test_sync_scheduler_clamps_future_cursor():
     from src.scheduler import tasks
     TZ_CN = timezone(timedelta(hours=8))
     now = datetime.now(TZ_CN)
-    future = datetime.now(timezone.utc) + timedelta(days=10)
+    future = now + timedelta(days=10)   # 未来游标（aware 北京）
 
     fake_row = ("astock_daily", "30 16 * * 1-5", True, "idle", "20260810", future, "none")
     conn = MagicMock()
@@ -55,15 +55,17 @@ def test_sync_scheduler_clamps_future_cursor():
         def __init__(self, schedule, base):
             captured["base"] = base
 
-        def get_next(self, dt):
-            return dt + timedelta(days=1)   # 未来 → skip（不触发 sync）
+        def get_next(self, start):   # start 是 datetime 类（croniter 契约 get_next(datetime)）
+            return datetime.now() + timedelta(days=1)   # 未来 → skip（不触发 sync）
 
-    with patch.object(tasks, "get_conn", return_value=conn), \
+    # 注意 patch 路径：get_conn 是 data_sync_scheduler 函数内 from src.data_platform.db import
+    # 的，必须 patch src.data_platform.db.get_conn（patch tasks.get_conn 无效=假绿）
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
          patch("croniter.croniter", _Cron):
         tasks.data_sync_scheduler()
 
-    # base 是 naive 北京本地时；钳制后应 <= now（而非 future）
-    assert captured["base"] <= now.replace(tzinfo=None)
+    # base 被钳回 now 附近（±60s），而非 future 的 +10 天
+    assert abs((captured["base"] - now.replace(tzinfo=None)).total_seconds()) < 60
 
 
 # --- F-55 factor:recalc 多 worker 各记 last_seen ---
