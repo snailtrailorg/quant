@@ -10,7 +10,7 @@ import psycopg
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
-from .schema import BAR_TABLE_DDL, BAR_TABLE_INSERT, BAR_TABLE_INSERT_OVERWRITE, BAR_TABLE_SELECT, parse_vt_symbol
+from .schema import BAR_TABLE_INSERT, BAR_TABLE_INSERT_OVERWRITE, BAR_TABLE_SELECT, parse_vt_symbol
 
 _dotenv_loaded = False
 if not _dotenv_loaded:
@@ -54,8 +54,8 @@ _engine = create_engine(
     connect_args=_db_session_options(),
 )
 
-# 已建表的 freq 集合，避免每次 save_bars/get_bars 重复 DDL
-_ensured_tables: set = set()
+# 已校验存在的 freq 集合，避免热路径重复 to_regclass 查询（建表由 alembic 迁移负责）
+_verified_tables: set = set()
 
 
 def get_conn() -> psycopg.Connection:
@@ -69,14 +69,23 @@ def get_engine():
 
 
 def ensure_table(freq: str) -> None:
-    """确保 K 线表存在，自动建表。"""
-    if freq in _ensured_tables:
+    """校验 K 线表存在（建表由 alembic 迁移负责，运行时不再 CREATE TABLE IF NOT EXISTS）。
+
+    2026-09-03：bar_{freq} 8 表已全部入迁移（0064 补齐 15min/30min/60min/1h/4h）。
+    运行时只校验 + 告警——表不存在（迁移未跑）告警，后续 INSERT/SELECT 由 PG 报
+    relation does not exist。首次校验成功缓存，避免热路径重复 to_regclass 查询。
+    """
+    if freq in _verified_tables:
         return
-    ddl = BAR_TABLE_DDL.format(freq=freq)
+    import logging
+    logger = logging.getLogger("data_platform")
+    table = f"bar_{freq.lower()}"
     with get_conn() as conn:
-        conn.execute(ddl)
-        conn.commit()
-    _ensured_tables.add(freq)
+        cur = conn.execute("SELECT to_regclass(%s)", (table,))
+        if cur.fetchone()[0] is None:
+            logger.warning("%s 表不存在（alembic upgrade head 建表，勿运行时 CREATE TABLE）", table)
+            return   # 不缓存：下次再校验（迁移可能已跑）
+    _verified_tables.add(freq)
 
 
 def validate_bars(rows: list[tuple]) -> list[tuple]:

@@ -120,27 +120,6 @@ class Bar:
         )
 
 
-# ——— K 线表 DDL ———
-
-BAR_TABLE_DDL = """
-CREATE TABLE IF NOT EXISTS bar_{freq} (
-    id        BIGSERIAL PRIMARY KEY,
-    symbol    TEXT NOT NULL,
-    freq      TEXT NOT NULL DEFAULT '{freq}',
-    ts        TIMESTAMPTZ NOT NULL,
-    open      NUMERIC NOT NULL,
-    high      NUMERIC NOT NULL,
-    low       NUMERIC NOT NULL,
-    close     NUMERIC NOT NULL,
-    volume    NUMERIC NOT NULL DEFAULT 0,
-    amount    NUMERIC NOT NULL DEFAULT 0,
-    adj_factor NUMERIC,
-    source    TEXT NOT NULL DEFAULT 'tushare',
-    UNIQUE(symbol, ts)
-);
-CREATE INDEX IF NOT EXISTS idx_bar_{freq}_symbol_ts ON bar_{freq} (symbol, ts DESC);
-"""
-
 BAR_TABLE_INSERT = """
 INSERT INTO bar_{freq} (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)

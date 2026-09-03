@@ -249,7 +249,6 @@ def to_save_rows(df: pd.DataFrame, freq: str = "1D") -> list[tuple]:
 def pull_trade_cal(year: int) -> list[tuple]:
     """拉取 A 股交易日历并写入 DB。"""
     from ..db import init_trade_calendar, get_conn
-    from ..db import ensure_table  # noqa
 
     pro = get_pro()
     df = pro.trade_cal(exchange="SSE", start_date=f"{year}0101", end_date=f"{year}1231")
