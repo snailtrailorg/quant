@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!allowed" class="empty-cell" style="padding: 24px 0">{{ t('alerts.noPerm') }}</div>
+  <div v-if="!allowed" class="empty-cell" style="padding: var(--sp-6) 0">{{ t('alerts.noPerm') }}</div>
   <div v-else>
     <el-alert v-if="!cfg.sms_configured" type="info" :closable="false" style="margin-bottom: 12px">
       {{ t('alerts.smsNotConfigured') }}

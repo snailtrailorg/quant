@@ -22,7 +22,7 @@
           <el-button v-else type="warning" @click="onStop">{{ t('chat.stopGen') }}</el-button>
         </template>
       </el-input>
-      <div style="margin-top: 8px">
+      <div style="margin-top: var(--sp-2)">
         <el-button type="primary" @click="quick(t('chat.qPosition'))">{{ t('chat.qPosition') }}</el-button>
         <el-button type="primary" @click="quick(t('chat.qPnl'))">{{ t('chat.qPnl') }}</el-button>
         <el-button type="primary" @click="quick(t('chat.qStatus'))">{{ t('chat.qStatus') }}</el-button>
@@ -141,7 +141,7 @@ const quick = q => { input.value = q; onSend() }
 .msg.user { justify-content: flex-end; }
 .msg.assistant { justify-content: flex-start; }
 .bubble { max-width: 70%; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.msg.user .bubble { background: #409eff; color: #fff; }
+.msg.user .bubble { background: var(--brand-600); color: #fff; }
 .msg.assistant .bubble { background: #fff; color: #303133; border: 1px solid #e4e7ed; }
 .chat-input { margin-top: 12px; }
 </style>

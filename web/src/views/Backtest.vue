@@ -6,12 +6,12 @@
           <span>
             {{ t('backtest.runList') }}
             <!-- P2-4（05 §5.7）：badge 摘要 -->
-            <el-tag size="small" style="margin-left: 8px">{{ t('backtest.runningTag') }} {{ runningCount }}</el-tag>
+            <el-tag size="small" style="margin-left: var(--sp-2)">{{ t('backtest.runningTag') }} {{ runningCount }}</el-tag>
             <el-tag size="small" type="info" style="margin-left: 4px">{{ t('backtest.todayTag') }} {{ todayCount }}</el-tag>
             <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">{{ t('backtest.failedTag') }} {{ failedCount }}</el-tag>
           </span>
           <span>
-            <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: 8px">
+            <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: var(--sp-2)">
               <el-option v-for="st in ['running','done','failed','pending']" :key="st" :value="st" :label="st" />
             </el-select>
             <el-button type="primary" @click="showForm = true" :disabled="navReadonly">{{ t('backtest.create') }}</el-button>
@@ -101,8 +101,8 @@
             <el-option value="custom" :label="t('backtest.feeCustom')" />
           </el-select>
           <el-input-number v-if="feePreset === 'custom'" v-model="form.commissionRate"
-                           :min="0" :step="0.0001" :precision="4" style="margin-left: 8px" />
-          <span v-else style="margin-left: 8px; color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('backtest.feeUnit') }}</span>
+                           :min="0" :step="0.0001" :precision="4" style="margin-left: var(--sp-2)" />
+          <span v-else style="margin-left: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('backtest.feeUnit') }}</span>
         </el-form-item>
         <el-form-item :label="t('backtest.mode')">
           <el-select v-model="form.mode" style="width: 100%">
@@ -118,14 +118,14 @@
         <!-- 统一参数 -->
         <el-divider content-position="left">{{ t('backtest.unifiedParams') }}</el-divider>
         <ParameterForm v-if="parameterDefs.length" :defs="parameterDefs" v-model="form.params" />
-        <div v-else style="color: #999; font-size: 12px; padding-left: 100px">{{ t('backtest.noParams') }}</div>
+        <div v-else style="color: var(--text-secondary); font-size: 12px; padding-left: 100px">{{ t('backtest.noParams') }}</div>
 
         <!-- per-symbol 参数（高级） -->
         <el-divider content-position="left">
           <el-checkbox v-model="form.useSymbolParams">{{ t('backtest.advSymbolParams') }}</el-checkbox>
         </el-divider>
         <template v-if="form.useSymbolParams">
-          <div style="color: #999; font-size: 12px; margin-bottom: 8px; padding-left: 100px">
+          <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: var(--sp-2); padding-left: 100px">
             {{ t('backtest.jsonHint') }}
           </div>
           <el-input v-model="form.symbolParamsStr" type="textarea" :rows="4"

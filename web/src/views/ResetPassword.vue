@@ -8,8 +8,8 @@
         </el-form-item>
         <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%">{{ t('reset.submit') }}</el-button>
       </el-form>
-      <p style="text-align: center; margin-top: 16px">
-        <router-link to="/login" style="color: #409eff">{{ t('login.backToLogin') }}</router-link>
+      <p style="text-align: center; margin-top: var(--sp-4)">
+        <router-link to="/login" style="color: var(--brand-600)">{{ t('login.backToLogin') }}</router-link>
       </p>
     </el-card>
   </div>

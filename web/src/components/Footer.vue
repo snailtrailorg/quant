@@ -22,7 +22,7 @@
   z-index: 100;
 }
 .icp-footer a {
-  color: #999;
+  color: var(--text-secondary);
   text-decoration: none;
 }
 </style>

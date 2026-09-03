@@ -1,15 +1,15 @@
 <template>
   <div class="auth-page">
     <el-card style="width: 400px">
-      <h2 style="text-align: center; color: #409eff">{{ t('forgot.title') }}</h2>
+      <h2 style="text-align: center; color: var(--brand-600)">{{ t('forgot.title') }}</h2>
       <el-form @submit.prevent="onSubmit">
         <el-form-item>
           <el-input v-model="email" :placeholder="t('forgot.emailPlaceholder')" prefix-icon="Message" size="large" />
         </el-form-item>
         <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%">{{ t('forgot.submit') }}</el-button>
       </el-form>
-      <p style="text-align: center; margin-top: 16px">
-        <router-link to="/login" style="color: #409eff">{{ t('login.backToLogin') }}</router-link>
+      <p style="text-align: center; margin-top: var(--sp-4)">
+        <router-link to="/login" style="color: var(--brand-600)">{{ t('login.backToLogin') }}</router-link>
       </p>
     </el-card>
   </div>

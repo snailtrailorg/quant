@@ -58,7 +58,7 @@
             <el-radio-button value="aggregated">{{ t('perm.sensAgg') }}</el-radio-button>
             <el-radio-button value="count">{{ t('perm.sensCount') }}</el-radio-button>
           </el-radio-group>
-          <div style="color: var(--text-secondary); font-size: 12px; margin-top: 8px">{{ t('perm.dataNote') }}</div>
+          <div style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">{{ t('perm.dataNote') }}</div>
           <div style="color: var(--text-secondary); font-size: 12px; margin-top: 4px">{{ t('perm.dualTrackNote') }}</div>
         </el-tab-pane>
       </el-tabs>
@@ -97,7 +97,7 @@
           </el-radio-group>
           <el-button type="primary" @click="addOverride">{{ t('perm.addOverride') }}</el-button>
         </div>
-        <div v-if="locked.length" style="color: var(--text-secondary); font-size: 12px; margin-top: 8px">
+        <div v-if="locked.length" style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">
           {{ t('perm.lockedNote') }}: {{ locked.join(' / ') }}
         </div>
       </template>

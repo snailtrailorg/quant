@@ -9,15 +9,19 @@
     </template>
     <el-alert v-if="loadFailed" type="error" :closable="false" show-icon
               :title="$t('trading.loadFailed')" style="margin-bottom: 12px" />
-    <el-row :gutter="20" style="margin-bottom: 20px">
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalAssets') }}</div>
-    <el-alert v-if="dataSens" type="info" :closable="false" style="margin: 8px 0">
+    <!-- wd-20 §2.4：KpiCard 四卡 + flex 首屏（与 Dashboard 同构；pnl 色走 up/down 令牌类） -->
+    <el-alert v-if="dataSens" type="info" :closable="false" style="margin: var(--sp-2) 0; margin-bottom: var(--sp-3)">
       {{ t('perm.sensLimited') }}: {{ dataSens }} — {{ positionData?.count ?? '—' }} {{ t('perm.sensCountUnit') }}
-    </el-alert><div class="value">¥{{ formatNum(positionData.total_value) }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.todayPnl') }}</div><div class="value" :style="{color: (pnlData.today_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.today_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.today_pnl) }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.totalPnl') }}</div><div class="value" :style="{color: (pnlData.total_pnl||0) >= 0 ? '#C8102E' : '#0A7A54'}">{{ (pnlData.total_pnl||0) >= 0 ? '▲' : '▼' }}¥{{ formatNum(pnlData.total_pnl) }} ({{ pnlData.total_pnl_pct || 0 }}%)</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('trading.positionCount') }}</div><div class="value">{{ positionData.positions?.length || 0 }}</div></div></el-card></el-col>
-    </el-row>
+    </el-alert>
+    <div style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-5)">
+      <KpiCard :label="t('trading.totalAssets')" :value="'¥' + formatNum(positionData.total_value)" />
+      <KpiCard :label="t('trading.todayPnl')" :value="(pnlData.today_pnl||0) >= 0 ? '▲¥' + formatNum(pnlData.today_pnl) : '▼¥' + formatNum(pnlData.today_pnl)"
+               :tone="(pnlData.today_pnl||0) >= 0 ? 'up' : 'down'" />
+      <KpiCard :label="t('trading.totalPnl')" :value="(pnlData.total_pnl||0) >= 0 ? '▲¥' + formatNum(pnlData.total_pnl) : '▼¥' + formatNum(pnlData.total_pnl)"
+               :tone="(pnlData.total_pnl||0) >= 0 ? 'up' : 'down'"
+               :sub="pnlData.total_pnl_pct ? (pnlData.total_pnl_pct + '%') : ''" />
+      <KpiCard :label="t('trading.positionCount')" :value="positionData.positions?.length || 0" />
+    </div>
     <el-tabs>
       <el-tab-pane :label="t('trading.positions')">
         <el-table :data="positionData.positions || []" size="small">
@@ -60,7 +64,7 @@
           </el-table-column>
         </el-table>
         <!-- wd-20 §1.6：stale 黄条——停更防被读成空仓（N-S5 语义：停更≠空仓） -->
-        <el-alert v-if="positionData.stale" type="warning" :closable="false" style="margin: 8px 0">
+        <el-alert v-if="positionData.stale" type="warning" :closable="false" style="margin: var(--sp-2) 0">
           <template #title>
             {{ t('trading.staleWarn') }}
             <el-tooltip v-if="positionData.snapshot_rows != null" :content="t('trading.snapshotRowsTip', { n: positionData.snapshot_rows })">
@@ -120,7 +124,7 @@
         <div v-if="pnlData.curve?.length" style="height: 400px">
           <v-chart :option="pnlChartOption" autoresize />
         </div>
-        <div v-else style="height: 400px; display: flex; align-items: center; justify-content: center; color: #999">
+        <div v-else style="height: 400px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary)">
           {{ t('trading.noPnlHint') }}
         </div>
       </el-tab-pane>
@@ -160,6 +164,7 @@ const pnlChartOption = computed(() => ({
 const formatNum = (n) => (n || 0).toFixed(0)
 import { fmtCn } from '../utils/format'
 import { stockDetail } from '../api'
+import KpiCard from '../components/KpiCard.vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 const loadFailed = ref(false)
 const dataSens = ref('')
@@ -215,7 +220,4 @@ onUnmounted(() => clearInterval(pollTimer))
 </script>
 
 <style scoped>
-.stat { text-align: center; padding: 12px 0; }
-.stat .label { color: #909399; font-size: 13px; }
-.stat .value { font-size: 24px; font-weight: bold; color: #303133; margin-top: 4px; }
 </style>

@@ -48,7 +48,7 @@
       @open="onTermsOpen">
       <div ref="termsScrollRef" class="terms-scroll" @scroll="onTermsScroll">
         <template v-for="(item, i) in terms" :key="item.lang">
-          <h4 class="terms-lang" :style="i ? 'margin-top: 24px' : ''">{{ item.name }}</h4>
+          <h4 class="terms-lang" :style="i ? 'margin-top: var(--sp-6)' : ''">{{ item.name }}</h4>
           <pre class="terms-body">{{ item.body }}</pre>
         </template>
       </div>
@@ -131,18 +131,18 @@ const onRegister = async () => {
 .register-card { width: 440px; max-width: 100%; padding: 0; overflow: hidden; }
 .register-card :deep(.el-card__body) { padding: 0; }
 .banner { background: linear-gradient(90deg, #67c23a, #4e9e6b); color: #fff; padding: 18px 24px; font-size: 17px; font-weight: bold; }
-.state-msg { padding: 32px 24px; text-align: center; color: #999; }
+.state-msg { padding: 32px 24px; text-align: center; color: var(--text-secondary); }
 .state-msg.error { color: #f56c6c; line-height: 1.8; }
 .register-form { padding: 20px 28px 8px; }
 .welcome { text-align: center; color: #303133; font-size: 15px; margin: 4px 0 12px; }
 .email-box { background: #f5f7fa; border-radius: 6px; padding: 10px 14px; font-size: 13px; color: #606266; margin-bottom: 14px; }
-.pwd-rule { color: #909399; font-size: 12px; margin: -8px 0 10px; }
+.pwd-rule { color: var(--text-secondary); font-size: 12px; margin: -8px 0 10px; }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
 .terms-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer; user-select: none; }
-.back-login { text-align: center; margin: 8px 0 18px; }
-.link { color: #409eff; font-size: 13px; text-decoration: none; }
+.back-login { text-align: center; margin: var(--sp-2) 0 18px; }
+.link { color: var(--brand-600); font-size: 13px; text-decoration: none; }
 .terms-scroll { max-height: 65vh; overflow-y: auto; padding: 0 8px; }
-.terms-lang { color: #303133; font-size: 16px; margin: 16px 0 8px; }
+.terms-lang { color: #303133; font-size: 16px; margin: var(--sp-4) 0 8px; }
 .terms-body { white-space: pre-wrap; font-family: inherit; font-size: 16px; color: #606266; line-height: 1.7; margin: 0; }
 .scroll-hint { color: #e6a23c; font-size: 13px; margin-right: 12px; }
 </style>

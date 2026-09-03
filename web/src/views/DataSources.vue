@@ -2,7 +2,7 @@
   <el-card>
     <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('dataSources.title') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
-      <div style="font-weight: bold; margin-bottom: 8px">{{ t('dataSources.usageTitle') }}</div>
+      <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
       <el-table :data="usage.today">
         <el-table-column prop="provider" label="Provider" width="120" />
         <el-table-column prop="calls" :label="t('common.calls')" width="100" />
@@ -48,11 +48,11 @@
       <el-divider />
       <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('dataSources.tierTitle') }}</h3>
       <div style="margin-bottom: 12px">
-        <span style="margin-right: 8px">{{ t('dataSources.pointsTier') }}:</span>
+        <span style="margin-right: var(--sp-2)">{{ t('dataSources.pointsTier') }}:</span>
         <el-radio-group :model-value="presets.current_tier" @change="onTierChange">
           <el-radio-button v-for="tr in presetTiers" :key="tr" :value="tr">{{ tr }} {{ t('dataSources.pointsUnit') }}</el-radio-button>
         </el-radio-group>
-        <el-tag v-if="presets.current_tier == null" type="info" style="margin-left: 8px">{{ t('dataSources.noTier') }}</el-tag>
+        <el-tag v-if="presets.current_tier == null" type="info" style="margin-left: var(--sp-2)">{{ t('dataSources.noTier') }}</el-tag>
       </div>
       <el-collapse>
         <el-collapse-item :title="t('dataSources.rateTableTitle')" name="rates">

@@ -4,7 +4,7 @@
       <div style="display: flex; justify-content: space-between; align-items: center">
         <div>
           <el-button type="primary" @click="$router.back()">← {{ t('common.return') }}</el-button>
-          <span style="margin-left: 8px">{{ t('symbol.listTitle', { title, n: total }) }}</span>
+          <span style="margin-left: var(--sp-2)">{{ t('symbol.listTitle', { title, n: total }) }}</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: center">
           <el-input v-model="q" :placeholder="t('symbol.phSearch')" style="width: 180px" clearable @keyup.enter="onSearch" />

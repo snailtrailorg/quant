@@ -86,11 +86,11 @@
           </template>
         </el-auto-resizer>
       </template>
-      <el-alert v-else-if="riskSens" type="info" :closable="false" style="margin: 8px 0">
+      <el-alert v-else-if="riskSens" type="info" :closable="false" style="margin: var(--sp-2) 0">
         {{ t('perm.sensLimited') }}: {{ riskSens }} —
         {{ riskSensSummary }}
       </el-alert>
-      <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 8px">{{ t('risk.sellAlwaysNote') }}</div>
+      <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-2)">{{ t('risk.sellAlwaysNote') }}</div>
     </el-card>
   </div>
 </template>

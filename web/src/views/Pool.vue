@@ -9,7 +9,7 @@
     <el-table :data="pools" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand">
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: 8px 24px">
+          <div style="padding: var(--sp-2) 24px">
             <!-- 覆盖状态（分钟历史池才显示） -->
             <el-button size="small" type="warning" style="margin-bottom: 10px"
                        :disabled="navReadonly" @click="backfillMinute(row)">{{ t('pool.backfillMinute') }}</el-button>
@@ -37,7 +37,7 @@
               </div>
             </template>
             <!-- 单标的添加 -->
-            <div style="display: flex; gap: 8px; align-items: center; margin-top: 8px">
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: var(--sp-2)">
               <el-input v-model="addSymbolInput[row.id]" :placeholder="t('pool.phAddSymbol')" style="width: 220px" size="small" />
               <el-button type="success" size="small" @click="addSymbol(row.id)">+</el-button>
             </div>

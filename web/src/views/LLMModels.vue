@@ -2,7 +2,7 @@
   <el-card>
     <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.configTitle') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
     <el-card shadow="never" style="margin-bottom: 12px">
-      <template #header>{{ t('llm.usageTitle') }}<el-button type="primary" @click="loadUsage" style="margin-left: 8px">{{ t('common.refresh') }}</el-button></template>
+      <template #header>{{ t('llm.usageTitle') }}<el-button type="primary" @click="loadUsage" style="margin-left: var(--sp-2)">{{ t('common.refresh') }}</el-button></template>
       <el-table :data="usage.month">
         <el-table-column prop="provider" label="Provider" width="120" />
         <el-table-column prop="model" :label="t('llm.model')" show-overflow-tooltip />
@@ -15,7 +15,7 @@
           <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'">{{ row.success_rate }}%</el-tag></template>
         </el-table-column>
       </el-table>
-      <div style="font-size: 12px; color: #999; margin-top: 8px">
+      <div style="font-size: 12px; color: var(--text-secondary); margin-top: var(--sp-2)">
         {{ t('llm.trend7d') }}<span v-for="tr in usage.trend" :key="tr.date" style="margin-right: 10px">{{ tr.date.slice(5) }} {{tr.calls}}/{{tr.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">{{ t('llm.noTrend') }}</span>
       </div>
     </el-card>

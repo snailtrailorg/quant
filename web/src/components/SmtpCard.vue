@@ -35,11 +35,11 @@
       <el-form-item>
         <el-button type="primary" @click="saveSmtp" :loading="savingSmtp">{{ t('common.save') }}</el-button>
         <el-button type="primary" @click="sendTest" :loading="testing">{{ t('smtp.test') }}</el-button>
-        <el-input v-model="testTo" :placeholder="t('smtp.testPh')" style="width: 220px; margin-left: 8px" />
+        <el-input v-model="testTo" :placeholder="t('smtp.testPh')" style="width: 220px; margin-left: var(--sp-2)" />
       </el-form-item>
     </el-form>
-    <div style="color: #909399; font-size: 12px">{{ t('smtp.hint') }}</div>
-    <el-link type="primary" @click="$router.push('/observe?tab=logs')" style="margin-top: 8px">{{ t('smtp.viewOutbox') }} →</el-link>
+    <div style="color: var(--text-secondary); font-size: 12px">{{ t('smtp.hint') }}</div>
+    <el-link type="primary" @click="$router.push('/observe?tab=logs')" style="margin-top: var(--sp-2)">{{ t('smtp.viewOutbox') }} →</el-link>
   </el-card>
 </template>
 

@@ -1,7 +1,7 @@
 <template>
   <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #667eea, #764ba2)">
     <el-card style="width: 400px">
-      <h2 style="text-align: center; color: #409eff">{{ t('app.title') }}</h2>
+      <h2 style="text-align: center; color: var(--brand-600)">{{ t('app.title') }}</h2>
       <el-form @submit.prevent="onLogin">
         <el-form-item>
           <el-input v-model="form.username" :placeholder="t('login.username')" prefix-icon="User" size="large" />
@@ -12,7 +12,7 @@
         <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%">{{ t('login.submit') }}</el-button>
       </el-form>
       <p style="text-align: center; margin-top: 12px">
-        <router-link to="/forgot-password" style="color: #409eff; font-size: 13px">{{ t('login.forgotPassword') }}</router-link>
+        <router-link to="/forgot-password" style="color: var(--brand-600); font-size: 13px">{{ t('login.forgotPassword') }}</router-link>
       </p>
     </el-card>
   </div>

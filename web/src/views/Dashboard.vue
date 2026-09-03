@@ -2,17 +2,17 @@
   <div>
     <!-- P1-3（web-design 05 §5.1）指挥中心：30 秒回答四问——钱安全吗/任务活着吗/今天赚亏/数据正常吗 -->
     <!-- 告警条：critical/warn 未读置顶 -->
-    <el-alert v-if="alerts.length" type="error" show-icon :closable="false" style="margin-bottom: 16px">
+    <el-alert v-if="alerts.length" type="error" show-icon :closable="false" style="margin-bottom: var(--sp-4)">
       <template #title>
         {{ t('dashboard.alertBar', { n: alerts.length }) }}
-        <el-button size="small" text type="primary" @click="$router.push('/live-task')" style="margin-left: 8px">{{ t('dashboard.handleNow') }}</el-button>
+        <el-button size="small" text type="primary" @click="$router.push('/live-task')" style="margin-left: var(--sp-2)">{{ t('dashboard.handleNow') }}</el-button>
       </template>
     </el-alert>
 
     <!-- 空态三步引导（05 §5.0-1：零数据首访态） -->
     <el-card v-if="emptyState" style="margin-bottom: 20px">
-      <div style="text-align: center; padding: 24px 0">
-        <div style="font-size: var(--fs-page); font-weight: 600; margin-bottom: 16px">{{ t('dashboard.welcome') }}</div>
+      <div style="text-align: center; padding: var(--sp-6) 0">
+        <div style="font-size: var(--fs-page); font-weight: 600; margin-bottom: var(--sp-4)">{{ t('dashboard.welcome') }}</div>
         <el-steps :active="emptyStep" align-center style="max-width: 720px; margin: 0 auto">
           <el-step :title="t('dashboard.step1')" :description="t('dashboard.step1d')" />
           <el-step :title="t('dashboard.step2')" :description="t('dashboard.step2d')" />
@@ -55,7 +55,7 @@
     </div>
 
     <!-- 权益曲线 + 实盘任务（14号 §2.4 :md/:xs 降列：<992 堆叠） -->
-    <el-row class="resp-row" :gutter="16" style="margin-top: 16px">
+    <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
       <el-col :xs="24" :sm="24" :md="15">
         <el-card shadow="never">
           <template #header>
@@ -81,7 +81,7 @@
           <div v-if="!liveTasks.length" class="empty-cell">{{ t('dashboard.noTasks') }}</div>
         </el-card>
         <!-- 今日事件（简化：今日 risk/data 类通知） -->
-        <el-card shadow="never" style="margin-top: 16px">
+        <el-card shadow="never" style="margin-top: var(--sp-4)">
           <template #header>{{ t('dashboard.todayEvents') }}</template>
           <div v-for="n in todayEvents.slice(0, 4)" :key="n.id" class="evt-row">⚠ {{ n.title }}</div>
           <div v-if="!todayEvents.length" class="empty-cell">{{ t('dashboard.noEvents') }}</div>
@@ -90,7 +90,7 @@
     </el-row>
 
     <!-- 底排：持仓 Top5 / 今日订单流 / 数据健康 / 最近回测（14号 §2.4：≥992 四列 / 768-991 两列 / <768 堆叠） -->
-    <el-row class="resp-row" :gutter="16" style="margin-top: 16px">
+    <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
       <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.topPositions') }}<el-button text size="small" @click="$router.push('/trading')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="p in topPositions" :key="p.symbol" class="pos-row">
@@ -196,7 +196,7 @@ const curveOption = computed(() => ({
     { type: 'line', data: rangeCurve.value.map(c => c.value), smooth: true, showSymbol: false,
       lineStyle: { width: 2 }, areaStyle: { opacity: 0.08 } },
     { type: 'line', yAxisIndex: 1, data: drawdownSeries.value, showSymbol: false,
-      lineStyle: { width: 1, color: '#909399' }, areaStyle: { opacity: 0.15, color: '#909399' } },
+      lineStyle: { width: 1, color: 'var(--text-secondary)' }, areaStyle: { opacity: 0.15, color: 'var(--text-secondary)' } },
   ],
 }))
 

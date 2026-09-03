@@ -60,7 +60,7 @@
         <el-form-item :label="t('strategy.enable')">
           <el-switch v-model="editForm.enabled" />
         </el-form-item>
-        <div style="color: #999; font-size: 12px; margin: -10px 0 10px 100px">
+        <div style="color: var(--text-secondary); font-size: 12px; margin: -10px 0 10px 100px">
           {{ t('strategy.hintNoSymbol') }}
         </div>
 
@@ -118,11 +118,11 @@
           <el-divider content-position="left">{{ t('strategy.pythonCode') }}</el-divider>
           <el-form-item>
             <div style="width: 100%">
-              <div style="margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary)">
+              <div style="margin-bottom: var(--sp-2); font-size: 12px; color: var(--el-text-color-secondary)">
                 {{ t('strategy.pythonHint') }}
               </div>
               <PythonEditor v-model="editForm.pythonCode" :height="350" />
-              <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
+              <div style="margin-top: var(--sp-2); display: flex; gap: 8px; align-items: center">
                 <el-button type="primary" @click="validateCode" :loading="validating">{{ t('strategy.codeValidate') }}</el-button>
                 <span v-if="codeValid === true" style="color: var(--el-color-success)">✅ {{ t('strategy.codeValid') }}</span>
                 <span v-else-if="codeValid === false" style="color: var(--el-color-danger)">❌ {{ codeError }}</span>
@@ -133,7 +133,7 @@
 
         <!-- 参数定义 -->
         <el-divider content-position="left">{{ t('strategy.paramDef') }}</el-divider>
-        <div v-for="(pd, i) in editForm.parameterDefs" :key="i" style="margin-bottom: 12px; padding: 8px; border: 1px solid #eee; border-radius: 4px">
+        <div v-for="(pd, i) in editForm.parameterDefs" :key="i" style="margin-bottom: 12px; padding: var(--sp-2); border: 1px solid #eee; border-radius: 4px">
           <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
             <el-input v-model="pd.name" :placeholder="t('strategy.phParamName')" style="width: 140px" />
             <el-select v-model="pd.type" :placeholder="t('common.type')" style="width: 100px">

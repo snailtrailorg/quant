@@ -25,7 +25,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <div style="color: #999; font-size: 12px; margin-top: 12px">{{ t('systemConfig.hint') }}</div>
+    <div style="color: var(--text-secondary); font-size: 12px; margin-top: 12px">{{ t('systemConfig.hint') }}</div>
   </el-card>
 </template>
 

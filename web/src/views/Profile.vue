@@ -3,7 +3,7 @@
     <template #header>{{ t('profile.title') }}</template>
 
     <!-- 头像（点击即更换） -->
-    <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 24px">
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: var(--sp-6)">
       <div style="cursor: pointer" @click="openChooser" :title="t('profile.clickToChange')">
         <Avatar :url="me.avatar_url" :name="me.nickname || me.username" size="lg" />
       </div>
@@ -49,7 +49,7 @@
 
     <!-- 注销账号（软删+脱敏，末位 admin 受限） -->
     <div style="display: flex; align-items: center; justify-content: space-between">
-      <span style="color: #909399; font-size: 13px">{{ t('profile.deactivateHint') }}</span>
+      <span style="color: var(--text-secondary); font-size: 13px">{{ t('profile.deactivateHint') }}</span>
       <el-button type="danger" @click="onDeactivate">{{ t('profile.deactivate') }}</el-button>
     </div>
 
@@ -67,7 +67,7 @@
         </el-tab-pane>
         <!-- 上传自定义（裁剪） -->
         <el-tab-pane :label="t('profile.uploadImage')" name="upload">
-          <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 8px 0">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 12px; padding: var(--sp-2) 0">
             <el-button type="primary" @click="pickFile">{{ t('profile.pickImage') }}</el-button>
             <div v-if="rawImg" style="width: 100%; height: 300px">
               <vue-cropper ref="cropperRef" :img="rawImg" :auto-crop="true" :auto-crop-width="220" :auto-crop-height="220"
@@ -189,11 +189,11 @@ const onChangePwd = async () => {
 
 <style scoped>
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px #f56c6c inset; }
-.pwd-rule { color: #909399; font-size: 12px; margin: -14px 0 14px; }
+.pwd-rule { color: var(--text-secondary); font-size: 12px; margin: -14px 0 14px; }
 .info-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: 14px; }
-.info-label { color: #909399; min-width: 60px; }
+.info-label { color: var(--text-secondary); min-width: 60px; }
 .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-height: 360px; overflow-y: auto; padding: 4px; }
 .icon-grid img { width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer; border: 3px solid transparent; }
 .icon-grid img:hover { border-color: #c0c4cc; }
-.icon-grid img.selected { border-color: #409eff; }
+.icon-grid img.selected { border-color: var(--brand-600); }
 </style>

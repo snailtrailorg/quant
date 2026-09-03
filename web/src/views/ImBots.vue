@@ -11,13 +11,13 @@
     </template>
 
     <!-- 扫码向导(interactive 平台) -->
-    <el-card v-if="qrSession" shadow="hover" style="margin-bottom:16px">
+    <el-card v-if="qrSession" shadow="hover" style="margin-bottom:var(--sp-4)">
       <template #header>{{ t('imBots.qrTitle') }}</template>
       <div style="display:flex;gap:24px;align-items:center">
         <img v-if="qrData.qr_img" :src="qrData.qr_img" style="width:200px;height:200px" alt="QR" />
         <div>
           <el-tag :type="qrStatusType">{{ qrData.status || 'pending' }}</el-tag>
-          <div style="margin-top:8px;color:#909399;font-size:13px">{{ t('imBots.qrHint') }}</div>
+          <div style="margin-top:var(--sp-2);color:var(--text-secondary);font-size:13px">{{ t('imBots.qrHint') }}</div>
         </div>
       </div>
     </el-card>

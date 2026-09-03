@@ -23,7 +23,7 @@
         <el-option label="BIAS" value="BIAS" />
         <el-option label="OBV" value="OBV" />
       </el-select>
-      <span style="color: #999; font-size: 12px">{{ t('kline.barCount', { symbol, n: dataCount }) }}</span>
+      <span style="color: var(--text-secondary); font-size: 12px">{{ t('kline.barCount', { symbol, n: dataCount }) }}</span>
     </div>
     <div ref="chartRef" style="width: 100%; height: 500px"></div>
   </el-dialog>

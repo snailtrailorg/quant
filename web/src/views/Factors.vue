@@ -88,7 +88,7 @@
         </el-form-item>
         <el-form-item :label="t('factors.historyWindow')">
           <el-input-number v-model="form.needsHistory" :min="0" :step="1" :disabled="form.ftype === 'dsl'" />
-          <div style="color: #999; font-size: 12px; margin-top: 4px">
+          <div style="color: var(--text-secondary); font-size: 12px; margin-top: 4px">
             {{ form.ftype === 'dsl' ? t('factors.dslHistoryHint') : t('factors.historyHint') }}
           </div>
         </el-form-item>
@@ -105,7 +105,7 @@
             <div style="margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary)">
               {{ t('factors.dslHint') }}
             </div>
-            <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
+            <div style="margin-top: var(--sp-2); display: flex; gap: 8px; align-items: center">
               <el-button type="success" size="small" @click="previewFactor" :loading="previewing">{{ t('factors.preview') }}</el-button>
               <span style="font-size: 12px; color: var(--el-text-color-secondary)">{{ t('factors.dslPreviewHint') }}</span>
             </div>
@@ -113,11 +113,11 @@
         </el-form-item>
         <el-form-item v-else :label="t('factors.pythonCode')">
           <div style="width: 100%">
-            <div style="margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary)">
+            <div style="margin-bottom: var(--sp-2); font-size: 12px; color: var(--el-text-color-secondary)">
               {{ t('factors.codeHint') }}
             </div>
             <PythonEditor v-model="form.code" :height="300" />
-            <div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
+            <div style="margin-top: var(--sp-2); display: flex; gap: 8px; align-items: center">
               <el-button type="primary" @click="validateCode" :loading="validating">{{ t('factors.validate') }}</el-button>
               <el-button type="success" @click="previewFactor" :loading="previewing">{{ t('factors.preview') }}</el-button>
               <span v-if="codeValid === true" style="color: var(--el-color-success)">✅ {{ t('factors.codeValid') }}</span>
@@ -136,7 +136,7 @@
     <el-drawer v-model="previewVisible" :title="t('factors.previewTitle')" size="50%">
       <div v-if="previewError" style="color: var(--el-color-danger)">{{ previewError }}</div>
       <template v-else-if="previewData">
-        <el-descriptions :column="5" border size="small" style="margin-bottom: 16px">
+        <el-descriptions :column="5" border size="small" style="margin-bottom: var(--sp-4)">
           <el-descriptions-item :label="t('factors.pvCount')">{{ previewData.stats.count }}</el-descriptions-item>
           <el-descriptions-item :label="t('factors.pvErrors')">{{ previewData.stats.errors }}</el-descriptions-item>
           <el-descriptions-item :label="t('factors.pvMin')">{{ previewData.stats.min }}</el-descriptions-item>

@@ -24,7 +24,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('screener.results') }} ({{ rows.length }})</span>
           <div>
-            <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: 8px">
+            <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: var(--sp-2)">
               <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
             </el-select>
             <el-button type="primary" size="small" :disabled="!checked.size || !selectedPool" @click="addToPool">

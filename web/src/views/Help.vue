@@ -44,7 +44,7 @@ onMounted(() => loadTopic('index'))
 .help-page { background: var(--el-bg-color); border-radius: 8px; padding: 20px; }
 .markdown-body :deep(h1) { font-size: 22px; margin: 12px 0 16px; }
 .markdown-body :deep(h2) { font-size: 18px; margin: 20px 0 10px; border-bottom: 1px solid var(--el-border-color-lighter); padding-bottom: 6px; }
-.markdown-body :deep(h3) { font-size: 15px; margin: 16px 0 8px; }
+.markdown-body :deep(h3) { font-size: 15px; margin: var(--sp-4) 0 8px; }
 .markdown-body :deep(table) { border-collapse: collapse; margin: 12px 0; width: 100%; }
 .markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--el-border-color-lighter); padding: 6px 10px; font-size: 13px; text-align: left; }
 .markdown-body :deep(th) { background: var(--el-fill-color-light); }

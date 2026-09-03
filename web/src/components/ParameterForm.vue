@@ -10,11 +10,11 @@
           <el-input-number v-else-if="def.type === 'number'" v-model="vals[def.name]"
             :min="def.min" :max="def.max" :step="def.step || 1" style="width: 200px" />
           <el-input v-else v-model="vals[def.name]" :placeholder="def.placeholder || ''" style="width: 200px" />
-          <span style="color: #999; font-size: 12px">{{ def.description || '' }}</span>
+          <span style="color: var(--text-secondary); font-size: 12px">{{ def.description || '' }}</span>
         </div>
       </el-form-item>
     </div>
-    <div v-if="!defs || defs.length === 0" style="color: #999; font-size: 12px; padding-left: 100px">
+    <div v-if="!defs || defs.length === 0" style="color: var(--text-secondary); font-size: 12px; padding-left: 100px">
       {{ t('common.noParams') }}
     </div>
   </div>

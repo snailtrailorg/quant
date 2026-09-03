@@ -6,9 +6,9 @@
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div>
             <span style="font-size:18px;font-weight:600">{{ detail.name || quote?.name || symbol }}</span>
-            <el-tag v-if="detail.in_pool" type="success" style="margin-left:8px">{{ t('stockDetail.inPool') }}</el-tag>
-            <el-tag v-else type="info" style="margin-left:8px">{{ t('stockDetail.notPool') }}</el-tag>
-            <span style="margin-left:12px;color:#909399">{{ detail.ts_code }}
+            <el-tag v-if="detail.in_pool" type="success" style="margin-left:var(--sp-2)">{{ t('stockDetail.inPool') }}</el-tag>
+            <el-tag v-else type="info" style="margin-left:var(--sp-2)">{{ t('stockDetail.notPool') }}</el-tag>
+            <span style="margin-left:12px;color:var(--text-secondary)">{{ detail.ts_code }}
               <template v-if="detail.industry"> · {{ detail.industry }}</template>
             </span>
           </div>
@@ -36,8 +36,8 @@
             </div>
             <div class="meta" style="margin-top:6px">
               <span>{{ t('stockDetail.limitUp') }}: <b style="color:#C8102E">{{ quote.upper_limit ?? detail.limit?.up_limit ?? '-' }}</b></span>
-              <span style="margin-left:16px">{{ t('stockDetail.limitDown') }}: <b style="color:#0A7A54">{{ quote.lower_limit ?? detail.limit?.down_limit ?? '-' }}</b></span>
-              <span style="margin-left:16px;color:#909399">{{ quote.ts }}</span>
+              <span style="margin-left:var(--sp-4)">{{ t('stockDetail.limitDown') }}: <b style="color:#0A7A54">{{ quote.lower_limit ?? detail.limit?.down_limit ?? '-' }}</b></span>
+              <span style="margin-left:var(--sp-4);color:var(--text-secondary)">{{ quote.ts }}</span>
             </div>
           </div>
           <el-empty v-else :description="t('stockDetail.noQuote')" :image-size="60" />
@@ -63,15 +63,15 @@
     </el-card>
 
     <!-- Tab（8 内容区之 6） -->
-    <el-card style="margin-top:16px">
+    <el-card style="margin-top:var(--sp-4)">
       <el-tabs v-model="activeTab">
         <el-tab-pane :label="t('stockDetail.kline')" name="kline">
-          <div style="margin-bottom:8px">
+          <div style="margin-bottom:var(--sp-2)">
             <el-radio-group v-model="klineMode" @change="onKlineMode">
               <el-radio-button label="day">{{ t('stockDetail.kDay') }}</el-radio-button>
               <el-radio-button label="intraday">{{ t('stockDetail.kIntraday') }}</el-radio-button>
             </el-radio-group>
-            <span v-if="intraday.date" style="margin-left:12px;color:#909399">
+            <span v-if="intraday.date" style="margin-left:12px;color:var(--text-secondary)">
               {{ intraday.date }}（{{ srcName(intraday.source) }}）
             </span>
           </div>
@@ -94,7 +94,7 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('stockDetail.chips')" name="chips">
-          <div v-if="detail.chips" style="color:#909399;margin-bottom:6px">
+          <div v-if="detail.chips" style="color:var(--text-secondary);margin-bottom:6px">
             {{ t('stockDetail.chipsDate') }}: {{ detail.chips.trade_date }}（{{ detail.chips.source }}）
           </div>
           <v-chart v-if="detail.chips?.dist?.length" :option="chipsOption" autoresize style="height:360px" />
@@ -148,7 +148,7 @@
             <el-button type="primary" :loading="analyzing" :disabled="!canAnalyze" @click="doAnalyze">
               {{ analysis ? t('stockDetail.reAnalyze') : t('stockDetail.doAnalyze') }}
             </el-button>
-            <span v-if="!canAnalyze" style="color:#909399;align-self:center">{{ t('stockDetail.analyzePerm') }}</span>
+            <span v-if="!canAnalyze" style="color:var(--text-secondary);align-self:center">{{ t('stockDetail.analyzePerm') }}</span>
           </div>
           <div v-if="analysis" class="analysis">{{ analysis }}</div>
           <el-empty v-else :description="t('stockDetail.aiHint')" :image-size="60" />
@@ -313,7 +313,7 @@ const intradayOption = computed(() => {
         lineStyle: { width: 1.5 },
         areaStyle: { opacity: 0.06 },
         markLine: { symbol: 'none', silent: true,
-          lineStyle: { color: '#909399', type: 'dashed' },
+          lineStyle: { color: 'var(--text-secondary)', type: 'dashed' },
           data: [{ yAxis: first }], label: { formatter: String(first) } } },
       { name: t('stockDetail.avgPrice'), type: 'line', data: pts.map(p => p.avg), showSymbol: false,
         lineStyle: { width: 1, color: '#e6a23c' }, itemStyle: { color: '#e6a23c' } },
@@ -345,7 +345,7 @@ const chipsOption = computed(() => {
     yAxis: { type: 'value', name: '%' },
     series: [{
       type: 'bar', data: dist.map(d => d[1]),
-      itemStyle: { color: '#409eff' },
+      itemStyle: { color: 'var(--brand-600)' },
       markLine: quote.value?.last ? { symbol: 'none', data: [{ xAxis: nearestChipIdx(dist, quote.value.last), name: 'last' }],
         lineStyle: { color: '#C8102E', type: 'dashed' }, label: { formatter: String(quote.value.last) } } : undefined,
     }],
@@ -375,11 +375,11 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .snap .chg { font-size: 16px; font-weight: 600; }
 .up { color: #C8102E; }
 .down { color: #0A7A54; }
-.flat { color: #909399; }
+.flat { color: var(--text-secondary); }
 .meta { display: flex; gap: 18px; color: #606266; flex-wrap: wrap; font-size: 13px; margin-top: 10px; }
 .depth { width: 100%; border-collapse: collapse; font-size: 13px; }
 .depth td { padding: 2px 8px; border-bottom: 1px solid #f0f2f5; }
-.depth .mid { text-align: center; color: #909399; font-weight: 600; padding: 4px 0; }
+.depth .mid { text-align: center; color: var(--text-secondary); font-weight: 600; padding: 4px 0; }
 .depth .ask td:nth-child(2) { color: #0A7A54; }
 .depth .bid td:nth-child(2) { color: #C8102E; }
 .frow { display: flex; justify-content: space-between; padding: 4px 0; }

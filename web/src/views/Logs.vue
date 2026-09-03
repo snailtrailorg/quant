@@ -86,11 +86,11 @@
       </el-table-column>
       <el-table-column prop="last_error" :label="t('log.outboxError')" min-width="160" show-overflow-tooltip />
     </el-table>
-    <div style="color: #909399; font-size: 12px; margin-top: 8px">{{ t('log.outboxHint') }}</div>
+    <div style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">{{ t('log.outboxHint') }}</div>
   </el-card>
 
   <el-dialog v-model="showAnalyze" :title="t('log.aiTitle')" width="720px">
-    <el-alert type="warning" :closable="false" style="margin-bottom: 16px">{{ t('log.analyzeHint', { n: errorLogs.length }) }}</el-alert>
+    <el-alert type="warning" :closable="false" style="margin-bottom: var(--sp-4)">{{ t('log.analyzeHint', { n: errorLogs.length }) }}</el-alert>
     <el-input v-model="analysisResult" type="textarea" :rows="10" readonly :placeholder="t('log.phAnalyze')" />
     <template #footer>
       <el-button type="primary" @click="showAnalyze = false">{{ t('common.close') }}</el-button>
@@ -163,6 +163,6 @@ const logRange = ref(null)
 .ndot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .ndot.critical { background: #f56c6c; }
 .ndot.warn { background: #e6a23c; }
-.ndot.info { background: #909399; }
+.ndot.info { background: var(--text-secondary); }
 </style>
 

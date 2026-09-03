@@ -62,7 +62,7 @@
             <div v-for="h in healthItems" :key="h.k" style="display:flex; justify-content:space-between; padding:4px 0; font-size:13px">
               <span>{{ h.k }}</span><span :class="h.ok ? 'up' : 'down'">{{ h.v }}</span>
             </div>
-            <div style="color: #909399; font-size: 12px; margin-top: 6px">{{ t('layout.healthNote') }}</div>
+            <div style="color: var(--text-secondary); font-size: 12px; margin-top: 6px">{{ t('layout.healthNote') }}</div>
           </el-popover>
 
           <el-select v-model="lang" @change="onLangChange" style="width: 110px">
@@ -75,11 +75,11 @@
             <el-button type="primary" circle @click="notifDrawer = true">🔔</el-button>
           </el-badge>
           <el-drawer v-model="notifDrawer" :title="t('notify.title')" size="480px">
-            <div style="display: flex; justify-content: flex-end; margin-bottom: 8px">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: var(--sp-2)">
               <el-button v-if="notifCount" size="small" type="primary" @click="onAckAll">{{ t('notify.ackAll') }}</el-button>
             </div>
             <div style="overflow-y: auto">
-              <div v-if="!notifs.length" style="color: #909399; font-size: 13px; text-align: center; padding: 20px 0">{{ t('notify.empty') }}</div>
+              <div v-if="!notifs.length" style="color: var(--text-secondary); font-size: 13px; text-align: center; padding: 20px 0">{{ t('notify.empty') }}</div>
               <div v-for="n in notifs" :key="n.id" @click="goCategory(n.category)"
                 style="padding: 10px 4px; border-bottom: 1px solid #f0f0f0; cursor: pointer">
                 <span :class="['dot', n.level]"></span>
@@ -88,7 +88,7 @@
                         style="margin-left: 6px">{{ n.rb.label }}</el-tag>
                 <div v-if="n.body" class="notif-body">{{ n.body }}</div>
                 <div v-if="n.rb" class="notif-guide">▸ {{ n.rb.guide }}</div>
-                <div style="color: #909399; font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
+                <div style="color: var(--text-secondary); font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
               </div>
             </div>
           </el-drawer>
@@ -125,7 +125,7 @@
     </el-container>
     <!-- 我的权限玻璃盒（10 §4：被授予/拒绝的依据用户随时可见） -->
   <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="480px">
-    <div style="margin-bottom: 8px; color: var(--text-secondary)">{{ t('layout.myPermsNote') }}</div>
+    <div style="margin-bottom: var(--sp-2); color: var(--text-secondary)">{{ t('layout.myPermsNote') }}</div>
     <!-- W4 玻璃盒:分组+来源(role-base/user-override)+被拒项(10 §4 去黑箱化) -->
     <div v-if="myPermGroups.base.length" style="margin-bottom: 10px">
       <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeRole') }}</div>
@@ -144,9 +144,9 @@
   <!-- ⌘K 全局搜索(P1-4/03 §3.3) -->
   <el-dialog v-model="cmdkVisible" :title="t('layout.search')" width="480px" :show-close="false">
     <el-input v-model="cmdkQuery" :placeholder="t('layout.searchPh')" autofocus @input="filterCmdk" />
-    <div style="max-height: 300px; overflow-y: auto; margin-top: 8px">
+    <div style="max-height: 300px; overflow-y: auto; margin-top: var(--sp-2)">
       <div v-for="item in cmdkResults" :key="item.path" @click="$router.push(item.path); cmdkVisible = false"
-        style="padding: 8px 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak); display: flex; justify-content: space-between">
+        style="padding: var(--sp-2) 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak); display: flex; justify-content: space-between">
         <span>{{ item.label }}</span>
         <span style="color: var(--text-secondary); font-size: 12px">{{ item.path }}</span>
       </div>
@@ -333,7 +333,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot.critical { background: #f56c6c; }
 .dot.warn { background: #e6a23c; }
-.dot.info { background: #909399; }
+.dot.info { background: var(--text-secondary); }
 .notif-body { white-space: pre-wrap; color: #606266; font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
 .notif-guide { color: var(--el-color-primary); font-size: 12px; line-height: 1.5; margin: 2px 0 2px 14px; }
 </style>

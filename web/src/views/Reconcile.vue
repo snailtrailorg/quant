@@ -14,7 +14,7 @@
 
     <!-- W6：el-table-v2 虚拟滚动（≤500 行）+行点击详情抽屉（原 expand 列 v2 不支持——盲审重构）；
          脱敏分支（count/aggregated 摘要，同 Risk 页范式） -->
-    <el-alert v-if="issuesSens && issuesSens !== 'detail'" type="info" :closable="false" style="margin: 8px 0">
+    <el-alert v-if="issuesSens && issuesSens !== 'detail'" type="info" :closable="false" style="margin: var(--sp-2) 0">
       {{ t('perm.sensLimited') }}: {{ issuesSens }} — {{ issuesSensSummary }}
     </el-alert>
     <el-auto-resizer v-else>
@@ -24,7 +24,7 @@
                      :row-class="({ rowIndex }) => rowIndex % 2 ? 'v2-zebra' : ''" />
       </template>
     </el-auto-resizer>
-    <div v-if="!diffRows.length" style="color: var(--text-secondary); padding: 16px 0">{{ t('reconcile.noIssue') }}</div>
+    <div v-if="!diffRows.length" style="color: var(--text-secondary); padding: var(--sp-4) 0">{{ t('reconcile.noIssue') }}</div>
     <!-- 行详情抽屉（原 expand 面板 6 行证据链） -->
     <el-drawer v-model="detailVisible" :title="t('reconcile.evidence')" size="360px">
       <template v-if="detailRow">
