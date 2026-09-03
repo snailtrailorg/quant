@@ -157,6 +157,7 @@ const todayEvents = ref([])
 const integrity = ref({})
 const recentBacktests = ref([])
 const riskMetrics = ref({})
+const partialFail = ref(0)
 
 const onHandleAlert = () => {
   // wd-20 §2.6：告警条按最严重项类别跳（原盲跳 /live-task）
@@ -208,7 +209,7 @@ const curveOption = computed(() => ({
   ],
 }))
 
-onMounted(async () => {
+const loadAll = async () => {
   const jobs = [
     async () => { strategies.value = await getStrategies() },
     async () => { dashboard.value = await getDashboard() },
@@ -224,8 +225,13 @@ onMounted(async () => {
     async () => { recentBacktests.value = (await getBacktests()).slice(0, 4) },
     async () => { const r = await getRiskState(); riskMetrics.value = r.metrics || {} },
   ]
-  jobs.forEach(fn => fn().catch(() => {}))
-})
+  // wd-20 §2.6：部分失败可见+可重试（原静默吞——部分卡空被读成无数据）
+  const errs = []
+  await Promise.all(jobs.map(fn => fn().catch(e => errs.push(String(e).slice(0, 60)))))
+  if (errs.length) partialFail.value = errs.length
+}
+onMounted(loadAll)
+const reload = () => loadAll()
 
 // KPI sparkline(7 日,文本近似——图表 sparkline 留后续;05 §4.4 KPI=数字+环比箭头+趋势)
 

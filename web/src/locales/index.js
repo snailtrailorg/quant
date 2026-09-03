@@ -498,6 +498,7 @@ export default {
       title: '{name} · K线图',
     },
     dashboard: {
+      partialFail: '{n} 项数据加载失败（部分卡片可能为空）——点击重试',
       alertBar: '有 {n} 条未处理告警', handleNow: '处理',
       welcome: '欢迎使用蜗牛量化交易',
       step1: '建因子', step1d: '从因子库开始', step2: '写策略', step2d: 'DSL 或 Python', step3: '跑回测', step3d: '验证后上实盘',
@@ -1574,6 +1575,7 @@ export default {
       title: '{name} · K-Line',
     },
     dashboard: {
+      partialFail: '{n} data sources failed to load (some cards may be empty) — retry',
       alertBar: '{n} unhandled alerts', handleNow: 'Handle',
       welcome: 'Welcome to SnailQuant Trading',
       step1: 'Build factor', step1d: 'Start from factor library', step2: 'Write strategy', step2d: 'DSL or Python', step3: 'Run backtest', step3d: 'Verify then go live',

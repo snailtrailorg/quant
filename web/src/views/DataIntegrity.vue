@@ -3,6 +3,10 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('dataIntegrity.title', { n: summary.total || 0 }) }}</span>
+        <el-alert v-if="loadFailed" type="error" :closable="false" style="margin-bottom: var(--sp-3)">
+          {{ t('common.loadFailed') }}
+          <el-button size="small" type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+        </el-alert>
         <el-radio-group v-model="freq" @change="load">
           <el-radio-button value="1D">{{ t('dataIntegrity.daily') }}</el-radio-button>
           <el-radio-button value="1min">{{ t('dataIntegrity.min1') }}</el-radio-button>
@@ -55,13 +59,16 @@ const completePct = computed(() => {
   return total ? Math.round((summary.value.complete || 0) / total * 100) : 0
 })
 
+const loadFailed = ref(false)   // wd-20 §2.6：静默吞错→错误条+重试
 const load = async () => {
   loading.value = true
+  loadFailed.value = false
   try {
     const r = await getDataIntegrity(freq.value)
     items.value = r.items || []
     summary.value = r.summary || {}
-  } finally {
+  } catch { loadFailed.value = true }
+  finally {
     loading.value = false
   }
 }
