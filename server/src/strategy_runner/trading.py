@@ -219,6 +219,9 @@ def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
     halt_state["was"] = halted_now
 
 
+_recalc_seen: str | None = None   # F-55：本 worker 进程最近一次消费的因子重算触发标记值（多 worker 各记，不删全局键）
+
+
 def recalc_hook(r, rewarm, history) -> None:
     """因子重算触发（#31，data_continuity_check 补采后设标记 -> 重填 history）。
 
@@ -226,15 +229,19 @@ def recalc_hook(r, rewarm, history) -> None:
     rewarm 由调用方注入（direct：PG 重填 history；worker：PG+流回放重暖机）；
     日志文案统一 direct 版（4a 知情差异④）。
     """
+    global _recalc_seen
     try:
-        if r.get("factor:recalc:triggered"):
+        val = r.get("factor:recalc:triggered")
+        if val and val != _recalc_seen:
+            # F-55（2026-09-03）：多 worker 各记 last_seen、读到新标记才重算且不删全局键——
+            # 原 r.delete 使第一个抢到的 worker 删键后，其余 worker 全部错过因子重算。
+            _recalc_seen = val
             try:
                 from src.strategy_framework.factor import load_factors_from_db
                 load_factors_from_db()
             except Exception:
                 pass
             rewarm()
-            r.delete("factor:recalc:triggered")
             logger.info("因子重算触发：重填 %d 根历史 bar", len(history))
     except Exception as e:
         logger.warning("因子重算触发检查失败: %s", e)

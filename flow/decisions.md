@@ -5,6 +5,11 @@
 
 ---
 
+## 2026-09-03 · SF1 长尾清尾裁定：F-37/38/49 知情接受 + F-50/56 残余单独批
+
+- **F-37/38/49 知情接受（不修）**：F-37 停止延迟已从 direct 60s 缩到 hub 5s（send_order 无 stop_due 门控的残余窗口仅 5s，停止即 `os._exit` 进程整体终止）；F-38 last_price≤0 tick 静默丢是 B4「vnpy 同款」有意设计（停牌标的本就无 bar）；F-49 暖机靠 send_order 时刻 `buy_ok_check`（last_bar_wall<300s）+ hub 流回放间接缓解，`_warmup_history` 不显式校验新鲜度。三者低风险/有意，不再扩门。
+- **F-50/F-56 残余单独批（不本批混做）**：F-50（order_log 状态机无 filled/canceled 终态 + 重启后 `write_trade_log` 的 order_id NULL）与 F-56（worker TD 共用 client_id + XTP SDK 目录并发写）均动交易核心链路/需 XTP 平台知识，混在归因+清尾批里匆忙做风险高——单独立批（含 order_log 终态 schema 变更评估 + client_id 分配策略）。
+
 ## 2026-09-03 · 冒烟门抓修 3 真 bug + 令牌/密码/staging 若干裁定
 
 - **canvas-var 走 cssVar 解析器**（用户裁定①）：批一 A 档把 echarts 图内色换 `var(--)`，但 canvas 不解析 var()（zrender 直传 fillStyle 静默丢弃）。裁定加 `utils/cssVar.js`（getComputedStyle 解析）替换全站 21 处，而非回退字面 hex——保住令牌单一源 + 暗色自适应。

@@ -280,7 +280,8 @@ class TestHaltEdgeCancel:
 class TestRecalcHook:
     """因子重算/热重载钩子（rewarm 注入：direct=PG 重填，worker=PG+流回放）。"""
 
-    def test_trigger_reloads_factors_rewarms_and_clears_flag(self):
+    def test_trigger_reloads_factors_and_rewarms_without_deleting(self):
+        trading._recalc_seen = None   # F-55：模块级 last_seen，测试隔离
         r = MagicMock()
         r.get.return_value = "1"
         rewarm = MagicMock()
@@ -289,9 +290,10 @@ class TestRecalcHook:
             trading.recalc_hook(r, rewarm, history)
         lf.assert_called_once()
         rewarm.assert_called_once()
-        r.delete.assert_called_once_with("factor:recalc:triggered")
+        r.delete.assert_not_called()   # F-55：不删全局键（多 worker 各记 last_seen）
 
     def test_no_trigger_noop(self):
+        trading._recalc_seen = None
         r = MagicMock()
         r.get.return_value = None
         rewarm = MagicMock()
@@ -302,6 +304,7 @@ class TestRecalcHook:
         r.delete.assert_not_called()
 
     def test_factor_reload_failure_still_rewarms(self):
+        trading._recalc_seen = None
         r = MagicMock()
         r.get.return_value = "1"
         rewarm = MagicMock()

@@ -73,7 +73,7 @@ def test_jwt_jti_and_blacklist():
         # 加入黑名单后再验 → 401
         r = MagicMock()
         r.exists.return_value = 1
-        with patch("redis.Redis.from_url", return_value=r):
+        with patch("src.web_api.redis_pool.redis_client", return_value=r):
             with pytest.raises(Exception) as e:
                 auth_mod.verify_jwt(token)
             assert "登出" in str(e.value.detail) or e.value.status_code == 401
@@ -83,7 +83,7 @@ def test_revoke_jwt_sets_blacklist():
     """revoke_jwt 把 jti 写入黑名单（TTL=剩余寿命）。"""
     token = auth_mod.create_jwt("1", "alice", "viewer")
     r = MagicMock()
-    with patch("redis.Redis.from_url", return_value=r):
+    with patch("src.web_api.redis_pool.redis_client", return_value=r):
         assert auth_mod.revoke_jwt(token) is True
     r.setex.assert_called_once()
     args = r.setex.call_args[0]

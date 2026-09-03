@@ -537,7 +537,9 @@ def data_continuity_check():
                         # 3. 因子重算触发：有修复则标记（后续 astock_select_daily 将利用完整数据）
                         if repaired > 0:
                             if r is not None:
-                                r.set(f"factor:recalc:triggered", "1", ex=3600)
+                                # F-55（2026-09-03）：写变化值（原常量 "1"）——多 live-task worker
+                                # 各记 last_seen，常量值第二次触发无法区分。isoformat 微秒级唯一。
+                                r.set("factor:recalc:triggered", datetime.now().isoformat(), ex=3600)
                 except Exception as e:
                     issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
     except Exception as e:
@@ -732,6 +734,10 @@ def data_sync_scheduler():
 
         # cron 解析：从上次同步时间算下次到点（P1：base 也归一北京时区，与 now 同基准）
         base = last_sync_ts.astimezone(TZ_CN) if last_sync_ts else (now - timedelta(days=7))
+        # F-51（2026-09-03）：游标在未来钳制——last_sync_ts 被时钟回拨/手工改大时，croniter
+        # 算出的 next_run 恒在未来 → 该同步永久静默停摆。钳回 now（下次到点即触发）。
+        if base > now:
+            base = now
         base = base.replace(tzinfo=None) if hasattr(base, "tzinfo") else base   # croniter 用 naive 本地时
         try:
             cron = croniter(schedule, base)

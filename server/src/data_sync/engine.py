@@ -477,11 +477,13 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
         try:
             # 限速（限流治理吸收）：节奏档取 daily（原 0.15s 硬编码→三级可调）；
             # stk_mins 档（3600s）归 pool_minute 的 Valkey 全局闸门管——此处若用会卡成每小时一只
+            # 归因拆分（2026-09-03）：熔断上下文只包 Tushare 拉取，DB 写在外——
+            # DB 写失败计入 failed 不误伤熔断器（否则 DB 抖动打穿 Tushare 配额熔断）
             with rate_limit_context(ds, "daily"):
-                df, saved = _fetch_minute_and_save(tc, freq, start, end_date)
+                df = _pull_minute(tc, freq, start, end_date)
             if df is not None and not df.empty:
+                total_saved += _save_minute(df, freq)
                 total_pulled += len(df)
-                total_saved += saved
         except Exception as ex:
             failed.append(f"{tc}:{type(ex).__name__}:{str(ex)[:40]}")
         if progress_cb:
@@ -1032,6 +1034,20 @@ def _find_gaps(api_fn, kind: str, ts_code: str, first: str, last: str,
     return gaps
 
 
+def _pull_daily_df(api_fn, ts_code: str, start: str, end: str) -> "pd.DataFrame | None":
+    """日线拉取（只 API，异常透传）。返回 df；None/空/缺 trade_date 列返回对应值。
+
+    归因拆分（2026-09-03）：与 _fetch_and_save 的差异——不吞 API 异常、不写库，
+    供 sync_all 在 rate_limit_context 内只包 Tushare 调用用（API 失败计熔断，DB 写在外）。
+    """
+    df = api_fn(ts_code=ts_code, start_date=start, end_date=end)
+    if df is None or df.empty:
+        return df
+    if "trade_date" not in df.columns:
+        return None
+    return df
+
+
 def _fetch_and_save(api_fn, ts_code: str, start: str, end: str, save_fn,
                     df_to_rows=None) -> "pd.DataFrame | None":
     """拉取一段日期数据并入库。返回 df（供调用方统计）。
@@ -1068,28 +1084,49 @@ def _wrap_result(df, used: str, cnt: int, start: str, end: str) -> dict:
             "local_count_before": cnt}
 
 
-def _fetch_minute_and_save(ts_code: str, freq: str, start: str, end: str,
-                           overwrite: bool = False) -> "tuple[pd.DataFrame | None, int]":
-    """分钟线分段拉取入库（stk_mins per-symbol + 8000 条分段）。
+def _pull_minute(ts_code: str, freq: str, start: str, end: str) -> "pd.DataFrame | None":
+    """分钟线分段拉取（只 API，不写库）。stk_mins per-symbol + 8000 条分段。
 
-    返回 (concat_df, saved)。overwrite=True 覆盖写（回补），False 冲突跳过（增量/全量）。
     每段单独调 pull_minute（按 09:00~15:00 交易时段），避免单次返回被截断丢数据。
+    归因拆分（2026-09-03）：异常透传——Tushare 调用失败需被 rate_limit_context 计入熔断，
+    故与 DB 写拆开（DB 写失败不应打穿 Tushare 配额熔断）。
     """
-    from src.data_platform.adapters.tushare_adapter import pull_minute, to_save_rows_min
-    from src.data_platform.db import save_bars, save_bars_overwrite
-    save_fn = save_bars_overwrite if overwrite else save_bars
+    from src.data_platform.adapters.tushare_adapter import pull_minute
     total_df: list[pd.DataFrame] = []
-    total_saved = 0
     for s, e in _split_minute_range(start, end, freq):
         df = pull_minute(ts_code, freq, f"{s} 09:00:00", f"{e} 15:00:00")
         if df is None or df.empty:
             continue
-        rows = to_save_rows_min(df, freq)
-        total_saved += save_fn(freq, rows)
         total_df.append(df)
     if not total_df:
+        return None
+    return pd.concat(total_df, ignore_index=True)
+
+
+def _save_minute(df: pd.DataFrame, freq: str, overwrite: bool = False) -> int:
+    """分钟线入库（只写库）。overwrite=True 覆盖写（回补），False 冲突跳过（增量/全量）。
+
+    归因拆分（2026-09-03）：调用方把它放 rate_limit_context 外，DB 写失败计入 failed
+    而非 Tushare 熔断。
+    """
+    from src.data_platform.adapters.tushare_adapter import to_save_rows_min
+    from src.data_platform.db import save_bars, save_bars_overwrite
+    save_fn = save_bars_overwrite if overwrite else save_bars
+    rows = to_save_rows_min(df, freq)
+    return save_fn(freq, rows)
+
+
+def _fetch_minute_and_save(ts_code: str, freq: str, start: str, end: str,
+                           overwrite: bool = False) -> "tuple[pd.DataFrame | None, int]":
+    """拉取+入库（组合 _pull_minute + _save_minute，per-symbol 路径用）。
+
+    返回 (concat_df, saved)。overwrite=True 覆盖写（回补），False 冲突跳过（增量/全量）。
+    """
+    df = _pull_minute(ts_code, freq, start, end)
+    if df is None or df.empty:
         return None, 0
-    return pd.concat(total_df, ignore_index=True), total_saved
+    saved = _save_minute(df, freq, overwrite)
+    return df, saved
 
 
 def _wrap_minute_result(df, used: str, cnt: int, start: str, end: str) -> dict:
@@ -1269,6 +1306,7 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
 
     ts_codes = _list_static_ts_codes(kind)
     total = len(ts_codes)
+    today = date.today().strftime("%Y%m%d")
     ok = 0
     failed: list[str] = []
     total_saved = 0
@@ -1278,13 +1316,21 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
             # 全量重建：强制 full（从上市日起全历史），不走 auto 完整性扫描
             # （auto 只补 first~last 缺口，不补上市日到 first 的早期缺口）；
             # 限速（限流治理吸收）：原 0.15s 硬编码 → rate_limit_context 三级可调（daily 档）
-            with rate_limit_context(ds, "daily"):
-                r = sync_symbol(sync_id, tc, mode="full")
-            if r.get("status") in ("success", "uptodate", "empty"):
-                ok += 1
-                total_saved += r.get("saved", 0)
+            # 归因拆分（2026-09-03）：熔断上下文只包 Tushare 拉取、DB 写在外。原
+            # sync_symbol(mode="full") 把 _fetch_and_save（吞 API 异常）与 DB 写混进上下文：
+            # API 失败被吞成 empty 假装成功、DB 写失败反而计熔断——归因完全反转，拆开根治。
+            start = _get_list_date(kind, tc)
+            if bar_type == "minute":
+                with rate_limit_context(ds, "daily"):
+                    df = _pull_minute(tc, freq, start, today)
+                if df is not None and not df.empty:
+                    total_saved += _save_minute(df, freq)
             else:
-                failed.append(f"{tc}:{r.get('error','')[:40]}")
+                with rate_limit_context(ds, "daily"):
+                    df = _pull_daily_df(api_fn, tc, start, today)
+                if df is not None and not df.empty:
+                    total_saved += _save_bars(_daily_to_rows(df))
+            ok += 1
         except Exception as e:
             failed.append(f"{tc}:{type(e).__name__}:{str(e)[:40]}")
         if progress_cb:

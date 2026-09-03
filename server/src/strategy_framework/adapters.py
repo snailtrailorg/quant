@@ -193,9 +193,17 @@ class XTPAdapter(ExecutionAdapter):
             # vnpy cancel 要纯 orderid（不含 gateway 前缀）+ symbol + exchange
             req = CancelRequest(orderid=od.orderid, symbol=od.symbol, exchange=od.exchange)
         else:
-            # 退化：没缓存时用 order_id 直接试（可能失败）
-            sym, ex = self.parse_vt_symbol(order_id)
-            req = CancelRequest(orderid=order_id, symbol=sym, exchange=_vnpy_exchange(ex))
+            # 退化：没缓存时无法还原 symbol/exchange。XTP cancel 实际只吃纯 orderid
+            # （xtp_gateway.cancel_order 仅 cancelOrder(int(orderid), session_id)，symbol/exchange
+            # 不参与）。F-39（2026-09-03）：原把整串 vt_orderid "XTP.123" 当 orderid → int() 崩溃，
+            # parse_vt_symbol 又把其拆成 ("XTP","123") 错 symbol 错 exchange。改为剥前缀得纯
+            # orderid；非纯数字（client_id 等）无法还原则放弃盲撤（盲撤错单比不撤更危险）。
+            pure = order_id.rsplit(".", 1)[-1] if "." in order_id else order_id
+            if not pure.isdigit():
+                logger.error("撤单退化路径：%r 无纯数字 orderid，放弃撤单", order_id)
+                return
+            logger.warning("撤单退化路径：无缓存，用纯 orderid %s 盲撤（symbol 未知）", pure)
+            req = CancelRequest(orderid=pure, symbol="", exchange=_vnpy_exchange(""))
         self._gateway.cancel_order(req)
 
     # ── 查询（事件驱动，触发后轮询等结果） ──
@@ -247,7 +255,11 @@ class XTPAdapter(ExecutionAdapter):
     def query_account(self) -> list:
         if self._gateway is None:
             return []
+        # F-40（2026-09-03）：查询前清缓存（同 query_position 的 ST2 修）——断线时 gateway
+        # 静默 no-op 无新 EVENT_ACCOUNT，旧缓存会让 snapshot_cycle 的 `if not accounts` 守卫
+        # 失效、account_snapshot 被陈旧值污染。清缓存后断线返回空 → snapshot_cycle 正确跳过。
         with self._lock:
+            self._accounts.clear()
             before = set(self._accounts.keys())
         self._gateway.query_account()
         self._wait_update(self._accounts, before, timeout=2.0)

@@ -259,11 +259,17 @@ def verify_jwt(token: str) -> dict:
     # 登出黑名单（A4）：旧 token 无 jti 跳过（24h 过渡期后全部带 jti）
     jti = payload.get("jti")
     if jti:
-        import redis as _redis
-        import os as _os
-        r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
-        if r.exists(f"jwt:bl:{jti}"):
-            raise HTTPException(401, "token 已登出")
+        # F-59（2026-09-03）：复用共享连接池 + Valkey 挂降级放行——原每请求 from_url 建连
+        # 且 r.exists 无保护，Valkey 抖动即 500 认证全瘫。降级=跳过黑名单（登出 token 短暂
+        # 可用靠自然过期），账号禁用/注销仍由下方 PG fail-closed 兜底，不引入越权面。
+        try:
+            from src.web_api.redis_pool import redis_client
+            if redis_client().exists(f"jwt:bl:{jti}"):
+                raise HTTPException(401, "token 已登出")
+        except HTTPException:
+            raise
+        except Exception as e:
+            _logger.warning("登出黑名单检查失败（Valkey 不可达，降级放行）: %s", e)
     # SD1（F-45）：账号状态即时校验——禁用/注销后存量 token 立即失效（原来最长 24h 仍有效）
     username = payload.get("username")
     if username:
@@ -292,13 +298,17 @@ def revoke_jwt(token: str) -> bool:
     jti = payload.get("jti")
     if not jti:
         return False  # 旧 token 无 jti（自然过期兜底）
-    import redis as _redis
-    import os as _os
     from datetime import datetime as _dt
-    r = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+    from src.web_api.redis_pool import redis_client
     remaining = payload["exp"] - int(_dt.utcnow().timestamp())
     if remaining > 0:
-        r.setex(f"jwt:bl:{jti}", remaining, "1")
+        try:
+            redis_client().setex(f"jwt:bl:{jti}", remaining, "1")
+        except Exception as e:
+            # F-59（2026-09-03）：Valkey 不可达时降级——登出仍成功（客户端丢弃 token），
+            # 黑名单未记录则 token 靠自然过期兜底，不阻塞登出流程。
+            _logger.warning("登出黑名单写入失败（Valkey 不可达，token 靠自然过期）: %s", e)
+            return False
     return True
 
 
