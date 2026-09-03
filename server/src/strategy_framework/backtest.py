@@ -20,6 +20,23 @@ from .adapters import ExecutionAdapter, Order, Position
 logger = logging.getLogger("backtest")
 _patch_lock = threading.Lock()
 
+import contextvars
+
+_run_logs_ctx: contextvars.ContextVar[list | None] = contextvars.ContextVar("backtest_run_logs", default=None)
+
+
+class _RunLogHandler(logging.Handler):
+    """run 作用域日志捕获：把 run 期间的 strategy/backtest 日志追加到当前 run 的 logs 列表。
+
+    挂在 "strategy"/"backtest" logger 上，run finally 摘除——防并发回测串日志（ptrade 批 1）。
+    """
+
+    def emit(self, record) -> None:
+        logs = _run_logs_ctx.get()
+        if logs is not None:
+            logs.append({"ts": datetime.fromtimestamp(record.created).strftime("%H:%M:%S"),
+                         "level": record.levelname, "msg": record.getMessage()})
+
 
 @dataclass
 class Trade:
@@ -57,6 +74,7 @@ class BacktestResult:
     daily_values: list = field(default_factory=list)   # 每日净值
     trades: list = field(default_factory=list)          # 成交记录
     metrics: dict = field(default_factory=dict)         # 全部指标
+    logs: list = field(default_factory=list)            # 回测日志（ptrade 批 1：run 作用域捕获）
 
 
 class BacktestAdapter(ExecutionAdapter):
@@ -183,6 +201,13 @@ class BacktestEngine:
         with _patch_lock:
             strat_mod.Strategy.place_order = _bt_place_order
 
+        # 回测日志（ptrade 批 1）：run 作用域 handler 捕获 strategy/backtest 日志，finally 摘除
+        run_logs: list = []
+        _tok = _run_logs_ctx.set(run_logs)
+        _log_handler = _RunLogHandler()
+        for _lg in ("strategy", "backtest"):
+            logging.getLogger(_lg).addHandler(_log_handler)
+
         try:
             cash = self.initial_capital
             position = 0
@@ -216,6 +241,8 @@ class BacktestEngine:
                                 buy_queue.append((trade.volume, trade.price))
                             else:
                                 adapter.trades.remove(trade)   # 未成交不入明细
+                                logger.warning("资金不足，BUY 未成交: %s %s股 @%s（现金 %.2f）",
+                                               trade.symbol, trade.volume, trade.price, cash)
                         elif trade.action == "SELL":
                             if position >= trade.volume:
                                 proceeds = trade.price * trade.volume - trade.commission
@@ -236,6 +263,8 @@ class BacktestEngine:
                                     avg_price = 0.0
                             else:
                                 adapter.trades.remove(trade)   # 未成交不入明细
+                                logger.warning("持仓不足，SELL 未成交: %s %s股 @%s（持仓 %s）",
+                                               trade.symbol, trade.volume, trade.price, position)
 
                 # 每日净值
                 close = bar.get("close", 0)
@@ -271,7 +300,10 @@ class BacktestEngine:
 
             final_value = cash
         finally:
-            # 恢复（线程安全）
+            # 恢复（线程安全）+ 摘除日志 handler
+            for _lg in ("strategy", "backtest"):
+                logging.getLogger(_lg).removeHandler(_log_handler)
+            _run_logs_ctx.reset(_tok)
             with _patch_lock:
                 strat_mod.Strategy.place_order = original_place_order
 
@@ -280,13 +312,14 @@ class BacktestEngine:
             daily_values, adapter.trades, final_value,
             bars[0].get("ts") if bars else "",
             bars[-1].get("ts") if bars else "",
-            wins, total_closed, benchmark_bars,
+            wins, total_closed, benchmark_bars, run_logs,
         )
 
     def _calculate(self, daily_values: list, trades: list[Trade],
                    final_value: float, start_ts, end_ts,
                    wins: int = 0, total_closed: int = 0,
-                   benchmark_bars: list | None = None) -> BacktestResult:
+                   benchmark_bars: list | None = None,
+                   run_logs: list | None = None) -> BacktestResult:
         """计算绩效指标。benchmark_bars 为基准指数 bars（[{ts, close}, ...]），可选。"""
         if not daily_values:
             return BacktestResult()
@@ -397,6 +430,7 @@ class BacktestEngine:
                 "total_trades": len(trades),
                 "commission_rate": self.commission_rate,
             },
+            logs=run_logs or [],
         )
 
 

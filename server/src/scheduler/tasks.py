@@ -1043,7 +1043,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
             "benchmark_return": result.benchmark_return,
             "benchmark_volatility": result.benchmark_volatility,
             "total_trades": result.total_trades, "daily_values": result.daily_values,
-            "trades": result.trades, "metrics": result.metrics})
+            "trades": result.trades, "metrics": result.metrics, "logs": result.logs})
         with get_conn() as conn:
             conn.execute(
                 "UPDATE backtest_symbols SET status='done', result=%s WHERE run_id=%s AND symbol=%s",

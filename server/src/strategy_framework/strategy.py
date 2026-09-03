@@ -165,6 +165,10 @@ class Strategy:
         )
         self._init_factors(config.factors)
 
+    def log(self, msg: str, level: str = "info") -> None:
+        """策略作者日志入口（ptrade 批 1）：回测时进 run 作用域日志，实盘进进程日志。"""
+        getattr(logger, level.lower(), logger.info)(msg)
+
     def _init_factors(self, factor_configs: list[dict]):
         """从配置初始化因子实例。"""
         for fc in factor_configs:
