@@ -105,6 +105,18 @@ def record_broker_usage(provider: str, action: str, symbol: str = "", success: b
         logger.warning(f"broker_usage 写失败: {e}")
 
 
+def runner_client_id(task_id: int | None) -> int | None:
+    """worker TD 的独立 client_id（F-56，2026-09-03）。
+
+    XTP 普通用户 client_id 须 1-99（xtp_trader_api.h:602）；hub MD 占 broker 默认号，
+    多 worker TD 若共用默认号会撞号（同账户同 client_id 仅一个 TD session，后面的登录
+    无法连接）。派生 2-99 区间（task_id 映射），同时 running 任务数 < 98 时不冲突。
+    """
+    if task_id is None:
+        return None
+    return (int(task_id) - 1) % 98 + 2
+
+
 def build_xtp_setting(client_id: int | None = None) -> dict:
     """组装 vnpy XtpGateway SETTING（中文 key）。Broker DB 优先（PI3），.env XTP_TEST_* fallback。
 

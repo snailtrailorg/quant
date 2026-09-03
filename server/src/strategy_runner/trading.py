@@ -76,6 +76,14 @@ def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
                 row = cur.fetchone()
                 if row:
                     order_db_id, strategy_of = row[0], row[1] or sid
+            elif vt:
+                # F-50：重启后 _vt2cid 进程内存丢失，cid=None——用 vt_orderid 反查（order_log 已存该列）
+                cur = conn.execute(
+                    "SELECT id, strategy_id FROM order_log WHERE vt_orderid=%s ORDER BY id DESC LIMIT 1",
+                    (vt,))
+                row = cur.fetchone()
+                if row:
+                    order_db_id, strategy_of = row[0], row[1] or sid
             cur = conn.execute(
                 "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING RETURNING id",

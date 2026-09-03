@@ -131,3 +131,17 @@ def test_query_account_clears_cache_on_disconnect():
     with patch.object(adapter, "_wait_update", return_value=False):   # 模拟超时（不真实 sleep）
         result = adapter.query_account()
     assert result == []   # 清缓存后断线返回空，snapshot_cycle 据此跳过不写假值
+
+
+# --- F-56 worker TD 独立 client_id ---
+
+def test_runner_client_id_derivation():
+    """worker TD 独立 client_id：1-99 范围（XTP 普通用户），避开 hub MD 默认号。"""
+    from src.strategy_framework.broker import runner_client_id
+    assert runner_client_id(None) is None
+    assert runner_client_id(1) == 2     # (1-1)%98+2
+    assert runner_client_id(8) == 9
+    # 范围锁：任意 task_id 都落在 2-99（普通用户 1-99，避开 hub MD 的 broker 默认号）
+    for tid in range(1, 300):
+        cid = runner_client_id(tid)
+        assert 2 <= cid <= 99, f"task_id={tid} -> client_id={cid} 越界"

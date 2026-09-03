@@ -23,7 +23,7 @@ except ImportError:
 
 # 2026-08-19 模块归位：build_xtp_setting 搬 strategy_framework/broker（hub/runner 双消费方）；
 # 此别名保 tests/scripts 旧 import 兼容
-from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
+from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting, runner_client_id
 
 # 批 4a（2026-08-27）：交易域九单元单源化于 trading（write_trade_log/快照/熔断沿/recalc/
 # stop_due/对账/frozen/buy_ok/_flush_positions）——direct 与 hub worker 共享，语义与提取前
@@ -127,7 +127,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     from src.strategy_runner.hub_worker import run as hub_worker_run
 
     logger.info("任务 %s 以 hub 模式启动（策略 %s 标的 %s）", tid or sid, sid, symbol)
-    setting = _build_xtp_setting()
+    setting = _build_xtp_setting(client_id=runner_client_id(tid))   # F-56：worker TD 独立 client_id（多任务防撞号）
     boot_epoch = int(time.time())   # 评审 S8：秒级 epoch（分钟级同分钟重启会撞 id）
 
     # 每日连接窗·TD 侧（P2 批 08-28，A/B 双盲审）：窗开建连/窗关启动不连（窗开沿由

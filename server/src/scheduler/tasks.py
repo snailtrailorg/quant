@@ -319,10 +319,11 @@ def reconcile_three_books():
             if orphan_signals > 0:
                 issues.append(f"信号无委托: {orphan_signals} 笔")
 
-            # 2. 委托不成交
+            # 2. 委托不成交（F-50 口径收紧：只告警「已提交未成交」——原 status!='filled' 恒真，
+            # 把 send_failed 失败单/submitting 僵尸单也误报成噪音）
             cur = conn.execute("""
                 SELECT count(*) FROM order_log o
-                WHERE o.status != 'filled'
+                WHERE o.status = 'submitted'
                 AND NOT EXISTS (SELECT 1 FROM trade_log t WHERE t.order_id = o.id)
             """)
             unfilled = cur.fetchone()[0]

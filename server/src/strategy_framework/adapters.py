@@ -74,6 +74,10 @@ class ExecutionAdapter(ABC):
         """查当日成交（默认空，从事件缓存读）。"""
         return []
 
+    def get_vt_orderid(self, client_id: str) -> str | None:
+        """client_id -> vnpy 委托号（成交/撤单关联用）。默认无实现返回 None。"""
+        return None
+
 
 # --- 场内 XTP 适配器（vnpy_xtp 网关，可转债/场内基金/A 股股票） ---
 
@@ -205,6 +209,11 @@ class XTPAdapter(ExecutionAdapter):
             logger.warning("撤单退化路径：无缓存，用纯 orderid %s 盲撤（symbol 未知）", pure)
             req = CancelRequest(orderid=pure, symbol="", exchange=_vnpy_exchange(""))
         self._gateway.cancel_order(req)
+
+    def get_vt_orderid(self, client_id: str) -> str | None:
+        """client_id -> vnpy 委托号（send_order 写回 _cid2vt）。F-50：成交/撤单关联用。"""
+        with self._lock:
+            return self._cid2vt.get(client_id)
 
     # ── 查询（事件驱动，触发后轮询等结果） ──
 

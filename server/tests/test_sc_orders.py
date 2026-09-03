@@ -26,6 +26,9 @@ class FakeAdapter:
             raise self.exc
         return self.ret
 
+    def get_vt_orderid(self, client_id):
+        return None   # 对齐 ExecutionAdapter 基类默认（F-50 加）
+
 
 @pytest.fixture
 def strat():

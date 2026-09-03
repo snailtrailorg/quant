@@ -99,6 +99,7 @@ class TestWriteTradeLog:
     def test_returning_insert_and_commit(self):
         conn = self._conn()
         adapter = _adapter()
+        conn.execute.return_value.fetchone.return_value = None   # F-50：cid 与 vt_orderid 均无匹配
         with patch.object(db, "get_conn", return_value=conn):
             trading.write_trade_log(_trade(), adapter, "s1", "600000.SHSE")
         sqls = [c.args[0] for c in conn.execute.call_args_list]
@@ -120,6 +121,19 @@ class TestWriteTradeLog:
         assert lookup.args[1] == ("CID-9",)
         insert = [c for c in conn.execute.call_args_list if "INSERT INTO trade_log" in c.args[0]][0]
         assert insert.args[1][1] == "s-owner" and insert.args[1][2] == 42
+
+    def test_vt_orderid_fallback_resolves_order(self):
+        """F-50：重启后 _vt2cid 空（cid=None），用 vt_orderid 反查 order_log。"""
+        conn = self._conn()
+        adapter = _adapter()   # _vt2cid 空
+        conn.execute.return_value.fetchone.return_value = (99, "s-owner")
+        with patch.object(db, "get_conn", return_value=conn):
+            trading.write_trade_log(_trade(), adapter, "s1", "600000.SHSE")
+        lookup = conn.execute.call_args_list[0]
+        assert "FROM order_log WHERE vt_orderid=%s" in lookup.args[0]
+        assert lookup.args[1] == ("x.1",)
+        insert = [c for c in conn.execute.call_args_list if "INSERT INTO trade_log" in c.args[0]][0]
+        assert insert.args[1][1] == "s-owner" and insert.args[1][2] == 99
 
     def test_sell_direction_mapped(self):
         conn = self._conn()

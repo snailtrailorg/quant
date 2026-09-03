@@ -410,7 +410,10 @@ class Strategy:
             return
         record_broker_usage(self.config.adapter, sig.action.name, self.symbol,
                             success=True, latency_ms=int((_t.time() - _t0) * 1000))
-        self._update_order_status(order_row_id, "submitted", client_order_id=client_id)
+        # F-50：写回 vt_orderid（vnpy 委托号）——重启后 _vt2cid 丢失，write_trade_log 靠它反查 order_id
+        vt_orderid = self.adapter.get_vt_orderid(client_id)
+        self._update_order_status(order_row_id, "submitted", client_order_id=client_id,
+                                  vt_orderid=vt_orderid)
 
     def _log_signal_order(self, sig: Signal, final_order: dict, status: str = "submitted") -> tuple:
         """写 signal_log + order_log（三账对账数据来源，P1-3；SC1 起带 status 流转）。
@@ -438,17 +441,19 @@ class Strategy:
 
     @staticmethod
     def _update_order_status(order_row_id: int, status: str,
-                             client_order_id: str | None = None, error: str | None = None) -> None:
-        """SC1：order_log 状态流转（submitting→submitted/send_failed；成交/撤单由 trade/事件推进）。"""
+                             client_order_id: str | None = None, error: str | None = None,
+                             vt_orderid: str | None = None) -> None:
+        """SC1：order_log 状态流转（submitting→submitted/send_failed；成交/撤单由 trade/事件推进）。
+
+        F-50（2026-09-03）：加 vt_orderid（vnpy 委托号）——重启后 _vt2cid 进程内存丢失，
+        write_trade_log 靠 vt_orderid 反查 order_id。字段全量 SET（未传为 NULL，send_failed 时本就 NULL）。
+        """
         try:
             from ..data_platform.db import get_conn
             with get_conn() as conn:
-                if client_order_id is not None:
-                    conn.execute("UPDATE order_log SET status=%s, client_order_id=%s, error=%s WHERE id=%s",
-                                 (status, client_order_id, error, order_row_id))
-                else:
-                    conn.execute("UPDATE order_log SET status=%s, error=%s WHERE id=%s",
-                                 (status, error, order_row_id))
+                conn.execute(
+                    "UPDATE order_log SET status=%s, client_order_id=%s, error=%s, vt_orderid=%s WHERE id=%s",
+                    (status, client_order_id, error, vt_orderid, order_row_id))
                 conn.commit()
         except Exception as e:
             logger.warning("更新 order_log 状态失败 (id=%s -> %s): %s", order_row_id, status, e)

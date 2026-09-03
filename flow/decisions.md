@@ -5,10 +5,10 @@
 
 ---
 
-## 2026-09-03 · SF1 长尾清尾裁定：F-37/38/49 知情接受 + F-50/56 残余单独批
+## 2026-09-03 · SF1 长尾清尾裁定：F-37/38/49 知情接受 + F-50/56 完成
 
 - **F-37/38/49 知情接受（不修）**：F-37 停止延迟已从 direct 60s 缩到 hub 5s（send_order 无 stop_due 门控的残余窗口仅 5s，停止即 `os._exit` 进程整体终止）；F-38 last_price≤0 tick 静默丢是 B4「vnpy 同款」有意设计（停牌标的本就无 bar）；F-49 暖机靠 send_order 时刻 `buy_ok_check`（last_bar_wall<300s）+ hub 流回放间接缓解，`_warmup_history` 不显式校验新鲜度。三者低风险/有意，不再扩门。
-- **F-50/F-56 残余单独批（不本批混做）**：F-50（order_log 状态机无 filled/canceled 终态 + 重启后 `write_trade_log` 的 order_id NULL）与 F-56（worker TD 共用 client_id + XTP SDK 目录并发写）均动交易核心链路/需 XTP 平台知识，混在归因+清尾批里匆忙做风险高——单独立批（含 order_log 终态 schema 变更评估 + client_id 分配策略）。
+- **F-50/F-56 本批完成（独立复核后不推迟）**：F-50 核心=order_log 加 vt_orderid 列（迁移 0063）+ write_trade_log 重启后 vt_orderid 反查（消除 order_id NULL 误判）+ 「委托不成交」口径收紧排除 send_failed；撤单 canceled 终态涉及 EVENT_ORDER 监听分层，不做（口径收紧用 status='submitted' 已隐含排除）。F-56 子问题 1=worker TD 独立 client_id（runner_client_id 派生 2-99，XTP 普通用户 1-99 见 xtp_trader_api.h:602）；**子问题 2（SDK 目录）判定不修**——MD 写 quote.log、TD 写 trade.log，文件名天然区分，目录级共享非并发冲突（子代理的「并发互写」系未复核的过度判断）。
 
 ## 2026-09-03 · 冒烟门抓修 3 真 bug + 令牌/密码/staging 若干裁定
 
