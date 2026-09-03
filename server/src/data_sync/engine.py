@@ -1403,3 +1403,21 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
             "local_last": loc[2] if loc else None,
         })
     return {"items": items, "total": total}
+
+
+def sync_benchmark_index(ts_code: str = "000300.SH", start: str = "20050408",
+                         end: str | None = None) -> dict:
+    """同步基准指数日线到 bar_index（ptrade 全家桶批 1，2026-09-04）。
+
+    沪深300（000300.SH → 000300.SHSE）等指数独立存 bar_index，与股票 bar_1d 分离。
+    幂等：ON CONFLICT (symbol, ts) DO NOTHING，重复同步跳过。
+    """
+    from src.data_platform.adapters.tushare_adapter import pull_index_daily, to_save_rows
+    from src.data_platform.db import save_index_bars
+    end = end or date.today().strftime("%Y%m%d")
+    df = pull_index_daily(ts_code, start, end)
+    if df.empty:
+        return {"status": "empty", "pulled": 0, "saved": 0, "ts_code": ts_code}
+    rows = to_save_rows(df, "1D")
+    saved = save_index_bars(rows)
+    return {"status": "success", "pulled": len(df), "saved": saved, "ts_code": ts_code}

@@ -271,7 +271,9 @@ def get_backtest_api(run_id: int,
     # symbols 改对象数组（此前字符串数组致状态列空白）+ 顶层 task_id（终止按钮 #17）
     _mk = [_s for _s in syms if _s[1] == "done"]
     _agg = {}
-    for k in ("total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades"):
+    for k in ("total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades",
+              "volatility", "sortino_ratio", "alpha", "beta", "information_ratio",
+              "benchmark_return", "benchmark_volatility"):
         vals = [float((json.loads(_s[2]) or {}).get(k) or 0) for _s in _mk if _s[2]]
         _agg[k] = round(sum(vals) / len(vals), 3) if vals else None
     _run_task = r[9]   # H11：runs 级 task_id
@@ -321,7 +323,9 @@ def backtest_summary(run_id: int, payload: dict = Depends(require_perm("read")))
     with get_conn() as conn:
         cur = conn.execute("SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
         rows = cur.fetchall()
-    metrics_keys = ["total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades"]
+    metrics_keys = ["total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades",
+                    "volatility", "sortino_ratio", "alpha", "beta", "information_ratio",
+                    "benchmark_return", "benchmark_volatility"]
     results = []
     for sym, result_json in rows:
         r = json.loads(result_json) if result_json else {}

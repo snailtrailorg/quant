@@ -172,6 +172,36 @@ def save_bars_overwrite(freq: str, rows: list[tuple]) -> int:
         return len(rows)
 
 
+def save_index_bars(rows: list[tuple]) -> int:
+    """批量写入指数日线到 bar_index 表（回测基准数据）。冲突跳过，返回写入行数。
+
+    rows 11 字段同 save_bars：(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)。
+    """
+    if not rows:
+        return 0
+    insert_sql = (
+        "INSERT INTO bar_index (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source) "
+        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (symbol, ts) DO NOTHING"
+    )
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(insert_sql, rows)
+        conn.commit()
+        return len(rows)
+
+
+def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
+    """查询指数日线（bar_index），返回 DataFrame（symbol 为 vt_symbol 如 000300.SHSE）。"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT ts, open, high, low, close, volume, amount FROM bar_index "
+                "WHERE symbol=%s AND ts >= %s AND ts <= %s ORDER BY ts",
+                (symbol, start, end))
+            rows = cur.fetchall()
+    return pd.DataFrame(rows, columns=["ts", "open", "high", "low", "close", "volume", "amount"])
+
+
 def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
     """查询 K 线，返回 DataFrame。
 

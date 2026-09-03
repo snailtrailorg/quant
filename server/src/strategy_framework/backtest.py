@@ -51,6 +51,7 @@ class BacktestResult:
     beta: float = 0.0            # β（P3-2，需基准数据，默认 0）
     information_ratio: float = 0.0  # 信息率（P3-2）
     benchmark_return: float = 0.0   # 基准收益（P3-2）
+    benchmark_volatility: float = 0.0  # 基准波动率（ptrade 批 1，年化 %）
     total_trades: int = 0          # 总交易次数
     # 明细
     daily_values: list = field(default_factory=list)   # 每日净值
@@ -144,7 +145,8 @@ class BacktestEngine:
 
     def run(self, config: StrategyConfig, bars: list[dict],
             shares_per_trade: int = 100,
-            on_bar_callback: Callable | None = None) -> BacktestResult:
+            on_bar_callback: Callable | None = None,
+            benchmark_bars: list | None = None) -> BacktestResult:
         """运行回测。
 
         Args:
@@ -242,6 +244,7 @@ class BacktestEngine:
                     "ts": str(bar.get("ts")),   # 转 str：pandas Timestamp 不可 JSON 序列化（回测 result 存库崩溃→symbol error）
                     "cash": round(cash, 2),
                     "position": position,
+                    "avg_price": round(avg_price, 4),   # 持仓成本（ptrade 批 1：每日持仓盈亏）
                     "close": close,
                     "value": round(portfolio_value, 2),
                 })
@@ -277,13 +280,14 @@ class BacktestEngine:
             daily_values, adapter.trades, final_value,
             bars[0].get("ts") if bars else "",
             bars[-1].get("ts") if bars else "",
-            wins, total_closed,
+            wins, total_closed, benchmark_bars,
         )
 
     def _calculate(self, daily_values: list, trades: list[Trade],
                    final_value: float, start_ts, end_ts,
-                   wins: int = 0, total_closed: int = 0) -> BacktestResult:
-        """计算绩效指标。"""
+                   wins: int = 0, total_closed: int = 0,
+                   benchmark_bars: list | None = None) -> BacktestResult:
+        """计算绩效指标。benchmark_bars 为基准指数 bars（[{ts, close}, ...]），可选。"""
         if not daily_values:
             return BacktestResult()
 
@@ -323,6 +327,29 @@ class BacktestEngine:
             volatility = 0.0
             sortino = 0.0
 
+        # 基准对比（ptrade 批 1，2026-09-04）：α/β/信息率/基准收益/基准波动率
+        # 口径（方案定稿四）：简单收益率、rf=0.02/252、β=cov/var(ddof=0)、
+        # Jensen α 年化、信息率=mean(active)/std(active)×√252、基准收益同期累计截断窗口
+        benchmark_return = 0.0
+        benchmark_volatility = 0.0
+        alpha = 0.0
+        beta = 0.0
+        information_ratio = 0.0
+        if benchmark_bars:
+            r_p, r_b = _align_benchmark_returns(daily_values, benchmark_bars)
+            if len(r_p) > 1 and len(r_b) > 1:
+                rf = 0.02 / 252
+                var_b = float(np.var(r_b, ddof=0))
+                beta = float(np.cov(r_p, r_b, ddof=0)[0, 1] / var_b) if var_b > 0 else 0.0
+                alpha = float((np.mean(r_p) - rf - beta * (np.mean(r_b) - rf)) * 252)
+                active = [a - b for a, b in zip(r_p, r_b)]
+                active_std = float(np.std(active, ddof=0))
+                information_ratio = float(np.mean(active) / active_std * np.sqrt(252)) if active_std > 0 else 0.0
+                benchmark_volatility = float(np.std(r_b, ddof=0) * np.sqrt(252) * 100)
+            b_closes = [float(b["close"]) for b in benchmark_bars if b.get("close")]
+            if len(b_closes) > 1 and b_closes[0] > 0:
+                benchmark_return = round((b_closes[-1] / b_closes[0] - 1) * 100, 2)
+
         # 胜率（从主循环传入）
         win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
 
@@ -337,6 +364,11 @@ class BacktestEngine:
             sharpe_ratio=round(sharpe, 2),
             volatility=round(volatility, 2),
             sortino_ratio=round(sortino, 2),
+            alpha=round(alpha, 4),
+            beta=round(beta, 4),
+            information_ratio=round(information_ratio, 4),
+            benchmark_return=benchmark_return,
+            benchmark_volatility=round(benchmark_volatility, 2),
             total_trades=len(trades),
             daily_values=daily_values,
             trades=[{
@@ -351,11 +383,34 @@ class BacktestEngine:
                 "sharpe_ratio": round(sharpe, 2),
                 "volatility": round(volatility, 2),
                 "sortino_ratio": round(sortino, 2),
+                "alpha": round(alpha, 4),
+                "beta": round(beta, 4),
+                "information_ratio": round(information_ratio, 4),
+                "benchmark_return": benchmark_return,
+                "benchmark_volatility": round(benchmark_volatility, 2),
                 "win_rate": round(win_rate, 1),
                 "total_trades": len(trades),
                 "commission_rate": self.commission_rate,
             },
         )
+
+
+def _align_benchmark_returns(daily_values: list, benchmark_bars: list) -> tuple[list, list]:
+    """对齐策略与基准的逐日收益率（按日期 inner join，方案定稿四·8 对齐）。
+
+    策略 daily_values 的 value → 逐日收益率；基准 benchmark_bars 的 close → 逐日收益率。
+    公共交易日 inner join，停牌/缺日跳过。返回 (r_p, r_b)。
+    """
+    strat_val = {str(d["ts"])[:10]: float(d["value"]) for d in daily_values}
+    bench_close = {str(b["ts"])[:10]: float(b["close"]) for b in benchmark_bars}
+    common = sorted(set(strat_val) & set(bench_close))
+    r_p, r_b = [], []
+    for i in range(1, len(common)):
+        d, prev = common[i], common[i - 1]
+        if strat_val[prev] > 0 and bench_close[prev] > 0:
+            r_p.append(strat_val[d] / strat_val[prev] - 1)
+            r_b.append(bench_close[d] / bench_close[prev] - 1)
+    return r_p, r_b
 
 # --- 防未来函数校验 ---
 

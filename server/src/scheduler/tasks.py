@@ -981,6 +981,15 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
     bars_df = get_bars(symbol, "1D", start, end)
     bars = bars_df.to_dict("records") if not bars_df.empty else []
 
+    # 基准数据（ptrade 批 1）：沪深300 指数日线，对齐回测窗口；缺失降级（α/β 返回 0，不崩回测）
+    benchmark_bars = []
+    try:
+        from src.data_platform.db import get_index_bars
+        bench_df = get_index_bars("000300.SHSE", start, end)
+        benchmark_bars = bench_df.to_dict("records") if not bench_df.empty else []
+    except Exception:
+        pass
+
     # 合并参数（链条打磨#14）：parameter_defs 默认值 → 策略级 params → per-symbol 覆盖。
     # 此前不合并默认值——同一策略缺省参数下回测与实盘（live_task 走 build_default_params）行为不同
     strategy_params = json.loads(sc[2]) if sc[2] else {}
@@ -1010,7 +1019,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
         }), ex=3600)
 
     try:
-        result = engine.run(cfg, bars, on_bar_callback=on_bar_cb)
+        result = engine.run(cfg, bars, on_bar_callback=on_bar_cb, benchmark_bars=benchmark_bars)
         # 链条打磨#15：预检/防未来失败（engine 返回 metrics.error 而非抛异常）→ 置 failed
         # 此前照常 status='done' + 存全 0 指标——预检形同虚设
         _pc_err = (result.metrics or {}).get("error")
@@ -1028,6 +1037,11 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
         result_json = json.dumps({
             "total_return_pct": result.total_return_pct, "win_rate": result.win_rate,
             "max_drawdown_pct": result.max_drawdown_pct, "sharpe_ratio": result.sharpe_ratio,
+            "volatility": result.volatility, "sortino_ratio": result.sortino_ratio,
+            "alpha": result.alpha, "beta": result.beta,
+            "information_ratio": result.information_ratio,
+            "benchmark_return": result.benchmark_return,
+            "benchmark_volatility": result.benchmark_volatility,
             "total_trades": result.total_trades, "daily_values": result.daily_values,
             "trades": result.trades, "metrics": result.metrics})
         with get_conn() as conn:
@@ -1082,6 +1096,13 @@ def write_summary_metrics(conn, run_id: int) -> None:
             "max_drawdown_pct": _avg("max_drawdown_pct"),
             "sharpe": _avg("sharpe_ratio"),
             "win_rate": _avg("win_rate"),
+            "volatility": _avg("volatility"),
+            "sortino": _avg("sortino_ratio"),
+            "alpha": _avg("alpha"),
+            "beta": _avg("beta"),
+            "information_ratio": _avg("information_ratio"),
+            "benchmark_return": _avg("benchmark_return"),
+            "benchmark_volatility": _avg("benchmark_volatility"),
             "trade_count": int(sum(int(r.get("total_trades") or 0) for r in rows)),
         }), run_id))
 

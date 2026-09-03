@@ -155,6 +155,21 @@ def pull_daily(ts_code: str, start_date: str, end_date: str | None = None,
     return df
 
 
+def pull_index_daily(ts_code: str, start_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """拉取指数日线（index_daily 接口，如 000300.SH 沪深300，作回测基准）。
+
+    指数无复权，adj_factor 置 None（16 号「NULL 因子=1.0 降级」）。列与 pull_daily 对齐
+    （补 adj_factor 后），供 to_save_rows 统一处理。
+    """
+    pro = get_pro()
+    end_date = end_date or date.today().strftime("%Y%m%d")
+    df = pro.index_daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+    if df is None or df.empty:
+        return pd.DataFrame()
+    df["adj_factor"] = None
+    return df
+
+
 def pull_cb_daily(start_date: str, end_date: str | None = None) -> pd.DataFrame:
     """拉取可转债日线全量（cb_daily 接口）。"""
     pro = get_pro()
