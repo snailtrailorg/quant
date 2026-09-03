@@ -1,7 +1,7 @@
 # staging 彩排组参数（2026-08-26）——镜像 quant-prod 全集保真，
-# 仅四处彩排差异：①交易窗不强制（随时彩排）②波次缩减 web/celery/feishu/hub（task 连外网不入；
-# feishu 入波——2026-09-03 彩排盲区改进：staging=dev 同机同 DB，重启本地真实飞书助手
-# 跑满启动路径，连本地 Lark 非生产外网）③XTP md_host 已指 127.0.0.1（连不上即刻拒绝，
+# 仅四处彩排差异：①交易窗不强制（随时彩排）②波次缩减 web/celery/hub（feishu/task 连外网不入；
+# feishu 暂不恢复入波——本地助手走 webhook 路径、长连接单元 quant-feishu-bot@2 重启 dwell 不稳，
+# 2026-09-03 实测彩排红，留上产后诊断长连接凭证）③XTP md_host 已指 127.0.0.1（连不上即刻拒绝，
 # 防黑洞挂起>Watchdog）④（批 4b 原差异④波次源 static→db 已对齐 prod——彩排即验证 DB 真相源通道，消盲区）
 ---
 # ---- 根与包装器（sudoers 白名单通道，设计稿 §2）----
@@ -34,8 +34,6 @@ deploy_waves:
     readyz: "http://127.0.0.1:8001/readyz"
   - name: celery
     units: [quant-celery-worker@quant.service, quant-celery-beat@quant.service]   # W6 收官日修:beat 补入波次(此前不在任何波——演练复活后版本收敛断言首逮;对齐 prod 波
-  - name: feishu
-    units: "{{ deploy_task_units_feishu }}"   # 2026-09-03 彩排盲区改进:入波(DB 真相源;重启本地真实助手跑满启动路径;空则跳过)
   - name: hub
     units: [quant-md-hub@quant.service]
 deploy_postverify_units: "{{ deploy_waves | map(attribute='units') | flatten }}"
