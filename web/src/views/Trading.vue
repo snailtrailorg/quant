@@ -185,13 +185,12 @@ const load = async () => {
   loadPrices()   // wd-20 §1.4.2：现价随 5s/60s 轮询联动（不阻塞主 load）
 }
 const loadPrices = async () => {
-  const syms = [...new Set((positionData.value?.positions || [])
-    .map(p => p.symbol?.split('.')[0]).filter(Boolean))]
-  await Promise.all(syms.map(async s => {
+  const positions = positionData.value?.positions || []
+  await Promise.all(positions.map(async p => {
     try {
-      const d = await stockDetail(s)
+      const d = await stockDetail(p.symbol)   // 带后缀（detail 端点 to_vt_symbol 不推断交易所，去后缀=404）
       const q = d?.quote
-      if (q?.last != null) lastPrices.value[s] = q.last
+      if (q?.last != null) lastPrices.value[p.symbol?.split('.')[0]] = q.last
     } catch { /* 单标的行情失败不阻塞其余 */ }
   }))
 }
