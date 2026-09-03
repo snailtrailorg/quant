@@ -52,7 +52,7 @@
             </div>
           </template>
           <v-chart v-if="rangeCurve.length" :option="curveOption" autoresize style="height: 280px" />
-          <div v-else class="empty-cell">{{ t('dashboard.noCurve') }}</div>
+          <EmptyState size="small" :description="t('dashboard.noCurve')" />
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="24" :md="9">
@@ -63,13 +63,13 @@
             <span style="color: var(--text-secondary)">{{ task.symbol }}</span>
             <StatusTag :value="task.status" />
           </div>
-          <div v-if="!liveTasks.length" class="empty-cell">{{ t('dashboard.noTasks') }}</div>
+          <EmptyState size="small" :description="t('dashboard.noTasks')" :action-label="t('dashboard.goStrategy')" @action="$router.push('/live-task')" />
         </el-card>
         <!-- 今日事件（简化：今日 risk/data 类通知） -->
         <el-card shadow="never" style="margin-top: var(--sp-4)">
           <template #header>{{ t('dashboard.todayEvents') }}</template>
           <div v-for="n in todayEvents.slice(0, 4)" :key="n.id" class="evt-row">⚠ {{ n.title }}</div>
-          <div v-if="!todayEvents.length" class="empty-cell">{{ t('dashboard.noEvents') }}</div>
+          <EmptyState size="small" :description="t('dashboard.noEvents')" />
         </el-card>
       </el-col>
     </el-row>
@@ -82,7 +82,7 @@
           <span>{{ (p.symbol || '').split('.')[0] }}</span>
           <span class="num" :class="pnlClass(p.pnl)">{{ pnlArrow(p.pnl) }} {{ fmtMoney(p.pnl) }}</span>
         </div>
-        <div v-if="!topPositions.length" class="empty-cell">{{ t('dashboard.noPositions') }}</div>
+        <EmptyState size="small" :description="t('dashboard.noPositions')" :action-label="t('dashboard.goStrategy')" @action="$router.push('/trading')" />
       </el-card></el-col>
       <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header>{{ t('dashboard.todayOrders') }}</template>
@@ -91,7 +91,7 @@
           {{ (o.symbol || '').split('.')[0] }} ×{{ o.volume }}
           <span style="color: var(--text-secondary)">{{ (o.ts || '').slice(5, 16) }}</span>
         </div>
-        <div v-if="!todayOrders.length" class="empty-cell">{{ t('dashboard.noOrders') }}</div>
+        <EmptyState size="small" :description="t('dashboard.noOrders')" />
       </el-card></el-col>
       <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.dataHealth') }}<el-button text size="small" @click="$router.push('/data-integrity')">{{ t('dashboard.more') }}→</el-button></div></template>
@@ -106,7 +106,7 @@
           <span :class="b.status === 'done' ? 'up' : ''">{{ bs(b).ret != null ? pct(bs(b).ret) : b.status }}</span>
           <span style="color: var(--text-secondary)">{{ (b.created_at || '').slice(5, 10) }}</span>
         </div>
-        <div v-if="!recentBacktests.length" class="empty-cell">{{ t('dashboard.noBacktests') }}</div>
+        <EmptyState size="small" :description="t('dashboard.noBacktests')" :action-label="t('dashboard.goBacktest')" @action="$router.push('/backtest')" />
       </el-card></el-col>
     </el-row>
   </div>
@@ -123,6 +123,7 @@ import { bs, pct } from '../utils/backtestSummary'
 import { goCategoryPath } from '../utils/goCategory'
 import StatusTag from '../components/StatusTag.vue'
 import KpiCard from '../components/KpiCard.vue'
+import EmptyState from '../components/EmptyState.vue'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
@@ -268,5 +269,4 @@ const sparkline = computed(() => {
 .evt-row:last-child { border-bottom: none; }
 .pos-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
 .pos-row:last-child { border-bottom: none; }
-.empty-cell { color: var(--text-secondary); font-size: var(--fs-body); padding: 18px 0; text-align: center; }
 </style>

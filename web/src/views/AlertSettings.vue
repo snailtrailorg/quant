@@ -1,5 +1,5 @@
 <template>
-  <div v-if="!allowed" class="empty-cell" style="padding: var(--sp-6) 0">{{ t('alerts.noPerm') }}</div>
+  <EmptyState v-if="!allowed" :description="t('alerts.noPerm')" />
   <div v-else>
     <el-alert v-if="!cfg.sms_configured" type="info" :closable="false" style="margin-bottom: 12px">
       {{ t('alerts.smsNotConfigured') }}
@@ -110,6 +110,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
+import EmptyState from '../components/EmptyState.vue'
 
 const { t } = useI18n()
 const CATS = ['risk', 'task', 'data', 'system']
