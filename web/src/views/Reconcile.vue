@@ -84,8 +84,8 @@ import api from '../api'
 
 const { t } = useI18n()
 // W5 残留修(W6 审 A-P2):localStorage role → /auth/me permissions(W4 权限驱动)
+import { meOnce } from '../api'   // 提到声明前（编译器提升 import 时会吃掉下行防御分号——ASI 连体雷根修）
 const canHandle = ref(false)
-import { meOnce } from '../api'
 ;(async () => {
   const me = await meOnce()
   canHandle.value = (me?.permissions || []).includes('trade')
