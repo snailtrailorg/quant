@@ -683,6 +683,10 @@ export default {
       phSymbols: '一行一个 vt_symbol，如 600000.SHSE',
       loadFailed: '加载标的池失败',
       idNameRequired: 'ID 和名称必填',
+      minuteSymbolsTitle: '攒数据标的（分钟）',
+      minuteSymbolsPlaceholder: '批量直标（一行一个 vt_symbol，如 600000.SHSE）',
+      minuteSymbolsAdd: '加入攒数据',
+      minuteSymbolSource: '来源',
     },
     factors: {
       pvParams: '试算参数（标的/频率/根数）',
@@ -1764,6 +1768,10 @@ export default {
       phSymbols: 'One vt_symbol per line, e.g. 600000.SHSE',
       loadFailed: 'Failed to load pools',
       idNameRequired: 'ID and name are required',
+      minuteSymbolsTitle: 'Minute Data Symbols',
+      minuteSymbolsPlaceholder: 'Batch tag (one vt_symbol per line, e.g. 600000.SHSE)',
+      minuteSymbolsAdd: 'Tag',
+      minuteSymbolSource: 'Source',
     },
     factors: {
       pvParams: 'Trial params (symbol/freq/bars)',

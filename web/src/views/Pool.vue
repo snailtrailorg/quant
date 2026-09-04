@@ -67,6 +67,29 @@
       </el-table-column>
     </el-table>
 
+    <!-- 攒数据标的（分钟数据源重构 21 号 §3.5：池级∪个股级统一展开表） -->
+    <el-divider content-position="left">{{ t('pool.minuteSymbolsTitle') }}</el-divider>
+    <div style="display: flex; gap: 8px; margin-bottom: var(--sp-2); align-items: flex-start">
+      <el-input v-model="minuteSymbolsInput" type="textarea" :rows="3"
+                :placeholder="t('pool.minuteSymbolsPlaceholder')" style="width: 420px" />
+      <el-button type="primary" :disabled="navReadonly" @click="addMinuteSymbols">
+        {{ t('pool.minuteSymbolsAdd') }}
+      </el-button>
+    </div>
+    <el-table :data="minuteSymbols" size="small" max-height="300">
+      <el-table-column prop="symbol" :label="t('common.symbol')" width="180" />
+      <el-table-column prop="source" :label="t('pool.minuteSymbolSource')" width="130" />
+      <el-table-column :label="t('pool.minuteLastTs')" width="200">
+        <template #default="{ row }">{{ row.last_ts || '-' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="100">
+        <template #default="{ row }">
+          <el-button type="danger" size="small" :disabled="navReadonly"
+                     @click="removeMinuteSymbol(row.symbol)">✕</el-button>
+        </template>
+      </el-table-column>
+    </el-table>
+
     <el-dialog v-model="showDialog" :close-on-click-modal="false" :title="t('pool.createTitle')" width="560px">
       <el-form :model="newPool" label-width="110px">
         <el-form-item label="ID"><el-input v-model="newPool.id" :disabled="!!newPool._edit" /></el-form-item>
@@ -108,7 +131,7 @@ import { ref, reactive, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import api, { getPools, createPoolApi, deletePoolApi } from '../api'
+import api, { getPools, createPoolApi, deletePoolApi, getMinuteSymbols, addMinuteSymbol, delMinuteSymbol } from '../api'
 
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
@@ -119,6 +142,8 @@ const showDialog = ref(false)
 const expanded = ref([])
 const addSymbolInput = reactive({})
 const minuteStatus = reactive({})   // {pool_id: [{symbol,last_ts,covered}]}
+const minuteSymbols = ref([])
+const minuteSymbolsInput = ref('')
 const newPool = ref({ id: '', name: '', category: 'astock', symbolsStr: '', description: '', minuteStart: null, _edit: false })
 
 const load = async () => {
@@ -191,7 +216,27 @@ const editPool = row => {
 const delPool = async row => {
   try { await deletePoolApi(row.id); ElMessage.success(t('common.deleteSuccess')); await load() } catch (e) { ElMessage.error(t('common.deleteFailed')) }
 }
-onMounted(load)
+
+const loadMinuteSymbols = async () => {
+  try { minuteSymbols.value = (await getMinuteSymbols()).symbols || [] } catch { minuteSymbols.value = [] }
+}
+const addMinuteSymbols = async () => {
+  const syms = minuteSymbolsInput.value.split('\n').map(s => s.trim()).filter(Boolean)
+  if (!syms.length) return
+  let ok = 0
+  for (const sym of syms) {
+    try { await addMinuteSymbol(sym); ok++ }
+    catch (e) { ElMessage.error(`${sym}: ${e?.detail || t('common.saveFailed')}`) }
+  }
+  if (ok) ElMessage.success(`${ok} ✓`)
+  minuteSymbolsInput.value = ''
+  await loadMinuteSymbols()
+}
+const removeMinuteSymbol = async sym => {
+  try { await delMinuteSymbol(sym); ElMessage.success(`${sym} ✕`); await loadMinuteSymbols() }
+  catch (e) { ElMessage.error(e?.detail || t('common.deleteFailed')) }
+}
+onMounted(() => { load(); loadMinuteSymbols() })
 
 // P2-9(05 §5.9):remote 标的搜索+分钟覆盖回补
 const poolSymbols = ref([])
