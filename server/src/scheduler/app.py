@@ -182,6 +182,13 @@ app.conf.update(
         #     "schedule": 300.0,
         #     "options": {"queue": "data", "expires": 290},
         # },
+        # 腾讯分钟攒（分钟数据源重构 21 号 §3.2：每天收盘后 15:20 取一次腾讯 1min，
+        # 攒进 bar_1min 供回测/研判/暖机；数据源开关 minute_data_source='tencent' 才跑）
+        "tencent-minute-sync": {
+            "task": "src.scheduler.tasks.tencent_minute_sync_task",
+            "schedule": crontab(hour=15, minute=20),
+            "options": {"queue": "data", "expires": 350},
+        },
         "health-monitor": {
             "task": "src.scheduler.tasks.health_monitor_check",
             "schedule": 30.0,
