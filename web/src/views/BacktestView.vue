@@ -4,7 +4,8 @@
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('backtest.viewTitle', { symbol }) }}</span>
         <div>
-          <el-button @click="exportReport">{{ t('backtest.exportReport') }}</el-button>
+          <el-button @click="exportReport('xlsx')">Excel</el-button>
+          <el-button @click="exportReport('pdf')">PDF</el-button>
           <el-button type="primary" @click="$router.back()">{{ t('common.return') }}</el-button>
         </div>
       </div>
@@ -92,7 +93,7 @@ import VChart from 'vue-echarts'
 import api, { getBacktestRun } from '../api'
 import { cssVar } from '../utils/cssVar'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
 const route = useRoute()
@@ -163,13 +164,14 @@ const rollingRows = computed(() => {
 
 const levelTag = level => ({ WARNING: 'warning', ERROR: 'danger', CRITICAL: 'danger' }[level] || 'info')
 
-const exportReport = async () => {
+const exportReport = async (format = 'xlsx') => {
   try {
-    const r = await api.get(`/backtest/${runId}/export`, { params: { symbol }, responseType: 'blob' })
+    const path = format === 'pdf' ? `/backtest/${runId}/export.pdf` : `/backtest/${runId}/export`
+    const r = await api.get(path, { params: { symbol, lang: locale.value }, responseType: 'blob' })
     const url = URL.createObjectURL(r)   // axios 拦截器 res=>res.data，r 已是 Blob（盲审 P0/P1）
     const a = document.createElement('a')
     a.href = url
-    a.download = `backtest_${runId}_${symbol}.xlsx`
+    a.download = `backtest_${runId}_${symbol}.${format}`
     document.body.appendChild(a)
     a.click()
     a.remove()

@@ -445,6 +445,115 @@ def backtest_export(run_id: int, symbol: str | None = None,
         headers={"Content-Disposition": f"attachment; filename=backtest_{run_id}.xlsx"})
 
 
+# 回测报告 PDF 多语言列头（ptrade 批 3，N 语言：新增语言只加 key）
+_PDF_COLUMNS = {
+    "zh": {
+        "meta": ["标的", "总收益%", "基准收益%", "阿尔法", "贝塔", "夏普", "索提诺", "信息率", "策略波动率%", "基准波动率%", "最大回撤%", "胜率%", "交易次数"],
+        "trades": ["标的", "时间", "方向", "数量", "价格", "佣金"],
+        "positions": ["标的", "日期", "收盘价", "持仓", "成本", "现金", "总资产"],
+    },
+    "en": {
+        "meta": ["Symbol", "Total Return%", "Benchmark%", "Alpha", "Beta", "Sharpe", "Sortino", "Info Ratio", "Volatility%", "Bench Volatility%", "Max Drawdown%", "Win Rate%", "Trades"],
+        "trades": ["Symbol", "Time", "Action", "Volume", "Price", "Commission"],
+        "positions": ["Symbol", "Date", "Close", "Position", "Avg Cost", "Cash", "Total Value"],
+    },
+}
+
+
+def _register_cjk_font() -> str:
+    """注册 CJK 字体（幂等）。NotoSansCJK 放服务器 PDF_FONT_PATH 指向；开发机 fallback DroidSansFallback。
+
+    返回字体名（注册成功 "CJK"，否则 "Helvetica" 拉丁兜底——CJK 字符会豆腐块，属降级不崩）。
+    """
+    import os
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    if "CJK" in pdfmetrics.getRegisteredFontNames():
+        return "CJK"
+    font_path = os.environ.get("PDF_FONT_PATH", "/usr/share/ghostscript/Resource/CIDFSubst/DroidSansFallback.ttf")
+    if font_path and os.path.exists(font_path):
+        try:
+            pdfmetrics.registerFont(TTFont("CJK", font_path))
+            return "CJK"
+        except Exception:
+            pass
+    return "Helvetica"
+
+
+@router.get("/api/backtest/{run_id}/export.pdf")
+def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en",
+                        payload: dict = Depends(require_perm("read"))):
+    """导出回测报告为 PDF（ptrade 批 3）：指标概览/交易明细/每日持仓三表。
+
+    字体 NotoSansCJK 放服务器（PDF_FONT_PATH 指向）；文本按 lang（normalize_lang 回落 en）。
+    """
+    import io
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+    from reportlab.lib import colors
+    from fastapi.responses import StreamingResponse
+    from src.email_service import normalize_lang
+
+    lang = normalize_lang(lang)
+    cols = _PDF_COLUMNS[lang]
+    font = _register_cjk_font()
+
+    sql = "SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'"
+    params = [run_id]
+    if symbol:
+        sql += " AND symbol=%s"
+        params.append(symbol)
+    sql += " ORDER BY symbol"
+    with get_conn() as conn:
+        cur = conn.execute(sql, params)
+        rows = cur.fetchall()
+    if not rows:
+        raise ApiError(404, "BACKTEST_NOT_FOUND", "run 无 done 结果")
+
+    def _build_table(header, data_rows):
+        t = Table([header] + data_rows, repeatRows=1)
+        t.setStyle(TableStyle([
+            ("FONTNAME", (0, 0), (-1, -1), font),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        ]))
+        return t
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), title=f"Backtest {run_id}")
+    elements = []
+
+    meta_rows = []
+    for sym, result_json in rows:
+        r = _safe_json(result_json, {})
+        meta_rows.append([sym, r.get("total_return_pct", ""), r.get("benchmark_return", ""),
+                          r.get("alpha", ""), r.get("beta", ""), r.get("sharpe_ratio", ""),
+                          r.get("sortino_ratio", ""), r.get("information_ratio", ""),
+                          r.get("volatility", ""), r.get("benchmark_volatility", ""),
+                          r.get("max_drawdown_pct", ""), r.get("win_rate", ""), r.get("total_trades", "")])
+    elements.append(_build_table(cols["meta"], meta_rows))
+
+    trade_rows = []
+    for sym, result_json in rows:
+        r = _safe_json(result_json, {})
+        for t in (r.get("trades") or []):
+            trade_rows.append([sym, (t.get("ts") or "")[:19], t.get("action"), t.get("volume"), t.get("price"), t.get("commission")])
+    elements.append(_build_table(cols["trades"], trade_rows))
+
+    pos_rows = []
+    for sym, result_json in rows:
+        r = _safe_json(result_json, {})
+        for d in (r.get("daily_values") or []):
+            pos_rows.append([sym, (d.get("ts") or "")[:10], d.get("close"), d.get("position"), d.get("avg_price"), d.get("cash"), d.get("value")])
+    elements.append(_build_table(cols["positions"], pos_rows))
+
+    doc.build(elements)
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="application/pdf",
+                             headers={"Content-Disposition": f"attachment; filename=backtest_{run_id}.pdf"})
+
+
 @router.get("/api/backtest/{run_id}/{symbol}/stream")
 def backtest_stream_api(run_id: int, symbol: str,
                         payload: dict = Depends(require_perm("read"))):
