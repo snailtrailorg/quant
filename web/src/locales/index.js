@@ -445,7 +445,7 @@ export default {
       date: '日期', closePrice: '收盘价', positionQty: '持仓数量', avgPrice: '持仓成本',
       marketValue: '持仓市值', cash: '现金', totalValue: '总资产',
       logLevel: '级别', logMsg: '日志内容', logTime: '时间',
-      metricType: '指标', windowCol: '窗口',
+      metricType: '指标', windowCol: '窗口', exportReport: '导出报告',
     },
     riskRule: {
       title: '风控规则管理（平台化风控，规则 DB 化 + 可扩展）',
@@ -1530,7 +1530,7 @@ export default {
       date: 'Date', closePrice: 'Close', positionQty: 'Position', avgPrice: 'Avg Cost',
       marketValue: 'Market Value', cash: 'Cash', totalValue: 'Total Value',
       logLevel: 'Level', logMsg: 'Message', logTime: 'Time',
-      metricType: 'Metric', windowCol: 'Window',
+      metricType: 'Metric', windowCol: 'Window', exportReport: 'Export Report',
     },
     riskRule: {
       title: 'Risk Rule Management (platform risk, DB-driven + extensible)',

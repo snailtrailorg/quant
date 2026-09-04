@@ -3,7 +3,10 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('backtest.viewTitle', { symbol }) }}</span>
-        <el-button type="primary" @click="$router.back()">{{ t('common.return') }}</el-button>
+        <div>
+          <el-button @click="exportReport">{{ t('backtest.exportReport') }}</el-button>
+          <el-button type="primary" @click="$router.back()">{{ t('common.return') }}</el-button>
+        </div>
       </div>
     </template>
 
@@ -86,7 +89,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
-import { getBacktestRun } from '../api'
+import api, { getBacktestRun } from '../api'
 import { cssVar } from '../utils/cssVar'
 
 const { t } = useI18n()
@@ -157,6 +160,18 @@ const rollingRows = computed(() => {
 })
 
 const levelTag = level => ({ WARNING: 'warning', ERROR: 'danger', CRITICAL: 'danger' }[level] || 'info')
+
+const exportReport = async () => {
+  try {
+    const r = await api.get(`/backtest/${runId}/export`, { responseType: 'blob' })
+    const url = URL.createObjectURL(r.data)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `backtest_${runId}.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  } catch { ElMessage.error(t('common.failed')) }
+}
 
 const equityOption = computed(() => ({
   tooltip: { trigger: 'axis' },

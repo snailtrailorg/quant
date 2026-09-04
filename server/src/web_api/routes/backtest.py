@@ -388,6 +388,56 @@ def backtest_metrics(run_id: int, type: str = "return",
     return {"run_id": run_id, "type": type, "windows": ["1", "3", "6", "12"], "data": data}
 
 
+@router.get("/api/backtest/{run_id}/export")
+def backtest_export(run_id: int, payload: dict = Depends(require_perm("read"))):
+    """导出回测报告为 Excel（ptrade 批 3）：指标概览 / 交易明细 / 每日持仓 三 sheet。
+
+    同步生成（数据量小，10s 内完成），返回 xlsx 文件流。
+    """
+    import io
+    from openpyxl import Workbook
+    from fastapi.responses import StreamingResponse
+
+    with get_conn() as conn:
+        cur = conn.execute("SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done' ORDER BY symbol", (run_id,))
+        rows = cur.fetchall()
+    if not rows:
+        raise ApiError(404, "BACKTEST_NOT_FOUND", "run 无 done 结果")
+
+    wb = Workbook()
+    ws_meta = wb.active
+    ws_meta.title = "指标概览"
+    metric_cols = ["symbol", "total_return_pct", "benchmark_return", "alpha", "beta", "sharpe_ratio",
+                   "sortino_ratio", "information_ratio", "volatility", "benchmark_volatility",
+                   "max_drawdown_pct", "win_rate", "total_trades"]
+    ws_meta.append(metric_cols)
+    for sym, result_json in rows:
+        r = json.loads(result_json) if result_json else {}
+        ws_meta.append([sym] + [r.get(k, "") for k in metric_cols[1:]])
+
+    ws_trades = wb.create_sheet("交易明细")
+    ws_trades.append(["symbol", "ts", "action", "volume", "price", "commission"])
+    for sym, result_json in rows:
+        r = json.loads(result_json) if result_json else {}
+        for t in (r.get("trades") or []):
+            ws_trades.append([sym, t.get("ts"), t.get("action"), t.get("volume"), t.get("price"), t.get("commission")])
+
+    ws_pos = wb.create_sheet("每日持仓")
+    ws_pos.append(["symbol", "ts", "close", "position", "avg_price", "cash", "value"])
+    for sym, result_json in rows:
+        r = json.loads(result_json) if result_json else {}
+        for d in (r.get("daily_values") or []):
+            ws_pos.append([sym, d.get("ts"), d.get("close"), d.get("position"), d.get("avg_price"), d.get("cash"), d.get("value")])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=backtest_{run_id}.xlsx"})
+
+
 @router.get("/api/backtest/{run_id}/{symbol}/stream")
 def backtest_stream_api(run_id: int, symbol: str,
                         payload: dict = Depends(require_perm("read"))):

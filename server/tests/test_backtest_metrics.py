@@ -50,3 +50,16 @@ def test_backtest_metrics_invalid_type():
         with pytest.raises(ApiError) as e:
             b.backtest_metrics(1, "garbage", {})
     assert e.value.code == "INVALID_METRIC_TYPE"
+
+
+def test_backtest_export_generates_xlsx():
+    """导出 Excel：返回 xlsx 文件流（指标概览/交易/持仓三 sheet）。"""
+    from src.web_api.routes import backtest as b
+    result = {"total_return_pct": 10.5,
+              "trades": [{"ts": "2026-01-01", "action": "BUY", "volume": 100, "price": 10, "commission": 0.5}],
+              "daily_values": [{"ts": "2026-01-01", "close": 10, "position": 100, "avg_price": 10, "cash": 9000, "value": 10000}]}
+    conn = _conn_with_results([("600000.SHSE", result)])
+    with patch.object(b, "get_conn", return_value=conn):
+        resp = b.backtest_export(1, {})
+    assert resp.media_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert "backtest_1.xlsx" in resp.headers["Content-Disposition"]
