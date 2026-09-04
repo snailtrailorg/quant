@@ -152,6 +152,27 @@ def save_bars(freq: str, rows: list[tuple]) -> int:
         return len(rows)
 
 
+def refresh_minute_symbols() -> int:
+    """重算 minute_symbols 展开表的 pool 部分（幂等；direct 行不动）。
+
+    池级标记（pools.minute_history_start 非空的 astock 池成员）→ source='pool:{id}'；
+    个股直标 source='direct' 由 API 直接 UPSERT，不参与重算。direct 优先：同标的既直标
+    又在池时，INSERT ON CONFLICT DO NOTHING 保留已存在的 direct 行（盲审 A-P0/B-P1 同根）。
+    返回展开表总行数。minute_symbols 由迁移 0066 建表。
+    """
+    with get_conn() as conn:
+        conn.execute("DELETE FROM minute_symbols WHERE source LIKE 'pool:%'")
+        conn.execute(
+            "INSERT INTO minute_symbols (symbol, source) "
+            "SELECT DISTINCT ON (ps.symbol) ps.symbol, 'pool:' || p.id "
+            "FROM pool_symbols ps JOIN pools p ON p.id = ps.pool_id "
+            "WHERE p.minute_history_start IS NOT NULL AND p.category = 'astock' "
+            "ON CONFLICT (symbol) DO NOTHING")
+        conn.commit()
+        cur = conn.execute("SELECT count(*) FROM minute_symbols")
+        return cur.fetchone()[0]
+
+
 def save_bars_overwrite(freq: str, rows: list[tuple]) -> int:
     """批量写入 K 线，冲突覆盖（回补用，体现手动回补优先级高于增量）。
 
