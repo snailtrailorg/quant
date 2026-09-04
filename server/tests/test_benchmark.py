@@ -38,3 +38,33 @@ def test_align_benchmark_returns_date_alignment():
              {"ts": "2024-01-04", "value": 102}]
     r_p, r_b = _align_benchmark_returns(daily, benchmark)
     assert len(r_p) == 2   # 公共日期 01/03/04 → 2 个收益率（01→03, 03→04）
+
+
+def test_rolling_metrics_monthly_windows():
+    """滚动绩效：每月 × 1/3/6/12 窗口，窗口不足 N 月返回 None，指标字段齐全。"""
+    from src.strategy_framework.backtest import rolling_metrics
+    daily = [
+        {"ts": "2026-01-05", "value": 100.0},
+        {"ts": "2026-01-30", "value": 101.0},
+        {"ts": "2026-02-05", "value": 102.0},
+        {"ts": "2026-02-27", "value": 103.0},
+        {"ts": "2026-03-05", "value": 104.0},
+        {"ts": "2026-03-31", "value": 105.0},
+    ]
+    result = rolling_metrics(daily, [])
+    assert set(result.keys()) == {"2026-01", "2026-02", "2026-03"}
+    # 早期窗口：1 月有数据，3/6/12 月不足 None
+    assert result["2026-01"]["1"] is not None
+    assert result["2026-01"]["3"] is None
+    assert result["2026-01"]["6"] is None
+    assert result["2026-01"]["12"] is None
+    # 3 月窗口（1-3 月）有数据，6/12 不足
+    assert result["2026-03"]["3"] is not None
+    assert result["2026-03"]["6"] is None
+    # 指标字段齐全
+    m = result["2026-03"]["3"]
+    for k in ("return", "max_drawdown", "sharpe", "sortino", "alpha", "beta",
+              "information_ratio", "volatility", "benchmark_return", "benchmark_volatility"):
+        assert k in m
+    # 3 月窗口收益 = (105/100 - 1)*100 = 5.0
+    assert m["return"] == 5.0

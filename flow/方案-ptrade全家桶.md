@@ -11,7 +11,7 @@
 | 2 | 每日持仓快照 | 批1（avg_price 补入 daily_values） |
 | 3 | 回测日志 | 批1 |
 | 4 | 基准对比（沪深300） | 批0+批1 |
-| 5 | **backtest_tasks 缓存表** | **批1**（盲审补漏） |
+| 5 | ~~backtest_tasks 缓存表~~ | **不建**——backtest_runs+backtest_symbols 已覆盖「任务+结果」，滚动绩效存 result.metrics.rolling（无冗余表） |
 | 6 | 回测 API 分层 | 批2 |
 | 7 | 滚动绩效二维表 | 批1 后端算 + 批3 前端 |
 | 8 | **导出报告 Excel/PDF** | **批3**（盲审补漏：后端导出端点 + 库 + PDF 中文） |
@@ -61,12 +61,12 @@
 ### 批 0（spike，前置闸门）
 实测 `pro.index_daily` 5000 档能否拉沪深300 + 列结构；不可则启用 510300.SH ETF fallback。产出：实测结论 + 选定基准源。**不通过不进批1**。
 
-### 批 1（后端：数据 + 指标 + 缓存表）
+### 批 1（后端：数据 + 指标 + 滚动绩效）
 1. 基准同步（pull_index_daily + bar_index 表迁移 + data_sync）
 2. `_calculate` 算 α/β/信息率/基准收益/基准波动率（口径见四）
 3. daily_values 补 avg_price（一行）
 4. 回测日志（机制见五）
-5. **backtest_tasks 缓存表**（参数快照 + 资金曲线 JSON + 绩效 JSON，滚动绩效预计算缓存）
+5. **滚动绩效**（rolling_metrics 月度 1/3/6/12 窗口 × 指标，存 result.metrics.rolling，不建冗余表）
 6. **指标传播链路**（metrics dict / result JSON / summary_metrics / API keys / 前端，见二）
 
 ### 批 2（后端 API 分层）
@@ -86,7 +86,7 @@
 2. 导出库依赖 + 中文 PDF 字体（al8 无 CJK 字体 → 豆腐块）+ 异步生成
 3. 日志采集不破坏实盘/回测行为（run 作用域隔离）
 4. 历史回测兼容：旧 run result JSON 无 α/β，前端容错显 `-`
-5. 滚动绩效计算量（backtest_tasks 缓存表承担）
+5. 滚动绩效计算量（回测时算一次存 result.metrics.rolling，前端读缓存不重算）
 6. 多市场基准（当前只 A 股沪深300，加密留 TODO）
 
 ## 九、制度符合性（W6）
