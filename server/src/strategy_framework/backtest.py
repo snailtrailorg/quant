@@ -349,8 +349,8 @@ class BacktestEngine:
         benchmark_return = bm["benchmark_return"]
         benchmark_volatility = bm["benchmark_volatility"]
 
-        # 滚动绩效（ptrade 批 1）：月度 1/3/6/12 窗口指标，有基准才算
-        rolling = rolling_metrics(daily_values, benchmark_bars) if benchmark_bars else {}
+        # 滚动绩效（ptrade 批 1）：月度 1/3/6/12 窗口指标；空基准时基准字段自然为 0（非基准指标仍算）
+        rolling = rolling_metrics(daily_values, benchmark_bars)
 
         # 胜率（从主循环传入）
         win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
@@ -439,7 +439,10 @@ def _benchmark_metrics(daily_values: list, benchmark_bars: list) -> dict:
         out["information_ratio"] = float(np.mean(active) / active_std * np.sqrt(252)) if active_std > 0 else 0.0
         out["benchmark_volatility"] = float(np.std(r_b, ddof=0) * np.sqrt(252) * 100)
         out["volatility"] = float(np.std(r_p, ddof=0) * np.sqrt(252) * 100)
-    b_closes = [float(b["close"]) for b in benchmark_bars if b.get("close")]
+    # benchmark_return：同期累计收益，截断到 daily_values 的日期范围（窗口截断，盲审 P1）
+    dv_dates = {str(d["ts"])[:10] for d in daily_values}
+    b_closes = [float(b["close"]) for b in benchmark_bars
+                if str(b["ts"])[:10] in dv_dates and b.get("close")]
     if len(b_closes) > 1 and b_closes[0] > 0:
         out["benchmark_return"] = round((b_closes[-1] / b_closes[0] - 1) * 100, 2)
     return out
@@ -464,11 +467,13 @@ def _window_metrics(win_dv: list, benchmark_bars: list) -> dict:
         dd = (peak - v) / peak * 100 if peak > 0 else 0
         max_dd = max(max_dd, dd)
     bm = _benchmark_metrics(win_dv, benchmark_bars)
+    # volatility 与 sharpe/sortino 同源（窗口连续日收益率 returns），非对齐 r_p（盲审 P2）
+    volatility = float(np.std(returns) * np.sqrt(252) * 100) if returns else 0.0
     return {"return": round(total_return, 2), "max_drawdown": round(max_dd, 2),
             "sharpe": round(sharpe, 2), "sortino": round(sortino, 2),
             "alpha": round(bm["alpha"], 4), "beta": round(bm["beta"], 4),
             "information_ratio": round(bm["information_ratio"], 4),
-            "volatility": round(bm["volatility"], 2),
+            "volatility": round(volatility, 2),
             "benchmark_return": bm["benchmark_return"],
             "benchmark_volatility": round(bm["benchmark_volatility"], 2)}
 
@@ -477,22 +482,26 @@ def rolling_metrics(daily_values: list, benchmark_bars: list) -> dict:
     """月度滚动绩效（ptrade 批 1）：每个结束自然月，算 1/3/6/12 月窗口的指标。
 
     返回 {month: {window: metric_dict}}，month="YYYY-MM"，window ∈ {"1","3","6","12"}。
-    窗口数据不足（< 2 根）时该窗口为 None。
+    窗口按日历月算术（严格 N 自然月，非有数据月计数），数据不足（< 2 根）时该窗口为 None。
     """
     def _month(ts):
         return str(ts)[:7]
+
+    def _month_add(m, delta):
+        y, mo = int(m[:4]), int(m[5:7])
+        idx = (y * 12 + (mo - 1)) + delta
+        return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
 
     months = sorted({_month(d["ts"]) for d in daily_values})
     result: dict = {}
     for i, m in enumerate(months):
         result[m] = {}
         for win in (1, 3, 6, 12):
-            if i - win + 1 < 0:
-                result[m][str(win)] = None   # 窗口不足 N 个自然月
+            if i + 1 < win:
+                result[m][str(win)] = None   # 时间不足 win 个月（回测第 i+1 个月）
                 continue
-            start = i - win + 1
-            win_months = set(months[start:i + 1])
-            win_dv = [d for d in daily_values if _month(d["ts"]) in win_months]
+            start_month = _month_add(m, -(win - 1))
+            win_dv = [d for d in daily_values if start_month <= _month(d["ts"]) <= m]
             result[m][str(win)] = _window_metrics(win_dv, benchmark_bars) if len(win_dv) >= 2 else None
     return result
 

@@ -51,10 +51,10 @@
 ## 五、回测日志机制（盲审 P1：低估，定死）
 
 - 现状：`Strategy` 用模块级 `logger`；`BacktestEngine` monkey-patch `place_order` **绕开** `Strategy.place_order` 的风控 warning；"资金不足"在引擎静默 `adapter.trades.remove()`（216/236 行）零日志。
-- 机制三件：
-  1. **run 作用域 handler**：`contextvar`/thread-local 的 list handler，`finally` 摘除（同 place_order monkey-patch 模式），防并发回测串日志。
-  2. **引擎侧补记**：资金不足调整/生成订单/订单号（`bt-{n}`），在引擎主循环显式发日志（不只策略 log.info）。
-  3. **策略作者 log API**：`Strategy` 加 `self.log(msg)` 方法（run 作用域内转发到 list）。
+- 机制三件（最终定为**显式收集器**，非 handler/contextvar/setLevel 隐式状态）：
+  1. **run 局部变量收集**：引擎 run 维护 `run_logs` 局部变量 + `def _log_fn`（append），注入 `strategy._log_fn`——显式、零共享状态，进程内并发天然安全。
+  2. **引擎侧补记**：资金不足/持仓不足直接 `_log_fn`（不走 logger.warning）。
+  3. **策略作者 log API**：`Strategy.log(msg, level)` 优先走 `_log_fn`，无则 fallback 模块 logger（实盘行为保留）。
 
 ## 六、方案（分 4 批，批0 spike 先行）
 
