@@ -19,5 +19,6 @@
 | `Deepseek改进建议-20260802.md` | reference/ 外部评估 | 2026-08-02 快照：所指缺失（回测/因子/对账 API、用户体系、i18n）**已全部实现**（`flow/待办.md` M2 线全 ✅），评估失时效 | 00-总体设计.md + 08-web-admin.md |
 | `VNPY策略调试加载回测相关建议.md` | reference/ 外部方案 | 建议架构（ClickHouse/MongoDB、独立 strategy_core）与定稿选型（PG 统一/自建 Strategy 基类）相悖；有用部分（进程隔离/策略解耦）已吸收 | 00-总体设计.md + 02-strategy-framework.md |
 | `多资产量化数据中台架构升级方案.md` | reference/ 外部升级方案 | 2026-08-27 评审（对 60%/错 40%/过度 100%）：**三件已做完**（限流治理，06 号 §9 吸收）、三件裁定不做有理由——错 40% 与过度设计留在 reference 易误导，归档 | 06-data-platform.md §9 + `docs/任务/限流治理吸收.md` |
+| `任务卡TEMPLATE.md` | flow/tasks/ 旧任务卡模板 | 旧「T<编号> 6 字段」任务卡写法已被 8 字段自包含模板取代（2026-09-04 归档） | flow/规范/任务模板.md |
 
 > **注意**：`docs/任务/A2.md` 的旧版本曾在此目录，已删除（`docs/任务/A2.md` 为最新版本）。
