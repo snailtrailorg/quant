@@ -18,7 +18,7 @@ bcrypt>=4.0            # 密码哈希（P2：passlib 死依赖移除——src �
 pandas>=2.0           # P2：直接依赖显式声明（原靠 vnpy/tushare 传递带入，上游一变即 ImportError）
 numpy>=1.26            # P2：同上（直接依赖显式声明）
 openpyxl>=3.1          # ptrade 批 3：回测报告 Excel 导出（原靠传递带入未声明）
-reportlab>=4.0         # ptrade 批 3：回测报告 PDF 导出（CJK 字体放服务器，PDF_FONT_PATH 指向）
+weasyprint>=60         # ptrade 批 3：回测报告 PDF 导出（HTML→PDF；服务器 pango/cairo+wqy-microhei 已装，fc 自动发现字体）
 python-multipart>=0.0.9    # 表单/上传
 
 # === 数据库 / 缓存 / 向量 ===

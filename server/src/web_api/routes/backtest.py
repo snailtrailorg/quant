@@ -460,43 +460,22 @@ _PDF_COLUMNS = {
 }
 
 
-def _register_cjk_font() -> str:
-    """注册 CJK 字体（幂等）。NotoSansCJK 放服务器 PDF_FONT_PATH 指向；开发机 fallback DroidSansFallback。
-
-    返回字体名（注册成功 "CJK"，否则 "Helvetica" 拉丁兜底——CJK 字符会豆腐块，属降级不崩）。
-    """
-    import os
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
-    if "CJK" in pdfmetrics.getRegisteredFontNames():
-        return "CJK"
-    font_path = os.environ.get("PDF_FONT_PATH", "/usr/share/ghostscript/Resource/CIDFSubst/DroidSansFallback.ttf")
-    if font_path and os.path.exists(font_path):
-        try:
-            pdfmetrics.registerFont(TTFont("CJK", font_path))
-            return "CJK"
-        except Exception:
-            pass
-    return "Helvetica"
-
-
 @router.get("/api/backtest/{run_id}/export.pdf")
 def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en",
                         payload: dict = Depends(require_perm("read"))):
     """导出回测报告为 PDF（ptrade 批 3）：指标概览/交易明细/每日持仓三表。
 
-    字体 NotoSansCJK 放服务器（PDF_FONT_PATH 指向）；文本按 lang（normalize_lang 回落 en）。
+    weasyprint HTML→PDF：系统字体（wqy-microhei 等）自动 fc 发现，无需手动注册；
+    文本按 lang（normalize_lang 回落 en）。
     """
+    import html as _html
     import io
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-    from reportlab.lib import colors
+    from weasyprint import HTML
     from fastapi.responses import StreamingResponse
     from src.email_service import normalize_lang
 
     lang = normalize_lang(lang)
     cols = _PDF_COLUMNS[lang]
-    font = _register_cjk_font()
 
     sql = "SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'"
     params = [run_id]
@@ -510,19 +489,13 @@ def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en"
     if not rows:
         raise ApiError(404, "BACKTEST_NOT_FOUND", "run 无 done 结果")
 
-    def _build_table(header, data_rows):
-        t = Table([header] + data_rows, repeatRows=1)
-        t.setStyle(TableStyle([
-            ("FONTNAME", (0, 0), (-1, -1), font),
-            ("FONTSIZE", (0, 0), (-1, -1), 7),
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-        ]))
-        return t
+    def _esc(v):
+        return _html.escape(str(v) if v is not None else "")
 
-    buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), title=f"Backtest {run_id}")
-    elements = []
+    def _table(headers, data_rows):
+        thead = "".join(f"<th>{_esc(h)}</th>" for h in headers)
+        tbody = "".join("<tr>" + "".join(f"<td>{_esc(c)}</td>" for c in row) + "</tr>" for row in data_rows)
+        return f"<table><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
 
     meta_rows = []
     for sym, result_json in rows:
@@ -532,23 +505,35 @@ def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en"
                           r.get("sortino_ratio", ""), r.get("information_ratio", ""),
                           r.get("volatility", ""), r.get("benchmark_volatility", ""),
                           r.get("max_drawdown_pct", ""), r.get("win_rate", ""), r.get("total_trades", "")])
-    elements.append(_build_table(cols["meta"], meta_rows))
 
     trade_rows = []
     for sym, result_json in rows:
         r = _safe_json(result_json, {})
         for t in (r.get("trades") or []):
             trade_rows.append([sym, (t.get("ts") or "")[:19], t.get("action"), t.get("volume"), t.get("price"), t.get("commission")])
-    elements.append(_build_table(cols["trades"], trade_rows))
 
     pos_rows = []
     for sym, result_json in rows:
         r = _safe_json(result_json, {})
         for d in (r.get("daily_values") or []):
             pos_rows.append([sym, (d.get("ts") or "")[:10], d.get("close"), d.get("position"), d.get("avg_price"), d.get("cash"), d.get("value")])
-    elements.append(_build_table(cols["positions"], pos_rows))
 
-    doc.build(elements)
+    doc_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  body {{ font-family: "WenQuanYi Micro Hei", "Noto Sans CJK SC", sans-serif; font-size: 10px; }}
+  table {{ border-collapse: collapse; width: 100%; margin-bottom: 18px; }}
+  th, td {{ border: 1px solid #999; padding: 4px 6px; text-align: left; }}
+  th {{ background: #eee; font-weight: bold; }}
+</style></head>
+<body>
+{_table(cols["meta"], meta_rows)}
+{_table(cols["trades"], trade_rows)}
+{_table(cols["positions"], pos_rows)}
+</body></html>"""
+
+    buf = io.BytesIO()
+    HTML(string=doc_html).write_pdf(buf)
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/pdf",
                              headers={"Content-Disposition": f"attachment; filename=backtest_{run_id}.pdf"})
