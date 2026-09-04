@@ -342,6 +342,52 @@ def backtest_summary(run_id: int, payload: dict = Depends(require_perm("read")))
     return {"run_id": run_id, "count": len(results), "avg": avg, "ranked": ranked}
 
 
+# 滚动绩效 type → result.metrics.rolling 的指标键（ptrade 批 2）
+_ROLLING_METRIC_KEYS = {
+    "return": "return", "benchmark": "benchmark_return", "alpha": "alpha",
+    "beta": "beta", "sharpe": "sharpe", "sortino": "sortino",
+    "information": "information_ratio", "volatility": "volatility",
+    "drawdown": "max_drawdown",
+}
+
+
+@router.get("/api/backtest/{run_id}/metrics")
+def backtest_metrics(run_id: int, type: str = "return",
+                     payload: dict = Depends(require_perm("read"))):
+    """滚动绩效（ptrade 批 2）：按 type 返回月度 × 窗口（1/3/6/12）的指标二维表。
+
+    type ∈ return|benchmark|alpha|beta|sharpe|sortino|information|volatility|drawdown。
+    多标的按均值聚合。返回 {"data": {month: {window: value}}}，前端滚动二维表直接渲染。
+    """
+    key = _ROLLING_METRIC_KEYS.get(type)
+    if key is None:
+        raise ApiError(400, "INVALID_METRIC_TYPE",
+                       f"type {type} 非法，须 ∈ {list(_ROLLING_METRIC_KEYS)}")
+    with get_conn() as conn:
+        cur = conn.execute("SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
+        rows = cur.fetchall()
+    agg: dict = {}
+    for _sym, result_json in rows:
+        r = json.loads(result_json) if result_json else {}
+        rolling = (r.get("metrics") or {}).get("rolling") or {}
+        for month, windows in rolling.items():
+            agg.setdefault(month, {})
+            for win, m in windows.items():
+                if m is None:
+                    continue
+                v = m.get(key)
+                if v is None:
+                    continue
+                agg[month].setdefault(win, []).append(v)
+    data = {}
+    for month in sorted(agg):
+        data[month] = {}
+        for win in ("1", "3", "6", "12"):
+            vals = agg.get(month, {}).get(win)
+            data[month][win] = round(sum(vals) / len(vals), 4) if vals else None
+    return {"run_id": run_id, "type": type, "windows": ["1", "3", "6", "12"], "data": data}
+
+
 @router.get("/api/backtest/{run_id}/{symbol}/stream")
 def backtest_stream_api(run_id: int, symbol: str,
                         payload: dict = Depends(require_perm("read"))):

@@ -70,7 +70,7 @@
 6. **指标传播链路**（metrics dict / result JSON / summary_metrics / API keys / 前端，见二）
 
 ### 批 2（后端 API 分层）
-`/api/backtest/{run_id}/overview|trades|positions|logs|metrics`（metrics 按 type 返回滚动绩效）。验收断言 overview==metrics==summary 同值。
+`GET /api/backtest/{run_id}/metrics?type=return|benchmark|alpha|beta|sharpe|sortino|information|volatility|drawdown`——滚动绩效按 type 返回月度×窗口（1/3/6/12）二维表，多标的均值聚合。trades/positions/logs/overview 复用详情端点（result 已含 daily_values/trades/metrics/logs/rolling，数据量小无需冗余端点）。
 
 ### 批 3（前端 + 导出）
 多标签页（收益概述/交易详情/每日持仓/日志/滚动二维表）+ **导出端点**（Excel openpyxl / PDF reportlab+中文字体，异步 Celery 生成避免卡 web 10s 超时）。
