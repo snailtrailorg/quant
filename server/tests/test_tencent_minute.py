@@ -20,7 +20,7 @@ def test_to_rows_ts_mapping():
     assert (rows[0][2].hour, rows[0][2].minute) == (9, 31)
     assert rows[0][3:7] == (9.27, 9.30, 9.27, 9.30)   # open/high/low/close
     assert rows[0][7] == 1353200.0
-    assert rows[0][8] is None and rows[0][9] is None and rows[0][10] == "tencent"   # amount/adj NULL, source
+    assert rows[0][8] == 0.0 and rows[0][9] is None and rows[0][10] == "tencent"   # amount=0(NOT NULL)/adj NULL, source
     # 1500 → 1501（收盘竞价错位）
     assert (rows[1][2].hour, rows[1][2].minute) == (15, 1)
 
@@ -51,6 +51,7 @@ def test_sync_saves_bars():
     bars = [("20260904", "0931", 9.27, 9.30, 9.27, 9.30, 1353200.0)]
     lock = MagicMock(); lock.acquired = True; lock.__enter__.return_value = lock
     with patch.object(tm, "_data_source", return_value="tencent"), \
+         patch.object(tm._pdb, "is_trading_day", return_value=True), \
          patch.object(tm, "SyncLock", return_value=lock), \
          patch.object(tm, "_minute_symbols", return_value=["600000.SHSE"]), \
          patch.object(tm, "_parse_tencent", return_value=bars), \
@@ -67,12 +68,17 @@ def test_sync_saves_bars():
 def test_check_gap_notifies_when_stale():
     """漏取检测：MAX(ts) 落后昨天 → safe_notify 告警。"""
     import importlib
-    from datetime import datetime, timedelta
+    from datetime import date, datetime, timedelta
     from src.data_sync import tencent_minute as tm
     notify_mod = importlib.import_module("src.alert_notify.notify")
     conn = MagicMock(); conn.__enter__.return_value = conn
-    conn.execute.return_value.fetchone.return_value = (datetime.now() - timedelta(days=3),)
+    # 两次 execute 返回不同值：MAX(ts) 落后 3 天 / 上一交易日 = 昨天
+    conn.execute.return_value.fetchone.side_effect = [
+        (datetime.now() - timedelta(days=3),),   # bar_1min MAX(ts)
+        (date.today() - timedelta(days=1),),     # trade_cal 上一交易日
+    ]
     with patch.object(tm._pdb, "get_conn", return_value=conn), \
+         patch.object(tm._pdb, "is_trading_day", return_value=True), \
          patch.object(notify_mod, "safe_notify") as notify_mock:
         tm._check_gap("600000.SHSE")
     notify_mock.assert_called_once()

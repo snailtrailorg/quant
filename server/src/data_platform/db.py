@@ -167,6 +167,7 @@ def refresh_minute_symbols() -> int:
             "SELECT DISTINCT ON (ps.symbol) ps.symbol, 'pool:' || p.id "
             "FROM pool_symbols ps JOIN pools p ON p.id = ps.pool_id "
             "WHERE p.minute_history_start IS NOT NULL AND p.category = 'astock' "
+            "AND ps.symbol NOT LIKE '%.BSE' "   # 北交所腾讯 mkline 不支持（盲审 A-P2/B-P2）
             "ON CONFLICT (symbol) DO NOTHING")
         conn.commit()
         cur = conn.execute("SELECT count(*) FROM minute_symbols")

@@ -36,12 +36,13 @@ def upgrade() -> None:
         "'分钟数据源（tencent=腾讯攒过渡 / tushare=Tushare 分钟线终极，互斥单选）') "
         "ON CONFLICT (key) DO NOTHING"
     )
-    # backfill：现有 minute_history_start 的 astock 池成员展开进表
+    # backfill：现有 minute_history_start 的 astock 池成员展开进表（排除北交所 BSE——腾讯不支持）
     op.execute(
         "INSERT INTO minute_symbols (symbol, source) "
         "SELECT DISTINCT ON (ps.symbol) ps.symbol, 'pool:' || p.id "
         "FROM pool_symbols ps JOIN pools p ON p.id = ps.pool_id "
         "WHERE p.minute_history_start IS NOT NULL AND p.category = 'astock' "
+        "AND ps.symbol NOT LIKE '%.BSE' "
         "ON CONFLICT (symbol) DO NOTHING"
     )
 

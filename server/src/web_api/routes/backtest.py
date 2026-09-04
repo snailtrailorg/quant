@@ -38,11 +38,19 @@ def list_pools(payload: dict = Depends(require_perm("read"))):
             "SELECT p.id, p.name, p.category, p.description, ps.symbol, p.minute_history_start "
             "FROM pools p LEFT JOIN pool_symbols ps ON ps.pool_id=p.id ORDER BY p.id")
         rows = cur.fetchall()
+        # minute_count：该池在展开表里的攒数据标的数（source='pool:{id}'，盲审 A-P2/B-P2）
+        try:
+            cur = conn.execute(
+                "SELECT source, count(*) FROM minute_symbols WHERE source LIKE 'pool:%' GROUP BY source")
+            pool_counts = {r[0][5:]: r[1] for r in cur.fetchall()}
+        except Exception:
+            pool_counts = {}
     pools = {}
     for pid, pname, pcat, pdesc, sym, mhs in rows:
         if pid not in pools:
             pools[pid] = {"id": pid, "name": pname, "category": pcat, "description": pdesc,
-                          "symbols": [], "minute_history_start": str(mhs) if mhs else None}
+                          "symbols": [], "minute_history_start": str(mhs) if mhs else None,
+                          "minute_count": pool_counts.get(str(pid), 0)}
         if sym:
             pools[pid]["symbols"].append(sym)
     return list(pools.values())
@@ -172,12 +180,14 @@ def list_minute_symbols(payload: dict = Depends(require_perm("read"))):
 @router.post("/api/minute-symbol/{symbol}")
 def add_minute_symbol(symbol: str, payload: dict = Depends(require_perm("strategy_control"))):
     """个股直标攒分钟数据（source='direct'，UPSERT 覆盖池来源）。"""
-    from src.data_platform.schema import to_vt_symbol, vt_to_ts
+    from src.data_platform.schema import to_vt_symbol
     raw = (symbol or "").strip()
     if not raw or "." not in raw:
         raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
     vt = to_vt_symbol(raw)
-    vt_to_ts(vt)   # 校验可转换
+    ex = vt.rsplit(".", 1)[-1].upper()
+    if ex not in ("SHSE", "SZSE", "BSE"):
+        raise ApiError(400, "SYMBOL_INVALID", f"不支持的交易所后缀: {ex}（支持 SHSE/SZSE/BSE）")
     with get_conn() as conn:
         conn.execute(
             "INSERT INTO minute_symbols (symbol, source) VALUES (%s, 'direct') "
@@ -189,12 +199,17 @@ def add_minute_symbol(symbol: str, payload: dict = Depends(require_perm("strateg
 
 @router.delete("/api/minute-symbol/{symbol}")
 def del_minute_symbol(symbol: str, payload: dict = Depends(require_perm("strategy_control"))):
-    """取消个股直标（仅删 direct 行；池驱动的 pool 行不删，下轮 refresh 重算）。"""
+    """取消个股直标（仅删 direct 行；删后 refresh 把仍属池的标的重物化为 pool 行）。"""
     from src.data_platform.schema import to_vt_symbol
-    vt = to_vt_symbol(symbol)
+    raw = (symbol or "").strip()
+    if not raw or "." not in raw:
+        raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
+    vt = to_vt_symbol(raw)
     with get_conn() as conn:
         conn.execute("DELETE FROM minute_symbols WHERE symbol=%s AND source='direct'", (vt,))
         conn.commit()
+    refresh_minute_symbols()   # 盲审 A-P1/B-P1：add 的 ON CONFLICT 把 pool 行原地覆盖成 direct，
+    # 删 direct 后标的虽仍在池、却从展开表消失——refresh 重物化 pool 行
     audit_log(payload["username"], "minute_symbol_del", vt)
     return {"status": "removed", "symbol": vt}
 

@@ -58,6 +58,11 @@
           <span v-else style="color: var(--el-text-color-placeholder)">-</span>
         </template>
       </el-table-column>
+      <el-table-column :label="t('pool.minuteCount')" width="100" align="center">
+        <template #default="{ row }">
+          <el-badge :value="row.minute_count || 0" type="info" />
+        </template>
+      </el-table-column>
       <el-table-column prop="description" min-width="180" show-overflow-tooltip :label="t('common.description')" />
       <el-table-column :label="t('common.action')" width="200">
         <template #default="{ row }">
@@ -84,8 +89,9 @@
       </el-table-column>
       <el-table-column :label="t('common.action')" width="100">
         <template #default="{ row }">
-          <el-button type="danger" size="small" :disabled="navReadonly"
+          <el-button v-if="row.source === 'direct'" type="danger" size="small" :disabled="navReadonly"
                      @click="removeMinuteSymbol(row.symbol)">✕</el-button>
+          <span v-else style="color: var(--el-text-color-placeholder); font-size: 12px">{{ t('pool.sourcePool') }}</span>
         </template>
       </el-table-column>
     </el-table>

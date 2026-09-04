@@ -50,9 +50,17 @@ def _parse_tencent(ts_code: str) -> list[tuple]:
     """
     from src.data_platform.market_snapshot import _tencent_sym
     sym = _tencent_sym(ts_code)
-    resp = requests.get(TENCENT_MKLINE_URL.format(sym=sym),
-                        headers=TENCENT_HEADERS, timeout=TENCENT_TIMEOUT)
-    resp.raise_for_status()
+    last_err = None
+    for _ in range(2):   # 网络抖动重试 1 次（方案 §3.2，盲审 A-P2/B-P2）
+        try:
+            resp = requests.get(TENCENT_MKLINE_URL.format(sym=sym),
+                                headers=TENCENT_HEADERS, timeout=TENCENT_TIMEOUT)
+            resp.raise_for_status()
+            break
+        except Exception as e:
+            last_err = e
+    else:
+        raise last_err
     data = (resp.json().get("data") or {}).get(sym) or {}
     arr = data.get("m1") or []
     out = []
@@ -79,36 +87,50 @@ def _to_rows(vt: str, bars: list[tuple]) -> list[tuple]:
         ts_hhmm = "1501" if hhmm == "1500" else hhmm   # 收盘竞价错位
         ts = datetime(int(d[:4]), int(d[4:6]), int(d[6:8]),
                       int(ts_hhmm[:2]), int(ts_hhmm[2:4]))
-        rows.append((vt, "1min", ts, o, h, l, c, v, None, None, "tencent"))
+        # amount 写 0（bar_1min.amount NOT NULL DEFAULT 0；腾讯 mkline 无成交额，
+        # 对齐 Tushare to_save_rows_min 缺省 0 口径，勿写 None——盲审 B-P0 NotNullViolation）
+        rows.append((vt, "1min", ts, o, h, l, c, v, 0.0, None, "tencent"))
     return rows
 
 
 def _check_gap(vt: str) -> None:
-    """漏取检测：bar_1min 里该标的 MAX(ts) 落后昨天 → 告警（320 窗口漏一天断 ~4h）。"""
+    """漏取检测：bar_1min 里该标的 MAX(ts) 落后上一交易日 → 告警（320 窗口漏一天断 ~4h）。
+
+    非交易日跳过（MAX(ts) 落后正常）；上一交易日用 trade_cal 而非日历昨天——
+    周日/长假后周一不误报（盲审 A-P1/B-P2）。
+    """
     from src.alert_notify.notify import safe_notify
+    from src.data_platform.db import is_trading_day
+    if not is_trading_day():
+        return
     try:
         with _pdb.get_conn() as conn:
             cur = conn.execute("SELECT MAX(ts) FROM bar_1min WHERE symbol=%s", (vt,))
             row = cur.fetchone()
-        last = row[0] if row else None
-        yesterday = date.today() - timedelta(days=1)
-        if last is None or last.date() < yesterday:
+            last = row[0] if row else None
+            cur = conn.execute(
+                "SELECT MAX(cal_date)::date FROM trade_cal WHERE exchange='SSE' "
+                "AND is_open=1 AND cal_date < CURRENT_DATE")
+            prev_row = cur.fetchone()
+            prev = prev_row[0] if prev_row else None
+        if prev is not None and (last is None or last.date() < prev):
             safe_notify("warn", f"分钟数据漏取 {vt}",
-                        f"bar_1min 最后 {last}，落后昨天——腾讯 1min 滚动窗口漏一天即断档",
+                        f"bar_1min 最后 {last}，落后上一交易日 {prev}——腾讯 1min 滚动窗口漏一天即断档",
                         code="minute.gap")
     except Exception as e:
         logger.warning("漏取检测 %s 失败: %s", vt, e)
 
 
-def _log_sync(total_saved: int, total_symbols: int, errors: list) -> None:
-    """sync_log 可观测（对齐 pool_minute 模式）。"""
+def _log_sync(total_saved: int, total_symbols: int, errors: list, timed_out: bool = False) -> None:
+    """sync_log 可观测（对齐 pool_minute 模式，含 timeout 态）。"""
+    status = "timeout" if timed_out else ("done" if not errors else "partial")
     try:
         with _pdb.get_conn() as conn:
             conn.execute(
                 "INSERT INTO sync_log (sync_id, ts, mode, start_date, end_date, rows_pulled, rows_saved, duration_ms, status, error, failed_dates) "
                 "VALUES (%s, now(), %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 ("tencent_minute", "beat", "", "", total_saved, total_saved, 0,
-                 "done" if not errors else "partial", "", "; ".join(errors[:3])[:200]))
+                 status, "", "; ".join(errors[:3])[:200]))
             conn.commit()
     except Exception as e:
         logger.error("tencent_minute sync_log 写入失败: %s", e)
@@ -123,6 +145,10 @@ def sync_tencent_minute(timebox_s: int = 280) -> dict:
     """
     if _data_source() != "tencent":
         return {"status": "disabled", "reason": "minute_data_source != tencent"}
+
+    from src.data_platform.db import is_trading_day
+    if not is_trading_day():
+        return {"status": "skipped", "reason": "非交易日"}   # 盲审 A-P1：收盘 beat 周末也跑，加交易日闸门
 
     lock = SyncLock("tencent_minute")
     with lock:
@@ -148,22 +174,24 @@ def sync_tencent_minute(timebox_s: int = 280) -> dict:
 
         from src.data_platform.schema import vt_to_ts
         deadline = time.time() + timebox_s
-        total_saved, errors = 0, []
+        total_saved, errors, timed_out = 0, [], False
         for vt in ordered:
             if time.time() >= deadline:
+                timed_out = True
                 break
             try:
                 bars = _parse_tencent(vt_to_ts(vt))
                 rows = _to_rows(vt, bars)
                 if rows:
-                    _pdb.save_bars("1min", rows)
-                    total_saved += len(rows)
+                    # 用实际入库行数（save_bars 内 validate_bars 会剔 ohlc=0 行，盲审 A-P2/B-P2）
+                    total_saved += _pdb.save_bars("1min", rows)
                 r.set(_CURSOR_KEY, vt, ex=86400)
                 _check_gap(vt)
             except Exception as e:
                 errors.append(f"{vt}: {type(e).__name__}: {str(e)[:60]}")
                 logger.warning("腾讯分钟攒 %s 失败: %s", vt, e)
 
-        _log_sync(total_saved, len(symbols), errors)
-        return {"status": "done" if not errors else "partial",
+        status = "timebox" if timed_out else ("done" if not errors else "partial")
+        _log_sync(total_saved, len(symbols), errors, timed_out)
+        return {"status": status,
                 "symbols": len(symbols), "saved": total_saved, "errors": errors[:5]}

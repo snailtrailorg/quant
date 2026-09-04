@@ -687,6 +687,8 @@ export default {
       minuteSymbolsPlaceholder: '批量直标（一行一个 vt_symbol，如 600000.SHSE）',
       minuteSymbolsAdd: '加入攒数据',
       minuteSymbolSource: '来源',
+      minuteCount: '攒数据数',
+      sourcePool: '池驱动',
     },
     factors: {
       pvParams: '试算参数（标的/频率/根数）',
@@ -1772,6 +1774,8 @@ export default {
       minuteSymbolsPlaceholder: 'Batch tag (one vt_symbol per line, e.g. 600000.SHSE)',
       minuteSymbolsAdd: 'Tag',
       minuteSymbolSource: 'Source',
+      minuteCount: 'Tagged',
+      sourcePool: 'Pool',
     },
     factors: {
       pvParams: 'Trial params (symbol/freq/bars)',

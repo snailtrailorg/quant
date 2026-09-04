@@ -50,6 +50,7 @@ def test_del_minute_symbol_direct_only():
     from src.web_api.routes import backtest as b
     conn = _conn()
     with patch.object(b, "get_conn", return_value=conn), \
+         patch.object(b, "refresh_minute_symbols"), \
          patch.object(b, "audit_log"):
         r = b.del_minute_symbol("600000.SHSE", {"username": "test"})
     assert r == {"status": "removed", "symbol": "600000.SHSE"}
