@@ -177,10 +177,10 @@ def main() -> None:
     md_status_was = False   # MD 重连沿基态（SA2 hub 版）
 
     def _desired_symbols() -> set[str]:
-        """订阅真相源（四源）：running 任务标的 ∪ system_config 白名单 ∪ 池标的 ∪ 临时订阅。
+        """订阅真相源（三源）：running 任务标的 ∪ system_config 白名单 ∪ 临时订阅。
 
-        池源（2026-08-19 分钟数据策略：XTP hub 自攒为主）：所有配置了 minute_history_start
-        的池的成员自动进订阅——即使没有 running 任务在该标的上，hub 也会为它积累分钟 bar。
+        池源已移除（2026-09-04 分钟数据源重构 21 号 §3.3）：历史分钟数据改腾讯攒
+        （bar_1min），hub 不再为攒数据订阅非实盘标的，释放 XTP 订阅额度。
         临时源（2026-08-20 三档详情页"看过即订阅"，用户裁定 XTP 为主路径）：expire_at>now
         的行——过期即不可见=自动退订（30min TTL 由详情页每次打开续期）。
         """
@@ -197,20 +197,6 @@ def main() -> None:
                         rows |= {s.strip() for s in row[0].split(",") if s.strip()}
                 except Exception as e:
                     logger.warning("读 hub_shadow_symbols 失败: %s", e)
-                # 池源：minute_history_start 非空的池的成员（XTP 自攒分钟数据）
-                try:
-                    cur = conn.execute(
-                        "SELECT DISTINCT ps.symbol FROM pool_symbols ps "
-                        "JOIN pools p ON p.id = ps.pool_id "
-                        "WHERE p.minute_history_start IS NOT NULL")
-                    pool_rows = {x[0] for x in cur.fetchall() if x[0]}
-                    if pool_rows:
-                        rows |= pool_rows
-                        # 2026-08-23 降噪：15s 轮询每轮都打=噪音；实际订阅变化由
-                        # 订阅同步的「订阅同步：+N -M」日志呈现，轮询内部态降 debug
-                        logger.debug("池源订阅 +%d 标的", len(pool_rows))
-                except Exception as e:
-                    logger.warning("读池订阅源失败: %s", e)
                 # 临时源（详情页看过即订阅，TTL 自动退订；顺带清理过期行防表膨胀）
                 try:
                     cur = conn.execute(
