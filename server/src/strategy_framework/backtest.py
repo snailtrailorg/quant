@@ -20,32 +20,6 @@ from .adapters import ExecutionAdapter, Order, Position
 logger = logging.getLogger("backtest")
 _patch_lock = threading.Lock()
 
-import contextvars
-
-_run_logs_ctx: contextvars.ContextVar[list | None] = contextvars.ContextVar("backtest_run_logs", default=None)
-
-
-class _RunLogHandler(logging.Handler):
-    """run 作用域日志捕获（单例，import 期挂一次永不摘除）：emit 读 contextvar，无 run 时 no-op。
-
-    并发 run 靠 contextvar 隔离；单 handler 无 per-run addHandler 的重复捕获（盲审 A-P1/B-P2）。
-    """
-
-    def emit(self, record) -> None:
-        logs = _run_logs_ctx.get()
-        if logs is None:
-            return
-        try:
-            logs.append({"ts": datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
-                         "level": record.levelname, "msg": record.getMessage()})
-        except Exception:
-            pass   # 坏 record（msg/args 不匹配）不炸回测主循环
-
-
-# import 期挂单例 handler（一次，不 per-run 摘除——per-run addHandler 并发会重复捕获）
-for _lg in ("strategy", "backtest"):
-    logging.getLogger(_lg).addHandler(_RunLogHandler())
-
 
 @dataclass
 class Trade:
@@ -210,12 +184,15 @@ class BacktestEngine:
         with _patch_lock:
             strat_mod.Strategy.place_order = _bt_place_order
 
-        # 回测日志（ptrade 批 1）：单例 handler + contextvar 隔离；setLevel(INFO) 保证策略 info 可达
+        # 回测日志（ptrade 批 1）：显式收集器——run_logs 是 run 局部变量，strategy._log_fn 注入收集，
+        # 无全局 handler/contextvar/setLevel 共享状态，进程内并发天然安全
         run_logs: list = []
-        _tok = _run_logs_ctx.set(run_logs)
-        _log_levels = {_lg: logging.getLogger(_lg).level for _lg in ("strategy", "backtest")}
-        for _lg in ("strategy", "backtest"):
-            logging.getLogger(_lg).setLevel(logging.INFO)
+
+        def _log_fn(msg, level="info"):
+            run_logs.append({"ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                             "level": str(level).upper(), "msg": str(msg)})
+
+        strategy._log_fn = _log_fn
 
         try:
             cash = self.initial_capital
@@ -250,8 +227,7 @@ class BacktestEngine:
                                 buy_queue.append((trade.volume, trade.price))
                             else:
                                 adapter.trades.remove(trade)   # 未成交不入明细
-                                logger.warning("资金不足，BUY 未成交: %s %s股 @%s（现金 %.2f）",
-                                               trade.symbol, trade.volume, trade.price, cash)
+                                _log_fn(f"资金不足，BUY 未成交: {trade.symbol} {trade.volume}股 @{trade.price}（现金 {cash:.2f}）", "warning")
                         elif trade.action == "SELL":
                             if position >= trade.volume:
                                 proceeds = trade.price * trade.volume - trade.commission
@@ -272,8 +248,7 @@ class BacktestEngine:
                                     avg_price = 0.0
                             else:
                                 adapter.trades.remove(trade)   # 未成交不入明细
-                                logger.warning("持仓不足，SELL 未成交: %s %s股 @%s（持仓 %s）",
-                                               trade.symbol, trade.volume, trade.price, position)
+                                _log_fn(f"持仓不足，SELL 未成交: {trade.symbol} {trade.volume}股 @{trade.price}（持仓 {position}）", "warning")
 
                 # 每日净值
                 close = bar.get("close", 0)
@@ -309,10 +284,7 @@ class BacktestEngine:
 
             final_value = cash
         finally:
-            # 恢复（线程安全）+ 恢复 logger 级别 + 清 contextvar
-            for _lg, _lv in _log_levels.items():
-                logging.getLogger(_lg).setLevel(_lv)
-            _run_logs_ctx.reset(_tok)
+            # 恢复（线程安全）
             with _patch_lock:
                 strat_mod.Strategy.place_order = original_place_order
 

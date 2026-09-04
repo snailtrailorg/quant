@@ -164,9 +164,14 @@ class Strategy:
             threshold_sell=config.aggregator.get("threshold_sell", -0.3),
         )
         self._init_factors(config.factors)
+        self._log_fn = None   # ptrade 批 1：回测引擎 run 期间注入的显式日志收集器（无则 fallback 模块 logger）
 
     def log(self, msg: str, level: str = "info") -> None:
-        """策略作者日志入口（ptrade 批 1）：回测时进 run 作用域日志，实盘进进程日志。"""
+        """策略作者日志入口（ptrade 批 1）：回测时走引擎注入的 _log_fn（进 run 日志），
+        实盘无 _log_fn 则走模块 logger。"""
+        if self._log_fn is not None:
+            self._log_fn(msg, level)
+            return
         try:
             fn = getattr(logger, str(level).lower(), None)
         except Exception:
