@@ -470,12 +470,16 @@ def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en"
     """
     import html as _html
     import io
-    from weasyprint import HTML
     from fastapi.responses import StreamingResponse
     from src.email_service import normalize_lang
+    try:
+        from weasyprint import HTML
+    except Exception:
+        raise ApiError(503, "PDF_EXPORT_UNAVAILABLE", "PDF 导出依赖 weasyprint 未装（服务器需 pango/cairo 系统库）")
 
     lang = normalize_lang(lang)
-    cols = _PDF_COLUMNS[lang]
+    # .get 回落 en：加语言只在 terms.py 登记而忘加 _PDF_COLUMNS key 时，不 KeyError→500，与 email 侧一致
+    cols = _PDF_COLUMNS.get(lang, _PDF_COLUMNS["en"])
 
     sql = "SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'"
     params = [run_id]
@@ -533,7 +537,10 @@ def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en"
 </body></html>"""
 
     buf = io.BytesIO()
-    HTML(string=doc_html).write_pdf(buf)
+    try:
+        HTML(string=doc_html).write_pdf(buf)
+    except Exception:
+        raise ApiError(503, "PDF_EXPORT_FAIL", "PDF 渲染失败（字体/系统库缺失）")
     buf.seek(0)
     return StreamingResponse(buf, media_type="application/pdf",
                              headers={"Content-Disposition": f"attachment; filename=backtest_{run_id}.pdf"})

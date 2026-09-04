@@ -66,13 +66,18 @@ def test_backtest_export_generates_xlsx():
 
 
 def test_backtest_export_pdf_generates():
-    """导出 PDF：返回 pdf 文件流（CJK 字体注册 + 多语言 lang 回落）。"""
+    """导出 PDF：返回 pdf 文件流（weasyprint HTML→PDF，系统字体 fc 自动发现；lang 回落）。"""
     from src.web_api.routes import backtest as b
     result = {"total_return_pct": 10.5,
               "trades": [{"ts": "2026-01-01", "action": "BUY", "volume": 100, "price": 10, "commission": 0.5}],
               "daily_values": [{"ts": "2026-01-01", "close": 10, "position": 100, "avg_price": 10, "cash": 9000, "value": 10000}]}
     conn = _conn_with_results([("600000.SHSE", result)])
-    with patch.object(b, "get_conn", return_value=conn):
+    fake_html = MagicMock()
+    with patch.object(b, "get_conn", return_value=conn), \
+         patch("weasyprint.HTML", fake_html):
         resp = b.backtest_export_pdf(1, "600000.SHSE", "zh", {})
     assert resp.media_type == "application/pdf"
     assert "backtest_1.pdf" in resp.headers["Content-Disposition"]
+    html_str = fake_html.call_args.kwargs.get("string") or fake_html.call_args.args[0]
+    assert "标的" in html_str          # zh 列头渲染
+    assert "600000.SHSE" in html_str   # 数据经 _esc 入模板

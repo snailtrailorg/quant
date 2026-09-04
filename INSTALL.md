@@ -42,6 +42,7 @@
 | Node.js | 18+ | 仅前端构建用，可装在控制机，服务器不需要 |
 | Nginx | 任意稳定版 | 反代 API + 前端静态 |
 | gcc / python3-devel | — | vnpy_xtp 编译（仅实盘需要） |
+| pango / cairo / gdk-pixbuf2 / 中文字体 | — | weasyprint（回测 PDF 导出）系统库；中文字体需 wqy-microhei-fonts（或 Noto CJK），否则 PDF 中文豆腐块 |
 
 ### 1.3 账号与密钥清单（开工前备齐）
 
@@ -63,12 +64,12 @@ git / python3 / 能 ssh 到服务器。其余由仓库 `deploy/requirements.txt`
 
 **RHEL 系：**
 ```bash
-dnf install -y postgresql-server postgresql-devel valkey nginx git rsync
+dnf install -y postgresql-server postgresql-devel valkey nginx git rsync pango cairo gdk-pixbuf2 libffi wqy-microhei-fonts
 # Python 3.11（若系统默认非 3.10/3.11）：dnf install -y python3.11 python3.11-devel gcc gcc-c++ make
 ```
 **Debian 系：**
 ```bash
-apt install -y postgresql postgresql-server-dev-all valkey nginx git rsync
+apt install -y postgresql postgresql-server-dev-all valkey nginx git rsync libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 fonts-wqy-microhei
 apt install -y python3.11 python3.11-dev gcc g++ make   # 按发行版调整
 ```
 
