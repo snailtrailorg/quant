@@ -438,6 +438,14 @@ export default {
       markFailed: '标记失败',
       loadDetailFailed: '加载回测详情失败',
       loadViewFailed: '加载可视化数据失败',
+      // ptrade 批 3：指标概览 + 多标签页
+      benchmarkReturn: '基准收益', alpha: '阿尔法', beta: '贝塔', sortino: '索提诺',
+      informationRatio: '信息率', volatility: '策略波动率', benchmarkVolatility: '基准波动率',
+      positions: '每日持仓', logs: '日志', rolling: '滚动绩效',
+      date: '日期', closePrice: '收盘价', positionQty: '持仓数量', avgPrice: '持仓成本',
+      marketValue: '持仓市值', cash: '现金', totalValue: '总资产',
+      logLevel: '级别', logMsg: '日志内容', logTime: '时间',
+      metricType: '指标', windowCol: '窗口',
     },
     riskRule: {
       title: '风控规则管理（平台化风控，规则 DB 化 + 可扩展）',
@@ -1515,6 +1523,14 @@ export default {
       markFailed: 'Mark failed',
       loadDetailFailed: 'Failed to load backtest detail',
       loadViewFailed: 'Failed to load visualization data',
+      // ptrade batch 3: metric overview + multi-tab
+      benchmarkReturn: 'Benchmark Return', alpha: 'Alpha', beta: 'Beta', sortino: 'Sortino',
+      informationRatio: 'Information Ratio', volatility: 'Strategy Volatility', benchmarkVolatility: 'Benchmark Volatility',
+      positions: 'Daily Positions', logs: 'Logs', rolling: 'Rolling Performance',
+      date: 'Date', closePrice: 'Close', positionQty: 'Position', avgPrice: 'Avg Cost',
+      marketValue: 'Market Value', cash: 'Cash', totalValue: 'Total Value',
+      logLevel: 'Level', logMsg: 'Message', logTime: 'Time',
+      metricType: 'Metric', windowCol: 'Window',
     },
     riskRule: {
       title: 'Risk Rule Management (platform risk, DB-driven + extensible)',
