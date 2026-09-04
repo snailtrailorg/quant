@@ -335,7 +335,7 @@ def backtest_summary(run_id: int, payload: dict = Depends(require_perm("read")))
                     "benchmark_return", "benchmark_volatility"]
     results = []
     for sym, result_json in rows:
-        r = json.loads(result_json) if result_json else {}
+        r = _safe_json(result_json, {})
         results.append({"symbol": sym, **{k: r.get(k, 0) for k in metrics_keys}})
     ranked = sorted(results, key=lambda x: x.get("total_return_pct", 0), reverse=True)
     avg = {k: round(sum(r[k] for r in results) / len(results), 3) for k in metrics_keys} if results else {}
@@ -368,7 +368,7 @@ def backtest_metrics(run_id: int, type: str = "return",
         rows = cur.fetchall()
     agg: dict = {}
     for _sym, result_json in rows:
-        r = json.loads(result_json) if result_json else {}
+        r = _safe_json(result_json, {})
         rolling = (r.get("metrics") or {}).get("rolling") or {}
         for month, windows in rolling.items():
             agg.setdefault(month, {})
@@ -389,17 +389,24 @@ def backtest_metrics(run_id: int, type: str = "return",
 
 
 @router.get("/api/backtest/{run_id}/export")
-def backtest_export(run_id: int, payload: dict = Depends(require_perm("read"))):
+def backtest_export(run_id: int, symbol: str | None = None,
+                    payload: dict = Depends(require_perm("read"))):
     """导出回测报告为 Excel（ptrade 批 3）：指标概览 / 交易明细 / 每日持仓 三 sheet。
 
-    同步生成（数据量小，10s 内完成），返回 xlsx 文件流。
+    同步生成（数据量小，10s 内完成），返回 xlsx 文件流。symbol 可选（单标的导出，前端单标视图传）。
     """
     import io
     from openpyxl import Workbook
     from fastapi.responses import StreamingResponse
 
+    sql = "SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'"
+    params = [run_id]
+    if symbol:
+        sql += " AND symbol=%s"
+        params.append(symbol)
+    sql += " ORDER BY symbol"
     with get_conn() as conn:
-        cur = conn.execute("SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done' ORDER BY symbol", (run_id,))
+        cur = conn.execute(sql, params)
         rows = cur.fetchall()
     if not rows:
         raise ApiError(404, "BACKTEST_NOT_FOUND", "run 无 done 结果")
@@ -412,20 +419,20 @@ def backtest_export(run_id: int, payload: dict = Depends(require_perm("read"))):
                    "max_drawdown_pct", "win_rate", "total_trades"]
     ws_meta.append(metric_cols)
     for sym, result_json in rows:
-        r = json.loads(result_json) if result_json else {}
+        r = _safe_json(result_json, {})
         ws_meta.append([sym] + [r.get(k, "") for k in metric_cols[1:]])
 
     ws_trades = wb.create_sheet("交易明细")
     ws_trades.append(["symbol", "ts", "action", "volume", "price", "commission"])
     for sym, result_json in rows:
-        r = json.loads(result_json) if result_json else {}
+        r = _safe_json(result_json, {})
         for t in (r.get("trades") or []):
             ws_trades.append([sym, t.get("ts"), t.get("action"), t.get("volume"), t.get("price"), t.get("commission")])
 
     ws_pos = wb.create_sheet("每日持仓")
     ws_pos.append(["symbol", "ts", "close", "position", "avg_price", "cash", "value"])
     for sym, result_json in rows:
-        r = json.loads(result_json) if result_json else {}
+        r = _safe_json(result_json, {})
         for d in (r.get("daily_values") or []):
             ws_pos.append([sym, d.get("ts"), d.get("close"), d.get("position"), d.get("avg_price"), d.get("cash"), d.get("value")])
 

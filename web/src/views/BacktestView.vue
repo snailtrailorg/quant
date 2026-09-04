@@ -147,15 +147,17 @@ const _rollingMetricKey = {
   sharpe: 'sharpe', sortino: 'sortino', information: 'information_ratio',
   volatility: 'volatility', drawdown: 'max_drawdown',
 }
+const _pctKeys = { return: true, benchmark: true, volatility: true, drawdown: true }
 const rollingRows = computed(() => {
   const rolling = result.value.metrics?.rolling || {}
   const key = _rollingMetricKey[rollingType.value] || 'return'
+  const fmt = _pctKeys[rollingType.value] ? _pct : _fmt   // 百分数指标加 %（盲审 P2）
   return Object.entries(rolling).sort(([a], [b]) => a.localeCompare(b)).map(([month, windows]) => ({
     month,
-    w1: _fmt(windows['1']?.[key]),
-    w3: _fmt(windows['3']?.[key]),
-    w6: _fmt(windows['6']?.[key]),
-    w12: _fmt(windows['12']?.[key]),
+    w1: fmt(windows['1']?.[key]),
+    w3: fmt(windows['3']?.[key]),
+    w6: fmt(windows['6']?.[key]),
+    w12: fmt(windows['12']?.[key]),
   }))
 })
 
@@ -163,13 +165,15 @@ const levelTag = level => ({ WARNING: 'warning', ERROR: 'danger', CRITICAL: 'dan
 
 const exportReport = async () => {
   try {
-    const r = await api.get(`/backtest/${runId}/export`, { responseType: 'blob' })
-    const url = URL.createObjectURL(r.data)
+    const r = await api.get(`/backtest/${runId}/export`, { params: { symbol }, responseType: 'blob' })
+    const url = URL.createObjectURL(r)   // axios 拦截器 res=>res.data，r 已是 Blob（盲审 P0/P1）
     const a = document.createElement('a')
     a.href = url
-    a.download = `backtest_${runId}.xlsx`
+    a.download = `backtest_${runId}_${symbol}.xlsx`
+    document.body.appendChild(a)
     a.click()
-    URL.revokeObjectURL(url)
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)   // 延迟 revoke 防 Firefox 截断下载
   } catch { ElMessage.error(t('common.failed')) }
 }
 
@@ -226,6 +230,7 @@ onMounted(async () => {
           if (frame.trades) { trades.value = frame.trades }
           if (frame.total_return_pct !== undefined) {
             result.value = frame
+            if (frame.logs) { logs.value = frame.logs }   // 终帧喂 logs（盲审 P2：运行中跑完日志 tab 恒空）
             eventSource.close(); eventSource = null
           }
         } catch (e) { /* ignore malformed frame */ }
