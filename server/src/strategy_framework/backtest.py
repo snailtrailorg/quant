@@ -26,16 +26,25 @@ _run_logs_ctx: contextvars.ContextVar[list | None] = contextvars.ContextVar("bac
 
 
 class _RunLogHandler(logging.Handler):
-    """run 作用域日志捕获：把 run 期间的 strategy/backtest 日志追加到当前 run 的 logs 列表。
+    """run 作用域日志捕获（单例，import 期挂一次永不摘除）：emit 读 contextvar，无 run 时 no-op。
 
-    挂在 "strategy"/"backtest" logger 上，run finally 摘除——防并发回测串日志（ptrade 批 1）。
+    并发 run 靠 contextvar 隔离；单 handler 无 per-run addHandler 的重复捕获（盲审 A-P1/B-P2）。
     """
 
     def emit(self, record) -> None:
         logs = _run_logs_ctx.get()
-        if logs is not None:
-            logs.append({"ts": datetime.fromtimestamp(record.created).strftime("%H:%M:%S"),
+        if logs is None:
+            return
+        try:
+            logs.append({"ts": datetime.fromtimestamp(record.created).strftime("%Y-%m-%d %H:%M:%S"),
                          "level": record.levelname, "msg": record.getMessage()})
+        except Exception:
+            pass   # 坏 record（msg/args 不匹配）不炸回测主循环
+
+
+# import 期挂单例 handler（一次，不 per-run 摘除——per-run addHandler 并发会重复捕获）
+for _lg in ("strategy", "backtest"):
+    logging.getLogger(_lg).addHandler(_RunLogHandler())
 
 
 @dataclass
@@ -201,12 +210,12 @@ class BacktestEngine:
         with _patch_lock:
             strat_mod.Strategy.place_order = _bt_place_order
 
-        # 回测日志（ptrade 批 1）：run 作用域 handler 捕获 strategy/backtest 日志，finally 摘除
+        # 回测日志（ptrade 批 1）：单例 handler + contextvar 隔离；setLevel(INFO) 保证策略 info 可达
         run_logs: list = []
         _tok = _run_logs_ctx.set(run_logs)
-        _log_handler = _RunLogHandler()
+        _log_levels = {_lg: logging.getLogger(_lg).level for _lg in ("strategy", "backtest")}
         for _lg in ("strategy", "backtest"):
-            logging.getLogger(_lg).addHandler(_log_handler)
+            logging.getLogger(_lg).setLevel(logging.INFO)
 
         try:
             cash = self.initial_capital
@@ -300,9 +309,9 @@ class BacktestEngine:
 
             final_value = cash
         finally:
-            # 恢复（线程安全）+ 摘除日志 handler
-            for _lg in ("strategy", "backtest"):
-                logging.getLogger(_lg).removeHandler(_log_handler)
+            # 恢复（线程安全）+ 恢复 logger 级别 + 清 contextvar
+            for _lg, _lv in _log_levels.items():
+                logging.getLogger(_lg).setLevel(_lv)
             _run_logs_ctx.reset(_tok)
             with _patch_lock:
                 strat_mod.Strategy.place_order = original_place_order
@@ -322,7 +331,7 @@ class BacktestEngine:
                    run_logs: list | None = None) -> BacktestResult:
         """计算绩效指标。benchmark_bars 为基准指数 bars（[{ts, close}, ...]），可选。"""
         if not daily_values:
-            return BacktestResult()
+            return BacktestResult(logs=run_logs or [])
 
         values = [d["value"] for d in daily_values]
         initial = self.initial_capital

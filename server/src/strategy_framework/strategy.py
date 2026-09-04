@@ -167,7 +167,11 @@ class Strategy:
 
     def log(self, msg: str, level: str = "info") -> None:
         """策略作者日志入口（ptrade 批 1）：回测时进 run 作用域日志，实盘进进程日志。"""
-        getattr(logger, level.lower(), logger.info)(msg)
+        try:
+            fn = getattr(logger, str(level).lower(), None)
+        except Exception:
+            fn = None
+        (fn if callable(fn) else logger.info)(msg)
 
     def _init_factors(self, factor_configs: list[dict]):
         """从配置初始化因子实例。"""

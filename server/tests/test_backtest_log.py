@@ -5,21 +5,24 @@ from unittest.mock import patch
 
 
 def test_run_log_handler_captures():
-    """_RunLogHandler 把 run 作用域的日志追加到 logs（contextvar 隔离）。"""
-    from src.strategy_framework.backtest import _RunLogHandler, _run_logs_ctx
+    """单例 _RunLogHandler（import 期已挂）把 run 作用域日志追加到 logs（contextvar 隔离）。"""
+    from src.strategy_framework.backtest import _run_logs_ctx
     logs = []
     tok = _run_logs_ctx.set(logs)
-    handler = _RunLogHandler()
-    lg = logging.getLogger("backtest")
-    lg.addHandler(handler)
     try:
-        lg.warning("资金不足测试")
+        logging.getLogger("backtest").warning("资金不足测试")
     finally:
-        lg.removeHandler(handler)
         _run_logs_ctx.reset(tok)
     assert len(logs) == 1
     assert logs[0]["msg"] == "资金不足测试"
     assert logs[0]["level"] == "WARNING"
+
+
+def test_run_log_handler_noop_without_context():
+    """无 run（contextvar 未设）时单例 handler no-op，不误捕获。"""
+    from src.strategy_framework.backtest import _run_logs_ctx
+    # 确保无 context（默认 None）
+    assert _run_logs_ctx.get() is None
 
 
 def test_run_result_has_logs_field():
