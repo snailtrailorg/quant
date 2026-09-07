@@ -908,19 +908,20 @@ def _get_pro_api(sync_id: str):
 def _list_static_ts_codes(kind: str) -> list[str]:
     """从静态信息表取全部 ts_code（Tushare 格式）。
 
-    P3-14：优先读 static_symbols（P1-6 static_list_sync 写的表，含退市标记），
-    fallback 到旧 asset_static_info / etf_basic_info / cb_basic_info。
+    盲审 B-P0：static_symbols 只写 A 股（股票，static_list_sync 仅 stock_basic 入库），
+    对 kind=etf/cb 不能走快路径——会返回股票代码，delete_by_sync_item 删错标的（数据丢失）。
+    astock 走 static_symbols 快路径（含退市标记），etf/cb 直查专用表。
     """
-    # P3-14: 优先 static_symbols
-    try:
-        with get_conn() as conn:
-            cur = conn.execute("SELECT ts_code FROM static_symbols WHERE coalesce(delisted, false) = false ORDER BY ts_code")
-            rows = cur.fetchall()
-        if rows:
-            return [r[0] for r in rows]
-    except (psycopg.errors.UndefinedTable, Exception) as e:
-        logger.warning("查询 static_symbols 失败: %s", e)
-    # fallback 旧表
+    if kind == "astock":
+        # P3-14: 优先 static_symbols（含退市标记）
+        try:
+            with get_conn() as conn:
+                cur = conn.execute("SELECT ts_code FROM static_symbols WHERE coalesce(delisted, false) = false ORDER BY ts_code")
+                rows = cur.fetchall()
+            if rows:
+                return [r[0] for r in rows]
+        except Exception as e:
+            logger.warning("查询 static_symbols 失败: %s", e)
     table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
     with get_conn() as conn:
         cur = conn.execute(f"SELECT ts_code FROM {table} ORDER BY ts_code")
@@ -1303,9 +1304,10 @@ def delete_symbol(sync_id: str, ts_code: str) -> dict:
 
 
 def delete_by_sync_item(sync_id: str) -> dict:
-    """全量删该同步项的本地数据（切换 provider 用，24 号 §2.3 切换重建原语）。
+    """全量删该同步项的本地数据 + 重置游标（切换 provider 用，24 号 §2.3 切换重建原语）。
 
-    删 bar 表里该 kind 的所有标的（批量 SQL，非 per-symbol 逐个删）。返回删除行数。
+    删 bar 表里该 kind 的所有标的（批量 SQL），并重置 last_sync_date 游标——
+    调用方随后 full 回填。静态表空（无法确定删什么）返回 error 防静默假删。
     """
     from src.data_platform.schema import to_vt_symbol
     meta = _PER_SYMBOL_META.get(sync_id)
@@ -1315,16 +1317,17 @@ def delete_by_sync_item(sync_id: str) -> dict:
     kind = meta[2]
     ts_codes = _list_static_ts_codes(kind)
     if not ts_codes:
-        return {"status": "success", "deleted": 0}
+        return {"status": "error", "error": f"静态表 {kind} 为空，无法确定删除范围"}   # 盲审 A-P2：防静默假删
     vts = [to_vt_symbol(tc) for tc in ts_codes]
     with get_conn() as conn:
         try:
             cur = conn.execute(f"DELETE FROM {table} WHERE symbol = ANY(%s)", (vts,))
             deleted = cur.rowcount
-            conn.commit()
         except psycopg.errors.UndefinedTable:
             deleted = 0
-            conn.commit()
+        conn.execute("UPDATE sync_config SET last_sync_date=NULL, last_sync_ts=NULL, "
+                     "last_sync_count=0, last_status='idle' WHERE id=%s", (sync_id,))   # 重置游标
+        conn.commit()
     return {"status": "success", "deleted": deleted}
 
 
