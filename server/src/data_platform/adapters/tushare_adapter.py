@@ -245,19 +245,29 @@ def to_save_rows_min(df: pd.DataFrame, freq: str) -> list[tuple]:
 
 
 def to_save_rows(df: pd.DataFrame, freq: str = "1D") -> list[tuple]:
-    """DataFrame → 写入 DB 的行列表。"""
+    """DataFrame → 写入 DB 的行列表（金标准，与 TushareAdapter.to_bar_rows 同语义）。
+
+    单位换算（专家审核 P0，2026-09-07）：日线 vol=手/amount=千元 → ×100/×1000 到股/元；
+    分钟线（stk_mins）vol=股/amount=元 不换算——与 to_bar_rows 的 is_daily 分支一致。
+    """
     from ..schema import to_vt_symbol
 
+    is_daily = "min" not in freq
     rows = []
     for _, row in df.iterrows():
         ts_code = row.get("ts_code", "")
         vt_sym = to_vt_symbol(ts_code)
         trade_date = pd.Timestamp(row["trade_date"]).to_pydatetime()
+        vol = _safe_float(row.get("vol", 0))
+        amt = _safe_float(row.get("amount", 0))
+        if is_daily:
+            vol *= 100
+            amt *= 1000
         rows.append((
             vt_sym, freq, trade_date,
             _safe_float(row["open"]), _safe_float(row["high"]), _safe_float(row["low"]),
             _safe_float(row["close"]),
-            _safe_float(row.get("vol", 0)), _safe_float(row.get("amount", 0)),
+            vol, amt,
             _safe_float(row["adj_factor"]) if row.get("adj_factor") and pd.notna(row["adj_factor"]) else None,
             "tushare",
         ))

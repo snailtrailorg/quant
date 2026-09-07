@@ -159,6 +159,7 @@ class TushareAdapter(BaseDataAdapter):
         from src.data_platform.schema import to_vt_symbol
         from src.data_platform.adapters.tushare_adapter import _safe_float
         rows = []
+        is_daily = "min" not in freq
         for _, row in df.iterrows():
             ts_code = row.get("ts_code", "")
             vt_sym = to_vt_symbol(ts_code)
@@ -173,11 +174,19 @@ class TushareAdapter(BaseDataAdapter):
                 adj_val = float(adj_raw) if adj_raw is not None and pd.notna(adj_raw) else None
             else:
                 adj_val = _safe_float(row.get("adj_factor")) if row.get("adj_factor") and pd.notna(row.get("adj_factor")) else None
+            # 单位换算（专家审核 P0，2026-09-07 定性：Tushare 日线 vol=手/amount=千元，分钟线
+            # stk_mins vol=股/amount=元——日线 ×100/×1000 到统一契约股/元；分钟线不换算）。
+            # 实证：600000.SH 09-04 daily vol=757659.82 手（bar_1D 曾同值）vs bar_hub sum=75522582 股
+            vol = _safe_float(row.get("vol", 0))
+            amt = _safe_float(row.get("amount", 0))
+            if is_daily:
+                vol *= 100
+                amt *= 1000
             rows.append((
                 vt_sym, freq, ts,
                 _safe_float(row["open"]), _safe_float(row["high"]), _safe_float(row["low"]),
                 _safe_float(row["close"]),
-                _safe_float(row.get("vol", 0)), _safe_float(row.get("amount", 0)),
+                vol, amt,
                 adj_val, self.provider,
             ))
         return rows
