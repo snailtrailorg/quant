@@ -20,7 +20,13 @@
     </el-table>
     <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('brokers.editTitle') : t('brokers.addTitle')" width="560px">
       <el-form :model="form" label-width="120px">
-      <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('brokers.phProvider')" /></el-form-item>
+      <el-form-item label="Provider">
+        <el-select v-model="form.provider" style="width: 100%">
+          <el-option label="XTP" value="xtp" />
+          <el-option :label="t('common.binance')" value="binance_perp" />
+          <el-option label="OKX" value="okx_perp" />
+        </el-select>
+      </el-form-item>
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item :label="t('common.credentialJson')">
         <!-- wd-15 批四: XTP field_schema 静态映射(消灭盲写 JSON;非 XTP 走原 password) -->

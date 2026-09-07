@@ -965,6 +965,7 @@ export default {
     },
     err: {
       PROVIDER_INVALID: '未知 IM 平台', BOT_NOT_FOUND: '机器人不存在', BOT_DUPLICATE: '同平台已有相同 App ID 的机器人',
+      SYNC_PROVIDER_INVALID: '数据源未注册', SYNC_PROVIDER_NO_CAPABILITY: '该数据源不提供此同步项',
       ROLE_INVALID: '非法角色', NOT_INTERACTIVE: '该平台走手动添加', NOT_IMPLEMENTED: '该平台辅助接入待实现',
       SAVE_FAILED: '保存失败', RATE_LIMITED: '请求过于频繁', PASSWORD_TOO_LONG: '密码至多 72 字节',
       FACTOR_INCOMPATIBLE: '含与策略品类不兼容的因子', STRATEGY_NOT_FOUND: '策略不存在', TARGET_REQUIRED: '启用通道须填写推送目标', SMS_NOT_CONFIGURED: '短信通道未接入（API key 未申请）',
@@ -2056,6 +2057,7 @@ export default {
     },
     err: {
       PROVIDER_INVALID: 'Unknown IM platform', BOT_NOT_FOUND: 'Bot not found', BOT_DUPLICATE: 'A bot with the same App ID already exists',
+      SYNC_PROVIDER_INVALID: 'Provider not registered', SYNC_PROVIDER_NO_CAPABILITY: 'Provider does not support this sync item',
       ROLE_INVALID: 'Invalid role', NOT_INTERACTIVE: 'This platform uses manual setup', NOT_IMPLEMENTED: 'Onboarding for this platform not yet implemented',
       SAVE_FAILED: 'Save failed', RATE_LIMITED: 'Too many requests', PASSWORD_TOO_LONG: 'Password max 72 bytes',
       FACTOR_INCOMPATIBLE: 'Contains factors incompatible with strategy category', STRATEGY_NOT_FOUND: 'Strategy not found', TARGET_REQUIRED: 'Target required for enabled channel', SMS_NOT_CONFIGURED: 'SMS not connected (API key not applied yet)',

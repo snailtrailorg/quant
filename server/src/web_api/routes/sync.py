@@ -30,9 +30,9 @@ def _validate_provider(sid: str, provider: str):
     from src.data_platform.adapters.base import _ADAPTERS
     cls = _ADAPTERS.get(provider)
     if not cls:
-        raise ApiError(400, "PROVIDER_INVALID", f"provider {provider} 未注册")
+        raise ApiError(400, "SYNC_PROVIDER_INVALID", f"provider {provider} 未注册")
     if sid not in cls.capabilities:
-        raise ApiError(400, "PROVIDER_NO_CAPABILITY", f"provider {provider} 不提供同步项 {sid}")
+        raise ApiError(400, "SYNC_PROVIDER_NO_CAPABILITY", f"provider {provider} 不提供同步项 {sid}")
 
 
 @router.post("/api/sync/config/{sid}")

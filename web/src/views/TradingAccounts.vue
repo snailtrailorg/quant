@@ -39,7 +39,7 @@
         <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
         <el-form-item :label="t('tradingAccounts.exchange')">
           <el-select v-model="form.exchange" style="width: 100%">
-            <el-option v-for="ex in ['xtp', 'binance', 'okx']" :key="ex" :value="ex" :label="ex.toUpperCase()" />
+            <el-option v-for="ex in ['xtp', 'binance_perp', 'okx_perp']" :key="ex" :value="ex" :label="ex.toUpperCase()" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('tradingAccounts.apiKey')"><el-input v-model="form.api_key_hint" /></el-form-item>

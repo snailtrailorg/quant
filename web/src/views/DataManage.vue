@@ -185,13 +185,14 @@ const changeProvider = async (row, newProvider) => {
       t('dataManage.providerSwitch'), { type: 'warning' })
   } catch { return }   // 取消
   try {
-    // 切换重建：先删旧源数据 → 改 provider → 触发 full 回填（26 号收尾批 C 原子顺序）
-    await api.post(`/sync/delete-by-sync-item/${row.id}`)
+    // 切换重建原子顺序（26 号收尾批 C）：①删旧源数据（失败中止）→ ②改 provider → ③全历史 full 重建
+    const del = await api.post(`/sync/delete-by-sync-item/${row.id}`)
+    if (del.status !== 'success') throw new Error(del.error || 'delete failed')   // 盲审 P1：失败即中止
     await api.post(`/sync/config/${row.id}`, { provider: newProvider })
-    await api.post(`/sync/trigger/${row.id}`, null, { params: { full: true } })
+    await api.post(`/sync/all/${row.id}`)   // 盲审 P0：/sync/all 全历史重建，非 /sync/trigger full（full 参数被丢弃只回填 30 天）
     ElMessage.success(t('dataManage.providerSwitched'))
     await load()
-  } catch (e) { ElMessage.error(e?.detail || t('common.saveFailed')) }
+  } catch (e) { ElMessage.error(e?.detail || e?.message || t('common.saveFailed')) }
 }
 const onScheduleChange = async (row) => {
   // H10（01 §3.2）：表内裸输入不再直写库——confirm+取消回滚旧值（弹窗化编辑留 P3-4）
