@@ -26,13 +26,14 @@ def _minute_df():
 
 
 def test_to_bar_rows_daily_batch_snapshot():
-    """快照：to_bar_rows(df,'1D',adj_map={}) 输出（日线 vol×100/amount×1000 到股/元，专家审核 P0 修复）。"""
+    """快照：to_bar_rows(df,'1D',adj_map={}) 输出（日线 vol×100/amount×1000 到股/元，ts +08:00 aware）。"""
     from datetime import datetime
+    from src.data_platform.tz import as_shanghai
     adapter = TushareAdapter()
     df = _daily_df()
     rows = adapter.to_bar_rows(df, "1D", adj_map={})
-    assert rows[0] == ("600000.SHSE", "1D", datetime(2026, 1, 5), 10.0, 10.5, 9.8, 10.2, 100000.0, 10200000.0, None, "tushare")
-    assert rows[1] == ("000001.SZSE", "1D", datetime(2026, 1, 5), 12.0, 12.3, 11.9, 12.1, 200000.0, 24200000.0, None, "tushare")
+    assert rows[0] == ("600000.SHSE", "1D", as_shanghai(datetime(2026, 1, 5)), 10.0, 10.5, 9.8, 10.2, 100000.0, 10200000.0, None, "tushare")
+    assert rows[1] == ("000001.SZSE", "1D", as_shanghai(datetime(2026, 1, 5)), 12.0, 12.3, 11.9, 12.1, 200000.0, 24200000.0, None, "tushare")
 
 
 def test_to_bar_rows_daily_matches_to_save_rows():

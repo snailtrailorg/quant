@@ -22,11 +22,31 @@ def list_sync_config(payload: dict = Depends(require_perm("read"))):
     return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "data_type": r[4], "sync_mode": r[5], "schedule": r[6], "trade_day_filter": r[7], "enabled": r[8], "last_sync_date": r[9], "last_sync_ts": str(r[10]) if r[10] else None, "last_sync_count": r[11], "last_status": r[12], "description": r[13], "provider": r[14]} for r in rows]
 
 
+def _validate_provider(sid: str, provider: str):
+    """provider 白名单两层校验（26 号收尾批 C，盲审 A-P1/B-P1）：
+    provider ∈ _ADAPTERS 且 sid ∈ capabilities[provider]——capabilities 是 sync_id 集合非 provider 名；
+    joinquant/ricequant 空集 → 只能选 tushare，stub 不会崩。
+    """
+    from src.data_platform.adapters.base import _ADAPTERS
+    cls = _ADAPTERS.get(provider)
+    if not cls:
+        raise ApiError(400, "PROVIDER_INVALID", f"provider {provider} 未注册")
+    if sid not in cls.capabilities:
+        raise ApiError(400, "PROVIDER_NO_CAPABILITY", f"provider {provider} 不提供同步项 {sid}")
+
+
 @router.post("/api/sync/config/{sid}")
 def update_sync_config_api(sid: str, body: dict, payload: dict = Depends(require_perm("data_sync"))):
+    """部分更新同步配置（26 号收尾批 C：条件 SET，旧调用不带 provider 不覆写 NULL；provider 白名单）。"""
+    allowed = {"schedule", "enabled", "trade_day_filter", "provider"}
+    updates = {k: body[k] for k in allowed if k in body}
+    if not updates:
+        return {"ok": True}
+    if "provider" in updates:
+        _validate_provider(sid, updates["provider"])
+    sets = ", ".join(f"{k}=%s" for k in updates)
     with get_conn() as conn:
-        conn.execute("UPDATE sync_config SET schedule=%s, enabled=%s, trade_day_filter=%s WHERE id=%s",
-            (body.get("schedule"), body.get("enabled"), body.get("trade_day_filter"), sid))
+        conn.execute(f"UPDATE sync_config SET {sets} WHERE id=%s", list(updates.values()) + [sid])
         conn.commit()
     audit_log(payload["username"], "update_sync_config", sid)
     return {"ok": True}
@@ -240,6 +260,15 @@ def delete_sync_data_api(sid: str, payload: dict = Depends(require_perm("data_sy
             conn.commit()
     audit_log(payload["username"], "delete_sync_data", sid)
     return {"ok": True}
+
+
+@router.post("/api/sync/delete-by-sync-item/{sid}")
+def delete_by_sync_item_api(sid: str, payload: dict = Depends(require_perm("data_sync"))):
+    """切换 provider 重建原语：删该同步项所有标的 + 重置游标（26 号收尾批 C）。"""
+    from src.data_sync.engine import delete_by_sync_item
+    r = delete_by_sync_item(sid)
+    audit_log(payload["username"], "delete_by_sync_item", sid)
+    return r
 
 
 @router.get("/api/sync/log")

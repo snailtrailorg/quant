@@ -21,8 +21,13 @@
       <el-table-column prop="data_type" :label="t('dataManage.category')" width="80">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('dataManage.provider')" width="100">
-        <template #default="{ row }"><el-tag type="info">{{ row.provider || 'tushare' }}</el-tag></template>
+      <el-table-column :label="t('dataManage.provider')" width="130">
+        <template #default="{ row }">
+          <el-select :model-value="row.provider || 'tushare'" size="small"
+                     :disabled="providerOptions(row).length <= 1" @change="v => changeProvider(row, v)">
+            <el-option v-for="p in providerOptions(row)" :key="p" :value="p" :label="p" />
+          </el-select>
+        </template>
       </el-table-column>
       <el-table-column prop="mode" :label="t('common.mode')" width="80" />
       <el-table-column :label="t('dataManage.cronSchedule')" width="200">
@@ -148,6 +153,7 @@ const navReadonly = inject('navReadonly', ref(false))
 const router = useRouter()
 const configs = ref([])
 const logs = ref([])
+const providers = ref({})   // {provider: [sync_ids]} 能力矩阵（26 号收尾批 C provider 下拉数据源）
 const loading = ref(false)
 const currentSync = ref(null)  // 当前异步同步任务 {sid, name, task_id}
 const progress = ref({})
@@ -165,7 +171,27 @@ const load = async () => {
   try {
     configs.value = (await api.get('/sync/config')).map(c => ({ ...c, status: c.last_status ?? 'idle', _prevSchedule: c.schedule, _prevFilter: c.trade_day_filter }))
     logs.value = await api.get('/sync/log')
+    const caps = await api.get('/datasource/capabilities')
+    providers.value = caps.providers || {}
   } finally { loading.value = false }
+}
+
+const providerOptions = row => Object.keys(providers.value).filter(p => (providers.value[p] || []).includes(row.id))
+const changeProvider = async (row, newProvider) => {
+  if (!newProvider || newProvider === (row.provider || 'tushare')) return
+  try {
+    await ElMessageBox.confirm(
+      t('dataManage.providerSwitchConfirm', { sid: row.name, provider: newProvider }),
+      t('dataManage.providerSwitch'), { type: 'warning' })
+  } catch { return }   // 取消
+  try {
+    // 切换重建：先删旧源数据 → 改 provider → 触发 full 回填（26 号收尾批 C 原子顺序）
+    await api.post(`/sync/delete-by-sync-item/${row.id}`)
+    await api.post(`/sync/config/${row.id}`, { provider: newProvider })
+    await api.post(`/sync/trigger/${row.id}`, null, { params: { full: true } })
+    ElMessage.success(t('dataManage.providerSwitched'))
+    await load()
+  } catch (e) { ElMessage.error(e?.detail || t('common.saveFailed')) }
 }
 const onScheduleChange = async (row) => {
   // H10（01 §3.2）：表内裸输入不再直写库——confirm+取消回滚旧值（弹窗化编辑留 P3-4）

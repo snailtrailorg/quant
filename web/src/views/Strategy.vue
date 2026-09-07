@@ -183,8 +183,8 @@
             <el-input v-model="bindForm.account_id" :placeholder="t('strategy.phAccountId')" style="width: 220px" />
             <el-select v-model="bindForm.broker_provider" style="width: 120px">
               <el-option label="XTP" value="xtp" />
-              <el-option :label="t('common.binance')" value="binance" />
-              <el-option label="OKX" value="okx" />
+              <el-option :label="t('common.binance')" value="binance_perp" />
+              <el-option label="OKX" value="okx_perp" />
             </el-select>
             <el-input-number v-model="bindForm.initial_capital" :min="10000" :step="100000" style="width: 180px" />
             <el-button type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">{{ t('common.bind') }}</el-button>

@@ -1212,7 +1212,7 @@ def broker_health_check():
     from src.strategy_framework.broker import get_broker
     from src.alert_notify import notify
     results = {}
-    for provider in ("xtp", "binance", "okx"):
+    for provider in ("xtp", "binance_perp", "okx_perp"):   # 26 号收尾批 C：与 broker._REGISTRY *_perp 对齐
         try:
             broker = get_broker(provider)
             if broker is None:

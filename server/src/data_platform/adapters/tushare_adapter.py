@@ -227,12 +227,13 @@ def pull_minute(ts_code: str, freq: str, start_date: str, end_date: str | None =
 def to_save_rows_min(df: pd.DataFrame, freq: str) -> list[tuple]:
     """分钟线 DataFrame → 写入 DB 行列表（trade_time 作为 ts）。"""
     from ..schema import to_vt_symbol
+    from ..tz import as_shanghai
     rows = []
     for _, row in df.iterrows():
         ts_code = row.get("ts_code", "")
         vt_sym = to_vt_symbol(ts_code)
         # trade_time 格式 "YYYY-MM-DD HH:MM:SS"
-        ts = pd.Timestamp(row["trade_time"]).to_pydatetime()
+        ts = as_shanghai(pd.Timestamp(row["trade_time"]).to_pydatetime())
         rows.append((
             vt_sym, freq, ts,
             _safe_float(row["open"]), _safe_float(row["high"]), _safe_float(row["low"]),
@@ -251,13 +252,14 @@ def to_save_rows(df: pd.DataFrame, freq: str = "1D") -> list[tuple]:
     分钟线（stk_mins）vol=股/amount=元 不换算——与 to_bar_rows 的 is_daily 分支一致。
     """
     from ..schema import to_vt_symbol
+    from ..tz import as_shanghai
 
     is_daily = "min" not in freq
     rows = []
     for _, row in df.iterrows():
         ts_code = row.get("ts_code", "")
         vt_sym = to_vt_symbol(ts_code)
-        trade_date = pd.Timestamp(row["trade_date"]).to_pydatetime()
+        trade_date = as_shanghai(pd.Timestamp(row["trade_date"]).to_pydatetime())
         vol = _safe_float(row.get("vol", 0))
         amt = _safe_float(row.get("amount", 0))
         if is_daily:

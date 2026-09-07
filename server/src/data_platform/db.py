@@ -42,7 +42,8 @@ def _db_session_options() -> dict:
     lock_ms = int(_os.environ.get("QUANT_DB_LOCK_TIMEOUT_MS", "10000"))
     return {"options": f"-c statement_timeout={stmt_ms} "
                        f"-c idle_in_transaction_session_timeout={idle_ms} "
-                       f"-c lock_timeout={lock_ms}"}
+                       f"-c lock_timeout={lock_ms} "
+                       f"-c TimeZone=Asia/Shanghai"}   # 26 号收尾批 C：pin 死 A 股时区（防 DB/server 默认漂移）
 
 
 _engine = create_engine(

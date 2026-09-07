@@ -67,8 +67,8 @@ class OKXBroker(_BaseBroker):
 
 _REGISTRY: dict[str, type[Broker]] = {
     "xtp": XTPBroker,
-    "binance": BinanceBroker,
-    "okx": OKXBroker,
+    "binance_perp": BinanceBroker,   # 26 号收尾批 C：与 create_adapter 的 *_perp 对齐
+    "okx_perp": OKXBroker,
 }
 
 
