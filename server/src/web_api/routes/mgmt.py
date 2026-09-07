@@ -122,6 +122,16 @@ def _save_ds_params(dsid: int, params: dict) -> None:
         conn.commit()
 
 
+@router.get("/api/datasource/capabilities")
+def get_capabilities(payload: dict = Depends(require_perm("read"))):
+    """各数据源 adapter 的能力矩阵（24 号供给矩阵数据源：provider → 支持的 sync_id 列表）。"""
+    from src.data_platform.adapters.base import _ADAPTERS
+    return {"providers": {
+        provider: sorted(cls.capabilities)
+        for provider, cls in _ADAPTERS.items()
+    }}
+
+
 @router.get("/api/datasource/{provider}/rate-limits")
 def get_rate_limits(provider: str,
                     payload: dict = Depends(require_perm("read"))):

@@ -21,6 +21,9 @@
       <el-table-column prop="data_type" :label="t('dataManage.category')" width="80">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
       </el-table-column>
+      <el-table-column :label="t('dataManage.provider')" width="100">
+        <template #default="{ row }"><el-tag type="info">{{ row.provider || 'tushare' }}</el-tag></template>
+      </el-table-column>
       <el-table-column prop="mode" :label="t('common.mode')" width="80" />
       <el-table-column :label="t('dataManage.cronSchedule')" width="200">
         <template #default="{ row }">

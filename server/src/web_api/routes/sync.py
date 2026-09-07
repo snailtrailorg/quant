@@ -17,9 +17,9 @@ router = APIRouter(tags=["sync"])
 @router.get("/api/sync/config")
 def list_sync_config(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description FROM sync_config ORDER BY id")
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description, provider FROM sync_config ORDER BY id")
         rows = cur.fetchall()
-    return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "data_type": r[4], "sync_mode": r[5], "schedule": r[6], "trade_day_filter": r[7], "enabled": r[8], "last_sync_date": r[9], "last_sync_ts": str(r[10]) if r[10] else None, "last_sync_count": r[11], "last_status": r[12], "description": r[13]} for r in rows]
+    return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "data_type": r[4], "sync_mode": r[5], "schedule": r[6], "trade_day_filter": r[7], "enabled": r[8], "last_sync_date": r[9], "last_sync_ts": str(r[10]) if r[10] else None, "last_sync_count": r[11], "last_status": r[12], "description": r[13], "provider": r[14]} for r in rows]
 
 
 @router.post("/api/sync/config/{sid}")

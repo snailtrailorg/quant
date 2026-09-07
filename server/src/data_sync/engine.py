@@ -1302,6 +1302,32 @@ def delete_symbol(sync_id: str, ts_code: str) -> dict:
     return {"status": "success", "deleted": deleted, "symbol": vt}
 
 
+def delete_by_sync_item(sync_id: str) -> dict:
+    """全量删该同步项的本地数据（切换 provider 用，24 号 §2.3 切换重建原语）。
+
+    删 bar 表里该 kind 的所有标的（批量 SQL，非 per-symbol 逐个删）。返回删除行数。
+    """
+    from src.data_platform.schema import to_vt_symbol
+    meta = _PER_SYMBOL_META.get(sync_id)
+    if meta is None:
+        return {"status": "error", "error": f"不支持删除: {sync_id}"}
+    table = meta[1]
+    kind = meta[2]
+    ts_codes = _list_static_ts_codes(kind)
+    if not ts_codes:
+        return {"status": "success", "deleted": 0}
+    vts = [to_vt_symbol(tc) for tc in ts_codes]
+    with get_conn() as conn:
+        try:
+            cur = conn.execute(f"DELETE FROM {table} WHERE symbol = ANY(%s)", (vts,))
+            deleted = cur.rowcount
+            conn.commit()
+        except psycopg.errors.UndefinedTable:
+            deleted = 0
+            conn.commit()
+    return {"status": "success", "deleted": deleted}
+
+
 def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
     """全市场全量同步（Celery 调用）。
 
