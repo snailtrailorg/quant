@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Callable, Iterator
 
@@ -191,3 +192,48 @@ def rate_limit_context(ds, api_name: str,
         breaker.record_failure()
         raise
     breaker.record_success()
+
+
+class RateLimitPolicy(ABC):
+    """限速策略（24 号限速抽象聚合）：不同平台不同限速模型，抽象统一接口。
+
+    Tushare=间隔秒（FixedIntervalPolicy）；聚宽/米筐=每日额度（DailyQuotaPolicy）。
+    engine 只依赖 get_interval(api_name)，不关心具体平台怎么算间隔。
+    """
+    @abstractmethod
+    def get_interval(self, api_name: str) -> float:
+        """两次调用最小间隔秒。0=不限。"""
+
+
+class FixedIntervalPolicy(RateLimitPolicy):
+    """固定间隔策略（Tushare）：api_name -> 间隔秒，两级（类默认 + DB 覆写）。
+
+    非法覆写值回落类默认（同原 get_rate_limit 容错语义——非法值不崩、回落最保守默认）。
+    """
+    def __init__(self, defaults: dict[str, float], overrides: dict[str, float]):
+        self._defaults = defaults or {}
+        self._overrides = overrides or {}
+
+    def get_interval(self, api_name: str) -> float:
+        if api_name in self._overrides:
+            try:
+                return max(0.0, float(self._overrides[api_name]))
+            except (TypeError, ValueError):
+                pass   # 非法覆写回落类默认
+        try:
+            return max(0.0, float(self._defaults.get(api_name, 0.0)))
+        except (TypeError, ValueError):
+            return 0.0
+
+
+class DailyQuotaPolicy(RateLimitPolicy):
+    """每日额度策略（聚宽/米筐）：每日 N 次 → 平均间隔 86400/N。
+
+    注（盲审 B-P1）：平均间隔是「下界近似」——防超不防 burst（under-utilize），
+    且无「日上限硬顶」，持续跑超一天会超 N 次。日上限硬顶 + 当日计数留真接批补。
+    """
+    def __init__(self, daily_quota: int):
+        self._quota = max(1, int(daily_quota))
+
+    def get_interval(self, api_name: str) -> float:
+        return 86400.0 / self._quota

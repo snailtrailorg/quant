@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Body, HTTPException
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
 from ..models import (DataSourceReq, ChannelReq, BrokerReq,
-                      PointsTierReq, RateLimitOverrideReq)
+                      RateLimitOverrideReq)
 from src.data_platform.db import get_conn
 import logging
 
@@ -95,14 +95,6 @@ def _ds_cls(provider: str):
     return cls
 
 
-def _preset_cls(provider: str):
-    """provider → 有积分档预设的 DataSource 类（无预设 404——预设端点专属门槛）。"""
-    cls = _ds_cls(provider)
-    if not getattr(cls, "POINTS_PRESETS", None):
-        raise ApiError(404, "NO_POINTS_PRESETS", f"数据源 {provider} 不支持积分档预设")
-    return cls
-
-
 def _load_ds_params(provider: str) -> tuple[int, dict]:
     """读 provider 配置行（enabled 优先）→ (id, params dict)；无配置 404。"""
     with get_conn() as conn:
@@ -130,34 +122,24 @@ def _save_ds_params(dsid: int, params: dict) -> None:
         conn.commit()
 
 
-@router.get("/api/datasource/{provider}/points-presets")
-def get_points_presets(provider: str,
-                       payload: dict = Depends(require_perm("read"))):
-    """积分档预设表 + 当前档位 + 每 API 当前生效值（前端下拉/限速表格数据源）。"""
-    cls = _preset_cls(provider)
+@router.get("/api/datasource/{provider}/rate-limits")
+def get_rate_limits(provider: str,
+                    payload: dict = Depends(require_perm("read"))):
+    """限速覆写 + 熔断参数（24 号限速抽象聚合：去积分档，限速=类默认 + DB 覆写两级）。"""
+    cls = _ds_cls(provider)
     _, params = _load_ds_params(provider)
-    tier = params.get("points_tier")
-    tier_val = None
-    try:
-        tier_val = int(tier) if tier is not None else None
-    except (TypeError, ValueError):
-        pass   # 非法档位：回 None（= 未选档，老三级行为），四层解析里同样跳过
-    preset = cls.POINTS_PRESETS.get(tier_val, {}) if tier_val is not None else {}
     overrides = params.get("rate_limits") or {}
     ds = cls(params=json.dumps(params))
     apis = []
-    for name in sorted(set(cls.DEFAULT_RATE_LIMITS) | set(preset) | set(overrides)):
+    for name in sorted(set(cls.DEFAULT_RATE_LIMITS) | set(overrides)):
         apis.append({
             "api": name,
-            "default": float(cls.DEFAULT_RATE_LIMITS.get(name, 0.0)),   # L0
-            "preset": preset.get(name),      # L1 当前档预设值（未选档/键不在预设=None）
-            "override": overrides.get(name),  # L2 显式覆写（None=未覆写）
-            "effective": ds.get_rate_limit(name),   # 当前生效值（含 L3 时段乘数）
+            "default": float(cls.DEFAULT_RATE_LIMITS.get(name, 0.0)),   # 类默认
+            "override": overrides.get(name),                            # DB 覆写（None=未覆写）
+            "effective": ds.get_rate_limit(name),                       # 当前生效值
         })
     return {
         "provider": provider,
-        "presets": {str(k): v for k, v in cls.POINTS_PRESETS.items()},   # JSON 键须字符串
-        "current_tier": tier_val,
         "apis": apis,
         "circuit_breaker": {
             "fail_threshold": ds.get_param_float(
@@ -166,26 +148,6 @@ def get_points_presets(provider: str,
                 "circuit_breaker", "reset_timeout", default=60.0, lo=1.0, hi=86400.0),
         },
     }
-
-
-@router.post("/api/datasource/{provider}/points-tier")
-def set_points_tier(provider: str, req: PointsTierReq,
-                    payload: dict = Depends(require_perm("system_config"))):
-    """切换积分档（写 params.points_tier），返回逐 API 生效值 diff（旧档 vs 新档）。"""
-    cls = _preset_cls(provider)
-    if req.tier not in cls.POINTS_PRESETS:
-        raise ApiError(400, "TIER_INVALID",
-                       f"档位 {req.tier} 不在预设表（可选：{sorted(cls.POINTS_PRESETS)}）")
-    dsid, params = _load_ds_params(provider)
-    new_params = {**params, "points_tier": req.tier}
-    old_ds = cls(params=json.dumps(params))
-    new_ds = cls(params=json.dumps(new_params))
-    names = set(cls.DEFAULT_RATE_LIMITS) | set(cls.POINTS_PRESETS[req.tier]) | set(params.get("rate_limits") or {})
-    diff = [{"api": n, "before": old_ds.get_rate_limit(n), "after": new_ds.get_rate_limit(n)}
-            for n in sorted(names) if old_ds.get_rate_limit(n) != new_ds.get_rate_limit(n)]
-    _save_ds_params(dsid, new_params)
-    audit_log(payload["username"], "data_source_points_tier", f"{provider} -> {req.tier}")
-    return {"ok": True, "tier": req.tier, "diff": diff}
 
 
 @router.post("/api/datasource/{provider}/rate-limit-override")

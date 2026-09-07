@@ -9,23 +9,8 @@ import os
 import json
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime
 
 logger = logging.getLogger("data_source")
-
-
-def _hm_valid(hm: str) -> bool:
-    """HH:MM 合法（00-23:00-59，两位补零——窗口比较靠字符串定宽，"9:00" 这类非法）。"""
-    if len(hm) != 5 or hm[2] != ":" or not hm[:2].isdigit() or not hm[3:].isdigit():
-        return False
-    return int(hm[:2]) <= 23 and int(hm[3:]) <= 59
-
-
-def _hm_in_window(now: str, start: str, end: str) -> bool:
-    """now 是否落在 [start, end]（含端点）；start>end 视为跨零点窗口（如 22:00-02:00）。"""
-    if start <= end:
-        return start <= now <= end
-    return now >= start or now <= end
 
 
 class DataSource(ABC):
@@ -44,6 +29,7 @@ class DataSource(ABC):
     def __init__(self, credentials_encrypted: str | None = None, params: str | None = None):
         self._credentials_encrypted = credentials_encrypted
         self._params = json.loads(params) if params else {}
+        self._policy = self._build_rate_policy()
 
     def get_param(self, *keys, default=None):
         """按命名空间路径读 params——get_param("circuit_breaker", "fail_threshold")。
@@ -78,47 +64,20 @@ class DataSource(ABC):
     def test_connection(self) -> bool:
         """测试连接，返回是否成功。"""
 
+    def _build_rate_policy(self):
+        """子类覆写：构建限速策略（24 号限速抽象聚合，各平台自己实现，高内聚低耦合）。
+
+        默认 FixedIntervalPolicy（类默认 {} + DB rate_limits 覆写）。
+        """
+        from src.data_platform.rate_limit import FixedIntervalPolicy
+        return FixedIntervalPolicy({}, self._params.get("rate_limits") or {})
+
     def get_rate_limit(self, api_name: str) -> float:
-        """该 API 两次调用最小间隔（秒）。0=不限。
+        """该 API 两次调用最小间隔（秒）。0=不限。委托限速策略（24 号聚合）。
 
-        三级覆盖（限流治理吸收 2026-08-27，D3）：
-        1. 类级 DEFAULT_RATE_LIMITS（代码默认）
-        2. params.rate_limits（DB 覆盖，{"api": 秒}）
-        3. params.rate_time_overrides 时段乘数——当前墙钟命中窗口则 interval /= multiplier
-           （multiplier>1=更快=间隔缩短，如盘后 ×2；格式 [{"window":"16:00-20:00",
-           "multiplier":2.5}]，支持跨零点 "22:00-02:00"，首条命中即生效）
-
-        值非法回落默认+告警，不崩同步。键=数据源接口名（Tushare 即 pro.xxx 的 xxx，
-        与 sync_config.tushare_api 词汇表对齐）。
+        键=数据源接口名（Tushare 即 pro.xxx 的 xxx，与 sync_config.tushare_api 词汇表对齐）。
         """
-        limits = {**self.DEFAULT_RATE_LIMITS, **(self._params.get("rate_limits") or {})}
-        try:
-            interval = float(limits.get(api_name, 0.0))
-        except (TypeError, ValueError):
-            logger.warning("rate_limits[%s]=%r 非法，回落默认", api_name, limits.get(api_name))
-            interval = float(self.DEFAULT_RATE_LIMITS.get(api_name, 0.0))
-        return self._apply_time_overrides(interval)
-
-    def _apply_time_overrides(self, interval: float) -> float:
-        """第三级：时段乘数——当前时刻（HH:MM）命中某条 window 则 interval /= multiplier。
-
-        非法条目（窗口格式错/multiplier≤0/非数）跳过+告警；interval<=0（不限速）不受影响。
-        """
-        rules = self._params.get("rate_time_overrides")
-        if not rules or interval <= 0:
-            return interval
-        now_hm = datetime.now().strftime("%H:%M")
-        for rule in rules if isinstance(rules, list) else []:
-            try:
-                start_s, end_s = (s.strip() for s in str(rule["window"]).split("-"))
-                multiplier = float(rule["multiplier"])
-                if multiplier <= 0 or not (_hm_valid(start_s) and _hm_valid(end_s)):
-                    raise ValueError("非法时段条目")
-                if _hm_in_window(now_hm, start_s, end_s):
-                    return interval / multiplier
-            except Exception:
-                logger.warning("rate_time_overrides 条目非法已跳过: %r", rule)
-        return interval
+        return self._policy.get_interval(api_name)
 
     def record_usage(self, api_calls: int = 1, api_name: str = "",
                     success: bool = True, latency_ms: int = 0,
@@ -157,55 +116,14 @@ class TushareDataSource(DataSource):
         "stock_basic": 0.5,
     }
 
-    # 积分档预设（四层限流 L1）：Web 下拉选择存 params.points_tier，切换即全量更新。
-    # Tushare 官方积分 200/2000/5000 三档对应每分钟频控换算为最小间隔秒——
-    # 官方调整限额时改这里走部署；个别接口临时应急用 params.rate_limits 覆写（L2）。
-    POINTS_PRESETS = {
-        200: {   # 现状档（积分 200：多数接口 ~120 次/分钟内实测受限更严，stk_mins 1 次/小时）
-            "stk_mins": 3600.0, "adj_factor": 0.3,
-            "daily": 0.5, "daily_basic": 0.5, "fund_daily": 0.5,
-            "cb_daily": 0.5, "trade_cal": 0.5, "stock_basic": 0.5,
-        },
-        2000: {  # 积分 2000（约 500 次/分钟 → 0.2s 级；stk_mins 分钟线仍受限）
-            "stk_mins": 0.3, "adj_factor": 0.15,
-            "daily": 0.2, "daily_basic": 0.2, "fund_daily": 0.2,
-            "cb_daily": 0.2, "trade_cal": 0.2, "stock_basic": 0.2,
-        },
-        5000: {  # 积分 5000（约 1000 次/分钟 → 0.1s 级）
-            "stk_mins": 0.12, "adj_factor": 0.06,
-            "daily": 0.1, "daily_basic": 0.1, "fund_daily": 0.1,
-            "cb_daily": 0.1, "trade_cal": 0.1, "stock_basic": 0.1,
-        },
-    }
+    def _build_rate_policy(self):
+        """Tushare 限速策略：FixedIntervalPolicy（类默认 DEFAULT_RATE_LIMITS + DB rate_limits 覆写）。
 
-    def get_rate_limit(self, api_name: str) -> float:
-        """该 API 两次调用最小间隔（秒）。0=不限。四层解析（2026-08-27 积分档）：
-
-        - L0 DEFAULT_RATE_LIMITS（代码兜底，最保守——= 现状 200 积分实测值）
-        - L1 params.points_tier 选中积分档预设批量覆盖（200/2000/5000，见 POINTS_PRESETS）
-        - L2 params.rate_limits 单参数覆写（只覆盖显式写的键——Tushare 调个别值应急用）
-        - L3 params.rate_time_overrides 时段乘数（interval /= multiplier，>1=更快）
-
-        points_tier 不存在时 = 三级老行为，向后兼容；非法值各层独立回落+告警不崩。
+        24 号限速抽象聚合：去掉积分档（points_tier/POINTS_PRESETS）+ 时段乘数
+        （rate_time_overrides），限速值由「类默认 + DB 覆写」两级决定。
         """
-        limits = dict(self.DEFAULT_RATE_LIMITS)  # L0
-        tier = self._params.get("points_tier")   # L1
-        if tier:
-            try:
-                preset = self.POINTS_PRESETS.get(int(tier))
-                if preset:
-                    limits.update(preset)
-                else:
-                    logger.warning("points_tier=%r 无对应预设，跳过预设层", tier)
-            except (TypeError, ValueError):
-                logger.warning("points_tier=%r 非法，跳过预设层", tier)
-        limits.update(self._params.get("rate_limits") or {})  # L2
-        try:
-            interval = float(limits.get(api_name, 0.0))
-        except (TypeError, ValueError):
-            logger.warning("rate_limits[%s]=%r 非法，回落默认", api_name, limits.get(api_name))
-            interval = float(self.DEFAULT_RATE_LIMITS.get(api_name, 0.0))
-        return self._apply_time_overrides(interval)  # L3
+        from src.data_platform.rate_limit import FixedIntervalPolicy
+        return FixedIntervalPolicy(self.DEFAULT_RATE_LIMITS, self._params.get("rate_limits") or {})
 
     def _get_token(self) -> str:
         """解密 token（DB 优先，.env fallback）。"""

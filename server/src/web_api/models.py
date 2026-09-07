@@ -109,10 +109,6 @@ class DataSourceReq(BaseModel):
     usage_limit: int | None = None
     enabled: bool = True
 
-class PointsTierReq(BaseModel):
-    """积分档切换（四层限流 L1）：tier 必须在 POINTS_PRESETS 键中（后端校验）。"""
-    tier: int
-
 class RateLimitOverrideReq(BaseModel):
     """单参数限速覆写（L2）或熔断参数写入（params.circuit_breaker）。
 

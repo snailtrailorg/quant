@@ -25,6 +25,9 @@ class BaseDataAdapter(ABC):
     to_bar_rows 转统一 (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)。
     """
     provider: str = ""
+    # 能力矩阵（24 号）：该平台能提供的同步项 sync_id 集合。供给矩阵只列这些
+    # （由 adapter 类属性派生，非 DB JSON——盲审 A-P2/B-P2 双真相源会漂移）
+    capabilities: set[str] = set()
 
     @abstractmethod
     def pull_daily(self, symbol: str, start: str, end: str, adj=None, kind: str = "astock") -> pd.DataFrame:
@@ -55,6 +58,23 @@ class BaseDataAdapter(ABC):
         """
         return pd.DataFrame()
 
+    # —— 归一化（带默认实现，Tushare 直通，聚宽/米筐覆写，24 号 §2.1）——
+    def to_source_symbol(self, symbol: str) -> str:
+        """内部 ts_code（600000.SH）→ 源格式（聚宽 600000.XSHG）。默认直通。"""
+        return symbol
+
+    def from_source_symbol(self, source_symbol: str) -> str:
+        """源格式 → 内部 ts_code（to_bar_rows 归一到 vt_symbol 的输入）。默认直通。"""
+        return source_symbol
+
+    def to_source_freq(self, freq: str) -> str:
+        """内部 freq（'1min'）→ 源格式（聚宽 '1m'）。默认直通。"""
+        return freq
+
+    def to_source_adj(self, adj: str | None) -> str | None:
+        """语义复权（'pre'/'post'/None）→ 源格式（Tushare 'qfq'/'hfq'/None）。默认直通。"""
+        return adj
+
 
 # ——— 注册表 ———
 _ADAPTERS: dict[str, type[BaseDataAdapter]] = {}
@@ -84,6 +104,7 @@ class TushareAdapter(BaseDataAdapter):
     """
 
     provider = "tushare"
+    capabilities = {"astock_daily", "etf_daily", "cb_daily", "astock_minute", "astock_minute_5min"}
 
     def __init__(self):
         from src.data_platform.data_source import get_data_source, TushareDataSource

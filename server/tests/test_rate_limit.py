@@ -78,73 +78,26 @@ class TestRateLimiter:
         assert sleeps == []
 
 
-# --- get_rate_limit 三级覆盖 ---
+# --- get_rate_limit 两级（24 号限速聚合：类默认 + DB 覆写，去积分档/时段乘数） ---
 
-class TestGetRateLimitThreeLevels:
+class TestGetRateLimit:
 
     def _ds(self, params: dict | None = None):
         from src.data_platform.data_source import TushareDataSource
         return TushareDataSource(params=json.dumps(params) if params else None)
 
-    def test_level1_class_default(self):
-        """一级：类级 DEFAULT_RATE_LIMITS；未知接口 0=不限。"""
+    def test_class_default(self):
+        """类默认 DEFAULT_RATE_LIMITS；未知接口 0=不限。"""
         ds = self._ds()
         assert ds.get_rate_limit("adj_factor") == 0.3
         assert ds.get_rate_limit("daily") == 0.5
         assert ds.get_rate_limit("ghost_api") == 0.0
 
-    def test_level2_params_override(self):
-        """二级：params.rate_limits 覆盖类默认；未覆盖键回落默认。"""
+    def test_params_override(self):
+        """DB rate_limits 覆盖类默认；未覆盖键回落默认。"""
         ds = self._ds({"rate_limits": {"adj_factor": 1.2}})
         assert ds.get_rate_limit("adj_factor") == 1.2
         assert ds.get_rate_limit("daily") == 0.5
-
-    def test_level3_multiplier_shortens_interval(self):
-        """三级：multiplier>1=更快=间隔缩短（0.5 / 2 = 0.25，D3 方向）。"""
-        ds = self._ds({"rate_time_overrides": [{"window": "00:00-23:59", "multiplier": 2}]})
-        assert abs(ds.get_rate_limit("daily") - 0.25) < 1e-9
-
-    def test_level3_multiplier_lt1_lengthens_interval(self):
-        """三级反方向：multiplier<1=更慢=间隔拉长（竞价降速 0.5 / 0.5 = 1.0）。"""
-        ds = self._ds({"rate_time_overrides": [{"window": "00:00-23:59", "multiplier": 0.5}]})
-        assert abs(ds.get_rate_limit("daily") - 1.0) < 1e-9
-
-    def test_level3_window_hit_and_miss(self):
-        """窗口 16:00-20:00：17:00 命中（0.5/2.5=0.2），21:00 不命中（原值 0.5）。"""
-        ds = self._ds({"rate_time_overrides": [{"window": "16:00-20:00", "multiplier": 2.5}]})
-        for hh, expected in [(17, 0.2), (21, 0.5)]:
-            with patch("src.data_platform.data_source.datetime") as mdt:
-                mdt.now.return_value = datetime(2026, 8, 27, hh, 0)
-                assert abs(ds.get_rate_limit("daily") - expected) < 1e-9
-
-    def test_level3_cross_midnight_window(self):
-        """跨零点窗口 22:00-02:00：23:10 命中、10:00 不命中。"""
-        ds = self._ds({"rate_time_overrides": [{"window": "22:00-02:00", "multiplier": 5}]})
-        for hh, mm, expected in [(23, 10, 0.1), (10, 0, 0.5)]:
-            with patch("src.data_platform.data_source.datetime") as mdt:
-                mdt.now.return_value = datetime(2026, 8, 27, hh, mm)
-                assert abs(ds.get_rate_limit("daily") - expected) < 1e-9
-
-    def test_level3_invalid_entries_skipped(self):
-        """非法条目（非补零窗口/multiplier≤0/格式错）跳过不崩，合法条目仍生效。"""
-        ds = self._ds({"rate_time_overrides": [
-            {"window": "9:00-15:00", "multiplier": 2},    # 非两位补零，字符串比较失真
-            {"window": "00:00-23:59", "multiplier": 0},   # multiplier 须为正
-            {"window": "bad-window", "multiplier": 2},    # 窗口解析失败
-            {"window": "00:00-23:59", "multiplier": 4},   # 首条合法命中 → 0.5/4=0.125
-        ]})
-        assert abs(ds.get_rate_limit("daily") - 0.125) < 1e-9
-
-    def test_level3_zero_interval_untouched(self):
-        """不限速（0）不受时段条目影响（无意义也不引入误差）。"""
-        ds = self._ds({"rate_time_overrides": [{"window": "00:00-23:59", "multiplier": 2}]})
-        assert ds.get_rate_limit("ghost_api") == 0.0
-
-    def test_level3_stacks_on_level2(self):
-        """三级叠在二级上：rate_limits 定基础间隔 1.0 → 时段 ÷2 → 0.5。"""
-        ds = self._ds({"rate_limits": {"daily": 1.0},
-                       "rate_time_overrides": [{"window": "00:00-23:59", "multiplier": 2}]})
-        assert abs(ds.get_rate_limit("daily") - 0.5) < 1e-9
 
 
 # --- CircuitBreaker：三态 ---

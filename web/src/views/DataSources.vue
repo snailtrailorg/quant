@@ -46,21 +46,10 @@
     </el-dialog>
     <template v-if="tushareRow">
       <el-divider />
-      <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('dataSources.tierTitle') }}</h3>
-      <div style="margin-bottom: 12px">
-        <span style="margin-right: var(--sp-2)">{{ t('dataSources.pointsTier') }}:</span>
-        <el-radio-group :model-value="presets.current_tier" @change="onTierChange">
-          <el-radio-button v-for="tr in presetTiers" :key="tr" :value="tr">{{ tr }} {{ t('dataSources.pointsUnit') }}</el-radio-button>
-        </el-radio-group>
-        <el-tag v-if="presets.current_tier == null" type="info" style="margin-left: var(--sp-2)">{{ t('dataSources.noTier') }}</el-tag>
-      </div>
       <el-collapse>
         <el-collapse-item :title="t('dataSources.rateTableTitle')" name="rates">
           <el-table :data="presets.apis" size="small" max-height="360">
             <el-table-column prop="api" label="API" min-width="110" />
-            <el-table-column :label="t('dataSources.presetCol')" width="100">
-              <template #default="{ row }">{{ fmtSec(row.preset ?? row.default) }}</template>
-            </el-table-column>
             <el-table-column :label="t('dataSources.overrideCol')" width="210">
               <template #default="{ row }">
                 <el-input-number v-model="row._edit" :min="0" :max="86400" :step="0.05" :precision="3" size="small" controls-position="right" style="width: 130px" />
@@ -103,7 +92,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {apiErr,  getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage, getPointsPresets, setPointsTier, setRateLimitOverride } from '../api'
+import {apiErr,  getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -114,11 +103,10 @@ const saving = ref(false)
 const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）
 const testing = ref(0)
 
-// --- 积分档四层限流（tushare）：预设表 + 覆写 + 熔断参数 ---
-const presets = ref({ current_tier: null, presets: {}, apis: [] })
+// --- 限速（tushare）：覆写 + 熔断参数（24 号去积分档，限速=类默认+DB覆写两级） ---
+const presets = ref({ apis: [] })
 const cb = ref({ fail_threshold: 5, reset_timeout: 60 })
 const tushareRow = computed(() => sources.value.find(s => s.provider === 'tushare'))
-const presetTiers = computed(() => Object.keys(presets.value.presets || {}).map(Number).sort((a, b) => a - b))
 
 function emptyForm() {
   return { provider: 'tushare', name: '', credentials: '', usage_limit: null, enabled: true }
@@ -138,40 +126,14 @@ const onAdd = () => { resetForm(); dlg.value = true }
 const loadPresets = async () => {
   if (!tushareRow.value) return
   try {
-    const p = await getPointsPresets('tushare')
+    const p = await getRateLimits('tushare')
     p.apis.forEach(a => { a._edit = a.override })   // 覆写编辑框初值=当前覆写（无则空）
     presets.value = p
     cb.value = { fail_threshold: p.circuit_breaker.fail_threshold, reset_timeout: p.circuit_breaker.reset_timeout }
-  } catch (e) { console.debug('无积分档预设（provider 未注册或无配置）', e) }
+  } catch (e) { console.debug('无限速配置（provider 未注册或无配置）', e) }
 }
 
 const fmtSec = (v) => (v == null ? '-' : `${v}s`)
-
-/** 客户端预览切档 diff（确认框展示"将变化项"；生效值后端 PUT 返回同款 diff） */
-const previewDiff = (newTier) => {
-  const p = presets.value
-  const before = p.presets[String(p.current_tier)] || {}
-  const after = p.presets[String(newTier)] || {}
-  return p.apis
-    .map(a => ({ api: a.api, b: a.override ?? before[a.api] ?? a.default, v: a.override ?? after[a.api] ?? a.default }))
-    .filter(d => d.b !== d.v)
-}
-
-const onTierChange = async (newTier) => {
-  const diff = previewDiff(newTier)
-  const lines = diff.length
-    ? diff.map(d => `${d.api}: ${fmtSec(d.b)} → ${fmtSec(d.v)}`).join('<br>')
-    : t('dataSources.noChange')
-  try {
-    await ElMessageBox.confirm(lines, t('dataSources.tierConfirmTitle', { tier: newTier }),
-      { dangerouslyUseHTMLString: true, type: 'warning' })
-  } catch { return }   // 取消：model-value 仍挂旧档，无本地漂移
-  try {
-    await setPointsTier('tushare', newTier)
-    ElMessage.success(t('dataSources.tierUpdated'))
-    loadPresets()
-  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
-}
 
 const overrideDirty = (row) => row._edit != null && row._edit !== row.override
 

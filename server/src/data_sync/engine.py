@@ -51,6 +51,16 @@ def _get_kline_adapter(cfg: dict):
         return get_adapter("tushare")
 
 
+def _get_rate_ds(provider: str):
+    """按 provider 选限速/熔断 DataSource（fallback tushare）。
+
+    盲审 A-P1-3：rate_limit_context 的 ds 原硬编码 tushare，切 provider 后限速/熔断串源——
+    新源仍按 Tushare 间隔限速、熔断器 key=tushare。改为按 provider 选。
+    """
+    from src.data_platform.data_source import get_data_source, TushareDataSource
+    return get_data_source(provider) or TushareDataSource()
+
+
 def _log(sync_id: str, mode: str, start: str, end: str, pulled: int, saved: int,
          duration_ms: int, status: str, error: str = "",
          failed_dates: list[str] | None = None, expected_days: int | None = None,
@@ -234,7 +244,7 @@ def _api_name_of(cfg: dict) -> str:
 def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
                         start: str, end: str, sleep_s: float | None = None,
                         progress_cb: Callable | None = None,
-                        api_name: str = "daily") -> dict:
+                        api_name: str = "daily", provider: str = "tushare") -> dict:
     """按交易日逐日批量拉取 + 写入。
 
     单日失败不中断整体，记入 failed_dates（含失败原因），不再静默 continue。
@@ -246,9 +256,8 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
 
     Returns: {pulled, saved, failed_dates, expected_days, actual_days}
     """
-    from src.data_platform.data_source import get_data_source, TushareDataSource
     from src.data_platform.rate_limit import rate_limit_context
-    ds = get_data_source("tushare") or TushareDataSource()   # DB 无配置回落类级默认限速
+    ds = _get_rate_ds(provider)   # 按 provider 选限速/熔断 DataSource（24 号，不串源）
     date_range = pd.date_range(start=start, end=end, freq="B")
     total = len(date_range)
     total_pulled = 0
@@ -314,7 +323,8 @@ def _sync_astock_daily(cfg: dict, end_date: str, backfill_from: str | None = Non
     r = _sync_by_trade_date(
         lambda trade_date: adapter.pull_daily_batch(trade_date, "astock"),
         lambda df: _daily_to_save_fn(df, adapter),
-        start, end_date, api_name=_api_name_of(cfg), progress_cb=progress_cb)
+        start, end_date, api_name=_api_name_of(cfg), progress_cb=progress_cb,
+        provider=adapter.provider)
     r["start"] = start
     return r
 
@@ -423,7 +433,8 @@ def _sync_etf_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
     r = _sync_by_trade_date(
         lambda trade_date: adapter.pull_daily_batch(trade_date, "etf"),
         lambda df: _daily_to_save_fn(df, adapter),
-        start, end_date, api_name=_api_name_of(cfg), progress_cb=progress_cb)
+        start, end_date, api_name=_api_name_of(cfg), progress_cb=progress_cb,
+        provider=adapter.provider)
     r["start"] = start
     return r
 
@@ -485,9 +496,8 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [],
                     "expected_days": 0, "actual_days": 0}
 
-    from src.data_platform.data_source import get_data_source, TushareDataSource
     from src.data_platform.rate_limit import rate_limit_context
-    ds = get_data_source("tushare") or TushareDataSource()
+    ds = _get_rate_ds(cfg.get("provider") or "tushare")
     ts_codes = _list_static_ts_codes("astock")
     total = len(ts_codes)
     total_pulled = 0
@@ -1303,9 +1313,8 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
     adapter, kind, freq, bar_type = _get_pro_api(sync_id)
     if kind is None:
         return {"status": "error", "error": f"不支持全量同步: {sync_id}"}
-    from src.data_platform.data_source import get_data_source, TushareDataSource
     from src.data_platform.rate_limit import rate_limit_context
-    ds = get_data_source("tushare") or TushareDataSource()
+    ds = _get_rate_ds(adapter.provider)
 
     ts_codes = _list_static_ts_codes(kind)
     total = len(ts_codes)
