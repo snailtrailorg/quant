@@ -14,7 +14,7 @@ server/src/data_platform/
 ├── schema.py          # Bar dataclass + vt_symbol 转换 + DDL 模板
 ├── data_source.py     # DataSource 接口（get_param*/get_rate_limit）+ Tushare/AkShare 实现（DB 化凭证 + 积分档预设）
 ├── rate_limit.py      # 限流+熔断三件套：RateLimiter/CircuitBreaker/rate_limit_context（2026-08-27 限流治理新建）
-├── platform.py        # DataPlatform 单例（统一入口，部分占位）
+├── _platform.py      # DataPlatform 单例（统一入口，部分占位；批9 改名自 platform.py——包属性/子模块/实例三层同名占用 import 机制保留地，懒加载下现投毒竞态，守门=tests/test_data_platform_lazy.py）
 ├── settings.py        # 环境变量集中读取
 ├── audit.py           # audit_log（原寄生 web_api.auth，2026-08-19 归位）
 ├── market_snapshot.py # 三档腾讯实时快照（quote:tencent 60s TTL）
@@ -202,7 +202,7 @@ get_stock_detail(symbol) -> dict
     # 被 web_api GET /api/stock/{symbol}/detail（薄壳）与 POST /analyze 调用
 ```
 
-### platform.py（DataPlatform 单例 `platform`）
+### _platform.py（DataPlatform 单例 `platform`；批9 改名自 platform.py，防 import 同名投毒）
 ```python
 platform.get_bar(symbol, freq, start, end, adj="qfq") -> pd.DataFrame
 platform.ensure_daily(ts_code, start_date, end_date=None, adj="qfq") -> int
@@ -238,7 +238,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | data_source.py | `src.quant_common.crypto.decrypt` | 解密 DB 凭证（2026-08-19 归位后路径；原 `web_api.crypto_utils` 循环依赖已解）（P3 回写 2026-08-20） |
 | rate_limit.py | （纯 stdlib：threading/contextlib/time，零跨模块依赖） | 限流+熔断自包含（2026-08-27 新增行） |
 | tushare_adapter.py | `.schema.to_vt_symbol` | ts_code -> vt_symbol |
-| platform.py | `.db` / `.schema` / `.adapters.tushare_adapter` | 组合 |
+| _platform.py | `.db` / `.schema` / `.adapters.tushare_adapter` | 组合 |
 | settings.py | dotenv | 读 .env |
 
 > 曾有 `data_platform` ⇄ `web_api.crypto_utils` 循环依赖——2026-08-19 模块归位后加解密在 `quant_common.crypto`（层 0），循环已解。（P3 回写 2026-08-20）
