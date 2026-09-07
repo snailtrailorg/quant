@@ -41,7 +41,8 @@ class DataPlatform:
         df = tushare.pull_daily(ts_code, start_date, end_date, adj=adj)
         if df.empty:
             return 0
-        rows = tushare.to_save_rows(df, freq="1D")
+        from .adapters.base import TushareAdapter
+        rows = TushareAdapter().to_bar_rows(df, "1D")
         return save_bars("1D", rows)
 
     def ensure_minute(self, ts_code: str, freq: str, start_date: str,
@@ -50,7 +51,8 @@ class DataPlatform:
         df = tushare.pull_minute(ts_code, freq, start_date, end_date)
         if df.empty:
             return 0
-        rows = tushare.to_save_rows_min(df, freq=freq)
+        from .adapters.base import TushareAdapter
+        rows = TushareAdapter().to_bar_rows(df, freq)
         return save_bars(freq, rows)
 
     # ——— 实时（占位，T04 实现） ———

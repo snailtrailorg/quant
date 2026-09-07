@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS sync_config (
     last_sync_ts    TIMESTAMPTZ,
     last_sync_count INTEGER DEFAULT 0,
     last_status     TEXT DEFAULT 'idle',
+    provider        TEXT NOT NULL DEFAULT 'tushare',  -- 24 号多数据源：数据源路由（与迁移 0067 对齐）
     description     TEXT,
     created_at      TIMESTAMPTZ DEFAULT now()
 );

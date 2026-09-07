@@ -15,29 +15,31 @@ def _daily_df():
 
 class TestDailyToRowsAdj:
     def test_factor_joined_into_row(self):
-        from src.data_sync.engine import _daily_to_rows
-        rows = _daily_to_rows(_daily_df(), adj_map={"600000.SH": 12.5})
+        from src.data_platform.adapters.base import TushareAdapter
+        rows = TushareAdapter().to_bar_rows(_daily_df(), "1D", adj_map={"600000.SH": 12.5})
         assert rows[0][9] == 12.5          # adj_factor 字段
         assert rows[1][9] is None          # 不在 map 的标保持 NULL
         assert rows[0][10] == "tushare"
 
     def test_adj_map_degraded_returns_empty_and_rows_still_built(self):
         """降级（因子接口不可用）→ adj_map={} → 行照常产出（因子 NULL），同步不中断。"""
-        from src.data_sync.engine import _daily_to_rows, _adj_map_for_df
-        with patch("src.data_platform.adapters.tushare_adapter.pull_adj_factor_by_date",
-                   return_value=None):
-            m = _adj_map_for_df(_daily_df())
+        from src.data_sync.engine import _adj_map_for_df
+        from src.data_platform.adapters.base import TushareAdapter
+        adapter = TushareAdapter()
+        with patch.object(adapter, "pull_adj_factor", return_value=None):
+            m = _adj_map_for_df(_daily_df(), adapter)
         assert m == {}
-        rows = _daily_to_rows(_daily_df(), m)
+        rows = adapter.to_bar_rows(_daily_df(), "1D", m)
         assert len(rows) == 2 and all(r[9] is None for r in rows)
 
     def test_adj_map_joins_by_trade_date(self):
         from src.data_sync.engine import _adj_map_for_df
+        from src.data_platform.adapters.base import TushareAdapter
+        adapter = TushareAdapter()
         fdf = pd.DataFrame({"ts_code": ["600000.SH"], "trade_date": ["20260815"],
                             "adj_factor": [3.3]})
-        with patch("src.data_platform.adapters.tushare_adapter.pull_adj_factor_by_date",
-                   return_value=fdf):
-            m = _adj_map_for_df(_daily_df())
+        with patch.object(adapter, "pull_adj_factor", return_value=fdf):
+            m = _adj_map_for_df(_daily_df(), adapter)
         assert m == {"600000.SH": 3.3}
 
 
@@ -53,29 +55,27 @@ class TestBackfillAdjFactor:
     def test_degraded_returns_status_not_raise(self):
         """积分未到账：包装层返回 None（降级契约）→ backfill 返回 degraded，不抛异常。"""
         from src.data_sync.engine import backfill_adj_factor
+        mock_adapter = MagicMock()
+        mock_adapter.pull_adj_factor.return_value = None
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = [("2026-08-15",)]
         with patch("src.data_sync.engine.get_conn", return_value=mock_conn), \
-             patch("src.data_platform.adapters.tushare_adapter.pull_adj_factor_by_date",
-                   return_value=None), \
-             patch("src.data_platform.adapters.tushare_adapter._adj_degraded_alert"), \
-             patch("src.data_platform.adapters.tushare_adapter._adj_degraded", {"ts": 0.0}):
+             patch("src.data_sync.engine._get_kline_adapter", return_value=mock_adapter):
             r = backfill_adj_factor()
         assert r["status"] == "degraded"
         assert "积分" in r["reason"] or "接口" in r["reason"]
 
     def test_update_only_fills_null_rows_and_uses_range_predicate(self):
         from src.data_sync.engine import backfill_adj_factor
+        mock_adapter = MagicMock()
+        mock_adapter.pull_adj_factor.return_value = pd.DataFrame(
+            {"ts_code": ["600000.SH"], "trade_date": ["20260815"], "adj_factor": [7.7]})
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
         mock_conn.execute.return_value.fetchall.return_value = [("2026-08-15",)]
-        fdf = pd.DataFrame({"ts_code": ["600000.SH"], "trade_date": ["20260815"],
-                            "adj_factor": [7.7]})
         with patch("src.data_sync.engine.get_conn", return_value=mock_conn), \
-             patch("src.data_platform.adapters.tushare_adapter.pull_adj_factor_by_date",
-                   return_value=fdf), \
-             patch("src.data_platform.adapters.tushare_adapter._adj_degraded", {"ts": 0.0}):
+             patch("src.data_sync.engine._get_kline_adapter", return_value=mock_adapter):
             r = backfill_adj_factor()
         assert r["status"] == "success"
         cur = mock_conn.cursor.return_value.__enter__.return_value
@@ -119,6 +119,7 @@ class TestWiringRegressions:
 
     def test_daily_rows_adj_map_none_and_nan_kept_none(self):
         """F 核对 8：adj_map 值为 None/NaN 不得变 0.0（0 是合法因子值，毒化复权计算）。"""
-        from src.data_sync.engine import _daily_to_rows
-        rows = _daily_to_rows(_daily_df(), adj_map={"600000.SH": None, "000001.SZ": float("nan")})
+        from src.data_platform.adapters.base import TushareAdapter
+        rows = TushareAdapter().to_bar_rows(_daily_df(), "1D",
+                                            adj_map={"600000.SH": None, "000001.SZ": float("nan")})
         assert rows[0][9] is None and rows[1][9] is None

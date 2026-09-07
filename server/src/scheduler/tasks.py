@@ -531,11 +531,12 @@ def data_continuity_check():
                 issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{expected})")
                 try:
                     ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
-                    from src.data_platform.adapters.tushare_adapter import pull_daily, to_save_rows
+                    from src.data_platform.adapters.tushare_adapter import pull_daily
+                    from src.data_platform.adapters.base import TushareAdapter
                     from src.data_platform.db import save_bars
                     df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
                     if not df.empty:
-                        rws = to_save_rows(df)
+                        rws = TushareAdapter().to_bar_rows(df, "1D")
                         repaired = save_bars("1D", rws)
                         if repaired > 0:
                             repaired_any = True

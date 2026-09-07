@@ -43,7 +43,7 @@ def test_minute_api_error_counts_breaker():
     from src.data_sync import engine
     cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.tushare_adapter.pull_minute",
+         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute",
                side_effect=Exception("tushare down")):
         r = engine._sync_astock_minute(cfg, "20260808")
     assert len(r["failed_dates"]) == 1
@@ -55,7 +55,7 @@ def test_minute_db_error_not_counts_breaker():
     from src.data_sync import engine
     cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.tushare_adapter.pull_minute", return_value=_fake_df()), \
+         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_df()), \
          patch("src.data_platform.db.save_bars", side_effect=Exception("db down")):
         r = engine._sync_astock_minute(cfg, "20260808")
     assert len(r["failed_dates"]) == 1
@@ -68,7 +68,7 @@ def test_sync_all_api_error_counts_breaker():
     """sync_all 日线：API 失败 → 计熔断 + 记 failed（原吞成 empty 假装成功）。"""
     from src.data_sync import engine
     with patch("src.data_sync.engine._get_pro_api",
-               return_value=(MagicMock(), MagicMock(), "astock", "1D", "daily")), \
+               return_value=(MagicMock(), "astock", "1D", "daily")), \
          patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
          patch("src.data_sync.engine._get_list_date", return_value="20260101"), \
          patch("src.data_sync.engine._pull_daily_df", side_effect=Exception("tushare down")):
@@ -81,7 +81,7 @@ def test_sync_all_db_error_not_counts_breaker():
     """sync_all 日线：DB 写失败 → 记 failed 但不计熔断。"""
     from src.data_sync import engine
     with patch("src.data_sync.engine._get_pro_api",
-               return_value=(MagicMock(), MagicMock(), "astock", "1D", "daily")), \
+               return_value=(MagicMock(), "astock", "1D", "daily")), \
          patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
          patch("src.data_sync.engine._get_list_date", return_value="20260101"), \
          patch("src.data_sync.engine._pull_daily_df", return_value=_fake_df()), \
@@ -95,7 +95,7 @@ def test_sync_all_success_saves_and_counts_ok():
     """sync_all 日线：成功路径拉取+入库，ok 计数正确（归因拆分不破坏正常流）。"""
     from src.data_sync import engine
     with patch("src.data_sync.engine._get_pro_api",
-               return_value=(MagicMock(), MagicMock(), "astock", "1D", "daily")), \
+               return_value=(MagicMock(), "astock", "1D", "daily")), \
          patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
          patch("src.data_sync.engine._get_list_date", return_value="20260101"), \
          patch("src.data_sync.engine._pull_daily_df", return_value=_fake_df()), \

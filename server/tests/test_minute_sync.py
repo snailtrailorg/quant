@@ -59,7 +59,7 @@ def test_sync_astock_minute_incremental():
     from src.data_sync import engine
     cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH", "000001.SZ"]), \
-         patch("src.data_platform.adapters.tushare_adapter.pull_minute", return_value=_fake_minute_df()), \
+         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_minute_df()), \
          patch("src.data_platform.db.save_bars", return_value=1) as msave:
         r = engine._sync_astock_minute(cfg, "20260808")
     assert r["pulled"] == 2          # 2 只 × 1 行
@@ -74,7 +74,7 @@ def test_sync_astock_minute_5min_freq():
     from src.data_sync import engine
     cfg = {"id": "astock_minute_5min", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.tushare_adapter.pull_minute", return_value=_fake_minute_df()), \
+         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_minute_df()), \
          patch("src.data_platform.db.save_bars", return_value=1) as msave:
         engine._sync_astock_minute(cfg, "20260808")
     assert msave.call_args.args[0] == "5min"
@@ -85,7 +85,7 @@ def test_sync_astock_minute_backfill():
     from src.data_sync import engine
     cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.tushare_adapter.pull_minute", return_value=_fake_minute_df()), \
+         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_minute_df()), \
          patch("src.data_platform.db.save_bars", return_value=1):
         r = engine._sync_astock_minute(cfg, "20260808", backfill_from="20260801")
     assert r["start"] == "20260801"
@@ -111,7 +111,7 @@ def test_sync_astock_minute_failed_symbol():
             raise ValueError("tushare error")
         return _fake_minute_df(tc)
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH", "000001.SZ"]), \
-         patch("src.data_platform.adapters.tushare_adapter.pull_minute", side_effect=_pull), \
+         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", side_effect=_pull), \
          patch("src.data_platform.db.save_bars", return_value=1):
         r = engine._sync_astock_minute(cfg, "20260808")
     assert r["pulled"] == 1
@@ -125,7 +125,7 @@ def test_sync_symbol_minute_full():
     """空 -> 全量（mode=auto，cnt==0）。"""
     from src.data_sync import engine
     with patch("src.data_sync.engine._get_pro_api",
-               return_value=(MagicMock(), MagicMock(), "astock", "1min", "minute")), \
+               return_value=(MagicMock(), "astock", "1min", "minute")), \
          patch("src.data_sync.engine._local_bar_range", return_value=(None, None, 0)), \
          patch("src.data_sync.engine._get_list_date", return_value="20260101"), \
          patch("src.data_sync.engine._fetch_minute_and_save", return_value=(_fake_minute_df(), 1)) as mf:
@@ -133,15 +133,15 @@ def test_sync_symbol_minute_full():
     assert r["status"] == "success"
     assert r["mode_used"] == "full"
     mf.assert_called_once()
-    assert mf.call_args.args[0] == "600000.SH"
-    assert mf.call_args.args[1] == "1min"
+    assert mf.call_args.args[1] == "600000.SH"
+    assert mf.call_args.args[2] == "1min"
 
 
 def test_sync_symbol_minute_uptodate():
     """有数据无缺口 -> uptodate。"""
     from src.data_sync import engine
     with patch("src.data_sync.engine._get_pro_api",
-               return_value=(MagicMock(), MagicMock(), "astock", "1min", "minute")), \
+               return_value=(MagicMock(), "astock", "1min", "minute")), \
          patch("src.data_sync.engine._local_bar_range", return_value=("20260101", "20260807", 1000)), \
          patch("src.data_sync.engine._find_gaps", return_value=[]):
         r = engine.sync_symbol("astock_minute", "600000.SH", mode="auto")
@@ -153,12 +153,12 @@ def test_backfill_symbol_minute():
     """分钟线回补：覆盖写（overwrite=True）。"""
     from src.data_sync import engine
     with patch("src.data_sync.engine._get_pro_api",
-               return_value=(MagicMock(), MagicMock(), "astock", "5min", "minute")), \
+               return_value=(MagicMock(), "astock", "5min", "minute")), \
          patch("src.data_sync.engine._fetch_minute_and_save", return_value=(_fake_minute_df(), 1)) as mf:
         r = engine.backfill_symbol("astock_minute_5min", "600000.SH", "20260101", "20260110")
     assert r["status"] == "success"
     assert r["overwritten"] is True
-    assert mf.call_args.args == ("600000.SH", "5min", "20260101", "20260110")
+    assert mf.call_args.args[1:] == ("600000.SH", "5min", "20260101", "20260110")
     assert mf.call_args.kwargs == {"overwrite": True}
 
 
