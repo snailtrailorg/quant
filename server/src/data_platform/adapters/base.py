@@ -72,7 +72,12 @@ class BaseDataAdapter(ABC):
         return freq
 
     def to_source_adj(self, adj: str | None) -> str | None:
-        """语义复权（'pre'/'post'/None）→ 源格式（Tushare 'qfq'/'hfq'/None）。默认直通。"""
+        """语义复权 → 源格式。默认直通。
+
+        注意（盲审 A-P2/B-P2）：当前内部约定即 Tushare 原语 'qfq'/'hfq'/None（tushare_adapter
+        直用），Tushare 直通。接聚宽/米筐时统一为语义化 'pre'/'post'，各源 to_source_adj
+        做映射（聚宽 pre→fq='pre'、Tushare pre→qfq）——真接批一并统一，本批只预留接口。
+        """
         return adj
 
 

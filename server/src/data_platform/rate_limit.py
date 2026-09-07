@@ -1,17 +1,16 @@
-"""限流 + 熔断（限流治理吸收 2026-08-27，docs/任务/限流治理吸收.md）。
+"""限流 + 熔断（限流治理吸收 2026-08-27，24 号限速抽象聚合）。
 
 三件套：
 - RateLimiter：线程安全最小间隔执行器——acquire() 阻塞到距上次调用满间隔
 - CircuitBreaker：三态熔断（Closed→Open→Half-open）
 - rate_limit_context(ds, api_name)：声明式上下文——进=熔断检查+间隔等待，出=成败入账
 
-设计决策（任务文件 §设计决策）：
+设计决策：
 - D1 限速在 engine 侧（编排节奏），adapter pull_* 零改动
-- D2 熔断按 DataSource 级（Tushare 配额共享体，任何接口打穿都封整个账号）——非 API 级
-- D3 间隔四层覆盖（DataSource.get_rate_limit，Tushare）：类默认 → points_tier 积分档预设
-  → params.rate_limits 单参数覆写 → params.rate_time_overrides 时段乘数（interval /=
-  multiplier，>1=更快=间隔缩短）；熔断参数（fail_threshold/reset_timeout）从
-  params.circuit_breaker 读，代码默认兜底（2026-08-27 积分档批次）
+- D2 熔断按 DataSource 级（配额共享体，任何接口打穿都封整个账号）——非 API 级
+- D3 限速策略化（24 号）：RateLimitPolicy 抽象 + FixedIntervalPolicy（类默认 + DB 覆写两级）
+  / DailyQuotaPolicy（每日额度）。熔断参数（fail_threshold/reset_timeout）从
+  params.circuit_breaker 读，代码默认兜底
 """
 from __future__ import annotations
 
@@ -233,7 +232,10 @@ class DailyQuotaPolicy(RateLimitPolicy):
     且无「日上限硬顶」，持续跑超一天会超 N 次。日上限硬顶 + 当日计数留真接批补。
     """
     def __init__(self, daily_quota: int):
-        self._quota = max(1, int(daily_quota))
+        try:
+            self._quota = max(1, int(daily_quota))
+        except (TypeError, ValueError):
+            self._quota = 1   # 非法回落最保守（1 次/天，盲审 B-P2-3）
 
     def get_interval(self, api_name: str) -> float:
         return 86400.0 / self._quota

@@ -16,12 +16,10 @@ logger = logging.getLogger("data_source")
 class DataSource(ABC):
     """数据源接口。
 
-    限速（2026-08-19 T 审）：`get_rate_limit(api_name)` 具体方法（非 abstract——
+    限速（24 号抽象聚合）：`get_rate_limit(api_name)` 委托限速策略（非 abstract——
     带默认实现，AkShare stub 零改动，未来 Wind 不强制实现）。配置归
-    `data_source_config.params` JSON：{"rate_limits": {"stk_mins": 60, ...},
-    "rate_time_overrides": [{"window":"16:00-20:00","multiplier":2.5}]}。
-    params 分界：秘密→credentials_encrypted；运维参数（rate_limits/rate_time_overrides/
-    base_url）→params。
+    `data_source_config.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
+    params 分界：秘密→credentials_encrypted；运维参数（rate_limits/base_url）→params。
     """
 
     DEFAULT_RATE_LIMITS: dict[str, float] = {}   # 子类覆写：api_name -> 最小间隔秒
@@ -67,10 +65,11 @@ class DataSource(ABC):
     def _build_rate_policy(self):
         """子类覆写：构建限速策略（24 号限速抽象聚合，各平台自己实现，高内聚低耦合）。
 
-        默认 FixedIntervalPolicy（类默认 {} + DB rate_limits 覆写）。
+        默认 FixedIntervalPolicy（类默认 DEFAULT_RATE_LIMITS + DB rate_limits 覆写）。
+        盲审 A-P1/B-P2：用 self.DEFAULT_RATE_LIMITS（非 {}），未来子类设类属性即生效。
         """
         from src.data_platform.rate_limit import FixedIntervalPolicy
-        return FixedIntervalPolicy({}, self._params.get("rate_limits") or {})
+        return FixedIntervalPolicy(self.DEFAULT_RATE_LIMITS, self._params.get("rate_limits") or {})
 
     def get_rate_limit(self, api_name: str) -> float:
         """该 API 两次调用最小间隔（秒）。0=不限。委托限速策略（24 号聚合）。

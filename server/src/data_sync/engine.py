@@ -497,7 +497,7 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
                     "expected_days": 0, "actual_days": 0}
 
     from src.data_platform.rate_limit import rate_limit_context
-    ds = _get_rate_ds(cfg.get("provider") or "tushare")
+    ds = _get_rate_ds(adapter.provider)
     ts_codes = _list_static_ts_codes("astock")
     total = len(ts_codes)
     total_pulled = 0
