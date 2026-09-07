@@ -169,9 +169,14 @@ const goSymbols = row => router.push(`/data-manage/${row.id}`)
 const load = async () => {
   loading.value = true
   try {
-    configs.value = (await api.get('/sync/config')).map(c => ({ ...c, status: c.last_status ?? 'idle', _prevSchedule: c.schedule, _prevFilter: c.trade_day_filter }))
-    logs.value = await api.get('/sync/log')
-    const caps = await api.get('/datasource/capabilities')
+    // 批9 内存治理：三源互不依赖→并发（原串行=耗时相加，慢机上 10s+ 的主因之一）
+    const [cfg, lg, caps] = await Promise.all([
+      api.get('/sync/config'),
+      api.get('/sync/log'),
+      api.get('/datasource/capabilities'),
+    ])
+    configs.value = cfg.map(c => ({ ...c, status: c.last_status ?? 'idle', _prevSchedule: c.schedule, _prevFilter: c.trade_day_filter }))
+    logs.value = lg
     providers.value = caps.providers || {}
   } finally { loading.value = false }
 }

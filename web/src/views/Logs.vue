@@ -147,10 +147,13 @@ const doAnalyze = async () => {
   } catch (e) { ElMessage.error(t('log.analyzeFailed')) }
   finally { analyzing.value = false }
 }
-onMounted(async () => {
-  try { logs.value = (await getLogs()).logs || [] } catch {}
-  try { notifs.value = (await getNotifications('all', 50)).items || [] } catch {}
-  try { outbox.value = (await getEmailOutbox()).items || [] } catch {}
+onMounted(() => {
+  // 批9：三源各自独立容错→并发发不短路（Dashboard jobs 范式）
+  [
+    async () => { try { logs.value = (await getLogs()).logs || [] } catch {} },
+    async () => { try { notifs.value = (await getNotifications('all', 50)).items || [] } catch {} },
+    async () => { try { outbox.value = (await getEmailOutbox()).items || [] } catch {} },
+  ].forEach(fn => fn())
 })
 
 // P3-5:日志筛选

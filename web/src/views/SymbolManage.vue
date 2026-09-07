@@ -213,12 +213,17 @@ const startProgress = () => {
 const stopProgress = () => { if (progressTimer) { clearInterval(progressTimer); progressTimer = null } }
 
 onMounted(async () => {
-  await load()
-  try {
-    const p = await api.get(`/sync/all/${syncId}/progress`)
-    progress.value = p
-    if (p.status === 'running') { allRunning.value = true; startProgress() }
-  } catch (e) { console.error(e) }
+  // 批9：标的列表与全量重建进度互不依赖（progress 只用路由参数）→并发
+  await Promise.all([
+    load(),
+    (async () => {
+      try {
+        const p = await api.get(`/sync/all/${syncId}/progress`)
+        progress.value = p
+        if (p.status === 'running') { allRunning.value = true; startProgress() }
+      } catch (e) { console.error(e) }
+    })(),
+  ])
 })
 onUnmounted(stopProgress)
 </script>

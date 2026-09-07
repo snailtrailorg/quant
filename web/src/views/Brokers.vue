@@ -91,7 +91,7 @@ function emptyForm() {
 }
 
 const load = async () => { try { brokers.value = await getBrokers() } catch (e) { console.error(e) } }
-onMounted(async () => { await load(); await loadUsage() })
+onMounted(async () => { await Promise.all([load(), loadUsage()]) })   // 批9：互不依赖→并发（对齐 LLMModels 同构页）
 
 const onEdit = (row) => { form.value = { ...row, credentials: '' }; credFields.value = {} ; dlg.value = true }   // 补审F-P0:清字段防 A 凭据串进 C
 const resetForm = () => { form.value = emptyForm(); credFields.value = {} }   // 补审F-P0

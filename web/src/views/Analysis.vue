@@ -88,5 +88,5 @@ const confirmAddPool = async () => {
   finally { adding.value = false }
 }
 
-onMounted(async () => { await load(); await loadPools() })
+onMounted(async () => { await Promise.all([load(), loadPools()]) })   // 批9：互不依赖→并发
 </script>

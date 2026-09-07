@@ -299,8 +299,11 @@ const load = async () => { strategies.value = await getStrategies() }
 const backtestRuns = ref([])
 const liveTasksAll = ref([])
 const loadExtra = async () => {
-  try { backtestRuns.value = await api.get('/backtest') } catch { backtestRuns.value = [] }
-  try { liveTasksAll.value = await api.get('/live-task') } catch { liveTasksAll.value = [] }
+  // 批9：两源各自独立容错→并发不短路（保部分失败可见语义）
+  await Promise.all([
+    (async () => { try { backtestRuns.value = await api.get('/backtest') } catch { backtestRuns.value = [] } })(),
+    (async () => { try { liveTasksAll.value = await api.get('/live-task') } catch { liveTasksAll.value = [] } })(),
+  ])
 }
 const lastRun = (row) => {
   const runs = backtestRuns.value.filter(b => b.strategy_config_id === row.id && b.status === 'done')
@@ -444,5 +447,5 @@ const saveEdit = async () => {
 const removeFactor = (i) => { editForm.value.factors = editForm.value.factors.filter((_, idx) => idx !== i) }
 onMounted(async () => {
   loadExtra()
-  await load(); await loadFactors() })
+  await Promise.all([load(), loadFactors()]) })   // 批9：互不依赖→并发
 </script>

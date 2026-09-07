@@ -5,12 +5,16 @@
 
 from __future__ import annotations
 import os
-import pandas as pd
+from typing import TYPE_CHECKING
 import psycopg
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
 
 from .schema import BAR_TABLE_INSERT, BAR_TABLE_INSERT_OVERWRITE, BAR_TABLE_SELECT, parse_vt_symbol
+# 批 9 内存治理：pandas 下沉到唯一使用它的 get_bars/get_index_bars（函数级 import）——
+# 本模块被 beat/调度链模块级引用（tasks.py 顶部），模块级 pandas 会拖进整个调度进程
+if TYPE_CHECKING:
+    import pandas as pd   # 仅注解用（返回类型 pd.DataFrame），运行时不加载
 
 _dotenv_loaded = False
 if not _dotenv_loaded:
@@ -219,6 +223,7 @@ def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
 
     与 get_bars 同款列转换（数值 float64 + ts datetime）。
     """
+    import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
     cols = ["ts", "open", "high", "low", "close", "volume", "amount"]
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -241,6 +246,7 @@ def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
 
     用 cursor.fetchall 替代 pd.read_sql 避免 pandas/psycopg 不兼容警告。
     """
+    import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
     ensure_table(freq)
     select_sql = BAR_TABLE_SELECT.format(freq=freq)
     with get_conn() as conn:

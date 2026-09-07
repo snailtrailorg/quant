@@ -16,7 +16,10 @@ def _is_trading_day() -> bool:
     try:
         from src.data_platform import platform
         return platform.is_trading_day(date.today())
-    except Exception:
+    except Exception as e:
+        # 批9 盲审 A-P2：platform 惰性化后加载失败从「启动崩溃」变为运行期首调——
+        # 静默降级 weekday 启发式（假日盲）必须有日志，否则假日照跑无人知
+        logger.warning("交易日判定降级为 weekday 启发式（platform 不可用: %s）", e)
         return date.today().weekday() < 5
 
 

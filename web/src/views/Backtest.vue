@@ -249,9 +249,12 @@ onMounted(async () => {
   const pre = route.query.strategy   // B-P1-5:history 路由,深链读 query
   if (pre) { showForm.value = true; form.value.strategyId = String(pre) }
   pollTimer = setInterval(() => { if (runs.value.some(r => r.status === 'running')) loadRuns() }, 5000)
-  strategies.value = await getStrategies()
-  try { pools.value = await getPools() } catch (e) {}
-  await loadRuns()
+  // 批9：三源互不依赖→并发（pools 保留独立 catch；轮询 timer 查 runs 空数组安全）
+  await Promise.all([
+    (async () => { strategies.value = await getStrategies() })(),
+    (async () => { try { pools.value = await getPools() } catch (e) {} })(),
+    loadRuns(),
+  ])
 })
 </script>
 

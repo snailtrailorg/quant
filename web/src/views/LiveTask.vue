@@ -222,7 +222,8 @@ onMounted(async () => {
   // wd-20 §1.5：enrichTasks 移到 load 之后（原在 tasks 为空时先跑=恒空转）
   const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
   if (pre) { dialogVisible.value = true; form.value.strategy_id = String(pre) }
-  await load(); await loadStrategies(); await loadAccounts(); enrichTasks() })
+  // 批9：三 loader 互不依赖→并发；尾部 enrichTasks 删（load() 内已调，纯冗余双跑）
+  await Promise.all([load(), loadStrategies(), loadAccounts()]) })
 
 // wd-20 §1.5 方案 A：自愈时间线（05 §5.8）——幽灵端点 /live-task/{id}/detail 已删
 // （wd-19 P0：404 恒吞）。数据源两路：①列表行已有字段（NRestarts 语义近似=心跳龄/冻结/
