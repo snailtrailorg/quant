@@ -181,3 +181,9 @@
 - **裁定**：**先切换，周一生产验证**（hub 模式运行验证代替影子门禁）。依据：①hub 输入质量实证优于 worker-MD（25 vs 8 快照/分）——切换=信号源数据质量提升；②15:01 竞价分钟两侧逐位一致证明等价性可达；③门禁口径决策成本>收益，切换后该决策消解。
 - **配套**：任务级+全局 md_mode 双切（盲审 B-P1-1 防混态）；配置级秒级回滚（改回 direct+restart）；direct 代码保留至 6b 验证绿后退役；周一验证清单（首根消费/TD 登录确认/gen_jump 误导告警勿动作/metrics 标签）。
 - **同期裁定**：三查两站制（09:31 查昨日全量+15:10 查今日全量，门禁以盘后为准）+ST7 计数作废重置。
+
+## 2026-09-08 · 批9 内存治理三裁定
+
+1. **zram 而非合并 worker**：风控 worker 独立是告警 SLA 的刻意隔离设计（记忆 alert-dispatch-architecture），不为省内存牺牲进程隔离；OS 层治 OS 层的问题（zram+swappiness），zram 配置入 INSTALL.md §2.4 成版本化 runbook。
+2. **platform.py 改名 _platform.py（「改就彻底改」）**：三层同名占用 import 机制保留地是历史反模式，懒加载暴露绑定竞态；治本=退出争议名，守门测试固化三不变量。约定：模块名单例实例同名+包级同名 re-export 禁止再犯。
+3. **前端失败语义按页分型**：无独立 catch 的 load 用 Promise.all（全成或全败）；有独立 catch 的（Logs/Strategy.loadExtra）用分立 promise 保部分失败容错，禁裸 all 短路。
