@@ -32,6 +32,10 @@
 | 磁盘 | 20 GB | 40 GB+（历史数据约 3GB） |
 | OS | RHEL 系（dnf）或 Debian 系（apt），任意现代发行版 | Alibaba Cloud Linux 3 / Rocky 9 |
 
+> ≤4 GB 内存的机器**必须**配置 §2.4 zram（生产 1.87G 实证 2026-09-08：Python 服务舰队
+> RSS >1.4G，无 zram 时慢性磁盘 swap，每个 Web 请求缴缺页税致页面 10s+；zram zstd
+> 压缩 ~3:1，等效内存翻倍，Web 延迟恢复正常）。
+
 ### 1.2 软件依赖
 
 | 软件 | 版本 | 说明 |
@@ -97,6 +101,40 @@ SQL
 
 仓库提供样例 `server/scripts/nginx/quant.conf`——复制到 `/etc/nginx/conf.d/` 后改两处：
 `server_name` 与证书路径（HTTPS 用 certbot 或自有证书；前端静态 root 见 §4.3 说明，路径变量化为你的部署根）。
+
+### 2.4 zram 内存压缩交换（批9 内存治理，RHEL 系已生产验证 2026-09-08）
+
+Python 服务舰队（4 celery + beat + hub + web + feishu）RSS >1.4G；小内存机无 zram 时
+慢性磁盘 swap，每个请求缴缺页税（生产实证：Web 页面 10s+）。zram=压缩内存换页
+（zstd ~3:1），换页从磁盘 IO 变内存解压（μs 级）。
+
+**RHEL 系（已验）：**
+```bash
+dnf install -y epel-release && dnf install -y zram-generator
+tee /etc/systemd/zram-generator.conf <<'EOF'
+[zram0]
+zram-size = min(ram / 2, 1536)
+compression-algorithm = zstd
+swap-priority = 100
+EOF
+systemctl daemon-reload && systemctl start systemd-zram-setup@zram0
+```
+
+**sysctl**（注意 `/etc/sysctl.conf` 在 `sysctl --system` 中最后读、会压过 sysctl.d，两处都要改；
+先 `grep -r swappiness /etc/sysctl.conf /etc/sysctl.d/` 记录原值备回滚）：
+```bash
+echo -e 'vm.swappiness = 100\nvm.page-cluster = 0' > /etc/sysctl.d/99-quant-zram.conf
+sed -i 's/^vm.swappiness = .*/vm.swappiness = 100/' /etc/sysctl.conf
+sysctl --system
+```
+
+**Debian 系（未验）**：`apt install zram-tools`，`/etc/default/zramswap` 配 SIZE/ALGO/PRIORITY，语义同上——
+首装实测后回改本节（过/未验分列守则）。
+
+**验证**：`swapon --show`（zram0 prio 100，磁盘 swap 保底 -2）· `zramctl`（algo=zstd）·
+`cat /proc/sys/vm/swappiness`=100。
+**回滚**：`swapoff /dev/zram0` → 卸包删两 conf → `sysctl.conf` 的 swappiness 改回记录值 → `systemctl daemon-reload`。
+（磁盘 swap 里已有的存量换出页不迁移，热页随访问逐步回内存——属预期滞后。）
 
 ---
 
