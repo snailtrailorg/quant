@@ -80,7 +80,7 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
         from datetime import datetime as _dt, timedelta
         bars_df = get_bars(symbol, "1min", _dt.now() - timedelta(days=30), _dt.now())
         if not bars_df.empty:
-            for _, row in bars_df.tail(min(n, 500)).iterrows():
+            for row in bars_df.tail(min(n, 500)).to_dict("records"):
                 history.append({
                     "ts": row["ts"],
                     "open": float(row["open"]), "high": float(row["high"]),

@@ -1189,7 +1189,7 @@ def static_list_sync():
         if df is None or df.empty:
             return {"status": "ok", "synced": 0}
         rows = [(r["ts_code"], r.get("name", "") or "", r.get("industry", "") or "")
-                for _, r in df.iterrows()]
+                for r in df.to_dict("records")]
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.executemany(

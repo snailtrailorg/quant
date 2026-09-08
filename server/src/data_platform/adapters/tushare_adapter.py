@@ -229,7 +229,7 @@ def to_save_rows_min(df: pd.DataFrame, freq: str) -> list[tuple]:
     from ..schema import to_vt_symbol
     from ..tz import as_shanghai
     rows = []
-    for _, row in df.iterrows():
+    for row in df.to_dict("records"):
         ts_code = row.get("ts_code", "")
         vt_sym = to_vt_symbol(ts_code)
         # trade_time 格式 "YYYY-MM-DD HH:MM:SS"
@@ -256,7 +256,7 @@ def to_save_rows(df: pd.DataFrame, freq: str = "1D") -> list[tuple]:
 
     is_daily = "min" not in freq
     rows = []
-    for _, row in df.iterrows():
+    for row in df.to_dict("records"):
         ts_code = row.get("ts_code", "")
         vt_sym = to_vt_symbol(ts_code)
         trade_date = as_shanghai(pd.Timestamp(row["trade_date"]).to_pydatetime())
@@ -293,7 +293,7 @@ def pull_trade_cal(year: int) -> list[tuple]:
     from .db import get_conn as _get_pooled_conn
     with _get_pooled_conn() as pro:
         with pro.cursor() as cur:
-            for _, r in df.iterrows():
+            for r in df.to_dict("records"):
                 rows.append((
                     r["exchange"], r["cal_date"], int(r["is_open"]),
                     r.get("pretrade_date"),
@@ -374,7 +374,7 @@ def save_daily_basic(df: pd.DataFrame) -> int:
     if df.empty:
         return 0
     rows = []
-    for _, r in df.iterrows():
+    for r in df.to_dict("records"):
         rows.append((
             r["ts_code"], to_vt_symbol(r["ts_code"]),
             pd.Timestamp(r["trade_date"]).to_pydatetime().date(),

@@ -136,7 +136,7 @@ class DailySelectionEngine:
         top = df.head(self.top_n)
         q_hi, q_lo = top["score"].quantile(0.85), top["score"].quantile(0.15)
         results = []
-        for _, row in top.iterrows():
+        for row in top.to_dict("records"):
             rating = "BUY" if row["score"] >= q_hi else "AVOID" if row["score"] <= q_lo else "HOLD"
             ts_code = row["ts_code"]
             # conclusion 用因子原值（O 审 G9：rank 是分位不是量纲，原值才可读）

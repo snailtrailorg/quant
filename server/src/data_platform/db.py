@@ -267,6 +267,35 @@ def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
         return df
 
 
+def get_kline_records(symbol: str, freq: str, start, end) -> list[dict]:
+    """K 线 records 直查（零 pandas）——web-api 常驻不载 pandas 的关键路径（批10）。
+
+    get_bars 的 DataFrame 版面向分析/回测；K 线图表只要 JSON records，
+    DataFrame 往返是纯常驻开销（+57MB RSS）。语义对齐 BAR_TABLE_SELECT
+    （同 WHERE/ORDER BY ts ASC，列裁剪为图表所需 6 列）。
+    """
+    assert freq.lower() in _VALID_FREQS, f"非法 freq: {freq}"   # 对齐 save_bars 写路径标准（批10 盲审同判）
+    ensure_table(freq)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT ts, open, high, low, close, volume FROM bar_{freq} "
+                "WHERE symbol=%s AND ts >= %s AND ts <= %s ORDER BY ts ASC".format(freq=freq),
+                (symbol, start, end))
+            rows = cur.fetchall()
+
+    def _num(v):
+        # NaN→None（v==v 对 Decimal('NaN')/float nan 通用，防列型漂移踩 is_nan 的 Decimal 专属）：
+        # PG numeric 可存 NaN，裸 float() 会向 JSON 产出非法 NaN 字面量
+        return float(v) if v is not None and v == v else None
+
+    return [{
+        "ts": r[0].strftime("%Y-%m-%d") if r[0] is not None else None,
+        "open": _num(r[1]), "high": _num(r[2]), "low": _num(r[3]),
+        "close": _num(r[4]), "volume": _num(r[5]),
+    } for r in rows]
+
+
 def get_trade_calendar(year: int) -> list[date]:
     """从数据库取 A 股交易日历（来源 Tushare trade_cal）。"""
     with get_conn() as conn:

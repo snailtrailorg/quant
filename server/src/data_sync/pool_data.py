@@ -95,7 +95,7 @@ def _upsert_rows(table, pk_cols, core_map, df, ts_code):
     with _pdb.get_conn() as conn:
         with conn.cursor() as cur:
             batch = []
-            for _, row in df.iterrows():
+            for row in df.to_dict("records"):
                 vals = []
                 for c in insert_cols:
                     if c == "raw_json":

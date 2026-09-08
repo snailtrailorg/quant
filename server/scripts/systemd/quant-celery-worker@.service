@@ -9,7 +9,11 @@ User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QT_QPA_PLATFORM=offscreen
-ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler worker -Q celery,risk,data,analysis --loglevel=info
+# 批10：max-tasks-per-child=100——每百任务回收 prefork 子进程，治大任务峰值后 RSS
+# 高水位永久驻留（Python arena 不还 OS）。副作用预期：回收后首个 data 类任务重付
+# pandas/tushare 子进程内 import（~1-2s，偶发慢非回归）。对单任务特大峰值无效，
+# max-memory-per-child 挂账另议（docs/任务/批10-内存浪费清理.md §2.C）。
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler worker -Q celery,risk,data,analysis --loglevel=info --max-tasks-per-child=100
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

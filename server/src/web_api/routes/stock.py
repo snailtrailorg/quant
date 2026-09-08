@@ -3,7 +3,9 @@ from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
 from src.data_platform.db import get_conn
 import logging
-import pandas as pd
+# 批10：不再模块级 import pandas——web-api 常驻进程的 pandas 唯一用途曾是本文件两个
+# pd.notna()（+57MB RSS）；K 线路由改走 db.get_kline_records 零 pandas 直查。
+# 防回潮守门：tests/test_web_api_lazy.py。
 
 logger = logging.getLogger("web_api")
 
@@ -127,22 +129,15 @@ def get_kline_api(symbol: str, days: int = 0,
 
     symbol 接受 ts_code（600000.SH）或 vt_symbol（600000.SHSE），内部 to_vt_symbol 转换查 bar_1D。
     返回 [{ts, open, high, low, close, volume}, ...]。
+    批10：改走 get_kline_records 零 pandas 直查（Decimal/NaN 转换在 db 层完成）。
     """
-    from src.data_platform.db import get_bars
+    from src.data_platform.db import get_kline_records
     from src.data_platform.schema import to_vt_symbol
     from datetime import date, timedelta
     end = date.today()
     start = end - timedelta(days=days) if days > 0 else date(2010, 1, 1)
     vt = to_vt_symbol(symbol)
-    df = get_bars(vt, "1D", start, end)
-    if df is None or df.empty:
-        return []
-    records = df[["ts", "open", "high", "low", "close", "volume"]].to_dict("records")
-    for r in records:
-        r["ts"] = r["ts"].strftime("%Y-%m-%d") if pd.notna(r["ts"]) else None
-        for k in ("open", "high", "low", "close", "volume"):
-            r[k] = float(r[k]) if pd.notna(r[k]) else None
-    return records
+    return get_kline_records(vt, "1D", start, end)
 
 
 @router.get("/api/screen/astock")

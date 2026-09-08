@@ -161,7 +161,7 @@ class TushareAdapter(BaseDataAdapter):
         from src.data_platform.tz import as_shanghai
         rows = []
         is_daily = "min" not in freq
-        for _, row in df.iterrows():
+        for row in df.to_dict("records"):
             ts_code = row.get("ts_code", "")
             vt_sym = to_vt_symbol(ts_code)
             # ts：分钟读 trade_time，日线读 trade_date；+08:00 aware（26 号收尾批 C）

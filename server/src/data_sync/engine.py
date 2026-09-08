@@ -355,7 +355,7 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
     df = pro.stock_basic(list_status="L")   # DB 优化：网络拉取在事务外（2026-08-21 盘点）
     rows = [(r.get("ts_code"), r.get("name"), r.get("industry"), r.get("market"),
              r.get("list_status") or "L", str(r.get("list_date", "")), str(r.get("delist_date", "")))
-            for _, r in df.iterrows()]
+            for r in df.to_dict("records")]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany("""
@@ -401,7 +401,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
              str(r.get("conv_start_date", "")), str(r.get("conv_end_date", "")),
              str(r.get("maturity_date", "")), r.get("coupon_rate"), r.get("rate_clause"),
              str(r.get("list_date", "")), str(r.get("delist_date", "")))
-            for _, r in df.iterrows()]
+            for r in df.to_dict("records")]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany("""
@@ -446,7 +446,7 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
     df = pro.fund_basic(market="E")   # DB 优化：拉取在事务外
     rows = [(r.get("ts_code"), r.get("name"), r.get("management"),
              r.get("fund_type"), r.get("invest_type"), str(r.get("list_date", "")))
-            for _, r in df.iterrows()]
+            for r in df.to_dict("records")]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany("""
@@ -726,7 +726,7 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                             # DB 优化（2026-08-21 盘点）：逐行 execute（单日全市场 ~5000 次往返）
                             # → executemany 一次提交（psycopg3 pipeline，db.py save_bars 同款范式）
                             batch = []
-                            for _, row in df.iterrows():
+                            for row in df.to_dict("records"):
                                 vals = []
                                 for c in insert_cols:
                                     v = row.get(c)
@@ -772,7 +772,7 @@ def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str]
             conn.execute(f"DELETE FROM {table}")
             with conn.cursor() as cur:
                 batch = [tuple(str(row[c]) if row[c] is not None else None for c in cols)
-                         for _, row in df.iterrows()]
+                         for row in df.to_dict("records")]
                 cur.executemany(f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})", batch)
             conn.commit()
         return {"pulled": len(df), "saved": len(df), "start": "full",
