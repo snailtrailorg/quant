@@ -66,11 +66,16 @@ try {
     const m = getComputedStyle(a).transform
     return (m === 'none' || m === 'matrix(1, 0, 0, 1, 0, 0)') ? 'in' : 'out'
   })
+  // 2026-09-10 图钉：缺省钉死态（无热区）——先拔钉进浮动态测 hover,测完钉回恢复缺省
+  const pinned0 = await p.evaluate(() => document.querySelector('.overlay-aside')?.classList.contains('pinned'))
+  if (pinned0) await p.evaluate(() => document.querySelector('.rail-pin')?.click())
+  await new Promise(r => setTimeout(r, 400))
   await p.hover('.rail-hotzone'); await new Promise(r => setTimeout(r, 400))   // 真鼠标划热区→右滑展开
   const s1 = await asideState()
   await p.hover('.el-main'); await new Promise(r => setTimeout(r, 400))        // 移入内容区→mouseleave 左滑收起
   const s2 = await asideState()
   assert('侧栏 hover 展开/失焦收起', s1 === 'in' && s2 === 'out', `${s1}→${s2}`)
+  if (pinned0) { await p.hover('.rail-hotzone'); await new Promise(r => setTimeout(r, 400)); await p.evaluate(() => document.querySelector('.rail-pin')?.click()); await new Promise(r => setTimeout(r, 300)) }   // 钉回缺省
 } catch (e) { assert('侧栏 hover', false, String(e).slice(0, 100)) }
 
 // ---- ⌘K 真键盘 ----
