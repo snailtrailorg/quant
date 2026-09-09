@@ -1,52 +1,11 @@
 <template>
   <el-container style="height: 100vh">
-    <el-aside :width="collapsed ? '64px' : '240px'" style="background: var(--bg-sidebar); transition: width .2s">
-      <div style="color: #fff; padding: 20px; font-size: 18px; font-weight: bold; text-align: center">
-        {{ t('app.title') }}
+    <!-- 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽顶到最左 + 标题居左；侧栏移出文档流改 hover 覆盖式 -->
+    <el-header style="background: var(--bg-surface); border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; justify-content: space-between" @mouseenter="railOpen = false">
+      <div style="display: flex; align-items: center; gap: 12px">
+        <span class="app-title">{{ t('app.title') }}</span>
       </div>
-      <el-menu :default-active="route.path" router background-color="var(--bg-sidebar)" text-color="#bfcbd9" active-text-color="#FFFFFF" style="padding-bottom: 28px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
-        <!-- P3-9（web-design 03 v2.1）：菜单 v2.1 四组 16 项——组标题与菜单项同字号;组内流程序 -->
-        <el-menu-item index="/"><el-icon><DataBoard /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
-
-        <el-sub-menu index="research">
-          <template #title><el-icon><DataAnalysis /></el-icon>{{ t('nav.gResearch') }}</template>
-          <el-menu-item index="/screener"><el-icon><Search /></el-icon>{{ t('nav.screener') }}</el-menu-item>
-          <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.stockPool') }}</el-menu-item>
-          <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>
-          <el-menu-item index="/strategy"><el-icon><SetUp /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
-          <el-menu-item index="/backtest"><el-icon><Timer /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
-          <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.dailyInsight') }}</el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="live">
-          <template #title><el-icon><Monitor /></el-icon>{{ t('nav.gLive') }}</template>
-          <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
-          <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.tradingDesk') }}</el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="riskgrp">
-          <template #title><el-icon><Warning /></el-icon>{{ t('nav.gRisk') }}</template>
-          <el-menu-item index="/risk"><el-icon><CircleCheck /></el-icon>{{ t('nav.risk') }}</el-menu-item>
-          <el-menu-item index="/reconcile"><el-icon><ScaleToOriginal /></el-icon>{{ t('nav.reconcile') }}</el-menu-item>
-          <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
-        </el-sub-menu>
-
-        <el-sub-menu index="ops" v-if="has('data_sync') || has('system_config')">
-          <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
-          <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
-          <el-menu-item v-if="has('llm_config') || has('im_bots_config')" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
-          <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
-          <el-menu-item v-if="has('system_config')" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
-        </el-sub-menu>
-      </el-menu>
-    </el-aside>
-    <el-container>
-      <el-header style="background: var(--bg-surface); border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; justify-content: space-between">
-        <div></div>
-        <div style="display: flex; align-items: center; gap: 16px">
-          <!-- P3-2（04 §4.1）：侧边栏折叠（240↔64 图标模式，记忆状态） -->
-          <el-button size="small" text @click="collapsed = !collapsed">{{ collapsed ? '»' : '«' }}</el-button>
-
+      <div style="display: flex; align-items: center; gap: 16px">
           <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼） -->
           <el-button type="danger" size="small" @click="onEmergencyHalt">{{ t('risk.halt') }}</el-button>
 
@@ -119,9 +78,54 @@
           </el-dropdown>
         </div>
       </el-header>
-      <el-main style="padding-bottom: 30px">
+      <!-- mouseenter 兜底关：Chrome 边界事件状态机下,指针停热区、侧栏滑到指针下方后直接跳主区,
+           aside 自身从未 mouseenter→mouseleave 永不触发=卡死不收（快甩鼠标真实场景）。主区/顶栏进入=焦点离开侧栏→收 -->
+      <el-main style="padding-bottom: 30px" @mouseenter="railOpen = false">
         <router-view />
       </el-main>
+      <!-- 主界面框架改版：hover 热区 + 覆盖式侧栏（fixed 出文档流；z 分层 1800/1801——侧栏盖住热区,防开合抖动） -->
+      <div class="rail-hotzone" @mouseenter="railOpen = true"></div>
+      <el-aside class="overlay-aside" :class="{ open: railOpen }" width="200px" @mouseleave="railOpen = false">
+        <!-- 用户裁定（2026-09-09 二轮）：侧栏到顶自带同款标题,滑出遮盖顶栏标题——深底消除顶栏左段的视觉断层。
+             用 el-header 组件本身：padding/高度由 EP 组件默认供给（0 20px/60px 定义于 .el-header 作用域）,
+             与顶栏同源同值零字面量——真原位替换且无硬编码 -->
+        <el-header class="aside-brand"><span class="aside-brand-text">{{ t('app.title') }}</span></el-header>
+        <el-menu :default-active="route.path" router background-color="var(--bg-sidebar)" text-color="#bfcbd9" active-text-color="#FFFFFF" style="padding-bottom: 28px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
+          <!-- P3-9（web-design 03 v2.1）：菜单 v2.1 四组 16 项——组标题与菜单项同字号;组内流程序 -->
+          <el-menu-item index="/"><el-icon><DataBoard /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
+
+          <el-sub-menu index="research">
+            <template #title><el-icon><DataAnalysis /></el-icon>{{ t('nav.gResearch') }}</template>
+            <el-menu-item index="/screener"><el-icon><Search /></el-icon>{{ t('nav.screener') }}</el-menu-item>
+            <el-menu-item index="/pool"><el-icon><Collection /></el-icon>{{ t('nav.stockPool') }}</el-menu-item>
+            <el-menu-item index="/factors"><el-icon><MagicStick /></el-icon>{{ t('nav.factors') }}</el-menu-item>
+            <el-menu-item index="/strategy"><el-icon><SetUp /></el-icon>{{ t('nav.strategy') }}</el-menu-item>
+            <el-menu-item index="/backtest"><el-icon><Timer /></el-icon>{{ t('nav.backtest') }}</el-menu-item>
+            <el-menu-item index="/analysis"><el-icon><TrendCharts /></el-icon>{{ t('nav.dailyInsight') }}</el-menu-item>
+          </el-sub-menu>
+
+          <el-sub-menu index="live">
+            <template #title><el-icon><Monitor /></el-icon>{{ t('nav.gLive') }}</template>
+            <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
+            <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.tradingDesk') }}</el-menu-item>
+          </el-sub-menu>
+
+          <el-sub-menu index="riskgrp">
+            <template #title><el-icon><Warning /></el-icon>{{ t('nav.gRisk') }}</template>
+            <el-menu-item index="/risk"><el-icon><CircleCheck /></el-icon>{{ t('nav.risk') }}</el-menu-item>
+            <el-menu-item index="/reconcile"><el-icon><ScaleToOriginal /></el-icon>{{ t('nav.reconcile') }}</el-menu-item>
+            <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
+          </el-sub-menu>
+
+          <el-sub-menu index="ops" v-if="has('data_sync') || has('system_config')">
+            <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
+            <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
+            <el-menu-item v-if="has('llm_config') || has('im_bots_config')" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
+            <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
+            <el-menu-item v-if="has('system_config')" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
+          </el-sub-menu>
+        </el-menu>
+      </el-aside>
     </el-container>
     <!-- 我的权限玻璃盒（10 §4：被授予/拒绝的依据用户随时可见） -->
   <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="480px">
@@ -158,7 +162,6 @@
       </div>
     </div>
   </el-dialog>
-</el-container>
 </template>
 
 <script setup>
@@ -229,13 +232,10 @@ const onAckAll = async () => {
   try { await ackAllNotifications(); await loadNotifs() } catch {}
 }
 // 类别 → 页面路由（点击通知直达）
-// P3-2/P3-8：折叠+暗色+帮助抽屉+我的权限玻璃盒
-// wd-14 P0:侧栏 matchMedia 自动折叠(localStorage 记忆优先)
-const collapsed = ref(localStorage.getItem('sidebar-collapsed') === '1')
-const _mq = window.matchMedia('(max-width: 1706px)')
-const _onMq = e => { if (!localStorage.getItem('sidebar-collapsed')) collapsed.value = e.matches }
-_mq.addEventListener('change', _onMq)
-if (!localStorage.getItem('sidebar-collapsed')) collapsed.value = _mq.matches
+// P3-2/P3-8：暗色+帮助抽屉+我的权限玻璃盒
+// 主界面框架改版（2026-09-09 用户裁定）：侧栏平时隐藏,hover 热区向右展开/失焦左滑收起（覆盖式）——
+// 折叠按钮/collapsed/localStorage/matchMedia 1706px 自动折叠全退役
+const railOpen = ref(false)
 const dark = ref(localStorage.getItem('theme-dark') === '1')
 const onDark = v => { document.documentElement.classList.toggle('dark', v); localStorage.setItem('theme-dark', v ? '1' : '0') }
 if (dark.value) document.documentElement.classList.add('dark')
@@ -360,6 +360,30 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 </script>
 
 <style scoped>
+/* 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽+标题居左;侧栏到顶 hover 覆盖式。
+   .aside-brand 用 el-header 组件（padding/高度=EP 默认,与顶栏同源）;去 .el-menu 自带 border-right 消 1px 宽差 */
+.app-title { font-size: 18px; font-weight: 700; color: var(--brand-600); }
+.aside-brand { display: flex; align-items: center; }
+.aside-brand-text { color: #fff; font-size: 18px; font-weight: 700; }
+.overlay-aside .el-menu { border-right: none; }   /* EP 默认 1px 右边框→与标题区宽度差 1px,去掉 */
+.rail-hotzone { position: fixed; left: 0; top: 0; bottom: 0; width: 12px; z-index: 1800; }
+.rail-hotzone::after {
+  /* 把手指示：左缘可划出菜单的视觉暗示（平时侧栏完全隐藏,无指示=不可发现） */
+  content: ''; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 48px; border-radius: 2px;
+  background: var(--text-secondary); opacity: .35;
+}
+.overlay-aside {
+  position: fixed; left: 0; top: 0; bottom: 0;      /* 到顶：滑出时连顶栏左段一并遮盖 */
+  background: var(--bg-sidebar);
+  transform: translateX(-100%);            /* 平时隐藏,左滑出视口 */
+  visibility: hidden;                      /* 盲审 P1：出 Tab 焦点序（仅 transform 出视口时键盘 Tab 仍会聚焦不可见菜单） */
+  transition: transform .25s ease, visibility .25s;   /* visibility 离散：收起=滑完再隐,展开=立即可见,动画不受影响 */
+  z-index: 1801;                            /* 盖住热区(1800)与顶栏(el-header 无定位),防开↔合抖动。EP 弹层 2000+ 之下/页面 --z-sticky 100 之上——令牌化挂 web backlog（盲审 P2） */
+  overflow-y: auto;
+}
+.overlay-aside.open { transform: translateX(0); visibility: visible; box-shadow: 4px 0 16px rgba(0, 0, 0, .18); }
+
 /* 通知级别色点：critical 深红 / warn 橙 / info 灰（走 tokens：--critical/--warn-fill/--text-secondary） */
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot.critical { background: var(--critical); }

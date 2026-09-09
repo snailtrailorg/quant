@@ -1097,7 +1097,7 @@ export default {
       etfFilters: 'ETF Filters', scaleMin: 'Scale min (yi)', feeMax: 'Fee max (%)',
       fundScale: 'Scale', mgmtFee: 'Mgmt fee', trackingErr: 'Track err', fundType: 'Type',
     },
-    app: { title: 'SnailQuant Trading' },
+    app: { title: 'Snail Quant' },   // 2026-09-09 用户裁定：侧栏 200px 容不下长文案（161.8px>160px 内容区），缩短
     common: {
       action: 'Action',
       copy: 'Copy',

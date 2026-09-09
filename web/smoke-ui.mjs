@@ -57,16 +57,21 @@ try {
 const menuGroups = await count('.el-menu .el-sub-menu__title')
 assert('菜单组(应4)', menuGroups >= 4, `组数=${menuGroups}`)
 
-// ---- 侧栏折叠（处理初始折叠态）----
+// ---- 侧栏 hover 展开/失焦收起（2026-09-09 框架改版：覆盖式,无折叠按钮）----
 try {
-  const asideW = () => p.evaluate(() => document.querySelector('.el-aside')?.getBoundingClientRect().width ?? 0)
-  let w0 = await asideW()
-  if (w0 < 100) { await clickBtn('»'); await new Promise(r => setTimeout(r, 400)); w0 = await asideW() }   // 初始折叠→先展开
-  await clickBtn('«'); await new Promise(r => setTimeout(r, 400))
-  const w1 = await asideW()
-  assert('侧栏折叠切换', w0 > 100 && w1 < 100, `${w0}→${w1}`)
-  await clickBtn('»'); await new Promise(r => setTimeout(r, 400))
-} catch (e) { assert('侧栏折叠', false, String(e).slice(0, 100)) }
+  const asideState = () => p.evaluate(() => {
+    const a = document.querySelector('.overlay-aside'); if (!a) return 'none'
+    const r = a.getBoundingClientRect()
+    if (Math.abs(r.width - 200) > 1) return `w${r.width}`   // 2026-09-09 用户裁定宽 200;容差 1px 抗 DPR/缩放（盲审 P2）
+    const m = getComputedStyle(a).transform
+    return (m === 'none' || m === 'matrix(1, 0, 0, 1, 0, 0)') ? 'in' : 'out'
+  })
+  await p.hover('.rail-hotzone'); await new Promise(r => setTimeout(r, 400))   // 真鼠标划热区→右滑展开
+  const s1 = await asideState()
+  await p.hover('.el-main'); await new Promise(r => setTimeout(r, 400))        // 移入内容区→mouseleave 左滑收起
+  const s2 = await asideState()
+  assert('侧栏 hover 展开/失焦收起', s1 === 'in' && s2 === 'out', `${s1}→${s2}`)
+} catch (e) { assert('侧栏 hover', false, String(e).slice(0, 100)) }
 
 // ---- ⌘K 真键盘 ----
 try {
