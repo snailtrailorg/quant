@@ -1,5 +1,5 @@
 <template>
-  <el-card style="max-width: 640px">
+  <el-card>
     <template #header>
       <!-- 批11D：个人中心三 tab（基本信息/IM 通道/修改密码） -->
       <TabsShell :tabs="tabs" default-tab="basic" query-key="ptab" v-slot="sp">
@@ -13,7 +13,7 @@
     </div>
 
     <!-- 资料 -->
-    <el-form label-position="top">
+    <el-form label-position="top" style="max-width: 480px">
       <el-form-item :label="t('profile.nickname')">
         <div style="display: flex; gap: 8px; width: 100%">
           <el-input v-model="me.nickname" maxlength="20" />

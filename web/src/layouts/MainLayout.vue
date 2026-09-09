@@ -78,18 +78,34 @@
           </el-dropdown>
         </div>
       </el-header>
+      <!-- 内层容器（图钉批补回）：root 因 el-header 判为纵向——钉死态 aside 需与 main 横排,
+           显式 horizontal 包住工作区（2026-09-10 lc47 实证 column 下 order 无效） -->
+      <el-container direction="horizontal" style="flex: 1 1 0%; min-height: 0">
       <!-- mouseenter 兜底关：Chrome 边界事件状态机下,指针停热区、侧栏滑到指针下方后直接跳主区,
            aside 自身从未 mouseenter→mouseleave 永不触发=卡死不收（快甩鼠标真实场景）。主区/顶栏进入=焦点离开侧栏→收 -->
       <el-main style="padding-bottom: 30px" @mouseenter="railOpen = false">
         <router-view />
       </el-main>
       <!-- 主界面框架改版：hover 热区 + 覆盖式侧栏（fixed 出文档流；z 分层 1800/1801——侧栏盖住热区,防开合抖动） -->
-      <div class="rail-hotzone" @mouseenter="railOpen = true"></div>
-      <el-aside class="overlay-aside" :class="{ open: railOpen }" width="200px" @mouseleave="railOpen = false">
+      <!-- 图钉（2026-09-10 用户裁定）：缺省钉死=推挤式常驻显示；拔钉=hover 覆盖式。hotzone 仅浮动态有意义 -->
+      <div v-if="!railPinned" class="rail-hotzone" @mouseenter="railOpen = true"></div>
+      <el-aside class="overlay-aside" :class="{ open: railOpen || railPinned, pinned: railPinned }"
+                width="200px" @mouseleave="!railPinned && (railOpen = false)">
         <!-- 用户裁定（2026-09-09 二轮）：侧栏到顶自带同款标题,滑出遮盖顶栏标题——深底消除顶栏左段的视觉断层。
              用 el-header 组件本身：padding/高度由 EP 组件默认供给（0 20px/60px 定义于 .el-header 作用域）,
              与顶栏同源同值零字面量——真原位替换且无硬编码 -->
-        <el-header class="aside-brand"><span class="aside-brand-text">{{ t('app.title') }}</span></el-header>
+        <el-header class="aside-brand">
+          <span class="aside-brand-text">{{ t('app.title') }}</span>
+          <button class="rail-pin" :class="{ active: railPinned }" :title="railPinned ? t('layout.unpin') : t('layout.pin')"
+                  @click="togglePin" @mouseenter.stop @mouseleave.stop>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                 stroke-linecap="round" stroke-linejoin="round" :style="{ transform: railPinned ? 'none' : 'rotate(45deg)' }">
+              <line x1="12" y1="17" x2="12" y2="22" />
+              <path d="M5 17h14l-1.5-6.5a2 2 0 0 0-2-1.5h-7a2 2 0 0 0-2 1.5Z" fill="currentColor" stroke="none" />
+              <circle cx="12" cy="3.5" r="2" />
+            </svg>
+          </button>
+        </el-header>
         <el-menu :default-active="route.path" router background-color="var(--bg-sidebar)" text-color="#bfcbd9" active-text-color="#FFFFFF" style="padding-bottom: 28px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
           <!-- P3-9（web-design 03 v2.1）：菜单 v2.1 四组 16 项——组标题与菜单项同字号;组内流程序 -->
           <el-menu-item index="/"><el-icon><DataBoard /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
@@ -127,6 +143,7 @@
           </el-sub-menu>
         </el-menu>
       </el-aside>
+      </el-container>
     </el-container>
     <!-- 我的权限玻璃盒（10 §4：被授予/拒绝的依据用户随时可见） -->
   <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="480px">
@@ -236,7 +253,14 @@ const onAckAll = async () => {
 // P3-2/P3-8：暗色+帮助抽屉+我的权限玻璃盒
 // 主界面框架改版（2026-09-09 用户裁定）：侧栏平时隐藏,hover 热区向右展开/失焦左滑收起（覆盖式）——
 // 折叠按钮/collapsed/localStorage/matchMedia 1706px 自动折叠全退役
+// 2026-09-10 图钉：缺省钉死（推挤式常驻）；拔钉=hover 覆盖式。localStorage 记忆（'0'=未钉）
 const railOpen = ref(false)
+const railPinned = ref(localStorage.getItem('rail-pinned') !== '0')
+const togglePin = () => {
+  railPinned.value = !railPinned.value
+  if (!railPinned.value) railOpen.value = false   // 拔钉即收回（浮动态缺省隐藏）
+  localStorage.setItem('rail-pinned', railPinned.value ? '1' : '0')
+}
 const dark = ref(localStorage.getItem('theme-dark') === '1')
 const onDark = v => { document.documentElement.classList.toggle('dark', v); localStorage.setItem('theme-dark', v ? '1' : '0') }
 if (dark.value) document.documentElement.classList.add('dark')
@@ -364,8 +388,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 /* 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽+标题居左;侧栏到顶 hover 覆盖式。
    .aside-brand 用 el-header 组件（padding/高度=EP 默认,与顶栏同源）;去 .el-menu 自带 border-right 消 1px 宽差 */
 .app-title { font-size: 18px; font-weight: 700; color: var(--brand-600); }
-.aside-brand { display: flex; align-items: center; }
+.aside-brand { display: flex; align-items: center; gap: 8px; }
 .aside-brand-text { color: #fff; font-size: 18px; font-weight: 700; }
+/* 图钉（2026-09-10）：标题后右对齐——flex 布局 text 撑开+margin-left:auto；钉死=竖直针高亮,浮动=斜 45°灰 */
+.rail-pin { margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px; border: none; cursor: pointer;
+  background: transparent; color: var(--text-secondary, #8a94a6); transition: color .15s, background .15s; }
+.rail-pin:hover { color: #fff; background: rgba(255, 255, 255, .12); }
+.rail-pin.active { color: #fff; }
 .overlay-aside .el-menu { border-right: none; }   /* EP 默认 1px 右边框→与标题区宽度差 1px,去掉 */
 .rail-hotzone { position: fixed; left: 0; top: 0; bottom: 0; width: 12px; z-index: 1800; }
 .rail-hotzone::after {
@@ -384,6 +414,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   overflow-y: auto;
 }
 .overlay-aside.open { transform: translateX(0); visibility: visible; box-shadow: 4px 0 16px rgba(0, 0, 0, .18); }
+/* 图钉钉死态（2026-09-10）：覆盖式→推挤式——回文档流排最左（DOM 序在 main 后,order 前移）,main 让位 200px。
+   高度不设（flex 默认 stretch=inner 全高）+沿袭 overflow-y:auto——菜单长时栏内滚,不撑破容器 */
+.overlay-aside.pinned { position: static; transform: none; visibility: visible;
+  order: -1; box-shadow: none; }
 
 /* 通知级别色点：critical 深红 / warn 橙 / info 灰（走 tokens：--critical/--warn-fill/--text-secondary） */
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }

@@ -1121,6 +1121,7 @@ export default {
       halted: '已熔断', frozen: '数据冻结',
     },
     layout: {
+      pin: '固定侧栏（常驻显示）', unpin: '浮动侧栏（悬停划出）',
       healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页（监控→健康）',
       helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：', myPermsDenied: '被用户规则拒绝（角色有但被覆盖）：',
     },
@@ -2247,6 +2248,7 @@ export default {
       halted: 'halted', frozen: 'frozen',
     },
     layout: {
+      pin: 'Pin sidebar (always visible)', unpin: 'Unpin sidebar (hover to slide out)',
       healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
       helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):', myPermsDenied: 'Denied by user rule (role has it, override blocks):',
     },
