@@ -34,6 +34,10 @@ deploy_waves:
     readyz: "http://127.0.0.1:8001/readyz"
   - name: celery
     units: [quant-celery-worker@quant.service, quant-celery-beat@quant.service]   # W6 收官日修:beat 补入波次(此前不在任何波——演练复活后版本收敛断言首逮;对齐 prod 波
+  - name: feishu
+    # 批11D：staging 补 IM pool 入波——批11C 后 staging 手动起过 pool（钉旧版不在波次→收敛断言双版红，
+    # 2026-09-10 彩排实抓）；入波即每次发布重启收敛，与 prod 波次语义对齐
+    units: [quant-im-pool@quant.service]
   - name: hub
     units: [quant-md-hub@quant.service]
 deploy_postverify_units: "{{ deploy_waves | map(attribute='units') | flatten }}"
