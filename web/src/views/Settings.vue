@@ -1,5 +1,6 @@
 <template>
-  <!-- 设置五 tab(03 号 §3.3/09 号 A3+wd-20 §2.2 TabsShell；批 7 增告警 tab) -->
+  <!-- 设置五 tab(03 号 §3.3/09 号 A3+wd-20 §2.2 TabsShell；批 7 增告警 tab)。
+       批11：原"账号与邀请"迁往 UserManagement.vue（系统管理→用户管理），本 users tab 只剩 API 密钥 -->
   <el-card>
     <template #header>
       <TabsShell :tabs="visibleTabs" default-tab="run" v-slot="slotProps">
@@ -22,7 +23,8 @@ import AlertSettings from './AlertSettings.vue'
 import Profile from './Profile.vue'
 
 const isAdmin = localStorage.getItem('role') === 'admin'
-// perm/alerts=admin 门控（页面自验兜底在其内）
+// perm/alerts=admin 门控（页面自验兜底在其内）；批11：users tab（现=API 密钥）admin-only
+// ——GET /api/account 需 account_keys 权限,非 admin 点开必 loadFailed（盲审 P2-10,原"账号与邀请"期即存在的错放）
 const visibleTabs = computed(() => isAdmin
   ? [
       { key: 'run', i18nKey: 'tabs.run' },
@@ -33,7 +35,6 @@ const visibleTabs = computed(() => isAdmin
     ]
   : [
       { key: 'run', i18nKey: 'tabs.run' },
-      { key: 'users', i18nKey: 'tabs.users' },
       { key: 'profile', i18nKey: 'tabs.profile' },
     ])
 </script>

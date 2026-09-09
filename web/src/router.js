@@ -30,6 +30,7 @@ const routes = [
       { path: 'analysis', name: 'analysis', component: () => import('./views/Analysis.vue') },
       { path: 'stock/:symbol', name: 'stock-detail', component: () => import('./views/StockDetail.vue') },
       { path: 'integrations', name: 'integrations', component: () => import('./views/Integrations.vue') },
+      { path: 'users', name: 'users', component: () => import('./views/UserManagement.vue'), meta: { admin: true } },   // 批11：用户管理（系统管理第一项；user_mgmt=admin-only 同 permissions 守卫）
       { path: 'dataops', name: 'dataops', component: () => import('./views/DataOps.vue') },
       { path: 'observe', name: 'observe', component: () => import('./views/Observe.vue') },
       { path: 'permissions', name: 'permissions', component: () => import('./views/Permissions.vue'), meta: { admin: true } },

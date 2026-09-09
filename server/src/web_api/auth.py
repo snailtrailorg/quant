@@ -514,8 +514,8 @@ def invite_user(email: str) -> str | None:
     return create_token(email, "invite", hours=72)
 
 
-def register_user(token: str, username: str, password: str) -> dict | None:
-    """自助开通：凭 invite token 建用户（默认 Viewer）。"""
+def register_user(token: str, username: str, password: str, nickname: str = "") -> dict | None:
+    """自助开通：凭 invite token 建用户（默认 Viewer）。批11：nickname 选填；email_verified 列已删（裁定③）。"""
     t = verify_token(token, "invite")
     if not t:
         return None
@@ -524,7 +524,8 @@ def register_user(token: str, username: str, password: str) -> dict | None:
     except ValueError:
         return None  # 用户名已存在
     with get_conn() as conn:
-        conn.execute("UPDATE users SET email=%s, email_verified=true WHERE id=%s", (t["email"], uid))
+        conn.execute("UPDATE users SET email=%s, nickname=LEFT(COALESCE(NULLIF(%s,''), nickname), 20) WHERE id=%s",
+                     (t["email"], nickname, uid))   # 昵称 20 上限对齐 profile_update（盲审 P2-4）
         conn.commit()
     _mark_token_used(t["id"])
     return {"id": uid, "username": username, "email": t["email"]}

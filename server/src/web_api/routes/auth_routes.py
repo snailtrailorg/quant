@@ -42,6 +42,9 @@ if not _avatar_ok:
 _RATE_LIMITS: dict[str, dict[str, list[float]]] = {}
 _RATE_RULES = {"login": (10, 60), "forgot": (3, 60)}
 
+# 批11：注册用户名保留字（防冒充系统身份；大小写不敏感）
+_RESERVED_USERNAMES = {"admin", "administrator", "root", "system", "support", "官方", "蜗牛量化"}
+
 
 def _rate_limited(bucket: str, key: str) -> bool:
     import time as _t
@@ -329,29 +332,13 @@ def profile_update_api(body: dict = Body(...),
     return {"ok": True}
 
 
-@router.post("/api/user/avatar")
-def avatar_upload_api(body: dict = Body(...),
-                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
-    """设置头像（批次C+）：{icon:"icon_NN.png"} 选系统卡通图标（public/icons，36 个）
-    或 {avatar_base64} 上传（裁剪 1:1 → Pillow 统一 256px JPEG 存 static/avatars，
-    固定文件名 user_{id}.jpg 覆盖旧图无孤儿，URL 带 ?t= 防缓存）。"""
+def _save_avatar_base64(data: str, uid: int) -> str:
+    """头像 base64 → 中心裁剪 256px JPEG 存 static/avatars/user_{uid}.jpg,返回 URL。
+
+    批11 从 /api/user/avatar 端点下沉（注册开通四字段复用——彼时用户刚建,无登录态）。"""
     import base64 as _b64
-    # 1) 系统图标：仅允许 icon_NN.png（0-35），防路径注入
-    icon = str(body.get("icon", "") or "").strip()
-    if icon:
-        import re as _re
-        if not _re.fullmatch(r"icon_(?:[0-2]\d|3[0-5])\.png", icon):
-            raise ApiError(400, "AVATAR_INVALID", "无效的系统图标")
-        url = f"/icons/{icon}"
-        with get_conn() as conn:
-            conn.execute("UPDATE users SET avatar_url=%s, avatar_updated_at=now() WHERE id=%s",
-                         (url, payload["sub"]))
-            conn.commit()
-        audit_log(payload["username"], "avatar_icon", icon)
-        return {"avatar_url": url}
     import io as _io
     import time as _time
-    data = str(body.get("avatar_base64", ""))
     if data.startswith("data:"):
         data = data.split(",", 1)[-1]
     try:
@@ -373,13 +360,35 @@ def avatar_upload_api(body: dict = Body(...),
         if img.mode != "RGB":
             img = img.convert("RGB")
         img = img.resize((256, 256), Image.LANCZOS)
-        fname = f"user_{payload['sub']}.jpg"
+        fname = f"user_{uid}.jpg"
         img.save(_AVATAR_DIR / fname, "JPEG", quality=85)
     except ApiError:
         raise
     except Exception:
         raise ApiError(400, "AVATAR_INVALID", "图片解析失败")
-    url = f"/api/static/avatars/{fname}?t={int(_time.time())}"
+    return f"/api/static/avatars/{fname}?t={int(_time.time())}"
+
+
+@router.post("/api/user/avatar")
+def avatar_upload_api(body: dict = Body(...),
+                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+    """设置头像（批次C+）：{icon:"icon_NN.png"} 选系统卡通图标（public/icons，36 个）
+    或 {avatar_base64} 上传（裁剪 1:1 → Pillow 统一 256px JPEG 存 static/avatars，
+    固定文件名 user_{id}.jpg 覆盖旧图无孤儿，URL 带 ?t= 防缓存）。"""
+    # 1) 系统图标：仅允许 icon_NN.png（0-35），防路径注入
+    icon = str(body.get("icon", "") or "").strip()
+    if icon:
+        import re as _re
+        if not _re.fullmatch(r"icon_(?:[0-2]\d|3[0-5])\.png", icon):
+            raise ApiError(400, "AVATAR_INVALID", "无效的系统图标")
+        url = f"/icons/{icon}"
+        with get_conn() as conn:
+            conn.execute("UPDATE users SET avatar_url=%s, avatar_updated_at=now() WHERE id=%s",
+                         (url, payload["sub"]))
+            conn.commit()
+        audit_log(payload["username"], "avatar_icon", icon)
+        return {"avatar_url": url}
+    url = _save_avatar_base64(str(body.get("avatar_base64", "")), payload["sub"])
     with get_conn() as conn:
         conn.execute("UPDATE users SET avatar_url=%s, avatar_updated_at=now() WHERE id=%s",
                      (url, payload["sub"]))
@@ -422,6 +431,25 @@ def invites_api(payload: dict = Depends(require_perm("user_mgmt"))):
                       "expires_at": str(r[2])[:19] if r[2] else None,
                       "status": status, "created_at": str(r[5])[:19]})
     return {"items": items}
+
+
+@router.post("/api/invites/batch-delete")
+def invites_batch_delete_api(body: dict = Body(...),
+                             payload: dict = Depends(require_perm("user_mgmt"))):
+    """批量删邀请记录（批11：清理用）。任何状态（pending/used/expired/revoked）皆可删；上限 100/次。"""
+    ids = body.get("ids") or []
+    if not isinstance(ids, list) or not ids:
+        raise ApiError(400, "IDS_EMPTY", "ids 不能为空")
+    if not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
+        raise ApiError(400, "IDS_INVALID", "ids 须为整型数组")   # 盲审 P2-1：text[]/float[] 到 PG 报 operator 错=500
+    if len(ids) > 100:
+        raise ApiError(400, "TOO_MANY", "单次最多删除 100 条")
+    with get_conn() as conn:
+        cur = conn.execute("DELETE FROM user_tokens WHERE type='invite' AND id = ANY(%s)", (ids,))
+        conn.commit()
+        deleted = cur.rowcount
+    audit_log(payload["username"], "invites_batch_delete", f"n={deleted}", f"ids={ids}")   # 盲审 P2-8：不可逆删除可追溯
+    return {"deleted": deleted}
 
 
 @router.post("/api/invites/{tid}/revoke")
@@ -467,11 +495,27 @@ def verify_invite_token(token: str):
 
 @router.post("/api/auth/register")
 async def register_api(req: RegisterReq, request: Request, background_tasks: BackgroundTasks):
-    """自助开通：凭 invite token 建用户（默认 Viewer）。"""
+    """自助开通：凭 invite token 建用户（默认 Viewer）。批11 四字段：用户名/昵称/头像/密码。"""
     validate_password(req.password)  # 不达标直接抛 ApiError(含错误码)
-    user = register_user(req.token, req.username, req.password)
+    username = (req.username or "").strip()
+    if not username:
+        raise ApiError(400, "USERNAME_EMPTY", "用户名不能为空")   # 盲审 P2-3：strip 后空串后端裸奔
+    if username.lower() in _RESERVED_USERNAMES:
+        raise ApiError(400, "USERNAME_RESERVED", "该用户名为系统保留名")
+    user = register_user(req.token, username, req.password, nickname=(req.nickname or "").strip())
     if not user:
         raise ApiError(400, "TOKEN_OR_USERNAME_INVALID", "token 无效/已用/过期，或用户名已存在")
+    if req.avatar:
+        # 盲审 P1-1：此时账号已建+token 已烧——头像失败绝不能把开通流程带进死胡同（重试同 token 必 400）
+        try:
+            url = _save_avatar_base64(req.avatar, user["id"])
+            with get_conn() as conn:
+                conn.execute("UPDATE users SET avatar_url=%s, avatar_updated_at=now() WHERE id=%s",
+                             (url, user["id"]))
+                conn.commit()
+        except Exception as e:
+            import logging as _lg
+            _lg.getLogger("web_api").warning("注册头像保存失败(降级跳过): %s", e)   # 选填项,降级不阻断
     audit_log(user["username"], "self_register")
     # 开通通知邮件后台发送（带条款，内容大发送慢，不阻塞注册响应）
     background_tasks.add_task(send_activation_email, user["email"], user["username"], _request_base(request), req.lang)
@@ -528,14 +572,15 @@ def create_user_api(req: UserCreate, payload: dict = Depends(require_perm("user_
 
 @router.get("/api/user")
 def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
+    # 批11：email_verified 列已删（迁移 0070）；email 保留返回（邀请/通知流程用）
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, username, nickname, role, enabled, email, email_verified, created_at, "
+        cur = conn.execute("SELECT id, username, nickname, role, enabled, email, created_at, "
                            "last_login_at, deleted_at FROM users ORDER BY id")
         rows = cur.fetchall()
     return [{"id": r[0], "username": r[1], "nickname": r[2], "role": r[3],
-             "enabled": r[4] and not r[9], "deactivated": bool(r[9]),
-             "email": r[5], "email_verified": r[6], "created_at": str(r[7])[:19],
-             "last_login_at": str(r[8])[:19] if r[8] else None} for r in rows]
+             "enabled": r[4] and not r[8], "deactivated": bool(r[8]),
+             "email": r[5], "created_at": str(r[6])[:19],
+             "last_login_at": str(r[7])[:19] if r[7] else None} for r in rows]
 
 
 @router.post("/api/user/{uid}")

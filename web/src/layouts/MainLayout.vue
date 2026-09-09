@@ -119,6 +119,7 @@
 
           <el-sub-menu index="ops" v-if="has('data_sync') || has('system_config')">
             <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
+            <el-menu-item v-if="has('user_mgmt')" index="/users"><el-icon><User /></el-icon>{{ t('nav.userMgmt') }}</el-menu-item>
             <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
             <el-menu-item v-if="has('llm_config') || has('im_bots_config')" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
             <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
@@ -168,7 +169,7 @@
 import { QuestionFilled, DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
-         ChatDotRound } from '@element-plus/icons-vue'
+         ChatDotRound, User } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'

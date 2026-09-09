@@ -18,6 +18,20 @@
         <el-form-item>
           <el-input v-model="form.username" :placeholder="t('login.username')" prefix-icon="User" size="large" />
         </el-form-item>
+        <!-- 批11：邀请开通四字段——昵称（选填）+头像（选填,文件→dataURL,注册成功后端落盘） -->
+        <el-form-item>
+          <el-input v-model="form.nickname" :placeholder="t('profile.nickname') + ' (' + t('common.optional') + ')'" prefix-icon="Postcard" size="large" />
+        </el-form-item>
+        <el-form-item>
+          <div class="avatar-row">
+            <div class="avatar-picker" @click="pickAvatar">
+              <Avatar v-if="form.avatar" :url="form.avatar" name="?" size="lg" />
+              <el-icon v-else :size="28"><Plus /></el-icon>
+            </div>
+            <span class="avatar-hint">{{ t('profile.avatar') }} · {{ t('common.optional') }}</span>
+            <input ref="avatarInputRef" type="file" accept="image/jpeg,image/png,image/webp" style="display:none" @change="onAvatarFile" />
+          </div>
+        </el-form-item>
         <el-form-item>
           <el-input v-model="form.password" type="password" :placeholder="t('login.password')" prefix-icon="Lock" size="large" show-password />
         </el-form-item>
@@ -65,8 +79,10 @@ import { ref, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
+import { Plus } from '@element-plus/icons-vue'
 import { verifyInviteToken, registerUser, getTerms, apiErr } from '../api'
 import { validatePassword } from '../password'
+import Avatar from '../components/Avatar.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -81,7 +97,19 @@ const termsVisible = ref(false)
 const terms = ref([])
 const termsScrollRef = ref(null)
 const termsRead = ref(false)  // 滚到底才 true（内容不足一屏时打开即 true）
-const form = ref({ username: '', password: '', confirm: '' })
+const form = ref({ username: '', nickname: '', avatar: '', password: '', confirm: '' })
+const avatarInputRef = ref(null)
+const pickAvatar = () => avatarInputRef.value?.click()
+const onAvatarFile = (e) => {
+  const f = e.target.files?.[0]
+  e.target.value = ''   // 同文件可重选
+  if (!f) return
+  if (f.size > 2 * 1024 * 1024) { ElMessage.warning(t('profile.avatarTooLarge')); return }
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(f.type)) { ElMessage.warning(t('profile.avatarFormat')); return }
+  const reader = new FileReader()
+  reader.onload = () => { form.value.avatar = reader.result }   // dataURL,注册时后端裁剪落盘
+  reader.readAsDataURL(f)
+}
 
 // 条款从后端 /api/terms 取（单一源，与开通邮件一致）；中英双语纵向全量展示
 // 条款从后端 /api/terms 取 items [{lang,name,body}]（注册表驱动，前端不感知具体语言）
@@ -118,7 +146,8 @@ const onRegister = async () => {
   if (!agreed.value) { ElMessage.warning(t('register.agreeRequired')); return }
   loading.value = true
   try {
-    await registerUser(token, form.value.username, form.value.password, locale.value)
+    await registerUser(token, form.value.username, form.value.password, locale.value,
+                       (form.value.nickname || '').trim(), form.value.avatar || '')
     ElMessage.success(t('register.success'))
     router.push('/login')
   } catch (e) { ElMessage.error(apiErr(e, t('register.failed'))) }
@@ -137,6 +166,12 @@ const onRegister = async () => {
 .welcome { text-align: center; color: var(--text-primary); font-size: 15px; margin: 4px 0 12px; }
 .email-box { background: var(--bg-canvas); border-radius: 6px; padding: 10px 14px; font-size: 13px; color: var(--text-secondary); margin-bottom: 14px; }
 .pwd-rule { color: var(--text-secondary); font-size: 12px; margin: -8px 0 10px; }
+/* 批11：头像选择（圆形预览+加号空态） */
+.avatar-row { display: flex; align-items: center; gap: 12px; width: 100%; }
+.avatar-picker { width: 56px; height: 56px; border-radius: 50%; border: 1px dashed var(--border-weak);
+  display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden;
+  color: var(--text-secondary); flex-shrink: 0; }
+.avatar-hint { font-size: 13px; color: var(--text-secondary); }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
 .terms-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer; user-select: none; }
 .back-login { text-align: center; margin: var(--sp-2) 0 18px; }

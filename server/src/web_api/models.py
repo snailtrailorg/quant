@@ -32,6 +32,8 @@ class RegisterReq(BaseModel):
     token: str
     username: str
     password: str
+    nickname: str = ""          # 批11：邀请开通四字段（选填）
+    avatar: str = ""            # 批11：头像 dataURL base64（选填，注册成功后落盘）
     lang: str = "en"
 
 class ForgotReq(BaseModel):

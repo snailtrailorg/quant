@@ -181,8 +181,10 @@ export const getPnl = () => api.get('/pnl')
 export const inviteUser = (email, lang) => api.post('/auth/invite', { email, lang })
 export const getInvites = () => api.get('/invites')
 export const revokeInvite = id => api.post(`/invites/${id}/revoke`)
+export const batchDeleteInvites = ids => api.post('/invites/batch-delete', { ids })   // 批11：批量清理
 export const verifyInviteToken = token => api.get(`/auth/invite/verify`, { params: { token } })
-export const registerUser = (token, username, password, lang) => api.post('/auth/register', { token, username, password, lang })
+export const registerUser = (token, username, password, lang, nickname = '', avatar = '') =>
+  api.post('/auth/register', { token, username, password, lang, nickname, avatar })
 export const forgotPassword = (email, lang) => api.post('/auth/forgot-password', { email, lang })
 export const resetPassword = (token, new_password) => api.post('/auth/reset-password', { token, new_password })
 export const changePassword = (old_password, new_password) => api.post('/auth/change-password', { old_password, new_password })
