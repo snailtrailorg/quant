@@ -200,6 +200,15 @@ try {
   assert('四内置组列出(builtin)', gtxt.includes('admin') && gtxt.includes('viewer'))
 } catch (e) { assert('用户群组页签', false, String(e).slice(0, 100)) }
 
+// ---- 个人中心三 tab（批11D）----
+try {
+  await nav('/settings?tab=profile')
+  await new Promise(r => setTimeout(r, 900))
+  const labels = await p.evaluate(() => document.body.innerText)
+  const tabs3 = ['基本信息', 'IM 通道', '修改密码'].every(x => labels.includes(x))
+  assert('Profile 三 tab', tabs3)
+} catch (e) { assert('Profile 三 tab', false, String(e).slice(0, 100)) }
+
 // ---- 汇总 ----
 const failed = results.filter(r => !r.ok)
 console.log(`\n=== 汇总: ${results.length - failed.length}/${results.length} 通过（${needsData.length} 项需造数） ===`)

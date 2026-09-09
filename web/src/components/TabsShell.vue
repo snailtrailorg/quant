@@ -10,13 +10,14 @@ const props = defineProps({
   tabs: { type: Array, required: true },      // [{key, i18nKey, badge?}]
   defaultTab: { type: String, default: '' },
   memoryKey: { type: String, default: '' },   // sessionStorage 记忆键（空=不记忆）
+  queryKey: { type: String, default: 'tab' }, // 批11D：query 参数名——嵌套容器（Settings×Profile）必须异名,否则内外互踩（盲审 P1-1：漏声明则全站 ?tab= 深链失效）
 })
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 
 const initial = () => {
-  if (route.query.tab) return route.query.tab
+  if (route.query[props.queryKey]) return route.query[props.queryKey]
   if (props.memoryKey) {
     const m = sessionStorage.getItem(props.memoryKey)
     if (m && props.tabs.some(x => x.key === m)) return m
@@ -27,7 +28,7 @@ const tab = ref(initial())
 const onTab = (v) => {
   tab.value = v   // 盲审A-P0-1：EP el-tabs 点击只改内部 currentName 不回推 modelValue——不写则正文永不切
   if (props.memoryKey) sessionStorage.setItem(props.memoryKey, v)
-  router.replace({ query: { ...route.query, tab: v } })
+  router.replace({ query: { ...route.query, [props.queryKey]: v } })
 }
 const currentKey = computed(() => (props.tabs.some(x => x.key === tab.value) ? tab.value : props.tabs[0]?.key))
 const label = x => t(x.i18nKey)

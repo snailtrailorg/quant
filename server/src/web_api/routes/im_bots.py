@@ -205,6 +205,13 @@ def im_bots_user_delete(bid: int, im_user_id: str,
     return {"ok": True}
 
 # ——— 批11C：自助面（require_authenticated——自定义组零权限用户也能管自己的 IM 通道） ———
+# 批11D：向导标识 → celery task 白名单（放本层因 im_bot 层3 不得 import feishu_bot 层4——分层守卫实抓；
+# 加新向导在此加分支，盲审 P2-3：不做 dict 注册表半套）
+def _wizard_task(wizard: str):
+    if wizard == "feishu_register":
+        from src.feishu_bot.tasks import feishu_register_task
+        return feishu_register_task
+    return None
 # 安全锚点（方案 v2 双盲审）：owner_user_id 服务端钉死=认证会话；default_role 恒 viewer（展示用，
 # 非权限身份——身份源=绑定）；body 的 owner/default_role/user_id 一律忽略；IDOR=owner 守卫。
 
@@ -225,6 +232,57 @@ def my_im_providers(payload: dict = Depends(require_authenticated)):
     """自助面 provider 注册表+FIELD_SCHEMA（与 admin 面同源——表单元数据无秘密，A-P2-2）。"""
     from src.im_bot.base import list_providers
     return list_providers()
+
+
+@router.post("/api/my/im-bots/onboarding/{provider}/{method}")
+def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require_authenticated)):
+    """自助扫码向导（批11D）：注册表校验+频控+配额 → 起 celery task（owner=会话钉死）。
+
+    频控：每用户同时 1 个活 ticket（session 载荷 owner 比对+非终态）；配额：每用户 bot ≤5。"""
+    from src.im_bot.base import get_im_provider
+    p = get_im_provider(provider)
+    if p is None:
+        raise ApiError(404, "PROVIDER_INVALID", f"未知 IM 平台: {provider}")
+    m = p.ONBOARDING_METHODS.get(method)
+    if not m or m.get("kind") != "interactive":
+        raise ApiError(400, "METHOD_NOT_INTERACTIVE", f"方式 {method} 不存在或不支持扫码向导")
+    task = _wizard_task(m.get("wizard", ""))
+    if task is None:
+        raise ApiError(400, "WIZARD_UNKNOWN", f"向导未注册: {m.get('wizard')}")
+    uid = int(payload["sub"])
+    # 配额：每用户 bot ≤5（11C 挂账量级依据收口——每 bot 子进程 ≈62MB）
+    with get_conn() as conn:
+        n = conn.execute("SELECT count(*) FROM im_bot_config WHERE owner_user_id=%s", (uid,)).fetchone()[0]
+        if n >= 5:
+            raise ApiError(400, "BOT_QUOTA", "每用户最多 5 个 IM 通道")
+    # 频控：活 ticket 扫描（session 载荷 owner 比对且非终态）
+    r = feishu_redis_client()
+    for key in r.scan_iter("feishu:session:*", count=100):
+        try:
+            d = json.loads(r.get(key) or "{}")
+            if d.get("owner_user_id") == uid and d.get("status") not in ("done", "error"):
+                raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，请先完成或等待过期")
+        except ApiError:
+            raise
+        except Exception:
+            continue
+    session_id = str(uuid.uuid4())
+    task.delay(session_id, owner_user_id=uid)
+    audit_log(payload["username"], "owner_im_onboarding_start", detail=f"{provider}/{method} ticket={session_id[:8]}…")
+    return {"ticket": session_id}
+
+
+@router.get("/api/my/im-bots/onboarding-status/{ticket}")
+def my_im_onboarding_status(ticket: str, payload: dict = Depends(require_authenticated)):
+    """轮询自助向导状态（ticket 归属绑定：session 载荷 owner≠会话 → 404，A-P2-2）。"""
+    r = feishu_redis_client()
+    data = r.get(f"feishu:session:{ticket}")
+    if not data:
+        return {"status": "pending"}
+    d = json.loads(data)
+    if d.get("owner_user_id") is not None and d.get("owner_user_id") != int(payload["sub"]):
+        raise ApiError(404, "NOT_FOUND", "会话不存在")
+    return d
 
 
 @router.get("/api/my/im-bots")

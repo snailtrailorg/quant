@@ -1,7 +1,9 @@
 <template>
-  <el-card style="max-width: 560px">
-    <template #header>{{ t('profile.title') }}</template>
-
+  <el-card style="max-width: 640px">
+    <template #header>
+      <!-- 批11D：个人中心三 tab（基本信息/IM 通道/修改密码） -->
+      <TabsShell :tabs="tabs" default-tab="basic" query-key="ptab" v-slot="sp">
+        <div v-if="sp.tab === 'basic'">
     <!-- 头像（点击即更换） -->
     <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: var(--sp-6)">
       <div style="cursor: pointer" @click="openChooser" :title="t('profile.clickToChange')">
@@ -24,8 +26,15 @@
       <div class="info-row"><span class="info-label">{{ t('account.email') }}</span><span>{{ me.email || '-' }}</span></div>
     </el-form>
 
+    <!-- 注销置底于基本信息（盲审 B-P2-4①） -->
     <el-divider />
+    <div style="display: flex; align-items: center; justify-content: space-between">
+      <span style="color: var(--text-secondary); font-size: 13px">{{ t('profile.deactivateHint') }}</span>
+      <el-button type="danger" @click="onDeactivate">{{ t('profile.deactivate') }}</el-button>
+    </div>
+        </div>
 
+        <div v-else-if="sp.tab === 'pwd'">
     <!-- 改密码（所有角色自助） -->
     <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.changePwd') }}</h3>
     <el-form label-position="top" style="max-width: 400px" @submit.prevent="onChangePwd">
@@ -45,6 +54,9 @@
       </el-form-item>
     </el-form>
 
+        </div>
+
+        <div v-else>
     <el-divider />
 
     <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
@@ -80,25 +92,49 @@
     </el-table>
     <div v-else style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
 
-    <!-- 添加 IM 通道（FIELD_SCHEMA 动态表单——19 号范式复用） -->
-    <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="480px">
+    <!-- 添加 IM 通道（批11D：按注册表 methods 自动生成——方式选择+表单/扫码双形态） -->
+    <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="520px">
       <el-form label-width="120px">
         <el-form-item :label="t('myIm.provider')">
           <el-select v-model="imForm.provider" style="width: 200px" @change="onImProviderChange">
-            <el-option v-for="p in imProviders" :key="p.provider" :value="p.provider" :label="p.provider" />
+            <el-option v-for="p in imProviders.filter(x => (x.methods||[]).length)" :key="p.provider" :value="p.provider" :label="p.provider" />
           </el-select>
         </el-form-item>
-        <el-form-item :label="t('common.name')">
-          <el-input v-model="imForm.name" style="width: 260px" />
+        <!-- 方式选择（多方式才显示——注册表驱动，盲审 A-P1-3 顺序无关） -->
+        <el-form-item v-if="curMethods().length > 1" :label="t('myIm.method')">
+          <el-radio-group v-model="imMethod" @change="onImMethodChange">
+            <el-radio-button v-for="m in curMethods()" :key="m.id" :value="m.id">{{ methodLabel(m) }}</el-radio-button>
+          </el-radio-group>
         </el-form-item>
-        <el-form-item v-for="f in imFields" :key="f.key" :label="te(f.label_key) ? t(f.label_key) : f.key">
-          <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" show-password style="width: 260px" />
-        </el-form-item>
+
+        <!-- kind=manual：FIELD_SCHEMA 表单 -->
+        <template v-if="imMethod && curMethods().find(m => m.id === imMethod)?.kind === 'manual'">
+          <el-form-item :label="t('common.name')">
+            <el-input v-model="imForm.name" style="width: 260px" />
+          </el-form-item>
+          <el-form-item v-for="f in imFields" :key="f.key" :label="te(f.label_key) ? t(f.label_key) : f.key">
+            <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" show-password style="width: 260px" />
+          </el-form-item>
+        </template>
+
+        <!-- kind=interactive：扫码向导 -->
+        <div v-else-if="imMethod" style="padding: var(--sp-2) 0">
+          <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrIntro') }}</div>
+          <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
+          <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">{{ t('myIm.qrStarting') }}</div>
+          <div v-else-if="qrStatus === 'scanning'" style="text-align: center; color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrScanning') }}</div>
+          <div v-else-if="qrStatus === 'timeout'" style="text-align: center; color: var(--warn-fill)">{{ t('myIm.qrTimeout') }}</div>
+          <div v-else-if="qrStatus === 'error'" style="text-align: center; color: var(--critical)">{{ qrNote || t('common.failed') }}</div>
+          <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: 13px">{{ qrNote }}</div>
+        </div>
       </el-form>
       <div style="color: var(--text-secondary); font-size: 12px">{{ t('myIm.addHint') }}</div>
       <template #footer>
-        <el-button @click="imAddDlg = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
+        <el-button @click="imAddDlg = false">{{ t('common.close') }}</el-button>
+        <el-button v-if="imMethod && curMethods().find(m => m.id === imMethod)?.kind === 'manual'"
+                   type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
+        <el-button v-else-if="imMethod && ['','timeout','error'].includes(qrStatus)"
+                   type="primary" @click="startQr">{{ t('myIm.qrStart') }}</el-button>
       </template>
     </el-dialog>
 
@@ -116,13 +152,7 @@
       </el-table>
     </el-dialog>
 
-    <el-divider />
-
-    <!-- 注销账号（软删+脱敏，末位 admin 受限） -->
-    <div style="display: flex; align-items: center; justify-content: space-between">
-      <span style="color: var(--text-secondary); font-size: 13px">{{ t('profile.deactivateHint') }}</span>
-      <el-button type="danger" @click="onDeactivate">{{ t('profile.deactivate') }}</el-button>
-    </div>
+        </div>
 
     <!-- 选择头像弹窗：系统图标 or 上传 -->
     <el-dialog v-model="chooserVisible" :title="t('profile.chooseAvatar')" width="560px">
@@ -150,20 +180,28 @@
         </el-tab-pane>
       </el-tabs>
     </el-dialog>
+      </TabsShell>
+    </template>
   </el-card>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { VueCropper } from 'vue-cropper'  // 样式在 main.js 全局引入（漏引 CSS 是"界面全乱"的根因；该包 CSS 自带 scope id 与组件 __scopeId 配套自洽）
 import Avatar from '../components/Avatar.vue'
+import TabsShell from '../components/TabsShell.vue'
 import api, { apiErr } from '../api'
 import { validatePassword } from '../password'
 
 const { t, te } = useI18n()
+const tabs = [
+  { key: 'basic', i18nKey: 'profile.tabBasic' },
+  { key: 'im', i18nKey: 'profile.tabIm' },
+  { key: 'pwd', i18nKey: 'profile.tabPwd' },
+]
 const router = useRouter()
 const me = ref({ username: '', nickname: '', role: '', avatar_url: '', email: '' })
 const chooserVisible = ref(false)
@@ -201,12 +239,14 @@ const openImAdd = async () => {
     if (!imProviders.value.some(p => p.provider === imForm.value.provider) && imProviders.value.length)
       imForm.value.provider = imProviders.value[0].provider
   } catch {}
-  imFields.value = imProviders.value.find(p => p.provider === imForm.value.provider)?.field_schema || []
   imForm.value = { provider: imForm.value.provider, name: '', creds: {} }
+  // 盲审 P2-4/P2-5：会话状态复位 + 默认选中首方式（单方式直进）
+  stopPoll()
+  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrTicket.value = ''
+  const ms = curMethods()
+  imMethod.value = ms.length ? ms[0].id : ''
+  imFields.value = ms.find(m => m.id === imMethod.value)?.fields || []
   imAddDlg.value = true
-}
-const onImProviderChange = () => {   // 盲审 B-P2-8：换平台重算 FIELD_SCHEMA
-  imFields.value = imProviders.value.find(p => p.provider === imForm.value.provider)?.field_schema || []
 }
 const saveIm = async () => {
   imSaving.value = true
@@ -245,6 +285,62 @@ const bindOpenId = async (openId) => {
   } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
 }
 onMounted(loadIm)
+
+// ——— 批11D：扫码向导（kind=interactive 方式）+ 轮询三件套 ———
+const imMethod = ref('')                     // 当前方式 id（qr|form）
+const qrTicket = ref('')
+const qrImg = ref('')
+const qrStatus = ref('')                     // ''|starting|scanning|done|error|timeout
+const qrNote = ref('')
+let pollTimer = null
+let qrPollFails = 0
+let pollDeadline = 0
+const methodLabel = m => te(m.label_key) ? t(m.label_key) : t('imBots.methodKind.' + m.kind)
+const curProvider = () => imProviders.value.find(p => p.provider === imForm.value.provider)
+const curMethods = () => (curProvider()?.methods || []).filter(m => m.kind === 'manual' || m.kind === 'interactive')
+const onImMethodChange = () => {
+  imFields.value = curMethods().find(m => m.id === imMethod.value)?.fields || []
+  stopPoll()   // 换方式弃当前会话
+}
+const onImProviderChange = () => {   // 盲审 B-P2-8：换平台重算方式与字段（methods 空的 provider 已在下拉过滤）
+  const ms = curMethods()
+  imMethod.value = ms.length ? ms[0].id : ''
+  onImMethodChange()
+}
+const startQr = async () => {
+  qrStatus.value = 'starting'; qrImg.value = ''; qrNote.value = ''
+  try {
+    const r = await api.post(`/my/im-bots/onboarding/${imForm.value.provider}/${imMethod.value}`)
+    qrTicket.value = r.ticket
+    pollDeadline = Date.now() + 600_000     // 600s 前端兜底（后端 pending 混同过期永不报——B-P2-4③）
+    pollTimer = setInterval(pollQr, 10_000)
+  } catch (e) { qrStatus.value = 'error'; qrNote.value = apiErr(e, ''); ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+}
+const pollQr = async () => {
+  qrPollFails = 0
+  if (Date.now() > pollDeadline) { qrStatus.value = 'timeout'; stopPoll(); return }
+  try {
+    const d = await api.get(`/my/im-bots/onboarding-status/${qrTicket.value}`)
+    qrStatus.value = d.status || 'pending'
+    if (d.qr_img) qrImg.value = d.qr_img
+    if (d.status === 'scanning' && !qrImg.value) qrStatus.value = 'scanning'
+    if (d.status === 'done') {
+      stopPoll()
+      if (d.owned === false) { qrNote.value = t('myIm.ownedFalse'); ElMessage.warning(t('myIm.ownedFalse')) }
+      else ElMessage.success(t('myIm.qrDone'))
+      await loadIm()
+    }
+    if (d.status === 'error') { stopPoll(); qrNote.value = d.code ? (te('err.' + d.code) ? t('err.' + d.code) : (d.error || '')) : (d.error || ''); ElMessage.error(qrNote.value || t('common.operationFailed')) }
+  } catch (e) {
+    // 盲审 P3：单次瞬时网络错不终止（连续 2 次才判死——后端会话可能仍活）
+    qrPollFails = (qrPollFails || 0) + 1
+    if (qrPollFails >= 2) { qrStatus.value = 'error'; stopPoll() }
+  }
+}
+const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+onUnmounted(stopPoll)   // 轮询三件套①（组件级）
+watch(imAddDlg, v => { if (!v) stopPoll() })   // ②弹窗关停
+
 
 // ——— 头像选择（点头像打开：系统图标 / 上传）———
 const openChooser = () => {

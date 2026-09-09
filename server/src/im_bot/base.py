@@ -16,11 +16,25 @@ _REGISTRY: dict[str, "IMBotProvider"] = {}
 
 
 class IMBotProvider(ABC):
-    """IM 平台接入抽象。每家一个子类+DB 配一行(im_bot_config)。"""
+    """IM 平台接入抽象。每家一个子类+DB 配一行(im_bot_config)。
+
+    批11D 两层模型（通道×方式）：通道注册声明**方式集合** ONBOARDING_METHODS，UI 据此自动生成；
+    同平台可多方式并存（飞书=qr+form）。旧单值 ONBOARDING 改 @property 派生（顺序无关 any()）。"""
 
     provider: str                          # 'feishu' | 'dingtalk' | ...
     MODE: str = "webhook"                  # webhook | websocket | long_poll | hybrid
-    ONBOARDING: str = "manual"             # manual | interactive(扫码/回跳类辅助流程)
+    # 方式注册表：标识 → {kind: manual|interactive, label_key,
+    #                   fields?: [...](manual=FIELD_SCHEMA 本体), wizard?: str(interactive 向导标识),
+    #                   post_steps?: [str](创建后指引文案 key——webhook 型通道用)}
+    ONBOARDING_METHODS: dict[str, dict] = {}
+
+    @property
+    def ONBOARDING(self) -> str:
+        """兼容派生（批11D）：任一方式 kind=interactive 即 interactive——顺序无关（盲审 A-P1-3/B-P1-2：
+        首键派生是顺序地雷，form 排前会把现网 admin 扫码静默断掉）。"""
+        if any(m.get("kind") == "interactive" for m in self.ONBOARDING_METHODS.values()):
+            return "interactive"
+        return "manual"
 
     # ── 凭证声明(单一真相源;REQUIRED_FIELDS 由 secret 字段推导)──
     FIELD_SCHEMA: list[dict] = []
@@ -89,9 +103,11 @@ def get_im_provider(provider: str) -> IMBotProvider | None:
 
 
 def list_providers() -> list[dict]:
-    """平台注册表(前端下拉+向导用)。"""
+    """平台注册表(前端下拉+向导用)。批11D：增 methods 全集（UI 按注册能力自动生成，零硬编码）。"""
     if not _REGISTRY:
         from . import feishu as _feishu  # noqa: F401
     return [{"provider": p, "mode": inst.MODE, "onboarding": inst.ONBOARDING,
+             "methods": [{**m, "id": mid} for mid, m in inst.ONBOARDING_METHODS.items()],
              "field_schema": inst.FIELD_SCHEMA}
             for p, inst in sorted(_REGISTRY.items())]
+

@@ -14,7 +14,11 @@ logger = logging.getLogger("im_bot.feishu")
 class FeishuProvider(IMBotProvider):
     provider = "feishu"
     MODE = "hybrid"
-    ONBOARDING = "interactive"      # lark.register_app 扫码
+    # 批11D 两层模型：扫码（SDK 建/连应用）+ 手填凭证 双方式并存
+    ONBOARDING_METHODS = {
+        "qr": {"kind": "interactive", "wizard": "feishu_register", "label_key": "imBots.method.qr"},
+        "form": {"kind": "manual", "label_key": "imBots.method.form"},
+    }
 
     FIELD_SCHEMA = [
         {"key": "app_id", "type": "text", "label_key": "imBots.field.appId", "secret": False},
@@ -22,6 +26,9 @@ class FeishuProvider(IMBotProvider):
         {"key": "verification_token", "type": "text", "label_key": "imBots.field.verifyToken", "secret": True},
         {"key": "encrypt_key", "type": "text", "label_key": "imBots.field.encryptKey", "secret": True},
     ]
+
+    # form 方式的 fields=FIELD_SCHEMA 本体（同源不复制——盲审 A-P2-7）
+    ONBOARDING_METHODS["form"]["fields"] = FIELD_SCHEMA
 
     # ── 通道行为(委托 feishu_bot.bot 的生产实现,bot_id 定位凭证)──
     def send_text(self, bot_id: int, receive_id: str, receive_id_type: str, text: str) -> bool:
