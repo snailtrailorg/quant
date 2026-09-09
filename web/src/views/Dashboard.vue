@@ -12,7 +12,7 @@
     <!-- 空态三步引导（05 §5.0-1：零数据首访态） -->
     <el-card v-if="emptyState" style="margin-bottom: 20px">
       <div style="text-align: center; padding: var(--sp-6) 0">
-        <div style="font-size: var(--fs-page); font-weight: 600; margin-bottom: var(--sp-4)">{{ t('dashboard.welcome') }}</div>
+        <div style="font-size: var(--fs-page); font-weight: 600; margin-bottom: var(--sp-4)">{{ t('dashboard.welcome', { app: t('app.title') }) }}</div>
         <el-steps :active="emptyStep" align-center style="max-width: 720px; margin: 0 auto">
           <el-step :title="t('dashboard.step1')" :description="t('dashboard.step1d')" />
           <el-step :title="t('dashboard.step2')" :description="t('dashboard.step2d')" />

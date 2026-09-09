@@ -1,0 +1,13 @@
+import puppeteer from 'puppeteer-core'
+const b = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome', headless: 'new', args: ['--no-sandbox', '--disable-gpu'] })
+const p = await b.newPage()
+await p.goto('http://127.0.0.1:5173/login', { waitUntil: 'networkidle2', timeout: 30000 })
+const inputs = await p.$$('input')
+await inputs[0].type('admin'); await inputs[1].type('admin123')
+await p.click('button'); await new Promise(r => setTimeout(r, 3500))
+const txt = await p.evaluate(() => document.body.innerText)
+const has = txt.includes('Welcome to Snail Quant')
+const stale = txt.includes('SnailQuant Trading')
+console.log(`welcome 渲染: ${has ? '✓ Welcome to Snail Quant' : '✗ 未找到'}; 旧长名残留: ${stale ? '✗ 有' : '✓ 无'}`)
+await b.close()
+process.exit(has && !stale ? 0 : 1)

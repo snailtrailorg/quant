@@ -508,7 +508,7 @@ export default {
     dashboard: {
       partialFail: '{n} 项数据加载失败（部分卡片可能为空）——点击重试',
       alertBar: '有 {n} 条未处理告警', handleNow: '处理',
-      welcome: '欢迎使用蜗牛量化交易',
+      welcome: '欢迎使用{app}',   // 品牌名复用 app.title 资源 ID（2026-09-09 用户裁定,与 register.welcome 同范式）
       step1: '建因子', step1d: '从因子库开始', step2: '写策略', step2d: 'DSL 或 Python', step3: '跑回测', step3d: '验证后上实盘',
       goFactors: '去因子库', goStrategy: '去策略', goBacktest: '去回测',
       sinceInception: '成立以来', riskGauge: '风控水位（回撤）', tasksRunning: '实盘任务',
@@ -1604,7 +1604,7 @@ export default {
     dashboard: {
       partialFail: '{n} data sources failed to load (some cards may be empty) — retry',
       alertBar: '{n} unhandled alerts', handleNow: 'Handle',
-      welcome: 'Welcome to SnailQuant Trading',
+      welcome: 'Welcome to {app}',   // 品牌名复用 app.title 资源 ID（2026-09-09 用户裁定,与 register.welcome 同范式）
       step1: 'Build factor', step1d: 'Start from factor library', step2: 'Write strategy', step2d: 'DSL or Python', step3: 'Run backtest', step3d: 'Verify then go live',
       goFactors: 'Factors', goStrategy: 'Strategy', goBacktest: 'Backtest',
       sinceInception: 'since inception', riskGauge: 'Risk gauge (drawdown)', tasksRunning: 'Live tasks',
