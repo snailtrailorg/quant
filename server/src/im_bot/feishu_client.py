@@ -69,12 +69,18 @@ class FeishuClient:
         creds = {}
         try:
             if bot_id is None:
-                # 兼容旧调用:最新 enabled feishu 行
+                # 批11C（B-P2-6）：None 语义钉平台级（owner NULL）——webhook/聊天兜底路径不被
+                # 自助 bot（id 更大）劫持回复凭证；无平台级 bot 回落最新 enabled（过渡兼容）
                 with get_conn() as conn:
                     cur = conn.execute(
                         "SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
-                        "ORDER BY id DESC LIMIT 1")
+                        "AND owner_user_id IS NULL ORDER BY id DESC LIMIT 1")
                     row = cur.fetchone()
+                    if not row:
+                        cur = conn.execute(
+                            "SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
+                            "ORDER BY id DESC LIMIT 1")
+                        row = cur.fetchone()
                 bot_id = row[0] if row else None
             if bot_id is not None:
                 creds = get_bot_credentials(bot_id)
@@ -218,7 +224,8 @@ def _im_bot_secret(field: str, env_key: str) -> str:
             cur = conn.execute(
                 "SELECT credentials_encrypted FROM im_bot_config "
                 "WHERE provider='feishu' AND enabled AND credentials_encrypted IS NOT NULL "
-                "ORDER BY id DESC LIMIT 1")   # A-G3:与 FeishuClient/ws_client 选行方向一致(最新)
+                "AND owner_user_id IS NULL "
+                "ORDER BY id DESC LIMIT 1")   # 批11C（A-P1-1）：钉平台级 bot——自助 bot（id 更大）不劫持卡片验签/回执通道
             row = cur.fetchone()
             if row:
                 creds = _json.loads(decrypt(row[0]))
@@ -290,44 +297,56 @@ def card_action_fresh(value: dict, max_age_s: int = 60) -> bool:
 
 # ——— 后台处理（3s 超时绕开） ———
 
+
+def _first_seen_note(open_id: str, fid: int) -> None:
+    """批11C：首见留痕（user_id NULL 行）——不再授予任何权限（A-P0-1③），仅供 owner 在
+    个人中心"待绑定"列表看到 open_id 后一键绑定；不再入告警收件人（A-P1-4 dispatch 只取绑定行）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            if not conn.execute("SELECT 1 FROM im_bot_users WHERE bot_id=%s AND im_user_id=%s",
+                                (fid, open_id)).fetchone():
+                conn.execute("INSERT INTO im_bot_users (bot_id, im_user_id, role) VALUES (%s,%s,'viewer')",
+                             (fid, open_id))
+                conn.commit()
+                logger.info("首见留痕 bot=%s open_id=%s…（待绑定，不授权）", fid, open_id[:10])
+    except Exception as e:
+        logger.warning("首见留痕失败(不影响拒答): %s", e)
+
+
 def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None):
     if receive_id is None: receive_id = open_id
     """后台线程：消息 → LLM 网关 → 回复/确认卡片。per-机器人 role（机器人=登录账号）。"""
     print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
     client = get_feishu_client(fid)   # 批 2:per-bot 单例(修多 bot 回复走错凭证隐患)
-    role = "viewer"
+    # 批11C（方案 v2 双盲审 A-P0-1）：身份源=绑定查询——default_role 不再是权限身份（仅展示默认）。
+    # 未绑定 fail-closed + 回显 open_id（bootstrap 通路：用户从拒答消息拿到自己的标识去个人中心绑定，B-P1-2）。
+    from src.im_bot.users import resolve_im_identity
     if fid:
-        try:
-            from src.data_platform.db import get_conn
-            with get_conn() as conn:
-                cur = conn.execute("SELECT default_role FROM im_bot_config WHERE id=%s AND provider='feishu'", (fid,))
-                r = cur.fetchone()
-                if r:
-                    role = r[0]
-                # 首见登记（2026-09-02 用户裁定）：per-bot 路径本就是"发消息即按 default_role 对话"
-                # （arch-19批 2 设计）但此前零留痕——首见即入 im_bot_users + warn 通知 admin（骑批 7
-                # 告警链）。幂等：已在表则跳过；并发双见由 notify 60s 去重兜。
-                cur = conn.execute("SELECT 1 FROM im_bot_users WHERE bot_id=%s AND im_user_id=%s", (fid, open_id))
-                if not cur.fetchone():
-                    from src.im_bot.users import upsert_user
-                    if upsert_user(fid, open_id, role).get("ok"):
-                        logger.info(f"首见登记 bot={fid} open_id={open_id[:10]}… role={role}")
-                        try:
-                            from src.alert_notify.notify import notify
-                            notify("warn", "system",
-                                   f"飞书新用户首见登记（bot #{fid} · {open_id[:8]}…）",   # 补审E-4:带 open_id 前缀防异用户同窗互吞
-                                   f"open_id={open_id} 已按 default_role={role} 登记为该 bot 用户——"
-                                   f"将同时成为告警推送收件人；如非预期请到 设置→集成→IM→用户管理 调整或移除。",
-                                   code="im.first-seen")
-                        except Exception as ne:
-                            logger.warning(f"首见登记通知失败(不影响对话): {ne}")
-        except Exception as e:
-            logger.warning(f"查飞书机器人 role 失败: {e}")
-    else:
-        role = check_user(open_id)
-        if not role:
-            client.send_text(receive_id, "未授权，无法使用", receive_id_type)
-            return
+        _first_seen_note(open_id, fid)
+    identity = resolve_im_identity(open_id)   # webhook 路径同链（env 兜底已从身份面摘除，A-P1-3）
+    if not identity:
+        # 代码盲审 A-P0-1 修：文案分流——平台级 bot 指引找管理员（管理面 upsert user_id 绑定），
+        # 自有 bot 指引个人中心绑定（_own_bot 仅 owner 可达——平台 bot 用户走那条路是死路）
+        _own = False
+        if fid:
+            try:
+                from src.data_platform.db import get_conn as _gc
+                with _gc() as conn:
+                    _own = bool(conn.execute(
+                        "SELECT 1 FROM im_bot_config WHERE id=%s AND owner_user_id IS NOT NULL",
+                        (fid,)).fetchone())
+            except Exception:
+                pass
+        _guide = ("请登录 Web → 个人中心 → 我的 IM 通道，绑定此标识后即可对话。" if _own
+                  else "请联系管理员在 集成中心 → IM → 用户管理 绑定你的账号。")
+        client.send_text(
+            receive_id,
+            f"未绑定平台账号，无法使用。\n您的 IM 标识（open_id）：{open_id}\n{_guide}",
+            receive_id_type)
+        return
+    role = identity["role"]
+    perms = identity["perms"]
 
     try:
         from src.llm_gateway import gateway
@@ -338,7 +357,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
         # 工具调用 loop：读类直接执行回 LLM，操作类发确认卡片后等用户确认
         max_turns = _get_max_tool_turns()
         for _ in range(max_turns):
-            resp = gateway.chat(messages, role=role, tools=READ_TOOLS, caller="feishu")
+            resp = gateway.chat(messages, role=role, tools=READ_TOOLS, caller="feishu", perms=perms)
             if not resp.tool_calls:
                 break
             messages.append({"role": "assistant", "content": resp.content or "",
@@ -408,7 +427,12 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
         args = str(_sid)
     except Exception:
         pass
-    client = get_feishu_client()   # A-G4/B-G4:切单例(最新 enabled 近似;卡片 value 无 bid,批 3 通用卡片加)
+    # 批11C：卡片回执钉平台级 bot（owner NULL）——与 _im_bot_secret 同源（A-P1-1）
+    from src.data_platform.db import get_conn as _gc
+    with _gc() as conn:
+        _pb = conn.execute("SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
+                           "AND owner_user_id IS NULL ORDER BY id DESC LIMIT 1").fetchone()
+    client = get_feishu_client(_pb[0] if _pb else None)
     try:
         # 实际执行工具（emergency_halt / strategy_stop 等）
         if tool_name == "emergency_halt":

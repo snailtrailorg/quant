@@ -11,7 +11,7 @@ import threading   # P0-2：卡片确认执行一直缺 import（确认功能 Na
 import concurrent.futures
 from fastapi import APIRouter, Request, HTTPException
 from .bot import (
-    verify_event_signature, check_user, process_message_async,
+    verify_event_signature, process_message_async,
     execute_confirmed_tool, FeishuClient, load_feishu_users,
 )
 
@@ -99,17 +99,36 @@ async def card_callback(request: Request):
         _ts = request.headers.get("X-Lark-Timestamp", "")
         _nonce = request.headers.get("X-Lark-Nonce", "")
         _sig = request.headers.get("X-Lark-Signature", "")
-        from .bot import verify_card_signature, check_user, _im_bot_secret
+        from .bot import verify_card_signature, _im_bot_secret
         if not _im_bot_secret("verification_token", "LARK_VERIFICATION_TOKEN"):
             logger.error("卡片确认拒绝执行：verification_token 未配置（表+env 皆空，fail-closed；arch-19批 1 主源=im_bot_config）")
             return {"code": 0}
         if not verify_card_signature(_ts, _nonce, body.decode("utf-8"), _sig):
             logger.warning("卡片签名校验失败拒绝执行: open_id=%s tool=%s", open_id, tool)
             return {"code": 0}
-        # ②操作者授权：操作类工具需 trader/admin（与 Web 侧权限矩阵对齐——resume 原为 admin 专属）
-        _role = check_user(open_id)
-        if _role not in ("trader", "admin") or tool == "risk_resume" and _role != "admin":
-            logger.warning("卡片确认权限不足拒绝执行: open_id=%s role=%s tool=%s", open_id, _role, tool)
+        # ②操作者授权（批11C 方案 v2）：身份=绑定平台账号（resolve_im_identity），权限键判定与
+        # require_perm 同源（emergency_halt=halt / risk_resume=resume 锁键 / 其余操作类=trade）；
+        # 卡片确认面仅平台级 bot（owner NULL）开放——自助 bot 的操作卡片降级"请到 Web 执行"（A-P1-1）
+        from src.im_bot.users import resolve_im_identity
+        from src.data_platform.db import get_conn as _gc
+        try:
+            with _gc() as conn:
+                _platform = conn.execute(
+                    "SELECT 1 FROM im_bot_config WHERE provider='feishu' AND enabled "
+                    "AND owner_user_id IS NULL").fetchone()
+        except Exception:
+            _platform = None
+        if not _platform:
+            logger.warning("卡片确认拒绝：无平台级 bot（自助 bot 请走 Web）: tool=%s", tool)
+            return {"code": 0}
+        identity = resolve_im_identity(open_id)
+        if not identity:
+            logger.warning("卡片确认未绑定拒绝: open_id=%s tool=%s", open_id, tool)
+            return {"code": 0}
+        _need = "resume" if tool == "risk_resume" else ("halt" if tool == "emergency_halt" else "trade")
+        if _need not in identity["perms"]:
+            logger.warning("卡片确认权限不足拒绝执行: user=%s tool=%s need=%s",
+                           identity["username"], tool, _need)
             return {"code": 0}
         threading.Thread(
             target=execute_confirmed_tool,

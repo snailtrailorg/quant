@@ -32,7 +32,10 @@ deploy_waves:
   - name: celery
     units: [quant-celery-worker@quant.service, quant-celery-beat@quant.service, quant-celery-risk@quant.service]
   - name: feishu
-    units: "{{ deploy_task_units_feishu }}"   # DB 真相源（feishu_config enabled）
+    # 批11C（B-P0-3）：IM pool 化——波次静态单实例（quant-dbro 的 @{id} SQL 真相源退役；
+    # 改 wrapper 是 root 特权通道 deploy 无权，故静态化在 inventory）。上产切换序列见
+    # docs/任务/批11C-IM归属用户pool化.md §1#8（先起 pool 拉齐→停+disable 旧 @10）
+    units: [quant-im-pool@quant.service]
   - name: hub
     units: [quant-md-hub@quant.service]
   - name: task

@@ -212,7 +212,7 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
             if not row:
                 return False, "disabled"
             provider_name = row[0]
-            cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s", (bid,))
+            cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s AND user_id IS NOT NULL   # 批11C（A-P1-4）：只发绑定用户——首见留痕行（user_id NULL）不再收告警", (bid,))
             users = list({r[0] for r in cur.fetchall()})
         if not users:
             # arch-19 双轨收尾（2026-09-02）：表空则尝试 env 授权层一次性回填（扫码时代 open_id 在 env，

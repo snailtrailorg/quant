@@ -75,7 +75,8 @@
               </el-table-column>
               <el-table-column prop="created_at" :label="t('common.createdAt')" width="160" />
               <el-table-column prop="expires_at" :label="t('account.inviteExpires')" width="160" />
-              <el-table-column :label="t('common.action')" width="110">
+              <!-- 操作列动态显示：仅存在待注册邀请时才有撤销可操作，否则整列不渲染（空壳列无意义） -->
+              <el-table-column v-if="invites.some(i => i.status === 'pending')" :label="t('common.action')" width="110">
                 <template #default="{ row }">
                   <el-button v-if="row.status === 'pending'" size="small" type="warning" @click="onRevoke(row)">{{ t('account.inviteRevoke') }}</el-button>
                 </template>

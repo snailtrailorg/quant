@@ -123,6 +123,14 @@ export default {
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
       run: '运行配置', users: 'API 密钥', perm: '权限管理', profile: '个人资料', alerts: '告警',
     },
+    myIm: {   // 批11C：个人中心·我的 IM 通道
+      title: '我的 IM 通道', add: '添加通道', provider: '平台', pending: '待绑定',
+      empty: '暂无 IM 通道——添加后，用该机器人对话将以你的账号身份与权限进行',
+      addHint: '创建后默认停用；启用前请先在 IM 平台完成应用配置。凭证仅用于该通道收发消息。',
+      bindTitle: '待绑定身份（{name}）', bind: '绑定', bound: '已绑定——此后该 IM 身份的消息将以你的账号权限执行',
+      bindHint: '给机器人发过消息的 IM 身份会出现在此（未绑定不获任何权限）。点击「绑定」将身份绑定为你的账号。',
+      delConfirm: '确定删除通道 {name}？',
+    },
     um: {   // 批11：用户管理页（系统管理第一项）；批11B 增组管理
       tabUsers: '用户列表', tabGroups: '用户群组',
       editUser: '编辑用户 {name}',
@@ -978,6 +986,7 @@ export default {
     },
     err: {
       PROVIDER_INVALID: '未知 IM 平台', BOT_NOT_FOUND: '机器人不存在', BOT_DUPLICATE: '同平台已有相同 App ID 的机器人',
+      OPEN_ID_INVALID: 'open_id 无效',
       SYNC_PROVIDER_INVALID: '数据源未注册', SYNC_PROVIDER_NO_CAPABILITY: '该数据源不提供此同步项',
       ROLE_INVALID: '非法角色', NOT_INTERACTIVE: '该平台走手动添加', NOT_IMPLEMENTED: '该平台辅助接入待实现',
       SAVE_FAILED: '保存失败', RATE_LIMITED: '请求过于频繁', PASSWORD_TOO_LONG: '密码至多 72 字节',
@@ -1243,6 +1252,14 @@ export default {
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
       run: 'Run Config', users: 'API Keys', perm: 'Permissions', profile: 'Profile', alerts: 'Alerts',
+    },
+    myIm: {   // batch 11C: profile · my IM channels
+      title: 'My IM Channels', add: 'Add Channel', provider: 'Platform', pending: 'Pending',
+      empty: 'No IM channels yet — after adding one, chatting with that bot runs as your account & permissions',
+      addHint: 'Created disabled by default; configure the app on the IM platform before enabling.',
+      bindTitle: 'Pending identities ({name})', bind: 'Bind', bound: 'Bound — messages from this IM identity now run as your account',
+      bindHint: 'IM identities that have messaged the bot appear here (unbound = zero permissions). Click "Bind" to bind an identity to your account.',
+      delConfirm: 'Delete channel {name}?',
     },
     um: {   // batch 11: user management page; batch 11B adds group management
       tabUsers: 'Users', tabGroups: 'User Groups',
@@ -2094,6 +2111,7 @@ export default {
     },
     err: {
       PROVIDER_INVALID: 'Unknown IM platform', BOT_NOT_FOUND: 'Bot not found', BOT_DUPLICATE: 'A bot with the same App ID already exists',
+      OPEN_ID_INVALID: 'Invalid open_id',
       SYNC_PROVIDER_INVALID: 'Provider not registered', SYNC_PROVIDER_NO_CAPABILITY: 'Provider does not support this sync item',
       ROLE_INVALID: 'Invalid role', NOT_INTERACTIVE: 'This platform uses manual setup', NOT_IMPLEMENTED: 'Onboarding for this platform not yet implemented',
       SAVE_FAILED: 'Save failed', RATE_LIMITED: 'Too many requests', PASSWORD_TOO_LONG: 'Password max 72 bytes',

@@ -366,7 +366,7 @@ def test_feishu_webhook_message_flow():
 
     with patch.object(llm_gateway, "chat", return_value=LLMResponse(content="您好，我是量化交易助手。当前风控状态正常。")) as mock_chat, \
          patch("src.im_bot.feishu_client.FeishuClient.send_text") as mock_send, \
-         patch("src.im_bot.feishu_client.check_user", return_value="analyst"):
+         patch("src.im_bot.users.resolve_im_identity", return_value={"user_id": 1, "username": "t", "role": "analyst", "perms": {"read"}}):
         process_message_async("ou_test_user", "查一下风控状态", "open_id")
 
     # 验证 LLM 被调用
@@ -384,11 +384,11 @@ def test_feishu_webhook_message_unauthorized():
     from src.im_bot.feishu_client import process_message_async
 
     with patch("src.im_bot.feishu_client.FeishuClient.send_text") as mock_send, \
-         patch("src.im_bot.feishu_client.check_user", return_value=None):
+         patch("src.im_bot.users.resolve_im_identity", return_value=None):
         process_message_async("ou_unauthorized", "查持仓", "open_id")
 
     mock_send.assert_called_once()
-    assert "未授权" in mock_send.call_args[0][1]
+    assert "未绑定平台账号" in mock_send.call_args[0][1] and "ou_unauthorized" in mock_send.call_args[0][1]
 
 
 def test_feishu_process_message_with_tool():
@@ -399,7 +399,7 @@ def test_feishu_process_message_with_tool():
 
     with patch.object(llm_gateway, "chat") as mock_chat, \
          patch("src.im_bot.feishu_client.FeishuClient.send_text") as mock_send, \
-         patch("src.im_bot.feishu_client.check_user", return_value="trader"):
+         patch("src.im_bot.users.resolve_im_identity", return_value={"user_id": 2, "username": "t2", "role": "trader", "perms": {"read", "trade", "halt"}}):
         # 第一轮：LLM 返回工具调用（query_risk_state）
         # 第二轮：LLM 返回最终回复
         mock_chat.side_effect = [

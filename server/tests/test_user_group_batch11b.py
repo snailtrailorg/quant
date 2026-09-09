@@ -228,20 +228,21 @@ class TestRequireAuthenticated:
         """删组重建同名不继承权限——invalidate 后缓存清空，新组零权限（代码盲审 A-P2-6 语义化断言）。"""
         import contextlib
         import src.web_api.auth as A
+        import src.data_platform.perms as perms_mod
         conn = _conn(scripted=[(("ops", False), [], 0), ((0,), [], 0),
                                (None, [], 0), (None, [], 0), (None, [], 1)])
         with contextlib.ExitStack() as s:
             for p in _admin_ctx(conn): s.enter_context(p)
             real_inv = A.invalidate_perm_cache
             s.enter_context(patch("src.web_api.auth.invalidate_perm_cache", side_effect=real_inv))
-            A._PERM_CACHE.update(at=0.0, roles={"ops": {"read", "trade"}}, users={})   # 预置缓存=已删组的旧权限
+            perms_mod._PERM_CACHE.update(at=0.0, roles={"ops": {"read", "trade"}}, users={})   # 预置缓存=已删组的旧权限
             r = _client().delete("/api/user-groups/5", headers={"Authorization": "Bearer t"})
         assert r.status_code == 200
-        assert A._PERM_CACHE["roles"] is None   # 缓存真被清（非 mock 代理断言）
+        assert perms_mod._PERM_CACHE["roles"] is None   # 缓存真被清（非 mock 代理断言）
         # 重建同名组后加载：permission 表空（mock 空表回退）→ PERMISSIONS 字典无 ops → 零权限不继承
-        A._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
         with patch("src.data_platform.db.get_conn", return_value=_conn()):
-            roles = A.load_role_permissions()
+            roles = perms_mod.load_role_permissions()
         assert "ops" not in roles
 
     def test_disabled_account_still_401(self):

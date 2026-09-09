@@ -95,6 +95,7 @@ class IMBotUpdateReq(BaseModel):
 class IMBotUserReq(BaseModel):
     im_user_id: str
     role: str
+    user_id: int | None = None   # 批11C：绑定平台账号（管理面通道——平台级 bot 的绑定恢复路径，A-P0-1 修）
 
 class LlmBudgetReq(BaseModel):
     provider: str | None = None

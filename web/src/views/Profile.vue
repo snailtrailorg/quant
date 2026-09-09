@@ -47,6 +47,77 @@
 
     <el-divider />
 
+    <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
+      <h3 style="font-size: 16px; margin: 0">{{ t('myIm.title') }}</h3>
+      <el-button type="primary" @click="openImAdd">{{ t('myIm.add') }}</el-button>
+    </div>
+    <el-table v-if="imBots.length" :data="imBots" size="small">
+      <el-table-column prop="provider" :label="t('myIm.provider')" width="90" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="120" show-overflow-tooltip />
+      <el-table-column :label="t('common.status')" width="80">
+        <template #default="{ row }">
+          <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('myIm.pending')" width="90">
+        <template #default="{ row }">
+          <el-badge v-if="row.pending_binds" :value="row.pending_binds" type="warning"
+                    style="cursor: pointer" @click="openBinds(row)" />
+          <span v-else style="color: var(--text-secondary)">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="150">
+        <template #default="{ row }">
+          <div style="display: inline-flex; gap: 6px">
+            <el-button size="small" :type="row.enabled ? 'warning' : 'success'" @click="toggleIm(row)">
+              {{ row.enabled ? t('common.stop') : t('common.start') }}
+            </el-button>
+            <el-button size="small" type="danger" @click="delIm(row)">{{ t('common.delete') }}</el-button>
+          </div>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div v-else style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
+
+    <!-- 添加 IM 通道（FIELD_SCHEMA 动态表单——19 号范式复用） -->
+    <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="480px">
+      <el-form label-width="120px">
+        <el-form-item :label="t('myIm.provider')">
+          <el-select v-model="imForm.provider" style="width: 200px" @change="onImProviderChange">
+            <el-option v-for="p in imProviders" :key="p.provider" :value="p.provider" :label="p.provider" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('common.name')">
+          <el-input v-model="imForm.name" style="width: 260px" />
+        </el-form-item>
+        <el-form-item v-for="f in imFields" :key="f.key" :label="te(f.label_key) ? t(f.label_key) : f.key">
+          <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" show-password style="width: 260px" />
+        </el-form-item>
+      </el-form>
+      <div style="color: var(--text-secondary); font-size: 12px">{{ t('myIm.addHint') }}</div>
+      <template #footer>
+        <el-button @click="imAddDlg = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 待绑定列表（首见留痕 open_id → 一键绑定=本人身份） -->
+    <el-dialog v-model="bindDlg" :title="t('myIm.bindTitle', { name: bindBot?.name || '' })" width="520px">
+      <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.bindHint') }}</div>
+      <el-table :data="pendingBinds" size="small">
+        <el-table-column prop="open_id" label="open_id" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="created_at" :label="t('common.createdAt')" width="160" />
+        <el-table-column :label="t('common.action')" width="90">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" @click="bindOpenId(row.open_id)">{{ t('myIm.bind') }}</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
+
+    <el-divider />
+
     <!-- 注销账号（软删+脱敏，末位 admin 受限） -->
     <div style="display: flex; align-items: center; justify-content: space-between">
       <span style="color: var(--text-secondary); font-size: 13px">{{ t('profile.deactivateHint') }}</span>
@@ -92,7 +163,7 @@ import Avatar from '../components/Avatar.vue'
 import api, { apiErr } from '../api'
 import { validatePassword } from '../password'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const router = useRouter()
 const me = ref({ username: '', nickname: '', role: '', avatar_url: '', email: '' })
 const chooserVisible = ref(false)
@@ -110,6 +181,70 @@ const load = async () => {
   try { me.value = { ...me.value, ...(await api.get('/user/profile')) } } catch {}
 }
 onMounted(load)
+
+// ——— 批11C：我的 IM 通道（自助面——owner=本人，绑定继承本人权限） ———
+const imBots = ref([])
+const imProviders = ref([])
+const imAddDlg = ref(false)
+const imSaving = ref(false)
+const imForm = ref({ provider: 'feishu', name: '', creds: {} })
+const imFields = ref([])
+const bindDlg = ref(false)
+const bindBot = ref(null)
+const pendingBinds = ref([])
+const loadIm = async () => {
+  try { imBots.value = await api.get('/my/im-bots') } catch {}
+}
+const openImAdd = async () => {
+  try {
+    imProviders.value = await api.get('/my/im-bots/providers')
+    if (!imProviders.value.some(p => p.provider === imForm.value.provider) && imProviders.value.length)
+      imForm.value.provider = imProviders.value[0].provider
+  } catch {}
+  imFields.value = imProviders.value.find(p => p.provider === imForm.value.provider)?.field_schema || []
+  imForm.value = { provider: imForm.value.provider, name: '', creds: {} }
+  imAddDlg.value = true
+}
+const onImProviderChange = () => {   // 盲审 B-P2-8：换平台重算 FIELD_SCHEMA
+  imFields.value = imProviders.value.find(p => p.provider === imForm.value.provider)?.field_schema || []
+}
+const saveIm = async () => {
+  imSaving.value = true
+  try {
+    await api.post('/my/im-bots', { provider: imForm.value.provider, name: imForm.value.name,
+                                    description: '', credentials: imForm.value.creds })
+    ElMessage.success(t('common.createSuccess'))
+    imAddDlg.value = false
+    await loadIm()
+  } catch (e) { ElMessage.error(apiErr(e, t('common.createFailed'))) }
+  finally { imSaving.value = false }
+}
+const toggleIm = async (row) => {
+  try { await api.post(`/my/im-bots/${row.id}/${row.enabled ? 'stop' : 'start'}`); await loadIm() }
+  catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+}
+const delIm = async (row) => {
+  try {
+    await ElMessageBox.confirm(t('myIm.delConfirm', { name: row.name }), { type: 'warning' })
+    await api.delete(`/my/im-bots/${row.id}`)
+    ElMessage.success(t('common.deleteSuccess'))
+    await loadIm()
+  } catch (e) { if (e === 'cancel') return; ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
+}
+const openBinds = async (row) => {
+  bindBot.value = row
+  try { pendingBinds.value = await api.get(`/my/im-bots/${row.id}/pending`) } catch { pendingBinds.value = [] }
+  bindDlg.value = true
+}
+const bindOpenId = async (openId) => {
+  try {
+    await api.post(`/my/im-bots/${bindBot.value.id}/bind`, { open_id: openId })
+    ElMessage.success(t('myIm.bound'))
+    bindDlg.value = false
+    await loadIm()
+  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+}
+onMounted(loadIm)
 
 // ——— 头像选择（点头像打开：系统图标 / 上传）———
 const openChooser = () => {

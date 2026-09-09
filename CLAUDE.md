@@ -102,7 +102,7 @@
 - 多频率数据（16 号 v2.1 定稿，影子门禁后实施）：`docs/architecture/16-多频率数据设计.md`（慢路径日线直读+日界沿/快路径分钟；复权逐行因子链；NULL 因子=1.0 降级；盘口 Phase 2）
 - 三档数据与详情页（17 号，U 审 21 项）：`docs/architecture/17-三档数据与详情页.md`（2026-08-20 三档 6 项+项 5 选股全上线；剩项 18 监控/项 11 质量/项 4 时点实测；含 U 审裁定与坑）
 - 数据库操作规范（18 号，2026-08-21 定稿）：`docs/architecture/18-数据库操作规范.md`（全仓写路径盘点/写路径五规范：executemany+事务禁跨网络+DDL CONCURRENTLY/超时分层 web 10s·同步 60s·idle_tx 5min/长事务告警 R7/pg_stat_activity 诊断钥匙——锁链事件根治）
-- IM 统一接入（19 号，2026-08-21 批 1+2 上线）：`docs/architecture/19-IM统一接入设计.md`（IMBotProvider 抽象/im_bot_config+im_bot_users 统一表/凭证异构 JSON/动态 FIELD_SCHEMA 表单/接入向导状态机；接新 IM=实现子类+配置零平台改动）
+- IM 统一接入（19 号，2026-09-09 批11C 归属化+pool 化终态）：`docs/architecture/19-IM统一接入设计.md`（IMBotProvider 抽象/凭证异构 JSON/动态 FIELD_SCHEMA/接入向导）。**批11C 裁定**：`im_bot_config.owner_user_id`（NULL=平台级/非空=自助归属，admin 面创建=平台级）；身份源=`im_bot_users.user_id` 绑定（im_user_id→平台账号，未绑定 fail-closed 拒答并回显 open_id；role 列回落/env 兜底已从身份面摘除）；pool=子进程管理器 `quant-im-pool@quant`（lark SDK 全局单 loop 限制——每 bot spawn ws_client 子进程，30s 对账+坏 bot 退避）；自助面 `/api/my/im-bots`（require_authenticated，owner/default_role 服务端钉死）；卡片确认面仅平台级 bot（per-bot URL 路由挂下批）；聊天工具档位=gateway 按权限键（trade/halt/resume）；权限解析已下沉 `data_platform/perms.py`（web_api/auth re-export）
 - 共享行情 Hub（ST7）：`docs/architecture/13-需求书.md` + `14-设计.md` v2（hub=纯数据面单实例 MD，worker=TD-only；Valkey Streams 分发+租约 fencing；影子期 bar_hub/bar_shadow diff 门禁）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（19 份，2026-08-21 增 web_api）+ im_bot

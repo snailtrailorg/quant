@@ -207,17 +207,28 @@ class LLMGateway:
 
     # ── 工具过滤（按角色；传入 tools 取交集，不能越权） ──
 
-    def _filter_tools(self, role: Role, tools: list[Tool] | None) -> list[dict]:
+    def _filter_tools(self, role: Role, tools: list[Tool] | None,
+                      perms: set | None = None) -> list[dict]:
         """按角色过滤可用工具 -> OpenAI 格式。
 
         角色白名单：viewer/analyst=读类；trader=读+halt+启停策略；admin=+resume。
         传入 tools 时与角色白名单取交集（调用方只能缩小范围，不能越权）。
+        批11C（B-P1-1）：perms 非空时按**权限键档位**（trade/halt=操作档，resume=管理档，
+        与 require_perm 同源）——动态组用户按组权限拿工具；None=旧 role 档位（Web 兼容）。
         """
+        if perms is not None and "read" not in perms:
+            return []   # 代码盲审 A-P1-3：无 read 键=零权限用户（Web 面同被拒）——IM 面不给读工具
         allowed = list(READ_TOOLS)
-        if role in ("trader", "admin"):
-            allowed += TRADER_TOOLS
-        if role == "admin":
-            allowed += ADMIN_TOOLS
+        if perms is not None:
+            if "trade" in perms or "halt" in perms:
+                allowed += TRADER_TOOLS
+            if "resume" in perms:
+                allowed += ADMIN_TOOLS
+        else:
+            if role in ("trader", "admin"):
+                allowed += TRADER_TOOLS
+            if role == "admin":
+                allowed += ADMIN_TOOLS
         allowed = [t for t in allowed if t.name not in FORBIDDEN_TOOLS]
         # None=角色默认白名单；[]=显式无工具（三档 analyze 踩到：空列表意图被无视
         # → LLM 看到工具集自发请求"查询更多信息"，非循环 chat 直接吐过渡语）
@@ -240,10 +251,12 @@ class LLMGateway:
              role: Role = "viewer",
              timeout: float = 30.0,
              retries: int = 1,
-             caller: str | None = None) -> LLMResponse:
-        """同步聊天。caller=调用方标识（写 llm_usage，如 feishu/web_chat/daily_report）。"""
+             caller: str | None = None,
+             perms: set | None = None) -> LLMResponse:
+        """同步聊天。caller=调用方标识（写 llm_usage，如 feishu/web_chat/daily_report）。
+        批11C：perms=权限键集（非空走权限档位工具过滤，None 走旧 role 档位）。"""
         self._check_input_chars(messages)
-        openai_tools = self._filter_tools(role, tools)
+        openai_tools = self._filter_tools(role, tools, perms)
         primary, fallback = self._get_primary_fallback()
         messages = self._truncate_messages(messages, primary.get("max_input_tokens"))
         return self._do_chat(messages, primary, fallback, openai_tools, timeout, retries, caller)
@@ -251,11 +264,12 @@ class LLMGateway:
     async def chat_stream(self, messages: list[dict], *,
                           tools: list[Tool] | None = None,
                           role: Role = "viewer",
+                          perms: set | None = None,
                           caller: str | None = None,
                           ) -> AsyncGenerator[str, None]:
         """流式聊天。"""
         self._check_input_chars(messages)
-        openai_tools = self._filter_tools(role, tools)
+        openai_tools = self._filter_tools(role, tools, perms)
         primary, fallback = self._get_primary_fallback()
         messages = self._truncate_messages(messages, primary.get("max_input_tokens"))
         async for chunk in self._do_chat_stream(messages, primary, fallback, openai_tools, caller):

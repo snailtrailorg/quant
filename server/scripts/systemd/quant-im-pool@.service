@@ -1,0 +1,21 @@
+[Unit]
+Description=Quant IM Pool %i (子进程管理器——每 bot 一个 ws_client 子进程)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
+EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=QT_QPA_PLATFORM=offscreen
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.im_bot.pool
+# Restart=always 仅对 pool 主进程（对账循环）——子进程崩由 pool 退避管理不传染
+Restart=always
+RestartSec=10
+TimeoutStopSec=60
+KillSignal=SIGTERM
+# 停 pool 时连带停全部 bot 子进程（子进程是 pool 的 cgroup 成员，KillMode=control-group 默认即达）
+
+[Install]
+WantedBy=multi-user.target

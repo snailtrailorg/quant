@@ -334,30 +334,37 @@ def test_backfill_from_env_idempotent():
 
 # 首见登记（2026-09-02 用户裁定：per-bot 对话本就开放 default_role，补留痕+通知）
 def test_first_seen_enroll():
+    """批11C 语义翻新：首见=留痕（INSERT user_id NULL）不授权不通知——原"upsert 授权+notify"
+    提权链已废（方案 v2 双盲审 A-P0-1③）。"""
     from src.im_bot import feishu_client as FC
     conn = MagicMock(); conn.__enter__.return_value = conn
-    # 第一条 SELECT=default_role 行；第二条 SELECT 1 im_bot_users=空(未登记)
-    conn.execute.return_value.fetchone.side_effect = [["viewer"], None]
+    conn.execute.return_value.fetchone.side_effect = [None]   # 留痕 SELECT 1=未见
     with patch("src.data_platform.db.get_conn", return_value=conn), \
          patch.object(FC, "get_feishu_client"), \
          patch("src.im_bot.users.upsert_user", return_value={"ok": True}) as p_up, \
-         patch.object(N, "notify") as p_notify:
+         patch.object(N, "notify") as p_notify, \
+         patch("src.im_bot.users.resolve_im_identity", return_value=None):
         FC.process_message_async("ou_new", "你好", fid=10)
-    p_up.assert_called_once_with(10, "ou_new", "viewer")
-    p_notify.assert_called_once()
-    assert p_notify.call_args.kwargs["code"] == "im.first-seen"
+    p_up.assert_not_called()      # 不再经 upsert_user 授予 role
+    p_notify.assert_not_called()  # 不再通知 admin
+    sqls = [c_[0][0] for c_ in conn.execute.call_args_list]
+    assert any("INSERT INTO im_bot_users" in s and "user_id" not in s.split("VALUES")[0] for s in sqls) or \
+           any("INSERT INTO im_bot_users" in s for s in sqls)   # 留痕 INSERT
 
 
 def test_first_seen_already_enrolled_no_renotify():
     from src.im_bot import feishu_client as FC
     conn = MagicMock(); conn.__enter__.return_value = conn
-    conn.execute.return_value.fetchone.side_effect = [["viewer"], [1]]   # 已在表
+    conn.execute.return_value.fetchone.side_effect = [[1]]   # 已在表（留痕 SELECT 命中）
     with patch("src.data_platform.db.get_conn", return_value=conn), \
          patch.object(FC, "get_feishu_client"), \
          patch("src.im_bot.users.upsert_user", return_value={"ok": True}) as p_up, \
-         patch.object(N, "notify") as p_notify:
+         patch.object(N, "notify") as p_notify, \
+         patch("src.im_bot.users.resolve_im_identity", return_value=None):
         FC.process_message_async("ou_known", "又一条", fid=10)
     p_up.assert_not_called(); p_notify.assert_not_called()
+    sqls = [c_[0][0] for c_ in conn.execute.call_args_list]
+    assert not any("INSERT INTO im_bot_users" in s for s in sqls)   # 幂等不重复留痕
 
 
 def test_writeback_real_pg():

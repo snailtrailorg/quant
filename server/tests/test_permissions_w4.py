@@ -6,6 +6,7 @@
 from unittest.mock import patch, MagicMock
 
 import src.web_api.auth as auth_mod
+import src.data_platform.perms as perms_mod
 
 
 def _conn_rows(rows):
@@ -23,13 +24,13 @@ class TestBaseline:
 
     def test_role_fallback_dict_on_db_fail(self):
         with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db")):
-            auth_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+            perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
             roles = auth_mod.load_role_permissions()
         assert roles == auth_mod.PERMISSIONS          # fail→字典
 
     def test_role_table_overrides_dict(self):
         # 表有 role 行 → 全量以表为准（现 P1-4 语义）
-        auth_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
         rows = [("trader", "read", "allow"), ("trader", "trade", "allow")]
         with patch("src.data_platform.db.get_conn", return_value=_conn_rows(rows)):
             roles = auth_mod.load_role_permissions()
@@ -40,7 +41,7 @@ class TestEffective:
     """user deny > user allow > role allow（10 §3 合并序）。"""
 
     def test_no_user_rows_equals_role(self):
-        auth_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
         role_rows = [("trader", "read", "allow"), ("trader", "trade", "allow")]
         user_rows = []
         def gc():
@@ -54,7 +55,7 @@ class TestEffective:
     _user = False
 
     def test_user_deny_beats_role_allow(self):
-        auth_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
         with patch("src.data_platform.db.get_conn",
                    side_effect=lambda: _conn_rows([("trader", "read", "allow"),
                                                    ("trader", "trade", "allow")] if not TestEffective._user
@@ -68,7 +69,7 @@ class TestEffective:
         assert src["__denied__"] == ["trade"]
 
     def test_user_allow_fills_role_gap(self):
-        auth_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
         with patch("src.data_platform.db.get_conn",
                    side_effect=lambda: _conn_rows([("viewer", "read", "allow")] if not TestEffective._user
                                                   else [("data_sync", "allow")])):   # 2 列
@@ -80,7 +81,7 @@ class TestEffective:
         assert src["data_sync"] == "user-override" and src["read"] == "role-base"
 
     def test_user_read_fail_failopen_role(self):
-        auth_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
         state = {"n": 0}
         def gc():
             state["n"] += 1
@@ -149,7 +150,7 @@ class TestAuthMatrixW5:
         conn.execute.return_value.fetchall.return_value = []   # permission 表空→字典回退
         conn.execute.return_value.fetchone.return_value = None
         import src.web_api.auth as A
-        A._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
         out = {}
         with patch("src.web_api.auth.verify_jwt",
                    return_value={"sub": "1", "username": "bob", "role": role, "db_role": role}), \
