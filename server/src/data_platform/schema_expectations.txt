@@ -52,6 +52,7 @@ llm_model_config :: id,name,provider,model,api_key_encrypted,base_url,context_wi
 llm_usage :: id,ts,provider,model,input_tokens,output_tokens,latency_ms,success,error_type,caller
 margin_detail :: trade_date,ts_code,rzye,rqye,rzmre,rqyl,rzche,rqchl,rqmcl,rzrqye
 market_session :: id,name,calendar,session_rules,tz,created_at,updated_at
+minute_symbols :: symbol,source,updated_at
 moneyflow :: ts_code,trade_date,buy_sm_vol,buy_sm_amount,sell_sm_vol,sell_sm_amount,buy_md_vol,buy_md_amount,sell_md_vol,sell_md_amount,buy_lg_vol,buy_lg_amount,sell_lg_vol,sell_lg_amount,buy_elg_vol,buy_elg_amount,sell_elg_vol,sell_elg_amount,net_mf_vol,net_mf_amount
 namechange :: ts_code,name,start_date,end_date,ann_date,change_reason
 notifications :: id,level,category,title,body,source_ref,status,created_at,acked_by,acked_at,code,dispatch
@@ -73,7 +74,7 @@ stk_holdernumber :: ts_code,ann_date,end_date,holder_num
 stk_limit :: trade_date,ts_code,pre_close,up_limit,down_limit
 strategy_account :: id,strategy_id,account_id,broker_provider,initial_capital,leverage,created_at
 strategy_config :: id,name,type,symbol,adapter,enabled,factors,aggregator,risk,params,backtest_verified,updated_at
-sync_config :: id,name,tushare_api,pg_table,data_type,sync_mode,schedule,enabled,last_sync_date,last_sync_ts,last_sync_count,last_status,description,created_at,trade_day_filter
+sync_config :: id,name,tushare_api,pg_table,data_type,sync_mode,schedule,enabled,last_sync_date,last_sync_ts,last_sync_count,last_status,description,created_at,trade_day_filter,provider
 sync_log :: id,sync_id,ts,mode,start_date,end_date,rows_pulled,rows_saved,duration_ms,status,error,failed_dates,expected_days,actual_days
 system_config :: key,value,value_type,description,updated_at,updated_by
 task_logs :: id,task_id,level,message,step_name,sql_or_api,resource_usage,created_at
@@ -82,5 +83,6 @@ top10_holders :: ts_code,ann_date,end_date,holder_name,hold_amount,hold_ratio,ho
 top_list :: trade_date,ts_code,name,close,pct_change,turnover_rate,amount,l_sell,l_buy,l_amount,net_amount,net_rate,amount_rate,float_values,reason
 trade_cal :: exchange,cal_date,is_open,pretrade_date
 trade_log :: id,ts,order_id,symbol,action,volume,price,commission,strategy_id,trade_ref
+user_group :: id,name,description,builtin,created_at
 user_tokens :: id,user_id,email,token,type,created_at,expires_at,used,revoked
-users :: id,username,password_hash,role,enabled,created_at,email,email_verified,last_login_at,last_login_ip,nickname,avatar_url,avatar_updated_at,deleted_at
+users :: id,username,password_hash,role,enabled,created_at,email,last_login_at,last_login_ip,nickname,avatar_url,avatar_updated_at,deleted_at

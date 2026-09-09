@@ -44,10 +44,7 @@
             <el-form label-width="90px">
               <el-form-item :label="t('user.role')">
                 <el-select v-model="editForm.role" style="width: 100%">
-                  <el-option label="Admin" value="admin" />
-                  <el-option label="Trader" value="trader" />
-                  <el-option label="Analyst" value="analyst" />
-                  <el-option label="Viewer" value="viewer" />
+                  <el-option v-for="g in groups" :key="g.name" :label="g.name" :value="g.name" />
                 </el-select>
               </el-form-item>
               <el-form-item :label="t('common.status')">
@@ -100,9 +97,63 @@
           </el-dialog>
         </div>
 
-        <!-- ═══ 页签二：用户群组（批 B 填实：组表+弹窗+三维权限矩阵收编） ═══ -->
+        <!-- ═══ 页签二：用户群组（批11B：动态用户组——四内置锁名+自定义组增删改） ═══ -->
         <div v-else>
-          <el-empty :description="t('um.groupsComing')" />
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
+            <h3 style="font-size: 16px; margin: 0">{{ t('um.tabGroups') }}</h3>
+            <el-button type="primary" @click="openGroupEdit(null)">{{ t('um.addGroup') }}</el-button>
+          </div>
+          <el-table :data="groups">
+            <el-table-column prop="name" :label="t('common.name')" min-width="140" />
+            <el-table-column prop="description" :label="t('common.description')" min-width="200" show-overflow-tooltip />
+            <el-table-column :label="t('um.groupType')" width="110">
+              <template #default="{ row }">
+                <el-tag v-if="row.builtin" type="warning">builtin 🔒</el-tag>
+                <el-tag v-else type="info">custom</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="user_count" :label="t('um.userCount')" width="90" />
+            <el-table-column :label="t('common.action')" width="150">
+              <template #default="{ row }">
+                <div style="display: inline-flex; gap: 6px">
+                  <el-button size="small" type="primary" @click="openGroupEdit(row)">{{ t('common.edit') }}</el-button>
+                  <el-button size="small" type="danger" :disabled="row.builtin" @click="onDeleteGroup(row)">{{ t('common.delete') }}</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <!-- 组编辑弹窗（添加/编辑共用，~820px 容纳三维矩阵；新组先创建后配权限） -->
+          <el-dialog v-model="groupDlg" :title="groupForm.id ? t('um.editGroup', { name: groupForm.origName }) : t('um.addGroup')" width="820px" top="4vh">
+            <el-form label-width="90px" inline>
+              <el-form-item :label="t('common.name')">
+                <el-input v-model="groupForm.name" :disabled="groupForm.builtin" style="width: 240px"
+                          :placeholder="t('um.groupNamePh')" />
+              </el-form-item>
+              <el-form-item :label="t('common.description')">
+                <el-input v-model="groupForm.description" maxlength="200" style="width: 380px" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" :loading="groupSaving" @click="onSaveGroupInfo">
+                  {{ groupForm.id ? t('common.save') : t('common.create') }}
+                </el-button>
+              </el-form-item>
+            </el-form>
+            <div v-if="groupForm.builtin" style="color: var(--text-secondary); font-size: 12px; margin: -6px 0 10px">
+              {{ t('um.builtinLocked') }}
+            </div>
+            <el-divider style="margin: var(--sp-2) 0 var(--sp-4)" />
+            <template v-if="savedName">
+              <div style="font-weight: 600; margin-bottom: var(--sp-2)">{{ t('um.groupPerms') }}（{{ savedName }}）</div>
+              <div style="max-height: 52vh; overflow-y: auto">
+                <PermMatrix :key="savedName" :group="savedName" @saved="loadGroups" />
+              </div>
+            </template>
+            <el-empty v-else :description="t('um.createFirst')" />
+            <template #footer>
+              <el-button @click="groupDlg = false">{{ t('common.close') }}</el-button>
+            </template>
+          </el-dialog>
         </div>
       </TabsShell>
     </template>
@@ -116,6 +167,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUsers, getMe, getInvites, inviteUser, revokeInvite, batchDeleteInvites, apiErr } from '../api'
 import api from '../api'
 import TabsShell from '../components/TabsShell.vue'
+import PermMatrix from '../components/PermMatrix.vue'
 
 const { t, locale } = useI18n()
 const tabs = [
@@ -143,8 +195,52 @@ const load = async () => {
     invites.value = (await getInvites()).items || []
   } catch { ElMessage.error(t('common.loadFailed')) }
 }
+// —— 用户组（批11B：动态组——四内置锁名+自定义增删改；PermMatrix 配权限） ——
+const groups = ref([])
+const groupDlg = ref(false)
+const groupSaving = ref(false)
+const groupForm = ref({ id: null, name: '', description: '', builtin: false, origName: '' })
+const savedName = ref('')   // 已落库组名（PermMatrix 挂载键——新组先创建、rename 先保存才有）
+const loadGroups = async () => {
+  try { groups.value = await api.get('/user-groups') } catch {}
+}
+const openGroupEdit = (row) => {
+  groupForm.value = row
+    ? { id: row.id, name: row.name, description: row.description || '', builtin: row.builtin, origName: row.name }
+    : { id: null, name: '', description: '', builtin: false, origName: '' }
+  savedName.value = row ? row.name : ''
+  groupDlg.value = true
+}
+const onSaveGroupInfo = async () => {
+  const f = groupForm.value
+  groupSaving.value = true
+  try {
+    if (!f.id) {
+      const r = await api.post('/user-groups', { name: f.name, description: f.description })
+      f.id = r.id; f.origName = f.name; savedName.value = f.name
+      ElMessage.success(t('common.createSuccess'))
+    } else {
+      await api.post(`/user-groups/${f.id}`, { name: f.name, description: f.description })
+      savedName.value = f.name; f.origName = f.name
+      ElMessage.success(t('common.saveSuccess'))
+    }
+    await Promise.all([loadGroups(), load()])   // rename 会改用户表角色显示
+  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+  finally { groupSaving.value = false }
+}
+const onDeleteGroup = async (row) => {
+  try {
+    await ElMessageBox.confirm(t('um.deleteGroupConfirm', { name: row.name, n: row.user_count }), { type: 'warning' })
+    await api.delete(`/user-groups/${row.id}`)
+    ElMessage.success(t('common.deleteSuccess'))
+    await loadGroups()
+  } catch (e) {
+    if (e === 'cancel') return
+    ElMessage.error(apiErr(e, t('common.deleteFailed')))
+  }
+}
 getMe().then(me => { currentUsername.value = me.username }).catch(() => {})
-onMounted(load)
+onMounted(() => { load(); loadGroups() })
 
 // —— 编辑弹窗 ——
 const editDlg = ref(false)

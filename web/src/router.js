@@ -76,11 +76,14 @@ router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('token')
   const publicPages = ['login', 'register', 'forgot-password', 'reset-password']
   if (!publicPages.includes(to.name) && !token) { next('/login'); return }
-  if (to.meta?.admin && localStorage.getItem('role') !== 'admin') { next('/'); return }
   // nav 维:hidden 拒路由+readonly 放行(标志经 me 消费方读取)。nav=UI 提示层,
   // 执行面在 api 维(直连 API 不受 nav 限=设计)
   if (token && !publicPages.includes(to.name)) {
     const me = await meOnce()
+    // 批11B：admin 页守卫双条件——admin 角色 OR user_mgmt 权限（纯角色判断=动态组授 user_mgmt 后
+    // 菜单可见点进被弹回,盲审 A/B 同判 P1-3；admin 角色短路优先,meOnce 失败 fail-closed）
+    if (to.meta?.admin && localStorage.getItem('role') !== 'admin'
+        && !(me?.permissions || []).includes('user_mgmt')) { next('/'); return }
     const nav = me?.nav || {}
     // 路由 path→菜单 id 映射(菜单 id=NAV_ITEMS 常量;route.path 去斜杠首段)
     const menuId = to.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'

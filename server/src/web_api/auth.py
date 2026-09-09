@@ -219,6 +219,19 @@ def require_role(*allowed: Role):
     return checker
 
 
+def require_authenticated(authorization: str = Header(...)):
+    """FastAPI 依赖：已认证+账号有效即可，**不查权限**（批11B 双盲审 P0-1 修）。
+
+    身份与权限分层：身份类端点（me/logout/profile/avatar/deactivate/change-password）
+    对自定义组（零权限起步）用户必须可用——原 require_role(四元组) 会让这类用户
+    登录即 403 半砖死（连登出/改密都不可）。verify_jwt 已 fail-closed 校验账号
+    存在/启用/未删（SD1）+登出黑名单（A4），此处仅作依赖别名；各端点自身的安全
+    （旧密码验证/guard_self_deactivate/自助注销脱敏）保留不变。功能端点走 require_perm。
+    """
+    token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
+    return verify_jwt(token)
+
+
 def require_perm(perm: str):
     """FastAPI 依赖：检查 JWT 角色是否有指定权限。"""
     def checker(authorization: str = Header(...)):

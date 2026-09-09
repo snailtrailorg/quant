@@ -189,6 +189,17 @@ try {
   assert('EmptyState 空态', empty > 0 || hasTable, `el-empty=${empty}`)
 } catch (e) { assert('EmptyState', false, String(e).slice(0, 100)) }
 
+// ---- 用户管理·群组页签（批11B：动态用户组）----
+try {
+  await nav('/users')
+  assert('用户管理页渲染', (await count('.el-table')) >= 1)
+  await p.evaluate(() => { const t = [...document.querySelectorAll('.el-tabs__item, [role=tab]')]
+    .find(e => e.textContent.includes('用户群组') || e.textContent.includes('User Groups')); t?.click() })
+  await new Promise(r => setTimeout(r, 800))
+  const gtxt = await p.evaluate(() => [...document.querySelectorAll('.el-table')].pop()?.innerText || '')
+  assert('四内置组列出(builtin)', gtxt.includes('admin') && gtxt.includes('viewer'))
+} catch (e) { assert('用户群组页签', false, String(e).slice(0, 100)) }
+
 // ---- 汇总 ----
 const failed = results.filter(r => !r.ok)
 console.log(`\n=== 汇总: ${results.length - failed.length}/${results.length} 通过（${needsData.length} 项需造数） ===`)

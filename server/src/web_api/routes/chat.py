@@ -28,7 +28,8 @@ def chat(req: ChatReq, payload: dict = Depends(require_perm("strategy_control"))
         resp = None
         for _ in range(3):  # max 3 轮工具调用
             resp = gateway.chat(
-                messages=messages, tools=READ_TOOLS, role=payload["role"],
+                messages=messages, tools=READ_TOOLS,
+                role=payload.get("db_role") or payload.get("role", "viewer"),   # 批11B：DB role（JWT 旧声明的工具面 24h 不缩问题，盲审 A P1-5）
                 timeout=30, retries=0, caller="web_chat",
             )
             if resp is None:

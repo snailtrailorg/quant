@@ -5,7 +5,7 @@
 from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, Query, Body, Request, BackgroundTasks, HTTPException
 from ..auth import (
-    create_jwt, authenticate, create_user, require_role, require_perm,
+    create_jwt, authenticate, create_user, require_role, require_perm, require_authenticated,
     audit_log, ensure_default_admin, init_users_table, PERMISSIONS,
     invite_user, register_user, forgot_password, reset_password, change_password, verify_token,
     validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
@@ -80,7 +80,7 @@ def login(req: LoginReq, request: Request):
 
 
 @router.get("/api/auth/me")
-def me(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def me(payload: dict = Depends(require_authenticated)):
     nickname, avatar_url, db_role = payload["username"], None, None
     try:
         with get_conn() as conn:
@@ -104,7 +104,8 @@ def me(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admi
             "nav": load_nav_map(payload["username"], role)}
 
 
-# W4（10 §4）：nav 16 项/数据域清单——后端单源常量,前端从 GET 拿（不硬编码第二份）
+# W4（10 §4）：nav/数据域清单——后端单源常量,前端从 GET 拿（不硬编码第二份）
+# 批11B：加 users（用户管理，与 MainLayout 菜单对齐——盲审 P2-7）
 NAV_ITEMS = [
     {"id": "dashboard", "group": "base"},
     {"id": "screener", "group": "research"}, {"id": "pool", "group": "research"},
@@ -113,9 +114,24 @@ NAV_ITEMS = [
     {"id": "live-task", "group": "live"}, {"id": "trading", "group": "live"},
     {"id": "risk", "group": "riskgrp"}, {"id": "reconcile", "group": "riskgrp"},
     {"id": "risk-rules", "group": "riskgrp"},
+    {"id": "users", "group": "ops"},
     {"id": "dataops", "group": "ops"}, {"id": "integrations", "group": "ops"},
     {"id": "observe", "group": "ops"}, {"id": "settings", "group": "ops"},
 ]
+
+
+def _all_group_names() -> list[str]:
+    """用户组名全量（批11B）；读失败或表空 → 四内置名回退（盲审 B P2-3：空表=未迁移环境跑新代码防静默半瘫）。"""
+    from src.data_platform.db import get_conn as _gc
+    try:
+        with _gc() as conn:
+            rows = conn.execute("SELECT name FROM user_group ORDER BY builtin DESC, id").fetchall()
+        names = [r[0] for r in rows]
+        if names:
+            return names
+    except Exception:
+        pass
+    return ["admin", "trader", "analyst", "viewer"]
 DATA_FIELDS = {"markets": ["astock", "convertible", "etf", "crypto"],
                "sensitivity": ["detail", "aggregated", "count"]}
 
@@ -138,13 +154,15 @@ def _load_dim(dimension: str) -> dict:
 
 @router.get("/api/permissions")
 def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
-    """W4 三维矩阵（10 §4）：api 键+nav 三态+数据域+user override 全景。"""
-    from ..auth import load_role_permissions
+    """W4 三维矩阵（10 §4）：api 键+nav 三态+数据域+user override 全景。
+    批11B：角色清单动态（user_group 表全量，失败/空回退四内置）+locked 随 GET 返回（前端 🔒 不再硬编码）。"""
+    from ..auth import load_role_permissions, LOCKED_PERM_KEYS
     from src.data_platform.db import get_conn as _gc
     all_keys = ["read", "strategy_control", "data_sync", "halt", "resume", "trade",
                 "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
                 "system_config", "llm_config", "im_bots_config", "alerts_config"]
     roles = load_role_permissions()
+    group_names = _all_group_names()   # 恒以组表为准（与权限数据短暂分叉可接受，盲审 B P2-4）
     overrides = []
     try:
         with _gc() as conn:
@@ -156,10 +174,17 @@ def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
     except Exception:
         pass
     return {"keys": all_keys,
-            "roles": {r: sorted(roles.get(r, set())) for r in ("viewer", "analyst", "trader", "admin")},
+            "locked": sorted(LOCKED_PERM_KEYS),
+            "roles": {r: sorted(roles.get(r, set())) for r in group_names},
             "nav": {"items": NAV_ITEMS, "roles": _load_dim("nav")},
             "data": {"fields": DATA_FIELDS, "roles": _load_dim("data")},
             "user_overrides": overrides}
+
+
+def _ensure_group(conn, role: str) -> None:
+    """组存在性校验（写事务内调用——代码盲审 A-P2-1/B-P2-2：独立连接=TOCTOU 窗口可给已删组写行）。"""
+    if not conn.execute("SELECT 1 FROM user_group WHERE name=%s", (role,)).fetchone():
+        raise ApiError(400, "GROUP_NOT_FOUND", f"用户组不存在: {role}")
 
 
 @router.post("/api/permissions/{role}")
@@ -174,8 +199,6 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
     """
     from ..auth import invalidate_perm_cache, load_role_permissions, LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR
     from src.data_platform.db import get_conn as _gc
-    if role not in ("viewer", "analyst", "trader", "admin"):
-        raise HTTPException(400, "BAD_ROLE")
     if dimension not in ("api", "nav", "data"):
         raise HTTPException(400, "BAD_DIMENSION", "dimension ∈ api|nav|data")
     if dimension == "api":
@@ -195,6 +218,7 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
         keys = (keys - floor_keys) | preserved            # 地板键恒保持现值（双路径同锁之一）
         out = sorted(keys)
         with _gc() as conn:
+            _ensure_group(conn, role)   # 写事务内校验（防删组竞态窗口幽灵行——盲审 A-P2-1）
             conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "
                          "AND dimension='api'", (role,))
             for k in out:
@@ -209,7 +233,8 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
     # nav/data 维：body.resources = {resource: effect}
     res_map = body.get("resources", {}) or {}
     valid_res = {i["id"] for i in NAV_ITEMS} if dimension == "nav" \
-        else (set(DATA_FIELDS["markets"]) | set(DATA_FIELDS["sensitivity"]))
+        else (set(DATA_FIELDS["markets"]) | set(DATA_FIELDS["sensitivity"])
+              | {f"sensitivity:{v}" for v in DATA_FIELDS["sensitivity"]})   # 代码盲审 A P1-1：敏感级上送复合键（24f5544 契约），白名单漏配致 data 维保存恒 400
     bad = set(res_map) - valid_res
     if bad:
         raise HTTPException(400, "BAD_RESOURCE", f"未知资源: {sorted(bad)}")
@@ -220,6 +245,7 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
     if bad_eff:
         raise HTTPException(400, "BAD_EFFECT", f"非法 effect: {sorted(bad_eff)}")
     with _gc() as conn:
+        _ensure_group(conn, role)   # 写事务内校验（同上）
         conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "
                      "AND dimension=%s", (role, dimension))
         for res, eff in res_map.items():
@@ -288,7 +314,7 @@ def update_user_override(username: str, body: dict,
 
 @router.post("/api/auth/logout")
 def logout(authorization: str = Header(...),
-           payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+           payload: dict = Depends(require_authenticated)):
     """登出：token 加入黑名单立即失效（A4）+ 审计。"""
     from ..auth import revoke_jwt
     token = authorization[7:] if authorization.lower().startswith("bearer ") else authorization
@@ -307,7 +333,7 @@ def _request_base(request: Request) -> str:
 
 
 @router.get("/api/user/profile")
-def profile_api(payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def profile_api(payload: dict = Depends(require_authenticated)):
     """个人中心：当前用户资料（批次C）。"""
     with get_conn() as conn:
         cur = conn.execute(
@@ -320,7 +346,7 @@ def profile_api(payload: dict = Depends(require_role("viewer", "analyst", "trade
 
 @router.post("/api/user/profile")
 def profile_update_api(body: dict = Body(...),
-                       payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                       payload: dict = Depends(require_authenticated)):
     """更新昵称（批次C；仅昵称可自助改，角色/用户名只读）。"""
     nickname = str(body.get("nickname", "")).strip()[:20]
     if not nickname:
@@ -371,7 +397,7 @@ def _save_avatar_base64(data: str, uid: int) -> str:
 
 @router.post("/api/user/avatar")
 def avatar_upload_api(body: dict = Body(...),
-                      payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                      payload: dict = Depends(require_authenticated)):
     """设置头像（批次C+）：{icon:"icon_NN.png"} 选系统卡通图标（public/icons，36 个）
     或 {avatar_base64} 上传（裁剪 1:1 → Pillow 统一 256px JPEG 存 static/avatars，
     固定文件名 user_{id}.jpg 覆盖旧图无孤儿，URL 带 ?t= 防缓存）。"""
@@ -399,7 +425,7 @@ def avatar_upload_api(body: dict = Body(...),
 
 @router.post("/api/user/deactivate")
 def deactivate_api(authorization: str = Header(...),
-                   payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+                   payload: dict = Depends(require_authenticated)):
     """自助注销（批次D）：软删+脱敏+token 拉黑。末位 admin 不可注销自己（该路径真实可达）。"""
     guard_self_deactivate(int(payload["sub"]))
     soft_delete_user(int(payload["sub"]))
@@ -545,7 +571,7 @@ def reset_password_api(req: ResetReq):
 
 
 @router.post("/api/auth/change-password")
-def change_password_api(req: ChangePwdReq, payload: dict = Depends(require_role("viewer", "analyst", "trader", "admin"))):
+def change_password_api(req: ChangePwdReq, payload: dict = Depends(require_authenticated)):
     """改密码：需旧密码验证。"""
     validate_password(req.new_password)  # 不达标直接抛 ApiError(含错误码)
     ok = change_password(int(payload["sub"]), req.old_password, req.new_password)
@@ -555,13 +581,133 @@ def change_password_api(req: ChangePwdReq, payload: dict = Depends(require_role(
     return {"status": "changed"}
 
 
+# ——— 用户组管理（批11B：四角色硬编码 → DB 用户组实体；方案双盲审 A/B 修订全吸收） ———
+
+import re as _re_group
+_GROUP_NAME_RE = _re_group.compile(r"^[a-z][a-z0-9_]{1,29}$")   # 总长 2..30（盲审 B P2-4）
+
+
+@router.get("/api/user-groups")
+def list_groups(payload: dict = Depends(require_perm("user_mgmt"))):
+    """组列表（user_count 只数活跃用户——排除软删，盲审 B P1-2）。"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT g.id, g.name, g.description, g.builtin, "
+            "COALESCE(u.cnt, 0) FROM user_group g LEFT JOIN "
+            "(SELECT role, count(*) cnt FROM users WHERE deleted_at IS NULL GROUP BY role) u "
+            "ON u.role = g.name ORDER BY g.builtin DESC, g.id").fetchall()
+    return [{"id": r[0], "name": r[1], "description": r[2] or "",
+             "builtin": r[3], "user_count": r[4]} for r in rows]
+
+
+@router.post("/api/user-groups")
+def create_group(body: dict = Body(...), payload: dict = Depends(require_perm("user_mgmt"))):
+    """建组（新组零权限起步——permission 无行不落字典兜底）。body.builtin 服务端忽略（盲审 A P2）。"""
+    name = str(body.get("name", "")).strip()
+    desc = str(body.get("description", "") or "").strip()[:200]
+    if not _GROUP_NAME_RE.fullmatch(name):
+        raise ApiError(400, "GROUP_NAME_INVALID", "组名 2-30 位、小写字母开头、可含数字/下划线")
+    try:
+        with get_conn() as conn:
+            gid = conn.execute(
+                "INSERT INTO user_group (name, description) VALUES (%s,%s) RETURNING id",
+                (name, desc)).fetchone()[0]
+            conn.commit()
+    except Exception as e:
+        if getattr(e, "pgcode", None) == "23505" or "duplicate key" in str(e).lower():
+            raise ApiError(409, "GROUP_EXISTS", f"组名已存在: {name}")
+        raise
+    audit_log(payload["username"], "group_create", name)
+    return {"id": gid, "name": name}
+
+
+@router.post("/api/user-groups/{gid}")
+def update_group(gid: int, body: dict = Body(...), payload: dict = Depends(require_perm("user_mgmt"))):
+    """改组。builtin：锁 name 只可改 description；自定义组：rename 三表级联（单事务+尾断言防并发孤儿行，
+    盲审 B P2-1）+软删用户 role 一并归位；rename 后 invalidate_perm_cache（盲审 A/B 同判 P1）。"""
+    from ..auth import invalidate_perm_cache
+    desc = str(body.get("description", "") or "").strip()[:200]
+    new_name = str(body.get("name", "") or "").strip()
+    renamed = False
+    with get_conn() as conn:
+        row = conn.execute("SELECT name, builtin FROM user_group WHERE id=%s", (gid,)).fetchone()
+        if not row:
+            raise ApiError(404, "GROUP_NOT_FOUND", "用户组不存在")
+        old_name, builtin = row
+        if builtin and new_name and new_name != old_name:
+            raise ApiError(400, "GROUP_BUILTIN", "内置组不可改名")
+        if not builtin and new_name and new_name != old_name:
+            if not _GROUP_NAME_RE.fullmatch(new_name):
+                raise ApiError(400, "GROUP_NAME_INVALID", "组名 2-30 位、小写字母开头、可含数字/下划线")
+            if conn.execute("SELECT 1 FROM user_group WHERE name=%s AND id<>%s",
+                            (new_name, gid)).fetchone():
+                raise ApiError(409, "GROUP_EXISTS", f"组名已存在: {new_name}")   # 代码盲审 B P1-1：撞名（含内置名）原裸抛 UniqueViolation=500
+            conn.execute("UPDATE user_group SET name=%s, description=%s WHERE id=%s", (new_name, desc, gid))
+            perm_n = conn.execute(
+                "UPDATE permission SET subject_id=%s WHERE subject_type='role' AND subject_id=%s",
+                (new_name, old_name)).rowcount
+            user_n = conn.execute(
+                "UPDATE users SET role=%s WHERE role=%s AND deleted_at IS NULL",
+                (new_name, old_name)).rowcount
+            conn.execute("UPDATE users SET role='viewer' WHERE role=%s AND deleted_at IS NOT NULL",
+                         (old_name,))   # 代码盲审 A P2-3：软删用户一并归位（与 delete 对称，防幽灵组名残留展示）
+            # 级联尾断言：rename×权限写并发（READ COMMITTED 语句快照看不见对方新 INSERT 的旧行）
+            if conn.execute("SELECT 1 FROM permission WHERE subject_type='role' AND subject_id=%s LIMIT 1",
+                            (old_name,)).fetchone():
+                conn.rollback()
+                raise ApiError(409, "GROUP_RENAME_RACE", "权限并发写入，请重试")
+            conn.commit()
+            renamed = True
+            rename_log = (payload["username"], f"{old_name}->{new_name}",
+                          f"permission行={perm_n} 用户行={user_n}")
+        else:
+            conn.execute("UPDATE user_group SET description=%s WHERE id=%s", (desc, gid))
+            conn.commit()
+            rename_log = (payload["username"], "group_update", old_name, f"desc({len(desc)}字)")
+    if renamed:
+        invalidate_perm_cache()
+        audit_log(*rename_log)   # 代码盲审 A P3：commit 后在事务外记——audit 抖动不再把已提交操作报 500
+    else:
+        audit_log(*rename_log)
+    return {"ok": True}
+
+
+@router.delete("/api/user-groups/{gid}")
+def delete_group(gid: int, payload: dict = Depends(require_perm("user_mgmt"))):
+    """删组（builtin 拒；活跃用户>0 拒；级联清 permission 行+软删用户 role 归 viewer；
+    invalidate_perm_cache 防 60s 内重建同名组继承已删权限——盲审 A/B 同判 P1）。"""
+    from ..auth import invalidate_perm_cache
+    with get_conn() as conn:
+        row = conn.execute("SELECT name, builtin FROM user_group WHERE id=%s", (gid,)).fetchone()
+        if not row:
+            raise ApiError(404, "GROUP_NOT_FOUND", "用户组不存在")
+        name, builtin = row
+        if builtin:
+            raise ApiError(400, "GROUP_BUILTIN", "内置组不可删除")
+        cnt = conn.execute("SELECT count(*) FROM users WHERE role=%s AND deleted_at IS NULL",
+                           (name,)).fetchone()[0]
+        if cnt:
+            raise ApiError(409, "GROUP_IN_USE", f"组下仍有 {cnt} 个活跃用户，请先移出再删除")
+        perm_n = conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s",
+                              (name,)).rowcount
+        soft_n = conn.execute("UPDATE users SET role='viewer' WHERE role=%s AND deleted_at IS NOT NULL",
+                              (name,)).rowcount
+        conn.execute("DELETE FROM user_group WHERE id=%s", (gid,))
+        conn.commit()
+    invalidate_perm_cache()
+    audit_log(payload["username"], "group_delete", name, f"permission行={perm_n} 软删用户归位={soft_n}")
+    return {"ok": True}
+
+
 # ——— 用户管理（Admin） ———
 
 @router.post("/api/user")
 def create_user_api(req: UserCreate, payload: dict = Depends(require_perm("user_mgmt"))):
     validate_password(req.password)   # P0-复审残留：admin 建用户原无校验（>72 字节 500）
-    if req.role not in ("admin", "trader", "analyst", "viewer"):   # P2 A4：角色白名单
-        raise ApiError(400, "ROLE_INVALID", f"非法角色: {req.role}")
+    # 批11B：四元组白名单 → user_group 存在性校验（角色值域动态化）
+    with get_conn() as conn:
+        if not conn.execute("SELECT 1 FROM user_group WHERE name=%s", (req.role,)).fetchone():
+            raise ApiError(400, "ROLE_INVALID", f"用户组不存在: {req.role}")
     try:
         uid = create_user(req.username, req.password, req.role)
         audit_log(payload["username"], "create_user", req.username, f"role={req.role}")
@@ -595,6 +741,9 @@ def update_user(uid: int, role: str = None, enabled: bool = None,
     guard_user_mutation(row[0], payload["username"])
     with get_conn() as conn:
         if role is not None:
+            # 批11B（顺修盲审 P2-11 预先存在项）：update_user 原无角色校验——与 create 同为组存在性校验
+            if not conn.execute("SELECT 1 FROM user_group WHERE name=%s", (role,)).fetchone():
+                raise ApiError(400, "ROLE_INVALID", f"用户组不存在: {role}")
             conn.execute("UPDATE users SET role=%s WHERE id=%s", (role, uid))
         if enabled is not None:
             conn.execute("UPDATE users SET enabled=%s WHERE id=%s", (enabled, uid))
