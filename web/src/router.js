@@ -60,7 +60,7 @@ const routes = [
       { path: 'channels', redirect: '/integrations?tab=push' },
       { path: 'brokers', redirect: '/integrations?tab=brokers' },
       { path: 'risk-rules', name: 'risk-rules', component: () => import('./views/RiskRules.vue'), meta: { admin: true } },
-      { path: 'im-bots', redirect: '/integrations?tab=im' },
+      { path: 'im-bots', redirect: '/profile' },   // 五轮：admin IM 面删除——旧路由指个人中心 IM 通道
       { path: 'feishu', redirect: '/im-bots' },   // arch-19 批 2:旧路由重定向
       { path: 'system-config', redirect: '/settings?tab=run' },
     ],

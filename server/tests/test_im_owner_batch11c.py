@@ -101,18 +101,6 @@ class TestSelfService:
             r = _client().delete("/api/my/im-bots/10", headers={"Authorization": "Bearer t"})
         assert r.status_code == 404 and r.json()["code"] == "BOT_NOT_FOUND"
 
-    def test_bind_pins_session_user(self):
-        """绑定 user_id=会话用户（body 无 user_id 通道，A-P0-2）。"""
-        conn = _conn(scripted=[((1, "feishu", "b", "", True), [], 0), (None, [], 1)])
-        with contextlib.ExitStack() as s:
-            for p in _ctx(conn, USER9): s.enter_context(p)
-            pb = s.enter_context(patch("src.im_bot.users.bind_owner", return_value={"ok": True}))
-            s.enter_context(patch("src.web_api.routes.im_bots.audit_log"))
-            r = _client().post("/api/my/im-bots/1/bind", headers={"Authorization": "Bearer t"},
-                               json={"open_id": "ou_me", "user_id": 1})
-        assert r.status_code == 200
-        assert pb.call_args[0][2] == 9      # user_id=会话（9），body 的 1 无效
-
 
 class TestCardGate:
     def test_no_platform_bot_rejected(self):

@@ -70,11 +70,11 @@ def alerts_config_get(payload: dict = Depends(require_perm("alerts_config"))):
         out.append(r)
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT b.id, b.provider, b.name, b.enabled, "
-            "(SELECT count(*) FROM im_bot_users u WHERE u.bot_id = b.id) AS n "
-            "FROM im_bot_config b ORDER BY b.id")
+            "SELECT b.id, b.provider, b.name, b.enabled, u.username "
+            "FROM im_bot_config b LEFT JOIN users u ON u.id = b.owner_user_id ORDER BY b.id")
+        # 五轮：IM 全面用户化——告警从用户 bot 中选（下拉显示归属人）
         bots = [{"id": r[0], "provider": r[1], "name": r[2], "enabled": r[3],
-                 "bound_users": r[4]} for r in cur.fetchall()]
+                 "owner": r[4] or ""} for r in cur.fetchall()]
     return {"channels": out, "sms_configured": sms_configured(), "im_bots": bots,
             "quota": dict(_LIMITS)}
 

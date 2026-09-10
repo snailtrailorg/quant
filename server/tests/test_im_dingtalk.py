@@ -67,15 +67,17 @@ _IDENT = {"sub": "1", "username": "admin", "role": "admin"}
 
 
 class TestCreateGuard:
-    def test_admin_create_empty_secret_rejected(self):
-        """A-P2-8：manual-only 平台 secret 必填（防空 bot 进 pool 退避循环）。"""
-        from src.web_api.routes.im_bots import im_bots_create
+    def test_self_create_empty_secret_rejected(self):
+        """A-P2-8：manual-only 平台 secret 必填（五轮后自助面=唯一建 bot 路径）。"""
+        from src.web_api.routes.im_bots import my_im_bots_create
         from src.web_api.models import IMBotCreateReq
         conn = MagicMock(); conn.__enter__.return_value = conn
+        cur = MagicMock(); cur.fetchone.return_value = (0,)   # 配额 count=0
+        conn.execute.return_value = cur
         with patch("src.web_api.routes.im_bots.get_conn", return_value=conn):
             try:
-                im_bots_create(IMBotCreateReq(provider="dingtalk", name="d1",
-                                              credentials={"app_key": "ak"}), _IDENT)
+                my_im_bots_create(IMBotCreateReq(provider="dingtalk", name="d1",
+                                                 credentials={"app_key": "ak"}), _IDENT)
                 raise AssertionError("应拒")
             except Exception as e:
                 assert "CREDENTIALS_INCOMPLETE" in str(getattr(e, "code", "")) or "凭证" in str(e)

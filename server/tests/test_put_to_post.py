@@ -25,7 +25,7 @@ POST_ENDPOINTS = [
     "/api/account/1",
     "/api/live-trading/astock",
     "/api/llm-models/1",
-    "/api/im-bots/1",
+    "/api/my/im-bots/1",   # 五轮：admin IM 面删除——自助端点
     "/api/sync/config/astock_daily",
     "/api/llm-budget/1",
     "/api/data-sources/1",

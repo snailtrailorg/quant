@@ -134,7 +134,6 @@ export const updateRiskRule = (id, data) => api.post(`/risk-rules/${id}`, data)
 export const deleteRiskRule = (id) => api.delete(`/risk-rules/${id}`)
 
 // IM 统一接入(arch-19 批 2)
-export const getImBots = () => api.get('/im-bots')
 export const getImBotProviders = () => api.get('/im-bots/providers')
 export const createImBot = data => api.post('/im-bots', data)
 export const deleteImBot = id => api.delete(`/im-bots/${id}`)

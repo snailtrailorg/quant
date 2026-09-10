@@ -288,53 +288,15 @@ def card_action_fresh(value: dict, max_age_s: int = 60) -> bool:
 
 
 def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None, chat_type: str = ""):
-    """飞书消息处理薄壳（批13）：bindcode 特例在壳内，通用链走 handlers.handle_incoming。
+    """飞书消息处理薄壳（批13）：通用链走 handlers.handle_incoming（五轮：绑定机制取消，
+    bindcode/首见留痕链退役——自有 bot 由 resolve owner 直通）。
 
     webhook(ws_client/router) 双路径签名零改动。"""
     if receive_id is None: receive_id = open_id
     print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
     client = get_feishu_client(fid)   # 批 2:per-bot 单例(修多 bot 回复走错凭证隐患)
     from src.im_bot.users import resolve_im_identity
-    identity = resolve_im_identity(open_id, fid)   # per-bot 收口（批13 P0）
-    if not identity and fid and chat_type == "p2p":
-        # 批11E：验证码自动绑定（飞书特例，留壳内——盲审 A-P2-3 平台特例不进通用层）
-        # p2p 判据=chat_type（代码盲审 P0-3：p2p 也有 chat_id,receive_id_type 判不出）
-        # 码错不绑走原拒答；消费后整段兜底（盲审 P2-2：失败不静默烧码,明确引导手动绑定）
-        try:
-            from src.im_bot.bindcode import match_consume
-            if match_consume(fid, text, True):
-                from src.data_platform.db import get_conn as _gc
-                with _gc() as conn:
-                    _owner = conn.execute(
-                        "SELECT owner_user_id FROM im_bot_config WHERE id=%s", (fid,)).fetchone()[0]
-                from src.im_bot.users import bind_owner
-                from src.data_platform.db import get_conn as _gc
-                with _gc() as conn:
-                    # 已绑拦截（防二次抢绑——码 GETDEL 单次已串行化并发,此处为防御纵深）
-                    _bound = conn.execute(
-                        "SELECT 1 FROM im_bot_users WHERE bot_id=%s AND user_id IS NOT NULL LIMIT 1",
-                        (fid,)).fetchone()
-                if _owner is not None and not _bound:
-                    # bind_owner 原语=ON CONFLICT DO UPDATE：首见留痕 NULL 行就地转绑定行（盲审 P0-2：
-                    # 内联裸 INSERT 撞 (bot_id,im_user_id) 唯一约束必崩）——pending 计数随之归零
-                    bind_owner(fid, open_id, _owner)
-                    if resolve_im_identity(open_id, fid):
-                        from src.data_platform.audit import audit_log
-                        audit_log(f"im(bot#{fid})", "owner_im_bind_autocode",
-                                  target=str(_owner), detail=f"open_id={open_id[:8]}…")   # 不含码
-                        client.send_text(receive_id,
-                                         "✅ 绑定成功！现在发消息就以你的账号权限执行——试试「查一下风控状态」",
-                                         receive_id_type)
-                        return
-        except Exception as e:
-            logger.warning("验证码自动绑定异常（码可能已消费,请走手动绑定兜底）: %s", e)
-            # 盲审 A-P2：异常若发生在 bind 之后，重查成功即已绑定——原样 fall-through 会把
-            # 验证码原文喂进 LLM 对话（原实现回落引导文案）；改明确提示并 return
-            if resolve_im_identity(open_id, fid):
-                client.send_text(receive_id, "✅ 绑定成功（过程中略有延迟，不影响结果）。现在可以直接发消息了",
-                                 receive_id_type)
-                return
-
+    identity = resolve_im_identity(open_id, fid)   # per-bot 收口（批13 P0）+ owner 直通（五轮：绑定取消）
     from src.im_bot.handlers import handle_incoming
     handle_incoming(
         "feishu", fid, open_id, text,

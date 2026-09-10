@@ -7,16 +7,13 @@
   （读类执行完再拒答操作类，与飞书"发卡后 return"行为对齐——A-P2-2）
 - chat_type: 'p2p' | 'group'（runner 侧归一：飞书 p2p / 钉钉 '1' / 企微 'single'——B-P2-3）
 
-飞书特例（bindcode 验证码绑定）留在飞书薄壳 feishu_client.process_message_async，
-不进通用层（盲审 A-P2-3：平台特例不渗入通用签名）。
+批13 五轮：绑定机制全平台取消——自有 bot 由 resolve owner 直通，无平台特例。
 """
 from __future__ import annotations
 import logging
 
 logger = logging.getLogger("im_bot.handlers")
 
-# 批13 文案师：用户面平台名（"feishu" 裸串不该见人）
-_PROVIDER_NAME = {"feishu": "飞书", "wecom": "企业微信", "dingtalk": "钉钉"}
 
 
 def _get_max_tool_turns() -> int:
@@ -31,21 +28,6 @@ def _get_max_tool_turns() -> int:
     except Exception:
         pass
     return 5
-
-
-def _first_seen_note(bot_id: int, im_user_id: str) -> None:
-    """首见留痕（user_id NULL 行）——不授权，仅供 owner 个人中心"待绑定"列表一键绑定。"""
-    try:
-        from src.data_platform.db import get_conn
-        with get_conn() as conn:
-            if not conn.execute("SELECT 1 FROM im_bot_users WHERE bot_id=%s AND im_user_id=%s",
-                                (bot_id, im_user_id)).fetchone():
-                conn.execute("INSERT INTO im_bot_users (bot_id, im_user_id, role) VALUES (%s,%s,'viewer')",
-                             (bot_id, im_user_id))
-                conn.commit()
-                logger.info("首见留痕 bot=%s im_user=%s…（待绑定，不授权）", bot_id, im_user_id[:10])
-    except Exception as e:
-        logger.warning("首见留痕失败(不影响拒答): %s", e)
 
 
 def execute_read_tool(name: str, args: dict) -> str:
@@ -82,29 +64,14 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
                     reply, chat_type: str, *, confirm_card=None) -> None:
     """平台无关消息处理（在调用方线程里跑——runners 各自起线程）。
 
-    chat_type（'p2p'|'group' 归一）：预留参数——飞书 bindcode 分支用 p2p 判据（在飞书壳内，
-    到这里的 chat_type 暂不参与分支；群聊场景化文案/档位控制启用时接线——盲审 A-P2 标注）。"""
-    if bot_id:
-        _first_seen_note(bot_id, im_user_id)
+    chat_type（'p2p'|'group' 归一）：预留参数——群聊场景化文案/档位控制启用时接线。"""
+    # 五轮：首见留痕退役（绑定取消——无待绑定列表可填）
     from src.im_bot.users import resolve_im_identity
     identity = resolve_im_identity(im_user_id, bot_id)
     if not identity:
-        # 文案分流：自有 bot 指引个人中心绑定；平台级 bot 指引找管理员（A-P0-1 修语义随迁）
-        # 批13 文案师重写：读者视角+禁内部术语+动作具体（原"未绑定平台账号/IM 标识"是系统视角）
-        _own = False
-        if bot_id:
-            try:
-                from src.data_platform.db import get_conn
-                with get_conn() as conn:
-                    _own = bool(conn.execute(
-                        "SELECT 1 FROM im_bot_config WHERE id=%s AND owner_user_id IS NOT NULL",
-                        (bot_id,)).fetchone())
-            except Exception:
-                pass
-        _pname = _PROVIDER_NAME.get(provider, provider)
-        _guide = (f"打开网页端「个人中心 → IM 通道」，在这个通道的「待绑定」里点「绑定」，绑定后即可对话。" if _own
-                  else f"请联系管理员，把上面这串标识绑定到你的账号。")
-        reply(f"这个机器人还不知道你是谁，暂时无法对话。\n你的{_pname}标识：{im_user_id}\n{_guide}")
+        # 五轮：绑定机制取消——自有 bot 由 resolve owner 直通，走不到这里的是账号停用等罕见兜底。
+        # 平台公共 bot 已迁移归 admin（0073），此分支基本不可达；文案按账号问题处理。
+        reply("你的账号当前已停用或不可用，恢复后即可对话。")
         return
     role = identity["role"]
     perms = identity["perms"]

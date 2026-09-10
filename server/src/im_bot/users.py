@@ -117,7 +117,31 @@ def resolve_im_identity(im_user_id: str, bot_id: int | None = None) -> dict | No
                     "JOIN im_bot_config b ON b.id = u.bot_id "
                     "WHERE u.bot_id = %s AND u.im_user_id = %s AND u.user_id IS NOT NULL "
                     "AND b.enabled", (bot_id, im_user_id)).fetchone()
-                uids = {r[0]} if r else set()
+                if r:
+                    uids = {r[0]}
+                else:
+                    # 批13 五轮裁定（用户）：绑定机制全平台取消——自有 bot（owner 非空）发消息
+                    # 直接以创建者身份执行（"怕陌生人抢占"是替 IM 平台操心的越俎代庖）；
+                    # 绑定表降级为平台公共 bot 的管理员配置面。首见留痕不再必要（无待绑定）。
+                    r2 = conn.execute(
+                        "SELECT b.owner_user_id FROM im_bot_config b "
+                        "WHERE b.id = %s AND b.enabled AND b.owner_user_id IS NOT NULL",
+                        (bot_id,)).fetchone()
+                    if r2:
+                        uids = {r2[0]}
+                        # 五轮：顺手落绑定行——owner 的 im 身份记账（告警 dispatch 反向收件人来源；
+                        # 幂等 ON CONFLICT，无管理面依赖）
+                        try:
+                            conn.execute(
+                                "INSERT INTO im_bot_users (bot_id, im_user_id, role, user_id) "
+                                "VALUES (%s,%s,'viewer',%s) "
+                                "ON CONFLICT (bot_id, im_user_id) DO NOTHING",
+                                (bot_id, im_user_id, r2[0]))
+                            conn.commit()
+                        except Exception:
+                            pass   # 记账失败不影响身份直通
+                    else:
+                        uids = set()
             else:
                 rows = conn.execute(
                     "SELECT DISTINCT u.user_id FROM im_bot_users u "

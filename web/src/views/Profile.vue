@@ -59,15 +59,6 @@
         <div v-else>
     <el-divider />
 
-    <!-- 批12A #3：绑定码常驻横条（关弹窗不丢码——pending 归零/15min 过期后消失） -->
-    <el-alert v-if="barCode" type="success" :closable="false" style="margin-bottom: 12px">
-      <div style="display: flex; align-items: center; gap: 16px">
-        <span style="font-size: 13px">{{ t('myIm.barHint') }}</span>
-        <span style="font-size: 26px; font-weight: 700; letter-spacing: 6px; color: var(--brand-600)">{{ barCode }}</span>
-        <span style="font-size: 13px; color: var(--text-secondary)">{{ barCountdown }}</span>
-      </div>
-    </el-alert>
-
     <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
       <h3 style="font-size: 16px; margin: 0">{{ t('myIm.title') }}</h3>
@@ -79,13 +70,6 @@
       <el-table-column :label="t('common.status')" width="80">
         <template #default="{ row }">
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column :label="t('myIm.pending')" width="90">
-        <template #default="{ row }">
-          <el-badge v-if="row.pending_binds" :value="row.pending_binds" type="warning"
-                    style="cursor: pointer" @click="openBinds(row)" />
-          <span v-else style="color: var(--text-secondary)">—</span>
         </template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="150">
@@ -145,21 +129,17 @@
             <el-button type="primary" @click="startQr">{{ t('myIm.qrRetry') }}</el-button>
           </div>
           <div v-else-if="qrStatus === 'error'" style="text-align: center; color: var(--critical)">{{ qrNote || t('common.failed') }}</div>
-          <div v-if="qrStatus === 'done' && qrCode" style="text-align: center; margin: var(--sp-2) 0">
-            <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px">{{ t('myIm.bindCodeHint') }}</div>
-            <div style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: var(--brand-600)">{{ qrCode }}</div>
+          <!-- 五轮：绑定机制取消——done 即成功终态（发消息即 owner 身份，无需绑定步骤） -->
+          <div v-if="qrStatus === 'done'" style="text-align: center; padding: var(--sp-4) 0">
+            <div style="font-size: calc(var(--fs-kpi) * 1.6); line-height: 1">✅</div>
+            <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 6px">{{ t('myIm.doneTitle') }}</div>
+            <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.doneGuide') }}</div>
           </div>
           <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: 13px">{{ qrNote }}</div>
-          <!-- 2026-09-10 三轮：绑定成功终态（pending 归零感知）——庆祝+后续指引，2.5s 自动关 -->
-          <div v-if="qrStatus === 'bound'" style="text-align: center; padding: var(--sp-4) 0">
-            <div style="font-size: calc(var(--fs-kpi) * 1.6); line-height: 1">✅</div>
-            <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 6px">{{ t('myIm.boundTitle') }}</div>
-            <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.boundGuide') }}</div>
-          </div>
       </div>
       <div style="color: var(--text-secondary); font-size: 12px; line-height: 1.7">{{ curHint() }}</div>
       <template #footer>
-        <el-button @click="guardClose(() => { imAddDlg = false })">{{ isTerminalQr || curKind() !== 'interactive' ? t('common.done') : t('common.cancel') }}</el-button>
+        <el-button @click="guardClose(() => { imAddDlg = false })">{{ t('common.close') }}</el-button>
         <el-button v-if="curKind() === 'manual'"
                    type="primary" :loading="imSaving" @click="saveIm">{{ t('myIm.createBtn') }}</el-button>
         <el-button v-else-if="curKind() === 'interactive' && qrStatus === 'error'"
@@ -167,19 +147,6 @@
       </template>
     </el-dialog>
 
-    <!-- 待绑定列表（首见留痕 open_id → 一键绑定=本人身份） -->
-    <el-dialog v-model="bindDlg" :title="t('myIm.bindTitle', { name: bindBot?.name || '' })" width="520px">
-      <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.bindHint') }}</div>
-      <el-table :data="pendingBinds" size="small">
-        <el-table-column prop="open_id" label="open_id" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="created_at" :label="t('common.createdAt')" width="160" />
-        <el-table-column :label="t('common.action')" width="90">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" @click="bindOpenId(row.open_id)">{{ t('myIm.bind') }}</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
 
         </div>
 
@@ -256,9 +223,6 @@ const imAddDlg = ref(false)
 const imSaving = ref(false)
 const imForm = ref({ provider: 'feishu', name: '', creds: {} })
 const imFields = ref([])
-const bindDlg = ref(false)
-const bindBot = ref(null)
-const pendingBinds = ref([])
 const loadIm = async () => {
   try { imBots.value = await api.get('/my/im-bots') } catch {}
 }
@@ -272,7 +236,7 @@ const openImAdd = async () => {
   imForm.value = { provider: imForm.value.provider, name: '', creds: {} }
   // 盲审 P2-4/P2-5：会话状态复位 + 单方式直进
   stopPoll()
-  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrTicket.value = ''; qrCode.value = ''
+  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrTicket.value = ''
   const ms = curMethods()
   imMethod.value = ms.length ? ms[0].id : ''
   imFields.value = ms.find(m => m.id === imMethod.value)?.fields || []
@@ -306,63 +270,7 @@ const delIm = async (row) => {
     await loadIm()
   } catch (e) { if (e === 'cancel') return; ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
 }
-const openBinds = async (row) => {
-  bindBot.value = row
-  try { pendingBinds.value = await api.get(`/my/im-bots/${row.id}/pending`) } catch { pendingBinds.value = [] }
-  bindDlg.value = true
-}
-const bindOpenId = async (openId) => {
-  try {
-    await api.post(`/my/im-bots/${bindBot.value.id}/bind`, { open_id: openId })
-    ElMessage.success(t('myIm.bound'))
-    bindDlg.value = false
-    await loadIm()
-  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
-}
 onMounted(loadIm)
-
-// ——— 批12A #3：绑定码横条（独立 refs 不进复位清单——B-P1-4；弹窗关了横条仍在） ———
-const barCode = ref('')
-const barExpireAt = ref(0)
-const barCountdown = ref('')
-let barTimer = null
-let barSawPending = false   // 三轮实测：pending 归零判定缺基线闸——done 后用户尚未发消息时 pending 本就为 0，
-                           // 轮询首拍即判"归零"→庆祝抢跑→2.5s 自动关→码无提示消失。只有见过 ≥1（首见留痕
-                           // 发生）后归零才是真绑定信号。
-const startBarWatch = () => {
-  if (barTimer) clearInterval(barTimer)
-  barSawPending = false
-  barTimer = setInterval(async () => {
-    const left = barExpireAt.value - Date.now()
-    if (left <= 0) { stopBarWatch(); return }
-    barCountdown.value = `${String(Math.floor(left / 60000)).padStart(2, '0')}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`
-    await loadIm()
-    // 批13（B-P2-5）：pending 判定按飞书过滤——绑定码只发飞书 bot，钉钉/企微 bot 的首见留痕
-    // 不阻塞扫码绑定的 bound 庆祝态（否则其他 bot 留痕会让庆祝态悬到 15min 过期）
-    const anyPending = imBots.value.some(b => b.pending_binds && b.provider === 'feishu')
-    if (anyPending) barSawPending = true
-    if (barSawPending && !anyPending) {
-      stopBarWatch()
-      onBindComplete()
-    }
-  }, 1_500)
-}
-// 2026-09-10 用户三轮：「页面像傻子」根治——绑定成功（我们后端发的通知,Web 侧 pending 归零感知）
-// → 弹窗翻 bound 终态（✅ 庆祝+示例命令）→ 2.5s 自动关；横条随 stopBarWatch 消失；全局 toast
-const onBindComplete = () => {
-  ElMessage.success(t('myIm.bound'))
-  if (imAddDlg.value && qrStatus.value === 'done') {
-    qrStatus.value = 'bound'
-    stopPoll()
-    sessionStorage.removeItem(qrTicketKey())
-    // 用户裁定（三轮实测）：绑定成功后不自动关弹窗——庆祝态常显，由用户手动关闭
-  }
-}
-const stopBarWatch = () => {
-  barCode.value = ''; barCountdown.value = ''
-  if (barTimer) { clearInterval(barTimer); barTimer = null }
-}
-onUnmounted(stopBarWatch)
 
 // ——— 批11D：扫码向导（kind=interactive 方式）+ 轮询三件套 ———
 const imMethod = ref('')                     // 当前方式 id（qr|form）
@@ -370,7 +278,6 @@ const qrTicket = ref('')
 const qrImg = ref('')
 const qrStatus = ref('')                     // ''|starting|scanning|done|error|timeout
 const qrNote = ref('')
-const qrCode = ref('')
 let pollTimer = null
 let qrPollFails = 0
 let pollDeadline = 0
@@ -460,18 +367,11 @@ const pollQr = async () => {
     qrStatus.value = d.status || 'pending'
     if (d.qr_img) qrImg.value = d.qr_img
     if (d.status === 'scanning' && !qrImg.value) qrStatus.value = 'scanning'
-    if (d.status === 'done') {
+    if (d.status === 'done') {   // 五轮：done 即成功终态（绑定取消——发消息即 owner）
       stopPoll()
       if (d.owned === false) { qrNote.value = t('myIm.ownedFalse'); ElMessage.warning(t('myIm.ownedFalse')) }
-      else if (d.bind_code) {
-        qrCode.value = d.bind_code; ElMessage.success(t('myIm.qrDone'))
-        // 批12A #3：码落横条（独立 refs——关弹窗不丢；pending 归零/过期消失）
-        barCode.value = d.bind_code
-        barExpireAt.value = Date.now() + 900_000
-        startBarWatch()
-        sessionStorage.removeItem(qrTicketKey())
-      }
       else ElMessage.success(t('myIm.qrDone'))
+      sessionStorage.removeItem(qrTicketKey())
       await loadIm()
     }
     if (d.status === 'error') { stopPoll(); qrNote.value = d.code ? (te('err.' + d.code) ? t('err.' + d.code) : (d.error || '')) : (d.error || ''); ElMessage.error(qrNote.value || t('common.operationFailed')) }

@@ -58,15 +58,13 @@
         </el-form-item>
         <el-form-item :label="t('alerts.target')">
           <el-select v-if="form.channel === 'im'" v-model="form.target" style="width: 100%">
+            <!-- 五轮：IM 全面用户化——告警从用户 bot 中选（显示归属人） -->
             <el-option v-for="b in cfg.im_bots" :key="b.id" :value="String(b.id)"
-                       :label="`${b.name}（${t('alerts.channel.' + b.provider)} · ${t('alerts.bound')}: ${b.bound_users}）`"
+                       :label="b.owner ? `${b.name}（${b.owner} · ${t('alerts.channel.' + b.provider)}）` : `${b.name}（${t('alerts.channel.' + b.provider)}）`"
                        :disabled="!b.enabled" />
           </el-select>
           <el-input v-else-if="form.channel === 'email'" v-model="form.target" :placeholder="t('alerts.phEmail')" />
           <el-input v-else v-model="form.target" :placeholder="t('alerts.phPhone')" />
-        </el-form-item>
-        <el-form-item v-if="form.channel === 'im' && selBot && selBot.bound_users === 0" :label="''">
-          <span style="color: var(--warn); font-size: var(--fs-foot)">{{ t('alerts.noBinding') }}</span>
         </el-form-item>
         <el-form-item :label="t('alerts.categories')">
           <el-checkbox-group v-model="form.categories">

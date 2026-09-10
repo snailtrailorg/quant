@@ -11,44 +11,17 @@ def _identity(perms=None):
 
 
 class TestUnbound:
-    def test_unbound_reply_shows_provider_identity(self):
-        """拒答文案身份标识参数化（B-P2-7）：钉钉回显 staffId 而非 open_id。"""
+    """五轮后：自有 bot 由 resolve owner 直通不拒答——本组测兜底分支（账号停用等罕见态）。"""
+
+    def test_unbound_fallback_reply(self):
         from src.im_bot.handlers import handle_incoming
+        from unittest.mock import MagicMock, patch
         conn = MagicMock(); conn.__enter__.return_value = conn
-        cur = MagicMock(); cur.fetchone.return_value = None   # 无绑定行 + 非自有 bot
-        conn.execute.return_value = cur
-        sent = []
         with patch("src.data_platform.db.get_conn", return_value=conn), \
              patch("src.im_bot.users.resolve_im_identity", return_value=None):
+            sent = []
             handle_incoming("dingtalk", 7, "staff_abc", "你好", sent.append, "p2p")
-        assert sent and "staff_abc" in sent[0] and "钉钉" in sent[0]   # 文案师：中文平台名
-        assert "open_id" not in sent[0]
-
-    def test_unbound_own_bot_guide_points_profile(self):
-        from src.im_bot.handlers import handle_incoming
-        conn = MagicMock(); conn.__enter__.return_value = conn
-        def exe(sql, *a):
-            cur = MagicMock()
-            # im_bot_config owner 查询（文案分流）→ 自有 bot
-            cur.fetchone.return_value = (1,) if "owner_user_id IS NOT NULL" in sql else None
-            return cur
-        conn.execute.side_effect = exe
-        sent = []
-        with patch("src.data_platform.db.get_conn", return_value=conn), \
-             patch("src.im_bot.users.resolve_im_identity", return_value=None):
-            handle_incoming("wecom", 7, "wx_zhang", "hi", sent.append, "p2p")
-        assert any("个人中心" in s for s in sent)
-
-    def test_first_seen_note_written(self):
-        """首见留痕：未绑定用户落 NULL 行（不授权）。"""
-        from src.im_bot.handlers import _first_seen_note
-        conn = MagicMock(); conn.__enter__.return_value = conn
-        cur = MagicMock(); cur.fetchone.return_value = None   # 无既有行 → INSERT
-        conn.execute.return_value = cur
-        with patch("src.data_platform.db.get_conn", return_value=conn):
-            _first_seen_note(7, "u_new")
-        sql = conn.execute.call_args_list[0][0][0]
-        assert "im_bot_users" in sql
+        assert sent and "已停用" in sent[0]
 
 
 class _FakeResp:
@@ -65,7 +38,6 @@ class TestChatLoop:
         from src.llm_gateway import gateway as _gw_inst
         gm = import_module("src.llm_gateway.gateway")
         return [
-            patch("src.im_bot.handlers._first_seen_note"),
             patch("src.im_bot.users.resolve_im_identity", return_value=_identity()),
             patch.object(_gw_inst, "chat", side_effect=list(responses)),   # chat=实例方法（test_feishu_integration 同款）
             patch.object(gm, "READ_TOOLS", []),                            # 工具表=模块级
@@ -79,7 +51,7 @@ class TestChatLoop:
         sent = []
         with ExitStack() as es:
             ps = [es.enter_context(p) for p in self._chat_ctx([_FakeResp(content="风控正常")])]
-            mchat = ps[2]   # _chat_ctx[2]=chat patcher
+            mchat = ps[1]   # _chat_ctx[1]=chat patcher（五轮后 _first_seen_note 项删除）
             handle_incoming("dingtalk", 7, "s1", "查风控", sent.append, "p2p")
         assert sent == ["风控正常"]
         assert mchat.call_args.kwargs.get("caller") == "dingtalk"
