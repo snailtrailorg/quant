@@ -147,7 +147,7 @@ export default {
     },
     nav: {
       gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性', permissions: '权限管理',
-      userMgmt: '用户管理',
+      userMgmt: '用户管理', aiChat: 'AI 助手',
       dataCenter: '数据中心', healthLogs: '健康与日志',
       stockPool: '股票池', dailyInsight: '每日研判',
       tradingDesk: '交易台', liveTasks: '实盘任务',
@@ -810,7 +810,7 @@ export default {
       delete: '删除',
       disable: '禁用',
       manageTitle: '账户管理',
-      userMgmt: '用户管理',
+      userMgmt: '用户管理', aiChat: 'AI 助手',
       phInviteEmail: '被邀请者邮箱',
       invite: '邀请开通',
       username: '用户名',
@@ -1121,7 +1121,7 @@ export default {
       halted: '已熔断', frozen: '数据冻结',
     },
     layout: {
-      pin: '固定侧栏（常驻显示）', unpin: '浮动侧栏（悬停划出）',
+      pin: '固定', unpin: '自动隐藏', themeToggle: '切换深浅色',
       healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页（监控→健康）',
       helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：', myPermsDenied: '被用户规则拒绝（角色有但被覆盖）：',
     },
@@ -1289,7 +1289,7 @@ export default {
     },
     nav: {
       gData: 'Data Ops', gIntegrations: 'Integrations', gObserve: 'Observability', permissions: 'Permissions',
-      userMgmt: 'User Management',
+      userMgmt: 'User Management', aiChat: 'AI Assistant',
       dataCenter: 'Data Center', healthLogs: 'Health & Logs',
       stockPool: 'Stock Pool', dailyInsight: 'Daily Insight',
       tradingDesk: 'Trading Desk', liveTasks: 'Live Tasks',
@@ -1947,7 +1947,7 @@ export default {
       delete: 'Delete',
       disable: 'Disable',
       manageTitle: 'Account Management',
-      userMgmt: 'User Management',
+      userMgmt: 'User Management', aiChat: 'AI Assistant',
       phInviteEmail: 'Invitee email',
       invite: 'Send Invite',
       username: 'Username',
@@ -2248,7 +2248,7 @@ export default {
       halted: 'halted', frozen: 'frozen',
     },
     layout: {
-      pin: 'Pin sidebar (always visible)', unpin: 'Unpin sidebar (hover to slide out)',
+      pin: 'Pin', unpin: 'Auto-hide', themeToggle: 'Toggle dark mode',
       healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
       helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):', myPermsDenied: 'Denied by user rule (role has it, override blocks):',
     },
