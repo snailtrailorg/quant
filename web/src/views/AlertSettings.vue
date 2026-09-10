@@ -93,7 +93,7 @@
     <el-dialog v-model="smsDlg" :close-on-click-modal="false" :title="t('alerts.smsCred')" width="560px">
       <el-form label-width="140px">
         <el-form-item label="AccessKey ID"><el-input v-model="smsForm.access_key_id" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
-        <el-form-item label="AccessKey Secret"><el-input v-model="smsForm.access_key_secret" type="password" show-password :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
+        <el-form-item label="AccessKey Secret"><el-input v-model="smsForm.access_key_secret" type="password" show-password :placeholder="t('alerts.phKeepBlank')" autocomplete="new-password" /></el-form-item>
         <el-form-item :label="t('alerts.signName')"><el-input v-model="smsForm.sign_name" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
         <el-form-item :label="t('alerts.tplCode')"><el-input v-model="smsForm.template_code" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
       </el-form>

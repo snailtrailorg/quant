@@ -47,7 +47,7 @@
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('llm.phProvider')" /></el-form-item>
       <el-form-item :label="t('llm.model')"><el-input v-model="form.model" /></el-form-item>
-      <el-form-item :label="t('llm.apiKey')"><el-input v-model="form.api_key" type="password" show-password :placeholder="t('common.phEditNoChange')" /></el-form-item>
+      <el-form-item :label="t('llm.apiKey')"><el-input v-model="form.api_key" type="password" show-password :placeholder="t('common.phEditNoChange')" autocomplete="new-password" /></el-form-item>
       <el-form-item :label="t('llm.baseUrl')"><el-input v-model="form.base_url" /></el-form-item>
       <el-form-item :label="t('llm.maxInputTokens')"><el-input-number v-model="form.max_input_tokens" :min="0" controls-position="right" :placeholder="t('llm.phInputTokens')" /></el-form-item>
       <el-form-item :label="t('llm.maxOutputTokens')"><el-input-number v-model="form.max_output_tokens" :min="0" controls-position="right" :placeholder="t('llm.phOutputTokens')" /></el-form-item>

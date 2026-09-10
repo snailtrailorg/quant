@@ -37,7 +37,7 @@
           <el-input v-model="credFields['md_port']" :placeholder="t('brokers.phMdPort')" />
           <el-input v-model="credFields['client_id']" :placeholder="t('brokers.phClientId')" />
         </div>
-        <el-input v-else v-model="form.credentials" type="password" show-password :placeholder="t('brokers.phCred')" />
+        <el-input v-else v-model="form.credentials" type="password" show-password :placeholder="t('brokers.phCred')" autocomplete="new-password" />
       </el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>

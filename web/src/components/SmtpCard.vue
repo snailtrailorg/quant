@@ -26,7 +26,7 @@
         <el-input v-model="smtp.username" />
       </el-form-item>
       <el-form-item :label="t('smtp.password')">
-        <el-input v-model="smtp.password" type="password" show-password
+        <el-input v-model="smtp.password" type="password" show-password autocomplete="new-password"
           :placeholder="smtp.password_set ? t('systemConfig.pwdSet') : t('systemConfig.pwdEmpty')" />
       </el-form-item>
       <el-form-item :label="t('smtp.from')">

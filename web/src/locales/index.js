@@ -125,7 +125,7 @@ export default {
       run: '运行配置', users: 'API 密钥', perm: '权限管理', profile: '个人资料', alerts: '告警',
     },
     myIm: {   // 批11C：个人中心·我的 IM 通道；批11D 增方式/扫码
-      title: '我的 IM 通道', add: '添加通道', provider: '平台', pending: '待绑定', method: '接入方式',
+      title: '我的 IM 通道', add: '添加通道', createBtn: '创建通道', provider: '平台', pending: '待绑定', method: '接入方式',
       empty: '暂无 IM 通道——添加后，用该机器人对话将以你的账号身份与权限进行',
       addHint: '钉钉 / 企业微信：填写凭证创建后为「停用」状态——请先在对应平台完成应用/机器人配置并核对凭证无误，再回到列表点击「启动」。飞书：扫码授权后自动创建并立即启用，无需额外操作。',
       bindTitle: '待绑定身份（{name}）', bind: '绑定', bound: '已绑定——此后该 IM 身份的消息将以你的账号权限执行',
@@ -939,7 +939,7 @@ export default {
       pwdEmpty: '未配置',
     },
     imBots: {
-      title: 'IM 机器人', addBot: '添加机器人', editBot: '编辑机器人',
+      title: 'IM 机器人', addBot: '添加机器人', createBot: '创建机器人', editBot: '编辑机器人',
       providerCol: '平台', defaultRole: '默认角色', users: '用户授权', roleCol: '角色',
       qrTitle: '扫码接入', qrHint: '用平台 App 扫码后选择「连接现有/重新创建」', qrBtn: '扫码接入',
       phName: '机器人名称', phKeepBlank: '留空不改',
@@ -1288,7 +1288,7 @@ export default {
       run: 'Run Config', users: 'API Keys', perm: 'Permissions', profile: 'Profile', alerts: 'Alerts',
     },
     myIm: {   // batch 11C: profile · my IM channels; batch 11D adds methods/QR
-      title: 'My IM Channels', add: 'Add Channel', provider: 'Platform', pending: 'Pending', method: 'Method',
+      title: 'My IM Channels', add: 'Add Channel', createBtn: 'Create Channel', provider: 'Platform', pending: 'Pending', method: 'Method',
       empty: 'No IM channels yet — after adding one, chatting with that bot runs as your account & permissions',
       addHint: 'DingTalk / WeCom: the channel is created in the "disabled" state — finish the app/bot configuration on the platform, verify the credentials, then click "Start" in the list. Feishu: scanning the QR code creates and enables the channel automatically.',
       bindTitle: 'Pending identities ({name})', bind: 'Bind', bound: 'Bound — messages from this IM identity now run as your account',
@@ -2097,7 +2097,7 @@ export default {
       pwdEmpty: 'Not set',
     },
     imBots: {
-      title: 'IM Bots', addBot: 'Add Bot', editBot: 'Edit Bot',
+      title: 'IM Bots', addBot: 'Add Bot', createBot: 'Create Bot', editBot: 'Edit Bot',
       providerCol: 'Platform', defaultRole: 'Default Role', users: 'Authorized Users', roleCol: 'Role',
       qrTitle: 'Scan to Connect', qrHint: 'Scan with the platform app, choose connect/create', qrBtn: 'QR Onboarding',
       phName: 'Bot name', phKeepBlank: 'Leave blank to keep',

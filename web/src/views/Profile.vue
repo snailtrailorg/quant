@@ -39,14 +39,14 @@
     <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.changePwd') }}</h3>
     <el-form label-position="top" style="max-width: 400px" @submit.prevent="onChangePwd">
       <el-form-item :label="t('account.oldPwd')">
-        <el-input v-model="pwd.old_password" type="password" show-password />
+        <el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" />
       </el-form-item>
       <el-form-item :label="t('account.newPwd')">
-        <el-input v-model="pwd.new_password" type="password" show-password />
+        <el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" />
       </el-form-item>
       <div class="pwd-rule">{{ t('common.passwordRule') }}</div>
       <el-form-item :label="t('register.confirmPwd')">
-        <el-input v-model="pwd.confirm" type="password" show-password
+        <el-input v-model="pwd.confirm" type="password" show-password autocomplete="new-password"
           :class="{ 'mismatch': pwd.confirm && pwd.confirm !== pwd.new_password }" />
       </el-form-item>
       <el-form-item>
@@ -114,7 +114,7 @@
           <el-input v-model="imForm.name" style="width: 260px" />
         </el-form-item>
         <el-form-item v-for="f in imFields" :key="f.key" :label="te(f.label_key) ? t(f.label_key) : f.key">
-          <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" show-password style="width: 260px" />
+          <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" :autocomplete="f.secret ? 'new-password' : 'off'" show-password style="width: 260px" />
         </el-form-item>
         <!-- post_steps：后台建应用指引（注册表驱动） -->
         <div v-if="curPostSteps().length" style="color: var(--text-secondary); font-size: 12px; line-height: 1.9; padding: var(--sp-2) 0">
@@ -160,7 +160,7 @@
       <template #footer>
         <el-button @click="guardClose(() => { imAddDlg = false })">{{ isTerminalQr || curKind() !== 'interactive' ? t('common.done') : t('common.cancel') }}</el-button>
         <el-button v-if="curKind() === 'manual'"
-                   type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
+                   type="primary" :loading="imSaving" @click="saveIm">{{ t('myIm.createBtn') }}</el-button>
         <el-button v-else-if="curKind() === 'interactive' && qrStatus === 'error'"
                    type="primary" @click="startQr">{{ t('myIm.qrRetry') }}</el-button>
       </template>

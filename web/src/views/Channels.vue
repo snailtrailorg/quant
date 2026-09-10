@@ -22,7 +22,7 @@
       <el-form :model="form" label-width="120px">
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('channels.phProvider')" /></el-form-item>
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
-      <el-form-item :label="t('common.credentialWebhook')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" /></el-form-item>
+      <el-form-item :label="t('common.credentialWebhook')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" autocomplete="new-password" /></el-form-item>
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>
       <template #footer>

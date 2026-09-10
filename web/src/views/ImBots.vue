@@ -64,7 +64,7 @@
         <template v-if="currentSchema.length">
           <el-form-item v-for="f in currentSchema" :key="f.key" :label="fieldLabel(f)">
             <el-input v-if="f.type === 'textarea'" v-model="addForm.credentials[f.key]" type="textarea" :rows="2" />
-            <el-input v-else v-model="addForm.credentials[f.key]" :show-password="!!f.secret"
+            <el-input v-else v-model="addForm.credentials[f.key]" :show-password="!!f.secret" :autocomplete="f.secret ? 'new-password' : 'off'"
                       :placeholder="fieldLabel(f)" />
           </el-form-item>
         </template>
@@ -81,7 +81,7 @@
       <template #footer>
         <el-button @click="showAdd = false">{{ t('common.cancel') }}</el-button>
         <el-button v-if="currentProvider?.onboarding === 'interactive'" type="warning" @click="startQr">{{ t('imBots.qrBtn') }}</el-button>
-        <el-button type="primary" @click="createBot">{{ t('common.create') }}</el-button>
+        <el-button type="primary" @click="createBot">{{ t('imBots.createBot') }}</el-button>
       </template>
     </el-dialog>
 
@@ -96,7 +96,7 @@
           </el-select>
         </el-form-item>
         <el-form-item v-for="f in editSchema" :key="f.key" :label="fieldLabel(f)">
-          <el-input v-model="editForm.credentials[f.key]" :show-password="!!f.secret"
+          <el-input v-model="editForm.credentials[f.key]" :show-password="!!f.secret" :autocomplete="f.secret ? 'new-password' : 'off'"
                     :placeholder="t('imBots.phKeepBlank')" />
         </el-form-item>
       </el-form>
