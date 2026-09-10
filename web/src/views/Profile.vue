@@ -126,10 +126,9 @@
       <div v-else-if="curKind() === 'interactive'" style="padding: var(--sp-2) 0">
           <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrIntro') }}</div>
           <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
-          <div v-if="qrImg && qrCountdown" style="text-align: center; margin-top: 6px">
-            <span style="font-size: 15px; font-weight: 700; color: var(--brand-600)">{{ t('myIm.qrValidPrefix') }}</span>
-            <span style="font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--brand-600); margin-left: 6px">{{ qrCountdown }}</span>
-          </div>
+          <div v-if="qrImg && qrCountdown"
+               style="text-align: center; margin-top: 6px; font-size: 16px; font-weight: 600; color: var(--brand-600)">
+            {{ t('myIm.qrValid', { t: qrCountdown }) }}</div>
           <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">
             <div class="qr-skeleton"></div>{{ t('myIm.qrStarting') }}
           </div>
