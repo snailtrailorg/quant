@@ -148,11 +148,17 @@
             <div style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: var(--brand-600)">{{ qrCode }}</div>
           </div>
           <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: 13px">{{ qrNote }}</div>
+          <!-- 2026-09-10 三轮：绑定成功终态（pending 归零感知）——庆祝+后续指引，2.5s 自动关 -->
+          <div v-if="qrStatus === 'bound'" style="text-align: center; padding: var(--sp-4) 0">
+            <div style="font-size: calc(var(--fs-kpi) * 1.6); line-height: 1">✅</div>
+            <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 6px">{{ t('myIm.boundTitle') }}</div>
+            <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.boundGuide') }}</div>
+          </div>
         </div>
       </el-form>
       <div style="color: var(--text-secondary); font-size: 12px">{{ t('myIm.addHint') }}</div>
       <template #footer>
-        <el-button @click="guardClose(() => { imAddDlg = false })">{{ t('common.close') }}</el-button>
+        <el-button @click="guardClose(() => { imAddDlg = false })">{{ isTerminalQr ? t('common.done') : t('common.cancel') }}</el-button>
         <el-button v-if="imMethod && curMethods().find(m => m.id === imMethod)?.kind === 'manual'"
                    type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
         <el-button v-else-if="imMethod && ['','timeout','error'].includes(qrStatus)"
@@ -208,7 +214,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -268,14 +274,7 @@ const openImAdd = async () => {
   const ms = curMethods()
   imMethod.value = ms.length ? ms[0].id : ''
   imFields.value = ms.find(m => m.id === imMethod.value)?.fields || []
-  // 批12A：恢复活会话（sessionStorage ticket——刷新/重开后 900s 内重轮仍可拿码）
-  const savedTicket = sessionStorage.getItem('im-onboarding-ticket')
-  if (savedTicket) {
-    qrTicket.value = savedTicket
-    qrStatus.value = 'starting'
-    pollDeadline = Date.now() + 600_000
-    pollTimer = setInterval(pollQr, 3_000)
-  }
+  resumeActiveSession()   // 批12A：恢复活会话（与方式切换共用）
   imAddDlg.value = true
 }
 const saveIm = async () => {
@@ -327,9 +326,22 @@ const startBarWatch = () => {
     const left = barExpireAt.value - Date.now()
     if (left <= 0) { stopBarWatch(); return }
     barCountdown.value = `${String(Math.floor(left / 60000)).padStart(2, '0')}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`
-    await loadIm()   // pending 归零（绑定完成）即消失
-    if (!imBots.value.some(b => b.pending_binds)) stopBarWatch()
-  }, 1_000)
+    await loadIm()
+    if (!imBots.value.some(b => b.pending_binds)) {   // pending 归零=绑定完成（后端 bind_owner 已翻转留痕行）
+      stopBarWatch()
+      onBindComplete()
+    }
+  }, 1_500)
+}
+// 2026-09-10 用户三轮：「页面像傻子」根治——绑定成功（我们后端发的通知,Web 侧 pending 归零感知）
+// → 弹窗翻 bound 终态（✅ 庆祝+示例命令）→ 2.5s 自动关；横条随 stopBarWatch 消失；全局 toast
+const onBindComplete = () => {
+  ElMessage.success(t('myIm.bound'))
+  if (imAddDlg.value && qrStatus.value === 'done') {
+    qrStatus.value = 'bound'
+    stopPoll()
+    setTimeout(() => { imAddDlg.value = false; sessionStorage.removeItem('im-onboarding-ticket') }, 2_500)
+  }
 }
 const stopBarWatch = () => {
   barCode.value = ''; barCountdown.value = ''
@@ -350,10 +362,23 @@ let pollDeadline = 0
 const methodLabel = m => te(m.label_key) ? t(m.label_key) : t('imBots.methodKind.' + m.kind)
 const curProvider = () => imProviders.value.find(p => p.provider === imForm.value.provider)
 const curMethods = () => (curProvider()?.methods || []).filter(m => m.kind === 'manual' || m.kind === 'interactive')
+const isTerminalQr = computed(() => ['done', 'bound', 'timeout', 'error'].includes(qrStatus.value))
 const onImMethodChange = () => {
+  const kind = curMethods().find(m => m.id === imMethod.value)?.kind
   imFields.value = curMethods().find(m => m.id === imMethod.value)?.fields || []
-  stopPoll()   // 换方式弃当前会话
-  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrCode.value = ''   // 盲审 P2-5：复位旧码区（防过期码误导）
+  stopPoll()   // 切走停轮询（会话仍在后台——ticket 不清）
+  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrCode.value = ''   // 复位旧码区（防过期码误导）
+  // 2026-09-10 用户三轮：切回扫码=恢复活会话（不再退回"开始扫码"按钮——那要求用户重来一遍）
+  if (kind === 'interactive') resumeActiveSession()
+}
+const resumeActiveSession = () => {
+  const savedTicket = sessionStorage.getItem('im-onboarding-ticket')
+  if (savedTicket) {
+    qrTicket.value = savedTicket
+    qrStatus.value = 'starting'   // 轮询首查即翻 scanning（有码）或 expired
+    pollDeadline = Date.now() + 600_000
+    pollTimer = setInterval(pollQr, 3_000)
+  }
 }
 const onImProviderChange = () => {   // 盲审 B-P2-8：换平台重算方式与字段（methods 空的 provider 已在下拉过滤）
   const ms = curMethods()
