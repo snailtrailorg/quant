@@ -126,8 +126,10 @@
       <div v-else-if="curKind() === 'interactive'" style="padding: var(--sp-2) 0">
           <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrIntro') }}</div>
           <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
-          <div v-if="qrImg && qrCountdown" style="text-align: center; color: var(--text-secondary); font-size: 12px; margin-top: 4px">
-            {{ t('myIm.qrValid', { t: qrCountdown }) }}</div>
+          <div v-if="qrImg && qrCountdown" style="text-align: center; margin-top: 6px">
+            <span style="font-size: 15px; font-weight: 700; color: var(--brand-600)">{{ t('myIm.qrValidPrefix') }}</span>
+            <span style="font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--brand-600); margin-left: 6px">{{ qrCountdown }}</span>
+          </div>
           <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">
             <div class="qr-skeleton"></div>{{ t('myIm.qrStarting') }}
           </div>
@@ -156,7 +158,7 @@
             <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.boundGuide') }}</div>
           </div>
       </div>
-      <div style="color: var(--text-secondary); font-size: 12px">{{ t('myIm.addHint') }}</div>
+      <div style="color: var(--text-secondary); font-size: 12px; line-height: 1.7">{{ curHint() }}</div>
       <template #footer>
         <el-button @click="guardClose(() => { imAddDlg = false })">{{ isTerminalQr || curKind() !== 'interactive' ? t('common.done') : t('common.cancel') }}</el-button>
         <el-button v-if="curKind() === 'manual'"
@@ -391,6 +393,8 @@ const curMethods = () => (curProvider()?.methods || []).filter(m => m.kind === '
 // 批13：每平台单方式——curKind/curPostSteps 直取首方式（页签=平台，页签内容=方式）
 const curKind = () => curMethods()[0]?.kind || ''
 const curPostSteps = () => curMethods()[0]?.post_steps || []
+// 四轮实测：hint 按页签平台分流——飞书页签只显示飞书句，钉钉/企微只显示表单句（原全文常显=每页签重复噪音）
+const curHint = () => curKind() === 'interactive' ? t('myIm.hintFeishu') : t('myIm.hintManual')
 const isTerminalQr = computed(() => ['done', 'bound', 'timeout', 'error'].includes(qrStatus.value))
 const onImMethodChange = () => {
   const kind = curMethods().find(m => m.id === imMethod.value)?.kind
