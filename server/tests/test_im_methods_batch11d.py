@@ -64,6 +64,8 @@ class TestModel:
         assert [m["id"] for m in w["methods"]] == ["form"] and w["mode"] == "websocket"
         assert {x["key"] for x in w["field_schema"]} == {"bot_id", "secret"}
         assert w["methods"][0]["fields"] == w["field_schema"]
+        # 批13 UX 裁定：页签顺序=飞书→钉钉→企微（用户指定，非字母序）
+        assert [p["provider"] for p in ps if p["provider"] in ("feishu", "dingtalk", "wecom")] == ["feishu", "dingtalk", "wecom"]
 
     def test_onboarding_derived_any_order_independent(self):
         """A-P1-3/B-P1-2：派生=any(interactive)——form 排前也必须 interactive（首键派生是顺序地雷）。"""

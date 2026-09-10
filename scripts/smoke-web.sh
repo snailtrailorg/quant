@@ -72,7 +72,7 @@ check "健康组件"        "/api/health/components"           'isinstance(d, di
 check "帮助-index"      "/api/help/index"                  '"content" in d'
 check "runbook 映射"     "/api/runbook"                     '"items" in d and len(d["items"]) > 20'
 # 批13（2026-09-11）：IM 平台注册表三平台断言（registry 遍历引导+form.fields 契约）
-check "IM平台注册表"    "/api/im-bots/providers"           'isinstance(d, list) and {p.get("provider") for p in d} >= {"feishu", "dingtalk", "wecom"} and all(any(m.get("kind") == "manual" and m.get("fields") for m in p["methods"]) for p in d if p["provider"] != "feishu")'
+check "IM平台注册表"    "/api/im-bots/providers"           'isinstance(d, list) and {p.get("provider") for p in d} >= {"feishu", "dingtalk", "wecom"} and d[0]["provider"] == "feishu" and all(any(m.get("kind") == "manual" and m.get("fields") for m in p["methods"]) for p in d if p["provider"] != "feishu")'
 
 echo "──────────"
 echo "冒烟结果: $PASS 绿 / $FAIL 红"

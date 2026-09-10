@@ -124,10 +124,13 @@ def get_im_provider(provider: str) -> IMBotProvider | None:
 def list_providers() -> list[dict]:
     """平台注册表(前端下拉+向导用)。批11D：增 methods 全集（UI 按注册能力自动生成，零硬编码）。
     批13（盲审 B-P0-1）：manual 方式通用补挂 fields=FIELD_SCHEMA——恢复批11D A-P2-7 契约
-    （feishu form 砍除时删了挂钩、新 Provider 没接，自助面表单零凭证框）。"""
+    （feishu form 砍除时删了挂钩、新 Provider 没接，自助面表单零凭证框）。
+    批13 UX 裁定：显示顺序=飞书→钉钉→企微（用户指定，非字母序）；未登记平台字母序垫底。"""
     _bootstrap_registry()
+    order = {p: i for i, p in enumerate(_PROVIDER_MODULES)}
+    ordered = sorted(_REGISTRY.items(), key=lambda kv: (order.get(kv[0], 99), kv[0]))
     out = []
-    for p, inst in sorted(_REGISTRY.items()):
+    for p, inst in ordered:
         methods = [{**m, "id": mid} for mid, m in inst.ONBOARDING_METHODS.items()]
         for m in methods:
             if m.get("kind") == "manual" and not m.get("fields"):

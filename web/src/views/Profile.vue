@@ -126,6 +126,8 @@
       <div v-else-if="curKind() === 'interactive'" style="padding: var(--sp-2) 0">
           <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrIntro') }}</div>
           <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
+          <div v-if="qrImg && qrCountdown" style="text-align: center; color: var(--text-secondary); font-size: 12px; margin-top: 4px">
+            {{ t('myIm.qrValid', { t: qrCountdown }) }}</div>
           <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">
             <div class="qr-skeleton"></div>{{ t('myIm.qrStarting') }}
           </div>
@@ -138,6 +140,9 @@
           </div>
           <div v-else-if="qrStatus === 'confirming'" style="text-align: center; color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrConfirming') }}</div>
           <div v-else-if="qrStatus === 'timeout'" style="text-align: center; color: var(--warn-fill)">{{ t('myIm.qrTimeout') }}</div>
+          <div v-if="qrStatus === 'timeout'" style="text-align: center; margin-top: 8px">
+            <el-button type="primary" @click="startQr">{{ t('myIm.qrRetry') }}</el-button>
+          </div>
           <div v-else-if="qrStatus === 'error'" style="text-align: center; color: var(--critical)">{{ qrNote || t('common.failed') }}</div>
           <div v-if="qrStatus === 'done' && qrCode" style="text-align: center; margin: var(--sp-2) 0">
             <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px">{{ t('myIm.bindCodeHint') }}</div>
@@ -156,8 +161,8 @@
         <el-button @click="guardClose(() => { imAddDlg = false })">{{ isTerminalQr || curKind() !== 'interactive' ? t('common.done') : t('common.cancel') }}</el-button>
         <el-button v-if="curKind() === 'manual'"
                    type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
-        <el-button v-else-if="curKind() === 'interactive' && ['','timeout','error'].includes(qrStatus)"
-                   type="primary" @click="startQr">{{ t('myIm.qrStart') }}</el-button>
+        <el-button v-else-if="curKind() === 'interactive' && qrStatus === 'error'"
+                   type="primary" @click="startQr">{{ t('myIm.qrRetry') }}</el-button>
       </template>
     </el-dialog>
 
@@ -271,7 +276,10 @@ const openImAdd = async () => {
   imMethod.value = ms.length ? ms[0].id : ''
   imFields.value = ms.find(m => m.id === imMethod.value)?.fields || []
   // 批13：恢复活会话仅在 interactive 页签可见时（盲审 A-P1-3③——manual 页签下不后台轮询飞书）
-  if (curKind() === 'interactive') resumeActiveSession()
+  if (curKind() === 'interactive') {
+    resumeActiveSession()
+    if (!qrStatus.value) startQr()   // UX 裁定：进入扫码页签直接出码（去"开始扫码"按钮层）
+  }
   imAddDlg.value = true
 }
 const saveIm = async () => {
@@ -358,6 +366,19 @@ const qrCode = ref('')
 let pollTimer = null
 let qrPollFails = 0
 let pollDeadline = 0
+const qrCountdown = ref('')
+let qrTickTimer = null
+const startQrCountdown = (expireAt) => {   // 批13 UX：二维码有效期倒计时（expire_in 秒）
+  stopQrCountdown()
+  const tick = () => {
+    const left = expireAt - Date.now()
+    if (left <= 0) { stopQrCountdown(); return }
+    qrCountdown.value = `${String(Math.floor(left / 60000)).padStart(2, '0')}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`
+  }
+  tick()
+  qrTickTimer = setInterval(tick, 1000)
+}
+const stopQrCountdown = () => { qrCountdown.value = ''; if (qrTickTimer) { clearInterval(qrTickTimer); qrTickTimer = null } }
 const curProvider = () => imProviders.value.find(p => p.provider === imForm.value.provider)
 const curMethods = () => (curProvider()?.methods || []).filter(m => m.kind === 'manual' || m.kind === 'interactive')
 // 批13：每平台单方式——curKind/curPostSteps 直取首方式（页签=平台，页签内容=方式）
@@ -370,7 +391,10 @@ const onImMethodChange = () => {
   stopPoll()   // 切走停轮询（会话仍在后台——ticket 不清）
   qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrCode.value = ''   // 复位旧码区（防过期码误导）
   // 2026-09-10 用户三轮：切回扫码=恢复活会话（不再退回"开始扫码"按钮——那要求用户重来一遍）
-  if (kind === 'interactive') resumeActiveSession()
+  if (kind === 'interactive') {
+    resumeActiveSession()
+    if (!qrStatus.value) startQr()   // UX 裁定：切回即出码
+  }
 }
 const qrTicketKey = () => 'im-onboarding-ticket:' + imForm.value.provider   // B-P2-2：键绑 provider
 const resumeActiveSession = () => {
@@ -379,6 +403,7 @@ const resumeActiveSession = () => {
     qrTicket.value = savedTicket
     qrStatus.value = 'starting'   // 轮询首查即翻 scanning（有码）或 expired
     pollDeadline = Date.now() + 600_000
+    startQrCountdown(pollDeadline)
     pollTimer = setInterval(pollQr, 3_000)
   }
 }
@@ -396,6 +421,7 @@ const startQr = async () => {
     sessionStorage.setItem(qrTicketKey(), r.ticket)
     if (r.qr_img) { qrImg.value = r.qr_img; qrStatus.value = 'scanning' }
     pollDeadline = Date.now() + (r.expire_in || 600) * 1000
+    startQrCountdown(pollDeadline)   // UX 裁定：有效期倒计时
     pollTimer = setInterval(pollQr, 3_000)
   } catch (e) {
     // 批12A #8：BUSY 自动恢复活会话（existing_ticket——频控困局解锁，B-P2-3 通道）
@@ -405,6 +431,7 @@ const startQr = async () => {
       sessionStorage.setItem(qrTicketKey(), et)
       qrStatus.value = 'starting'
       pollDeadline = Date.now() + 600_000
+      startQrCountdown(pollDeadline)
       pollTimer = setInterval(pollQr, 3_000)
       ElMessage.info(t('myIm.resumed'))
       return
@@ -455,7 +482,7 @@ const guardClose = (done) => {
       .catch(() => {})
   } else { stopPoll(); done() }
 }
-onUnmounted(stopPoll)   // 轮询三件套①（组件级）
+onUnmounted(() => { stopPoll(); stopQrCountdown() })   // 轮询三件套①（组件级）+倒计时
 watch(imAddDlg, v => { if (!v) stopPoll() })   // ②弹窗关停
 
 
