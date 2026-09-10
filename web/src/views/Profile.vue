@@ -125,6 +125,10 @@
           <div v-else-if="qrStatus === 'scanning'" style="text-align: center; color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrScanning') }}</div>
           <div v-else-if="qrStatus === 'timeout'" style="text-align: center; color: var(--warn-fill)">{{ t('myIm.qrTimeout') }}</div>
           <div v-else-if="qrStatus === 'error'" style="text-align: center; color: var(--critical)">{{ qrNote || t('common.failed') }}</div>
+          <div v-if="qrStatus === 'done' && qrCode" style="text-align: center; margin: var(--sp-2) 0">
+            <div style="color: var(--text-secondary); font-size: 13px; margin-bottom: 8px">{{ t('myIm.bindCodeHint') }}</div>
+            <div style="font-size: 32px; font-weight: 700; letter-spacing: 8px; color: var(--brand-600)">{{ qrCode }}</div>
+          </div>
           <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: 13px">{{ qrNote }}</div>
         </div>
       </el-form>
@@ -242,7 +246,7 @@ const openImAdd = async () => {
   imForm.value = { provider: imForm.value.provider, name: '', creds: {} }
   // 盲审 P2-4/P2-5：会话状态复位 + 默认选中首方式（单方式直进）
   stopPoll()
-  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrTicket.value = ''
+  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrTicket.value = ''; qrCode.value = ''
   const ms = curMethods()
   imMethod.value = ms.length ? ms[0].id : ''
   imFields.value = ms.find(m => m.id === imMethod.value)?.fields || []
@@ -292,6 +296,7 @@ const qrTicket = ref('')
 const qrImg = ref('')
 const qrStatus = ref('')                     // ''|starting|scanning|done|error|timeout
 const qrNote = ref('')
+const qrCode = ref('')
 let pollTimer = null
 let qrPollFails = 0
 let pollDeadline = 0
@@ -301,11 +306,12 @@ const curMethods = () => (curProvider()?.methods || []).filter(m => m.kind === '
 const onImMethodChange = () => {
   imFields.value = curMethods().find(m => m.id === imMethod.value)?.fields || []
   stopPoll()   // 换方式弃当前会话
+  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrCode.value = ''   // 盲审 P2-5：复位旧码区（防过期码误导）
 }
 const onImProviderChange = () => {   // 盲审 B-P2-8：换平台重算方式与字段（methods 空的 provider 已在下拉过滤）
   const ms = curMethods()
   imMethod.value = ms.length ? ms[0].id : ''
-  onImMethodChange()
+  onImMethodChange()   // 内含码区复位（P2-5）
 }
 const startQr = async () => {
   qrStatus.value = 'starting'; qrImg.value = ''; qrNote.value = ''
@@ -327,6 +333,7 @@ const pollQr = async () => {
     if (d.status === 'done') {
       stopPoll()
       if (d.owned === false) { qrNote.value = t('myIm.ownedFalse'); ElMessage.warning(t('myIm.ownedFalse')) }
+      else if (d.bind_code) { qrCode.value = d.bind_code; ElMessage.success(t('myIm.qrDone')) }   // 批11E：验证码一步绑定
       else ElMessage.success(t('myIm.qrDone'))
       await loadIm()
     }

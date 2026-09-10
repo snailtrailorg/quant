@@ -314,7 +314,7 @@ def _first_seen_note(open_id: str, fid: int) -> None:
         logger.warning("首见留痕失败(不影响拒答): %s", e)
 
 
-def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None):
+def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None, chat_type: str = ""):
     if receive_id is None: receive_id = open_id
     """后台线程：消息 → LLM 网关 → 回复/确认卡片。per-机器人 role（机器人=登录账号）。"""
     print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
@@ -325,6 +325,36 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     if fid:
         _first_seen_note(open_id, fid)
     identity = resolve_im_identity(open_id)   # webhook 路径同链（env 兜底已从身份面摘除，A-P1-3）
+    if not identity and fid and chat_type == "p2p":
+        # 批11E：验证码自动绑定——p2p 判据=chat_type（代码盲审 P0-3：p2p 也有 chat_id,receive_id_type 判不出）
+        # 码错不绑走原拒答；消费后整段兜底（盲审 P2-2：失败不静默烧码,明确引导手动绑定）
+        try:
+            from src.im_bot.bindcode import match_consume
+            if match_consume(fid, text, True):
+                from src.data_platform.db import get_conn as _gc
+                with _gc() as conn:
+                    _owner = conn.execute(
+                        "SELECT owner_user_id FROM im_bot_config WHERE id=%s", (fid,)).fetchone()[0]
+                from src.im_bot.users import bind_owner
+                from src.data_platform.db import get_conn as _gc
+                with _gc() as conn:
+                    # 已绑拦截（防二次抢绑——码 GETDEL 单次已串行化并发,此处为防御纵深）
+                    _bound = conn.execute(
+                        "SELECT 1 FROM im_bot_users WHERE bot_id=%s AND user_id IS NOT NULL LIMIT 1",
+                        (fid,)).fetchone()
+                if _owner is not None and not _bound:
+                    # bind_owner 原语=ON CONFLICT DO UPDATE：首见留痕 NULL 行就地转绑定行（盲审 P0-2：
+                    # 内联裸 INSERT 撞 (bot_id,im_user_id) 唯一约束必崩）——pending 计数随之归零
+                    bind_owner(fid, open_id, _owner)
+                    from src.im_bot.users import resolve_im_identity as _ri
+                    if _ri(open_id):
+                        from src.data_platform.audit import audit_log
+                        audit_log(f"im(bot#{fid})", "owner_im_bind_autocode",
+                                  target=str(_owner), detail=f"open_id={open_id[:8]}…")   # 不含码
+                        client.send_text(receive_id, "✅ 绑定成功，此后以你的身份与权限对话", receive_id_type)
+                        return
+        except Exception as e:
+            logger.warning("验证码自动绑定异常（码可能已消费,请走手动绑定兜底）: %s", e)
     if not identity:
         # 代码盲审 A-P0-1 修：文案分流——平台级 bot 指引找管理员（管理面 upsert user_id 绑定），
         # 自有 bot 指引个人中心绑定（_own_bot 仅 owner 可达——平台 bot 用户走那条路是死路）

@@ -96,7 +96,9 @@ def im_bots_onboarding_status(ticket: str, payload: dict = Depends(require_perm(
     data = r.get(f"feishu:session:{ticket}")
     if not data:
         return {"status": "pending"}
-    return json.loads(data)
+    d = json.loads(data)
+    d.pop("bind_code", None)   # 批11E（B-P2）：admin 面不泄露他人自助会话的验证码（代码盲审 P0-1 真落点）
+    return d
 
 
 @router.post("/api/im-bots/{bid}/start")
@@ -282,7 +284,7 @@ def my_im_onboarding_status(ticket: str, payload: dict = Depends(require_authent
     d = json.loads(data)
     if d.get("owner_user_id") is not None and d.get("owner_user_id") != int(payload["sub"]):
         raise ApiError(404, "NOT_FOUND", "会话不存在")
-    return d
+    return d   # 自助面原样返回（含 bind_code——owner 本人才能看到码,代码盲审 P0-2 修：pop 误加在此=前端永拿不到码）
 
 
 @router.get("/api/my/im-bots")
@@ -343,6 +345,11 @@ def my_im_bind(bid: int, body: dict = Body(...), payload: dict = Depends(require
     if not open_id or len(open_id) > 64:
         raise ApiError(400, "OPEN_ID_INVALID", "open_id 无效")
     bind_owner(bid, open_id, int(payload["sub"]))
+    try:
+        from src.im_bot.bindcode import revoke
+        revoke(bid)   # 方案 §2：手动绑成功同 DEL 码（B-P2-2）
+    except Exception:
+        pass
     audit_log(payload["username"], "owner_im_bind", detail=f"#{bid} {open_id[:8]}…")
     return {"ok": True}
 

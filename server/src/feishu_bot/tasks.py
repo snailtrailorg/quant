@@ -135,8 +135,17 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
                      encrypt(_json.dumps(creds, ensure_ascii=False)),
                      _json.dumps({"route_key": app_id}))).fetchone()
                 conn.commit()
+            bind_code = None   # 批11E：仅 ins 真新建且自助 owner 发码（重扫/平台级/admin 不发——B-P1-1/A-P2）
             if ins:
                 _audit(owner_user_id, "im_register_create", ins[0], app_id)   # 真插入=新 bot（盲审 P2-1：避开重扫分支误标）
+                if owner_user_id is not None:
+                    from src.im_bot.bindcode import gen_code, issue
+                    bind_code = gen_code()
+                    try:
+                        issue(ins[0], bind_code)      # 双写之一（键）；session 载荷在末尾 done 处——同码
+                    except Exception as e:
+                        bind_code = None
+                        logger.warning(f"验证码写入失败(不影响接入): {e}")
             elif not row:
                 # A-P2-6：并发同 app 冲突（INSERT 被吞）→ 重查行走进重扫判定
                 cur = conn.execute(
@@ -173,7 +182,10 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
                     (app_name, row[0]))
                 conn.commit()
                 _audit(owner_user_id, "im_rescan", row[0], app_id)
-        _set_session(session_id, {"status": "done", "app_id": app_id, "owned": True}, expire=600)
+        done_payload = {"status": "done", "app_id": app_id, "owned": True}
+        if bind_code:
+            done_payload["bind_code"] = bind_code   # 前端显示码（ticket 归属已绑定,他人轮询 404）
+        _set_session(session_id, done_payload, expire=900)   # 批11E A-P2-4：与码 TTL 900 对齐（600 会先失联）
         logger.info(f"feishu register done: app_id={app_id}")
         _SESSION_OWNER.pop(session_id, None)
     except Exception as e:

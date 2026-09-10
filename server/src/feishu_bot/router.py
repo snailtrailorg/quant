@@ -54,7 +54,9 @@ async def webhook(request: Request):
 
     # 后台处理（立即返回，不阻塞 3s 超时）
     receive_id = msg.get("chat_id", open_id)
-    _executor.submit(process_message_async, open_id, text, "chat_id" if receive_id != open_id else "open_id")
+    _executor.submit(process_message_async, open_id, text,
+                     "chat_id" if receive_id != open_id else "open_id",
+                     receive_id, None, msg.get("chat_type", ""))   # 批11E：透传 chat_type（码绑定 p2p 判据）
 
     return {"code": 0}  # 立即返回，3s 内
 

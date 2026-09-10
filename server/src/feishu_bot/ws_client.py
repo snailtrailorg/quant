@@ -49,11 +49,12 @@ def on_message(data) -> None:
         chat_id = getattr(msg, "chat_id", "")
         receive_id = chat_id or open_id
         receive_id_type = "chat_id" if chat_id else "open_id"
+        chat_type = getattr(msg, "chat_type", "") or ""   # 批11E P0-3：p2p 也有 chat_id——私聊判别唯一真源=chat_type
         # 补审E-3：起后台线程处理（与 router/webhook 路径对齐）——原同步跑在 lark ws 的
         # asyncio 事件循环上，LLM chat 阻塞期间 ping 停发可能被服务端断连
         import threading
         threading.Thread(target=process_message_async, daemon=True,
-                         args=(open_id, text, receive_id_type, receive_id, _FID)).start()
+                         args=(open_id, text, receive_id_type, receive_id, _FID, chat_type)).start()
     except Exception as e:
         print(f"=== on_message ERROR: {e}", flush=True)
         import traceback; traceback.print_exc()

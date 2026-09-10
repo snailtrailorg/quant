@@ -132,7 +132,8 @@ export default {
       delConfirm: '确定删除通道 {name}？',
       qrIntro: '扫码接入：由开放平台引导创建或连接应用，凭证自动配置（推荐）。',
       qrStart: '开始扫码', qrStarting: '正在生成二维码…', qrScanning: '请用手机扫码，并在手机上确认',
-      qrDone: '接入成功', qrTimeout: '二维码已过期，请重新发起', ownedFalse: '该应用为平台级/他人通道：已刷新凭证，未变更归属与启停',
+      qrDone: '接入成功', qrTimeout: '二维码已过期，请重新发起',
+      bindCodeHint: '接入成功！将此验证码私聊发给该机器人，即自动完成身份绑定（15 分钟内有效）', ownedFalse: '该应用为平台级/他人通道：已刷新凭证，未变更归属与启停',
     },
     um: {   // 批11：用户管理页（系统管理第一项）；批11B 增组管理
       tabUsers: '用户列表', tabGroups: '用户群组',
@@ -1274,7 +1275,8 @@ export default {
       delConfirm: 'Delete channel {name}?',
       qrIntro: 'QR onboarding: the open platform guides app creation/connection; credentials auto-configured (recommended).',
       qrStart: 'Start QR', qrStarting: 'Generating QR code…', qrScanning: 'Scan with your phone and confirm on it',
-      qrDone: 'Connected', qrTimeout: 'QR code expired — start again', ownedFalse: 'This app belongs to the platform/another account: credentials refreshed, ownership & state unchanged',
+      qrDone: 'Connected', qrTimeout: 'QR code expired — start again',
+      bindCodeHint: 'Connected! Send this code to the bot in a private chat to auto-bind your identity (valid 15 min)', ownedFalse: 'This app belongs to the platform/another account: credentials refreshed, ownership & state unchanged',
     },
     um: {   // batch 11: user management page; batch 11B adds group management
       tabUsers: 'Users', tabGroups: 'User Groups',
