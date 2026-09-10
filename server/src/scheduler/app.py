@@ -42,7 +42,7 @@ app = Celery(
     "quant",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=["src.scheduler.tasks", "src.feishu_bot.tasks", "src.scheduler.alert_tasks"],
+    include=["src.scheduler.tasks", "src.scheduler.alert_tasks"],   # 批12A：feishu onboarding 去 celery 化摘除
 )
 
 # 批 7 告警三队列（显式全名映射——生产者 send_task 按名投递，此处兜路由）：

@@ -23,9 +23,13 @@ app = FastAPI(title="量化交易平台 API", version="0.1.0")
 
 @app.exception_handler(ApiError)
 async def api_error_handler(request, exc: ApiError):
-    """错误码化响应：detail(中文兜底) + 顶层 code（前端 err.<CODE> 本地化）。"""
+    """错误码化响应：detail(中文兜底) + 顶层 code（前端 err.<CODE> 本地化）。
+    批12A：extra 字典合并顶层（如 429 携 existing_ticket——B-P2-3 通道）。"""
     from fastapi.responses import JSONResponse
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail, "code": exc.code})
+    content = {"detail": exc.detail, "code": exc.code}
+    if getattr(exc, "extra", None):
+        content.update(exc.extra)
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 from src.feishu_bot.router import router as feishu_router
@@ -64,6 +68,16 @@ app.add_middleware(
 
 @app.on_event("startup")
 def startup():
+    # 批12A（A-P1-2）：清非终态扫码会话——发布重启杀 daemon 线程的死会话若不扫，
+    # existing_ticket 会把死人还给前端"恢复"（白扫+频控困局加重版）
+    try:
+        from src.feishu_bot.tasks import sweep_stale_sessions
+        n = sweep_stale_sessions()
+        if n:
+            import logging as _lg
+            _lg.getLogger("web_api").warning("startup 清扫死扫码会话 %d 个", n)
+    except Exception:
+        pass
     init_users_table()
     # #48：启动时列级校验（纯函数 -> 入口层路由告警；失败不阻断启动）
     try:

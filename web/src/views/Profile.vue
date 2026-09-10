@@ -59,6 +59,15 @@
         <div v-else>
     <el-divider />
 
+    <!-- 批12A #3：绑定码常驻横条（关弹窗不丢码——pending 归零/15min 过期后消失） -->
+    <el-alert v-if="barCode" type="success" :closable="false" style="margin-bottom: 12px">
+      <div style="display: flex; align-items: center; gap: 16px">
+        <span style="font-size: 13px">{{ t('myIm.barHint') }}</span>
+        <span style="font-size: 26px; font-weight: 700; letter-spacing: 6px; color: var(--brand-600)">{{ barCode }}</span>
+        <span style="font-size: 13px; color: var(--text-secondary)">{{ barCountdown }}</span>
+      </div>
+    </el-alert>
+
     <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
       <h3 style="font-size: 16px; margin: 0">{{ t('myIm.title') }}</h3>
@@ -93,7 +102,7 @@
     <div v-else style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
 
     <!-- 添加 IM 通道（批11D：按注册表 methods 自动生成——方式选择+表单/扫码双形态） -->
-    <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="520px">
+    <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="520px" :before-close="guardClose">
       <el-form label-width="120px">
         <el-form-item :label="t('myIm.provider')">
           <el-select v-model="imForm.provider" style="width: 200px" @change="onImProviderChange">
@@ -121,8 +130,17 @@
         <div v-else-if="imMethod" style="padding: var(--sp-2) 0">
           <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrIntro') }}</div>
           <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
-          <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">{{ t('myIm.qrStarting') }}</div>
-          <div v-else-if="qrStatus === 'scanning'" style="text-align: center; color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrScanning') }}</div>
+          <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">
+            <div class="qr-skeleton"></div>{{ t('myIm.qrStarting') }}
+          </div>
+          <div v-else-if="qrStatus === 'scanning'" style="text-align: center">
+            <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrScanning') }}</div>
+            <!-- 批12A #7：引导三行（22 号 §3.2b+§3.4-8——App 归属/手机选择预告/归因飞书） -->
+            <div style="color: var(--text-secondary); font-size: 12px; margin-top: 8px; line-height: 1.8">
+              {{ t('myIm.guideApp') }}<br/>{{ t('myIm.guideChoice') }}<br/>{{ t('myIm.guideWhy') }}
+            </div>
+          </div>
+          <div v-else-if="qrStatus === 'confirming'" style="text-align: center; color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrConfirming') }}</div>
           <div v-else-if="qrStatus === 'timeout'" style="text-align: center; color: var(--warn-fill)">{{ t('myIm.qrTimeout') }}</div>
           <div v-else-if="qrStatus === 'error'" style="text-align: center; color: var(--critical)">{{ qrNote || t('common.failed') }}</div>
           <div v-if="qrStatus === 'done' && qrCode" style="text-align: center; margin: var(--sp-2) 0">
@@ -134,7 +152,7 @@
       </el-form>
       <div style="color: var(--text-secondary); font-size: 12px">{{ t('myIm.addHint') }}</div>
       <template #footer>
-        <el-button @click="imAddDlg = false">{{ t('common.close') }}</el-button>
+        <el-button @click="guardClose(() => { imAddDlg = false })">{{ t('common.close') }}</el-button>
         <el-button v-if="imMethod && curMethods().find(m => m.id === imMethod)?.kind === 'manual'"
                    type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
         <el-button v-else-if="imMethod && ['','timeout','error'].includes(qrStatus)"
@@ -250,6 +268,14 @@ const openImAdd = async () => {
   const ms = curMethods()
   imMethod.value = ms.length ? ms[0].id : ''
   imFields.value = ms.find(m => m.id === imMethod.value)?.fields || []
+  // 批12A：恢复活会话（sessionStorage ticket——刷新/重开后 900s 内重轮仍可拿码）
+  const savedTicket = sessionStorage.getItem('im-onboarding-ticket')
+  if (savedTicket) {
+    qrTicket.value = savedTicket
+    qrStatus.value = 'starting'
+    pollDeadline = Date.now() + 600_000
+    pollTimer = setInterval(pollQr, 3_000)
+  }
   imAddDlg.value = true
 }
 const saveIm = async () => {
@@ -290,6 +316,27 @@ const bindOpenId = async (openId) => {
 }
 onMounted(loadIm)
 
+// ——— 批12A #3：绑定码横条（独立 refs 不进复位清单——B-P1-4；弹窗关了横条仍在） ———
+const barCode = ref('')
+const barExpireAt = ref(0)
+const barCountdown = ref('')
+let barTimer = null
+const startBarWatch = () => {
+  if (barTimer) clearInterval(barTimer)
+  barTimer = setInterval(async () => {
+    const left = barExpireAt.value - Date.now()
+    if (left <= 0) { stopBarWatch(); return }
+    barCountdown.value = `${String(Math.floor(left / 60000)).padStart(2, '0')}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`
+    await loadIm()   // pending 归零（绑定完成）即消失
+    if (!imBots.value.some(b => b.pending_binds)) stopBarWatch()
+  }, 1_000)
+}
+const stopBarWatch = () => {
+  barCode.value = ''; barCountdown.value = ''
+  if (barTimer) { clearInterval(barTimer); barTimer = null }
+}
+onUnmounted(stopBarWatch)
+
 // ——— 批11D：扫码向导（kind=interactive 方式）+ 轮询三件套 ———
 const imMethod = ref('')                     // 当前方式 id（qr|form）
 const qrTicket = ref('')
@@ -317,23 +364,49 @@ const startQr = async () => {
   qrStatus.value = 'starting'; qrImg.value = ''; qrNote.value = ''
   try {
     const r = await api.post(`/my/im-bots/onboarding/${imForm.value.provider}/${imMethod.value}`)
+    // 批12A：同步出码——后端 ≤5s 内直接带 qr_img（本地实测 0.69s）；202=慢网回落轮询
     qrTicket.value = r.ticket
-    pollDeadline = Date.now() + 600_000     // 600s 前端兜底（后端 pending 混同过期永不报——B-P2-4③）
-    pollTimer = setInterval(pollQr, 10_000)
-  } catch (e) { qrStatus.value = 'error'; qrNote.value = apiErr(e, ''); ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+    sessionStorage.setItem('im-onboarding-ticket', r.ticket)
+    if (r.qr_img) { qrImg.value = r.qr_img; qrStatus.value = 'scanning' }
+    pollDeadline = Date.now() + (r.expire_in || 600) * 1000
+    pollTimer = setInterval(pollQr, 3_000)
+  } catch (e) {
+    // 批12A #8：BUSY 自动恢复活会话（existing_ticket——频控困局解锁，B-P2-3 通道）
+    const et = e?.existing_ticket   // 拦截器已剥 response.data（api.js L20 reject err.response?.data）
+    if (et) {
+      qrTicket.value = et
+      sessionStorage.setItem('im-onboarding-ticket', et)
+      qrStatus.value = 'starting'
+      pollDeadline = Date.now() + 600_000
+      pollTimer = setInterval(pollQr, 3_000)
+      ElMessage.info(t('myIm.resumed'))
+      return
+    }
+    qrStatus.value = 'error'; qrNote.value = apiErr(e, ''); ElMessage.error(apiErr(e, t('common.operationFailed')))
+  }
 }
 const pollQr = async () => {
   qrPollFails = 0
   if (Date.now() > pollDeadline) { qrStatus.value = 'timeout'; stopPoll(); return }
   try {
     const d = await api.get(`/my/im-bots/onboarding-status/${qrTicket.value}`)
+    if (d.status === 'expired') {   // 批12A（A-P2-6）：key 不存在=过期（原 pending 混同收口）
+      qrStatus.value = 'timeout'; stopPoll(); sessionStorage.removeItem('im-onboarding-ticket'); return
+    }
     qrStatus.value = d.status || 'pending'
     if (d.qr_img) qrImg.value = d.qr_img
     if (d.status === 'scanning' && !qrImg.value) qrStatus.value = 'scanning'
     if (d.status === 'done') {
       stopPoll()
       if (d.owned === false) { qrNote.value = t('myIm.ownedFalse'); ElMessage.warning(t('myIm.ownedFalse')) }
-      else if (d.bind_code) { qrCode.value = d.bind_code; ElMessage.success(t('myIm.qrDone')) }   // 批11E：验证码一步绑定
+      else if (d.bind_code) {
+        qrCode.value = d.bind_code; ElMessage.success(t('myIm.qrDone'))
+        // 批12A #3：码落横条（独立 refs——关弹窗不丢；pending 归零/过期消失）
+        barCode.value = d.bind_code
+        barExpireAt.value = Date.now() + 900_000
+        startBarWatch()
+        sessionStorage.removeItem('im-onboarding-ticket')
+      }
       else ElMessage.success(t('myIm.qrDone'))
       await loadIm()
     }
@@ -345,6 +418,14 @@ const pollQr = async () => {
   }
 }
 const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+// 批12A #4：处理中关弹窗挽留（before-close 统一 X/ESC/遮罩/footer 三路径——B-P2-1）
+const guardClose = (done) => {
+  if (['scanning', 'confirming', 'starting', 'pending'].includes(qrStatus.value)) {   // 盲审B-P1-1：pending（202 回落窗）也挽留
+    ElMessageBox.confirm(t('myIm.closeGuard'), t('common.tip'), { type: 'warning' })
+      .then(() => { stopPoll(); done() })
+      .catch(() => {})
+  } else { stopPoll(); done() }
+}
 onUnmounted(stopPoll)   // 轮询三件套①（组件级）
 watch(imAddDlg, v => { if (!v) stopPoll() })   // ②弹窗关停
 

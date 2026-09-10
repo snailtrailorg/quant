@@ -103,14 +103,15 @@ class TestTaskIssue:
         fake = MagicMock(); fake.register_app.return_value = {"client_id": "cli_z", "client_secret": "s"}
         with patch("src.feishu_bot.tasks.get_conn", return_value=conn), \
              patch.object(T.lark, "register_app", fake.register_app), \
-             patch.object(T, "_set_session", lambda sid, d, expire=None: states.append(d)), \
+             patch.object(T, "_set_session", lambda sid, d, expire=600, owner_user_id=None: states.append(d)), \
              patch("src.im_bot.credentials.save_bot_credentials", MagicMock()), \
              patch("src.im_bot.credentials.get_bot_credentials", return_value={}), \
              patch.object(T, "_audit"), \
+             patch.object(T, "_current_username", return_value="u9"), \
              patch("src.im_bot.bindcode.issue") as p_issue, \
              patch("httpx.post", return_value=MagicMock(json=lambda: {})), \
              patch("httpx.get", return_value=MagicMock(json=lambda: {})):
-            T.feishu_register_task.run("s", owner_user_id=task_owner)
+            T.run_onboarding("s", owner_user_id=task_owner)
         return states, p_issue
 
     def test_new_bot_self_service_issues_code(self):

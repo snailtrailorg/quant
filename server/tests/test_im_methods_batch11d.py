@@ -119,11 +119,16 @@ class TestSelfOnboarding:
         with contextlib.ExitStack() as s:
             for p in _ctx(conn): s.enter_context(p)
             s.enter_context(patch("src.web_api.routes.im_bots.feishu_redis_client", return_value=rd))
-            task = s.enter_context(patch("src.web_api.routes.im_bots._wizard_task"))
+            entry = s.enter_context(patch("src.web_api.routes.im_bots._wizard_entry"))
             s.enter_context(patch("src.web_api.routes.im_bots.audit_log"))
+            set_s = s.enter_context(patch("src.feishu_bot.tasks._set_session"))
+            s.enter_context(patch("src.feishu_bot.tasks.acquire_onboarding_slot", return_value=True))
             r = _client().post("/api/my/im-bots/onboarding/feishu/qr", headers={"Authorization": "Bearer t"})
-        assert r.status_code == 200 and "ticket" in r.json()
-        assert task.return_value.delay.call_args.kwargs.get("owner_user_id") == 9   # owner=会话钉死
+        assert r.status_code in (200, 202) and "ticket" in r.json()
+        # 盲审 B-P1-2：owner 钉死断言重建（IDOR 防线回归护栏——观察点=端点同步写 pending 的 owner 参,
+        # 线程内 entry 调用有竞态不可稳定断言;owner 正确传递由 args=(session_id, uid) 与 pending 同源保证）
+        owner_args = [c.kwargs.get("owner_user_id") for c in set_s.call_args_list]
+        assert 9 in owner_args
 
     def test_ticket_owner_binding_404(self):
         """他人 ticket → 404（A-P2-2 session 载荷 owner 比对）。"""
@@ -156,12 +161,13 @@ class TestRescanBranches:
              patch.object(T, "_set_session", set_session), \
              patch("src.im_bot.credentials.save_bot_credentials", save_creds), \
              patch("src.im_bot.credentials.get_bot_credentials", return_value={}), \
-             patch.object(T, "_audit"):
-            T.feishu_register_task.run("sess", owner_user_id=task_owner)
+             patch.object(T, "_audit"), \
+             patch.object(T, "_current_username", return_value="u9"):
+            T.run_onboarding("sess", owner_user_id=task_owner)
 
     def test_others_bot_error(self):
         states = []
-        set_s = lambda sid, d, expire=None: states.append(d)
+        set_s = lambda sid, d, expire=None, owner_user_id=None: states.append(d)
         self._run_task_rescan(row_owner=1, task_owner=9, set_session=set_s, save_creds=MagicMock())
         final = states[-1]
         assert final["status"] == "error" and "已被其他账号接入" in final["error"]
@@ -169,7 +175,7 @@ class TestRescanBranches:
     def test_platform_bot_creds_only_no_enable_flip(self):
         """平台级 bot（owner NULL）+ 自助重扫 → 只刷凭证：UPDATE enabled 语句不得出现。"""
         states, upd = [], MagicMock()
-        set_s = lambda sid, d, expire=None: states.append(d)
+        set_s = lambda sid, d, expire=None, owner_user_id=None: states.append(d)
         # 用真 conn 捕获 SQL
         sqls = []
         conn = MagicMock(); conn.__enter__.return_value = conn
@@ -180,11 +186,12 @@ class TestRescanBranches:
         fake_lark.register_app.return_value = {"client_id": "cli_x", "client_secret": "s"}
         with patch("src.feishu_bot.tasks.get_conn", return_value=conn), \
              patch.object(T.lark, "register_app", fake_lark.register_app), \
-             patch.object(T, "_set_session", set_s), \
+             patch.object(T, "_set_session", lambda sid, d, expire=600, owner_user_id=None: set_s(sid, d, expire)), \
              patch("src.im_bot.credentials.save_bot_credentials", upd), \
              patch("src.im_bot.credentials.get_bot_credentials", return_value={}), \
-             patch.object(T, "_audit"):
-            T.feishu_register_task.run("sess", owner_user_id=9)
+             patch.object(T, "_audit"), \
+             patch.object(T, "_current_username", return_value="u9"):
+            T.run_onboarding("sess", owner_user_id=9)
         assert states[-1]["status"] == "done" and states[-1]["owned"] is False
         assert upd.called                                   # 凭证刷了
         assert not any("enabled=true" in s for s in sqls)     # 不翻 enabled（A-P1-1）
@@ -192,7 +199,7 @@ class TestRescanBranches:
     def test_own_rescan_keeps_legacy(self):
         """自己/admin 重扫 → 现状：翻 enabled+改名。"""
         states = []
-        set_s = lambda sid, d, expire=None: states.append(d)
+        set_s = lambda sid, d, expire=None, owner_user_id=None: states.append(d)
         sqls = []
         conn = MagicMock(); conn.__enter__.return_value = conn
         cur = MagicMock(); cur.fetchone.return_value = (10, "enc", 9)
@@ -202,11 +209,12 @@ class TestRescanBranches:
         fake_lark.register_app.return_value = {"client_id": "cli_x", "client_secret": "s"}
         with patch("src.feishu_bot.tasks.get_conn", return_value=conn), \
              patch.object(T.lark, "register_app", fake_lark.register_app), \
-             patch.object(T, "_set_session", set_s), \
+             patch.object(T, "_set_session", lambda sid, d, expire=600, owner_user_id=None: set_s(sid, d, expire)), \
              patch("src.im_bot.credentials.save_bot_credentials", MagicMock()), \
              patch("src.im_bot.credentials.get_bot_credentials", return_value={}), \
-             patch.object(T, "_audit"):
-            T.feishu_register_task.run("sess", owner_user_id=9)
+             patch.object(T, "_audit"), \
+             patch.object(T, "_current_username", return_value="u9"):
+            T.run_onboarding("sess", owner_user_id=9)
         assert states[-1]["status"] == "done" and states[-1]["owned"] is True
         assert any("enabled=true" in s for s in sqls)
 
@@ -227,10 +235,9 @@ class TestPostCodeReview:
         import json as _j
         rd = MagicMock()
         T._redis = rd
-        T._SESSION_OWNER["s1"] = 9
-        T._set_session("s1", {"status": "scanning", "qr_img": "x"}, expire=600)
+        T._set_session("s1", {"status": "scanning", "qr_img": "x"}, expire=600, owner_user_id=9)   # 批12A：owner 显式传参（_SESSION_OWNER 退役）
         payload = _j.loads(rd.setex.call_args[0][2])
-        assert payload["owner_user_id"] == 9 and payload["status"] == "scanning"
+        assert payload["owner_user_id"] == 9 and payload["status"] == "scanning" and "ts" in payload
 
     def test_own_status_200(self):
         """B-P2-1 附：本人 ticket 轮询 200（归属比对只拒他人）。"""
@@ -264,11 +271,12 @@ class TestPostCodeReview:
         fake = MagicMock(); fake.register_app.return_value = {"client_id": "cli_c", "client_secret": "s"}
         with patch("src.feishu_bot.tasks.get_conn", return_value=conn), \
              patch.object(T.lark, "register_app", fake.register_app), \
-             patch.object(T, "_set_session", lambda sid, d, expire=None: states.append(d)), \
+             patch.object(T, "_set_session", lambda sid, d, expire=600, owner_user_id=None: states.append(d)), \
              patch("src.im_bot.credentials.save_bot_credentials", MagicMock()), \
              patch("src.im_bot.credentials.get_bot_credentials", return_value={}), \
              patch.object(T, "_audit"), \
+             patch.object(T, "_current_username", return_value="u9"), \
              patch("httpx.post", return_value=MagicMock(json=lambda: {})), \
              patch("httpx.get", return_value=MagicMock(json=lambda: {})):
-            T.feishu_register_task.run("s", owner_user_id=9)
+            T.run_onboarding("s", owner_user_id=9)
         assert states[-1]["status"] == "error" and states[-1]["code"] == "ONBOARDING_APP_TAKEN"

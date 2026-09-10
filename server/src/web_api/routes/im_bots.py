@@ -1,6 +1,7 @@
 """Web 后端 · IM 机器人路由（/api/im-bots/*，从 main.py 迁出）。"""
 
 from fastapi import APIRouter, Depends, Request, Body, BackgroundTasks
+from fastapi.responses import JSONResponse
 from ..auth import require_role, require_perm, require_authenticated, audit_log
 from ..errors import ApiError
 from ..models import (IMBotCreateReq, IMBotUpdateReq, IMBotUserReq)
@@ -74,7 +75,7 @@ def im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_perm("im
 
 @router.post("/api/im-bots/onboarding/{provider}")
 def im_bots_onboarding(provider: str, payload: dict = Depends(require_perm("im_bots_config"))):
-    """启动辅助接入(扫码/回跳)。飞书=FeishuRegisterTask 扫码(向后兼容原 /api/feishu/connect)。"""
+    """启动辅助接入（扫码/回跳）。批12A：飞书=web 进程线程跑 run_onboarding（去 celery）。"""
     from src.im_bot.base import get_im_provider
     p = get_im_provider(provider)
     if p is None:
@@ -82,9 +83,17 @@ def im_bots_onboarding(provider: str, payload: dict = Depends(require_perm("im_b
     if p.ONBOARDING != "interactive":
         raise ApiError(400, "NOT_INTERACTIVE", f"{provider} 走手动添加(manual)")
     if provider == "feishu":
-        from src.feishu_bot.tasks import feishu_register_task
+        from src.feishu_bot.tasks import run_onboarding, acquire_onboarding_slot, release_onboarding_slot, _set_session
+        if not acquire_onboarding_slot():
+            raise ApiError(429, "ONBOARDING_BUSY", "当前接入人数较多，请稍后再试")
         session_id = str(uuid.uuid4())
-        feishu_register_task.delay(session_id)
+        import threading as _th
+        try:   # 盲审 A-P1-2：同自助面——acquire 后失败归还帽位
+            _set_session(session_id, {"status": "pending"}, expire=900, owner_user_id=None)   # admin=平台级
+            _th.Thread(target=run_onboarding, daemon=True, args=(session_id,)).start()
+        except Exception:
+            release_onboarding_slot()
+            raise
         return {"type": "qr", "ticket": session_id}
     raise ApiError(400, "NOT_IMPLEMENTED", f"{provider} 辅助接入待实现")
 
@@ -95,9 +104,9 @@ def im_bots_onboarding_status(ticket: str, payload: dict = Depends(require_perm(
     r = feishu_redis_client()
     data = r.get(f"feishu:session:{ticket}")
     if not data:
-        return {"status": "pending"}
+        return {"status": "expired"}   # 批12A（A-P2-7）：与自助面语义对齐（原 pending 混同过期）
     d = json.loads(data)
-    d.pop("bind_code", None)   # 批11E（B-P2）：admin 面不泄露他人自助会话的验证码（代码盲审 P0-1 真落点）
+    d.pop("bind_code", None)   # 批11E（B-P2）：admin 面不泄露他人自助会话的验证码
     return d
 
 
@@ -207,12 +216,11 @@ def im_bots_user_delete(bid: int, im_user_id: str,
     return {"ok": True}
 
 # ——— 批11C：自助面（require_authenticated——自定义组零权限用户也能管自己的 IM 通道） ———
-# 批11D：向导标识 → celery task 白名单（放本层因 im_bot 层3 不得 import feishu_bot 层4——分层守卫实抓；
-# 加新向导在此加分支，盲审 P2-3：不做 dict 注册表半套）
-def _wizard_task(wizard: str):
+# 批12A：向导标识 → onboarding 入口白名单（去 celery——web 进程线程跑；分层：本层引 feishu_bot 层4 合法）
+def _wizard_entry(wizard: str):
     if wizard == "feishu_register":
-        from src.feishu_bot.tasks import feishu_register_task
-        return feishu_register_task
+        from src.feishu_bot.tasks import run_onboarding
+        return run_onboarding
     return None
 # 安全锚点（方案 v2 双盲审）：owner_user_id 服务端钉死=认证会话；default_role 恒 viewer（展示用，
 # 非权限身份——身份源=绑定）；body 的 owner/default_role/user_id 一律忽略；IDOR=owner 守卫。
@@ -238,7 +246,7 @@ def my_im_providers(payload: dict = Depends(require_authenticated)):
 
 @router.post("/api/my/im-bots/onboarding/{provider}/{method}")
 def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require_authenticated)):
-    """自助扫码向导（批11D）：注册表校验+频控+配额 → 起 celery task（owner=会话钉死）。
+    """自助扫码向导（批12A 去 celery）：注册表校验+频控+配额 → web 线程 run_onboarding（owner=会话钉死）。
 
     频控：每用户同时 1 个活 ticket（session 载荷 owner 比对+非终态）；配额：每用户 bot ≤5。"""
     from src.im_bot.base import get_im_provider
@@ -248,8 +256,8 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
     m = p.ONBOARDING_METHODS.get(method)
     if not m or m.get("kind") != "interactive":
         raise ApiError(400, "METHOD_NOT_INTERACTIVE", f"方式 {method} 不存在或不支持扫码向导")
-    task = _wizard_task(m.get("wizard", ""))
-    if task is None:
+    entry = _wizard_entry(m.get("wizard", ""))
+    if entry is None:
         raise ApiError(400, "WIZARD_UNKNOWN", f"向导未注册: {m.get('wizard')}")
     uid = int(payload["sub"])
     # 配额：每用户 bot ≤5（11C 挂账量级依据收口——每 bot 子进程 ≈62MB）
@@ -257,21 +265,52 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
         n = conn.execute("SELECT count(*) FROM im_bot_config WHERE owner_user_id=%s", (uid,)).fetchone()[0]
         if n >= 5:
             raise ApiError(400, "BOT_QUOTA", "每用户最多 5 个 IM 通道")
-    # 频控：活 ticket 扫描（session 载荷 owner 比对且非终态）
+    # 频控：活 ticket 扫描（owner 比对且非终态）——命中则带 existing_ticket 给前端恢复活会话（批12A #8）
     r = feishu_redis_client()
     for key in r.scan_iter("feishu:session:*", count=100):
         try:
             d = json.loads(r.get(key) or "{}")
             if d.get("owner_user_id") == uid and d.get("status") not in ("done", "error"):
-                raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，请先完成或等待过期")
+                raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，已为你恢复",
+                               extra={"existing_ticket": str(key).rsplit(":", 1)[-1]})
         except ApiError:
             raise
         except Exception:
             continue
+    # 全局并发帽（批12A A-P1-1②：SDK 无 timeout 的 daemon 线程总闸——满则 429）
+    from src.feishu_bot.tasks import acquire_onboarding_slot, release_onboarding_slot
+    if not acquire_onboarding_slot():
+        raise ApiError(429, "ONBOARDING_BUSY", "当前接入人数较多，请稍后再试")
+    # 盲审 A-P1-2：acquire 后基础设施失败（Valkey 瞬断/线程起不来）必须归还帽位——
+    # 否则 8 次后全站 onboarding 429 直到重启
     session_id = str(uuid.uuid4())
-    task.delay(session_id, owner_user_id=uid)
+    import threading as _th
+    qr_evt = _th.Event()
+    err_evt = _th.Event()   # 快失败短路（A-P2-4：init 异常不等满 5s）
+    holder = {}
+    def _on_qr(info):
+        holder.update(info); qr_evt.set()
+    def _on_error(msg):
+        holder["error"] = msg; err_evt.set()
+    try:
+        from src.feishu_bot.tasks import _set_session
+        _set_session(session_id, {"status": "pending"}, expire=900, owner_user_id=uid)   # TOCTOU 收口（A-P2-1）
+        _th.Thread(target=entry, daemon=True,
+                   args=(session_id, uid), kwargs={"on_qr": _on_qr, "on_error": _on_error}).start()
+    except Exception:
+        release_onboarding_slot()
+        raise
     audit_log(payload["username"], "owner_im_onboarding_start", detail=f"{provider}/{method} ticket={session_id[:8]}…")
-    return {"ticket": session_id}
+    # 同步等出码（≤5s——正常 1~2s；失败即返；超时 202 前端回落轮询）
+    import time as _t
+    deadline = _t.monotonic() + 5.0
+    while _t.monotonic() < deadline and not qr_evt.is_set() and not err_evt.is_set():
+        qr_evt.wait(0.2)
+    if err_evt.is_set():
+        raise ApiError(502, "ONBOARDING_FAILED", holder.get("error", "接入发起失败"))
+    if qr_evt.is_set():
+        return {"ticket": session_id, **{k: holder[k] for k in ("qr_url", "qr_img", "expire_in") if k in holder}}
+    return JSONResponse(status_code=202, content={"ticket": session_id})
 
 
 @router.get("/api/my/im-bots/onboarding-status/{ticket}")
@@ -280,11 +319,11 @@ def my_im_onboarding_status(ticket: str, payload: dict = Depends(require_authent
     r = feishu_redis_client()
     data = r.get(f"feishu:session:{ticket}")
     if not data:
-        return {"status": "pending"}
+        return {"status": "expired"}   # 批12A（A-P2-6）：key 不存在=过期/TTL 尽——pending 混同过期收口
     d = json.loads(data)
     if d.get("owner_user_id") is not None and d.get("owner_user_id") != int(payload["sub"]):
         raise ApiError(404, "NOT_FOUND", "会话不存在")
-    return d   # 自助面原样返回（含 bind_code——owner 本人才能看到码,代码盲审 P0-2 修：pop 误加在此=前端永拿不到码）
+    return d   # 自助面原样返回（含 bind_code——owner 本人才能看到码）
 
 
 @router.get("/api/my/im-bots")

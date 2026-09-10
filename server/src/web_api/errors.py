@@ -10,8 +10,12 @@ from fastapi import HTTPException
 
 
 class ApiError(HTTPException):
-    """带错误码的业务异常。code 顶层返回，detail 保持字符串（兼容旧前端）。"""
+    """带错误码的业务异常。code 顶层返回，detail 保持字符串（兼容旧前端）。
 
-    def __init__(self, status_code: int, code: str, message: str):
+    批12A（B-P2-3）：extra 可选字典——合并进响应体顶层（如 429 携带 existing_ticket
+    供前端恢复活会话）；None=零改动。"""
+
+    def __init__(self, status_code: int, code: str, message: str, extra: dict | None = None):
         super().__init__(status_code=status_code, detail=message)
         self.code = code
+        self.extra = extra

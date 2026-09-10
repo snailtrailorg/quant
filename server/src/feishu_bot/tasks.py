@@ -1,17 +1,23 @@
-"""飞书扫码接入 Celery 任务（lark.register_app 异步执行）。
+"""飞书扫码接入 onboarding 核心（批12A 去 celery 化重构）。
 
-register_app 同步阻塞，放 Celery worker 跑（不阻塞 web-api）。
-on_qr_code 回调存 Valkey（前端轮询拿二维码）；
-成功后凭证加密存 DB im_bot_config(批 2)+ Valkey 存 done 状态。
+v2 双盲审关键修正（A/B 同判 P0）：confirming 触发点=register_app **返回之后**——SDK 实证
+on_status_change 只发 domain_switched/polling/slow_down，"手机已确认"信号不存在（确认与
+拿凭证同一瞬间：下一次 poll 直接带回 client_id/secret）。
+
+线程模型（批12A）：web-api 进程内 daemon 线程跑 run_onboarding（SDK requests 无 timeout →
+cancel_event+deadline 看门狗+模块级 Semaphore(8) 全局帽——A-P1-1）；出码经 threading.Event
+由端点同步等待返回（≤5s），确认段继续写 session 供轮询/批B SSE。
 """
 from __future__ import annotations
 import os
 import json
 import logging
+import re
+import threading
+import time
 import redis
 import lark_oapi as lark
 
-from src.scheduler.app import app as celery_app
 from src.data_platform.db import get_conn
 from src.quant_common.crypto import encrypt
 
@@ -20,26 +26,55 @@ VALKEY_URL = os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4")
 _redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True)
 
 
-_SESSION_OWNER: dict[str, int | None] = {}
-
-
-def _set_session(session_id: str, data: dict, expire: int = 600) -> None:
-    """存扫码会话状态到 Valkey。批11D 盲审 P1-3：自动注入 owner_user_id——
-    任何阶段载荷覆盖（scanning/done/error）都不丢归属（频控与 ticket 归属比对的载体）。"""
-    data = {**data, "owner_user_id": _SESSION_OWNER.get(session_id)}
+def _set_session(session_id: str, data: dict, expire: int = 600,
+                 owner_user_id: int | None = None) -> None:
+    """存扫码会话状态。批12A：owner 显式传参（v1 的 _SESSION_OWNER 全局 dict 慢泄漏退役——B-P2-4）；
+    载荷带 ts（wall clock——B-P2-6 批 B SSE 去重钩子；非单调,回拨可倒退,去重勿依赖严格递增）。"""
+    data = {**data, "owner_user_id": owner_user_id, "ts": time.time()}
     _redis.setex(f"feishu:session:{session_id}", expire, json.dumps(data, ensure_ascii=False))
 
 
-@celery_app.task(name="src.feishu_bot.tasks.feishu_register_task", bind=True)
-def feishu_register_task(self, session_id: str, owner_user_id: int | None = None):
-    """调 lark.register_app 扫码创建/连接飞书机器人。
+# 批12A（A-P1-1②）：全局并发帽——SDK requests 无 timeout，daemon 线程理论可挂到 deadline；
+# 信号量把"频控限全局"从口号变机制（每用户 1 活 ticket 之外的总闸）
+_ONBOARD_SEMAPHORE = threading.BoundedSemaphore(8)
 
-    用户扫码后手机选"连接现有/重新创建"，SDK 返回 client_id/client_secret。
-    批11D：owner_user_id——自助面=会话用户（bot 归属钉死）；admin 面=None（平台级）。
-    重扫三分支（盲审 A-P1-1+B-P1-1）：他人 bot=error / 平台 bot=只刷凭证不翻 enabled（done 带 owned:false）/ 自己或 admin=现状（翻 enabled+改名）。
+
+def acquire_onboarding_slot() -> bool:
+    return _ONBOARD_SEMAPHORE.acquire(blocking=False)
+
+
+def release_onboarding_slot() -> None:
+    try:
+        _ONBOARD_SEMAPHORE.release()
+    except ValueError:
+        pass
+
+
+# 批12A（#5）：应用名后缀——sanitize（SDK app_preset 仅预填手机创建页，真名来自 bot/v3/info）
+def _app_suffix(username: str | None) -> str:
+    if not username or not isinstance(username, str):
+        return "用户"
+    s = re.sub(r"[^\w-]", "", username)[:16]
+    return s if s else "用户"
+
+
+def run_onboarding(session_id: str, owner_user_id: int | None = None,
+                   on_qr=None, on_error=None, deadline_s: float = 720.0):
+    """扫码接入核心（web 进程线程内跑；批12A 去 celery）。
+
+    owner_user_id：自助=会话用户；admin=None（平台级）。
+    重扫三分支（批11D）：他人=error / 平台=只刷凭证 / 自己或 admin=现状。
+    on_qr(info)：出码回调（端点经 Event 同步等它——快失败走 on_error 短路）。
+    deadline_s：cancel_event+看门狗（SDK requests 无 timeout——"≤600s"承诺的机制，A-P1-1）。
     """
+    cancel = threading.Event()
+    _watchdog = threading.Timer(deadline_s, cancel.set)   # 到点置 cancel——SDK poll 间检查即退出
+    _watchdog.daemon = True
+    _watchdog.start()
+    # 批12A #5：自助名带 sanitize 后缀（防同名混淆链——22 号 §3.3-1 根因）；admin 保持原名
+    _name = "量化交易助手" if owner_user_id is None else f"量化-{_app_suffix(_current_username(owner_user_id))}"
     app_preset = {
-        "name": "量化交易助手",
+        "name": _name,
         "desc": "多市场量化交易平台飞书机器人",
     }
 
@@ -56,11 +91,13 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
             "qr_url": url,
             "qr_img": qr_b64,
             "expire_in": info.get("expire_in", 600),
-        }, expire=info.get("expire_in", 600))
+        }, expire=info.get("expire_in", 600), owner_user_id=owner_user_id)
+        if on_qr:
+            on_qr({"qr_url": url, "qr_img": qr_b64, "expire_in": info.get("expire_in", 600)})
 
-    # ticket 归属绑定（A-P2-2）：owner 登记+pending 载荷——_set_session 全程自动携带
-    _SESSION_OWNER[session_id] = owner_user_id
-    _set_session(session_id, {"status": "pending"}, expire=900)
+    # pending 由端点先写（批12A TOCTOU 收口）——此处不覆写（admin 直调/旧路径兜底）
+    if not _redis.exists(f"feishu:session:{session_id}"):
+        _set_session(session_id, {"status": "pending"}, expire=900, owner_user_id=owner_user_id)
 
     # 默认权限（addons）：发消息 + 收消息事件 + 卡片回调
     addons = {
@@ -74,7 +111,12 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
             on_status_change=lambda info: logger.info(f"feishu register status: {info}"),
             app_preset=app_preset,
             addons=addons,
+            cancel_event=cancel,   # 批12A：SDK 支持——poll 间检查，看门狗到点即退出（A-P1-1）
         )
+        _watchdog.cancel()
+        # 批12A #2（v2 修正，A/B 同判 P0）：confirming=register_app 返回后（SDK 无"手机已确认"
+        # 前置信号——确认与拿凭证同一瞬间）；窗口=httpx 取名+落库+发码（1~3s），文案诚实对应
+        _set_session(session_id, {"status": "confirming"}, expire=120, owner_user_id=owner_user_id)
         # 成功：result 含 client_id/client_secret（SDK 返回 dict 或对象，兼容两种）
         if hasattr(result, "get"):
             app_id = result.get("client_id", "")
@@ -84,7 +126,8 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
             app_secret = getattr(result, "client_secret", "")
 
         if not app_id:
-            _set_session(session_id, {"status": "error", "error": "register_app 未返回 app_id"})
+            _set_session(session_id, {"status": "error", "error": "register_app 未返回 app_id"},
+                         owner_user_id=owner_user_id)   # 盲审 A-P1-1：显式传参改造漏点（归属守卫失效）
             return
 
         # 获取应用名称（调飞书 API）
@@ -158,7 +201,8 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
             if row and rescan == "error":
                 # 他人 bot：拒合并（凭证/归属/enabled 全不动）——扫描者明确失败而非静默死胡同
                 _set_session(session_id, {"status": "error",
-                                          "error": "该应用已被其他账号接入", "code": "ONBOARDING_APP_TAKEN"}, expire=600)
+                                          "error": "该应用已被其他账号接入", "code": "ONBOARDING_APP_TAKEN"},
+                             expire=600, owner_user_id=owner_user_id)
                 logger.warning(f"扫码重扫拒: app_id={app_id} 已归属 user={row[2]} 本次 owner={owner_user_id}")
                 return
 
@@ -168,8 +212,8 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
                 conn.commit()
                 from src.im_bot.feishu_client import evict_feishu_client
                 evict_feishu_client(row[0])
-                _set_session(session_id, {"status": "done", "app_id": app_id, "owned": False,
-                                          "note": "platform_bot"}, expire=600)
+                _set_session(session_id, {"status": "done", "app_id": app_id, "owned": False, "note": "platform_bot"},
+                             expire=600, owner_user_id=owner_user_id)
                 logger.info(f"扫码重扫平台级 bot #{row[0]}：仅刷新凭证（owner 保持 NULL）")
                 _audit(owner_user_id, "owner_im_rescan_platform", row[0], app_id)
                 return
@@ -185,12 +229,18 @@ def feishu_register_task(self, session_id: str, owner_user_id: int | None = None
         done_payload = {"status": "done", "app_id": app_id, "owned": True}
         if bind_code:
             done_payload["bind_code"] = bind_code   # 前端显示码（ticket 归属已绑定,他人轮询 404）
-        _set_session(session_id, done_payload, expire=900)   # 批11E A-P2-4：与码 TTL 900 对齐（600 会先失联）
+        _set_session(session_id, done_payload, expire=900, owner_user_id=owner_user_id)   # 与码 TTL 900 对齐
         logger.info(f"feishu register done: app_id={app_id}")
-        _SESSION_OWNER.pop(session_id, None)
     except Exception as e:
-        _set_session(session_id, {"status": "error", "error": str(e)})
+        _set_session(session_id, {"status": "error", "error": str(e), "code": "ONBOARDING_FAILED"},
+                     owner_user_id=owner_user_id)
+        if on_error:
+            try: on_error(str(e))
+            except Exception: pass
         logger.error(f"feishu register 失败: {e}")
+    finally:
+        _watchdog.cancel()
+        release_onboarding_slot()   # 批12A：全局帽归还（线程包装器侧 acquire）
 
 
 def _audit(owner_user_id, action: str, bot_id, app_id: str) -> None:
@@ -203,3 +253,40 @@ def _audit(owner_user_id, action: str, bot_id, app_id: str) -> None:
                   detail=f"bot={bot_id} app_id={app_id}")
     except Exception as e:
         logger.warning(f"task audit 失败(不影响流程): {e}")
+
+
+def _current_username(uid: int | None) -> str | None:
+    """app_preset 后缀用：owner_user_id → username（查不到回退 None→"用户"）。"""
+    if uid is None:
+        return None
+    try:
+        with get_conn() as conn:
+            r = conn.execute("SELECT username FROM users WHERE id=%s", (uid,)).fetchone()
+            return r[0] if r else None
+    except Exception:
+        return None
+
+
+def sweep_stale_sessions() -> int:
+    """web startup 扫（批12A #8③——A-P1-2）：非终态 session 改写 error/ONBOARDING_INTERRUPTED。
+
+    发布重启杀 daemon 线程 → 死会话（线程里的凭证永远到不了 DB=白扫）；不扫则 #8 的
+    existing_ticket 会把死人还给前端"恢复"——频控困局加重版。startup 钩子装一次。"""
+    n = 0
+    try:
+        for key in _redis.scan_iter("feishu:session:*", count=100):
+            try:
+                d = json.loads(_redis.get(key) or "{}")
+            except Exception:
+                continue
+            if not isinstance(d, dict):
+                continue   # 盲审 A-P2-1：非字典载荷（null/数字）防 AttributeError 中断全扫
+            if d.get("status") in ("pending", "scanning", "confirming"):
+                d.update(status="error", code="ONBOARDING_INTERRUPTED",
+                         error="服务重启导致会话中断，请重新发起")
+                ttl = _redis.ttl(key)
+                _redis.setex(key, max(ttl, 60), json.dumps(d, ensure_ascii=False))
+                n += 1
+    except Exception as e:
+        logger.warning(f"startup 会话清扫失败(不影响启动): {e}")
+    return n
