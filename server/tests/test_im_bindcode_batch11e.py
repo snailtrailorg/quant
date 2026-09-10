@@ -147,7 +147,8 @@ class TestAutoBindSQL:
 class TestCodeBranchBehavior:
     """代码双盲审 P0 修复的行为级钉子（原字符串 grep 对 P0 全失明——B-P1-1）。"""
 
-    def _run_process(self, chat_type, code_hit, owner_row, bound_row, code="123456", text="123456"):
+    def _run_process(self, chat_type, code_hit, owner_row, bound_row, code="123456", text="123456",
+                     ident_seq=None):
         """mock 驱动 process_message_async 到码分支。"""
         import src.im_bot.feishu_client as FC
         conn = MagicMock(); conn.__enter__.return_value = conn
@@ -172,7 +173,7 @@ class TestCodeBranchBehavior:
         rd.getdel.return_value = code
         ident = {"user_id": 9, "username": "u9", "role": "viewer", "perms": {"read"}}
         with patch("src.data_platform.db.get_conn", return_value=conn), \
-             patch("src.im_bot.users.resolve_im_identity", side_effect=[None, ident, None]), \
+             patch("src.im_bot.users.resolve_im_identity", side_effect=ident_seq or [None, ident, None]), \
              patch.object(FC, "get_feishu_client", return_value=client), \
              patch.object(BC, "_client", return_value=rd), \
              patch("src.im_bot.users.bind_owner") as p_bind:
@@ -193,7 +194,9 @@ class TestCodeBranchBehavior:
         assert not p_bind.called and "绑定成功" not in "".join(sent)   # 已绑拦截（防御纵深）
 
     def test_no_owner_code_consumed_but_no_bind(self):
-        p_bind, sent = self._run_process("p2p", code_hit=True, owner_row=None, bound_row=None)
+        # 文案师版 except 分支会重查身份——owner 空场景全程未绑定（含重查），落拒答不发"绑定成功"
+        p_bind, sent = self._run_process("p2p", code_hit=True, owner_row=None, bound_row=None,
+                                         ident_seq=[None, None, None])
         assert not p_bind.called and "绑定成功" not in "".join(sent)   # owner 空码白吃——落拒答（兜底 try 不崩）
 
 

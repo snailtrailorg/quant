@@ -353,7 +353,8 @@ const onBindComplete = () => {
   if (imAddDlg.value && qrStatus.value === 'done') {
     qrStatus.value = 'bound'
     stopPoll()
-    setTimeout(() => { imAddDlg.value = false; sessionStorage.removeItem(qrTicketKey()) }, 2_500)
+    sessionStorage.removeItem(qrTicketKey())
+    // 用户裁定（三轮实测）：绑定成功后不自动关弹窗——庆祝态常显，由用户手动关闭
   }
 }
 const stopBarWatch = () => {

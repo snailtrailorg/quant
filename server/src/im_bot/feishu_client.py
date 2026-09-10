@@ -322,14 +322,17 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
                         from src.data_platform.audit import audit_log
                         audit_log(f"im(bot#{fid})", "owner_im_bind_autocode",
                                   target=str(_owner), detail=f"open_id={open_id[:8]}…")   # 不含码
-                        client.send_text(receive_id, "✅ 绑定成功，此后以你的身份与权限对话", receive_id_type)
+                        client.send_text(receive_id,
+                                         "✅ 绑定成功！现在发消息就以你的账号权限执行——试试「查一下风控状态」",
+                                         receive_id_type)
                         return
         except Exception as e:
             logger.warning("验证码自动绑定异常（码可能已消费,请走手动绑定兜底）: %s", e)
             # 盲审 A-P2：异常若发生在 bind 之后，重查成功即已绑定——原样 fall-through 会把
             # 验证码原文喂进 LLM 对话（原实现回落引导文案）；改明确提示并 return
             if resolve_im_identity(open_id, fid):
-                client.send_text(receive_id, "✅ 绑定已完成（过程中有短暂异常，不影响结果）", receive_id_type)
+                client.send_text(receive_id, "✅ 绑定成功（过程中略有延迟，不影响结果）。现在可以直接发消息了",
+                                 receive_id_type)
                 return
 
     from src.im_bot.handlers import handle_incoming

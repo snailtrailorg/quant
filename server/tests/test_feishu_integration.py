@@ -388,7 +388,7 @@ def test_feishu_webhook_message_unauthorized():
         process_message_async("ou_unauthorized", "查持仓", "open_id")
 
     mock_send.assert_called_once()
-    assert "未绑定平台账号" in mock_send.call_args[0][1] and "ou_unauthorized" in mock_send.call_args[0][1]
+    assert "还不知道你是谁" in mock_send.call_args[0][1] and "ou_unauthorized" in mock_send.call_args[0][1]   # 文案师版拒答
 
 
 def test_feishu_process_message_with_tool():

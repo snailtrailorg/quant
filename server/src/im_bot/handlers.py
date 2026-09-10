@@ -15,6 +15,9 @@ import logging
 
 logger = logging.getLogger("im_bot.handlers")
 
+# 批13 文案师：用户面平台名（"feishu" 裸串不该见人）
+_PROVIDER_NAME = {"feishu": "飞书", "wecom": "企业微信", "dingtalk": "钉钉"}
+
 
 def _get_max_tool_turns() -> int:
     """从 system_config 表读取 LLM 最大工具调用轮次，默认 5。"""
@@ -87,6 +90,7 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
     identity = resolve_im_identity(im_user_id, bot_id)
     if not identity:
         # 文案分流：自有 bot 指引个人中心绑定；平台级 bot 指引找管理员（A-P0-1 修语义随迁）
+        # 批13 文案师重写：读者视角+禁内部术语+动作具体（原"未绑定平台账号/IM 标识"是系统视角）
         _own = False
         if bot_id:
             try:
@@ -97,9 +101,10 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
                         (bot_id,)).fetchone())
             except Exception:
                 pass
-        _guide = ("请登录 Web → 个人中心 → 我的 IM 通道，绑定此标识后即可对话。" if _own
-                  else "请联系管理员在 集成中心 → IM → 用户管理 绑定你的账号。")
-        reply(f"未绑定平台账号，无法使用。\n您的 IM 标识（{provider}）：{im_user_id}\n{_guide}")
+        _pname = _PROVIDER_NAME.get(provider, provider)
+        _guide = (f"打开网页端「个人中心 → IM 通道」，在这个通道的「待绑定」里点「绑定」，绑定后即可对话。" if _own
+                  else f"请联系管理员，把上面这串标识绑定到你的账号。")
+        reply(f"这个机器人还不知道你是谁，暂时无法对话。\n你的{_pname}标识：{im_user_id}\n{_guide}")
         return
     role = identity["role"]
     perms = identity["perms"]
@@ -133,12 +138,12 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
             if has_operational:
                 if confirm_card is None:
                     # 降级（钉钉/企微 MVP，方案 §2.3）：读类已执行完，操作类文本拒答（与飞书"发卡 return"对齐）
-                    reply("该指令包含操作类工具，请在 Web 操作台执行（IM 通道暂只支持查询类）。")
+                    reply("聊天里目前只能查询，不能执行操作。停止策略、熔断这类操作，请到网页端完成。")
                 return  # 操作类等用户确认（或已降级拒答），不继续 loop
         if resp and resp.content:
             reply(resp.content)
         else:
-            reply("（LLM 无响应）")
+            reply("刚才没有生成回答，请把消息重新发一遍")
     except Exception as e:
         logger.error("%s 消息处理失败: %s", provider, e)
-        reply(f"处理失败: {e}")
+        reply("处理出了点问题，这条没有成功。请稍后重发一遍；若一直失败，请联系管理员")   # 文案师：异常原文只进日志不进用户面

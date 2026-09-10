@@ -40,7 +40,7 @@ def main() -> None:
         if msgtype != "text":
             # 非文本 MVP：仍回一条引导（企微有回复通道，与钉钉静默策略不同——用户可感知）
             threading.Thread(target=lambda: ws.reply_threadsafe(
-                req_id, "暂不支持该消息类型（当前仅支持文本）。"), daemon=True).start()
+                req_id, "目前只支持文字消息——请用文字重新发一次"), daemon=True).start()
             return
         text = ((body.get("text") or {}).get("content") or "").strip()
         if not userid or not text:

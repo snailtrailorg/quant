@@ -21,7 +21,7 @@ class TestUnbound:
         with patch("src.data_platform.db.get_conn", return_value=conn), \
              patch("src.im_bot.users.resolve_im_identity", return_value=None):
             handle_incoming("dingtalk", 7, "staff_abc", "你好", sent.append, "p2p")
-        assert sent and "staff_abc" in sent[0] and "dingtalk" in sent[0]
+        assert sent and "staff_abc" in sent[0] and "钉钉" in sent[0]   # 文案师：中文平台名
         assert "open_id" not in sent[0]
 
     def test_unbound_own_bot_guide_points_profile(self):
@@ -101,7 +101,7 @@ class TestChatLoop:
         finally:
             import unittest.mock as _um
             _um.patch.stopall()
-        assert len(sent) == 1 and "Web 操作台" in sent[0]   # 单条降级拒答，读类结果不追发（与飞书对齐）
+        assert len(sent) == 1 and "网页端" in sent[0]   # 文案师版降级文案；单条拒答，读类结果不追发（与飞书对齐）
 
     def test_operational_with_confirm_card_sends_card(self):
         """飞书路径：confirm_card 回调发卡（行为等价回归锚点）。"""
@@ -131,4 +131,4 @@ class TestChatLoop:
         finally:
             import unittest.mock as _um
             _um.patch.stopall()
-        assert any("处理失败" in s for s in sent)
+        assert any("重发" in s for s in sent)   # 文案师：异常不进用户面，给重发指引
