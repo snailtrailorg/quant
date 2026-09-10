@@ -3,6 +3,16 @@
 > 层 3 服务层(19 号 IM 统一接入,2026-08-21 批 2 上线)。完整 IM 接入面抽象--区别于 alert_notify 的 MessageChannel(单向告警出站)。
 > 新平台=实现 IMBotProvider 子类+locales 加字段词条+DB 配一行,平台代码零改动。
 
+## 最近变更（批13 · 2026-09-11 钉钉/企微接入）
+
+- **三平台注册**：feishu（qr 单方式——form 砍除，裁定A）/dingtalk（form，`app_key/app_secret`，官方 dingtalk-stream SDK）/wecom（form，`bot_id/secret`，自实现 ws——协议参考 `docs/reference/企微智能机器人协议参考.md`）。registry 引导遍历 `_PROVIDER_MODULES`（显式 `_BOOTSTRAPPED` 标志——空检查会被"模块被单独 import"短路致其余平台永不注册）。
+- **通用消息链** `handlers.handle_incoming(provider, bot_id, im_user_id, text, reply, chat_type, *, confirm_card=None)`：首见留痕→身份解析→LLM 工具 loop；`execute_read_tool` 随迁此处；bindcode 飞书特例留 feishu_client 薄壳；caller=provider。
+- **身份解析 per-bot 收口**：`resolve_im_identity(im_user_id, bot_id=None)`——企微 userid/钉钉 staffId 是企业内命名空间，provider 级 join 会跨企业同名串号；None=webhook 兼容路径（feishu 全表 join 旧语义）。
+- **route_key 单点** `routing.route_key_from(creds)`（名单含 `app_key/bot_id`）——三处建/补录路径收口，防第二只 bot 撞唯一索引。
+- **pool 多平台**：`_RUNNER_MODULES` 映射 spawn（feishu 存量入口不动；钉钉 runner=凭证预检 fail-fast+open_connection 看门狗；企微 runner=WecomAuthError→SystemExit）。
+- **建/启双闸**：create+start 端点 `CREDENTIALS_INCOMPLETE` 校验（manual-only 平台 secret 全必填；飞书 start 校验 route 非空）；自助 create 补 ≤5 配额。
+- 企微 send_text/send_card=诚实桩 False（跨进程推送通道+chatid 留存归告警批）。
+
 ## 一、public API
 
 ### base.py(抽象+注册表)

@@ -13,6 +13,15 @@ def backfill_from_env(bot_id: int) -> int:
     dispatch 只读表误判"无绑定"）。表非空=no-op（幂等）；角色非法回落 viewer。
     返回回填行数。"""
     try:
+        # 批13（盲审 A-P1-3）：env 授权层（LARK_AUTHORIZED_USERS 的 open_id）飞书专属——
+        # 函数内收口拒非 feishu bot（钉钉/企微 runner 也调用本函数，不收口会把飞书
+        # open_id 留痕进新平台 bot——dispatch.py B-P2-6 同类污染换个入口再犯）。
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            _pv = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s", (bot_id,)).fetchone()
+        if not _pv or _pv[0] != "feishu":
+            logger.info("backfill_from_env(%s) 跳过：非 feishu bot（env 层飞书专属）", bot_id)
+            return 0
         if list_users(bot_id):
             return 0
         # 多 bot 语义护栏（2026-09-02 用户裁定 .env 为待废弃残留、平台走多 bot）：
@@ -83,12 +92,17 @@ def delete_user(bot_id: int, im_user_id: str) -> None:
         conn.commit()
 
 
-def resolve_im_identity(open_id: str) -> dict | None:
-    """批11C：open_id → 绑定的平台账号（身份源唯一——聊天/卡片全路径）。
+def resolve_im_identity(im_user_id: str, bot_id: int | None = None) -> dict | None:
+    """批13（P0，盲审 A-P0-1）：**按收消息 bot 收口**——im_user_id → 绑定的平台账号。
 
-    fail-closed 语义（方案 v2 双盲审 A-P0-1/P1-2/P2-1）：
+    为什么 per-bot 而非 provider 级：企微 userid 是企业自设字符串、钉钉 staffId 是企业内
+    命名空间——多企业自助共存下 provider 级 join 会跨企业同名串号（B 企业用户继承 A 企业
+    账号权限）；per-bot 收口后飞书零行为损失（open_id 跨 app 本不重合）。
+
+    bot_id=None=webhook 兼容路径（无 per-bot 上下文时旧 feishu 全表 join 语义不变）。
+
+    fail-closed 语义（批11C 方案 v2）：
     - 仅 user_id 非空行算绑定（首见留痕行=NULL 不获任何权限）
-    - 多 bot 多行 user_id 不一致 → 拒（多义 fail-closed）
     - 绑定账号停用/软删 → 拒（join users 校验 enabled+deleted_at）
     - role 列回落已删、env 兜底已从身份面摘除（告警 backfill 用途保留）
     返回 {user_id, username, role, perms} 或 None。
@@ -96,16 +110,25 @@ def resolve_im_identity(open_id: str) -> dict | None:
     from src.data_platform.db import get_conn
     try:
         with get_conn() as conn:
-            rows = conn.execute(
-                "SELECT DISTINCT u.user_id FROM im_bot_users u "
-                "JOIN im_bot_config b ON b.id = u.bot_id "
-                "WHERE u.im_user_id = %s AND u.user_id IS NOT NULL "
-                "AND b.provider = 'feishu' AND b.enabled", (open_id,)).fetchall()
-        uids = {r[0] for r in rows}
+            if bot_id is not None:
+                # per-bot 收口：(bot_id, im_user_id) 有唯一索引，无多义；join 校验 bot enabled
+                r = conn.execute(
+                    "SELECT u.user_id FROM im_bot_users u "
+                    "JOIN im_bot_config b ON b.id = u.bot_id "
+                    "WHERE u.bot_id = %s AND u.im_user_id = %s AND u.user_id IS NOT NULL "
+                    "AND b.enabled", (bot_id, im_user_id)).fetchone()
+                uids = {r[0]} if r else set()
+            else:
+                rows = conn.execute(
+                    "SELECT DISTINCT u.user_id FROM im_bot_users u "
+                    "JOIN im_bot_config b ON b.id = u.bot_id "
+                    "WHERE u.im_user_id = %s AND u.user_id IS NOT NULL "
+                    "AND b.provider = 'feishu' AND b.enabled", (im_user_id,)).fetchall()
+                uids = {r[0] for r in rows}
         if not uids:
             return None
         if len(uids) > 1:
-            logger.warning("open_id 多义绑定（跨 bot 不同账号）fail-closed: %s…", open_id[:10])
+            logger.warning("im_user 多义绑定（跨 bot 不同账号）fail-closed: %s…", im_user_id[:10])
             return None
         uid = uids.pop()
         with get_conn() as conn:

@@ -38,12 +38,12 @@ def _provider_secret_fields(provider: str) -> set[str]:
 def save_bot_credentials(bot_id: int, creds: dict, partial: bool = True) -> bool:
     """写凭证(整 JSON 重加密)。partial=True 时与现值合并(表单只改部分字段)。
     有任一非空字段即存(schema 推导,不再要求必须有 secret——A-G2 只填 app_id 也保单真相源)。
-    """
+    route_key 单点推导（批13 P0：钉钉 app_key/企微 bot_id 进名单——防补录改写空值撞唯一索引）。"""
     from src.data_platform.db import get_conn
     from src.quant_common.crypto import encrypt
+    from .routing import route_key_from
     if partial:
         creds = {**get_bot_credentials(bot_id), **{k: v for k, v in creds.items() if v}}
-    route = creds.get("app_id") or creds.get("client_id") or creds.get("corp_id") or ""
     try:
         with get_conn() as conn:
             has_any = any(v for v in creds.values())
@@ -51,7 +51,7 @@ def save_bot_credentials(bot_id: int, creds: dict, partial: bool = True) -> bool
                 "UPDATE im_bot_config SET credentials_encrypted=%s, "
                 "params = COALESCE(params,'{}'::jsonb) || %s::jsonb, updated_at=now() WHERE id=%s",
                 (encrypt(json.dumps(creds, ensure_ascii=False)) if has_any else None,
-                 json.dumps({"route_key": route}), bot_id))
+                 json.dumps({"route_key": route_key_from(creds)}), bot_id))
             conn.commit()
         return True
     except Exception as e:

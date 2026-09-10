@@ -14,10 +14,10 @@ logger = logging.getLogger("im_bot.feishu")
 class FeishuProvider(IMBotProvider):
     provider = "feishu"
     MODE = "hybrid"
-    # 批11D 两层模型：扫码（SDK 建/连应用）+ 手填凭证 双方式并存
+    # 批13（裁定A）：form 方式砍除——自助向导扫码唯一路径；FIELD_SCHEMA 保留（admin 编辑面
+    # 凭证录入继续渲染，存量手填 bot 零迁移）
     ONBOARDING_METHODS = {
         "qr": {"kind": "interactive", "wizard": "feishu_register", "label_key": "imBots.method.qr"},
-        "form": {"kind": "manual", "label_key": "imBots.method.form"},
     }
 
     FIELD_SCHEMA = [
@@ -27,8 +27,7 @@ class FeishuProvider(IMBotProvider):
         {"key": "encrypt_key", "type": "text", "label_key": "imBots.field.encryptKey", "secret": True},
     ]
 
-    # form 方式的 fields=FIELD_SCHEMA 本体（同源不复制——盲审 A-P2-7）
-    ONBOARDING_METHODS["form"]["fields"] = FIELD_SCHEMA
+    # （批11D form.fields=FIELD_SCHEMA 本体的挂钩随 form 方式砍除一并移除）
 
     # ── 通道行为(委托 feishu_bot.bot 的生产实现,bot_id 定位凭证)──
     def send_text(self, bot_id: int, receive_id: str, receive_id_type: str, text: str) -> bool:

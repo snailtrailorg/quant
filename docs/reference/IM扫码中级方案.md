@@ -359,3 +359,29 @@ asyncio.run(ding_agent_connect())
 
 > （注：部分内容可能由 AI 生成）
 
+---
+
+## 核实附录（2026-09-10，源码级逐项核实）
+
+> 结论先行：**当需求书看（体验理念/容错清单可取），当代码参考必翻车**——端点/协议/接入叙事多处编造。核心卖点「三平台统一扫码自动部署」实际仅飞书可行。以下每项均落到官方 SDK 源码或 npm/PyPI 元数据证据。
+
+### A. 逐项红绿表
+
+| 方案原claim | 核实结果 | 证据 |
+|---|---|---|
+| 飞书 `open-apis/auth/v3/device_authorize` 设备 OAuth | ❌ **编造**。真实机制=lark SDK `register_app`（我们批12A 在用）：POST `https://accounts.feishu.cn/oauth/v1/app/registration`（form-encoded，action=begin/poll + device_code 轮询） | 本地 lark-oapi `scene/registration/__init__.py` L14/L261 |
+| 企微 `wss://ws-api.work.weixin.qq.com/aibot/ws` | ❌ **编造**。真实端点=`wss://openws.work.weixin.qq.com`（私有部署企业在管理端查专用地址） | `@wecom/aibot-node-sdk` v1.0.7 dist 源码常量 |
+| 企微 `aibot_subscribe` 认证帧 | ⚠️ 帧名蒙对、结构错。真实=`{cmd:"aibot_subscribe", headers:{req_id}, body:{bot_id, secret}}`（凭证在 body），认证失败不重试；另有 `aibot_msg_callback`/`aibot_event_callback`/`aibot_respond_msg`/`ping` 帧 | 同上 sendAuth() 源码 |
+| 钉钉 `wss://wss-open-connection.dingtalk.com/connect?access_token=` | ❌ **错**。真实=POST `https://api.dingtalk.com/v1.0/gateway/connections/open`（clientId/clientSecret/subscriptions）→ 响应含动态 endpoint+ticket → `websockets.connect(f'{endpoint}?ticket=…')`；心跳=协议级 ws.ping()（默认 60s），非自定义 JSON ping | `dingtalk-stream` SDK `stream.py`（open-dingtalk/dingtalk-stream-sdk-python） |
+| 「管理员扫码→OAuth→全自动新建机器人」 | ❌ 企微/钉钉**无此通道**。企微=管理后台「安全与管理→管理工具→智能机器人」手动创建（API 模式+长连接）或客户端创建；钉钉=开放平台开发者后台手动建应用。OAuth 扫码端点（企微 3rd_qr_connect/钉钉 oauth2/auth）只做**登录授权**，不做 provision | 企微创建路径实证（xiaowangzhixiao/wecom-aibot-python-sdk 文档）+ 钉钉 SDK 事实 |
+| 企微「需 ISV 服务商资质」 | ❌ 企业自用智能机器人（API 模式）不需要；ISV 是三方代开发场景 | 同上 |
+| 企微 `secret` 明文长连接 | ⚠️ 真实可跑，但官方 Node SDK 尚无 Python 官方版：官方=`@wecom/aibot-node-sdk`（WecomTeam，仅 Node）；Python=第三方 `wecom-aibot-sdk` 1.0.8（mattzwang，httpx+websockets+cryptography，**非官方需评估**） | npm/PyPI 元数据 |
+| 三段长连接示例代码 | ❌ 全非官方 SDK 用法，照抄必废 | — |
+
+### B. 对本项目（19 号 IM 统一接入）的结论
+
+1. **接入方式建模已正确**：`ONBOARDING_METHODS`（qr/form 并存）就是现实——飞书=qr（register_app 扫码建应用，唯一有官方自动通道的平台）；钉钉/企微=form（凭证手填：钉钉 AppKey/AppSecret，企微 BotId/Secret）。「统一二维码」愿景降级为远期增强，非首批交付。
+2. **Python 栈落地件**：钉钉=官方 `dingtalk-stream`（pip，自动重连/AckMessage/事件订阅现成）；企微=自实现 ws 协议（帧协议已摸清，4+1 帧型，工作量小）或第三方 `wecom-aibot-sdk`（八步法方案阶段再定）。
+3. **可吸收的只有体验理念**：UA 识别（lark/wxwork/dingtalk）、一次性短链（我们已有等价物：批11E GETDEL 原子消费，方案样例 get→delete 双步有 TOCTOU 竞态，勿抄）。
+4. 企微智能机器人能力面比预期丰富：流式回复（Markdown/图文混排）、模板卡片、enter_chat 等事件、主动推送、AES-256-CBC 文件解密、分片媒体上传——与我们 SSE 批（流式推送）天然契合。
+

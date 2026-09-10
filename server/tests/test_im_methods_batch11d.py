@@ -51,11 +51,19 @@ class TestModel:
         ps = list_providers()
         f = next(p for p in ps if p["provider"] == "feishu")
         ids = [m["id"] for m in f["methods"]]
-        assert set(ids) == {"qr", "form"}
-        form = next(m for m in f["methods"] if m["id"] == "form")
-        assert form["fields"] == f["field_schema"]          # 同源本体（A-P2-7）
+        # 批13（裁定A）：飞书 form 方式砍除——自助向导扫码唯一路径；FIELD_SCHEMA 保留（admin 编辑面）
+        assert set(ids) == {"qr"}
         qr = next(m for m in f["methods"] if m["id"] == "qr")
         assert qr["kind"] == "interactive" and qr["wizard"] == "feishu_register"
+        # 批13：钉钉/企微=form 单方式，FIELD_SCHEMA 各自声明；manual 方式通用挂 fields（B-P0-1 契约恢复）
+        d = next(p for p in ps if p["provider"] == "dingtalk")
+        assert [m["id"] for m in d["methods"]] == ["form"] and d["mode"] == "websocket"
+        assert {x["key"] for x in d["field_schema"]} == {"app_key", "app_secret"}
+        assert d["methods"][0]["fields"] == d["field_schema"]   # A-P2-7 同源本体（B-P0-1 重建断言）
+        w = next(p for p in ps if p["provider"] == "wecom")
+        assert [m["id"] for m in w["methods"]] == ["form"] and w["mode"] == "websocket"
+        assert {x["key"] for x in w["field_schema"]} == {"bot_id", "secret"}
+        assert w["methods"][0]["fields"] == w["field_schema"]
 
     def test_onboarding_derived_any_order_independent(self):
         """A-P1-3/B-P1-2：派生=any(interactive)——form 排前也必须 interactive（首键派生是顺序地雷）。"""

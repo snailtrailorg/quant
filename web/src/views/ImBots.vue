@@ -51,15 +51,13 @@
       </el-table-column>
     </el-table>
 
-    <!-- 添加向导 -->
+    <!-- 添加向导（批13 页签化：页签=注册表驱动） -->
     <el-dialog v-model="showAdd" :close-on-click-modal="false" :title="t('imBots.addBot')" width="560px">
+      <el-tabs v-model="addForm.provider" @tab-change="onProviderChange">
+        <el-tab-pane v-for="p in providers" :key="p.provider" :name="p.provider"
+                     :label="$t('imBots.provider.' + p.provider, p.provider)" />
+      </el-tabs>
       <el-form label-width="120px">
-        <el-form-item :label="t('imBots.providerCol')">
-          <el-select v-model="addForm.provider" style="width:100%" @change="onProviderChange">
-            <el-option v-for="p in providers" :key="p.provider" :value="p.provider"
-                       :label="$t('imBots.provider.' + p.provider, p.provider)" />
-          </el-select>
-        </el-form-item>
         <el-form-item :label="t('common.name')">
           <el-input v-model="addForm.name" :placeholder="t('imBots.phName')" />
         </el-form-item>
@@ -70,6 +68,10 @@
                       :placeholder="fieldLabel(f)" />
           </el-form-item>
         </template>
+        <!-- post_steps：后台建应用指引（注册表驱动，批13） -->
+        <div v-if="currentPostSteps.length" style="color: var(--text-secondary); font-size: 12px; line-height: 1.9; padding: var(--sp-2) 0">
+          <div v-for="(s, i) in currentPostSteps" :key="i">{{ i + 1 }}. {{ $t(s, s) }}</div>
+        </div>
         <el-form-item :label="t('imBots.defaultRole')">
           <el-select v-model="addForm.default_role" style="width:100%">
             <el-option v-for="r in ['viewer','analyst','trader','admin']" :key="r" :value="r" :label="r" />
@@ -150,6 +152,7 @@ let qrTimer = null
 
 const currentProvider = computed(() => providers.value.find(p => p.provider === addForm.value.provider))
 const currentSchema = computed(() => currentProvider.value?.field_schema || [])
+const currentPostSteps = computed(() => currentProvider.value?.methods?.[0]?.post_steps || [])
 
 const fieldLabel = f => {
   const g = useI18n().global

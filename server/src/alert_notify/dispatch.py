@@ -204,7 +204,12 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
     """IM 通道：target=bot_id，收件人=该 bot enabled 绑定用户全体（open_id 去重）。
     全成=ok；任一败=im_partial（A3-F9）。provider 限 feishu（B2-16，接第二家 IM 时扩展）。"""
     try:
-        bid = bid   # 补审E-7：脏 target 提前明确失败（原在 with 内 ValueError→timeout 错标）
+        try:
+            bid = int(bot_id)   # 补审E-7 意图（盲审A 范围外P0 实锤：原写 `bid = bid` 必
+            # UnboundLocalError 被兜底 except 吃成 (False,"timeout")——自 db5fd27 起 IM 告警
+            # 通道整体静默失效，测试 mock _send_one 故全绿）
+        except (TypeError, ValueError):
+            return False, "bad_target"   # 脏 target 明确失败（原在 with 内错标 timeout）
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s AND enabled", (bid,))
@@ -216,14 +221,19 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
             users = list({r[0] for r in cur.fetchall()})
         if not users:
             # arch-19 双轨收尾（2026-09-02）：表空则尝试 env 授权层一次性回填（扫码时代 open_id 在 env，
-            # 聊天一直靠 check_user 兜底——dispatch 与聊天路径应同源）
+            # 聊天一直靠 check_user 兜底——dispatch 与聊天路径应同源）。
+            # 批13（B-P2-6）：回填移到 provider 检查后——否则钉钉/企微 bot 的告警目标会把飞书
+            # env 用户回填进该 bot 的 im_bot_users（跨平台污染行）。env 层本就飞书专属。
+            if provider_name != "feishu":
+                logger.warning("alert im dispatch: provider %s not supported yet (bot %s)", provider_name, bid)
+                return False, "not_configured"
             from src.im_bot.users import backfill_from_env, list_users
             if backfill_from_env(bid) > 0:
                 users = list({u["im_user_id"] for u in list_users(bid)})
         if not users:
             return False, "no_binding"
         if provider_name != "feishu":
-            logger.warning("alert im dispatch: provider %s not supported yet (bot %s)", provider_name, bot_id)
+            logger.warning("alert im dispatch: provider %s not supported yet (bot %s)", provider_name, bid)
             return False, "not_configured"
         from src.im_bot.base import get_im_provider
         provider = get_im_provider("feishu")

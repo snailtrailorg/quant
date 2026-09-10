@@ -172,9 +172,8 @@ class TestCodeBranchBehavior:
         rd.getdel.return_value = code
         ident = {"user_id": 9, "username": "u9", "role": "viewer", "perms": {"read"}}
         with patch("src.data_platform.db.get_conn", return_value=conn), \
-             patch("src.im_bot.users.resolve_im_identity", side_effect=[None, ident]), \
+             patch("src.im_bot.users.resolve_im_identity", side_effect=[None, ident, None]), \
              patch.object(FC, "get_feishu_client", return_value=client), \
-             patch.object(FC, "_first_seen_note"), \
              patch.object(BC, "_client", return_value=rd), \
              patch("src.im_bot.users.bind_owner") as p_bind:
             FC.process_message_async("ou_x", text, "open_id", "ou_x", fid=7, chat_type=chat_type)

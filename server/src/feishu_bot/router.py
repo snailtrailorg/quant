@@ -116,14 +116,14 @@ async def card_callback(request: Request):
         try:
             with _gc() as conn:
                 _platform = conn.execute(
-                    "SELECT 1 FROM im_bot_config WHERE provider='feishu' AND enabled "
-                    "AND owner_user_id IS NULL").fetchone()
+                    "SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
+                    "AND owner_user_id IS NULL ORDER BY id DESC LIMIT 1").fetchone()
         except Exception:
             _platform = None
         if not _platform:
             logger.warning("卡片确认拒绝：无平台级 bot（自助 bot 请走 Web）: tool=%s", tool)
             return {"code": 0}
-        identity = resolve_im_identity(open_id)
+        identity = resolve_im_identity(open_id, _platform[0])   # 批13：per-bot 收口（卡片面=平台级 bot）
         if not identity:
             logger.warning("卡片确认未绑定拒绝: open_id=%s tool=%s", open_id, tool)
             return {"code": 0}

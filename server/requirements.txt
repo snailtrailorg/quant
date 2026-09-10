@@ -42,8 +42,10 @@ httpx>=0.27
 tushare>=1.4
 akshare>=1.12
 
-# === 飞书（11）===
+# === IM 平台（11）===
 lark-oapi>=1.3
+dingtalk-stream>=0.24          # 批13：钉钉 Stream 模式官方 SDK
+websockets>=11                 # 批13：显式 pin（企微自实现 ws；本随 dingtalk-stream 传递，防上游抽走）
 
 # === 通用 ===
 pydantic>=2.7

@@ -1,13 +1,14 @@
-"""IM pool —— 子进程管理器（批11C 方案 v2 双盲审 B-P0-1 修正）。
+"""IM pool —— 子进程管理器（批11C 方案 v2 双盲审 B-P0-1 修正；批13 通用化多平台）。
 
 lark SDK `ws/client.py` 模块级全局 asyncio loop——单进程跑不了第二个 lark.ws.Client
 （第二线程 run_until_complete 必 RuntimeError）。故 pool=**子进程管理器**：
-主进程 30s 对账 enabled feishu bot → spawn `python -m src.feishu_bot.ws_client {bid}`
-（现入口零改动，backfill_from_env 天然保留）/terminate 停用。单 bot 隔离：
-坏凭证 bot 子进程退避重试不传染平台 bot（B-P0-2）。
+主进程 30s 对账 enabled bot（批13：全平台，按 provider 映射 spawn 入口）→
+feishu=`python -m src.feishu_bot.ws_client {bid}`（存量入口零改动）/terminate 停用。
+单 bot 隔离：坏凭证 bot 子进程退避重试不传染平台 bot（B-P0-2）。
 
-对账白名单键集 {id, enabled, credentials_encrypted}（B-P1-5）：改名/改语言等
-不动连接；凭证变更必触发（旧连接 token 不换）。
+对账白名单键集 {id, provider, enabled, credentials_encrypted}（B-P1-5）：改名/改语言等
+不动连接；凭证变更必触发（旧连接 token 不换）。未注册 provider（入口映射缺）→ log skip
+不 spawn（前向兼容：DB 有行但实现未上，如批13A 窗口期的 wecom）。
 
 systemd quant-im-pool@quant.service（Restart=always 仅对 pool 主进程——主进程
 只有对账循环，重启即全量重拉，安全）。
@@ -26,26 +27,34 @@ POLL_S = 30
 _BACKOFF_BASE = 60     # 坏 bot 子进程重启退避（秒，指数×2 封顶 10min）
 _BACKOFF_MAX = 600
 
+# provider → 子进程入口模块（批13 通用化；未列出的 provider=skip 不 spawn）
+_RUNNER_MODULES = {
+    "feishu": ["src.feishu_bot.ws_client"],
+    "dingtalk": ["src.im_bot.runners.dingtalk"],
+    "wecom": ["src.im_bot.runners.wecom"],
+}
 
-def _desired() -> dict[int, str] | None:
-    """对账目标：enabled feishu bot 的 {bid: credentials_encrypted 指纹}。
+
+def _desired() -> dict[int, tuple[str, str]] | None:
+    """对账目标：enabled bot 的 {bid: (provider, credentials_encrypted 指纹)}。
     DB 失败返回 **None**（≠{}——代码盲审 A-P1-1/B-P0-1：{} 会被当"无目标"terminate 全部子进程，
     一次 DB 抖动/迁移持锁窗=全平台断连；None=本周期跳过对账不动现状）。"""
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             rows = conn.execute(
-                "SELECT id, COALESCE(credentials_encrypted,'') FROM im_bot_config "
-                "WHERE enabled AND provider='feishu'").fetchall()
-        return {r[0]: str(r[1]) for r in rows}
+                "SELECT id, provider, COALESCE(credentials_encrypted,'') FROM im_bot_config "
+                "WHERE enabled").fetchall()
+        return {r[0]: (r[1], str(r[2])) for r in rows}
     except Exception as e:
         logger.warning("对账查询失败（本周期跳过，不动现状）: %s", e)
         return None
 
 
 class _Child:
-    def __init__(self, bid: int):
+    def __init__(self, bid: int, provider: str):
         self.bid = bid
+        self.provider = provider
         self.proc: subprocess.Popen | None = None
         self.fingerprint = ""
         self.next_start = 0.0     # 退避到期时刻（monotonic）
@@ -58,6 +67,10 @@ class _Child:
 
     def ensure(self, fingerprint: str) -> None:
         """对账单 bot：起/换/停。凭证指纹变化=terminate 重起（换 token）。"""
+        entry = _RUNNER_MODULES.get(self.provider)
+        if not entry:
+            logger.warning("bot %s provider=%s 无 runner 入口（skip 本周期）", self.bid, self.provider)
+            return
         if self.proc and self.proc.poll() is None:
             if fingerprint != self.fingerprint:
                 logger.info("bot %s 凭证变更，重启子进程", self.bid)
@@ -66,11 +79,10 @@ class _Child:
                 return
         now = time.monotonic()
         if now < self.next_start:
-            return   # 退避窗内（坏 bot 不打飞书 API——B-P0-2）
+            return   # 退避窗内（坏 bot 不打 IM API——B-P0-2）
         self.fingerprint = fingerprint
-        self.proc = subprocess.Popen(
-            [sys.executable, "-m", "src.feishu_bot.ws_client", str(self.bid)])
-        logger.info("bot %s 子进程起 pid=%s", self.bid, self.proc.pid)
+        self.proc = subprocess.Popen([sys.executable, "-m", *entry, str(self.bid)])
+        logger.info("bot %s [%s] 子进程起 pid=%s", self.bid, self.provider, self.proc.pid)
 
     def _stop(self) -> None:
         if self.proc and self.proc.poll() is None:
@@ -85,7 +97,8 @@ class _Child:
         """退出子进程记退避（崩溃=凭证坏/网络断，不打满重试）。"""
         if self.proc and self.proc.poll() is not None:
             rc = self.proc.returncode
-            logger.warning("bot %s 子进程退出 rc=%s，退避 %ss 后重试", self.bid, rc, self.backoff)
+            logger.warning("bot %s [%s] 子进程退出 rc=%s，退避 %ss 后重试",
+                           self.bid, self.provider, rc, self.backoff)
             self.next_start = time.monotonic() + self.backoff
             self.backoff = min(self.backoff * 2, _BACKOFF_MAX)
             self.proc = None
@@ -93,7 +106,7 @@ class _Child:
 
 def main() -> None:
     children: dict[int, _Child] = {}
-    logger.info("IM pool 起（30s 对账，子进程模型）")
+    logger.info("IM pool 起（30s 对账，子进程模型，多平台）")
     while True:
         time.sleep(POLL_S)
         try:
@@ -107,8 +120,15 @@ def main() -> None:
                     children[bid]._stop()
                     del children[bid]
             # 起/换 desired 的
-            for bid, fp in want.items():
-                ch = children.get(bid) or children.setdefault(bid, _Child(bid))
+            for bid, (provider, fp) in want.items():
+                ch = children.get(bid)
+                if ch is None or ch.provider != provider:   # provider 不该变，防御：重建
+                    # （盲审 A-P2：setdefault 在 key 已存在时返回旧 _Child 新对象被丢——
+                    # 显式赋值才真重建）
+                    if ch is not None:
+                        ch._stop()
+                        del children[bid]
+                    ch = children[bid] = _Child(bid, provider)
                 ch.reap()          # 退出者记退避
                 ch.ensure(fp)
                 ch.note_healthy()  # 存活满一周期者重置退避

@@ -96,18 +96,43 @@ def register_provider(inst: IMBotProvider) -> None:
     _REGISTRY[inst.provider] = inst
 
 
+# Provider 模块名单（批13 A-P1-1：引导遍历——原只 import feishu，新 Provider 永不注册）。
+# wecom 随批13B 上：未实现时 import 失败 log skip 不炸（页签/平台能力自然缺席）。
+_PROVIDER_MODULES = ("feishu", "dingtalk", "wecom")
+_BOOTSTRAPPED = False   # 显式标志而非"registry 非空"判断——任何模块被单独 import（自注册）
+                       # 后 registry 即非空，空检查会让其余平台永不注册（批13 全量测试实锤）
+
+
+def _bootstrap_registry() -> None:
+    global _BOOTSTRAPPED
+    if _BOOTSTRAPPED:
+        return
+    _BOOTSTRAPPED = True
+    from importlib import import_module
+    for mod in _PROVIDER_MODULES:
+        try:
+            import_module(f".{mod}", __package__)
+        except ImportError as e:
+            logger.info("Provider 模块 %s 未安装/未实现（跳过注册）: %s", mod, e)
+
+
 def get_im_provider(provider: str) -> IMBotProvider | None:
-    if not _REGISTRY:
-        from . import feishu as _feishu  # noqa: F401 触发注册
+    _bootstrap_registry()
     return _REGISTRY.get(provider)
 
 
 def list_providers() -> list[dict]:
-    """平台注册表(前端下拉+向导用)。批11D：增 methods 全集（UI 按注册能力自动生成，零硬编码）。"""
-    if not _REGISTRY:
-        from . import feishu as _feishu  # noqa: F401
-    return [{"provider": p, "mode": inst.MODE, "onboarding": inst.ONBOARDING,
-             "methods": [{**m, "id": mid} for mid, m in inst.ONBOARDING_METHODS.items()],
-             "field_schema": inst.FIELD_SCHEMA}
-            for p, inst in sorted(_REGISTRY.items())]
+    """平台注册表(前端下拉+向导用)。批11D：增 methods 全集（UI 按注册能力自动生成，零硬编码）。
+    批13（盲审 B-P0-1）：manual 方式通用补挂 fields=FIELD_SCHEMA——恢复批11D A-P2-7 契约
+    （feishu form 砍除时删了挂钩、新 Provider 没接，自助面表单零凭证框）。"""
+    _bootstrap_registry()
+    out = []
+    for p, inst in sorted(_REGISTRY.items()):
+        methods = [{**m, "id": mid} for mid, m in inst.ONBOARDING_METHODS.items()]
+        for m in methods:
+            if m.get("kind") == "manual" and not m.get("fields"):
+                m["fields"] = inst.FIELD_SCHEMA
+        out.append({"provider": p, "mode": inst.MODE, "onboarding": inst.ONBOARDING,
+                    "methods": methods, "field_schema": inst.FIELD_SCHEMA})
+    return out
 

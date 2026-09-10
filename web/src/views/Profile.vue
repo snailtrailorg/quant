@@ -101,33 +101,29 @@
     </el-table>
     <div v-else style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
 
-    <!-- 添加 IM 通道（批11D：按注册表 methods 自动生成——方式选择+表单/扫码双形态） -->
+    <!-- 添加 IM 通道（批13 页签化：页签=注册表驱动，页签内容=方式动态生成——每平台单方式） -->
     <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="520px" :before-close="guardClose">
-      <el-form label-width="120px">
-        <el-form-item :label="t('myIm.provider')">
-          <el-select v-model="imForm.provider" style="width: 200px" @change="onImProviderChange">
-            <el-option v-for="p in imProviders.filter(x => (x.methods||[]).length)" :key="p.provider" :value="p.provider" :label="p.provider" />
-          </el-select>
-        </el-form-item>
-        <!-- 方式选择（多方式才显示——注册表驱动，盲审 A-P1-3 顺序无关） -->
-        <el-form-item v-if="curMethods().length > 1" :label="t('myIm.method')">
-          <el-radio-group v-model="imMethod" @change="onImMethodChange">
-            <el-radio-button v-for="m in curMethods()" :key="m.id" :value="m.id">{{ methodLabel(m) }}</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
+      <el-tabs v-model="imForm.provider" @tab-change="onImProviderChange">
+        <el-tab-pane v-for="p in imProviders.filter(x => (x.methods||[]).length)" :key="p.provider"
+                     :name="p.provider" :label="te('imBots.provider.' + p.provider) ? t('imBots.provider.' + p.provider) : p.provider" />
+      </el-tabs>
 
-        <!-- kind=manual：FIELD_SCHEMA 表单 -->
-        <template v-if="imMethod && curMethods().find(m => m.id === imMethod)?.kind === 'manual'">
-          <el-form-item :label="t('common.name')">
-            <el-input v-model="imForm.name" style="width: 260px" />
-          </el-form-item>
-          <el-form-item v-for="f in imFields" :key="f.key" :label="te(f.label_key) ? t(f.label_key) : f.key">
-            <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" show-password style="width: 260px" />
-          </el-form-item>
-        </template>
+      <!-- kind=manual：FIELD_SCHEMA 表单（钉钉/企微） -->
+      <el-form v-if="curKind() === 'manual'" label-width="120px">
+        <el-form-item :label="t('common.name')">
+          <el-input v-model="imForm.name" style="width: 260px" />
+        </el-form-item>
+        <el-form-item v-for="f in imFields" :key="f.key" :label="te(f.label_key) ? t(f.label_key) : f.key">
+          <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" show-password style="width: 260px" />
+        </el-form-item>
+        <!-- post_steps：后台建应用指引（注册表驱动） -->
+        <div v-if="curPostSteps().length" style="color: var(--text-secondary); font-size: 12px; line-height: 1.9; padding: var(--sp-2) 0">
+          <div v-for="(s, i) in curPostSteps()" :key="i">{{ i + 1 }}. {{ te(s) ? t(s) : s }}</div>
+        </div>
+      </el-form>
 
-        <!-- kind=interactive：扫码向导 -->
-        <div v-else-if="imMethod" style="padding: var(--sp-2) 0">
+      <!-- kind=interactive：扫码向导（飞书——qrSession/poll/bind 感知状态机不动，只换容器） -->
+      <div v-else-if="curKind() === 'interactive'" style="padding: var(--sp-2) 0">
           <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrIntro') }}</div>
           <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
           <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">
@@ -154,14 +150,13 @@
             <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 6px">{{ t('myIm.boundTitle') }}</div>
             <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.boundGuide') }}</div>
           </div>
-        </div>
-      </el-form>
+      </div>
       <div style="color: var(--text-secondary); font-size: 12px">{{ t('myIm.addHint') }}</div>
       <template #footer>
-        <el-button @click="guardClose(() => { imAddDlg = false })">{{ isTerminalQr ? t('common.done') : t('common.cancel') }}</el-button>
-        <el-button v-if="imMethod && curMethods().find(m => m.id === imMethod)?.kind === 'manual'"
+        <el-button @click="guardClose(() => { imAddDlg = false })">{{ isTerminalQr || curKind() !== 'interactive' ? t('common.done') : t('common.cancel') }}</el-button>
+        <el-button v-if="curKind() === 'manual'"
                    type="primary" :loading="imSaving" @click="saveIm">{{ t('common.create') }}</el-button>
-        <el-button v-else-if="imMethod && ['','timeout','error'].includes(qrStatus)"
+        <el-button v-else-if="curKind() === 'interactive' && ['','timeout','error'].includes(qrStatus)"
                    type="primary" @click="startQr">{{ t('myIm.qrStart') }}</el-button>
       </template>
     </el-dialog>
@@ -264,17 +259,19 @@ const loadIm = async () => {
 const openImAdd = async () => {
   try {
     imProviders.value = await api.get('/my/im-bots/providers')
-    if (!imProviders.value.some(p => p.provider === imForm.value.provider) && imProviders.value.length)
-      imForm.value.provider = imProviders.value[0].provider
+    // 批13：默认页签=feishu（活会话唯一来源；不按字母序落 dingtalk——盲审 A-P1-3/B-P1-2；B-P2-1 显式化）
+    imForm.value.provider = imProviders.value.some(p => p.provider === 'feishu')
+      ? 'feishu' : (imProviders.value[0]?.provider || 'feishu')
   } catch {}
   imForm.value = { provider: imForm.value.provider, name: '', creds: {} }
-  // 盲审 P2-4/P2-5：会话状态复位 + 默认选中首方式（单方式直进）
+  // 盲审 P2-4/P2-5：会话状态复位 + 单方式直进
   stopPoll()
   qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrTicket.value = ''; qrCode.value = ''
   const ms = curMethods()
   imMethod.value = ms.length ? ms[0].id : ''
   imFields.value = ms.find(m => m.id === imMethod.value)?.fields || []
-  resumeActiveSession()   // 批12A：恢复活会话（与方式切换共用）
+  // 批13：恢复活会话仅在 interactive 页签可见时（盲审 A-P1-3③——manual 页签下不后台轮询飞书）
+  if (curKind() === 'interactive') resumeActiveSession()
   imAddDlg.value = true
 }
 const saveIm = async () => {
@@ -327,7 +324,9 @@ const startBarWatch = () => {
     if (left <= 0) { stopBarWatch(); return }
     barCountdown.value = `${String(Math.floor(left / 60000)).padStart(2, '0')}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`
     await loadIm()
-    if (!imBots.value.some(b => b.pending_binds)) {   // pending 归零=绑定完成（后端 bind_owner 已翻转留痕行）
+    // 批13（B-P2-5）：pending 判定按飞书过滤——绑定码只发飞书 bot，钉钉/企微 bot 的首见留痕
+    // 不阻塞扫码绑定的 bound 庆祝态（否则其他 bot 留痕会让庆祝态悬到 15min 过期）
+    if (!imBots.value.some(b => b.pending_binds && b.provider === 'feishu')) {
       stopBarWatch()
       onBindComplete()
     }
@@ -340,7 +339,7 @@ const onBindComplete = () => {
   if (imAddDlg.value && qrStatus.value === 'done') {
     qrStatus.value = 'bound'
     stopPoll()
-    setTimeout(() => { imAddDlg.value = false; sessionStorage.removeItem('im-onboarding-ticket') }, 2_500)
+    setTimeout(() => { imAddDlg.value = false; sessionStorage.removeItem(qrTicketKey()) }, 2_500)
   }
 }
 const stopBarWatch = () => {
@@ -359,9 +358,11 @@ const qrCode = ref('')
 let pollTimer = null
 let qrPollFails = 0
 let pollDeadline = 0
-const methodLabel = m => te(m.label_key) ? t(m.label_key) : t('imBots.methodKind.' + m.kind)
 const curProvider = () => imProviders.value.find(p => p.provider === imForm.value.provider)
 const curMethods = () => (curProvider()?.methods || []).filter(m => m.kind === 'manual' || m.kind === 'interactive')
+// 批13：每平台单方式——curKind/curPostSteps 直取首方式（页签=平台，页签内容=方式）
+const curKind = () => curMethods()[0]?.kind || ''
+const curPostSteps = () => curMethods()[0]?.post_steps || []
 const isTerminalQr = computed(() => ['done', 'bound', 'timeout', 'error'].includes(qrStatus.value))
 const onImMethodChange = () => {
   const kind = curMethods().find(m => m.id === imMethod.value)?.kind
@@ -371,8 +372,9 @@ const onImMethodChange = () => {
   // 2026-09-10 用户三轮：切回扫码=恢复活会话（不再退回"开始扫码"按钮——那要求用户重来一遍）
   if (kind === 'interactive') resumeActiveSession()
 }
+const qrTicketKey = () => 'im-onboarding-ticket:' + imForm.value.provider   // B-P2-2：键绑 provider
 const resumeActiveSession = () => {
-  const savedTicket = sessionStorage.getItem('im-onboarding-ticket')
+  const savedTicket = sessionStorage.getItem(qrTicketKey())
   if (savedTicket) {
     qrTicket.value = savedTicket
     qrStatus.value = 'starting'   // 轮询首查即翻 scanning（有码）或 expired
@@ -391,7 +393,7 @@ const startQr = async () => {
     const r = await api.post(`/my/im-bots/onboarding/${imForm.value.provider}/${imMethod.value}`)
     // 批12A：同步出码——后端 ≤5s 内直接带 qr_img（本地实测 0.69s）；202=慢网回落轮询
     qrTicket.value = r.ticket
-    sessionStorage.setItem('im-onboarding-ticket', r.ticket)
+    sessionStorage.setItem(qrTicketKey(), r.ticket)
     if (r.qr_img) { qrImg.value = r.qr_img; qrStatus.value = 'scanning' }
     pollDeadline = Date.now() + (r.expire_in || 600) * 1000
     pollTimer = setInterval(pollQr, 3_000)
@@ -400,7 +402,7 @@ const startQr = async () => {
     const et = e?.existing_ticket   // 拦截器已剥 response.data（api.js L20 reject err.response?.data）
     if (et) {
       qrTicket.value = et
-      sessionStorage.setItem('im-onboarding-ticket', et)
+      sessionStorage.setItem(qrTicketKey(), et)
       qrStatus.value = 'starting'
       pollDeadline = Date.now() + 600_000
       pollTimer = setInterval(pollQr, 3_000)
@@ -416,7 +418,7 @@ const pollQr = async () => {
   try {
     const d = await api.get(`/my/im-bots/onboarding-status/${qrTicket.value}`)
     if (d.status === 'expired') {   // 批12A（A-P2-6）：key 不存在=过期（原 pending 混同收口）
-      qrStatus.value = 'timeout'; stopPoll(); sessionStorage.removeItem('im-onboarding-ticket'); return
+      qrStatus.value = 'timeout'; stopPoll(); sessionStorage.removeItem(qrTicketKey()); return
     }
     qrStatus.value = d.status || 'pending'
     if (d.qr_img) qrImg.value = d.qr_img
@@ -430,7 +432,7 @@ const pollQr = async () => {
         barCode.value = d.bind_code
         barExpireAt.value = Date.now() + 900_000
         startBarWatch()
-        sessionStorage.removeItem('im-onboarding-ticket')
+        sessionStorage.removeItem(qrTicketKey())
       }
       else ElMessage.success(t('myIm.qrDone'))
       await loadIm()
@@ -445,6 +447,8 @@ const pollQr = async () => {
 const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 // 批12A #4：处理中关弹窗挽留（before-close 统一 X/ESC/遮罩/footer 三路径——B-P2-1）
 const guardClose = (done) => {
+  // 批13：manual 页签无会话状态直接关（盲审 A-P1-3③——挽留/isTerminalQr 仅扫码页签语义）
+  if (curKind() !== 'interactive') { stopPoll(); done(); return }
   if (['scanning', 'confirming', 'starting', 'pending'].includes(qrStatus.value)) {   // 盲审B-P1-1：pending（202 回落窗）也挽留
     ElMessageBox.confirm(t('myIm.closeGuard'), t('common.tip'), { type: 'warning' })
       .then(() => { stopPoll(); done() })

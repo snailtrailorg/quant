@@ -310,7 +310,12 @@ def test_backfill_from_env_idempotent():
     mod = types.ModuleType("src.im_bot.feishu_client")
     mod.load_feishu_users = lambda: fake_env
     guard = MagicMock(); guard.__enter__.return_value = guard
-    guard.execute.return_value.fetchone.return_value = [1]   # 唯一启用 feishu bot（护栏放行）
+    def _gexe(sql, *a):
+        cur = MagicMock()
+        # 批13（A-P1-3）：函数内新增 provider 校验查询 → ("feishu",)；护栏 count → [1]
+        cur.fetchone.return_value = ("feishu",) if sql.startswith("SELECT provider") else [1]
+        return cur
+    guard.execute.side_effect = _gexe
     with patch.dict(sys.modules, {"src.im_bot.feishu_client": mod}), \
          patch("src.data_platform.db.get_conn", return_value=guard), \
          patch.object(U, "list_users", return_value=[]), \
@@ -392,3 +397,21 @@ def test_writeback_real_pg():
         with conn.cursor() as cur:
             cur.execute("DELETE FROM notifications WHERE id=%s", (nid,))
     conn.close()
+
+
+def test_send_im_bid_int_conversion_batch13():
+    """批13 盲审A 范围外 P0 钉子：`bid = bid` 笔误自 db5fd27 起 IM 告警必 UnboundLocalError
+    被吞成 (False,"timeout")——现修 int(bot_id)；脏 target ValueError 明确失败。"""
+    import pytest as _pytest
+    from src.alert_notify.dispatch import _send_im
+    # 脏 target：ValueError → (False, 明确原因) 而非 timeout 错标
+    ok, why = _send_im("not_a_number", "warn", "t", "b", None)
+    assert (ok, why) == (False, "bad_target")   # 明确失败码（原错标 timeout）
+    # 合法 int 串：应进入 DB 查询路径（mock get_conn）而非 NameError
+    from unittest.mock import MagicMock, patch as _patch
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    cur = MagicMock(); cur.fetchone.return_value = None
+    conn.execute.return_value = cur
+    with _patch("src.data_platform.db.get_conn", return_value=conn):
+        ok2, why2 = _send_im("7", "warn", "t", "b", None)
+    assert not ok2 and why2 == "disabled"

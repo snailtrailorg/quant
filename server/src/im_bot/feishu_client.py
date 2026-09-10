@@ -18,18 +18,10 @@ logger = logging.getLogger("feishu_bot")
 _token_lock = threading.Lock()
 
 
-def _get_max_tool_turns() -> int:
-    """从 system_config 表读取 LLM 最大工具调用轮次，默认 5。"""
-    try:
-        from src.data_platform.db import get_conn
-        with get_conn() as conn:
-            cur = conn.execute("SELECT value FROM system_config WHERE key='llm_max_tool_turns'")
-            row = cur.fetchone()
-            if row:
-                return int(row[0])
-    except Exception:
-        pass
-    return 5
+# ——— 后台处理（3s 超时绕开） ———
+# 批13：_get_max_tool_turns/_first_seen_note/execute_read_tool 已随通用链迁 handlers.py；
+# execute_read_tool 保留 re-export（旧引用兼容），其余为内部细节不保符号。
+from src.im_bot.handlers import execute_read_tool  # noqa: F401  (re-export)
 
 
 # 批 2(arch-19 v2):per-bot 客户端单例——修两个现状隐患:①多 bot 时 FeishuClient() 不带
@@ -295,38 +287,18 @@ def card_action_fresh(value: dict, max_age_s: int = 60) -> bool:
     return (_t.time() - ts) <= max_age_s
 
 
-# ——— 后台处理（3s 超时绕开） ———
-
-
-def _first_seen_note(open_id: str, fid: int) -> None:
-    """批11C：首见留痕（user_id NULL 行）——不再授予任何权限（A-P0-1③），仅供 owner 在
-    个人中心"待绑定"列表看到 open_id 后一键绑定；不再入告警收件人（A-P1-4 dispatch 只取绑定行）。"""
-    try:
-        from src.data_platform.db import get_conn
-        with get_conn() as conn:
-            if not conn.execute("SELECT 1 FROM im_bot_users WHERE bot_id=%s AND im_user_id=%s",
-                                (fid, open_id)).fetchone():
-                conn.execute("INSERT INTO im_bot_users (bot_id, im_user_id, role) VALUES (%s,%s,'viewer')",
-                             (fid, open_id))
-                conn.commit()
-                logger.info("首见留痕 bot=%s open_id=%s…（待绑定，不授权）", fid, open_id[:10])
-    except Exception as e:
-        logger.warning("首见留痕失败(不影响拒答): %s", e)
-
-
 def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None, chat_type: str = ""):
+    """飞书消息处理薄壳（批13）：bindcode 特例在壳内，通用链走 handlers.handle_incoming。
+
+    webhook(ws_client/router) 双路径签名零改动。"""
     if receive_id is None: receive_id = open_id
-    """后台线程：消息 → LLM 网关 → 回复/确认卡片。per-机器人 role（机器人=登录账号）。"""
     print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
     client = get_feishu_client(fid)   # 批 2:per-bot 单例(修多 bot 回复走错凭证隐患)
-    # 批11C（方案 v2 双盲审 A-P0-1）：身份源=绑定查询——default_role 不再是权限身份（仅展示默认）。
-    # 未绑定 fail-closed + 回显 open_id（bootstrap 通路：用户从拒答消息拿到自己的标识去个人中心绑定，B-P1-2）。
     from src.im_bot.users import resolve_im_identity
-    if fid:
-        _first_seen_note(open_id, fid)
-    identity = resolve_im_identity(open_id)   # webhook 路径同链（env 兜底已从身份面摘除，A-P1-3）
+    identity = resolve_im_identity(open_id, fid)   # per-bot 收口（批13 P0）
     if not identity and fid and chat_type == "p2p":
-        # 批11E：验证码自动绑定——p2p 判据=chat_type（代码盲审 P0-3：p2p 也有 chat_id,receive_id_type 判不出）
+        # 批11E：验证码自动绑定（飞书特例，留壳内——盲审 A-P2-3 平台特例不进通用层）
+        # p2p 判据=chat_type（代码盲审 P0-3：p2p 也有 chat_id,receive_id_type 判不出）
         # 码错不绑走原拒答；消费后整段兜底（盲审 P2-2：失败不静默烧码,明确引导手动绑定）
         try:
             from src.im_bot.bindcode import match_consume
@@ -346,8 +318,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
                     # bind_owner 原语=ON CONFLICT DO UPDATE：首见留痕 NULL 行就地转绑定行（盲审 P0-2：
                     # 内联裸 INSERT 撞 (bot_id,im_user_id) 唯一约束必崩）——pending 计数随之归零
                     bind_owner(fid, open_id, _owner)
-                    from src.im_bot.users import resolve_im_identity as _ri
-                    if _ri(open_id):
+                    if resolve_im_identity(open_id, fid):
                         from src.data_platform.audit import audit_log
                         audit_log(f"im(bot#{fid})", "owner_im_bind_autocode",
                                   target=str(_owner), detail=f"open_id={open_id[:8]}…")   # 不含码
@@ -355,93 +326,20 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
                         return
         except Exception as e:
             logger.warning("验证码自动绑定异常（码可能已消费,请走手动绑定兜底）: %s", e)
-    if not identity:
-        # 代码盲审 A-P0-1 修：文案分流——平台级 bot 指引找管理员（管理面 upsert user_id 绑定），
-        # 自有 bot 指引个人中心绑定（_own_bot 仅 owner 可达——平台 bot 用户走那条路是死路）
-        _own = False
-        if fid:
-            try:
-                from src.data_platform.db import get_conn as _gc
-                with _gc() as conn:
-                    _own = bool(conn.execute(
-                        "SELECT 1 FROM im_bot_config WHERE id=%s AND owner_user_id IS NOT NULL",
-                        (fid,)).fetchone())
-            except Exception:
-                pass
-        _guide = ("请登录 Web → 个人中心 → 我的 IM 通道，绑定此标识后即可对话。" if _own
-                  else "请联系管理员在 集成中心 → IM → 用户管理 绑定你的账号。")
-        client.send_text(
-            receive_id,
-            f"未绑定平台账号，无法使用。\n您的 IM 标识（open_id）：{open_id}\n{_guide}",
-            receive_id_type)
-        return
-    role = identity["role"]
-    perms = identity["perms"]
+            # 盲审 A-P2：异常若发生在 bind 之后，重查成功即已绑定——原样 fall-through 会把
+            # 验证码原文喂进 LLM 对话（原实现回落引导文案）；改明确提示并 return
+            if resolve_im_identity(open_id, fid):
+                client.send_text(receive_id, "✅ 绑定已完成（过程中有短暂异常，不影响结果）", receive_id_type)
+                return
 
-    try:
-        from src.llm_gateway import gateway
-        from src.llm_gateway.gateway import READ_TOOLS, OPERATIONAL_TOOLS
-        operational_names = {t.name for t in OPERATIONAL_TOOLS}
-        messages = [{"role": "user", "content": text}]
-        resp = None
-        # 工具调用 loop：读类直接执行回 LLM，操作类发确认卡片后等用户确认
-        max_turns = _get_max_tool_turns()
-        for _ in range(max_turns):
-            resp = gateway.chat(messages, role=role, tools=READ_TOOLS, caller="feishu", perms=perms)
-            if not resp.tool_calls:
-                break
-            messages.append({"role": "assistant", "content": resp.content or "",
-                             "tool_calls": [{"id": tc["id"], "type": "function",
-                                             "function": {"name": tc["name"],
-                                                          "arguments": tc.get("arguments", "{}")}}
-                                            for tc in resp.tool_calls]})
-            has_operational = False
-            for tc in resp.tool_calls:
-                if tc["name"] in operational_names:
-                    card = build_confirm_card(tc["name"], tc.get("arguments", {}))
-                    client.send_card(receive_id, card, receive_id_type)
-                    has_operational = True
-                else:
-                    result = execute_read_tool(tc["name"], tc.get("arguments", {}))
-                    messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
-            if has_operational:
-                return  # 操作类等用户确认，不继续 loop
-        if resp and resp.content:
-            client.send_text(receive_id, resp.content[:4000], receive_id_type)
-        else:
-            client.send_text(receive_id, "（LLM 无响应）", receive_id_type)
-    except Exception as e:
-        logger.error(f"飞书消息处理失败: {e}")
-        client.send_text(open_id, f"处理失败: {e}", receive_id_type)
-
-
-def execute_read_tool(name: str, args: dict) -> str:
-    """执行读类工具（直接查询，无副作用）。操作类走 execute_confirmed_tool（用户确认后）。"""
-    try:
-        if name == "query_risk_state":
-            from src.risk_control import RiskControl
-            rc = RiskControl.get()
-            state = "熔断" if rc.is_halted() else "正常"
-            return f"风控状态: {state}; 原因: {rc.halt_reason() or '无'}"
-        if name == "query_strategy_status":
-            from src.data_platform.db import get_conn
-            with get_conn() as conn:
-                cur = conn.execute("SELECT id, enabled, backtest_verified FROM strategy_config ORDER BY id")
-                rows = cur.fetchall()
-            if not rows:
-                return "无策略配置"
-            return "策略状态: " + "; ".join(
-                f"{r[0]}({'启' if r[1] else '停'}/{'已验' if r[2] else '未验'})" for r in rows)
-        if name == "query_position":
-            return "持仓查询需实盘对接（XTPAdapter），当前未接入实盘"
-        if name == "query_pnl":
-            return "盈亏查询需实盘对接，当前未接入实盘"
-        if name == "get_astock_analysis":
-            sym = args.get("symbol", "")
-            return f"A股研判 {sym or '全部'}：待 astock_analysis 运行产出"
-        return f"工具 {name} 未实现"
-    except Exception as e:
-        return f"工具 {name} 执行失败: {e}"
+    from src.im_bot.handlers import handle_incoming
+    handle_incoming(
+        "feishu", fid, open_id, text,
+        reply=lambda t: client.send_text(receive_id, t[:4000], receive_id_type),   # 截断留飞书侧（B-P2-2）
+        chat_type="p2p" if chat_type == "p2p" else "group",
+        confirm_card=lambda tool, args: client.send_card(
+            receive_id, build_confirm_card(tool, args), receive_id_type),
+    )
 
 
 def execute_confirmed_tool(open_id: str, tool_name: str, args: str):

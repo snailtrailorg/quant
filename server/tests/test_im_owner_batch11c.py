@@ -77,7 +77,8 @@ class TestResolveIdentity:
 class TestSelfService:
     def test_create_pins_owner_and_role(self):
         """自助创建：owner=会话 sub、default_role 服务端恒 viewer（body 传 admin 也被忽略，A-P0-1）。"""
-        conn = _conn(scripted=[(None, [], 0), ((42,), [], 1)])   # 唯一性预检空 → INSERT RETURNING 42
+        # 批13（A-P1-5）：create 新增配额 count（→0）→ 唯一性预检空 → INSERT RETURNING 42
+        conn = _conn(scripted=[((0,), [], 0), (None, [], 0), ((42,), [], 1)])
         with contextlib.ExitStack() as s:
             for p in _ctx(conn, USER9): s.enter_context(p)
             s.enter_context(patch("src.web_api.routes.im_bots.audit_log"))
@@ -132,10 +133,10 @@ class TestPoolAccounting:
             assert pool._desired() is None
 
     def test_child_backoff(self):
-        """子进程退出 → 退避递增封顶（B-P0-2 坏 bot 不打满重试）。"""
+        """子进程退出 → 退避递增封顶（B-P0-2 坏 bot 不打满重试）。批13：_Child 增 provider 形参。"""
         import time as _t
         from src.im_bot import pool
-        ch = pool._Child(7)
+        ch = pool._Child(7, "feishu")
         ch.proc = MagicMock()
         ch.proc.poll.return_value = 1
         ch.reap()

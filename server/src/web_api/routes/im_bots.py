@@ -49,9 +49,14 @@ def im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_perm("im
         raise ApiError(400, "ROLE_INVALID", f"非法角色: {req.default_role}")
     import json as _json
     from src.quant_common.crypto import encrypt as _encrypt
-    route = req.credentials.get("app_id") or req.credentials.get("client_id") or \
-            req.credentials.get("corp_id") or ""
+    from src.im_bot.routing import route_key_from
+    route = route_key_from(req.credentials)
     has_any = any(v for v in req.credentials.values())
+    # A-P2-8（批13）：空凭证/身份键缺失拦截；manual-only 平台（钉钉/企微）secret 全必填。
+    # 飞书豁免 secret 全检——admin 手填 verification_token/encrypt_key 可空（历史合法形态）。
+    if not has_any or not route or (p.ONBOARDING == "manual"
+                                    and any(not req.credentials.get(f) for f in p.required_fields)):
+        raise ApiError(400, "CREDENTIALS_INCOMPLETE", "凭证不完整（必填字段缺失）")
     # A-G1: 同 (provider, route_key) 预检(撞唯一索引裸 500→错误码化;两个空 route_key 也撞)
     with get_conn() as conn:
         cur = conn.execute(
@@ -110,6 +115,22 @@ def im_bots_onboarding_status(ticket: str, payload: dict = Depends(require_perm(
     return d
 
 
+def _guard_start_credentials(bid: int, provider: str) -> None:
+    """批13（盲审 B-P1-1）：start 前校验凭证齐备——防空/残凭证 bot 进 pool 退避循环
+    （存量 bot 批13 前建库无校验，start 时是最后一道闸）。manual-only 平台 secret 全检，
+    interactive 平台（飞书）校验身份键（route_key）。"""
+    from src.im_bot.base import get_im_provider
+    from src.im_bot.credentials import get_bot_credentials
+    from src.im_bot.routing import route_key_from
+    p = get_im_provider(provider)
+    if p is None:
+        return   # 未注册实现：pool 自然 skip（前向兼容），不拦 start
+    creds = get_bot_credentials(bid)
+    if not creds or not route_key_from(creds) or \
+       (p.ONBOARDING == "manual" and any(not creds.get(f) for f in p.required_fields)):
+        raise ApiError(400, "CREDENTIALS_INCOMPLETE", "凭证不完整（先补录凭证再启动）")
+
+
 @router.post("/api/im-bots/{bid}/start")
 def im_bots_start(bid: int, payload: dict = Depends(require_perm("im_bots_config"))):
     """启动机器人(hybrid/websocket 型启 systemd 长连接单元;纯 webhook 型只翻 enabled)。"""
@@ -118,6 +139,7 @@ def im_bots_start(bid: int, payload: dict = Depends(require_perm("im_bots_config
         row = cur.fetchone()
     if not row:
         raise ApiError(404, "BOT_NOT_FOUND", f"机器人 {bid} 不存在")
+    _guard_start_credentials(bid, row[0])
     # 批11C：pool 化后 start=翻 enabled 开关（quant-im-pool 30s 对账拉起子进程；systemctl 装拆退役）
     with get_conn() as conn:
         conn.execute("UPDATE im_bot_config SET enabled=true, updated_at=now() WHERE id=%s", (bid,))
@@ -186,6 +208,8 @@ def im_bots_test(bid: int, payload: dict = Depends(require_perm("im_bots_config"
     if not row:
         raise ApiError(404, "BOT_NOT_FOUND", f"机器人 {bid} 不存在")
     p = get_im_provider(row[0])
+    if p is None:
+        raise ApiError(400, "PROVIDER_INVALID", f"平台 {row[0]} 未注册实现")
     ok, detail = p.test_connection(bid)
     return {"ok": ok, "detail": detail}
 
@@ -354,9 +378,20 @@ def my_im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_authe
         raise ApiError(400, "PROVIDER_INVALID", f"未知 IM 平台: {req.provider}")
     import json as _json
     from src.quant_common.crypto import encrypt as _encrypt
-    route = req.credentials.get("app_id") or req.credentials.get("client_id") or \
-            req.credentials.get("corp_id") or ""
+    from src.im_bot.routing import route_key_from
+    # 盲审 A-P1-5：手动建同受 ≤5/user 配额（与扫码 onboarding 路径同一条——否则
+    # require_authenticated 面可绕配额无限造子进程，≈62MB/bot）
+    with get_conn() as conn:
+        _n = conn.execute("SELECT count(*) FROM im_bot_config WHERE owner_user_id=%s",
+                          (int(payload["sub"]),)).fetchone()[0]
+        if _n >= 5:
+            raise ApiError(400, "BOT_QUOTA", "每用户最多 5 个 IM 通道")
+    route = route_key_from(req.credentials)
     has_any = any(v for v in req.credentials.values())
+    # A-P2-8（批13）：自助面同款拦截（manual-only 平台 secret 全必填；飞书无手动建路径）
+    if not has_any or not route or (p.ONBOARDING == "manual"
+                                    and any(not req.credentials.get(f) for f in p.required_fields)):
+        raise ApiError(400, "CREDENTIALS_INCOMPLETE", "凭证不完整（必填字段缺失）")
     with get_conn() as conn:
         if conn.execute(
                 "SELECT 1 FROM im_bot_config WHERE provider=%s AND params->>'route_key'=%s",
@@ -435,6 +470,11 @@ def my_im_delete(bid: int, payload: dict = Depends(require_authenticated)):
 @router.post("/api/my/im-bots/{bid}/start")
 def my_im_start(bid: int, payload: dict = Depends(require_authenticated)):
     _own_bot(bid, payload["sub"])
+    from src.data_platform.db import get_conn as _gc
+    with _gc() as conn:
+        _pv = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s", (bid,)).fetchone()
+    if _pv:
+        _guard_start_credentials(bid, _pv[0])   # 批13 B-P1-1：自助面同款启动校验
     with get_conn() as conn:
         conn.execute("UPDATE im_bot_config SET enabled=true, updated_at=now() WHERE id=%s", (bid,))
         conn.commit()
