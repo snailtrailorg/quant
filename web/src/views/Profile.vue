@@ -325,8 +325,12 @@ const barCode = ref('')
 const barExpireAt = ref(0)
 const barCountdown = ref('')
 let barTimer = null
+let barSawPending = false   // 三轮实测：pending 归零判定缺基线闸——done 后用户尚未发消息时 pending 本就为 0，
+                           // 轮询首拍即判"归零"→庆祝抢跑→2.5s 自动关→码无提示消失。只有见过 ≥1（首见留痕
+                           // 发生）后归零才是真绑定信号。
 const startBarWatch = () => {
   if (barTimer) clearInterval(barTimer)
+  barSawPending = false
   barTimer = setInterval(async () => {
     const left = barExpireAt.value - Date.now()
     if (left <= 0) { stopBarWatch(); return }
@@ -334,7 +338,9 @@ const startBarWatch = () => {
     await loadIm()
     // 批13（B-P2-5）：pending 判定按飞书过滤——绑定码只发飞书 bot，钉钉/企微 bot 的首见留痕
     // 不阻塞扫码绑定的 bound 庆祝态（否则其他 bot 留痕会让庆祝态悬到 15min 过期）
-    if (!imBots.value.some(b => b.pending_binds && b.provider === 'feishu')) {
+    const anyPending = imBots.value.some(b => b.pending_binds && b.provider === 'feishu')
+    if (anyPending) barSawPending = true
+    if (barSawPending && !anyPending) {
       stopBarWatch()
       onBindComplete()
     }
