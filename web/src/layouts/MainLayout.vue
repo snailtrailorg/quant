@@ -1,9 +1,10 @@
 <template>
   <el-container style="height: 100vh">
     <!-- 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽顶到最左 + 标题居左；侧栏移出文档流改 hover 覆盖式 -->
-    <el-header style="background: var(--bg-surface); border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; justify-content: space-between" @mouseenter="railOpen = false">
+    <el-header :class="{ 'pinned-shift': railPinned }" style="background: var(--bg-surface); border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; justify-content: space-between" @mouseenter="railOpen = false">
       <div style="display: flex; align-items: center; gap: 12px">
-        <span class="app-title">{{ t('app.title') }}</span>
+        <!-- 钉死态隐藏（2026-09-10 四轮裁定）：侧栏 title 到顶顶替,避免双标题 -->
+        <span v-show="!railPinned" class="app-title">{{ t('app.title') }}</span>
       </div>
       <div style="display: flex; align-items: center; gap: 16px">
           <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼）。2026-09-10 用户裁定：图标按钮（原文字按钮）+title 提示 -->
@@ -80,7 +81,7 @@
       </el-header>
       <!-- 内层容器（图钉批补回）：root 因 el-header 判为纵向——钉死态 aside 需与 main 横排,
            显式 horizontal 包住工作区（2026-09-10 lc47 实证 column 下 order 无效） -->
-      <el-container direction="horizontal" style="flex: 1 1 0%; min-height: 0">
+      <el-container direction="horizontal" :class="{ 'pinned-shift': railPinned }" style="flex: 1 1 0%; min-height: 0">
       <!-- mouseenter 兜底关：Chrome 边界事件状态机下,指针停热区、侧栏滑到指针下方后直接跳主区,
            aside 自身从未 mouseenter→mouseleave 永不触发=卡死不收（快甩鼠标真实场景）。主区/顶栏进入=焦点离开侧栏→收 -->
       <el-main style="padding-bottom: 30px" @mouseenter="railOpen = false">
@@ -91,8 +92,21 @@
       <div v-if="!railPinned" class="rail-hotzone" @mouseenter="railOpen = true"></div>
       <el-aside class="overlay-aside" :class="{ open: railOpen || railPinned, pinned: railPinned }"
                 width="200px" @mouseleave="!railPinned && (railOpen = false)">
-        <!-- 2026-09-10 三轮裁定：侧栏删标题（同色一体后顶栏标题独一份）；图钉移侧栏底部贴底条（不随菜单滚） -->
-        <el-menu :default-active="route.path" router background-color="var(--bg-surface)" text-color="var(--text-secondary)" active-text-color="var(--brand-600)" style="padding-bottom: 12px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
+        <!-- 2026-09-10 四轮裁定：title 恢复+到顶（钉死推挤顶栏时顶替其 title）；图钉 title 右侧右对齐；
+             配色恢复深底浅字（同色一体方案撤回） -->
+        <el-header class="aside-brand">
+          <span class="aside-brand-text">{{ t('app.title') }}</span>
+          <button class="rail-pin" :class="{ active: railPinned }" :title="railPinned ? t('layout.unpin') : t('layout.pin')"
+                  @click="togglePin" @mouseenter.stop @mouseleave.stop>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                 stroke-linecap="round" stroke-linejoin="round" :style="{ transform: railPinned ? 'none' : 'rotate(45deg)' }">
+              <line x1="12" y1="17" x2="12" y2="22" />
+              <path d="M5 17h14l-1.5-6.5a2 2 0 0 0-2-1.5h-7a2 2 0 0 0-2 1.5Z" fill="currentColor" stroke="none" />
+              <circle cx="12" cy="3.5" r="2" />
+            </svg>
+          </button>
+        </el-header>
+        <el-menu :default-active="route.path" router background-color="var(--bg-sidebar)" text-color="#bfcbd9" active-text-color="#FFFFFF" style="padding-bottom: 12px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
           <!-- P3-9（web-design 03 v2.1）：菜单 v2.1 四组 16 项——组标题与菜单项同字号;组内流程序 -->
           <el-menu-item index="/"><el-icon><DataBoard /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
 
@@ -128,18 +142,7 @@
             <el-menu-item v-if="has('system_config')" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
           </el-sub-menu>
         </el-menu>
-        <!-- 图钉贴底条（2026-09-10 三轮裁定）：不随菜单滚（aside flex column,menu flex:1 内滚） -->
-        <div class="rail-foot">
-          <button class="rail-pin" :class="{ active: railPinned }" :title="railPinned ? t('layout.unpin') : t('layout.pin')"
-                  @click="togglePin" @mouseenter.stop @mouseleave.stop>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-                 stroke-linecap="round" stroke-linejoin="round" :style="{ transform: railPinned ? 'none' : 'rotate(45deg)' }">
-              <line x1="12" y1="17" x2="12" y2="22" />
-              <path d="M5 17h14l-1.5-6.5a2 2 0 0 0-2-1.5h-7a2 2 0 0 0-2 1.5Z" fill="currentColor" stroke="none" />
-              <circle cx="12" cy="3.5" r="2" />
-            </svg>
-          </button>
-        </div>
+
       </el-aside>
       </el-container>
     </el-container>
@@ -386,14 +389,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 /* 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽+标题居左;侧栏到顶 hover 覆盖式。
    .aside-brand 用 el-header 组件（padding/高度=EP 默认,与顶栏同源）;去 .el-menu 自带 border-right 消 1px 宽差 */
 .app-title { font-size: 18px; font-weight: 700; color: var(--brand-600); }
-/* 图钉贴底条（2026-09-10 三轮）：aside 改纵向 flex——菜单 flex:1 内滚,图钉条固定底部 */
-.rail-foot { border-top: 1px solid var(--border-weak); padding: 8px 12px; flex-shrink: 0; }
+.aside-brand { display: flex; align-items: center; gap: 8px; }
+.aside-brand-text { color: #fff; font-size: 18px; font-weight: 700; }
 /* 图钉（2026-09-10）：标题后右对齐——flex 布局 text 撑开+margin-left:auto；钉死=竖直针高亮,浮动=斜 45°灰 */
-.rail-pin { display: inline-flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; margin: 0 auto; border-radius: 6px; border: none; cursor: pointer;
-  background: transparent; color: var(--text-secondary); transition: color .15s, background .15s; }
-.rail-pin:hover { color: var(--brand-600); background: rgba(0, 0, 0, .06); }
-.rail-pin.active { color: var(--brand-600); }
+.rail-pin { margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px; border: none; cursor: pointer;
+  background: transparent; color: var(--text-secondary, #8a94a6); transition: color .15s, background .15s; }
+.rail-pin:hover { color: #fff; background: rgba(255, 255, 255, .12); }
+.rail-pin.active { color: #fff; }
 .overlay-aside .el-menu { border-right: none; }   /* EP 默认 1px 右边框→与标题区宽度差 1px,去掉 */
 .rail-hotzone { position: fixed; left: 0; top: 0; bottom: 0; width: 12px; z-index: 1800; }
 .rail-hotzone::after {
@@ -404,7 +407,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 .overlay-aside {
   position: fixed; left: 0; top: 0; bottom: 0;      /* 到顶：滑出时连顶栏左段一并遮盖 */
-  background: var(--bg-surface);   /* 2026-09-10 用户裁定：与顶栏同令牌同色一体（浅底+深字,原深底浅字退役） */
+  background: var(--bg-sidebar);   /* 2026-09-10 四轮裁定：恢复深底（同色一体方案撤回） */
   transform: translateX(-100%);            /* 平时隐藏,左滑出视口 */
   visibility: hidden;                      /* 盲审 P1：出 Tab 焦点序（仅 transform 出视口时键盘 Tab 仍会聚焦不可见菜单） */
   transition: transform .25s ease, visibility .25s;   /* visibility 离散：收起=滑完再隐,展开=立即可见,动画不受影响 */
@@ -414,10 +417,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 }
 .overlay-aside .el-menu { flex: 1; }
 .overlay-aside.open { transform: translateX(0); visibility: visible; box-shadow: 4px 0 16px rgba(0, 0, 0, .18); }
-/* 图钉钉死态（2026-09-10）：覆盖式→推挤式——回文档流排最左（DOM 序在 main 后,order 前移）,main 让位 200px。
-   高度不设（flex 默认 stretch=inner 全高）+沿袭 overflow-y:auto——菜单长时栏内滚,不撑破容器 */
-.overlay-aside.pinned { position: static; transform: none; visibility: visible;
-  order: -1; box-shadow: none; }
+/* 图钉钉死态（2026-09-10 四轮）：fixed 常驻到顶（左列全高）——顶栏/工作区经 .pinned-shift margin 让位缩窄 */
+.overlay-aside.pinned { transform: none; visibility: visible; box-shadow: none; }
+.pinned-shift { margin-left: 200px; }   /* 顶栏+inner 容器同让位（推挤式缩范围） */
 
 /* 通知级别色点：critical 深红 / warn 橙 / info 灰（走 tokens：--critical/--warn-fill/--text-secondary） */
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
