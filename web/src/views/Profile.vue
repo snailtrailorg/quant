@@ -139,7 +139,7 @@
       </div>
       <div style="color: var(--text-secondary); font-size: 12px; line-height: 1.7">{{ curHint() }}</div>
       <template #footer>
-        <el-button @click="guardClose(() => { imAddDlg = false })">{{ t('common.close') }}</el-button>
+        <el-button @click="guardClose(() => { imAddDlg = false })">{{ qrStatus === 'done' ? t('common.done') : t('common.cancel') }}</el-button>
         <el-button v-if="curKind() === 'manual'"
                    type="primary" :loading="imSaving" @click="saveIm">{{ t('myIm.createBtn') }}</el-button>
         <el-button v-else-if="curKind() === 'interactive' && qrStatus === 'error'"
