@@ -45,7 +45,7 @@
         </el-table>
         <div style="display: flex; gap: 8px; margin-top: 14px; align-items: center">
           <el-select v-model="newOv.dimension" style="width: 100px">
-            <el-option v-for="d in ['api','nav','data']" :key="d" :value="d" :label="d" />
+            <el-option v-for="d in ['api','nav','market_op']" :key="d" :value="d" :label="d" />
           </el-select>
           <el-input v-model="newOv.resource" :placeholder="t('perm.resource')" style="width: 220px" />
           <el-radio-group v-model="newOv.effect">

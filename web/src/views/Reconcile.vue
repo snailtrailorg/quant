@@ -12,12 +12,8 @@
     </template>
     <el-alert :title="summary" :type="hasIssues ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: 20px" />
 
-    <!-- W6：el-table-v2 虚拟滚动（≤500 行）+行点击详情抽屉（原 expand 列 v2 不支持——盲审重构）；
-         脱敏分支（count/aggregated 摘要，同 Risk 页范式） -->
-    <el-alert v-if="issuesSens && issuesSens !== 'detail'" type="info" :closable="false" style="margin: var(--sp-2) 0">
-      {{ t('perm.sensLimited') }}: {{ issuesSens }} — {{ issuesSensSummary }}
-    </el-alert>
-    <el-auto-resizer v-else>
+    <!-- W6：el-table-v2 虚拟滚动（≤500 行）+行点击详情抽屉（原 expand 列 v2 不支持——盲审重构） -->
+    <el-auto-resizer>
       <template #default="{ width }">
         <el-table-v2 :columns="issueCols" :data="diffRows" :width="width" :height="480"
                      :row-height="48" fixed :row-event-handlers="{ onClick: ({ rowData }) => openDetail(rowData) }"
@@ -95,8 +91,6 @@ const diffRows = ref([])
 const detailVisible = ref(false)
 const detailRow = ref(null)
 const openDetail = row => { detailRow.value = row; detailVisible.value = true }
-const issuesSens = ref('detail')
-const issuesSensSummary = ref('')
 // W6 v2 列：i18n 与组件渲染入 JS(cellRenderer)——操作列 h(ElButton) 保组件形态
 import { h } from 'vue'
 import { ElButton, ElTag } from 'element-plus'
@@ -143,13 +137,8 @@ const statusLabel = st => ({ open: t('reconcile.stOpen'), verified: t('reconcile
 const loadDiff = async () => {
   try {
     const r = await api.get('/reconcile/issues')
-    issuesSens.value = r.sensitivity || 'detail'
     diffRows.value = r.items || []
-    if (r.sensitivity === 'count')
-      issuesSensSummary.value = `${r.count} ${t('perm.sensCountUnit')}`
-    else if (r.sensitivity === 'aggregated')
-      issuesSensSummary.value = Object.entries(r.by_status || {}).map(([k, v]) => `${statusLabel(k) || k}: ${v}`).join(' · ')
-  } catch { diffRows.value = []; issuesSens.value = 'detail' }
+  } catch { diffRows.value = [] }
 }
 const load = async () => {
   try { const r = await getReconcile(); rawIssues.value = r.issues || [] } catch { rawIssues.value = [] }

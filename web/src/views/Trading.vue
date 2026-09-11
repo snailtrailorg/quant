@@ -10,9 +10,6 @@
     <el-alert v-if="loadFailed" type="error" :closable="false" show-icon
               :title="$t('trading.loadFailed')" style="margin-bottom: 12px" />
     <!-- wd-20 §2.4：KpiCard 四卡 + flex 首屏（与 Dashboard 同构；pnl 色走 up/down 令牌类） -->
-    <el-alert v-if="dataSens" type="info" :closable="false" style="margin: var(--sp-2) 0; margin-bottom: var(--sp-3)">
-      {{ t('perm.sensLimited') }}: {{ dataSens }} — {{ positionData?.count ?? '—' }} {{ t('perm.sensCountUnit') }}
-    </el-alert>
     <div style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-5)">
       <KpiCard :label="t('trading.totalAssets')" :value="'¥' + formatNum(positionData.total_value)" />
       <KpiCard :label="t('trading.todayPnl')" :value="(pnlData.today_pnl||0) >= 0 ? '▲¥' + formatNum(pnlData.today_pnl) : '▼¥' + formatNum(pnlData.today_pnl)"
@@ -168,7 +165,6 @@ import { stockDetail } from '../api'
 import KpiCard from '../components/KpiCard.vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 const loadFailed = ref(false)
-const dataSens = ref('')
 const lastUpdate = ref('—')
 const load = async () => {
   // P2（审计 C3）：静默空表=交易系统假空显示
@@ -176,9 +172,6 @@ const load = async () => {
   try {
     positionData.value = await getPosition()
     ordersData.value = await getOrders()
-    // W5：脱敏态(count/aggregated)不再渲染空表误读为无持仓——提示条替代
-    const sens = positionData.value?.sensitivity || 'detail'
-    if (sens !== 'detail') dataSens.value = sens
   } catch { loadFailed.value = true }
   try { pnlData.value = await getPnl() } catch { }
   lastUpdate.value = new Date().toLocaleTimeString()

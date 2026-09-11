@@ -200,6 +200,19 @@ class RiskControl:
 
     # ── 前置校验 ──
 
+    @staticmethod
+    def _role_of(username: str) -> str | None:
+        """operator=username → users.role（批15 market_op 判定用）。
+
+        筛 enabled+未软删：软删/禁用用户无命中=None（调用方按 deny 处理，fail-closed）。
+        读库异常向上抛（由 2.5 整段 try 收口成 deny critical——拒绝可见）。
+        """
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT role FROM users WHERE username=%s "
+                "AND enabled AND deleted_at IS NULL", (username,)).fetchone()
+        return row[0] if row else None
+
     def check_order(self, order: dict, account: str = "") -> RiskDecision:
         """所有自动交易 send_order 前必调。
 
@@ -240,6 +253,25 @@ class RiskControl:
             return RiskDecision(approved=False, reason=f"未授权实盘品种或 A 股只读: {symbol}", severity="critical")
         if not self.is_live_trading_allowed(market):
             return RiskDecision(approved=False, reason=f"实盘开关未开: {market}（需 .env ENABLE_LIVE_TRADING=true 且 Web 分项开启）", severity="warn")
+
+        # 2.5 市场操作权限（批15 market_op 维；SELL/平仓完全豁免——F-31 同哲学：准入拦
+        # 开仓，平仓=减风险方向；operator 缺失的 SELL 同样放行，旧 --id 路径持仓可止损。
+        # 整段 try 收口：异常=deny critical 落 risk_log，保持"拒绝可见"）
+        try:
+            from src.data_platform.perms import market_op_allowed
+            operator = order.get("operator") or ""
+            if str(order.get("action", "")).upper() != "SELL":
+                if not operator:
+                    return RiskDecision(approved=False,
+                        reason="订单缺 operator（旧 --id 路径或异常构造，fail-closed 拒单）",
+                        severity="critical")
+                role_of = self._role_of(operator)
+                if role_of is None or not market_op_allowed(operator, role_of, market):
+                    return RiskDecision(approved=False,
+                        reason=f"市场操作权限拒绝: {market}（operator={operator}）", severity="warn")
+        except Exception as e:
+            return RiskDecision(approved=False,
+                reason=f"市场操作权限检查异常（fail-closed）: {e}", severity="critical")
 
         # 3. 全局风控
         state = self._get_global_state(account)

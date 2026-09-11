@@ -386,6 +386,9 @@ class Strategy:
             "reason": sig.reason,
             "strategy_id": self.config.id,  # SC3：供 max_trades_per_day 计数
             "validity": getattr(sig, "order_validity", "DAY"),   # P2：GTC 曾读了不传（R-S3b 半接线）
+            # 批15：market_op 判定的操作者（runner 注入的实例属性=live_task.owner_username）。
+            # 服务端钉死——Signal/策略参数无此通道（order 为显式键列表，sig.operator 进不来）
+            "operator": getattr(self, "operator", ""),
         }
         decision = RiskControl.get().check_order(order, "")
         if not decision.approved:

@@ -132,12 +132,14 @@ def _all_group_names() -> list[str]:
     except Exception:
         pass
     return ["admin", "trader", "analyst", "viewer"]
-DATA_FIELDS = {"markets": ["astock", "convertible", "etf", "crypto"],
-               "sensitivity": ["detail", "aggregated", "count"]}
 
 
-def _load_dim(dimension: str) -> dict:
-    """角色→{resource: effect}（nav/data 维;行存在即显性配置）。"""
+def _load_dim(dimension: str, strict: bool = False) -> dict:
+    """角色→{resource: effect}（nav/market_op 维;行存在即显性配置）。
+
+    strict=True 读失败抛 503（market_op 段用——静默 {} 会让矩阵显示全不勾，
+    误保存=全 deny 钉死，代码盲审 B-P2）；缺省容错 {}（nav 维既有语义）。
+    """
     from src.data_platform.db import get_conn as _gc
     try:
         with _gc() as conn:
@@ -149,6 +151,9 @@ def _load_dim(dimension: str) -> dict:
             out.setdefault(sid, {})[res] = eff
         return out
     except Exception:
+        if strict:
+            raise ApiError(503, "PERM_DIM_READ_FAILED",
+                           f"权限维度 {dimension} 读取失败——矩阵可能显示不全，请勿在此状态保存")
         return {}
 
 
@@ -156,7 +161,7 @@ def _load_dim(dimension: str) -> dict:
 def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
     """W4 三维矩阵（10 §4）：api 键+nav 三态+数据域+user override 全景。
     批11B：角色清单动态（user_group 表全量，失败/空回退四内置）+locked 随 GET 返回（前端 🔒 不再硬编码）。"""
-    from ..auth import load_role_permissions, LOCKED_PERM_KEYS
+    from ..auth import load_role_permissions, LOCKED_PERM_KEYS, _MARKET_OP_KEYS
     from src.data_platform.db import get_conn as _gc
     all_keys = ["read", "strategy_control", "data_sync", "halt", "resume", "trade",
                 "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
@@ -177,7 +182,9 @@ def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
             "locked": sorted(LOCKED_PERM_KEYS),
             "roles": {r: sorted(roles.get(r, set())) for r in group_names},
             "nav": {"items": NAV_ITEMS, "roles": _load_dim("nav")},
-            "data": {"fields": DATA_FIELDS, "roles": _load_dim("data")},
+            # 批15：data 维退役（脱敏+markets 存而不灵），换 market_op（市场操作权限）。
+            # keys 单源 perms._MARKET_OP_KEYS（防第二份五键清单漂移）；strict=读失败 503
+            "market_op": {"keys": list(_MARKET_OP_KEYS), "roles": _load_dim("market_op", strict=True)},
             "user_overrides": overrides}
 
 
@@ -190,17 +197,19 @@ def _ensure_group(conn, role: str) -> None:
 @router.post("/api/permissions/{role}")
 def update_permissions(role: str, body: dict, dimension: str = "api",
                        payload: dict = Depends(require_perm("user_mgmt"))):
-    """改角色权限集。W4：dimension ∈ api|nav|data（缺省 api 兼容旧前端）。
+    """改角色权限集。W4：dimension ∈ api|nav|market_op（缺省 api 兼容旧前端）。
 
-    api 维=全量重写 allow 集；nav/data 维=全量重写 {resource: effect} 映射。
+    api 维=全量重写 allow 集；nav/market_op 维=全量重写 {resource: effect} 映射。
+    （批15：data 维退役——脱敏删+markets 存而不灵由 market_op 顶替。）
     锁键（W4 盲审 B-P0 新建——原"系统策略键已锁定"是幻觉）：LOCKED_PERM_KEYS
     双路径同锁——角色重写自动地板保护（请求集被静默校正,锁键恒保持现值）;
     admin 角色另加 ADMIN_ROLE_FLOOR（self-lockout 防线）。返回 preserved 提示校正。
     """
-    from ..auth import invalidate_perm_cache, load_role_permissions, LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR
+    from ..auth import (invalidate_perm_cache, load_role_permissions,
+                        LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR, _MARKET_OP_KEYS)
     from src.data_platform.db import get_conn as _gc
-    if dimension not in ("api", "nav", "data"):
-        raise HTTPException(400, "BAD_DIMENSION", "dimension ∈ api|nav|data")
+    if dimension not in ("api", "nav", "market_op"):
+        raise HTTPException(400, "BAD_DIMENSION", "dimension ∈ api|nav|market_op")
     if dimension == "api":
         keys = set(body.get("permissions", []) or [])
         if not keys:
@@ -230,11 +239,10 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
         invalidate_perm_cache()
         return {"role": role, "permissions": out,
                 "preserved_locked": sorted(preserved & (set(body.get("permissions", [])) ^ preserved))}
-    # nav/data 维：body.resources = {resource: effect}
+    # nav/market_op 维：body.resources = {resource: effect}
     res_map = body.get("resources", {}) or {}
-    valid_res = {i["id"] for i in NAV_ITEMS} if dimension == "nav" \
-        else (set(DATA_FIELDS["markets"]) | set(DATA_FIELDS["sensitivity"])
-              | {f"sensitivity:{v}" for v in DATA_FIELDS["sensitivity"]})   # 代码盲审 A P1-1：敏感级上送复合键（24f5544 契约），白名单漏配致 data 维保存恒 400
+    valid_res = ({i["id"] for i in NAV_ITEMS} if dimension == "nav"
+                 else set(_MARKET_OP_KEYS))   # 批15：market_op 单源五键（data 维退役）
     bad = set(res_map) - valid_res
     if bad:
         raise HTTPException(400, "BAD_RESOURCE", f"未知资源: {sorted(bad)}")
@@ -263,23 +271,27 @@ def update_user_override(username: str, body: dict,
                          payload: dict = Depends(require_perm("user_mgmt"))):
     """W4 C 阶段：per-user override（10 §4 用户视图=角色+override）。
 
-    body: {dimension ∈ api|nav|data, resource, effect ∈ allow|deny|clear}
+    body: {dimension ∈ api|nav|market_op, resource, effect ∈ allow|deny|clear}
     - clear=删该行（回到角色基线）
     - 锁键（api 维 LOCKED_PERM_KEYS）双路径同锁 → 400 PERMISSION_KEY_LOCKED
     - 自锁防线：目标用户是 admin 时拒 deny 其管理键（self-lockout,盲审 B-P1）
     subject_id=username（W4 定死——0056 注释 user_id 弃,盲审 A/B-P1）。
     """
-    from ..auth import invalidate_perm_cache, LOCKED_PERM_KEYS
+    from ..auth import invalidate_perm_cache, LOCKED_PERM_KEYS, _MARKET_OP_KEYS
     from src.data_platform.db import get_conn as _gc
     dimension = body.get("dimension", "api")
     resource = body.get("resource", "")
     effect = body.get("effect", "")
-    if dimension not in ("api", "nav", "data"):
+    if dimension not in ("api", "nav", "market_op"):
         raise HTTPException(400, "BAD_DIMENSION")
     if effect not in ("allow", "deny", "clear"):
         raise HTTPException(400, "BAD_EFFECT")
     if not resource:
         raise HTTPException(400, "BAD_RESOURCE", "resource 必填")
+    if dimension == "market_op" and resource not in _MARKET_OP_KEYS:
+        # ApiError（代码盲审 A/B 同判）：原生 HTTPException 第三位置参落 headers，
+        # 触发时响应层 AttributeError→500 而非 400；项目错误码体系统一走 ApiError
+        raise ApiError(400, "BAD_RESOURCE", f"未知市场键: {resource}")
     if dimension == "api":
         if resource in LOCKED_PERM_KEYS:
             raise HTTPException(400, "PERMISSION_KEY_LOCKED",

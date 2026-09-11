@@ -76,20 +76,14 @@
           </el-radio-group>
         </div>
       </template>
-      <!-- W5 #2b：el-table-v2 虚拟滚动（风控日志 ≤1000 行真长表）；脱敏分支（count/aggregated 摘要态） -->
-      <template v-if="riskSens === 'detail'">
-        <el-auto-resizer>
-          <template #default="{ width }">
-            <el-table-v2 :columns="riskLogCols" :data="riskLogs" :width="width" :height="420"
-                         :row-height="44" fixed
-                         :row-class="({ rowIndex }) => rowIndex % 2 ? 'v2-zebra' : ''" />
-          </template>
-        </el-auto-resizer>
-      </template>
-      <el-alert v-else-if="riskSens" type="info" :closable="false" style="margin: var(--sp-2) 0">
-        {{ t('perm.sensLimited') }}: {{ riskSens }} —
-        {{ riskSensSummary }}
-      </el-alert>
+      <!-- W5 #2b：el-table-v2 虚拟滚动（风控日志 ≤1000 行真长表） -->
+      <el-auto-resizer>
+        <template #default="{ width }">
+          <el-table-v2 :columns="riskLogCols" :data="riskLogs" :width="width" :height="420"
+                       :row-height="44" fixed
+                       :row-class="({ rowIndex }) => rowIndex % 2 ? 'v2-zebra' : ''" />
+        </template>
+      </el-auto-resizer>
       <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-2)">{{ t('risk.sellAlwaysNote') }}</div>
     </el-card>
   </div>
@@ -118,8 +112,6 @@ const load = async () => { state.value = await getRiskState() }
 import api from '../api'
 import { cssVar } from '../utils/cssVar'
 const riskLogs = ref([])
-const riskSens = ref('detail')
-const riskSensSummary = ref('')
 // v2 列（cellRenderer:i18n 文案入 JS——v2 无 #default slot,盲审 A-P2）
 const riskLogCols = computed(() => [
   { key: 'ts', dataKey: 'ts', title: t('common.time'), width: 160 },
@@ -135,14 +127,8 @@ const logFilter = ref('')
 const loadLog = async () => {
   try {
     const r = await api.get(`/risk/log${logFilter.value ? `?action=${logFilter.value}` : ''}`)
-    riskSens.value = r.sensitivity || 'detail'
     riskLogs.value = r.items || []
-    if (r.sensitivity === 'count')
-      riskSensSummary.value = `${r.count} ${t('perm.sensCountUnit')} (${r.first_ts || '—'} ~ ${r.last_ts || '—'})`
-    else if (r.sensitivity === 'aggregated')
-      riskSensSummary.value = Object.entries(r.by_action || {})
-        .map(([k, v]) => `${{ reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') }[k] || k}: ${v}`).join(' · ')
-  } catch { riskLogs.value = []; riskSens.value = 'detail' }
+  } catch { riskLogs.value = [] }
 }
 const _gaugeColor = pct => pct >= 90 ? cssVar('--critical') : pct >= 75 ? cssVar('--warn-fill') : cssVar('--success')
 const gauges = computed(() => {

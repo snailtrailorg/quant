@@ -51,14 +51,6 @@ def list_live_tasks(status: str | None = None,
                     "bars": int(h["bars"]) if h.get("bars") else 0,
                     "frozen": h.get("frozen") == "1",
                     "hb_age_s": (time.time() - float(h["ts"])) if h.get("ts") else None})
-    # W5 脱敏（盲审 B-P1 旁路集）：任务行含 symbol/account_id/initial_capital=持仓财务面
-    from ..auth import data_sensitivity
-    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
-    if sens in ("count", "aggregated"):
-        by_status: dict = {}
-        for t in out:
-            by_status[t.get("status") or "?"] = by_status.get(t.get("status") or "?", 0) + 1
-        return {"sensitivity": sens, "items": [], "count": len(out), "by_status": by_status}
     return out
 
 
@@ -116,9 +108,9 @@ def create_live_task(body: dict = Body(...),
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO live_task (name, strategy_id, symbol, params, strategy_snapshot, status, "
-            "account_id, initial_capital) VALUES (%s,%s,%s,%s,%s,'pending',%s,%s) RETURNING id",
+            "account_id, initial_capital, owner_username) VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s) RETURNING id",
             (name, strategy_id, symbol, json.dumps(merged_params), json.dumps(strategy_snapshot),
-             account_id, initial_capital))
+             account_id, initial_capital, payload["username"]))
         task_id = cur.fetchone()[0]
         conn.commit()
     audit_log(payload["username"], "create_live_task", f"task {task_id} strategy={strategy_id} symbol={symbol}")
@@ -248,20 +240,7 @@ def get_position(payload: dict = Depends(require_perm("read"))):
     total_value = float(snap[0]) if snap else 0
     initial = float(first[0]) if first and first[0] else (float(snap[2]) if snap and snap[2] is not None else 1000000)
     total_pnl = (total_value - initial) if snap else 0
-    # W5 脱敏（盲审 B-P1）：count=仅账户级计数+净值（设计判断：账户级总览保留）；
-    # aggregated=Σpnl 聚合（剔 symbol 级明细）；detail=现行为
-    from ..auth import data_sensitivity
-    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
-    if sens == "count":
-        return {"sensitivity": "count", "positions": [], "count": len(positions),
-                "total_value": total_value, "stale": stale}
-    if sens == "aggregated":
-        return {"sensitivity": "aggregated", "positions": [],
-                "count": len(positions), "sum_pnl": round(sum(p["pnl"] or 0 for p in positions), 2),
-                "total_value": total_value, "total_pnl": total_pnl,
-                "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0,
-                "snapshot_ts": str(refresh_ts)[:19] if refresh_ts else None, "stale": stale}
-    return {"sensitivity": "detail", "positions": positions, "total_value": total_value, "total_pnl": total_pnl,
+    return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0,
             "snapshot_ts": str(refresh_ts)[:19] if refresh_ts else None,
             "snapshot_rows": refresh_rows, "stale": stale}
@@ -299,16 +278,7 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
         cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status, client_order_id, error "
                            "FROM order_log ORDER BY ts DESC LIMIT 100")   # wd-20 §1.4.3：补委托号/失败原因（0039 列）
         rows = cur.fetchall()
-    # W5 脱敏：剔 strategy_id/symbol/price（盲审 B-P1 聚合键）
-    from ..auth import data_sensitivity
-    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
-    if sens in ("count", "aggregated"):
-        by_status: dict = {}
-        for r in rows:
-            by_status[r[6]] = by_status.get(r[6], 0) + 1
-        return {"sensitivity": sens, "orders": [], "total": len(rows), "by_status": by_status}
-    return {"sensitivity": "detail",
-            "orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6],
+    return {"orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6],
                         "client_order_id": r[7], "error": r[8]} for r in rows],
             "total": len(rows)}
 

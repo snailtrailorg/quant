@@ -117,8 +117,12 @@ def _guard(name):
 
 
 def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,
-                  account_id=None):
-    """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。"""
+                  account_id=None, owner_username=None):
+    """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。
+
+    owner_username（批15）：live_task 归属人 → strategy.operator 实例属性 → order["operator"]
+    → check_order 2.5 市场操作权限判定。旧 --id 路径无值=None → operator 空 → 2.5 拒单
+    critical（预期 fail-closed）。"""
     from vnpy.event import EventEngine
     from vnpy.trader.gateway import BaseGateway
     from vnpy_xtp.gateway.xtp_gateway import XtpTdApi
@@ -194,6 +198,9 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     cfg = StrategyConfig(id=sid, name=name, type=s_type, symbol=symbol, adapter="xtp",
                          enabled=True, factors=factors or [], aggregator=aggregator or {}, params=params or {})
     strategy = Strategy.from_config(cfg, adapter)
+    # 批15：owner 经实例属性注入（不动构造签名——from_config 调用点含 backtest.py，
+    # 改签名会炸回测）；place_order 读 getattr(self, "operator", "")
+    strategy.operator = owner_username or ""
 
     # 评审 C2：冻结的真实抓手——包 adapter.send_order（下单唯一咽喉，strategy.place_order 必经）。
     # S6 修订（2026-08-18）：两段判定——①sticky 冻结（untrusted/gap=数据污染事实）BUY 拒/SELL 放；
@@ -316,13 +323,13 @@ def main():
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
-                "status, account_id, initial_capital FROM live_task WHERE id=%s",
+                "status, account_id, initial_capital, owner_username FROM live_task WHERE id=%s",
                 (args.task_id,))
             row = cur.fetchone()
         if not row:
             logger.error("实盘任务 %s 不存在", args.task_id)
             sys.exit(EX_CONFIG)
-        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital = row
+        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital, owner_username = row
         if status == "stopped":
             logger.info("实盘任务 %s 已停止，退出", tid)
             sys.exit(0)
@@ -362,6 +369,7 @@ def main():
         tid = None
         account_id = None
         initial_capital = 1000000
+        owner_username = None   # 旧路径无归属（批15：operator 空 → 2.5 拒单 critical=预期）
         # 旧架构读 strategy_account
         try:
             with get_conn() as conn:
@@ -391,7 +399,8 @@ def main():
 
     _run_hub_mode(sid=sid, tid=tid, name=name, s_type=s_type, symbol=symbol,
                   factors=factors, aggregator=aggregator, params=params,
-                  initial_capital=initial_capital, account_id=account_id)
+                  initial_capital=initial_capital, account_id=account_id,
+                  owner_username=owner_username)
     return
 
 

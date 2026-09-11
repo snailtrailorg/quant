@@ -34,6 +34,46 @@ _PERM_TTL = 60.0
 LOCKED_PERM_KEYS = {"user_mgmt", "resume", "account_keys"}
 ADMIN_ROLE_FLOOR = LOCKED_PERM_KEYS | {"system_config", "alerts_config"}   # 批7:告警路由/计费短信面同列自锁防线
 
+# 批15：市场操作权限（market_op 维）——市场键与实盘分项开关同键（risk._market_of 返回集）。
+# 管理面/白名单单源引用此常量，防第二份五键清单漂移（盲审 P1-5/P2-7）。
+_MARKET_OP_KEYS = ("convertible", "etf", "astock", "binance_perp", "okx_perp")
+
+
+def market_op_allowed(username: str, role: str, market: str) -> bool:
+    """批15 market_op 维：user 行(effect) > role 行(effect) > 无行 False。
+
+    全链 fail-closed（2026-09-11 用户裁定）：
+    - 无行=False——组未配置即拒（新市场键漏配=默认锁死；自定义新组零行=天然零权限）
+    - 同 (subject,market) allow+deny 双行并存时 deny 优先（对齐 api 维 deny 语义）
+    读库失败=False（对齐 check_order 链上件：熔断态/快照/开关均 fail-closed）
+    - 不做缓存：直读 PG——invalidate_perm_cache 是进程内的，永远到不了 strategy_runner
+      子进程（check_order 调用方），缓存=权限收紧对运行中任务永不生效的 fail-open 面
+      （盲审 A-P1-4/B-P1-5 同判）；下单=信号级低频（max_trades_per_day 默认 20），直读可忽略。
+    """
+    from src.data_platform.db import get_conn as _gc
+    try:
+        with _gc() as conn:
+            cur = conn.execute(
+                "SELECT subject_type, subject_id, effect FROM permission "
+                "WHERE dimension='market_op' AND resource=%s "
+                "AND ((subject_type='role' AND subject_id=%s) "
+                " OR (subject_type='user' AND subject_id=%s))",
+                (market, role, username))
+            rows = cur.fetchall()
+    except Exception as e:
+        _logger.warning("market_op 表读取失败（fail-closed 拒）: %s", e)
+        return False
+
+    def _layer(st: str) -> str | None:
+        """层内聚合：deny 优先于 allow（同层双行并存时），无行=None。"""
+        effs = {eff for s, _sid, eff in rows if s == st}
+        if "deny" in effs:
+            return "deny"
+        return "allow" if "allow" in effs else None
+
+    eff = _layer("user") or _layer("role")   # user 层有行则覆盖 role 层
+    return eff == "allow"                    # None/deny 均 False（无行=deny）
+
 
 def load_role_permissions() -> dict:
     """角色→权限集（api 维）。表读失败/空 → fallback 字典（行为零变化）。"""
@@ -90,30 +130,6 @@ def _load_user_api_overrides(username: str) -> tuple[set, set]:
         for res, eff in cur.fetchall():
             (denies if eff == "deny" else allows).add(res)
     return allows, denies
-
-
-def data_sensitivity(username: str, role: str) -> str:
-    """W5：data 维敏感级（detail|aggregated|count，缺省 detail=现行为零变化）。
-
-    解析 resource='sensitivity:<v>' 行（W4 Permissions.vue 编码）。user 行覆盖
-    role 行（单值字段的 deny 语义=用户级值生效）；无任何配置=detail。读失败=detail。
-    """
-    try:
-        from src.data_platform.db import get_conn as _gc
-        with _gc() as conn:
-            rows = conn.execute(
-                "SELECT subject_type, subject_id, resource FROM permission "
-                "WHERE dimension='data' AND resource LIKE 'sensitivity:%'").fetchall()
-        role_v = user_v = None
-        for st, sid, res in rows:
-            v = res.split(":", 1)[1]
-            if st == "role" and sid == role:
-                role_v = v
-            elif st == "user" and sid == username:
-                user_v = v
-        return user_v or role_v or "detail"
-    except Exception:
-        return "detail"
 
 
 def load_nav_map(username: str, role: str) -> dict:

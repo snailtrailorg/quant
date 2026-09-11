@@ -52,9 +52,9 @@ JWT_TTL_HOURS = 24
 # 运行时真源=permission 表（60s 缓存热加载），_load_permissions() 合并 deny>allow>默认拒绝。
 # 批11C：权限解析下沉 data_platform/perms.py（IM 身份链同源）；此处 re-export 兼容全部既有引用
 from src.data_platform.perms import (   # noqa: F401
-    PERMISSIONS, LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR,
+    PERMISSIONS, LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR, _MARKET_OP_KEYS,
     load_role_permissions, invalidate_perm_cache, load_effective_permissions,
-    data_sensitivity, load_nav_map,
+    load_nav_map, market_op_allowed,
 )
 
 

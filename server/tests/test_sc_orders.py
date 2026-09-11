@@ -35,17 +35,22 @@ def strat():
     cfg = StrategyConfig(id="t-sc", name="t", type="astock_analysis",
                          symbol="600000.SHSE", adapter="xtp")
     s = Strategy(cfg, None)
+    s.operator = "tester"   # 批15：runner 注入位（place_order 读 getattr）
     return s
 
 
 @pytest.fixture
-def rc_ok():
+def rc_ok(monkeypatch):
     saved = RiskControl._instance
     c = RiskControl()
     RiskControl._instance = saved
     c.is_halted = lambda: False
     c.is_live_trading_allowed = lambda market: True
     c._get_global_state = lambda a: type("S", (), {"available": True, "total_drawdown": 0.0, "daily_loss": 0.0})()
+    # 批15 2.5：market_op 判定打桩放行（本文件聚焦 WAL/计数，非权限）
+    c._role_of = staticmethod(lambda u: "admin")
+    import src.data_platform.perms as _pm
+    monkeypatch.setattr(_pm, "market_op_allowed", lambda u, r, m: True)
     return c
 
 

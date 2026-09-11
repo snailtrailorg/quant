@@ -63,7 +63,7 @@ class TestExitCodes:
         conn = MagicMock()
         conn.__enter__.return_value = conn
         cur = MagicMock()
-        cur.fetchone.return_value = (8, "t", 1, "600000.SHSE", "{}", "{}", "stopped", None, None)
+        cur.fetchone.return_value = (8, "t", 1, "600000.SHSE", "{}", "{}", "stopped", None, None, "admin")
         conn.execute.return_value = cur
         with patch.object(m, "_wait_for_deps", return_value=True), \
              patch("src.data_platform.db.get_conn", return_value=conn), \

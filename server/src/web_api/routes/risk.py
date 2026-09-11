@@ -47,22 +47,7 @@ def risk_log_api(action: str = "", limit: int = 200,
         args.append(min(int(limit), 1000))
         cur = conn.execute(sql, args)
         rows = cur.fetchall()
-    # W5 数据脱敏（盲审 B-P1 旁路集）：count=仅计数/aggregated=按 action 聚合——
-    # symbol/rule/detail 属持仓与决策明细,count 用户不可见
-    from ..auth import data_sensitivity
-    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
-    if sens == "count":
-        return {"sensitivity": "count", "items": [], "count": len(rows),
-                "first_ts": str(rows[-1][1])[:19] if rows else None,
-                "last_ts": str(rows[0][1])[:19] if rows else None}
-    if sens == "aggregated":
-        agg: dict = {}
-        for r in rows:
-            agg[r[2]] = agg.get(r[2], 0) + 1
-        return {"sensitivity": "aggregated", "items": [], "count": len(rows),
-                "by_action": agg, "last_ts": str(rows[0][1])[:19] if rows else None}
-    return {"sensitivity": "detail",
-            "items": [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "action": r[2],
+    return {"items": [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "action": r[2],
                        "symbol": r[3], "rule": r[4], "detail": r[5], "severity": r[6]}
                       for r in rows]}
 
@@ -86,19 +71,7 @@ def reconcile_issues_api(status: str = "",
         rows = cur.fetchall()
     def _n(v):
         return float(v) if v is not None else None
-    # W5 脱敏（盲审 B-P1 旁路集）：差异单含 symbol+两侧数量=持仓明细
-    from ..auth import data_sensitivity
-    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
-    if sens in ("count", "aggregated"):
-        by_status: dict = {}
-        by_type: dict = {}
-        for r in rows:
-            by_status[r[6]] = by_status.get(r[6], 0) + 1
-            by_type[r[2]] = by_type.get(r[2], 0) + 1
-        return {"sensitivity": sens, "items": [], "count": len(rows),
-                "by_status": by_status, "by_type": by_type}
-    return {"sensitivity": "detail",
-            "items": [{"id": r[0], "symbol": r[1], "issue_type": r[2], "detail": r[3],
+    return {"items": [{"id": r[0], "symbol": r[1], "issue_type": r[2], "detail": r[3],
                        "broker_qty": _n(r[4]), "derived_qty": _n(r[5]), "status": r[6],
                        "first_seen": str(r[7])[:19] if r[7] else None,
                        "updated_at": str(r[8])[:19] if r[8] else None,
@@ -265,15 +238,6 @@ def reconcile_api(payload: dict = Depends(require_perm("read"))):
     """三账对账（signal_log/order_log/trade_log 比对，同步执行）。"""
     from src.scheduler.tasks import reconcile_three_books
     out = reconcile_three_books.apply().get()
-    # W5 脱敏（盲审 B-P1）：对账明细含 symbol 级数量快照=持仓面——count/aggregated 摘要化
-    from ..auth import data_sensitivity
-    sens = data_sensitivity(payload.get("username", ""), payload.get("role", "viewer"))
-    if sens in ("count", "aggregated"):
-        issues = out.get("issues") if isinstance(out, dict) else None
-        n = len(issues) if isinstance(issues, list) else (out.get("count", 0) if isinstance(out, dict) else 0)
-        return {"sensitivity": sens, "summary": True, "count": n,
-                "raw": {k: v for k, v in out.items() if k not in ("issues",)}
-                        if isinstance(out, dict) else None}
     return out
 
 

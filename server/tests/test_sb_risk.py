@@ -14,13 +14,19 @@ from src.risk_control.risk import RiskControl, RiskState, DEFAULT_RULES
 
 
 @pytest.fixture
-def rc():
-    """独立实例（不污染单例）。is_halted/开关均打桩，聚焦被测逻辑。"""
+def rc(monkeypatch):
+    """独立实例（不污染单例）。is_halted/开关均打桩，聚焦被测逻辑。
+
+    批15 2.5：market_op 判定同样打桩放行（lazy import 重查模块属性，patch 模块级生效）。
+    """
     saved = RiskControl._instance
     c = RiskControl()
     RiskControl._instance = saved  # 不注册为单例
     c.is_halted = lambda: False
     c.is_live_trading_allowed = lambda market: True
+    c._role_of = staticmethod(lambda u: "admin")
+    import src.data_platform.perms as _pm
+    monkeypatch.setattr(_pm, "market_op_allowed", lambda u, r, m: True)
     return c
 
 
@@ -28,8 +34,8 @@ def _state(drawdown=0.0, daily=0.0, available=True):
     return RiskState(halted=False, total_drawdown=drawdown, daily_loss=daily, available=available)
 
 
-BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0}
-SELL = {"symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0}
+BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0, "operator": "tester"}
+SELL = {"symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0, "operator": "tester"}
 
 
 class TestFailClosed:

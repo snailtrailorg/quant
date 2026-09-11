@@ -72,8 +72,10 @@ ADMIN_TOOLS = [
          input_schema={"type": "object", "properties": {}, "required": []}),
 ]
 
-# 永不注册（高危参数修改类；下单类 place_order/cancel_order 已放开，走三级开关+风控 check_order）
-FORBIDDEN_TOOLS = {"modify_risk_rule", "modify_strategy_params"}
+# 永不注册（高危参数修改类）。注：聊天/IM 面无下单工具（曾有"place_order 已放开"的
+# 过时注释——实无此工具，批15 双盲审证伪）；真实下单唯一链=策略 runner → check_order。
+# 未来若加聊天下单：operator=聊天登录用户/IM bot owner（批15 方案预写语义）
+FORBIDDEN_TOOLS = {"modify_risk_rule", "modify_strategy_params", "place_order", "cancel_order"}
 
 # 操作类合集（TRADER+ADMIN），供外部判断"需确认卡片"的工具
 OPERATIONAL_TOOLS = TRADER_TOOLS + ADMIN_TOOLS
