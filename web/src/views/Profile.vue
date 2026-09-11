@@ -117,11 +117,8 @@
             <div class="qr-skeleton"></div>{{ t('myIm.qrStarting') }}
           </div>
           <div v-else-if="qrStatus === 'scanning'" style="text-align: center">
+            <!-- 六轮裁定：只留「用飞书扫这个码」——时效由倒计时行表达，手机端提示不需要网页预告 -->
             <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrScanning') }}</div>
-            <!-- 批12A #7：引导三行（22 号 §3.2b+§3.4-8——App 归属/手机选择预告/归因飞书） -->
-            <div style="color: var(--text-secondary); font-size: 12px; margin-top: 8px; line-height: 1.8">
-              {{ t('myIm.guideApp') }}<br/>{{ t('myIm.guideChoice') }}<br/>{{ t('myIm.guideWhy') }}
-            </div>
           </div>
           <div v-else-if="qrStatus === 'confirming'" style="text-align: center; color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrConfirming') }}</div>
           <div v-else-if="qrStatus === 'timeout'" style="text-align: center; color: var(--warn-fill)">{{ t('myIm.qrTimeout') }}</div>
@@ -137,7 +134,6 @@
           </div>
           <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: 13px">{{ qrNote }}</div>
       </div>
-      <div style="color: var(--text-secondary); font-size: 12px; line-height: 1.7">{{ curHint() }}</div>
       <template #footer>
         <el-button @click="guardClose(() => { imAddDlg = false })">{{ qrStatus === 'done' ? t('common.done') : t('common.cancel') }}</el-button>
         <el-button v-if="curKind() === 'manual'"
@@ -304,8 +300,6 @@ const curMethods = () => (curProvider()?.methods || []).filter(m => m.kind === '
 // 批13：每平台单方式——curKind/curPostSteps 直取首方式（页签=平台，页签内容=方式）
 const curKind = () => curMethods()[0]?.kind || ''
 const curPostSteps = () => curMethods()[0]?.post_steps || []
-// 四轮实测：hint 按页签平台分流——飞书页签只显示飞书句，钉钉/企微只显示表单句（原全文常显=每页签重复噪音）
-const curHint = () => curKind() === 'interactive' ? t('myIm.hintFeishu') : t('myIm.hintManual')
 const isTerminalQr = computed(() => ['done', 'bound', 'timeout', 'error'].includes(qrStatus.value))
 const onImMethodChange = () => {
   const kind = curMethods().find(m => m.id === imMethod.value)?.kind

@@ -195,7 +195,7 @@ def my_im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_authe
         cur = conn.execute(
             "INSERT INTO im_bot_config (provider, name, description, default_role, enabled, "
             "owner_user_id, credentials_encrypted, params) "
-            "VALUES (%s,%s,%s,'viewer',false,%s,%s,%s::jsonb) RETURNING id",
+            "VALUES (%s,%s,%s,'viewer',true,%s,%s,%s::jsonb) RETURNING id",   # 六轮裁定：建完即启用——凭证建时已过 CREDENTIALS_INCOMPLETE 校验，无需再让用户手动点启动
             (req.provider, req.name, req.description, int(payload["sub"]),
              _encrypt(_json.dumps(req.credentials, ensure_ascii=False)) if has_any else None,
              _json.dumps({"route_key": route})))
