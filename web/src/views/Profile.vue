@@ -360,6 +360,12 @@ const startQr = async () => {
 const handleOnboardingStatus = async (d) => {
   // B-P2-4：SSE 即时到+在途 poll 双达同状态——终态短路（防双 toast/双 loadIm）
   if (isTerminalQr.value && qrStatus.value === d.status) return
+  // 七轮：ttl 真值校准——倒计时/pollDeadline 统一为会话真实剩余（原 startQr 用 SDK expire_in≈1h、
+  // 恢复路径硬编码 10min，同一会话两个数）
+  if (d.ttl && d.ttl > 0) {
+    pollDeadline = Date.now() + d.ttl * 1000
+    if (qrImg.value) startQrCountdown(pollDeadline)
+  }
   if (d.status === 'expired') {   // 批12A（A-P2-6）：key 不存在=过期（原 pending 混同收口）
     qrStatus.value = 'timeout'; stopPoll(); sessionStorage.removeItem(qrTicketKey()); return
   }

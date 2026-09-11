@@ -141,13 +141,17 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
 def my_im_onboarding_status(ticket: str, payload: dict = Depends(require_authenticated)):
     """轮询自助向导状态（ticket 归属绑定：session 载荷 owner≠会话 → 404，A-P2-2）。"""
     r = feishu_redis_client()
-    data = r.get(f"feishu:session:{ticket}")
+    key = f"feishu:session:{ticket}"
+    data = r.get(key)
     if not data:
         return {"status": "expired"}   # 批12A（A-P2-6）：key 不存在=过期/TTL 尽——pending 混同过期收口
     d = json.loads(data)
     if d.get("owner_user_id") is not None and d.get("owner_user_id") != int(payload["sub"]):
         raise ApiError(404, "NOT_FOUND", "会话不存在")
-    return d   # 自助面原样返回（含 bind_code——owner 本人才能看到码）
+    ttl = r.ttl(key)   # 七轮：剩余秒数真值——前端倒计时校准（原恢复路径硬编码 10 分钟与 SDK expire_in≈1h 打架）
+    if isinstance(ttl, (int, float)) and ttl > 0:
+        d["ttl"] = int(ttl)
+    return d
 
 
 @router.get("/api/my/im-bots")
