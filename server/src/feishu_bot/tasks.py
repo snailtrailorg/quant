@@ -29,9 +29,19 @@ _redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True)
 def _set_session(session_id: str, data: dict, expire: int = 600,
                  owner_user_id: int | None = None) -> None:
     """存扫码会话状态。批12A：owner 显式传参（v1 的 _SESSION_OWNER 全局 dict 慢泄漏退役——B-P2-4）；
-    载荷带 ts（wall clock——B-P2-6 批 B SSE 去重钩子；非单调,回拨可倒退,去重勿依赖严格递增）。"""
+    载荷带 ts（wall clock——B-P2-6 批 B SSE 去重钩子；非单调,回拨可倒退,去重勿依赖严格递增）。
+    批14 SSE：setex 成功后 publish（契约①真相源优先②全吞）——推送故障绝不炸状态机。"""
     data = {**data, "owner_user_id": owner_user_id, "ts": time.time()}
     _redis.setex(f"feishu:session:{session_id}", expire, json.dumps(data, ensure_ascii=False))
+    if owner_user_id is not None:
+        try:
+            from src.quant_common.eventbus import bus
+            # 载荷剥 qr_img（A-P1-3：base64 数十 KB 跨 chunk；前端出码时已同步拿到）+ 带 ticket
+            ev = {k: v for k, v in data.items() if k != "qr_img"}
+            ev["ticket"] = session_id
+            bus.publish(owner_user_id, "onboarding", ev)
+        except Exception as e:   # noqa: BLE001
+            logger.warning("SSE publish 失败(不影响扫码状态机): %s", e)
 
 
 # 批12A（A-P1-1②）：全局并发帽——SDK requests 无 timeout，daemon 线程理论可挂到 deadline；

@@ -35,6 +35,8 @@ async def api_error_handler(request, exc: ApiError):
 from src.feishu_bot.router import router as feishu_router
 app.include_router(feishu_router)
 
+from .routes.events import router as events_router   # 批14 SSE（import 在 include 前——顺序无碍）
+
 # --- 头像静态服务（批次C）：挂 /api/static/avatars -- nginx 已代理 /api/，零额外配置同源可达 ---
 # 2026-08-26 3b 修正：头像是运行时数据，位置=shared 层（AVATAR_DIR 环境变量可覆盖）。
 # 原 <版本树>/static/avatars 两宗罪：工件化后落在 deploy 属主 releases/<id> 内——
@@ -65,6 +67,13 @@ app.add_middleware(
 
 
 # --- 启动时初始化 ---
+
+@app.on_event("shutdown")
+def shutdown():
+    # 批14（B-P0-1）：停机关总线——SSE 生成器收哨兵即退（配合 systemd --timeout-graceful-shutdown 5）
+    from src.quant_common.eventbus import bus
+    bus.close()
+
 
 @app.on_event("startup")
 def startup():
@@ -122,6 +131,7 @@ app.include_router(stock_router)
 app.include_router(chat_router)
 app.include_router(im_bots_router)
 app.include_router(alerts_router)
+app.include_router(events_router)   # 批14：SSE 推送端点
 app.include_router(mgmt_router)
 app.include_router(risk_router)
 app.include_router(backtest_router)

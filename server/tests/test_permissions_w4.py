@@ -160,6 +160,8 @@ class TestAuthMatrixW5:
             for path, methods in spec.get("paths", {}).items():
                 if "get" not in methods or "{" in path:
                     continue
+                if path == "/api/events":
+                    continue   # 批14：SSE 无限流——同步 c.get 必挂死，不适用状态码矩阵语义
                 try:
                     resp = c.get(path, headers={"Authorization": "Bearer t"})
                     out[path] = resp.status_code

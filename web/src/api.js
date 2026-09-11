@@ -199,3 +199,108 @@ export const stockDetail = (symbol) => api.get(`/stock/${symbol}/detail`)
 export const stockIntraday = (symbol) => api.get(`/stock/${symbol}/intraday`)
 export const stockAnalyze = (symbol) => api.post(`/stock/${symbol}/analyze`)
 export const getKline = (symbol, days = 0) => api.get(`/kline/${symbol}`, { params: { days } })
+
+
+// ── 批14：SSE 单例管理器（引用计数+共享退避+帧看门狗）──
+// 契约：401 停止重连走既有登出路径；健康=帧到达看门狗（45s 无帧判死重连），
+// 非"连接曾建立"布尔（fetch 假活防误判）；解析失败丢帧不断流（缓冲累积按 \n\n 切）。
+export const sse = (() => {
+  const FRAME_TIMEOUT_MS = 45000
+  let ctrl = null
+  let refCount = 0
+  let handlers = new Set()
+  let lastFrameAt = 0
+  let watchdog = null
+  let retry = 0
+  let stopped = false
+  let loopGen = 0   // 盲审 B-P1-1：代数计数——退避期 unmount→remount 置回 stopped=false 后，
+                    // 旧 loop 醒来仍续跑（双连接/同事件双发）；每 loop 持代数，换代即退出
+
+  const emit = ev => { for (const h of [...handlers]) { try { h(ev) } catch { /* 单 handler 炸不断流 */ } } }
+
+  function noteFrame() { lastFrameAt = Date.now() }
+
+  function startWatchdog() {
+    if (watchdog) clearInterval(watchdog)
+    watchdog = setInterval(() => {
+      if (ctrl && Date.now() - lastFrameAt > FRAME_TIMEOUT_MS) {
+        // 帧看门狗判死：abort 触发重连循环（退避）
+        ctrl.abort()
+      }
+    }, 5000)
+  }
+
+  async function loop() {
+    const my = ++loopGen
+    while (!stopped && my === loopGen) {
+      try {
+        const token = localStorage.getItem('token')
+        ctrl = new AbortController()
+        const resp = await fetch('/api/events', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: ctrl.signal,
+        })
+        if (resp.status === 401) {   // 停止重连——走既有登出路径（axios 拦截器同款）
+          localStorage.removeItem('token')
+          window.location.href = '/login'
+          return
+        }
+        if (!resp.ok || !resp.body) throw new Error(`HTTP ${resp.status}`)
+        // B-P2-1：retry 清零推迟到首帧到达（hello 处 noteFrame）——服务器 accept 即断的
+        // 崩溃循环下退避才能增长（HTTP 200 不代表流健康）
+        const reader = resp.body.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          noteFrame()
+          buf += dec.decode(value, { stream: true })
+          let i
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, i)
+            buf = buf.slice(i + 2)
+            let evName = 'message', dataLine = ''
+            for (const line of frame.split('\n')) {
+              if (line.startsWith('event: ')) evName = line.slice(7).trim()
+              else if (line.startsWith('data: ')) dataLine = line.slice(6)
+            }
+            if (evName === 'hello') { noteFrame(); retry = 0; emit({ event: 'hello' }); continue }
+            if (evName === 'bye') { noteFrame(); emit({ event: 'bye' }); break }   // max-age——无感重连
+            if (dataLine) {
+              try { emit({ event: 'data', data: JSON.parse(dataLine) }) }
+              catch { /* 单帧解析失败丢帧不断流 */ }
+            }
+          }
+        }
+      } catch { /* abort/网络断——落入重连 */ }
+      if (stopped || my !== loopGen) return
+      const delay = Math.min(1000 * 2 ** retry, 30000)
+      retry += 1
+      await new Promise(r => setTimeout(r, delay))
+    }
+  }
+
+  return {
+    subscribe(handler) {
+      handlers.add(handler)
+      if (refCount === 0) { stopped = false; lastFrameAt = Date.now(); startWatchdog(); loop() }
+      refCount += 1
+      let closed = false   // B-P2-2：退订闭包幂等（多调不至 refCount 负数泄漏连接）
+      return () => {
+        if (closed) return
+        closed = true
+        handlers.delete(handler)
+        refCount -= 1
+        if (refCount === 0) {
+          stopped = true
+          loopGen += 1   // 配合 P1-1：退避中的旧 loop 立即失效
+          if (watchdog) { clearInterval(watchdog); watchdog = null }
+          if (ctrl) ctrl.abort()
+          ctrl = null
+        }
+      }
+    },
+    healthy() { return !!ctrl && !stopped && (Date.now() - lastFrameAt) < FRAME_TIMEOUT_MS },
+  }
+})()

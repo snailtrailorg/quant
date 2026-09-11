@@ -189,7 +189,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { VueCropper } from 'vue-cropper'  // 样式在 main.js 全局引入（漏引 CSS 是"界面全乱"的根因；该包 CSS 自带 scope id 与组件 __scopeId 配套自洽）
 import Avatar from '../components/Avatar.vue'
 import TabsShell from '../components/TabsShell.vue'
-import api, { apiErr } from '../api'
+import api, { apiErr, sse } from '../api'
 import { validatePassword } from '../password'
 
 const { t, te } = useI18n()
@@ -287,7 +287,12 @@ const startQrCountdown = (expireAt) => {   // 批13 UX：二维码有效期倒�
   stopQrCountdown()
   const tick = () => {
     const left = expireAt - Date.now()
-    if (left <= 0) { stopQrCountdown(); return }
+    if (left <= 0) {
+      stopQrCountdown()
+      // A-P2-3：expired 是端点合成态无 SSE 事件——归零即时回查一次（防兜底轮询 15s 延迟）
+      if (qrTicket.value && ['scanning', 'confirming', 'starting', 'pending'].includes(qrStatus.value)) pollQr(true)
+      return
+    }
     qrCountdown.value = `${String(Math.floor(left / 60000)).padStart(2, '0')}:${String(Math.floor(left % 60000 / 1000)).padStart(2, '0')}`
   }
   tick()
@@ -306,7 +311,7 @@ const onImMethodChange = () => {
   const kind = curMethods().find(m => m.id === imMethod.value)?.kind
   imFields.value = curMethods().find(m => m.id === imMethod.value)?.fields || []
   stopPoll()   // 切走停轮询（会话仍在后台——ticket 不清）
-  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''; qrCode.value = ''   // 复位旧码区（防过期码误导）
+  qrStatus.value = ''; qrImg.value = ''; qrNote.value = ''   // 复位旧码区（防过期码误导；B-P1-3：qrCode 残留引用已删——未声明变量致恢复链整段死）
   // 2026-09-10 用户三轮：切回扫码=恢复活会话（不再退回"开始扫码"按钮——那要求用户重来一遍）
   if (kind === 'interactive') {
     resumeActiveSession()
@@ -321,7 +326,7 @@ const resumeActiveSession = () => {
     qrStatus.value = 'starting'   // 轮询首查即翻 scanning（有码）或 expired
     pollDeadline = Date.now() + 600_000
     startQrCountdown(pollDeadline)
-    pollTimer = setInterval(pollQr, 3_000)
+    pollQr()   // 批14：立即一次+链式自续（间隔动态）
   }
 }
 const onImProviderChange = () => {   // 盲审 B-P2-8：换平台重算方式与字段（methods 空的 provider 已在下拉过滤）
@@ -339,7 +344,7 @@ const startQr = async () => {
     if (r.qr_img) { qrImg.value = r.qr_img; qrStatus.value = 'scanning' }
     pollDeadline = Date.now() + (r.expire_in || 600) * 1000
     startQrCountdown(pollDeadline)   // UX 裁定：有效期倒计时
-    pollTimer = setInterval(pollQr, 3_000)
+    pollQr()   // 批14：立即一次+链式自续（间隔动态）
   } catch (e) {
     // 批12A #8：BUSY 自动恢复活会话（existing_ticket——频控困局解锁，B-P2-3 通道）
     const et = e?.existing_ticket   // 拦截器已剥 response.data（api.js L20 reject err.response?.data）
@@ -349,39 +354,57 @@ const startQr = async () => {
       qrStatus.value = 'starting'
       pollDeadline = Date.now() + 600_000
       startQrCountdown(pollDeadline)
-      pollTimer = setInterval(pollQr, 3_000)
+      pollQr()   // 批14：立即一次+链式自续（间隔动态）
       ElMessage.info(t('myIm.resumed'))
       return
     }
     qrStatus.value = 'error'; qrNote.value = apiErr(e, ''); ElMessage.error(apiErr(e, t('common.operationFailed')))
   }
 }
-const pollQr = async () => {
-  qrPollFails = 0
-  if (Date.now() > pollDeadline) { qrStatus.value = 'timeout'; stopPoll(); return }
+// 批14：d 的处理抽公共（pollQr 与 SSE 事件两路共用——B-P2-1 边界：只装 d 处理，
+// BUSY 恢复留在 startQr catch、deadline/fails 计数留 pollQr；SSE 路径不做 deadline→timeout 翻转）
+const handleOnboardingStatus = async (d) => {
+  // B-P2-4：SSE 即时到+在途 poll 双达同状态——终态短路（防双 toast/双 loadIm）
+  if (isTerminalQr.value && qrStatus.value === d.status) return
+  if (d.status === 'expired') {   // 批12A（A-P2-6）：key 不存在=过期（原 pending 混同收口）
+    qrStatus.value = 'timeout'; stopPoll(); sessionStorage.removeItem(qrTicketKey()); return
+  }
+  qrStatus.value = d.status || 'pending'
+  if (d.qr_img) qrImg.value = d.qr_img
+  if (d.status === 'scanning' && !qrImg.value) qrStatus.value = 'scanning'
+  if (d.status === 'done') {   // 五轮：done 即成功终态（绑定取消——发消息即 owner）
+    stopPoll()
+    if (d.owned === false) { qrNote.value = t('myIm.ownedFalse'); ElMessage.warning(t('myIm.ownedFalse')) }
+    else ElMessage.success(t('myIm.qrDone'))
+    sessionStorage.removeItem(qrTicketKey())
+    await loadIm()
+  }
+  if (d.status === 'error') { stopPoll(); qrNote.value = d.code ? (te('err.' + d.code) ? t('err.' + d.code) : (d.error || '')) : (d.error || ''); ElMessage.error(qrNote.value || t('common.operationFailed')) }
+}
+let pollEpoch = 0   // B-P0-1：链代数——stopPoll 递增；in-flight 的 pollQr 返回后见换代即不重挂（链复活根治）
+const pollQr = async (force = false) => {
+  const myEpoch = pollEpoch
+  if (!force && Date.now() > pollDeadline) { qrStatus.value = 'timeout'; stopPoll(); return }
+  // ↑ B-P1-2：倒计时归零的即时回查传 force（expireAt 与 pollDeadline 同源，非 force 恒被此守卫拦——契约(f)原是死代码）
   try {
     const d = await api.get(`/my/im-bots/onboarding-status/${qrTicket.value}`)
-    if (d.status === 'expired') {   // 批12A（A-P2-6）：key 不存在=过期（原 pending 混同收口）
-      qrStatus.value = 'timeout'; stopPoll(); sessionStorage.removeItem(qrTicketKey()); return
-    }
-    qrStatus.value = d.status || 'pending'
-    if (d.qr_img) qrImg.value = d.qr_img
-    if (d.status === 'scanning' && !qrImg.value) qrStatus.value = 'scanning'
-    if (d.status === 'done') {   // 五轮：done 即成功终态（绑定取消——发消息即 owner）
-      stopPoll()
-      if (d.owned === false) { qrNote.value = t('myIm.ownedFalse'); ElMessage.warning(t('myIm.ownedFalse')) }
-      else ElMessage.success(t('myIm.qrDone'))
-      sessionStorage.removeItem(qrTicketKey())
-      await loadIm()
-    }
-    if (d.status === 'error') { stopPoll(); qrNote.value = d.code ? (te('err.' + d.code) ? t('err.' + d.code) : (d.error || '')) : (d.error || ''); ElMessage.error(qrNote.value || t('common.operationFailed')) }
+    await handleOnboardingStatus(d)
+    qrPollFails = 0   // B-P2-2 死代码修：清零移到成功路径尾部（原在首行——"连续 2 次判死"从未生效）
   } catch (e) {
     // 盲审 P3：单次瞬时网络错不终止（连续 2 次才判死——后端会话可能仍活）
     qrPollFails = (qrPollFails || 0) + 1
     if (qrPollFails >= 2) { qrStatus.value = 'error'; stopPoll() }
   }
+  if (myEpoch !== pollEpoch) return   // B-P0-1：期间被 stopPoll（关弹窗/终态/切页签）——不复活链
+  scheduleNextPoll()   // 批14：setTimeout 链——间隔随 SSE 健康态动态（健康 15s 兜底/非健康 3s）
 }
-const stopPoll = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+const scheduleNextPoll = () => {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
+  // B-P0-1：终态/弹窗关不重挂（原只查 qrTicket——done 后链复活：toast 轰炸+deadline 后 done 翻 timeout）
+  if (!qrTicket.value || isTerminalQr.value || !imAddDlg.value) return
+  pollTimer = setTimeout(pollQr, sse.healthy() ? 15_000 : 3_000)
+}
+const stopPoll = () => { pollEpoch += 1; if (pollTimer) { clearTimeout(pollTimer); pollTimer = null } }
 // 批12A #4：处理中关弹窗挽留（before-close 统一 X/ESC/遮罩/footer 三路径——B-P2-1）
 const guardClose = (done) => {
   // 批13：manual 页签无会话状态直接关（盲审 A-P1-3③——挽留/isTerminalQr 仅扫码页签语义）
@@ -392,7 +415,25 @@ const guardClose = (done) => {
       .catch(() => {})
   } else { stopPoll(); done() }
 }
-onUnmounted(() => { stopPoll(); stopQrCountdown() })   // 轮询三件套①（组件级）+倒计时
+onUnmounted(() => { stopPoll(); stopQrCountdown(); offSse?.() })   // 轮询①+倒计时+SSE 退订
+
+// ── 批14：SSE 事件接线（组件级生命周期——弹窗/方式切换不动连接）──
+// 契约：hello→连接即回查一次（初始竞态/resume 首查/重连补偿三合一——B-P0-2）；
+// onboarding 事件→ticket 守卫（旧 ticket 迟到终态防误翻 A-P1-4）+弹窗开守卫
+let offSse = null
+offSse = sse.subscribe((ev) => {
+  if (ev.event === 'hello') {
+    if (!imAddDlg.value) return   // B-P2-3：弹窗已关不复活后台轮询（与数据事件同守卫）
+    if (qrTicket.value && !isTerminalQr.value) pollQr()
+    return
+  }
+  if (ev.event !== 'data') return
+  const d = ev.data
+  if (d?.type !== 'onboarding') return
+  if (!imAddDlg.value) return                       // 弹窗已关守卫（abort 异步，in-flight 帧仍到）
+  if (d.ticket !== qrTicket.value) return           // ticket 守卫
+  handleOnboardingStatus(d)
+})
 watch(imAddDlg, v => { if (!v) stopPoll() })   // ②弹窗关停
 
 
