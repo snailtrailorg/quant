@@ -13,7 +13,9 @@ Environment=QT_QPA_PLATFORM=offscreen
 # 端点不挂长查询；idle_in_tx 60s（web 快速进出，防读块悬挂）
 Environment=QUANT_DB_STMT_TIMEOUT_MS=10000
 Environment=QUANT_DB_IDLE_TX_TIMEOUT_MS=60000
-ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m uvicorn src.web_api.main:app --host 127.0.0.1 --port 8001 --timeout-graceful-shutdown 2   # 批14：SSE 永久 in-flight 必烧满窗——SSE 客户端自愈重连,2s 足矣（盲审 A-P1-1②）；注意此窗封顶所有 in-flight 请求（超 2s 的合法长请求重启时刻被掐——部署窗内影响≈0,有意取舍）
+# 批14：graceful 2s——SSE 永久 in-flight 必烧满窗（客户端自愈重连,2s 足矣,盲审 A-P1-1②）；
+# 注意此窗封顶所有 in-flight 请求（超 2s 的合法长请求重启时刻被掐——部署窗内影响≈0,有意取舍）
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m uvicorn src.web_api.main:app --host 127.0.0.1 --port 8001 --timeout-graceful-shutdown 2
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30
