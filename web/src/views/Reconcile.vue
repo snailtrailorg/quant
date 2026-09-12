@@ -78,6 +78,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getReconcile } from '../api'
 import api from '../api'
 import { estColWidth, sample } from '../utils/colwidth'
+import { fmtTime } from '../utils/fmtTime'
 
 const { t } = useI18n()
 // W5 残留修(W6 审 A-P2):localStorage role → /auth/me permissions(W4 权限驱动)
@@ -109,7 +110,9 @@ const issueCols = computed(() => [
         `${up ? '▲' : '▼'}${Math.abs(rowData.broker_qty - rowData.derived_qty)}`)
     } },
   { key: 'first_seen', dataKey: 'first_seen', title: t('reconcile.firstSeen'), width: 160 },
-  { key: 'updated_at', dataKey: 'updated_at', title: t('cols.actionTime'), width: 160 },
+  { key: 'updated_at', dataKey: 'updated_at', title: t('cols.actionTime'),
+    width: estColWidth(t('cols.actionTime'), sample(diffRows.value, 'updated_at')),
+    cellRenderer: ({ cellData }) => (cellData ? fmtTime.full(cellData) : '—') },
   { key: 'status', dataKey: 'status', title: t('common.status'), width: 100,
     cellRenderer: ({ cellData }) => h(ElTag, { size: 'small',
       type: ({ open: 'danger', verified: 'success', ignored: 'info', exempt: 'warning' })[cellData] || 'info' },

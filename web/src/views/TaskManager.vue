@@ -22,7 +22,9 @@
       <el-table-column prop="id" :label="t('task.taskId')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" min-width="100" />
-      <el-table-column v-if="colOn('trigger_type')" prop="trigger_type" :label="t('cols.triggerType')" min-width="110" />
+      <el-table-column v-if="colOn('trigger_type')" prop="trigger_type" :label="t('cols.triggerType')" min-width="110">
+        <template #default="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
+      </el-table-column>
       <el-table-column v-if="colOn('trigger_user')" prop="trigger_user" :label="t('cols.triggeredBy')" min-width="110" show-overflow-tooltip />
       <el-table-column :label="t('common.status')" min-width="100">
         <template #default="{ row }"><StatusTag :value="row.status" /></template>
@@ -95,6 +97,8 @@ const taskColDefs = computed(() => [
 ])
 const taskVisible = ref([])
 const colOn = k => taskVisible.value.includes(k)
+// 盲审B-P2-7：触发方式枚举中文化（标签经文案师；未知值原样——排查新枚举不被吞）
+const triggerLabel = v => v === 'manual' ? t('task.triggerManual') : v === 'schedule' ? t('task.triggerSchedule') : (v || '-')
 
 
 const load = async () => { try { tasks.value = (await getTasks(filterStatus.value)).items || [] } catch (e) { console.error(e) } }

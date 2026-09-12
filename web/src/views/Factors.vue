@@ -334,6 +334,7 @@ const onDelete = async (name) => {
     await ElMessageBox.confirm(msg, t('common.confirm'), { type: n ? 'warning' : undefined })
     await deleteFactor(name)
     ElMessage.success(t('common.deleteSuccess'))
+    dialogVisible.value = false   // 盲审A-P2-1：删完关编辑弹窗（防对已删对象再保存）
     await load()
   } catch { /* 取消 */ }
 }

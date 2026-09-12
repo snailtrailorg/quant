@@ -11,13 +11,13 @@
     </template>
 
     <el-row :gutter="20" style="margin-bottom: 20px">
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.totalReturn') }}</div><div class="value">{{ run.total_return_pct ?? '-' }}%</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.winRate') }}</div><div class="value">{{ run.win_rate ?? '-' }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.totalReturn') }}</div><div class="value">{{ pct(run.total_return_pct) }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.winRate') }}</div><div class="value">{{ pct(run.win_rate) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.sharpe') }}</div><div class="value">{{ run.sharpe_ratio ?? '-' }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.maxDrawdown') }}</div><div class="value">{{ run.max_drawdown_pct ?? '-' }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.maxDrawdown') }}</div><div class="value">{{ pct(run.max_drawdown_pct) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.tradeCount') }}</div><div class="value">{{ run.trade_count ?? '—' }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.annualized') }}</div><div class="value">{{ run.annualized_return != null ? (run.annualized_return).toFixed(1) + '%' : '—' }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.benchmarkReturn') }}</div><div class="value">{{ run.benchmark_return ?? '—' }}%</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.annualized') }}</div><div class="value">{{ pct(run.annualized_return, 1) }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.benchmarkReturn') }}</div><div class="value">{{ pct(run.benchmark_return) }}</div></div></el-card></el-col>
     </el-row>
 
     <!-- P2-5：费用与摩擦面板（引擎侧已参数化：佣金/印花税卖出0.05%/过户费/滑点/涨跌停约束） -->
@@ -73,10 +73,10 @@
         <el-descriptions-item :label="t('backtest.informationRatio')">{{ metricsRow.result?.information_ratio ?? '—' }}</el-descriptions-item>
         <el-descriptions-item :label="t('backtest.alpha')">{{ metricsRow.result?.alpha ?? '—' }}</el-descriptions-item>
         <el-descriptions-item :label="t('backtest.beta')">{{ metricsRow.result?.beta ?? '—' }}</el-descriptions-item>
-        <el-descriptions-item :label="t('backtest.benchmarkReturn')">{{ metricsRow.result?.benchmark_return ?? '—' }}%</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.benchmarkReturn')">{{ pct(metricsRow.result?.benchmark_return) }}</el-descriptions-item>
         <el-descriptions-item :label="t('backtest.benchmarkVolatility')">{{ metricsRow.result?.benchmark_volatility ?? '—' }}</el-descriptions-item>
         <el-descriptions-item :label="t('backtest.spanDays')">{{ run.span_days ?? '—' }}</el-descriptions-item>
-        <el-descriptions-item :label="t('backtest.annualized')">{{ run.annualized_return ?? '—' }}%</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.annualized')">{{ pct(run.annualized_return) }}</el-descriptions-item>
       </el-descriptions>
     </el-dialog>
     </el-card>
@@ -93,6 +93,7 @@ import { getBacktestRun, verifyStrategy } from '../api'
 import api from '../api'
 
 const { t } = useI18n()
+const pct = (v, digits) => (v == null ? '—' : (digits != null ? Number(v).toFixed(digits) : v) + '%')   // 盲审A-P2-4：null 不带 '%' 尾巴
 const route = useRoute()
 const router = useRouter()
 const loading = ref(false)

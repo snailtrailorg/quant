@@ -27,13 +27,16 @@ const visible = defineModel('visible', { type: Array, default: () => [] })
 const { t } = useI18n()
 const defaultKeys = computed(() => props.columns.filter(c => !c.hidden).map(c => c.key))
 
-// 初始化：localStorage 优先（剔掉已下线的键），无存档用默认
+// 初始化：localStorage 优先（剔掉已下线的键），无存档用默认。
+// 盲审A-P2-5：全隐藏（空档）也是有效用户选择要持久化——"空档≠无档"；
+// 存档键全部下线（schema 变更）才回落默认。
 const stored = (() => {
   try { return JSON.parse(localStorage.getItem(props.storageKey) || '') } catch { return null }
 })()
-if (Array.isArray(stored) && stored.length) {
+if (Array.isArray(stored)) {
   const valid = stored.filter(k => props.columns.some(c => c.key === k))
-  visible.value = valid.length ? valid : defaultKeys.value
+  if (valid.length > 0 || stored.length === 0) visible.value = valid
+  else visible.value = defaultKeys.value
 } else {
   visible.value = defaultKeys.value
 }

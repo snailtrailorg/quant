@@ -238,11 +238,16 @@ const onUserCommand = (cmd) => {
 // 个人中心弹窗：头像下拉直开 + 深链 /?profile=<tab>（redirect 链 /profile /im-bots /feishu 收口于此）
 const profileDlg = ref(false)
 const profileTab = ref('basic')
+let openedByQuery = false   // 盲审A-P2-10：深链开的弹窗随 query 消失而关（后退语义）；下拉开的与 URL 无关不受牵连
 watch(() => route.query.profile, v => {
-  if (v && ['basic', 'im', 'pwd'].includes(v)) { profileTab.value = v; profileDlg.value = true }
+  if (v && ['basic', 'im', 'pwd'].includes(v)) {
+    profileTab.value = v; profileDlg.value = true; openedByQuery = true
+  } else if (!v && openedByQuery) {
+    profileDlg.value = false; openedByQuery = false
+  }
 }, { immediate: true })   // immediate：直链落地/刷新即开
 const onProfileClosed = () => {
-  profileDlg.value = false
+  profileDlg.value = false; openedByQuery = false
   if (route.query.profile) router.replace({ query: { ...route.query, profile: undefined } })   // 关后清参：刷新/后退不再重开
 }
 const onProfileUpdated = (u) => {

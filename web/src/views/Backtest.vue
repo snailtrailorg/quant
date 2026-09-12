@@ -198,12 +198,14 @@ const moreVisible = computed({
 const deleteRun = async (row) => {
   if (!row) return
   try {
-    await ElMessageBox.confirm(`#${row.id}`, t('common.confirm'), { type: 'warning' })
+    // 盲审A-P2-2：裸 "#id" 确认不知删什么——换文案师全文案（对象+后果+不可恢复）
+    await ElMessageBox.confirm(t('backtest.confirmDelete', { id: row.id, name: strategyName(row.strategy_id) }),
+                               t('common.confirm'), { type: 'warning' })
     await api.delete(`/backtest/${row.id}`)
     ElMessage.success(t('common.deleteSuccess'))
     moreRow.value = null
     await loadRuns()
-  } catch (e) { if (e !== 'cancel') ElMessage.error(String(e?.response?.data?.detail || t('common.failed'))) }
+  } catch (e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(String(e?.response?.data?.detail || t('common.failed'))) }   // 盲审B-P2-5：ESC reject 'close' 不算失败
 }
 const strategyName = (sid) => strategies.value.find(x => x.id === sid)?.name || sid
 const runningCount = computed(() => runs.value.filter(r => r.status === 'running').length)

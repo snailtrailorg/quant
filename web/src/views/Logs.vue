@@ -31,9 +31,9 @@
         <!-- P3-5(05 §5.10):日志筛选 -->
   <el-card style="margin-bottom: 14px">
     <el-form inline>
-      <el-form-item><el-input v-model="logKw" :placeholder="t('logs.keyword')" clearable style="width: 200px" @change="filterLogs" /></el-form-item>
+      <el-form-item><el-input v-model="logKw" :placeholder="t('log.keyword')" clearable style="width: 200px" @change="filterLogs" /></el-form-item>
       <el-form-item>
-        <el-select v-model="logLevel" :placeholder="t('logs.level')" clearable style="width: 100px" @change="filterLogs">
+        <el-select v-model="logLevel" :placeholder="t('log.level')" clearable style="width: 100px" @change="filterLogs">
           <el-option v-for="lv in ['ERROR','WARNING','INFO','DEBUG']" :key="lv" :value="lv" :label="lv" />
         </el-select>
       </el-form-item>
@@ -66,7 +66,7 @@
           </el-table-column>
           <el-table-column prop="created_at" :label="t('common.time')" min-width="160" />
           <el-table-column prop="acked_at" :label="t('cols.confirmedAt')" min-width="160">
-            <template #default="{ row }">{{ row.acked_at || '-' }}</template>
+            <template #default="{ row }">{{ row.acked_at ? fmtTime.full(row.acked_at) : '-' }}</template>
           </el-table-column>
         </el-table>
       </el-card>
@@ -85,7 +85,7 @@
       <el-table-column prop="to" :label="t('log.outboxTo')" min-width="200" show-overflow-tooltip />
       <el-table-column prop="subject" :label="t('log.outboxSubject')" min-width="180" show-overflow-tooltip />
       <el-table-column prop="sent_at" :label="t('cols.sentAt')" min-width="160">
-        <template #default="{ row }">{{ row.sent_at || '-' }}</template>
+        <template #default="{ row }">{{ row.sent_at ? fmtTime.full(row.sent_at) : '-' }}</template>
       </el-table-column>
       <el-table-column prop="next_attempt_at" :label="t('log.outboxNext')" min-width="160">
         <template #default="{ row }">{{ row.next_attempt_at || '-' }}</template>

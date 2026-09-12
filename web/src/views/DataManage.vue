@@ -93,12 +93,23 @@
           </template>
         </el-table-column>
         <el-table-column :label="t('dataManage.tradeDay')" min-width="120">
+          <template #header>
+            <!-- 裁定 v2：列头 tooltip 说明"92% 行 '-' 属正常"语义（盲审A-P2-7 词条早备未绑） -->
+            <el-tooltip :content="t('dataManage.tradeDayGapTip')" placement="top">
+              <span class="hdr-hint">{{ t('dataManage.tradeDay') }}</span>
+            </el-tooltip>
+          </template>
           <template #default="{ row }">
             <span v-if="row.expected_days != null">{{ row.actual_days }}/{{ row.expected_days }}</span>
             <span v-else style="color:var(--text-secondary)">-</span>
           </template>
         </el-table-column>
         <el-table-column :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
+          <template #header>
+            <el-tooltip :content="t('dataManage.tradeDayGapTip')" placement="top">
+              <span class="hdr-hint">{{ t('dataManage.gap') }}</span>
+            </el-tooltip>
+          </template>
           <template #default="{ row }">
             <span v-if="row.failed_dates" style="color: var(--critical); font-size:12px">{{ row.failed_dates }}</span>
             <span v-else style="color:var(--text-secondary)">-</span>
@@ -354,3 +365,7 @@ const saveCron = async () => {
   } catch { ElMessage.error(t('common.failed')) }
 }
 </script>
+<style scoped>
+/* 列头 tooltip 提示可交互（虚线下划线=hover 有说明） */
+.hdr-hint { cursor: help; border-bottom: 1px dashed var(--text-secondary); }
+</style>

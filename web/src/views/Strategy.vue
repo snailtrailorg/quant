@@ -335,7 +335,7 @@ const onDelete = async (row) => {
     const n = runningTasksFor(row.id).length
     await ElMessageBox.confirm(n ? t('strategy.deleteBlocked', { n }) : t('strategy.confirmDeleteName', { name: row.name }),
                                t('common.confirm'), { type: 'warning' })
-    await api.delete(`/strategy/${row.id}`); ElMessage.success(t('common.success')); load()
+    await api.delete(`/strategy/${row.id}`); ElMessage.success(t('common.success')); editVisible.value = false; load()   // 盲审A-P2-1：删完关编辑弹窗（防对已删对象再保存）
   } catch (e) { if (e?.response) ElMessage.error(t('common.failed')) }
 }
 const saveAndBacktest = async () => {

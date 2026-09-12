@@ -87,7 +87,7 @@
       <el-table-column prop="alert_threshold_pct" :label="t('llm.alertThreshold')" min-width="110" />
       <el-table-column prop="enabled" :label="t('common.enable')" min-width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
       <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160"><template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template></el-table-column>
-      <el-table-column v-if="role === 'admin'" :label="t('common.action')" width="110">
+      <el-table-column v-if="canBudgetEdit" :label="t('common.action')" width="110">
         <template #default="{ row }">
           <el-button type="primary" @click="onBudgetEdit(row)">{{ t('common.edit') }}</el-button>
         </template>
@@ -116,7 +116,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import {apiErr,  getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage } from '../api'
+import {apiErr,  getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage, meOnce } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fmtTime } from '../utils/fmtTime'
 import api from '../api'
@@ -128,7 +128,11 @@ const budgets = ref([])
 const budgetLoading = ref(false)
 const budgetCheck = ref(null)
 const checking = ref(false)
-const role = ref(localStorage.getItem('role') || 'viewer')
+// 盲审A-P2-6：预算编辑入口跟后端权限键 llm_config（非裸 admin 角色——批11B 权限驱动模型，自定义组授 llm_config 须可见）
+const canBudgetEdit = ref(false)
+onMounted(async () => {
+  try { const me = await meOnce(); canBudgetEdit.value = (me?.permissions || []).includes('llm_config') } catch {}
+})
 
 const loadBudget = async () => { budgetLoading.value = true; try { budgets.value = await api.get('/llm-budget') } catch {} finally { budgetLoading.value = false } }
 const checkBudget = async () => { checking.value = true; try { budgetCheck.value = await api.post('/llm-budget/check') } catch { ElMessage.error(t('llm.checkFailed')) } finally { checking.value = false } }

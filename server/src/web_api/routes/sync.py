@@ -62,7 +62,7 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
 
 
 @router.post("/api/sync/pool-data/trigger")
-def trigger_pool_data_api(full: bool = False, pool_id: int | None = None,
+def trigger_pool_data_api(full: bool = False, pool_id: str | None = None,
                           payload: dict = Depends(require_perm("data_sync"))):
     """手动触发池内深度数据同步（beat 300s 也自动跑）。
 
@@ -70,6 +70,8 @@ def trigger_pool_data_api(full: bool = False, pool_id: int | None = None,
     pool_id=单池定向回补（批16 bug4：前端曾传 pool_id 被忽略——语义错位为全池；
     且 URL 打到不存在的 /sync/pool-data 裸路径=404。现端点收 pool_id 查该池标的
     传 symbols 定向，celery 任务本就支持（scheduler/tasks.py:599））。
+    注：pools.id/pool_symbols.pool_id 是 TEXT（迁移 0018）——盲审B-P0 实测 int 注解
+    双死路（文本 ID→422 / 数字串→PG text=int 500），必须 str。
     """
     from src.scheduler.tasks import pool_data_sync_task
     symbols = None

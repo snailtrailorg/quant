@@ -35,7 +35,7 @@
         <template #default="{ row }">{{ fmtTime.full(row.created_at) }}</template>
       </el-table-column>
       <el-table-column :label="t('cols.heartbeatAge')" min-width="100" class-name="num">
-        <template #default="{ row }">{{ row.hb_age_s != null ? Math.round(row.hb_age_s) + 's' : '—' }}</template>
+        <template #default="{ row }">{{ fmtAge(row.hb_age_s) }}</template>
       </el-table-column>
             <el-table-column type="expand">
         <template #default="{ row }">
@@ -60,15 +60,30 @@
         <template #default="{ row }">
           <!-- 批16 v2：行内=启停（互斥同位）+解冻（frozen 态才现=火警级不进弹窗）+标的详情链接；
                「详情」按钮本就是死的（toggleTimeline 无消费者，展开走 expand 箭头）——删；
-               删除收进「编辑」弹窗（盲审 A-P1-1/P1-5） -->
+               删除收进「更多」弹窗（裁定#8+删除分界纪律：输入名强确认类进弹窗；
+               盲审A-P2-8 曾留行内=偏离裁定，文案师裁定弹窗无可编辑字段名「编辑」名不副实——
+               对齐 Backtest 同批「更多」模式） -->
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
           <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)" :disabled="navReadonly">{{ t('liveTask.unfreeze') }}</el-button>
           <el-button @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
-          <el-button v-if="row.status !== 'running'" type="danger" plain @click="onDelete(row)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.status !== 'running'" @click="openMore(row)" :disabled="navReadonly">{{ t('common.more') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
+
+    <!-- 批16：「更多」弹窗（收删除——输入任务名启用按钮，站内最强确认；原 ElMessageBox.prompt 平移入内） -->
+    <el-dialog v-model="moreVisible" :title="moreRow?.name" width="420px" :close-on-click-modal="false">
+      <el-form @submit.prevent>
+        <el-form-item :label="t('liveTask.deletePromptTip', { name: moreRow?.name })">
+          <el-input v-model="deleteConfirmName" :placeholder="moreRow?.name" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="moreVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="danger" :disabled="!moreRow || deleteConfirmName.trim() !== moreRow.name" @click="onDelete(moreRow)">{{ t('common.delete') }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 创建实盘任务弹窗 -->
     <el-dialog v-model="dialogVisible" :title="t('liveTask.create')" width="720px" :close-on-click-modal="false">
@@ -115,7 +130,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -216,15 +231,35 @@ const onStop = async (row) => {
     await stopLiveTask(row.id); ElMessage.success(t('common.stopped')); load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(t('common.stopFailed')); else if (e?.response) ElMessage.error(t('common.stopFailed')) }
 }
+// 批16「更多」弹窗（收删除）：输入任务名才启用删除按钮（与原 prompt 确认等强）
+const moreRow = ref(null)
+const moreVisible = computed({
+  get: () => !!moreRow.value,
+  set: v => { if (!v) moreRow.value = null },
+})
+const deleteConfirmName = ref('')
+const openMore = (row) => { moreRow.value = row; deleteConfirmName.value = ''; moreVisible.value = true }
 const onDelete = async (row) => {
-  // H5：删除=输入任务名确认（比停止更强——不可恢复操作）
+  if (!row) return
   try {
-    const { value } = await ElMessageBox.prompt(
-      t('liveTask.deletePromptTip', { name: row.name }), t('liveTask.deletePromptTitle'),
-      { type: 'warning', confirmButtonText: t('common.confirm') })
-    if (value?.trim() !== row.name) { ElMessage.warning(t('liveTask.deleteMismatch')); return }
-    await deleteLiveTask(row.id); ElMessage.success(t('common.deleteSuccess')); load()
-  } catch { /* 取消 */ }
+    await deleteLiveTask(row.id)
+    ElMessage.success(t('common.deleteSuccess'))
+    moreRow.value = null
+    load()
+  } catch (e) { ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
+}
+
+// 盲审A-P2-9：心跳年龄人性化（原裸秒数——stale 86400s 无读性）
+const fmtAge = (s) => {
+  if (s == null) return '—'
+  s = Math.round(s)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m${s % 60 ? ' ' + (s % 60) + 's' : ''}`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h${m % 60 ? ' ' + (m % 60) + 'm' : ''}`
+  const d = Math.floor(h / 24)
+  return `${d}d${h % 24 ? ' ' + (h % 24) + 'h' : ''}`
 }
 
 onMounted(async () => {

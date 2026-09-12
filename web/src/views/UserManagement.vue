@@ -34,13 +34,12 @@
             <el-table-column prop="last_login_at" :label="t('account.lastLogin')" min-width="160">
               <template #default="{ row }">{{ row.last_login_at || '-' }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.action')" min-width="150" fixed="right">
+            <el-table-column :label="t('common.action')" min-width="110" fixed="right">
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
+                  <!-- 批16 裁定#15：删除收编编辑弹窗（原行内双按钮） -->
                   <el-button size="small" type="primary" @click="openEdit(row)"
                              :disabled="locked(row)" :title="lockedReason(row)">{{ t('common.edit') }}</el-button>
-                  <el-button size="small" type="danger" @click="onDeleteUser(row)"
-                             :disabled="locked(row)" :title="lockedReason(row)">{{ t('common.delete') }}</el-button>
                 </div>
               </template>
             </el-table-column>
@@ -59,6 +58,7 @@
               </el-form-item>
             </el-form>
             <template #footer>
+              <el-button type="danger" @click="onDeleteUser(editForm)">{{ t('common.delete') }}</el-button>
               <el-button @click="editDlg = false">{{ t('common.cancel') }}</el-button>
               <el-button type="primary" :loading="saving" @click="onSaveEdit">{{ t('common.save') }}</el-button>
             </template>
@@ -274,15 +274,16 @@ const onSaveEdit = async () => {
   finally { saving.value = false }
 }
 
-// —— 删除（确认） ——
+// —— 删除（批16 裁定#15：入口在编辑弹窗 footer；确认后弹窗随列表一并收） ——
 const onDeleteUser = async (row) => {
   try {
     await ElMessageBox.confirm(t('account.confirmDeleteUser'), { type: 'warning' })
     await api.delete(`/user/${row.id}`)
     ElMessage.success(t('common.deleteSuccess'))
+    editDlg.value = false
     await load()
   } catch (e) {
-    if (e === 'cancel') return
+    if (e === 'cancel' || e === 'close') return
     ElMessage.error(apiErr(e, t('common.deleteFailed')))
   }
 }
