@@ -75,13 +75,13 @@
             <el-table :data="invites" @selection-change="s => inviteSel = s">
               <el-table-column type="selection" width="44" />
               <el-table-column prop="email" :label="t('account.email')" min-width="200" show-overflow-tooltip />
-              <el-table-column :label="t('common.status')" width="110">
+              <el-table-column :label="t('common.status')" min-width="100">
                 <template #default="{ row }">
                   <el-tag :type="inviteStatusType(row.status)">{{ t('account.inviteStatus.' + row.status) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="created_at" :label="t('common.createdAt')" width="160" />
-              <el-table-column prop="expires_at" :label="t('account.inviteExpires')" width="160" />
+              <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="160" />
+              <el-table-column prop="expires_at" :label="t('account.inviteExpires')" min-width="160" />
               <!-- 操作列动态显示：仅存在待注册邀请时才有撤销可操作，否则整列不渲染（空壳列无意义） -->
               <el-table-column v-if="invites.some(i => i.status === 'pending')" :label="t('common.action')" width="110">
                 <template #default="{ row }">
@@ -112,16 +112,16 @@
             <el-button type="primary" @click="openGroupEdit(null)">{{ t('um.addGroup') }}</el-button>
           </div>
           <el-table :data="groups">
-            <el-table-column prop="name" :label="t('common.name')" min-width="140" />
-            <el-table-column prop="description" :label="t('common.description')" min-width="200" show-overflow-tooltip />
-            <el-table-column :label="t('um.groupType')" width="110">
+            <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="description" :label="t('common.description')" min-width="240" show-overflow-tooltip />
+            <el-table-column :label="t('um.groupType')" min-width="110">
               <template #default="{ row }">
                 <el-tag v-if="row.builtin" type="warning">builtin 🔒</el-tag>
                 <el-tag v-else type="info">custom</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="user_count" :label="t('um.userCount')" width="90" />
-            <el-table-column :label="t('common.action')" width="150">
+            <el-table-column prop="user_count" :label="t('um.userCount')" min-width="100" />
+            <el-table-column :label="t('common.action')" min-width="180">
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
                   <el-button size="small" type="primary" @click="openGroupEdit(row)">{{ t('common.edit') }}</el-button>
