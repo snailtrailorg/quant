@@ -16,14 +16,14 @@
       </el-table-column>
       <!-- P2-1（05 §5.6）：验证✓独立成列（证据链可点）+最近回测列；操作列发起回测/编辑/复制/删除。
            链条打磨#22：策略无启停是设计（实盘启停唯一入口=LiveTask）；symbol:"" 是契约——勿修 -->
-      <el-table-column :label="t('strategy.verifyCol')" width="110">
+      <el-table-column :label="t('strategy.verifyCol')" min-width="110">
         <template #default="{ row }">
           <el-tag v-if="row.backtest_verified" type="success" size="small" style="cursor:pointer"
                   @click="gotoVerifiedRun(row)">✓ {{ t('strategy.verified') }}</el-tag>
           <el-tag v-else type="info" size="small">{{ t('strategy.unverified') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('strategy.lastBtCol')" width="150">
+      <el-table-column :label="t('strategy.lastBtCol')" min-width="150">
         <template #default="{ row }">
           <span v-if="lastRun(row)" style="cursor:pointer" @click="$router.push(`/backtest/${lastRun(row).id}`)">
             <span :class="(bs(lastRun(row)).ret ?? 0) >= 0 ? 'up' : 'down'">
@@ -34,12 +34,12 @@
           <span v-else style="color: var(--text-secondary)">—</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="300" fixed="right">
+      <el-table-column :label="t('common.action')" min-width="260" fixed="right">
         <template #default="{ row }">
+          <!-- 批16 v2：行内=回测+复制（迭代主路径）+编辑；删除收进编辑弹窗（盲审 A-P1-4） -->
           <el-button type="primary" size="small" @click="runBacktest(row)" :disabled="navReadonly">{{ t('strategy.runBacktest') }}</el-button>
-          <el-button size="small" @click="openEdit(row)" :disabled="navReadonly">{{ t('common.edit') }}</el-button>
           <el-button size="small" @click="onCopy(row)" :disabled="navReadonly">{{ t('common.copy') }}</el-button>
-          <el-button size="small" type="danger" @click="onDelete(row)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
+          <el-button size="small" @click="openEdit(row)" :disabled="navReadonly">{{ t('common.edit') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -201,9 +201,19 @@
         </el-table>
       </el-form>
       <template #footer>
-        <el-button type="primary" @click="editVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
-        <el-button type="success" @click="saveAndBacktest" :loading="saving">{{ t('strategy.saveAndBacktest') }}</el-button>
+        <div v-if="!editForm.isNew" style="display: flex; justify-content: space-between; width: 100%">
+          <el-button size="small" type="danger" plain @click="onDelete(editRow)">{{ t('common.delete') }}</el-button>
+          <div>
+            <el-button @click="editVisible = false">{{ t('common.cancel') }}</el-button>
+            <el-button type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
+            <el-button type="success" @click="saveAndBacktest" :loading="saving">{{ t('strategy.saveAndBacktest') }}</el-button>
+          </div>
+        </div>
+        <template v-else>
+          <el-button type="primary" @click="editVisible = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="saveEdit" :loading="saving">{{ t('common.save') }}</el-button>
+          <el-button type="success" @click="saveAndBacktest" :loading="saving">{{ t('strategy.saveAndBacktest') }}</el-button>
+        </template>
       </template>
     </el-dialog>
   </el-card>
@@ -226,6 +236,7 @@ const navReadonly = inject('navReadonly', ref(false))
 const strategies = ref([])
 const availableFactors = ref([])
 const editVisible = ref(false)
+const editRow = ref(null)   // 批16：编辑弹窗 footer 删除条件渲染用
 const saving = ref(false)
 const validating = ref(false)
 const codeValid = ref(null)  // null=未校验, true=通过, false=失败
@@ -333,6 +344,7 @@ const saveAndBacktest = async () => {
 }
 const loadFactors = async () => { const r = await getFactorList(); availableFactors.value = r.items || [] }
 const openCreate = () => {
+  editRow.value = null
   editForm.value = {
     id: '', name: '', enabled: true,
     mode: 'dsl',
@@ -348,6 +360,7 @@ const openCreate = () => {
 }
 
 const openEdit = (row) => {
+  editRow.value = row
   editForm.value = {
     id: row.id,
     name: row.name,

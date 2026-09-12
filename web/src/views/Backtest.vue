@@ -19,25 +19,25 @@
         </div>
       </template>
       <el-table :data="filteredRuns" v-loading="loading" @row-click="goDetail">
-        <el-table-column prop="id" label="ID" width="60" />
+        <el-table-column prop="id" label="ID" min-width="70" />
         <el-table-column prop="strategy_id" :label="t('backtest.strategy')" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>
         </el-table-column>
         <!-- P2-4：指标摘要——列表行直接给成绩，不用点进 Run 页 -->
-        <el-table-column :label="t('backtest.retCol')" width="90" class-name="num">
+        <el-table-column :label="t('backtest.retCol')" min-width="90" class-name="num">
           <template #default="{ row }">
             <span v-if="bs(row).ret != null" :class="bs(row).ret >= 0 ? 'up' : 'down'">
               {{ pct(bs(row).ret) }}
             </span><span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('backtest.ddCol')" width="80" class-name="num">
+        <el-table-column :label="t('backtest.ddCol')" min-width="80" class-name="num">
           <template #default="{ row }">{{ bs(row).dd != null ? pct(bs(row).dd) : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('backtest.sharpeCol')" width="70" class-name="num">
+        <el-table-column :label="t('backtest.sharpeCol')" min-width="80" class-name="num">
           <template #default="{ row }">{{ bs(row).sharpe != null ? bs(row).sharpe.toFixed(2) : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('backtest.dateRangeCol')" width="160">
+        <el-table-column :label="t('backtest.dateRangeCol')" min-width="170">
           <template #default="{ row }">
             {{ (row.created_at||'').slice(0,10) }} ~ {{ (row.finished_at||'').slice(5,10) || '…' }}
           </template>
@@ -49,26 +49,39 @@
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" :label="t('common.status')" width="100">
+        <el-table-column prop="status" :label="t('common.status')" min-width="100">
           <template #default="{ row }">
             <StatusTag :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column prop="mode" :label="t('backtest.mode')" width="80" />
+        <el-table-column prop="mode" :label="t('backtest.mode')" min-width="80" />
         <el-table-column :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ t('backtest.symbolCount', { n: row.symbols?.length || 0 }) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.createdAt')" width="160">
+        <el-table-column :label="t('common.createdAt')" min-width="160">
           <template #default="{ row }">{{ row.created_at?.slice(0, 19) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.action')" width="160" fixed="right">
+        <el-table-column :label="t('common.action')" min-width="190" fixed="right">
           <template #default="{ row }">
+            <!-- 批16：行内留详情+更多；终止/删除（后端 DELETE 现无按钮，批16 新接）收进弹窗 -->
             <el-button type="primary" @click.stop="goDetail(row)">{{ t('common.detail') }}</el-button>
-            <el-button v-if="row.status === 'running'" type="danger" @click.stop="cancelRun(row)" :disabled="navReadonly">{{ t('backtest.terminate') }}</el-button>
+            <el-button @click.stop="moreRow = row">{{ t('common.more') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
+
+    <!-- 批16：行「更多」弹窗（终止/删除） -->
+    <el-dialog v-model="moreVisible" :title="`#${moreRow?.id ?? ''}`" width="380px">
+      <div style="display: flex; flex-direction: column; gap: 12px">
+        <el-button v-if="moreRow?.status === 'running'" type="danger" @click="cancelRun(moreRow); moreVisible = false" :disabled="navReadonly">
+          {{ t('backtest.terminate') }}
+        </el-button>
+        <el-button type="danger" plain @click="deleteRun(moreRow)" :disabled="navReadonly || moreRow?.status === 'running'">
+          {{ t('common.delete') }}
+        </el-button>
+      </div>
+    </el-dialog>
 
     <!-- 新建回测弹窗 -->
     <el-dialog v-model="showForm" :close-on-click-modal="false" :title="t('backtest.create')" width="720px">
@@ -177,6 +190,21 @@ const onStrategyChange = (sid) => {
 
 
 const filterStatus = ref('')
+const moreRow = ref(null)
+const moreVisible = computed({
+  get: () => !!moreRow.value,
+  set: v => { if (!v) moreRow.value = null },
+})
+const deleteRun = async (row) => {
+  if (!row) return
+  try {
+    await ElMessageBox.confirm(`#${row.id}`, t('common.confirm'), { type: 'warning' })
+    await api.delete(`/backtest/${row.id}`)
+    ElMessage.success(t('common.deleteSuccess'))
+    moreRow.value = null
+    await loadRuns()
+  } catch (e) { if (e !== 'cancel') ElMessage.error(String(e?.response?.data?.detail || t('common.failed'))) }
+}
 const strategyName = (sid) => strategies.value.find(x => x.id === sid)?.name || sid
 const runningCount = computed(() => runs.value.filter(r => r.status === 'running').length)
 const todayCount = computed(() => runs.value.filter(r => (r.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length)

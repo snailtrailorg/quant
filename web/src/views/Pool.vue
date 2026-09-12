@@ -3,7 +3,12 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('pool.manageTitle') }}</span>
-        <el-button type="primary" @click="showDialog = true" :disabled="navReadonly">{{ t('pool.createTitle') }}</el-button>
+        <div>
+          <!-- 批16：后端有端点全站无按钮的两操作（用户裁定补） -->
+          <el-button size="small" :disabled="navReadonly" @click="syncMinuteAll">{{ t('pool.syncMinuteBtn') }}</el-button>
+          <el-button size="small" :disabled="navReadonly" @click="backfillFactor">{{ t('pool.backfillFactorBtn') }}</el-button>
+          <el-button type="primary" @click="showDialog = true" :disabled="navReadonly">{{ t('pool.createTitle') }}</el-button>
+        </div>
       </div>
     </template>
     <el-table :data="pools" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand">
@@ -16,18 +21,18 @@
             <template v-if="row.minute_history_start">
               <div v-if="minuteStatus[row.id]" style="margin-bottom: 12px">
                 <el-table :data="minuteStatus[row.id]" size="small" max-height="300">
-                  <el-table-column prop="symbol" :label="t('common.symbol')" width="160" />
-                  <el-table-column :label="t('pool.minuteLastTs')" width="200">
+                  <el-table-column prop="symbol" :label="t('common.symbol')" min-width="140" />
+                  <el-table-column :label="t('pool.minuteLastTs')" min-width="170">
                     <template #default="{ row: s }">{{ s.last_ts || '-' }}</template>
                   </el-table-column>
-                  <el-table-column :label="t('pool.minuteCovered')" width="100">
+                  <el-table-column :label="t('pool.minuteCovered')" min-width="100">
                     <template #default="{ row: s }">
                       <el-tag :type="s.covered ? 'success' : 'warning'" size="small">
                         {{ s.covered ? '✓' : t('pool.pending') }}
                       </el-tag>
                     </template>
                   </el-table-column>
-                  <el-table-column :label="t('common.action')" width="150">
+                  <el-table-column :label="t('common.action')" min-width="150">
                     <template #default="{ row: s }">
                       <el-button type="primary" @click="gotoDetail(s.symbol)">{{ t('common.detail') }}</el-button>
                       <el-button type="danger" @click="removeSymbol(row.id, s.symbol)">✕</el-button>
@@ -44,27 +49,27 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="id" label="ID" width="130" />
+      <el-table-column prop="id" label="ID" min-width="100" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="category" :label="t('pool.category')" width="100" />
-      <el-table-column :label="t('pool.symbolCount')" width="80" align="center">
+      <el-table-column prop="category" :label="t('pool.category')" min-width="110" />
+      <el-table-column :label="t('pool.symbolCount')" min-width="90" align="center">
         <template #default="{ row }">
           <el-badge :value="row.symbols?.length || 0" type="primary" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('pool.minuteStart')" width="120">
+      <el-table-column :label="t('pool.minuteStart')" min-width="130">
         <template #default="{ row }">
           <span v-if="row.minute_history_start" style="font-size: 12px">{{ row.minute_history_start }}</span>
           <span v-else style="color: var(--el-text-color-placeholder)">-</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('pool.minuteCount')" width="100" align="center">
+      <el-table-column :label="t('pool.minuteCount')" min-width="100" align="center">
         <template #default="{ row }">
           <el-badge :value="row.minute_count || 0" type="info" />
         </template>
       </el-table-column>
-      <el-table-column prop="description" min-width="180" show-overflow-tooltip :label="t('common.description')" />
-      <el-table-column :label="t('common.action')" width="200">
+      <el-table-column prop="description" min-width="220" show-overflow-tooltip :label="t('common.description')" />
+      <el-table-column :label="t('common.action')" min-width="180">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="editPool(row)">{{ t('common.edit') }}</el-button>
           <el-button type="danger" size="small" @click="delPool(row)">{{ t('common.delete') }}</el-button>
@@ -82,12 +87,12 @@
       </el-button>
     </div>
     <el-table :data="minuteSymbols" size="small" max-height="300">
-      <el-table-column prop="symbol" :label="t('common.symbol')" width="180" />
-      <el-table-column prop="source" :label="t('pool.minuteSymbolSource')" width="130" />
-      <el-table-column :label="t('pool.minuteLastTs')" width="200">
+      <el-table-column prop="symbol" :label="t('common.symbol')" min-width="150" />
+      <el-table-column prop="source" :label="t('pool.minuteSymbolSource')" min-width="110" />
+      <el-table-column :label="t('pool.minuteLastTs')" min-width="170">
         <template #default="{ row }">{{ row.last_ts || '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="100">
+      <el-table-column :label="t('common.action')" min-width="100">
         <template #default="{ row }">
           <el-button v-if="row.source === 'direct'" type="danger" size="small" :disabled="navReadonly"
                      @click="removeMinuteSymbol(row.symbol)">✕</el-button>
@@ -258,10 +263,26 @@ const searchSymbols = async (query) => {
   finally { symbolLoading.value = false }
 }
 const backfillMinute = async (row) => {
+  // 批16 bug4：原 URL 打到不存在的 /sync/pool-data（裸路径）=404；且 pool_id 被后端忽略。
+  // 现= /trigger 端点收 pool_id → symbols 定向回补该池（后端批16 已改）
   try {
-    await api.post(`/sync/pool-data?pool_id=${row.id}&full=true`)
+    await api.post(`/sync/pool-data/trigger?pool_id=${row.id}&full=true`)
     ElMessage.success(t('pool.backfillStarted', { name: row.name }))
     if (row.minute_history_start) loadMinuteStatus(row.id)
+  } catch { ElMessage.error(t('common.failed')) }
+}
+const syncMinuteAll = async () => {
+  // 池分钟同步手动触发（beat 300s 也自动跑；手动用于首建池后立即拉取）
+  try {
+    await api.post('/sync/pool-minute/trigger')
+    ElMessage.success(t('common.success'))
+  } catch { ElMessage.error(t('common.failed')) }
+}
+const backfillFactor = async () => {
+  // 复权因子回补（历史缺口补齐）
+  try {
+    await api.post('/sync/adj-factor-backfill')
+    ElMessage.success(t('common.success'))
   } catch { ElMessage.error(t('common.failed')) }
 }
 import { watch } from 'vue'
