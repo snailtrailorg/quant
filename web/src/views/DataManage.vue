@@ -3,7 +3,10 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('dataManage.title') }}</span>
-        <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <ColumnSettings storage-key="cols.sync-config" :columns="syncColDefs" v-model:visible="syncVisible" />
+          <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+        </div>
       </div>
     </template>
     <el-card v-if="currentSync" shadow="never" style="margin-bottom: 12px">
@@ -17,11 +20,11 @@
       </div>
     </el-card>
     <el-table :data="configs" v-loading="loading">
-      <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="data_type" :label="t('dataManage.category')" width="80">
+      <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
+      <el-table-column v-if="colOn('data_type')" prop="data_type" :label="t('dataManage.category')" min-width="100">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('dataManage.provider')" width="130">
+      <el-table-column v-if="colOn('provider')" :label="t('dataManage.provider')" min-width="140">
         <template #default="{ row }">
           <el-select :model-value="row.provider || 'tushare'" size="small"
                      :disabled="providerOptions(row).length <= 1" @change="v => changeProvider(row, v)">
@@ -29,39 +32,43 @@
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column prop="mode" :label="t('common.mode')" width="80" />
-      <el-table-column :label="t('dataManage.cronSchedule')" width="200">
+      <el-table-column v-if="colOn('mode')" prop="sync_mode" :label="t('common.mode')" min-width="120" />
+      <el-table-column v-if="colOn('schedule')" :label="t('dataManage.cronSchedule')" min-width="140">
         <template #default="{ row }">
           <el-link type="primary" @click="openCron(row)">{{ row.schedule }}</el-link>
         </template>
       </el-table-column>
-      <el-table-column :label="t('dataManage.tradeDayFilter')" width="120">
+      <el-table-column v-if="colOn('trade_day_filter')" :label="t('dataManage.tradeDayFilter')" min-width="120">
         <template #default="{ row }">
           <span>{{ row.trade_day_filter }}</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.status')" width="80">
+      <el-table-column v-if="colOn('tushare_api')" prop="tushare_api" :label="t('cols.apiName')" min-width="140" show-overflow-tooltip />
+      <el-table-column v-if="colOn('pg_table')" prop="pg_table" :label="t('cols.targetTable')" min-width="120" show-overflow-tooltip />
+      <el-table-column v-if="colOn('last_sync_date')" prop="last_sync_date" :label="t('cols.cursorDate')" min-width="120">
+        <template #default="{ row }">{{ row.last_sync_date || '-' }}</template>
+      </el-table-column>
+      <el-table-column v-if="colOn('status')" :label="t('common.status')" min-width="100">
         <template #default="{ row }">
           <StatusTag :value="row.status" />
         </template>
       </el-table-column>
-      <el-table-column prop="last_sync_count" :label="t('dataManage.lastSync')" width="100">
+      <el-table-column v-if="colOn('last_sync_count')" prop="last_sync_count" :label="t('dataManage.lastSync')" min-width="100">
         <template #default="{ row }">{{ t('dataManage.rowsCount', { n: row.last_sync_count || 0 }) }}</template>
       </el-table-column>
-      <el-table-column prop="last_sync_ts" :label="t('dataManage.syncTime')" width="160">
+      <el-table-column v-if="colOn('last_sync_ts')" prop="last_sync_ts" :label="t('dataManage.syncTime')" min-width="160">
         <template #default="{ row }">{{ row.last_sync_ts ? fmtTime.s(row.last_sync_ts) : '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.enable')" width="60">
+      <el-table-column v-if="colOn('enabled')" :label="t('common.enable')" min-width="80">
         <template #default="{ row }">
           <el-switch v-model="row.enabled" @change="onToggle(row)" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="400">
+      <el-table-column :label="t('common.action')" width="250">
         <template #default="{ row }">
           <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'" :disabled="navReadonly">{{ t('dataManage.syncBtn') }}</el-button>
-          <el-button type="warning" @click="onBackfill(row)" v-if="row.mode === 'incremental'">{{ t('symbol.backfill') }}</el-button>
-          <el-button type="danger" @click="onDelete(row)" v-if="role === 'admin'">{{ t('common.delete') }}</el-button>
           <el-button type="primary" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>
+          <el-button type="primary" @click="openCron(row)">{{ t('common.edit') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -70,22 +77,22 @@
     <el-card>
       <template #header>{{ t('dataManage.syncLogs') }}</template>
       <el-table :data="logs" max-height="300">
-        <el-table-column prop="sync_id" :label="t('dataManage.task')" width="120" />
-        <el-table-column prop="ts" :label="t('common.time')" width="160">
+        <el-table-column prop="sync_id" :label="t('dataManage.task')" min-width="120" />
+        <el-table-column prop="ts" :label="t('common.time')" min-width="160">
           <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
         </el-table-column>
-        <el-table-column prop="mode" :label="t('common.mode')" width="80" />
-        <el-table-column prop="rows_pulled" :label="t('dataManage.pulled')" width="80" />
-        <el-table-column prop="rows_saved" :label="t('dataManage.saved')" width="80" />
-        <el-table-column prop="duration_ms" :label="t('dataManage.duration')" width="80">
+        <el-table-column prop="mode" :label="t('common.mode')" min-width="80" />
+        <el-table-column prop="rows_pulled" :label="t('dataManage.pulled')" min-width="80" />
+        <el-table-column prop="rows_saved" :label="t('dataManage.saved')" min-width="80" />
+        <el-table-column prop="duration_ms" :label="t('dataManage.duration')" min-width="100">
           <template #default="{ row }">{{ row.duration_ms }}ms</template>
         </el-table-column>
-        <el-table-column prop="status" :label="t('common.status')" width="80">
+        <el-table-column prop="status" :label="t('common.status')" min-width="100">
           <template #default="{ row }">
             <StatusTag :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('dataManage.tradeDay')" width="100">
+        <el-table-column :label="t('dataManage.tradeDay')" min-width="120">
           <template #default="{ row }">
             <span v-if="row.expected_days != null">{{ row.actual_days }}/{{ row.expected_days }}</span>
             <span v-else style="color:var(--text-secondary)">-</span>
@@ -100,22 +107,8 @@
       </el-table>
     </el-card>
   
-    <!-- 回补弹窗(wd-16 §3 第三次点名:prompt 正则只拦格式不拦非法日期,改 el-date-picker 组件校验) -->
-    <el-dialog v-model="backfillDialog" :close-on-click-modal="false" :title="t('dataManage.backfillTitle', { name: backfillForm.name })" width="420px">
-      <el-form label-width="90px" @submit.prevent>
-        <el-form-item :label="t('dataManage.backfillFrom')">
-          <el-date-picker v-model="backfillForm.date" type="date" value-format="YYYYMMDD"
-                          :disabled-date="d => d.getTime() > Date.now()" :clearable="false" style="width: 100%" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="backfillDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="warning" :disabled="!backfillForm.date" @click="submitBackfill">{{ t('symbol.backfill') }}</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- Cron 编辑弹窗(05 §5.10) -->
-    <el-dialog v-model="cronDialog" :close-on-click-modal="false" :title="t('dataManage.cronEditTitle')" width="560px">
+    <!-- 编辑弹窗（批16 操作收编：调度+回补进弹窗，删除进 footer；吸收原 cron/回补双弹窗） -->
+    <el-dialog v-model="cronDialog" :close-on-click-modal="false" :title="t('dataManage.editTitle')" width="560px">
       <el-form label-width="80px">
         <el-form-item label="Cron">
           <el-input v-model="cronForm.schedule" placeholder="30 16 * * 1-5" />
@@ -130,10 +123,22 @@
             <el-option value="trade_day" :label="t('dataManage.filterTradeDay')" />
           </el-select>
         </el-form-item>
+        <template v-if="cronForm.sync_mode === 'incremental'">
+          <el-divider style="margin: var(--sp-1) 0 var(--sp-3)" />
+          <el-form-item :label="t('dataManage.backfillFrom')">
+            <div style="display: flex; gap: 8px; width: 100%">
+              <!-- el-date-picker 组件级校验天然只出合法日期（value-format=YYYYMMDD 对齐后端契约），默认 30 天前 -->
+              <el-date-picker v-model="cronForm.date" type="date" value-format="YYYYMMDD"
+                              :disabled-date="d => d.getTime() > Date.now()" :clearable="false" style="flex: 1" />
+              <el-button type="warning" :disabled="!cronForm.date" @click="submitBackfill">{{ t('symbol.backfill') }}</el-button>
+            </div>
+          </el-form-item>
+        </template>
       </el-form>
       <template #footer>
+        <el-button type="danger" @click="onDelete(cronRow)" v-if="role === 'admin'" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
         <el-button @click="cronDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveCron">{{ t('common.save') }}</el-button>
+        <el-button type="primary" @click="saveCron" :disabled="navReadonly">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
   </el-card>
@@ -141,8 +146,9 @@
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { fmtTime } from '../utils/fmtTime'
-import { ref, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
@@ -161,6 +167,24 @@ let pollTimer = null
 const role = ref(localStorage.getItem('role') || 'viewer')
 const _pollingActive = ref(false)
 const setRowStatus = (id, status) => { configs.value = configs.value.map(c => c.id === id ? { ...c, status } : c) }
+
+// 批16 列显示配置（新列默认隐）：colDefs 不含名称/操作两锁定列
+const syncColDefs = computed(() => [
+  { key: 'data_type', label: t('dataManage.category') },
+  { key: 'provider', label: t('dataManage.provider') },
+  { key: 'mode', label: t('common.mode') },
+  { key: 'schedule', label: t('dataManage.cronSchedule') },
+  { key: 'trade_day_filter', label: t('dataManage.tradeDayFilter') },
+  { key: 'status', label: t('common.status') },
+  { key: 'last_sync_count', label: t('dataManage.lastSync') },
+  { key: 'last_sync_ts', label: t('dataManage.syncTime') },
+  { key: 'enabled', label: t('common.enable') },
+  { key: 'tushare_api', label: t('cols.apiName'), hidden: true },
+  { key: 'pg_table', label: t('cols.targetTable'), hidden: true },
+  { key: 'last_sync_date', label: t('cols.cursorDate'), hidden: true },
+])
+const syncVisible = ref([])
+const colOn = k => syncVisible.value.includes(k)
 
 const PER_SYMBOL_IDS = ['astock_daily', 'etf_daily', 'cb_daily', 'astock_minute', 'astock_minute_5min']
 const isPerSymbol = id => PER_SYMBOL_IDS.includes(id)
@@ -277,27 +301,20 @@ const onTrigger = async (row) => {
   } catch (e) { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(row.id, 'idle') }
 }
 
-// 回补起始日期弹窗化（原 ElMessageBox.prompt 正则 /^\d{4}-\d{2}-\d{2}$/ 不拦非法日期如 20261332；
-// el-date-picker 组件级校验天然只出合法日期，且 value-format=YYYYMMDD 对齐后端契约 engine.sync 文档字符串）
-const backfillDialog = ref(false)
-const backfillForm = ref({ id: '', name: '', date: '' })
-const onBackfill = (row) => {
-  const d = new Date(); d.setDate(d.getDate() - 30)   // 默认起始：30 天前
-  backfillForm.value = { id: row.id, name: row.name, date: d.toISOString().slice(0, 10).replace(/-/g, '') }
-  backfillDialog.value = true
-}
+// 回补起始日期（批16 收编进编辑弹窗；el-date-picker 组件级校验天然只出合法日期，
+// value-format=YYYYMMDD 对齐后端契约 engine.sync 文档字符串，默认起始 30 天前）
 const submitBackfill = async () => {
-  const { id, date } = backfillForm.value
+  const { id, name, date } = cronForm.value
   const row = configs.value.find(c => c.id === id)
   if (!row || !date) return
-  backfillDialog.value = false
+  cronDialog.value = false
   setRowStatus(id, 'running')
   try {
     const r = await api.post(`/sync/trigger/${id}`, null, { params: { backfill_from: date } })
     if (r.status === 'submitted') {
-      startPoll(row, t('dataManage.backfillTaskName', { name: row.name, value: date }), r.task_id)
+      startPoll(row, t('dataManage.backfillTaskName', { name, value: date }), r.task_id)
     } else {
-      notifyResult(row, r, t('dataManage.backfillTaskName', { name: row.name, value: date }))
+      notifyResult(row, r, t('dataManage.backfillTaskName', { name, value: date }))
       setRowStatus(id, 'idle')
     }
   } catch (e) { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(id, 'idle') }
@@ -308,22 +325,26 @@ const onDelete = async (row) => {
     await ElMessageBox.confirm(t('dataManage.confirmDeleteAll', { name: row.name }), t('task.highRiskConfirm'), { type: 'warning' })
     await api.delete(`/sync/data/${row.id}`)
     ElMessage.success(t('dataManage.dataDeleted'))
+    cronDialog.value = false
     await load()
   } catch {}
 }
 onMounted(load)
 onUnmounted(stopPoll)
 
-// Cron 弹窗化(05 §5.10)
+// 编辑弹窗（批16 操作收编，吸收原 Cron 弹窗；footer 删除用的行对象按 id 反查）
 const cronDialog = ref(false)
-const cronForm = ref({ id: '', schedule: '', trade_day_filter: 'none' })
+const cronForm = ref({ id: '', name: '', sync_mode: '', schedule: '', trade_day_filter: 'none', date: '' })
+const cronRow = computed(() => configs.value.find(c => c.id === cronForm.value.id))
 const cronTemplates = [
   { label: t('dataManage.tplDaily'), expr: '30 16 * * 1-5' },
   { label: t('dataManage.tplMorning'), expr: '0 9 * * 1-5' },
   { label: t('dataManage.tplWeekly'), expr: '0 9 * * 1' },
 ]
 const openCron = (row) => {
-  cronForm.value = { id: row.id, schedule: row.schedule, trade_day_filter: row.trade_day_filter || 'none' }
+  const d = new Date(); d.setDate(d.getDate() - 30)   // 回补默认起始：30 天前
+  cronForm.value = { id: row.id, name: row.name, sync_mode: row.sync_mode, schedule: row.schedule,
+                     trade_day_filter: row.trade_day_filter || 'none', date: d.toISOString().slice(0, 10).replace(/-/g, '') }
   cronDialog.value = true
 }
 const saveCron = async () => {

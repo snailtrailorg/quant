@@ -4,26 +4,29 @@
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
       <el-table :data="usage.today">
-        <el-table-column prop="provider" label="Provider" width="120" />
-        <el-table-column prop="calls" :label="t('common.calls')" width="100" />
-        <el-table-column prop="records" :label="t('common.records')" width="100" />
-        <el-table-column :label="t('common.failures')" width="80">
+        <el-table-column prop="provider" label="Provider" min-width="120" />
+        <el-table-column prop="calls" :label="t('common.calls')" min-width="100" />
+        <el-table-column prop="records" :label="t('common.records')" min-width="100" />
+        <el-table-column :label="t('common.failures')" min-width="80">
           <template #default="{ row }"><el-tag :type="row.failures > 0 ? 'danger' : 'success'">{{ row.failures }}</el-tag></template>
         </el-table-column>
-        <el-table-column prop="avg_latency" :label="t('common.avgLatency')" width="110" />
+        <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="110" />
       </el-table>
     </el-card>
     <el-table :data="sources">
-      <el-table-column prop="provider" label="Provider" width="120" />
-      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
-      <el-table-column :label="t('common.credential')" width="80">
+      <el-table-column prop="provider" label="Provider" min-width="120" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
+      <el-table-column :label="t('common.credential')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="usage_limit" :label="t('common.dailyLimit')" width="80" />
-      <el-table-column :label="t('common.enable')" width="80">
+      <el-table-column prop="usage_limit" :label="t('common.dailyLimit')" min-width="80" />
+      <el-table-column :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="260">
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160">
+        <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="250">
         <template #default="{ row }">
           <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
           <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
@@ -92,6 +95,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { fmtTime } from '../utils/fmtTime'
 import {apiErr,  getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 

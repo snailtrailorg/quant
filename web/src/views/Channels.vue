@@ -2,15 +2,18 @@
   <el-card>
     <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('channels.manageTitle') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
     <el-table :data="channels">
-      <el-table-column prop="provider" label="Provider" width="120" />
-      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
-      <el-table-column :label="t('common.credential')" width="80">
+      <el-table-column prop="provider" label="Provider" min-width="120" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
+      <el-table-column :label="t('common.credential')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.enable')" width="80">
+      <el-table-column :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="260">
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160">
+        <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="250">
         <template #default="{ row }">
           <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
           <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
@@ -36,6 +39,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { fmtTime } from '../utils/fmtTime'
 import {apiErr,  getChannels, createChannel, updateChannel, deleteChannel, testChannel } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 

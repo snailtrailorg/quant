@@ -17,15 +17,15 @@
           </div>
         </template>
         <el-table :data="filteredLogs" height="500">
-          <el-table-column prop="ts" :label="t('common.time')" width="160">
+          <el-table-column prop="ts" :label="t('common.time')" min-width="160">
             <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
           </el-table-column>
-          <el-table-column prop="level" :label="t('log.level')" width="80">
+          <el-table-column prop="level" :label="t('log.level')" min-width="80">
             <template #default="{ row }">
               <el-tag :type="row.level === 'ERROR' ? 'danger' : row.level === 'WARN' ? 'warning' : 'info'">{{ row.level }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="module" :label="t('log.module')" width="100" />
+          <el-table-column prop="module" :label="t('log.module')" min-width="120" />
           <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
         </el-table>
         <!-- P3-5(05 §5.10):日志筛选 -->
@@ -46,15 +46,15 @@
       <el-card>
         <template #header>{{ t('log.notifyHistory') }}</template>
         <el-table :data="notifs" height="500">
-          <el-table-column prop="level" :label="t('log.level')" width="90">
+          <el-table-column prop="level" :label="t('log.level')" min-width="100">
             <template #default="{ row }">
               <span :class="['ndot', row.level]"></span>{{ row.level }}
             </template>
           </el-table-column>
-          <el-table-column prop="category" :label="t('log.notifyCategory')" width="80" />
-          <el-table-column prop="title" :label="t('log.titleCol')" min-width="150" show-overflow-tooltip />
+          <el-table-column prop="category" :label="t('log.notifyCategory')" min-width="100" />
+          <el-table-column prop="title" :label="t('log.titleCol')" min-width="200" show-overflow-tooltip />
           <el-table-column prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
-          <el-table-column :label="t('alerts.dispatchCol')" width="110">
+          <el-table-column :label="t('alerts.dispatchCol')" min-width="140">
             <template #default="{ row }">
               <template v-if="row.level === 'info'"></template>
               <span v-else-if="!row.dispatch" style="color: var(--flat)">?</span>
@@ -64,7 +64,10 @@
               </template>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" :label="t('common.time')" width="150" />
+          <el-table-column prop="created_at" :label="t('common.time')" min-width="160" />
+          <el-table-column prop="acked_at" :label="t('cols.confirmedAt')" min-width="160">
+            <template #default="{ row }">{{ row.acked_at || '-' }}</template>
+          </el-table-column>
         </el-table>
       </el-card>
     </el-col>
@@ -74,14 +77,17 @@
   <el-card style="margin-top: 20px">
     <template #header>{{ t('log.outboxTitle') }}</template>
     <el-table :data="outbox" max-height="300">
-      <el-table-column prop="status" :label="t('common.status')" width="100">
+      <el-table-column prop="status" :label="t('common.status')" min-width="100">
         <template #default="{ row }">
           <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.status === 'pending' ? `(${row.attempts})` : '' }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="to" :label="t('log.outboxTo')" min-width="200" show-overflow-tooltip />
       <el-table-column prop="subject" :label="t('log.outboxSubject')" min-width="180" show-overflow-tooltip />
-      <el-table-column prop="next_attempt_at" :label="t('log.outboxNext')" width="160">
+      <el-table-column prop="sent_at" :label="t('cols.sentAt')" min-width="160">
+        <template #default="{ row }">{{ row.sent_at || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="next_attempt_at" :label="t('log.outboxNext')" min-width="160">
         <template #default="{ row }">{{ row.next_attempt_at || '-' }}</template>
       </el-table-column>
       <el-table-column prop="last_error" :label="t('log.outboxError')" min-width="160" show-overflow-tooltip />

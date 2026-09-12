@@ -2,15 +2,18 @@
   <el-card>
     <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('brokers.manageTitle') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
     <el-table :data="brokers">
-      <el-table-column prop="provider" label="Provider" width="100" />
-      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
-      <el-table-column :label="t('common.credential')" width="80">
+      <el-table-column prop="provider" label="Provider" min-width="100" />
+      <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
+      <el-table-column :label="t('common.credential')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.enable')" width="80">
+      <el-table-column :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="260">
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160">
+        <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="250">
         <template #default="{ row }">
           <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
           <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
@@ -52,9 +55,9 @@
   <el-card style="margin-top: 20px" v-loading="usageLoading">
     <template #header>{{ t('brokers.usageTitle') }}</template>
     <el-table :data="usage.today">
-      <el-table-column prop="provider" label="Provider" width="120" />
-      <el-table-column prop="calls" :label="t('common.todayCalls')" width="100" />
-      <el-table-column prop="avg_latency_ms" :label="t('common.avgLatency')" width="120" />
+      <el-table-column prop="provider" label="Provider" min-width="120" />
+      <el-table-column prop="calls" :label="t('common.todayCalls')" min-width="100" />
+      <el-table-column prop="avg_latency_ms" :label="t('common.avgLatency')" min-width="120" />
       <el-table-column prop="success_rate" :label="t('common.successRate')"><template #default="{ row }">{{ row.success_rate }}%</template></el-table-column>
     </el-table>
     <div v-if="!usage.today?.length" style="color:var(--text-secondary);font-size:12px;margin-top:var(--sp-2)">{{ t('brokers.noUsage') }}</div>
@@ -64,6 +67,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { fmtTime } from '../utils/fmtTime'
 import {apiErr,  getBrokers, createBroker, updateBroker, deleteBroker, testBroker } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'

@@ -68,6 +68,7 @@ import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, ElButton, ElTag } from 'element-plus'
+import { estColWidth, sample } from '../utils/colwidth'
 import { apiErr } from '../api'
 import api from '../api'
 
@@ -87,12 +88,13 @@ const idleSince = ref(0)
 let progressTimer = null
 
 // 虚拟滚动 columns（computed 响应语言切换；cellRenderer 用 h 函数）
+// 批16 M3 估宽（#22）：内容列对数据采样估宽，local 长文本 flexGrow 吃剩余
 const columns = computed(() => [
-  { key: 'ts_code', dataKey: 'ts_code', title: t('symbol.code'), width: 120 },
-  { key: 'name', dataKey: 'name', title: t('common.name'), width: 120 },
-  { key: 'list_date', dataKey: 'list_date', title: t('symbol.listDate'), width: 110 },
+  { key: 'ts_code', dataKey: 'ts_code', title: t('symbol.code'), width: estColWidth(t('symbol.code'), sample(items.value, 'ts_code')) },
+  { key: 'name', dataKey: 'name', title: t('common.name'), width: estColWidth(t('common.name'), sample(items.value, 'name')) },
+  { key: 'list_date', dataKey: 'list_date', title: t('symbol.listDate'), width: estColWidth(t('symbol.listDate'), sample(items.value, 'list_date')) },
   {
-    key: 'local', title: t('symbol.localData'), width: 240,
+    key: 'local', title: t('symbol.localData'), minWidth: 200, flexGrow: 1, ellipsis: true,
     cellRenderer: ({ row }) => row.local_count > 0
       ? h('span', { style: 'font-size: 12px' }, t('symbol.localSummary', { n: row.local_count, first: row.local_first, last: row.local_last }))
       : h(ElTag, { type: 'info' }, () => t('symbol.empty'))

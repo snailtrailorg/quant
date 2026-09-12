@@ -14,12 +14,12 @@
       </el-form-item>
     </el-form>
     <el-table :data="filteredLogs">
-      <el-table-column prop="ts" :label="t('common.time')" width="200">
-        <template #default="{ row }">{{ row.ts.replace('T', ' ').slice(0, 19) }}</template>
+      <el-table-column prop="ts" :label="t('common.time')" min-width="160">
+        <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
       <el-table-column prop="actor" :label="t('audit.actor')" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="action" :label="t('common.action')" width="150" />
-      <el-table-column prop="target" :label="t('audit.target')" width="150" />
+      <el-table-column prop="action" :label="t('common.action')" min-width="140" />
+      <el-table-column prop="target" :label="t('audit.target')" min-width="140" />
       <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
     </el-table>
     <el-button size="small" type="primary" @click="exportCsv">{{ t('audit.exportCsv') }}</el-button>
@@ -29,6 +29,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { fmtTime } from '../utils/fmtTime'
 import { getAudit } from '../api'
 const { t } = useI18n()
 const logs = ref([])

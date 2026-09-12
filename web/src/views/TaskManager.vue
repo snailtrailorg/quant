@@ -12,25 +12,34 @@
             <el-option :label="t('task.statusStuck')" value="stuck" />
             <el-option :label="t('task.statusTerminated')" value="terminated" />
           </el-select>
+          <ColumnSettings storage-key="cols.tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
           <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
           <el-button type="warning" @click="onDetectStuck" v-if="role==='admin'">{{ t('task.detectStuck') }}</el-button>
         </div>
       </div>
     </template>
     <el-table :data="tasks">
-      <el-table-column prop="id" :label="t('task.taskId')" width="120" show-overflow-tooltip />
-      <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
-      <el-table-column prop="type" :label="t('common.type')" width="80" />
-      <el-table-column :label="t('common.status')" width="90">
+      <el-table-column prop="id" :label="t('task.taskId')" min-width="120" show-overflow-tooltip />
+      <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
+      <el-table-column prop="type" :label="t('common.type')" min-width="100" />
+      <el-table-column v-if="colOn('trigger_type')" prop="trigger_type" :label="t('cols.triggerType')" min-width="110" />
+      <el-table-column v-if="colOn('trigger_user')" prop="trigger_user" :label="t('cols.triggeredBy')" min-width="110" show-overflow-tooltip />
+      <el-table-column :label="t('common.status')" min-width="100">
         <template #default="{ row }"><StatusTag :value="row.status" /></template>
       </el-table-column>
-      <el-table-column :label="t('task.progress')" width="140">
+      <el-table-column :label="t('task.progress')" min-width="140">
         <template #default="{ row }">{{ row.progress?.pct || 0 }}% ({{ row.progress?.current || 0 }}/{{ row.progress?.total || 0 }})</template>
       </el-table-column>
-      <el-table-column prop="last_heartbeat" :label="t('task.heartbeat')" width="150">
-        <template #default="{ row }">{{ row.last_heartbeat ? row.last_heartbeat.slice(0,19).replace('T',' ') : '-' }}</template>
+      <el-table-column prop="last_heartbeat" :label="t('task.heartbeat')" min-width="160">
+        <template #default="{ row }">{{ row.last_heartbeat ? fmtTime.full(row.last_heartbeat) : '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="300">
+      <el-table-column v-if="colOn('start_time')" prop="start_time" :label="t('cols.startTime')" min-width="160">
+        <template #default="{ row }">{{ row.start_time ? fmtTime.full(row.start_time) : '-' }}</template>
+      </el-table-column>
+      <el-table-column v-if="colOn('end_time')" prop="end_time" :label="t('cols.endTime')" min-width="160">
+        <template #default="{ row }">{{ row.end_time ? fmtTime.full(row.end_time) : '-' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('common.action')" width="250">
         <template #default="{ row }">
           <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
             <el-button type="primary" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>
@@ -49,11 +58,11 @@
         <el-divider />
         <h4>{{ t('task.execLogs') }}</h4>
         <el-table :data="detail.logs" max-height="300">
-          <el-table-column prop="level" :label="t('log.level')" width="70" />
+          <el-table-column prop="level" :label="t('log.level')" min-width="80" />
           <el-table-column prop="message" :label="t('log.content')" show-overflow-tooltip />
-          <el-table-column prop="step_name" :label="t('task.step')" width="100" />
-          <el-table-column prop="created_at" :label="t('common.time')" width="150">
-            <template #default="{ row }">{{ row.created_at ? row.created_at.slice(0,19).replace('T',' ') : '' }}</template>
+          <el-table-column prop="step_name" :label="t('task.step')" min-width="120" />
+          <el-table-column prop="created_at" :label="t('common.time')" min-width="160">
+            <template #default="{ row }">{{ row.created_at ? fmtTime.full(row.created_at) : '' }}</template>
           </el-table-column>
         </el-table>
       </div>
@@ -63,7 +72,9 @@
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
-import { ref, onMounted } from 'vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
+import { fmtTime } from '../utils/fmtTime'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getTasks, getTaskDetail, terminateTask, forceDeleteTask, detectStuck } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -74,6 +85,16 @@ const filterStatus = ref('')
 const detailVisible = ref(false)
 const detail = ref(null)
 const role = ref(localStorage.getItem('role') || 'viewer')
+
+// 批16 列显示配置（新列默认隐）：触发方式/触发人/起止时间——排查"谁在什么时候跑的"才开
+const taskColDefs = computed(() => [
+  { key: 'trigger_type', label: t('cols.triggerType'), hidden: true },
+  { key: 'trigger_user', label: t('cols.triggeredBy'), hidden: true },
+  { key: 'start_time', label: t('cols.startTime'), hidden: true },
+  { key: 'end_time', label: t('cols.endTime'), hidden: true },
+])
+const taskVisible = ref([])
+const colOn = k => taskVisible.value.includes(k)
 
 
 const load = async () => { try { tasks.value = (await getTasks(filterStatus.value)).items || [] } catch (e) { console.error(e) } }

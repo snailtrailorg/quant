@@ -9,8 +9,8 @@
     <el-card>
         <template #header>{{ t('health.apiHealth') }}</template>
         <el-table :data="healthData">
-          <el-table-column prop="name" :label="t('health.service')" min-width="100" show-overflow-tooltip />
-          <el-table-column :label="t('common.status')" width="80">
+          <el-table-column prop="name" :label="t('health.service')" min-width="160" show-overflow-tooltip />
+          <el-table-column :label="t('common.status')" min-width="100">
             <template #default="{ row }">
               <StatusTag :value="row.status" />
             </template>
@@ -34,8 +34,8 @@
     </template>
     <el-table :data="componentRows">
       <el-table-column prop="component" :label="t('health.component')" min-width="200" />
-      <el-table-column prop="kind" :label="t('health.kind')" width="110" />
-      <el-table-column :label="t('common.status')" width="110">
+      <el-table-column prop="kind" :label="t('health.kind')" min-width="120" />
+      <el-table-column :label="t('common.status')" min-width="110">
         <template #default="{ row }">
           <el-tag :type="row.ok ? 'success' : (row.unknown ? 'info' : 'danger')">
             {{ row.state || (row.ok ? 'ok' : (row.unknown ? '?' : 'fail')) }}
@@ -50,14 +50,14 @@
   <el-card style="margin-top: 20px">
     <template #header>{{ t('health.events') }}</template>
     <el-table :data="eventRows">
-      <el-table-column prop="ts" :label="t('health.time')" width="170" />
-      <el-table-column :label="t('health.severity')" width="100">
+      <el-table-column prop="ts" :label="t('health.time')" min-width="160" />
+      <el-table-column :label="t('health.severity')" min-width="100">
         <template #default="{ row }">
           <el-tag :type="sevType(row.severity)" size="small">{{ row.severity }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="component" :label="t('health.component')" min-width="180" />
-      <el-table-column prop="rule" :label="t('health.rule')" width="150" />
+      <el-table-column prop="component" :label="t('health.component')" min-width="200" />
+      <el-table-column prop="rule" :label="t('health.rule')" min-width="140" />
       <el-table-column prop="detail" :label="t('common.detail')" min-width="280" show-overflow-tooltip />
     </el-table>
   </el-card>
