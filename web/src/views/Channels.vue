@@ -1,8 +1,8 @@
 <template>
   <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('channels.manageTitle') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
-    <el-table :data="channels">
-      <el-table-column prop="provider" label="Provider" min-width="120" />
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('channels.manageTitle') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.channels" :columns="colDefs" v-model:visible="visible" /><el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></div></template>
+    <TableShell :data="channels" storage-key="channels">
+      <el-table-column v-if="colOn('provider')" prop="provider" label="Provider" min-width="120" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
       <el-table-column :label="t('common.credential')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
@@ -10,7 +10,7 @@
       <el-table-column :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160">
+      <el-table-column v-if="colOn('updated_at')" prop="updated_at" :label="t('common.updatedAt')" min-width="160">
         <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="250">
@@ -20,7 +20,7 @@
           <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
     <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('channels.editTitle') : t('channels.addTitle')" width="560px">
       <el-form :model="form" label-width="120px">
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('channels.phProvider')" /></el-form-item>
@@ -37,14 +37,25 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { fmtTime } from '../utils/fmtTime'
 import {apiErr,  getChannels, createChannel, updateChannel, deleteChannel, testChannel } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
 const channels = ref([])
+
+// 批17 列显示配置：更新时间默认隐；名称/凭证/启用/操作恒显不进 defs
+const colDefs = computed(() => [
+  { key: 'provider', label: 'Provider' },
+  { key: 'updated_at', label: t('common.updatedAt'), hidden: true },
+])
+const visible = ref([])
+const colOn = k => visible.value.includes(k)
+
 const form = ref(emptyForm())
 const saving = ref(false)
 const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）

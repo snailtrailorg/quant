@@ -6,7 +6,8 @@
         <el-button type="primary" @click="!navReadonly && openCreate()" :disabled="navReadonly">{{ t('strategy.create') }}</el-button>
       </div>
     </template>
-    <el-table :data="strategies">
+    <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+    <TableShell :data="strategies" storage-key="strategy-main">
       <el-table-column prop="name" :label="t('strategy.name')" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('strategy.type')" />
       <el-table-column :label="t('strategy.status')">
@@ -42,7 +43,7 @@
           <el-button size="small" @click="openEdit(row)" :disabled="navReadonly">{{ t('common.edit') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <!-- 编辑弹窗 -->
     <el-dialog v-model="editVisible" :title="editForm.isNew ? t('strategy.createTitle') : t('strategy.editTitle')" width="720px" :close-on-click-modal="false">
@@ -188,17 +189,19 @@
             </el-select>
             <el-input-number v-model="bindForm.initial_capital" :min="10000" :step="100000" style="width: 180px" />
             <el-button type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">{{ t('common.bind') }}</el-button>
-            <el-button type="primary" @click="loadBinds" :disabled="!editForm.id">{{ t('common.refresh') }}</el-button>
+            <!-- 批17 17C：刷新图标化（原 disabled 由 loadBinds 内 id 空值守卫承接） -->
+            <RefreshBtn @refresh="loadBinds" />
           </div>
         </el-form-item>
-        <el-table v-if="binds.length" :data="binds" style="margin-bottom: 12px">
+        <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+        <TableShell v-if="binds.length" :data="binds" style="margin-bottom: 12px" storage-key="strategy-accounts">
           <el-table-column prop="account_id" :label="t('common.account')" show-overflow-tooltip />
           <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
           <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
           <el-table-column :label="t('common.action')" width="80">
             <template #default="{ row }"><el-button type="danger" @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
           </el-table-column>
-        </el-table>
+        </TableShell>
       </el-form>
       <template #footer>
         <div v-if="!editForm.isNew" style="display: flex; justify-content: space-between; width: 100%">
@@ -230,6 +233,8 @@ import { getStrategies, updateStrategy, createStrategy, getFactorList, validateP
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 import CodeEditor from '../components/CodeEditor.vue'
+import TableShell from '../components/TableShell.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))

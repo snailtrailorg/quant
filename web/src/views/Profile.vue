@@ -65,7 +65,7 @@
       <h3 style="font-size: 16px; margin: 0">{{ t('myIm.title') }}</h3>
       <el-button type="primary" @click="openImAdd">{{ t('myIm.add') }}</el-button>
     </div>
-    <el-table v-if="imBots.length" :data="imBots" size="small">
+    <TableShell v-if="imBots.length" :data="imBots" size="small" storage-key="im-bots">
       <el-table-column prop="provider" :label="t('myIm.provider')" width="90" />
       <el-table-column prop="name" :label="t('common.name')" min-width="120" show-overflow-tooltip />
       <el-table-column :label="t('common.status')" width="80">
@@ -83,7 +83,7 @@
           </div>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
     <div v-else style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
 
     <!-- 添加 IM 通道（批13 页签化：页签=注册表驱动，页签内容=方式动态生成——每平台单方式；
@@ -186,6 +186,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { VueCropper } from 'vue-cropper'  // 样式在 main.js 全局引入（漏引 CSS 是"界面全乱"的根因；该包 CSS 自带 scope id 与组件 __scopeId 配套自洽）
 import Avatar from '../components/Avatar.vue'
 import TabsShell from '../components/TabsShell.vue'
+import TableShell from '../components/TableShell.vue'
 import api, { apiErr, sse } from '../api'
 import { validatePassword } from '../password'
 

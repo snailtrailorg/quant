@@ -43,7 +43,7 @@
       <el-alert v-if="masterEnabled === false" type="error" :closable="false" style="margin-bottom: 12px">
         {{ t('risk.masterOff') }}
       </el-alert>
-      <el-table :data="liveTradingMarkets">
+      <TableShell :data="liveTradingMarkets" storage-key="live-switches">
         <el-table-column prop="market" :label="t('risk.market')" width="150" />
         <el-table-column :label="t('risk.label')" show-overflow-tooltip>
           <template #default="{ row }">{{ t(row.labelKey) }}</template>
@@ -57,7 +57,7 @@
             </el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </TableShell>
       <el-alert type="info" :closable="false" style="margin-top: 12px">
         {{ t('risk.switchHint') }}
       </el-alert>
@@ -91,6 +91,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import TableShell from '../components/TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { getRiskState, riskHalt, riskResume, getLiveTrading, updateLiveTrading } from '../api'

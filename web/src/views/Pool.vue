@@ -5,13 +5,16 @@
         <span>{{ t('pool.manageTitle') }}</span>
         <div>
           <!-- 批16：后端有端点全站无按钮的两操作（用户裁定补） -->
+          <!-- 批17 17B：列显示配置（ID/名称/操作列恒显不进 defs）；描述=低频宽列默认隐 -->
+          <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.pool-main" :columns="poolColDefs" v-model:visible="poolVisible" /></span>
           <el-button size="small" :disabled="navReadonly" @click="syncMinuteAll">{{ t('pool.syncMinuteBtn') }}</el-button>
           <el-button size="small" :disabled="navReadonly" @click="backfillFactor">{{ t('pool.backfillFactorBtn') }}</el-button>
           <el-button type="primary" @click="showDialog = true" :disabled="navReadonly">{{ t('pool.createTitle') }}</el-button>
         </div>
       </div>
     </template>
-    <el-table :data="pools" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand">
+    <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+    <TableShell :data="pools" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand" storage-key="pool-main">
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: var(--sp-2) 24px">
@@ -20,7 +23,8 @@
                        :disabled="navReadonly" @click="backfillMinute(row)">{{ t('pool.backfillMinute') }}</el-button>
             <template v-if="row.minute_history_start">
               <div v-if="minuteStatus[row.id]" style="margin-bottom: 12px">
-                <el-table :data="minuteStatus[row.id]" size="small" max-height="300">
+                <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+                <TableShell :data="minuteStatus[row.id]" size="small" max-height="300" storage-key="pool-coverage">
                   <el-table-column prop="symbol" :label="t('common.symbol')" min-width="140" />
                   <el-table-column :label="t('pool.minuteLastTs')" min-width="170">
                     <template #default="{ row: s }">{{ s.last_ts || '-' }}</template>
@@ -38,7 +42,7 @@
                       <el-button type="danger" @click="removeSymbol(row.id, s.symbol)">✕</el-button>
                     </template>
                   </el-table-column>
-                </el-table>
+                </TableShell>
               </div>
             </template>
             <!-- 单标的添加 -->
@@ -51,31 +55,31 @@
       </el-table-column>
       <el-table-column prop="id" label="ID" min-width="100" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="category" :label="t('pool.category')" min-width="110" />
-      <el-table-column :label="t('pool.symbolCount')" min-width="90" align="center">
+      <el-table-column v-if="colOn('category')" prop="category" :label="t('pool.category')" min-width="110" />
+      <el-table-column v-if="colOn('symbol_count')" :label="t('pool.symbolCount')" min-width="90" align="center">
         <template #default="{ row }">
           <el-badge :value="row.symbols?.length || 0" type="primary" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('pool.minuteStart')" min-width="130">
+      <el-table-column v-if="colOn('minute_start')" :label="t('pool.minuteStart')" min-width="130">
         <template #default="{ row }">
           <span v-if="row.minute_history_start" style="font-size: 12px">{{ row.minute_history_start }}</span>
           <span v-else style="color: var(--el-text-color-placeholder)">-</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('pool.minuteCount')" min-width="100" align="center">
+      <el-table-column v-if="colOn('minute_count')" :label="t('pool.minuteCount')" min-width="100" align="center">
         <template #default="{ row }">
           <el-badge :value="row.minute_count || 0" type="info" />
         </template>
       </el-table-column>
-      <el-table-column prop="description" min-width="220" show-overflow-tooltip :label="t('common.description')" />
+      <el-table-column v-if="colOn('description')" prop="description" min-width="220" show-overflow-tooltip :label="t('common.description')" />
       <el-table-column :label="t('common.action')" min-width="180">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="editPool(row)">{{ t('common.edit') }}</el-button>
           <el-button type="danger" size="small" @click="delPool(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <!-- 攒数据标的（分钟数据源重构 21 号 §3.5：池级∪个股级统一展开表） -->
     <el-divider content-position="left">{{ t('pool.minuteSymbolsTitle') }}</el-divider>
@@ -86,7 +90,8 @@
         {{ t('pool.minuteSymbolsAdd') }}
       </el-button>
     </div>
-    <el-table :data="minuteSymbols" size="small" max-height="300">
+    <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+    <TableShell :data="minuteSymbols" size="small" max-height="300" storage-key="pool-minute-symbols">
       <el-table-column prop="symbol" :label="t('common.symbol')" min-width="150" />
       <el-table-column prop="source" :label="t('pool.minuteSymbolSource')" min-width="110" />
       <el-table-column :label="t('pool.minuteLastTs')" min-width="170">
@@ -99,7 +104,7 @@
           <span v-else style="color: var(--el-text-color-placeholder); font-size: 12px">{{ t('pool.sourcePool') }}</span>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <el-dialog v-model="showDialog" :close-on-click-modal="false" :title="t('pool.createTitle')" width="560px">
       <el-form :model="newPool" label-width="110px">
@@ -138,11 +143,13 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, inject } from 'vue'
+import { ref, reactive, computed, onMounted, inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api, { getPools, createPoolApi, deletePoolApi, getMinuteSymbols, addMinuteSymbol, delMinuteSymbol } from '../api'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
@@ -156,6 +163,17 @@ const minuteStatus = reactive({})   // {pool_id: [{symbol,last_ts,covered}]}
 const minuteSymbols = ref([])
 const minuteSymbolsInput = ref('')
 const newPool = ref({ id: '', name: '', category: 'astock', symbolsStr: '', description: '', minuteStart: null, _edit: false })
+
+// 批17 17B：列显示配置——ID/名称/操作列恒显不进 defs；描述=低频宽列默认隐
+const poolColDefs = computed(() => [
+  { key: 'category', label: t('pool.category') },
+  { key: 'symbol_count', label: t('pool.symbolCount') },
+  { key: 'minute_start', label: t('pool.minuteStart') },
+  { key: 'minute_count', label: t('pool.minuteCount') },
+  { key: 'description', label: t('common.description'), hidden: true },
+])
+const poolVisible = ref([])
+const colOn = k => poolVisible.value.includes(k)
 
 const load = async () => {
   try { pools.value = await getPools() } catch (e) { ElMessage.error(t('pool.loadFailed')) }

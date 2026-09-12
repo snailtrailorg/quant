@@ -5,7 +5,7 @@
       {{ t('alerts.smsNotConfigured') }}
     </el-alert>
 
-    <el-table :data="rows">
+    <TableShell :data="rows" storage-key="alert-subs">
       <el-table-column :label="t('common.type')" width="90">
         <template #default="{ row }">
           <el-tag :type="{ im: 'primary', email: 'success', sms: 'warning' }[row.channel]">
@@ -39,7 +39,7 @@
           <el-button size="small" type="danger" @click="del(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <div style="display: flex; gap: 8px; margin-top: 12px">
       <el-button type="primary" @click="add">{{ t('alerts.addSub') }}</el-button>
@@ -105,6 +105,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import TableShell from '../components/TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'

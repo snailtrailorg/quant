@@ -16,7 +16,7 @@
             </div>
           </div>
         </template>
-        <el-table :data="filteredLogs" height="500">
+        <TableShell :data="filteredLogs" height="500" storage-key="logs-run">
           <el-table-column prop="ts" :label="t('common.time')" min-width="160">
             <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
           </el-table-column>
@@ -27,7 +27,7 @@
           </el-table-column>
           <el-table-column prop="module" :label="t('log.module')" min-width="120" />
           <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
-        </el-table>
+        </TableShell>
         <!-- P3-5(05 §5.10):日志筛选 -->
   <el-card style="margin-bottom: 14px">
     <el-form inline>
@@ -44,17 +44,22 @@
     </el-col>
     <el-col :span="10">
       <el-card>
-        <template #header>{{ t('log.notifyHistory') }}</template>
-        <el-table :data="notifs" height="500">
-          <el-table-column prop="level" :label="t('log.level')" min-width="100">
+        <template #header>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <span>{{ t('log.notifyHistory') }}</span>
+            <ColumnSettings storage-key="cols.logs-notify" :columns="notifyColDefs" v-model:visible="notifyVisible" />
+          </div>
+        </template>
+        <TableShell :data="notifs" height="500" storage-key="logs-notify">
+          <el-table-column v-if="colOn('level')" prop="level" :label="t('log.level')" min-width="100">
             <template #default="{ row }">
               <span :class="['ndot', row.level]"></span>{{ row.level }}
             </template>
           </el-table-column>
-          <el-table-column prop="category" :label="t('log.notifyCategory')" min-width="100" />
-          <el-table-column prop="title" :label="t('log.titleCol')" min-width="200" show-overflow-tooltip />
-          <el-table-column prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
-          <el-table-column :label="t('alerts.dispatchCol')" min-width="140">
+          <el-table-column v-if="colOn('category')" prop="category" :label="t('log.notifyCategory')" min-width="100" />
+          <el-table-column v-if="colOn('title')" prop="title" :label="t('log.titleCol')" min-width="200" show-overflow-tooltip />
+          <el-table-column v-if="colOn('body')" prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
+          <el-table-column v-if="colOn('dispatch')" :label="t('alerts.dispatchCol')" min-width="140">
             <template #default="{ row }">
               <template v-if="row.level === 'info'"></template>
               <span v-else-if="!row.dispatch" style="color: var(--flat)">?</span>
@@ -64,11 +69,11 @@
               </template>
             </template>
           </el-table-column>
-          <el-table-column prop="created_at" :label="t('common.time')" min-width="160" />
-          <el-table-column prop="acked_at" :label="t('cols.confirmedAt')" min-width="160">
+          <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.time')" min-width="160" />
+          <el-table-column v-if="colOn('acked_at')" prop="acked_at" :label="t('cols.confirmedAt')" min-width="160">
             <template #default="{ row }">{{ row.acked_at ? fmtTime.full(row.acked_at) : '-' }}</template>
           </el-table-column>
-        </el-table>
+        </TableShell>
       </el-card>
     </el-col>
   </el-row>
@@ -76,7 +81,7 @@
   <!-- 邮件发件箱（持久化 + 指数退避重发） -->
   <el-card style="margin-top: 20px">
     <template #header>{{ t('log.outboxTitle') }}</template>
-    <el-table :data="outbox" max-height="300">
+    <TableShell :data="outbox" max-height="300" storage-key="logs-outbox">
       <el-table-column prop="status" :label="t('common.status')" min-width="100">
         <template #default="{ row }">
           <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.status === 'pending' ? `(${row.attempts})` : '' }}</span>
@@ -91,7 +96,7 @@
         <template #default="{ row }">{{ row.next_attempt_at || '-' }}</template>
       </el-table-column>
       <el-table-column prop="last_error" :label="t('log.outboxError')" min-width="160" show-overflow-tooltip />
-    </el-table>
+    </TableShell>
     <div style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">{{ t('log.outboxHint') }}</div>
   </el-card>
 
@@ -107,12 +112,27 @@
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getLogs, logAnalyze, getEmailOutbox, getNotifications } from '../api'
 const { t } = useI18n()
+
+// 批17 列显示配置（通知历史表）：dispatch chips 列默认隐
+const notifyColDefs = computed(() => [
+  { key: 'level', label: t('log.level') },
+  { key: 'category', label: t('log.notifyCategory') },
+  { key: 'title', label: t('log.titleCol') },
+  { key: 'body', label: t('log.content') },
+  { key: 'dispatch', label: t('alerts.dispatchCol'), hidden: true },
+  { key: 'created_at', label: t('common.time') },
+  { key: 'acked_at', label: t('cols.confirmedAt') },
+])
+const notifyVisible = ref([])
+const colOn = k => notifyVisible.value.includes(k)
 
 // 批 7 推送结果 chips（dispatch jsonb 渲染契约：ok✓/queued○/skip|failed 带因/{}不显示/null=未明）
 const chipType = v => v === 'ok' || v === 'legacy' ? 'success' : (v === 'queued' || v === 'sending') ? 'info'

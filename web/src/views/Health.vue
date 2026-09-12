@@ -8,7 +8,7 @@
 
     <el-card>
         <template #header>{{ t('health.apiHealth') }}</template>
-        <el-table :data="healthData">
+        <TableShell :data="healthData" storage-key="health-services">
           <el-table-column prop="name" :label="t('health.service')" min-width="160" show-overflow-tooltip />
           <el-table-column :label="t('common.status')" min-width="100">
             <template #default="{ row }">
@@ -16,7 +16,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
-        </el-table>
+        </TableShell>
       </el-card>
     </el-col>
   </el-row>
@@ -32,7 +32,7 @@
         </el-tag>
       </span>
     </template>
-    <el-table :data="componentRows">
+    <TableShell :data="componentRows" storage-key="health-components">
       <el-table-column prop="component" :label="t('health.component')" min-width="200" />
       <el-table-column prop="kind" :label="t('health.kind')" min-width="120" />
       <el-table-column :label="t('common.status')" min-width="110">
@@ -43,13 +43,13 @@
         </template>
       </el-table-column>
       <el-table-column prop="detail" :label="t('common.detail')" min-width="260" show-overflow-tooltip />
-    </el-table>
+    </TableShell>
   </el-card>
 
   <!-- arch-15 SM2：健康事件流（触发/恢复沿历史） -->
   <el-card style="margin-top: 20px">
     <template #header>{{ t('health.events') }}</template>
-    <el-table :data="eventRows">
+    <TableShell :data="eventRows" storage-key="health-events">
       <el-table-column prop="ts" :label="t('health.time')" min-width="160" />
       <el-table-column :label="t('health.severity')" min-width="100">
         <template #default="{ row }">
@@ -59,12 +59,13 @@
       <el-table-column prop="component" :label="t('health.component')" min-width="200" />
       <el-table-column prop="rule" :label="t('health.rule')" min-width="140" />
       <el-table-column prop="detail" :label="t('common.detail')" min-width="280" show-overflow-tooltip />
-    </el-table>
+    </TableShell>
   </el-card>
 </template>
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
+import TableShell from '../components/TableShell.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getHealthComponents, getHealthEvents } from '../api'

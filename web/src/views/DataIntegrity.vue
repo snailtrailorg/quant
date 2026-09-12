@@ -5,7 +5,7 @@
         <span>{{ t('dataIntegrity.title', { n: summary.total || 0 }) }}</span>
         <el-alert v-if="loadFailed" type="error" :closable="false" style="margin-bottom: var(--sp-3)">
           {{ t('common.loadFailed') }}
-          <el-button size="small" type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+          <RefreshBtn :loading="loading" @refresh="load" style="margin-left: var(--sp-2)" />
         </el-alert>
         <el-radio-group v-model="freq" @change="load">
           <el-radio-button value="1D">{{ t('dataIntegrity.daily') }}</el-radio-button>
@@ -22,7 +22,7 @@
       <el-col :span="6"><el-card shadow="never"><div style="color:var(--text-secondary)">{{ t('dataIntegrity.completeRate') }}</div><div style="font-size: 24px">{{ completePct }}%</div></el-card></el-col>
     </el-row>
 
-    <el-table :data="items" v-loading="loading" style="width: 100%" height="500">
+    <TableShell :data="items" v-loading="loading" style="width: 100%" height="500" storage-key="data-integrity">
       <el-table-column prop="symbol" :label="t('common.symbol')" min-width="120" />
       <el-table-column prop="local_count" :label="t('dataIntegrity.localCount')" min-width="100" />
       <el-table-column prop="first" :label="t('dataIntegrity.first')" min-width="120" />
@@ -38,12 +38,14 @@
           <StatusTag :value="row.status" />
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
   </el-card>
 </template>
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
+import TableShell from '../components/TableShell.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getDataIntegrity } from '../api'

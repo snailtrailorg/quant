@@ -7,7 +7,7 @@
         <el-button type="primary" size="small" @click="showForm = true">{{ t('common.create') }}</el-button>
       </div>
     </template>
-    <el-table :data="accounts" v-loading="loading">
+    <TableShell :data="accounts" v-loading="loading" storage-key="trading-accounts">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="exchange" :label="t('tradingAccounts.exchange')" width="120" />
@@ -30,7 +30,7 @@
           <el-button size="small" type="danger" @click="del(row)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
     <div v-if="!accounts.length && !loading" style="color: var(--text-secondary); padding: 20px; text-align: center">{{ t('tradingAccounts.empty') }}</div>
 
     <!-- 创建/编辑弹窗 -->
@@ -56,6 +56,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import TableShell from '../components/TableShell.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { apiErr } from '../api'

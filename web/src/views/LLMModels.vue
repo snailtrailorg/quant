@@ -1,9 +1,9 @@
 <template>
   <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.configTitle') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.configTitle') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.llm-models" :columns="modelColDefs" v-model:visible="modelVisible" /><el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></div></template>
     <el-card shadow="never" style="margin-bottom: 12px">
-      <template #header>{{ t('llm.usageTitle') }}<el-button type="primary" @click="loadUsage" style="margin-left: var(--sp-2)">{{ t('common.refresh') }}</el-button></template>
-      <el-table :data="usage.month">
+      <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.usageTitle') }}<RefreshBtn @refresh="loadUsage" style="margin-left: var(--sp-2)" /></div></template>
+      <TableShell :data="usage.month" storage-key="llm-usage">
         <el-table-column prop="provider" label="Provider" min-width="120" />
         <el-table-column prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
         <el-table-column prop="calls" :label="t('llm.calls')" min-width="80" />
@@ -14,26 +14,26 @@
         <el-table-column :label="t('llm.successRateCol')" min-width="100">
           <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'">{{ row.success_rate }}%</el-tag></template>
         </el-table-column>
-      </el-table>
+      </TableShell>
       <div style="font-size: 12px; color: var(--text-secondary); margin-top: var(--sp-2)">
         {{ t('llm.trend7d') }}<span v-for="tr in usage.trend" :key="tr.date" style="margin-right: 10px">{{ tr.date.slice(5) }} {{tr.calls}}/{{tr.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">{{ t('llm.noTrend') }}</span>
       </div>
     </el-card>
-    <el-table :data="models">
-      <el-table-column prop="id" label="ID" min-width="80" />
+    <TableShell :data="models" storage-key="llm-models">
+      <el-table-column v-if="modelColOn('id')" prop="id" label="ID" min-width="80" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="provider" label="Provider" min-width="120" />
-      <el-table-column prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="base_url" :label="t('cols.apiUrl')" min-width="220" show-overflow-tooltip>
+      <el-table-column v-if="modelColOn('provider')" prop="provider" label="Provider" min-width="120" />
+      <el-table-column v-if="modelColOn('model')" prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
+      <el-table-column v-if="modelColOn('base_url')" prop="base_url" :label="t('cols.apiUrl')" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">{{ row.base_url || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="context_window" :label="t('cols.contextWindow')" min-width="110">
+      <el-table-column v-if="modelColOn('context_window')" prop="context_window" :label="t('cols.contextWindow')" min-width="110">
         <template #default="{ row }">{{ row.context_window?.toLocaleString() || '-' }}</template>
       </el-table-column>
       <el-table-column :label="t('llm.key')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'">{{ row.has_key ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="priority" :label="t('llm.priority')" min-width="80" />
+      <el-table-column v-if="modelColOn('priority')" prop="priority" :label="t('llm.priority')" min-width="80" />
       <el-table-column :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
@@ -46,7 +46,7 @@
           </div>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('llm.editModel') : t('llm.addModel')" width="560px">
       <el-form :model="form" label-width="120px">
@@ -76,7 +76,7 @@
         <el-button type="primary" @click="checkBudget" :loading="checking">{{ t('llm.check') }}</el-button>
       </div>
     </template>
-    <el-table :data="budgets">
+    <TableShell :data="budgets" storage-key="llm-budget">
       <el-table-column prop="provider" label="Provider" min-width="120"><template #default="{ row }">{{ row.provider || t('llm.global') }}</template></el-table-column>
       <el-table-column prop="daily_token_limit" :label="t('llm.dailyTokenLimit')" min-width="120">
         <template #default="{ row }">{{ row.daily_token_limit?.toLocaleString() || '-' }}</template>
@@ -92,7 +92,7 @@
           <el-button type="primary" @click="onBudgetEdit(row)">{{ t('common.edit') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
     <!-- 预算编辑（批16：后端本有 POST /llm-budget/{bid}，前端补入口） -->
     <el-dialog v-model="budgetDlg" :close-on-click-modal="false" :title="t('llm.budgetEdit')" width="480px">
       <el-form :model="budgetForm" label-width="130px">
@@ -114,8 +114,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 import {apiErr,  getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage, meOnce } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fmtTime } from '../utils/fmtTime'
@@ -123,6 +126,19 @@ import api from '../api'
 
 const { t } = useI18n()
 const models = ref([])
+
+// 批17 列显示配置（模型表）：接口地址/优先级默认隐；名称/密钥/启用/操作恒显不进 defs
+const modelColDefs = computed(() => [
+  { key: 'id', label: 'ID' },
+  { key: 'provider', label: 'Provider' },
+  { key: 'model', label: t('llm.model') },
+  { key: 'context_window', label: t('cols.contextWindow') },
+  { key: 'base_url', label: t('cols.apiUrl'), hidden: true },
+  { key: 'priority', label: t('llm.priority'), hidden: true },
+])
+const modelVisible = ref([])
+const modelColOn = k => modelVisible.value.includes(k)
+
 const usage = ref({ today: [], month: [], trend: [] })
 const budgets = ref([])
 const budgetLoading = ref(false)

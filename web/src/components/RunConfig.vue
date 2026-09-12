@@ -2,7 +2,7 @@
   <!-- 运行配置卡(从 SystemConfig 拆出通用配置;设置·运行配置 tab 用,批 1 归位重组) -->
   <el-card>
     <template #header>{{ t('systemConfig.title') }}</template>
-    <el-table :data="configs">
+    <TableShell :data="configs" storage-key="run-config">
       <el-table-column prop="key" :label="t('common.configKey')" width="200" />
       <el-table-column :label="t('common.configValue')" width="200">
         <template #default="{ row }">
@@ -24,13 +24,14 @@
           <el-button type="primary" @click="save(row)" :loading="row._saving">{{ t('common.save') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
     <div style="color: var(--text-secondary); font-size: 12px; margin-top: 12px">{{ t('systemConfig.hint') }}</div>
   </el-card>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import TableShell from './TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getSystemConfig, updateSystemConfig, apiErr } from '../api'

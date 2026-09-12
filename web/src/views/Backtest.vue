@@ -11,6 +11,8 @@
             <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">{{ t('backtest.failedTag') }} {{ failedCount }}</el-tag>
           </span>
           <span>
+            <!-- 批17 17B：列显示配置（ID/策略/操作列恒显不进 defs）；创建时间默认隐 -->
+            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.backtest-list" :columns="btColDefs" v-model:visible="btVisible" /></span>
             <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: var(--sp-2)">
               <el-option v-for="st in ['running','done','failed','pending']" :key="st" :value="st" :label="st" />
             </el-select>
@@ -18,47 +20,48 @@
           </span>
         </div>
       </template>
-      <el-table :data="filteredRuns" v-loading="loading" @row-click="goDetail">
+      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+      <TableShell :data="filteredRuns" v-loading="loading" @row-click="goDetail" storage-key="backtest-list">
         <el-table-column prop="id" label="ID" min-width="70" />
         <el-table-column prop="strategy_id" :label="t('backtest.strategy')" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>
         </el-table-column>
         <!-- P2-4：指标摘要——列表行直接给成绩，不用点进 Run 页 -->
-        <el-table-column :label="t('backtest.retCol')" min-width="90" class-name="num">
+        <el-table-column v-if="colOn('ret')" :label="t('backtest.retCol')" min-width="90" class-name="num">
           <template #default="{ row }">
             <span v-if="bs(row).ret != null" :class="bs(row).ret >= 0 ? 'up' : 'down'">
               {{ pct(bs(row).ret) }}
             </span><span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('backtest.ddCol')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('dd')" :label="t('backtest.ddCol')" min-width="80" class-name="num">
           <template #default="{ row }">{{ bs(row).dd != null ? pct(bs(row).dd) : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('backtest.sharpeCol')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('sharpe')" :label="t('backtest.sharpeCol')" min-width="80" class-name="num">
           <template #default="{ row }">{{ bs(row).sharpe != null ? bs(row).sharpe.toFixed(2) : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('backtest.dateRangeCol')" min-width="170">
+        <el-table-column v-if="colOn('date_range')" :label="t('backtest.dateRangeCol')" min-width="170">
           <template #default="{ row }">
             {{ (row.created_at||'').slice(0,10) }} ~ {{ (row.finished_at||'').slice(5,10) || '…' }}
           </template>
         </el-table-column>
         <!-- 失败原因透出（05 §5.7：failed 行点开见原因） -->
-        <el-table-column :label="t('backtest.reason')" min-width="140" show-overflow-tooltip>
+        <el-table-column v-if="colOn('reason')" :label="t('backtest.reason')" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.status === 'failed'" style="color: var(--critical)">{{ row.summary?.error || row.error || '—' }}</span>
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="status" :label="t('common.status')" min-width="100">
+        <el-table-column v-if="colOn('status')" prop="status" :label="t('common.status')" min-width="100">
           <template #default="{ row }">
             <StatusTag :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column prop="mode" :label="t('backtest.mode')" min-width="80" />
-        <el-table-column :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
+        <el-table-column v-if="colOn('mode')" prop="mode" :label="t('backtest.mode')" min-width="80" />
+        <el-table-column v-if="colOn('symbols')" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ t('backtest.symbolCount', { n: row.symbols?.length || 0 }) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.createdAt')" min-width="160">
+        <el-table-column v-if="colOn('created_at')" :label="t('common.createdAt')" min-width="160">
           <template #default="{ row }">{{ row.created_at?.slice(0, 19) }}</template>
         </el-table-column>
         <el-table-column :label="t('common.action')" min-width="190" fixed="right">
@@ -68,7 +71,7 @@
             <el-button @click.stop="moreRow = row">{{ t('common.more') }}</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </TableShell>
     </el-card>
 
     <!-- 批16：行「更多」弹窗（终止/删除） -->
@@ -160,6 +163,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bs, pct } from '../utils/backtestSummary'
 import StatusTag from '../components/StatusTag.vue'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
@@ -191,6 +196,21 @@ const onStrategyChange = (sid) => {
 
 const filterStatus = ref('')
 const moreRow = ref(null)
+
+// 批17 17B：列显示配置——ID/策略/操作列恒显不进 defs；创建时间=低频列默认隐
+const btColDefs = computed(() => [
+  { key: 'ret', label: t('backtest.retCol') },
+  { key: 'dd', label: t('backtest.ddCol') },
+  { key: 'sharpe', label: t('backtest.sharpeCol') },
+  { key: 'date_range', label: t('backtest.dateRangeCol') },
+  { key: 'reason', label: t('backtest.reason') },
+  { key: 'status', label: t('common.status') },
+  { key: 'mode', label: t('backtest.mode') },
+  { key: 'symbols', label: t('common.symbol') },
+  { key: 'created_at', label: t('common.createdAt'), hidden: true },
+])
+const btVisible = ref([])
+const colOn = k => btVisible.value.includes(k)
 const moreVisible = computed({
   get: () => !!moreRow.value,
   set: v => { if (!v) moreRow.value = null },

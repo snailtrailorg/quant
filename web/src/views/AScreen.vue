@@ -24,6 +24,8 @@
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('screener.results') }} ({{ rows.length }})</span>
           <div>
+            <!-- 批17 17B：列显示配置（代码/名称列恒显不进 defs） -->
+            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.screener-astock" :columns="astockColDefs" v-model:visible="astockVisible" /></span>
             <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: var(--sp-2)">
               <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
             </el-select>
@@ -33,24 +35,25 @@
           </div>
         </div>
       </template>
-      <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
+      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+      <TableShell :data="pagedRows" size="small" @selection-change="onSelChange" storage-key="screener-astock">
         <el-table-column type="selection" width="40" />
         <!-- 批16：列宽套档（min-width 权重，评估文档档位制）；+滚动市盈率（后端已返回） -->
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="close" :label="t('trading.price')" min-width="80" class-name="num" />
-        <el-table-column prop="pe" label="PE" min-width="70" class-name="num" />
-        <el-table-column prop="pe_ttm" :label="t('cols.peTtm')" min-width="90" class-name="num">
+        <el-table-column v-if="colOn('close')" prop="close" :label="t('trading.price')" min-width="80" class-name="num" />
+        <el-table-column v-if="colOn('pe')" prop="pe" label="PE" min-width="70" class-name="num" />
+        <el-table-column v-if="colOn('pe_ttm')" prop="pe_ttm" :label="t('cols.peTtm')" min-width="90" class-name="num">
           <template #default="{ row }">{{ row.pe_ttm != null ? row.pe_ttm.toFixed(1) : '—' }}</template>
         </el-table-column>
-        <el-table-column prop="pb" label="PB" min-width="70" class-name="num" />
-        <el-table-column :label="t('screener.turnover')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('pb')" prop="pb" label="PB" min-width="70" class-name="num" />
+        <el-table-column v-if="colOn('turnover')" :label="t('screener.turnover')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.turnover?.toFixed(1) || '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.marketCap')" min-width="110" class-name="num">
+        <el-table-column v-if="colOn('market_cap')" :label="t('screener.marketCap')" min-width="110" class-name="num">
           <template #default="{ row }">{{ fmtCn(row.total_mv * 10000, 1) }}</template>
         </el-table-column>
-      </el-table>
+      </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
         layout="prev, pager, next" style="margin-top: 12px; justify-content: flex-end" />
     </el-card>
@@ -63,6 +66,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { fmtCn } from '../utils/format'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 
 const { t } = useI18n()
 const rows = ref([])
@@ -74,6 +79,18 @@ const page = ref(1)
 const pageSize = 50
 const f = ref({ pe_max: 0, pb_max: 0, mv_min: 0, turnover_min: 0 })
 const plans = ref(JSON.parse(localStorage.getItem('screener_astock_plans') || '{}'))
+
+// 批17 17B：列显示配置——代码/名称列恒显不进 defs；换手率=低频列默认隐
+const astockColDefs = computed(() => [
+  { key: 'close', label: t('trading.price') },
+  { key: 'pe', label: 'PE' },
+  { key: 'pe_ttm', label: t('cols.peTtm') },
+  { key: 'pb', label: 'PB' },
+  { key: 'turnover', label: t('screener.turnover'), hidden: true },
+  { key: 'market_cap', label: t('screener.marketCap') },
+])
+const astockVisible = ref([])
+const colOn = k => astockVisible.value.includes(k)
 
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }

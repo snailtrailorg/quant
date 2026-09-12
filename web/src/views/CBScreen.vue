@@ -16,6 +16,8 @@
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('screener.results') }} ({{ rows.length }})</span>
           <div>
+            <!-- 批17 17B：列显示配置（代码/转债名称列恒显不进 defs） -->
+            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.screener-cb" :columns="cbColDefs" v-model:visible="cbVisible" /></span>
             <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: var(--sp-2)">
               <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
             </el-select>
@@ -25,31 +27,32 @@
           </div>
         </div>
       </template>
-      <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
+      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+      <TableShell :data="pagedRows" size="small" @selection-change="onSelChange" storage-key="screener-cb">
         <el-table-column type="selection" width="40" />
         <!-- 批16：列宽套档；+正股代码/正股现价（后端已返回未显示） -->
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('screener.bondName')" min-width="120" show-overflow-tooltip />
         <el-table-column prop="stk_code" :label="t('cols.underlyingCode')" min-width="110" />
-        <el-table-column prop="stk_name" :label="t('screener.stkName')" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="bond_close" :label="t('trading.price')" min-width="80" class-name="num" />
-        <el-table-column prop="stk_close" :label="t('cols.underlyingPrice')" min-width="90" class-name="num">
+        <el-table-column v-if="colOn('stk_name')" prop="stk_name" :label="t('screener.stkName')" min-width="120" show-overflow-tooltip />
+        <el-table-column v-if="colOn('bond_close')" prop="bond_close" :label="t('trading.price')" min-width="80" class-name="num" />
+        <el-table-column v-if="colOn('stk_close')" prop="stk_close" :label="t('cols.underlyingPrice')" min-width="90" class-name="num">
           <template #default="{ row }">{{ row.stk_close != null ? row.stk_close.toFixed(2) : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.doubleLow')" min-width="90" class-name="num" sortable>
+        <el-table-column v-if="colOn('double_low')" :label="t('screener.doubleLow')" min-width="90" class-name="num" sortable>
           <template #default="{ row }">{{ row.double_low?.toFixed(1) || '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.premium')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('premium')" :label="t('screener.premium')" min-width="80" class-name="num">
           <template #default="{ row }">
             <span v-if="row.premium_pct != null" :class="row.premium_pct >= 0 ? 'up' : 'down'">{{ row.premium_pct.toFixed(1) }}%</span>
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="conv_price" :label="t('screener.convPrice')" min-width="80" class-name="num" />
-        <el-table-column prop="maturity_date" :label="t('screener.maturity')" min-width="110">
+        <el-table-column v-if="colOn('conv_price')" prop="conv_price" :label="t('screener.convPrice')" min-width="80" class-name="num" />
+        <el-table-column v-if="colOn('maturity_date')" prop="maturity_date" :label="t('screener.maturity')" min-width="110">
           <template #default="{ row }">{{ (row.maturity_date || '').slice(0, 10) }}</template>
         </el-table-column>
-      </el-table>
+      </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
         layout="prev, pager, next" style="margin-top: 12px; justify-content: flex-end" />
     </el-card>
@@ -61,6 +64,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 
 const { t } = useI18n()
 const rows = ref([])
@@ -71,6 +76,19 @@ const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
 const f = ref({ double_low_max: 0, premium_max: 0, remaining_min: 0 })
+
+// 批17 17B：列显示配置——代码/转债名称列恒显不进 defs；转股价=低频参考列默认隐
+const cbColDefs = computed(() => [
+  { key: 'stk_name', label: t('screener.stkName') },
+  { key: 'bond_close', label: t('trading.price') },
+  { key: 'stk_close', label: t('cols.underlyingPrice') },
+  { key: 'double_low', label: t('screener.doubleLow') },
+  { key: 'premium', label: t('screener.premium') },
+  { key: 'conv_price', label: t('screener.convPrice'), hidden: true },
+  { key: 'maturity_date', label: t('screener.maturity') },
+])
+const cbVisible = ref([])
+const colOn = k => cbVisible.value.includes(k)
 
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }

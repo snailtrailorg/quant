@@ -15,6 +15,8 @@
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('screener.results') }} ({{ rows.length }})</span>
           <div>
+            <!-- 批17 17B：列显示配置（代码/名称列恒显不进 defs） -->
+            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.screener-etf" :columns="etfColDefs" v-model:visible="etfVisible" /></span>
             <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: var(--sp-2)">
               <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
             </el-select>
@@ -24,24 +26,25 @@
           </div>
         </div>
       </template>
-      <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
+      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+      <TableShell :data="pagedRows" size="small" @selection-change="onSelChange" storage-key="screener-etf">
         <el-table-column type="selection" width="40" />
         <!-- 批16：列宽套档；+管理人/投资类型（后端已返回未显示） -->
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
-        <el-table-column prop="fund_type" :label="t('screener.fundType')" min-width="90" />
-        <el-table-column prop="invest_type" :label="t('cols.investType')" min-width="100" show-overflow-tooltip />
-        <el-table-column prop="management" :label="t('cols.manager')" min-width="140" show-overflow-tooltip />
-        <el-table-column :label="t('screener.fundScale')" min-width="110" class-name="num">
+        <el-table-column v-if="colOn('fund_type')" prop="fund_type" :label="t('screener.fundType')" min-width="90" />
+        <el-table-column v-if="colOn('invest_type')" prop="invest_type" :label="t('cols.investType')" min-width="100" show-overflow-tooltip />
+        <el-table-column v-if="colOn('management')" prop="management" :label="t('cols.manager')" min-width="140" show-overflow-tooltip />
+        <el-table-column v-if="colOn('fund_scale')" :label="t('screener.fundScale')" min-width="110" class-name="num">
           <template #default="{ row }">{{ row.fund_scale != null ? fmtCn(row.fund_scale, 1) : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.mgmtFee')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('management_fee')" :label="t('screener.mgmtFee')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.management_fee != null ? row.management_fee.toFixed(2) + '%' : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.trackingErr')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('tracking_error')" :label="t('screener.trackingErr')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.tracking_error != null ? row.tracking_error.toFixed(2) : '—' }}</template>
         </el-table-column>
-      </el-table>
+      </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
         layout="prev, pager, next" style="margin-top: 12px; justify-content: flex-end" />
     </el-card>
@@ -54,6 +57,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import { fmtCn } from '../utils/format'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 
 const { t } = useI18n()
 const rows = ref([])
@@ -64,6 +69,18 @@ const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
 const f = ref({ scale_min: 0, fee_max: 0 })
+
+// 批17 17B：列显示配置——代码/名称列恒显不进 defs；投资类型/管理人=低频属性列默认隐
+const etfColDefs = computed(() => [
+  { key: 'fund_type', label: t('screener.fundType') },
+  { key: 'invest_type', label: t('cols.investType'), hidden: true },
+  { key: 'management', label: t('cols.manager'), hidden: true },
+  { key: 'fund_scale', label: t('screener.fundScale') },
+  { key: 'management_fee', label: t('screener.mgmtFee') },
+  { key: 'tracking_error', label: t('screener.trackingErr') },
+])
+const etfVisible = ref([])
+const colOn = k => etfVisible.value.includes(k)
 
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }

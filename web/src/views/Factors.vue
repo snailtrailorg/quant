@@ -6,7 +6,8 @@
         <el-button type="primary" @click="openCreate">{{ t('factors.create') }}</el-button>
       </div>
     </template>
-    <el-table :data="factors">
+    <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+    <TableShell :data="factors" storage-key="factors-main">
       <el-table-column prop="name" :label="t('common.name')" min-width="150" show-overflow-tooltip />
       <el-table-column :label="t('factors.category')" min-width="100">
         <template #default="{ row }"><el-tag>{{ row.category }}</el-tag></template>
@@ -43,18 +44,19 @@
           <el-button size="small" type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <!-- 被引用策略列表弹窗(P2-7) -->
     <el-dialog v-model="refsDlg" :title="t('factors.refsTitle', { name: refsFactor })" width="560px">
-      <el-table :data="refsList" size="small">
+      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+      <TableShell :data="refsList" size="small" storage-key="factors-refs">
         <el-table-column prop="name" :label="t('common.name')" />
         <el-table-column :label="t('factors.weightInStrategy')" width="80">
           <template #default="{ row }">
             {{ (row.factors || []).find(f => f.name === refsFactor)?.weight ?? '—' }}
           </template>
         </el-table-column>
-      </el-table>
+      </TableShell>
       <div v-if="!refsList.length" style="color: var(--text-secondary); text-align: center; padding: 20px">—</div>
     </el-dialog>
 
@@ -169,6 +171,7 @@ import { getFactorList, createFactor, updateFactor, deleteFactor, validateFactor
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 import DslEditor from '../components/DslEditor.vue'
+import TableShell from '../components/TableShell.vue'
 
 const { t } = useI18n()
 const factors = ref([])

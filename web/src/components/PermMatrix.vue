@@ -20,7 +20,7 @@
       </el-tab-pane>
       <el-tab-pane name="nav">
         <template #label><b>{{ t('perm.tabNav') }}</b></template>
-        <el-table :data="navItems" size="small" max-height="320">
+        <TableShell :data="navItems" size="small" max-height="320" storage-key="perm-matrix">
           <el-table-column prop="id" :label="t('common.name')" width="140" />
           <el-table-column prop="group" :label="t('perm.navGroup')" width="110" />
           <el-table-column :label="t('perm.navState')">
@@ -34,7 +34,7 @@
               </el-radio-group>
             </template>
           </el-table-column>
-        </el-table>
+        </TableShell>
       </el-tab-pane>
       <el-tab-pane name="market">
         <template #label><b>{{ t('perm.tabMarket') }}</b></template>
@@ -54,6 +54,7 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
+import TableShell from './TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'

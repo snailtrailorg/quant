@@ -30,16 +30,17 @@
         <div v-else style="height:400px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">{{ t('backtest.noDrawdown') }}</div>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.trades')" name="trades">
-        <el-table :data="trades" max-height="400">
+        <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+        <TableShell :data="trades" max-height="400" storage-key="backtest-view-trades">
           <el-table-column prop="ts" :label="t('trading.time')" min-width="180" />
           <el-table-column prop="action" :label="t('trading.direction')" min-width="80" />
           <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" />
           <el-table-column prop="price" :label="t('trading.price')" min-width="100" />
           <el-table-column prop="commission" :label="t('backtest.commission')" min-width="100" />
-        </el-table>
+        </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.positions')" name="positions">
-        <el-table :data="dailyValues" max-height="400">
+        <TableShell :data="dailyValues" max-height="400" storage-key="backtest-view-positions">
           <el-table-column prop="ts" :label="t('backtest.date')" min-width="120" :formatter="(r, c, v) => (v || '').slice(0, 10)" />
           <el-table-column prop="close" :label="t('backtest.closePrice')" min-width="100" />
           <el-table-column prop="position" :label="t('backtest.positionQty')" min-width="100" />
@@ -49,10 +50,10 @@
           </el-table-column>
           <el-table-column prop="cash" :label="t('backtest.cash')" min-width="120" />
           <el-table-column prop="value" :label="t('backtest.totalValue')" min-width="120" />
-        </el-table>
+        </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.logs')" name="logs">
-        <el-table :data="logs" max-height="400">
+        <TableShell :data="logs" max-height="400" storage-key="backtest-view-logs">
           <el-table-column prop="ts" :label="t('backtest.logTime')" min-width="170" />
           <el-table-column prop="level" :label="t('backtest.logLevel')" min-width="110">
             <template #default="{ row }">
@@ -60,7 +61,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="msg" :label="t('backtest.logMsg')" />
-        </el-table>
+        </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.rolling')" name="rolling">
         <div style="margin-bottom: 12px">
@@ -68,13 +69,13 @@
             <el-option v-for="mt in metricTypes" :key="mt.key" :value="mt.key" :label="mt.label" />
           </el-select>
         </div>
-        <el-table :data="rollingRows" max-height="400">
+        <TableShell :data="rollingRows" max-height="400" storage-key="backtest-view-rolling">
           <el-table-column prop="month" :label="t('backtest.date')" min-width="120" />
           <el-table-column prop="w1" :label="t('backtest.r1m')" />
           <el-table-column prop="w3" :label="t('backtest.r3m')" />
           <el-table-column prop="w6" :label="t('backtest.r6m')" />
           <el-table-column prop="w12" :label="t('backtest.r1y')" />
-        </el-table>
+        </TableShell>
       </el-tab-pane>
     </el-tabs>
   </el-card>
@@ -90,6 +91,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
+import TableShell from '../components/TableShell.vue'
 import api, { getBacktestRun } from '../api'
 import { cssVar } from '../utils/cssVar'
 

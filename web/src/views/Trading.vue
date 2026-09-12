@@ -4,7 +4,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('trading.title') }}</span>
-        <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+        <RefreshBtn @refresh="load" />
       </div>
     </template>
     <el-alert v-if="loadFailed" type="error" :closable="false" show-icon
@@ -21,7 +21,8 @@
     </div>
     <el-tabs>
       <el-tab-pane :label="t('trading.positions')">
-        <el-table :data="positionData.positions || []" size="small">
+        <!-- 批17 17A：列宽拖拽+持久化 -->
+        <TableShell :data="positionData.positions || []" size="small" storage-key="trading-positions">
           <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
             <template #default="{ row }">
               <el-link type="primary" @click="gotoDetail(row.symbol)">{{ (row.symbol||'').split('.')[0] }}</el-link>
@@ -59,7 +60,7 @@
               <el-button type="primary" size="small" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </TableShell>
         <!-- wd-20 §1.6：stale 黄条——停更防被读成空仓（N-S5 语义：停更≠空仓） -->
         <el-alert v-if="positionData.stale" type="warning" :closable="false" style="margin: var(--sp-2) 0">
           <template #title>
@@ -101,27 +102,31 @@
         <div style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('trading.manualHint') }}</div>
       </el-tab-pane>
       <el-tab-pane :label="t('trading.orders')">
-        <el-table :data="ordersData.orders || []" size="small">
-          <el-table-column prop="ts" :label="t('trading.time')" min-width="140" />
-          <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
-          <el-table-column prop="action" :label="t('trading.direction')" min-width="80">
+        <div style="display: flex; justify-content: flex-end; margin-bottom: var(--sp-2)">
+          <ColumnSettings storage-key="cols.trading-orders" :columns="orderColDefs" v-model:visible="orderVisible" />
+        </div>
+        <!-- 批17 17A：列宽拖拽+持久化；17B 列显隐（时间类低频列默认隐） -->
+        <TableShell :data="ordersData.orders || []" size="small" storage-key="trading-orders">
+          <el-table-column v-if="orderOn('ts')" prop="ts" :label="t('trading.time')" min-width="140" />
+          <el-table-column v-if="orderOn('symbol')" prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
+          <el-table-column v-if="orderOn('action')" prop="action" :label="t('trading.direction')" min-width="80">
             <template #default="{ row }">
               <!-- BUY=买入红(A股习惯)/SELL=卖出绿;中文化 05 §5.2 要点 3 -->
               <el-tag size="small" :type="row.action === 'BUY' ? 'danger' : 'success'">{{ row.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" class-name="num" />
-          <el-table-column prop="price" :label="t('trading.price')" min-width="90" class-name="num" />
-          <el-table-column prop="status" :label="t('common.status')" min-width="90" />
-          <el-table-column prop="client_order_id" :label="t('trading.orderRefCol')" min-width="130" class-name="num" show-overflow-tooltip />
+          <el-table-column v-if="orderOn('volume')" prop="volume" :label="t('trading.volume')" min-width="80" class-name="num" />
+          <el-table-column v-if="orderOn('price')" prop="price" :label="t('trading.price')" min-width="90" class-name="num" />
+          <el-table-column v-if="orderOn('status')" prop="status" :label="t('common.status')" min-width="90" />
+          <el-table-column v-if="orderOn('client_order_id')" prop="client_order_id" :label="t('trading.orderRefCol')" min-width="130" class-name="num" show-overflow-tooltip />
           <!-- 批16：+策略列（order_log.strategy_id 真实归属；持仓表不加——数据模型级缺失，盲审 B-P0） -->
-          <el-table-column prop="strategy_id" min-width="130" show-overflow-tooltip>
+          <el-table-column v-if="orderOn('strategy_id')" prop="strategy_id" min-width="130" show-overflow-tooltip>
             <template #header>
               <span :title="t('trading.strategyColTip')">{{ t('cols.strategy') }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="error" :label="t('backtest.reason')" show-overflow-tooltip />
-        </el-table>
+          <el-table-column v-if="orderOn('error')" prop="error" :label="t('backtest.reason')" show-overflow-tooltip />
+        </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('trading.pnl')">
         <div v-if="pnlData.curve?.length" style="height: 400px">
@@ -156,6 +161,21 @@ use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const positionData = ref({})
 const ordersData = ref({})
+
+// 批17 17B：委托表列显隐（方案圈定——时间类低频列默认隐；全列可配，无锁定列）
+const orderColDefs = computed(() => [
+  { key: 'ts', label: t('trading.time'), hidden: true },
+  { key: 'symbol', label: t('common.symbol') },
+  { key: 'action', label: t('trading.direction') },
+  { key: 'volume', label: t('trading.volume') },
+  { key: 'price', label: t('trading.price') },
+  { key: 'status', label: t('common.status') },
+  { key: 'client_order_id', label: t('trading.orderRefCol') },
+  { key: 'strategy_id', label: t('cols.strategy') },
+  { key: 'error', label: t('backtest.reason') },
+])
+const orderVisible = ref([])
+const orderOn = k => orderVisible.value.includes(k)
 const pnlData = ref({})
 const lastPrices = ref({})   // wd-20 §1.4.2：现价恢复（行情快照联动）
 const pnlChartOption = computed(() => ({
@@ -169,6 +189,9 @@ const formatNum = (n) => (n || 0).toFixed(0)
 import { fmtCn } from '../utils/format'
 import { stockDetail } from '../api'
 import KpiCard from '../components/KpiCard.vue'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 import { QuestionFilled } from '@element-plus/icons-vue'
 const loadFailed = ref(false)
 const lastUpdate = ref('—')

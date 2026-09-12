@@ -9,7 +9,7 @@
         <div style="display: flex; gap: 8px; align-items: center">
           <el-input v-model="q" :placeholder="t('symbol.phSearch')" style="width: 180px" clearable @keyup.enter="onSearch" />
           <el-button type="primary" @click="onSearch">{{ t('common.search') }}</el-button>
-          <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+          <RefreshBtn @refresh="load" />
           <el-button type="primary" @click="onSyncAll" :loading="allRunning">{{ t('symbol.syncAll') }}</el-button>
         </div>
       </div>
@@ -70,6 +70,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, ElButton, ElTag } from 'element-plus'
 import { estColWidth, sample } from '../utils/colwidth'
 import { useV2ColWidths } from '../utils/v2colwidth'
+import RefreshBtn from '../components/RefreshBtn.vue'
 import { apiErr } from '../api'
 import api from '../api'
 

@@ -1,9 +1,9 @@
 <template>
   <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('dataSources.title') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('dataSources.title') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.datasources" :columns="colDefs" v-model:visible="visible" /><el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></div></template>
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
-      <el-table :data="usage.today">
+      <TableShell :data="usage.today" storage-key="datasource-usage">
         <el-table-column prop="provider" label="Provider" min-width="120" />
         <el-table-column prop="calls" :label="t('common.calls')" min-width="100" />
         <el-table-column prop="records" :label="t('common.records')" min-width="100" />
@@ -11,19 +11,19 @@
           <template #default="{ row }"><el-tag :type="row.failures > 0 ? 'danger' : 'success'">{{ row.failures }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="110" />
-      </el-table>
+      </TableShell>
     </el-card>
-    <el-table :data="sources">
-      <el-table-column prop="provider" label="Provider" min-width="120" />
+    <TableShell :data="sources" storage-key="datasources">
+      <el-table-column v-if="colOn('provider')" prop="provider" label="Provider" min-width="120" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
       <el-table-column :label="t('common.credential')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="usage_limit" :label="t('common.dailyLimit')" min-width="80" />
+      <el-table-column v-if="colOn('usage_limit')" prop="usage_limit" :label="t('common.dailyLimit')" min-width="80" />
       <el-table-column :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160">
+      <el-table-column v-if="colOn('updated_at')" prop="updated_at" :label="t('common.updatedAt')" min-width="160">
         <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
       </el-table-column>
       <el-table-column :label="t('common.action')" width="250">
@@ -33,7 +33,7 @@
           <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
     <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('dataSources.editTitle') : t('dataSources.addTitle')" width="560px">
       <el-form :model="form" label-width="120px">
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('dataSources.phProvider')" /></el-form-item>
@@ -51,7 +51,7 @@
       <el-divider />
       <el-collapse>
         <el-collapse-item :title="t('dataSources.rateTableTitle')" name="rates">
-          <el-table :data="presets.apis" size="small" max-height="360">
+          <TableShell :data="presets.apis" size="small" max-height="360" storage-key="datasource-rates">
             <el-table-column prop="api" label="API" min-width="110" />
             <el-table-column :label="t('dataSources.overrideCol')" width="210">
               <template #default="{ row }">
@@ -72,7 +72,7 @@
                 <el-button size="small" :disabled="row.override == null" @click="clearOverride(row)">{{ t('dataSources.resetPreset') }}</el-button>
               </template>
             </el-table-column>
-          </el-table>
+          </TableShell>
         </el-collapse-item>
         <el-collapse-item :title="t('dataSources.cbTitle')" name="cb">
           <el-form inline label-width="160px">
@@ -95,12 +95,23 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { fmtTime } from '../utils/fmtTime'
 import {apiErr,  getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
 const sources = ref([])
+
+// 批17 列显示配置：更新时间默认隐；名称/凭证/启用/操作恒显不进 defs（限速覆写表为编辑面不接）
+const colDefs = computed(() => [
+  { key: 'provider', label: 'Provider' },
+  { key: 'usage_limit', label: t('common.dailyLimit') },
+  { key: 'updated_at', label: t('common.updatedAt'), hidden: true },
+])
+const visible = ref([])
+const colOn = k => visible.value.includes(k)
 const usage = ref({ today: [], trend: [] })
 const form = ref(emptyForm())
 const saving = ref(false)

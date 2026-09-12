@@ -29,33 +29,38 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('backtest.symbolResults') }}</span>
-          <el-button type="primary" @click="loadSummary" :loading="summaryLoading">{{ t('backtest.groupSummary') }}</el-button>
+          <span>
+            <!-- 批17 17B：列显示配置（代码/操作列恒显不进 defs）；夏普=低频指标列默认隐 -->
+            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.backtest-run-symbols" :columns="runColDefs" v-model:visible="runVisible" /></span>
+            <el-button type="primary" @click="loadSummary" :loading="summaryLoading">{{ t('backtest.groupSummary') }}</el-button>
+          </span>
         </div>
       </template>
       <el-alert v-if="summary" type="info" :closable="false" style="margin-bottom: 12px">
         {{ t('backtest.groupAvg', { ret: summary.avg?.total_return_pct, wr: summary.avg?.win_rate, sh: summary.avg?.sharpe_ratio, n: summary.count }) }}
       </el-alert>
-      <el-table :data="symbols" @row-click="goView">
+      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+      <TableShell :data="symbols" @row-click="goView" storage-key="backtest-run-symbols">
         <el-table-column prop="symbol" :label="t('common.symbol')" min-width="110" show-overflow-tooltip />
-        <el-table-column prop="status" :label="t('common.status')" min-width="100">
+        <el-table-column v-if="colOn('status')" prop="status" :label="t('common.status')" min-width="100">
           <template #default="{ row }">
             <StatusTag :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('backtest.returnCol')" min-width="110">
+        <el-table-column v-if="colOn('ret')" :label="t('backtest.returnCol')" min-width="110">
           <template #default="{ row }">{{ row.result?.total_return_pct }}%</template>
         </el-table-column>
         <!-- 批16：核心三列（波动率/胜率/最大回撤——后端 symbol 级已返回） -->
-        <el-table-column :label="t('cols.volatility')" min-width="90" class-name="num">
+        <el-table-column v-if="colOn('volatility')" :label="t('cols.volatility')" min-width="90" class-name="num">
           <template #default="{ row }">{{ row.result?.volatility ?? '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('cols.winRate')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('win_rate')" :label="t('cols.winRate')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.result?.win_rate != null ? row.result.win_rate + '%' : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('cols.maxDrawdown')" min-width="100" class-name="num">
+        <el-table-column v-if="colOn('max_drawdown')" :label="t('cols.maxDrawdown')" min-width="100" class-name="num">
           <template #default="{ row }">{{ row.result?.max_drawdown_pct != null ? row.result.max_drawdown_pct + '%' : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('backtest.sharpe')" min-width="90">
+        <el-table-column v-if="colOn('sharpe')" :label="t('backtest.sharpe')" min-width="90">
           <template #default="{ row }">{{ row.result?.sharpe_ratio }}</template>
         </el-table-column>
         <el-table-column :label="t('common.action')" min-width="150">
@@ -64,7 +69,7 @@
             <el-button size="small" @click.stop="metricsRow = row">{{ t('backtest.metricsBtn') }}</el-button>
           </template>
         </el-table-column>
-      </el-table>
+      </TableShell>
 
     <!-- 批16：指标弹窗（低频全量指标——后端已返回） -->
     <el-dialog v-model="metricsVisible" :title="`${metricsRow?.symbol ?? ''} · ${t('backtest.metricsBtn')}`" width="520px">
@@ -85,6 +90,8 @@
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -106,6 +113,18 @@ const metricsVisible = computed({
 })
 const summary = ref(null)
 const summaryLoading = ref(false)
+
+// 批17 17B：列显示配置——代码/操作列恒显不进 defs；夏普=低频指标列默认隐（样本天数无表内列，指标弹窗可见）
+const runColDefs = computed(() => [
+  { key: 'status', label: t('common.status') },
+  { key: 'ret', label: t('backtest.returnCol') },
+  { key: 'volatility', label: t('cols.volatility') },
+  { key: 'win_rate', label: t('cols.winRate') },
+  { key: 'max_drawdown', label: t('cols.maxDrawdown') },
+  { key: 'sharpe', label: t('backtest.sharpe'), hidden: true },
+])
+const runVisible = ref([])
+const colOn = k => runVisible.value.includes(k)
 
 const goView = (row) => router.push(`/backtest/${route.params.id}/view/${row.symbol}`)
 const loadSummary = async () => {

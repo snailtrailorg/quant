@@ -17,7 +17,8 @@
             <el-tag :type="quote?.source === 'hub' ? 'success' : 'warning'">
               {{ quote?.source === 'hub' ? t('stockDetail.srcHub') : (quote ? t('stockDetail.srcTencent') : t('stockDetail.noQuote')) }}
             </el-tag>
-            <el-button type="primary" @click="refreshAll">{{ t('common.refresh') }}</el-button>
+            <!-- 批17 17C：刷新图标化 -->
+            <RefreshBtn @refresh="refreshAll" />
           </div>
         </div>
       </template>
@@ -103,7 +104,8 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('stockDetail.events')" name="events">
-          <el-table :data="detail.events || []" max-height="420">
+          <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+          <TableShell :data="detail.events || []" max-height="420" storage-key="stock-events">
             <el-table-column prop="date" :label="t('stockDetail.date')" min-width="110" />
             <el-table-column :label="t('stockDetail.eventType')" min-width="120">
               <template #default="{ row }">
@@ -113,7 +115,7 @@
             <el-table-column :label="t('stockDetail.eventDetail')" min-width show-overflow-tooltip>
               <template #default="{ row }">{{ eventText(row) }}</template>
             </el-table-column>
-          </el-table>
+          </TableShell>
         </el-tab-pane>
 
         <el-tab-pane :label="t('stockDetail.finance')" name="finance">
@@ -164,6 +166,8 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import KlineDialog from '../components/KlineDialog.vue'
+import TableShell from '../components/TableShell.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 import { ElMessage } from 'element-plus'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'

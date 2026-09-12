@@ -13,7 +13,7 @@
             <el-option :label="t('task.statusTerminated')" value="terminated" />
           </el-select>
           <ColumnSettings storage-key="cols.tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
-          <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+          <RefreshBtn @refresh="load" />
           <el-button type="warning" @click="onDetectStuck" v-if="role==='admin'">{{ t('task.detectStuck') }}</el-button>
         </div>
       </div>
@@ -75,6 +75,7 @@
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 import TableShell from '../components/TableShell.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted } from 'vue'

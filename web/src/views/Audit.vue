@@ -13,7 +13,7 @@
         <el-button type="primary" @click="filterActor='';filterAction='';load()">{{ t('common.reset') }}</el-button>
       </el-form-item>
     </el-form>
-    <el-table :data="filteredLogs">
+    <TableShell :data="filteredLogs" storage-key="audit">
       <el-table-column prop="ts" :label="t('common.time')" min-width="160">
         <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
@@ -21,7 +21,7 @@
       <el-table-column prop="action" :label="t('common.action')" min-width="140" />
       <el-table-column prop="target" :label="t('audit.target')" min-width="140" />
       <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
-    </el-table>
+    </TableShell>
     <el-button size="small" type="primary" @click="exportCsv">{{ t('audit.exportCsv') }}</el-button>
 </el-card>
 </template>
@@ -29,6 +29,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import TableShell from '../components/TableShell.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { getAudit } from '../api'
 const { t } = useI18n()

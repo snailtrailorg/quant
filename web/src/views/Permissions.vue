@@ -29,7 +29,7 @@
       </template>
       <template v-else>
         <el-alert type="warning" :closable="false" style="margin-bottom: 12px">{{ t('perm.overrideNote') }}</el-alert>
-        <el-table :data="userOverrides(userSel)" size="small">
+        <TableShell :data="userOverrides(userSel)" size="small" storage-key="perm-overrides">
           <el-table-column prop="dimension" :label="t('perm.dim')" width="100" />
           <el-table-column prop="resource" :label="t('perm.resource')" show-overflow-tooltip />
           <el-table-column prop="effect" :label="t('perm.effect')" width="90">
@@ -42,7 +42,7 @@
               <el-button size="small" type="danger" @click="clearOverride(row)">{{ t('perm.clear') }}</el-button>
             </template>
           </el-table-column>
-        </el-table>
+        </TableShell>
         <div style="display: flex; gap: 8px; margin-top: 14px; align-items: center">
           <el-select v-model="newOv.dimension" style="width: 100px">
             <el-option v-for="d in ['api','nav','market_op']" :key="d" :value="d" :label="d" />
@@ -63,6 +63,7 @@
 </template>
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import TableShell from '../components/TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'

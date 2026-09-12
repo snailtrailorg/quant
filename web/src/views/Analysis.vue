@@ -3,10 +3,12 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('analysis.title') }}</span>
-        <el-button type="primary" @click="load" :loading="loading">{{ t('analysis.refresh') }}</el-button>
+        <!-- 批17 17C：刷新图标化（原 t('analysis.refresh') 文本钮） -->
+        <RefreshBtn @refresh="load" :loading="loading" />
       </div>
     </template>
-    <el-table :data="results">
+    <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
+    <TableShell :data="results" storage-key="analysis-results">
       <el-table-column prop="symbol" :label="t('analysis.stock')" min-width="120" />
       <el-table-column prop="score" :label="t('analysis.score')" min-width="100" sortable />
       <el-table-column :label="t('analysis.rating')" min-width="100">
@@ -25,7 +27,7 @@
           <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <el-dialog v-model="showPoolDialog" :close-on-click-modal="false" :title="t('analysis.addPoolTitle')" width="420px">
       <el-form label-width="80px">
@@ -50,6 +52,8 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getAstockSelection, getPools, createPoolApi } from '../api'
+import TableShell from '../components/TableShell.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 
 const { t } = useI18n()
 const router = useRouter()

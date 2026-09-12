@@ -5,7 +5,7 @@
         <span>{{ t('dataManage.title') }}</span>
         <div style="display: flex; gap: 8px; align-items: center">
           <ColumnSettings storage-key="cols.sync-config" :columns="syncColDefs" v-model:visible="syncVisible" />
-          <el-button type="primary" @click="load">{{ t('common.refresh') }}</el-button>
+          <RefreshBtn :loading="loading" @refresh="load" />
         </div>
       </div>
     </template>
@@ -77,24 +77,29 @@
 
     <el-divider />
     <el-card>
-      <template #header>{{ t('dataManage.syncLogs') }}</template>
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <span>{{ t('dataManage.syncLogs') }}</span>
+          <ColumnSettings storage-key="cols.sync-logs" :columns="logColDefs" v-model:visible="logVisible" />
+        </div>
+      </template>
       <TableShell :data="logs" max-height="300" storage-key="sync-logs">
-        <el-table-column prop="sync_id" :label="t('dataManage.task')" min-width="120" />
-        <el-table-column prop="ts" :label="t('common.time')" min-width="160">
+        <el-table-column v-if="logColOn('task')" prop="sync_id" :label="t('dataManage.task')" min-width="120" />
+        <el-table-column v-if="logColOn('ts')" prop="ts" :label="t('common.time')" min-width="160">
           <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
         </el-table-column>
-        <el-table-column prop="mode" :label="t('common.mode')" min-width="80" />
-        <el-table-column prop="rows_pulled" :label="t('dataManage.pulled')" min-width="80" />
-        <el-table-column prop="rows_saved" :label="t('dataManage.saved')" min-width="80" />
-        <el-table-column prop="duration_ms" :label="t('dataManage.duration')" min-width="100">
+        <el-table-column v-if="logColOn('mode')" prop="mode" :label="t('common.mode')" min-width="80" />
+        <el-table-column v-if="logColOn('pulled')" prop="rows_pulled" :label="t('dataManage.pulled')" min-width="80" />
+        <el-table-column v-if="logColOn('saved')" prop="rows_saved" :label="t('dataManage.saved')" min-width="80" />
+        <el-table-column v-if="logColOn('duration')" prop="duration_ms" :label="t('dataManage.duration')" min-width="100">
           <template #default="{ row }">{{ row.duration_ms }}ms</template>
         </el-table-column>
-        <el-table-column prop="status" :label="t('common.status')" min-width="100">
+        <el-table-column v-if="logColOn('status')" prop="status" :label="t('common.status')" min-width="100">
           <template #default="{ row }">
             <StatusTag :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('dataManage.tradeDay')" min-width="120">
+        <el-table-column v-if="logColOn('trade_day')" :label="t('dataManage.tradeDay')" min-width="120">
           <template #header>
             <!-- 裁定 v2：列头 tooltip 说明"92% 行 '-' 属正常"语义（盲审A-P2-7 词条早备未绑） -->
             <el-tooltip :content="t('dataManage.tradeDayGapTip')" placement="top">
@@ -106,7 +111,7 @@
             <span v-else style="color:var(--text-secondary)">-</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
+        <el-table-column v-if="logColOn('gap')" :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
           <template #header>
             <el-tooltip :content="t('dataManage.tradeDayGapTip')" placement="top">
               <span class="hdr-hint">{{ t('dataManage.gap') }}</span>
@@ -161,6 +166,7 @@
 import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import TableShell from '../components/TableShell.vue'
+import RefreshBtn from '../components/RefreshBtn.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -199,6 +205,21 @@ const syncColDefs = computed(() => [
 ])
 const syncVisible = ref([])
 const colOn = k => syncVisible.value.includes(k)
+
+// 批17 同步日志表列显示配置：交易日/缺口默认隐（92% 行 '-' 属正常，按需展开）
+const logColDefs = computed(() => [
+  { key: 'task', label: t('dataManage.task') },
+  { key: 'ts', label: t('common.time') },
+  { key: 'mode', label: t('common.mode') },
+  { key: 'pulled', label: t('dataManage.pulled') },
+  { key: 'saved', label: t('dataManage.saved') },
+  { key: 'duration', label: t('dataManage.duration') },
+  { key: 'status', label: t('common.status') },
+  { key: 'trade_day', label: t('dataManage.tradeDay'), hidden: true },
+  { key: 'gap', label: t('dataManage.gap'), hidden: true },
+])
+const logVisible = ref([])
+const logColOn = k => logVisible.value.includes(k)
 
 const PER_SYMBOL_IDS = ['astock_daily', 'etf_daily', 'cb_daily', 'astock_minute', 'astock_minute_5min']
 const isPerSymbol = id => PER_SYMBOL_IDS.includes(id)

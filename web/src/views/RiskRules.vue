@@ -1,7 +1,8 @@
 <template>
   <el-card>
     <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('riskRule.title') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
-    <el-table :data="rules">
+    <!-- 批17 17A：列宽拖拽+持久化 -->
+    <TableShell :data="rules" storage-key="risk-rules">
       <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" min-width="160" />
       <el-table-column prop="params" :label="t('riskRule.params')" min-width="200" show-overflow-tooltip />
@@ -17,7 +18,7 @@
           <el-button type="danger" @click="onDelete(row.id)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
     <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('riskRule.editRule') : t('riskRule.addRule')" width="560px">
       <el-form :model="form" label-width="120px">
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
@@ -43,6 +44,7 @@
 import { ref, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { fmtTime } from '../utils/fmtTime'
+import TableShell from '../components/TableShell.vue'
 import {apiErr,  getRiskRules, getRiskRuleTypes, createRiskRule, updateRiskRule, deleteRiskRule } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 

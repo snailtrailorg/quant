@@ -3,38 +3,42 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('liveTask.title') }}</span>
-        <el-button type="primary" @click="openCreate">{{ t('liveTask.create') }}</el-button>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <ColumnSettings storage-key="cols.live-tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
+          <el-button type="primary" @click="openCreate">{{ t('liveTask.create') }}</el-button>
+        </div>
       </div>
     </template>
-    <el-table :data="tasks">
-      <el-table-column prop="id" label="ID" width="60" />
+    <!-- 批17 17A：列宽拖拽+持久化 -->
+    <TableShell :data="tasks" storage-key="live-tasks">
+      <el-table-column v-if="colOn('id')" prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
+      <el-table-column v-if="colOn('strategy_id')" prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
+      <el-table-column v-if="colOn('symbol')" prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
       <!-- P1-5（06 B#5）：md_mode/行情 lag/bars 消费/frozen——活着吗/新鲜吗/冻没冻直答 -->
-      <el-table-column :label="t('liveTask.mdMode')" width="90">
+      <el-table-column v-if="colOn('md_mode')" :label="t('liveTask.mdMode')" width="90">
         <template #default="{ row }">
           <el-tag size="small" :type="row.md_mode === 'hub' ? 'primary' : 'info'">{{ row.md_mode }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('liveTask.lag')" width="90" class-name="num">
+      <el-table-column v-if="colOn('lag')" :label="t('liveTask.lag')" width="90" class-name="num">
         <template #default="{ row }">
           <span :style="{ color: (row.lag ?? 999) > 5 ? 'var(--warn)' : 'var(--success)' }">{{ row.lag != null ? row.lag.toFixed(1) + 's' : '—' }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="bars" :label="t('liveTask.bars')" width="90" class-name="num" />
-      <el-table-column :label="t('common.status')" width="110">
+      <el-table-column v-if="colOn('bars')" prop="bars" :label="t('liveTask.bars')" width="90" class-name="num" />
+      <el-table-column v-if="colOn('status')" :label="t('common.status')" width="110">
         <template #default="{ row }">
           <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.frozen ? '❄' : '' }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="initial_capital" :label="t('liveTask.capital')" min-width="120" />
+      <el-table-column v-if="colOn('account_id')" prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
+      <el-table-column v-if="colOn('initial_capital')" prop="initial_capital" :label="t('liveTask.capital')" min-width="120" />
       <!-- 批16：+创建时间/心跳年龄（后端已返回未显示） -->
-      <el-table-column :label="t('common.createdAt')" min-width="160">
+      <el-table-column v-if="colOn('created_at')" :label="t('common.createdAt')" min-width="160">
         <template #default="{ row }">{{ fmtTime.full(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column :label="t('cols.heartbeatAge')" min-width="100" class-name="num">
+      <el-table-column v-if="colOn('hb_age')" :label="t('cols.heartbeatAge')" min-width="100" class-name="num">
         <template #default="{ row }">{{ fmtAge(row.hb_age_s) }}</template>
       </el-table-column>
             <el-table-column type="expand">
@@ -70,7 +74,7 @@
           <el-button v-if="row.status !== 'running'" @click="openMore(row)" :disabled="navReadonly">{{ t('common.more') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <!-- 批16：「更多」弹窗（收删除——输入任务名启用按钮，站内最强确认；原 ElMessageBox.prompt 平移入内） -->
     <el-dialog v-model="moreVisible" :title="moreRow?.name" width="420px" :close-on-click-modal="false">
@@ -137,6 +141,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, apiErr } from '../api'
 import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
+import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { fmtTime } from '../utils/fmtTime'
 
 const router = useRouter()
@@ -168,6 +174,23 @@ const form = ref({
   name: '', strategy_id: '', symbol: '', params: {},
   account_id: '', initial_capital: 1000000,
 })
+
+// 批17 17B：列显隐（方案圈定——bars/md_mode/账户列低频默认隐；名称/操作/展开锁定不进 defs）
+const taskColDefs = computed(() => [
+  { key: 'id', label: 'ID' },
+  { key: 'strategy_id', label: t('liveTask.strategy') },
+  { key: 'symbol', label: t('common.symbol') },
+  { key: 'md_mode', label: t('liveTask.mdMode'), hidden: true },
+  { key: 'lag', label: t('liveTask.lag') },
+  { key: 'bars', label: t('liveTask.bars'), hidden: true },
+  { key: 'status', label: t('common.status') },
+  { key: 'account_id', label: t('common.account'), hidden: true },
+  { key: 'initial_capital', label: t('liveTask.capital'), hidden: true },
+  { key: 'created_at', label: t('common.createdAt') },
+  { key: 'hb_age', label: t('cols.heartbeatAge') },
+])
+const taskVisible = ref([])
+const colOn = k => taskVisible.value.includes(k)
 
 
 const load = async () => {
