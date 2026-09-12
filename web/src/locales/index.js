@@ -548,7 +548,7 @@ export default {
       todayOrders: '今日订单流', noOrders: '今日无订单', buy: '买', sell: '卖',
       dataHealth: '数据健康', complete: '完整', missing: '缺失', dataHealthNote: '日线完整性体检',
       recentBacktests: '最近回测', noBacktests: '暂无回测',
-      more: '更多',
+      more: '更多', updatedAt: '更新时间',
       backtestStrategy: '回测/策略',
       strategyStatus: '策略运行状态',
     },
@@ -598,6 +598,7 @@ export default {
       triggerType: '触发方式', triggeredBy: '触发人', startTime: '开始时间', endTime: '结束时间',
       apiUrl: '接口地址', contextWindow: '上下文窗口', monthlyCostLimit: '月成本限额',
       confirmedAt: '确认时间', sentAt: '发出时间',
+      nickname: '昵称', email: '邮箱',
     },
     cols: {
       peTtm: 'P/E (TTM)', underlyingCode: 'Underlying Symbol', underlyingPrice: 'Underlying Price',
@@ -609,6 +610,7 @@ export default {
       triggerType: 'Trigger Type', triggeredBy: 'Triggered By', startTime: 'Start Time', endTime: 'End Time',
       apiUrl: 'API URL', contextWindow: 'Context Window', monthlyCostLimit: 'Monthly Cost Limit',
       confirmedAt: 'Confirmed At', sentAt: 'Sent At',
+      nickname: 'Nickname', email: 'Email',
     },
     symbol: {
       listTitle: '{title} · 标的列表（{n} 只，虚拟滚动）',
@@ -1726,7 +1728,7 @@ export default {
       todayOrders: 'Today orders', noOrders: 'No orders today', buy: 'BUY', sell: 'SELL',
       dataHealth: 'Data health', complete: 'Complete', missing: 'Missing', dataHealthNote: 'Daily-bar integrity',
       recentBacktests: 'Recent backtests', noBacktests: 'No backtests',
-      more: 'More',
+      more: 'More', updatedAt: 'Updated At',
       backtestStrategy: 'Backtest/Strategy',
       strategyStatus: 'Strategy Status',
     },

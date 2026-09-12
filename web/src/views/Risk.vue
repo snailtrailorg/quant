@@ -110,18 +110,19 @@ const load = async () => { state.value = await getRiskState() }
 
 // P1-1 水位仪表（05 §5.3：75/90 变色=纯 UI 档,不暗示引擎约束）
 import api from '../api'
+import { estColWidth, sample } from '../utils/colwidth'
 import { cssVar } from '../utils/cssVar'
 const riskLogs = ref([])
 // v2 列（cellRenderer:i18n 文案入 JS——v2 无 #default slot,盲审 A-P2）
+// 批16：估宽走 colwidth（对渲染后文本采样——action 经中文映射、detail 实测 p90=58；
+// 末列 severity 固定，detail 用 flexGrow 吃剩余，数据到达 computed 自动重算）
+const _actZh = v => ({ reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') })[v] || v
 const riskLogCols = computed(() => [
-  { key: 'ts', dataKey: 'ts', title: t('common.time'), width: 160 },
-  { key: 'action', dataKey: 'action', title: t('risk.logAction'), width: 100, cellRenderer: ({ cellData }) => {
-      const map = { reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') }
-      return map[cellData] || cellData
-  } },
-  { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: 130 },
-  { key: 'detail', dataKey: 'detail', title: t('risk.logDetail'), width: 400, ellipsis: true },
-  { key: 'severity', dataKey: 'severity', title: t('risk.logSeverity'), width: 90 },
+  { key: 'ts', dataKey: 'ts', title: t('common.time'), width: estColWidth(t('common.time'), sample(riskLogs.value, 'ts')) },
+  { key: 'action', dataKey: 'action', title: t('risk.logAction'), width: estColWidth(t('risk.logAction'), sample(riskLogs.value, 'action').map(_actZh)), cellRenderer: ({ cellData }) => _actZh(cellData) },
+  { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: estColWidth('Symbol', sample(riskLogs.value, 'symbol')) },
+  { key: 'detail', dataKey: 'detail', title: t('risk.logDetail'), minWidth: 200, flexGrow: 1, ellipsis: true },
+  { key: 'severity', dataKey: 'severity', title: t('risk.logSeverity'), width: estColWidth(t('risk.logSeverity'), sample(riskLogs.value, 'severity')) },
 ])
 const logFilter = ref('')
 const loadLog = async () => {

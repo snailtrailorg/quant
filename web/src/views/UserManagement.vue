@@ -10,24 +10,31 @@
             <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
           </div>
           <el-table :data="users" style="margin-top: 12px">
-            <el-table-column prop="id" label="ID" width="60" />
+            <el-table-column prop="id" label="ID" min-width="60" />
             <el-table-column prop="username" :label="t('account.username')" min-width="120" show-overflow-tooltip />
-            <el-table-column prop="role" :label="t('user.role')" width="100">
+            <!-- 批16：+昵称/邮箱（后端已返回未显示） -->
+            <el-table-column prop="nickname" :label="t('cols.nickname')" min-width="120" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.nickname || '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="email" :label="t('cols.email')" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.email || '—' }}</template>
+            </el-table-column>
+            <el-table-column prop="role" :label="t('user.role')" min-width="100">
               <template #default="{ row }"><el-tag>{{ row.role }}</el-tag></template>
             </el-table-column>
-            <el-table-column :label="t('common.status')" width="100">
+            <el-table-column :label="t('common.status')" min-width="100">
               <template #default="{ row }">
                 <el-tag v-if="row.deactivated" type="info">{{ t('account.statusDeactivated') }}</el-tag>
                 <el-tag v-else :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="created_at" :label="t('common.createdAt')" width="110">
+            <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="110">
               <template #default="{ row }">{{ (row.created_at || '').slice(0, 10) || '-' }}</template>   <!-- 到日 -->
             </el-table-column>
-            <el-table-column prop="last_login_at" :label="t('account.lastLogin')" width="160">
+            <el-table-column prop="last_login_at" :label="t('account.lastLogin')" min-width="160">
               <template #default="{ row }">{{ row.last_login_at || '-' }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.action')" width="150" fixed="right">
+            <el-table-column :label="t('common.action')" min-width="150" fixed="right">
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
                   <el-button size="small" type="primary" @click="openEdit(row)"

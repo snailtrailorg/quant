@@ -77,6 +77,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getReconcile } from '../api'
 import api from '../api'
+import { estColWidth, sample } from '../utils/colwidth'
 
 const { t } = useI18n()
 // W5 残留修(W6 审 A-P2):localStorage role → /auth/me permissions(W4 权限驱动)
@@ -95,8 +96,8 @@ const openDetail = row => { detailRow.value = row; detailVisible.value = true }
 import { h } from 'vue'
 import { ElButton, ElTag } from 'element-plus'
 const issueCols = computed(() => [
-  { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: 110 },
-  { key: 'issue_type', dataKey: 'issue_type', title: t('reconcile.issueType'), width: 130,
+  { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: estColWidth('Symbol', sample(diffRows.value, 'symbol')) },
+  { key: 'issue_type', dataKey: 'issue_type', title: t('reconcile.issueType'), width: estColWidth(t('reconcile.issueType'), sample(diffRows.value, 'issue_type').map(issueTypeLabel)),
     cellRenderer: ({ cellData }) => issueTypeLabel(cellData) },
   { key: 'broker_qty', dataKey: 'broker_qty', title: t('reconcile.brokerQty'), width: 110, align: 'right' },
   { key: 'derived_qty', dataKey: 'derived_qty', title: t('reconcile.derivedQty'), width: 110, align: 'right' },
@@ -108,6 +109,7 @@ const issueCols = computed(() => [
         `${up ? '▲' : '▼'}${Math.abs(rowData.broker_qty - rowData.derived_qty)}`)
     } },
   { key: 'first_seen', dataKey: 'first_seen', title: t('reconcile.firstSeen'), width: 160 },
+  { key: 'updated_at', dataKey: 'updated_at', title: t('cols.actionTime'), width: 160 },
   { key: 'status', dataKey: 'status', title: t('common.status'), width: 100,
     cellRenderer: ({ cellData }) => h(ElTag, { size: 'small',
       type: ({ open: 'danger', verified: 'success', ignored: 'info', exempt: 'warning' })[cellData] || 'info' },

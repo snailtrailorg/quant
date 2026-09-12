@@ -5,7 +5,6 @@
     <template #header>
       <TabsShell :tabs="visibleTabs" default-tab="run" v-slot="slotProps">
         <RunConfig v-if="slotProps.tab === 'run'" />
-        <Account v-else-if="slotProps.tab === 'users'" />
         <Permissions v-else-if="slotProps.tab === 'perm'" />
         <AlertSettings v-else-if="slotProps.tab === 'alerts'" />
         <Profile v-else />
@@ -17,18 +16,16 @@
 import { computed } from 'vue'
 import TabsShell from '../components/TabsShell.vue'
 import RunConfig from '../components/RunConfig.vue'
-import Account from './Account.vue'
 import Permissions from './Permissions.vue'
 import AlertSettings from './AlertSettings.vue'
 import Profile from './Profile.vue'
 
 const isAdmin = localStorage.getItem('role') === 'admin'
-// perm/alerts=admin 门控（页面自验兜底在其内）；批11：users tab（现=API 密钥）admin-only
+// perm/alerts=admin 门控（页面自验兜底在其内）。批16：users tab（API 密钥）删除——能力在集成中心·交易账户（只读残留）
 // ——GET /api/account 需 account_keys 权限,非 admin 点开必 loadFailed（盲审 P2-10,原"账号与邀请"期即存在的错放）
 const visibleTabs = computed(() => isAdmin
   ? [
       { key: 'run', i18nKey: 'tabs.run' },
-      { key: 'users', i18nKey: 'tabs.users' },
       { key: 'perm', i18nKey: 'tabs.perm' },
       { key: 'alerts', i18nKey: 'tabs.alerts' },
       { key: 'profile', i18nKey: 'tabs.profile' },

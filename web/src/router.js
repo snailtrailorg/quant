@@ -46,7 +46,7 @@ const routes = [
       { path: 'reconcile', name: 'reconcile', component: () => import('./views/Reconcile.vue') },
 
       // 系统 (Admin)
-      { path: 'account', redirect: '/settings?tab=users' },
+      { path: 'account', redirect: '/integrations?tab=trading' },  // 批16：API 密钥能力在集成中心·交易账户
       { path: 'help', redirect: '/observe?tab=health' },
       { path: 'health', redirect: '/observe?tab=health' },
       { path: 'logs', redirect: '/observe?tab=logs' },
