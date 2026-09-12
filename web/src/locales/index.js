@@ -397,7 +397,7 @@ export default {
     backtest: {
       runningTag: '运行中', feeCustom: '自定义', feeUnit: '（佣金按万分之计）', todayTag: '今日', failedTag: '失败', unverified: '（未验证）', copySuffix: ' (副本)', feeHint: '万分之（默认 5=万5）',
       createLive: '以此创建实盘任务', sharpeCol: '夏普', dateRangeCol: '区间', tradeCount: '交易次数',
-      annualized: '年化收益', plRatio: '盈亏比',
+      annualized: '年化收益', plRatio: '盈亏比', metricsBtn: '指标', spanDays: '样本天数',
       sampleThreshold: '证据不足：区间 {d} 天 / 成交 {s} 笔，未达 90 天 / 10 笔最低证据门槛——跑长区间或多标的后再标记',
       feePanel: '费用与摩擦：佣金可配（默认万5）+ 印花税（卖出 0.05%）+ 过户费（0.001%）+ 滑点可配 + 涨跌停一字板不可成交约束',
       retCol: '收益', ddCol: '回撤', reason: '失败原因',
@@ -1585,7 +1585,7 @@ export default {
       pending: 'Pending',
       phAddSymbol: 'Type symbol (e.g. 600000.SHSE) and press Enter to add',
       createLive: 'Create live task', sharpeCol: 'Sharpe', dateRangeCol: 'Range', tradeCount: 'Trades',
-      annualized: 'Annualized', plRatio: 'P/L ratio',
+      annualized: 'Annualized', plRatio: 'P/L ratio', metricsBtn: 'Metrics', spanDays: 'Span Days',
       sampleThreshold: 'Insufficient evidence: {d} days / {s} trades, below the 90-day / 10-trade minimum evidence bar',
       feePanel: 'Fees & friction: configurable commission (default 0.05%) + stamp tax (sell 0.05%) + transfer fee (0.001%) + slippage + limit-lock no-fill constraint',
       retCol: 'Return', ddCol: 'Drawdown', reason: 'Failure',

@@ -37,13 +37,6 @@ export const dash = v => (v === null || v === undefined || v === '' || (typeof v
 /** 证券代码展示：'600000.SHSE' → '600000'（内部命名空间不裸露给用户，04 §3.3） */
 export const fmtCode = sym => dash(String(sym ?? '').split('.')[0])
 
-/** 时间戳统一显示（批16 v2 纪律：后端多返回 29 字符原始串 '2026-09-12T10:30:00.123456+08:00'，
- *  不截断会击穿档位 E 的 160px——全站新加时间列一律走此函数，取前 19 字符 'YYYY-MM-DD HH:mm:ss'） */
-export const fmtTime = v => {
-  if (v === null || v === undefined || v === '') return '—'
-  const s = String(v)
-  return s.length > 19 ? s.slice(0, 19).replace('T', ' ') : s.replace('T', ' ')
-}
 
 /** 枚举中文化映射表（01 G10：SELL/running/complete… 不裸英文上屏） */
 export const ENUM_ZH = {

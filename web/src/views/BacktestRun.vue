@@ -36,31 +36,56 @@
         {{ t('backtest.groupAvg', { ret: summary.avg?.total_return_pct, wr: summary.avg?.win_rate, sh: summary.avg?.sharpe_ratio, n: summary.count }) }}
       </el-alert>
       <el-table :data="symbols" @row-click="goView">
-        <el-table-column prop="symbol" :label="t('common.symbol')" show-overflow-tooltip />
-        <el-table-column prop="status" :label="t('common.status')">
+        <el-table-column prop="symbol" :label="t('common.symbol')" min-width="110" show-overflow-tooltip />
+        <el-table-column prop="status" :label="t('common.status')" min-width="100">
           <template #default="{ row }">
             <StatusTag :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column :label="t('backtest.returnCol')" min-width="120">
+        <el-table-column :label="t('backtest.returnCol')" min-width="110">
           <template #default="{ row }">{{ row.result?.total_return_pct }}%</template>
         </el-table-column>
-        <el-table-column :label="t('backtest.sharpe')" min-width="100">
+        <!-- 批16：核心三列（波动率/胜率/最大回撤——后端 symbol 级已返回） -->
+        <el-table-column :label="t('cols.volatility')" min-width="90" class-name="num">
+          <template #default="{ row }">{{ row.result?.volatility ?? '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('cols.winRate')" min-width="80" class-name="num">
+          <template #default="{ row }">{{ row.result?.win_rate != null ? row.result.win_rate + '%' : '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('cols.maxDrawdown')" min-width="100" class-name="num">
+          <template #default="{ row }">{{ row.result?.max_drawdown_pct != null ? row.result.max_drawdown_pct + '%' : '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('backtest.sharpe')" min-width="90">
           <template #default="{ row }">{{ row.result?.sharpe_ratio }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.action')" width="120">
+        <el-table-column :label="t('common.action')" min-width="150">
           <template #default="{ row }">
-            <el-button type="primary" @click.stop="goView(row)">{{ t('backtest.viewBtn') }}</el-button>
+            <el-button type="primary" size="small" @click.stop="goView(row)">{{ t('backtest.viewBtn') }}</el-button>
+            <el-button size="small" @click.stop="metricsRow = row">{{ t('backtest.metricsBtn') }}</el-button>
           </template>
         </el-table-column>
       </el-table>
+
+    <!-- 批16：指标弹窗（低频全量指标——后端已返回） -->
+    <el-dialog v-model="metricsVisible" :title="`${metricsRow?.symbol ?? ''} · ${t('backtest.metricsBtn')}`" width="520px">
+      <el-descriptions v-if="metricsRow" :column="2" border size="small">
+        <el-descriptions-item :label="t('backtest.sortino')">{{ metricsRow.result?.sortino_ratio ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.informationRatio')">{{ metricsRow.result?.information_ratio ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.alpha')">{{ metricsRow.result?.alpha ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.beta')">{{ metricsRow.result?.beta ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.benchmarkReturn')">{{ metricsRow.result?.benchmark_return ?? '—' }}%</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.benchmarkVolatility')">{{ metricsRow.result?.benchmark_volatility ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.spanDays')">{{ run.span_days ?? '—' }}</el-descriptions-item>
+        <el-descriptions-item :label="t('backtest.annualized')">{{ run.annualized_return ?? '—' }}%</el-descriptions-item>
+      </el-descriptions>
+    </el-dialog>
     </el-card>
   </el-card>
 </template>
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -73,6 +98,11 @@ const router = useRouter()
 const loading = ref(false)
 const run = ref({})
 const symbols = ref([])
+const metricsRow = ref(null)
+const metricsVisible = computed({
+  get: () => !!metricsRow.value,
+  set: v => { if (!v) metricsRow.value = null },
+})
 const summary = ref(null)
 const summaryLoading = ref(false)
 

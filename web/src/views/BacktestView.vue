@@ -31,30 +31,30 @@
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.trades')" name="trades">
         <el-table :data="trades" max-height="400">
-          <el-table-column prop="ts" :label="t('trading.time')" width="180" />
-          <el-table-column prop="action" :label="t('trading.direction')" width="80" />
-          <el-table-column prop="volume" :label="t('trading.volume')" width="80" />
-          <el-table-column prop="price" :label="t('trading.price')" width="100" />
-          <el-table-column prop="commission" :label="t('backtest.commission')" width="100" />
+          <el-table-column prop="ts" :label="t('trading.time')" min-width="180" />
+          <el-table-column prop="action" :label="t('trading.direction')" min-width="80" />
+          <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" />
+          <el-table-column prop="price" :label="t('trading.price')" min-width="100" />
+          <el-table-column prop="commission" :label="t('backtest.commission')" min-width="100" />
         </el-table>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.positions')" name="positions">
         <el-table :data="dailyValues" max-height="400">
-          <el-table-column prop="ts" :label="t('backtest.date')" width="120" :formatter="(r, c, v) => (v || '').slice(0, 10)" />
-          <el-table-column prop="close" :label="t('backtest.closePrice')" width="100" />
-          <el-table-column prop="position" :label="t('backtest.positionQty')" width="100" />
-          <el-table-column prop="avg_price" :label="t('backtest.avgPrice')" width="100" />
-          <el-table-column :label="t('backtest.marketValue')" width="120">
+          <el-table-column prop="ts" :label="t('backtest.date')" min-width="120" :formatter="(r, c, v) => (v || '').slice(0, 10)" />
+          <el-table-column prop="close" :label="t('backtest.closePrice')" min-width="100" />
+          <el-table-column prop="position" :label="t('backtest.positionQty')" min-width="100" />
+          <el-table-column prop="avg_price" :label="t('backtest.avgPrice')" min-width="100" />
+          <el-table-column :label="t('backtest.marketValue')" min-width="120">
             <template #default="{ row }">{{ (row.position * row.close).toFixed(2) }}</template>
           </el-table-column>
-          <el-table-column prop="cash" :label="t('backtest.cash')" width="120" />
-          <el-table-column prop="value" :label="t('backtest.totalValue')" width="120" />
+          <el-table-column prop="cash" :label="t('backtest.cash')" min-width="120" />
+          <el-table-column prop="value" :label="t('backtest.totalValue')" min-width="120" />
         </el-table>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.logs')" name="logs">
         <el-table :data="logs" max-height="400">
-          <el-table-column prop="ts" :label="t('backtest.logTime')" width="170" />
-          <el-table-column prop="level" :label="t('backtest.logLevel')" width="110">
+          <el-table-column prop="ts" :label="t('backtest.logTime')" min-width="170" />
+          <el-table-column prop="level" :label="t('backtest.logLevel')" min-width="110">
             <template #default="{ row }">
               <el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag>
             </template>
@@ -69,7 +69,7 @@
           </el-select>
         </div>
         <el-table :data="rollingRows" max-height="400">
-          <el-table-column prop="month" :label="t('backtest.date')" width="120" />
+          <el-table-column prop="month" :label="t('backtest.date')" min-width="120" />
           <el-table-column prop="w1" :label="t('backtest.r1m')" />
           <el-table-column prop="w3" :label="t('backtest.r3m')" />
           <el-table-column prop="w6" :label="t('backtest.r6m')" />

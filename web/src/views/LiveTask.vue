@@ -29,7 +29,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="initial_capital" :label="t('liveTask.capital')" width="120" />
+      <el-table-column prop="initial_capital" :label="t('liveTask.capital')" min-width="120" />
+      <!-- 批16：+创建时间/心跳年龄（后端已返回未显示） -->
+      <el-table-column :label="t('common.createdAt')" min-width="160">
+        <template #default="{ row }">{{ fmtTime.full(row.created_at) }}</template>
+      </el-table-column>
+      <el-table-column :label="t('cols.heartbeatAge')" min-width="100" class-name="num">
+        <template #default="{ row }">{{ row.hb_age_s != null ? Math.round(row.hb_age_s) + 's' : '—' }}</template>
+      </el-table-column>
             <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: var(--sp-2) 16px">
@@ -49,14 +56,16 @@
           </div>
         </template>
       </el-table-column>
-<el-table-column :label="t('common.action')" width="320">
+<el-table-column :label="t('common.action')" min-width="230">
         <template #default="{ row }">
-          <el-button type="primary" @click="toggleTimeline(row)">{{ t('common.detail') }}</el-button>
-          <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
+          <!-- 批16 v2：行内=启停（互斥同位）+解冻（frozen 态才现=火警级不进弹窗）+标的详情链接；
+               「详情」按钮本就是死的（toggleTimeline 无消费者，展开走 expand 箭头）——删；
+               删除收进「编辑」弹窗（盲审 A-P1-1/P1-5） -->
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
-          <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)" :disabled="navReadonly">{{ t('liveTask.unfreeze') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
-          <el-button v-if="row.status !== 'running'" type="danger" @click="onDelete(row)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
+          <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)" :disabled="navReadonly">{{ t('liveTask.unfreeze') }}</el-button>
+          <el-button @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
+          <el-button v-if="row.status !== 'running'" type="danger" plain @click="onDelete(row)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -241,15 +250,6 @@ const restartCount = row => Math.max((row._timeline || []).filter(l => (l.msg ||
 const lastExit = row => {
   const e = (row._timeline || []).find(l => (l.msg || '').includes('退出'))
   return e ? (e.msg.includes('退出码 0') ? '0' : e.msg.slice(0, 24)) : '—'
-}
-const toggleTimeline = async (row) => {
-  row._open = !row._open
-  if (row._open && row._timeline == null) {
-    try {
-      const r = await api.get('/log', { params: { task_id: `live:${row.id}` } })
-      row._timeline = (r?.logs || []).slice(0, 8)
-    } catch { row._timeline = [] }
-  }
 }
 
 // P1-5(05 §5.8):自愈时间线数据(NRestarts)+快照查看

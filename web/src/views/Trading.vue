@@ -28,22 +28,22 @@
             </template>
           </el-table-column>
           <!-- P2-11（05 §5.2/06 B#4）：API 已有字段全展示——direction/frozen/cost/pnl（现状只 2 列） -->
-          <el-table-column prop="direction" :label="t('trading.dirCol')" width="70">
+          <el-table-column prop="direction" :label="t('trading.dirCol')" min-width="80">
             <template #default="{ row }"><el-tag size="small" :type="row.direction === 'short' ? 'danger' : 'primary'">{{ row.direction === 'short' ? t('trading.shortTag') : t('trading.longTag') }}</el-tag></template>
           </el-table-column>
-          <el-table-column prop="volume" :label="t('trading.volume')" width="80" class-name="num" />
-          <el-table-column prop="frozen" :label="t('trading.frozenCol')" width="70" class-name="num" />
-          <el-table-column prop="cost_price" :label="t('trading.costCol')" width="90" class-name="num" />
-          <el-table-column :label="t('trading.lastPrice')" width="75" class-name="num">
+          <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" class-name="num" />
+          <el-table-column prop="frozen" :label="t('trading.frozenCol')" min-width="80" class-name="num" />
+          <el-table-column prop="cost_price" :label="t('trading.costCol')" min-width="90" class-name="num" />
+          <el-table-column :label="t('trading.lastPrice')" min-width="80" class-name="num">
             <template #default="{ row }">{{ lastPrices[row.symbol?.split('.')[0]] || '—' }}</template>
           </el-table-column>
-          <el-table-column :label="t('trading.pnlCol')" width="110" class-name="num">
+          <el-table-column :label="t('trading.pnlCol')" min-width="110" class-name="num">
             <template #default="{ row }">
               <span v-if="row.pnl != null" :class="row.pnl >= 0 ? 'up' : 'down'">{{ row.pnl >= 0 ? '▲' : '▼' }} {{ row.pnl.toFixed(0) }}</span>
               <span v-else>—</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('trading.pnlPct')" width="70" class-name="num">
+          <el-table-column :label="t('trading.pnlPct')" min-width="80" class-name="num">
             <template #default="{ row }">
               <span v-if="row.cost_price > 0 && row.pnl != null" :class="row.pnl >= 0 ? 'up' : 'down'">
                 {{ (row.pnl / (row.cost_price * row.volume) * 100).toFixed(1) }}%
@@ -51,10 +51,10 @@
               <span v-else>—</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('trading.mktValue')" width="90" class-name="num">
+          <el-table-column :label="t('trading.mktValue')" min-width="100" class-name="num">
             <template #default="{ row }">{{ row.cost_price && row.volume ? fmtCn(row.cost_price * row.volume, 1) : '—' }}</template>
           </el-table-column>
-          <el-table-column :label="t('common.action')" width="90">
+          <el-table-column :label="t('common.action')" min-width="90">
             <template #default="{ row }">
               <el-button type="primary" size="small" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
             </template>
@@ -102,18 +102,24 @@
       </el-tab-pane>
       <el-tab-pane :label="t('trading.orders')">
         <el-table :data="ordersData.orders || []" size="small">
-          <el-table-column prop="ts" :label="t('trading.time')" width="150" />
+          <el-table-column prop="ts" :label="t('trading.time')" min-width="140" />
           <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
-          <el-table-column prop="action" :label="t('trading.direction')" width="80">
+          <el-table-column prop="action" :label="t('trading.direction')" min-width="80">
             <template #default="{ row }">
               <!-- BUY=买入红(A股习惯)/SELL=卖出绿;中文化 05 §5.2 要点 3 -->
               <el-tag size="small" :type="row.action === 'BUY' ? 'danger' : 'success'">{{ row.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="volume" :label="t('trading.volume')" width="80" class-name="num" />
-          <el-table-column prop="price" :label="t('trading.price')" width="90" class-name="num" />
-          <el-table-column prop="status" :label="t('common.status')" width="90" />
-          <el-table-column prop="client_order_id" :label="t('trading.orderRefCol')" width="130" class-name="num" show-overflow-tooltip />
+          <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" class-name="num" />
+          <el-table-column prop="price" :label="t('trading.price')" min-width="90" class-name="num" />
+          <el-table-column prop="status" :label="t('common.status')" min-width="90" />
+          <el-table-column prop="client_order_id" :label="t('trading.orderRefCol')" min-width="130" class-name="num" show-overflow-tooltip />
+          <!-- 批16：+策略列（order_log.strategy_id 真实归属；持仓表不加——数据模型级缺失，盲审 B-P0） -->
+          <el-table-column prop="strategy_id" min-width="130" show-overflow-tooltip>
+            <template #header>
+              <span :title="t('trading.strategyColTip')">{{ t('cols.strategy') }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="error" :label="t('backtest.reason')" show-overflow-tooltip />
         </el-table>
       </el-tab-pane>
