@@ -5,11 +5,15 @@
       <TabsShell :tabs="tabs" default-tab="users" v-slot="slotProps">
         <!-- ═══ 页签一：用户列表（=原设置·账号+邀请，列精简/两操作/批量删） ═══ -->
         <div v-if="slotProps.tab === 'users'">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-            <h3 style="font-size: 16px; margin: 0">{{ t('account.userMgmt') }}</h3>
-            <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
-          </div>
-          <el-table :data="users" style="margin-top: 12px">
+          <!-- 批16 补齐：区块卡片层（其他多区块页均有 el-card 分节，本页原裸 div+h3——用户实测点名不一致） -->
+          <el-card shadow="never" style="margin-bottom: 12px">
+            <template #header>
+              <div style="display: flex; justify-content: space-between; align-items: center">
+                <span>{{ t('account.userMgmt') }}</span>
+                <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
+              </div>
+            </template>
+          <el-table :data="users">
             <el-table-column prop="id" label="ID" min-width="60" />
             <el-table-column prop="username" :label="t('account.username')" min-width="120" show-overflow-tooltip />
             <!-- 批16：+昵称/邮箱（后端已返回未显示） -->
@@ -44,6 +48,7 @@
               </template>
             </el-table-column>
           </el-table>
+          </el-card>
 
           <!-- 编辑弹窗（角色+启停，等价原行内三操作收编） -->
           <el-dialog v-model="editDlg" :title="t('um.editUser', { name: editForm.username })" width="400px">
@@ -65,13 +70,15 @@
           </el-dialog>
 
           <!-- 邀请记录：批量复选删除 -->
-          <div style="margin-top: 28px">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-              <h3 style="font-size: 16px; margin: 0">{{ t('account.inviteLog') }}</h3>
-              <el-button type="danger" plain :disabled="!inviteSel.length" @click="onBatchDelete">
-                {{ t('um.batchDelete') }}{{ inviteSel.length ? ` (${inviteSel.length})` : '' }}
-              </el-button>
-            </div>
+          <el-card shadow="never">
+            <template #header>
+              <div style="display: flex; justify-content: space-between; align-items: center">
+                <span>{{ t('account.inviteLog') }}</span>
+                <el-button type="danger" plain :disabled="!inviteSel.length" @click="onBatchDelete">
+                  {{ t('um.batchDelete') }}{{ inviteSel.length ? ` (${inviteSel.length})` : '' }}
+                </el-button>
+              </div>
+            </template>
             <el-table :data="invites" @selection-change="s => inviteSel = s">
               <el-table-column type="selection" width="44" />
               <el-table-column prop="email" :label="t('account.email')" min-width="200" show-overflow-tooltip />
@@ -89,7 +96,7 @@
                 </template>
               </el-table-column>
             </el-table>
-          </div>
+          </el-card>
 
           <!-- 邀请弹窗（原样搬设置页） -->
           <el-dialog v-model="inviteDlg" :close-on-click-modal="false" :title="t('account.invite')" width="420px">
@@ -107,11 +114,15 @@
 
         <!-- ═══ 页签二：用户群组（批11B：动态用户组——四内置锁名+自定义组增删改） ═══ -->
         <div v-else>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-            <h3 style="font-size: 16px; margin: 0">{{ t('um.tabGroups') }}</h3>
-            <el-button type="primary" @click="openGroupEdit(null)">{{ t('um.addGroup') }}</el-button>
-          </div>
-          <el-table :data="groups">
+          <!-- 批16 补齐：区块卡片层（同页签一） -->
+          <el-card shadow="never">
+            <template #header>
+              <div style="display: flex; justify-content: space-between; align-items: center">
+                <span>{{ t('um.tabGroups') }}</span>
+                <el-button type="primary" @click="openGroupEdit(null)">{{ t('um.addGroup') }}</el-button>
+              </div>
+            </template>
+            <el-table :data="groups">
             <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
             <el-table-column prop="description" :label="t('common.description')" min-width="240" show-overflow-tooltip />
             <el-table-column :label="t('um.groupType')" min-width="110">
@@ -130,6 +141,7 @@
               </template>
             </el-table-column>
           </el-table>
+          </el-card>
 
           <!-- 组编辑弹窗（添加/编辑共用，~820px 容纳三维矩阵；新组先创建后配权限） -->
           <el-dialog v-model="groupDlg" :title="groupForm.id ? t('um.editGroup', { name: groupForm.origName }) : t('um.addGroup')" width="820px" top="4vh">
