@@ -19,7 +19,8 @@
         </span>
       </div>
     </el-card>
-    <el-table :data="configs" v-loading="loading">
+    <!-- border=列宽拖拽试点（用户 2026-09-13 裁定：先同步配置表试，会话内有效不带记忆；真有手感再议推广） -->
+    <el-table :data="configs" v-loading="loading" border>
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
       <el-table-column v-if="colOn('data_type')" prop="data_type" :label="t('dataManage.category')" min-width="100">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
