@@ -64,7 +64,8 @@
           <el-switch v-model="row.enabled" @change="onToggle(row)" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="250">
+      <!-- 操作列 280=按钮实宽（同步 60+管理标的 88+编辑 60+间距 24+cell 内边距 24=256，留 loading 旋转余量）——4 字按钮超档位公式假设，估窄即换行 -->
+      <el-table-column :label="t('common.action')" width="280">
         <template #default="{ row }">
           <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'" :disabled="navReadonly">{{ t('dataManage.syncBtn') }}</el-button>
           <el-button type="primary" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>

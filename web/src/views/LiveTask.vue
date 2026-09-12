@@ -56,7 +56,7 @@
           </div>
         </template>
       </el-table-column>
-<el-table-column :label="t('common.action')" min-width="230">
+<el-table-column :label="t('common.action')" min-width="260">
         <template #default="{ row }">
           <!-- 批16 v2：行内=启停（互斥同位）+解冻（frozen 态才现=火警级不进弹窗）+标的详情链接；
                「详情」按钮本就是死的（toggleTimeline 无消费者，展开走 expand 箭头）——删；
