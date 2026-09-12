@@ -69,6 +69,7 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, ElButton, ElTag } from 'element-plus'
 import { estColWidth, sample } from '../utils/colwidth'
+import { useV2ColWidths } from '../utils/v2colwidth'
 import { apiErr } from '../api'
 import api from '../api'
 
@@ -89,7 +90,9 @@ let progressTimer = null
 
 // 虚拟滚动 columns（computed 响应语言切换；cellRenderer 用 h 函数）
 // 批16 M3 估宽（#22）：内容列对数据采样估宽，local 长文本 flexGrow 吃剩余
-const columns = computed(() => [
+// 批17 17A：withWidths 叠用户拖拽宽（表头手柄+localStorage 持久化）
+const { withWidths } = useV2ColWidths('symbol-manage')
+const columns = computed(() => withWidths([
   { key: 'ts_code', dataKey: 'ts_code', title: t('symbol.code'), width: estColWidth(t('symbol.code'), sample(items.value, 'ts_code')) },
   { key: 'name', dataKey: 'name', title: t('common.name'), width: estColWidth(t('common.name'), sample(items.value, 'name')) },
   { key: 'list_date', dataKey: 'list_date', title: t('symbol.listDate'), width: estColWidth(t('symbol.listDate'), sample(items.value, 'list_date')) },
@@ -107,7 +110,7 @@ const columns = computed(() => [
       h(ElButton, { type: 'danger', onClick: () => onDelete(row) }, () => t('common.delete')),
     ])
   },
-])
+]))
 
 const load = async () => {
   loading.value = true

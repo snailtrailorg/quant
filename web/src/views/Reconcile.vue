@@ -78,6 +78,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getReconcile } from '../api'
 import api from '../api'
 import { estColWidth, sample } from '../utils/colwidth'
+import { useV2ColWidths } from '../utils/v2colwidth'
 import { fmtTime } from '../utils/fmtTime'
 
 const { t } = useI18n()
@@ -96,7 +97,8 @@ const openDetail = row => { detailRow.value = row; detailVisible.value = true }
 // W6 v2 列：i18n 与组件渲染入 JS(cellRenderer)——操作列 h(ElButton) 保组件形态
 import { h } from 'vue'
 import { ElButton, ElTag } from 'element-plus'
-const issueCols = computed(() => [
+const { withWidths } = useV2ColWidths('reconcile-diff')   // 批17 17A：拖拽宽+持久化
+const issueCols = computed(() => withWidths([
   { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: estColWidth('Symbol', sample(diffRows.value, 'symbol')) },
   { key: 'issue_type', dataKey: 'issue_type', title: t('reconcile.issueType'), width: estColWidth(t('reconcile.issueType'), sample(diffRows.value, 'issue_type').map(issueTypeLabel)),
     cellRenderer: ({ cellData }) => issueTypeLabel(cellData) },
@@ -128,7 +130,7 @@ const issueCols = computed(() => [
       }
       return h('span', { style: 'color:var(--text-secondary);font-size:var(--fs-foot)' }, rowData.handled_by || '—')
     } },
-])
+]))
 const hasIssues = computed(() => diffRows.value.some(r => r.status === 'open'))
 const summary = computed(() => hasIssues.value
   ? t('reconcile.openCount', { n: diffRows.value.filter(r => r.status === 'open').length })

@@ -18,7 +18,7 @@
         </div>
       </div>
     </template>
-    <el-table :data="tasks">
+    <TableShell :data="tasks" storage-key="tasks">
       <el-table-column prop="id" :label="t('task.taskId')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" min-width="100" />
@@ -50,7 +50,7 @@
           </div>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <el-dialog v-model="detailVisible" :title="t('task.detailTitle')" width="720px">
       <div v-if="detail">
@@ -59,14 +59,14 @@
         <p v-if="detail.error_message" style="color: var(--critical)">{{ t('task.error') }}: {{ detail.error_message }}</p>
         <el-divider />
         <h4>{{ t('task.execLogs') }}</h4>
-        <el-table :data="detail.logs" max-height="300">
+        <TableShell :data="detail.logs" max-height="300" storage-key="task-logs">
           <el-table-column prop="level" :label="t('log.level')" min-width="80" />
           <el-table-column prop="message" :label="t('log.content')" show-overflow-tooltip />
           <el-table-column prop="step_name" :label="t('task.step')" min-width="120" />
           <el-table-column prop="created_at" :label="t('common.time')" min-width="160">
             <template #default="{ row }">{{ row.created_at ? fmtTime.full(row.created_at) : '' }}</template>
           </el-table-column>
-        </el-table>
+        </TableShell>
       </div>
     </el-dialog>
   </el-card>
@@ -75,6 +75,7 @@
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import TableShell from '../components/TableShell.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'

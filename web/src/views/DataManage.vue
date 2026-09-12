@@ -19,8 +19,8 @@
         </span>
       </div>
     </el-card>
-    <!-- border=列宽拖拽试点（用户 2026-09-13 裁定：先同步配置表试，会话内有效不带记忆；真有手感再议推广） -->
-    <el-table :data="configs" v-loading="loading" border>
+    <!-- 批17 TableShell：列宽拖拽+持久化（批16 试点 border 升级为全站机制的首两表） -->
+    <TableShell :data="configs" v-loading="loading" storage-key="sync-config">
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
       <el-table-column v-if="colOn('data_type')" prop="data_type" :label="t('dataManage.category')" min-width="100">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
@@ -73,12 +73,12 @@
           <el-button type="primary" @click="openCron(row)">{{ t('common.edit') }}</el-button>
         </template>
       </el-table-column>
-    </el-table>
+    </TableShell>
 
     <el-divider />
     <el-card>
       <template #header>{{ t('dataManage.syncLogs') }}</template>
-      <el-table :data="logs" max-height="300">
+      <TableShell :data="logs" max-height="300" storage-key="sync-logs">
         <el-table-column prop="sync_id" :label="t('dataManage.task')" min-width="120" />
         <el-table-column prop="ts" :label="t('common.time')" min-width="160">
           <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
@@ -117,9 +117,9 @@
             <span v-else style="color:var(--text-secondary)">-</span>
           </template>
         </el-table-column>
-      </el-table>
+      </TableShell>
     </el-card>
-  
+
     <!-- 编辑弹窗（批16 操作收编：调度+回补进弹窗，删除进 footer；吸收原 cron/回补双弹窗） -->
     <el-dialog v-model="cronDialog" :close-on-click-modal="false" :title="t('dataManage.editTitle')" width="560px">
       <el-form label-width="80px">
@@ -160,6 +160,7 @@
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import TableShell from '../components/TableShell.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'

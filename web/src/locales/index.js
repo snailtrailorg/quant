@@ -144,8 +144,6 @@ export default {
     um: {   // 批11：用户管理页（系统管理第一项）；批11B 增组管理
       tabUsers: '用户列表', tabGroups: '用户群组',
       editUser: '编辑用户 {name}',
-      batchDelete: '批量删除', batchDeleteConfirm: '确定删除选中的 {n} 条邀请记录？此操作不可恢复。',
-      batchDeleted: '已删除 {n} 条邀请记录',
       addGroup: '添加用户组', editGroup: '编辑用户组 {name}', groupNamePh: '组名（2-30 位小写字母开头）',
       groupType: '类型', userCount: '用户数', groupPerms: '组权限（api/nav/data 三维）',
       builtinLocked: '内置组：名称锁定不可删，可改描述与权限',
@@ -861,6 +859,7 @@ export default {
       roleChanged: '角色已改',
       roleChangeFailed: '改角色失败',
       confirmDeleteUser: '确认删除该用户？',
+      confirmDeleteInvite: '确定删除 {email} 的邀请记录？删除后该邮箱将无法再用这条邀请注册（已注册账号不受影响），此操作不可恢复。',
       cantDeleteSelf: '当前登录账户，不可修改或删除',
     },
     task: {
@@ -1317,8 +1316,6 @@ export default {
     um: {   // batch 11: user management page; batch 11B adds group management
       tabUsers: 'Users', tabGroups: 'User Groups',
       editUser: 'Edit User {name}',
-      batchDelete: 'Batch Delete', batchDeleteConfirm: 'Delete {n} selected invite records? This cannot be undone.',
-      batchDeleted: '{n} invite records deleted',
       addGroup: 'Add Group', editGroup: 'Edit Group {name}', groupNamePh: 'Name (2-30 chars, lowercase first)',
       groupType: 'Type', userCount: 'Users', groupPerms: 'Group Permissions (api/nav/data)',
       builtinLocked: 'Built-in group: name locked & undeletable; description and permissions editable',
@@ -2029,6 +2026,7 @@ export default {
       roleChanged: 'Role changed',
       roleChangeFailed: 'Role change failed',
       confirmDeleteUser: 'Confirm delete this user?',
+      confirmDeleteInvite: 'Delete the invitation for {email}? The invitation will be voided and {email} can no longer register with it. Accounts already registered are unaffected. This cannot be undone.',
       cantDeleteSelf: 'This is your current account — protected from changes',
     },
     task: {

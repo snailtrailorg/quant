@@ -13,7 +13,7 @@
                 <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
               </div>
             </template>
-          <el-table :data="users">
+          <TableShell :data="users" storage-key="users">
             <el-table-column prop="id" label="ID" min-width="60" />
             <el-table-column prop="username" :label="t('account.username')" min-width="120" show-overflow-tooltip />
             <!-- 批16：+昵称/邮箱（后端已返回未显示） -->
@@ -47,7 +47,7 @@
                 </div>
               </template>
             </el-table-column>
-          </el-table>
+          </TableShell>
           </el-card>
 
           <!-- 编辑弹窗（角色+启停，等价原行内三操作收编） -->
@@ -69,18 +69,14 @@
             </template>
           </el-dialog>
 
-          <!-- 邀请记录：批量复选删除 -->
+          <!-- 邀请记录（批17 17D 用户裁定：去批量选择，行级删除+撤销） -->
           <el-card shadow="never">
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('account.inviteLog') }}</span>
-                <el-button type="danger" plain :disabled="!inviteSel.length" @click="onBatchDelete">
-                  {{ t('um.batchDelete') }}{{ inviteSel.length ? ` (${inviteSel.length})` : '' }}
-                </el-button>
               </div>
             </template>
-            <el-table :data="invites" @selection-change="s => inviteSel = s">
-              <el-table-column type="selection" width="44" />
+            <TableShell :data="invites" storage-key="invites">
               <el-table-column prop="email" :label="t('account.email')" min-width="200" show-overflow-tooltip />
               <el-table-column :label="t('common.status')" min-width="100">
                 <template #default="{ row }">
@@ -90,12 +86,15 @@
               <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="160" />
               <el-table-column prop="expires_at" :label="t('account.inviteExpires')" min-width="160" />
               <!-- 操作列动态显示：仅存在待注册邀请时才有撤销可操作，否则整列不渲染（空壳列无意义） -->
-              <el-table-column v-if="invites.some(i => i.status === 'pending')" :label="t('common.action')" width="110">
+              <el-table-column v-if="invites.some(i => i.status === 'pending')" :label="t('common.action')" min-width="150">
                 <template #default="{ row }">
-                  <el-button v-if="row.status === 'pending'" size="small" type="warning" @click="onRevoke(row)">{{ t('account.inviteRevoke') }}</el-button>
+                  <div style="display: inline-flex; gap: 6px">
+                    <el-button v-if="row.status === 'pending'" size="small" type="warning" @click="onRevoke(row)">{{ t('account.inviteRevoke') }}</el-button>
+                    <el-button size="small" type="danger" plain @click="onDeleteInvite(row)">{{ t('common.delete') }}</el-button>
+                  </div>
                 </template>
               </el-table-column>
-            </el-table>
+            </TableShell>
           </el-card>
 
           <!-- 邀请弹窗（原样搬设置页） -->
@@ -122,7 +121,7 @@
                 <el-button type="primary" @click="openGroupEdit(null)">{{ t('um.addGroup') }}</el-button>
               </div>
             </template>
-            <el-table :data="groups">
+            <TableShell :data="groups" storage-key="groups">
             <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
             <el-table-column prop="description" :label="t('common.description')" min-width="240" show-overflow-tooltip />
             <el-table-column :label="t('um.groupType')" min-width="110">
@@ -140,7 +139,7 @@
                 </div>
               </template>
             </el-table-column>
-          </el-table>
+          </TableShell>
           </el-card>
 
           <!-- 组编辑弹窗（添加/编辑共用，~820px 容纳三维矩阵；新组先创建后配权限） -->
@@ -187,6 +186,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUsers, getMe, getInvites, inviteUser, revokeInvite, batchDeleteInvites, apiErr } from '../api'
 import api from '../api'
 import TabsShell from '../components/TabsShell.vue'
+import TableShell from '../components/TableShell.vue'
 import PermMatrix from '../components/PermMatrix.vue'
 
 const { t, locale } = useI18n()
@@ -197,7 +197,6 @@ const tabs = [
 
 const users = ref([])
 const invites = ref([])
-const inviteSel = ref([])          // 批量复选
 const currentUsername = ref('')
 const inviteEmail = ref('')
 const inviting = ref(false)
@@ -323,15 +322,15 @@ const onRevoke = async (row) => {
     ElMessage.error(apiErr(e, t('common.operationFailed')))
   }
 }
-const onBatchDelete = async () => {
-  const n = inviteSel.value.length
+// 批17 17D：行级删除（单发 batch-delete 端点——后端收 id 数组，单元素即行删）
+const onDeleteInvite = async (row) => {
   try {
-    await ElMessageBox.confirm(t('um.batchDeleteConfirm', { n }), { type: 'warning' })
-    const r = await batchDeleteInvites(inviteSel.value.map(i => i.id))
-    ElMessage.success(t('um.batchDeleted', { n: r.deleted ?? n }))
+    await ElMessageBox.confirm(t('account.confirmDeleteInvite', { email: row.email }), { type: 'warning' })
+    await batchDeleteInvites([row.id])
+    ElMessage.success(t('common.deleteSuccess'))
     await load()
   } catch (e) {
-    if (e === 'cancel') return
+    if (e === 'cancel' || e === 'close') return
     ElMessage.error(apiErr(e, t('common.deleteFailed')))
   }
 }

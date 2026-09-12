@@ -1,9 +1,10 @@
 <template>
   <!-- 批16 列显示配置（盲审 A-P0：数据中心两表 11 列 ≈1570px 溢出——用户可按需隐藏列；
-       新列默认隐，配置持久化 localStorage，键=storageKey） -->
+       新列默认隐，配置持久化 localStorage，键=storageKey）。
+       批17 17C：触发器图标化（Setting 圆钮+title——工具位统一图标形态，用户裁定） -->
   <el-popover :width="240" trigger="click">
     <template #reference>
-      <el-button size="small">{{ t('cols.settings') }}</el-button>
+      <el-button circle :title="t('cols.settings')"><el-icon><Setting /></el-icon></el-button>
     </template>
     <el-checkbox-group v-model="visible">
       <el-checkbox v-for="c in columns" :key="c.key" :value="c.key" class="col-opt">{{ c.label }}</el-checkbox>
@@ -16,6 +17,7 @@
 <script setup>
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Setting } from '@element-plus/icons-vue'
 
 const props = defineProps({
   storageKey: { type: String, required: true },
