@@ -44,8 +44,9 @@ onMounted(async () => { try { logs.value = await getAudit() } catch (e) { consol
 
 // P3-5(05 §5.10):审计导出 CSV(合规刚需)
 const exportCsv = () => {
-  const rows = (auditData.value || []).map(a => [a.ts, a.username, a.action, a.detail].map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))
-  const csv = '\ufeff' + ['时间,用户,动作,详情', ...rows].join('\n')
+  // 批16 bug1：auditData→filteredLogs（未定义变量必 ReferenceError）+ username→actor（后端字段名）+ 补 target
+  const rows = filteredLogs.value.map(a => [a.ts, a.actor, a.action, a.target, a.detail].map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))
+  const csv = '\ufeff' + ['时间,用户,动作,对象,详情', ...rows].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a'); a.href = url; a.download = `audit_${new Date().toISOString().slice(0,10)}.csv`; a.click()

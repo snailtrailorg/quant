@@ -17,7 +17,7 @@
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.maxDrawdown') }}</div><div class="value">{{ run.max_drawdown_pct ?? '-' }}%</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.tradeCount') }}</div><div class="value">{{ run.trade_count ?? '—' }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.annualized') }}</div><div class="value">{{ run.annualized_return != null ? (run.annualized_return).toFixed(1) + '%' : '—' }}</div></div></el-card></el-col>
-      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.plRatio') }}</div><div class="value">{{ run.profit_loss_ratio ?? '—' }}</div></div></el-card></el-col>
+      <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.benchmarkReturn') }}</div><div class="value">{{ run.benchmark_return ?? '—' }}%</div></div></el-card></el-col>
     </el-row>
 
     <!-- P2-5：费用与摩擦面板（引擎侧已参数化：佣金/印花税卖出0.05%/过户费/滑点/涨跌停约束） -->

@@ -27,21 +27,26 @@
       </template>
       <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
         <el-table-column type="selection" width="40" />
-        <el-table-column prop="ts_code" label="Code" width="90" />
-        <el-table-column prop="name" :label="t('screener.bondName')" min-width="80" show-overflow-tooltip />
-        <el-table-column prop="stk_name" :label="t('screener.stkName')" min-width="80" show-overflow-tooltip />
-        <el-table-column prop="bond_close" :label="t('trading.price')" width="65" class-name="num" />
-        <el-table-column :label="t('screener.doubleLow')" width="70" class-name="num" sortable>
+        <!-- 批16：列宽套档；+正股代码/正股现价（后端已返回未显示） -->
+        <el-table-column prop="ts_code" label="Code" min-width="110" />
+        <el-table-column prop="name" :label="t('screener.bondName')" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="stk_code" :label="t('cols.underlyingCode')" min-width="110" />
+        <el-table-column prop="stk_name" :label="t('screener.stkName')" min-width="120" show-overflow-tooltip />
+        <el-table-column prop="bond_close" :label="t('trading.price')" min-width="80" class-name="num" />
+        <el-table-column prop="stk_close" :label="t('cols.underlyingPrice')" min-width="90" class-name="num">
+          <template #default="{ row }">{{ row.stk_close != null ? row.stk_close.toFixed(2) : '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('screener.doubleLow')" min-width="90" class-name="num" sortable>
           <template #default="{ row }">{{ row.double_low?.toFixed(1) || '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.premium')" width="70" class-name="num">
+        <el-table-column :label="t('screener.premium')" min-width="80" class-name="num">
           <template #default="{ row }">
             <span v-if="row.premium_pct != null" :class="row.premium_pct >= 0 ? 'up' : 'down'">{{ row.premium_pct.toFixed(1) }}%</span>
             <span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="conv_price" :label="t('screener.convPrice')" width="65" class-name="num" />
-        <el-table-column prop="maturity_date" :label="t('screener.maturity')" width="85">
+        <el-table-column prop="conv_price" :label="t('screener.convPrice')" min-width="80" class-name="num" />
+        <el-table-column prop="maturity_date" :label="t('screener.maturity')" min-width="110">
           <template #default="{ row }">{{ (row.maturity_date || '').slice(0, 10) }}</template>
         </el-table-column>
       </el-table>

@@ -62,15 +62,28 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
 
 
 @router.post("/api/sync/pool-data/trigger")
-def trigger_pool_data_api(full: bool = False, payload: dict = Depends(require_perm("data_sync"))):
+def trigger_pool_data_api(full: bool = False, pool_id: int | None = None,
+                          payload: dict = Depends(require_perm("data_sync"))):
     """手动触发池内深度数据同步（beat 300s 也自动跑）。
 
     full=true 全量校准（无视游标窗口）——定期跑防上游改历史漏数据。
+    pool_id=单池定向回补（批16 bug4：前端曾传 pool_id 被忽略——语义错位为全池；
+    且 URL 打到不存在的 /sync/pool-data 裸路径=404。现端点收 pool_id 查该池标的
+    传 symbols 定向，celery 任务本就支持（scheduler/tasks.py:599））。
     """
     from src.scheduler.tasks import pool_data_sync_task
-    task = pool_data_sync_task.delay(full=full)
-    audit_log(payload["username"], "trigger_pool_data", "full" if full else "")
-    return {"status": "submitted", "task_id": task.id, "full": full}
+    symbols = None
+    if pool_id is not None:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT symbol FROM pool_symbols WHERE pool_id=%s", (pool_id,)).fetchall()
+        symbols = [r[0] for r in rows]
+        if not symbols:
+            raise ApiError(400, "POOL_EMPTY", f"池 {pool_id} 无标的，无可回补")
+    task = pool_data_sync_task.delay(full=full, symbols=symbols)
+    audit_log(payload["username"], "trigger_pool_data",
+              f"pool={pool_id}" if pool_id is not None else ("full" if full else ""))
+    return {"status": "submitted", "task_id": task.id, "full": full, "pool_id": pool_id}
 
 
 @router.get("/api/sync/pool-data/progress")
@@ -276,14 +289,19 @@ def get_sync_logs_api(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         # 列名对齐写入侧（engine._log）：start_date/end_date/rows_pulled/rows_saved——
         # 原查询写成 start/end（PG 保留字+列不存在）→ 端点自出生即 500，2026-08-18 生产验证顺带发现
+        # 批16 bug2：补 failed_dates/expected_days/actual_days——表里有列且前端渲染已写好，
+        # 纯 SELECT 漏列致「交易日/缺口」两列恒 '-'（盲审 B 实测 115/1446 行有值=日线类）
         cur = conn.execute(
             "SELECT id, sync_id, mode, start_date, end_date, rows_pulled, rows_saved, "
-            "duration_ms, status, ts FROM sync_log ORDER BY ts DESC LIMIT 100")
+            "duration_ms, status, ts, expected_days, actual_days, failed_dates "
+            "FROM sync_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
     return [{"id": r[0], "sync_id": r[1], "mode": r[2],
              "start": str(r[3]) if r[3] else None, "end": str(r[4]) if r[4] else None,
              "rows_pulled": r[5], "rows_saved": r[6], "duration_ms": r[7],
-             "status": r[8], "ts": str(r[9]) if r[9] else None} for r in rows]
+             "status": r[8], "ts": str(r[9]) if r[9] else None,
+             "expected_days": r[10], "actual_days": r[11],
+             "failed_dates": r[12] if r[12] else None} for r in rows]
 
 
 # --- 数据源用量监控（A4 #36）---

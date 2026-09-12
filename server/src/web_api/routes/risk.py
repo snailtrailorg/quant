@@ -244,9 +244,11 @@ def reconcile_api(payload: dict = Depends(require_perm("read"))):
 @router.get("/api/audit")
 def get_audit(payload: dict = Depends(require_perm("user_mgmt"))):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, ts, actor, action, detail FROM audit_log ORDER BY ts DESC LIMIT 100")
+        # 批16 bug1：补 target——表里有列（audit_log.target）端点漏查，前端 target 列恒空
+        cur = conn.execute("SELECT id, ts, actor, action, target, detail FROM audit_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
-    return [{"id": r[0], "ts": str(r[1]) if r[1] else None, "actor": r[2], "action": r[3], "detail": r[4]} for r in rows]
+    return [{"id": r[0], "ts": str(r[1]) if r[1] else None, "actor": r[2], "action": r[3],
+             "target": r[4], "detail": r[5]} for r in rows]
 
 
 @router.get("/api/data-integrity")

@@ -364,8 +364,18 @@ def get_backtest_api(run_id: int,
             span_days = (max(_ee) - min(_ss)).days + 1
         else:
             span_days = 0
+    # 批16 bug3：补 annualized_return（前端卡绑定此字段但引擎/聚合从无——恒 '—'）。
+    # 口径 ((1+r/100)^(365/span)-1)*100；span<30 天复利外推会爆炸，钳制为 None（不做年化）。
+    _annualized = None
+    if span_days and span_days >= 30 and _agg.get("total_return_pct") is not None:
+        try:
+            _r = float(_agg["total_return_pct"]) / 100.0
+            _annualized = round(((1 + _r) ** (365.0 / span_days) - 1) * 100, 1)
+        except Exception:
+            _annualized = None
     return {"id": r[0], "strategy_config_id": r[1],
             "span_days": span_days,
+            "annualized_return": _annualized,
             "symbols": [{"symbol": _s[0], "status": _s[1],
                          "result": json.loads(_s[2]) if _s[2] else {}} for _s in syms],
             "symbols_list": json.loads(r[2]),

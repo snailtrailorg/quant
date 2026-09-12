@@ -66,9 +66,9 @@ SOURCES = {
 # 内容宽 → px 换算：中文字符≈15px、ASCII≈8px（13px 字号近似）。粗略但方向对：
 # 建议宽 = max(表头估宽, p90 内容宽) + 24 padding；数字/枚举类列封顶不超 140。
 def est_px(p90: float, mx: float, header_cn: int = 4) -> int:
-    cn = int(p90 * 15) if p90 else 0
-    asc = int(p90 * 8)
-    content = max(cn if p90 and p90 <= 8 else asc, 0)   # 短值按中文估、长值按 ASCII 估（保守取窄）
+    # v2（盲审 B-P2-1）：逐字符估宽——按中英 6:4 混合比例折算（p90 只给长度不给构成，
+    # 站内自由文本中文为主，按 12px/字符折中；纯 ASCII 列（代码/id）会略宽=无害方向）
+    content = int(p90 * 12) if p90 else 0
     w = max(header_cn * 15 + 20, content + 24)
     return min(w, 360)
 

@@ -35,15 +35,19 @@
       </template>
       <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
         <el-table-column type="selection" width="40" />
-        <el-table-column prop="ts_code" label="Code" width="100" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="90" show-overflow-tooltip />
-        <el-table-column prop="close" :label="t('trading.price')" width="70" class-name="num" />
-        <el-table-column prop="pe" label="PE" width="60" class-name="num" />
-        <el-table-column prop="pb" label="PB" width="55" class-name="num" />
-        <el-table-column :label="t('screener.turnover')" width="60" class-name="num">
+        <!-- 批16：列宽套档（min-width 权重，评估文档档位制）；+滚动市盈率（后端已返回） -->
+        <el-table-column prop="ts_code" label="Code" min-width="110" />
+        <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="close" :label="t('trading.price')" min-width="80" class-name="num" />
+        <el-table-column prop="pe" label="PE" min-width="70" class-name="num" />
+        <el-table-column prop="pe_ttm" :label="t('cols.peTtm')" min-width="90" class-name="num">
+          <template #default="{ row }">{{ row.pe_ttm != null ? row.pe_ttm.toFixed(1) : '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="pb" label="PB" min-width="70" class-name="num" />
+        <el-table-column :label="t('screener.turnover')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.turnover?.toFixed(1) || '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.marketCap')" width="90" class-name="num">
+        <el-table-column :label="t('screener.marketCap')" min-width="110" class-name="num">
           <template #default="{ row }">{{ fmtCn(row.total_mv * 10000, 1) }}</template>
         </el-table-column>
       </el-table>

@@ -26,16 +26,19 @@
       </template>
       <el-table :data="pagedRows" size="small" @selection-change="onSelChange">
         <el-table-column type="selection" width="40" />
-        <el-table-column prop="ts_code" label="Code" width="100" />
-        <el-table-column prop="name" :label="t('common.name')" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="fund_type" :label="t('screener.fundType')" width="80" />
-        <el-table-column :label="t('screener.fundScale')" width="90" class-name="num">
+        <!-- 批16：列宽套档；+管理人/投资类型（后端已返回未显示） -->
+        <el-table-column prop="ts_code" label="Code" min-width="110" />
+        <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="fund_type" :label="t('screener.fundType')" min-width="90" />
+        <el-table-column prop="invest_type" :label="t('cols.investType')" min-width="100" show-overflow-tooltip />
+        <el-table-column prop="management" :label="t('cols.manager')" min-width="140" show-overflow-tooltip />
+        <el-table-column :label="t('screener.fundScale')" min-width="110" class-name="num">
           <template #default="{ row }">{{ row.fund_scale != null ? fmtCn(row.fund_scale, 1) : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.mgmtFee')" width="70" class-name="num">
+        <el-table-column :label="t('screener.mgmtFee')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.management_fee != null ? row.management_fee.toFixed(2) + '%' : '—' }}</template>
         </el-table-column>
-        <el-table-column :label="t('screener.trackingErr')" width="70" class-name="num">
+        <el-table-column :label="t('screener.trackingErr')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.tracking_error != null ? row.tracking_error.toFixed(2) : '—' }}</template>
         </el-table-column>
       </el-table>
