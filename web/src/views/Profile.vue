@@ -1,8 +1,9 @@
 <template>
-  <el-card>
-    <template #header>
-      <!-- 批11D：个人中心三 tab（基本信息/IM 通道/修改密码） -->
-      <TabsShell :tabs="tabs" default-tab="basic" query-key="ptab" v-slot="sp">
+  <!-- 批16 五批：个人中心弹窗化（弹窗唯一入口——原独立路由页转 dialog 宿主；
+       v-if 挂载于 MainLayout，关闭即卸载（onUnmounted 清理链全保留）） -->
+  <el-dialog v-model="dlg" :title="t('profile.title')" width="720px" :before-close="onOuterClose">
+    <!-- 批11D：个人中心三 tab（基本信息/IM 通道/修改密码）；批16 去路由化（routing=false 防与 ?profile= 深链互踩） -->
+    <TabsShell :tabs="tabs" :default-tab="initialTab || 'basic'" :routing="false" v-slot="sp">
         <div v-if="sp.tab === 'basic'">
     <!-- 头像（点击即更换） -->
     <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: var(--sp-6)">
@@ -85,8 +86,9 @@
     </el-table>
     <div v-else style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
 
-    <!-- 添加 IM 通道（批13 页签化：页签=注册表驱动，页签内容=方式动态生成——每平台单方式） -->
-    <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="520px" :before-close="guardClose">
+    <!-- 添加 IM 通道（批13 页签化：页签=注册表驱动，页签内容=方式动态生成——每平台单方式；
+         批16 嵌套弹窗 append-to-body） -->
+    <el-dialog v-model="imAddDlg" :title="t('myIm.add')" width="520px" append-to-body :before-close="guardClose">
       <el-tabs v-model="imForm.provider" @tab-change="onImProviderChange">
         <el-tab-pane v-for="p in imProviders.filter(x => (x.methods||[]).length)" :key="p.provider"
                      :name="p.provider" :label="te('imBots.provider.' + p.provider) ? t('imBots.provider.' + p.provider) : p.provider" />
@@ -146,8 +148,8 @@
 
         </div>
 
-    <!-- 选择头像弹窗：系统图标 or 上传 -->
-    <el-dialog v-model="chooserVisible" :title="t('profile.chooseAvatar')" width="560px">
+    <!-- 选择头像弹窗：系统图标 or 上传（批16：嵌套弹窗 append-to-body——外层 dialog overflow/z-index 圈禁坑） -->
+    <el-dialog v-model="chooserVisible" :title="t('profile.chooseAvatar')" width="560px" append-to-body>
       <el-tabs v-model="chooserTab">
         <!-- 系统图标（36 个，点击即选） -->
         <el-tab-pane :label="t('profile.systemIcons')" name="icons">
@@ -173,8 +175,7 @@
       </el-tabs>
     </el-dialog>
       </TabsShell>
-    </template>
-  </el-card>
+  </el-dialog>
 </template>
 
 <script setup>
@@ -188,6 +189,10 @@ import TabsShell from '../components/TabsShell.vue'
 import api, { apiErr, sse } from '../api'
 import { validatePassword } from '../password'
 
+const props = defineProps({
+  initialTab: { type: String, default: 'basic' },   // 深链定位（?profile=im → 'im'）
+})
+const emit = defineEmits(['close', 'updated'])   // updated：头像/昵称变更回传顶栏即时刷新
 const { t, te } = useI18n()
 const tabs = [
   { key: 'basic', i18nKey: 'profile.tabBasic' },
@@ -195,6 +200,16 @@ const tabs = [
   { key: 'pwd', i18nKey: 'profile.tabPwd' },
 ]
 const router = useRouter()
+const dlg = ref(true)   // 宿主即弹窗：挂载即开；关闭经 onOuterClose 挽留闸
+watch(dlg, v => { if (!v) emit('close') })
+// 外层关闭挽留（批16 三坑之三）：内层扫码在途→确认；manual 表单开着→无状态直接收
+const onOuterClose = (done) => {
+  if (imAddDlg.value && ['scanning', 'confirming', 'starting', 'pending'].includes(qrStatus.value)) {
+    ElMessageBox.confirm(t('myIm.closeGuard'), t('common.tip'), { type: 'warning' })
+      .then(() => { stopPoll(); imAddDlg.value = false; done() })
+      .catch(() => {})
+  } else { stopPoll(); imAddDlg.value = false; done() }
+}
 const me = ref({ username: '', nickname: '', role: '', avatar_url: '', email: '' })
 const chooserVisible = ref(false)
 const chooserTab = ref('icons')
@@ -447,6 +462,7 @@ const pickIcon = async (icon) => {
   try {
     const r = await api.post('/user/avatar', { icon })
     me.value.avatar_url = r.avatar_url
+    emit('updated', { nickname: me.value.nickname, avatar_url: r.avatar_url })
     ElMessage.success(t('profile.avatarUpdated'))
     chooserVisible.value = false
   } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
@@ -468,6 +484,7 @@ const uploadAvatar = () => {
     try {
       const r = await api.post('/user/avatar', { avatar_base64: base64 })
       me.value.avatar_url = r.avatar_url
+      emit('updated', { nickname: me.value.nickname, avatar_url: r.avatar_url })
       ElMessage.success(t('profile.avatarUpdated'))
       chooserVisible.value = false
     } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
@@ -481,6 +498,7 @@ const saveNickname = async () => {
   savingNick.value = true
   try {
     await api.post('/user/profile', { nickname: me.value.nickname.trim() })
+    emit('updated', { nickname: me.value.nickname.trim(), avatar_url: me.value.avatar_url })
     ElMessage.success(t('common.saveSuccess'))
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { savingNick.value = false }

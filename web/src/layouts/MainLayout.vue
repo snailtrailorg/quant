@@ -146,6 +146,8 @@
       </el-aside>
       </el-container>
     </el-container>
+    <!-- 批16 五批：个人中心弹窗唯一入口（v-if 挂载——关闭即卸载，Profile 内清理链随 onUnmounted 走） -->
+    <Profile v-if="profileDlg" :initial-tab="profileTab" @close="onProfileClosed" @updated="onProfileUpdated" />
     <!-- 我的权限玻璃盒（10 §4：被授予/拒绝的依据用户随时可见） -->
   <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="480px">
     <div style="margin-bottom: var(--sp-2); color: var(--text-secondary)">{{ t('layout.myPermsNote') }}</div>
@@ -196,6 +198,7 @@ import { getMe, getNotifications, ackAllNotifications, meOnce, resetMeCache } fr
 import api, { getStrategies, getFactorList } from '../api'
 import { setLang, LANGUAGES } from '../i18n'
 import Avatar from '../components/Avatar.vue'
+import Profile from '../views/Profile.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -225,11 +228,26 @@ provide('navReadonly', navReadonly)
 const lang = ref(locale.value)
 
 getMe().then(me => { username.value = me.username; role.value = me.role; nickname.value = me.nickname || ''; avatarUrl.value = me.avatar_url || '' }).catch(e => { console.error(e); username.value = ''; role.value = '' })
-// 用户下拉命令（个人中心/退出）
+// 用户下拉命令（个人中心/退出）。批16 五批：profile 改弹窗（弹窗唯一入口，不再路由跳转）
 const onUserCommand = (cmd) => {
-  if (cmd === 'profile') router.push('/profile')
+  if (cmd === 'profile') { profileTab.value = 'basic'; profileDlg.value = true }
   else if (cmd === 'myperms') { loadMyPerms(); showMyPerms.value = true }
   else if (cmd === 'logout') logout()
+}
+
+// 个人中心弹窗：头像下拉直开 + 深链 /?profile=<tab>（redirect 链 /profile /im-bots /feishu 收口于此）
+const profileDlg = ref(false)
+const profileTab = ref('basic')
+watch(() => route.query.profile, v => {
+  if (v && ['basic', 'im', 'pwd'].includes(v)) { profileTab.value = v; profileDlg.value = true }
+}, { immediate: true })   // immediate：直链落地/刷新即开
+const onProfileClosed = () => {
+  profileDlg.value = false
+  if (route.query.profile) router.replace({ query: { ...route.query, profile: undefined } })   // 关后清参：刷新/后退不再重开
+}
+const onProfileUpdated = (u) => {
+  if (u?.nickname != null) nickname.value = u.nickname
+  if (u?.avatar_url != null) avatarUrl.value = u.avatar_url
 }
 
 // ——— 通知铃铛（60s 轮询；viewer 无可见类别不显示）———

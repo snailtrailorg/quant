@@ -122,7 +122,7 @@ export default {
       health: '健康', logs: '日志', audit: '审计',
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
-      run: '运行配置', users: 'API 密钥', perm: '权限管理', profile: '个人资料', alerts: '告警',
+      run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警',
     },
     myIm: {   // 批11C：个人中心·我的 IM 通道；批11D 增方式/扫码
       title: '我的 IM 通道', add: '添加通道', createBtn: '创建通道', provider: '平台', pending: '待绑定', method: '接入方式',
@@ -1305,7 +1305,7 @@ export default {
       health: 'Health', logs: 'Logs', audit: 'Audit',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
-      run: 'Run Config', users: 'API Keys', perm: 'Permissions', profile: 'Profile', alerts: 'Alerts',
+      run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alerts',
     },
     myIm: {   // batch 11C: profile · my IM channels; batch 11D adds methods/QR
       title: 'My IM Channels', add: 'Add Channel', createBtn: 'Create Channel', provider: 'Platform', pending: 'Pending', method: 'Method',

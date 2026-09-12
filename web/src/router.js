@@ -11,7 +11,8 @@ const routes = [
     children: [
       // 总览
       { path: '', name: 'dashboard', component: () => import('./views/Dashboard.vue') },
-      { path: 'profile', name: 'profile', component: () => import('./views/Profile.vue') },
+      // 批16 五批：个人中心弹窗唯一入口——独立路由页退役，redirect 链统一落 /?profile=<tab>（MainLayout 读 query 开弹窗定位）
+      { path: 'profile', redirect: { path: '/', query: { profile: 'basic' } } },
 
       // 交易
       { path: 'trading', name: 'trading', component: () => import('./views/Trading.vue') },
@@ -60,8 +61,8 @@ const routes = [
       { path: 'channels', redirect: '/integrations?tab=push' },
       { path: 'brokers', redirect: '/integrations?tab=brokers' },
       { path: 'risk-rules', name: 'risk-rules', component: () => import('./views/RiskRules.vue'), meta: { admin: true } },
-      { path: 'im-bots', redirect: '/profile' },   // 五轮：admin IM 面删除——旧路由指个人中心 IM 通道
-      { path: 'feishu', redirect: '/im-bots' },   // arch-19 批 2:旧路由重定向
+      { path: 'im-bots', redirect: { path: '/', query: { profile: 'im' } } },   // 批16：个人中心弹窗化——旧路由指弹窗 IM tab
+      { path: 'feishu', redirect: { path: '/', query: { profile: 'im' } } },   // arch-19 批 2:旧路由重定向（批16 收口弹窗）
       { path: 'system-config', redirect: '/settings?tab=run' },
     ],
   },
