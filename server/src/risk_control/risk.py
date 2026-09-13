@@ -25,7 +25,7 @@ class RiskDecision:
     reason: str
     severity: Level = "info"
     adjusted: dict | None = None  # B8 风控覆写（修正后的 order，如超仓位截断 volume；None=不覆写）
-    rule: str | None = None  # 批19：命中规则码（UPPER_SNAKE；放行=None）——risk_log.rule 溯源
+    rule: str | None = None  # 批19：命中规则码（UPPER_SNAKE；拒单/覆写带码、纯放行 None）——risk_log.rule 溯源
 
 
 @dataclass
@@ -222,7 +222,9 @@ class RiskControl:
         """
         d = self._check_order_inner(order, account)
         try:
-            action = "approve" if d.approved else ("adjust" if "截断" in (d.reason or "") else "reject")
+            # 批19 盲审A-P1 修：按 adjusted 语义判（原 "截断" in reason——场内"截断后 volume=0"
+            # 的拒单被记 adjust、真覆写(approved+adjusted)被记 approve，同码横跨三 action）
+            action = "adjust" if d.adjusted is not None else ("approve" if d.approved else "reject")
             with get_conn() as conn:
                 conn.execute(
                     "INSERT INTO risk_log (action, symbol, rule, detail, severity) "

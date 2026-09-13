@@ -48,12 +48,14 @@
 重拉+服务端过滤）下伪造无害，知情接受。**铁律：本频道永不承载免服务端校验的渲染数据或
 操作指令**——未来帧语义变富前必须先做服务端重验（uid 通道启用时同此约束）。
 
-## 18F 部署验证（盲审B-P1-4，八步法第 8 步）
+## 18F 部署验证（盲审B-P1-4；B-P2-4 修订为可执行路径）
 
-1. 造帧全链实证：`redis-cli PUBLISH quant:sse:all '{"type":"notification"}'` →
-   `spe curl -N` 带 token 打 `/api/events` 观察 data 帧 + 浏览器铃铛秒跳（桥→publish_all→
-   SSE 透传→前端 handler 四段全验）
-2. 生产者侧收尾：触发一条真实 notify（如告警测试端点）→ 铃铛实时刷新
+主验证（生产者→全链→前端）：**`POST /api/alerts/test`**（告警测试端点，已认证）触发真实
+notify → 浏览器（已登录态）铃铛**秒级**跳数（producer→PG insert→publish_cross_process→
+Valkey→桥→publish_all→SSE 透传→前端 handler→loadNotifs 七段全验）。60s 轮询兜底期间
+SSE 断连时的表现=最长 60s 延迟（预期非故障）。
+（原 redis-cli 造帧步骤不可执行——服务器无 redis-cli 且无 shell 通道；桥半段已由
+`test_run_loop_dispatches_pmessage_and_stops` 钉住。）
 
 ## 18D 测试
 
@@ -68,5 +70,6 @@
 - 不动扫码向导消费者；不动 SSE 端点契约（hello/心跳/max-age 原样）
 
 ## 修订记录
+- 代码双盲审（A：P1×1+P2×6；B：P1×2+P2×6）全吸收：**action 判定改 `d.adjusted is not None` 语义**（历史 bug——"截断" in reason 把场内截断拒单记 adjust、真覆写记 approve）/ensure_bridge stop 后重建/频道常量收口单源/去抖定时器卸载清理/地板值前置防 slice 截尾/notify 测试隔离 dispatch/桥 run() 循环+socket>POLL 隐式契约入测/规则码静态扫描钉子（拒单分支全打码+前端地板⊆后端码集）/注释漂移三处/18F 改可执行路径。**实现偏差**：桥循环用 get_message(timeout=5) 轮询（方案原文 listen——无消息流时 stop 永不被检查，轮询使 stop 必达）。
 - 2026-09-13 立项
 - 2026-09-13 v2：方案双盲审 A（P0×2+P1+P2×4）+B（P1×5+P2×7）合并 16 项全吸收——payload 只带 type（可见性）/redis 双 1s 超时+短连接（防挂死实盘告警路径）/on_event 装配（非 lifespan——既有钩子不杀）/桥落 quant_common 可测/毒消息隔离/去抖+卸载语义/去重不广播/抽屉@open 补拉/信任边界+部署验证两节

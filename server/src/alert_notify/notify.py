@@ -93,7 +93,7 @@ def notify(level: Level, category: Category, title: str, body: str = "",
     #     去重命中/insert 失败路径在上方短路——不广播，与铃铛数据一致。
     if notif_id is not None:
         try:
-            from src.quant_common.eventbus import bus   # 惰性导入（live-task 冷启动链不进 redis 依赖面）
+            from src.quant_common.eventbus import bus   # 惰性导入（eventbus 顶层已 import redis，此处惰性=防冷启动顺序耦合非减依赖）
             bus.publish_cross_process(0, "notification", {})
         except Exception as e:   # noqa: BLE001
             logger.warning("notification SSE 广播失败（60s 轮询兜底）: %s", e)

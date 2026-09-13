@@ -346,7 +346,11 @@ const goCategory = c => router.push(goCategoryPath(c))   // wd-20 §2.6：映射
 loadHealth()
 loadPerms()
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000); loadDynamicIndex() })
-onUnmounted(() => { if (notifTimer) clearInterval(notifTimer); offNotifSse?.() })
+onUnmounted(() => {
+  if (notifTimer) clearInterval(notifTimer)
+  if (notifDebounce) clearTimeout(notifDebounce)   // 盲审A/B-P2-3：卸载清 pending 去抖（防悬挂请求+401 整页跳）
+  offNotifSse?.()
+})
 
 // ——— 批18：通知 SSE 实时化（信号帧→400ms 去抖重拉；60s 轮询留作兜底纠偏） ———
 let notifDebounce = null

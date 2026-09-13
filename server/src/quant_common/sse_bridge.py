@@ -18,9 +18,13 @@ import threading
 
 import redis
 
+from .eventbus import SSE_CHANNEL_ALL, SSE_CHANNEL_USER
+
 logger = logging.getLogger("quant_common.sse_bridge")
 
 RECONNECT_S = 5
+POLL_S = 5.0          # get_message 轮询间隔（stop 必达上界）
+SOCKET_TIMEOUT_S = 6  # 隐式契约：必须 > POLL_S（否则空转进超时异常→重连风暴；测试钉住）
 
 
 class SseBridge:
@@ -32,12 +36,12 @@ class SseBridge:
     def handle_message(self, channel: str, payload: str) -> None:
         """频道后缀路由 + JSON 解析；任何异常吞掉（毒消息不断流）。"""
         try:
-            if channel == "quant:sse:all":
+            if channel == SSE_CHANNEL_ALL:
                 ev = json.loads(payload) if payload else {}
                 if isinstance(ev, dict) and ev.get("type"):
                     self.bus.publish_all(ev["type"], {k: v for k, v in ev.items() if k != "type"})
                 return
-            if channel.startswith("quant:sse:u:"):
+            if channel.startswith(SSE_CHANNEL_USER.format(uid="")):
                 uid = int(channel.rsplit(":", 1)[1])
                 ev = json.loads(payload) if payload else {}
                 if isinstance(ev, dict) and ev.get("type"):
@@ -51,15 +55,15 @@ class SseBridge:
             try:
                 r = redis.Redis.from_url(
                     os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
-                    socket_connect_timeout=2, socket_timeout=6,   # get_message(timeout=5) 内空转必须界时
+                    socket_connect_timeout=2, socket_timeout=SOCKET_TIMEOUT_S,
                     decode_responses=True)
                 pubsub = r.pubsub(ignore_subscribe_messages=True)
-                pubsub.psubscribe("quant:sse:*")
+                pubsub.psubscribe("quant:sse:*")   # 模式串（通配符语义，独立于单频道常量）
                 try:
                     while not self._stop.is_set():
                         # get_message 轮询而非 listen() 阻塞迭代——stop 每 5s 必达
                         #（listen 下无消息流时 stop 永不被检查，关停挂到连接断开为止）
-                        msg = pubsub.get_message(timeout=5.0)
+                        msg = pubsub.get_message(timeout=POLL_S)
                         if msg and msg.get("type") == "pmessage":
                             self.handle_message(msg.get("channel") or "", msg.get("data") or "")
                 finally:
@@ -85,9 +89,10 @@ _bridge: SseBridge | None = None
 
 
 def ensure_bridge() -> SseBridge:
-    """幂等启动（startup 每次调用只起一线程；uvicorn 单 worker 语义）。"""
+    """幂等启动（startup 每次调用只起一线程；盲审A-P2-2：已 stop 的实例（shutdown 后
+    同进程二次 startup——TestClient with 块/未来 lifespan 重构）重建而非返回死桥）。"""
     global _bridge
-    if _bridge is None:
+    if _bridge is None or _bridge._stop.is_set():
         from .eventbus import bus
         _bridge = SseBridge(bus)
         _bridge.start()

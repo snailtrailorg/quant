@@ -46,7 +46,8 @@ class TestPublishCrossProcess:
             bus.publish_cross_process(0, "notification", {})
         ch, payload = _FakeRedis.calls[0]
         assert ch == SSE_CHANNEL_ALL
-        assert '"notification"' in payload   # {"type": "notification"} —— 信号帧零内容（可见性矩阵）
+        import json as _json
+        assert _json.loads(payload) == {"type": "notification"}   # 信号帧零内容钉死（可见性矩阵）
 
     def test_user_channel_routing(self):
         bus = self._bus()
@@ -127,7 +128,8 @@ class TestNotifyBroadcasts:
         conn.execute.return_value.fetchone.return_value = [123]
         with patch.object(N, "_redis", return_value=rk), \
              patch("src.data_platform.db.get_conn", return_value=conn), \
-             patch("src.quant_common.eventbus.bus") as bus:
+             patch("src.quant_common.eventbus.bus") as bus, \
+             patch("src.alert_notify.dispatch.dispatch"):   # 盲审B-P1-2：隔离 dispatch 副作用（真 daemon 线程跨测试污染）
             N.notify("warn", "risk", "t", "b")
             bus.publish_cross_process.assert_called_once_with(0, "notification", {})
 
@@ -142,3 +144,63 @@ class TestNotifyBroadcasts:
             assert N.notify("warn", "risk", "t", "b") is None
             gc.execute.assert_not_called()
             bus.publish_cross_process.assert_not_called()
+
+
+class TestBridgeRunLoop:
+    """盲审B-P1-1：run() 循环本体覆盖——pmessage 过滤/stop 必达/隐式契约 socket>POLL。"""
+
+    def test_socket_timeout_must_exceed_poll(self):
+        from src.quant_common import sse_bridge as B
+        assert B.SOCKET_TIMEOUT_S > B.POLL_S   # 否则空转进超时异常→重连风暴
+
+    def test_run_loop_dispatches_pmessage_and_stops(self):
+        """伪 pubsub：一帧 pmessage + 一帧杂型（应被过滤）→ stop 必达退出且消息达 bus。"""
+        import threading
+        from src.quant_common.sse_bridge import SseBridge
+        from src.quant_common.eventbus import EventBus
+
+        bus = EventBus()
+        bridge = SseBridge(bus)
+        seen = []
+
+        class _FakePubSub:
+            def psubscribe(self, pattern): seen.append(("psub", pattern))
+            def get_message(self, timeout=None):
+                # 首帧真消息 → 第二帧非 pmessage（subscribe 确认类，应被过滤）→ 触发 stop 后 None
+                if not getattr(self, "_fed", False):
+                    self._fed = True
+                    return {"type": "pmessage", "channel": "quant:sse:all",
+                            "data": '{"type": "notification"}'}
+                if not bridge._stop.is_set():
+                    bridge._stop.set()   # 模拟关停到达
+                return None
+            def close(self): pass
+
+        class _FakeR:
+            def __init__(self, *a, **k): pass
+            def pubsub(self, **k): return _FakePubSub()
+
+        async def _drive():
+            q = bus.subscribe(1)
+            t = threading.Thread(target=bridge.run, daemon=True)
+            t.start()
+            item = await asyncio.wait_for(q.get(), timeout=3)
+            assert item["type"] == "notification"
+            t.join(timeout=3)
+            assert not t.is_alive()   # stop 必达——run() 自行退出
+        with patch("src.quant_common.sse_bridge.redis") as rmod:
+            rmod.Redis.from_url = _FakeR
+            _run(_drive())
+
+    def test_ensure_bridge_rebuilds_after_stop(self):
+        """盲审A-P2-2：shutdown→startup 同进程二次装配重建（死桥不复用）。"""
+        import src.quant_common.sse_bridge as B
+        b1 = type("B1", (), {"_stop": __import__("threading").Event()})()
+        b1._stop.set()
+        B._bridge = b1
+        with patch.object(B, "SseBridge") as Cls, patch.object(B.threading, "Thread"):
+            fake = Cls.return_value
+            fake._stop.is_set.return_value = False
+            out = B.ensure_bridge()
+        assert out is fake and Cls.called
+        B._bridge = None

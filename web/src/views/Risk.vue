@@ -126,7 +126,7 @@ const riskLogCols = computed(() => withWidths([
   { key: 'action', dataKey: 'action', title: t('risk.logAction'), width: estColWidth(t('risk.logAction'), sample(riskLogs.value, 'action').map(_actZh)), cellRenderer: ({ cellData }) => _actZh(cellData) },
   { key: 'rule', dataKey: 'rule', title: t('risk.logRule'),
     width: estColWidth(t('risk.logRule'),
-      [...sample(riskLogs.value, 'rule'), 'MAX_DRAWDOWN', 'SNAPSHOT_UNAVAILABLE'].filter(Boolean)),
+      ['MAX_DRAWDOWN', 'SNAPSHOT_UNAVAILABLE', ...sample(riskLogs.value, 'rule')].filter(Boolean)),   // 地板值前置——estColWidth slice(0,50) 截尾
     cellRenderer: ({ cellData }) => cellData || '—' },   // 批19：命中规则码溯源（放行=-；存量行 NULL 亦 -）
   { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: estColWidth('Symbol', sample(riskLogs.value, 'symbol')) },
   { key: 'detail', dataKey: 'detail', title: t('risk.logDetail'), minWidth: 200, flexGrow: 1, ellipsis: true },
