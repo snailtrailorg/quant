@@ -47,7 +47,11 @@
           <el-select v-model="newOv.dimension" style="width: 100px">
             <el-option v-for="d in ['api','nav','market_op']" :key="d" :value="d" :label="d" />
           </el-select>
-          <el-input v-model="newOv.resource" :placeholder="t('perm.resource')" style="width: 220px" />
+          <!-- 批15 挂账清理：market_op 键改五键下拉（原手填易错键名；标签对齐实盘开关命名） -->
+          <el-select v-if="newOv.dimension === 'market_op'" v-model="newOv.resource" :placeholder="t('perm.resource')" style="width: 220px">
+            <el-option v-for="mk in MARKET_KEYS" :key="mk.k" :value="mk.k" :label="mk.label" />
+          </el-select>
+          <el-input v-else v-model="newOv.resource" :placeholder="t('perm.resource')" style="width: 220px" />
           <el-radio-group v-model="newOv.effect">
             <el-radio-button value="allow">allow</el-radio-button>
             <el-radio-button value="deny">deny</el-radio-button>
@@ -62,7 +66,7 @@
   </el-card>
 </template>
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import TableShell from '../components/TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
@@ -76,6 +80,14 @@ const userSel = ref('')
 const groups = ref([])   // 批11B：动态（user_group 表）
 const users = ref([])
 const overrides = ref([])
+// 批15 挂账清理：market_op 五键下拉数据源（单源对齐后端 _MARKET_OP_KEYS；标签=实盘开关命名）
+const MARKET_KEYS = computed(() => [
+  { k: 'astock', label: t('risk.mAstock') },
+  { k: 'convertible', label: t('risk.mConvertible') },
+  { k: 'etf', label: t('risk.mEtf') },
+  { k: 'binance_perp', label: t('risk.mBinancePerp') },
+  { k: 'okx_perp', label: t('risk.mOkxPerp') },
+])
 
 const userOverrides = u => overrides.value.filter(o => o.username === u)
 

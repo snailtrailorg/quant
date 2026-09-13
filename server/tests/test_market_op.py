@@ -245,7 +245,8 @@ class TestMarketOpEndpoints:
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as ei:
             self._call_save("trader", {"crypto": "allow"})   # 批15：binance/okx 拆两键，crypto 不在键集
-        assert ei.value.status_code == 400 and ei.value.detail == "BAD_RESOURCE"
+        # 批17 挂账清理：HTTPException 三参（实发 500）→ ApiError 统一契约 {detail=中文, code=码}
+        assert ei.value.status_code == 400 and getattr(ei.value, "code", "") == "BAD_RESOURCE"
 
     def test_get_permissions_has_market_op_segment(self):
         """GET /api/permissions 响应含 market_op 段（keys 单源五键）且无 data 段。"""

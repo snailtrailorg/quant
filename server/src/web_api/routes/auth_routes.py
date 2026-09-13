@@ -209,12 +209,12 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
                         LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR, _MARKET_OP_KEYS)
     from src.data_platform.db import get_conn as _gc
     if dimension not in ("api", "nav", "market_op"):
-        raise HTTPException(400, "BAD_DIMENSION", "dimension ∈ api|nav|market_op")
+        raise ApiError(400, "BAD_DIMENSION", "dimension ∈ api|nav|market_op")
     if dimension == "api":
         keys = set(body.get("permissions", []) or [])
         if not keys:
             # 终审 A-P2-11：空集会让 load 回退字典=全撤权失效（空集歧义）
-            raise HTTPException(400, "EMPTY_PERMISSIONS", "权限集不可为空（至少保留 read）")
+            raise ApiError(400, "EMPTY_PERMISSIONS", "权限集不可为空（至少保留 read）")
         current = set(load_role_permissions().get(role, set()))
         # 盲审 A-P1c 修：admin 地板=锁键+system_config（原 &LOCKED 把 FLOOR 的
         # system_config 截成死代码——admin 重写可去 system_config=自锁防线失真）
@@ -245,13 +245,13 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
                  else set(_MARKET_OP_KEYS))   # 批15：market_op 单源五键（data 维退役）
     bad = set(res_map) - valid_res
     if bad:
-        raise HTTPException(400, "BAD_RESOURCE", f"未知资源: {sorted(bad)}")
+        raise ApiError(400, "BAD_RESOURCE", f"未知资源: {sorted(bad)}")
     if dimension == "nav":
         bad_eff = {v for v in res_map.values()} - {"hidden", "readonly", "readwrite"}
     else:
         bad_eff = {v for v in res_map.values()} - {"allow", "deny"}
     if bad_eff:
-        raise HTTPException(400, "BAD_EFFECT", f"非法 effect: {sorted(bad_eff)}")
+        raise ApiError(400, "BAD_EFFECT", f"非法 effect: {sorted(bad_eff)}")
     with _gc() as conn:
         _ensure_group(conn, role)   # 写事务内校验（同上）
         conn.execute("DELETE FROM permission WHERE subject_type='role' AND subject_id=%s "
@@ -283,18 +283,18 @@ def update_user_override(username: str, body: dict,
     resource = body.get("resource", "")
     effect = body.get("effect", "")
     if dimension not in ("api", "nav", "market_op"):
-        raise HTTPException(400, "BAD_DIMENSION")
+        raise ApiError(400, "BAD_DIMENSION", "dimension ∈ api|nav|market_op")
     if effect not in ("allow", "deny", "clear"):
-        raise HTTPException(400, "BAD_EFFECT")
+        raise ApiError(400, "BAD_EFFECT", "effect ∈ allow|deny|clear")
     if not resource:
-        raise HTTPException(400, "BAD_RESOURCE", "resource 必填")
+        raise ApiError(400, "BAD_RESOURCE", "resource 必填")
     if dimension == "market_op" and resource not in _MARKET_OP_KEYS:
         # ApiError（代码盲审 A/B 同判）：原生 HTTPException 第三位置参落 headers，
         # 触发时响应层 AttributeError→500 而非 400；项目错误码体系统一走 ApiError
         raise ApiError(400, "BAD_RESOURCE", f"未知市场键: {resource}")
     if dimension == "api":
         if resource in LOCKED_PERM_KEYS:
-            raise HTTPException(400, "PERMISSION_KEY_LOCKED",
+            raise ApiError(400, "PERMISSION_KEY_LOCKED",
                                 f"{resource} 为系统策略锁键（双路径同锁,不可 override）")
         # 自锁防线：目标用户是 admin 时,deny 其余管理键也拒（锁死后无 UI 恢复路径）
         try:
@@ -303,7 +303,7 @@ def update_user_override(username: str, body: dict,
                                      (username,)).fetchone()
             if trole and trole[0] == "admin" and effect == "deny" \
                     and resource in ("system_config", "user_mgmt"):
-                raise HTTPException(400, "SELF_LOCK_RISK",
+                raise ApiError(400, "SELF_LOCK_RISK",
                                     f"拒绝对 admin 用户 deny {resource}（自锁防线）")
         except HTTPException:
             raise
