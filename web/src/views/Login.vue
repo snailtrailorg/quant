@@ -1,5 +1,5 @@
 <template>
-  <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #667eea, #764ba2)">
+  <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: var(--grad-auth)">
     <el-card style="width: 400px">
       <h2 style="text-align: center; color: var(--brand-600)">{{ t('app.title') }}</h2>
       <el-form @submit.prevent="onLogin">

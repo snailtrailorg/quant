@@ -5,6 +5,7 @@ const routes = [
   { path: '/register', name: 'register', component: () => import('./views/Register.vue') },
   { path: '/forgot-password', name: 'forgot-password', component: () => import('./views/ForgotPassword.vue') },
   { path: '/reset-password', name: 'reset-password', component: () => import('./views/ResetPassword.vue') },
+  { path: '/email-confirm', name: 'email-confirm', component: () => import('./views/EmailConfirm.vue') },   // 批20：改邮箱确认（免登录）
   {
     path: '/',
     component: () => import('./layouts/MainLayout.vue'),
@@ -75,7 +76,7 @@ import { meOnce } from './api'   // W6 修:meOnce 落户 api.js(动态导入 chu
 
 router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('token')
-  const publicPages = ['login', 'register', 'forgot-password', 'reset-password']
+  const publicPages = ['login', 'register', 'forgot-password', 'reset-password', 'email-confirm']   // 批20：邮件链接免登录进入
   if (!publicPages.includes(to.name) && !token) { next('/login'); return }
   // nav 维:hidden 拒路由+readonly 放行(标志经 me 消费方读取)。nav=UI 提示层,
   // 执行面在 api 维(直连 API 不受 nav 限=设计)

@@ -40,6 +40,16 @@ class ForgotReq(BaseModel):
     email: str
     lang: str = "en"
 
+
+class EmailChangeReq(BaseModel):   # 批20：验证成功才改（无中间态）
+    new_email: str
+    current_password: str
+    lang: str = "en"
+
+
+class EmailConfirmReq(BaseModel):
+    token: str
+
 class ResetReq(BaseModel):
     token: str
     new_password: str

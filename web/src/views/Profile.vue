@@ -24,8 +24,34 @@
       <!-- 只读字段：纯文本展示（非编辑框） -->
       <div class="info-row"><span class="info-label">{{ t('account.username') }}</span><span>{{ me.username }}</span></div>
       <div class="info-row"><span class="info-label">{{ t('user.role') }}</span><el-tag>{{ me.role }}</el-tag></div>
-      <div class="info-row"><span class="info-label">{{ t('account.email') }}</span><span>{{ me.email || '-' }}</span></div>
+      <div class="info-row">
+        <span class="info-label">{{ t('account.email') }}</span>
+        <span style="display: inline-flex; gap: 8px; align-items: center">
+          {{ me.email || '-' }}
+          <el-button size="small" text type="primary" @click="openEmailChg">{{ t('emailChg.title') }}</el-button>
+        </span>
+      </div>
+      <!-- 批20 20A：三行展示（注册时间/最近登录+IP/账号状态） -->
+      <div class="info-row"><span class="info-label">{{ t('profile.registeredAt') }}</span><span>{{ me.created_at || '-' }}</span></div>
+      <div class="info-row"><span class="info-label">{{ t('profile.recentLogin') }}</span><span>{{ me.last_login_at ? `${me.last_login_at}${me.last_login_ip ? ' · ' + me.last_login_ip : ''}` : '-' }}</span></div>
+      <div class="info-row"><span class="info-label">{{ t('profile.accountStatus') }}</span><el-tag type="success" size="small">{{ t('status.ok') }}</el-tag></div>
     </el-form>
+
+    <!-- 批20 20C：改邮箱弹窗（验证成功才改——确认邮件发新邮箱，点链接才生效） -->
+    <el-dialog v-model="emailChgDlg" :title="t('emailChg.title')" width="420px" :close-on-click-modal="false">
+      <el-form label-width="130px" @submit.prevent>
+        <el-form-item :label="t('emailChg.newEmail')">
+          <el-input v-model="emailChgForm.new_email" type="email" />
+        </el-form-item>
+        <el-form-item :label="t('emailChg.password')">
+          <el-input v-model="emailChgForm.current_password" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="emailChgDlg = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="emailChgSaving" @click="submitEmailChg">{{ t('common.submit') }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 注销置底于基本信息（盲审 B-P2-4①） -->
     <el-divider />
@@ -57,7 +83,7 @@
 
         </div>
 
-        <div v-else>
+        <div v-else-if="sp.tab === 'im'">
     <el-divider />
 
     <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
@@ -148,6 +174,34 @@
 
         </div>
 
+        <div v-else>
+          <!-- 批20 20B：权限概览（market_op 五键 chips + 玻璃盒三组——数据 getMe 新鲜拉，方案 v2） -->
+          <h3 style="font-size: 16px; margin: 0 0 12px">{{ t('profile.marketOpTitle') }}</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-4)">
+            <el-tag v-for="(ok, mk) in me.market_op || {}" :key="mk"
+                    :type="ok ? 'success' : 'info'" effect="plain">
+              {{ t('perm.mk_' + mk) }} · {{ ok ? t('perm.allow') : t('perm.deny') }}
+            </el-tag>
+          </div>
+          <el-divider />
+          <h3 style="font-size: 16px; margin: 0 0 12px">{{ t('layout.myPerms') }}</h3>
+          <div v-if="permBox.base.length" style="margin-bottom: 10px">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeRole') }}</div>
+            <el-tag v-for="p in permBox.base" :key="p" style="margin: var(--sp-1)">{{ p }}</el-tag>
+          </div>
+          <div v-if="permBox.override.length" style="margin-bottom: 10px">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeUser') }}</div>
+            <el-tag v-for="p in permBox.override" :key="p" type="warning" style="margin: var(--sp-1)">{{ p }}</el-tag>
+          </div>
+          <div v-if="permBox.denied.length">
+            <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('layout.myPermsDenied') }}</div>
+            <el-tag v-for="p in permBox.denied" :key="p" type="danger" effect="plain" style="margin: var(--sp-1)">{{ p }}</el-tag>
+          </div>
+          <div v-if="!permBox.base.length && !permBox.override.length" style="color: var(--text-secondary); font-size: 13px">
+            {{ t('um.createFirst') }}
+          </div>
+        </div>
+
     <!-- 选择头像弹窗：系统图标 or 上传（批16：嵌套弹窗 append-to-body——外层 dialog overflow/z-index 圈禁坑） -->
     <el-dialog v-model="chooserVisible" :title="t('profile.chooseAvatar')" width="560px" append-to-body>
       <el-tabs v-model="chooserTab">
@@ -187,7 +241,7 @@ import { VueCropper } from 'vue-cropper'  // 样式在 main.js 全局引入（�
 import Avatar from '../components/Avatar.vue'
 import TabsShell from '../components/TabsShell.vue'
 import TableShell from '../components/TableShell.vue'
-import api, { apiErr, sse } from '../api'
+import api, { apiErr, sse, getMe } from '../api'
 import { validatePassword } from '../password'
 
 const props = defineProps({
@@ -199,6 +253,7 @@ const tabs = [
   { key: 'basic', i18nKey: 'profile.tabBasic' },
   { key: 'im', i18nKey: 'profile.tabIm' },
   { key: 'pwd', i18nKey: 'profile.tabPwd' },
+  { key: 'perms', i18nKey: 'profile.tabPerms' },   // 批20 20B：权限概览（独立 tab——basic 塞不下，方案 v2 盲审B-P2-2）
 ]
 const router = useRouter()
 const dlg = ref(true)   // 宿主即弹窗：挂载即开；关闭经 onOuterClose 挽留闸
@@ -211,7 +266,8 @@ const onOuterClose = (done) => {
       .catch(() => {})
   } else { stopPoll(); imAddDlg.value = false; done() }
 }
-const me = ref({ username: '', nickname: '', role: '', avatar_url: '', email: '' })
+const me = ref({ username: '', nickname: '', role: '', avatar_url: '', email: '',
+  created_at: null, last_login_at: null, last_login_ip: null, market_op: {} })
 const chooserVisible = ref(false)
 const chooserTab = ref('icons')
 const selectedIcon = ref('')
@@ -227,6 +283,37 @@ const load = async () => {
   try { me.value = { ...me.value, ...(await api.get('/user/profile')) } } catch {}
 }
 onMounted(load)
+
+// 批20 20C：改邮箱（验证成功才改——sent 后到新邮箱点链接）
+const emailChgDlg = ref(false)
+const emailChgSaving = ref(false)
+const emailChgForm = ref({ new_email: '', current_password: '' })
+const { locale } = useI18n()
+const openEmailChg = () => { emailChgForm.value = { new_email: '', current_password: '' }; emailChgDlg.value = true }
+const submitEmailChg = async () => {
+  emailChgSaving.value = true
+  try {
+    await api.post('/user/email-change', { ...emailChgForm.value, lang: locale.value })
+    emailChgDlg.value = false
+    ElMessage.success(t('emailChg.sent', { email: emailChgForm.value.new_email }))
+  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
+  finally { emailChgSaving.value = false }
+}
+
+// 批20 20B：权限玻璃盒（getMe 新鲜拉——meOnce 是登录时刻快照，admin 中途调组须反映，方案 v2 盲审B-P2-5）
+const permBox = ref({ base: [], override: [], denied: [] })
+onMounted(async () => {
+  try {
+    const me2 = await getMe()
+    const perms = me2.permissions || []
+    const src = me2.perm_sources || {}
+    permBox.value = {
+      base: perms.filter(p => (src[p] || 'role-base') === 'role-base'),
+      override: perms.filter(p => src[p] === 'user-override'),
+      denied: me2.denied || [],
+    }
+  } catch {}
+})
 
 // ——— 批11C：我的 IM 通道（自助面——owner=本人，绑定继承本人权限） ———
 const imBots = ref([])

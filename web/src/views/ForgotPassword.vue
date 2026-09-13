@@ -37,5 +37,5 @@ const onSubmit = async () => {
 </script>
 
 <style scoped>
-.auth-page { display: flex; justify-content: center; align-items: center; height: 100vh; background: linear-gradient(135deg, #667eea, #764ba2) }
+.auth-page { display: flex; justify-content: center; align-items: center; height: 100vh; background: var(--grad-auth) }
 </style>

@@ -35,6 +35,7 @@
   --text-primary: #1A2233;
   --text-secondary: #5A6478;
   --border-weak: #E4E8F0;
+  --grad-auth: linear-gradient(135deg, #667eea, #764ba2);   /* 批20：登录系页面背景渐变收令牌（原四页内联 hex）*/
 
   /* —— 金融语义四令牌四色相（04 §1.2：--up/--down 只用于价格与盈亏方向；
         --success/--critical 只用于操作反馈与系统状态，互不借用）—— */

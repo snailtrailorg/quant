@@ -11,9 +11,9 @@ from ..auth import (
     validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
 )
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, LogAnalyzeReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, LogAnalyzeReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq, EmailChangeReq, EmailConfirmReq)
 from src.data_platform.db import get_conn
-from src.email_service import send_invite_email, send_activation_email, send_password_reset_email
+from src.email_service import send_invite_email, send_activation_email, send_password_reset_email, send_email_change_email
 import logging
 import os
 from pathlib import Path as _Path
@@ -40,7 +40,7 @@ if not _avatar_ok:
 # P4 轻量限流（审计 B-服务层 OWASP API4）：内存滑窗（单进程足够——部署单 uvicorn worker），
 # login 10 次/分/IP（防爆破）、forgot 3 次/分/IP（防邮件轰炸）。重启清零可接受。
 _RATE_LIMITS: dict[str, dict[str, list[float]]] = {}
-_RATE_RULES = {"login": (10, 60), "forgot": (3, 60)}
+_RATE_RULES = {"login": (10, 60), "forgot": (3, 60), "emailchg": (3, 3600)}   # 批20：改邮箱发信（宽窗——发信有成本）
 
 # 批11：注册用户名保留字（防冒充系统身份；大小写不敏感）
 _RESERVED_USERNAMES = {"admin", "administrator", "root", "system", "support", "官方", "蜗牛量化"}
@@ -346,15 +346,107 @@ def _request_base(request: Request) -> str:
 
 @router.get("/api/user/profile")
 def profile_api(payload: dict = Depends(require_authenticated)):
-    """个人中心：当前用户资料（批次C）。"""
+    """个人中心：当前用户资料（批次C；批20 扩信息台+权限概览）。"""
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT username, nickname, role, avatar_url, email FROM users WHERE id=%s", (payload["sub"],))
+            "SELECT username, nickname, role, avatar_url, email, created_at, last_login_at, "
+            "last_login_ip, enabled, deleted_at FROM users WHERE id=%s", (payload["sub"],))
         r = cur.fetchone()
     if not r:
         raise ApiError(404, "USER_NOT_FOUND", "用户不存在")
-    return {"username": r[0], "nickname": r[1], "role": r[2], "avatar_url": r[3], "email": r[4]}
+    # 批20 20B：市场操作权限五键（批15 单源逐键；role 用 DB role——JWT 陈旧角色防漂移，盲审A-P2-6）
+    market_op = {}
+    try:
+        from src.data_platform.perms import market_op_allowed
+        role = payload.get("db_role") or payload.get("role") or r[2]
+        for mk in ("astock", "convertible", "etf", "binance_perp", "okx_perp"):
+            market_op[mk] = bool(market_op_allowed(r[0], role, mk))
+    except Exception:
+        pass   # 权限面故障不挡资料展示（chips 空=前端省略）
+    return {"username": r[0], "nickname": r[1], "role": r[2], "avatar_url": r[3], "email": r[4],
+            "created_at": str(r[5])[:10] if r[5] else None,
+            "last_login_at": str(r[6])[:19] if r[6] else None,
+            "last_login_ip": r[7],
+            "deactivated": r[9] is not None,      # 响应映射（真实列 deleted_at——盲审B-P1-3）
+            "market_op": market_op}
 
+
+
+# ——— 批20 20C：邮箱修改（验证成功才改——无 email_verified 列、无 pending 态，方案 v2 单事务四防线） ———
+
+import re as _re_email
+_EMAIL_RE = _re_email.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@router.post("/api/user/email-change")
+def email_change_api(req: EmailChangeReq, request: Request,
+                     background_tasks: BackgroundTasks,
+                     payload: dict = Depends(require_authenticated)):
+    """发起改邮箱：密码验证+占用校验 → 发确认邮件到新邮箱（1h token）。库零触碰直到 confirm。"""
+    if _rate_limited("emailchg", request.client.host if request.client else "?"):
+        raise ApiError(429, "RATE_LIMITED", "请求过于频繁，请稍后再试")
+    uid = int(payload["sub"])
+    new_email = req.new_email.strip().lower()          # 规范化全链（盲审A-P2-5：唯一约束区分大小写）
+    if not _EMAIL_RE.fullmatch(new_email):
+        raise ApiError(400, "EMAIL_INVALID", "邮箱格式不正确")
+    from ..auth import verify_password, create_token
+    with get_conn() as conn:
+        cur = conn.execute("SELECT email, password_hash FROM users WHERE id=%s "
+                           "AND deleted_at IS NULL AND enabled=true", (uid,))
+        row = cur.fetchone()
+        if not row:
+            raise ApiError(403, "ACCOUNT_UNAVAILABLE", "账号不可用")
+        if not row[1] or not verify_password(req.current_password, row[1]):
+            raise ApiError(400, "OLD_PASSWORD_WRONG", "当前密码错误")
+        if new_email == (row[0] or "").lower():
+            raise ApiError(400, "SAME_AS_CURRENT", "新邮箱与当前邮箱相同")
+        occ = conn.execute("SELECT 1 FROM users WHERE email=%s AND id<>%s AND deleted_at IS NULL",
+                           (new_email, uid)).fetchone()
+        if occ:
+            raise ApiError(409, "EMAIL_TAKEN", "该邮箱已被使用")
+    token = create_token(new_email, "email_change", user_id=uid, hours=1)
+    background_tasks.add_task(send_email_change_email, new_email, token, _request_base(request), req.lang)
+    return {"status": "sent"}
+
+
+@router.post("/api/user/email-change/confirm")
+def email_change_confirm_api(req: EmailConfirmReq):
+    """确认改邮箱（免登录——token 即凭证）。单事务四防线：占用复核/账号状态守卫/token 原子标记/
+    唯一约束竞态转 409。任何失败=库零触碰（验证不成功根本不改——用户裁定）。"""
+    from ..auth import verify_token
+    t = verify_token(req.token, "email_change")
+    if not t or not t.get("user_id"):
+        raise ApiError(400, "TOKEN_INVALID_OR_EXPIRED", "链接无效或已过期")
+    new_email = t["email"]
+    try:
+        with get_conn() as conn:
+            occ = conn.execute("SELECT 1 FROM users WHERE email=%s AND id<>%s AND deleted_at IS NULL",
+                               (new_email, t["user_id"])).fetchone()
+            if occ:
+                raise ApiError(409, "EMAIL_TAKEN", "该邮箱已被使用")
+            old = conn.execute("SELECT email FROM users WHERE id=%s", (t["user_id"],)).fetchone()
+            cur = conn.execute(
+                "UPDATE users SET email=%s WHERE id=%s AND deleted_at IS NULL AND enabled=true "
+                "RETURNING username", (new_email, t["user_id"]))
+            row = cur.fetchone()
+            if not row:
+                conn.rollback()
+                raise ApiError(410, "ACCOUNT_GONE", "账号已注销或停用，邮箱未修改")
+            marked = conn.execute("UPDATE user_tokens SET used=true WHERE id=%s AND used=false "
+                                  "RETURNING id", (t["id"],)).fetchone()
+            if not marked:
+                conn.rollback()   # 并发双 confirm：后到者见 used=true——幂等拒
+                raise ApiError(400, "TOKEN_INVALID_OR_EXPIRED", "链接已使用")
+            conn.commit()
+        audit_log(row[0], "email_change", f"{(old[0] if old else '') or '-'}->{new_email}")
+        return {"status": "changed", "email": new_email}
+    except ApiError:
+        raise
+    except Exception as e:
+        pgcode = getattr(getattr(e, "orig", None), "pgcode", "") or getattr(e, "pgcode", "")
+        if pgcode == "23505":
+            raise ApiError(409, "EMAIL_TAKEN", "该邮箱已被使用")
+        raise
 
 @router.post("/api/user/profile")
 def profile_update_api(body: dict = Body(...),

@@ -335,6 +335,26 @@ async def send_password_reset_email(email: str, token: str, request_base: str = 
     return True
 
 
+# 批20：改邮箱确认邮件（验证成功才改——文案经文案师；正文带 1 小时时效对齐找回密码格式）
+EMAIL_CHANGE_TPL = {
+    "zh": {"subject": "人工智能开发学习平台 · 修改邮箱",
+           "body": "您正在把平台账号的邮箱改为这个邮箱，点击下面的链接确认：\n{{url}}\n链接 1 小时内有效。\n如果不是您本人操作，请忽略此邮件。"},
+    "en": {"subject": "AI Development Learning · Email Change",
+           "body": "You are changing your platform account email to this address. Click the link below to confirm:\n{{url}}\nLink valid for 1 hour.\nIf this wasn't you, please ignore this email."},
+}
+
+
+async def send_email_change_email(email: str, token: str, request_base: str = "", lang: str = "en") -> bool:
+    """发送改邮箱确认邮件到新邮箱（收信即所有权证明）。"""
+    base_url = _resolve_base_url(request_base)
+    url = f"{base_url}/email-confirm?token={token}"
+    lang = normalize_lang(lang)
+    subject, body = _render(EMAIL_CHANGE_TPL, lang, url=url)
+    outbox_id = queue_email(email, subject, body)
+    await try_row(outbox_id)
+    return True
+
+
 async def send_activation_email(email: str, username: str, request_base: str = "", lang: str = "en") -> bool:
     """开通成功通知邮件：登录链接 + 条款全语言纵向堆叠（语言=注册者操作界面语言）。"""
     base_url = _resolve_base_url(request_base)
