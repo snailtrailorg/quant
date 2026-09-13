@@ -16,18 +16,18 @@
       <el-table-column v-if="colOn('strategy_id')" prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
       <el-table-column v-if="colOn('symbol')" prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
       <!-- P1-5（06 B#5）：md_mode/行情 lag/bars 消费/frozen——活着吗/新鲜吗/冻没冻直答 -->
-      <el-table-column v-if="colOn('md_mode')" :label="t('liveTask.mdMode')" width="90">
+      <el-table-column v-if="colOn('md_mode')" prop="md_mode" :label="t('liveTask.mdMode')" width="90">
         <template #default="{ row }">
           <el-tag size="small" :type="row.md_mode === 'hub' ? 'primary' : 'info'">{{ row.md_mode }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('lag')" :label="t('liveTask.lag')" width="90" class-name="num">
+      <el-table-column v-if="colOn('lag')" prop="lag" :label="t('liveTask.lag')" width="90" class-name="num">
         <template #default="{ row }">
           <span :style="{ color: (row.lag ?? 999) > 5 ? 'var(--warn)' : 'var(--success)' }">{{ row.lag != null ? row.lag.toFixed(1) + 's' : '—' }}</span>
         </template>
       </el-table-column>
       <el-table-column v-if="colOn('bars')" prop="bars" :label="t('liveTask.bars')" width="90" class-name="num" />
-      <el-table-column v-if="colOn('status')" :label="t('common.status')" width="110">
+      <el-table-column v-if="colOn('status')" prop="status" :label="t('common.status')" width="110">
         <template #default="{ row }">
           <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.frozen ? '❄' : '' }}</span>
         </template>
@@ -35,10 +35,10 @@
       <el-table-column v-if="colOn('account_id')" prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
       <el-table-column v-if="colOn('initial_capital')" prop="initial_capital" :label="t('liveTask.capital')" min-width="120" />
       <!-- 批16：+创建时间/心跳年龄（后端已返回未显示） -->
-      <el-table-column v-if="colOn('created_at')" :label="t('common.createdAt')" min-width="160">
+      <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="160">
         <template #default="{ row }">{{ fmtTime.full(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('hb_age')" :label="t('cols.heartbeatAge')" min-width="100" class-name="num">
+      <el-table-column v-if="colOn('hb_age')" prop="hb_age" :label="t('cols.heartbeatAge')" min-width="100" class-name="num">
         <template #default="{ row }">{{ fmtAge(row.hb_age_s) }}</template>
       </el-table-column>
             <el-table-column type="expand">
@@ -60,7 +60,7 @@
           </div>
         </template>
       </el-table-column>
-<el-table-column :label="t('common.action')" min-width="260">
+<el-table-column prop="actions" :label="t('common.action')" min-width="260">
         <template #default="{ row }">
           <!-- 批16 v2：行内=启停（互斥同位）+解冻（frozen 态才现=火警级不进弹窗）+标的详情链接；
                「详情」按钮本就是死的（toggleTimeline 无消费者，展开走 expand 箭头）——删；

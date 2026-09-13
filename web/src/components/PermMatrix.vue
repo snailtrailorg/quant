@@ -23,7 +23,7 @@
         <TableShell :data="navItems" size="small" max-height="320" storage-key="perm-matrix">
           <el-table-column prop="id" :label="t('common.name')" width="140" />
           <el-table-column prop="group" :label="t('perm.navGroup')" width="110" />
-          <el-table-column :label="t('perm.navState')">
+          <el-table-column prop="nav_state" :label="t('perm.navState')">
             <template #default="{ row }">
               <el-radio-group :model-value="navSel[row.id] || ''" size="small"
                               @update:model-value="v => navSel[row.id] = v">

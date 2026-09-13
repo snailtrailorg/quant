@@ -45,7 +45,7 @@
           <el-table-column prop="close" :label="t('backtest.closePrice')" min-width="100" />
           <el-table-column prop="position" :label="t('backtest.positionQty')" min-width="100" />
           <el-table-column prop="avg_price" :label="t('backtest.avgPrice')" min-width="100" />
-          <el-table-column :label="t('backtest.marketValue')" min-width="120">
+          <el-table-column prop="market_value" :label="t('backtest.marketValue')" min-width="120">
             <template #default="{ row }">{{ (row.position * row.close).toFixed(2) }}</template>
           </el-table-column>
           <el-table-column prop="cash" :label="t('backtest.cash')" min-width="120" />

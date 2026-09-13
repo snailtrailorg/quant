@@ -6,13 +6,13 @@
       <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" min-width="160" />
       <el-table-column prop="params" :label="t('riskRule.params')" min-width="200" show-overflow-tooltip />
-      <el-table-column :label="t('common.updatedAt')" min-width="160">
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160">
         <template #default="{ row }">{{ fmtTime.full(row.updated_at) }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.enable')" min-width="80">
+      <el-table-column prop="enabled" :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" min-width="180">
+      <el-table-column prop="actions" :label="t('common.action')" min-width="180">
         <template #default="{ row }">
           <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
           <el-button type="danger" @click="onDelete(row.id)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>

@@ -4,16 +4,16 @@
     <TableShell :data="brokers" storage-key="brokers">
       <el-table-column v-if="colOn('provider')" prop="provider" label="Provider" min-width="100" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
-      <el-table-column :label="t('common.credential')" min-width="80">
+      <el-table-column prop="has_credentials" :label="t('common.credential')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.enable')" min-width="80">
+      <el-table-column prop="enabled" :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
       <el-table-column v-if="colOn('updated_at')" prop="updated_at" :label="t('common.updatedAt')" min-width="160">
         <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="250">
+      <el-table-column prop="actions" :label="t('common.action')" width="250">
         <template #default="{ row }">
           <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
           <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>

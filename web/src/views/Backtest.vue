@@ -27,26 +27,26 @@
           <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>
         </el-table-column>
         <!-- P2-4：指标摘要——列表行直接给成绩，不用点进 Run 页 -->
-        <el-table-column v-if="colOn('ret')" :label="t('backtest.retCol')" min-width="90" class-name="num">
+        <el-table-column v-if="colOn('ret')" prop="ret" :label="t('backtest.retCol')" min-width="90" class-name="num">
           <template #default="{ row }">
             <span v-if="bs(row).ret != null" :class="bs(row).ret >= 0 ? 'up' : 'down'">
               {{ pct(bs(row).ret) }}
             </span><span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colOn('dd')" :label="t('backtest.ddCol')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('dd')" prop="dd" :label="t('backtest.ddCol')" min-width="80" class-name="num">
           <template #default="{ row }">{{ bs(row).dd != null ? pct(bs(row).dd) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('sharpe')" :label="t('backtest.sharpeCol')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('sharpe')" prop="sharpe" :label="t('backtest.sharpeCol')" min-width="80" class-name="num">
           <template #default="{ row }">{{ bs(row).sharpe != null ? bs(row).sharpe.toFixed(2) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('date_range')" :label="t('backtest.dateRangeCol')" min-width="170">
+        <el-table-column v-if="colOn('date_range')" prop="date_range" :label="t('backtest.dateRangeCol')" min-width="170">
           <template #default="{ row }">
             {{ (row.created_at||'').slice(0,10) }} ~ {{ (row.finished_at||'').slice(5,10) || '…' }}
           </template>
         </el-table-column>
         <!-- 失败原因透出（05 §5.7：failed 行点开见原因） -->
-        <el-table-column v-if="colOn('reason')" :label="t('backtest.reason')" min-width="140" show-overflow-tooltip>
+        <el-table-column v-if="colOn('reason')" prop="reason" :label="t('backtest.reason')" min-width="140" show-overflow-tooltip>
           <template #default="{ row }">
             <span v-if="row.status === 'failed'" style="color: var(--critical)">{{ row.summary?.error || row.error || '—' }}</span>
             <span v-else>—</span>
@@ -58,13 +58,13 @@
           </template>
         </el-table-column>
         <el-table-column v-if="colOn('mode')" prop="mode" :label="t('backtest.mode')" min-width="80" />
-        <el-table-column v-if="colOn('symbols')" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
+        <el-table-column v-if="colOn('symbols')" prop="symbols" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ t('backtest.symbolCount', { n: row.symbols?.length || 0 }) }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('created_at')" :label="t('common.createdAt')" min-width="160">
+        <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="160">
           <template #default="{ row }">{{ row.created_at?.slice(0, 19) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.action')" min-width="190" fixed="right">
+        <el-table-column prop="actions" :label="t('common.action')" min-width="190" fixed="right">
           <template #default="{ row }">
             <!-- 批16：行内留详情+更多；终止/删除（后端 DELETE 现无按钮，批16 新接）收进弹窗 -->
             <el-button type="primary" @click.stop="goDetail(row)">{{ t('common.detail') }}</el-button>

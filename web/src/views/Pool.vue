@@ -26,17 +26,17 @@
                 <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
                 <TableShell :data="minuteStatus[row.id]" size="small" max-height="300" storage-key="pool-coverage">
                   <el-table-column prop="symbol" :label="t('common.symbol')" min-width="140" />
-                  <el-table-column :label="t('pool.minuteLastTs')" min-width="170">
+                  <el-table-column prop="last_ts" :label="t('pool.minuteLastTs')" min-width="170">
                     <template #default="{ row: s }">{{ s.last_ts || '-' }}</template>
                   </el-table-column>
-                  <el-table-column :label="t('pool.minuteCovered')" min-width="100">
+                  <el-table-column prop="covered" :label="t('pool.minuteCovered')" min-width="100">
                     <template #default="{ row: s }">
                       <el-tag :type="s.covered ? 'success' : 'warning'" size="small">
                         {{ s.covered ? '✓' : t('pool.pending') }}
                       </el-tag>
                     </template>
                   </el-table-column>
-                  <el-table-column :label="t('common.action')" min-width="150">
+                  <el-table-column prop="actions" :label="t('common.action')" min-width="150">
                     <template #default="{ row: s }">
                       <el-button type="primary" @click="gotoDetail(s.symbol)">{{ t('common.detail') }}</el-button>
                       <el-button type="danger" @click="removeSymbol(row.id, s.symbol)">✕</el-button>
@@ -56,24 +56,24 @@
       <el-table-column prop="id" label="ID" min-width="100" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
       <el-table-column v-if="colOn('category')" prop="category" :label="t('pool.category')" min-width="110" />
-      <el-table-column v-if="colOn('symbol_count')" :label="t('pool.symbolCount')" min-width="90" align="center">
+      <el-table-column v-if="colOn('symbol_count')" prop="symbol_count" :label="t('pool.symbolCount')" min-width="90" align="center">
         <template #default="{ row }">
           <el-badge :value="row.symbols?.length || 0" type="primary" />
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('minute_start')" :label="t('pool.minuteStart')" min-width="130">
+      <el-table-column v-if="colOn('minute_start')" prop="minute_history_start" :label="t('pool.minuteStart')" min-width="130">
         <template #default="{ row }">
           <span v-if="row.minute_history_start" style="font-size: 12px">{{ row.minute_history_start }}</span>
           <span v-else style="color: var(--el-text-color-placeholder)">-</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('minute_count')" :label="t('pool.minuteCount')" min-width="100" align="center">
+      <el-table-column v-if="colOn('minute_count')" prop="minute_count" :label="t('pool.minuteCount')" min-width="100" align="center">
         <template #default="{ row }">
           <el-badge :value="row.minute_count || 0" type="info" />
         </template>
       </el-table-column>
       <el-table-column v-if="colOn('description')" prop="description" min-width="220" show-overflow-tooltip :label="t('common.description')" />
-      <el-table-column :label="t('common.action')" min-width="180">
+      <el-table-column prop="actions" :label="t('common.action')" min-width="180">
         <template #default="{ row }">
           <el-button type="primary" size="small" @click="editPool(row)">{{ t('common.edit') }}</el-button>
           <el-button type="danger" size="small" @click="delPool(row)">{{ t('common.delete') }}</el-button>
@@ -94,10 +94,10 @@
     <TableShell :data="minuteSymbols" size="small" max-height="300" storage-key="pool-minute-symbols">
       <el-table-column prop="symbol" :label="t('common.symbol')" min-width="150" />
       <el-table-column prop="source" :label="t('pool.minuteSymbolSource')" min-width="110" />
-      <el-table-column :label="t('pool.minuteLastTs')" min-width="170">
+      <el-table-column prop="last_ts" :label="t('pool.minuteLastTs')" min-width="170">
         <template #default="{ row }">{{ row.last_ts || '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" min-width="100">
+      <el-table-column prop="actions" :label="t('common.action')" min-width="100">
         <template #default="{ row }">
           <el-button v-if="row.source === 'direct'" type="danger" size="small" :disabled="navReadonly"
                      @click="removeMinuteSymbol(row.symbol)">✕</el-button>

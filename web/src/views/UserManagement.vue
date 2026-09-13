@@ -29,7 +29,7 @@
             <el-table-column v-if="userColOn('role')" prop="role" :label="t('user.role')" min-width="100">
               <template #default="{ row }"><el-tag>{{ row.role }}</el-tag></template>
             </el-table-column>
-            <el-table-column v-if="userColOn('status')" :label="t('common.status')" min-width="100">
+            <el-table-column v-if="userColOn('status')" prop="status" :label="t('common.status')" min-width="100">
               <template #default="{ row }">
                 <el-tag v-if="row.deactivated" type="info">{{ t('account.statusDeactivated') }}</el-tag>
                 <el-tag v-else :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
@@ -41,7 +41,7 @@
             <el-table-column v-if="userColOn('last_login_at')" prop="last_login_at" :label="t('account.lastLogin')" min-width="160">
               <template #default="{ row }">{{ row.last_login_at || '-' }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.action')" min-width="110" fixed="right">
+            <el-table-column prop="actions" :label="t('common.action')" min-width="110" fixed="right">
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
                   <!-- 批16 裁定#15：删除收编编辑弹窗（原行内双按钮） -->
@@ -81,7 +81,7 @@
             </template>
             <TableShell :data="invites" storage-key="invites">
               <el-table-column prop="email" :label="t('account.email')" min-width="200" show-overflow-tooltip />
-              <el-table-column :label="t('common.status')" min-width="100">
+              <el-table-column prop="status" :label="t('common.status')" min-width="100">
                 <template #default="{ row }">
                   <el-tag :type="inviteStatusType(row.status)">{{ t('account.inviteStatus.' + row.status) }}</el-tag>
                 </template>
@@ -90,7 +90,7 @@
               <el-table-column prop="expires_at" :label="t('account.inviteExpires')" min-width="160" />
               <!-- 盲审A-P1-3/B-P1-1 修：操作列恒显（原 v-if="有 pending" 是批16 仅撤销时的设计——
                    删除按钮与 pending 无关，全过期/全撤销场景下不能失去清理入口）；撤销保留行级条件 -->
-              <el-table-column :label="t('common.action')" min-width="150">
+              <el-table-column prop="actions" :label="t('common.action')" min-width="150">
                 <template #default="{ row }">
                   <div style="display: inline-flex; gap: 6px">
                     <el-button v-if="row.status === 'pending'" size="small" type="warning" @click="onRevoke(row)">{{ t('account.inviteRevoke') }}</el-button>
@@ -128,14 +128,14 @@
             <TableShell :data="groups" storage-key="groups">
             <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
             <el-table-column prop="description" :label="t('common.description')" min-width="240" show-overflow-tooltip />
-            <el-table-column :label="t('um.groupType')" min-width="110">
+            <el-table-column prop="builtin" :label="t('um.groupType')" min-width="110">
               <template #default="{ row }">
                 <el-tag v-if="row.builtin" type="warning">builtin 🔒</el-tag>
                 <el-tag v-else type="info">custom</el-tag>
               </template>
             </el-table-column>
             <el-table-column prop="user_count" :label="t('um.userCount')" min-width="100" />
-            <el-table-column :label="t('common.action')" min-width="180">
+            <el-table-column prop="actions" :label="t('common.action')" min-width="180">
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
                   <el-button size="small" type="primary" @click="openGroupEdit(row)">{{ t('common.edit') }}</el-button>

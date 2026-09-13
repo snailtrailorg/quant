@@ -25,7 +25,7 @@
       <el-table-column v-if="colOn('data_type')" prop="data_type" :label="t('dataManage.category')" min-width="100">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
       </el-table-column>
-      <el-table-column v-if="colOn('provider')" :label="t('dataManage.provider')" min-width="140">
+      <el-table-column v-if="colOn('provider')" prop="provider" :label="t('dataManage.provider')" min-width="140">
         <template #default="{ row }">
           <el-select :model-value="row.provider || 'tushare'" size="small"
                      :disabled="providerOptions(row).length <= 1" @change="v => changeProvider(row, v)">
@@ -34,12 +34,12 @@
         </template>
       </el-table-column>
       <el-table-column v-if="colOn('mode')" prop="sync_mode" :label="t('common.mode')" min-width="120" />
-      <el-table-column v-if="colOn('schedule')" :label="t('dataManage.cronSchedule')" min-width="140">
+      <el-table-column v-if="colOn('schedule')" prop="schedule" :label="t('dataManage.cronSchedule')" min-width="140">
         <template #default="{ row }">
           <el-link type="primary" @click="openCron(row)">{{ row.schedule }}</el-link>
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('trade_day_filter')" :label="t('dataManage.tradeDayFilter')" min-width="120">
+      <el-table-column v-if="colOn('trade_day_filter')" prop="trade_day_filter" :label="t('dataManage.tradeDayFilter')" min-width="120">
         <template #default="{ row }">
           <span>{{ row.trade_day_filter }}</span>
         </template>
@@ -49,7 +49,7 @@
       <el-table-column v-if="colOn('last_sync_date')" prop="last_sync_date" :label="t('cols.cursorDate')" min-width="120">
         <template #default="{ row }">{{ row.last_sync_date || '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('status')" :label="t('common.status')" min-width="100">
+      <el-table-column v-if="colOn('status')" prop="status" :label="t('common.status')" min-width="100">
         <template #default="{ row }">
           <StatusTag :value="row.status" />
         </template>
@@ -60,13 +60,13 @@
       <el-table-column v-if="colOn('last_sync_ts')" prop="last_sync_ts" :label="t('dataManage.syncTime')" min-width="160">
         <template #default="{ row }">{{ row.last_sync_ts ? fmtTime.s(row.last_sync_ts) : '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('enabled')" :label="t('common.enable')" min-width="80">
+      <el-table-column v-if="colOn('enabled')" prop="enabled" :label="t('common.enable')" min-width="80">
         <template #default="{ row }">
           <el-switch v-model="row.enabled" @change="onToggle(row)" />
         </template>
       </el-table-column>
       <!-- 操作列 280=按钮实宽（同步 60+管理标的 88+编辑 60+间距 24+cell 内边距 24=256，留 loading 旋转余量）——4 字按钮超档位公式假设，估窄即换行 -->
-      <el-table-column :label="t('common.action')" width="280">
+      <el-table-column prop="actions" :label="t('common.action')" width="280">
         <template #default="{ row }">
           <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'" :disabled="navReadonly">{{ t('dataManage.syncBtn') }}</el-button>
           <el-button type="primary" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>
@@ -99,7 +99,7 @@
             <StatusTag :value="row.status" />
           </template>
         </el-table-column>
-        <el-table-column v-if="logColOn('trade_day')" :label="t('dataManage.tradeDay')" min-width="120">
+        <el-table-column v-if="logColOn('trade_day')" prop="trade_day" :label="t('dataManage.tradeDay')" min-width="120">
           <template #header>
             <!-- 裁定 v2：列头 tooltip 说明"92% 行 '-' 属正常"语义（盲审A-P2-7 词条早备未绑） -->
             <el-tooltip :content="t('dataManage.tradeDayGapTip')" placement="top">
@@ -111,7 +111,7 @@
             <span v-else style="color:var(--text-secondary)">-</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="logColOn('gap')" :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
+        <el-table-column v-if="logColOn('gap')" prop="gap" :label="t('dataManage.gap')" min-width="180" show-overflow-tooltip>
           <template #header>
             <el-tooltip :content="t('dataManage.tradeDayGapTip')" placement="top">
               <span class="hdr-hint">{{ t('dataManage.gap') }}</span>

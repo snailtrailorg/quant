@@ -10,7 +10,7 @@
         <template #header>{{ t('health.apiHealth') }}</template>
         <TableShell :data="healthData" storage-key="health-services">
           <el-table-column prop="name" :label="t('health.service')" min-width="160" show-overflow-tooltip />
-          <el-table-column :label="t('common.status')" min-width="100">
+          <el-table-column prop="status" :label="t('common.status')" min-width="100">
             <template #default="{ row }">
               <StatusTag :value="row.status" />
             </template>
@@ -35,7 +35,7 @@
     <TableShell :data="componentRows" storage-key="health-components">
       <el-table-column prop="component" :label="t('health.component')" min-width="200" />
       <el-table-column prop="kind" :label="t('health.kind')" min-width="120" />
-      <el-table-column :label="t('common.status')" min-width="110">
+      <el-table-column prop="state" :label="t('common.status')" min-width="110">
         <template #default="{ row }">
           <el-tag :type="row.ok ? 'success' : (row.unknown ? 'info' : 'danger')">
             {{ row.state || (row.ok ? 'ok' : (row.unknown ? '?' : 'fail')) }}
@@ -51,7 +51,7 @@
     <template #header>{{ t('health.events') }}</template>
     <TableShell :data="eventRows" storage-key="health-events">
       <el-table-column prop="ts" :label="t('health.time')" min-width="160" />
-      <el-table-column :label="t('health.severity')" min-width="100">
+      <el-table-column prop="severity" :label="t('health.severity')" min-width="100">
         <template #default="{ row }">
           <el-tag :type="sevType(row.severity)" size="small">{{ row.severity }}</el-tag>
         </template>

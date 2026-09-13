@@ -28,12 +28,12 @@
       <el-table-column prop="first" :label="t('dataIntegrity.first')" min-width="120" />
       <el-table-column prop="last" :label="t('dataIntegrity.last')" min-width="120" />
       <el-table-column prop="expected" :label="t('dataIntegrity.expected')" min-width="100" />
-      <el-table-column :label="t('dataIntegrity.integrityPct')" min-width="180">
+      <el-table-column prop="pct" :label="t('dataIntegrity.integrityPct')" min-width="180">
         <template #default="{ row }">
           <el-progress :percentage="Number(row.pct || 0)" :status="row.status === 'complete' ? 'success' : row.status === 'missing' ? 'exception' : ''" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.status')" min-width="100">
+      <el-table-column prop="status" :label="t('common.status')" min-width="100">
         <template #default="{ row }">
           <StatusTag :value="row.status" />
         </template>

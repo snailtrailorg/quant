@@ -47,10 +47,10 @@
           <template #default="{ row }">{{ row.pe_ttm != null ? row.pe_ttm.toFixed(1) : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('pb')" prop="pb" label="PB" min-width="70" class-name="num" />
-        <el-table-column v-if="colOn('turnover')" :label="t('screener.turnover')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('turnover')" prop="turnover" :label="t('screener.turnover')" min-width="80" class-name="num">
           <template #default="{ row }">{{ row.turnover?.toFixed(1) || '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('market_cap')" :label="t('screener.marketCap')" min-width="110" class-name="num">
+        <el-table-column v-if="colOn('market_cap')" prop="total_mv" :label="t('screener.marketCap')" min-width="110" class-name="num">
           <template #default="{ row }">{{ fmtCn(row.total_mv * 10000, 1) }}</template>
         </el-table-column>
       </TableShell>

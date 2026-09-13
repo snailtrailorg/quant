@@ -37,7 +37,7 @@
               <el-tag :type="row.effect === 'deny' ? 'danger' : 'success'" size="small">{{ row.effect }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.action')" width="90">
+          <el-table-column prop="actions" :label="t('common.action')" width="90">
             <template #default="{ row }">
               <el-button size="small" type="danger" @click="clearOverride(row)">{{ t('perm.clear') }}</el-button>
             </template>

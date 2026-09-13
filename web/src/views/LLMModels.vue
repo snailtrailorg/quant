@@ -7,11 +7,11 @@
         <el-table-column prop="provider" label="Provider" min-width="120" />
         <el-table-column prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
         <el-table-column prop="calls" :label="t('llm.calls')" min-width="80" />
-        <el-table-column :label="t('llm.tokenCol')" min-width="160">
+        <el-table-column prop="tokens" :label="t('llm.tokenCol')" min-width="160">
           <template #default="{ row }">{{ row.input_tokens.toLocaleString() }} / {{ row.output_tokens.toLocaleString() }}</template>
         </el-table-column>
         <el-table-column prop="avg_latency_ms" :label="t('llm.latencyMs')" min-width="100" />
-        <el-table-column :label="t('llm.successRateCol')" min-width="100">
+        <el-table-column prop="success_rate" :label="t('llm.successRateCol')" min-width="100">
           <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'">{{ row.success_rate }}%</el-tag></template>
         </el-table-column>
       </TableShell>
@@ -30,14 +30,14 @@
       <el-table-column v-if="modelColOn('context_window')" prop="context_window" :label="t('cols.contextWindow')" min-width="110">
         <template #default="{ row }">{{ row.context_window?.toLocaleString() || '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('llm.key')" min-width="80">
+      <el-table-column prop="has_key" :label="t('llm.key')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'">{{ row.has_key ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
       <el-table-column v-if="modelColOn('priority')" prop="priority" :label="t('llm.priority')" min-width="80" />
-      <el-table-column :label="t('common.enable')" min-width="80">
+      <el-table-column prop="enabled" :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="250">
+      <el-table-column prop="actions" :label="t('common.action')" width="250">
         <template #default="{ row }">
           <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
             <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
@@ -87,7 +87,7 @@
       <el-table-column prop="alert_threshold_pct" :label="t('llm.alertThreshold')" min-width="110" />
       <el-table-column prop="enabled" :label="t('common.enable')" min-width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
       <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160"><template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template></el-table-column>
-      <el-table-column v-if="canBudgetEdit" :label="t('common.action')" width="110">
+      <el-table-column v-if="canBudgetEdit" prop="actions" :label="t('common.action')" width="110">
         <template #default="{ row }">
           <el-button type="primary" @click="onBudgetEdit(row)">{{ t('common.edit') }}</el-button>
         </template>

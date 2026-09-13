@@ -4,7 +4,7 @@
     <template #header>{{ t('systemConfig.title') }}</template>
     <TableShell :data="configs" storage-key="run-config">
       <el-table-column prop="key" :label="t('common.configKey')" width="200" />
-      <el-table-column :label="t('common.configValue')" width="200">
+      <el-table-column prop="value" :label="t('common.configValue')" width="200">
         <template #default="{ row }">
           <el-input-number v-if="row.value_type === 'int' || row.value_type === 'float'"
             v-model="row.editValue" :step="1" style="width: 140px" />
@@ -16,10 +16,10 @@
       </el-table-column>
       <el-table-column prop="value_type" :label="t('common.type')" width="80" />
       <el-table-column prop="description" :label="t('risk.label')" show-overflow-tooltip />
-      <el-table-column :label="t('common.updatedAt')" width="180">
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" width="180">
         <template #default="{ row }">{{ row.updated_at }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="120">
+      <el-table-column prop="actions" :label="t('common.action')" width="120">
         <template #default="{ row }">
           <el-button type="primary" @click="save(row)" :loading="row._saving">{{ t('common.save') }}</el-button>
         </template>

@@ -26,10 +26,10 @@
         <template #default="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
       </el-table-column>
       <el-table-column v-if="colOn('trigger_user')" prop="trigger_user" :label="t('cols.triggeredBy')" min-width="110" show-overflow-tooltip />
-      <el-table-column :label="t('common.status')" min-width="100">
+      <el-table-column prop="status" :label="t('common.status')" min-width="100">
         <template #default="{ row }"><StatusTag :value="row.status" /></template>
       </el-table-column>
-      <el-table-column :label="t('task.progress')" min-width="140">
+      <el-table-column prop="progress" :label="t('task.progress')" min-width="140">
         <template #default="{ row }">{{ row.progress?.pct || 0 }}% ({{ row.progress?.current || 0 }}/{{ row.progress?.total || 0 }})</template>
       </el-table-column>
       <el-table-column prop="last_heartbeat" :label="t('task.heartbeat')" min-width="160">
@@ -41,7 +41,7 @@
       <el-table-column v-if="colOn('end_time')" prop="end_time" :label="t('cols.endTime')" min-width="160">
         <template #default="{ row }">{{ row.end_time ? fmtTime.full(row.end_time) : '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="250">
+      <el-table-column prop="actions" :label="t('common.action')" width="250">
         <template #default="{ row }">
           <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
             <el-button type="primary" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>

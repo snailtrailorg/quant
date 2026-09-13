@@ -11,12 +11,12 @@
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="exchange" :label="t('tradingAccounts.exchange')" width="120" />
-      <el-table-column :label="t('tradingAccounts.apiKeyHint')" width="180">
+      <el-table-column prop="api_key_hint" :label="t('tradingAccounts.apiKeyHint')" width="180">
         <template #default="{ row }">
           <code style="font-family: var(--font-num); font-size: 12px">{{ row.api_key_hint || '—' }}</code>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.status')" width="80">
+      <el-table-column prop="enabled" :label="t('common.status')" width="80">
         <template #default="{ row }">
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
         </template>
@@ -24,7 +24,7 @@
       <el-table-column prop="created_at" :label="t('common.createdAt')" width="160">
         <template #default="{ row }">{{ fmtTime.full(row.created_at || '') }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="150" fixed="right">
+      <el-table-column prop="actions" :label="t('common.action')" width="150" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click="edit(row)">{{ t('common.edit') }}</el-button>
           <el-button size="small" type="danger" @click="del(row)">{{ t('common.delete') }}</el-button>

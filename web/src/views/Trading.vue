@@ -35,16 +35,16 @@
           <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" class-name="num" />
           <el-table-column prop="frozen" :label="t('trading.frozenCol')" min-width="80" class-name="num" />
           <el-table-column prop="cost_price" :label="t('trading.costCol')" min-width="90" class-name="num" />
-          <el-table-column :label="t('trading.lastPrice')" min-width="80" class-name="num">
+          <el-table-column prop="last_price" :label="t('trading.lastPrice')" min-width="80" class-name="num">
             <template #default="{ row }">{{ lastPrices[row.symbol?.split('.')[0]] || '—' }}</template>
           </el-table-column>
-          <el-table-column :label="t('trading.pnlCol')" min-width="110" class-name="num">
+          <el-table-column prop="pnl" :label="t('trading.pnlCol')" min-width="110" class-name="num">
             <template #default="{ row }">
               <span v-if="row.pnl != null" :class="row.pnl >= 0 ? 'up' : 'down'">{{ row.pnl >= 0 ? '▲' : '▼' }} {{ row.pnl.toFixed(0) }}</span>
               <span v-else>—</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('trading.pnlPct')" min-width="80" class-name="num">
+          <el-table-column prop="pnl_pct" :label="t('trading.pnlPct')" min-width="80" class-name="num">
             <template #default="{ row }">
               <span v-if="row.cost_price > 0 && row.pnl != null" :class="row.pnl >= 0 ? 'up' : 'down'">
                 {{ (row.pnl / (row.cost_price * row.volume) * 100).toFixed(1) }}%
@@ -52,10 +52,10 @@
               <span v-else>—</span>
             </template>
           </el-table-column>
-          <el-table-column :label="t('trading.mktValue')" min-width="100" class-name="num">
+          <el-table-column prop="market_value" :label="t('trading.mktValue')" min-width="100" class-name="num">
             <template #default="{ row }">{{ row.cost_price && row.volume ? fmtCn(row.cost_price * row.volume, 1) : '—' }}</template>
           </el-table-column>
-          <el-table-column :label="t('common.action')" min-width="90">
+          <el-table-column prop="actions" :label="t('common.action')" min-width="90">
             <template #default="{ row }">
               <el-button type="primary" size="small" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
             </template>

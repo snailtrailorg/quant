@@ -39,10 +39,10 @@
         <el-table-column v-if="colOn('stk_close')" prop="stk_close" :label="t('cols.underlyingPrice')" min-width="90" class-name="num">
           <template #default="{ row }">{{ row.stk_close != null ? row.stk_close.toFixed(2) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('double_low')" :label="t('screener.doubleLow')" min-width="90" class-name="num" sortable>
+        <el-table-column v-if="colOn('double_low')" prop="double_low" :label="t('screener.doubleLow')" min-width="90" class-name="num" sortable>
           <template #default="{ row }">{{ row.double_low?.toFixed(1) || '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('premium')" :label="t('screener.premium')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('premium')" prop="premium_pct" :label="t('screener.premium')" min-width="80" class-name="num">
           <template #default="{ row }">
             <span v-if="row.premium_pct != null" :class="row.premium_pct >= 0 ? 'up' : 'down'">{{ row.premium_pct.toFixed(1) }}%</span>
             <span v-else>—</span>

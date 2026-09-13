@@ -10,21 +10,21 @@
     <TableShell :data="strategies" storage-key="strategy-main">
       <el-table-column prop="name" :label="t('strategy.name')" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('strategy.type')" />
-      <el-table-column :label="t('strategy.status')">
+      <el-table-column prop="enabled" :label="t('strategy.status')">
         <template #default="{ row }">
           <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? t('strategy.statusRunning') : t('strategy.statusStopped') }}</el-tag>
         </template>
       </el-table-column>
       <!-- P2-1（05 §5.6）：验证✓独立成列（证据链可点）+最近回测列；操作列发起回测/编辑/复制/删除。
            链条打磨#22：策略无启停是设计（实盘启停唯一入口=LiveTask）；symbol:"" 是契约——勿修 -->
-      <el-table-column :label="t('strategy.verifyCol')" min-width="110">
+      <el-table-column prop="backtest_verified" :label="t('strategy.verifyCol')" min-width="110">
         <template #default="{ row }">
           <el-tag v-if="row.backtest_verified" type="success" size="small" style="cursor:pointer"
                   @click="gotoVerifiedRun(row)">✓ {{ t('strategy.verified') }}</el-tag>
           <el-tag v-else type="info" size="small">{{ t('strategy.unverified') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('strategy.lastBtCol')" min-width="150">
+      <el-table-column prop="last_backtest" :label="t('strategy.lastBtCol')" min-width="150">
         <template #default="{ row }">
           <span v-if="lastRun(row)" style="cursor:pointer" @click="$router.push(`/backtest/${lastRun(row).id}`)">
             <span :class="(bs(lastRun(row)).ret ?? 0) >= 0 ? 'up' : 'down'">
@@ -35,7 +35,7 @@
           <span v-else style="color: var(--text-secondary)">—</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" min-width="260" fixed="right">
+      <el-table-column prop="actions" :label="t('common.action')" min-width="260" fixed="right">
         <template #default="{ row }">
           <!-- 批16 v2：行内=回测+复制（迭代主路径）+编辑；删除收进编辑弹窗（盲审 A-P1-4） -->
           <el-button type="primary" size="small" @click="runBacktest(row)" :disabled="navReadonly">{{ t('strategy.runBacktest') }}</el-button>
@@ -198,7 +198,7 @@
           <el-table-column prop="account_id" :label="t('common.account')" show-overflow-tooltip />
           <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
           <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
-          <el-table-column :label="t('common.action')" width="80">
+          <el-table-column prop="actions" :label="t('common.action')" width="80">
             <template #default="{ row }"><el-button type="danger" @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
           </el-table-column>
         </TableShell>

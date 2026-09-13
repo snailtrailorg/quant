@@ -68,12 +68,12 @@
     <TableShell v-if="imBots.length" :data="imBots" size="small" storage-key="im-bots">
       <el-table-column prop="provider" :label="t('myIm.provider')" width="90" />
       <el-table-column prop="name" :label="t('common.name')" min-width="120" show-overflow-tooltip />
-      <el-table-column :label="t('common.status')" width="80">
+      <el-table-column prop="enabled" :label="t('common.status')" width="80">
         <template #default="{ row }">
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="150">
+      <el-table-column prop="actions" :label="t('common.action')" width="150">
         <template #default="{ row }">
           <div style="display: inline-flex; gap: 6px">
             <el-button size="small" :type="row.enabled ? 'warning' : 'success'" @click="toggleIm(row)">

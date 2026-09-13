@@ -7,7 +7,7 @@
         <el-table-column prop="provider" label="Provider" min-width="120" />
         <el-table-column prop="calls" :label="t('common.calls')" min-width="100" />
         <el-table-column prop="records" :label="t('common.records')" min-width="100" />
-        <el-table-column :label="t('common.failures')" min-width="80">
+        <el-table-column prop="failures" :label="t('common.failures')" min-width="80">
           <template #default="{ row }"><el-tag :type="row.failures > 0 ? 'danger' : 'success'">{{ row.failures }}</el-tag></template>
         </el-table-column>
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="110" />
@@ -16,17 +16,17 @@
     <TableShell :data="sources" storage-key="datasources">
       <el-table-column v-if="colOn('provider')" prop="provider" label="Provider" min-width="120" />
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
-      <el-table-column :label="t('common.credential')" min-width="80">
+      <el-table-column prop="has_credentials" :label="t('common.credential')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
       </el-table-column>
       <el-table-column v-if="colOn('usage_limit')" prop="usage_limit" :label="t('common.dailyLimit')" min-width="80" />
-      <el-table-column :label="t('common.enable')" min-width="80">
+      <el-table-column prop="enabled" :label="t('common.enable')" min-width="80">
         <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
       </el-table-column>
       <el-table-column v-if="colOn('updated_at')" prop="updated_at" :label="t('common.updatedAt')" min-width="160">
         <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="250">
+      <el-table-column prop="actions" :label="t('common.action')" width="250">
         <template #default="{ row }">
           <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
           <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
@@ -53,21 +53,21 @@
         <el-collapse-item :title="t('dataSources.rateTableTitle')" name="rates">
           <TableShell :data="presets.apis" size="small" max-height="360" storage-key="datasource-rates">
             <el-table-column prop="api" label="API" min-width="110" />
-            <el-table-column :label="t('dataSources.overrideCol')" width="210">
+            <el-table-column prop="override" :label="t('dataSources.overrideCol')" width="210">
               <template #default="{ row }">
                 <el-input-number v-model="row._edit" :min="0" :max="86400" :step="0.05" :precision="3" size="small" controls-position="right" style="width: 130px" />
                 <el-button size="small" type="primary" style="margin-left: 6px" :disabled="!overrideDirty(row)" @click="saveOverride(row)">{{ t('common.save') }}</el-button>
               </template>
             </el-table-column>
-            <el-table-column :label="t('dataSources.statusCol')" width="90">
+            <el-table-column prop="status" :label="t('dataSources.statusCol')" width="90">
               <template #default="{ row }">
                 <el-tag :type="row.override != null ? 'warning' : 'info'" size="small">{{ row.override != null ? t('dataSources.tagOverride') : t('dataSources.tagDefault') }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('dataSources.effectiveCol')" width="100">
+            <el-table-column prop="effective" :label="t('dataSources.effectiveCol')" width="100">
               <template #default="{ row }">{{ fmtSec(row.effective) }}</template>
             </el-table-column>
-            <el-table-column :label="t('common.action')" width="120">
+            <el-table-column prop="actions" :label="t('common.action')" width="120">
               <template #default="{ row }">
                 <el-button size="small" :disabled="row.override == null" @click="clearOverride(row)">{{ t('dataSources.resetPreset') }}</el-button>
               </template>

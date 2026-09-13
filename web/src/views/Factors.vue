@@ -9,36 +9,36 @@
     <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
     <TableShell :data="factors" storage-key="factors-main">
       <el-table-column prop="name" :label="t('common.name')" min-width="150" show-overflow-tooltip />
-      <el-table-column :label="t('factors.category')" min-width="100">
+      <el-table-column prop="category" :label="t('factors.category')" min-width="100">
         <template #default="{ row }"><el-tag>{{ row.category }}</el-tag></template>
       </el-table-column>
-      <el-table-column :label="t('common.type')" min-width="80">
+      <el-table-column prop="type" :label="t('common.type')" min-width="80">
         <template #default="{ row }">
           <el-tag v-if="row.type === 'dsl'" type="success">{{ t('factors.typeDsl') }}</el-tag>
           <el-tag v-else-if="row.is_custom" type="warning">{{ t('factors.custom') }}</el-tag>
           <el-tag v-else type="info">{{ t('factors.preset') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('factors.staticFactor') + '/' + t('factors.dynamicFactor')" min-width="110">
+      <el-table-column prop="needs_history" :label="t('factors.staticFactor') + '/' + t('factors.dynamicFactor')" min-width="110">
         <template #default="{ row }">
           <el-tag v-if="row.needs_history === 0" type="success">{{ t('factors.staticFactor') }}</el-tag>
           <el-tag v-else type="danger">{{ t('factors.dynamicFactor') }}({{ row.needs_history }})</el-tag>
         </template>
       </el-table-column>
-      <el-table-column :label="t('factors.usedBy')" min-width="90">
+      <el-table-column prop="used_by" :label="t('factors.usedBy')" min-width="90">
         <template #default="{ row }">
           <el-link v-if="usedByCount(row.name)" type="primary" @click="showRefs(row.name)">{{ usedByCount(row.name) }} ↗</el-link>
           <span v-else>—</span>
         </template>
       </el-table-column>
       <el-table-column prop="description" :label="t('common.description')" show-overflow-tooltip />
-      <el-table-column :label="t('factors.paramsCol')" min-width="200">
+      <el-table-column prop="params" :label="t('factors.paramsCol')" min-width="200">
         <template #default="{ row }">
           <el-tag v-for="(v, k) in (row.params || {})" :key="k" size="small" style="margin: 2px">{{ k }}={{ v }}</el-tag>
           <span v-if="!row.params || !Object.keys(row.params).length">—</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" min-width="110" fixed="right">
+      <el-table-column prop="actions" :label="t('common.action')" min-width="110" fixed="right">
         <template #default="{ row }">
           <!-- 批16：操作收编——行内只留「编辑」（预置因子=只读详情）；试算/删除进编辑弹窗内 -->
           <el-button size="small" type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
@@ -51,7 +51,7 @@
       <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
       <TableShell :data="refsList" size="small" storage-key="factors-refs">
         <el-table-column prop="name" :label="t('common.name')" />
-        <el-table-column :label="t('factors.weightInStrategy')" width="80">
+        <el-table-column prop="weight" :label="t('factors.weightInStrategy')" width="80">
           <template #default="{ row }">
             {{ (row.factors || []).find(f => f.name === refsFactor)?.weight ?? '—' }}
           </template>

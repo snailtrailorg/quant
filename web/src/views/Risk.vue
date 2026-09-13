@@ -45,10 +45,10 @@
       </el-alert>
       <TableShell :data="liveTradingMarkets" storage-key="live-switches">
         <el-table-column prop="market" :label="t('risk.market')" width="150" />
-        <el-table-column :label="t('risk.label')" show-overflow-tooltip>
+        <el-table-column prop="label" :label="t('risk.label')" show-overflow-tooltip>
           <template #default="{ row }">{{ t(row.labelKey) }}</template>
         </el-table-column>
-        <el-table-column :label="t('common.status')" width="120">
+        <el-table-column prop="enabled" :label="t('common.status')" width="120">
           <template #default="{ row }">
             <!-- P1-1（05 §5.3 要点 5）：switch→按钮+确认弹窗（显示影响面） -->
             <el-button size="small" :type="row.enabled ? 'warning' : 'success'" :loading="row.loading"

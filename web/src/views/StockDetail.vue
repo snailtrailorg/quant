@@ -107,12 +107,12 @@
           <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
           <TableShell :data="detail.events || []" max-height="420" storage-key="stock-events">
             <el-table-column prop="date" :label="t('stockDetail.date')" min-width="110" />
-            <el-table-column :label="t('stockDetail.eventType')" min-width="120">
+            <el-table-column prop="type" :label="t('stockDetail.eventType')" min-width="120">
               <template #default="{ row }">
                 <el-tag :type="EVENT_TAG[row.type] || 'info'">{{ t('stockDetail.ev_' + row.type) }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column :label="t('stockDetail.eventDetail')" min-width show-overflow-tooltip>
+            <el-table-column prop="detail" :label="t('stockDetail.eventDetail')" min-width show-overflow-tooltip>
               <template #default="{ row }">{{ eventText(row) }}</template>
             </el-table-column>
           </TableShell>

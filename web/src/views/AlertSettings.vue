@@ -6,7 +6,7 @@
     </el-alert>
 
     <TableShell :data="rows" storage-key="alert-subs">
-      <el-table-column :label="t('common.type')" width="90">
+      <el-table-column prop="channel" :label="t('common.type')" width="90">
         <template #default="{ row }">
           <el-tag :type="{ im: 'primary', email: 'success', sms: 'warning' }[row.channel]">
             {{ t('alerts.channel.' + row.channel) }}
@@ -18,21 +18,21 @@
           {{ row.channel === 'im' ? botName(row.target) : (row.target || '—') }}
         </template>
       </el-table-column>
-      <el-table-column :label="t('alerts.categories')" min-width="170">
+      <el-table-column prop="categories" :label="t('alerts.categories')" min-width="170">
         <template #default="{ row }">
           <el-tag v-for="c in row.categories" :key="c" size="small" style="margin: 1px">{{ t('alerts.cat.' + c) }}</el-tag>
           <span v-if="!row.categories.length" style="color: var(--text-secondary)">—</span>
         </template>
       </el-table-column>
-      <el-table-column :label="t('alerts.minLevel')" width="120">
+      <el-table-column prop="min_level" :label="t('alerts.minLevel')" width="120">
         <template #default="{ row }">{{ t('alerts.lvl.' + row.min_level) }}</template>
       </el-table-column>
-      <el-table-column :label="t('common.enable')" width="70">
+      <el-table-column prop="enabled" :label="t('common.enable')" width="70">
         <template #default="{ row }">
           <el-switch v-model="row.enabled" @change="toggle(row)" />
         </template>
       </el-table-column>
-      <el-table-column :label="t('common.action')" width="200">
+      <el-table-column prop="actions" :label="t('common.action')" width="200">
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="edit(row)">{{ t('common.edit') }}</el-button>
           <el-button size="small" type="warning" :loading="testing[row.id]" @click="test(row)">{{ t('alerts.testBtn') }}</el-button>

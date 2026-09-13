@@ -59,7 +59,7 @@
           <el-table-column v-if="colOn('category')" prop="category" :label="t('log.notifyCategory')" min-width="100" />
           <el-table-column prop="title" :label="t('log.titleCol')" min-width="200" show-overflow-tooltip />
           <el-table-column v-if="colOn('body')" prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
-          <el-table-column v-if="colOn('dispatch')" :label="t('alerts.dispatchCol')" min-width="140">
+          <el-table-column v-if="colOn('dispatch')" prop="dispatch" :label="t('alerts.dispatchCol')" min-width="140">
             <template #default="{ row }">
               <template v-if="row.level === 'info'"></template>
               <span v-else-if="!row.dispatch" style="color: var(--flat)">?</span>
