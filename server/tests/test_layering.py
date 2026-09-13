@@ -108,8 +108,9 @@ class TestLayering:
         assert not bad, f"历史违规边复发: {bad}"
 
     def test_quant_common_third_party_whitelist(self):
-        """第三方白名单（P-S4：'只许 stdlib'自相矛盾——cryptography/dotenv 是基础库）。"""
-        allowed = {"cryptography", "dotenv"}
+        """第三方白名单（P-S4：'只许 stdlib'自相矛盾——cryptography/dotenv 是基础库；
+        批18 加 redis：SSE 跨进程桥技术依赖，全站 requirements 已有，同审批路径）。"""
+        allowed = {"cryptography", "dotenv", "redis"}
         path = os.path.join(SRC, "quant_common")
         for f in os.listdir(path):
             if not f.endswith(".py"):

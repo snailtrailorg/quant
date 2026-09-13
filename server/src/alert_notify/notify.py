@@ -48,8 +48,11 @@ def should_push_external(category: str, level: str) -> bool:
 
 
 def _redis() -> redis.Redis:
+    # 批18 盲审A-P0-2 同修：双 1s 超时——Valkey hung 时缺省无超时会永久阻塞调用线程
+    #（notify 挂在实盘告警路径=冻结交易主流程；超时=跳过去重继续发送）
     return redis.Redis.from_url(
-        os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+        os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+        socket_connect_timeout=1, socket_timeout=1, decode_responses=True)
 
 
 def notify(level: Level, category: Category, title: str, body: str = "",
@@ -83,6 +86,17 @@ def notify(level: Level, category: Category, title: str, body: str = "",
             notif_id = cur.fetchone()[0]
     except Exception as e:
         logger.error("notification insert failed: %s", e)
+
+    # 1.5 批18：站内 SSE 实时化——insert 成功即跨进程广播「有新通知」信号帧。
+    #     payload 只带 type 不带内容（盲审A-P0-1：email/system 类仅 admin 可见，title 明文
+    #     广播给全部 SSE 连接=破可见性矩阵；前端只触发重拉，可见性过滤仍在服务端）。
+    #     去重命中/insert 失败路径在上方短路——不广播，与铃铛数据一致。
+    if notif_id is not None:
+        try:
+            from src.quant_common.eventbus import bus   # 惰性导入（live-task 冷启动链不进 redis 依赖面）
+            bus.publish_cross_process(0, "notification", {})
+        except Exception as e:   # noqa: BLE001
+            logger.warning("notification SSE 广播失败（60s 轮询兜底）: %s", e)
 
     # 2. 外部：批 7 订阅分发（2026-09-02）——warn/critical 交 dispatch 异步三通道（IM/邮件/短信，
     #    Celery 队列化，业务路径仅付一次 executor.submit）；info 到站内为止。

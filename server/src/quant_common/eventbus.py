@@ -1,4 +1,4 @@
-"""进程内事件总线（批14 SSE）——层 0 通用件，纯 stdlib。
+"""进程内事件总线（批14 SSE）——层 0 通用件。
 
 并发契约（方案 v2 盲审 A-P2-6/B-P2-4）：
 - watchers 的读改写全部经 call_soon_threadsafe 收敛到 loop 内执行——publish 调用线程
@@ -7,19 +7,28 @@
 - loop 惰性锚定：首次 subscribe 时 get_running_loop()（web startup 是 sync def 无 loop）
 - loop 未锚定/已关闭：publish 一律 no-op（停机窗口 daemon 线程 publish 不炸调用方）
 
-跨进程桥（通知中心等 celery 产生者）接口预留：publish_cross_process() no-op，
-Valkey pub/sub 消费线程接入时填充（uvicorn 多 worker 化时同）。
+跨进程桥（批18 通知中心 SSE 实时化）：publish_cross_process() 经 Valkey pub/sub 广播，
+仅 web-api 进程跑 sse_bridge 回填本地 bus（人人 publish、单点收口；进程内自环绕桥亦是
+预期路径——**不做 bus.publish 双写**，批14 旧注释「接入时改双写」随批18 废弃：双写会使
+web-api 进程内 notify 双帧）。
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import threading
+
+import redis
 
 logger = logging.getLogger("quant_common.eventbus")
 
 QUEUE_MAX = 50        # 满→丢最旧（状态事件可合并，旧态无消费价值）
 CLOSE_SENTINEL = None  # 停机哨兵（close() 投给全部 watcher，SSE 生成器收即退）
+
+SSE_CHANNEL_ALL = "quant:sse:all"
+SSE_CHANNEL_USER = "quant:sse:u:{uid}"   # 预留：按人定向（信任边界见批18 18E——富语义前必须服务端重验）
 
 
 class EventBus:
@@ -103,9 +112,31 @@ class EventBus:
                 pass
         q.put_nowait(item)
 
+    def publish_all(self, ev_type: str, data: dict) -> None:
+        """广播给全部本地 watcher（批18 桥消费 'all' 频道用；与 publish 同容错契约）。"""
+        try:
+            self._dispatch_all({"type": ev_type, **data})
+        except Exception as e:   # noqa: BLE001
+            logger.warning("eventbus publish_all 失败（不影响调用方）: %s", e)
+
     def publish_cross_process(self, uid: int, ev_type: str, data: dict) -> None:
-        """跨进程桥预留（Valkey pub/sub）——本批 no-op，接入时实现并改 publish 双写。"""
-        return None
+        """跨进程发布（批18）：PUBLISH Valkey 频道，仅 web-api 桥回填本地——调用进程不直发。
+
+        盲审A-P0-2：每次新建短连接 + 双 1s 超时（celery prefork 下模块级池 fork 不安全；
+        Valkey hung 时缺省无超时会永久阻塞调用线程——notify 挂在实盘告警路径，必须界时）。
+        永不 raise、界时失败静默（轮询兜底覆盖）。
+        """
+        try:
+            ch = SSE_CHANNEL_ALL if uid == 0 else SSE_CHANNEL_USER.format(uid=uid)
+            r = redis.Redis.from_url(
+                os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                socket_connect_timeout=1, socket_timeout=1, decode_responses=True)
+            try:
+                r.publish(ch, json.dumps({"type": ev_type, **data}, ensure_ascii=False))
+            finally:
+                r.close()
+        except Exception as e:   # noqa: BLE001
+            logger.warning("publish_cross_process 失败（轮询兜底覆盖）: %s", e)
 
 
 bus = EventBus()   # 进程单例

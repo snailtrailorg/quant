@@ -70,6 +70,12 @@ app.add_middleware(
 
 @app.on_event("shutdown")
 def shutdown():
+    # 批18：先停桥再关总线（盲审A-P2-4——桥停后 bus.close 哨兵才不会被桥回填的迟到事件跟在后面）
+    try:
+        from src.quant_common.sse_bridge import _bridge
+        _bridge.stop()
+    except Exception:
+        pass
     # 批14（B-P0-1）：停机关总线——SSE 生成器收哨兵即退（配合 systemd --timeout-graceful-shutdown 5）
     from src.quant_common.eventbus import bus
     bus.close()
@@ -77,6 +83,9 @@ def shutdown():
 
 @app.on_event("startup")
 def startup():
+    # 批18：SSE 跨进程桥线程（仅 web-api 进程；Valkey 不可达时桥内退避重连，不阻 startup）
+    from src.quant_common.sse_bridge import ensure_bridge
+    ensure_bridge()
     # 批12A（A-P1-2）：清非终态扫码会话——发布重启杀 daemon 线程的死会话若不扫，
     # existing_ticket 会把死人还给前端"恢复"（白扫+频控困局加重版）
     try:

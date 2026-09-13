@@ -34,7 +34,7 @@
           <el-badge v-if="bellVisible" :value="notifCount" :hidden="!notifCount" :max="99">
             <el-button type="primary" circle :title="t('notify.title')" @click="notifDrawer = true">🔔</el-button>
           </el-badge>
-          <el-drawer v-model="notifDrawer" :title="t('notify.title')" size="480px">
+          <el-drawer v-model="notifDrawer" :title="t('notify.title')" size="480px" @open="loadNotifs">
             <div style="display: flex; justify-content: flex-end; margin-bottom: var(--sp-2)">
               <el-button v-if="notifCount" size="small" type="primary" @click="onAckAll">{{ t('notify.ackAll') }}</el-button>
             </div>
@@ -195,7 +195,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe, getNotifications, ackAllNotifications, meOnce, resetMeCache } from '../api'
-import api, { getStrategies, getFactorList } from '../api'
+import api, { getStrategies, getFactorList, sse } from '../api'
 import { setLang, LANGUAGES } from '../i18n'
 import Avatar from '../components/Avatar.vue'
 import Profile from '../views/Profile.vue'
@@ -346,7 +346,17 @@ const goCategory = c => router.push(goCategoryPath(c))   // wd-20 §2.6：映射
 loadHealth()
 loadPerms()
 onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000); loadDynamicIndex() })
-onUnmounted(() => { if (notifTimer) clearInterval(notifTimer) })
+onUnmounted(() => { if (notifTimer) clearInterval(notifTimer); offNotifSse?.() })
+
+// ——— 批18：通知 SSE 实时化（信号帧→400ms 去抖重拉；60s 轮询留作兜底纠偏） ———
+let notifDebounce = null
+let offNotifSse = null
+offNotifSse = sse.subscribe((ev) => {
+  if (ev.event !== 'data' || ev.data?.type !== 'notification') return
+  // 去抖（盲审A-P2-2/B-P1-3）：突发 K 帧合并为一次拉取，防并发请求群+乱序回退
+  if (notifDebounce) clearTimeout(notifDebounce)
+  notifDebounce = setTimeout(loadNotifs, 400)
+})
 
 const onLangChange = v => setLang(v)
 const logout = async () => {
