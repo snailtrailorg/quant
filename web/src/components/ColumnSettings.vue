@@ -6,9 +6,11 @@
     <template #reference>
       <el-button circle :title="t('cols.settings')"><el-icon><Setting /></el-icon></el-button>
     </template>
-    <el-checkbox-group v-model="visible">
-      <el-checkbox v-for="c in columns" :key="c.key" :value="c.key" class="col-opt">{{ c.label }}</el-checkbox>
-    </el-checkbox-group>
+    <div style="max-height: 320px; overflow-y: auto">
+      <el-checkbox-group v-model="visible">
+        <el-checkbox v-for="c in columns" :key="c.key" :value="c.key" class="col-opt">{{ c.label }}</el-checkbox>
+      </el-checkbox-group>
+    </div>
     <el-divider style="margin: var(--sp-2) 0" />
     <el-button link type="primary" size="small" @click="resetDefault">{{ t('cols.reset') }}</el-button>
   </el-popover>

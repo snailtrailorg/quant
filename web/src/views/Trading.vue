@@ -108,7 +108,7 @@
         <!-- 批17 17A：列宽拖拽+持久化；17B 列显隐（时间类低频列默认隐） -->
         <TableShell :data="ordersData.orders || []" size="small" storage-key="trading-orders">
           <el-table-column v-if="orderOn('ts')" prop="ts" :label="t('trading.time')" min-width="140" />
-          <el-table-column v-if="orderOn('symbol')" prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
+          <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
           <el-table-column v-if="orderOn('action')" prop="action" :label="t('trading.direction')" min-width="80">
             <template #default="{ row }">
               <!-- BUY=买入红(A股习惯)/SELL=卖出绿;中文化 05 §5.2 要点 3 -->
@@ -164,8 +164,7 @@ const ordersData = ref({})
 
 // 批17 17B：委托表列显隐（方案圈定——时间类低频列默认隐；全列可配，无锁定列）
 const orderColDefs = computed(() => [
-  { key: 'ts', label: t('trading.time'), hidden: true },
-  { key: 'symbol', label: t('common.symbol') },
+  { key: 'ts', label: t('trading.time') },   // 盲审A-P2-9：委托表唯一时序锚，不默认隐
   { key: 'action', label: t('trading.direction') },
   { key: 'volume', label: t('trading.volume') },
   { key: 'price', label: t('trading.price') },

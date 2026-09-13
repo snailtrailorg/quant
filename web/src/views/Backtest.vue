@@ -21,7 +21,7 @@
         </div>
       </template>
       <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
-      <TableShell :data="filteredRuns" v-loading="loading" @row-click="goDetail" storage-key="backtest-list">
+      <TableShell :data="filteredRuns" :loading="loading" @row-click="goDetail" storage-key="backtest-list">
         <el-table-column prop="id" label="ID" min-width="70" />
         <el-table-column prop="strategy_id" :label="t('backtest.strategy')" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>

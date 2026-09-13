@@ -121,7 +121,7 @@ const runColDefs = computed(() => [
   { key: 'volatility', label: t('cols.volatility') },
   { key: 'win_rate', label: t('cols.winRate') },
   { key: 'max_drawdown', label: t('cols.maxDrawdown') },
-  { key: 'sharpe', label: t('backtest.sharpe'), hidden: true },
+  { key: 'sharpe', label: t('backtest.sharpe') },   // 盲审A-P2-9：夏普=核心指标不默认隐,
 ])
 const runVisible = ref([])
 const colOn = k => runVisible.value.includes(k)

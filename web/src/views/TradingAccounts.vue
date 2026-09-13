@@ -7,7 +7,7 @@
         <el-button type="primary" size="small" @click="showForm = true">{{ t('common.create') }}</el-button>
       </div>
     </template>
-    <TableShell :data="accounts" v-loading="loading" storage-key="trading-accounts">
+    <TableShell :data="accounts" :loading="loading" storage-key="trading-accounts">
       <el-table-column prop="id" label="ID" width="60" />
       <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="exchange" :label="t('tradingAccounts.exchange')" width="120" />

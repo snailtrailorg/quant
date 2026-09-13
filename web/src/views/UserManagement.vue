@@ -10,32 +10,35 @@
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('account.userMgmt') }}</span>
-                <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
+                <div style="display: flex; gap: 8px; align-items: center">
+                  <ColumnSettings storage-key="cols.users" :columns="userColDefs" v-model:visible="userVisible" />
+                  <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
+                </div>
               </div>
             </template>
           <TableShell :data="users" storage-key="users">
-            <el-table-column prop="id" label="ID" min-width="60" />
+            <el-table-column v-if="userColOn('id')" prop="id" label="ID" min-width="60" />
             <el-table-column prop="username" :label="t('account.username')" min-width="120" show-overflow-tooltip />
             <!-- 批16：+昵称/邮箱（后端已返回未显示） -->
-            <el-table-column prop="nickname" :label="t('cols.nickname')" min-width="120" show-overflow-tooltip>
+            <el-table-column v-if="userColOn('nickname')" prop="nickname" :label="t('cols.nickname')" min-width="120" show-overflow-tooltip>
               <template #default="{ row }">{{ row.nickname || '—' }}</template>
             </el-table-column>
-            <el-table-column prop="email" :label="t('cols.email')" min-width="180" show-overflow-tooltip>
+            <el-table-column v-if="userColOn('email')" prop="email" :label="t('cols.email')" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">{{ row.email || '—' }}</template>
             </el-table-column>
-            <el-table-column prop="role" :label="t('user.role')" min-width="100">
+            <el-table-column v-if="userColOn('role')" prop="role" :label="t('user.role')" min-width="100">
               <template #default="{ row }"><el-tag>{{ row.role }}</el-tag></template>
             </el-table-column>
-            <el-table-column :label="t('common.status')" min-width="100">
+            <el-table-column v-if="userColOn('status')" :label="t('common.status')" min-width="100">
               <template #default="{ row }">
                 <el-tag v-if="row.deactivated" type="info">{{ t('account.statusDeactivated') }}</el-tag>
                 <el-tag v-else :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="110">
+            <el-table-column v-if="userColOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="110">
               <template #default="{ row }">{{ (row.created_at || '').slice(0, 10) || '-' }}</template>   <!-- 到日 -->
             </el-table-column>
-            <el-table-column prop="last_login_at" :label="t('account.lastLogin')" min-width="160">
+            <el-table-column v-if="userColOn('last_login_at')" prop="last_login_at" :label="t('account.lastLogin')" min-width="160">
               <template #default="{ row }">{{ row.last_login_at || '-' }}</template>
             </el-table-column>
             <el-table-column :label="t('common.action')" min-width="110" fixed="right">
@@ -85,8 +88,9 @@
               </el-table-column>
               <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="160" />
               <el-table-column prop="expires_at" :label="t('account.inviteExpires')" min-width="160" />
-              <!-- 操作列动态显示：仅存在待注册邀请时才有撤销可操作，否则整列不渲染（空壳列无意义） -->
-              <el-table-column v-if="invites.some(i => i.status === 'pending')" :label="t('common.action')" min-width="150">
+              <!-- 盲审A-P1-3/B-P1-1 修：操作列恒显（原 v-if="有 pending" 是批16 仅撤销时的设计——
+                   删除按钮与 pending 无关，全过期/全撤销场景下不能失去清理入口）；撤销保留行级条件 -->
+              <el-table-column :label="t('common.action')" min-width="150">
                 <template #default="{ row }">
                   <div style="display: inline-flex; gap: 6px">
                     <el-button v-if="row.status === 'pending'" size="small" type="warning" @click="onRevoke(row)">{{ t('account.inviteRevoke') }}</el-button>
@@ -187,9 +191,23 @@ import { getUsers, getMe, getInvites, inviteUser, revokeInvite, batchDeleteInvit
 import api from '../api'
 import TabsShell from '../components/TabsShell.vue'
 import TableShell from '../components/TableShell.vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import PermMatrix from '../components/PermMatrix.vue'
+import { computed } from 'vue'
 
 const { t, locale } = useI18n()
+// 批17 17B 补接（盲审B-P2-5）：用户表列显隐——ID/创建时间默认隐（方案 17B 圈定，扫荡分工漏接）
+const userColDefs = computed(() => [
+  { key: 'id', label: 'ID', hidden: true },
+  { key: 'nickname', label: t('cols.nickname') },
+  { key: 'email', label: t('cols.email') },
+  { key: 'role', label: t('user.role') },
+  { key: 'status', label: t('common.status') },
+  { key: 'created_at', label: t('common.createdAt'), hidden: true },
+  { key: 'last_login_at', label: t('account.lastLogin') },
+])
+const userVisible = ref([])
+const userColOn = k => userVisible.value.includes(k)
 const tabs = [
   { key: 'users', i18nKey: 'um.tabUsers' },
   { key: 'groups', i18nKey: 'um.tabGroups' },
@@ -318,7 +336,7 @@ const onRevoke = async (row) => {
     ElMessage.success(t('account.inviteRevoked'))
     invites.value = (await getInvites()).items || []
   } catch (e) {
-    if (e === 'cancel') return
+    if (e === 'cancel' || e === 'close') return   // 盲审B-P2-4：ESC/X reject 'close' 不算失败
     ElMessage.error(apiErr(e, t('common.operationFailed')))
   }
 }

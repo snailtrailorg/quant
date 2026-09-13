@@ -57,7 +57,7 @@
             </template>
           </el-table-column>
           <el-table-column v-if="colOn('category')" prop="category" :label="t('log.notifyCategory')" min-width="100" />
-          <el-table-column v-if="colOn('title')" prop="title" :label="t('log.titleCol')" min-width="200" show-overflow-tooltip />
+          <el-table-column prop="title" :label="t('log.titleCol')" min-width="200" show-overflow-tooltip />
           <el-table-column v-if="colOn('body')" prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
           <el-table-column v-if="colOn('dispatch')" :label="t('alerts.dispatchCol')" min-width="140">
             <template #default="{ row }">
@@ -125,7 +125,6 @@ const { t } = useI18n()
 const notifyColDefs = computed(() => [
   { key: 'level', label: t('log.level') },
   { key: 'category', label: t('log.notifyCategory') },
-  { key: 'title', label: t('log.titleCol') },
   { key: 'body', label: t('log.content') },
   { key: 'dispatch', label: t('alerts.dispatchCol'), hidden: true },
   { key: 'created_at', label: t('common.time') },

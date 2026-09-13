@@ -3,7 +3,8 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('reconcile.title') }}</span>
-        <div>
+        <div style="display: flex; gap: 8px; align-items: center">
+          <ColumnSettings storage-key="cols.reconcile-diff" :columns="recColDefs" v-model:visible="recVisible" />
           <el-button size="small" @click="openManual = true">{{ t('reconcile.manualOrder') }}</el-button>
           <el-button size="small" type="warning" @click="onReset">{{ t('reconcile.resetBtn') }}</el-button>
           <el-button type="primary" :loading="rerunning" @click="rerun">{{ t('reconcile.rerun') }}</el-button>
@@ -73,6 +74,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import ColumnSettings from '../components/ColumnSettings.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getReconcile } from '../api'
@@ -98,6 +100,15 @@ const openDetail = row => { detailRow.value = row; detailVisible.value = true }
 import { h } from 'vue'
 import { ElButton, ElTag } from 'element-plus'
 const { withWidths } = useV2ColWidths('reconcile-diff')   // 批17 17A：拖拽宽+持久化
+// 批17 17B 补接（盲审B-P2-5）：v2 差异表列显隐——filter 在 withWidths 前（symbol/差异/处置/操作恒显）
+const recColDefs = computed(() => [
+  { key: 'issue_type', label: t('reconcile.issueType') },
+  { key: 'broker_qty', label: t('reconcile.brokerQty') },
+  { key: 'derived_qty', label: t('reconcile.derivedQty') },
+  { key: 'first_seen', label: t('reconcile.firstSeen'), hidden: true },   // 方案默认隐
+  { key: 'updated_at', label: t('cols.actionTime') },
+])
+const recVisible = ref([])
 const issueCols = computed(() => withWidths([
   { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: estColWidth('Symbol', sample(diffRows.value, 'symbol')) },
   { key: 'issue_type', dataKey: 'issue_type', title: t('reconcile.issueType'), width: estColWidth(t('reconcile.issueType'), sample(diffRows.value, 'issue_type').map(issueTypeLabel)),
@@ -130,7 +141,7 @@ const issueCols = computed(() => withWidths([
       }
       return h('span', { style: 'color:var(--text-secondary);font-size:var(--fs-foot)' }, rowData.handled_by || '—')
     } },
-]))
+].filter(c => !recColDefs.value.some(d => d.key === c.key) || recVisible.value.includes(c.key))))
 const hasIssues = computed(() => diffRows.value.some(r => r.status === 'open'))
 const summary = computed(() => hasIssues.value
   ? t('reconcile.openCount', { n: diffRows.value.filter(r => r.status === 'open').length })

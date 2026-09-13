@@ -22,7 +22,7 @@
       <el-col :span="6"><el-card shadow="never"><div style="color:var(--text-secondary)">{{ t('dataIntegrity.completeRate') }}</div><div style="font-size: 24px">{{ completePct }}%</div></el-card></el-col>
     </el-row>
 
-    <TableShell :data="items" v-loading="loading" style="width: 100%" height="500" storage-key="data-integrity">
+    <TableShell :data="items" :loading="loading" style="width: 100%" height="500" storage-key="data-integrity">
       <el-table-column prop="symbol" :label="t('common.symbol')" min-width="120" />
       <el-table-column prop="local_count" :label="t('dataIntegrity.localCount')" min-width="100" />
       <el-table-column prop="first" :label="t('dataIntegrity.first')" min-width="120" />

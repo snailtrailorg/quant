@@ -20,7 +20,7 @@
       </div>
     </el-card>
     <!-- 批17 TableShell：列宽拖拽+持久化（批16 试点 border 升级为全站机制的首两表） -->
-    <TableShell :data="configs" v-loading="loading" storage-key="sync-config">
+    <TableShell :data="configs" :loading="loading" storage-key="sync-config">
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
       <el-table-column v-if="colOn('data_type')" prop="data_type" :label="t('dataManage.category')" min-width="100">
         <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
