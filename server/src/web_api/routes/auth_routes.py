@@ -357,9 +357,9 @@ def profile_api(payload: dict = Depends(require_authenticated)):
     # 批20 20B：市场操作权限五键（批15 单源逐键；role 用 DB role——JWT 陈旧角色防漂移，盲审A-P2-6）
     market_op = {}
     try:
-        from src.data_platform.perms import market_op_allowed
+        from src.data_platform.perms import market_op_allowed, _MARKET_OP_KEYS
         role = payload.get("db_role") or payload.get("role") or r[2]
-        for mk in ("astock", "convertible", "etf", "binance_perp", "okx_perp"):
+        for mk in _MARKET_OP_KEYS:   # 单源五键（盲审B-P2-4：防第二份清单漂移）
             market_op[mk] = bool(market_op_allowed(r[0], role, mk))
     except Exception:
         pass   # 权限面故障不挡资料展示（chips 空=前端省略）
@@ -438,7 +438,7 @@ def email_change_confirm_api(req: EmailConfirmReq):
                 conn.rollback()   # 并发双 confirm：后到者见 used=true——幂等拒
                 raise ApiError(400, "TOKEN_INVALID_OR_EXPIRED", "链接已使用")
             conn.commit()
-        audit_log(row[0], "email_change", f"{(old[0] if old else '') or '-'}->{new_email}")
+        audit_log(row[0], "email_change", "email_change", f"{(old[0] if old else '') or '-'}->{new_email}")
         return {"status": "changed", "email": new_email}
     except ApiError:
         raise

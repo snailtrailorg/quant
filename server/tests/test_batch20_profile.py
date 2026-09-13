@@ -176,10 +176,54 @@ class TestEmailChangeConfirm:
         assert r.status_code == 200 and r.json()["email"] == "new@x.com"
         conn.commit.assert_called_once()
         al.assert_called_once()
-        assert al.call_args[0][0] == "u1" and "old@x.com->new@x.com" in al.call_args[0][2]
+        assert al.call_args[0][0] == "u1" and al.call_args[0][2] == "email_change" \
+               and "old@x.com->new@x.com" in al.call_args[0][3]   # 盲审B-P3-6：变更入 detail 位
 
     def test_token_without_user_id_rejected(self, client):
         """invite 场景 token 无 user_id——防串用（盲审A-P3）。"""
         with patch("src.web_api.auth.verify_token", return_value={"id": 1, "user_id": None, "email": "x@x.com"}):
             r = client.post("/api/user/email-change/confirm", json={"token": "tok"})
         assert r.status_code == 400
+
+
+class TestConfirmEdge:
+    """盲审A-P2-1：第四防线（23505→409）与 token 无效态零覆盖补齐。"""
+
+    def _t(self):
+        return {"id": 77, "user_id": 1, "email": "new@x.com"}
+
+    def test_token_invalid_expired_400(self, client):
+        """verify_token 返回 None（used/expired/错 kind/不存在同语义）→ 400 库零触碰。"""
+        with patch("src.web_api.auth.verify_token", return_value=None):
+            r = client.post("/api/user/email-change/confirm", json={"token": "tok"})
+        assert r.status_code == 400 and r.json().get("code") == "TOKEN_INVALID_OR_EXPIRED"
+
+    def test_unique_violation_races_to_409(self, client):
+        """窗口竞态：UPDATE 撞唯一约束（psycopg 裸异常带 pgcode 23505）→ 409 非 500。"""
+        class _UniqueViolation(Exception):
+            def __init__(self):
+                self.orig = MagicMock(pgcode="23505")
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        conn.__exit__.return_value = False
+        conn.execute.side_effect = [
+            MagicMock(fetchone=lambda: None),          # 占用空（发起时无冲突）
+            _UniqueViolation(),                         # UPDATE users 撞唯一约束
+        ]
+        with patch("src.web_api.auth.verify_token", return_value=self._t()), \
+             patch("src.web_api.routes.auth_routes.get_conn", return_value=conn):
+            r = client.post("/api/user/email-change/confirm", json={"token": "tok"})
+        assert r.status_code == 409 and r.json().get("code") == "EMAIL_TAKEN"
+        conn.commit.assert_not_called()
+
+
+class TestEmailTemplate:
+    """盲审B-P0：改邮箱邮件 URL 必须真实渲染（{{url}} 撞 .format 转义=字面 {url} 的历史坑）。"""
+
+    def test_url_rendered_not_literal(self):
+        from src.email_service import EMAIL_CHANGE_TPL, _render
+        for lang in ("zh", "en"):
+            subject, body = _render(EMAIL_CHANGE_TPL, lang, url="http://x/email-confirm?token=T")
+            assert "http://x/email-confirm?token=T" in body, f"{lang} body 未渲染 url"
+            assert "{url}" not in body, f"{lang} body 含字面 {{url}}（.format 转义坑）"
+            assert "{btn_red}" not in body

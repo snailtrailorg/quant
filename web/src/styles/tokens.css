@@ -11,6 +11,7 @@
   font-family: "JBMono Web";
   src: url("/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
   font-weight: 400; font-display: swap;
+  --grad-auth: linear-gradient(135deg, #0f1a30, #2E6BF0);   /* 批20：暗色登录系渐变（P2-3）*/
 }
 @font-face {
   font-family: "JBMono Web";

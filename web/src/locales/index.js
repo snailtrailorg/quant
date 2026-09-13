@@ -129,8 +129,6 @@ export default {
     emailChg: {   // 批20 20C：改邮箱（文案经文案师）
       title: '修改邮箱', newEmail: '新邮箱', password: '当前密码（验证身份用）',
       sent: '确认邮件已发到新邮箱 {email}，去该邮箱点邮件里的链接，修改才会生效。没收到请查看垃圾箱，或稍后再试。',
-      sameAsCurrent: '新邮箱与当前邮箱相同，请填写其他邮箱',
-      occupied: '该邮箱已被使用，请填写其他邮箱',
     },
     emailConfirm: {
       title: '确认新邮箱', verifying: '正在验证链接...',
@@ -1081,6 +1079,8 @@ export default {
       PASSWORD_NO_LETTER: '密码需包含字母',
       PASSWORD_NO_DIGIT: '密码需包含数字',
       OLD_PASSWORD_WRONG: '旧密码错误',
+      EMAIL_TAKEN: '该邮箱已被使用，请填写其他邮箱', SAME_AS_CURRENT: '新邮箱与当前邮箱相同，请填写其他邮箱',
+      ACCOUNT_GONE: '账号已注销或停用，邮箱未修改', ACCOUNT_UNAVAILABLE: '账号不可用',
       USERNAME_EXISTS: '用户名已存在',
       USER_NOT_FOUND: '用户不存在',
       SELF_MUTATION_FORBIDDEN: '不能修改或删除当前登录的账户',
@@ -1314,8 +1314,6 @@ export default {
     emailChg: {
       title: 'Change Email', newEmail: 'New Email', password: 'Current Password (to verify it\'s you)',
       sent: 'Confirmation email sent to {email}. Open that inbox and click the link to complete the change. If it doesn\'t arrive, check spam or try again later.',
-      sameAsCurrent: 'This is already your current email — enter a different one',
-      occupied: 'This email is already in use — enter a different one',
     },
     emailConfirm: {
       title: 'Confirm New Email', verifying: 'Verifying the link...',
@@ -2261,6 +2259,8 @@ export default {
       PASSWORD_NO_LETTER: 'Password must contain letters',
       PASSWORD_NO_DIGIT: 'Password must contain digits',
       OLD_PASSWORD_WRONG: 'Old password is incorrect',
+      EMAIL_TAKEN: 'This email is already in use — enter a different one', SAME_AS_CURRENT: 'This is already your current email — enter a different one',
+      ACCOUNT_GONE: 'Account deactivated or deleted — email unchanged', ACCOUNT_UNAVAILABLE: 'Account unavailable',
       USERNAME_EXISTS: 'Username already exists',
       USER_NOT_FOUND: 'User not found',
       SELF_MUTATION_FORBIDDEN: 'Cannot modify or delete your own account',

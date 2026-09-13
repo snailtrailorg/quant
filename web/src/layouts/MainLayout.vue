@@ -240,7 +240,7 @@ const profileDlg = ref(false)
 const profileTab = ref('basic')
 let openedByQuery = false   // 盲审A-P2-10：深链开的弹窗随 query 消失而关（后退语义）；下拉开的与 URL 无关不受牵连
 watch(() => route.query.profile, v => {
-  if (v && ['basic', 'im', 'pwd'].includes(v)) {
+  if (v && ['basic', 'im', 'pwd', 'perms'].includes(v)) {   // 批20：第四权限 tab 入深链白名单
     profileTab.value = v; profileDlg.value = true; openedByQuery = true
   } else if (!v && openedByQuery) {
     profileDlg.value = false; openedByQuery = false

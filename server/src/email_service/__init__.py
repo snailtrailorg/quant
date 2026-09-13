@@ -335,12 +335,29 @@ async def send_password_reset_email(email: str, token: str, request_base: str = 
     return True
 
 
-# 批20：改邮箱确认邮件（验证成功才改——文案经文案师；正文带 1 小时时效对齐找回密码格式）
+# 批20：改邮箱确认邮件（验证成功才改——文案经文案师；正文带 1 小时时效对齐找回密码格式）。
+# 盲审B-P0：`{url}` 单花括号（{{}} 是 .format 转义→字面 {url} 永不渲染）；HTML 按钮对齐 RESET_TPL（B-P2-5）
 EMAIL_CHANGE_TPL = {
     "zh": {"subject": "人工智能开发学习平台 · 修改邮箱",
-           "body": "您正在把平台账号的邮箱改为这个邮箱，点击下面的链接确认：\n{{url}}\n链接 1 小时内有效。\n如果不是您本人操作，请忽略此邮件。"},
+           "body": """<html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>📧 修改邮箱</h2>
+        <p>您正在把平台账号的邮箱改为这个邮箱，点击下面的链接确认：</p>
+        <p style="margin: 20px 0;">
+            <a href="{url}" {btn_red}>确认新邮箱</a>
+        </p>
+        <p style="color: #666; font-size: 14px;">链接 1 小时内有效。</p>
+        <p style="color: #999; font-size: 12px;">如果不是您本人操作，请忽略此邮件。</p>
+    </body></html>"""},
     "en": {"subject": "AI Development Learning · Email Change",
-           "body": "You are changing your platform account email to this address. Click the link below to confirm:\n{{url}}\nLink valid for 1 hour.\nIf this wasn't you, please ignore this email."},
+           "body": """<html><body style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>📧 Email Change</h2>
+        <p>You are changing your platform account email to this address. Click below to confirm:</p>
+        <p style="margin: 20px 0;">
+            <a href="{url}" {btn_red}>Confirm New Email</a>
+        </p>
+        <p style="color: #666; font-size: 14px;">Link valid for 1 hour.</p>
+        <p style="color: #999; font-size: 12px;">If this wasn't you, please ignore this email.</p>
+    </body></html>"""},
 }
 
 

@@ -176,6 +176,7 @@
 
         <div v-else>
           <!-- 批20 20B：权限概览（market_op 五键 chips + 玻璃盒三组——数据 getMe 新鲜拉，方案 v2） -->
+          <template v-if="Object.keys(me.market_op || {}).length">
           <h3 style="font-size: 16px; margin: 0 0 12px">{{ t('profile.marketOpTitle') }}</h3>
           <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-4)">
             <el-tag v-for="(ok, mk) in me.market_op || {}" :key="mk"
@@ -183,6 +184,7 @@
               {{ t('perm.mk_' + mk) }} · {{ ok ? t('perm.allow') : t('perm.deny') }}
             </el-tag>
           </div>
+          </template>
           <el-divider />
           <h3 style="font-size: 16px; margin: 0 0 12px">{{ t('layout.myPerms') }}</h3>
           <div v-if="permBox.base.length" style="margin-bottom: 10px">
