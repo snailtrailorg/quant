@@ -25,6 +25,7 @@ class RiskDecision:
     reason: str
     severity: Level = "info"
     adjusted: dict | None = None  # B8 风控覆写（修正后的 order，如超仓位截断 volume；None=不覆写）
+    rule: str | None = None  # 批19：命中规则码（UPPER_SNAKE；放行=None）——risk_log.rule 溯源
 
 
 @dataclass
@@ -242,17 +243,17 @@ class RiskControl:
         except Exception as e:
             # Valkey 不可达：按熔断处理（SB2，更保守——fail-closed）
             logger.error("熔断状态读取失败，按熔断拒单: %s", e)
-            return RiskDecision(approved=False, reason=f"熔断状态不可读（Valkey 故障），保守拒单: {e}", severity="critical")
+            return RiskDecision(approved=False, reason=f"熔断状态不可读（Valkey 故障），保守拒单: {e}", severity="critical", rule="HALT_UNREADABLE")
         if halted:
-            return RiskDecision(approved=False, reason=f"熔断中: {self.halt_reason()}", severity="critical")
+            return RiskDecision(approved=False, reason=f"熔断中: {self.halt_reason()}", severity="critical", rule="HALTED")
 
         # 2. 实盘开关（三级 AND：.env 总闸 + Web 分项 live_trading_config）
         symbol = order.get("symbol", "")
         market = self._market_of(symbol)
         if market is None:
-            return RiskDecision(approved=False, reason=f"未授权实盘品种或 A 股只读: {symbol}", severity="critical")
+            return RiskDecision(approved=False, reason=f"未授权实盘品种或 A 股只读: {symbol}", severity="critical", rule="MARKET_UNAUTHORIZED")
         if not self.is_live_trading_allowed(market):
-            return RiskDecision(approved=False, reason=f"实盘开关未开: {market}（需 .env ENABLE_LIVE_TRADING=true 且 Web 分项开启）", severity="warn")
+            return RiskDecision(approved=False, reason=f"实盘开关未开: {market}（需 .env ENABLE_LIVE_TRADING=true 且 Web 分项开启）", severity="warn", rule="LIVE_SWITCH_OFF")
 
         # 2.5 市场操作权限（批15 market_op 维；SELL/平仓完全豁免——F-31 同哲学：准入拦
         # 开仓，平仓=减风险方向；operator 缺失的 SELL 同样放行，旧 --id 路径持仓可止损。
@@ -264,30 +265,30 @@ class RiskControl:
                 if not operator:
                     return RiskDecision(approved=False,
                         reason="订单缺 operator（旧 --id 路径或异常构造，fail-closed 拒单）",
-                        severity="critical")
+                        severity="critical", rule="OPERATOR_MISSING")
                 role_of = self._role_of(operator)
                 if role_of is None or not market_op_allowed(operator, role_of, market):
                     return RiskDecision(approved=False,
-                        reason=f"市场操作权限拒绝: {market}（operator={operator}）", severity="warn")
+                        reason=f"市场操作权限拒绝: {market}（operator={operator}）", severity="warn", rule="MARKET_OP_DENIED")
         except Exception as e:
             return RiskDecision(approved=False,
-                reason=f"市场操作权限检查异常（fail-closed）: {e}", severity="critical")
+                reason=f"市场操作权限检查异常（fail-closed）: {e}", severity="critical", rule="MARKET_OP_ERROR")
 
         # 3. 全局风控
         state = self._get_global_state(account)
         # SB1（F-29）fail-closed：快照数据源故障/无数据时拒绝一切新单（故障时保护必须更紧不能更松）
         if not state.available:
-            return RiskDecision(approved=False, reason="风控状态不可用（快照数据源故障或无数据，fail-closed），等待快照恢复", severity="critical")
+            return RiskDecision(approved=False, reason="风控状态不可用（快照数据源故障或无数据，fail-closed），等待快照恢复", severity="critical", rule="SNAPSHOT_UNAVAILABLE")
         global_rules = self._rules.get("global", {})
         if state.total_drawdown >= global_rules.get("max_drawdown", 0.15):
             # P0 修复（2026-08-20 双盲审计 F5.2）：总回撤熔断曾连 SELL/止损一起拒——触线后
             # 只能持仓看戏，与 F-31 同错。对齐日亏语义：只禁开仓，平仓放行。
             if str(order.get("action", "")).upper() != "SELL":
-                return RiskDecision(approved=False, reason=f"总回撤 {state.total_drawdown:.1%} 超限，禁止开仓（平仓放行）", severity="critical")
+                return RiskDecision(approved=False, reason=f"总回撤 {state.total_drawdown:.1%} 超限，禁止开仓（平仓放行）", severity="critical", rule="MAX_DRAWDOWN")
         if state.daily_loss >= global_rules.get("daily_loss_limit", 0.05):
             # SB2（F-31）：日亏限额只禁开仓，SELL/平仓放行——否则触发限额后连止损都做不了
             if str(order.get("action", "")).upper() != "SELL":
-                return RiskDecision(approved=False, reason=f"单日亏损 {state.daily_loss:.1%} 超限，禁止开仓（平仓放行）", severity="warn")
+                return RiskDecision(approved=False, reason=f"单日亏损 {state.daily_loss:.1%} 超限，禁止开仓（平仓放行）", severity="warn", rule="DAILY_LOSS_LIMIT")
 
         # 4. 分市场检查
         if ".BINANCE" in symbol or ".OKX" in symbol or "PERP" in symbol:
@@ -303,9 +304,9 @@ class RiskControl:
         price = float(order.get("price", 0) or 0)
         volume = float(order.get("volume", 0) or 0)
         if volume <= 0:
-            return RiskDecision(approved=False, reason=f"委托数量无效: {volume}", severity="critical")
+            return RiskDecision(approved=False, reason=f"委托数量无效: {volume}", severity="critical", rule="INVALID_VOLUME")
         if price <= 0:
-            return RiskDecision(approved=False, reason="委托价格无效（缺失则无法评估金额，fail-closed）", severity="critical")
+            return RiskDecision(approved=False, reason="委托价格无效（缺失则无法评估金额，fail-closed）", severity="critical", rule="INVALID_PRICE")
         # SC3（F-28 频次护栏）：max_trades_per_day 实装——按 order_log 当日有效单计数
         strategy_id = order.get("strategy_id")
         max_trades = rules.get("max_trades_per_day", 0)
@@ -322,11 +323,11 @@ class RiskControl:
                 if n >= max_trades:
                     return RiskDecision(approved=False,
                                         reason=f"当日已下 {n} 单达上限 {max_trades}（max_trades_per_day）",
-                                        severity="warn")
+                                        severity="warn", rule="MAX_TRADES_PER_DAY")
             except Exception as e:
                 # 计数失败 fail-closed（PG 故障时 _get_global_state 已先拒，这里是双保险）
                 logger.warning("max_trades_per_day 计数失败（fail-closed 拒单）: %s", e)
-                return RiskDecision(approved=False, reason=f"交易频次校验失败: {e}", severity="critical")
+                return RiskDecision(approved=False, reason=f"交易频次校验失败: {e}", severity="critical", rule="TRADE_COUNT_ERROR")
         # P2 修复（2026-08-20 双盲审计 F5.1）：single_position_pct 原只有默认值零判定——
         # 规则表展示存在但闸不存在（认知误导）。实装：BUY 后标的市值/账户总值 超限拒单。
         if str(order.get("action", "")).upper() == "BUY":
@@ -338,7 +339,7 @@ class RiskControl:
                 if total_val > 0 and after / total_val > pct_limit * 1.05:   # 5% 容差防边界抖动
                     return RiskDecision(approved=False,
                                         reason=f"单标的仓位 {after/total_val:.1%} 将超限 {pct_limit:.0%}（single_position_pct）",
-                                        severity="warn")
+                                        severity="warn", rule="SINGLE_POSITION_PCT")
             except Exception as e:
                 logger.warning("single_position_pct 检查失败（放行——暴露度计算依赖快照，极端故障由 fail-closed 兜）: %s", e)
         # #29 风控覆写：单笔金额超限截断 volume（不只 reject，能修正）
@@ -347,9 +348,9 @@ class RiskControl:
         if price > 0 and amount > max_amount:
             new_vol = int(max_amount / price)
             if new_vol <= 0:
-                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}，截断后 volume=0", severity="warn")
+                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}，截断后 volume=0", severity="warn", rule="MAX_SINGLE_AMOUNT")
             adjusted = {**order, "volume": new_vol}
-            return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限，截断 volume {int(volume)}->{new_vol}", adjusted=adjusted, severity="warn")
+            return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限，截断 volume {int(volume)}->{new_vol}", adjusted=adjusted, severity="warn", rule="MAX_SINGLE_AMOUNT")
         return RiskDecision(approved=True, reason="场内风控通过")
 
     def _check_crypto(self, order: dict) -> RiskDecision:
@@ -357,12 +358,12 @@ class RiskControl:
         rules = self._rules["crypto"]
         leverage = order.get("leverage", 1)
         if leverage > rules["leverage_max"]:
-            return RiskDecision(approved=False, reason=f"杠杆 {leverage}x 超上限 {rules['leverage_max']}x", severity="warn")
+            return RiskDecision(approved=False, reason=f"杠杆 {leverage}x 超上限 {rules['leverage_max']}x", severity="warn", rule="LEVERAGE_MAX")
         # 日亏损熔断
         daily_limit = rules.get("daily_loss_limit", 0.05)
         state = self._get_global_state("")
         if state.daily_loss >= daily_limit:
-            return RiskDecision(approved=False, reason=f"加密日亏损 {state.daily_loss:.1%} 超限 {daily_limit:.0%}", severity="critical")
+            return RiskDecision(approved=False, reason=f"加密日亏损 {state.daily_loss:.1%} 超限 {daily_limit:.0%}", severity="critical", rule="CRYPTO_DAILY_LOSS")
         # 单笔金额截断（P3-9 补全，复用 max_single_amount）
         price = float(order.get("price", 0) or 0)
         volume = float(order.get("volume", 0) or 0)
@@ -371,8 +372,8 @@ class RiskControl:
         if price > 0 and amount > max_amount:
             new_vol = int(max_amount / price)
             if new_vol <= 0:
-                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}", severity="warn")
-            return RiskDecision(approved=True, reason=f"单笔截断 {int(volume)}->{new_vol}", adjusted={**order, "volume": new_vol}, severity="warn")
+                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}", severity="warn", rule="MAX_SINGLE_AMOUNT")
+            return RiskDecision(approved=True, reason=f"单笔截断 {int(volume)}->{new_vol}", adjusted={**order, "volume": new_vol}, severity="warn", rule="MAX_SINGLE_AMOUNT")
         return RiskDecision(approved=True, reason="加密风控通过")
 
     # ── 全局状态（从数据中台/账户读取，简化） ──

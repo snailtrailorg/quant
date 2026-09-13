@@ -124,6 +124,10 @@ const _actZh = v => ({ reject: t('risk.logReject'), adjust: t('risk.logAdjust'),
 const riskLogCols = computed(() => withWidths([
   { key: 'ts', dataKey: 'ts', title: t('common.time'), width: estColWidth(t('common.time'), sample(riskLogs.value, 'ts')) },
   { key: 'action', dataKey: 'action', title: t('risk.logAction'), width: estColWidth(t('risk.logAction'), sample(riskLogs.value, 'action').map(_actZh)), cellRenderer: ({ cellData }) => _actZh(cellData) },
+  { key: 'rule', dataKey: 'rule', title: t('risk.logRule'),
+    width: estColWidth(t('risk.logRule'),
+      [...sample(riskLogs.value, 'rule'), 'MAX_DRAWDOWN', 'SNAPSHOT_UNAVAILABLE'].filter(Boolean)),
+    cellRenderer: ({ cellData }) => cellData || '—' },   // 批19：命中规则码溯源（放行=-；存量行 NULL 亦 -）
   { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: estColWidth('Symbol', sample(riskLogs.value, 'symbol')) },
   { key: 'detail', dataKey: 'detail', title: t('risk.logDetail'), minWidth: 200, flexGrow: 1, ellipsis: true },
   { key: 'severity', dataKey: 'severity', title: t('risk.logSeverity'), width: estColWidth(t('risk.logSeverity'), sample(riskLogs.value, 'severity')) },
