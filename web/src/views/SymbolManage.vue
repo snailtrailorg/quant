@@ -10,7 +10,7 @@
           <el-input v-model="q" :placeholder="t('symbol.phSearch')" style="width: 180px" clearable @keyup.enter="onSearch" />
           <el-button type="primary" @click="onSearch">{{ t('common.search') }}</el-button>
           <RefreshBtn @refresh="load" />
-          <el-button type="primary" @click="onSyncAll" :loading="allRunning">{{ t('symbol.syncAll') }}</el-button>
+          <IconBtn :icon="Refresh" :title="t('symbol.syncAll')" @click="onSyncAll" :loading="allRunning" />
         </div>
       </div>
     </template>
@@ -71,6 +71,8 @@ import { ElMessage, ElMessageBox, ElButton, ElTag } from 'element-plus'
 import { estColWidth, sample } from '../utils/colwidth'
 import { useV2ColWidths } from '../utils/v2colwidth'
 import RefreshBtn from '../components/RefreshBtn.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Refresh } from '@element-plus/icons-vue'
 import { apiErr } from '../api'
 import api from '../api'
 

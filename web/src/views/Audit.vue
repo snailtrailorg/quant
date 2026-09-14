@@ -22,7 +22,7 @@
       <el-table-column prop="target" :label="t('audit.target')" min-width="140" />
       <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
     </TableShell>
-    <el-button size="small" type="primary" @click="exportCsv">{{ t('audit.exportCsv') }}</el-button>
+    <IconBtn size="small" :icon="Download" :title="t('audit.exportCsv')" @click="exportCsv" />
 </el-card>
 </template>
 
@@ -32,6 +32,8 @@ import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { getAudit } from '../api'
+import IconBtn from '../components/IconBtn.vue'
+import { Download } from '@element-plus/icons-vue'
 const { t } = useI18n()
 const logs = ref([])
 const filterActor = ref('')

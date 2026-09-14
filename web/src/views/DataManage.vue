@@ -66,11 +66,11 @@
         </template>
       </el-table-column>
       <!-- 操作列 280=按钮实宽（同步 60+管理标的 88+编辑 60+间距 24+cell 内边距 24=256，留 loading 旋转余量）——4 字按钮超档位公式假设，估窄即换行 -->
-      <el-table-column prop="actions" :label="t('common.action')" width="280">
+      <el-table-column prop="actions" :label="t('common.action')" width="140">
         <template #default="{ row }">
-          <el-button type="primary" @click="onTrigger(row)" :loading="row.status === 'running'" :disabled="navReadonly">{{ t('dataManage.syncBtn') }}</el-button>
-          <el-button type="primary" @click="goSymbols(row)" v-if="isPerSymbol(row.id)">{{ t('dataManage.manageSymbols') }}</el-button>
-          <el-button type="primary" @click="openCron(row)">{{ t('common.edit') }}</el-button>
+          <IconBtn size="small" :icon="Refresh" :title="t('dataManage.syncBtn')" @click="onTrigger(row)" :loading="row.status === 'running'" :disabled="navReadonly" />
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openCron(row)" />
+          <IconBtn size="small" :icon="Setting" :title="t('dataManage.manageSymbols')" @click="goSymbols(row)" v-if="isPerSymbol(row.id)" />
         </template>
       </el-table-column>
     </TableShell>
@@ -167,6 +167,8 @@ import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import TableShell from '../components/TableShell.vue'
 import RefreshBtn from '../components/RefreshBtn.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Refresh, Setting, Edit } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'

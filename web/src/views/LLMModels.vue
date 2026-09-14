@@ -1,6 +1,6 @@
 <template>
   <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.configTitle') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.llm-models" :columns="modelColDefs" v-model:visible="modelVisible" /><el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></div></template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.configTitle') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.llm-models" :columns="modelColDefs" v-model:visible="modelVisible" /><IconBtn :icon="Plus" :title="t('common.create')" @click="onAdd" /></div></div></template>
     <el-card shadow="never" style="margin-bottom: 12px">
       <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.usageTitle') }}<RefreshBtn @refresh="loadUsage" style="margin-left: var(--sp-2)" /></div></template>
       <TableShell :data="usage.month" storage-key="llm-usage">
@@ -40,9 +40,9 @@
       <el-table-column prop="actions" :label="t('common.action')" width="250">
         <template #default="{ row }">
           <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
-            <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-            <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-            <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+            <IconBtn size="small" :icon="VideoPlay" :title="t('common.test')" @click="onTest(row.id)" :loading="testing === row.id" />
+            <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onEdit(row)" />
+            <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')" @click="onDelete(row.id)" />
           </div>
         </template>
       </el-table-column>
@@ -89,7 +89,7 @@
       <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160"><template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template></el-table-column>
       <el-table-column v-if="canBudgetEdit" prop="actions" :label="t('common.action')" width="110">
         <template #default="{ row }">
-          <el-button type="primary" @click="onBudgetEdit(row)">{{ t('common.edit') }}</el-button>
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onBudgetEdit(row)" />
         </template>
       </el-table-column>
     </TableShell>
@@ -119,6 +119,8 @@ import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import RefreshBtn from '../components/RefreshBtn.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, VideoPlay, Edit, Delete } from '@element-plus/icons-vue'
 import {apiErr,  getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage, meOnce } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { fmtTime } from '../utils/fmtTime'

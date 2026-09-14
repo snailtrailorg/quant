@@ -1,6 +1,6 @@
 <template>
   <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('dataSources.title') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.datasources" :columns="colDefs" v-model:visible="visible" /><el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></div></template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('dataSources.title') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.datasources" :columns="colDefs" v-model:visible="visible" /><IconBtn :icon="Plus" :title="t('common.create')" @click="onAdd" /></div></div></template>
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
       <TableShell :data="usage.today" storage-key="datasource-usage">
@@ -28,9 +28,9 @@
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" width="250">
         <template #default="{ row }">
-          <el-button type="primary" @click="onTest(row.id)" :loading="testing === row.id">{{ t('common.test') }}</el-button>
-          <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button type="danger" @click="onDelete(row.id)">{{ t('common.delete') }}</el-button>
+          <IconBtn size="small" :icon="VideoPlay" :title="t('common.test')" @click="onTest(row.id)" :loading="testing === row.id" />
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onEdit(row)" />
+          <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')" @click="onDelete(row.id)" />
         </template>
       </el-table-column>
     </TableShell>
@@ -97,6 +97,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, VideoPlay, Edit, Delete } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import {apiErr,  getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'

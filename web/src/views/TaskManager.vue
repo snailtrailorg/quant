@@ -14,7 +14,7 @@
           </el-select>
           <ColumnSettings storage-key="cols.tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
           <RefreshBtn @refresh="load" />
-          <el-button type="warning" @click="onDetectStuck" v-if="role==='admin'">{{ t('task.detectStuck') }}</el-button>
+          <IconBtn v-if="role==='admin'" type="warning" :icon="ZoomIn" :title="t('task.detectStuck')" @click="onDetectStuck" />
         </div>
       </div>
     </template>
@@ -41,12 +41,12 @@
       <el-table-column v-if="colOn('end_time')" prop="end_time" :label="t('cols.endTime')" min-width="160">
         <template #default="{ row }">{{ row.end_time ? fmtTime.full(row.end_time) : '-' }}</template>
       </el-table-column>
-      <el-table-column prop="actions" :label="t('common.action')" width="250">
+      <el-table-column prop="actions" :label="t('common.action')" width="130">
         <template #default="{ row }">
           <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
-            <el-button type="primary" @click="onDetail(row.id)">{{ t('common.detail') }}</el-button>
-            <el-button type="warning" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)">{{ t('task.terminate') }}</el-button>
-            <el-button type="danger" @click="onForceDelete(row.id)" v-if="role==='admin'">{{ t('task.forceDelete') }}</el-button>
+            <IconBtn size="small" :icon="View" :title="t('common.detail')" @click="onDetail(row.id)" />
+            <IconBtn size="small" type="danger" :icon="SwitchButton" :title="t('task.terminate')" @click="onTerminate(row.id)" v-if="row.status==='running' && ['trader','admin'].includes(role)" />
+            <IconBtn size="small" type="danger" :icon="Delete" :title="t('task.forceDelete')" @click="onForceDelete(row.id)" v-if="role==='admin'" />
           </div>
         </template>
       </el-table-column>
@@ -76,6 +76,8 @@
 import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import RefreshBtn from '../components/RefreshBtn.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { ZoomIn, SwitchButton, Delete, View } from '@element-plus/icons-vue'
 import TableShell from '../components/TableShell.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted } from 'vue'

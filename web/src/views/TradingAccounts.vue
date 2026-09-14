@@ -4,7 +4,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('tradingAccounts.title') }}</span>
-        <el-button type="primary" size="small" @click="showForm = true">{{ t('common.create') }}</el-button>
+        <IconBtn :icon="Plus" :title="t('common.create')" @click="showForm = true" />
       </div>
     </template>
     <TableShell :data="accounts" :loading="loading" storage-key="trading-accounts">
@@ -26,8 +26,8 @@
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" width="150" fixed="right">
         <template #default="{ row }">
-          <el-button size="small" @click="edit(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="danger" @click="del(row)">{{ t('common.delete') }}</el-button>
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="edit(row)" />
+          <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="del(row)" />
         </template>
       </el-table-column>
     </TableShell>
@@ -57,6 +57,8 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, Edit, Delete } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { apiErr } from '../api'

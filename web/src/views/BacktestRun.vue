@@ -4,9 +4,9 @@
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('backtest.detailTitle', { id: $route.params.id }) }}</span>
         <el-button type="primary" @click="$router.back()">{{ t('common.return') }}</el-button>
-        <el-button type="success" @click="markVerified" :disabled="!run.strategy_config_id">{{ t('backtest.markVerified') }}</el-button>
+        <IconBtn type="success" :icon="CircleCheck" :title="t('backtest.markVerified')" @click="markVerified" :disabled="!run.strategy_config_id" />
         <!-- P2-5（05 §5.7 要点 4）：三级开关终点——以此结果创建实盘任务（预填策略/参数） -->
-        <el-button type="primary" @click="createLiveFromRun" :disabled="!run.strategy_config_id">{{ t('backtest.createLive') }}</el-button>
+        <IconBtn :icon="VideoPlay" :title="t('backtest.createLive')" @click="createLiveFromRun" :disabled="!run.strategy_config_id" />
       </div>
     </template>
 
@@ -32,7 +32,7 @@
           <span>
             <!-- 批17 17B：列显示配置（代码/操作列恒显不进 defs）；夏普=低频指标列默认隐 -->
             <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.backtest-run-symbols" :columns="runColDefs" v-model:visible="runVisible" /></span>
-            <el-button type="primary" @click="loadSummary" :loading="summaryLoading">{{ t('backtest.groupSummary') }}</el-button>
+            <IconBtn :icon="Files" :title="t('backtest.groupSummary')" @click="loadSummary" :loading="summaryLoading" />
           </span>
         </div>
       </template>
@@ -65,8 +65,8 @@
         </el-table-column>
         <el-table-column prop="actions" :label="t('common.action')" min-width="150">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click.stop="goView(row)">{{ t('backtest.viewBtn') }}</el-button>
-            <el-button size="small" @click.stop="metricsRow = row">{{ t('backtest.metricsBtn') }}</el-button>
+            <IconBtn size="small" :icon="View" :title="t('backtest.viewBtn')" @click.stop="goView(row)" />
+            <IconBtn size="small" :icon="DataAnalysis" :title="t('backtest.metricsBtn')" @click.stop="metricsRow = row" />
           </template>
         </el-table-column>
       </TableShell>
@@ -92,6 +92,8 @@
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { CircleCheck, VideoPlay, Files, View, DataAnalysis } from '@element-plus/icons-vue'
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'

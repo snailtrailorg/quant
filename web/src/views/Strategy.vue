@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('strategy.title') }}</span>
-        <el-button type="primary" @click="!navReadonly && openCreate()" :disabled="navReadonly">{{ t('strategy.create') }}</el-button>
+        <IconBtn :icon="Plus" :title="t('strategy.create')" @click="!navReadonly && openCreate()" :disabled="navReadonly" />
       </div>
     </template>
     <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
@@ -38,9 +38,9 @@
       <el-table-column prop="actions" :label="t('common.action')" min-width="260" fixed="right">
         <template #default="{ row }">
           <!-- 批16 v2：行内=回测+复制（迭代主路径）+编辑；删除收进编辑弹窗（盲审 A-P1-4） -->
-          <el-button type="primary" size="small" @click="runBacktest(row)" :disabled="navReadonly">{{ t('strategy.runBacktest') }}</el-button>
-          <el-button size="small" @click="onCopy(row)" :disabled="navReadonly">{{ t('common.copy') }}</el-button>
-          <el-button size="small" @click="openEdit(row)" :disabled="navReadonly">{{ t('common.edit') }}</el-button>
+          <IconBtn size="small" :icon="VideoPlay" :title="t('strategy.runBacktest')" @click="runBacktest(row)" :disabled="navReadonly" />
+          <IconBtn size="small" :icon="CopyDocument" :title="t('common.copy')" @click="onCopy(row)" :disabled="navReadonly" />
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openEdit(row)" :disabled="navReadonly" />
         </template>
       </el-table-column>
     </TableShell>
@@ -235,6 +235,8 @@ import PythonEditor from '../components/PythonEditor.vue'
 import CodeEditor from '../components/CodeEditor.vue'
 import TableShell from '../components/TableShell.vue'
 import RefreshBtn from '../components/RefreshBtn.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, VideoPlay, CopyDocument, Edit } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))

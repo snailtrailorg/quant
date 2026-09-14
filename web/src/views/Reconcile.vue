@@ -5,9 +5,9 @@
         <span>{{ t('reconcile.title') }}</span>
         <div style="display: flex; gap: 8px; align-items: center">
           <ColumnSettings storage-key="cols.reconcile-diff" :columns="recColDefs" v-model:visible="recVisible" />
-          <el-button size="small" @click="openManual = true">{{ t('reconcile.manualOrder') }}</el-button>
-          <el-button size="small" type="warning" @click="onReset">{{ t('reconcile.resetBtn') }}</el-button>
-          <el-button type="primary" :loading="rerunning" @click="rerun">{{ t('reconcile.rerun') }}</el-button>
+          <IconBtn :icon="DocumentAdd" :title="t('reconcile.manualOrder')" @click="openManual = true" />
+          <IconBtn type="warning" :icon="RefreshLeft" :title="t('reconcile.resetBtn')" @click="onReset" />
+          <IconBtn :icon="Refresh" :title="t('reconcile.rerun')" :loading="rerunning" @click="rerun" />
         </div>
       </div>
     </template>
@@ -75,6 +75,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { DocumentAdd, RefreshLeft, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getReconcile } from '../api'

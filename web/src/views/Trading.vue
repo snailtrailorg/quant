@@ -57,7 +57,7 @@
           </el-table-column>
           <el-table-column prop="actions" :label="t('common.action')" min-width="90">
             <template #default="{ row }">
-              <el-button type="primary" size="small" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>
+              <IconBtn size="small" :icon="View" :title="t('common.detail')" @click="gotoDetail(row.symbol)" />
             </template>
           </el-table-column>
         </TableShell>
@@ -191,7 +191,8 @@ import KpiCard from '../components/KpiCard.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import RefreshBtn from '../components/RefreshBtn.vue'
-import { QuestionFilled } from '@element-plus/icons-vue'
+import IconBtn from '../components/IconBtn.vue'
+import { QuestionFilled, View } from '@element-plus/icons-vue'
 const loadFailed = ref(false)
 const lastUpdate = ref('—')
 const load = async () => {

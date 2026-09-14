@@ -105,7 +105,7 @@
             <el-button size="small" :type="row.enabled ? 'warning' : 'success'" @click="toggleIm(row)">
               {{ row.enabled ? t('common.stop') : t('common.start') }}
             </el-button>
-            <el-button size="small" type="danger" @click="delIm(row)">{{ t('common.delete') }}</el-button>
+            <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="delIm(row)" />
           </div>
         </template>
       </el-table-column>
@@ -245,6 +245,8 @@ import TabsShell from '../components/TabsShell.vue'
 import TableShell from '../components/TableShell.vue'
 import api, { apiErr, sse, getMe } from '../api'
 import { validatePassword } from '../password'
+import IconBtn from '../components/IconBtn.vue'
+import { Delete } from '@element-plus/icons-vue'
 
 const props = defineProps({
   initialTab: { type: String, default: 'basic' },   // 深链定位（?profile=im → 'im'）

@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('factors.title') }}</span>
-        <el-button type="primary" @click="openCreate">{{ t('factors.create') }}</el-button>
+        <IconBtn :icon="Plus" :title="t('factors.create')" @click="openCreate" />
       </div>
     </template>
     <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
@@ -41,7 +41,7 @@
       <el-table-column prop="actions" :label="t('common.action')" min-width="110" fixed="right">
         <template #default="{ row }">
           <!-- 批16：操作收编——行内只留「编辑」（预置因子=只读详情）；试算/删除进编辑弹窗内 -->
-          <el-button size="small" type="primary" @click="openEdit(row)">{{ t('common.edit') }}</el-button>
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openEdit(row)" />
         </template>
       </el-table-column>
     </TableShell>
@@ -172,6 +172,8 @@ import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 import DslEditor from '../components/DslEditor.vue'
 import TableShell from '../components/TableShell.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, Edit } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const factors = ref([])

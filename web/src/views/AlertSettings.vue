@@ -34,9 +34,9 @@
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" width="200">
         <template #default="{ row }">
-          <el-button size="small" type="primary" @click="edit(row)">{{ t('common.edit') }}</el-button>
-          <el-button size="small" type="warning" :loading="testing[row.id]" @click="test(row)">{{ t('alerts.testBtn') }}</el-button>
-          <el-button size="small" type="danger" @click="del(row)">{{ t('common.delete') }}</el-button>
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="edit(row)" />
+          <IconBtn size="small" :icon="VideoPlay" :loading="testing[row.id]" :title="t('alerts.testBtn')" @click="test(row)" />
+          <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="del(row)" />
         </template>
       </el-table-column>
     </TableShell>
@@ -110,6 +110,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 import EmptyState from '../components/EmptyState.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Edit, VideoPlay, Delete } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const CATS = ['risk', 'task', 'data', 'system']

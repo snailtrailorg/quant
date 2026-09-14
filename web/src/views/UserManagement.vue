@@ -12,7 +12,7 @@
                 <span>{{ t('account.userMgmt') }}</span>
                 <div style="display: flex; gap: 8px; align-items: center">
                   <ColumnSettings storage-key="cols.users" :columns="userColDefs" v-model:visible="userVisible" />
-                  <el-button type="primary" @click="inviteDlg = true">{{ t('account.invite') }}</el-button>
+                  <IconBtn :icon="Plus" :title="t('account.invite')" @click="inviteDlg = true" />
                 </div>
               </div>
             </template>
@@ -45,8 +45,8 @@
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
                   <!-- 批16 裁定#15：删除收编编辑弹窗（原行内双按钮） -->
-                  <el-button size="small" type="primary" @click="openEdit(row)"
-                             :disabled="locked(row)" :title="lockedReason(row)">{{ t('common.edit') }}</el-button>
+                  <IconBtn size="small" :icon="Edit" :title="lockedReason(row) || t('common.edit')"
+                           :disabled="locked(row)" @click="openEdit(row)" />
                 </div>
               </template>
             </el-table-column>
@@ -93,8 +93,8 @@
               <el-table-column prop="actions" :label="t('common.action')" min-width="150">
                 <template #default="{ row }">
                   <div style="display: inline-flex; gap: 6px">
-                    <el-button v-if="row.status === 'pending'" size="small" type="warning" @click="onRevoke(row)">{{ t('account.inviteRevoke') }}</el-button>
-                    <el-button size="small" type="danger" plain @click="onDeleteInvite(row)">{{ t('common.delete') }}</el-button>
+                    <IconBtn v-if="row.status === 'pending'" size="small" :icon="RefreshLeft" type="warning" :title="t('account.inviteRevoke')" @click="onRevoke(row)" />
+                    <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="onDeleteInvite(row)" />
                   </div>
                 </template>
               </el-table-column>
@@ -122,7 +122,7 @@
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('um.tabGroups') }}</span>
-                <el-button type="primary" @click="openGroupEdit(null)">{{ t('um.addGroup') }}</el-button>
+                <IconBtn :icon="Plus" :title="t('um.addGroup')" @click="openGroupEdit(null)" />
               </div>
             </template>
             <TableShell :data="groups" storage-key="groups">
@@ -138,8 +138,8 @@
             <el-table-column prop="actions" :label="t('common.action')" min-width="180">
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
-                  <el-button size="small" type="primary" @click="openGroupEdit(row)">{{ t('common.edit') }}</el-button>
-                  <el-button size="small" type="danger" :disabled="row.builtin" @click="onDeleteGroup(row)">{{ t('common.delete') }}</el-button>
+                  <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openGroupEdit(row)" />
+                  <IconBtn size="small" :icon="Delete" type="danger" :disabled="row.builtin" :title="t('common.delete')" @click="onDeleteGroup(row)" />
                 </div>
               </template>
             </el-table-column>
@@ -193,6 +193,8 @@ import TabsShell from '../components/TabsShell.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import PermMatrix from '../components/PermMatrix.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, Edit, Delete, RefreshLeft } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 
 const { t, locale } = useI18n()

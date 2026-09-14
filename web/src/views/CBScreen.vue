@@ -21,9 +21,7 @@
             <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: var(--sp-2)">
               <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
             </el-select>
-            <el-button type="primary" size="small" :disabled="!checked.size || !selectedPool" @click="addToPool">
-              {{ t('screener.addToPool') }}{{ checked.size ? ` (${checked.size})` : '' }}
-            </el-button>
+            <IconBtn size="small" :icon="Plus" :title="t('screener.addToPool') + (checked.size ? ' (' + checked.size + ')' : '')" :disabled="!checked.size || !selectedPool" @click="addToPool" />
           </div>
         </div>
       </template>
@@ -66,6 +64,8 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const rows = ref([])

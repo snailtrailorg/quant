@@ -39,7 +39,7 @@
           </el-table-column>
           <el-table-column prop="actions" :label="t('common.action')" width="90">
             <template #default="{ row }">
-              <el-button size="small" type="danger" @click="clearOverride(row)">{{ t('perm.clear') }}</el-button>
+              <IconBtn size="small" :icon="Delete" type="danger" :title="t('perm.clear')" @click="clearOverride(row)" />
             </template>
           </el-table-column>
         </TableShell>
@@ -72,6 +72,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'
 import PermMatrix from '../components/PermMatrix.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Delete } from '@element-plus/icons-vue'
 const { t } = useI18n()
 
 const mode = ref('role')

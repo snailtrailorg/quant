@@ -12,7 +12,7 @@ import { computed, ref, watch } from 'vue'
 const props = defineProps({
   url: { type: String, default: '' },        // 头像 URL（空=按名字随机系统图标）
   name: { type: String, default: '?' },      // 用户名/昵称（随机种子 + 首字母兜底）
-  size: { type: String, default: 'md' },     // sm=24 md=40 lg=64
+  size: { type: String, default: 'md' },     // sm=24 icon=32 md=40 lg=64
 })
 
 const imgFailed = ref(false)
@@ -23,7 +23,7 @@ function hashName(str) {
   for (const c of (str || '?')) h = ((h << 5) - h + c.charCodeAt(0)) | 0
   return Math.abs(h)
 }
-const sizes = { sm: 24, md: 40, lg: 64 }
+const sizes = { sm: 24, icon: 32, md: 40, lg: 64 }
 const sizePx = computed(() => (sizes[props.size] || 40) + 'px')
 const fontSize = computed(() => Math.round((sizes[props.size] || 40) * 0.42) + 'px')
 // 缺省：36 个卡通图标按名字确定性选择（同一用户每次相同）

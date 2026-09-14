@@ -16,7 +16,7 @@
             <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: var(--sp-2)">
               <el-option v-for="st in ['running','done','failed','pending']" :key="st" :value="st" :label="st" />
             </el-select>
-            <el-button type="primary" @click="showForm = true" :disabled="navReadonly">{{ t('backtest.create') }}</el-button>
+            <IconBtn :icon="Plus" :title="t('backtest.create')" @click="showForm = true" :disabled="navReadonly" />
           </span>
         </div>
       </template>
@@ -67,8 +67,8 @@
         <el-table-column prop="actions" :label="t('common.action')" min-width="190" fixed="right">
           <template #default="{ row }">
             <!-- 批16：行内留详情+更多；终止/删除（后端 DELETE 现无按钮，批16 新接）收进弹窗 -->
-            <el-button type="primary" @click.stop="goDetail(row)">{{ t('common.detail') }}</el-button>
-            <el-button @click.stop="moreRow = row">{{ t('common.more') }}</el-button>
+            <IconBtn size="small" :icon="View" :title="t('common.detail')" @click.stop="goDetail(row)" />
+            <IconBtn size="small" :icon="MoreFilled" :title="t('common.more')" @click.stop="moreRow = row" />
           </template>
         </el-table-column>
       </TableShell>
@@ -165,6 +165,8 @@ import { bs, pct } from '../utils/backtestSummary'
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, View, MoreFilled } from '@element-plus/icons-vue'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
 import api from '../api'
 import ParameterForm from '../components/ParameterForm.vue'

@@ -5,7 +5,7 @@
         <span>{{ t('liveTask.title') }}</span>
         <div style="display: flex; gap: 8px; align-items: center">
           <ColumnSettings storage-key="cols.live-tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
-          <el-button type="primary" @click="openCreate">{{ t('liveTask.create') }}</el-button>
+          <IconBtn :icon="Plus" :title="t('liveTask.create')" @click="openCreate" />
         </div>
       </div>
     </template>
@@ -69,7 +69,7 @@
                对齐 Backtest 同批「更多」模式） -->
           <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
-          <el-button v-if="row.status === 'running' && row.frozen" type="warning" size="small" @click="onUnfreeze(row)" :disabled="navReadonly">{{ t('liveTask.unfreeze') }}</el-button>
+          <IconBtn size="small" type="warning" :icon="Unlock" :title="t('liveTask.unfreeze')" v-if="row.status === 'running' && row.frozen" @click="onUnfreeze(row)" :disabled="navReadonly" />
           <el-button @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
           <el-button v-if="row.status !== 'running'" @click="openMore(row)" :disabled="navReadonly">{{ t('common.more') }}</el-button>
         </template>
@@ -143,6 +143,8 @@ import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, Unlock } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 
 const router = useRouter()

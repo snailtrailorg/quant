@@ -7,9 +7,9 @@
           <!-- 批16：后端有端点全站无按钮的两操作（用户裁定补） -->
           <!-- 批17 17B：列显示配置（ID/名称/操作列恒显不进 defs）；描述=低频宽列默认隐 -->
           <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.pool-main" :columns="poolColDefs" v-model:visible="poolVisible" /></span>
-          <el-button size="small" :disabled="navReadonly" @click="syncMinuteAll">{{ t('pool.syncMinuteBtn') }}</el-button>
-          <el-button size="small" :disabled="navReadonly" @click="backfillFactor">{{ t('pool.backfillFactorBtn') }}</el-button>
-          <el-button type="primary" @click="showDialog = true" :disabled="navReadonly">{{ t('pool.createTitle') }}</el-button>
+          <IconBtn :icon="Timer" :title="t('pool.syncMinuteBtn')" :disabled="navReadonly" @click="syncMinuteAll" />
+          <IconBtn :icon="MagicStick" :title="t('pool.backfillFactorBtn')" :disabled="navReadonly" @click="backfillFactor" />
+          <IconBtn :icon="Plus" :title="t('pool.createTitle')" @click="showDialog = true" :disabled="navReadonly" />
         </div>
       </div>
     </template>
@@ -38,8 +38,8 @@
                   </el-table-column>
                   <el-table-column prop="actions" :label="t('common.action')" min-width="150">
                     <template #default="{ row: s }">
-                      <el-button type="primary" @click="gotoDetail(s.symbol)">{{ t('common.detail') }}</el-button>
-                      <el-button type="danger" @click="removeSymbol(row.id, s.symbol)">✕</el-button>
+                      <IconBtn size="small" :icon="View" :title="t('common.detail')" @click="gotoDetail(s.symbol)" />
+                      <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.remove')" @click="removeSymbol(row.id, s.symbol)" />
                     </template>
                   </el-table-column>
                 </TableShell>
@@ -48,7 +48,7 @@
             <!-- 单标的添加 -->
             <div style="display: flex; gap: 8px; align-items: center; margin-top: var(--sp-2)">
               <el-input v-model="addSymbolInput[row.id]" :placeholder="t('pool.phAddSymbol')" style="width: 220px" size="small" />
-              <el-button type="success" size="small" @click="addSymbol(row.id)">+</el-button>
+              <IconBtn size="small" :icon="Plus" :title="t('pool.add')" @click="addSymbol(row.id)" />
             </div>
           </div>
         </template>
@@ -75,8 +75,8 @@
       <el-table-column v-if="colOn('description')" prop="description" min-width="220" show-overflow-tooltip :label="t('common.description')" />
       <el-table-column prop="actions" :label="t('common.action')" min-width="180">
         <template #default="{ row }">
-          <el-button type="primary" size="small" @click="editPool(row)">{{ t('common.edit') }}</el-button>
-          <el-button type="danger" size="small" @click="delPool(row)">{{ t('common.delete') }}</el-button>
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="editPool(row)" />
+          <IconBtn size="small" :icon="Delete" :title="t('common.delete')" type="danger" @click="delPool(row)" />
         </template>
       </el-table-column>
     </TableShell>
@@ -99,8 +99,8 @@
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" min-width="100">
         <template #default="{ row }">
-          <el-button v-if="row.source === 'direct'" type="danger" size="small" :disabled="navReadonly"
-                     @click="removeMinuteSymbol(row.symbol)">✕</el-button>
+          <IconBtn v-if="row.source === 'direct'" size="small" :icon="Delete" type="danger" :disabled="navReadonly"
+                   :title="t('common.remove')" @click="removeMinuteSymbol(row.symbol)" />
           <span v-else style="color: var(--el-text-color-placeholder); font-size: 12px">{{ t('pool.sourcePool') }}</span>
         </template>
       </el-table-column>
@@ -150,6 +150,8 @@ import { ElMessage } from 'element-plus'
 import api, { getPools, createPoolApi, deletePoolApi, getMinuteSymbols, addMinuteSymbol, delMinuteSymbol } from '../api'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, Timer, MagicStick, Edit, Delete, View } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))

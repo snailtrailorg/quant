@@ -4,7 +4,7 @@
        批17 17C：触发器图标化（Setting 圆钮+title——工具位统一图标形态，用户裁定） -->
   <el-popover :width="240" trigger="click">
     <template #reference>
-      <el-button circle :title="t('cols.settings')"><el-icon><Setting /></el-icon></el-button>
+      <IconBtn :icon="Filter" :title="t('cols.settings')" />
     </template>
     <div style="max-height: 320px; overflow-y: auto">
       <el-checkbox-group v-model="visible">
@@ -19,7 +19,8 @@
 <script setup>
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Setting } from '@element-plus/icons-vue'
+import { Filter } from '@element-plus/icons-vue'
+import IconBtn from './IconBtn.vue'
 
 const props = defineProps({
   storageKey: { type: String, required: true },

@@ -1,6 +1,6 @@
 <template>
   <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('riskRule.title') }}<el-button type="primary" @click="onAdd">{{ t('common.create') }}</el-button></div></template>
+    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('riskRule.title') }}<IconBtn :icon="Plus" :title="t('common.create')" @click="onAdd" /></div></template>
     <!-- 批17 17A：列宽拖拽+持久化 -->
     <TableShell :data="rules" storage-key="risk-rules">
       <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
@@ -14,8 +14,8 @@
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" min-width="180">
         <template #default="{ row }">
-          <el-button type="primary" @click="onEdit(row)">{{ t('common.edit') }}</el-button>
-          <el-button type="danger" @click="onDelete(row.id)" :disabled="navReadonly">{{ t('common.delete') }}</el-button>
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onEdit(row)" />
+          <IconBtn size="small" :icon="Delete" :title="t('common.delete')" type="danger" @click="onDelete(row.id)" :disabled="navReadonly" />
         </template>
       </el-table-column>
     </TableShell>
@@ -45,6 +45,8 @@ import { ref, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { fmtTime } from '../utils/fmtTime'
 import TableShell from '../components/TableShell.vue'
+import IconBtn from '../components/IconBtn.vue'
+import { Plus, Edit, Delete } from '@element-plus/icons-vue'
 import {apiErr,  getRiskRules, getRiskRuleTypes, createRiskRule, updateRiskRule, deleteRiskRule } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 

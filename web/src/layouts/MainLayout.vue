@@ -1,39 +1,27 @@
 <template>
   <el-container style="height: 100vh">
     <!-- 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽顶到最左 + 标题居左；侧栏移出文档流改 hover 覆盖式 -->
-    <el-header :class="{ 'pinned-shift': railPinned }" style="background: var(--bg-surface); border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; justify-content: space-between" @mouseenter="railOpen = false">
+    <el-header height="48px" :class="{ 'pinned-shift': railPinned }" style="background: var(--bg-surface); border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; justify-content: space-between" @mouseenter="railOpen = false">
       <div style="display: flex; align-items: center; gap: 12px">
         <!-- 钉死态隐藏（2026-09-10 四轮裁定）：侧栏 title 到顶顶替,避免双标题 -->
         <span v-show="!railPinned" class="app-title">{{ t('app.title') }}</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 16px">
-          <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼）。2026-09-10 用户裁定：图标按钮（原文字按钮）+title 提示 -->
-          <el-button type="danger" size="small" circle :title="t('risk.halt')" @click="onEmergencyHalt"><el-icon><SwitchButton /></el-icon></el-button>
+      <div style="display: flex; align-items: center; gap: 24px">
+          <!-- 批21 标题栏圆钮统一（2026-09-14 用户五裁定）：功能分组 + 全站圆钮统一 32px（IconBtn）；组内 gap 16px、组间 gap 24px -->
+          <!-- ═ 安全组 ═ -->
+          <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼） -->
+          <IconBtn type="danger" :icon="SwitchButton" :title="t('risk.halt')" @click="onEmergencyHalt" />
 
-          <!-- P1-4：数据健康灯（admin-only 端点,非 admin 隐藏——B-P2-8 修正恒黄误报） -->
-          <el-popover v-if="role === 'admin'" placement="bottom-end" :width="320" trigger="click">
-            <template #reference>
-              <span :style="{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }">
-                <span class="dot" :class="healthLevel" style="width:10px;height:10px;border-radius:50%;display:inline-block" />
-                <span style="font-size: 12px">{{ t('layout.healthLight') }}</span>
-              </span>
-            </template>
-            <b>{{ t('layout.healthSummary') }}</b>
-            <div v-for="h in healthItems" :key="h.k" style="display:flex; justify-content:space-between; padding:4px 0; font-size:13px">
-              <span>{{ h.k }}</span><span :class="h.ok ? 'up' : 'down'">{{ h.v }}</span>
-            </div>
-            <div style="color: var(--text-secondary); font-size: 12px; margin-top: 6px">{{ t('layout.healthNote') }}</div>
-          </el-popover>
-
-          <el-select v-model="lang" @change="onLangChange" style="width: 110px">
-            <el-option v-for="l in LANGUAGES" :key="l.code" :label="l.label" :value="l.code" />
-          </el-select>
-
-          <!-- 通知铃铛（按角色可见类别；viewer 无可见类别不显示） -->
-          <!-- P1-6（05 §5.0-2）：通知中心 480 抽屉替代 popover（结构化 body+精确路由） -->
-          <el-badge v-if="bellVisible" :value="notifCount" :hidden="!notifCount" :max="99">
-            <el-button type="primary" circle :title="t('notify.title')" @click="notifDrawer = true">🔔</el-button>
-          </el-badge>
+          <!-- ═ 状态组（健康异常才现；保留 admin 门防非 admin 恒黄误报；空态不渲染防 viewer 多余组间 gap） ═ -->
+          <div v-if="bellVisible || (role === 'admin' && healthLevel !== 'ok')" style="display: flex; align-items: center; gap: 16px">
+            <IconBtn v-if="role === 'admin' && healthLevel !== 'ok'" :type="healthBtnType" :icon="Warning"
+                     :title="t('layout.healthWarn')" @click="$router.push('/observe?tab=health')" />
+            <!-- 通知铃铛（按角色可见类别；viewer 无可见类别不显示） -->
+            <!-- P1-6（05 §5.0-2）：通知中心 480 抽屉替代 popover（结构化 body+精确路由） -->
+            <el-badge v-if="bellVisible" :value="notifCount" :hidden="!notifCount" :max="99">
+              <IconBtn :icon="Bell" :title="t('notify.title')" @click="notifDrawer = true" />
+            </el-badge>
+          </div>
           <el-drawer v-model="notifDrawer" :title="t('notify.title')" size="480px" @open="loadNotifs">
             <div style="display: flex; justify-content: flex-end; margin-bottom: var(--sp-2)">
               <el-button v-if="notifCount" size="small" type="primary" @click="onAckAll">{{ t('notify.ackAll') }}</el-button>
@@ -53,27 +41,22 @@
             </div>
           </el-drawer>
 
-          <!-- 03 v2.1:AI 助手顶栏常驻入口(不占菜单位,全局只读工具)；2026-09-10 图标按钮统一 title 提示 -->
-          <el-button circle :title="t('nav.aiChat')" @click="$router.push('/chat')"><el-icon><ChatDotRound /></el-icon></el-button>
+          <!-- ═ 偏好组（语言/暗色乒乓，恢复到标题栏） ═ -->
+          <div style="display: flex; align-items: center; gap: 16px">
+            <IconBtn :title="langTitle" @click="toggleLang">{{ langLabel }}</IconBtn>
+            <IconBtn :icon="dark ? Sunny : Moon" :title="dark ? t('layout.toLight') : t('layout.toDark')" @click="onDark(!dark)" />
+          </div>
 
-          <!-- P3-8（09-B8）：帮助抽屉（全角色）+ P3-2 暗色切换（盯盘场景） -->
-          <el-button circle :title="t('layout.helpTitle')" @click="helpDrawer = true"><el-icon><QuestionFilled /></el-icon></el-button>
-          <el-drawer v-model="helpDrawer" :title="t('layout.helpTitle')" size="480px">
-            <Help />
-          </el-drawer>
-          <el-switch v-model="dark" :active-icon="Moon" :inactive-icon="Sunny" :title="t('layout.themeToggle')" @change="onDark" />
-
-          <!-- 用户区：头像 + 昵称下拉（个人中心/退出 + 我的权限玻璃盒，10 §4） -->
-          <el-dropdown trigger="click" @command="onUserCommand">
-            <div style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 8px; border-radius: 6px;">
-              <Avatar :url="avatarUrl" :name="nickname || username" size="sm" />
-              <span style="font-size: 14px">{{ nickname || username }}</span>
-            </div>
+          <!-- ═ 用户区（32px 头像圆钮触发下拉，最小暴露不显昵称） ═ -->
+          <el-dropdown trigger="click" @command="onSystemCommand">
+            <IconBtn :title="t('profile.title')">
+              <Avatar :url="avatarUrl" :name="nickname || username" size="icon" />
+            </IconBtn>
             <template #dropdown>
               <el-dropdown-menu>
-                <el-dropdown-item command="profile">{{ t('profile.title') }}</el-dropdown-item>
-                <el-dropdown-item command="myperms">{{ t('layout.myPerms') }}</el-dropdown-item>
-                <el-dropdown-item command="logout" divided>{{ t('user.logout') }}</el-dropdown-item>
+                <el-dropdown-item command="profile"><el-icon><User /></el-icon>{{ t('profile.title') }}</el-dropdown-item>
+                <el-dropdown-item command="ai"><el-icon><ChatDotRound /></el-icon>{{ t('nav.aiChat') }}</el-dropdown-item>
+                <el-dropdown-item command="logout" divided><el-icon><Back /></el-icon>{{ t('user.logout') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
           </el-dropdown>
@@ -94,7 +77,7 @@
                 width="200px" @mouseleave="!railPinned && (railOpen = false)">
         <!-- 2026-09-10 四轮裁定：title 恢复+到顶（钉死推挤顶栏时顶替其 title）；图钉 title 右侧右对齐；
              配色恢复深底浅字（同色一体方案撤回） -->
-        <el-header class="aside-brand">
+        <el-header class="aside-brand" height="48px">
           <span class="aside-brand-text">{{ t('app.title') }}</span>
           <button class="rail-pin" :class="{ active: railPinned }" :title="railPinned ? t('layout.unpin') : t('layout.pin')"
                   @click="togglePin" @mouseenter.stop @mouseleave.stop>
@@ -148,24 +131,6 @@
     </el-container>
     <!-- 批16 五批：个人中心弹窗唯一入口（v-if 挂载——关闭即卸载，Profile 内清理链随 onUnmounted 走） -->
     <Profile v-if="profileDlg" :initial-tab="profileTab" @close="onProfileClosed" @updated="onProfileUpdated" />
-    <!-- 我的权限玻璃盒（10 §4：被授予/拒绝的依据用户随时可见） -->
-  <el-dialog v-model="showMyPerms" :title="t('layout.myPerms')" width="480px">
-    <div style="margin-bottom: var(--sp-2); color: var(--text-secondary)">{{ t('layout.myPermsNote') }}</div>
-    <!-- W4 玻璃盒:分组+来源(role-base/user-override)+被拒项(10 §4 去黑箱化) -->
-    <div v-if="myPermGroups.base.length" style="margin-bottom: 10px">
-      <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeRole') }}</div>
-      <el-tag v-for="p in myPermGroups.base" :key="p" style="margin: 3px">{{ p }}</el-tag>
-    </div>
-    <div v-if="myPermGroups.override.length" style="margin-bottom: 10px">
-      <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeUser') }}</div>
-      <el-tag v-for="p in myPermGroups.override" :key="p" type="warning" style="margin: 3px">{{ p }}</el-tag>
-    </div>
-    <div v-if="myPermGroups.denied.length">
-      <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('layout.myPermsDenied') }}</div>
-      <el-tag v-for="p in myPermGroups.denied" :key="p" type="danger" effect="plain" style="margin: 3px">{{ p }}</el-tag>
-    </div>
-    <div v-if="!myPerms.length" style="color: var(--text-secondary)">—</div>
-  </el-dialog>
   <!-- ⌘K 全局搜索(P1-4/03 §3.3；wd-20 §2.6 WAI-ARIA combobox：roving ↑↓/Enter/Esc) -->
   <el-dialog v-model="cmdkVisible" :title="t('layout.search')" width="480px" :show-close="false" @opened="focusCmdk">
     <div role="combobox" aria-expanded="true" aria-haspopup="listbox" aria-label="global search">
@@ -186,18 +151,19 @@
 </template>
 
 <script setup>
-import { QuestionFilled, DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
+import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
-         ChatDotRound, User, SwitchButton } from '@element-plus/icons-vue'
+         ChatDotRound, Bell, User, SwitchButton, Back } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe, getNotifications, ackAllNotifications, meOnce, resetMeCache } from '../api'
 import api, { getStrategies, getFactorList, sse } from '../api'
-import { setLang, LANGUAGES } from '../i18n'
+import { setLang } from '../i18n'
 import Avatar from '../components/Avatar.vue'
+import IconBtn from '../components/IconBtn.vue'
 import Profile from '../views/Profile.vue'
 
 const { t, locale } = useI18n()
@@ -225,13 +191,12 @@ const loadPerms = async () => {
 }
 const navReadonly = computed(() => navMap.value[route.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'] === 'readonly')
 provide('navReadonly', navReadonly)
-const lang = ref(locale.value)
 
 getMe().then(me => { username.value = me.username; role.value = me.role; nickname.value = me.nickname || ''; avatarUrl.value = me.avatar_url || '' }).catch(e => { console.error(e); username.value = ''; role.value = '' })
-// 用户下拉命令（个人中心/退出）。批16 五批：profile 改弹窗（弹窗唯一入口，不再路由跳转）
-const onUserCommand = (cmd) => {
+// 用户下拉（批21：头像触发；个人中心/AI/退出）
+const onSystemCommand = (cmd) => {
   if (cmd === 'profile') { profileTab.value = 'basic'; profileDlg.value = true }
-  else if (cmd === 'myperms') { loadMyPerms(); showMyPerms.value = true }
+  else if (cmd === 'ai') router.push('/chat')
   else if (cmd === 'logout') logout()
 }
 
@@ -286,27 +251,9 @@ const togglePin = () => {
   localStorage.setItem('rail-pinned', railPinned.value ? '1' : '0')
 }
 const dark = ref(localStorage.getItem('theme-dark') === '1')
-const onDark = v => { document.documentElement.classList.toggle('dark', v); localStorage.setItem('theme-dark', v ? '1' : '0') }
+const onDark = v => { dark.value = v; document.documentElement.classList.toggle('dark', v); localStorage.setItem('theme-dark', v ? '1' : '0') }
 if (dark.value) document.documentElement.classList.add('dark')
-const helpDrawer = ref(false)
-const myPerms = ref([])
-const showMyPerms = ref(false)
-const myPermGroups = ref({ base: [], override: [], denied: [] })
-const loadMyPerms = async () => {
-  try {
-    const me = await meOnce()
-    myPerms.value = me.permissions || []
-    const src = me.perm_sources || {}
-    const denied = me.denied || []
-    myPermGroups.value = {
-      base: myPerms.value.filter(p => (src[p] || 'role-base') === 'role-base'),
-      override: myPerms.value.filter(p => src[p] === 'user-override'),
-      denied,
-    }
-  } catch {}
-}
 import { Moon, Sunny } from '@element-plus/icons-vue'
-import Help from '../views/Help.vue'
 
 // P1-4：急停（熔断=轻确认,04 §4.5——所有可登录角色可触发,后端 require_perm 兜底）
 const onEmergencyHalt = async () => {
@@ -316,18 +263,24 @@ const onEmergencyHalt = async () => {
     await riskHalt(); ElMessage.success(t('risk.halted'))
   } catch (e) { if (e?.response) ElMessage.error(String(e)) }
 }
-// P1-4：数据健康灯摘要（抽屉自含诊断;权限感知——不跨页路由）
+// P1-4：数据健康灯（批21 改：圆钮化 + 异常才显示 + 点击转健康页；popover 详情移除，只留 healthLevel 派生）
 const notifDrawer = ref(false)
 const healthLevel = ref('ok')
-const healthItems = ref([])
+const healthBtnType = computed(() => healthLevel.value === 'critical' ? 'danger' : 'warning')
 const loadHealth = async () => {
   try {
     const { getHealthComponents } = await import('../api')
-    const comps = await getHealthComponents()
-    const items = (comps.items || comps || []).map(c => ({ k: c.name || c.component || 'svc', ok: (c.status || 'ok') === 'ok', v: c.status || 'ok' }))
-    healthItems.value = items.slice(0, 8)
-    healthLevel.value = items.some(i => !i.ok) ? 'critical' : 'ok'
-  } catch { healthItems.value = [{ k: 'health', ok: false, v: '—' }]; healthLevel.value = 'warn' }
+    const snap = await getHealthComponents()
+    // /health/components 返回字典快照（非数组）——逐组件判健康（与 Health.vue 同口径）
+    const units = snap.units || {}, deps = snap.deps || {}, tasks = snap.tasks || {}
+    const unitDown = Object.values(units).some(u => u && u.ActiveState !== 'active')
+    const depDown = deps.postgres === false || deps.valkey === false
+    const hubLost = deps.valkey === true && !snap.hub
+    const taskFrozen = Object.values(tasks).some(t => t.frozen)
+    const txStale = !!(snap.db_idle_tx_stale)
+    healthLevel.value = (unitDown || depDown || hubLost) ? 'critical'
+      : (taskFrozen || txStale) ? 'warn' : 'ok'
+  } catch { healthLevel.value = 'warn' }
 }
 // runbook: web 长尾批 2026-09-01——通知表 code 字段已上(migration 0059),chip+一句话处置接线
 // W3：runbook 后端单源——懒挂 loadNotifs 首载（bellVisible 门内，viewer 不白请求）；
@@ -362,7 +315,10 @@ offNotifSse = sse.subscribe((ev) => {
   notifDebounce = setTimeout(loadNotifs, 400)
 })
 
-const onLangChange = v => setLang(v)
+// 批21：语言乒乓（真源 locale.value）；标题栏按钮显示目标语言
+const langLabel = computed(() => locale.value === 'zh' ? 'EN' : '中')
+const langTitle = computed(() => locale.value === 'zh' ? t('layout.toEn') : t('layout.toZh'))
+const toggleLang = () => setLang(locale.value === 'zh' ? 'en' : 'zh')
 const logout = async () => {
   try { await api.post('/auth/logout') } catch {}
   try { resetMeCache() } catch {}

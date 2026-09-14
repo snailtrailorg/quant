@@ -1164,9 +1164,11 @@ export default {
       halted: '已熔断', frozen: '数据冻结',
     },
     layout: {
-      pin: '固定', unpin: '自动隐藏', themeToggle: '切换深浅色',
-      healthLight: '健康', healthSummary: '服务健康摘要', healthNote: '详情见健康页（监控→健康）',
-      helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果', myPerms: '我的权限', myPermsNote: '以下为后端强制生效的权限键（菜单只是显性化）：', myPermsDenied: '被用户规则拒绝（角色有但被覆盖）：',
+      pin: '点击切换为固定', unpin: '点击切换为自动隐藏',
+      toEn: '点击切换为英文', toZh: '点击切换为中文',
+      toDark: '点击切换为深色', toLight: '点击切换为浅色',
+      healthWarn: '服务异常，点击查看健康详情',
+      helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
     },
     notify: {
       title: '通知',
@@ -2334,9 +2336,11 @@ export default {
       halted: 'halted', frozen: 'frozen',
     },
     layout: {
-      pin: 'Pin', unpin: 'Auto-hide', themeToggle: 'Toggle dark mode',
-      healthLight: 'Health', healthSummary: 'Service health summary', healthNote: 'Details in Health page (Observe → Health)',
-      helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results', myPerms: 'My permissions', myPermsNote: 'Backend-enforced permission keys (menus are visualization):', myPermsDenied: 'Denied by user rule (role has it, override blocks):',
+      pin: 'Pin sidebar', unpin: 'Auto-hide sidebar',
+      toEn: 'Switch to English', toZh: 'Switch to Chinese',
+      toDark: 'Switch to dark mode', toLight: 'Switch to light mode',
+      healthWarn: 'Service issue — click for health details',
+      helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
     },
     notify: {
       title: 'Notifications',
