@@ -82,6 +82,18 @@ def _prune_events() -> None:
         logger.debug("health_event 清理失败（表未建/PG 抖动，忽略）: %s", e)
 
 
+def _prune_metrics() -> None:
+    """system_metric 保留期清理（30 天，与 health_event 同款）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute("DELETE FROM system_metric WHERE ts < now() - (%s * interval '1 day')",
+                         (EVENT_RETENTION_DAYS,))
+            conn.commit()
+    except Exception as e:
+        logger.debug("system_metric 清理失败（表未建/PG 抖动，忽略）: %s", e)
+
+
 def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     """规则判定（纯函数，供测试）。返回 (findings, state)——state 为跨轮状态字典，
     由调用方持久化（R4/R6 需要连续轮次证据）。"""
@@ -139,6 +151,35 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
         if t.get("frozen"):
             out.append({"rule_id": "task_blind", "component": f"task-{tid}", "severity": "warning",
                         "detail": f"frozen=1 md={t.get('md')} lag={t.get('lag')}"})
+
+    # R8-R10 系统资源阈值（mem/disk/swap；阈值配置驱动 snap["thresholds"]，缺省回落硬编码；
+    #   各指标独立采集（周期不同）——某 kind None=证据缺失，只跳过该 kind）
+    res = snap.get("resources")
+    if res:
+        thr = snap.get("thresholds") or {"mem": {"warn": 0.6, "crit": 0.9},
+                                         "disk": {"warn": 0.8, "crit": 0.9},
+                                         "swap": {"warn": 0.8}}
+        for kind, comp, rule in (("mem", "memory", "mem_high"), ("swap", "swap", "swap_high")):
+            r = res.get(kind)
+            if not r or r.get("pct") is None:
+                continue
+            pct = r["pct"]
+            sev = "critical" if (thr[kind].get("crit") is not None and pct > thr[kind]["crit"]) \
+                else ("warning" if pct > thr[kind]["warn"] else None)
+            if sev:
+                out.append({"rule_id": rule, "component": comp, "severity": sev,
+                            "detail": f"{kind} used {pct:.1%}（阈值 {sev}）"})
+        # R9 磁盘逐挂载点判定（聚合求和会稀释单分区爆满——盲审 A-P1；component 带路径）
+        dthr = thr["disk"]
+        for p in (res.get("disk") or {}).get("paths") or []:
+            pct = p.get("pct")
+            if pct is None:
+                continue
+            sev = "critical" if (dthr.get("crit") is not None and pct > dthr["crit"]) \
+                else ("warning" if pct > dthr["warn"] else None)
+            if sev:
+                out.append({"rule_id": "disk_high", "component": f"disk:{p['path']}", "severity": sev,
+                            "detail": f"disk {p['path']} used {pct:.1%}（阈值 {sev}）"})
 
     return out, state
 
@@ -198,15 +239,26 @@ def run_check() -> dict:
                        if f["rule_id"] != "unit_restarted"}
             for key, f in current.items():
                 state_key = _STATE_PREFIX + f["rule_id"] + ":" + f["component"]
-                if not r.get(state_key):
+                # state 键值存 severity：首触发 / warn→critical 升级 = 新沿（重发通知）；
+                # 降级（critical→warn）只更新键值不重发（盲审 A-P3）；旧值 "1" 过渡=视为已触发
+                prev = r.get(state_key)
+                if not prev or (prev != f["severity"] and f["severity"] == "critical"):
                     new_events.append(f)
-                    r.set(state_key, "1", ex=7200)
-            # 恢复沿：state 键在而本次未触发。D-F5：units 采集失败时 unit_down 不判恢复（证据缺失≠恢复）
+                    r.set(state_key, f["severity"], ex=7200)
+                elif prev != f["severity"]:
+                    r.set(state_key, f["severity"], ex=7200)
+            # 恢复沿：state 键在而本次未触发。D-F5：采集失败时对应规则不判恢复（证据缺失≠恢复）
             units_evidence = bool(snap.get("units"))
+            _res = snap.get("resources") or {}
+            res_evidence = {"mem_high": _res.get("mem") is not None,
+                            "disk_high": _res.get("disk") is not None,
+                            "swap_high": _res.get("swap") is not None}
             for state_key in r.scan_iter(_STATE_PREFIX + "*", count=100):
                 token = state_key[len(_STATE_PREFIX):]
                 rule_id, _, component = token.partition(":")
                 if rule_id == "unit_down" and not units_evidence:
+                    continue
+                if rule_id in res_evidence and not res_evidence[rule_id]:
                     continue
                 if (rule_id, component) not in current:
                     r.delete(state_key)
@@ -235,8 +287,29 @@ def run_check() -> dict:
         _notify("recovery", f"[health] 恢复: {rec['component']} {rec['rule_id']}", "", code="health.recovery")
         _write_event(rec["rule_id"], rec["component"], "recovery", "")
 
+    # system_metric 采样（每 60s 落一行=最小采集周期；epoch 取模，重启免疫、免状态键；
+    #   各指标独立采集（周期不同）——未采集的 kind 落 NULL，series 查询端按行读各自列即可）
+    res = snap.get("resources")
+    if res and int(snap["ts"]) % 60 < 30:
+        try:
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO system_metric "
+                    "(ts, mem_total, mem_used, swap_total, swap_used, disk_total, disk_used) "
+                    "VALUES (to_timestamp(%s), %s, %s, %s, %s, %s, %s) "
+                    "ON CONFLICT (ts) DO NOTHING",
+                    (snap["ts"],
+                     (res.get("mem") or {}).get("total"), (res.get("mem") or {}).get("used"),
+                     (res.get("swap") or {}).get("total"), (res.get("swap") or {}).get("used"),
+                     (res.get("disk") or {}).get("total"), (res.get("disk") or {}).get("used")))
+                conn.commit()
+        except Exception as e:
+            logger.warning("system_metric 写入失败: %s", e)
+
     if int(snap["ts"]) % 86400 < 60:   # 每日一轮清理（epoch 取模，随 beat 周期命中一次）
         _prune_events()
+        _prune_metrics()
 
     return {"ts": snap["ts"], "active": len(findings), "new": len(new_events),
             "recovered": len(recovered)}

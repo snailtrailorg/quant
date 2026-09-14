@@ -146,6 +146,8 @@ def metrics():
 
 # --- 健康监控（arch-15 SM2：组件矩阵 + 事件流，admin）---
 
+_METRICS_CACHE: dict = {}   # /api/system/metrics 60s 进程缓存（=最小采集周期）
+
 @router.get("/api/health/components")
 def health_components_api(payload: dict = Depends(require_perm("system_config"))):
     """组件实时矩阵：collector 快照（systemd unit / 依赖 / hub 心跳 / 任务心跳）。
@@ -167,6 +169,66 @@ def health_events_api(limit: int = 100, payload: dict = Depends(require_perm("sy
         rows = cur.fetchall()
     return {"events": [{"ts": str(r[0])[:19], "rule": r[1], "component": r[2],
                         "severity": r[3], "detail": r[4] or ""} for r in rows]}
+
+
+@router.get("/api/system/metrics")
+def system_metrics_api(payload: dict = Depends(require_perm("system_config"))):
+    """系统指标：资源当前值（最新 system_metric 行）+ 近 7d 时间序列（sparkline 用）。
+
+    阈值与监控判定同源（system_config 配置驱动）；series 60s 进程缓存（=最小采集周期，
+    内存 60s 一变，缓存不丢新鲜度且省重复查询）。
+    """
+    import time as _time
+    now = _time.time()
+    if now - _METRICS_CACHE.get("ts", 0) < 60:
+        return _METRICS_CACHE["payload"]
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT mem_total, mem_used, swap_total, swap_used, disk_total, disk_used "
+            "FROM system_metric ORDER BY ts DESC LIMIT 1")
+        row = cur.fetchone()
+        cur = conn.execute(
+            "SELECT ts, mem_total, mem_used, swap_total, swap_used, disk_total, disk_used "
+            "FROM system_metric WHERE ts > now() - interval '7 days' ORDER BY ts")
+        rows = cur.fetchall()
+
+    def _res(t, u):
+        return {"total": t, "used": u, "pct": round(u / t, 4) if t else 0.0}
+
+    resources = {}
+    if row:
+        resources = {"mem": _res(row[0], row[1]), "swap": _res(row[2], row[3]),
+                     "disk": _res(row[4], row[5])}
+    series = {"mem": [], "swap": [], "disk": []}
+    for r in rows:
+        _ts = r[0].isoformat()   # 带时区 ISO（前端 time 轴直接解析）
+        series["mem"].append({"ts": _ts, "used": r[2], "total": r[1]})
+        series["swap"].append({"ts": _ts, "used": r[4], "total": r[3]})
+        series["disk"].append({"ts": _ts, "used": r[6], "total": r[5]})
+    from src.health_monitor.collector import alerts_thresholds
+    payload = {"resources": resources, "thresholds": alerts_thresholds(), "series": series}
+    _METRICS_CACHE.update({"ts": now, "payload": payload})
+    return payload
+
+
+@router.get("/api/system/alerts")
+def system_alerts_api(payload: dict = Depends(require_perm("system_config"))):
+    """活跃告警（Valkey 电平状态键 quant:hm:state:*，键值=severity）。
+
+    Valkey 不可达时抛 503 而非返回空集——证据缺失≠无告警（盲审 A-P2），前端 catch 后
+    角标维持上次值。
+    """
+    import redis
+    from src.health_monitor.monitor import _STATE_PREFIX as _pfx
+    r = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                             decode_responses=True, socket_timeout=2)
+    items = []
+    for key in r.scan_iter(_pfx + "*", count=100):
+        token = key[len(_pfx):]
+        rule_id, _, component = token.partition(":")
+        items.append({"rule_id": rule_id, "component": component,
+                      "severity": r.get(key) or "warning"})
+    return {"count": len(items), "items": items}
 
 
 # --- 系统配置（system_config，admin 可改，部分项支持动态生效） ---

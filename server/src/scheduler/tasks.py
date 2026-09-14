@@ -645,44 +645,6 @@ def health_monitor_check():
     return run_check()
 
 
-@app.task(name="src.scheduler.tasks.disk_monitor")
-def disk_monitor():
-    """F-OPS-002 服务器磁盘监控，超阈值告警。"""
-    import shutil
-    issues = []
-    stats = []
-
-    # 检查挂载点
-    for path in ["/", "/var/lib/postgresql", "/var/lib/valkey"]:
-        try:
-            usage = shutil.disk_usage(path)
-            total_gb = usage.total / (1024**3)
-            used_gb = usage.used / (1024**3)
-            pct = usage.percent
-            stats.append({"path": path, "total_gb": round(total_gb, 1),
-                          "used_gb": round(used_gb, 1), "pct": pct})
-            if pct > 85:
-                issues.append(f"{path} 磁盘使用 {pct}% 超阈值 85%")
-        except Exception:
-            pass
-
-    # PG 数据库大小
-    try:
-        import psycopg, os
-        with get_conn() as conn:
-            cur = conn.execute("SELECT pg_size_pretty(pg_database_size('quant'))")
-            pg_size = cur.fetchone()[0]
-            stats.append({"path": "PG:quant", "size": pg_size})
-    except Exception:
-        pass
-
-    if issues:
-        from src.alert_notify import notify
-        notify("critical", "system", "磁盘告警", "\n".join(issues), code="disk.warning")
-
-    return {"status": "ok" if not issues else "issues", "stats": stats, "issues": issues}
-
-
 @app.task(name="src.scheduler.tasks.data_sync_scheduler")
 def data_sync_scheduler():
     """扫描 sync_config，按 cron 表达式 + 交易日日历触发同步任务。

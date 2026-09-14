@@ -12,34 +12,11 @@
           <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼） -->
           <IconBtn type="danger" :icon="SwitchButton" :title="t('risk.halt')" @click="onEmergencyHalt" />
 
-          <!-- ═ 状态组（健康异常才现；保留 admin 门防非 admin 恒黄误报；空态不渲染防 viewer 多余组间 gap） ═ -->
-          <div v-if="bellVisible || (role === 'admin' && healthLevel !== 'ok')" style="display: flex; align-items: center; gap: 16px">
-            <IconBtn v-if="role === 'admin' && healthLevel !== 'ok'" :type="healthBtnType" :icon="Warning"
-                     :title="t('layout.healthWarn')" @click="$router.push('/observe?tab=health')" />
-            <!-- 通知铃铛（按角色可见类别；viewer 无可见类别不显示） -->
-            <!-- P1-6（05 §5.0-2）：通知中心 480 抽屉替代 popover（结构化 body+精确路由） -->
-            <el-badge v-if="bellVisible" :value="notifCount" :hidden="!notifCount" :max="99">
-              <IconBtn :icon="Bell" :title="t('notify.title')" @click="notifDrawer = true" />
-            </el-badge>
-          </div>
-          <el-drawer v-model="notifDrawer" :title="t('notify.title')" size="480px" @open="loadNotifs">
-            <div style="display: flex; justify-content: flex-end; margin-bottom: var(--sp-2)">
-              <el-button v-if="notifCount" size="small" type="primary" @click="onAckAll">{{ t('notify.ackAll') }}</el-button>
-            </div>
-            <div style="overflow-y: auto">
-              <div v-if="!notifs.length" style="color: var(--text-secondary); font-size: 13px; text-align: center; padding: 20px 0">{{ t('notify.empty') }}</div>
-              <div v-for="n in notifs" :key="n.id" @click="goCategory(n.category)"
-                style="padding: 10px 4px; border-bottom: 1px solid var(--border-weak); cursor: pointer">
-                <span :class="['dot', n.level]"></span>
-                <b style="font-size: 13px">{{ n.title }}</b>
-                <el-tag v-if="n.rb" size="small" effect="plain"
-                        style="margin-left: 6px">{{ n.rb.label }}</el-tag>
-                <div v-if="n.body" class="notif-body">{{ n.body }}</div>
-                <div v-if="n.rb" class="notif-guide">▸ {{ n.rb.guide }}</div>
-                <div style="color: var(--text-secondary); font-size: 12px; margin-left: 14px">{{ n.created_at }}</div>
-              </div>
-            </div>
-          </el-drawer>
+          <!-- ═ 告警（批22：admin-only，角标=活跃告警数，点击进系统监控页） ═ -->
+          <el-badge v-if="role === 'admin'" :value="alertCount" :hidden="!alertCount" :max="99"
+                    :type="alertLevel === 'critical' ? 'danger' : 'warning'">
+            <IconBtn :icon="Bell" :title="t('sysmon.title')" @click="$router.push('/observe')" />
+          </el-badge>
 
           <!-- ═ 偏好组（语言/暗色乒乓，恢复到标题栏） ═ -->
           <div style="display: flex; align-items: center; gap: 16px">
@@ -159,8 +136,8 @@ import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getMe, getNotifications, ackAllNotifications, meOnce, resetMeCache } from '../api'
-import api, { getStrategies, getFactorList, sse } from '../api'
+import { getMe, meOnce, resetMeCache, getSystemAlerts } from '../api'
+import api, { getStrategies, getFactorList } from '../api'
 import { setLang } from '../i18n'
 import Avatar from '../components/Avatar.vue'
 import IconBtn from '../components/IconBtn.vue'
@@ -220,23 +197,18 @@ const onProfileUpdated = (u) => {
   if (u?.avatar_url != null) avatarUrl.value = u.avatar_url
 }
 
-// ——— 通知铃铛（60s 轮询；viewer 无可见类别不显示）———
-const notifs = ref([])
-const notifCount = ref(0)
-let notifTimer = null
-const bellVisible = computed(() => ['admin', 'trader', 'analyst'].includes(role.value))
-const loadNotifs = async () => {
-  if (!bellVisible.value) return
-  await ensureRunbook()
+// ——— 告警角标（批22：活跃告警数，30s 轮询；admin-only） ———
+const alertCount = ref(0)
+const alertLevel = ref('warning')
+let alertTimer = null
+const loadAlerts = async () => {
+  if (role.value !== 'admin') return
   try {
-    const r = await getNotifications('active', 20)
-    // W1：runbook 预计算一行一次（原模板 4 处调用→0），旧通知 code=null→rb=null 不渲染
-    notifs.value = (r.items || []).map(n => ({ ...n, rb: runbookOf(n.code) }))
-    notifCount.value = r.count || 0
+    const r = await getSystemAlerts()
+    const items = r.items || []
+    alertCount.value = items.length
+    alertLevel.value = items.some(x => x.severity === 'critical') ? 'critical' : 'warning'
   } catch {}
-}
-const onAckAll = async () => {
-  try { await ackAllNotifications(); await loadNotifs() } catch {}
 }
 // 类别 → 页面路由（点击通知直达）
 // P3-2/P3-8：暗色+帮助抽屉+我的权限玻璃盒
@@ -263,57 +235,10 @@ const onEmergencyHalt = async () => {
     await riskHalt(); ElMessage.success(t('risk.halted'))
   } catch (e) { if (e?.response) ElMessage.error(String(e)) }
 }
-// P1-4：数据健康灯（批21 改：圆钮化 + 异常才显示 + 点击转健康页；popover 详情移除，只留 healthLevel 派生）
-const notifDrawer = ref(false)
-const healthLevel = ref('ok')
-const healthBtnType = computed(() => healthLevel.value === 'critical' ? 'danger' : 'warning')
-const loadHealth = async () => {
-  try {
-    const { getHealthComponents } = await import('../api')
-    const snap = await getHealthComponents()
-    // /health/components 返回字典快照（非数组）——逐组件判健康（与 Health.vue 同口径）
-    const units = snap.units || {}, deps = snap.deps || {}, tasks = snap.tasks || {}
-    const unitDown = Object.values(units).some(u => u && u.ActiveState !== 'active')
-    const depDown = deps.postgres === false || deps.valkey === false
-    const hubLost = deps.valkey === true && !snap.hub
-    const taskFrozen = Object.values(tasks).some(t => t.frozen)
-    const txStale = !!(snap.db_idle_tx_stale)
-    healthLevel.value = (unitDown || depDown || hubLost) ? 'critical'
-      : (taskFrozen || txStale) ? 'warn' : 'ok'
-  } catch { healthLevel.value = 'warn' }
-}
-// runbook: web 长尾批 2026-09-01——通知表 code 字段已上(migration 0059),chip+一句话处置接线
-// W3：runbook 后端单源——懒挂 loadNotifs 首载（bellVisible 门内，viewer 不白请求）；
-// fetch 失败（如发布切换窗 404）下次 loadNotifs 懒补；无映射=chip 静默不渲染（降级同旧）
-let runbookMap = null
-const ensureRunbook = async () => {
-  if (runbookMap) return
-  try {
-    const items = (await api.get('/runbook')).items
-    if (items && Object.keys(items).length) runbookMap = items   // 空 200 不锁死,下轮懒补(盲审 A-P2)
-  } catch {}
-}
-const runbookOf = code => (code && runbookMap && runbookMap[code]) || null 
-import { goCategoryPath } from '../utils/goCategory'
-const goCategory = c => router.push(goCategoryPath(c))   // wd-20 §2.6：映射抽 utils（与 Dashboard 共用）
-loadHealth()
+// 批22：告警角标初始化 + 30s 轮询（健康/通知逻辑迁至系统监控页与 NotificationList 组件）
 loadPerms()
-onMounted(() => { loadNotifs(); notifTimer = setInterval(loadNotifs, 60000); loadDynamicIndex() })
-onUnmounted(() => {
-  if (notifTimer) clearInterval(notifTimer)
-  if (notifDebounce) clearTimeout(notifDebounce)   // 盲审A/B-P2-3：卸载清 pending 去抖（防悬挂请求+401 整页跳）
-  offNotifSse?.()
-})
-
-// ——— 批18：通知 SSE 实时化（信号帧→400ms 去抖重拉；60s 轮询留作兜底纠偏） ———
-let notifDebounce = null
-let offNotifSse = null
-offNotifSse = sse.subscribe((ev) => {
-  if (ev.event !== 'data' || ev.data?.type !== 'notification') return
-  // 去抖（盲审A-P2-2/B-P1-3）：突发 K 帧合并为一次拉取，防并发请求群+乱序回退
-  if (notifDebounce) clearTimeout(notifDebounce)
-  notifDebounce = setTimeout(loadNotifs, 400)
-})
+onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loadDynamicIndex() })
+onUnmounted(() => { if (alertTimer) clearInterval(alertTimer) })
 
 // 批21：语言乒乓（真源 locale.value）；标题栏按钮显示目标语言
 const langLabel = computed(() => locale.value === 'zh' ? 'EN' : '中')
@@ -351,7 +276,7 @@ const searchIndex = [
   { label: '实盘任务', path: '/live-task' }, { label: '交易台', path: '/trading' },
   { label: '风控总览', path: '/risk' }, { label: '三账对账', path: '/reconcile' },
   { label: '数据中心', path: '/dataops' }, { label: '集成中心', path: '/integrations' },
-  { label: '健康与日志', path: '/observe' }, { label: '设置', path: '/settings' },
+  { label: '系统监控', path: '/observe' }, { label: '设置', path: '/settings' },
   { label: 'AI 助手', path: '/chat' },
 ]
 // wd-20 §2.6 索引扩展：策略/因子/标的名（API 拉取，标签前缀区分；空态回落导航项）

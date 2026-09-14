@@ -121,7 +121,7 @@ export default {
     tabs: {
       astock: 'A股', cb: '可转债', etf: 'ETF',
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
-      health: '健康', logs: '日志', audit: '审计',
+      notifications: '通知', logs: '日志', audit: '审计',
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
       run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警',
@@ -162,7 +162,7 @@ export default {
     nav: {
       gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性', permissions: '权限管理',
       userMgmt: '用户管理', aiChat: 'AI 助手',
-      dataCenter: '数据中心', healthLogs: '健康与日志',
+      dataCenter: '数据中心', healthLogs: '系统监控',
       stockPool: '股票池', dailyInsight: '每日研判',
       tradingDesk: '交易台', liveTasks: '实盘任务',
       gResearch: '策略研究', gLive: '实盘交易', gRisk: '风险控制', gOps: '系统管理',
@@ -545,7 +545,6 @@ export default {
     },
     dashboard: {
       partialFail: '{n} 项数据加载失败（部分卡片可能为空）——点击重试',
-      alertBar: '有 {n} 条未处理告警', handleNow: '处理',
       welcome: '欢迎使用{app}',   // 品牌名复用 app.title 资源 ID（2026-09-09 用户裁定,与 register.welcome 同范式）
       step1: '建因子', step1d: '从因子库开始', step2: '写策略', step2d: 'DSL 或 Python', step3: '跑回测', step3d: '验证后上实盘',
       goFactors: '去因子库', goStrategy: '去策略', goBacktest: '去回测',
@@ -1167,13 +1166,19 @@ export default {
       pin: '点击切换为固定', unpin: '点击切换为自动隐藏',
       toEn: '点击切换为英文', toZh: '点击切换为中文',
       toDark: '点击切换为深色', toLight: '点击切换为浅色',
-      healthWarn: '服务异常，点击查看健康详情',
       helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
     },
     notify: {
-      title: '通知',
       ackAll: '全部确认',
       empty: '暂无通知',
+    },
+    sysmon: {
+      title: '系统监控',
+      metrics: '系统指标', services: '系统服务', connections: '实时连接',
+      mem: '内存', disk: '磁盘', swap: '交换分区',
+      critical: '严重', warning: '警告', normal: '正常',
+      active: '运行中', inactive: '已停止', online: '在线', offline: '离线',
+      running: '运行中', frozen: '冻结', restarts: '重启次数', noData: '暂无数据',
     },
   },
   en: {
@@ -1308,7 +1313,7 @@ export default {
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
-      health: 'Health', logs: 'Logs', audit: 'Audit',
+      notifications: 'Notifications', logs: 'Logs', audit: 'Audit',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
       run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alerts',
@@ -1349,7 +1354,7 @@ export default {
     nav: {
       gData: 'Data Ops', gIntegrations: 'Integrations', gObserve: 'Observability', permissions: 'Permissions',
       userMgmt: 'User Management', aiChat: 'AI Assistant',
-      dataCenter: 'Data Center', healthLogs: 'Health & Logs',
+      dataCenter: 'Data Center', healthLogs: 'System Monitor',
       stockPool: 'Stock Pool', dailyInsight: 'Daily Insight',
       tradingDesk: 'Trading Desk', liveTasks: 'Live Tasks',
       gResearch: 'Research', gLive: 'Live Trading', gRisk: 'Risk Control', gOps: 'System',
@@ -1731,7 +1736,6 @@ export default {
     },
     dashboard: {
       partialFail: '{n} data sources failed to load (some cards may be empty) — retry',
-      alertBar: '{n} unhandled alerts', handleNow: 'Handle',
       welcome: 'Welcome to {app}',   // 品牌名复用 app.title 资源 ID（2026-09-09 用户裁定,与 register.welcome 同范式）
       step1: 'Build factor', step1d: 'Start from factor library', step2: 'Write strategy', step2d: 'DSL or Python', step3: 'Run backtest', step3d: 'Verify then go live',
       goFactors: 'Factors', goStrategy: 'Strategy', goBacktest: 'Backtest',
@@ -2339,13 +2343,19 @@ export default {
       pin: 'Pin sidebar', unpin: 'Auto-hide sidebar',
       toEn: 'Switch to English', toZh: 'Switch to Chinese',
       toDark: 'Switch to dark mode', toLight: 'Switch to light mode',
-      healthWarn: 'Service issue — click for health details',
       helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
     },
     notify: {
-      title: 'Notifications',
       ackAll: 'Ack All',
       empty: 'No notifications',
+    },
+    sysmon: {
+      title: 'System Monitor',
+      metrics: 'Metrics', services: 'Services', connections: 'Connections',
+      mem: 'Memory', disk: 'Disk', swap: 'Swap',
+      critical: 'Critical', warning: 'Warning', normal: 'Normal',
+      active: 'Active', inactive: 'Inactive', online: 'Online', offline: 'Offline',
+      running: 'Running', frozen: 'Frozen', restarts: 'Restarts', noData: 'No data',
     },
   },
 }

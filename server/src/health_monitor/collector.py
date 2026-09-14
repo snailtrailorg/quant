@@ -30,6 +30,143 @@ def _valkey():
                                 decode_responses=True, socket_timeout=2)
 
 
+_DISK_PATHS_CACHE: dict = {"paths": None, "ts": 0.0}
+_CFG_CACHE: dict = {"thresholds": None, "periods": None, "ts": 0.0}
+
+# 缺省（批22 迭代用户裁定：内存 warn 缺省 60%；周期内存 60s/磁盘 3600s/swap 300s）
+_DEF_THRESHOLDS = {"mem": {"warn": 0.6, "crit": 0.9}, "disk": {"warn": 0.8, "crit": 0.9},
+                   "swap": {"warn": 0.8}}
+_DEF_PERIODS = {"mem": 60, "disk": 3600, "swap": 300}
+_CFG_KEYS = {
+    "thresholds": {
+        "mem.warn": ("alert_mem_warn", "mem", "warn"),
+        "mem.crit": ("alert_mem_crit", "mem", "crit"),
+        "disk.warn": ("alert_disk_warn", "disk", "warn"),
+        "disk.crit": ("alert_disk_crit", "disk", "crit"),
+        "swap.warn": ("alert_swap_warn", "swap", "warn"),
+    },
+    "periods": {
+        "mem": ("collect_period_mem", "mem"),
+        "disk": ("collect_period_disk", "disk"),
+        "swap": ("collect_period_swap", "swap"),
+    },
+}
+
+
+def _read_cfg() -> tuple[dict, dict]:
+    """阈值/周期配置（system_config，TTL 60s 缓存；读失败回落缺省——监控不能因配置读取挂掉）。"""
+    now = time.time()
+    if _CFG_CACHE["thresholds"] is not None and now - _CFG_CACHE["ts"] < 60:
+        return _CFG_CACHE["thresholds"], _CFG_CACHE["periods"]
+    thresholds, periods = None, None
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute("SELECT key, value FROM system_config")
+            cfg = {k: v for k, v in cur.fetchall()}
+        thresholds = {"mem": dict(_DEF_THRESHOLDS["mem"]), "disk": dict(_DEF_THRESHOLDS["disk"]),
+                      "swap": dict(_DEF_THRESHOLDS["swap"])}
+        for _, (ck, kind, lvl) in _CFG_KEYS["thresholds"].items():
+            try:
+                thresholds[kind][lvl] = float(cfg.get(ck, _DEF_THRESHOLDS[kind][lvl]))
+            except (TypeError, ValueError):
+                pass
+        periods = dict(_DEF_PERIODS)
+        for _, (ck, kind) in _CFG_KEYS["periods"].items():
+            try:
+                periods[kind] = max(30, int(cfg.get(ck, _DEF_PERIODS[kind])))
+            except (TypeError, ValueError):
+                pass
+    except Exception:
+        pass
+    if thresholds is None:
+        thresholds, periods = _DEF_THRESHOLDS, _DEF_PERIODS
+    _CFG_CACHE.update({"thresholds": thresholds, "periods": periods, "ts": now})
+    return thresholds, periods
+
+
+def alerts_thresholds() -> dict:
+    """资源告警阈值（配置驱动；/api/system/metrics 与 evaluate 同源）。"""
+    return _read_cfg()[0]
+
+
+def _disk_paths() -> list[str]:
+    """磁盘监控路径（system_config 键 disk_monitor_paths，':' 分隔；缺省 ['/']）。TTL 60s 缓存。"""
+    now = time.time()
+    if _DISK_PATHS_CACHE["paths"] is not None and now - _DISK_PATHS_CACHE["ts"] < 60:
+        return _DISK_PATHS_CACHE["paths"]
+    paths = ["/"]
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute("SELECT value FROM system_config WHERE key = 'disk_monitor_paths'")
+            row = cur.fetchone()
+        if row and row[0]:
+            paths = [p.strip() for p in str(row[0]).split(":") if p.strip()]
+    except Exception:
+        pass
+    _DISK_PATHS_CACHE["paths"] = paths
+    _DISK_PATHS_CACHE["ts"] = now
+    return paths
+
+
+_RES_CACHE: dict = {}   # kind -> {"data": {...}|None, "ts": float}——按各自周期采一次（批22 迭代）
+
+
+def _collect_mem():
+    import psutil
+    m = psutil.virtual_memory()
+    return {"total": m.total, "used": m.used, "pct": m.percent / 100.0}
+
+
+def _collect_swap():
+    import psutil
+    s = psutil.swap_memory()
+    return {"total": s.total, "used": s.used, "pct": (s.used / s.total) if s.total else 0.0}
+
+
+def _collect_disk():
+    import shutil
+    total_d = used_d = 0
+    paths = []
+    for p in _disk_paths():
+        du = shutil.disk_usage(p)
+        total_d += du.total
+        used_d += du.used
+        paths.append({"path": p, "total": du.total, "used": du.used,
+                      "pct": (du.used / du.total) if du.total else 0.0})
+    return {"total": total_d, "used": used_d, "pct": (used_d / total_d) if total_d else 0.0,
+            "paths": paths}
+
+
+def _cached_kind(kind: str, fn, period: int, now: float):
+    """单指标按周期采集（进程内缓存）；采集失败时有旧值用旧值、无旧值为 None（证据缺失）。"""
+    c = _RES_CACHE.get(kind)
+    if c and now - c["ts"] < period:
+        return c["data"]
+    try:
+        data = fn()
+    except Exception:
+        data = c["data"] if c else None
+    _RES_CACHE[kind] = {"data": data, "ts": now}
+    return data
+
+
+def _collect_resources(now: float | None = None) -> dict:
+    """系统资源快照（内存/磁盘/swap），各指标按配置周期采集（缺省 内存60s/磁盘3600s/swap300s）。
+
+    磁盘保留逐挂载点明细（paths）——聚合值仅供展示，告警判定按单路径（多路径求和会稀释
+    单分区爆满，盲审 A-P1）；psutil 整体缺失时 mem/swap 为 None（证据缺失≠健康，D-F5 同款）。
+    """
+    now = now if now is not None else time.time()
+    _, periods = _read_cfg()
+    return {
+        "mem": _cached_kind("mem", _collect_mem, periods["mem"], now),
+        "swap": _cached_kind("swap", _collect_swap, periods["swap"], now),
+        "disk": _cached_kind("disk", _collect_disk, periods["disk"], now),
+    }
+
+
 def systemctl_units(units: list[str]) -> dict:
     """批量取 ActiveState/SubState/NRestarts。返回 {unit: {...}}；非 systemd 环境返回空 dict。
 
@@ -65,6 +202,10 @@ def collect(now: float | None = None) -> dict:
     snap: dict = {"ts": now, "units": {}, "deps": {}, "hub": None, "tasks": {}}
 
     snap["units"] = systemctl_units(CORE_UNITS)
+
+    # 系统资源（内存/磁盘/swap，各按配置周期采集；psutil 缺失→对应项 None=证据缺失）+ 生效阈值（同源配置）
+    snap["resources"] = _collect_resources(now)
+    snap["thresholds"] = _read_cfg()[0]
 
     try:
         r = _valkey()
@@ -231,6 +372,13 @@ def render_prometheus(snap: dict) -> str:
         else:
             emit("quant_tier_table_staleness_hours", -1,
                  "hours since last successful sync", {"sync_id": t["sync_id"], "kind": t["kind"]})
+
+    for kind, res in (snap.get("resources") or {}).items():
+        if not res:
+            continue
+        emit(f"quant_res_{kind}_used_bytes", int(res["used"]), f"{kind} used bytes")
+        emit(f"quant_res_{kind}_total_bytes", int(res["total"]), f"{kind} total bytes")
+        emit(f"quant_res_{kind}_pct", round(res["pct"], 4), f"{kind} used ratio")
 
     lines: list[str] = []
     for metric in order:

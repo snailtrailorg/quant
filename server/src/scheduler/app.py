@@ -99,11 +99,6 @@ app.conf.update(
             "schedule": 300.0,   # U-4: 300s 才对得上 cron 窗口（08:45 等分钟级 schedule）
             "options": {"queue": "data"},
         },
-        "disk-monitor": {
-            "task": "src.scheduler.tasks.disk_monitor",
-            "schedule": 21600.0,
-            "options": {"queue": "risk"},
-        },
         "data-continuity": {
             "task": "src.scheduler.tasks.data_continuity_check",
             "schedule": 3600.0,

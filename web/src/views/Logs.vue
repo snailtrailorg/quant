@@ -1,82 +1,44 @@
 <template>
-  <el-row :gutter="20">
-    <el-col :span="14">
-      <el-card>
-        <template #header>
-          <div style="display: flex; justify-content: space-between; align-items: center">
-            <span>{{ t('log.runLogs') }}</span>
-            <div style="display: flex; gap: 8px; align-items: center">
-              <el-select v-model="levelFilter" style="width: 100px" :placeholder="t('log.level')" clearable>
-                <el-option :label="t('common.all')" value="" />
-                <el-option label="ERROR" value="ERROR" />
-                <el-option label="WARN" value="WARN" />
-                <el-option label="INFO" value="INFO" />
-              </el-select>
-              <el-button type="primary" @click="showAnalyze = true" :disabled="!errorLogs.length">{{ t('log.aiAnalyzeCount', { n: errorLogs.length }) }}</el-button>
-            </div>
+  <div>
+    <!-- 批22 追加裁定：通知历史表迁至系统监控页「通知」页签（NotificationTable），本页不再重复 -->
+    <el-card>
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <span>{{ t('log.runLogs') }}</span>
+          <div style="display: flex; gap: 8px; align-items: center">
+            <el-select v-model="levelFilter" style="width: 100px" :placeholder="t('log.level')" clearable>
+              <el-option :label="t('common.all')" value="" />
+              <el-option label="ERROR" value="ERROR" />
+              <el-option label="WARN" value="WARN" />
+              <el-option label="INFO" value="INFO" />
+            </el-select>
+            <el-button type="primary" @click="showAnalyze = true" :disabled="!errorLogs.length">{{ t('log.aiAnalyzeCount', { n: errorLogs.length }) }}</el-button>
           </div>
-        </template>
-        <TableShell :data="filteredLogs" height="500" storage-key="logs-run">
-          <el-table-column prop="ts" :label="t('common.time')" min-width="160">
-            <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
-          </el-table-column>
-          <el-table-column prop="level" :label="t('log.level')" min-width="80">
-            <template #default="{ row }">
-              <el-tag :type="row.level === 'ERROR' ? 'danger' : row.level === 'WARN' ? 'warning' : 'info'">{{ row.level }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="module" :label="t('log.module')" min-width="120" />
-          <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
-        </TableShell>
-        <!-- P3-5(05 §5.10):日志筛选 -->
-  <el-card style="margin-bottom: 14px">
-    <el-form inline>
-      <el-form-item><el-input v-model="logKw" :placeholder="t('log.keyword')" clearable style="width: 200px" @change="filterLogs" /></el-form-item>
-      <el-form-item>
-        <el-select v-model="logLevel" :placeholder="t('log.level')" clearable style="width: 100px" @change="filterLogs">
-          <el-option v-for="lv in ['ERROR','WARNING','INFO','DEBUG']" :key="lv" :value="lv" :label="lv" />
-        </el-select>
-      </el-form-item>
-      <el-form-item><el-date-picker v-model="logRange" type="datetimerange" style="width: 280px" @change="filterLogs" /></el-form-item>
-    </el-form>
-  </el-card>
-</el-card>
-    </el-col>
-    <el-col :span="10">
-      <el-card>
-        <template #header>
-          <div style="display: flex; justify-content: space-between; align-items: center">
-            <span>{{ t('log.notifyHistory') }}</span>
-            <ColumnSettings storage-key="cols.logs-notify" :columns="notifyColDefs" v-model:visible="notifyVisible" />
-          </div>
-        </template>
-        <TableShell :data="notifs" height="500" storage-key="logs-notify">
-          <el-table-column v-if="colOn('level')" prop="level" :label="t('log.level')" min-width="100">
-            <template #default="{ row }">
-              <span :class="['ndot', row.level]"></span>{{ row.level }}
-            </template>
-          </el-table-column>
-          <el-table-column v-if="colOn('category')" prop="category" :label="t('log.notifyCategory')" min-width="100" />
-          <el-table-column prop="title" :label="t('log.titleCol')" min-width="200" show-overflow-tooltip />
-          <el-table-column v-if="colOn('body')" prop="body" :label="t('log.content')" min-width="220" show-overflow-tooltip />
-          <el-table-column v-if="colOn('dispatch')" prop="dispatch" :label="t('alerts.dispatchCol')" min-width="140">
-            <template #default="{ row }">
-              <template v-if="row.level === 'info'"></template>
-              <span v-else-if="!row.dispatch" style="color: var(--flat)">?</span>
-              <template v-else>
-                <el-tag v-for="(v, ch) in row.dispatch" :key="ch" size="small" style="margin: 1px"
-                        :type="chipType(v)" :title="chipTitle(ch, v)">{{ chipLabel(ch, v) }}</el-tag>
-              </template>
-            </template>
-          </el-table-column>
-          <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.time')" min-width="160" />
-          <el-table-column v-if="colOn('acked_at')" prop="acked_at" :label="t('cols.confirmedAt')" min-width="160">
-            <template #default="{ row }">{{ row.acked_at ? fmtTime.full(row.acked_at) : '-' }}</template>
-          </el-table-column>
-        </TableShell>
-      </el-card>
-    </el-col>
-  </el-row>
+        </div>
+      </template>
+      <TableShell :data="filteredLogs" height="500" storage-key="logs-run">
+        <el-table-column prop="ts" :label="t('common.time')" min-width="160">
+          <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
+        </el-table-column>
+        <el-table-column prop="level" :label="t('log.level')" min-width="80">
+          <template #default="{ row }">
+            <el-tag :type="row.level === 'ERROR' ? 'danger' : row.level === 'WARN' ? 'warning' : 'info'">{{ row.level }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="module" :label="t('log.module')" min-width="120" />
+        <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
+      </TableShell>
+      <!-- P3-5(05 §5.10):日志筛选 -->
+      <el-form inline style="margin-top: var(--sp-2)">
+        <el-form-item><el-input v-model="logKw" :placeholder="t('log.keyword')" clearable style="width: 200px" @change="filterLogs" /></el-form-item>
+        <el-form-item>
+          <el-select v-model="logLevel" :placeholder="t('log.level')" clearable style="width: 100px" @change="filterLogs">
+            <el-option v-for="lv in ['ERROR','WARNING','INFO','DEBUG']" :key="lv" :value="lv" :label="lv" />
+          </el-select>
+        </el-form-item>
+        <el-form-item><el-date-picker v-model="logRange" type="datetimerange" style="width: 280px" @change="filterLogs" /></el-form-item>
+      </el-form>
+    </el-card>
 
   <!-- 邮件发件箱（持久化 + 指数退避重发） -->
   <el-card style="margin-top: 20px">
@@ -108,52 +70,20 @@
       <el-button type="primary" @click="doAnalyze" :loading="analyzing">{{ t('log.analyze') }}</el-button>
     </template>
   </el-dialog>
+  </div>
 </template>
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
-import ColumnSettings from '../components/ColumnSettings.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { getLogs, logAnalyze, getEmailOutbox, getNotifications } from '../api'
+import { getLogs, logAnalyze, getEmailOutbox } from '../api'
 const { t } = useI18n()
 
-// 批17 列显示配置（通知历史表）：dispatch chips 列默认隐
-const notifyColDefs = computed(() => [
-  { key: 'level', label: t('log.level') },
-  { key: 'category', label: t('log.notifyCategory') },
-  { key: 'body', label: t('log.content') },
-  { key: 'dispatch', label: t('alerts.dispatchCol'), hidden: true },
-  { key: 'created_at', label: t('common.time') },
-  { key: 'acked_at', label: t('cols.confirmedAt') },
-])
-const notifyVisible = ref([])
-const colOn = k => notifyVisible.value.includes(k)
-
-// 批 7 推送结果 chips（dispatch jsonb 渲染契约：ok✓/queued○/skip|failed 带因/{}不显示/null=未明）
-const chipType = v => v === 'ok' || v === 'legacy' ? 'success' : (v === 'queued' || v === 'sending') ? 'info'
-  : v.startsWith('failed:') ? 'danger' : v.startsWith('skip:') ? 'warning' : 'info'
-const chipLabel = (ch, v) => {
-  const base = ch.split(':')[0]   // 批7.1 行级 dkey（email:12）剥后缀取通道名
-  const n = ch.includes(':') ? `·${ch.split(':')[1]}` : ''
-  const tag = { im: 'IM', email: t('alerts.channel.email'), sms: t('alerts.channel.sms'),
-                legacy: 'web', _chain: 'Ⓒ' }[base] || ch
-  return (v === 'ok' ? `${tag}✓` : (v === 'queued' || v === 'sending') ? `${tag}○` : v.startsWith('failed:') ? `${tag}✗` : `${tag}–`) + n
-}
-const chipTitle = (ch, v) => {
-  if (v === 'ok') return t('alerts.dispatch.ok')
-  if (v === 'queued') return t('alerts.dispatch.queued')
-  if (v === 'sending') return t('alerts.dispatch.sending')
-  const reason = v.includes(':') ? v.split(':').slice(1).join(':') : ''
-  const key = `alerts.dispatch.${reason}`
-  const zh = t(key)
-  return zh !== key ? `${v.startsWith('skip:') ? t('alerts.dispatch.skip') : t('alerts.dispatch.failed')} · ${zh}` : v
-}
 const logs = ref([])
-const notifs = ref([])
 const outbox = ref([])
 const showAnalyze = ref(false)
 const analyzing = ref(false)
@@ -173,10 +103,9 @@ const doAnalyze = async () => {
   finally { analyzing.value = false }
 }
 onMounted(() => {
-  // 批9：三源各自独立容错→并发发不短路（Dashboard jobs 范式）
+  // 批9：双源各自独立容错→并发发不短路（Dashboard jobs 范式）
   [
     async () => { try { logs.value = (await getLogs()).logs || [] } catch {} },
-    async () => { try { notifs.value = (await getNotifications('all', 50)).items || [] } catch {} },
     async () => { try { outbox.value = (await getEmailOutbox()).items || [] } catch {} },
   ].forEach(fn => fn())
 })
@@ -188,10 +117,4 @@ const logRange = ref(null)
 // P3-5:日志筛选
 
 </script>
-<style scoped>
-.ndot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-.ndot.critical { background: var(--critical); }
-.ndot.warn { background: var(--warn-fill); }
-.ndot.info { background: var(--text-secondary); }
-</style>
 

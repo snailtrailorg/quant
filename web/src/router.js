@@ -49,8 +49,6 @@ const routes = [
 
       // 系统 (Admin)
       { path: 'account', redirect: '/integrations?tab=trading' },  // 批16：API 密钥能力在集成中心·交易账户
-      { path: 'help', redirect: '/observe?tab=health' },
-      { path: 'health', redirect: '/observe?tab=health' },
       { path: 'logs', redirect: '/observe?tab=logs' },
       { path: 'data-manage', redirect: '/dataops?tab=sync' },
       { path: 'data-integrity', redirect: '/dataops?tab=integrity' },

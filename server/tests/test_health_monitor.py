@@ -320,3 +320,157 @@ class TestApiProbe:
     def test_probe_malformed_header_403(self):
         """畸形头 fail-closed（盲审 B-P2）。"""
         assert self._probe({"X-Real-IP": "not-an-ip"}).status_code == 403
+
+
+# ——— 资源阈值规则（批22）———
+
+class TestResourceRules:
+    def _snap_res(self, mem=0.0, disk=0.0, swap=0.0):
+        snap = _snap()
+        snap["resources"] = {
+            "mem": {"total": 100, "used": 0, "pct": mem},
+            "disk": {"total": 100, "used": 0, "pct": disk,
+                     "paths": [{"path": "/", "total": 100, "used": 0, "pct": disk}]},
+            "swap": {"total": 100, "used": 0, "pct": swap},
+        }
+        return snap
+
+    def test_disk_critical_above_90(self):
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(self._snap_res(disk=0.95))
+        assert any(f["rule_id"] == "disk_high" and f["severity"] == "critical" for f in findings)
+
+    def test_disk_warning_above_80(self):
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(self._snap_res(disk=0.85))
+        assert any(f["rule_id"] == "disk_high" and f["severity"] == "warning" for f in findings)
+
+    def test_mem_critical_swap_warning(self):
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(self._snap_res(mem=0.91, swap=0.85))
+        assert any(f["rule_id"] == "mem_high" and f["severity"] == "critical" for f in findings)
+        assert any(f["rule_id"] == "swap_high" and f["severity"] == "warning" for f in findings)
+
+    def test_resources_missing_no_resource_findings(self):
+        """resources 缺失=证据缺失，不判资源规则（D-F5 同款）。"""
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(_snap())   # 无 resources 键
+        assert not any(f["rule_id"] in ("mem_high", "disk_high", "swap_high") for f in findings)
+
+    def test_disk_dilution_still_alerts_per_path(self):
+        """盲审 A-P1：多挂载点聚合稀释（36%）但单路径 95% → 仍告 critical，component 带路径。"""
+        from src.health_monitor.monitor import evaluate
+        snap = self._snap_res()
+        snap["resources"]["disk"] = {
+            "total": 550, "used": 197, "pct": 0.36,
+            "paths": [
+                {"path": "/", "total": 500, "used": 150, "pct": 0.30},
+                {"path": "/var/lib/postgresql", "total": 50, "used": 47, "pct": 0.95},
+            ]}
+        findings, _ = evaluate(snap)
+        assert any(f["rule_id"] == "disk_high" and f["severity"] == "critical"
+                   and f["component"] == "disk:/var/lib/postgresql" for f in findings)
+
+
+class _FakeValkey:
+    """run_check 状态机测试用最小 Valkey 假体（get/set/scan_iter/delete/hset/expire）。"""
+    def __init__(self):
+        self.d = {}
+
+    def get(self, k):
+        return self.d.get(k)
+
+    def set(self, k, v, ex=None):
+        self.d[k] = v
+
+    def scan_iter(self, pat, count=None):
+        import fnmatch
+        for k in list(self.d):
+            if fnmatch.fnmatch(k, pat):
+                yield k
+
+    def delete(self, k):
+        self.d.pop(k, None)
+
+    def hset(self, k, mapping=None):
+        self.d[k] = mapping
+
+    def expire(self, k, ttl):
+        pass
+
+
+class TestRunCheckStateMachine:
+    """资源告警状态机（批22）：severity 存 state 键值、升级重发、降级不重发、证据缺失不假恢复。"""
+
+    TS0 = 1800000150.0   # % 300 = 150 ≥ 30，避开 system_metric 采样窗
+
+    def _snap_res(self, disk_pct, ts, with_resources=True):
+        s = _snap()
+        s["ts"] = ts
+        if with_resources:
+            s["resources"] = {
+                "mem": {"total": 100, "used": 0, "pct": 0.1},
+                "swap": {"total": 100, "used": 0, "pct": 0.0},
+                "disk": {"total": 100, "used": 0, "pct": disk_pct,
+                         "paths": [{"path": "/", "total": 100, "used": 0, "pct": disk_pct}]},
+            }
+        else:
+            s.pop("resources", None)
+        return s
+
+    def _run(self, snap, fake):
+        from unittest.mock import patch
+        import src.health_monitor.monitor as M
+        with patch("src.health_monitor.collector.collect", return_value=snap), \
+             patch("src.health_monitor.collector._valkey", return_value=fake), \
+             patch.object(M, "_in_session", return_value=False), \
+             patch.object(M, "_write_event"), patch.object(M, "_notify"):
+            return M.run_check()
+
+    def test_warn_to_critical_upgrade_refires(self):
+        from src.health_monitor.monitor import _STATE_PREFIX
+        fake = _FakeValkey()
+        key = _STATE_PREFIX + "disk_high:disk:/"
+        r1 = self._run(self._snap_res(0.85, self.TS0), fake)          # 首触发 warning
+        assert r1["new"] == 1 and fake.d.get(key) == "warning"
+        r2 = self._run(self._snap_res(0.95, self.TS0 + 30), fake)     # 升级 critical → 重发
+        assert r2["new"] == 1 and fake.d.get(key) == "critical"
+        r3 = self._run(self._snap_res(0.95, self.TS0 + 60), fake)     # severity 不变 → 不重发
+        assert r3["new"] == 0
+
+    def test_critical_downgrade_no_refire(self):
+        from src.health_monitor.monitor import _STATE_PREFIX
+        fake = _FakeValkey()
+        key = _STATE_PREFIX + "disk_high:disk:/"
+        self._run(self._snap_res(0.95, self.TS0), fake)               # critical
+        r2 = self._run(self._snap_res(0.85, self.TS0 + 30), fake)     # 降级 warning → 只更新键值不重发
+        assert r2["new"] == 0 and fake.d.get(key) == "warning"
+
+    def test_resources_missing_no_false_recovery(self):
+        """resources 缺失=证据缺失：已触发的 disk_high 不判恢复（不产生假 recovery）。"""
+        fake = _FakeValkey()
+        r1 = self._run(self._snap_res(0.95, self.TS0), fake)
+        assert r1["new"] == 1
+        r2 = self._run(self._snap_res(0.0, self.TS0 + 30, with_resources=False), fake)
+        assert r2["recovered"] == 0
+        # 资源恢复且证据在 → 才判恢复
+        r3 = self._run(self._snap_res(0.10, self.TS0 + 60), fake)
+        assert r3["recovered"] == 1
+
+    def test_thresholds_from_snap_config(self):
+        """阈值配置驱动：snap["thresholds"] 自定义 warn 0.5 → 0.55 触发（覆盖缺省 0.6）。"""
+        from src.health_monitor.monitor import evaluate
+        snap = TestResourceRules()._snap_res(mem=0.55)
+        snap["thresholds"] = {"mem": {"warn": 0.5, "crit": 0.9},
+                              "disk": {"warn": 0.8, "crit": 0.9}, "swap": {"warn": 0.8}}
+        findings, _ = evaluate(snap)
+        assert any(f["rule_id"] == "mem_high" and f["severity"] == "warning" for f in findings)
+
+    def test_kind_missing_only_skips_that_kind(self):
+        """独立采集（周期不同）：disk None 只跳过磁盘，mem 正常判定。"""
+        from src.health_monitor.monitor import evaluate
+        snap = TestResourceRules()._snap_res(mem=0.95)
+        snap["resources"]["disk"] = None
+        findings, _ = evaluate(snap)
+        assert any(f["rule_id"] == "mem_high" and f["severity"] == "critical" for f in findings)
+        assert not any(f["rule_id"] == "disk_high" for f in findings)

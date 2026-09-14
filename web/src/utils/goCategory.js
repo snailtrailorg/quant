@@ -4,5 +4,5 @@ export const goCategoryPath = c => ({
   task: '/dataops?tab=sched',
   risk: '/risk',
   data: '/dataops?tab=integrity',
-  system: '/observe?tab=health',
+  system: '/observe',
 }[c] || '/')

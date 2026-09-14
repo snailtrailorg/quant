@@ -62,3 +62,4 @@ Pillow>=10.0
 # === 测试 ===
 pytest>=8.0
 pytest-mock>=3.12
+psutil

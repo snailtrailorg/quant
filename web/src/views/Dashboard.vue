@@ -1,13 +1,6 @@
 <template>
   <div>
     <!-- P1-3（web-design 05 §5.1）指挥中心：30 秒回答四问——钱安全吗/任务活着吗/今天赚亏/数据正常吗 -->
-    <!-- 告警条：critical/warn 未读置顶 -->
-    <el-alert v-if="alerts.length" type="error" show-icon :closable="false" style="margin-bottom: var(--sp-4)">
-      <template #title>
-        {{ t('dashboard.alertBar', { n: alerts.length }) }}
-        <el-button size="small" text type="primary" @click="onHandleAlert" style="margin-left: var(--sp-2)">{{ t('dashboard.handleNow') }}</el-button>
-      </template>
-    </el-alert>
 
     <!-- 空态三步引导（05 §5.0-1：零数据首访态） -->
     <el-card v-if="emptyState" style="margin-bottom: 20px">
@@ -120,7 +113,6 @@ import { getStrategies, getDashboard, getPnl, getOrders, getLiveTasks,
          getNotifications, getDataIntegrity, getBacktests, getRiskState } from '../api'
 import api from '../api'
 import { bs, pct } from '../utils/backtestSummary'
-import { goCategoryPath } from '../utils/goCategory'
 import { cssVar } from '../utils/cssVar'
 import StatusTag from '../components/StatusTag.vue'
 import KpiCard from '../components/KpiCard.vue'
@@ -140,18 +132,12 @@ const curve = ref([])
 const positions = ref([])
 const orders = ref([])
 const liveTasks = ref([])
-const alerts = ref([])
 const todayEvents = ref([])
 const integrity = ref({})
 const recentBacktests = ref([])
 const riskMetrics = ref({})
 const partialFail = ref(0)
 
-const onHandleAlert = () => {
-  // wd-20 §2.6：告警条按最严重项类别跳（原盲跳 /live-task）
-  const top = alerts.value.find(a => a.level === 'critical') || alerts.value[0]
-  router.push(goCategoryPath(top?.category))
-}
 const pnlClass = v => (v || 0) >= 0 ? 'up' : 'down'
 const pnlArrow = v => (v || 0) >= 0 ? '▲' : '▼'
 const fmtMoney = v => {
@@ -207,7 +193,6 @@ const loadAll = async () => {
     async () => { liveTasks.value = await getLiveTasks() },
     async () => { const n = await getNotifications('active', 50)
                   const items = n.items || n || []
-                  alerts.value = items.filter(x => ['critical', 'warn', 'error'].includes(x.level || x.severity || ''))
                   todayEvents.value = items.filter(x => ['risk', 'data'].includes(x.category)) },
     async () => { integrity.value = (await getDataIntegrity('1D'))?.summary || await getDataIntegrity('1D') },   // A-P2-9:大小写+summary 形状
     async () => { recentBacktests.value = (await getBacktests()).slice(0, 4) },

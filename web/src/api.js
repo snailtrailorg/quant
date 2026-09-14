@@ -141,6 +141,8 @@ export const testImBot = id => api.post(`/im-bots/${id}/test`)
 
 export const getHealthComponents = () => api.get('/health/components')
 export const getHealthEvents = (limit = 100) => api.get('/health/events', { params: { limit } })
+export const getSystemMetrics = () => api.get('/system/metrics')
+export const getSystemAlerts = () => api.get('/system/alerts')
 export const verifyStrategy = id => api.post(`/strategy/${id}/verify`)
 export const createStrategy = data => api.post('/strategy', data)
 export const getFactorList = () => api.get('/factors')
