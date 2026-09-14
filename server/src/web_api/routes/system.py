@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Request, Body, BackgroundTasks
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, LogAnalyzeReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
 from src.data_platform.db import get_conn
 from src.email_service import queue_email, try_row
 from ..terms import get_terms_items
@@ -496,3 +496,36 @@ def notifications_ack_all(payload: dict = Depends(require_perm("read"))):
         conn.commit()
     audit_log(payload["username"], "notifications_ack_all", f"n={cur.rowcount}")
     return {"acked": cur.rowcount}
+
+
+@router.post("/api/notifications/delete")
+def notifications_delete(body: dict = Body(...),
+                         payload: dict = Depends(require_perm("user_mgmt"))):
+    """批量删通知（批23）：{ids:[..]} 选中删 / {all:true} 全清。
+    可见类别作用域（对齐 ack-all，防越权删不可见类别）；all 仅 admin；删必留痕。"""
+    all_mode = bool(body.get("all"))
+    if all_mode and (payload.get("db_role") or payload.get("role")) != "admin":
+        raise ApiError(403, "ADMIN_ONLY", "全部清除仅 admin 可用")
+    ids = body.get("ids") or []
+    if not all_mode:
+        if not isinstance(ids, list) or not ids:
+            raise ApiError(400, "IDS_EMPTY", "ids 不能为空")
+        if not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
+            raise ApiError(400, "IDS_INVALID", "ids 须为整型数组")
+        if len(ids) > 100:
+            raise ApiError(400, "TOO_MANY", "单次最多删除 100 条")
+    from src.alert_notify import visible_categories
+    cats = visible_categories(payload.get("role", "viewer"))
+    if not cats:
+        return {"deleted": 0}
+    with get_conn() as conn:
+        if all_mode:
+            cur = conn.execute(
+                "DELETE FROM notifications WHERE category = ANY(%s)", (cats,))
+        else:
+            cur = conn.execute(
+                "DELETE FROM notifications WHERE category = ANY(%s) AND id = ANY(%s)",
+                (cats, ids))
+        conn.commit()
+    audit_log(payload["username"], "notifications_delete", f"n={cur.rowcount}")
+    return {"deleted": cur.rowcount}

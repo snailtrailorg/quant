@@ -1,5 +1,5 @@
 """风控路由：熔断开关 + 风控规则 CRUD + 三账对账 + 审计日志 + 数据完整性看板。"""
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Body
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
 from ..models import (RiskRuleReq)
@@ -249,6 +249,32 @@ def get_audit(payload: dict = Depends(require_perm("user_mgmt"))):
         rows = cur.fetchall()
     return [{"id": r[0], "ts": str(r[1]) if r[1] else None, "actor": r[2], "action": r[3],
              "target": r[4], "detail": r[5]} for r in rows]
+
+
+@router.post("/api/audit/delete")
+def audit_delete(body: dict = Body(...),
+                 payload: dict = Depends(require_perm("user_mgmt"))):
+    """批量删审计记录（批23）：{ids:[..]} 选中删 / {all:true} 全清（仅 admin）。
+    audit 自删尤其留痕——删除条数记入 audit_log（留痕行在删除之后写入，不被本次波及）。"""
+    all_mode = bool(body.get("all"))
+    if all_mode and (payload.get("db_role") or payload.get("role")) != "admin":
+        raise ApiError(403, "ADMIN_ONLY", "全部清除仅 admin 可用")
+    ids = body.get("ids") or []
+    if not all_mode:
+        if not isinstance(ids, list) or not ids:
+            raise ApiError(400, "IDS_EMPTY", "ids 不能为空")
+        if not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
+            raise ApiError(400, "IDS_INVALID", "ids 须为整型数组")
+        if len(ids) > 100:
+            raise ApiError(400, "TOO_MANY", "单次最多删除 100 条")
+    with get_conn() as conn:
+        if all_mode:
+            cur = conn.execute("DELETE FROM audit_log")
+        else:
+            cur = conn.execute("DELETE FROM audit_log WHERE id = ANY(%s)", (ids,))
+        conn.commit()
+    audit_log(payload["username"], "audit_delete", f"n={cur.rowcount}")
+    return {"deleted": cur.rowcount}
 
 
 @router.get("/api/data-integrity")

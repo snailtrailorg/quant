@@ -64,13 +64,15 @@ def log_task(task_id: str, level: str, message: str, step_name: str | None = Non
 
 
 def list_tasks(status: str | None = None, limit: int = 100) -> list[dict]:
-    """列任务（可按 status 过滤）。"""
+    """列任务（status 可单值或逗号分隔多值如 "running,pending"；空/缺省=不过滤）。
+    批23：多值走 ANY（TaskManager 行筛选多选后端过滤，防稀疏状态被 LIMIT 挤出窗口）。"""
+    statuses = [s.strip() for s in status.split(",") if s.strip()] if status else []
     with get_conn() as conn:
-        if status:
+        if statuses:
             cur = conn.execute(
                 "SELECT id, name, type, trigger_type, trigger_user, status, progress, "
                 "last_heartbeat, error_message, start_time, end_time "
-                "FROM tasks WHERE status=%s ORDER BY updated_at DESC LIMIT %s", (status, limit))
+                "FROM tasks WHERE status = ANY(%s) ORDER BY updated_at DESC LIMIT %s", (statuses, limit))
         else:
             cur = conn.execute(
                 "SELECT id, name, type, trigger_type, trigger_user, status, progress, "

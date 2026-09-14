@@ -5,14 +5,9 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('log.runLogs') }}</span>
+          <!-- 批23：级别筛选 RowFilter 多选（本地过滤；选项集统一 ERROR/WARNING/INFO/DEBUG） -->
           <div style="display: flex; gap: 8px; align-items: center">
-            <el-select v-model="levelFilter" style="width: 100px" :placeholder="t('log.level')" clearable>
-              <el-option :label="t('common.all')" value="" />
-              <el-option label="ERROR" value="ERROR" />
-              <el-option label="WARN" value="WARN" />
-              <el-option label="INFO" value="INFO" />
-            </el-select>
-            <el-button type="primary" @click="showAnalyze = true" :disabled="!errorLogs.length">{{ t('log.aiAnalyzeCount', { n: errorLogs.length }) }}</el-button>
+            <RowFilter v-model="levelFilter" :options="levelOptions" :title="t('common.filter')" />
           </div>
         </div>
       </template>
@@ -28,16 +23,7 @@
         <el-table-column prop="module" :label="t('log.module')" min-width="120" />
         <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
       </TableShell>
-      <!-- P3-5(05 §5.10):日志筛选 -->
-      <el-form inline style="margin-top: var(--sp-2)">
-        <el-form-item><el-input v-model="logKw" :placeholder="t('log.keyword')" clearable style="width: 200px" @change="filterLogs" /></el-form-item>
-        <el-form-item>
-          <el-select v-model="logLevel" :placeholder="t('log.level')" clearable style="width: 100px" @change="filterLogs">
-            <el-option v-for="lv in ['ERROR','WARNING','INFO','DEBUG']" :key="lv" :value="lv" :label="lv" />
-          </el-select>
-        </el-form-item>
-        <el-form-item><el-date-picker v-model="logRange" type="datetimerange" style="width: 280px" @change="filterLogs" /></el-form-item>
-      </el-form>
+      <!-- 批23：表格下方死筛选表单整组删（filterLogs 未定义，批22 前遗留死控件；AI 分析整链同批退役） -->
     </el-card>
 
   <!-- 邮件发件箱（持久化 + 指数退避重发） -->
@@ -61,47 +47,25 @@
     </TableShell>
     <div style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">{{ t('log.outboxHint') }}</div>
   </el-card>
-
-  <el-dialog v-model="showAnalyze" :title="t('log.aiTitle')" width="720px">
-    <el-alert type="warning" :closable="false" style="margin-bottom: var(--sp-4)">{{ t('log.analyzeHint', { n: errorLogs.length }) }}</el-alert>
-    <el-input v-model="analysisResult" type="textarea" :rows="10" readonly :placeholder="t('log.phAnalyze')" />
-    <template #footer>
-      <el-button type="primary" @click="showAnalyze = false">{{ t('common.close') }}</el-button>
-      <el-button type="primary" @click="doAnalyze" :loading="analyzing">{{ t('log.analyze') }}</el-button>
-    </template>
-  </el-dialog>
   </div>
 </template>
 
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
+import RowFilter from '../components/RowFilter.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
-import { getLogs, logAnalyze, getEmailOutbox } from '../api'
+import { getLogs, getEmailOutbox } from '../api'
 const { t } = useI18n()
 
 const logs = ref([])
 const outbox = ref([])
-const showAnalyze = ref(false)
-const analyzing = ref(false)
-const analysisResult = ref('')
-const levelFilter = ref('')
-const filteredLogs = computed(() => {
-  if (!levelFilter.value) return logs.value
-  return logs.value.filter(l => l.level === levelFilter.value)
-})
-const errorLogs = computed(() => (logs.value || []).filter(l => l.level === 'ERROR' || l.level === 'WARN'))
-const doAnalyze = async () => {
-  analyzing.value = true; analysisResult.value = ''
-  try {
-    const r = await logAnalyze({ logs: errorLogs.value })
-    analysisResult.value = r.analysis || t('log.noResult')
-  } catch (e) { ElMessage.error(t('log.analyzeFailed')) }
-  finally { analyzing.value = false }
-}
+// 批23：级别多选本地过滤（[] =全部）；选项集对齐 task_logs 实际枚举（strategy_runner level.upper()）
+const levelFilter = ref([])
+const levelOptions = ['ERROR', 'WARN', 'INFO'].map(v => ({ value: v, label: v }))
+const filteredLogs = computed(() => levelFilter.value.length ? logs.value.filter(l => levelFilter.value.includes(l.level)) : logs.value)
 onMounted(() => {
   // 批9：双源各自独立容错→并发发不短路（Dashboard jobs 范式）
   [
@@ -109,12 +73,5 @@ onMounted(() => {
     async () => { try { outbox.value = (await getEmailOutbox()).items || [] } catch {} },
   ].forEach(fn => fn())
 })
-
-// P3-5:日志筛选
-const logKw = ref('')
-const logLevel = ref('')
-const logRange = ref(null)
-// P3-5:日志筛选
-
 </script>
 

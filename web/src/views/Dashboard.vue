@@ -152,7 +152,7 @@ const gaugeColor = computed(() => ddPct.value >= 90 ? cssVar('--critical') : ddP
 const topPositions = computed(() => [...(positions.value || [])]
   .sort((a, b) => Math.abs(b.pnl || 0) - Math.abs(a.pnl || 0)).slice(0, 5))
 const todayOrders = computed(() => {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10)
   return (orders.value || []).filter(o => (o.ts || '').startsWith(today))
 })
 const emptyState = computed(() => !liveTasks.value.length && !recentBacktests.value.length)
@@ -191,9 +191,11 @@ const loadAll = async () => {
     async () => { positions.value = (await api.get('/position')).positions || [] },
     async () => { orders.value = (await getOrders()).orders || [] },   // A-P0-1:后端返 {orders,total}
     async () => { liveTasks.value = await getLiveTasks() },
-    async () => { const n = await getNotifications('active', 50)
+    async () => { const n = await getNotifications('all', 50)   // 批23 B-P1-2：ack 退役后 active 池只增不减——改拉 all 前端滤今日
                   const items = n.items || n || []
-                  todayEvents.value = items.filter(x => ['risk', 'data'].includes(x.category)) },
+                  const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10)
+                  todayEvents.value = items.filter(x => ['risk', 'data'].includes(x.category)
+                    && (x.created_at || '').startsWith(today)) },
     async () => { integrity.value = (await getDataIntegrity('1D'))?.summary || await getDataIntegrity('1D') },   // A-P2-9:大小写+summary 形状
     async () => { recentBacktests.value = (await getBacktests()).slice(0, 4) },
     async () => { const r = await getRiskState(); riskMetrics.value = r.metrics || {} },

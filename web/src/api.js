@@ -69,6 +69,8 @@ export const riskHalt = () => api.post('/risk/halt')
 export const riskResume = () => api.post('/risk/resume')
 
 export const getAudit = () => api.get('/audit')
+// 批23：审计批量删（{ids:[int]} / {all:true}，后端留痕 audit_delete）
+export const deleteAudit = (payload) => api.post('/audit/delete', payload)
 export const getUsers = () => api.get('/user')
 export const createUser = (username, password, role) =>
   api.post('/user', { username, password, role })
@@ -77,7 +79,8 @@ export const getAccounts = () => api.get('/account')
 export const getLogs = () => api.get('/log')
 export const getEmailOutbox = () => api.get('/email-outbox')
 export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
-export const ackAllNotifications = () => api.post('/notifications/ack-all')
+// 批23：通知批量删（{ids:[int]} 选中删 / {all:true} 全清，confirm 前置在组件层）——ack-all 前端随确认机制退役（后端端点保留）
+export const deleteNotifications = (payload) => api.post('/notifications/delete', payload)
 export const getSmtpConfig = () => api.get('/smtp-config')
 export const saveSmtpConfig = (data) => api.post('/smtp-config', data)
 export const sendTestEmail = (data) => api.post('/email/test', data)
@@ -192,7 +195,6 @@ export const changePassword = (old_password, new_password) => api.post('/auth/ch
 export const getTerms = () => api.get('/terms')
 export const getLiveTrading = () => api.get("/live-trading")
 export const updateLiveTrading = (market, enabled) => api.post(`/live-trading/${market}?enabled=${enabled}`)
-export const logAnalyze = (data) => api.post('/log/analyze', data)
 export const logoutApi = () => api.post('/auth/logout')
 
 // 三档详情页（arch-17 §5）

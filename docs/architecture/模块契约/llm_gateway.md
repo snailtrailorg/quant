@@ -43,7 +43,7 @@ gateway.chat(messages: list[dict], *,
 # role: 决定可用工具范围（viewer/analyst=读类；trader=+halt+启停；admin=+resume）
 # caller: 调用方标识，写 llm_usage.caller
 #   实况取值（P3 回写 2026-08-20）：feishu / web_chat / daily_report / health_check /
-#   astock（选股 LLM 研判）/ convertible_terms / stock_analyze（三档详情 AI 分析）/ log_analyze（D4）/ test
+#   astock（选股 LLM 研判）/ convertible_terms / stock_analyze（三档详情 AI 分析）/ test（log_analyze 已退役批23）
 # 返回 LLMResponse；全失败返回 LLMResponse(content="", usage={"error":"所有 provider 不可用"})，不抛
 ```
 
@@ -111,7 +111,7 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 | `web_api.main` `/api/chat` | `gateway.chat(messages, tools=READ_TOOLS, role=, caller="web_chat")` |
 | `web_api.main` `/ws/chat` | `gateway.chat_stream(...)`（D1 WS 流式） |
 | `web_api.main` `/api/stock/{symbol}/analyze` | `gateway.chat(..., caller="stock_analyze")`（三档 AI 分析）（P3 回写 2026-08-20 补） |
-| `web_api.main` `/api/log/analyze` | `gateway.chat(..., caller="log_analyze")`（D4 已实现，原 alert_notify 预留位撤销）（P3 回写 2026-08-20） |
+| ~~`/api/log/analyze`~~ | 已退役（批23，2026-09-15） |
 | `web_api.main` `/api/llm-models/*` | 直接 SQL 读写 `llm_model_config`（不经 gateway）+ `gateway.reload_models()` |
 | `astock_analysis.analysis` `enhance_with_llm` | `gateway.chat([...], role="viewer", caller="astock")` |
 | `astock_analysis.convertible_terms` | `gateway.chat(..., caller="convertible_terms")`（D3）（P3 回写 2026-08-20 补） |

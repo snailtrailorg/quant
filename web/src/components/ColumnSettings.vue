@@ -4,7 +4,8 @@
        批17 17C：触发器图标化（Setting 圆钮+title——工具位统一图标形态，用户裁定） -->
   <el-popover :width="240" trigger="click">
     <template #reference>
-      <IconBtn :icon="Filter" :title="t('cols.settings')" />
+      <!-- 批23：图标 Filter→Operation（用户裁定：Filter 让位行筛选 RowFilter，列设置用扳手形 Operation） -->
+      <IconBtn :icon="Operation" :title="t('cols.settings')" />
     </template>
     <div style="max-height: 320px; overflow-y: auto">
       <el-checkbox-group v-model="visible">
@@ -19,7 +20,7 @@
 <script setup>
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Filter } from '@element-plus/icons-vue'
+import { Operation } from '@element-plus/icons-vue'
 import IconBtn from './IconBtn.vue'
 
 const props = defineProps({

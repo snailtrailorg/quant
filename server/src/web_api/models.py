@@ -58,10 +58,6 @@ class ChangePwdReq(BaseModel):
     old_password: str
     new_password: str
 
-class LogAnalyzeReq(BaseModel):
-    logs: list[dict] | None = None
-    task_id: str | None = None
-
 class ChatReq(BaseModel):
     message: str
 

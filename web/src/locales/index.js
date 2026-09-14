@@ -84,6 +84,10 @@ export default {
       noParams: '该策略未定义可配置参数',
       time: '时间',
       filter: '筛选',
+      deleteSelected: '删除所选',   // 批23：三表批量删（通知/审计；confirm 数量回显）
+      clearAll: '全部清除',
+      confirmDeleteSelected: '确认删除所选的 {n} 条记录？删除后不可恢复。',
+      confirmClearAll: '确认清除全部记录（含未加载部分）？删除后不可恢复。',
       credential: '凭证',
       credentialJson: '凭证(JSON)',
       credentialToken: '凭证(Token)',
@@ -124,7 +128,7 @@ export default {
       notifications: '通知', logs: '日志', audit: '审计',
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
-      run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警',
+      run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）
     },
     emailChg: {   // 批20 20C：改邮箱（文案经文案师）
       title: '修改邮箱', newEmail: '新邮箱', password: '当前密码（验证身份用）',
@@ -402,6 +406,7 @@ export default {
       noData: '暂无数据',
     },
     backtest: {
+      statusMap: { running: '运行中', done: '已完成', failed: '失败', pending: '待启动' },   // 批23：行筛选状态词条（裸英文退役）
       runningTag: '运行中', feeCustom: '自定义', feeUnit: '（佣金按万分之计）', todayTag: '今日', failedTag: '失败', unverified: '（未验证）', copySuffix: ' (副本)', feeHint: '万分之（默认 5=万5）',
       createLive: '以此创建实盘任务', sharpeCol: '夏普', dateRangeCol: '区间', tradeCount: '交易次数',
       annualized: '年化收益', plRatio: '盈亏比', metricsBtn: '指标', spanDays: '样本天数',
@@ -605,7 +610,7 @@ export default {
       apiName: 'API 名', targetTable: '落库表', cursorDate: '游标日期',
       triggerType: '触发方式', triggeredBy: '触发人', startTime: '开始时间', endTime: '结束时间',
       apiUrl: '接口地址', contextWindow: '上下文窗口', monthlyCostLimit: '月成本限额',
-      confirmedAt: '确认时间', sentAt: '发出时间',
+      sentAt: '发出时间',   // confirmedAt 随批23 确认机制退役
       nickname: '昵称', email: '邮箱',
       settings: '列设置', reset: '恢复默认',
     },
@@ -801,20 +806,12 @@ export default {
     },
     log: {
       title: '日志',
-      analyze: 'AI归因',
-      analyzeResult: '归因结果',
       runLogs: '运行日志',
-      level: '级别', keyword: '关键字',   // 盲审B题外：Logs.vue 筛选表单原误用 logs.* 命名空间（裸键）
+      level: '级别',   // 批23：keyword 随死筛选表单退役；AI 归因词条（analyze/analyzeResult/aiTitle/aiAnalyzeCount/analyzeHint/phAnalyze/noResult/analyzeFailed）整链清
       module: '模块',
       content: '内容',
       alertHistory: '告警历史',
       titleCol: '标题',
-      aiTitle: 'AI 日志归因',
-      aiAnalyzeCount: 'AI 归因（{n} 条异常）',
-      analyzeHint: '对 {n} 条 ERROR/WARN 日志进行 AI 归因分析。',
-      phAnalyze: '点击分析按钮...',
-      noResult: '无分析结果',
-      analyzeFailed: '归因失败',
       outboxTitle: '邮件发件箱',
       outboxTo: '收件人',
       outboxSubject: '主题',
@@ -1067,6 +1064,7 @@ export default {
       GROUP_RENAME_RACE: '权限并发写入，请重试',
       USERNAME_EMPTY: '用户名不能为空',
       IDS_EMPTY: 'ids 不能为空',
+      ADMIN_ONLY: '全部清除仅管理员可用',
       IDS_INVALID: 'ids 须为整型数组',
       TOO_MANY: '单次最多 100 条',
       AVATAR_TOO_LARGE: '图片不能超过 2MB',
@@ -1128,7 +1126,7 @@ export default {
                   not_configured: '通道未配置', expired: '消息过期' },
     },
     settings: {
-      run: '运行配置', users: '账号与邀请', perm: '权限管理', profile: '个人资料', alertsTab: '告警',
+      run: '运行配置', users: '账号与邀请', perm: '权限管理', profile: '个人资料', alertsTab: '告警通道',
     },
     tradingAccounts: {
       title: '交易账户', exchange: '交易所', apiKeyHint: 'API 密钥(回显)', apiKey: 'API 密钥标识',
@@ -1169,8 +1167,7 @@ export default {
       helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
     },
     notify: {
-      ackAll: '全部确认',
-      empty: '暂无通知',
+      empty: '暂无通知',   // ackAll 随批23 确认机制退役
     },
     sysmon: {
       title: '系统监控',
@@ -1276,6 +1273,10 @@ export default {
       noParams: 'This strategy has no configurable params',
       time: 'Time',
       filter: 'Filter',
+      deleteSelected: 'Delete Selected',   // 批23：三表批量删（通知/审计）
+      clearAll: 'Clear All',
+      confirmDeleteSelected: 'Delete the {n} selected records? This cannot be undone.',
+      confirmClearAll: 'Clear ALL records (including unloaded)? This cannot be undone.',
       credential: 'Credential',
       credentialJson: 'Credential (JSON)',
       credentialToken: 'Credential (Token)',
@@ -1316,7 +1317,7 @@ export default {
       notifications: 'Notifications', logs: 'Logs', audit: 'Audit',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
-      run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alerts',
+      run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alert Channels',
     },
     emailChg: {
       title: 'Change Email', newEmail: 'New Email', password: 'Current Password (to verify it\'s you)',
@@ -1593,6 +1594,7 @@ export default {
       noData: 'No data',
     },
     backtest: {
+      statusMap: { running: 'Running', done: 'Completed', failed: 'Failed', pending: 'Pending' },   // 批23：行筛选状态词条
       runningTag: 'Running', feeCustom: 'Custom', feeUnit: '(commission in bps)', todayTag: 'Today', failedTag: 'Failed', unverified: ' (unverified)', copySuffix: ' (copy)', feeHint: 'In bps (default 5 = 0.05%)',
       minuteStart: 'Min Start',
       minuteStartLabel: '⭐ Minute-bar accumulation (start date)',
@@ -1796,7 +1798,7 @@ export default {
       apiName: 'API Name', targetTable: 'Target Table', cursorDate: 'Cursor Date',
       triggerType: 'Trigger Type', triggeredBy: 'Triggered By', startTime: 'Start Time', endTime: 'End Time',
       apiUrl: 'API URL', contextWindow: 'Context Window', monthlyCostLimit: 'Monthly Cost Limit',
-      confirmedAt: 'Confirmed At', sentAt: 'Sent At',
+      sentAt: 'Sent At',   // confirmedAt retired in batch 23
       nickname: 'Nickname', email: 'Email',
       settings: 'Columns', reset: 'Reset to defaults',
     },
@@ -1988,20 +1990,12 @@ export default {
     },
     log: {
       title: 'Logs',
-      analyze: 'AI Analyze',
-      analyzeResult: 'Analysis',
       runLogs: 'Runtime Logs',
-      level: 'Level', keyword: 'Keyword',
+      level: 'Level',   // 批23：keyword 随死筛选表单退役；AI 归因词条整链清
       module: 'Module',
       content: 'Content',
       alertHistory: 'Alert History',
       titleCol: 'Title',
-      aiTitle: 'AI Log Analysis',
-      aiAnalyzeCount: 'AI Analyze ({n} issues)',
-      analyzeHint: 'Analyze {n} ERROR/WARN logs with AI.',
-      phAnalyze: 'Click analyze...',
-      noResult: 'No analysis result',
-      analyzeFailed: 'Analysis failed',
       outboxTitle: 'Email Outbox',
       outboxTo: 'To',
       outboxSubject: 'Subject',
@@ -2254,6 +2248,7 @@ export default {
       GROUP_RENAME_RACE: 'Concurrent permission write, please retry',
       USERNAME_EMPTY: 'Username cannot be empty',
       IDS_EMPTY: 'ids cannot be empty',
+      ADMIN_ONLY: 'Clear-all is admin-only',
       IDS_INVALID: 'ids must be an integer array',
       TOO_MANY: 'At most 100 items per batch',
       AVATAR_TOO_LARGE: 'Image must be under 2MB',
@@ -2315,7 +2310,7 @@ export default {
                   not_configured: 'Channel not configured', expired: 'Message expired' },
     },
     settings: {
-      run: 'Run Config', users: 'Users & Invites', perm: 'Permissions', profile: 'Profile', alertsTab: 'Alerts',
+      run: 'Run Config', users: 'Users & Invites', perm: 'Permissions', profile: 'Profile', alertsTab: 'Alert Channels',
     },
     tradingAccounts: {
       title: 'Trading Accounts', exchange: 'Exchange', apiKeyHint: 'API Key (hint)', apiKey: 'API Key hint',
@@ -2346,8 +2341,7 @@ export default {
       helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
     },
     notify: {
-      ackAll: 'Ack All',
-      empty: 'No notifications',
+      empty: 'No notifications',   // ackAll retired in batch 23
     },
     sysmon: {
       title: 'System Monitor',

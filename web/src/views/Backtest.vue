@@ -10,13 +10,11 @@
             <el-tag size="small" type="info" style="margin-left: 4px">{{ t('backtest.todayTag') }} {{ todayCount }}</el-tag>
             <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">{{ t('backtest.failedTag') }} {{ failedCount }}</el-tag>
           </span>
-          <span>
-            <!-- 批17 17B：列显示配置（ID/策略/操作列恒显不进 defs）；创建时间默认隐 -->
-            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.backtest-list" :columns="btColDefs" v-model:visible="btVisible" /></span>
-            <el-select v-model="filterStatus" size="small" clearable :placeholder="t('common.status')" style="width: 120px; margin-right: var(--sp-2)">
-              <el-option v-for="st in ['running','done','failed','pending']" :key="st" :value="st" :label="st" />
-            </el-select>
+          <span style="display: inline-flex; gap: 8px; align-items: center">
+            <!-- 批23：动作组统一序=筛选→新建→列设置（本页轮询自刷无刷新钮）；状态筛选 RowFilter 多选本地过滤 -->
+            <RowFilter v-model="filterStatus" :options="statusOptions" :title="t('common.filter')" />
             <IconBtn :icon="Plus" :title="t('backtest.create')" @click="showForm = true" :disabled="navReadonly" />
+            <ColumnSettings storage-key="cols.backtest-list" :columns="btColDefs" v-model:visible="btVisible" />
           </span>
         </div>
       </template>
@@ -165,6 +163,7 @@ import { bs, pct } from '../utils/backtestSummary'
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import RowFilter from '../components/RowFilter.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { Plus, View, MoreFilled } from '@element-plus/icons-vue'
 import { getBacktests, createBacktest, getStrategies, getPools } from '../api'
@@ -196,7 +195,10 @@ const onStrategyChange = (sid) => {
 }
 
 
-const filterStatus = ref('')
+// 批23：状态筛选多选本地过滤（[] =全部）；label 走 backtest.statusMap 词条（裸英文退役）
+const filterStatus = ref([])
+const statusOptions = computed(() => ['running', 'done', 'failed', 'pending']
+  .map(st => ({ value: st, label: t(`backtest.statusMap.${st}`) })))
 const moreRow = ref(null)
 
 // 批17 17B：列显示配置——ID/策略/操作列恒显不进 defs；创建时间=低频列默认隐
@@ -233,7 +235,7 @@ const strategyName = (sid) => strategies.value.find(x => x.id === sid)?.name || 
 const runningCount = computed(() => runs.value.filter(r => r.status === 'running').length)
 const todayCount = computed(() => runs.value.filter(r => (r.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length)
 const failedCount = computed(() => runs.value.filter(r => r.status === 'failed').length)
-const filteredRuns = computed(() => filterStatus.value ? runs.value.filter(r => r.status === filterStatus.value) : runs.value)
+const filteredRuns = computed(() => filterStatus.value.length ? runs.value.filter(r => filterStatus.value.includes(r.status)) : runs.value)
 // P2-6：区间快捷项
 const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d }
 const quickRanges = [

@@ -11,7 +11,7 @@ from ..auth import (
     validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
 )
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, LogAnalyzeReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq, EmailChangeReq, EmailConfirmReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq, EmailChangeReq, EmailConfirmReq)
 from src.data_platform.db import get_conn
 from src.email_service import send_invite_email, send_activation_email, send_password_reset_email, send_email_change_email
 import logging
@@ -28,7 +28,7 @@ router = APIRouter(tags=["auth_routes"])
 _AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR",
                                    "/data/websites/snailtrail.cc/quant/shared/static/avatars"))
 # 2026-08-27 双盲审 P1-1：Path.is_dir() 遇 EACCES 会 raise（非返回 False）——staging 建成后
-# 开发机 import 即崩（test_log_analyze 实锤）。对齐 main.py 回退机制：except OSError 判回退。
+# 开发机 import 即崩（批23 前的 log_analyze 测试实锤）。对齐 main.py 回退机制：except OSError 判回退。
 try:
     _avatar_ok = _AVATAR_DIR.is_dir()
 except OSError:
@@ -876,46 +876,6 @@ def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
 
 
 # ——— 日志 ———
-
-def _analyze_logs_with_llm(logs: list[dict]) -> str:
-    """LLM 归因异常日志，返回分析文本（D4 #34）。caller=log_analyze。"""
-    if not logs:
-        return "无异常日志"
-    from src.llm_gateway import gateway
-    log_text = "\n".join(
-        f"[{l.get('level','')}] {l.get('module') or l.get('step_name') or ''}: {l.get('msg') or l.get('message','')}"
-        for l in logs
-    )
-    try:
-        resp = gateway.chat(
-            messages=[
-                {"role": "system", "content": "你是运维归因助手，分析异常日志的根因并给出排查建议，用中文回复"},
-                {"role": "user", "content": f"以下是异常日志，请分析可能原因并给出排查建议：\n{log_text}"},
-            ],
-            role="viewer",
-            caller="log_analyze",
-        )
-        return resp.content if resp and resp.content else "（LLM 无响应，请检查 API key）"
-    except Exception as e:
-        return f"（LLM 暂不可用: {e}）"
-
-
-@router.post("/api/log/analyze")
-def log_analyze(req: LogAnalyzeReq, payload: dict = Depends(require_perm("strategy_control"))):
-    """AI 日志归因：传 logs 或 task_id，LLM 分析根因（D4 #34）。"""
-    logs = []
-    if req.logs:
-        logs = req.logs
-    elif req.task_id:
-        from src.task_manager import get_task
-        task = get_task(req.task_id)
-        if not task:
-            raise HTTPException(404, f"任务 {req.task_id} 不存在")
-        logs = task.get("logs", [])
-    # 过滤 ERROR/WARN（INFO/DEBUG 不归因）
-    logs = [l for l in logs if l.get("level", "").upper() in ("ERROR", "WARN")]
-    analysis = _analyze_logs_with_llm(logs)
-    return {"analysis": analysis, "log_count": len(logs), "logs": logs}
 
 
 @router.get("/api/log")

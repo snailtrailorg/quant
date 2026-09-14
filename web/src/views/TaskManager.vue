@@ -3,18 +3,12 @@
     <template #header>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <span>{{ t('task.title') }}</span>
+        <!-- 批23：header 左标题/右动作组，统一序=筛选→页面特有（检测卡死）→刷新→列设置 -->
         <div style="display:flex;gap:8px;align-items:center">
-          <el-select v-model="filterStatus" style="width:120px" @change="load">
-            <el-option :label="t('common.all')" value="" />
-            <el-option :label="t('task.statusRunning')" value="running" />
-            <el-option :label="t('task.statusCompleted')" value="completed" />
-            <el-option :label="t('task.statusFailed')" value="failed" />
-            <el-option :label="t('task.statusStuck')" value="stuck" />
-            <el-option :label="t('task.statusTerminated')" value="terminated" />
-          </el-select>
-          <ColumnSettings storage-key="cols.tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
-          <RefreshBtn @refresh="load" />
+          <RowFilter :model-value="filterStatus" :options="statusOptions" :title="t('common.filter')" @update:model-value="onFilter" />
           <IconBtn v-if="role==='admin'" type="warning" :icon="ZoomIn" :title="t('task.detectStuck')" @click="onDetectStuck" />
+          <RefreshBtn @refresh="load" />
+          <ColumnSettings storage-key="cols.tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
         </div>
       </div>
     </template>
@@ -75,6 +69,7 @@
 <script setup>
 import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
+import RowFilter from '../components/RowFilter.vue'
 import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { ZoomIn, SwitchButton, Delete, View } from '@element-plus/icons-vue'
@@ -87,10 +82,18 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
 const tasks = ref([])
-const filterStatus = ref('')
+// 批23：状态筛选多选（RowFilter 契约：[] =全部；空串单选退役）
+const filterStatus = ref([])
 const detailVisible = ref(false)
 const detail = ref(null)
 const role = ref(localStorage.getItem('role') || 'viewer')
+const statusOptions = computed(() => [
+  { value: 'running', label: t('task.statusRunning') },
+  { value: 'completed', label: t('task.statusCompleted') },
+  { value: 'failed', label: t('task.statusFailed') },
+  { value: 'stuck', label: t('task.statusStuck') },
+  { value: 'terminated', label: t('task.statusTerminated') },
+])
 
 // 批16 列显示配置（新列默认隐）：触发方式/触发人/起止时间——排查"谁在什么时候跑的"才开
 const taskColDefs = computed(() => [
@@ -105,7 +108,9 @@ const colOn = k => taskVisible.value.includes(k)
 const triggerLabel = v => v === 'manual' ? t('task.triggerManual') : v === 'schedule' ? t('task.triggerSchedule') : (v || '-')
 
 
-const load = async () => { try { tasks.value = (await getTasks(filterStatus.value)).items || [] } catch (e) { console.error(e) } }
+// 后端 status=ANY(多值)（批23 A-P1-5）：逗号拼接重拉，空数组→无参=全部
+const load = async () => { try { tasks.value = (await getTasks(filterStatus.value.join(','))).items || [] } catch (e) { console.error(e) } }
+const onFilter = (v) => { filterStatus.value = v; load() }
 onMounted(load)
 
 const onDetail = async (id) => {

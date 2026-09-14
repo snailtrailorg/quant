@@ -106,7 +106,6 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 通道用量 | `/api/broker-usage` | GET | viewer+ | #37（broker_usage 聚合看板） |
 | i18n 条款 | `/api/terms` | GET | viewer+ | TERMS 注册表全语言 |
 | 分时（三档项 16） | `/api/stock/{symbol}/intraday` | GET | viewer+ | 当日分时（腾讯全天优先→bar_hub 兜底） |
-| 日志归因 | `/api/log/analyze` | POST | viewer+ | D4（LLM 归因，caller="log_analyze"） |
 | 预算告警检查 | `check_budget_alerts`（非 HTTP，llm_gateway/budget.py） | - | - | beat `budget_alert_check` 1h 调（2026-08-19 已迁出本模块） |
 
 > 上表为 2026-08-20 P3 回写补全的缺失组（原表漏列 13 组）；`/api/help/{topic}` `/api/health/*` `/api/risk-rules` 等见各增量节。
@@ -246,7 +245,7 @@ from src.quant_common.crypto import encrypt, decrypt, mask
 3. main.py 加 CRUD 端点（参照 /api/channels 模式）
 
 ### D4 日志归因 / D5 预算端点（已存在，P3 回写 2026-08-20：原"待加"过时）
-- D4：`POST /api/log/analyze`（viewer+，传日志片段 -> gateway.chat 归因，caller="log_analyze"）
+- D4：`POST /api/log/analyze` 已退役（批23 AI 归因下线，2026-09-15）
 - D5：`GET /api/llm-budget` + `POST /api/llm-budget/{bid}`（预算 CRUD）+ `POST /api/llm-budget/check`（手动检查）；告警逻辑在 `llm_gateway/budget.check_budget_alerts()`（beat `budget_alert_check` 1h 调，2026-08-19 模块归位迁出 web_api）
 
 ---

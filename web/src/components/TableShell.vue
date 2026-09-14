@@ -26,6 +26,10 @@ const tableRef = ref(null)
 const storeId = 'colw.' + props.storageKey
 const declaredWidths = new Map()   // 盲审A-P1-4：声明宽快照（prop→width/min-width 原值）——双击回档真值
 
+// 批23：透出内层 el-table 清选（selection+reserve-selection 批删后清勾选，
+// script setup 组件默认闭合，不 expose 则父层拿不到 el-table 方法）
+defineExpose({ clearSelection: () => tableRef.value?.clearSelection?.() })
+
 const loadWidths = () => {
   try {
     const m = JSON.parse(localStorage.getItem(storeId) || '{}')
