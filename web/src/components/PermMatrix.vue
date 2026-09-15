@@ -55,7 +55,8 @@
         </div>
       </el-tab-pane>
     </el-tabs>
-    <el-button type="primary" @click="save" :loading="saving" style="margin-top: 14px">{{ t('common.save') }}</el-button>
+    <!-- hideSave（批24 迭代十二）：组弹窗统一保存时隐藏组件内按钮，save 经 expose 由外层调 -->
+    <el-button v-if="!hideSave" type="primary" @click="save" :loading="saving" style="margin-top: 14px">{{ t('common.save') }}</el-button>
   </div>
 </template>
 
@@ -67,7 +68,10 @@ import { ElMessage } from 'element-plus'
 import api from '../api'
 import { permGroupsOf } from '../permGroups'
 
-const props = defineProps({ group: { type: String, required: true } })
+const props = defineProps({
+  group: { type: String, required: true },
+  hideSave: { type: Boolean, default: false },   // 批24 迭代十二：外层统一保存（对照页仍用组件内钮）
+})
 const emit = defineEmits(['saved'])
 const { t, te } = useI18n()
 
@@ -117,6 +121,7 @@ const save = async () => {
   } catch (e) { ElMessage.error(String(e?.response?.data?.detail || e)) }
   finally { saving.value = false }
 }
+defineExpose({ save })   // 批24 迭代十二：外层统一保存入口（hideSave 模式）——置于 const save 定义后（TDZ）
 </script>
 
 <style scoped>

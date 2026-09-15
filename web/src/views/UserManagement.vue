@@ -160,30 +160,36 @@
           </TableShell>
           </el-card>
 
-          <!-- 组编辑弹窗（添加/编辑共用，~820px 容纳三维矩阵；新组先创建后配权限） -->
+          <!-- 组编辑弹窗（添加/编辑共用；批24 迭代十二：基本信息表格化+统一保存——编辑模式单钮串基本信息+权限，
+               新建模式仍"先创建后配权限"（savedName 机制约束）；弹窗 footer 只留关闭；builtin 提示行删（用户裁定：无用——锁定输入框已自明） -->
           <el-dialog v-model="groupDlg" :title="groupForm.id ? t('um.editGroup') : t('um.addGroup')" width="820px" top="4vh">
-            <el-form label-width="90px" inline>
-              <el-form-item :label="t('common.name')">
-                <el-input v-model="groupForm.name" :disabled="groupForm.builtin" style="width: 240px"
-                          :placeholder="t('um.groupNamePh')" />
-              </el-form-item>
-              <el-form-item :label="t('common.description')">
-                <el-input v-model="groupForm.description" maxlength="200" style="width: 380px" />
-              </el-form-item>
-              <el-form-item>
-                <el-button type="primary" :loading="groupSaving" @click="onSaveGroupInfo">
-                  {{ groupForm.id ? t('common.save') : t('common.create') }}
-                </el-button>
-              </el-form-item>
-            </el-form>
-            <div v-if="groupForm.builtin" style="color: var(--text-secondary); font-size: var(--fs-foot); margin: -6px 0 10px">
-              {{ t('um.builtinLocked') }}
+            <div class="info-table" style="max-width: 640px">
+              <div class="info-row">
+                <span class="info-label">{{ t('common.name') }}</span>
+                <span class="info-value"><el-input v-model="groupForm.name" :disabled="groupForm.builtin" style="width: 240px"
+                          :placeholder="t('um.groupNamePh')" /></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">{{ t('common.description') }}</span>
+                <span class="info-value"><el-input v-model="groupForm.description" maxlength="200" style="width: 420px" /></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label"></span>
+                <span class="info-value" style="justify-content: flex-end">
+                  <el-button v-if="!groupForm.id" type="primary" :loading="groupSaving" @click="onSaveGroupInfo">
+                    {{ t('common.create') }}
+                  </el-button>
+                  <el-button v-else type="primary" :loading="groupSaving" @click="onSaveAll">
+                    {{ t('common.save') }}
+                  </el-button>
+                </span>
+              </div>
             </div>
             <el-divider style="margin: var(--sp-2) 0 var(--sp-4)" />
             <template v-if="savedName">
               <div style="font-weight: 600; margin-bottom: var(--sp-2)">{{ t('um.groupPerms') }}（{{ savedName }}）</div>
               <div style="max-height: 52vh; overflow-y: auto">
-                <PermMatrix :key="savedName" :group="savedName" @saved="loadGroups" />
+                <PermMatrix ref="permMatrixRef" :key="savedName" :group="savedName" hide-save @saved="loadGroups" />
               </div>
             </template>
             <el-empty v-else :description="t('um.createFirst')" />
@@ -251,6 +257,7 @@ const load = async () => {
 // —— 用户组（批11B：动态组——四内置锁名+自定义增删改；PermMatrix 配权限） ——
 const groups = ref([])
 const groupDlg = ref(false)
+const permMatrixRef = ref(null)   // 批24 迭代十二：统一保存调 PermMatrix expose save
 const groupSaving = ref(false)
 const groupForm = ref({ id: null, name: '', description: '', builtin: false, origName: '' })
 const savedName = ref('')   // 已落库组名（PermMatrix 挂载键——新组先创建、rename 先保存才有）
@@ -278,8 +285,14 @@ const onSaveGroupInfo = async () => {
       ElMessage.success(t('common.saveSuccess'))
     }
     await Promise.all([loadGroups(), load()])   // rename 会改用户表角色显示
-  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+    return true
+  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))); return false }
   finally { groupSaving.value = false }
+}
+// 批24 迭代十二：编辑模式统一保存——基本信息+权限矩阵串行（任一失败即停，错误提示各自出）
+const onSaveAll = async () => {
+  if (!await onSaveGroupInfo()) return   // 基本信息失败即停（错误提示已出）
+  await permMatrixRef.value?.save?.()
 }
 const onDeleteGroup = async (row) => {
   try {
