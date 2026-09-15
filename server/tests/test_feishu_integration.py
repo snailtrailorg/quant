@@ -281,7 +281,8 @@ class TestImBotBatch1:
         assert bot.verify_card_signature(ts, nonce, body, good2) is False
 
     def test_db_error_falls_back_env(self, monkeypatch):
-        """B-B4:DB 挂(get_conn 抛)→ 签名/授权都回落 env(批 1 降级路径)。"""
+        """B-B4:DB 挂(get_conn 抛)→ 签名回落 env(批 1 降级路径)。
+        批27-27：check_user 已退役（零业务调用+env 兜底与五轮身份裁定相悖）——授权断言随删。"""
         from src.feishu_bot import bot
         import hashlib as _h
         from src.data_platform import db as _db
@@ -290,21 +291,6 @@ class TestImBotBatch1:
         ts, nonce, body = "1", "n", "{}"
         good = _h.sha1(f"{ts}{nonce}tok_env{body}".encode()).hexdigest()
         assert bot.verify_card_signature(ts, nonce, body, good) is True
-        monkeypatch.setenv("LARK_AUTHORIZED_USERS", "ou_y:analyst")
-        bot.FEISHU_USERS.clear()
-        assert bot.check_user("ou_y") == "analyst"
-
-    def test_check_user_table_first_env_fallback(self, monkeypatch):
-        from src.feishu_bot import bot
-        # 表有授权行
-        self._mock_conn(monkeypatch, users_rows=("admin",))
-        assert bot.check_user("ou_x") == "admin"
-        # 表无 → env 层
-        self._mock_conn(monkeypatch, users_rows=None)
-        monkeypatch.setenv("LARK_AUTHORIZED_USERS", "ou_x:trader")
-        bot.FEISHU_USERS.clear()
-        assert bot.check_user("ou_x") == "trader"
-        assert bot.check_user("ou_unknown") is None
 
 
 # ---------------------------------------------------------------------------

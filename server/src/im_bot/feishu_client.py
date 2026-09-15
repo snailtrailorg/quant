@@ -179,31 +179,9 @@ def load_feishu_users():
     return FEISHU_USERS
 
 
-def check_user(open_id: str) -> str | None:
-    """检查飞书用户是否授权，返回角色或 None。
-
-    批 1 语义：先查 im_bot_users（全部 feishu bot 行的授权并集——webhook 暂无 per-bot
-    路由，批 2 的 URL bid 才精确 per-bot），查无回落 env 层，再无=未授权（fail-closed）。
-    """
-    try:
-        from src.data_platform.db import get_conn
-        with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT u.role FROM im_bot_users u JOIN im_bot_config b ON b.id=u.bot_id "
-                "WHERE u.im_user_id=%s AND b.provider='feishu' AND b.enabled "
-                "ORDER BY CASE u.role WHEN 'admin' THEN 0 WHEN 'trader' THEN 1 "
-                "WHEN 'analyst' THEN 2 ELSE 3 END LIMIT 1", (open_id,))
-            row = cur.fetchone()
-            if row:
-                return row[0]
-    except Exception as e:
-        logger.warning("im_bot_users 查询失败（回落 env 授权层）: %s", e)
-    if not FEISHU_USERS:
-        load_feishu_users()
-    return FEISHU_USERS.get(open_id)
-
-
 # ——— 签名校验（批 1：主源 im_bot_config，env 兜底——arch-19 v2 §5 过渡双轨）———
+# 批27-27：check_user（表查询+env 授权兜底）已退役——零业务调用，且 env 兜底与
+# 五轮"身份源=绑定/owner 直通"裁定相悖（load_feishu_users/FEISHU_USERS 仍活：探针/users.py 兜底）
 
 def _im_bot_secret(field: str, env_key: str) -> str:
     """取签名密钥:im_bot_config 任一 enabled feishu 行的 credentials.{field}（批 1 全局

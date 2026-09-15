@@ -7,7 +7,7 @@ from src.im_bot.feishu_client import *           # noqa: F401,F403
 from src.im_bot.feishu_client import (            # noqa: F401 显式列(非 __all__ 成员)
     FeishuClient, get_feishu_client, evict_feishu_client,
     process_message_async, execute_confirmed_tool,
-    check_user, load_feishu_users, FEISHU_USERS,
+    load_feishu_users, FEISHU_USERS,
     verify_event_signature, verify_card_signature, _im_bot_secret,
     build_confirm_card, card_action_fresh,
 )

@@ -270,10 +270,16 @@ def delete_sync_data_api(sid: str, payload: dict = Depends(require_perm("data_sy
         cur = conn.execute("SELECT pg_table FROM sync_config WHERE id=%s", (sid,))
         r = cur.fetchone()
     if r and r[0]:
-        with get_conn() as conn:
-            conn.execute(f'DELETE FROM "{r[0]}"')
-            conn.execute("UPDATE sync_config SET last_sync_date=NULL, last_sync_ts=NULL, last_sync_count=0, last_status='idle' WHERE id=%s", (sid,))
-            conn.commit()
+        # 批27-30：标识符白名单校验（存量含 bar_1D 大写——正则须含大写，全局检视 A-P2：DB 行被
+        # 污染时 f-string 标识符=注入面；不符跳过 DELETE 但继续游标重置——对齐既有 try/except 容错风格）
+        import re as _re
+        if not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", r[0]):
+            logger.warning("sync_config.pg_table 非法标识符（跳过 DELETE 防注入）: %r", r[0])
+        else:
+            with get_conn() as conn:
+                conn.execute(f'DELETE FROM "{r[0]}"')
+                conn.execute("UPDATE sync_config SET last_sync_date=NULL, last_sync_ts=NULL, last_sync_count=0, last_status='idle' WHERE id=%s", (sid,))
+                conn.commit()
     audit_log(payload["username"], "delete_sync_data", sid)
     return {"ok": True}
 

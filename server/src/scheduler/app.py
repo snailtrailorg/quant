@@ -125,19 +125,14 @@ app.conf.update(
     task_track_started=True,
     task_soft_time_limit=300,  # 5 分钟超时
     beat_schedule={
-        "data-increment-daily": {
-            "task": "src.scheduler.tasks.data_increment_daily",
-            "schedule": 86400.0,  # 每天一次（实盘用 crontab hour=16, minute=0）
-            "options": {"queue": "data"},
-        },
         "astock-select-daily": {
             "task": "src.scheduler.tasks.astock_select_daily",
-            "schedule": 86400.0,
+            "schedule": crontab(hour=16, minute=8),   # 批27-31：盘后锚（避 16:30 daily-report）
             "options": {"queue": "analysis"},
         },
         "data-increment-crypto": {
             "task": "src.scheduler.tasks.data_increment_crypto",
-            "schedule": 900.0,  # 15min
+            "schedule": crontab(minute="*/15"),   # 批27-31：15min 无损表达
             "options": {"queue": "data"},
         },
         "sync-scheduler": {
@@ -147,17 +142,17 @@ app.conf.update(
         },
         "data-continuity": {
             "task": "src.scheduler.tasks.data_continuity_check",
-            "schedule": 3600.0,
+            "schedule": crontab(minute=17),   # 批27-31：每小时 :17 错峰
             "options": {"queue": "data"},
         },
         "reconcile": {
             "task": "src.scheduler.tasks.reconcile_three_books",
-            "schedule": 3600.0,
+            "schedule": crontab(minute=43),   # 批27-31：每小时 :43（与 continuity 错开）
             "options": {"queue": "risk"},
         },
         "drift-check": {
             "task": "src.scheduler.tasks.drift_check",
-            "schedule": 86400.0,
+            "schedule": crontab(hour=15, minute=37),   # 批27-31：盘后窗内（依赖当日分析）
             "options": {"queue": "risk"},
         },
         "risk-sweep": {
@@ -172,27 +167,27 @@ app.conf.update(
         },
         "notifications-cleanup": {
             "task": "src.scheduler.tasks.notifications_cleanup",
-            "schedule": 86400.0,
+            "schedule": crontab(hour=3, minute=13),   # 批27-31：低峰（避 04:00 备份）
             "options": {"queue": "risk"},
         },
         "logs-cleanup": {   # 批25：system_log>30d 清理
             "task": "src.scheduler.tasks.cleanup_logs",
-            "schedule": 86400.0,
+            "schedule": crontab(hour=3, minute=23),   # 批27-31：低峰（避 04:00 备份/04:07 校准）
             "options": {"queue": "risk"},
         },
         "convertible-terms-sync": {
             "task": "src.scheduler.tasks.convertible_terms_sync",
-            "schedule": 86400.0,
+            "schedule": crontab(hour=3, minute=43),   # 批27-31：低峰
             "options": {"queue": "data"},
         },
         "budget-alert-check": {
             "task": "src.scheduler.tasks.budget_alert_check",
-            "schedule": 3600.0,
+            "schedule": crontab(minute=37),   # 批27-31：每小时 :37 错峰
             "options": {"queue": "risk"},
         },
         "static-list-sync": {
             "task": "src.scheduler.tasks.static_list_sync",
-            "schedule": 604800.0,
+            "schedule": crontab(day_of_week=0, hour=4, minute=37),   # 批27-31：周日低峰（避 04:07 校准）
             "options": {"queue": "data"},
         },
         "daily-report": {
@@ -202,7 +197,7 @@ app.conf.update(
         },
         "broker-health-check": {
             "task": "src.scheduler.tasks.broker_health_check",
-            "schedule": 21600.0,
+            "schedule": crontab(hour="*/6", minute=51),   # 批27-31：6h 周期+错峰分钟
             "options": {"queue": "risk"},
         },
         # 15-服务监控：30s 症状型判定（unit/依赖/心跳，沿检测去重），S6 修订配套

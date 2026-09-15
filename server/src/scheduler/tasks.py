@@ -32,22 +32,6 @@ def _is_trading_hours() -> bool:
     return (930 <= hm <= 1130) or (1300 <= hm <= 1500)
 
 
-@app.task(name="src.scheduler.tasks.data_increment_daily", bind=True, max_retries=2)
-def data_increment_daily(self):
-    """[已弃用] 盘后增量更新日线。改用 data_sync_scheduler + sync_config DB 驱动（P3-16）。保留 beat 仅兼容。"""
-    if not _is_trading_day():
-        return {"status": "skipped", "reason": "非交易日"}
-    try:
-        from src.data_platform import platform
-        # MVP：浦发银行作为连通性标的；后续改配置驱动全标的池
-        today = date.today().strftime("%Y%m%d")
-        rows = platform.ensure_daily("600000.SH", today, today)
-        return {"status": "ok", "rows": rows}
-    except Exception as exc:
-        logger.exception("日线增量失败")
-        raise self.retry(exc=exc, countdown=30)
-
-
 @app.task(name="src.scheduler.tasks.astock_select_daily", bind=True, max_retries=1)
 def astock_select_daily(self):
     """每日 A 股选股；非交易日跳过。"""
@@ -107,45 +91,6 @@ def daily_report(self):
     from src.alert_notify import report
     report("盘后报告", body)
     return {"status": "ok", "body": body[:200]}
-
-
-@app.task(name="src.scheduler.tasks.astock_minute_analysis")
-def astock_minute_analysis():
-    """盘中分钟研判；非交易日/连续竞价外跳过。P1-6 接线：读 bar_1min 最新 + MinuteAnalysisEngine + 落 PG。"""
-    if not _is_trading_hours():
-        return {"status": "skipped", "reason": "非交易时段"}
-    # P1-6：读 bar_1min 最新 bar + MinuteAnalysisEngine.on_bar + 落 astock_analysis 表
-    try:
-        from src.astock_analysis.analysis import MinuteAnalysisEngine
-        from src.data_platform.db import get_bars, get_conn
-        # 取活跃策略的 symbol
-        with get_conn() as conn:
-            cur = conn.execute("SELECT symbol FROM strategy_config WHERE enabled=true AND type='astock_analysis' LIMIT 5")
-            symbols = [r[0] for r in cur.fetchall()]
-        if not symbols:
-            return {"status": "skipped", "reason": "无活跃 A 股策略"}
-        engine = MinuteAnalysisEngine()
-        results = []
-        for sym in symbols:
-            bars_df = get_bars(sym, "1min", None, None)
-            if bars_df is None or bars_df.empty or len(bars_df) < 20:
-                continue
-            history = bars_df.tail(20).to_dict("records")
-            bar = history[-1]
-            r = engine.on_bar(bar, history[:-1])
-            if r:
-                results.append({"symbol": sym, "action": r["action"], "score": r["score"], "rating": r["rating"]})
-                # 落 PG
-                with get_conn() as conn:
-                    conn.execute("SELECT 1 FROM astock_analysis LIMIT 1")
-                    import json
-                    conn.execute("INSERT INTO astock_analysis (symbol, action, score, rating, factors) VALUES (%s,%s,%s,%s,%s)",
-                                 (sym, r["action"], r["score"], r["rating"], json.dumps(r.get("factors", {}))))
-                    conn.commit()
-        return {"status": "ok", "count": len(results), "results": results}
-    except Exception as e:
-        logger.exception("astock_minute_analysis 失败")
-        return {"status": "error", "reason": str(e)[:100]}
 
 
 @app.task(name="src.scheduler.tasks.health_check")
@@ -253,20 +198,6 @@ def reconcile_three_books():
 
     try:
         with get_conn() as conn:
-            # 校验表存在
-            try:
-                conn.execute("SELECT 1 FROM signal_log LIMIT 1")
-            except Exception:
-                pass
-            try:
-                conn.execute("SELECT 1 FROM order_log LIMIT 1")
-            except Exception:
-                pass
-            try:
-                conn.execute("SELECT 1 FROM trade_log LIMIT 1")
-            except Exception:
-                pass
-            conn.commit()
 
             # 4. ST2 持仓双源 diff（2026-08-18，N 建议：快照真相 vs trade_log 推导=账实分离持续验证器）
             try:
