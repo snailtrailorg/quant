@@ -7,7 +7,8 @@
       <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
       <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExport" />
     </div>
-    <TableShell :data="filteredLogs" height="500" storage-key="logs-run">
+    <el-alert v-if="noPerm" type="warning" :title="t('log.noPerm')" :closable="false" style="margin-bottom: var(--sp-3)" />
+    <TableShell v-else :data="filteredLogs" height="500" storage-key="logs-run">
       <el-table-column prop="ts" :label="t('common.time')" min-width="160">
         <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
@@ -52,5 +53,9 @@ const filteredLogs = computed(() => {   // 批25：数据源已切 system_log—
 const onExport = () => exportCsv('run_logs',
   [t('common.time'), t('log.level'), t('log.module'), t('log.content')],
   filteredLogs.value.map(l => [fmtTime.full(l.ts), l.level, l.module, l.msg]))
-onMounted(async () => { try { logs.value = (await getLogs()).logs || [] } catch {} })
+const noPerm = ref(false)
+onMounted(async () => {
+  try { logs.value = (await getLogs()).logs || [] }
+  catch (e) { noPerm.value = e?.response?.status === 403 }   // 批25：运行日志=管理员面（权限收紧）——403 显式提示非静默空表
+})
 </script>

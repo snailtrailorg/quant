@@ -40,12 +40,17 @@ class _Sink(logging.Handler):
         self._thread = threading.Thread(target=self._loop, name="log-sink", daemon=True)
         self._closed = False
 
+    # level 归一（盲审 A-P2-7）：logger 面 WARNING/CRITICAL → WARN/ERROR——与 event() 及前端筛选枚举（ERROR/WARN/INFO）同值域
+    @staticmethod
+    def _norm_level(name: str) -> str:
+        return {"WARNING": "WARN", "CRITICAL": "ERROR"}.get(name, name)
+
     def emit(self, record: logging.LogRecord) -> None:
         try:
             msg = self.format(record)
         except Exception:
             msg = record.getMessage()
-        self._q.append((record.levelname, record.name[:60], msg[:8000]))
+        self._q.append((self._norm_level(record.levelname), record.name[:60], msg[:8000]))
 
     def _loop(self) -> None:
         while not self._stop.wait(_INTERVAL):
@@ -108,8 +113,14 @@ def install(format_src: str = "") -> _Sink:
         return _sink
     _sink = _Sink(format_src or _default_source())
     root = logging.getLogger()
+    root.setLevel(logging.INFO)   # 盲审 A-P0-1/B-P0：root 默认 WARNING 且后续 basicConfig 因已有 handler 短路——不设则 INFO 面全进程空转
     _sink.setFormatter(logging.Formatter("%(message)s"))
     root.addHandler(_sink)
+    # 盲审 A-P0-1 后半：basicConfig 短路后 console StreamHandler 也没了（live-task/md-hub journalctl 全暗）——补装
+    if not any(isinstance(h, logging.StreamHandler) and not isinstance(h, _Sink) for h in root.handlers):
+        _sh = logging.StreamHandler()
+        _sh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+        root.addHandler(_sh)
     _sink._thread.start()
     atexit.register(_sink.close)
     return _sink
@@ -121,17 +132,21 @@ def install_worker(format_src: str = "") -> _Sink:
     billiard os._exit 绕过 atexit → worker_shutdown 信号处显式调 close()。
     """
     global _sink
-    _sink = None   # 丢弃 fork 继承的父进程 sink（无线程，纯死对象）
+    if _sink is not None:
+        logging.getLogger().removeHandler(_sink)   # 盲审 A-P2-5：摘死 handler——不摘则子进程每条记录双写进无线程永不满发的父 deque
+        _sink = None
     return install(format_src)
 
 
 def chain_sigterm(previous=None) -> None:
-    """自持 SIGTERM：冲刷后链式调原 handler 再退出（live-task/md-hub 等自管进程入口用）。"""
+    """自持 SIGTERM：冲刷后链式调原 handler 再退出（live-task/md-hub 等自管进程入口用）。
+    盲审 B-P1：SIG_DFL/SIG_IGN 是整数枚举非 callable——排除后走 sys.exit（atexit 冲刷链保通）。"""
+    prev = previous if callable(previous) else None
     def _handler(signum, frame):
         if _sink is not None:
             _sink.close()
-        if previous is not None:
-            previous(signum, frame)
+        if prev is not None:
+            prev(signum, frame)
         else:
             sys.exit(0)
     signal.signal(signal.SIGTERM, _handler)

@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.Column("module", sa.String(60), nullable=False, server_default=""),
         sa.Column("message", sa.Text(), nullable=False),
     )
-    op.create_index("idx_system_log_ts", "system_log", ["ts"], postgresql_where=sa.text("ts IS NOT NULL"))
+    op.create_index("idx_system_log_ts", "system_log", ["ts"])
     op.create_index("idx_system_log_level", "system_log", ["level"])
 
 

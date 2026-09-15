@@ -898,8 +898,12 @@ def get_logs(task_id: str | None = None, payload: dict = Depends(require_perm("u
                 rows = cur.fetchall()
             return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
                               "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
-        cur = conn.execute(
-            "SELECT level, module, message, ts FROM system_log ORDER BY ts DESC LIMIT 200")
-        rows = cur.fetchall()
+        try:
+            cur = conn.execute(
+                "SELECT level, module, message, ts FROM system_log ORDER BY ts DESC LIMIT 200")
+            rows = cur.fetchall()
+        except Exception:
+            logger.warning("get_logs: system_log 表不存在（需运行 alembic upgrade head）")
+            rows = []
     return {"logs": [{"level": r[0], "msg": r[2], "module": r[1] or "",
                       "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}

@@ -302,11 +302,11 @@ const enrichTasks = async () => {
     try {
       const r = await api.get('/log', { params: { task_id: `live:${task.id}` } })
       task._timeline = (r?.logs || []).slice(0, 100)   // 盲审A-P2-8：满窗计数（渲染侧 slice(0,8)）
-    } catch { task._timeline = [] }
+    } catch (e) { task._timeline = e?.response?.status === 403 ? null : [] }   // 批25：403=无权限(null 与空时间线区分——防重启数假 0)
   }))
 }
 // wd-20 §1.5 裁定②：重启/退出码由 task_logs 时间线派生（启动条目数-1=重启数）
-const restartCount = row => Math.max((row._timeline || []).filter(l => (l.msg || '').includes('任务启动')).length - 1, 0)
+const restartCount = row => row._timeline === null ? '—' : Math.max((row._timeline || []).filter(l => (l.msg || '').includes('任务启动')).length - 1, 0)
 const lastExit = row => {
   const e = (row._timeline || []).find(l => (l.msg || '').includes('退出'))
   return e ? (e.msg.includes('退出码 0') ? '0' : e.msg.slice(0, 24)) : '—'

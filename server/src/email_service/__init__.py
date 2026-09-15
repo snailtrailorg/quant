@@ -131,26 +131,31 @@ def _try_row_sync(outbox_id: int) -> None:
         conn.commit()
     _, to, subject, body, attempts = row
     err = _send_email_sync(to, subject, body)
+    # 批25：终态事件进 system_log（四路径必经单点）；盲审 A-P2-6——事件在 commit 成功后发（防 UPDATE 回滚与日志不一致）
+    from src.data_platform.log_sink import event
+    _ev = None
     with get_conn() as conn:
-        from src.data_platform.log_sink import event   # 批25：终态事件进 system_log（四路径必经单点）
         if err is None:
             conn.execute(
                 "UPDATE email_outbox SET status='sent', sent_at=now(), last_error=NULL WHERE id=%s", (outbox_id,))
-            event("INFO", "email", f"已发送 → {to} ｜ {subject}")
+            _ev = ("INFO", f"已发送 → {to} ｜ {subject}")
         else:
             n = attempts + 1
             if n >= MAX_ATTEMPTS:
                 conn.execute(
                     "UPDATE email_outbox SET status='failed', attempts=%s, last_error=%s WHERE id=%s",
                     (n, err, outbox_id))
-                event("ERROR", "email", f"发送失败（重试 {MAX_ATTEMPTS} 次耗尽）→ {to} ｜ {subject} ｜ {err}")
-                _final_failure_notify(to, subject, err, outbox_id)
+                _ev = ("ERROR", f"发送失败（重试 {MAX_ATTEMPTS} 次耗尽）→ {to} ｜ {subject} ｜ {err}")
             else:
                 conn.execute(
                     "UPDATE email_outbox SET status='pending', attempts=%s, next_attempt_at=now()+make_interval(secs=>%s), last_error=%s WHERE id=%s",
                     (n, _backoff_seconds(n), err, outbox_id))
-                event("WARN", "email", f"待重发（第 {n} 次）→ {to} ｜ {subject} ｜ {err}")
+                _ev = ("WARN", f"待重发（第 {n} 次）→ {to} ｜ {subject} ｜ {err}")
         conn.commit()
+    if _ev:
+        event(_ev[0], "email", _ev[1])
+        if _ev[0] == "ERROR":
+            _final_failure_notify(to, subject, err, outbox_id)
 
 
 async def try_row(outbox_id: int) -> None:
