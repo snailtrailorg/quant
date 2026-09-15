@@ -173,17 +173,6 @@
                 <span class="info-label">{{ t('common.description') }}</span>
                 <span class="info-value"><el-input v-model="groupForm.description" maxlength="200" style="width: 420px" /></span>
               </div>
-              <div class="info-row">
-                <span class="info-label"></span>
-                <span class="info-value" style="justify-content: flex-end">
-                  <el-button v-if="!groupForm.id" type="primary" :loading="groupSaving" @click="onSaveGroupInfo">
-                    {{ t('common.create') }}
-                  </el-button>
-                  <el-button v-else type="primary" :loading="groupSaving" @click="onSaveAll">
-                    {{ t('common.save') }}
-                  </el-button>
-                </span>
-              </div>
             </div>
             <el-divider style="margin: var(--sp-2) 0 var(--sp-4)" />
             <template v-if="savedName">
@@ -194,7 +183,14 @@
             </template>
             <el-empty v-else :description="t('um.createFirst')" />
             <template #footer>
-              <el-button @click="groupDlg = false">{{ t('common.close') }}</el-button>
+              <!-- 批24 迭代十四（用户裁定）：像编辑用户一样全弹窗底部两钮——取消+保存/创建（取消即关闭） -->
+              <el-button @click="groupDlg = false">{{ t('common.cancel') }}</el-button>
+              <el-button v-if="!groupForm.id" type="primary" :loading="groupSaving" @click="onSaveGroupInfo">
+                {{ t('common.create') }}
+              </el-button>
+              <el-button v-else type="primary" :loading="groupSaving" @click="onSaveAll">
+                {{ t('common.save') }}
+              </el-button>
             </template>
           </el-dialog>
         </div>
@@ -259,15 +255,15 @@ const groups = ref([])
 const groupDlg = ref(false)
 const permMatrixRef = ref(null)   // 批24 迭代十二：统一保存调 PermMatrix expose save
 const groupSaving = ref(false)
-const groupForm = ref({ id: null, name: '', description: '', builtin: false, origName: '' })
+const groupForm = ref({ id: null, name: '', description: '', builtin: false, origName: '', origDesc: '' })   // origDesc 批24 迭代十五：diff 提交基准
 const savedName = ref('')   // 已落库组名（PermMatrix 挂载键——新组先创建、rename 先保存才有）
 const loadGroups = async () => {
   try { groups.value = await api.get('/user-groups') } catch {}
 }
 const openGroupEdit = (row) => {
   groupForm.value = row
-    ? { id: row.id, name: row.name, description: row.description || '', builtin: row.builtin, origName: row.name }
-    : { id: null, name: '', description: '', builtin: false, origName: '' }
+    ? { id: row.id, name: row.name, description: row.description || '', builtin: row.builtin, origName: row.name, origDesc: row.description || '' }
+    : { id: null, name: '', description: '', builtin: false, origName: '', origDesc: '' }
   savedName.value = row ? row.name : ''
   groupDlg.value = true
 }
@@ -289,10 +285,25 @@ const onSaveGroupInfo = async () => {
   } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))); return false }
   finally { groupSaving.value = false }
 }
-// 批24 迭代十二：编辑模式统一保存——基本信息+权限矩阵串行（任一失败即停，错误提示各自出）
+// 批24 迭代十四：全弹窗单保存（footer）——基本信息+权限矩阵串行全链贯穿 loading；
+// 矩阵 save 返回布尔（false=已各自红提示），失败不再冒矛盾的保存成功
 const onSaveAll = async () => {
-  if (!await onSaveGroupInfo()) return   // 基本信息失败即停（错误提示已出）
-  await permMatrixRef.value?.save?.()
+  const f = groupForm.value
+  // 批24 迭代十五（用户裁定）：单钮多表单按 diff 提交——没改的不发请求
+  const infoDirty = f.name !== f.origName || f.description !== f.origDesc
+  const matrixDirty = permMatrixRef.value?.isDirty?.() ?? false
+  if (!infoDirty && !matrixDirty) { groupDlg.value = false; return }   // 零修改直接关（免打扰）
+  groupSaving.value = true
+  try {
+    if (infoDirty) {
+      await api.post(`/user-groups/${f.id}`, { name: f.name, description: f.description })
+      savedName.value = f.name; f.origName = f.name; f.origDesc = f.description
+    }
+    if (matrixDirty && await permMatrixRef.value?.save?.() === false) return
+    await Promise.all([loadGroups(), load()])
+    ElMessage.success(t('common.saveSuccess'))
+  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+  finally { groupSaving.value = false }
 }
 const onDeleteGroup = async (row) => {
   try {

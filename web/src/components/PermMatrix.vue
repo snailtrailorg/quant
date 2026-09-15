@@ -84,6 +84,12 @@ const marketKeys = ref([])          // 批15：market_op 五键（后端 _MARKET
 const apiSel = ref([])
 const navSel = reactive({})
 const marketSel = ref([])
+let _snapshot = ''   // 批24 迭代十五：加载态快照——isDirty 判没改不发请求
+const _ser = () => JSON.stringify({
+  a: [...apiSel.value].sort(),
+  n: Object.fromEntries(Object.entries(navSel).sort()),
+  m: [...marketSel.value].sort(),
+})
 
 const load = async () => {
   try {
@@ -98,6 +104,7 @@ const load = async () => {
     Object.assign(navSel, r.nav?.roles?.[g] || {})   // 盲审 B P0-1：reactive 对象禁 .value= 赋值（旧错型致 nav 三态加载恒空+保存必 400）
     const m = r.market_op?.roles?.[g] || {}
     marketSel.value = marketKeys.value.filter(k => m[k] === 'allow')
+    _snapshot = _ser()
   } catch { ElMessage.error(t('common.loadFailed')) }
 }
 watch(() => props.group, load, { immediate: true })
@@ -118,10 +125,11 @@ const save = async () => {
       ElMessage.info(t('perm.preservedInfo') + ': ' + res1.preserved_locked.map(k => (te('perm.key_' + k) ? t('perm.key_' + k) : k)).join(', '))
     ElMessage.success(t('common.saveSuccess'))
     emit('saved')
-  } catch (e) { ElMessage.error(String(e?.response?.data?.detail || e)) }
+    return true
+  } catch (e) { ElMessage.error(String(e?.response?.data?.detail || e)); return false }
   finally { saving.value = false }
 }
-defineExpose({ save })   // 批24 迭代十二：外层统一保存入口（hideSave 模式）——置于 const save 定义后（TDZ）
+defineExpose({ save, isDirty: () => _ser() !== _snapshot })   // 迭代十二 save 入口+迭代十五 diff 判（未改不发请求）——置于 const save 定义后（TDZ）
 </script>
 
 <style scoped>
