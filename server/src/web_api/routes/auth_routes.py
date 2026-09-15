@@ -834,15 +834,23 @@ def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
 
 
 @router.post("/api/user/{uid}")
-def update_user(uid: int, role: str = None, enabled: bool = None,
+def update_user(uid: int, role: str = None, enabled: bool = None, email: str = None,
                 payload: dict = Depends(require_perm("user_mgmt"))):
-    """改用户角色/禁用。保护：不能动自己（末位 admin 由 user_mgmt=admin-only + 不动自己 隐式保证）。"""
+    """改用户角色/禁用/邮箱（批24 迭代八：email 管理动作即时生效+审计——不走自助改的邮件验证链，管理员被信任）。
+    保护：不能动自己（末位 admin 由 user_mgmt=admin-only + 不动自己 隐式保证）。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT username FROM users WHERE id=%s", (uid,))
         row = cur.fetchone()
     if not row:
         raise ApiError(404, "USER_NOT_FOUND", "用户不存在")
     guard_user_mutation(row[0], payload["username"])
+    if email is not None:
+        email = email.strip().lower()
+        if not _EMAIL_RE.fullmatch(email):
+            raise ApiError(400, "EMAIL_INVALID", "邮箱格式不正确")
+        with get_conn() as conn:
+            if conn.execute("SELECT 1 FROM users WHERE email=%s AND id<>%s", (email, uid)).fetchone():
+                raise ApiError(409, "EMAIL_TAKEN", "该邮箱已被使用")
     with get_conn() as conn:
         if role is not None:
             # 批11B（顺修盲审 P2-11 预先存在项）：update_user 原无角色校验——与 create 同为组存在性校验
@@ -851,8 +859,15 @@ def update_user(uid: int, role: str = None, enabled: bool = None,
             conn.execute("UPDATE users SET role=%s WHERE id=%s", (role, uid))
         if enabled is not None:
             conn.execute("UPDATE users SET enabled=%s WHERE id=%s", (enabled, uid))
+        if email is not None:
+            try:
+                conn.execute("UPDATE users SET email=%s WHERE id=%s", (email, uid))
+            except Exception as e:
+                if getattr(e, "pgcode", None) == "23505":
+                    raise ApiError(409, "EMAIL_TAKEN", "该邮箱已被使用")
+                raise
         conn.commit()
-    audit_log(payload["username"], "update_user", str(uid), f"role={role} enabled={enabled}")
+    audit_log(payload["username"], "update_user", str(uid), f"role={role} enabled={enabled} email={email}")
     return {"ok": True}
 
 

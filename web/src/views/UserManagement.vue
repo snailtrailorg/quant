@@ -52,18 +52,26 @@
           </TableShell>
           </el-card>
 
-          <!-- 编辑弹窗（角色+启停，等价原行内三操作收编） -->
-          <el-dialog v-model="editDlg" :title="t('um.editUser', { name: editForm.username })" width="400px">
-            <el-form label-width="90px">
-              <el-form-item :label="t('user.role')">
-                <el-select v-model="editForm.role" style="width: 100%">
+          <!-- 编辑弹窗（用户组+启停+邮箱；批24 迭代八：email 可编辑+表格化对齐——label 右带冒号/控件左，与个人中心同规范） -->
+          <el-dialog v-model="editDlg" :title="t('um.editUser', { name: editForm.username })" width="440px">
+            <div class="info-table">
+              <div class="info-row">
+                <span class="info-label">{{ t('user.role') }}</span>
+                <span class="info-value"><el-select v-model="editForm.role" style="width: 260px">
                   <el-option v-for="g in groups" :key="g.name" :label="g.name" :value="g.name" />
-                </el-select>
-              </el-form-item>
-              <el-form-item :label="t('common.status')">
-                <el-switch v-model="editForm.enabled" :active-text="t('common.enabled')" :inactive-text="t('common.disabled')" />
-              </el-form-item>
-            </el-form>
+                </el-select></span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">{{ t('common.status') }}</span>
+                <span class="info-value">
+                  <el-switch v-model="editForm.enabled" :active-text="t('common.enabled')" :inactive-text="t('common.disabled')" />
+                </span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">{{ t('account.email') }}</span>
+                <span class="info-value"><el-input v-model="editForm.email" style="width: 260px" placeholder="user@example.com" /></span>
+              </div>
+            </div>
             <template #footer>
               <el-button type="danger" @click="onDeleteUser(editForm)">{{ t('common.delete') }}</el-button>
               <el-button @click="editDlg = false">{{ t('common.cancel') }}</el-button>
@@ -290,15 +298,16 @@ const saving = ref(false)
 const editForm = ref({ id: 0, username: '', role: 'viewer', enabled: true })
 const editOrig = ref({ role: '', enabled: true })   // 盲审 P2-9：按实际变化给文案（角色改/启停切换）
 const openEdit = (row) => {
-  editForm.value = { id: row.id, username: row.username, role: row.role, enabled: row.enabled }
-  editOrig.value = { role: row.role, enabled: row.enabled }
+  editForm.value = { id: row.id, username: row.username, role: row.role, enabled: row.enabled, email: row.email || '' }
+  editOrig.value = { role: row.role, enabled: row.enabled, email: row.email || '' }
   editDlg.value = true
 }
 const onSaveEdit = async () => {
   saving.value = true
   try {
     const f = editForm.value
-    await api.post(`/user/${f.id}?role=${f.role}&enabled=${f.enabled}`)
+    await api.post(`/user/${f.id}?role=${encodeURIComponent(f.role)}&enabled=${f.enabled}`
+      + (editOrig.value.email !== f.email ? `&email=${encodeURIComponent(f.email)}` : ''))
     ElMessage.success(editOrig.value.role !== f.role ? t('account.roleChanged')
       : editOrig.value.enabled !== f.enabled ? (f.enabled ? t('common.enabled') : t('common.disabled'))
       : t('common.save') + ' ✓')
@@ -358,3 +367,15 @@ const onDeleteInvite = async (row) => {
   }
 }
 </script>
+
+<style scoped>
+/* 批24 迭代八：编辑弹窗表格化（与个人中心 info-table 同规范——外层轨道+行 subgrid；冒号随语言） */
+.info-table { display: grid; grid-template-columns: max-content 1fr; column-gap: var(--sp-4); row-gap: var(--sp-2); }
+.info-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; min-height: 36px; padding: var(--sp-1) 0; border-bottom: 1px dashed var(--border-weak); font-size: var(--fs-body); }
+.info-row:last-child { border-bottom: none; }
+.info-label { text-align: right; color: var(--text-secondary); font-size: var(--fs-label); white-space: nowrap; }
+.info-label::after { content: ':'; margin-left: 2px; }
+.info-label:empty::after { content: none; }
+:root[lang='zh'] .info-label::after { content: '：'; }
+.info-value { display: inline-flex; align-items: center; gap: 8px; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+</style>
