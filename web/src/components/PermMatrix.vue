@@ -24,10 +24,11 @@
           <el-table-column prop="id" :label="t('common.name')" width="140" />
           <el-table-column prop="group" :label="t('perm.navGroup')" width="110" />
           <el-table-column prop="nav_state" :label="t('perm.navState')">
+            <!-- 批24 迭代五（用户裁定）：四态收三态——"—"（无配置）后端语义=readwrite 缺省（perms.py load_nav_map），
+                 并入读写档（非隐藏！）；单选三态互斥；保存时 readwrite 不写行=维持"无配置即缺省"数据语义 -->
             <template #default="{ row }">
-              <el-radio-group :model-value="navSel[row.id] || ''" size="small"
+              <el-radio-group :model-value="navSel[row.id] || 'readwrite'" size="small"
                               @update:model-value="v => navSel[row.id] = v">
-                <el-radio-button value="">—</el-radio-button>
                 <el-radio-button value="hidden">{{ t('perm.navHidden') }}</el-radio-button>
                 <el-radio-button value="readonly">{{ t('perm.navReadonly') }}</el-radio-button>
                 <el-radio-button value="readwrite">{{ t('perm.navReadwrite') }}</el-radio-button>
@@ -96,7 +97,8 @@ const save = async () => {
     const g = props.group
     const res1 = await api.post(`/permissions/${g}`, { permissions: apiSel.value })
     await api.post(`/permissions/${g}?dimension=nav`,
-      { resources: Object.fromEntries(Object.entries(navSel).filter(([, v]) => v)) })
+      // 批24 迭代五：readwrite=不写行（无配置即缺省 readwrite——navSel 内存值保留但过滤落库）
+      { resources: Object.fromEntries(Object.entries(navSel).filter(([, v]) => v && v !== 'readwrite')) })
     // market_op 全量重写：勾=allow、不勾=deny（无行≠未配置语义——矩阵所见即卡口所得）
     const marketRes = Object.fromEntries(
       marketKeys.value.map(k => [k, marketSel.value.includes(k) ? 'allow' : 'deny']))

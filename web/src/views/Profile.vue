@@ -13,19 +13,17 @@
       <div style="font-size: var(--fs-card); font-weight: bold">{{ me.nickname || me.username }}</div>
     </div>
 
-    <!-- 批24 用户裁定：资料改表格式（label 右对齐+冒号/value 左对齐/可编辑行尾编辑钮→弹窗，不再可编辑不可编辑混排） -->
+    <!-- 批24 迭代五（用户裁定）：编辑钮跟在值后不单列 -->
     <div class="info-table">
       <div class="info-row">
         <span class="info-label">{{ t('profile.nickname') }}</span>
-        <span class="info-value">{{ me.nickname || me.username }}</span>
-        <IconBtn :icon="Edit" :title="t('common.edit')" @click="openNickDlg" />
+        <span class="info-value">{{ me.nickname || me.username }}<IconBtn :icon="Edit" :title="t('common.edit')" @click="openNickDlg" /></span>
       </div>
       <div class="info-row"><span class="info-label">{{ t('account.username') }}</span><span class="info-value">{{ me.username }}</span></div>
       <div class="info-row"><span class="info-label">{{ t('user.role') }}</span><span class="info-value"><el-tag>{{ me.role }}</el-tag></span></div>
       <div class="info-row">
         <span class="info-label">{{ t('account.email') }}</span>
-        <span class="info-value">{{ me.email || '-' }}</span>
-        <IconBtn :icon="Edit" :title="t('emailChg.title')" @click="openEmailChg" />
+        <span class="info-value">{{ me.email || '-' }}<IconBtn :icon="Edit" :title="t('emailChg.title')" @click="openEmailChg" /></span>
       </div>
       <!-- 批20 20A：三行展示（注册时间/最近登录+IP/账号状态） -->
       <div class="info-row"><span class="info-label">{{ t('profile.registeredAt') }}</span><span class="info-value">{{ me.created_at || '-' }}</span></div>
@@ -71,33 +69,31 @@
         </div>
 
         <div v-else-if="sp.tab === 'pwd'">
-    <!-- 改密码（批24 用户裁定：对齐基本信息模式——行式+编辑钮→弹窗，不再直出表单） -->
-    <div class="info-table" style="max-width: 560px">
+    <!-- 改密码（批24 迭代五 用户裁定：不弹窗直接展示三栏，同基本信息表格化改造） -->
+    <div class="info-table" style="max-width: 480px">
       <div class="info-row">
-        <span class="info-label">{{ t('login.password') }}</span>
-        <span class="info-value">••••••••</span>
-        <IconBtn :icon="Edit" :title="t('account.changePwd')" @click="pwdDlg = true" />
+        <span class="info-label">{{ t('account.oldPwd') }}</span>
+        <span class="info-value"><el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" style="width: 260px" /></span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">{{ t('account.newPwd') }}</span>
+        <span class="info-value"><el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" style="width: 260px" /></span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">{{ t('register.confirmPwd') }}</span>
+        <span class="info-value">
+          <el-input v-model="pwd.confirm" type="password" show-password autocomplete="new-password"
+            :class="{ 'mismatch': pwd.confirm && pwd.confirm !== pwd.new_password }" style="width: 260px" />
+        </span>
+      </div>
+      <div class="info-row">
+        <span class="info-label"></span>
+        <span class="info-value">
+          <span class="pwd-rule" style="flex: 1">{{ t('common.passwordRule') }}</span>
+          <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
+        </span>
       </div>
     </div>
-    <el-dialog v-model="pwdDlg" :title="t('account.changePwd')" width="420px" append-to-body :close-on-click-modal="false">
-      <el-form label-position="top" @submit.prevent="onChangePwd">
-        <el-form-item :label="t('account.oldPwd')">
-          <el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" />
-        </el-form-item>
-        <el-form-item :label="t('account.newPwd')">
-          <el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" />
-        </el-form-item>
-        <div class="pwd-rule">{{ t('common.passwordRule') }}</div>
-        <el-form-item :label="t('register.confirmPwd')">
-          <el-input v-model="pwd.confirm" type="password" show-password autocomplete="new-password"
-            :class="{ 'mismatch': pwd.confirm && pwd.confirm !== pwd.new_password }" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="pwdDlg = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
-      </template>
-    </el-dialog>
 
         </div>
 
@@ -299,7 +295,6 @@ const changingPwd = ref(false)
 // 批24：行式+弹窗编辑模式（昵称草稿/两弹窗开关）
 const nickDlg = ref(false)
 const nickDraft = ref('')
-const pwdDlg = ref(false)
 const openNickDlg = () => { nickDraft.value = me.value.nickname || ''; nickDlg.value = true }
 
 const load = async () => {
@@ -644,7 +639,6 @@ const onChangePwd = async () => {
     await api.post('/auth/change-password', { old_password: pwd.value.old_password, new_password: pwd.value.new_password })
     ElMessage.success(t('account.pwdChanged'))
     pwd.value = { old_password: '', new_password: '', confirm: '' }
-    pwdDlg.value = false
   } catch (e) { ElMessage.error(apiErr(e, t('account.changeFailed'))) }
   finally { changingPwd.value = false }
 }
@@ -653,15 +647,16 @@ const onChangePwd = async () => {
 <style scoped>
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
 .pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -14px 0 14px; }
-/* 批24 用户裁定：资料表格式——label 右对齐带冒号、value 左对齐、行尾动作位（编辑钮） */
-.info-table { max-width: 560px; }
-.info-row { display: grid; grid-template-columns: max-content 1fr auto; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-bottom: 1px dashed var(--border-weak); font-size: var(--fs-body); }
+/* 批24 迭代五（用户裁定）：真·列对齐——外层单 grid 定两列轨道（label max-content/value 1fr），行 subgrid 继承；
+   编辑钮不单列，直接跟在值后（value 格 inline） */
+.info-table { display: grid; grid-template-columns: max-content 1fr; column-gap: var(--sp-4); row-gap: var(--sp-2); max-width: 560px; }
+.info-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; padding: var(--sp-1) 0; border-bottom: 1px dashed var(--border-weak); font-size: var(--fs-body); }
 .info-row:last-child { border-bottom: none; }
 .info-label { text-align: right; color: var(--text-secondary); font-size: var(--fs-label); white-space: nowrap; }
 /* 冒号随语言：zh 全角（对齐全站文案惯例）·en 半角——html[lang] 由 App.vue watch 同步 */
 .info-label::after { content: ':'; margin-left: 2px; }
 :root[lang='zh'] .info-label::after { content: '：'; }
-.info-value { text-align: left; min-width: 0; overflow-wrap: anywhere; }
+.info-value { display: inline-flex; align-items: center; gap: 8px; text-align: left; min-width: 0; overflow-wrap: anywhere; }
 /* 批24：权限只读复选框 grid（与 PermMatrix 同风格） */
 .perm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); }
 .perm-grid :deep(.el-checkbox) { margin-right: 0; height: auto; }
