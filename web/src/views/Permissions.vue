@@ -58,7 +58,7 @@
           </el-radio-group>
           <el-button type="primary" @click="addOverride">{{ t('perm.addOverride') }}</el-button>
         </div>
-        <div style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-2)">
           {{ t('perm.lockedNote') }}: user_mgmt / resume / account_keys
         </div>
       </template>

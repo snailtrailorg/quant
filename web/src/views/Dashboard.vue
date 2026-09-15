@@ -245,7 +245,7 @@ const sparkline = computed(() => {
 @media (max-width: 991px) {
   .resp-row { row-gap: 16px; }
 }
-.sparkline { font-size: 12px; color: var(--text-secondary); }
+.sparkline { font-size: var(--fs-foot); color: var(--text-secondary); }
 .klabel { color: var(--text-secondary); font-size: var(--fs-label); }
 .task-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
 .task-row:last-child { border-bottom: none; }

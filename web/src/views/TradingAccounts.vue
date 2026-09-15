@@ -13,7 +13,7 @@
       <el-table-column prop="exchange" :label="t('tradingAccounts.exchange')" width="120" />
       <el-table-column prop="api_key_hint" :label="t('tradingAccounts.apiKeyHint')" width="180">
         <template #default="{ row }">
-          <code style="font-family: var(--font-num); font-size: 12px">{{ row.api_key_hint || '—' }}</code>
+          <code style="font-family: var(--font-num); font-size: var(--fs-foot)">{{ row.api_key_hint || '—' }}</code>
         </template>
       </el-table-column>
       <el-table-column prop="enabled" :label="t('common.status')" width="80">

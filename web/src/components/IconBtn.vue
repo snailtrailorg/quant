@@ -48,7 +48,7 @@ defineEmits(['click'])
 .icon-btn:hover:not(.is-disabled) { background: var(--el-color-primary-light-8); }   /* hover 浅蓝，有活力 */
 /* 行内操作小号（24px，表格操作列密度）：尺寸与字形同缩 */
 .icon-btn--small { width: 24px; height: 24px; }
-.icon-btn--small :deep(.el-icon) { font-size: 14px; }
+.icon-btn--small :deep(.el-icon) { font-size: calc(var(--icon-glyph) - 4px); }
 /* 图标字形尺寸：el-icon 按 1em 走，这里放大；文字槽位（语言「EN/中」）不受影响 */
 .icon-btn :deep(.el-icon) { font-size: var(--icon-glyph); }
 /* 语义色：颜色在图标，底仍透明，hover 同淡中性 */

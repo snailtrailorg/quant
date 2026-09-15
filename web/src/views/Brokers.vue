@@ -60,7 +60,7 @@
       <el-table-column prop="avg_latency_ms" :label="t('common.avgLatency')" min-width="120" />
       <el-table-column prop="success_rate" :label="t('common.successRate')"><template #default="{ row }">{{ row.success_rate }}%</template></el-table-column>
     </TableShell>
-    <div v-if="!usage.today?.length" style="color:var(--text-secondary);font-size:12px;margin-top:var(--sp-2)">{{ t('brokers.noUsage') }}</div>
+    <div v-if="!usage.today?.length" style="color:var(--text-secondary);font-size: var(--fs-foot);margin-top:var(--sp-2)">{{ t('brokers.noUsage') }}</div>
   </el-card>
 </template>
 

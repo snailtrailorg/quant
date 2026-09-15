@@ -15,7 +15,7 @@
           <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'">{{ row.success_rate }}%</el-tag></template>
         </el-table-column>
       </TableShell>
-      <div style="font-size: 12px; color: var(--text-secondary); margin-top: var(--sp-2)">
+      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-top: var(--sp-2)">
         {{ t('llm.trend7d') }}<span v-for="tr in usage.trend" :key="tr.date" style="margin-right: 10px">{{ tr.date.slice(5) }} {{tr.calls}}/{{tr.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">{{ t('llm.noTrend') }}</span>
       </div>
     </el-card>

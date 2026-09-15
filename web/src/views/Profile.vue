@@ -10,7 +10,7 @@
       <div style="cursor: pointer" @click="openChooser" :title="t('profile.clickToChange')">
         <Avatar :url="me.avatar_url" :name="me.nickname || me.username" size="lg" />
       </div>
-      <div style="font-size: 16px; font-weight: bold">{{ me.nickname || me.username }}</div>
+      <div style="font-size: var(--fs-card); font-weight: bold">{{ me.nickname || me.username }}</div>
     </div>
 
     <!-- 资料 -->
@@ -56,14 +56,14 @@
     <!-- 注销置底于基本信息（盲审 B-P2-4①） -->
     <el-divider />
     <div style="display: flex; align-items: center; justify-content: space-between">
-      <span style="color: var(--text-secondary); font-size: 13px">{{ t('profile.deactivateHint') }}</span>
+      <span style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('profile.deactivateHint') }}</span>
       <el-button type="danger" @click="onDeactivate">{{ t('profile.deactivate') }}</el-button>
     </div>
         </div>
 
         <div v-else-if="sp.tab === 'pwd'">
     <!-- 改密码（所有角色自助） -->
-    <h3 style="font-size: 16px; margin-bottom: 12px">{{ t('account.changePwd') }}</h3>
+    <h3 style="font-size: var(--fs-card); font-weight: 600; margin-bottom: 12px">{{ t('account.changePwd') }}</h3>
     <el-form label-position="top" style="max-width: 400px" @submit.prevent="onChangePwd">
       <el-form-item :label="t('account.oldPwd')">
         <el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" />
@@ -88,7 +88,7 @@
 
     <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
-      <h3 style="font-size: 16px; margin: 0">{{ t('myIm.title') }}</h3>
+      <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0">{{ t('myIm.title') }}</h3>
       <el-button type="primary" @click="openImAdd">{{ t('myIm.add') }}</el-button>
     </div>
     <TableShell v-if="imBots.length" :data="imBots" size="small" storage-key="im-bots">
@@ -110,7 +110,7 @@
         </template>
       </el-table-column>
     </TableShell>
-    <div v-else style="color: var(--text-secondary); font-size: 13px; margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
+    <div v-else style="color: var(--text-secondary); font-size: var(--fs-label); margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
 
     <!-- 添加 IM 通道（批13 页签化：页签=注册表驱动，页签内容=方式动态生成——每平台单方式；
          批16 嵌套弹窗 append-to-body） -->
@@ -129,26 +129,26 @@
           <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" :autocomplete="f.secret ? 'new-password' : 'off'" show-password style="width: 260px" />
         </el-form-item>
         <!-- post_steps：后台建应用指引（注册表驱动） -->
-        <div v-if="curPostSteps().length" style="color: var(--text-secondary); font-size: 12px; line-height: 1.9; padding: var(--sp-2) 0">
+        <div v-if="curPostSteps().length" style="color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.9; padding: var(--sp-2) 0">
           <div v-for="(s, i) in curPostSteps()" :key="i">{{ i + 1 }}. {{ te(s) ? t(s) : s }}</div>
         </div>
       </el-form>
 
       <!-- kind=interactive：扫码向导（飞书——qrSession/poll/bind 感知状态机不动，只换容器） -->
       <div v-else-if="curKind() === 'interactive'" style="padding: var(--sp-2) 0">
-          <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrIntro') }}</div>
+          <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.qrIntro') }}</div>
           <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
           <div v-if="qrImg && qrCountdown"
-               style="text-align: center; margin-top: 6px; font-size: 16px; font-weight: 600; color: var(--brand-600)">
+               style="text-align: center; margin-top: 6px; font-size: var(--fs-card); font-weight: 600; color: var(--brand-600)">
             {{ t('myIm.qrValid', { t: qrCountdown }) }}</div>
           <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">
             <div class="qr-skeleton"></div>{{ t('myIm.qrStarting') }}
           </div>
           <div v-else-if="qrStatus === 'scanning'" style="text-align: center">
             <!-- 六轮裁定：只留「用飞书扫这个码」——时效由倒计时行表达，手机端提示不需要网页预告 -->
-            <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrScanning') }}</div>
+            <div style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.qrScanning') }}</div>
           </div>
-          <div v-else-if="qrStatus === 'confirming'" style="text-align: center; color: var(--text-secondary); font-size: 13px">{{ t('myIm.qrConfirming') }}</div>
+          <div v-else-if="qrStatus === 'confirming'" style="text-align: center; color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.qrConfirming') }}</div>
           <div v-else-if="qrStatus === 'timeout'" style="text-align: center; color: var(--warn-fill)">{{ t('myIm.qrTimeout') }}</div>
           <div v-if="qrStatus === 'timeout'" style="text-align: center; margin-top: 8px">
             <el-button type="primary" @click="startQr">{{ t('myIm.qrRetry') }}</el-button>
@@ -158,9 +158,9 @@
           <div v-if="qrStatus === 'done'" style="text-align: center; padding: var(--sp-4) 0">
             <div style="font-size: calc(var(--fs-kpi) * 1.6); line-height: 1">✅</div>
             <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 6px">{{ t('myIm.doneTitle') }}</div>
-            <div style="color: var(--text-secondary); font-size: 13px">{{ t('myIm.doneGuide') }}</div>
+            <div style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.doneGuide') }}</div>
           </div>
-          <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: 13px">{{ qrNote }}</div>
+          <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: var(--fs-label)">{{ qrNote }}</div>
       </div>
       <template #footer>
         <el-button @click="guardClose(() => { imAddDlg = false })">{{ qrStatus === 'done' ? t('common.done') : t('common.cancel') }}</el-button>
@@ -177,7 +177,7 @@
         <div v-else>
           <!-- 批20 20B：权限概览（market_op 五键 chips + 玻璃盒三组——数据 getMe 新鲜拉，方案 v2） -->
           <template v-if="Object.keys(me.market_op || {}).length">
-          <h3 style="font-size: 16px; margin: 0 0 12px">{{ t('profile.marketOpTitle') }}</h3>
+          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('profile.marketOpTitle') }}</h3>
           <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-4)">
             <el-tag v-for="(ok, mk) in me.market_op || {}" :key="mk"
                     :type="ok ? 'success' : 'info'" effect="plain">
@@ -186,20 +186,20 @@
           </div>
           </template>
           <el-divider />
-          <h3 style="font-size: 16px; margin: 0 0 12px">{{ t('layout.myPerms') }}</h3>
+          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('layout.myPerms') }}</h3>
           <div v-if="permBox.base.length" style="margin-bottom: 10px">
-            <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeRole') }}</div>
+            <div style="font-weight: 600; font-size: var(--fs-label); margin-bottom: 4px">{{ t('perm.modeRole') }}</div>
             <el-tag v-for="p in permBox.base" :key="p" style="margin: var(--sp-1)">{{ p }}</el-tag>
           </div>
           <div v-if="permBox.override.length" style="margin-bottom: 10px">
-            <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('perm.modeUser') }}</div>
+            <div style="font-weight: 600; font-size: var(--fs-label); margin-bottom: 4px">{{ t('perm.modeUser') }}</div>
             <el-tag v-for="p in permBox.override" :key="p" type="warning" style="margin: var(--sp-1)">{{ p }}</el-tag>
           </div>
           <div v-if="permBox.denied.length">
-            <div style="font-weight: 600; font-size: 13px; margin-bottom: 4px">{{ t('layout.myPermsDenied') }}</div>
+            <div style="font-weight: 600; font-size: var(--fs-label); margin-bottom: 4px">{{ t('layout.myPermsDenied') }}</div>
             <el-tag v-for="p in permBox.denied" :key="p" type="danger" effect="plain" style="margin: var(--sp-1)">{{ p }}</el-tag>
           </div>
-          <div v-if="!permBox.base.length && !permBox.override.length" style="color: var(--text-secondary); font-size: 13px">
+          <div v-if="!permBox.base.length && !permBox.override.length" style="color: var(--text-secondary); font-size: var(--fs-label)">
             {{ t('um.createFirst') }}
           </div>
         </div>
@@ -625,8 +625,8 @@ const onChangePwd = async () => {
 
 <style scoped>
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
-.pwd-rule { color: var(--text-secondary); font-size: 12px; margin: -14px 0 14px; }
-.info-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: 14px; }
+.pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -14px 0 14px; }
+.info-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: var(--fs-body); }
 .info-label { color: var(--text-secondary); min-width: 60px; }
 .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-height: 360px; overflow-y: auto; padding: 4px; }
 .icon-grid img { width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer; border: 3px solid transparent; }

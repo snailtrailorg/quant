@@ -42,13 +42,13 @@ onMounted(() => loadTopic('index'))
 
 <style scoped>
 .help-page { background: var(--el-bg-color); border-radius: 8px; padding: 20px; }
-.markdown-body :deep(h1) { font-size: 22px; margin: 12px 0 16px; }
-.markdown-body :deep(h2) { font-size: 18px; margin: 20px 0 10px; border-bottom: 1px solid var(--el-border-color-lighter); padding-bottom: 6px; }
-.markdown-body :deep(h3) { font-size: 15px; margin: var(--sp-4) 0 8px; }
+.markdown-body :deep(h1) { font-size: var(--fs-page); font-weight: 700; margin: 12px 0 16px; }
+.markdown-body :deep(h2) { font-size: var(--fs-card); font-weight: 600; margin: 20px 0 10px; border-bottom: 1px solid var(--el-border-color-lighter); padding-bottom: 6px; }
+.markdown-body :deep(h3) { font-size: var(--fs-body); font-weight: 600; margin: var(--sp-4) 0 8px; }
 .markdown-body :deep(table) { border-collapse: collapse; margin: 12px 0; width: 100%; }
-.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--el-border-color-lighter); padding: 6px 10px; font-size: 13px; text-align: left; }
+.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--el-border-color-lighter); padding: 6px 10px; font-size: var(--fs-label); text-align: left; }
 .markdown-body :deep(th) { background: var(--el-fill-color-light); }
-.markdown-body :deep(code) { background: var(--el-fill-color); padding: 2px 5px; border-radius: 3px; font-size: 12.5px; }
+.markdown-body :deep(code) { background: var(--el-fill-color); padding: 2px 5px; border-radius: 3px; font-size: var(--fs-foot); }
 .markdown-body :deep(pre code) { display: block; padding: 10px; overflow-x: auto; }
 .markdown-body :deep(blockquote) { border-left: 3px solid var(--el-color-primary); margin: 10px 0; padding: 4px 12px; color: var(--el-text-color-secondary); }
 </style>

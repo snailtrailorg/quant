@@ -61,7 +61,7 @@
         <el-form-item :label="t('strategy.enable')">
           <el-switch v-model="editForm.enabled" />
         </el-form-item>
-        <div style="color: var(--text-secondary); font-size: 12px; margin: -10px 0 10px 100px">
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin: -10px 0 10px 100px">
           {{ t('strategy.hintNoSymbol') }}
         </div>
 
@@ -93,7 +93,7 @@
             <!-- 链条打磨#9：因子参数子表单（按因子 schema 动态展开——此前 params 锁死默认值改不了） -->
             <div v-if="factorSchema(f.name).length" style="display: flex; gap: 12px; margin: 6px 0 0 188px; flex-wrap: wrap">
               <div v-for="p in factorSchema(f.name)" :key="p.k" style="display: flex; align-items: center; gap: 4px">
-                <span style="font-size: 12px; color: var(--el-text-color-secondary)">{{ p.k }}:</span>
+                <span style="font-size: var(--fs-foot); color: var(--el-text-color-secondary)">{{ p.k }}:</span>
                 <el-input-number v-model="f.params[p.k]" :step="1" size="small" style="width: 110px" />
               </div>
             </div>
@@ -119,7 +119,7 @@
           <el-divider content-position="left">{{ t('strategy.pythonCode') }}</el-divider>
           <el-form-item>
             <div style="width: 100%">
-              <div style="margin-bottom: var(--sp-2); font-size: 12px; color: var(--el-text-color-secondary)">
+              <div style="margin-bottom: var(--sp-2); font-size: var(--fs-foot); color: var(--el-text-color-secondary)">
                 {{ t('strategy.pythonHint') }}
               </div>
               <PythonEditor v-model="editForm.pythonCode" :height="350" />

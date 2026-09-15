@@ -6,7 +6,7 @@
           <el-button type="primary" size="small" @click="goBack" style="margin-right: 8px">← {{ t('common.back') }}</el-button>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div>
-            <span style="font-size:18px;font-weight:600">{{ detail.name || quote?.name || symbol }}</span>
+            <span style="font-size: var(--fs-page);font-weight:600">{{ detail.name || quote?.name || symbol }}</span>
             <el-tag v-if="detail.in_pool" type="success" style="margin-left:var(--sp-2)">{{ t('stockDetail.inPool') }}</el-tag>
             <el-tag v-else type="info" style="margin-left:var(--sp-2)">{{ t('stockDetail.notPool') }}</el-tag>
             <span style="margin-left:12px;color:var(--text-secondary)">{{ detail.ts_code }}
@@ -383,13 +383,13 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>
 
 <style scoped>
-.snap .price { font-size: 34px; font-weight: 700; margin-right: 10px; }
-.snap .chg { font-size: 16px; font-weight: 600; }
+.snap .price { font-size: calc(var(--fs-kpi) * 1.25); font-weight: 700; margin-right: 10px; }
+.snap .chg { font-size: var(--fs-card); font-weight: 600; }
 .up { color: var(--up); }
 .down { color: var(--down); }
 .flat { color: var(--text-secondary); }
-.meta { display: flex; gap: 18px; color: var(--text-secondary); flex-wrap: wrap; font-size: 13px; margin-top: 10px; }
-.depth { width: 100%; border-collapse: collapse; font-size: 13px; }
+.meta { display: flex; gap: 18px; color: var(--text-secondary); flex-wrap: wrap; font-size: var(--fs-label); margin-top: 10px; }
+.depth { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
 .depth td { padding: 2px 8px; border-bottom: 1px solid var(--border-weak); }
 .depth .mid { text-align: center; color: var(--text-secondary); font-weight: 600; padding: 4px 0; }
 .depth .ask td:nth-child(2) { color: var(--down); }

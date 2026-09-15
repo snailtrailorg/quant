@@ -45,7 +45,7 @@
       </el-table-column>
       <el-table-column prop="last_error" :label="t('log.outboxError')" min-width="160" show-overflow-tooltip />
     </TableShell>
-    <div style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">{{ t('log.outboxHint') }}</div>
+    <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-2)">{{ t('log.outboxHint') }}</div>
   </el-card>
   </div>
 </template>

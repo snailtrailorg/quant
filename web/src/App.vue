@@ -16,5 +16,5 @@ watch(locale, () => { document.title = t('app.title') }, { immediate: true })
 </script>
 
 <style>
-body { margin: 0; font-family: var(--font-ui); }
+body { margin: 0; font-family: var(--font-ui); font-size: var(--fs-body); }
 </style>

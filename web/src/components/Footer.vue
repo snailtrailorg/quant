@@ -16,7 +16,7 @@
   height: 22px;
   line-height: 22px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--fs-foot);
   background: var(--bg-canvas);
   border-top: 1px solid var(--border-weak);
   z-index: 100;

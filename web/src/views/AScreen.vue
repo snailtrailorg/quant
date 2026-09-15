@@ -11,7 +11,7 @@
         <el-button type="primary" style="width: 100%" @click="load" :loading="loading">{{ t('screener.run') }}</el-button>
       </el-form>
       <el-divider />
-      <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px">{{ t('screener.savedPlans') }}</div>
+      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: 6px">{{ t('screener.savedPlans') }}</div>
       <div v-for="(plan, name) in plans" :key="name" style="display: flex; gap: 4px; margin-bottom: 4px">
         <el-button size="small" text type="primary" @click="applyPlan(name)">{{ name }}</el-button>
         <el-button size="small" text type="danger" @click="delPlan(name)">×</el-button>

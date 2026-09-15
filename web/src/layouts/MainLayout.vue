@@ -119,7 +119,7 @@
              :id="i === cmdkActive ? 'cmdk-opt-active' : undefined" :class="['cmdk-opt', { active: i === cmdkActive }]"
              @click="$router.push(item.path); cmdkVisible = false" @mouseenter="cmdkActive = i">
           <span>{{ item.label }}</span>
-          <span style="color: var(--text-secondary); font-size: 12px">{{ item.path }}</span>
+          <span style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ item.path }}</span>
         </div>
         <div v-if="!cmdkResults.length" style="color: var(--text-secondary); text-align: center; padding: 20px">{{ t('layout.noResults') }}</div>
       </div>
@@ -306,9 +306,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 <style scoped>
 /* 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽+标题居左;侧栏到顶 hover 覆盖式。
    .aside-brand 用 el-header 组件（padding/高度=EP 默认,与顶栏同源）;去 .el-menu 自带 border-right 消 1px 宽差 */
-.app-title { font-size: 18px; font-weight: 700; color: var(--brand-600); }
+.app-title { font-size: var(--fs-page); font-weight: 700; color: var(--brand-600); }
 .aside-brand { display: flex; align-items: center; gap: 8px; }
-.aside-brand-text { color: #fff; font-size: 18px; font-weight: 700; }
+.aside-brand-text { color: #fff; font-size: var(--fs-page); font-weight: 700; }
 /* 图钉（2026-09-10）：标题后右对齐——flex 布局 text 撑开+margin-left:auto；钉死=竖直针高亮,浮动=斜 45°灰 */
 .rail-pin { margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 6px; border: none; cursor: pointer;
@@ -344,8 +344,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .dot.critical { background: var(--critical); }
 .dot.warn { background: var(--warn-fill); }
 .dot.info { background: var(--text-secondary); }
-.notif-body { white-space: pre-wrap; color: var(--text-secondary); font-size: 12px; line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
-.notif-guide { color: var(--el-color-primary); font-size: 12px; line-height: 1.5; margin: 2px 0 2px 14px; }
+.notif-body { white-space: pre-wrap; color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
+.notif-guide { color: var(--el-color-primary); font-size: var(--fs-foot); line-height: 1.5; margin: 2px 0 2px 14px; }
 /* wd-20 §2.6 ⌘K combobox 选项 */
 .cmdk-opt { padding: var(--sp-2) 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak);
   display: flex; justify-content: space-between; }

@@ -132,14 +132,14 @@
         <!-- 统一参数 -->
         <el-divider content-position="left">{{ t('backtest.unifiedParams') }}</el-divider>
         <ParameterForm v-if="parameterDefs.length" :defs="parameterDefs" v-model="form.params" />
-        <div v-else style="color: var(--text-secondary); font-size: 12px; padding-left: 100px">{{ t('backtest.noParams') }}</div>
+        <div v-else style="color: var(--text-secondary); font-size: var(--fs-foot); padding-left: 100px">{{ t('backtest.noParams') }}</div>
 
         <!-- per-symbol 参数（高级） -->
         <el-divider content-position="left">
           <el-checkbox v-model="form.useSymbolParams">{{ t('backtest.advSymbolParams') }}</el-checkbox>
         </el-divider>
         <template v-if="form.useSymbolParams">
-          <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: var(--sp-2); padding-left: 100px">
+          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-bottom: var(--sp-2); padding-left: 100px">
             {{ t('backtest.jsonHint') }}
           </div>
           <el-input v-model="form.symbolParamsStr" type="textarea" :rows="4"

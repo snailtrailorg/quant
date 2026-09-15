@@ -45,14 +45,14 @@
         <template #default="{ row }">
           <div style="padding: var(--sp-2) 16px">
             <!-- wd-20 §1.5 方案 A：自愈时间线（task_logs 过滤渲染 + 行内事实字段） -->
-            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px">{{ t('liveTask.selfHeal') }}:</div>
-            <div style="font-size: 12px; font-family: var(--font-num)">
+            <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: 6px">{{ t('liveTask.selfHeal') }}:</div>
+            <div style="font-size: var(--fs-foot); font-family: var(--font-num)">
               {{ t('liveTask.mdMode') }}: {{ row.md_mode || '—' }} | {{ t('liveTask.lag') }}: {{ row.lag_s ?? row.lag ?? '—' }}s | {{ t('liveTask.bars') }}: {{ row.bars ?? '—' }} | {{ t('common.status') }}: {{ row.status }}
               | {{ t('liveTask.nRestarts') }}: {{ restartCount(row) }} | {{ t('liveTask.lastExit') }}: {{ lastExit(row) }}
             </div>
             <div v-if="row._timeline?.length" style="margin-top: var(--sp-2)">
-              <div style="color: var(--text-secondary); font-size: 12px">{{ t('liveTask.recentLogs') }}:</div>
-              <div v-for="(l, i) in row._timeline.slice(0, 8)" :key="i" style="font-size: 11px; font-family: var(--font-num); display: flex; gap: 8px">
+              <div style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('liveTask.recentLogs') }}:</div>
+              <div v-for="(l, i) in row._timeline.slice(0, 8)" :key="i" style="font-size: var(--fs-foot); font-family: var(--font-num); display: flex; gap: 8px">
                 <span style="color: var(--text-secondary)">{{ fmtTime.s(l.ts) }}</span>
                 <span :style="{ color: ['ERROR', 'error'].includes(l.level) ? 'var(--critical)' : ['WARNING', 'warning', 'WARN'].includes(l.level) ? 'var(--warn)' : 'inherit' }">{{ l.msg?.slice(0, 100) }}</span>
               </div>
@@ -110,7 +110,7 @@
 
         <el-divider content-position="left">{{ t('liveTask.taskParams') }}</el-divider>
         <ParameterForm v-if="parameterDefs.length" :defs="parameterDefs" v-model="form.params" />
-        <div v-else style="color: var(--text-secondary); font-size: 12px; padding-left: 120px">
+        <div v-else style="color: var(--text-secondary); font-size: var(--fs-foot); padding-left: 120px">
           {{ t('liveTask.selectStrategyFirst') }}
         </div>
 

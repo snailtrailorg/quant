@@ -255,6 +255,6 @@ const sellPoints = computed(() => (trades.value || []).filter(t => t.action === 
 
 <style scoped>
 .stat { text-align: center; padding: 12px 0; }
-.stat .label { color: var(--text-secondary); font-size: 12px; }
-.stat .value { font-size: 20px; font-weight: bold; color: var(--text-primary); margin-top: 4px; }
+.stat .label { color: var(--text-secondary); font-size: var(--fs-foot); }
+.stat .value { font-size: var(--fs-page); font-weight: bold; color: var(--text-primary); margin-top: 4px; }
 </style>

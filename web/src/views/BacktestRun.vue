@@ -167,6 +167,6 @@ onMounted(async () => {
 
 <style scoped>
 .stat { text-align: center; padding: 12px 0; }
-.stat .label { color: var(--text-secondary); font-size: 13px; }
-.stat .value { font-size: 24px; font-weight: bold; color: var(--text-primary); margin-top: 4px; }
+.stat .label { color: var(--text-secondary); font-size: var(--fs-label); }
+.stat .value { font-size: var(--fs-kpi); font-weight: bold; color: var(--text-primary); margin-top: 4px; }
 </style>

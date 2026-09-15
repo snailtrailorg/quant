@@ -11,9 +11,9 @@
     </template>
     <el-card v-if="currentSync" shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; align-items: center; gap: 12px">
-        <span style="font-size: 13px; white-space: nowrap">{{ currentSync.name }}</span>
+        <span style="font-size: var(--fs-label); white-space: nowrap">{{ currentSync.name }}</span>
         <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />
-        <span style="font-size: 12px; color: var(--text-secondary); white-space: nowrap">
+        <span style="font-size: var(--fs-foot); color: var(--text-secondary); white-space: nowrap">
           {{ progress.done || 0 }} / {{ progress.total || 0 }} · {{ progress.current || '' }}
           <span v-if="progress.status === 'error'" style="color: var(--critical)">{{ progress.error }}</span>
         </span>
@@ -118,7 +118,7 @@
             </el-tooltip>
           </template>
           <template #default="{ row }">
-            <span v-if="row.failed_dates" style="color: var(--critical); font-size:12px">{{ row.failed_dates }}</span>
+            <span v-if="row.failed_dates" style="color: var(--critical); font-size: var(--fs-foot)">{{ row.failed_dates }}</span>
             <span v-else style="color:var(--text-secondary)">-</span>
           </template>
         </el-table-column>

@@ -38,7 +38,7 @@
         <el-input v-model="testTo" :placeholder="t('smtp.testPh')" style="width: 220px; margin-left: var(--sp-2)" />
       </el-form-item>
     </el-form>
-    <div style="color: var(--text-secondary); font-size: 12px">{{ t('smtp.hint') }}</div>
+    <div style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('smtp.hint') }}</div>
     <el-link type="primary" @click="$router.push('/observe?tab=logs')" style="margin-top: var(--sp-2)">{{ t('smtp.viewOutbox') }} →</el-link>
   </el-card>
 </template>

@@ -162,7 +162,7 @@
                 </el-button>
               </el-form-item>
             </el-form>
-            <div v-if="groupForm.builtin" style="color: var(--text-secondary); font-size: 12px; margin: -6px 0 10px">
+            <div v-if="groupForm.builtin" style="color: var(--text-secondary); font-size: var(--fs-foot); margin: -6px 0 10px">
               {{ t('um.builtinLocked') }}
             </div>
             <el-divider style="margin: var(--sp-2) 0 var(--sp-4)" />

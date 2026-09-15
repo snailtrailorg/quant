@@ -144,9 +144,9 @@ const quick = q => { input.value = q; onSend() }
 .msg.user .bubble { background: var(--brand-600); color: #fff; }
 .msg.assistant .bubble { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-weak); }
 .chat-input { margin-top: 12px; }
-</style>
-/* P2-12：Markdown 渲染样式（v-html 需 :deep） */
-.bubble.md :deep(pre.md-code) { background: #1e2430; color: #e6eaf2; padding: 10px; border-radius: 6px; overflow-x: auto; font-family: var(--font-num); font-size: 12px; }
+/* P2-12：Markdown 渲染样式（v-html 需 :deep）——批24 盲审A-P1-1：原位于 style 块外被 SFC 静默丢弃（自 671375f 起死码），本批归位块内使其生效 */
+.bubble.md :deep(pre.md-code) { background: #1e2430; color: #e6eaf2; padding: 10px; border-radius: 6px; overflow-x: auto; font-family: var(--font-num); font-size: var(--fs-foot); }
 .bubble.md :deep(code) { background: rgba(31, 79, 216, 0.08); padding: 1px 4px; border-radius: 3px; font-family: var(--font-num); }
 .bubble.md :deep(table.md-tab) { border-collapse: collapse; margin: 6px 0; }
-.bubble.md :deep(table.md-tab td) { border: 1px solid var(--border-weak); padding: 3px 8px; font-size: 12px; }
+.bubble.md :deep(table.md-tab td) { border: 1px solid var(--border-weak); padding: 3px 8px; font-size: var(--fs-foot); }
+</style>

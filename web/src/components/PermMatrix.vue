@@ -14,7 +14,7 @@
             {{ k }}<span v-if="lockedKeys.includes(k)"> 🔒</span>
           </el-checkbox>
         </el-checkbox-group>
-        <div v-if="lockedKeys.length" style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">
+        <div v-if="lockedKeys.length" style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-2)">
           {{ t('perm.lockedNote') }}: {{ lockedKeys.join(' / ') }}
         </div>
       </el-tab-pane>
@@ -43,7 +43,7 @@
             {{ t(`perm.mk_${m}`) }}
           </el-checkbox>
         </el-checkbox-group>
-        <div style="color: var(--text-secondary); font-size: 12px; margin-top: var(--sp-2)">
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-2)">
           {{ t('perm.marketOpNote') }}
         </div>
       </el-tab-pane>

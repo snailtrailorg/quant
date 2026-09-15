@@ -65,7 +65,7 @@
   --fs-body:  clamp(12.5px, calc(9.5px + 0.234vw), 14px); /* @1280=12.5 | @1707=13.5 | @1920=14 */
   --fs-kpi:   calc(var(--fs-body) * 1.92);
   --fs-page:  calc(var(--fs-body) * 1.38);
-  --fs-card:  calc(var(--fs-body) * 1.0);
+  --fs-card:  calc(var(--fs-body) * 1.15);
   --fs-label: calc(var(--fs-body) * 0.92);
   --fs-foot:  calc(var(--fs-body) * 0.87);
 
@@ -163,6 +163,7 @@ html.dark {
 :focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
 
 /* EP 组件字号覆写(非变量区) */
+.el-card__header { font-size: var(--fs-card); }
 .el-pagination { font-size: var(--fs-label); }
 .el-pagination button, .el-pagination .el-pager li { font-size: var(--fs-label); }
 

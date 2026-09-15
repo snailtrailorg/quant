@@ -1,7 +1,7 @@
 <template>
   <div class="auth-page">
     <el-card style="width: 400px">
-      <h2 style="text-align: center; color: var(--brand-600)">{{ t('forgot.title') }}</h2>
+      <h2 style="text-align: center; color: var(--brand-600); font-size: var(--fs-page)">{{ t('forgot.title') }}</h2>
       <el-form @submit.prevent="onSubmit">
         <el-form-item>
           <el-input v-model="email" :placeholder="t('forgot.emailPlaceholder')" prefix-icon="Message" size="large" />

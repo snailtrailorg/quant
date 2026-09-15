@@ -89,7 +89,7 @@
         </el-form-item>
         <el-form-item :label="t('factors.historyWindow')">
           <el-input-number v-model="form.needsHistory" :min="0" :step="1" :disabled="form.ftype === 'dsl'" />
-          <div style="color: var(--text-secondary); font-size: 12px; margin-top: 4px">
+          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 4px">
             {{ form.ftype === 'dsl' ? t('factors.dslHistoryHint') : t('factors.historyHint') }}
           </div>
         </el-form-item>
@@ -103,18 +103,18 @@
         <el-form-item v-if="form.ftype === 'dsl'" :label="t('factors.exprLabel')">
           <div style="width: 100%">
             <DslEditor v-model="form.code" :placeholder="t('factors.dslPlaceholder')" />
-            <div style="margin-top: 6px; font-size: 12px; color: var(--el-text-color-secondary)">
+            <div style="margin-top: 6px; font-size: var(--fs-foot); color: var(--el-text-color-secondary)">
               {{ t('factors.dslHint') }}
             </div>
             <div style="margin-top: var(--sp-2); display: flex; gap: 8px; align-items: center">
               <el-button type="success" size="small" @click="previewFactor" :loading="previewing">{{ t('factors.preview') }}</el-button>
-              <span style="font-size: 12px; color: var(--el-text-color-secondary)">{{ t('factors.dslPreviewHint') }}</span>
+              <span style="font-size: var(--fs-foot); color: var(--el-text-color-secondary)">{{ t('factors.dslPreviewHint') }}</span>
             </div>
           </div>
         </el-form-item>
         <el-form-item v-else :label="t('factors.pythonCode')">
           <div style="width: 100%">
-            <div style="margin-bottom: var(--sp-2); font-size: 12px; color: var(--el-text-color-secondary)">
+            <div style="margin-bottom: var(--sp-2); font-size: var(--fs-foot); color: var(--el-text-color-secondary)">
               {{ t('factors.codeHint') }}
             </div>
             <PythonEditor v-model="form.code" :height="300" />

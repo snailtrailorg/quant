@@ -19,7 +19,7 @@
     <el-card v-if="allRunning || progress.status === 'running' || progress.status === 'error'" shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; align-items: center; gap: 12px">
         <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />
-        <span style="font-size: 12px; color: var(--text-secondary); white-space: nowrap">
+        <span style="font-size: var(--fs-foot); color: var(--text-secondary); white-space: nowrap">
           {{ progress.done || 0 }} / {{ progress.total || 0 }} · {{ progress.current || '' }}
           <span v-if="progress.status === 'error'" style="color: var(--critical)">{{ progress.error }}</span>
         </span>
@@ -102,7 +102,7 @@ const columns = computed(() => withWidths([
   {
     key: 'local', title: t('symbol.localData'), minWidth: 200, flexGrow: 1, ellipsis: true,
     cellRenderer: ({ row }) => row.local_count > 0
-      ? h('span', { style: 'font-size: 12px' }, t('symbol.localSummary', { n: row.local_count, first: row.local_first, last: row.local_last }))
+      ? h('span', { style: 'font-size: var(--fs-foot)' }, t('symbol.localSummary', { n: row.local_count, first: row.local_first, last: row.local_last }))
       : h(ElTag, { type: 'info' }, () => t('symbol.empty'))
   },
   {

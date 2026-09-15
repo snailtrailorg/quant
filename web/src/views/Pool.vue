@@ -63,7 +63,7 @@
       </el-table-column>
       <el-table-column v-if="colOn('minute_start')" prop="minute_history_start" :label="t('pool.minuteStart')" min-width="130">
         <template #default="{ row }">
-          <span v-if="row.minute_history_start" style="font-size: 12px">{{ row.minute_history_start }}</span>
+          <span v-if="row.minute_history_start" style="font-size: var(--fs-foot)">{{ row.minute_history_start }}</span>
           <span v-else style="color: var(--el-text-color-placeholder)">-</span>
         </template>
       </el-table-column>
@@ -101,7 +101,7 @@
         <template #default="{ row }">
           <IconBtn v-if="row.source === 'direct'" size="small" :icon="Delete" type="danger" :disabled="navReadonly"
                    :title="t('common.remove')" @click="removeMinuteSymbol(row.symbol)" />
-          <span v-else style="color: var(--el-text-color-placeholder); font-size: 12px">{{ t('pool.sourcePool') }}</span>
+          <span v-else style="color: var(--el-text-color-placeholder); font-size: var(--fs-foot)">{{ t('pool.sourcePool') }}</span>
         </template>
       </el-table-column>
     </TableShell>
@@ -121,7 +121,7 @@
         <el-form-item :label="t('pool.minuteStartLabel')">
           <el-date-picker v-model="newPool.minuteStart" type="date" style="width: 100%"
                           :placeholder="t('pool.phMinuteStart')" value-format="YYYY-MM-DD" clearable />
-          <div style="font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px">
+          <div style="font-size: var(--fs-foot); color: var(--el-text-color-secondary); margin-top: 4px">
             {{ t('pool.minuteStartHint') }}
           </div>
         </el-form-item>
