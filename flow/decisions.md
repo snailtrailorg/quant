@@ -195,3 +195,11 @@
 1. **zram 而非合并 worker**：风控 worker 独立是告警 SLA 的刻意隔离设计（记忆 alert-dispatch-architecture），不为省内存牺牲进程隔离；OS 层治 OS 层的问题（zram+swappiness），zram 配置入 INSTALL.md §2.4 成版本化 runbook。
 2. **platform.py 改名 _platform.py（「改就彻底改」）**：三层同名占用 import 机制保留地是历史反模式，懒加载暴露绑定竞态；治本=退出争议名，守门测试固化三不变量。约定：模块名单例实例同名+包级同名 re-export 禁止再犯。
 3. **前端失败语义按页分型**：无独立 catch 的 load 用 Promise.all（全成或全败）；有独立 catch 的（Logs/Strategy.loadExtra）用分立 promise 保部分失败容错，禁裸 all 短路。
+
+
+## 2026-09-15 · 批21-23 三批裁定
+
+1. **圆钮配色规则**（批21）：图标按钮一律浅蓝灰底（--el-fill-color-light）+品牌蓝图标+hover 浅蓝；颜色只表语义（danger 红/warning 橙/success 绿）；primary 蓝退出图标按钮；每卡=告警源+状态，不产生告警的信息不监控（zram 因此不入）。
+2. **告警/指标两张表一个循环**（批22）：health_event=沿事件（触发/恢复有状态），system_metric=连续采样（趋势）；资源阈值 severity 存 Valkey state 键值（warn→critical 升级重发、降级只换徽标）；disk 逐挂载点判定（聚合稀释单分区爆满是漏报根因）。
+3. **通知退回外部推送+留档**（批22/23）：系统 UI 只盯告警（铃铛=活跃告警数角标 admin-only）；通知中心确认机制退役（active 池只增不减，全清是唯一清空手段）；日志（task_logs）不做删除——实盘任务时间线是自愈数据源。
+4. **表头位置规则**（批23）：卡片 header 左=标题，右=筛选+动作组（统一序：筛选→新建→刷新→列设置）；行筛选统一 RowFilter 弹窗复选多选（「全部」=空数组）。
