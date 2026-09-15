@@ -38,7 +38,10 @@ const loadWidths = () => {
 }
 const saveWidths = (m) => localStorage.setItem(storeId, JSON.stringify(m))
 const isResizableCol = c => !c.type || c.type === 'default'   // selection/expand 不记忆
-const cols = () => tableRef.value?.store?.states?.columns || []
+const cols = () => {
+  const cs = tableRef.value?.store?.states?.columns
+  return Array.isArray(cs) ? cs : []   // 迭代十六 hotfix：EP 内部结构异常/HMR 版本错乱时防御——不可迭代即空
+}
 const colKey = c => c.property || c.label
 
 const snapshotDeclared = () => {

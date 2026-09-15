@@ -20,6 +20,7 @@
 </template>
 
 <script setup>
+import { useI18n } from 'vue-i18n'
 import TabsShell from '../components/TabsShell.vue'
 import SystemMetricsCards from '../components/SystemMetricsCards.vue'
 import ServiceStatusCards from '../components/ServiceStatusCards.vue'
@@ -34,4 +35,5 @@ const tabs = [
   { key: 'mail', i18nKey: 'tabs.mail' },
   { key: 'notifications', i18nKey: 'tabs.notifications' },
 ]
+const { t } = useI18n()   // 迭代十六 hotfix：header 标题词条——重写时漏解构致 observe 崩+组件树连锁全白
 </script>
