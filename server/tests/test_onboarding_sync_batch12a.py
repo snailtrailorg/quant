@@ -60,7 +60,7 @@ class TestSyncEndpoint:
 
     def test_qr_sync_return(self):
         """正常路径：on_qr 在 5s 内触发 → 200 直接带 qr_img（零轮询）。"""
-        conn = _conn(scripted=[((0,), [], 0)])
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0)])   # 批26-9：onboarding 配额+全平台 count 两条
         rd = MagicMock(); rd.scan_iter.return_value = iter([]); rd.get.return_value = None
         def entry(sid, owner, on_qr=None, on_error=None, **k):
             on_qr({"qr_url": "https://x", "qr_img": "data:...", "expire_in": 600})
@@ -69,7 +69,7 @@ class TestSyncEndpoint:
 
     def test_fast_fail_short_circuit(self):
         """快失败：on_error 触发 → 502 不等满 5s（A-P2-4）。"""
-        conn = _conn(scripted=[((0,), [], 0)])
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0)])   # 批26-9：onboarding 配额+全平台 count 两条
         rd = MagicMock(); rd.scan_iter.return_value = iter([]); rd.get.return_value = None
         def entry(sid, owner, on_qr=None, on_error=None, **k):
             on_error("init boom")
@@ -77,11 +77,10 @@ class TestSyncEndpoint:
         assert r.status_code == 502 and r.json()["code"] == "ONBOARDING_FAILED"
 
     def test_busy_returns_existing_ticket(self):
-        """429 带 existing_ticket（B-P2-3 extra 通道；扫描按 owner 过滤=必自己的）。"""
-        conn = _conn(scripted=[((0,), [], 0)])
+        """429 带 existing_ticket（B-P2-3 extra 通道；批26-5：per-user 索引键 O(1) 单键查替全键 scan）。"""
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0)])   # 批26-9：onboarding 配额+全平台 count 两条
         rd = MagicMock()
-        rd.scan_iter.return_value = iter(["feishu:session:t-live"])
-        rd.get.return_value = '{"status": "scanning", "owner_user_id": 9}'
+        rd.get.return_value = '{"ticket": "t-live", "status": "scanning"}'
         r = self._post(conn, rd)
         assert r.status_code == 429
         assert r.json().get("existing_ticket") == "t-live"
@@ -89,7 +88,7 @@ class TestSyncEndpoint:
     def test_semaphore_full_429(self):
         """全局帽满 → 429（A-P1-1②：SDK 无 timeout 线程总闸）。"""
         import src.feishu_bot.tasks as T
-        conn = _conn(scripted=[((0,), [], 0)])
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0)])   # 批26-9：onboarding 配额+全平台 count 两条
         rd = MagicMock(); rd.scan_iter.return_value = iter([]); rd.get.return_value = None
         for _ in range(8):               # 占满全部 8 位（mock_slot=False——测真信号量）
             T._ONBOARD_SEMAPHORE.acquire()

@@ -429,21 +429,6 @@ def terms_api():
     return {"items": get_terms_items()}
 
 
-@router.get("/api/email-outbox")
-def email_outbox_api(payload: dict = Depends(require_perm("user_mgmt"))):
-    """发件箱状态（持久化 + 指数退避重发）：pending 重发中 / sent 已发 / failed 重试耗尽。"""
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT id, to_email, subject, status, attempts, next_attempt_at, last_error, created_at, sent_at "
-            "FROM email_outbox ORDER BY id DESC LIMIT 50")
-        rows = cur.fetchall()
-    return {"items": [{
-        "id": r[0], "to": r[1], "subject": r[2], "status": r[3], "attempts": r[4],
-        "next_attempt_at": str(r[5])[:19] if r[5] else None,
-        "last_error": r[6], "created_at": str(r[7])[:19], "sent_at": str(r[8])[:19] if r[8] else None,
-    } for r in rows]}
-
-
 @router.get("/api/notifications")
 def notifications_api(status: str = "active", limit: int = 50,
                       payload: dict = Depends(require_perm("read"))):

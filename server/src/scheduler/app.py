@@ -61,6 +61,19 @@ def _on_celery_setup_logging(**_kw):
 def _on_worker_process_init(**_kw):
     from src.data_platform.log_sink import install_worker
     install_worker()   # fork 后每子进程重启 flush 线程（source 取 env，systemd 单元 Environment= 各自注入）
+    # 批26-11（C6 根治）：自定义因子加载从模块 import 期挪进本信号——原位在 import 期 exec 用户
+    # 因子代码，凡 import celery app 的进程（beat/worker 父进程）启动即被拉起重库且进程终身不卸
+    # （批9 lazy 守门只盖我方模块，盖不住 exec 的用户代码）。挪 prefork 子进程后：beat 只调度
+    # 零因子、worker 父进程干净、每子进程各自加载（定义期 def 毫秒级，max-tasks-per-child 回收
+    # 重付可忽略）；任务头 lazy 重载（tasks.py R-S4）已是运行期兜底。try/except 必留——
+    # 信号处理器抛异常会阻断 prefork 子进程启动。
+    try:
+        from src.strategy_framework.factor import load_factors_from_db
+        _loaded_f = load_factors_from_db()
+        if _loaded_f:
+            print(f"✓ 加载自定义因子(worker 子进程): {', '.join(_loaded_f)}")
+    except Exception:
+        pass   # 表未建/DB 未就绪的子进程早期窗口静默（任务头 R-S4 兜底）
 
 @worker_shutdown.connect
 def _on_worker_shutdown(**_kw):
@@ -84,15 +97,6 @@ app.conf.task_routes = {
     "alerts.send_email": {"queue": "alerts_email"},
     "alerts.send_sms": {"queue": "alerts_sms"},
 }
-
-# 自定义因子加载（链条打磨#1：worker 进程此前永不加载——回测/实盘"未知因子"直接失败）
-try:
-    from src.strategy_framework.factor import load_factors_from_db
-    _loaded_f = load_factors_from_db()
-    if _loaded_f:
-        print(f"✓ 加载自定义因子: {', '.join(_loaded_f)}")
-except Exception:
-    pass   # 表未建/DB 未就绪的早期导入窗口静默
 
 # #48：列级校验挂 celery 父进程（import 期一次；prefork 子进程 fork 不重复执行）
 try:

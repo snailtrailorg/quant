@@ -72,7 +72,8 @@ def my_im_providers(payload: dict = Depends(require_authenticated)):
 def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require_authenticated)):
     """自助扫码向导（批12A 去 celery）：注册表校验+频控+配额 → web 线程 run_onboarding（owner=会话钉死）。
 
-    频控：每用户同时 1 个活 ticket（session 载荷 owner 比对+非终态）；配额：每用户 bot ≤5。"""
+    频控（批26-5）：per-user 索引键 im:onboarding:owner:{uid} 单键查——键活（非终态）即 429 带
+    existing_ticket；终态由 _set_session 即时 DEL。配额：每用户 bot ≤5 + 全平台 ≤10（批26-9）。"""
     from src.im_bot.base import get_im_provider
     p = get_im_provider(provider)
     if p is None:
@@ -84,23 +85,32 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
     if entry is None:
         raise ApiError(400, "WIZARD_UNKNOWN", f"向导未注册: {m.get('wizard')}")
     uid = int(payload["sub"])
-    # 配额：每用户 bot ≤5（11C 挂账量级依据收口——每 bot 子进程 ≈62MB）
+    # 配额：每用户 bot ≤5（11C 挂账量级依据收口——每 bot 子进程 ≈62MB）；
+    # 批26-9：+全平台上限 10（三面闸之二——扫码建成的 bot 同样计入 spawn 面）
     with get_conn() as conn:
         n = conn.execute("SELECT count(*) FROM im_bot_config WHERE owner_user_id=%s", (uid,)).fetchone()[0]
         if n >= 5:
             raise ApiError(400, "BOT_QUOTA", "每用户最多 5 个 IM 通道")
-    # 频控：活 ticket 扫描（owner 比对且非终态）——命中则带 existing_ticket 给前端恢复活会话（批12A #8）
+        total = conn.execute("SELECT count(*) FROM im_bot_config WHERE enabled").fetchone()[0]
+        if total >= 10:
+            raise ApiError(400, "BOT_PLATFORM_LIMIT", "平台 IM 通道总数已达上限（10），请先停用不用的通道")
+    # 频控（批26-5）：per-user 索引键 O(1) 单键查——替代全键 scan（O(全部活 session)）+
+    # scan 与写 ticket 非原子的 TOCTOU（并发双活 ticket）。终态由 _set_session 即时 DEL
+    # （语义等价批12A"done 后立即可再发起"）；崩溃未 DEL 兜底=TTL 尽（≤900s）。
     r = feishu_redis_client()
-    for key in r.scan_iter("feishu:session:*", count=100):
+    raw = r.get(f"im:onboarding:owner:{uid}")
+    if raw:
         try:
-            d = json.loads(r.get(key) or "{}")
-            if d.get("owner_user_id") == uid and d.get("status") not in ("done", "error"):
-                raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，已为你恢复",
-                               extra={"existing_ticket": str(key).rsplit(":", 1)[-1]})
-        except ApiError:
-            raise
+            d = json.loads(raw)
         except Exception:
-            continue
+            d = None   # 坏值=对齐旧 scan 版 fail-open（解析失败放行）；DEL 防坏键挡住新 pending 的 NX
+            try:
+                r.delete(f"im:onboarding:owner:{uid}")
+            except Exception:
+                pass
+        if d and d.get("status") not in ("done", "error"):
+            raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，已为你恢复",
+                           extra={"existing_ticket": d.get("ticket")})
     # 全局并发帽（批12A A-P1-1②：SDK 无 timeout 的 daemon 线程总闸——满则 429）
     from src.feishu_bot.tasks import acquire_onboarding_slot, release_onboarding_slot
     if not acquire_onboarding_slot():
@@ -118,9 +128,22 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
         holder["error"] = msg; err_evt.set()
     try:
         from src.feishu_bot.tasks import _set_session
-        _set_session(session_id, {"status": "pending"}, expire=900, owner_user_id=uid)   # TOCTOU 收口（A-P2-1）
+        # 盲审 A-P1-2：pending NX 失败=并发先到 ticket（两请求都过 GET miss 窗口）——必须 429，
+        # 静默继续会让第二 ticket 与先到并跑、其中态覆盖写劫持 owner 键、终态 DEL 互删（频控失效窗）
+        if not _set_session(session_id, {"status": "pending"}, expire=900, owner_user_id=uid):
+            release_onboarding_slot()
+            _d = r.get(f"im:onboarding:owner:{uid}")
+            _prior = None
+            try:
+                _prior = json.loads(_d).get("ticket") if _d else None
+            except Exception:
+                pass
+            raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，已为你恢复",
+                           extra={"existing_ticket": _prior})
         _th.Thread(target=entry, daemon=True,
                    args=(session_id, uid), kwargs={"on_qr": _on_qr, "on_error": _on_error}).start()
+    except ApiError:
+        raise
     except Exception:
         release_onboarding_slot()
         raise
@@ -167,6 +190,14 @@ def my_im_bots(payload: dict = Depends(require_authenticated)):
             for r in rows]   # 五轮：pending_binds 退役（绑定取消）
 
 
+def _platform_bot_count() -> int:
+    """批26-9：全平台活 bot 计数（三面闸单源：创建/扫码/启动）——
+    1.8G 机器每 bot 子进程 ≈62MB（批B #0d 量级依据），总量护栏（上限 10，用户裁定）。
+    并发 TOCTOU 声明：计数与 INSERT 间无事务锁，极端并发可超限 1-2 个——自助面低并发场景接受。"""
+    with get_conn() as conn:
+        return conn.execute("SELECT count(*) FROM im_bot_config WHERE enabled").fetchone()[0]
+
+
 @router.post("/api/my/im-bots")
 def my_im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_authenticated)):
     """自助创建（owner=会话用户钉死；default_role 服务端恒 viewer；唯一性预检同管理面 A-P1-5）。"""
@@ -175,16 +206,24 @@ def my_im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_authe
     p = get_im_provider(req.provider)
     if p is None:
         raise ApiError(400, "PROVIDER_INVALID", f"未知 IM 平台: {req.provider}")
+    # 批26-3：平台×方式一致性闸——注册表无 manual 方式的平台（现即飞书=扫码唯一）API 层拒 form 直建
+    #（前端早已只渲染扫码页签，此处堵 API 绕过；扫码向导端点自身已校验 method kind，im_bots.py:81-82）
+    if not any(m.get("kind") == "manual" for m in p.ONBOARDING_METHODS.values()):
+        raise ApiError(400, "ONBOARDING_INTERACTIVE_ONLY", f"{req.provider} 仅支持扫码接入，请在集成中心使用扫码向导")
     import json as _json
     from src.quant_common.crypto import encrypt as _encrypt
     from src.im_bot.routing import route_key_from
     # 盲审 A-P1-5：手动建同受 ≤5/user 配额（与扫码 onboarding 路径同一条——否则
-    # require_authenticated 面可绕配额无限造子进程，≈62MB/bot）
+    # require_authenticated 面可绕配额无限造子进程，≈62MB/bot）。
+    # 批26-9：+全平台上限 10（三面闸之一；"建完即启用"故 create 时点即计入）。
     with get_conn() as conn:
         _n = conn.execute("SELECT count(*) FROM im_bot_config WHERE owner_user_id=%s",
                           (int(payload["sub"]),)).fetchone()[0]
         if _n >= 5:
             raise ApiError(400, "BOT_QUOTA", "每用户最多 5 个 IM 通道")
+        _total = conn.execute("SELECT count(*) FROM im_bot_config WHERE enabled").fetchone()[0]
+        if _total >= 10:
+            raise ApiError(400, "BOT_PLATFORM_LIMIT", "平台 IM 通道总数已达上限（10），请先停用不用的通道")
     route = route_key_from(req.credentials)
     has_any = any(v for v in req.credentials.values())
     # A-P2-8（批13）：自助面同款拦截（manual-only 平台 secret 全必填；飞书无手动建路径）
@@ -239,7 +278,11 @@ def my_im_delete(bid: int, payload: dict = Depends(require_authenticated)):
 
 @router.post("/api/my/im-bots/{bid}/start")
 def my_im_start(bid: int, payload: dict = Depends(require_authenticated)):
-    _own_bot(bid, payload["sub"])
+    bot = _own_bot(bid, payload["sub"])   # 已含 enabled（盲审 A-P2-1：去冗余二次查询）
+    # 批26-9：全平台上限 10 三面闸之三（启动面）——只闸创建可被"停旧→建新过闸→再启旧"
+    # 确定性绕过（盲审 A-P1-2）；本 bot 已 enabled 时 start 是幂等操作不占新额度，放行
+    if not bot["enabled"] and _platform_bot_count() >= 10:
+        raise ApiError(400, "BOT_PLATFORM_LIMIT", "平台 IM 通道总数已达上限（10），请先停用不用的通道")
     from src.data_platform.db import get_conn as _gc
     with _gc() as conn:
         _pv = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s", (bid,)).fetchone()

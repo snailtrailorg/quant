@@ -295,8 +295,8 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     if receive_id is None: receive_id = open_id
     print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
     client = get_feishu_client(fid)   # 批 2:per-bot 单例(修多 bot 回复走错凭证隐患)
-    from src.im_bot.users import resolve_im_identity
-    identity = resolve_im_identity(open_id, fid)   # per-bot 收口（批13 P0）+ owner 直通（五轮：绑定取消）
+    # 批26-4：删外层 resolve_im_identity 死赋值（结果从未使用——批13 迁移残留）；
+    # 身份解析单点=handle_incoming 内部（handlers.py，钉钉/企微 runner 同构）
     from src.im_bot.handlers import handle_incoming
     handle_incoming(
         "feishu", fid, open_id, text,

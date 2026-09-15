@@ -12,9 +12,20 @@ Environment=QUANT_LOG_SOURCE=celery-worker
 Environment=QT_QPA_PLATFORM=offscreen
 # 批10：max-tasks-per-child=100——每百任务回收 prefork 子进程，治大任务峰值后 RSS
 # 高水位永久驻留（Python arena 不还 OS）。副作用预期：回收后首个 data 类任务重付
-# pandas/tushare 子进程内 import（~1-2s，偶发慢非回归）。对单任务特大峰值无效，
-# max-memory-per-child 挂账另议（docs/任务/批10-内存浪费清理.md §2.C）。
-ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler worker -Q celery,risk,data,analysis --loglevel=info --max-tasks-per-child=100
+# pandas/tushare 子进程内 import（~1-2s，偶发慢非回归）。
+# 批26-12（用户裁定，批10 §2.C 挂账收口）：
+#   ① MemoryHigh=1200M——大任务（历史峰值 1.5G）超 High 进限流=swap 换页慢跑，不打断执行中任务
+#   ② MemoryMax=1600M——<物理 1.8G 的失控兜底。运维语义：命中=整 cgroup 杀（master+全部子进程）+
+#      early-ack 任务不重投（数据同步半途断需游标重拉；观测=journalctl grep oom 或 cgroup memory.events，
+#      NRestarts 测不到 prefork 子进程级 OOM）
+#   ③ --max-memory-per-child=1228800（1200M KiB）——任务结束后按子进程 RSS 优雅回收（带内先于 cgroup 顶）
+#   ④ -Q 去 risk——risk 队列归 quant-celery-risk@ 唯一消费（-c 1 专属，F-48 防长任务饿死告警巡检；
+#      原双消费者竞争，批10 盲审 A P2-3 在案）
+#   ⑤ 不加 -c——DB 动态并发调优（system_config.celery_concurrency + Web pool_grow/shrink）优先级高于
+#      命令行，显式 -c 会废掉动态调优（app.py"不再用 -c 硬编码"设计）
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m celery -A src.scheduler worker -Q celery,data,analysis --loglevel=info --max-tasks-per-child=100 --max-memory-per-child=1228800
+MemoryHigh=1200M
+MemoryMax=1600M
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

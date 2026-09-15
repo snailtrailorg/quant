@@ -558,8 +558,10 @@ const startQr = async () => {
 // 批14：d 的处理抽公共（pollQr 与 SSE 事件两路共用——B-P2-1 边界：只装 d 处理，
 // BUSY 恢复留在 startQr catch、deadline/fails 计数留 pollQr；SSE 路径不做 deadline→timeout 翻转）
 const handleOnboardingStatus = async (d) => {
-  // B-P2-4：SSE 即时到+在途 poll 双达同状态——终态短路（防双 toast/双 loadIm）
-  if (isTerminalQr.value && qrStatus.value === d.status) return
+  // B-P2-4：SSE 即时到+在途 poll 双达同状态——终态短路（防双 toast/双 loadIm）。
+  // 批26-6：升级为终态吸收——终态是吸收态，任何迟到载荷（含更旧的 scanning/confirming，
+  // 如 SSE 先推 done 后在途 poll 返回）一律丢弃，防界面从 done 视觉回退成"扫码中"
+  if (isTerminalQr.value) return
   // 七轮：ttl 真值校准——倒计时/pollDeadline 统一为会话真实剩余（原 startQr 用 SDK expire_in≈1h、
   // 恢复路径硬编码 10min，同一会话两个数）
   if (d.ttl && d.ttl > 0) {

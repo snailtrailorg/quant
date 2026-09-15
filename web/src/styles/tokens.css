@@ -80,8 +80,9 @@
   --shadow-1: 0 1px 2px rgba(26, 34, 51, 0.06);
   --shadow-2: 0 4px 12px rgba(26, 34, 51, 0.10);
 
-  /* —— z-index 三档 —— */
+  /* —— z-index 档 ——（批26-2：+rail 两档——侧栏覆盖层域 1800/1801 在 EP 弹层 2000+ 之下、页面 --z-sticky 之上） */
   --z-sticky: 100; --z-drawer: 200; --z-modal: 300;
+  --z-rail: 1800; --z-rail-aside: 1801;
 
   /* —— Element Plus 整组品牌 ramp 覆盖（04 §5：EP 落地要整组做）—— */
   --el-color-primary: var(--brand-600);

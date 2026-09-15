@@ -316,7 +316,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .rail-pin:hover { color: #fff; background: rgba(255, 255, 255, .12); }
 .rail-pin.active { color: #fff; }
 .overlay-aside .el-menu { border-right: none; }   /* EP 默认 1px 右边框→与标题区宽度差 1px,去掉 */
-.rail-hotzone { position: fixed; left: 0; top: 0; bottom: 0; width: 12px; z-index: 1800; }
+.rail-hotzone { position: fixed; left: 0; top: 0; bottom: 0; width: 12px; z-index: var(--z-rail); }
 .rail-hotzone::after {
   /* 把手指示：左缘可划出菜单的视觉暗示（平时侧栏完全隐藏,无指示=不可发现） */
   content: ''; position: absolute; right: 0; top: 50%; transform: translateY(-50%);
@@ -329,7 +329,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   transform: translateX(-100%);            /* 平时隐藏,左滑出视口 */
   visibility: hidden;                      /* 盲审 P1：出 Tab 焦点序（仅 transform 出视口时键盘 Tab 仍会聚焦不可见菜单） */
   transition: transform .25s ease, visibility .25s;   /* visibility 离散：收起=滑完再隐,展开=立即可见,动画不受影响 */
-  z-index: 1801;                            /* 盖住热区(1800)与顶栏(el-header 无定位),防开↔合抖动。EP 弹层 2000+ 之下/页面 --z-sticky 100 之上——令牌化挂 web backlog（盲审 P2） */
+  z-index: var(--z-rail-aside);                  /* 盖住热区(--z-rail)与顶栏(el-header 无定位),防开↔合抖动。EP 弹层 2000+ 之下/页面 --z-sticky 100 之上（批26-2 令牌化） */
   overflow-y: auto;
   display: flex; flex-direction: column;   /* 菜单 flex:1 内滚,图钉贴底（2026-09-10 三轮） */
 }

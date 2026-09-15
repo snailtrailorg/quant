@@ -76,7 +76,6 @@ export const createUser = (username, password, role) =>
 
 export const getAccounts = () => api.get('/account')
 export const getLogs = () => api.get('/log')
-export const getEmailOutbox = () => api.get('/email-outbox')
 export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
 // 批23：通知批量删（{ids:[int]} 选中删 / {all:true} 全清，confirm 前置在组件层）——ack-all 前端随确认机制退役（后端端点保留）
 export const deleteNotifications = (payload) => api.post('/notifications/delete', payload)

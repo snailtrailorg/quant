@@ -113,10 +113,10 @@ class TestSelfOnboarding:
         assert r.status_code == 400 and r.json()["code"] == "BOT_QUOTA"
 
     def test_busy_ticket_429(self):
-        conn = _conn(scripted=[((0,), [], 0)])
+        # 批26-5：频控改 per-user 索引键单键查（替全键 scan）；批26-9：配额+全平台 count 两条
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0)])
         rd = MagicMock()
-        rd.scan_iter.return_value = iter(["feishu:session:t1"])
-        rd.get.return_value = '{"status": "scanning", "owner_user_id": 9}'
+        rd.get.return_value = '{"ticket": "t1", "status": "scanning"}'
         with contextlib.ExitStack() as s:
             for p in _ctx(conn): s.enter_context(p)
             s.enter_context(patch("src.web_api.routes.im_bots.feishu_redis_client", return_value=rd))
@@ -124,7 +124,7 @@ class TestSelfOnboarding:
         assert r.status_code == 429 and r.json()["code"] == "ONBOARDING_BUSY"
 
     def test_start_ok_and_task_owner_pinned(self):
-        conn = _conn(scripted=[((0,), [], 0)])
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0)])   # 批26-9：配额+全平台 count 两条
         rd = MagicMock(); rd.scan_iter.return_value = iter([]); rd.get.return_value = None
         with contextlib.ExitStack() as s:
             for p in _ctx(conn): s.enter_context(p)

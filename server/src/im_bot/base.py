@@ -26,7 +26,18 @@ class IMBotProvider(ABC):
     # 方式注册表：标识 → {kind: manual|interactive, label_key,
     #                   fields?: [...](manual=FIELD_SCHEMA 本体), wizard?: str(interactive 向导标识),
     #                   post_steps?: [str](创建后指引文案 key——webhook 型通道用)}
+    # 批26-7 约定钉（原批11D 盲审余项）：子类必须**整表重声明**（新字面量）——类属性 dict 跨子类
+    # 共享，继承后 mutate（类体内 ONBOARDING_METHODS["x"]=…）会污染基类与兄弟平台；
+    # 且部分继承会让 ONBOARDING @property 静默错派生。__init_subclass__ 闸强制之。
     ONBOARDING_METHODS: dict[str, dict] = {}
+
+    def __init_subclass__(cls, **kwargs):
+        """批26-7：把"整表重声明"从约定变机制——子类缺自有声明即 TypeError（定义期炸，非运行期静默错）。"""
+        super().__init_subclass__(**kwargs)
+        if "ONBOARDING_METHODS" not in cls.__dict__:
+            raise TypeError(
+                f"{cls.__name__} 必须整表重声明 ONBOARDING_METHODS（类属性 dict 跨子类共享，"
+                f"禁止继承或局部增删——见 base.py 约定钉）")
 
     @property
     def ONBOARDING(self) -> str:

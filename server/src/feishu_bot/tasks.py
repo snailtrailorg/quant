@@ -27,21 +27,51 @@ _redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True)
 
 
 def _set_session(session_id: str, data: dict, expire: int = 600,
-                 owner_user_id: int | None = None) -> None:
+                 owner_user_id: int | None = None) -> bool:
     """存扫码会话状态。批12A：owner 显式传参（v1 的 _SESSION_OWNER 全局 dict 慢泄漏退役——B-P2-4）；
     载荷带 ts（wall clock——B-P2-6 批 B SSE 去重钩子；非单调,回拨可倒退,去重勿依赖严格递增）。
-    批14 SSE：setex 成功后 publish（契约①真相源优先②全吞）——推送故障绝不炸状态机。"""
+    批14 SSE：setex 成功后 publish（契约①真相源优先②全吞）——推送故障绝不炸状态机。
+    批26-5：owner 非 None 时同步维护 per-user 索引键 im:onboarding:owner:{uid}——频控 O(1) 单键查
+    替代全键 scan+NX 首建关 TOCTOU。三分支：pending=SET NX（首建）→ **返回 NX 成败**（盲审 A-P1-2：
+    失败=并发先到 ticket，调用方须 429，静默继续会让第二 ticket 的中态覆盖写劫持键）/
+    中态（scanning/confirming）=覆盖写续 TTL/终态（done|error）=比对归属后 DEL 即时放行。
+    键值 {"ticket","status"}；终态 DEL 前比对键内 ticket==本 session（盲审 A-P2-2 轻量版——单用户
+    顺序状态机下无竞态窗口，防的是异常路径迟到 DEL 误删新键；原子版需 Lua，触发路径出现再升级）。
+    TTL 随调用方 expire（pending 900s/scanning=SDK expire_in 可达 ~1h/confirming 120s）——
+    崩溃未 DEL 的自愈窗口=TTL 尽（最长 ~1h，非固定 900s；sweep 已同步清键见 sweep_stale_sessions）。
+    前缀刻意避开 feishu:session:*——sweep_stale_sessions 的 scan 模式不触碰本键。
+    返回值：pending 分支返回 NX 成败（False=并发先到）；其余分支恒 True。"""
     data = {**data, "owner_user_id": owner_user_id, "ts": time.time()}
     _redis.setex(f"feishu:session:{session_id}", expire, json.dumps(data, ensure_ascii=False))
-    if owner_user_id is not None:
-        try:
-            from src.quant_common.eventbus import bus
-            # 载荷剥 qr_img（A-P1-3：base64 数十 KB 跨 chunk；前端出码时已同步拿到）+ 带 ticket
-            ev = {k: v for k, v in data.items() if k != "qr_img"}
-            ev["ticket"] = session_id
-            bus.publish(owner_user_id, "onboarding", ev)
-        except Exception as e:   # noqa: BLE001
-            logger.warning("SSE publish 失败(不影响扫码状态机): %s", e)
+    if owner_user_id is None:
+        return True
+    status = data.get("status")
+    okey = f"im:onboarding:owner:{owner_user_id}"
+    try:
+        if status in ("done", "error"):
+            # 终态：比对归属后 DEL（键不存在/已换主 → 不误删）
+            cur = _redis.get(okey)
+            if cur is None or json.loads(cur).get("ticket") == session_id:
+                _redis.delete(okey)   # 终态：立即放行下一次发起
+        else:
+            _payload = json.dumps({"ticket": session_id, "status": status})
+            if status == "pending":
+                return bool(_redis.set(okey, _payload, ex=expire, nx=True))
+            _redis.set(okey, _payload, ex=expire)
+        return True
+    except Exception as e:   # noqa: BLE001
+        logger.warning("owner 索引键维护失败(不影响扫码状态机): %s", e)
+        return True
+    finally:
+        if owner_user_id is not None:
+            try:
+                from src.quant_common.eventbus import bus
+                # 载荷剥 qr_img（A-P1-3：base64 数十 KB 跨 chunk；前端出码时已同步拿到）+ 带 ticket
+                ev = {k: v for k, v in data.items() if k != "qr_img"}
+                ev["ticket"] = session_id
+                bus.publish(owner_user_id, "onboarding", ev)
+            except Exception as e:   # noqa: BLE001
+                logger.warning("SSE publish 失败(不影响扫码状态机): %s", e)
 
 
 # 批12A（A-P1-1②）：全局并发帽——SDK requests 无 timeout，daemon 线程理论可挂到 deadline；
@@ -287,6 +317,16 @@ def sweep_stale_sessions() -> int:
                          error="服务重启导致会话中断，请重新发起")
                 ttl = _redis.ttl(key)
                 _redis.setex(key, max(ttl, 60), json.dumps(d, ensure_ascii=False))
+                # 批26-5 盲审 A-P1-1：error=终态语义——owner 索引键必须同步 DEL，否则重启后
+                # 新频控（单键查 owner 键）仍见非终态 → 用户 429 困到 TTL 尽（批12A #8 当年
+                # 做 sweep 就是为解此困局，索引键时代 sweep 必须同步覆盖）；scanning 态 TTL 随
+                # SDK expire_in 可达 ~1h，困局窗口不小。
+                _owner = d.get("owner_user_id")
+                if _owner is not None:
+                    try:
+                        _redis.delete(f"im:onboarding:owner:{_owner}")
+                    except Exception:
+                        pass   # 索引键清理失败不阻断全扫（TTL 尽自愈）
                 n += 1
     except Exception as e:
         logger.warning(f"startup 会话清扫失败(不影响启动): {e}")

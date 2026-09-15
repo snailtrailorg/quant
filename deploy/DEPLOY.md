@@ -41,3 +41,19 @@
 
 - systemd 239：StartLimit 窗口内 reset-failed 后 start 仍被拒——release 波次对"窗口内 crash-loop 单元"的重启会失败（自动回滚兜底；避免在单元 crash-loop 未冷却时发布）
 - 单元文件变更走 quant-install-units 通道 + 受影响波（不手工 cp + daemon-reload）
+- **IM 回滚不走 rollback.yml**（批26-13，批B #0b 在案收口）：rollback 波次按"普通单元"处理 IM，但 IM 的单元形态跨版本不通用——回滚时**先判目标版本所在区间**：
+
+### IM 手工回滚 runbook（极罕见场景）
+
+```bash
+# 情形 A：回滚目标 ≥ 批11C（3d17fc6，pool 化之后）
+#   IM 单元名不变（quant-im-pool@quant.service），常规 rollback.yml 即恢复——无需本节操作。
+
+# 情形 B：回滚目标 < 批11C（pool 化之前，IM=单 bot 模板单元）
+sudo -n /usr/local/sbin/quant-svc stop quant-im-pool@quant.service
+# 起旧版单 bot 模板实例：%i = bot id（int，从 im_bot_config 表查：SELECT id FROM im_bot_config WHERE enabled）
+sudo -n /usr/local/sbin/quant-svc start quant-feishu-bot@<bot_id>.service
+```
+
+- **兼容性注意**（盲审 B-P1-3 核正）：`im_bot_config.credentials_encrypted` 自批11 建表（迁移 0051）起就是凭证存储且列名未变——批11C（迁移 0073）只 UPDATE `owner_user_id` 归属制，**情形 B 区间（0051~0072 间）回滚后旧版读同一列，凭证无需重录**。真正不可回滚的边界=批11 之前（IM 凭证在 `feishu_config` 表，0052 已 DROP 该表）——回滚目标早于批11 时 `im_bot_config` 表不存在，IM 整体不可用，需另行评估而非套本节。
+- **迁移方向注意**：0073（IM 用户化）之后前滚回现代版本不受影响；本节只在"整体回退到 pool 化之前"时使用。

@@ -42,8 +42,17 @@ if not _avatar_ok:
 _RATE_LIMITS: dict[str, dict[str, list[float]]] = {}
 _RATE_RULES = {"login": (10, 60), "forgot": (3, 60), "emailchg": (3, 3600)}   # 批20：改邮箱发信（宽窗——发信有成本）
 
-# 批11：注册用户名保留字（防冒充系统身份；大小写不敏感）
-_RESERVED_USERNAMES = {"admin", "administrator", "root", "system", "support", "官方", "蜗牛量化"}
+# 批11：注册用户名保留字（防冒充系统身份；大小写不敏感）。
+# 批26-8：补"官方客服"（批11A 盲审 P2-11 词表缺口）；比对统一走 _username_reserved
+# （NFKC 归一化防全角 ａｄｍｉｎ 绕过）。边界声明：不做前缀模糊匹配（误伤 admin2 类正常名）；
+# NFKC 不折叠西里尔等 homoglyph——接受，防冒充主目标=中英文平台身份词。
+_RESERVED_USERNAMES = {"admin", "administrator", "root", "system", "support", "官方", "官方客服", "蜗牛量化"}
+
+
+def _username_reserved(name: str) -> bool:
+    """保留字判定（批26-8 单源）：NFKC 归一化 + strip + lower 后精确匹配。注册与 admin 建用户共用。"""
+    import unicodedata
+    return unicodedata.normalize("NFKC", name or "").strip().lower() in _RESERVED_USERNAMES
 
 
 def _rate_limited(bucket: str, key: str) -> bool:
@@ -630,7 +639,7 @@ async def register_api(req: RegisterReq, request: Request, background_tasks: Bac
     username = (req.username or "").strip()
     if not username:
         raise ApiError(400, "USERNAME_EMPTY", "用户名不能为空")   # 盲审 P2-3：strip 后空串后端裸奔
-    if username.lower() in _RESERVED_USERNAMES:
+    if _username_reserved(username):
         raise ApiError(400, "USERNAME_RESERVED", "该用户名为系统保留名")
     user = register_user(req.token, username, req.password, nickname=(req.nickname or "").strip())
     if not user:
@@ -808,6 +817,8 @@ def delete_group(gid: int, payload: dict = Depends(require_perm("user_mgmt"))):
 @router.post("/api/user")
 def create_user_api(req: UserCreate, payload: dict = Depends(require_perm("user_mgmt"))):
     validate_password(req.password)   # P0-复审残留：admin 建用户原无校验（>72 字节 500）
+    if _username_reserved(req.username):   # 批26-8：admin 面同闸（原无校验——与注册路径一致性）
+        raise ApiError(400, "USERNAME_RESERVED", "该用户名为系统保留名")
     # 批11B：四元组白名单 → user_group 存在性校验（角色值域动态化）
     with get_conn() as conn:
         if not conn.execute("SELECT 1 FROM user_group WHERE name=%s", (req.role,)).fetchone():

@@ -76,22 +76,95 @@ class TestResolveIdentity:
 
 class TestSelfService:
     def test_create_pins_owner_and_role(self):
-        """自助创建：owner=会话 sub、default_role 服务端恒 viewer（body 传 admin 也被忽略，A-P0-1）。"""
-        # 批13（A-P1-5）：create 新增配额 count（→0）→ 唯一性预检空 → INSERT RETURNING 42
-        conn = _conn(scripted=[((0,), [], 0), (None, [], 0), ((42,), [], 1)])
+        """自助创建：owner=会话 sub、default_role 服务端恒 viewer（body 传 admin 也被忽略，A-P0-1）。
+        批26-3：feishu 无 manual 方式被 API 闸拒（见 TestOnboardingGate），本测改走 dingtalk（form 合法路径）。"""
+        # 批13（A-P1-5）：create 配额 count（→0）→ 批26-9 全平台 count（→0）→ 唯一性预检空 → INSERT RETURNING 42
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0), (None, [], 0), ((42,), [], 1)])
         with contextlib.ExitStack() as s:
             for p in _ctx(conn, USER9): s.enter_context(p)
             s.enter_context(patch("src.web_api.routes.im_bots.audit_log"))
             r = _client().post("/api/my/im-bots", headers={"Authorization": "Bearer t"},
-                               json={"provider": "feishu", "name": "my bot", "description": "",
+                               json={"provider": "dingtalk", "name": "my bot", "description": "",
                                      "default_role": "admin", "owner_user_id": 1,   # 应被忽略
-                                     "credentials": {"app_id": "a1", "app_secret": "s1"}})
+                                     "credentials": {"app_key": "ak1", "app_secret": "s1"}})
         assert r.status_code == 200 and r.json() == {"id": 42}
         ins = [c[0] for c in conn.execute.call_args_list if "INSERT INTO im_bot_config" in c[0][0]]
         assert ins, "应有 INSERT"
         sql_text, args = ins[0][0], ins[0][1]
         assert "'viewer'" in sql_text       # default_role 服务端内嵌恒 viewer（非参数化）
         assert args[3] == 9                 # owner=会话 sub（body 的 owner_user_id=1 被忽略）
+
+
+class TestOnboardingGate:
+    """批26-3：平台×方式一致性闸——注册表无 manual 方式的平台（飞书=扫码唯一）API 层拒 form 直建。"""
+
+    def test_feishu_form_api_rejected(self):
+        conn = _conn()   # 闸在配额/DB 之前——不应有任何 DB 调用
+        with contextlib.ExitStack() as s:
+            for p in _ctx(conn, USER9): s.enter_context(p)
+            r = _client().post("/api/my/im-bots", headers={"Authorization": "Bearer t"},
+                               json={"provider": "feishu", "name": "x", "description": "",
+                                     "credentials": {"app_id": "a1", "app_secret": "s1"}})
+        assert r.status_code == 400 and r.json()["code"] == "ONBOARDING_INTERACTIVE_ONLY"
+        assert not conn.execute.called, "闸应在任何 DB 查询前拒绝"
+
+    def test_wecom_form_passes_gate(self):
+        """有 manual 方式的平台（钉钉/企微）不受闸影响（完整创建链见 test_create_pins_owner_and_role）。"""
+        conn = _conn(scripted=[((0,), [], 0), ((0,), [], 0), (None, [], 0), ((42,), [], 1)])
+        with contextlib.ExitStack() as s:
+            for p in _ctx(conn, USER9): s.enter_context(p)
+            s.enter_context(patch("src.web_api.routes.im_bots.audit_log"))
+            r = _client().post("/api/my/im-bots", headers={"Authorization": "Bearer t"},
+                               json={"provider": "wecom", "name": "w", "description": "",
+                                     "credentials": {"bot_id": "b1", "secret": "s1"}})
+        assert r.status_code == 200 and r.json() == {"id": 42}
+
+
+class TestPlatformLimit:
+    """批26-9：全平台活 bot 上限 10（用户裁定）三面闸——只闸创建可被"停旧→建新过闸→再启旧"绕过。"""
+
+    def test_create_rejected_at_limit(self):
+        conn = _conn(scripted=[((0,), [], 0), ((10,), [], 0)])   # owner 配额 0 放行 → 全平台 10 拒
+        with contextlib.ExitStack() as s:
+            for p in _ctx(conn, USER9): s.enter_context(p)
+            r = _client().post("/api/my/im-bots", headers={"Authorization": "Bearer t"},
+                               json={"provider": "dingtalk", "name": "x", "description": "",
+                                     "credentials": {"app_key": "k", "app_secret": "s"}})
+        assert r.status_code == 400 and r.json()["code"] == "BOT_PLATFORM_LIMIT"
+
+    def test_onboarding_rejected_at_limit(self):
+        conn = _conn(scripted=[((0,), [], 0), ((10,), [], 0)])
+        rd = MagicMock(); rd.get.return_value = None   # 无活 ticket（频控放行）
+        with contextlib.ExitStack() as s:
+            for p in _ctx(conn, USER9): s.enter_context(p)
+            s.enter_context(patch("src.web_api.routes.im_bots.feishu_redis_client", return_value=rd))
+            r = _client().post("/api/my/im-bots/onboarding/feishu/qr",
+                               headers={"Authorization": "Bearer t"})
+        assert r.status_code == 400 and r.json()["code"] == "BOT_PLATFORM_LIMIT"
+
+    def test_start_rejected_at_limit(self):
+        """启动面闸：本 bot 停用态 + 全平台已 10 → 拒（堵"停旧→建新→再启旧"绕过）。"""
+        conn = _conn(scripted=[
+            ((11, "feishu", "n", "d", False), [], 0),   # _own_bot：本人 bot，enabled=False（含 enabled——A-P2-1 去冗余查询）
+            ((10,), [], 0),                              # 全平台 count=10
+        ])
+        with contextlib.ExitStack() as s:
+            for p in _ctx(conn, USER9): s.enter_context(p)
+            r = _client().post("/api/my/im-bots/11/start", headers={"Authorization": "Bearer t"})
+        assert r.status_code == 400 and r.json()["code"] == "BOT_PLATFORM_LIMIT"
+
+    def test_start_idempotent_when_self_enabled(self):
+        """本 bot 已 enabled：start 是幂等操作不占新额度 → 闸放行。"""
+        conn = _conn(scripted=[
+            ((11, "feishu", "n", "d", True), [], 0),    # _own_bot：enabled=True → 不查全平台 count
+            (("feishu",), [], 0),                        # provider 查询（guard 前置）
+        ])
+        with contextlib.ExitStack() as s:
+            for p in _ctx(conn, USER9): s.enter_context(p)
+            s.enter_context(patch("src.web_api.routes.im_bots._guard_start_credentials"))
+            s.enter_context(patch("src.web_api.routes.im_bots.audit_log"))
+            r = _client().post("/api/my/im-bots/11/start", headers={"Authorization": "Bearer t"})
+        assert r.status_code == 200 and r.json() == {"ok": True}
 
     def test_idor_404(self):
         """IDOR：动他人/平台级 bot → 404（防探测，A-P2-2）。"""

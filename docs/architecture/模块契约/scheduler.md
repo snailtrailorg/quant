@@ -3,6 +3,10 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
+## 最近变更
+- **批26（2026-09-15）**：自定义因子加载（`load_factors_from_db`）从 app.py **模块 import 期**挪进 `worker_process_init` 信号——根治 C6 exec 回染（import 期 exec 用户代码把重库拉进 beat/worker 父进程且终身不卸）。beat 只调度零因子；每 prefork 子进程各自加载（任务头 R-S4 lazy 重载仍是运行期兜底）。守门测 `test_beat_import_chain_heavy_free` 升级为哨兵法（import 期必不触碰因子加载）。
+- **批25（2026-09-15）**：system_log 落库 celery 侧装配（`setup_logging` 挂回 root + `worker_process_init` 每子进程自起 flush 线程 + `worker_process_shutdown` 子进程尾窗冲刷）。详见 `docs/architecture/模块契约/` 各模块与 `docs/任务/批25-全局日志三套体系.md`。
+
 ## 职责
 Celery + beat 定时任务编排：数据同步调度 / 盘后选股 / 风控巡检 / 健康探测 / 回测组分发 / 对账与漂移检测。
 **所有异步长任务（回测/全量同步/类型同步）经此入 Celery worker**，进度写 Valkey 供前端轮询。A 股任务带交易日/交易时段跳过。

@@ -41,12 +41,17 @@ def test_cross_name_resolution_order():
 def test_beat_import_chain_heavy_free():
     """beat/调度入口 import 链无 pandas/numpy（批9 内存治理核心不变量）。
 
-    注意（方案 C6）：若 DB 存在自定义因子且其代码 import pandas，本测试会红——
-    那是因子代码的问题而非本链问题，归因时先查 factor 表。
+    批26-11 升级（哨兵法）：因子 exec 回染已根治——load_factors_from_db 从 app.py 模块
+    import 期挪进 worker_process_init 信号。哨兵替换 factor.load_factors_from_db 后
+    import app，断言哨兵零调用（DB 有无自定义因子行都与断言无关——import 期必不触碰）。
     """
     code = (
         "import sys\n"
+        "import src.strategy_framework.factor as F\n"
+        "calls = []\n"
+        "F.load_factors_from_db = lambda: (calls.append(1), [])[1]   # 哨兵（app.py:90 from-import 绑定生效）\n"
         "import src.scheduler.app\n"
+        "assert not calls, 'import 期仍触发因子加载（批26-11 回归——应只在 worker_process_init）'\n"
         "assert 'pandas' not in sys.modules, 'beat 链被 pandas 污染'\n"
         "assert 'numpy' not in sys.modules, 'beat 链被 numpy 污染'\n"
     )
