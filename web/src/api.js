@@ -70,7 +70,6 @@ export const riskResume = () => api.post('/risk/resume')
 
 export const getAudit = () => api.get('/audit')
 // 批23：审计批量删（{ids:[int]} / {all:true}，后端留痕 audit_delete）
-export const deleteAudit = (payload) => api.post('/audit/delete', payload)
 export const getUsers = () => api.get('/user')
 export const createUser = (username, password, role) =>
   api.post('/user', { username, password, role })

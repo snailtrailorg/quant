@@ -46,12 +46,22 @@ def _register():
         dkey = dkey or ch   # 多目标：行级审计键（批7.1）
         if not _still_enabled(row):
             D._writeback(notif_id, dkey, "skip:disabled")
+            from src.data_platform.log_sink import event
+            event("WARN", ch, f"跳过（通道已关）→ {str(title)[:80]}")
             return
         if not D._claim(notif_id, dkey):
             # B 评 P2-4：降级直发已认领（send_task 响应超时但消息已达 broker 的双发窗）
             return
         ok, reason = D._send_one(row, level, category, title, body, code)
         D._writeback(notif_id, dkey, "ok" if ok else f"failed:{reason}")
+        # 批25：三通道发送事件进 system_log（im=bot 维度整行记，per-user 结局不展开——方案 v3 known-limit）
+        from src.data_platform.log_sink import event
+        _tgt = row.get("to") or row.get("target") or row.get("bot_id") or row.get("name") or dkey or ch
+        _mod = {"im": "im", "email": "email", "sms": "sms"}.get(ch, ch)
+        if ok:
+            event("INFO", _mod, f"已发送 → {_tgt} ｜ {str(title)[:80]}")
+        else:
+            event("ERROR", _mod, f"发送失败 → {_tgt} ｜ {str(title)[:80]} ｜ {reason}")
         if not ok:
             # 终败站内通知（dispatch 对 code=alert.push-failed 有防环闸，只留站内）
             try:

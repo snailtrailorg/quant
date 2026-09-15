@@ -1207,6 +1207,28 @@ def email_outbox_sweep():
         return {"processed": 0, "error": str(e)}
 
 
+@app.task(name="src.scheduler.tasks.cleanup_logs")
+def cleanup_logs():
+    """批25：system_log 留存清理（每日）——>30 天批删（pk IN 子查询分批，每批独立短事务，18 号规范）。"""
+    from src.data_platform.db import get_conn
+    total = 0
+    try:
+        while True:
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "DELETE FROM system_log WHERE id IN "
+                    "(SELECT id FROM system_log WHERE ts < now() - interval '30 days' LIMIT 5000)")
+                n = cur.rowcount
+                conn.commit()
+            total += n
+            if n < 5000:
+                break
+        return {"deleted": total}
+    except Exception as e:
+        logger.exception(f"system_log cleanup failed: {e}")
+        return {"deleted": total, "error": str(e)}
+
+
 @app.task(name="src.scheduler.tasks.notifications_cleanup")
 def notifications_cleanup():
     """通知留存清理（每日）：已确认>7天、全部>30天删除。"""

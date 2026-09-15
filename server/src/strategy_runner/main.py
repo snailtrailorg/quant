@@ -294,6 +294,11 @@ def main():
     except Exception as e:
         logger.warning("schema 校验异常（不阻断启动）: %s", e)
 
+    # 批25：system_log 落库（live-task 装配：source=live:{tid}；SIGTERM 链式冲刷）
+    import signal as _sig
+    from src.data_platform.log_sink import install as _log_install, chain_sigterm as _chain
+    _log_install(f"live:{args.task_id}" if args.task_id else "live:?")
+    _chain(_sig.getsignal(_sig.SIGTERM))
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

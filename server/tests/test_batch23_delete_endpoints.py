@@ -1,7 +1,7 @@
 """批23 表格与告警设置整顿（后端）：通知/审计批量删除 + tasks 多值状态。
 
 覆盖：①/api/notifications/delete——ids 参数校验三档+可见类别作用域（category=ANY
-防越权删不可见类别）+all 仅 admin+audit_log 留痕；②/api/audit/delete 同款；
+防越权删不可见类别）+all 仅 admin+audit_log 留痕；②/api/audit/delete 同款（批25 已退役——测试随删）；
 ③task_manager.list_tasks 逗号分隔多值 status（空/缺省=不过滤，单值走 ANY 兼容）。
 
 桩模式同 test_user_mgmt_batch11：verify_jwt 打桩身份层 + 双 patch get_conn
@@ -108,45 +108,6 @@ class TestNotificationsDelete:
         """viewer 无 user_mgmt：require_perm 层 403。"""
         r, _, _ = _post("/api/notifications/delete", {"ids": [1]}, "system", who=VIEWER, conn=_conn())
         assert r.status_code == 403
-
-
-class TestAuditDelete:
-    """POST /api/audit/delete（批23）：audit 自删尤其留痕。"""
-
-    def test_ids_mode_and_audit(self):
-        conn = _conn(rowcount=2)
-        r, au, _ = _post("/api/audit/delete", {"ids": [10, 20]}, "risk", conn=conn)
-        assert r.status_code == 200 and r.json() == {"deleted": 2}
-        sql, params = conn.execute.call_args[0]
-        assert "DELETE FROM audit_log" in sql and "id = ANY(%s)" in sql
-        assert params == ([10, 20],)
-        assert au.call_args[0][:2] == ("admin", "audit_delete")   # 自删留痕
-        assert "n=2" in au.call_args[0][2]
-
-    def test_all_admin_only(self):
-        """all=true 非 admin 拒；admin 全清（无 id 条件）。双防线同通知端点。"""
-        import pytest
-        from src.web_api.errors import ApiError
-        from src.web_api.routes.risk import audit_delete
-        r, au, _ = _post("/api/audit/delete", {"all": True}, "risk", who=TRADER, conn=_conn())
-        assert r.status_code == 403
-        au.assert_not_called()
-        with pytest.raises(ApiError) as ei:
-            audit_delete({"all": True}, payload=TRADER)
-        assert ei.value.status_code == 403 and ei.value.code == "ADMIN_ONLY"
-        conn = _conn(rowcount=7)
-        r, _, _ = _post("/api/audit/delete", {"all": True}, "risk", conn=conn)
-        assert r.status_code == 200 and r.json() == {"deleted": 7}
-        assert conn.execute.call_args[0][0].strip() == "DELETE FROM audit_log"
-
-    def test_empty_ids(self):
-        r, _, _ = _post("/api/audit/delete", {"ids": []}, "risk", conn=_conn())
-        assert r.status_code == 400 and r.json()["code"] == "IDS_EMPTY"
-
-    def test_viewer_forbidden(self):
-        r, _, _ = _post("/api/audit/delete", {"ids": [1]}, "risk", who=VIEWER, conn=_conn())
-        assert r.status_code == 403
-
 
 
 class TestListTasksMultiStatus:

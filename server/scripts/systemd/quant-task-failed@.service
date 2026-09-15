@@ -2,6 +2,7 @@
 Description=Quant task failed hook: %i (告警后自动退出)
 
 [Service]
+Environment=QUANT_LOG_SOURCE=task-failed
 Type=oneshot
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared

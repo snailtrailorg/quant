@@ -8,6 +8,7 @@ Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=QUANT_LOG_SOURCE=celery-worker
 Environment=QT_QPA_PLATFORM=offscreen
 # 批10：max-tasks-per-child=100——每百任务回收 prefork 子进程，治大任务峰值后 RSS
 # 高水位永久驻留（Python arena 不还 OS）。副作用预期：回收后首个 data 类任务重付

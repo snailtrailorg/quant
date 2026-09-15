@@ -61,6 +61,9 @@ def log_task(task_id: str, level: str, message: str, step_name: str | None = Non
             "VALUES (%s,%s,%s,%s,%s)",
             (task_id, level, message, step_name, sql_or_api))
         conn.commit()
+    # 批25：双写 system_log（数据同步任务 step 过程上运行日志页——方案 §2.5 可感知取舍补齐）
+    from src.data_platform.log_sink import event
+    event(level, f"task:{task_id}"[:60], f"{step_name or ''} {message}".strip())
 
 
 def list_tasks(status: str | None = None, limit: int = 100) -> list[dict]:

@@ -8,6 +8,7 @@ Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=QUANT_LOG_SOURCE=im-pool
 Environment=QT_QPA_PLATFORM=offscreen
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.im_bot.pool
 # Restart=always 仅对 pool 主进程（对账循环）——子进程崩由 pool 退避管理不传染

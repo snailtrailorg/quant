@@ -880,22 +880,26 @@ def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
 
 
 @router.get("/api/log")
-def get_logs(task_id: str | None = None, payload: dict = Depends(require_perm("read"))):
-    """运行日志（P3-1 接 task_logs 真实日志，不再占位）。"""
+def get_logs(task_id: str | None = None, payload: dict = Depends(require_perm("user_mgmt"))):
+    """运行日志（批25：无参=system_log 全局面——三通道发送事件 module=email|im|sms 天然在内；
+    task_id 参数=live-task 自愈时间线，保留读 task_logs（唯一消费 LiveTask）。
+    权限 read→user_mgmt 收紧（用户裁定：运行日志=管理员面，含收件人明文）。"""
     with get_conn() as conn:
-        try:
-            conn.execute("SELECT 1 FROM task_logs LIMIT 1")
-        except Exception:
-            logger.warning("get_logs: task_logs 表不存在（需运行 alembic upgrade head）")
-        # task_id 过滤（wd-20 §1.5 方案 A）：live-task 自愈时间线按任务取日志
         if task_id:
-            cur = conn.execute(
-                "SELECT level, message, step_name, created_at FROM task_logs "
-                "WHERE task_id = %s ORDER BY created_at DESC LIMIT 100", (task_id,))   # 精确匹配（LIKE %live:1% 撞 live:12）
-        else:
-            cur = conn.execute(
-                "SELECT level, message, step_name, created_at FROM task_logs "
-                "ORDER BY created_at DESC LIMIT 200")
+            try:
+                cur = conn.execute(
+                    "SELECT level, message, step_name, created_at FROM task_logs "
+                    "WHERE task_id = %s ORDER BY created_at DESC LIMIT 100", (task_id,))   # 精确匹配（LIKE %live:1% 撞 live:12）
+            except Exception:
+                logger.warning("get_logs: task_logs 表不存在（需运行 alembic upgrade head）")
+                cur = None
+                rows = []
+            if cur is not None:
+                rows = cur.fetchall()
+            return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
+                              "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
+        cur = conn.execute(
+            "SELECT level, module, message, ts FROM system_log ORDER BY ts DESC LIMIT 200")
         rows = cur.fetchall()
-    return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
+    return {"logs": [{"level": r[0], "msg": r[2], "module": r[1] or "",
                       "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}

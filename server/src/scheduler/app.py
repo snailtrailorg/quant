@@ -45,6 +45,28 @@ app = Celery(
     include=["src.scheduler.tasks", "src.scheduler.alert_tasks"],   # 批12A：feishu onboarding 去 celery 化摘除
 )
 
+# 批25：system_log 落库——celery 侧装配（盲审 A-P0 三连击根治：hijack_root_logger 摘 root → setup_logging 挂回；
+# prefork 线程不跨 fork → worker_process_init 每子进程自起；billiard os._exit 绕 atexit → worker_shutdown 自冲刷）
+from celery.signals import setup_logging as _cel_setup_logging, worker_process_init, worker_shutdown
+
+@_cel_setup_logging.connect
+def _on_celery_setup_logging(**_kw):
+    import logging
+    from src.data_platform.log_sink import install_worker
+    install_worker(os.environ.get("QUANT_LOG_SOURCE") or "celery")
+    return logging.getLogger()   # 返回 root：celery 不再自装（hijack 防线）
+
+@worker_process_init.connect
+def _on_worker_process_init(**_kw):
+    from src.data_platform.log_sink import install_worker
+    install_worker()   # fork 后每子进程重启 flush 线程（source 取 env，systemd 单元 Environment= 各自注入）
+
+@worker_shutdown.connect
+def _on_worker_shutdown(**_kw):
+    from src.data_platform.log_sink import sink
+    if (_s := sink()) is not None:
+        _s.close()   # billiard os._exit 绕过 atexit——显式冲刷
+
 # 批 7 告警三队列（显式全名映射——生产者 send_task 按名投递，此处兜路由）：
 # alerts_* 由 quant-celery-risk@ 专属消费（-c 1，与主 worker data/analysis 长任务隔离，B2-P5）
 app.conf.task_routes = {
@@ -126,6 +148,11 @@ app.conf.update(
         },
         "notifications-cleanup": {
             "task": "src.scheduler.tasks.notifications_cleanup",
+            "schedule": 86400.0,
+            "options": {"queue": "risk"},
+        },
+        "logs-cleanup": {   # 批25：system_log>30d 清理
+            "task": "src.scheduler.tasks.cleanup_logs",
             "schedule": 86400.0,
             "options": {"queue": "risk"},
         },

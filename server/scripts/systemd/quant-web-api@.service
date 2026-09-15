@@ -8,6 +8,7 @@ Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=QUANT_LOG_SOURCE=web-api
 Environment=QT_QPA_PLATFORM=offscreen
 # DB 优化防线（2026-08-21，18 号 §1.7）：web 进程 SQL 10s 超时（同步族默认 60s）——
 # 端点不挂长查询；idle_in_tx 60s（web 快速进出，防读块悬挂）

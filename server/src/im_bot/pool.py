@@ -21,6 +21,9 @@ import sys
 import time
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [im-pool] %(levelname)s %(message)s")
+# 批25：system_log 落库（im-pool 装配；ws_client 子进程经 QUANT_LOG_SOURCE 环境继承，未注入则 pid 兜底）
+from src.data_platform.log_sink import install as _log_install
+_log_install("im-pool")
 logger = logging.getLogger("im_pool")
 
 POLL_S = 30

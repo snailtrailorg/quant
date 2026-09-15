@@ -11,6 +11,7 @@ Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=QUANT_LOG_SOURCE=hub
 Environment=QT_QPA_PLATFORM=offscreen
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.md_hub.main
 WatchdogSec=90

@@ -8,6 +8,7 @@ Type=simple
 User=quant
 WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=QUANT_LOG_SOURCE=im-bot
 Environment=QT_QPA_PLATFORM=offscreen
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.feishu_bot.ws_client %i
 Restart=on-failure

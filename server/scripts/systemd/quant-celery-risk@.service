@@ -4,6 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+Environment=QUANT_LOG_SOURCE=celery-risk
 Type=simple
 User=quant
 Group=quant

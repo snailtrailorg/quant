@@ -68,8 +68,13 @@ app.add_middleware(
 
 # --- 启动时初始化 ---
 
+# 批25：system_log 统一落库（web-api 装配——不裸抢 SIGTERM，uvicorn 优雅退出→shutdown 钩子冲刷）
+from src.data_platform.log_sink import install as _log_install, sink as _log_sink
+_log_install("web-api")
+
 @app.on_event("shutdown")
 def shutdown():
+    if (_s := _log_sink()) is not None: _s.close()   # 批25：缓冲日志冲刷（幂等，atexit 兜底）
     # 批18：先停桥再关总线（盲审A-P2-4——桥停后 bus.close 哨兵才不会被桥回填的迟到事件跟在后面）
     try:
         from src.quant_common.sse_bridge import _bridge
