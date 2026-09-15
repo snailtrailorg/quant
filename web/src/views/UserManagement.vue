@@ -43,16 +43,18 @@
             <el-table-column prop="actions" :label="t('common.action')" min-width="110" fixed="right">
               <template #default="{ row }">
                 <div style="display: inline-flex; gap: 6px">
-                  <!-- 批16 裁定#15：删除收编编辑弹窗（原行内双按钮） -->
+                  <!-- 批16 裁定#15：删除收编编辑弹窗（原行内双按钮）；批24 迭代十一（用户裁定）：删除回归行内图标钮 -->
                   <IconBtn size="small" :icon="Edit" :title="lockedReason(row) || t('common.edit')"
                            :disabled="locked(row)" @click="openEdit(row)" />
+                  <IconBtn size="small" :icon="Delete" type="danger" :title="lockedReason(row) || t('common.delete')"
+                           :disabled="locked(row)" @click="onDeleteUser(row)" />
                 </div>
               </template>
             </el-table-column>
           </TableShell>
           </el-card>
 
-          <!-- 编辑弹窗（用户组+启停+邮箱；批24 迭代八：email 可编辑+表格化对齐——label 右带冒号/控件左，与个人中心同规范） -->
+          <!-- 编辑弹窗（用户名展示+用户组+启停；批24 迭代十一：email 撤出——个人中心自助改；表格化对齐同规范） -->
           <el-dialog v-model="editDlg" :title="t('um.editUser')" width="440px">
             <div class="info-table">
               <!-- 批24 迭代十（用户裁定）：title 去用户名，内容首行展示 -->
@@ -72,13 +74,9 @@
                   <el-switch v-model="editForm.enabled" :active-text="t('common.enabled')" :inactive-text="t('common.disabled')" />
                 </span>
               </div>
-              <div class="info-row">
-                <span class="info-label">{{ t('account.email') }}</span>
-                <span class="info-value"><el-input v-model="editForm.email" style="width: 260px" placeholder="user@example.com" /></span>
-              </div>
+              <!-- 批24 迭代十一（用户裁定）：email 不在管理面编辑——用户在个人中心自助改（批20 邮件验证链） -->
             </div>
             <template #footer>
-              <el-button type="danger" @click="onDeleteUser(editForm)">{{ t('common.delete') }}</el-button>
               <el-button @click="editDlg = false">{{ t('common.cancel') }}</el-button>
               <el-button type="primary" :loading="saving" @click="onSaveEdit">{{ t('common.save') }}</el-button>
             </template>
@@ -303,16 +301,15 @@ const saving = ref(false)
 const editForm = ref({ id: 0, username: '', role: 'viewer', enabled: true })
 const editOrig = ref({ role: '', enabled: true })   // 盲审 P2-9：按实际变化给文案（角色改/启停切换）
 const openEdit = (row) => {
-  editForm.value = { id: row.id, username: row.username, role: row.role, enabled: row.enabled, email: row.email || '' }
-  editOrig.value = { role: row.role, enabled: row.enabled, email: row.email || '' }
+  editForm.value = { id: row.id, username: row.username, role: row.role, enabled: row.enabled }
+  editOrig.value = { role: row.role, enabled: row.enabled }
   editDlg.value = true
 }
 const onSaveEdit = async () => {
   saving.value = true
   try {
     const f = editForm.value
-    await api.post(`/user/${f.id}?role=${encodeURIComponent(f.role)}&enabled=${f.enabled}`
-      + (editOrig.value.email !== f.email ? `&email=${encodeURIComponent(f.email)}` : ''))
+    await api.post(`/user/${f.id}?role=${encodeURIComponent(f.role)}&enabled=${f.enabled}`)
     ElMessage.success(editOrig.value.role !== f.role ? t('account.roleChanged')
       : editOrig.value.enabled !== f.enabled ? (f.enabled ? t('common.enabled') : t('common.disabled'))
       : t('common.save') + ' ✓')
