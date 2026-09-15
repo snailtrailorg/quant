@@ -61,6 +61,21 @@ async def webhook(request: Request):
     return {"code": 0}  # 立即返回，3s 内
 
 
+def _dup_click_reply(open_id: str) -> None:
+    """同卡重复点击回执（线程内跑——send_text 的 httpx 超时会破 3s 回调窗）。
+    回执通道对齐 execute_confirmed_tool：钉平台级 bot（owner NULL，批11C A-P1-1）。"""
+    from src.data_platform.db import get_conn as _gc
+    from src.im_bot.feishu_client import get_feishu_client
+    try:
+        with _gc() as conn:
+            _pb = conn.execute("SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
+                               "AND owner_user_id IS NULL ORDER BY id DESC LIMIT 1").fetchone()
+        get_feishu_client(_pb[0] if _pb else None).send_text(
+            open_id, "这项操作刚才已经执行过了，再点也不会执行第二次——不用再点。")   # 文案师 A 候选
+    except Exception as e:
+        logger.warning("重复点击回执发送失败: %s", e)
+
+
 @router.post("/card/callback")
 async def card_callback(request: Request):
     """交互卡片回调（用户点确认/取消）。"""
@@ -132,9 +147,25 @@ async def card_callback(request: Request):
             logger.warning("卡片确认权限不足拒绝执行: user=%s tool=%s need=%s",
                            identity["username"], tool, _need)
             return {"code": 0}
+        # 卡级 exec 去重（批27-4，与 ws 面同修）：同卡 60s 窗内连点每次生成新 event_id
+        # （上方 event_id 键挡不住）→ 一张卡只执行一次；键主成分=open_message_id（每卡
+        # 唯一），缺失回退 ts:open_id——纯 {ts}:{tool} 会把"停掉 s1 和 s2"的第二张卡静默吞
+        _mid = data.get("event", {}).get("context", {}).get("open_message_id", "")
+        _exec_key = _mid or f"{action_data.get('ts')}:{open_id}"
+        try:
+            import redis as _redis
+            _r = _redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                                       decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+            if not _r.set(f"feishu:card:exec:{_exec_key}:{tool}", "1", nx=True, ex=300):
+                logger.warning("同卡重复执行拦截: tool=%s mid=%s", tool, _mid or "(回退 ts:open_id)")
+                threading.Thread(target=_dup_click_reply, args=(open_id,), daemon=True).start()   # 3s 超时窗外回文本
+                return {"code": 0}
+        except Exception as e:
+            logger.warning("卡片执行去重检查失败（放行，风险自负）: %s", e)
         threading.Thread(
             target=execute_confirmed_tool,
-            args=(open_id, tool, json.dumps(args) if isinstance(args, dict) else args),
+            args=(open_id, tool, json.dumps(args) if isinstance(args, dict) else args,
+                  identity["username"]),   # 批27-13 补：审计 actor=可读用户名（原漏传回退 feishu:open_id）
             daemon=True,
         ).start()
 

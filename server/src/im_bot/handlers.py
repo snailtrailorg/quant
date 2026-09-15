@@ -103,8 +103,8 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
             for tc in resp.tool_calls:
                 if tc["name"] in operational_names:
                     if is_group:
-                        # 兜底（perms 钳制后的幻觉残余）：群聊不发卡不执行——文案随批统一过文案师
-                        reply("群里只能查询。停止策略、熔断这类操作，请单独私聊我，或到网页端完成。")
+                        # 兜底（perms 钳制后的幻觉残余）：群聊不发卡不执行——文案师 A 候选（批27-4 落地）
+                        reply("群里只能查询，不能执行操作。需要急停、恢复交易或启停策略，请单独私聊我。")
                         return
                     if confirm_card is not None:
                         confirm_card(tc["name"], tc.get("arguments", {}))

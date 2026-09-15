@@ -101,7 +101,9 @@ class TestCardFreshness:
 
     def test_built_card_carries_ts(self):
         card = build_confirm_card("strategy_stop", {"id": "s1"})
-        btn = card["elements"][1]["actions"][0]["value"]
+        # 批27-4：CardKit 2.0——按钮直挂 body.elements，callback value 在 behaviors[0]
+        # （elements[1]=确认钮——时效闸语义锚点；[2] 是取消钮，代码盲审勘误）
+        btn = card["body"]["elements"][1]["behaviors"][0]["value"]
         assert isinstance(btn.get("ts"), (int, float))
 
 

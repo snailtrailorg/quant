@@ -135,13 +135,15 @@ class FeishuClient:
             logger.warning("飞书发送消息失败: %s", e)
             return False
 
-    def send_card(self, receive_id: str, card: dict, receive_id_type: str = "open_id"):
-        """发送交互卡片（操作确认）。"""
+    def send_card(self, receive_id: str, card: dict, receive_id_type: str = "open_id") -> bool:
+        """发送交互卡片（操作确认）。批27-4：补响应校验——2.0 卡首发被飞书拒时若零观测，
+        真机验证期既无卡也无降级文本无日志（代码盲审 B-P1）——HTTP 状态/body code 落
+        warning 并返回 False（对齐 send_text 先例）。"""
         token = self._get_token()
         if not token:
-            return
+            return False
         try:
-            httpx.post(
+            resp = httpx.post(
                 "https://open.feishu.cn/open-apis/im/v1/messages",
                 params={"receive_id_type": receive_id_type},
                 headers={"Authorization": f"Bearer {token}"},
@@ -154,6 +156,19 @@ class FeishuClient:
             )
         except httpx.HTTPError as e:
             logger.warning("飞书发送消息失败: %s", e)
+            return False
+        if resp.status_code != 200:
+            logger.warning("飞书发送卡片 HTTP %s: %s", resp.status_code, resp.text[:200])
+            return False
+        try:
+            body = resp.json()
+        except Exception:
+            logger.warning("飞书发送卡片响应非 JSON: %s", resp.text[:200])
+            return False
+        if body.get("code") != 0:
+            logger.warning("飞书发送卡片 code=%s: %s", body.get("code"), str(body.get("msg", ""))[:200])
+            return False
+        return True
 
 
 # ——— 用户鉴权 + 角色映射 ———
@@ -234,25 +249,39 @@ def verify_card_signature(header_ts: str, nonce: str, body: str, signature: str)
 
 # ——— 确认卡片 ———
 
+# 批27-4：ws 卡片回调通道就绪标志（ws_client 探针置 False——SDK 版本未验证时降级文本，
+# 防止发出用户点了没反应的卡）。仅 ws 进程内生效；webhook 入口不在此机制内（无公网入口）。
+CARD_CHANNEL_OK = True
+
+
 def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
-    """构建操作确认卡片。按钮 value 携带 ts：确认时校验 60s 时效（SD2，F-33 防重放）。"""
+    """构建操作确认卡片（批27-4 v3.1：CardKit 2.0——1.0 interactive 卡不走 card.action.trigger
+    事件，2.0 是 ws 回调链的确定触发前提）。
+
+    结构实证：openclaw sanitizeNativeFeishuCard 输出形态（生产实践）——按钮直挂
+    body.elements（顶层无 action 键）；callback 行为 behaviors[0].value 携带 {action,tool,args,ts}，
+    ts=建卡时刻秒（确认时 card_action_fresh 校验 60s 时效，SD2/F-33；同卡恒定=exec 去重键成分）。
+    inline 发送（msg_type=interactive+content=卡 JSON）复用 send_card 零改动。"""
     import time as _t
     return {
-        "config": {"wide_screen_mode": True},
+        "schema": "2.0",
+        "config": {"update_multi": True},
         "header": {
             "title": {"tag": "plain_text", "content": f"⚠️ 操作确认: {tool_name}"},
             "template": "red",
         },
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md",
-             "content": f"**操作**: {tool_name}\n**参数**: {json.dumps(args, ensure_ascii=False)}\n**原因**: {reason or 'LLM 触发'}"}},
-            {"tag": "action", "actions": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 确认执行"},
-                 "type": "primary", "value": {"action": "confirm", "tool": tool_name, "args": args, "ts": int(_t.time())}},
-                {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 取消"},
-                 "type": "danger", "value": {"action": "cancel", "tool": tool_name, "ts": int(_t.time())}},
-            ]},
-        ],
+        "body": {"elements": [
+            {"tag": "markdown", "content":
+             f"**操作**: {tool_name}\n**参数**: {json.dumps(args, ensure_ascii=False)}\n**原因**: {reason or 'LLM 触发'}"},
+            {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 确认执行"},
+             "type": "primary",
+             "behaviors": [{"type": "callback",
+                            "value": {"action": "confirm", "tool": tool_name, "args": args, "ts": int(_t.time())}}]},
+            {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 取消"},
+             "type": "danger",
+             "behaviors": [{"type": "callback",
+                            "value": {"action": "cancel", "tool": tool_name, "ts": int(_t.time())}}]},
+        ]},
     }
 
 
@@ -277,12 +306,22 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     # 批26-4：删外层 resolve_im_identity 死赋值（结果从未使用——批13 迁移残留）；
     # 身份解析单点=handle_incoming 内部（handlers.py，钉钉/企微 runner 同构）
     from src.im_bot.handlers import handle_incoming
+
+    def _confirm_card(tool: str, args: dict) -> None:
+        # 批27-4：卡片回调通道未就绪（ws 探针失败）时降级文本——发出的卡点了没反应比不发更糟
+        if not CARD_CHANNEL_OK:
+            logger.warning("确认卡片通道未就绪，操作 %s 降级文本拒答（SDK 版本未验证?）", tool)
+            client.send_text(receive_id,
+                             "确认卡片暂时发不出来，这次操作没有执行。请到网页端完成这项操作。",
+                             receive_id_type)
+            return
+        client.send_card(receive_id, build_confirm_card(tool, args), receive_id_type)
+
     handle_incoming(
         "feishu", fid, open_id, text,
         reply=lambda t: client.send_text(receive_id, t[:4000], receive_id_type),   # 截断留飞书侧（B-P2-2）
         chat_type="p2p" if chat_type == "p2p" else "group",
-        confirm_card=lambda tool, args: client.send_card(
-            receive_id, build_confirm_card(tool, args), receive_id_type),
+        confirm_card=_confirm_card,
     )
 
 
