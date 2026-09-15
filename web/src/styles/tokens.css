@@ -163,7 +163,11 @@ html.dark {
 :focus-visible { outline: 2px solid var(--brand-500); outline-offset: 1px; }
 
 /* EP 组件字号覆写(非变量区) */
-.el-card__header { font-size: var(--fs-card); }
+.el-card__header { font-size: var(--fs-card); font-weight: 600; }
+/* 批24 追加：header 600 只属于标题——表单控件归位（EP 无显式字重会继承容器） */
+.el-card__header .el-input__inner, .el-card__header .el-select__selected-item, .el-card__header .el-tag { font-weight: 400; }
+/* 批24 追加：弹窗标题对齐卡片标题（同 fs-card 档同 600 字重） */
+.el-dialog__title { font-weight: 600; }
 .el-pagination { font-size: var(--fs-label); }
 .el-pagination button, .el-pagination .el-pager li { font-size: var(--fs-label); }
 

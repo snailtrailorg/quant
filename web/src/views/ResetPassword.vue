@@ -1,7 +1,7 @@
 <template>
   <div class="auth-page">
     <el-card style="width: 400px">
-      <h2 style="text-align: center; color: var(--critical); font-size: var(--fs-page)">{{ t('reset.title') }}</h2>
+      <h2 style="text-align: center; color: var(--critical); font-size: var(--fs-page); font-weight: 700">{{ t('reset.title') }}</h2>
       <el-form @submit.prevent="onSubmit">
         <el-form-item>
           <el-input v-model="password" type="password" :placeholder="t('reset.newPwdPlaceholder')" prefix-icon="Lock" size="large" show-password />

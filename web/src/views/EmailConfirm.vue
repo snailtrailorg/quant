@@ -2,7 +2,7 @@
   <!-- 批20 20C：改邮箱确认页（免登录——邮件链接进入，token 即凭证；验证成功才改，失败库零触碰） -->
   <div class="auth-page">
     <el-card style="width: 400px">
-      <h2 style="text-align: center; font-size: var(--fs-page)">{{ t('emailConfirm.title') }}</h2>
+      <h2 style="text-align: center; font-size: var(--fs-page); font-weight: 700">{{ t('emailConfirm.title') }}</h2>
       <div v-if="state === 'verifying'" style="text-align: center; color: var(--text-secondary); padding: var(--sp-4) 0">
         {{ t('emailConfirm.verifying') }}
       </div>

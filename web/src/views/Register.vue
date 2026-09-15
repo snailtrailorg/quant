@@ -177,7 +177,7 @@ const onRegister = async () => {
 .back-login { text-align: center; margin: var(--sp-2) 0 18px; }
 .link { color: var(--brand-600); font-size: var(--fs-label); text-decoration: none; }
 .terms-scroll { max-height: 65vh; overflow-y: auto; padding: 0 8px; }
-.terms-lang { color: var(--text-primary); font-size: var(--fs-card); margin: var(--sp-4) 0 8px; }
+.terms-lang { color: var(--text-primary); font-size: var(--fs-card); font-weight: 600; margin: var(--sp-4) 0 8px; }
 .terms-body { white-space: pre-wrap; font-family: inherit; font-size: var(--fs-body); color: var(--text-secondary); line-height: 1.7; margin: 0; }
 .scroll-hint { color: var(--warn-fill); font-size: var(--fs-label); margin-right: 12px; }
 </style>

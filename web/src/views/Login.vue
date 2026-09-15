@@ -1,7 +1,7 @@
 <template>
   <div style="display: flex; justify-content: center; align-items: center; height: 100vh; background: var(--grad-auth)">
     <el-card style="width: 400px">
-      <h2 style="text-align: center; color: var(--brand-600); font-size: var(--fs-page)">{{ t('app.title') }}</h2>
+      <h2 style="text-align: center; color: var(--brand-600); font-size: var(--fs-page); font-weight: 700">{{ t('app.title') }}</h2>
       <el-form @submit.prevent="onLogin">
         <el-form-item>
           <el-input v-model="form.username" :placeholder="t('login.username')" prefix-icon="User" size="large" />

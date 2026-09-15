@@ -52,7 +52,7 @@
         <p>{{ t('task.params') }}: {{ JSON.stringify(detail.params) }}</p>
         <p v-if="detail.error_message" style="color: var(--critical)">{{ t('task.error') }}: {{ detail.error_message }}</p>
         <el-divider />
-        <h4>{{ t('task.execLogs') }}</h4>
+        <h4 style="font-size: var(--fs-card); font-weight: 600">{{ t('task.execLogs') }}</h4>
         <TableShell :data="detail.logs" max-height="300" storage-key="task-logs">
           <el-table-column prop="level" :label="t('log.level')" min-width="80" />
           <el-table-column prop="message" :label="t('log.content')" show-overflow-tooltip />
