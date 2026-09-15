@@ -53,8 +53,13 @@
           </el-card>
 
           <!-- 编辑弹窗（用户组+启停+邮箱；批24 迭代八：email 可编辑+表格化对齐——label 右带冒号/控件左，与个人中心同规范） -->
-          <el-dialog v-model="editDlg" :title="t('um.editUser', { name: editForm.username })" width="440px">
+          <el-dialog v-model="editDlg" :title="t('um.editUser')" width="440px">
             <div class="info-table">
+              <!-- 批24 迭代十（用户裁定）：title 去用户名，内容首行展示 -->
+              <div class="info-row">
+                <span class="info-label">{{ t('account.username') }}</span>
+                <span class="info-value">{{ editForm.username }}</span>
+              </div>
               <div class="info-row">
                 <span class="info-label">{{ t('user.role') }}</span>
                 <span class="info-value"><el-select v-model="editForm.role" style="width: 260px">
@@ -158,7 +163,7 @@
           </el-card>
 
           <!-- 组编辑弹窗（添加/编辑共用，~820px 容纳三维矩阵；新组先创建后配权限） -->
-          <el-dialog v-model="groupDlg" :title="groupForm.id ? t('um.editGroup', { name: groupForm.origName }) : t('um.addGroup')" width="820px" top="4vh">
+          <el-dialog v-model="groupDlg" :title="groupForm.id ? t('um.editGroup') : t('um.addGroup')" width="820px" top="4vh">
             <el-form label-width="90px" inline>
               <el-form-item :label="t('common.name')">
                 <el-input v-model="groupForm.name" :disabled="groupForm.builtin" style="width: 240px"

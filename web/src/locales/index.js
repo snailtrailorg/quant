@@ -156,8 +156,8 @@ export default {
     },
     um: {   // 批11：用户管理页（系统管理第一项）；批11B 增组管理
       tabUsers: '用户列表', tabGroups: '用户群组',
-      editUser: '编辑用户 {name}',
-      addGroup: '添加用户组', editGroup: '编辑用户组 {name}', groupNamePh: '组名（2-30 位小写字母开头）',
+      editUser: '编辑用户',
+      addGroup: '添加用户组', editGroup: '编辑用户组', groupNamePh: '组名（2-30 位小写字母开头）',
       groupType: '类型', userCount: '用户数', groupPerms: '组权限（api/nav/data 三维）',
       builtinLocked: '内置组：名称锁定不可删，可改描述与权限',
       createFirst: '先创建组，再配置权限（新组零权限起步）',
@@ -1348,8 +1348,8 @@ export default {
     },
     um: {   // batch 11: user management page; batch 11B adds group management
       tabUsers: 'Users', tabGroups: 'User Groups',
-      editUser: 'Edit User {name}',
-      addGroup: 'Add Group', editGroup: 'Edit Group {name}', groupNamePh: 'Name (2-30 chars, lowercase first)',
+      editUser: 'Edit User',
+      addGroup: 'Add Group', editGroup: 'Edit Group', groupNamePh: 'Name (2-30 chars, lowercase first)',
       groupType: 'Type', userCount: 'Users', groupPerms: 'Group Permissions (api/nav/data)',
       builtinLocked: 'Built-in group: name locked & undeletable; description and permissions editable',
       createFirst: 'Create the group first, then configure permissions (new groups start with zero)',
