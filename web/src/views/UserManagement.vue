@@ -12,7 +12,6 @@
                 <span>{{ t('account.userMgmt') }}</span>
                 <div style="display: flex; gap: 8px; align-items: center">
                   <ColumnSettings storage-key="cols.users" :columns="userColDefs" v-model:visible="userVisible" />
-                  <IconBtn :icon="Plus" :title="t('account.invite')" @click="inviteDlg = true" />
                 </div>
               </div>
             </template>
@@ -77,6 +76,10 @@
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('account.inviteLog') }}</span>
+                <!-- 批24 用户裁定：邀请开通按钮移此（发邀请=邀请记录卡的操作，语义归位） -->
+                <div style="display: flex; gap: 8px; align-items: center">
+                  <IconBtn :icon="Plus" :title="t('account.invite')" @click="inviteDlg = true" />
+                </div>
               </div>
             </template>
             <TableShell :data="invites" storage-key="invites">

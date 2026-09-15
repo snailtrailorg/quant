@@ -13,32 +13,41 @@
       <div style="font-size: var(--fs-card); font-weight: bold">{{ me.nickname || me.username }}</div>
     </div>
 
-    <!-- 资料 -->
-    <el-form label-position="top" style="max-width: 480px">
-      <el-form-item :label="t('profile.nickname')">
-        <div style="display: flex; gap: 8px; width: 100%">
-          <el-input v-model="me.nickname" maxlength="20" />
-          <el-button type="primary" @click="saveNickname" :loading="savingNick">{{ t('common.save') }}</el-button>
-        </div>
-      </el-form-item>
-      <!-- 只读字段：纯文本展示（非编辑框） -->
-      <div class="info-row"><span class="info-label">{{ t('account.username') }}</span><span>{{ me.username }}</span></div>
-      <div class="info-row"><span class="info-label">{{ t('user.role') }}</span><el-tag>{{ me.role }}</el-tag></div>
+    <!-- 批24 用户裁定：资料改表格式（label 右对齐+冒号/value 左对齐/可编辑行尾编辑钮→弹窗，不再可编辑不可编辑混排） -->
+    <div class="info-table">
+      <div class="info-row">
+        <span class="info-label">{{ t('profile.nickname') }}</span>
+        <span class="info-value">{{ me.nickname || me.username }}</span>
+        <IconBtn :icon="Edit" :title="t('common.edit')" @click="openNickDlg" />
+      </div>
+      <div class="info-row"><span class="info-label">{{ t('account.username') }}</span><span class="info-value">{{ me.username }}</span></div>
+      <div class="info-row"><span class="info-label">{{ t('user.role') }}</span><span class="info-value"><el-tag>{{ me.role }}</el-tag></span></div>
       <div class="info-row">
         <span class="info-label">{{ t('account.email') }}</span>
-        <span style="display: inline-flex; gap: 8px; align-items: center">
-          {{ me.email || '-' }}
-          <el-button size="small" text type="primary" @click="openEmailChg">{{ t('emailChg.title') }}</el-button>
-        </span>
+        <span class="info-value">{{ me.email || '-' }}</span>
+        <IconBtn :icon="Edit" :title="t('emailChg.title')" @click="openEmailChg" />
       </div>
       <!-- 批20 20A：三行展示（注册时间/最近登录+IP/账号状态） -->
-      <div class="info-row"><span class="info-label">{{ t('profile.registeredAt') }}</span><span>{{ me.created_at || '-' }}</span></div>
-      <div class="info-row"><span class="info-label">{{ t('profile.recentLogin') }}</span><span>{{ me.last_login_at ? `${me.last_login_at}${me.last_login_ip ? ' · ' + me.last_login_ip : ''}` : '-' }}</span></div>
-      <div class="info-row"><span class="info-label">{{ t('profile.accountStatus') }}</span><el-tag type="success" size="small">{{ t('status.ok') }}</el-tag></div>
-    </el-form>
+      <div class="info-row"><span class="info-label">{{ t('profile.registeredAt') }}</span><span class="info-value">{{ me.created_at || '-' }}</span></div>
+      <div class="info-row"><span class="info-label">{{ t('profile.recentLogin') }}</span><span class="info-value">{{ me.last_login_at ? `${me.last_login_at}${me.last_login_ip ? ' · ' + me.last_login_ip : ''}` : '-' }}</span></div>
+      <div class="info-row"><span class="info-label">{{ t('profile.accountStatus') }}</span><span class="info-value"><el-tag type="success" size="small">{{ t('status.ok') }}</el-tag></span></div>
+    </div>
+
+    <!-- 昵称编辑弹窗（批24：行式+弹窗模式对齐邮箱） -->
+    <el-dialog v-model="nickDlg" :title="t('profile.nickname')" width="420px" append-to-body :close-on-click-modal="false">
+      <el-form @submit.prevent>
+        <el-form-item :label="t('profile.nickname')">
+          <el-input v-model="nickDraft" maxlength="20" style="width: 260px" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="nickDlg = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="savingNick" @click="saveNickname">{{ t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 批20 20C：改邮箱弹窗（验证成功才改——确认邮件发新邮箱，点链接才生效） -->
-    <el-dialog v-model="emailChgDlg" :title="t('emailChg.title')" width="420px" :close-on-click-modal="false">
+    <el-dialog v-model="emailChgDlg" :title="t('emailChg.title')" width="420px" append-to-body :close-on-click-modal="false">
       <el-form label-width="130px" @submit.prevent>
         <el-form-item :label="t('emailChg.newEmail')">
           <el-input v-model="emailChgForm.new_email" type="email" />
@@ -62,24 +71,33 @@
         </div>
 
         <div v-else-if="sp.tab === 'pwd'">
-    <!-- 改密码（所有角色自助） -->
-    <h3 style="font-size: var(--fs-card); font-weight: 600; margin-bottom: 12px">{{ t('account.changePwd') }}</h3>
-    <el-form label-position="top" style="max-width: 400px" @submit.prevent="onChangePwd">
-      <el-form-item :label="t('account.oldPwd')">
-        <el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" />
-      </el-form-item>
-      <el-form-item :label="t('account.newPwd')">
-        <el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" />
-      </el-form-item>
-      <div class="pwd-rule">{{ t('common.passwordRule') }}</div>
-      <el-form-item :label="t('register.confirmPwd')">
-        <el-input v-model="pwd.confirm" type="password" show-password autocomplete="new-password"
-          :class="{ 'mismatch': pwd.confirm && pwd.confirm !== pwd.new_password }" />
-      </el-form-item>
-      <el-form-item>
+    <!-- 改密码（批24 用户裁定：对齐基本信息模式——行式+编辑钮→弹窗，不再直出表单） -->
+    <div class="info-table" style="max-width: 560px">
+      <div class="info-row">
+        <span class="info-label">{{ t('login.password') }}</span>
+        <span class="info-value">••••••••</span>
+        <IconBtn :icon="Edit" :title="t('account.changePwd')" @click="pwdDlg = true" />
+      </div>
+    </div>
+    <el-dialog v-model="pwdDlg" :title="t('account.changePwd')" width="420px" append-to-body :close-on-click-modal="false">
+      <el-form label-position="top" @submit.prevent="onChangePwd">
+        <el-form-item :label="t('account.oldPwd')">
+          <el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item :label="t('account.newPwd')">
+          <el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+        <div class="pwd-rule">{{ t('common.passwordRule') }}</div>
+        <el-form-item :label="t('register.confirmPwd')">
+          <el-input v-model="pwd.confirm" type="password" show-password autocomplete="new-password"
+            :class="{ 'mismatch': pwd.confirm && pwd.confirm !== pwd.new_password }" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="pwdDlg = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
-      </el-form-item>
-    </el-form>
+      </template>
+    </el-dialog>
 
         </div>
 
@@ -89,7 +107,7 @@
     <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
       <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0">{{ t('myIm.title') }}</h3>
-      <el-button type="primary" @click="openImAdd">{{ t('myIm.add') }}</el-button>
+      <IconBtn :icon="Plus" :title="t('myIm.add')" @click="openImAdd" />
     </div>
     <TableShell v-if="imBots.length" :data="imBots" size="small" storage-key="im-bots">
       <el-table-column prop="provider" :label="t('myIm.provider')" width="90" />
@@ -175,32 +193,28 @@
         </div>
 
         <div v-else>
-          <!-- 批20 20B：权限概览（market_op 五键 chips + 玻璃盒三组——数据 getMe 新鲜拉，方案 v2） -->
+          <!-- 批20 20B：权限概览；批24 用户裁定改表格化只读复选框（与组编辑弹窗 PermMatrix 同风格：无边框多列 grid） -->
           <template v-if="Object.keys(me.market_op || {}).length">
           <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('profile.marketOpTitle') }}</h3>
-          <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: var(--sp-4)">
-            <el-tag v-for="(ok, mk) in me.market_op || {}" :key="mk"
-                    :type="ok ? 'success' : 'info'" effect="plain">
-              {{ t('perm.mk_' + mk) }} · {{ ok ? t('perm.allow') : t('perm.deny') }}
-            </el-tag>
-          </div>
+          <el-checkbox-group :model-value="marketAllowedKeys" disabled class="perm-grid">
+            <el-checkbox v-for="(ok, mk) in me.market_op || {}" :key="mk" :value="mk" :class="{ 'perm-denied': !ok }">
+              {{ t('perm.mk_' + mk) }}
+            </el-checkbox>
+          </el-checkbox-group>
           </template>
           <el-divider />
           <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('layout.myPerms') }}</h3>
-          <div v-if="permBox.base.length" style="margin-bottom: 10px">
-            <div style="font-weight: 600; font-size: var(--fs-label); margin-bottom: 4px">{{ t('perm.modeRole') }}</div>
-            <el-tag v-for="p in permBox.base" :key="p" style="margin: var(--sp-1)">{{ p }}</el-tag>
+          <el-checkbox-group v-if="permAllKeys.length" :model-value="permAllowedKeys" disabled class="perm-grid">
+            <el-checkbox v-for="k in permAllKeys" :key="k" :value="k" :class="permCls(k)">
+              {{ k }}<span v-if="permBox.override.includes(k)">（{{ t('perm.modeUser') }}）</span>
+            </el-checkbox>
+          </el-checkbox-group>
+          <div v-else style="color: var(--text-secondary); font-size: var(--fs-label)">
+            {{ t('common.noData') }}
           </div>
-          <div v-if="permBox.override.length" style="margin-bottom: 10px">
-            <div style="font-weight: 600; font-size: var(--fs-label); margin-bottom: 4px">{{ t('perm.modeUser') }}</div>
-            <el-tag v-for="p in permBox.override" :key="p" type="warning" style="margin: var(--sp-1)">{{ p }}</el-tag>
-          </div>
-          <div v-if="permBox.denied.length">
-            <div style="font-weight: 600; font-size: var(--fs-label); margin-bottom: 4px">{{ t('layout.myPermsDenied') }}</div>
-            <el-tag v-for="p in permBox.denied" :key="p" type="danger" effect="plain" style="margin: var(--sp-1)">{{ p }}</el-tag>
-          </div>
-          <div v-if="!permBox.base.length && !permBox.override.length" style="color: var(--text-secondary); font-size: var(--fs-label)">
-            {{ t('um.createFirst') }}
+          <!-- 图例：勾=允许；橙字=用户覆盖；红字=已拒绝（盲审 B-P1：myPermsDenied 词条批21 已删，图例红字改用 perm.deny 既有词条） -->
+          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-3)">
+            {{ t('perm.legendAllowed') }} · <span style="color: var(--warn-fill)">{{ t('perm.modeUser') }}</span> · <span style="color: var(--critical)">{{ t('perm.deny') }}</span>
           </div>
         </div>
 
@@ -246,7 +260,7 @@ import TableShell from '../components/TableShell.vue'
 import api, { apiErr, sse, getMe } from '../api'
 import { validatePassword } from '../password'
 import IconBtn from '../components/IconBtn.vue'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Plus, Edit } from '@element-plus/icons-vue'
 
 const props = defineProps({
   initialTab: { type: String, default: 'basic' },   // 深链定位（?profile=im → 'im'）
@@ -282,6 +296,11 @@ const uploading = ref(false)
 const savingNick = ref(false)
 const pwd = ref({ old_password: '', new_password: '', confirm: '' })
 const changingPwd = ref(false)
+// 批24：行式+弹窗编辑模式（昵称草稿/两弹窗开关）
+const nickDlg = ref(false)
+const nickDraft = ref('')
+const pwdDlg = ref(false)
+const openNickDlg = () => { nickDraft.value = me.value.nickname || ''; nickDlg.value = true }
 
 const load = async () => {
   try { me.value = { ...me.value, ...(await api.get('/user/profile')) } } catch {}
@@ -306,6 +325,11 @@ const submitEmailChg = async () => {
 
 // 批20 20B：权限玻璃盒（getMe 新鲜拉——meOnce 是登录时刻快照，admin 中途调组须反映，方案 v2 盲审B-P2-5）
 const permBox = ref({ base: [], override: [], denied: [] })
+// 批24：权限表格化只读视图——全键=三组并集；勾=有效允许（base∪override）；denied 展示但不勾（红字弱化）
+const permAllKeys = computed(() => [...new Set([...permBox.value.base, ...permBox.value.override, ...permBox.value.denied])])
+const permAllowedKeys = computed(() => [...permBox.value.base, ...permBox.value.override])
+const permCls = k => permBox.value.denied.includes(k) ? 'perm-denied' : (permBox.value.override.includes(k) ? 'perm-ovr' : '')
+const marketAllowedKeys = computed(() => Object.entries(me.value.market_op || {}).filter(([, ok]) => ok).map(([mk]) => mk))
 onMounted(async () => {
   try {
     const me2 = await getMe()
@@ -586,12 +610,14 @@ const uploadAvatar = () => {
 
 // ——— 昵称 / 密码 / 注销 ———
 const saveNickname = async () => {
-  if (!me.value.nickname?.trim()) { ElMessage.warning(t('profile.nicknameRequired')); return }
+  if (!nickDraft.value.trim()) { ElMessage.warning(t('profile.nicknameRequired')); return }
   savingNick.value = true
   try {
-    await api.post('/user/profile', { nickname: me.value.nickname.trim() })
-    emit('updated', { nickname: me.value.nickname.trim(), avatar_url: me.value.avatar_url })
+    await api.post('/user/profile', { nickname: nickDraft.value.trim() })
+    me.value.nickname = nickDraft.value.trim()
+    emit('updated', { nickname: nickDraft.value.trim(), avatar_url: me.value.avatar_url })
     ElMessage.success(t('common.saveSuccess'))
+    nickDlg.value = false
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { savingNick.value = false }
 }
@@ -618,6 +644,7 @@ const onChangePwd = async () => {
     await api.post('/auth/change-password', { old_password: pwd.value.old_password, new_password: pwd.value.new_password })
     ElMessage.success(t('account.pwdChanged'))
     pwd.value = { old_password: '', new_password: '', confirm: '' }
+    pwdDlg.value = false
   } catch (e) { ElMessage.error(apiErr(e, t('account.changeFailed'))) }
   finally { changingPwd.value = false }
 }
@@ -626,8 +653,21 @@ const onChangePwd = async () => {
 <style scoped>
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
 .pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -14px 0 14px; }
-.info-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; font-size: var(--fs-body); }
-.info-label { color: var(--text-secondary); min-width: 60px; }
+/* 批24 用户裁定：资料表格式——label 右对齐带冒号、value 左对齐、行尾动作位（编辑钮） */
+.info-table { max-width: 560px; }
+.info-row { display: grid; grid-template-columns: max-content 1fr auto; align-items: center; gap: var(--sp-3); padding: var(--sp-2) 0; border-bottom: 1px dashed var(--border-weak); font-size: var(--fs-body); }
+.info-row:last-child { border-bottom: none; }
+.info-label { text-align: right; color: var(--text-secondary); font-size: var(--fs-label); white-space: nowrap; }
+/* 冒号随语言：zh 全角（对齐全站文案惯例）·en 半角——html[lang] 由 App.vue watch 同步 */
+.info-label::after { content: ':'; margin-left: 2px; }
+:root[lang='zh'] .info-label::after { content: '：'; }
+.info-value { text-align: left; min-width: 0; overflow-wrap: anywhere; }
+/* 批24：权限只读复选框 grid（与 PermMatrix 同风格） */
+.perm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); }
+.perm-grid :deep(.el-checkbox) { margin-right: 0; height: auto; }
+.perm-denied { opacity: .55; }
+.perm-denied :deep(.el-checkbox__label) { color: var(--critical); text-decoration: line-through; }
+.perm-ovr :deep(.el-checkbox__label) { color: var(--warn-fill); }
 .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-height: 360px; overflow-y: auto; padding: 4px; }
 .icon-grid img { width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer; border: 3px solid transparent; }
 .icon-grid img:hover { border-color: var(--border-weak); }

@@ -8,9 +8,9 @@
     <el-tabs v-model="tab">
       <el-tab-pane name="api">
         <template #label><b>{{ t('perm.tabApi') }}</b></template>
-        <el-checkbox-group v-model="apiSel">
-          <el-checkbox v-for="k in keys" :key="k" :value="k"
-                       :disabled="lockedKeys.includes(k)" style="margin: 6px 14px">
+        <!-- 批24 用户裁定：复选框流式堆叠改表格化多列 grid（无边框、行列对齐、统一复选框风格） -->
+        <el-checkbox-group v-model="apiSel" class="perm-grid">
+          <el-checkbox v-for="k in keys" :key="k" :value="k" :disabled="lockedKeys.includes(k)">
             {{ k }}<span v-if="lockedKeys.includes(k)"> 🔒</span>
           </el-checkbox>
         </el-checkbox-group>
@@ -38,8 +38,8 @@
       </el-tab-pane>
       <el-tab-pane name="market">
         <template #label><b>{{ t('perm.tabMarket') }}</b></template>
-        <el-checkbox-group v-model="marketSel">
-          <el-checkbox v-for="m in marketKeys" :key="m" :value="m" style="margin: 6px 14px">
+        <el-checkbox-group v-model="marketSel" class="perm-grid">
+          <el-checkbox v-for="m in marketKeys" :key="m" :value="m">
             {{ t(`perm.mk_${m}`) }}
           </el-checkbox>
         </el-checkbox-group>
@@ -109,3 +109,9 @@ const save = async () => {
   finally { saving.value = false }
 }
 </script>
+
+<style scoped>
+/* 批24 用户裁定：权限复选框表格化——无边框多列 grid，行列对齐（监控卡同款三列节奏） */
+.perm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); }
+.perm-grid :deep(.el-checkbox) { margin-right: 0; height: auto; }
+</style>
