@@ -76,7 +76,7 @@ def _register():
     def send_im(row=None, level="", category="", title="", body="", code=None, notif_id=None, dkey=None):
         _finish("im", row or {}, level, category, title, body, code, notif_id, dkey)
 
-    @app.task(name="alerts.send_email", soft_time_limit=70)   # B 评 P3：≥SMTP 60s,防 soft 超时炸在 _try_row_sync 内致 outbox 行卡死 sending（sweep 只扫 pending）
+    @app.task(name="alerts.send_email", soft_time_limit=70)   # B 评 P3：≥SMTP 60s,防 soft 超时炸在 _try_row_sync 内——批27-1 起 sweep 回收 sending 死行（claim 锚 10min），卡死不再永久
     def send_email(row=None, level="", category="", title="", body="", code=None, notif_id=None, dkey=None):
         _finish("email", row or {}, level, category, title, body, code, notif_id, dkey)
 

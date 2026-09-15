@@ -290,6 +290,10 @@ def reconcile_three_books():
                     # P1-2（web-design 05 §5.4）：结构化差异单双写（旧字符串兼容期保留，勿误修#11）。
                     # upsert 语义：open 单在位则刷新数量/时间（first_seen 保留）；豁免基准内
                     # （|diff|<=exempt_qty 且豁免期内）不再开新单。
+                    # 批27-3：逐单 commit——原实现零 commit，with 退出=还池回滚，差异单自 fd5543a 起
+                    # 永不落库（对账处置台"自动检测"恒空）。逐单而非循环外：任一 INSERT 失败事务即
+                    # aborted，循环外 commit 实为 rollback 全批丢弃（含成功的）；单条失败 rollback
+                    # 只丢自己且保住后续比对 SELECT 存活。
                     try:
                         conn.execute("""
                             INSERT INTO reconcile_issue (symbol, issue_type, detail, broker_qty, derived_qty)
@@ -307,7 +311,12 @@ def reconcile_three_books():
                                           updated_at = now()
                             """,
                             (sym, f"券商快照={sv} trade_log推导={dv}", sv, dv, sym, sv, dv))
+                        conn.commit()
                     except Exception as _e:
+                        try:
+                            conn.rollback()   # 终止 aborted 态——后续 INSERT/SELECT 存活
+                        except Exception:
+                            pass
                         logging.getLogger("scheduler").warning("reconcile_issue 双写失败（不阻断）: %s", _e)
             except Exception:
                 pass   # 表未就绪静默（与上方三表探测一致，O-S2）
@@ -569,7 +578,7 @@ def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str 
     task_id = self.request.id
     create_task(task_id, "复权因子回填", "sync", "manual", "system",
                 {"start": start_date, "end": end_date})
-    r = _redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    r = _redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2, socket_connect_timeout=2)
     key = "sync:adj-factor"
 
     def progress_cb(i: int, total: int, current: str):
@@ -762,7 +771,7 @@ def sync_all_symbols(self, sync_id: str):
     import psycopg
     from src.data_sync.engine import sync_all
 
-    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2, socket_connect_timeout=2)
     key = f"sync:progress:{sync_id}"
 
     def _mark(status: str, count: int = 0):
@@ -828,7 +837,7 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
     create_task(task_id, f"同步 {sync_id}", "sync", "manual", "system",
                 {"sync_id": sync_id, "backfill_from": backfill_from})
 
-    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2, socket_connect_timeout=2)
     key = f"sync:type:{sync_id}"
 
     def progress_cb(i: int, total: int, current: str):
@@ -930,7 +939,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
     from src.strategy_framework.strategy import StrategyConfig
     from src.strategy_framework.backtest import BacktestEngine
 
-    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"))
+    r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2, socket_connect_timeout=2)
     pub_key = f"backtest:run:{run_id}:{symbol}"
 
     with get_conn() as conn:
@@ -1398,7 +1407,7 @@ def sa4_reconciler():
     r = None
     try:
         r = _redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
         r.ping()
     except Exception as e:
         logger.warning("sa4: Valkey 不可达（退避计数不可用，按首档拉起）: %s", e)

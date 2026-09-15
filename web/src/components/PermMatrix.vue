@@ -5,6 +5,9 @@
        props.group 定位当前组；save 三连发沿旧链（POST /permissions/{group} ×3 维——非原子=存量债,
        部分失败时已保存维度不再重放,注释在案）。 -->
   <div>
+    <!-- 批27-6：未加载态遮罩——加载失败时矩阵不可当作真值编辑（空集保存=清空扩权） -->
+    <el-alert v-if="!loaded" type="warning" :closable="false" show-icon
+              :title="t('perm.notLoaded')" style="margin-bottom: var(--sp-2)" />
     <el-tabs v-model="tab">
       <el-tab-pane name="api">
         <template #label><b>{{ t('perm.tabApi') }}</b></template>
@@ -84,6 +87,7 @@ const marketKeys = ref([])          // 批15：market_op 五键（后端 _MARKET
 const apiSel = ref([])
 const navSel = reactive({})
 const marketSel = ref([])
+const loaded = ref(false)   // 批27-6：加载成功才可保存（失败态禁存防空集清空扩权）
 let _snapshot = ''   // 批24 迭代十五：加载态快照——isDirty 判没改不发请求
 const _ser = () => JSON.stringify({
   a: [...apiSel.value].sort(),
@@ -92,6 +96,7 @@ const _ser = () => JSON.stringify({
 })
 
 const load = async () => {
+  loaded.value = false   // 批27-6：切组即重置——失败态保留上一组选择域=跨组污染（保存把上一组值写进当前组）
   try {
     const r = await api.get('/permissions')
     keys.value = r.keys || []
@@ -105,11 +110,18 @@ const load = async () => {
     const m = r.market_op?.roles?.[g] || {}
     marketSel.value = marketKeys.value.filter(k => m[k] === 'allow')
     _snapshot = _ser()
+    loaded.value = true
   } catch { ElMessage.error(t('common.loadFailed')) }
 }
 watch(() => props.group, load, { immediate: true })
 
 const save = async () => {
+  // 批27-6（全局检视 B-P1-4）：未加载态禁存——加载失败时空矩阵上手动勾选再保存，
+  // nav/market_op 维会以空集发出=清空该组全部行（nav 无行=缺省 readwrite=扩权）
+  if (!loaded.value) {
+    ElMessage.warning(t('perm.notLoaded'))
+    return false
+  }
   saving.value = true
   try {
     const g = props.group
@@ -129,7 +141,7 @@ const save = async () => {
   } catch (e) { ElMessage.error(String(e?.response?.data?.detail || e)); return false }
   finally { saving.value = false }
 }
-defineExpose({ save, isDirty: () => _ser() !== _snapshot })   // 迭代十二 save 入口+迭代十五 diff 判（未改不发请求）——置于 const save 定义后（TDZ）
+defineExpose({ save, isDirty: () => loaded.value && _ser() !== _snapshot })   // 迭代十二 save 入口+迭代十五 diff 判（未改不发请求）；批27-6 未加载态恒非脏——置于 const save 定义后（TDZ）
 </script>
 
 <style scoped>

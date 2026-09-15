@@ -62,10 +62,15 @@ class _Child:
         self.fingerprint = ""
         self.next_start = 0.0     # 退避到期时刻（monotonic）
         self.backoff = _BACKOFF_BASE
+        self.spawned_at = 0.0     # 批27-5：当前进程 spawn 时刻（monotonic）——note_healthy 存活时长判据
 
     def note_healthy(self) -> None:
-        """子进程健康跑过一整个对账周期（≥POLL_S）→ 退避重置（B-P2-2：长跑后一次崩溃不该按累加倍数罚）。"""
-        if self.proc and self.proc.poll() is None:
+        """子进程健康跑过一整个对账周期（≥POLL_S）→ 退避重置（B-P2-2：长跑后一次崩溃不该按累加倍数罚）。
+
+        批27-5（全局检视 B-P1-3）：原实现只判 `poll() is None`（活着即重置）——spawn 后 30s 内
+        存活就被重置，坏 bot 恒 60s 拉起循环、指数退避从未生效（与注释自述矛盾）。现在判存活
+        时长 ≥POLL_S 才重置（兑现"跑过一整个对账周期"语义）。"""
+        if self.proc and self.proc.poll() is None and time.monotonic() - self.spawned_at >= POLL_S:
             self.backoff = _BACKOFF_BASE
 
     def ensure(self, fingerprint: str) -> None:
@@ -85,6 +90,7 @@ class _Child:
             return   # 退避窗内（坏 bot 不打 IM API——B-P0-2）
         self.fingerprint = fingerprint
         self.proc = subprocess.Popen([sys.executable, "-m", *entry, str(self.bid)])
+        self.spawned_at = time.monotonic()   # 批27-5：每次 Popen 处赋值（凭证重起的新进程秒崩不被旧时刻误判健康）
         logger.info("bot %s [%s] 子进程起 pid=%s", self.bid, self.provider, self.proc.pid)
 
     def _stop(self) -> None:

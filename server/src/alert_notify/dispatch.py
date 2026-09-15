@@ -81,7 +81,7 @@ def _get_producer():
 
 def _redis() -> redis.Redis:
     return redis.Redis.from_url(
-        os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+        os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
 
 
 # ── 回写契约（A3-F2/F3/F4/F5，B3-1/10 收口）──

@@ -23,7 +23,7 @@ from src.quant_common.crypto import encrypt
 
 logger = logging.getLogger("feishu_bot")
 VALKEY_URL = os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4")
-_redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True)
+_redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
 
 
 def _set_session(session_id: str, data: dict, expire: int = 600,

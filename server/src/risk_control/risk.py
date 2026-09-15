@@ -67,7 +67,7 @@ class RiskControl:
         self._redis = redis.Redis.from_url(
             os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
             decode_responses=True,
-        )
+            socket_timeout=2, socket_connect_timeout=2)   # 批27-2：is_halted 在下单主路径——Valkey 挂起不冻下单线程（超时异常走 check_order 既有 fail-closed 拒单）
         # SB2（F-30/F-23）：DEFAULT 兜底合并保证三个 key 永远存在（部分规则不再 KeyError 杀事件线程）；
         # _rules_loaded_at 支撑 60s 热加载（Web 改规则对长活进程生效）
         self._rules = self._merged_rules(self._load_rules_from_db())
@@ -242,12 +242,13 @@ class RiskControl:
         # 1. 熔断检查
         try:
             halted = self.is_halted()
+            _halt_reason = self.halt_reason() if halted else None   # 批27-2：并进 try——超时也有 risk_log 落迹而非裸抛
         except Exception as e:
             # Valkey 不可达：按熔断处理（SB2，更保守——fail-closed）
             logger.error("熔断状态读取失败，按熔断拒单: %s", e)
             return RiskDecision(approved=False, reason=f"熔断状态不可读（Valkey 故障），保守拒单: {e}", severity="critical", rule="HALT_UNREADABLE")
         if halted:
-            return RiskDecision(approved=False, reason=f"熔断中: {self.halt_reason()}", severity="critical", rule="HALTED")
+            return RiskDecision(approved=False, reason=f"熔断中: {_halt_reason}", severity="critical", rule="HALTED")
 
         # 2. 实盘开关（三级 AND：.env 总闸 + Web 分项 live_trading_config）
         symbol = order.get("symbol", "")

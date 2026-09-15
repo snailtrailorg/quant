@@ -1145,6 +1145,7 @@ export default {
       title: '权限管理', note: '后端强制生效 · 菜单只是显性化 · 变更全程审计。改完即时生效（60s 内或重登）。',
       modeRole: '角色基线', modeUser: '用户覆盖', pickUser: '选择用户…',
       tabApi: '功能', tabNav: '菜单/页面', tabMarket: '市场',
+      notLoaded: '权限数据未加载成功，暂不能编辑或保存——请先重试加载',
       navGroup: '分组', navState: '可见性', navHidden: '隐藏', navReadonly: '只读', navReadwrite: '读写',
       mk_astock: 'A股', mk_convertible: '可转债', mk_etf: '场内基金', mk_binance_perp: '币安永续', mk_okx_perp: 'OKX 永续',
       allow: '允许', deny: '禁止',   // 批20：个人中心权限 chips 状态（经文案师）
@@ -2321,6 +2322,7 @@ export default {
       title: 'Permissions', note: 'Backend-enforced · menus are visualization · fully audited. Effective within 60s or re-login.',
       modeRole: 'Role Baseline', modeUser: 'User Overrides', pickUser: 'Pick user…',
       tabApi: 'Features', tabNav: 'Menu/Pages', tabMarket: 'Markets',
+      notLoaded: 'Permission data failed to load — editing and saving are disabled until it loads. Please retry.',
       navGroup: 'Group', navState: 'Visibility', navHidden: 'Hidden', navReadonly: 'Read-only', navReadwrite: 'Read-write',
       mk_astock: 'A-Stock', mk_convertible: 'Convertible', mk_etf: 'Listed Funds', mk_binance_perp: 'Binance Perp', mk_okx_perp: 'OKX Perp',
       allow: 'Allowed', deny: 'Denied',

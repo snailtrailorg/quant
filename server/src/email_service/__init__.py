@@ -117,11 +117,14 @@ def queue_email(to: str, subject: str, html_body: str) -> int:
 
 
 def _try_row_sync(outbox_id: int) -> None:
-    """认领（pending→sending）并单次发送；成功标 sent，失败按指数退避排下次，超上限标 failed。"""
+    """认领（pending→sending）并单次发送；成功标 sent，失败按指数退避排下次，超上限标 failed。
+
+    批27-1：claim 段借 next_attempt_at 写认领超时锚（now()+10min）——进程死在 SMTP 60s 窗口/
+    写库前时行停在 sending，sweep 的死行回收（见 sweep）按锚过期重置，邮件不再静默永丢。"""
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         cur = conn.execute(
-            "UPDATE email_outbox SET status='sending' "
+            "UPDATE email_outbox SET status='sending', next_attempt_at=now()+interval '10 min' "
             "WHERE id=%s AND status='pending' AND next_attempt_at<=now() "
             "RETURNING id, to_email, subject, html_body, attempts", (outbox_id,))
         row = cur.fetchone()
@@ -136,19 +139,23 @@ def _try_row_sync(outbox_id: int) -> None:
     _ev = None
     with get_conn() as conn:
         if err is None:
+            # 批27-1④：回写加 AND status='sending'——与回收-重领重叠时不双写（盲审 A）
             conn.execute(
-                "UPDATE email_outbox SET status='sent', sent_at=now(), last_error=NULL WHERE id=%s", (outbox_id,))
+                "UPDATE email_outbox SET status='sent', sent_at=now(), last_error=NULL "
+                "WHERE id=%s AND status='sending'", (outbox_id,))
             _ev = ("INFO", f"已发送 → {to} ｜ {subject}")
         else:
             n = attempts + 1
             if n >= MAX_ATTEMPTS:
                 conn.execute(
-                    "UPDATE email_outbox SET status='failed', attempts=%s, last_error=%s WHERE id=%s",
+                    "UPDATE email_outbox SET status='failed', attempts=%s, last_error=%s "
+                    "WHERE id=%s AND status='sending'",
                     (n, err, outbox_id))
                 _ev = ("ERROR", f"发送失败（重试 {MAX_ATTEMPTS} 次耗尽）→ {to} ｜ {subject} ｜ {err}")
             else:
                 conn.execute(
-                    "UPDATE email_outbox SET status='pending', attempts=%s, next_attempt_at=now()+make_interval(secs=>%s), last_error=%s WHERE id=%s",
+                    "UPDATE email_outbox SET status='pending', attempts=%s, next_attempt_at=now()+make_interval(secs=>%s), last_error=%s "
+                    "WHERE id=%s AND status='sending'",
                     (n, _backoff_seconds(n), err, outbox_id))
                 _ev = ("WARN", f"待重发（第 {n} 次）→ {to} ｜ {subject} ｜ {err}")
         conn.commit()
@@ -164,9 +171,21 @@ async def try_row(outbox_id: int) -> None:
 
 
 def sweep(limit: int = 3) -> int:
-    """扫描到期待发邮件并逐封发送（Celery beat 每分钟调；limit 限制单轮防超 Celery 5min 时限）。"""
+    """扫描到期待发邮件并逐封发送（Celery beat 每分钟调；limit 限制单轮防超 Celery 5min 时限）。
+
+    批27-1②：开头先回收 sending 死行（claim 锚 10min 过期=进程死在发送窗/写库前）——
+    attempts+1 计次（防"已发成功但写库前死"→每 10 分钟无限重发真实邮件，盲审 A），
+    达上限直接标 failed 走终态可见（回收不触发 _final_failure_notify——轻量，失败事件
+    由后续真实发送路径产生）；回收与 claim 条件词互斥（sending vs pending）无竞态。"""
     from src.data_platform.db import get_conn
     with get_conn() as conn:
+        conn.execute(
+            "UPDATE email_outbox "
+            "SET status=CASE WHEN attempts+1>=%s THEN 'failed' ELSE 'pending' END, "
+            "    attempts=attempts+1, last_error=COALESCE(last_error, '发送窗中断（进程重启/回收）') "
+            "WHERE status='sending' AND next_attempt_at<=now()",
+            (MAX_ATTEMPTS,))
+        conn.commit()   # 盲审 B：with 退出=还池回滚——回收必须显式 commit
         cur = conn.execute(
             "SELECT id FROM email_outbox WHERE status='pending' AND next_attempt_at<=now() ORDER BY id LIMIT %s",
             (limit,))

@@ -76,7 +76,7 @@ async def card_callback(request: Request):
     if event_id:
         try:
             import redis as _redis
-            r = _redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True)
+            r = _redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
             if not r.set(f"feishu:card:{event_id}", "1", nx=True, ex=300):
                 logger.warning("重复卡片回调丢弃: event_id=%s", event_id)
                 return {"code": 0}

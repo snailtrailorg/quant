@@ -75,6 +75,12 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
         return
     role = identity["role"]
     perms = identity["perms"]
+    # 批27-7（用户裁定·群聊限只读）：群聊 perms 钳为 {"read"}——gateway._filter_tools 按 perms
+    # 重建工具集，LLM 根本看不到操作工具（不在 tool_calls 层反复尝试烧轮次）；操作确认仅私聊
+    # （自有 bot 进群后任何群成员 @bot ≠ owner 全权限——放大面收口，私聊面五轮裁定不变）
+    is_group = (chat_type == "group")
+    if is_group:
+        perms = {"read"}
 
     try:
         from src.llm_gateway import gateway
@@ -96,6 +102,10 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
             has_operational = False
             for tc in resp.tool_calls:
                 if tc["name"] in operational_names:
+                    if is_group:
+                        # 兜底（perms 钳制后的幻觉残余）：群聊不发卡不执行——文案随批统一过文案师
+                        reply("群里只能查询。停止策略、熔断这类操作，请单独私聊我，或到网页端完成。")
+                        return
                     if confirm_card is not None:
                         confirm_card(tc["name"], tc.get("arguments", {}))
                     has_operational = True

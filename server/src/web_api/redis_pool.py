@@ -12,13 +12,13 @@ import redis
 redis_pool = redis.ConnectionPool.from_url(
     os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
     decode_responses=True,
-)
+    socket_timeout=2, socket_connect_timeout=2)   # 批27-2：web 共享池——JWT 黑名单/进度等，Valkey 挂起不拖死请求线程
 
 # 飞书长连接专用库（db4）：ws_client 心跳/重连状态等，与业务库隔离
 feishu_redis_pool = redis.ConnectionPool.from_url(
     os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4"),
     decode_responses=True,
-)
+    socket_timeout=2, socket_connect_timeout=2)
 
 
 def redis_client() -> redis.Redis:

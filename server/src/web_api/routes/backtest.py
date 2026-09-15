@@ -17,7 +17,7 @@ logger = logging.getLogger("web_api")
 _redis_pool = redis.ConnectionPool.from_url(
     os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
     decode_responses=True,
-)
+    socket_timeout=2, socket_connect_timeout=2)   # 批27-2：SSE gen() 内同步 get——挂起时帧断而非冻事件循环
 
 router = APIRouter(tags=["backtest"])
 
