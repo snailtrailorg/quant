@@ -17,13 +17,13 @@
     <div class="info-table">
       <div class="info-row">
         <span class="info-label">{{ t('profile.nickname') }}</span>
-        <span class="info-value">{{ me.nickname || me.username }}<IconBtn :icon="Edit" :title="t('common.edit')" @click="openNickDlg" /></span>
+        <span class="info-value">{{ me.nickname || me.username }}<IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openNickDlg" /></span>
       </div>
       <div class="info-row"><span class="info-label">{{ t('account.username') }}</span><span class="info-value">{{ me.username }}</span></div>
       <div class="info-row"><span class="info-label">{{ t('user.role') }}</span><span class="info-value"><el-tag>{{ me.role }}</el-tag></span></div>
       <div class="info-row">
         <span class="info-label">{{ t('account.email') }}</span>
-        <span class="info-value">{{ me.email || '-' }}<IconBtn :icon="Edit" :title="t('emailChg.title')" @click="openEmailChg" /></span>
+        <span class="info-value">{{ me.email || '-' }}<IconBtn size="small" :icon="Edit" :title="t('emailChg.title')" @click="openEmailChg" /></span>
       </div>
       <!-- 批20 20A：三行展示（注册时间/最近登录+IP/账号状态） -->
       <div class="info-row"><span class="info-label">{{ t('profile.registeredAt') }}</span><span class="info-value">{{ me.created_at || '-' }}</span></div>
@@ -60,9 +60,9 @@
       </template>
     </el-dialog>
 
-    <!-- 注销置底于基本信息（盲审 B-P2-4①） -->
+    <!-- 注销置底于基本信息（批24 迭代六：整行居中——用户裁定） -->
     <el-divider />
-    <div style="display: flex; align-items: center; justify-content: space-between">
+    <div style="display: flex; flex-direction: column; align-items: center; gap: var(--sp-2)">
       <span style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('profile.deactivateHint') }}</span>
       <el-button type="danger" @click="onDeactivate">{{ t('profile.deactivate') }}</el-button>
     </div>
@@ -189,7 +189,35 @@
         </div>
 
         <div v-else>
-          <!-- 批20 20B：权限概览；批24 用户裁定改表格化只读复选框（与组编辑弹窗 PermMatrix 同风格：无边框多列 grid） -->
+          <!-- 批24 迭代六（用户裁定）：三分区=API 权限/菜单页面/市场操作（对齐组编辑页签序，说法统一）；
+               nav 数据 /auth/me 已带（load_nav_map）——只列被限制项，未列出=可正常使用 -->
+          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('perm.apiPermTitle') }}</h3>
+          <el-checkbox-group v-if="permAllKeys.length" :model-value="permAllowedKeys" disabled class="perm-grid">
+            <el-checkbox v-for="k in permAllKeys" :key="k" :value="k" :class="permCls(k)">
+              {{ k }}
+            </el-checkbox>
+          </el-checkbox-group>
+          <div v-else style="color: var(--text-secondary); font-size: var(--fs-label)">
+            {{ t('common.noData') }}
+          </div>
+          <!-- 图例（批24 迭代六 文案师产出）：删内联后缀，颜色+图例承载三态语义 -->
+          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-3)">
+            {{ t('perm.legendAllowed') }} · <span style="color: var(--warn-fill)">{{ t('perm.legendOrange') }}</span> · <span style="color: var(--critical)">{{ t('perm.legendRed') }}</span>
+          </div>
+          <el-divider />
+          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('layout.navLimitTitle') }}</h3>
+          <div v-if="navLimited.length" class="nav-limit-table">
+            <div v-for="[id, st] in navLimited" :key="id" class="nav-limit-row">
+              <span style="text-align: left">{{ navName(id) }}</span>
+              <el-tag :type="st === 'hidden' ? 'danger' : 'warning'" size="small" effect="plain">
+                {{ st === 'hidden' ? t('perm.navHidden') : t('perm.navReadonly') }}
+              </el-tag>
+            </div>
+          </div>
+          <div style="color: var(--text-secondary); font-size: var(--fs-foot)">
+            {{ navLimited.length ? t('layout.navLimitNote') : t('layout.navLimitEmpty') }}
+          </div>
+          <el-divider />
           <template v-if="Object.keys(me.market_op || {}).length">
           <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('profile.marketOpTitle') }}</h3>
           <el-checkbox-group :model-value="marketAllowedKeys" disabled class="perm-grid">
@@ -198,19 +226,8 @@
             </el-checkbox>
           </el-checkbox-group>
           </template>
-          <el-divider />
-          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('layout.myPerms') }}</h3>
-          <el-checkbox-group v-if="permAllKeys.length" :model-value="permAllowedKeys" disabled class="perm-grid">
-            <el-checkbox v-for="k in permAllKeys" :key="k" :value="k" :class="permCls(k)">
-              {{ k }}<span v-if="permBox.override.includes(k)">（{{ t('perm.modeUser') }}）</span>
-            </el-checkbox>
-          </el-checkbox-group>
-          <div v-else style="color: var(--text-secondary); font-size: var(--fs-label)">
-            {{ t('common.noData') }}
-          </div>
-          <!-- 图例：勾=允许；橙字=用户覆盖；红字=已拒绝（盲审 B-P1：myPermsDenied 词条批21 已删，图例红字改用 perm.deny 既有词条） -->
-          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-3)">
-            {{ t('perm.legendAllowed') }} · <span style="color: var(--warn-fill)">{{ t('perm.modeUser') }}</span> · <span style="color: var(--critical)">{{ t('perm.deny') }}</span>
+          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-4)">
+            {{ t('layout.permChangeHint') }}
           </div>
         </div>
 
@@ -281,7 +298,7 @@ const onOuterClose = (done) => {
   } else { stopPoll(); imAddDlg.value = false; done() }
 }
 const me = ref({ username: '', nickname: '', role: '', avatar_url: '', email: '',
-  created_at: null, last_login_at: null, last_login_ip: null, market_op: {} })
+  created_at: null, last_login_at: null, last_login_ip: null, market_op: {}, nav: {} })
 const chooserVisible = ref(false)
 const chooserTab = ref('icons')
 const selectedIcon = ref('')
@@ -325,6 +342,9 @@ const permAllKeys = computed(() => [...new Set([...permBox.value.base, ...permBo
 const permAllowedKeys = computed(() => [...permBox.value.base, ...permBox.value.override])
 const permCls = k => permBox.value.denied.includes(k) ? 'perm-denied' : (permBox.value.override.includes(k) ? 'perm-ovr' : '')
 const marketAllowedKeys = computed(() => Object.entries(me.value.market_op || {}).filter(([, ok]) => ok).map(([mk]) => mk))
+// 批24 迭代六：菜单权限——只列被限制项（hidden/readonly），未列出=读写缺省（/auth/me 的 nav=load_nav_map 合并结果）
+const navLimited = computed(() => Object.entries(me.value.nav || {}).filter(([, st]) => st && st !== 'readwrite'))
+const navName = id => (te('nav.' + id) ? t('nav.' + id) : id)
 onMounted(async () => {
   try {
     const me2 = await getMe()
@@ -335,6 +355,7 @@ onMounted(async () => {
       override: perms.filter(p => src[p] === 'user-override'),
       denied: me2.denied || [],
     }
+    me.value.nav = me2.nav || {}   // 批24 迭代六：菜单权限（load_nav_map 合并结果，随 getMe 新鲜拉）
   } catch {}
 })
 
@@ -655,8 +676,12 @@ const onChangePwd = async () => {
 .info-label { text-align: right; color: var(--text-secondary); font-size: var(--fs-label); white-space: nowrap; }
 /* 冒号随语言：zh 全角（对齐全站文案惯例）·en 半角——html[lang] 由 App.vue watch 同步 */
 .info-label::after { content: ':'; margin-left: 2px; }
+.info-label:empty::after { content: none; }   /* 批24 迭代六：空 label 不出孤立冒号（密码规则行） */
 :root[lang='zh'] .info-label::after { content: '：'; }
 .info-value { display: inline-flex; align-items: center; gap: 8px; text-align: left; min-width: 0; overflow-wrap: anywhere; }
+.info-row { min-height: 36px; }   /* 批24 迭代六：全行等高（编辑钮 24px 与纯文本行一致） */
+.nav-limit-table { max-width: 480px; margin-bottom: var(--sp-2); }
+.nav-limit-row { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: var(--sp-1) 0; }
 /* 批24：权限只读复选框 grid（与 PermMatrix 同风格） */
 .perm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); }
 .perm-grid :deep(.el-checkbox) { margin-right: 0; height: auto; }

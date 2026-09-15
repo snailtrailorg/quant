@@ -1150,7 +1150,7 @@ export default {
       mk_astock: 'A股', mk_convertible: '可转债', mk_etf: '场内基金', mk_binance_perp: '币安永续', mk_okx_perp: 'OKX 永续',
       allow: '允许', deny: '禁止',   // 批20：个人中心权限 chips 状态（经文案师）
       marketOpNote: '勾选=允许该组在此市场买入开仓；不勾=买入拒单。卖出平仓不受影响。',
-      legendAllowed: '勾选=允许',
+      legendAllowed: '勾选 = 允许使用', legendOrange: '橙字 = 管理员单独给你开的', legendRed: '红字删除线 = 禁止使用', apiPermTitle: 'API 权限',
       overrideNote: '用户覆盖叠加在角色基线之上：deny 优先于 allow；移除覆盖即回到角色基线。',
       addOverride: '添加覆盖', clear: '移除', dim: '维度', resource: '资源', effect: '效果',
       lockedNote: '系统策略锁键（双路径同锁，不可编辑）',
@@ -1166,7 +1166,7 @@ export default {
       toEn: '点击切换为英文', toZh: '点击切换为中文',
       toDark: '点击切换为深色', toLight: '点击切换为浅色',
       search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
-      myPerms: '我的权限',
+      myPerms: '我的权限', navLimitTitle: '受限页面', navLimitNote: '只列出受限制的页面，其余都能正常用', navLimitEmpty: '所有页面都能正常使用', permChangeHint: '需要开通或调整权限，请联系管理员',
     },
     notify: {
       empty: '暂无通知',   // ackAll 随批23 确认机制退役
@@ -2326,7 +2326,7 @@ export default {
       mk_astock: 'A-Stock', mk_convertible: 'Convertible', mk_etf: 'Listed Funds', mk_binance_perp: 'Binance Perp', mk_okx_perp: 'OKX Perp',
       allow: 'Allowed', deny: 'Denied',
       marketOpNote: 'Checked = this group may buy/open in this market; unchecked = buys are rejected. Selling to close is always allowed.',
-      legendAllowed: 'Checked = allowed',
+      legendAllowed: 'Checked = allowed', legendOrange: 'Orange = granted to you personally by an admin', legendRed: 'Red strikethrough = not allowed', apiPermTitle: 'API permissions',
       overrideNote: 'User overrides stack on the role baseline: deny beats allow; clearing returns to baseline.',
       addOverride: 'Add Override', clear: 'Remove', dim: 'Dimension', resource: 'Resource', effect: 'Effect',
       lockedNote: 'System policy locked keys (dual-path lock, not editable)',
@@ -2342,7 +2342,7 @@ export default {
       toEn: 'Switch to English', toZh: 'Switch to Chinese',
       toDark: 'Switch to dark mode', toLight: 'Switch to light mode',
      search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
-      myPerms: 'My permissions',
+      myPerms: 'My permissions', navLimitTitle: 'Restricted pages', navLimitNote: 'Only restricted pages are listed; all others work normally', navLimitEmpty: 'All pages are available as normal', permChangeHint: 'To request a change, contact your admin',
     },
     notify: {
       empty: 'No notifications',   // ackAll retired in batch 23
