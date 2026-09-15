@@ -32,7 +32,7 @@ import MailLog from './MailLog.vue'
 const tabs = [
   { key: 'logs', i18nKey: 'tabs.logs' },
   { key: 'audit', i18nKey: 'tabs.audit' },
-  { key: 'mail', i18nKey: 'tabs.mail' },
+  { key: 'mail', i18nKey: 'sysmon.tabMail' },
   { key: 'notifications', i18nKey: 'tabs.notifications' },
 ]
 const { t } = useI18n()   // 迭代十六 hotfix：header 标题词条——重写时漏解构致 observe 崩+组件树连锁全白

@@ -127,7 +127,7 @@ export default {
     tabs: {
       astock: 'A股', cb: '可转债', etf: 'ETF',
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
-      notifications: '通知消息', logs: '运行日志', audit: '审计日志', mail: '邮件日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签）
+      notifications: '通知消息', logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
       run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）
@@ -1176,7 +1176,7 @@ export default {
     },
     sysmon: {
       title: '系统监控',
-      metrics: '系统指标', services: '系统服务', connections: '实时连接', logsTitle: '系统日志',
+      metrics: '系统指标', services: '系统服务', connections: '实时连接', logsTitle: '系统日志', tabMail: '邮件日志',
       mem: '内存', disk: '磁盘', swap: '交换分区',
       critical: '严重', warning: '警告', normal: '正常',
       active: '运行中', inactive: '已停止', online: '在线', offline: '离线',
@@ -1321,7 +1321,7 @@ export default {
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
-      notifications: 'Notifications', logs: 'Run Logs', audit: 'Audit Log', mail: 'Mail Log',
+      notifications: 'Notifications', logs: 'Run Logs', audit: 'Audit Log',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
       run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alert Channels',
@@ -2355,7 +2355,7 @@ export default {
     },
     sysmon: {
       title: 'System Monitor',
-      metrics: 'Metrics', services: 'Services', connections: 'Connections', logsTitle: 'System Logs',
+      metrics: 'Metrics', services: 'Services', connections: 'Connections', logsTitle: 'System Logs', tabMail: 'Mail Log',
       mem: 'Memory', disk: 'Disk', swap: 'Swap',
       critical: 'Critical', warning: 'Warning', normal: 'Normal',
       active: 'Active', inactive: 'Inactive', online: 'Online', offline: 'Offline',
