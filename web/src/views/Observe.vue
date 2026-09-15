@@ -1,14 +1,19 @@
 <template>
-  <!-- 批22：系统监控页（原「健康与日志」改名）——三组卡片（指标/服务/连接）+ 底部[通知|日志|审计]页签 -->
+  <!-- 批22：系统监控页——三组卡片（指标/服务/连接）+ 底部四页签（迭代十六：运行日志/审计日志/邮件日志/通知消息，
+       outbox 从 Logs 拆出独立成签；卡片 header 补标题「系统日志」与上三 section 同构） -->
   <div>
     <SystemMetricsCards />
     <ServiceStatusCards style="margin-top: var(--sp-4)" />
     <ConnectionCards style="margin-top: var(--sp-4)" />
     <el-card shadow="never" style="margin-top: var(--sp-4)">
-      <TabsShell :tabs="tabs" default-tab="notifications" v-slot="slotProps">
-        <NotificationTable v-if="slotProps.tab === 'notifications'" />
-        <Logs v-else-if="slotProps.tab === 'logs'" />
-        <Audit v-else />
+      <template #header>
+        <span>{{ t('sysmon.logsTitle') }}</span>
+      </template>
+      <TabsShell :tabs="tabs" default-tab="logs" v-slot="slotProps">
+        <Logs v-if="slotProps.tab === 'logs'" />
+        <Audit v-else-if="slotProps.tab === 'audit'" />
+        <MailLog v-else-if="slotProps.tab === 'mail'" />
+        <NotificationTable v-else />
       </TabsShell>
     </el-card>
   </div>
@@ -22,9 +27,11 @@ import ConnectionCards from '../components/ConnectionCards.vue'
 import NotificationTable from '../components/NotificationTable.vue'
 import Logs from './Logs.vue'
 import Audit from './Audit.vue'
+import MailLog from './MailLog.vue'
 const tabs = [
-  { key: 'notifications', i18nKey: 'tabs.notifications' },
   { key: 'logs', i18nKey: 'tabs.logs' },
   { key: 'audit', i18nKey: 'tabs.audit' },
+  { key: 'mail', i18nKey: 'tabs.mail' },
+  { key: 'notifications', i18nKey: 'tabs.notifications' },
 ]
 </script>

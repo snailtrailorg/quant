@@ -86,6 +86,8 @@ export default {
       filter: '筛选',
       deleteSelected: '删除所选',   // 批23：三表批量删（通知/审计；confirm 数量回显）
       clearAll: '全部清除',
+      deleteAll: '删除所有',   // 批24 迭代十六（用户裁定 title 用词）
+      export: '导出',
       confirmDeleteSelected: '确认删除所选的 {n} 条记录？删除后不可恢复。',
       confirmClearAll: '确认清除全部记录（含未加载部分）？删除后不可恢复。',
       credential: '凭证',
@@ -125,7 +127,7 @@ export default {
     tabs: {
       astock: 'A股', cb: '可转债', etf: 'ETF',
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
-      notifications: '通知', logs: '日志', audit: '审计',
+      notifications: '通知消息', logs: '运行日志', audit: '审计日志', mail: '邮件日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签）
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
       run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）
@@ -821,7 +823,7 @@ export default {
       notifyHistory: '通知历史',
       notifyCategory: '类别',
     },
-    audit: { exportCsv: '导出 CSV',
+    audit: {
       title: '审计日志',
       actor: '操作人',
       phActor: '筛选操作人',
@@ -1174,7 +1176,7 @@ export default {
     },
     sysmon: {
       title: '系统监控',
-      metrics: '系统指标', services: '系统服务', connections: '实时连接',
+      metrics: '系统指标', services: '系统服务', connections: '实时连接', logsTitle: '系统日志',
       mem: '内存', disk: '磁盘', swap: '交换分区',
       critical: '严重', warning: '警告', normal: '正常',
       active: '运行中', inactive: '已停止', online: '在线', offline: '离线',
@@ -1278,6 +1280,8 @@ export default {
       filter: 'Filter',
       deleteSelected: 'Delete Selected',   // 批23：三表批量删（通知/审计）
       clearAll: 'Clear All',
+      deleteAll: 'Delete All',
+      export: 'Export',
       confirmDeleteSelected: 'Delete the {n} selected records? This cannot be undone.',
       confirmClearAll: 'Clear ALL records (including unloaded)? This cannot be undone.',
       credential: 'Credential',
@@ -1317,7 +1321,7 @@ export default {
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
-      notifications: 'Notifications', logs: 'Logs', audit: 'Audit',
+      notifications: 'Notifications', logs: 'Run Logs', audit: 'Audit Log', mail: 'Mail Log',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
       run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alert Channels',
@@ -2008,7 +2012,7 @@ export default {
       notifyHistory: 'Notification History',
       notifyCategory: 'Category',
     },
-    audit: { exportCsv: 'Export CSV',
+    audit: {
       title: 'Audit Log',
       actor: 'Actor',
       phActor: 'Filter actor',
@@ -2351,7 +2355,7 @@ export default {
     },
     sysmon: {
       title: 'System Monitor',
-      metrics: 'Metrics', services: 'Services', connections: 'Connections',
+      metrics: 'Metrics', services: 'Services', connections: 'Connections', logsTitle: 'System Logs',
       mem: 'Memory', disk: 'Disk', swap: 'Swap',
       critical: 'Critical', warning: 'Warning', normal: 'Normal',
       active: 'Active', inactive: 'Inactive', online: 'Online', offline: 'Offline',

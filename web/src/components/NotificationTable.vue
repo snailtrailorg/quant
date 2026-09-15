@@ -5,13 +5,15 @@
        加 selection 批删（row-key+reserve-selection 防 30s 轮询重赋值丢勾选）。 -->
   <div>
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: var(--sp-3)">
-      <template v-if="isAdmin">
-        <el-button size="small" type="danger" plain :disabled="!selRows.length" @click="onDeleteSelected">{{ t('common.deleteSelected') }}</el-button>
-        <el-button size="small" type="danger" plain :disabled="!notifs.length" @click="onClearAll">{{ t('common.clearAll') }}</el-button>
-      </template>
+      <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
+      <IconBtn v-if="isAdmin" size="small" :icon="Delete" type="danger" :title="t('common.deleteSelected')"
+               :disabled="!selRows.length" @click="onDeleteSelected" />
+      <IconBtn v-if="isAdmin" size="small" :icon="DeleteFilled" type="danger" :title="t('common.deleteAll')"
+               :disabled="!notifs.length" @click="onClearAll" />
+      <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExport" />
       <ColumnSettings storage-key="cols.sysmon-notify" :columns="colDefs" v-model:visible="visible" />
     </div>
-    <TableShell ref="tableRef" :data="notifs" height="500" storage-key="sysmon-notify" row-key="id" @selection-change="onSelChange">
+    <TableShell ref="tableRef" :data="filteredNotifs" height="500" storage-key="sysmon-notify" row-key="id" @selection-change="onSelChange">
       <el-table-column type="selection" width="42" reserve-selection />
       <el-table-column v-if="colOn('level')" prop="level" :label="t('log.level')" min-width="100">
         <template #default="{ row }">
@@ -39,6 +41,10 @@
 <script setup>
 import TableShell from './TableShell.vue'
 import ColumnSettings from './ColumnSettings.vue'
+import RowFilter from './RowFilter.vue'
+import IconBtn from './IconBtn.vue'
+import { exportCsv } from '../exportCsv'
+import { Delete, DeleteFilled, Download } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -46,6 +52,21 @@ import { getNotifications, deleteNotifications , apiErr } from '../api'
 
 const { t } = useI18n()
 const notifs = ref([])
+// 批24 迭代十六：分组筛选 {level:[], category:[]}（category 从数据 distinct 预取——用户裁定：非固定下拉提前备好）
+const rowFilter = ref({})
+const categoryOptions = computed(() => [...new Set(notifs.value.map(n => n.category).filter(Boolean))].sort()
+  .map(v => ({ value: v, label: v })))
+const filterGroups = computed(() => [
+  { key: 'level', label: t('log.level'), options: [...new Set(notifs.value.map(n => n.level).filter(Boolean))].sort().map(v => ({ value: v, label: v })) },
+  { key: 'category', label: t('log.notifyCategory'), options: categoryOptions.value },
+])
+const filteredNotifs = computed(() => {
+  const { level = [], category = [] } = rowFilter.value
+  return notifs.value.filter(n => (!level.length || level.includes(n.level)) && (!category.length || category.includes(n.category)))
+})
+const onExport = () => exportCsv('notifications',
+  [t('common.time'), t('log.level'), t('log.notifyCategory'), t('log.titleCol'), t('log.content')],
+  filteredNotifs.value.map(n => [n.created_at, n.level, n.category, n.title, n.body]))
 let pollTimer = null
 const isAdmin = localStorage.getItem('role') === 'admin'   // 删除端点 require_perm(user_mgmt)=admin 地板
 const tableRef = ref(null)
