@@ -18,11 +18,37 @@
       <el-table-column prop="module" :label="t('log.module')" min-width="120" />
       <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
     </TableShell>
+
+    <!-- 批24 迭代十六 hotfix3（用户裁定）：邮件发件箱并回本页签底部（曾独立成签后并回）——自带筛选+导出 -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin: var(--sp-4) 0 var(--sp-3)">
+      <span style="font-size: var(--fs-card); font-weight: 600">{{ t('log.outboxTitle') }}</span>
+      <div style="display: flex; gap: 8px; align-items: center">
+        <RowFilter v-model="mailFilter" :options="mailStatusOptions" :title="t('common.filter')" />
+        <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExportMail" />
+      </div>
+    </div>
+    <TableShell :data="filteredOutbox" max-height="420" storage-key="logs-outbox">
+      <el-table-column prop="status" :label="t('common.status')" min-width="100">
+        <template #default="{ row }">
+          <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.status === 'pending' ? `(${row.attempts})` : '' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="to" :label="t('log.outboxTo')" min-width="200" show-overflow-tooltip />
+      <el-table-column prop="subject" :label="t('log.outboxSubject')" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="sent_at" :label="t('cols.sentAt')" min-width="160">
+        <template #default="{ row }">{{ row.sent_at ? fmtTime.full(row.sent_at) : '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="next_attempt_at" :label="t('log.outboxNext')" min-width="160">
+        <template #default="{ row }">{{ row.next_attempt_at || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="last_error" :label="t('log.outboxError')" min-width="160" show-overflow-tooltip />
+    </TableShell>
   </div>
 </template>
 
 <script setup>
 import TableShell from '../components/TableShell.vue'
+import StatusTag from '../components/StatusTag.vue'
 import RowFilter from '../components/RowFilter.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { fmtTime } from '../utils/fmtTime'
@@ -30,7 +56,7 @@ import { exportCsv } from '../exportCsv'
 import { Download } from '@element-plus/icons-vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getLogs } from '../api'
+import { getLogs, getEmailOutbox } from '../api'
 const { t } = useI18n()
 
 const logs = ref([])
@@ -50,5 +76,18 @@ const filteredLogs = computed(() => {
 const onExport = () => exportCsv('run_logs',
   [t('common.time'), t('log.level'), t('log.module'), t('log.content')],
   filteredLogs.value.map(l => [fmtTime.full(l.ts), l.level, l.module, l.msg]))
-onMounted(async () => { try { logs.value = (await getLogs()).logs || [] } catch {} })
+// 邮件发件箱（hotfix3 并回）：状态 distinct 预取 + 独立筛选导出
+const outbox = ref([])
+const mailFilter = ref([])
+const mailStatusOptions = computed(() => [...new Set(outbox.value.map(o => o.status).filter(Boolean))].sort()
+  .map(v => ({ value: v, label: v })))
+const filteredOutbox = computed(() => mailFilter.value.length
+  ? outbox.value.filter(o => mailFilter.value.includes(o.status)) : outbox.value)
+const onExportMail = () => exportCsv('mail_outbox',
+  [t('common.status'), t('log.outboxTo'), t('log.outboxSubject'), t('cols.sentAt'), t('log.outboxNext'), t('log.outboxError')],
+  filteredOutbox.value.map(o => [o.status + (o.status === 'pending' ? `(${o.attempts})` : ''), o.to, o.subject, o.sent_at || '-', o.next_attempt_at || '-', o.last_error || '']))
+onMounted(() => {
+  [async () => { try { logs.value = (await getLogs()).logs || [] } catch {} },
+   async () => { try { outbox.value = (await getEmailOutbox()).items || [] } catch {} }].forEach(fn => fn())   // 批9 双源独立容错
+})
 </script>

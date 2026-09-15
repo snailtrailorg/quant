@@ -5,12 +5,13 @@
     <!-- 批24 迭代十六：el-card 退役（Observe 页签卡内防卡中卡）；筛选文字框→RowFilter 分组（用户+动作，均数据 distinct 预取——
          用户裁定：用户相关等非固定下拉提前备好）；删除钮图标化（Delete/DeleteFilled） -->
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: var(--sp-3)">
+      <!-- 批24 迭代十六 hotfix3（用户裁定）：动作序=筛选→导出→删除所选→删除所有（功能在前/破坏性靠后） -->
       <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
+      <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExportCsv" />
       <IconBtn v-if="isAdmin" size="small" :icon="Delete" type="danger" :title="t('common.deleteSelected')"
                :disabled="!selRows.length" @click="onDeleteSelected" />
       <IconBtn v-if="isAdmin" size="small" :icon="DeleteFilled" type="danger" :title="t('common.deleteAll')"
                :disabled="!logs.length" @click="onClearAll" />
-      <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExportCsv" />
     </div>
     <TableShell ref="tableRef" :data="filteredLogs" storage-key="audit" row-key="id" @selection-change="onSelChange">
       <el-table-column type="selection" width="42" reserve-selection />

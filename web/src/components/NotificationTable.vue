@@ -5,12 +5,13 @@
        加 selection 批删（row-key+reserve-selection 防 30s 轮询重赋值丢勾选）。 -->
   <div>
     <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: var(--sp-3)">
+      <!-- 批24 迭代十六 hotfix3（用户裁定）：动作序=筛选→导出→删除所选→删除所有→列设置（功能在前/破坏性靠后/视图收尾） -->
       <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
+      <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExport" />
       <IconBtn v-if="isAdmin" size="small" :icon="Delete" type="danger" :title="t('common.deleteSelected')"
                :disabled="!selRows.length" @click="onDeleteSelected" />
       <IconBtn v-if="isAdmin" size="small" :icon="DeleteFilled" type="danger" :title="t('common.deleteAll')"
                :disabled="!notifs.length" @click="onClearAll" />
-      <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExport" />
       <ColumnSettings storage-key="cols.sysmon-notify" :columns="colDefs" v-model:visible="visible" />
     </div>
     <TableShell ref="tableRef" :data="filteredNotifs" height="500" storage-key="sysmon-notify" row-key="id" @selection-change="onSelChange">
