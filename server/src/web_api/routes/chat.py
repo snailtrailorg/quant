@@ -105,7 +105,7 @@ async def ws_chat(ws: WebSocket, token: str = Query(None)):
     except Exception:
         await ws.close(code=4001, reason="token 无效")
         return
-    role = payload.get("role", "viewer")
+    role = payload.get("db_role") or payload.get("role", "viewer")   # 批27-11：对齐 POST 面批11B（降级/改组即时生效）
     from src.llm_gateway import gateway
     try:
         while True:

@@ -273,7 +273,8 @@ const onSaveGroupInfo = async () => {
   try {
     if (!f.id) {
       const r = await api.post('/user-groups', { name: f.name, description: f.description })
-      f.id = r.id; f.origName = f.name; savedName.value = f.name
+      f.id = r.id; f.origName = f.name; f.origDesc = f.description   // 批27-20：origDesc 同步——消除后续 onSaveAll infoDirty 恒真的冗余重发
+      savedName.value = f.name
       ElMessage.success(t('common.createSuccess'))
     } else {
       await api.post(`/user-groups/${f.id}`, { name: f.name, description: f.description })

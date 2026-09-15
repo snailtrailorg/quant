@@ -280,8 +280,14 @@ const onScheduleChange = async (row) => {
   }
 }
 const onToggle = async (row) => {
-  await api.post(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled })
-  ElMessage.success(`${row.name} ${row.enabled ? t('common.enabled') : t('common.disabled')}`)
+  // 批27-17：失败回滚开关态——UI 与 DB 不脱节（开关先翻转 optimistic）
+  try {
+    await api.post(`/sync/config/${row.id}`, { schedule: row.schedule, enabled: row.enabled })
+    ElMessage.success(`${row.name} ${row.enabled ? t('common.enabled') : t('common.disabled')}`)
+  } catch (e) {
+    row.enabled = !row.enabled
+    ElMessage.error(apiErr(e, t('common.failed')))
+  }
 }
 
 // 异步同步完成提示（适配轮询 progress 结果，用 failed_dates_count）
@@ -386,7 +392,8 @@ const openCron = (row) => {
 }
 const saveCron = async () => {
   try {
-    await api.post(`/sync/config/${cronForm.value.id}`, { schedule: cronForm.value.schedule, enabled: true, trade_day_filter: cronForm.value.trade_day_filter })
+    // 批27-16：透传原 enabled——编辑停用行的 cron 不再被强制启用
+    await api.post(`/sync/config/${cronForm.value.id}`, { schedule: cronForm.value.schedule, enabled: cronForm.value.enabled, trade_day_filter: cronForm.value.trade_day_filter })
     cronDialog.value = false; ElMessage.success(t('common.success')); load()
   } catch { ElMessage.error(t('common.failed')) }
 }

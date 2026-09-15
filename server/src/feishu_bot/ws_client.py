@@ -38,7 +38,6 @@ def load_feishu_credentials(fid=None) -> tuple[str, str]:
 
 def on_message(data) -> None:
     """处理收到的消息事件 -> process_message_async（复用 bot.py）。"""
-    print(f"=== on_message TRIGGERED: {data}", flush=True)
     logger.info(f"on_message triggered: {data}")
     try:
         event = data.event
@@ -56,9 +55,8 @@ def on_message(data) -> None:
         threading.Thread(target=process_message_async, daemon=True,
                          args=(open_id, text, receive_id_type, receive_id, _FID, chat_type)).start()
     except Exception as e:
-        print(f"=== on_message ERROR: {e}", flush=True)
-        import traceback; traceback.print_exc()
-        logger.error(f"处理飞书消息失败: {e}")
+        import traceback
+        logger.error(f"处理飞书消息失败: {e}\n{traceback.format_exc()}")   # 批27-8：print/traceback.print_exc→logger（子进程 stdout 不可观测）
 
 
 def main() -> None:

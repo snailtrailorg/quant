@@ -83,7 +83,7 @@ def login(req: LoginReq, request: Request):
                          (client_ip, user["id"]))
             conn.commit()
     except Exception as e:
-        print(f"[login] last_login update failed (ignored): {e}", flush=True)
+        logger.warning("login last_login 更新失败（不阻断登录）: %s", e)   # 批27-8：print→logger（可观测）
     audit_log(user["username"], "login", detail=client_ip)
     return {"token": token, "role": user["role"], "username": user["username"]}
 
@@ -447,7 +447,7 @@ def email_change_confirm_api(req: EmailConfirmReq):
                 conn.rollback()   # 并发双 confirm：后到者见 used=true——幂等拒
                 raise ApiError(400, "TOKEN_INVALID_OR_EXPIRED", "链接已使用")
             conn.commit()
-        audit_log(row[0], "email_change", "email_change", f"{(old[0] if old else '') or '-'}->{new_email}")
+        audit_log(row[0], "email_change", row[0], f"{(old[0] if old else '') or '-'}->{new_email}")   # 批27-14：target=用户名（原与 action 重复，按 target 聚合检索错位）
         return {"status": "changed", "email": new_email}
     except ApiError:
         raise

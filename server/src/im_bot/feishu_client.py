@@ -293,7 +293,8 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
 
     webhook(ws_client/router) 双路径签名零改动。"""
     if receive_id is None: receive_id = open_id
-    print(f"=== process_message_async: fid={fid} open_id={open_id} receive_id={receive_id} type={receive_id_type}", flush=True)
+    logger.info("process_message_async: fid=%s open_id=%s receive_id=%s type=%s",
+                fid, open_id, receive_id, receive_id_type)   # 批27-8：print→logger（调试遗留 === 格式清）
     client = get_feishu_client(fid)   # 批 2:per-bot 单例(修多 bot 回复走错凭证隐患)
     # 批26-4：删外层 resolve_im_identity 死赋值（结果从未使用——批13 迁移残留）；
     # 身份解析单点=handle_incoming 内部（handlers.py，钉钉/企微 runner 同构）
@@ -307,13 +308,15 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     )
 
 
-def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
+def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: str | None = None):
     """用户点击确认后执行操作类工具（P3-11 含 60s 超时检查）。
 
     P0-2 顺带修（审计 B5）：args 原样拼 systemd 单元名永远畸形——json 解析取 id。
-    """
+    批27-13：username=身份解析结果（router 卡片闸已解析）——审计 actor 与 halt reason
+    记可读用户名而非 open_id（盲审 B）；None 兜底回退 feishu:{open_id}。"""
     import time
     import json as _json
+    _actor = username or f"feishu:{open_id}"
     try:  # args 可能是 {"id": N} 的 JSON 串或纯 id
         _a = _json.loads(args) if isinstance(args, str) and args.strip().startswith("{") else args
         _sid = _a.get("id", _a) if isinstance(_a, dict) else _a
@@ -330,7 +333,7 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
         # 实际执行工具（emergency_halt / strategy_stop 等）
         if tool_name == "emergency_halt":
             from src.risk_control import RiskControl
-            RiskControl.get().emergency_halt(f"飞书:{open_id}")
+            RiskControl.get().emergency_halt(f"飞书:{_actor}")
             client.send_text(open_id, "✅ 已执行熔断")
         elif tool_name == "risk_resume":
             from src.risk_control import RiskControl
@@ -354,6 +357,6 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str):
             client.send_text(open_id, f"⚠️ 未知操作: {tool_name}")
         # 审计
         from src.data_platform.audit import audit_log
-        audit_log(f"feishu:{open_id}", tool_name, detail=json.dumps(args))
+        audit_log(_actor, tool_name, detail=json.dumps(args))   # 批27-13：可读 actor
     except Exception as e:
         client.send_text(open_id, f"❌ 执行失败: {e}")

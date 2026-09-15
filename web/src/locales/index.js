@@ -173,11 +173,10 @@ export default {
       tradingDesk: '交易台', liveTasks: '实盘任务',
       gResearch: '策略研究', gLive: '实盘交易', gRisk: '风险控制', gOps: '系统管理',
       dashboard: '总览',
-      settings: '系统设置',
       strategy: '策略管理',
       backtest: '回测中心',
       factors: '因子库',
-      screener: '选股器', settings: '设置',
+      screener: '选股器', settings: '设置',   // 批27-15：唯一保留（原 :176 重复二定已删——vue-i18n 后键胜）
       risk: '风控总览',
       reconcile: '三账对账',
       riskRules: '风控规则',
@@ -415,7 +414,7 @@ export default {
       sampleThreshold: '证据不足：区间 {d} 天 / 成交 {s} 笔，未达 90 天 / 10 笔最低证据门槛——跑长区间或多标的后再标记',
       feePanel: '费用与摩擦：佣金可配（默认万5）+ 印花税（卖出 0.05%）+ 过户费（0.001%）+ 滑点可配 + 涨跌停一字板不可成交约束',
       retCol: '收益', ddCol: '回撤', reason: '失败原因',
-      commission: '佣金率', r1m: '近1月', r3m: '近3月', r6m: '近6月', r1y: '近1年',
+      r1m: '近1月', r3m: '近3月', r6m: '近6月', r1y: '近1年',   // 批27-15：commission 重复键已删（保 :480 '佣金'——运行时本就后者胜）
       title: '回测中心',
       run: '运行',
       summary: '汇总',
@@ -1365,7 +1364,6 @@ export default {
       tradingDesk: 'Trading Desk', liveTasks: 'Live Tasks',
       gResearch: 'Research', gLive: 'Live Trading', gRisk: 'Risk Control', gOps: 'System',
       dashboard: 'Dashboard',
-      settings: 'Settings',
       strategy: 'Strategies',
       backtest: 'Backtest',
       factors: 'Factors',
@@ -1616,7 +1614,7 @@ export default {
       sampleThreshold: 'Insufficient evidence: {d} days / {s} trades, below the 90-day / 10-trade minimum evidence bar',
       feePanel: 'Fees & friction: configurable commission (default 0.05%) + stamp tax (sell 0.05%) + transfer fee (0.001%) + slippage + limit-lock no-fill constraint',
       retCol: 'Return', ddCol: 'Drawdown', reason: 'Failure',
-      commission: 'Commission', r1m: '1M', r3m: '3M', r6m: '6M', r1y: '1Y',
+      r1m: '1M', r3m: '3M', r6m: '6M', r1y: '1Y',   // 批27-15：commission 重复键已删（保后——运行时本就后者胜）
       title: 'Backtest',
       run: 'Run',
       summary: 'Summary',

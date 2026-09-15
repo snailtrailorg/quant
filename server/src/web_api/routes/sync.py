@@ -194,7 +194,8 @@ def trigger_progress_api(sid: str, task_id: str | None = None,
 def list_symbols_api(sid: str, q: str = "", page: int = 1, size: int = 9999,
                      payload: dict = Depends(require_perm("read"))):
     from src.data_sync.engine import list_symbols
-    return list_symbols(sid, q=q, page=page, size=size)
+    # 批27-10：page/size 下限钳制——负值致负 OFFSET 直接 PG 500
+    return list_symbols(sid, q=q, page=max(1, page), size=max(1, min(size, 9999)))
 
 
 @router.post("/api/sync/symbol/{sid}/{ts_code}")
@@ -333,6 +334,7 @@ def data_source_usage_api(payload: dict = Depends(require_perm("read"))):
                 GROUP BY day, provider ORDER BY day, provider
             """)
             trend = [{"day": r[0], "provider": r[1], "calls": r[2]} for r in cur.fetchall()]
-        except Exception:
+        except Exception as e:
+            logger.warning("数据源用量趋势查询失败（显示零用量）: %s", e)   # 批27-21：不再静默——排障可辨"查询失败"与"真零用量"
             return {"today": [], "trend": []}
     return {"today": today, "trend": trend}

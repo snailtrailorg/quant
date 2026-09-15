@@ -338,7 +338,7 @@ def get_backtest_api(run_id: int,
     for k in ("total_return_pct", "win_rate", "max_drawdown_pct", "sharpe_ratio", "total_trades",
               "volatility", "sortino_ratio", "alpha", "beta", "information_ratio",
               "benchmark_return", "benchmark_volatility"):
-        vals = [float((json.loads(_s[2]) or {}).get(k) or 0) for _s in _mk if _s[2]]
+        vals = [float((_safe_json(_s[2], {})).get(k) or 0) for _s in _mk if _s[2]]   # 批27-9：_safe_json 防残行炸详情页
         _agg[k] = round(sum(vals) / len(vals), 3) if vals else None
     _run_task = r[9]   # H11：runs 级 task_id
     # wd-20 §1.2 验证门派生字段（单点）：params 区间优先，回落 created_at→finished_at
@@ -350,15 +350,15 @@ def get_backtest_api(run_id: int,
         except Exception:
             return None
 
-    _p = json.loads(r[3]) or {}
+    _p = _safe_json(r[3], {})   # 批27-9
     _s0, _e0 = _d(_p.get("start")), _d(_p.get("end"))
     if _s0 and _e0:
         span_days = (_e0 - _s0).days + 1
     else:
         # 盲审B-P3：回退改 done 符号 result.start/end_date 聚合（引擎每符号都写）——
         # 度量回测窗口而非执行时长（分钟级 run 用 created→finished 会恒 1 天被 90 门误拦）
-        _ss = [_d((json.loads(_x[2]) or {}).get("start_date")) for _x in syms if _x[1] == "done" and _x[2]]
-        _ee = [_d((json.loads(_x[2]) or {}).get("end_date")) for _x in syms if _x[1] == "done" and _x[2]]
+        _ss = [_d((_safe_json(_x[2], {})).get("start_date")) for _x in syms if _x[1] == "done" and _x[2]]   # 批27-9
+        _ee = [_d((_safe_json(_x[2], {})).get("end_date")) for _x in syms if _x[1] == "done" and _x[2]]
         _ss = [x for x in _ss if x]; _ee = [x for x in _ee if x]
         if _ss and _ee:
             span_days = (max(_ee) - min(_ss)).days + 1
@@ -377,10 +377,10 @@ def get_backtest_api(run_id: int,
             "span_days": span_days,
             "annualized_return": _annualized,
             "symbols": [{"symbol": _s[0], "status": _s[1],
-                         "result": json.loads(_s[2]) if _s[2] else {}} for _s in syms],
-            "symbols_list": json.loads(r[2]),
-            "params": json.loads(r[3]), "mode": r[4], "status": r[5],
-            "summary": json.loads(r[6]) if r[6] else {},
+                         "result": _safe_json(_s[2], {}) if _s[2] else {}} for _s in syms],   # 批27-9
+            "symbols_list": _safe_json(r[2], []),
+            "params": _safe_json(r[3], {}), "mode": r[4], "status": r[5],
+            "summary": _safe_json(r[6], {}) if r[6] else {},
             "task_id": _run_task,
             "total_return_pct": _agg.get("total_return_pct"),
             "win_rate": _agg.get("win_rate"),
@@ -394,7 +394,7 @@ def get_backtest_api(run_id: int,
             "benchmark_return": _agg.get("benchmark_return"),
             "benchmark_volatility": _agg.get("benchmark_volatility"),
             "total_trades": _agg.get("total_trades"),
-            "symbols_detail": [{"symbol": _s[0], "status": _s[1], "result": json.loads(_s[2]) if _s[2] else {}}
+            "symbols_detail": [{"symbol": _s[0], "status": _s[1], "result": _safe_json(_s[2], {}) if _s[2] else {}}
                               for _s in syms]}
 
 

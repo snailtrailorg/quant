@@ -441,7 +441,7 @@ def notifications_api(status: str = "active", limit: int = 50,
     params = [cats]
     if status != "all":
         params.append(status)
-    params.append(min(limit, 200))
+    params.append(max(1, min(limit, 200)))   # 批27-10：下限 1——负/零 limit 致 PG LIMIT 负=无上限
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT id, level, category, title, body, source_ref, status, created_at, acked_at, code, dispatch "

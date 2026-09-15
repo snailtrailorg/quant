@@ -110,13 +110,13 @@ def startup():
     except Exception as e:
         logger.warning("startup: schema 校验异常（不阻断）: %s", e)
     if ensure_default_admin():
-        print("✓ 创建默认 admin（admin/admin123，请改密码）")
+        logger.info("已创建默认 admin（admin/admin123，请改密码）")   # 批27-8：print→logger
     # 加载自定义因子（因子平台化）
     try:
         from src.strategy_framework.factor import load_factors_from_db
         loaded = load_factors_from_db()
         if loaded:
-            print(f"✓ 加载自定义因子: {', '.join(loaded)}")
+            logger.info("加载自定义因子: %s", ", ".join(loaded))   # 批27-8：print→logger（log_sink 恒可观测）
     except Exception as e:
         logger.warning("startup: 加载自定义因子失败（表可能未创建）: %s", e)
 

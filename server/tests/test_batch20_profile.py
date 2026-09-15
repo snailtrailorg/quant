@@ -176,8 +176,8 @@ class TestEmailChangeConfirm:
         assert r.status_code == 200 and r.json()["email"] == "new@x.com"
         conn.commit.assert_called_once()
         al.assert_called_once()
-        assert al.call_args[0][0] == "u1" and al.call_args[0][2] == "email_change" \
-               and "old@x.com->new@x.com" in al.call_args[0][3]   # 盲审B-P3-6：变更入 detail 位
+        assert al.call_args[0][0] == "u1" and al.call_args[0][1] == "email_change" and al.call_args[0][2] == "u1" \
+               and "old@x.com->new@x.com" in al.call_args[0][3]   # 批27-14：target=用户名（原与 action 重复）
 
     def test_token_without_user_id_rejected(self, client):
         """invite 场景 token 无 user_id——防串用（盲审A-P3）。"""

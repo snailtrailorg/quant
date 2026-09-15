@@ -33,7 +33,8 @@ import { exportCsv } from '../exportCsv'
 import { Download } from '@element-plus/icons-vue'
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getLogs } from '../api'
+import { ElMessage } from 'element-plus'
+import { getLogs, apiErr } from '../api'
 const { t } = useI18n()
 
 const logs = ref([])
@@ -56,6 +57,10 @@ const onExport = () => exportCsv('run_logs',
 const noPerm = ref(false)
 onMounted(async () => {
   try { logs.value = (await getLogs()).logs || [] }
-  catch (e) { noPerm.value = e?.response?.status === 403 }   // 批25：运行日志=管理员面（权限收紧）——403 显式提示非静默空表
+  // 批25：运行日志=管理员面——403 显式提示非静默空表；批27-19：其余错误（500/网络）也不再静默
+  catch (e) {
+    if (e?.response?.status === 403) noPerm.value = true
+    else ElMessage.error(apiErr(e, t('common.loadFailed')))
+  }
 })
 </script>

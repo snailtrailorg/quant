@@ -44,7 +44,7 @@ def risk_log_api(action: str = "", limit: int = 200,
             sql += "WHERE action=%s "
             args.append(action)
         sql += "ORDER BY id DESC LIMIT %s"
-        args.append(min(int(limit), 1000))
+        args.append(max(1, min(int(limit), 1000)))   # 批27-10：下限 1——负 limit 致 PG 500
         cur = conn.execute(sql, args)
         rows = cur.fetchall()
     return {"items": [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "action": r[2],
@@ -133,7 +133,10 @@ def reconcile_manual_order(body: dict, payload: dict = Depends(require_perm("use
     """场外单登记（红队#4：底仓/手动单回流对账豁免基准，仅 admin）。"""
     from datetime import date
     sym = str(body.get("symbol", "")).strip()
-    qty = float(body.get("volume", 0) or 0)
+    try:
+        qty = float(body.get("volume", 0) or 0)   # 批27-10：非数字串原直接 ValueError 500
+    except (TypeError, ValueError):
+        raise ApiError(400, "BAD_PARAM", "volume 必须是数字")
     if not sym or not qty:
         raise ApiError(400, "BAD_MANUAL_ORDER", "symbol 与 volume 必填")
     note = body.get("note", "场外单登记")

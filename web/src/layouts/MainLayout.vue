@@ -166,7 +166,19 @@ const loadPerms = async () => {
     navMap.value = me.nav || {}
   } catch {}
 }
-const navReadonly = computed(() => navMap.value[route.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'] === 'readonly')
+// 批27-18（全局检视 B-P2 面修）：路由首段 ≠ NAV_ITEMS 键的子页全部补映射——原只按首段直查，
+// data-manage/:syncId（SymbolManage）等子页 readonly 守卫失效（首段 'data-manage' 查 navMap 恒 undefined）
+const ROUTE_TO_NAV = {
+  'data-manage': 'dataops', 'data-sources': 'dataops',
+  'ascreen': 'screener', 'cbscreen': 'screener', 'etfscreen': 'screener',
+  'stock': 'analysis',
+  'logs': 'observe', 'audit': 'observe', 'monitoring': 'observe', 'data-integrity': 'observe',
+  'permissions': 'users',
+}
+const navReadonly = computed(() => {
+  const seg = route.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'
+  return navMap.value[ROUTE_TO_NAV[seg] || seg] === 'readonly'
+})
 provide('navReadonly', navReadonly)
 
 getMe().then(me => { username.value = me.username; role.value = me.role; nickname.value = me.nickname || ''; avatarUrl.value = me.avatar_url || '' }).catch(e => { console.error(e); username.value = ''; role.value = '' })

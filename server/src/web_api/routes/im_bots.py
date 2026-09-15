@@ -168,7 +168,10 @@ def my_im_onboarding_status(ticket: str, payload: dict = Depends(require_authent
     data = r.get(key)
     if not data:
         return {"status": "expired"}   # 批12A（A-P2-6）：key 不存在=过期/TTL 尽——pending 混同过期收口
-    d = json.loads(data)
+    try:
+        d = json.loads(data)
+    except Exception:
+        return {"status": "expired"}   # 批27-12：坏值按过期收口（fail-open，对齐 :103-110 onboarding 入口先例）
     if d.get("owner_user_id") is not None and d.get("owner_user_id") != int(payload["sub"]):
         raise ApiError(404, "NOT_FOUND", "会话不存在")
     ttl = r.ttl(key)   # 七轮：剩余秒数真值——前端倒计时校准（原恢复路径硬编码 10 分钟与 SDK expire_in≈1h 打架）
