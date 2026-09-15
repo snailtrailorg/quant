@@ -2,8 +2,11 @@
   <!-- 批22：系统指标卡片组（内存/磁盘/swap）——每卡=状态徽标+当前值+sparkline+阈值线；
        30s 轮询（对齐旧 Health.vue 自动刷新——盲审 B-P1-2）；
        数据拉不到（无权限/空表）整组占位，不渲染假 0.0% 正常态（盲审 B-P2-2） -->
-  <div>
-    <h4 class="group-title">{{ t('sysmon.metrics') }}</h4>
+  <!-- 批24 结构统一：组标题从卡外裸 h4 归位 el-card header（用户管理式——批23 表头规则同构） -->
+  <el-card>
+    <template #header>
+      <div style="display:flex;justify-content:space-between;align-items:center"><span>{{ t('sysmon.metrics') }}</span></div>
+    </template>
     <div v-if="!hasData" class="empty-group">{{ t('sysmon.noData') }}</div>
     <div v-else class="card-grid">
       <el-card v-for="c in cards" :key="c.kind" shadow="never" class="metric-card">
@@ -19,7 +22,7 @@
         <div v-else class="empty-spark">{{ t('sysmon.noData') }}</div>
       </el-card>
     </div>
-  </div>
+  </el-card>
 </template>
 
 <script setup>
@@ -117,7 +120,6 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.group-title { font-size: var(--fs-card); font-weight: 600; margin: 0 0 var(--sp-3); }
 .empty-group { color: var(--text-secondary); font-size: var(--fs-label); padding: var(--sp-6) 0; text-align: center; }
 .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 每行 3 卡随容器宽等分伸缩（用户裁定） */
 .metric-card { border: 1px solid var(--border-weak); }

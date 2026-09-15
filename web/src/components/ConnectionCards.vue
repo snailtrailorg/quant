@@ -1,7 +1,10 @@
 <template>
   <!-- 批22：实时连接状态卡片组（hub + 每实盘任务一卡） -->
-  <div>
-    <h4 class="group-title">{{ t('sysmon.connections') }}</h4>
+  <!-- 批24 结构统一：组标题从卡外裸 h4 归位 el-card header（用户管理式——批23 表头规则同构） -->
+  <el-card>
+    <template #header>
+      <div style="display:flex;justify-content:space-between;align-items:center"><span>{{ t('sysmon.connections') }}</span></div>
+    </template>
     <div class="card-grid">
       <el-card shadow="never" class="status-card">
         <div class="card-head">
@@ -23,7 +26,7 @@
         <div class="card-meta">md {{ tk.md }} · lag {{ tk.lag == null ? '—' : Math.round(tk.lag) + 's' }}</div>
       </el-card>
     </div>
-  </div>
+  </el-card>
 </template>
 
 <script setup>
@@ -50,7 +53,6 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.group-title { font-size: var(--fs-card); font-weight: 600; margin: 0 0 var(--sp-3); }
 .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 每行 3 卡随容器宽等分伸缩 */
 .status-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; }

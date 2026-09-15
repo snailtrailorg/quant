@@ -1,7 +1,10 @@
 <template>
   <!-- 批22：系统服务状态卡片组（每 systemd unit 一卡） -->
-  <div>
-    <h4 class="group-title">{{ t('sysmon.services') }}</h4>
+  <!-- 批24 结构统一：组标题从卡外裸 h4 归位 el-card header（用户管理式——批23 表头规则同构） -->
+  <el-card>
+    <template #header>
+      <div style="display:flex;justify-content:space-between;align-items:center"><span>{{ t('sysmon.services') }}</span></div>
+    </template>
     <div class="card-grid">
       <el-card v-for="(st, unit) in units" :key="unit" shadow="never" class="status-card">
         <div class="card-head">
@@ -13,7 +16,7 @@
         <div class="card-meta">{{ t('sysmon.restarts') }}: {{ st.NRestarts || 0 }}</div>
       </el-card>
     </div>
-  </div>
+  </el-card>
 </template>
 
 <script setup>
@@ -41,7 +44,6 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.group-title { font-size: var(--fs-card); font-weight: 600; margin: 0 0 var(--sp-3); }
 .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 每行 3 卡随容器宽等分伸缩 */
 .status-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
