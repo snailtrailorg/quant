@@ -192,11 +192,20 @@
           <!-- 批24 迭代六（用户裁定）：三分区=API 权限/菜单页面/市场操作（对齐组编辑页签序，说法统一）；
                nav 数据 /auth/me 已带（load_nav_map）——只列被限制项，未列出=可正常使用 -->
           <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('perm.apiPermTitle') }}</h3>
-          <el-checkbox-group v-if="permAllKeys.length" :model-value="permAllowedKeys" disabled class="perm-grid">
-            <el-checkbox v-for="k in permAllKeys" :key="k" :value="k" :class="permCls(k)">
-              {{ k }}
-            </el-checkbox>
-          </el-checkbox-group>
+          <template v-if="permAllKeys.length">
+            <!-- 批24 迭代七：分组+中文名只读展示（与 PermMatrix 同构；未知键落 other 组兜底） -->
+            <div v-for="g in permGroupsOf(permAllKeys)" :key="g.id" style="margin-bottom: var(--sp-3)">
+              <div class="perm-group-title">
+                <span>{{ te('perm.grp_' + g.id) ? t('perm.grp_' + g.id) : g.id }}</span>
+                <span v-if="te('perm.grp_' + g.id + '_desc')" class="perm-group-desc">{{ t('perm.grp_' + g.id + '_desc') }}</span>
+              </div>
+              <el-checkbox-group :model-value="permAllowedKeys" disabled class="perm-grid">
+                <el-checkbox v-for="k in g.keys" :key="k" :value="k" :class="permCls(k)" :title="k">
+                  {{ te('perm.key_' + k) ? t('perm.key_' + k) : k }}
+                </el-checkbox>
+              </el-checkbox-group>
+            </div>
+          </template>
           <div v-else style="color: var(--text-secondary); font-size: var(--fs-label)">
             {{ t('common.noData') }}
           </div>
@@ -274,6 +283,7 @@ import api, { apiErr, sse, getMe } from '../api'
 import { validatePassword } from '../password'
 import IconBtn from '../components/IconBtn.vue'
 import { Delete, Plus, Edit } from '@element-plus/icons-vue'
+import { permGroupsOf } from '../permGroups'
 
 const props = defineProps({
   initialTab: { type: String, default: 'basic' },   // 深链定位（?profile=im → 'im'）
@@ -682,6 +692,8 @@ const onChangePwd = async () => {
 .info-row { min-height: 36px; }   /* 批24 迭代六：全行等高（编辑钮 24px 与纯文本行一致） */
 .nav-limit-table { max-width: 480px; margin-bottom: var(--sp-2); }
 .nav-limit-row { display: grid; grid-template-columns: 1fr auto; align-items: center; padding: var(--sp-1) 0; }
+.perm-group-title { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-1); font-size: var(--fs-label); font-weight: 600; }
+.perm-group-desc { font-weight: 400; color: var(--text-secondary); font-size: var(--fs-foot); }
 /* 批24：权限只读复选框 grid（与 PermMatrix 同风格） */
 .perm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); }
 .perm-grid :deep(.el-checkbox) { margin-right: 0; height: auto; }

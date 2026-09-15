@@ -8,14 +8,20 @@
     <el-tabs v-model="tab">
       <el-tab-pane name="api">
         <template #label><b>{{ t('perm.tabApi') }}</b></template>
-        <!-- 批24 用户裁定：复选框流式堆叠改表格化多列 grid（无边框、行列对齐、统一复选框风格） -->
-        <el-checkbox-group v-model="apiSel" class="perm-grid">
-          <el-checkbox v-for="k in keys" :key="k" :value="k" :disabled="lockedKeys.includes(k)">
-            {{ k }}<span v-if="lockedKeys.includes(k)"> 🔒</span>
-          </el-checkbox>
-        </el-checkbox-group>
+        <!-- 批24 迭代七（用户裁定）：分组展示+中文名（无下划线，键名留 title 悬浮给管理员）；未知键落 other 组 -->
+        <div v-for="g in permGroupsOf(keys)" :key="g.id" style="margin-bottom: var(--sp-3)">
+          <div class="perm-group-title">
+            <span>{{ te('perm.grp_' + g.id) ? t('perm.grp_' + g.id) : g.id }}</span>
+            <span v-if="te('perm.grp_' + g.id + '_desc')" class="perm-group-desc">{{ t('perm.grp_' + g.id + '_desc') }}</span>
+          </div>
+          <el-checkbox-group v-model="apiSel" class="perm-grid">
+            <el-checkbox v-for="k in g.keys" :key="k" :value="k" :disabled="lockedKeys.includes(k)" :title="k">
+              {{ te('perm.key_' + k) ? t('perm.key_' + k) : k }}<span v-if="lockedKeys.includes(k)"> 🔒</span>
+            </el-checkbox>
+          </el-checkbox-group>
+        </div>
         <div v-if="lockedKeys.length" style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-2)">
-          {{ t('perm.lockedNote') }}: {{ lockedKeys.join(' / ') }}
+          {{ t('perm.lockedNote') }}: {{ lockedKeys.map(k => (te('perm.key_' + k) ? t('perm.key_' + k) : k)).join(' / ') }}
         </div>
       </el-tab-pane>
       <el-tab-pane name="nav">
@@ -59,10 +65,11 @@ import TableShell from './TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import { permGroupsOf } from '../permGroups'
 
 const props = defineProps({ group: { type: String, required: true } })
 const emit = defineEmits(['saved'])
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const tab = ref('api')
 const saving = ref(false)
@@ -104,7 +111,7 @@ const save = async () => {
       marketKeys.value.map(k => [k, marketSel.value.includes(k) ? 'allow' : 'deny']))
     await api.post(`/permissions/${g}?dimension=market_op`, { resources: marketRes })
     if (res1?.preserved_locked?.length)
-      ElMessage.info(t('perm.preservedInfo') + ': ' + res1.preserved_locked.join(', '))
+      ElMessage.info(t('perm.preservedInfo') + ': ' + res1.preserved_locked.map(k => (te('perm.key_' + k) ? t('perm.key_' + k) : k)).join(', '))
     ElMessage.success(t('common.saveSuccess'))
     emit('saved')
   } catch (e) { ElMessage.error(String(e?.response?.data?.detail || e)) }
@@ -113,7 +120,10 @@ const save = async () => {
 </script>
 
 <style scoped>
-/* 批24 用户裁定：权限复选框表格化——无边框多列 grid，行列对齐（监控卡同款三列节奏） */
+/* 批24 用户裁定：权限复选框表格化——无边框多列 grid，行列对齐（监控卡同款三列节奏）；
+   迭代七：分组标题+描述（组名 600，描述灰小字） */
 .perm-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); }
 .perm-grid :deep(.el-checkbox) { margin-right: 0; height: auto; }
+.perm-group-title { display: flex; align-items: baseline; gap: var(--sp-2); margin-bottom: var(--sp-1); font-size: var(--fs-label); font-weight: 600; }
+.perm-group-desc { font-weight: 400; color: var(--text-secondary); font-size: var(--fs-foot); }
 </style>
