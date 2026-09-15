@@ -386,3 +386,83 @@ def test_confirm_card_normal_when_channel_on():
         fc.process_message_async("ou_1", "hi", "open_id", "ou_1", 5, "p2p")
         captured["cc"]("emergency_halt", {})
     assert fc2.send_card.called and not fc2.send_text.called
+
+
+def test_confirm_card_selfbot_blocked_before_send():
+    """挂账清偿：自助 bot 发卡前拦截——不发必然无效的卡（闸门③仍兜底=防御纵深）。"""
+    from src.im_bot import feishu_client as fc
+    fc2 = MagicMock()
+    captured = {}
+
+    def fake_incoming(provider, fid, uid, text, reply, chat_type, *, confirm_card=None):
+        captured["cc"] = confirm_card
+
+    with patch.object(fc, "get_feishu_client", return_value=fc2), \
+         patch("src.im_bot.handlers.handle_incoming", side_effect=fake_incoming), \
+         patch.object(fc, "CARD_SELF_BOT", True):
+        fc.process_message_async("ou_1", "hi", "open_id", "ou_1", 5, "p2p")
+        captured["cc"]("emergency_halt", {})
+    assert fc2.send_text.called and not fc2.send_card.called
+    assert "网页端" in fc2.send_text.call_args[0][1]
+
+
+def test_confirm_card_selfbot_flag_priority_over_channel():
+    """两 flag 并存时自助 bot 拦截优先（语义更具体——通道健康与否无关）。"""
+    from src.im_bot import feishu_client as fc
+    fc2 = MagicMock()
+    captured = {}
+
+    def fake_incoming(provider, fid, uid, text, reply, chat_type, *, confirm_card=None):
+        captured["cc"] = confirm_card
+
+    with patch.object(fc, "get_feishu_client", return_value=fc2), \
+         patch("src.im_bot.handlers.handle_incoming", side_effect=fake_incoming), \
+         patch.object(fc, "CARD_SELF_BOT", True), \
+         patch.object(fc, "CARD_CHANNEL_OK", False):
+        fc.process_message_async("ou_1", "hi", "open_id", "ou_1", 5, "p2p")
+        captured["cc"]("emergency_halt", {})
+    assert fc2.send_text.called and not fc2.send_card.called
+    assert "不能执行" in fc2.send_text.call_args[0][1]   # 自助 bot 文案而非通道降级文案
+
+
+def test_main_sets_flags_before_start():
+    """main() 启动链冒烟（快审 P0 教训：函数内 import 时序=UnboundLocalError 启动即崩，
+    常规测试不碰 main() 抓不到——启动级 bug 必须钉）。断言：flag 置位先于 client.start()；
+    无平台级行 → CARD_SELF_BOT=True。"""
+    import sys
+    from src.feishu_bot import ws_client
+    from src.im_bot import feishu_client as fc
+    order = []
+
+    class _FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **kw):
+            class _R:
+                @staticmethod
+                def fetchone():
+                    return None   # 无平台级行 → 自助 bot
+            return _R()
+
+    fake_client = MagicMock()
+    fake_client.start = MagicMock(side_effect=lambda: order.append("start"))
+    saved_fid = ws_client._FID
+    saved_self, saved_ok = fc.CARD_SELF_BOT, fc.CARD_CHANNEL_OK
+    try:
+        with patch.object(sys, "argv", ["ws_client", "7"]), \
+             patch("src.im_bot.users.backfill_from_env"), \
+             patch("src.feishu_bot.ws_client.load_feishu_credentials", return_value=("ai", "sk")), \
+             patch("src.feishu_bot.ws_client.get_conn", return_value=_FakeConn()), \
+             patch("lark_oapi.ws.Client", return_value=fake_client), \
+             patch("src.feishu_bot.ws_client.patch_ws_card_frames",
+                   side_effect=lambda c: order.append("patch") or True):
+            ws_client.main()
+            assert order == ["patch", "start"]   # 探针先于连接启动（finally 恢复前断言）
+            assert fc.CARD_SELF_BOT is True      # 无平台级行 → 自助 bot flag
+    finally:
+        ws_client._FID = saved_fid
+        fc.CARD_SELF_BOT, fc.CARD_CHANNEL_OK = saved_self, saved_ok

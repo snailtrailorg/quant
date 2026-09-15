@@ -252,6 +252,11 @@ def verify_card_signature(header_ts: str, nonce: str, body: str, signature: str)
 # 批27-4：ws 卡片回调通道就绪标志（ws_client 探针置 False——SDK 版本未验证时降级文本，
 # 防止发出用户点了没反应的卡）。仅 ws 进程内生效；webhook 入口不在此机制内（无公网入口）。
 CARD_CHANNEL_OK = True
+# 批27-4 挂账清偿：本进程 bot 是否自助 bot（owner 非空）——True 时发卡前直接文本拒答，
+# 不发必然无效的卡（用户白点一次）。ws_client main() 启动查一次置位（bot 配置变更需重启
+# 进程）；webhook 进程缺省 False=按平台级处理（历史语义：卡片面钉平台级）。闸门层③保留
+# 兜底（防御纵深——flag 时序/未来新路径发卡仍被拦）。
+CARD_SELF_BOT = False
 
 
 def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
@@ -308,6 +313,12 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     from src.im_bot.handlers import handle_incoming
 
     def _confirm_card(tool: str, args: dict) -> None:
+        # 批27-4 挂账清偿：自助 bot 发卡前拦截——闸门③已拒，白点一次无效卡是纯损耗
+        if CARD_SELF_BOT:
+            client.send_text(receive_id,
+                             "这台机器人不能执行这类操作，请到网页端完成。",
+                             receive_id_type)   # 快审 P1：私聊带 chat_id 时缺省会按 open_id 发=拒答送不到（纯静默）
+            return
         # 批27-4：卡片回调通道未就绪（ws 探针失败）时降级文本——发出的卡点了没反应比不发更糟
         if not CARD_CHANNEL_OK:
             logger.warning("确认卡片通道未就绪，操作 %s 降级文本拒答（SDK 版本未验证?）", tool)

@@ -223,10 +223,12 @@ def main() -> None:
     # 批27-4：平台级判定（卡片确认面仅平台级 bot——批11C A-P1-1 对齐；bot 配置变更需重启
     # 进程，启动查一次语义成立）
     _fid = int(_FID)
+    from src.im_bot import feishu_client as _fc   # 须先于 :230 的 _fc 引用——函数内后段 import 会把名字局部化（快审 P0：同款 12:03 prod 崩溃）
     with get_conn() as conn:
         _plat = conn.execute(
             "SELECT 1 FROM im_bot_config WHERE id = %s AND owner_user_id IS NULL",
             (_fid,)).fetchone()
+    _fc.CARD_SELF_BOT = not bool(_plat)   # 挂账清偿：自助 bot 发卡前拦截 flag（闸门③仍兜底）
     event_handler = (
         EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(on_message)
@@ -242,7 +244,6 @@ def main() -> None:
     )
     # 批27-4：探针+patch（EVENT 帧路径走公开 API 与 patch 无关恒注册；False 时 ws 进程
     # confirm_card 降级文本——SDK 版本未验证期宁可不出卡不出"点了没反应"）
-    from src.im_bot import feishu_client as _fc
     _fc.CARD_CHANNEL_OK = patch_ws_card_frames(client)
     logger.info(f"飞书长连接启动: id={_FID} app_id={app_id} 平台级bot={bool(_plat)} 卡片patch={_fc.CARD_CHANNEL_OK}")
     client.start()  # 阻塞维持连接
