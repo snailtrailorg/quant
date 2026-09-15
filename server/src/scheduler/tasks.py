@@ -1147,26 +1147,62 @@ def email_outbox_sweep():
         return {"processed": 0, "error": str(e)}
 
 
-@app.task(name="src.scheduler.tasks.cleanup_logs")
-def cleanup_logs():
-    """批25：system_log 留存清理（每日）——>30 天批删（pk IN 子查询分批，每批独立短事务，18 号规范）。"""
+def _read_int_cfg(key: str, default: int) -> int:
+    """批28-7：读 system_config 整数键（独立短连接——27-29 _quota_limits 先例；读不到/
+    解析失败回落缺省，im_bots.py:203 try/except 回落范式）。"""
+    from src.data_platform.db import get_conn
+    try:
+        with get_conn() as conn:
+            row = conn.execute("SELECT value FROM system_config WHERE key = %s", (key,)).fetchone()
+        return int(row[0]) if row and row[0] is not None else default
+    except Exception as e:
+        logger.warning("读取配置 %s 失败回落缺省 %s（盲审 A P2-3：audit 清理静默转永久保留须可感知）: %s",
+                       key, default, e)
+        return default
+
+
+def _batch_delete_until(table: str, cutoff) -> int:
+    """按截止时刻批删（5000/批独立短事务，18 号规范）。table 由调用点白名单常量传入
+    （system_log/audit_log——非用户输入，f-string 安全）。"""
     from src.data_platform.db import get_conn
     total = 0
+    while True:
+        with get_conn() as conn:
+            cur = conn.execute(
+                f"DELETE FROM {table} WHERE id IN "
+                f"(SELECT id FROM {table} WHERE ts < %s LIMIT 5000)", (cutoff,))
+            n = cur.rowcount
+            conn.commit()
+        total += n
+        if n < 5000:
+            break
+    return total
+
+
+@app.task(name="src.scheduler.tasks.cleanup_logs")
+def cleanup_logs():
+    """批25 留存清理（批28-7 配置化）：保留天数走 system_config——log_retention_days
+    缺省 30 / audit_retention_days 缺省 0=永久保留。**两键 0=不清理**（盲审 P0：杜绝
+    "0=保留 0 天"误读=全表清空——任务侧纵深，API 校验+UI :min 是前两道）。截止时刻
+    Python 侧算+参数化（盲审 A P1-5：禁 f-string interval——注入面）。audit 并入本任务
+    （零 beat 改动）。"""
+    from datetime import datetime, timedelta, timezone
+    log_days = _read_int_cfg("log_retention_days", 30)
+    audit_days = _read_int_cfg("audit_retention_days", 0)
+    result = {"deleted": 0, "audit_deleted": 0}
+    now = datetime.now(timezone.utc)
     try:
-        while True:
-            with get_conn() as conn:
-                cur = conn.execute(
-                    "DELETE FROM system_log WHERE id IN "
-                    "(SELECT id FROM system_log WHERE ts < now() - interval '30 days' LIMIT 5000)")
-                n = cur.rowcount
-                conn.commit()
-            total += n
-            if n < 5000:
-                break
-        return {"deleted": total}
+        if log_days > 0:
+            result["deleted"] = _batch_delete_until("system_log", now - timedelta(days=log_days))
+        else:
+            logger.warning("log_retention_days=%s：system_log 不清理（0=不清理语义）", log_days)
+        if audit_days > 0:
+            result["audit_deleted"] = _batch_delete_until("audit_log", now - timedelta(days=audit_days))
+        # audit_days<=0=永久保留缺省——正常态不打日志
     except Exception as e:
-        logger.exception(f"system_log cleanup failed: {e}")
-        return {"deleted": total, "error": str(e)}
+        logger.exception(f"cleanup_logs failed（system_log/audit_log 批28-7 并入后统称）: {e}")
+        result["error"] = str(e)
+    return result
 
 
 @app.task(name="src.scheduler.tasks.notifications_cleanup")

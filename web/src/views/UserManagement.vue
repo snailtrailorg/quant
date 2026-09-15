@@ -64,7 +64,7 @@
               </div>
               <div class="info-row">
                 <span class="info-label">{{ t('user.role') }}</span>
-                <span class="info-value"><el-select v-model="editForm.role" style="width: 260px">
+                <span class="info-value"><el-select v-model="editForm.role" style="width: 100%">   <!-- 批28-5：el-select 需显式 100%（缺省收缩到内容宽） -->
                   <el-option v-for="g in groups" :key="g.name" :label="g.name" :value="g.name" />
                 </el-select></span>
               </div>
@@ -107,7 +107,9 @@
               <el-table-column prop="actions" :label="t('common.action')" min-width="150">
                 <template #default="{ row }">
                   <div style="display: inline-flex; gap: 6px">
-                    <IconBtn v-if="row.status === 'pending'" size="small" :icon="RefreshLeft" type="warning" :title="t('account.inviteRevoke')" @click="onRevoke(row)" />
+                    <!-- 批28-1（用户三裁）：撤销恒显+非 pending 禁用（不隐藏）——图标 RefreshLeft→Close；措辞保留"撤销" -->
+                    <IconBtn size="small" :icon="Close" type="warning" :disabled="row.status !== 'pending'"
+                             :title="t('account.inviteRevoke')" @click="onRevoke(row)" />
                     <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="onDeleteInvite(row)" />
                   </div>
                 </template>
@@ -166,12 +168,12 @@
             <div class="info-table" style="max-width: 640px">
               <div class="info-row">
                 <span class="info-label">{{ t('common.name') }}</span>
-                <span class="info-value"><el-input v-model="groupForm.name" :disabled="groupForm.builtin" style="width: 240px"
+                <span class="info-value"><el-input v-model="groupForm.name" :disabled="groupForm.builtin"
                           :placeholder="t('um.groupNamePh')" /></span>
               </div>
               <div class="info-row">
                 <span class="info-label">{{ t('common.description') }}</span>
-                <span class="info-value"><el-input v-model="groupForm.description" maxlength="200" style="width: 420px" /></span>
+                <span class="info-value"><el-input v-model="groupForm.description" maxlength="200" /></span>   <!-- 批28-5：去 420 定宽 -->
               </div>
             </div>
             <el-divider style="margin: var(--sp-2) 0 var(--sp-4)" />
@@ -210,7 +212,7 @@ import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import PermMatrix from '../components/PermMatrix.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Plus, Edit, Delete, RefreshLeft } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Close } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 
 const { t, locale } = useI18n()

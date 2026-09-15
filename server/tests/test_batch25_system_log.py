@@ -95,12 +95,80 @@ class TestAuditDeleteRetired:
         assert r.status_code == 404
 
 
+def _cfg_conn():
+    """按 SQL 前缀分派的精准 mock（盲审 B P1-2：万能 conn 会被 require_perm/audit_log
+    与端点交错污染——权限行/value_type 行必须分开喂）。"""
+    conn = MagicMock(); conn.__enter__.return_value = conn
+
+    def _exec(sql, *a, **kw):
+        cur = MagicMock()
+        if sql.startswith("SELECT value_type"):
+            cur.fetchone.return_value = ("int",)
+        elif sql.startswith("SELECT subject_id") or sql.startswith("SELECT resource, effect"):
+            cur.fetchall.return_value = [("admin", "system_config", "allow")]   # 三列 SQL 喂三元组（A P2-2：两元组解包炸=靠异常回退放行）
+        return cur
+    conn.execute = MagicMock(side_effect=_exec)
+    return conn
+
+
 class TestCleanupLogs:
     def test_batch_loop_until_short(self):
+        """批删循环（批28-7 适配：配置 mock 为 30/0——log 清理/audit 永久，get_conn 只被删循环消耗）。"""
         import src.scheduler.tasks as T
         calls = iter([5000, 5000, 12])   # 三轮后短于批=停
-        rows = []
-        with patch("src.data_platform.db.get_conn", side_effect=lambda: (
-            rows.append(1), _conn(rowcount=next(calls)))[1]):
+        with patch.object(T, "_read_int_cfg", side_effect=[30, 0]), \
+             patch("src.data_platform.db.get_conn", side_effect=lambda: _conn(rowcount=next(calls))):
             r = T.cleanup_logs()
         assert r["deleted"] == 10012
+        assert r["audit_deleted"] == 0   # audit=0 永久缺省不清
+
+    def test_log_zero_skips_all(self):
+        """批28-7 盲审 P0 负例：log_retention_days=0（=不清理）——零删除零连接，杜绝全表清空。"""
+        import src.scheduler.tasks as T
+        with patch.object(T, "_read_int_cfg", side_effect=[0, 0]), \
+             patch("src.data_platform.db.get_conn", side_effect=AssertionError("不应触库")):
+            r = T.cleanup_logs()
+        assert r == {"deleted": 0, "audit_deleted": 0}
+
+    def test_negative_days_skips(self):
+        """负值同样不清理（任务侧纵深——API 校验是第一道，直改库是第三道场景）。"""
+        import src.scheduler.tasks as T
+        with patch.object(T, "_read_int_cfg", side_effect=[-5, 0]), \
+             patch("src.data_platform.db.get_conn", side_effect=AssertionError("不应触库")):
+            r = T.cleanup_logs()
+        assert r == {"deleted": 0, "audit_deleted": 0}
+
+    def test_audit_positive_cleans_both(self):
+        """audit_retention_days>0：两表都清（audit 并入本任务，返回双计数）。"""
+        import src.scheduler.tasks as T
+        calls = iter([5000, 12, 5000, 7])   # system_log 两轮 + audit 两轮
+        with patch.object(T, "_read_int_cfg", side_effect=[30, 7]), \
+             patch("src.data_platform.db.get_conn", side_effect=lambda: _conn(rowcount=next(calls))):
+            r = T.cleanup_logs()
+        assert r == {"deleted": 5012, "audit_deleted": 5007}
+
+    def test_read_int_cfg_fallback(self):
+        """配置读不到/解析失败回落缺省（独立短连接 try/except 范式）。"""
+        import src.scheduler.tasks as T
+        with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
+            assert T._read_int_cfg("log_retention_days", 30) == 30
+        dirty = _conn(); dirty.execute.return_value.fetchone.return_value = ("abc",)   # 脏值行：int('abc') 抛 → 回落
+        with patch("src.data_platform.db.get_conn", return_value=dirty):
+            assert T._read_int_cfg("audit_retention_days", 0) == 0
+
+    def test_retention_negative_rejected_by_api(self):
+        """批28-7 盲审 P0：保留两键负值 400（interval 负天数=删全表，audit 不可逆损失级）。"""
+        with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
+             patch("src.web_api.routes.system.get_conn", return_value=_cfg_conn()):   # 名字绑定式 import——patch 须打模块名
+            r = _client().post("/api/system-config/log_retention_days", json={"value": -5},
+                               headers={"Authorization": "Bearer t"})
+        assert r.status_code == 400
+
+    def test_retention_zero_accepted(self):
+        """0=不清理：合法值放行（与 audit 永久缺省语义统一）。"""
+        with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
+             patch("src.web_api.routes.system.get_conn", return_value=_cfg_conn()), \
+             patch("src.data_platform.db.get_conn", return_value=_cfg_conn()):   # A P1-1：audit_log 链（audit.py 函数内 import 打源名）——不 patch 则真连库+污染审计表
+            r = _client().post("/api/system-config/audit_retention_days", json={"value": 0},
+                               headers={"Authorization": "Bearer t"})
+        assert r.status_code == 200

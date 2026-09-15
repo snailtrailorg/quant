@@ -9,10 +9,10 @@
       <template #header>
         <span>{{ t('sysmon.logsTitle') }}</span>
       </template>
+      <!-- 批28-3（用户裁定：已决策干掉）：通知消息页签退役——NotificationTable 删除，仅留双页签 -->
       <TabsShell :tabs="tabs" default-tab="logs" v-slot="slotProps">
         <Logs v-if="slotProps.tab === 'logs'" />
-        <Audit v-else-if="slotProps.tab === 'audit'" />
-        <NotificationTable v-else />
+        <Audit v-else />
       </TabsShell>
     </el-card>
   </div>
@@ -24,13 +24,11 @@ import TabsShell from '../components/TabsShell.vue'
 import SystemMetricsCards from '../components/SystemMetricsCards.vue'
 import ServiceStatusCards from '../components/ServiceStatusCards.vue'
 import ConnectionCards from '../components/ConnectionCards.vue'
-import NotificationTable from '../components/NotificationTable.vue'
 import Logs from './Logs.vue'
 import Audit from './Audit.vue'
 const tabs = [
   { key: 'logs', i18nKey: 'tabs.logs' },
   { key: 'audit', i18nKey: 'tabs.audit' },
-  { key: 'notifications', i18nKey: 'tabs.notifications' },
 ]
 const { t } = useI18n()   // 迭代十六 hotfix：header 标题词条——重写时漏解构致 observe 崩+组件树连锁全白
 </script>

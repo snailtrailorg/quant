@@ -18,14 +18,17 @@ _SEEDS = [
 
 
 def upgrade() -> None:
-    for key, value in _SEEDS:
+    # 批28 盲审 B P0 修正：alembic 1.18 Operations.execute 签名 (sqltext, *, execution_options)
+    # 不收参数元组（原参数化写法 upgrade --sql 实测 TypeError）——0076 先例 f-string 常量拼接
+    for key, value, desc in (
+        ("user_bot_quota", "5", "用户 IM 通道上限"),
+        ("platform_bot_quota", "10", "全平台 IM 通道上限"),
+    ):
         op.execute(
-            "INSERT INTO system_config (key, value, description) VALUES (%s, %s, %s) "
-            "ON CONFLICT (key) DO NOTHING",
-            (key, value,
-             "用户 IM 通道上限" if key == "user_bot_quota" else "全平台 IM 通道上限"))
+            f"INSERT INTO system_config (key, value, description) "
+            f"VALUES ('{key}', '{value}', '{desc}') ON CONFLICT (key) DO NOTHING")
 
 
 def downgrade() -> None:
     for key, _ in _SEEDS:
-        op.execute("DELETE FROM system_config WHERE key = %s", (key,))
+        op.execute(f"DELETE FROM system_config WHERE key = '{key}'")

@@ -127,7 +127,7 @@ export default {
     tabs: {
       astock: 'A股', cb: '可转债', etf: 'ETF',
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
-      notifications: '通知消息', logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
+      logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
       run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）
@@ -157,7 +157,7 @@ export default {
       ownedFalse: '这个机器人是平台公共的，不会变成你的个人通道。想要自己的：重新扫码，在手机上选「重新创建应用」',
     },
     um: {   // 批11：用户管理页（系统管理第一项）；批11B 增组管理
-      tabUsers: '用户列表', tabGroups: '用户群组',
+      tabUsers: '用户', tabGroups: '用户组',
       editUser: '编辑用户',
       addGroup: '添加用户组', editGroup: '编辑用户组', groupNamePh: '组名（2-30 位小写字母开头）',
       groupType: '类型', userCount: '用户数', groupPerms: '组权限（api/nav/data 三维）',
@@ -814,10 +814,8 @@ export default {
       module: '模块',
       content: '内容',
       alertHistory: '告警历史',
-      titleCol: '标题',
       noPerm: '运行日志仅管理员可见',
       notifyHistory: '通知历史',
-      notifyCategory: '类别',
     },
     audit: {
       title: '审计日志',
@@ -832,7 +830,7 @@ export default {
       delete: '删除',
       disable: '禁用',
       manageTitle: '账户管理',
-      userMgmt: '用户管理', aiChat: 'AI 助手',
+      userMgmt: '所有用户', aiChat: 'AI 助手',
       phInviteEmail: '被邀请者邮箱',
       invite: '邀请开通',
       username: '用户名',
@@ -1320,7 +1318,7 @@ export default {
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
-      notifications: 'Notifications', logs: 'Run Logs', audit: 'Audit Log',
+      logs: 'Run Logs', audit: 'Audit Log',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
       run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alert Channels',
@@ -2002,10 +2000,8 @@ export default {
       module: 'Module',
       content: 'Content',
       alertHistory: 'Alert History',
-      titleCol: 'Title',
       noPerm: 'Run logs are admin-only',
       notifyHistory: 'Notification History',
-      notifyCategory: 'Category',
     },
     audit: {
       title: 'Audit Log',
@@ -2020,7 +2016,7 @@ export default {
       delete: 'Delete',
       disable: 'Disable',
       manageTitle: 'Account Management',
-      userMgmt: 'User Management', aiChat: 'AI Assistant',
+      userMgmt: 'All Users', aiChat: 'AI Assistant',
       phInviteEmail: 'Invitee email',
       invite: 'Send Invite',
       username: 'Username',

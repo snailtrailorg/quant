@@ -3,7 +3,10 @@
        v-if 挂载于 MainLayout，关闭即卸载（onUnmounted 清理链全保留）） -->
   <el-dialog v-model="dlg" :title="t('profile.title')" width="720px" :before-close="onOuterClose">
     <!-- 批11D：个人中心三 tab（基本信息/IM 通道/修改密码）；批16 去路由化（routing=false 防与 ?profile= 深链互踩） -->
-    <TabsShell :tabs="tabs" :default-tab="initialTab || 'basic'" :routing="false" v-slot="sp">
+    <!-- 批28-4（用户裁定）：页签视图边框框起+底部右侧关闭钮（与右上角 X 同走 onOuterClose 挽留闸；
+         done 显式落 dlg——直接绑 onOuterClose 会把 MouseEvent 当 done 抛 TypeError） -->
+    <div class="profile-tab-box">
+      <TabsShell :tabs="tabs" :default-tab="initialTab || 'basic'" :routing="false" v-slot="sp">
         <div v-if="sp.tab === 'basic'">
     <!-- 头像（点击即更换） -->
     <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: var(--sp-6)">
@@ -35,7 +38,7 @@
     <el-dialog v-model="nickDlg" :title="t('profile.nickname')" width="420px" append-to-body :close-on-click-modal="false">
       <el-form @submit.prevent>
         <el-form-item :label="t('profile.nickname')">
-          <el-input v-model="nickDraft" maxlength="20" style="width: 260px" />
+          <el-input v-model="nickDraft" maxlength="20" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -70,29 +73,27 @@
 
         <div v-else-if="sp.tab === 'pwd'">
     <!-- 改密码（批24 迭代五 用户裁定：不弹窗直接展示三栏，同基本信息表格化改造） -->
-    <div class="info-table" style="max-width: 480px">
+    <div class="info-table">   <!-- 批28-5：去 480 约束——元素到右缘 -->
       <div class="info-row">
         <span class="info-label">{{ t('account.oldPwd') }}</span>
-        <span class="info-value"><el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" style="width: 260px" /></span>
+        <span class="info-value"><el-input v-model="pwd.old_password" type="password" show-password autocomplete="new-password" /></span>
       </div>
       <div class="info-row">
         <span class="info-label">{{ t('account.newPwd') }}</span>
-        <span class="info-value"><el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" style="width: 260px" /></span>
+        <span class="info-value"><el-input v-model="pwd.new_password" type="password" show-password autocomplete="new-password" /></span>
       </div>
       <div class="info-row">
         <span class="info-label">{{ t('register.confirmPwd') }}</span>
         <span class="info-value">
           <el-input v-model="pwd.confirm" type="password" show-password autocomplete="new-password"
-            :class="{ 'mismatch': pwd.confirm && pwd.confirm !== pwd.new_password }" style="width: 260px" />
+            :class="{ 'mismatch': pwd.confirm && pwd.confirm !== pwd.new_password }" />
         </span>
       </div>
-      <div class="info-row">
-        <span class="info-label"></span>
-        <span class="info-value">
-          <span class="pwd-rule" style="flex: 1">{{ t('common.passwordRule') }}</span>
-          <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
-        </span>
-      </div>
+    </div>
+    <!-- 批28-5（用户裁定）：按钮行独立全宽——左规则提示右按钮（原在 480 表内=右缘不齐，参照系=28-4 边框容器右缘） -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-top: var(--sp-2)">
+      <span class="pwd-rule" style="margin: 0">{{ t('common.passwordRule') }}</span>
+      <el-button type="primary" @click="onChangePwd" :loading="changingPwd">{{ t('account.changePwdBtn') }}</el-button>
     </div>
 
         </div>
@@ -134,7 +135,7 @@
         </div>
         <div class="info-row">
           <span class="info-label">{{ t('common.name') }}</span>
-          <span class="info-value"><el-input v-model="imEditForm.name" maxlength="40" style="width: 260px" /></span>
+          <span class="info-value"><el-input v-model="imEditForm.name" maxlength="40" /></span>
         </div>
         <div class="info-row">
           <span class="info-label">{{ t('common.status') }}</span>
@@ -160,10 +161,10 @@
       <!-- kind=manual：FIELD_SCHEMA 表单（钉钉/企微） -->
       <el-form v-if="curKind() === 'manual'" label-width="120px">
         <el-form-item :label="t('common.name')">
-          <el-input v-model="imForm.name" style="width: 260px" />
+          <el-input v-model="imForm.name" />
         </el-form-item>
         <el-form-item v-for="f in imFields" :key="f.key" :label="te(f.label_key) ? t(f.label_key) : f.key">
-          <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" :autocomplete="f.secret ? 'new-password' : 'off'" show-password style="width: 260px" />
+          <el-input v-model="imForm.creds[f.key]" :type="f.secret ? 'password' : 'text'" :autocomplete="f.secret ? 'new-password' : 'off'" show-password />
         </el-form-item>
         <!-- post_steps：后台建应用指引（注册表驱动） -->
         <div v-if="curPostSteps().length" style="color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.9; padding: var(--sp-2) 0">
@@ -290,6 +291,10 @@
       </el-tabs>
     </el-dialog>
       </TabsShell>
+    </div>
+    <div class="profile-close-row">
+      <el-button @click="onOuterClose(() => { dlg = false })">{{ t('common.close') }}</el-button>
+    </div>
   </el-dialog>
 </template>
 
@@ -721,11 +726,14 @@ const onChangePwd = async () => {
 </script>
 
 <style scoped>
+/* 批28-4（用户裁定）：页签视图边框框起+底部关闭行 */
+.profile-tab-box { border: 1px solid var(--border-weak); border-radius: var(--radius-m); padding: var(--sp-3) var(--sp-4); }
+.profile-close-row { display: flex; justify-content: flex-end; margin-top: var(--sp-3); }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
 .pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -14px 0 14px; }
 /* 批24 迭代五（用户裁定）：真·列对齐——外层单 grid 定两列轨道（label max-content/value 1fr），行 subgrid 继承；
    编辑钮不单列，直接跟在值后（value 格 inline） */
-.info-table { display: grid; grid-template-columns: max-content 1fr; column-gap: var(--sp-4); row-gap: var(--sp-2); max-width: 560px; }
+.info-table { display: grid; grid-template-columns: max-content 1fr; column-gap: var(--sp-4); row-gap: var(--sp-2); }   /* 批28-5：去 560 约束——容器决定宽度 */
 .info-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; padding: var(--sp-1) 0; border-bottom: 1px dashed var(--border-weak); font-size: var(--fs-body); }
 .info-row:last-child { border-bottom: none; }
 .info-label { text-align: right; color: var(--text-secondary); font-size: var(--fs-label); white-space: nowrap; }

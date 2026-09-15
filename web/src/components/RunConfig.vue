@@ -7,7 +7,7 @@
       <el-table-column prop="value" :label="t('common.configValue')" width="200">
         <template #default="{ row }">
           <el-input-number v-if="row.value_type === 'int' || row.value_type === 'float'"
-            v-model="row.editValue" :step="1" style="width: 140px" />
+            v-model="row.editValue" :step="1" :min="0" style="width: 140px" />   <!-- 批28-7：:min=0——通用 int/float 行（负保留天数=删全表盲审 P0） -->
           <el-switch v-else-if="row.value_type === 'bool'" v-model="row.editValue" />
           <el-input v-else-if="row.value_type === 'password'" v-model="row.editValue" type="password" show-password autocomplete="new-password"
             style="width: 180px" :placeholder="row.has_value ? t('systemConfig.pwdSet') : t('systemConfig.pwdEmpty')" />

@@ -380,6 +380,10 @@ def update_system_config(key: str, body: dict = Body(...),
         if value_type == "int":
             try: value = str(int(value))
             except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 int 值")
+            # 批28-7（盲审 P0）：日志保留两键 ≥0——负值=interval 负天数=删全表（audit 是
+            # 不可逆数据损失级）；0=不清理语义统一
+            if key in ("log_retention_days", "audit_retention_days") and int(value) < 0:
+                raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 ≥0（0=不清理）")
         elif value_type == "float":
             try: value = str(float(value))
             except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 float 值")

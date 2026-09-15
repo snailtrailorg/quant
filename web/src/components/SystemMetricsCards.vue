@@ -54,9 +54,10 @@ const statusText = s => s === 'critical' ? t('sysmon.critical') : s === 'warning
 const hasData = computed(() => !!(metrics.value.resources && Object.keys(metrics.value.resources).length))
 
 const defs = [
+  // 批28-6（用户裁定）：顺序改内存→交换分区→磁盘
   { kind: 'mem', label: () => t('sysmon.mem') },
-  { kind: 'disk', label: () => t('sysmon.disk') },
   { kind: 'swap', label: () => t('sysmon.swap') },
+  { kind: 'disk', label: () => t('sysmon.disk') },
 ]
 
 const cards = computed(() => {

@@ -77,8 +77,7 @@ export const createUser = (username, password, role) =>
 export const getAccounts = () => api.get('/account')
 export const getLogs = () => api.get('/log')
 export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
-// 批23：通知批量删（{ids:[int]} 选中删 / {all:true} 全清，confirm 前置在组件层）——ack-all 前端随确认机制退役（后端端点保留）
-export const deleteNotifications = (payload) => api.post('/notifications/delete', payload)
+// 批28-3：deleteNotifications 退役（NotificationTable 删除后 UI 无消费；后端 /notifications/delete 端点保留——require_perm 保护，UI 孤儿无害）
 export const getSmtpConfig = () => api.get('/smtp-config')
 export const saveSmtpConfig = (data) => api.post('/smtp-config', data)
 export const sendTestEmail = (data) => api.post('/email/test', data)
