@@ -1164,7 +1164,7 @@ export default {
       pin: '点击切换为固定', unpin: '点击切换为自动隐藏',
       toEn: '点击切换为英文', toZh: '点击切换为中文',
       toDark: '点击切换为深色', toLight: '点击切换为浅色',
-      helpTitle: '帮助', search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
+      search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
     },
     notify: {
       empty: '暂无通知',   // ackAll 随批23 确认机制退役
@@ -2338,7 +2338,7 @@ export default {
       pin: 'Pin sidebar', unpin: 'Auto-hide sidebar',
       toEn: 'Switch to English', toZh: 'Switch to Chinese',
       toDark: 'Switch to dark mode', toLight: 'Switch to light mode',
-      helpTitle: 'Help', search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
+     search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
     },
     notify: {
       empty: 'No notifications',   // ackAll retired in batch 23
