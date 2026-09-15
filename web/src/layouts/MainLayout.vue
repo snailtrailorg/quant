@@ -281,16 +281,17 @@ const onCmdkKeys = (e) => {
   else if (e.key === 'Escape') { cmdkVisible.value = false }
 }
 const $routerPush = p => router.push(p)
-const searchIndex = [
-  { label: '选股器', path: '/screener' }, { label: '股票池', path: '/pool' },
-  { label: '因子库', path: '/factors' }, { label: '策略', path: '/strategy' },
-  { label: '回测', path: '/backtest' }, { label: '每日研判', path: '/analysis' },
-  { label: '实盘任务', path: '/live-task' }, { label: '交易台', path: '/trading' },
-  { label: '风控总览', path: '/risk' }, { label: '三账对账', path: '/reconcile' },
-  { label: '数据中心', path: '/dataops' }, { label: '集成中心', path: '/integrations' },
-  { label: '系统监控', path: '/observe' }, { label: '设置', path: '/settings' },
-  { label: 'AI 助手', path: '/chat' },
-]
+// 批27-25：改 computed + t()——原模块级 const 硬编码中文，en 语言下 ⌘K 索引仍中文且不随语言变
+const searchIndex = computed(() => [
+  { label: t('nav.screener'), path: '/screener' }, { label: t('nav.pool'), path: '/pool' },
+  { label: t('nav.factors'), path: '/factors' }, { label: t('nav.strategy'), path: '/strategy' },
+  { label: t('nav.backtest'), path: '/backtest' }, { label: t('nav.analysis'), path: '/analysis' },
+  { label: t('nav.liveTasks'), path: '/live-task' }, { label: t('nav.tradingDesk'), path: '/trading' },
+  { label: t('nav.risk'), path: '/risk' }, { label: t('nav.reconcile'), path: '/reconcile' },
+  { label: t('nav.dataops'), path: '/dataops' }, { label: t('nav.integrations'), path: '/integrations' },
+  { label: t('nav.observe'), path: '/observe' }, { label: t('nav.settings'), path: '/settings' },
+  { label: t('nav.chat'), path: '/chat' },
+])
 // wd-20 §2.6 索引扩展：策略/因子/标的名（API 拉取，标签前缀区分；空态回落导航项）
 const dynamicIndex = ref([])
 const loadDynamicIndex = async () => {
@@ -304,7 +305,7 @@ const loadDynamicIndex = async () => {
 }
 const filterCmdk = () => {
   const q = cmdkQuery.value.toLowerCase()
-  const pool = [...searchIndex, ...dynamicIndex.value]
+  const pool = [...searchIndex.value, ...dynamicIndex.value]   // 批27-25：computed 消费 .value
   cmdkResults.value = q ? pool.filter(i => i.label.toLowerCase().includes(q) || i.path.includes(q)) : pool
   cmdkActive.value = 0
 }

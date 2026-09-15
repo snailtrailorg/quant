@@ -177,6 +177,8 @@ export default {
       backtest: '回测中心',
       factors: '因子库',
       screener: '选股器', settings: '设置',   // 批27-15：唯一保留（原 :176 重复二定已删——vue-i18n 后键胜）
+      pool: '股票池', analysis: '每日研判', dataops: '数据中心',
+      integrations: '集成中心', observe: '系统监控', chat: 'AI 助手',
       risk: '风控总览',
       reconcile: '三账对账',
       riskRules: '风控规则',
@@ -1368,6 +1370,8 @@ export default {
       backtest: 'Backtest',
       factors: 'Factors',
       screener: 'Screener', settings: 'Settings',
+      pool: 'Stock Pool', analysis: 'Daily Analysis', dataops: 'Data Center',
+      integrations: 'Integrations', observe: 'System Monitor', chat: 'AI Assistant',
       risk: 'Risk',
       reconcile: 'Reconcile',
       riskRules: 'Risk Rules',

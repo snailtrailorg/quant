@@ -246,6 +246,9 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
                     (role, k, payload.get("username", "")))
             conn.commit()
         invalidate_perm_cache()
+        # 批27-22：三维全量重写补审计（原零 audit——谁给哪个组加了什么键不可追溯，对齐 update_user_override 先例）
+        audit_log(payload.get("username", ""), "perm_role_update", role,
+                  f"api allow={len(out)} 键: {','.join(out[:12])}{'…' if len(out) > 12 else ''}")
         return {"role": role, "permissions": out,
                 "preserved_locked": sorted(preserved & (set(body.get("permissions", [])) ^ preserved))}
     # nav/market_op 维：body.resources = {resource: effect}
@@ -272,6 +275,9 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
                 (role, dimension, res, eff, payload.get("username", "")))
         conn.commit()
     invalidate_perm_cache()
+    # 批27-22：nav/market_op 维同补审计
+    _summary = ",".join(f"{r}={e}" for r, e in sorted(res_map.items())[:10]) or "（空=清空该维）"
+    audit_log(payload.get("username", ""), "perm_role_update", role, f"{dimension}: {_summary}")
     return {"role": role, "dimension": dimension, "resources": res_map}
 
 

@@ -174,7 +174,7 @@ import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
-import api from '../api'
+import api, { meOnce } from '../api'
 
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
@@ -187,6 +187,9 @@ const currentSync = ref(null)  // 当前异步同步任务 {sid, name, task_id}
 const progress = ref({})
 let pollTimer = null
 const role = ref(localStorage.getItem('role') || 'viewer')
+// 批27-24：role 双源统一——删除钮显隐改 /auth/me（DB role，降级即时生效），
+// localStorage 快照仅作首帧兜底；对齐 MainLayout 同源
+meOnce().then(me => { if (me?.role) role.value = me.role })
 const _pollingActive = ref(false)
 const setRowStatus = (id, status) => { configs.value = configs.value.map(c => c.id === id ? { ...c, status } : c) }
 
@@ -251,11 +254,10 @@ const changeProvider = async (row, newProvider) => {
       t('dataManage.providerSwitch'), { type: 'warning' })
   } catch { return }   // 取消
   try {
-    // 切换重建原子顺序（26 号收尾批 C）：①删旧源数据（失败中止）→ ②改 provider → ③全历史 full 重建
-    const del = await api.post(`/sync/delete-by-sync-item/${row.id}`)
-    if (del.status !== 'success') throw new Error(del.error || 'delete failed')   // 盲审 P1：失败即中止
-    await api.post(`/sync/config/${row.id}`, { provider: newProvider })
-    await api.post(`/sync/all/${row.id}`)   // 盲审 P0：/sync/all 全历史重建，非 /sync/trigger full（full 参数被丢弃只回填 30 天）
+    // 批27-23：后端事务化（原子：改 provider+删旧数据一次提交）→ 前端只两步（切换→全历史重建）
+    const r = await api.post(`/sync/switch-provider/${row.id}`, { provider: newProvider })
+    if (r.status !== 'success') throw new Error(r.error || 'switch failed')
+    await api.post(`/sync/all/${row.id}`)   // 重建独立触发（幂等可重试，失败不产生配置错位）
     ElMessage.success(t('dataManage.providerSwitched'))
     await load()
   } catch (e) { ElMessage.error(e?.detail || e?.message || t('common.saveFailed')) }

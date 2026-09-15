@@ -287,6 +287,28 @@ def delete_by_sync_item_api(sid: str, payload: dict = Depends(require_perm("data
     return r
 
 
+@router.post("/api/sync/switch-provider/{sid}")
+def switch_provider_api(sid: str, body: dict = Body(default={}),
+                        payload: dict = Depends(require_perm("data_sync"))):
+    """批27-23：切换 provider 原子化——事务内 改 provider + 删旧数据 一次 commit。
+
+    原前端三步链（①删→②改→③重建）两种中间态均不可接受：②失败=旧数据已丢未切换；
+    倒置则=新配置+旧源历史混合（多源"一致地错"教训）。重建仍由前端独立调 /sync/all
+    （幂等可重试，失败不产生配置错位）。"""
+    from src.data_sync.engine import delete_by_sync_item
+    provider = str(body.get("provider", "")).strip()
+    _validate_provider(sid, provider)
+    with get_conn() as conn:
+        r = delete_by_sync_item(sid, conn=conn)   # 事务归本端点
+        if r.get("status") != "success":
+            conn.rollback()
+            raise ApiError(500, "SWITCH_DELETE_FAILED", r.get("error", "旧数据删除失败，已回滚未切换"))
+        conn.execute("UPDATE sync_config SET provider=%s WHERE id=%s", (provider, sid))
+        conn.commit()
+    audit_log(payload["username"], "switch_provider", sid, f"→ {provider}, deleted={r.get('deleted')}")
+    return r
+
+
 @router.get("/api/sync/log")
 def get_sync_logs_api(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:

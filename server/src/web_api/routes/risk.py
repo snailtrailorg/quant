@@ -7,6 +7,8 @@ from src.data_platform.db import get_conn
 import logging
 logger = logging.getLogger("web_api")
 
+_AGG_CACHE: dict[str, tuple[float, dict]] = {}   # 批27-26：全表聚合 60s 缓存（键含参数——integrity:{freq}）
+
 router = APIRouter(tags=["risk"])
 
 
@@ -265,9 +267,15 @@ def data_integrity_api(freq: str = "1D",
     freq: 1D（按 trade_cal 交易日）/ 1min / 5min（按自然日 × bars_per_day）。
     返回 {items:[{symbol, local_count, first, last, expected, pct, status}], summary}
     status: complete(>=99%) / partial(>0%) / missing(0)
+    批27-26：全表聚合按 freq 分键 60s 缓存（_METRICS_CACHE 先例——viewer 可反复刷的 DB 压力点）。
     """
     if freq not in ("1D", "1min", "5min"):
         return {"error": "freq 必须是 1D/1min/5min"}
+    import time as _t
+    _ck = f"integrity:{freq}"
+    _hit = _AGG_CACHE.get(_ck)
+    if _hit and _t.time() - _hit[0] < 60:
+        return _hit[1]
     table = "bar_1D" if freq == "1D" else f"bar_{freq}"
     bars_per_day = {"1D": 1, "1min": 240, "5min": 48}[freq]
     with get_conn() as conn:
@@ -305,5 +313,7 @@ def data_integrity_api(freq: str = "1D",
         else: missing += 1
         items.append({"symbol": sym, "local_count": cnt, "first": str(first), "last": str(last),
                       "expected": expected, "pct": pct, "status": status})
-    return {"items": items, "summary": {"total": len(items), "complete": complete,
+    _result = {"items": items, "summary": {"total": len(items), "complete": complete,
                                         "partial": partial, "missing": missing}}
+    _AGG_CACHE[_ck] = (_t.time(), _result)   # 批27-26：按 freq 分键缓存
+    return _result

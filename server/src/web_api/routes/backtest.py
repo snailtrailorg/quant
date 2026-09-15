@@ -19,6 +19,8 @@ _redis_pool = redis.ConnectionPool.from_url(
     decode_responses=True,
     socket_timeout=2, socket_connect_timeout=2)   # 批27-2：SSE gen() 内同步 get——挂起时帧断而非冻事件循环
 
+_POOL_AGG_CACHE: dict[str, tuple[float, dict]] = {}   # 批27-26：minute-status 聚合 60s 缓存（键=pid）
+
 router = APIRouter(tags=["backtest"])
 
 
@@ -140,16 +142,25 @@ def del_pool_symbol_api(pid: str, sym: str,
 @router.get("/api/pool/{pid}/minute-status")
 def pool_minute_status_api(pid: str,
                            payload: dict = Depends(require_perm("read"))):
-    """池分钟数据覆盖状态（每标的 bar_1min 最后 ts——首轮回补可能 11.5h，进度可见是必须项）。"""
+    """池分钟数据覆盖状态（每标的 bar_1min 最后 ts——首轮回补可能 11.5h，进度可见是必须项）。
+
+    批27-26：bar_1min 全表 GROUP BY 聚合按 pid 分键 60s 缓存（首轮回补期间高频轮询的 DB 压力点）。"""
+    import time as _t
+    _ck = f"minstat:{pid}"
+    _hit = _POOL_AGG_CACHE.get(_ck)
+    if _hit and _t.time() - _hit[0] < 60:
+        return _hit[1]
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT ps.symbol, COALESCE(b.last_ts::text, '') FROM pool_symbols ps "
             "LEFT JOIN (SELECT symbol, MAX(ts) AS last_ts FROM bar_1min GROUP BY symbol) b "
             "ON b.symbol = ps.symbol WHERE ps.pool_id=%s ORDER BY ps.symbol", (pid,))
         rows = cur.fetchall()
-    return {"pool_id": pid, "symbols": [
+    _result = {"pool_id": pid, "symbols": [
         {"symbol": r[0], "last_ts": r[1][:19] if r[1] else None, "covered": bool(r[1])}
         for r in rows]}
+    _POOL_AGG_CACHE[_ck] = (_t.time(), _result)
+    return _result
 
 
 @router.delete("/api/pool/{pid}")

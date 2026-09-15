@@ -1303,11 +1303,13 @@ def delete_symbol(sync_id: str, ts_code: str) -> dict:
     return {"status": "success", "deleted": deleted, "symbol": vt}
 
 
-def delete_by_sync_item(sync_id: str) -> dict:
+def delete_by_sync_item(sync_id: str, conn=None) -> dict:
     """全量删该同步项的本地数据 + 重置游标（切换 provider 用，24 号 §2.3 切换重建原语）。
 
     删 bar 表里该 kind 的所有标的（批量 SQL），并重置 last_sync_date 游标——
     调用方随后 full 回填。静态表空（无法确定删什么）返回 error 防静默假删。
+    批27-23：conn 可选传入——传入则事务归调用方（switch-provider 原子化：改 provider+删数据
+    一次 commit，防"删成功改失败=数据已丢未切换"与倒置的"新配置+旧数据混合"两种中间态）。
     """
     from src.data_platform.schema import to_vt_symbol
     meta = _PER_SYMBOL_META.get(sync_id)
@@ -1319,15 +1321,22 @@ def delete_by_sync_item(sync_id: str) -> dict:
     if not ts_codes:
         return {"status": "error", "error": f"静态表 {kind} 为空，无法确定删除范围"}   # 盲审 A-P2：防静默假删
     vts = [to_vt_symbol(tc) for tc in ts_codes]
-    with get_conn() as conn:
+
+    def _body(c) -> int:
         try:
-            cur = conn.execute(f"DELETE FROM {table} WHERE symbol = ANY(%s)", (vts,))
+            cur = c.execute(f"DELETE FROM {table} WHERE symbol = ANY(%s)", (vts,))
             deleted = cur.rowcount
         except psycopg.errors.UndefinedTable:
             deleted = 0
-        conn.execute("UPDATE sync_config SET last_sync_date=NULL, last_sync_ts=NULL, "
-                     "last_sync_count=0, last_status='idle' WHERE id=%s", (sync_id,))   # 重置游标
-        conn.commit()
+        c.execute("UPDATE sync_config SET last_sync_date=NULL, last_sync_ts=NULL, "
+                  "last_sync_count=0, last_status='idle' WHERE id=%s", (sync_id,))   # 重置游标
+        return deleted
+
+    if conn is not None:
+        return {"status": "success", "deleted": _body(conn)}   # 调用方事务（不 commit）
+    with get_conn() as c:
+        deleted = _body(c)
+        c.commit()
     return {"status": "success", "deleted": deleted}
 
 
