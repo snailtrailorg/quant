@@ -68,6 +68,17 @@ def get_conn() -> psycopg.Connection:
     return _engine.raw_connection()
 
 
+def dispose_fork_inherited_connections() -> None:
+    """批26-11（行为冒烟实证根修）：celery prefork 子进程丢弃 fork 继承的池连接。
+
+    池连接非 fork-safe：父子进程共享同一 backend session，psycopg3 auto-prepare（同语句
+    5 次触发）在该 session 注册的 prepared statement（_pg3_N）会被继承——后续子进程（重启/
+    max-tasks-per-child 回收后）写库撞 "prepared statement already exists" 整批 drop
+    （log_sink 冒烟实证：首子进程周期正常、继承连接后 sink 写库全丢）。close=False：只丢弃
+    本进程的池引用，不向服务端发 terminate（backend session 为父进程共享，close 会误杀）。"""
+    _engine.dispose(close=False)
+
+
 def get_engine():
     """返回 SQLAlchemy engine（alembic/pandas 等用）。"""
     return _engine

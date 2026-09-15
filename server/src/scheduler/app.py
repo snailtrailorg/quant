@@ -59,6 +59,13 @@ def _on_celery_setup_logging(**_kw):
 
 @worker_process_init.connect
 def _on_worker_process_init(**_kw):
+    # 批26-11 附带根修：fork 继承的池连接非 fork-safe（共享 backend session 的 prepared
+    # statement 撞名 → log_sink 整批 drop，行为冒烟实证）——先丢弃继承连接再装 sink
+    try:
+        from src.data_platform.db import dispose_fork_inherited_connections
+        dispose_fork_inherited_connections()
+    except Exception:
+        pass   # 极早期窗口（db 模块未就绪）静默——sink flush 时新连接自建即净
     from src.data_platform.log_sink import install_worker
     install_worker()   # fork 后每子进程重启 flush 线程（source 取 env，systemd 单元 Environment= 各自注入）
     # 批26-11（C6 根治）：自定义因子加载从模块 import 期挪进本信号——原位在 import 期 exec 用户
@@ -68,10 +75,13 @@ def _on_worker_process_init(**_kw):
     # 重付可忽略）；任务头 lazy 重载（tasks.py R-S4）已是运行期兜底。try/except 必留——
     # 信号处理器抛异常会阻断 prefork 子进程启动。
     try:
+        import logging
         from src.strategy_framework.factor import load_factors_from_db
         _loaded_f = load_factors_from_db()
         if _loaded_f:
-            print(f"✓ 加载自定义因子(worker 子进程): {', '.join(_loaded_f)}")
+            # 行为冒烟实证：print 在子进程 init 时刻 stdout 重定向尚未接管（journal 盲区），
+            # logger 走 log_sink→system_log 恒可观测（批26-11）
+            logging.getLogger(__name__).info("加载自定义因子(worker 子进程): %s", ", ".join(_loaded_f))
     except Exception:
         pass   # 表未建/DB 未就绪的子进程早期窗口静默（任务头 R-S4 兜底）
 
