@@ -113,18 +113,41 @@
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="actions" :label="t('common.action')" width="150">
+      <el-table-column prop="actions" :label="t('common.action')" width="120">
         <template #default="{ row }">
+          <!-- 批24 迭代九（用户裁定）：启停文字钮退役→编辑弹窗（名称+启停收编） -->
           <div style="display: inline-flex; gap: 6px">
-            <el-button size="small" :type="row.enabled ? 'warning' : 'success'" @click="toggleIm(row)">
-              {{ row.enabled ? t('common.stop') : t('common.start') }}
-            </el-button>
+            <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openImEdit(row)" />
             <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="delIm(row)" />
           </div>
         </template>
       </el-table-column>
     </TableShell>
     <div v-else style="color: var(--text-secondary); font-size: var(--fs-label); margin-bottom: var(--sp-2)">{{ t('myIm.empty') }}</div>
+
+    <!-- IM 通道编辑弹窗（批24 迭代九：名称可改+启停收编；info-table 同规范） -->
+    <el-dialog v-model="imEditDlg" :title="t('common.edit')" width="440px" append-to-body :close-on-click-modal="false">
+      <div class="info-table">
+        <div class="info-row">
+          <span class="info-label">{{ t('myIm.provider') }}</span>
+          <span class="info-value">{{ imEditForm.provider }}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">{{ t('common.name') }}</span>
+          <span class="info-value"><el-input v-model="imEditForm.name" maxlength="40" style="width: 260px" /></span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">{{ t('common.status') }}</span>
+          <span class="info-value">
+            <el-switch v-model="imEditForm.enabled" :active-text="t('common.enabled')" :inactive-text="t('common.disabled')" />
+          </span>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="imEditDlg = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="imEditSaving" @click="saveImEdit">{{ t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- 添加 IM 通道（批13 页签化：页签=注册表驱动，页签内容=方式动态生成——每平台单方式；
          批16 嵌套弹窗 append-to-body） -->
@@ -411,9 +434,29 @@ const saveIm = async () => {
   } catch (e) { ElMessage.error(apiErr(e, t('common.createFailed'))) }
   finally { imSaving.value = false }
 }
-const toggleIm = async (row) => {
-  try { await api.post(`/my/im-bots/${row.id}/${row.enabled ? 'stop' : 'start'}`); await loadIm() }
-  catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+// 批24 迭代九：IM 编辑弹窗（名称改+启停收编——原行内启停钮 toggleIm 退役，保存流按状态差异调 start/stop）
+const imEditDlg = ref(false)
+const imEditSaving = ref(false)
+const imEditForm = ref({ id: 0, provider: '', name: '', enabled: false })
+const imEditOrig = ref({ name: '', enabled: false })
+const openImEdit = row => {
+  imEditForm.value = { id: row.id, provider: row.provider, name: row.name || '', enabled: !!row.enabled }
+  imEditOrig.value = { name: row.name || '', enabled: !!row.enabled }
+  imEditDlg.value = true
+}
+const saveImEdit = async () => {
+  imEditSaving.value = true
+  try {
+    const f = imEditForm.value
+    if (f.name.trim() && f.name.trim() !== imEditOrig.value.name)
+      await api.post(`/my/im-bots/${f.id}`, { name: f.name.trim() })
+    if (f.enabled !== imEditOrig.value.enabled)
+      await api.post(`/my/im-bots/${f.id}/${f.enabled ? 'start' : 'stop'}`)
+    ElMessage.success(t('common.saveSuccess'))
+    imEditDlg.value = false
+    await loadIm()
+  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+  finally { imEditSaving.value = false }
 }
 const delIm = async (row) => {
   try {
