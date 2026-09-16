@@ -1201,7 +1201,7 @@ export default {
     },
     sysmon: {
       title: '系统监控',
-      metrics: '系统指标', services: '系统服务', connections: '实时连接', logsTitle: '系统日志',
+      metrics: '资源消耗', services: '系统服务', connections: '实时连接', runStatus: '运行状态',   // 批31：改名+页签提升（原卡头词条随壳退役）
       mem: '内存', disk: '磁盘', swap: '交换分区',
       critical: '严重', warning: '警告', normal: '正常',
       active: '运行中', inactive: '已停止', online: '在线', offline: '离线',
@@ -2404,7 +2404,7 @@ export default {
     },
     sysmon: {
       title: 'System Monitor',
-      metrics: 'Metrics', services: 'Services', connections: 'Connections', logsTitle: 'System Logs',
+      metrics: 'Resource Usage', services: 'Services', connections: 'Connections', runStatus: 'System Status',   // batch 31: rename + tab lift (old card-header key retired)
       mem: 'Memory', disk: 'Disk', swap: 'Swap',
       critical: 'Critical', warning: 'Warning', normal: 'Normal',
       active: 'Active', inactive: 'Inactive', online: 'Online', offline: 'Offline',
