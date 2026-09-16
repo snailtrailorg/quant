@@ -28,6 +28,10 @@
         <span class="info-label">{{ t('account.email') }}</span>
         <span class="info-value">{{ me.email || '-' }}<IconBtn size="small" :icon="Edit" :title="t('emailChg.title')" @click="openEmailChg" /></span>
       </div>
+      <div class="info-row">
+        <span class="info-label">{{ t('account.phone') }}</span>
+        <span class="info-value">{{ me.phone ? maskPhone(me.phone) : t('account.phoneUnset') }}<IconBtn size="small" :icon="Edit" :title="me.phone ? t('phoneChg.title') : t('phoneChg.titleAdd')" @click="openPhoneChg" /></span>
+      </div>
       <!-- 批20 20A：三行展示（注册时间/最近登录+IP/账号状态） -->
       <div class="info-row"><span class="info-label">{{ t('profile.registeredAt') }}</span><span class="info-value">{{ me.created_at || '-' }}</span></div>
       <div class="info-row"><span class="info-label">{{ t('profile.recentLogin') }}</span><span class="info-value">{{ me.last_login_at ? `${me.last_login_at}${me.last_login_ip ? ' · ' + me.last_login_ip : ''}` : '-' }}</span></div>
@@ -60,6 +64,30 @@
       <template #footer>
         <el-button @click="emailChgDlg = false">{{ t('common.cancel') }}</el-button>
         <el-button type="primary" :loading="emailChgSaving" @click="submitEmailChg">{{ t('common.submit') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 批30：改手机弹窗（验证码验证成功才改——码与手机号绑定存服务端） -->
+    <el-dialog v-model="phoneChgDlg" :title="me.phone ? t('phoneChg.title') : t('phoneChg.titleAdd')" width="420px" append-to-body :close-on-click-modal="false">
+      <el-form label-width="150px" @submit.prevent>
+        <el-form-item :label="t('phoneChg.newPhone')">
+          <el-input v-model="phoneChgForm.phone" :placeholder="t('phoneChg.phNewPhone')" maxlength="11" />
+        </el-form-item>
+        <el-form-item :label="t('phoneChg.password')">
+          <el-input v-model="phoneChgForm.current_password" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+        <el-form-item :label="t('phoneChg.code')">
+          <div class="phone-code-row">
+            <el-input v-model="phoneChgForm.code" :placeholder="t('phoneChg.phCode')" maxlength="6" />
+            <el-button :disabled="phoneCd > 0 || phoneSending" :loading="phoneSending" @click="sendPhoneCode">
+              {{ phoneCd > 0 ? t('phoneChg.resendIn', { n: phoneCd }) : (codeSent ? t('phoneChg.resend') : t('phoneChg.sendCode')) }}
+            </el-button>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="phoneChgDlg = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="phoneChgSaving" @click="submitPhoneChg">{{ t('common.submit') }}</el-button>
       </template>
     </el-dialog>
 
@@ -373,6 +401,49 @@ const submitEmailChg = async () => {
   finally { emailChgSaving.value = false }
 }
 
+// ——— 批30：手机号修改（验证码验证成功才改——码绑手机存服务端，60s 防重发倒计时） ———
+const phoneChgDlg = ref(false)
+const phoneChgSaving = ref(false)
+const phoneSending = ref(false)
+const codeSent = ref(false)
+const phoneCd = ref(0)
+let phoneCdTimer = null
+const phoneChgForm = ref({ phone: '', current_password: '', code: '' })
+const maskPhone = p => (p && p.length === 11 ? `${p.slice(0, 3)}****${p.slice(-4)}` : p)   // 本人资料后端回明文，前端遮罩后上屏防肩窥
+const openPhoneChg = () => {
+  phoneChgForm.value = { phone: '', current_password: '', code: '' }
+  codeSent.value = false
+  phoneChgDlg.value = true
+}
+const _tickCd = () => {
+  if (phoneCd.value > 0) { phoneCd.value -= 1; return }
+  clearInterval(phoneCdTimer); phoneCdTimer = null
+}
+const sendPhoneCode = async () => {
+  if (!/^1[3-9]\d{9}$/.test(phoneChgForm.value.phone)) { ElMessage.warning(t('err.PHONE_INVALID')); return }
+  phoneSending.value = true
+  try {
+    await api.post('/user/phone-request', { phone: phoneChgForm.value.phone, current_password: phoneChgForm.value.current_password })
+    codeSent.value = true
+    phoneCd.value = 60
+    if (!phoneCdTimer) phoneCdTimer = setInterval(_tickCd, 1000)
+    ElMessage.success(t('phoneChg.sent', { phone: maskPhone(phoneChgForm.value.phone) }))
+  } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
+  finally { phoneSending.value = false }
+}
+const submitPhoneChg = async () => {
+  if (!codeSent.value) { ElMessage.warning(t('phoneChg.sendCode')); return }
+  if (!/^\d{6}$/.test(phoneChgForm.value.code)) { ElMessage.warning(t('phoneChg.phCode')); return }   // B-P3：空码拦截——白烧后端 1/5 错次
+  phoneChgSaving.value = true
+  try {
+    const r = await api.post('/user/phone-change', { code: phoneChgForm.value.code })
+    phoneChgDlg.value = false
+    ElMessage.success(t('phoneChg.done', { phone: r.phone || maskPhone(phoneChgForm.value.phone) }))
+    me.value = { ...me.value, ...(await api.get('/user/profile')) }   // A-P1-1：merge 非 replace（/auth/me 不含 phone/email——整替会把两行打成未设置）
+  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
+  finally { phoneChgSaving.value = false }
+}
+
 // 批20 20B：权限玻璃盒（getMe 新鲜拉——meOnce 是登录时刻快照，admin 中途调组须反映，方案 v2 盲审B-P2-5）
 const permBox = ref({ base: [], override: [], denied: [] })
 // 批24：权限表格化只读视图——全键=三组并集；勾=有效允许（base∪override）；denied 展示但不勾（红字弱化）
@@ -484,10 +555,10 @@ let qrPollFails = 0
 let pollDeadline = 0
 const qrCountdown = ref('')
 let qrTickTimer = null
-const startQrCountdown = (expireAt) => {   // 批13 UX：二维码有效期倒计时（expire_in 秒）
+const startQrCountdown = () => {   // 批30-6：读活变量 pollDeadline——poll 的 d.ttl 真值校准自动生效（原闭包捕获调用时 deadline+resume 硬编码 10min=切页签倒计时重置根因）
   stopQrCountdown()
   const tick = () => {
-    const left = expireAt - Date.now()
+    const left = pollDeadline - Date.now()
     if (left <= 0) {
       stopQrCountdown()
       // A-P2-3：expired 是端点合成态无 SSE 事件——归零即时回查一次（防兜底轮询 15s 延迟）
@@ -523,8 +594,8 @@ const resumeActiveSession = () => {
   if (savedTicket) {
     qrTicket.value = savedTicket
     qrStatus.value = 'starting'   // 轮询首查即翻 scanning（有码）或 expired
-    pollDeadline = Date.now() + 600_000
-    startQrCountdown(pollDeadline)
+    pollDeadline = Date.now() + 3_600_000   // 批30-6：占位上界 3600（SDK expire_in 可达 ~1h；首查 d.ttl ≤2s 内校准真值——A-P2-1：900 是 pending 键 TTL 非 SDK 真值，钳 900 会低估致提前 timeout）
+    startQrCountdown()
     pollQr()   // 批14：立即一次+链式自续（间隔动态）
   }
 }
@@ -541,8 +612,8 @@ const startQr = async () => {
     qrTicket.value = r.ticket
     sessionStorage.setItem(qrTicketKey(), r.ticket)
     if (r.qr_img) { qrImg.value = r.qr_img; qrStatus.value = 'scanning' }
-    pollDeadline = Date.now() + (r.expire_in || 600) * 1000
-    startQrCountdown(pollDeadline)   // UX 裁定：有效期倒计时
+    pollDeadline = Date.now() + Math.min(r.expire_in || 600, 3600) * 1000   // 批30-6：钳 SDK 真值上界
+    startQrCountdown()   // UX 裁定：有效期倒计时
     pollQr()   // 批14：立即一次+链式自续（间隔动态）
   } catch (e) {
     // 批12A #8：BUSY 自动恢复活会话（existing_ticket——频控困局解锁，B-P2-3 通道）
@@ -551,8 +622,8 @@ const startQr = async () => {
       qrTicket.value = et
       sessionStorage.setItem(qrTicketKey(), et)
       qrStatus.value = 'starting'
-      pollDeadline = Date.now() + 600_000
-      startQrCountdown(pollDeadline)
+      pollDeadline = Date.now() + 3_600_000   // 批30-6：占位同 resume（首查校准）
+      startQrCountdown()
       pollQr()   // 批14：立即一次+链式自续（间隔动态）
       ElMessage.info(t('myIm.resumed'))
       return
@@ -567,11 +638,10 @@ const handleOnboardingStatus = async (d) => {
   // 批26-6：升级为终态吸收——终态是吸收态，任何迟到载荷（含更旧的 scanning/confirming，
   // 如 SSE 先推 done 后在途 poll 返回）一律丢弃，防界面从 done 视觉回退成"扫码中"
   if (isTerminalQr.value) return
-  // 七轮：ttl 真值校准——倒计时/pollDeadline 统一为会话真实剩余（原 startQr 用 SDK expire_in≈1h、
-  // 恢复路径硬编码 10min，同一会话两个数）
+  // 七轮：ttl 真值校准——pollDeadline 统一为会话真实剩余；批30-6 起 tick 读活变量，校准自动
+  // 反映到可见倒计时（原 if(qrImg) 条件重启=qrImg 尚空的恢复路径校准失效真 bug，随闭包改造消除）
   if (d.ttl && d.ttl > 0) {
     pollDeadline = Date.now() + d.ttl * 1000
-    if (qrImg.value) startQrCountdown(pollDeadline)
   }
   if (d.status === 'expired') {   // 批12A（A-P2-6）：key 不存在=过期（原 pending 混同收口）
     qrStatus.value = 'timeout'; stopPoll(); sessionStorage.removeItem(qrTicketKey()); return
@@ -622,7 +692,7 @@ const guardClose = (done) => {
       .catch(() => {})
   } else { stopPoll(); done() }
 }
-onUnmounted(() => { stopPoll(); stopQrCountdown(); offSse?.() })   // 轮询①+倒计时+SSE 退订
+onUnmounted(() => { stopPoll(); stopQrCountdown(); if (phoneCdTimer) clearInterval(phoneCdTimer); offSse?.() })   // 轮询①+倒计时+手机码倒计时+SSE 退订
 
 // ── 批14：SSE 事件接线（组件级生命周期——弹窗/方式切换不动连接）──
 // 契约：hello→连接即回查一次（初始竞态/resume 首查/重连补偿三合一——B-P0-2）；

@@ -50,6 +50,15 @@ class EmailChangeReq(BaseModel):   # 批20：验证成功才改（无中间态�
 class EmailConfirmReq(BaseModel):
     token: str
 
+
+class PhoneCodeReq(BaseModel):   # 批30：手机号验证码修改（码绑死手机——存侧 {code,phone}，change 不收 body 手机号）
+    phone: str
+    current_password: str
+
+
+class PhoneChangeReq(BaseModel):
+    code: str
+
 class ResetReq(BaseModel):
     token: str
     new_password: str

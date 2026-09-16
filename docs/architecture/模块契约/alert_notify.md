@@ -12,8 +12,12 @@
 server/src/alert_notify/
 ├── notify.py     # AlertNotify 单例（分级路由 + 去重 + 配额 + 记录）
 ├── channel.py    # MessageChannel 接口 + 企业微信/Discord/Server酱 实现 + get_channel 工厂
+├── dispatch.py   # 批7 订阅分发（三通道 Celery 三队列+claim/writeback 审计；批30 订阅用户化：_load_channels 读 alert_user_sub 展开为用户三通道行——行契约 {id,sub_id}，email/sms 行 id=user_id、im 行 id=bot_id 保 (ch,id) 唯一；软删停用 JOIN 过滤；legacy webhook 外推分支已退役）
+├── sms.py        # 批7 阿里云短信（dysmsapi 签名 V1 零 SDK）；批30 加 send_sms_code（验证码模板键 alert_sms_verify_template_code 独立读，不入 _CFG_KEYS——防告警面被误伤）
 └── __init__.py   # 导出 AlertNotify
 ```
+
+> **批30（2026-09-16）**：订阅维度=用户（`alert_user_sub` 表）——被选用户的邮箱/手机/名下全部 enabled bot 即投递目标（可用就发不可用跳过；多 bot 全发=用户裁定）。旧表 `alert_channel_sub` 保留不读写（im 行存量已迁 owner 用户行，email/sms 行 legacy 清单提示重建）。worker 侧重查 `_still_enabled` 走 sub_id 查新表（scheduler/alert_tasks.py）。已知修：批30 盲审 B-P0 发现 `_send_im` SQL 内嵌 `#` 注释致 IM 告警自批11C 起静默失效——已修（注释移出字符串）。
 
 ---
 

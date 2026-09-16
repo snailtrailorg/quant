@@ -4,18 +4,28 @@
     <el-alert v-if="!cfg.sms_configured" type="info" :closable="false" style="margin-bottom: 12px">
       {{ t('alerts.smsNotConfigured') }}
     </el-alert>
+    <!-- 批30：旧按地址订阅（email/sms）不自动迁移——提示重建，防告警漏发（为零不显示） -->
+    <el-alert v-if="legacyRows.length" type="warning" :closable="false" style="margin-bottom: 12px">
+      {{ t('alerts.legacyBanner', { n: legacyRows.length }) }}
+    </el-alert>
 
     <TableShell :data="rows" storage-key="alert-subs">
-      <el-table-column prop="channel" :label="t('common.type')" width="90">
+      <el-table-column prop="username" :label="t('alerts.subUser')" min-width="150">
         <template #default="{ row }">
-          <el-tag :type="{ im: 'primary', email: 'success', sms: 'warning' }[row.channel]">
-            {{ t('alerts.channel.' + row.channel) }}
-          </el-tag>
+          {{ row.nickname ? `${row.username}（${row.nickname}）` : row.username }}
         </template>
       </el-table-column>
-      <el-table-column prop="target" :label="t('alerts.target')" min-width="160" show-overflow-tooltip>
+      <el-table-column :label="t('alerts.channels')" min-width="220">
         <template #default="{ row }">
-          {{ row.channel === 'im' ? botName(row.target) : (row.target || '—') }}
+          <el-tooltip :content="row.channels.email ? t('alerts.chip.email.okTip') : t('alerts.chip.email.noTip')" placement="top">
+            <el-tag :type="row.channels.email ? 'success' : 'info'" size="small" style="margin: 1px">{{ row.channels.email ? t('alerts.chip.email.ok') : t('alerts.chip.email.no') }}</el-tag>
+          </el-tooltip>
+          <el-tooltip :content="row.channels.sms ? t('alerts.chip.sms.okTip') : t('alerts.chip.sms.noTip')" placement="top">
+            <el-tag :type="row.channels.sms ? 'warning' : 'info'" size="small" style="margin: 1px">{{ row.channels.sms ? t('alerts.chip.sms.ok') : t('alerts.chip.sms.no') }}</el-tag>
+          </el-tooltip>
+          <el-tooltip :content="row.channels.im ? t('alerts.chip.imTip', { n: row.channels.im }) : t('alerts.chip.imZeroTip')" placement="top">
+            <el-tag :type="row.channels.im ? 'primary' : 'info'" size="small" style="margin: 1px">{{ row.channels.im ? t('alerts.chip.im', { n: row.channels.im }) : t('alerts.chip.imZero') }}</el-tag>
+          </el-tooltip>
         </template>
       </el-table-column>
       <el-table-column prop="categories" :label="t('alerts.categories')" min-width="170">
@@ -46,25 +56,16 @@
       <el-button type="warning" @click="smsDlg = true">{{ t('alerts.smsCred') }}</el-button>
     </div>
 
-    <!-- 订阅编辑（新增/修改共用；类型驱动目标控件） -->
+    <!-- 订阅编辑（批30 用户维度：新增=用户多选循环建行；编辑=用户只读） -->
     <el-dialog v-model="dlg" :close-on-click-modal="false" :title="isEdit ? t('alerts.editSub') : t('alerts.addSub')" width="560px">
       <el-form label-width="90px">
-        <el-form-item :label="t('common.type')">
-          <el-select v-model="form.channel" style="width: 100%" :disabled="isEdit">
-            <el-option value="im" :label="t('alerts.channel.im')" />
-            <el-option value="email" :label="t('alerts.channel.email')" />
-            <el-option value="sms" :label="t('alerts.channel.sms')" />
+        <el-form-item :label="t('alerts.subUser')">
+          <el-select v-if="!isEdit" v-model="form.user_ids" multiple filterable style="width: 100%" :placeholder="t('alerts.phSubUser')">
+            <el-option v-for="u in cfg.users" :key="u.id" :value="u.id"
+                       :label="u.nickname ? `${u.username}（${u.nickname}）` : u.username" />
           </el-select>
-        </el-form-item>
-        <el-form-item :label="t('alerts.target')">
-          <el-select v-if="form.channel === 'im'" v-model="form.target" style="width: 100%">
-            <!-- 五轮：IM 全面用户化——告警从用户 bot 中选（显示归属人） -->
-            <el-option v-for="b in cfg.im_bots" :key="b.id" :value="String(b.id)"
-                       :label="b.owner ? `${b.name}（${b.owner} · ${t('alerts.channel.' + b.provider)}）` : `${b.name}（${t('alerts.channel.' + b.provider)}）`"
-                       :disabled="!b.enabled" />
-          </el-select>
-          <el-input v-else-if="form.channel === 'email'" v-model="form.target" :placeholder="t('alerts.phEmail')" />
-          <el-input v-else v-model="form.target" :placeholder="t('alerts.phPhone')" />
+          <div v-if="!isEdit" class="sub-limit-hint">{{ t('alerts.subLimit') }}</div>
+          <el-input v-else :model-value="form.username" disabled />
         </el-form-item>
         <el-form-item :label="t('alerts.categories')">
           <el-checkbox-group v-model="form.categories">
@@ -87,13 +88,14 @@
       </template>
     </el-dialog>
 
-    <!-- 短信凭证（专用端点,secret 只写不读） -->
+    <!-- 短信凭证（专用端点,secret 只写不读；批30 加验证码模板第 5 字段） -->
     <el-dialog v-model="smsDlg" :close-on-click-modal="false" :title="t('alerts.smsCred')" width="560px">
       <el-form label-width="140px">
         <el-form-item label="AccessKey ID"><el-input v-model="smsForm.access_key_id" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
         <el-form-item label="AccessKey Secret"><el-input v-model="smsForm.access_key_secret" type="password" show-password :placeholder="t('alerts.phKeepBlank')" autocomplete="new-password" /></el-form-item>
         <el-form-item :label="t('alerts.signName')"><el-input v-model="smsForm.sign_name" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
         <el-form-item :label="t('alerts.tplCode')"><el-input v-model="smsForm.template_code" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
+        <el-form-item :label="t('alerts.verifyTplCode')"><el-input v-model="smsForm.verify_template_code" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="smsDlg = false">{{ t('common.cancel') }}</el-button>
@@ -117,36 +119,32 @@ const { t } = useI18n()
 const CATS = ['risk', 'task', 'data', 'system']
 const allowed = ref(false)
 const isAdmin = localStorage.getItem('role') === 'admin'
-const cfg = ref({ channels: [], sms_configured: false, im_bots: [], quota: {} })
+const cfg = ref({ subs: [], users: [], sms_configured: false, legacy: [], quota: {} })
 const rows = ref([])
 const dlg = ref(false)
 const isEdit = ref(false)
 const editingId = ref(null)
-const form = reactive({ channel: 'im', target: '', categories: ['risk'], min_level: 'warn', enabled: true })
+const form = reactive({ user_ids: [], username: '', categories: ['risk'], min_level: 'warn', enabled: true })
 const testing = reactive({})
 const smsDlg = ref(false)
-const smsForm = ref({ access_key_id: '', access_key_secret: '', sign_name: '', template_code: '' })
+const smsForm = ref({ access_key_id: '', access_key_secret: '', sign_name: '', template_code: '', verify_template_code: '' })
 
-const selBot = computed(() => {
-  const b = cfg.value.im_bots.find(x => String(x.id) === form.target)
-  return b && b.enabled ? b : null
-})
-const botName = tid => cfg.value.im_bots.find(x => String(x.id) === String(tid))?.name || tid
+const legacyRows = computed(() => cfg.value.legacy || [])
 
 const load = async () => {
   const d = await api.get('/alerts/config')
   cfg.value = d
-  rows.value = d.channels
+  rows.value = d.subs
 }
 
 const add = () => {
   isEdit.value = false; editingId.value = null
-  Object.assign(form, { channel: 'im', target: '', categories: ['risk'], min_level: 'warn', enabled: true })
+  Object.assign(form, { user_ids: [], username: '', categories: ['risk'], min_level: 'warn', enabled: true })
   dlg.value = true
 }
 const edit = (row) => {
   isEdit.value = true; editingId.value = row.id
-  Object.assign(form, { channel: row.channel, target: row.target || '',
+  Object.assign(form, { user_ids: [row.user_id], username: row.nickname ? `${row.username}（${row.nickname}）` : row.username,
                         categories: [...(row.categories || [])], min_level: row.min_level, enabled: row.enabled })
   dlg.value = true
 }
@@ -154,20 +152,32 @@ const edit = (row) => {
 const save = async () => {
   try {
     if (isEdit.value) {
-      await api.put(`/alerts/config/${editingId.value}`, { ...form })
+      await api.put(`/alerts/config/${editingId.value}`,
+                    { user_id: form.user_ids[0], categories: form.categories, min_level: form.min_level, enabled: form.enabled })
     } else {
-      const r = await api.post('/alerts/config', { ...form })
-      editingId.value = r.id
+      // 用户多选=循环建行（后端行级端点保形）；A-P2-5：已订阅（409 DUPLICATE_SUB）幂等跳过，
+      // 其余失败收集后统一报——部分成功行落表可见
+      if (!form.user_ids.length) { ElMessage.warning(t('alerts.phSubUser')); return }
+      const failed = []
+      for (const uid of form.user_ids) {
+        try {
+          await api.post('/alerts/config', { user_id: uid, categories: form.categories, min_level: form.min_level, enabled: form.enabled })
+        } catch (e) {
+          if (e?.code === 'DUPLICATE_SUB') continue
+          failed.push(uid)
+        }
+      }
+      if (failed.length) throw new Error(`${failed.length}`)
     }
     dlg.value = false
     ElMessage.success(t('common.success'))
     await load()
-  } catch (e) { ElMessage.error(e?.detail || t('common.failed')) }
+  } catch (e) { ElMessage.error(e?.message ? t('alerts.partialFail', { n: e.message }) : (e?.detail || t('common.failed'))) }
 }
 
 const toggle = async (row) => {
   try {
-    await api.put(`/alerts/config/${row.id}`, { target: row.target, categories: row.categories,
+    await api.put(`/alerts/config/${row.id}`, { categories: row.categories,
                                                 min_level: row.min_level, enabled: row.enabled })
     ElMessage.success(t('common.success'))
   } catch (e) {
@@ -178,7 +188,7 @@ const toggle = async (row) => {
 
 const del = async (row) => {
   try {
-    await ElMessageBox.confirm(`${t('alerts.channel.' + row.channel)} · ${row.channel === 'im' ? botName(row.target) : row.target}`,
+    await ElMessageBox.confirm(row.nickname ? `${row.username}（${row.nickname}）` : row.username,
                                t('common.delete'), { type: 'warning' })
     await api.delete(`/alerts/config/${row.id}`)
     ElMessage.success(t('common.success'))
@@ -199,7 +209,7 @@ const test = async (row) => {
   testing[row.id] = true
   try {
     const r = await api.post('/alerts/test', { id: row.id })
-    r.ok ? ElMessage.success(`${t('alerts.channel.' + row.channel)}: ${r.detail}`) : ElMessage.warning(`${t('alerts.channel.' + row.channel)}: ${r.detail}`)
+    r.ok ? ElMessage.success(r.detail) : ElMessage.warning(r.detail)
   } catch (e) {
     ElMessage.error(e?.detail || t('common.failed'))
   } finally { testing[row.id] = false }
@@ -213,3 +223,6 @@ onMounted(async () => {
   if (allowed.value) await load().catch(() => {})
 })
 </script>
+<style scoped>
+.sub-limit-hint { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: 4px; line-height: 1.4; }
+</style>

@@ -60,7 +60,8 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 系统 | `/health` | GET | 无 | 健康检查 |
 | 认证 | `/api/auth/*` | POST/GET | viewer+（部分 user_mgmt） | login/me/logout/invite/invite/verify/register/forgot/reset/change-password |
 | 用户管理 | `/api/user` `/api/user/{uid}` | POST/GET/POST/DELETE | user_mgmt（Admin） | create/list + 改角色/禁用（不动自己守卫）+ 软删（脱敏+清头像，批次 D） |
-| 用户自助 | `/api/user/profile` `/api/user/avatar` `/api/user/deactivate` | GET/POST | viewer+（本人） | 资料读 + 改昵称（仅昵称自助）/头像上传/自助停用（批次 C） |
+| 用户自助 | `/api/user/profile` `/api/user/avatar` `/api/user/deactivate` | GET/POST | viewer+（本人） | 资料读 + 改昵称（仅昵称自助）/头像上传/自助停用（批次 C）。**批30**：profile 响应加 `phone`；`/api/user/phone-request`+`/api/user/phone-change`（POST，require_authenticated——手机号验证码修改，码绑手机存 Valkey {code,phone}，change 不收 body 手机号；密码验证+phonechg 3/h 按 uid+60s 冷却+码错 5 次作废） |
+| 告警订阅 | `/api/alerts/config` `/api/alerts/sms-config` `/api/alerts/test` | GET/POST/PUT/DELETE | alerts_config（admin 专属） | **批30 订阅用户化**：config 维度=user_id（alert_user_sub 表，全表 10 行上限）；GET 响应 {subs,users,sms_configured,legacy,quota}（users=可订阅清单+三通道可用性）；test=按订阅用户三通道各试发；sms-config 加 verify_template_code 第 5 字段 |
 | 策略 | `/api/strategy` `/api/strategy/{sid}/{start,stop,verify}` | GET/POST/POST/POST | viewer+ / strategy_control | CRUD + 启停 + 回测验证标记 |
 | 持仓/盈亏/订单/账户 | `/api/position` `/api/pnl` `/api/orders` `/api/account` `/api/account/{aid}` | GET | viewer+ | 读查询（XTP query） |
 | 日志/告警 | `/api/log` `/api/alert` | GET | viewer+ | 系统/告警日志 |

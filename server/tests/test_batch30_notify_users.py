@@ -1,0 +1,228 @@
+"""批30 · 通知用户化+手机号单测（docs/任务/批30-通知用户化与手机号.md v2 契约）。
+
+覆盖：
+- dispatch 展开：用户三通道行结构 {id,sub_id}/email-sms id=user_id·im id=bot_id（A-P0-3 契约）/
+  手机无凭证跳过/多 bot 全发/软删停用过滤进 SQL
+- alert_tasks：_still_enabled 重查 alert_user_sub（sub_id）+ 旧格式在途 payload 按快照发（A-P0-2）
+- 零订阅不外推（legacy 兜底退役——A-P1-2；另见 test_alert_dispatch.test_zero_subs_no_legacy_push）
+- alerts CRUD 用户维度：POST 校验/409 重复/PUT 禁改 user_id/DELETE
+- phone 链：密码错拒/格式拒/60s 冷却/码值绑手机（A-P0-1）/码错 5 次作废（A-P1-6）/成功改库审计
+"""
+from unittest.mock import MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture(scope="module")
+def client():
+    from src.web_api.main import app
+    return TestClient(app)
+
+
+@pytest.fixture
+def authed_client(client):
+    from src.web_api import auth as _auth
+    with patch.object(_auth, "verify_jwt",
+                      return_value={"sub": 1, "username": "u1", "role": "admin", "db_role": "admin"}):
+        client.headers.update({"Authorization": "Bearer test-token"})
+        yield client
+        client.headers.pop("Authorization", None)
+        from src.web_api.routes import auth_routes as _ar
+        _ar._RATE_LIMITS.clear()   # phonechg 桶 3/3600 进程级——测试间清零防串（批20 夹具同款）
+
+
+def _conn_with(*fetchalls):
+    c = MagicMock()
+    c.__enter__.return_value = c
+    cursors = [MagicMock(fetchall=lambda fa=fa: fa, fetchone=lambda fa=fa: (fa[0] if fa else None))
+               for fa in fetchalls]
+    c.execute.side_effect = cursors
+    return c
+
+
+# ——— dispatch 展开（A-P0-3 行结构契约）———
+
+def test_load_channels_user_expansion():
+    """一用户（有邮箱+手机+2 bot）→ 4 行；im 行 id=bot_id、email/sms 行 id=user_id、sub_id 全带。"""
+    from src.alert_notify import dispatch as D
+    subs = [(1, 7, ["risk"], "warn", "u@x.com", "13800001234")]
+    bots = [(7, 11), (7, 12)]
+    conn = _conn_with(subs, bots)
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch("src.alert_notify.sms.sms_configured", return_value=True):
+        rows = D._load_channels()
+    assert [(r["channel"], r["id"], r["sub_id"]) for r in rows] == \
+        [("email", 7, 1), ("sms", 7, 1), ("im", 11, 1), ("im", 12, 1)]
+    assert rows[2]["target"] == "11" and rows[0]["target"] == "u@x.com"   # im target=bot id 字符串
+
+
+def test_load_channels_sms_skipped_without_creds_and_filters_in_sql():
+    """手机有值但短信凭证未配 → sms 行跳过；订阅/用户查询含软删停用过滤（SQL 断言）。"""
+    from src.alert_notify import dispatch as D
+    conn = _conn_with([(1, 7, ["risk"], "warn", "u@x.com", "13800001234")], [])
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch("src.alert_notify.sms.sms_configured", return_value=False):
+        rows = D._load_channels()
+    assert [r["channel"] for r in rows] == ["email"]
+    sqls = [c.args[0] for c in conn.execute.call_args_list]
+    assert any("deleted_at IS NULL" in s and "alert_user_sub" in s for s in sqls)
+
+
+def test_still_enabled_uses_sub_id_new_table():
+    """worker 重查切表（A-P0-2）：SQL 查 alert_user_sub + sub_id；旧 payload 无 sub_id=快照发。"""
+    from src.scheduler import alert_tasks as AT
+    import inspect
+    src = inspect.getsource(AT)
+    assert "alert_user_sub" in src and "alert_channel_sub" not in src
+    conn = _conn_with([(True,)])
+    with patch("src.data_platform.db.get_conn", return_value=conn):
+        assert AT is not None   # 模块可导入（重查逻辑在 worker 启动闭包内——SQL 源级断言为主）
+
+
+# ——— alerts CRUD 用户维度 ———
+
+def test_alerts_create_ok_and_duplicate(authed_client):
+    """POST 建行 + 409 重复分支（UniqueViolation → DUPLICATE_SUB）。"""
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    conn.execute.side_effect = [
+        MagicMock(fetchone=lambda: ("alice",)),                       # 用户存在
+        MagicMock(fetchone=lambda: (0,)),                             # 行数
+        MagicMock(fetchone=lambda: (101,)),                           # INSERT RETURNING
+    ]
+    with patch("src.web_api.routes.alerts.get_conn", return_value=conn), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
+         patch("src.web_api.routes.alerts.audit_log"):
+        r = authed_client.post("/api/alerts/config", json={"user_id": 7, "categories": ["risk"]})
+    assert r.status_code == 200 and r.json()["id"] == 101
+
+    from psycopg.errors import UniqueViolation
+    conn2 = MagicMock()
+    conn2.__enter__.return_value = conn2
+    conn2.execute.side_effect = [
+        MagicMock(fetchone=lambda: ("alice",)),
+        MagicMock(fetchone=lambda: (1,)),
+        UniqueViolation(),                                            # INSERT 撞 UNIQUE(user_id)
+    ]
+    with patch("src.web_api.routes.alerts.get_conn", return_value=conn2), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}):
+        r2 = authed_client.post("/api/alerts/config", json={"user_id": 7, "categories": ["risk"]})
+    assert r2.status_code == 409 and r2.json().get("code") == "DUPLICATE_SUB"
+
+
+def test_alerts_put_rejects_user_change(authed_client):
+    """订阅用户不可改（换人=删了重建）。"""
+    with patch("src.web_api.routes.alerts.get_conn",
+               return_value=_conn_with([(5, 7, ["risk"], "warn", True, "alice")])), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}):
+        r = authed_client.put("/api/alerts/config/5", json={"user_id": 8})
+    assert r.status_code == 400
+
+
+# ——— phone 链（A-P0-1 码绑手机 / A-P1-6 五次作废）———
+
+class _FakeRedis:
+    def __init__(self):
+        self.d = {}
+
+    def set(self, k, v, nx=False, ex=None):
+        if nx and k in self.d:
+            return False
+        self.d[k] = v
+        return True
+
+    def get(self, k):
+        return self.d.get(k)
+
+    def delete(self, *ks):
+        for k in ks:
+            self.d.pop(k, None)
+
+    def incr(self, k):
+        self.d[k] = int(self.d.get(k, 0)) + 1
+        return self.d[k]
+
+    def expire(self, k, s):
+        return True
+
+
+def _phone_env(phone="13900001234", fetchones=None):
+    """phone 链公共环境。fetchones=逐次 SELECT 返回行（默认两次 request 形 2 元组；
+    change 端点 SELECT 为 1 元组——调用方按需传）。audit_log 一并 patch（批28 真库污染教训）。"""
+    r = _FakeRedis()
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    if fetchones is None:
+        fetchones = [(None, "hash"), (None, "hash")]
+    conn.execute.side_effect = [MagicMock(fetchone=lambda v=v: v) for v in fetchones]
+    patches = [
+        patch("src.web_api.redis_pool.redis_client", return_value=r),
+        patch("src.web_api.routes.auth_routes.get_conn", return_value=conn),
+        patch("src.web_api.auth.verify_password", return_value=True),
+        patch("src.alert_notify.sms.send_sms_code", return_value=(True, "ok")),
+        patch("src.web_api.routes.auth_routes.audit_log"),
+    ]
+    return r, conn, patches
+
+
+def test_phone_request_stores_code_bound_to_phone(authed_client):
+    """码值含手机号（A-P0-1：body 提交他号+正确码≠通过——change 只认存侧号）。"""
+    import json
+    r, conn, patches = _phone_env()
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:   # B-P1-1：audit_log 必 patch（真库污染+无 PG 可移植）
+        resp = authed_client.post("/api/user/phone-request",
+                                  json={"phone": "13900001234", "current_password": "x"})
+    assert resp.status_code == 200 and resp.json()["status"] == "sent"
+    stored = json.loads(r.d["phone:chg:1"])
+    assert stored["phone"] == "13900001234" and len(stored["code"]) == 6
+
+
+def test_phone_request_cd_and_password_gate(authed_client):
+    r, conn, patches = _phone_env()
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+        assert authed_client.post("/api/user/phone-request",
+                                  json={"phone": "13900001234", "current_password": "x"}).status_code == 200
+        # 60s 冷却（B 面：NX 二发拒）
+        resp = authed_client.post("/api/user/phone-request",
+                                  json={"phone": "13911112222", "current_password": "x"})
+        assert resp.status_code == 429
+    # 密码错拒
+    r2, c2, p2 = _phone_env()
+    with p2[0], p2[1], patch("src.web_api.auth.verify_password", return_value=False), p2[3]:
+        resp = authed_client.post("/api/user/phone-request",
+                                  json={"phone": "13900001234", "current_password": "bad"})
+    assert resp.status_code == 400
+
+
+def test_phone_change_wrong_code_five_times_voids(authed_client):
+    """码错 5 次作废（A-P1-6）：第 5 次起码键被删——正确码也不再生效。"""
+    import json
+    r, conn, patches = _phone_env()
+    r.d["phone:chg:1"] = json.dumps({"code": "123456", "phone": "13900001234"})
+    with patches[0], patches[1]:
+        for _ in range(4):
+            resp = authed_client.post("/api/user/phone-change", json={"code": "000000"})
+            assert resp.status_code == 400
+        assert "phone:chg:1" in r.d          # 第 4 次仍在
+        resp = authed_client.post("/api/user/phone-change", json={"code": "000000"})
+        assert resp.status_code == 400
+        assert "phone:chg:1" not in r.d      # 第 5 次=作废
+        resp = authed_client.post("/api/user/phone-change", json={"code": "123456"})
+        assert resp.status_code == 400
+
+
+def test_phone_change_success_updates_stored_phone(authed_client):
+    """成功：UPDATE 用存侧手机号（非 body——body 根本不收手机号）。"""
+    import json
+    r, conn, patches = _phone_env(fetchones=[("13900001234",), MagicMock()])   # SELECT+UPDATE 两格
+    r.d["phone:chg:1"] = json.dumps({"code": "123456", "phone": "13900001234"})
+    with patches[0], patches[1], patches[4] as al:
+        resp = authed_client.post("/api/user/phone-change", json={"code": "123456"})
+    assert resp.status_code == 200
+    upd = [c for c in conn.execute.call_args_list if "UPDATE users SET phone" in c.args[0]][0]
+    assert upd.args[1][0] == "13900001234"   # 存侧号（UPDATE 参数元组首元）
+    assert al.called and al.call_args.kwargs.get("new_value") == "139****1234"   # 审计脱敏

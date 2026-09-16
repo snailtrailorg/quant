@@ -60,26 +60,8 @@ def _pe(s) -> str:
     return quote(str(s), safe="-_.~")
 
 
-def send_sms(phone: str, level: str, title: str) -> tuple[bool, str]:
-    """发送一条告警短信。返回 (ok, reason_token)——reason 只允许稳定枚举，原文进 journal。"""
-    cfg = _sms_config()
-    if not cfg:
-        return False, "not_configured"
-    params: dict[str, str] = {
-        "Action": "SendSms",
-        "Version": "2017-05-25",
-        "Format": "JSON",
-        "AccessKeyId": cfg["alert_sms_access_key_id"],
-        "SignatureMethod": "HMAC-SHA1",
-        "SignatureVersion": "1.0",
-        "SignatureNonce": uuid.uuid4().hex,
-        "Timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "PhoneNumbers": phone,
-        "SignName": cfg["alert_sms_sign_name"],
-        "TemplateCode": cfg["alert_sms_template_code"],
-        # 整体 json.dumps 构造，禁 f-string 拼 JSON（引号/特殊字符注入面）
-        "TemplateParam": json.dumps({"level": level, "title": str(title)[:20]}, ensure_ascii=False),
-    }
+def _aliyun_send(cfg: dict, params: dict[str, str]) -> tuple[bool, str]:
+    """dysmsapi RPC 签名 V1 发送（批30 抽公共——告警/验证码两模板同通道）。"""
     canonical = urlencode(sorted(params.items()), safe="-_.~", quote_via=quote)
     string_to_sign = "POST&" + _pe("/") + "&" + _pe(canonical)
     signature = base64.b64encode(
@@ -97,3 +79,55 @@ def send_sms(phone: str, level: str, title: str) -> tuple[bool, str]:
     except (httpx.HTTPError, ValueError) as e:
         logger.warning("aliyun sms send failed: %s", e)
         return False, "timeout"
+
+
+def _base_params(cfg: dict, phone: str, template_code: str, template_param: dict) -> dict[str, str]:
+    return {
+        "Action": "SendSms",
+        "Version": "2017-05-25",
+        "Format": "JSON",
+        "AccessKeyId": cfg["alert_sms_access_key_id"],
+        "SignatureMethod": "HMAC-SHA1",
+        "SignatureVersion": "1.0",
+        "SignatureNonce": uuid.uuid4().hex,
+        "Timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "PhoneNumbers": phone,
+        "SignName": cfg["alert_sms_sign_name"],
+        "TemplateCode": template_code,
+        # 整体 json.dumps 构造，禁 f-string 拼 JSON（引号/特殊字符注入面）
+        "TemplateParam": json.dumps(template_param, ensure_ascii=False),
+    }
+
+
+def send_sms(phone: str, level: str, title: str) -> tuple[bool, str]:
+    """发送一条告警短信。返回 (ok, reason_token)——reason 只允许稳定枚举，原文进 journal。"""
+    cfg = _sms_config()
+    if not cfg:
+        return False, "not_configured"
+    params = _base_params(cfg, phone, cfg["alert_sms_template_code"],
+                          {"level": level, "title": str(title)[:20]})
+    return _aliyun_send(cfg, params)
+
+
+def send_sms_code(phone: str, code: str) -> tuple[bool, str]:
+    """批30：发手机号修改验证码短信。
+
+    模板键 alert_sms_verify_template_code 独立读取（带 alert_sms_ 前缀进 _sms_config 的
+    LIKE 面但**不入 _CFG_KEYS 四键 all() 校验**——盲审 A-P1-5/B-P1-3：防告警面
+    sms_configured 被未配验证码模板误伤）。返回 (ok, reason_token)。"""
+    cfg = _sms_config()
+    if not cfg:
+        return False, "not_configured"
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            r = conn.execute(
+                "SELECT value FROM system_config WHERE key='alert_sms_verify_template_code'").fetchone()
+        tpl = str(r[0]).strip() if r and r[0] and str(r[0]).strip() else ""
+    except Exception as e:
+        logger.error("read alert_sms_verify_template_code failed: %s", e)
+        return False, "verify_template_missing"
+    if not tpl:
+        return False, "verify_template_missing"
+    params = _base_params(cfg, phone, tpl, {"code": code})
+    return _aliyun_send(cfg, params)

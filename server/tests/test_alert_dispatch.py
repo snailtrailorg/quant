@@ -167,17 +167,16 @@ def test_report_info_not_dispatched():
 
 
 # ⑩ 过渡兜底：零 enabled 订阅 → critical+risk 走旧 _push_channel + legacy 回写
-def test_legacy_fallback_throttled():
-    """B 评 P1：兜底路径保留 15min 节流（E-4 循环告警烧配额回归防线）。"""
-    wb = []
+def test_zero_subs_no_legacy_push():
+    """批30（盲审 A-P1-2 裁定）：零订阅=不外推——legacy webhook 过渡兜底随订阅用户化退役
+    （新表空环境不得重燃已失效 webhook；原 test_legacy_fallback/_throttled 两测随分支退役）。"""
     with patch.object(D, "_load_channels", return_value=[]), \
-         patch.object(D, "_writeback", lambda n, c, v: wb.append((c, v))), \
-         patch.object(D, "_throttled", MagicMock(return_value=True)), \
-         patch.object(N, "should_push_external", return_value=True), \
+         patch.object(D, "_writeback_empty") as p_empty, \
+         patch.object(D, "_throttled", MagicMock(return_value=False)), \
          patch.object(N, "_push_channel") as p_pc:
         D._dispatch_async("critical", "risk", "t", "b", None, 1)
     p_pc.assert_not_called()
-    assert ("legacy", "skip:throttled") in wb
+    p_empty.assert_called_once()
 
 
 def test_claim_guards_double_send():
@@ -207,19 +206,9 @@ def test_degrade_respects_claim():
     p_send.assert_not_called()
 
 
-def test_legacy_fallback():
-    wb = []
-    with patch.object(D, "_load_channels", return_value=[]), \
-         patch.object(D, "_writeback", lambda n, c, v: wb.append((c, v))), \
-         patch.object(D, "_throttled", MagicMock(return_value=False)), \
-         patch.object(N, "should_push_external", return_value=True), \
-         patch.object(N, "_push_channel", return_value=True) as p_pc:
-        D._dispatch_async("critical", "risk", "t", "b", None, 1)
-    p_pc.assert_called_once()
-    assert ("legacy", "ok") in wb
-
-
-def test_legacy_fallback_non_critical_writes_empty():
+def test_zero_subs_non_critical_writes_empty():
+    """批30 名实校正：legacy 退役后本测=零订阅一律 writeback_empty（warn 级同 critical 级——
+    外推分支已删，级别不再分支）。"""
     with patch.object(D, "_load_channels", return_value=[]), \
          patch.object(D, "_throttled", MagicMock(return_value=False)), \
          patch.object(D, "_writeback_empty") as p_empty, \

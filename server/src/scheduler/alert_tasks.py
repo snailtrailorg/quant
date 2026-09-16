@@ -28,17 +28,21 @@ def _register():
     from src.data_platform.db import get_conn
 
     def _still_enabled(row: dict) -> bool:
-        """行级重查（批7.1 多目标）：入队后该行被关/删则 skip（计费敏感）。"""
-        if row.get("id") is None:
-            return True   # 补审C：批 7 旧格式在途 payload 无行 id——按快照发（WHERE id=NULL 恒空会误标 skip:disabled 丢发）
+        """行级重查（批7.1 多目标；批30 切表）：入队后订阅行被关/删则 skip（计费敏感）。
+
+        批30：重查 alert_user_sub（sub_id=订阅行 id）。旧格式在途 payload 无 sub_id——按快照发
+        （两表 id 空间重叠，拿旧 id 查新表=随机误杀/误放——盲审 A-P0-2）。"""
+        sid = row.get("sub_id")
+        if sid is None:
+            return True   # 快照发（入队时刻的有效订阅）
         try:
             with get_conn() as conn:
                 cur = conn.execute(
-                    "SELECT enabled FROM alert_channel_sub WHERE id=%s", (row.get("id"),))
+                    "SELECT enabled FROM alert_user_sub WHERE id=%s", (sid,))
                 r = cur.fetchone()
                 return bool(r and r[0])
         except Exception as e:
-            logger.warning("re-check enabled(row %s) failed: %s", row.get("id"), e)
+            logger.warning("re-check enabled(sub %s) failed: %s", sid, e)
             return True   # 查不到按快照发（快照本身是入队时刻的有效订阅）
 
     def _finish(ch: str, row: dict, level: str, category: str, title: str,

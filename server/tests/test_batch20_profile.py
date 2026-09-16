@@ -34,10 +34,10 @@ def authed_client(client):
 
 
 def _row(username="u1", email="u1@x.com", ph="hash", enabled=True, deleted=None):
-    """profile SELECT 行（10 列）。"""
+    """profile SELECT 行（批30 起 11 列——phone 尾列）。"""
     return (username, "nick", "trader", None, email,
             datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 9, 13, tzinfo=timezone.utc),
-            "1.2.3.4", enabled, deleted)
+            "1.2.3.4", enabled, deleted, "13800001234")
 
 
 class TestProfileExpansion:

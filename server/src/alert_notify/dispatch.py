@@ -217,7 +217,10 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
             if not row:
                 return False, "disabled"
             provider_name = row[0]
-            cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s AND user_id IS NOT NULL   # 批11C（A-P1-4）：只发绑定用户——首见留痕行（user_id NULL）不再收告警", (bid,))
+            # 批11C（A-P1-4）：只发绑定用户——首见留痕行（user_id NULL）不再收告警
+            # （批30 盲审 B-P0：原注释嵌在 SQL 字符串内→psycopg SyntaxError 被吞成 (False,"timeout")
+            #  ——IM 告警自批11C 上产起整体静默失效；注释移出字符串，SQL 本体零变化）
+            cur = conn.execute("SELECT im_user_id FROM im_bot_users WHERE bot_id=%s AND user_id IS NOT NULL", (bid,))
             users = list({r[0] for r in cur.fetchall()})
         if not users:
             # arch-19 双轨收尾（2026-09-02）：表空则尝试 env 授权层一次性回填（扫码时代 open_id 在 env，
@@ -287,39 +290,56 @@ def _send_one(row: dict, level: str, category: str, title: str, body: str, code:
 # ── 订阅加载与主流程 ──
 
 def _load_channels() -> list[dict]:
-    """enabled 订阅行。DB 异常 = 空 + warn（订阅在 DB，DB 故障=外推不可用，与旧 webhook 同语义）。"""
+    """批30：订阅用户展开为通道目标行（函数名保留——dispatch 机制测试的 patch 缝）。
+
+    行结构契约（方案 30-3）：{channel, target, categories, min_level, id, sub_id}——
+    email/sms 行 id=user_id、im 行 id=bot_id（(ch,id) 全局唯一：节流/dkey/claim 三链防撞
+    ——盲审 A-P0-3/B-P1-2）；sub_id=alert_user_sub 行 id（worker 侧重查用）。
+    软删/停用用户 JOIN 过滤=自然出列表（用户裁定：删用户自动退出通知）；通道不可用跳过
+    （手机无/短信凭证未配；邮箱仅有值判定——发送侧 outbox 兜底失败可见，跳过反而静默）。
+    DB 异常 = 空 + warn（订阅在 DB，DB 故障=外推不可用，与旧 webhook 同语义）。"""
     try:
         from src.data_platform.db import get_conn
+        from src.alert_notify.sms import sms_configured as _sms_ok
+        rows: list[dict] = []
         with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT id, channel, target, categories, min_level FROM alert_channel_sub "
-                "WHERE enabled ORDER BY id")
-            # 2026-09-02 多目标修正：每通道可多行（多邮箱/多手机/多 bot）——行 id 进快照，
-            # 回写/节流键 = dkey=ch:row_id（ch 键会同行互撞：第二行必被节流/回写互相覆盖）
-            return [{"id": r[0], "channel": r[1], "target": r[2], "categories": r[3] or [],
-                     "min_level": r[4]} for r in cur.fetchall()]
+            subs = conn.execute(
+                "SELECT s.id, s.user_id, s.categories, s.min_level, u.email, u.phone "
+                "FROM alert_user_sub s JOIN users u ON u.id=s.user_id "
+                "AND u.enabled AND u.deleted_at IS NULL WHERE s.enabled ORDER BY s.id").fetchall()
+            bots = conn.execute(
+                "SELECT owner_user_id, id FROM im_bot_config WHERE enabled "
+                "AND owner_user_id IS NOT NULL ORDER BY id").fetchall()
+        bots_by_user: dict[int, list[int]] = {}
+        for owner, bid in bots:
+            bots_by_user.setdefault(owner, []).append(bid)
+        sms_ok = _sms_ok()
+        for sid, uid, cats, min_level, email, phone in subs:
+            if email:
+                rows.append({"id": uid, "sub_id": sid, "channel": "email", "target": email,
+                             "categories": cats or [], "min_level": min_level})
+            if phone:
+                if sms_ok:
+                    rows.append({"id": uid, "sub_id": sid, "channel": "sms", "target": phone,
+                                 "categories": cats or [], "min_level": min_level})
+                else:
+                    logger.info("用户 %s 手机通道跳过（短信凭证未配）", uid)
+            for bid in bots_by_user.get(uid, []):   # 用户裁定：名下 bot 全发
+                rows.append({"id": bid, "sub_id": sid, "channel": "im", "target": str(bid),
+                             "categories": cats or [], "min_level": min_level})
+        return rows
     except Exception as e:
-        logger.warning("load alert_channel_sub failed: %s", e)
+        logger.warning("load alert_user_sub failed: %s", e)
         return []
 
 
 def _dispatch_async(level: str, category: str, title: str, body: str,
                     code: str | None, notif_id: int | None) -> None:
-    from src.alert_notify.notify import should_push_external, _push_channel   # 惰性（防环+冷启动零增重）
     rows = _load_channels()
     if not rows:
-        # 过渡兜底（A2-P4/B2-P6）：零 enabled 订阅 = 沿用旧 webhook 外推规则，部署日不黑洞；
-        # 订阅配好自然失效，下个版本周期移除本分支。兜底也回写（B3-3：审计链不断）。
-        if should_push_external(category, level):
-            # B 评 P1：旧 notify:external 15min 节流随旧外推块删除而丢——E-4 的 60s 循环
-            # critical（断流类）会 ~100min 烧光 webhook 配额。同款 NX 补回。
-            if _throttled("legacy", title):
-                _writeback(notif_id, "legacy", "skip:throttled")
-                return
-            ok = _push_channel(level, title, body, code, notif_id=notif_id)
-            _writeback(notif_id, "legacy", "ok" if ok else "failed:timeout")
-        else:
-            _writeback_empty(notif_id)
+        # 批30（盲审 A-P1-2 裁定）：零订阅=不外推——旧"legacy webhook 外推"过渡兜底随订阅
+        # 用户化退役（新表空环境重燃已失效 webhook；审计链经 _writeback_empty 不断）
+        _writeback_empty(notif_id)
         return
     matched = [r for r in rows
                if category in (r["categories"] or [])
