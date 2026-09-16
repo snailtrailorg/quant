@@ -11,7 +11,7 @@
 ## 文件结构
 ```
 server/src/feishu_bot/
-├── __init__.py        # 重导出 FeishuClient/check_user/process_message_async/build_confirm_card
+├── __init__.py        # 重导出 FeishuClient/process_message_async/build_confirm_card（check_user 批27-27 退役）
 ├── bot.py             # 薄壳 re-export（13 行）——实现全在 im_bot/feishu_client.py（B-S3 下沉）
 ├── tasks.py           # Celery 任务：feishu_register_task（扫码创建/连接机器人，存 im_bot_config）
 ├── router.py          # FastAPI APIRouter（/lark/webhook + /lark/card/callback + /lark/test）
@@ -37,24 +37,23 @@ get_feishu_client(bot_id: int | None = None) -> FeishuClient   # （新增 批2�
 evict_feishu_client(bot_id: int | None) -> None    # （新增 批2）凭证写路径后主动失效（同进程）
 
 load_feishu_users() -> list[str] | None            # env LARK_AUTHORIZED_USERS——兜底层（主真相源=im_bot_users 表）
-check_user(open_id: str) -> str | None             # 先查 im_bot_users（全部 feishu bot 行并集，角色取最高），
-                                                   #   查无回落 env 层，再无=None（fail-closed）
+# check_user：批27-27 已退役（零业务调用+env 兜底与五轮身份裁定相悖）——身份解析单点=resolve_im_identity
 verify_event_signature(header_ts, nonce, body, signature) -> bool
     # sha256(ts+nonce+EncryptKey+body)（官方算法，P0 复审修正）；密钥主源 im_bot_config.credentials.encrypt_key，
     #   env 兜底；未配置 Encrypt Key 跳过（纯 token 模式兼容）
-verify_card_signature(header_ts, nonce, body, signature) -> bool
-    # sha1(ts+nonce+VerificationToken+body)；密钥主源 im_bot_config.credentials.verification_token，
-    #   表+env 皆空=fail-closed 拒（卡片是操作执行面，P0-2）
-build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict   # 确认卡片，按钮 value 携带 ts
+# verify_card_signature：批29-4 已退役（HTTP 卡片面桩化，卡片确认收敛 ws 面；_im_bot_secret 保留服务事件验签）
+build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict   # 确认卡片（批27-4 CardKit 2.0），按钮 value 携带 ts
 card_action_fresh(value: dict, max_age_s: int = 60) -> bool               # （新增 SD2/F-33）60s 时效防重放
 process_message_async(open_id: str, text: str, receive_id_type: str = "open_id",
                       receive_id: str = None, fid: int = None) -> None
-    # 后台线程：消息 -> gateway.chat（READ_TOOLS，轮次 system_config.llm_max_tool_turns 默认 5）
-    # role：fid 有值 -> per-机器人（im_bot_config.default_role）；无 fid -> check_user(open_id)
+    # 后台线程：消息 -> gateway.chat（批29-1：tools=None 纯 perms 档位，轮次 system_config.llm_max_tool_turns 默认 5）
+    # 身份/权限：handle_incoming 内 resolve_im_identity（owner 直通，五轮裁定）
     # 读类工具直接 execute_read_tool；操作类发确认卡片后 return（等用户确认）
 execute_read_tool(name: str, args: dict) -> str  # query_risk_state/query_strategy_status/query_position/...（position/pnl 待实盘）
-execute_confirmed_tool(open_id: str, tool_name: str, args: str) -> None
+execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: str | None = None,
+                       fid: int | None = None) -> None
     # 用户确认后执行操作类：emergency_halt/risk_resume/strategy_stop/strategy_start + data_platform.audit 审计
+    # 批29-2b：fid=发卡 bot（回执 per-bot 凭证）；username=审计 actor
 ```
 
 ### tasks.py（Celery 任务）
@@ -70,9 +69,9 @@ feishu_register_task(self, session_id: str)      # @celery_app.task name="src.fe
 ```python
 POST /lark/webhook        -> webhook(request)      # 飞书事件订阅回调，3s 内返回 {"code":0}
                                                    #   线程池 _executor(10) 提交 process_message_async
-POST /lark/card/callback  -> card_callback(request) # 卡片按钮回调（confirm/cancel），三道闸：
-                                                   #   ①验签 fail-closed（表+env 皆空拒）②event_id 5min 去重
-                                                   #   ③60s 时效 + 角色门槛（trader/admin；risk_resume 仅 admin）
+POST /lark/card/callback  -> card_callback(request) # 批29-4 退役为桩：challenge echo + ACK（{"code":0}）。
+                                                   #   原 HTTP 卡片确认路径钉平台级 bot（单 URL 无法区分多 bot，
+                                                   #   0073 后恒空全拒）——卡片确认收敛 ws 面 ws_client._card_gates
 GET  /lark/test           -> test_endpoint()        # 测试端点
 ```
 
@@ -126,11 +125,11 @@ main() -> None                                 # 启动 lark.ws.Client（auto_re
 
 | 表 | 写 | 读 |
 |---|---|---|
-| `im_bot_config` | `tasks.feishu_register_task`（扫码 INSERT/UPDATE，凭证经 `im_bot.credentials.save_bot_credentials` 整 JSON 加密） | `FeishuClient.__init__` / `_im_bot_secret`（签名密钥）/ `process_message_async`（default_role）/ `ws_client.load_feishu_credentials` |
-| `im_bot_users` | —（写经 `im_bot.users`，web 端点） | `check_user`（授权并集 JOIN im_bot_config） |
+| `im_bot_config` | `tasks.feishu_register_task`（扫码 INSERT/UPDATE，凭证经 `im_bot.credentials.save_bot_credentials` 整 JSON 加密） | `FeishuClient.__init__` / `_im_bot_secret`（签名密钥）/ `ws_client.load_feishu_credentials` |
+| `im_bot_users` | owner 直通顺手落绑定行（`users.resolve_im_identity`，幂等） | `users.resolve_im_identity`（身份解析单点，五轮） |
 | `strategy_config` | — | `execute_read_tool`（query_strategy_status） |
 | Valkey `feishu:session:{id}` | `tasks._set_session`（scanning/done/error + 二维码） | web_api 轮询（onboarding-status 端点） |
-| Valkey `feishu:card:{event_id}` | `router.card_callback`（NX EX 300s 去重） | 同左（防重放） |
+| Valkey `feishu:card:{event_id}` | `ws_client._card_gates`（NX EX 300s 去重 + exec 卡级键——批29-4 后唯一写者，HTTP 面已桩化） | 同左（防重放） |
 
 > 表 schema：`im_bot_config` + `im_bot_users` = migration **0051**（建两表 + **feishu_config 全列数据迁移**，密文容错解密）；**0052 DROP feishu_config**（批 2 切完全部读路径后）。feishu_config 的 lang 列注入早已废弃（i18n 简化）。
 
@@ -141,12 +140,12 @@ main() -> None                                 # 启动 lark.ws.Client（auto_re
 - **3 秒超时**：webhook/card_callback 必须立即返回 `{"code":0}`，重活丢线程池/`threading.Thread(daemon=True)`
 - **凭证 DB 化**：凭证 JSON 整串 Fernet 加密存 `im_bot_config.credentials_encrypted`（FIELD_SCHEMA 全字段单真相源；全空=NULL）；`params.route_key` 与凭证 id 字段同写（唯一索引 (provider, route_key) 防漂移）
 - **per-bot 单例**：`get_feishu_client(fid)` TTL 300s——凭证热更新最多 5 分钟生效，即时生效走 start/stop 端点重启进程
-- **多机器人**：per-机器人 role（`fid` 查 `im_bot_config.default_role`）；无 fid 走 `check_user`（im_bot_users → env 兜底）
-- **签名密钥主源**：`im_bot_config.credentials`（encrypt_key / verification_token），env 兜底；**卡片路径 fail-closed**（表+env 皆空即拒——操作执行面）
-- **卡片三道闸**：验签 + event_id 5min 去重 + 60s 时效；操作类另加角色门槛（trader/admin，risk_resume 仅 admin）
+- **多机器人**：身份/权限=handle_incoming 内 `resolve_im_identity`（owner 直通，五轮；批29 卡片面同源）
+- **签名密钥主源**：`im_bot_config.credentials`（encrypt_key），env 兜底（`_im_bot_secret`——注：其 SQL 钉 owner IS NULL 恒空=恒走 env 兜底，观察项）
+- **卡片五闸（批29-3，ws 面）**：时效 60s + 身份（resolve_im_identity）+ 权限键（halt/resume/trade）+ event_id 去重 + exec 卡级去重（mid 主成分）；回执 per-bot fid（批29-2b）
 - **工具分级**：读类（READ_TOOLS）直接 `execute_read_tool` 执行回填 LLM；操作类（OPERATIONAL_TOOLS）发确认卡片，用户点确认才 `execute_confirmed_tool`
 - **send_text 截断**：LLM 回复截 4000 字符（飞书单条限制）
-- **长连接优先**：生产用 ws_client（不需公网 webhook），router 仅备用/测试；MODE=hybrid（消息 ws + 卡片 webhook）
+- **长连接唯一路径**：生产用 ws_client（消息+卡片确认均走 ws）；router webhook 仅备用/测试（批29-4 卡片面桩化）
 - **未实现占位**：query_position/query_pnl 返回"待实盘对接"（XTPAdapter 未接入飞书）
 
 ---

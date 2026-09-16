@@ -260,37 +260,32 @@ class TestImBotBatch1:
         monkeypatch.setattr(_db, "get_conn", lambda: _Conn())
 
     def test_secret_table_first_env_fallback(self, monkeypatch):
-        """表有 verification_token → 用表值(env 不同值不干扰);表空 → env 兜底。"""
-        from src.feishu_bot import bot
-        import json as _json, hashlib as _h
-        creds = _json.dumps({"verification_token": "tok_from_db", "app_id": "cli_x"})
+        """表有密钥 → 用表值；表空 → env 兜底；皆空 → 空串。批29-4 改写：verify_card_signature
+        已退役（HTTP 卡片面桩化），直测 _im_bot_secret——其表→env 回落仍服务活面
+        verify_event_signature（webhook 事件验签）。"""
+        from src.im_bot.feishu_client import _im_bot_secret
+        import json as _json
+        creds = _json.dumps({"encrypt_key": "key_from_db", "app_id": "cli_x"})
         # 表路:patch decrypt 回原文(避免真 crypto 依赖)
         monkeypatch.setattr("src.quant_common.crypto.decrypt", lambda s: s)
         self._mock_conn(monkeypatch, creds_row=creds)
-        ts, nonce, body = "1", "n", "{}"
-        good = _h.sha1(f"{ts}{nonce}tok_from_db{body}".encode()).hexdigest()
-        assert bot.verify_card_signature(ts, nonce, body, good) is True
-        assert bot.verify_card_signature(ts, nonce, body, "bad") is False
+        assert _im_bot_secret("encrypt_key", "LARK_ENCRYPT_KEY") == "key_from_db"
         # env 兜底:表查无(None)+env 配了
         self._mock_conn(monkeypatch, creds_row=None)
-        monkeypatch.setenv("LARK_VERIFICATION_TOKEN", "tok_from_env")
-        good2 = _h.sha1(f"{ts}{nonce}tok_from_env{body}".encode()).hexdigest()
-        assert bot.verify_card_signature(ts, nonce, body, good2) is True
-        # 皆空 fail-closed
-        monkeypatch.delenv("LARK_VERIFICATION_TOKEN")
-        assert bot.verify_card_signature(ts, nonce, body, good2) is False
+        monkeypatch.setenv("LARK_ENCRYPT_KEY", "key_from_env")
+        assert _im_bot_secret("encrypt_key", "LARK_ENCRYPT_KEY") == "key_from_env"
+        # 皆空
+        monkeypatch.delenv("LARK_ENCRYPT_KEY")
+        assert _im_bot_secret("encrypt_key", "LARK_ENCRYPT_KEY") == ""
 
     def test_db_error_falls_back_env(self, monkeypatch):
-        """B-B4:DB 挂(get_conn 抛)→ 签名回落 env(批 1 降级路径)。
+        """B-B4:DB 挂(get_conn 抛)→ 回落 env（批 1 降级路径——_im_bot_secret 活面）。
         批27-27：check_user 已退役（零业务调用+env 兜底与五轮身份裁定相悖）——授权断言随删。"""
-        from src.feishu_bot import bot
-        import hashlib as _h
+        from src.im_bot.feishu_client import _im_bot_secret
         from src.data_platform import db as _db
         monkeypatch.setattr(_db, "get_conn", lambda: (_ for _ in ()).throw(RuntimeError("db down")))
-        monkeypatch.setenv("LARK_VERIFICATION_TOKEN", "tok_env")
-        ts, nonce, body = "1", "n", "{}"
-        good = _h.sha1(f"{ts}{nonce}tok_env{body}".encode()).hexdigest()
-        assert bot.verify_card_signature(ts, nonce, body, good) is True
+        monkeypatch.setenv("LARK_ENCRYPT_KEY", "key_env")
+        assert _im_bot_secret("encrypt_key", "LARK_ENCRYPT_KEY") == "key_env"
 
 
 # ---------------------------------------------------------------------------
@@ -309,21 +304,6 @@ def test_verify_signature():
     with patch.dict(os.environ, {"LARK_ENCRYPT_KEY": secret}):
         assert verify_event_signature(timestamp, nonce, body, expected_sig) is True
         assert verify_event_signature(timestamp, nonce, body, "wrong_sig") is False
-
-
-def test_verify_card_signature():
-    """官方卡片签名：sha1(头ts+头nonce+token+body)；未配 token fail-closed 拒。"""
-    import hashlib as _h
-    from src.im_bot.feishu_client import verify_card_signature
-
-    secret = "tok_123"
-    ts, nonce, body = "1723536000", "n1", '{"x":1}'
-    sig = _h.sha1(f"{ts}{nonce}{secret}{body}".encode()).hexdigest()
-    with patch.dict(os.environ, {"LARK_VERIFICATION_TOKEN": secret}):
-        assert verify_card_signature(ts, nonce, body, sig) is True
-        assert verify_card_signature(ts, nonce, body, "bad") is False
-    with patch.dict(os.environ, {"LARK_VERIFICATION_TOKEN": ""}):
-        assert verify_card_signature(ts, nonce, body, sig) is False   # fail-closed
 
 
 def test_verify_signature_no_secret():

@@ -234,29 +234,13 @@ def verify_event_signature(header_ts: str, nonce: str, body: str, signature: str
     return sig == signature
 
 
-def verify_card_signature(header_ts: str, nonce: str, body: str, signature: str) -> bool:
-    """校验飞书卡片回调签名（P0 复审修正 2026-08-20，官方算法）：
-    sha1(HTTP 头 X-Lark-Timestamp + X-Lark-Nonce + Verification Token + body)。
-
-    批 1：密钥主源=im_bot_config.credentials.verification_token，env 兜底；
-    两处皆空=fail-closed 拒（卡片是操作执行面，P0-2）。"""
-    secret = _im_bot_secret("verification_token", "LARK_VERIFICATION_TOKEN")
-    if not secret:
-        return False   # 卡片是操作执行面：未配置即拒（fail-closed，P0-2）
-    sig = hashlib.sha1(f"{header_ts}{nonce}{secret}{body}".encode()).hexdigest()
-    return sig == signature
-
-
 # ——— 确认卡片 ———
 
 # 批27-4：ws 卡片回调通道就绪标志（ws_client 探针置 False——SDK 版本未验证时降级文本，
 # 防止发出用户点了没反应的卡）。仅 ws 进程内生效；webhook 入口不在此机制内（无公网入口）。
 CARD_CHANNEL_OK = True
-# 批27-4 挂账清偿：本进程 bot 是否自助 bot（owner 非空）——True 时发卡前直接文本拒答，
-# 不发必然无效的卡（用户白点一次）。ws_client main() 启动查一次置位（bot 配置变更需重启
-# 进程）；webhook 进程缺省 False=按平台级处理（历史语义：卡片面钉平台级）。闸门层③保留
-# 兜底（防御纵深——flag 时序/未来新路径发卡仍被拦）。
-CARD_SELF_BOT = False
+# 批29-2：CARD_SELF_BOT（自助 bot 发卡前拦截）已退役——六轮裁定平台级概念整体废弃，
+# 卡片确认面归用户 bot（身份/权限闸为安全边界，见 ws_client._card_gates 五闸）。
 
 
 def build_confirm_card(tool_name: str, args: dict, reason: str = "") -> dict:
@@ -313,12 +297,6 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     from src.im_bot.handlers import handle_incoming
 
     def _confirm_card(tool: str, args: dict) -> None:
-        # 批27-4 挂账清偿：自助 bot 发卡前拦截——闸门③已拒，白点一次无效卡是纯损耗
-        if CARD_SELF_BOT:
-            client.send_text(receive_id,
-                             "这台机器人不能执行这类操作，请到网页端完成。",
-                             receive_id_type)   # 快审 P1：私聊带 chat_id 时缺省会按 open_id 发=拒答送不到（纯静默）
-            return
         # 批27-4：卡片回调通道未就绪（ws 探针失败）时降级文本——发出的卡点了没反应比不发更糟
         if not CARD_CHANNEL_OK:
             logger.warning("确认卡片通道未就绪，操作 %s 降级文本拒答（SDK 版本未验证?）", tool)
@@ -336,12 +314,16 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     )
 
 
-def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: str | None = None):
+def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: str | None = None,
+                           fid: int | None = None):
     """用户点击确认后执行操作类工具（P3-11 含 60s 超时检查）。
 
     P0-2 顺带修（审计 B5）：args 原样拼 systemd 单元名永远畸形——json 解析取 id。
     批27-13：username=身份解析结果（router 卡片闸已解析）——审计 actor 与 halt reason
-    记可读用户名而非 open_id（盲审 B）；None 兜底回退 feishu:{open_id}。"""
+    记可读用户名而非 open_id（盲审 B）；None 兜底回退 feishu:{open_id}。
+    批29-2b（盲审 A-P0/B-P1-1）：fid=发卡 bot——回执走本 bot 凭证（原查 owner IS NULL
+    恒空回落"最大 id enabled bot"，多 bot 下回执走错凭证 open_id 跨 app 无效=静默丢）。
+    None 兜底维持旧行为（最新 enabled），唯一遗留调用面 bot.py re-export 零破坏。"""
     import time
     import json as _json
     _actor = username or f"feishu:{open_id}"
@@ -351,12 +333,8 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: st
         args = str(_sid)
     except Exception:
         pass
-    # 批11C：卡片回执钉平台级 bot（owner NULL）——与 _im_bot_secret 同源（A-P1-1）
-    from src.data_platform.db import get_conn as _gc
-    with _gc() as conn:
-        _pb = conn.execute("SELECT id FROM im_bot_config WHERE provider='feishu' AND enabled "
-                           "AND owner_user_id IS NULL ORDER BY id DESC LIMIT 1").fetchone()
-    client = get_feishu_client(_pb[0] if _pb else None)
+    # 批29-2b：回执 per-bot（ws 面传本进程 fid）——平台级查询（owner IS NULL 恒空）已退役
+    client = get_feishu_client(fid)
     try:
         # 实际执行工具（emergency_halt / strategy_stop 等）
         if tool_name == "emergency_halt":

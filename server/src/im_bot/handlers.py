@@ -84,14 +84,17 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
 
     try:
         from src.llm_gateway import gateway
-        from src.llm_gateway.gateway import READ_TOOLS, OPERATIONAL_TOOLS
+        from src.llm_gateway.gateway import OPERATIONAL_TOOLS
         operational_names = {t.name for t in OPERATIONAL_TOOLS}
         messages = [{"role": "user", "content": text}]
         resp = None
         max_turns = _get_max_tool_turns()
         for _ in range(max_turns):
             # caller 参数化（批13 A-P2-1/B-P2-1 双判，arch-19 §4）：审计/观测记真实平台
-            resp = gateway.chat(messages, role=role, tools=READ_TOOLS, caller=provider, perms=perms)
+            # 批29-1（P0）：tools=None=纯按 perms 档位过滤——批13 起 tools=READ_TOOLS 硬编码
+            # 与 _filter_tools 交集规则叠加，操作工具永远进不了 LLM 工具集（27-4 真机测试根因）。
+            # 群聊安全由 27-7 perms 钳 {read} 保证；viewer/零权限用户档位不变。
+            resp = gateway.chat(messages, role=role, tools=None, caller=provider, perms=perms)
             if not resp.tool_calls:
                 break
             messages.append({"role": "assistant", "content": resp.content or "",

@@ -123,10 +123,11 @@ def patch_ws_card_frames(client) -> bool:
     return True
 
 
-def _card_gates(event_id: str, value: dict, open_id: str, fid: int, is_platform_bot: bool,
+def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
                 mid: str = "") -> None:
     """卡片确认闸门链（批27-4 v3.1 ⑤，工作线程内跑——闸门含 redis/PG 同步 IO，上 asyncio loop
-    会冻结连接断连，对齐补审E-3 同根因）。顺序钉死：解析→时效→平台级→身份→权限→dedup→执行
+    会冻结连接断连，对齐补审E-3 同根因）。顺序钉死：解析→时效→身份→权限→dedup→执行
+    （批29-3：平台级闸退役——六轮裁定卡片面归用户 bot，身份/权限闸即安全边界）。
     （dedup 放最后=handler 异常 ACK 500 重推可重走全幂等闸门）。签名闸不适用 ws——鉴权=连接级
     app_secret 握手（帧只来自已鉴权连接；卡片 value 由我方建卡写入飞书原样回传，不可注入）。
     mid=卡片消息 id（event.context.open_message_id，每卡唯一）——exec 去重键主成分（代码盲审
@@ -139,13 +140,6 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int, is_platform_
     args = value.get("args", {})
     if not card_action_fresh(value):
         logger.warning("卡片确认超时/无时间戳拒绝执行: tool=%s", tool)
-        return
-    if not is_platform_bot:
-        # 批11C A-P1-1 对齐：卡片确认面仅平台级 bot（自助 bot 请走 Web）。HTTP 面静默拒，
-        # ws 面改为显式回文本（拒绝面相同，反馈可感知——改良非扩权）
-        logger.info("自助 bot 卡片确认降级拒答: bot=%s tool=%s", fid, tool)
-        get_feishu_client(fid).send_text(
-            open_id, "这台机器人不能执行这类操作，刚才的指令没有执行——请到网页端完成。")   # 文案师 A 候选
         return
     from src.im_bot.users import resolve_im_identity
     identity = resolve_im_identity(open_id, fid)
@@ -178,10 +172,10 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int, is_platform_
     except Exception as e:
         logger.warning("卡片去重检查失败（放行，风险自负）: %s", e)   # fail-open 对齐 HTTP 面
     execute_confirmed_tool(open_id, tool, json.dumps(args) if isinstance(args, dict) else args,
-                           identity["username"])   # 批27-13：username 显式传（审计 actor 可读）
+                           identity["username"], fid=fid)   # 批29-2b：回执走本 bot 凭证
 
 
-def make_card_handler(fid: int, is_platform_bot: bool):
+def make_card_handler(fid: int):
     """构建 card.action.trigger 回调（闭包捕获局部 fid——不读模块级 _FID 与赋值时序解耦）。
 
     handler 内仅做字段提取（跑在 asyncio loop 上），闸门+执行全移工作线程。返回 None=
@@ -198,7 +192,7 @@ def make_card_handler(fid: int, is_platform_bot: bool):
             open_id = getattr(getattr(ev, "operator", None), "open_id", "") or ""
             mid = getattr(getattr(ev, "context", None), "open_message_id", "") or ""   # 卡唯一键成分
             threading.Thread(target=_card_gates, daemon=True,
-                             args=(event_id, value, open_id, fid, is_platform_bot, mid)).start()
+                             args=(event_id, value, open_id, fid, mid)).start()
         except Exception as e:
             logger.error("卡片回调字段提取失败: %s", e)
 
@@ -220,19 +214,12 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
     """启动长连接客户端（阻塞）。"""
     app_id, app_secret = load_feishu_credentials(_FID)
-    # 批27-4：平台级判定（卡片确认面仅平台级 bot——批11C A-P1-1 对齐；bot 配置变更需重启
-    # 进程，启动查一次语义成立）
     _fid = int(_FID)
-    from src.im_bot import feishu_client as _fc   # 须先于 :230 的 _fc 引用——函数内后段 import 会把名字局部化（快审 P0：同款 12:03 prod 崩溃）
-    with get_conn() as conn:
-        _plat = conn.execute(
-            "SELECT 1 FROM im_bot_config WHERE id = %s AND owner_user_id IS NULL",
-            (_fid,)).fetchone()
-    _fc.CARD_SELF_BOT = not bool(_plat)   # 挂账清偿：自助 bot 发卡前拦截 flag（闸门③仍兜底）
+    from src.im_bot import feishu_client as _fc   # 须先于后段 _fc 引用（探针赋值）——函数内后段 import 会把名字局部化（快审 P0：同款 12:03 prod 崩溃）
     event_handler = (
         EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(on_message)
-        .register_p2_card_action_trigger(make_card_handler(_fid, bool(_plat)))
+        .register_p2_card_action_trigger(make_card_handler(_fid))
         .build()
     )
     client = lark.ws.Client(
@@ -245,7 +232,7 @@ def main() -> None:
     # 批27-4：探针+patch（EVENT 帧路径走公开 API 与 patch 无关恒注册；False 时 ws 进程
     # confirm_card 降级文本——SDK 版本未验证期宁可不出卡不出"点了没反应"）
     _fc.CARD_CHANNEL_OK = patch_ws_card_frames(client)
-    logger.info(f"飞书长连接启动: id={_FID} app_id={app_id} 平台级bot={bool(_plat)} 卡片patch={_fc.CARD_CHANNEL_OK}")
+    logger.info(f"飞书长连接启动: id={_FID} app_id={app_id} 卡片patch={_fc.CARD_CHANNEL_OK}")
     client.start()  # 阻塞维持连接
 
 

@@ -1,7 +1,7 @@
 """飞书 Provider(arch-19 v2 批 2)——适配层组合现有生产验证逻辑,行为零变化。
 
-MODE='hybrid':消息走 ws 长连接(feishu_bot/ws_client),卡片回调走 webhook
-(feishu_bot/router,lark SDK 长连接丢卡片是现状)。
+MODE='websocket':消息+卡片回调均走 ws 长连接(feishu_bot/ws_client——批29-3 ws patch 后卡片帧
+可达;批29-4 卡片确认收敛 ws 面,router webhook 仅备用且卡片路径桩化)。
 """
 from __future__ import annotations
 import logging
@@ -13,7 +13,7 @@ logger = logging.getLogger("im_bot.feishu")
 
 class FeishuProvider(IMBotProvider):
     provider = "feishu"
-    MODE = "hybrid"
+    MODE = "websocket"   # 批29：消息+卡片确认均收敛 ws（原 hybrid 的卡片 webhook 面已桩化）
     # 批13（裁定A）：form 方式砍除——自助向导扫码唯一路径；FIELD_SCHEMA 保留（admin 编辑面
     # 凭证录入继续渲染，存量手填 bot 零迁移）
     ONBOARDING_METHODS = {
@@ -39,23 +39,6 @@ class FeishuProvider(IMBotProvider):
         client = FeishuClient(bot_id)
         client.send_card(receive_id, card, receive_id_type)
         return True
-
-    def verify_callback(self, bot_id: int, headers: dict, body: str):
-        """批 2:飞书回调仍走 feishu_bot/router 旧路径(用户飞书后台已配 URL 不动,
-        通用 /api/im-bots/{bid}/callback 批 3 强制)——此实现为通用入口预置。"""
-        from .feishu_client import verify_card_signature, verify_event_signature
-        ts = headers.get("X-Lark-Timestamp", "")
-        nonce = headers.get("X-Lark-Nonce", "")
-        sig = headers.get("X-Lark-Signature", "")
-        if not verify_card_signature(ts, nonce, body, sig):
-            return None
-        import json as _json
-        data = _json.loads(body)
-        if "challenge" in data:
-            return ("challenge", {"challenge": data["challenge"]})
-        if data.get("event", {}).get("action"):
-            return ("card", data)
-        return ("message", data)
 
     def test_connection(self, bot_id: int) -> tuple[bool, str]:
         """tenant_access_token 获取即连通(同旧 /api/feishu/{fid}/test 逻辑,凭证读新表)。"""

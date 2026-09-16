@@ -8,6 +8,6 @@ from src.im_bot.feishu_client import (            # noqa: F401 显式列(非 __a
     FeishuClient, get_feishu_client, evict_feishu_client,
     process_message_async, execute_confirmed_tool,
     load_feishu_users, FEISHU_USERS,
-    verify_event_signature, verify_card_signature, _im_bot_secret,
+    verify_event_signature, _im_bot_secret,   # 批29-4：verify_card_signature 退役（HTTP 卡片面桩化）
     build_confirm_card, card_action_fresh,
 )

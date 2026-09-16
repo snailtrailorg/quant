@@ -1,4 +1,4 @@
-"""批27-4：飞书 ws 卡片回调通道（CARD 帧条件改写 patch + card.action.trigger handler 六闸）。
+"""批27-4：飞书 ws 卡片回调通道（CARD 帧条件改写 patch + card.action.trigger handler；批29-3 起五闸）。
 
 盲审实测三坑全收（v3.1 ⑪）：Frame required 字段补齐（service/SeqID/LogID，漏则
 SerializeToString EncodeError）；orig 方法尾部 ACK 依赖 _write_message（测试外层不 stub
@@ -139,9 +139,9 @@ def test_sdk_combine_last_frame_idempotent():
     assert client._combine("m", 2, 1, b"full") == b"half-full"   # 重入幂等
 
 
-# ——— _card_gates 六闸 ———
+# ——— _card_gates 五闸（批29-3：平台级闸退役）———
 
-def _gates_env(event_id="e-1", ts=None, perms=("halt",), platform=True, identity=True):
+def _gates_env(event_id="e-1", ts=None, perms=("halt",), identity=True):
     """闸门公共 mock：identity/redis/execute 全 mock，返回收集器。"""
     value = {"action": "confirm", "tool": "emergency_halt", "args": {"id": "s1"},
              "ts": ts if ts is not None else int(time.time())}
@@ -155,14 +155,14 @@ def _gates_env(event_id="e-1", ts=None, perms=("halt",), platform=True, identity
     return value, ident, fake_redis, exec_calls, texts, fc
 
 
-def _run_gates(value, ident, fake_redis, exec_calls, texts, fc, platform=True, mid="", event_id="e-1"):
+def _run_gates(value, ident, fake_redis, exec_calls, texts, fc, mid="", event_id="e-1"):
     from src.feishu_bot import ws_client
     with patch("redis.Redis.from_url", return_value=fake_redis), \
          patch("src.im_bot.users.resolve_im_identity", return_value=ident), \
          patch("src.im_bot.feishu_client.execute_confirmed_tool",
                side_effect=lambda *a, **kw: exec_calls.append(a)), \
          patch("src.im_bot.feishu_client.get_feishu_client", return_value=fc):
-        ws_client._card_gates(event_id, value, "ou_x", 7, platform, mid)
+        ws_client._card_gates(event_id, value, "ou_x", 7, mid)
 
 
 def test_gates_pass_executes_with_username():
@@ -186,13 +186,6 @@ def test_gates_cancel_ignored():
     v["action"] = "cancel"
     _run_gates(v, ident, r, calls, texts, fc)
     assert calls == [] and r.set.call_count == 0
-
-
-def test_gates_selfbot_text_reject():
-    v, ident, r, calls, texts, fc = _gates_env(platform=False)
-    _run_gates(v, ident, r, calls, texts, fc, platform=False)
-    assert calls == []
-    assert texts and "网页端" in texts[0]   # 显式拒答回文本（文案师 A 候选）
 
 
 def test_gates_identity_missing_rejected():
@@ -322,18 +315,18 @@ def test_card_handler_extracts_and_spawns():
     gate_calls = []
     with patch.object(ws_client, "_card_gates", side_effect=lambda *a: gate_calls.append(a)), \
          patch("threading.Thread", _SyncThread):
-        ws_client.make_card_handler(3, True)(data)
+        ws_client.make_card_handler(3)(data)
     assert gate_calls == [("e-9", {"action": "confirm", "tool": "risk_resume", "ts": 1},
-                           "ou_9", 3, True, "")]   # mid 缺省 ""
+                           "ou_9", 3, "")]   # mid 缺省 ""
 
 
 def test_card_handler_bad_data_no_raise():
     """字段提取全容错：无任何属性的裸对象 → 空值安全提取+spawn，不抛异常。"""
     from src.feishu_bot import ws_client
     with patch.object(ws_client, "_card_gates") as g, patch("threading.Thread", _SyncThread):
-        ws_client.make_card_handler(3, True)(object())
+        ws_client.make_card_handler(3)(object())
         assert g.called
-        assert g.call_args[0] == ("", {}, "", 3, True, "")
+        assert g.call_args[0] == ("", {}, "", 3, "")
 
 
 # ——— 2.0 卡结构与降级链 ———
@@ -388,81 +381,70 @@ def test_confirm_card_normal_when_channel_on():
     assert fc2.send_card.called and not fc2.send_text.called
 
 
-def test_confirm_card_selfbot_blocked_before_send():
-    """挂账清偿：自助 bot 发卡前拦截——不发必然无效的卡（闸门③仍兜底=防御纵深）。"""
-    from src.im_bot import feishu_client as fc
-    fc2 = MagicMock()
-    captured = {}
-
-    def fake_incoming(provider, fid, uid, text, reply, chat_type, *, confirm_card=None):
-        captured["cc"] = confirm_card
-
-    with patch.object(fc, "get_feishu_client", return_value=fc2), \
-         patch("src.im_bot.handlers.handle_incoming", side_effect=fake_incoming), \
-         patch.object(fc, "CARD_SELF_BOT", True):
-        fc.process_message_async("ou_1", "hi", "open_id", "ou_1", 5, "p2p")
-        captured["cc"]("emergency_halt", {})
-    assert fc2.send_text.called and not fc2.send_card.called
-    assert "网页端" in fc2.send_text.call_args[0][1]
-
-
-def test_confirm_card_selfbot_flag_priority_over_channel():
-    """两 flag 并存时自助 bot 拦截优先（语义更具体——通道健康与否无关）。"""
-    from src.im_bot import feishu_client as fc
-    fc2 = MagicMock()
-    captured = {}
-
-    def fake_incoming(provider, fid, uid, text, reply, chat_type, *, confirm_card=None):
-        captured["cc"] = confirm_card
-
-    with patch.object(fc, "get_feishu_client", return_value=fc2), \
-         patch("src.im_bot.handlers.handle_incoming", side_effect=fake_incoming), \
-         patch.object(fc, "CARD_SELF_BOT", True), \
-         patch.object(fc, "CARD_CHANNEL_OK", False):
-        fc.process_message_async("ou_1", "hi", "open_id", "ou_1", 5, "p2p")
-        captured["cc"]("emergency_halt", {})
-    assert fc2.send_text.called and not fc2.send_card.called
-    assert "不能执行" in fc2.send_text.call_args[0][1]   # 自助 bot 文案而非通道降级文案
-
-
-def test_main_sets_flags_before_start():
+def test_main_probe_before_start():
     """main() 启动链冒烟（快审 P0 教训：函数内 import 时序=UnboundLocalError 启动即崩，
-    常规测试不碰 main() 抓不到——启动级 bug 必须钉）。断言：flag 置位先于 client.start()；
-    无平台级行 → CARD_SELF_BOT=True。"""
+    常规测试不碰 main() 抓不到——启动级 bug 必须钉）。批29 改写：CARD_SELF_BOT 断言随
+    flag 退役删除，保留"探针置位先于 client.start()"断言（批29-3 恰再动 main() 函数体）。"""
     import sys
     from src.feishu_bot import ws_client
     from src.im_bot import feishu_client as fc
     order = []
 
-    class _FakeConn:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def execute(self, *a, **kw):
-            class _R:
-                @staticmethod
-                def fetchone():
-                    return None   # 无平台级行 → 自助 bot
-            return _R()
-
     fake_client = MagicMock()
     fake_client.start = MagicMock(side_effect=lambda: order.append("start"))
     saved_fid = ws_client._FID
-    saved_self, saved_ok = fc.CARD_SELF_BOT, fc.CARD_CHANNEL_OK
+    saved_ok = fc.CARD_CHANNEL_OK
     try:
         with patch.object(sys, "argv", ["ws_client", "7"]), \
              patch("src.im_bot.users.backfill_from_env"), \
              patch("src.feishu_bot.ws_client.load_feishu_credentials", return_value=("ai", "sk")), \
-             patch("src.feishu_bot.ws_client.get_conn", return_value=_FakeConn()), \
              patch("lark_oapi.ws.Client", return_value=fake_client), \
              patch("src.feishu_bot.ws_client.patch_ws_card_frames",
                    side_effect=lambda c: order.append("patch") or True):
             ws_client.main()
             assert order == ["patch", "start"]   # 探针先于连接启动（finally 恢复前断言）
-            assert fc.CARD_SELF_BOT is True      # 无平台级行 → 自助 bot flag
     finally:
         ws_client._FID = saved_fid
-        fc.CARD_SELF_BOT, fc.CARD_CHANNEL_OK = saved_self, saved_ok
+        fc.CARD_CHANNEL_OK = saved_ok
+
+
+# ——— 批29：卡片面用户化新钉 ———
+
+def test_handle_incoming_passes_full_toolset():
+    """批29-1（P0 回归钉）：gateway.chat 须传 tools=None——批13 起 tools=READ_TOOLS 与
+    _filter_tools 交集规则叠加把操作工具全滤掉（27-4 真机测试根因）。原测试 mock 网关
+    从不断言 tools 参数=恒绿盲区，此钉补上。"""
+    from types import SimpleNamespace
+    from src.im_bot import handlers
+    gw = MagicMock()
+    gw.chat = MagicMock(return_value=SimpleNamespace(tool_calls=[], content="ok"))
+    ident = {"user_id": 1, "username": "alice", "role": "admin",
+             "perms": {"read", "strategy_control", "halt", "trade", "resume"}}
+    replied = []
+    with patch("src.llm_gateway.gateway", gw), \
+         patch("src.im_bot.users.resolve_im_identity", return_value=ident):
+        handlers.handle_incoming("feishu", 7, "ou_x", "急停", lambda t: replied.append(t), "p2p")
+    assert gw.chat.called
+    assert gw.chat.call_args.kwargs.get("tools") is None   # None=纯 perms 档位（操作工具可见）
+    assert replied == ["ok"]
+
+
+def test_gates_owner_bot_executes_with_fid():
+    """批29：自助 bot 正向闸门（平台级闸退役后，五闸=时效→身份→权限→dedup→exec）+
+    fid 透传钉（29-2b：回执走本 bot 凭证——原查 owner IS NULL 恒空回落错 bot）。"""
+    from src.feishu_bot import ws_client
+    v = {"action": "confirm", "tool": "emergency_halt", "args": {"id": "s1"}, "ts": int(time.time())}
+    ident = {"username": "alice", "perms": {"read", "trade", "halt", "resume"}}
+    fake_redis = MagicMock()
+    fake_redis.set = MagicMock(return_value=True)
+    captured = []
+    fc = MagicMock()
+    with patch("redis.Redis.from_url", return_value=fake_redis), \
+         patch("src.im_bot.users.resolve_im_identity", return_value=ident), \
+         patch("src.im_bot.feishu_client.execute_confirmed_tool",
+               side_effect=lambda *a, **kw: captured.append((a, kw))), \
+         patch("src.im_bot.feishu_client.get_feishu_client", return_value=fc):
+        ws_client._card_gates("e-1", v, "ou_x", 7, "om_1")
+    assert len(captured) == 1
+    assert captured[0][0][1] == "emergency_halt"
+    assert captured[0][1].get("fid") == 7   # 批29-2b：回执 per-bot
