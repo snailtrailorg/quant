@@ -29,8 +29,10 @@ class FeishuClient:
     def __init__(self, bot_id: int | None = None)   # 凭证读 im_bot_config（bot_id=None=最新 enabled 行；
                                                      #   creds 经 im_bot.credentials.get_bot_credentials 解密 JSON）
     def _get_token(self) -> str                     # tenant_access_token（缓存至 expire-60s）
-    def send_text(self, receive_id, text, receive_id_type="open_id") -> None
-    def send_card(self, receive_id, card, receive_id_type="open_id") -> None
+    def send_text(self, receive_id, text, receive_id_type="open_id") -> bool
+    def send_card(self, receive_id, card, receive_id_type="open_id") -> bool
+    def update_card(self, message_id, card) -> bool
+    # 批29b：PATCH /im/v1/messages/{mid} 原地更新已发卡片（终态化）；fail-soft 全吞 Exception 返 bool
 
 get_feishu_client(bot_id: int | None = None) -> FeishuClient   # （新增 批2）per-bot 单例，TTL 300s
     # 修两隐患：多 bot 回复走错凭证 / 每消息 new 实例 token 缓存形同虚设；凭证热更新最多 5min 生效
@@ -51,9 +53,13 @@ process_message_async(open_id: str, text: str, receive_id_type: str = "open_id",
     # 读类工具直接 execute_read_tool；操作类发确认卡片后 return（等用户确认）
 execute_read_tool(name: str, args: dict) -> str  # query_risk_state/query_strategy_status/query_position/...（position/pnl 待实盘）
 execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: str | None = None,
-                       fid: int | None = None) -> None
+                       fid: int | None = None) -> bool
     # 用户确认后执行操作类：emergency_halt/risk_resume/strategy_stop/strategy_start + data_platform.audit 审计
     # 批29-2b：fid=发卡 bot（回执 per-bot 凭证）；username=审计 actor
+    # 批29b：返 bool——True=执行成功；False=stop/start 子进程失败/未知工具/外层异常（ws 面据返值选 executed/failed 终态卡）
+build_terminal_card(tool_name: str, status: str) -> dict
+    # 批29b：终态卡（schema 2.0 无按钮，config.update_multi 保留=PATCH 前提）；status ∈
+    #   executed/cancelled/expired/denied/unavailable/failed（文案六条过文案师，_TERMINAL_TEXTS 单源）
 ```
 
 ### tasks.py（Celery 任务）

@@ -132,24 +132,41 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
     app_secret 握手（帧只来自已鉴权连接；卡片 value 由我方建卡写入飞书原样回传，不可注入）。
     mid=卡片消息 id（event.context.open_message_id，每卡唯一）——exec 去重键主成分（代码盲审
     A/B 共识：{ts}:{tool} 键同秒同工具的两张卡互斥，"停掉 s1 和 s2"第二张被静默吞）。"""
-    from src.im_bot.feishu_client import (card_action_fresh, execute_confirmed_tool,
-                                          get_feishu_client)
+    from src.im_bot.feishu_client import (build_terminal_card, card_action_fresh,
+                                          execute_confirmed_tool, get_feishu_client)
+
+    def _terminal(status: str, tool_name: str = "") -> None:
+        """批29b：卡片终态化（PATCH 原地更新摘按钮+状态文案）。mid 缺失跳过；fail-soft
+        双保险（update_card 内部已全吞 Exception，此处再兜防 build/get 环节）。"""
+        if not mid:
+            return
+        try:
+            get_feishu_client(fid).update_card(mid, build_terminal_card(tool_name, status))
+        except Exception as e:
+            logger.warning("卡片终态化失败（不影响闸门行为）: %s", e)
+
+    if value.get("action") == "cancel":
+        _terminal("cancelled")   # cancel 分支在 tool 提取前——文案不带 tool，空串
+        return
     if value.get("action") != "confirm":
-        return   # cancel 仅 ACK 不操作（对齐 HTTP 面）
+        return   # 未知 action 维持静默（A-P2-2：终态化仅精确命中 cancel，不替脏数据圆谎）
     tool = value.get("tool", "")
     args = value.get("args", {})
     if not card_action_fresh(value):
         logger.warning("卡片确认超时/无时间戳拒绝执行: tool=%s", tool)
+        _terminal("expired", tool)
         return
     from src.im_bot.users import resolve_im_identity
     identity = resolve_im_identity(open_id, fid)
     if not identity:
         logger.warning("卡片确认未绑定拒绝: open_id=%s tool=%s", open_id, tool)
+        _terminal("unavailable", tool)
         return
     _need = "resume" if tool == "risk_resume" else ("halt" if tool == "emergency_halt" else "trade")
     if _need not in identity["perms"]:
         logger.warning("卡片确认权限不足拒绝执行: user=%s tool=%s need=%s",
                        identity["username"], tool, _need)
+        _terminal("denied", tool)
         return
     import os
     import redis as _redis
@@ -168,11 +185,29 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
             logger.warning("同卡重复执行拦截: tool=%s mid=%s", tool, mid or "(回退 ts:open_id)")
             get_feishu_client(fid).send_text(
                 open_id, "这项操作刚才已经执行过了，再点也不会执行第二次——不用再点。")   # 文案师 A 候选
+            # 批29b-B1（代码盲审 B-P1-1）：据伴生结果键重刷——防首点失败的卡被重点刷绿
+            # "已执行"（风险操作面说谎）；结果键缺失/redis 异常 → 不重刷（首点已终态化，
+            # PATCH 失败态由过期闸兜底），保守缺省不赌方向。
+            try:
+                _res = r.get(f"feishu:card:execres:{_exec_key}:{tool}")
+            except Exception:
+                _res = None
+            if _res == "ok":
+                _terminal("executed", tool)
+            elif _res == "fail":
+                _terminal("failed", tool)
             return
     except Exception as e:
         logger.warning("卡片去重检查失败（放行，风险自负）: %s", e)   # fail-open 对齐 HTTP 面
-    execute_confirmed_tool(open_id, tool, json.dumps(args) if isinstance(args, dict) else args,
-                           identity["username"], fid=fid)   # 批29-2b：回执走本 bot 凭证
+        r = None   # 批29b-B1：redis 不可用时伴生键同样不可写——下方 execres 落键各自兜
+    _ok = execute_confirmed_tool(open_id, tool, json.dumps(args) if isinstance(args, dict) else args,
+                                 identity["username"], fid=fid)   # 批29-2b：回执走本 bot 凭证
+    if r is not None:
+        try:   # 伴生结果键（批29b-B1）：去重点据此重刷 executed/failed
+            r.set(f"feishu:card:execres:{_exec_key}:{tool}", "ok" if _ok else "fail", ex=300)
+        except Exception as e:
+            logger.warning("卡片执行结果键写入失败（去重点将不重刷）: %s", e)
+    _terminal("executed" if _ok else "failed", tool)   # 批29b：成败终态（A-P1-1——失败不终态=去重键锁死假状态）
 
 
 def make_card_handler(fid: int):

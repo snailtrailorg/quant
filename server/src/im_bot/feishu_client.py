@@ -105,6 +105,33 @@ class FeishuClient:
                 logger.error(f"获取 token 失败: {e}")
                 return ""
 
+    def update_card(self, message_id: str, card: dict) -> bool:
+        """PATCH 原地更新已发卡片（批29b 终态化）。官方端点仅支持 interactive 且要求
+        config.update_multi=true（build_confirm_card/build_terminal_card 均满足）；权限
+        im:message:send_as_bot（能发卡即具备）。fail-soft：任何异常只落 warning 返 False，
+        不触碰调用方执行链（盲审 A-P2-5：daemon 工作线程炸=不可观测）。"""
+        token = self._get_token()
+        if not token:
+            return False
+        try:
+            resp = httpx.patch(
+                f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"content": json.dumps(card)},   # SDK PatchMessageRequestBody 唯一字段 content:str
+                timeout=10,
+            )
+        except Exception as e:   # B-P1-2：宽于 httpx.HTTPError——resp 无 text 属性等 AttributeError 同兜
+            logger.warning("飞书更新卡片失败: %s", e)
+            return False
+        try:
+            if resp.status_code != 200 or resp.json().get("code", -1) != 0:
+                logger.warning("飞书更新卡片被拒: %s %s", resp.status_code, resp.text[:200])
+                return False
+        except Exception as e:
+            logger.warning("飞书更新卡片响应解析失败: %s", e)
+            return False
+        return True
+
     def send_text(self, receive_id: str, text: str, receive_id_type: str = "open_id") -> bool:
         """发送文本消息。返回真实结局（批 7 · A2-P2/B2-P1：原吞异常返 None——告警分发
         依赖 bool 回写审计列；现有调用点均忽略返回值，改 bool 零破坏）。"""
@@ -283,6 +310,33 @@ def card_action_fresh(value: dict, max_age_s: int = 60) -> bool:
     return (_t.time() - ts) <= max_age_s
 
 
+# 批29b：终态卡文案（文案师终审 2026-09-16 六条全齐；✅ 仅绑执行成功，余 grey）
+_TERMINAL_TEXTS = {
+    "executed":     ("✅ 已执行", "你确认的操作（{tool}）已执行。", "green"),
+    "cancelled":    ("已取消", "你点了取消，这次操作没有执行。", "grey"),
+    "expired":      ("已过期", "这张确认卡只在发出后 60 秒内有效，你点击时已过期，这次操作没有执行。需要的话请重新发一次指令。", "grey"),
+    "denied":       ("未执行", "你的账号没有这项操作的权限。如需开通，请联系管理员。", "grey"),
+    "unavailable":  ("未执行", "你的账号当前不可用，这次操作没有执行。请联系管理员处理。", "grey"),
+    "failed":       ("执行失败", "你确认的操作（{tool}）没有执行成功，具体原因见刚发的那条失败消息。需要的话，重新发一次指令即可重试。", "grey"),
+}
+
+
+def build_terminal_card(tool_name: str, status: str) -> dict:
+    """构建终态卡（批29b：任一被处理的点击后 PATCH 原地更新——摘按钮+状态文案，防复点）。
+
+    与 build_confirm_card 同构（schema 2.0/config update_multi——官方 PATCH 前提），无按钮，
+    body 单 markdown 行。终态后原卡 value（ts/tool）消失=无回调可能，自洽。status 见 _TERMINAL_TEXTS。"""
+    title, body, template = _TERMINAL_TEXTS[status]
+    return {
+        "schema": "2.0",
+        "config": {"update_multi": True},
+        "header": {"title": {"tag": "plain_text", "content": title}, "template": template},
+        "body": {"elements": [
+            {"tag": "markdown", "content": body.format(tool=tool_name or "?")},
+        ]},
+    }
+
+
 def process_message_async(open_id: str, text: str, receive_id_type: str = "open_id", receive_id: str = None, fid: int = None, chat_type: str = ""):
     """飞书消息处理薄壳（批13）：通用链走 handlers.handle_incoming（五轮：绑定机制取消，
     bindcode/首见留痕链退役——自有 bot 由 resolve owner 直通）。
@@ -315,7 +369,7 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
 
 
 def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: str | None = None,
-                           fid: int | None = None):
+                           fid: int | None = None) -> bool:
     """用户点击确认后执行操作类工具（P3-11 含 60s 超时检查）。
 
     P0-2 顺带修（审计 B5）：args 原样拼 systemd 单元名永远畸形——json 解析取 id。
@@ -323,7 +377,10 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: st
     记可读用户名而非 open_id（盲审 B）；None 兜底回退 feishu:{open_id}。
     批29-2b（盲审 A-P0/B-P1-1）：fid=发卡 bot——回执走本 bot 凭证（原查 owner IS NULL
     恒空回落"最大 id enabled bot"，多 bot 下回执走错凭证 open_id 跨 app 无效=静默丢）。
-    None 兜底维持旧行为（最新 enabled），唯一遗留调用面 bot.py re-export 零破坏。"""
+    None 兜底维持旧行为（最新 enabled），唯一遗留调用面 bot.py re-export 零破坏。
+    批29b 返 bool（盲审 A-P1-1/文案师随审双判）：True=执行成功（halt/resume/stop/start
+    成功路径，含审计）；False=执行失败（stop/start 子进程失败、未知工具、外层异常——
+    原实现吞异常无从分辨，调用方据返值选 executed/failed 终态）。"""
     import time
     import json as _json
     _actor = username or f"feishu:{open_id}"
@@ -335,6 +392,7 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: st
         pass
     # 批29-2b：回执 per-bot（ws 面传本进程 fid）——平台级查询（owner IS NULL 恒空）已退役
     client = get_feishu_client(fid)
+    _ok = True   # 批29b：成败标记（False 分支已发 ⚠️/❌ 文本，审计仍记尝试）
     try:
         # 实际执行工具（emergency_halt / strategy_stop 等）
         if tool_name == "emergency_halt":
@@ -352,6 +410,7 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: st
                 client.send_text(open_id, f"✅ 已停止策略 {args}")
             except Exception as e:
                 client.send_text(open_id, f"⚠️ 停止失败（polkit 未配? 待办#14）: {e}")
+                _ok = False
         elif tool_name == "strategy_start":
             import subprocess
             try:
@@ -359,10 +418,14 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: st
                 client.send_text(open_id, f"✅ 已启动策略 {args}")
             except Exception as e:
                 client.send_text(open_id, f"⚠️ 启动失败（polkit 未配? 待办#14）: {e}")
+                _ok = False
         else:
             client.send_text(open_id, f"⚠️ 未知操作: {tool_name}")
+            _ok = False
         # 审计
         from src.data_platform.audit import audit_log
         audit_log(_actor, tool_name, detail=json.dumps(args))   # 批27-13：可读 actor
     except Exception as e:
         client.send_text(open_id, f"❌ 执行失败: {e}")
+        return False
+    return _ok

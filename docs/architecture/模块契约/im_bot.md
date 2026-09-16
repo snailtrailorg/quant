@@ -40,7 +40,8 @@ FeishuClient(bot_id=None)      # 凭证读 im_bot_config(bot_id=None=最新 enab
 get_feishu_client(bot_id)      # per-bot 单例(TTL 300s;凭证热更新最多 5 分钟,即时生效走 stop/start 重启)
 evict_feishu_client(bot_id)    # 凭证写路径后主动失效(同进程)
 process_message_async(open_id, text, receive_id_type, receive_id, fid)   # 消息->LLM->回复(3s 约束)
-execute_confirmed_tool(open_id, tool_name, args, username=None, fid=None)  # 确认卡片执行(熔断/恢复/策略启停)；批29-2b：fid=回执 per-bot
+execute_confirmed_tool(open_id, tool_name, args, username=None, fid=None) -> bool  # 确认卡片执行(熔断/恢复/策略启停)；批29-2b：fid=回执 per-bot；批29b：返 bool(成败→终态卡 executed/failed)
+build_terminal_card(tool_name, status) -> dict   # 批29b：终态卡六状态(executed/cancelled/expired/denied/unavailable/failed)；FeishuClient.update_card PATCH 原地更新
 # check_user：批27-27 已退役（零业务调用+env 兜底与五轮身份裁定相悖）——身份解析单点=resolve_im_identity
 verify_event_signature(ts, nonce, body, sig)    # 官方算法;密钥主源 im_bot_config,env 兜底（verify_card_signature 批29-4 随 HTTP 卡片面桩化退役）
 ```

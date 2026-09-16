@@ -155,12 +155,12 @@ def _gates_env(event_id="e-1", ts=None, perms=("halt",), identity=True):
     return value, ident, fake_redis, exec_calls, texts, fc
 
 
-def _run_gates(value, ident, fake_redis, exec_calls, texts, fc, mid="", event_id="e-1"):
+def _run_gates(value, ident, fake_redis, exec_calls, texts, fc, mid="", event_id="e-1", exec_return=True):
     from src.feishu_bot import ws_client
     with patch("redis.Redis.from_url", return_value=fake_redis), \
          patch("src.im_bot.users.resolve_im_identity", return_value=ident), \
          patch("src.im_bot.feishu_client.execute_confirmed_tool",
-               side_effect=lambda *a, **kw: exec_calls.append(a)), \
+               side_effect=lambda *a, **kw: exec_calls.append(a) or exec_return), \
          patch("src.im_bot.feishu_client.get_feishu_client", return_value=fc):
         ws_client._card_gates(event_id, value, "ou_x", 7, mid)
 
@@ -180,18 +180,31 @@ def test_gates_stale_rejected():
     assert calls == []
 
 
-def test_gates_cancel_ignored():
-    """cancel 仅 ACK 不操作（对齐 HTTP 面）——闸门零消耗直接 return。"""
+def test_gates_cancel_terminal():
+    """cancel → 不执行不置键，但卡片终态化"已取消"（批29b；原 test_gates_cancel_ignored
+    的"零消耗直接 return"语义过时——A-P2-4 改写）。"""
     v, ident, r, calls, texts, fc = _gates_env()
     v["action"] = "cancel"
-    _run_gates(v, ident, r, calls, texts, fc)
+    _run_gates(v, ident, r, calls, texts, fc, mid="om_c")
     assert calls == [] and r.set.call_count == 0
+    from src.im_bot.feishu_client import build_terminal_card
+    assert fc.update_card.call_args[0] == ("om_c", build_terminal_card("", "cancelled"))
+
+
+def test_gates_unknown_action_silent():
+    """未知 action 维持静默（A-P2-2：终态化仅精确命中 cancel，不替脏数据圆谎）。"""
+    v, ident, r, calls, texts, fc = _gates_env()
+    v["action"] = "junk"
+    _run_gates(v, ident, r, calls, texts, fc, mid="om_j")
+    assert calls == [] and not fc.update_card.called
 
 
 def test_gates_identity_missing_rejected():
     v, ident, r, calls, texts, fc = _gates_env(identity=False)
-    _run_gates(v, ident, r, calls, texts, fc)
+    _run_gates(v, ident, r, calls, texts, fc, mid="om_u")
     assert calls == []
+    from src.im_bot.feishu_client import build_terminal_card
+    assert fc.update_card.call_args[0] == ("om_u", build_terminal_card("emergency_halt", "unavailable"))
 
 
 def test_gates_perm_denied():
@@ -442,9 +455,114 @@ def test_gates_owner_bot_executes_with_fid():
     with patch("redis.Redis.from_url", return_value=fake_redis), \
          patch("src.im_bot.users.resolve_im_identity", return_value=ident), \
          patch("src.im_bot.feishu_client.execute_confirmed_tool",
-               side_effect=lambda *a, **kw: captured.append((a, kw))), \
+               side_effect=lambda *a, **kw: captured.append((a, kw)) or True), \
          patch("src.im_bot.feishu_client.get_feishu_client", return_value=fc):
         ws_client._card_gates("e-1", v, "ou_x", 7, "om_1")
     assert len(captured) == 1
     assert captured[0][0][1] == "emergency_halt"
     assert captured[0][1].get("fid") == 7   # 批29-2b：回执 per-bot
+    from src.im_bot.feishu_client import build_terminal_card
+    assert fc.update_card.call_args[0] == ("om_1", build_terminal_card("emergency_halt", "executed"))
+
+
+# ——— 批29b：卡片终态化 ———
+
+def test_terminal_card_structure():
+    """六状态纯函数：schema 2.0/update_multi 保留/无按钮/仅 executed 用 green/文案 tool 落位。"""
+    from src.im_bot.feishu_client import build_terminal_card
+    for status in ("executed", "cancelled", "expired", "denied", "unavailable", "failed"):
+        c = build_terminal_card("emergency_halt", status)
+        assert c["schema"] == "2.0" and c["config"] == {"update_multi": True}
+        els = c["body"]["elements"]
+        assert len(els) == 1 and els[0]["tag"] == "markdown"   # 无按钮=终态
+        assert not any(e.get("tag") == "button" for e in els)
+        assert (c["header"]["template"] == "green") == (status == "executed")
+        if status != "executed":
+            assert c["header"]["template"] == "grey"   # B-P2-1：grey 组钉（含 failed——文案师裁定无红）
+    assert "emergency_halt" in build_terminal_card("emergency_halt", "executed")["body"]["elements"][0]["content"]
+    assert "60 秒" in build_terminal_card("t", "expired")["body"]["elements"][0]["content"]
+
+
+def test_gates_stale_and_denied_terminal():
+    """时效外/权限不足：静默拒→终态化可见拒（批29b 表格行 3/5）。"""
+    from src.im_bot.feishu_client import build_terminal_card
+    v, ident, r, calls, texts, fc = _gates_env(ts=int(time.time()) - 120)
+    _run_gates(v, ident, r, calls, texts, fc, mid="om_s")
+    assert calls == []
+    assert fc.update_card.call_args[0] == ("om_s", build_terminal_card("emergency_halt", "expired"))
+    fc2 = MagicMock()
+    v2, ident2, r2, calls2, texts2, _ = _gates_env(perms=("read",))
+    _run_gates(v2, ident2, r2, calls2, texts2, fc2, mid="om_d")
+    assert calls2 == []
+    assert fc2.update_card.call_args[0] == ("om_d", build_terminal_card("emergency_halt", "denied"))
+
+
+def test_gates_exec_terminal_failed_on_false():
+    """执行失败（execute 返 False）→ 终态 failed 非 executed（A-P1-1：不终态=去重键锁死假状态）。"""
+    from src.im_bot.feishu_client import build_terminal_card
+    v, ident, r, calls, texts, fc = _gates_env()
+    _run_gates(v, ident, r, calls, texts, fc, mid="om_f", exec_return=False)
+    assert len(calls) == 1
+    assert fc.update_card.call_args[0] == ("om_f", build_terminal_card("emergency_halt", "failed"))
+
+
+def test_gates_update_card_exception_fail_soft():
+    """终态化抛异常不影响执行链（A-P2-5：daemon 工作线程炸=不可观测——fail-soft 钉）。"""
+    v, ident, r, calls, texts, fc = _gates_env()
+    fc.update_card = MagicMock(side_effect=RuntimeError("patch boomed"))
+    _run_gates(v, ident, r, calls, texts, fc, mid="om_x")   # 不抛=通过
+    assert len(calls) == 1
+
+
+def test_gates_mid_missing_no_update():
+    """mid 缺失（回退态）→ 不尝试终态化（方案 §六 钦定钉——防 `if not mid` 误删后
+    PATCH /messages/ 尾斜杠 404 静默红）。"""
+    v, ident, r, calls, texts, fc = _gates_env()
+    _run_gates(v, ident, r, calls, texts, fc, mid="")
+    assert len(calls) == 1
+    fc.update_card.assert_not_called()
+
+
+def test_gates_dup_rerushes_by_outcome_key():
+    """批29b-B1（代码盲审 B-P1-1）：去重点据伴生结果键重刷——首点失败的卡重点不得刷绿
+    "已执行"（风险操作面说谎）；结果键缺失 → 不重刷（保守缺省不赌方向）。"""
+    from src.im_bot.feishu_client import build_terminal_card
+
+    def _dup_env(res):
+        v, ident, r, calls, texts, fc = _gates_env()
+        r.set = MagicMock(side_effect=lambda k, *a, **kw: not k.startswith("feishu:card:exec:"))
+        r.get = MagicMock(return_value=res)
+        _run_gates(v, ident, r, calls, texts, fc, mid="om_r")
+        assert calls == [] and texts   # 未执行+去重文本
+        return fc
+
+    fc_fail = _dup_env("fail")
+    assert fc_fail.update_card.call_args[0] == ("om_r", build_terminal_card("emergency_halt", "failed"))
+    fc_ok = _dup_env("ok")
+    assert fc_ok.update_card.call_args[0] == ("om_r", build_terminal_card("emergency_halt", "executed"))
+    fc_unk = _dup_env(None)   # 结果键缺失（写入失败/过期）→ 不重刷
+    assert not fc_unk.update_card.called
+
+
+def test_update_card_request_shape_and_results():
+    """update_card：URL/请求体形态（PATCH /im/v1/messages/{mid}+content:str）+三态返回。"""
+    from src.im_bot.feishu_client import FeishuClient
+    from unittest.mock import patch as _p
+    c = FeishuClient.__new__(FeishuClient)   # 绕 __init__（凭证读 DB）
+    c._token, c._token_expires = "tok_valid", 9999999999.0   # B-P1-1：token 预置先例
+    card = {"schema": "2.0"}
+    ok_resp = MagicMock(status_code=200)
+    ok_resp.json.return_value = {"code": 0}
+    ok_resp.text = "{}"
+    with _p("src.im_bot.feishu_client.httpx.patch", return_value=ok_resp) as hp:
+        assert c.update_card("om_9", card) is True
+        url = hp.call_args[0][0]
+        assert url.endswith("/open-apis/im/v1/messages/om_9")
+        assert hp.call_args.kwargs["json"] == {"content": '{"schema": "2.0"}'}
+    bad_resp = MagicMock(status_code=400)
+    bad_resp.json.return_value = {"code": 230002}
+    bad_resp.text = "no permission"   # B-P1-2：失败负例必须带 text
+    with _p("src.im_bot.feishu_client.httpx.patch", return_value=bad_resp):
+        assert c.update_card("om_9", card) is False
+    with _p("src.im_bot.feishu_client.httpx.patch", side_effect=RuntimeError("net down")):
+        assert c.update_card("om_9", card) is False
