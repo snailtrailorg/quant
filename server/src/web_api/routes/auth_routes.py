@@ -988,30 +988,64 @@ def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
 
 
 @router.get("/api/log")
-def get_logs(task_id: str | None = None, payload: dict = Depends(require_perm("user_mgmt"))):
+def get_logs(task_id: str | None = None, before: str | None = None, limit: int = 100,
+             level: list[str] = Query(default=[]), module: list[str] = Query(default=[]),
+             payload: dict = Depends(require_perm("user_mgmt"))):
     """运行日志（批25：无参=system_log 全局面——三通道发送事件 module=email|im|sms 天然在内；
-    task_id 参数=live-task 自愈时间线，保留读 task_logs（唯一消费 LiveTask）。
-    权限 read→user_mgmt 收紧（用户裁定：运行日志=管理员面，含收件人明文）。"""
-    with get_conn() as conn:
-        if task_id:
-            try:
+    task_id 参数=live-task 自愈时间线，保留读 task_logs（唯一消费 LiveTask，对分页参数忽略）。
+    权限 read→user_mgmt 收紧（用户裁定：运行日志=管理员面，含收件人明文）。
+    批32：游标分页（每页 100——用户裁定；ORDER BY ts DESC, id DESC 双键=log_sink 同事务批量
+    同 ts 单键必丢/重行，盲审 A-P1-1/B-P0）+level/module 筛选后端化（FastAPI 重复参数零逗号
+    歧义）+首屏（无 before）附带 modules 全量下拉源（翻页不重复——A-P2-3）。游标独立全精度
+    序列化 epochµs|id（展示字段仍 str[:19]——截秒游标必漏行，A-P1-2）。"""
+    limit = max(1, min(limit, 500))
+    if task_id:
+        rows = []
+        try:
+            with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT level, message, step_name, created_at FROM task_logs "
-                    "WHERE task_id = %s ORDER BY created_at DESC LIMIT 100", (task_id,))   # 精确匹配（LIKE %live:1% 撞 live:12）
-            except Exception:
-                logger.warning("get_logs: task_logs 表不存在（需运行 alembic upgrade head）")
-                cur = None
-                rows = []
-            if cur is not None:
+                    "WHERE task_id = %s ORDER BY created_at DESC LIMIT 100", (task_id,))   # 精确匹配（LIKE %live:1% 撞 live:12）；批32：对分页/筛选参数忽略（LiveTask 时间线语义）
                 rows = cur.fetchall()
-            return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
-                              "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
-        try:
-            cur = conn.execute(
-                "SELECT level, module, message, ts FROM system_log ORDER BY ts DESC LIMIT 200")
-            rows = cur.fetchall()
         except Exception:
-            logger.warning("get_logs: system_log 表不存在（需运行 alembic upgrade head）")
-            rows = []
-    return {"logs": [{"level": r[0], "msg": r[2], "module": r[1] or "",
-                      "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
+            logger.warning("get_logs: task_logs 表不存在（需运行 alembic upgrade head）")
+        return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
+                          "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
+    where, params = "", []
+    if before:
+        try:
+            _us, _rid = before.split("|")
+            from datetime import datetime as _dt, timezone as _tz
+            _ts = _dt.fromtimestamp(int(_us) / 1_000_000, tz=_tz.utc)
+            where += " WHERE (ts, id) < (%s, %s)"
+            params += [_ts, int(_rid)]
+        except Exception:
+            raise ApiError(400, "CURSOR_INVALID", "游标无效或已过期，请刷新列表")
+    _lv = [lv for lv in level if lv]   # B-P2-2：全空串维度跳过（ANY('{}') 恒假会拉空结果）
+    if _lv:
+        where += (" AND" if where else " WHERE") + " level = ANY(%s)"
+        params.append(_lv)
+    _md = [m for m in module if m]
+    if _md:
+        where += (" AND" if where else " WHERE") + " module = ANY(%s)"
+        params.append(_md)
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                f"SELECT id, level, module, message, ts FROM system_log{where} "
+                "ORDER BY ts DESC, id DESC LIMIT %s", (*params, limit))
+            rows = cur.fetchall()
+            mods = []
+            if not before:   # 首屏才带下拉源（翻页值域不变——A-P2-3）
+                mcur = conn.execute("SELECT DISTINCT module FROM system_log WHERE module <> '' ORDER BY 1")
+                mods = [m[0] for m in mcur.fetchall()]
+    except Exception:
+        logger.warning("get_logs: system_log 表不存在（需运行 alembic upgrade head）")
+        rows, mods = [], []
+    logs = [{"level": r[1], "msg": r[3], "module": r[2] or "",
+             "ts": str(r[4])[:19] if r[4] else ""} for r in rows]
+    next_cursor = None
+    if len(rows) == limit and rows:   # 恰好一页=可能还有；不足=终页
+        last = rows[-1]
+        next_cursor = f"{int(last[4].timestamp() * 1_000_000)}|{last[0]}"
+    return {"logs": logs, "next": next_cursor, "modules": mods}

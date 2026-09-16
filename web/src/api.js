@@ -2,6 +2,9 @@ import axios from 'axios'
 import i18n from './i18n'
 
 const api = axios.create({ baseURL: '/api', timeout: 30000 })
+// 批32 A-P0-1：数组参数序列化为重复键（level=ERROR&level=WARN）——axios 缺省带方括号
+// （level[]=?）FastAPI list[str] 收不到=筛选静默失效；实例级统一，四处调用零适配
+api.defaults.paramsSerializer = { indexes: null }
 
 // 请求拦截：带 token
 api.interceptors.request.use(config => {
@@ -68,14 +71,12 @@ export const getRiskState = () => api.get('/risk/state')
 export const riskHalt = () => api.post('/risk/halt')
 export const riskResume = () => api.post('/risk/resume')
 
-export const getAudit = () => api.get('/audit')
 // 批23：审计批量删（{ids:[int]} / {all:true}，后端留痕 audit_delete）
 export const getUsers = () => api.get('/user')
 export const createUser = (username, password, role) =>
   api.post('/user', { username, password, role })
 
 export const getAccounts = () => api.get('/account')
-export const getLogs = () => api.get('/log')
 export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
 // 批28-3：deleteNotifications 退役（NotificationTable 删除后 UI 无消费；后端 /notifications/delete 端点保留——require_perm 保护，UI 孤儿无害）
 export const getSmtpConfig = () => api.get('/smtp-config')

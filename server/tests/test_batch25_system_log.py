@@ -60,7 +60,8 @@ class TestLogSink:
 
 class TestGetLogs:
     def test_no_param_reads_system_log(self):
-        c = _conn(rows=[("INFO", "email", "已发送 → a@b.c", "2026-09-15 10:00:00")])
+        # 批32：SELECT 加 id 首列（游标键成分）→ 行 5 元组
+        c = _conn(rows=[(1, "INFO", "email", "已发送 → a@b.c", "2026-09-15 10:00:00")])
         with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
              patch("src.web_api.routes.auth_routes.get_conn", return_value=c):
             r = _client().get("/api/log", headers={"Authorization": "Bearer t"})

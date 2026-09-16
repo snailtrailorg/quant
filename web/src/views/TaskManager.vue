@@ -12,7 +12,7 @@
         </div>
       </div>
     </template>
-    <TableShell :data="tasks" storage-key="tasks">
+    <TableShell :data="tasks" fill :fill-reserve="60" storage-key="tasks">
       <el-table-column prop="id" :label="t('task.taskId')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" min-width="100" />

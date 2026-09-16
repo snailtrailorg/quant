@@ -6,23 +6,82 @@
        + 列集合变化（ColumnSettings 显隐切换）重放存档宽（盲审 A/B 同判）
        迁移 = <el-table → <TableShell storage-key="语义键"（必填）:loading="x"（替代 v-loading 指令）。
        已知限制（盲审B-P2-1 裁定）：无 prop 模板列以渲染后 label 记键，切语言后该列存档失配（宽回默认，非破坏）。
-       回放走 EP store.states.columns（内部 API，EP 升级需回归本批测试）。 -->
-  <el-table ref="tableRef" v-bind="$attrs" border v-loading="loading" @header-dragend="onDrag">
+       回放走 EP store.states（内部 API，EP 升级需回归本批测试）。
+       批32：fill（撑满可用空间表内滚）/infinite（滚到底 load-more）两 opt-in——见 props 注释；
+       infinite 依赖 EP el-table 公开 @scroll 事件（2.14.3 实证 event.target=滚动 wrap），
+       append slot 由 EP 渲染进滚动区（高度天然计入）——同为 EP 行为面，升级需回归。 -->
+  <el-table ref="tableRef" v-bind="tableAttrs" border v-loading="loading" @header-dragend="onDrag">
     <slot />
+    <template v-if="moreText" #append>
+      <div class="ts-more">{{ moreText }}</div>
+    </template>
   </el-table>
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch, useAttrs } from 'vue'
 
 defineOptions({ inheritAttrs: false })   // 显式 v-bind="$attrs" 透传（含事件），防根双绑
 
 const props = defineProps({
   storageKey: { type: String, required: true },   // 语义键（localStorage 前缀 colw.）
   loading: { type: Boolean, default: undefined },  // 盲审A-P2-10：v-loading 指令在组件根=dev 警告，收 prop 内层化
+  // 批32 fill：撑满可用空间（el-main 底 − 表格顶 − reserve），max-height 语义=数据少自然高/多则表内滚。
+  // reserve 默认 40（≥el-main padding-bottom 30，小了残留外滚——批32 盲审 A-P2-1）；页有表下元素时调大。
+  fill: { type: Boolean, default: false },
+  fillReserve: { type: Number, default: 40 },
+  // 批32 infinite：滚到底（距底 ≤60px）emit load-more（父层 loading 自行守护去抖）；隐含 fill。
+  // moreText 经 append slot 渲染在滚动区内（"加载中/没有更多"——高度天然计入，免 fill 扣减）。
+  infinite: { type: Boolean, default: false },
+  moreText: { type: String, default: '' },
+})
+const emit = defineEmits(['load-more'])
+
+// fill 生效时忽略外部传入的 height/max-height（批32 契约——B-P2-7：两值并存 EP wrapStyle 语义混乱）
+// 注：useAttrs() 返回响应式对象本身（非 ref）——此处不可 .value（P0 实锤：.value=undefined
+// 展开成空 attrs，:data/loading/style 全丢=全站表格空、零报错、构建绿的三重盲区）
+const attrsProxy = useAttrs()
+const tableAttrs = computed(() => {
+  const a = { ...attrsProxy }
+  if (props.fill || props.infinite) {
+    delete a.height
+    delete a['max-height']
+    delete a.maxHeight
+    a.maxHeight = availHeight.value || undefined
+  }
+  return a
 })
 
 const tableRef = ref(null)
+const availHeight = ref(0)
+let ro = null
+
+const recompute = () => {
+  const el = tableRef.value?.$el
+  if (!el) return
+  const main = el.closest?.('.el-main')
+  const anchorBottom = main ? main.getBoundingClientRect().bottom : window.innerHeight   // 锚 el-main 非 viewport（fixed footer 遮挡巧合非设计——批32 A-P2-2）
+  const top = el.getBoundingClientRect().top
+  const avail = Math.floor(anchorBottom - top - props.fillReserve)
+  availHeight.value = Math.max(240, avail)   // 地板 240：小屏防挤没
+}
+
+// 批32：滚到底触发（A-P0-2 修正：EP el-table 的 scroll 是组件自定义事件，载荷=纯对象
+// {scrollTop,scrollLeft} 无 target——模板 @scroll 拿不到滚动容器。改为挂载期对 $el 捕获监听
+// （捕获截获子树内滚动容器，e.target=滚动 wrap，含 scrollHeight/clientHeight 全量信息；
+// 不 querySelector、不依赖 EP 载荷形状；scroll 不冒泡=捕获是必需）
+let lastFire = 0
+const onScroll = (e) => {
+  if (!props.infinite) return
+  const t = e?.target
+  if (!t) return
+  if (t.scrollTop + t.clientHeight >= t.scrollHeight - 60) {
+    const now = Date.now()
+    if (now - lastFire < 200) return   // 高频滚动事件级去抖（跨请求去抖由父层 loading 守护）
+    lastFire = now
+    emit('load-more')
+  }
+}
 const storeId = 'colw.' + props.storageKey
 const declaredWidths = new Map()   // 盲审A-P1-4：声明宽快照（prop→width/min-width 原值）——双击回档真值
 
@@ -95,6 +154,15 @@ onMounted(async () => {
   snapshotDeclared()
   applySaved()
   tableRef.value?.$el?.addEventListener('dblclick', onDbl)
+  // 批32：fill/infinite 高度观测——表格自身 RO（页签 v-if 激活 0→实高自然触发重算）+ window resize 兜底；
+  // infinite 滚动=捕获监听（A-P0-2：EP scroll 自定义事件载荷无 target，见 onScroll 注释）
+  if (props.fill || props.infinite) {
+    recompute()
+    ro = new ResizeObserver(() => recompute())
+    ro.observe(tableRef.value?.$el)
+    window.addEventListener('resize', recompute)
+  }
+  if (props.infinite) tableRef.value?.$el?.addEventListener('scroll', onScroll, true)
   // 盲审A-P2-5/B-P2-2：列集合变化（显隐切换重建 column 对象）→ 重放存档宽
   watch(() => cols().length, async (_n, o) => {
     if (o === undefined) return
@@ -102,5 +170,15 @@ onMounted(async () => {
     applySaved()
   })
 })
-onUnmounted(() => tableRef.value?.$el?.removeEventListener('dblclick', onDbl))
+onUnmounted(() => {
+  tableRef.value?.$el?.removeEventListener('dblclick', onDbl)
+  tableRef.value?.$el?.removeEventListener('scroll', onScroll, true)
+  ro?.disconnect()
+  window.removeEventListener('resize', recompute)
+})
 </script>
+
+<style scoped>
+/* 批32：append slot 懒加载提示行（滚动区内） */
+.ts-more { text-align: center; padding: 8px 0; color: var(--text-secondary); font-size: var(--fs-foot); }
+</style>

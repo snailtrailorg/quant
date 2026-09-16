@@ -94,7 +94,10 @@ def require_perm(perm: str):
         role = payload.get("db_role") or payload.get("role", "viewer")
         perms, _ = load_effective_permissions(payload.get("username", ""), role)
         if perm not in perms:
-            raise HTTPException(403, f"角色 {role} 无 {perm} 权限")
+            # 批32：错误码化（原裸 HTTPException 无 code——前端 axios 拦截器剥 response 后
+            # 403 不可辨，批25"noPerm 显式横条"检测路径自始是死的）
+            from .errors import ApiError
+            raise ApiError(403, "PERM_DENIED", f"角色 {role} 无 {perm} 权限")
         return payload
     return checker
 

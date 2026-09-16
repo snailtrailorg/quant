@@ -8,7 +8,8 @@
       <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExport" />
     </div>
     <el-alert v-if="noPerm" type="warning" :title="t('log.noPerm')" :closable="false" style="margin-bottom: var(--sp-3)" />
-    <TableShell v-else :data="filteredLogs" height="500" storage-key="logs-run">
+    <TableShell v-else :data="filteredLogs" fill infinite :more-text="moreText" :loading="loading"
+                @load-more="onLoadMore" storage-key="logs-run">
       <el-table-column prop="ts" :label="t('common.time')" min-width="160">
         <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
@@ -31,32 +32,60 @@ import IconBtn from '../components/IconBtn.vue'
 import { fmtTime } from '../utils/fmtTime'
 import { exportCsv } from '../exportCsv'
 import { Download } from '@element-plus/icons-vue'
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { getLogs, apiErr } from '../api'
+import api, { apiErr } from '../api'
 const { t } = useI18n()
 
+// 批32：游标懒加载（每页 100）+level/module 后端筛选（用户裁定：日志是查问题用的，筛不准=白筛）
 const logs = ref([])
-// 批24 迭代十六：分组筛选 {level:[], module:[]}（级别枚举固定；模块从数据 distinct 预取）
+const next = ref(null)
+const loading = ref(true)
+const loadingMore = ref(false)
+let reqId = 0   // 批32 A-P1-5：筛选变更重置游标，在途响应 reqId 不匹配即丢弃（防旧页后到覆盖新筛选）
 const rowFilter = ref({})
 const levelOptions = ['ERROR', 'WARN', 'INFO'].map(v => ({ value: v, label: v }))
-const moduleOptions = computed(() => [...new Set(logs.value.map(l => l.module).filter(Boolean))].sort()
-  .map(v => ({ value: v, label: v })))
+const moduleOptions = ref([])   // 批32：后端首屏附带全量（原从已加载行 distinct——筛历史半残）
 const filterGroups = computed(() => [
   { key: 'level', label: t('log.level'), options: levelOptions },
   { key: 'module', label: t('log.module'), options: moduleOptions.value },
 ])
-const filteredLogs = computed(() => {   // 批25：数据源已切 system_log——email/im/sms 发送事件为真数据行（映射撤）
+const fetchPage = async (before) => {
+  const my = ++reqId
+  const params = { }
+  if (before) params.before = before
   const { level = [], module = [] } = rowFilter.value
-  return logs.value.filter(l => (!level.length || level.includes(l.level)) && (!module.length || module.includes(l.module)))
-})
+  if (level.length) params.level = level
+  if (module.length) params.module = module
+  try {
+    const r = await api.get('/log', { params })
+    if (my !== reqId) return   // 过期响应丢弃
+    if (before) logs.value.push(...r.logs)
+    else { logs.value = r.logs; if (r.modules) moduleOptions.value = r.modules.map(v => ({ value: v, label: v })) }
+    next.value = r.next
+  } catch (e) {
+    if (e?.code === 'PERM_DENIED') { noPerm.value = true; return }   // A-P1-1：批25"403 显式横条"复活（后端批32 补 PERM_DENIED 码）
+    ElMessage.error(apiErr(e, ''))
+  } finally {
+    if (my === reqId) { loading.value = false; loadingMore.value = false }
+  }
+}
+const onLoadMore = () => {
+  if (!next.value || loadingMore.value || loading.value) return
+  loadingMore.value = true
+  fetchPage(next.value)
+}
+const moreText = computed(() => loadingMore.value ? t('common.loading')
+  : (!next.value && logs.value.length ? t('common.noMore') : ''))
+watch(rowFilter, () => { loading.value = true; next.value = null; fetchPage() }, { deep: true })   // 筛选变更=重置游标重拉首屏（next 先清防"没有更多"闪现——B-P2-4）
+const filteredLogs = computed(() => logs.value)   // 筛选已在后端（保留 computed 名兼容导出引用）
 const onExport = () => exportCsv('run_logs',
   [t('common.time'), t('log.level'), t('log.module'), t('log.content')],
   filteredLogs.value.map(l => [fmtTime.full(l.ts), l.level, l.module, l.msg]))
 const noPerm = ref(false)
 onMounted(async () => {
-  try { logs.value = (await getLogs()).logs || [] }
+  try { await fetchPage() }
   // 批25：运行日志=管理员面——403 显式提示非静默空表；批27-19：其余错误（500/网络）也不再静默
   catch (e) {
     if (e?.response?.status === 403) noPerm.value = true

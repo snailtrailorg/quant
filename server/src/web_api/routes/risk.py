@@ -1,5 +1,5 @@
 """风控路由：熔断开关 + 风控规则 CRUD + 三账对账 + 审计日志 + 数据完整性看板。"""
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Depends, Body, Query
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
 from ..models import (RiskRuleReq)
@@ -247,13 +247,52 @@ def reconcile_api(payload: dict = Depends(require_perm("read"))):
 
 
 @router.get("/api/audit")
-def get_audit(payload: dict = Depends(require_perm("user_mgmt"))):
+def get_audit(before: str | None = None, limit: int = 100,
+              actor: list[str] = Query(default=[]), action: list[str] = Query(default=[]),
+              payload: dict = Depends(require_perm("user_mgmt"))):
+    """审计日志。批32：游标分页（每页 100，ORDER BY ts DESC, id DESC 双键——同秒多行单键丢/重行）
+    +actor/action 筛选后端化（Audit.vue 原两维前端筛同病同治）+首屏附带 actors/actions 全量下拉源
+    （DISTINCT LIMIT 500 封顶——audit_log 只插不删，全表扫随年头增长，量级注记）。
+    **响应形状变更 list→dict（破坏性）**：唯一消费方 Audit.vue 同批切换+Ansible 同车发布无错配窗口。
+    批16 bug1 的 target 列保留。"""
+    limit = max(1, min(limit, 500))
+    where, params = "", []
+    if before:
+        try:
+            _us, _rid = before.split("|")
+            from datetime import datetime as _dt, timezone as _tz
+            _ts = _dt.fromtimestamp(int(_us) / 1_000_000, tz=_tz.utc)
+            where += " WHERE (ts, id) < (%s, %s)"
+            params += [_ts, int(_rid)]
+        except Exception:
+            raise ApiError(400, "CURSOR_INVALID", "游标无效或已过期，请刷新列表")
+    _ac = [a for a in actor if a]   # B-P2-2：全空串维度跳过
+    if _ac:
+        where += (" AND" if where else " WHERE") + " actor = ANY(%s)"
+        params.append(_ac)
+    _at = [a for a in action if a]
+    if _at:
+        where += (" AND" if where else " WHERE") + " action = ANY(%s)"
+        params.append(_at)
     with get_conn() as conn:
-        # 批16 bug1：补 target——表里有列（audit_log.target）端点漏查，前端 target 列恒空
-        cur = conn.execute("SELECT id, ts, actor, action, target, detail FROM audit_log ORDER BY ts DESC LIMIT 100")
+        cur = conn.execute(
+            f"SELECT id, ts, actor, action, target, detail FROM audit_log{where} "
+            "ORDER BY ts DESC, id DESC LIMIT %s", (*params, limit))
         rows = cur.fetchall()
-    return [{"id": r[0], "ts": str(r[1]) if r[1] else None, "actor": r[2], "action": r[3],
+        actors, actions = [], []
+        if not before:   # 首屏下拉源（翻页不重复）
+            acur = conn.execute("SELECT DISTINCT actor FROM audit_log ORDER BY 1 LIMIT 500")
+            actors = [r[0] for r in acur.fetchall()]
+            tcur = conn.execute("SELECT DISTINCT action FROM audit_log ORDER BY 1 LIMIT 500")
+            actions = [r[0] for r in tcur.fetchall()]
+    # A-P2-1 注记：ts [:19] 截断对齐 /api/log 既有口径——非 +08 浏览器显示会漂移（fmtTime 按本地解析）
+    logs = [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "actor": r[2], "action": r[3],
              "target": r[4], "detail": r[5]} for r in rows]
+    next_cursor = None
+    if len(rows) == limit and rows:
+        last = rows[-1]
+        next_cursor = f"{int(last[1].timestamp() * 1_000_000)}|{last[0]}"
+    return {"logs": logs, "next": next_cursor, "actors": actors, "actions": actions}
 
 
 
