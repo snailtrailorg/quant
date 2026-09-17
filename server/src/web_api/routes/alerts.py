@@ -310,11 +310,16 @@ def sms_config_put(body: dict = Body(...), payload: dict = Depends(require_perm(
               "sign_name": "alert_sms_sign_name",
               "template_code": "alert_sms_template_code",
               "verify_template_code": "alert_sms_verify_template_code"}   # 批30：验证码模板（明文 text）
+    # 批38 用户裁定三段语义：缺键=不改（API 部分更新灵活性）/密钥空=不改（不回显防御——
+    # 表单恒空，空=清空会每次保存误清）/明文三键空=真清空（GET 明文回显→所见即所得）
+    _clearable = {"sign_name", "template_code", "verify_template_code"}
     with get_conn() as conn:
         for k, col in fields.items():
-            v = (body.get(k) or "").strip()
-            if not v:
-                continue   # 留空=不修改（smtp 先例；批38 用户裁定：签名/模板明文回显直接改，无需清除）
+            if k not in body:
+                continue
+            v = str(body.get(k) or "").strip()
+            if not v and k not in _clearable:
+                continue
             if k == "access_key_secret":
                 v = encrypt(v)
             conn.execute(

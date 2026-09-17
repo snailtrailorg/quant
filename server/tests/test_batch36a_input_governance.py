@@ -283,3 +283,24 @@ def test_models_field_constraints():
     with _pytest.raises(ValidationError):
         StrategyAccountReq(strategy_id="s", account_id="a", initial_capital=0)
     assert LlmBudgetReq(alert_threshold_pct=100).alert_threshold_pct == 100   # 边界含
+
+
+def test_sms_config_three_semantics(authed_client):
+    """批38 用户裁定：sms-config 三段语义——缺键=不改/密钥空=跳过/明文空=真清空。"""
+    from src.web_api.routes import alerts as A
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    calls = []
+    conn.execute.side_effect = lambda sql, *a: calls.append((sql, a)) or None
+    with patch("src.web_api.routes.alerts.get_conn", return_value=conn), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
+         patch("src.web_api.routes.alerts.audit_log"):
+        # 密钥空=跳过 + 明文空=清空落库（空串仍 execute）+ 缺键（access_key_id 不发）=跳过
+        authed_client.put("/api/alerts/sms-config",
+                          json={"access_key_secret": "", "sign_name": "", "template_code": "SMS_1"})
+    writes = [c for c in calls if "system_config" in c[0] and "INSERT" in c[0]]
+    keys = [w[0] for w in writes]
+    assert any("alert_sms_sign_name" in k for k in keys)          # 明文空=清空（落库空串）
+    assert any("alert_sms_template_code" in k for k in keys)      # 明文非空=正常
+    assert not any("alert_sms_access_key_secret" in k for k in keys)   # 密钥空=跳过
+    assert not any("alert_sms_access_key_id" in k for k in keys)       # 缺键=跳过
