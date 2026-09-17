@@ -111,7 +111,6 @@ export default {
       sendSuccess: '发送成功',
       credComplete: '凭证完整',
       configKey: '配置项',
-      configValue: '值',
       mode: '模式',
       more: '更多',   // 批16：回测列表「更多」按钮（操作收编弹窗入口）——第三批误加进 dashboard 块
       passwordRule: '密码至少 8 位，需含字母和数字',
@@ -958,6 +957,14 @@ export default {
       updated: '已更新',
       pwdSet: '已配置，留空不改',
       pwdEmpty: '未配置',
+      // 批35 只显化词条（文案师终稿）——pwdShown 刻意与 pwdSet（编辑态）错开用词防两状态混淆
+      currentValue: '当前值',
+      boolOn: '开',
+      boolOff: '关',
+      pwdShown: '已设置',
+      pwdShownNo: '未设置',
+      editTitle: '编辑配置',
+      newValue: '新值',
     },
     imBots: {
       title: 'IM 机器人', addBot: '添加机器人', createBot: '创建机器人', editBot: '编辑机器人',
@@ -1331,7 +1338,6 @@ export default {
       sendSuccess: 'Sent',
       credComplete: 'Credentials complete',
       configKey: 'Config Key',
-      configValue: 'Value',
       mode: 'Mode',
       more: 'More',
       passwordRule: 'At least 8 chars, must include letters and numbers',
@@ -2173,6 +2179,14 @@ export default {
       updated: 'Updated',
       pwdSet: 'Set — leave blank to keep',
       pwdEmpty: 'Not set',
+      // 批35 只显化词条（文案师终稿）
+      currentValue: 'Current Value',
+      boolOn: 'On',
+      boolOff: 'Off',
+      pwdShown: 'Set',
+      pwdShownNo: 'Not set',
+      editTitle: 'Edit Configuration',
+      newValue: 'New Value',
     },
     imBots: {
       title: 'IM Bots', addBot: 'Add Bot', createBot: 'Create Bot', editBot: 'Edit Bot',

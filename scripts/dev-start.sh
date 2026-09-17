@@ -85,8 +85,8 @@ start_backend() {
   fi
   echo "🚀 启动后端 :$BACKEND_PORT ..."
   (cd "$SERVER" && setsid ./venv/bin/uvicorn src.web_api.main:app --port $BACKEND_PORT >"$BACKEND_LOG" 2>&1 < /dev/null &)
-  # 等就绪（最多 15s）
-  for i in $(seq 1 15); do
+  # 等就绪（最多 30s——15s 实证不够：88 表 schema 校验冷启动可超窗，2026-09-17 起栈误判失败后端却活着）
+  for i in $(seq 1 30); do
     if curl -sf http://127.0.0.1:$BACKEND_PORT/health >/dev/null 2>&1; then
       green "  后端 ✓ (pid $(backend_pid))"
       return
