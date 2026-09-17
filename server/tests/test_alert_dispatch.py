@@ -422,3 +422,15 @@ def test_send_one_unknown_channel_rejected():
     from src.alert_notify.dispatch import _send_one
     ok, reason = _send_one({"channel": "fax", "target": "123"}, "warn", "risk", "t", "b", None)
     assert ok is False and reason == "not_configured"
+
+
+def test_broadcast_submit_real_call_no_mock():
+    """批44 累积审 P0 回归钉：broadcast→_submit 真调用（零 mock——批39 半修签名致 TypeError
+    每轮盘后报告崩，测试全 mock broadcast 测不出）。"""
+    from src.alert_notify import dispatch as D
+    q = []
+    with patch.object(D, "_q") as fake_q, \
+         patch.object(D, "_worker_started", True):
+        fake_q.put.side_effect = lambda item: q.append(item)
+        D.broadcast("system", "t", "b")
+    assert q and q[0] == ("info", "system", "t", "b", None, None, True)

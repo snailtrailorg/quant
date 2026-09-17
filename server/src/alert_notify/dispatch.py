@@ -62,13 +62,13 @@ def broadcast(category: str, title: str, body: str) -> None:
 
 
 def _submit(level: str, category: str, title: str, body: str,
-            code: str | None, notif_id: int | None) -> None:
+            code: str | None, notif_id: int | None, skip_level: bool = False) -> None:
     global _worker_started
     if not _worker_started:
         import threading
         threading.Thread(target=_worker, daemon=True, name="alert-dispatch").start()
         _worker_started = True
-    _q.put((level, category, title, body, code, notif_id))
+    _q.put((level, category, title, body, code, notif_id, skip_level))
 
 
 # ── broker-only 生产者：模块级惰性单例（仅 executor 单线程使用，免锁）──
@@ -340,7 +340,7 @@ def _send_one(row: dict, level: str, category: str, title: str, body: str, code:
     if prof is None:
         return False, "not_configured"
     ctx = {"level": level, "category": category, "title": title, "body": body,
-           "code": code, "notif_id": row.get("notif_id")}
+           "code": code}
     payload = prof.renderer(ctx)
     return prof.sender(row["target"], **payload)
 

@@ -122,30 +122,7 @@ def report(title: str, body: str, channel: str = "wechat_work") -> None:
 
 
 # 批39：_push_channel 已删（用户裁定死码连根——webhook 链整体退役；报告推送走 dispatch.broadcast）
-def _quota_exceeded(channel: str) -> bool:
-    """日配额（#39，默认 100 条/天/渠道）。
-
-    P1 修复（2026-08-20 双盲审计）：配额检查原无 try——Valkey 故障时异常穿透 notify
-    到 safe_notify 被吞，critical 告警的外部推送恰在 Valkey 故障时刻必死（违背 D-F1）。
-    存储故障按未超限放行（fail-open，与节流键同款——见本文件 84-86 行注释的承诺）。
-    """
-    try:
-        r = _redis()
-        k = f"alert:quota:{channel}:{time.strftime('%Y%m%d')}"
-        used = int(r.get(k) or 0)
-        limit = int(os.environ.get("ALERT_DAILY_QUOTA", "100"))
-        if used >= limit:
-            logger.warning("渠道 %s 日配额超限 %s，跳过", channel, limit)
-            return True
-        r.setnx(k, 0)
-        r.incr(k)
-        r.expire(k, 86400)
-        return False
-    except Exception as e:
-        logger.warning("配额检查失败（fail-open 放行）: %s", e)
-        return False
-
-
+# 批44 累积审：notify._quota_exceeded 已删（批39 _push_channel 随 webhook 退役后零消费——dispatch 有自己的实现）
 def cleanup(retention_acked_days: int = 7, retention_all_days: int = 30) -> dict:
     """留存清理（beat 每日）：已确认>7天删除，全部>30天删除。"""
     from src.data_platform.db import get_conn
