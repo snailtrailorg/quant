@@ -566,3 +566,19 @@ def test_update_card_request_shape_and_results():
         assert c.update_card("om_9", card) is False
     with _p("src.im_bot.feishu_client.httpx.patch", side_effect=RuntimeError("net down")):
         assert c.update_card("om_9", card) is False
+
+
+
+def test_dup_receipt_failure_does_not_bypass_dedup():
+    """批44 累积审回归钉（批39 A-P1-1 修复当时零钉）：dup 分支回执 send_text 抛异常
+    不得落外层 except「放行」——去重已生效，回执失败仅记日志（否则二连点+网络抖动
+    =第二次急停真执行）。"""
+    v, ident, r, calls, texts, fc = _gates_env()
+    r.set = MagicMock(side_effect=lambda k, *a, **kw: not k.startswith("feishu:card:exec:"))
+    r.get = MagicMock(return_value="ok")   # 伴生结果键 ok → 终态化 executed
+    fc.send_text = MagicMock(side_effect=RuntimeError("网络抖动"))
+    patched = []
+    with patch("src.im_bot.feishu_client.build_terminal_card", side_effect=lambda t, s: patched.append(s)):
+        _run_gates(v, ident, r, calls, texts, fc, mid="m1")
+    assert calls == []          # 关键断言：去重拦截成立（execute 零调用——异常未致放行）
+    assert patched == ["executed"]   # 伴生键 ok → 终态化 executed 走通（mid 空守卫需 mid）

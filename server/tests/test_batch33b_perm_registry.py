@@ -174,3 +174,27 @@ def test_overlay_end_to_end_real_db():
             conn.execute("DELETE FROM perm_resource WHERE res_id='settings'")
             conn.commit()
         invalidate_registry_cache()
+
+
+def test_nav_ghost_row_stripped_load_nav_map():
+    """批39 B-P2-3 回归钉：load_nav_map 剥离注册表外 nav resource（菜单改名/删除残留行
+    ——不滤则 PermMatrix 回显即回传，BAD_RESOURCE 卡死该组 nav 保存）。"""
+    from src.data_platform import perms
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    # role 行：一条合法（screener）+ 一条幽灵（已删除的旧菜单 id）
+    conn.execute.return_value.fetchall.return_value = [
+        ("screener", "hidden"), ("ghost_old_menu", "readonly")]
+    with patch("src.data_platform.db.get_conn", return_value=conn):
+        out = perms.load_nav_map("bob", "analyst")
+    assert out == {"screener": "hidden"}   # 幽灵行被剥（不进守卫/不回显）
+
+
+def test_nav_ghost_row_stripped_load_dim():
+    """批39 B-P2-3 回归钉：_load_dim nav 维同剥离（管理面矩阵回显侧）。"""
+    from src.web_api.routes.auth_routes import _load_dim
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchall.return_value = [
+        ("analyst", "screener", "hidden"), ("analyst", "ghost_menu", "readonly")]
+    with patch("src.data_platform.db.get_conn", return_value=conn):
+        out = _load_dim("nav")
+    assert out == {"analyst": {"screener": "hidden"}}

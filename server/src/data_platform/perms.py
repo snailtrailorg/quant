@@ -122,15 +122,25 @@ def load_nav_map(username: str, role: str) -> dict:
     """W5：nav 维映射（resource=菜单id → hidden|readonly|readwrite）。
 
     批33a：user 覆盖层退役——纯 role 判定（username 参数保留=签名兼容）。
+    批39 B-P2-3：nav 维幽灵行剥离（菜单改名/删除后 permission 表残留行——不滤则回显即
+    回传，BAD_RESOURCE 卡死该组 nav 保存；读侧白名单=注册表 NAV 条目 id 集）。
     无配置={}（=readwrite 缺省，前端现行为）。
     """
     try:
+        from src.data_platform.perm_registry import NAV_ITEMS_BASE
         from src.data_platform.db import get_conn as _gc
         with _gc() as conn:
             rows = conn.execute(
                 "SELECT resource, effect FROM permission "
                 "WHERE dimension='nav' AND subject_type='role' AND subject_id=%s", (role,)).fetchall()
-        return {res: eff for res, eff in rows}
+        known = {e["id"] for e in NAV_ITEMS_BASE}
+        out = {}
+        for res, eff in rows:
+            if res not in known:
+                _logger.warning("nav 维幽灵行忽略（resource=%s 不在注册表——菜单改名/删除残留）", res)
+                continue
+            out[res] = eff
+        return out
     except Exception:
         return {}
 
