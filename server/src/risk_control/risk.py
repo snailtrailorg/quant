@@ -445,11 +445,4 @@ class RiskControl:
     def get_rules(self) -> dict:
         return dict(self._rules)
 
-    def update_rules(self, rules: dict) -> None:
-        """更新风控规则（Admin）。"""
-        allowed_keys = {"global", "etf_conv", "crypto"}
-        for k in rules:
-            if k not in allowed_keys:
-                raise ValueError(f"非法规则键: {k}")
-        self._rules.update(rules)
-        logger.info(f"风控规则更新: {rules}")
+    # 批39 A-P2-5：update_rules 已删（全仓零调用+绕过 RuleSanitizer 不落库的陷阱面——风险页显示恒走 60s 热加载真源）

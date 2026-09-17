@@ -40,13 +40,6 @@ def visible_categories(role: str) -> list[str]:
     return [c for c, roles in CATEGORY_ROLES.items() if role in roles]
 
 
-def should_push_external(category: str, level: str) -> bool:
-    """外部通道主动推送规则：实盘紧急（risk+critical）+ 基础设施紧急（system+critical，
-    2026-08-18 盲审 D-F6：health_monitor 的 dep_down/unit_down 类 critical 若只落站内铃铛，
-    恰在最需要告警的时刻到不了人）。其余站内即可（订阅型走 report）。"""
-    return level == "critical" and category in ("risk", "system")
-
-
 def _redis() -> redis.Redis:
     # 批18 盲审A-P0-2 同修：双 1s 超时——Valkey hung 时缺省无超时会永久阻塞调用线程
     #（notify 挂在实盘告警路径=冻结交易主流程；超时=跳过去重继续发送）
@@ -120,50 +113,15 @@ def safe_notify(level: Level, title: str, body: str = "", code: str | None = Non
 
 
 def report(title: str, body: str, channel: str = "wechat_work") -> None:
-    """订阅型报告分发（盘后报告等）：站内记 info + 外部照推（属用户订阅，不占主动推送规则）。"""
+    """订阅型报告分发（盘后报告等）。批39 B-P2-7（用户裁定改走订阅链）：站内记 info +
+    订阅广播（dispatch.broadcast——跳 min_level 门槛的订阅推送，通道勾选/节流/配额照常）；
+    旧 channel_config webhook 直推退役（Channels UI 批38 删）。channel 形参保留兼容。"""
     notify("info", "system", title, body[:2000])
-    _push_channel("info", title, body, channel=channel)
+    from src.alert_notify.dispatch import broadcast
+    broadcast("system", title, body[:2000])
 
 
-def _push_channel(level: Level, title: str, body: str, code: str | None = None,
-                  channel: str | None = None, notif_id: int | None = None) -> bool:
-    """外部通道推送（webhook 渠道：分级路由 + 日配额）。返回是否送达（批 7：过渡兜底回写 legacy 态用）。
-
-    W3（2026-09-01）：code 在 RUNBOOK 时 body 尾部追加处置行。截断纪律（盲审 A/B-P1）：
-    discord content 上限 2000 字符/企微 markdown 4096 字节——**先截原 body 再拼行**，
-    处置行永不落截断区（超限发送失败被通道层吞=告警静默丢，违 D-F1）；组装在配额
-    检查后（配额已尽免白拼）；顺手修既有隐患（原版外推传原始 body 未截）。
-    """
-    target = channel or ("discord" if level == "critical" else "wechat_work")
-    from src.alert_notify.channel import get_channel
-    ch = get_channel(target)
-    if not ch:
-        logger.warning("无可用渠道(%s/%s): %s（在 Web 消息通道页配 channel_config）", level, target, title)
-        return False
-    if _quota_exceeded(target):
-        return False
-    try:
-        line = ""
-        if code:
-            from src.alert_notify.runbook import RUNBOOK
-            rb = RUNBOOK.get(code)
-            if rb:
-                line = f"\n▸ 处置[{rb['label']}]: {rb['guide']}"
-        # W3（盲审 A/B-P1a 修正版）：分通道截断——企微 markdown 限 4096 **字节**
-        # （chars≠bytes：1900 汉字=5700B 超限，通道层无二次截断=静默丢）；discord
-        # content 限 2000 字符。先截原 body 再拼行，处置行永不落截断区。
-        if target == "discord":
-            out_body = body[:max(1990 - len(line), 0)] + line
-        else:
-            budget = 3900 - len(line.encode("utf-8"))
-            out_body = body.encode("utf-8")[:max(budget, 0)].decode("utf-8", "ignore") + line
-        ch.send(title, out_body, level)
-        return True
-    except Exception as e:
-        logger.error("channel send failed (%s): %s", target, e)
-        return False
-
-
+# 批39：_push_channel 已删（用户裁定死码连根——webhook 链整体退役；报告推送走 dispatch.broadcast）
 def _quota_exceeded(channel: str) -> bool:
     """日配额（#39，默认 100 条/天/渠道）。
 

@@ -11,7 +11,7 @@ from ..auth import (
     validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
 )
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq, EmailChangeReq, EmailConfirmReq, PhoneCodeReq, PhoneChangeReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq, EmailChangeReq, EmailConfirmReq, PhoneCodeReq, PhoneChangeReq)
 from src.data_platform.db import get_conn
 from src.email_service import send_invite_email, send_activation_email, send_password_reset_email, send_email_change_email
 import logging
@@ -70,7 +70,9 @@ def _rate_limited(bucket: str, key: str) -> bool:
 
 @router.post("/api/auth/login")
 def login(req: LoginReq, request: Request):
-    if _rate_limited("login", request.client.host if request.client else "?"):
+    # 批39 A-P2-4 解耦：桶键=请求体用户名（零 HTTP 头依赖——nginx 配不配 XFF 不影响；
+    # 防定向扫号足够/牺牲分布式喷洒检测=可接受权衡，用户裁定）
+    if _rate_limited("login", f"u:{(req.username or '').strip().lower()}"):
         raise ApiError(429, "RATE_LIMITED", "尝试过于频繁，请稍后再试")
     user = authenticate(req.username, req.password)  # 支持 用户名 或 邮箱（含 @）
     if not user:
@@ -158,6 +160,15 @@ def _load_dim(dimension: str, strict: bool = False) -> dict:
                 "SELECT subject_id, resource, effect FROM permission "
                 "WHERE subject_type='role' AND dimension=%s", (dimension,)).fetchall()
         out: dict = {}
+        if dimension == "nav":
+            # 批39 B-P2-3：nav 维幽灵行剥离（菜单改名/删除后 permission 表残留行——
+            # 不滤则 PermMatrix 回显即回传，BAD_RESOURCE 卡死该组 nav 保存）
+            from src.data_platform.perm_registry import NAV_ITEMS_BASE as _NB
+            _known = {e["id"] for e in _NB}
+            for sid, res, eff in rows:
+                if res in _known:
+                    out.setdefault(sid, {})[res] = eff
+            return out
         for sid, res, eff in rows:
             out.setdefault(sid, {})[res] = eff
         return out
@@ -217,7 +228,7 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
         # 盲审 A-P1c 修：admin 地板=锁键+system_config（原 &LOCKED 把 FLOOR 的
         # system_config 截成死代码——admin 重写可去 system_config=自锁防线失真）
         if role == "admin":
-            floor_keys = LOCKED_PERM_KEYS | {"system_config"}
+            floor_keys = LOCKED_PERM_KEYS | {"system_config", "alerts_config"}   # 批39 B-P2-1：alerts_config 地板生效（原 ADMIN_ROLE_FLOOR 含该键但 & 截断=死值）
             preserved = (current | ADMIN_ROLE_FLOOR) & floor_keys
         else:
             floor_keys = LOCKED_PERM_KEYS
@@ -336,7 +347,7 @@ def email_change_api(req: EmailChangeReq, request: Request,
                      background_tasks: BackgroundTasks,
                      payload: dict = Depends(require_authenticated)):
     """发起改邮箱：密码验证+占用校验 → 发确认邮件到新邮箱（1h token）。库零触碰直到 confirm。"""
-    if _rate_limited("emailchg", request.client.host if request.client else "?"):
+    if _rate_limited("emailchg", f"u:{payload['username']}"):   # 批39：uid/用户名键解耦
         raise ApiError(429, "RATE_LIMITED", "请求过于频繁，请稍后再试")
     uid = int(payload["sub"])
     new_email = req.new_email.strip().lower()          # 规范化全链（盲审A-P2-5：唯一约束区分大小写）
@@ -696,7 +707,7 @@ async def register_api(req: RegisterReq, request: Request, background_tasks: Bac
 @router.post("/api/auth/forgot-password")
 async def forgot_password_api(req: ForgotReq, request: Request, background_tasks: BackgroundTasks):
     """找回密码：发重置邮件（后台发送，SMTP 慢/失败不阻塞接口；不泄露 email 是否存在）。"""
-    if _rate_limited("forgot", request.client.host if request.client else "?"):   # P4：防邮件轰炸
+    if _rate_limited("forgot", f"u:{(str(req.email or '')).strip().lower()}"):   # 批39 解耦：账号键（P4 防邮件轰炸——req.email 非 body）
         raise ApiError(429, "RATE_LIMITED", "请求过于频繁，请稍后再试")
     token = forgot_password(req.email)
     if not token:

@@ -29,7 +29,7 @@ POST_ENDPOINTS = [
     "/api/sync/config/astock_daily",
     "/api/llm-budget/1",
     "/api/data-sources/1",
-    "/api/channels/1",
+    
     "/api/brokers/1",
     "/api/risk-rules/1",
     "/api/factors/some-name",

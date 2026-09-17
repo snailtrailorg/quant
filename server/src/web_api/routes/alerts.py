@@ -384,8 +384,8 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
         with get_conn() as conn:
             cur = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s AND enabled", (bid,))
             b = cur.fetchone()
-            cur = conn.execute("SELECT count(*), array_agg(im_user_id) FROM im_bot_users WHERE bot_id=%s",
-                               (bid,))
+            cur = conn.execute("SELECT count(*), array_agg(im_user_id) FROM im_bot_users "
+                               "WHERE bot_id=%s AND user_id IS NOT NULL", (bid,))   # 批39 A-P2-2：对齐 dispatch 过滤（防向未绑定行发测试消息）
             agg = cur.fetchone()
         n_bound, bound = (agg[0] or 0), (agg[1] or [])
         if not b:

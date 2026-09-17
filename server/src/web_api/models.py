@@ -137,13 +137,6 @@ class RateLimitOverrideReq(BaseModel):
     value: float | None = None
     circuit_breaker: dict | None = None
 
-class ChannelReq(BaseModel):
-    provider: str
-    name: str
-    credentials: str = ""
-    params: str | None = None
-    enabled: bool = True
-
 class BrokerReq(BaseModel):
     provider: str
     name: str

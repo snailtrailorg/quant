@@ -183,8 +183,13 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
         _exec_key = mid or f"{value.get('ts')}:{open_id}"
         if not r.set(f"feishu:card:exec:{_exec_key}:{tool}", "1", nx=True, ex=300):
             logger.warning("同卡重复执行拦截: tool=%s mid=%s", tool, mid or "(回退 ts:open_id)")
-            get_feishu_client(fid).send_text(
-                open_id, "这项操作刚才已经执行过了，再点也不会执行第二次——不用再点。")   # 文案师 A 候选
+            # 批39 A-P1-1：dup 分支局部防护——回执异常禁落外层 except「放行」（原路径=二连点+
+            # 网络抖动 → 第二次急停/恢复被真实执行）。去重已生效，回执失败仅记日志。
+            try:
+                get_feishu_client(fid).send_text(
+                    open_id, "这项操作刚才已经执行过了，再点也不会执行第二次——不用再点。")   # 文案师 A 候选
+            except Exception as _re:
+                logger.warning("dup 回执发送失败（不影响去重拦截）: %s", _re)
             # 批29b-B1（代码盲审 B-P1-1）：据伴生结果键重刷——防首点失败的卡被重点刷绿
             # "已执行"（风险操作面说谎）；结果键缺失/redis 异常 → 不重刷（首点已终态化，
             # PATCH 失败态由过期闸兜底），保守缺省不赌方向。
@@ -192,10 +197,13 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
                 _res = r.get(f"feishu:card:execres:{_exec_key}:{tool}")
             except Exception:
                 _res = None
-            if _res == "ok":
-                _terminal("executed", tool)
-            elif _res == "fail":
-                _terminal("failed", tool)
+            try:
+                if _res == "ok":
+                    _terminal("executed", tool)
+                elif _res == "fail":
+                    _terminal("failed", tool)
+            except Exception as _te:
+                logger.warning("dup 终态化失败（不影响去重拦截）: %s", _te)
             return
     except Exception as e:
         logger.warning("卡片去重检查失败（放行，风险自负）: %s", e)   # fail-open 对齐 HTTP 面

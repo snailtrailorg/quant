@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Request, Body, BackgroundTasks
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, ChannelReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
 from src.data_platform.db import get_conn
 from src.email_service import queue_email, try_row
 from ..terms import get_terms_items
@@ -416,12 +416,21 @@ def update_system_config(key: str, body: dict = Body(...),
             if hi is not None and num > hi:
                 raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 不得大于 {hi:g}")
         # 阈值对交叉校验（warn < crit——写侧查对方现值；swap 单阈值无对）
-        _pair = {"alert_disk_warn": "alert_disk_crit", "alert_mem_warn": "alert_mem_crit"}.get(key)
+        # 批39 A-P2-1 双边化：写 crit 侧也校验（原只拦 warn 侧——crit 调到 warn 之下静默落库=分级反转）
+        _pairs = {"alert_disk_warn": "alert_disk_crit", "alert_mem_warn": "alert_mem_crit",
+                  "alert_disk_crit": "alert_disk_warn", "alert_mem_crit": "alert_mem_warn"}
+        _pair = _pairs.get(key)
         if _pair:
+            _is_warn = key.endswith("_warn")
             cur2 = conn.execute("SELECT value FROM system_config WHERE key=%s", (_pair,)).fetchone()
-            if cur2 and cur2[0] and float(value) >= float(cur2[0]):
-                raise ApiError(400, "CONFIG_VALUE_INVALID",
-                               f"{key} 须小于 {_pair}（预警先于严重）")
+            if cur2 and cur2[0]:
+                _mine, _other = float(value), float(cur2[0])
+                if _is_warn and _mine >= _other:
+                    raise ApiError(400, "CONFIG_VALUE_INVALID",
+                                   f"{key} 须小于 {_pair}（预警先于严重）")
+                if not _is_warn and _mine <= _other:
+                    raise ApiError(400, "CONFIG_VALUE_INVALID",
+                                   f"{key} 须大于 {_pair}（严重后于预警）")
         elif value_type == "bool":
             value = "true" if value in (True, "true", "True", "1", 1) else "false"
         elif value_type == "json":

@@ -1,5 +1,5 @@
 """通知中心单测：类别×角色可见矩阵 + 外部推送规则（2026-08-14 决策）。"""
-from src.alert_notify.notify import visible_categories, should_push_external, CATEGORY_ROLES
+from src.alert_notify.notify import visible_categories, CATEGORY_ROLES   # 批39：should_push_external 随 webhook 链退役删
 
 
 def test_admin_sees_all():
@@ -30,16 +30,7 @@ def test_viewer_sees_nothing():
     assert visible_categories("viewer") == []
 
 
-def test_external_push_only_risk_critical():
-    """外部通道只推紧急（risk/system + critical）；其余站内。D-F6 修订后 system+critical 也外推。"""
-    assert should_push_external("risk", "critical") is True
-    assert should_push_external("risk", "warn") is False
-    assert should_push_external("email", "critical") is False   # 邮件失败不外推
-    assert should_push_external("system", "critical") is True   # 2026-08-18 D-F6：基础设施紧急到人
-    assert should_push_external("system", "warn") is False      # 磁盘/接口 warn 级仍站内
-    assert should_push_external("task", "warn") is False
-
-
+# 批39：webhook 外推语义钉随 should_push_external 退役删除
 def test_matrix_covers_all_categories():
     """每个类别至少一个角色可见。"""
     for c in CATEGORY_ROLES:

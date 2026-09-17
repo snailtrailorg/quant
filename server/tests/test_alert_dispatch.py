@@ -159,7 +159,7 @@ def test_report_info_not_dispatched():
     with patch.object(N, "_redis", return_value=r), \
          patch("src.data_platform.db.get_conn", return_value=conn), \
          patch("src.alert_notify.dispatch.dispatch") as p_disp, \
-         patch.object(N, "_push_channel") as p_pc:
+         patch.object(D, "broadcast") as p_pc:
         N.report("盘后报告", "内容")
     p_disp.assert_called_once()
     assert D._LEVEL_RANK.get("info", 0) < 1                # 入口门槛事实
@@ -173,7 +173,7 @@ def test_zero_subs_no_legacy_push():
     with patch.object(D, "_load_channels", return_value=[]), \
          patch.object(D, "_writeback_empty") as p_empty, \
          patch.object(D, "_throttled", MagicMock(return_value=False)), \
-         patch.object(N, "_push_channel") as p_pc:
+         patch.object(D, "broadcast") as p_pc:
         D._dispatch_async("critical", "risk", "t", "b", None, 1)
     p_pc.assert_not_called()
     p_empty.assert_called_once()
@@ -212,7 +212,7 @@ def test_zero_subs_non_critical_writes_empty():
     with patch.object(D, "_load_channels", return_value=[]), \
          patch.object(D, "_throttled", MagicMock(return_value=False)), \
          patch.object(D, "_writeback_empty") as p_empty, \
-         patch.object(N, "_push_channel") as p_pc:
+         patch.object(D, "broadcast") as p_pc:
         D._dispatch_async("warn", "data", "t", "b", None, 1)   # should_push_external warn=False
     p_pc.assert_not_called(); p_empty.assert_called_once()
 
@@ -244,7 +244,8 @@ def test_writeback_logs_on_failure():
 def test_reason_tokens_constrain():
     """dispatch 值域只允许枚举 token（failed:<token>/skip:<token>）。"""
     ok_reasons = {"throttled", "quota", "disabled", "timeout", "smtp_refused", "smtp_error",
-                  "enqueue", "submit", "im_partial", "no_binding", "not_configured", "expired"}
+                  "enqueue", "submit", "im_partial", "no_binding", "not_configured", "expired",
+                  "bad_target"}   # 批39 A-P2-3：_send_im 脏 target 失败 token 补录
     assert D._REASON_TOKENS == ok_reasons
 
 

@@ -2,7 +2,7 @@
 
 code → {label, guide}：通知结构化标识 → 展示名+一句话处置。
 - 消费方①：站内通知（前端 GET /api/runbook → MainLayout 缓存 → chip/guide 渲染）
-- 消费方②：外推通道（notify._push_channel 组装"▸ 处置"行）
+- 消费方②：订阅推送（dispatch 发送链组装"▸ 处置"行——批39 webhook 退役后唯一组装点）
 - **暂仅中文**（多语言债：governed by multilang-architecture，en 版本批后补）
 一致性防线：直调打码点 code 字面量 ⊆ RUNBOOK 键（tests/test_notify.py 一致性测试跑 collect 断言；
 wrapper 变量透传链测不到——main._alert / make_alert 注入链靠人工对照，见测试盲区声明）。

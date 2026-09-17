@@ -7,6 +7,6 @@
     report("盘后报告", "今日盈亏+...")                             # 订阅型：站内 + 外推
 """
 
-from .notify import notify, report, visible_categories, should_push_external, cleanup, CATEGORY_ROLES
+from .notify import notify, report, visible_categories, cleanup, CATEGORY_ROLES   # 批39：should_push_external 随 webhook 链退役
 
 __all__ = ["notify", "report", "visible_categories", "should_push_external", "cleanup", "CATEGORY_ROLES"]

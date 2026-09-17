@@ -28,7 +28,7 @@ _LEVEL_RANK = {"info": 0, "warn": 1, "critical": 2}
 _REASON_TOKENS = {
     "throttled", "quota", "disabled", "timeout", "smtp_refused", "smtp_error",
     "enqueue", "submit", "im_partial", "no_binding", "not_configured", "expired",
-}
+    "bad_target"}
 _LIMITS = {"im": 100, "email": 100, "sms": int(os.environ.get("ALERT_SMS_DAILY_QUOTA", "20"))}
 _TZ = ZoneInfo("Asia/Shanghai")
 
@@ -51,6 +51,14 @@ def _worker() -> None:
             logger.error("alert_dispatch chain failed: %s", e)
         finally:
             _q.task_done()
+
+
+def broadcast(category: str, title: str, body: str) -> None:
+    """批39 B-P2-7：报告类广播——订阅行（category 匹配+enabled）全推，**跳过 min_level 门槛**
+    （报告=用户明确订阅的常规通知非告警——info 级被 warn 门槛滤掉违背订阅意图；用户裁定
+    盘后报告改走订阅链）。通道勾选/节流/配额照常；站内记录由 notify() 承担（notif_id=None
+    =无审计行回写跳过——报告在 notifications 表已有 info 行）。"""
+    _submit("info", category, title, body, None, None, skip_level=True)
 
 
 def _submit(level: str, category: str, title: str, body: str,

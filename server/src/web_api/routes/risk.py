@@ -156,13 +156,7 @@ def reconcile_manual_order(body: dict, payload: dict = Depends(require_perm("use
             "SELECT COALESCE(SUM(volume),0) FROM trade_log WHERE split_part(symbol,'.',1)=%s "
             "AND action='BUY'", (sym.split(".")[0],))
         derived = float(cur.fetchone()[0] or 0)
-        cur = conn.execute(
-            "SELECT COALESCE(SUM(snap_vol - vol),0) FROM ("
-            " SELECT split_part(symbol,'.',1) s, SUM(volume) snap_vol FROM position_snapshot "
-            " WHERE direction!='short' GROUP BY 1) p "
-            "LEFT JOIN (SELECT split_part(symbol,'.',1) s, SUM(volume) vol FROM trade_log "
-            " WHERE action='BUY' GROUP BY 1) t ON t.s=p.s WHERE p.s=%s", (sym.split(".")[0],))
-        broker_extra = float(cur.fetchone()[0] or 0) if cur.rowcount else 0
+        # 批39 A-P2-6：broker_extra 快照聚合查询已删（算后未用——INSERT 用 derived+qty 自洽）
         conn.execute(
             "INSERT INTO reconcile_issue (symbol, issue_type, detail, broker_qty, derived_qty, "
             "status, handled_by, note, exempt_qty) VALUES (%s,'manual_order',%s,%s,%s,'exempt',%s,%s,%s)",

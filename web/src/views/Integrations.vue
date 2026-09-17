@@ -3,7 +3,9 @@
   <el-card>
     <template #header>
       <TabsShell :tabs="tabs" default-tab="mail" v-slot="slotProps">
-        <component :is="(tabs.find(x => x.key === slotProps.tab) || tabs[0]).c" />
+        <!-- 批39 A-P1-2：空 tabs（无任一页签权限/meOnce 失败）渲染空态——原 tabs[0].c 抛 TypeError 白屏 -->
+        <EmptyState v-if="!tabs.length" :description="t('common.noPerm')" />
+        <component :is="(tabs.find(x => x.key === slotProps.tab) || tabs[0])?.c" v-else />
       </TabsShell>
     </template>
   </el-card>
@@ -12,6 +14,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { meOnce } from '../api'
 import TabsShell from '../components/TabsShell.vue'
+import EmptyState from '../components/EmptyState.vue'
 import DataSources from './DataSources.vue'
 import LLMModels from './LLMModels.vue'
 import SmtpCard from '../components/SmtpCard.vue'
