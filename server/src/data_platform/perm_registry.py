@@ -47,8 +47,8 @@ NAV_ITEMS_BASE: list[dict] = [
     {"id": "dataops", "group": "ops", "order": 2},
     {"id": "integrations", "group": "ops", "order": 3},
     {"id": "observe", "group": "ops", "order": 4},
-    {"id": "settings", "group": "ops", "order": 5},
-    {"id": "perm-resources", "group": "ops", "order": 6},   # 批33b：管理页自身入册（吃狗粮）
+    {"id": "perm-resources", "group": "ops", "order": 5},   # 批33b 入册；批37 组内序=系统权限前系统设置底
+    {"id": "settings", "group": "ops", "order": 6},
 ]
 
 # 市场操作键 5（原 perms._MARKET_OP_KEYS 字面量迁此——perms 改派生 re-export 保调用方零改动）

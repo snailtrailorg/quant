@@ -29,6 +29,11 @@ api.interceptors.response.use(
 export function apiErr(e, fallback = '') {
   const g = i18n.global
   if (e?.code && g.te('err.' + e.code)) return g.t('err.' + e.code)
+  // 批37（用户裁定）：裸英文错误串不上屏——后端默认 404 与 axios 网络层错误双语化
+  if (e?.detail === 'Not Found' || e?.message === 'Not Found')
+    return g.t('common.apiNotFound')
+  const m = /^Request failed with status code (\d+)$/.exec(e?.message || '')
+  if (m) return g.t('common.httpError', { code: m[1] })
   return e?.detail || e?.message || fallback
 }
 

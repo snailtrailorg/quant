@@ -15,11 +15,13 @@ import Brokers from './Brokers.vue'
 import Channels from './Channels.vue'
 import LLMModels from './LLMModels.vue'
 import SmtpCard from '../components/SmtpCard.vue'
+import SmsCard from '../components/SmsCard.vue'
 import TradingAccounts from './TradingAccounts.vue'
 const tabs = [
     { key: 'brokers', i18nKey: 'tabs.brokers', c: Brokers },
     { key: 'push', i18nKey: 'tabs.push', c: Channels },
     { key: 'mail', i18nKey: 'tabs.mail', c: SmtpCard },
+    { key: 'sms', i18nKey: 'tabs.sms', c: SmsCard },   // 批37：短信凭证迁入（告警页弹窗退役）
     { key: 'llm', i18nKey: 'tabs.llm', c: LLMModels },
     { key: 'sources', i18nKey: 'tabs.sources', c: DataSources },
     { key: 'trading', i18nKey: 'tabs.trading', c: TradingAccounts },

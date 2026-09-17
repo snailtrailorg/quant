@@ -47,6 +47,8 @@ export default {
       failed: '失败',
       saveSuccess: '保存成功',
       saveFailed: '保存失败',
+      apiNotFound: '这个功能的数据接口不存在，可能是页面与系统版本不一致。请刷新页面或稍后再试，仍不行请联系管理员。',   // 批37：裸 404 兜底双语化
+      httpError: '服务出错了（错误码 {code}）。请稍后重试；持续出现请联系管理员。',
       deleteSuccess: '删除成功',
       deleteFailed: '删除失败',
       createSuccess: '创建成功',
@@ -129,7 +131,7 @@ export default {
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
       logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
-      llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
+      llm: 'LLM 模型', sources: '数据源', trading: '交易账户', sms: '短信凭证',   // 批37
       run: '运行配置', users: 'API 密钥', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
     },
     emailChg: {   // 批20 20C：改邮箱（文案经文案师）
@@ -185,7 +187,7 @@ export default {
       strategy: '策略管理',
       backtest: '回测中心',
       factors: '因子库',
-      screener: '选股器', settings: '设置', permResources: '资源注册表',   // 批33b：管理页菜单项
+      screener: '选股器', settings: '系统设置', permResources: '系统权限',   // 批37 改名
       pool: '股票池', analysis: '每日研判', dataops: '数据中心',
       integrations: '集成中心', observe: '系统监控', chat: 'AI 助手',
       risk: '风控总览',
@@ -504,15 +506,15 @@ export default {
       logLevel: '级别', logMsg: '日志内容', logTime: '时间',
       exportReport: '导出报告',
     },
-    permRes: {   // 批33b：资源注册表管理页（文案师终稿）
-      title: '资源注册表', tabApi: '功能权限键', tabNav: '菜单项', tabMarket: '市场操作键',
+    permRes: {   // 批33b：资源注册表管理页（文案师终稿；批37 页名随菜单改「系统权限」）
+      title: '系统权限', tabApi: '功能权限', tabNav: '菜单权限', tabMarket: '交易权限', colId: '标识',
       colRes: '名称', colGroup: '分组', colOrder: '排序', colLabel: '显示名', colStatus: '状态',
       colEndpoints: '管控接口', colAction: '操作',
-      locked: '🔒 系统锁定，不可修改', readonly: '权限键由系统统一定义，本页只能查看',
+      locked: '🔒 系统锁定，不可修改', readonly: '权限键由系统统一定义，本页只能查看', readonlyShort: '只读',
       editTitle: '编辑菜单项', fGroup: '分组', fOrder: '排序',
       fLabelZh: '中文名（留空用内置名）', fLabelEn: '英文名（留空用内置名）',
       fEnabled: '停用（开启后任何角色都打不开这个页面）',
-      redline: '本页资源随版本发布，不能在此新增或删除。菜单项可调整分组、排序、显示名和停用；功能权限键与市场操作键只读。',
+      redline: '本页条目随版本发布，不能新增或删除。菜单权限页签可调整分组、排序、显示名和停用；功能权限、交易权限页签只能查看。',
       bindingsNote: '这里列出该权限键管控的全部接口：未获授权的用户访问这些接口会被拒绝。清单由系统自动维护、随版本更新，无需人工操作。',
       nBindings: '管控 {n} 个接口', enabled: '启用', disabled: '停用',
     },
@@ -1052,7 +1054,7 @@ export default {
       nickname: '昵称',
       avatar: '头像',
       tabBasic: '基本信息', tabIm: 'IM 通道', tabPwd: '修改密码', tabPerms: '权限',
-      registeredAt: '注册时间', recentLogin: '最近登录', accountStatus: '账号状态', marketOpTitle: '市场操作权限',
+      registeredAt: '注册时间', recentLogin: '最近登录', accountStatus: '账号状态', marketOpTitle: '交易权限',
       nicknameRequired: '昵称不能为空',
       clickToChange: '点击头像更换',
       chooseAvatar: '选择头像',
@@ -1221,7 +1223,7 @@ export default {
     perm: {
       // 批33a：title/note/modeRole/modeUser/pickUser/overrideNote/addOverride/clear/dim/resource/effect/legendOrange
       // 随 Permissions.vue 整删退役（PermMatrix 共用键 tabApi/tabNav/navGroup/mk_* 等保留）
-      tabApi: '功能', tabNav: '菜单/页面', tabMarket: '市场',
+      tabApi: '功能权限', tabNav: '菜单权限', tabMarket: '交易权限',
       notLoaded: '权限配置加载失败。请刷新页面重试；刷新后仍失败，请联系管理员。',   // 批27-4 文案师 A
       navGroup: '分组', navState: '可见性', navHidden: '隐藏', navReadonly: '只读', navReadwrite: '读写',
       mk_astock: 'A股', mk_convertible: '可转债', mk_etf: '场内基金', mk_binance_perp: '币安永续', mk_okx_perp: 'OKX 永续',
@@ -1242,7 +1244,7 @@ export default {
       toEn: '点击切换为英文', toZh: '点击切换为中文',
       toDark: '点击切换为深色', toLight: '点击切换为浅色',
       search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
-      myPerms: '我的权限', navLimitTitle: '受限页面', navLimitNote: '只列出受限制的页面，其余都能正常用', navLimitEmpty: '所有页面都能正常使用', permChangeHint: '需要开通或调整权限，请联系管理员',
+      myPerms: '我的权限', navLimitTitle: '菜单权限', navLimitNote: '只列出受限制的页面，其余都能正常用', navLimitEmpty: '所有页面都能正常使用', permChangeHint: '需要开通或调整权限，请联系管理员',
     },
     notify: {
       empty: '暂无通知',   // ackAll 随批23 确认机制退役
@@ -1314,6 +1316,8 @@ export default {
       failed: 'Failed',
       saveSuccess: 'Saved',
       saveFailed: 'Save failed',
+      apiNotFound: 'The data service behind this page wasn\'t found — the page and the system may be on different versions. Refresh the page or try again later; if it keeps failing, contact your administrator.',
+      httpError: 'The server returned an error (code {code}). Please try again in a moment; if it keeps happening, contact your administrator.',
       deleteSuccess: 'Deleted',
       deleteFailed: 'Delete failed',
       createSuccess: 'Created',
@@ -1396,7 +1400,7 @@ export default {
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
       logs: 'Run Logs', audit: 'Audit Log',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
-      llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
+      llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts', sms: 'SMS Credentials',   // 批37
       run: 'Run Config', users: 'API Keys', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
     },
     emailChg: {
@@ -1452,7 +1456,7 @@ export default {
       strategy: 'Strategies',
       backtest: 'Backtest',
       factors: 'Factors',
-      screener: 'Screener', settings: 'Settings', permResources: 'Resource Registry',
+      screener: 'Screener', settings: 'System Settings', permResources: 'System Permissions',
       pool: 'Stock Pool', analysis: 'Daily Analysis', dataops: 'Data Center',
       integrations: 'Integrations', observe: 'System Monitor', chat: 'AI Assistant',
       risk: 'Risk',
@@ -1770,11 +1774,11 @@ export default {
       logLevel: 'Level', logMsg: 'Message', logTime: 'Time',
       exportReport: 'Export Report',
     },
-    permRes: {   // 批33b（copywriter final）
-      title: 'Resource Registry', tabApi: 'Feature Keys', tabNav: 'Menu Items', tabMarket: 'Market Keys',
+    permRes: {   // 批33b（copywriter final；批37 renamed with menu）
+      title: 'System Permissions', tabApi: 'Feature Permissions', tabNav: 'Menu Permissions', tabMarket: 'Trading Permissions', colId: 'Identifier',
       colRes: 'Name', colGroup: 'Group', colOrder: 'Order', colLabel: 'Display Name', colStatus: 'Status',
       colEndpoints: 'Guarded APIs', colAction: 'Actions',
-      locked: '🔒 System-locked, not editable', readonly: 'Keys are defined system-wide; view only',
+      locked: '🔒 System-locked, not editable', readonly: 'Keys are defined system-wide; view only', readonlyShort: 'View-only',
       editTitle: 'Edit Menu Item', fGroup: 'Group', fOrder: 'Order',
       fLabelZh: 'Chinese name (blank = built-in)', fLabelEn: 'English name (blank = built-in)',
       fEnabled: 'Disable (no role can open this page)',
@@ -2314,7 +2318,7 @@ export default {
       nickname: 'Nickname',
       avatar: 'Avatar',
       tabBasic: 'Basic Info', tabIm: 'IM Channels', tabPwd: 'Change Password', tabPerms: 'Permissions',
-      registeredAt: 'Registered', recentLogin: 'Last Login', accountStatus: 'Account Status', marketOpTitle: 'Market Permissions',
+      registeredAt: 'Registered', recentLogin: 'Last Login', accountStatus: 'Account Status', marketOpTitle: 'Trading Permissions',
       nicknameRequired: 'Nickname cannot be empty',
       clickToChange: 'Click avatar to change',
       chooseAvatar: 'Choose Avatar',
@@ -2471,14 +2475,14 @@ export default {
     },
     perm: {
       // 批33a：title/note/modeRole/modeUser/pickUser/overrideNote/addOverride/clear/dim/resource/effect/legendOrange retired with Permissions.vue
-      tabApi: 'Features', tabNav: 'Menu/Pages', tabMarket: 'Markets',
+      tabApi: 'Feature Permissions', tabNav: 'Menu Permissions', tabMarket: 'Trading Permissions',
       notLoaded: 'Failed to load permission settings. Please refresh the page and try again; if it keeps failing, contact your administrator.',   // 批27-4 文案师 A
       navGroup: 'Group', navState: 'Visibility', navHidden: 'Hidden', navReadonly: 'Read-only', navReadwrite: 'Read-write',
       mk_astock: 'A-Stock', mk_convertible: 'Convertible', mk_etf: 'Listed Funds', mk_binance_perp: 'Binance Perp', mk_okx_perp: 'OKX Perp',
       allow: 'Allowed', deny: 'Denied',
       marketOpNote: 'Checked = this group may buy/open in this market; unchecked = buys are rejected. Selling to close is always allowed.',
       grp_basic: 'Basic Access', grp_basic_desc: 'View markets, positions and backtests', grp_trading: 'Trading Operations', grp_trading_desc: 'Orders, emergency stop and live trading switches', grp_strategy: 'Strategy & Data', grp_strategy_desc: 'Manage strategies and sync market data', grp_risk: 'Risk Control', grp_risk_desc: 'Set position, drawdown and blacklist rules', grp_system: 'System Administration', grp_system_desc: 'Accounts, keys, channels and system settings', grp_other: 'Other', key_read: 'View Pages', key_trade: 'Place Orders', key_halt: 'Emergency Stop', key_resume: 'Resume Trading', key_live_trading_control: 'Live Trading Switch', key_strategy_control: 'Strategy Management', key_data_sync: 'Data Sync', key_risk_rules: 'Risk Rules', key_system_config: 'System Parameters', key_user_mgmt: 'Users & Permissions', key_llm_config: 'AI Models', key_im_bots_config: 'IM Channels', key_alerts_config: 'Alert Settings', key_account_keys: 'API Keys',
-      legendAllowed: 'Checked = allowed', legendRed: 'Red strikethrough = not allowed', apiPermTitle: 'Feature permissions',
+      legendAllowed: 'Checked = allowed', legendRed: 'Red strikethrough = not allowed', apiPermTitle: 'Feature Permissions',
       lockedNote: 'System policy locked keys (dual-path lock, not editable)',
       preservedInfo: 'System locked keys auto-preserved (not editable here)',
       dualTrackNote: 'Menu visibility is driven by API permissions (same source as the role matrix); market picks are enforced at order time — unchecked markets reject buys. AI Models and IM Channels manage credentials; grant with care.',
@@ -2492,7 +2496,7 @@ export default {
       toEn: 'Switch to English', toZh: 'Switch to Chinese',
       toDark: 'Switch to dark mode', toLight: 'Switch to light mode',
      search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
-      myPerms: 'My permissions', navLimitTitle: 'Restricted pages', navLimitNote: 'Only restricted pages are listed; all others work normally', navLimitEmpty: 'All pages are available as normal', permChangeHint: 'To request a change, contact your admin',
+      myPerms: 'My permissions', navLimitTitle: 'Menu Permissions', navLimitNote: 'Only restricted pages are listed; all others work normally', navLimitEmpty: 'All pages are available as normal', permChangeHint: 'To request a change, contact your admin',
     },
     notify: {
       empty: 'No notifications',   // ackAll retired in batch 23

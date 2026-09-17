@@ -12,8 +12,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span style="font-weight: 600">{{ t('alerts.page.title') }}</span>
           <span style="display: flex; gap: 8px">
-            <IconBtn :icon="Plus" :title="t('alerts.addSub')" @click="add" />
-            <IconBtn :icon="Message" :title="t('alerts.smsCred')" @click="smsDlg = true" />
+            <IconBtn :icon="Plus" :title="t('alerts.addSub')" @click="add" />   <!-- 批37：短信凭证入口迁集成中心 -->
           </span>
         </div>
       </template>
@@ -125,20 +124,6 @@
       </template>
     </el-dialog>
 
-    <!-- 短信凭证（专用端点,secret 只写不读；批30 加验证码模板第 5 字段） -->
-    <el-dialog v-model="smsDlg" :close-on-click-modal="false" :title="t('alerts.smsCred')" width="560px">
-      <el-form label-width="140px">
-        <el-form-item label="AccessKey ID"><el-input v-model="smsForm.access_key_id" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
-        <el-form-item label="AccessKey Secret"><el-input v-model="smsForm.access_key_secret" type="password" show-password :placeholder="t('alerts.phKeepBlank')" autocomplete="new-password" /></el-form-item>
-        <el-form-item :label="t('alerts.signName')"><el-input v-model="smsForm.sign_name" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
-        <el-form-item :label="t('alerts.tplCode')"><el-input v-model="smsForm.template_code" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
-        <el-form-item :label="t('alerts.verifyTplCode')"><el-input v-model="smsForm.verify_template_code" :placeholder="t('alerts.phKeepBlank')" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="smsDlg = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveSms">{{ t('common.save') }}</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -150,7 +135,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { apiErr } from '../api'
 import IconBtn from '../components/IconBtn.vue'
 import EmptyState from '../components/EmptyState.vue'
-import { Edit, VideoPlay, Delete, Plus, Message } from '@element-plus/icons-vue'
+import { Edit, VideoPlay, Delete, Plus } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const CATS = ['risk', 'task', 'data', 'system']
@@ -163,8 +148,6 @@ const isEdit = ref(false)
 const editingId = ref(null)
 const form = reactive({ user_id: null, username: '', channels: [], categories: ['risk'], min_level: 'warn', enabled: true })
 const testing = reactive({})
-const smsDlg = ref(false)
-const smsForm = ref({ access_key_id: '', access_key_secret: '', sign_name: '', template_code: '', verify_template_code: '' })
 
 const legacyRows = computed(() => cfg.value.legacy || [])
 const EMPTY_AVAIL = { email: false, sms: false, bots: [] }
@@ -245,15 +228,6 @@ const del = async (row) => {
     ElMessage.success(t('common.success'))
     await load()
   } catch (e) { if (e?.detail) ElMessage.error(e.detail) }
-}
-
-const saveSms = async () => {
-  try {
-    await api.put('/alerts/sms-config', smsForm.value)
-    smsDlg.value = false
-    ElMessage.success(t('common.success'))
-    await load()
-  } catch (e) { ElMessage.error(apiErr(e, t('common.failed'))) }
 }
 
 const test = async (row) => {
