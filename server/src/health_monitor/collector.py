@@ -66,15 +66,24 @@ def _read_cfg() -> tuple[dict, dict]:
             cfg = {k: v for k, v in cur.fetchall()}
         thresholds = {"mem": dict(_DEF_THRESHOLDS["mem"]), "disk": dict(_DEF_THRESHOLDS["disk"]),
                       "swap": dict(_DEF_THRESHOLDS["swap"])}
+        from math import isfinite
         for _, (ck, kind, lvl) in _CFG_KEYS["thresholds"].items():
             try:
-                thresholds[kind][lvl] = float(cfg.get(ck, _DEF_THRESHOLDS[kind][lvl]))
+                v = float(cfg.get(ck, _DEF_THRESHOLDS[kind][lvl]))
+                # 批36b-α：消费侧钳位（写侧注册表同源语义——DB 可被多通道写/有存量脏值风险）：
+                # 阈值域 (0,1]——>1 永不告警、≤0 恒告警、NaN 恒 False 比较均静默失效
+                if not isfinite(v) or v <= 0:
+                    continue   # 保留缺省
+                thresholds[kind][lvl] = min(v, 1.0)
             except (TypeError, ValueError):
                 pass
         periods = dict(_DEF_PERIODS)
         for _, (ck, kind) in _CFG_KEYS["periods"].items():
             try:
-                periods[kind] = max(30, int(cfg.get(ck, _DEF_PERIODS[kind])))
+                # 批36b-α：周期下限钳 30s（原已有）+上限 86400+负值回落缺省（写侧注册表同源）
+                v = int(cfg.get(ck, _DEF_PERIODS[kind]))
+                if v > 0:
+                    periods[kind] = max(30, min(v, 86400))
             except (TypeError, ValueError):
                 pass
     except Exception:

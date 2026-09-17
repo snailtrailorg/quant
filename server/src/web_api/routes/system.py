@@ -12,6 +12,22 @@ import json
 import logging
 logger = logging.getLogger("web_api")
 
+
+# 批36b-α：int/float 配置键值域注册表（单源——写侧查表/GET 下发/消费侧钳位同源引用；
+# 33b perm_resource 注册表同模式协同约定）。(lo, hi, lo_open)；hi=None 无上界。
+# xtp 两键 lo 取负：≤0=禁用（永久连接）是铁律语义，不得锁死（盲审 B-P1-4）。
+SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
+    "alert_disk_warn": (0, 1, True), "alert_disk_crit": (0, 1, True),
+    "alert_mem_warn": (0, 1, True), "alert_mem_crit": (0, 1, True),
+    "alert_swap_warn": (0, 1, True),
+    "log_retention_days": (0, 36500, False), "audit_retention_days": (0, 36500, False),   # 0=不清理（批28-7 语义）
+    "celery_concurrency": (1, 16, False),
+    "collect_period_disk": (30, 86400, False),
+    "collect_period_mem": (10, 86400, False), "collect_period_swap": (10, 86400, False),
+    "xtp_session_lead_min": (-1440, 1440, False), "xtp_session_lag_min": (-1440, 1440, False),
+    "user_bot_quota": (1, 100, False), "platform_bot_quota": (1, 100, False),   # 批26 裁定量程（0083 键型归位后生效）
+}
+
 router = APIRouter(tags=["system"])
 
 # ——— 操作指导书（链条打磨批次 4：Web 内置帮助）———
@@ -354,7 +370,9 @@ def list_system_config(payload: dict = Depends(require_perm("read"))):
                           "value_type": r[2], "description": r[3],
                           "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]})
         else:
+            b = SYSTEM_CONFIG_BOUNDS.get(r[0]) if r[2] in ("int", "float") else None   # 批36b-α：值域随 GET 下发（前端控件动态绑定）
             items.append({"key": r[0], "value": value, "value_type": r[2], "description": r[3],
+                          "bounds": {"lo": b[0], "hi": b[1], "lo_open": b[2]} if b else None,
                           "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]})
     return {"items": items}
 
@@ -380,13 +398,30 @@ def update_system_config(key: str, body: dict = Body(...),
         if value_type == "int":
             try: value = str(int(value))
             except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 int 值")
-            # 批28-7（盲审 P0）：日志保留两键 ≥0——负值=interval 负天数=删全表（audit 是
-            # 不可逆数据损失级）；0=不清理语义统一
-            if key in ("log_retention_days", "audit_retention_days") and int(value) < 0:
-                raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 ≥0（0=不清理）")
         elif value_type == "float":
             try: value = str(float(value))
             except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 float 值")
+        # 批36b-α：数值键→(lo,hi) 查表注册表（批28-7 两键特例并入统一；未注册键=仅 cast 零范围
+        # ——注册表是增强非强制全集）。NaN/Inf 一并拒（36a 同病）。
+        from math import isfinite
+        bounds = SYSTEM_CONFIG_BOUNDS.get(key)
+        if bounds is not None and value_type in ("int", "float"):
+            num = float(value)
+            if not isfinite(num):
+                raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需有限数字")
+            lo, hi, lo_open = bounds
+            if num < lo or (num == lo and lo_open):
+                raise ApiError(400, "CONFIG_VALUE_INVALID",
+                               f"{key} 需大于 {lo:g}" + ("（不含）" if lo_open else ""))
+            if hi is not None and num > hi:
+                raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 不得大于 {hi:g}")
+        # 阈值对交叉校验（warn < crit——写侧查对方现值；swap 单阈值无对）
+        _pair = {"alert_disk_warn": "alert_disk_crit", "alert_mem_warn": "alert_mem_crit"}.get(key)
+        if _pair:
+            cur2 = conn.execute("SELECT value FROM system_config WHERE key=%s", (_pair,)).fetchone()
+            if cur2 and cur2[0] and float(value) >= float(cur2[0]):
+                raise ApiError(400, "CONFIG_VALUE_INVALID",
+                               f"{key} 须小于 {_pair}（预警先于严重）")
         elif value_type == "bool":
             value = "true" if value in (True, "true", "True", "1", 1) else "false"
         elif value_type == "json":

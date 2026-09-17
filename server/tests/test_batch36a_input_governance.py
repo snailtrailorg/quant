@@ -222,3 +222,64 @@ def test_validate_params_nan_and_optional_null():
     assert validate_params("etf_conv", '{"strict_stop_loss": null}')[0] == {}   # optional null 跳过
     s = RuleSanitizer(logging.getLogger("t36c"))
     assert s.sanitize_type("global", {"max_drawdown": float("nan")}) == {}   # NaN 消费侧同样回落
+
+
+# ——— 批36b-α：system_config 注册表/交叉/collector 钳位/models Field ———
+
+def test_system_config_bounds_registry(authed_client):
+    """注册表查表：阈值 >1 拒/concurrency 0 拒/xtp 负值（=禁用语义）放行/quota 域。"""
+    from src.web_api.routes.system import SYSTEM_CONFIG_BOUNDS
+    assert SYSTEM_CONFIG_BOUNDS["alert_mem_crit"] == (0, 1, True)
+    assert SYSTEM_CONFIG_BOUNDS["xtp_session_lead_min"][0] < 0   # ≤0=禁用铁律不锁死（B-P1-4）
+    assert SYSTEM_CONFIG_BOUNDS["user_bot_quota"] == (1, 100, False)
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchone.side_effect = [
+        ("float",), (None,),   # value_type 查询 / 交叉校验查 crit（无行）
+    ]
+    with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+         patch("src.web_api.routes.system.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
+         patch("src.web_api.routes.system.audit_log"):
+        r = authed_client.post("/api/system-config/alert_mem_warn", json={"value": 1.5})
+    assert r.status_code == 400 and "不得大于" in r.json()["detail"]
+
+
+def test_system_config_cross_validation(authed_client):
+    """阈值对交叉：warn ≥ 现 crit 值拒（预警先于严重）。"""
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchone.side_effect = [("float",), ("0.9",)]
+    with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+         patch("src.web_api.routes.system.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
+         patch("src.web_api.routes.system.audit_log"):
+        r = authed_client.post("/api/system-config/alert_mem_warn", json={"value": 0.95})
+    assert r.status_code == 400 and "须小于" in r.json()["detail"]
+
+
+def test_collector_clamps_thresholds():
+    """消费侧钳位：DB 阈值 >1 钳 1.0 / NaN 回落缺省（监控告警静默失效面）。"""
+    import importlib
+    from src.health_monitor import collector as C
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchall.return_value = [
+        ("alert_mem_warn", "1.7"), ("alert_mem_crit", "nan"), ("collect_period_mem", "-5")]
+    with patch("src.data_platform.db.get_conn", return_value=conn):
+        C._CFG_CACHE.update(thresholds=None, ts=0)
+        th, periods = C._read_cfg()
+    assert th["mem"]["warn"] == 1.0            # 钳 hi
+    assert th["mem"]["crit"] == C._DEF_THRESHOLDS["mem"]["crit"]   # NaN 回落缺省
+    assert periods["mem"] == C._DEF_PERIODS["mem"]                 # 负周期回落缺省
+
+
+def test_models_field_constraints():
+    """模型层 Field：负 token 限额/阈值 0/杠杆 0——422（pydantic 校验错）。"""
+    from src.web_api.models import LlmBudgetReq, StrategyAccountReq
+    import pytest as _pytest
+    from pydantic import ValidationError
+    with _pytest.raises(ValidationError):
+        LlmBudgetReq(daily_token_limit=-100)
+    with _pytest.raises(ValidationError):
+        LlmBudgetReq(alert_threshold_pct=0)
+    with _pytest.raises(ValidationError):
+        StrategyAccountReq(strategy_id="s", account_id="a", initial_capital=0)
+    assert LlmBudgetReq(alert_threshold_pct=100).alert_threshold_pct == 100   # 边界含

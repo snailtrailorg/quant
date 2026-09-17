@@ -27,6 +27,19 @@ def _validate_strategy_category(stype: str, symbol: str, factors: list) -> dict:
 
 # --- 策略管理（DB 驱动） ---
 
+
+def _int_or(v, default: int, lo: int = None, hi: int = None) -> int:
+    """批36b-α：int cast 容错+值域钳（非数字回落缺省而非 500）。"""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return default
+    if lo is not None and n < lo:
+        return default
+    if hi is not None and n > hi:
+        return hi
+    return n
+
 @router.get("/api/strategy")
 def list_strategies(payload: dict = Depends(require_perm("read"))):
     """列策略配置（从 DB 读）。"""
@@ -224,7 +237,7 @@ def create_factor_api(req: dict = Body(...),
             code=req.get("code", ""),
             description=req.get("description", ""),
             params=req.get("params", {}),
-            needs_history=int(req.get("needs_history", 0)),
+            needs_history=_int_or(req.get("needs_history", 0), 0, lo=0, hi=5000),   # 批36b-α：非数字原 500+值域
             ftype=req.get("type", "python"),
         )
         audit_log(payload["username"], "create_factor", req.get("name", ""))
@@ -332,7 +345,7 @@ def update_factor_api(name: str, req: dict = Body(...),
             code=req.get("code", ""),
             description=req.get("description", ""),
             params=req.get("params", {}),
-            needs_history=int(req.get("needs_history", 0)),
+            needs_history=_int_or(req.get("needs_history", 0), 0, lo=0, hi=5000),   # 批36b-α：非数字原 500+值域
             ftype=req.get("type", "python"),
         )
         audit_log(payload["username"], "update_factor", name)

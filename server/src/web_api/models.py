@@ -1,6 +1,6 @@
 """Web 后端 · Pydantic 请求体模型（从 main.py 迁出，零语义改动）。"""
 from __future__ import annotations
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class LoginReq(BaseModel):
@@ -76,12 +76,12 @@ class LLMModelReq(BaseModel):
     model: str
     api_key: str = ""
     base_url: str
-    context_window: int = 32768
+    context_window: int = Field(32768, ge=0, le=2_000_000)      # 批36b-α：模型层值域（0=用模型缺省）
     supports_tools: bool = True
-    max_input_tokens: int | None = None
-    max_output_tokens: int | None = None
-    temperature: float | None = None
-    priority: int = 10
+    max_input_tokens: int | None = Field(None, ge=0, le=2_000_000)
+    max_output_tokens: int | None = Field(None, ge=0, le=2_000_000)
+    temperature: float | None = Field(None, ge=0, le=2)
+    priority: int = Field(10, ge=1, le=100)
     enabled: bool = False
 
     @field_validator("provider")
@@ -114,9 +114,9 @@ class IMBotUserReq(BaseModel):
 
 class LlmBudgetReq(BaseModel):
     provider: str | None = None
-    daily_token_limit: int | None = None
-    monthly_cost_limit: float | None = None
-    alert_threshold_pct: int = 80
+    daily_token_limit: int | None = Field(None, ge=0)            # 0/负=禁用告警（budget.py falsy 跳过）——写侧仍拒负
+    monthly_cost_limit: float | None = Field(None, ge=0)
+    alert_threshold_pct: int = Field(80, ge=1, le=100)
     enabled: bool = True
 
 class DataSourceReq(BaseModel):
@@ -124,7 +124,7 @@ class DataSourceReq(BaseModel):
     name: str
     credentials: str = ""
     params: str | None = None
-    usage_limit: int | None = None
+    usage_limit: int | None = Field(None, ge=0)                  # 批36b-α（0 语义=无限制——UI placeholder 表达）
     enabled: bool = True
 
 class RateLimitOverrideReq(BaseModel):
@@ -169,5 +169,5 @@ class StrategyAccountReq(BaseModel):
     strategy_id: str
     account_id: str
     broker_provider: str = "xtp"
-    initial_capital: float = 1000000
-    leverage: int = 1
+    initial_capital: float = Field(1_000_000, gt=0, le=1e10)
+    leverage: int = Field(1, ge=1, le=100)

@@ -33,7 +33,9 @@
         <el-form-item :label="t('risk.label')"><span>{{ editing.description }}</span></el-form-item>
         <el-form-item :label="t('systemConfig.newValue')">
           <el-input-number v-if="editing.value_type === 'int' || editing.value_type === 'float'"
-            v-model="editing.editValue" :step="1" :min="0" style="width: 140px" />   <!-- 批28-7：:min=0——通用 int/float 行（负保留天数=删全表盲审 P0） -->
+            v-model="editing.editValue" :step="1"
+            :min="editing.bounds ? editing.bounds.lo : 0" :max="editing.bounds?.hi ?? undefined"
+            style="width: 140px" />   <!-- 批36b-α：min/max 由注册表 bounds 驱动（批28-7 :min=0 缺省回落；xtp 负值禁用语义放开） -->
           <el-switch v-else-if="editing.value_type === 'bool'" v-model="editing.editValue" />
           <el-input v-else-if="editing.value_type === 'password'" v-model="editing.editValue" type="password" show-password autocomplete="new-password"
             style="width: 100%" :placeholder="editing.has_value ? t('systemConfig.pwdSet') : t('systemConfig.pwdEmpty')" />
