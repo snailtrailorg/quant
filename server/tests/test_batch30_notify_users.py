@@ -44,9 +44,10 @@ def _conn_with(*fetchalls):
 # ——— dispatch 展开（A-P0-3 行结构契约）———
 
 def test_load_channels_user_expansion():
-    """一用户（有邮箱+手机+2 bot）→ 4 行；im 行 id=bot_id、email/sms 行 id=user_id、sub_id 全带。"""
+    """一用户（有邮箱+手机+2 bot）→ 4 行；im 行 id=bot_id、email/sms 行 id=user_id、sub_id 全带。
+    批34：subs 七元组（channels 列在 min_level 后）——sel=None 全通道=批30 行为不变。"""
     from src.alert_notify import dispatch as D
-    subs = [(1, 7, ["risk"], "warn", "u@x.com", "13800001234")]
+    subs = [(1, 7, ["risk"], "warn", None, "u@x.com", "13800001234")]
     bots = [(7, 11), (7, 12)]
     conn = _conn_with(subs, bots)
     with patch("src.data_platform.db.get_conn", return_value=conn), \
@@ -60,13 +61,130 @@ def test_load_channels_user_expansion():
 def test_load_channels_sms_skipped_without_creds_and_filters_in_sql():
     """手机有值但短信凭证未配 → sms 行跳过；订阅/用户查询含软删停用过滤（SQL 断言）。"""
     from src.alert_notify import dispatch as D
-    conn = _conn_with([(1, 7, ["risk"], "warn", "u@x.com", "13800001234")], [])
+    conn = _conn_with([(1, 7, ["risk"], "warn", None, "u@x.com", "13800001234")], [])
     with patch("src.data_platform.db.get_conn", return_value=conn), \
          patch("src.alert_notify.sms.sms_configured", return_value=False):
         rows = D._load_channels()
     assert [r["channel"] for r in rows] == ["email"]
     sqls = [c.args[0] for c in conn.execute.call_args_list]
     assert any("deleted_at IS NULL" in s and "alert_user_sub" in s for s in sqls)
+
+
+# ——— 批34 通道级选择 ———
+
+def test_ch_ok_three_states():
+    """三态谓词：None=全通道 / []=零通道（禁 not sel 假值全开——盲审 A-P1-1）/ 精确匹配。"""
+    from src.alert_notify.dispatch import _ch_ok
+    assert _ch_ok(None, "email") and _ch_ok(None, "im:3")
+    assert not _ch_ok([], "email") and not _ch_ok([], "im:3")   # [] 必须零通道
+    assert _ch_ok(["email"], "email") and not _ch_ok(["email"], "sms")
+    assert _ch_ok(["im:3"], "im:3") and not _ch_ok(["im:3"], "im:4")
+
+
+def test_load_channels_filters_by_selection():
+    """按勾选过滤：sel=["email","im:12"] → 只发 email+bot12（sms/bot11 不发）。"""
+    from src.alert_notify import dispatch as D
+    conn = _conn_with([(1, 7, ["risk"], "warn", ["email", "im:12"], "u@x.com", "13800001234")],
+                      [(7, 11), (7, 12)])
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch("src.alert_notify.sms.sms_configured", return_value=True):
+        rows = D._load_channels()
+    assert [(r["channel"], r["id"]) for r in rows] == [("email", 7), ("im", 12)]
+
+
+def test_load_channels_empty_selection_mutes():
+    """零勾选=静音：sel=[] → 零行（用户裁定：行保留但不投递）。"""
+    from src.alert_notify import dispatch as D
+    conn = _conn_with([(1, 7, ["risk"], "warn", [], "u@x.com", "13800001234")],
+                      [(7, 11)])
+    with patch("src.data_platform.db.get_conn", return_value=conn), \
+         patch("src.alert_notify.sms.sms_configured", return_value=True):
+        assert D._load_channels() == []
+
+
+def test_strip_dead_keys():
+    """GET 剥离失效键：bot 删/邮箱清空的键不进回显；None 原样；畸形键滤除。"""
+    from src.web_api.routes.alerts import _strip_dead_keys
+    avail = {"email": False, "sms": True, "bots": [{"id": 3, "name": "b3"}]}
+    assert _strip_dead_keys(None, avail) is None
+    assert _strip_dead_keys(["email", "sms", "im:3", "im:9", "bad"], avail) == ["sms", "im:3"]
+
+
+def test_validate_channels_strips_dead_bot():
+    """已删 bot=实体消失 → 剥离落库不 400（用户裁定 2/盲审 A-P0-1 解法）。
+    批34 盲审 A-P2-2 后查询两步：①owner+enabled（非自有停用判定）②存在性（已删判定）。"""
+    from src.web_api.routes.alerts import _validate_channels
+    vc = _conn_with([("u@x.com", "138")], [])   # users(有邮箱) / 名下无 bot
+    with patch("src.web_api.routes.alerts.get_conn",
+               side_effect=[vc, _conn_with([(0,)]), _conn_with([(0,)])]):
+        out, stripped = _validate_channels(7, ["email", "im:99"])
+    assert out == ["email"] and stripped == ["im:99"]
+
+
+def test_validate_channels_rejects_foreign_bot_and_no_email():
+    """bot 属他人=400；无邮箱勾 email=400（API 误用信号，非实体消失）——盲审 A-P2-5 断言等值。"""
+    from src.web_api.routes.alerts import _validate_channels, ApiError
+    conn = _conn_with([("u@x.com", "138")], [])   # 有邮箱有手机，名下无 bot
+    # 第一查 owner+enabled=0（非自有），第二查存在性=1（bot 存在=属他人）
+    with patch("src.web_api.routes.alerts.get_conn", side_effect=[conn, _conn_with([(0,)]), _conn_with([(1,)])]):
+        with pytest.raises(ApiError) as ei:
+            _validate_channels(7, ["im:99"])   # bot 99 存在但不属名下
+        assert ei.value.code == "ALERT_CHANNEL_INVALID"
+    conn2 = _conn_with([("", "138")], [])   # 无邮箱
+    with patch("src.web_api.routes.alerts.get_conn", return_value=conn2):
+        with pytest.raises(ApiError) as ei2:
+            _validate_channels(7, ["email"])
+        assert ei2.value.code == "ALERT_CHANNEL_INVALID"
+
+
+def test_validate_channels_none_passthrough():
+    """None=全通道原样（不查库）。"""
+    from src.web_api.routes.alerts import _validate_channels
+    out, stripped = _validate_channels(7, None)
+    assert out is None and stripped == []
+
+
+def test_alerts_create_with_channels(authed_client):
+    """POST 带 channels：校验链过（有邮箱+名下 bot3）→ INSERT 参数含勾选数组。"""
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    vc = MagicMock()   # _validate_channels 内 conn：users(email,phone)+own bots
+    vc.__enter__.return_value = vc
+    vc.execute.side_effect = [
+        MagicMock(fetchone=lambda: ("u@x.com", "138")),   # users email/phone
+        MagicMock(fetchall=lambda: [(3,)]),               # own bots
+    ]
+    ins = MagicMock(fetchone=lambda: (101,))
+    conn.execute.side_effect = [
+        MagicMock(fetchone=lambda: ("alice",)),           # 用户存在
+        MagicMock(fetchone=lambda: (0,)),                 # 行数
+        ins,                                              # INSERT RETURNING
+    ]
+    with patch("src.web_api.routes.alerts.get_conn", side_effect=[conn, vc, conn]), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
+         patch("src.web_api.routes.alerts.audit_log"):
+        r = authed_client.post("/api/alerts/config",
+                               json={"user_id": 7, "channels": ["email", "im:3"], "categories": ["risk"]})
+    assert r.status_code == 200 and r.json()["id"] == 101
+    ins_call = conn.execute.call_args_list[2]
+    assert '"email"' in ins_call.args[1][4] and '"im:3"' in ins_call.args[1][4]   # channels JSON=参数元组第 5 位
+
+
+def test_alerts_put_omits_channels_keeps_row_value(authed_client):
+    """PUT 缺 channels 键=沿用行现值（toggle 开关翻转不重置勾选——批34 B-P1-2）。"""
+    row_conn = _conn_with([(5, 7, ["risk"], "warn", True, ["sms"], "alice")])   # _load_row 带 channels
+    upd = MagicMock()
+    upd.__enter__.return_value = upd
+    with patch("src.web_api.routes.alerts.get_conn", side_effect=[row_conn, upd]), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
+         patch("src.web_api.routes.alerts.audit_log"):
+        r = authed_client.put("/api/alerts/config/5", json={"enabled": False})
+    assert r.status_code == 200
+    sql, args = upd.execute.call_args_list[0].args
+    assert "channels=%s::jsonb" in sql and '"sms"' in args[3]   # 沿用行现值落库
+    assert upd.execute.call_count == 1 and row_conn.execute.call_count == 1   # 无校验查询
 
 
 def test_still_enabled_uses_sub_id_new_table():
@@ -114,9 +232,9 @@ def test_alerts_create_ok_and_duplicate(authed_client):
 
 
 def test_alerts_put_rejects_user_change(authed_client):
-    """订阅用户不可改（换人=删了重建）。"""
+    """订阅用户不可改（换人=删了重建）。批34：_load_row 七列（channels 在 enabled 后）。"""
     with patch("src.web_api.routes.alerts.get_conn",
-               return_value=_conn_with([(5, 7, ["risk"], "warn", True, "alice")])), \
+               return_value=_conn_with([(5, 7, ["risk"], "warn", True, ["sms"], "alice")])), \
          patch("src.web_api.routes.alerts.require_perm",
                return_value={"sub": 1, "username": "admin", "db_role": "admin"}):
         r = authed_client.put("/api/alerts/config/5", json={"user_id": 8})
@@ -226,3 +344,32 @@ def test_phone_change_success_updates_stored_phone(authed_client):
     upd = [c for c in conn.execute.call_args_list if "UPDATE users SET phone" in c.args[0]][0]
     assert upd.args[1][0] == "13900001234"   # 存侧号（UPDATE 参数元组首元）
     assert al.called and al.call_args.kwargs.get("new_value") == "139****1234"   # 审计脱敏
+
+
+def test_alerts_get_row_shape(authed_client):
+    """批34 盲审 B-P2-5①：GET 行形状端点级钉——channels_sel（None 透传/数组）/channels_avail 三键。"""
+    users = [{"id": 7, "username": "alice", "nickname": None,
+              "channels": {"email": True, "sms": False, "bots": [{"id": 3, "name": "b3"}]}}]
+    subs = [{"id": 1, "user_id": 7, "categories": ["risk"], "min_level": "warn", "enabled": True,
+             "channels_raw": ["email", "im:9"], "username": "alice", "nickname": None},   # im:9 失效键
+            {"id": 2, "user_id": 7, "categories": [], "min_level": "warn", "enabled": True,
+             "channels_raw": None, "username": "alice", "nickname": None}]
+    with patch("src.web_api.routes.alerts._users_with_channels", return_value=users), \
+         patch("src.web_api.routes.alerts._subs_from_db", return_value=subs), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}):
+        r = authed_client.get("/api/alerts/config")
+    assert r.status_code == 200
+    rows = r.json()["subs"]
+    assert rows[0]["channels_sel"] == ["email"]   # im:9 剥离
+    assert rows[0]["channels_avail"] == {"email": True, "sms": False, "bots": [{"id": 3, "name": "b3"}]}
+    assert rows[1]["channels_sel"] is None        # None 原样（全通道）
+
+
+def test_validate_channels_rejects_malformed_key():
+    """批34 盲审 B-P2-5③：畸形键 400（等值断言）。"""
+    from src.web_api.routes.alerts import _validate_channels, ApiError
+    with patch("src.web_api.routes.alerts.get_conn", return_value=_conn_with([("u@x.com", "138")], [])):
+        with pytest.raises(ApiError) as ei:
+            _validate_channels(7, ["telepathy"])
+        assert ei.value.code == "ALERT_CHANNEL_INVALID"

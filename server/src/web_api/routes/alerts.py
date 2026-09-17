@@ -31,29 +31,55 @@ def _mask(channel: str, target: str | None) -> str | None:
 
 
 def _users_with_channels() -> list[dict]:
-    """可订阅用户清单（enabled 未软删）+ 各自通道可用性。"""
-    from src.alert_notify.sms import sms_configured
-    sms_ok = sms_configured()
+    """可订阅用户清单（enabled 未软删）+ 各自通道可用性（批34：勾选面=资料面——
+    sms 可用性不再 and sms_configured()，凭证未配由发送侧跳过兜底，后配即生效）。"""
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT u.id, u.username, u.nickname, u.email, u.phone, "
-            "(SELECT count(*) FROM im_bot_config b WHERE b.owner_user_id=u.id AND b.enabled) "
-            "FROM users u WHERE u.enabled AND u.deleted_at IS NULL ORDER BY u.id")
-        return [{"id": r[0], "username": r[1], "nickname": r[2],
-                 "channels": {"email": bool(r[3]), "sms": bool(r[4]) and sms_ok, "im": r[5] or 0}}
-                for r in cur.fetchall()]
+            "SELECT u.id, u.username, u.nickname, u.email, u.phone FROM users u "
+            "WHERE u.enabled AND u.deleted_at IS NULL ORDER BY u.id")
+        users = [{"id": r[0], "username": r[1], "nickname": r[2], "email": r[3], "phone": r[4]}
+                 for r in cur.fetchall()]
+        cur = conn.execute(
+            "SELECT id, owner_user_id, name FROM im_bot_config WHERE enabled "
+            "AND owner_user_id IS NOT NULL ORDER BY id")
+        by_user: dict[int, list] = {}
+        for bid, owner, name in cur.fetchall():
+            by_user.setdefault(owner, []).append({"id": bid, "name": name or f"bot-{bid}"})
+    for u in users:
+        u["channels"] = {"email": bool(u["email"]), "sms": bool(u["phone"]),
+                         "bots": by_user.get(u["id"], [])}
+        del u["email"], u["phone"]   # 明细不外泄（历史形状也无此二键）
+    return users
 
 
 def _subs_from_db() -> list[dict]:
     """软删/停用用户行不入列（A-P2-2 裁定=用户裁定"删用户自然从通知列表删除"——管理面与
-    投递面同口径；孤儿行 inert，随旧表清理批扫除）。"""
+    投递面同口径；孤儿行 inert，随旧表清理批扫除）。批34：带 channels 原始值。"""
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT s.id, s.user_id, s.categories, s.min_level, s.enabled, u.username, u.nickname "
+            "SELECT s.id, s.user_id, s.categories, s.min_level, s.enabled, s.channels, u.username, u.nickname "
             "FROM alert_user_sub s JOIN users u ON u.id=s.user_id "
             "AND u.enabled AND u.deleted_at IS NULL ORDER BY s.id")
         return [{"id": r[0], "user_id": r[1], "categories": r[2] or [], "min_level": r[3],
-                 "enabled": r[4], "username": r[5], "nickname": r[6]} for r in cur.fetchall()]
+                 "enabled": r[4], "channels_raw": r[5], "username": r[6], "nickname": r[7]}
+                for r in cur.fetchall()]
+
+
+def _strip_dead_keys(sel: list | None, avail: dict) -> list | None:
+    """批34：勾选值剥离失效键（用户裁定"通道删除则本处也删除"）——email/sms 资料已空、
+    im:bid 实体已删的键不进前端回显；None 原样（全通道语义不代入）。畸形键一并滤除。"""
+    if sel is None:
+        return None
+    bot_ids = {b["id"] for b in avail.get("bots", [])}
+    out = []
+    for k in sel:
+        if k == "email" and avail.get("email"):
+            out.append(k)
+        elif k == "sms" and avail.get("sms"):
+            out.append(k)
+        elif str(k).startswith("im:") and str(k)[3:].isdigit() and int(k[3:]) in bot_ids:
+            out.append(k)
+    return out
 
 
 def _legacy_from_db() -> list[dict]:
@@ -70,16 +96,21 @@ def _legacy_from_db() -> list[dict]:
 
 @router.get("/api/alerts/config")
 def alerts_config_get(payload: dict = Depends(require_perm("alerts_config"))):
-    """订阅列表（批30 用户维度）+ 可订阅用户清单 + 旧表遗留行。"""
+    """订阅列表（批30 用户维度/批34 通道选择）+ 可订阅用户清单 + 旧表遗留行。
+    批34 行形状：channels_sel=剥离失效键后的勾选（None=全通道/[]=零通道静音）、
+    channels_avail=该用户可用通道（email/sms bool + bots 明细）。"""
     from src.alert_notify.sms import sms_configured
     from src.alert_notify.dispatch import _LIMITS
     users = _users_with_channels()
-    chans = {u["id"]: u["channels"] for u in users}
+    avail_by_uid = {u["id"]: u["channels"] for u in users}
     subs = []
     for s in _subs_from_db():
-        s = dict(s)
-        s["channels"] = chans.get(s["user_id"], {"email": False, "sms": False, "im": 0})
-        subs.append(s)
+        avail = avail_by_uid.get(s["user_id"], {"email": False, "sms": False, "bots": []})
+        subs.append({"id": s["id"], "user_id": s["user_id"], "categories": s["categories"],
+                     "min_level": s["min_level"], "enabled": s["enabled"],
+                     "username": s["username"], "nickname": s["nickname"],
+                     "channels_sel": _strip_dead_keys(s["channels_raw"], avail),
+                     "channels_avail": avail})
     return {"subs": subs, "users": users, "sms_configured": sms_configured(),
             "legacy": _legacy_from_db(), "quota": dict(_LIMITS)}
 
@@ -94,6 +125,62 @@ def _validate_sub_body(body: dict, *, partial: dict | None = None) -> tuple[list
         raise ApiError(400, "BAD_REQUEST", "min_level 须为 warn|critical")
     enabled = bool(body.get("enabled", base.get("enabled", True)))
     return cats, min_level, enabled
+
+
+def _validate_channels(uid: int, channels) -> tuple[list | None, list]:
+    """批34：通道勾选校验+失效剥离（盲审 A-P0-1 解法×用户裁定 2）。仅在 body 显式含
+    channels 键时调用（缺键=沿用行现值——开关注 toggle 不重置勾选，B-P1-2）。
+    三态：None=全通道/[]=零通道静音/非空=按勾选。返回 (落库值, 被剥离键)：
+    - 实体已消失（bot 删/邮箱手机清空）→ 剥离落库（懒清理，审计注 stripped）
+    - 实体在但不属该用户（bot 属他人/无邮箱勾 email/无手机勾 sms）→ 400 ALERT_CHANNEL_INVALID
+    - 畸形键 → 400"""
+    if channels is None:
+        return None, []
+    if not isinstance(channels, list) or any(not isinstance(k, str) for k in channels):
+        raise ApiError(400, "ALERT_CHANNEL_INVALID", "channels 须为 null 或字符串数组")
+    with get_conn() as conn:
+        cur = conn.execute("SELECT email, phone FROM users WHERE id=%s", (uid,))
+        u = cur.fetchone()
+        cur = conn.execute("SELECT id FROM im_bot_config WHERE owner_user_id=%s AND enabled", (uid,))
+        own_bots = {b[0] for b in cur.fetchall()}
+    email_ok, phone_ok = (bool(u[0]), bool(u[1])) if u else (False, False)
+    out: list[str] = []
+    stripped: list[str] = []
+    for k in channels:
+        if k == "email":
+            if not email_ok:
+                raise ApiError(400, "ALERT_CHANNEL_INVALID",
+                               "该用户未填邮箱，无法勾选邮件通道；请先让该用户在「个人资料」补上邮箱。")
+            out.append(k)
+        elif k == "sms":
+            if not phone_ok:
+                raise ApiError(400, "ALERT_CHANNEL_INVALID",
+                               "该用户未填手机号，无法勾选短信通道；请先让该用户在「个人资料」补上手机号。")
+            out.append(k)
+        elif k.startswith("im:") and k[3:].isdigit():
+            bid = int(k[3:])
+            if bid in own_bots:
+                out.append(f"im:{bid}")   # 规范化（盲审 A-P2-3：im:007 死键防线）
+            else:
+                with get_conn() as conn:
+                    # 盲审 A-P2-2：owner 判定区分"属他人"（400）与"自有但停用/已删"（剥离）
+                    cur = conn.execute(
+                        "SELECT count(*) FROM im_bot_config WHERE id=%s AND owner_user_id=%s "
+                        "AND enabled", (bid, uid))
+                    own_disabled = cur.fetchone()[0] > 0
+                if own_disabled:
+                    stripped.append(k)   # 自有但停用=等同不可用，剥离（dispatch enabled 过滤天然不发）
+                    continue
+                with get_conn() as conn:
+                    cur = conn.execute("SELECT count(*) FROM im_bot_config WHERE id=%s", (bid,))
+                    exists = cur.fetchone()[0] > 0
+                if exists:   # 实体在但不属该用户——API 误用信号
+                    raise ApiError(400, "ALERT_CHANNEL_INVALID",
+                                   f"所选机器人（ID {bid}）不属于该用户，请重新勾选。")
+                stripped.append(k)   # 已删 bot=实体消失，剥离落库
+        else:
+            raise ApiError(400, "ALERT_CHANNEL_INVALID", f"通道键不合法: {k!r}")
+    return out, stripped
 
 
 @router.post("/api/alerts/config")
@@ -113,13 +200,18 @@ def alerts_config_create(body: dict = Body(...), payload: dict = Depends(require
         if cur.fetchone()[0] >= 10:   # 补审C 行数上限保形（per-channel 概念消失=全表 10 用户）
             raise ApiError(400, "BAD_REQUEST", "订阅用户至多 10 个")
     cats, min_level, enabled = _validate_sub_body(body)
+    sel: list | None = None
+    stripped: list = []
+    if "channels" in body:   # 批34：显式提交才校验（缺键=INSERT 全通道缺省）
+        sel, stripped = _validate_channels(uid, body.get("channels"))
     import json as _json
     with get_conn() as conn:
         try:
             cur = conn.execute(
-                "INSERT INTO alert_user_sub (user_id, categories, min_level, enabled) "
-                "VALUES (%s, %s::jsonb, %s, %s) RETURNING id",
-                (uid, _json.dumps(cats), min_level, enabled))
+                "INSERT INTO alert_user_sub (user_id, categories, min_level, enabled, channels) "
+                "VALUES (%s, %s::jsonb, %s, %s, %s::jsonb) RETURNING id",
+                (uid, _json.dumps(cats), min_level, enabled,
+                 _json.dumps(sel) if sel is not None else None))
             new_id = cur.fetchone()[0]
             conn.commit()
         except Exception as e:
@@ -128,27 +220,30 @@ def alerts_config_create(body: dict = Body(...), payload: dict = Depends(require
                 raise ApiError(409, "DUPLICATE_SUB", "该用户已订阅")
             raise
     audit_log(payload["username"], "alerts_config_create",
-              detail=f"#{new_id} user={u[0]} cats={cats} level={min_level} enabled={enabled}")
+              detail=f"#{new_id} user={u[0]} cats={cats} level={min_level} enabled={enabled}"
+                     f" channels={sel if sel is not None else 'ALL'}"
+                     + (f" stripped={stripped}" if stripped else ""))
     return {"id": new_id}
 
 
 def _load_row(row_id: int) -> dict:
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT s.id, s.user_id, s.categories, s.min_level, s.enabled, u.username "
+            "SELECT s.id, s.user_id, s.categories, s.min_level, s.enabled, s.channels, u.username "
             "FROM alert_user_sub s JOIN users u ON u.id=s.user_id "
             "AND u.enabled AND u.deleted_at IS NULL WHERE s.id=%s", (row_id,))   # A-P2-7：软删用户行不可操作（含 test 面不再对死号发真实短信）
         r = cur.fetchone()
     if not r:
         raise ApiError(404, "ROW_NOT_FOUND", f"订阅行 {row_id} 不存在")
     return {"id": r[0], "user_id": r[1], "categories": r[2] or [], "min_level": r[3],
-            "enabled": r[4], "username": r[5]}
+            "enabled": r[4], "channels": r[5], "username": r[6]}
 
 
 @router.put("/api/alerts/config/{row_id}")
 def alerts_config_update(row_id: int, body: dict = Body(...),
                          payload: dict = Depends(require_perm("alerts_config"))):
-    """改订阅行（批30：用户不可改——换人=删了重建；类别/级别/开关可改）。"""
+    """改订阅行（批30：用户不可改——换人=删了重建；批34：channels 缺键=沿用现值
+    ——行内开关注 toggle 不带 channels 不重置勾选，B-P1-2；显式提交才校验+剥离失效键）。"""
     row = _load_row(row_id)
     if "user_id" in body:
         try:
@@ -158,15 +253,22 @@ def alerts_config_update(row_id: int, body: dict = Body(...),
         if new_uid != row["user_id"]:
             raise ApiError(400, "BAD_REQUEST", "订阅用户不可改（删除后重新添加）")
     cats, min_level, enabled = _validate_sub_body(body, partial=row)
+    sel: list | None = row["channels"]
+    stripped: list = []
+    if "channels" in body:
+        sel, stripped = _validate_channels(row["user_id"], body.get("channels"))
     import json as _json
     with get_conn() as conn:
         conn.execute(
             "UPDATE alert_user_sub SET categories=%s::jsonb, min_level=%s, enabled=%s, "
-            "updated_at=now() WHERE id=%s",
-            (_json.dumps(cats), min_level, enabled, row_id))
+            "channels=%s::jsonb, updated_at=now() WHERE id=%s",
+            (_json.dumps(cats), min_level, enabled,
+             _json.dumps(sel) if sel is not None else None, row_id))
         conn.commit()
     audit_log(payload["username"], "alerts_config_update",
-              detail=f"#{row_id} user={row['username']} cats={cats} level={min_level} enabled={enabled}")
+              detail=f"#{row_id} user={row['username']} cats={cats} level={min_level} enabled={enabled}"
+                     f" channels={sel if sel is not None else 'ALL'}"
+                     + (f" stripped={stripped}" if stripped else ""))
 
 
 @router.delete("/api/alerts/config/{row_id}")
@@ -228,13 +330,16 @@ def sms_config_put(body: dict = Body(...), payload: dict = Depends(require_perm(
 
 @router.post("/api/alerts/test")
 def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
-    """用户维度测试发送（批30）：按订阅行用户的三通道各试一遍（绕节流/配额）；per-actor 60s
-    冷却；结果落 code=alert.test 站内通知。ok=已试通道全过（零可用通道=False）。"""
+    """用户维度测试发送（批30：按订阅行用户的三通道各试一遍绕节流/配额；批34：按勾选
+    过滤——None=全试/[]=零通道/per-actor 60s 冷却；结果落 code=alert.test 站内通知。
+    ok=已试通道全过（零可试通道=False）。"""
     try:
         _rid = int(body.get("id") or 0)
     except (TypeError, ValueError):
         raise ApiError(400, "BAD_REQUEST", "id 须为数字")
     row = _load_row(_rid)
+    from src.alert_notify.dispatch import _ch_ok   # 与投递面同源谓词（盲审 A-P2-3）
+    sel = row["channels"]
     actor = payload["username"]
     r = get_redis()
     cool = f"alert:test:cooldown:{actor}:{row['id']}"
@@ -249,7 +354,7 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
     results: list[tuple[bool, str]] = []
 
     # —— 邮箱（有值即试——outbox 60s 兜，发送记录页可查）——
-    if u[0]:
+    if u[0] and _ch_ok(sel, "email"):
         try:
             from src.email_service import queue_email
             queue_email(u[0], "[test] 告警通道测试", "<pre>这是一封测试邮件（设置→告警→测试）</pre>")
@@ -258,7 +363,7 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
             results.append((False, "邮件入队失败: smtp_error"))
 
     # —— 短信（有手机且凭证齐）——
-    if u[1]:
+    if u[1] and _ch_ok(sel, "sms"):
         from src.alert_notify.sms import send_sms, sms_configured
         if not sms_configured():
             results.append((False, "短信未接入（凭证未配）"))
@@ -268,6 +373,8 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
 
     # —— IM（名下每个 enabled bot——沿用批 8.5 真发语义：test_connection + 发绑定用户）——
     for bid in bots:
+        if not _ch_ok(sel, f"im:{bid}"):
+            continue
         from src.im_bot.base import get_im_provider
         with get_conn() as conn:
             cur = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s AND enabled", (bid,))
@@ -295,7 +402,13 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
         results.append((sent > 0, f"机器人 {bid} 连接正常，测试消息已发 {sent}/{n_bound} 位绑定用户"))
 
     if not results:
-        ok, detail = False, "该用户没有可用通道（未设邮箱/手机，且名下无启用机器人）"
+        if sel == []:
+            ok, detail = False, "未勾选任何通道，测试消息未发出；打开「编辑」勾选通道后再试。"
+        elif sel:   # 勾了但全失效（bot 删/凭证未配/资料空——盲审 A-P2-4，文案师终稿）
+            ok, detail = False, ("所选通道都已失效，测试消息未发出（如机器人已删除、短信未接入、"
+                                 "未填邮箱/手机号）。请打开「编辑」检查勾选或改选可用通道。")
+        else:
+            ok, detail = False, "该用户没有可用通道（未设邮箱/手机，且名下无启用机器人）"
     else:
         ok = all(r0 for r0, _ in results)
         detail = "；".join(d for _, d in results)

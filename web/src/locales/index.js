@@ -130,7 +130,7 @@ export default {
       logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
       brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户',
-      run: '运行配置', users: 'API 密钥', perm: '权限管理', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）
+      run: '运行配置', users: 'API 密钥', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
     },
     emailChg: {   // 批20 20C：改邮箱（文案经文案师）
       title: '修改邮箱', newEmail: '新邮箱', password: '当前密码（验证身份用）',
@@ -175,7 +175,7 @@ export default {
       deleteGroupConfirm: '确定删除用户组 {name}？（当前 {n} 个用户）此操作级联清除该组权限配置，不可恢复。',
     },
     nav: {
-      gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性', permissions: '权限管理',
+      gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性',   // 批33a：permissions 死键清（菜单从无此项）
       userMgmt: '用户管理', aiChat: 'AI 助手',
       dataCenter: '数据中心', healthLogs: '系统监控',
       stockPool: '股票池', dailyInsight: '每日研判',
@@ -1110,6 +1110,7 @@ export default {
       CONFIG_KEY_NOT_FOUND: '配置项不存在',
       CONFIG_VALUE_INVALID: '配置值无效',
       CONFIG_PASSWORD_EMPTY: '密码型配置留空=不修改；如需更换请填新值',
+      ALERT_CHANNEL_INVALID: '所选通道当前不可用，请重新勾选，或先补全该用户资料（如邮箱/手机号）。',
     },
     smtp: {
       title: '邮件发信配置',
@@ -1128,17 +1129,26 @@ export default {
       hint: '整组保存即时生效（无需重启）；密码加密存储不回显，留空=不修改；测试邮件走发件箱（失败自动重试，结果见发件箱）',
     },
     alerts: {
-      channel: { im: 'IM 私聊', email: '邮件', sms: '短信', feishu: '飞书' },
+      // 批34：channel {im,email,sms,feishu} 旧四键退役（零消费——文案师建议随 chan.* 新组清理）
       // 批30：订阅用户维度（文案经文案师）
-      subUser: '订阅用户', phSubUser: '搜索并选择用户（可多选）',
-      partialFail: '{n} 个用户添加失败（其余已添加），可重试或检查用户状态。',
+      subUser: '订阅用户', phSubUser: '搜索并选择用户',
       subLimit: '订阅用户最多 10 个（全平台合计）', channels: '通知通道',
+      // 批34 通道级选择（文案师终稿）
+      page: { title: '告警接收人' },
+      allChannelsTip: '告警会发到该用户名下全部通道，之后新增的通道自动纳入；未配置的通道不会实际发送。',
+      noChannelSel: '未选任何通道',
+      noChannelSelTip: '该用户暂不接收任何告警；以后要收，点「编辑」重新勾选即可。',
+      chipSkipTip: '该通道未勾选，告警不会发到这里；要接收，点「编辑」勾选即可。',
+      chan: { email: '邮箱', sms: '手机' },
+      chanHint: '全勾=告警自动发往该用户全部通道，以后新增的通道自动纳入；一个不勾=该用户暂不接收告警，此行保留，以后可再勾选。',
+      pickUserFirst: '先选择用户，再勾选通道',
+      userSubscribed: '该用户已在接收清单中，无需重复添加；要调整通道，编辑列表中该行即可。',
+      noPerm: '无告警设置权限（管理员专属）',   // 批34 盲审 B-P2-2 恢复（EmptyState 防线回归）
       legacyBanner: '下面 {n} 条是升级前按「邮箱/手机号」订阅的旧规则，升级后不会再发送。请按用户重新添加订阅，避免告警漏发。',
       verifyTplCode: '验证码模板 Code',
       chip: {
         email: { ok: '邮箱 ✓', okTip: '告警会发到该用户的邮箱', no: '邮箱 ✗', noTip: '该用户账号未填邮箱，邮件通知自动跳过' },
-        sms: { ok: '短信 ✓', okTip: '告警会发到该用户的手机号', no: '短信 ✗', noTip: '该用户未设置手机号（或短信通道未接入），短信通知自动跳过' },
-        im: '机器人 ×{n}', imTip: '告警会发给该用户名下全部启用的机器人（共 {n} 个）',
+        sms: { ok: '短信 ✓', okTip: '告警会发到该用户的手机号', no: '短信 ✗', noTip: '该用户未设置手机号，短信通知自动跳过' },   // 批34：勾选面=资料面，凭证半句死语义删（盲审 B-P2-4）
         imZero: '机器人 ✗', imZeroTip: '该用户名下没有启用中的机器人，IM 通知自动跳过',
       },
       target: '推送目标', categories: '消息类别', minLevel: '最低级别',
@@ -1148,7 +1158,6 @@ export default {
       phEmail: '接收告警的邮箱', phPhone: '接收告警的手机号（中国大陆）',
       phKeepBlank: '留空=不修改',
       noBinding: '该 bot 暂无绑定用户——先在飞书对 bot 发送任意消息完成绑定',
-      noPerm: '无告警设置权限（管理员专属）',
       smsNotConfigured: '短信通道未接入：阿里云 API key 未申请。订阅与凭证可先配好，key 到位即在下方填入即时生效。',
       smsCred: '短信凭证（阿里云）', signName: '签名', tplCode: '模板 CODE', saveFirst: '请先保存配置再测试', addSub: '新增订阅', editSub: '编辑订阅',
       dispatchCol: '推送',
@@ -1160,7 +1169,7 @@ export default {
                   not_configured: '通道未配置', expired: '消息过期' },
     },
     settings: {
-      run: '运行配置', users: '账号与邀请', perm: '权限管理', profile: '个人资料', alertsTab: '告警通道',
+      run: '运行配置', users: '账号与邀请', profile: '个人资料', alertsTab: '告警通道',   // 批33a：perm 键删（盲审 B-P1 两区对齐）
     },
     tradingAccounts: {
       title: '交易账户', exchange: '交易所', apiKeyHint: 'API 密钥(回显)', apiKey: 'API 密钥标识',
@@ -1177,8 +1186,8 @@ export default {
       fundScale: '规模', mgmtFee: '管理费', trackingErr: '跟踪误差', fundType: '类型',
     },
     perm: {
-      title: '权限管理', note: '后端强制生效 · 菜单只是显性化 · 变更全程审计。改完即时生效（60s 内或重登）。',
-      modeRole: '角色基线', modeUser: '用户覆盖', pickUser: '选择用户…',
+      // 批33a：title/note/modeRole/modeUser/pickUser/overrideNote/addOverride/clear/dim/resource/effect/legendOrange
+      // 随 Permissions.vue 整删退役（PermMatrix 共用键 tabApi/tabNav/navGroup/mk_* 等保留）
       tabApi: '功能', tabNav: '菜单/页面', tabMarket: '市场',
       notLoaded: '权限配置加载失败。请刷新页面重试；刷新后仍失败，请联系管理员。',   // 批27-4 文案师 A
       navGroup: '分组', navState: '可见性', navHidden: '隐藏', navReadonly: '只读', navReadwrite: '读写',
@@ -1186,9 +1195,7 @@ export default {
       allow: '允许', deny: '禁止',   // 批20：个人中心权限 chips 状态（经文案师）
       marketOpNote: '勾选=允许该组在此市场买入开仓；不勾=买入拒单。卖出平仓不受影响。',
       grp_basic: '基础访问', grp_basic_desc: '打开行情、持仓、回测等页面', grp_trading: '交易操作', grp_trading_desc: '下单、急停、恢复与实盘开关', grp_strategy: '策略与数据', grp_strategy_desc: '管理策略因子，同步行情数据', grp_risk: '风险控制', grp_risk_desc: '配置仓位、回撤、黑名单规则', grp_system: '系统管理', grp_system_desc: '账号、密钥、通道与系统参数', grp_other: '其他', key_read: '查看页面', key_trade: '下单', key_halt: '紧急停止', key_resume: '恢复交易', key_live_trading_control: '实盘开关', key_strategy_control: '策略管理', key_data_sync: '数据同步', key_risk_rules: '风控规则', key_system_config: '系统参数', key_user_mgmt: '用户与权限', key_llm_config: 'AI 模型', key_im_bots_config: 'IM 通道', key_alerts_config: '告警设置', key_account_keys: 'API 密钥',
-      legendAllowed: '勾选 = 允许使用', legendOrange: '橙字 = 管理员单独给你开的', legendRed: '红字删除线 = 禁止使用', apiPermTitle: '功能权限',
-      overrideNote: '用户覆盖叠加在角色基线之上：deny 优先于 allow；移除覆盖即回到角色基线。',
-      addOverride: '添加覆盖', clear: '移除', dim: '维度', resource: '资源', effect: '效果',
+      legendAllowed: '勾选 = 允许使用', legendRed: '红字删除线 = 禁止使用', apiPermTitle: '功能权限',
       lockedNote: '系统策略锁键（双路径同锁，不可编辑）',
       preservedInfo: '系统锁键已自动保留（不可经此编辑）',
       dualTrackNote: '菜单维由 API 权限驱动（与角色矩阵同源）；市场维在下单时强制校验：未勾选的市场买入即拒单。AI 模型、IM 通道含密钥类信息，授予需谨慎。',
@@ -1357,7 +1364,7 @@ export default {
       logs: 'Run Logs', audit: 'Audit Log',
       brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts',
-      run: 'Run Config', users: 'API Keys', perm: 'Permissions', alerts: 'Alert Channels',
+      run: 'Run Config', users: 'API Keys', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
     },
     emailChg: {
       title: 'Change Email', newEmail: 'New Email', password: 'Current Password (to verify it\'s you)',
@@ -1402,7 +1409,7 @@ export default {
       deleteGroupConfirm: 'Delete group {name}? ({n} users) This cascades its permission rows and cannot be undone.',
     },
     nav: {
-      gData: 'Data Ops', gIntegrations: 'Integrations', gObserve: 'Observability', permissions: 'Permissions',
+      gData: 'Data Ops', gIntegrations: 'Integrations', gObserve: 'Observability',   // 批33a：permissions dead key removed
       userMgmt: 'User Management', aiChat: 'AI Assistant',
       dataCenter: 'Data Center', healthLogs: 'System Monitor',
       stockPool: 'Stock Pool', dailyInsight: 'Daily Insight',
@@ -2332,6 +2339,7 @@ export default {
       CONFIG_KEY_NOT_FOUND: 'Config key not found',
       CONFIG_VALUE_INVALID: 'Invalid config value',
       CONFIG_PASSWORD_EMPTY: 'Password-type blank = keep; enter a new value to change',
+      ALERT_CHANNEL_INVALID: 'A selected channel isn\'t available right now — pick again, or complete this user\'s profile first (e.g. email/phone).',
     },
     smtp: {
       viewOutbox: 'View outbox',
@@ -2351,17 +2359,26 @@ export default {
     },
     alerts: {
 
-      subUser: 'Subscribed users', phSubUser: 'Search and select users (multiple allowed)',
-      partialFail: '{n} user(s) failed to add (the rest were added). Retry or check the user\'s status.',
+      subUser: 'Subscribed users', phSubUser: 'Search and select a user',
       subLimit: 'At most 10 subscribed users (platform-wide)', channels: 'Channels',
+      // 批34 通道级选择（文案师终稿）
+      page: { title: 'Alert Recipients' },
+      allChannelsTip: 'Alerts go to all of this user\'s channels, and channels added later are included automatically; channels that aren\'t set up won\'t actually send.',
+      noChannelSel: 'No channels selected',
+      noChannelSelTip: 'This user receives no alerts for now; open Edit later to pick channels.',
+      chipSkipTip: 'This channel isn\'t checked, so alerts won\'t go here; open Edit and check it to receive.',
+      chan: { email: 'Email', sms: 'SMS' },
+      chanHint: 'All checked = alerts automatically go to every channel this user has, including ones added later; none checked = this user receives no alerts for now — the row stays, and you can add channels anytime.',
+      pickUserFirst: 'Pick a user first, then check channels',
+      userSubscribed: 'This user is already on the recipient list; edit their row to adjust channels.',
+      noPerm: 'No alert settings permission (admin only)',
       legacyBanner: 'The {n} entries below are pre-upgrade subscriptions by email/phone address. They no longer send after the upgrade — re-add subscriptions by user so alerts aren\'t missed.',
       verifyTplCode: 'Verification template code',
       chip: {
         email: { ok: 'Email ✓', okTip: 'Alerts go to this user\'s email', no: 'Email ✗', noTip: 'No email on this account — email alerts are skipped' },
-        sms: { ok: 'SMS ✓', okTip: 'Alerts go to this user\'s mobile number', no: 'SMS ✗', noTip: 'No phone number on this account (or SMS not set up) — SMS alerts are skipped' },
-        im: 'Bots ×{n}', imTip: 'Alerts go to every enabled bot this user owns ({n} total)',
+        sms: { ok: 'SMS ✓', okTip: 'Alerts go to this user\'s mobile number', no: 'SMS ✗', noTip: 'No phone number on this account — SMS alerts are skipped' },   // 批34：凭证半句死语义删
         imZero: 'Bots ✗', imZeroTip: 'This user has no enabled bots — IM alerts are skipped',
-      },      channel: { im: 'IM DM', email: 'Email', sms: 'SMS', feishu: 'Feishu' },
+      },      // 批34：channel 旧四键退役（零消费）
       target: 'Target', categories: 'Categories', minLevel: 'Min level',
       cat: { risk: 'Risk', task: 'Task', data: 'Data', system: 'System' },
       lvl: { warn: 'warn and above', critical: 'critical only' },
@@ -2369,7 +2386,6 @@ export default {
       phEmail: 'Email to receive alerts', phPhone: 'Mobile number (CN mainland)',
       phKeepBlank: 'Leave blank = keep current',
       noBinding: 'This bot has no bound users yet — send any message to the bot in Feishu to bind',
-      noPerm: 'No alert settings permission (admin only)',
       smsNotConfigured: 'SMS not connected yet: Aliyun API key not applied. Subscriptions and credentials can be pre-configured; fill in the key below once ready.',
       smsCred: 'SMS credentials (Aliyun)', signName: 'Sign name', tplCode: 'Template code', saveFirst: 'Save config before testing', addSub: 'Add subscription', editSub: 'Edit subscription',
       dispatchCol: 'Push',
@@ -2381,15 +2397,14 @@ export default {
                   not_configured: 'Channel not configured', expired: 'Message expired' },
     },
     settings: {
-      run: 'Run Config', users: 'Users & Invites', perm: 'Permissions', profile: 'Profile', alertsTab: 'Alert Channels',
+      run: 'Run Config', users: 'Users & Invites', profile: 'Profile', alertsTab: 'Alert Channels',   // 批33a：perm key retired
     },
     tradingAccounts: {
       title: 'Trading Accounts', exchange: 'Exchange', apiKeyHint: 'API Key (hint)', apiKey: 'API Key hint',
       empty: 'No trading accounts', confirmDelete: 'Delete account "{name}"?',
     },
     perm: {
-      title: 'Permissions', note: 'Backend-enforced · menus are visualization · fully audited. Effective within 60s or re-login.',
-      modeRole: 'Role Baseline', modeUser: 'User Overrides', pickUser: 'Pick user…',
+      // 批33a：title/note/modeRole/modeUser/pickUser/overrideNote/addOverride/clear/dim/resource/effect/legendOrange retired with Permissions.vue
       tabApi: 'Features', tabNav: 'Menu/Pages', tabMarket: 'Markets',
       notLoaded: 'Failed to load permission settings. Please refresh the page and try again; if it keeps failing, contact your administrator.',   // 批27-4 文案师 A
       navGroup: 'Group', navState: 'Visibility', navHidden: 'Hidden', navReadonly: 'Read-only', navReadwrite: 'Read-write',
@@ -2397,9 +2412,7 @@ export default {
       allow: 'Allowed', deny: 'Denied',
       marketOpNote: 'Checked = this group may buy/open in this market; unchecked = buys are rejected. Selling to close is always allowed.',
       grp_basic: 'Basic Access', grp_basic_desc: 'View markets, positions and backtests', grp_trading: 'Trading Operations', grp_trading_desc: 'Orders, emergency stop and live trading switches', grp_strategy: 'Strategy & Data', grp_strategy_desc: 'Manage strategies and sync market data', grp_risk: 'Risk Control', grp_risk_desc: 'Set position, drawdown and blacklist rules', grp_system: 'System Administration', grp_system_desc: 'Accounts, keys, channels and system settings', grp_other: 'Other', key_read: 'View Pages', key_trade: 'Place Orders', key_halt: 'Emergency Stop', key_resume: 'Resume Trading', key_live_trading_control: 'Live Trading Switch', key_strategy_control: 'Strategy Management', key_data_sync: 'Data Sync', key_risk_rules: 'Risk Rules', key_system_config: 'System Parameters', key_user_mgmt: 'Users & Permissions', key_llm_config: 'AI Models', key_im_bots_config: 'IM Channels', key_alerts_config: 'Alert Settings', key_account_keys: 'API Keys',
-      legendAllowed: 'Checked = allowed', legendOrange: 'Orange = granted to you personally by an admin', legendRed: 'Red strikethrough = not allowed', apiPermTitle: 'Feature permissions',
-      overrideNote: 'User overrides stack on the role baseline: deny beats allow; clearing returns to baseline.',
-      addOverride: 'Add Override', clear: 'Remove', dim: 'Dimension', resource: 'Resource', effect: 'Effect',
+      legendAllowed: 'Checked = allowed', legendRed: 'Red strikethrough = not allowed', apiPermTitle: 'Feature permissions',
       lockedNote: 'System policy locked keys (dual-path lock, not editable)',
       preservedInfo: 'System locked keys auto-preserved (not editable here)',
       dualTrackNote: 'Menu visibility is driven by API permissions (same source as the role matrix); market picks are enforced at order time — unchecked markets reject buys. AI Models and IM Channels manage credentials; grant with care.',

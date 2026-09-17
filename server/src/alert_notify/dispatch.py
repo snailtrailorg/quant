@@ -289,6 +289,13 @@ def _send_one(row: dict, level: str, category: str, title: str, body: str, code:
 
 # ── 订阅加载与主流程 ──
 
+def _ch_ok(sel, key: str) -> bool:
+    """批34：订阅勾选三态判定——None=全通道；非空=按勾选；[] =零通道静音。
+    禁 `not sel` 写法：[] 必须零通道不能假值全开（方案盲审 A-P1-1/B-P2-4 双抓）。
+    落本模块导出=test 端点同源 import，两份谓词防漂移（盲审 A-P2-3）。"""
+    return sel is None or key in sel
+
+
 def _load_channels() -> list[dict]:
     """批30：订阅用户展开为通道目标行（函数名保留——dispatch 机制测试的 patch 缝）。
 
@@ -304,7 +311,7 @@ def _load_channels() -> list[dict]:
         rows: list[dict] = []
         with get_conn() as conn:
             subs = conn.execute(
-                "SELECT s.id, s.user_id, s.categories, s.min_level, u.email, u.phone "
+                "SELECT s.id, s.user_id, s.categories, s.min_level, s.channels, u.email, u.phone "
                 "FROM alert_user_sub s JOIN users u ON u.id=s.user_id "
                 "AND u.enabled AND u.deleted_at IS NULL WHERE s.enabled ORDER BY s.id").fetchall()
             bots = conn.execute(
@@ -314,19 +321,20 @@ def _load_channels() -> list[dict]:
         for owner, bid in bots:
             bots_by_user.setdefault(owner, []).append(bid)
         sms_ok = _sms_ok()
-        for sid, uid, cats, min_level, email, phone in subs:
-            if email:
+        for sid, uid, cats, min_level, sel, email, phone in subs:
+            if email and _ch_ok(sel, "email"):
                 rows.append({"id": uid, "sub_id": sid, "channel": "email", "target": email,
                              "categories": cats or [], "min_level": min_level})
-            if phone:
+            if phone and _ch_ok(sel, "sms"):
                 if sms_ok:
                     rows.append({"id": uid, "sub_id": sid, "channel": "sms", "target": phone,
                                  "categories": cats or [], "min_level": min_level})
                 else:
                     logger.info("用户 %s 手机通道跳过（短信凭证未配）", uid)
-            for bid in bots_by_user.get(uid, []):   # 用户裁定：名下 bot 全发
-                rows.append({"id": bid, "sub_id": sid, "channel": "im", "target": str(bid),
-                             "categories": cats or [], "min_level": min_level})
+            for bid in bots_by_user.get(uid, []):   # 用户裁定：名下 bot 全发（批34：勾选了特定 bot 则按勾选）
+                if _ch_ok(sel, f"im:{bid}"):
+                    rows.append({"id": bid, "sub_id": sid, "channel": "im", "target": str(bid),
+                                 "categories": cats or [], "min_level": min_level})
         return rows
     except Exception as e:
         logger.warning("load alert_user_sub failed: %s", e)
