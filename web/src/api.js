@@ -121,18 +121,6 @@ export const terminateTask = (id) => api.post(`/tasks/${id}/terminate`)
 export const forceDeleteTask = (id) => api.post(`/tasks/${id}/force-delete`)
 export const detectStuck = () => api.post('/tasks/detect-stuck')
 
-export const getChannels = () => api.get('/channels')
-export const createChannel = (data) => api.post('/channels', data)
-export const updateChannel = (id, data) => api.post(`/channels/${id}`, data)
-export const deleteChannel = (id) => api.delete(`/channels/${id}`)
-export const testChannel = (id) => api.post(`/channels/${id}/test`)
-
-export const getBrokers = () => api.get('/brokers')
-export const createBroker = (data) => api.post('/brokers', data)
-export const updateBroker = (id, data) => api.post(`/brokers/${id}`, data)
-export const deleteBroker = (id) => api.delete(`/brokers/${id}`)
-export const testBroker = (id) => api.post(`/brokers/${id}/test`)
-
 export const getRiskRules = () => api.get('/risk-rules')
 export const getRiskRuleTypes = () => api.get('/risk-rules/types')
 export const createRiskRule = (data) => api.post('/risk-rules', data)
@@ -206,7 +194,6 @@ export const stockDetail = (symbol) => api.get(`/stock/${symbol}/detail`)
 export const stockIntraday = (symbol) => api.get(`/stock/${symbol}/intraday`)
 export const stockAnalyze = (symbol) => api.post(`/stock/${symbol}/analyze`)
 export const getKline = (symbol, days = 0) => api.get(`/kline/${symbol}`, { params: { days } })
-
 
 // ── 批14：SSE 单例管理器（引用计数+共享退避+帧看门狗）──
 // 契约：401 停止重连走既有登出路径；健康=帧到达看门狗（45s 无帧判死重连），
