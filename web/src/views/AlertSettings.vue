@@ -1,10 +1,6 @@
 <template>
   <div>
-    <!-- 批30：旧按地址订阅（email/sms）不自动迁移——提示重建，防告警漏发（为零不显示） -->
-    <el-alert v-if="legacyRows.length" type="warning" :closable="false" style="margin-bottom: 12px"
-              :title="t('alerts.legacyBanner', { n: legacyRows.length })" />
-    <el-alert v-if="!cfg.sms_configured" type="info" :closable="false" style="margin-bottom: 12px"
-              :title="t('alerts.smsNotConfigured')" />
+    <!-- 批42：两条过渡横幅已删（用户裁定）——理由见下。 -->
 
     <!-- 批34：一行一用户+通道勾选（用户口述重设计）；创建/凭证收编 header 图标钮 -->
     <el-card>
@@ -63,7 +59,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="min_level" :label="t('alerts.minLevel')" width="120">
-          <template #default="{ row }">{{ t('alerts.lvl.' + row.min_level) }}</template>
+          <template #default="{ row }">{{ t('common.lvl.' + row.min_level) }}</template>
         </el-table-column>
         <el-table-column prop="enabled" :label="t('common.enable')" width="70">
           <template #default="{ row }">
@@ -110,8 +106,8 @@
         </el-form-item>
         <el-form-item :label="t('alerts.minLevel')">
           <el-select v-model="form.min_level" style="width: 100%">
-            <el-option value="warn" :label="t('alerts.lvl.warn')" />
-            <el-option value="critical" :label="t('alerts.lvl.critical')" />
+            <el-option value="warn" :label="t('common.lvl.warn')" />
+            <el-option value="critical" :label="t('common.lvl.critical')" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('common.enable')">
@@ -149,7 +145,6 @@ const editingId = ref(null)
 const form = reactive({ user_id: null, username: '', channels: [], categories: ['risk'], min_level: 'warn', enabled: true })
 const testing = reactive({})
 
-const legacyRows = computed(() => cfg.value.legacy || [])
 const EMPTY_AVAIL = { email: false, sms: false, bots: [] }
 
 const load = async () => {

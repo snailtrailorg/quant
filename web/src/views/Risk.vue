@@ -120,6 +120,7 @@ const riskLogs = ref([])
 // 末列 severity 固定，detail 用 flexGrow 吃剩余，数据到达 computed 自动重算）
 // 批17 17A：withWidths 叠用户拖拽宽（表头手柄+localStorage 持久化）
 const { withWidths } = useV2ColWidths('risk-log')
+const _lvlZh = v => t(`common.lvl.${v}`)   // 批42：severity 值走全局级别标签
 const _actZh = v => ({ reject: t('risk.logReject'), adjust: t('risk.logAdjust'), approve: t('risk.logApprove') })[v] || v
 const riskLogCols = computed(() => withWidths([
   { key: 'ts', dataKey: 'ts', title: t('common.time'), width: estColWidth(t('common.time'), sample(riskLogs.value, 'ts')) },
@@ -130,7 +131,7 @@ const riskLogCols = computed(() => withWidths([
     cellRenderer: ({ cellData }) => cellData || '—' },   // 批19：命中规则码溯源（放行=-；存量行 NULL 亦 -）
   { key: 'symbol', dataKey: 'symbol', title: 'Symbol', width: estColWidth('Symbol', sample(riskLogs.value, 'symbol')) },
   { key: 'detail', dataKey: 'detail', title: t('risk.logDetail'), minWidth: 200, flexGrow: 1, ellipsis: true },
-  { key: 'severity', dataKey: 'severity', title: t('risk.logSeverity'), width: estColWidth(t('risk.logSeverity'), sample(riskLogs.value, 'severity')) },
+  { key: 'severity', dataKey: 'severity', title: t('risk.logSeverity'), width: estColWidth(t('risk.logSeverity'), sample(riskLogs.value, 'severity').map(_lvlZh)), cellRenderer: ({ cellData }) => _lvlZh(cellData) },   // 批42 级别标签注册表
 ]))
 const logFilter = ref('')
 const loadLog = async () => {

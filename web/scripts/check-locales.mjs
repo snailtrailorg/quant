@@ -39,3 +39,22 @@ if (dups.length) {
   process.exit(1)
 }
 console.log('✓ locales 无重复键')
+
+// 批42 守门：行内注释吞键检测——键被 // 注释静默失效（zh 缺键→静默回落 en→中文界面出英文）
+{
+  const srcLines = src.split('\n')
+  const swallowed = []
+  for (let i = 0; i < srcLines.length; i++) {
+    const ln = srcLines[i]
+    const idx = ln.indexOf('//')
+    if (idx < 0) continue
+    const m = ln.slice(idx).match(/[a-zA-Z_][a-zA-Z0-9_]*: '/g)
+    if (m) swallowed.push(`  行${i + 1} 注释后含键（已静默失效）: ${m.map(x => x.replace(/: .*/, '')).join(',')} — ${ln.slice(idx).trim().slice(0, 60)}`)
+  }
+  if (swallowed.length) {
+    console.error(`✗ 行内注释吞键 ${swallowed.length} 处:`)
+    swallowed.forEach(x => console.error(x))
+    process.exit(1)
+  }
+  console.log('✓ 行内注释吞键 0 处')
+}

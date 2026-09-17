@@ -101,6 +101,16 @@ for (const pg of pages) {
       ? document.body.innerText.match(/(?:riskRule|alerts|perm|trading|strategy)\.[a-zA-Z_.]+/)[0] : '')
     assert(`页面 ${pg || '/'} 无 i18n 原始路径泄漏`, leak === '', leak)
   }
+  if (len > 50) {   // 批42 守门②：zh 环境常见英文词条值泄漏（zh 缺键回落 en 的形态——Add subscription 实锤）
+    const enLeak = await p.evaluate(() => {
+      const suspects = ['Add subscription', 'Edit subscription', 'Save config before testing',
+        'warn and above', 'critical only', 'Template CODE', 'Min level', 'Channels',
+        'Daily quota', 'Test push', 'View template content']
+      const txt = document.body.innerText
+      return suspects.find(x => txt.includes(x)) || ''
+    })
+    assert(`页面 ${pg || '/'} zh 环境无英文词条回落`, enLeak === '', enLeak)
+  }
 }
 
 // ---- 首页 KpiCard + 总资产 ----
