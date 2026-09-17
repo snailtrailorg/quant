@@ -205,7 +205,7 @@ const addSymbol = async (pid) => {
     await load()
     if (minuteStatus[pid]) await loadMinuteStatus(pid)
   } catch (e) {
-    ElMessage.error(e?.detail || t('common.saveFailed'))
+    ElMessage.error(apiErr(e, t('common.saveFailed')))
   }
 }
 
@@ -216,7 +216,7 @@ const removeSymbol = async (pid, sym) => {
     await load()
     if (minuteStatus[pid]) await loadMinuteStatus(pid)
   } catch (e) {
-    ElMessage.error(e?.detail || t('common.deleteFailed'))
+    ElMessage.error(apiErr(e, t('common.deleteFailed')))
   }
 }
 
@@ -233,7 +233,7 @@ const savePool = async () => {
     showDialog.value = false
     newPool.value = { id: '', name: '', category: 'astock', symbolsStr: '', description: '', minuteStart: null, _edit: false }
     await load()
-  } catch (e) { ElMessage.error(e?.detail || t('common.saveFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
 }
 
 const editPool = row => {
@@ -257,7 +257,7 @@ const addMinuteSymbols = async () => {
   let ok = 0
   for (const sym of syms) {
     try { await addMinuteSymbol(sym); ok++ }
-    catch (e) { ElMessage.error(`${sym}: ${e?.detail || t('common.saveFailed')}`) }
+    catch (e) { ElMessage.error(`${sym}: ${apiErr(e, t('common.saveFailed'))}`) }
   }
   if (ok) ElMessage.success(`${ok} ✓`)
   minuteSymbolsInput.value = ''
@@ -265,7 +265,7 @@ const addMinuteSymbols = async () => {
 }
 const removeMinuteSymbol = async sym => {
   try { await delMinuteSymbol(sym); ElMessage.success(`${sym} ✕`); await loadMinuteSymbols() }
-  catch (e) { ElMessage.error(e?.detail || t('common.deleteFailed')) }
+  catch (e) { ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
 }
 onMounted(() => { load(); loadMinuteSymbols() })
 

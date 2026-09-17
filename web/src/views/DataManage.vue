@@ -260,7 +260,7 @@ const changeProvider = async (row, newProvider) => {
     await api.post(`/sync/all/${row.id}`)   // 重建独立触发（幂等可重试，失败不产生配置错位）
     ElMessage.success(t('dataManage.providerSwitched'))
     await load()
-  } catch (e) { ElMessage.error(e?.detail || e?.message || t('common.saveFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
 }
 const onScheduleChange = async (row) => {
   // H10（01 §3.2）：表内裸输入不再直写库——confirm+取消回滚旧值（弹窗化编辑留 P3-4）

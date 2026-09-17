@@ -275,7 +275,7 @@ const previewFactor = async () => {
       })
     }
   } catch (e) {
-    previewError.value = e?.detail || String(e)
+    previewError.value = apiErr(e, String(e))
     previewData.value = null
     previewVisible.value = true
   } finally { previewing.value = false }

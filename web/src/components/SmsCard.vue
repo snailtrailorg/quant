@@ -3,11 +3,11 @@
   <el-card>
     <template #header>{{ t('alerts.smsCred') }}</template>
     <el-form :model="form" label-position="top" style="max-width: 560px">
-      <el-form-item label="AccessKey ID"><el-input v-model="form.access_key_id" :placeholder="ph('secret_set')" /></el-form-item>
-      <el-form-item label="AccessKey Secret"><el-input v-model="form.access_key_secret" type="password" show-password :placeholder="ph('secret_set')" autocomplete="new-password" /></el-form-item>
-      <el-form-item :label="t('alerts.signName')"><el-input v-model="form.sign_name" :placeholder="ph('secret_set')" /></el-form-item>
-      <el-form-item :label="t('alerts.tplCode')"><el-input v-model="form.template_code" :placeholder="ph('secret_set')" /></el-form-item>
-      <el-form-item :label="t('alerts.verifyTplCode')"><el-input v-model="form.verify_template_code" :placeholder="ph('secret_set')" /></el-form-item>
+      <el-form-item label="AccessKey ID"><el-input v-model="form.access_key_id" :placeholder="ph()" /></el-form-item>
+      <el-form-item label="AccessKey Secret"><el-input v-model="form.access_key_secret" type="password" show-password :placeholder="ph()" autocomplete="new-password" /></el-form-item>
+      <el-form-item :label="t('alerts.signName')"><el-input v-model="form.sign_name" :placeholder="ph()" /></el-form-item>
+      <el-form-item :label="t('alerts.tplCode')"><el-input v-model="form.template_code" :placeholder="ph()" /></el-form-item>
+      <el-form-item :label="t('alerts.verifyTplCode')"><el-input v-model="form.verify_template_code" :placeholder="ph()" /></el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
   </el-card>
@@ -23,7 +23,7 @@ const { t } = useI18n()
 const form = ref({ access_key_id: '', access_key_secret: '', sign_name: '', template_code: '', verify_template_code: '' })
 const secretSet = ref(false)
 const saving = ref(false)
-const ph = k => secretSet.value ? t('alerts.phKeepBlank') : ''
+const ph = () => secretSet.value ? t('alerts.phKeepBlank') : ''
 
 const load = async () => {
   try {

@@ -227,7 +227,7 @@ const del = async (row) => {
     await api.delete(`/alerts/config/${row.id}`)
     ElMessage.success(t('common.success'))
     await load()
-  } catch (e) { if (e?.detail) ElMessage.error(e.detail) }
+  } catch (e) { if (e?.detail) ElMessage.error(apiErr(e, t('common.failed'))) }
 }
 
 const test = async (row) => {
