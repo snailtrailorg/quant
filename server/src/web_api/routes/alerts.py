@@ -281,26 +281,7 @@ def alerts_config_delete(row_id: int, payload: dict = Depends(require_perm("aler
     return {"ok": True}
 
 
-@router.get("/api/alerts/sms-config")
-def sms_config_get(payload: dict = Depends(require_perm("alerts_config"))):
-    """凭证状态：只回 secret_set 布尔与非密钥项（access_key_id 不回显）。"""
-    from src.alert_notify.sms import _sms_config, sms_configured
-    cfg = _sms_config() or {}
-    # verify 模板键独立读（不入 _CFG_KEYS——A-P1-5：未配验证码模板不应影响告警面判定）
-    verify_tpl = ""
-    try:
-        with get_conn() as conn:
-            r = conn.execute(
-                "SELECT value FROM system_config WHERE key='alert_sms_verify_template_code'").fetchone()
-        verify_tpl = str(r[0]).strip() if r and r[0] else ""
-    except Exception:
-        pass
-    return {"secret_set": bool(cfg.get("alert_sms_access_key_secret")),
-            "sms_configured": sms_configured(),
-            "sign_name": cfg.get("alert_sms_sign_name", ""),
-            "template_code": cfg.get("alert_sms_template_code", ""),
-            "verify_template_code": verify_tpl}
-
+# 批43：/api/alerts/sms-config GET·PUT 已退役（多行化 sms_provider 表 CRUD 取代——唯一消费方 SmsCard 同批重写）
 
 @router.put("/api/alerts/sms-config")
 def sms_config_put(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
@@ -430,3 +411,116 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
         logging.getLogger("web_api").warning("alert.test notify failed: %s", e)
     audit_log(payload["username"], "alerts_test", detail=f"user={row['username']} ok={ok} {detail[:120]}")
     return {"ok": ok, "detail": detail}
+
+
+# ——— 批43：短信服务商多行 CRUD（sms_provider 表；position 单层拖拽序；v3 双盲审全吸收）———
+
+_SMS_REQUIRED = ("name",)
+
+
+def _provider_row(r) -> dict:
+    return {"id": r[0], "name": r[1], "provider": r[2],
+            "credentials_set": bool(r[3] and r[4]),   # ak_id+secret 成对齐（不回显密钥）
+            "sign_name": r[5], "alert_template_code": r[6], "verify_template_code": r[7],
+            "position": r[8], "enabled": r[9],
+            "updated_at": str(r[10])[:19] if r[10] else None}
+
+
+@router.get("/api/alerts/sms-providers")
+def sms_providers_list(payload: dict = Depends(require_perm("alerts_config"))):
+    """列表（position ASC, id ASC——与候选排序同序；密钥不回显只回 credentials_set）。"""
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, name, provider, access_key_id, access_key_secret, sign_name, "
+            "alert_template_code, verify_template_code, position, enabled, updated_at "
+            "FROM sms_provider ORDER BY position, id")
+        rows = cur.fetchall()
+    return {"items": [_provider_row(r) for r in rows]}
+
+
+@router.post("/api/alerts/sms-providers")
+def sms_providers_create(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
+    """新建（position=MAX+1 追加末尾——P1-2；密钥对必填+签名必填；明文模板可后补）。"""
+    from src.quant_common.crypto import encrypt
+    name = str(body.get("name", "")).strip()
+    ak = str(body.get("access_key_id", "")).strip()
+    enc_v = str(body.get("access_key_secret", "")).strip()
+    sign = str(body.get("sign_name", "")).strip()
+    if not name:
+        raise ApiError(400, "BAD_PARAM", "名称必填")
+    if not ak or not enc_v or not sign:
+        raise ApiError(400, "BAD_PARAM", "AccessKey ID/Secret/签名 三项必填（模板编号可后补）")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO sms_provider (name, provider, access_key_id, access_key_secret, sign_name, "
+            "alert_template_code, verify_template_code, position, enabled) "
+            "VALUES (%s, 'aliyun', %s, %s, %s, %s, %s, "
+            "COALESCE((SELECT MAX(position) FROM sms_provider), -1) + 1, %s) RETURNING id",
+            (name, ak, encrypt(enc_v), sign,
+             str(body.get("alert_template_code", "")).strip(),
+             str(body.get("verify_template_code", "")).strip(),
+             bool(body.get("enabled", True))))
+        new_id = cur.fetchone()[0]
+        conn.commit()
+    audit_log(payload["username"], "sms_provider_create", f"#{new_id} {name}")
+    return {"id": new_id}
+
+
+@router.post("/api/alerts/sms-providers/reorder")
+def sms_providers_reorder(body: dict = Body(...), payload: dict = Depends(require_perm("alerts_config"))):
+    """拖拽重排（v3 P0-2）：body={"ids":[3,1,2]} 全量有序数组→单事务按下标重编号 position=0..n-1。
+    id 集合=现有全集校验（防并发丢行/幽灵 id）；幂等；并发=后写赢（低频管理操作）。"""
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        raise ApiError(400, "BAD_PARAM", "ids 须为整数数组")
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM sms_provider")
+        existing = {r[0] for r in cur.fetchall()}
+        if set(ids) != existing or len(ids) != len(existing):
+            raise ApiError(400, "BAD_PARAM", "ids 必须等于当前全部通道 id（全量序列——防并发丢行）")
+        for pos, rid in enumerate(ids):
+            conn.execute("UPDATE sms_provider SET position=%s, updated_at=now() WHERE id=%s", (pos, rid))
+        conn.commit()
+    audit_log(payload["username"], "sms_provider_reorder", detail=f"order={ids}")
+    return {"ok": True}
+
+
+@router.post("/api/alerts/sms-providers/{pid}")
+def sms_providers_update(pid: int, body: dict = Body(...),
+                         payload: dict = Depends(require_perm("alerts_config"))):
+    """编辑（全量；批38 三段语义移植——密钥对留空=不改，明文四字段=name/sign/两模板 空即存空）。"""
+    from src.quant_common.crypto import encrypt
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM sms_provider WHERE id=%s", (pid,))
+        if not cur.fetchone():
+            raise ApiError(404, "PROVIDER_NOT_FOUND", f"短信通道 {pid} 不存在")
+        sets, vals = ["updated_at=now()"], []
+        for k in ("name", "sign_name", "alert_template_code", "verify_template_code"):
+            if k in body:
+                sets.append(f"{k}=%s")
+                vals.append(str(body.get(k) or "").strip())
+        for k in ("access_key_id", "access_key_secret"):
+            v = str(body.get(k) or "").strip()
+            if v:   # 密钥对留空=不改
+                sets.append(f"{k}=%s")
+                vals.append(encrypt(v) if k == "access_key_secret" else v)
+        if "enabled" in body:
+            sets.append("enabled=%s")
+            vals.append(bool(body.get("enabled")))
+        vals.append(pid)
+        conn.execute(f"UPDATE sms_provider SET {', '.join(sets)} WHERE id=%s", tuple(vals))
+        conn.commit()
+    audit_log(payload["username"], "sms_provider_update", f"#{pid}")
+    return {"ok": True}
+
+
+@router.delete("/api/alerts/sms-providers/{pid}")
+def sms_providers_delete(pid: int, payload: dict = Depends(require_perm("alerts_config"))):
+    """删除（用户裁定：无保护提示——不可用行留着无用）。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM sms_provider WHERE id=%s", (pid,))
+        conn.commit()
+    audit_log(payload["username"], "sms_provider_delete", f"#{pid}")
+    return {"ok": True}
+
+

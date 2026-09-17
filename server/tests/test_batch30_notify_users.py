@@ -373,3 +373,81 @@ def test_validate_channels_rejects_malformed_key():
         with pytest.raises(ApiError) as ei:
             _validate_channels(7, ["telepathy"])
         assert ei.value.code == "ALERT_CHANNEL_INVALID"
+
+
+# ─—— 批43：短信多行容灾（failover/候选集/端点/迁移第三态）——
+
+def test_failover_first_fails_second_ok():
+    """首行业务错（ALIYUN_*）→ 切次行成功。"""
+    from src.alert_notify import sms as S
+    rows = [{"id": 1, "name": "a", "access_key_id": "k1", "access_key_secret": "s1",
+             "sign_name": "g", "template_code": "T1"},
+            {"id": 2, "name": "b", "access_key_id": "k2", "access_key_secret": "s2",
+             "sign_name": "g", "template_code": "T2"}]
+    sends = []
+    def fake_send(cfg, params, timeout=(3, 10)):
+        sends.append(cfg["id"])
+        return (False, "ALIYUN_LIMIT_CONTROL") if cfg["id"] == 1 else (True, "ok")
+    with patch.object(S, "_available_providers", return_value=rows), \
+         patch.object(S, "_aliyun_send", side_effect=fake_send):
+        ok, reason = S.send_sms("13800000000", "warn", "t")
+    assert ok and sends == [1, 2]
+
+
+def test_failover_timeout_no_fallback():
+    """timeout（结局模糊）→ 不切次行（批7 双发计费防线）。"""
+    from src.alert_notify import sms as S
+    rows = [{"id": 1, "access_key_id": "k1", "access_key_secret": "s1", "sign_name": "g", "template_code": "T"},
+            {"id": 2, "access_key_id": "k2", "access_key_secret": "s2", "sign_name": "g", "template_code": "T"}]
+    sends = []
+    def fake_send(cfg, params, timeout=(3, 10)):
+        sends.append(cfg["id"])
+        return False, "timeout"
+    with patch.object(S, "_available_providers", return_value=rows), \
+         patch.object(S, "_aliyun_send", side_effect=fake_send):
+        ok, reason = S.send_sms("13800000000", "warn", "t")
+    assert not ok and reason == "timeout" and sends == [1]   # 只尝试首行
+
+
+def test_candidate_sets_independent():
+    """告警/验证码候选独立：缺 verify_tpl 的行可发告警不进验证码候选。"""
+    from src.alert_notify import sms as S
+    rows = [(1, "a", "k", "enc", "g", "T1", ""),   # 无 verify_tpl
+            (2, "b", "k", "enc", "g", "T1", "V2")]
+    def fake_conn(*a, **k):
+        c = MagicMock(); c.__enter__.return_value = c
+        c.execute.return_value.fetchall.return_value = rows
+        return c
+    import src.quant_common.crypto as C
+    with patch("src.data_platform.db.get_conn", side_effect=fake_conn), \
+         patch.object(C, "decrypt", return_value="sec"):
+        alert_set = S._available_providers(require_verify_tpl=False)
+        verify_set = S._available_providers(require_verify_tpl=True)
+    assert [r["id"] for r in alert_set] == [1, 2]      # 两行都可发告警
+    assert [r["id"] for r in verify_set] == [2]          # 只有行 2 进验证码候选
+
+
+def test_sms_providers_crud_and_reorder(authed_client):
+    """CRUD+reorder 端点：新建 position=MAX+1/reorder 全集校验/幽灵 id 拒。"""
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchone.side_effect = [
+        (1,), (2,),          # INSERT RETURNING ×2（建两行）
+        (None,),             # reorder SELECT id fetchall 走 fetchall 不 fetchone
+    ]
+    conn.execute.return_value.fetchall.return_value = [(1,), (2,)]
+    with patch("src.web_api.routes.alerts.get_conn", return_value=conn), \
+         patch("src.web_api.routes.alerts.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}), \
+         patch("src.web_api.routes.alerts.audit_log"), \
+         patch("src.quant_common.crypto.encrypt", side_effect=lambda v: f"ENC({v})"):
+        r1 = authed_client.post("/api/alerts/sms-providers",
+                                json={"name": "a", "access_key_id": "k", "access_key_secret": "s", "sign_name": "g"})
+        r2 = authed_client.post("/api/alerts/sms-providers",
+                                json={"name": "b", "access_key_id": "k", "access_key_secret": "s", "sign_name": "g"})
+        assert r1.status_code == 200 and r2.status_code == 200
+        rr = authed_client.post("/api/alerts/sms-providers/reorder", json={"ids": [2, 1]})
+        assert rr.status_code == 200
+        # 幽灵 id 拒（集合不等）
+        conn.execute.return_value.fetchall.return_value = [(1,)]
+        rb = authed_client.post("/api/alerts/sms-providers/reorder", json={"ids": [1, 99]})
+        assert rb.status_code == 400

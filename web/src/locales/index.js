@@ -126,7 +126,7 @@ export default {
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
       logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 im: 'IM 机器人', mail: '邮件 SMTP',
-      llm: 'LLM 模型', sources: '数据源', trading: '交易账户', sms: '短信凭证',   // 批37
+      llm: 'LLM 模型', sources: '数据源', trading: '交易账户', sms: '短信通道',   // 批43 改名（文案师）
       run: '运行配置', users: 'API 密钥', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
     },
     emailChg: {   // 批20 20C：改邮箱（文案经文案师）
@@ -1117,6 +1117,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       CONFIG_VALUE_INVALID: '配置值无效',
       CONFIG_PASSWORD_EMPTY: '密码型配置留空=不修改；如需更换请填新值',
       ALERT_CHANNEL_INVALID: '所选通道当前不可用，请重新勾选，或先补全该用户资料（如邮箱/手机号）。',
+      PROVIDER_NOT_FOUND: '短信通道不存在，刷新页面后重试',
       RISK_PARAM_INVALID: '风控参数填写有误（格式、参数名、数值类型或范围），请修改后重新保存',
       BAD_BACKTEST_PARAM: '回测参数填写有误（初始资金/佣金/滑点超范围或非数字、参数值类型不对、per-symbol 参数里放了资金类设置），请修改后重新提交',
       PERM_RES_KIND: '资源类型不正确，请刷新页面后重试',
@@ -1161,6 +1162,17 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       tplContentHint: '查看模板内容', tplContentNote: '申请时把这份正文原样复制到阿里云（${xxx} 系统自动替换成实际内容，不可改动）；告警标题超过 20 个字时，短信里只显示前 20 个字。',
       tplBodyAlert: '${level}级别告警：${title}。请登录平台查看。',   // 模板正文（变量固定无 i18n）
       tplBodyVerify: '您的验证码为${code}，5分钟内有效。若非本人操作请忽略。',
+      // 批43 短信通道表格（文案师终稿——注释独立成行防吞键）
+      smsProvName: '名称', smsProvVendor: '服务商', smsProvStatus: '状态',
+      smsProvCredOk: '凭证齐全', smsProvCredNo: '待补凭证',
+      smsProvEnabled: '已启用', smsProvDisabled: '已停用',
+      smsProvAdd: '添加短信通道', smsProvAddTitle: '添加短信通道', smsProvEditTitle: '编辑短信通道',
+      smsProvNameField: '名称', smsProvNamePh: '如：主账号',
+      smsProvEmpty: '还没有短信通道。添加一个，告警才能发短信。',
+      smsProvDrag: '拖动调整发送顺序，排在前面的先用',
+      smsProvOrderNote: '短信按从上到下的顺序发送：排在前面的先用，不可用自动换下一行。',
+      smsProvDeleteConfirm: '删除短信通道 "{name}"？删除后该通道不再参与发送。',
+      smsProvVendors: { aliyun: '阿里云' },
       chip: {
         email: { ok: '邮箱 ✓', okTip: '告警会发到该用户的邮箱', no: '邮箱 ✗', noTip: '该用户账号未填邮箱，邮件通知自动跳过' },
         sms: { ok: '短信 ✓', okTip: '告警会发到该用户的手机号', no: '短信 ✗', noTip: '该用户未设置手机号，短信通知自动跳过' },   // 批34：勾选面=资料面，凭证半句死语义删（盲审 B-P2-4）
@@ -1377,7 +1389,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
       logs: 'Run Logs', audit: 'Audit Log',
 im: 'IM Bots', mail: 'Email SMTP',
-      llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts', sms: 'SMS Credentials',   // 批37
+      llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts', sms: 'SMS Channels',   // 批37
       run: 'Run Config', users: 'API Keys', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
     },
     emailChg: {
@@ -2362,6 +2374,7 @@ im: 'IM Bots', mail: 'Email SMTP',
       CONFIG_VALUE_INVALID: 'Invalid config value',
       CONFIG_PASSWORD_EMPTY: 'Password-type blank = keep; enter a new value to change',
       ALERT_CHANNEL_INVALID: 'A selected channel isn\'t available right now — pick again, or complete this user\'s profile first (e.g. email/phone).',
+      PROVIDER_NOT_FOUND: 'SMS channel not found; refresh the page and try again',
       RISK_PARAM_INVALID: 'Invalid risk parameter (format, name, value type, or range), please fix and save again',
       BAD_BACKTEST_PARAM: 'Invalid backtest parameter (capital/commission/slippage out of range or non-numeric, wrong value type, or capital settings in per-symbol params), please fix and submit again',
       PERM_RES_KIND: 'Unknown resource type. Refresh the page and try again.',
@@ -2406,6 +2419,16 @@ im: 'IM Bots', mail: 'Email SMTP',
       tplContentHint: 'View template content', tplContentNote: 'Copy this body as-is into the Aliyun application (${xxx} is filled in automatically and must not be changed); alert titles longer than 20 characters show only the first 20 in the SMS.',
       tplBodyAlert: '${level}级别告警：${title}。请登录平台查看。',
       tplBodyVerify: '您的验证码为${code}，5分钟内有效。若非本人操作请忽略。',
+      smsProvName: 'Name', smsProvVendor: 'Provider', smsProvStatus: 'Status',
+      smsProvCredOk: 'Credentials complete', smsProvCredNo: 'Missing credentials',
+      smsProvEnabled: 'Enabled', smsProvDisabled: 'Disabled',
+      smsProvAdd: 'Add SMS channel', smsProvAddTitle: 'Add SMS channel', smsProvEditTitle: 'Edit SMS channel',
+      smsProvNameField: 'Name', smsProvNamePh: 'e.g. Main account',
+      smsProvEmpty: 'No SMS channels yet. Add one so alerts can go out by SMS.',
+      smsProvDrag: 'Drag to reorder; the top channel sends first',
+      smsProvOrderNote: 'SMS sends top to bottom: the first channel is used first; if it is unavailable, the next row is used automatically.',
+      smsProvDeleteConfirm: 'Delete SMS channel "{name}"? It will no longer be used for sending.',
+      smsProvVendors: { aliyun: 'Aliyun' },
       chip: {
         email: { ok: 'Email ✓', okTip: 'Alerts go to this user\'s email', no: 'Email ✗', noTip: 'No email on this account — email alerts are skipped' },
         sms: { ok: 'SMS ✓', okTip: 'Alerts go to this user\'s mobile number', no: 'SMS ✗', noTip: 'No phone number on this account — SMS alerts are skipped' },   // 批34：凭证半句死语义删
