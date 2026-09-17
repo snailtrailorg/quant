@@ -1156,6 +1156,9 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       noPerm: '无告警设置权限（管理员专属）',   // 批34 盲审 B-P2-2 恢复（EmptyState 防线回归）
       legacyBanner: '下面 {n} 条是升级前按「邮箱/手机号」订阅的旧规则，升级后不会再发送。请按用户重新添加订阅，避免告警漏发。',
       verifyTplCode: '验证码模板编号', phVerifyTpl: '阿里云控制台的验证码短信模板编号，如 SMS_1234567',
+      tplContentHint: '查看模板内容', tplContentNote: '申请时把这份正文原样复制到阿里云（${xxx} 系统自动替换成实际内容，不可改动）；告警标题超过 20 个字时，短信里只显示前 20 个字。',
+      tplBodyAlert: '${level}级别告警：${title}。请登录平台查看。',   // 模板正文（变量固定无 i18n）
+      tplBodyVerify: '您的验证码为${code}，5分钟内有效。若非本人操作请忽略。',
       chip: {
         email: { ok: '邮箱 ✓', okTip: '告警会发到该用户的邮箱', no: '邮箱 ✗', noTip: '该用户账号未填邮箱，邮件通知自动跳过' },
         sms: { ok: '短信 ✓', okTip: '告警会发到该用户的手机号', no: '短信 ✗', noTip: '该用户未设置手机号，短信通知自动跳过' },   // 批34：勾选面=资料面，凭证半句死语义删（盲审 B-P2-4）
@@ -2395,6 +2398,9 @@ im: 'IM Bots', mail: 'Email SMTP',
       noPerm: 'No alert settings permission (admin only)',
       legacyBanner: 'The {n} entries below are pre-upgrade subscriptions by email/phone address. They no longer send after the upgrade — re-add subscriptions by user so alerts aren\'t missed.',
       verifyTplCode: 'Verification code template code', phVerifyTpl: 'Verification SMS template code from the Aliyun console, e.g. SMS_1234567',
+      tplContentHint: 'View template content', tplContentNote: 'Copy this body as-is into the Aliyun application (${xxx} is filled in automatically and must not be changed); alert titles longer than 20 characters show only the first 20 in the SMS.',
+      tplBodyAlert: '${level}级别告警：${title}。请登录平台查看。',
+      tplBodyVerify: '您的验证码为${code}，5分钟内有效。若非本人操作请忽略。',
       chip: {
         email: { ok: 'Email ✓', okTip: 'Alerts go to this user\'s email', no: 'Email ✗', noTip: 'No email on this account — email alerts are skipped' },
         sms: { ok: 'SMS ✓', okTip: 'Alerts go to this user\'s mobile number', no: 'SMS ✗', noTip: 'No phone number on this account — SMS alerts are skipped' },   // 批34：凭证半句死语义删

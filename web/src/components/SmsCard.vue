@@ -6,8 +6,26 @@
       <el-form-item label="AccessKey ID"><el-input v-model="form.access_key_id" :placeholder="ph()" /></el-form-item>
       <el-form-item label="AccessKey Secret"><el-input v-model="form.access_key_secret" type="password" show-password :placeholder="ph()" autocomplete="new-password" /></el-form-item>
       <el-form-item :label="t('alerts.signName')"><el-input v-model="form.sign_name" /></el-form-item>
-      <el-form-item :label="t('alerts.tplCode')"><el-input v-model="form.template_code" :placeholder="t('alerts.phAlertTpl')" /></el-form-item>
-      <el-form-item :label="t('alerts.verifyTplCode')"><el-input v-model="form.verify_template_code" :placeholder="t('alerts.phVerifyTpl')" /></el-form-item>
+      <el-form-item :label="t('alerts.tplCode')">
+        <el-input v-model="form.template_code" :placeholder="t('alerts.phAlertTpl')" />
+        <el-popover placement="right" :width="420" trigger="click">
+          <template #reference>
+            <el-link type="primary" :underline="false" style="font-size: var(--fs-foot); margin-top: 2px">{{ t('alerts.tplContentHint') }}</el-link>
+          </template>
+          <div style="font-family: var(--font-mono, monospace); font-size: var(--fs-foot); padding: 4px; word-break: break-all; background: var(--fill-weak, transparent); border-radius: 4px">{{ t('alerts.tplBodyAlert') }}</div>
+          <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-top: 6px; line-height: 1.5">{{ t('alerts.tplContentNote') }}</div>
+        </el-popover>
+      </el-form-item>
+      <el-form-item :label="t('alerts.verifyTplCode')">
+        <el-input v-model="form.verify_template_code" :placeholder="t('alerts.phVerifyTpl')" />
+        <el-popover placement="right" :width="420" trigger="click">
+          <template #reference>
+            <el-link type="primary" :underline="false" style="font-size: var(--fs-foot); margin-top: 2px">{{ t('alerts.tplContentHint') }}</el-link>
+          </template>
+          <div style="font-family: var(--font-mono, monospace); font-size: var(--fs-foot); padding: 4px; word-break: break-all; background: var(--fill-weak, transparent); border-radius: 4px">{{ t('alerts.tplBodyVerify') }}</div>
+          <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-top: 6px; line-height: 1.5">{{ t('alerts.tplContentNote') }}</div>
+        </el-popover>
+      </el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
   </el-card>
