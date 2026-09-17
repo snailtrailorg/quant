@@ -14,6 +14,10 @@ from src.data_platform.db import get_conn   # noqa: F401（部分函数内再 im
 _logger = logging.getLogger("data_platform.perms")
 
 
+# 批33b（A-P1-4）：唯一字面量层=perm_registry（api 键 14/nav/market 全在那）；本模块
+# 单向 import——admin 集=注册表 api 全键派生（三集实测相等），其余角色子集保留字面量（角色语义独立）。
+from src.data_platform.perm_registry import API_PERM_KEYS as _API_KEYS, MARKET_OP_KEYS as _MKT_KEYS
+
 PERMISSIONS = {
     "viewer":  {"read"},
     "analyst": {"read", "strategy_control", "data_sync"},   # 研究：策略/回测/数据同步。
@@ -21,9 +25,7 @@ PERMISSIONS = {
     # admin-only 门（数据源/通道/券商凭证 CRUD/system-config 写/health）挂上后 analyst
     # 经回退字典全部可达=扩权回归。删键归位 admin-only（wd-10"收紧 analyst"方向）。
     "trader":  {"read", "strategy_control", "halt", "trade", "live_trading_control"},  # 交易：策略启停/熔断/下单/实盘开关
-    "admin":   {"read", "strategy_control", "data_sync", "halt", "resume", "trade", "live_trading_control",
-                 "risk_rules", "account_keys", "user_mgmt", "system_config", "llm_config", "im_bots_config",
-                 "alerts_config"},   # 批7:DB 故障 fallback 亦含(admin 专属;analyst 无)
+    "admin":   set(_API_KEYS),   # 批33b：注册表派生（admin 专属全集；analyst 无）
 }
 
 _PERM_CACHE: dict = {"at": 0.0, "roles": None}
@@ -36,8 +38,8 @@ LOCKED_PERM_KEYS = {"user_mgmt", "resume", "account_keys"}
 ADMIN_ROLE_FLOOR = LOCKED_PERM_KEYS | {"system_config", "alerts_config"}   # 批7:告警路由/计费短信面同列自锁防线
 
 # 批15：市场操作权限（market_op 维）——市场键与实盘分项开关同键（risk._market_of 返回集）。
-# 管理面/白名单单源引用此常量，防第二份五键清单漂移（盲审 P1-5/P2-7）。
-_MARKET_OP_KEYS = ("convertible", "etf", "astock", "binance_perp", "okx_perp")
+# 批33b：字面量层迁 perm_registry（本常量改派生 re-export——全部既有引用零改动，盲审 P1-5/P2-7 单源延续）。
+_MARKET_OP_KEYS = _MKT_KEYS
 
 
 def market_op_allowed(username: str, role: str, market: str) -> bool:

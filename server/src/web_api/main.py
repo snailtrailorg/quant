@@ -88,6 +88,14 @@ def shutdown():
 
 @app.on_event("startup")
 def startup():
+    # 批33b：防漂移闸——绑定键集 ⊆ 注册表 api 键集（违例=新增 require_perm 键忘进注册表；
+    # 落点在入口层 startup——verify_schema 在 data_platform 禁 import 上层，盲审 A-P1-2）
+    try:
+        from src.data_platform.perm_registry import check_binding_drift
+        for _v in check_binding_drift():
+            logger.warning("权限绑定漂移（键未注册）: %s", _v)
+    except Exception as e:
+        logger.warning("perm binding drift 检查失败: %s", e)
     # 批18：SSE 跨进程桥线程（仅 web-api 进程；Valkey 不可达时桥内退避重连，不阻 startup）
     from src.quant_common.sse_bridge import ensure_bridge
     ensure_bridge()

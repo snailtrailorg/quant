@@ -89,7 +89,7 @@ try {
 } catch (e) { assert('⌘K', false, String(e).slice(0, 100)) }
 
 // ---- 13 页导航零 pageerror ----
-const pages = ['/', '/strategy', '/backtest', '/trading', '/live-task', '/factors', '/pool', '/screener', '/risk', '/risk-rules', '/reconcile', '/integrations', '/dataops', '/observe']   // 批36a：/risk-rules 入冒烟（盲审 B-P2-9——结构大改页三门不设防）
+const pages = ['/', '/strategy', '/backtest', '/trading', '/live-task', '/factors', '/pool', '/screener', '/risk', '/risk-rules', '/perm-resources', '/reconcile', '/integrations', '/dataops', '/observe']   // 批36a：/risk-rules 入冒烟（盲审 B-P2-9——结构大改页三门不设防）
 for (const pg of pages) {
   const before = errors.length
   await nav(pg)

@@ -37,6 +37,7 @@ const routes = [
       { path: 'observe', name: 'observe', component: () => import('./views/Observe.vue') },
       { path: 'permissions', redirect: '/users?tab=groups' },   // 批33a：权限页退役——权限单入口=用户管理·用户群组（PermMatrix 组弹窗）；旧深链归位
       { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue') },
+      { path: 'perm-resources', name: 'perm-resources', component: () => import('./views/PermResources.vue'), meta: { perm: 'system_config' } },   // 批33b：门=system_config（与菜单/端点一致——B-P2-1）
       { path: 'screener', name: 'screener', component: () => import('./views/Screener.vue') },   // P2-8 三合一（旧三路由保留兼容直链）
       { path: 'ascreen', redirect: '/screener?tab=astock' },
       { path: 'cbscreen', redirect: '/screener?tab=cb' },
@@ -84,9 +85,13 @@ router.beforeEach(async (to, from, next) => {
     // 菜单可见点进被弹回,盲审 A/B 同判 P1-3；admin 角色短路优先,meOnce 失败 fail-closed）
     if (to.meta?.admin && localStorage.getItem('role') !== 'admin'
         && !(me?.permissions || []).includes('user_mgmt')) { next('/'); return }
+    if (to.meta?.perm && !(me?.permissions || []).includes(to.meta.perm)) { next('/'); return }   // 批33b：perm 级路由门（B-P2-1 对齐）
     const nav = me?.nav || {}
-    // 路由 path→菜单 id 映射(菜单 id=NAV_ITEMS 常量;route.path 去斜杠首段)
-    const menuId = to.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'
+    // 路由 path→菜单 id 映射(菜单 id=注册表 NAV 条目;route.path 去斜杠首段)
+    // 批33b：经 me.nav_aliases 归一（与 MainLayout navReadonly 同一张表——两套映射合一）
+    const aliases = me?.nav_aliases || {}
+    const seg = to.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'
+    const menuId = aliases[seg] || seg
     const state = nav[menuId]
     if (state === 'hidden') { next('/'); return }
   }

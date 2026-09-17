@@ -100,6 +100,7 @@
             <el-menu-item v-if="has('llm_config') || has('im_bots_config')" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
             <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
             <el-menu-item v-if="has('system_config')" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>
+            <el-menu-item v-if="has('system_config')" index="/perm-resources"><el-icon><Grid /></el-icon>{{ t('nav.permResources') }}</el-menu-item>
           </el-sub-menu>
         </el-menu>
 
@@ -131,7 +132,7 @@
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
-         ChatDotRound, Bell, User, SwitchButton, Back } from '@element-plus/icons-vue'
+         ChatDotRound, Bell, User, SwitchButton, Back, Grid } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -162,22 +163,19 @@ const loadPerms = async () => {
     const me = await meOnce()
     if (!me) return
     perms.value = me.permissions || []
+    navAliases.value = me.nav_aliases || {}   // 批33b：别名随 me（守卫同源）
     role.value = me.role || role.value
     navMap.value = me.nav || {}
   } catch {}
 }
 // 批27-18（全局检视 B-P2 面修）：路由首段 ≠ NAV_ITEMS 键的子页全部补映射——原只按首段直查，
 // data-manage/:syncId（SymbolManage）等子页 readonly 守卫失效（首段 'data-manage' 查 navMap 恒 undefined）
-const ROUTE_TO_NAV = {
-  'data-manage': 'dataops', 'data-sources': 'dataops',
-  'ascreen': 'screener', 'cbscreen': 'screener', 'etfscreen': 'screener',
-  'stock': 'analysis',
-  'logs': 'observe', 'audit': 'observe', 'monitoring': 'observe', 'data-integrity': 'observe',
-  // 批33a：'permissions'→'users' 映射删——路由已 redirect /users?tab=groups，无组件再以 /permissions 渲染
-}
+// 批33b P0-2：别名表动态化——真源 GET /auth/me 的 nav_aliases（注册表下发；本地硬编码表退役）。
+// me 未回时空表=行为等同现状（fail-open 先例）。
+const navAliases = ref({})
 const navReadonly = computed(() => {
   const seg = route.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'
-  return navMap.value[ROUTE_TO_NAV[seg] || seg] === 'readonly'
+  return navMap.value[navAliases.value[seg] || seg] === 'readonly'
 })
 provide('navReadonly', navReadonly)
 

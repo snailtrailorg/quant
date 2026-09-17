@@ -85,7 +85,9 @@ def require_authenticated(authorization: str = Header(...)):
 
 
 def require_perm(perm: str):
-    """FastAPI 依赖：检查 JWT 角色是否有指定权限。"""
+    """FastAPI 依赖：检查 JWT 角色是否有指定权限。
+    批33b：checker 挂 _perm_key 属性（perm_registry.scan_perm_bindings 经
+    Dependant.call 提取——绑定注册表全自动零手工，173 处调用点零改动）。"""
     def checker(authorization: str = Header(...)):
         token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
         payload = verify_jwt(token)
@@ -99,6 +101,7 @@ def require_perm(perm: str):
             from .errors import ApiError
             raise ApiError(403, "PERM_DENIED", f"角色 {role} 无 {perm} 权限")
         return payload
+    checker._perm_key = perm   # 批33b：绑定扫描提取点
     return checker
 
 

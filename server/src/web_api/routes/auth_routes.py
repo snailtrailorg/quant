@@ -108,26 +108,27 @@ def me(payload: dict = Depends(require_authenticated)):
     # W4 玻璃盒:来源标注（批33a 后恒 role-base,denied 恒空）;不含 updated_by（盲审 A-P2）
     denied = sources.pop("__denied__", [])
     from ..auth import load_nav_map
+    nav_map = load_nav_map(payload["username"], role)
+    # 批33b A-P1-1：注册表停用（enabled=false）合并为 hidden——语义=路由拒（与 permission 维
+    # hidden 同款；侧栏可见性由 api 维 has() 管辖——现状架构一致，文案师词条对齐此语义）
+    for e in load_registry()["nav"]:
+        if e.get("enabled") is False:
+            nav_map[e["id"]] = "hidden"
     return {"user_id": payload["sub"], "username": payload["username"], "role": role,
             "nickname": nickname, "avatar_url": avatar_url,
             "permissions": sorted(perms), "perm_sources": sources, "denied": denied,
-            "nav": load_nav_map(payload["username"], role)}
+            "nav": nav_map,
+            "nav_aliases": NAV_ALIASES}   # 批33b P0-2：别名真源=me 面（守卫服务全员——/permissions 面 admin-only 拿不到）
 
 
-# W4（10 §4）：nav/数据域清单——后端单源常量,前端从 GET 拿（不硬编码第二份）
-# 批11B：加 users（用户管理，与 MainLayout 菜单对齐——盲审 P2-7）
-NAV_ITEMS = [
-    {"id": "dashboard", "group": "base"},
-    {"id": "screener", "group": "research"}, {"id": "pool", "group": "research"},
-    {"id": "factors", "group": "research"}, {"id": "strategy", "group": "research"},
-    {"id": "backtest", "group": "research"}, {"id": "analysis", "group": "research"},
-    {"id": "live-task", "group": "live"}, {"id": "trading", "group": "live"},
-    {"id": "risk", "group": "riskgrp"}, {"id": "reconcile", "group": "riskgrp"},
-    {"id": "risk-rules", "group": "riskgrp"},
-    {"id": "users", "group": "ops"},
-    {"id": "dataops", "group": "ops"}, {"id": "integrations", "group": "ops"},
-    {"id": "observe", "group": "ops"}, {"id": "settings", "group": "ops"},
-]
+# W4（10 §4）：nav/数据域清单——批33b 起字面量层迁 perm_registry（唯一真源；本模块派生）
+from src.data_platform.perm_registry import NAV_ALIASES, load_registry
+
+
+def _nav_items() -> list[dict]:
+    """注册表供形（代码底座⊕DB 覆盖）——id/group 原名保留（PermMatrix prop=group 直绑），
+    aliases/enabled 只增不改（方案 v3 A-P1-3）。"""
+    return load_registry()["nav"]
 
 
 def _all_group_names() -> list[str]:
@@ -173,15 +174,13 @@ def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
     退役——权限单源化，用户裁定权限完全追随组）。
     批11B：角色清单动态（user_group 表全量，失败/空回退四内置）+locked 随 GET 返回（前端 🔒 不再硬编码）。"""
     from ..auth import load_role_permissions, LOCKED_PERM_KEYS, _MARKET_OP_KEYS
-    all_keys = ["read", "strategy_control", "data_sync", "halt", "resume", "trade",
-                "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
-                "system_config", "llm_config", "im_bots_config", "alerts_config"]
+    all_keys = load_registry()["api"]   # 批33b：键集注册表单源（admin 回退字典同派生）
     roles = load_role_permissions()
     group_names = _all_group_names()   # 恒以组表为准（与权限数据短暂分叉可接受，盲审 B P2-4）
     return {"keys": all_keys,
             "locked": sorted(LOCKED_PERM_KEYS),
             "roles": {r: sorted(roles.get(r, set())) for r in group_names},
-            "nav": {"items": NAV_ITEMS, "roles": _load_dim("nav")},
+            "nav": {"items": _nav_items(), "roles": _load_dim("nav")},
             # 批15：data 维退役（脱敏+markets 存而不灵），换 market_op（市场操作权限）。
             # keys 单源 perms._MARKET_OP_KEYS（防第二份五键清单漂移）；strict=读失败 503
             "market_op": {"keys": list(_MARKET_OP_KEYS), "roles": _load_dim("market_op", strict=True)}}
@@ -243,7 +242,7 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
                 "preserved_locked": sorted(preserved & (set(body.get("permissions", [])) ^ preserved))}
     # nav/market_op 维：body.resources = {resource: effect}
     res_map = body.get("resources", {}) or {}
-    valid_res = ({i["id"] for i in NAV_ITEMS} if dimension == "nav"
+    valid_res = ({i["id"] for i in _nav_items()} if dimension == "nav"
                  else set(_MARKET_OP_KEYS))   # 批15：market_op 单源五键（data 维退役）
     bad = set(res_map) - valid_res
     if bad:
@@ -985,3 +984,69 @@ def get_logs(task_id: str | None = None, before: str | None = None, limit: int =
         last = rows[-1]
         next_cursor = f"{int(last[4].timestamp() * 1_000_000)}|{last[0]}"
     return {"logs": logs, "next": next_cursor, "modules": mods}
+
+# ——— 批33b：资源注册表管理面（system_config 门；PermMatrix 分组随 GET /permissions 下发——
+# 本端点只服务管理页，A-P1-5 门控不混 ———
+
+@router.get("/api/perm-resources")
+def perm_resources_get(payload: dict = Depends(require_perm("system_config"))):
+    """注册表全量（三 kind+绑定反查段）——管理页数据源。
+    绑定段=阶段二「可读」：require_perm 173 处全自动扫描（router-walk），只读展示。"""
+    from src.data_platform.perm_registry import load_registry, scan_perm_bindings
+    reg = load_registry()
+    from ..auth import LOCKED_PERM_KEYS
+    bindings = scan_perm_bindings()
+    by_key: dict[str, list] = {}
+    for b in bindings:
+        by_key.setdefault(b["key"], []).append(f"{','.join(m for m in b['methods'] if m not in ('HEAD',))} {b['path']}")
+    return {"api": [{"key": k, "group": None, "locked": k in LOCKED_PERM_KEYS,
+                     "endpoints": sorted(by_key.get(k, []))}
+                    for k in reg["api"]],
+            "nav": reg["nav"],
+            "market_op": reg["market_op"],
+            "bindings_total": len(bindings)}
+
+
+@router.patch("/api/perm-resources/{kind}/{res_id}")
+def perm_resource_patch(kind: str, res_id: str, body: dict,
+                        payload: dict = Depends(require_perm("system_config"))):
+    """改覆盖行四字段（group_key/sort_order/label_json/enabled）——条目集不可增删红线：
+    ①kind∈{nav}（api/market 键集不可覆盖——A-P1-6：api enabled 触鉴权面=降权可配置，禁）
+    ②res_id ∈ 注册表（防幽灵）③非 upsert：仅允许 UPDATE 既有覆盖行或插入合法行。"""
+    import json as _json
+    from src.data_platform.perm_registry import invalidate_registry_cache, NAV_ITEMS_BASE
+    if kind != "nav":
+        raise ApiError(400, "PERM_RES_KIND", "仅 nav 条目可改（api/market 键集代码单源）")
+    if res_id not in {e["id"] for e in NAV_ITEMS_BASE}:
+        raise ApiError(400, "PERM_RES_UNKNOWN", f"资源 {res_id} 不在注册表（条目集不可增删）")
+    # A-P2-2：全量替换语义显式化——四键任一缺失=400（防部分体静默清覆盖；前端恒发全四键）
+    missing = [k for k in ("group_key", "sort_order", "label_json", "enabled") if k not in body]
+    if missing:
+        raise ApiError(400, "PERM_RES_VALUE", f"缺少字段: {','.join(missing)}（全量提交，null=清除该字段覆盖）")
+    group_key = body.get("group_key")
+    sort_order = body.get("sort_order")
+    label_json = body.get("label_json")
+    enabled = body.get("enabled")
+    if group_key is not None and (not isinstance(group_key, str) or not group_key.strip() or len(group_key) > 32):
+        raise ApiError(400, "PERM_RES_VALUE", "group_key 须为非空字符串（≤32 字符）")
+    if sort_order is not None and (not isinstance(sort_order, int) or isinstance(sort_order, bool) or not 0 <= sort_order <= 999):
+        raise ApiError(400, "PERM_RES_VALUE", "sort_order 须为 0-999 整数")
+    if label_json is not None and not isinstance(label_json, dict):
+        raise ApiError(400, "PERM_RES_VALUE", "label_json 须为对象（per-locale 覆盖，如 zh/en 键）")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ApiError(400, "PERM_RES_VALUE", "enabled 须为布尔")
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO perm_resource (kind, res_id, group_key, sort_order, label_json, enabled, updated_by) "
+            "VALUES ('nav', %s, %s, %s, %s::jsonb, %s, %s) "
+            "ON CONFLICT (kind, res_id) DO UPDATE SET group_key=EXCLUDED.group_key, "
+            "sort_order=EXCLUDED.sort_order, label_json=EXCLUDED.label_json, "
+            "enabled=EXCLUDED.enabled, updated_by=EXCLUDED.updated_by, updated_at=now()",
+            (res_id, group_key, sort_order,
+             _json.dumps(label_json) if label_json else None, enabled, payload["username"]))
+        conn.commit()
+    invalidate_registry_cache()
+    audit_log(payload["username"], "perm_resource_update", f"{kind}/{res_id}",
+              f"group={group_key} order={sort_order} enabled={enabled}" +
+              (f" label={_json.dumps(label_json, ensure_ascii=False)[:80]}" if label_json else ""))
+    return {"ok": True, "kind": kind, "res_id": res_id}
