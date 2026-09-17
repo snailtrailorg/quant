@@ -55,13 +55,12 @@ NAV_ITEMS_BASE: list[dict] = [
 MARKET_OP_KEYS: tuple[str, ...] = ("convertible", "etf", "astock", "binance_perp", "okx_perp")
 
 # 路由别名（原 MainLayout ROUTE_TO_NAV 硬编码 10 条实测——批33a 删 permissions 后；
-# A-P2-1：仅 stock/data-manage 是活别名（参数路由），其余 8 条指向 redirect 恒不命中——
-# 全量收编保留行为等价，死别名随下次菜单批清理）
+# 批38：8 条死别名已清（见下））
 NAV_ALIASES: dict[str, str] = {
-    "data-manage": "dataops", "data-sources": "dataops",
-    "ascreen": "screener", "cbscreen": "screener", "etfscreen": "screener",
+    # 批38 死别名清理（快审 A-P2-1：仅参数路由别名活——redirect 类别名在 vue-router 解析后
+    # 永不进守卫，删除零影响；活别名=stock（/stock/:symbol）+data-manage（/data-manage/:syncId））
+    "data-manage": "dataops",
     "stock": "analysis",
-    "logs": "observe", "audit": "observe", "monitoring": "observe", "data-integrity": "observe",
 }
 # /chat 有路由无菜单不入 nav 维（A-P2-2 豁免注记——菜单本就不列，nav 权限管不到属预期）
 

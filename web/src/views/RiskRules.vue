@@ -123,6 +123,14 @@ const onSave = async () => {
       if (typeof p.hi === 'number' && v > p.hi) { ElMessage.warning(t('riskRule.hiErr', { k: paramLabel(p.key), hi: p.hi })); return }
     }
   }
+  // 批38 last-wins 防御：同 type 已有其他启用行=保存后静默覆盖（合并语义后行胜）——确认提示
+  if (form.value.enabled) {
+    const dup = rules.value.find(r => r.type === form.value.type && r.enabled && r.id !== form.value.id)
+    if (dup) {
+      try { await ElMessageBox.confirm(t('riskRule.dupTypeConfirm', { name: dup.name }), t('common.tip'), { type: 'warning' }) }
+      catch { return }
+    }
+  }
   saving.value = true
   try {
     const body = { name: form.value.name, type: form.value.type, params: JSON.stringify(form.value.values), enabled: form.value.enabled }

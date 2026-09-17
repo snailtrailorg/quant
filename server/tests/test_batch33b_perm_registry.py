@@ -33,7 +33,7 @@ def test_registry_base_three_lists():
     assert len(API_PERM_KEYS) == 14 and len(set(API_PERM_KEYS)) == 14
     assert len(NAV_ITEMS_BASE) == 18   # 17+perm-resources（批33b 管理页）
     assert len(MARKET_OP_KEYS) == 5
-    assert len(NAV_ALIASES) == 10      # 实测（A-P2-1：非 11——批33a 已删 permissions）
+    assert len(NAV_ALIASES) == 2       # 批38：8 条死别名已清（活=stock/data-manage）
 
 
 def test_load_registry_fallback_on_db_fail():

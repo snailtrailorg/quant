@@ -131,7 +131,7 @@ export default {
       astock: 'A股', cb: '可转债', etf: 'ETF',
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
       logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
-      brokers: '券商', push: '推送通道', im: 'IM 机器人', mail: '邮件 SMTP',
+im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户', sms: '短信凭证',   // 批37
       run: '运行配置', users: 'API 密钥', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
     },
@@ -1180,6 +1180,7 @@ export default {
       chanHint: '全勾=告警自动发往该用户全部通道，以后新增的通道自动纳入；一个不勾=该用户暂不接收告警，此行保留，以后可再勾选。',
       pickUserFirst: '先选择用户，再勾选通道',
       userSubscribed: '该用户已在接收清单中，无需重复添加；要调整通道，编辑列表中该行即可。',
+      dupTypeConfirm: '已有一条启用的同类型规则（{name}），保存后新规则会覆盖它生效。确定继续吗？',   // 批38 last-wins
       noPerm: '无告警设置权限（管理员专属）',   // 批34 盲审 B-P2-2 恢复（EmptyState 防线回归）
       legacyBanner: '下面 {n} 条是升级前按「邮箱/手机号」订阅的旧规则，升级后不会再发送。请按用户重新添加订阅，避免告警漏发。',
       verifyTplCode: '验证码模板 Code',
@@ -1402,7 +1403,7 @@ export default {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
       logs: 'Run Logs', audit: 'Audit Log',
-      brokers: 'Brokers', push: 'Push Channels', im: 'IM Bots', mail: 'Email SMTP',
+im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts', sms: 'SMS Credentials',   // 批37
       run: 'Run Config', users: 'API Keys', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
     },
@@ -2445,6 +2446,7 @@ export default {
       chanHint: 'All checked = alerts automatically go to every channel this user has, including ones added later; none checked = this user receives no alerts for now — the row stays, and you can add channels anytime.',
       pickUserFirst: 'Pick a user first, then check channels',
       userSubscribed: 'This user is already on the recipient list; edit their row to adjust channels.',
+      dupTypeConfirm: 'An enabled rule of the same type already exists ({name}); saving this one will take its place. Continue?',
       noPerm: 'No alert settings permission (admin only)',
       legacyBanner: 'The {n} entries below are pre-upgrade subscriptions by email/phone address. They no longer send after the upgrade — re-add subscriptions by user so alerts aren\'t missed.',
       verifyTplCode: 'Verification template code',

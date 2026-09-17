@@ -314,7 +314,7 @@ def sms_config_put(body: dict = Body(...), payload: dict = Depends(require_perm(
         for k, col in fields.items():
             v = (body.get(k) or "").strip()
             if not v:
-                continue   # 留空=不修改（smtp 先例）
+                continue   # 留空=不修改（smtp 先例；批38 用户裁定：签名/模板明文回显直接改，无需清除）
             if k == "access_key_secret":
                 v = encrypt(v)
             conn.execute(
