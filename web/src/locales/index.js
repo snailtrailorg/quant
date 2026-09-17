@@ -1155,7 +1155,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       userSubscribed: '该用户已在接收清单中，无需重复添加；要调整通道，编辑列表中该行即可。',
       noPerm: '无告警设置权限（管理员专属）',   // 批34 盲审 B-P2-2 恢复（EmptyState 防线回归）
       legacyBanner: '下面 {n} 条是升级前按「邮箱/手机号」订阅的旧规则，升级后不会再发送。请按用户重新添加订阅，避免告警漏发。',
-      verifyTplCode: '验证码模板 Code',
+      verifyTplCode: '验证码模板编号', phVerifyTpl: '阿里云控制台的验证码短信模板编号，如 SMS_1234567',
       chip: {
         email: { ok: '邮箱 ✓', okTip: '告警会发到该用户的邮箱', no: '邮箱 ✗', noTip: '该用户账号未填邮箱，邮件通知自动跳过' },
         sms: { ok: '短信 ✓', okTip: '告警会发到该用户的手机号', no: '短信 ✗', noTip: '该用户未设置手机号，短信通知自动跳过' },   // 批34：勾选面=资料面，凭证半句死语义删（盲审 B-P2-4）
@@ -1169,7 +1169,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       phKeepBlank: '留空=不修改',
       noBinding: '该 bot 暂无绑定用户——先在飞书对 bot 发送任意消息完成绑定',
       smsNotConfigured: '短信通道未接入：阿里云短信凭证还没配置。订阅可以先在这里配好；打开「集成中心 → 短信凭证」页签填入 AccessKey，保存后即时生效。',
-      smsCred: '短信凭证（阿里云）', signName: '签名', tplCode: '模板 CODE', saveFirst: '请先保存配置再测试', addSub: '新增订阅', editSub: '编辑订阅',
+      smsCred: '短信凭证（阿里云）', signName: '签名', tplCode: '告警模板编号', phAlertTpl: '阿里云控制台的告警短信模板编号，如 SMS_1234567',   // 批40 纯中文化（原中英混合大小写不一致） saveFirst: '请先保存配置再测试', addSub: '新增订阅', editSub: '编辑订阅',
       dispatchCol: '推送',
       dispatch: { ok: '已送达', queued: '已投递，等待 worker 回报', sending: '发送中（已认领）', skip: '跳过',
                   failed: '发送失败', throttled: '15 分钟节流', quota: '日配额已满',
@@ -2394,7 +2394,7 @@ im: 'IM Bots', mail: 'Email SMTP',
       userSubscribed: 'This user is already on the recipient list; edit their row to adjust channels.',
       noPerm: 'No alert settings permission (admin only)',
       legacyBanner: 'The {n} entries below are pre-upgrade subscriptions by email/phone address. They no longer send after the upgrade — re-add subscriptions by user so alerts aren\'t missed.',
-      verifyTplCode: 'Verification template code',
+      verifyTplCode: 'Verification code template code', phVerifyTpl: 'Verification SMS template code from the Aliyun console, e.g. SMS_1234567',
       chip: {
         email: { ok: 'Email ✓', okTip: 'Alerts go to this user\'s email', no: 'Email ✗', noTip: 'No email on this account — email alerts are skipped' },
         sms: { ok: 'SMS ✓', okTip: 'Alerts go to this user\'s mobile number', no: 'SMS ✗', noTip: 'No phone number on this account — SMS alerts are skipped' },   // 批34：凭证半句死语义删

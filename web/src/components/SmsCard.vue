@@ -6,8 +6,8 @@
       <el-form-item label="AccessKey ID"><el-input v-model="form.access_key_id" :placeholder="ph()" /></el-form-item>
       <el-form-item label="AccessKey Secret"><el-input v-model="form.access_key_secret" type="password" show-password :placeholder="ph()" autocomplete="new-password" /></el-form-item>
       <el-form-item :label="t('alerts.signName')"><el-input v-model="form.sign_name" /></el-form-item>
-      <el-form-item :label="t('alerts.tplCode')"><el-input v-model="form.template_code" /></el-form-item>
-      <el-form-item :label="t('alerts.verifyTplCode')"><el-input v-model="form.verify_template_code" /></el-form-item>
+      <el-form-item :label="t('alerts.tplCode')"><el-input v-model="form.template_code" :placeholder="t('alerts.phAlertTpl')" /></el-form-item>
+      <el-form-item :label="t('alerts.verifyTplCode')"><el-input v-model="form.verify_template_code" :placeholder="t('alerts.phVerifyTpl')" /></el-form-item>
       <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
     </el-form>
   </el-card>
