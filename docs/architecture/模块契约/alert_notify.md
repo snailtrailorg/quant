@@ -10,14 +10,17 @@
 ## 文件结构
 ```
 server/src/alert_notify/
-├── notify.py     # AlertNotify 单例（分级路由 + 去重 + 配额 + 记录）
-├── channel.py    # MessageChannel 接口 + 企业微信/Discord/Server酱 实现 + get_channel 工厂
+├── notify.py     # AlertNotify 单例（分级路由 + 去重 + 配额 + 记录）；批39 report() 改走订阅广播（旧 webhook 直推退役）
+├── dispatch.py   # （channel.py 已删——批39 webhook 链连根退役：channel_config 表 0085 drop、/api/channels 五端点删、MessageChannel 抽象只剩平台化接口声明）
 ├── dispatch.py   # 批7 订阅分发（三通道 Celery 三队列+claim/writeback 审计；批30 订阅用户化：_load_channels 读 alert_user_sub 展开为用户三通道行——行契约 {id,sub_id}，email/sms 行 id=user_id、im 行 id=bot_id 保 (ch,id) 唯一；软删停用 JOIN 过滤；legacy webhook 外推分支已退役）
 ├── sms.py        # 批7 阿里云短信（dysmsapi 签名 V1 零 SDK）；批30 加 send_sms_code（验证码模板键 alert_sms_verify_template_code 独立读，不入 _CFG_KEYS——防告警面被误伤）
 └── __init__.py   # 导出 AlertNotify
 ```
 
 > **批30（2026-09-16）**：订阅维度=用户（`alert_user_sub` 表）——被选用户的邮箱/手机/名下全部 enabled bot 即投递目标（可用就发不可用跳过；多 bot 全发=用户裁定）。旧表 `alert_channel_sub` 保留不读写（im 行存量已迁 owner 用户行，email/sms 行 legacy 清单提示重建）。worker 侧重查 `_still_enabled` 走 sub_id 查新表（scheduler/alert_tasks.py）。已知修：批30 盲审 B-P0 发现 `_send_im` SQL 内嵌 `#` 注释致 IM 告警自批11C 起静默失效——已修（注释移出字符串）。
+
+> **批34（2026-09-17）**：通道级勾选——`alert_user_sub.channels` JSONB 三态（NULL=全通道自动/`[]`=零通道静音/非空=按勾选 `["email","sms","im:3"]` im 粒度到 bot）；`_ch_ok(sel,key)=sel is None or key in sel`（禁 `not sel`——`[]` 假值全开）；GET 行 `channels_sel`（剥离失效键）/`channels_avail`；PUT 缺 channels 键=沿用现值；实体消失键剥离落库、实体在但不属用户/畸形键 400 `ALERT_CHANNEL_INVALID`。
+> **批39（2026-09-17 全局检视）**：**webhook 链连根退役**（channel.py/五端点/ChannelReq/0085 drop channel_config）；盘后报告 `report()` 改走 `dispatch.broadcast()`——跳 min_level 门槛的订阅推送（报告=订阅意图明确的常规通知非告警）；测试端点 IM 行滤未绑定；`_REASON_TOKENS` 补 `bad_target`。
 
 ---
 

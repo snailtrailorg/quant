@@ -8,7 +8,9 @@
 - **风控**:GET `/api/risk/state` 扩展 `metrics{total_drawdown,daily_loss,available,snapshot_age_s}`（水位仪表+fail-closed 可见,P1-1）；GET `/api/risk/log?action=&limit=`（risk_log 决策面板——check_order 出口统一写入 approve/reject/adjust）
 - **对账处置台**（P1-2,迁移 0055 reconcile_issue 表,旧 issues 字符串双写兼容期保留）：GET `/api/reconcile/issues`；POST `/api/reconcile/issues/{id}/verify|ignore|exempt`（exempt 仅 user_mgmt=admin,标的级豁免基准 exempt_qty/until,差异超基准重开——scheduler 双写处过滤）；POST `/api/reconcile/manual-order`（场外单登记,admin）；POST `/api/reconcile/reset`（清零基线,admin）
 - **实盘任务**：GET `/api/live-task` 每行合并 worker 心跳（md_mode/lag/bars/frozen/hb_age_s——Valkey quant:hb:task:{id}）
-- **权限 A+B**（P3-7,迁移 0056 permission 表+四角色 seed=原字典逐条,行为零变化；**批33a 2026-09-17 单源化：subject_type CHECK 锁 'role' 单维——user 覆盖端点 POST /api/permissions/user/{username} 退役（404）,GET user_overrides 键退役,load_effective_permissions=角色单源（签名/形状保持）**）：`require_perm` 底层换查表（60s 缓存,表空/故障回退字典;**表有 allow 行则全量以表为准**=撤权生效）；GET `/api/permissions`（admin,矩阵）/ POST `/api/permissions/{role}`（admin,全量重写 allow 集,invalidate 缓存即时生效）；`/auth/me` role 改读 DB（修 JWT 24h 滞留）+permissions 随查表
+- **权限 A+B**（P3-7,迁移 0056；**批33a 单源化**：subject_type CHECK 锁 'role' 单维/user 端点退役；**批33b 注册表化**：GET `/api/permissions` 供形切 `perm_registry`（nav.items 带 aliases/enabled 增量/id·group 原名保序）；`/auth/me` 下发 `nav_aliases`（别名真源=me 面——守卫服务全员）；注册表 enabled=false 合并 hidden；**批39 nav 幽灵行读侧剥离**（load_nav_map+_load_dim 白名单——菜单改名残留行不卡保存））：GET `/api/permissions`（admin,矩阵）/ POST `/api/permissions/{role}`（admin,全量重写,admin 地板含 alerts_config）/ **GET `/api/perm-resources`（system_config,三段+绑定反查 175 处）+ PATCH `/api/perm-resources/{kind}/{id}`（仅 nav 四字段）**（批33b 新增,详见 data_platform 契约 perm_registry 节）
+- **告警订阅（批30 用户化/批34 通道级/批39 webhook 退役）**：GET `/api/alerts/config`（行 channels_sel 剥离失效键+channels_avail 用户三通道明细）；POST/PUT `/api/alerts/config{/{id}}`（channels 三态 null/[]/勾选——`_validate_channels` 缺键=沿用/实体消失剥离/不属用户 400）；DELETE；POST `/api/alerts/test`（按勾选过滤 60s 冷却）；`/api/alerts/sms-config` GET·PUT（**批38 三段语义**：缺键=不改/密钥空=不改/明文三键空=真清空——所见即所得；批37 从告警页迁集成中心页签）
+- **风控规则（批36a schema 化）**：GET `/api/risk-rules/types` 下发六类 schema 元数据（active 标注+lo/hi/step/precision/enum——前端动态表单纯渲染）；POST `/api/risk-rules{/{id}}` validate_params→400 RISK_PARAM_INVALID；消费侧 Sanitizer 三层钳位（详见 risk_control 契约）
 - **回测**：GET `/api/backtest` 列表 `_safe_json` 防御（坏 JSON 行降级不 500,H11）
 - **引擎**（strategy_framework/backtest.py,P2-5）：费用摩擦参数化 `set_fees(stamp_tax/transfer_fee/limit_lock)`——印花税仅卖出 0.05%+过户费双边 0.001%+一字板（high==low）不可成交拒单返回 None（调用方已兼容）
 
@@ -34,7 +36,7 @@ server/src/web_api/
 │   ├── backtest.py   # /api/backtest* /api/pool* /api/broker-usage
 │   ├── stock.py      # /api/stock/* /api/kline /api/screen* /api/convertible
 │   ├── chat.py       # /api/chat /ws/* /api/llm-* /api/astock/selection
-│   ├── mgmt.py       # /api/data-sources /api/channels /api/brokers /api/tasks
+│   ├── mgmt.py       # /api/data-sources /api/brokers /api/tasks（批39 /api/channels 五端点已删——webhook 链退役）
 │   └── im_bots.py    # /api/im-bots/*（arch-19 批 2）
 └── __init__.py
 ```

@@ -11,11 +11,18 @@
 ```
 server/src/risk_control/
 ├── risk.py         # RiskControl 单例 + RiskDecision/RiskState + 三级开关 + 熔断 + 分市场检查
-├── risk_rule.py    # RiskRule 接口（PT6）+ MaxPosition/MaxSingleOrder/DailyLossLimit + 注册表
+├── risk_schema.py  # 批36a：参数 schema 单源（(type,key) 复合查表/validate_params 写侧/RuleSanitizer 消费侧三层钳位/GET /types 下发元数据）
+├── risk_rule.py    # RiskRule 接口（PT6）+ MaxPosition/MaxSingleOrder/DailyLossLimit + 注册表（三类存储未生效——load_rules_from_db 零调用，激活待裁定）
 └── __init__.py     # 导出 RiskControl/RiskDecision/RiskState
 ```
 
 ---
+
+## 批36a 变更（2026-09-17 全站输入治理·资金面）
+
+- **risk_schema.py 新模块（唯一单源）**：`RISK_PARAM_SCHEMA` 六类 (type,key) 复合表（global/etf_conv/crypto 执法三类+registry 三类存储未生效——`daily_loss_limit` global=比例 (0,1] vs registry `max_loss`=绝对额，复合键钉死）；`validate_params(type, raw)` 写侧校验（JSON/dict/逐键范围/NaN 拒/optional null 跳过）；`RuleSanitizer` 消费侧三层钳位（非 dict 整组回落/键类型非法回落缺省/超界钳边界——原 `__init__` TypeError 崩溃+坏 JSON 静默回落+NaN 穿透三路径闭环）+值指纹去抖告警；GET `/api/risk-rules/types` 下发 schema（前端 RiskRules 动态表单纯渲染）。
+- 写端点（POST `/api/risk-rules`×2）：type 白名单六类+validate_params→400 `RISK_PARAM_INVALID`。
+- 批39：`RiskControl.update_rules` 死码已删（绕过 Sanitizer 不落库陷阱）。
 
 ## 一、public API（稳定，可跨模块调用）
 

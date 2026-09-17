@@ -17,6 +17,7 @@ server/src/data_platform/
 ├── _platform.py      # DataPlatform 单例（统一入口，部分占位；批9 改名自 platform.py——包属性/子模块/实例三层同名占用 import 机制保留地，懒加载下现投毒竞态，守门=tests/test_data_platform_lazy.py）
 ├── settings.py        # 环境变量集中读取
 ├── audit.py           # audit_log（原寄生 web_api.auth，2026-08-19 归位）
+├── perm_registry.py   # 批33b：权限资源注册表（唯一字面量层——api 14 键+nav 18 条+market 5+别名；DB 覆盖层 perm_resource 四字段；绑定扫描 router-walk 175 处+防漂移闸）
 ├── market_snapshot.py # 三档腾讯实时快照（quote:tencent 60s TTL）
 ├── stock_detail.py    # 三档详情聚合层（quote 降级链+慢变块缓存）
 ├── schema_expectations.txt  # verify_schema 期望基线（迁移链生成物，禁手写）
@@ -26,6 +27,13 @@ server/src/data_platform/
 （P3 回写 2026-08-20：补 audit/market_snapshot/stock_detail/schema_expectations.txt 四文件）
 
 ---
+
+## 批33b 新模块：perm_registry.py（2026-09-17）
+
+- **唯一字面量层**：`API_PERM_KEYS`（14）/`NAV_ITEMS_BASE`（18 含 perm-resources 自身）/`MARKET_OP_KEYS`（5）/`NAV_ALIASES`（活别名 stock/data-manage——批39 死别名 8 条已清）；perms.py 单向 import（admin 集=注册表派生）。
+- **DB 覆盖层**：`perm_resource` 表（迁移 0084）只改显示四字段（group/order/label per-locale/enabled）——条目集恒代码单源红线（PATCH 仅 nav kind+id∈注册表预检）；`load_registry()` 容错回底座不缓存。
+- **绑定扫描**：`scan_perm_bindings()` router-walk（FastAPI 0.141 懒 include——app.routes 零 APIRoute，扫 APIRouter 实例 175 处）；`check_binding_drift()` 键集⊆注册表防漂移闸（web_api startup 落点）。
+- GET `/api/perm-resources`（system_config）三段+绑定反查；PATCH `/api/perm-resources/{kind}/{id}`（四键全量显式）。
 
 ## 一、public API（稳定，可跨模块调用）
 
