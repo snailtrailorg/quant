@@ -144,7 +144,9 @@
               <el-option :label="t('strategy.optSelect')" value="select" />
             </el-select>
             <el-input v-model="pd.label" :placeholder="t('strategy.phLabel')" style="width: 120px" />
-            <el-input v-model="pd.default" :placeholder="t('strategy.phDefault')" style="width: 100px" v-if="pd.type !== 'boolean'" />
+            <el-input-number v-if="pd.type === 'number'" v-model="pd.default"
+                             :min="pd.min ?? undefined" :max="pd.max ?? undefined" :controls="false" style="width: 100px" />   <!-- 批36a-4：number 默认值数值控件（原文本框类型不受控） -->
+            <el-input v-else-if="pd.type !== 'boolean'" v-model="pd.default" :placeholder="t('strategy.phDefault')" style="width: 100px" />
             <el-switch v-model="pd.default" v-else />
             <template v-if="pd.type === 'number'">
               <el-input-number v-model="pd.min" :placeholder="t('strategy.phMin')" style="width: 110px" :controls="false" />
@@ -428,6 +430,15 @@ const validateCode = async () => {
 
 const saveEdit = async () => {
   if (!editForm.value.id || !editForm.value.name) { ElMessage.warning(t('strategy.idNameRequired')); return }
+  // 批36a-4（用户裁定=必填一步到位）：number 型 defs min/max 必填+min<max——前端先拦（后端 400 兜底）
+  for (const pd of editForm.value.parameterDefs) {
+    if (pd.name && pd.type === 'number' && (pd.min == null || pd.max == null)) {
+      ElMessage.warning(t('strategy.defsRangeRequired', { n: pd.name })); return
+    }
+    if (pd.name && pd.type === 'number' && Number(pd.min) >= Number(pd.max)) {
+      ElMessage.warning(t('strategy.defsRangeOrder', { n: pd.name })); return
+    }
+  }
   saving.value = true
   try {
     const params = {

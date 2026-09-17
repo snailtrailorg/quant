@@ -118,7 +118,14 @@ def reconcile_exempt(iid: int, body: dict, payload: dict = Depends(require_perm(
         until = date.fromisoformat(str(body.get("exempt_until", "")))
     except ValueError:
         raise ApiError(400, "BAD_DATE", "exempt_until 须为 YYYY-MM-DD")
-    qty = float(body.get("exempt_qty", 0) or 0)
+    if until < date.today():   # 批36a-2：登记即过期=误操作（B-P2-8）
+        raise ApiError(400, "BAD_DATE", "豁免生效日不得早于今天")
+    try:
+        qty = float(body.get("exempt_qty", 0) or 0)   # 批36a-2：cast 先行（原 float 无 try）
+    except (TypeError, ValueError):
+        raise ApiError(400, "BAD_PARAM", "豁免数量必须是数字")
+    if qty < 0:   # 批36a-2：负豁免=反向扭曲对账基准（0=零豁免语义保留）
+        raise ApiError(400, "BAD_PARAM", "豁免数量不得为负（0=零豁免，任何差异重新告警）")
     with get_conn() as conn:
         cur = conn.execute(
             "UPDATE reconcile_issue SET status='exempt', updated_at=now(), handled_by=%s, "
@@ -141,6 +148,8 @@ def reconcile_manual_order(body: dict, payload: dict = Depends(require_perm("use
         raise ApiError(400, "BAD_PARAM", "volume 必须是数字")
     if not sym or not qty:
         raise ApiError(400, "BAD_MANUAL_ORDER", "symbol 与 volume 必填")
+    if qty <= 0 or qty > 1e9:   # 批36a-2：负量污染对账基准；上限 1e9（场外底仓大宗可超亿股）
+        raise ApiError(400, "BAD_MANUAL_ORDER", "数量须为正数（上限 10 亿）")
     note = body.get("note", "场外单登记")
     with get_conn() as conn:
         cur = conn.execute(
@@ -203,17 +212,27 @@ def list_risk_rules(payload: dict = Depends(require_perm("read"))):
 
 @router.get("/api/risk-rules/types")
 def list_risk_rule_types(payload: dict = Depends(require_perm("read"))):
-    """列已注册的规则类型（前端下拉）"""
-    from src.risk_control.risk_rule import _REGISTRY
-    return {"types": list(_REGISTRY.keys())}
+    """列规则类型+参数 schema 元数据（批36a-1 用户裁定=活参数入 UI：schema 单源下发驱动
+    动态表单——前端纯渲染零硬编码；active=False=registry 三类存储未生效，前端标注）。"""
+    from src.risk_control.risk_schema import RISK_PARAM_SCHEMA
+    return {"types": [
+        {"type": t, "active": spec["active"], "params": spec["params"]}
+        for t, spec in RISK_PARAM_SCHEMA.items()
+    ]}
 
 
 @router.post("/api/risk-rules")
 def create_risk_rule(req: RiskRuleReq, payload: dict = Depends(require_perm("risk_rules"))):
+    from src.risk_control.risk_schema import validate_params
+    clean, err = validate_params(req.type, req.params)   # 批36a-1：type 白名单+JSON+逐键查表
+    if err:
+        raise ApiError(400, "RISK_PARAM_INVALID", err)
+    import json as _json
+    params_json = _json.dumps(clean)
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO risk_rules (name, type, params, enabled) VALUES (%s,%s,%s,%s) RETURNING id",
-            (req.name, req.type, req.params, req.enabled))
+            (req.name, req.type, params_json, req.enabled))
         conn.commit()
     audit_log(payload["username"], "risk_rule_create", req.type)
     return {"id": cur.fetchone()[0]}
@@ -221,9 +240,15 @@ def create_risk_rule(req: RiskRuleReq, payload: dict = Depends(require_perm("ris
 
 @router.post("/api/risk-rules/{rid}")
 def update_risk_rule(rid: int, req: RiskRuleReq, payload: dict = Depends(require_perm("risk_rules"))):
+    from src.risk_control.risk_schema import validate_params
+    clean, err = validate_params(req.type, req.params)
+    if err:
+        raise ApiError(400, "RISK_PARAM_INVALID", err)
+    import json as _json
+    params_json = _json.dumps(clean)
     with get_conn() as conn:
         conn.execute("UPDATE risk_rules SET name=%s, type=%s, params=%s, enabled=%s, updated_at=now() WHERE id=%s",
-                     (req.name, req.type, req.params, req.enabled, rid))
+                     (req.name, req.type, params_json, req.enabled, rid))
         conn.commit()
     audit_log(payload["username"], "risk_rule_update", f"id={rid}")
     return {"ok": True}

@@ -114,8 +114,9 @@
             <el-option v-for="n in [1, 2, 3, 5]" :key="n" :value="String(n)" :label="`万${n}`" />
             <el-option value="custom" :label="t('backtest.feeCustom')" />
           </el-select>
+          <!-- 批36a-3：万单位 bug 修（原 step 0.0001/precision 4 与万N 语义错位——输 0.0003 实际佣金 3e-8 变相零费） -->
           <el-input-number v-if="feePreset === 'custom'" v-model="form.commissionRate"
-                           :min="0" :step="0.0001" :precision="4" style="margin-left: var(--sp-2)" />
+                           :min="0" :max="100" :step="0.1" :precision="1" style="margin-left: var(--sp-2)" />
           <span v-else style="margin-left: var(--sp-2); color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('backtest.feeUnit') }}</span>
         </el-form-item>
         <el-form-item :label="t('backtest.mode')">
@@ -126,7 +127,7 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="t('common.initialCapital')">
-          <el-input-number v-model="form.capital" :min="10000" :step="100000" style="width: 100%" />
+          <el-input-number v-model="form.capital" :min="10000" :max="10000000000" :step="100000" style="width: 100%" />   <!-- 批36a-3：上限 1e10（与后端校验对齐） -->
         </el-form-item>
 
         <!-- 统一参数 -->

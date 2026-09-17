@@ -266,6 +266,52 @@ def create_backtest_api(body: dict = Body(...),
     params = body.get("params", {})
     symbol_params = body.get("symbol_params", {})  # per-symbol 参数覆盖
     mode = body.get("mode", "single")
+    # 批36a-3/4（盲审 A-P1-2 重写）：引擎资金键只读 run 级 params（tasks.py:927）——校验与执行
+    # 同构分层：run 级 params 判保留键；symbol_params 每标的含保留键即 400（执行侧不消费=脏配置）
+    # +defs 按执行同构 defaults⊕params⊕per_symbol 逐标的判定。
+    from math import isfinite
+    from src.strategy_framework.strategy import validate_params_against_defs
+    if not isinstance(params, dict) or not isinstance(symbol_params, dict):
+        raise ApiError(400, "BAD_BACKTEST_PARAM", "params/symbol_params 须为对象")
+    def _chk_money(d: dict, where: str):
+        try:
+            capital = float(d.get("capital", 1_000_000))
+            commission = float(d.get("commission", 0.0005))
+            slippage = float(d.get("slippage", 0))
+        except (TypeError, ValueError):
+            raise ApiError(400, "BAD_BACKTEST_PARAM", f"{where} capital/commission/slippage 必须是数字")
+        if not all(isfinite(x) for x in (capital, commission, slippage)):
+            raise ApiError(400, "BAD_BACKTEST_PARAM", f"{where} 资金参数须为有限数字")
+        if not (1e4 <= capital <= 1e10):
+            raise ApiError(400, "BAD_BACKTEST_PARAM", "初始资金须在 1 万 ~ 100 亿之间")
+        if not (0 <= commission <= 0.01):
+            raise ApiError(400, "BAD_BACKTEST_PARAM", "佣金率须在 0 ~ 0.01（比例）之间（负佣金=回测造假面）")
+        if not (0 <= slippage <= 0.05):
+            raise ApiError(400, "BAD_BACKTEST_PARAM", "滑点须在 0 ~ 0.05 之间")
+    _chk_money(params, "params")
+    for sym, sp in symbol_params.items():
+        if not isinstance(sp, dict):
+            raise ApiError(400, "BAD_BACKTEST_PARAM", f"symbol_params[{sym}] 须为对象")
+        if {"capital", "commission", "slippage"} & set(sp):
+            raise ApiError(400, "BAD_BACKTEST_PARAM",
+                           f"symbol_params[{sym}] 不可包含 capital/commission/slippage（引擎只读全局参数）")
+    # 批36a-4：validate_params_against_defs 接线（现状唯一未接的写端点——strategy/live-task 已接）
+    with get_conn() as conn:
+        cur = conn.execute("SELECT params FROM strategy_config WHERE id=%s", (strategy_id,))
+        srow = cur.fetchone()
+        if not srow:
+            raise ApiError(404, "STRATEGY_NOT_FOUND", f"策略 {strategy_id} 不存在")
+    try:
+        import json as _json
+        sparams = srow[0] if isinstance(srow[0], dict) else _json.loads(srow[0] or "{}")
+    except (ValueError, TypeError):
+        sparams = {}
+    defs = sparams.get("parameter_defs") or []
+    merged = dict(params)   # defs 校验面：run 级（symbol_params 仅策略参数覆盖——逐标的并入判定）
+    for sym in symbols:
+        err = validate_params_against_defs({**merged, **(symbol_params.get(sym) or {})}, defs)
+        if err:
+            raise ApiError(400, "BAD_BACKTEST_PARAM", f"[{sym}] {err}")
     with get_conn() as conn:
         cur = conn.execute(
             "INSERT INTO backtest_runs (strategy_config_id, symbols, params, symbol_params, mode, status) "

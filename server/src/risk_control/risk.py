@@ -38,6 +38,10 @@ class RiskState:
 
 # ——— 风控规则配置（默认，可 Web 改） ———
 
+from src.risk_control.risk_schema import RuleSanitizer   # 批36a-1（模块级——去抖指纹跨热加载持久，每进程每因一次）
+
+_SANITIZER = RuleSanitizer(logging.getLogger("risk_control.sanitize"))
+
 DEFAULT_RULES = {
     "global": {
         "max_drawdown": 0.15,       # 总回撤 15%
@@ -70,6 +74,8 @@ class RiskControl:
             socket_timeout=2, socket_connect_timeout=2)   # 批27-2：is_halted 在下单主路径——Valkey 挂起不冻下单线程（超时异常走 check_order 既有 fail-closed 拒单）
         # SB2（F-30/F-23）：DEFAULT 兜底合并保证三个 key 永远存在（部分规则不再 KeyError 杀事件线程）；
         # _rules_loaded_at 支撑 60s 热加载（Web 改规则对长活进程生效）
+        # 批36a-1：Sanitizer 三层钳位（非 dict 整组回落/键类型非法回落缺省/数值超界钳边界）——
+        # __init__ 载入路径先于一切，init+热加载+存量脏行三面全兜（原 TypeError 崩溃路径闭环）
         self._rules = self._merged_rules(self._load_rules_from_db())
         self._rules_loaded_at = time.time()
         self._HALT_KEY = "risk:halted"
@@ -100,7 +106,8 @@ class RiskControl:
         注意：RiskRule 接口（PT6，type=max_position 等单规则）独立，保留新规则扩展。
         risk_control 用 dict 参数（global/etf_conv/crypto），与 RiskRule 单规则抽象不同，
         故 risk_control 自己读 risk_rules（type=global/etf_conv/crypto），不用 load_rules_from_db。
-        """
+        批36a-1：逐 type 经 Sanitizer 清洗（坏 JSON 该组回落/类型非法该键回落/超界钳位），
+        告警按值指纹去抖（每进程一次，仅日志）。"""
         import json
         try:
             from src.data_platform.db import get_conn
@@ -109,7 +116,13 @@ class RiskControl:
                 rules = {}
                 for r in cur.fetchall():
                     if r[0] in ("global", "etf_conv", "crypto"):
-                        rules[r[0]] = json.loads(r[1]) if r[1] else {}
+                        try:
+                            raw = json.loads(r[1]) if r[1] else {}
+                        except (json.JSONDecodeError, TypeError):
+                            _SANITIZER._warn_once((r[0], "__badjson__"),
+                                f"type={r[0]} params 非法 JSON，整组回落默认")   # B 盲审 P2-7：去抖（原 60s 热加载每分钟一响）
+                            continue   # 逐 type 回落（B-P1-7：非整表）
+                        rules[r[0]] = _SANITIZER.sanitize_type(r[0], raw)
             return rules if rules else None
         except Exception:
             return None

@@ -89,13 +89,18 @@ try {
 } catch (e) { assert('⌘K', false, String(e).slice(0, 100)) }
 
 // ---- 13 页导航零 pageerror ----
-const pages = ['/', '/strategy', '/backtest', '/trading', '/live-task', '/factors', '/pool', '/screener', '/risk', '/reconcile', '/integrations', '/dataops', '/observe']
+const pages = ['/', '/strategy', '/backtest', '/trading', '/live-task', '/factors', '/pool', '/screener', '/risk', '/risk-rules', '/reconcile', '/integrations', '/dataops', '/observe']   // 批36a：/risk-rules 入冒烟（盲审 B-P2-9——结构大改页三门不设防）
 for (const pg of pages) {
   const before = errors.length
   await nav(pg)
   const len = await p.evaluate(() => document.body.innerText.length)
   const newErrs = errors.length - before
   assert(`页面 ${pg || '/'} 渲染`, len > 50 && newErrs === 0, `文本${len}字 新err=${newErrs}`)
+  if (len > 50) {   // 批36a：i18n 缺键守门（原始路径泄漏=词条错位——盲审 A-P1-1 类缺陷三门不设防）
+    const leak = await p.evaluate(() => /(?:riskRule|alerts|perm|trading|strategy)\.[a-zA-Z_.]+/.test(document.body.innerText)
+      ? document.body.innerText.match(/(?:riskRule|alerts|perm|trading|strategy)\.[a-zA-Z_.]+/)[0] : '')
+    assert(`页面 ${pg || '/'} 无 i18n 原始路径泄漏`, leak === '', leak)
+  }
 }
 
 // ---- 首页 KpiCard + 总资产 ----

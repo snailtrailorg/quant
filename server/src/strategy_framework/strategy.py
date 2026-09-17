@@ -84,7 +84,9 @@ _PARAM_TYPES = {"number", "boolean", "string", "select"}
 
 
 def validate_parameter_defs(defs):
-    """校验 parameter_defs 结构。返回错误描述，None 表示合法。"""
+    """校验 parameter_defs 结构。返回错误描述，None 表示合法。
+    批36a-4（用户裁定=必填一步到位）：number 型 defs 的 min/max 必填+交叉校验
+    （min<max、default∈[min,max]、step>0）——存量空 defs 零影响（无条目无校验）。"""
     if not isinstance(defs, list):
         return "parameter_defs 必须是数组"
     names = set()
@@ -104,6 +106,23 @@ def validate_parameter_defs(defs):
             return f"参数 {name} 缺 default 字段"
         if ptype == "select" and not d.get("options"):
             return f"select 参数 {name} 缺 options"
+        if ptype == "number":   # 批36a-4 立法
+            lo, hi = d.get("min"), d.get("max")
+            if lo is None or hi is None:
+                return f"参数 {name} 缺最小值/最大值（min/max 必填——防无界参数进实盘）"
+            if not isinstance(lo, (int, float)) or not isinstance(hi, (int, float)) \
+                    or isinstance(lo, bool) or isinstance(hi, bool) \
+                    or lo != lo or hi != hi:   # A-P1-3 顺手：NaN 不可为界（lo!=lo 即 NaN 判定）
+                return f"参数 {name} 的 min/max 必须是有限数字"
+            if lo >= hi:
+                return f"参数 {name} 最小值须小于最大值（当前 {lo} ≥ {hi}）"
+            dv = d.get("default")
+            if isinstance(dv, (int, float)) and not isinstance(dv, bool) \
+                    and not (lo <= dv <= hi):
+                return f"参数 {name} 默认值 {dv} 不在 [{lo}, {hi}] 内"
+            st = d.get("step")
+            if st is not None and (not isinstance(st, (int, float)) or isinstance(st, bool) or st <= 0):
+                return f"参数 {name} 步进须为正数"
     return None
 
 

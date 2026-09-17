@@ -86,21 +86,9 @@
           <el-descriptions-item :label="t('trading.sellAmount')">{{ fmtCn(todayOrders.filter(o => o.action === 'SELL').reduce((s, o) => s + (o.price || 0) * (o.volume || 0), 0), 1) }}</el-descriptions-item>
         </el-descriptions>
       </el-tab-pane>
-      <!-- 05 §5.2 要点 8:人工单登记(底仓/场外手动单回流对账豁免基准) -->
-      <el-tab-pane :label="t('trading.manualOrders')">
-        <el-form inline>
-          <el-form-item label="Symbol"><el-input v-model="manualForm.symbol" placeholder="600000" style="width: 100px" /></el-form-item>
-          <el-form-item :label="t('trading.direction')">
-            <el-select v-model="manualForm.action" style="width: 80px">
-              <el-option value="BUY" :label="t('dashboard.buy')" /><el-option value="SELL" :label="t('dashboard.sell')" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="t('trading.volume')"><el-input-number v-model="manualForm.volume" :step="100" style="width: 100px" /></el-form-item>
-          <el-form-item :label="t('trading.price')"><el-input-number v-model="manualForm.price" :step="0.01" :precision="2" style="width: 90px" /></el-form-item>
-          <el-form-item><el-button type="primary" @click="submitManual">{{ t('common.confirm') }}</el-button></el-form-item>
-        </el-form>
-        <div style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('trading.manualHint') }}</div>
-      </el-tab-pane>
+      <!-- 批36a-2：人工单登记 tab 退役——与风控·三账对账·场外单登记同端点同语义
+           （POST /reconcile/manual-order），且本页无 user_mgmt 门（Trader 填单 403 静默）
+           +direction/price 是死字段（端点只收 symbol/volume）。统一走 Reconcile 一处。 -->
       <el-tab-pane :label="t('trading.orders')">
         <div style="display: flex; justify-content: flex-end; margin-bottom: var(--sp-2)">
           <ColumnSettings storage-key="cols.trading-orders" :columns="orderColDefs" v-model:visible="orderVisible" />
@@ -227,13 +215,6 @@ const todayOrders = computed(() => {
   const today = new Date().toISOString().slice(0, 10)
   return (ordersData.value?.orders || []).filter(o => (o.ts || '').startsWith(today))
 })
-const manualForm = ref({ symbol: '', action: 'BUY', volume: 0, price: 0 })
-const submitManual = async () => {
-  try { await api.post('/reconcile/manual-order', { ...manualForm.value, note: t('trading.manualNote') }); ElMessage.success(t('common.success')) }
-  catch { ElMessage.error(t('common.failed')) }
-}
-import api from '../api'
-import { ElMessage } from 'element-plus'
 import { onUnmounted } from 'vue'
 let pollTimer = null
 onMounted(() => {

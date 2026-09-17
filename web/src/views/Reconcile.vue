@@ -46,7 +46,7 @@
     <!-- 登记豁免（标的级）：数量+生效期+原因 -->
     <el-dialog v-model="exemptDlg" :close-on-click-modal="false" :title="t('reconcile.exemptTitle')" width="420px">
       <el-form label-width="110px">
-        <el-form-item :label="t('reconcile.exemptQty')"><el-input-number v-model="exemptForm.exempt_qty" :step="100" /></el-form-item>
+        <el-form-item :label="t('reconcile.exemptQty')"><el-input-number v-model="exemptForm.exempt_qty" :min="0" :step="100" /></el-form-item>   <!-- 批36a-2：负豁免=反向扭曲基准 -->
         <el-form-item :label="t('reconcile.exemptUntil')"><el-date-picker v-model="exemptForm.exempt_until" value-format="YYYY-MM-DD" /></el-form-item>
         <el-form-item :label="t('reconcile.note')"><el-input v-model="exemptForm.reason" type="textarea" :rows="2" /></el-form-item>
       </el-form>
@@ -61,7 +61,7 @@
     <el-dialog v-model="openManual" :close-on-click-modal="false" :title="t('reconcile.manualOrder')" width="420px">
       <el-form label-width="90px">
         <el-form-item label="Symbol"><el-input v-model="manualForm.symbol" placeholder="600000" /></el-form-item>
-        <el-form-item :label="t('reconcile.volume')"><el-input-number v-model="manualForm.volume" :step="100" /></el-form-item>
+        <el-form-item :label="t('reconcile.volume')"><el-input-number v-model="manualForm.volume" :min="1" :max="1000000000" :step="100" /></el-form-item>   <!-- 批36a-2：>0 上限 1e9（场外底仓大宗） -->
         <el-form-item :label="t('reconcile.note')"><el-input v-model="manualForm.note" /></el-form-item>
       </el-form>
       <template #footer>

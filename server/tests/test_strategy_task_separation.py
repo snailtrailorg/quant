@@ -17,8 +17,8 @@ class TestParameterDefs:
 
     def test_validate_defs_dup_name(self):
         defs = [
-            {"name": "x", "type": "number", "default": 1},
-            {"name": "x", "type": "number", "default": 2},
+            {"name": "x", "type": "number", "default": 1, "min": 0, "max": 10},   # 批36a-4：number 必填 min/max
+            {"name": "x", "type": "number", "default": 2, "min": 0, "max": 10},
         ]
         assert validate_parameter_defs(defs) is not None and "重复" in validate_parameter_defs(defs)
 
