@@ -121,7 +121,7 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="t('liveTask.initialCapital')">
-          <el-input-number v-model="form.initial_capital" :min="10000" :step="100000" />
+          <el-input-number v-model="form.initial_capital" v-bind="CAPITAL_INPUT" />   <!-- 批36b-β：补 max（三胞胎单源） -->
         </el-form-item>
       
         <!-- 批 6b：md_mode 单模式（hub），创建不再可选——direct 2026-09-01 退役 --></el-form>
@@ -139,6 +139,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, apiErr } from '../api'
+import { CAPITAL_INPUT } from '../utils/inputRanges'
 import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'

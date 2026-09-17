@@ -47,6 +47,7 @@ export default {
       failed: '失败',
       saveSuccess: '保存成功',
       saveFailed: '保存失败',
+      jsonInvalid: '不是有效的 JSON——请检查格式（引号、逗号等）',   // 批36b-β
       apiNotFound: '这个功能的数据接口不存在，可能是页面与系统版本不一致。请刷新页面或稍后再试，仍不行请联系管理员。',   // 批37：裸 404 兜底双语化
       httpError: '服务出错了（错误码 {code}）。请稍后重试；持续出现请联系管理员。',
       deleteSuccess: '删除成功',
@@ -952,6 +953,7 @@ export default {
       addTitle: '添加通道',
     },
     dataSources: {
+      limitZeroNote: '0 = 不限量',   // 批36b-β
       title: '数据源管理（平台化数据层，配置 DB 化）',
       usageTitle: '数据源调用量（今日，A4 #36）',
       phProvider: 'tushare/wind/akshare',
@@ -1215,7 +1217,7 @@ export default {
       added: '已添加 {n} 只标的到池', savedPlans: '已保存方案', savePlan: '保存当前方案', planName: '方案名称',
       peMax: 'PE 上限', pbMax: 'PB 上限', mvMin: '市值下限(万元)', turnoverMin: '换手率下限(%)',
       marketCap: '市值', turnover: '换手率',
-      cbFilters: '转债筛选', doubleLowMax: '双低下限', premiumMax: '溢价率上限(%)', remainingMin: '剩余年限下限',
+      cbFilters: '转债筛选', doubleLowMax: '双低上限', premiumMax: '溢价率上限(%)', remainingMin: '剩余年限下限',
       doubleLow: '双低', premium: '溢价率', convPrice: '转股价', maturity: '到期日', bondName: '转债名', stkName: '正股名',
       etfFilters: 'ETF 筛选', scaleMin: '规模下限(亿)', feeMax: '费率上限(%)',
       fundScale: '规模', mgmtFee: '管理费', trackingErr: '跟踪误差', fundType: '类型',
@@ -1316,6 +1318,7 @@ export default {
       failed: 'Failed',
       saveSuccess: 'Saved',
       saveFailed: 'Save failed',
+      jsonInvalid: 'Not valid JSON — check the format (quotes, commas)',
       apiNotFound: 'The data service behind this page wasn\'t found — the page and the system may be on different versions. Refresh the page or try again later; if it keeps failing, contact your administrator.',
       httpError: 'The server returned an error (code {code}). Please try again in a moment; if it keeps happening, contact your administrator.',
       deleteSuccess: 'Deleted',
@@ -2216,6 +2219,7 @@ export default {
       addTitle: 'Add Channel',
     },
     dataSources: {
+      limitZeroNote: '0 = no limit',
       title: 'Data Source Management (platform data layer, DB-driven)',
       usageTitle: 'Data Source Usage (today, A4 #36)',
       phProvider: 'tushare/wind/akshare',

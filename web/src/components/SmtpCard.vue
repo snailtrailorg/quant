@@ -11,7 +11,7 @@
         </el-col>
         <el-col :span="8">
           <el-form-item :label="t('smtp.port')">
-            <el-input v-model="smtp.port" placeholder="465 / 587" />
+            <el-input-number v-model="smtp.port" v-bind="PORT_INPUT" placeholder="465 / 587" style="width: 100%" />   <!-- 批36b-β：端口 1-65535 -->
           </el-form-item>
         </el-col>
       </el-row>
@@ -48,6 +48,7 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { getSmtpConfig, saveSmtpConfig, sendTestEmail, apiErr } from '../api'
+import { PORT_INPUT } from '../utils/inputRanges'
 
 const { t } = useI18n()
 const smtp = ref({ host: '', port: '587', security: 'auto', username: '', password: '', password_set: false, from: '' })

@@ -85,7 +85,7 @@
           <el-input v-model="form.description" />
         </el-form-item>
         <el-form-item :label="t('factors.defaultParams')">
-          <el-input v-model="form.paramsStr" :placeholder="t('factors.phParams')" :disabled="form.ftype === 'dsl'" />
+          <JsonInput v-model="form.paramsStr" :rows="2" :placeholder="t('factors.phParams')" />   <!-- 批36b-β：JSON 校验组件（dsl 禁用态由提交侧守卫） -->
         </el-form-item>
         <el-form-item :label="t('factors.historyWindow')">
           <el-input-number v-model="form.needsHistory" :min="0" :step="1" :disabled="form.ftype === 'dsl'" />
@@ -168,6 +168,7 @@ import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFactorList, createFactor, updateFactor, deleteFactor, validateFactorCode , apiErr } from '../api'
+import JsonInput from '../components/JsonInput.vue'
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 import DslEditor from '../components/DslEditor.vue'

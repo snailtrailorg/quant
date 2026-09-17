@@ -35,9 +35,9 @@
         <!-- wd-15 批四: XTP field_schema 静态映射(消灭盲写 JSON;非 XTP 走原 password) -->
         <div v-if="form.provider === 'xtp'" style="display: flex; flex-direction: column; gap: 6px">
           <el-input v-model="credFields['td_host']" :placeholder="t('brokers.phTdHost')" />
-          <el-input v-model="credFields['td_port']" :placeholder="t('brokers.phTdPort')" />
+          <el-input-number v-model="credFields['td_port']" v-bind="PORT_INPUT" :placeholder="t('brokers.phTdPort')" />   <!-- 批36b-β -->
           <el-input v-model="credFields['md_host']" :placeholder="t('brokers.phMdHost')" />
-          <el-input v-model="credFields['md_port']" :placeholder="t('brokers.phMdPort')" />
+          <el-input-number v-model="credFields['md_port']" v-bind="PORT_INPUT" :placeholder="t('brokers.phMdPort')" />
           <el-input v-model="credFields['client_id']" :placeholder="t('brokers.phClientId')" />
         </div>
         <el-input v-else v-model="form.credentials" type="password" show-password :placeholder="t('brokers.phCred')" autocomplete="new-password" />
@@ -73,6 +73,7 @@ import IconBtn from '../components/IconBtn.vue'
 import { Plus, VideoPlay, Edit, Delete } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import {apiErr,  getBrokers, createBroker, updateBroker, deleteBroker, testBroker } from '../api'
+import { PORT_INPUT } from '../utils/inputRanges'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../api'
 

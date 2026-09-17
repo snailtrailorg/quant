@@ -39,7 +39,10 @@
       <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('dataSources.phProvider')" /></el-form-item>
       <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
       <el-form-item :label="t('common.credentialToken')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" autocomplete="new-password" /></el-form-item>
-      <el-form-item :label="t('common.dailyLimit')"><el-input-number v-model="form.usage_limit" :min="0" controls-position="right" /></el-form-item>
+      <el-form-item :label="t('common.dailyLimit')">
+            <el-input-number v-model="form.usage_limit" :min="0" controls-position="right" />
+            <span class="zero-note">{{ t('dataSources.limitZeroNote') }}</span>
+          </el-form-item>   <!-- 批36b-β：0 语义消歧 -->
       <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>
       <template #footer>
@@ -208,3 +211,6 @@ const onTest = async (id) => {
   finally { testing.value = 0 }
 }
 </script>
+<style scoped>
+.zero-note { margin-left: 8px; font-size: var(--fs-foot); color: var(--text-secondary); }
+</style>

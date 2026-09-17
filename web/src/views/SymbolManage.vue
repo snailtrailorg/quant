@@ -47,10 +47,10 @@
     <el-dialog v-model="bfVisible" :close-on-click-modal="false" :title="t('symbol.backfillTitle', { symbol: bfSymbol })" width="420px">
       <el-form label-width="80px">
         <el-form-item :label="t('symbol.start')">
-          <el-input v-model="bfForm.start" :placeholder="t('symbol.phDate')" />
+          <el-date-picker v-model="bfForm.start" type="date" value-format="YYYYMMDD" :disabled-date="noFuture" style="width: 100%" />
         </el-form-item>
         <el-form-item :label="t('symbol.end')">
-          <el-input v-model="bfForm.end" :placeholder="t('symbol.phDate')" />
+          <el-date-picker v-model="bfForm.end" type="date" value-format="YYYYMMDD" :disabled-date="noFuture" style="width: 100%" />
         </el-form-item>
         <el-alert type="warning" :closable="false" show-icon
           :title="t('symbol.backfillHint')" />
@@ -64,6 +64,7 @@
 </template>
 
 <script setup>
+const noFuture = d => d.getTime() > Date.now()   // 批36b-β：回补禁未来（DataManage 基准同款）
 import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'

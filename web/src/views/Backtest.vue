@@ -127,7 +127,7 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="t('common.initialCapital')">
-          <el-input-number v-model="form.capital" :min="10000" :max="10000000000" :step="100000" style="width: 100%" />   <!-- 批36a-3：上限 1e10（与后端校验对齐） -->
+          <el-input-number v-model="form.capital" v-bind="CAPITAL_INPUT" style="width: 100%" />   <!-- 批36b-β：三胞胎单源 -->
         </el-form-item>
 
         <!-- 统一参数 -->
@@ -143,8 +143,8 @@
           <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-bottom: var(--sp-2); padding-left: 100px">
             {{ t('backtest.jsonHint') }}
           </div>
-          <el-input v-model="form.symbolParamsStr" type="textarea" :rows="4"
-            placeholder='{"600000.SHSE": {"buy_threshold": 0.03}}' />
+          <JsonInput ref="symParamsRef" v-model="form.symbolParamsStr" :rows="4"
+            placeholder='{"600000.SHSE": {"buy_threshold": 0.03}}' />   <!-- 批36b-β：JSON 校验组件 -->
         </template>
       </el-form>
       <template #footer>
@@ -162,6 +162,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bs, pct } from '../utils/backtestSummary'
 import StatusTag from '../components/StatusTag.vue'
+import { CAPITAL_INPUT } from '../utils/inputRanges'
+import JsonInput from '../components/JsonInput.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import RowFilter from '../components/RowFilter.vue'

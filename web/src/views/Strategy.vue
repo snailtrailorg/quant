@@ -189,7 +189,7 @@
               <el-option :label="t('common.binance')" value="binance_perp" />
               <el-option label="OKX" value="okx_perp" />
             </el-select>
-            <el-input-number v-model="bindForm.initial_capital" :min="10000" :step="100000" style="width: 180px" />
+            <el-input-number v-model="bindForm.initial_capital" v-bind="CAPITAL_INPUT" style="width: 180px" />   <!-- 批36b-β：补 max（三胞胎单源） -->
             <el-button type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">{{ t('common.bind') }}</el-button>
             <!-- 批17 17C：刷新图标化（原 disabled 由 loadBinds 内 id 空值守卫承接） -->
             <RefreshBtn @refresh="loadBinds" />
@@ -232,6 +232,7 @@ const router = useRouter()
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { bs, pct } from '../utils/backtestSummary'
 import { getStrategies, updateStrategy, createStrategy, getFactorList, validatePythonCode } from '../api'
+import { CAPITAL_INPUT } from '../utils/inputRanges'
 import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 import CodeEditor from '../components/CodeEditor.vue'
