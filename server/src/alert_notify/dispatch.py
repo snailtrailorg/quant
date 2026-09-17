@@ -208,7 +208,7 @@ def _compose(body: str, code: str | None, limit: int) -> str:
     return str(body)[:max(limit - len(line), 0)] + line
 
 
-def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -> tuple[bool, str]:
+def _send_im(bot_id: str, *, level: str, title: str, body: str, code: str | None) -> tuple[bool, str]:
     """IM 通道：target=bot_id，收件人=该 bot enabled 绑定用户全体（open_id 去重）。
     全成=ok；任一败=im_partial（A3-F9）。provider 限 feishu（B2-16，接第二家 IM 时扩展）。"""
     try:
@@ -265,7 +265,7 @@ def _send_im(bot_id: str, level: str, title: str, body: str, code: str | None) -
         return False, "timeout"
 
 
-def _send_email(to: str, level: str, category: str, title: str, body: str, code: str | None) -> tuple[bool, str]:
+def _send_email(to: str, *, level: str, category: str, title: str, body: str, code: str | None) -> tuple[bool, str]:
     """邮件通道：入 outbox（持久+重试+终败 email.failed 回流站内）后立即同步试发（B-P9 时效）。"""
     try:
         from src.email_service import queue_email
@@ -281,18 +281,68 @@ def _send_email(to: str, level: str, category: str, title: str, body: str, code:
         return False, "smtp_error"
 
 
-def _send_sms(phone: str, level: str, title: str) -> tuple[bool, str]:
+def _send_sms(phone: str, *, level: str, title: str) -> tuple[bool, str]:
+    """短信传输层（纯发）——payload 由 _render_sms 渲染层产出（截断不再在此）。"""
     from src.alert_notify.sms import send_sms
     return send_sms(phone, level, title)
 
 
+# ── 通道内容适配层（批40 Channel Profile 注册表——用户裁定建框架）──
+# 通知上下文 ctx = {level, category, title, body, code, notif_id}（完整信息全通道同源）；
+# 每通道一张画像：内容形态声明 + 渲染策略（ctx→payload）+ 传输函数（纯发不问内容）。
+# 加新通道 = 注册表加一条（渲染+传输各一个函数），_send_one 与调用方零改动。
+#
+# 内容形态（content_model）：
+#   full      = 全量直通（body 完整送达）——im/email
+#   templated = 模板化降维（短信=敲门通知媒介，用户裁定——只传模板变量，
+#               完整信息走 Web 登录或 AI 通道问答；title 截 20 字与阿里云模板 ${title} 对齐）
+from dataclasses import dataclass
+from typing import Any, Callable
+
+
+@dataclass(frozen=True)
+class ChannelProfile:
+    channel: str
+    content_model: str                      # "full" | "templated"
+    supports_body: bool                     # 通道是否消费 body
+    max_title: int | None                   # 标题截断上限（None=不截）
+    renderer: Callable[[dict], dict]        # ctx → 该通道 payload
+    sender: Callable[..., tuple[bool, str]] # (target, payload) → (ok, reason_token)
+
+
+def _render_full(ctx: dict) -> dict:
+    """im 渲染：全量直通（body 完整）。"""
+    return {"level": ctx["level"], "title": ctx["title"], "body": ctx["body"], "code": ctx["code"]}
+
+
+def _render_email(ctx: dict) -> dict:
+    """email 渲染：全量+类别（sender 组装 html 与 runbook 行——传输层职责）。"""
+    return {"level": ctx["level"], "category": ctx["category"], "title": ctx["title"],
+            "body": ctx["body"], "code": ctx["code"]}
+
+
+def _render_sms(ctx: dict) -> dict:
+    """短信渲染（产品裁定显式契约）：降维为阿里云模板变量 {level, title[:20]}——
+    丢 category/body/code；截断在渲染层（原藏 sms.py 传输层，批40 归位）。"""
+    return {"level": ctx["level"], "title": str(ctx["title"])[:20]}
+
+
+CHANNEL_PROFILES: dict[str, ChannelProfile] = {
+    "im":    ChannelProfile("im", "full", True, None, _render_full, _send_im),
+    "email": ChannelProfile("email", "full", True, None, _render_email, _send_email),
+    "sms":   ChannelProfile("sms", "templated", False, 20, _render_sms, _send_sms),
+}
+
+
 def _send_one(row: dict, level: str, category: str, title: str, body: str, code: str | None) -> tuple[bool, str]:
-    ch = row["channel"]
-    if ch == "im":
-        return _send_im(row["target"], level, title, body, code)
-    if ch == "email":
-        return _send_email(row["target"], level, category, title, body, code)
-    return _send_sms(row["target"], level, title)
+    """统一入口：ctx 组装 → 画像渲染 → 传输。未知通道拒（not_configured——注册表单一真相源）。"""
+    prof = CHANNEL_PROFILES.get(row["channel"])
+    if prof is None:
+        return False, "not_configured"
+    ctx = {"level": level, "category": category, "title": title, "body": body,
+           "code": code, "notif_id": row.get("notif_id")}
+    payload = prof.renderer(ctx)
+    return prof.sender(row["target"], **payload)
 
 
 # ── 订阅加载与主流程 ──

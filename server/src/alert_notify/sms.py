@@ -104,8 +104,9 @@ def send_sms(phone: str, level: str, title: str) -> tuple[bool, str]:
     cfg = _sms_config()
     if not cfg:
         return False, "not_configured"
+    # 批40：截断上移 dispatch._render_sms（内容层）——本函数纯传输（title 原样进模板参数）
     params = _base_params(cfg, phone, cfg["alert_sms_template_code"],
-                          {"level": level, "title": str(title)[:20]})
+                          {"level": level, "title": str(title)})
     return _aliyun_send(cfg, params)
 
 

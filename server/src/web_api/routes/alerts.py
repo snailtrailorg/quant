@@ -373,7 +373,11 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
         if not sms_configured():
             results.append((False, "短信未接入（凭证未配）"))
         else:
-            ok, reason = send_sms(u[1], "info", "告警通道测试")
+            # 批40：走渲染层同源（_render_sms 截断契约与正式告警一致——不再手拼）
+            from src.alert_notify.dispatch import _render_sms
+            _p = _render_sms({"level": "info", "category": "system", "title": "告警通道测试",
+                              "body": "", "code": None})
+            ok, reason = send_sms(u[1], _p["level"], _p["title"])
             results.append((ok, "短信已发送" if ok else f"短信失败: {reason}"))
 
     # —— IM（名下每个 enabled bot——沿用批 8.5 真发语义：test_connection + 发绑定用户）——

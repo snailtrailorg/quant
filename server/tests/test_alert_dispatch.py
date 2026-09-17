@@ -377,7 +377,7 @@ def test_send_im_bid_int_conversion_batch13():
     import pytest as _pytest
     from src.alert_notify.dispatch import _send_im
     # 脏 target：ValueError → (False, 明确原因) 而非 timeout 错标
-    ok, why = _send_im("not_a_number", "warn", "t", "b", None)
+    ok, why = _send_im("not_a_number", level="warn", title="t", body="b", code=None)
     assert (ok, why) == (False, "bad_target")   # 明确失败码（原错标 timeout）
     # 合法 int 串：应进入 DB 查询路径（mock get_conn）而非 NameError
     from unittest.mock import MagicMock, patch as _patch
@@ -385,5 +385,40 @@ def test_send_im_bid_int_conversion_batch13():
     cur = MagicMock(); cur.fetchone.return_value = None
     conn.execute.return_value = cur
     with _patch("src.data_platform.db.get_conn", return_value=conn):
-        ok2, why2 = _send_im("7", "warn", "t", "b", None)
+        ok2, why2 = _send_im("7", level="warn", title="t", body="b", code=None)
     assert not ok2 and why2 == "disabled"
+
+
+# ── 批40：Channel Profile 注册表（内容适配层）──
+
+def test_channel_profiles_registry():
+    """三通道画像齐全：im/email=full（supports_body）/sms=templated（max_title=20 不消费 body）。"""
+    from src.alert_notify.dispatch import CHANNEL_PROFILES
+    assert set(CHANNEL_PROFILES) == {"im", "email", "sms"}
+    assert CHANNEL_PROFILES["im"].content_model == "full" and CHANNEL_PROFILES["im"].supports_body
+    assert CHANNEL_PROFILES["email"].content_model == "full"
+    sms_p = CHANNEL_PROFILES["sms"]
+    assert sms_p.content_model == "templated" and not sms_p.supports_body and sms_p.max_title == 20
+
+
+def test_render_sms_dimension_reduction():
+    """短信渲染契约（用户裁定显式化）：丢 category/body/code+title 截 20——完整信息走 Web/AI 通道。"""
+    from src.alert_notify.dispatch import _render_sms
+    out = _render_sms({"level": "critical", "category": "risk", "title": "回" * 30,
+                       "body": "详细内容", "code": "R7"})
+    assert out == {"level": "critical", "title": "回" * 20}
+
+
+def test_render_full_passes_body():
+    """im/email 渲染全量直通（body 完整送达）。"""
+    from src.alert_notify.dispatch import _render_full, _render_email
+    ctx = {"level": "warn", "category": "task", "title": "t", "body": "完整正文", "code": None}
+    assert _render_full(ctx)["body"] == "完整正文"
+    assert _render_email(ctx)["category"] == "task" and _render_email(ctx)["body"] == "完整正文"
+
+
+def test_send_one_unknown_channel_rejected():
+    """未知通道拒（注册表单一真相源——新通道=注册表加条目而非改 if 链）。"""
+    from src.alert_notify.dispatch import _send_one
+    ok, reason = _send_one({"channel": "fax", "target": "123"}, "warn", "risk", "t", "b", None)
+    assert ok is False and reason == "not_configured"
