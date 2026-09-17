@@ -1,8 +1,9 @@
 """权限解析（批11C 下沉自 web_api/auth.py——服务层合法消费,IM 身份链同源）。
 
-语义与锁键防线原样：PERMISSIONS 字典=DB 故障回退底座；表有行全量以表为准；
-user deny > user allow > role allow；锁键/地板见各常量。web_api/auth.py re-export
-保持全部既有引用路径不变（函数内 import 每次解析,patch 兼容）。
+批33a（2026-09-17）：权限单源化——user 维退役（用户裁定：权限完全追随组；生产
+permission 表 user 行复核=0；迁移 0082 CHECK 锁值域仅 role）。语义与锁键防线原样：
+PERMISSIONS 字典=DB 故障回退底座；表有行全量以表为准；锁键/地板见各常量。
+web_api/auth.py re-export 保持全部既有引用路径不变（函数内 import 每次解析,patch 兼容）。
 """
 from __future__ import annotations
 
@@ -25,12 +26,12 @@ PERMISSIONS = {
                  "alerts_config"},   # 批7:DB 故障 fallback 亦含(admin 专属;analyst 无)
 }
 
-_PERM_CACHE: dict = {"at": 0.0, "roles": None, "users": {}}
+_PERM_CACHE: dict = {"at": 0.0, "roles": None}
 _PERM_TTL = 60.0
 
 # W4（盲审 B-P0 新建——原"系统策略键已锁定"是幻觉：require_perm 全表驱动,任何键今天都可被
-# 角色重写关掉）：锁键=提权链/自损链高危键——角色重写与 user override 双路径同锁;
-# admin 角色重写另有地板键（self-lockout 防线）
+# 角色重写关掉）：锁键=提权链/自损链高危键。批33a：user override 双路径已随 user 维退役
+# （组层单锁）；admin 角色重写地板键（self-lockout 防线）保留组层。
 LOCKED_PERM_KEYS = {"user_mgmt", "resume", "account_keys"}
 ADMIN_ROLE_FLOOR = LOCKED_PERM_KEYS | {"system_config", "alerts_config"}   # 批7:告警路由/计费短信面同列自锁防线
 
@@ -40,11 +41,13 @@ _MARKET_OP_KEYS = ("convertible", "etf", "astock", "binance_perp", "okx_perp")
 
 
 def market_op_allowed(username: str, role: str, market: str) -> bool:
-    """批15 market_op 维：user 行(effect) > role 行(effect) > 无行 False。
+    """批15 market_op 维：role 行(effect)；无行 False。
+
+    批33a：user 层退役——单层 role 判定（username 参数保留=调用方签名兼容，不再参与查询）。
 
     全链 fail-closed（2026-09-11 用户裁定）：
     - 无行=False——组未配置即拒（新市场键漏配=默认锁死；自定义新组零行=天然零权限）
-    - 同 (subject,market) allow+deny 双行并存时 deny 优先（对齐 api 维 deny 语义）
+    - 同 (role,market) allow+deny 双行并存时 deny 优先（对齐 api 维 deny 语义）
     读库失败=False（对齐 check_order 链上件：熔断态/快照/开关均 fail-closed）
     - 不做缓存：直读 PG——invalidate_perm_cache 是进程内的，永远到不了 strategy_runner
       子进程（check_order 调用方），缓存=权限收紧对运行中任务永不生效的 fail-open 面
@@ -54,25 +57,19 @@ def market_op_allowed(username: str, role: str, market: str) -> bool:
     try:
         with _gc() as conn:
             cur = conn.execute(
-                "SELECT subject_type, subject_id, effect FROM permission "
+                "SELECT effect FROM permission "
                 "WHERE dimension='market_op' AND resource=%s "
-                "AND ((subject_type='role' AND subject_id=%s) "
-                " OR (subject_type='user' AND subject_id=%s))",
-                (market, role, username))
+                "AND subject_type='role' AND subject_id=%s",
+                (market, role))
             rows = cur.fetchall()
     except Exception as e:
         _logger.warning("market_op 表读取失败（fail-closed 拒）: %s", e)
         return False
 
-    def _layer(st: str) -> str | None:
-        """层内聚合：deny 优先于 allow（同层双行并存时），无行=None。"""
-        effs = {eff for s, _sid, eff in rows if s == st}
-        if "deny" in effs:
-            return "deny"
-        return "allow" if "allow" in effs else None
-
-    eff = _layer("user") or _layer("role")   # user 层有行则覆盖 role 层
-    return eff == "allow"                    # None/deny 均 False（无行=deny）
+    effs = {eff for (eff,) in rows}
+    if "deny" in effs:
+        return False
+    return "allow" in effs
 
 
 def load_role_permissions() -> dict:
@@ -116,70 +113,36 @@ def load_role_permissions() -> dict:
 def invalidate_perm_cache() -> None:
     """权限变更后即刻生效（10 §3：指纹重编译）。全局清（W4 保持现语义——单 worker
     写后即生效,勿改按键清留 role 脏键,盲审 B-P1）。"""
-    _PERM_CACHE.update(at=0.0, roles=None, users={})
-
-
-def _load_user_api_overrides(username: str) -> tuple[set, set]:
-    """user 维 api override →（allows, denies）。读失败 raise 由调用方决定 fail-open。"""
-    from src.data_platform.db import get_conn as _gc
-    with _gc() as conn:
-        cur = conn.execute(
-            "SELECT resource, effect FROM permission "
-            "WHERE subject_type='user' AND subject_id=%s AND dimension='api'", (username,))
-        allows, denies = set(), set()
-        for res, eff in cur.fetchall():
-            (denies if eff == "deny" else allows).add(res)
-    return allows, denies
+    _PERM_CACHE.update(at=0.0, roles=None)
 
 
 def load_nav_map(username: str, role: str) -> dict:
-    """W5：nav 维三态映射（resource=菜单id → hidden|readonly|readwrite）。
+    """W5：nav 维映射（resource=菜单id → hidden|readonly|readwrite）。
 
-    user 行覆盖 role 行（与 data 维同规则）；无配置={}（=readwrite 缺省，前端现行为）。
+    批33a：user 覆盖层退役——纯 role 判定（username 参数保留=签名兼容）。
+    无配置={}（=readwrite 缺省，前端现行为）。
     """
     try:
         from src.data_platform.db import get_conn as _gc
         with _gc() as conn:
             rows = conn.execute(
-                "SELECT subject_type, subject_id, resource, effect FROM permission "
-                "WHERE dimension='nav'").fetchall()
-        out: dict = {}
-        for st, sid, res, eff in rows:
-            if st == "role" and sid == role:
-                out[res] = eff
-        for st, sid, res, eff in rows:
-            if st == "user" and sid == username:
-                out[res] = eff
-        return out
+                "SELECT resource, effect FROM permission "
+                "WHERE dimension='nav' AND subject_type='role' AND subject_id=%s", (role,)).fetchall()
+        return {res: eff for res, eff in rows}
     except Exception:
         return {}
 
 
 def load_effective_permissions(username: str, role: str) -> tuple[set, dict]:
-    """W4 C 阶段：用户有效权限 = user deny > user allow > role allow（10 §3 合并序）。
+    """W4 C 阶段（批33a 单源化）：用户有效权限 = 角色 base（user 维退役——用户裁定权限
+    完全追随组，新组合=建新组）。
 
-    返回 (perms, sources)：sources 供玻璃盒标注来源（api 维）——
-    {"<perm>": "user-override" | "role-base"} + {"__denied__": [被 user deny 的 role 键]}。
-    user 维读失败 fail-open=按角色（user 维无字典可回,盲审 A-P1）。
+    返回 (perms, sources)：sources 供玻璃盒标注来源（api 维）——签名与返回形状保持
+    （调用方/5 测试文件 patch 零改动）：批33a 后恒 {"<perm>": "role-base"} +
+    {"__denied__": []}（user 维不存在，键保留=前端玻璃盒零逻辑改动）。
     """
     roles = load_role_permissions()
     base = set(roles.get(role, set()))
-    if not username:
-        return base, {p: "role-base" for p in base}
-    key = (username, role)
-    cached = _PERM_CACHE["users"].get(key)
-    if cached is None:
-        try:
-            cached = _load_user_api_overrides(username)
-            _PERM_CACHE["users"][key] = cached
-        except Exception:
-            # 盲审 A-P1b：失败结果**不缓存**（users 槽无 TTL,缓存=一次 DB 抖动把该用户
-            # fail-open 冻结到下次 invalidate）——本次按角色返回,下次重试
-            cached = (set(), set())
-    allows, denies = cached
-    denied = sorted(base & denies)
-    perms = (base | allows) - denies
-    sources = {p: ("user-override" if (p in allows and p not in base) else "role-base")
-               for p in perms}
-    sources["__denied__"] = denied
-    return perms, sources
+    sources = {p: "role-base" for p in base}
+    sources["__denied__"] = []
+    return base, sources

@@ -35,7 +35,7 @@ const routes = [
       { path: 'users', name: 'users', component: () => import('./views/UserManagement.vue'), meta: { admin: true } },   // 批11：用户管理（系统管理第一项；user_mgmt=admin-only 同 permissions 守卫）
       { path: 'dataops', name: 'dataops', component: () => import('./views/DataOps.vue') },
       { path: 'observe', name: 'observe', component: () => import('./views/Observe.vue') },
-      { path: 'permissions', name: 'permissions', component: () => import('./views/Permissions.vue'), meta: { admin: true } },
+      { path: 'permissions', redirect: '/users?tab=groups' },   // 批33a：权限页退役——权限单入口=用户管理·用户群组（PermMatrix 组弹窗）；旧深链归位
       { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue') },
       { path: 'screener', name: 'screener', component: () => import('./views/Screener.vue') },   // P2-8 三合一（旧三路由保留兼容直链）
       { path: 'ascreen', redirect: '/screener?tab=astock' },

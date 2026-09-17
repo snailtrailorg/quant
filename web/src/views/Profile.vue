@@ -263,7 +263,7 @@
           </div>
           <!-- 图例（批24 迭代六 文案师产出）：删内联后缀，颜色+图例承载三态语义 -->
           <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-3)">
-            {{ t('perm.legendAllowed') }} · <span style="color: var(--warn-fill)">{{ t('perm.legendOrange') }}</span> · <span style="color: var(--critical)">{{ t('perm.legendRed') }}</span>
+            {{ t('perm.legendAllowed') }} · <span style="color: var(--critical)">{{ t('perm.legendRed') }}</span>
           </div>
           <el-divider />
           <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('layout.navLimitTitle') }}</h3>
@@ -449,7 +449,8 @@ const permBox = ref({ base: [], override: [], denied: [] })
 // 批24：权限表格化只读视图——全键=三组并集；勾=有效允许（base∪override）；denied 展示但不勾（红字弱化）
 const permAllKeys = computed(() => [...new Set([...permBox.value.base, ...permBox.value.override, ...permBox.value.denied])])
 const permAllowedKeys = computed(() => [...permBox.value.base, ...permBox.value.override])
-const permCls = k => permBox.value.denied.includes(k) ? 'perm-denied' : (permBox.value.override.includes(k) ? 'perm-ovr' : '')
+// 批33a：橙态（user-override）随 user 维退役——恒 role-base；denied 管道保留（恒空，market_op 区 perm-denied 样式仍复用）
+const permCls = k => permBox.value.denied.includes(k) ? 'perm-denied' : ''
 const marketAllowedKeys = computed(() => Object.entries(me.value.market_op || {}).filter(([, ok]) => ok).map(([mk]) => mk))
 // 批24 迭代六：菜单权限——只列被限制项（hidden/readonly），未列出=读写缺省（/auth/me 的 nav=load_nav_map 合并结果）
 const navLimited = computed(() => Object.entries(me.value.nav || {}).filter(([, st]) => st && st !== 'readwrite'))
@@ -822,7 +823,7 @@ const onChangePwd = async () => {
 .perm-grid :deep(.el-checkbox) { margin-right: 0; height: auto; }
 .perm-denied { opacity: .55; }
 .perm-denied :deep(.el-checkbox__label) { color: var(--critical); text-decoration: line-through; }
-.perm-ovr :deep(.el-checkbox__label) { color: var(--warn-fill); }
+/* 批33a：.perm-ovr（橙字）随 user-override 退役删 */
 .icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-height: 360px; overflow-y: auto; padding: 4px; }
 .icon-grid img { width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer; border: 3px solid transparent; }
 .icon-grid img:hover { border-color: var(--border-weak); }

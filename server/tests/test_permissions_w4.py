@@ -1,7 +1,7 @@
 """W4 权限三维化 C 阶段测试（2026-09-01）。
 
-分层：①基线锁（现行为先钉死再重构的防线,盲审 B）②effective 合并序
-③锁键双路径 ④override CRUD+自锁防线 ⑤GET 三维形状。
+分层（批33a 单源化后）：①基线锁（现行为先钉死再重构的防线）②effective=角色单源
+（签名/形状契约钉）③锁键组层单锁 ④user override 端点退役 ⑤GET 三维形状。
 """
 from unittest.mock import patch, MagicMock
 
@@ -24,13 +24,13 @@ class TestBaseline:
 
     def test_role_fallback_dict_on_db_fail(self):
         with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db")):
-            perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+            perms_mod._PERM_CACHE.update(at=0.0, roles=None)   # 批33a：users 槽随 user 维退役删
             roles = auth_mod.load_role_permissions()
         assert roles == auth_mod.PERMISSIONS          # fail→字典
 
     def test_role_table_overrides_dict(self):
         # 表有 role 行 → 全量以表为准（现 P1-4 语义）
-        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None)   # 批33a：users 槽随 user 维退役删
         rows = [("trader", "read", "allow"), ("trader", "trade", "allow")]
         with patch("src.data_platform.db.get_conn", return_value=_conn_rows(rows)):
             roles = auth_mod.load_role_permissions()
@@ -38,59 +38,39 @@ class TestBaseline:
 
 
 class TestEffective:
-    """user deny > user allow > role allow（10 §3 合并序）。"""
+    """批33a 单源化：有效权限=角色 base（user 维退役——恒 role-base/__denied__=[]）。
+    签名与返回形状保持（玻璃盒/IM 链/5 文件 patch 零改动的契约钉）。"""
 
-    def test_no_user_rows_equals_role(self):
-        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+    def test_role_base_effective(self):
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None)
         role_rows = [("trader", "read", "allow"), ("trader", "trade", "allow")]
-        user_rows = []
-        def gc():
-            c = _conn_rows(role_rows if not TestEffective._user else user_rows)
-            return c
-        TestEffective._user = False
         with patch("src.data_platform.db.get_conn", side_effect=lambda: _conn_rows(role_rows)):
-            base, _ = auth_mod.load_effective_permissions("", "trader")
-        assert base == {"read", "trade"}
-
-    _user = False
-
-    def test_user_deny_beats_role_allow(self):
-        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
-        with patch("src.data_platform.db.get_conn",
-                   side_effect=lambda: _conn_rows([("trader", "read", "allow"),
-                                                   ("trader", "trade", "allow")] if not TestEffective._user
-                                                  else [("trade", "deny")])):   # user 查询 2 列(resource,effect)
-            # 先载 role 面
-            TestEffective._user = False
-            auth_mod.load_role_permissions()
-            TestEffective._user = True
             perms, src = auth_mod.load_effective_permissions("bob", "trader")
-        assert "trade" not in perms and "read" in perms
-        assert src["__denied__"] == ["trade"]
+        assert perms == {"read", "trade"}
+        assert src["read"] == "role-base" and src["trade"] == "role-base"
+        assert src["__denied__"] == []   # 形状键保留恒空（前端玻璃盒零逻辑改动）
 
-    def test_user_allow_fills_role_gap(self):
-        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+    def test_unknown_role_empty_base(self):
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None)
         with patch("src.data_platform.db.get_conn",
-                   side_effect=lambda: _conn_rows([("viewer", "read", "allow")] if not TestEffective._user
-                                                  else [("data_sync", "allow")])):   # 2 列
-            TestEffective._user = False
-            auth_mod.load_role_permissions()
-            TestEffective._user = True
-            perms, src = auth_mod.load_effective_permissions("bob", "viewer")
-        assert perms == {"read", "data_sync"}
-        assert src["data_sync"] == "user-override" and src["read"] == "role-base"
+                   side_effect=lambda: _conn_rows([])):   # 表空 → 字典兜底；未知组不在字典 → 空
+            perms, _ = auth_mod.load_effective_permissions("bob", "ghost_group")
+        assert perms == set()
 
-    def test_user_read_fail_failopen_role(self):
-        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
-        state = {"n": 0}
-        def gc():
-            state["n"] += 1
-            if state["n"] == 1:
-                return _conn_rows([("viewer", "read", "allow")])
-            raise RuntimeError("db down at user query")
-        with patch("src.data_platform.db.get_conn", side_effect=gc):
-            perms, _ = auth_mod.load_effective_permissions("bob", "viewer")
-        assert perms == {"read"}                        # user 维读失败=按角色
+    def test_empty_username_same_as_named(self):
+        """空 username 与实名同构（签名保留——不再有 user 维分支差异）。"""
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None)
+        rows = [("viewer", "read", "allow")]
+        with patch("src.data_platform.db.get_conn", side_effect=lambda: _conn_rows(rows)):
+            a, sa = auth_mod.load_effective_permissions("", "viewer")
+            b, sb = auth_mod.load_effective_permissions("anyone", "viewer")
+        assert a == b == {"read"} and sa == sb
+
+    def test_no_user_query_issued(self):
+        """user 维退役=零 user 查询：解析只读 role 面（load_nav_map 同——单条 role SQL）。"""
+        import inspect
+        src = inspect.getsource(perms_mod)
+        assert "subject_type='user'" not in src   # 单源钉：全模块无 user 维查询
 
 
 class TestLockedKeys:
@@ -99,42 +79,21 @@ class TestLockedKeys:
         assert "system_config" in auth_mod.ADMIN_ROLE_FLOOR
 
 
-class TestOverrideCrud:
-    """POST /api/permissions/user/{username} + 锁键/自锁防线（mock DB）。"""
+class TestOverrideEndpointRetired:
+    """批33a：POST /api/permissions/user/{username} 整端点退役——唯一 user 写点随删。"""
 
-    def _call(self, username, body):
-        from src.web_api.routes.auth_routes import update_user_override
-        conn = MagicMock(); conn.__enter__.return_value = conn
-        tconn = MagicMock(); tconn.__enter__.return_value = tconn
-        tconn.execute.return_value.fetchone.return_value = ["admin"]
-        def gc():
-            return tconn if not TestOverrideCrud._phase else conn
-        TestOverrideCrud._phase = False
-        with patch("src.data_platform.db.get_conn", side_effect=gc), \
-             patch("src.web_api.routes.auth_routes.audit_log"):
-            return update_user_override(username, body, {"username": "op"})
+    def test_route_removed(self):
+        from src.web_api.routes import auth_routes
+        paths = {getattr(r, "path", "") for r in auth_routes.router.routes}
+        assert "/api/permissions/user/{username}" not in paths
+        assert "/api/permissions" in paths   # GET/role POST 保留
 
-    _phase = False
-
-    def test_allow_deny_clear_roundtrip(self):
-        r = self._call("bob", {"dimension": "api", "resource": "data_sync", "effect": "deny"})
-        assert r["effect"] == "deny"
-        r2 = self._call("bob", {"dimension": "api", "resource": "data_sync", "effect": "clear"})
-        assert r2["effect"] == "clear"
-
-    def test_locked_key_rejected(self):
-        import pytest
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as ei:
-            self._call("bob", {"dimension": "api", "resource": "user_mgmt", "effect": "allow"})
-        assert ei.value.status_code == 400
-
-    def test_self_lock_guard_admin_deny(self):
-        import pytest
-        from fastapi import HTTPException
-        with pytest.raises(HTTPException) as ei:
-            self._call("adminbob", {"dimension": "api", "resource": "system_config", "effect": "deny"})
-        assert ei.value.status_code == 400
+    def test_get_no_user_overrides_key(self):
+        """GET /api/permissions 返回键退役（user_overrides 不再下发）。"""
+        import inspect
+        from src.web_api.routes import auth_routes
+        src = inspect.getsource(auth_routes.get_permissions)
+        assert "user_overrides" not in src
 
 
 class TestAuthMatrixW5:
@@ -150,7 +109,7 @@ class TestAuthMatrixW5:
         conn.execute.return_value.fetchall.return_value = []   # permission 表空→字典回退
         conn.execute.return_value.fetchone.return_value = None
         import src.web_api.auth as A
-        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None)   # 批33a：users 槽随 user 维退役删
         out = {}
         with patch("src.web_api.auth.verify_jwt",
                    return_value={"sub": "1", "username": "bob", "role": role, "db_role": role}), \

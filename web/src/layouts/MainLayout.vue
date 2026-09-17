@@ -173,7 +173,7 @@ const ROUTE_TO_NAV = {
   'ascreen': 'screener', 'cbscreen': 'screener', 'etfscreen': 'screener',
   'stock': 'analysis',
   'logs': 'observe', 'audit': 'observe', 'monitoring': 'observe', 'data-integrity': 'observe',
-  'permissions': 'users',
+  // 批33a：'permissions'→'users' 映射删——路由已 redirect /users?tab=groups，无组件再以 /permissions 渲染
 }
 const navReadonly = computed(() => {
   const seg = route.path.replace(/^\/+/, '').split('/')[0] || 'dashboard'

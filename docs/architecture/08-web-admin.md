@@ -138,7 +138,7 @@ GET    /api/audit?actor=&action=&from=&to=   # 审计日志（Admin）
 | 管理账户/密钥 | ❌ | ❌ | ✅ |
 | 用户管理 / 系统配置 | ❌ | ❌ | ✅ |
 
-实现：每个 endpoint 加权限装饰器（`@require_role("admin")` / `@require_role("operator","admin")`）；JWT 携带 role，中间件校验。所有 mutation 写 `audit_log(actor, action, target, ts, detail)`。
+实现：每个 endpoint 加权限装饰器（`@require_role("admin")` / `@require_role("operator","admin")`）；JWT 携带 role，中间件校验。所有 mutation 写 `audit_log(actor, action, target, ts, detail)`。**批33a（2026-09-17）权限单源化**：用户组维度单源——user 覆盖层退役（permission 表 subject_type CHECK 锁 'role'，迁移 0082；用户权限完全追随组，新组合=建新组）；权限配置唯一入口=用户管理→用户群组（组弹窗 PermMatrix；设置→权限管理页已退役 redirect）。
 
 **账号与角色**：支持多个登录账号，每个账号绑一个角色（`user` 表 `role` 字段）；同一角色可有多个账号（如多个 Trader、多个 Viewer），无数量限制。Admin 可建/改/禁用/删账号。非多租户——所有账号共享同一套数据与交易系统，差异仅在角色权限。
 

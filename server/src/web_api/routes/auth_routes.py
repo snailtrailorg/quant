@@ -3,7 +3,7 @@
 启动: 由 main.py include_router 挂载。
 """
 from __future__ import annotations
-from fastapi import APIRouter, Depends, Header, Query, Body, Request, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, Header, Query, Body, Request, BackgroundTasks
 from ..auth import (
     create_jwt, authenticate, create_user, require_role, require_perm, require_authenticated,
     audit_log, ensure_default_admin, init_users_table, PERMISSIONS,
@@ -105,7 +105,7 @@ def me(payload: dict = Depends(require_authenticated)):
     from ..auth import load_effective_permissions
     role = db_role or payload["role"]
     perms, sources = load_effective_permissions(payload["username"], role)
-    # W4 玻璃盒:来源标注（role-base/user-override）+被 user deny 的键;不含 updated_by（盲审 A-P2）
+    # W4 玻璃盒:来源标注（批33a 后恒 role-base,denied 恒空）;不含 updated_by（盲审 A-P2）
     denied = sources.pop("__denied__", [])
     from ..auth import load_nav_map
     return {"user_id": payload["sub"], "username": payload["username"], "role": role,
@@ -169,33 +169,22 @@ def _load_dim(dimension: str, strict: bool = False) -> dict:
 
 @router.get("/api/permissions")
 def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
-    """W4 三维矩阵（10 §4）：api 键+nav 三态+数据域+user override 全景。
+    """W4 三维矩阵（10 §4）：api 键+nav 三态+市场操作权限全景（批33a：user override 维
+    退役——权限单源化，用户裁定权限完全追随组）。
     批11B：角色清单动态（user_group 表全量，失败/空回退四内置）+locked 随 GET 返回（前端 🔒 不再硬编码）。"""
     from ..auth import load_role_permissions, LOCKED_PERM_KEYS, _MARKET_OP_KEYS
-    from src.data_platform.db import get_conn as _gc
     all_keys = ["read", "strategy_control", "data_sync", "halt", "resume", "trade",
                 "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
                 "system_config", "llm_config", "im_bots_config", "alerts_config"]
     roles = load_role_permissions()
     group_names = _all_group_names()   # 恒以组表为准（与权限数据短暂分叉可接受，盲审 B P2-4）
-    overrides = []
-    try:
-        with _gc() as conn:
-            rows = conn.execute(
-                "SELECT subject_id, dimension, resource, effect FROM permission "
-                "WHERE subject_type='user'").fetchall()
-        overrides = [{"username": r[0], "dimension": r[1], "resource": r[2], "effect": r[3]}
-                     for r in rows]
-    except Exception:
-        pass
     return {"keys": all_keys,
             "locked": sorted(LOCKED_PERM_KEYS),
             "roles": {r: sorted(roles.get(r, set())) for r in group_names},
             "nav": {"items": NAV_ITEMS, "roles": _load_dim("nav")},
             # 批15：data 维退役（脱敏+markets 存而不灵），换 market_op（市场操作权限）。
             # keys 单源 perms._MARKET_OP_KEYS（防第二份五键清单漂移）；strict=读失败 503
-            "market_op": {"keys": list(_MARKET_OP_KEYS), "roles": _load_dim("market_op", strict=True)},
-            "user_overrides": overrides}
+            "market_op": {"keys": list(_MARKET_OP_KEYS), "roles": _load_dim("market_op", strict=True)}}
 
 
 def _ensure_group(conn, role: str) -> None:
@@ -282,62 +271,9 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
     return {"role": role, "dimension": dimension, "resources": res_map}
 
 
-@router.post("/api/permissions/user/{username}")
-def update_user_override(username: str, body: dict,
-                         payload: dict = Depends(require_perm("user_mgmt"))):
-    """W4 C 阶段：per-user override（10 §4 用户视图=角色+override）。
-
-    body: {dimension ∈ api|nav|market_op, resource, effect ∈ allow|deny|clear}
-    - clear=删该行（回到角色基线）
-    - 锁键（api 维 LOCKED_PERM_KEYS）双路径同锁 → 400 PERMISSION_KEY_LOCKED
-    - 自锁防线：目标用户是 admin 时拒 deny 其管理键（self-lockout,盲审 B-P1）
-    subject_id=username（W4 定死——0056 注释 user_id 弃,盲审 A/B-P1）。
-    """
-    from ..auth import invalidate_perm_cache, LOCKED_PERM_KEYS, _MARKET_OP_KEYS
-    from src.data_platform.db import get_conn as _gc
-    dimension = body.get("dimension", "api")
-    resource = body.get("resource", "")
-    effect = body.get("effect", "")
-    if dimension not in ("api", "nav", "market_op"):
-        raise ApiError(400, "BAD_DIMENSION", "dimension ∈ api|nav|market_op")
-    if effect not in ("allow", "deny", "clear"):
-        raise ApiError(400, "BAD_EFFECT", "effect ∈ allow|deny|clear")
-    if not resource:
-        raise ApiError(400, "BAD_RESOURCE", "resource 必填")
-    if dimension == "market_op" and resource not in _MARKET_OP_KEYS:
-        # ApiError（代码盲审 A/B 同判）：原生 HTTPException 第三位置参落 headers，
-        # 触发时响应层 AttributeError→500 而非 400；项目错误码体系统一走 ApiError
-        raise ApiError(400, "BAD_RESOURCE", f"未知市场键: {resource}")
-    if dimension == "api":
-        if resource in LOCKED_PERM_KEYS:
-            raise ApiError(400, "PERMISSION_KEY_LOCKED",
-                                f"{resource} 为系统策略锁键（双路径同锁,不可 override）")
-        # 自锁防线：目标用户是 admin 时,deny 其余管理键也拒（锁死后无 UI 恢复路径）
-        try:
-            with _gc() as conn:
-                trole = conn.execute("SELECT role FROM users WHERE username=%s",
-                                     (username,)).fetchone()
-            if trole and trole[0] == "admin" and effect == "deny" \
-                    and resource in ("system_config", "user_mgmt"):
-                raise ApiError(400, "SELF_LOCK_RISK",
-                                    f"拒绝对 admin 用户 deny {resource}（自锁防线）")
-        except HTTPException:
-            raise
-        except Exception:
-            pass   # users 表不可读时放行校验（DB 写入本身也会失败兜底）
-    with _gc() as conn:
-        conn.execute("DELETE FROM permission WHERE subject_type='user' AND subject_id=%s "
-                     "AND dimension=%s AND resource=%s", (username, dimension, resource))
-        if effect != "clear":
-            conn.execute(
-                "INSERT INTO permission (subject_type, subject_id, dimension, resource, effect, updated_by) "
-                "VALUES ('user', %s, %s, %s, %s, %s)",
-                (username, dimension, resource, effect, payload.get("username", "")))
-        conn.commit()
-    invalidate_perm_cache()
-    audit_log(payload.get("username", ""), "perm_override",
-              f"{username}:{dimension}:{resource}:{effect}")
-    return {"username": username, "dimension": dimension, "resource": resource, "effect": effect}
+# 批33a：POST /api/permissions/user/{username}（update_user_override）整端点退役——
+# user 维随权限单源化废除（用户裁定 2026-09-16：权限完全追随组）；全仓唯一 user 写点
+# 随删=SELF_LOCK_RISK 防线退役实为封死唯一绕过面（锁键组层单锁仍在 POST /api/permissions/{role}）。
 
 
 @router.post("/api/auth/logout")

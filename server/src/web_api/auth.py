@@ -90,7 +90,7 @@ def require_perm(perm: str):
         token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
         payload = verify_jwt(token)
         # W4：DB role 优先（verify_jwt 已查 users 行,零成本——JWT role 仅旧 token 兜底）+
-        # effective 解析（user override 并入）
+        # effective 解析（批33a：角色单源——user override 维已退役）
         role = payload.get("db_role") or payload.get("role", "viewer")
         perms, _ = load_effective_permissions(payload.get("username", ""), role)
         if perm not in perms:

@@ -8,7 +8,7 @@
 - **风控**:GET `/api/risk/state` 扩展 `metrics{total_drawdown,daily_loss,available,snapshot_age_s}`（水位仪表+fail-closed 可见,P1-1）；GET `/api/risk/log?action=&limit=`（risk_log 决策面板——check_order 出口统一写入 approve/reject/adjust）
 - **对账处置台**（P1-2,迁移 0055 reconcile_issue 表,旧 issues 字符串双写兼容期保留）：GET `/api/reconcile/issues`；POST `/api/reconcile/issues/{id}/verify|ignore|exempt`（exempt 仅 user_mgmt=admin,标的级豁免基准 exempt_qty/until,差异超基准重开——scheduler 双写处过滤）；POST `/api/reconcile/manual-order`（场外单登记,admin）；POST `/api/reconcile/reset`（清零基线,admin）
 - **实盘任务**：GET `/api/live-task` 每行合并 worker 心跳（md_mode/lag/bars/frozen/hb_age_s——Valkey quant:hb:task:{id}）
-- **权限 A+B**（P3-7,迁移 0056 permission 表+四角色 seed=原字典逐条,行为零变化）：`require_perm` 底层换查表（60s 缓存,表空/故障回退字典;**表有 allow 行则全量以表为准**=撤权生效）；GET `/api/permissions`（admin,矩阵）/ POST `/api/permissions/{role}`（admin,全量重写 allow 集,invalidate 缓存即时生效）；`/auth/me` role 改读 DB（修 JWT 24h 滞留）+permissions 随查表
+- **权限 A+B**（P3-7,迁移 0056 permission 表+四角色 seed=原字典逐条,行为零变化；**批33a 2026-09-17 单源化：subject_type CHECK 锁 'role' 单维——user 覆盖端点 POST /api/permissions/user/{username} 退役（404）,GET user_overrides 键退役,load_effective_permissions=角色单源（签名/形状保持）**）：`require_perm` 底层换查表（60s 缓存,表空/故障回退字典;**表有 allow 行则全量以表为准**=撤权生效）；GET `/api/permissions`（admin,矩阵）/ POST `/api/permissions/{role}`（admin,全量重写 allow 集,invalidate 缓存即时生效）；`/auth/me` role 改读 DB（修 JWT 24h 滞留）+permissions 随查表
 - **回测**：GET `/api/backtest` 列表 `_safe_json` 防御（坏 JSON 行降级不 500,H11）
 - **引擎**（strategy_framework/backtest.py,P2-5）：费用摩擦参数化 `set_fees(stamp_tax/transfer_fee/limit_lock)`——印花税仅卖出 0.05%+过户费双边 0.001%+一字板（high==low）不可成交拒单返回 None（调用方已兼容）
 
@@ -236,8 +236,8 @@ from src.quant_common.crypto import encrypt, decrypt, mask
 4. 操作类写 `audit_log`
 5. 同步改前端 `web/src/api.js` + 组件
 
-### 加新 RBAC 权限
-1. `auth.PERMISSIONS[role].add(perm)`
+### 加新 RBAC 权限（批33a 后：组层单源）
+1. 管理面：系统管理→用户管理→用户群组→组弹窗 PermMatrix 勾选（写 permission 表 role 行——`auth.PERMISSIONS` 字典仅为 DB 故障回退底座+新组兜底，不是授权入口）
 2. 端点用 `Depends(require_perm(perm))`
 
 ### 加新平台化配置端点（如新通道类型）

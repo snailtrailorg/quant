@@ -1,8 +1,7 @@
 """批15 市场操作权限测试（market_op 维）。
 
 覆盖：
-- market_op_allowed 解析：user 行覆盖 role 行 / deny 优先（同层双行）/ 无行 False /
-  读库失败 False / role allow 生效
+- market_op_allowed 解析（批33a：role 单层 deny 优先/无行 False/读库失败 False/username 签名兼容不参与查询）
 - check_order 2.5 卡口：denied 市场 BUY 拒 + risk_log 落行 / SELL 平仓放行（F-31 同哲学）/
   operator 空=拒 critical（旧 --id 路径预期）/ _role_of 无命中（软删用户）=拒 /
   检查异常=deny critical（拒绝可见）
@@ -35,27 +34,23 @@ class TestMarketOpAllowed:
             assert market_op_allowed("u1", "viewer", "astock") is False
 
     def test_role_allow(self):
-        rows = [("role", "trader", "allow")]
+        rows = [("allow",)]   # 批33a：单层 role 查询只回 effect 1 列
         with patch("src.data_platform.db.get_conn", return_value=_perm_conn(rows)):
             from src.data_platform.perms import market_op_allowed
             assert market_op_allowed("u1", "trader", "astock") is True
 
-    def test_user_allow_over_role_absence(self):
-        """user 行 allow 覆盖 role 层无行（显式放行）。"""
-        rows = [("user", "u1", "allow")]
-        with patch("src.data_platform.db.get_conn", return_value=_perm_conn(rows)):
+    def test_username_param_kept_but_not_queried(self):
+        """批33a：user 维退役——username 参数签名兼容保留但不参与判定（任意名同结果）。"""
+        with patch("src.data_platform.db.get_conn", return_value=_perm_conn([("allow",)])) as gc:
             from src.data_platform.perms import market_op_allowed
-            assert market_op_allowed("u1", "viewer", "etf") is True
-
-    def test_user_deny_beats_role_allow(self):
-        rows = [("role", "trader", "allow"), ("user", "u1", "deny")]
-        with patch("src.data_platform.db.get_conn", return_value=_perm_conn(rows)):
-            from src.data_platform.perms import market_op_allowed
-            assert market_op_allowed("u1", "trader", "etf") is False
+            assert market_op_allowed("u1", "trader", "etf") is True
+            assert market_op_allowed("anyone-else", "trader", "etf") is True
+        sql = gc.return_value.execute.call_args.args[0]
+        assert "subject_type='user'" not in sql   # 单源钉：market_op 查询无 user 分支
 
     def test_same_layer_deny_priority(self):
         """同层 allow+deny 双行并存（手工 SQL 可造）→ deny 优先。"""
-        rows = [("role", "trader", "allow"), ("role", "trader", "deny")]
+        rows = [("allow",), ("deny",)]
         with patch("src.data_platform.db.get_conn", return_value=_perm_conn(rows)):
             from src.data_platform.perms import market_op_allowed
             assert market_op_allowed("u1", "trader", "etf") is False
@@ -249,7 +244,8 @@ class TestMarketOpEndpoints:
         assert ei.value.status_code == 400 and getattr(ei.value, "code", "") == "BAD_RESOURCE"
 
     def test_get_permissions_has_market_op_segment(self):
-        """GET /api/permissions 响应含 market_op 段（keys 单源五键）且无 data 段。"""
+        """GET /api/permissions 响应含 market_op 段（keys 单源五键）且无 data 段；
+        批33a：user_overrides 键退役（行为级钉——盲审 A 观察项）。"""
         from src.web_api.routes.auth_routes import get_permissions
 
         def side_conn(*a, **k):
@@ -261,5 +257,5 @@ class TestMarketOpEndpoints:
         with patch("src.data_platform.db.get_conn", side_effect=side_conn):
             r = get_permissions(payload={"username": "admin"})
         assert list(r["market_op"]["keys"]) == ["convertible", "etf", "astock", "binance_perp", "okx_perp"]
-        assert "data" not in r
+        assert "data" not in r and "user_overrides" not in r   # 批33a：user 维键退役（行为级）
 

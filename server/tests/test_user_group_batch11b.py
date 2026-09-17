@@ -235,12 +235,12 @@ class TestRequireAuthenticated:
             for p in _admin_ctx(conn): s.enter_context(p)
             real_inv = A.invalidate_perm_cache
             s.enter_context(patch("src.web_api.auth.invalidate_perm_cache", side_effect=real_inv))
-            perms_mod._PERM_CACHE.update(at=0.0, roles={"ops": {"read", "trade"}}, users={})   # 预置缓存=已删组的旧权限
+            perms_mod._PERM_CACHE.update(at=0.0, roles={"ops": {"read", "trade"}})   # 预置缓存=已删组的旧权限（批33a users 槽删）
             r = _client().delete("/api/user-groups/5", headers={"Authorization": "Bearer t"})
         assert r.status_code == 200
         assert perms_mod._PERM_CACHE["roles"] is None   # 缓存真被清（非 mock 代理断言）
         # 重建同名组后加载：permission 表空（mock 空表回退）→ PERMISSIONS 字典无 ops → 零权限不继承
-        perms_mod._PERM_CACHE.update(at=0.0, roles=None, users={})
+        perms_mod._PERM_CACHE.update(at=0.0, roles=None)   # 批33a：users 槽随 user 维退役删
         with patch("src.data_platform.db.get_conn", return_value=_conn()):
             roles = perms_mod.load_role_permissions()
         assert "ops" not in roles
