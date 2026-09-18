@@ -141,3 +141,5 @@ _REGISTRY: dict[str, type[MessageChannel]]   # wechat_work / discord / servercha
 - 2026-08-11 初版（基于代码核实：notify.py:1-108 / channel.py:1-102 / __init__.py 全读）
 
 - 新增 safe_notify（never-raise 包装，收编三处重复 try/except notify 模式）
+
+> **批47（2026-09-18）防递归**：`_send_email` 对 `code='email.failed'` 直接跳过（`(False, "skip_recursion")`）——邮件终败通知不再经 email 通道外推，否则多通道时代该通知自己走 N 通道×配额=慢速自持续链（站内+IM 照常可达；email_service 侧状态机详见其契约批47 注记）。

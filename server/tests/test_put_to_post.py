@@ -17,7 +17,7 @@ def client():
 
 # 16 个原 PUT 端点
 POST_ENDPOINTS = [
-    "/api/smtp-config",
+    "/api/smtp-providers", "/api/smtp-providers/reorder",
     "/api/system-config/some-key",
     "/api/user/profile",
     "/api/user/1",
@@ -53,7 +53,7 @@ class TestPutToPost:
 
     def test_put_now_returns_405(self, client):
         """老动词负向验证：PUT 应 405（证明硬切干净，无双路由残留）。"""
-        r = client.put("/api/smtp-config", json={})
+        r = client.put("/api/smtp-providers", json={})
         assert r.status_code == 405
 
     def test_static_routes_not_shadowed(self, client):

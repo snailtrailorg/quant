@@ -27,6 +27,7 @@ SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
     "collect_period_mem": (10, 86400, False, False), "collect_period_swap": (10, 86400, False, False),
     "xtp_session_lead_min": (-1440, 1440, False, False), "xtp_session_lag_min": (-1440, 1440, False, False),
     "user_bot_quota": (1, 100, False, False), "platform_bot_quota": (1, 100, False, False),   # 批26 裁定量程（0083 键型归位后生效）
+    "smtp_max_attempts": (1, 10, False, False),   # 批47：每通道尝试配额（总尝试=配额——用户裁定 A）
 }
 
 router = APIRouter(tags=["system"])
@@ -278,58 +279,130 @@ def _adjust_celery_concurrency(new_value: int) -> dict:
         return {"applied": False, "reason": f"动态调整失败（DB 已更新，下次 worker 启动生效）: {e}"}
 
 
-@router.get("/api/smtp-config")
-def smtp_config_api(payload: dict = Depends(require_perm("user_mgmt"))):
-    """邮件发信配置（整组读取；password 不回传明文，只回 password_set 标记）。"""
+# ——— 批47：SMTP 多通道（smtp_provider 表——批43 sms_provider 同模式；行序即 failover 顺序）———
+
+
+def _smtp_provider_row(r) -> dict:
+    """行形状（密钥不回显只回 password_set；与 sms _provider_row 同约定）。"""
+    return {"id": r[0], "name": r[1], "host": r[2], "port": r[3], "security": r[4],
+            "username": r[5], "password_set": bool(r[6]), "from": r[7],
+            "position": r[8], "enabled": r[9]}
+
+
+@router.get("/api/smtp-providers")
+def smtp_providers_list(payload: dict = Depends(require_perm("user_mgmt"))):
+    """列表（position ASC, id ASC——与 _providers() 候选排序同序）。"""
     with get_conn() as conn:
-        cur = conn.execute("SELECT key, value FROM system_config WHERE key LIKE 'smtp_%'")
-        cfg = {k: v for k, v in cur.fetchall()}
-    return {
-        "host": cfg.get("smtp_host", ""),
-        "port": cfg.get("smtp_port", "587"),
-        "security": cfg.get("smtp_security", "auto"),
-        "username": cfg.get("smtp_username", ""),
-        "password_set": bool(cfg.get("smtp_password")),
-        "from": cfg.get("smtp_from", ""),
-    }
+        cur = conn.execute(
+            "SELECT id, name, host, port, security, username, password, from_addr, "
+            "position, enabled FROM smtp_provider ORDER BY position, id")
+        rows = cur.fetchall()
+    return {"items": [_smtp_provider_row(r) for r in rows]}
 
 
-@router.post("/api/smtp-config")
-def smtp_config_save_api(body: dict = Body(...),
-                         payload: dict = Depends(require_perm("user_mgmt"))):
-    """邮件发信配置整组保存。password 留空=保持不变；security ∈ auto/ssl/starttls。"""
+@router.post("/api/smtp-providers")
+def smtp_providers_create(body: dict = Body(...), payload: dict = Depends(require_perm("user_mgmt"))):
+    """新建（position=MAX+1 追加末尾；username/host 必填——_providers 同口径；password 必填）。"""
+    from src.quant_common.crypto import encrypt
+    name = str(body.get("name", "")).strip()
+    host = str(body.get("host", "")).strip()
+    user = str(body.get("username", "")).strip()
+    pwd = str(body.get("password", "") or "").strip()
+    if not name:
+        raise ApiError(400, "BAD_PARAM", "名称必填")
+    if not host or not user or not pwd:
+        raise ApiError(400, "BAD_PARAM", "服务器地址/用户名/密码 三项必填")
     security = str(body.get("security", "auto")).strip() or "auto"
     if security not in ("auto", "ssl", "starttls"):
-        raise ApiError(400, "SMTP_SECURITY_INVALID", "security 需为 auto / ssl / starttls")
-    port = str(body.get("port", "587")).strip() or "587"
+        raise ApiError(400, "SMTP_SECURITY_INVALID", "加密方式需为 auto / ssl / starttls")
     try:
-        int(port)
-    except ValueError:
-        raise ApiError(400, "SMTP_PORT_INVALID", "port 需为数字")
-    from src.quant_common.crypto import encrypt
-    values = {
-        "smtp_host": str(body.get("host", "")).strip(),
-        "smtp_port": port,
-        "smtp_security": security,
-        "smtp_username": str(body.get("username", "")).strip(),
-        "smtp_from": str(body.get("from", "")).strip(),
-    }
+        port = int(str(body.get("port", 587)).strip() or 587)
+        if not (1 <= port <= 65535):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ApiError(400, "SMTP_PORT_INVALID", "端口需为 1-65535 数字")
     with get_conn() as conn:
-        for k, v in values.items():
-            conn.execute(
-                "INSERT INTO system_config (key, value, value_type, description) "
-                "VALUES (%s, %s, 'text', '') ON CONFLICT (key) DO UPDATE SET value=%s, updated_at=now()",
-                (k, v, v))
-        pwd = str(body.get("password", "") or "").strip()
-        if pwd:  # 留空=不变
-            conn.execute(
-                "INSERT INTO system_config (key, value, value_type, description) "
-                "VALUES ('smtp_password', %s, 'password', 'SMTP 密码（加密）') "
-                "ON CONFLICT (key) DO UPDATE SET value=%s, updated_at=now()",
-                (encrypt(pwd), encrypt(pwd)))
+        cur = conn.execute(
+            "INSERT INTO smtp_provider (name, host, port, security, username, password, from_addr, "
+            "position, enabled) VALUES (%s, %s, %s, %s, %s, %s, %s, "
+            "COALESCE((SELECT MAX(position) FROM smtp_provider), -1) + 1, %s) RETURNING id",
+            (name, host, port, security, user, encrypt(pwd),
+             str(body.get("from", "") or "").strip(), bool(body.get("enabled", True))))
+        new_id = cur.fetchone()[0]
         conn.commit()
-    audit_log(payload["username"], "smtp_config_save",
-              f"host={values['smtp_host']} port={port} security={security} pwd={'***' if pwd else 'unchanged'}")
+    audit_log(payload["username"], "smtp_provider_create", f"#{new_id} {name} {host}:{port}")
+    return {"id": new_id}
+
+
+@router.post("/api/smtp-providers/reorder")   # 路由前移防 {pid} int 遮蔽 422（批43 P0-3 教训）
+def smtp_providers_reorder(body: dict = Body(...), payload: dict = Depends(require_perm("user_mgmt"))):
+    """拖拽重排（批43 同款）：body={"ids":[3,1,2]} 全量有序数组→单事务按下标重编号 position=0..n-1。
+    id 集合=现有全集校验（防并发丢行/幽灵 id）；幂等；并发=后写赢（低频管理操作）。"""
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        raise ApiError(400, "BAD_PARAM", "ids 须为整数数组")
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM smtp_provider")
+        existing = {r[0] for r in cur.fetchall()}
+        if set(ids) != existing or len(ids) != len(existing):
+            raise ApiError(400, "BAD_PARAM", "ids 必须等于当前全部通道 id（全量序列——防并发丢行）")
+        for pos, rid in enumerate(ids):
+            conn.execute("UPDATE smtp_provider SET position=%s, updated_at=now() WHERE id=%s", (pos, rid))
+        conn.commit()
+    audit_log(payload["username"], "smtp_provider_reorder", detail=f"order={ids}")
+    return {"ok": True}
+
+
+@router.post("/api/smtp-providers/{pid}")
+def smtp_providers_update(pid: int, body: dict = Body(...),
+                          payload: dict = Depends(require_perm("user_mgmt"))):
+    """编辑（批38 三段语义移植：缺键=不改/密码留空=不改/明文字段空即存空——所见即所得）。"""
+    from src.quant_common.crypto import encrypt
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM smtp_provider WHERE id=%s", (pid,))
+        if not cur.fetchone():
+            raise ApiError(404, "PROVIDER_NOT_FOUND", f"邮件通道 {pid} 不存在")
+        sets, vals = ["updated_at=now()"], []
+        for k in ("name", "host", "username", "from_addr"):
+            if k in body:
+                sets.append(f"{k}=%s")
+                vals.append(str(body.get(k) or "").strip())
+        if "port" in body:
+            try:
+                port = int(str(body.get("port", 587)).strip() or 587)
+                if not (1 <= port <= 65535):
+                    raise ValueError
+            except (TypeError, ValueError):
+                raise ApiError(400, "SMTP_PORT_INVALID", "端口需为 1-65535 数字")
+            sets.append("port=%s")
+            vals.append(port)
+        if "security" in body:
+            security = str(body.get("security", "auto")).strip() or "auto"
+            if security not in ("auto", "ssl", "starttls"):
+                raise ApiError(400, "SMTP_SECURITY_INVALID", "加密方式需为 auto / ssl / starttls")
+            sets.append("security=%s")
+            vals.append(security)
+        pwd = str(body.get("password", "") or "").strip()
+        if pwd:   # 密码留空=不改
+            sets.append("password=%s")
+            vals.append(encrypt(pwd))
+        if "enabled" in body:
+            sets.append("enabled=%s")
+            vals.append(bool(body.get("enabled")))
+        vals.append(pid)
+        conn.execute(f"UPDATE smtp_provider SET {', '.join(sets)} WHERE id=%s", tuple(vals))
+        conn.commit()
+    audit_log(payload["username"], "smtp_provider_update", f"#{pid}")
+    return {"ok": True}
+
+
+@router.delete("/api/smtp-providers/{pid}")
+def smtp_providers_delete(pid: int, payload: dict = Depends(require_perm("user_mgmt"))):
+    """删除（批43 同裁定：无保护提示——不可用行留着无用；outbox 行 provider_id 悬空回落第一）。"""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM smtp_provider WHERE id=%s", (pid,))
+        conn.commit()
+    audit_log(payload["username"], "smtp_provider_delete", f"#{pid}")
     return {"ok": True}
 
 
@@ -341,7 +414,7 @@ async def email_test_api(body: dict = Body(...), request: Request = None,
     to = str(body.get("to", "")).strip()
     if not to or "@" not in to:
         raise ApiError(400, "EMAIL_INVALID", "请填有效收件邮箱")
-    subject = "测试邮件 · 人工智能开发学习平台"
+    subject = "测试邮件 · 蜗牛量化交易"   # 批47 顺手修：站名遗留文案（原"人工智能开发学习平台"）
     html = ("<html><body style='font-family:sans-serif'><h3>✅ 测试邮件</h3>"
             "<p>这是一封配置验证邮件。收到即表示 SMTP 发信配置正确。</p></body></html>")
     outbox_id = queue_email(to, subject, html)

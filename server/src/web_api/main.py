@@ -131,7 +131,7 @@ def startup():
 
 # --- 路由注册（端点实现全部在 routes/ 各 APIRouter，此处只 include） ---
 
-from .routes.system import router as system_router            # /healthz /readyz /metrics /api/help /api/system-config /api/smtp-config 等
+from .routes.system import router as system_router            # /healthz /readyz /metrics /api/help /api/system-config /api/smtp-providers 等
 from .routes.auth_routes import router as auth_router         # /api/auth/* /api/user* /api/invites /api/log
 from .routes.strategy import router as strategy_router        # /api/strategy* /api/factors* /api/live-task
 from .routes.trading import router as trading_router          # /api/position /api/pnl /api/orders /api/account /api/dashboard

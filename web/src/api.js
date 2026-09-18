@@ -84,8 +84,11 @@ export const createUser = (username, password, role) =>
 export const getAccounts = () => api.get('/account')
 export const getNotifications = (status = 'active', limit = 50) => api.get('/notifications', { params: { status, limit } })
 // 批28-3：deleteNotifications 退役（NotificationTable 删除后 UI 无消费；后端 /notifications/delete 端点保留——require_perm 保护，UI 孤儿无害）
-export const getSmtpConfig = () => api.get('/smtp-config')
-export const saveSmtpConfig = (data) => api.post('/smtp-config', data)
+export const listSmtpProviders = () => api.get('/smtp-providers')
+export const createSmtpProvider = (data) => api.post('/smtp-providers', data)
+export const updateSmtpProvider = (id, data) => api.post(`/smtp-providers/${id}`, data)
+export const deleteSmtpProvider = (id) => api.delete(`/smtp-providers/${id}`)
+export const reorderSmtpProviders = (ids) => api.post('/smtp-providers/reorder', { ids })   // 批47：多通道 failover（旧 /smtp-config 单实例端点退役）
 export const sendTestEmail = (data) => api.post('/email/test', data)
 export const chat = message => api.post('/chat', { message })
 

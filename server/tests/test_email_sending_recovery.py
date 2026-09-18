@@ -59,7 +59,7 @@ class TestSweepRecovery:
     def test_claim_writes_lease_anchor(self):
         """claim 段写认领锚 now()+10min（回收依据）。"""
         import src.email_service as E
-        conn = _conn(scripted=[(1, "a@x", "s", "b", 0)])   # claim RETURNING 行
+        conn = _conn(scripted=[(1, "a@x", "s", "b", 0, None, 0)])   # claim RETURNING 行
         with patch("src.data_platform.db.get_conn", return_value=conn), \
              patch.object(E, "_send_email_sync", return_value=None), \
              patch("src.data_platform.log_sink.event"), \
@@ -70,7 +70,7 @@ class TestSweepRecovery:
     def test_finalize_guarded_by_sending(self):
         """终态回写带 AND status='sending'——回收-重领重叠时不双写。"""
         import src.email_service as E
-        conn = _conn(scripted=[(1, "a@x", "s", "b", 0), None])   # claim 行 → 回写
+        conn = _conn(scripted=[(1, "a@x", "s", "b", 0, None, 0), None])   # claim 行 → 回写
         with patch("src.data_platform.db.get_conn", return_value=conn), \
              patch.object(E, "_send_email_sync", return_value=None), \
              patch("src.data_platform.log_sink.event"), \

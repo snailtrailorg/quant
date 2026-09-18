@@ -1,8 +1,8 @@
 """SMTP 邮件发送服务（复用 safebox 模式）。
 
-.env 配置：
-  SMTP_HOST / SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM
-  未配置 SMTP_USERNAME 时走 DEV 模式（打印不发）。
+批47：多通道 failover——`smtp_provider` 表（集成中心→邮件 页维护，行序即 failover 顺序）；
+每通道尝试配额 system_config `smtp_max_attempts`（默认 3）；无通道时 .env SMTP_DEV=true
+走 DEV 模式（打印不发）。system_config 旧 smtp_* 六键已迁移退役（2026-08-14 曾弃 .env 单实例）。
 """
 import smtplib
 import os
@@ -14,52 +14,60 @@ from email.mime.multipart import MIMEMultipart
 _logger = logging.getLogger("quant")
 
 
-def _smtp_config() -> tuple[str, int, str, str, str, str] | None:
-    """SMTP 配置：仅读 system_config（Web「系统配置」页维护，单一真相源，2026-08-14 弃 .env）。
-    返回 (host, port, security, username, password, from) 或 None（未配置）。
-    security: auto（按端口推断 RFC 8314：465→ssl，其余→starttls）/ ssl / starttls。"""
-    cfg = {}
+def _providers() -> list[dict]:
+    """批47：按 position 序读 enabled 通道（行序即 failover 顺序——用户裁定；密码解密）。
+    返回 [{id,host,port,security,username,password,from}]；空=未配置。security auto 按端口
+    推断（RFC 8314：465→ssl，其余→starttls）——与原 _smtp_config 同语义。"""
+    out = []
     try:
         from src.data_platform.db import get_conn
         from src.quant_common.crypto import decrypt
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT key, value FROM system_config WHERE key LIKE 'smtp_%'")
-            for k, v in cur.fetchall():
-                if v is None or str(v).strip() == "":
-                    continue
-                cfg[k] = decrypt(v) if k == "smtp_password" else str(v).strip()
+                "SELECT id, host, port, security, username, password, from_addr "
+                "FROM smtp_provider WHERE enabled ORDER BY position, id")
+            for pid, host, port, sec, user, pwd, frm in cur.fetchall():
+                if not str(user or "").strip():
+                    continue   # username 空=未配置（原 _smtp_config 判定同口径）
+                sec = (sec or "auto").strip() or "auto"
+                port = int(port or 587)
+                if sec == "auto":
+                    sec = "ssl" if port == 465 else "starttls"
+                out.append({"id": pid, "host": host or "", "port": port, "security": sec,
+                            "username": user, "password": decrypt(pwd) if pwd else "",
+                            "from": (frm or "").strip() or user})
     except Exception as e:
-        _logger.error("read smtp config from DB failed: %s", e)
-        return None
-    if not cfg.get("smtp_username"):
-        return None  # 未配置
-    security = cfg.get("smtp_security", "auto")
-    # auto：按端口推断（RFC 8314 业界约定）
-    if security == "auto":
-        security = "ssl" if cfg.get("smtp_port", "587") == "465" else "starttls"
-    return (
-        cfg.get("smtp_host", ""),
-        int(cfg.get("smtp_port", "587") or 587),
-        security,
-        cfg["smtp_username"],
-        cfg.get("smtp_password", ""),
-        cfg.get("smtp_from") or cfg["smtp_username"],
-    )
+        _logger.error("read smtp providers failed: %s", e)
+    return out
 
 
-def _send_email_sync(to: str, subject: str, html_body: str) -> str | None:
-    """底层同步发送邮件。成功返回 None，失败返回错误描述（供发件箱记录 last_error）。
-    未配置：本地开发可 .env SMTP_DEV=true 显式开打印模式（不真发）；否则视为失败（→重试→铃铛）。"""
-    conf = _smtp_config()
-    if conf is None:
+def _max_attempts() -> int:
+    """批47：每通道尝试配额（system_config smtp_max_attempts，默认 3；**总尝试=配额**——用户
+    裁定 A：3=该通道共试 3 次后切下一条）。读失败回落 3。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            row = conn.execute("SELECT value FROM system_config WHERE key='smtp_max_attempts'").fetchone()
+        return max(1, int(str(row[0]).strip())) if row and str(row[0]).strip() else 3
+    except Exception:
+        return 3
+
+
+def _send_email_sync(to: str, subject: str, html_body: str, provider: dict | None) -> str | None:
+    """底层同步发送邮件（批47 改收 provider 实例 dict——多通道 failover 由 _try_row_sync 状态机
+    驱动）。成功返回 None，失败返回错误描述（供发件箱记录 last_error）。
+    未配置（providers 空）：本地开发可 .env SMTP_DEV=true 显式开打印模式（不真发）；否则视为
+    失败（→重试→铃铛）。"""
+    if provider is None:
         if os.environ.get("SMTP_DEV") == "true":
             print(f"[DEV] SMTP 未配置（打印模式） -> {to}\n[DEV] 主题={subject}\n[DEV] 内容={html_body}")
             return None
-        return "SMTP 未配置（Web 系统设置→系统配置 填 smtp_* 五项）"
-    smtp_host, smtp_port, security, smtp_username, smtp_password, smtp_from = conf
+        return "SMTP 未配置（集成中心→邮件 添加通道）"
+    smtp_host = provider["host"]
     if not smtp_host:
-        return "SMTP 未配置 smtp_host"
+        return "SMTP 通道未配置服务器地址"
+    smtp_port, security = provider["port"], provider["security"]
+    smtp_username, smtp_password, smtp_from = provider["username"], provider["password"], provider["from"]
 
     msg = MIMEMultipart()
     msg["From"] = smtp_from
@@ -75,16 +83,19 @@ def _send_email_sync(to: str, subject: str, html_body: str) -> str | None:
                 server.starttls()
             server.login(smtp_username, smtp_password)
             server.sendmail(smtp_from, to, msg.as_string())
-        _logger.info("email sent: to=%s subject=%s", to, subject)
+        _logger.info("email sent: to=%s subject=%s provider=%s", to, subject, smtp_host)
         return None
     except (smtplib.SMTPException, OSError) as e:
-        _logger.error("email send failed: to=%s subject=%s err=%s", to, subject, e)
+        _logger.error("email send failed: to=%s subject=%s provider=%s err=%s", to, subject, smtp_host, e)
         return str(e) or type(e).__name__
 
 
 # ——— 发件箱（持久化 + 指数退避重发；进程重启不丢，Celery beat 每分钟扫描）———
 
-MAX_ATTEMPTS = 6  # 失败 6 次后标 failed（退避 1→2→4→8→16→30 分钟，约 1 小时）
+# 批47：MAX_ATTEMPTS=6 退役——多通道 failover 后总上限=通道数×smtp_max_attempts（动态）。
+# 死行回收独立绝对上限（固定 30）：防"已发成功写库前死"行被无限重发真实邮件（批27-1 核心保障）；
+# 与业务配额独立——配额小则业务 failed 先达，配额大则死行提前 failed=安全方向（盲审 A-P1-1）。
+SWEEP_ABS_LIMIT = 30
 
 
 def _backoff_seconds(failed_count: int) -> int:
@@ -93,11 +104,13 @@ def _backoff_seconds(failed_count: int) -> int:
 
 
 def _final_failure_notify(to: str, subject: str, err: str, outbox_id: int) -> None:
-    """重试耗尽 → 通知中心（critical/email，admin 铃铛可见，点击直达发件箱）。失败不影响主流程。"""
+    """重试耗尽（全部通道轮转一圈）→ 通知中心（critical/email，admin 铃铛可见，点击直达发件箱）。
+    失败不影响主流程。批47 防递归：dispatch 侧 code=email.failed 跳过 email 通道外推——
+    否则本通知自己再走 N 通道×配额=慢速自持续链。"""
     try:
         from src.alert_notify import notify
         notify("critical", "email", "邮件发送最终失败",
-               f"收件人: {to}\n主题: {subject}\n重试 {MAX_ATTEMPTS} 次耗尽\n错误: {err}",
+               f"收件人: {to}\n主题: {subject}\n全部 SMTP 通道重试耗尽\n错误: {err}",
                source_ref=str(outbox_id), code="email.failed")
     except Exception as e:
         _logger.error("final failure notify error: %s", e)
@@ -117,7 +130,14 @@ def queue_email(to: str, subject: str, html_body: str) -> int:
 
 
 def _try_row_sync(outbox_id: int) -> None:
-    """认领（pending→sending）并单次发送；成功标 sent，失败按指数退避排下次，超上限标 failed。
+    """认领（pending→sending）并单次发送；批47 多通道 failover 状态机：
+    - 实例解析：行 provider_id null/悬空（实例删/停用→不在 enabled 列表）→回落第一实例
+      （与"新邮件从第一个开始"同精神——盲审 A-P1-2）
+    - 失败且 provider_attempts+1 < 配额 → **同实例**指数退避重试（既有节奏）
+    - 配额尽 → 切下一实例（providers 按 position 序，idx+1 即严格下一个——禁 position+1 裸算）：
+      provider_id=下一/provider_attempts=0/pending，next=now()+60s（切换短退避防连环打爆）
+    - 已最后实例（轮转一圈）或无实例 → failed 终态+最终失败通知
+    成功标 sent（批27-1④回写带 AND status='sending' 防与回收-重领重叠双写——保留）。
 
     批27-1：claim 段借 next_attempt_at 写认领超时锚（now()+10min）——进程死在 SMTP 60s 窗口/
     写库前时行停在 sending，sweep 的死行回收（见 sweep）按锚过期重置，邮件不再静默永丢。"""
@@ -126,14 +146,19 @@ def _try_row_sync(outbox_id: int) -> None:
         cur = conn.execute(
             "UPDATE email_outbox SET status='sending', next_attempt_at=now()+interval '10 min' "
             "WHERE id=%s AND status='pending' AND next_attempt_at<=now() "
-            "RETURNING id, to_email, subject, html_body, attempts", (outbox_id,))
+            "RETURNING id, to_email, subject, html_body, attempts, provider_id, provider_attempts",
+            (outbox_id,))
         row = cur.fetchone()
         if not row:
             conn.rollback()
             return
         conn.commit()
-    _, to, subject, body, attempts = row
-    err = _send_email_sync(to, subject, body)
+    _, to, subject, body, attempts, prov_id, prov_att = row
+    providers = _providers()
+    idx = next((i for i, p in enumerate(providers) if p["id"] == prov_id), 0)
+    quota = _max_attempts()
+    provider = providers[idx] if providers else None
+    err = _send_email_sync(to, subject, body, provider)
     # 批25：终态事件进 system_log（四路径必经单点）；盲审 A-P2-6——事件在 commit 成功后发（防 UPDATE 回滚与日志不一致）
     from src.data_platform.log_sink import event
     _ev = None
@@ -146,18 +171,27 @@ def _try_row_sync(outbox_id: int) -> None:
             _ev = ("INFO", f"已发送 → {to} ｜ {subject}")
         else:
             n = attempts + 1
-            if n >= MAX_ATTEMPTS:
+            if provider is not None and prov_att + 1 < quota:
+                conn.execute(
+                    "UPDATE email_outbox SET status='pending', attempts=%s, provider_attempts=%s, "
+                    "next_attempt_at=now()+make_interval(secs=>%s), last_error=%s "
+                    "WHERE id=%s AND status='sending'",
+                    (n, prov_att + 1, _backoff_seconds(prov_att + 1), err, outbox_id))   # 批47 盲审 A-P1-1：通道内计数做指数基数（attempts 全局累计会让后位通道退避放大成小时级——每通道独立节奏才是容灾语义）
+                _ev = ("WARN", f"待重发（第 {prov_att + 1}/{quota} 次·通道 {provider['host']}）→ {to} ｜ {subject} ｜ {err}")
+            elif provider is not None and idx + 1 < len(providers):
+                nxt = providers[idx + 1]
+                conn.execute(
+                    "UPDATE email_outbox SET status='pending', attempts=%s, provider_id=%s, provider_attempts=0, "
+                    "next_attempt_at=now()+interval '60 seconds', last_error=%s "
+                    "WHERE id=%s AND status='sending'",
+                    (n, nxt["id"], err, outbox_id))
+                _ev = ("WARN", f"通道 {provider['host']} 重试耗尽，60 秒后切 {nxt['host']} → {to} ｜ {subject} ｜ {err}")
+            else:
                 conn.execute(
                     "UPDATE email_outbox SET status='failed', attempts=%s, last_error=%s "
                     "WHERE id=%s AND status='sending'",
                     (n, err, outbox_id))
-                _ev = ("ERROR", f"发送失败（重试 {MAX_ATTEMPTS} 次耗尽）→ {to} ｜ {subject} ｜ {err}")
-            else:
-                conn.execute(
-                    "UPDATE email_outbox SET status='pending', attempts=%s, next_attempt_at=now()+make_interval(secs=>%s), last_error=%s "
-                    "WHERE id=%s AND status='sending'",
-                    (n, _backoff_seconds(n), err, outbox_id))
-                _ev = ("WARN", f"待重发（第 {n} 次）→ {to} ｜ {subject} ｜ {err}")
+                _ev = ("ERROR", f"发送失败（全部通道重试耗尽）→ {to} ｜ {subject} ｜ {err}")
         conn.commit()
     if _ev:
         event(_ev[0], "email", _ev[1])
@@ -176,7 +210,10 @@ def sweep(limit: int = 3) -> int:
     批27-1②：开头先回收 sending 死行（claim 锚 10min 过期=进程死在发送窗/写库前）——
     attempts+1 计次（防"已发成功但写库前死"→每 10 分钟无限重发真实邮件，盲审 A），
     达上限直接标 failed 走终态可见（回收不触发 _final_failure_notify——轻量，失败事件
-    由后续真实发送路径产生）；回收与 claim 条件词互斥（sending vs pending）无竞态。"""
+    由后续真实发送路径产生）；回收与 claim 条件词互斥（sending vs pending）无竞态。
+    批47：上限改 SWEEP_ABS_LIMIT=30 独立绝对值（MAX_ATTEMPTS 退役后业务上限=通道数×配额动态，
+    回收纯 SQL 不便读动态值；**不动 provider_attempts**——进程死≠实例故障，动了会因反复重启
+    烧配额误切实例——盲审 A-P2-1 反转）。"""
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         conn.execute(
@@ -184,7 +221,7 @@ def sweep(limit: int = 3) -> int:
             "SET status=CASE WHEN attempts+1>=%s THEN 'failed' ELSE 'pending' END, "
             "    attempts=attempts+1, last_error=COALESCE(last_error, '发送窗中断（进程重启/回收）') "
             "WHERE status='sending' AND next_attempt_at<=now()",
-            (MAX_ATTEMPTS,))
+            (SWEEP_ABS_LIMIT,))
         conn.commit()   # 盲审 B：with 退出=还池回滚——回收必须显式 commit
         cur = conn.execute(
             "SELECT id FROM email_outbox WHERE status='pending' AND next_attempt_at<=now() ORDER BY id LIMIT %s",

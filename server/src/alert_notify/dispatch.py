@@ -266,7 +266,11 @@ def _send_im(bot_id: str, *, level: str, title: str, body: str, code: str | None
 
 
 def _send_email(to: str, *, level: str, category: str, title: str, body: str, code: str | None) -> tuple[bool, str]:
-    """邮件通道：入 outbox（持久+重试+终败 email.failed 回流站内）后立即同步试发（B-P9 时效）。"""
+    """邮件通道：入 outbox（持久+重试+终败 email.failed 回流站内）后立即同步试发（B-P9 时效）。
+    批47 防递归：email.failed 的终败通知**跳过 email 通道**——否则本通知自己再走
+    N 通道×配额（多实例放大）=慢速自持续链（盲审 A-P1-4；站内+IM 照常可达）。"""
+    if code == "email.failed":
+        return False, "skip_recursion"
     try:
         from src.email_service import queue_email
         from src.email_service import _try_row_sync
