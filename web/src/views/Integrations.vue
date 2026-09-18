@@ -12,6 +12,7 @@
 </template>
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'   // 批46 快审 B：批39 空态用 t('common.noPerm') 但无解构——tabs 空时必崩 _ctx.t TypeError（白屏恰踩批39 修复目标）
 import { meOnce } from '../api'
 import TabsShell from '../components/TabsShell.vue'
 import EmptyState from '../components/EmptyState.vue'
@@ -31,6 +32,7 @@ const ALL_TABS = [
 ]
 const _perms = ref([])
 const tabs = computed(() => ALL_TABS.filter(x => _perms.value.includes(x.perm)))
+const { t } = useI18n()   // 批46 快审 B：空态文案消费（批39 引入时漏）
 onMounted(async () => {
   try { _perms.value = (await meOnce())?.permissions || [] } catch { _perms.value = [] }
 })

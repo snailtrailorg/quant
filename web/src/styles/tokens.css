@@ -167,6 +167,10 @@ html.dark {
 .el-card__header { font-size: var(--fs-card); font-weight: 600; }
 /* 批24 追加：header 600 只属于标题——表单控件归位（EP 无显式字重会继承容器） */
 .el-card__header .el-input__inner, .el-card__header .el-select__selected-item, .el-card__header .el-tag { font-weight: 400; }
+/* 批46：TabsShell 页（Settings/UserManagement/Integrations/DataOps/PermResources）把页签+内容塞在外层
+   el-card 的 header slot——正文整片继承 header 的 600 字重（表格内容全粗，EP 表格无显式字重）。
+   嵌套卡片=内容区归位；嵌套卡片自己的 __header 仍被上行直接命中=600（标题语义保留） */
+.el-card__header .el-card { font-weight: 400; }
 /* 批24 追加：弹窗标题对齐卡片标题（同 fs-card 档同 600 字重） */
 .el-dialog__title { font-weight: 600; }
 .el-pagination { font-size: var(--fs-label); }

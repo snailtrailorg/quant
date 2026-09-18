@@ -11,7 +11,8 @@
       </template>
       <div class="order-note">{{ t('alerts.smsProvOrderNote') }}</div>
       <TableShell :data="rows" storage-key="sms-providers" row-key="id">
-        <el-table-column :label="t('alerts.smsProvDrag')" width="46">
+        <el-table-column :label="t('alerts.smsProvDrag')" width="46">   <!-- 批46：视觉列头换 menu 图标（#header slot 优先渲染），:label 保留供 TableShell 列宽持久化键（快审 A-P1-2：移除则 colKey=undefined 互踩） -->
+          <template #header><el-icon :title="t('alerts.smsProvDrag')" :size="16"><Menu /></el-icon></template>
           <template #default="{ $index }">
             <span class="drag-handle" :draggable="true"
                   :title="t('alerts.smsProvDrag')"
@@ -98,7 +99,7 @@ import api, { apiErr } from '../api'
 import TableShell from './TableShell.vue'
 import TabsShell from './TabsShell.vue'
 import IconBtn from './IconBtn.vue'
-import { Edit, Delete, Plus } from '@element-plus/icons-vue'
+import { Edit, Delete, Plus, Menu } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const dlgTabs = [
@@ -180,8 +181,8 @@ const del = async (row) => {
 </script>
 <style scoped>
 .order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
-.drag-handle { display: inline-block; width: 14px; height: 18px; cursor: grab;
-               background: linear-gradient(90deg, var(--text-secondary) 0 2px, transparent 2px 5px, var(--text-secondary) 5px 7px, transparent 7px 10px, var(--text-secondary) 10px 12px, transparent 12px);
+.drag-handle { display: inline-block; width: 12px; height: 10px; cursor: grab;
+               background: linear-gradient(180deg, var(--text-secondary) 0 2px, transparent 2px 4px, var(--text-secondary) 4px 6px, transparent 6px 8px, var(--text-secondary) 8px 10px);   /* 批46：90deg→180deg 竖线转横线（快审 A-P1-1：色标收进 10px 盒高三线全显——原 10-12px 段被裁只显两线） */
                opacity: .55; }
 .drag-handle:active { cursor: grabbing; }
 .tpl-body { font-family: var(--font-mono, monospace); font-size: var(--fs-foot); padding: 4px; word-break: break-all;
