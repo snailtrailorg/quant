@@ -171,6 +171,9 @@ html.dark {
    el-card 的 header slot——正文整片继承 header 的 600 字重（表格内容全粗，EP 表格无显式字重）。
    嵌套卡片=内容区归位；嵌套卡片自己的 __header 仍被上行直接命中=600（标题语义保留） */
 .el-card__header .el-card { font-weight: 400; }
+/* 批49：弹窗行距立法（EP 默认 .el-form-item margin-bottom 18px 偏大——用户反馈各弹窗行距大且不一；
+   全局统一收紧。label-width 五档+position 混用的规格统一=大改另批挂账） */
+.el-dialog .el-form-item { margin-bottom: 14px; }
 /* 批24 追加：弹窗标题对齐卡片标题（同 fs-card 档同 600 字重） */
 .el-dialog__title { font-weight: 600; }
 .el-pagination { font-size: var(--fs-label); }

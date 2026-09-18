@@ -89,7 +89,7 @@ export default {
       return: '返回',
       noParams: '该策略未定义可配置参数',
       time: '时间',
-      filter: '筛选',
+      filter: '行筛选',   // 批49：用户亲定（RowFilter 触发钮 title 专属键）
       deleteSelected: '删除所选',   // 批23：三表批量删（通知/审计；confirm 数量回显）
       clearAll: '全部清除',
       deleteAll: '删除所有',   // 批24 迭代十六（用户裁定 title 用词）
@@ -126,7 +126,7 @@ export default {
     tabs: {
       astock: 'A股', cb: '可转债', etf: 'ETF',
       sync: '同步任务', integrity: '完整性体检', sched: '调度',
-      logs: '运行日志', audit: '审计日志',   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
+      logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', sources: '数据源', trading: '交易账户', sms: '短信通道',   // 批43 改名（文案师）
       run: '运行配置', users: 'API 密钥', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
@@ -179,6 +179,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       dataCenter: '数据中心', healthLogs: '系统监控',
       stockPool: '股票池', dailyInsight: '每日研判',
       tradingDesk: '交易台', liveTasks: '实盘任务',
+      liveTask: '实盘任务', trading: '交易台', users: '用户管理',   // 批49：NAV id camel 形态（菜单权限表显示名兜底链——id 与侧栏词条键不同名 3 枚）
       gResearch: '策略研究', gLive: '实盘交易', gRisk: '风险控制', gOps: '系统管理',
       dashboard: '总览',
       strategy: '策略管理',
@@ -653,7 +654,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       apiUrl: '接口地址', contextWindow: '上下文窗口', monthlyCostLimit: '月成本限额',
       sentAt: '发出时间',   // confirmedAt 随批23 确认机制退役
       nickname: '昵称', email: '邮箱',
-      settings: '列设置', reset: '恢复默认',
+      settings: '列筛选', reset: '恢复默认',   // 批49：用户亲定（ColumnSettings 触发钮专属）
     },
     symbol: {
       listTitle: '{title} · 标的列表（{n} 只，虚拟滚动）',
@@ -855,7 +856,6 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       notifyHistory: '通知历史',
     },
     audit: {
-      title: '审计日志',
       actor: '操作人',
       phActor: '筛选操作人',
       phAction: '登录/创建/删除...',
@@ -1388,7 +1388,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       return: 'Back',
       noParams: 'This strategy has no configurable params',
       time: 'Time',
-      filter: 'Filter',
+      filter: 'Row Filter',   // 批49
       deleteSelected: 'Delete Selected',   // 批23：三表批量删（通知/审计）
       clearAll: 'Clear All',
       deleteAll: 'Delete All',
@@ -1425,7 +1425,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
       sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
-      logs: 'Run Logs', audit: 'Audit Log',
+      logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名
 im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', sources: 'Data Sources', trading: 'Trading Accounts', sms: 'SMS Channels',   // 批37
       run: 'Run Config', users: 'API Keys', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
@@ -1478,6 +1478,7 @@ im: 'IM Bots', mail: 'Email SMTP',
       dataCenter: 'Data Center', healthLogs: 'System Monitor',
       stockPool: 'Stock Pool', dailyInsight: 'Daily Insight',
       tradingDesk: 'Trading Desk', liveTasks: 'Live Tasks',
+      liveTask: 'Live Tasks', trading: 'Trading Desk', users: 'User Management',   // 批49：NAV id camel 形态
       gResearch: 'Research', gLive: 'Live Trading', gRisk: 'Risk Control', gOps: 'System',
       dashboard: 'Dashboard',
       strategy: 'Strategies',
@@ -1951,7 +1952,7 @@ im: 'IM Bots', mail: 'Email SMTP',
       apiUrl: 'API URL', contextWindow: 'Context Window', monthlyCostLimit: 'Monthly Cost Limit',
       sentAt: 'Sent At',   // confirmedAt retired in batch 23
       nickname: 'Nickname', email: 'Email',
-      settings: 'Columns', reset: 'Reset to defaults',
+      settings: 'Column Filter', reset: 'Reset to defaults',   // 批49
     },
     symbol: {
       listTitle: '{title} · Symbols ({n}, virtual scroll)',
@@ -2149,7 +2150,6 @@ im: 'IM Bots', mail: 'Email SMTP',
       notifyHistory: 'Notification History',
     },
     audit: {
-      title: 'Audit Log',
       actor: 'Actor',
       phActor: 'Filter actor',
       phAction: 'login/create/delete...',
