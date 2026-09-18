@@ -23,7 +23,7 @@
                   @dragstart="onDragStart($index)" />
           </template>
         </el-table-column>
-        <el-table-column prop="name" :label="t('alerts.smtpProvName')" min-width="120" show-overflow-tooltip>
+        <el-table-column prop="name" :label="t('alerts.smtpProvName')" width="240" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <span @dragover.prevent @drop="onDrop($index)">{{ row.name }}</span>
           </template>
