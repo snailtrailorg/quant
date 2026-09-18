@@ -28,8 +28,8 @@
             <span @dragover.prevent @drop="onDrop($index)">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('alerts.smtpProvHost')" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.host }}:{{ row.port }}</template>
+        <el-table-column :label="t('alerts.smsProvVendor')" width="180" show-overflow-tooltip>   <!-- 批53:列序裁定 名称/运营商/状态/操作——服务器地址收进运营商列(配置项不占表宽) -->
+          <template #default="{ row }">{{ row.host }}</template>
         </el-table-column>
         <el-table-column :label="t('alerts.smtpProvStatus')" width="170">
           <template #default="{ row }">

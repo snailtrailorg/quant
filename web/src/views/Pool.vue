@@ -25,18 +25,18 @@
               <div v-if="minuteStatus[row.id]" style="margin-bottom: 12px">
                 <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
                 <TableShell :data="minuteStatus[row.id]" size="small" max-height="300" storage-key="pool-coverage">
-                  <el-table-column prop="symbol" :label="t('common.symbol')" min-width="140" />
-                  <el-table-column prop="last_ts" :label="t('pool.minuteLastTs')" min-width="170">
+                  <el-table-column prop="symbol" :label="t('common.symbol')" min-width="140" />   <!-- 批53:子表唯一弹性列 -->
+                  <el-table-column prop="last_ts" :label="t('pool.minuteLastTs')" width="200">
                     <template #default="{ row: s }">{{ s.last_ts || '-' }}</template>
                   </el-table-column>
-                  <el-table-column prop="covered" :label="t('pool.minuteCovered')" min-width="100">
+                  <el-table-column prop="covered" :label="t('pool.minuteCovered')" width="90">
                     <template #default="{ row: s }">
                       <el-tag :type="s.covered ? 'success' : 'warning'" size="small">
                         {{ s.covered ? '✓' : t('pool.pending') }}
                       </el-tag>
                     </template>
                   </el-table-column>
-                  <el-table-column prop="actions" :label="t('common.action')" min-width="150">
+                  <el-table-column prop="actions" :label="t('common.action')" width="120">
                     <template #default="{ row: s }">
                       <IconBtn size="small" :icon="View" :title="t('common.detail')" @click="gotoDetail(s.symbol)" />
                       <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.remove')" @click="removeSymbol(row.id, s.symbol)" />
@@ -73,7 +73,7 @@
         </template>
       </el-table-column>
       <el-table-column v-if="colOn('description')" prop="description" min-width="220" show-overflow-tooltip :label="t('common.description')" />
-      <el-table-column prop="actions" :label="t('common.action')" min-width="180">
+      <el-table-column prop="actions" :label="t('common.action')" width="180">
         <template #default="{ row }">
           <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="editPool(row)" />
           <IconBtn size="small" :icon="Delete" :title="t('common.delete')" type="danger" @click="delPool(row)" />

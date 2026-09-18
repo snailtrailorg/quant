@@ -9,19 +9,19 @@
     </template>
     <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
     <TableShell :data="results" storage-key="analysis-results">
-      <el-table-column prop="symbol" :label="t('analysis.stock')" min-width="120" />
-      <el-table-column prop="score" :label="t('analysis.score')" min-width="100" sortable />
-      <el-table-column prop="rating" :label="t('analysis.rating')" min-width="100">
+      <el-table-column prop="symbol" :label="t('analysis.stock')" width="130" />   <!-- 批53:固定型退出弹性,Conclusion 独占 flex -->
+      <el-table-column prop="score" :label="t('analysis.score')" width="110" sortable />
+      <el-table-column prop="rating" :label="t('analysis.rating')" width="110">
         <template #default="{ row }">
           <el-tag :type="row.rating === 'BUY' ? 'success' : row.rating === 'AVOID' ? 'danger' : 'info'">{{ row.rating }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="support" :label="t('analysis.support')" min-width="100" />
-      <el-table-column prop="resistance" :label="t('analysis.resistance')" min-width="120" />
+      <el-table-column prop="support" :label="t('analysis.support')" width="110" />
+      <el-table-column prop="resistance" :label="t('analysis.resistance')" width="130" />
       <el-table-column prop="conclusion" :label="t('analysis.conclusion')" show-overflow-tooltip>
         <template #default="{ row }">{{ (row.conclusion || '').replace(/=缺/g, '=—') || '—' }}</template>
       </el-table-column>
-      <el-table-column prop="actions" :label="t('common.action')" min-width="190">
+      <el-table-column prop="actions" :label="t('common.action')" width="200">
         <template #default="{ row }">
           <el-button type="primary" @click="addToPool(row)">{{ t('pool.add') }}</el-button>
           <el-button type="primary" @click="gotoDetail(row.symbol)">{{ t('common.detail') }}</el-button>

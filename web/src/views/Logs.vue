@@ -10,15 +10,15 @@
     <el-alert v-if="noPerm" type="warning" :title="t('log.noPerm')" :closable="false" style="margin-bottom: var(--sp-3)" />
     <TableShell v-else :data="filteredLogs" fill infinite :more-text="moreText" :loading="loading"
                 @load-more="onLoadMore" storage-key="logs-run">
-      <el-table-column prop="ts" :label="t('common.time')" min-width="220">
+      <el-table-column prop="ts" :label="t('common.time')" width="220">   <!-- 批53:固定型 width 退出弹性(原 min-width 220 在 flex 尾列表吸走富余→实测 600px 荒谬) -->
         <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
-      <el-table-column prop="level" :label="t('log.level')" min-width="80">
+      <el-table-column prop="level" :label="t('log.level')" width="90">
         <template #default="{ row }">
           <el-tag :type="row.level === 'ERROR' ? 'danger' : row.level === 'WARN' ? 'warning' : 'info'">{{ row.level }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="module" :label="t('log.module')" min-width="120" />
+      <el-table-column prop="module" :label="t('log.module')" width="140" />
       <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
     </TableShell>
 

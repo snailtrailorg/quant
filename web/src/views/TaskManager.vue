@@ -29,10 +29,10 @@
       <el-table-column prop="last_heartbeat" :label="t('task.heartbeat')" min-width="160">
         <template #default="{ row }">{{ row.last_heartbeat ? fmtTime.full(row.last_heartbeat) : '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('start_time')" prop="start_time" :label="t('cols.startTime')" min-width="220">
+      <el-table-column v-if="colOn('start_time')" prop="start_time" :label="t('cols.startTime')" width="220">
         <template #default="{ row }">{{ row.start_time ? fmtTime.full(row.start_time) : '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('end_time')" prop="end_time" :label="t('cols.endTime')" min-width="220">
+      <el-table-column v-if="colOn('end_time')" prop="end_time" :label="t('cols.endTime')" width="220">
         <template #default="{ row }">{{ row.end_time ? fmtTime.full(row.end_time) : '-' }}</template>
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" width="130">
@@ -57,7 +57,7 @@
           <el-table-column prop="level" :label="t('log.level')" min-width="80" />
           <el-table-column prop="message" :label="t('log.content')" show-overflow-tooltip />
           <el-table-column prop="step_name" :label="t('task.step')" min-width="120" />
-          <el-table-column prop="created_at" :label="t('common.time')" min-width="220">
+          <el-table-column prop="created_at" :label="t('common.time')" width="220">
             <template #default="{ row }">{{ row.created_at ? fmtTime.full(row.created_at) : '' }}</template>
           </el-table-column>
         </TableShell>

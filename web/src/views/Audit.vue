@@ -11,12 +11,12 @@
     </div>
     <TableShell :data="logs" fill infinite :more-text="moreText" :loading="loading"
                 @load-more="onLoadMore" storage-key="audit">
-      <el-table-column prop="ts" :label="t('common.time')" min-width="220">
+      <el-table-column prop="ts" :label="t('common.time')" width="220">   <!-- 批53:固定退出弹性(实测 428) -->
         <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
-      <el-table-column prop="actor" :label="t('audit.actor')" min-width="120" show-overflow-tooltip />
-      <el-table-column prop="action" :label="t('common.action')" min-width="140" />
-      <el-table-column prop="target" :label="t('audit.target')" min-width="140" />
+      <el-table-column prop="actor" :label="t('audit.actor')" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="action" :label="t('common.action')" width="170" />
+      <el-table-column prop="target" :label="t('audit.target')" min-width="150" />
       <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
     </TableShell>
   </div>

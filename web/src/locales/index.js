@@ -1174,7 +1174,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       tplBodyAlert: '${level}级别告警：${title}。请登录平台查看。',   // 模板正文（变量固定无 i18n）
       tplBodyVerify: '您的验证码为${code}，5分钟内有效。若非本人操作请忽略。',
       // 批43 短信通道表格（文案师终稿——注释独立成行防吞键）
-      smsProvName: '名称', smsProvVendor: '服务商', smsProvStatus: '状态', smsProvCredNo: '待补凭证',
+      smsProvName: '名称', smsProvVendor: '运营商', smsProvStatus: '状态', smsProvCredNo: '待补凭证',
       smsProvEnabled: '已启用', smsProvDisabled: '已停用',
       smsProvAdd: '添加短信通道', smsProvAddTitle: '添加短信通道', smsProvEditTitle: '编辑短信通道',
       smsProvNameField: '名称', smsProvNamePh: '如：主账号',
