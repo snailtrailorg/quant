@@ -103,30 +103,56 @@ def test_load_channels_empty_selection_mutes():
 
 
 def test_strip_dead_keys():
-    """GET 剥离失效键：bot 删/邮箱清空的键不进回显；None 原样；畸形键滤除。"""
+    """GET 剥离失效键：bot 删/邮箱清空的键不进回显；None 原样；畸形键滤除。
+    批48：停用 bot 保留（avail.bots 含停用、id 集同判"实体在"——零代码自然结果，此断言钉语义防后人"修复"）。"""
     from src.web_api.routes.alerts import _strip_dead_keys
-    avail = {"email": False, "sms": True, "bots": [{"id": 3, "name": "b3"}]}
+    avail = {"email": False, "sms": True, "bots": [{"id": 3, "name": "b3", "enabled": False}]}
     assert _strip_dead_keys(None, avail) is None
-    assert _strip_dead_keys(["email", "sms", "im:3", "im:9", "bad"], avail) == ["sms", "im:3"]
+    assert _strip_dead_keys(["email", "sms", "im:3", "im:9", "bad"], avail) == ["sms", "im:3"]   # im:3 停用仍保留
 
 
 def test_validate_channels_strips_dead_bot():
     """已删 bot=实体消失 → 剥离落库不 400（用户裁定 2/盲审 A-P0-1 解法）。
-    批34 盲审 A-P2-2 后查询两步：①owner+enabled（非自有停用判定）②存在性（已删判定）。"""
+    批48 重构后两查：①owner 集（不分 enabled——一次查询）②存在性（已删判定）。"""
     from src.web_api.routes.alerts import _validate_channels
-    vc = _conn_with([("u@x.com", "138")], [])   # users(有邮箱) / 名下无 bot
+    vc = _conn_with([("u@x.com", "138")], [])   # conn1：users（有邮箱）/ 名下无 bot
     with patch("src.web_api.routes.alerts.get_conn",
-               side_effect=[vc, _conn_with([(0,)]), _conn_with([(0,)])]):
+               side_effect=[vc, _conn_with([(0,)])]):
         out, stripped = _validate_channels(7, ["email", "im:99"])
     assert out == ["email"] and stripped == ["im:99"]
 
 
+def test_validate_channels_keeps_disabled_bot():
+    """批48：自有但停用 → **保留落库**（原 own_disabled 死分支恒 false 落 400"不属于该用户"
+    错报——A-P1-1 实锤；停用勾选发送侧 dispatch enabled 过滤天然不发，bot 复启自动恢复）。"""
+    from src.web_api.routes.alerts import _validate_channels
+    vc = _conn_with([("u@x.com", "138")], [(99,)])   # conn1：users / owner 集**含 99**（不分 enabled）
+    with patch("src.web_api.routes.alerts.get_conn", side_effect=[vc]):
+        out, stripped = _validate_channels(7, ["email", "im:99"])
+    assert out == ["email", "im:99"] and stripped == []   # 保留（无第二查——continue 短路）
+
+
+def test_users_with_channels_includes_disabled_bot():
+    """批48 形状钉：avail.bots 含停用 bot 且带 enabled 标志（B-P2-2——显示面=全通道恒显）。"""
+    from src.web_api.routes.alerts import _users_with_channels
+    conn = _conn_with(
+        [(1, "admin", "昵称", "u@x.com", "138")],   # users 查
+        [(2, 1, "量化交易助手", False), (5, 1, "量化助手", True)],   # bots 查（含停用）
+    )
+    with patch("src.web_api.routes.alerts.get_conn", return_value=conn):
+        users = _users_with_channels()
+    u = next(x for x in users if x["id"] == 1)
+    assert u["channels"]["email"] is True and u["channels"]["sms"] is True
+    assert [(b["id"], b["enabled"]) for b in u["channels"]["bots"]] == [(2, False), (5, True)]
+
+
 def test_validate_channels_rejects_foreign_bot_and_no_email():
-    """bot 属他人=400；无邮箱勾 email=400（API 误用信号，非实体消失）——盲审 A-P2-5 断言等值。"""
+    """bot 属他人=400；无邮箱勾 email=400（API 误用信号，非实体消失）——盲审 A-P2-5 断言等值。
+    批48 重构后两查：①owner 集（不分 enabled）②存在性。"""
     from src.web_api.routes.alerts import _validate_channels, ApiError
     conn = _conn_with([("u@x.com", "138")], [])   # 有邮箱有手机，名下无 bot
-    # 第一查 owner+enabled=0（非自有），第二查存在性=1（bot 存在=属他人）
-    with patch("src.web_api.routes.alerts.get_conn", side_effect=[conn, _conn_with([(0,)]), _conn_with([(1,)])]):
+    # owner 集=0（非自有），存在性=1（bot 存在=属他人）
+    with patch("src.web_api.routes.alerts.get_conn", side_effect=[conn, _conn_with([(1,)])]):
         with pytest.raises(ApiError) as ei:
             _validate_channels(7, ["im:99"])   # bot 99 存在但不属名下
         assert ei.value.code == "ALERT_CHANNEL_INVALID"

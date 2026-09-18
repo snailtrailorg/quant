@@ -250,8 +250,8 @@ loadPerms()
 onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loadDynamicIndex() })
 onUnmounted(() => { if (alertTimer) clearInterval(alertTimer) })
 
-// 批21：语言乒乓（真源 locale.value）；标题栏按钮显示目标语言
-const langLabel = computed(() => locale.value === 'zh' ? 'EN' : '中')
+// 批21：语言乒乓（真源 locale.value）；批48 后用户裁定：按钮显示**当前语言**（中文态"中"/英文态"EN"），title 仍指目标语言
+const langLabel = computed(() => locale.value === 'zh' ? '中' : 'EN')
 const langTitle = computed(() => locale.value === 'zh' ? t('layout.toEn') : t('layout.toZh'))
 const toggleLang = () => setLang(locale.value === 'zh' ? 'en' : 'zh')
 const logout = async () => {

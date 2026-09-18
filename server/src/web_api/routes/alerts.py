@@ -40,11 +40,11 @@ def _users_with_channels() -> list[dict]:
         users = [{"id": r[0], "username": r[1], "nickname": r[2], "email": r[3], "phone": r[4]}
                  for r in cur.fetchall()]
         cur = conn.execute(
-            "SELECT id, owner_user_id, name FROM im_bot_config WHERE enabled "
-            "AND owner_user_id IS NOT NULL ORDER BY id")
+            "SELECT id, owner_user_id, name, enabled FROM im_bot_config "
+            "WHERE owner_user_id IS NOT NULL ORDER BY id")   # 批48：含停用（前端灰显"已停用"）——显示面=全通道恒显
         by_user: dict[int, list] = {}
-        for bid, owner, name in cur.fetchall():
-            by_user.setdefault(owner, []).append({"id": bid, "name": name or f"bot-{bid}"})
+        for bid, owner, name, en in cur.fetchall():
+            by_user.setdefault(owner, []).append({"id": bid, "name": name or f"bot-{bid}", "enabled": bool(en)})
     for u in users:
         u["channels"] = {"email": bool(u["email"]), "sms": bool(u["phone"]),
                          "bots": by_user.get(u["id"], [])}
@@ -67,7 +67,9 @@ def _subs_from_db() -> list[dict]:
 
 def _strip_dead_keys(sel: list | None, avail: dict) -> list | None:
     """批34：勾选值剥离失效键（用户裁定"通道删除则本处也删除"）——email/sms 资料已空、
-    im:bid 实体已删的键不进前端回显；None 原样（全通道语义不代入）。畸形键一并滤除。"""
+    im:bid 实体已删的键不进前端回显；None 原样（全通道语义不代入）。畸形键一并滤除。
+    批48：**停用 bot 保留**（avail.bots 已含停用、id 集同判"实体在"——零代码自然结果，
+    仅此注释钉死语义防后人"修复"；停用勾选发送侧 dispatch enabled 过滤天然不发）。"""
     if sel is None:
         return None
     bot_ids = {b["id"] for b in avail.get("bots", [])}
@@ -131,6 +133,7 @@ def _validate_channels(uid: int, channels) -> tuple[list | None, list]:
     """批34：通道勾选校验+失效剥离（盲审 A-P0-1 解法×用户裁定 2）。仅在 body 显式含
     channels 键时调用（缺键=沿用行现值——开关注 toggle 不重置勾选，B-P1-2）。
     三态：None=全通道/[]=零通道静音/非空=按勾选。返回 (落库值, 被剥离键)：
+    - 自有但停用（批48）→ **保留落库**（dispatch enabled 过滤天然不发；bot 复启自动恢复——所见即所得）
     - 实体已消失（bot 删/邮箱手机清空）→ 剥离落库（懒清理，审计注 stripped）
     - 实体在但不属该用户（bot 属他人/无邮箱勾 email/无手机勾 sms）→ 400 ALERT_CHANNEL_INVALID
     - 畸形键 → 400"""
@@ -141,7 +144,7 @@ def _validate_channels(uid: int, channels) -> tuple[list | None, list]:
     with get_conn() as conn:
         cur = conn.execute("SELECT email, phone FROM users WHERE id=%s", (uid,))
         u = cur.fetchone()
-        cur = conn.execute("SELECT id FROM im_bot_config WHERE owner_user_id=%s AND enabled", (uid,))
+        cur = conn.execute("SELECT id FROM im_bot_config WHERE owner_user_id=%s", (uid,))   # 批48：不分 enabled（owner 集一次查询）
         own_bots = {b[0] for b in cur.fetchall()}
     email_ok, phone_ok = (bool(u[0]), bool(u[1])) if u else (False, False)
     out: list[str] = []
@@ -160,24 +163,17 @@ def _validate_channels(uid: int, channels) -> tuple[list | None, list]:
         elif k.startswith("im:") and k[3:].isdigit():
             bid = int(k[3:])
             if bid in own_bots:
-                out.append(f"im:{bid}")   # 规范化（盲审 A-P2-3：im:007 死键防线）
-            else:
-                with get_conn() as conn:
-                    # 盲审 A-P2-2：owner 判定区分"属他人"（400）与"自有但停用/已删"（剥离）
-                    cur = conn.execute(
-                        "SELECT count(*) FROM im_bot_config WHERE id=%s AND owner_user_id=%s "
-                        "AND enabled", (bid, uid))
-                    own_disabled = cur.fetchone()[0] > 0
-                if own_disabled:
-                    stripped.append(k)   # 自有但停用=等同不可用，剥离（dispatch enabled 过滤天然不发）
-                    continue
-                with get_conn() as conn:
-                    cur = conn.execute("SELECT count(*) FROM im_bot_config WHERE id=%s", (bid,))
-                    exists = cur.fetchone()[0] > 0
-                if exists:   # 实体在但不属该用户——API 误用信号
-                    raise ApiError(400, "ALERT_CHANNEL_INVALID",
-                                   f"所选机器人（ID {bid}）不属于该用户，请重新勾选。")
-                stripped.append(k)   # 已删 bot=实体消失，剥离落库
+                out.append(f"im:{bid}")   # 规范化（盲审 A-P2-3：im:007 死键防线）。批48：自有含停用——**保留**
+                continue   # 停用勾选落库（dispatch enabled 过滤天然不发；bot 复启自动恢复——所见即所得）
+            with get_conn() as conn:
+                cur = conn.execute("SELECT count(*) FROM im_bot_config WHERE id=%s", (bid,))
+                exists = cur.fetchone()[0] > 0
+            if exists:   # 实体在但不属该用户——API 误用信号
+                raise ApiError(400, "ALERT_CHANNEL_INVALID",
+                               f"所选机器人（ID {bid}）不属于该用户，请重新勾选。")
+            stripped.append(k)   # 已删 bot=实体消失，剥离落库
+            # 批48：原 own_disabled 死分支删除（盲审 A-P1-1：与第一查同条件 owner+enabled，
+            # 停用恒 count=0 落此——生产实际 400 错报"不属于该用户"而非剥离；mock 造不可达形态掩盖）
         else:
             raise ApiError(400, "ALERT_CHANNEL_INVALID", f"通道键不合法: {k!r}")
     return out, stripped

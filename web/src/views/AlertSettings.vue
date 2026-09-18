@@ -17,40 +17,16 @@
         <el-table-column prop="username" :label="t('alerts.subUser')" min-width="150">
           <template #default="{ row }">{{ row.nickname ? `${row.username}（${row.nickname}）` : row.username }}</template>
         </el-table-column>
-        <el-table-column :label="t('alerts.channels')" min-width="260">
+        <el-table-column :label="t('alerts.channels')" min-width="300">
           <template #default="{ row }">
-            <!-- 批34 三态：null=全通道自动（按 avail 联动亮灰）/[]=零勾选/非空=已选亮+未勾可用灰 -->
-            <template v-if="row.channels_sel === null">
-              <el-tooltip :content="row.channels_avail.email ? t('alerts.allChannelsTip') : t('alerts.chip.email.noTip')" placement="top">
-                <el-tag :type="row.channels_avail.email ? 'success' : 'info'" size="small" style="margin: 1px">{{ t('alerts.chip.email.' + (row.channels_avail.email ? 'ok' : 'no')) }}</el-tag>
-              </el-tooltip>
-              <el-tooltip :content="row.channels_avail.sms ? t('alerts.allChannelsTip') : t('alerts.chip.sms.noTip')" placement="top">
-                <el-tag :type="row.channels_avail.sms ? 'success' : 'info'" size="small" style="margin: 1px">{{ t('alerts.chip.sms.' + (row.channels_avail.sms ? 'ok' : 'no')) }}</el-tag>
-              </el-tooltip>
-              <el-tooltip v-if="row.channels_avail.bots.length" :content="t('alerts.allChannelsTip')" placement="top">
-                <el-tag v-for="b in row.channels_avail.bots" :key="b.id" type="success" size="small" style="margin: 1px">{{ b.name }}</el-tag>
-              </el-tooltip>
-              <el-tooltip v-else :content="t('alerts.chip.imZeroTip')" placement="top">
-                <el-tag type="info" size="small" style="margin: 1px">{{ t('alerts.chip.imZero') }}</el-tag>
-              </el-tooltip>
-            </template>
-            <el-tooltip v-else-if="!row.channels_sel.length" :content="t('alerts.noChannelSelTip')" placement="top">
-              <el-tag type="info" size="small">{{ t('alerts.noChannelSel') }}</el-tag>
+            <!-- 批48 四态统一渲染（全通道恒显——治 tooltip 吞 chip+两态不一致+停用无处显示）：
+                 on=会发(亮)/off=可勾未勾(灰)/disabled=未配置或停用未勾(灰)/on_disabled=已勾但停用(灰+✓) -->
+            <el-tooltip v-for="c in chipsOf(row)" :key="c.key" :content="c.tip" placement="top">
+              <el-tag :type="c.state === 'on' ? 'success' : 'info'" size="small" style="margin: 1px">{{ c.label }}</el-tag>
             </el-tooltip>
-            <template v-else>
-              <el-tooltip :content="selHas(row, 'email') ? t('alerts.chip.email.okTip') : t('alerts.chipSkipTip')" placement="top">
-                <el-tag v-if="row.channels_avail.email" :type="selHas(row, 'email') ? 'success' : 'info'" size="small" style="margin: 1px">{{ t('alerts.chip.email.ok') }}</el-tag>
-              </el-tooltip>
-              <el-tooltip :content="selHas(row, 'sms') ? t('alerts.chip.sms.okTip') : t('alerts.chipSkipTip')" placement="top">
-                <el-tag v-if="row.channels_avail.sms" :type="selHas(row, 'sms') ? 'success' : 'info'" size="small" style="margin: 1px">{{ t('alerts.chip.sms.ok') }}</el-tag>
-              </el-tooltip>
-              <template v-for="b in row.channels_avail.bots" :key="b.id">
-                <el-tag v-if="selHas(row, 'im:' + b.id)" type="primary" size="small" style="margin: 1px">{{ b.name }}</el-tag>
-                <el-tooltip v-else :content="t('alerts.chipSkipTip')" placement="top">
-                  <el-tag type="info" size="small" style="margin: 1px">{{ b.name }}</el-tag>
-                </el-tooltip>
-              </template>
-            </template>
+            <el-tooltip v-if="isMuted(row)" :content="t('alerts.noChannelSelTip')" placement="top">
+              <el-tag type="warning" size="small" style="margin: 1px">{{ t('alerts.noChannelSel') }}</el-tag>
+            </el-tooltip>
           </template>
         </el-table-column>
         <el-table-column prop="categories" :label="t('alerts.categories')" min-width="170">
@@ -93,7 +69,9 @@
             <el-checkbox-group v-model="form.channels">
               <el-checkbox value="email" :disabled="!formAvail.email">{{ t('alerts.chan.email') }}</el-checkbox>
               <el-checkbox value="sms" :disabled="!formAvail.sms">{{ t('alerts.chan.sms') }}</el-checkbox>
-              <el-checkbox v-for="b in formAvail.bots" :key="'im:' + b.id" :value="'im:' + b.id">{{ b.name }}</el-checkbox>
+              <el-checkbox v-for="b in formAvail.bots" :key="'im:' + b.id" :value="'im:' + b.id"
+                           :disabled="b.enabled === false"
+                           :title="b.enabled === false ? t('alerts.chipBotOff') : undefined">{{ b.name }}</el-checkbox>
             </el-checkbox-group>
             <div class="sub-limit-hint">{{ t('alerts.chanHint') }}</div>
           </template>
@@ -155,13 +133,45 @@ const load = async () => {
 
 const availOf = (uid) => (cfg.value.users || []).find(u => u.id === uid)?.channels || EMPTY_AVAIL
 const formAvail = computed(() => availOf(form.user_id))
-// 全勾键集（avail 内全部可选通道）——保存时与勾选集比对，全勾归一提交 null（全通道自动）
+const selHas = (row, key) => (row.channels_sel || []).includes(key)
+// 全勾键集（批48：只含**可勾**通道——enabled bot+有资料 email/sms；停用/未配置不计入，
+// 否则永无法全勾归一 null；onUserPicked 默认全勾/edit 回显同源）
 const allKeysOf = (avail) => [
   ...(avail.email ? ['email'] : []),
   ...(avail.sms ? ['sms'] : []),
-  ...avail.bots.map(b => `im:${b.id}`),
+  ...(avail.bots || []).filter(b => b.enabled !== false).map(b => `im:${b.id}`),
 ]
-const selHas = (row, key) => (row.channels_sel || []).includes(key)
+const isMuted = (row) => Array.isArray(row.channels_sel) && !row.channels_sel.length
+// 批48 四态统一 chips（全通道恒显）：on=会发(亮)/off=可勾未勾(灰)/disabled=未配置或停用未勾(灰)/
+// on_disabled=已勾但停用(灰+✓ 勾标)——绿只留给真会发；每 chip 独立 tooltip（治批34 单 tooltip 吞 chip）
+const chipsOf = (row) => {
+  const avail = row.channels_avail || EMPTY_AVAIL
+  const isAll = row.channels_sel === null   // null=全通道自动
+  const out = []
+  const pushChan = (key, dom, usable, checked) => {
+    if (!usable) out.push({ key, state: 'disabled', label: t(`alerts.chip.${dom}.no`), tip: t('alerts.chipDisabled') })
+    else if (isAll) out.push({ key, state: 'on', label: t(`alerts.chan.${dom}`), tip: t('alerts.allChannelsTip') })
+    else out.push({ key, state: checked ? 'on' : 'off', label: t(`alerts.chan.${dom}`),
+                    tip: checked ? t(`alerts.chip.${dom}.okTip`) : t('alerts.chipSkipTip') })
+  }
+  pushChan('email', 'email', avail.email, selHas(row, 'email'))
+  pushChan('sms', 'sms', avail.sms, selHas(row, 'sms'))
+  for (const b of avail.bots || []) {
+    const key = 'im:' + b.id
+    const checked = selHas(row, key)
+    const usable = b.enabled !== false   // 批48：停用 bot 恒显
+    if (isAll) out.push({ key, state: usable ? 'on' : 'disabled', label: b.name,
+                          tip: usable ? t('alerts.allChannelsTip') : t('alerts.chipBotOff') })
+    else if (!usable) out.push({ key, state: checked ? 'on_disabled' : 'disabled',
+                                 label: (checked ? '✓ ' : '') + b.name,
+                                 tip: checked ? t('alerts.chipBotOffChecked') : t('alerts.chipBotOff') })
+    else out.push({ key, state: checked ? 'on' : 'off', label: b.name,
+                    tip: checked ? t('alerts.chipBotOkTip') : t('alerts.chipSkipTip') })
+  }
+  if (!(avail.bots || []).length) out.push({ key: 'im-zero', state: 'disabled',
+                                             label: t('alerts.chip.imZero'), tip: t('alerts.chip.imZeroTip') })
+  return out
+}
 
 const onUserPicked = () => {   // 新增选用户后默认全勾（=全通道自动）
   form.channels = allKeysOf(formAvail.value)
