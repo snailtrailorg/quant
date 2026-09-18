@@ -49,7 +49,6 @@
         </el-table-column>
         <template #empty>{{ t('alerts.smtpProvEmpty') }}</template>
       </TableShell>
-      <el-link type="primary" @click="$router.push('/observe?tab=logs')" style="margin-top: var(--sp-2)">{{ t('smtp.viewOutbox') }} →</el-link>
     </el-card>
 
     <!-- 编辑弹窗（批47 单页表单——SMTP 无模板概念；密码批38 三段语义：留空=不改） -->

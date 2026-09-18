@@ -32,8 +32,8 @@
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small" style="margin: 1px">
               {{ row.enabled ? t('alerts.smsProvEnabled') : t('alerts.smsProvDisabled') }}
             </el-tag>
-            <el-tag :type="row.credentials_set ? 'success' : 'warning'" size="small" style="margin: 1px">
-              {{ row.credentials_set ? t('alerts.smsProvCredOk') : t('alerts.smsProvCredNo') }}
+            <el-tag v-if="!row.credentials_set" type="warning" size="small" style="margin: 1px">
+              {{ t('alerts.smsProvCredNo') }}   <!-- 批51：凭证齐全不标（正常态零噪音），只留待补警示 -->
             </el-tag>
           </template>
         </el-table-column>
