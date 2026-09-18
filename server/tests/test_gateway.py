@@ -1,5 +1,6 @@
 """LLM 网关单测：token 限制 + 工具过滤（越权）+ 熔断半开。"""
 import time
+from unittest.mock import MagicMock, patch
 import pytest
 
 
@@ -108,7 +109,7 @@ def test_circuit_half_open(gateway):
     """达 threshold + pause 过期 -> 半开放一个试探"""
     for _ in range(5):
         gateway._record_fail("deepseek")
-    gateway._last_fail_time["deepseek"] = time.time() - 301  # > pause(300)
+    gateway._last_fail_time["deepseek"] = time.time() - gateway._failover_params()["cooldown_min"] * 60 - 1  # 批50：> cooldown（自适应读值——B-P1-2，原 301 硬编码对 30min 缺省恒 open）
     assert gateway._is_circuit_open("deepseek") is False  # 放试探
     assert gateway._half_open["deepseek"] is True
     assert gateway._is_circuit_open("deepseek") is True  # 半开中其他跳过
@@ -125,7 +126,35 @@ def test_circuit_half_open_fail_back_to_open(gateway):
     """半开试探失败 -> 回 open"""
     for _ in range(5):
         gateway._record_fail("deepseek")
-    gateway._last_fail_time["deepseek"] = time.time() - 301
+    gateway._last_fail_time["deepseek"] = time.time() - gateway._failover_params()["cooldown_min"] * 60 - 1
     gateway._is_circuit_open("deepseek")  # 进半开
     gateway._record_fail("deepseek")  # 试探失败
     assert gateway._half_open["deepseek"] is False  # 回 open
+
+
+def test_n_row_chain_third_model_tried(gateway):
+    """批50 N 行链钉（方案 §三明列——盲审 A-P2-1）：三模型前两失败熔断，第三行被尝试。
+    原实现 [primary, fallback] 二级硬编码=拖到第 3 行起永不参与（方案盲审 A-P1-1 实锤）。"""
+    gateway._models = [
+        {"id": i, "provider": f"p{i}", "model": f"m{i}", "api_key": "k", "base_url": "http://x",
+         "context_window": 8192, "supports_tools": True, "max_input_tokens": None,
+         "max_output_tokens": None, "temperature": None} for i in (1, 2, 3)
+    ]
+    tried = []
+
+    class _Resp:
+        content = "ok"
+        usage = {}
+
+    def fake_get_client(conf):
+        tried.append(conf["id"])
+        if conf["id"] < 3:
+            raise RuntimeError("down")   # 前两行失败
+        mc = MagicMock()
+        mc.chat.completions.create.return_value = _Resp()
+        return mc, conf["model"]
+
+    with patch.object(gateway, "_get_client", side_effect=fake_get_client),          patch.object(gateway, "_parse_response", side_effect=lambda r: r),          patch.object(gateway, "_log_usage"),          patch.object(gateway, "_failover_params",
+                      return_value={"cooldown_min": 30, "fail_threshold": 1, "retry_wait_s": 0, "_ts": 0}):
+        resp = gateway._do_chat([{"role": "user", "content": "hi"}], [], 30, 0, caller="test")
+    assert tried == [1, 2, 3] and resp.content == "ok"   # 第三行被尝试且成功（原二级硬编码下 3 号永不入列）

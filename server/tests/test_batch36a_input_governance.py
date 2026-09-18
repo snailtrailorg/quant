@@ -301,17 +301,13 @@ def test_collector_clamps_thresholds():
 
 
 def test_models_field_constraints():
-    """模型层 Field：负 token 限额/阈值 0/杠杆 0——422（pydantic 校验错）。"""
-    from src.web_api.models import LlmBudgetReq, StrategyAccountReq
+    """模型层 Field：负 token 限额/阈值 0/杠杆 0——422（pydantic 校验错）。
+    批50：LlmBudgetReq 断言随预算链退役删除（负限额用例改挂 SmtpCard 域外——llm 域无 Field 模型剩余）。"""
+    from src.web_api.models import StrategyAccountReq
     import pytest as _pytest
     from pydantic import ValidationError
     with _pytest.raises(ValidationError):
-        LlmBudgetReq(daily_token_limit=-100)
-    with _pytest.raises(ValidationError):
-        LlmBudgetReq(alert_threshold_pct=0)
-    with _pytest.raises(ValidationError):
         StrategyAccountReq(strategy_id="s", account_id="a", initial_capital=0)
-    assert LlmBudgetReq(alert_threshold_pct=100).alert_threshold_pct == 100   # 边界含
 
 
 def test_sms_config_three_semantics(authed_client):

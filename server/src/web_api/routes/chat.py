@@ -7,7 +7,7 @@ import json
 from fastapi import APIRouter, Depends, Request, Body, WebSocket, WebSocketDisconnect, Query
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import (ChatReq, LLMModelReq, LlmBudgetReq)
+from ..models import (ChatReq, LLMModelReq)
 from src.data_platform.db import get_conn
 
 logger = logging.getLogger("web_api")
@@ -142,10 +142,11 @@ async def ws_market(ws: WebSocket, token: str = Query(...)):
 
 @router.get("/api/llm-models")
 def list_llm_models(payload: dict = Depends(require_perm("llm_config"))):
+    """批50：position 接管 priority（拖拽行序=容灾链序）。"""
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, priority, enabled FROM llm_model_config ORDER BY priority")
+        cur = conn.execute("SELECT id, name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, position, enabled FROM llm_model_config ORDER BY position, id")
         rows = cur.fetchall()
-    return [{"id": r[0], "name": r[1], "provider": r[2], "model": r[3], "has_key": bool(r[4]), "base_url": r[5], "context_window": r[6], "supports_tools": r[7], "max_input_tokens": r[8], "max_output_tokens": r[9], "temperature": r[10], "priority": r[11], "enabled": r[12]} for r in rows]
+    return [{"id": r[0], "name": r[1], "provider": r[2], "model": r[3], "has_key": bool(r[4]), "base_url": r[5], "context_window": r[6], "supports_tools": r[7], "max_input_tokens": r[8], "max_output_tokens": r[9], "temperature": r[10], "position": r[11], "enabled": r[12]} for r in rows]
 
 
 @router.post("/api/llm-models")
@@ -154,11 +155,36 @@ def create_llm_model(req: LLMModelReq, payload: dict = Depends(require_perm("llm
     enc = encrypt(req.api_key) if req.api_key else ""
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO llm_model_config (name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, priority, enabled) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.priority, req.enabled))
+            "INSERT INTO llm_model_config (name, provider, model, api_key_encrypted, base_url, context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, position, enabled) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, "
+            "COALESCE((SELECT MAX(position) FROM llm_model_config), -1) + 1, %s) RETURNING id",   # 批50：position 追加末尾（批43/47 同款）
+            (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.enabled))
         conn.commit()
     audit_log(payload["username"], "llm_model_create", detail=f"{req.provider}/{req.model}")
+    from src.llm_gateway.gateway import gateway
+    gateway.reload_models()   # 批50 顺手修既有 bug：create 原缺 reload（新建首条模型网关空列表直到下次编辑）
     return {"id": cur.fetchone()[0]}
+
+
+@router.post("/api/llm-models/reorder")   # 批50：路由前移防 {mid} int 遮蔽（批43 P0-3 教训）
+def llm_models_reorder(body: dict = Body(...), payload: dict = Depends(require_perm("llm_config"))):
+    """拖拽重排（批43/47 同款）：全量 id 数组→单事务按下标重编号 position=0..n-1；
+    行序即容灾链序（网关 N 行链迭代序）。"""
+    ids = body.get("ids")
+    if not isinstance(ids, list) or not all(isinstance(i, int) for i in ids):
+        raise ApiError(400, "BAD_PARAM", "ids 须为整数数组")
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM llm_model_config")
+        existing = {r[0] for r in cur.fetchall()}
+        if set(ids) != existing or len(ids) != len(existing):
+            raise ApiError(400, "BAD_PARAM", "ids 必须等于当前全部模型 id（全量序列——防并发丢行）")
+        for pos, rid in enumerate(ids):
+            conn.execute("UPDATE llm_model_config SET position=%s, updated_at=now() WHERE id=%s", (pos, rid))
+        conn.commit()
+    audit_log(payload["username"], "llm_model_reorder", detail=f"order={ids}")
+    from src.llm_gateway.gateway import gateway
+    gateway.reload_models()   # 行序即链序——即时生效
+    return {"ok": True}
 
 
 @router.post("/api/llm-models/{mid}")
@@ -167,11 +193,11 @@ def update_llm_model(mid: int, req: LLMModelReq, payload: dict = Depends(require
     enc = encrypt(req.api_key) if req.api_key else None
     with get_conn() as conn:
         if enc is not None:
-            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, api_key_encrypted=%s, base_url=%s, context_window=%s, supports_tools=%s, max_input_tokens=%s, max_output_tokens=%s, temperature=%s, priority=%s, enabled=%s, updated_at=now() WHERE id=%s",
-                (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.priority, req.enabled, mid))
+            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, api_key_encrypted=%s, base_url=%s, context_window=%s, supports_tools=%s, max_input_tokens=%s, max_output_tokens=%s, temperature=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                (req.name, req.provider, req.model, enc, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.enabled, mid))
         else:
-            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, base_url=%s, context_window=%s, supports_tools=%s, max_input_tokens=%s, max_output_tokens=%s, temperature=%s, priority=%s, enabled=%s, updated_at=now() WHERE id=%s",
-                (req.name, req.provider, req.model, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.priority, req.enabled, mid))
+            conn.execute("UPDATE llm_model_config SET name=%s, provider=%s, model=%s, base_url=%s, context_window=%s, supports_tools=%s, max_input_tokens=%s, max_output_tokens=%s, temperature=%s, enabled=%s, updated_at=now() WHERE id=%s",
+                (req.name, req.provider, req.model, req.base_url, req.context_window, req.supports_tools, req.max_input_tokens, req.max_output_tokens, req.temperature, req.enabled, mid))
         conn.commit()
     audit_log(payload["username"], "llm_model_update", detail=f"id={mid}")
     from src.llm_gateway.gateway import gateway
@@ -211,81 +237,50 @@ def test_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"))
 # ——— LLM 用量 ——
 
 
-@router.get("/api/llm-usage/summary")
-def llm_usage_summary(payload: dict = Depends(require_perm("read"))):
-    """LLM 用量汇总：今日/本月（按 provider/model）+ 近 7 天趋势。"""
+@router.get("/api/llm-usage/series")
+def llm_usage_series(payload: dict = Depends(require_perm("read"))):
+    """批50：用量监控卡数据源——每模型 {今日汇总 + 48h×小时粒度曲线（generate_series 补零，
+    前端零补逻辑）}。provider+model 双键（同名模型跨 provider 不撞——方案盲审 A-P1-4）。
+    原 /api/llm-usage/summary 随批退役（消费=LLM 页唯一）。"""
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT provider, model, count(*),
-                   COALESCE(sum(input_tokens),0), COALESCE(sum(output_tokens),0),
-                   COALESCE(avg(latency_ms),0),
+                   COALESCE(sum(input_tokens+output_tokens),0),
                    CASE WHEN count(*)>0 THEN round(sum(CASE WHEN success THEN 1 ELSE 0 END)*100.0/count(*),1) ELSE 0 END
             FROM llm_usage WHERE ts::date = current_date
-            GROUP BY provider, model ORDER BY count(*) DESC
+            GROUP BY provider, model
         """)
-        today = [{"provider": r[0], "model": r[1], "calls": r[2], "input_tokens": int(r[3]),
-                  "output_tokens": int(r[4]), "avg_latency_ms": int(r[5]), "success_rate": float(r[6])}
-                 for r in cur.fetchall()]
+        today = {(r[0], r[1]): {"calls": r[2], "tokens": int(r[3]), "success_rate": float(r[4])}
+                 for r in cur.fetchall()}
         cur = conn.execute("""
-            SELECT provider, model, count(*), COALESCE(sum(input_tokens),0), COALESCE(sum(output_tokens),0),
-                   COALESCE(avg(latency_ms),0),
-                   CASE WHEN count(*)>0 THEN round(sum(CASE WHEN success THEN 1 ELSE 0 END)*100.0/count(*),1) ELSE 0 END
-            FROM llm_usage WHERE date_trunc('month', ts) = date_trunc('month', current_date)
-            GROUP BY provider, model ORDER BY count(*) DESC
+            SELECT provider, model, date_trunc('hour', ts) AS h,
+                   count(*), COALESCE(sum(input_tokens+output_tokens),0)
+            FROM llm_usage
+            WHERE ts >= date_trunc('hour', now()) - interval '47 hours'
+            GROUP BY provider, model, h ORDER BY h
         """)
-        month = [{"provider": r[0], "model": r[1], "calls": r[2], "input_tokens": int(r[3]),
-                  "output_tokens": int(r[4]), "avg_latency_ms": int(r[5]), "success_rate": float(r[6])}
-                 for r in cur.fetchall()]
+        series: dict[tuple, list] = {}
+        for prov, model, h, calls, tokens in cur.fetchall():
+            series.setdefault((prov, model), []).append(
+                {"ts": h.strftime("%Y-%m-%dT%H:%M"), "calls": calls, "tokens": int(tokens)})
+        # 48 点补零（对齐曲线网格——generate_series 左联）
         cur = conn.execute("""
-            SELECT ts::date AS d, count(*), COALESCE(sum(input_tokens+output_tokens),0), COALESCE(avg(latency_ms),0)
-            FROM llm_usage WHERE ts >= current_date - interval '7 days'
-            GROUP BY d ORDER BY d
+            SELECT to_char(gs, 'YYYY-MM-DD"T"HH24:MI') FROM generate_series(
+                date_trunc('hour', now()) - interval '47 hours',
+                date_trunc('hour', now()), interval '1 hour') gs
         """)
-        trend = [{"date": str(r[0]), "calls": r[1], "total_tokens": int(r[2]), "avg_latency_ms": int(r[3])}
-                 for r in cur.fetchall()]
-    return {"today": today, "month": month, "trend": trend}
+        grid = [r[0] for r in cur.fetchall()]
+    models = []
+    seen = set(today) | set(series)
+    for prov, model in seen:
+        pts = {p["ts"]: p for p in series.get((prov, model), [])}
+        models.append({"provider": prov, "model": model,
+                       "today": today.get((prov, model), {"calls": 0, "tokens": 0, "success_rate": 100.0}),
+                       "series": [{"ts": ts, "calls": pts[ts]["calls"] if ts in pts else 0,
+                                   "tokens": pts[ts]["tokens"] if ts in pts else 0} for ts in grid]})
+    models.sort(key=lambda m: -m["today"]["calls"])
+    return {"models": models}
 
-
-# ——— LLM 预算 ——
-
-
-@router.get("/api/llm-budget")
-def list_llm_budget(payload: dict = Depends(require_perm("read"))):
-    """列出预算配置（D5 #38）。"""
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT id, provider, daily_token_limit, monthly_cost_limit, "
-            "alert_threshold_pct, enabled, updated_at FROM llm_budget ORDER BY id"
-        )
-        rows = cur.fetchall()
-    return [{"id": r[0], "provider": r[1], "daily_token_limit": r[2],
-             "monthly_cost_limit": float(r[3]) if r[3] else None,
-             "alert_threshold_pct": r[4], "enabled": r[5],
-             "updated_at": str(r[6]) if r[6] else None} for r in rows]
-
-
-@router.post("/api/llm-budget/check")
-def check_budget(payload: dict = Depends(require_perm("read"))):
-    """手动触发预算告警检查。"""
-    from src.llm_gateway.budget import check_budget_alerts
-    result = check_budget_alerts()
-    return result
-
-
-@router.post("/api/llm-budget/{bid}")
-def update_llm_budget(bid: int, req: LlmBudgetReq,
-                      payload: dict = Depends(require_perm("llm_config"))):
-    """更新预算配置（P3-13 权限修正：admin only）。"""
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE llm_budget SET provider=%s, daily_token_limit=%s, monthly_cost_limit=%s, "
-            "alert_threshold_pct=%s, enabled=%s, updated_at=now() WHERE id=%s",
-            (req.provider, req.daily_token_limit, req.monthly_cost_limit,
-             req.alert_threshold_pct, req.enabled, bid),
-        )
-        conn.commit()
-    audit_log(payload["username"], "update_llm_budget", str(bid))
-    return {"ok": True}
 
 
 # ——— A 股分析 ———

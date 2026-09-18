@@ -72,7 +72,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | A股分析 | `/api/astock/selection` | GET | viewer+ | `DailySelectionEngine.run` |
 | 风控 | `/api/risk/state` `/api/risk/halt` `/api/risk/resume` | GET/POST | viewer+ / halt | RiskControl 查/熔断/恢复 |
 | 实盘开关 | `/api/live-trading` `/api/live-trading/{market}` | GET/POST | viewer+ / strategy_control | 三级第二级（5 分项） |
-| LLM模型管理 | `/api/llm-models` `/api/llm-models/{mid}/{test}` | GET/POST/POST/DELETE | admin | CRUD + 测试 + reload_models |
+| LLM模型管理 | `/api/llm-models` `/api/llm-models/{mid}/{test}` | GET/POST/POST/DELETE | admin | CRUD + 测试 + reload_models |   **批50**：+`/api/llm-models/reorder`（拖拽行序=容灾链序）；priority 字段退役（position 接管）；create 补 reload
 | IM 统一接入 | `/api/im-bots` `/api/im-bots/providers` `/api/im-bots/onboarding/{provider}` `/api/im-bots/onboarding-status/{ticket}` `/api/im-bots/{bid}` `/api/im-bots/{bid}/{start,stop,test}` `/api/im-bots/{bid}/users[/{im_user_id}]` | GET/POST/DELETE | im_bots_config | arch-19：多 IM CRUD + 接入向导状态机（interactive 平台）+ 启停/测试 + bound_users 管理（取代已删的 `/api/feishu/*`） |
 | Lark 回调 | `/lark/{webhook,card/callback,test}` | POST/GET | 无（事件体/签名内校验） | feishu_bot.router 内嵌：Lark 事件回调入口 |
 | 数据同步 | `/api/sync/{config,config/{sid},trigger/{sid}/progress,symbols/{sid},symbol/{sid}/{ts_code}/backfill,all/{sid}/progress,data/{sid},log}` | GET/POST/POST/DELETE | viewer+ / **data_sync**（P3 回写 2026-08-20：原写 strategy_control 有误，实况 require_perm("data_sync")，analyst/admin 有此权限） | 同步配置 + 触发 + 标的 + 进度 |
@@ -82,7 +82,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 标的详情（三档项 14） | `/api/stock/{symbol}/detail` | GET | viewer+ | 薄壳→`data_platform/stock_detail.get_stock_detail`（聚合禁寄生 web_api） |
 | AI 标的分析（三档项 15） | `/api/stock/{symbol}/analyze` | POST | analyst+ | LLM 网关 caller=stock_analyze，10min 缓存，SYMBOL_NOT_FOUND/LLM_UNAVAILABLE |
 | 筛选 | `/api/screen/{astock,cb,etf}` | GET | viewer+ | 标的筛选（daily_basic） |
-| **LLM用量** | `/api/llm-usage/summary` | GET | viewer+ | 今日/本月/7天趋势（llm_usage 聚合） |
+| **LLM用量** | `/api/llm-usage/series` | GET | viewer+ | 批50：每模型今日汇总+48h×小时曲线（generate_series 补零；原 summary 退役） |
 | 数据源管理 | `/api/data-sources` `/api/data-sources/{dsid}/{test}` | GET/POST/POST/DELETE | admin | PT3（data_source_config CRUD） |
 | 后台任务 | `/api/tasks` `/api/tasks/{task_id}/{terminate,force-delete}` `/api/tasks/detect-stuck` | GET/POST | viewer+ | PT1（list/get/终止/强删/卡死检测） |
 | 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/POST/DELETE | admin | PT4（channel_config CRUD） |
@@ -98,7 +98,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 回测 | `/api/backtest` `/api/backtest/{run_id}` `/api/backtest/{run_id}/{symbol}/stream` `/api/backtest/{run_id}/summary` | POST/GET | analyst+ | B3（创建含 symbol_params/列表/详情/SSE 流/汇总） |
 | 标的池 | `/api/pool` `/api/pool/{pid}` `/api/pool/{pid}/{symbol,minute-status}` | GET/POST/DELETE | viewer+ / strategy_control | 池 CRUD + 入池（astock 池自动投 symbols 回补）+ 池分钟状态 |
 | 策略-账户绑定 | `/api/strategy_account` `/api/strategy_account/{said}` | GET/POST/DELETE | viewer+ / strategy_control | #27 绑定关系 CRUD |
-| LLM 预算 | `/api/llm-budget` `/api/llm-budget/{check,{bid}}` | GET/POST | viewer+ | D5（预算 CRUD + 手动检查；告警逻辑在 llm_gateway/budget.py） |
+| ~~LLM 预算~~ | ~~`/api/llm-budget`~~ | — | — | **批50 彻底退役**（用户裁定 B：beat 任务/端点/`llm_budget` 表 0088 DROP） |
 | 站内通知 | `/api/notifications` `/api/notifications/ack-all` | GET/POST | viewer+ | 通知中心（active 历史 + 全部已读） |
 | 通知 runbook | `/api/runbook` | GET | strategy_control | runbook 映射单源（通知 chip/处置行消费；暂仅中文——多语言债） |
 | 系统配置 | `/api/system-config` `/api/system-config/{key}` | GET/POST | viewer+ | system_config 键值（md_mode/celery_concurrency 等）；批36b-α 数值键 bounds 随 GET 下发 `{lo,hi,lo_open,percent}`（批45 加 percent=True 五键=0~1 比例，前端显示层 ×100 百分比化，存储仍 0~1）；description 前端词条优先（`systemConfig.desc.*`）DB 兜底 |

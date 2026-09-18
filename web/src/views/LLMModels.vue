@@ -1,219 +1,186 @@
 <template>
-  <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.configTitle') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.llm-models" :columns="modelColDefs" v-model:visible="modelVisible" /><IconBtn :icon="Plus" :title="t('common.create')" @click="onAdd" /></div></div></template>
-    <el-card shadow="never" style="margin-bottom: 12px">
-      <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('llm.usageTitle') }}<RefreshBtn @refresh="loadUsage" style="margin-left: var(--sp-2)" /></div></template>
-      <TableShell :data="usage.month" storage-key="llm-usage">
-        <el-table-column prop="provider" label="Provider" min-width="120" />
-        <el-table-column prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="calls" :label="t('llm.calls')" min-width="80" />
-        <el-table-column prop="tokens" :label="t('llm.tokenCol')" min-width="160">
-          <template #default="{ row }">{{ row.input_tokens.toLocaleString() }} / {{ row.output_tokens.toLocaleString() }}</template>
+  <!-- 批50 重构：两 section 平铺——模型列表（上，拖拽行序=容灾链序）+用量监控（下，卡片曲线）。
+       原预算预警卡彻底退役（用户裁定 B：beat 任务/端点/表 0088 随版 DROP）。
+       原内嵌"用量监控"子卡（当日表+7 日文本行）退役→独立 section 卡片化。 -->
+  <div>
+    <el-card>
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          {{ t('llm.configTitle') }}
+          <div style="display: flex; gap: 8px; align-items: center">
+            <ColumnSettings storage-key="cols.llm-models" :columns="modelColDefs" v-model:visible="modelVisible" />
+            <IconBtn :icon="Plus" :title="t('common.create')" @click="onAdd" />
+          </div>
+        </div>
+      </template>
+      <div class="order-note">{{ t('llm.llmListOrderNote') }} <span class="cooldown-note">{{ t('llm.llmCooldownNote') }}</span></div>
+      <TableShell :data="models" storage-key="llm-models" row-key="id">
+        <el-table-column :label="t('alerts.smtpProvDrag')" width="46">   <!-- 批46 形态：menu 列头+三横线手柄；:label 保留供列宽键 -->
+          <template #header><el-icon :title="t('llm.llmListOrderNote')" :size="16"><Menu /></el-icon></template>
+          <template #default="{ $index }">
+            <span class="drag-handle" :draggable="true"
+                  :title="t('alerts.smtpProvDrag')"
+                  @dragstart="onDragStart($index)" />
+          </template>
         </el-table-column>
-        <el-table-column prop="avg_latency_ms" :label="t('llm.latencyMs')" min-width="100" />
-        <el-table-column prop="success_rate" :label="t('llm.successRateCol')" min-width="100">
-          <template #default="{ row }"><el-tag :type="row.success_rate >= 95 ? 'success' : 'warning'">{{ row.success_rate }}%</el-tag></template>
+        <el-table-column v-if="modelColOn('id')" prop="id" label="ID" min-width="80" />
+        <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip>
+          <template #default="{ row, $index }">
+            <span @dragover.prevent @drop="onDrop($index)">{{ row.name }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="modelColOn('provider')" prop="provider" label="Provider" min-width="120" />
+        <el-table-column v-if="modelColOn('model')" prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
+        <el-table-column v-if="modelColOn('key')" :label="t('llm.apiKey')" min-width="100">
+          <template #default="{ row }">{{ row.has_key ? '✓' : '✗' }}</template>
+        </el-table-column>
+        <el-table-column v-if="modelColOn('ctx')" prop="context_window" :label="t('cols.contextWindow')" min-width="110" />
+        <el-table-column v-if="modelColOn('enabled')" :label="t('common.enable')" min-width="80">
+          <template #default="{ row }">
+            <el-switch v-model="row.enabled" @change="toggle(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column prop="actions" :label="t('common.action')" width="140">
+          <template #default="{ row }">
+            <IconBtn size="small" :icon="VideoPlay" :loading="testing[row.id]" :title="t('common.test')" @click="test(row)" />
+            <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onEdit(row)" />
+            <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="del(row)" />
+          </template>
         </el-table-column>
       </TableShell>
-      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-top: var(--sp-2)">
-        {{ t('llm.trend7d') }}<span v-for="tr in usage.trend" :key="tr.date" style="margin-right: 10px">{{ tr.date.slice(5) }} {{tr.calls}}/{{tr.total_tokens.toLocaleString()}}tk</span><span v-if="!usage.trend.length">{{ t('llm.noTrend') }}</span>
-      </div>
+
+      <!-- 编辑弹窗（批50：priority 输入退役——拖拽唯一真源） -->
+      <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('common.edit') : t('common.create')" width="560px">
+        <el-form :model="form" label-position="top" style="max-width: 480px">
+          <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
+          <el-form-item label="Provider"><el-input v-model="form.provider" placeholder="deepseek / ark ..." /></el-form-item>
+          <el-form-item :label="t('llm.model')"><el-input v-model="form.model" /></el-form-item>
+          <el-form-item :label="t('llm.apiKey')"><el-input v-model="form.api_key" type="password" show-password :placeholder="t('common.phEditNoChange')" autocomplete="new-password" /></el-form-item>
+          <el-form-item :label="t('llm.baseUrl')"><el-input v-model="form.base_url" /></el-form-item>
+          <el-form-item :label="t('cols.contextWindow')"><el-input-number v-model="form.context_window" :min="0" :step="1024" controls-position="right" /></el-form-item>
+          <el-form-item :label="t('llm.maxInputTokens')"><el-input-number v-model="form.max_input_tokens" :min="0" controls-position="right" :placeholder="t('llm.phInputTokens')" /></el-form-item>
+          <el-form-item :label="t('llm.maxOutputTokens')"><el-input-number v-model="form.max_output_tokens" :min="0" controls-position="right" :placeholder="t('llm.phOutputTokens')" /></el-form-item>
+          <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="dlg = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+        </template>
+      </el-dialog>
     </el-card>
-    <TableShell :data="models" storage-key="llm-models">
-      <el-table-column v-if="modelColOn('id')" prop="id" label="ID" min-width="80" />
-      <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
-      <el-table-column v-if="modelColOn('provider')" prop="provider" label="Provider" min-width="120" />
-      <el-table-column v-if="modelColOn('model')" prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
-      <el-table-column v-if="modelColOn('base_url')" prop="base_url" :label="t('cols.apiUrl')" min-width="220" show-overflow-tooltip>
-        <template #default="{ row }">{{ row.base_url || '-' }}</template>
-      </el-table-column>
-      <el-table-column v-if="modelColOn('context_window')" prop="context_window" :label="t('cols.contextWindow')" min-width="110">
-        <template #default="{ row }">{{ row.context_window?.toLocaleString() || '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="has_key" :label="t('llm.key')" min-width="80">
-        <template #default="{ row }"><el-tag :type="row.has_key ? 'success' : 'info'">{{ row.has_key ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
-      </el-table-column>
-      <el-table-column v-if="modelColOn('priority')" prop="priority" :label="t('llm.priority')" min-width="80" />
-      <el-table-column prop="enabled" :label="t('common.enable')" min-width="80">
-        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
-      </el-table-column>
-      <el-table-column prop="actions" :label="t('common.action')" width="250">
-        <template #default="{ row }">
-          <div style="display: inline-flex; gap: 6px; align-items: center; white-space: nowrap">
-            <IconBtn size="small" :icon="VideoPlay" :title="t('common.test')" @click="onTest(row.id)" :loading="testing === row.id" />
-            <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onEdit(row)" />
-            <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')" @click="onDelete(row.id)" />
-          </div>
-        </template>
-      </el-table-column>
-    </TableShell>
 
-    <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('llm.editModel') : t('llm.addModel')" width="560px">
-      <el-form :model="form" label-width="120px">
-      <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
-      <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('llm.phProvider')" /></el-form-item>
-      <el-form-item :label="t('llm.model')"><el-input v-model="form.model" /></el-form-item>
-      <el-form-item :label="t('llm.apiKey')"><el-input v-model="form.api_key" type="password" show-password :placeholder="t('common.phEditNoChange')" autocomplete="new-password" /></el-form-item>
-      <el-form-item :label="t('llm.baseUrl')"><el-input v-model="form.base_url" /></el-form-item>
-      <el-form-item :label="t('cols.contextWindow')"><el-input-number v-model="form.context_window" :min="0" :step="1024" controls-position="right" /></el-form-item>
-      <el-form-item :label="t('llm.maxInputTokens')"><el-input-number v-model="form.max_input_tokens" :min="0" controls-position="right" :placeholder="t('llm.phInputTokens')" /></el-form-item>
-      <el-form-item :label="t('llm.maxOutputTokens')"><el-input-number v-model="form.max_output_tokens" :min="0" controls-position="right" :placeholder="t('llm.phOutputTokens')" /></el-form-item>
-      <el-form-item :label="t('llm.priority')"><el-input-number v-model="form.priority" :min="1" :max="100" /></el-form-item>
-      <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dlg = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
+    <!-- 用量监控 section（批50 卡片化） -->
+    <el-card style="margin-top: 20px">
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <span>{{ t('llm.llmUsageTitle2') }}</span>
+          <RefreshBtn @refresh="loadUsage" />
+        </div>
       </template>
-    </el-dialog>
-  </el-card>
-
-  <!-- P2-3 LLM 预算预警 -->
-  <el-card style="margin-top: 20px" v-loading="budgetLoading">
-    <template #header>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>{{ t('llm.budgetTitle') }}</span>
-        <el-button type="primary" @click="checkBudget" :loading="checking">{{ t('llm.check') }}</el-button>
-      </div>
-    </template>
-    <TableShell :data="budgets" storage-key="llm-budget">
-      <el-table-column prop="provider" label="Provider" min-width="120"><template #default="{ row }">{{ row.provider || t('llm.global') }}</template></el-table-column>
-      <el-table-column prop="daily_token_limit" :label="t('llm.dailyTokenLimit')" min-width="120">
-        <template #default="{ row }">{{ row.daily_token_limit?.toLocaleString() || '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="monthly_cost_limit" :label="t('cols.monthlyCostLimit')" min-width="120">
-        <template #default="{ row }">{{ row.monthly_cost_limit != null ? `¥${row.monthly_cost_limit}` : '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="alert_threshold_pct" :label="t('llm.alertThreshold')" min-width="110" />
-      <el-table-column prop="enabled" :label="t('common.enable')" min-width="80"><template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template></el-table-column>
-      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160"><template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template></el-table-column>
-      <el-table-column v-if="canBudgetEdit" prop="actions" :label="t('common.action')" width="110">
-        <template #default="{ row }">
-          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onBudgetEdit(row)" />
-        </template>
-      </el-table-column>
-    </TableShell>
-    <!-- 预算编辑（批16：后端本有 POST /llm-budget/{bid}，前端补入口） -->
-    <el-dialog v-model="budgetDlg" :close-on-click-modal="false" :title="t('llm.budgetEdit')" width="480px">
-      <el-form :model="budgetForm" label-width="130px">
-        <el-form-item label="Provider"><el-input :model-value="budgetForm.provider || t('llm.global')" disabled /></el-form-item>
-        <el-form-item :label="t('llm.dailyTokenLimit')"><el-input-number v-model="budgetForm.daily_token_limit" :min="0" :step="10000" controls-position="right" style="width: 100%" /></el-form-item>
-        <el-form-item :label="t('cols.monthlyCostLimit')"><el-input-number v-model="budgetForm.monthly_cost_limit" :min="0" :step="100" controls-position="right" style="width: 100%" /></el-form-item>
-        <el-form-item :label="t('llm.alertThreshold')"><el-input-number v-model="budgetForm.alert_threshold_pct" :min="1" :max="100" controls-position="right" style="width: 100%" /></el-form-item>
-        <el-form-item :label="t('common.enable')"><el-switch v-model="budgetForm.enabled" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="budgetDlg = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveBudget" :loading="budgetSaving">{{ t('common.update') }}</el-button>
-      </template>
-    </el-dialog>
-    <el-alert v-if="budgetCheck" :type="budgetCheck.alerts?.length ? 'warning' : 'success'" :closable="false" style="margin-top: 12px">
-      {{ budgetCheck.alerts?.length ? t('llm.alertsOver', { n: budgetCheck.alerts.length }) : t('llm.alertsOk', { n: budgetCheck.checked }) }}
-    </el-alert>
-  </el-card>
+      <LLMUsageCards :models="usageModels" />
+    </el-card>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Edit, Delete, Plus, VideoPlay, Menu } from '@element-plus/icons-vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
-import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Plus, VideoPlay, Edit, Delete } from '@element-plus/icons-vue'
-import {apiErr,  getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel, testLLMModel, getLLMUsage, meOnce } from '../api'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import RefreshBtn from '../components/RefreshBtn.vue'
+import LLMUsageCards from '../components/LLMUsageCards.vue'
 import { fmtTime } from '../utils/fmtTime'
-import api from '../api'
+import { apiErr, getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel,
+         testLLMModel, reorderLLMModels, getLLMUsageSeries } from '../api'
 
 const { t } = useI18n()
 const models = ref([])
-
-// 批17 列显示配置（模型表）：接口地址/优先级默认隐；名称/密钥/启用/操作恒显不进 defs
-const modelColDefs = computed(() => [
-  { key: 'id', label: 'ID' },
-  { key: 'provider', label: 'Provider' },
-  { key: 'model', label: t('llm.model') },
-  { key: 'context_window', label: t('cols.contextWindow') },
-  { key: 'base_url', label: t('cols.apiUrl'), hidden: true },
-  { key: 'priority', label: t('llm.priority'), hidden: true },
-])
-const modelVisible = ref([])
-const modelColOn = k => modelVisible.value.includes(k)
-
-const usage = ref({ today: [], month: [], trend: [] })
-const budgets = ref([])
-const budgetLoading = ref(false)
-const budgetCheck = ref(null)
-const checking = ref(false)
-// 盲审A-P2-6：预算编辑入口跟后端权限键 llm_config（非裸 admin 角色——批11B 权限驱动模型，自定义组授 llm_config 须可见）
-const canBudgetEdit = ref(false)
-onMounted(async () => {
-  try { const me = await meOnce(); canBudgetEdit.value = (me?.permissions || []).includes('llm_config') } catch {}
-})
-
-const loadBudget = async () => { budgetLoading.value = true; try { budgets.value = await api.get('/llm-budget') } catch {} finally { budgetLoading.value = false } }
-const checkBudget = async () => { checking.value = true; try { budgetCheck.value = await api.post('/llm-budget/check') } catch { ElMessage.error(t('llm.checkFailed')) } finally { checking.value = false } }
-
-// 预算编辑（批16）
-const budgetDlg = ref(false)
-const budgetSaving = ref(false)
-const budgetForm = ref({})
-const onBudgetEdit = (row) => { budgetForm.value = { ...row }; budgetDlg.value = true }
-const saveBudget = async () => {
-  budgetSaving.value = true
-  try {
-    await api.post(`/llm-budget/${budgetForm.value.id}`, budgetForm.value)
-    ElMessage.success(t('common.saveSuccess'))
-    budgetDlg.value = false
-    loadBudget()
-  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
-  finally { budgetSaving.value = false }
-}
-const form = ref(emptyForm())
+const usageModels = ref([])
+const dlg = ref(false)
 const saving = ref(false)
-const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）
-const testing = ref(0)
-
-function emptyForm() {
-  return { name: '', provider: '', model: '', api_key: '', base_url: '', priority: 10, enabled: false, context_window: 32768, supports_tools: true, max_input_tokens: null, max_output_tokens: null, temperature: null }
-}
+const testing = ref({})
+const modelVisible = ref({})
+const modelColDefs = [
+  { key: 'id', label: 'ID' }, { key: 'provider', label: 'Provider' },
+  { key: 'model', label: t('llm.model') }, { key: 'key', label: t('llm.apiKey') },
+  { key: 'ctx', label: t('cols.contextWindow') }, { key: 'enabled', label: t('common.enable') },
+]
+const modelColOn = k => modelVisible.value[k] !== false
+const emptyForm = () => ({ id: null, name: '', provider: '', model: '', api_key: '', base_url: '',
+                           context_window: 32768, max_input_tokens: null, max_output_tokens: null, enabled: true })
+const form = ref(emptyForm())
 
 const load = async () => { try { models.value = await getLLMModels() } catch (e) { console.error(e) } }
-const loadUsage = async () => { try { usage.value = await getLLMUsage() } catch (e) { console.error(e) } }
-onMounted(() => { load(); loadUsage(); loadBudget() })
+const loadUsage = async () => { try { usageModels.value = (await getLLMUsageSeries()).models || [] } catch (e) { console.error(e) } }
 
-const onEdit = (row) => { form.value = { ...row, api_key: '' } ; dlg.value = true }
-const resetForm = () => { form.value = emptyForm() }
-const onAdd = () => { resetForm(); dlg.value = true }
-
+const onAdd = () => { form.value = emptyForm(); dlg.value = true }
+const onEdit = (row) => {
+  form.value = { ...row, api_key: '' }   // 密钥空起——留空=不改（后端 api_key 空串跳过加密）
+  dlg.value = true
+}
 const onSave = async () => {
   saving.value = true
   try {
-    if (form.value.id) await updateLLMModel(form.value.id, form.value)
-    else await createLLMModel(form.value)
+    const body = { name: form.value.name, provider: form.value.provider, model: form.value.model,
+                   api_key: form.value.api_key, base_url: form.value.base_url,
+                   context_window: form.value.context_window,
+                   supports_tools: form.value.supports_tools ?? true,   // 批50 盲审 A-P1-1：原值保真（硬编码 true 会静默重置纯文本模型）
+                   max_input_tokens: form.value.max_input_tokens, max_output_tokens: form.value.max_output_tokens,
+                   enabled: form.value.enabled }
+    if (form.value.id) await updateLLMModel(form.value.id, body)
+    else await createLLMModel(body)
     ElMessage.success(t('common.saveSuccess'))
-    resetForm()
     dlg.value = false
-    load()
+    await load()
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
   finally { saving.value = false }
 }
-
-const onDelete = async (id) => {
-  await ElMessageBox.confirm(t('riskRule.confirmDelete'), t('common.tip'), { type: 'warning' })
-  await deleteLLMModel(id)
-  ElMessage.success(t('common.deleteSuccess'))
-  load()
+const toggle = async (row) => {
+  try { await updateLLMModel(row.id, { ...row, api_key: '' }) }
+  catch (e) { row.enabled = !row.enabled; ElMessage.error(apiErr(e, t('common.failed'))) }
 }
-
-const onTest = async (id) => {
-  testing.value = id
+const del = async (row) => {
   try {
-    const r = await testLLMModel(id)
-    if (r.ok) ElMessage.success(t('llm.connectOkReply', { reply: r.reply || '' }))
-    else ElMessage.error(t('common.failedPrefix') + r.error)
-  } catch (e) { ElMessage.error(t('common.testFailed')) }
-  finally { testing.value = 0 }
+    await ElMessageBox.confirm(row.name, t('common.delete'), { type: 'warning' })
+    await deleteLLMModel(row.id)
+    ElMessage.success(t('common.deleteSuccess'))
+    await load()
+  } catch (e) { if (e?.detail) ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
 }
+const test = async (row) => {
+  testing.value[row.id] = true
+  try {
+    const r = await testLLMModel(row.id)
+    ElMessage.success(`${row.name}: ${r.reply?.slice(0, 60) || 'ok'}`)
+  } catch (e) { ElMessage.error(apiErr(e, t('common.failed'))) }
+  finally { testing.value[row.id] = false }
+}
+
+// ——— 拖拽重排（批43/47/50 同款：乐观重排+失败重拉）———
+let dragIdx = -1
+const onDragStart = (i) => { dragIdx = i }
+const onDrop = async (i) => {
+  if (dragIdx < 0 || dragIdx === i) return
+  const arr = [...models.value]
+  const [moved] = arr.splice(dragIdx, 1)
+  arr.splice(i, 0, moved)
+  models.value = arr   // 乐观
+  dragIdx = -1
+  try { await reorderLLMModels(arr.map(r => r.id)) }
+  catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))); await load() }
+}
+
+onMounted(() => { load(); loadUsage() })
 </script>
+
+<style scoped>
+.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+.cooldown-note { color: var(--text-secondary); }
+.drag-handle { display: inline-block; width: 12px; height: 10px; cursor: grab;
+               background: linear-gradient(180deg, var(--text-secondary) 0 2px, transparent 2px 4px, var(--text-secondary) 4px 6px, transparent 6px 8px, var(--text-secondary) 8px 10px);
+               opacity: .55; }
+.drag-handle:active { cursor: grabbing; }
+</style>

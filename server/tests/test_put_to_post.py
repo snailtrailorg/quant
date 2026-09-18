@@ -27,7 +27,6 @@ POST_ENDPOINTS = [
     "/api/llm-models/1",
     "/api/my/im-bots/1",   # 五轮：admin IM 面删除——自助端点
     "/api/sync/config/astock_daily",
-    "/api/llm-budget/1",
     "/api/data-sources/1",
     
     "/api/brokers/1",
@@ -39,8 +38,6 @@ POST_ENDPOINTS = [
 STATIC_ENDPOINTS = [
     "/api/strategy/validate-python",
     "/api/strategy/validate-params",
-    "/api/llm-budget/check",
-    "/api/factors/validate",
 ]
 
 

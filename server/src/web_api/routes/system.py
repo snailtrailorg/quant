@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Request, Body, BackgroundTasks
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, LlmBudgetReq, DataSourceReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, DataSourceReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
 from src.data_platform.db import get_conn
 from src.email_service import queue_email, try_row
 from ..terms import get_terms_items
@@ -28,6 +28,8 @@ SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
     "xtp_session_lead_min": (-1440, 1440, False, False), "xtp_session_lag_min": (-1440, 1440, False, False),
     "user_bot_quota": (1, 100, False, False), "platform_bot_quota": (1, 100, False, False),   # 批26 裁定量程（0083 键型归位后生效）
     "smtp_max_attempts": (1, 10, False, False),   # 批47：每通道尝试配额（总尝试=配额——用户裁定 A）
+    "llm_cooldown_min": (1, 1440, False, False), "llm_fail_threshold": (1, 100, False, False),
+    "llm_retry_wait_s": (0, 300, False, False),   # 批50：LLM 容灾三参数（冷却/阈值/重试间隔——system_config 新真源）
 }
 
 router = APIRouter(tags=["system"])

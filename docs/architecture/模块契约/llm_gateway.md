@@ -171,3 +171,5 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 - 2026-08-10 初版（基于代码核实：gateway.py 402 行全读 + 接口契约字典 §6）
 
 - check_budget_alerts 已入本模块（budget.py，原寄生 web_api.main；随迁 notify 化——预算预警进站内铃铛）
+
+> **批50（2026-09-18）N 行链+冷却三配置**：failover 从 `[primary, fallback]` 二级硬编码改**迭代 models 全列表**（position 序=拖拽行序，`llm_model_config.priority` DROP 由 position 接管——迁移 0088）；熔断键改**行级** `f"{provider}:{id}"`（同 provider 多行独立冷却）；threshold/pause/retry_wait 三参数入 system_config 新真源（`llm_cooldown_min` 默认 30 分/`llm_fail_threshold` 默认 5/`llm_retry_wait_s` 默认 2——`_failover_params` TTL 60s 缓存，config.yaml 降级兜底）；`_load_models_from_db` 坏密文单行跳过（原炸单例构造=chat 链断）；create 端点补 `reload_models()`（存量 bug）；预算链彻底退役（beat 任务/budget.py/三端点/`llm_budget` 表 DROP——用户裁定 B）；用量端点 summary→**series**（每模型今日汇总+48h×小时曲线 generate_series 补零）。

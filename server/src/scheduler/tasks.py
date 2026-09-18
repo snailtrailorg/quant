@@ -1060,18 +1060,6 @@ def convertible_terms_sync():
     return {"status": "ok", "count": len(results)}
 
 
-@app.task(name="src.scheduler.tasks.budget_alert_check")
-def budget_alert_check():
-    """D5 定时预算告警检查（每小时，交易时段内）。"""
-    if not _is_trading_hours():
-        return {"status": "skipped", "reason": "非交易时段"}
-    try:
-        from src.llm_gateway.budget import check_budget_alerts
-        result = check_budget_alerts()
-        return {"status": "ok", "alerts": len(result.get("alerts", []))}
-    except Exception as e:
-        return {"status": "error", "reason": str(e)[:200]}
-
 
 
 @app.task(name="src.scheduler.tasks.static_list_sync")

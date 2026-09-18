@@ -180,11 +180,6 @@ app.conf.update(
             "schedule": crontab(hour=3, minute=43),   # 批27-31：低峰
             "options": {"queue": "data"},
         },
-        "budget-alert-check": {
-            "task": "src.scheduler.tasks.budget_alert_check",
-            "schedule": crontab(minute=37),   # 批27-31：每小时 :37 错峰
-            "options": {"queue": "risk"},
-        },
         "static-list-sync": {
             "task": "src.scheduler.tasks.static_list_sync",
             "schedule": crontab(day_of_week=0, hour=4, minute=37),   # 批27-31：周日低峰（避 04:07 校准）

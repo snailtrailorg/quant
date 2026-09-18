@@ -91,21 +91,22 @@ class LLMGateway:
         if not self._models:
             logger.warning("LLM 网关初始化：无 enabled 模型")
         self._failover = self._load_failover_config(config_path)
+        self._fo_cache: dict = {}   # 批50：failover 三参数缓存（TTL 60s——锁外读库；reload_models 顺带刷新）
         self._failed_counts: dict[str, int] = {}
         self._last_fail_time: dict[str, float] = {}
         self._half_open: dict[str, bool] = {}  # 半开状态标记（P1.9）
         self._lock = threading.Lock()  # 熔断状态并发安全（单例+线程池）
 
     def _load_models_from_db(self) -> list[dict]:
-        """从 DB 读 enabled 模型（按 priority 全局排序），API key 解密。"""
+        """从 DB 读 enabled 模型（批50：按 position 排序——拖拽行序即容灾链序），API key 解密。"""
         from src.data_platform.db import get_conn
         from src.quant_common.crypto import decrypt
         try:
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT id, name, provider, model, api_key_encrypted, base_url, "
-                    "context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, priority "
-                    "FROM llm_model_config WHERE enabled=true ORDER BY priority"
+                    "context_window, supports_tools, max_input_tokens, max_output_tokens, temperature, position "
+                    "FROM llm_model_config WHERE enabled=true ORDER BY position, id"
                 )
                 rows = cur.fetchall()
         except Exception as e:
@@ -113,27 +114,59 @@ class LLMGateway:
             return []
         models = []
         for r in rows:
+            try:   # 批50 dev 实测抓出存量缺陷：坏密文（key 轮换/跨环境）炸单例构造=整个 chat 链断——单行失败跳过+warning
+                api_key = decrypt(r[4]) if r[4] else ""
+            except Exception as e:
+                logger.warning(f"模型 {r[2]}/{r[3]} api_key 解密失败跳过: {e}")
+                continue
             models.append({
                 "id": r[0], "name": r[1], "provider": r[2], "model": r[3],
-                "api_key": decrypt(r[4]) if r[4] else "",
+                "api_key": api_key,
                 "base_url": r[5], "context_window": r[6], "supports_tools": r[7],
-                "max_input_tokens": r[8], "max_output_tokens": r[9], "temperature": r[10], "priority": r[11],
+                "max_input_tokens": r[8], "max_output_tokens": r[9], "temperature": r[10],
             })
         return models
 
     def reload_models(self) -> None:
-        """Web 改配置后刷新缓存。"""
+        """Web 改配置后刷新缓存（批50：顺带刷 failover 参数缓存）。"""
         self._models = self._load_models_from_db()
+        self._fo_cache = {}
+
+    def _failover_params(self) -> dict:
+        """批50：failover 三参数（system_config 新真源：llm_cooldown_min 默认 30/
+        llm_fail_threshold 默认 5/llm_retry_wait_s 默认 2；未配=缺省——config.yaml 降为读库失败
+        兜底）。TTL 60s 实例缓存——chat 主路径高频调用不读库、熔断锁外读。"""
+        now = time.time()
+        if self._fo_cache and now - self._fo_cache.get("_ts", 0) < 60:
+            return self._fo_cache
+        out = {}
+        try:
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "SELECT key, value FROM system_config WHERE key IN "
+                    "('llm_cooldown_min','llm_fail_threshold','llm_retry_wait_s')")
+                cfg = dict(cur.fetchall())
+            out["cooldown_min"] = max(1, int(cfg.get("llm_cooldown_min", 30)))
+            out["fail_threshold"] = max(1, int(cfg.get("llm_fail_threshold", 5)))
+            out["retry_wait_s"] = max(0, int(cfg.get("llm_retry_wait_s", 2)))
+        except Exception as e:
+            logger.warning(f"读 failover 配置失败回落 config.yaml: {e}")
+            cb = self._failover.get("circuit_breaker", {})
+            out["cooldown_min"] = cb.get("pause_s", 300) // 60 or 5
+            out["fail_threshold"] = cb.get("fail_threshold", 5)
+            out["retry_wait_s"] = self._failover.get("retry_wait_s", 2)
+        out["_ts"] = now
+        self._fo_cache = out
+        return out
 
     # ── 路由逻辑 ──
 
-    def _get_primary_fallback(self) -> tuple[dict, dict]:
-        """按 priority 全局排序取 primary + fallback。"""
+    def _ensure_models(self) -> None:
+        """批50：N 行链守卫（原 _get_primary_fallback 二元组退役——failover 硬编码
+        primary/fallback 两级=拖到第 3 行起永不参与，方案盲审 A-P1-1 实锤）。"""
         if not self._models:
             raise RuntimeError("无 enabled LLM 模型，请 Admin 在 Web 配置")
-        primary = self._models[0]
-        fallback = self._models[1] if len(self._models) > 1 else self._models[0]
-        return primary, fallback
 
     # ── 输入 token 限制（程序控制） ──
 
@@ -178,10 +211,12 @@ class LLMGateway:
         return client, conf["model"]
 
     def _is_circuit_open(self, provider: str) -> bool:
-        """熔断检查（closed/open/half_open，P1.9 半开探测）。"""
-        cfg = self._failover.get("circuit_breaker", {})
-        threshold = cfg.get("fail_threshold", 5)
-        pause = cfg.get("pause_s", 300)
+        """熔断检查（closed/open/half_open，P1.9 半开探测）。
+        批50：threshold/pause 读 system_config 真源（`_failover_params` TTL 缓存——
+        cooldown_min=切换后冷却时长；期满半开试探=恢复路径）。"""
+        cfg = self._failover_params()
+        threshold = cfg["fail_threshold"]
+        pause = cfg["cooldown_min"] * 60
         with self._lock:
             n = self._failed_counts.get(provider, 0)
             if n < threshold:
@@ -259,9 +294,9 @@ class LLMGateway:
         批11C：perms=权限键集（非空走权限档位工具过滤，None 走旧 role 档位）。"""
         self._check_input_chars(messages)
         openai_tools = self._filter_tools(role, tools, perms)
-        primary, fallback = self._get_primary_fallback()
-        messages = self._truncate_messages(messages, primary.get("max_input_tokens"))
-        return self._do_chat(messages, primary, fallback, openai_tools, timeout, retries, caller)
+        self._ensure_models()   # 批50：N 行链——_do_chat 迭代全列表
+        messages = self._truncate_messages(messages, self._models[0].get("max_input_tokens"))   # 批50：按首行窗口截断
+        return self._do_chat(messages, openai_tools, timeout, retries, caller)
 
     async def chat_stream(self, messages: list[dict], *,
                           tools: list[Tool] | None = None,
@@ -272,21 +307,23 @@ class LLMGateway:
         """流式聊天。"""
         self._check_input_chars(messages)
         openai_tools = self._filter_tools(role, tools, perms)
-        primary, fallback = self._get_primary_fallback()
-        messages = self._truncate_messages(messages, primary.get("max_input_tokens"))
-        async for chunk in self._do_chat_stream(messages, primary, fallback, openai_tools, caller):
+        self._ensure_models()   # 批50：N 行链——_do_chat 迭代全列表
+        messages = self._truncate_messages(messages, self._models[0].get("max_input_tokens"))   # 批50：按首行窗口截断
+        async for chunk in self._do_chat_stream(messages, openai_tools, caller):
             yield chunk
 
     # ── 内部执行 ──
 
-    def _do_chat(self, messages: list[dict], primary: dict, fallback: dict,
+    def _do_chat(self, messages: list[dict],
                  openai_tools: list[dict],
                  timeout: float, retries: int, caller: str | None) -> LLMResponse:
-        """实际调 LLM，带容灾（指数退避 + 半开熔断 + 用量日志）。"""
+        """实际调 LLM，带容灾（指数退避 + 半开熔断 + 用量日志）。
+        批50：N 行链——迭代 self._models 全列表（position 序即链序，原 [primary, fallback]
+        二级硬编码=第 3 行起永不参与）；熔断键行级 f"{provider}:{id}"。"""
         max_attempts = max(retries, 1)
         for attempt in range(max_attempts + 1):
-            for conf in [primary, fallback]:
-                prov = conf["provider"]
+            for conf in self._models:
+                prov = f"{conf['provider']}:{conf['id']}"
                 if self._is_circuit_open(prov):
                     logger.warning(f"熔断跳过: {prov}")
                     continue
@@ -303,7 +340,7 @@ class LLMGateway:
                     latency = int((time.time() - t0) * 1000)
                     self._reset_fail(prov)
                     parsed = self._parse_response(resp)
-                    self._log_usage(prov, model, parsed.usage.get("input_tokens", 0),
+                    self._log_usage(conf["provider"], model, parsed.usage.get("input_tokens", 0),
                                     parsed.usage.get("output_tokens", 0), latency,
                                     success=True, caller=caller)
                     return parsed
@@ -311,19 +348,19 @@ class LLMGateway:
                     latency = int((time.time() - t0) * 1000)
                     logger.warning(f"prov={prov} 失败: {e}")
                     self._record_fail(prov)
-                    self._log_usage(prov, conf["model"], 0, 0, latency,
+                    self._log_usage(conf["provider"], conf["model"], 0, 0, latency,
                                     success=False, error_type=type(e).__name__, caller=caller)
                     continue
-            # 指数退避（最后一次不睡）
+            # 指数退避（最后一次不睡）——批50：retry_wait_s 读参数缓存（system_config 真源）
             if attempt < max_attempts:
-                time.sleep(self._failover.get("retry_wait_s", 2) * (2 ** attempt))
+                time.sleep(self._failover_params()["retry_wait_s"] * (2 ** attempt))
         return LLMResponse(content="", usage={"error": "所有 provider 不可用"})
 
-    async def _do_chat_stream(self, messages: list[dict], primary: dict, fallback: dict,
+    async def _do_chat_stream(self, messages: list[dict],
                               openai_tools: list[dict], caller: str | None) -> AsyncGenerator[str, None]:
-        """流式调 LLM。"""
-        for conf in [primary, fallback]:
-            prov = conf["provider"]
+        """流式调 LLM。批50：N 行链（同 _do_chat）+行级熔断键。"""
+        for conf in self._models:
+            prov = f"{conf['provider']}:{conf['id']}"
             if self._is_circuit_open(prov):
                 continue
             t0 = time.time()
@@ -352,14 +389,14 @@ class LLMGateway:
                         yield delta.content
                 latency = int((time.time() - t0) * 1000)
                 self._reset_fail(prov)
-                self._log_usage(prov, conf["model"], usage_in, usage_out, latency,
+                self._log_usage(conf["provider"], conf["model"], usage_in, usage_out, latency,
                                 success=True, caller=caller)
                 return
             except Exception as e:
                 latency = int((time.time() - t0) * 1000)
                 logger.warning(f"stream prov={prov} 失败: {e}")
                 self._record_fail(prov)
-                self._log_usage(prov, conf["model"], 0, 0, latency,
+                self._log_usage(conf["provider"], conf["model"], 0, 0, latency,
                                 success=False, error_type=type(e).__name__, caller=caller)
                 continue
         yield "（所有 provider 不可用）"

@@ -81,7 +81,6 @@ class LLMModelReq(BaseModel):
     max_input_tokens: int | None = Field(None, ge=0, le=2_000_000)
     max_output_tokens: int | None = Field(None, ge=0, le=2_000_000)
     temperature: float | None = Field(None, ge=0, le=2)
-    priority: int = Field(10, ge=1, le=100)
     enabled: bool = False
 
     @field_validator("provider")
@@ -111,13 +110,6 @@ class IMBotUserReq(BaseModel):
     im_user_id: str
     role: str
     user_id: int | None = None   # 批11C：绑定平台账号（管理面通道——平台级 bot 的绑定恢复路径，A-P0-1 修）
-
-class LlmBudgetReq(BaseModel):
-    provider: str | None = None
-    daily_token_limit: int | None = Field(None, ge=0)            # 0/负=禁用告警（budget.py falsy 跳过）——写侧仍拒负
-    monthly_cost_limit: float | None = Field(None, ge=0)
-    alert_threshold_pct: int = Field(80, ge=1, le=100)
-    enabled: bool = True
 
 class DataSourceReq(BaseModel):
     provider: str
