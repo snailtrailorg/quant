@@ -17,7 +17,7 @@
       <el-table-column prop="description" :label="t('risk.label')" show-overflow-tooltip>
         <template #default="{ row }">{{ descOf(row) }}</template>   <!-- 批45：词条优先（多语言），DB description 兜底 -->
       </el-table-column>
-      <el-table-column prop="updated_at" :label="t('common.updatedAt')" width="180">
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" width="220">
         <template #default="{ row }">{{ row.updated_at }}</template>
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" width="120">

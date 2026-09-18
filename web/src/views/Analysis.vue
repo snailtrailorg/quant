@@ -17,7 +17,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="support" :label="t('analysis.support')" min-width="100" />
-      <el-table-column prop="resistance" :label="t('analysis.resistance')" min-width="100" />
+      <el-table-column prop="resistance" :label="t('analysis.resistance')" min-width="120" />
       <el-table-column prop="conclusion" :label="t('analysis.conclusion')" show-overflow-tooltip>
         <template #default="{ row }">{{ (row.conclusion || '').replace(/=缺/g, '=—') || '—' }}</template>
       </el-table-column>

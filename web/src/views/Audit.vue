@@ -11,7 +11,7 @@
     </div>
     <TableShell :data="logs" fill infinite :more-text="moreText" :loading="loading"
                 @load-more="onLoadMore" storage-key="audit">
-      <el-table-column prop="ts" :label="t('common.time')" min-width="160">
+      <el-table-column prop="ts" :label="t('common.time')" min-width="220">
         <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
       <el-table-column prop="actor" :label="t('audit.actor')" min-width="120" show-overflow-tooltip />

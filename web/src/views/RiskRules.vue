@@ -8,7 +8,7 @@
         <template #default="{ row }">{{ typeLabel(row.type) }}</template>
       </el-table-column>
       <el-table-column prop="params" :label="t('riskRule.params')" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="160">
+      <el-table-column prop="updated_at" :label="t('common.updatedAt')" min-width="220">
         <template #default="{ row }">{{ fmtTime.full(row.updated_at) }}</template>
       </el-table-column>
       <el-table-column prop="enabled" :label="t('common.enable')" min-width="80">

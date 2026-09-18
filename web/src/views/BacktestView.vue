@@ -32,29 +32,29 @@
       <el-tab-pane :label="t('backtest.trades')" name="trades">
         <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
         <TableShell :data="trades" max-height="400" storage-key="backtest-view-trades">
-          <el-table-column prop="ts" :label="t('trading.time')" min-width="180" />
+          <el-table-column prop="ts" :label="t('trading.time')" min-width="220" />
           <el-table-column prop="action" :label="t('trading.direction')" min-width="80" />
           <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" />
           <el-table-column prop="price" :label="t('trading.price')" min-width="100" />
-          <el-table-column prop="commission" :label="t('backtest.commission')" min-width="100" />
+          <el-table-column prop="commission" :label="t('backtest.commission')" min-width="120" />
         </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.positions')" name="positions">
         <TableShell :data="dailyValues" max-height="400" storage-key="backtest-view-positions">
-          <el-table-column prop="ts" :label="t('backtest.date')" min-width="120" :formatter="(r, c, v) => (v || '').slice(0, 10)" />
+          <el-table-column prop="ts" :label="t('backtest.date')" min-width="220" :formatter="(r, c, v) => (v || '').slice(0, 10)" />
           <el-table-column prop="close" :label="t('backtest.closePrice')" min-width="100" />
           <el-table-column prop="position" :label="t('backtest.positionQty')" min-width="100" />
           <el-table-column prop="avg_price" :label="t('backtest.avgPrice')" min-width="100" />
-          <el-table-column prop="market_value" :label="t('backtest.marketValue')" min-width="120">
+          <el-table-column prop="market_value" :label="t('backtest.marketValue')" min-width="138">
             <template #default="{ row }">{{ (row.position * row.close).toFixed(2) }}</template>
           </el-table-column>
           <el-table-column prop="cash" :label="t('backtest.cash')" min-width="120" />
-          <el-table-column prop="value" :label="t('backtest.totalValue')" min-width="120" />
+          <el-table-column prop="value" :label="t('backtest.totalValue')" min-width="129" />
         </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.logs')" name="logs">
         <TableShell :data="logs" max-height="400" storage-key="backtest-view-logs">
-          <el-table-column prop="ts" :label="t('backtest.logTime')" min-width="170" />
+          <el-table-column prop="ts" :label="t('backtest.logTime')" min-width="220" />
           <el-table-column prop="level" :label="t('backtest.logLevel')" min-width="110">
             <template #default="{ row }">
               <el-tag :type="levelTag(row.level)" size="small">{{ row.level }}</el-tag>

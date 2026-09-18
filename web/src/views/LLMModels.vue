@@ -34,7 +34,7 @@
         <el-table-column v-if="modelColOn('key')" :label="t('llm.apiKey')" min-width="100">
           <template #default="{ row }">{{ row.has_key ? '✓' : '✗' }}</template>
         </el-table-column>
-        <el-table-column v-if="modelColOn('ctx')" prop="context_window" :label="t('cols.contextWindow')" min-width="110" />
+        <el-table-column v-if="modelColOn('ctx')" prop="context_window" :label="t('cols.contextWindow')" min-width="156" />
         <el-table-column v-if="modelColOn('enabled')" :label="t('common.enable')" min-width="80">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="toggle(row)" />

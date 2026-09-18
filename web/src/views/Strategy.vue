@@ -198,7 +198,7 @@
         <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
         <TableShell v-if="binds.length" :data="binds" style="margin-bottom: 12px" storage-key="strategy-accounts">
           <el-table-column prop="account_id" :label="t('common.account')" show-overflow-tooltip />
-          <el-table-column prop="broker_provider" :label="t('common.broker')" width="80" />
+          <el-table-column prop="broker_provider" :label="t('common.broker')" width="101" />
           <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
           <el-table-column prop="actions" :label="t('common.action')" width="80">
             <template #default="{ row }"><el-button type="danger" @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>

@@ -16,7 +16,7 @@
               </div>
             </template>
           <TableShell :data="users" storage-key="users">
-            <el-table-column v-if="userColOn('id')" prop="id" label="ID" min-width="60" />
+            <el-table-column v-if="userColOn('id')" prop="id" label="ID" min-width="80" />
             <el-table-column prop="username" :label="t('account.username')" min-width="120" show-overflow-tooltip />
             <!-- 批16：+昵称/邮箱（后端已返回未显示） -->
             <el-table-column v-if="userColOn('nickname')" prop="nickname" :label="t('cols.nickname')" min-width="120" show-overflow-tooltip>
@@ -34,10 +34,10 @@
                 <el-tag v-else :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
               </template>
             </el-table-column>
-            <el-table-column v-if="userColOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="110">
+            <el-table-column v-if="userColOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="220">
               <template #default="{ row }">{{ (row.created_at || '').slice(0, 10) || '-' }}</template>   <!-- 到日 -->
             </el-table-column>
-            <el-table-column v-if="userColOn('last_login_at')" prop="last_login_at" :label="t('account.lastLogin')" min-width="160">
+            <el-table-column v-if="userColOn('last_login_at')" prop="last_login_at" :label="t('account.lastLogin')" min-width="220">
               <template #default="{ row }">{{ row.last_login_at || '-' }}</template>
             </el-table-column>
             <el-table-column prop="actions" :label="t('common.action')" min-width="110" fixed="right">
@@ -100,8 +100,8 @@
                   <el-tag :type="inviteStatusType(row.status)">{{ t('account.inviteStatus.' + row.status) }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="160" />
-              <el-table-column prop="expires_at" :label="t('account.inviteExpires')" min-width="160" />
+              <el-table-column prop="created_at" :label="t('common.createdAt')" min-width="220" />
+              <el-table-column prop="expires_at" :label="t('account.inviteExpires')" min-width="220" />
               <!-- 盲审A-P1-3/B-P1-1 修：操作列恒显（原 v-if="有 pending" 是批16 仅撤销时的设计——
                    删除按钮与 pending 无关，全过期/全撤销场景下不能失去清理入口）；撤销保留行级条件 -->
               <el-table-column prop="actions" :label="t('common.action')" min-width="150">

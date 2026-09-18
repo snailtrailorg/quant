@@ -40,12 +40,12 @@
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
         <el-table-column v-if="colOn('close')" prop="close" :label="t('trading.price')" min-width="80" class-name="num" />
-        <el-table-column v-if="colOn('pe')" prop="pe" label="PE" min-width="70" class-name="num" />
-        <el-table-column v-if="colOn('pe_ttm')" prop="pe_ttm" :label="t('cols.peTtm')" min-width="90" class-name="num">
+        <el-table-column v-if="colOn('pe')" prop="pe" label="PE" min-width="80" class-name="num" />
+        <el-table-column v-if="colOn('pe_ttm')" prop="pe_ttm" :label="t('cols.peTtm')" min-width="114" class-name="num">
           <template #default="{ row }">{{ row.pe_ttm != null ? row.pe_ttm.toFixed(1) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('pb')" prop="pb" label="PB" min-width="70" class-name="num" />
-        <el-table-column v-if="colOn('turnover')" prop="turnover" :label="t('screener.turnover')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('pb')" prop="pb" label="PB" min-width="80" class-name="num" />
+        <el-table-column v-if="colOn('turnover')" prop="turnover" :label="t('screener.turnover')" min-width="101" class-name="num">
           <template #default="{ row }">{{ row.turnover?.toFixed(1) || '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('market_cap')" prop="total_mv" :label="t('screener.marketCap')" min-width="110" class-name="num">

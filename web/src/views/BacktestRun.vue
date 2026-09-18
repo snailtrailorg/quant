@@ -51,13 +51,13 @@
           <template #default="{ row }">{{ row.result?.total_return_pct }}%</template>
         </el-table-column>
         <!-- 批16：核心三列（波动率/胜率/最大回撤——后端 symbol 级已返回） -->
-        <el-table-column v-if="colOn('volatility')" prop="volatility" :label="t('cols.volatility')" min-width="90" class-name="num">
+        <el-table-column v-if="colOn('volatility')" prop="volatility" :label="t('cols.volatility')" min-width="120" class-name="num">
           <template #default="{ row }">{{ row.result?.volatility ?? '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('win_rate')" prop="win_rate" :label="t('cols.winRate')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('win_rate')" prop="win_rate" :label="t('cols.winRate')" min-width="101" class-name="num">
           <template #default="{ row }">{{ row.result?.win_rate != null ? row.result.win_rate + '%' : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('max_drawdown')" prop="max_drawdown" :label="t('cols.maxDrawdown')" min-width="100" class-name="num">
+        <el-table-column v-if="colOn('max_drawdown')" prop="max_drawdown" :label="t('cols.maxDrawdown')" min-width="138" class-name="num">
           <template #default="{ row }">{{ row.result?.max_drawdown_pct != null ? row.result.max_drawdown_pct + '%' : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('sharpe')" prop="sharpe" :label="t('backtest.sharpe')" min-width="90">

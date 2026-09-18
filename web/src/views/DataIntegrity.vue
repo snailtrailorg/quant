@@ -24,7 +24,7 @@
 
     <TableShell :data="items" :loading="loading" style="width: 100%" fill :fill-reserve="60" storage-key="data-integrity">
       <el-table-column prop="symbol" :label="t('common.symbol')" min-width="120" />
-      <el-table-column prop="local_count" :label="t('dataIntegrity.localCount')" min-width="100" />
+      <el-table-column prop="local_count" :label="t('dataIntegrity.localCount')" min-width="120" />
       <el-table-column prop="first" :label="t('dataIntegrity.first')" min-width="120" />
       <el-table-column prop="last" :label="t('dataIntegrity.last')" min-width="120" />
       <el-table-column prop="expected" :label="t('dataIntegrity.expected')" min-width="100" />

@@ -39,14 +39,14 @@
           <el-link type="primary" @click="openCron(row)">{{ row.schedule }}</el-link>
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('trade_day_filter')" prop="trade_day_filter" :label="t('dataManage.tradeDayFilter')" min-width="120">
+      <el-table-column v-if="colOn('trade_day_filter')" prop="trade_day_filter" :label="t('dataManage.tradeDayFilter')" min-width="175">
         <template #default="{ row }">
           <span>{{ row.trade_day_filter }}</span>
         </template>
       </el-table-column>
       <el-table-column v-if="colOn('tushare_api')" prop="tushare_api" :label="t('cols.apiName')" min-width="140" show-overflow-tooltip />
-      <el-table-column v-if="colOn('pg_table')" prop="pg_table" :label="t('cols.targetTable')" min-width="120" show-overflow-tooltip />
-      <el-table-column v-if="colOn('last_sync_date')" prop="last_sync_date" :label="t('cols.cursorDate')" min-width="120">
+      <el-table-column v-if="colOn('pg_table')" prop="pg_table" :label="t('cols.targetTable')" min-width="138" show-overflow-tooltip />
+      <el-table-column v-if="colOn('last_sync_date')" prop="last_sync_date" :label="t('cols.cursorDate')" min-width="129">
         <template #default="{ row }">{{ row.last_sync_date || '-' }}</template>
       </el-table-column>
       <el-table-column v-if="colOn('status')" prop="status" :label="t('common.status')" min-width="100">
@@ -54,7 +54,7 @@
           <StatusTag :value="row.status" />
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('last_sync_count')" prop="last_sync_count" :label="t('dataManage.lastSync')" min-width="100">
+      <el-table-column v-if="colOn('last_sync_count')" prop="last_sync_count" :label="t('dataManage.lastSync')" min-width="110">
         <template #default="{ row }">{{ t('dataManage.rowsCount', { n: row.last_sync_count || 0 }) }}</template>
       </el-table-column>
       <el-table-column v-if="colOn('last_sync_ts')" prop="last_sync_ts" :label="t('dataManage.syncTime')" min-width="160">
@@ -85,7 +85,7 @@
       </template>
       <TableShell :data="logs" max-height="300" storage-key="sync-logs">
         <el-table-column v-if="logColOn('task')" prop="sync_id" :label="t('dataManage.task')" min-width="120" />
-        <el-table-column v-if="logColOn('ts')" prop="ts" :label="t('common.time')" min-width="160">
+        <el-table-column v-if="logColOn('ts')" prop="ts" :label="t('common.time')" min-width="220">
           <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
         </el-table-column>
         <el-table-column v-if="logColOn('mode')" prop="mode" :label="t('common.mode')" min-width="80" />

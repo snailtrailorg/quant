@@ -11,7 +11,7 @@
     </template>
     <!-- 批17 17A：列宽拖拽+持久化 -->
     <TableShell :data="tasks" storage-key="live-tasks">
-      <el-table-column v-if="colOn('id')" prop="id" label="ID" width="60" />
+      <el-table-column v-if="colOn('id')" prop="id" label="ID" width="80" />
       <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
       <el-table-column v-if="colOn('strategy_id')" prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
       <el-table-column v-if="colOn('symbol')" prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
@@ -35,10 +35,10 @@
       <el-table-column v-if="colOn('account_id')" prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
       <el-table-column v-if="colOn('initial_capital')" prop="initial_capital" :label="t('liveTask.capital')" min-width="120" />
       <!-- 批16：+创建时间/心跳年龄（后端已返回未显示） -->
-      <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="160">
+      <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="220">
         <template #default="{ row }">{{ fmtTime.full(row.created_at) }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('hb_age')" prop="hb_age" :label="t('cols.heartbeatAge')" min-width="100" class-name="num">
+      <el-table-column v-if="colOn('hb_age')" prop="hb_age" :label="t('cols.heartbeatAge')" min-width="147" class-name="num">
         <template #default="{ row }">{{ fmtAge(row.hb_age_s) }}</template>
       </el-table-column>
             <el-table-column type="expand">

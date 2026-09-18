@@ -16,10 +16,10 @@
       <el-table-column prop="id" :label="t('task.taskId')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="name" :label="t('common.name')" min-width="200" show-overflow-tooltip />
       <el-table-column prop="type" :label="t('common.type')" min-width="100" />
-      <el-table-column v-if="colOn('trigger_type')" prop="trigger_type" :label="t('cols.triggerType')" min-width="110">
+      <el-table-column v-if="colOn('trigger_type')" prop="trigger_type" :label="t('cols.triggerType')" min-width="138">
         <template #default="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('trigger_user')" prop="trigger_user" :label="t('cols.triggeredBy')" min-width="110" show-overflow-tooltip />
+      <el-table-column v-if="colOn('trigger_user')" prop="trigger_user" :label="t('cols.triggeredBy')" min-width="138" show-overflow-tooltip />
       <el-table-column prop="status" :label="t('common.status')" min-width="100">
         <template #default="{ row }"><StatusTag :value="row.status" /></template>
       </el-table-column>
@@ -29,10 +29,10 @@
       <el-table-column prop="last_heartbeat" :label="t('task.heartbeat')" min-width="160">
         <template #default="{ row }">{{ row.last_heartbeat ? fmtTime.full(row.last_heartbeat) : '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('start_time')" prop="start_time" :label="t('cols.startTime')" min-width="160">
+      <el-table-column v-if="colOn('start_time')" prop="start_time" :label="t('cols.startTime')" min-width="220">
         <template #default="{ row }">{{ row.start_time ? fmtTime.full(row.start_time) : '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="colOn('end_time')" prop="end_time" :label="t('cols.endTime')" min-width="160">
+      <el-table-column v-if="colOn('end_time')" prop="end_time" :label="t('cols.endTime')" min-width="220">
         <template #default="{ row }">{{ row.end_time ? fmtTime.full(row.end_time) : '-' }}</template>
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" width="130">
@@ -57,7 +57,7 @@
           <el-table-column prop="level" :label="t('log.level')" min-width="80" />
           <el-table-column prop="message" :label="t('log.content')" show-overflow-tooltip />
           <el-table-column prop="step_name" :label="t('task.step')" min-width="120" />
-          <el-table-column prop="created_at" :label="t('common.time')" min-width="160">
+          <el-table-column prop="created_at" :label="t('common.time')" min-width="220">
             <template #default="{ row }">{{ row.created_at ? fmtTime.full(row.created_at) : '' }}</template>
           </el-table-column>
         </TableShell>

@@ -95,7 +95,7 @@
         </div>
         <!-- 批17 17A：列宽拖拽+持久化；17B 列显隐（时间类低频列默认隐） -->
         <TableShell :data="ordersData.orders || []" size="small" storage-key="trading-orders">
-          <el-table-column v-if="orderOn('ts')" prop="ts" :label="t('trading.time')" min-width="140" />
+          <el-table-column v-if="orderOn('ts')" prop="ts" :label="t('trading.time')" min-width="220" />
           <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
           <el-table-column v-if="orderOn('action')" prop="action" :label="t('trading.direction')" min-width="80">
             <template #default="{ row }">

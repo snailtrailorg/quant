@@ -31,15 +31,15 @@
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
         <el-table-column v-if="colOn('fund_type')" prop="fund_type" :label="t('screener.fundType')" min-width="90" />
-        <el-table-column v-if="colOn('invest_type')" prop="invest_type" :label="t('cols.investType')" min-width="100" show-overflow-tooltip />
+        <el-table-column v-if="colOn('invest_type')" prop="invest_type" :label="t('cols.investType')" min-width="166" show-overflow-tooltip />
         <el-table-column v-if="colOn('management')" prop="management" :label="t('cols.manager')" min-width="140" show-overflow-tooltip />
         <el-table-column v-if="colOn('fund_scale')" prop="fund_scale" :label="t('screener.fundScale')" min-width="110" class-name="num">
           <template #default="{ row }">{{ row.fund_scale != null ? fmtCn(row.fund_scale, 1) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('management_fee')" prop="management_fee" :label="t('screener.mgmtFee')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('management_fee')" prop="management_fee" :label="t('screener.mgmtFee')" min-width="101" class-name="num">
           <template #default="{ row }">{{ row.management_fee != null ? row.management_fee.toFixed(2) + '%' : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('tracking_error')" prop="tracking_error" :label="t('screener.trackingErr')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('tracking_error')" prop="tracking_error" :label="t('screener.trackingErr')" min-width="134" class-name="num">
           <template #default="{ row }">{{ row.tracking_error != null ? row.tracking_error.toFixed(2) : '—' }}</template>
         </el-table-column>
       </TableShell>

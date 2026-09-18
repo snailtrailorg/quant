@@ -20,7 +20,7 @@
       </template>
       <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
       <TableShell :data="filteredRuns" :loading="loading" @row-click="goDetail" storage-key="backtest-list">
-        <el-table-column prop="id" label="ID" min-width="70" />
+        <el-table-column prop="id" label="ID" min-width="80" />
         <el-table-column prop="strategy_id" :label="t('backtest.strategy')" min-width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ strategyName(row.strategy_id) }}</template>
         </el-table-column>
@@ -32,7 +32,7 @@
             </span><span v-else>—</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="colOn('dd')" prop="dd" :label="t('backtest.ddCol')" min-width="80" class-name="num">
+        <el-table-column v-if="colOn('dd')" prop="dd" :label="t('backtest.ddCol')" min-width="101" class-name="num">
           <template #default="{ row }">{{ bs(row).dd != null ? pct(bs(row).dd) : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('sharpe')" prop="sharpe" :label="t('backtest.sharpeCol')" min-width="80" class-name="num">
@@ -59,7 +59,7 @@
         <el-table-column v-if="colOn('symbols')" prop="symbols" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ t('backtest.symbolCount', { n: row.symbols?.length || 0 }) }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="160">
+        <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="220">
           <template #default="{ row }">{{ row.created_at?.slice(0, 19) }}</template>
         </el-table-column>
         <el-table-column prop="actions" :label="t('common.action')" min-width="190" fixed="right">

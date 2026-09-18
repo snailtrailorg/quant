@@ -135,7 +135,7 @@
       <IconBtn :icon="Plus" :title="t('myIm.add')" @click="openImAdd" />
     </div>
     <TableShell v-if="imBots.length" :data="imBots" size="small" storage-key="im-bots">
-      <el-table-column prop="provider" :label="t('myIm.provider')" width="90" />
+      <el-table-column prop="provider" :label="t('myIm.provider')" width="123" />
       <el-table-column prop="name" :label="t('common.name')" min-width="120" show-overflow-tooltip />
       <el-table-column prop="enabled" :label="t('common.status')" width="80">
         <template #default="{ row }">

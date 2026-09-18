@@ -8,7 +8,7 @@
       </div>
     </template>
     <TableShell :data="accounts" :loading="loading" storage-key="trading-accounts">
-      <el-table-column prop="id" label="ID" width="60" />
+      <el-table-column prop="id" label="ID" width="80" />
       <el-table-column prop="name" :label="t('common.name')" show-overflow-tooltip />
       <el-table-column prop="exchange" :label="t('tradingAccounts.exchange')" width="120" />
       <el-table-column prop="api_key_hint" :label="t('tradingAccounts.apiKeyHint')" width="180">
@@ -21,7 +21,7 @@
           <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? t('common.enabled') : t('common.disabled') }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="created_at" :label="t('common.createdAt')" width="160">
+      <el-table-column prop="created_at" :label="t('common.createdAt')" width="220">
         <template #default="{ row }">{{ fmtTime.full(row.created_at || '') }}</template>
       </el-table-column>
       <el-table-column prop="actions" :label="t('common.action')" width="150" fixed="right">

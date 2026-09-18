@@ -14,7 +14,7 @@
       </template>
       <EmptyState v-if="!allowed" :description="t('alerts.noPerm')" />
       <TableShell :data="rows" storage-key="alert-subs">
-        <el-table-column prop="username" :label="t('alerts.subUser')" min-width="150">
+        <el-table-column prop="username" :label="t('alerts.subUser')" min-width="213">
           <template #default="{ row }">{{ row.nickname ? `${row.username}（${row.nickname}）` : row.username }}</template>
         </el-table-column>
         <el-table-column :label="t('alerts.channels')" min-width="300">
@@ -37,7 +37,7 @@
         <el-table-column prop="min_level" :label="t('alerts.minLevel')" width="120">
           <template #default="{ row }">{{ t('common.lvl.' + row.min_level) }}</template>
         </el-table-column>
-        <el-table-column prop="enabled" :label="t('common.enable')" width="70">
+        <el-table-column prop="enabled" :label="t('common.enable')" width="83">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="toggle(row)" />
           </template>

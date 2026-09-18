@@ -10,7 +10,7 @@
     <el-alert v-if="noPerm" type="warning" :title="t('log.noPerm')" :closable="false" style="margin-bottom: var(--sp-3)" />
     <TableShell v-else :data="filteredLogs" fill infinite :more-text="moreText" :loading="loading"
                 @load-more="onLoadMore" storage-key="logs-run">
-      <el-table-column prop="ts" :label="t('common.time')" min-width="160">
+      <el-table-column prop="ts" :label="t('common.time')" min-width="220">
         <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
       </el-table-column>
       <el-table-column prop="level" :label="t('log.level')" min-width="80">
