@@ -14,18 +14,19 @@ logger = logging.getLogger("web_api")
 
 
 # 批36b-α：int/float 配置键值域注册表（单源——写侧查表/GET 下发/消费侧钳位同源引用；
-# 33b perm_resource 注册表同模式协同约定）。(lo, hi, lo_open)；hi=None 无上界。
+# 33b perm_resource 注册表同模式协同约定）。(lo, hi, lo_open, percent)；hi=None 无上界。
+# 批45 第四元 percent=True：0~1 比例键——前端显示层 ×100 百分比化（存储仍 0~1 不动）。
 # xtp 两键 lo 取负：≤0=禁用（永久连接）是铁律语义，不得锁死（盲审 B-P1-4）。
 SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
-    "alert_disk_warn": (0, 1, True), "alert_disk_crit": (0, 1, True),
-    "alert_mem_warn": (0, 1, True), "alert_mem_crit": (0, 1, True),
-    "alert_swap_warn": (0, 1, True),
-    "log_retention_days": (0, 36500, False), "audit_retention_days": (0, 36500, False),   # 0=不清理（批28-7 语义）
-    "celery_concurrency": (1, 16, False),
-    "collect_period_disk": (30, 86400, False),
-    "collect_period_mem": (10, 86400, False), "collect_period_swap": (10, 86400, False),
-    "xtp_session_lead_min": (-1440, 1440, False), "xtp_session_lag_min": (-1440, 1440, False),
-    "user_bot_quota": (1, 100, False), "platform_bot_quota": (1, 100, False),   # 批26 裁定量程（0083 键型归位后生效）
+    "alert_disk_warn": (0, 1, True, True), "alert_disk_crit": (0, 1, True, True),
+    "alert_mem_warn": (0, 1, True, True), "alert_mem_crit": (0, 1, True, True),
+    "alert_swap_warn": (0, 1, True, True),
+    "log_retention_days": (0, 36500, False, False), "audit_retention_days": (0, 36500, False, False),   # 0=不清理（批28-7 语义）
+    "celery_concurrency": (1, 16, False, False),
+    "collect_period_disk": (30, 86400, False, False),
+    "collect_period_mem": (10, 86400, False, False), "collect_period_swap": (10, 86400, False, False),
+    "xtp_session_lead_min": (-1440, 1440, False, False), "xtp_session_lag_min": (-1440, 1440, False, False),
+    "user_bot_quota": (1, 100, False, False), "platform_bot_quota": (1, 100, False, False),   # 批26 裁定量程（0083 键型归位后生效）
 }
 
 router = APIRouter(tags=["system"])
@@ -370,9 +371,9 @@ def list_system_config(payload: dict = Depends(require_perm("read"))):
                           "value_type": r[2], "description": r[3],
                           "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]})
         else:
-            b = SYSTEM_CONFIG_BOUNDS.get(r[0]) if r[2] in ("int", "float") else None   # 批36b-α：值域随 GET 下发（前端控件动态绑定）
+            b = SYSTEM_CONFIG_BOUNDS.get(r[0]) if r[2] in ("int", "float") else None   # 批36b-α：值域随 GET 下发（前端控件动态绑定）；批45 加 percent
             items.append({"key": r[0], "value": value, "value_type": r[2], "description": r[3],
-                          "bounds": {"lo": b[0], "hi": b[1], "lo_open": b[2]} if b else None,
+                          "bounds": {"lo": b[0], "hi": b[1], "lo_open": b[2], "percent": b[3]} if b else None,
                           "updated_at": str(r[4]) if r[4] else None, "updated_by": r[5]})
     return {"items": items}
 
@@ -409,7 +410,7 @@ def update_system_config(key: str, body: dict = Body(...),
             num = float(value)
             if not isfinite(num):
                 raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需有限数字")
-            lo, hi, lo_open = bounds
+            lo, hi, lo_open = bounds[:3]   # 批45 四元（第四元 percent 仅显示元数据，不参与校验）
             if num < lo or (num == lo and lo_open):
                 raise ApiError(400, "CONFIG_VALUE_INVALID",
                                f"{key} 需大于 {lo:g}" + ("（不含）" if lo_open else ""))

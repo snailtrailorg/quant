@@ -7,7 +7,8 @@
 
 条目形状（批36b-α/33b 注册表协同约定参照）：typed dict——
   key/dtype(float|int|bool|enum)/lo/hi/lo_open（下界开区间）/
-  default（与 DEFAULT_RULES 对齐）/step/precision/enum/values/optional
+  default（与 DEFAULT_RULES 对齐）/step/precision/enum/values/optional/
+  percent（批45：True=0~1 比例键——前端显示层 ×100 百分比化，存储仍 0~1）
 命名冲突钉：daily_loss_limit 在 global/crypto=比例(0,1]，registry 侧绝对额键名是
 max_loss——查表恒 (type,key) 复合键，禁平铺。
 """
@@ -19,16 +20,16 @@ RISK_PARAM_SCHEMA: dict[str, dict] = {
         "active": True,
         "params": [
             {"key": "max_drawdown", "dtype": "float", "lo": 0, "hi": 1, "lo_open": True,
-             "default": 0.15, "step": 0.01, "precision": 4},
+             "default": 0.15, "step": 0.01, "precision": 4, "percent": True},
             {"key": "daily_loss_limit", "dtype": "float", "lo": 0, "hi": 1, "lo_open": True,
-             "default": 0.05, "step": 0.01, "precision": 4},
+             "default": 0.05, "step": 0.01, "precision": 4, "percent": True},
         ],
     },
     "etf_conv": {
         "active": True,
         "params": [
             {"key": "single_position_pct", "dtype": "float", "lo": 0, "hi": 1, "lo_open": True,
-             "default": 0.15, "step": 0.01, "precision": 4},
+             "default": 0.15, "step": 0.01, "precision": 4, "percent": True},
             {"key": "max_trades_per_day", "dtype": "int", "lo": 0, "hi": 10000,
              "default": 20, "step": 1, "precision": 0, "zero_note": True},   # 0=不限制（:316 falsy 跳过）
             {"key": "max_single_amount", "dtype": "float", "lo": 0, "hi": 1e12, "lo_open": True,
@@ -45,7 +46,7 @@ RISK_PARAM_SCHEMA: dict[str, dict] = {
              "default": "isolated", "optional": True},
             {"key": "pin_protection", "dtype": "bool", "default": True, "optional": True},
             {"key": "daily_loss_limit", "dtype": "float", "lo": 0, "hi": 1, "lo_open": True,
-             "default": 0.05, "step": 0.01, "precision": 4},
+             "default": 0.05, "step": 0.01, "precision": 4, "percent": True},
             {"key": "max_single_amount", "dtype": "float", "lo": 0, "hi": 1e12, "lo_open": True,
              "default": 500000, "step": 10000, "precision": 0, "optional": True},   # DEFAULT 无键、:373 .get 消费
         ],
@@ -55,7 +56,7 @@ RISK_PARAM_SCHEMA: dict[str, dict] = {
         "active": False,
         "params": [
             {"key": "max_pct", "dtype": "float", "lo": 0, "hi": 1, "lo_open": True,
-             "default": 0.1, "step": 0.01, "precision": 4},
+             "default": 0.1, "step": 0.01, "precision": 4, "percent": True},
         ],
     },
     "max_single_order": {

@@ -58,3 +58,35 @@ console.log('✓ locales 无重复键')
   }
   console.log('✓ 行内注释吞键 0 处')
 }
+
+// 批45 守门：en/zh 键集对称——单侧缺键=另一语言环境静默回落（zh 缺→中文界面出英文；en 缺→英文界面出中文）。
+// 现状盲区实证：en 缺 systemConfig.desc.* → 英文环境配置说明回落 DB 中文。
+{
+  const collect = (node, prefix, out) => {
+    if (!node || node.type !== 'ObjectExpression') return
+    for (const p of node.properties) {
+      if (p.type !== 'Property' || p.computed || p.key.type !== 'Identifier') continue
+      const path = prefix ? `${prefix}.${p.key.name}` : p.key.name
+      if (p.value.type === 'ObjectExpression') collect(p.value, path, out)
+      else out.add(path)
+    }
+  }
+  const root = ast.body.find(s => s.type === 'ExportDefaultDeclaration')?.declaration
+  const zhNode = root?.properties?.find(p => p.key.name === 'zh')?.value
+  const enNode = root?.properties?.find(p => p.key.name === 'en')?.value
+  if (!zhNode || !enNode) {
+    console.error('✗ 未找到顶层 zh/en 段（结构变更？）')
+    process.exit(1)
+  }
+  const zhKeys = new Set(), enKeys = new Set()
+  collect(zhNode, '', zhKeys); collect(enNode, '', enKeys)
+  const zhOnly = [...zhKeys].filter(k => !enKeys.has(k))
+  const enOnly = [...enKeys].filter(k => !zhKeys.has(k))
+  if (zhOnly.length || enOnly.length) {
+    console.error(`✗ en/zh 键集不对称（zh-only ${zhOnly.length} / en-only ${enOnly.length}）:`)
+    zhOnly.forEach(k => console.error(`  仅 zh: ${k}`))
+    enOnly.forEach(k => console.error(`  仅 en: ${k}`))
+    process.exit(1)
+  }
+  console.log(`✓ en/zh 键集对称（${zhKeys.size} 键）`)
+}

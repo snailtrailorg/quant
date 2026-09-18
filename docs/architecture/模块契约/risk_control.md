@@ -23,6 +23,7 @@ server/src/risk_control/
 - **risk_schema.py 新模块（唯一单源）**：`RISK_PARAM_SCHEMA` 六类 (type,key) 复合表（global/etf_conv/crypto 执法三类+registry 三类存储未生效——`daily_loss_limit` global=比例 (0,1] vs registry `max_loss`=绝对额，复合键钉死）；`validate_params(type, raw)` 写侧校验（JSON/dict/逐键范围/NaN 拒/optional null 跳过）；`RuleSanitizer` 消费侧三层钳位（非 dict 整组回落/键类型非法回落缺省/超界钳边界——原 `__init__` TypeError 崩溃+坏 JSON 静默回落+NaN 穿透三路径闭环）+值指纹去抖告警；GET `/api/risk-rules/types` 下发 schema（前端 RiskRules 动态表单纯渲染）。
 - 写端点（POST `/api/risk-rules`×2）：type 白名单六类+validate_params→400 `RISK_PARAM_INVALID`。
 - 批39：`RiskControl.update_rules` 死码已删（绕过 Sanitizer 不落库陷阱）。
+- 批45（2026-09-18）：schema 5 个 pct 键（global.max_drawdown/global.daily_loss_limit/etf_conv.single_position_pct/crypto.daily_loss_limit/max_position.max_pct）加 `percent: True`——GET /types 透传，前端 RiskRules 显示层 ×100 百分比化（0.15↔15，步进 1%），存储仍 0~1、校验/钳位零改动。
 
 ## 一、public API（稳定，可跨模块调用）
 

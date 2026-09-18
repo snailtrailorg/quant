@@ -101,7 +101,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | LLM 预算 | `/api/llm-budget` `/api/llm-budget/{check,{bid}}` | GET/POST | viewer+ | D5（预算 CRUD + 手动检查；告警逻辑在 llm_gateway/budget.py） |
 | 站内通知 | `/api/notifications` `/api/notifications/ack-all` | GET/POST | viewer+ | 通知中心（active 历史 + 全部已读） |
 | 通知 runbook | `/api/runbook` | GET | strategy_control | runbook 映射单源（通知 chip/处置行消费；暂仅中文——多语言债） |
-| 系统配置 | `/api/system-config` `/api/system-config/{key}` | GET/POST | viewer+ | system_config 键值（md_mode/celery_concurrency 等） |
+| 系统配置 | `/api/system-config` `/api/system-config/{key}` | GET/POST | viewer+ | system_config 键值（md_mode/celery_concurrency 等）；批36b-α 数值键 bounds 随 GET 下发 `{lo,hi,lo_open,percent}`（批45 加 percent=True 五键=0~1 比例，前端显示层 ×100 百分比化，存储仍 0~1）；description 前端词条优先（`systemConfig.desc.*`）DB 兜底 |
 | SMTP 配置 | `/api/smtp-config` `/api/email/test` `/api/email-outbox` | GET/POST | user_mgmt（admin） | 邮件服务器配置 + 测试 + 发件箱 |
 | 邀请管理 | `/api/invites` `/api/invites/{tid}/revoke` | GET/POST | user_mgmt（admin） | 邀请链接列表 + 撤销 |
 | Dashboard | `/api/dashboard` | GET | viewer+ | 账户快照/持仓聚合看板 |

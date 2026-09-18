@@ -38,7 +38,14 @@
         <div v-if="!currentSpec?.active" class="param-hint">{{ t('riskRule.typeInactiveNote') }}</div>
       </el-form-item>
       <el-form-item v-for="p in currentSpec?.params || []" :key="p.key" :label="paramLabel(p.key)">
-        <el-input-number v-if="p.dtype === 'float' || p.dtype === 'int'"
+        <!-- 批45：0~1 比例键换算模型（0.15↔15，步进 1%=0.01；存储仍 0~1） -->
+        <template v-if="p.percent">
+          <el-input-number
+            :model-value="toPct(form.values[p.key])" @update:model-value="v => form.values[p.key] = fromPct(v)"
+            :min="p.lo * 100" :max="p.hi * 100" :step="(p.step || 0.01) * 100" :precision="0" style="width: 180px" />
+          <span style="margin-left: 6px">%</span>
+        </template>
+        <el-input-number v-else-if="p.dtype === 'float' || p.dtype === 'int'"
           v-model="form.values[p.key]" :min="p.lo ?? undefined" :max="p.hi ?? undefined"
           :step="p.step || 1" :precision="p.precision ?? undefined" style="width: 180px" />
         <el-switch v-else-if="p.dtype === 'bool'" v-model="form.values[p.key]" />
@@ -66,6 +73,7 @@ import TableShell from '../components/TableShell.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { Plus, Edit, Delete } from '@element-plus/icons-vue'
 import {apiErr,  getRiskRules, getRiskRuleTypes, createRiskRule, updateRiskRule, deleteRiskRule } from '../api'
+import { toPct, fromPct } from '../utils/pct'   // 批45：percent 键显示层换算
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const { t } = useI18n()
@@ -119,8 +127,9 @@ const onSave = async () => {
   for (const p of currentSpec.value?.params || []) {
     const v = form.value.values[p.key]
     if ((p.dtype === 'float' || p.dtype === 'int') && typeof v === 'number') {
-      if (p.lo_open && v <= p.lo) { ElMessage.warning(t('riskRule.loOpenErr', { k: paramLabel(p.key), lo: p.lo })); return }
-      if (typeof p.hi === 'number' && v > p.hi) { ElMessage.warning(t('riskRule.hiErr', { k: paramLabel(p.key), hi: p.hi })); return }
+      // 批45：percent 键界值随显示层 ×100（消息与控件刻度一致）
+      if (p.lo_open && v <= p.lo) { ElMessage.warning(t('riskRule.loOpenErr', { k: paramLabel(p.key), lo: p.percent ? `${p.lo * 100}%` : p.lo })); return }
+      if (typeof p.hi === 'number' && v > p.hi) { ElMessage.warning(t('riskRule.hiErr', { k: paramLabel(p.key), hi: p.percent ? `${p.hi * 100}%` : p.hi })); return }
     }
   }
   // 批38 last-wins 防御：同 type 已有其他启用行=保存后静默覆盖（合并语义后行胜）——确认提示

@@ -113,6 +113,35 @@ def test_risk_rule_types_shape(authed_client):
     assert set(tys) == {"global", "etf_conv", "crypto", "max_position", "max_single_order", "daily_loss_limit"}
     assert tys["global"]["active"] is True and tys["max_position"]["active"] is False
     assert any(p["key"] == "max_drawdown" for p in tys["global"]["params"])
+    # 批45：pct 键 percent=True 透传（前端显示层 ×100 百分比化驱动）；金额键无
+    _g = {p["key"]: p for p in tys["global"]["params"]}
+    assert _g["max_drawdown"]["percent"] is True and _g["daily_loss_limit"]["percent"] is True
+    _e = {p["key"]: p for p in tys["etf_conv"]["params"]}
+    assert _e["single_position_pct"]["percent"] is True and "percent" not in _e["max_single_amount"]
+    _c = {p["key"]: p for p in tys["crypto"]["params"]}
+    assert _c["daily_loss_limit"]["percent"] is True and "percent" not in _c["leverage_max"]
+    assert not any(p.get("percent") for p in tys["daily_loss_limit"]["params"])   # 绝对额类零 percent
+
+
+# ——— 批45：GET bounds percent 下发（显示层百分比化元数据随值域同源下发） ———
+
+def test_system_config_bounds_percent_downstream(authed_client):
+    """GET config：五 pct 键 bounds.percent=true、int 键 false、text 键 bounds=null。"""
+    conn = MagicMock(); conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchall.return_value = [
+        ("alert_disk_warn", "0.8", "float", "d", None, None),
+        ("celery_concurrency", "2", "int", "d", None, None),
+        ("base_url", "", "text", "d", None, None),
+    ]
+    with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+         patch("src.web_api.routes.system.require_perm",
+               return_value={"sub": 1, "username": "admin", "db_role": "admin"}):
+        r = authed_client.get("/api/system-config")
+    assert r.status_code == 200
+    items = {i["key"]: i for i in r.json()["items"]}
+    assert items["alert_disk_warn"]["bounds"] == {"lo": 0, "hi": 1, "lo_open": True, "percent": True}
+    assert items["celery_concurrency"]["bounds"]["percent"] is False
+    assert items["base_url"]["bounds"] is None   # text 键无 bounds（前端可选链防 TypeError——盲审 A-P1-2 钉）
 
 
 # ——— manual-order / exempt ———
@@ -229,9 +258,9 @@ def test_validate_params_nan_and_optional_null():
 def test_system_config_bounds_registry(authed_client):
     """注册表查表：阈值 >1 拒/concurrency 0 拒/xtp 负值（=禁用语义）放行/quota 域。"""
     from src.web_api.routes.system import SYSTEM_CONFIG_BOUNDS
-    assert SYSTEM_CONFIG_BOUNDS["alert_mem_crit"] == (0, 1, True)
+    assert SYSTEM_CONFIG_BOUNDS["alert_mem_crit"] == (0, 1, True, True)   # 批45 四元（第四元 percent）
     assert SYSTEM_CONFIG_BOUNDS["xtp_session_lead_min"][0] < 0   # ≤0=禁用铁律不锁死（B-P1-4）
-    assert SYSTEM_CONFIG_BOUNDS["user_bot_quota"] == (1, 100, False)
+    assert SYSTEM_CONFIG_BOUNDS["user_bot_quota"] == (1, 100, False, False)
     conn = MagicMock(); conn.__enter__.return_value = conn
     conn.execute.return_value.fetchone.side_effect = [
         ("float",), (None,),   # value_type 查询 / 交叉校验查 crit（无行）
