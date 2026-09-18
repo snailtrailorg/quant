@@ -69,8 +69,8 @@ risk_log :: id,ts,action,symbol,rule,detail,severity,username
 risk_rules :: id,name,type,params,enabled,created_at,updated_at
 share_float :: ts_code,ann_date,float_date,float_share,float_ratio,holder_name,share_type
 signal_log :: id,ts,strategy_id,symbol,action,score,price
-sms_provider :: id,name,provider,access_key_id,access_key_secret,sign_name,alert_template_code,verify_template_code,position,enabled,created_at,updated_at
-smtp_provider :: id,name,host,port,security,username,password,from_addr,position,enabled,created_at,updated_at
+sms_provider :: id,name,vendor,provider,access_key_id,access_key_secret,sign_name,alert_template_code,verify_template_code,position,enabled,created_at,updated_at
+smtp_provider :: id,name,vendor,host,port,security,username,password,from_addr,position,enabled,created_at,updated_at
 static_symbols :: ts_code,name,industry,list_status,delisted,updated_at
 stk_holdernumber :: ts_code,ann_date,end_date,holder_num
 stk_limit :: trade_date,ts_code,pre_close,up_limit,down_limit

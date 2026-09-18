@@ -19,13 +19,13 @@
                   @dragstart="onDragStart($index)" />
           </template>
         </el-table-column>
-        <el-table-column prop="name" :label="t('alerts.smsProvName')" width="240" show-overflow-tooltip>
+        <el-table-column prop="name" :label="t('alerts.smsProvName')" min-width="200" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <span @dragover.prevent @drop="onDrop($index)">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('alerts.smsProvVendor')" width="100">
-          <template #default="{ row }">{{ t('alerts.smsProvVendors.' + row.provider) }}</template>
+        <el-table-column :label="t('alerts.smsProvVendor')" min-width="180">   <!-- 批53 追加:vendor 用户自输入(空回落 provider 映射)+双弹性与名称按比例分富余(表格不留白) -->
+          <template #default="{ row }">{{ row.vendor || t('alerts.smsProvVendors.' + row.provider) }}</template>
         </el-table-column>
         <el-table-column :label="t('alerts.smsProvStatus')" width="170">
           <template #default="{ row }">
@@ -54,6 +54,9 @@
         <el-form v-if="slotProps.tab === 'basic'" label-position="top" style="max-width: 480px">
           <el-form-item :label="t('alerts.smsProvNameField')">
             <el-input v-model="form.name" :placeholder="t('alerts.smsProvNamePh')" />
+          </el-form-item>
+          <el-form-item :label="t('alerts.smsProvVendor')">   <!-- 批53 追加:运营商用户自输入 -->
+            <el-input v-model="form.vendor" :placeholder="t('alerts.smsProvVendorPh')" />
           </el-form-item>
           <el-form-item label="AccessKey ID"><el-input v-model="form.access_key_id" :placeholder="ph()" /></el-form-item>
           <el-form-item label="AccessKey Secret"><el-input v-model="form.access_key_secret" type="password" show-password :placeholder="ph()" autocomplete="new-password" /></el-form-item>
@@ -114,7 +117,7 @@ const credSet = ref(false)   // 编辑态：已有密钥（placeholder 提示用
 const ph = () => (isEdit.value && credSet.value) ? t('alerts.phKeepBlank') : ''
 const form = reactive(emptyForm())
 function emptyForm() {
-  return { name: '', access_key_id: '', access_key_secret: '', sign_name: '',
+  return { name: '', vendor: '', access_key_id: '', access_key_secret: '', sign_name: '',
            alert_template_code: '', verify_template_code: '', enabled: true }
 }
 
@@ -147,7 +150,7 @@ const openEdit = (row) => {
   isEdit.value = true; credSet.value = row.credentials_set
   Object.assign(form, emptyForm(), {
     id: row.id,
-    name: row.name, sign_name: row.sign_name,
+    name: row.name, vendor: row.vendor || '', sign_name: row.sign_name,
     alert_template_code: row.alert_template_code, verify_template_code: row.verify_template_code,
     enabled: row.enabled,   // 密钥对不回显——留空=不改
   })
@@ -156,7 +159,7 @@ const openEdit = (row) => {
 const save = async () => {
   saving.value = true
   try {
-    const body = { name: form.name, sign_name: form.sign_name,
+    const body = { name: form.name, vendor: form.vendor, sign_name: form.sign_name,
                    alert_template_code: form.alert_template_code,
                    verify_template_code: form.verify_template_code, enabled: form.enabled }
     if (form.access_key_id) body.access_key_id = form.access_key_id

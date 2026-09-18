@@ -245,5 +245,5 @@ def test_smtp_providers_crud_reorder(authed_client):
 
 def test_smtp_row_shape_password_not_leaked():
     from src.web_api.routes.system import _smtp_provider_row
-    r = _smtp_provider_row((1, "n", "h", 465, "ssl", "u", "SECRET", "f", 0, True))
+    r = _smtp_provider_row((1, "n", "v", "h", 465, "ssl", "u", "SECRET", "f", 0, True))   # 批53 追加 vendor 列
     assert r["password_set"] is True and "password" not in r

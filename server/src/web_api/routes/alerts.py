@@ -415,11 +415,11 @@ _SMS_REQUIRED = ("name",)
 
 
 def _provider_row(r) -> dict:
-    return {"id": r[0], "name": r[1], "provider": r[2],
-            "credentials_set": bool(r[3] and r[4]),   # ak_id+secret 成对齐（不回显密钥）
-            "sign_name": r[5], "alert_template_code": r[6], "verify_template_code": r[7],
-            "position": r[8], "enabled": r[9],
-            "updated_at": str(r[10])[:19] if r[10] else None}
+    return {"id": r[0], "name": r[1], "vendor": r[2], "provider": r[3],
+            "credentials_set": bool(r[4] and r[5]),   # ak_id+secret 成对齐（不回显密钥）
+            "sign_name": r[6], "alert_template_code": r[7], "verify_template_code": r[8],
+            "position": r[9], "enabled": r[10],
+            "updated_at": str(r[11])[:19] if r[11] else None}
 
 
 @router.get("/api/alerts/sms-providers")
@@ -427,7 +427,7 @@ def sms_providers_list(payload: dict = Depends(require_perm("alerts_config"))):
     """列表（position ASC, id ASC——与候选排序同序；密钥不回显只回 credentials_set）。"""
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, name, provider, access_key_id, access_key_secret, sign_name, "
+            "SELECT id, name, vendor, provider, access_key_id, access_key_secret, sign_name, "
             "alert_template_code, verify_template_code, position, enabled, updated_at "
             "FROM sms_provider ORDER BY position, id")
         rows = cur.fetchall()
@@ -448,11 +448,11 @@ def sms_providers_create(body: dict = Body(...), payload: dict = Depends(require
         raise ApiError(400, "BAD_PARAM", "AccessKey ID/Secret/签名 三项必填（模板编号可后补）")
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO sms_provider (name, provider, access_key_id, access_key_secret, sign_name, "
+            "INSERT INTO sms_provider (name, vendor, provider, access_key_id, access_key_secret, sign_name, "
             "alert_template_code, verify_template_code, position, enabled) "
-            "VALUES (%s, 'aliyun', %s, %s, %s, %s, %s, "
+            "VALUES (%s, %s, 'aliyun', %s, %s, %s, %s, %s, "
             "COALESCE((SELECT MAX(position) FROM sms_provider), -1) + 1, %s) RETURNING id",
-            (name, ak, encrypt(enc_v), sign,
+            (name, str(body.get('vendor', '') or '').strip(), ak, encrypt(enc_v), sign,
              str(body.get("alert_template_code", "")).strip(),
              str(body.get("verify_template_code", "")).strip(),
              bool(body.get("enabled", True))))
@@ -491,7 +491,7 @@ def sms_providers_update(pid: int, body: dict = Body(...),
         if not cur.fetchone():
             raise ApiError(404, "PROVIDER_NOT_FOUND", f"短信通道 {pid} 不存在")
         sets, vals = ["updated_at=now()"], []
-        for k in ("name", "sign_name", "alert_template_code", "verify_template_code"):
+        for k in ("name", "vendor", "sign_name", "alert_template_code", "verify_template_code"):
             if k in body:
                 sets.append(f"{k}=%s")
                 vals.append(str(body.get(k) or "").strip())

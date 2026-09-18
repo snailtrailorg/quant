@@ -23,13 +23,13 @@
                   @dragstart="onDragStart($index)" />
           </template>
         </el-table-column>
-        <el-table-column prop="name" :label="t('alerts.smtpProvName')" width="240" show-overflow-tooltip>
+        <el-table-column prop="name" :label="t('alerts.smtpProvName')" min-width="200" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <span @dragover.prevent @drop="onDrop($index)">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('alerts.smsProvVendor')" width="180" show-overflow-tooltip>   <!-- 批53:列序裁定 名称/运营商/状态/操作——服务器地址收进运营商列(配置项不占表宽) -->
-          <template #default="{ row }">{{ row.host }}</template>
+        <el-table-column :label="t('alerts.smsProvVendor')" min-width="180" show-overflow-tooltip>   <!-- 批53 追加:vendor 用户自输入;host 不再显示(配置项留弹窗) -->
+          <template #default="{ row }">{{ row.vendor }}</template>
         </el-table-column>
         <el-table-column :label="t('alerts.smtpProvStatus')" width="170">
           <template #default="{ row }">
@@ -54,6 +54,9 @@
       <el-form label-position="top" style="max-width: 460px">
         <el-form-item :label="t('alerts.smtpProvNameField')">
           <el-input v-model="form.name" :placeholder="t('alerts.smtpProvNamePh')" />
+        </el-form-item>
+        <el-form-item :label="t('alerts.smsProvVendor')">   <!-- 批53 追加:运营商用户自输入 -->
+          <el-input v-model="form.vendor" :placeholder="t('alerts.smsProvVendorPh')" />
         </el-form-item>
         <el-form-item :label="t('alerts.smtpProvHostField')">
           <el-input v-model="form.host" :placeholder="t('alerts.smtpProvHostPh')" />
@@ -113,7 +116,7 @@ const editingId = ref(null)
 const saving = ref(false)
 const testing = ref(false)
 const testTo = ref('')
-const emptyForm = () => ({ name: '', host: '', port: 587, security: 'auto', username: '',
+const emptyForm = () => ({ name: '', vendor: '', host: '', port: 587, security: 'auto', username: '',
                            password: '', from: '', enabled: true })
 const form = ref(emptyForm())
 
@@ -131,7 +134,7 @@ const openEdit = (row) => {
 const save = async () => {
   saving.value = true
   try {
-    const body = { name: form.value.name, host: form.value.host, port: form.value.port,
+    const body = { name: form.value.name, vendor: form.value.vendor, host: form.value.host, port: form.value.port,
                    security: form.value.security, username: form.value.username,
                    from: form.value.from, enabled: form.value.enabled }
     if (form.value.password) body.password = form.value.password   // 留空=不发送该键

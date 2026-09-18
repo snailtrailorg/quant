@@ -286,9 +286,9 @@ def _adjust_celery_concurrency(new_value: int) -> dict:
 
 def _smtp_provider_row(r) -> dict:
     """行形状（密钥不回显只回 password_set；与 sms _provider_row 同约定）。"""
-    return {"id": r[0], "name": r[1], "host": r[2], "port": r[3], "security": r[4],
-            "username": r[5], "password_set": bool(r[6]), "from": r[7],
-            "position": r[8], "enabled": r[9]}
+    return {"id": r[0], "name": r[1], "vendor": r[2], "host": r[3], "port": r[4], "security": r[5],
+            "username": r[6], "password_set": bool(r[7]), "from": r[8],
+            "position": r[9], "enabled": r[10]}
 
 
 @router.get("/api/smtp-providers")
@@ -296,7 +296,7 @@ def smtp_providers_list(payload: dict = Depends(require_perm("user_mgmt"))):
     """列表（position ASC, id ASC——与 _providers() 候选排序同序）。"""
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id, name, host, port, security, username, password, from_addr, "
+            "SELECT id, name, vendor, host, port, security, username, password, from_addr, "
             "position, enabled FROM smtp_provider ORDER BY position, id")
         rows = cur.fetchall()
     return {"items": [_smtp_provider_row(r) for r in rows]}
@@ -325,10 +325,10 @@ def smtp_providers_create(body: dict = Body(...), payload: dict = Depends(requir
         raise ApiError(400, "SMTP_PORT_INVALID", "端口需为 1-65535 数字")
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO smtp_provider (name, host, port, security, username, password, from_addr, "
-            "position, enabled) VALUES (%s, %s, %s, %s, %s, %s, %s, "
+            "INSERT INTO smtp_provider (name, vendor, host, port, security, username, password, from_addr, "
+            "position, enabled) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, "
             "COALESCE((SELECT MAX(position) FROM smtp_provider), -1) + 1, %s) RETURNING id",
-            (name, host, port, security, user, encrypt(pwd),
+            (name, str(body.get("vendor", "") or "").strip(), host, port, security, user, encrypt(pwd),
              str(body.get("from", "") or "").strip(), bool(body.get("enabled", True))))
         new_id = cur.fetchone()[0]
         conn.commit()
@@ -365,7 +365,7 @@ def smtp_providers_update(pid: int, body: dict = Body(...),
         if not cur.fetchone():
             raise ApiError(404, "PROVIDER_NOT_FOUND", f"邮件通道 {pid} 不存在")
         sets, vals = ["updated_at=now()"], []
-        for k in ("name", "host", "username", "from_addr"):
+        for k in ("name", "vendor", "host", "username", "from_addr"):
             if k in body:
                 sets.append(f"{k}=%s")
                 vals.append(str(body.get(k) or "").strip())
