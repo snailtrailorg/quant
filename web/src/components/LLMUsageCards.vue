@@ -3,7 +3,7 @@
        仿 SystemMetricsCards（VChart 按需+cssVar 解实色——批22 约定 echarts 不解析 CSS 变量；
        无阈值线/状态徽标=LLM 卡差异）；网格 auto-fill 自适应模型数 -->
   <div v-if="!models.length" class="empty-group">{{ t('llm.llmUsageEmpty') }}</div>
-  <div v-else class="card-grid" :style="{ gridTemplateColumns: `repeat(${Math.min(3, models.length)}, minmax(0, 1fr))` }">
+  <div v-else class="card-grid">
     <el-card v-for="m in models" :key="m.provider + m.model" shadow="never" class="metric-card">
       <div class="card-head">
         <span class="card-name">{{ m.model }}</span>
@@ -54,7 +54,7 @@ const optionOf = (m) => ({
 </script>
 
 <style scoped>
-.card-grid { display: grid; gap: var(--sp-3); }   /* 批51：列数动态 min(3,N)——最多一行 3 卡、平均占满整行（模板内联 style 驱动） */
+.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 批51 追加（用户裁定）：固定 3 列各占 1/3——少于 3 不扩充满行（简单） */
 .metric-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .card-name { font-size: var(--fs-label); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -8,7 +8,7 @@
       <div style="display:flex;justify-content:space-between;align-items:center"><span>{{ t('sysmon.metrics') }}</span></div>
     </template>
     <div v-if="!hasData" class="empty-group">{{ t('sysmon.noData') }}</div>
-    <div v-else class="card-grid" :style="{ gridTemplateColumns: `repeat(${Math.min(3, cards.length)}, minmax(0, 1fr))` }">
+    <div v-else class="card-grid">
       <el-card v-for="c in cards" :key="c.kind" shadow="never" class="metric-card">
         <div class="card-head">
           <span class="card-name">{{ c.label }}</span>
@@ -122,7 +122,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
 <style scoped>
 .empty-group { color: var(--text-secondary); font-size: var(--fs-label); padding: var(--sp-6) 0; text-align: center; }
-.card-grid { display: grid; gap: var(--sp-3); }   /* 批51：列数动态 min(3,卡数) 同 LLM 用量卡（统一规则） */
+.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 批51 追加（用户裁定）：固定 3 列各占 1/3 */
 .metric-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
 .card-name { font-size: var(--fs-label); color: var(--text-secondary); }

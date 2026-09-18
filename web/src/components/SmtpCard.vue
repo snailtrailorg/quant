@@ -36,9 +36,6 @@
             <el-tag :type="row.enabled ? 'success' : 'info'" size="small" style="margin: 1px">
               {{ row.enabled ? t('alerts.smtpProvEnabled') : t('alerts.smtpProvDisabled') }}
             </el-tag>
-            <el-tag :type="row.password_set ? 'success' : 'warning'" size="small" style="margin: 1px">
-              {{ row.password_set ? t('alerts.smtpProvCredOk') : t('alerts.smtpProvCredNo') }}
-            </el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="actions" :label="t('common.action')" width="110">
@@ -82,7 +79,7 @@
         </el-form-item>
         <el-form-item :label="t('smtp.password')">
           <el-input v-model="form.password" type="password" show-password autocomplete="new-password"
-                    :placeholder="isEdit && form.password_set ? t('systemConfig.pwdSet') : ''" />
+                    :placeholder="t('common.phEditNoChange')" />
         </el-form-item>
         <el-form-item :label="t('smtp.from')">
           <el-input v-model="form.from" :placeholder="t('smtp.fromPh')" />
@@ -117,7 +114,7 @@ const saving = ref(false)
 const testing = ref(false)
 const testTo = ref('')
 const emptyForm = () => ({ name: '', host: '', port: 587, security: 'auto', username: '',
-                           password: '', password_set: false, from: '', enabled: true })
+                           password: '', from: '', enabled: true })
 const form = ref(emptyForm())
 
 const load = async () => {
