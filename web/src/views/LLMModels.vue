@@ -23,18 +23,13 @@
                   @dragstart="onDragStart($index)" />
           </template>
         </el-table-column>
-        <el-table-column v-if="modelColOn('id')" prop="id" label="ID" min-width="80" />
         <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip>
           <template #default="{ row, $index }">
             <span @dragover.prevent @drop="onDrop($index)">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column v-if="modelColOn('provider')" prop="provider" label="Provider" min-width="120" />
+        <el-table-column v-if="modelColOn('provider')" prop="provider" :label="t('llm.providerCol')" min-width="120" />
         <el-table-column v-if="modelColOn('model')" prop="model" :label="t('llm.model')" min-width="200" show-overflow-tooltip />
-        <el-table-column v-if="modelColOn('key')" :label="t('llm.apiKey')" min-width="100">
-          <template #default="{ row }">{{ row.has_key ? '✓' : '✗' }}</template>
-        </el-table-column>
-        <el-table-column v-if="modelColOn('ctx')" prop="context_window" :label="t('cols.contextWindow')" min-width="156" />
         <el-table-column v-if="modelColOn('enabled')" :label="t('common.enable')" min-width="80">
           <template #default="{ row }">
             <el-switch v-model="row.enabled" @change="toggle(row)" />
@@ -59,7 +54,6 @@
           <el-form-item :label="t('llm.baseUrl')"><el-input v-model="form.base_url" /></el-form-item>
           <el-form-item :label="t('cols.contextWindow')"><el-input-number v-model="form.context_window" :min="0" :step="1024" controls-position="right" /></el-form-item>
           <el-form-item :label="t('llm.maxInputTokens')"><el-input-number v-model="form.max_input_tokens" :min="0" controls-position="right" :placeholder="t('llm.phInputTokens')" /></el-form-item>
-          <el-form-item :label="t('llm.maxOutputTokens')"><el-input-number v-model="form.max_output_tokens" :min="0" controls-position="right" :placeholder="t('llm.phOutputTokens')" /></el-form-item>
           <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
         </el-form>
         <template #footer>
@@ -103,14 +97,13 @@ const dlg = ref(false)
 const saving = ref(false)
 const testing = ref({})
 const modelVisible = ref({})
-const modelColDefs = [
-  { key: 'id', label: 'ID' }, { key: 'provider', label: 'Provider' },
-  { key: 'model', label: t('llm.model') }, { key: 'key', label: t('llm.apiKey') },
-  { key: 'ctx', label: t('cols.contextWindow') }, { key: 'enabled', label: t('common.enable') },
+const modelColDefs = [   // 批53 追加三:ID/Key/ctx 列删(用户裁定——内部键/凭证/配置项不占表)
+  { key: 'provider', label: t('llm.providerCol') },
+  { key: 'model', label: t('llm.model') }, { key: 'enabled', label: t('common.enable') },
 ]
 const modelColOn = k => modelVisible.value[k] !== false
 const emptyForm = () => ({ id: null, name: '', provider: '', model: '', api_key: '', base_url: '',
-                           context_window: 32768, max_input_tokens: null, max_output_tokens: null, enabled: true })
+                           context_window: 32768, max_input_tokens: null, enabled: true })
 const form = ref(emptyForm())
 
 const load = async () => { try { models.value = await getLLMModels() } catch (e) { console.error(e) } }
@@ -128,8 +121,7 @@ const onSave = async () => {
                    api_key: form.value.api_key, base_url: form.value.base_url,
                    context_window: form.value.context_window,
                    supports_tools: form.value.supports_tools ?? true,   // 批50 盲审 A-P1-1：原值保真（硬编码 true 会静默重置纯文本模型）
-                   max_input_tokens: form.value.max_input_tokens, max_output_tokens: form.value.max_output_tokens,
-                   enabled: form.value.enabled }
+                   max_input_tokens: form.value.max_input_tokens, enabled: form.value.enabled }
     if (form.value.id) await updateLLMModel(form.value.id, body)
     else await createLLMModel(body)
     ElMessage.success(t('common.saveSuccess'))
