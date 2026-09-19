@@ -28,7 +28,15 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "astock_minute": "minute", "astock_minute_5min": "minute",
 }
 NON_DATA_PROVIDERS = {"tencent": {"minute", "snapshot"}, "xtp": {"trading", "quote"},
-                      "binance": {"trading"}, "okx": {"trading"}}   # 无 adapter 的通道能力(快照/hub 网关层)
+                      "binance_perp": {"trading"}, "okx_perp": {"trading"}}   # 无 adapter 的通道能力(快照/hub 网关层)
+# 键=Broker._REGISTRY/同步路由的真实 provider 串（binance_perp/okx_perp 非 binance/okx——
+# 55a 修键：与 26 号收尾批 C 对齐，词表键错位会让 ⊆ 校验误拒合法配置）
+
+# provider → 市场（固定归属；55a 写侧校验 market 与 provider 一致，防跨市场错行）
+PROVIDER_MARKET: dict[str, str] = {
+    "tushare": "astock", "joinquant": "astock", "ricequant": "astock", "tencent": "astock",
+    "xtp": "astock", "binance_perp": "crypto", "okx_perp": "crypto",
+}
 
 # 权限五键 → (market, category, venue) 无损映射(market_op 三分混一的立法化解)
 MARKET_OP_DECOMP: dict[str, tuple] = {

@@ -212,7 +212,7 @@ app.conf.update(
         },
         # 池分钟同步（已建未启用——Tushare stk_mins 是独立产品包 2000 元/年，
         # 全局 1 次/小时不够用；先靠 XTP hub 自攒，买包后启用 Tushare 为主源+XTP 校验。
-        # 启用方法：取消注释此 beat + data_source_config.params 配 rate_limits）
+        # 启用方法：取消注释此 beat + external_interface.params 配 rate_limits（批55a 合表）
         # "pool-minute-sync": {
         #     "task": "src.scheduler.tasks.pool_minute_sync_task",
         #     "schedule": 300.0,

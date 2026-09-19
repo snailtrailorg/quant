@@ -208,7 +208,7 @@ class SyncLock:
 | `asset_static_info`/`etf_basic_info`/`cb_basic_info` | 各 list handler（全量写） | `_list_static_ts_codes`/`_get_list_date`/`list_symbols` |
 | `trade_cal` | `_sync_trade_cal`（pull_trade_cal） | `_expected_trade_dates`/`_expected_trading_days` |
 | `daily_basic` | `_sync_astock_basic`（save_daily_basic） | - |
-| `data_source_config` | - | `_get_pro`（经 get_data_source） |
+| `external_interface`（批55a 合表，经 get_data_source） | - | `_get_pro`（经 get_data_source） |
 | 一档 9 表（stk_limit/moneyflow/margin_detail/top_list/block_trade/cyq_perf/forecast/namechange/concept） | tier1 handler 工厂（batch/全量重建） | - |
 | 二档 10 表（income/balancesheet/cashflow/fina_indicator/cyq_chips/top10_holders/dividend/pledge_stat/share_float/stk_holdernumber） | `pool_data._upsert_rows`（幂等 upsert） | 详情页三档已实施（`stock_detail` 池内直读：筹码/财务块）（P3 回写 2026-08-20：原"未实施"过时） |
 | `pool_data_cursor` | `pool_data._advance_cursors`（游标推进，迁移 0047） | `pool_data._load_cursors` |

@@ -334,7 +334,7 @@ def init_trade_calendar(year: int) -> None:
 
 
 def load_schema_expectations() -> dict[str, set[str]]:
-    """加载链生成的期望清单（schema_expectations.txt，85 表，随迁移增长）。
+    """加载链生成的期望清单（schema_expectations.txt，91 表，随迁移增长）。
 
     生成方式（#48 L-S-A 生成式，禁手写）：
       PGPASSWORD=… psql -d quant -q -c "DROP SCHEMA IF EXISTS chain_scratch CASCADE; CREATE SCHEMA chain_scratch;"

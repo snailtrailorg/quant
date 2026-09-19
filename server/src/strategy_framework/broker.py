@@ -1,7 +1,7 @@
 """交易通道抽象基类（平台化：别人实现接口接入自己的券商/交易所）。
 
 接口：get_credentials() / test_connection()。
-实现：XTPBroker / BinanceBroker / OKXBroker（凭证从 broker_config DB 读）。
+实现：XTPBroker / BinanceBroker / OKXBroker（凭证从 external_interface 交易域行读，批55a 合表）。
 ExecutionAdapter 已有交易接口（send_order/cancel/query），Broker 抽象"配置 + 连接测试"。
 别人加 IB/CTP：实现 Broker 子类 + DB 配置。
 """
@@ -73,7 +73,10 @@ _REGISTRY: dict[str, type[Broker]] = {
 
 
 def get_broker(provider: str) -> Broker | None:
-    """从 DB broker_config 实例化通道。"""
+    """从 DB external_interface 交易域行实例化通道（批55a 合表）。
+
+    选行=enabled+域内 position 序（勘察 #4：确定性排序防多账号选行漂移）。
+    """
     cls = _REGISTRY.get(provider)
     if not cls:
         return None
@@ -81,14 +84,16 @@ def get_broker(provider: str) -> Broker | None:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT credentials_encrypted, params FROM broker_config "
-                "WHERE provider=%s AND enabled=true LIMIT 1", (provider,))
+                "SELECT credentials_encrypted, params FROM external_interface "
+                "WHERE provider=%s AND enabled=true AND 'trading' = ANY(capabilities) "
+                "ORDER BY position, id LIMIT 1", (provider,))
             r = cur.fetchone()
         if not r:
             return None
-        return cls(credentials_encrypted=r[0], params=r[1])
+        params_str = json.dumps(r[1]) if isinstance(r[1], dict) else r[1]   # jsonb→str 喂 __init__ 契约
+        return cls(credentials_encrypted=r[0], params=params_str)
     except Exception as e:
-        logger.warning(f"读 broker_config({provider}) 失败: {e}")
+        logger.warning(f"读 external_interface({provider}) 失败: {e}")
         return None
 
 
@@ -175,7 +180,7 @@ def build_xtp_setting(client_id: int | None = None) -> dict:
 
 
 def get_xtp_param(key: str, default=None):
-    """读 broker_config xtp 记录 params JSON 的指定键（通道级配置正位）；缺省/异常回 default。"""
+    """读 external_interface xtp 交易域行 params JSON 的指定键（通道级配置正位）；缺省/异常回 default。"""
     try:
         broker = get_broker("xtp")
         if broker:

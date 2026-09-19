@@ -281,16 +281,15 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `bar_1D` / `bar_1min` / `bar_5min` | `db.save_bars` / `save_bars_overwrite` | `db.get_bars`（回测/分析/K线端点） |
 | `daily_basic` | `tushare_adapter.save_daily_basic` | web_api（筛选端点） |
 | `trade_cal` | `tushare_adapter.pull_trade_cal` | `db.get_trade_calendar` / `is_trading_day` |
-| `data_source_config` | web_api（数据源端点 + 积分档三端点写 params.points_tier/rate_limits/circuit_breaker，2026-08-27） | `data_source.get_data_source` |
-| `data_source_usage` | `DataSource.record_usage`（API 用量，A4 #36） | web_api（用量看板） |
-| `broker_config` | web_api（交易通道端点） | `broker.get_broker` |
+| `external_interface`（批55a 合表 0090：data_source_config+broker_config→统一外部接口表——行=账号/列=能力/页签=过滤视图，见 27 号架构文档） | web_api（/api/interfaces 族+旧端点垫片，写侧 ⊆ 代码能力校验） | `data_source.get_data_source`（数据域行）/`broker.get_broker`（交易域行） |
+| `data_source_usage` | `DataSource.record_usage`（API 用量，A4 #36；批55a 加 interface_id 列——provider 双填保留显示冗余） | web_api（用量看板，GROUP BY provider 不变） |
 | `channel_config` | web_api（消息通道端点） | `channel.get_channel` |
 | `live_trading_config` | web_api（实盘开关端点） | `risk.is_live_trading_allowed` |
 | `account_snapshot` | `risk.update_account_snapshot`（幂等建） | `risk._get_global_state` |
 | `llm_usage` | `gateway._log_usage`（幂等建） | web_api（用量看板） |
 
 > 三档数据 19 张新表（stk_limit 等 9 张一档 + income 等 10 张二档）由 data_sync/pool_data 经本模块 adapter 拉取写入，详见 [17-三档数据与详情页](../17-三档数据与详情页.md)。
-> schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，**head 0053**；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（**74 表**生成式基线，"表 :: 列"每表一行；每加迁移必重跑生成命令并提交）。（2026-08-27 回写：head 0049→0053、73 表→74 表——0051 建 im_bot 两表、0052 DROP feishu_config、0050/0053 加列建表）
+> schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，**head 0090**；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（**91 表**生成式基线，"表 :: 列"每表一行；每加迁移必重跑生成命令并提交——批55a 链重生成时浮出批11C/43/47/53 等多批欠账一并还清）。
 
 ---
 
@@ -304,7 +303,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 - **save_bars**：`ensure_table` 校验表存在+告警（建表归迁移 0064，不再运行时 DDL）
 - **is_trading_day**：查 trade_cal，查不到回退工作日（不抛）
 - **stk_mins**：per-symbol 接口（不支持按日全市场），2000 积分，单次 8000 条（超限分段，见 engine._split_minute_range）
-- **限流四层**（2026-08-27 积分档批次）：`TushareDataSource.get_rate_limit` 解析序 **L0** `DEFAULT_RATE_LIMITS`（代码兜底）← **L1** `params.points_tier` 积分档预设（`POINTS_PRESETS` 200/2000/5000）← **L2** `params.rate_limits` 单参数覆写 ← **L3** `params.rate_time_overrides` 时段乘数；非法值各层独立回落+告警不崩同步。**熔断 DataSource 级**（D2），参数 `params.circuit_breaker`（代码默认 fail_threshold=5 / reset_timeout=60s）
+- **限流四层**（批55a 勘察定稿，详单 `docs/任务/批55a-限流四层牵连勘察.md`）：**L1** `DEFAULT_RATE_LIMITS` 类默认（代码兜底）← **L2** `params.rate_limits` 单参数覆写（24 号去积分档后两级）；非法值回落+告警不崩同步。**L3 熔断** DataSource 级（D2），参数 `params.circuit_breaker`（代码默认 fail_threshold=5 / reset_timeout=60s）；进程内键=provider——同 provider 多账号共享熔断/限速（勘察发现 3 裂缝，深水区批解）。**L4** `data_source_usage` 用量（provider+interface_id 双填）
 - **params 分界**：秘密→`credentials_encrypted`；运维参数（points_tier/rate_limits/rate_time_overrides/circuit_breaker/base_url）→`params` JSON；数值一律经 `get_param_float` 钳位（不信任前端/DB 手写值）
 
 ---
@@ -313,10 +312,10 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 
 ### 加新数据源（如 Wind）
 1. 实现 `DataSource` 子类（`get_client`/`test_connection`）
-2. `data_source._REGISTRY["wind"] = WindDataSource`
-3. Web 配 `data_source_config`（provider='wind'，credentials 加密）
+2. `data_source._REGISTRY["wind"] = WindDataSource` + `markets.PROVIDER_MARKET["wind"]` 登记（层 0 纯数据）
+3. Web 配 `external_interface`（批55a 统一表：provider='wind'，market，capabilities=启用子集，credentials 加密）
 4. 不改 engine（`_get_pro` 走 `get_data_source`）
-5. 限速可选（2026-08-27 起）：子类设 `DEFAULT_RATE_LIMITS`（有积分档再设 `POINTS_PRESETS`）即自动进 `rate_limit_context` 体系，engine 拉取点零改动
+5. 限速可选：子类设 `DEFAULT_RATE_LIMITS` 即自动进 `rate_limit_context` 体系，engine 拉取点零改动
 
 ### 加新 K 线频率（如 15min）
 1. migration 建 `bar_15min` 表（0064 的 `_create_bar_table` 模式，结构同 bar_1d）

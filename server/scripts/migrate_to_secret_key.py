@@ -61,11 +61,9 @@ if new_key == old_key:
 
 log.info("新旧密钥不同，开始迁移...")
 
-# ── 4. 已加密列清单 ──
+# ── 4. 已加密列清单（批55a：三表合一 external_interface；channel_config 0085 已 drop） ──
 TABLES = [
-    ("broker_config", "credentials_encrypted", "id"),
-    ("data_source_config", "credentials_encrypted", "id"),
-    ("channel_config", "credentials_encrypted", "id"),
+    ("external_interface", "credentials_encrypted", "id"),
     ("im_bot_config", "credentials_encrypted", "id"),
     ("llm_model_config", "api_key_encrypted", "id"),
 ]

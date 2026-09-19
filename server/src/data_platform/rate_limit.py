@@ -87,7 +87,7 @@ class CircuitBreaker:
 
     def __init__(self, fail_threshold: int | None = None, reset_timeout: float | None = None,
                  clock: Callable[[], float] = time.monotonic, ds=None):
-        """ds 有则从 data_source_config.params.circuit_breaker 读熔断参数（显式实参 >
+        """ds 有则从 external_interface.params.circuit_breaker 读熔断参数（显式实参 >
         params 配置 > 代码默认兜底）。ds 无 get_param（测试替身/未继承基类）跳过。"""
         # 双盲补审 P1：裸 int(get_param) 对 DB 垃圾值 "abc" 直接炸（且永不缓存=每次都炸）。
         # 改走 get_param_float 同款钳位语义：非法值告警+回落，永不崩同步。

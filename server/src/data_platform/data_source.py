@@ -1,7 +1,7 @@
 """数据源抽象基类 + 注册表（平台化：别人实现 DataSource 接入自己的数据源）。
 
 接口：get_client / test_connection / record_usage。
-实现：TushareDataSource（token 从 data_source_config DB 读，.env fallback）。
+实现：TushareDataSource（token 从 external_interface 数据域行读，.env fallback）。
 别人加 Wind：实现 DataSource 子类 + DB 配置（provider='wind'），不改 engine 代码。
 """
 from __future__ import annotations
@@ -18,15 +18,17 @@ class DataSource(ABC):
 
     限速（24 号抽象聚合）：`get_rate_limit(api_name)` 委托限速策略（非 abstract——
     带默认实现，AkShare stub 零改动，未来 Wind 不强制实现）。配置归
-    `data_source_config.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
+    `external_interface.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
     params 分界：秘密→credentials_encrypted；运维参数（rate_limits/base_url）→params。
     """
 
     DEFAULT_RATE_LIMITS: dict[str, float] = {}   # 子类覆写：api_name -> 最小间隔秒
 
-    def __init__(self, credentials_encrypted: str | None = None, params: str | None = None):
+    def __init__(self, credentials_encrypted: str | None = None, params: str | None = None,
+                 interface_id: int | None = None):
         self._credentials_encrypted = credentials_encrypted
         self._params = json.loads(params) if params else {}
+        self.interface_id = interface_id   # 批55a：external_interface 行 id（record_usage 双填用；裸构造=None）
         self._policy = self._build_rate_policy()
 
     def get_param(self, *keys, default=None):
@@ -83,23 +85,25 @@ class DataSource(ABC):
                     provider: str = "") -> None:
         """记录 API 调用到 data_source_usage 表（用量监控，A4 #36）。
 
-        失败不抛（用量记录不影响主流程）。provider 缺省从 self.provider 取。
+        失败不抛（用量记录不影响主流程）。provider 缺省从 self.provider 取；
+        interface_id（批55a 键升级）从实例注入取——get_data_source 读行时带上，
+        裸构造（测试/.env fallback）为 NULL，provider 列仍双填保聚合视图不破。
         """
         try:
             from src.data_platform.db import get_conn
             prov = provider or getattr(self, "provider", "unknown")
             with get_conn() as conn:
                 conn.execute(
-                    "INSERT INTO data_source_usage (provider, api_name, calls, success, latency_ms) "
-                    "VALUES (%s,%s,%s,%s,%s)",
-                    (prov, api_name, api_calls, success, latency_ms))
+                    "INSERT INTO data_source_usage (provider, api_name, calls, success, latency_ms, interface_id) "
+                    "VALUES (%s,%s,%s,%s,%s,%s)",
+                    (prov, api_name, api_calls, success, latency_ms, self.interface_id))
                 conn.commit()
         except Exception:
             pass
 
 
 class TushareDataSource(DataSource):
-    """Tushare 数据源（token 从 data_source_config DB 读，.env fallback）。"""
+    """Tushare 数据源（token 从 external_interface 数据域行读，.env fallback）。"""
 
     provider = "tushare"
 
@@ -156,9 +160,10 @@ _REGISTRY: dict[str, type[DataSource]] = {
 
 
 def get_data_source(provider: str) -> DataSource | None:
-    """从 DB 读 data_source_config 实例化对应 DataSource。
+    """从 DB external_interface 读数据域配置行实例化对应 DataSource（批55a 合表）。
 
     provider 不存在或无配置返回 None（调用方 fallback .env）。
+    选行=enabled 过滤+域内 position 序（勘察 #3：确定性排序防多账号选行漂移）。
     """
     cls = _REGISTRY.get(provider)
     if not cls:
@@ -167,14 +172,17 @@ def get_data_source(provider: str) -> DataSource | None:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT credentials_encrypted, params FROM data_source_config "
-                "WHERE provider=%s AND enabled=true LIMIT 1", (provider,))
+                "SELECT id, credentials_encrypted, params FROM external_interface "
+                "WHERE provider=%s AND enabled=true "
+                "AND NOT ('trading' = ANY(capabilities)) "
+                "ORDER BY position, id LIMIT 1", (provider,))
             r = cur.fetchone()
         if not r:
             return None
-        return cls(credentials_encrypted=r[0], params=r[1])
+        params_str = json.dumps(r[2]) if isinstance(r[2], dict) else r[2]   # jsonb→str 喂 __init__ 契约
+        return cls(credentials_encrypted=r[1], params=params_str, interface_id=r[0])
     except Exception as e:
-        logger.warning(f"读 data_source_config({provider}) 失败: {e}")
+        logger.warning(f"读 external_interface({provider}) 失败: {e}")
         return None
 
 

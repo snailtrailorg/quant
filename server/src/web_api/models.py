@@ -112,12 +112,35 @@ class IMBotUserReq(BaseModel):
     user_id: int | None = None   # 批11C：绑定平台账号（管理面通道——平台级 bot 的绑定恢复路径，A-P0-1 修）
 
 class DataSourceReq(BaseModel):
+    """旧数据源端点垫片请求体（55a 过渡——usage_limit 死列退役不收）。"""
     provider: str
     name: str
     credentials: str = ""
     params: str | None = None
-    usage_limit: int | None = Field(None, ge=0)                  # 批36b-α（0 语义=无限制——UI placeholder 表达）
     enabled: bool = True
+
+class InterfaceReq(BaseModel):
+    """外部接口行（批55a：行=账号/列=能力——27 号架构文档）。
+
+    - capabilities=启用子集（写侧 ⊆ 代码能力校验，越集 400）
+    - market=MARKETS 注册表键；provider∈PROVIDER_MARKET 时须一致
+    - exchanges=None 即注册表该市场全所（包含式；excluded 机制退役）
+    - params 接受 JSON 字符串或对象（旧端点字符串惯例/新端点对象皆可）
+    - credentials 空=创建无凭证/更新不改（三段语义对齐旧两族端点）
+    """
+    name: str
+    provider: str
+    market: str
+    exchanges: list[str] | None = None
+    credentials: str = ""
+    params: str | dict | None = None
+    capabilities: list[str]
+    enabled: bool = True
+
+class InterfaceReorderReq(BaseModel):
+    """分域拖拽重排（批43 全集语义+方案一 v2 分域段：数据/交易域各自 0..n）。"""
+    domain: str                       # data|trading（trading∈capabilities=交易域）
+    ids: list[int]
 
 class RateLimitOverrideReq(BaseModel):
     """单参数限速覆写（L2）或熔断参数写入（params.circuit_breaker）。
