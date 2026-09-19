@@ -243,7 +243,9 @@ def llm_usage_series(granularity: str = "hour", payload: dict = Depends(require_
     批54 granularity=hour|day（默认 hour）：hour=7 天×小时(168 点，初始窗 2 天)/
     day=90 天×天(90 点，初始窗 30 天——用户裁定 B 两档)。原固定 48h 退役。"""
     granularity = "day" if granularity == "day" else "hour"
-    span = "interval '90 days'" if granularity == "day" else "interval '7 days'"
+    # 批54 追加（用户裁定）：回看=**从有数据时刻起**（去固定时限）。day 档=数据 min 全历史；
+    # hour 档护栏=封顶 31 天（744 点——数年数据的小时网格会到数万点拖死页面，属必要工程护栏）
+    span = "interval '1825 days'" if granularity == "day" else "interval '31 days'"
     trunc = "day" if granularity == "day" else "hour"
     grid_fmt = "'YYYY-MM-DD'" if granularity == "day" else "'YYYY-MM-DD\"T\"HH24:MI'"
     with get_conn() as conn:
