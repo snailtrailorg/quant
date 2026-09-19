@@ -339,3 +339,5 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 
 ## 最近变更
 - 2026-08-27 限流治理吸收 + 积分档预设四层限流（`docs/任务/限流治理吸收.md`；双盲补审 fa1f123 全修后产上部署）
+
+> **批55-0(2026-09-19)能力查询层**:新增 `capabilities.py`(`provider_capabilities`/`check_capability_subset`——能力真源=代码 `_ADAPTERS` sync_id 串经 `quant_common.markets.SYNC_ID_CAP_MAP` 归一;配置能力⊆代码校验,55a 端点写侧与漂移告警消费)。维度注册表本体在 `quant_common/markets.py`(层 0 纯数据——本模块只放读上层代码的查询函数,分层铁律)。立法全文 `docs/architecture/27-外部接口与市场维度设计.md`。
