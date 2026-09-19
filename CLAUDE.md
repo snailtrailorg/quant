@@ -51,6 +51,7 @@
 - **部署 OS**：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8）。开发机 Fedora（同 dnf/RPM 系）。
 - **回测与实盘 schema 对齐**：数据中台 schema 现在就和未来 XTP 实时行情一致，零迁移。回测费用摩擦：佣金可配+印花税(卖出 0.05%)+过户费(0.001%)+涨跌停一字板不可成交约束（`BacktestAdapter.set_fees`）。
 - **配置驱动非硬编码**：策略因子组合/权重/参数走 Web 配置 + DSL 表达式，每个策略都改代码是错误做法。
+- **外部接口配置模型**（2026-09-19 用户裁定，详 27 号架构文档）：行的边界=账号（连接身份）/列语义=能力/页签=能力过滤视图——统一表 `external_interface`（55a/55b 已落地，旧两表已删）；能力真源=代码 adapter（配置列恒=启用子集，写侧 ⊆ 校验）；XTP 等多能力接口单份配置两页签可见。**配置存放立法**：`.env` 只放加密密钥（SECRET_KEY 类），其余所有配置入库，敏感值用密钥加密后入库（credentials_encrypted）；鸡生蛋例外=DB/Valkey/Celery 连接串；迁移次序=先建库行验证再清 .env 值。
 - **平台化通用接口**：6 大接口抽象（DataSource/Broker/MessageChannel/Task/RiskRule/LLMProvider），结构接口按通用方向设计，实现可简化。业务菜单保留，管理设置类按通用化设计。
 
 - **部署窗三段**（2026-09-01 用户裁定）：交易日 盘前启动截止 8:55 / 午休 11:35 起-12:40 启动截止 / 盘后 15:05 起；闸拦启动时刻（pipeline `deploy_trading_windows`）；staging 彩排绿前提；部署命令一律落文件、输出为空先验状态再动。
