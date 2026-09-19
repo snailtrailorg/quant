@@ -9,7 +9,8 @@ logger = logging.getLogger("web_api")
 
 router = APIRouter(tags=["trading"])
 
-LIVE_TRADING_MARKETS = ("convertible", "etf", "astock", "binance_perp", "okx_perp")
+from src.data_platform.perm_registry import MARKET_OP_KEYS
+LIVE_TRADING_MARKETS = MARKET_OP_KEYS   # 批55-0 L0:实盘开关键单源化(原独立硬编码副本——双源漂移=开关失控实弹风险)
 
 
 @router.get("/api/live-task")
