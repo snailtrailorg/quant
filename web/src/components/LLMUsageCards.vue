@@ -10,10 +10,6 @@
         <span class="chip-sub">{{ m.today.calls }} · {{ m.today.tokens.toLocaleString() }}tk · {{ m.today.success_rate }}%</span>
         </span>
       </div>
-      <el-radio-group v-model="gran" size="small" @change="reload">
-        <el-radio-button value="hour">{{ t('llm.granHour') }}</el-radio-button>
-        <el-radio-button value="day">{{ t('llm.granDay') }}</el-radio-button>
-      </el-radio-group>
     </div>
     <VChart :option="option" autoresize style="height: 280px" />
   </el-card>
@@ -44,9 +40,6 @@ const toggleSel = (name) => {
   if (s2.size) selected.value = s2   // 至少留一个(全取消=全选语义混乱)
 }
 const shown = computed(() => props.models.filter(m => selected.value.has(m.model)))
-const gran = defineModel('gran', { default: 'hour' })   // 批54:父级 v-model(刷新保档)
-const emit = defineEmits(['reload'])
-const reload = () => emit('reload', gran.value)
 
 // 多模型调色板（cssVar 主色领衔+扩展色——暗色变体下仍可辨）
 const PALETTE = [
@@ -76,10 +69,9 @@ const option = computed(() => {
       axisLabel: { color: cssVar('--text-secondary'), fontSize: 10, hideOverlap: true, interval: 5 },
       splitLine: { show: false },
     },
-    dataZoom: [   // 批54:初始窗(hour 48 点/day 30 点)+滚轮/slider 回看历史
-      { type: 'inside', start: gran.value === 'hour' ? 100 - 48 / (grid.length || 1) * 100 : 100 - 30 / (grid.length || 1) * 100, end: 100 },
-      { type: 'slider', height: 14, bottom: 22,
-        start: gran.value === 'hour' ? 100 - 48 / (grid.length || 1) * 100 : 100 - 30 / (grid.length || 1) * 100, end: 100 },
+    dataZoom: [   // 批54 追加三:单档——初始窗 30 天+滚轮/slider 回看全历史
+      { type: 'inside', start: 100 - 30 / (grid.length || 1) * 100, end: 100 },
+      { type: 'slider', height: 14, bottom: 22, start: 100 - 30 / (grid.length || 1) * 100, end: 100 },
     ],
     yAxis: { type: 'value', show: true,
              axisLabel: { color: cssVar('--text-secondary'), fontSize: 10 },

@@ -68,10 +68,10 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('llm.llmUsageTitle2') }}</span>
-          <RefreshBtn @refresh="() => loadUsage(usageGran)" />
+          <RefreshBtn @refresh="loadUsage" />
         </div>
       </template>
-      <LLMUsageCards v-model:gran="usageGran" :models="usageModels" @reload="g => loadUsage(g)" />
+      <LLMUsageCards :models="usageModels" />   <!-- 批54 追加三:两档退役——固定日档全历史 -->
     </el-card>
   </div>
 </template>
@@ -93,7 +93,6 @@ import { apiErr, getLLMModels, createLLMModel, updateLLMModel, deleteLLMModel,
 const { t } = useI18n()
 const models = ref([])
 const usageModels = ref([])
-const usageGran = ref('hour')   // 批54 快审 A-P1-2:档位提升父级——RefreshBtn 刷新保当前档
 const dlg = ref(false)
 const saving = ref(false)
 const testing = ref({})
@@ -108,7 +107,7 @@ const emptyForm = () => ({ id: null, name: '', provider: '', model: '', api_key:
 const form = ref(emptyForm())
 
 const load = async () => { try { models.value = await getLLMModels() } catch (e) { console.error(e) } }
-const loadUsage = async (gran = 'hour') => { try { usageModels.value = (await getLLMUsageSeries({ granularity: gran })).models || [] } catch (e) { console.error(e) } }
+const loadUsage = async () => { try { usageModels.value = (await getLLMUsageSeries()).models || [] } catch (e) { console.error(e) } }
 
 const onAdd = () => { form.value = emptyForm(); dlg.value = true }
 const onEdit = (row) => {

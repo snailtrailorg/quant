@@ -238,16 +238,9 @@ def test_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"))
 
 
 @router.get("/api/llm-usage/series")
-def llm_usage_series(granularity: str = "hour", payload: dict = Depends(require_perm("read"))):
-    """批50/54：用量监控卡数据源——每模型 {今日汇总+曲线(补零)}。provider+model 双键。
-    批54 granularity=hour|day（默认 hour）：hour=7 天×小时(168 点，初始窗 2 天)/
-    day=90 天×天(90 点，初始窗 30 天——用户裁定 B 两档)。原固定 48h 退役。"""
-    granularity = "day" if granularity == "day" else "hour"
-    # 批54 追加（用户裁定）：回看=**从有数据时刻起**（去固定时限）。day 档=数据 min 全历史；
-    # hour 档护栏=封顶 31 天（744 点——数年数据的小时网格会到数万点拖死页面，属必要工程护栏）
-    span = "interval '1825 days'" if granularity == "day" else "interval '31 days'"
-    trunc = "day" if granularity == "day" else "hour"
-    grid_fmt = "'YYYY-MM-DD'" if granularity == "day" else "'YYYY-MM-DD\"T\"HH24:MI'"
+def llm_usage_series(payload: dict = Depends(require_perm("read"))):
+    """批50 起/批54 终态(用户裁定:去两档只留日):每模型 {今日汇总+日粒度全历史曲线(补零)}。
+    provider+model 双键;左界=数据 min(从有数据时刻起)。原 hour 档/48h 固定窗均退役。"""
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT provider, model, count(*),
@@ -258,25 +251,21 @@ def llm_usage_series(granularity: str = "hour", payload: dict = Depends(require_
         """)
         today = {(r[0], r[1]): {"calls": r[2], "tokens": int(r[3]), "success_rate": float(r[4])}
                  for r in cur.fetchall()}
-        cur = conn.execute(f"""
-            SELECT provider, model, date_trunc('{trunc}', ts) AS bucket,
+        cur = conn.execute("""
+            SELECT provider, model, date_trunc('day', ts) AS bucket,
                    count(*), COALESCE(sum(input_tokens+output_tokens),0)
             FROM llm_usage
-            WHERE ts >= date_trunc('{trunc}', now()) - {span}
             GROUP BY provider, model, bucket ORDER BY bucket
         """)
         series = {}
         for prov, model, b, calls, tokens in cur.fetchall():
-            fmt = "%Y-%m-%d" if granularity == "day" else "%Y-%m-%dT%H:%M"
             series.setdefault((prov, model), []).append(
-                {"ts": b.strftime(fmt), "calls": calls, "tokens": int(tokens)})
-        cur = conn.execute(f"""
-            SELECT to_char(gs, {grid_fmt}) FROM generate_series(
-                GREATEST(date_trunc('{trunc}', now()) - {span},
-                         COALESCE((SELECT date_trunc('{trunc}', min(ts)) FROM llm_usage), date_trunc('{trunc}', now()) - {span})),
-                date_trunc('{trunc}', now()),
-                '1 {trunc}'::interval) gs
-        """)   # 批54:左界=回看范围与数据实际 min 的较大者——无数据不画空尾(轴动态收缩)
+                {"ts": b.strftime("%Y-%m-%d"), "calls": calls, "tokens": int(tokens)})
+        cur = conn.execute("""
+            SELECT to_char(gs, 'YYYY-MM-DD') FROM generate_series(
+                COALESCE((SELECT date_trunc('day', min(ts)) FROM llm_usage), current_date),
+                date_trunc('day', now()), '1 day') gs
+        """)
         grid = [r[0] for r in cur.fetchall()]
     models = []
     for prov, model in set(today) | set(series):
@@ -286,7 +275,7 @@ def llm_usage_series(granularity: str = "hour", payload: dict = Depends(require_
                        "series": [{"ts": ts, "calls": pts[ts]["calls"] if ts in pts else 0,
                                    "tokens": pts[ts]["tokens"] if ts in pts else 0} for ts in grid]})
     models.sort(key=lambda m: -m["today"]["calls"])
-    return {"models": models, "granularity": granularity}
+    return {"models": models}
 
 
 

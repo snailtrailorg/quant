@@ -1027,7 +1027,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       llmUsageEmpty: '还没有用量记录。发起一次 AI 对话后，这里会显示各模型的调用情况。',
       llmCooldownNote: '连续失败几次后切换、冷却多长时间，可在「系统设置 → 运行配置」调整。',
       model: '型号',
-      providerCol: '运营商', granHour: '时', granDay: '日',   // 批54 两档:列头词条化(原硬编码 Provider)
+      providerCol: '运营商',   // 批54 两档:列头词条化(原硬编码 Provider)
       calls: '调用',
       apiKey: 'API Key',
       baseUrl: 'Base URL',
@@ -2301,7 +2301,7 @@ im: 'IM Bots', mail: 'Email SMTP',
       llmUsageEmpty: 'No usage yet. Start an AI conversation, and each model\'s call activity will show up here.',
       llmCooldownNote: 'Change how many consecutive failures trigger a switch and how long the cooldown lasts in System Settings → Run Config.',
       model: 'Model',
-      providerCol: 'Carrier', granHour: 'Hour', granDay: 'Day',   // 批54
+      providerCol: 'Carrier',   // 批54
       calls: 'Calls',
       apiKey: 'API Key',
       baseUrl: 'Base URL',
