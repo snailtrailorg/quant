@@ -114,6 +114,11 @@
   /* 涨跌语义直通 EP 危险/成功不可混用——success 用 --success（青绿），
      danger 保持 EP 语义红（操作反馈），与 --up（数据方向红）分离 */
   --el-color-success: var(--success);
+
+  /* 批53 追加四：多序列图表调色板（LLM 用量多模型曲线——主色领衔+5 扩展；echarts 不解析
+     CSS 变量故组件经 cssVar 解实值引用；色值定义归本文件=令牌门合法新增） */
+  --chart-c1: #ee6666; --chart-c2: #91cc75; --chart-c3: #fac858;
+  --chart-c4: #73c0de; --chart-c5: #3ba272;
 }
 
 html.dark {

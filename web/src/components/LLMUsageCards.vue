@@ -1,66 +1,73 @@
 <template>
-  <!-- 批50：LLM 用量监控卡（每模型一卡：今日调用/tokens/成功率+48h×小时调用曲线）——
-       仿 SystemMetricsCards（VChart 按需+cssVar 解实色——批22 约定 echarts 不解析 CSS 变量；
-       无阈值线/状态徽标=LLM 卡差异）；网格 auto-fill 自适应模型数 -->
   <div v-if="!models.length" class="empty-group">{{ t('llm.llmUsageEmpty') }}</div>
-  <div v-else class="card-grid">
-    <el-card v-for="m in models" :key="m.provider + m.model" shadow="never" class="metric-card">
-      <div class="card-head">
-        <span class="card-name">{{ m.model }}</span>
-        <span class="card-prov">{{ m.provider }}</span>
-      </div>
-      <div class="card-value">
-        <span class="num">{{ m.today.calls }}</span>
-        <span class="sub">{{ t('llm.calls') }} · {{ m.today.tokens.toLocaleString() }} tk · {{ m.today.success_rate }}%</span>
-      </div>
-      <VChart :option="optionOf(m)" autoresize style="height: 128px" />
-    </el-card>
-  </div>
+  <el-card v-else shadow="never" class="metric-card">
+    <div class="chips">
+      <span v-for="m in models" :key="m.provider + m.model" class="chip">
+        <i class="dot" :style="{ background: colorOf(m) }" />
+        <span class="chip-name">{{ m.model }}</span>
+        <span class="chip-sub">{{ m.today.calls }} · {{ m.today.tokens.toLocaleString() }}tk · {{ m.today.success_rate }}%</span>
+      </span>
+    </div>
+    <VChart :option="option" autoresize style="height: 260px" />
+  </el-card>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
-import { GridComponent } from 'echarts/components'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { cssVar } from '../utils/cssVar'
 
-use([CanvasRenderer, LineChart, GridComponent])
+use([CanvasRenderer, LineChart, GridComponent, LegendComponent, TooltipComponent])
 
+const props = defineProps({ models: { type: Array, default: () => [] } })
 const { t } = useI18n()
-defineProps({ models: { type: Array, default: () => [] } })
 
-const optionOf = (m) => ({
-  animation: false,
-  grid: { left: 2, right: 4, top: 2, bottom: 20 },
-  xAxis: {
-    type: 'category', show: true,
-    data: m.series.map(p => p.ts.slice(5, 13).replace('T', ' ')),   // MM-DD HH
-    axisLine: { lineStyle: { color: cssVar('--border-weak') } },
-    axisTick: { show: false },
-    axisLabel: { show: true, color: cssVar('--text-secondary'), fontSize: 10,
-                 hideOverlap: true, interval: 11 },   // 48 点≈每 12h 一刻度
-    splitLine: { show: false },
-  },
-  yAxis: { type: 'value', show: false, min: 0 },
-  series: [{
-    type: 'line', showSymbol: false, data: m.series.map(p => p.calls),
-    lineStyle: { width: 1.5, color: cssVar('--brand-600') },
-    areaStyle: { color: cssVar('--brand-600'), opacity: 0.08 },   // 批50 盲审 A-P1-2：cssVar 单参无 fallback+--brand-fill-weak 令牌不存在→同色低透明零新令牌
-  }],
+// 多模型调色板（cssVar 主色领衔+扩展色——暗色变体下仍可辨）
+const PALETTE = [
+  cssVar('--brand-600'), cssVar('--chart-c1'), cssVar('--chart-c2'),
+  cssVar('--chart-c3'), cssVar('--chart-c4'), cssVar('--chart-c5'),
+]
+const colorOf = (m) => PALETTE[props.models.indexOf(m) % PALETTE.length]
+
+const option = computed(() => {
+  const grid = props.models[0]?.series?.map(p => p.ts.slice(5, 13).replace('T', ' ')) || []
+  return {
+    animation: false,
+    tooltip: { trigger: 'axis' },
+    legend: { show: true, bottom: 0, textStyle: { color: cssVar('--text-secondary'), fontSize: 11 } },
+    grid: { left: 8, right: 12, top: 8, bottom: 44 },
+    xAxis: {
+      type: 'category', show: true, data: grid,
+      axisLine: { lineStyle: { color: cssVar('--border-weak') } },
+      axisTick: { show: false },
+      axisLabel: { color: cssVar('--text-secondary'), fontSize: 10, hideOverlap: true, interval: 5 },
+      splitLine: { show: false },
+    },
+    yAxis: { type: 'value', show: true,
+             axisLabel: { color: cssVar('--text-secondary'), fontSize: 10 },
+             splitLine: { lineStyle: { color: cssVar('--border-weak') } } },
+    series: props.models.map((m, i) => ({
+      name: m.model, type: 'line', showSymbol: false,
+      data: m.series.map(p => p.calls),
+      lineStyle: { width: 1.6 },
+      itemStyle: { color: PALETTE[i % PALETTE.length] },
+      emphasis: { focus: 'series' },
+    })),
+  }
 })
 </script>
 
 <style scoped>
-.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 批51 追加（用户裁定）：固定 3 列各占 1/3——少于 3 不扩充满行（简单） */
 .metric-card { border: 1px solid var(--border-weak); }
-.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.card-name { font-size: var(--fs-label); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.card-prov { font-size: var(--fs-foot); color: var(--text-secondary); flex-shrink: 0; margin-left: 8px; }
-.card-value { margin-bottom: 4px; }
-.num { font-family: var(--font-num); font-weight: 600; font-size: var(--fs-kpi); }
-.sub { font-size: var(--fs-foot); color: var(--text-secondary); margin-left: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.chip-name { font-size: var(--fs-label); font-weight: 600; }
+.chip-sub { font-size: var(--fs-foot); color: var(--text-secondary); }
 .empty-group { color: var(--text-secondary); font-size: var(--fs-foot); padding: 18px 0; text-align: center; }
 </style>
