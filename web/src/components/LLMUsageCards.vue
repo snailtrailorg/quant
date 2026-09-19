@@ -85,11 +85,10 @@ const option = computed(() => {
              axisLabel: { color: cssVar('--text-secondary'), fontSize: 10 },
              splitLine: { lineStyle: { color: cssVar('--border-weak') } } },
     series: shown.value.map((m) => ({
-      name: m.model, type: 'line', showSymbol: false,
+      name: m.model, type: 'bar', stack: 'total', barMaxWidth: 18,
       data: m.series.map(p => p.calls),
-      lineStyle: { width: 1.6 },
       itemStyle: { color: colorOf(m) },
-      emphasis: { focus: 'series' },
+      emphasis: { focus: 'series' },   // 批54 追加:堆叠柱(计数数据柱形语义+多模型构成一眼看——用户裁定)
     })),
   }
 })
