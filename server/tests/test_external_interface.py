@@ -137,13 +137,6 @@ class TestCreateValidation:
                     "capabilities": ["daily"], "params": bad})
             assert r.status_code == 400 and r.json()["code"] == "IFACE_PARAMS_INVALID", bad
 
-    def test_shim_update_provider_change_rejected(self, admin_client):
-        """盲审 B-P1-2 修钉：旧 UI 换 provider（自由文本）→400 拒——防行静默跳域遮蔽实盘凭证链。"""
-        with _ConnPatch(one=("tushare",)):   # 现行 provider=tushare
-            r = admin_client.post("/api/data-sources/1", json={
-                "provider": "xtp", "name": "被误改成通道", "enabled": True})
-        assert r.status_code == 400 and r.json()["code"] == "SHIM_PROVIDER_IMMUTABLE"
-
     def test_update_domain_change_rejected(self, admin_client):
         """盲审 B-P1-2 后半修钉：改能力致换域拒（position 残留+选行序破坏）。"""
         with _ConnPatch(one=(["trading", "quote"],)):   # 现行=交易域
@@ -231,45 +224,6 @@ class TestReorder:
                                   json={"domain": "trading", "ids": [2]})
         assert r.status_code == 200
         assert "'trading' = ANY(capabilities)" in conn.executed[0][0]
-
-
-# --- 旧端点垫片（55a 过渡——55b 前端切换后同车删） ---
-
-class TestShims:
-
-    def test_data_sources_list_old_shape(self, admin_client):
-        row = (1, "tushare", "Tushare主", True, {"rate_limits": {}}, True, None)
-        with _ConnPatch(all_rows=[row]) as conn:
-            r = admin_client.get("/api/data-sources")
-        assert r.status_code == 200
-        item = r.json()[0]
-        assert item["params"] == '{"rate_limits": {}}'   # params dict→JSON 串（旧形状）
-        assert "usage_limit" not in item                  # 死列退役不返
-        assert "NOT ('trading' = ANY(capabilities))" in conn.executed[0][0]
-
-    def test_data_sources_create_derives_defaults(self, admin_client):
-        with _ConnPatch(one=(9,)) as conn:
-            r = admin_client.post("/api/data-sources", json={
-                "provider": "tushare", "name": "t", "credentials": "", "enabled": True})
-        assert r.status_code == 200
-        sql, args = conn.executed[0]
-        assert "external_interface" in sql
-        assert args[1] == "tushare" and args[2] == "astock"
-        assert args[3] is None                                  # exchanges=全所（数据行）
-        assert list(args[6]) == ["daily", "minute"]             # 垫片建行=代码能力全集
-
-    def test_brokers_list_trading_domain(self, admin_client):
-        row = (2, "xtp", "中泰XTP", True, {"td_host": "x"}, True, None)
-        with _ConnPatch(all_rows=[row]) as conn:
-            r = admin_client.get("/api/brokers")
-        assert r.status_code == 200 and r.json()[0]["provider"] == "xtp"
-        assert "'trading' = ANY(capabilities)" in conn.executed[0][0]
-
-    def test_shim_create_unregistered_provider_rejected(self, admin_client):
-        with _ConnPatch():
-            r = admin_client.post("/api/data-sources",
-                                  json={"provider": "wind", "name": "w"})
-        assert r.status_code == 400 and r.json()["code"] == "IFACE_PROVIDER_UNKNOWN"
 
 
 # --- 三消费方（勘察 #1/#3/#5） ---

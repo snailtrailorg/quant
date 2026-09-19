@@ -34,7 +34,7 @@ _PERM_TTL = 60.0
 # W4（盲审 B-P0 新建——原"系统策略键已锁定"是幻觉：require_perm 全表驱动,任何键今天都可被
 # 角色重写关掉）：锁键=提权链/自损链高危键。批33a：user override 双路径已随 user 维退役
 # （组层单锁）；admin 角色重写地板键（self-lockout 防线）保留组层。
-LOCKED_PERM_KEYS = {"user_mgmt", "resume", "account_keys"}
+LOCKED_PERM_KEYS = {"user_mgmt", "resume"}   # 批55b:account_keys 退役(收编外部接口管理)
 ADMIN_ROLE_FLOOR = LOCKED_PERM_KEYS | {"system_config", "alerts_config"}   # 批7:告警路由/计费短信面同列自锁防线
 
 # 批15：市场操作权限（market_op 维）——市场键与实盘分项开关同键（risk._market_of 返回集）。

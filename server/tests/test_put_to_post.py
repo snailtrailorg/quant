@@ -1,7 +1,7 @@
 """PUT→POST 硬切（A 案）冒烟测试。
 
 I 审两个焦点：
-1. 16 个原 PUT 端点 POST 可达（401/422 皆可——只要不是 405/404）
+1. 15 个原 PUT 端点 POST 可达（401/422 皆可——只要不是 405/404）
 2. **路由遮蔽**：POST 化后参数化路由（{sid}/{bid}/{name}）会吃掉后注册的静态路由——
    已把 4 个静态端点调到前面注册，此测试锁死注册顺序（回退/重排即红）。
 """
@@ -15,7 +15,7 @@ def client():
     return TestClient(app)
 
 
-# 16 个原 PUT 端点
+# 15 个原 PUT 端点
 POST_ENDPOINTS = [
     "/api/smtp-providers", "/api/smtp-providers/reorder",
     "/api/system-config/some-key",
@@ -27,9 +27,9 @@ POST_ENDPOINTS = [
     "/api/llm-models/1",
     "/api/my/im-bots/1",   # 五轮：admin IM 面删除——自助端点
     "/api/sync/config/astock_daily",
-    "/api/data-sources/1",
+    "/api/interfaces/1",
     
-    "/api/brokers/1",
+    "/api/interfaces/1/test",
     "/api/risk-rules/1",
     "/api/factors/some-name",
 ]

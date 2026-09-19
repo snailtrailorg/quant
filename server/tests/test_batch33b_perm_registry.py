@@ -30,7 +30,7 @@ def authed_client(client):
 def test_registry_base_three_lists():
     """底座三清单：api 14/nav 18（含管理页自身吃狗粮）/market 5——与原三份平行清单等价收编。"""
     from src.data_platform.perm_registry import API_PERM_KEYS, NAV_ITEMS_BASE, MARKET_OP_KEYS, NAV_ALIASES
-    assert len(API_PERM_KEYS) == 14 and len(set(API_PERM_KEYS)) == 14
+    assert len(API_PERM_KEYS) == 13 and len(set(API_PERM_KEYS)) == 13   # 批55b:account_keys 退役
     assert len(NAV_ITEMS_BASE) == 18   # 17+perm-resources（批33b 管理页）
     assert len(MARKET_OP_KEYS) == 5
     assert len(NAV_ALIASES) == 2       # 批38：8 条死别名已清（活=stock/data-manage）
@@ -48,12 +48,12 @@ def test_load_registry_fallback_on_db_fail():
 
 def test_scan_bindings_full_and_drift():
     """router-walk 扫描（A-P0-1：app.routes 懒 include 拿 0 条——本实现扫 APIRouter 实例）
-    ：import 真 app 后 173 处量级+14 键+违例 0；临时 router 喂未注册键=违例非空。"""
+    ：import 真 app 后 172 处量级+13 键+违例 0；临时 router 喂未注册键=违例非空。"""
     from src.data_platform.perm_registry import scan_perm_bindings, check_binding_drift
     import src.web_api.main
     assert src.web_api.main  # 注册全部路由（真用防 pyflakes）
     b = scan_perm_bindings()
-    assert len(b) >= 170 and len({x["key"] for x in b}) == 14
+    assert len(b) >= 170 and len({x["key"] for x in b}) == 13   # 批55b:14→13
     assert check_binding_drift() == []
     r = APIRouter()
     @r.get("/api/__unreg_test")
@@ -73,7 +73,7 @@ def test_get_permissions_shape_compat(authed_client):
         r = authed_client.get("/api/permissions")
     assert r.status_code == 200
     j = r.json()
-    assert len(j["keys"]) == 14 and j["keys"][0] == "read"
+    assert len(j["keys"]) == 13 and j["keys"][0] == "read"
     nav = j["nav"]["items"]
     assert all("id" in e and "group" in e for e in nav)      # 原名保留（PermMatrix prop=group 直绑）
     # A-P1-2 修后等价钉：前 17 项 id 序==原 NAV_ITEMS 声明序（组秩排序非字母序）
@@ -127,7 +127,7 @@ def test_perm_resources_get_shape(authed_client):
         r = authed_client.get("/api/perm-resources")
     assert r.status_code == 200
     j = r.json()
-    assert len(j["api"]) == 14 and j["bindings_total"] >= 170
+    assert len(j["api"]) == 13 and j["bindings_total"] >= 170
     user_mgmt = next(a for a in j["api"] if a["key"] == "user_mgmt")
     assert user_mgmt["locked"] is True and user_mgmt["endpoints"]
 

@@ -111,14 +111,6 @@ class IMBotUserReq(BaseModel):
     role: str
     user_id: int | None = None   # 批11C：绑定平台账号（管理面通道——平台级 bot 的绑定恢复路径，A-P0-1 修）
 
-class DataSourceReq(BaseModel):
-    """旧数据源端点垫片请求体（55a 过渡——usage_limit 死列退役不收）。"""
-    provider: str
-    name: str
-    credentials: str = ""
-    params: str | None = None
-    enabled: bool = True
-
 class InterfaceReq(BaseModel):
     """外部接口行（批55a：行=账号/列=能力——27 号架构文档）。
 
@@ -151,13 +143,6 @@ class RateLimitOverrideReq(BaseModel):
     api_name: str | None = None
     value: float | None = None
     circuit_breaker: dict | None = None
-
-class BrokerReq(BaseModel):
-    provider: str
-    name: str
-    credentials: str = ""
-    params: str | None = None
-    enabled: bool = True
 
 class RiskRuleReq(BaseModel):
     name: str

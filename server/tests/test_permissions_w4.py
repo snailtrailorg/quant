@@ -75,7 +75,7 @@ class TestEffective:
 
 class TestLockedKeys:
     def test_locked_consts(self):
-        assert auth_mod.LOCKED_PERM_KEYS == {"user_mgmt", "resume", "account_keys"}
+        assert auth_mod.LOCKED_PERM_KEYS == {"user_mgmt", "resume"}   # 批55b:account_keys 退役
         assert "system_config" in auth_mod.ADMIN_ROLE_FLOOR
 
 

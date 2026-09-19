@@ -1,8 +1,7 @@
-"""平台化管理路由：外部接口（55a 统一）/限流四层/任务/旧端点垫片 —— 从 main.py 提取的 mgmt 端点。
+"""平台化管理路由：外部接口（批55 统一表）/限流四层/任务 —— 从 main.py 提取的 mgmt 端点。
 
 批55a（27 号架构文档）：data_source_config+broker_config 合并为 external_interface——
-行=账号/列=能力/页签=过滤视图。旧 /api/data-sources+/api/brokers 以垫片过渡
-（55b 前端切 /api/interfaces 后同车删）。
+行=账号/列=能力/页签=过滤视图。批55b：旧端点垫片已随前端切换删除（批39 channels 同款）。
 """
 
 import json
@@ -10,8 +9,7 @@ import json
 from fastapi import APIRouter, Depends, Request, Body, HTTPException
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import (DataSourceReq, BrokerReq, InterfaceReq, InterfaceReorderReq,
-                      RateLimitOverrideReq)
+from ..models import InterfaceReq, InterfaceReorderReq, RateLimitOverrideReq
 from src.data_platform.db import get_conn
 import logging
 
@@ -80,6 +78,14 @@ def _validate_iface(provider: str, market: str, exchanges, capabilities) -> tupl
         if bad:
             raise ApiError(400, "IFACE_EXCHANGE_UNKNOWN",
                            f"交易所 {sorted(bad)} 不属于市场 {market}（该市场全所：{sorted(market_ex)}）")
+        # 盲审 B-P1-4：perp 类 provider 只能覆盖自身 venue（防 binance 通道勾 OKX 的语义错行）
+        from src.quant_common.markets import MARKET_OP_DECOMP
+        d = MARKET_OP_DECOMP.get(provider)
+        if d and d[2]:
+            bad = set(exchanges) - {d[2]}
+            if bad:
+                raise ApiError(400, "IFACE_EXCHANGE_UNKNOWN",
+                               f"provider {provider} 仅覆盖 {[d[2]]}（不可勾 {sorted(bad)}）")
     return sorted(caps), (list(exchanges) if exchanges else None)
 
 
@@ -124,6 +130,23 @@ def list_interfaces(cap: str | None = None, payload: dict = Depends(require_perm
             logger.warning("外部接口 %s(id=%s) 能力漂移：%s", r[2], r[0], msg)
         items.append(_iface_row(r))
     return items
+
+
+@router.get("/api/interfaces/providers")   # 静态路由前移防 {iid} 遮蔽（批43 P0-3 同款）
+def list_interface_providers(payload: dict = Depends(require_perm("read"))):
+    """provider 目录（55b：新建弹窗下拉零硬编码——注册表派生）。
+
+    provider→{market, capabilities=代码能力全集}；代码能力空（stub：joinquant/ricequant）
+    不出目录（写侧 ⊆ 校验建不了行，列出来只会引导用户撞 400）。
+    """
+    from src.quant_common.markets import PROVIDER_MARKET, EXCHANGES
+    from src.data_platform.capabilities import provider_capabilities
+    return {"providers": [
+        {"provider": p, "market": m, "capabilities": sorted(provider_capabilities(p)),
+         "market_exchanges": sorted(e for e, v in EXCHANGES.items() if v["market"] == m),
+         "default_exchanges": _default_exchanges(p)}   # 批55b 盲审修：perp 预填单所（防"不选=全部"文案与后端钉默认不一致）
+        for p, m in sorted(PROVIDER_MARKET.items()) if provider_capabilities(p)
+    ]}
 
 
 @router.post("/api/interfaces")
@@ -424,183 +447,3 @@ def detect_stuck_api(payload: dict = Depends(require_perm("system_config"))):
     return {"stuck_count": count}
 
 
-# --- 旧端点垫片（55a 过渡：读写 external_interface 映射旧形状；55b 前端切换后同车删） ---
-# 批39：/api/channels CRUD 五端点已删（用户裁定死码连根——Channels UI 批38 删后零前端消费；
-# channel_config 表随 0085 drop；推送走告警订阅链）
-
-
-def _shim_old_row(r) -> dict:
-    """external_interface 行 → 旧端点形状（params dict→JSON 串；usage_limit 死列不返）。"""
-    return {"id": r[0], "provider": r[1], "name": r[2], "has_credentials": bool(r[3]),
-            "params": json.dumps(r[4], ensure_ascii=False) if isinstance(r[4], dict) else r[4],
-            "enabled": r[5], "updated_at": str(r[6]) if r[6] else None}
-
-
-_OLD_COLS = "id, provider, name, credentials_encrypted IS NOT NULL, params, enabled, updated_at"
-
-
-def _shim_defaults(provider: str) -> tuple[str, list]:
-    """垫片建行的 market/caps 派生（新端点显式提交，旧端点按注册表默认全集）。
-
-    盲审注记（A-P2/B-P2，有意收窄非回归）：旧端点曾接受任意字符串 provider——
-    垫片对未注册 provider/代码能力空（stub：joinquant/ricequant）一律 400。
-    """
-    from src.quant_common.markets import PROVIDER_MARKET
-    from src.data_platform.capabilities import provider_capabilities
-    market = PROVIDER_MARKET.get(provider)
-    caps = sorted(provider_capabilities(provider))
-    if market is None or not caps:
-        raise ApiError(400, "IFACE_PROVIDER_UNKNOWN",
-                       f"provider {provider} 未注册（需先实现接入并登记 markets.PROVIDER_MARKET）")
-    return market, caps
-
-
-@router.get("/api/data-sources")
-def list_data_sources(payload: dict = Depends(require_perm("read"))):
-    with get_conn() as conn:
-        cur = conn.execute(
-            f"SELECT {_OLD_COLS} FROM external_interface WHERE {_DOMAIN_DATA} ORDER BY position, id")
-        rows = cur.fetchall()
-    return [_shim_old_row(r) for r in rows]
-
-
-@router.post("/api/data-sources")
-def create_data_source(req: DataSourceReq, payload: dict = Depends(require_perm("system_config"))):
-    from src.quant_common.crypto import encrypt
-    market, caps = _shim_defaults(req.provider)
-    enc = encrypt(req.credentials) if req.credentials else None
-    params = json.dumps(_normalize_params(req.params), ensure_ascii=False)
-    with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO external_interface "
-            f"(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled) "
-            f"VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
-            f"(SELECT coalesce(max(position),-1)+1 FROM external_interface WHERE {_DOMAIN_DATA}),%s) "
-            "RETURNING id",
-            (req.name, req.provider, market, _default_exchanges(req.provider), enc, params, caps, req.enabled))
-        conn.commit()
-    audit_log(payload["username"], "data_source_create", req.provider)
-    return {"id": cur.fetchone()[0]}
-
-
-def _shim_update(iid: int, req_provider: str, req_name: str, enc, params: dict,
-                 enabled: bool, audit_action: str, username: str) -> None:
-    """垫片更新共用体（盲审 A-P2-7 修）：行种字段（provider/market/exchanges/
-    capabilities/position）一律不动——provider 变更拒 400（换行种请用新端点/等 55b），
-    防旧 UI 静默重置新端点收窄过的 caps 或翻转域+position 碰撞。"""
-    with get_conn() as conn:
-        cur = conn.execute("SELECT provider FROM external_interface WHERE id=%s", (iid,))
-        r = cur.fetchone()
-        if not r:
-            raise ApiError(404, "IFACE_NOT_FOUND", "接口不存在")
-        if r[0] != req_provider:
-            raise ApiError(400, "SHIM_PROVIDER_IMMUTABLE",
-                           f"过渡端点不支持更换 provider（{r[0]}→{req_provider}）——请用 /api/interfaces")
-        if enc is not None:
-            conn.execute(
-                "UPDATE external_interface SET name=%s, credentials_encrypted=%s, "
-                "params=%s::jsonb, enabled=%s, updated_at=now() WHERE id=%s",
-                (req_name, enc, json.dumps(params, ensure_ascii=False), enabled, iid))
-        else:
-            conn.execute(
-                "UPDATE external_interface SET name=%s, "
-                "params=%s::jsonb, enabled=%s, updated_at=now() WHERE id=%s",
-                (req_name, json.dumps(params, ensure_ascii=False), enabled, iid))
-        conn.commit()
-    audit_log(username, audit_action, f"id={iid}")
-
-
-@router.post("/api/data-sources/{dsid}")
-def update_data_source(dsid: int, req: DataSourceReq, payload: dict = Depends(require_perm("system_config"))):
-    from src.quant_common.crypto import encrypt
-    enc = encrypt(req.credentials) if req.credentials else None
-    _shim_update(dsid, req.provider, req.name, enc, _normalize_params(req.params),
-                 req.enabled, "data_source_update", payload["username"])
-    return {"ok": True}
-
-
-@router.delete("/api/data-sources/{dsid}")
-def delete_data_source(dsid: int, payload: dict = Depends(require_perm("system_config"))):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM external_interface WHERE id=%s", (dsid,))
-        conn.commit()
-    audit_log(payload["username"], "data_source_delete", f"id={dsid}")
-    return {"ok": True}
-
-
-@router.post("/api/data-sources/{dsid}/test")
-def test_data_source(dsid: int, payload: dict = Depends(require_perm("read"))):
-    from src.data_platform.data_source import _REGISTRY
-    with get_conn() as conn:
-        cur = conn.execute("SELECT provider, credentials_encrypted, params FROM external_interface WHERE id=%s", (dsid,))
-        r = cur.fetchone()
-    if not r:
-        return {"ok": False, "error": "数据源不存在"}
-    cls = _REGISTRY.get(r[0])
-    if not cls:
-        return {"ok": False, "error": f"provider {r[0]} 未注册（需实现 DataSource 子类）"}
-    ds = cls(credentials_encrypted=r[1], params=json.dumps(r[2]) if isinstance(r[2], dict) else r[2])
-    ok = ds.test_connection()
-    return {"ok": ok, "error": "" if ok else "连接测试失败，看日志"}
-
-
-@router.get("/api/brokers")
-def list_brokers(payload: dict = Depends(require_perm("read"))):
-    with get_conn() as conn:
-        cur = conn.execute(
-            f"SELECT {_OLD_COLS} FROM external_interface WHERE {_DOMAIN_TRADING} ORDER BY position, id")
-        rows = cur.fetchall()
-    return [_shim_old_row(r) for r in rows]
-
-
-@router.post("/api/brokers")
-def create_broker(req: BrokerReq, payload: dict = Depends(require_perm("system_config"))):
-    from src.quant_common.crypto import encrypt
-    market, caps = _shim_defaults(req.provider)
-    enc = encrypt(req.credentials) if req.credentials else None
-    params = json.dumps(_normalize_params(req.params), ensure_ascii=False)
-    with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO external_interface "
-            f"(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled) "
-            f"VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
-            f"(SELECT coalesce(max(position),-1)+1 FROM external_interface WHERE {_DOMAIN_TRADING}),%s) "
-            "RETURNING id",
-            (req.name, req.provider, market, _default_exchanges(req.provider), enc, params, caps, req.enabled))
-        conn.commit()
-    audit_log(payload["username"], "broker_create", req.provider)
-    return {"id": cur.fetchone()[0]}
-
-
-@router.post("/api/brokers/{bid}")
-def update_broker(bid: int, req: BrokerReq, payload: dict = Depends(require_perm("system_config"))):
-    from src.quant_common.crypto import encrypt
-    enc = encrypt(req.credentials) if req.credentials else None
-    _shim_update(bid, req.provider, req.name, enc, _normalize_params(req.params),
-                 req.enabled, "broker_update", payload["username"])
-    return {"ok": True}
-
-
-@router.delete("/api/brokers/{bid}")
-def delete_broker(bid: int, payload: dict = Depends(require_perm("system_config"))):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM external_interface WHERE id=%s", (bid,))
-        conn.commit()
-    audit_log(payload["username"], "broker_delete", f"id={bid}")
-    return {"ok": True}
-
-
-@router.post("/api/brokers/{bid}/test")
-def test_broker(bid: int, payload: dict = Depends(require_perm("read"))):
-    from src.strategy_framework.broker import _REGISTRY
-    with get_conn() as conn:
-        cur = conn.execute("SELECT provider, credentials_encrypted, params FROM external_interface WHERE id=%s", (bid,))
-        r = cur.fetchone()
-    if not r:
-        return {"ok": False, "error": "通道不存在"}
-    cls = _REGISTRY.get(r[0])
-    if not cls:
-        return {"ok": False, "error": f"provider {r[0]} 未注册（需实现 Broker 子类）"}
-    b = cls(credentials_encrypted=r[1], params=json.dumps(r[2]) if isinstance(r[2], dict) else r[2])
-    ok = b.test_connection()
-    return {"ok": ok, "error": "" if ok else "凭证不完整或连接失败（真连 vnpy 在服务器）"}

@@ -28,7 +28,7 @@ const ALL_TABS = [
     { key: 'sms', i18nKey: 'tabs.sms', c: SmsCard, perm: 'alerts_config' },   // 批37 迁入
     { key: 'llm', i18nKey: 'tabs.llm', c: LLMModels, perm: 'llm_config' },
     { key: 'sources', i18nKey: 'tabs.sources', c: DataSources, perm: 'system_config' },
-    { key: 'trading', i18nKey: 'tabs.trading', c: TradingAccounts, perm: 'account_keys' },
+    { key: 'trading', i18nKey: 'tabs.trading', c: TradingAccounts, perm: 'system_config' },   // 批55b:交易视图写端点=system_config(旧 accounts UI 的 account_keys 门随重写退役)
 ]
 const _perms = ref([])
 const tabs = computed(() => ALL_TABS.filter(x => _perms.value.includes(x.perm)))

@@ -140,7 +140,7 @@ from .routes.stock import router as stock_router              # /api/stock/* /ap
 from .routes.chat import router as chat_router                # /api/chat /ws/chat /ws/market /api/llm-models /api/llm-*
 from .routes.im_bots import router as im_bots_router          # /api/im-bots/*
 from .routes.alerts import router as alerts_router              # /api/alerts/*（批7 告警订阅）
-from .routes.mgmt import router as mgmt_router                # /api/data-sources /api/channels /api/brokers /api/risk-rules /api/tasks
+from .routes.mgmt import router as mgmt_router                # /api/interfaces（批55 统一表）/api/datasource rate-limits /api/tasks
 from .routes.risk import router as risk_router                # /api/risk* /api/live-trading /api/reconcile /api/convertible
 from .routes.backtest import router as backtest_router        # /api/backtest* /api/pool* /api/broker-usage
 

@@ -1,14 +1,16 @@
 <template>
   <!-- 批55-0:通道表格壳(拖拽列+reorder 乐观重排通用层——第七份复制止于此,弹窗不抽:凭证/枚举异构真实)。
        用法: <ChannelTableShell :rows="rows" storage-key="xx" :drag-title-key="'a.b'" @reorder="ids => api(ids)">
-             列内容走默认插槽(调用方 el-table-column 依序追加,本壳只出手柄列)。 -->
+             列内容走默认插槽(调用方 el-table-column 依序追加,本壳只出手柄列)。
+       批55b 扩展:can-drag 谓词(可选)——混合行场景(数据页含交易域行,可见但不可拖):
+       手柄按行隐藏;drop 仅在可拖行间生效,重排只动可拖子集,不可拖行原位不动。 -->
   <div>
     <div v-if="noteKey" class="order-note">{{ t(noteKey) }}</div>
     <TableShell :data="rows" :storage-key="storageKey" row-key="id">
       <el-table-column :label="t(dragTitleKey)" width="46">   <!-- :label 保留供列宽持久化键(批48 快审 A-P1-2) -->
         <template #header><el-icon :title="t(dragTitleKey)" :size="16"><Menu /></el-icon></template>
-        <template #default="{ $index }">
-          <span class="drag-handle" :draggable="true"
+        <template #default="{ row, $index }">
+          <span v-if="!canDrag || canDrag(row)" class="drag-handle" :draggable="true"
                 :title="t(dragTitleKey)"
                 @dragstart="$emit('dragstart', $index); dragIdx = $index" />
         </template>
@@ -30,20 +32,30 @@ const props = defineProps({
   dragTitleKey: { type: String, required: true },   // 手柄 title+列头 tooltip 词条键
   noteKey: { type: String, default: '' },           // 表上方排序说明行(空=不渲染)
   reorder: { type: Function, required: true },      // async (ids) => await api(ids)
+  canDrag: { type: Function, default: null },       // 批55b:行级可拖谓词(null=全部可拖)
 })
 const emit = defineEmits(['reorder-failed', 'dragstart'])
 const { t } = useI18n()
 let dragIdx = -1
 
+const _canDrag = (r) => !props.canDrag || props.canDrag(r)
+
 const onDrop = async (i) => {
   if (dragIdx < 0 || dragIdx === i) return
-  const arr = [...props.rows]
-  const [moved] = arr.splice(dragIdx, 1)
-  arr.splice(i, 0, moved)
-  dragIdx = -1
   const rowsRef = props.rows
+  if (!rowsRef[dragIdx] || !rowsRef[i]) { dragIdx = -1; return }   // 盲审 B-P2-8:load 替换后 index 越界的时序防御
+  if (!_canDrag(rowsRef[dragIdx]) || !_canDrag(rowsRef[i])) { dragIdx = -1; return }
+  // 可拖子集内重排（不可拖行原位不动——批55b 混合行）
+  const sub = rowsRef.filter(_canDrag)
+  const from = sub.indexOf(rowsRef[dragIdx])
+  const to = sub.indexOf(rowsRef[i])
+  sub.splice(to, 0, sub.splice(from, 1)[0])
+  const arr = [...rowsRef]
+  let k = 0
+  arr.forEach((r, idx) => { if (_canDrag(r)) arr[idx] = sub[k++] })
+  dragIdx = -1
   try {
-    await props.reorder(arr.map(r => r.id))
+    await props.reorder(arr.filter(_canDrag).map(r => r.id))
     rowsRef.splice(0, rowsRef.length, ...arr)   // 乐观落地(调用方 rows 须响应式数组)
   } catch (e) {
     emit('reorder-failed', e)   // 失败回滚由调用方重拉(load)

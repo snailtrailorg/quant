@@ -83,11 +83,11 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | AI 标的分析（三档项 15） | `/api/stock/{symbol}/analyze` | POST | analyst+ | LLM 网关 caller=stock_analyze，10min 缓存，SYMBOL_NOT_FOUND/LLM_UNAVAILABLE |
 | 筛选 | `/api/screen/{astock,cb,etf}` | GET | viewer+ | 标的筛选（daily_basic） |
 | **LLM用量** | `/api/llm-usage/series` | GET | viewer+ | 批50：每模型今日汇总+48h×小时曲线（generate_series 补零；原 summary 退役） |
-| **外部接口** | `/api/interfaces` `?cap=` `{iid}/{test}` `/api/interfaces/reorder` | GET/POST/DELETE | admin | 批55a：统一表 CRUD+分域 reorder（行=账号/列=能力——27 号）；GET 按能力过滤（GIN @>）+漂移告警+附 code_capabilities |
-| 数据源管理（垫片） | `/api/data-sources` `/api/data-sources/{dsid}/{test}` | GET/POST/POST/DELETE | admin | PT3→批55a 过渡垫片（读写 external_interface 数据域行映旧形状；55b 前端切换后同车删） |
+| **外部接口** | `/api/interfaces` `?cap=` `{iid}/{test}` `/api/interfaces/reorder` `/api/interfaces/providers` | GET/POST/DELETE | admin | 批55a：统一表 CRUD+分域 reorder（行=账号/列=能力——27 号）；GET 按能力过滤（GIN @>）+漂移告警+附 code_capabilities；批55b：providers=新建下拉目录（注册表派生） |
+| ~~数据源管理（垫片）~~ | ~~`/api/data-sources` 族~~ | — | — | 批55b 删除（55a 过渡垫片完成使命——前端已切 /api/interfaces，批39 channels 同款节奏） |
 | 后台任务 | `/api/tasks` `/api/tasks/{task_id}/{terminate,force-delete}` `/api/tasks/detect-stuck` | GET/POST | viewer+ | PT1（list/get/终止/强删/卡死检测） |
 | 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/POST/DELETE | admin | PT4（channel_config CRUD） |
-| 交易通道（垫片） | `/api/brokers` `/api/brokers/{bid}/{test}` | GET/POST/POST/DELETE | admin | PT5→批55a 过渡垫片（交易域行映旧形状；55b 后同车删） |
+| ~~交易通道（垫片）~~ | ~~`/api/brokers` 族~~ | — | — | 批55b 删除（同上） |
 | 风控规则 | `/api/risk-rules` `/api/risk-rules/{types,{rid}}` | GET/POST/POST/DELETE | admin | PT6（risk_rules CRUD） |
 | 因子 | `/api/factors` `/api/factors/{name}` `/api/factors/validate` | GET/POST/POST/DELETE | viewer+ / strategy_control | 因子 CRUD（预置+自定义）+ 代码校验 |
 | 策略校验 | `/api/strategy/validate-python` `/api/strategy/validate-params` | POST | analyst+ | Python 代码 AST 校验 + parameter_defs 校验 |
@@ -200,7 +200,7 @@ from src.quant_common.crypto import encrypt, decrypt, mask
 | `llm_usage` | gateway._log_usage（间接） | /api/llm-usage/summary |
 | `llm_budget` | /api/llm-budget CRUD（UPDATE provider/daily_token_limit/monthly_cost_limit 等） | /api/llm-budget + budget.check_budget_alerts（llm_usage 聚合比对）（P3 回写 2026-08-20：原"待加"已过时） |
 | `im_bot_config` / `im_bot_users` | /api/im-bots CRUD + /api/im-bots/{bid}/users | im_bot 运行读 + 首见 open_id 登记 |
-| `external_interface`（批55a 统一表 0090） | /api/interfaces CRUD+reorder+test；/api/data-sources+/api/brokers 垫片；限流三端点（_load_ds_params 域内选行） | get_data_source / get_broker（间接） |
+| `external_interface`（批55a 统一表 0090） | /api/interfaces CRUD+reorder+test+providers；限流三端点（_load_ds_params 域内选行） | get_data_source / get_broker（间接） |
 | `data_source_usage` | record_usage（间接） | /api/data-source-usage |
 | `channel_config` | /api/channels CRUD | get_channel（间接） |
 | `risk_rules` | /api/risk-rules CRUD | risk_control._load_rules（间接） |

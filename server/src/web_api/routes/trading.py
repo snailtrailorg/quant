@@ -2,7 +2,7 @@ import json, subprocess, time
 from fastapi import APIRouter, Depends, Request, Body, Header, HTTPException, Query
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, DataSourceReq, BrokerReq, RiskRuleReq, PoolReq, StrategyAccountReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq, StrategyAccountReq)
 from src.data_platform.db import get_conn
 import logging
 logger = logging.getLogger("web_api")
@@ -285,7 +285,7 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
 
 
 @router.get("/api/account")
-def list_accounts(payload: dict = Depends(require_perm("account_keys"))):
+def list_accounts(payload: dict = Depends(require_perm("read"))):   # 批55b:LiveTask 建任务下拉依赖(viewer 可见掩码提示)
     """列券商/交易所账户（密钥不返回明文）。"""
     with get_conn() as conn:
         try:
@@ -299,7 +299,7 @@ def list_accounts(payload: dict = Depends(require_perm("account_keys"))):
 
 
 @router.post("/api/account")
-def create_account(req: dict = Body(...), payload: dict = Depends(require_perm("account_keys"))):
+def create_account(req: dict = Body(...), payload: dict = Depends(require_perm("system_config"))):   # 批55b:与集成中心页签门一致
     """P4-5 创建账户。"""
     with get_conn() as conn:
         k = (req.get("name", ""), req.get("exchange", ""), req.get("api_key_hint", ""), req.get("enabled", True))
@@ -309,7 +309,7 @@ def create_account(req: dict = Body(...), payload: dict = Depends(require_perm("
 
 
 @router.get("/api/account/{aid}")
-def get_account(aid: int, payload: dict = Depends(require_perm("account_keys"))):
+def get_account(aid: int, payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
         cur = conn.execute("SELECT id, name, exchange, api_key_hint, enabled, created_at FROM accounts WHERE id=%s", (aid,))
         row = cur.fetchone()
@@ -319,7 +319,7 @@ def get_account(aid: int, payload: dict = Depends(require_perm("account_keys")))
 
 
 @router.post("/api/account/{aid}")
-def update_account(aid: int, req: dict = Body(...), payload: dict = Depends(require_perm("account_keys"))):
+def update_account(aid: int, req: dict = Body(...), payload: dict = Depends(require_perm("system_config"))):
     """P4-5 更新账户。"""
     with get_conn() as conn:
         for k in ("name", "exchange", "api_key_hint", "enabled"):
@@ -330,7 +330,7 @@ def update_account(aid: int, req: dict = Body(...), payload: dict = Depends(requ
 
 
 @router.delete("/api/account/{aid}")
-def delete_account(aid: int, payload: dict = Depends(require_perm("account_keys"))):
+def delete_account(aid: int, payload: dict = Depends(require_perm("system_config"))):
     """P4-5 删除账户。"""
     with get_conn() as conn:
         conn.execute("DELETE FROM accounts WHERE id=%s", (aid,))

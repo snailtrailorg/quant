@@ -1,6 +1,8 @@
 <template>
-  <el-card>
-    <template #header><div style="display:flex; justify-content:space-between; align-items:center">{{ t('dataSources.title') }}<div style="display:flex; gap:8px; align-items:center"><ColumnSettings storage-key="cols.datasources" :columns="colDefs" v-model:visible="visible" /><IconBtn :icon="Plus" :title="t('common.create')" @click="onAdd" /></div></div></template>
+  <!-- 批55b:数据源页签=外部接口统一表·数据视图(27 号:页签=能力过滤视图)。
+      表格+弹窗+拖拽归 InterfacesCard(两视图单源);本页保留数据页特有件:
+      今日调用量卡片+Tushare 限速/熔断折叠面板(provider 键端点不变)。 -->
+  <div>
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
       <TableShell :data="usage.today" storage-key="datasource-usage">
@@ -13,44 +15,8 @@
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="166" />
       </TableShell>
     </el-card>
-    <TableShell :data="sources" storage-key="datasources">
-      <el-table-column v-if="colOn('provider')" prop="provider" label="Provider" min-width="120" />
-      <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="has_credentials" :label="t('common.credential')" min-width="120">
-        <template #default="{ row }"><el-tag :type="row.has_credentials ? 'success' : 'info'">{{ row.has_credentials ? t('common.configured') : t('common.notConfigured') }}</el-tag></template>
-      </el-table-column>
-      <el-table-column v-if="colOn('usage_limit')" prop="usage_limit" :label="t('common.dailyLimit')" min-width="129" />
-      <el-table-column prop="enabled" :label="t('common.enable')" min-width="80">
-        <template #default="{ row }"><el-tag :type="row.enabled ? 'success' : 'danger'">{{ row.enabled ? '✓' : '✗' }}</el-tag></template>
-      </el-table-column>
-      <el-table-column v-if="colOn('updated_at')" prop="updated_at" :label="t('common.updatedAt')" min-width="220">
-        <template #default="{ row }">{{ row.updated_at ? fmtTime.full(row.updated_at) : '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="actions" :label="t('common.action')" width="250">
-        <template #default="{ row }">
-          <IconBtn size="small" :icon="VideoPlay" :title="t('common.test')" @click="onTest(row.id)" :loading="testing === row.id" />
-          <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="onEdit(row)" />
-          <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')" @click="onDelete(row.id)" />
-        </template>
-      </el-table-column>
-    </TableShell>
-    <el-dialog v-model="dlg" :close-on-click-modal="false" :title="form.id ? t('dataSources.editTitle') : t('dataSources.addTitle')" width="560px">
-      <el-form :model="form" label-width="120px">
-      <el-form-item label="Provider"><el-input v-model="form.provider" :placeholder="t('dataSources.phProvider')" /></el-form-item>
-      <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
-      <el-form-item :label="t('common.credentialToken')"><el-input v-model="form.credentials" type="password" show-password :placeholder="t('common.phEditNoChange')" autocomplete="new-password" /></el-form-item>
-      <el-form-item :label="t('common.dailyLimit')">
-            <el-input-number v-model="form.usage_limit" :min="0" controls-position="right" />
-            <span class="zero-note">{{ t('dataSources.limitZeroNote') }}</span>
-          </el-form-item>   <!-- 批36b-β：0 语义消歧 -->
-      <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dlg = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="onSave" :loading="saving">{{ form.id ? t('common.update') : t('riskRule.add') }}</el-button>
-      </template>
-    </el-dialog>
-    <template v-if="tushareRow">
+    <InterfacesCard view="data" @loaded="onRowsChanged" />
+    <template v-if="tushareExists">
       <el-divider />
       <el-collapse>
         <el-collapse-item :title="t('dataSources.rateTableTitle')" name="rates">
@@ -92,59 +58,36 @@
         </el-collapse-item>
       </el-collapse>
     </template>
-  </el-card>
+  </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
-import ColumnSettings from '../components/ColumnSettings.vue'
-import IconBtn from '../components/IconBtn.vue'
-import { Plus, VideoPlay, Edit, Delete } from '@element-plus/icons-vue'
-import { fmtTime } from '../utils/fmtTime'
-import {apiErr,  getDataSources, createDataSource, updateDataSource, deleteDataSource, testDataSource, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import InterfacesCard from '../components/InterfacesCard.vue'
+import { apiErr, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
+import { ElMessage } from 'element-plus'
 
 const { t } = useI18n()
-const sources = ref([])
-
-// 批17 列显示配置：更新时间默认隐；名称/凭证/启用/操作恒显不进 defs（限速覆写表为编辑面不接）
-const colDefs = computed(() => [
-  { key: 'provider', label: 'Provider' },
-  { key: 'usage_limit', label: t('common.dailyLimit') },
-  { key: 'updated_at', label: t('common.updatedAt'), hidden: true },
-])
-const visible = ref([])
-const colOn = k => visible.value.includes(k)
 const usage = ref({ today: [], trend: [] })
-const form = ref(emptyForm())
-const saving = ref(false)
-const dlg = ref(false)   // 编辑形态弹窗化（DESIGN 新立法）
-const testing = ref(0)
 
-// --- 限速（tushare）：覆写 + 熔断参数（24 号去积分档，限速=类默认+DB覆写两级） ---
+// 限速/熔断（provider 键端点不变）：数据域存在 tushare 行即显示——随 CRUD 联动（盲审 A-P1-2：旧快照式滞留）
+const tushareExists = ref(false)
 const presets = ref({ apis: [] })
 const cb = ref({ fail_threshold: 5, reset_timeout: 60 })
-const tushareRow = computed(() => sources.value.find(s => s.provider === 'tushare'))
 
-function emptyForm() {
-  return { provider: 'tushare', name: '', credentials: '', usage_limit: null, enabled: true }
+const onRowsChanged = (allRows) => {
+  tushareExists.value = (allRows || []).some(r => r.provider === 'tushare' && !(r.capabilities || []).includes('trading'))
+  loadPresets()
 }
 
-const load = async () => {
-  try { sources.value = await getDataSources() } catch (e) { console.error(e) }
-  loadPresets()   // 档位/覆写随数据源配置走，列表刷新后同步拉取
-}
-const loadUsage = async () => { try { usage.value = await getDataSourceUsage() } catch (e) { console.error(e) } }
-onMounted(() => { load(); loadUsage() })
-
-const onEdit = (row) => { form.value = { ...row, credentials: '' } ; dlg.value = true }
-const resetForm = () => { form.value = emptyForm() }
-const onAdd = () => { resetForm(); dlg.value = true }
+onMounted(async () => {
+  try { usage.value = await getDataSourceUsage() } catch (e) { console.error(e) }
+})
 
 const loadPresets = async () => {
-  if (!tushareRow.value) return
+  if (!tushareExists.value) return
   try {
     const p = await getRateLimits('tushare')
     p.apis.forEach(a => { a._edit = a.override })   // 覆写编辑框初值=当前覆写（无则空）
@@ -154,7 +97,6 @@ const loadPresets = async () => {
 }
 
 const fmtSec = (v) => (v == null ? '-' : `${v}s`)
-
 const overrideDirty = (row) => row._edit != null && row._edit !== row.override
 
 const saveOverride = async (row) => {
@@ -180,37 +122,4 @@ const saveCb = async () => {
     loadPresets()
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
 }
-
-const onSave = async () => {
-  saving.value = true
-  try {
-    if (form.value.id) await updateDataSource(form.value.id, form.value)
-    else await createDataSource(form.value)
-    ElMessage.success(t('common.saveSuccess'))
-    resetForm()
-    dlg.value = false
-    load()
-  } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
-  finally { saving.value = false }
-}
-
-const onDelete = async (id) => {
-  await ElMessageBox.confirm(t('riskRule.confirmDelete'), t('common.tip'), { type: 'warning' })
-  await deleteDataSource(id)
-  ElMessage.success(t('common.deleteSuccess'))
-  load()
-}
-
-const onTest = async (id) => {
-  testing.value = id
-  try {
-    const r = await testDataSource(id)
-    if (r.ok) ElMessage.success(t('common.connectSuccess'))
-    else ElMessage.error(t('common.failedPrefix') + r.error)
-  } catch (e) { ElMessage.error(t('common.testFailed')) }
-  finally { testing.value = 0 }
-}
 </script>
-<style scoped>
-.zero-note { margin-left: 8px; font-size: var(--fs-foot); color: var(--text-secondary); }
-</style>

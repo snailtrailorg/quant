@@ -181,12 +181,12 @@ class TestPermSaveDynamic:
         with contextlib.ExitStack() as s:
             for p in _admin_ctx(conn): s.enter_context(p)
             s.enter_context(patch("src.web_api.auth.load_role_permissions", return_value={}))
-            r = _client().post("/api/permissions/ops", json={"permissions": ["read", "user_mgmt", "resume", "account_keys", "trade"]}, headers={"Authorization": "Bearer t"})
+            r = _client().post("/api/permissions/ops", json={"permissions": ["read", "user_mgmt", "resume", "data_sync", "trade"]}, headers={"Authorization": "Bearer t"})
         assert r.status_code == 200
         inserts = [c[0][1] for c in conn.execute.call_args_list if "INSERT INTO permission" in c[0][0]]
         assert inserts, "应有 INSERT"
         for args in inserts:
-            assert args[1] not in ("user_mgmt", "resume", "account_keys")   # 锁键恒不入库
+            assert args[1] not in ("user_mgmt", "resume")   # 锁键恒不入库
 
 
 class TestRequireAuthenticated:

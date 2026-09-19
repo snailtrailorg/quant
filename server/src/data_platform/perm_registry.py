@@ -24,7 +24,7 @@ _logger = logging.getLogger("data_platform.perm_registry")
 # api 权限键 14（顺序=原 all_keys 声明序——GET /permissions 供形保序等价）
 API_PERM_KEYS: list[str] = [
     "read", "strategy_control", "data_sync", "halt", "resume", "trade",
-    "live_trading_control", "risk_rules", "account_keys", "user_mgmt",
+    "live_trading_control", "risk_rules", "user_mgmt",
     "system_config", "llm_config", "im_bots_config", "alerts_config",
 ]
 

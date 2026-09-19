@@ -6,7 +6,7 @@ export const PERM_GROUPS = [
   { id: 'trading', keys: ['trade', 'halt', 'resume', 'live_trading_control'] },
   { id: 'strategy', keys: ['strategy_control', 'data_sync'] },
   { id: 'risk', keys: ['risk_rules'] },
-  { id: 'system', keys: ['system_config', 'user_mgmt', 'llm_config', 'im_bots_config', 'alerts_config', 'account_keys'] },
+  { id: 'system', keys: ['system_config', 'user_mgmt', 'llm_config', 'im_bots_config', 'alerts_config'] },
 ]
 
 // keys=后端下发的全键集；返回分组列表（只含有键的组）+未知键 other 兜底
