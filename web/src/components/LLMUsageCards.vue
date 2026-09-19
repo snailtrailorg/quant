@@ -1,19 +1,25 @@
 <template>
   <div v-if="!models.length" class="empty-group">{{ t('llm.llmUsageEmpty') }}</div>
   <el-card v-else shadow="never" class="metric-card">
-    <div class="chips">
-      <span v-for="m in models" :key="m.provider + m.model" class="chip">
+    <div class="head-row">
+      <div class="chips">
+        <span v-for="m in models" :key="m.provider + m.model" class="chip">
         <i class="dot" :style="{ background: colorOf(m) }" />
         <span class="chip-name">{{ m.model }}</span>
         <span class="chip-sub">{{ m.today.calls }} · {{ m.today.tokens.toLocaleString() }}tk · {{ m.today.success_rate }}%</span>
-      </span>
+        </span>
+      </div>
+      <el-radio-group v-model="gran" size="small" @change="reload">
+        <el-radio-button value="hour">{{ t('llm.granHour') }}</el-radio-button>
+        <el-radio-button value="day">{{ t('llm.granDay') }}</el-radio-button>
+      </el-radio-group>
     </div>
-    <VChart :option="option" autoresize style="height: 260px" />
+    <VChart :option="option" autoresize style="height: 280px" />
   </el-card>
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -26,6 +32,11 @@ use([CanvasRenderer, LineChart, GridComponent, LegendComponent, TooltipComponent
 
 const props = defineProps({ models: { type: Array, default: () => [] } })
 const { t } = useI18n()
+
+// 批54 两档(用户裁定 B):hour=小时粒度窗 2 天(48/168 点)/day=天粒度窗 30 天(30/90 点)
+const gran = defineModel('gran', { default: 'hour' })   // 批54:父级 v-model(刷新保档)
+const emit = defineEmits(['reload'])
+const reload = () => emit('reload', gran.value)
 
 // 多模型调色板（cssVar 主色领衔+扩展色——暗色变体下仍可辨）
 const PALETTE = [
@@ -40,7 +51,7 @@ const option = computed(() => {
     animation: false,
     tooltip: { trigger: 'axis' },
     legend: { show: true, bottom: 0, textStyle: { color: cssVar('--text-secondary'), fontSize: 11 } },
-    grid: { left: 8, right: 12, top: 8, bottom: 44 },
+    grid: { left: 8, right: 12, top: 8, bottom: 64 },
     xAxis: {
       type: 'category', show: true, data: grid,
       axisLine: { lineStyle: { color: cssVar('--border-weak') } },
@@ -48,6 +59,11 @@ const option = computed(() => {
       axisLabel: { color: cssVar('--text-secondary'), fontSize: 10, hideOverlap: true, interval: 5 },
       splitLine: { show: false },
     },
+    dataZoom: [   // 批54:初始窗(hour 48 点/day 30 点)+滚轮/slider 回看历史
+      { type: 'inside', start: gran.value === 'hour' ? 100 - 48 / (grid.length || 1) * 100 : 100 - 30 / (grid.length || 1) * 100, end: 100 },
+      { type: 'slider', height: 14, bottom: 22,
+        start: gran.value === 'hour' ? 100 - 48 / (grid.length || 1) * 100 : 100 - 30 / (grid.length || 1) * 100, end: 100 },
+    ],
     yAxis: { type: 'value', show: true,
              axisLabel: { color: cssVar('--text-secondary'), fontSize: 10 },
              splitLine: { lineStyle: { color: cssVar('--border-weak') } } },

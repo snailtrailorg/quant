@@ -98,7 +98,7 @@ export const updateLLMModel = (id, data) => api.post(`/llm-models/${id}`, data)
 export const deleteLLMModel = (id) => api.delete(`/llm-models/${id}`)
 export const testLLMModel = (id) => api.post(`/llm-models/${id}/test`)
 export const reorderLLMModels = (ids) => api.post('/llm-models/reorder', { ids })   // 批50：拖拽行序=容灾链序
-export const getLLMUsageSeries = () => api.get('/llm-usage/series')   // 批50：每模型今日汇总+48h 曲线（旧 summary 退役）
+export const getLLMUsageSeries = (params = {}) => api.get('/llm-usage/series', { params })   // 批54：granularity=hour|day 两档
 
 export const getDataSources = () => api.get('/data-sources')
 export const createDataSource = (data) => api.post('/data-sources', data)
