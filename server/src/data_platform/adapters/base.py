@@ -169,7 +169,7 @@ class TushareAdapter(BaseDataAdapter):
         """三合一 mapper：原 _daily_to_rows（批量，adj_map）+ to_save_rows（日）+ to_save_rows_min（分钟）。"""
         from src.data_platform.schema import to_vt_symbol
         from src.data_platform.adapters.tushare_adapter import _safe_float
-        from src.data_platform.tz import as_shanghai
+        from src.data_platform.tz import as_utc
         rows = []
         is_daily = "min" not in freq
         for row in df.to_dict("records"):
@@ -177,9 +177,9 @@ class TushareAdapter(BaseDataAdapter):
             vt_sym = to_vt_symbol(ts_code)
             # ts：分钟读 trade_time，日线读 trade_date；+08:00 aware（26 号收尾批 C）
             if "min" in freq:
-                ts = as_shanghai(pd.Timestamp(row["trade_time"]).to_pydatetime())
+                ts = as_utc(pd.Timestamp(row["trade_time"]).to_pydatetime())
             else:
-                ts = as_shanghai(pd.Timestamp(row["trade_date"]).to_pydatetime())
+                ts = as_utc(pd.Timestamp(row["trade_date"]).to_pydatetime())
             # adj：批量路径（adj_map 非 None）用 adj_map；per-symbol（None）用 df["adj_factor"]
             if adj_map is not None:
                 adj_raw = adj_map.get(ts_code)

@@ -21,6 +21,7 @@ server/src/data_platform/
 ├── market_snapshot.py # 三档腾讯实时快照（quote:tencent 60s TTL）
 ├── stock_detail.py    # 三档详情聚合层（quote 降级链+慢变块缓存）
 ├── security_master.py # 批 56a：SMClient（标的属性库读侧+engine 填充链写侧）+MarketHours（节奏域）——见下节
+├── tz.py             # 批 56b：as_utc（写/读 PG 统一收口——naive 按上海解释转 UTC aware）+as_shanghai（显示层）
 ├── schema_expectations.txt  # verify_schema 期望基线（迁移链生成物，禁手写）
 └── adapters/
     └── tushare_adapter.py  # Tushare 拉取 + DataFrame->rows 转换 + 质量校验
@@ -71,10 +72,13 @@ save_bars(freq: str, rows: list[tuple]) -> int
     # 开头已接线 rows = validate_bars(rows)（save_bars/save_bars_overwrite 开头；A2 已实现，P3 回写 2026-08-20 撤"A2 待改"）
 save_bars_overwrite(freq: str, rows: list[tuple]) -> int
     # 批量写，ON CONFLICT DO UPDATE（回补覆盖）。返回 len(rows)
-get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame
-    # 查 K 线，列：symbol/freq/ts/open/high/low/close/volume/amount/adj_factor/source
 validate_bars(rows: list[tuple]) -> list[tuple]
     # A2 已实现（db.py:82）：剔 ohlc=0 行 + 标 ts 断点 warning（不剔）；save_bars/save_bars_overwrite 开头调用
+    # 批 56b 写收口：入口统一 ts=as_utc（naive 按上海解释——pin UTC 后裸 naive 进库=错 8h 唯一生死面）
+get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame
+    # 查 K 线，列：symbol/freq/ts/open/high/low/close/volume/amount/adj_factor/source
+    # 批 56b 读收口：start/end 为 naive datetime 时 as_utc（get_kline_records/get_index_bars 同款）
+    # 连接 pin：TimeZone=UTC（28 §3.2 立法——绝对时刻表示统一；epoch 校验和双会话恒同实证零数据变更）
 get_trade_calendar(year: int) -> list[date]
     # 从 trade_cal 表读 SSE 交易日（is_open=1）
 is_trading_day(d: date | None = None) -> bool

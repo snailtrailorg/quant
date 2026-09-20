@@ -24,6 +24,7 @@ import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { cssVar } from '../utils/cssVar'
+import { fmtTime } from '../utils/fmtTime'
 
 use([CanvasRenderer, LineChart, GridComponent, LegendComponent, TooltipComponent])
 
@@ -49,7 +50,7 @@ const PALETTE = [
 const colorOf = (m) => PALETTE[props.models.indexOf(m) % PALETTE.length]
 
 const option = computed(() => {
-  const grid = (shown.value[0] || props.models[0])?.series?.map(p => p.ts.slice(5, 13).replace('T', ' ')) || []
+  const grid = (shown.value[0] || props.models[0])?.series?.map(p => fmtTime.s(p.ts)) || []
   // 轴左界=所选模型最早**有活动**的点(非零 calls——筛选后时间范围跟着变)
   let minIdx = 0
   for (const m of shown.value) {

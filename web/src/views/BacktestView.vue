@@ -41,7 +41,7 @@
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.positions')" name="positions">
         <TableShell :data="dailyValues" max-height="400" storage-key="backtest-view-positions">
-          <el-table-column prop="ts" :label="t('backtest.date')" width="220" :formatter="(r, c, v) => (v || '').slice(0, 10)" />
+          <el-table-column prop="ts" :label="t('backtest.date')" width="220" :formatter="(r, c, v) => fmtTime.day(v)" />
           <el-table-column prop="close" :label="t('backtest.closePrice')" min-width="100" />
           <el-table-column prop="position" :label="t('backtest.positionQty')" min-width="100" />
           <el-table-column prop="avg_price" :label="t('backtest.avgPrice')" min-width="100" />
@@ -85,6 +85,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { fmtTime } from '../utils/fmtTime'
 import { ElMessage } from 'element-plus'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -185,7 +186,7 @@ const equityOption = computed(() => ({
   tooltip: { trigger: 'axis' },
   legend: { data: [t('trading.equity')] },
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
-  xAxis: { type: 'category', data: dailyValues.value.map(d => d.ts?.slice(0, 10)) },
+  xAxis: { type: 'category', data: dailyValues.value.map(d => fmtTime.day(d.ts)) },
   yAxis: { type: 'value', scale: true },
   series: [{
     name: t('trading.equity'), type: 'line', data: dailyValues.value.map(d => d.value),
@@ -203,7 +204,7 @@ const equityOption = computed(() => ({
 const drawdownOption = computed(() => ({
   tooltip: { trigger: 'axis' },
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
-  xAxis: { type: 'category', data: drawdownData.value.map(d => d.ts?.slice(0, 10)) },
+  xAxis: { type: 'category', data: drawdownData.value.map(d => fmtTime.day(d.ts)) },
   yAxis: { type: 'value', scale: true },
   series: [{ name: t('backtest.drawdown'), type: 'line', data: drawdownData.value.map(d => d.dd), smooth: true, lineStyle: { width: 2, color: cssVar('--down') }, areaStyle: { opacity: 0.1, color: cssVar('--down') } }],
 }))
@@ -247,8 +248,8 @@ onMounted(async () => {
 onUnmounted(() => { if (eventSource) { eventSource.onmessage = null; eventSource.close(); eventSource = null } })
 
 // P2-5(05 §5.7):B/S 买卖点 markPoint
-const buyPoints = computed(() => (trades.value || []).filter(t => t.action === 'BUY').map(t => ({ ts: (t.ts || '').slice(0, 10), price: t.price })))
-const sellPoints = computed(() => (trades.value || []).filter(t => t.action === 'SELL').map(t => ({ ts: (t.ts || '').slice(0, 10), price: t.price })))
+const buyPoints = computed(() => (trades.value || []).filter(t => t.action === 'BUY').map(t => ({ ts: fmtTime.day(t.ts), price: t.price })))
+const sellPoints = computed(() => (trades.value || []).filter(t => t.action === 'SELL').map(t => ({ ts: fmtTime.day(t.ts), price: t.price })))
 
 </script>
 

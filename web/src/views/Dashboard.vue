@@ -107,6 +107,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { fmtTime } from '../utils/fmtTime'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getStrategies, getDashboard, getPnl, getOrders, getLiveTasks,
@@ -162,7 +163,7 @@ const curveRange = ref('1M')
 const rangeCurve = computed(() => {
   const now = new Date(); const days = { '1D': 1, '7D': 7, '1M': 30, 'ALL': 9999 }[curveRange.value] || 30
   const cutoff = new Date(now.getTime() - days * 86400000).toISOString().slice(0, 10)
-  return curve.value.filter(c => (c.ts || '').slice(0, 10) >= cutoff)
+  return curve.value.filter(c => fmtTime.day(c.ts) >= cutoff)
 })
 // 回撤序列(从峰值)
 const drawdownSeries = computed(() => {

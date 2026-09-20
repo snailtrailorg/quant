@@ -33,7 +33,9 @@ class TestMinuteAggregator:
         assert agg.on_tick("600000.SHSE", _tick(0, 5, 10.0, 100)) is None
         bar = agg.on_tick("600000.SHSE", _tick(1, 2, 10.2, 300))  # 跨分钟 → finalize 上一桶
         assert bar is not None
-        assert bar["ts"].hour == 10 and bar["ts"].minute == 1 and bar["ts"].second == 0
+        # 批 56b：流协议 UTC 表示（原 +08:00）——时刻等价（10:01 上海 = 02:01 UTC）
+        assert bar["ts"].hour == 2 and bar["ts"].minute == 1 and bar["ts"].second == 0
+        assert bar["ts"].tzinfo is not None and bar["ts"].utcoffset().total_seconds() == 0
 
     def test_volume_cumulative_diff(self):
         """S3：XTP qty 当日累计 → 桶 volume=桶末累计−上桶末累计。"""
@@ -106,7 +108,7 @@ class TestMinuteAggregator:
         agg.on_tick("Z.SHSE", _tick(25, 30, 10.0, 100))
         [bar] = agg.flush_rest()
         assert bar["symbol"] == "Z.SHSE"
-        assert bar["ts"].hour == 10 and bar["ts"].minute == 26
+        assert bar["ts"].hour == 2 and bar["ts"].minute == 26   # 批 56b UTC 表示（10:26 上海）
 
 
 class TestInBarSession:

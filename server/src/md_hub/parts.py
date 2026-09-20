@@ -147,7 +147,7 @@ class MinuteAggregator:
 
     def _finalize(self, symbol: str, b: dict) -> dict:
         from datetime import timedelta
-        from src.data_platform.tz import as_shanghai
+        from src.data_platform.tz import as_utc
         prev = self._last_acc.get(symbol)
         volume = max(0.0, b["vol_acc"] - (prev[0] if prev else 0.0))
         amount = max(0.0, b["amt_acc"] - (prev[1] if prev else 0.0))
@@ -160,7 +160,7 @@ class MinuteAggregator:
         untrusted = (not closing) and span < 30 and b["count"] < 3   # 双门限（评审）
         return {
             "symbol": symbol,
-            "ts": as_shanghai(b["minute"] + timedelta(minutes=1)),   # 分钟末标注（R-BR9 Tushare 口径）+08:00 aware
+            "ts": as_utc(b["minute"] + timedelta(minutes=1)),        # 分钟末标注（R-BR9 Tushare 口径）批 56b 起流协议 UTC 表示
             "open": b["open"], "high": b["high"], "low": b["low"], "close": b["close"],
             "volume": volume, "amount": amount, "tick_count": b["count"],
             "untrusted": untrusted,

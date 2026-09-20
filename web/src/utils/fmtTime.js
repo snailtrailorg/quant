@@ -2,6 +2,8 @@
 //   fmtTime.s(ts)   → 'MM-DD HH:mm'        常规（列表/卡片）
 //   fmtTime.t(ts)   → 'HH:mm:ss'           盘中（实时心跳/行情时间）
 //   fmtTime.full(ts)→ 'YYYY-MM-DD HH:mm:ss' 日志/审计
+//   fmtTime.day(ts) → 'YYYY-MM-DD'         到日（批 56b：API ts 改 UTC ISO 表示后
+//                                          字符串 slice 会错位 8h/跨日——一律本地解析取日）
 // 入参兼容 'YYYY-MM-DDTHH:mm:ss' / 'YYYY-MM-DD HH:mm:ss' / Date
 const norm = (ts) => {
   if (!ts) return ''
@@ -14,4 +16,5 @@ export const fmtTime = {
   s: (ts) => { const d = norm(ts); return d instanceof Date ? `${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}` : d },
   t: (ts) => { const d = norm(ts); return d instanceof Date ? `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` : d },
   full: (ts) => { const d = norm(ts); return d instanceof Date ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` : d },
+  day: (ts) => { const d = norm(ts); return d instanceof Date ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` : d },
 }

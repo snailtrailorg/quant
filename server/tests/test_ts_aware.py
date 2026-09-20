@@ -35,4 +35,4 @@ def test_to_bar_rows_ts_aware():
                         "vol": 1000, "amount": 10200}])
     rows = TushareAdapter().to_bar_rows(df, "1D", adj_map={})
     assert rows[0][2].tzinfo is not None
-    assert rows[0][2].utcoffset() == timedelta(hours=8)
+    assert rows[0][2].utcoffset() == timedelta(0)   # 批 56b：UTC 表示（时刻不变——+08:00 与 UTC 同存储）

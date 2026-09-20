@@ -252,7 +252,6 @@ def convertible_terms(ts_code: str, payload: dict = Depends(require_perm("read")
 def security_attr_api(vt_symbol: str, payload: dict = Depends(require_perm("read"))):
     """标的属性：主档+时变时间线+所属时段表（集成中心·标的属性页数据源）。"""
     import re as _re
-    from datetime import date as _date
     from src.data_platform.security_master import SMClient, get_market_hours
     from src.data_platform.db import get_conn
     vt_symbol = vt_symbol.strip()
@@ -278,5 +277,5 @@ def security_attr_api(vt_symbol: str, payload: dict = Depends(require_perm("read
         "states": states,
         "states_truncated": len(raw) > 50,
         "sessions": [{"phase": p.phase, "start": p.start, "end": p.end}
-                     for p in mh.sessions(a.session_id, _date.today())],
+                     for p in mh.applicable_phases(vt_symbol, a.session_id)],
     }

@@ -1,19 +1,30 @@
-"""A 股时区工具（26 号收尾批 C：bar 表 ts 写入 +08:00 显式 aware）。
+"""时间工具（批 56b UTC 立法：库/代码构造统一 UTC 绝对时刻，显示层换算）。
 
-生产 PG timezone=Asia/Shanghai（2026-09-07 实测），naive 写与 aware 写存储一致；
-本 helper 消除「依赖 PG 会话时区/DB 默认」的隐性耦合，不改存储语义。
+timestamptz 列存绝对时刻与表示无关——本模块职责是**消灭 naive 值**：
+pin TimeZone=UTC 后任何 naive datetime 进 PG 会被解释为 UTC（原按上海）=静默错 8h。
+写/读收口在 db.py（validate_bars/窗口查询）；流协议（md_hub parts）同版本原子切 UTC 表示。
+as_shanghai 保留：显示层换算+本地时段判定（服务器本地=A 股时刻语义）用。
 """
 from __future__ import annotations
 
 import zoneinfo
-from datetime import datetime
+from datetime import datetime, timezone
 
 SHANGHAI = zoneinfo.ZoneInfo("Asia/Shanghai")   # IANA，非固定 +08:00 offset（1986-1991 DST 期，盲审 B-P2）
+UTC = timezone.utc
+
+
+def as_utc(dt: datetime) -> datetime:
+    """naive → 按 Asia/Shanghai 解释转 UTC aware（上游 naive 语义=本地 A 股时刻）；已 aware → astimezone(UTC)。
+
+    批 56b：写/读 PG 的统一收口（naive 残留在 pin UTC 后会被错解释，唯一生死面）。
+    """
+    return (dt.replace(tzinfo=SHANGHAI)).astimezone(UTC) if dt.tzinfo is None else dt.astimezone(UTC)
 
 
 def as_shanghai(dt: datetime) -> datetime:
     """naive datetime → Asia/Shanghai aware；已 aware → astimezone 归一（盲审 B-P2 不原样返回）。
 
-    bar 表 ts 写入统一走此函数，消除对 PG 会话时区的隐性依赖。
+    显示层换算/本地时段判定用（写库路径批 56b 起改走 as_utc）。
     """
     return dt.replace(tzinfo=SHANGHAI) if dt.tzinfo is None else dt.astimezone(SHANGHAI)

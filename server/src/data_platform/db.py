@@ -47,7 +47,8 @@ def _db_session_options() -> dict:
     return {"options": f"-c statement_timeout={stmt_ms} "
                        f"-c idle_in_transaction_session_timeout={idle_ms} "
                        f"-c lock_timeout={lock_ms} "
-                       f"-c TimeZone=Asia/Shanghai"}   # 26 号收尾批 C：pin 死 A 股时区（防 DB/server 默认漂移）
+                       f"-c TimeZone=UTC"}   # 批 56b：pin UTC（28 §3.2 立法——绝对时刻表示统一；
+                       # naive 进库的隐性解释已由 as_utc 收口消灭，pin 只剩显示/字面量语义）
 
 
 _engine = create_engine(
@@ -112,12 +113,18 @@ def validate_bars(rows: list[tuple]) -> list[tuple]:
         rows: 11 字段元组 (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)
     Returns:
         清洗后 rows（剔 ohlc=0；ts 断点 per-symbol 相邻 >7 天记 warning，不剔）
+
+    批 56b 写收口：ts 统一 as_utc（naive 按上海解释——上游 naive 语义=本地 A 股时刻；
+    pin UTC 后 naive 进库会被错解释为 UTC=静默错 8h，本收口一处管全部写路径）。
     """
     import logging
     from collections import defaultdict
+    from datetime import datetime as _dt
+    from .tz import as_utc
     logger = logging.getLogger("data_platform")
     if not rows:
         return rows
+    rows = [(*r[:2], as_utc(r[2]), *r[3:]) if isinstance(r[2], _dt) else r for r in rows]
     # 1. 剔 ohlc=0（坏数据）
     clean = [r for r in rows if not (r[3] == 0 or r[4] == 0 or r[5] == 0 or r[6] == 0)]
     removed = len(rows) - len(clean)
@@ -233,8 +240,15 @@ def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
     """查询指数日线（bar_index），返回 DataFrame（symbol 为 vt_symbol 如 000300.SHSE）。
 
     与 get_bars 同款列转换（数值 float64 + ts datetime）。
+    批 56b 读收口：start/end as_utc（同 get_bars）。
     """
     import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
+    from datetime import datetime as _dt
+    from .tz import as_utc
+    if isinstance(start, _dt):
+        start = as_utc(start)
+    if isinstance(end, _dt):
+        end = as_utc(end)
     cols = ["ts", "open", "high", "low", "close", "volume", "amount"]
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -256,8 +270,15 @@ def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
     """查询 K 线，返回 DataFrame。
 
     用 cursor.fetchall 替代 pd.read_sql 避免 pandas/psycopg 不兼容警告。
+    批 56b 读收口：start/end as_utc（naive 按上海解释——防 pin UTC 后窗口错 8h）。
     """
     import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
+    from datetime import datetime as _dt
+    from .tz import as_utc
+    if isinstance(start, _dt):
+        start = as_utc(start)
+    if isinstance(end, _dt):
+        end = as_utc(end)
     ensure_table(freq)
     select_sql = BAR_TABLE_SELECT.format(freq=freq)
     with get_conn() as conn:
@@ -284,7 +305,14 @@ def get_kline_records(symbol: str, freq: str, start, end) -> list[dict]:
     get_bars 的 DataFrame 版面向分析/回测；K 线图表只要 JSON records，
     DataFrame 往返是纯常驻开销（+57MB RSS）。语义对齐 BAR_TABLE_SELECT
     （同 WHERE/ORDER BY ts ASC，列裁剪为图表所需 6 列）。
+    批 56b 读收口：start/end as_utc（同 get_bars）。
     """
+    from datetime import datetime as _dt
+    from .tz import as_utc
+    if isinstance(start, _dt):
+        start = as_utc(start)
+    if isinstance(end, _dt):
+        end = as_utc(end)
     assert freq.lower() in _VALID_FREQS, f"非法 freq: {freq}"   # 对齐 save_bars 写路径标准（批10 盲审同判）
     ensure_table(freq)
     with get_conn() as conn:

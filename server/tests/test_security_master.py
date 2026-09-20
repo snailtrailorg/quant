@@ -124,6 +124,17 @@ class TestMarketHours:
         # 周六非交易日恒 False（日历感知——盲审 A）
         assert not mh.is_auction("600000.SHSE", datetime(2026, 9, 19, 9, 22))
 
+    def test_applicable_phases_scope_filter(self, mh):
+        # 展示面 scope 过滤（与 is_auction 同源）：沪主板无 close_auct/post_fix；
+        # 科创板两者全有；深市转债有 close_auct 无 post_fix（仅 CHINEXT 有盘后）
+        main = {p.phase for p in mh.applicable_phases("600000.SHSE")}
+        star = {p.phase for p in mh.applicable_phases("688001.SHSE")}
+        cb = {p.phase for p in mh.applicable_phases("125002.SZSE")}
+        assert "close_auct" not in main and "post_fix" not in main
+        assert "close_auct" in star and "post_fix" in star
+        assert "close_auct" in cb and "post_fix" not in cb
+        assert {"pre", "auction", "open", "lunch"} <= main
+
     def test_band_rules(self, mh):
         assert mh.band_of("SHSE", "main", False) == 10
         assert mh.band_of("SHSE", "main", True) == 5      # ST 折半
@@ -154,4 +165,5 @@ class TestSecurityApi:
         from src.web_api.routes.stock import security_attr_api
         r = security_attr_api("600000.SHSE", payload={})
         assert r["attr"]["category"] == "stock" and r["states_truncated"] is False
-        assert len(r["sessions"]) >= 6
+        phases = [s["phase"] for s in r["sessions"]]
+        assert "close_auct" not in phases and "post_fix" not in phases  # 沪主板 scope 过滤（展示面）

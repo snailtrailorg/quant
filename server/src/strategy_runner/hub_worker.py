@@ -11,8 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import time
-from datetime import datetime
-
+from datetime import datetime, timezone
 from src.strategy_framework.runtime.alerts import make_alert, make_guard, make_valkey
 from src.strategy_framework.runtime.loop import EngineLoop
 from src.strategy_framework.runtime.pulse import HeartbeatWriter
@@ -28,16 +27,21 @@ STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
 _alert = make_alert()
 _valkey = make_valkey
 
-def _norm_ts(v) -> str:   # ts 归一化（评审 S4：PG str() 与流 isoformat 断裂）
+def _norm_ts(v) -> str:   # 传值归一：UTC ISO（策略/日志面——形状与批 56b 前一致，仅统一 UTC 表示）
     try:
-        return datetime.fromisoformat(str(v)).isoformat()
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
     except Exception: return str(v)
+
+def _epoch_key(v) -> str:   # 比较键（批 56b：去重/水位/截断——+08:00/Z 混合窗口同刻同键；29 号歧义消解=Unix 秒）
+    try:
+        return str(int(datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()))
+    except Exception: return ""
 
 class BarMsgState:   # worker 侧消息序号/去重状态（gen 分区内 seq 连续，R-BR6/R-DL2）
     def __init__(self):
         self.gen = 0
         self.seq = 0
-        self.max_ts: str = ""       # 本标的已处理最大 ts（R-DL1 持久去重，评审 S7 真正使用）
+        self.max_ts: str = ""       # 本标的已处理最大 ts epoch 键（R-DL1 持久去重，评审 S7 真正使用）
 
     def classify(self, m: dict) -> str:
         gen, seq = int(m["gen"]), int(m["seq"])
@@ -114,25 +118,26 @@ def run(ctx: dict) -> None:
     try:
         _saved = r.get(_mts_key)
         if _saved:
-            state.max_ts = _saved
-            logger.info("跨重启水位恢复 max_ts=%s", _saved)
+            # 批 56b 兼容：存量水位是 ISO（+08:00 表示）→转 epoch 键；转不动=脏值从零起（防恒假去重）
+            state.max_ts = _saved if _saved.isdigit() else _epoch_key(_saved)
+            logger.info("跨重启水位恢复 max_ts=%s", state.max_ts)
     except Exception as e:
         logger.warning("水位恢复读取失败（从空水位起）: %s", e)
     # ——— 暖机：只填 history 绝不调 on_bar（评审 F3）———
     def _warmup_from_stream(hist: list, upto_ts: str | None = None) -> list:
-        """流回放填 history。upto_ts 截断（rewarm 时防未来泄漏，评审 S4）。"""
+        """流回放填 history。upto_ts（epoch 键）截断（rewarm 时防未来泄漏，评审 S4）。"""
         try:
             entries = r.xrevrange(stream, count=240)
-            seen = {_norm_ts(h.get("ts")) for h in hist}
+            seen = {_epoch_key(h.get("ts")) for h in hist}
             bars = []
             for _id, f in reversed(entries):
-                ts_n = _norm_ts(f.get("ts", ""))
-                if upto_ts and ts_n > upto_ts:
+                ts_key = _epoch_key(f.get("ts", ""))
+                if upto_ts and ts_key and ts_key > upto_ts:
                     continue                       # 只灌当前消息之前的（防未来）
-                if ts_n and ts_n not in seen:
-                    bars.append({"ts": ts_n, "open": float(f["open"]), "high": float(f["high"]),
+                if ts_key and ts_key not in seen:
+                    bars.append({"ts": _norm_ts(f.get("ts", "")), "open": float(f["open"]), "high": float(f["high"]),
                                  "low": float(f["low"]), "close": float(f["close"]), "volume": float(f["volume"] or 0)})
-                    seen.add(ts_n)
+                    seen.add(ts_key)
             hist.extend(bars)
             logger.info("hub 暖机：流回放补 %d 根（history 总 %d）", len(bars), len(hist))
         except Exception as e:
@@ -151,9 +156,9 @@ def run(ctx: dict) -> None:
     # ——— 消息处理（guard 保护，R-BR12；告警走 _alert——notify 自带 1min 同标题去重）———
     @make_guard("hub.on_msg", _alert)
     def handle_msg(fields: dict) -> None:
-        ts_n = _norm_ts(fields.get("ts", ""))
-        # R-DL1 持久去重（评审 S7）：ts 回退/重复（含 flush 迟到 tick 重复桶）一律丢弃
-        if ts_n and ts_n <= state.max_ts:
+        ts_key = _epoch_key(fields.get("ts", ""))
+        # R-DL1 持久去重（评审 S7）：ts 回退/重复（含 flush 迟到 tick 重复桶）一律丢弃（epoch 键——跨表示同刻同键）
+        if ts_key and ts_key <= state.max_ts:
             stats["dropped_dup"] += 1
             return
         kind = state.classify(fields)
@@ -166,14 +171,14 @@ def run(ctx: dict) -> None:
             #   不从消费侧推断（arch-13 审查设计纠偏+用户架构直觉确认）——worker 重启后首根 gen
             #   从 0 跳到当前值是必然，从这发告警=误报（盲审 A-P2① 的根修）
             logger.info("hub 代次切换 -> gen=%s，重暖机补缺口", state.gen)
-            _rewarm(upto_ts=ts_n)
+            _rewarm(upto_ts=ts_key)
         elif kind == "dup_or_reorder":
             stats["dropped_dup"] += 1
             return
         elif kind == "gap":
             logger.warning("seq 跳变（gap），重暖机并冻结直至人工确认")
             frozen["sticky"] = True   # gap 冻结 sticky（评审 C2：只能重启解）
-            _rewarm(upto_ts=ts_n)
+            _rewarm(upto_ts=ts_key)
             _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 bar_hub 表。", code="frozen.stream")
         # pub_ts 超龄丢弃（R-DL3）
         pub_ts = float(fields.get("pub_ts", 0) or 0)
@@ -185,16 +190,16 @@ def run(ctx: dict) -> None:
             logger.error("untrusted bar（断线失真），冻结: %s", fields.get("ts"))
             _alert(f"不可信 bar，冻结任务 {tid}（{symbol}）", "断线跨分钟失真，重启任务解冻。", code="frozen.stream")
             return
-        bar = {"ts": ts_n, "open": float(fields["open"]), "high": float(fields["high"]),
+        bar = {"ts": _norm_ts(fields.get("ts", "")), "open": float(fields["open"]), "high": float(fields["high"]),
                "low": float(fields["low"]), "close": float(fields["close"]),
                "volume": float(fields["volume"] or 0)}
         # bar 已接受：先落锚+去重水位再驱动策略（盲审 C-F1——锚后更新则首根 bar 的 BUY 读到昨日旧锚被确定性误拒）
         stats["last_bar_wall"] = time.time()
         if _in_astock_session():
             stats["sess_bar_wall"] = stats["last_bar_wall"]
-        state.max_ts = ts_n
+        state.max_ts = ts_key
         try:
-            r.set(_mts_key, ts_n)   # P0-3：水位持久化（重启恢复，防 SELL 重放；失败不阻断）
+            r.set(_mts_key, ts_key)   # P0-3：水位持久化（重启恢复，防 SELL 重放；失败不阻断）——epoch 键
         except Exception: pass
         sig = strategy.on_bar(bar, list(history))
         stats["bars"] += 1
@@ -202,7 +207,7 @@ def run(ctx: dict) -> None:
         if len(history) > 100:
             history.pop(0)
         sa = getattr(sig, "action", None)
-        logger.info("BAR %s close=%.2f vol=%.0f signal=%s", ts_n[:16], bar["close"], bar["volume"],
+        logger.info("BAR %s close=%.2f vol=%.0f signal=%s", bar["ts"][:19], bar["close"], bar["volume"],
                     sa.name if sa else "NONE")
 
     def process_batch(batch) -> int:

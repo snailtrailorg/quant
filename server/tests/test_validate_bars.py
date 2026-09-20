@@ -31,11 +31,13 @@ def test_validate_bars_keeps_gap_warning():
 
 
 def test_validate_bars_keeps_normal():
-    """正常行全保留（顺序不变）。"""
+    """正常行全保留（顺序不变）。批 56b：naive ts 入口收口转 UTC aware（写路径统一）。"""
     from src.data_platform.db import validate_bars
     ts1 = datetime(2026, 8, 1)
     ts2 = datetime(2026, 8, 2)  # 相邻 1 天，无断点
     rows = [_row(ts1), _row(ts2)]
     result = validate_bars(rows)
     assert len(result) == 2
-    assert result == rows
+    assert [r[0] for r in result] == [r[0] for r in rows]
+    for r in result:   # ts 已 as_utc（naive 按上海解释）——其余字段原样
+        assert r[2].tzinfo is not None and r[2].utcoffset().total_seconds() == 0

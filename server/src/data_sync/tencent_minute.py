@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta
 import requests
 
 from src.data_platform import db as _pdb
-from src.data_platform.tz import as_shanghai
+from src.data_platform.tz import as_utc
 from .sync_lock import SyncLock
 
 logger = logging.getLogger("data_sync.tencent_minute")
@@ -86,7 +86,7 @@ def _to_rows(vt: str, bars: list[tuple]) -> list[tuple]:
         if hhmm == "0930":
             continue                     # 开盘竞价根丢弃
         ts_hhmm = "1501" if hhmm == "1500" else hhmm   # 收盘竞价错位
-        ts = as_shanghai(datetime(int(d[:4]), int(d[4:6]), int(d[6:8]),
+        ts = as_utc(datetime(int(d[:4]), int(d[4:6]), int(d[6:8]),
                                    int(ts_hhmm[:2]), int(ts_hhmm[2:4])))
         # amount 写 0（bar_1min.amount NOT NULL DEFAULT 0；腾讯 mkline 无成交额，
         # 对齐 Tushare to_save_rows_min 缺省 0 口径，勿写 None——盲审 B-P0 NotNullViolation）

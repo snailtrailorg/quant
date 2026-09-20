@@ -17,12 +17,12 @@ def test_to_rows_ts_mapping():
     # 0931 直接对齐（分钟末）
     assert rows[0][0] == "600000.SHSE"
     assert rows[0][1] == "1min"
-    assert (rows[0][2].hour, rows[0][2].minute) == (9, 31)
+    assert (rows[0][2].hour, rows[0][2].minute) == (1, 31)   # 批 56b UTC 表示（09:31 上海）
     assert rows[0][3:7] == (9.27, 9.30, 9.27, 9.30)   # open/high/low/close
     assert rows[0][7] == 1353200.0
     assert rows[0][8] == 0.0 and rows[0][9] is None and rows[0][10] == "tencent"   # amount=0(NOT NULL)/adj NULL, source
-    # 1500 → 1501（收盘竞价错位）
-    assert (rows[1][2].hour, rows[1][2].minute) == (15, 1)
+    # 1500 → 1501（收盘竞价错位；批 56b UTC 表示——15:01 上海 = 07:01 UTC）
+    assert (rows[1][2].hour, rows[1][2].minute) == (7, 1)
 
 
 def test_parse_tencent_field_order():

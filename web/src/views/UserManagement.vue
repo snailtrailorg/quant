@@ -35,7 +35,7 @@
               </template>
             </el-table-column>
             <el-table-column v-if="userColOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="220">
-              <template #default="{ row }">{{ (row.created_at || '').slice(0, 10) || '-' }}</template>   <!-- 到日 -->
+              <template #default="{ row }">{{ fmtTime.day(row.created_at) || '-' }}</template>   <!-- 到日（批 56b 本地解析） -->
             </el-table-column>
             <el-table-column v-if="userColOn('last_login_at')" prop="last_login_at" :label="t('account.lastLogin')" min-width="220">
               <template #default="{ row }">{{ row.last_login_at || '-' }}</template>
@@ -203,6 +203,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { fmtTime } from '../utils/fmtTime'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getUsers, getMe, getInvites, inviteUser, revokeInvite, batchDeleteInvites, apiErr } from '../api'

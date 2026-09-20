@@ -168,7 +168,7 @@ const lastPrices = ref({})   // wd-20 §1.4.2：现价恢复（行情快照联�
 const pnlChartOption = computed(() => ({
   tooltip: { trigger: 'axis' },
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
-  xAxis: { type: 'category', data: (pnlData.value.curve || []).map(c => c.ts?.slice(0, 10)) },
+  xAxis: { type: 'category', data: (pnlData.value.curve || []).map(c => fmtTime.day(c.ts)) },
   yAxis: { type: 'value', scale: true },
   series: [{ name: t('trading.equity'), type: 'line', data: (pnlData.value.curve || []).map(c => c.value), smooth: true }],
 }))

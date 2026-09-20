@@ -51,7 +51,8 @@
         <template #header><span style="font-weight: 600">{{ t('interfaces.secSessionsTitle') }}</span></template>
         <!-- 批 56a 盲审修：TableShell 壳（29 号 §一第四铁律——新页表格禁裸 el-table） -->
         <TableShell :data="data.sessions" storage-key="security-sessions" size="small">
-          <el-table-column prop="phase" :label="t('interfaces.secSesPhase')" min-width="110" />
+          <el-table-column prop="phase" :label="t('interfaces.secSesPhase')" min-width="130"
+                           :formatter="(r) => phaseLabel(r.phase)" />
           <el-table-column prop="start" :label="t('interfaces.secSesStart')" min-width="90" />
           <el-table-column prop="end" :label="t('interfaces.secSesEnd')" min-width="90" />
         </TableShell>
@@ -68,13 +69,19 @@ import api, { apiErr } from '../api'
 import TableShell from '../components/TableShell.vue'
 import { ElMessage } from 'element-plus'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const symbol = ref('')
 const data = ref(null)
 const loading = ref(false)
 const errMsg = ref('')
 
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
+
+// 阶段枚举→用户可读名（词条缺 key 时回退原值——防未来新枚举裸奔报错）
+const phaseLabel = (phase) => {
+  const key = `interfaces.secPh${cap(phase)}`
+  return te(key) ? t(key) : phase
+}
 
 const load = async () => {
   if (!symbol.value.trim()) return

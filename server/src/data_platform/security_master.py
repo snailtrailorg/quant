@@ -243,6 +243,29 @@ class MarketHours:
             return "bse"
         return "main"
 
+    @staticmethod
+    def _scope_match(scope: str, exch: str, board: str) -> bool:
+        """scope 语法 交易所[:板块]（28 §4.2）："SHSE:STAR"=沪市仅科创板——板块例外须双匹配。
+
+        板块段大小写归一（种子大写 STAR vs _board_of 小写 star——盲审 B 实测错配）。
+        is_auction 判定与 applicable_phases 展示同源（共一 helper，防两处口径漂移）。
+        """
+        for tok in scope.split("|"):
+            parts_ = tok.split(":")
+            if parts_[0] == exch and (len(parts_) == 1 or parts_[1].lower() == board):
+                return True
+        return False
+
+    def applicable_phases(self, vt_symbol: str, session_id: str = "astock_main") -> list[Phase]:
+        """该标的适用的时段序列（scope 板块过滤——展示面与 is_auction 判定同源）。
+
+        沪主板不显示 close_auct/post_fix（无收盘竞价/无盘后固定价——仅科创创业适用）。
+        """
+        exch = vt_symbol.rsplit(".", 1)[1] if "." in vt_symbol else ""
+        board = self._board_of(vt_symbol)
+        return [p for p in self.sessions(session_id, date.today())
+                if p.scope is None or self._scope_match(p.scope, exch, board)]
+
     def is_auction(self, vt_symbol: str, at: datetime) -> bool:
         """竞价阶段判定（含 scope 板块过滤：close_auct 深市/北交/沪**仅科创**）。
 
@@ -265,14 +288,8 @@ class MarketHours:
             eh, em = int(p.end[:2]), int(p.end[3:5])
             t = at.hour * 60 + at.minute
             if hh * 60 + mm <= t < eh * 60 + em:
-                if p.scope is None:
+                if p.scope is None or self._scope_match(p.scope, exch, board):
                     return True
-                # scope 语法 交易所[:板块]（28 §4.2）："SHSE:STAR"=沪市仅科创板——板块例外须双匹配；
-                # 板块段大小写归一（种子大写 STAR vs _board_of 小写 star——盲审 B 实测错配）
-                for tok in p.scope.split("|"):
-                    parts_ = tok.split(":")
-                    if parts_[0] == exch and (len(parts_) == 1 or parts_[1].lower() == board):
-                        return True
         return False
 
     def band_of(self, exchange: str, board: str, is_st: bool) -> float | None:
