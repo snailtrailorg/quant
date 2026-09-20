@@ -102,14 +102,22 @@ class DataGap(ContractError):
 
 @dataclass(frozen=True)
 class Scope:
-    """能力覆盖范围三元组——covers() 按 (market,exchange,category) ∈ scope 匹配（None=通配）。"""
-    markets: frozenset[str] | None      # {'astock'} / {'crypto'} / None=全市场
-    exchanges: frozenset[str] | None    # None=该市场全所（28 号 exchanges NULL 同义）
-    categories: frozenset[str] | None   # None=全品类
+    """能力覆盖范围三元组——covers() 按 (market,exchange,category) ∈ scope 匹配（None=通配）。
+
+    markets 立法非空（29 §三：frozenset[str]，仅 exchanges/categories 可 None=通配；
+    全市场=显式列全集——防"跨市场通配"非法态被构造，盲审 A/B 契约加宽收回）。
+    """
+    markets: frozenset[str]                 # {'astock'} / {'crypto'}
+    exchanges: frozenset[str] | None        # None=该市场全所（28 号 exchanges NULL 同义）
+    categories: frozenset[str] | None       # None=全品类
+
+    def __post_init__(self):
+        if not self.markets:
+            raise ValueError("Scope.markets 非空（29 §三）——全市场=显式列 frozenset")
 
     def covers_one(self, market: str, exchange: str, category: str) -> bool:
         """单标的匹配（M2 硬过滤消费；SM 解析标的三元组后调此）。"""
-        if self.markets is not None and market not in self.markets:
+        if market not in self.markets:
             return False
         if self.exchanges is not None and exchange not in self.exchanges:
             return False

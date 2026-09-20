@@ -353,30 +353,37 @@ def _ts_to_vt_prefix(ts_code: str) -> str:
     from src.data_platform.schema import to_vt_symbol
     try:
         return to_vt_symbol(ts_code)
-    except Exception:
+    except Exception as e:
+        logger.warning("to_vt_symbol 转换失败（回退原码——将落不匹配词表的脏 exchange）: %r %s", ts_code, e)
         return ts_code
 
 
-def _sm_upsert(rows: list[tuple]) -> None:
-    """批 56a·M1 填充链：security_master upsert（fail-soft——SM 失败不打断数据同步）。"""
-    if not rows:
-        return
+def _sm_upsert(rows) -> None:
+    """批 56a·M1 填充链：security_master upsert（fail-soft——SM 失败不打断数据同步）。
+
+    rows 为惰性 iterable（生成器在函数体内才求值）——行构造的脏值异常
+    （float/rsplit 等）同样落在 try 内，不会穿透打断主同步（盲审 A/B）。
+    """
     try:
+        rows = list(rows)
+        if not rows:
+            return
         from src.data_platform.security_master import SMClient
         SMClient().upsert_rows(rows)
     except Exception as e:
-        logger.warning("security_master 填充失败（同步主流程不受影响）: %s", e)
+        logger.warning("security_master 填充失败（同步主流程不受影响）: %s", e, exc_info=True)
 
 
-def _sm_upsert_state(rows: list[tuple]) -> None:
-    """批 56a·M1 填充链：security_state 时变行 upsert（fail-soft 同上）。"""
-    if not rows:
-        return
+def _sm_upsert_state(rows) -> None:
+    """批 56a·M1 填充链：security_state 时变行 upsert（fail-soft+惰性求值同 _sm_upsert）。"""
     try:
+        rows = list(rows)
+        if not rows:
+            return
         from src.data_platform.security_master import SMClient
         SMClient().upsert_state(rows)
     except Exception as e:
-        logger.warning("security_state 填充失败（同步主流程不受影响）: %s", e)
+        logger.warning("security_state 填充失败（同步主流程不受影响）: %s", e, exc_info=True)
 
 
 def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None,
@@ -396,9 +403,12 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
                     list_status=EXCLUDED.list_status
             """, rows)
         conn.commit()
-    _sm_upsert([(_ts_to_vt_prefix(r[0]), "astock",
-                 _ts_to_vt_prefix(r[0]).rsplit(".", 1)[1], "stock", r[1], r[2])
-                for r in rows if r[0]])
+    # 品类值随行携带（盲审 A：server_default 按品类错——转债应 T+0/乘数 10）；
+    # (vt.rsplit+[""])[1]=无后缀安全提取（脏 ts_code 落 try 内 fail-soft）
+    _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
+                (vt.rsplit(".", 1) + [""])[1], "stock", r[1], r[2],
+                100, 0.01, "T+1", r[5], r[6])
+               for r in rows if r[0])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -448,17 +458,23 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                     rate_clause=EXCLUDED.rate_clause
             """, rows)
         conn.commit()
-    _sm_upsert([(_ts_to_vt_prefix(r[0]), "astock",
-                 _ts_to_vt_prefix(r[0]).rsplit(".", 1)[1], "convertible", r[1], None)
-                for r in rows if r[0]])
+    _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
+                (vt.rsplit(".", 1) + [""])[1], "convertible", r[1], None,
+                10, 0.001, "T+0", r[12], r[13])
+               for r in rows if r[0])
     import json as _json
-    def _norm_date(s: str) -> str:
-        """YYYYMMDD→YYYY-MM-DD（脏值回落 2010-01-01——cb_basic conv_start_date 有空串/'None' 字符串）。"""
-        s = (s or "").strip()
-        return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if s.isdigit() and len(s) == 8 else "2010-01-01"
-    _sm_upsert_state([(_ts_to_vt_prefix(r[0]), _norm_date(r[8]),
+    def _norm_date(s, fallback="") -> str:
+        """YYYYMMDD→YYYY-MM-DD；脏值（空串/'None'/NaN）回落 fallback（发行日 list_date）再兜 2010-01-01。"""
+        def _ok(v):
+            return v if isinstance(v, str) and v.isdigit() and len(v) == 8 else None
+        s, fb = _ok((s or "").strip() if isinstance(s, str) else ""), _ok(
+            (fallback or "").strip() if isinstance(fallback, str) else "")
+        v = s or fb
+        return f"{v[:4]}-{v[4:6]}-{v[6:8]}" if v else "2010-01-01"
+    # NaN 过滤（盲审 B：NaN 进 json.dumps 产非法 JSON 毒化整批）
+    _sm_upsert_state(((vt := _ts_to_vt_prefix(r[0])), _norm_date(r[8], r[12]),
                        "conv_price", _json.dumps({"conv_price": float(r[7])}))
-                      for r in rows if r[0] and r[7] is not None])
+                      for r in rows if r[0] and r[7] is not None and not pd.isna(r[7]))
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -500,9 +516,10 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                 ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name, management=EXCLUDED.management
             """, rows)
         conn.commit()
-    _sm_upsert([(_ts_to_vt_prefix(r[0]), "astock",
-                 _ts_to_vt_prefix(r[0]).rsplit(".", 1)[1], "etf", r[1], None)
-                for r in rows if r[0]])
+    _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
+                (vt.rsplit(".", 1) + [""])[1], "etf", r[1], None,
+                100, 0.001, "T+1", r[5], None)
+               for r in rows if r[0])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -840,7 +857,9 @@ def _derive_st_states(df) -> None:
     """从 namechange 全表派生 ST 时变行（fail-soft）。
 
     规则：每只股票的每个曾用名区间一行；name 含 'ST'→is_st=true。
-    当前有效名（end_date 为空/今天）的行是"现行状态"——effective_from=start_date。
+    脏值防御（盲审 B）：ts_code/name/start_date 为 NaN 等非字符串跳行；
+    历史区间（end_date 非空）缺 start_date 跳行——防伪行以 today 为 effective_from
+    遮蔽现行 ST 状态；现行名（end_date 空）缺 start 落 today（现行状态不丢）。
     """
     import json as _json
     from datetime import date as _d
@@ -848,17 +867,27 @@ def _derive_st_states(df) -> None:
         rows = []
         today = _d.today().isoformat()
         for r in df.to_dict("records"):
-            ts, name = r.get("ts_code"), r.get("name") or ""
-            if not ts:
+            ts = r.get("ts_code")
+            name = r.get("name")
+            name = name if isinstance(name, str) else ""       # NaN 真值——isinstance 挡
+            if not isinstance(ts, str) or not ts or not name:
                 continue
-            start = (r.get("start_date") or "").strip()
-            eff = f"{start[:4]}-{start[4:6]}-{start[6:8]}" if start.isdigit() and len(start) == 8 else today
+            start = r.get("start_date")
+            start = start.strip() if isinstance(start, str) else ""
+            end = r.get("end_date")
+            end = end.strip() if isinstance(end, str) else ""
+            if start.isdigit() and len(start) == 8:
+                eff = f"{start[:4]}-{start[4:6]}-{start[6:8]}"
+            elif not end:
+                eff = today
+            else:
+                continue
             rows.append((_ts_to_vt_prefix(ts), eff, "st",
                          _json.dumps({"name": name, "is_st": "ST" in name.upper()})))
         _sm_upsert_state(rows)
         logger.info("security_state(st) 派生 %d 行（namechange 重建）", len(rows))
     except Exception as e:
-        logger.warning("security_state(st) 派生失败（不影响 namechange 同步）: %s", e)
+        logger.warning("security_state(st) 派生失败（不影响 namechange 同步）: %s", e, exc_info=True)
 
 
 # 注册 9 个 handler（按迁移 0045 表结构）

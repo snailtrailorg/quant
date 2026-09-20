@@ -42,15 +42,19 @@
           </el-timeline-item>
         </el-timeline>
         <div v-else class="empty-note">{{ t('interfaces.secTimelineEmpty') }}</div>
+        <div v-if="data.states_truncated" class="empty-note" style="padding-top: 0">
+          {{ t('interfaces.secStatesTruncated') }}
+        </div>
       </el-card>
 
       <el-card shadow="never">
         <template #header><span style="font-weight: 600">{{ t('interfaces.secSessionsTitle') }}</span></template>
-        <el-table :data="data.sessions" size="small" style="width: 100%">
+        <!-- 批 56a 盲审修：TableShell 壳（29 号 §一第四铁律——新页表格禁裸 el-table） -->
+        <TableShell :data="data.sessions" storage-key="security-sessions" size="small">
           <el-table-column prop="phase" :label="t('interfaces.secSesPhase')" min-width="110" />
           <el-table-column prop="start" :label="t('interfaces.secSesStart')" min-width="90" />
           <el-table-column prop="end" :label="t('interfaces.secSesEnd')" min-width="90" />
-        </el-table>
+        </TableShell>
       </el-card>
     </template>
   </div>
@@ -61,6 +65,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { InfoFilled } from '@element-plus/icons-vue'
 import api, { apiErr } from '../api'
+import TableShell from '../components/TableShell.vue'
 import { ElMessage } from 'element-plus'
 
 const { t } = useI18n()

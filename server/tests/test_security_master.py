@@ -6,8 +6,21 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
+
+def _db_up() -> bool:
+    """dev 库可达探测（无库环境自动 skip——QUANT_TEST_NO_DB=1 手动开关保留）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
 pytestmark = pytest.mark.skipif(
-    os.environ.get("QUANT_TEST_NO_DB") == "1", reason="真库行为级验收")
+    os.environ.get("QUANT_TEST_NO_DB") == "1" or not _db_up(),
+    reason="真库行为级验收（无 dev 库自动跳过）")
 
 
 @pytest.fixture(scope="module")
@@ -89,7 +102,9 @@ class TestMarketHours:
         assert len(mh.sessions("crypto_247", date(2026, 9, 19))) == 1
 
     def test_day_anchor(self, mh):
-        assert mh.day_anchor("astock_main").hour == 15
+        # 29 号契约 ->datetime（表驱动 market_hours.anchor；aware——tz 列）
+        a = mh.day_anchor("astock_main")
+        assert isinstance(a, datetime) and a.hour == 15 and a.tzinfo is not None
         assert mh.day_anchor("crypto_247").hour == 0
 
     def test_is_auction_morning(self, mh):
@@ -101,8 +116,42 @@ class TestMarketHours:
         assert mh.is_auction("125002.SZSE", datetime(2026, 9, 18, 14, 58))
         assert not mh.is_auction("600000.SHSE", datetime(2026, 9, 18, 14, 58))
 
+    def test_close_auction_star(self, mh):
+        # 科创板 14:57-15:00 收盘竞价（scope "SHSE:STAR" 板块段大小写归一——盲审 B 实测曾恒 False）
+        assert mh.is_auction("688001.SHSE", datetime(2026, 9, 18, 14, 58))
+
+    def test_not_trading_day(self, mh):
+        # 周六非交易日恒 False（日历感知——盲审 A）
+        assert not mh.is_auction("600000.SHSE", datetime(2026, 9, 19, 9, 22))
+
     def test_band_rules(self, mh):
         assert mh.band_of("SHSE", "main", False) == 10
         assert mh.band_of("SHSE", "main", True) == 5      # ST 折半
         assert mh.band_of("SZSE", "chinext", False) == 20
         assert mh.band_of("BSE", "bse", False) == 30
+
+
+class TestSecurityApi:
+    """端点入参校验+404（盲审修：vt_symbol 正则/错误码）。"""
+
+    def test_invalid_symbol_400(self):
+        from src.web_api.routes.stock import security_attr_api
+        import pytest as _pytest
+        from src.web_api.errors import ApiError
+        with _pytest.raises(ApiError) as e:
+            security_attr_api("bad symbol!!", payload={})
+        assert e.value.status_code == 400 and e.value.code == "PARAM_INVALID"
+
+    def test_not_found_404(self):
+        from src.web_api.routes.stock import security_attr_api
+        import pytest as _pytest
+        from src.web_api.errors import ApiError
+        with _pytest.raises(ApiError) as e:
+            security_attr_api("NOPE.SHSE", payload={})
+        assert e.value.status_code == 404 and e.value.code == "SECURITY_NOT_FOUND"
+
+    def test_normal_shape(self):
+        from src.web_api.routes.stock import security_attr_api
+        r = security_attr_api("600000.SHSE", payload={})
+        assert r["attr"]["category"] == "stock" and r["states_truncated"] is False
+        assert len(r["sessions"]) >= 6

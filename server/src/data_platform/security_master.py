@@ -1,17 +1,38 @@
-"""批 56a·M1：SecurityMaster/MarketHours 读接口（29 号 §四契约）。
+"""批 56a·M1：SecurityMaster/MarketHours（29 号 §四契约）。
 
-SMClient：标的属性查询（主档+时变）+covers（M2 resolve 硬过滤预留）。
-MarketHours：节奏域查询（时段/日锚/竞价判定）——28 §4.2 立法的运行期切片。
-边界：只读——属性数据来自同步填充链（engine 侧 upsert），本模块零写。
+SMClient：标的属性查询（主档+时变）+covers（M2 resolve 硬过滤预留）+engine 专用写侧
+（upsert_rows/upsert_state——填充链唯一写通道，web 侧零写）。
+MarketHours：节奏域查询（时段/日锚/竞价判定）——28 §4.2 立法的运行期切片；
+HTTP 面用 get_market_hours() 单例（进程内缓存方有效）。
+
+盲审修订（2026-09-20 双盲 A/B）：写侧 executemany 化（18 号 §2.1）+全列 upsert
+（品类值+生命周期列——新标的不落 server_default 错值）；covers 单查批量化；
+is_auction scope 板块大小写归一+交易日历感知；sessions 无行不缓存（负缓存清除）；
+day_anchor 表驱动（market_hours.anchor）返 datetime（29 号契约签名）。
 """
 from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta, timezone
 
 logger = logging.getLogger("data_platform.security_master")
+
+# YYYYMMDD / YYYY-MM-DD（engine 填充链日期列清洗用——脏值统一 NULL 不炸批）
+_DATE_RE = re.compile(r"^\d{4}-?\d{2}-?\d{2}$")
+
+
+def _null_date(v):
+    """日期列脏值清洗：合法字符串原样/None 透传/date 对象 ISO 化/其余（空串/'None'/畸形）→ None。"""
+    if v is None:
+        return None
+    if isinstance(v, date):
+        return v.isoformat()
+    if isinstance(v, str) and _DATE_RE.match(v):
+        return v
+    return None
 
 
 @dataclass(frozen=True)
@@ -41,7 +62,7 @@ class Phase:
 
 
 class SMClient:
-    """security_master/security_state 读侧。"""
+    """security_master/security_state 读侧 + engine 填充链写侧。"""
 
     def get(self, vt_symbol: str) -> SecurityAttr | None:
         """主档一行；无此标的返回 None（消费方自行决定 DataGap 语义）。"""
@@ -82,11 +103,20 @@ class SMClient:
 
         库内有档：按 (market,exchange,category) 逐项过 scope.covers_one；
         库内无档：以 vt_symbol 交易所后缀近似（无档标的不因此一票否决——SM 未回填≠不可交易）。
+        单查批量取档（ANY），逐 symbol get 为 N+1（盲审 B）。
         """
+        if not symbols:
+            return True
+        from .db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT vt_symbol, market, exchange, category FROM security_master "
+                "WHERE vt_symbol = ANY(%s)", (list(symbols),))
+            known = {r[0]: (r[1], r[2], r[3]) for r in cur.fetchall()}
         for s in symbols:
-            a = self.get(s)
-            if a is not None:
-                if not scope.covers_one(a.market, a.exchange, a.category):
+            tri = known.get(s)
+            if tri is not None:
+                if not scope.covers_one(*tri):
                     return False
             else:
                 exch = s.rsplit(".", 1)[1] if "." in s else ""
@@ -95,56 +125,78 @@ class SMClient:
         return True
 
     def upsert_rows(self, rows: list[tuple]) -> int:
-        """填充链写侧（engine 同步任务调用——ON CONFLICT DO UPDATE 字段级更新，
-        29 号 §四：append-only 会让 delist_date/名称变更永远为空）。
+        """填充链写侧（engine 同步任务调用——executemany 单批，18 号 §2.1）。
 
-        rows 元组序=(vt_symbol, market, exchange, category, name, industry)。
+        rows 元组序=(vt_symbol, market, exchange, category, name, industry,
+        multiplier, tick_size, trade_phase, list_date, delist_date)。
+        品类值随行携带（新标的 INSERT 不落 server_default 错值——转债 T+0/乘数 10 等）；
+        DO UPDATE 字段级更新（29 §四：append-only 会让 delist_date/名称变更永远为空）；
+        list_date 空值不抹旧（COALESCE），delist_date 恒覆盖（退市事实只进不退）。
         """
+        clean = [(*r[:9], _null_date(r[9]), _null_date(r[10])) for r in rows]
+        if not clean:
+            return 0
         from .db import get_conn
-        n = 0
         with get_conn() as conn:
-            for vt, mkt, exch, cat, name, industry in rows:
-                conn.execute(
-                    "INSERT INTO security_master (vt_symbol, market, exchange, category, name, industry) "
-                    "VALUES (%s,%s,%s,%s,%s,%s) "
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO security_master (vt_symbol, market, exchange, category, name, "
+                    "industry, multiplier, tick_size, trade_phase, list_date, delist_date) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
                     "ON CONFLICT (vt_symbol) DO UPDATE SET "
-                    "name=EXCLUDED.name, industry=EXCLUDED.industry, updated_at=now()",
-                    (vt, mkt, exch, cat, name, industry))
-                n += 1
+                    "name=EXCLUDED.name, industry=EXCLUDED.industry, "
+                    "multiplier=EXCLUDED.multiplier, tick_size=EXCLUDED.tick_size, "
+                    "trade_phase=EXCLUDED.trade_phase, "
+                    "list_date=COALESCE(EXCLUDED.list_date, security_master.list_date), "
+                    "delist_date=EXCLUDED.delist_date, updated_at=now()", clean)
             conn.commit()
-        return n
-
+        return len(clean)
 
     def upsert_state(self, rows: list[tuple]) -> int:
-        """时变行写侧（rows=(vt_symbol, effective_from, kind, value_json_str)——幂等）。"""
+        """时变行写侧（rows=(vt_symbol, effective_from, kind, value_json_str)——幂等 executemany）。"""
+        if not rows:
+            return 0
         from .db import get_conn
-        n = 0
         with get_conn() as conn:
-            for vt, eff, kind, value in rows:
-                conn.execute(
+            with conn.cursor() as cur:
+                cur.executemany(
                     "INSERT INTO security_state (vt_symbol, effective_from, kind, value) "
                     "VALUES (%s,%s,%s,%s::jsonb) "
                     "ON CONFLICT (vt_symbol, effective_from, kind) DO UPDATE SET value=EXCLUDED.value",
-                    (vt, eff, kind, value))
-                n += 1
+                    list(rows))
             conn.commit()
-        return n
+        return len(rows)
+
+
+def _tz_of(s: str):
+    """tz 列解析：偏移式（'+08:00'）→ timezone；命名式（'UTC'/'Asia/Shanghai'）→ ZoneInfo。"""
+    if s and s[0] in "+-":
+        sign = -1 if s[0] == "-" else 1
+        return timezone(sign * timedelta(hours=int(s[1:3]), minutes=int(s[4:6])))
+    from zoneinfo import ZoneInfo
+    return ZoneInfo(s)
 
 
 class MarketHours:
-    """market_hours/band_rules 读侧（28 §4.2 节奏域）。"""
+    """market_hours/band_rules 读侧（28 §4.2 节奏域）。HTTP 面经 get_market_hours() 单例复用。"""
 
     def __init__(self):
         self._cache: dict[str, list[Phase]] = {}
+        self._anchor_cache: dict[str, tuple[time, str]] = {}
 
     def sessions(self, session_id: str, at: date) -> list[Phase]:
-        """时段序列（低频数据进程内缓存；scope 板块过滤由消费方按标的交易所套用）。"""
+        """时段序列（低频数据进程内缓存；scope 板块过滤由消费方按标的交易所套用）。
+
+        无此 session_id 不缓存（行后补可见——负缓存会钉死空表，盲审 A）。
+        """
         if session_id not in self._cache:
             from .db import get_conn
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT sessions FROM market_hours WHERE session_id=%s", (session_id,))
                 r = cur.fetchone()
+            if r is None:
+                return []                       # 无行不缓存
             raw = r[0] if r else []
             if isinstance(raw, str):
                 try:
@@ -158,15 +210,29 @@ class MarketHours:
             ]
         return self._cache[session_id]
 
-    def day_anchor(self, session_id: str) -> time:
-        """日界锚（28 §3.2——astock 15:00 / crypto 00:00）。"""
-        return time(15, 0) if session_id == "astock_main" else time(0, 0)
+    def day_anchor(self, session_id: str) -> datetime:
+        """日界锚（29 号契约 ->datetime；28 §3.2——astock 15:00(+08:00) / crypto UTC 00:00）。
+
+        表驱动（market_hours.anchor+tz 列）；返回"今天"在该市场时区的锚点 aware datetime。
+        历史锚点由消费方按日平移（签名无 at——契约变更走 29 号流程）。
+        """
+        if session_id not in self._anchor_cache:
+            from .db import get_conn
+            with get_conn() as conn:
+                cur = conn.execute(
+                    "SELECT anchor, tz FROM market_hours WHERE session_id=%s", (session_id,))
+                r = cur.fetchone()
+            if r is None:
+                return datetime.combine(date.today(), time(0, 0))
+            self._anchor_cache[session_id] = (r[0], r[1])
+        anchor, tz = self._anchor_cache[session_id]
+        return datetime.combine(date.today(), anchor, tzinfo=_tz_of(tz))
 
     @staticmethod
     def _board_of(vt_symbol: str) -> str:
         """板块判定（scope 语法 交易所[:板块] 的消费侧——27 号'board 暂不建实体'由代码前缀承载）。
 
-        STAR=688/689；CHINEXT=300/301；BSE=92/43/83；其余=main。
+        STAR=688/689；CHINEXT=300/301；BSE=92/43/83/87；其余=main。
         """
         code = vt_symbol.split(".", 1)[0]
         if code.startswith(("688", "689")):
@@ -178,7 +244,18 @@ class MarketHours:
         return "main"
 
     def is_auction(self, vt_symbol: str, at: datetime) -> bool:
-        """竞价阶段判定（含 scope 板块过滤：close_auct 深市/北交/沪**仅科创**）。"""
+        """竞价阶段判定（含 scope 板块过滤：close_auct 深市/北交/沪**仅科创**）。
+
+        日历感知：astock_main 经 trade_cal 判交易日（非交易日恒 False——盲审 A）；
+        calendar='none' 的 session（crypto）跳过日历。日历未覆盖年 fail-open（同 XTP 连接窗立法）。
+        """
+        from .db import get_conn, is_trading_day
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT calendar FROM market_hours WHERE session_id='astock_main'")
+            r = cur.fetchone()
+        if r and r[0] and r[0] != "none" and not is_trading_day(at.date()):
+            return False
         exch = vt_symbol.rsplit(".", 1)[1] if "." in vt_symbol else ""
         board = self._board_of(vt_symbol)
         for p in self.sessions("astock_main", at.date()):
@@ -190,10 +267,11 @@ class MarketHours:
             if hh * 60 + mm <= t < eh * 60 + em:
                 if p.scope is None:
                     return True
-                # scope 语法 交易所[:板块]（28 §4.2）："SHSE:STAR"=沪市仅科创板——板块例外须双匹配
+                # scope 语法 交易所[:板块]（28 §4.2）："SHSE:STAR"=沪市仅科创板——板块例外须双匹配；
+                # 板块段大小写归一（种子大写 STAR vs _board_of 小写 star——盲审 B 实测错配）
                 for tok in p.scope.split("|"):
                     parts_ = tok.split(":")
-                    if parts_[0] == exch and (len(parts_) == 1 or parts_[1] == board):
+                    if parts_[0] == exch and (len(parts_) == 1 or parts_[1].lower() == board):
                         return True
         return False
 
@@ -206,3 +284,14 @@ class MarketHours:
                     "pct_st" if is_st else "pct_normal"), (exchange, board))
             r = cur.fetchone()
         return float(r[0]) if r and r[0] is not None else None
+
+
+_hours: MarketHours | None = None
+
+
+def get_market_hours() -> MarketHours:
+    """MarketHours 单例（HTTP 常驻进程复用进程内缓存——每请求 new 则缓存无效，盲审 A）。"""
+    global _hours
+    if _hours is None:
+        _hours = MarketHours()
+    return _hours

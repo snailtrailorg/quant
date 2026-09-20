@@ -23,8 +23,9 @@ from src.quant_common.contract import (
     Subscription, CRYPTO_ALL, is_legal, validate_capability_decls,
 )
 
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))       # server/
 SRC = os.path.join(REPO, "src")
+assert os.path.isdir(SRC), f"扫描目录不存在——CI 断言将空转（曾经指到仓库根拼接而恒空，盲审 B）: {SRC}"
 
 
 class TestKindRegistry:
@@ -64,6 +65,13 @@ class TestScope:
         s = Scope(frozenset({"astock"}), None, frozenset({"convertible"}))
         assert s.covers_one("astock", "SHSE", "convertible")
         assert not s.covers_one("astock", "SHSE", "stock")
+
+    def test_markets_nonempty_enforced(self):
+        # 29 §三立法：markets 非空——全市场=显式列全集，防跨市场通配非法态（盲审 A/B 收回钉）
+        with pytest.raises(ValueError):
+            Scope(frozenset(), None, None)
+        with pytest.raises(ValueError):
+            Scope(None, None, None)  # type: ignore[arg-type]
 
 
 class TestDataRequest:
@@ -147,6 +155,7 @@ PROVIDER_CMP = re.compile(
 
 
 def _load_whitelist() -> set[str]:
+    """白名单条目=相对路径:行号（29 号 §三"一行一符号"——模块级豁免会静音同文件真违规，盲审 B）。"""
     if not os.path.exists(WHITELIST_FILE):
         return set()
     out = set()
@@ -168,23 +177,24 @@ class TestProviderGate:
                     continue
                 path = os.path.join(root, f)
                 rel = os.path.relpath(path, SRC)
-                key = rel.replace("/", ".")[:-3]
-                if key in whitelist:
-                    continue
                 for i, line in enumerate(open(path, encoding="utf-8"), 1):
-                    if PROVIDER_CMP.search(line):
+                    if PROVIDER_CMP.search(line) and f"{rel}:{i}" not in whitelist:
                         offenders.append(f"{rel}:{i}: {line.strip()[:80]}")
         assert not offenders, (
-            "发现硬编码 provider 分支（M3 起收敛至零；如属 adapter 方言处理请加入白名单 "
-            f"{WHITELIST_FILE}）:\n" + "\n".join(offenders[:20])
+            "发现硬编码 provider 分支（M3 起收敛至零；如属 adapter 方言处理请在白名单加 "
+            f"'相对路径:行号' 一行一条——{WHITELIST_FILE}）:\n" + "\n".join(offenders[:20])
         )
 
     @pytest.mark.skipif(not os.path.exists(WHITELIST_FILE), reason="基线未生成")
     def test_whitelist_entries_exist(self):
-        """白名单条目必须指向真实文件（防漂移死条目）。"""
+        """白名单条目必须指向真实文件与行内容（防漂移死条目）。"""
         for key in _load_whitelist():
-            path = os.path.join(SRC, key.replace(".", "/") + ".py")
-            assert os.path.exists(path), f"白名单死条目: {key}"
+            rel, _, lineno = key.partition(":")
+            path = os.path.join(SRC, rel)
+            assert os.path.exists(path), f"白名单死条目（文件不存在）: {key}"
+            if lineno.isdigit():
+                lines = open(path, encoding="utf-8").readlines()
+                assert int(lineno) <= len(lines), f"白名单死条目（行号越界）: {key}"
 
 
 # ─────────────── register_adapter 钩子（CI 断言三接线验证） ───────────────

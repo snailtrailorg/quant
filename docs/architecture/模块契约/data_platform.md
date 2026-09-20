@@ -20,6 +20,7 @@ server/src/data_platform/
 ├── perm_registry.py   # 批33b：权限资源注册表（唯一字面量层——api 14 键+nav 18 条+market 5+别名；DB 覆盖层 perm_resource 四字段；绑定扫描 router-walk 175 处+防漂移闸）
 ├── market_snapshot.py # 三档腾讯实时快照（quote:tencent 60s TTL）
 ├── stock_detail.py    # 三档详情聚合层（quote 降级链+慢变块缓存）
+├── security_master.py # 批 56a：SMClient（标的属性库读侧+engine 填充链写侧）+MarketHours（节奏域）——见下节
 ├── schema_expectations.txt  # verify_schema 期望基线（迁移链生成物，禁手写）
 └── adapters/
     └── tushare_adapter.py  # Tushare 拉取 + DataFrame->rows 转换 + 质量校验
@@ -34,6 +35,13 @@ server/src/data_platform/
 - **DB 覆盖层**：`perm_resource` 表（迁移 0084）只改显示四字段（group/order/label per-locale/enabled）——条目集恒代码单源红线（PATCH 仅 nav kind+id∈注册表预检）；`load_registry()` 容错回底座不缓存。
 - **绑定扫描**：`scan_perm_bindings()` router-walk（FastAPI 0.141 懒 include——app.routes 零 APIRoute，扫 APIRouter 实例 175 处）；`check_binding_drift()` 键集⊆注册表防漂移闸（web_api startup 落点）。
 - GET `/api/perm-resources`（system_config）三段+绑定反查；PATCH `/api/perm-resources/{kind}/{id}`（四键全量显式）。
+
+## 批 56a 新模块：security_master.py（2026-09-20，29 号 §四）
+
+- **SMClient**：`get(vt_symbol)->SecurityAttr|None` / `effective_attr(vt,kind,at)->dict|None`（effective_from<=at 最新行）/ `covers(scope,symbols)->bool`（单查 ANY 批量取档，库内无档按交易所后缀近似）/ `upsert_rows`+`upsert_state`（**engine 填充链唯一写通道**——executemany 单批 18 号 §2.1；品类值+生命周期列随行携带，`ON CONFLICT` 字段级更新，list_date 空值 COALESCE 不抹旧；web 侧零写）。
+- **MarketHours**：`sessions(session_id,at)->list[Phase]`（进程内缓存，无行不缓存）/ `day_anchor(session_id)->datetime`（表驱动 market_hours.anchor+tz，返今天 aware 锚点）/ `is_auction(vt,at)`（scope 板块大小写归一+trade_cal 日历感知，日历缺年 fail-open）/ `band_of(exchange,board,is_st)`（band_rules 规则派生）。HTTP 面经 `get_market_hours()` 单例。
+- 读写表：security_master / security_state / market_hours / band_rules（读）；security_master / security_state（写，仅 engine 链）。
+- 被调：engine 填充链三 handler+namechange 派生（写）；web_api `/api/security/{vt_symbol}`（读）；M2 resolve 接 covers（批 57）。
 
 ## 一、public API（稳定，可跨模块调用）
 

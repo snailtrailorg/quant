@@ -13,10 +13,24 @@ server/src/quant_common/
 ├── crypto.py    # encrypt/decrypt/mask（从 web_api 归位；死代码 store_api_key/get_api_key 已删）
 ├── session.py   # in_astock_session / session_edge（从 strategy_runner 归位——hub 曾因此模块级 import runner 连带 vnpy 链）
 ├── guard.py     # guard(name, alert=None) 回调注入 / sd_notify
-└── terms.py     # TERMS / LANG_NAMES i18n 注册表（层测试白捡的寄生项，从 web_api 归位）
+├── terms.py     # TERMS / LANG_NAMES i18n 注册表（层测试白捡的寄生项，从 web_api 归位）
+└── contract.py  # 批 56a：数据供给总线契约类型（29 号 §三——见下节）
 ```
 
 ---
+
+## 批 56a 新模块：contract.py（2026-09-20，29 号 §三契约层）
+
+纯类型零业务依赖（层 0 红线）：DataKind 26 词+`KIND_TEMPORALITY` 组合表+`is_legal`；
+错误三分类 `ParamError`（不 failover）/`SourceUnavailable`（可 failover）/`DataGap`（可降级）；
+`AsOf` PIT 双口径；`DataRequest` 9 字段（sub_kind 聚合域+mode 供给/消费分叉）；
+`Subscription`/`ContractEvent`/`Watermark`/`SnapshotRow`（TypedDict）；
+`CapabilityDecl`+`validate_capability_decls`；`Scope` 三元组（**markets 立法非空**，
+exchanges/categories 可 None=通配；常量 `ASTOCK_ALL`/`ASTOCK_SHSE_SZSE`/`CRYPTO_ALL`）；
+`BAR_COLUMNS`/`ALLOWED_BAR_COLUMNS`/`ALLOWED_SNAPSHOT_COLUMNS`（CI 列白名单断言的执法对象）。
+执法：`register_adapter` 装饰器钩子（adapters/base.py——类带 `capability_decls` 即逐项校验，
+import 即执法）；CI 三断言落 `tests/test_contract_gate.py`（provider 门扫 `server/src`，
+白名单"一行一符号" `tests/fixtures/provider_gate_whitelist.txt`）。
 
 ## 一、public API
 

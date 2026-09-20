@@ -251,24 +251,32 @@ def convertible_terms(ts_code: str, payload: dict = Depends(require_perm("read")
 @router.get("/api/security/{vt_symbol}")
 def security_attr_api(vt_symbol: str, payload: dict = Depends(require_perm("read"))):
     """标的属性：主档+时变时间线+所属时段表（集成中心·标的属性页数据源）。"""
-    from src.data_platform.security_master import SMClient, MarketHours
+    import re as _re
+    from datetime import date as _date
+    from src.data_platform.security_master import SMClient, get_market_hours
     from src.data_platform.db import get_conn
+    vt_symbol = vt_symbol.strip()
+    if not _re.fullmatch(r"[A-Za-z0-9._-]{1,32}", vt_symbol):
+        raise ApiError(400, "PARAM_INVALID", "vt_symbol 格式非法（仅限字母数字与 . _ -，长度 ≤32）")
     sm = SMClient()
     a = sm.get(vt_symbol)
     if a is None:
         raise ApiError(404, "SECURITY_NOT_FOUND", f"标的 {vt_symbol} 不在标的属性库（未上市或未回填）")
     with get_conn() as conn:
+        # 取 51 判截断（LIMIT 50 无标记=超限不可知——盲审 B）
         cur = conn.execute(
             "SELECT effective_from, kind, value FROM security_state "
-            "WHERE vt_symbol=%s ORDER BY effective_from DESC, kind LIMIT 50", (vt_symbol,))
-        states = [{"effective_from": str(r[0]), "kind": r[1], "value": r[2]} for r in cur.fetchall()]
-    mh = MarketHours()
+            "WHERE vt_symbol=%s ORDER BY effective_from DESC, kind LIMIT 51", (vt_symbol,))
+        raw = cur.fetchall()
+    states = [{"effective_from": str(r[0]), "kind": r[1], "value": r[2]} for r in raw[:50]]
+    mh = get_market_hours()
     return {
         "attr": {"vt_symbol": a.vt_symbol, "market": a.market, "exchange": a.exchange,
                  "category": a.category, "name": a.name, "industry": a.industry,
                  "multiplier": a.multiplier, "tick_size": a.tick_size,
                  "trade_phase": a.trade_phase, "session_id": a.session_id},
         "states": states,
+        "states_truncated": len(raw) > 50,
         "sessions": [{"phase": p.phase, "start": p.start, "end": p.end}
-                     for p in mh.sessions(a.session_id, __import__("datetime").date.today())],
+                     for p in mh.sessions(a.session_id, _date.today())],
     }
