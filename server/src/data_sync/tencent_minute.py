@@ -111,7 +111,7 @@ def _check_gap(vt: str) -> None:
             last = row[0] if row else None
             cur = conn.execute(
                 "SELECT MAX(cal_date)::date FROM trade_cal WHERE exchange='SSE' "
-                "AND is_open=1 AND cal_date < CURRENT_DATE")
+                "AND is_open=1 AND cal_date < (now() AT TIME ZONE 'Asia/Shanghai')::date")
             prev_row = cur.fetchone()
             prev = prev_row[0] if prev_row else None
         if prev is not None and (last is None or last.date() < prev):

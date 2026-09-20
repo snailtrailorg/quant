@@ -183,7 +183,7 @@ def my_im_bots(payload: dict = Depends(require_authenticated)):
             "SELECT id, provider, name, description, enabled, updated_at FROM im_bot_config "
             "WHERE owner_user_id=%s ORDER BY id", (uid,)).fetchall()
     return [{"id": r[0], "provider": r[1], "name": r[2], "description": r[3],
-             "enabled": r[4], "updated_at": str(r[5])[:19]}
+             "enabled": r[4], "updated_at": r[5].isoformat() if r[5] else None}
             for r in rows]   # 五轮：pending_binds 退役（绑定取消）
 
 

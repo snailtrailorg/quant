@@ -187,7 +187,7 @@ def health_events_api(limit: int = 100, payload: dict = Depends(require_perm("sy
             "SELECT ts, rule_id, component, severity, detail FROM health_event "
             "ORDER BY ts DESC LIMIT %s", (limit,))
         rows = cur.fetchall()
-    return {"events": [{"ts": str(r[0])[:19], "rule": r[1], "component": r[2],
+    return {"events": [{"ts": (r[0].isoformat() if r[0] else ""), "rule": r[1], "component": r[2],
                         "severity": r[3], "detail": r[4] or ""} for r in rows]}
 
 
@@ -580,8 +580,8 @@ def notifications_api(status: str = "active", limit: int = 50,
         "items": [{
             "id": r[0], "level": r[1], "category": r[2], "title": r[3], "body": r[4],
             "source_ref": r[5], "status": r[6],
-            "created_at": str(r[7])[:19] if r[7] else "",
-            "acked_at": str(r[8])[:19] if r[8] else None,
+            "created_at": r[7].isoformat() if r[7] else "",
+            "acked_at": r[8].isoformat() if r[8] else None,
             "code": r[9],   # web 长尾批：结构化标识（runbook 映射键，未打码为 None）
             # 批 7：投递结局审计（{ch: ok|queued|failed:<token>|skip:<token>}/{}=零外推/null=未跑完）
             "dispatch": r[10],

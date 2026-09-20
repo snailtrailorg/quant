@@ -260,8 +260,9 @@ class TestEndpoints:
         from unittest.mock import patch
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
+        from datetime import datetime as _dt
         mock_conn.execute.return_value.fetchall.return_value = [
-            ("2026-08-18 14:00:00+08", "unit_down", "quant-md-hub@quant", "critical", "ActiveState=failed")]
+            (_dt.fromisoformat("2026-08-18T14:00:00+08:00"), "unit_down", "quant-md-hub@quant", "critical", "ActiveState=failed")]
         from src.web_api.routes import system as system_route
         with patch.object(system_route, "get_conn", return_value=mock_conn):
             r = admin_client.get("/api/health/events", params={"limit": 50})

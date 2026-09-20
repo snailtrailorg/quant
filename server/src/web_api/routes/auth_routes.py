@@ -327,7 +327,7 @@ def profile_api(payload: dict = Depends(require_authenticated)):
         pass   # 权限面故障不挡资料展示（chips 空=前端省略）
     return {"username": r[0], "nickname": r[1], "role": r[2], "avatar_url": r[3], "email": r[4],
             "created_at": str(r[5])[:10] if r[5] else None,
-            "last_login_at": str(r[6])[:19] if r[6] else None,
+            "last_login_at": r[6].isoformat() if r[6] else None,
             "last_login_ip": r[7],
             "phone": r[10],   # 批30：本人资料不脱敏（对齐 email 先例）
             "deactivated": r[9] is not None,      # 响应映射（真实列 deleted_at——盲审B-P1-3）
@@ -610,8 +610,8 @@ def invites_api(payload: dict = Depends(require_perm("user_mgmt"))):
         status = ("revoked" if r[4] else "used" if r[3]
                   else "expired" if (r[2] and str(r[2]) < str(now)) else "pending")
         items.append({"id": r[0], "email": r[1],
-                      "expires_at": str(r[2])[:19] if r[2] else None,
-                      "status": status, "created_at": str(r[5])[:19]})
+                      "expires_at": r[2].isoformat() if r[2] else None,
+                      "status": status, "created_at": r[5].isoformat() if r[5] else None})
     return {"items": items}
 
 
@@ -883,8 +883,8 @@ def list_users(payload: dict = Depends(require_perm("user_mgmt"))):
         rows = cur.fetchall()
     return [{"id": r[0], "username": r[1], "nickname": r[2], "role": r[3],
              "enabled": r[4] and not r[8], "deactivated": bool(r[8]),
-             "email": r[5], "created_at": str(r[6])[:19],
-             "last_login_at": str(r[7])[:19] if r[7] else None} for r in rows]
+             "email": r[5], "created_at": r[6].isoformat() if r[6] else None,
+             "last_login_at": r[7].isoformat() if r[7] else None} for r in rows]
 
 
 @router.post("/api/user/{uid}")
@@ -956,7 +956,7 @@ def get_logs(task_id: str | None = None, before: str | None = None, limit: int =
         except Exception:
             logger.warning("get_logs: task_logs 表不存在（需运行 alembic upgrade head）")
         return {"logs": [{"level": r[0], "msg": r[1], "module": r[2] or "",
-                          "ts": str(r[3])[:19] if r[3] else ""} for r in rows]}
+                          "ts": r[3].isoformat() if r[3] else ""} for r in rows]}
     where, params = "", []
     if before:
         try:
@@ -989,7 +989,7 @@ def get_logs(task_id: str | None = None, before: str | None = None, limit: int =
         logger.warning("get_logs: system_log 表不存在（需运行 alembic upgrade head）")
         rows, mods = [], []
     logs = [{"level": r[1], "msg": r[3], "module": r[2] or "",
-             "ts": str(r[4])[:19] if r[4] else ""} for r in rows]
+             "ts": r[4].isoformat() if r[4] else ""} for r in rows]
     next_cursor = None
     if len(rows) == limit and rows:   # 恰好一页=可能还有；不足=终页
         last = rows[-1]

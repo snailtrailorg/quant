@@ -23,7 +23,7 @@ deploy_systemctl_extra: ""
 # ---- 发布源（控制机仓库 server/ 树；synchronize 白名单切片见 all.yml）----
 deploy_stage_root: "{{ lookup('env', 'HOME') }}/Projects/quant/server"
 
-# ---- 波次（设计稿 §3：web→celery→feishu→hub→task）----
+# ---- 波次（批 56b 翻转：web→celery→feishu→task→hub——新 worker 先起兼容旧 hub +08:00 流；反序=当日 bar 全丢）----
 deploy_waves:
   - name: web
     units: [quant-web-api@quant.service]
@@ -36,10 +36,12 @@ deploy_waves:
     # 改 wrapper 是 root 特权通道 deploy 无权，故静态化在 inventory）。上产切换序列见
     # docs/任务/批11C-IM归属用户pool化.md §1#8（先起 pool 拉齐→停+disable 旧 @10）
     units: [quant-im-pool@quant.service]
-  - name: hub
-    units: [quant-md-hub@quant.service]
+  # 批 56b 盲审 B：波次序 task 先于 hub（新 worker 兼容旧 hub +08:00 流——_epoch_key 跨表示同键；
+  # 反序（新 hub+旧 worker）ISO 字典序去重恒真=当日 bar 全丢锁死）
   - name: task
     units: "{{ deploy_task_units_live }}"     # DB 真相源（live_task active），不收 active 单元（幽灵前科）
+  - name: hub
+    units: [quant-md-hub@quant.service]
 deploy_postverify_units: "{{ deploy_waves | map(attribute='units') | flatten }}"
 
 # ---- 验证参数 ----

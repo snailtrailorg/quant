@@ -77,9 +77,10 @@ const errMsg = ref('')
 
 const cap = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s)
 
-// 阶段枚举→用户可读名（词条缺 key 时回退原值——防未来新枚举裸奔报错）
+// 阶段枚举→用户可读名（snake_case→camelCase 键；词条缺 key 回退原值——防未来新枚举裸奔）
 const phaseLabel = (phase) => {
-  const key = `interfaces.secPh${cap(phase)}`
+  const camel = String(phase).split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join('')
+  const key = `interfaces.secPh${camel}`
   return te(key) ? t(key) : phase
 }
 

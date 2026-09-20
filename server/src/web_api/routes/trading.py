@@ -243,7 +243,7 @@ def get_position(payload: dict = Depends(require_perm("read"))):
     total_pnl = (total_value - initial) if snap else 0
     return {"positions": positions, "total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl/initial*100, 2) if initial else 0,
-            "snapshot_ts": str(refresh_ts)[:19] if refresh_ts else None,
+            "snapshot_ts": refresh_ts.isoformat() if refresh_ts else None,
             "snapshot_rows": refresh_rows, "stale": stale}
 
 
@@ -261,7 +261,7 @@ def get_pnl(payload: dict = Depends(require_perm("read"))):
         # 原取 rows[0][3]（最新行的策略级配置资金）与账户级净值错配 -> total_pnl 虚增。
         cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts ASC LIMIT 1")
         first = cur.fetchone()
-    curve = [{"ts": str(r[0])[:19], "value": float(r[1]) if r[1] else 0, "daily_pnl": float(r[2]) if r[2] else 0} for r in reversed(rows)]
+    curve = [{"ts": r[0].isoformat() if r[0] else "", "value": float(r[1]) if r[1] else 0, "daily_pnl": float(r[2]) if r[2] else 0} for r in reversed(rows)]
     today_pnl = curve[-1]["daily_pnl"] if curve else 0
     initial = float(first[0]) if first and first[0] else (float(rows[-1][3]) if rows and rows[-1][3] is not None else 1000000)
     total_pnl = (curve[-1]["value"] - initial) if curve else 0
@@ -279,7 +279,7 @@ def get_orders(payload: dict = Depends(require_perm("read"))):
         cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status, client_order_id, error "
                            "FROM order_log ORDER BY ts DESC LIMIT 100")   # wd-20 §1.4.3：补委托号/失败原因（0039 列）
         rows = cur.fetchall()
-    return {"orders": [{"ts": str(r[0])[:19], "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6],
+    return {"orders": [{"ts": r[0].isoformat() if r[0] else "", "strategy_id": r[1], "symbol": r[2], "action": r[3], "volume": r[4], "price": float(r[5]) if r[5] else 0, "status": r[6],
                         "client_order_id": r[7], "error": r[8]} for r in rows],
             "total": len(rows)}
 

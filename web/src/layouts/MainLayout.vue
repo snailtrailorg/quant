@@ -99,6 +99,7 @@
             <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
             <el-menu-item v-if="has('llm_config') || has('im_bots_config')" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
             <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
+            <el-menu-item v-if="has('system_config')" index="/routing"><el-icon><Guide /></el-icon>{{ t('nav.dataRouting') }}</el-menu-item>
             <el-menu-item v-if="has('system_config')" index="/perm-resources"><el-icon><Grid /></el-icon>{{ t('nav.permResources') }}</el-menu-item>
             <el-menu-item v-if="has('system_config')" index="/settings"><el-icon><Tools /></el-icon>{{ t('nav.settings') }}</el-menu-item>   <!-- 批37：系统设置置底 -->
           </el-sub-menu>
@@ -132,7 +133,7 @@
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
-         ChatDotRound, Bell, User, SwitchButton, Back, Grid } from '@element-plus/icons-vue'
+         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Guide } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'

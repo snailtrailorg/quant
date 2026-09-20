@@ -269,7 +269,7 @@ class BacktestEngine:
                         "avg_price": avg_price,
                         "equity": portfolio_value,
                         "cash": cash,
-                        "trades": [{"ts": str(t.ts)[:19], "symbol": t.symbol, "action": t.action,
+                        "trades": [{"ts": (t.ts.isoformat() if hasattr(t.ts, "isoformat") else str(t.ts)), "symbol": t.symbol, "action": t.action,
                                     "volume": t.volume, "price": t.price} for t in adapter.trades],
                         "log": "",
                         "progress": {"current": i + 1, "total": len(bars),
@@ -356,8 +356,8 @@ class BacktestEngine:
         win_rate = (wins / total_closed * 100) if total_closed > 0 else 0
 
         return BacktestResult(
-            start_date=str(start_ts)[:10] if start_ts else "",
-            end_date=str(end_ts)[:10] if end_ts else "",
+            start_date=_day_key(start_ts) if start_ts else "",
+            end_date=_day_key(end_ts) if end_ts else "",
             initial_capital=initial,
             final_value=round(final, 2),
             total_return_pct=round(total_return, 2),
@@ -374,7 +374,7 @@ class BacktestEngine:
             total_trades=len(trades),
             daily_values=daily_values,
             trades=[{
-                "ts": str(t.ts)[:19], "symbol": t.symbol, "action": t.action,
+                "ts": (t.ts.isoformat() if hasattr(t.ts, "isoformat") else str(t.ts)), "symbol": t.symbol, "action": t.action,
                 "volume": t.volume, "price": t.price, "commission": round(t.commission, 2),
             } for t in trades],
             metrics={
@@ -399,14 +399,27 @@ class BacktestEngine:
         )
 
 
+
+def _day_key(v) -> str:
+    """业务日键（批 56b 盲审 A 修：日线 ts=上海 00:00=前日 16:00 UTC——字符串切片错一天；
+    统一 aware→上海业务日，naive 串/obj 双兼容——daily/benchmark/trades 三源同基准）。"""
+    from datetime import datetime as _dt
+    from src.data_platform.tz import as_shanghai
+    if isinstance(v, _dt):
+        return as_shanghai(v).strftime("%Y-%m-%d")
+    try:
+        return as_shanghai(_dt.fromisoformat(str(v).replace("Z", "+00:00"))).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return str(v)[:10]
+
 def _align_benchmark_returns(daily_values: list, benchmark_bars: list) -> tuple[list, list]:
     """对齐策略与基准的逐日收益率（按日期 inner join，方案定稿四·8 对齐）。
 
     策略 daily_values 的 value → 逐日收益率；基准 benchmark_bars 的 close → 逐日收益率。
     公共交易日 inner join，停牌/缺日跳过。返回 (r_p, r_b)。
     """
-    strat_val = {str(d["ts"])[:10]: float(d["value"]) for d in daily_values}
-    bench_close = {str(b["ts"])[:10]: float(b["close"]) for b in benchmark_bars}
+    strat_val = {_day_key(d["ts"]): float(d["value"]) for d in daily_values}
+    bench_close = {_day_key(b["ts"]): float(b["close"]) for b in benchmark_bars}
     common = sorted(set(strat_val) & set(bench_close))
     r_p, r_b = [], []
     for i in range(1, len(common)):
@@ -440,9 +453,9 @@ def _benchmark_metrics(daily_values: list, benchmark_bars: list) -> dict:
         out["benchmark_volatility"] = float(np.std(r_b, ddof=0) * np.sqrt(252) * 100)
         out["volatility"] = float(np.std(r_p, ddof=0) * np.sqrt(252) * 100)
     # benchmark_return：同期累计收益，截断到 daily_values 的日期范围（窗口截断，盲审 P1）
-    dv_dates = {str(d["ts"])[:10] for d in daily_values}
+    dv_dates = {_day_key(d["ts"]) for d in daily_values}
     b_closes = [float(b["close"]) for b in benchmark_bars
-                if str(b["ts"])[:10] in dv_dates and b.get("close")]
+                if _day_key(b["ts"]) in dv_dates and b.get("close")]   # 盲审 A/B：同 _day_key 基准
     if len(b_closes) > 1 and b_closes[0] > 0:
         out["benchmark_return"] = round((b_closes[-1] / b_closes[0] - 1) * 100, 2)
     return out

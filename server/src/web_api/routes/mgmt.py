@@ -194,6 +194,11 @@ def interfaces_reorder(req: InterfaceReorderReq, payload: dict = Depends(require
             conn.execute("UPDATE external_interface SET position=%s, updated_at=now() WHERE id=%s",
                          (pos, rid))
         conn.commit()
+    try:
+        from src.data_platform.routing import bump_config_version
+        bump_config_version()   # 批 57：position 改动 bump（28 §6.3——epoch 生效验收②闭环）
+    except Exception:
+        pass
     audit_log(payload["username"], "interface_reorder", detail=f"{req.domain} order={req.ids}")
     return {"ok": True}
 
@@ -228,6 +233,11 @@ def update_interface(iid: int, req: InterfaceReq, payload: dict = Depends(requir
                 (req.name, req.provider, req.market, exchanges,
                  json.dumps(params, ensure_ascii=False), caps, req.enabled, iid))
         conn.commit()
+    try:
+        from src.data_platform.routing import bump_config_version
+        bump_config_version()   # 批 57：接口行变更 bump（28 §6.3——position/enabled 改动 epoch 生效）
+    except Exception:
+        pass
     audit_log(payload["username"], "interface_update", f"id={iid}")
     return {"ok": True}
 

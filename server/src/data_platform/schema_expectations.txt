@@ -68,6 +68,8 @@ position_snapshot :: account_id,symbol,direction,volume,frozen,cost_price,pnl,yd
 reconcile_issue :: id,symbol,issue_type,detail,broker_qty,derived_qty,status,first_seen,updated_at,handled_by,note,exempt_qty,exempt_until
 risk_log :: id,ts,action,symbol,rule,detail,severity,username
 risk_rules :: id,name,type,params,enabled,created_at,updated_at
+routing_decision :: id,ts,fingerprint,req_summary,chain,epoch,cause
+routing_policy :: consumer_tag,weights,bulkhead_defaults,trade_switch_confirm_timeout_s
 security_master :: vt_symbol,market,exchange,category,name,industry,list_date,delist_date,multiplier,tick_size,fee_model_ref,margin_model_ref,session_id,trade_phase,routing_hints,updated_at
 security_state :: vt_symbol,effective_from,kind,value
 share_float :: ts_code,ann_date,float_date,float_share,float_ratio,holder_name,share_type

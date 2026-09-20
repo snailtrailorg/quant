@@ -27,6 +27,26 @@ STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
 _alert = make_alert()
 _valkey = make_valkey
 
+def _warmup_merge(hist: list, entries: list, upto_ts: str | None = None) -> list:
+    """流回放合入 history（模块级可测——批 56b 盲审 A：闭包版不可测致回归钉缩水）。
+
+    entries=[(id, fields)]（xrevrange 原序=新→旧）；upto_ts（epoch 键）截断防未来；
+    键值分离：去重/截断走 _epoch_key（跨表示同刻同键），传值走 _norm_ts（UTC ISO）。
+    """
+    bars = []
+    seen = {_epoch_key(h.get("ts")) for h in hist}
+    for _id, f in reversed(entries):          # 旧→新
+        ts_key = _epoch_key(f.get("ts", ""))
+        if upto_ts and ts_key and ts_key > upto_ts:
+            continue                          # 只灌当前消息之前的（防未来）
+        if ts_key and ts_key not in seen:
+            bars.append({"ts": _norm_ts(f.get("ts", "")), "open": float(f["open"]), "high": float(f["high"]),
+                         "low": float(f["low"]), "close": float(f["close"]), "volume": float(f["volume"] or 0)})
+            seen.add(ts_key)
+    hist.extend(bars)
+    return hist
+
+
 def _norm_ts(v) -> str:   # 传值归一：UTC ISO（策略/日志面——形状与批 56b 前一致，仅统一 UTC 表示）
     try:
         return datetime.fromisoformat(str(v).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
@@ -125,21 +145,13 @@ def run(ctx: dict) -> None:
         logger.warning("水位恢复读取失败（从空水位起）: %s", e)
     # ——— 暖机：只填 history 绝不调 on_bar（评审 F3）———
     def _warmup_from_stream(hist: list, upto_ts: str | None = None) -> list:
-        """流回放填 history。upto_ts（epoch 键）截断（rewarm 时防未来泄漏，评审 S4）。"""
+        """流回放填 history。upto_ts（epoch 键）截断（rewarm 时防未来泄漏，评审 S4）。
+        合入逻辑在模块级 _warmup_merge（可测——批 56b 盲审 A 修）。"""
         try:
             entries = r.xrevrange(stream, count=240)
-            seen = {_epoch_key(h.get("ts")) for h in hist}
-            bars = []
-            for _id, f in reversed(entries):
-                ts_key = _epoch_key(f.get("ts", ""))
-                if upto_ts and ts_key and ts_key > upto_ts:
-                    continue                       # 只灌当前消息之前的（防未来）
-                if ts_key and ts_key not in seen:
-                    bars.append({"ts": _norm_ts(f.get("ts", "")), "open": float(f["open"]), "high": float(f["high"]),
-                                 "low": float(f["low"]), "close": float(f["close"]), "volume": float(f["volume"] or 0)})
-                    seen.add(ts_key)
-            hist.extend(bars)
-            logger.info("hub 暖机：流回放补 %d 根（history 总 %d）", len(bars), len(hist))
+            before = len(hist)
+            _warmup_merge(hist, entries, upto_ts)
+            logger.info("hub 暖机：流回放补 %d 根（history 总 %d）", len(hist) - before, len(hist))
         except Exception as e:
             logger.warning("hub 暖机回放失败: %s", e)
         return hist
@@ -197,10 +209,11 @@ def run(ctx: dict) -> None:
         stats["last_bar_wall"] = time.time()
         if _in_astock_session():
             stats["sess_bar_wall"] = stats["last_bar_wall"]
-        state.max_ts = ts_key
-        try:
-            r.set(_mts_key, ts_key)   # P0-3：水位持久化（重启恢复，防 SELL 重放；失败不阻断）——epoch 键
-        except Exception: pass
+        if ts_key:               # 批 56b 盲审 B：空键不回写内存与 Valkey（脏 ts 不清零水位——R-DL1 失忆防线）
+            state.max_ts = ts_key
+            try:
+                r.set(_mts_key, ts_key)   # P0-3：水位持久化（重启恢复，防 SELL 重放；失败不阻断）——epoch 键
+            except Exception: pass
         sig = strategy.on_bar(bar, list(history))
         stats["bars"] += 1
         history.append(bar)

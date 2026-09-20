@@ -189,14 +189,14 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
                 -- W6 收官日修：原 ts::date = ... 铸型谓词索引用不上（表达式）→ 全表扫超 10s
                 -- 语句超时（prod 实证 QueryCanceled）。改 sargable 范围谓词（idx_bar_1d_ts 可用）。
                 SELECT symbol, close FROM bar_1d
-                WHERE ts >= date_trunc('day', (SELECT max(ts) FROM bar_1d))
-                  AND ts < date_trunc('day', (SELECT max(ts) FROM bar_1d)) + interval '1 day'
+                WHERE ts >= date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
+                  AND ts < (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') + interval '1 day'
             ) cd ON cd.symbol = replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE')
             LEFT JOIN (
                 SELECT d.ts_code, d.close FROM daily_basic d
                 WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)
             ) sd ON b.stk_code = sd.ts_code
-            WHERE b.list_date <= to_char(now(), 'YYYYMMDD') AND (b.delist_date IS NULL OR b.delist_date > to_char(now(), 'YYYYMMDD'))
+            WHERE b.list_date <= to_char(now() AT TIME ZONE 'Asia/Shanghai', 'YYYYMMDD') AND (b.delist_date IS NULL OR b.delist_date > to_char(now() AT TIME ZONE 'Asia/Shanghai', 'YYYYMMDD'))
             ORDER BY double_low NULLS LAST
             LIMIT %s
         """, (limit,))

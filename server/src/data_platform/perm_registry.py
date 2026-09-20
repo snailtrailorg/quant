@@ -45,10 +45,11 @@ NAV_ITEMS_BASE: list[dict] = [
     {"id": "risk-rules", "group": "riskgrp", "order": 3},
     {"id": "users", "group": "ops", "order": 1},
     {"id": "dataops", "group": "ops", "order": 2},
-    {"id": "integrations", "group": "ops", "order": 3},
-    {"id": "observe", "group": "ops", "order": 4},
-    {"id": "perm-resources", "group": "ops", "order": 5},   # 批33b 入册；批37 组内序=系统权限前系统设置底
-    {"id": "settings", "group": "ops", "order": 6},
+    {"id": "routing", "group": "ops", "order": 3},       # 批 57 M2：数据路由（策略权重+dry-run 试算器+审计）
+    {"id": "integrations", "group": "ops", "order": 4},
+    {"id": "observe", "group": "ops", "order": 5},
+    {"id": "perm-resources", "group": "ops", "order": 6},   # 批33b 入册；批37 组内序=系统权限前系统设置底
+    {"id": "settings", "group": "ops", "order": 7},
 ]
 
 # 市场操作键 5（原 perms._MARKET_OP_KEYS 字面量迁此——perms 改派生 re-export 保调用方零改动）

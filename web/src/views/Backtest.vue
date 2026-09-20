@@ -40,7 +40,7 @@
         </el-table-column>
         <el-table-column v-if="colOn('date_range')" prop="date_range" :label="t('backtest.dateRangeCol')" min-width="170">
           <template #default="{ row }">
-            {{ (row.created_at||'').slice(0,10) }} ~ {{ (row.finished_at||'').slice(5,10) || '…' }}
+            {{ fmtTime.day(row.created_at) }} ~ {{ fmtTime.day(row.finished_at)?.slice(5) || '…' }}
           </template>
         </el-table-column>
         <!-- 失败原因透出（05 §5.7：failed 行点开见原因） -->
@@ -157,6 +157,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { fmtTime } from '../utils/fmtTime'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -236,7 +237,7 @@ const deleteRun = async (row) => {
 }
 const strategyName = (sid) => strategies.value.find(x => x.id === sid)?.name || sid
 const runningCount = computed(() => runs.value.filter(r => r.status === 'running').length)
-const todayCount = computed(() => runs.value.filter(r => (r.created_at || '').slice(0, 10) === new Date().toISOString().slice(0, 10)).length)
+const todayCount = computed(() => runs.value.filter(r => fmtTime.day(r.created_at) === fmtTime.day(new Date())).length)
 const failedCount = computed(() => runs.value.filter(r => r.status === 'failed').length)
 const filteredRuns = computed(() => filterStatus.value.length ? runs.value.filter(r => filterStatus.value.includes(r.status)) : runs.value)
 // P2-6：区间快捷项

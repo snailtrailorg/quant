@@ -165,6 +165,7 @@
 
 <script setup>
 import { ref, computed, onMounted, nextTick } from 'vue'
+import { fmtTime } from '../utils/fmtTime'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getFactorList, createFactor, updateFactor, deleteFactor, validateFactorCode , apiErr } from '../api'
@@ -269,7 +270,7 @@ const previewFactor = async () => {
       const vals = res.values.filter(v => v.value !== null)
       chart.setOption({
         tooltip: { trigger: 'axis' },
-        xAxis: { type: 'category', data: vals.map(v => v.ts.slice(5, 16)) },
+        xAxis: { type: 'category', data: vals.map(v => fmtTime.s(v.ts)) },
         yAxis: { type: 'value', scale: true },
         series: [{ type: 'line', data: vals.map(v => v.value), showSymbol: false }],
         grid: { left: 50, right: 20, top: 20, bottom: 30 },

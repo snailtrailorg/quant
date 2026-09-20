@@ -246,13 +246,13 @@ def llm_usage_series(payload: dict = Depends(require_perm("read"))):
             SELECT provider, model, count(*),
                    COALESCE(sum(input_tokens+output_tokens),0),
                    CASE WHEN count(*)>0 THEN round(sum(CASE WHEN success THEN 1 ELSE 0 END)*100.0/count(*),1) ELSE 0 END
-            FROM llm_usage WHERE ts::date = current_date
+            FROM llm_usage WHERE (ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
             GROUP BY provider, model
         """)
         today = {(r[0], r[1]): {"calls": r[2], "tokens": int(r[3]), "success_rate": float(r[4])}
                  for r in cur.fetchall()}
         cur = conn.execute("""
-            SELECT provider, model, date_trunc('day', ts) AS bucket,
+            SELECT provider, model, date_trunc('day', ts AT TIME ZONE 'Asia/Shanghai') AS bucket,
                    count(*), COALESCE(sum(input_tokens+output_tokens),0)
             FROM llm_usage
             GROUP BY provider, model, bucket ORDER BY bucket
@@ -263,8 +263,8 @@ def llm_usage_series(payload: dict = Depends(require_perm("read"))):
                 {"ts": b.strftime("%Y-%m-%d"), "calls": calls, "tokens": int(tokens)})
         cur = conn.execute("""
             SELECT to_char(gs, 'YYYY-MM-DD') FROM generate_series(
-                COALESCE((SELECT date_trunc('day', min(ts)) FROM llm_usage), current_date),
-                date_trunc('day', now()), '1 day') gs
+                COALESCE((SELECT date_trunc('day', min(ts) AT TIME ZONE 'Asia/Shanghai') FROM llm_usage), (now() AT TIME ZONE 'Asia/Shanghai')::date),
+                date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai'), '1 day') gs
         """)
         grid = [r[0] for r in cur.fetchall()]
     models = []

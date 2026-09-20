@@ -16,6 +16,8 @@ reconcile_orders / frozen_allows / buy_ok_check / _flush_positions。
 """
 import logging
 
+from src.data_platform.tz import as_utc   # 批 56b 盲审 B：trade_log ts 收口（vnpy datetime naive——pin UTC 后裸写=错 8h）
+
 logger = logging.getLogger("strategy_runner.trading")
 
 FROZEN_STALE_BAR_S = 300     # 交易时段无新 bar 冻结（评审 S6 worker 侧防线；buy_ok 门限）
@@ -87,7 +89,8 @@ def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
             cur = conn.execute(
                 "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING RETURNING id",
-                (getattr(d, "datetime", None), strategy_of, order_db_id, getattr(d, "symbol", symbol),
+                (as_utc(getattr(d, "datetime", None)) if getattr(d, "datetime", None) is not None else None,
+                 strategy_of, order_db_id, getattr(d, "symbol", symbol),
                  action, float(getattr(d, "volume", 0) or 0), float(getattr(d, "price", 0) or 0),
                  getattr(d, "vt_tradeid", None) or None))
             if cur.fetchone():
@@ -186,7 +189,7 @@ def snapshot_cycle(adapter, account_id, tid, baseline_cache: dict) -> None:
             import datetime as _dt2
             today_str = _dt2.datetime.now().strftime('%Y-%m-%d')
             with get_conn() as conn:
-                cur = conn.execute("SELECT total_value FROM account_snapshot WHERE ts::date=%s ORDER BY ts ASC LIMIT 1", (today_str,))
+                cur = conn.execute("SELECT total_value FROM account_snapshot WHERE (ts AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY ts ASC LIMIT 1", (today_str,))
                 first_row = cur.fetchone()
                 daily_base = float(first_row[0]) if first_row else total
                 daily_pnl = total - daily_base
@@ -308,7 +311,7 @@ def reconcile_orders(adapter, sid, symbol=None) -> None:
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT id, symbol, action, volume FROM order_log WHERE strategy_id=%s "
-                    "AND status='submitting' AND ts::date=current_date", (sid,))
+                    "AND status='submitting' AND (ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date", (sid,))
                 orphans = cur.fetchall()
             for oid, osym, oact, ovol in orphans:
                 logger.warning("WAL 残留 submitting 单 id=%s %s %s %s（上会话崩溃窗口），待人工核对", oid, osym, oact, ovol)

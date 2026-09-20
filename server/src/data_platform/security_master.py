@@ -122,7 +122,21 @@ class SMClient:
                 exch = s.rsplit(".", 1)[1] if "." in s else ""
                 if scope.exchanges is not None and exch and exch not in scope.exchanges:
                     return False
+                # 无档近似补 market 维度（盲审 A：BTCUSDT.BINANCE 不再被 astock 行
+                # exchanges=NULL 通配放行——后缀→市场映射）
+                mkt = self._market_of_suffix(exch)
+                if mkt and scope.markets and mkt not in scope.markets:
+                    return False
         return True
+
+    @staticmethod
+    def _market_of_suffix(exch: str) -> str | None:
+        """交易所后缀→市场（无档近似维度；未知后缀 None=不否决——SM 未回填≠不可用）。"""
+        if exch in ("SHSE", "SZSE", "BSE"):
+            return "astock"
+        if exch in ("BINANCE", "OKX"):
+            return "crypto"
+        return None
 
     def upsert_rows(self, rows: list[tuple]) -> int:
         """填充链写侧（engine 同步任务调用——executemany 单批，18 号 §2.1）。

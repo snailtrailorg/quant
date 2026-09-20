@@ -143,6 +143,7 @@ from .routes.alerts import router as alerts_router              # /api/alerts/*�
 from .routes.mgmt import router as mgmt_router                # /api/interfaces（批55 统一表）/api/datasource rate-limits /api/tasks
 from .routes.risk import router as risk_router                # /api/risk* /api/live-trading /api/reconcile /api/convertible
 from .routes.backtest import router as backtest_router        # /api/backtest* /api/pool* /api/broker-usage
+from .routes.routing import router as routing_router          # 批 57 M2：/api/routing/*（策略+dry-run+审计）
 
 app.include_router(system_router)
 app.include_router(auth_router)
@@ -150,6 +151,7 @@ app.include_router(strategy_router)
 app.include_router(trading_router)
 app.include_router(sync_router)
 app.include_router(stock_router)
+app.include_router(routing_router)
 app.include_router(chat_router)
 app.include_router(im_bots_router)
 app.include_router(alerts_router)

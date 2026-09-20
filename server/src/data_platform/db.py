@@ -221,7 +221,11 @@ def save_index_bars(rows: list[tuple]) -> int:
     """批量写入指数日线到 bar_index 表（回测基准数据）。冲突跳过，返回**实际插入行数**。
 
     rows 11 字段同 save_bars：(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)。
+    批 56b 盲审 A：补 validate_bars 收口（原为第四条裸写路径——现调用方已 aware 属防御缺口）。
     """
+    if not rows:
+        return 0
+    rows = validate_bars(rows)
     if not rows:
         return 0
     insert_sql = (
@@ -243,12 +247,7 @@ def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
     批 56b 读收口：start/end as_utc（同 get_bars）。
     """
     import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
-    from datetime import datetime as _dt
-    from .tz import as_utc
-    if isinstance(start, _dt):
-        start = as_utc(start)
-    if isinstance(end, _dt):
-        end = as_utc(end)
+    start, end = _win_utc(start), _win_utc(end)
     cols = ["ts", "open", "high", "low", "close", "volume", "amount"]
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -266,6 +265,23 @@ def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
         return df
 
 
+
+def _win_utc(v):
+    """窗口参数归一（批 56b 盲审 B 扩型）：datetime→as_utc；date→当日上海零点→UTC；
+    ISO 串→解析→as_utc；解析失败/其他类型原样（PG 铸型兜底）。"""
+    from datetime import date as _date, datetime as _dt
+    from .tz import as_utc
+    if isinstance(v, _dt):
+        return as_utc(v)
+    if isinstance(v, _date):
+        return as_utc(_dt(v.year, v.month, v.day))
+    if isinstance(v, str):
+        try:
+            return as_utc(_dt.fromisoformat(v.replace("Z", "+00:00")))
+        except ValueError:
+            return v
+    return v
+
 def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
     """查询 K 线，返回 DataFrame。
 
@@ -273,12 +289,7 @@ def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
     批 56b 读收口：start/end as_utc（naive 按上海解释——防 pin UTC 后窗口错 8h）。
     """
     import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
-    from datetime import datetime as _dt
-    from .tz import as_utc
-    if isinstance(start, _dt):
-        start = as_utc(start)
-    if isinstance(end, _dt):
-        end = as_utc(end)
+    start, end = _win_utc(start), _win_utc(end)
     ensure_table(freq)
     select_sql = BAR_TABLE_SELECT.format(freq=freq)
     with get_conn() as conn:
@@ -307,12 +318,8 @@ def get_kline_records(symbol: str, freq: str, start, end) -> list[dict]:
     （同 WHERE/ORDER BY ts ASC，列裁剪为图表所需 6 列）。
     批 56b 读收口：start/end as_utc（同 get_bars）。
     """
-    from datetime import datetime as _dt
-    from .tz import as_utc
-    if isinstance(start, _dt):
-        start = as_utc(start)
-    if isinstance(end, _dt):
-        end = as_utc(end)
+    start, end = _win_utc(start), _win_utc(end)
+    from .tz import as_shanghai   # ts 输出=上海业务日（批 56b 盲审 A）
     assert freq.lower() in _VALID_FREQS, f"非法 freq: {freq}"   # 对齐 save_bars 写路径标准（批10 盲审同判）
     ensure_table(freq)
     with get_conn() as conn:
@@ -329,7 +336,7 @@ def get_kline_records(symbol: str, freq: str, start, end) -> list[dict]:
         return float(v) if v is not None and v == v else None
 
     return [{
-        "ts": r[0].strftime("%Y-%m-%d") if r[0] is not None else None,
+        "ts": as_shanghai(r[0]).strftime("%Y-%m-%d") if r[0] is not None else None,   # 批 56b 盲审 A：日线锚=上海业务日（pin UTC 下 strftime=UTC 日错一天）
         "open": _num(r[1]), "high": _num(r[2]), "low": _num(r[3]),
         "close": _num(r[4]), "volume": _num(r[5]),
     } for r in rows]

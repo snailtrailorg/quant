@@ -154,7 +154,7 @@ def drift_check():
         with get_conn() as conn:
             # 取最新实盘分析
             cur = conn.execute("""SELECT symbol, score, rating, factors FROM astock_analysis
-                WHERE ts::date = current_date ORDER BY ts DESC""")
+                WHERE (ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date ORDER BY ts DESC""")
             live_rows = cur.fetchall()
             if not live_rows:
                 return {"status": "skipped", "reason": "今日无实盘分析数据"}

@@ -119,15 +119,15 @@ def _intraday_from_hub(vt: str) -> dict | None:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT to_char(ts::date, 'YYYYMMDD') FROM bar_hub WHERE symbol=%s "
-                "AND ts::date=CURRENT_DATE ORDER BY ts DESC LIMIT 1", (vt,))
+                "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai', 'YYYYMMDD') FROM bar_hub WHERE symbol=%s "
+                "AND (ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date ORDER BY ts DESC LIMIT 1", (vt,))
             row = cur.fetchone()
             if not row:
                 return None
             d = row[0]
             cur = conn.execute(
-                "SELECT to_char(ts, 'HH24:MI'), close, volume, amount FROM bar_hub "
-                "WHERE symbol=%s AND ts::date=CURRENT_DATE ORDER BY ts", (vt,))
+                "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai', 'HH24:MI'), close, volume, amount FROM bar_hub "
+                "WHERE symbol=%s AND (ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date ORDER BY ts", (vt,))
             rows = cur.fetchall()
         # 当日点数不足（临时订阅标的当日只从订阅时刻攒起）→ 宁缺勿残段
         if not rows or len(rows) < 30:

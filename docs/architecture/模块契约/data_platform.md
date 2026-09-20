@@ -17,9 +17,10 @@ server/src/data_platform/
 ├── _platform.py      # DataPlatform 单例（统一入口，部分占位；批9 改名自 platform.py——包属性/子模块/实例三层同名占用 import 机制保留地，懒加载下现投毒竞态，守门=tests/test_data_platform_lazy.py）
 ├── settings.py        # 环境变量集中读取
 ├── audit.py           # audit_log（原寄生 web_api.auth，2026-08-19 归位）
-├── perm_registry.py   # 批33b：权限资源注册表（唯一字面量层——api 14 键+nav 18 条+market 5+别名；DB 覆盖层 perm_resource 四字段；绑定扫描 router-walk 175 处+防漂移闸）
+├── perm_registry.py   # 批33b：权限资源注册表（唯一字面量层——api 13 键+nav 19 条+market 5+别名；DB 覆盖层 perm_resource 四字段；绑定扫描 router-walk 175 处+防漂移闸）
 ├── market_snapshot.py # 三档腾讯实时快照（quote:tencent 60s TTL）
 ├── stock_detail.py    # 三档详情聚合层（quote 降级链+慢变块缓存）
+├── routing.py         # 批 57 M2：路由内核（resolve 五步/bulkhead/审计/热更新对账）——见下节
 ├── security_master.py # 批 56a：SMClient（标的属性库读侧+engine 填充链写侧）+MarketHours（节奏域）——见下节
 ├── tz.py             # 批 56b：as_utc（写/读 PG 统一收口——naive 按上海解释转 UTC aware）+as_shanghai（显示层）
 ├── schema_expectations.txt  # verify_schema 期望基线（迁移链生成物，禁手写）
@@ -32,10 +33,27 @@ server/src/data_platform/
 
 ## 批33b 新模块：perm_registry.py（2026-09-17）
 
-- **唯一字面量层**：`API_PERM_KEYS`（14）/`NAV_ITEMS_BASE`（18 含 perm-resources 自身）/`MARKET_OP_KEYS`（5）/`NAV_ALIASES`（活别名 stock/data-manage——批39 死别名 8 条已清）；perms.py 单向 import（admin 集=注册表派生）。
+- **唯一字面量层**：`API_PERM_KEYS`（13——55b account_keys 退役）/`NAV_ITEMS_BASE`（19 含 perm-resources+routing 批 57）/`MARKET_OP_KEYS`（5）/`NAV_ALIASES`（活别名 stock/data-manage——批39 死别名 8 条已清）；perms.py 单向 import（admin 集=注册表派生）。
 - **DB 覆盖层**：`perm_resource` 表（迁移 0084）只改显示四字段（group/order/label per-locale/enabled）——条目集恒代码单源红线（PATCH 仅 nav kind+id∈注册表预检）；`load_registry()` 容错回底座不缓存。
 - **绑定扫描**：`scan_perm_bindings()` router-walk（FastAPI 0.141 懒 include——app.routes 零 APIRoute，扫 APIRouter 实例 175 处）；`check_binding_drift()` 键集⊆注册表防漂移闸（web_api startup 落点）。
 - GET `/api/perm-resources`（system_config）三段+绑定反查；PATCH `/api/perm-resources/{kind}/{id}`（四键全量显式）。
+
+## 批 57 新模块：routing.py（2026-09-20，29 号 §五 M2）
+
+- **resolve(req, principal=None) -> CandidateChain**：五步——硬过滤（external_interface.capabilities
+  （55a 语义名经 _CAP_KIND_ALIASES 映射）+enabled+SMClient.covers scope+权限 market 级）/软排序
+  （健康一票前置（熔断沉底——28 §6.1 张力裁决）>position 人工序>三因子加权）/审计落 routing_decision
+  /供给模式排除 local_pg（28 §7.1 v3.2）/local_pg 消费模式恒第一候选（LOCAL_KINDS 起步={bar_daily}）。
+- **CandidateChain.fetch(fetch_fn, req, skip)**：链式下移（SourceUnavailable→failover 审计下移/
+  DataGap 记尾注全尽抛/bulkhead 超闸 skip_busy/熔断 skip_unhealthy/deadline_ms 超时）。
+  fetch_fn 回调注入——M4 门面接线（本批只选不拉）。
+- **bulkhead**：Valkey 计数 `routing:bh:{adapter}`（TTL 60s 兜底；被拒内部回减）；阈值=
+  routing_policy.bulkhead_defaults 覆写>派生初值（M3+ Quality 档案真实化）。
+- **热更新**：`cfg:version` Valkey 单调整数（策略页保存 INCR bump_config_version）+TTL 2s 周期对账
+  （pub/sub 订阅通道挂 M4/M5）。
+- 读写表：routing_policy/routing_decision（读写）；external_interface（读）。
+- 被调：web_api /api/routing/*（策略 CRUD+dry-run+审计）；engine._get_kline_adapter 试点
+  （system_config 键 routing_kline_pilot=on 时 resolve(supply) 选源；off=原路径回滚）。
 
 ## 批 56a 新模块：security_master.py（2026-09-20，29 号 §四）
 

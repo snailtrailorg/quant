@@ -28,10 +28,10 @@ def authed_client(client):
 
 
 def test_registry_base_three_lists():
-    """底座三清单：api 14/nav 18（含管理页自身吃狗粮）/market 5——与原三份平行清单等价收编。"""
+    """底座三清单：api 13/nav 19（含管理页自身吃狗粮；批 57 加 data-routing）/market 5。"""
     from src.data_platform.perm_registry import API_PERM_KEYS, NAV_ITEMS_BASE, MARKET_OP_KEYS, NAV_ALIASES
     assert len(API_PERM_KEYS) == 13 and len(set(API_PERM_KEYS)) == 13   # 批55b:account_keys 退役
-    assert len(NAV_ITEMS_BASE) == 18   # 17+perm-resources（批33b 管理页）
+    assert len(NAV_ITEMS_BASE) == 19   # 17+perm-resources（批33b）+routing（批 57 M2）
     assert len(MARKET_OP_KEYS) == 5
     assert len(NAV_ALIASES) == 2       # 批38：8 条死别名已清（活=stock/data-manage）
 
@@ -42,7 +42,7 @@ def test_load_registry_fallback_on_db_fail():
     PR._REGISTRY_CACHE.update(at=0.0, data=None)
     with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
         reg1 = PR.load_registry()
-        assert len(reg1["nav"]) == 18
+        assert len(reg1["nav"]) == 19
         assert PR._REGISTRY_CACHE["data"] is None   # 失败不缓存
 
 

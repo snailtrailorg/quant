@@ -49,7 +49,7 @@ def risk_log_api(action: str = "", limit: int = 200,
         args.append(max(1, min(int(limit), 1000)))   # 批27-10：下限 1——负 limit 致 PG 500
         cur = conn.execute(sql, args)
         rows = cur.fetchall()
-    return {"items": [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "action": r[2],
+    return {"items": [{"id": r[0], "ts": r[1].isoformat() if r[1] else None, "action": r[2],
                        "symbol": r[3], "rule": r[4], "detail": r[5], "severity": r[6]}
                       for r in rows]}
 
@@ -75,8 +75,8 @@ def reconcile_issues_api(status: str = "",
         return float(v) if v is not None else None
     return {"items": [{"id": r[0], "symbol": r[1], "issue_type": r[2], "detail": r[3],
                        "broker_qty": _n(r[4]), "derived_qty": _n(r[5]), "status": r[6],
-                       "first_seen": str(r[7])[:19] if r[7] else None,
-                       "updated_at": str(r[8])[:19] if r[8] else None,
+                       "first_seen": r[7].isoformat() if r[7] else None,
+                       "updated_at": r[8].isoformat() if r[8] else None,
                        "handled_by": r[9], "note": r[10],
                        "exempt_qty": _n(r[11]),
                        "exempt_until": str(r[12]) if r[12] else None} for r in rows]}
@@ -305,7 +305,7 @@ def get_audit(before: str | None = None, limit: int = 100,
             tcur = conn.execute("SELECT DISTINCT action FROM audit_log ORDER BY 1 LIMIT 500")
             actions = [r[0] for r in tcur.fetchall()]
     # A-P2-1 注记：ts [:19] 截断对齐 /api/log 既有口径——非 +08 浏览器显示会漂移（fmtTime 按本地解析）
-    logs = [{"id": r[0], "ts": str(r[1])[:19] if r[1] else None, "actor": r[2], "action": r[3],
+    logs = [{"id": r[0], "ts": r[1].isoformat() if r[1] else None, "actor": r[2], "action": r[3],
              "target": r[4], "detail": r[5]} for r in rows]
     next_cursor = None
     if len(rows) == limit and rows:
@@ -339,7 +339,7 @@ def data_integrity_api(freq: str = "1D",
     with get_conn() as conn:
         try:
             cur = conn.execute(
-                f"SELECT symbol, count(*), min(ts)::date, max(ts)::date FROM {table} GROUP BY symbol ORDER BY symbol")
+                f"SELECT symbol, count(*), min(ts AT TIME ZONE 'Asia/Shanghai')::date, max(ts AT TIME ZONE 'Asia/Shanghai')::date FROM {table} GROUP BY symbol ORDER BY symbol")
             rows = cur.fetchall()
         except Exception:
             return {"items": [], "summary": {"total": 0, "complete": 0, "partial": 0, "missing": 0}}

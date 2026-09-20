@@ -92,6 +92,58 @@ class TestDayBoundaryUtc:
         assert bar_before < anchor_utc < bar_after
 
 
+class TestWarmupMergeBehavior:
+    """暖机合入行为级（盲审 A 修：原钉只测原语缩水——_warmup_merge 提模块级后真行为可钉）。"""
+
+    @staticmethod
+    def _bar_fields(ts_iso):
+        return {"ts": ts_iso, "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 100}
+
+    def test_mixed_representation_merge_no_dup(self):
+        """混表示拼接：hist=PG 形态（UTC ISO）×流=旧 +08:00 存量+新 UTC——同刻去重无重复无缺口。"""
+        from src.strategy_runner.hub_worker import _warmup_merge
+        hist = [{"ts": "2026-09-21T01:31:00+00:00"},   # PG 暖机（09:31 上海）
+                {"ts": "2026-09-21T01:32:00+00:00"}]   # 09:32 上海
+        entries = [                                           # xrevrange 序（新→旧）
+            ("id3", self._bar_fields("2026-09-21T01:34:00+00:00")),   # 09:34 新流 UTC
+            ("id2", self._bar_fields("2026-09-21T09:33:00+08:00")),   # 09:33 旧流存量（+08:00）
+            ("id1", self._bar_fields("2026-09-21T01:31:00Z")),        # 09:31 与 PG 首根同刻（重复）
+        ]
+        out = _warmup_merge(hist, entries)
+        assert len(out) == 4                                  # 31/32/33/34——同刻 31 不双计
+        assert [h["ts"] for h in out[2:]] == ["2026-09-21T01:33:00+00:00", "2026-09-21T01:34:00+00:00"]
+
+    def test_upto_truncation_epoch(self):
+        from src.strategy_runner.hub_worker import _warmup_merge, _epoch_key
+        entries = [("id2", self._bar_fields("2026-09-21T01:34:00+00:00")),
+                   ("id1", self._bar_fields("2026-09-21T09:33:00+08:00"))]   # 01:33Z
+        out = _warmup_merge([], entries, upto_ts=_epoch_key("2026-09-21T01:33:00+00:00"))
+        assert len(out) == 1 and out[0]["ts"].startswith("2026-09-21T01:33")   # 只灌 ≤当前消息
+
+    def test_day_boundary_two_bars_across_open(self):
+        """日切双根：开盘前后两桶连续根（[9:30]/[9:31] 上海）——聚合按分钟桶不裂根不混根。"""
+        from src.md_hub.main import MinuteAggregator
+        from types import SimpleNamespace
+        agg = MinuteAggregator()
+        agg.on_tick("600000.SHSE", SimpleNamespace(
+            datetime=datetime(2026, 9, 21, 9, 30, 40, tzinfo=SHANGHAI),
+            last_price=10.0, volume=100, turnover=0.0))
+        b1 = agg.on_tick("600000.SHSE", SimpleNamespace(   # 跨分钟 → finalize [9:30) 桶（分钟末标注 9:31）
+            datetime=datetime(2026, 9, 21, 9, 31, 5, tzinfo=SHANGHAI),
+            last_price=10.1, volume=300, turnover=0.0))
+        [b2] = agg.flush_minute(9 * 60 + 31)               # [9:31) 桶（分钟末标注 9:32）
+        assert b1["ts"] == datetime(2026, 9, 21, 1, 31, 0, tzinfo=timezone.utc)
+        assert b2["ts"] == datetime(2026, 9, 21, 1, 32, 0, tzinfo=timezone.utc)
+
+    def test_anchor_along_day_boundary(self):
+        """沿判定组合：day_anchor（表驱动）×as_utc(bar ts) 方向——15:00 后归下一数据日语义。"""
+        from src.data_platform.tz import as_utc
+        anchor_sh = datetime(2026, 9, 21, 15, 0)      # 上海收盘锚
+        bar_1459, bar_1501 = as_utc(datetime(2026, 9, 21, 14, 59)), as_utc(datetime(2026, 9, 21, 15, 1))
+        anchor_utc = as_utc(anchor_sh)
+        assert bar_1459 < anchor_utc <= bar_1501       # 沿=15:00 含前不含后归属判据
+
+
 class TestReadWriteFunnel:
     """读写收口：naive 窗口参数/行 ts 不再裸进 PG（pin UTC 后裸 naive=错 8h——生死面）。"""
 

@@ -75,6 +75,19 @@ as_utc(dt)->datetime(UTC aware)（tz.py）；去重键比较走 int(ts.timestamp
    Dashboard×1/LLMUsageCards×1/UserManagement×1——字符串 slice 在 UTC ISO 下错位 8h/跨日；
    `new Date()` 解析点天然安全未动）；上线后观察 K 线/回测/权益曲线 x 轴日期
 
+**盲审 A/B 修复轮（2026-09-20，b55b9f5 后）**：A 17 项+B 独有 5 项全修——读侧渲染面归一
+（SQL `AT TIME ZONE 'Asia/Shanghai'` ×23 处：日界/分时/守卫/用量桶/首末日；`str()[:19]` 剥偏移
+×26 处→isoformat 带偏移）；P0 日 K 日期错一天（db.py get_kline_records as_shanghai 归一）；
+trade_log naive 写收口（B P0——vnpy datetime）；**波次序翻转 task→hub**（B P1：新 hub+旧 worker
+ISO 字典序去重恒真=当日 bar 全丢锁死；新 worker 兼容旧 hub 流安全）；phaseLabel camelCase；
+backtest 业务日 `_day_key` 三源同基准；db 读收口扩型 `_win_utc`（date/str 窗口参数）；
+`_warmup_merge` 提模块级+四行为钉（混表示合入/截断/日切双根/沿）；水位空键不回写。
+挂账：validate_bars 收口 ~2.9µs/行（13M 行全量回补 +38s 一次性——B 实测，分批无感）。
+
+## 部署 runbook 补充（批 56b 修复轮）
+- **整版本回滚前**：`DEL hub:worker:max_ts:*`（新代码水位是 epoch 数字串，旧代码 fromisoformat
+  解析失败当原串字典序比较恒通过=去重失效一拍——回滚 runbook 必含此步）
+
 ## mock 方式
 tz 转换单测纯函数；三处回归用例真库（行为级）。
 

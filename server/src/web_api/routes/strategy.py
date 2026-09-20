@@ -302,10 +302,10 @@ def preview_factor_api(body: dict = Body(...),
             v = factor.compute(ctx)
             if v is None or (isinstance(v, float) and math.isnan(v)):
                 v = None
-            values.append({"ts": str(bar["ts"])[:19], "value": round(float(v), 6) if v is not None else None})
+            values.append({"ts": str(bar["ts"]), "value": round(float(v), 6) if v is not None else None})
         except Exception:
             errors += 1
-            values.append({"ts": str(bar["ts"])[:19], "value": None})
+            values.append({"ts": str(bar["ts"]), "value": None})
     nums = [v["value"] for v in values if v["value"] is not None]
     stats = {"count": len(nums), "errors": errors,
              "min": round(min(nums), 6) if nums else None,

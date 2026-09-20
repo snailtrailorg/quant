@@ -24,8 +24,10 @@ def _acct(balance=1_000_000.0, frozen=0.0):
 
 
 def _trade(direction=Direction.LONG, vt_orderid="x.1", vt_tradeid="t1", symbol="600000.SHSE"):
+    # 批 56b 盲审 B：datetime=naive datetime（vnpy xtp_gateway strptime 真形态——非字符串）
+    from datetime import datetime as _dt
     return SimpleNamespace(direction=direction, vt_orderid=vt_orderid, vt_tradeid=vt_tradeid,
-                           datetime="2026-08-27 09:31:00", symbol=symbol, volume=100, price=9.05)
+                           datetime=_dt(2026, 8, 27, 9, 31), symbol=symbol, volume=100, price=9.05)
 
 
 def _adapter():
@@ -107,6 +109,9 @@ class TestWriteTradeLog:
         insert = [c for c in conn.execute.call_args_list if "INSERT INTO trade_log" in c.args[0]][0]
         assert insert.args[1][1] == "s1"          # strategy_id 兜底=传入 sid
         assert insert.args[1][2] is None          # 无 cid → order_db_id None
+        # 批 56b 盲审 B 钉：naive vnpy ts 收口 UTC aware（09:31 上海=01:31Z）
+        assert insert.args[1][0].utcoffset().total_seconds() == 0
+        assert (insert.args[1][0].hour, insert.args[1][0].minute) == (1, 31)
         conn.commit.assert_called_once()
 
     def test_cid_resolves_order_db_id_and_strategy(self):
@@ -212,7 +217,7 @@ class TestSnapshotCycle:
              patch.object(trading, "_flush_positions"):   # 持仓批自持连接/自有事务，单测隔离（挂点另有锁）
             trading.snapshot_cycle(adapter, "acct", 8, {"baseline": None})
         sqls = [c.args[0] for c in conn.execute.call_args_list]
-        assert any("SELECT total_value FROM account_snapshot WHERE ts::date=%s" in s for s in sqls)
+        assert any("SELECT total_value FROM account_snapshot WHERE (ts AT TIME ZONE 'Asia/Shanghai')::date=%s" in s for s in sqls)
         insert = [c for c in conn.execute.call_args_list
                   if "INSERT INTO account_snapshot" in c.args[0]][0]
         assert insert.args[1] == (150.0, 30.0, 1.0, 120.0)   # total/daily_pnl/基线/available(balance-frozen)

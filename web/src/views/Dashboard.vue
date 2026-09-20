@@ -82,7 +82,7 @@
         <div v-for="o in todayOrders.slice(0, 6)" :key="o.id" class="evt-row">
           <el-tag size="small" :type="o.action === 'BUY' ? 'danger' : 'success'">{{ o.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
           {{ (o.symbol || '').split('.')[0] }} ×{{ o.volume }}
-          <span style="color: var(--text-secondary)">{{ (o.ts || '').slice(5, 16) }}</span>
+          <span style="color: var(--text-secondary)">{{ fmtTime.s(o.ts) }}</span>
         </div>
         <EmptyState size="small" :description="t('dashboard.noOrders')" />
       </el-card></el-col>
@@ -173,7 +173,7 @@ const drawdownSeries = computed(() => {
 const curveOption = computed(() => ({
   grid: { left: 60, right: 16, top: 16, bottom: 28 },
   tooltip: { trigger: 'axis' },
-  xAxis: { type: 'category', data: rangeCurve.value.map(c => (c.ts || '').slice(5, 10)) },
+  xAxis: { type: 'category', data: rangeCurve.value.map(c => fmtTime.day(c.ts).slice(5)) },
   yAxis: { type: 'value', scale: true, axisLabel: { formatter: v => (v / 1e4).toFixed(0) + t('trading.wanUnit') } },
   yAxis: [{ type: 'value', scale: true }, { type: 'value', name: 'DD%', max: 0, splitLine: { show: false } }],
   series: [

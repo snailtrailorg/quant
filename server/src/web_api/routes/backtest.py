@@ -157,7 +157,7 @@ def pool_minute_status_api(pid: str,
             "ON b.symbol = ps.symbol WHERE ps.pool_id=%s ORDER BY ps.symbol", (pid,))
         rows = cur.fetchall()
     _result = {"pool_id": pid, "symbols": [
-        {"symbol": r[0], "last_ts": r[1][:19] if r[1] else None, "covered": bool(r[1])}
+        {"symbol": r[0], "last_ts": r[1] if r[1] else None, "covered": bool(r[1])}
         for r in rows]}
     _POOL_AGG_CACHE[_ck] = (_t.time(), _result)
     return _result
@@ -184,7 +184,7 @@ def list_minute_symbols(payload: dict = Depends(require_perm("read"))):
             "ON b.symbol = m.symbol ORDER BY m.symbol")
         rows = cur.fetchall()
     return {"symbols": [
-        {"symbol": r[0], "source": r[1], "last_ts": r[2][:19] if r[2] else None}
+        {"symbol": r[0], "source": r[1], "last_ts": r[2] if r[2] else None}
         for r in rows]}
 
 
@@ -645,7 +645,7 @@ def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en"
     for sym, result_json in rows:
         r = _safe_json(result_json, {})
         for t in (r.get("trades") or []):
-            trade_rows.append([sym, (t.get("ts") or "")[:19], t.get("action"), t.get("volume"), t.get("price"), t.get("commission")])
+            trade_rows.append([sym, (t.get("ts") or ""), t.get("action"), t.get("volume"), t.get("price"), t.get("commission")])
 
     pos_rows = []
     for sym, result_json in rows:

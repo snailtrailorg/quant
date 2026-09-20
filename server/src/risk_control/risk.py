@@ -332,7 +332,7 @@ class RiskControl:
                 today = _dt.datetime.now().strftime('%Y-%m-%d')
                 with get_conn() as conn:
                     cur = conn.execute(
-                        "SELECT COUNT(*) FROM order_log WHERE strategy_id=%s AND ts::date=%s "
+                        "SELECT COUNT(*) FROM order_log WHERE strategy_id=%s AND (ts AT TIME ZONE 'Asia/Shanghai')::date=%s "
                         "AND status IN ('submitting','submitted','part_filled','filled')",
                         (strategy_id, today))
                     n = cur.fetchone()[0]

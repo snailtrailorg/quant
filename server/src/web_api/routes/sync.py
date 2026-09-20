@@ -349,13 +349,13 @@ def data_source_usage_api(payload: dict = Depends(require_perm("read"))):
                     sum(case when success then 0 else 1 end) as failures,
                     coalesce(round(avg(latency_ms)), 0) as avg_latency
                 FROM data_source_usage
-                WHERE ts >= date_trunc('day', now())
+                WHERE ts >= date_trunc('day', now() AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'
                 GROUP BY provider ORDER BY calls DESC NULLS LAST
             """)
             today = [{"provider": r[0], "calls": r[1], "records": r[2],
                       "failures": r[3], "avg_latency": r[4]} for r in cur.fetchall()]
             cur = conn.execute("""
-                SELECT to_char(date_trunc('day', ts), 'YYYYMMDD') as day,
+                SELECT to_char(date_trunc('day', ts AT TIME ZONE 'Asia/Shanghai'), 'YYYYMMDD') as day,
                        provider, coalesce(sum(calls), 0)
                 FROM data_source_usage
                 WHERE ts >= now() - interval '7 days'

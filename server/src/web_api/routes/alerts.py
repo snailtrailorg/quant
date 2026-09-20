@@ -419,7 +419,7 @@ def _provider_row(r) -> dict:
             "credentials_set": bool(r[4] and r[5]),   # ak_id+secret 成对齐（不回显密钥）
             "sign_name": r[6], "alert_template_code": r[7], "verify_template_code": r[8],
             "position": r[9], "enabled": r[10],
-            "updated_at": str(r[11])[:19] if r[11] else None}
+            "updated_at": r[11].isoformat() if r[11] else None}
 
 
 @router.get("/api/alerts/sms-providers")

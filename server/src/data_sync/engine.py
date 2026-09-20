@@ -41,14 +41,45 @@ def _get_kline_adapter(cfg: dict):
 
     静态/日历/三档仍走 _get_pro（Tushare 专属）；K 线走 adapter（可插拔）。
     未知 provider 回退 tushare + 告警（盲审 A-P2/B-P2：配置错 provider 不应打断同步）。
+    批 57 M2 试点（盲审 A/B 修后收窄）：system_config 键 routing_kline_pilot=on 时
+    **仅日线数据面同步**（sync_id 以 _daily 结尾）走 resolve(supply) 选源；分钟/基准/复权
+    因子路径保持原 cfg（kind 波及面+归一面混搭两因——A P1 b/c）。试点回退=键置 off；
+    resolve 全程 try 包裹（表缺/DB 抖动回退 cfg provider——回退语义自洽）。
+    已知占位：symbols=("600000.SHSE",) 单标的近似（exchanges 限定行不可判——正式化取真实标的集）。
     """
     from src.data_platform.adapters.base import get_adapter
     provider = cfg.get("provider") or "tushare"
+    if _routing_pilot_on() and str(cfg.get("id", "")).endswith("_daily"):
+        try:
+            from src.quant_common.contract import DataRequest
+            from src.data_platform import routing
+            chain = routing.resolve(DataRequest(
+                kind="bar_daily", symbols=("600000.SHSE",), temporality="historical",
+                consumer_tag="sync", mode="supply"))
+            for c in chain.candidates:             # supply 链无 local_pg（28 §7.1）——首选外部源
+                if not c.is_local:
+                    provider = c.adapter
+                    break
+            logger.info("M2 试点路由：%s supply 链首选 provider=%s（epoch=%s）",
+                        cfg.get("id"), provider, chain.epoch)
+        except Exception as e:
+            logger.warning("M2 试点路由失败，回退 cfg provider=%s: %s", provider, e)
     try:
         return get_adapter(provider)
     except ValueError:
         logger.warning("未注册的数据源 provider=%s，回退 tushare", provider)
         return get_adapter("tushare")
+
+
+def _routing_pilot_on() -> bool:
+    """试点开关（system_config 键；读失败=off——回退现状路径）。"""
+    try:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT value FROM system_config WHERE key='routing_kline_pilot'")
+            r = cur.fetchone()
+            return bool(r) and str(r[0]).lower() in ("on", "1", "true")
+    except Exception:
+        return False
 
 
 def _get_rate_ds(provider: str):
@@ -648,16 +679,16 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     adapter = _get_kline_adapter({})   # 复权因子默认 tushare
 
     with get_conn() as conn:
-        sql = ("SELECT DISTINCT ts::date FROM bar_1d WHERE adj_factor IS NULL "
+        sql = ("SELECT DISTINCT (ts AT TIME ZONE 'Asia/Shanghai')::date FROM bar_1d WHERE adj_factor IS NULL "
                # 只扫股票行：asset_static_info 是 A 股静态表（ETF/转债不在其中）
                "AND symbol IN (SELECT DISTINCT REPLACE(REPLACE(REPLACE(ts_code,'.SH','.SHSE'),"
                "'.SZ','.SZSE'),'.BJ','.BSE') FROM asset_static_info)")
         params: list = []
         if start_date:
-            sql += " AND ts::date >= %s"
+            sql += " AND (ts AT TIME ZONE 'Asia/Shanghai')::date >= %s"
             params.append(start_date)
         if end_date:
-            sql += " AND ts::date <= %s"
+            sql += " AND (ts AT TIME ZONE 'Asia/Shanghai')::date <= %s"
             params.append(end_date)
         cur = conn.execute(sql + " ORDER BY 1", params)
         dates = [r[0] for r in cur.fetchall()]
@@ -1078,7 +1109,7 @@ def _local_trade_dates(vt_symbol: str, table: str = "bar_1D") -> list[str]:
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                f"SELECT DISTINCT to_char(ts, 'YYYYMMDD') FROM {table} "
+                f"SELECT DISTINCT to_char(ts AT TIME ZONE 'Asia/Shanghai', 'YYYYMMDD') FROM {table} "
                 f"WHERE symbol=%s ORDER BY 1",
                 (vt_symbol,))
             return [r[0] for r in cur.fetchall()]
@@ -1540,10 +1571,12 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
                 f"SELECT symbol, count(*), min(ts), max(ts) FROM {bar_table} "
                 "WHERE symbol = ANY(%s) GROUP BY symbol",
                 (list(vts.keys()),))
+            from src.data_platform.tz import as_shanghai
             for sym, cnt, mn, mx in cur.fetchall():
+                # 批 56b 盲审 B：首末日=上海业务日（UTC 墙钟切片=早一天）
                 local[sym] = (int(cnt),
-                              str(mn).replace("-", "")[:8] if mn else None,
-                              str(mx).replace("-", "")[:8] if mx else None)
+                              as_shanghai(mn).strftime("%Y%m%d") if mn else None,
+                              as_shanghai(mx).strftime("%Y%m%d") if mx else None)
     except psycopg.errors.UndefinedTable:
         pass
 
