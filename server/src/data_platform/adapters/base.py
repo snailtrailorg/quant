@@ -86,7 +86,18 @@ _ADAPTERS: dict[str, type[BaseDataAdapter]] = {}
 
 
 def register_adapter(cls: type[BaseDataAdapter]) -> type[BaseDataAdapter]:
-    """注册 adapter（装饰器）。"""
+    """注册 adapter（装饰器）。
+
+    批 56a·M0（29 号 §三）：capability_decls 即时校验钩子（import 即执法）——
+    类声明了 capability_decls 属性则逐项过组合表校验（validate_capability_decls），
+    非法即 ValueError 拒绝注册。现状 adapter 无该声明=空转合法（M3 收编时起真声明）。
+    """
+    decls = getattr(cls, "capability_decls", None)
+    if decls is not None:
+        from src.quant_common.contract import validate_capability_decls
+        errors = validate_capability_decls(decls)
+        if errors:
+            raise ValueError(f"adapter {cls.provider} capability_decls 非法: {errors}")
     _ADAPTERS[cls.provider] = cls
     return cls
 

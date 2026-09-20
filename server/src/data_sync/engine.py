@@ -348,6 +348,37 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
     return r
 
 
+def _ts_to_vt_prefix(ts_code: str) -> str:
+    """ts_code→vt_symbol 前缀+交易所（与 0092 迁移同映射——真源 schema.to_vt_symbol）。"""
+    from src.data_platform.schema import to_vt_symbol
+    try:
+        return to_vt_symbol(ts_code)
+    except Exception:
+        return ts_code
+
+
+def _sm_upsert(rows: list[tuple]) -> None:
+    """批 56a·M1 填充链：security_master upsert（fail-soft——SM 失败不打断数据同步）。"""
+    if not rows:
+        return
+    try:
+        from src.data_platform.security_master import SMClient
+        SMClient().upsert_rows(rows)
+    except Exception as e:
+        logger.warning("security_master 填充失败（同步主流程不受影响）: %s", e)
+
+
+def _sm_upsert_state(rows: list[tuple]) -> None:
+    """批 56a·M1 填充链：security_state 时变行 upsert（fail-soft 同上）。"""
+    if not rows:
+        return
+    try:
+        from src.data_platform.security_master import SMClient
+        SMClient().upsert_state(rows)
+    except Exception as e:
+        logger.warning("security_state 填充失败（同步主流程不受影响）: %s", e)
+
+
 def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                       progress_cb: Callable | None = None) -> dict:
     """A股股票列表全量同步。"""
@@ -365,6 +396,9 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
                     list_status=EXCLUDED.list_status
             """, rows)
         conn.commit()
+    _sm_upsert([(_ts_to_vt_prefix(r[0]), "astock",
+                 _ts_to_vt_prefix(r[0]).rsplit(".", 1)[1], "stock", r[1], r[2])
+                for r in rows if r[0]])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -414,6 +448,17 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                     rate_clause=EXCLUDED.rate_clause
             """, rows)
         conn.commit()
+    _sm_upsert([(_ts_to_vt_prefix(r[0]), "astock",
+                 _ts_to_vt_prefix(r[0]).rsplit(".", 1)[1], "convertible", r[1], None)
+                for r in rows if r[0]])
+    import json as _json
+    def _norm_date(s: str) -> str:
+        """YYYYMMDD→YYYY-MM-DD（脏值回落 2010-01-01——cb_basic conv_start_date 有空串/'None' 字符串）。"""
+        s = (s or "").strip()
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}" if s.isdigit() and len(s) == 8 else "2010-01-01"
+    _sm_upsert_state([(_ts_to_vt_prefix(r[0]), _norm_date(r[8]),
+                       "conv_price", _json.dumps({"conv_price": float(r[7])}))
+                      for r in rows if r[0] and r[7] is not None])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -455,6 +500,9 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                 ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name, management=EXCLUDED.management
             """, rows)
         conn.commit()
+    _sm_upsert([(_ts_to_vt_prefix(r[0]), "astock",
+                 _ts_to_vt_prefix(r[0]).rsplit(".", 1)[1], "etf", r[1], None)
+                for r in rows if r[0]])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -752,7 +800,12 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
 
 def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                               text_cols: list[str]):
-    """工厂：生成全量重建 handler（每周一跑，DELETE 全表后 INSERT）。"""
+    """工厂：生成全量重建 handler（每周一跑，DELETE 全表后 INSERT）。
+
+    批 56a·M1：重建后若表=namechange，追加派生 security_state(st) 时变行——
+    ST 状态从曾用名推断（当前有效名含 ST→is_st=true，start_date=生效日，
+    29 号 §四六源之一：st←namechange_sync，含 start_date 天然 PIT）。
+    """
     import importlib
     adapter = importlib.import_module("src.data_platform.adapters.tushare_adapter")
     pull_fn = getattr(adapter, pull_fn_name)
@@ -775,10 +828,37 @@ def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str]
                          for row in df.to_dict("records")]
                 cur.executemany(f"INSERT INTO {table} ({cols_sql}) VALUES ({placeholders})", batch)
             conn.commit()
+        if table == "namechange":
+            _derive_st_states(df)
         return {"pulled": len(df), "saved": len(df), "start": "full",
                 "failed_dates": [], "expected_days": 1, "actual_days": 1}
 
     return _handler
+
+
+def _derive_st_states(df) -> None:
+    """从 namechange 全表派生 ST 时变行（fail-soft）。
+
+    规则：每只股票的每个曾用名区间一行；name 含 'ST'→is_st=true。
+    当前有效名（end_date 为空/今天）的行是"现行状态"——effective_from=start_date。
+    """
+    import json as _json
+    from datetime import date as _d
+    try:
+        rows = []
+        today = _d.today().isoformat()
+        for r in df.to_dict("records"):
+            ts, name = r.get("ts_code"), r.get("name") or ""
+            if not ts:
+                continue
+            start = (r.get("start_date") or "").strip()
+            eff = f"{start[:4]}-{start[4:6]}-{start[6:8]}" if start.isdigit() and len(start) == 8 else today
+            rows.append((_ts_to_vt_prefix(ts), eff, "st",
+                         _json.dumps({"name": name, "is_st": "ST" in name.upper()})))
+        _sm_upsert_state(rows)
+        logger.info("security_state(st) 派生 %d 行（namechange 重建）", len(rows))
+    except Exception as e:
+        logger.warning("security_state(st) 派生失败（不影响 namechange 同步）: %s", e)
 
 
 # 注册 9 个 handler（按迁移 0045 表结构）

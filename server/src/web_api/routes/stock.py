@@ -244,3 +244,31 @@ def convertible_terms(ts_code: str, payload: dict = Depends(require_perm("read")
         raise HTTPException(404, f"可转债 {ts_code} 条款未找到")
     result = analyze_convertible_terms(terms)
     return {"ts_code": ts_code, "summary": result["summary"], "terms": result["raw_terms"]}
+
+# --- 批 56a·M1：标的属性查询（SecurityMaster 只读面——29 号 §四表-码-面之"面"） ---
+
+
+@router.get("/api/security/{vt_symbol}")
+def security_attr_api(vt_symbol: str, payload: dict = Depends(require_perm("read"))):
+    """标的属性：主档+时变时间线+所属时段表（集成中心·标的属性页数据源）。"""
+    from src.data_platform.security_master import SMClient, MarketHours
+    from src.data_platform.db import get_conn
+    sm = SMClient()
+    a = sm.get(vt_symbol)
+    if a is None:
+        raise ApiError(404, "SECURITY_NOT_FOUND", f"标的 {vt_symbol} 不在标的属性库（未上市或未回填）")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT effective_from, kind, value FROM security_state "
+            "WHERE vt_symbol=%s ORDER BY effective_from DESC, kind LIMIT 50", (vt_symbol,))
+        states = [{"effective_from": str(r[0]), "kind": r[1], "value": r[2]} for r in cur.fetchall()]
+    mh = MarketHours()
+    return {
+        "attr": {"vt_symbol": a.vt_symbol, "market": a.market, "exchange": a.exchange,
+                 "category": a.category, "name": a.name, "industry": a.industry,
+                 "multiplier": a.multiplier, "tick_size": a.tick_size,
+                 "trade_phase": a.trade_phase, "session_id": a.session_id},
+        "states": states,
+        "sessions": [{"phase": p.phase, "start": p.start, "end": p.end}
+                     for p in mh.sessions(a.session_id, __import__("datetime").date.today())],
+    }

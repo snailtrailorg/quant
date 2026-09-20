@@ -21,6 +21,7 @@ import LLMModels from './LLMModels.vue'
 import SmtpCard from '../components/SmtpCard.vue'
 import SmsCard from '../components/SmsCard.vue'
 import TradingAccounts from './TradingAccounts.vue'
+import SecurityMaster from './SecurityMaster.vue'
 // 批38：tab 级权限门——每 tab 按后端写端点权限键过滤（审批37 快审 P2-2；后端 fail-closed 兜底不变）
 const ALL_TABS = [
     // 批38 用户裁定：券商/推送通道页签删除（券商=交易账户重复；推送已在告警通道用户维度实现）
@@ -28,7 +29,8 @@ const ALL_TABS = [
     { key: 'sms', i18nKey: 'tabs.sms', c: SmsCard, perm: 'alerts_config' },   // 批37 迁入
     { key: 'llm', i18nKey: 'tabs.llm', c: LLMModels, perm: 'llm_config' },
     { key: 'sources', i18nKey: 'tabs.sources', c: DataSources, perm: 'system_config' },
-    { key: 'trading', i18nKey: 'tabs.trading', c: TradingAccounts, perm: 'system_config' },   // 批55b:交易视图写端点=system_config(旧 accounts UI 的 account_keys 门随重写退役)
+    { key: 'trading', i18nKey: 'tabs.trading', c: TradingAccounts, perm: 'system_config' },
+    { key: 'security', i18nKey: 'interfaces.secTab', c: SecurityMaster, perm: 'read' },   // 批 56a：标的属性只读查询   // 批55b:交易视图写端点=system_config(旧 accounts UI 的 account_keys 门随重写退役)
 ]
 const _perms = ref([])
 const tabs = computed(() => ALL_TABS.filter(x => _perms.value.includes(x.perm)))
