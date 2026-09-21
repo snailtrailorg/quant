@@ -66,6 +66,7 @@ pools :: id,name,category,description,created_at,minute_history_start
 position_refresh :: account_id,ts,rows,task_id
 position_snapshot :: account_id,symbol,direction,volume,frozen,cost_price,pnl,yd_volume,task_id,ts
 reconcile_issue :: id,symbol,issue_type,detail,broker_qty,derived_qty,status,first_seen,updated_at,handled_by,note,exempt_qty,exempt_until
+restate_event :: id,kind,sub_kind,symbols,ann_date,payload,created_at
 risk_log :: id,ts,action,symbol,rule,detail,severity,username
 risk_rules :: id,name,type,params,enabled,created_at,updated_at
 routing_decision :: id,ts,fingerprint,req_summary,chain,epoch,cause
@@ -82,6 +83,7 @@ stk_limit :: trade_date,ts_code,pre_close,up_limit,down_limit
 strategy_account :: id,strategy_id,account_id,broker_provider,initial_capital,leverage,created_at
 strategy_config :: id,name,type,symbol,adapter,enabled,factors,aggregator,risk,params,backtest_verified,updated_at
 sync_config :: id,name,tushare_api,pg_table,data_type,sync_mode,schedule,enabled,last_sync_date,last_sync_ts,last_sync_count,last_status,description,created_at,trade_day_filter,provider
+sync_kind_config :: sync_id,kind,sub_kind,pg_table,pk_cols,float_cols,text_cols,rebuild
 sync_log :: id,sync_id,ts,mode,start_date,end_date,rows_pulled,rows_saved,duration_ms,status,error,failed_dates,expected_days,actual_days
 system_config :: key,value,value_type,description,updated_at,updated_by
 system_log :: id,ts,level,source,module,message

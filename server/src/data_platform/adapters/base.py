@@ -51,6 +51,16 @@ class BaseDataAdapter(ABC):
         """按日全市场批量（Tushare pro.daily/fund_daily 专属）。默认 UnsupportedFeature。"""
         raise UnsupportedFeature(f"{self.provider} 不支持按日批量")
 
+    def fetch(self, req, acct=None):
+        """批 58·M3：拉取统一契约（28 §5.2——同步引擎循环与消费面 DataBus 共用，区别只在 req）。
+
+        req=FetchRequest（kind/sub_kind/symbols/range_/freq/as_of/mode/...）；acct=AccountRef。
+        分派键=(kind, sub_kind)（DataKind 第一公民——bar_daily 的 stock/etf/convertible 靠 sub_kind
+        判别，sync_id 不复活）；拉取粒度（逐日批/per-symbol/区间）是 adapter 内部批量优化策略。
+        返回 ContractFrame（to_contract 产物——58 同批建，本抽象先占位）。
+        """
+        raise UnsupportedFeature(f"{self.provider} 未实现 fetch({getattr(req, 'kind', '?')})")
+
     def pull_adj_factor(self, symbol=None, trade_date=None, start=None, end=None) -> pd.DataFrame:
         """复权因子（Tushare adj_factor 专属）。默认空（因子缺省 NULL）。
 
