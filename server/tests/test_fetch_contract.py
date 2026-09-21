@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pandas as pd
 import pytest
 
 from src.quant_common.contract import (
@@ -55,20 +56,60 @@ class TestFetchDispatch:
         from src.data_platform.adapters.base import TushareAdapter
         ad = TushareAdapter()
         df = MagicMock()
+        df.empty = False
         with patch.object(ad, "pull_daily_batch", return_value=df) as pb, \
+             patch.object(ad, "pull_adj_factor", return_value=None) as paf, \
              patch.object(ad, "to_bar_rows", return_value=[_row()]) as tbr:
             f = ad.fetch(self._req("bar_daily", sub="stock"))
         pb.assert_called_once_with("20260901", "astock")   # sub_kind=stock → 拉取 kind=astock
-        tbr.assert_called_once_with(df, "1D")
+        paf.assert_called_once_with(trade_date="20260901")  # 当日全市场复权因子
+        tbr.assert_called_once_with(df, "1D", {})          # 无因子 → adj_map={}
         assert f.source == "tushare" and f.kind == "bar_daily"
+
+    def test_bar_daily_stock_adj_factor(self):
+        """缺口 1：bar_daily+stock 必须把当日复权因子并入 adj_map（astock 因子非 NULL 生死线）。"""
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        df = MagicMock()
+        df.empty = False
+        fdf = pd.DataFrame({"ts_code": ["600000.SH"], "adj_factor": [2.5]})
+        with patch.object(ad, "pull_daily_batch", return_value=df), \
+             patch.object(ad, "pull_adj_factor", return_value=fdf), \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]) as tbr:
+            ad.fetch(self._req("bar_daily", sub="stock"))
+        tbr.assert_called_once_with(df, "1D", {"600000.SH": 2.5})
+
+    def test_bar_daily_empty_skips_adj_factor(self):
+        """缺口 1 加固：空 df（节假日）不拉因子——对齐 _daily_to_save_fn 只在 df 非空时拉。"""
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        with patch.object(ad, "pull_daily_batch", return_value=pd.DataFrame()) as pb, \
+             patch.object(ad, "pull_adj_factor", return_value=None) as paf, \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]):
+            ad.fetch(self._req("bar_daily", sub="stock"))
+        paf.assert_not_called()
 
     def test_bar_daily_etf_batch(self):
         from src.data_platform.adapters.base import TushareAdapter
         ad = TushareAdapter()
         with patch.object(ad, "pull_daily_batch", return_value=MagicMock()) as pb, \
+             patch.object(ad, "pull_adj_factor", return_value=None), \
              patch.object(ad, "to_bar_rows", return_value=[_row()]):
             ad.fetch(self._req("bar_daily", sub="etf"))
         pb.assert_called_once_with("20260901", "etf")
+
+    def test_bar_minute_segmented(self):
+        """缺口 2：bar_minute 必须按 split_minute_range 分段 + 09:00/15:00 约定拉取。"""
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        segs = [("20260901", "20260901")]
+        with patch("src.data_platform.adapters.tushare_adapter.split_minute_range",
+                   return_value=segs) as sr, \
+             patch.object(ad, "pull_minute", return_value=pd.DataFrame()) as pm, \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]):
+            ad.fetch(self._req("bar_minute", freq="1min"))
+        sr.assert_called_once_with("20260901", "20260921", "1min")
+        pm.assert_called_once_with("600000.SHSE", "1min", "20260901 09:00:00", "20260901 15:00:00")
 
     def test_bar_daily_convertible_range(self):
         from src.data_platform.adapters.base import TushareAdapter

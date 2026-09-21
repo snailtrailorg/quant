@@ -82,6 +82,22 @@ def _routing_pilot_on() -> bool:
         return False
 
 
+def _sync_kind_whitelist() -> set[str]:
+    """批 58·M3 灰度白名单（system_config 键 sync_kind_routing，逗号分隔 sync_id）。
+
+    空/缺省=off（全走 _HANDLERS）。读失败=空集（回退现状路径）。55a 式按 sync_id 逐项切。
+    """
+    try:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT value FROM system_config WHERE key='sync_kind_routing'")
+            r = cur.fetchone()
+            if not r:
+                return set()
+            return {s.strip() for s in str(r[0]).split(",") if s.strip()}
+    except Exception:
+        return set()
+
+
 def _get_rate_ds(provider: str):
     """按 provider 选限速/熔断 DataSource（fallback tushare）。
 
@@ -198,7 +214,7 @@ def sync(sync_id: str, backfill_from: str | None = None,
         end_date = date.today().strftime("%Y%m%d")
 
         try:
-            handler = _HANDLERS.get(sync_id)
+            handler = _sync_via_kind if sync_id in _sync_kind_whitelist() else _HANDLERS.get(sync_id)
             if not handler:
                 # H-S1：路由表外 id（DB 行不受代码控制，真实可达）——原代码会以 0/0 假 success
                 # 推进游标且触发 r 未定义 NameError（双记日志）。显式 error 返回，不动游标。
@@ -757,6 +773,186 @@ _HANDLERS = {
 }
 
 
+# ═══ 批 58·M3 通用引擎循环（bar 族收编——fetch(kind, sub_kind) 统一契约，灰度切）═══
+
+def _read_sync_kind(sync_id: str) -> dict:
+    """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild）。无行/表缺返回 {}。"""
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT kind, sub_kind, pg_table, rebuild FROM sync_kind_config WHERE sync_id=%s",
+                (sync_id,))
+            row = cur.fetchone()
+    except psycopg.errors.UndefinedTable:
+        return {}
+    if not row:
+        return {}
+    return {"kind": row[0], "sub_kind": row[1], "pg_table": row[2], "rebuild": row[3]}
+
+
+def _fetch_supply(adapter, *, kind: str, sub_kind: str | None, symbols: tuple[str, ...],
+                  start: str, end: str, freq: str):
+    """构造 supply DataRequest → 直接 adapter.fetch（决策 4：不走 routing.resolve）。"""
+    from datetime import datetime as _dt
+    from src.quant_common.contract import DataRequest
+    rng = (_dt.strptime(start, "%Y%m%d"), _dt.strptime(end, "%Y%m%d"))
+    return adapter.fetch(DataRequest(
+        kind=kind, symbols=symbols, temporality="historical", sub_kind=sub_kind,
+        range_=rng, freq=freq, consumer_tag="sync", mode="supply"))
+
+
+def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_date: str,
+                               progress_cb: Callable | None = None) -> dict:
+    """bar_daily+stock/etf 逐日批：镜像 _sync_by_trade_date 语义（fetch 替代 pro_api_fn+save_fn）。
+
+    逐日 fetch(bar_daily, sub, range_=(day,day)) → _save_bars（DB 写在熔断上下文外，保持归因拆分）；
+    failed_dates/last_success_date（连续成功末）/expected_days 与 _sync_by_trade_date 一致。
+    返回含 last_success_date 键 → sync() 走三态游标。
+    """
+    from src.data_platform.rate_limit import rate_limit_context
+    ds = _get_rate_ds(adapter.provider)
+    api_name = _api_name_of(cfg)
+    date_range = pd.date_range(start=start, end=end_date, freq="B")
+    total = len(date_range)
+    total_pulled = 0
+    total_saved = 0
+    failed_dates: list[str] = []
+    last_success_date: str | None = None
+    broken = False
+
+    for i, d in enumerate(date_range, 1):
+        trade_date = d.strftime("%Y%m%d")
+        try:
+            with rate_limit_context(ds, api_name):
+                frame = _fetch_supply(adapter, kind="bar_daily", sub_kind=sub,
+                                      symbols=(), start=trade_date, end=trade_date, freq="1D")
+            if frame.rows:
+                total_saved += _save_bars(list(frame.rows))
+                total_pulled += len(frame.rows)
+        except Exception as e:
+            failed_dates.append(f"{trade_date}:{type(e).__name__}:{str(e)[:40]}")
+            broken = True
+        else:
+            if not broken:
+                last_success_date = trade_date
+        if progress_cb:
+            progress_cb(i, total, trade_date)
+
+    return {
+        "pulled": total_pulled,
+        "saved": total_saved,
+        "failed_dates": failed_dates,
+        "expected_days": _expected_trading_days(start, end_date),
+        "actual_days": len(date_range) - len(failed_dates),
+        "last_success_date": last_success_date,
+        "start": start,
+    }
+
+
+def _sync_via_kind_cb_daily(adapter, *, start: str, end_date: str,
+                            progress_cb: Callable | None = None) -> dict:
+    """bar_daily+convertible 区间：镜像 _sync_cb_daily——单次 fetch → _save_bars；无 last_success_date。"""
+    frame = _fetch_supply(adapter, kind="bar_daily", sub_kind="convertible",
+                          symbols=(), start=start, end=end_date, freq="1D")
+    if not frame.rows:
+        return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [],
+                "expected_days": 0, "actual_days": 0}
+    return {"pulled": len(frame.rows), "saved": _save_bars(list(frame.rows)), "start": start,
+            "failed_dates": [], "expected_days": None, "actual_days": None}
+
+
+def _sync_via_kind_index(adapter, *, start: str, end_date: str,
+                         progress_cb: Callable | None = None) -> dict:
+    """index_daily 区间：镜像 _sync_index_daily（000300.SH）——单次 fetch → save_index_bars；无 last_success_date。"""
+    from src.data_platform.db import save_index_bars
+    frame = _fetch_supply(adapter, kind="index_daily", symbols=("000300.SH",),
+                          start=start, end=end_date, freq="1D")
+    saved = save_index_bars(list(frame.rows)) if frame.rows else 0
+    return {"pulled": len(frame.rows), "saved": saved, "start": start,
+            "failed_dates": [] if frame.rows else ["index_daily:empty"],
+            "expected_days": None, "actual_days": None}
+
+
+def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
+                          progress_cb: Callable | None = None) -> dict:
+    """bar_minute per-symbol：镜像 _sync_astock_minute——逐只 fetch（分段在 adapter 内）→ save_bars(freq)。
+
+    DB 写在 rate_limit_context 外（归因拆分，同 _sync_astock_minute）；无 last_success_date。
+    """
+    from src.data_platform.rate_limit import rate_limit_context
+    from src.data_platform.db import save_bars
+    ds = _get_rate_ds(adapter.provider)
+    freq = _MINUTE_FREQ.get(sync_id)
+    if freq is None:
+        return {"pulled": 0, "saved": 0, "start": end_date, "failed_dates": [],
+                "expected_days": None, "actual_days": None}
+    ts_codes = _list_static_ts_codes("astock")
+    total = len(ts_codes)
+    total_pulled = 0
+    total_saved = 0
+    failed: list[str] = []
+    for i, tc in enumerate(ts_codes, 1):
+        try:
+            with rate_limit_context(ds, "daily"):
+                frame = _fetch_supply(adapter, kind="bar_minute", symbols=(tc,),
+                                      start=start, end=end_date, freq=freq)
+            if frame.rows:
+                total_saved += save_bars(freq, list(frame.rows))
+                total_pulled += len(frame.rows)
+        except Exception as ex:
+            failed.append(f"{tc}:{type(ex).__name__}:{str(ex)[:40]}")
+        if progress_cb:
+            progress_cb(i, total, tc)
+    return {"pulled": total_pulled, "saved": total_saved, "start": start,
+            "failed_dates": failed, "expected_days": None,
+            "actual_days": total - len(failed)}
+
+
+def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
+                   progress_cb: Callable | None = None) -> dict:
+    """批 58·M3 通用引擎循环：读 sync_kind_config 归置行 → 按 (kind, sub_kind) 定粒度 → fetch → 落仓。
+
+    签名与 _HANDLERS handler 同型（sync() 游标逻辑复用）。本步只收编 bar 族 6 sync_id（决策 4），
+    非 bar 族 kind 抛 UnsupportedFeature 兜底（白名单手动控制只含 bar 族）。
+    """
+    from src.data_platform.adapters.base import UnsupportedFeature
+    sync_id = cfg["id"]
+    row = _read_sync_kind(sync_id)
+    if not row:
+        # 必须 raise（不能 return error status）——sync() 不查 r.get("status")，返回 error 会被当
+        # 成功并无条件推进游标跳过整个窗口（数据丢失）。raise 让 sync() 外层 except 收编→error+不动游标。
+        raise RuntimeError(f"sync_kind_config 无归置行: {sync_id}（迁移 0094 未上产或白名单配错）")
+    kind = row["kind"]
+    sub = row["sub_kind"]
+    # index_daily 走 sync_benchmark_index 同款 adapter 选择（_get_kline_adapter({})——指数非 K 线
+    # 数据面，绕开 M2 试点 resolve 选源，否则 routing_kline_pilot=on 时会误路由到缺能力源）
+    adapter = _get_kline_adapter({} if kind == "index_daily" else cfg)
+
+    if backfill_from:
+        start = backfill_from
+    elif kind == "index_daily":
+        start = "20050408"   # 基准指数全量起点（同 _sync_index_daily）
+    else:
+        default_days = 7 if kind == "bar_minute" else 30
+        last = cfg.get("last_sync_date") or (date.today() - timedelta(days=default_days)).strftime("%Y%m%d")
+        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
+        if start > end_date:
+            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [],
+                    "expected_days": 0, "actual_days": 0}
+
+    if kind == "bar_daily" and sub in ("stock", "etf"):
+        return _sync_via_kind_daily_batch(adapter, sub=sub, cfg=cfg, start=start,
+                                          end_date=end_date, progress_cb=progress_cb)
+    if kind == "bar_daily" and sub == "convertible":
+        return _sync_via_kind_cb_daily(adapter, start=start, end_date=end_date, progress_cb=progress_cb)
+    if kind == "index_daily":
+        return _sync_via_kind_index(adapter, start=start, end_date=end_date, progress_cb=progress_cb)
+    if kind == "bar_minute":
+        return _sync_via_kind_minute(adapter, sync_id=sync_id, start=start, end_date=end_date,
+                                     progress_cb=progress_cb)
+    raise UnsupportedFeature(f"通用引擎未实现 kind={kind}, sub_kind={sub}（bar 族外后续切）")
+
+
 # ═══ 三档数据第一档：全局定时同步 handler（U 审 2026-08-19）═══
 # 通用模式：pull(trade_date) → DataFrame → 逐行 upsert 到专用表
 # soft_time_limit 由 celery task 侧覆盖（≥600s），此处只做数据层
@@ -992,10 +1188,6 @@ _PER_SYMBOL_META: dict[str, tuple[str, str, str, str]] = {
 }
 _PER_SYMBOL_SYNC_IDS = set(_PER_SYMBOL_META)
 
-# 分钟线 stk_mins 单次返回上限 8000 条，按频率算每段最大天数（1min 33 天 / 5min 166 天）
-_BARS_PER_DAY = {"1min": 240, "5min": 48, "15min": 16, "30min": 8, "60min": 4}
-_STK_MINS_MAX_BARS = 8000
-
 # 各 sync_id 对应的：tushare 拉取 API / 静态信息表 / ts_code 来源
 # astock_daily -> pro.daily(ts_code=) / asset_static_info
 # etf_daily    -> pro.fund_daily(ts_code=) / etf_basic_info
@@ -1003,32 +1195,6 @@ _STK_MINS_MAX_BARS = 8000
 # astock_minute/_5min -> pro.stk_mins(ts_code=,freq=) / asset_static_info（per-symbol only，不支持按日全市场）
 
 _TUSHARE_MIN_DATE = os.environ.get("SYNC_START_DATE", "20100101")  # 全量起点，.env 可配（默认 2010）
-
-
-def _split_minute_range(start: str, end: str, freq: str) -> list[tuple[str, str]]:
-    """按 stk_mins 8000 条限制把日期区间分段（自然日粒度）。
-
-    1min: 240 根/日 -> 33 天/段；5min: 48 根/日 -> 166 天/段。
-    超过单段上限的区间拆成多段，每段单独调 stk_mins（避免单次返回被截断丢数据）。
-    """
-    bpd = _BARS_PER_DAY.get(freq, 240)
-    max_days = max(1, _STK_MINS_MAX_BARS // bpd)
-    days = pd.date_range(start=start, end=end, freq="D")
-    if len(days) == 0:
-        return []
-    segs: list[tuple[str, str]] = []
-    seg_start = start
-    cnt = 0
-    for d in days:
-        cnt += 1
-        if cnt >= max_days:
-            segs.append((seg_start, d.strftime("%Y%m%d")))
-            nxt = d + timedelta(days=1)
-            seg_start = nxt.strftime("%Y%m%d")
-            cnt = 0
-    if seg_start <= end:
-        segs.append((seg_start, end))
-    return segs
 
 
 def _get_pro_api(sync_id: str):
@@ -1251,8 +1417,9 @@ def _pull_minute(adapter, ts_code: str, freq: str, start: str, end: str) -> "pd.
     归因拆分（2026-09-03）：异常透传——数据源调用失败需被 rate_limit_context 计入熔断，
     故与 DB 写拆开（DB 写失败不应打穿数据源配额熔断）。
     """
+    from src.data_platform.adapters.tushare_adapter import split_minute_range
     total_df: list[pd.DataFrame] = []
-    for s, e in _split_minute_range(start, end, freq):
+    for s, e in split_minute_range(start, end, freq):
         df = adapter.pull_minute(ts_code, freq, f"{s} 09:00:00", f"{e} 15:00:00")
         if df is None or df.empty:
             continue

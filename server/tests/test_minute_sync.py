@@ -21,10 +21,10 @@ def _fake_minute_df(ts_code="600000.SH", n=1):
 
 def test_split_minute_range_1min():
     """1min: 33 天/段。32 天一段，35+ 天两段，每段不超 33 天。"""
-    from src.data_sync.engine import _split_minute_range
+    from src.data_platform.adapters.tushare_adapter import split_minute_range
     from datetime import datetime as _dt
-    assert _split_minute_range("20260101", "20260201", "1min") == [("20260101", "20260201")]
-    segs = _split_minute_range("20260101", "20260205", "1min")  # 36 天
+    assert split_minute_range("20260101", "20260201", "1min") == [("20260101", "20260201")]
+    segs = split_minute_range("20260101", "20260205", "1min")  # 36 天
     assert len(segs) == 2
     for s, e in segs:
         days = (_dt.strptime(e, "%Y%m%d") - _dt.strptime(s, "%Y%m%d")).days + 1
@@ -33,8 +33,8 @@ def test_split_minute_range_1min():
 
 def test_split_minute_range_5min():
     """5min: 166 天/段，小跨度一段。"""
-    from src.data_sync.engine import _split_minute_range
-    assert _split_minute_range("20260101", "20260110", "5min") == [("20260101", "20260110")]
+    from src.data_platform.adapters.tushare_adapter import split_minute_range
+    assert split_minute_range("20260101", "20260110", "5min") == [("20260101", "20260110")]
 
 
 # --- to_save_rows_min ---

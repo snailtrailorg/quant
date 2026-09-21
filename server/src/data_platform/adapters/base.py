@@ -242,9 +242,10 @@ class TushareAdapter(BaseDataAdapter):
 
         分派键=(kind, sub_kind)（DataKind 第一公民，sync_id 不复活）：
         - bar_daily+stock/etf = 按日全市场批拉（pull_daily_batch——引擎循环逐日调，req.range_ 单日）
+          附当日全市场复权因子 adj_map（对齐 _daily_to_save_fn——astock 因子非 NULL 生死线）
         - bar_daily+convertible = 区间全量（pull_cb_daily）
         - index_daily = per-symbol 区间（pull_index_daily）
-        - bar_minute = per-symbol 区间（pull_minute）
+        - bar_minute = per-symbol 区间（split_minute_range 分段 + 09:00/15:00 约定，对齐 _pull_minute）
         拉取粒度差异是 adapter 内部批量优化策略，不改签名。返回 to_contract（11 字段+UTC 校验）。
         非 bar 族（fundamental_daily/featured_daily 等）列形状不同，58a 后续切——先抛 UnsupportedFeature。
         """
@@ -260,18 +261,31 @@ class TushareAdapter(BaseDataAdapter):
             if sub == "convertible":
                 from src.data_platform.adapters.tushare_adapter import pull_cb_daily
                 df = pull_cb_daily(start, end)
-            else:   # stock/etf：按日全市场批拉（sub_kind=stock→astock）
+                rows = self.to_bar_rows(df, freq)
+            else:   # stock/etf：按日全市场批拉（sub_kind=stock→astock）+ 当日复权因子 adj_map
                 df = self.pull_daily_batch(start, "astock" if sub == "stock" else sub)
-            rows = self.to_bar_rows(df, freq)
+                adj_map = {}
+                # 空 df（节假日 freq=B 拉到空）不拉因子，对齐 _daily_to_save_fn 只在 df 非空时 _adj_map_for_df
+                if start and df is not None and not df.empty:
+                    fdf = self.pull_adj_factor(trade_date=start)
+                    if fdf is not None and not fdf.empty:
+                        adj_map = dict(zip(fdf["ts_code"], fdf["adj_factor"]))
+                rows = self.to_bar_rows(df, freq, adj_map)
         elif kind == "index_daily":
             from src.data_platform.adapters.tushare_adapter import pull_index_daily
             sym = req.symbols[0] if req.symbols else ""
             df = pull_index_daily(sym, start, end)
             rows = self.to_bar_rows(df, freq)
         elif kind == "bar_minute":
+            from src.data_platform.adapters.tushare_adapter import split_minute_range
             sym = req.symbols[0] if req.symbols else ""
-            df = self.pull_minute(sym, freq, start, end)
-            rows = self.to_bar_rows(df, freq)
+            if not start or not end:
+                rows = []
+            else:
+                dfs = [self.pull_minute(sym, freq, f"{s} 09:00:00", f"{e} 15:00:00")
+                       for s, e in split_minute_range(start, end, freq)]
+                df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+                rows = self.to_bar_rows(df, freq)
         else:
             raise UnsupportedFeature(f"tushare 未实现 fetch(kind={kind}, sub_kind={sub})")
         return to_contract(rows, source=self.provider, kind=kind, freq=freq)

@@ -202,6 +202,38 @@ def pull_cb_basic(ts_code: str) -> dict:
     return df.iloc[0].to_dict()
 
 
+# 分钟线 stk_mins 单次返回上限 8000 条，按频率算每段最大天数（1min 33 天 / 5min 166 天）
+_BARS_PER_DAY = {"1min": 240, "5min": 48, "15min": 16, "30min": 8, "60min": 4}
+_STK_MINS_MAX_BARS = 8000
+
+
+def split_minute_range(start: str, end: str, freq: str) -> list[tuple[str, str]]:
+    """按 stk_mins 8000 条限制把日期区间分段（自然日粒度）。
+
+    1min: 240 根/日 -> 33 天/段；5min: 48 根/日 -> 166 天/段。
+    超过单段上限的区间拆成多段，每段单独调 stk_mins（避免单次返回被截断丢数据）。
+    批 58 从 engine.py 下沉至此（Tushare 专属上限，fetch 分段拉取共用）。
+    """
+    bpd = _BARS_PER_DAY.get(freq, 240)
+    max_days = max(1, _STK_MINS_MAX_BARS // bpd)
+    days = pd.date_range(start=start, end=end, freq="D")
+    if len(days) == 0:
+        return []
+    segs: list[tuple[str, str]] = []
+    seg_start = start
+    cnt = 0
+    for d in days:
+        cnt += 1
+        if cnt >= max_days:
+            segs.append((seg_start, d.strftime("%Y%m%d")))
+            nxt = d + timedelta(days=1)
+            seg_start = nxt.strftime("%Y%m%d")
+            cnt = 0
+    if seg_start <= end:
+        segs.append((seg_start, end))
+    return segs
+
+
 def pull_minute(ts_code: str, freq: str, start_date: str, end_date: str | None = None) -> pd.DataFrame:
     """拉取分钟线（stk_mins 接口，需 2000 积分）。
 
