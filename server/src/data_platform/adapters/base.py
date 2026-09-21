@@ -267,7 +267,11 @@ class TushareAdapter(BaseDataAdapter):
                 adj_map = {}
                 # 空 df（节假日 freq=B 拉到空）不拉因子，对齐 _daily_to_save_fn 只在 df 非空时 _adj_map_for_df
                 if start and df is not None and not df.empty:
-                    fdf = self.pull_adj_factor(trade_date=start)
+                    # adj_factor 独立限速（adj_factor 档，对齐旧路径 _adj_map_for_df 批 58 补的限速）——
+                    # 嵌套在引擎 daily 档 with 块内，二者独立 limiter 各自 sleep，时序对齐旧路径
+                    from src.data_platform.rate_limit import rate_limit_context
+                    with rate_limit_context(self._ds, "adj_factor"):
+                        fdf = self.pull_adj_factor(trade_date=start)
                     if fdf is not None and not fdf.empty:
                         adj_map = dict(zip(fdf["ts_code"], fdf["adj_factor"]))
                 rows = self.to_bar_rows(df, freq, adj_map)

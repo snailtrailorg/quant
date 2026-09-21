@@ -641,10 +641,15 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
 def _adj_map_for_df(df: pd.DataFrame, adapter) -> dict:
     """当日全市场复权因子 {ts_code: factor}。**降级返回 {}——同步继续，因子 NULL**
     （A/B-F1 契约：积分未到账不阻塞日线同步；到账后回补 adj_factor 即恢复）。
-    adapter 提供 pull_adj_factor（Tushare 拉因子，其他源返回空）。"""
+    adapter 提供 pull_adj_factor（Tushare 拉因子，其他源返回空）。
+    批 58 补限速（用户裁定）：adj_factor 接口有 Tushare 侧速率限制，连续 backfill 无 sleep 会
+    触发限流返回空→因子 NULL（旧路径限速遗漏——backfill_adj_factor 用 adj_factor 档此处未用）。
+    """
     try:
         td = str(df["trade_date"].iloc[0])
-        fdf = adapter.pull_adj_factor(trade_date=td)
+        from src.data_platform.rate_limit import rate_limit_context
+        with rate_limit_context(_get_rate_ds(adapter.provider), "adj_factor"):
+            fdf = adapter.pull_adj_factor(trade_date=td)
         if fdf is None or fdf.empty:
             return {}
         return dict(zip(fdf["ts_code"], fdf["adj_factor"]))

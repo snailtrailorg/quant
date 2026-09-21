@@ -19,6 +19,7 @@ import argparse
 import os
 import re
 import sys
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -46,6 +47,24 @@ def _safe_table(name: str) -> str:
     return name
 
 
+# bar_daily 三品类共享 bar_1d 表——对照必须按品类 symbol 集合过滤（静态表 join），否则删窗口
+# 会误删其他品类（如 cb 对照删掉股票/ETF 行 → 新旧快照错位）。品类真源=静态表 ts_code → vt_symbol。
+_TB_TO_VT = "REPLACE(REPLACE(REPLACE(ts_code,'.SH','.SHSE'),'.SZ','.SZSE'),'.BJ','.BSE')"
+_CATEGORY_TABLE = {
+    ("bar_daily", "stock"): "asset_static_info",
+    ("bar_daily", "etf"): "etf_basic_info",
+    ("bar_daily", "convertible"): "cb_basic_info",
+}
+
+
+def _category_filter(kind: str, sub_kind: str | None) -> str:
+    """品类 symbol 过滤 SQL（独立表 index/minute 无共享返回空串=不过滤）。"""
+    tbl = _CATEGORY_TABLE.get((kind, sub_kind))
+    if tbl is None:
+        return ""
+    return f"symbol IN (SELECT {_TB_TO_VT} FROM {tbl})"
+
+
 def _set_routing(value: str | None) -> None:
     """写/清 system_config 键 sync_kind_routing（灰度白名单）。"""
     with get_conn() as conn:
@@ -58,29 +77,32 @@ def _set_routing(value: str | None) -> None:
         conn.commit()
 
 
-def _snapshot(pg_table: str, start: str, end: str) -> list[tuple]:
+def _snapshot(pg_table: str, start: str, end: str, cat_filter: str = "") -> list[tuple]:
     pg_table = _safe_table(pg_table)
+    where = _WINDOW_FILTER + (f" AND {cat_filter}" if cat_filter else "")
     with get_conn() as conn:
         cur = conn.execute(
-            f"SELECT {_BAR_COLS} FROM {pg_table} WHERE {_WINDOW_FILTER} ORDER BY symbol, ts",
+            f"SELECT {_BAR_COLS} FROM {pg_table} WHERE {where} ORDER BY symbol, ts",
             (start, end))
         return cur.fetchall()
 
 
-def _delete_window(pg_table: str, start: str, end: str) -> int:
+def _delete_window(pg_table: str, start: str, end: str, cat_filter: str = "") -> int:
     pg_table = _safe_table(pg_table)
+    where = _WINDOW_FILTER + (f" AND {cat_filter}" if cat_filter else "")
     with get_conn() as conn:
         cur = conn.execute(
-            f"DELETE FROM {pg_table} WHERE {_WINDOW_FILTER}", (start, end))
+            f"DELETE FROM {pg_table} WHERE {where}", (start, end))
         conn.commit()
         return cur.rowcount
 
 
-def _check_one(sync_id: str, start: str, end: str) -> dict:
+def _check_one(sync_id: str, start: str, end: str, sleep_s: float = 0.0) -> dict:
     row = _read_sync_kind(sync_id)
     if not row:
         return {"sync_id": sync_id, "ok": False, "reason": "sync_kind_config 无归置行"}
     pg_table = row["pg_table"]
+    cat_filter = _category_filter(row["kind"], row["sub_kind"])
 
     try:
         # 1. flag off → 旧 _HANDLERS 路径
@@ -88,13 +110,16 @@ def _check_one(sync_id: str, start: str, end: str) -> dict:
         r_old = sync(sync_id, backfill_from=start)
         if r_old.get("status") not in ("success", "partial"):
             return {"sync_id": sync_id, "ok": False, "reason": f"旧路径失败: {r_old}"}
-        old_snap = _snapshot(pg_table, start, end)
+        old_snap = _snapshot(pg_table, start, end, cat_filter)
 
-        # 2. 清窗口，flag on → 新 _sync_via_kind 路径
-        _delete_window(pg_table, start, end)
+        # 2. 清窗口（仅本品类），sleep 隔离 adj_factor 限流（Tushare 短窗口 ~4-5 次/分钟，
+        #    新旧路径连续跑共 2N 次会超配额→谁后跑谁失败，非代码逻辑差异），flag on → 新路径
+        _delete_window(pg_table, start, end, cat_filter)
+        if sleep_s:
+            time.sleep(sleep_s)
         _set_routing(sync_id)
         r_new = sync(sync_id, backfill_from=start)
-        new_snap = _snapshot(pg_table, start, end)
+        new_snap = _snapshot(pg_table, start, end, cat_filter)
     finally:
         # 3. 收尾必清 flag（try/finally 防 _snapshot 抛异常残留 sync_kind_routing 污染后续 beat）
         _set_routing(None)
@@ -121,6 +146,8 @@ def main() -> int:
     ap.add_argument("--sync-id", default=None, help="只查单个 sync_id（缺省=bar 族 6 个全跑）")
     ap.add_argument("--start", default=None, help="窗口起始 YYYYMMDD（缺省=近 5 交易日）")
     ap.add_argument("--end", default=None, help="窗口结束 YYYYMMDD（缺省=今日）")
+    ap.add_argument("--sleep", type=float, default=0.0,
+                    help="新旧路径之间 sleep 秒数（隔离 adj_factor 限流；bar_daily 建议 ≥60）")
     ap.add_argument("--list", action="store_true", help="只列将对比的 sync_id 与表")
     args = ap.parse_args()
 
@@ -136,7 +163,7 @@ def main() -> int:
 
     failed = 0
     for sid in sync_ids:
-        res = _check_one(sid, start, end)
+        res = _check_one(sid, start, end, sleep_s=args.sleep)
         if res["ok"]:
             print(f"✅ {sid}: 行为等价（{res.get('rows', 0)} 行全字段一致，表 {res.get('table')}）")
         else:
