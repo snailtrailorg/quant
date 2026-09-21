@@ -20,6 +20,8 @@ import time
 from datetime import datetime
 
 from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import 即重导出保测试路径）
+    ACTIVE_INSTANCE_KEY,
+    INTENT_KEY,
     LATEST_TICK_PREFIX,
     LEASE_KEY,
     MinuteAggregator,
@@ -27,7 +29,9 @@ from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import
     _LEASE_RENEW_LUA,
     _PGWriter,
     _in_bar_session,
+    _lease_acquire_guarded,
     _lease_boot,
+    _lease_release,
     _project_symbol,
     _write_latest_tick,
 )
@@ -59,6 +63,58 @@ HB_KEY = "quant:hb:md-hub"
 STREAM_MAXLEN = 5000          # ≈20 交易日分钟 bar（评审：慢消费者 3 周不读才可能被剪）
 
 
+def _read_intent(r):
+    """M5：读 hub:switch:intent，返回 {snapshot, target} dict 或 None（键不存在/坏值/不可达）。"""
+    try:
+        raw = r.get(INTENT_KEY)
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        import json as _json
+        return _json.loads(raw)
+    except Exception:
+        return None
+
+
+def _boot_dispatch(r, instance_name: str) -> tuple[str, int]:
+    """M5 boot 单判定 + dispatch 分叉（先仲裁再拿权，插在一切行情初始化之前）。
+
+    intent 存在：target==自己→guarded（切换目标接管）；target≠自己→exit(6)（被切走者拦截）。
+    intent 不存在：active_instance≠自己→exit(6)（非现任不抢回）；否则→normal 冷启（SET active_instance）。
+    """
+    import secrets
+    intent = _read_intent(r)
+    if intent is not None:
+        target = intent.get("target", "")
+        if target != instance_name:
+            logger.error("切换窗内被切走者（target=%s 本=%s），exit 6", target, instance_name)
+            raise SystemExit(6)
+        expected_gen = int(intent.get("snapshot", 0)) + 1
+        my_uuid = secrets.token_hex(8)   # M5：B 的 uuid 运行时生成（active_instance==target 校验替代 holder==uuid，无需预定）
+        for _attempt in range(3):
+            ok, uuid_, gen = _lease_acquire_guarded(r, expected_gen, target, my_uuid)
+            if ok:
+                return uuid_, gen
+            if gen == -1:   # gen 污染（复活 A 抢前 INCR）→ 拒接管，exit 1 让 systemd 重拉
+                logger.error("guarded 拒接管（gen 污染，期望=%d），exit 1", expected_gen)
+                raise SystemExit(1)
+            time.sleep(5)   # -2 旧 lease 挡（旧化身 TTL 30s 未过期）→ 重试
+        logger.error("guarded 3 次重试耗尽（旧 lease 挡），exit 1")
+        raise SystemExit(1)
+    # intent 不存在：active_instance 仲裁
+    active = None
+    try:
+        active = r.get(ACTIVE_INSTANCE_KEY)
+    except Exception:
+        active = None
+    if active and active != instance_name:
+        logger.error("非现任（active_instance=%s 本=%s），exit 6", active, instance_name)
+        raise SystemExit(6)
+    return _lease_boot(r, instance_name)
+
+
 def main() -> None:
     # #48：启动时列级校验（hub 侧同款）
     try:
@@ -80,9 +136,10 @@ def main() -> None:
 
     r = make_valkey()
 
-    # ——— 租约/代次（先拿权再连行情；重试/让位/退出语义在 parts._lease_boot）———
-    my_uuid, gen = _lease_boot(r)
-    logger.info("hub 启动：uuid=%s gen=%d", my_uuid, gen)
+    # ——— M5 boot 单判定 + dispatch（先仲裁再拿权；重试/让位/退出语义在 parts）———
+    instance_name = os.environ.get("INSTANCE_NAME", "")
+    my_uuid, gen = _boot_dispatch(r, instance_name)
+    logger.info("hub 启动：uuid=%s gen=%d 实例=%s", my_uuid, gen, instance_name or "(空)")
 
     # ——— 行情接入（ThinGateway + MdApi，零 TD）———
     from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
@@ -171,7 +228,13 @@ def main() -> None:
     ee.register(EVENT_LOG, on_log)
 
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB）———
-    setting = _build_xtp_setting()
+    interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
+    row_id = int(interface_row) if interface_row else None
+    try:
+        setting = _build_xtp_setting(row_id=row_id)
+    except Exception as e:
+        logger.error("XTP 凭证取数失败（row_id=%s），exit 78: %s", row_id, e)
+        raise SystemExit(78)
     md_api.connect(setting["账号"], setting["密码"], int(setting["客户号"]),
                    setting["行情地址"], int(setting["行情端口"]), setting.get("行情协议", "TCP"), 3,
                    defer_login=not md_sess.window_open())   # 窗关启动只建 C 对象（CREATED），窗开沿 relogin 直登
@@ -281,7 +344,12 @@ def main() -> None:
         md_status_was = md_status
 
     def _lease_renew() -> None:
-        """租约续期（Lua CAS）：续不上=被抢占/丢失 → 让位退出（exit 5）；网络异常容忍一轮。"""
+        """租约续期（Lua CAS）：续不上=被抢占/丢失 → 让位退出（exit 5）；网络异常容忍一轮。
+
+        M5：前置查 intent——见切换意图则不再续租（交由 _intent_poll 让位）。
+        """
+        if _read_intent(r) is not None:
+            return
         try:
             renewed = r.eval(_LEASE_RENEW_LUA, 1, LEASE_KEY, my_uuid, "30")
             if not int(renewed):
@@ -292,6 +360,18 @@ def main() -> None:
             raise
         except Exception as e:
             logger.error("租约续期异常（容忍一轮）: %s", e)
+
+    def _intent_poll() -> None:
+        """M5：轮询切换意图。见 intent 且 target≠自己 → CAS DEL lease → exit(0)（优雅让位）。"""
+        intent = _read_intent(r)
+        if intent is None:
+            return
+        target = intent.get("target", "")
+        if target == instance_name:
+            return   # 我是切换目标，boot 已用 guarded 接管，无需让位
+        logger.info("见切换意图 target=%s（本=%s），优雅让位 exit 0", target, instance_name)
+        _lease_release(r, my_uuid)   # CAS DEL lease（==my_uuid 才删，防删 B 已拿到的 lease）
+        os._exit(0)
 
     # 三窗分窗 finalize（P2 修复批 08-28 替代 flush_all 双点；盲审 B-P1-1 加宽 5~30s：
     # 钩子实际间隔 5s+δ>原窗宽 5s，straddle 相位会整窗 miss——pop 语义幂等，宽窗安全）：
@@ -331,6 +411,7 @@ def main() -> None:
                                                      code="runtime.fatal"),
                       fatal_exit_code=1)
     loop.every("lease-renew", 5.0, _lease_renew)    # 租约 30s TTL，5s 一续（失败 exit 5 在钩子内自带）
+    loop.every("intent-poll", 5.0, _intent_poll)    # M5：轮询切换意图（见则优雅让位 exit 0）
     loop.every("md-edge", 0.0, _md_edge)            # 重连沿检测：每步
     loop.every("subs-poll", 15.0, sm.poll)          # 订阅 diff（旧 counter%3 = 15s）
     loop.every("subs-replay", 60.0, sm.replay)      # 全量幂等重放（旧 %60<10 窗口法 = 60s）

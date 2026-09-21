@@ -26,6 +26,8 @@ except ImportError:   # 与 main 的 EventEngine 守卫同款：无 vnpy 环境�
 LEASE_KEY = "hub:lease"
 GEN_KEY = "hub:gen"
 SURRENDER_KEY = "hub:surrender"
+INTENT_KEY = "hub:switch:intent"          # M5 切换意图 {snapshot, target}，EX 300（switch.py 写）
+ACTIVE_INSTANCE_KEY = "hub:active_instance"   # M5 现任实例名（无 TTL），boot 仲裁
 LATEST_TICK_PREFIX = "hub:latest_tick:"   # 三档项 12：详情页实时快照（tick 自带五档，U-2 修正 #2 零订阅变化）
 LATEST_TICK_TTL = 65                      # 断流 65s 自动过期——详情页不展示陈旧价，降级腾讯/DB
 PG_FLUSH_INTERVAL = 10.0      # bar 落库批量间隔（独立线程，R-BR7 不反压分发）
@@ -207,10 +209,14 @@ class _PGWriter(threading.Thread):
                 logger.warning("bar_hub 批量落库失败（%d 条，丢弃）: %s", len(batch), e)
 
 
-def _lease_acquire(r) -> tuple[bool, str, int]:
-    """租约 + 代次（R-DL4）。返回 (ok, uuid, gen)。区分 Valkey 不可达与 NX 失败（评审陷阱 8）。"""
+def _lease_acquire(r, instance_name: str = "") -> tuple[bool, str, int]:
+    """租约 + 代次（R-DL4）。返回 (ok, uuid, gen)。区分 Valkey 不可达与 NX 失败（评审陷阱 8）。
+
+    M5：uuid 改 env 优先（HUB_UUID 由 switch.py 注入给 B，无则 token_hex）；normal 冷启
+    SET active_instance=INSTANCE_NAME（bootstrap，仲裁从首启成立）。
+    """
     import secrets
-    uuid_ = secrets.token_hex(8)
+    uuid_ = os.environ.get("HUB_UUID") or secrets.token_hex(8)
     try:
         got = r.set(LEASE_KEY, uuid_, nx=True, ex=30)
     except Exception as e:
@@ -228,13 +234,18 @@ def _lease_acquire(r) -> tuple[bool, str, int]:
     except Exception as e:
         logger.error("gen 计数器不可达: %s", e)
         return False, uuid_, 0
+    if instance_name:   # M5：normal 冷启补 SET 现任（guarded 已 SET，这里保首启前仲裁不退化）
+        try:
+            r.set(ACTIVE_INSTANCE_KEY, instance_name)
+        except Exception as e:
+            logger.warning("SET active_instance 失败: %s", e)
     return True, uuid_, gen
 
 
-def _lease_boot(r) -> tuple[str, int]:
+def _lease_boot(r, instance_name: str = "") -> tuple[str, int]:
     """启动租约获取（先拿权再连行情）：3 次重试；真让位 SystemExit(3)，重试耗尽 os._exit(4)。"""
     for attempt in range(3):
-        ok, my_uuid, gen = _lease_acquire(r)
+        ok, my_uuid, gen = _lease_acquire(r, instance_name)
         if ok:
             return my_uuid, gen
         if gen == -1:   # 真让位：写标记退出，unit 的 StartLimit 会接管
@@ -245,6 +256,61 @@ def _lease_boot(r) -> tuple[str, int]:
             raise SystemExit(3)
         time.sleep(5)
     os._exit(4)
+
+
+_GUARDED_ACQUIRE_LUA = """
+local g = tonumber(redis.call('get', KEYS[1]) or '0')
+if g == tonumber(ARGV[2]) then
+    -- 重启场景：gen 已是 snapshot+1（上次 INCR 过），只抢 lease 不 INCR
+    local ok = redis.call('set', KEYS[2], ARGV[1], 'NX', 'EX', 30)
+    if not ok then return -2 end
+    redis.call('set', KEYS[3], ARGV[3])
+    return tonumber(ARGV[2])
+elseif g == tonumber(ARGV[2]) - 1 then
+    -- 首接场景：gen 还是 snapshot，INCR + 抢 lease + SET 现任（原子绑定）
+    local ok = redis.call('set', KEYS[2], ARGV[1], 'NX', 'EX', 30)
+    if not ok then return -2 end
+    redis.call('incr', KEYS[1])
+    redis.call('set', KEYS[3], ARGV[3])
+    return tonumber(ARGV[2])
+else
+    return -1   -- gen 既非 snapshot 也非 snapshot+1（被污染）→ 拒接管，零污染
+end
+"""
+
+
+def _lease_acquire_guarded(r, expected_gen: int, target: str, uuid_: str) -> tuple[bool, str, int]:
+    """切换目标接管（原子 Lua，M5）。返回 (ok, uuid, gen)。
+
+    gen = expected_gen（首接 INCR 到 snapshot+1 或重启只抢 lease）；<0 失败：
+    -1 = gen 污染（被复活 A 抢在 B 前 INCR）拒接管零污染；0 = 存储不可达 / -2 旧 lease 挡。
+    """
+    try:
+        res = int(r.eval(_GUARDED_ACQUIRE_LUA, 3, GEN_KEY, LEASE_KEY, ACTIVE_INSTANCE_KEY,
+                         uuid_, expected_gen, target))
+    except Exception as e:
+        logger.error("guarded 租约存储不可达: %s", e)
+        return False, uuid_, 0
+    if res < 0:
+        return False, uuid_, res   # -1 污染 / -2 旧 lease 挡
+    return True, uuid_, res
+
+
+_CAS_DEL_LUA = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
+
+def _lease_release(r, uuid_: str) -> bool:
+    """A 让位 CAS DEL lease（M5）：lease 值==my_uuid 才删，防删掉 B 已拿到的 lease。"""
+    try:
+        return bool(int(r.eval(_CAS_DEL_LUA, 1, LEASE_KEY, uuid_)))
+    except Exception as e:
+        logger.error("CAS DEL lease 失败: %s", e)
+        return False
 
 
 _LEASE_RENEW_LUA = """

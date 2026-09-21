@@ -72,10 +72,11 @@ _REGISTRY: dict[str, type[Broker]] = {
 }
 
 
-def get_broker(provider: str) -> Broker | None:
+def get_broker(provider: str, row_id: int | None = None) -> Broker | None:
     """从 DB external_interface 交易域行实例化通道（批55a 合表）。
 
-    选行=enabled+域内 position 序（勘察 #4：确定性排序防多账号选行漂移）。
+    row_id 指定行（M5：B 实例 HUB_INTERFACE_ROW 选账号，按 id 直取不限制能力域）；
+    缺省=域内 position 序首行（勘察 #4：确定性排序防多账号选行漂移）。
     """
     cls = _REGISTRY.get(provider)
     if not cls:
@@ -83,10 +84,15 @@ def get_broker(provider: str) -> Broker | None:
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT credentials_encrypted, params FROM external_interface "
-                "WHERE provider=%s AND enabled=true AND 'trading' = ANY(capabilities) "
-                "ORDER BY position, id LIMIT 1", (provider,))
+            if row_id is not None:
+                cur = conn.execute(
+                    "SELECT credentials_encrypted, params FROM external_interface "
+                    "WHERE id=%s AND provider=%s AND enabled=true", (row_id, provider))
+            else:
+                cur = conn.execute(
+                    "SELECT credentials_encrypted, params FROM external_interface "
+                    "WHERE provider=%s AND enabled=true AND 'trading' = ANY(capabilities) "
+                    "ORDER BY position, id LIMIT 1", (provider,))
             r = cur.fetchone()
         if not r:
             return None
@@ -122,7 +128,7 @@ def runner_client_id(task_id: int | None) -> int | None:
     return (int(task_id) - 1) % 98 + 2
 
 
-def build_xtp_setting(client_id: int | None = None) -> dict:
+def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -> dict:
     """组装 vnpy XtpGateway SETTING（中文 key）。Broker DB 优先（PI3），.env XTP_TEST_* fallback。
 
     2026-08-19 从 strategy_runner.main 归位（hub/runner 双消费方；无 vnpy import——中文 key
@@ -132,12 +138,15 @@ def build_xtp_setting(client_id: int | None = None) -> dict:
     （官方 CreateQuoteApi 注释：多个客户端须用不同 client_id）——hub 与 direct runner
     消费同一 broker 记录必然撞号（08-22 起任务 8 "user already exists" 全部真相）。
     runner 侧传独立号（通道级配置 broker_config.params.client_id_runner）。
+
+    row_id 指定（M5：B 实例 HUB_INTERFACE_ROW 选账号）→ 取数失败**抛异常 fail-fast（exit 78）**，
+    禁 .env fallback（否则 B 静默跑在 A 的 XTP 账号上）。
     """
     import logging
     import os
     logger = logging.getLogger("strategy_framework")
     try:
-        broker = get_broker("xtp")
+        broker = get_broker("xtp", row_id)
         if broker:
             cred = broker.get_credentials()
             params = broker._params or {}
@@ -157,7 +166,12 @@ def build_xtp_setting(client_id: int | None = None) -> dict:
                 if client_id:
                     setting["客户号"] = int(client_id)
                 return setting
+        if row_id is not None:
+            # M5：指定 B 行但取数失败/凭证不完整 → fail-fast，禁 .env fallback
+            raise RuntimeError(f"external_interface 行 id={row_id} 无 XTP 凭证或凭证不完整")
     except Exception as e:
+        if row_id is not None:
+            raise   # fail-fast 上抛（main.py 捕获 → exit 78）
         logger.warning("Broker DB 取 XTP 凭证失败，fallback .env: %s", e)
 
     from dotenv import load_dotenv

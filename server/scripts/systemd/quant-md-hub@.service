@@ -13,15 +13,17 @@ WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
 EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QUANT_LOG_SOURCE=hub
 Environment=QT_QPA_PLATFORM=offscreen
+Environment=INSTANCE_NAME=%i
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.md_hub.main
 WatchdogSec=90
 NotifyAccess=main
-# 批5（2026-08-27）对齐 SA4（D3 退出矩阵）：on-failure + Prevent 覆盖
-#   78=EX_CONFIG 配置错（Failed 告警人工）/ 3=让位（对端在位不抢，交 L3 300s 轮询接管）/
-#   4=租约重试耗尽（同上——on-failure 下不 Prevent 会 30s 后再抢，5 次打穿 StartLimit 进 failed 黑洞）
-#   5=续租丢（对端接管）仍拉：重启正确；exit 0 正常停不对抗
+# M5（批60 v14）退出码矩阵：on-failure + Prevent 覆盖
+#   Prevent（不重拉）：0=优雅让位 / 3=真让位（输家非恢复实例）/ 6=boot 闸拦截（被切走者·非现任）/
+#   78=EX_CONFIG 配置错（B 凭证按 row_id 取数失败 fail-fast，Failed 告警人工）
+#   重启码（on-failure 重拉；重拉不愈则 5 次打穿 StartLimit 进 failed 黑洞=明确失败态非静默）：
+#   1=vnpy缺失·EngineLoop fatal / 4=租约重试耗尽 / 5=续租丢（对端接管）
 Restart=on-failure
-RestartPreventExitStatus=78
+RestartPreventExitStatus=0 3 6 78
 RestartSec=30
 # 合约表尖峰同 direct runner（500-700M 预算）；MemoryHigh 先限流后击杀（12 号 §2.5 落地）
 MemoryHigh=768M
