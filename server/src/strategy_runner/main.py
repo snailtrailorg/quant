@@ -76,18 +76,21 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
     """PG 暖机：读历史 bar 填充 history（因子初始化 / 断线补缺口，#4）。返回 list。"""
     history = []
     try:
-        from src.data_platform.db import get_bars
+        from src.data_platform.databus import DataBus
+        from src.quant_common.contract import DataRequest
         from datetime import datetime as _dt, timedelta
-        bars_df = get_bars(symbol, "1min", _dt.now() - timedelta(days=30), _dt.now())
-        if not bars_df.empty:
-            for row in bars_df.tail(min(n, 500)).to_dict("records"):
-                history.append({
-                    "ts": row["ts"],
-                    "open": float(row["open"]), "high": float(row["high"]),
-                    "low": float(row["low"]), "close": float(row["close"]),
-                    "volume": float(row["volume"]) if row["volume"] else 0,
-                })
-            logger.info("PG 暖机: 读 %d 根历史 bar", len(history))
+        req = DataRequest(kind="bar_minute", symbols=(symbol,), temporality="historical",
+                          freq="1min", range_=(_dt.now() - timedelta(days=30), _dt.now()))
+        frame, _wm = DataBus().get_bars(req)
+        # 11 字段序（BAR_COLUMNS）：symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source
+        for r in frame.rows[-min(n, 500):]:
+            history.append({
+                "ts": r[2],
+                "open": float(r[3]), "high": float(r[4]),
+                "low": float(r[5]), "close": float(r[6]),
+                "volume": float(r[7]) if r[7] else 0,
+            })
+        logger.info("PG 暖机: 读 %d 根历史 bar", len(history))
     except Exception as e:
         logger.warning("PG 暖机失败（因子首次可能不准）: %s", e)
     return history

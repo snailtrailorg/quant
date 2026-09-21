@@ -897,8 +897,14 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
 
     start = params.get("start", (date.today() - timedelta(days=365)).isoformat())
     end = params.get("end", date.today().isoformat())
-    bars_df = get_bars(symbol, "1D", start, end)
-    bars = bars_df.to_dict("records") if not bars_df.empty else []
+    # 批 59 M4：回测读 bar 走 DataBus（local_pg 候选 + fetch-on-miss），等价 db.get_bars
+    from datetime import datetime as _dt
+    from src.data_platform.databus import DataBus
+    from src.quant_common.contract import DataRequest, BAR_COLUMNS
+    req = DataRequest(kind="bar_daily", symbols=(symbol,), temporality="historical",
+                      freq="1D", range_=(_dt.fromisoformat(start), _dt.fromisoformat(end)))
+    frame, _wm = DataBus().get_bars(req)
+    bars = [dict(zip(BAR_COLUMNS, r)) for r in frame.rows]
 
     # 基准数据（ptrade 批 1）：沪深300 指数日线，对齐回测窗口；缺失降级（α/β 返回 0，不崩回测）
     benchmark_bars = []

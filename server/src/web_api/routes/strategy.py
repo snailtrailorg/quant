@@ -284,12 +284,17 @@ def preview_factor_api(body: dict = Body(...),
         return {"error": f"因子编译失败: {str(e)[:200]}"}
     from datetime import datetime as _dt, timedelta as _td
     end, start = _dt.now(), _dt.now() - _td(days=365 if freq == "1D" else 14)
-    df = get_bars(symbol, freq, start, end)
-    if df is None or df.empty:
+    # 批 59 M4：因子试算读 bar 走 DataBus（local_pg + fetch-on-miss）
+    from src.data_platform.databus import DataBus
+    from src.quant_common.contract import DataRequest, BAR_COLUMNS
+    req = DataRequest(kind="bar_daily" if freq == "1D" else "bar_minute", symbols=(symbol,),
+                      temporality="historical", freq=freq, range_=(start, end))
+    frame, _wm = DataBus().get_bars(req)
+    if not frame.rows:
         return {"error": f"无数据: {symbol} {freq}"}
-    if max_n and len(df) < n:
-        return {"error": f"数据不足以拉满窗口 {n}（现 {len(df)} 根 {freq}）——窗口改小或用回测链"}
-    bars = df.tail(n).to_dict("records")
+    if max_n and len(frame.rows) < n:
+        return {"error": f"数据不足以拉满窗口 {n}（现 {len(frame.rows)} 根 {freq}）——窗口改小或用回测链"}
+    bars = [dict(zip(BAR_COLUMNS, r)) for r in frame.rows[-n:]]
     values, errors = [], 0
     for i, bar in enumerate(bars):
         hist = bars[:i]

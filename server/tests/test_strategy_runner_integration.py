@@ -102,10 +102,16 @@ def test_warmup_history():
     from src.strategy_runner.main import _warmup_history
     import pandas as pd
     from datetime import datetime, timedelta
+    from src.data_platform.tz import as_utc
     now = datetime.now()
+    # 11 字段序（对齐 db.get_bars——批 59 DataBus 经 to_contract 校验）
     rows = [
-        {"ts": now - timedelta(hours=1), "open": 3.0, "high": 3.1, "low": 2.9, "close": 3.05, "volume": 10000},
-        {"ts": now - timedelta(minutes=30), "open": 3.05, "high": 3.15, "low": 3.0, "close": 3.1, "volume": 15000},
+        {"symbol": "600000.SHSE", "freq": "1min", "ts": as_utc(now - timedelta(hours=1)),
+         "open": 3.0, "high": 3.1, "low": 2.9, "close": 3.05, "volume": 10000,
+         "amount": 30000.0, "adj_factor": None, "source": "tushare"},
+        {"symbol": "600000.SHSE", "freq": "1min", "ts": as_utc(now - timedelta(minutes=30)),
+         "open": 3.05, "high": 3.15, "low": 3.0, "close": 3.1, "volume": 15000,
+         "amount": 45000.0, "adj_factor": None, "source": "tushare"},
     ]
     df = _make_bars_df(rows)
     with patch("src.data_platform.db.get_bars", return_value=df):

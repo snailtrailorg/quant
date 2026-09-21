@@ -172,10 +172,13 @@ class TestDslPreview:
     def _bars_df(self, n=150):
         import pandas as pd
         from datetime import datetime, timedelta
+        from src.data_platform.tz import as_utc
         base = datetime(2026, 8, 1)
+        # 11 字段序（对齐 db.get_bars 的 BAR_TABLE_SELECT——批 59 DataBus 经 to_contract 校验）
         return pd.DataFrame([{
-            "ts": base + timedelta(days=i), "open": 10.0, "high": 10.5,
-            "low": 9.5, "close": 10.0 + i * 0.01, "volume": 1000,
+            "symbol": "600000.SHSE", "freq": "1D", "ts": as_utc(base + timedelta(days=i)),
+            "open": 10.0, "high": 10.5, "low": 9.5, "close": 10.0 + i * 0.01,
+            "volume": 1000, "amount": 10000.0, "adj_factor": 1.0, "source": "tushare",
         } for i in range(n)])
 
     def test_preview_dsl_window_autoraise(self):
