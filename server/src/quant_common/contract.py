@@ -218,6 +218,41 @@ ALLOWED_BAR_COLUMNS: frozenset[str] = frozenset(BAR_COLUMNS)
 ALLOWED_SNAPSHOT_COLUMNS: frozenset[str] = frozenset(SnapshotRow.__annotations__.keys())
 
 
+# ─────────────────────────── 统一帧（28 §5.2 to_contract 产物） ───────────────────────────
+
+@dataclass(frozen=True)
+class ContractFrame:
+    """fetch 返回的统一帧（28 §5.2 to_contract 产物——同步/消费共用）。
+
+    rows=统一 11 字段行（BAR_COLUMNS 序，元组）；source=数据源 provider；
+    fetched_at=摄取时间戳（UTC aware——28 §15.1 血缘链第二环）。
+    """
+    kind: str
+    rows: tuple[tuple, ...]
+    source: str
+    freq: str
+    fetched_at: datetime
+
+
+def to_contract(rows, *, source: str, kind: str, freq: str, fetched_at: datetime | None = None) -> ContractFrame:
+    """归一义务④（28 §5.2 结束时刻）：11 字段序校验 + ts UTC aware 校验 + 包帧。
+
+    收编统一出口（29 §三 CI 断言二运行时执法）：任何 adapter 的 fetch 输出都过此关——
+    rows 必须是 to_bar_rows 产物的 11 字段元组（BAR_COLUMNS 序），ts 必须 UTC aware；
+    违者抛 ContractError（不 failover，请求/实现错）。
+    """
+    from datetime import timezone as _tz
+    if fetched_at is None:
+        fetched_at = datetime.now(tz=_tz.utc)
+    for r in rows:
+        if len(r) != 11:
+            raise ContractError(f"{source} 输出非 11 字段（{len(r)}）: {r[:3]}")
+        ts = r[2]
+        if ts is None or ts.tzinfo is None or ts.utcoffset().total_seconds() != 0:
+            raise ContractError(f"{source} 输出 ts 非 UTC aware: {ts!r}")
+    return ContractFrame(kind=kind, rows=tuple(rows), source=source, freq=freq, fetched_at=fetched_at)
+
+
 # ─────────────────────────── 注册表声明类型（28 §5.2） ───────────────────────────
 
 @dataclass(frozen=True)

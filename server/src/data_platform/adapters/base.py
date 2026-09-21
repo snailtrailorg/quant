@@ -237,6 +237,45 @@ class TushareAdapter(BaseDataAdapter):
             _adj_degraded_alert(e)
             return None
 
+    def fetch(self, req, acct=None):
+        """批 58·M3 拉取统一契约（28 §5.2——同步/消费共用；58a 先覆盖 bar 族）。
+
+        分派键=(kind, sub_kind)（DataKind 第一公民，sync_id 不复活）：
+        - bar_daily+stock/etf = 按日全市场批拉（pull_daily_batch——引擎循环逐日调，req.range_ 单日）
+        - bar_daily+convertible = 区间全量（pull_cb_daily）
+        - index_daily = per-symbol 区间（pull_index_daily）
+        - bar_minute = per-symbol 区间（pull_minute）
+        拉取粒度差异是 adapter 内部批量优化策略，不改签名。返回 to_contract（11 字段+UTC 校验）。
+        非 bar 族（fundamental_daily/featured_daily 等）列形状不同，58a 后续切——先抛 UnsupportedFeature。
+        """
+        from src.quant_common.contract import to_contract
+        kind = getattr(req, "kind", "")
+        sub = getattr(req, "sub_kind", None)
+        freq = getattr(req, "freq", None) or "1D"
+        rng = getattr(req, "range_", None)
+        start = rng[0].strftime("%Y%m%d") if rng and rng[0] else None
+        end = rng[1].strftime("%Y%m%d") if rng and rng[1] else None
+
+        if kind == "bar_daily":
+            if sub == "convertible":
+                from src.data_platform.adapters.tushare_adapter import pull_cb_daily
+                df = pull_cb_daily(start, end)
+            else:   # stock/etf：按日全市场批拉（sub_kind=stock→astock）
+                df = self.pull_daily_batch(start, "astock" if sub == "stock" else sub)
+            rows = self.to_bar_rows(df, freq)
+        elif kind == "index_daily":
+            from src.data_platform.adapters.tushare_adapter import pull_index_daily
+            sym = req.symbols[0] if req.symbols else ""
+            df = pull_index_daily(sym, start, end)
+            rows = self.to_bar_rows(df, freq)
+        elif kind == "bar_minute":
+            sym = req.symbols[0] if req.symbols else ""
+            df = self.pull_minute(sym, freq, start, end)
+            rows = self.to_bar_rows(df, freq)
+        else:
+            raise UnsupportedFeature(f"tushare 未实现 fetch(kind={kind}, sub_kind={sub})")
+        return to_contract(rows, source=self.provider, kind=kind, freq=freq)
+
 
 @register_adapter
 class JoinQuantAdapter(BaseDataAdapter):
