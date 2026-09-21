@@ -111,6 +111,34 @@ class TestFetchDispatch:
         sr.assert_called_once_with("20260901", "20260921", "1min")
         pm.assert_called_once_with("600000.SHSE", "1min", "20260901 09:00:00", "20260901 15:00:00")
 
+    def test_bar_minute_preserve_false_merges(self):
+        """批 58b：preserve_current_normalization=False 时启用竞价条并入首根。"""
+        from dataclasses import replace
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        req = replace(self._req("bar_minute", freq="1min"), preserve_current_normalization=False)
+        with patch("src.data_platform.adapters.tushare_adapter.split_minute_range",
+                   return_value=[("20260901", "20260901")]), \
+             patch.object(ad, "pull_minute", return_value=pd.DataFrame()), \
+             patch("src.data_platform.adapters.tushare_adapter.merge_auction_into_first",
+                   return_value=pd.DataFrame()) as mrg, \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]):
+            ad.fetch(req)
+        mrg.assert_called_once()
+
+    def test_bar_minute_preserve_true_skips_merge(self):
+        """批 58b：preserve 默认 True 不并入（58 收编期行为等价）。"""
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        with patch("src.data_platform.adapters.tushare_adapter.split_minute_range",
+                   return_value=[("20260901", "20260901")]), \
+             patch.object(ad, "pull_minute", return_value=pd.DataFrame()), \
+             patch("src.data_platform.adapters.tushare_adapter.merge_auction_into_first") as mrg, \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]):
+            ad.fetch(self._req("bar_minute", freq="1min"))
+        mrg.assert_not_called()
+
+
     def test_bar_daily_convertible_range(self):
         from src.data_platform.adapters.base import TushareAdapter
         ad = TushareAdapter()

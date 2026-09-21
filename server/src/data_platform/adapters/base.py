@@ -289,6 +289,10 @@ class TushareAdapter(BaseDataAdapter):
                 dfs = [self.pull_minute(sym, freq, f"{s} 09:00:00", f"{e} 15:00:00")
                        for s, e in split_minute_range(start, end, freq)]
                 df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+                # 迁移期特征开关（29 §六）：preserve=False 时启用竞价条并入首根（批 58b）
+                if not getattr(req, "preserve_current_normalization", True):
+                    from src.data_platform.adapters.tushare_adapter import merge_auction_into_first
+                    df = merge_auction_into_first(df)
                 rows = self.to_bar_rows(df, freq)
         else:
             raise UnsupportedFeature(f"tushare 未实现 fetch(kind={kind}, sub_kind={sub})")

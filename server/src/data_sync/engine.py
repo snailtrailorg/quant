@@ -98,6 +98,21 @@ def _sync_kind_whitelist() -> set[str]:
         return set()
 
 
+def _preserve_normalization() -> bool:
+    """批 58b：迁移期特征开关（29 §六）。system_config 键 preserve_current_normalization。
+
+    True（默认，键不存在）=竞价条保留现行原样落库（58 收编期行为等价）；
+    False（键=off/0/false）=启用归一义务①竞价条并入首根（58b 数据变更）。读失败=True。
+    """
+    try:
+        with get_conn() as conn:
+            cur = conn.execute("SELECT value FROM system_config WHERE key='preserve_current_normalization'")
+            r = cur.fetchone()
+            return not (bool(r) and str(r[0]).lower() in ("off", "0", "false"))
+    except Exception:
+        return True
+
+
 def _get_rate_ds(provider: str):
     """按 provider 选限速/熔断 DataSource（fallback tushare）。
 
@@ -796,14 +811,15 @@ def _read_sync_kind(sync_id: str) -> dict:
 
 
 def _fetch_supply(adapter, *, kind: str, sub_kind: str | None, symbols: tuple[str, ...],
-                  start: str, end: str, freq: str):
+                  start: str, end: str, freq: str, preserve: bool = True):
     """构造 supply DataRequest → 直接 adapter.fetch（决策 4：不走 routing.resolve）。"""
     from datetime import datetime as _dt
     from src.quant_common.contract import DataRequest
     rng = (_dt.strptime(start, "%Y%m%d"), _dt.strptime(end, "%Y%m%d"))
     return adapter.fetch(DataRequest(
         kind=kind, symbols=symbols, temporality="historical", sub_kind=sub_kind,
-        range_=rng, freq=freq, consumer_tag="sync", mode="supply"))
+        range_=rng, freq=freq, consumer_tag="sync", mode="supply",
+        preserve_current_normalization=preserve))
 
 
 def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_date: str,
@@ -891,6 +907,7 @@ def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
     if freq is None:
         return {"pulled": 0, "saved": 0, "start": end_date, "failed_dates": [],
                 "expected_days": None, "actual_days": None}
+    preserve = _preserve_normalization()   # 批 58b：竞价条并入开关（默认 True 保留现行，循环外读一次）
     ts_codes = _list_static_ts_codes("astock")
     total = len(ts_codes)
     total_pulled = 0
@@ -900,7 +917,7 @@ def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
         try:
             with rate_limit_context(ds, "daily"):
                 frame = _fetch_supply(adapter, kind="bar_minute", symbols=(tc,),
-                                      start=start, end=end_date, freq=freq)
+                                      start=start, end=end_date, freq=freq, preserve=preserve)
             if frame.rows:
                 total_saved += save_bars(freq, list(frame.rows))
                 total_pulled += len(frame.rows)

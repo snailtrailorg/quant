@@ -234,6 +234,39 @@ def split_minute_range(start: str, end: str, freq: str) -> list[tuple[str, str]]
     return segs
 
 
+def merge_auction_into_first(df: pd.DataFrame) -> pd.DataFrame:
+    """归一义务①（28 §3.2/§5.2）：竞价条（09:30）并入首根（09:31）。
+
+    Tushare stk_mins 的 09:30:00 条是开盘集合竞价统计条（含竞价撮合量），按 symbol+交易日
+    并入首根 09:31：volume/amount 累加、open 取竞价条 open、high/low 与竞价价取 max/min
+    （跳空日竞价价即首根极值——漏并则分钟聚合≠日线，首根系统性缺竞价量）。只滤条不归量=首根
+    每天每标的触发固定对账 diff。无 09:30 或 09:31 条则原样返回（幂等）。批 58b 启用。
+    """
+    if df is None or df.empty or "trade_time" not in df.columns:
+        return df
+    hhmm = df["trade_time"].str[11:16]
+    if (hhmm == "09:30").sum() == 0:
+        return df
+    df = df.copy()
+    drop_idx: list = []
+    for _, g in df.groupby(["ts_code", "trade_date"], sort=False):
+        a = g[hhmm[g.index] == "09:30"]
+        f = g[hhmm[g.index] == "09:31"]
+        if a.empty or f.empty:
+            continue
+        arow, frow = a.iloc[0], f.iloc[0]
+        fi = f.index[0]
+        df.loc[fi, "vol"] = float(frow.get("vol") or 0) + float(arow.get("vol") or 0)
+        df.loc[fi, "amount"] = float(frow.get("amount") or 0) + float(arow.get("amount") or 0)
+        df.loc[fi, "open"] = arow.get("open")
+        df.loc[fi, "high"] = max(float(frow.get("high") or 0), float(arow.get("high") or 0))
+        df.loc[fi, "low"] = min(float(frow.get("low") or 0), float(arow.get("low") or 0))
+        drop_idx.append(a.index[0])
+    if drop_idx:
+        df = df.drop(index=drop_idx)
+    return df
+
+
 def pull_minute(ts_code: str, freq: str, start_date: str, end_date: str | None = None) -> pd.DataFrame:
     """拉取分钟线（stk_mins 接口，需 2000 积分）。
 
