@@ -73,9 +73,14 @@ def _read_intent(r):
         return None
     try:
         import json as _json
-        return _json.loads(raw)
+        data = _json.loads(raw)
     except Exception:
         return None
+    if not isinstance(data, dict):
+        return None
+    if not isinstance(data.get("target", ""), str) or not isinstance(data.get("snapshot"), (int, float)):
+        return None
+    return data
 
 
 def _boot_dispatch(r, instance_name: str) -> tuple[str, int]:
@@ -101,7 +106,7 @@ def _boot_dispatch(r, instance_name: str) -> tuple[str, int]:
                 logger.error("guarded 拒接管（gen 污染，期望=%d），exit 1", expected_gen)
                 raise SystemExit(1)
             time.sleep(5)   # -2 旧 lease 挡（旧化身 TTL 30s 未过期）→ 重试
-        logger.error("guarded 3 次重试耗尽（旧 lease 挡），exit 1")
+        logger.error("guarded 3 次重试耗尽（旧 lease 挡或存储不可达），exit 1")
         raise SystemExit(1)
     # intent 不存在：active_instance 仲裁
     active = None
@@ -229,11 +234,11 @@ def main() -> None:
 
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB）———
     interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
-    row_id = int(interface_row) if interface_row else None
     try:
+        row_id = int(interface_row) if interface_row else None
         setting = _build_xtp_setting(row_id=row_id)
     except Exception as e:
-        logger.error("XTP 凭证取数失败（row_id=%s），exit 78: %s", row_id, e)
+        logger.error("XTP 凭证取数失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
         raise SystemExit(78)
     md_api.connect(setting["账号"], setting["密码"], int(setting["客户号"]),
                    setting["行情地址"], int(setting["行情端口"]), setting.get("行情协议", "TCP"), 3,
@@ -348,8 +353,9 @@ def main() -> None:
 
         M5：前置查 intent——见切换意图则不再续租（交由 _intent_poll 让位）。
         """
-        if _read_intent(r) is not None:
-            return
+        intent = _read_intent(r)
+        if intent is not None and intent.get("target", "") != instance_name:
+            return   # 被切走者：不再续租，交由 _intent_poll 让位（target==自己仍续租，防泄漏 exit 5）
         try:
             renewed = r.eval(_LEASE_RENEW_LUA, 1, LEASE_KEY, my_uuid, "30")
             if not int(renewed):

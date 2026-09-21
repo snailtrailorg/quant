@@ -212,11 +212,11 @@ class _PGWriter(threading.Thread):
 def _lease_acquire(r, instance_name: str = "") -> tuple[bool, str, int]:
     """租约 + 代次（R-DL4）。返回 (ok, uuid, gen)。区分 Valkey 不可达与 NX 失败（评审陷阱 8）。
 
-    M5：uuid 改 env 优先（HUB_UUID 由 switch.py 注入给 B，无则 token_hex）；normal 冷启
+    M5：uuid 运行时 token_hex（A/B 同，v15 砍 HUB_UUID）；normal 冷启
     SET active_instance=INSTANCE_NAME（bootstrap，仲裁从首启成立）。
     """
     import secrets
-    uuid_ = os.environ.get("HUB_UUID") or secrets.token_hex(8)
+    uuid_ = secrets.token_hex(8)
     try:
         got = r.set(LEASE_KEY, uuid_, nx=True, ex=30)
     except Exception as e:

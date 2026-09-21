@@ -19,8 +19,6 @@ import subprocess
 import sys
 import time
 
-signal.signal(signal.SIGHUP, signal.SIG_IGN)   # M5：confirm 阻塞驻留，忽略 SIGHUP 防关终端杀
-
 GEN_KEY = "hub:gen"
 LEASE_KEY = "hub:lease"
 INTENT_KEY = "hub:switch:intent"
@@ -79,6 +77,20 @@ def _read_hb_gen(r) -> int | None:
         return None
 
 
+def _wait_hb_gen(r, expected: int, timeout: float) -> int | None:
+    """轮询心跳 gen >= expected（B 心跳 ~5-15s 后首跳，单次读必撞陈旧心跳，须轮询）。"""
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        g = _read_hb_gen(r)
+        if g is not None:
+            last = g
+            if g >= expected:
+                return g
+        time.sleep(2)
+    return last
+
+
 def _has_running_tasks() -> bool:
     from src.data_platform.db import get_conn
     try:
@@ -101,10 +113,18 @@ def _set_intent(r, target: str) -> int:
 
 
 def _wait_lease_empty(r, timeout: float) -> bool:
-    """轮询 lease 空（≤2s 间隔）：A 让位 CAS DEL 或 A 崩 30s TTL 过期。"""
+    """轮询 lease 空（≤2s 间隔）：A 让位 CAS DEL 或 A 崩 30s TTL 过期。
+
+    读失败 fail-closed（继续等），不误判「lease 空」提前启动目标。
+    """
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if _get(r, LEASE_KEY) is None:
+        try:
+            raw = r.get(LEASE_KEY)
+        except Exception:
+            time.sleep(2)   # 读失败：继续等，不误判空
+            continue
+        if raw is None:
             return True
         time.sleep(2)
     return False
@@ -175,8 +195,8 @@ def cmd_confirm(target: str) -> int:
     if not _wait_takeover(r, snapshot, target, 30):
         print("✗ 等目标接管超时（30s，退出码 4）", file=sys.stderr)
         return 4
-    # (g) 数据流证据（心跳 gen==snapshot+1，防假接管）
-    hb_gen = _read_hb_gen(r)
+    # (g) 数据流证据（心跳 gen==snapshot+1，防假接管；轮询，B 心跳 ~5-15s 后首跳）
+    hb_gen = _wait_hb_gen(r, snapshot + 1, 20)
     if hb_gen is None or hb_gen != snapshot + 1:
         print(f"⚠ 心跳 gen={hb_gen} 未达 snapshot+1={snapshot+1}（疑似假接管，待次日验证）", file=sys.stderr)
     # (h) 收尾
@@ -257,6 +277,7 @@ def cmd_diff(date: str) -> int:
 
 
 def main() -> int:
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)   # M5：confirm 阻塞驻留，忽略 SIGHUP 防关终端杀（下沉主函数，避免导入副作用）
     args = sys.argv[1:]
     if not args:
         print(__doc__, file=sys.stderr)
