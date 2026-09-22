@@ -23,8 +23,8 @@
 ## 文件结构
 
 - `server/vendor/emt/`：SDK 头文件 + `lib/linux/*.so`（编译/部署资产；git 忽略，部署时放服务器）
-- `server/src/strategy_framework/emd/`：C++ pybind11 绑定源码（`bind_quote.cpp` + `py_spi.h` trampoline）+ `setup.py`/CMake 编译
-- `server/src/strategy_framework/md_gateways/emq.py`：`EmqMdGateway(MdGateway)` Python 层
+- `server/src/strategy_framework/emd/`：C++ pybind11 绑定源码（`bind_quote.cpp` trampoline 内联）+ **`build.sh` 编译脚本**（可复现，本地 3.10/服务器 3.11 各自 venv 重编）
+- `server/src/strategy_framework/md_gateway.py`：**`EmqMdGateway(MdGateway)` 与 XtpMdGateway 同文件**（单文件不拆包——两个网关实现共 ~300 行，简洁优先；P1 决策）
 
 ## 关键映射（tick 契约，对齐 md_gateway.py docstring）
 
