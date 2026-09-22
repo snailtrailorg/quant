@@ -19,8 +19,18 @@ parts.py 的公共件在 main.py 顶部 import 重导出——既有测试导入
 
 | 符号 | 签名 | 说明 |
 |---|---|---|
-| `main()` | 入口 `python -m src.md_hub.main` | systemd `quant-md-hub@quant` 单实例 |
+| `main()` | 入口 `python -m src.md_hub.main` | systemd `quant-md-hub@quant`（A 现任）/ `@quant2`（B 继任，按需启动）——**单活双实例**（M5 批 60：active_instance 仲裁，任一时刻至多一个写者） |
+| `_boot_dispatch(r, instance_name)` | `-> (uuid, gen)` | M5 boot 单判定+dispatch 分叉（插 `_lease_boot` 前）：intent.target==自己→guarded / intent.target≠自己→exit(6) / intent 无且 active_instance≠自己→exit(6) / 否则→normal 冷启 |
+| `_read_intent(r)` | `-> {snapshot,target}\|None` | 读 `hub:switch:intent`（dict+字段类型校验，坏值返 None） |
+| `_intent_poll()` | EngineLoop 钩子 5s | M5：见 intent 且 target≠自己 → CAS DEL lease → exit(0) 优雅让位 |
 | `LATEST_TICK_PREFIX` | 重导出 | test_stock_detail 经 main 取用 |
+
+**switch.py（M5 切换编排器，批 60）**
+
+| 符号 | 说明 |
+|---|---|
+| `main()` 子命令 | `confirm <target>`（阻塞式：闸→target 校验→SET intent→等让位→quant-svc start 目标→等接管+心跳 gen 证据→校验 active_instance→DEL intent→审计）/ `check` / `abort` / `diff <date>`（首日 bar_hub vs bar_1min 全量口径比对） |
+| 退出码 | 0=成功 / 2=有 running 任务 / 3=等让位超时 / 4=等接管超时 / 5=target 非法；SIGHUP 忽略（confirm 阻塞驻留防关终端杀，下沉 main()） |
 
 **parts.py（数据面部件）**
 
@@ -28,18 +38,21 @@ parts.py 的公共件在 main.py 顶部 import 重导出——既有测试导入
 |---|---|---|
 | `MinuteAggregator` | `on_tick(symbol, tick) -> dict\|None`；`flush_minute(minute_slot) -> list[dict]`；`flush_symbol(symbol) -> dict\|None` | 分钟聚合（分钟末标注/累计差分含冷启动基线/跨日清零/untrusted 双门限+收盘桶豁免 11:29/14:59/15:00）；flush_minute=三窗分窗 finalize（pop 幂等，P2 修复批 08-28 替代 flush_all）；flush_symbol=退订前防丢在桶最后一分钟 |
 | `_PGWriter` | `push(bar)`；daemon 线程 | bar 批量落库（10s 批/有界队列 5000 溢出丢最旧，不反压分发） |
-| `_lease_boot(r)` / `_lease_acquire(r)` | `-> (uuid, gen)` | 租约启动（先拿权再连行情）：3 次重试；真让位 SystemExit(3)，耗尽 os._exit(4)；区分存储不可达与 NX 失败 |
+| `_lease_boot(r, instance_name="")` / `_lease_acquire(r, instance_name="")` | `-> (uuid, gen)` | 租约启动（先拿权再连行情）：3 次重试；真让位 SystemExit(3)，耗尽 os._exit(4)；区分存储不可达与 NX 失败；uuid 运行时 token_hex；normal 冷启 SET active_instance（M5 bootstrap） |
+| `_lease_acquire_guarded(r, expected_gen, target, uuid_)` | `-> (ok, uuid, gen)` | M5 切换目标接管原子 Lua（首接 INCR+抢 lease+SET active_instance / 重启只抢 lease / 污染拒零污染，校验在 INCR 前）；-2=旧 lease 挡（3 次重试）/0=存储不可达 |
+| `_lease_release(r, uuid_)` | `-> bool` | M5 让位 CAS DEL lease（值==my_uuid 才删） |
 | `_write_latest_tick(r, symbol, tick, fail_ts)` | | 最新 tick 快照（0 价过滤前置/连败 60s 退避防半死 Valkey 拖死主链） |
 | `ThinGateway` | BaseGateway 子类 | 仅事件转发；connect/send_order 等抽象方法全 stub（数据面禁交易 R-HALT1 代码级保证） |
 | `_project_symbol(tick)` | TickData→`600000.SHSE` | vnpy SSE→项目 SHSE |
 | `_in_bar_session(t)` | `datetime -> bool` | 聚合喂入门（P2 修复批 08-28）：`930<=hm<1130 or 1300<=hm<1501`——盘前/午休尾/收盘后快照不进聚合，冷启动基线顺延至 09:30 后首笔（与 vnpy 首笔建基线一致化）；仅拦 agg 喂入，latest_tick/心跳不受影响 |
-| `LEASE_KEY`/`GEN_KEY`/`SURRENDER_KEY`/`_LEASE_RENEW_LUA` | 常量 | 租约三键 + Lua CAS 续期脚本 |
+| `LEASE_KEY`/`GEN_KEY`/`SURRENDER_KEY`/`INTENT_KEY`/`ACTIVE_INSTANCE_KEY`/`_LEASE_RENEW_LUA`/`_GUARDED_ACQUIRE_LUA`/`_CAS_DEL_LUA` | 常量 | 租约三键 + M5 切换两键（intent{snapshot,target} EX300 / active_instance 无 TTL）+ Lua 脚本三份（CAS 续期/guarded 条件推进/CAS DEL） |
 
 ## 行为契约
 
 - 分发：`XADD hub:bars:{symbol}` MAXLEN~5000，字段 `gen/seq/ts/pub_ts/untrusted/ohlc/volume/amount/tick_count`；seq 成功后才占号（失败不留洞）；事件线程 on_tick 与主循环 flush 经 seqs_lock 互斥
 - 最新 tick：`SET hub:latest_tick:{symbol}` TTL 65s（三档项 12）——价量+五档+涨跌停，每 tick 写；断流 65s 自动过期（消费方 `stock_detail._quote_block` 降级腾讯源）
-- fencing：租约 `hub:lease`（SET NX EX30 + Lua CAS 续期 5s 一续）；`gen = INCR hub:gen` 永不回退。**退出码**：3=租约让位（unit StartLimit 接管）/4=启动重试耗尽/5=续期失败被抢占/1=事件线程死（on_fatal 告警后）/0=正常收尾
+- fencing：租约 `hub:lease`（SET NX EX30 + Lua CAS 续期 5s 一续）；`gen = INCR hub:gen` 永不回退。**退出码矩阵（M5 批 60 扩）**：0=优雅让位（见 intent 主动让位）/1=事件线程死·guarded 污染拒（重启码）/3=真让位（NX 失败他人持有）/4=启动重试耗尽（重启码）/5=续期失败被抢占（重启码）/6=boot 闸拦截（被切走者·非现任）/78=B 凭证取数失败 fail-fast（禁 .env fallback）；unit `RestartPreventExitStatus=0 3 6 78`
+- M5 切换协议（批 60 v15）：boot 单判定（intent.target 放行目标/拦截被切走者 + active_instance 兜切换后重启仲裁）；guarded Lua 三态原子（正切 B/反切 A 通用）；holder 校验=active_instance==target（等强度代理）；worker 侧 gen 跳变重暖机复用（14 号现状）
 - 订阅真相源（**四源**）：`live_task(running).symbol ∪ system_config.hub_shadow_symbols ∪ minute_history_start 池成员 ∪ hub_transient_subs(30min TTL 临时)`；读失败沿用旧集。diff 增删（先加后退）/全量幂等重放（**先退 removed** 防订阅泄漏）/重连沿强放/退订前 flush_symbol——语义收编 `runtime.subs.SubscriptionManager`（纯逻辑不持周期，节奏由钩子注册）
 - 落库：`bar_hub` 表（_PGWriter 独立线程批量，ON CONFLICT 幂等）
 - 心跳：见下方字段表。tick 断流 300s（时段+已有 tick 基线）**只告警（文案带 runbook），不自杀**（S6 修订）——L2 段收编 `runtime.mdlink.MdSessionSupervisor`（定时续航/反应式重登/恢复/双通道限频告警）
@@ -66,7 +79,8 @@ EngineLoop(loop.py, step=5s) ──到期驱动──
 
 | 钩子 | period | 语义 |
 |---|---|---|
-| `lease-renew` | 5s | 租约 Lua CAS 续期（失败 exit 5 在钩子内自带；网络异常容忍一轮） |
+| `lease-renew` | 5s | 租约 Lua CAS 续期（失败 exit 5 在钩子内自带；网络异常容忍一轮；M5 前置查 intent——target≠自己才停续租，target==自己仍续租防泄漏 exit 5） |
+| `intent-poll` | 5s | M5：轮询切换意图（见 intent 且 target≠自己 → CAS DEL lease → exit(0) 优雅让位） |
 | `md-edge` | 每步 | MD 重连沿 → 强制全量重放（XTP 重连不恢复订阅） |
 | `subs-poll` | 15s | 订阅 diff（旧 counter%3） |
 | `subs-replay` | 60s | 全量幂等重放（旧 %60<10 窗口法——差异见下） |
@@ -106,7 +120,7 @@ vnpy（EventEngine/MdApi）· Valkey · PG（bar_hub/system_config/live_task/poo
 
 ## 读写表
 
-bar_hub（写）· system_config（读）· live_task（读）· pools+pool_symbols（读，池源）· hub_transient_subs（读 + DELETE 过期行）
+bar_hub（写）· system_config（读）· live_task（读）· pools+pool_symbols（读，池源）· hub_transient_subs（读 + DELETE 过期行）· external_interface（读，M5 B 实例按 HUB_INTERFACE_ROW row_id 取凭证）· audit_log（写，switch.py 切换审计）
 
 ## 最近变更
 

@@ -47,9 +47,11 @@ quant-live-task@N（hub 模式 worker）：ThinGateway+XtpTdApi（只连 TD）+ 
 - 拿不到租约的两种情况必须区分（评审陷阱 8）：**Valkey 连接异常**（重试+告警，不退出）vs **NX 失败且 lease 存在**（真有他人 → 写 surrender 标记退出）
 - gen 自 `INCR hub:gen` 永不回退；旧 hub 分区恢复后续期失败 → 停止 XADD
 
+> **M5 演进注记（批 60 v15，2026-09-22）**：租约语义原样保留，新增切换协议两键：`hub:switch:intent`（{snapshot,target} EX 300）与 `hub:active_instance`（现任实例名，无 TTL）。boot 单判定（intent.target 放行目标/拦截被切走者 + active_instance 兜切换后重启仲裁）；normal 冷启 `_lease_acquire` 增 SET active_instance；**guarded Lua `_lease_acquire_guarded`**（切换目标专用：首接 INCR+抢 lease+SET 现任 / 重启只抢 lease / 污染拒，三态原子，校验在 INCR 前零污染）；运行期 `_intent_poll`（5s 轮询见 intent 且 target≠自己 → CAS DEL lease → exit(0) 优雅让位），`_lease_renew` 前置查 intent（target≠自己才停续租）。详见 `docs/任务/批60-方案集.md` v15。
+
 ### 2.5 持久化/心跳/看门狗
 - bar 落库：独立线程+有界队列，10s 批量 `ON CONFLICT (symbol,ts) DO UPDATE`；**影子期写 `bar_hub` 独立表**（不碰 bar_1min，评审 F2/简化 5），切流验证后改写 bar_1min（带 source='hub'）
-- 心跳键 `quant:hb:md-hub`：pid/gen/订阅数/最新 tick ts/bar 计数/Tick 速率（TTL 90s）
+- 心跳键 `quant:hb:md-hub`：pid/gen/订阅数/最新 tick ts/bar 计数/Tick 速率（TTL 90s）——**M5 后 A/B 实例同写此主键**（单活保证唯一写者，B 无 `:2` 后缀）
 - 看门狗四件套（评审 S6 补全）：WatchdogSec+sd_notify / 事件线程死亡检测退出 / StartLimit+OnFailure / **tick 断流 300s（交易时段+今日已收 tick）告警+退出**——hub 活着但行情死是全场静默失明，必须自杀重启
 - hub 重启：重连→重订阅→seq 归零随 gen+1（**v1 的"seq 续用流内最大"作废**，评审 S1 自相矛盾项）→ 不补发历史（缺口由 worker gen 跳变暖机覆盖，见 3.3）
 
@@ -105,6 +107,8 @@ timer_tasks（每 5s）：停止条件/live_task.status 检查 / 心跳写 Valke
 照旧（live_task.status/熔断沿撤单/account_snapshot 单写者）。R-TD2 校验**升级为全部任务**（含 direct，迁移并存期防同账户双 TD 互踢，评审挂名项）。
 
 ## 4. systemd（R-BR15，v1 不变）
+
+> **M5 演进注记（批 60 v15）**：模板单元改 `Environment=INSTANCE_NAME=%i`（实例名注入）+ `RestartPreventExitStatus=0 3 6 78`；退出码矩阵扩为 0=优雅让位/1=vnpy缺失·fatal（重启码）/3=真让位/4=租约重试（重启码）/5=续租丢（重启码）/6=boot 闸拦截/78=EX_CONFIG（B 凭证取数失败 fail-fast）。B 实例（`quant-md-hub@quant2`）经 drop-in 注入 `HUB_INTERFACE_ROW`（B 账号行 id）按需启动，无待命态。
 hub 单元：WatchdogSec=90/StartLimit 5/300s/OnFailure/MemoryMax=1G/After=network-online。
 worker 单元：+`After= + Wants= quant-md-hub@quant.service`（启动顺带拉起；禁 PartOf/BindsTo）。
 
@@ -131,3 +135,5 @@ R-AV1→2.5/4 | R-AV2→3.2(timer hub心跳+无bar冻结) | R-AV3→2.5/3.3(gen�
 致命：F1 gen=INCR 计数器（§2.3/2.4）｜F2 ts 分钟末标注+影子期独立表（§2.2/2.5/5）｜F3 warmup 只填 history 砍 replay 机制（§3.3）。
 严重：S1 seq 归零定案（§2.5）｜S2 11:30:05 补 flush（§2.2）｜S3 volume/amount 差分（§2.2）｜S4 gen 跳变触发重暖机（§3.2/3.3）｜S5 任务级开关（§1/5）｜S6 hub 断流自杀+worker 无 bar 冻结（§2.5/3.2）｜S7 socket_timeout+循环伪代码（§3.2）｜S8 order_prefix 含 epoch（§3.1）。
 陷阱：BaseGateway 7 抽象 stub/log_level int/协议 str（§2.1/3.1/前言）｜XGROUP 先建组后回放（§3.3）｜Valkey≥7+实例级 noeviction（§2.3）｜Valkey 未就绪与 NX 失败区分（§2.4）｜续期 Lua CAS（§2.4）｜td connect_status 轮询检测重连沿（§3.1）｜R-TD2 全任务校验（§3.4）。
+
+> **M5 演进注记（批 60 v15，2026-09-22）**：单实例租约防脑裂演进为**单活双实例切换协议**（A 现任 + B 按需启动 + active_instance 仲裁）——hub 仍是单活（任一时刻至多一个写者），但支持计划性切换供应商账号。§2.4/2.5/4 已加注；协议全貌见 `docs/任务/批60-方案集.md` v15（20+ 轮评审收敛：Valkey 四键 + guarded Lua 条件推进 + boot 单判定，砍 stream_registry/影子预热/fencing token/待命模式）。
