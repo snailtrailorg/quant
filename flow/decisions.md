@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-09-22 · 批 60 M5 流协议五裁定（方案集 v16 定稿）
+
+- **M5 切换协议 = Valkey 四键 + guarded Lua + 无待命态**（推翻 28/29 蓝图的 stream_registry/影子预热/fencing token）：`hub:gen/lease/switch:intent{snapshot,target}/active_instance` 四键承载全部状态；B=A 让位后按需启动的正常 hub（非提前待命——main.py 单遍初始化决定「接管≈全量重启」，待命省不了连接时间）；「计划切换零丢包」降级为「切换仅限非交易时段 + 盘后回补兜底 + `switch.py diff` 口径比对」并已版本化注记进 28 §8.2/29 §八。
+- **guarded Lua 三态原子是切换核心**：首接（gen==snapshot→INCR+抢 lease+SET active_instance）/重启（gen==snapshot+1→只抢 lease）/污染（→拒，校验在 INCR 前零污染），正切 B/反切 A 通用；`active_instance==target` 是「目标已接管」的等强度代理（三等价：active_instance==target ⟺ guarded 成功 ⟺ 持 lease），由此砍掉 HUB_UUID 预定注入（无特权通道回写 drop-in）。
+- **boot 单判定 + intent 记 target**：切换方向建模在 intent（正切 target=quant2/反切 target=quant），boot 闸据此放行目标/拦截被切走者（exit 6 Prevent）；active_instance 只兜「切换完成后服务器重启」仲裁，normal 冷启也 SET（首启即生效）。
+- **退出码矩阵 Prevent=0 6 78，3=真让位回归重启码**（staging 实证）：SIGTERM 不 DEL lease，正常重启有 30s lease 滞后窗，靠 exit(3)→on-failure 30s 重拉自愈；切换窗复活拦截由 boot 闸 exit(6) 独立承接——一码多路径，Prevent 决策逐路径判定。
+- **评审方法论**（用户原则沉淀）：方案打磨期「换强模型对抗式单轮」优于同模型多轮（两轮 opus 深审独立命中同一 P0）；**自己先往死里推演主场景（正切/反切/重启/崩溃）再交评审**——v11 boot 双闸正反切矛盾即自推演发现，评审抓「设计对不对」、自推演抓「实现会不会卡」；盲审不收敛=前期工作不够，但「方案已成熟+审核通过」也要敢进编码，不能无限打磨。
+
+---
+
 ## 2026-09-13 · 表格交互与个人中心四批裁定
 
 - **列宽拖拽全站+持久化（批17）**：EP v1 原生拖拽+TableShell 包装补 localStorage（colw.*）+双击回声明宽；v2 三表自实现手柄（v2colwidth）。业界调研（AG Grid/vxe-table/TanStack）裁定不引库——能力缺口 ~300 行自建补齐，迁移 2-4 周零收益。
