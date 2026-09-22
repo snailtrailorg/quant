@@ -114,3 +114,116 @@ class TestDataBus:
         with patch("src.data_platform.routing.resolve", return_value=chain):
             out = bus.get("bar_daily", _req())
         assert out is chain.fetch.return_value
+
+
+def _min_frame(minutes):
+    """分钟 bar 帧（2026-09-22 上午，分钟末标注 ts=10:m:00 UTC 锚测试——实产为上海本地对应 UTC）。"""
+    from src.quant_common.contract import to_contract
+    rows = [("600000.SHSE", "1min", as_utc(datetime(2026, 9, 22, 10, m)), 10.0, 10.5, 9.8, 10.2,
+             1000.0, 10000.0, 1.0, "hub") for m in minutes]
+    return to_contract(rows, source="local_pg", kind="bar_minute", freq="1min")
+
+
+def _xrev(minutes, dup_ts=None):
+    """xrevrange 返回（新→旧）；dup_ts 分钟重复一次（同 ts 双 gen 交界）。"""
+    entries, seq = [], 0
+    for m in reversed(minutes):
+        ts = as_utc(datetime(2026, 9, 22, 10, m)).isoformat()
+        seq += 1
+        entries.append((f"1-{seq}", {"gen": "163", "seq": str(seq), "ts": ts, "close": "10.0"}))
+        if m == dup_ts:
+            seq += 1
+            entries.append((f"1-{seq}", {"gen": "164", "seq": "1", "ts": ts, "close": "10.0"}))
+    return entries
+
+
+class TestSubscribe:
+    """M5 subscribe 真实现（批 60 C3）：回放截断+去重+未达降级+poll。"""
+
+    def test_replay_truncate_and_dedupe(self):
+        """水位线截断（严格新于）+ ts 去重（gen 交界同 ts）+ poll 起点最新 id。"""
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        r = MagicMock()
+        rows = _xrev([1, 2, 3, 4, 5], dup_ts=4)
+        r.xrevrange.return_value = rows
+        wm = as_utc(datetime(2026, 9, 22, 10, 3))
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=wm)
+        with patch("src.data_platform.databus._r", return_value=r):
+            h = bus.subscribe(sub)
+        tss = [datetime.fromisoformat(m["ts"]).minute for m in h.bars]
+        assert tss == [4, 5]            # 严格新于 10:03 + 去重（gen 163/164 同 ts 只留一）
+        assert h.warmup is None
+        assert h.last_id == rows[0][0]  # poll 起点=流内最新 id
+        assert h.stream_key == "hub:bars:600000.SHSE"
+
+    def test_replay_no_watermark_returns_all(self):
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        r = MagicMock()
+        r.xrevrange.return_value = _xrev([1, 2, 3])
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=None)
+        with patch("src.data_platform.databus._r", return_value=r):
+            h = bus.subscribe(sub)
+        assert [datetime.fromisoformat(m["ts"]).minute for m in h.bars] == [1, 2, 3]
+        assert h.warmup is None
+
+    def test_underrun_falls_back_to_get_bars(self):
+        """回放未达水位线（剪尾/断流）→ 告警 + 降级 get_bars 补 warmup 帧。"""
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        r = MagicMock()
+        r.xrevrange.return_value = _xrev([1, 2, 3])
+        wm = as_utc(datetime(2026, 9, 22, 15, 0))   # 水位线超前于流内全部根
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=wm)
+        frame = _frame()
+        with patch("src.data_platform.databus._r", return_value=r), \
+             patch.object(bus, "_local_fetch", return_value=frame) as lf:
+            h = bus.subscribe(sub)
+        assert h.bars == [] and h.warmup is frame
+        assert lf.call_args[0][0].kind == "bar_minute"   # freq 按 kind 推断
+
+    def test_poll_advances_last_id_and_survives_error(self):
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        r = MagicMock()
+        r.xrevrange.return_value = _xrev([1])
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",))
+        with patch("src.data_platform.databus._r", return_value=r):
+            h = bus.subscribe(sub)
+        r.xread.return_value = [("hub:bars:600000.SHSE", [("1-9", {"gen": "163", "ts": "x", "close": "1"})])]
+        assert len(h.poll()) == 1 and h.last_id == "1-9"
+        r.xread.side_effect = Exception("down")
+        assert h.poll() == []          # 失败不崩，下次再试
+        h.close()
+        assert h.poll() == []          # close 后静默
+
+
+class TestWatermark:
+    """M5 连续无缺水位线（分钟网格锚：午休/日界/缺口）。"""
+
+    def test_continuous_minutes(self):
+        from src.data_platform.databus import DataBus
+        assert DataBus._watermark(_min_frame([1, 2, 3]), "1min").minute == 3
+
+    def test_gap_stops_before_hole(self):
+        from src.data_platform.databus import DataBus
+        assert DataBus._watermark(_min_frame([1, 2, 5]), "1min").minute == 2
+
+    def test_lunch_anchor_bridges(self):
+        """11:30 → 13:01 午休锚=期望衔接（缺口=13:01 起回走跨锚连续）。"""
+        from src.quant_common.contract import to_contract
+        from src.data_platform.databus import DataBus
+        rows = [("600000.SHSE", "1min", as_utc(datetime(2026, 9, 22, 11, 30)), 1, 1, 1, 1, 1, 1, 1, "hub"),
+                ("600000.SHSE", "1min", as_utc(datetime(2026, 9, 22, 13, 1)), 1, 1, 1, 1, 1, 1, 1, "hub")]
+        wm = DataBus._watermark(to_contract(rows, source="hub", kind="bar_minute", freq="1min"), "1min")
+        assert wm == as_utc(datetime(2026, 9, 22, 13, 1))   # as_utc=按上海本地解释（11:30→13:01 跨锚连续）
+
+    def test_daily_freq_keeps_max_ts(self):
+        """日线无交易日历网格 → 最大 ts 语义（挂账 daily 网格需 market_hours）。"""
+        from src.data_platform.databus import DataBus
+        assert DataBus._watermark(_frame(), "1D") == as_utc(datetime(2026, 9, 18))
