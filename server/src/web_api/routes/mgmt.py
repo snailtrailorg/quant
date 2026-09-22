@@ -89,6 +89,24 @@ def _validate_iface(provider: str, market: str, exchanges, capabilities) -> tupl
     return sorted(caps), (list(exchanges) if exchanges else None)
 
 
+def _validate_credentials(provider: str, credentials: str) -> None:
+    """写侧凭证校验（批63）：provider 有 FIELD_SCHEMA 且 credentials 非空时，
+    须合法 JSON 对象且 secret 字段非空（对标 IM required_fields）；无 schema 的 stub provider 跳过。"""
+    from src.data_platform.interfaces import get_interface_provider
+    inst = get_interface_provider(provider)
+    if not inst or not inst.FIELD_SCHEMA or not credentials:
+        return
+    try:
+        cred = json.loads(credentials)
+    except (TypeError, ValueError):
+        raise ApiError(400, "IFACE_CRED_INVALID", "credentials 须为合法 JSON 对象")
+    if not isinstance(cred, dict):
+        raise ApiError(400, "IFACE_CRED_INVALID", "credentials 须为 JSON 对象")
+    missing = [f for f in inst.required_fields if not cred.get(f)]
+    if missing:
+        raise ApiError(400, "IFACE_CRED_REQUIRED", f"缺少必填凭证字段：{missing}")
+
+
 def _normalize_params(params) -> dict:
     """params 归一为 dict（str=旧端点 JSON 字符串惯例/新端点对象皆可；非法 400）。
 
@@ -141,10 +159,14 @@ def list_interface_providers(payload: dict = Depends(require_perm("read"))):
     """
     from src.quant_common.markets import PROVIDER_MARKET, EXCHANGES
     from src.data_platform.capabilities import provider_capabilities
+    from src.data_platform.interfaces import list_interface_schemas
+    schemas = list_interface_schemas()
     return {"providers": [
         {"provider": p, "market": m, "capabilities": sorted(provider_capabilities(p)),
          "market_exchanges": sorted(e for e, v in EXCHANGES.items() if v["market"] == m),
-         "default_exchanges": _default_exchanges(p)}   # 批55b 盲审修：perp 预填单所（防"不选=全部"文案与后端钉默认不一致）
+         "default_exchanges": _default_exchanges(p),   # 批55b 盲审修：perp 预填单所（防"不选=全部"文案与后端钉默认不一致）
+         "field_schema": schemas.get(p, {}).get("field_schema", []),      # 批63：凭证字段 schema（前端动态表单）
+         "params_schema": schemas.get(p, {}).get("params_schema", [])}    # 批63：参数字段 schema
         for p, m in sorted(PROVIDER_MARKET.items()) if provider_capabilities(p)
     ]}
 
@@ -154,6 +176,7 @@ def create_interface(req: InterfaceReq, payload: dict = Depends(require_perm("sy
     from src.quant_common.crypto import encrypt
     caps, exchanges = _validate_iface(req.provider, req.market, req.exchanges, req.capabilities)
     params = _normalize_params(req.params)
+    _validate_credentials(req.provider, req.credentials)   # 批63：secret 字段必填（对标 IM）
     enc = encrypt(req.credentials) if req.credentials else None
     domain = _DOMAIN_TRADING if "trading" in caps else _DOMAIN_DATA
     with get_conn() as conn:
@@ -208,6 +231,8 @@ def update_interface(iid: int, req: InterfaceReq, payload: dict = Depends(requir
     from src.quant_common.crypto import encrypt
     caps, exchanges = _validate_iface(req.provider, req.market, req.exchanges, req.capabilities)
     params = _normalize_params(req.params)
+    if req.credentials:   # 空=不改（三段语义），非空才校验 secret 字段
+        _validate_credentials(req.provider, req.credentials)
     enc = encrypt(req.credentials) if req.credentials else None   # 空=不改（三段语义）
     with get_conn() as conn:
         cur = conn.execute("SELECT capabilities FROM external_interface WHERE id=%s", (iid,))

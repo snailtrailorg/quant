@@ -84,9 +84,29 @@
             <div class="exch-note">{{ t('interfaces.exchangesNote') }}</div>
           </div>
         </el-form-item>
-        <el-form-item :label="t('common.credentialToken')">
-          <el-input v-model="form.credentials" type="password" show-password :placeholder="t('interfaces.credentialNote')" autocomplete="new-password" />
-        </el-form-item>
+        <template v-for="f in curFieldSchema" :key="f.key">
+          <el-form-item :label="schemaLabel(f)">
+            <el-input v-if="f.type === 'textarea'" v-model="form.creds[f.key]" type="textarea" />
+            <el-input v-else-if="f.type === 'number'" v-model.number="form.creds[f.key]" />
+            <el-switch v-else-if="f.type === 'boolean'" v-model="form.creds[f.key]" />
+            <el-select v-else-if="f.type === 'select'" v-model="form.creds[f.key]" style="width: 100%">
+              <el-option v-for="o in (f.options || [])" :key="o" :value="o" :label="f.option_label_key ? t(f.option_label_key) : o" />
+            </el-select>
+            <el-input v-else v-model="form.creds[f.key]" :type="f.secret ? 'password' : 'text'"
+                      show-password autocomplete="new-password" />
+          </el-form-item>
+        </template>
+        <template v-for="f in curParamsSchema" :key="'p' + f.key">
+          <el-form-item :label="schemaLabel(f)">
+            <el-input v-if="f.type === 'textarea'" v-model="form.params[f.key]" type="textarea" />
+            <el-input v-else-if="f.type === 'number'" v-model.number="form.params[f.key]" />
+            <el-switch v-else-if="f.type === 'boolean'" v-model="form.params[f.key]" />
+            <el-select v-else-if="f.type === 'select'" v-model="form.params[f.key]" style="width: 100%">
+              <el-option v-for="o in (f.options || [])" :key="o" :value="o" :label="f.option_label_key ? t(f.option_label_key) : o" />
+            </el-select>
+            <el-input v-else v-model="form.params[f.key]" />
+          </el-form-item>
+        </template>
         <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
       </el-form>
       <template #footer>
@@ -111,7 +131,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 
 const props = defineProps({ view: { type: String, required: true } })   // 'data' | 'trading'
 const emit = defineEmits(['loaded'])   // 批55b 盲审 A-P1-2：CRUD 后通知父组件（限流面板显隐联动）
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const allRows = ref([])   // 全量缓存（providers 到达后可重过滤）
 const rows = ref([])
@@ -164,11 +184,16 @@ onMounted(() => { load(); loadProviders() })
 
 function emptyForm() {
   return { id: null, name: '', provider: '', market: '', exchanges: [],
-           capabilities: [], credentials: '', params: {}, enabled: true, _code_caps: [] }
+           capabilities: [], creds: {}, params: {}, enabled: true, _code_caps: [] }
 }
 
 const marketExchanges = computed(() =>
   providers.value.find(p => p.provider === form.value.provider)?.market_exchanges || [])
+// 批63：凭证/参数字段 schema（据选定 provider 动态取；编辑态凭证留空=不改，密文不可回显）
+const curMeta = computed(() => providers.value.find(p => p.provider === form.value.provider) || {})
+const curFieldSchema = computed(() => curMeta.value.field_schema || [])
+const curParamsSchema = computed(() => curMeta.value.params_schema || [])
+const schemaLabel = f => (f.label_key && te(f.label_key)) ? t(f.label_key) : f.key
 // 并集：漂移能力（配置含代码外项）也显示为可勾选项——用户可取消勾掉修复漂移（盲审 A-P2-5）
 const availableCaps = computed(() =>
   Array.from(new Set([...(form.value._code_caps || []), ...(form.value.capabilities || [])])))
@@ -182,6 +207,8 @@ const onProviderPick = (p) => {
   form.value._code_caps = meta.capabilities
   form.value.capabilities = [...meta.capabilities]   // 新建默认全启用（可收窄）
   form.value.exchanges = [...(meta.default_exchanges || [])]   // perp 预填单所——所见即所得（盲审 B-P1-3）
+  form.value.creds = {}   // 批63：schema 随 provider 变，凭证/参数收集重置
+  form.value.params = {}
 }
 
 const openAdd = () => {
@@ -190,7 +217,7 @@ const openAdd = () => {
   dlg.value = true
 }
 const openEdit = (row) => {
-  form.value = { ...row, credentials: '', exchanges: row.exchanges || [],
+  form.value = { ...row, creds: {}, params: row.params || {}, exchanges: row.exchanges || [],
                  _code_caps: row.code_capabilities || row.capabilities }
   dlg.value = true
 }
@@ -198,9 +225,11 @@ const openEdit = (row) => {
 const onSave = async () => {
   saving.value = true
   try {
+    const credsFilled = Object.values(form.value.creds || {}).some(v => v !== '' && v !== null && v !== undefined)
     const payload = { name: form.value.name, provider: form.value.provider, market: form.value.market,
                       exchanges: form.value.exchanges && form.value.exchanges.length ? form.value.exchanges : null,
-                      capabilities: form.value.capabilities, credentials: form.value.credentials,
+                      capabilities: form.value.capabilities,
+                      credentials: credsFilled ? JSON.stringify(form.value.creds) : '',   // 批63：全空=不改（编辑态密文不可回显）
                       params: form.value.params || {}, enabled: form.value.enabled }
     if (form.value.id) await updateInterface(form.value.id, payload)
     else await createInterface(payload)
