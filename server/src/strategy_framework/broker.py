@@ -128,55 +128,29 @@ def runner_client_id(task_id: int | None) -> int | None:
     return (int(task_id) - 1) % 98 + 2
 
 
-def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -> dict:
-    """组装 vnpy XtpGateway SETTING（中文 key）。Broker DB 优先（PI3），.env XTP_TEST_* fallback。
+def xtp_setting_from(cred: dict, params: dict) -> dict:
+    """cred/params → vnpy XtpGateway SETTING（中文 key）纯组装（批 63 二：hub 网关插件经此消费）。
 
-    2026-08-19 从 strategy_runner.main 归位（hub/runner 双消费方；无 vnpy import——中文 key
-    是普通字符串，层序不破）。
-
-    client_id 覆写（2026-08-25）：XTP 平台规则=同账号同 client_id 仅一个 MD 会话
-    （官方 CreateQuoteApi 注释：多个客户端须用不同 client_id）——hub 与 direct runner
-    消费同一 broker 记录必然撞号（08-22 起任务 8 "user already exists" 全部真相）。
-    runner 侧传独立号（通道级配置 broker_config.params.client_id_runner）。
-
-    row_id 指定（M5：B 实例 HUB_INTERFACE_ROW 选账号）→ 取数失败**抛异常 fail-fast（exit 78）**，
-    禁 .env fallback（否则 B 静默跑在 A 的 XTP 账号上）。
+    cred 有 app_id → 从 DB 行凭证/参数组装；无 → .env XTP_TEST_* fallback（staging/无 DB 行
+    历史行为保留）。client_id 覆写由调用方处理（worker TD 派生号）。
     """
-    import logging
     import os
-    logger = logging.getLogger("strategy_framework")
-    try:
-        broker = get_broker("xtp", row_id)
-        if broker:
-            cred = broker.get_credentials()
-            params = broker._params or {}
-            if cred.get("app_id"):
-                setting = {
-                    "账号": cred.get("app_id", ""),
-                    "密码": cred.get("app_secret", ""),
-                    "客户号": int(cred.get("client_id", params.get("client_id", 1)) or 1),
-                    "行情地址": params.get("md_host", ""),
-                    "行情端口": int(params.get("md_port", 0) or 0),
-                    "交易地址": params.get("td_host", ""),
-                    "交易端口": int(params.get("td_port", 0) or 0),
-                    "行情协议": "TCP",
-                    "授权码": cred.get("auth_code", ""),
-                    "日志级别": "INFO",
-                }
-                if client_id:
-                    setting["客户号"] = int(client_id)
-                return setting
-        if row_id is not None:
-            # M5：指定 B 行但取数失败/凭证不完整 → fail-fast，禁 .env fallback
-            raise RuntimeError(f"external_interface 行 id={row_id} 无 XTP 凭证或凭证不完整")
-    except Exception as e:
-        if row_id is not None:
-            raise   # fail-fast 上抛（main.py 捕获 → exit 78）
-        logger.warning("Broker DB 取 XTP 凭证失败，fallback .env: %s", e)
-
+    if cred.get("app_id"):
+        return {
+            "账号": cred.get("app_id", ""),
+            "密码": cred.get("app_secret", ""),
+            "客户号": int(cred.get("client_id", params.get("client_id", 1)) or 1),
+            "行情地址": params.get("md_host", ""),
+            "行情端口": int(params.get("md_port", 0) or 0),
+            "交易地址": params.get("td_host", ""),
+            "交易端口": int(params.get("td_port", 0) or 0),
+            "行情协议": "TCP",
+            "授权码": cred.get("auth_code", ""),
+            "日志级别": "INFO",
+        }
     from dotenv import load_dotenv
     load_dotenv()
-    setting = {
+    return {
         "账号": os.environ.get("XTP_TEST_ACCOUNT", ""),
         "密码": os.environ.get("XTP_TEST_PASSWORD", ""),
         "客户号": int(os.environ.get("XTP_TEST_CLIENT_ID", "1")),
@@ -188,9 +162,84 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
         "授权码": os.environ.get("XTP_TEST_KEY", ""),
         "日志级别": "INFO",
     }
+
+
+def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -> dict:
+    """组装 vnpy XtpGateway SETTING（中文 key）。Broker DB 优先（PI3），.env XTP_TEST_* fallback。
+
+    2026-08-19 从 strategy_runner.main 归位（hub/runner 双消费方；无 vnpy import——中文 key
+    是普通字符串，层序不破）。批 63 二起组装收口 xtp_setting_from（本函数 = 取行 + 组装）。
+
+    client_id 覆写（2026-08-25）：XTP 平台规则=同账号同 client_id 仅一个 MD 会话
+    （官方 CreateQuoteApi 注释：多个客户端须用不同 client_id）——hub 与 direct runner
+    消费同一 broker 记录必然撞号（08-22 起任务 8 "user already exists" 全部真相）。
+    runner 侧传独立号（通道级配置 broker_config.params.client_id_runner）。
+
+    row_id 指定（M5：B 实例 HUB_INTERFACE_ROW 选账号）→ 取数失败**抛异常 fail-fast（exit 78）**，
+    禁 .env fallback（否则 B 静默跑在 A 的 XTP 账号上）。
+    """
+    import logging
+    logger = logging.getLogger("strategy_framework")
+    try:
+        broker = get_broker("xtp", row_id)
+        if broker:
+            cred = broker.get_credentials()
+            params = broker._params or {}
+            if cred.get("app_id"):
+                setting = xtp_setting_from(cred, params)
+                if client_id:
+                    setting["客户号"] = int(client_id)
+                return setting
+        if row_id is not None:
+            # M5：指定 B 行但取数失败/凭证不完整 → fail-fast，禁 .env fallback
+            raise RuntimeError(f"external_interface 行 id={row_id} 无 XTP 凭证或凭证不完整")
+    except Exception as e:
+        if row_id is not None:
+            raise   # fail-fast 上抛（消费方捕获 → exit 78）
+        logger.warning("Broker DB 取 XTP 凭证失败，fallback .env: %s", e)
+
+    setting = xtp_setting_from({}, {})
     if client_id:
         setting["客户号"] = int(client_id)
     return setting
+
+
+def get_interface_row(row_id: int | None = None) -> dict:
+    """读 external_interface 交易域行（批 63 二：hub 网关按行 provider 选插件）。
+
+    返回 {provider, credentials(解密 dict), params, market, capabilities}。
+    row_id 指定行直取；缺省=交易域 position 序首行（build_xtp_setting 缺省路径同款）。
+    行不存在抛 RuntimeError（消费方 exit 78）；行无凭证=空 dict（B 实例由 hub 侧 fail-fast 拦）。
+    """
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            if row_id is not None:
+                cur = conn.execute(
+                    "SELECT provider, credentials_encrypted, params, market, capabilities "
+                    "FROM external_interface WHERE id=%s AND enabled=true", (row_id,))
+            else:
+                cur = conn.execute(
+                    "SELECT provider, credentials_encrypted, params, market, capabilities "
+                    "FROM external_interface WHERE enabled=true AND 'trading' = ANY(capabilities) "
+                    "ORDER BY position, id LIMIT 1")
+            r = cur.fetchone()
+        if not r:
+            raise RuntimeError(f"external_interface 无可用行（row_id={row_id}）")
+        cred = {}
+        if r[1]:
+            try:
+                from src.quant_common.crypto import decrypt
+                raw = decrypt(r[1])
+                cred = json.loads(raw) if raw else {}
+            except Exception as e:
+                logger.warning("解密接口行凭证失败（按无凭证处理）: %s", e)
+        params = r[2] if isinstance(r[2], dict) else (json.loads(r[2]) if r[2] else {})
+        return {"provider": r[0], "credentials": cred, "params": params,
+                "market": r[3], "capabilities": list(r[4] or [])}
+    except Exception as e:
+        logger.warning("读 external_interface 失败: %s", e)
+        raise
 
 
 def get_xtp_param(key: str, default=None):

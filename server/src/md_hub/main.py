@@ -19,13 +19,12 @@ import threading
 import time
 from datetime import datetime
 
-from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import 即重导出保测试路径）
+from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import 即重导出保测试路径——ThinGateway 批 63 二收编 md_gateway 后不再经 main 重导出）
     ACTIVE_INSTANCE_KEY,
     INTENT_KEY,
     LATEST_TICK_PREFIX,
     LEASE_KEY,
     MinuteAggregator,
-    ThinGateway,
     _LEASE_RENEW_LUA,
     _PGWriter,
     _in_bar_session,
@@ -146,26 +145,11 @@ def main() -> None:
     my_uuid, gen = _boot_dispatch(r, instance_name)
     logger.info("hub 启动：uuid=%s gen=%d 实例=%s", my_uuid, gen, instance_name or "(空)")
 
-    # ——— 行情接入（ThinGateway + MdApi，零 TD）———
-    from src.strategy_framework.broker import build_xtp_setting as _build_xtp_setting
-    from src.strategy_framework.md_api_guard import GuardedXtpMdApi, SdkState
-    from src.strategy_framework.md_session import (
-        XtpMdSession, is_trading_day, load_xtp_window_cfg)
+    # ——— 行情网关（批 63 二：插件化——XTP 全套收编 md_gateway.XtpMdGateway，hub 只持通用面）———
+    from src.strategy_framework.md_session import is_trading_day
     from src.strategy_framework.runtime.loop import EngineLoop
-    from src.strategy_framework.runtime.mdlink import MdSessionSupervisor
     from src.strategy_framework.runtime.pulse import HeartbeatWriter, SessionCounters
     from src.strategy_framework.runtime.subs import SubscriptionManager
-
-    ee = EventEngine()
-    ee.start()   # 绕开 MainEngine 必须自启（构造不启动，_active=False → 线程未活）
-    gw = ThinGateway(ee, "XTP")
-    md_api = GuardedXtpMdApi(gw)   # 批1：SDK 生命周期守卫（SEGV 结构性绝迹）
-    gw.md_api = md_api
-    # L2 会话（韧性分层模型 2026-08-24）：定时续航+反应式重登，批 2 起由 MdSessionSupervisor 在主循环节拍内驱动
-    # 每日连接窗（P2 批 08-28）：lead/lag>0 时窗开沿=续航单原语建连（relogin 直登）、
-    # 窗关沿=guard.suspend（logout 保持 CREATED）；任一 0=禁用（旧行为）
-    _lead, _lag = load_xtp_window_cfg()
-    md_sess = XtpMdSession(md_api, lead_min=_lead, lag_min=_lag)
 
     agg = MinuteAggregator()
     seqs: dict[str, int] = {}
@@ -179,8 +163,7 @@ def main() -> None:
     pgw.start()
 
     @_guard("hub.on_tick")
-    def on_tick(event):
-        tick = event.data
+    def on_tick(tick):
         symbol = _project_symbol(tick)
         stats["ticks"] += 1
         stats["last_tick_wall"] = time.time()
@@ -220,34 +203,25 @@ def main() -> None:
             "volume": bar["volume"], "amount": bar["amount"], "tick_count": bar["tick_count"],
         }
 
-    from vnpy.trader.event import EVENT_TICK
-    ee.register(EVENT_TICK, on_tick)
-
-    # MD 生命周期可见化（2026-08-24 僵尸会话事件）：连接/断开/重登日志走 EVENT_LOG，
-    # 此前只注册 EVENT_TICK 全被丢弃 -- hub 侧会话状态完全不可观测，诊断只能靠猜
-    from vnpy.trader.event import EVENT_LOG
-
-    @_guard("hub.on_log")
-    def on_log(event):
-        logger.info("[gw] %s", getattr(event.data, "msg", event.data))
-    ee.register(EVENT_LOG, on_log)
-
-    # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB）———
+    # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB；批 63 二：接口行 provider 选网关插件）———
     interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
+    row_id = int(interface_row) if interface_row else None
     try:
-        row_id = int(interface_row) if interface_row else None
-        setting = _build_xtp_setting(row_id=row_id)
+        from src.strategy_framework.broker import get_interface_row
+        iface = get_interface_row(row_id)
     except Exception as e:
-        logger.error("XTP 凭证取数失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
+        logger.error("外部接口行取数失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
         raise SystemExit(78)
-    md_api.connect(setting["账号"], setting["密码"], int(setting["客户号"]),
-                   setting["行情地址"], int(setting["行情端口"]), setting.get("行情协议", "TCP"), 3,
-                   defer_login=not md_sess.window_open())   # 窗关启动只建 C 对象（CREATED），窗开沿 relogin 直登
+    if row_id is not None and not iface["credentials"]:
+        # M5 语义保留：B 实例指定行必须带凭证，禁 .env fallback（防 B 静默跑 A 账号）
+        logger.error("接口行 id=%s 无凭证（B 实例 fail-fast），exit 78", row_id)
+        raise SystemExit(78)
+    from src.strategy_framework.md_gateway import create_md_gateway
+    md_gw = create_md_gateway(iface["provider"], counters)
+    md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
+    md_gw.connect(iface["credentials"], iface["params"])
 
-    from vnpy.trader.object import SubscribeRequest
-    from vnpy.trader.constant import Exchange
-    _EX = {"SHSE": Exchange.SSE, "SZSE": Exchange.SZSE, "BSE": getattr(Exchange, "BSE", Exchange.SSE)}
-    md_status_was = False   # MD 重连沿基态（SA2 hub 版）
+    md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
 
     def _desired_symbols() -> set[str]:
         """订阅真相源（三源）：running 任务标的 ∪ system_config 白名单 ∪ 临时订阅。
@@ -289,41 +263,21 @@ def main() -> None:
 
     def _subscribe(sym: str) -> None:
         try:
-            raw, ex = sym.rsplit(".", 1)
-            e = _EX.get(ex)
-            if e:
-                md_api.subscribe(SubscribeRequest(symbol=raw, exchange=e))
+            md_gw.subscribe(sym)   # 订阅原语=网关插件（XTP 的交易所映射在 XtpMdGateway）
         except Exception as e:
             logger.warning("订阅失败 %s: %s", sym, e)
 
     def _unsubscribe(sym: str) -> None:
-        """退订（2026-08-20 生命周期闭环：出池/临时订阅过期/白名单摘除/live_task 停）。
+        """退订（生命周期闭环：出池/临时订阅过期/白名单摘除/live_task 停）。
 
-        先 flush 在桶分钟防丢最后一根，再 SDK 原生退订——原订阅同步只加不减，
-        移除标的的 tick 白收（带宽/CPU+latest_tick 键残留到 TTL）。
-        补盲审 G1：EXCHANGE_VT2XTP 无 BSE 键——.get() 取 None 静默跳过（与 _subscribe 对称，
-        BSE 端到端本就不通，防 KeyError 噪音刷 warning）。
-        双盲审 P2：unSubscribeMarketData 前判 LOGGED_IN 态——非登录态（SDK 断线/
-        重登窗口）裸调 C 面有炸回调线程风险，跳过+debug（与守卫 subscribe 软防护
-        对称）。注意：跳过后订阅账本仍按 want 记账，被跳过的退订对下轮 diff 不可见——
-        真实兜底是重连/重登后的全量重放（服务端订阅清零，以 desired 重建），非 diff。
+        先 flush 在桶分钟防丢最后一根（hub 通用面），再网关退订原语（插件）——XTP 的
+        EXCHANGE 映射/LOGGED_IN 态闸/跳过后重连全量重放兜底语义全在 XtpMdGateway.unsubscribe。
         """
         try:
             bar = agg.flush_symbol(sym)
             if bar:
                 _publish(bar)
-            raw, ex = sym.rsplit(".", 1)
-            e = _EX.get(ex)
-            from vnpy_xtp.gateway.xtp_gateway import EXCHANGE_VT2XTP
-            xtp_ex = EXCHANGE_VT2XTP.get(e) if e else None
-            if xtp_ex is None:
-                return
-            if md_api.state is not SdkState.LOGGED_IN:
-                logger.debug("退订跳过 %s（MD 态 %s 非登录态，待重连后 diff 补齐）",
-                             sym, md_api.state.value)
-                return
-            md_api.unSubscribeMarketData(raw, 1, xtp_ex)
-            logger.info("退订 %s（生命周期结束）", sym)
+            md_gw.unsubscribe(sym)
         except Exception as e:
             logger.warning("退订失败 %s: %s", sym, e)
 
@@ -331,19 +285,20 @@ def main() -> None:
     # 语义原样（SubscriptionManager），节奏由下方钩子注册——15s diff / 60s 全量重放
     # （替换 %60<10 窗口法：同效果，无相位耦合）
     sm = SubscriptionManager(desired=_desired_symbols, subscribe=_subscribe, unsubscribe=_unsubscribe)
-    if md_sess.window_open():
+    md_gw.set_context(lambda: f"订阅 {len(sm.current)} 个标的。")   # 告警上下文（监督器文案；监督器批 63 二收编网关内）
+    if md_gw.start_ready():
         sm.replay()   # 启动全量订阅（旧 _sync_subscriptions(force=True)）
         logger.info("hub 就绪，初始订阅 %d", len(sm.current))
     else:
         # 窗关启动（P2 批 08-28）：订阅不预放（guard 非 LOGGED_IN 态 no-op，账实会错）——
-        # 窗开沿 relogin → connect_status True → _md_edge 上升沿强制全量重放，账实自然对齐
-        logger.info("hub 窗关启动（lead=%d/lag=%d，defer_login），订阅待窗开沿重放", _lead, _lag)
+        # 窗开沿 relogin → connected True → _md_edge 上升沿强制全量重放，账实自然对齐
+        logger.info("hub 窗关启动（provider=%s，defer_login），订阅待窗开沿重放", iface["provider"])
 
     # ——— 主循环（批 2：EngineLoop 到期驱动；喂狗/事件线程存活检查内建骨架）———
     def _md_edge() -> None:
-        """MD 重连沿：connect_status 上升沿 → 强制全量重放（XTP 重连不恢复订阅）。"""
+        """MD 重连沿：connected 上升沿 → 强制全量重放（XTP 重连不恢复订阅；connected 由网关插件供）。"""
         nonlocal md_status_was
-        md_status = bool(getattr(md_api, "connect_status", True))
+        md_status = md_gw.connected
         if md_status and not md_status_was:
             sm.on_reconnect_edge()
         md_status_was = md_status
@@ -404,14 +359,9 @@ def main() -> None:
                 ticks=stats["ticks"], bars=stats["bars"], sess_ticks=counters.sess_count,
                 last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=pgw.dropped)
 
-    # L2 监督器（韧性分层模型）：定时续航/反应式重登/恢复/零tick告警/断流告警五段内聚；
-    # 默认 AlertPolicy=hub 现值（600/300/150/30/60），告警文案与老 hub 逐字对齐
-    sup = MdSessionSupervisor(md_sess, counters, _alert, role="hub",
-                              context=lambda: f"订阅 {len(sm.current)} 个标的。")
-
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗
-                      event_engines=(ee,),                          # 事件线程存活（R-BR12，死→exit 1）
+                      event_engines=md_gw.event_engines,            # 事件线程存活（R-BR12，死→exit 1；批 63 二：网关插件供）
                       on_fatal=lambda reason: _alert(f"行情 hub {reason}，自动重启",
                                                      "实例退出由 systemd 接管；请查 journalctl 定位首个异常。",
                                                      code="runtime.fatal"),
@@ -423,11 +373,10 @@ def main() -> None:
     loop.every("subs-replay", 60.0, sm.replay)      # 全量幂等重放（旧 %60<10 窗口法 = 60s）
     loop.every("flush", 5.0, _flush)                # 三窗分窗 finalize（P2 修复批 08-28）
     loop.every("heartbeat", 5.0, _heartbeat)        # 心跳（R-OBS1）
-    loop.every("l2-supervise", 0.0,                 # L2 会话自愈：每步
-               # 批 4b D2：交易日按日缓存下沉 md_session.is_trading_day 本体——hub 侧
-               # _trading_day 缓存删除（等值消重：原缓存键同为当日，schedule_due 内部
-               # 裸打 DB 一并消掉）
-               lambda: sup.tick(in_session=_in_astock_session(), trading_day=is_trading_day()))
+    loop.every("md-supervise", 0.0,                # 会话监督：每步（批 63 二收编网关内——XTP=L2 五段续航/重登/告警）
+               # 批 4b D2：交易日按日缓存下沉 md_session.is_trading_day 本体（等值消重：
+               # schedule_due 内部裸打 DB 一并消掉）
+               lambda: md_gw.poll_supervise(in_session=_in_astock_session(), trading_day=is_trading_day()))
     try:
         loop.run()   # 永续（到期驱动；进程域退出在钩子/骨架内 os._exit 带码）
     except KeyboardInterrupt:

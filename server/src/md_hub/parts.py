@@ -18,11 +18,6 @@ from typing import Optional
 
 logger = logging.getLogger("md_hub")
 
-try:
-    from vnpy.trader.gateway import BaseGateway
-except ImportError:   # 与 main 的 EventEngine 守卫同款：无 vnpy 环境可导入本模块（main 启动时统一报错退出）
-    BaseGateway = object
-
 LEASE_KEY = "hub:lease"
 GEN_KEY = "hub:gen"
 SURRENDER_KEY = "hub:surrender"
@@ -354,26 +349,5 @@ def _write_latest_tick(r, symbol: str, tick, fail_ts: dict) -> None:
         logger.debug("latest_tick 写失败 %s: %s", symbol, e)
 
 
-class ThinGateway(BaseGateway):
-    """仅事件转发；7 个抽象方法全量 stub（hub 数据面永不交易，R-HALT1 代码级保证）。"""
-
-    def connect(self, setting: dict) -> None:
-        raise NotImplementedError("hub 数据面禁用")
-
-    def subscribe(self, req) -> None:
-        self.md_api.subscribe(req)
-
-    def send_order(self, req) -> str:
-        raise NotImplementedError("hub 数据面禁用")
-
-    def cancel_order(self, req) -> None:
-        raise NotImplementedError("hub 数据面禁用")
-
-    def query_account(self) -> None:
-        raise NotImplementedError("hub 数据面禁用")
-
-    def query_position(self) -> None:
-        raise NotImplementedError("hub 数据面禁用")
-
-    def close(self) -> None:
-        pass
+# ThinGateway 批 63 二移驻 src.strategy_framework.md_gateway（层序：strategy_framework
+# 层 2 禁 import 层 3；vnpy 网关薄壳归 vnpy 集成层）。
