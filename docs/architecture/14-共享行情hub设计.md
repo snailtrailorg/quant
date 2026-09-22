@@ -108,7 +108,7 @@ timer_tasks（每 5s）：停止条件/live_task.status 检查 / 心跳写 Valke
 
 ## 4. systemd（R-BR15，v1 不变）
 
-> **M5 演进注记（批 60 v15）**：模板单元改 `Environment=INSTANCE_NAME=%i`（实例名注入）+ `RestartPreventExitStatus=0 3 6 78`；退出码矩阵扩为 0=优雅让位/1=vnpy缺失·fatal（重启码）/3=真让位/4=租约重试（重启码）/5=续租丢（重启码）/6=boot 闸拦截/78=EX_CONFIG（B 凭证取数失败 fail-fast）。B 实例（`quant-md-hub@quant2`）经 drop-in 注入 `HUB_INTERFACE_ROW`（B 账号行 id）按需启动，无待命态。
+> **M5 演进注记（批 60 v16）**：模板单元改 `Environment=INSTANCE_NAME=%i`（实例名注入）+ `RestartPreventExitStatus=0 6 78`；退出码矩阵扩为 0=优雅让位/1=vnpy缺失·fatal（重启码）/3=真让位（**重启码**——正常重启 30s lease 滞后自愈，切换窗拦截由 6 承接）/4=租约重试（重启码）/5=续租丢（重启码）/6=boot 闸拦截/78=EX_CONFIG（B 凭证取数失败 fail-fast）。B 实例（`quant-md-hub@quant2`）经 drop-in 注入 `HUB_INTERFACE_ROW`（B 账号行 id）按需启动，无待命态。
 hub 单元：WatchdogSec=90/StartLimit 5/300s/OnFailure/MemoryMax=1G/After=network-online。
 worker 单元：+`After= + Wants= quant-md-hub@quant.service`（启动顺带拉起；禁 PartOf/BindsTo）。
 

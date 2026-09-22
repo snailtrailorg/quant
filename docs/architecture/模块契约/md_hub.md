@@ -51,7 +51,7 @@ parts.py 的公共件在 main.py 顶部 import 重导出——既有测试导入
 
 - 分发：`XADD hub:bars:{symbol}` MAXLEN~5000，字段 `gen/seq/ts/pub_ts/untrusted/ohlc/volume/amount/tick_count`；seq 成功后才占号（失败不留洞）；事件线程 on_tick 与主循环 flush 经 seqs_lock 互斥
 - 最新 tick：`SET hub:latest_tick:{symbol}` TTL 65s（三档项 12）——价量+五档+涨跌停，每 tick 写；断流 65s 自动过期（消费方 `stock_detail._quote_block` 降级腾讯源）
-- fencing：租约 `hub:lease`（SET NX EX30 + Lua CAS 续期 5s 一续）；`gen = INCR hub:gen` 永不回退。**退出码矩阵（M5 批 60 扩）**：0=优雅让位（见 intent 主动让位）/1=事件线程死·guarded 污染拒（重启码）/3=真让位（NX 失败他人持有）/4=启动重试耗尽（重启码）/5=续期失败被抢占（重启码）/6=boot 闸拦截（被切走者·非现任）/78=B 凭证取数失败 fail-fast（禁 .env fallback）；unit `RestartPreventExitStatus=0 3 6 78`
+- fencing：租约 `hub:lease`（SET NX EX30 + Lua CAS 续期 5s 一续）；`gen = INCR hub:gen` 永不回退。**退出码矩阵（M5 批 60 扩）**：0=优雅让位（见 intent 主动让位）/1=事件线程死·guarded 污染拒（重启码）/3=真让位（NX 失败他人持有；**重启码**——含正常重启 30s lease 滞后自愈，切换窗拦截由 6 承接）/4=启动重试耗尽（重启码）/5=续期失败被抢占（重启码）/6=boot 闸拦截（被切走者·非现任）/78=B 凭证取数失败 fail-fast（禁 .env fallback）；unit `RestartPreventExitStatus=0 6 78`
 - M5 切换协议（批 60 v15）：boot 单判定（intent.target 放行目标/拦截被切走者 + active_instance 兜切换后重启仲裁）；guarded Lua 三态原子（正切 B/反切 A 通用）；holder 校验=active_instance==target（等强度代理）；worker 侧 gen 跳变重暖机复用（14 号现状）
 - 订阅真相源（**四源**）：`live_task(running).symbol ∪ system_config.hub_shadow_symbols ∪ minute_history_start 池成员 ∪ hub_transient_subs(30min TTL 临时)`；读失败沿用旧集。diff 增删（先加后退）/全量幂等重放（**先退 removed** 防订阅泄漏）/重连沿强放/退订前 flush_symbol——语义收编 `runtime.subs.SubscriptionManager`（纯逻辑不持周期，节奏由钩子注册）
 - 落库：`bar_hub` 表（_PGWriter 独立线程批量，ON CONFLICT 幂等）
