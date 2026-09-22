@@ -24,7 +24,8 @@ NotifyAccess=main
 #   1=vnpy缺失·EngineLoop fatal·guarded 污染拒 / 3=真让位（**含正常重启的 30s lease 滞后自愈**——
 #   SIGTERM 不 DEL lease，旧 lease TTL 30s 内新进程 NX 失败 exit(3)，30s 后重拉即愈；staging 实证
 #   2026-09-22：Prevent 3 会把部署波重启打成永久死，故 3 不进 Prevent）/
-#   4=租约重试耗尽 / 5=续租丢（对端接管）
+#   4=租约重试耗尽 / 5=续租丢（对端接管）/
+#   9=接口行 provider 变更自重启（批 64：对账 cfg:version 检测切换，主动退出让 systemd 拉起读新行）
 #   重拉不愈则 5 次打穿 StartLimit 进 failed 黑洞=明确失败态非静默
 Restart=on-failure
 RestartPreventExitStatus=0 6 78

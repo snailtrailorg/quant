@@ -119,6 +119,28 @@ def _boot_dispatch(r, instance_name: str) -> tuple[str, int]:
     return _lease_boot(r, instance_name)
 
 
+def _poll_iface_switch(r, prev_version, row_id, current_provider):
+    """批 64：对账 external_interface 行——返回 (新版本, 是否 provider 切换)。
+
+    prev_version=None=首次读基线；Valkey 读失败返回原版本不判切换；版本变化才重读
+    接口行（get_interface_row，broker.py）比对 provider。main() 的 _iface_poll 消费此函数。
+    """
+    from src.data_platform.routing import CFG_VERSION_KEY
+    from src.strategy_framework.broker import get_interface_row
+    try:
+        v = r.get(CFG_VERSION_KEY) or "0"
+    except Exception:
+        return prev_version, False   # Valkey 不可达，跳过本轮
+    if prev_version is None or v == prev_version:
+        return v, False
+    try:
+        iface = get_interface_row(row_id)
+    except Exception as e:
+        logger.warning("对账接口行失败（跳过本轮）: %s", e)
+        return v, False
+    return v, (iface["provider"] != current_provider)
+
+
 def main() -> None:
     # #48：启动时列级校验（hub 侧同款）
     try:
@@ -217,6 +239,17 @@ def main() -> None:
     except Exception as e:
         logger.error("行情网关初始化失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
         raise SystemExit(78)
+
+    # 批 64：对账 external_interface 行变更——Web 拖拽/改行 bump cfg:version，provider 变了即
+    # 带码退出让 systemd 拉起重启读新行（Web 操作切换 provider 自动生效；不进程内拆原生库，符合铁律）
+    _cfg_version = None   # 首次 poll 读基线（避免启动即误触）
+
+    def _iface_poll() -> None:
+        nonlocal _cfg_version
+        _cfg_version, switched = _poll_iface_switch(r, _cfg_version, row_id, md_gw.provider)
+        if switched:
+            logger.info("[gw] 接口行 provider 变化（原 %s），主动退出重启", md_gw.provider)
+            os._exit(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus）
 
     md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
 
@@ -370,6 +403,7 @@ def main() -> None:
     loop.every("subs-replay", 60.0, sm.replay)      # 全量幂等重放（旧 %60<10 窗口法 = 60s）
     loop.every("flush", 5.0, _flush)                # 三窗分窗 finalize（P2 修复批 08-28）
     loop.every("heartbeat", 5.0, _heartbeat)        # 心跳（R-OBS1）
+    loop.every("iface-poll", 15.0, _iface_poll)     # 批 64：对账接口行 provider 变更（Web 切换自动生效）
     loop.every("md-supervise", 0.0,                # 会话监督：每步（批 63 二收编网关内——XTP=L2 五段续航/重登/告警）
                # 批 4b D2：交易日按日缓存下沉 md_session.is_trading_day 本体（等值消重：
                # schedule_due 内部裸打 DB 一并消掉）
