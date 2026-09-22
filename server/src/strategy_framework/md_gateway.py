@@ -9,7 +9,9 @@ tick 契约（EMQ 等自研网关 Phase B 须产出兼容对象，duck typing）
 1. 字段面：last_price/datetime/volume/turnover/exchange/symbol + open/high/low/pre_close/
    limit_up/limit_down + bid_price_1..5/ask_price_1..5/bid_volume_1..5/ask_volume_1..5
    （_write_latest_tick 与 MinuteAggregator 消费面；vnpy TickData 原生满足）。
-2. datetime 必须 tz-aware（UTC，批 56b 口径）——_in_bar_session/聚合分桶全依赖，naive 会崩。
+2. datetime 必须 tz-aware Asia/Shanghai（中国时刻）——_in_bar_session 用 t.hour/min 对中国时段
+   判界、MinuteAggregator 按 t.date 翻日；naive 会崩，UTC 会整段错位。XTP 网关原样
+   strptime(data_time).replace(tzinfo=CHINA_TZ)（批 56b 的 UTC 立法只作用于 bar 落库 ts，非 tick）。
 3. exchange 须 duck-type 到 vnpy 枚举：.value 取 "SSE"/"SZSE"（非 SHSE——parts._project_symbol
    做 SSE→SHSE 项目后缀映射，EMQ 实现者照直觉给 SHSE 会产出 "XXX.SHSE.SHSE" 错键）。
 4. turnover 缺失时 parts 侧 getattr(tick,"turnover",0) 静默降级——EMQ 的 amount 须显式映射到
@@ -19,7 +21,11 @@ tick 契约（EMQ 等自研网关 Phase B 须产出兼容对象，duck typing）
 """
 from __future__ import annotations
 import logging
+import os
+import queue
+import threading
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 # 观测面等值（盲审 A P3-5）：[gw] 会话日志/退订日志的 logger 名保持 md_hub——
 # journalctl 按名过滤与 system_log 落库 name 字段均不因插件化漂移
@@ -217,3 +223,246 @@ class XtpMdGateway(MdGateway):
 
     def set_context(self, fn) -> None:
         self._context_fn = fn
+
+
+# ——— EMQ 绑定惰性加载（测试用 patch 打 mock，不依赖本机 .so）———
+
+def _load_emd_binding():
+    """惰性导入 EMQ pybind11 绑定（.so 按解释器 ABI 编译，本机无 .so 时 ImportError）。"""
+    from src.strategy_framework.emd import emd_quote_api
+    return emd_quote_api
+
+
+def _make_spi(mod, gateway):
+    """构造 QuoteSpi trampoline 实例（覆写回调，回投 gateway）。"""
+    class _Spi(mod.QuoteSpi):
+        def OnDepthMarketData(self, market_data, bid1_count, ask1_count):
+            gateway._on_depth(market_data)
+
+        def OnError(self, error_info):
+            gateway._on_error(error_info)
+
+        def OnSubMarketData(self, ticker, error_info, is_last):
+            gateway._on_sub_result(ticker, error_info)
+
+        def OnUnSubMarketData(self, ticker, error_info, is_last):
+            gateway._on_unsub_result(ticker, error_info)
+    return _Spi()
+
+
+def _parse_host_port(addr: str, default_port: int) -> tuple[str, int]:
+    """'host:port' → (host, port)；无端口用 default_port；空串/坏值/端口越界回 ('', default_port)。"""
+    addr = (addr or "").strip()
+    if not addr:
+        return "", default_port
+    if ":" in addr:
+        host, _, port_s = addr.rpartition(":")
+        try:
+            port = int(port_s)
+            if not (0 < port <= 65535):
+                return host, default_port
+            return host, port
+        except ValueError:
+            return host, default_port
+    return addr, default_port
+
+
+def _md_to_tick(md):
+    """EMTMarketDataStruct → vnpy TickData（tick 契约见模块 docstring；未知交易所/无时刻返 None）。
+
+    data_time(int64 YYYYMMDDHHMMSSsss) 按中国时刻解析——与 XTP 网关行为等值
+    （strptime + replace(tzinfo=Asia/Shanghai)），供 _in_bar_session 中国时段判界。
+    data_time<=0（盘前快照零值）前置丢弃——strptime("0") 会 ValueError。
+    """
+    if int(md.data_time) <= 0:
+        return None
+    from src.data_platform.tz import SHANGHAI
+    from vnpy.trader.constant import Exchange
+    from vnpy.trader.object import TickData
+
+    # 交易所映射（EMQ_EXCHANGE_TYPE → vnpy 名）：BJGZ(5)→BSE；vnpy 无 BSE 则丢弃，
+    # 绝不回落 SSE 产出 "XXX.SHSE" 错键（模块 docstring 点名警告的坑）。
+    ex_name = {1: "SSE", 2: "SZSE", 5: "BSE"}.get(int(md.exchange_id))
+    ex = getattr(Exchange, ex_name, None) if ex_name else None
+    if ex is None:
+        return None
+    dt = datetime.strptime(str(md.data_time), "%Y%m%d%H%M%S%f").replace(tzinfo=SHANGHAI)
+    tick = TickData(
+        symbol=md.ticker,
+        exchange=ex,
+        datetime=dt,
+        volume=md.qty,
+        turnover=md.turnover,
+        last_price=md.last_price,
+        limit_up=md.upper_limit_price,
+        limit_down=md.lower_limit_price,
+        open_price=md.open_price,
+        high_price=md.high_price,
+        low_price=md.low_price,
+        pre_close=md.pre_close_price,
+        gateway_name="EMQ",
+    )
+    tick.bid_price_1, tick.bid_price_2, tick.bid_price_3, tick.bid_price_4, tick.bid_price_5 = md.bid[0:5]
+    tick.ask_price_1, tick.ask_price_2, tick.ask_price_3, tick.ask_price_4, tick.ask_price_5 = md.ask[0:5]
+    tick.bid_volume_1, tick.bid_volume_2, tick.bid_volume_3, tick.bid_volume_4, tick.bid_volume_5 = md.bid_qty[0:5]
+    tick.ask_volume_1, tick.ask_volume_2, tick.ask_volume_3, tick.ask_volume_4, tick.ask_volume_5 = md.ask_qty[0:5]
+    return tick
+
+
+@register_md_gateway
+class EmqMdGateway(MdGateway):
+    """东方财富 EMQ 极速行情网关（批 63 Phase B）。
+
+    EMQ QuoteApi 直连（无 vnpy 网关层）：CreateQuoteApi → RegisterSpi(PyQuoteSpi trampoline)
+    → Login（同步阻塞，<0 失败）→ SubscribeMarketData。tick 走 SDK 回调线程 →
+    OnDepthMarketData → _md_to_tick（EMTMarketDataStruct → vnpy TickData）→ 入队 →
+    消费线程 cb(tick)（隔离 SDK 回调线程，满足「回调须快速返回防断线」）。
+    """
+
+    provider = "emt_emq"
+
+    _TICK_QUEUE_MAX = 10000   # 有界队列：满则丢最新 tick + 计数（防消费停滞内存失控）
+
+    def __init__(self, counters):
+        from src.strategy_framework.runtime.alerts import make_alert
+        self._alert = make_alert()
+        # counters（hub SessionCounters）：P3 监督器（断流告警/续航）消费，P2 暂无监督故不存。
+        self._mod = None            # emd_quote_api 绑定模块（connect 惰性加载，测试 mock）
+        self._api = None            # QuoteApi 实例
+        self._spi = None            # PyQuoteSpi trampoline 实例
+        self._on_tick_cb = None
+        self._connected = False
+        self._login_err = 0
+        self._q = queue.Queue(maxsize=self._TICK_QUEUE_MAX)
+        self._worker = None
+        self._dropped = 0
+
+    # ——— MdGateway 抽象实现 ———
+
+    def set_on_tick(self, cb) -> None:
+        self._on_tick_cb = cb
+
+    def connect(self, cred: dict, params: dict) -> None:
+        mod = _load_emd_binding()
+        self._mod = mod
+        account = cred.get("emq_account", "") or ""
+        pwd = cred.get("emq_password", "") or ""
+        addr = params.get("emq_l1_host", "") or params.get("emq_l2_host", "") or ""
+        ip, port = _parse_host_port(addr, default_port=8093)
+        # 日志目录持久化（家目录，不被 systemd-tmpfiles 清 /tmp 扫掉——SDK 要求真实可写路径）
+        log_dir = os.path.expanduser(os.path.join("~", ".quant", "emd_quote_logs"))
+        os.makedirs(log_dir, exist_ok=True)
+        self._api = mod.QuoteApi.CreateQuoteApi(log_dir, mod.EMQ_LOG_LEVEL.INFO, mod.EMQ_LOG_LEVEL.ERROR)
+        self._spi = _make_spi(mod, self)
+        self._api.RegisterSpi(self._spi)
+        ret = self._api.Login(ip, port, account, pwd)
+        self._login_err = ret
+        self._connected = ret >= 0
+        if not self._connected:
+            # 登录失败 fail-fast（对齐 hub「建连异常 → exit 78」）：EMQ 无 supervisor 重登，
+            # 静默 _connected=False 会让 hub 成「失聪僵尸」（占租约心跳却不工作）——raise 让
+            # systemd 重启重试，而非半死存活。
+            raise RuntimeError(f"EMQ 行情登录失败（Login 返回 {ret}，{ip}:{port}）")
+
+    def subscribe(self, symbol: str) -> None:
+        emq_ex = self._emq_ex_for(symbol)
+        if emq_ex is None or self._api is None or not self._connected:
+            return
+        raw = symbol.rsplit(".", 1)[0]
+        ret = self._api.SubscribeMarketData([raw], emq_ex)
+        if ret != 0:
+            logger.warning("[gw] EMQ 订阅请求失败 %s（返回 %s）", symbol, ret)
+            self._alert("EMQ 订阅失败", f"{symbol} 订阅请求返回 {ret}", code="emq.sub-fail")
+
+    def unsubscribe(self, symbol: str) -> None:
+        emq_ex = self._emq_ex_for(symbol)
+        if emq_ex is None or self._api is None or not self._connected:
+            logger.debug("退订跳过 %s（未登录或未映射交易所，待重连后 diff 补齐）", symbol)
+            return
+        raw = symbol.rsplit(".", 1)[0]
+        self._api.UnSubscribeMarketData([raw], emq_ex)
+        logger.info("退订 %s（生命周期结束）", symbol)
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    def start_ready(self) -> bool:
+        return self._connected
+
+    def poll_supervise(self, in_session: bool, trading_day) -> None:
+        # EMQ 无每日连接窗（SDK「不支持过夜」）；无 OnDisconnected 回调——断线感知仅 OnError。
+        # 运行期重连语义待 P3 staging 真连实证（Login 同步阻塞原语；SDK 未明示自动重连），
+        # 本钩子暂不主动重登；仅周期清点 tick 丢弃计数（消费停滞可见化）。
+        if self._dropped:
+            logger.warning("[gw] EMQ tick 队列满丢弃 %d 条（消费停滞？）", self._dropped)
+            self._dropped = 0
+
+    # set_context 不覆写——EMQ 无监督器消费告警上下文，用 ABC 默认 no-op。
+
+    # ——— 内部 ———
+
+    def _emq_ex_for(self, symbol: str):
+        """project 后缀（SHSE/SZSE/BSE）→ 绑定模块 EMQ_EXCHANGE_TYPE 枚举；未映射/未加载返 None。"""
+        suffix = symbol.rsplit(".", 1)[-1]
+        name = {"SHSE": "SH", "SZSE": "SZ", "BSE": "BJGZ"}.get(suffix)
+        if name is None or self._mod is None:
+            return None
+        return getattr(self._mod.EMQ_EXCHANGE_TYPE, name)
+
+    def _on_depth(self, md) -> None:
+        """SDK 回调线程面（须快速返回）：映射后入队，消费线程再喂 cb。
+
+        异常兜底（C++ trampoline 已 try/catch 双保险，此处再兜一层）：任何映射异常
+        绝不穿透到 SDK 回调帧（EMQ 无 OnDisconnected，回调崩 = 整进程 SIGABRT）。
+        """
+        try:
+            tick = _md_to_tick(md)
+        except Exception:
+            logger.exception("EMQ tick 映射异常（丢弃）")
+            return
+        if tick is None:
+            return
+        self._ensure_worker()   # 先确保消费线程在，再入队（满队列分支才不丢 worker 重启机会）
+        try:
+            self._q.put_nowait(tick)
+        except queue.Full:
+            self._dropped += 1
+
+    def _on_error(self, err) -> None:
+        eid = getattr(err, "error_id", None)
+        msg = getattr(err, "error_msg", "")
+        logger.error("[gw] EMQ OnError（error_id=%s）: %s", eid, msg)
+        self._connected = False
+        self._alert("EMQ 行情错误", f"error_id={eid} {msg}".strip(), code="emq.md-error")
+
+    def _on_sub_result(self, ticker, error_info) -> None:
+        """订阅确认回调（SDK 线程面）：error_id 非 0 = 服务器拒收，记日志+告警（订阅失败可见化）。"""
+        eid = getattr(error_info, "error_id", None) if error_info else None
+        code = getattr(ticker, "ticker", "?") if ticker else "?"
+        if eid:
+            logger.error("[gw] EMQ 订阅被拒 %s（error_id=%s）", code, eid)
+            self._alert("EMQ 订阅失败", f"{code} error_id={eid}", code="emq.sub-fail")
+
+    def _on_unsub_result(self, ticker, error_info) -> None:
+        eid = getattr(error_info, "error_id", None) if error_info else None
+        code = getattr(ticker, "ticker", "?") if ticker else "?"
+        if eid:
+            logger.warning("[gw] EMQ 退订异常 %s（error_id=%s）", code, eid)
+
+    def _ensure_worker(self) -> None:
+        # SDK 单回调线程（OnDepthMarketData 消息按序到达，文档「阻塞后续消息」暗示单线程），
+        # 本方法仅在回调线程调用——无并发起线程竞态；is_alive 兜底防 worker 意外死亡后重建。
+        if self._worker is None or not self._worker.is_alive():
+            self._worker = threading.Thread(target=self._consume, name="emq-tick", daemon=True)
+            self._worker.start()
+
+    def _consume(self) -> None:
+        while True:
+            tick = self._q.get()
+            cb = self._on_tick_cb
+            if cb is not None:
+                try:
+                    cb(tick)
+                except Exception:
+                    logger.exception("EMQ on_tick 回调异常（消费线程）")

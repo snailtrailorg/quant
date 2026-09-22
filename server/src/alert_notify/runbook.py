@@ -29,6 +29,8 @@ RUNBOOK: dict[str, dict] = {
     "buy.blind":        {"label": "任务盲视", "guide": "hub 心跳丢失或 bar 停更——数据面不驱动决策中；查 hub 与流消费。"},
     "hub.xadd-fail":    {"label": "hub XADD 失败", "guide": "bar 写流失败即丢当根——查 Valkey；bar 明细见 bar_hub 表对账。"},
     "hub.lease-lost":   {"label": "hub 租约丢失", "guide": "另一实例在位或存储异常，实例已退出——systemd 接管；持续出现查是否双实例。"},
+    "emq.md-error":     {"label": "EMQ 行情错误", "guide": "EMQ 行情服务器返回错误（OnError）——查 hub journalctl 归因 error_id；连接已标记断开，需重启 hub 恢复（自动重连待后续版本）。"},
+    "emq.sub-fail":     {"label": "EMQ 订阅失败", "guide": "EMQ 行情订阅被拒（返回非 0 或 error_id 非 0）——核对标的是否有效/在支持范围，或在集成中心查东财极速行行情权限。"},
     "runtime.fatal":    {"label": "运行时致命退出", "guide": "事件线程死亡/看门狗类致命——systemd 自动重启；journalctl 归因首个异常。"},
     "runtime.guard":    {"label": "运行时守卫拦截", "guide": "handler 异常被守卫拦截（一次异常=永久失聪防线）——journalctl 看首个 traceback。"},
     # ——— 对账/交易域 ———

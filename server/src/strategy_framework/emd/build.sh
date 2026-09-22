@@ -21,6 +21,7 @@ $GXX -O3 -shared -std=c++11 -fPIC \
   $INCLUDES $PYINC \
   src/strategy_framework/emd/bind_quote.cpp \
   -L vendor/emt/lib \
+  -Wl,-rpath,'$ORIGIN/../../../vendor/emt/lib' \
   -lemt_quote_api -lemt_api \
   -o "src/strategy_framework/emd/emd_quote_api${EXT}"
 
