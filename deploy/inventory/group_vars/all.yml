@@ -20,7 +20,8 @@ deploy_postverify_probe: false        # W2 兜底：探针默认关（环境显�
 
 # ---- 发布同步白名单（设计稿 §3：synchronize 白名单清单，非全树 rsync）----
 deploy_sync_whitelist:
-  - {path: src, dir: true}
+  - {path: src, dir: true, exclude_so: true}   # 批 63：src 里的 .so 是 build.sh 本地编译产物（310 ABI），
+                                               # 服务器编译步骤会重编（311），从本地同步会泄漏冗余 310 .so
   - {path: migrations, dir: true}
   - {path: scripts, dir: true}
   - {path: alembic.ini, dir: false}

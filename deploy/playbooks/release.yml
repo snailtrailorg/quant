@@ -201,10 +201,8 @@
           ansible.posix.synchronize:
             src: "{{ deploy_stage_root }}/{{ item.path }}{{ '/' if item.dir else '' }}"
             dest: "{{ deploy_root }}/releases/{{ release_id }}/{{ item.path }}{{ '/' if item.dir else '' }}"
-            rsync_opts:
-              - "--exclude=__pycache__"
-              - "--exclude=*.pyc"
-              - "--delete"
+            rsync_opts: "{{ ['--exclude=__pycache__', '--exclude=*.pyc', '--delete']
+                            + (['--exclude=*.so'] if item.get('exclude_so') else []) }}"
           loop: "{{ deploy_sync_whitelist }}"
 
         - name: 阶段 2 —— web/dist 同步 → releases/<id>/web/（web 工件化批；不入白名单=不进 server 指纹体系）
