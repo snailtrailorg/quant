@@ -173,7 +173,7 @@ class Subscription:
     consumer_tag: str = "default"
 
 
-Watermark = datetime  # 语义别名：该 kind×symbol 仓内最新连续无缺 ts（非最大 ts——中间可能有洞）
+Watermark = datetime  # 语义别名：查询窗内最新连续无缺 ts（非最大 ts——中间可能有洞）；分钟级=单交易日窗口内连续（跨日需交易日历，databus 挂账 market_hours），日线=最大 ts
 
 
 @dataclass(frozen=True)

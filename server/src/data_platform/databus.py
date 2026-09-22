@@ -64,11 +64,21 @@ def _next_minute_slot(t: datetime):
     return nxt.astimezone(t.tzinfo)
 
 
+def _is_slot(t: datetime) -> bool:
+    """是否 A 股分钟合法槽（09:31~11:30 / 13:01~15:00）。竞价 9:26、午休 11:31~13:00 等槽外=False。"""
+    from .tz import SHANGHAI
+    hm = t.astimezone(SHANGHAI).hour * 60 + t.astimezone(SHANGHAI).minute
+    return (9 * 60 + 31 <= hm <= 11 * 60 + 30) or (13 * 60 + 1 <= hm <= 15 * 60)
+
+
 class StreamHandle:
     """流订阅句柄（M5 真实现）：回放预取入 .bars，poll 增量 XREAD 续读。
 
-    消息=14 号裸字段 dict（gen/seq/ts/pub_ts/untrusted/ohlc/volume/amount/tick_count）；
-    ContractEvent 信封化挂账 M7（29 §十一 v15 注记）。未达水位线时 .warmup=PG 降级帧。
+    消息=14 号裸字段 dict（gen/seq/ts/pub_ts/untrusted/ohlc/volume/amount/tick_count，**全 str**，
+    消费方自行转 float）；ContractEvent 信封化挂账 M7（29 §十一 v15 注记）。
+    未达水位线时 .warmup=PG 降级帧（**含水位线那根**，与流「严格新于水位线」互补无重叠）。
+    **fencing（stale_gen 拒旧 + gen 跳变重暖机）是消费方责任**——本句柄只按 ts 去重（同 ts 留新 gen，
+    gen 跳变信号保留），不做 stale_gen 过滤。
     """
 
     def __init__(self, r, stream_key: str, sub):
@@ -80,8 +90,12 @@ class StreamHandle:
         self.last_id = "$"              # poll 起点（回放后=流内最新 id）
         self.active = True
 
-    def poll(self, block_ms: int = 0) -> list[dict]:
-        """增量读一批（XREAD 自 last_id；失败告警返回空，不崩——消费方下次再试）。"""
+    def poll(self, block_ms: int | None = None) -> list[dict]:
+        """增量读一批（XREAD 自 last_id；失败告警返回空，不崩——消费方下次再试）。
+
+        block_ms=None=非阻塞（默认，不拼 BLOCK）；传 ≥0 才阻塞（redis `BLOCK 0`=无限阻塞，勿用 0 表非阻塞）。
+        消息字段全 str（decode_responses），消费方自行转 float；增量路径不去重，gen 过滤是消费方责任。
+        """
         if not self.active:
             return []
         try:
@@ -157,13 +171,15 @@ class DataBus:
         """流订阅：单标的 `hub:bars:{symbol}` 回放+增量。
 
         回放：XREVRANGE count=240 → 时间正序 → from_watermark 严格新于截断 → ts 去重
-        （流键即 symbol，(symbol,ts) 去重等价 ts 去重）。
-        未达断言：from_watermark 有值但回放无一根新于水位线（流被 MAXLEN 剪/写者断流）→
-        告警 + 降级 get_bars 补 PG 历史（handle.warmup），流仍续供增量。
-        多标的聚合/sink 推送/精确 ts 寻址：挂账 M7（本批单标的轮询）。
+        （同 ts 留新 gen——切换交界 gen 跳变信号保留）。fencing（stale_gen 拒旧/重暖机）是消费方责任。
+        未达断言：from_watermark 有值但回放空/窗头未接上水位线（剪尾/断流/有洞）→
+        告警 + 降级 get_bars 补 PG 历史（handle.warmup 含水位线根，与流互补无重叠）。
+        多标的聚合/sink 推送/精确 ts 寻址：挂账 M7（本批单标的轮询，多标的 fail-fast）。
         """
         r = _r()
-        symbol = sub.symbols[0] if sub.symbols else ""
+        if len(sub.symbols) != 1:
+            raise ValueError(f"subscribe 单标的订阅，收到 {len(sub.symbols)} 个标的（多标的聚合挂账 M7）: {sub.symbols}")
+        symbol = sub.symbols[0]
         stream_key = "hub:bars:" + symbol
         raw = r.xrevrange(stream_key, count=_REPLAY_COUNT)   # [(id, fields)] 新→旧
         handle = StreamHandle(r, stream_key, sub)
@@ -176,31 +192,42 @@ class DataBus:
                 continue                                      # 坏 ts 消息丢弃
             msgs.append((ts, m))
         msgs.sort(key=lambda x: x[0])                          # 正序（旧→新）
-        if sub.from_watermark is not None:
-            wm = sub.from_watermark
+        wm = sub.from_watermark
+        if wm is not None:
+            if wm.tzinfo is None:                              # naive 水位线 → 按上海本地解释转 UTC aware
+                from .tz import as_utc
+                wm = as_utc(wm)
             msgs = [(ts, m) for ts, m in msgs if ts > wm]      # 严格新于水位线（截断）
-            if not msgs:
-                logger.warning("流 %s 回放未达水位线 %s（剪尾/断流），降级 get_bars 补 warmup",
-                               stream_key, wm)
-                handle.warmup = self._warmup_fallback(sub)
-        seen: set = set()                                       # ts 去重（切换 gen 交界同 ts 理论可重复）
+        # ts 去重（同 ts 留 gen 更大者——切换交界旧代末根/新代重发同 ts 时，保留新代保 gen 跳变信号）
+        by_ts: dict = {}
         for ts, m in msgs:
-            if ts not in seen:
-                seen.add(ts)
-                handle.bars.append(m)
+            cur = by_ts.get(ts)
+            if cur is None or int(m.get("gen", 0)) > int(cur.get("gen", 0)):
+                by_ts[ts] = m
+        handle.bars = [m for _ts, m in sorted(by_ts.items(), key=lambda x: x[0])]
+        if wm is not None:
+            # 未达断言：回放空，或回放窗头未接上水位线（wm 与窗头之间有洞，MAXLEN 剪不断）→ 降级补 PG
+            head = _msg_ts(handle.bars[0]) if handle.bars else None
+            gap = head is not None and _next_minute_slot(wm) is not None and head != _next_minute_slot(wm)
+            if not handle.bars or gap:
+                logger.warning("流 %s 回放未达水位线 %s（剪尾/断流/窗头有洞），降级 get_bars 补 warmup",
+                               stream_key, wm)
+                handle.warmup = self._warmup_fallback(sub, wm)
         return handle
 
-    def _warmup_fallback(self, sub):
-        """未达水位线降级：get_bars（local_pg）拉水位线起历史（freq 按 kind 推断）。"""
-        from src.quant_common.contract import DataRequest, DataGap
+    def _warmup_fallback(self, sub, wm):
+        """未达水位线降级：get_bars（local_pg）拉水位线起历史（freq 按 kind 推断）。
+
+        range_=(wm, now)——end 不传 None（db.get_bars 的 end=None 落 SQL `ts<=NULL` 恒空，
+        盲审 A 实测；now 覆盖「wm 到当下」的 PG 回补）。warmup 含 wm 那根，与流「严格新于」互补。
+        """
+        from datetime import timezone
+        from src.quant_common.contract import DataRequest
         freq = _FREQ_BY_KIND.get(sub.kind, "1min")
         req = DataRequest(kind=sub.kind, symbols=tuple(sub.symbols), temporality="historical",
-                          freq=freq, range_=(sub.from_watermark, None))
-        try:
-            frame, _wm = self.get_bars(req)
-            return frame
-        except DataGap:
-            return None
+                          freq=freq, range_=(wm, datetime.now(timezone.utc)))
+        frame, _wm = self.get_bars(req)
+        return frame if frame.rows else None
 
     # —— 内部 ——
     def _local_fetch(self, req):
@@ -221,8 +248,9 @@ class DataBus:
     def _watermark(frame, freq=None) -> datetime | None:
         """连续无缺水位线（M5 实装，批 60）：正向扫，首缺口前的连续末端 ts。
 
-        - freq="1min"：A 股分钟网格锚（`_next_minute_slot`——午休 11:30→13:01 衔接、
-          日终 15:00 停；跨日不要求连续，日界=期望缺口）。
+        - freq="1min"：A 股分钟网格锚（`_next_minute_slot`——午休 11:30→13:01 衔接、日终 15:00 停）。
+          起点=首个合法槽（跳过竞价 9:26 等槽外脏根）；**单交易日窗口内连续**——跨日连续
+          （15:00→次日 9:31）需交易日历，挂账 market_hours（M1 有，本层未接）。
         - 其他 freq（日线等）：无交易日历网格，保持最大 ts 语义（挂账：daily 网格需 market_hours）。
         """
         if not frame.rows:
@@ -232,8 +260,11 @@ class DataBus:
             return None
         if len(tss) == 1 or freq != "1min":
             return tss[-1]
-        wm = tss[0]
-        for ts in tss[1:]:
+        start = next((i for i, ts in enumerate(tss) if _is_slot(ts)), None)
+        if start is None:
+            return tss[-1]
+        wm = tss[start]
+        for ts in tss[start + 1:]:
             nxt = _next_minute_slot(wm)
             if nxt is None or ts != nxt:
                 break                            # 首缺口 → 水位线停在连续末端

@@ -11,6 +11,8 @@
 ```
 server/src/data_platform/
 ├── db.py              # PG 连接池 + K 线读写（validate_bars）+ 交易日历 + verify_schema
+├── store.py           # 批 59 M4：Store（版本冻结骨架 cur_version/frozen_or_current/save）
+├── databus.py         # 批 59/60a M4：DataBus 消费门面（get_bars/get/get_snapshot/subscribe 真实现 + _watermark 连续无缺；StreamHandle 流句柄；读 Valkey hub:bars:* 依赖）
 ├── schema.py          # Bar dataclass + vt_symbol 转换 + DDL 模板
 ├── data_source.py     # DataSource 接口（get_param*/get_rate_limit）+ Tushare/AkShare 实现（DB 化凭证 + 积分档预设）
 ├── rate_limit.py      # 限流+熔断三件套：RateLimiter/CircuitBreaker/rate_limit_context（2026-08-27 限流治理新建）
@@ -248,7 +250,8 @@ platform.ensure_minute(ts_code, freq, start_date, end_date=None) -> int
 platform.is_trading_day(d=None) -> bool
 platform.get_trade_calendar(year) -> list[date]
 platform.init_calendar(year) -> None            # 调 tushare.pull_trade_cal
-# 占位（T04/T05 实现）：get_realtime / subscribe / get_fundamental / get_convertible_terms / get_funding_rate
+# 占位（T04/T05 实现）：get_realtime / get_fundamental / get_convertible_terms / get_funding_rate
+# subscribe 已真实现（批 60a）——在 databus.DataBus.subscribe（非 platform 单例），流消费经 StreamHandle
 ```
 > ⚠️ `platform` 单例职责是"统一入口"，但当前多数模块直接用 `db.save_bars`/`get_bars`/`get_conn`（不绕 platform）。新代码可优先用 platform，旧代码保留。
 

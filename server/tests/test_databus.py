@@ -141,7 +141,7 @@ class TestSubscribe:
     """M5 subscribe 真实现（批 60 C3）：回放截断+去重+未达降级+poll。"""
 
     def test_replay_truncate_and_dedupe(self):
-        """水位线截断（严格新于）+ ts 去重（gen 交界同 ts）+ poll 起点最新 id。"""
+        """水位线截断（严格新于）+ ts 去重（同 ts 留新 gen）+ poll 起点最新 id。"""
         from src.quant_common.contract import Subscription
         from src.data_platform.databus import DataBus
         bus = DataBus()
@@ -154,9 +154,59 @@ class TestSubscribe:
             h = bus.subscribe(sub)
         tss = [datetime.fromisoformat(m["ts"]).minute for m in h.bars]
         assert tss == [4, 5]            # 严格新于 10:03 + 去重（gen 163/164 同 ts 只留一）
+        assert h.bars[0]["gen"] == "164"  # 同 ts 留新 gen（切换交界信号保留）
         assert h.warmup is None
         assert h.last_id == rows[0][0]  # poll 起点=流内最新 id
         assert h.stream_key == "hub:bars:600000.SHSE"
+
+    def test_multi_symbol_fails_fast(self):
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        sub = Subscription(kind="bar_minute", symbols=("a.SHSE", "b.SHSE"))
+        with pytest.raises(ValueError):
+            bus.subscribe(sub)
+
+    def test_naive_watermark_does_not_crash(self):
+        """naive 水位线 → 按上海本地解释转 aware（不 TypeError）。"""
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        r = MagicMock()
+        r.xrevrange.return_value = _xrev([1, 2, 3])
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",),
+                           from_watermark=datetime(2026, 9, 22, 10, 1))  # naive
+        with patch("src.data_platform.databus._r", return_value=r):
+            h = bus.subscribe(sub)
+        assert [datetime.fromisoformat(m["ts"]).minute for m in h.bars] == [2, 3]
+
+    def test_partial_underrun_falls_back(self):
+        """回放窗头未接上水位线（有洞）→ 也降级 warmup（不只「空回放」触发）。"""
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        r = MagicMock()
+        r.xrevrange.return_value = _xrev([8, 9, 10])          # 窗头 10:08，wm=10:01 → 洞
+        wm = as_utc(datetime(2026, 9, 22, 10, 1))
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=wm)
+        frame = _frame()
+        with patch("src.data_platform.databus._r", return_value=r), \
+             patch.object(bus, "_local_fetch", return_value=frame):
+            h = bus.subscribe(sub)
+        assert h.warmup is frame
+
+    def test_poll_nonblocking_default(self):
+        """poll 默认 block=None（不拼 BLOCK，非阻塞），而非 block=0（redis BLOCK 0=无限阻塞）。"""
+        from src.quant_common.contract import Subscription
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        r = MagicMock()
+        r.xrevrange.return_value = []
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",))
+        with patch("src.data_platform.databus._r", return_value=r):
+            h = bus.subscribe(sub)
+        h.poll()
+        assert r.xread.call_args[1]["block"] is None
 
     def test_replay_no_watermark_returns_all(self):
         from src.quant_common.contract import Subscription
@@ -185,6 +235,7 @@ class TestSubscribe:
             h = bus.subscribe(sub)
         assert h.bars == [] and h.warmup is frame
         assert lf.call_args[0][0].kind == "bar_minute"   # freq 按 kind 推断
+        assert lf.call_args[0][0].range_[1] is not None  # end 不传 None（盲审 A：end=None 落 SQL ts<=NULL 恒空）
 
     def test_poll_advances_last_id_and_survives_error(self):
         from src.quant_common.contract import Subscription
