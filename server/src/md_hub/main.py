@@ -205,21 +205,18 @@ def main() -> None:
 
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB；批 63 二：接口行 provider 选网关插件）———
     interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
-    row_id = int(interface_row) if interface_row else None
     try:
+        row_id = int(interface_row) if interface_row else None
         from src.strategy_framework.broker import get_interface_row
+        # 指定行缺必填凭证/解密失败/未注册 provider/无可用行均 raise → 78（盲审 P0-1/P1-2/P1-3 收敛）
         iface = get_interface_row(row_id)
+        from src.strategy_framework.md_gateway import create_md_gateway
+        md_gw = create_md_gateway(iface["provider"], counters)   # 未注册 provider ValueError → 78（盲审 P1-1）
+        md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
+        md_gw.connect(iface["credentials"], iface["params"])   # 组装/建连异常 → 78（盲审 P2-4）
     except Exception as e:
-        logger.error("外部接口行取数失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
+        logger.error("行情网关初始化失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
         raise SystemExit(78)
-    if row_id is not None and not iface["credentials"]:
-        # M5 语义保留：B 实例指定行必须带凭证，禁 .env fallback（防 B 静默跑 A 账号）
-        logger.error("接口行 id=%s 无凭证（B 实例 fail-fast），exit 78", row_id)
-        raise SystemExit(78)
-    from src.strategy_framework.md_gateway import create_md_gateway
-    md_gw = create_md_gateway(iface["provider"], counters)
-    md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
-    md_gw.connect(iface["credentials"], iface["params"])
 
     md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
 

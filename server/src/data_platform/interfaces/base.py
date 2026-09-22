@@ -23,11 +23,12 @@ _REGISTRY: dict[str, "InterfaceProvider"] = {}
 class InterfaceProvider(ABC):
     """外部接口供应商接入抽象。每家一个子类 + external_interface 配一行（行=账号）。
 
-    FIELD_SCHEMA：凭证字段（身份秘密：账号/密码/密钥），secret 字段前端 password 框 + 写侧必填，
+    FIELD_SCHEMA：凭证字段（身份秘密：账号/密码/密钥），secret 字段前端 password 框，
                   整包 JSON Fernet 加密存 credentials_encrypted。
     PARAMS_SCHEMA：参数字段（连接配置：地址/端口/客户号，非秘密），明文存 params JSONB。
     schema 元素：{key, type: text|select|number|boolean|textarea, label_key,
-                 secret?: bool, options?: [...], option_label_key?: ...}
+                 secret?: bool, required?: bool(secret 隐含 True，非密默认 True，可选字段显式 False),
+                 options?: [...], option_label_key?: ...}
     平台固定列（name/provider/market/exchanges/capabilities/enabled/position）不进 schema。
     """
 
@@ -39,8 +40,10 @@ class InterfaceProvider(ABC):
 
     @property
     def required_fields(self) -> set[str]:
-        """secret 字段集（写侧校验非空；同 im_bot base.py:56-58）。"""
-        return {f["key"] for f in self.FIELD_SCHEMA if f.get("secret")}
+        """必填字段集（secret 隐含必填；非密默认必填、可选显式 required=False——批 63 二增强：
+        承载 B 实例凭证完整性校验，缺必填禁 .env fallback）。
+        """
+        return {f["key"] for f in self.FIELD_SCHEMA if f.get("secret") or f.get("required", True)}
 
 
 def register_provider(inst: InterfaceProvider) -> None:

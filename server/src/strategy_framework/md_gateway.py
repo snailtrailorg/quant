@@ -6,9 +6,14 @@
 - 进插件（provider 特有）：连接原语 / 订阅退订原语 / tick 喂入 / 重连沿 / 会话窗与监督 / SDK 守卫。
 
 tick 契约（EMQ 等自研网关 Phase B 须产出兼容对象，duck typing）：
-last_price/datetime/volume/turnover/exchange/symbol + open/high/low/pre_close/limit_up/limit_down
-+ bid_price_1..5/ask_price_1..5/bid_volume_1..5/ask_volume_1..5（_write_latest_tick 与
-MinuteAggregator 消费面；vnpy TickData 原生满足）。
+1. 字段面：last_price/datetime/volume/turnover/exchange/symbol + open/high/low/pre_close/
+   limit_up/limit_down + bid_price_1..5/ask_price_1..5/bid_volume_1..5/ask_volume_1..5
+   （_write_latest_tick 与 MinuteAggregator 消费面；vnpy TickData 原生满足）。
+2. datetime 必须 tz-aware（UTC，批 56b 口径）——_in_bar_session/聚合分桶全依赖，naive 会崩。
+3. exchange 须 duck-type 到 vnpy 枚举：.value 取 "SSE"/"SZSE"（非 SHSE——parts._project_symbol
+   做 SSE→SHSE 项目后缀映射，EMQ 实现者照直觉给 SHSE 会产出 "XXX.SHSE.SHSE" 错键）。
+4. turnover 缺失时 parts 侧 getattr(tick,"turnover",0) 静默降级——EMQ 的 amount 须显式映射到
+   turnover，否则 bar.amount 恒 0 无告警。
 
 全部 vnpy/XTP import 惰性（模块可被无 vnpy 环境导入——测试/层序）。
 """
@@ -16,7 +21,9 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 
-logger = logging.getLogger("strategy_framework.md_gateway")
+# 观测面等值（盲审 A P3-5）：[gw] 会话日志/退订日志的 logger 名保持 md_hub——
+# journalctl 按名过滤与 system_log 落库 name 字段均不因插件化漂移
+logger = logging.getLogger("md_hub")
 
 try:
     from vnpy.trader.gateway import BaseGateway
@@ -94,8 +101,8 @@ class MdGateway(ABC):
     def set_context(self, fn) -> None:
         """告警上下文（hub 设订阅数文案；默认 no-op）。"""
 
-    def shutdown(self) -> None:
-        """进程收尾（默认 no-op——hub 退出路径自带码自灭）。"""
+    # shutdown 无此成员——hub 退出走 os._exit 带码自灭（原生库拆除规避是刻意设计，
+    # 盲审 P3：不留永不调用的死接口）
 
 
 def register_md_gateway(cls):
@@ -104,11 +111,16 @@ def register_md_gateway(cls):
 
 
 def create_md_gateway(provider: str, counters) -> MdGateway:
-    """按接口行 provider 取网关插件（未注册 fail-fast——配了 emt_emq 行但 EMQ 插件未实现时启动即炸）。"""
+    """按接口行 provider 取网关插件（未注册 fail-fast——消费方须捕获转 exit 78）。"""
     cls = _REGISTRY.get(provider)
     if cls is None:
         raise ValueError(f"未注册的行情网关 provider: {provider}（需实现 MdGateway 子类并 register_md_gateway）")
     return cls(counters)
+
+
+def list_md_gateway_providers() -> tuple[str, ...]:
+    """已注册网关 provider 集（get_interface_row 缺省选行钉定用——盲审 P1）。"""
+    return tuple(sorted(_REGISTRY))
 
 
 @register_md_gateway
@@ -146,7 +158,11 @@ class XtpMdGateway(MdGateway):
                     "BSE": getattr(Exchange, "BSE", Exchange.SSE)}
         self.event_engines = (self._ee,)   # EngineLoop 事件线程存活检查面（R-BR12 原语义）
 
-        # MD 生命周期可见化（2026-08-24 僵尸会话事件）：连接/断开/重登日志走 EVENT_LOG（原 hub on_log 段原样）
+        # MD 生命周期可见化（2026-08-24 僵尸会话事件）：连接/断开/重登日志走 EVENT_LOG（原 hub on_log 段
+        # 原样；guard 保留——vnpy 事件线程对 handler 异常不捕获，裸抛=线程死 → EngineLoop fatal exit 1）
+        from src.strategy_framework.runtime.alerts import make_alert, make_guard
+
+        @make_guard("hub.on_log", make_alert())
         def _on_log(event):
             logger.info("[gw] %s", getattr(event.data, "msg", event.data))
         self._ee.register(EVENT_LOG, _on_log)

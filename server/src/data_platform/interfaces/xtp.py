@@ -12,7 +12,7 @@ class XtpProvider(InterfaceProvider):
     FIELD_SCHEMA = [
         {"key": "app_id", "type": "text", "label_key": "interfaces.field.appId", "secret": False},
         {"key": "app_secret", "type": "text", "label_key": "interfaces.field.appSecret", "secret": True},
-        {"key": "auth_code", "type": "text", "label_key": "interfaces.field.authCode", "secret": False},
+        {"key": "auth_code", "type": "text", "label_key": "interfaces.field.authCode", "secret": False, "required": False},
     ]
 
     PARAMS_SCHEMA = [

@@ -15,13 +15,13 @@ class EmtEmqProvider(InterfaceProvider):
         # EMQ 极速行情身份
         {"key": "emq_account", "type": "text", "label_key": "interfaces.field.emqAccount", "secret": False},
         {"key": "emq_password", "type": "text", "label_key": "interfaces.field.emqPassword", "secret": True},
-        # EMT 极速柜台身份（普通/信用/期权三套资金账号，供应商原样分列）
+        # EMT 极速柜台身份（普通必填；信用/期权可选——不用则不填，供应商原样分列）
         {"key": "emt_account", "type": "text", "label_key": "interfaces.field.emtAccount", "secret": False},
         {"key": "emt_password", "type": "text", "label_key": "interfaces.field.emtPassword", "secret": True},
-        {"key": "emt_credit_account", "type": "text", "label_key": "interfaces.field.emtCreditAccount", "secret": False},
-        {"key": "emt_credit_password", "type": "text", "label_key": "interfaces.field.emtCreditPassword", "secret": True},
-        {"key": "emt_option_account", "type": "text", "label_key": "interfaces.field.emtOptionAccount", "secret": False},
-        {"key": "emt_option_password", "type": "text", "label_key": "interfaces.field.emtOptionPassword", "secret": True},
+        {"key": "emt_credit_account", "type": "text", "label_key": "interfaces.field.emtCreditAccount", "secret": False, "required": False},
+        {"key": "emt_credit_password", "type": "text", "label_key": "interfaces.field.emtCreditPassword", "secret": True, "required": False},
+        {"key": "emt_option_account", "type": "text", "label_key": "interfaces.field.emtOptionAccount", "secret": False, "required": False},
+        {"key": "emt_option_password", "type": "text", "label_key": "interfaces.field.emtOptionPassword", "secret": True, "required": False},
     ]
 
     PARAMS_SCHEMA = [
