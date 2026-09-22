@@ -58,13 +58,14 @@
     <el-dialog v-model="dlg" :close-on-click-modal="false"
                :title="form.id ? t(view === 'data' ? 'interfaces.editTitleData' : 'interfaces.editTitleTrading')
                                : t(view === 'data' ? 'interfaces.addTitleData' : 'interfaces.addTitleTrading')" width="600px">
+      <el-tabs v-if="!form.id" v-model="form.provider" @tab-change="onProviderPick">
+        <el-tab-pane v-for="p in providers" :key="p.provider" :name="p.provider"
+                     :label="providerLabel(p.provider)" />
+      </el-tabs>
       <el-form :model="form" label-width="130px">
         <el-form-item :label="t('common.name')"><el-input v-model="form.name" /></el-form-item>
-        <el-form-item :label="t('interfaces.providerLabel')">
-          <el-select v-if="!form.id" v-model="form.provider" style="width: 100%" @change="onProviderPick">
-            <el-option v-for="p in providers" :key="p.provider" :value="p.provider" :label="p.provider" />
-          </el-select>
-          <el-input v-else :model-value="form.provider" disabled />
+        <el-form-item v-if="form.id" :label="t('interfaces.providerLabel')">
+          <el-input :model-value="providerLabel(form.provider)" disabled />
         </el-form-item>
         <el-form-item :label="t('interfaces.marketLabel')">
           <el-input :model-value="marketName" disabled />
@@ -194,6 +195,8 @@ const curMeta = computed(() => providers.value.find(p => p.provider === form.val
 const curFieldSchema = computed(() => curMeta.value.field_schema || [])
 const curParamsSchema = computed(() => curMeta.value.params_schema || [])
 const schemaLabel = f => (f.label_key && te(f.label_key)) ? t(f.label_key) : f.key
+// 批63：provider 页签 label——中文名优先（interfaces.provider.* 词条），缺失回退 provider 技术名
+const providerLabel = p => te('interfaces.provider.' + p) ? t('interfaces.provider.' + p) : p
 // 并集：漂移能力（配置含代码外项）也显示为可勾选项——用户可取消勾掉修复漂移（盲审 A-P2-5）
 const availableCaps = computed(() =>
   Array.from(new Set([...(form.value._code_caps || []), ...(form.value.capabilities || [])])))
