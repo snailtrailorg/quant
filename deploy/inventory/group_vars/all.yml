@@ -25,6 +25,13 @@ deploy_sync_whitelist:
   - {path: scripts, dir: true}
   - {path: alembic.ini, dir: false}
   - {path: requirements.txt, dir: false}
+  # 批 63 Phase B：EMQ 编译依赖（vendor/emt 头文件 + SDK .so）。synchronize 从控制机文件系统
+  # rsync，不区分 git tracked/ignored——SDK .so（git 忽略）一并同步到 releases/<id>/vendor/。
+  - {path: vendor, dir: true}
+
+# 批 63 Phase B：EMQ 绑定 .so 编译开关（生产/彩排开；沙箱关——无 gcc-toolset/vendor/emt 编译环境，
+# 沙箱只测编排逻辑不测真实编译）
+deploy_emd_build: true
 
 # ---- 波次稳定窗（设计稿 §3 注记②：无原生 dwell，循环实现）----
 deploy_dwell_seconds: 30             # is-active 需连续保持的秒数（沙箱压缩覆盖）

@@ -39,7 +39,7 @@ chown deploy:deploy /home/deploy/.ssh/authorized_keys && chmod 600 /home/deploy/
 
 echo "== 5 wrappers + run-current 装位（同产路径）=="
 install -m 755 -o root -g root \
-  "$REPO"/deploy/wrappers/quant-{svc,flip-server,flip-web,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned} \
+  "$REPO"/deploy/wrappers/quant-{svc,flip-server,flip-web,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned,emd-build} \
   /usr/local/sbin/
 install -m 755 -o quant -g quant \
   "$REPO"/deploy/wrappers/quant-{dbro,hbcheck} /usr/local/sbin/

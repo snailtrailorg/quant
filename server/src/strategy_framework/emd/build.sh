@@ -19,15 +19,15 @@ INCLUDES=$($PY -m pybind11 --includes)
 PYINC=$($PY -c "import sysconfig; print('-I' + sysconfig.get_paths()['include'])")
 EXT=$($PY -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 
-# 运行时 libstdc++：gcc-toolset 编译默认动态链接其新版 libstdc++，若 .so 引用了
-# 高于系统 GCC 8.5（GLIBCXX 3.4.25）的符号版本，运行时需 LD_LIBRARY_PATH 指向
-# gcc-toolset 的 libstdc++（bind_quote 仅用 C++11 特性，通常不超 3.4.25，部署时 readelf 复核）。
+# 运行时 libstdc++：gcc-toolset 编译的 .so 需 GLIBCXX 3.4.29+，服务器系统 libstdc++（GCC 10.2）
+# 仅 3.4.28——rpath 追加 gcc-toolset 的 libstdc++（.so 自足，免 systemd LD_LIBRARY_PATH）。
+# 本地（Fedora）该路径不存在，动态链接器忽略、fallback 系统 libstdc++，无副作用。
 $GXX -O3 -shared -std=c++11 -fPIC \
   -I vendor/emt/include \
   $INCLUDES $PYINC \
   src/strategy_framework/emd/bind_quote.cpp \
   -L vendor/emt/lib \
-  -Wl,-rpath,'$ORIGIN/../../../vendor/emt/lib' \
+  -Wl,-rpath,'$ORIGIN/../../../vendor/emt/lib:/opt/rh/gcc-toolset-13/root/usr/lib64' \
   -lemt_quote_api -lemt_api \
   -o "src/strategy_framework/emd/emd_quote_api${EXT}"
 

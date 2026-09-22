@@ -267,6 +267,11 @@
               ⚠️ shared/.env 与 shared/venv 是管道外输入（结构上不可指纹）——本轮若改过它们，须 -e force_full=true 重跑（补审A-P1）。
           when: not (server_changed | bool)
 
+        - name: 阶段 2.5 —— 编译 EMQ 绑定 .so（quant-emd-build，gcc-toolset-13 + shared/venv）
+          ansible.builtin.command: "{{ quant_emd_build_cmd }} {{ release_id }}"
+          changed_when: true
+          when: server_changed | bool and (deploy_emd_build | default(true) | bool)   # 批 63：src 变更才重编；沙箱关
+
         - name: 阶段 3 —— py_compile 全量 + 六入口导入冒烟（quant-importsmoke-wrapper，带 shared/.env）
           ansible.builtin.command: "{{ quant_importsmoke_cmd }} {{ release_id }}"
           changed_when: true

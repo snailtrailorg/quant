@@ -35,7 +35,7 @@ chmod 600 /home/deploy/.ssh/authorized_keys
 
 echo "== 4 wrappers 装位（root 属主 755；quant-dbro 唯一 quant 属主）=="
 install -m 755 -o root -g root \
-  "$SRC"/quant-{svc,flip-server,flip-web,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned} \
+  "$SRC"/quant-{svc,flip-server,flip-web,install-units,alembic-wrapper,importsmoke-wrapper,pip-wrapper,pinned,emd-build} \
   /usr/local/sbin/
 install -m 755 -o quant -g quant "$SRC/quant-dbro" "$SRC/quant-hbcheck" /usr/local/sbin/
 

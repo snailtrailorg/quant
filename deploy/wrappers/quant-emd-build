@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# quant-emd-build —— EMQ 行情 pybind11 绑定编译通道（sudoers QUANT_DEPLOY_ROOT，root 跑）
+#
+# 属主约束：root:root 755，部署于 /usr/local/sbin/quant-emd-build。
+# 为什么 root（非 quant/deploy）：编译须读 shared/venv（Python.h + pybind11，quant 700）
+#   且写 releases/<id>/src/strategy_framework/emd/（staged 属 deploy）——两个方向都卡权限，
+#   root 一步到位（读 shared/venv + 写 staged）。
+#
+# 动作：gcc-toolset-13 环境下跑 build.sh，产物 emd_quote_api.cpython-3xx.so 落 staged。
+#   提权面与 flip-server 等 root wrapper 同构——build.sh 为受控脚本（git tracked），
+#   g++ 编译 bind_quote.cpp（受控源码）+ vendor/emt 头文件（东财官方 SDK）。
+#
+# 严参校验：release_id 匹配 ^[0-9]{12}-[a-f0-9]{7,}$；cwd 锁定 releases/<release_id>。
+#
+# 环境变量：
+#   QUANT_DEPLOY_ROOT —— 部署根（生产默认 /data/websites/snailtrail.cc/quant）
+set -euo pipefail
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+
+[ $# -eq 1 ] || { echo "用法: quant-emd-build <release_id>" >&2; exit 2; }
+release_id=$1
+
+if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
+  echo "✗ release_id 非法（须匹配 ^[0-9]{12}-[a-f0-9]{7,}\$）: $release_id" >&2
+  exit 2
+fi
+
+REL="$ROOT/releases/$release_id"
+[ -d "$REL" ] || { echo "✗ release 目录不存在: $REL" >&2; exit 1; }
+
+PY="$ROOT/shared/venv/bin/python"
+[ -x "$PY" ] || { echo "✗ shared/venv 解释器不存在: $PY" >&2; exit 1; }
+
+# gcc-toolset-13 环境（服务器 GCC 10.2 不支持 EMQ 头文件的 C++23 enum 作用域，须 GCC 11+）
+# shellcheck disable=SC1091
+[ -f /opt/rh/gcc-toolset-13/enable ] && . /opt/rh/gcc-toolset-13/enable
+
+# build.sh 内部 cd "$(dirname "$0")/../../.." 自定位到 releases/<release_id>，相对路径
+# （vendor/emt include+lib / 产物 src/.../emd/）均以该目录为根，无需 wrapper 再 cd。
+PY="$PY" bash "$REL/src/strategy_framework/emd/build.sh"
+
+echo "✓ EMQ 绑定编译完成：src/strategy_framework/emd/emd_quote_api*.so"

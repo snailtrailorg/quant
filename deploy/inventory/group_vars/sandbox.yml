@@ -8,6 +8,7 @@ deploy_sudo_root: ""                 # 生产: sudo（sudoers QUANT_DEPLOY_ROOT�
 deploy_sudo_quant: ""                # 生产: sudo -u quant（sudoers QUANT_DEPLOY_QUANT）
 quant_svc_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-svc') | trim }}"
 quant_flip_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-server') | trim }}"
+quant_emd_build_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-emd-build') | trim }}"   # 批 63（沙箱不执行，见 deploy_emd_build=false）
 quant_flip_web_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-web') | trim }}"
 quant_install_units_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-install-units') | trim }}"
 quant_pinned_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pinned') | trim }}"   # v3.3: 被钉 release 探测（沙箱真通道 --user 直读 /proc）
@@ -46,6 +47,7 @@ deploy_waves:
 deploy_postverify_units: [quant-sbx-web.service, quant-sbx-celery.service, quant-sbx-hub.service]
 
 # ---- 验证参数（沙箱压缩/桩化）----
+deploy_emd_build: false               # 批 63：沙箱无 gcc-toolset/vendor/emt，跳过 EMQ 编译（只测编排）
 deploy_dwell_seconds: 4              # 压缩稳定窗
 deploy_dwell_poll: 1
 deploy_dwell_max_wait: 15

@@ -13,7 +13,7 @@ Defaults env_reset
 #   - quant-journal 只读诊断通道（2026-09-01 三查需求）：journalctl 收 wrapper 严参校验，
 #     仅 quant-*.service 域 + 只读 flags（-u/--since/--until/-n/-p/-q），deploy 读不到 auth/sshd
 Cmnd_Alias QUANT_DEPLOY_ROOT = /usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-flip-web, /usr/local/sbin/quant-install-units, \
-                               /usr/local/sbin/quant-pinned, /usr/local/sbin/quant-journal
+                               /usr/local/sbin/quant-pinned, /usr/local/sbin/quant-journal, /usr/local/sbin/quant-emd-build
 Cmnd_Alias QUANT_DEPLOY_SYS  = /usr/local/sbin/quant-svc
 Cmnd_Alias QUANT_DEPLOY_QUANT = /usr/local/sbin/quant-alembic-wrapper, \
                                 /usr/local/sbin/quant-importsmoke-wrapper, \
