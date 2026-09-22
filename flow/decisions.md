@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-09-23 · 批 63 部署三裁定 + 批 64 Web 切换裁定
+
+1. **EMQ 编译链用 gcc-toolset-13（不 patch vendor 头）**：EMQ 头 `quote_api.h` 用 `EMQ_EXCHANGE_TYPE::EMQ_EXCHANGE_UNKNOWN`（C++23 P1099 enum 作用域限定），服务器 GCC 10.2 编译报错。用户裁定装 gcc-toolset-13（`source /opt/rh/gcc-toolset-13/enable`），不改东财 SDK 头（保留上游原样，升级 SDK 时不丢 patch）。
+2. **切换 provider 用「自动重启」而非「热切换」**（批 64）：hub 对账 `config_version` 检测 provider 变化 → `os._exit(9)` 自重启读新行。不进程内 close 旧 gateway + 建新——违背项目铁律「原生库拆除规避」（hub 退出走 os._exit 带码自灭）。代价 ~30s 停机窗（盘外零损失）。
+3. **外部接口切换纯 Web 操作**（批 64）：集成中心拖拽改 position + bump config_version 即触发，不需 drop-in/root。`HUB_INTERFACE_ROW` 是 M5 双实例（A/B 账号）机制，非 provider 切换场景。
+
 ## 2026-09-22 · 批 60 M5 流协议五裁定（方案集 v16 定稿）
 
 - **M5 切换协议 = Valkey 四键 + guarded Lua + 无待命态**（推翻 28/29 蓝图的 stream_registry/影子预热/fencing token）：`hub:gen/lease/switch:intent{snapshot,target}/active_instance` 四键承载全部状态；B=A 让位后按需启动的正常 hub（非提前待命——main.py 单遍初始化决定「接管≈全量重启」，待命省不了连接时间）；「计划切换零丢包」降级为「切换仅限非交易时段 + 盘后回补兜底 + `switch.py diff` 口径比对」并已版本化注记进 28 §8.2/29 §八。
