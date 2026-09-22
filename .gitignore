@@ -36,6 +36,7 @@ web/dist/
 # 数据库本地
 *.sqlite3
 docs/reference/xtp-sdks/
+docs/reference/emt-sdks/
 
 # 批3 工件化交付（deploy）：控制机 venv 与沙箱生成物
 deploy/.venv/
