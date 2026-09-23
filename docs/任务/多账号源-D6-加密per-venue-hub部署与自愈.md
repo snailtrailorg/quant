@@ -4,7 +4,7 @@
 
 ## 一、目标
 
-加密 per-venue hub 是全新部署拓扑（N 实例，每 venue 一个 MD+TD 源），钉死实例生命周期、SA4 期望态、租约/维护键分 venue、停用反拉起。
+加密 per-venue hub 是全新部署拓扑（N 实例，每 venue 一个 MD 源；TD 仍在 worker 侧，归 D5），钉死实例生命周期、SA4 期望态、租约/维护键分 venue、停用反拉起。
 
 ## 二、现状（已核实）
 
@@ -17,7 +17,7 @@
 
 ## 四、契约
 
-- **实例生命周期**：加密 hub 按 venue 独立实例（N 个），`active_instance` 仲裁按 venue 分键。
+- **实例生命周期**：加密 hub 按 venue 独立实例（N 个），`active_instance` 仲裁按 venue 分键。**分源键=venue_id（=external_interface.id）；换凭证走 update 保 venue_id，禁 delete+insert 重建（否则与 D3 流键/暖机/order_log 归因脱钩）**。
 - **SA4 期望态按 venue**：期望实例集合 = enabled 且 capabilities∋trading 的加密 venue。
 - **租约/维护键分 venue**：对齐 D3（`quant:hb:md-hub:{venue_id}` / `hub:lease:{venue_id}`）。
 - **停用反拉起**：停用某 venue 时先设维护键、后停实例，防 SA4 300s 反拉起；新增 venue 先注册 DB 后 systemctl。

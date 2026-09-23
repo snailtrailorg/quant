@@ -9,7 +9,7 @@
 ## 二、现状（已核实）
 
 - `strategy_runner/main.py:199` 硬编码 `XTPAdapter(gateway=gw, ...)`——TD 网关不走 venue 配置。
-- `main.py:384` 从 `strategy_account.broker_provider`（自由文本）选源——身份线未收编到 venue。
+- `main.py:384` 读 `strategy_account.broker_provider`（自由文本）仅打日志，**从未驱动选源（死列）**；选源实为 `main.py:199` 硬编码 `XTPAdapter`——身份线未收编到 venue。
 - `perm_registry.py:56` market_op 五键下单卡口（role 级，非 venue 级）。
 - XTP 每日连接窗（`system_config` `xtp_session_lead_min`/`lag_min`）只对 A股 XTP 生效；EMT/加密不套（31 号 §五契约9）。
 
@@ -20,9 +20,10 @@
 ## 四、契约
 
 - **选源**：TD 人工显式选源（建任务 Web 选 venue_id）；候选收窄到 **enabled + capabilities ∋ trading**（加密 venue 无 quote，不得 trading+quote 收窄）。
-- **三级时点**：①建任务拒绝（`venue_allows`）②worker 启动 fail-fast ③下单前拦截（`risk_control.check_order` 前置）。
-- **TD 网关 per-venue 构建**：按 venue 的 provider+凭证构建网关/适配器，**禁硬编码 XTPAdapter/全局单例**；`query_position`/`query_account`/`order`/对账全走该 venue 会话。
+- **三级时点**：①建任务拒绝（`venue_allows`）②worker 启动 fail-fast ③下单前拦截（`risk_control.check_order` 前置）。**③时点接线：order dict 增 `venue_id` 键 → place_order 传 venue_id → check_order 用 venue_id 调 venue_allows + per-venue `_get_global_state`（现 check_order account 恒空串、order 无 venue_id，不钉则③静默失效）**。③时点 venue_allows 仅拦 BUY/开仓，SELL 豁免（见 D1）。
+- **TD 网关 per-venue 构建**：按 venue 的 provider+凭证构建网关/适配器，**禁硬编码 XTPAdapter/全局单例**；`query_position`/`query_account`/`order`/对账全走该 venue 会话。**硬约束：构建必须 `build_xtp_setting(row_id=venue_id)`（或等价），row_id=None / .env fallback 一律 EX_CONFIG fail-fast**——现 `main.py:137 _build_xtp_setting(client_id=...)` 未传 row_id、`broker.py:75 get_broker` 缺省取「域内 position 首行」，多 XTP venue 下第二个 worker 会连到首行账户（A 任务下单落 B 账户）。
 - **XTP 连接窗分支**：只 A股 XTP 套每日连接窗（lead/lag）；EMT/加密不套（常连）。
+- **加密 stub 硬闸（沿用既有，不重造）**：加密 venue 若 is_live 且 adapter 为 stub，fail-fast exit 78（批 6b 已实现，本件只引用）。
 
 ## 五、限定范围
 
@@ -32,8 +33,8 @@
 ## 六、验收标准（编码阶段定，行为级）
 
 - 建任务候选不含无 trading 能力的 venue。
-- 建任务选无权限品种的 venue 被拒；worker 启动 fail-fast；下单前拦截。
-- TD 网关按 venue.provider 构建（EMQ/EMT venue 不再走硬编码 XTPAdapter）；A 任务下单/查询落在 A venue，不串 B。
+- 建任务选无权限品种的 venue 被拒；worker 启动 fail-fast；下单前拦截（含 SELL 豁免、③时点 venue_id 传入）。
+- TD 网关按 venue.provider 构建（EMQ/EMT venue 不再走硬编码 XTPAdapter）；**row_id=venue_id 显式传入，None/.env fallback fail-fast**；A 任务下单/查询落在 A venue，不串 B。
 - EMT/加密 venue 不套 XTP 连接窗。
 
 ## 七、参考文档
