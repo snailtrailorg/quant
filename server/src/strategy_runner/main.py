@@ -122,27 +122,19 @@ def _guard(name):
     return _guard_base(name, alert=lambda title, body="": _alert(title, body, code="runtime.guard"))
 
 
-def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,
-                  venue_id=None, owner_username=None):
-    """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。
+def _build_xtp_runtime(ee, tid, venue_id, boot_epoch) -> dict:
+    """D5：XTP 专属 TD 运行时组装（ThinTdGateway + XtpTdApi + XTPAdapter + 连接窗）。
 
-    owner_username（批15）：live_task 归属人 → strategy.operator 实例属性 → order["operator"]
-    → check_order 2.5 市场操作权限判定。旧 --id 路径无值=None → operator 空 → 2.5 拒单
-    critical（预期 fail-closed）。"""
-    from vnpy.event import EventEngine
+    返回 {gw, td_api, adapter, setting, td_open, lead, lag, cfg_adapter}。
+    row_id=venue_id 显式传（build_xtp_setting 取数失败 raise，禁 .env fallback——防 A 任务串 B 账户）。
+    """
     from vnpy.trader.gateway import BaseGateway
     from vnpy_xtp.gateway.xtp_gateway import XtpTdApi
-    from src.strategy_framework.strategy import Strategy, StrategyConfig
     from src.strategy_framework.adapters import XTPAdapter
-    from src.strategy_runner.hub_worker import run as hub_worker_run
+    setting = _build_xtp_setting(client_id=runner_client_id(tid), row_id=venue_id)
 
-    logger.info("任务 %s 以 hub 模式启动（策略 %s 标的 %s）", tid or sid, sid, symbol)
-    setting = _build_xtp_setting(client_id=runner_client_id(tid))   # F-56：worker TD 独立 client_id（多任务防撞号）
-    boot_epoch = int(time.time())   # 评审 S8：秒级 epoch（分钟级同分钟重启会撞 id）
-
-    # 每日连接窗·TD 侧（P2 批 08-28，A/B 双盲审）：窗开建连/窗关启动不连（窗开沿由
-    # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout，exit 循环无
-    # 实证不冒——工程分级，TD 全窗化二期）。lead/lag 任一 0=禁用日窗（永久连接）。
+    # 每日连接窗·TD 侧（只 A股 XTP 套窗）：窗开建连/窗关启动不连（窗开沿由
+    # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
     from datetime import datetime as _dtnow   # 盲审 A-P0：函数级导入（模块头部无 datetime）
     from src.strategy_framework.md_session import is_trading_day as _itd
     from src.strategy_framework.md_session import load_xtp_window_cfg, xtp_session_window_open
@@ -178,19 +170,6 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
             except Exception:
                 pass
 
-    ee = EventEngine()
-    ee.start()   # 同 md_hub：直连 EventEngine（不经 MainEngine）须自启
-
-    # 批 6b（EVENT_LOG 修，批 4 迁移遗漏）：TD 会话日志（连接/断开/重登/拒单）走
-    # EVENT_LOG——hub 模式此前未注册全被吞（md_hub 批 0 修过同款盲区）。vnpy_xtp
-    # TD 侧仅事件驱动低频（盲审 B 实核 xtp_gateway.py:493/585/744/766），不刷屏。
-    from vnpy.trader.event import EVENT_LOG
-
-    @_guard("worker.on_log")
-    def on_log(event):
-        logger.info("[gw] %s", getattr(event.data, "msg", event.data))
-    ee.register(EVENT_LOG, on_log)
-
     gw = ThinTdGateway(ee, "XTP")
     td_api = XtpTdApi(gw)
     gw.td_api = td_api
@@ -200,9 +179,89 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         logger.info("TD 窗关启动（lead=%d/lag=%d），连接待窗开沿", _lead, _lag)
 
     adapter = XTPAdapter(gateway=gw, event_engine=ee,
-                         order_prefix=f"t{tid or sid}:e{boot_epoch}:")
+                         order_prefix=f"t{tid}:e{boot_epoch}:")
+    return {"gw": gw, "td_api": td_api, "adapter": adapter, "setting": setting,
+            "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp"}
+
+
+# D5：TD 运行时构建注册表（加 provider 只加条目，禁 if provider== 硬编码——M3 守门立法）
+_TD_BUILDERS = {"xtp": _build_xtp_runtime}
+
+
+def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,
+                  venue_id=None, owner_username=None):
+    """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。
+
+    owner_username（批15）：live_task 归属人 → strategy.operator 实例属性 → order["operator"]
+    → check_order 2.5 市场操作权限判定。旧 --id 路径无值=None → operator 空 → 2.5 拒单
+    critical（预期 fail-closed）。"""
+    from vnpy.event import EventEngine
+    from src.strategy_framework.strategy import Strategy, StrategyConfig
+    from src.strategy_runner.hub_worker import run as hub_worker_run
+    from src.strategy_framework.broker import get_interface_row
+
+    logger.info("任务 %s 以 hub 模式启动（策略 %s 标的 %s）", tid or sid, sid, symbol)
+    boot_epoch = int(time.time())   # 评审 S8：秒级 epoch（分钟级同分钟重启会撞 id）
+
+    # D5：读 venue 行 → provider（行=venue_id，禁硬编码 XTP）。取数失败（禁用/凭证缺/DB 异常）
+    # raise → 永久配置错误，单次干净 exit 78（RestartPreventExitStatus 豁免，防 on-failure 重启风暴）
+    try:
+        iface = get_interface_row(row_id=venue_id)
+    except Exception as e:
+        logger.error("读 venue 行失败（id=%s），拒绝启动: %s", venue_id, e)
+        sys.exit(EX_CONFIG)
+    provider = iface["provider"]
+
+    ee = EventEngine()
+    ee.start()   # 同 md_hub：直连 EventEngine（不经 MainEngine）须自启
+
+    # 批 6b（EVENT_LOG 修，批 4 迁移遗漏）：TD 会话日志（连接/断开/重登/拒单）走
+    # EVENT_LOG——hub 模式此前未注册全被吞（md_hub 批 0 修过同款盲区）。
+    from vnpy.trader.event import EVENT_LOG
+
+    @_guard("worker.on_log")
+    def on_log(event):
+        logger.info("[gw] %s", getattr(event.data, "msg", event.data))
+    ee.register(EVENT_LOG, on_log)
+
+    builder = _TD_BUILDERS.get(provider)
+    if builder is None:
+        # 非 XTP：TD 网关未实现（加密 stub / EMT 仅 MD）→ 加密 stub 硬闸（D5 落）
+        # 硬闸用「该 venue 分项实盘开关」（总闸 AND provider 分项），非全局总闸（盲审 B：跨市场耦合）
+        from src.data_platform.settings import is_live_trading_enabled
+        if is_live_trading_enabled():
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                row = conn.execute(
+                    "SELECT enabled FROM live_trading_config WHERE market=%s", (provider,)).fetchone()
+            if row and row[0]:
+                logger.error("provider %s 的 TD 网关未实现（加密 stub 硬闸），拒绝启动", provider)
+                sys.exit(EX_CONFIG)
+        try:
+            from src.strategy_framework.adapters import create_adapter
+            stub_adapter = create_adapter(provider)   # stub（is_live 关时仅启动不下单）
+        except Exception as e:
+            logger.error("provider %s 未注册 TD 适配器，拒绝启动: %s", provider, e)
+            sys.exit(EX_CONFIG)
+        rt = {"gw": None, "td_api": None, "adapter": stub_adapter, "setting": None,
+              "td_open": True, "lead": None, "lag": None, "cfg_adapter": provider}
+    else:
+        try:
+            rt = builder(ee, tid, venue_id, boot_epoch)
+        except Exception as e:
+            logger.error("TD 运行时组装失败（provider=%s），拒绝启动: %s", provider, e)
+            sys.exit(EX_CONFIG)
+
+    gw = rt["gw"]
+    td_api = rt["td_api"]
+    adapter = rt["adapter"]
+    setting = rt["setting"]
+    _td_open = rt["td_open"]
+    _lead, _lag = rt["lead"], rt["lag"]
+    cfg_adapter = rt["cfg_adapter"]
+
     adapter.venue_id = venue_id   # D2：成交/委托日志 per-venue 落库（write_trade_log 读此）
-    cfg = StrategyConfig(id=sid, name=name, type=s_type, symbol=symbol, adapter="xtp",
+    cfg = StrategyConfig(id=sid, name=name, type=s_type, symbol=symbol, adapter=cfg_adapter,
                          enabled=True, factors=factors or [], aggregator=aggregator or {}, params=params or {})
     strategy = Strategy.from_config(cfg, adapter)
     # 批15：owner 经实例属性注入（不动构造签名——from_config 调用点含 backtest.py，
@@ -260,8 +319,8 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         "initial_capital": initial_capital,
         "warmup_pg": lambda: _warmup_history(symbol),
         "stop_check": _stop_check, "reconcile": _reconcile,
-        "td_connect": lambda: gw.connect(setting),      # 窗开沿建连（P2 批 08-28）
-        "td_window": (_lead, _lag),                     # 同窗参数（worker 轮询）
+        "td_connect": (lambda: gw.connect(setting)) if gw is not None else (lambda: None),   # 窗开沿建连（XTP 专属）
+        "td_window": (_lead, _lag) if _lead is not None else None,   # 非 XTP=None（_td_connect_due 首行短路）
     })
     hub_worker_run(ctx)
 
@@ -400,6 +459,12 @@ def main():
             # （INSERT 违约被 except 吞、无快照无下单），显式 fail-fast 对齐 md_mode 处理。
             logger.error("旧 --id 路径：external_interface 无交易域行，无 venue 归属，拒绝启动")
             sys.exit(EX_CONFIG)
+
+    # 1.6 D5 三级时点②：worker 启动 venue 级品种权限（venue_allows）fail-fast（宁拒勿错）
+    from src.data_platform.perms import venue_allows
+    if not venue_allows(venue_id, symbol):
+        logger.error("venue %s 不允许交易品种 %s（三维 category/exchange/board 权限），拒绝启动", venue_id, symbol)
+        sys.exit(EX_CONFIG)
 
     # 1.5 md_mode 校验（批 6b：direct 退役）：hub 是唯一实盘行情模式。误设 direct
     # 显式 EX_CONFIG fail-fast（盲审 B-P1：静默落入已删代码=任务装死无人知）。

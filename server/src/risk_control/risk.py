@@ -286,6 +286,20 @@ class RiskControl:
             return RiskDecision(approved=False,
                 reason=f"市场操作权限检查异常（fail-closed）: {e}", severity="critical", rule="MARKET_OP_ERROR")
 
+        # 2.6 D5 三级时点③：venue 级品种权限（venue_allows）——仅拦 BUY/开仓，SELL 豁免（D1 裁定）。
+        # venue_id=None（旧 --id 路径/异常）跳过本段，由全局风控 _get_global_state(None) 读方
+        # fail-closed（WHERE venue_id=NULL 恒 false → available=False 拒单）兜住。
+        try:
+            if str(order.get("action", "")).upper() == "BUY" and venue_id is not None:
+                from src.data_platform.perms import venue_allows
+                if not venue_allows(venue_id, symbol):
+                    return RiskDecision(approved=False,
+                        reason=f"venue 级品种权限拒绝: {symbol}（venue_id={venue_id}）",
+                        severity="warn", rule="VENUE_NOT_ALLOWED")
+        except Exception as e:
+            return RiskDecision(approved=False,
+                reason=f"venue 权限检查异常（fail-closed）: {e}", severity="critical", rule="VENUE_PERM_ERROR")
+
         # 3. 全局风控
         state = self._get_global_state(venue_id)
         # SB1（F-29）fail-closed：快照数据源故障/无数据时拒绝一切新单（故障时保护必须更紧不能更松）

@@ -25,6 +25,12 @@
 - **XTP 连接窗分支**：只 A股 XTP 套每日连接窗（lead/lag）；EMT/加密不套（常连）。
 - **加密 stub 硬闸（沿用既有，不重造）**：加密 venue 若 is_live 且 adapter 为 stub，fail-fast exit 78（批 6b 已实现，本件只引用）。
 
+> **编码实施补充（2026-09-24，AB 双盲审后）**
+> - **TD 网关 per-venue 用注册表**（非 if provider== 硬编码，M3 守门立法）：`_TD_BUILDERS = {"xtp": _build_xtp_runtime}`（main.py 模块级），`_build_xtp_runtime` 抽 XTP 专属组装（ThinTdGateway + XtpTdApi + XTPAdapter + `build_xtp_setting(row_id=venue_id)` 修串账户 bug）。非 XTP（builder None）走 stub + 硬闸。
+> - **加密 stub 硬闸 D5 自己落**（文档原说「批 6b 已实现」是假的，代码无此闸）：非 XTP + 总闸开 + 该 provider 分项开 → `sys.exit(EX_CONFIG)`。
+> - **fail-fast 异常捕获**（双盲审 A/B P0）：`get_interface_row`/`build_xtp_setting`/`create_adapter` 的 raise 包 try/except → `sys.exit(EX_CONFIG)`，否则 exit 1 触发 systemd on-failure 重启风暴（RestartPreventExitStatus 只豁免 78）。
+> - **非 XTP `td_window=None`**（非 `(None,None)`）——`_td_connect_due` 首行 `if not win` 短路常连。
+
 ## 五、限定范围
 
 只做：建任务选源 + 三级时点接入 + TD 网关 per-venue 构建 + XTP 连接窗分支。

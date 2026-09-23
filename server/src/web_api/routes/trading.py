@@ -121,6 +121,11 @@ def create_live_task(body: dict = Body(...),
             "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (venue_id,))
         if cur.fetchone() is None:
             raise ApiError(404, "VENUE_NOT_FOUND", f"venue {venue_id} 不存在或非交易域")
+        # D5 三级时点①：venue 级品种权限（venue_allows）——建任务时拒绝无权限品种
+        from src.data_platform.perms import venue_allows
+        if not venue_allows(venue_id, symbol):
+            raise ApiError(403, "VENUE_NOT_ALLOWED",
+                           f"venue {venue_id} 不允许交易品种 {symbol}（三维 category/exchange/board 权限）")
         cur = conn.execute(
             "INSERT INTO live_task (name, strategy_id, symbol, params, strategy_snapshot, status, "
             "venue_id, initial_capital, owner_username) VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s) RETURNING id",
