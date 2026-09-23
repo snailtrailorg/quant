@@ -23,6 +23,39 @@ logger = logging.getLogger("hub_worker")
 BAR_STREAM_PREFIX = "hub:bars:"
 HB_KEY = "quant:hb:md-hub"
 STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
+
+
+def _crypto_provider(symbol: str) -> str | None:
+    """加密 symbol 后缀 → provider（D3 同源分源键）；A股/其他返回 None（单 hub 无 venue 维）。"""
+    if ".BINANCE" in symbol:
+        return "binance_perp"
+    if ".OKX" in symbol:
+        return "okx_perp"
+    return None
+
+
+def bar_stream_key(symbol: str, venue_id=None) -> str:
+    """D3 流键格式：A股 `hub:bars:{symbol}`（单 hub）；加密 `hub:bars:{venue_id}:{symbol}`（per-venue）。"""
+    if _crypto_provider(symbol) and venue_id is not None:
+        return f"hub:bars:{venue_id}:{symbol}"
+    return BAR_STREAM_PREFIX + symbol
+
+
+def _venue_mismatch(fields: dict, symbol: str, venue_id) -> bool:
+    """D3 同源校验：加密 per-venue 流消息与本 venue 是否不匹配（True=跨源/缺失/非法，fail-fast）。
+
+    A股（无 provider）恒 False（单 hub 无 venue 维，不做比对）。
+    加密但 venue_id=None（异常态）→ True（无法判定同源，fail-closed 拒——防吃错行情）。
+    decode_responses 读出 venue_id 是 str，须 int 转换；缺失/非法按不匹配（fail-closed）。
+    """
+    if _crypto_provider(symbol) is None:
+        return False
+    if venue_id is None:
+        return True
+    try:
+        return int(fields.get("venue_id", -1)) != venue_id
+    except (TypeError, ValueError):
+        return True
 # 批 2 骨架三件套（与 hub 同款；_valkey 保留别名供测试/冒烟注入 fake）
 _alert = make_alert()
 _valkey = make_valkey
@@ -101,18 +134,19 @@ def run(ctx: dict) -> None:
 
     r = _valkey()
     tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
+    venue_id = ctx.get("venue_id")     # D3：per-venue 流键/同源校验真源（A股 None）
     strategy, adapter = ctx["strategy"], ctx["adapter"]
     ee = ctx["event_engine"]          # 评审 C1：键名统一
     td_api = ctx.get("td_api")
     history = ctx["history"]
     frozen = ctx["frozen"]            # 与 _run_hub_mode 的 send_order 网关共享同一 dict（评审 C2）
-    stream = BAR_STREAM_PREFIX + symbol
+    stream = bar_stream_key(symbol, venue_id)
     gname = f"task-{tid}"
     cname = f"w-{os.getpid()}"
     state = BarMsgState()
     # last_bar_wall=进程累计；sess_bar_wall=时段内基线（S6 修订：沿上清零，昨夜回放 bar 不污染今晨判定）
     stats = {"last_bar_wall": 0.0, "bars": 0, "dropped_stale": 0, "dropped_dup": 0,
-             "sess_bar_wall": 0.0}
+             "dropped_cross": 0, "sess_bar_wall": 0.0}
     hb_task_key = f"quant:hb:task:{tid}"
 
     # ——— EVENT_TRADE → trade_log（评审 S1；4a 单源化 trading）———
@@ -134,7 +168,8 @@ def run(ctx: dict) -> None:
             logger.warning("XGROUP CREATE 失败: %s", e)
 
     # P0-3 配套：max_ts 持久化恢复（R-DL1 跨重启去重——曾进程内存失忆）
-    _mts_key = f"hub:worker:max_ts:{symbol}"
+    # D3：加密 per-venue 水位键含 venue（防跨 venue 去重串扰）
+    _mts_key = f"hub:worker:max_ts:{venue_id}:{symbol}" if _crypto_provider(symbol) else f"hub:worker:max_ts:{symbol}"
     try:
         _saved = r.get(_mts_key)
         if _saved:
@@ -168,6 +203,12 @@ def run(ctx: dict) -> None:
     # ——— 消息处理（guard 保护，R-BR12；告警走 _alert——notify 自带 1min 同标题去重）———
     @make_guard("hub.on_msg", _alert)
     def handle_msg(fields: dict) -> None:
+        # D3 同源校验：加密 per-venue 流必须带本 venue_id，跨源消息 fail-fast 不落地（防吃错行情下错单）
+        if _venue_mismatch(fields, symbol, venue_id):
+            stats["dropped_cross"] += 1
+            logger.error("跨源消息拒绝（venue_id=%s != %s）: %s",
+                         fields.get("venue_id"), venue_id, fields.get("ts"))
+            return
         ts_key = _epoch_key(fields.get("ts", ""))
         # R-DL1 持久去重（评审 S7）：ts 回退/重复（含 flush 迟到 tick 重复桶）一律丢弃（epoch 键——跨表示同刻同键）
         if ts_key and ts_key <= state.max_ts:

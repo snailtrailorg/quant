@@ -78,9 +78,12 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
     try:
         from src.data_platform.databus import DataBus
         from src.quant_common.contract import DataRequest
+        from src.strategy_runner.hub_worker import _crypto_provider
         from datetime import datetime as _dt, timedelta
+        source = _crypto_provider(symbol)   # D3：加密 per-venue 暖机按 source 过滤（A股 None 不过滤）
         req = DataRequest(kind="bar_minute", symbols=(symbol,), temporality="historical",
-                          freq="1min", range_=(_dt.now() - timedelta(days=30), _dt.now()))
+                          freq="1min", range_=(_dt.now() - timedelta(days=30), _dt.now()),
+                          source=source)
         frame, _wm = DataBus().get_bars(req)
         # 11 字段序（BAR_COLUMNS）：symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source
         for r in frame.rows[-min(n, 500):]:

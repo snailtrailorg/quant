@@ -260,19 +260,25 @@ def _win_utc(v):
             return v
     return v
 
-def get_bars(symbol: str, freq: str, start, end) -> pd.DataFrame:
+def get_bars(symbol: str, freq: str, start, end, source: str | None = None) -> pd.DataFrame:
     """查询 K 线，返回 DataFrame。
 
     用 cursor.fetchall 替代 pd.read_sql 避免 pandas/psycopg 不兼容警告。
     批 56b 读收口：start/end as_utc（naive 按上海解释——防 pin UTC 后窗口错 8h）。
+    D3：source 非 None 按数据源过滤（bar 表 source 列，加密 per-venue 暖机分源）。
     """
     import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
     start, end = _win_utc(start), _win_utc(end)
     ensure_table(freq)
     select_sql = BAR_TABLE_SELECT.format(freq=freq)
+    args: tuple = (symbol, start, end)
+    if source is not None:
+        # 插到 WHERE 与 ORDER BY 之间（BAR_TABLE_SELECT 以 ORDER BY ts ASC 结尾）
+        select_sql = select_sql.replace("ORDER BY ts ASC", "AND source = %s ORDER BY ts ASC")
+        args = (symbol, start, end, source)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(select_sql, (symbol, start, end))
+            cur.execute(select_sql, args)
             rows = cur.fetchall()
             cols = [d[0] for d in cur.description] if cur.description else []
         if not rows:

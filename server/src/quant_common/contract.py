@@ -157,6 +157,7 @@ class DataRequest:
     deadline_ms: int = 10_000
     consumer_tag: str = "default"
     mode: RequestMode = "consume"
+    source: str | None = None             # D3：按数据源 provider 过滤（bar 族 source 列）；None=不过滤（A股/默认）
     preserve_current_normalization: bool = True  # 迁移期特征开关（29 §六）：True=竞价条保留现行
     #   原样落库（58 收编期行为等价）；False=启用归一义务①竞价条并入首根（批 58b 数据变更）
 

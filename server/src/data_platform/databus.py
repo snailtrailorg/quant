@@ -237,7 +237,7 @@ class DataBus:
         symbol = req.symbols[0] if req.symbols else ""
         start = req.range_[0] if req.range_ else None
         end = req.range_[1] if req.range_ else None
-        df = get_bars(symbol, req.freq, start, end)
+        df = get_bars(symbol, req.freq, start, end, source=getattr(req, "source", None))
         if df.empty:
             raise DataGap(f"local_pg 无 {req.kind} 数据: {symbol} {req.freq}")
         # to_dict("records") 对齐 db.get_bars 消费方的字段类型（NaN→Python float，非 numpy）
