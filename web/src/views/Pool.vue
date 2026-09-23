@@ -7,7 +7,6 @@
           <!-- 批16：后端有端点全站无按钮的两操作（用户裁定补） -->
           <!-- 批17 17B：列显示配置（ID/名称/操作列恒显不进 defs）；描述=低频宽列默认隐 -->
           <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.pool-main" :columns="poolColDefs" v-model:visible="poolVisible" /></span>
-          <IconBtn :icon="Timer" :title="t('pool.syncMinuteBtn')" :disabled="navReadonly" @click="syncMinuteAll" />
           <IconBtn :icon="MagicStick" :title="t('pool.backfillFactorBtn')" :disabled="navReadonly" @click="backfillFactor" />
           <IconBtn :icon="Plus" :title="t('pool.createTitle')" @click="showDialog = true" :disabled="navReadonly" />
         </div>
@@ -18,33 +17,9 @@
       <el-table-column type="expand">
         <template #default="{ row }">
           <div style="padding: var(--sp-2) 24px">
-            <!-- 覆盖状态（分钟历史池才显示） -->
+            <!-- 池深度数据回补（二档：财务/筹码/股东，非分钟） -->
             <el-button size="small" type="warning" style="margin-bottom: 10px"
                        :disabled="navReadonly" @click="backfillMinute(row)">{{ t('pool.backfillMinute') }}</el-button>
-            <template v-if="row.minute_history_start">
-              <div v-if="minuteStatus[row.id]" style="margin-bottom: 12px">
-                <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
-                <TableShell :data="minuteStatus[row.id]" size="small" max-height="300" storage-key="pool-coverage">
-                  <el-table-column prop="symbol" :label="t('common.symbol')" min-width="140" />   <!-- 批53:子表唯一弹性列 -->
-                  <el-table-column prop="last_ts" :label="t('pool.minuteLastTs')" width="200">
-                    <template #default="{ row: s }">{{ s.last_ts || '-' }}</template>
-                  </el-table-column>
-                  <el-table-column prop="covered" :label="t('pool.minuteCovered')" width="90">
-                    <template #default="{ row: s }">
-                      <el-tag :type="s.covered ? 'success' : 'warning'" size="small">
-                        {{ s.covered ? '✓' : t('pool.pending') }}
-                      </el-tag>
-                    </template>
-                  </el-table-column>
-                  <el-table-column prop="actions" :label="t('common.action')" width="120">
-                    <template #default="{ row: s }">
-                      <IconBtn size="small" :icon="View" :title="t('common.detail')" @click="gotoDetail(s.symbol)" />
-                      <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.remove')" @click="removeSymbol(row.id, s.symbol)" />
-                    </template>
-                  </el-table-column>
-                </TableShell>
-              </div>
-            </template>
             <!-- 单标的添加 -->
             <div style="display: flex; gap: 8px; align-items: center; margin-top: var(--sp-2)">
               <el-input v-model="addSymbolInput[row.id]" :placeholder="t('pool.phAddSymbol')" style="width: 220px" size="small" />
@@ -61,47 +36,11 @@
           <el-badge :value="row.symbols?.length || 0" type="primary" />
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('minute_start')" prop="minute_history_start" :label="t('pool.minuteStart')" min-width="130">
-        <template #default="{ row }">
-          <span v-if="row.minute_history_start" style="font-size: var(--fs-foot)">{{ row.minute_history_start }}</span>
-          <span v-else style="color: var(--el-text-color-placeholder)">-</span>
-        </template>
-      </el-table-column>
-      <el-table-column v-if="colOn('minute_count')" prop="minute_count" :label="t('pool.minuteCount')" min-width="100" align="center">
-        <template #default="{ row }">
-          <el-badge :value="row.minute_count || 0" type="info" />
-        </template>
-      </el-table-column>
       <el-table-column v-if="colOn('description')" prop="description" min-width="220" show-overflow-tooltip :label="t('common.description')" />
       <el-table-column prop="actions" :label="t('common.action')" width="180">
         <template #default="{ row }">
           <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="editPool(row)" />
           <IconBtn size="small" :icon="Delete" :title="t('common.delete')" type="danger" @click="delPool(row)" />
-        </template>
-      </el-table-column>
-    </TableShell>
-
-    <!-- 攒数据标的（分钟数据源重构 21 号 §3.5：池级∪个股级统一展开表） -->
-    <el-divider content-position="left">{{ t('pool.minuteSymbolsTitle') }}</el-divider>
-    <div style="display: flex; gap: 8px; margin-bottom: var(--sp-2); align-items: flex-start">
-      <el-input v-model="minuteSymbolsInput" type="textarea" :rows="3"
-                :placeholder="t('pool.minuteSymbolsPlaceholder')" style="width: 420px" />
-      <el-button type="primary" :disabled="navReadonly" @click="addMinuteSymbols">
-        {{ t('pool.minuteSymbolsAdd') }}
-      </el-button>
-    </div>
-    <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
-    <TableShell :data="minuteSymbols" size="small" max-height="300" storage-key="pool-minute-symbols">
-      <el-table-column prop="symbol" :label="t('common.symbol')" min-width="150" />
-      <el-table-column prop="source" :label="t('pool.minuteSymbolSource')" min-width="110" />
-      <el-table-column prop="last_ts" :label="t('pool.minuteLastTs')" min-width="170">
-        <template #default="{ row }">{{ row.last_ts || '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="actions" :label="t('common.action')" min-width="100">
-        <template #default="{ row }">
-          <IconBtn v-if="row.source === 'direct'" size="small" :icon="Delete" type="danger" :disabled="navReadonly"
-                   :title="t('common.remove')" @click="removeMinuteSymbol(row.symbol)" />
-          <span v-else style="color: var(--el-text-color-placeholder); font-size: var(--fs-foot)">{{ t('pool.sourcePool') }}</span>
         </template>
       </el-table-column>
     </TableShell>
@@ -117,13 +56,6 @@
             <el-option :label="t('pool.catEtf')" value="etf" />
             <el-option :label="t('pool.catCrypto')" value="crypto" />
           </el-select>
-        </el-form-item>
-        <el-form-item :label="t('pool.minuteStartLabel')">
-          <el-date-picker v-model="newPool.minuteStart" type="date" style="width: 100%"
-                          :placeholder="t('pool.phMinuteStart')" value-format="YYYY-MM-DD" clearable />
-          <div style="font-size: var(--fs-foot); color: var(--el-text-color-secondary); margin-top: 4px">
-            {{ t('pool.minuteStartHint') }}
-          </div>
         </el-form-item>
         <el-form-item :label="t('pool.symbolList')">
           <el-select v-model="poolSymbols" multiple filterable allow-create default-first-option
@@ -143,35 +75,27 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, inject } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, reactive, computed, onMounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import api, { getPools, createPoolApi, deletePoolApi, getMinuteSymbols, addMinuteSymbol, delMinuteSymbol } from '../api'
+import api, { getPools, createPoolApi, deletePoolApi } from '../api'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Plus, Timer, MagicStick, Edit, Delete, View } from '@element-plus/icons-vue'
+import { Plus, MagicStick, Edit, Delete } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
-const router = useRouter()
-const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const pools = ref([])
 const showDialog = ref(false)
 const expanded = ref([])
 const addSymbolInput = reactive({})
-const minuteStatus = reactive({})   // {pool_id: [{symbol,last_ts,covered}]}
-const minuteSymbols = ref([])
-const minuteSymbolsInput = ref('')
-const newPool = ref({ id: '', name: '', category: 'astock', symbolsStr: '', description: '', minuteStart: null, _edit: false })
+const newPool = ref({ id: '', name: '', category: 'astock', symbolsStr: '', description: '', _edit: false })
 
 // 批17 17B：列显示配置——ID/名称/操作列恒显不进 defs；描述=低频宽列默认隐
 const poolColDefs = computed(() => [
   { key: 'category', label: t('pool.category') },
   { key: 'symbol_count', label: t('pool.symbolCount') },
-  { key: 'minute_start', label: t('pool.minuteStart') },
-  { key: 'minute_count', label: t('pool.minuteCount') },
   { key: 'description', label: t('common.description'), hidden: true },
 ])
 const poolVisible = ref([])
@@ -181,18 +105,8 @@ const load = async () => {
   try { pools.value = await getPools() } catch (e) { ElMessage.error(t('pool.loadFailed')) }
 }
 
-const onExpand = async (row, expandedRows) => {
+const onExpand = (row, expandedRows) => {
   expanded.value = expandedRows.map(r => r.id)
-  if (expandedRows.some(r => r.id === row.id) && row.minute_history_start) {
-    await loadMinuteStatus(row.id)
-  }
-}
-
-const loadMinuteStatus = async (pid) => {
-  try {
-    const r = await api.get(`/pool/${pid}/minute-status`)
-    minuteStatus[pid] = r.symbols || []
-  } catch { minuteStatus[pid] = [] }
 }
 
 const addSymbol = async (pid) => {
@@ -203,7 +117,6 @@ const addSymbol = async (pid) => {
     ElMessage.success(`${sym} ✓`)
     addSymbolInput[pid] = ''
     await load()
-    if (minuteStatus[pid]) await loadMinuteStatus(pid)
   } catch (e) {
     ElMessage.error(apiErr(e, t('common.saveFailed')))
   }
@@ -214,7 +127,6 @@ const removeSymbol = async (pid, sym) => {
     await api.delete(`/pool/${pid}/symbol/${sym}`)
     ElMessage.success(`${sym} ✕`)
     await load()
-    if (minuteStatus[pid]) await loadMinuteStatus(pid)
   } catch (e) {
     ElMessage.error(apiErr(e, t('common.deleteFailed')))
   }
@@ -225,13 +137,10 @@ const savePool = async () => {
   if (!np.id || !np.name) { ElMessage.warning(t('pool.idNameRequired')); return }
   try {
     // H3（01 P0#5，数据丢失级）：后端 PoolReq 契约只收 symbolsStr（\n 分隔）——此前发 symbols 数组被忽略，保存即清空池标的
-    await createPoolApi({ id: np.id, name: np.name, category: np.category, description: np.description, symbolsStr: np.symbolsStr, minute_history_start: np.minuteStart })
-    if (np.minuteStart) {
-      // 已随 createPoolApi 一起提交（minute_history_start 字段）
-    }
+    await createPoolApi({ id: np.id, name: np.name, category: np.category, description: np.description, symbolsStr: np.symbolsStr })
     ElMessage.success(t('common.saveSuccess'))
     showDialog.value = false
-    newPool.value = { id: '', name: '', category: 'astock', symbolsStr: '', description: '', minuteStart: null, _edit: false }
+    newPool.value = { id: '', name: '', category: 'astock', symbolsStr: '', description: '', _edit: false }
     await load()
   } catch (e) { ElMessage.error(apiErr(e, t('common.saveFailed'))) }
 }
@@ -240,7 +149,7 @@ const editPool = row => {
   newPool.value = {
     id: row.id, name: row.name, category: row.category || 'astock',
     symbolsStr: (row.symbols || []).join('\n'), description: row.description || '',
-    minuteStart: row.minute_history_start || null, _edit: true,
+    _edit: true,
   }
   showDialog.value = true
 }
@@ -248,28 +157,9 @@ const delPool = async row => {
   try { await deletePoolApi(row.id); ElMessage.success(t('common.deleteSuccess')); await load() } catch (e) { ElMessage.error(t('common.deleteFailed')) }
 }
 
-const loadMinuteSymbols = async () => {
-  try { minuteSymbols.value = (await getMinuteSymbols()).symbols || [] } catch { minuteSymbols.value = [] }
-}
-const addMinuteSymbols = async () => {
-  const syms = minuteSymbolsInput.value.split('\n').map(s => s.trim()).filter(Boolean)
-  if (!syms.length) return
-  let ok = 0
-  for (const sym of syms) {
-    try { await addMinuteSymbol(sym); ok++ }
-    catch (e) { ElMessage.error(`${sym}: ${apiErr(e, t('common.saveFailed'))}`) }
-  }
-  if (ok) ElMessage.success(`${ok} ✓`)
-  minuteSymbolsInput.value = ''
-  await loadMinuteSymbols()
-}
-const removeMinuteSymbol = async sym => {
-  try { await delMinuteSymbol(sym); ElMessage.success(`${sym} ✕`); await loadMinuteSymbols() }
-  catch (e) { ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
-}
-onMounted(() => { load(); loadMinuteSymbols() })
+onMounted(() => { load() })
 
-// P2-9(05 §5.9):remote 标的搜索+分钟覆盖回补
+// P2-9(05 §5.9):remote 标的搜索
 const poolSymbols = ref([])
 const symbolOptions = ref([])
 const symbolLoading = ref(false)
@@ -283,19 +173,10 @@ const searchSymbols = async (query) => {
   finally { symbolLoading.value = false }
 }
 const backfillMinute = async (row) => {
-  // 批16 bug4：原 URL 打到不存在的 /sync/pool-data（裸路径）=404；且 pool_id 被后端忽略。
-  // 现= /trigger 端点收 pool_id → symbols 定向回补该池（后端批16 已改）
+  // 池深度数据回补（二档：财务/筹码/股东——pool_data，与分钟无关）
   try {
     await api.post(`/sync/pool-data/trigger?pool_id=${row.id}&full=true`)
     ElMessage.success(t('pool.backfillStarted', { name: row.name }))
-    if (row.minute_history_start) loadMinuteStatus(row.id)
-  } catch { ElMessage.error(t('common.failed')) }
-}
-const syncMinuteAll = async () => {
-  // 池分钟同步手动触发（beat 300s 也自动跑；手动用于首建池后立即拉取）
-  try {
-    await api.post('/sync/pool-minute/trigger')
-    ElMessage.success(t('common.success'))
   } catch { ElMessage.error(t('common.failed')) }
 }
 const backfillFactor = async () => {
@@ -305,7 +186,6 @@ const backfillFactor = async () => {
     ElMessage.success(t('common.success'))
   } catch { ElMessage.error(t('common.failed')) }
 }
-import { watch } from 'vue'
 watch(() => showDialog.value, v => {
   if (v) poolSymbols.value = (newPool.value.symbolsStr || '').split('\n').map(x => x.trim()).filter(Boolean)
   else newPool.value.symbolsStr = poolSymbols.value.join('\n')

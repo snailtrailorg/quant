@@ -241,41 +241,6 @@ def cmd_abort() -> int:
     return 0
 
 
-def cmd_diff(date: str) -> int:
-    """首日口径比对：bar_hub（B 流写） vs bar_1min（腾讯回补），字段级容差告警。
-
-    阈值（相对偏差）：close/volume > 2% 且绝对差 > 0（对齐 28 §15.2 对账雏形）。
-    """
-    from src.data_platform.db import get_conn
-    try:
-        with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT symbol, ts, close, volume FROM bar_hub WHERE ts::date = %s", (date,))
-            hub = {(x[0], x[1]): (x[2], x[3]) for x in cur.fetchall()}
-            cur = conn.execute(
-                "SELECT symbol, ts, close, volume FROM bar_1min WHERE ts::date = %s", (date,))
-            ref = {(x[0], x[1]): (x[2], x[3]) for x in cur.fetchall()}
-    except Exception as e:
-        print(f"✗ diff 查询失败: {e}", file=sys.stderr)
-        return 3
-    missing = sorted(set(ref) - set(hub))
-    extra = sorted(set(hub) - set(ref))
-    mismatch = []
-    for k in sorted(set(hub) & set(ref)):
-        hc, hv = hub[k]
-        rc, rv = ref[k]
-        for name, a, b in (("close", hc, rc), ("volume", hv, rv)):
-            if b and abs(float(a) - float(b)) / abs(float(b)) > 0.02:
-                mismatch.append((k[0], k[1], name, a, b))
-                break
-    print(f"bar_hub {len(hub)} 根 / bar_1min {len(ref)} 根 | 缺失 {len(missing)} | 多出 {len(extra)} | 超差 {len(mismatch)}")
-    for m in mismatch[:50]:
-        print(f"  ✗ {m[0]} {m[1]} {m[2]}: hub={m[3]} ref={m[4]}")
-    for s, ts in missing[:20]:
-        print(f"  - 缺失 {s} {ts}")
-    return 1 if (missing or mismatch) else 0
-
-
 def main() -> int:
     signal.signal(signal.SIGHUP, signal.SIG_IGN)   # M5：confirm 阻塞驻留，忽略 SIGHUP 防关终端杀（下沉主函数，避免导入副作用）
     args = sys.argv[1:]
@@ -292,11 +257,6 @@ def main() -> int:
         return cmd_check()
     if cmd == "abort":
         return cmd_abort()
-    if cmd == "diff":
-        if len(args) != 2:
-            print("用法: switch.py diff <YYYY-MM-DD>", file=sys.stderr)
-            return 5
-        return cmd_diff(args[1])
     print(f"✗ 未知子命令: {cmd}", file=sys.stderr)
     return 5
 

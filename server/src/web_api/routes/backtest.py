@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Request, Body, WebSocket, WebSocketDisco
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
 from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq, StrategyAccountReq)
-from src.data_platform.db import get_conn, refresh_minute_symbols
+from src.data_platform.db import get_conn
 
 logger = logging.getLogger("web_api")
 
@@ -18,8 +18,6 @@ _redis_pool = redis.ConnectionPool.from_url(
     os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
     decode_responses=True,
     socket_timeout=2, socket_connect_timeout=2)   # 批27-2：SSE gen() 内同步 get——挂起时帧断而非冻事件循环
-
-_POOL_AGG_CACHE: dict[str, tuple[float, dict]] = {}   # 批27-26：minute-status 聚合 60s 缓存（键=pid）
 
 router = APIRouter(tags=["backtest"])
 
@@ -37,22 +35,14 @@ def list_pools(payload: dict = Depends(require_perm("read"))):
         except Exception:
             logger.warning("list_pools: pool_symbols 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute(
-            "SELECT p.id, p.name, p.category, p.description, ps.symbol, p.minute_history_start "
+            "SELECT p.id, p.name, p.category, p.description, ps.symbol "
             "FROM pools p LEFT JOIN pool_symbols ps ON ps.pool_id=p.id ORDER BY p.id")
         rows = cur.fetchall()
-        # minute_count：该池在展开表里的攒数据标的数（source='pool:{id}'，盲审 A-P2/B-P2）
-        try:
-            cur = conn.execute(
-                "SELECT source, count(*) FROM minute_symbols WHERE source LIKE 'pool:%' GROUP BY source")
-            pool_counts = {r[0][5:]: r[1] for r in cur.fetchall()}
-        except Exception:
-            pool_counts = {}
     pools = {}
-    for pid, pname, pcat, pdesc, sym, mhs in rows:
+    for pid, pname, pcat, pdesc, sym in rows:
         if pid not in pools:
             pools[pid] = {"id": pid, "name": pname, "category": pcat, "description": pdesc,
-                          "symbols": [], "minute_history_start": str(mhs) if mhs else None,
-                          "minute_count": pool_counts.get(str(pid), 0)}
+                          "symbols": []}
         if sym:
             pools[pid]["symbols"].append(sym)
     return list(pools.values())
@@ -71,18 +61,15 @@ def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_con
             conn.execute("SELECT 1 FROM pool_symbols LIMIT 1")
         except Exception:
             logger.warning("create_pool: pool_symbols 表不存在（需运行 alembic upgrade head）")
-        mhs = req.minute_history_start or None   # 空串/None → NULL（取消标记）
         conn.execute(
-            "INSERT INTO pools (id, name, category, description, minute_history_start) VALUES (%s,%s,%s,%s,%s) "
+            "INSERT INTO pools (id, name, category, description) VALUES (%s,%s,%s,%s) "
             "ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, category=EXCLUDED.category, "
-            "description=EXCLUDED.description, "
-            "minute_history_start=EXCLUDED.minute_history_start",
-            (req.id, req.name, req.category, req.description, mhs))
+            "description=EXCLUDED.description",
+            (req.id, req.name, req.category, req.description))
         conn.execute("DELETE FROM pool_symbols WHERE pool_id=%s", (req.id,))
         for sym in symbols:
             conn.execute("INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s,%s) ON CONFLICT DO NOTHING", (req.id, sym))
         conn.commit()
-    refresh_minute_symbols()   # 池属性/成员变化 → 展开表同步（分钟数据源重构 21 号 §3.1）
     audit_log(payload["username"], "create_pool", req.id)
     return {"ok": True, "id": req.id, "count": len(symbols)}
 
@@ -111,7 +98,6 @@ def add_pool_symbol_api(pid: str, body: dict = Body(...),
             "INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s, %s) "
             "ON CONFLICT (pool_id, symbol) DO NOTHING", (pid, vt))
         conn.commit()
-    refresh_minute_symbols()   # 池成员变化 → 展开表同步
     # 二档深度数据回补（U 审项 9）：增量游标只认窗口，新标的的历史靠这一投——
     # 异步不阻塞响应；非 astock 池不投（pool_data 只拉 astock）
     if row[1] == "astock":
@@ -134,33 +120,8 @@ def del_pool_symbol_api(pid: str, sym: str,
         conn.commit()
     if not deleted:
         raise ApiError(404, "POOL_SYMBOL_NOT_FOUND", f"{vt} 不在池 {pid}")
-    refresh_minute_symbols()   # 池成员变化 → 展开表同步
     audit_log(payload["username"], "pool_del_symbol", pid, vt)
     return {"status": "removed", "symbol": vt}
-
-
-@router.get("/api/pool/{pid}/minute-status")
-def pool_minute_status_api(pid: str,
-                           payload: dict = Depends(require_perm("read"))):
-    """池分钟数据覆盖状态（每标的 bar_1min 最后 ts——首轮回补可能 11.5h，进度可见是必须项）。
-
-    批27-26：bar_1min 全表 GROUP BY 聚合按 pid 分键 60s 缓存（首轮回补期间高频轮询的 DB 压力点）。"""
-    import time as _t
-    _ck = f"minstat:{pid}"
-    _hit = _POOL_AGG_CACHE.get(_ck)
-    if _hit and _t.time() - _hit[0] < 60:
-        return _hit[1]
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT ps.symbol, COALESCE(b.last_ts::text, '') FROM pool_symbols ps "
-            "LEFT JOIN (SELECT symbol, MAX(ts) AS last_ts FROM bar_1min GROUP BY symbol) b "
-            "ON b.symbol = ps.symbol WHERE ps.pool_id=%s ORDER BY ps.symbol", (pid,))
-        rows = cur.fetchall()
-    _result = {"pool_id": pid, "symbols": [
-        {"symbol": r[0], "last_ts": r[1] if r[1] else None, "covered": bool(r[1])}
-        for r in rows]}
-    _POOL_AGG_CACHE[_ck] = (_t.time(), _result)
-    return _result
 
 
 @router.delete("/api/pool/{pid}")
@@ -169,60 +130,7 @@ def delete_pool(pid: str, payload: dict = Depends(require_perm("strategy_control
     with get_conn() as conn:
         conn.execute("DELETE FROM pools WHERE id=%s", (pid,))
         conn.commit()
-    refresh_minute_symbols()   # 删整池 → 展开表移除该池成员（盲审 P1：漏了残留僵尸行）
     return {"ok": True}
-
-
-@router.get("/api/minute-symbol")
-def list_minute_symbols(payload: dict = Depends(require_perm("read"))):
-    """攒数据标的展开表清单（分钟数据源重构 21 号 §3.5；含 last_ts 弱化漏取盲区）。"""
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT m.symbol, m.source, COALESCE(b.last_ts::text, '') "
-            "FROM minute_symbols m "
-            "LEFT JOIN (SELECT symbol, MAX(ts) AS last_ts FROM bar_1min GROUP BY symbol) b "
-            "ON b.symbol = m.symbol ORDER BY m.symbol")
-        rows = cur.fetchall()
-    return {"symbols": [
-        {"symbol": r[0], "source": r[1], "last_ts": r[2] if r[2] else None}
-        for r in rows]}
-
-
-@router.post("/api/minute-symbol/{symbol}")
-def add_minute_symbol(symbol: str, payload: dict = Depends(require_perm("strategy_control"))):
-    """个股直标攒分钟数据（source='direct'，UPSERT 覆盖池来源）。"""
-    from src.data_platform.schema import to_vt_symbol
-    raw = (symbol or "").strip()
-    if not raw or "." not in raw:
-        raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
-    vt = to_vt_symbol(raw)
-    ex = vt.rsplit(".", 1)[-1].upper()
-    if ex not in ("SHSE", "SZSE", "BSE"):
-        raise ApiError(400, "SYMBOL_INVALID", f"不支持的交易所后缀: {ex}（支持 SHSE/SZSE/BSE）")
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO minute_symbols (symbol, source) VALUES (%s, 'direct') "
-            "ON CONFLICT (symbol) DO UPDATE SET source='direct', updated_at=now()", (vt,))
-        conn.commit()
-    audit_log(payload["username"], "minute_symbol_add", vt)
-    return {"status": "added", "symbol": vt}
-
-
-@router.delete("/api/minute-symbol/{symbol}")
-def del_minute_symbol(symbol: str, payload: dict = Depends(require_perm("strategy_control"))):
-    """取消个股直标（仅删 direct 行；删后 refresh 把仍属池的标的重物化为 pool 行）。"""
-    from src.data_platform.schema import to_vt_symbol
-    raw = (symbol or "").strip()
-    if not raw or "." not in raw:
-        raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
-    vt = to_vt_symbol(raw)
-    with get_conn() as conn:
-        conn.execute("DELETE FROM minute_symbols WHERE symbol=%s AND source='direct'", (vt,))
-        conn.commit()
-    refresh_minute_symbols()   # 盲审 A-P1/B-P1：add 的 ON CONFLICT 把 pool 行原地覆盖成 direct，
-    # 删 direct 后标的虽仍在池、却从展开表消失——refresh 重物化 pool 行
-    audit_log(payload["username"], "minute_symbol_del", vt)
-    return {"status": "removed", "symbol": vt}
 
 
 @router.delete("/api/backtest/{run_id}")

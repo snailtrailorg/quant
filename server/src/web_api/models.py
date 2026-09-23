@@ -156,7 +156,6 @@ class PoolReq(BaseModel):
     category: str = "astock"
     symbolsStr: str = ""
     description: str = ""
-    minute_history_start: str | None = None
 
 class StrategyAccountReq(BaseModel):
     strategy_id: str

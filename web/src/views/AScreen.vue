@@ -113,8 +113,7 @@ const addToPool = async () => {
   const merged = [...new Set([...existing, ...symbols])]
   try {
     await api.post('/pool', { id: pool.id, name: pool.name, category: pool.category || 'astock',
-                              symbolsStr: merged.join('\n'), description: pool.description || '',
-                              minute_history_start: pool.minute_history_start || null })
+                              symbolsStr: merged.join('\n'), description: pool.description || '' })
     ElMessage.success(t('screener.added', { n: symbols.length }))
   } catch { ElMessage.error(t('common.failed')) }
 }

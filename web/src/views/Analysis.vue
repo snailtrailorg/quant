@@ -85,7 +85,7 @@ const confirmAddPool = async () => {
     const pool = pools.value.find(p => p.id === poolTarget.value)
     if (!pool) throw new Error(t('analysis.poolNotExist'))
     const symbols = [...(pool.symbols || []), currentSymbol.value].filter((v, i, a) => a.indexOf(v) === i)
-    await createPoolApi({ id: pool.id, name: pool.name, category: pool.category, symbolsStr: symbols.join('\n'), description: pool.description, minute_history_start: pool.minute_history_start || null })
+    await createPoolApi({ id: pool.id, name: pool.name, category: pool.category, symbolsStr: symbols.join('\n'), description: pool.description })
     ElMessage.success(t('analysis.addedTo', { symbol: currentSymbol.value, name: pool.name }))
     showPoolDialog.value = false
   } catch (e) { ElMessage.error(t('analysis.addFailed')) }

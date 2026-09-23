@@ -61,7 +61,7 @@ def stock_detail_api(symbol: str,
 @router.get("/api/stock/{symbol}/intraday")
 def stock_intraday_api(symbol: str,
                        payload: dict = Depends(require_perm("read"))):
-    """当日分时曲线（arch-17 K 线 Tab 分钟半边）：bar_hub（池内自攒）→ 腾讯分时降级。"""
+    """当日分时曲线（arch-17 K 线 Tab 分钟半边）：腾讯分时。"""
     from src.data_platform.stock_detail import get_intraday
     return get_intraday(symbol) or {"date": None, "source": None, "points": []}
 

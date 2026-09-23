@@ -25,8 +25,6 @@ INTENT_KEY = "hub:switch:intent"          # M5 切换意图 {snapshot, target}�
 ACTIVE_INSTANCE_KEY = "hub:active_instance"   # M5 现任实例名（无 TTL），boot 仲裁
 LATEST_TICK_PREFIX = "hub:latest_tick:"   # 三档项 12：详情页实时快照（tick 自带五档，U-2 修正 #2 零订阅变化）
 LATEST_TICK_TTL = 65                      # 断流 65s 自动过期——详情页不展示陈旧价，降级腾讯/DB
-PG_FLUSH_INTERVAL = 10.0      # bar 落库批量间隔（独立线程，R-BR7 不反压分发）
-PG_QUEUE_MAX = 5000           # 落库缓冲上限（溢出丢最旧+告警，有界保证）
 
 
 def _project_symbol(tick) -> str:
@@ -162,46 +160,6 @@ class MinuteAggregator:
             "volume": volume, "amount": amount, "tick_count": b["count"],
             "untrusted": untrusted,
         }
-
-
-class _PGWriter(threading.Thread):
-    """bar 批量落库（独立线程，有界队列，R-BR7/B7）。影子期写 bar_hub（F2）。"""
-
-    def __init__(self):
-        super().__init__(daemon=True, name="hub-pg-writer")
-        self.q: list[dict] = []
-        self.lock = threading.Lock()
-        self.dropped = 0
-
-    def push(self, bar: dict) -> None:
-        with self.lock:
-            if len(self.q) >= PG_QUEUE_MAX:
-                self.q.pop(0)
-                self.dropped += 1
-            self.q.append(bar)
-
-    def run(self) -> None:
-        while True:
-            time.sleep(PG_FLUSH_INTERVAL)
-            with self.lock:
-                batch, self.q = self.q, []
-            if not batch:
-                continue
-            try:
-                from src.data_platform.db import get_conn
-                with get_conn() as conn:
-                    for b in batch:
-                        conn.execute(
-                            "INSERT INTO bar_hub (symbol, ts, open, high, low, close, volume, amount, untrusted) "
-                            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-                            "ON CONFLICT (symbol, ts) DO UPDATE SET open=EXCLUDED.open, high=EXCLUDED.high, "
-                            "low=EXCLUDED.low, close=EXCLUDED.close, volume=EXCLUDED.volume, "
-                            "amount=EXCLUDED.amount, untrusted=EXCLUDED.untrusted",
-                            (b["symbol"], b["ts"], b["open"], b["high"], b["low"], b["close"],
-                             b["volume"], b["amount"], b.get("untrusted", False)))
-                    conn.commit()
-            except Exception as e:
-                logger.warning("bar_hub 批量落库失败（%d 条，丢弃）: %s", len(batch), e)
 
 
 def _lease_acquire(r, instance_name: str = "") -> tuple[bool, str, int]:

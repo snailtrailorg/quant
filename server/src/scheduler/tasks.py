@@ -550,31 +550,6 @@ def pool_data_sync_task(self, full=False, symbols=None):
     return result
 
 
-@app.task(name="src.scheduler.tasks.pool_minute_sync_task",
-          bind=True, soft_time_limit=320, time_limit=350)
-def pool_minute_sync_task(self):
-    """池驱动分钟同步（S+T 审 2026-08-19：engine 编排+scheduler 薄壳第 4 例）。
-
-    每 5 分钟 beat；sync_pools_minute 自带时间盒 280s + SyncLock 防重叠 + sync_log 可观测。
-    stk_mins 限速 1 次/分钟（Valkey 全局闸门），首轮全量可能跨多轮完成（幂等续补）。
-    """
-    from src.data_sync.pool_minute import sync_pools_minute
-    return sync_pools_minute()
-
-
-@app.task(name="src.scheduler.tasks.tencent_minute_sync_task",
-          bind=True, soft_time_limit=320, time_limit=350)
-def tencent_minute_sync_task(self):
-    """腾讯分钟攒（分钟数据源重构 21 号 §3.2：每天收盘后一次，攒进 bar_1min）。
-
-    sync_tencent_minute 自带时间盒 280s + SyncLock 防重叠 + sync_log 可观测 +
-    Valkey 游标断点续。数据源开关 minute_data_source='tencent' 才跑；将来切
-    tushare 本任务停跑（互斥）。
-    """
-    from src.data_sync.tencent_minute import sync_tencent_minute
-    return sync_tencent_minute()
-
-
 @app.task(name="src.scheduler.tasks.health_monitor_check")
 def health_monitor_check():
     """15-服务监控：30s 采集判定（unit 状态/依赖/心跳 + 沿检测 + health_event 落库 + 告警）。

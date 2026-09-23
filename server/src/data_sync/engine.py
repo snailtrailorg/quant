@@ -632,8 +632,7 @@ def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = No
     failed: list[str] = []
     for i, tc in enumerate(ts_codes, 1):
         try:
-            # 限速（限流治理吸收）：节奏档取 daily（原 0.15s 硬编码→三级可调）；
-            # stk_mins 档（3600s）归 pool_minute 的 Valkey 全局闸门管——此处若用会卡成每小时一只
+            # 限速（限流治理吸收）：节奏档取 daily（原 0.15s 硬编码→三级可调）
             # 归因拆分（2026-09-03）：熔断上下文只包 Tushare 拉取，DB 写在外——
             # DB 写失败计入 failed 不误伤熔断器（否则 DB 抖动打穿 Tushare 配额熔断）
             with rate_limit_context(ds, "daily"):

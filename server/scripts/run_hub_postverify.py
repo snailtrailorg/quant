@@ -6,7 +6,7 @@
 故 G2 = 部署后对**真实 hub** 观察数分钟，断言：
   ① 进程稳定：窗口内零 SEGV/Traceback/重启（gen 不变）
   ② 心跳健康：quant:hb:md-hub TTL>0 且 8 个旧字段齐全（超集兼容的运行时证据）
-  ③ 数据流动：bar_hub 行数在窗口内持续增长（测试平台 7×24 回放，非交易时段也应增长）
+  ③ 数据流动：心跳 bars 累计在窗口内持续增长（测试平台 7×24 回放，非交易时段也应增长）
 
 运行（服务器，server/ 目录，root 或 quant）：
   set -a && source .env && set +a && \
@@ -37,12 +37,6 @@ def _redis():
                                 decode_responses=True, socket_timeout=3)
 
 
-def _bar_count():
-    from src.data_platform.db import get_conn
-    with get_conn() as c:
-        return c.execute("SELECT count(*) FROM bar_hub").fetchone()[0]
-
-
 def _journal_bad(since: str) -> tuple[int, str]:
     """窗口内硬伤（SEGV/Traceback/dumped）计数 + 摘要。"""
     out = subprocess.run(
@@ -61,7 +55,7 @@ def main() -> int:
     since = "now"   # 脚本启动即窗口起点（部署方应在部署后立即跑）
     r = _redis()
     deadline = time.time() + args.minutes * 60
-    gen_first, bars_first, bars_last, fails = None, None, None, 0
+    gen_first, bars_last, fails = None, None, 0
     cycle = 0
     while time.time() < deadline:
         cycle += 1
@@ -82,7 +76,7 @@ def main() -> int:
                 if missing:
                     problems.append(f"心跳缺旧字段 {missing}（超集破坏）")
             if gen_first is None:
-                gen_first, bars_first = gen, _bar_count()
+                gen_first = gen
             elif gen != gen_first:
                 problems.append(f"gen 变化 {gen_first}->{gen}（窗口内重启）")
         except Exception as e:
@@ -90,11 +84,11 @@ def main() -> int:
         # ③ 数据流动（校准 2026-08-25：测试平台晚间不推回放——无新数据在盘外是常态，
         # 降级 info；仅盘中心跳 sess_ticks>0 却不落 bar 才是真故障，保持 fail）
         try:
-            bars_now = _bar_count()
+            bars_now = int(r.hget(HB_KEY, "bars") or 0)
             if bars_last is not None and bars_now <= bars_last:
                 sess = r.hget(HB_KEY, "sess_ticks")
                 if sess and int(sess) > 0:
-                    problems.append(f"有 tick 但 bar_hub 未增长（{bars_last}->{bars_now}）")
+                    problems.append(f"有 tick 但 bar 未增长（{bars_last}->{bars_now}）")
                 else:
                     print(f"  ℹ️ 盘外无回放，bar 不增长属正常（{bars_now}）")
             bars_last = bars_now

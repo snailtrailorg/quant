@@ -19,9 +19,7 @@ bar_30min :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,sour
 bar_4h :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source,dataset_version
 bar_5min :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source,dataset_version
 bar_60min :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source,dataset_version
-bar_hub :: symbol,ts,open,high,low,close,volume,amount,untrusted
 bar_index :: id,symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source,dataset_version
-bar_shadow :: symbol,ts,open,high,low,close,volume,amount,untrusted
 block_trade :: ts_code,trade_date,price,vol,amount,buyer,seller
 broker_usage :: id,ts,provider,action,symbol,success,latency_ms
 cashflow :: ts_code,ann_date,end_date,report_type,n_cashflow_act,n_cashflow_inv_act,n_cash_flows_fnc_act,net_profit,c_fr_sale_sg,free_cashflow,raw_json
@@ -52,7 +50,6 @@ llm_usage :: id,ts,provider,model,input_tokens,output_tokens,latency_ms,success,
 margin_detail :: trade_date,ts_code,rzye,rqye,rzmre,rqyl,rzche,rqchl,rqmcl,rzrqye
 market_hours :: session_id,tz,calendar,anchor,sessions
 market_session :: id,name,calendar,session_rules,tz,created_at,updated_at
-minute_symbols :: symbol,source,updated_at
 moneyflow :: ts_code,trade_date,buy_sm_vol,buy_sm_amount,sell_sm_vol,sell_sm_amount,buy_md_vol,buy_md_amount,sell_md_vol,sell_md_amount,buy_lg_vol,buy_lg_amount,sell_lg_vol,sell_lg_amount,buy_elg_vol,buy_elg_amount,sell_elg_vol,sell_elg_amount,net_mf_vol,net_mf_amount
 namechange :: ts_code,name,start_date,end_date,ann_date,change_reason
 notifications :: id,level,category,title,body,source_ref,status,created_at,acked_by,acked_at,code,dispatch
@@ -62,7 +59,7 @@ permission :: id,subject_type,subject_id,dimension,resource,effect,note,updated_
 pledge_stat :: ts_code,end_date,pledge_count,unrest_pledge,rest_pledge,total_share,pledge_ratio
 pool_data_cursor :: table_name,last_pull_date,updated_at
 pool_symbols :: id,pool_id,symbol
-pools :: id,name,category,description,created_at,minute_history_start
+pools :: id,name,category,description,created_at
 position_refresh :: account_id,ts,rows,task_id
 position_snapshot :: account_id,symbol,direction,volume,frozen,cost_price,pnl,yd_volume,task_id,ts
 reconcile_issue :: id,symbol,issue_type,detail,broker_qty,derived_qty,status,first_seen,updated_at,handled_by,note,exempt_qty,exempt_until

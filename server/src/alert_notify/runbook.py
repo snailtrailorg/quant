@@ -27,7 +27,7 @@ RUNBOOK: dict[str, dict] = {
     "frozen.intercept": {"label": "冻结期拦截 BUY", "guide": "不可信 bar/流 gap（数据污染事实）——重启任务解冻；SELL 不受限。"},
     "buy.blocked":      {"label": "BUY 拦截(数据不新鲜)", "guide": "bar 停更>300s 或 hub 心跳丢失——查 hub 状态与行情流；恢复后自动放行。"},
     "buy.blind":        {"label": "任务盲视", "guide": "hub 心跳丢失或 bar 停更——数据面不驱动决策中；查 hub 与流消费。"},
-    "hub.xadd-fail":    {"label": "hub XADD 失败", "guide": "bar 写流失败即丢当根——查 Valkey；bar 明细见 bar_hub 表对账。"},
+    "hub.xadd-fail":    {"label": "hub XADD 失败", "guide": "bar 写流失败即丢当根——查 Valkey 流。"},
     "hub.lease-lost":   {"label": "hub 租约丢失", "guide": "另一实例在位或存储异常，实例已退出——systemd 接管；持续出现查是否双实例。"},
     "emq.md-error":     {"label": "EMQ 行情错误", "guide": "EMQ 行情服务器返回错误（OnError）——查 hub journalctl 归因 error_id；连接已标记断开，需重启 hub 恢复（自动重连待后续版本）。"},
     "emq.sub-fail":     {"label": "EMQ 订阅失败", "guide": "EMQ 行情订阅被拒（返回非 0 或 error_id 非 0）——核对标的是否有效/在支持范围，或在集成中心查东财极速行行情权限。"},
@@ -42,7 +42,6 @@ RUNBOOK: dict[str, dict] = {
     "data.disconn":     {"label": "数据断连", "guide": "行情/数据源连接断开——查 dataops 数据源页与适配器状态。"},
     "data.adj-degrade": {"label": "复权因子降级", "guide": "积分不足复权接口降级——跨除权日因子暂不可用；积分到账后触发回补。"},
     "sync.status":      {"label": "同步状态", "guide": "数据同步完成/失败状态——dataops 同步日志归因。"},
-    "minute.gap":       {"label": "分钟数据漏取", "guide": "腾讯分钟攒漏取（bar_1min 落后昨天）——查 tencent_minute sync_log；腾讯 1min 滚动窗口漏一天断 ~4h，人工回补。"},
     "disk.warning":     {"label": "磁盘告警", "guide": "磁盘余量触警——清理 var/log 与旧 release（GC 保 N=5）。"},
     # ——— 健康监控 ———
     "health.iface-down":   {"label": "接口健康异常", "guide": "LLM/PG/Valkey 有离线——查 /observe 健康页与对应服务。"},

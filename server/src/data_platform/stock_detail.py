@@ -81,15 +81,12 @@ def _touch_transient_sub(vt: str) -> None:
 # ── 分时曲线（arch-17 蓝图 K 线 Tab"日/分钟"的分钟半边，2026-08-20 补）──
 
 def get_intraday(symbol: str) -> dict | None:
-    """当日分时：腾讯全天优先 → bar_hub 兜底（2026-08-20 用户反馈修正）。
+    """当日分时：腾讯全天（自攒 bar_hub 已退役 2026-09-23，只剩腾讯源）。
 
-    XTP 是纯实时流无历史回放——临时订阅标的 hub 只有"订阅时刻起"的段，池内标的
-    当日 hub 也可能因重启有洞；腾讯分时是唯一当天全天免费源。bar_hub 的价值在
-    次日起的自攒全天（+腾讯不可用时兜底）。
-    补盲审 G4：腾讯结果 60s TTL + 失败 30s 负缓存（与 quote 同模式，防腾讯不可用
-    期间每 30s 轮询同步阻塞 5s）。
+    腾讯分时是当天全天免费源。补盲审 G4：腾讯结果 60s TTL + 失败 30s 负缓存
+    （与 quote 同模式，防腾讯不可用期间每 30s 轮询同步阻塞 5s）。
     """
-    ts_code, vt = _normalize(symbol)
+    ts_code, _ = _normalize(symbol)
     try:
         cached = _r().get(INTRADAY_KEY + ts_code)
         if cached:
@@ -97,8 +94,6 @@ def get_intraday(symbol: str) -> dict | None:
     except Exception:
         pass
     r = _intraday_from_tencent(ts_code)
-    if r is None:
-        r = _intraday_from_hub(vt)   # 腾讯死时的兜底（仅接受当日数据，见内）
     if r is None:
         try:
             _r().set(INTRADAY_KEY + ts_code, "null", ex=30)
@@ -110,38 +105,6 @@ def get_intraday(symbol: str) -> dict | None:
     except Exception:
         pass
     return r
-
-
-def _intraday_from_hub(vt: str) -> dict | None:
-    """hub 兜底（腾讯不可用时）：**只接受当日数据**（补盲审 G2——原取最新日，
-    临时订阅过期后会端出上一交易日曲线冒充当日）。"""
-    try:
-        from src.data_platform.db import get_conn
-        with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai', 'YYYYMMDD') FROM bar_hub WHERE symbol=%s "
-                "AND (ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date ORDER BY ts DESC LIMIT 1", (vt,))
-            row = cur.fetchone()
-            if not row:
-                return None
-            d = row[0]
-            cur = conn.execute(
-                "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai', 'HH24:MI'), close, volume, amount FROM bar_hub "
-                "WHERE symbol=%s AND (ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date ORDER BY ts", (vt,))
-            rows = cur.fetchall()
-        # 当日点数不足（临时订阅标的当日只从订阅时刻攒起）→ 宁缺勿残段
-        if not rows or len(rows) < 30:
-            return None
-        points, cum_v, cum_a = [], 0.0, 0.0
-        for t, close, volume, amount in rows:
-            cum_v += float(volume or 0)
-            cum_a += float(amount or 0)
-            points.append({"t": t, "price": float(close), "volume": float(volume or 0),
-                           "avg": round(cum_a / cum_v, 3) if cum_v > 0 else float(close)})
-        return {"date": d, "source": "hub", "points": points}
-    except Exception as e:
-        logger.warning("分时 bar_hub 读取失败: %s", e)
-        return None
 
 
 def _intraday_from_tencent(ts_code: str) -> dict | None:

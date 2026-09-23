@@ -5,7 +5,7 @@
 启动: python -m src.md_hub.main；systemd: quant-md-hub@quant（单元在 server/scripts/systemd/）。
 
 关键机制（对齐需求书 R-*）：租约+gen（R-DL4）/分钟末标注（R-BR9）/累计差分（S3）/
-双 flush（S2）/untrusted 双门限（R-BR4）/bar 落 bar_hub（R-CAP3/F2）/心跳+看门狗
+双 flush（S2）/untrusted 双门限（R-BR4）/心跳+看门狗
 （R-AV1/S6）——数据面部件在 parts.py。
 批 2（2026-08-25）：主循环迁上 runtime 骨架——EngineLoop 到期驱动钩子（废 counter%N
 相位耦合），L2 会话自愈五段收编 MdSessionSupervisor；行为值不变（AlertPolicy 默认
@@ -26,7 +26,6 @@ from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import
     LEASE_KEY,
     MinuteAggregator,
     _LEASE_RENEW_LUA,
-    _PGWriter,
     _in_bar_session,
     _lease_acquire_guarded,
     _lease_boot,
@@ -181,8 +180,6 @@ def main() -> None:
     # 时段内基线（sess_*/enter_ts/沿清零，S6 修订）批 2 起单点化 SessionCounters（事故 1 根治）
     stats = {"ticks": 0, "bars": 0, "last_tick_wall": 0.0}
     counters = SessionCounters()
-    pgw = _PGWriter()
-    pgw.start()
 
     @_guard("hub.on_tick")
     def on_tick(tick):
@@ -214,7 +211,6 @@ def main() -> None:
                 _alert("hub XADD 失败（bar 丢失）", f"{bar['symbol']} {bar['ts']}", code="hub.xadd-fail")
                 return
         stats["bars"] += 1
-        pgw.push(bar)
 
     def msg_of(bar: dict, seq: int) -> dict:
         return {
@@ -387,7 +383,7 @@ def main() -> None:
     def _heartbeat() -> None:
         hb.beat(pid=os.getpid(), gen=gen, subs=len(sm.current),
                 ticks=stats["ticks"], bars=stats["bars"], sess_ticks=counters.sess_count,
-                last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=pgw.dropped)
+                last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=0)
 
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗

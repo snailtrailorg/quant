@@ -210,21 +210,7 @@ app.conf.update(
             "options": {"queue": "data", "expires": 3600},
             "kwargs": {"full": True},
         },
-        # 池分钟同步（已建未启用——Tushare stk_mins 是独立产品包 2000 元/年，
-        # 全局 1 次/小时不够用；先靠 XTP hub 自攒，买包后启用 Tushare 为主源+XTP 校验。
-        # 启用方法：取消注释此 beat + external_interface.params 配 rate_limits（批55a 合表）
-        # "pool-minute-sync": {
-        #     "task": "src.scheduler.tasks.pool_minute_sync_task",
-        #     "schedule": 300.0,
-        #     "options": {"queue": "data", "expires": 290},
-        # },
-        # 腾讯分钟攒（分钟数据源重构 21 号 §3.2：每天收盘后 15:20 取一次腾讯 1min，
-        # 攒进 bar_1min 供回测/研判/暖机；数据源开关 minute_data_source='tencent' 才跑）
-        "tencent-minute-sync": {
-            "task": "src.scheduler.tasks.tencent_minute_sync_task",
-            "schedule": crontab(hour=15, minute=20),
-            "options": {"queue": "data", "expires": 350},
-        },
+        # 腾讯分钟攒已退役（2026-09-23：自攒历史分钟线退役，将来买 Tushare stk_mins 正式数据）
         "health-monitor": {
             "task": "src.scheduler.tasks.health_monitor_check",
             "schedule": 30.0,

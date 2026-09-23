@@ -191,7 +191,7 @@ def run(ctx: dict) -> None:
             logger.warning("seq 跳变（gap），重暖机并冻结直至人工确认")
             frozen["sticky"] = True   # gap 冻结 sticky（评审 C2：只能重启解）
             _rewarm(upto_ts=ts_key)
-            _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 bar_hub 表。", code="frozen.stream")
+            _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 hub 流。", code="frozen.stream")
         # pub_ts 超龄丢弃（R-DL3）
         pub_ts = float(fields.get("pub_ts", 0) or 0)
         if pub_ts and _in_astock_session() and (time.time() - pub_ts) > STALE_PUB_S:

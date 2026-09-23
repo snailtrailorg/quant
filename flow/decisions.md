@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-09-23 · 退役自攒历史分钟线（腾讯攒 + XTP bar_hub 落库）
+
+1. **历史分钟数据「不自攒、买正规」**（用户裁定）：自攒 A 股分钟数据质量存疑（腾讯攒竞价条错位 / 320 根滚动窗口漏一天断 ~4h；XTP bar_hub 自攒与实时分发耦合），维护成本高。退役自攒链路（断档接受），将来买 Tushare `stk_mins`（2000 积分/年）正式数据接入。设计真源 21 号本就是「腾讯攒过渡 + Tushare 终极」，本次提前结束过渡期。
+2. **边界 = 删「攒」留「读」**：删腾讯攒 + XTP bar_hub 落库 + minute_symbols 管理面；保留实时行情分发（`MinuteAggregator` + XADD 流——实盘下单输入，行业标准打法）+ stk_mins 接入位（`engine.py` 分钟编排 + `TushareAdapter`，将来买积分即用）+ 日线。`bar_1min`/`bar_5min` 表结构保留（将来 stk_mins 填），只清空腾讯存量。
+3. **分钟数据源切换语义简化**：`minute_data_source` 互斥开关随腾讯攒删除——将来 stk_mins 接入不需「互斥切换」，直接启用 `engine.py` 的 stk_mins 路径（21 号 §3.4 切换逻辑随之简化）。
+4. **断档影响接受**：因子试算 1min/5min 档硬失败（返回「无数据」）、实盘暖机 history 空（流回放 240 根兜底、double_low 静态因子不受影响）、Web 覆盖状态/完整性看板 1min/5min 显示空——均无交易/回测硬断。
+
 ## 2026-09-23 · 批 63 部署三裁定 + 批 64 Web 切换裁定
 
 1. **EMQ 编译链用 gcc-toolset-13（不 patch vendor 头）**：EMQ 头 `quote_api.h` 用 `EMQ_EXCHANGE_TYPE::EMQ_EXCHANGE_UNKNOWN`（C++23 P1099 enum 作用域限定），服务器 GCC 10.2 编译报错。用户裁定装 gcc-toolset-13（`source /opt/rh/gcc-toolset-13/enable`），不改东财 SDK 头（保留上游原样，升级 SDK 时不丢 patch）。
