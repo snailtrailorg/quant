@@ -159,6 +159,7 @@ class RiskControl:
         """标的当前市值与账户总值（single_position_pct 判定用；快照缺失返回 (0,0)=不拦）。
 
         D2：per-venue 过滤（venue_id=None 时 `venue_id=NULL` 恒 false → 返回 0 不拦）。
+        D4：净敞口（direction_long 正 / direction_short 负），原无 direction 过滤 short 行误并入市值。
         """
         try:
             from ..data_platform.db import get_conn
@@ -166,8 +167,10 @@ class RiskControl:
             vt = to_vt_symbol(symbol)
             with get_conn() as conn:
                 cur = conn.execute(
-                    "SELECT COALESCE(SUM(cost_price*volume),0) FROM position_snapshot "
-                    "WHERE symbol=%s AND venue_id=%s", (vt, venue_id))
+                    "SELECT COALESCE(SUM(CASE WHEN direction='direction_long' THEN cost_price*volume "
+                    "WHEN direction='direction_net' THEN cost_price*volume "
+                    "WHEN direction='direction_short' THEN -cost_price*volume ELSE 0 END),0) "
+                    "FROM position_snapshot WHERE symbol=%s AND venue_id=%s", (vt, venue_id))
                 held = float(cur.fetchone()[0] or 0)
                 cur = conn.execute(
                     "SELECT total_value FROM account_snapshot WHERE venue_id=%s ORDER BY ts DESC LIMIT 1",
@@ -178,26 +181,13 @@ class RiskControl:
             return 0.0, 0.0
 
     def _market_of(self, symbol: str) -> str | None:
-        """从 vt_symbol 判实盘分项市场。
+        """从 vt_symbol 判实盘分项市场（D4 起委托层0 quant_common.fees.symbol_market 单源）。
+
         返回 convertible/etf/astock/binance_perp/okx_perp；未知品种返回 None（拒单）。
         兼容项目 SHSE/SZSE 与 vnpy SSE/SZSE 后缀。A 股股票走 astock 分项（中泰 XTP 通道）。
         """
-        if ".BINANCE" in symbol:
-            return "binance_perp"
-        if ".OKX" in symbol:
-            return "okx_perp"
-        code = symbol.split(".")[0]
-        if any(symbol.endswith(s) for s in (".SHSE", ".SZSE", ".SSE")):
-            if code.startswith(("11", "12")):   # 沪/深可转债
-                return "convertible"
-            if code.startswith(("50", "51", "56", "58")) or code.startswith(("15", "16", "18")):
-                # 场内基金全体（P2 批 08-28 产品范围语义修正，用户裁定：非仅 ETF）——
-                # 沪 50x（封基/LOF/REITs 混合段）+51/56/58（ETF，588 科创 ETF 在 58；519 场外
-                # 申赎码沿用旧代码收讫，无害）；深 15（ETF，含 150 分级残余）/16（LOF）/18
-                # （184 封基+180 REITs）。分项键 etf 保留（=场内基金全体，DB/前端兼容）
-                return "etf"
-            return "astock"  # A 股股票（60/00/30 开头），走 XTP astock 分项
-        return None
+        from src.quant_common.fees import symbol_market
+        return symbol_market(symbol)
 
     def is_live_trading_allowed(self, market: str) -> bool:
         """三级 AND 第二级：.env 总闸 AND Web 分项（live_trading_config 表）。

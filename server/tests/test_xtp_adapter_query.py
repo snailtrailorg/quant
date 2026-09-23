@@ -17,7 +17,7 @@ def _row(vt_symbol: str):
     """_positions 行对象（对齐 vnpy 推送形状，Position 消费字段见 query_position）。"""
     return SimpleNamespace(
         vt_symbol=vt_symbol, volume=100, price=9.05, pnl=1.0,
-        direction=SimpleNamespace(value="long"), frozen=0, yd_volume=0,
+        direction=SimpleNamespace(name="LONG"), frozen=0, yd_volume=0,
     )
 
 

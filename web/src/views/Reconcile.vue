@@ -150,7 +150,8 @@ const summary = computed(() => hasIssues.value
   : t('reconcile.allConsistent'))
 
 const issueTypeLabel = ty => ({ position_diff: t('reconcile.tPositionDiff'), manual_order: t('reconcile.tManual'),
-  signal_no_order: t('reconcile.tSignalNoOrder'), order_no_trade: t('reconcile.tOrderNoTrade') }[ty] || ty)
+  signal_no_order: t('reconcile.tSignalNoOrder'), order_no_trade: t('reconcile.tOrderNoTrade'),
+  funding_diff: t('reconcile.tFundingDiff'), cross_venue_reverse: t('reconcile.tCrossVenueReverse') }[ty] || ty)
 const statusLabel = st => ({ open: t('reconcile.stOpen'), verified: t('reconcile.stVerified'),
   ignored: t('reconcile.stIgnored'), exempt: t('reconcile.stExempt') }[st] || st)
 

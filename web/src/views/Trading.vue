@@ -30,7 +30,7 @@
           </el-table-column>
           <!-- P2-11（05 §5.2/06 B#4）：API 已有字段全展示——direction/frozen/cost/pnl（现状只 2 列） -->
           <el-table-column prop="direction" :label="t('trading.dirCol')" min-width="80">
-            <template #default="{ row }"><el-tag size="small" :type="row.direction === 'short' ? 'danger' : 'primary'">{{ row.direction === 'short' ? t('trading.shortTag') : t('trading.longTag') }}</el-tag></template>
+            <template #default="{ row }"><el-tag size="small" :type="row.direction === 'direction_short' ? 'danger' : 'primary'">{{ row.direction === 'direction_short' ? t('trading.shortTag') : t('trading.longTag') }}</el-tag></template>
           </el-table-column>
           <el-table-column prop="volume" :label="t('trading.volume')" min-width="80" class-name="num" />
           <el-table-column prop="frozen" :label="t('trading.frozenCol')" min-width="80" class-name="num" />

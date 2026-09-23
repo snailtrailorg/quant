@@ -126,7 +126,7 @@ def _flush_positions(adapter, venue_id, task_id) -> None:
                         "ON CONFLICT (venue_id, symbol, direction) DO UPDATE SET volume=EXCLUDED.volume, "
                         "frozen=EXCLUDED.frozen, cost_price=EXCLUDED.cost_price, pnl=EXCLUDED.pnl, "
                         "yd_volume=EXCLUDED.yd_volume, task_id=EXCLUDED.task_id",
-                        [(venue_id, p.symbol, getattr(p, "direction", "long"), int(p.volume),
+                        [(venue_id, p.symbol, getattr(p, "direction", "direction_long"), int(p.volume),
                           int(getattr(p, "frozen", 0) or 0), float(p.avg_price or 0),
                           float(getattr(p, "pnl", 0) or 0), int(getattr(p, "yd_volume", 0) or 0),
                           str(task_id) if task_id is not None else None) for p in positions])

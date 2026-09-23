@@ -211,7 +211,7 @@ def reconcile_three_books():
                            COALESCE(s.snap_vol, 0) AS snap_vol,
                            COALESCE(t.derived_vol, 0) AS derived_vol
                     FROM (SELECT venue_id AS vid, split_part(symbol, '.', 1) AS sym, SUM(volume) AS snap_vol
-                          FROM position_snapshot WHERE direction != 'short' GROUP BY 1, 2) s
+                          FROM position_snapshot WHERE direction != 'direction_short' GROUP BY 1, 2) s
                     FULL OUTER JOIN (
                         SELECT venue_id AS vid, split_part(symbol, '.', 1) AS sym,
                                SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END) AS derived_vol
@@ -256,6 +256,85 @@ def reconcile_three_books():
                         logging.getLogger("scheduler").warning("reconcile_issue 双写失败（不阻断）: %s", _e)
             except Exception:
                 pass   # 表未就绪静默（与上方三表探测一致，O-S2）
+
+            # 5. D4 资金对账（现金口径）：本地推导现金 vs 券商查询可用现金，差异=漏记+费用误差+出入金。
+            # 现金口径（available_cash）而非总资产——总资产含持仓市值，浮盈浮亏会误报（盲审 A-1）。
+            try:
+                from src.quant_common.fees import calc_trade_fee
+                # 每 venue baseline 现金（首条快照 available_cash + ts）+ 券商现金（最新快照 available_cash）
+                cur = conn.execute(
+                    "SELECT DISTINCT ON (venue_id) venue_id, available_cash, ts "
+                    "FROM account_snapshot ORDER BY venue_id, ts ASC")
+                baseline = {r[0]: (float(r[1]) if r[1] is not None else None, r[2])
+                            for r in cur.fetchall()}
+                cur = conn.execute(
+                    "SELECT DISTINCT ON (venue_id) venue_id, available_cash "
+                    "FROM account_snapshot ORDER BY venue_id, ts DESC")
+                latest = {r[0]: (float(r[1]) if r[1] is not None else None)
+                          for r in cur.fetchall()}
+                for vid in set(baseline) | set(latest):
+                    base_cash, base_ts = baseline.get(vid, (None, None))
+                    actual_cash = latest.get(vid)
+                    if base_cash is None or actual_cash is None:
+                        continue   # 无现金数据（历史快照无 available_cash），跳过（盲审 B-7）
+                    # 成交流水（baseline 之后的成交，BUY 现金流出 / SELL 现金流入，窗口对齐盲审 A-3/B-1）
+                    cur = conn.execute(
+                        "SELECT symbol, action, volume, price FROM trade_log "
+                        "WHERE venue_id=%s AND ts > %s", (vid, base_ts))
+                    net = 0.0
+                    fees = 0.0
+                    for sym, act, vol, px in cur.fetchall():
+                        amount = float(px or 0) * float(vol or 0)
+                        net += amount if str(act).upper() == "SELL" else -amount
+                        fees += calc_trade_fee(sym, act, amount)
+                    local = base_cash + net - fees
+                    diff = actual_cash - local
+                    if abs(diff) > 1.0:   # 阈值 1 元（浮点噪音容忍）
+                        sym = f"venue#{vid}"
+                        detail = (f"[venue#{vid}] 券商现金={actual_cash:.2f} 本地推导={local:.2f} "
+                                  f"差异={diff:.2f}（成交净额={net:.2f} 费用={fees:.2f}）")
+                        issues.append(f"资金对账差异: {detail}")
+                        conn.execute("""
+                            INSERT INTO reconcile_issue (symbol, issue_type, detail, broker_qty, derived_qty)
+                            SELECT %s, 'funding_diff', %s, %s, %s
+                            WHERE NOT EXISTS (SELECT 1 FROM reconcile_issue e WHERE e.symbol=%s AND e.issue_type='funding_diff' AND e.status='exempt' AND (e.exempt_until IS NULL OR e.exempt_until >= current_date))
+                            ON CONFLICT (symbol, issue_type) WHERE status='open'
+                            DO UPDATE SET broker_qty=EXCLUDED.broker_qty, derived_qty=EXCLUDED.derived_qty, detail=EXCLUDED.detail, updated_at=now()
+                        """, (sym, detail, actual_cash, local, sym))
+                        conn.commit()
+            except Exception as _e:
+                try: conn.rollback()
+                except Exception: pass
+                logging.getLogger("scheduler").warning("资金对账失败（不阻断）: %s", _e)
+
+            # 6. D4 跨 venue 反向识别（对敲）：同 symbol 一 venue long 一 venue short（默认告警不拦截）
+            try:
+                cur = conn.execute("""
+                    SELECT a.symbol, a.venue_id, b.venue_id
+                    FROM position_snapshot a
+                    JOIN position_snapshot b ON a.symbol=b.symbol AND a.venue_id < b.venue_id
+                    WHERE a.direction IN ('direction_long','direction_short')
+                      AND b.direction IN ('direction_long','direction_short')
+                      AND a.direction != b.direction
+                      AND a.volume > 0 AND b.volume > 0""")
+                pairs: dict = {}
+                for sym, va, vb in cur.fetchall():
+                    pairs.setdefault(sym, []).append(f"venue#{va}↔venue#{vb}")
+                for sym, plist in pairs.items():
+                    detail = f"跨 venue 反向持仓: {sym}（{'、'.join(plist)}）"
+                    issues.append(detail)
+                    conn.execute("""
+                        INSERT INTO reconcile_issue (symbol, issue_type, detail)
+                        SELECT %s, 'cross_venue_reverse', %s
+                        WHERE NOT EXISTS (SELECT 1 FROM reconcile_issue e WHERE e.symbol=%s AND e.issue_type='cross_venue_reverse' AND e.status='exempt' AND (e.exempt_until IS NULL OR e.exempt_until >= current_date))
+                        ON CONFLICT (symbol, issue_type) WHERE status='open'
+                        DO UPDATE SET detail=EXCLUDED.detail, updated_at=now()
+                    """, (sym, detail, sym))
+                    conn.commit()
+            except Exception as _e:
+                try: conn.rollback()
+                except Exception: pass
+                logging.getLogger("scheduler").warning("跨 venue 反向识别失败（不阻断）: %s", _e)
 
             # 比对逻辑（实盘数据接入后实现具体核对）
             # 1. 信号无委托：signal_log 中有记录但 order_log 中无对应 signal_id

@@ -14,7 +14,7 @@ from src.strategy_runner import trading
 from vnpy.trader.constant import Direction, Status
 
 
-def _pos(symbol="600000.SHSE", volume=1000, direction="long", frozen=200, yd=800):
+def _pos(symbol="600000.SHSE", volume=1000, direction="direction_long", frozen=200, yd=800):
     return SimpleNamespace(symbol=symbol, volume=volume, avg_price=9.05, pnl=50.0,
                            direction=direction, frozen=frozen, yd_volume=yd)
 
@@ -85,10 +85,10 @@ class TestFlushPositions:
 
     def test_short_rows_written_not_filtered(self):
         """N-S3：两融 Short 行如实写（不过滤），端点侧再选向。"""
-        conn = self._run([_pos(), _pos(symbol="600000.SHSE", volume=100, direction="short")])
+        conn = self._run([_pos(), _pos(symbol="600000.SHSE", volume=100, direction="direction_short")])
         cur = conn.cursor.return_value.__enter__.return_value
         rows = cur.executemany.call_args.args[1]
-        assert len(rows) == 2 and rows[1][2] == "short"
+        assert len(rows) == 2 and rows[1][2] == "direction_short"
 
 
 class TestWriteTradeLog:
@@ -463,7 +463,7 @@ class TestRealConnectionSmoke:
                 cur = conn.execute("SELECT rows, task_id FROM position_refresh "
                                    "WHERE venue_id=%s", (vid,))
                 ref = cur.fetchone()
-            assert rows and rows[0][0] == "600000.SHSE" and rows[0][2] == "long"
+            assert rows and rows[0][0] == "600000.SHSE" and rows[0][2] == "direction_long"
             assert ref and ref[0] == 1 and ref[1] == "99"
             # 空批覆盖（N-F1 全链）：再跑空批 → 行清空 refresh rows=0
             adapter2 = MagicMock()

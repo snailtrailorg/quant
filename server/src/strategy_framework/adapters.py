@@ -39,7 +39,7 @@ class Position:
     volume: int
     avg_price: float
     pnl: float = 0.0
-    direction: str = "long"     # ST2（N-S3）：XTP 映射含 NET/LONG/SHORT（两融 Short 行）
+    direction: str = "direction_long"     # ST2（N-S3）：XTP 映射含 NET/LONG/SHORT（两融 Short 行）；D4 资源 id 化（direction_ 前缀防冲突）
     frozen: int = 0             # 冻结量；available = volume - frozen（T+1 可卖）
     yd_volume: int = 0          # 昨仓
 
@@ -254,7 +254,7 @@ class XTPAdapter(ExecutionAdapter):
                     volume=int(p.volume),
                     avg_price=float(p.price),
                     pnl=float(getattr(p, "pnl", 0.0) or 0.0),
-                    direction=getattr(p.direction, "value", "long"),
+                    direction="direction_" + getattr(p.direction, "name", "LONG").lower(),
                     frozen=int(getattr(p, "frozen", 0) or 0),
                     yd_volume=int(getattr(p, "yd_volume", 0) or 0),
                 )

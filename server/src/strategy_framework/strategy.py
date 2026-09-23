@@ -264,7 +264,7 @@ class Strategy:
         SELL = 持仓口径（本 symbol 持仓量；PERCENT=持仓×pct / ALL_IN=全部持仓）
                ——SELL ALL_IN 的"全仓"语义=清仓该标的，不是现金÷price（R-F1：原实现
                会让卖单量>持仓→XTP 拒单→止损保护失效）
-        持仓来源 position_snapshot（ST2 真相源，direction != 'short'）。查询失败 →
+        持仓来源 position_snapshot（ST2 真相源，direction != 'direction_short'）。查询失败 →
         告警+降级 SHARES 100（不拒单，风险随信号下发）。
         """
         from enum import Enum as _E
@@ -316,7 +316,7 @@ class Strategy:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT COALESCE(SUM(volume - COALESCE(frozen,0)),0) FROM position_snapshot "
-                "WHERE symbol=%s AND venue_id=%s AND direction != 'short'", (vt, self.venue_id))
+                "WHERE symbol=%s AND venue_id=%s AND direction != 'direction_short'", (vt, self.venue_id))
             return int(cur.fetchone()[0] or 0)
 
     def _held_value(self) -> float:
@@ -326,7 +326,7 @@ class Strategy:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT COALESCE(SUM(cost_price * volume),0) FROM position_snapshot "
-                "WHERE venue_id=%s AND direction != 'short'", (self.venue_id,))
+                "WHERE venue_id=%s AND direction != 'direction_short'", (self.venue_id,))
             return float(cur.fetchone()[0] or 0)
 
     def _param(self, key, default=None):
