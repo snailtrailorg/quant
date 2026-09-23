@@ -17,12 +17,12 @@
       <KpiCard :label="t('trading.totalPnl')" :value="(pnlData.total_pnl||0) >= 0 ? '▲¥' + formatNum(pnlData.total_pnl) : '▼¥' + formatNum(pnlData.total_pnl)"
                :tone="(pnlData.total_pnl||0) >= 0 ? 'up' : 'down'"
                :sub="pnlData.total_pnl_pct ? (pnlData.total_pnl_pct + '%') : ''" />
-      <KpiCard :label="t('trading.positionCount')" :value="positionData.positions?.length || 0" />
+      <KpiCard :label="t('trading.positionCount')" :value="positions.length || 0" />
     </div>
     <el-tabs>
       <el-tab-pane :label="t('trading.positions')">
         <!-- 批17 17A：列宽拖拽+持久化 -->
-        <TableShell :data="positionData.positions || []" size="small" storage-key="trading-positions">
+        <TableShell :data="positions" size="small" storage-key="trading-positions">
           <el-table-column prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip>
             <template #default="{ row }">
               <el-link type="primary" @click="gotoDetail(row.symbol)">{{ (row.symbol||'').split('.')[0] }}</el-link>
@@ -65,13 +65,13 @@
         <el-alert v-if="positionData.stale" type="warning" :closable="false" style="margin: var(--sp-2) 0">
           <template #title>
             {{ t('trading.staleWarn') }}
-            <el-tooltip v-if="positionData.snapshot_rows != null" :content="t('trading.snapshotRowsTip', { n: positionData.snapshot_rows })">
+            <el-tooltip v-if="snapshotVenue.snapshot_rows != null" :content="t('trading.snapshotRowsTip', { n: snapshotVenue.snapshot_rows })">
               <el-icon style="vertical-align: middle"><QuestionFilled /></el-icon>
             </el-tooltip>
           </template>
         </el-alert>
         <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 6px; display: flex; justify-content: space-between">
-          <span>{{ t('trading.snapshotNote') }}{{ positionData.snapshot_ts ? fmtTime.full(positionData.snapshot_ts) : '—' }}</span>
+          <span>{{ t('trading.snapshotNote') }}{{ snapshotVenue.snapshot_ts ? fmtTime.full(snapshotVenue.snapshot_ts) : '—' }}</span>
           <span>{{ t('trading.lastUpdate') }}: {{ lastUpdate }}</span>
         </div>
       </el-tab-pane>
@@ -117,7 +117,7 @@
         </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('trading.pnl')">
-        <div v-if="pnlData.curve?.length" style="height: 400px">
+        <div v-if="pnlCurve.length" style="height: 400px">
           <v-chart :option="pnlChartOption" autoresize />
         </div>
         <div v-else style="height: 400px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary)">
@@ -149,6 +149,8 @@ use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const positionData = ref({})
 const ordersData = ref({})
+// D2：get_position 按 venue 分组返回——粗显聚合各 venue 持仓（细显留后续）
+const positions = computed(() => (positionData.value?.venues || []).flatMap(v => v.positions || []))
 
 // 批17 17B：委托表列显隐（方案圈定——时间类低频列默认隐；全列可配，无锁定列）
 const orderColDefs = computed(() => [
@@ -164,13 +166,17 @@ const orderColDefs = computed(() => [
 const orderVisible = ref([])
 const orderOn = k => orderVisible.value.includes(k)
 const pnlData = ref({})
+// D2：get_pnl 按 venue 分组返回——粗显取首个 venue 曲线（细显留后续）
+const pnlCurve = computed(() => (pnlData.value?.venues || [])[0]?.curve || [])
+// D2：snapshot 时间/行数已下沉到 venue 对象——粗显取首个 venue（细显留后续）
+const snapshotVenue = computed(() => (positionData.value?.venues || [])[0] || {})
 const lastPrices = ref({})   // wd-20 §1.4.2：现价恢复（行情快照联动）
 const pnlChartOption = computed(() => ({
   tooltip: { trigger: 'axis' },
   grid: { left: '5%', right: '5%', bottom: '5%', containLabel: true },
-  xAxis: { type: 'category', data: (pnlData.value.curve || []).map(c => fmtTime.day(c.ts)) },
+  xAxis: { type: 'category', data: pnlCurve.value.map(c => fmtTime.day(c.ts)) },
   yAxis: { type: 'value', scale: true },
-  series: [{ name: t('trading.equity'), type: 'line', data: (pnlData.value.curve || []).map(c => c.value), smooth: true }],
+  series: [{ name: t('trading.equity'), type: 'line', data: pnlCurve.value.map(c => c.value), smooth: true }],
 }))
 const formatNum = (n) => (n || 0).toFixed(0)
 import { fmtCn } from '../utils/format'
@@ -195,9 +201,8 @@ const load = async () => {
   loadPrices()   // wd-20 §1.4.2：现价随 5s/60s 轮询联动（不阻塞主 load）
 }
 const loadPrices = async () => {
-  const positions = positionData.value?.positions || []
   // 盲审 P2：filter 掉空 symbol + 去重（原 map 直接对 undefined/重复标的发请求）
-  const symbols = [...new Set(positions.map(p => p.symbol).filter(Boolean))]
+  const symbols = [...new Set(positions.value.map(p => p.symbol).filter(Boolean))]
   await Promise.all(symbols.map(async symbol => {
     try {
       const d = await stockDetail(symbol)   // 带后缀（detail 端点 to_vt_symbol 不推断交易所，去后缀=404）

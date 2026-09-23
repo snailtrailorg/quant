@@ -128,6 +128,7 @@ class InterfaceReq(BaseModel):
     params: str | dict | None = None
     capabilities: list[str]
     enabled: bool = True
+    account_key: str | None = None   # D2：语义键（资金账号），UNIQUE(provider,account_key)
 
 class InterfaceReorderReq(BaseModel):
     """分域拖拽重排（批43 全集语义+方案一 v2 分域段：数据/交易域各自 0..n）。"""
@@ -167,10 +168,3 @@ class PoolReq(BaseModel):
     category: str = "astock"
     symbolsStr: str = ""
     description: str = ""
-
-class StrategyAccountReq(BaseModel):
-    strategy_id: str
-    account_id: str
-    broker_provider: str = "xtp"
-    initial_capital: float = Field(1_000_000, gt=0, le=1e10)
-    leverage: int = Field(1, ge=1, le=100)

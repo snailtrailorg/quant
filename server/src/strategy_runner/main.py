@@ -120,7 +120,7 @@ def _guard(name):
 
 
 def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,
-                  account_id=None, owner_username=None):
+                  venue_id=None, owner_username=None):
     """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。
 
     owner_username（批15）：live_task 归属人 → strategy.operator 实例属性 → order["operator"]
@@ -198,12 +198,16 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
 
     adapter = XTPAdapter(gateway=gw, event_engine=ee,
                          order_prefix=f"t{tid or sid}:e{boot_epoch}:")
+    adapter.venue_id = venue_id   # D2：成交/委托日志 per-venue 落库（write_trade_log 读此）
     cfg = StrategyConfig(id=sid, name=name, type=s_type, symbol=symbol, adapter="xtp",
                          enabled=True, factors=factors or [], aggregator=aggregator or {}, params=params or {})
     strategy = Strategy.from_config(cfg, adapter)
     # 批15：owner 经实例属性注入（不动构造签名——from_config 调用点含 backtest.py，
     # 改签名会炸回测）；place_order 读 getattr(self, "operator", "")
     strategy.operator = owner_username or ""
+    # D2：venue 身份经实例属性注入（同 operator 模式）——读方 _held_volume 等按此过滤，
+    # 未注入（None）时读方 `venue_id=NULL` 恒 false → 返回 0/空（fail-closed 不混仓）
+    strategy.venue_id = venue_id
 
     # 评审 C2：冻结的真实抓手——包 adapter.send_order（下单唯一咽喉，strategy.place_order 必经）。
     # S6 修订（2026-08-18）：两段判定——①sticky 冻结（untrusted/gap=数据污染事实）BUY 拒/SELL 放；
@@ -247,7 +251,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         _reconcile()   # B-P1-1：TD 在线才有对账意义——窗关启动跳过，窗开沿 connect 后由 TD 重连沿触发
     ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
-        "account_id": account_id,
+        "venue_id": venue_id,
         "strategy": strategy, "adapter": adapter, "event_engine": ee,
         "td_api": td_api, "history": history, "frozen": frozen,
         "initial_capital": initial_capital,
@@ -331,13 +335,13 @@ def main():
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
-                "status, account_id, initial_capital, owner_username FROM live_task WHERE id=%s",
+                "status, venue_id, initial_capital, owner_username FROM live_task WHERE id=%s",
                 (args.task_id,))
             row = cur.fetchone()
         if not row:
             logger.error("实盘任务 %s 不存在", args.task_id)
             sys.exit(EX_CONFIG)
-        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital, owner_username = row
+        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, venue_id, initial_capital, owner_username = row
         if status == "stopped":
             logger.info("实盘任务 %s 已停止，退出", tid)
             sys.exit(0)
@@ -375,20 +379,24 @@ def main():
             logger.warning("策略 %s 未启用或未回测验证，跳过", sid)
             sys.exit(0)
         tid = None
-        account_id = None
+        venue_id = None
         initial_capital = 1000000
         owner_username = None   # 旧路径无归属（批15：operator 空 → 2.5 拒单 critical=预期）
-        # 旧架构读 strategy_account
+        # D2：旧 --id 路径无 live_task.venue_id——取默认 venue（min 交易域，与迁移 0100 回填一致）。
+        # strategy_account 表已退役（0101 DROP），旧「策略-账户绑定」读方随之移除。
         try:
             with get_conn() as conn:
-                cur = conn.execute("SELECT account_id, broker_provider, initial_capital FROM strategy_account WHERE strategy_id=%s LIMIT 1", (sid,))
-                sa = cur.fetchone()
-            if sa:
-                initial_capital = float(sa[2]) if sa[2] else 1000000
-                account_id = sa[0]
-                logger.info("策略 %s 绑定账户 %s (%s, 资金 %s)", sid, sa[0], sa[1], initial_capital)
+                row = conn.execute(
+                    "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
+                ).fetchone()
+                venue_id = row[0] if row else None
         except Exception as e:
-            logger.warning("读 strategy_account 失败（用默认资金）: %s", e)
+            logger.warning("读默认 venue 失败（旧 --id 路径无 venue 归属）: %s", e)
+        if venue_id is None:
+            # D2：worker 快照/下单均需 venue_id（account_snapshot NOT NULL）——None 会静默装死
+            # （INSERT 违约被 except 吞、无快照无下单），显式 fail-fast 对齐 md_mode 处理。
+            logger.error("旧 --id 路径：external_interface 无交易域行，无 venue 归属，拒绝启动")
+            sys.exit(EX_CONFIG)
 
     # 1.5 md_mode 校验（批 6b：direct 退役）：hub 是唯一实盘行情模式。误设 direct
     # 显式 EX_CONFIG fail-fast（盲审 B-P1：静默落入已删代码=任务装死无人知）。
@@ -407,7 +415,7 @@ def main():
 
     _run_hub_mode(sid=sid, tid=tid, name=name, s_type=s_type, symbol=symbol,
                   factors=factors, aggregator=aggregator, params=params,
-                  initial_capital=initial_capital, account_id=account_id,
+                  initial_capital=initial_capital, venue_id=venue_id,
                   owner_username=owner_username)
     return
 

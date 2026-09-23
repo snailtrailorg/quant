@@ -63,16 +63,27 @@ def _execute_readonly_tool(tool_name: str, args: str) -> str:
             return str([{"symbol": r.symbol, "rating": r.rating, "score": r.score} for r in results])
         elif tool_name == "query_position":
             with get_conn() as conn:
-                cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts DESC LIMIT 1")
-                row = cur.fetchone()
-            return f"总资产: {float(row[0]) if row else 0}"
+                cur = conn.execute(
+                    "SELECT DISTINCT ON (a.venue_id) a.venue_id, a.total_value, e.name "
+                    "FROM account_snapshot a JOIN external_interface e ON e.id=a.venue_id "
+                    "ORDER BY a.venue_id, a.ts DESC")
+                rows = cur.fetchall()
+            if not rows:
+                return "无持仓数据"
+            return "总资产（按交易账号）: " + "; ".join(
+                f"{r[2] or r[0]}: {float(r[1]) if r[1] else 0}" for r in rows)
         elif tool_name == "query_pnl":
             with get_conn() as conn:
-                cur = conn.execute("SELECT total_value, daily_pnl, initial_capital FROM account_snapshot ORDER BY ts DESC LIMIT 1")
-                row = cur.fetchone()
-            if row:
-                return f"总资产: {float(row[0])}, 今日盈亏: {float(row[1])}, 初始资金: {float(row[2])}"
-            return "无盈亏数据"
+                cur = conn.execute(
+                    "SELECT DISTINCT ON (a.venue_id) a.venue_id, a.total_value, a.daily_pnl, a.initial_capital, e.name "
+                    "FROM account_snapshot a JOIN external_interface e ON e.id=a.venue_id "
+                    "ORDER BY a.venue_id, a.ts DESC")
+                rows = cur.fetchall()
+            if not rows:
+                return "无盈亏数据"
+            return "盈亏（按交易账号）: " + "; ".join(
+                f"{r[4] or r[0]}: 总资产{float(r[1]) if r[1] else 0}, 今日盈亏{float(r[2]) if r[2] else 0}, 初始资金{float(r[3]) if r[3] else 0}"
+                for r in rows)
         elif tool_name == "query_strategy_status":
             with get_conn() as conn:
                 cur = conn.execute("SELECT id, name, enabled FROM strategy_config ORDER BY id")

@@ -19,7 +19,14 @@ def risk_state(payload: dict = Depends(require_perm("read"))):
     # P1-1（web-design 05 §5.3 B#3）：水位仪表数据——回撤/日亏/快照年龄（>300s=fail-closed 拒 BUY 可见）
     metrics = {}
     try:
-        st = rc._get_global_state("")
+        # D2：风控水位读「默认 venue」（min 交易域）——_get_global_state 已 per-venue 过滤，
+        # 旧 "" 无「读全局」语义（传空串按 venue_id 过滤恒不命中→available=False 假「不可用」）
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
+            ).fetchone()
+            vid = row[0] if row else None
+        st = rc._get_global_state(vid)
         metrics = {"total_drawdown": st.total_drawdown, "daily_loss": st.daily_loss,
                    "available": st.available}
     except Exception as e:

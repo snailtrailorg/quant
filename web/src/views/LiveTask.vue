@@ -32,7 +32,7 @@
           <span style="display:inline-flex; align-items:center; gap:4px"><StatusTag :value="row.status" />{{ row.frozen ? '❄' : '' }}</span>
         </template>
       </el-table-column>
-      <el-table-column v-if="colOn('account_id')" prop="account_id" :label="t('common.account')" min-width="120" show-overflow-tooltip />
+      <el-table-column v-if="colOn('venue_id')" prop="venue_name" :label="t('liveTask.venue')" min-width="120" show-overflow-tooltip />
       <el-table-column v-if="colOn('initial_capital')" prop="initial_capital" :label="t('liveTask.capital')" min-width="120" />
       <!-- 批16：+创建时间/心跳年龄（后端已返回未显示） -->
       <el-table-column v-if="colOn('created_at')" prop="created_at" :label="t('common.createdAt')" min-width="220">
@@ -114,10 +114,10 @@
           {{ t('liveTask.selectStrategyFirst') }}
         </div>
 
-        <el-divider content-position="left">{{ t('common.account') }}</el-divider>
-        <el-form-item :label="t('liveTask.accountId')">
-          <el-select v-model="form.account_id" :placeholder="t('liveTask.phAccountId')" style="width: 100%">
-            <el-option v-for="a in accounts" :key="a.id" :label="`${a.name} (${a.id})`" :value="a.id" />
+        <el-divider content-position="left">{{ t('liveTask.venue') }}</el-divider>
+        <el-form-item :label="t('liveTask.venueId')">
+          <el-select v-model="form.venue_id" :placeholder="t('liveTask.phVenueId')" style="width: 100%">
+            <el-option v-for="v in venues" :key="v.id" :label="`${v.name} (${v.id})`" :value="v.id" />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('liveTask.initialCapital')">
@@ -138,7 +138,7 @@ import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, apiErr } from '../api'
+import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, getInterfaces, apiErr } from '../api'
 import { CAPITAL_INPUT } from '../utils/inputRanges'
 import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
@@ -155,11 +155,11 @@ const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
 const tasks = ref([])
 const strategies = ref([])
-const accounts = ref([])
+const venues = ref([])
 const symbolOptions = ref([])
 const symbolSearching = ref(false)
-const loadAccounts = async () => {
-  try { accounts.value = await api.get('/account') || [] } catch { accounts.value = [] }
+const loadVenues = async () => {
+  try { venues.value = await getInterfaces('trading') || [] } catch { venues.value = [] }
 }
 const searchSymbols = async (q) => {
   if (!q || q.length < 2) { symbolOptions.value = []; return }
@@ -175,7 +175,7 @@ const saving = ref(false)
 const parameterDefs = ref([])
 const form = ref({
   name: '', strategy_id: '', symbol: '', params: {},
-  account_id: '', initial_capital: 1000000,
+  venue_id: '', initial_capital: 1000000,
 })
 
 // 批17 17B：列显隐（方案圈定——bars/md_mode/账户列低频默认隐；名称/操作/展开锁定不进 defs）
@@ -187,7 +187,7 @@ const taskColDefs = computed(() => [
   { key: 'lag', label: t('liveTask.lag') },
   { key: 'bars', label: t('liveTask.bars'), hidden: true },
   { key: 'status', label: t('common.status') },
-  { key: 'account_id', label: t('common.account'), hidden: true },
+  { key: 'venue_id', label: t('liveTask.venue'), hidden: true },
   { key: 'initial_capital', label: t('liveTask.capital'), hidden: true },
   { key: 'created_at', label: t('common.createdAt') },
   { key: 'hb_age', label: t('cols.heartbeatAge') },
@@ -219,13 +219,13 @@ const onStrategyChange = (sid) => {
 }
 
 const openCreate = () => {
-  form.value = { name: '', strategy_id: '', symbol: '', params: {}, account_id: '', initial_capital: 1000000 }
+  form.value = { name: '', strategy_id: '', symbol: '', params: {}, venue_id: '', initial_capital: 1000000 }
   parameterDefs.value = []
   dialogVisible.value = true
 }
 
 const save = async () => {
-  if (!form.value.name || !form.value.strategy_id || !form.value.symbol) {
+  if (!form.value.name || !form.value.strategy_id || !form.value.symbol || !form.value.venue_id) {
     ElMessage.warning(t('liveTask.requiredHint')); return
   }
   saving.value = true
@@ -293,7 +293,7 @@ onMounted(async () => {
   const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
   if (pre) { dialogVisible.value = true; form.value.strategy_id = String(pre) }
   // 批9：三 loader 互不依赖→并发；尾部 enrichTasks 删（load() 内已调，纯冗余双跑）
-  await Promise.all([load(), loadStrategies(), loadAccounts()]) })
+  await Promise.all([load(), loadStrategies(), loadVenues()]) })
 
 // wd-20 §1.5 方案 A：自愈时间线（05 §5.8）——幽灵端点 /live-task/{id}/detail 已删
 // （wd-19 P0：404 恒吞）。数据源两路：①列表行已有字段（NRestarts 语义近似=心跳龄/冻结/

@@ -171,9 +171,9 @@ class TestCreateValidation:
 # --- 列表/过滤/漂移告警 ---
 
 _ROW_TUSHARE = (1, "Tushare主", "tushare", "astock", ["SHSE", "SZSE", "BSE"], True,
-                {"rate_limits": {}}, ["daily"], 0, True, None)
+                {"rate_limits": {}}, ["daily"], 0, True, None, None)
 _ROW_XTP = (2, "中泰XTP", "xtp", "astock", None, True,
-            {"td_host": "x"}, ["trading", "quote"], 0, True, None)
+            {"td_host": "x"}, ["trading", "quote"], 0, True, None, "253191001822")
 
 
 class TestListEndpoints:
@@ -186,6 +186,7 @@ class TestListEndpoints:
         assert [i["provider"] for i in items] == ["tushare", "xtp"]
         assert items[0]["params"] == {"rate_limits": {}}
         assert items[1]["code_capabilities"] == ["quote", "trading"]
+        assert items[1]["account_key"] == "253191001822" and items[0]["account_key"] is None
 
     def test_cap_filter_uses_gin_containment(self, admin_client):
         with _ConnPatch(all_rows=[_ROW_TUSHARE]) as conn:

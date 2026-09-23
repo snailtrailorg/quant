@@ -179,31 +179,6 @@
             <el-option :label="t('strategy.optGtc')" value="GTC" />
           </el-select>
         </el-form-item>
-
-        <el-divider content-position="left">{{ t('strategy.accountBind') }}</el-divider>
-        <el-form-item :label="t('strategy.bindAccount')">
-          <div style="display: flex; gap: 8px; align-items: center">
-            <el-input v-model="bindForm.account_id" :placeholder="t('strategy.phAccountId')" style="width: 220px" />
-            <el-select v-model="bindForm.broker_provider" style="width: 120px">
-              <el-option label="XTP" value="xtp" />
-              <el-option :label="t('common.binance')" value="binance_perp" />
-              <el-option label="OKX" value="okx_perp" />
-            </el-select>
-            <el-input-number v-model="bindForm.initial_capital" v-bind="CAPITAL_INPUT" style="width: 180px" />   <!-- 批36b-β：补 max（三胞胎单源） -->
-            <el-button type="primary" @click="doBind" :loading="binding" :disabled="!editForm.id">{{ t('common.bind') }}</el-button>
-            <!-- 批17 17C：刷新图标化（原 disabled 由 loadBinds 内 id 空值守卫承接） -->
-            <RefreshBtn @refresh="loadBinds" />
-          </div>
-        </el-form-item>
-        <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
-        <TableShell v-if="binds.length" :data="binds" style="margin-bottom: 12px" storage-key="strategy-accounts">
-          <el-table-column prop="account_id" :label="t('common.account')" show-overflow-tooltip />
-          <el-table-column prop="broker_provider" :label="t('common.broker')" width="101" />
-          <el-table-column prop="initial_capital" :label="t('strategy.colCapital')" width="120" />
-          <el-table-column prop="actions" :label="t('common.action')" width="80">
-            <template #default="{ row }"><el-button type="danger" @click="doUnbind(row.id)">{{ t('common.unbind') }}</el-button></template>
-          </el-table-column>
-        </TableShell>
       </el-form>
       <template #footer>
         <div v-if="!editForm.isNew" style="display: flex; justify-content: space-between; width: 100%">
@@ -237,7 +212,6 @@ import api from '../api'
 import PythonEditor from '../components/PythonEditor.vue'
 import CodeEditor from '../components/CodeEditor.vue'
 import TableShell from '../components/TableShell.vue'
-import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { Plus, VideoPlay, CopyDocument, Edit } from '@element-plus/icons-vue'
 
@@ -285,33 +259,11 @@ const editForm = ref({
   volumeType: 'SHARES', priceType: 'LIMIT', orderValidity: 'DAY',
   parameterDefs: [],
 })
-const binds = ref([])
-const binding = ref(false)
-const bindForm = ref({ account_id: '', broker_provider: 'xtp', initial_capital: 1000000 })
-
 const addParamDef = () => {
   editForm.value.parameterDefs.push({
     name: '', type: 'number', label: '', default: 0,
     min: undefined, max: undefined, step: undefined, description: '',
   })
-}
-
-const loadBinds = async () => {
-  if (!editForm.value.id) return
-  try { binds.value = await api.get('/strategy_account', { params: { strategy_id: editForm.value.id } }) } catch { binds.value = [] }
-}
-const doBind = async () => {
-  if (!bindForm.value.account_id) return
-  binding.value = true
-  try {
-    await api.post('/strategy_account', { ...bindForm.value, strategy_id: editForm.value.id })
-    ElMessage.success(t('common.bindSuccess'))
-    await loadBinds()
-  } catch { ElMessage.error(t('common.bindFailed')) }
-  finally { binding.value = false }
-}
-const doUnbind = async (id) => {
-  try { await api.delete(`/strategy_account/${id}`); ElMessage.success(t('common.unbindSuccess')); await loadBinds() } catch { ElMessage.error(t('common.unbindFailed')) }
 }
 
 const load = async () => { strategies.value = await getStrategies() }

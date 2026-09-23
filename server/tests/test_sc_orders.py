@@ -146,7 +146,7 @@ class TestMaxTradesPerDay:
                 return Cur()
 
         with patch.object(risk_mod, "get_conn", lambda: CountConn()):
-            d = rc_ok._check_etf_conv({"volume": 100, "price": 10.0, "strategy_id": "s1"})
+            d = rc_ok._check_etf_conv({"volume": 100, "price": 10.0, "strategy_id": "s1"}, None)
         assert not d.approved and "上限" in d.reason
 
     def test_count_failure_fail_closed(self, rc_ok):
@@ -163,5 +163,5 @@ class TestMaxTradesPerDay:
                 raise RuntimeError("PG 挂")
 
         with patch.object(risk_mod, "get_conn", lambda: BoomConn()):
-            d = rc_ok._check_etf_conv({"volume": 100, "price": 10.0, "strategy_id": "s1"})
+            d = rc_ok._check_etf_conv({"volume": 100, "price": 10.0, "strategy_id": "s1"}, None)
         assert not d.approved and d.severity == "critical"

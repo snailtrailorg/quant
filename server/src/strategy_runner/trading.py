@@ -87,12 +87,13 @@ def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
                 if row:
                     order_db_id, strategy_of = row[0], row[1] or sid
             cur = conn.execute(
-                "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING RETURNING id",
+                "INSERT INTO trade_log (ts, strategy_id, order_id, symbol, action, volume, price, trade_ref, venue_id) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (trade_ref) DO NOTHING RETURNING id",
                 (as_utc(getattr(d, "datetime", None)) if getattr(d, "datetime", None) is not None else None,
                  strategy_of, order_db_id, getattr(d, "symbol", symbol),
                  action, float(getattr(d, "volume", 0) or 0), float(getattr(d, "price", 0) or 0),
-                 getattr(d, "vt_tradeid", None) or None))
+                 getattr(d, "vt_tradeid", None) or None,
+                 getattr(adapter, "venue_id", None)))
             if cur.fetchone():
                 logger.info("成交入库: %s %s %s@%s (order_db=%s)", getattr(d, "symbol", symbol),
                             action, getattr(d, "volume", 0), getattr(d, "price", 0), order_db_id)
@@ -101,51 +102,50 @@ def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
         logger.warning("trade_log 写入失败: %s", e)
 
 
-def _flush_positions(adapter, account_id, task_id) -> None:
+def _flush_positions(adapter, venue_id, task_id) -> None:
     """ST2 持仓真相源写批（N 审 v2）：60s 循环取 query_position() 返回值，单事务覆盖式写。
 
-    - position_snapshot = 当前状态表：DELETE 该账户旧行 + INSERT 当前批（N-F1：清仓 0 行回报
+    - position_snapshot = 当前状态表：DELETE 该 venue 旧行 + INSERT 当前批（N-F1：清仓 0 行回报
       也能表示空仓；行数常数无需保留期）
     - position_refresh 心跳同事务 upsert（rows=本批行数）——区分"空仓"与"停更"（N-S5）
-    - account_id 为真相维度（N-S4：query_position 回报=全账户仓位，与任务标的无关）
+    - venue_id 为真相维度（D2：N-S4 query_position 回报=该 venue 全账户仓位，与任务标的无关）
     - 失败仅日志，不阻断主循环
     """
     try:
         from src.data_platform.db import get_conn
-        acct = str(account_id) if account_id else "default"
         positions = adapter.query_position() or []
         with get_conn() as conn:
-            conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", (acct,))
+            conn.execute("DELETE FROM position_snapshot WHERE venue_id=%s", (venue_id,))
             if positions:
                 # O-F1：池化连接无 executemany（F 审同款坑）——走 cursor；
-                # O-S8：ON CONFLICT 幂等——两任务同账户同拍写时 last-write-wins 而非互崩
+                # O-S8：ON CONFLICT 幂等——两任务同 venue 同拍写时 last-write-wins 而非互崩
                 with conn.cursor() as cur:
                     cur.executemany(
-                        "INSERT INTO position_snapshot (account_id, symbol, direction, volume, frozen, "
+                        "INSERT INTO position_snapshot (venue_id, symbol, direction, volume, frozen, "
                         "cost_price, pnl, yd_volume, task_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-                        "ON CONFLICT (account_id, symbol, direction) DO UPDATE SET volume=EXCLUDED.volume, "
+                        "ON CONFLICT (venue_id, symbol, direction) DO UPDATE SET volume=EXCLUDED.volume, "
                         "frozen=EXCLUDED.frozen, cost_price=EXCLUDED.cost_price, pnl=EXCLUDED.pnl, "
                         "yd_volume=EXCLUDED.yd_volume, task_id=EXCLUDED.task_id",
-                        [(acct, p.symbol, getattr(p, "direction", "long"), int(p.volume),
+                        [(venue_id, p.symbol, getattr(p, "direction", "long"), int(p.volume),
                           int(getattr(p, "frozen", 0) or 0), float(p.avg_price or 0),
                           float(getattr(p, "pnl", 0) or 0), int(getattr(p, "yd_volume", 0) or 0),
                           str(task_id) if task_id is not None else None) for p in positions])
             conn.execute(
-                "INSERT INTO position_refresh (account_id, ts, rows, task_id) VALUES (%s, now(), %s, %s) "
-                "ON CONFLICT (account_id) DO UPDATE SET ts=now(), rows=%s, task_id=%s",
-                (acct, len(positions), str(task_id) if task_id is not None else None,
+                "INSERT INTO position_refresh (venue_id, ts, rows, task_id) VALUES (%s, now(), %s, %s) "
+                "ON CONFLICT (venue_id) DO UPDATE SET ts=now(), rows=%s, task_id=%s",
+                (venue_id, len(positions), str(task_id) if task_id is not None else None,
                  len(positions), str(task_id) if task_id is not None else None))
             conn.commit()
     except Exception as e:
         logger.warning("ST2 持仓快照写批失败（不阻断）: %s", e)
 
 
-def _account_baseline_capital(total: float, cache: dict) -> float:
-    """账户基线净值（#10 口径修正 2026-08-22）。
+def _account_baseline_capital(total: float, cache: dict, venue_id) -> float:
+    """账户基线净值（#10 口径修正 2026-08-22；D2 起 per-venue）。
 
     account_snapshot.initial_capital 原写 live_task 配置资金（策略级，默认 100 万），
     而 total_value 是账户级真值（如测试账户 10 亿）--total_pnl 虚增 9.99 亿、风控回撤
-    分母错配。改：基线=该账户首条快照 total_value（跟踪起点净值）；无历史（首次跟踪）
+    分母错配。改：基线=该 venue 首条快照 total_value（跟踪起点净值）；无历史（首次跟踪）
     以当前查询值为基线。cache 由调用方持有（每进程恰一个快照调用方 → 基线不随运行漂移，
     与原模块级缓存语义等价；4a 消除模块级可变状态）。
     """
@@ -153,7 +153,9 @@ def _account_baseline_capital(total: float, cache: dict) -> float:
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
-                cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts ASC LIMIT 1")
+                cur = conn.execute(
+                    "SELECT total_value FROM account_snapshot WHERE venue_id=%s ORDER BY ts ASC LIMIT 1",
+                    (venue_id,))
                 row = cur.fetchone()
             cache["baseline"] = float(row[0]) if row and row[0] else total
         except Exception as e:
@@ -162,7 +164,7 @@ def _account_baseline_capital(total: float, cache: dict) -> float:
     return cache["baseline"]
 
 
-def snapshot_cycle(adapter, account_id, tid, baseline_cache: dict) -> None:
+def snapshot_cycle(adapter, venue_id, tid, baseline_cache: dict) -> None:
     """定期账户快照 + 持仓真相批（#6 每 60s / ST2；direct 形态——4a 双模式统一，知情差异②）。
 
     - SB1（F-34）：query_account 无结果（TD 断线/查询超时）绝不写假值——旧逻辑把
@@ -189,14 +191,14 @@ def snapshot_cycle(adapter, account_id, tid, baseline_cache: dict) -> None:
             import datetime as _dt2
             today_str = _dt2.datetime.now().strftime('%Y-%m-%d')
             with get_conn() as conn:
-                cur = conn.execute("SELECT total_value FROM account_snapshot WHERE (ts AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY ts ASC LIMIT 1", (today_str,))
+                cur = conn.execute("SELECT total_value FROM account_snapshot WHERE venue_id=%s AND (ts AT TIME ZONE 'Asia/Shanghai')::date=%s ORDER BY ts ASC LIMIT 1", (venue_id, today_str))
                 first_row = cur.fetchone()
                 daily_base = float(first_row[0]) if first_row else total
                 daily_pnl = total - daily_base
-                conn.execute("INSERT INTO account_snapshot (total_value, daily_pnl, initial_capital, available_cash) VALUES (%s, %s, %s, %s)",
-                             (total, daily_pnl, _account_baseline_capital(total, baseline_cache), avail))
+                conn.execute("INSERT INTO account_snapshot (venue_id, total_value, daily_pnl, initial_capital, available_cash) VALUES (%s, %s, %s, %s, %s)",
+                             (venue_id, total, daily_pnl, _account_baseline_capital(total, baseline_cache, venue_id), avail))
                 # ST2：同拍写持仓真相批（N-v2：取返回值单事务覆盖，非 EVENT_POSITION handler）
-                _flush_positions(adapter, account_id, tid)
+                _flush_positions(adapter, venue_id, tid)
                 conn.commit()
     except Exception as e:
         logger.warning("写 account_snapshot 失败: %s", e)

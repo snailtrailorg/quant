@@ -40,25 +40,25 @@ def _adapter():
 class TestFlushPositions:
     """ST2 持仓真相批（N 审 v2 语义；批 4a 自 test_position_snapshot 收编，断言原样）。"""
 
-    def _run(self, positions, account_id="253191001822", task_id=8):
+    def _run(self, positions, venue_id=1, task_id=8):
         adapter = MagicMock()
         adapter.query_position.return_value = positions
         conn = MagicMock()
         conn.__enter__.return_value = conn
         with patch.object(db, "get_conn", return_value=conn):
-            trading._flush_positions(adapter, account_id, task_id)
+            trading._flush_positions(adapter, venue_id, task_id)
         return conn
 
     def test_overwrite_write_single_transaction(self):
-        """N-v2：单事务 DELETE 该账户 + INSERT 批 + upsert refresh（一次 commit）。"""
+        """N-v2：单事务 DELETE 该 venue + INSERT 批 + upsert refresh（一次 commit）。"""
         conn = self._run([_pos()])
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("DELETE FROM position_snapshot" in s for s in sqls)
-        assert any("ON CONFLICT (account_id)" in s for s in sqls)   # refresh upsert
+        assert any("ON CONFLICT (venue_id)" in s for s in sqls)   # refresh upsert
         # O-F1：executemany 走 cursor（池化连接无此方法——F 审同款坑的回归锁）
         cur = conn.cursor.return_value.__enter__.return_value
         cur.executemany.assert_called_once()
-        assert "ON CONFLICT (account_id, symbol, direction)" in cur.executemany.call_args.args[0]
+        assert "ON CONFLICT (venue_id, symbol, direction)" in cur.executemany.call_args.args[0]
         conn.commit.assert_called_once()   # 单事务
 
     def test_empty_batch_clears_state_and_writes_heartbeat(self):
@@ -67,20 +67,21 @@ class TestFlushPositions:
         conn.cursor.assert_not_called()   # 空批不 INSERT
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("DELETE FROM position_snapshot" in s for s in sqls)
-        upsert = [c for c in conn.execute.call_args_list if "ON CONFLICT (account_id)" in c.args[0]]
-        assert upsert and upsert[0].args[1] == ("253191001822", 0, "8", 0, "8")
+        upsert = [c for c in conn.execute.call_args_list if "ON CONFLICT (venue_id)" in c.args[0]]
+        assert upsert and upsert[0].args[1] == (1, 0, "8", 0, "8")
 
-    def test_account_id_none_becomes_default(self):
-        conn = self._run([], account_id=None)
+    def test_venue_id_passed_directly(self):
+        """D2：venue_id 直接作为真相维度传入（无 account_id 'default' 降级）。"""
+        conn = self._run([], venue_id=7)
         del_call = [c for c in conn.execute.call_args_list if "DELETE" in c.args[0]][0]
-        assert del_call.args[1] == ("default",)
+        assert del_call.args[1] == (7,)
 
     def test_failure_does_not_raise(self):
         """写批失败仅日志（不阻断主循环）。"""
         adapter = MagicMock()
         adapter.query_position.side_effect = Exception("TD 断线")
         with patch.object(db, "get_conn", side_effect=Exception("PG down")):
-            trading._flush_positions(adapter, "x", 1)   # 不抛即过
+            trading._flush_positions(adapter, 1, 1)   # 不抛即过
 
     def test_short_rows_written_not_filtered(self):
         """N-S3：两融 Short 行如实写（不过滤），端点侧再选向。"""
@@ -161,7 +162,7 @@ class TestAccountBaseline:
         conn.__enter__.return_value = conn
         conn.execute.return_value.fetchone.return_value = (1_000_000_000,)
         with patch.object(db, "get_conn", return_value=conn):
-            v = trading._account_baseline_capital(5_000_000, {"baseline": None})
+            v = trading._account_baseline_capital(5_000_000, {"baseline": None}, 1)
         assert v == 1_000_000_000
 
     def test_no_history_uses_current_value(self):
@@ -170,7 +171,7 @@ class TestAccountBaseline:
         conn.__enter__.return_value = conn
         conn.execute.return_value.fetchone.return_value = None
         with patch.object(db, "get_conn", return_value=conn):
-            v = trading._account_baseline_capital(5_000_000, {"baseline": None})
+            v = trading._account_baseline_capital(5_000_000, {"baseline": None}, 1)
         assert v == 5_000_000
 
     def test_baseline_cached_across_calls(self):
@@ -180,15 +181,15 @@ class TestAccountBaseline:
         conn.execute.return_value.fetchone.return_value = (1_000_000_000,)
         cache = {"baseline": None}
         with patch.object(db, "get_conn", return_value=conn):
-            v1 = trading._account_baseline_capital(5_000_000, cache)
-            v2 = trading._account_baseline_capital(9_000_000, cache)
+            v1 = trading._account_baseline_capital(5_000_000, cache, 1)
+            v2 = trading._account_baseline_capital(9_000_000, cache, 1)
         assert v1 == v2 == 1_000_000_000
         assert conn.execute.call_count == 1
 
     def test_db_error_falls_back_to_current(self):
         """查库失败 -> 以当前值为基线（不抛，快照写入不阻断）。"""
         with patch.object(db, "get_conn", side_effect=Exception("PG down")):
-            v = trading._account_baseline_capital(5_000_000, {"baseline": None})
+            v = trading._account_baseline_capital(5_000_000, {"baseline": None}, 1)
         assert v == 5_000_000
 
 
@@ -201,7 +202,7 @@ class TestSnapshotCycle:
         adapter.query_account.return_value = []
         with patch.object(db, "get_conn") as gc, \
              patch.object(trading, "_flush_positions") as fp:
-            trading.snapshot_cycle(adapter, "acct", 8, {"baseline": None})
+            trading.snapshot_cycle(adapter, 1, 8, {"baseline": None})
         gc.assert_not_called()
         fp.assert_not_called()
 
@@ -215,17 +216,17 @@ class TestSnapshotCycle:
         with patch.object(db, "get_conn", return_value=conn), \
              patch.object(trading, "_account_baseline_capital", return_value=1.0) as base, \
              patch.object(trading, "_flush_positions"):   # 持仓批自持连接/自有事务，单测隔离（挂点另有锁）
-            trading.snapshot_cycle(adapter, "acct", 8, {"baseline": None})
+            trading.snapshot_cycle(adapter, 1, 8, {"baseline": None})
         sqls = [c.args[0] for c in conn.execute.call_args_list]
-        assert any("SELECT total_value FROM account_snapshot WHERE (ts AT TIME ZONE 'Asia/Shanghai')::date=%s" in s for s in sqls)
+        assert any("SELECT total_value FROM account_snapshot WHERE venue_id=%s" in s for s in sqls)
         insert = [c for c in conn.execute.call_args_list
                   if "INSERT INTO account_snapshot" in c.args[0]][0]
-        assert insert.args[1] == (150.0, 30.0, 1.0, 120.0)   # total/daily_pnl/基线/available(balance-frozen)
+        assert insert.args[1] == (1, 150.0, 30.0, 1.0, 120.0)   # venue_id/total/daily_pnl/基线/available
         base.assert_called_once()
         conn.commit.assert_called_once()
 
-    def test_flush_wired_with_same_account_and_task(self):
-        """ST2：同拍写持仓批，account_id/tid 原样透传（挂点契约）。"""
+    def test_flush_wired_with_same_venue_and_task(self):
+        """ST2：同拍写持仓批，venue_id/tid 原样透传（挂点契约）。"""
         adapter = MagicMock()
         adapter.query_account.return_value = [_acct()]
         conn = MagicMock()
@@ -234,14 +235,14 @@ class TestSnapshotCycle:
         with patch.object(db, "get_conn", return_value=conn), \
              patch.object(trading, "_account_baseline_capital", return_value=1.0), \
              patch.object(trading, "_flush_positions") as fp:
-            trading.snapshot_cycle(adapter, "acct-9", 12, {"baseline": None})
-        fp.assert_called_once_with(adapter, "acct-9", 12)
+            trading.snapshot_cycle(adapter, 9, 12, {"baseline": None})
+        fp.assert_called_once_with(adapter, 9, 12)
 
     def test_db_error_never_raises(self):
         adapter = MagicMock()
         adapter.query_account.return_value = [_acct()]
         with patch.object(db, "get_conn", side_effect=Exception("PG down")):
-            trading.snapshot_cycle(adapter, "a", 1, {"baseline": None})   # 不抛即过
+            trading.snapshot_cycle(adapter, 1, 1, {"baseline": None})   # 不抛即过
 
 
 class TestHaltEdgeCancel:
@@ -438,32 +439,45 @@ class TestRealConnectionSmoke:
         except Exception:
             pytest.skip("本地 PG 不可达或 0043 未迁移")
 
+        try:
+            with db.get_conn() as conn:
+                conn.execute("SELECT 1 FROM position_snapshot LIMIT 1")
+                row = conn.execute(
+                    "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
+                ).fetchone()
+                if row is None or row[0] is None:
+                    pytest.skip("无交易域 venue（external_interface 空）")
+                vid = row[0]
+                conn.commit()
+        except Exception:
+            pytest.skip("本地 PG 不可达或 0102 未迁移")
+
         adapter = MagicMock()
         adapter.query_position.return_value = [_pos()]
-        trading._flush_positions(adapter, "smoke_test_acct", 99)
+        trading._flush_positions(adapter, vid, 99)
         try:
             with db.get_conn() as conn:
                 cur = conn.execute("SELECT symbol, volume, direction FROM position_snapshot "
-                                   "WHERE account_id=%s", ("smoke_test_acct",))
+                                   "WHERE venue_id=%s", (vid,))
                 rows = cur.fetchall()
                 cur = conn.execute("SELECT rows, task_id FROM position_refresh "
-                                   "WHERE account_id=%s", ("smoke_test_acct",))
+                                   "WHERE venue_id=%s", (vid,))
                 ref = cur.fetchone()
             assert rows and rows[0][0] == "600000.SHSE" and rows[0][2] == "long"
             assert ref and ref[0] == 1 and ref[1] == "99"
             # 空批覆盖（N-F1 全链）：再跑空批 → 行清空 refresh rows=0
             adapter2 = MagicMock()
             adapter2.query_position.return_value = []
-            trading._flush_positions(adapter2, "smoke_test_acct", 99)
+            trading._flush_positions(adapter2, vid, 99)
             with db.get_conn() as conn:
-                cur = conn.execute("SELECT count(*) FROM position_snapshot WHERE account_id=%s",
-                                   ("smoke_test_acct",))
+                cur = conn.execute("SELECT count(*) FROM position_snapshot WHERE venue_id=%s",
+                                   (vid,))
                 assert cur.fetchone()[0] == 0, "空批必须清掉旧行（当前状态表语义）"
-                cur = conn.execute("SELECT rows FROM position_refresh WHERE account_id=%s",
-                                   ("smoke_test_acct",))
+                cur = conn.execute("SELECT rows FROM position_refresh WHERE venue_id=%s",
+                                   (vid,))
                 assert cur.fetchone()[0] == 0
         finally:
             with db.get_conn() as conn:
-                conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", ("smoke_test_acct",))
-                conn.execute("DELETE FROM position_refresh WHERE account_id=%s", ("smoke_test_acct",))
+                conn.execute("DELETE FROM position_snapshot WHERE venue_id=%s", (vid,))
+                conn.execute("DELETE FROM position_refresh WHERE venue_id=%s", (vid,))
                 conn.commit()

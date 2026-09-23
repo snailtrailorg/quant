@@ -175,6 +175,7 @@ class Strategy:
         self.symbol = config.symbol
         self.config = config
         self.adapter = adapter
+        self.venue_id = None   # D2：venue 身份（runner 注入；None=读方 fail-closed 不混仓）
         self._factors: list[Factor] = []
         self._aggregator = SignalAggregator(
             weights={f["name"]: f.get("weight", 1.0) for f in config.factors},
@@ -315,7 +316,7 @@ class Strategy:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT COALESCE(SUM(volume - COALESCE(frozen,0)),0) FROM position_snapshot "
-                "WHERE symbol=%s AND direction != 'short'", (vt,))
+                "WHERE symbol=%s AND venue_id=%s AND direction != 'short'", (vt, self.venue_id))
             return int(cur.fetchone()[0] or 0)
 
     def _held_value(self) -> float:
@@ -325,7 +326,7 @@ class Strategy:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT COALESCE(SUM(cost_price * volume),0) FROM position_snapshot "
-                "WHERE direction != 'short'")
+                "WHERE venue_id=%s AND direction != 'short'", (self.venue_id,))
             return float(cur.fetchone()[0] or 0)
 
     def _param(self, key, default=None):
@@ -335,7 +336,9 @@ class Strategy:
     def _latest_total_value(self) -> float:
         from ..data_platform.db import get_conn
         with get_conn() as conn:
-            cur = conn.execute("SELECT total_value FROM account_snapshot ORDER BY ts DESC LIMIT 1")
+            cur = conn.execute(
+                "SELECT total_value FROM account_snapshot WHERE venue_id=%s ORDER BY ts DESC LIMIT 1",
+                (self.venue_id,))
             row = cur.fetchone()
         if not row or not row[0]:
             raise RuntimeError("account_snapshot 无数据")
@@ -349,7 +352,8 @@ class Strategy:
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT available_cash FROM account_snapshot "
-                    "WHERE available_cash IS NOT NULL ORDER BY ts DESC LIMIT 1")
+                    "WHERE venue_id=%s AND available_cash IS NOT NULL ORDER BY ts DESC LIMIT 1",
+                    (self.venue_id,))
                 row = cur.fetchone()
             return float(row[0]) if row else None
         except Exception:
@@ -408,8 +412,10 @@ class Strategy:
             # 批15：market_op 判定的操作者（runner 注入的实例属性=live_task.owner_username）。
             # 服务端钉死——Signal/策略参数无此通道（order 为显式键列表，sig.operator 进不来）
             "operator": getattr(self, "operator", ""),
+            # D2：venue 身份（读方/写方 per-venue 过滤的真源；runner 注入）
+            "venue_id": getattr(self, "venue_id", None),
         }
-        decision = RiskControl.get().check_order(order, "")
+        decision = RiskControl.get().check_order(order, self.venue_id)
         if not decision.approved:
             return
         final = decision.adjusted if decision.adjusted is not None else order  # B8 风控覆写：用 adjusted（如截断 volume），无则原值
@@ -463,10 +469,11 @@ class Strategy:
                     (self.config.id, self.symbol, sig.action.name, sig.score, sig.price))
                 sig_id = cur.fetchone()[0]
                 cur = conn.execute(
-                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,venue_id) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                     (self.config.id, self.symbol, final_order.get("action", sig.action.name),
-                     final_order.get("volume", 100), final_order.get("price", 0), sig_id, status))
+                     final_order.get("volume", 100), final_order.get("price", 0), sig_id, status,
+                     self.venue_id))
                 order_id = cur.fetchone()[0]
                 conn.commit()
                 return sig_id, order_id

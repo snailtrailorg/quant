@@ -6,7 +6,7 @@ import subprocess
 from fastapi import APIRouter, Depends, Request, Body, HTTPException
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq, StrategyAccountReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq)
 from src.data_platform.db import get_conn
 import logging
 logger = logging.getLogger("web_api")
@@ -384,52 +384,5 @@ def delete_factor_api(name: str,
     return {"ok": True}
 
 
-# --- 策略-账户绑定 ---
-
-@router.get("/api/strategy_account")
-def list_strategy_account(strategy_id: str | None = None, payload: dict = Depends(require_perm("read"))):
-    """策略-账户绑定列表（可按 strategy_id 过滤，#27）。"""
-    with get_conn() as conn:
-        try:
-            conn.execute("SELECT 1 FROM strategy_account LIMIT 1")
-        except Exception:
-            logger.warning("list_strategy_account: strategy_account 表不存在（需运行 alembic upgrade head）")
-        if strategy_id:
-            cur = conn.execute(
-                "SELECT id, strategy_id, account_id, broker_provider, initial_capital, leverage, created_at "
-                "FROM strategy_account WHERE strategy_id=%s ORDER BY id", (strategy_id,))
-        else:
-            cur = conn.execute(
-                "SELECT id, strategy_id, account_id, broker_provider, initial_capital, leverage, created_at "
-                "FROM strategy_account ORDER BY id")
-        rows = cur.fetchall()
-    return [{"id": r[0], "strategy_id": r[1], "account_id": r[2], "broker_provider": r[3],
-             "initial_capital": float(r[4]) if r[4] else 0, "leverage": r[5],
-             "created_at": str(r[6]) if r[6] else None} for r in rows]
-
-
-@router.post("/api/strategy_account")
-def bind_strategy_account(req: StrategyAccountReq, payload: dict = Depends(require_perm("strategy_control"))):
-    """绑定策略-账户（#27）。"""
-    with get_conn() as conn:
-        try:
-            conn.execute("SELECT 1 FROM strategy_account LIMIT 1")
-        except Exception:
-            logger.warning("bind_strategy_account: strategy_account 表不存在（需运行 alembic upgrade head）")
-        conn.execute(
-            "INSERT INTO strategy_account (strategy_id, account_id, broker_provider, initial_capital, leverage) "
-            "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (strategy_id, account_id) DO UPDATE SET "
-            "broker_provider=EXCLUDED.broker_provider, initial_capital=EXCLUDED.initial_capital, leverage=EXCLUDED.leverage",
-            (req.strategy_id, req.account_id, req.broker_provider, req.initial_capital, req.leverage))
-        conn.commit()
-    audit_log(payload["username"], "bind_strategy_account", req.strategy_id)
-    return {"ok": True}
-
-
-@router.delete("/api/strategy_account/{said}")
-def unbind_strategy_account(said: int, payload: dict = Depends(require_perm("strategy_control"))):
-    """解绑策略-账户（#27）。"""
-    with get_conn() as conn:
-        conn.execute("DELETE FROM strategy_account WHERE id=%s", (said,))
-        conn.commit()
-    return {"ok": True}
+# D2：strategy_account 表已退役（迁移 0101 DROP）——「策略-账户绑定」三端点随之移除。
+# 账户绑定语义收编为 live_task.venue_id（建任务选源，见 trading.py create_live_task）。

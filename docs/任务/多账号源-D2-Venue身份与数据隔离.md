@@ -39,6 +39,12 @@
 - 身份线统一：`live_task.account_id`/`position_refresh.account_id` → `venue_id`；`strategy_account` 退役。
 - `delete_interface` 守卫与 FK 同版本（RESTRICT 防删有实盘任务的 venue）。
 
+> **段2 实施补充（2026-09-24 编码后：两决策 + AB 双盲审修复）**
+> - **决策1（全局视图分组）**：get_position/get_pnl/get_dashboard + chat 工具按 venue 分组返回 `{venues:[...]}` + 顶层聚合摘要（total_value/total_pnl/total_pnl_pct），前端粗显聚合（细显留后续）。
+> - **决策2（建任务选源）**：段2 前后端一起——create_live_task venue_id 必填 + int 校验，前端 LiveTask venue 下拉（`getInterfaces('trading')`）。
+> - **order/trade_log 写侧 venue_id**（§四原「回填」未含写侧接线，双盲审 P0 补）：write_trade_log 读 `adapter.venue_id`、_log_signal_order 读 `self.venue_id` 落库，否则对账 diff `IS NOT DISTINCT FROM` 恒假阳性。
+> - **读方 venue_id 单一真源**：risk check_order 用形参（order 键仅透传），_check_etf_conv/_check_crypto 收 venue_id/state 参数（免二次查库）。
+
 ## 五、限定范围
 
 只做：`external_interface.account_key` 列 + 迁移、`live_task.venue_id` 列、快照/订单日志 venue_id 列 + 回填、身份线统一、`strategy_account` 退役 + leverage/initial_capital 迁移、`delete_interface` 守卫。

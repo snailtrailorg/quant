@@ -203,21 +203,26 @@ def reconcile_three_books():
             try:
                 # O-F2：两侧符号命名空间不同（快照=vt_symbol "600000.SSE" vs trade_log=裸 "600000"）
                 # ——join 前必须归一，否则永不命中→每小时误报
+                cur = conn.execute("SELECT id, name FROM external_interface")
+                venue_names = {r[0]: r[1] for r in cur.fetchall()}
                 cur = conn.execute("""
                     SELECT COALESCE(s.sym, t.sym) AS sym,
+                           COALESCE(s.vid, t.vid) AS vid,
                            COALESCE(s.snap_vol, 0) AS snap_vol,
                            COALESCE(t.derived_vol, 0) AS derived_vol
-                    FROM (SELECT split_part(symbol, '.', 1) AS sym, SUM(volume) AS snap_vol
-                          FROM position_snapshot WHERE direction != 'short' GROUP BY 1) s
+                    FROM (SELECT venue_id AS vid, split_part(symbol, '.', 1) AS sym, SUM(volume) AS snap_vol
+                          FROM position_snapshot WHERE direction != 'short' GROUP BY 1, 2) s
                     FULL OUTER JOIN (
-                        SELECT split_part(symbol, '.', 1) AS sym,
+                        SELECT venue_id AS vid, split_part(symbol, '.', 1) AS sym,
                                SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END) AS derived_vol
-                        FROM trade_log GROUP BY 1) t ON s.sym = t.sym
+                        FROM trade_log GROUP BY 1, 2) t ON s.sym = t.sym AND s.vid IS NOT DISTINCT FROM t.vid
                     WHERE COALESCE(s.snap_vol, 0) != COALESCE(t.derived_vol, 0)""")
-                for sym, sv, dv in cur.fetchall():
+                for sym, vid, sv, dv in cur.fetchall():
                     # O-S2：trade_log 全历史推导（含上线前底仓/场外单）天然有持续差异——
-                    # 展示给对账页（issues）即可，归因与处置靠人；不加码告警频率
-                    issues.append(f"持仓账实分离: {sym} 券商快照={sv} trade_log推导={dv}")
+                    # 展示给对账页（issues）即可，归因与处置靠人；不加码告警频率。
+                    # D2：per-venue 分组对账（trade_log 历史 venue_id=NULL 用 IS NOT DISTINCT FROM 保留）
+                    vn = venue_names.get(vid, f"venue#{vid}")
+                    issues.append(f"持仓账实分离[{vn}]: {sym} 券商快照={sv} trade_log推导={dv}")
                     # P1-2（web-design 05 §5.4）：结构化差异单双写（旧字符串兼容期保留，勿误修#11）。
                     # upsert 语义：open 单在位则刷新数量/时间（first_seen 保留）；豁免基准内
                     # （|diff|<=exempt_qty 且豁免期内）不再开新单。
@@ -241,7 +246,7 @@ def reconcile_three_books():
                                           detail = EXCLUDED.detail,
                                           updated_at = now()
                             """,
-                            (sym, f"券商快照={sv} trade_log推导={dv}", sv, dv, sym, sv, dv))
+                            (sym, f"[{vn}] 券商快照={sv} trade_log推导={dv}", sv, dv, sym, sv, dv))
                         conn.commit()
                     except Exception as _e:
                         try:

@@ -11,7 +11,7 @@ from ..auth import (
     validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
 )
 from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq, StrategyAccountReq, EmailChangeReq, EmailConfirmReq, PhoneCodeReq, PhoneChangeReq)
+from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq, EmailChangeReq, EmailConfirmReq, PhoneCodeReq, PhoneChangeReq)
 from src.data_platform.db import get_conn
 from src.email_service import send_invite_email, send_activation_email, send_password_reset_email, send_email_change_email
 import logging

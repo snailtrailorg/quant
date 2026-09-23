@@ -31,7 +31,8 @@ def _iface_row(r, with_code_caps: bool = True) -> dict:
          "exchanges": list(r[4]) if r[4] else None,
          "has_credentials": bool(r[5]), "params": r[6],
          "capabilities": list(r[7]), "position": r[8], "enabled": r[9],
-         "updated_at": str(r[10]) if r[10] else None}
+         "updated_at": str(r[10]) if r[10] else None,
+         "account_key": r[11]}   # D2：语义键（资金账号，可空）
     if with_code_caps:
         from src.data_platform.capabilities import provider_capabilities
         d["code_capabilities"] = sorted(provider_capabilities(r[2]))
@@ -39,7 +40,17 @@ def _iface_row(r, with_code_caps: bool = True) -> dict:
 
 
 _IFACE_COLS = ("id, name, provider, market, exchanges, credentials_encrypted IS NOT NULL, "
-               "params, capabilities, position, enabled, updated_at")
+               "params, capabilities, position, enabled, updated_at, account_key")
+
+
+def _is_unique_violation(e: Exception) -> bool:
+    """psycopg3 唯一约束冲突（SQLSTATE 23505）——account_key UNIQUE(provider,account_key) 判重。"""
+    return getattr(e, "sqlstate", None) == "23505"
+
+
+def _is_fk_violation(e: Exception) -> bool:
+    """psycopg3 外键约束冲突（SQLSTATE 23503）——delete_interface 守卫兜底。"""
+    return getattr(e, "sqlstate", None) == "23503"
 
 
 def _default_exchanges(provider: str) -> list[str] | None:
@@ -180,14 +191,21 @@ def create_interface(req: InterfaceReq, payload: dict = Depends(require_perm("sy
     enc = encrypt(req.credentials) if req.credentials else None
     domain = _DOMAIN_TRADING if "trading" in caps else _DOMAIN_DATA
     with get_conn() as conn:
-        cur = conn.execute(
-            f"INSERT INTO external_interface "
-            f"(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled) "
-            f"VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
-            f"(SELECT coalesce(max(position),-1)+1 FROM external_interface WHERE {domain}),%s) RETURNING id",
-            (req.name, req.provider, req.market, exchanges, enc,
-             json.dumps(params, ensure_ascii=False), caps, req.enabled))
-        conn.commit()
+        try:
+            cur = conn.execute(
+                f"INSERT INTO external_interface "
+                f"(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled, account_key) "
+                f"VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
+                f"(SELECT coalesce(max(position),-1)+1 FROM external_interface WHERE {domain}),%s,%s) RETURNING id",
+                (req.name, req.provider, req.market, exchanges, enc,
+                 json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            if _is_unique_violation(e):
+                raise ApiError(409, "IFACE_ACCOUNT_KEY_DUP",
+                               f"account_key {req.account_key!r} 已被 provider {req.provider} 占用")
+            raise
     audit_log(payload["username"], "interface_create", f"{req.provider} caps={caps}")
     return {"id": cur.fetchone()[0]}
 
@@ -244,20 +262,27 @@ def update_interface(iid: int, req: InterfaceReq, payload: dict = Depends(requir
         if old_domain_trading != ("trading" in caps):
             raise ApiError(400, "IFACE_DOMAIN_CHANGE",
                            "本次修改会使行在数据域/交易域间切换（position 与选行序语义破坏）——请删除后按新行种重建")
-        if enc is not None:
-            conn.execute(
-                "UPDATE external_interface SET name=%s, provider=%s, market=%s, exchanges=%s, "
-                "credentials_encrypted=%s, params=%s::jsonb, capabilities=%s, enabled=%s, updated_at=now() "
-                "WHERE id=%s",
-                (req.name, req.provider, req.market, exchanges, enc,
-                 json.dumps(params, ensure_ascii=False), caps, req.enabled, iid))
-        else:
-            conn.execute(
-                "UPDATE external_interface SET name=%s, provider=%s, market=%s, exchanges=%s, "
-                "params=%s::jsonb, capabilities=%s, enabled=%s, updated_at=now() WHERE id=%s",
-                (req.name, req.provider, req.market, exchanges,
-                 json.dumps(params, ensure_ascii=False), caps, req.enabled, iid))
-        conn.commit()
+        try:
+            if enc is not None:
+                conn.execute(
+                    "UPDATE external_interface SET name=%s, provider=%s, market=%s, exchanges=%s, "
+                    "credentials_encrypted=%s, params=%s::jsonb, capabilities=%s, enabled=%s, account_key=%s, updated_at=now() "
+                    "WHERE id=%s",
+                    (req.name, req.provider, req.market, exchanges, enc,
+                     json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key, iid))
+            else:
+                conn.execute(
+                    "UPDATE external_interface SET name=%s, provider=%s, market=%s, exchanges=%s, "
+                    "params=%s::jsonb, capabilities=%s, enabled=%s, account_key=%s, updated_at=now() WHERE id=%s",
+                    (req.name, req.provider, req.market, exchanges,
+                     json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key, iid))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            if _is_unique_violation(e):
+                raise ApiError(409, "IFACE_ACCOUNT_KEY_DUP",
+                               f"account_key {req.account_key!r} 已被 provider {req.provider} 占用")
+            raise
     try:
         from src.data_platform.routing import bump_config_version
         bump_config_version()   # 批 57：接口行变更 bump（28 §6.3——position/enabled 改动 epoch 生效）
@@ -269,9 +294,22 @@ def update_interface(iid: int, req: InterfaceReq, payload: dict = Depends(requir
 
 @router.delete("/api/interfaces/{iid}")
 def delete_interface(iid: int, payload: dict = Depends(require_perm("system_config"))):
+    """删除外部接口行。D2：venue 被 live_task 引用时 FK RESTRICT 拒绝（防删实盘任务账号）。"""
     with get_conn() as conn:
-        conn.execute("DELETE FROM external_interface WHERE id=%s", (iid,))
-        conn.commit()
+        cur = conn.execute(
+            "SELECT id FROM live_task WHERE venue_id=%s LIMIT 1", (iid,))
+        if cur.fetchone() is not None:
+            raise ApiError(409, "IFACE_IN_USE",
+                           "该交易账号下存在实盘任务，禁止删除（请先停止并删除相关任务）")
+        try:
+            conn.execute("DELETE FROM external_interface WHERE id=%s", (iid,))
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            if _is_fk_violation(e):
+                raise ApiError(409, "IFACE_IN_USE",
+                               "该接口被其他记录引用（外键约束），禁止删除")
+            raise
     audit_log(payload["username"], "interface_delete", f"id={iid}")
     return {"ok": True}
 

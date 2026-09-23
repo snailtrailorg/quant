@@ -178,7 +178,7 @@ def child(mode: str, evidence: str, duration: float) -> None:
         "warmup_pg": lambda: [],
         "stop_check": lambda: time.time() - t0 > duration,
         "reconcile": lambda: r._log("reconcile"),
-        "account_id": "smoke",
+        "venue_id": 1,   # D2：快照/持仓批真相维度（原 account_id 已退役）
     }
 
     def publish():   # harness 侧发布线程（worker 本体仍单线程——禁后台线程约束不涉 harness）

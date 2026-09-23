@@ -300,16 +300,6 @@ def test_collector_clamps_thresholds():
     assert periods["mem"] == C._DEF_PERIODS["mem"]                 # 负周期回落缺省
 
 
-def test_models_field_constraints():
-    """模型层 Field：负 token 限额/阈值 0/杠杆 0——422（pydantic 校验错）。
-    批50：LlmBudgetReq 断言随预算链退役删除（负限额用例改挂 SmtpCard 域外——llm 域无 Field 模型剩余）。"""
-    from src.web_api.models import StrategyAccountReq
-    import pytest as _pytest
-    from pydantic import ValidationError
-    with _pytest.raises(ValidationError):
-        StrategyAccountReq(strategy_id="s", account_id="a", initial_capital=0)
-
-
 def test_sms_config_three_semantics(authed_client):
     """批38 用户裁定：sms-config 三段语义——缺键=不改/密钥空=跳过/明文空=真清空。"""
     from src.web_api.routes import alerts as A

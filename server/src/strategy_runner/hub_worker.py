@@ -328,7 +328,7 @@ def run(ctx: dict) -> None:
     loop.every("blind-watch", 0.0, _blind_watch)     # 盲视判定+告警（喂 frozen 字段）：每步
     loop.every("heartbeat", 5.0, _heartbeat)         # 心跳（D3 七字段+ts）
     loop.every("snapshot", 60.0, lambda: trading.snapshot_cycle(  # 快照+持仓批（旧 12 拍=60s）
-        adapter, ctx.get("account_id"), tid, _baseline_cache))
+        adapter, ctx.get("venue_id"), tid, _baseline_cache))
     loop.every("halt-edge", 0.0, lambda: trading.halt_edge_cancel(adapter, halt_state, sid))  # 熔断沿撤在场单
     loop.every("factor-recalc", 5.0, lambda: trading.recalc_hook(r, _rewarm, history))  # 因子重算+热重载
     loop.every("td-reconnect", 0.0, _td_reconnect)   # TD 重连沿对账：每步

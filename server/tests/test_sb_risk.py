@@ -161,15 +161,15 @@ class TestMarketOf:
 class TestOrderValidity:
     def test_zero_price_rejected(self, rc):
         """F-43：price=0 不再绕过金额上限。"""
-        d = rc._check_etf_conv({"volume": 100, "price": 0})
+        d = rc._check_etf_conv({"volume": 100, "price": 0}, None)
         assert not d.approved and d.severity == "critical"
 
     def test_zero_volume_rejected(self, rc):
         """F-28 风控层兜底：volume=0 废单拒绝。"""
-        d = rc._check_etf_conv({"volume": 0, "price": 10.0})
+        d = rc._check_etf_conv({"volume": 0, "price": 10.0}, None)
         assert not d.approved and d.severity == "critical"
 
     def test_normal_order_truncation_still_works(self, rc):
         """#29 既有能力回归：超金额截断。"""
-        d = rc._check_etf_conv({"volume": 100000, "price": 10.0})  # 100 万 > 10 万上限
+        d = rc._check_etf_conv({"volume": 100000, "price": 10.0}, None)  # 100 万 > 10 万上限
         assert d.adjusted is not None and d.adjusted["volume"] == 10000
