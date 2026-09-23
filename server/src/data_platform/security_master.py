@@ -35,6 +35,23 @@ def _null_date(v):
     return None
 
 
+def normalize_board(market_text: str | None) -> str | None:
+    """asset_static_info.market 中文板块 → board 枚举（未知→None=fail-closed）。
+
+    主板/中小板→main（中小板 2021 并入深主板）；创业板→chinext；科创板→star；
+    北交所→bse；CDR→star（689 归科创）。单一真源：迁移 0097 的 SQL CASE 与此同表。
+    """
+    if not market_text:
+        return None
+    return {
+        "主板": "main", "中小板": "main",
+        "创业板": "chinext",
+        "科创板": "star",
+        "北交所": "bse",
+        "CDR": "star",
+    }.get(str(market_text).strip())
+
+
 @dataclass(frozen=True)
 class SecurityAttr:
     """security_master 一行的形状（SMClient.get 返回）。"""
@@ -42,6 +59,7 @@ class SecurityAttr:
     market: str
     exchange: str
     category: str
+    board: str | None
     name: str | None
     industry: str | None
     multiplier: float
@@ -69,20 +87,20 @@ class SMClient:
         from .db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT vt_symbol, market, exchange, category, name, industry, multiplier, "
+                "SELECT vt_symbol, market, exchange, category, board, name, industry, multiplier, "
                 "tick_size, session_id, trade_phase, routing_hints "
                 "FROM security_master WHERE vt_symbol=%s", (vt_symbol,))
             r = cur.fetchone()
         if not r:
             return None
-        hints = r[10] or {}
+        hints = r[11] or {}
         if isinstance(hints, str):
             try:
                 hints = json.loads(hints)
             except (TypeError, ValueError):
                 hints = {}
-        return SecurityAttr(r[0], r[1], r[2], r[3], r[4], r[5],
-                            float(r[6]), float(r[7]), r[8], r[9], hints)
+        return SecurityAttr(r[0], r[1], r[2], r[3], r[4], r[5], r[6],
+                            float(r[7]), float(r[8]), r[9], r[10], hints)
 
     def effective_attr(self, vt_symbol: str, kind: str, at: date) -> dict | None:
         """时变查询：effective_from<=at 的最新一行（st/limit_band/conv_price/margin_tier）。"""
@@ -141,24 +159,24 @@ class SMClient:
     def upsert_rows(self, rows: list[tuple]) -> int:
         """填充链写侧（engine 同步任务调用——executemany 单批，18 号 §2.1）。
 
-        rows 元组序=(vt_symbol, market, exchange, category, name, industry,
+        rows 元组序=(vt_symbol, market, exchange, category, board, name, industry,
         multiplier, tick_size, trade_phase, list_date, delist_date)。
         品类值随行携带（新标的 INSERT 不落 server_default 错值——转债 T+0/乘数 10 等）；
         DO UPDATE 字段级更新（29 §四：append-only 会让 delist_date/名称变更永远为空）；
         list_date 空值不抹旧（COALESCE），delist_date 恒覆盖（退市事实只进不退）。
         """
-        clean = [(*r[:9], _null_date(r[9]), _null_date(r[10])) for r in rows]
+        clean = [(*r[:9], r[9], _null_date(r[10]), _null_date(r[11])) for r in rows]
         if not clean:
             return 0
         from .db import get_conn
         with get_conn() as conn:
             with conn.cursor() as cur:
                 cur.executemany(
-                    "INSERT INTO security_master (vt_symbol, market, exchange, category, name, "
+                    "INSERT INTO security_master (vt_symbol, market, exchange, category, board, name, "
                     "industry, multiplier, tick_size, trade_phase, list_date, delist_date) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
                     "ON CONFLICT (vt_symbol) DO UPDATE SET "
-                    "name=EXCLUDED.name, industry=EXCLUDED.industry, "
+                    "name=EXCLUDED.name, industry=EXCLUDED.industry, board=EXCLUDED.board, "
                     "multiplier=EXCLUDED.multiplier, tick_size=EXCLUDED.tick_size, "
                     "trade_phase=EXCLUDED.trade_phase, "
                     "list_date=COALESCE(EXCLUDED.list_date, security_master.list_date), "
@@ -243,19 +261,17 @@ class MarketHours:
         return datetime.combine(date.today(), anchor, tzinfo=_tz_of(tz))
 
     @staticmethod
-    def _board_of(vt_symbol: str) -> str:
-        """板块判定（scope 语法 交易所[:板块] 的消费侧——27 号'board 暂不建实体'由代码前缀承载）。
+    def _board_of_symbol(vt_symbol: str) -> str | None:
+        """读 security_master.board 列（退役 _board_of 前缀判断——board 字段化单一真源）。
 
-        STAR=688/689；CHINEXT=300/301；BSE=92/43/83/87；其余=main。
+        None=无档/读库失败：session/timing 路径 fail-open 至「无板块例外」（scope 板块段
+        不匹配）；权限路径（venue_allows）另 fail-closed。
         """
-        code = vt_symbol.split(".", 1)[0]
-        if code.startswith(("688", "689")):
-            return "star"
-        if code.startswith(("300", "301")):
-            return "chinext"
-        if code.startswith(("92", "43", "83", "87")):
-            return "bse"
-        return "main"
+        try:
+            attr = SMClient().get(vt_symbol)
+            return attr.board if attr else None
+        except Exception:
+            return None
 
     @staticmethod
     def _scope_match(scope: str, exch: str, board: str) -> bool:
@@ -276,7 +292,7 @@ class MarketHours:
         沪主板不显示 close_auct/post_fix（无收盘竞价/无盘后固定价——仅科创创业适用）。
         """
         exch = vt_symbol.rsplit(".", 1)[1] if "." in vt_symbol else ""
-        board = self._board_of(vt_symbol)
+        board = self._board_of_symbol(vt_symbol)
         return [p for p in self.sessions(session_id, date.today())
                 if p.scope is None or self._scope_match(p.scope, exch, board)]
 
@@ -294,7 +310,7 @@ class MarketHours:
         if r and r[0] and r[0] != "none" and not is_trading_day(at.date()):
             return False
         exch = vt_symbol.rsplit(".", 1)[1] if "." in vt_symbol else ""
-        board = self._board_of(vt_symbol)
+        board = self._board_of_symbol(vt_symbol)
         for p in self.sessions("astock_main", at.date()):
             if p.phase not in ("pre", "auction", "close_auct"):
                 continue

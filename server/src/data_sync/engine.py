@@ -430,7 +430,7 @@ def _sm_upsert(rows) -> None:
         rows = list(rows)
         if not rows:
             return
-        from src.data_platform.security_master import SMClient
+        from src.data_platform.security_master import SMClient, normalize_board
         SMClient().upsert_rows(rows)
     except Exception as e:
         logger.warning("security_master 填充失败（同步主流程不受影响）: %s", e, exc_info=True)
@@ -442,7 +442,7 @@ def _sm_upsert_state(rows) -> None:
         rows = list(rows)
         if not rows:
             return
-        from src.data_platform.security_master import SMClient
+        from src.data_platform.security_master import SMClient, normalize_board
         SMClient().upsert_state(rows)
     except Exception as e:
         logger.warning("security_state 填充失败（同步主流程不受影响）: %s", e, exc_info=True)
@@ -468,7 +468,7 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
     # 品类值随行携带（盲审 A：server_default 按品类错——转债应 T+0/乘数 10）；
     # (vt.rsplit+[""])[1]=无后缀安全提取（脏 ts_code 落 try 内 fail-soft）
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
-                (vt.rsplit(".", 1) + [""])[1], "stock", r[1], r[2],
+                (vt.rsplit(".", 1) + [""])[1], "stock", normalize_board(r[3]), r[1], r[2],
                 100, 0.01, "T+1", r[5], r[6])
                for r in rows if r[0])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
@@ -521,7 +521,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
             """, rows)
         conn.commit()
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
-                (vt.rsplit(".", 1) + [""])[1], "convertible", r[1], None,
+                (vt.rsplit(".", 1) + [""])[1], "convertible", None, r[1], None,
                 10, 0.001, "T+0", r[12], r[13])
                for r in rows if r[0])
     import json as _json
@@ -579,7 +579,7 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
             """, rows)
         conn.commit()
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
-                (vt.rsplit(".", 1) + [""])[1], "etf", r[1], None,
+                (vt.rsplit(".", 1) + [""])[1], "etf", None, r[1], None,
                 100, 0.001, "T+1", r[5], None)
                for r in rows if r[0])
     return {"pulled": len(df), "saved": len(df), "start": end_date,

@@ -74,6 +74,65 @@ def market_op_allowed(username: str, role: str, market: str) -> bool:
     return "allow" in effs
 
 
+def venue_allows(venue_id: int, symbol: str) -> bool:
+    """D1：venue 级品种权限（三维 category/exchange/board + ST 子布尔 + 可转债权限）。
+
+    判定顺序 category → exchange → board →（board=main 且 is_st）ST → convertible。
+    perp 分项 gate（market_op，role 级）不在此函数——check_order 单独查（现有链）。
+    方向无关（SELL 豁免由 ③时点调用方 check_order 只对 BUY 调用本函数实现）。
+
+    全链 fail-closed：venue 无权限行 / 标的无档 / board 无档 / 读库失败 → False（宁拒勿错）。
+    board↔exchange 一致性：board=star 必 SHSE、chinext 必 SZSE（矛盾数据 fail-closed）。
+    """
+    from datetime import date as _date
+    from src.data_platform.db import get_conn as _gc
+    from src.data_platform.security_master import SMClient
+
+    attr = SMClient().get(symbol)
+    if attr is None:
+        return False                       # 标的无档 → fail-closed（SM 未回填 ≠ 可交易）
+    try:
+        with _gc() as conn:
+            cur = conn.execute(
+                "SELECT allowed_categories, allowed_exchanges, allowed_boards, "
+                "is_st_allowed, convertible_allowed "
+                "FROM venue_permission WHERE venue_id=%s", (venue_id,))
+            row = cur.fetchone()
+    except Exception as e:
+        _logger.warning("venue_permission 读取失败（fail-closed 拒）: %s", e)
+        return False
+    if row is None:
+        return False                       # venue 无权限行 → fail-closed（新组零权限起步同哲学）
+
+    cats, exchs, boards, is_st_ok, conv_ok = row
+
+    # 1. category（全品种）
+    if attr.category not in (cats or []):
+        return False
+    # 2. exchange + board（仅 stock；etf/fund/reits/convertible/perp 跳过）
+    if attr.category == "stock":
+        if attr.exchange not in (exchs or []):
+            return False
+        board = attr.board
+        if board is None:
+            return False                   # board 无档 → fail-closed
+        if board not in (boards or []):
+            return False
+        # board↔exchange 一致性（矛盾数据 fail-closed）
+        if (board == "star" and attr.exchange != "SHSE") or \
+           (board == "chinext" and attr.exchange != "SZSE"):
+            return False
+        # 3. ST 子布尔（仅 board=main）
+        if board == "main":
+            st_attr = SMClient().effective_attr(symbol, "st", _date.today())
+            if st_attr and st_attr.get("is_st") and not is_st_ok:
+                return False
+    # 4. convertible 权限（10 万+2 年）
+    if attr.category == "convertible" and not conv_ok:
+        return False
+    return True
+
+
 def load_role_permissions() -> dict:
     """角色→权限集（api 维）。表读失败/空 → fallback 字典（行为零变化）。"""
     import time as _t

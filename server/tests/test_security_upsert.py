@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-_ROW = ("600000.SHSE", "astock", "SHSE", "stock", "浦发银行", None,
+_ROW = ("600000.SHSE", "astock", "SHSE", "stock", "main", "浦发银行", None,
         100, 0.01, "T+1", "19991110", "")
 
 
@@ -37,19 +37,19 @@ class TestUpsertRows:
         assert "multiplier=EXCLUDED.multiplier" in sql        # 品类值随行（盲审 A）
         assert "delist_date=EXCLUDED.delist_date" in sql      # 生命周期列字段级更新（29 §四）
         assert "list_date=COALESCE(EXCLUDED.list_date" in sql  # 空值不抹旧
-        assert len(params[0]) == 11                            # 全列携带
-        assert params[0][9] == "19991110" and params[0][10] is None  # 脏空串→NULL 清洗
+        assert len(params[0]) == 12                            # 全列携带（含 board）
+        assert params[0][10] == "19991110" and params[0][11] is None  # 脏空串→NULL 清洗
 
     def test_dirty_date_nullified(self):
         import src.data_platform.db as dbm
         conn, cur = _mock_conn()
-        dirty = ("113531.SHSE", "astock", "SHSE", "convertible", "x", None,
+        dirty = ("113531.SHSE", "astock", "SHSE", "convertible", None, "x", None,
                  10, 0.001, "T+0", "None", "garbage")
         with patch.object(dbm, "get_conn", return_value=conn):
             from src.data_platform.security_master import SMClient
             SMClient().upsert_rows([dirty])
         params = cur.executemany.call_args[0][1]
-        assert params[0][9] is None and params[0][10] is None  # 'None'/'garbage'→NULL
+        assert params[0][10] is None and params[0][11] is None  # 'None'/'garbage'→NULL
 
 
 class TestUpsertState:

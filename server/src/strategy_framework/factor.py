@@ -716,17 +716,27 @@ FACTOR_EXCLUSIVE = {
 }
 
 
-def detect_category(vt_symbol: str) -> str:
-    """从 vt_symbol 推断市场品类。"""
-    sym = vt_symbol.upper()
-    if any(x in sym for x in (".BINANCE", ".OKX", "PERP")):
-        return "crypto"
-    if sym.startswith("11") or sym.startswith("12") or "CB" in sym:
-        return "convertible"
-    if sym.startswith("15") or sym.startswith("16") or sym.startswith("51") or sym.startswith("52"):
-        return "etf"
-    if any(x in sym for x in (".SHSE", ".SZSE", ".BSE")):
-        return "astock"
+# 品类 → 因子兼容类（退役 detect_category 前缀判断——单源：security_master.category）
+CATEGORY_TO_FACTOR_CLASS = {
+    "stock": "astock",
+    "etf": "etf", "fund": "etf", "reits": "etf",
+    "convertible": "convertible",
+    "perp": "crypto",
+}
+
+
+def _factor_class_of(vt_symbol: str) -> str:
+    """标的品类 → 因子兼容类（读 security_master.category 真源，非前缀判断）。
+
+    无档/读库失败 → "unknown"（filter_factors_by_category 按默认因子族处理）。
+    """
+    try:
+        from src.data_platform.security_master import SMClient
+        attr = SMClient().get(vt_symbol)
+        if attr:
+            return CATEGORY_TO_FACTOR_CLASS.get(attr.category, "unknown")
+    except Exception:
+        pass
     return "unknown"
 
 
@@ -765,7 +775,7 @@ def validate_strategy_factors(vt_symbol: str, factor_configs: list[dict]) -> dic
 
     Returns: {"valid": bool, "category": str, "compatible": [...], "incompatible": [...]}
     """
-    category = detect_category(vt_symbol)
+    category = _factor_class_of(vt_symbol)
     compatible, incompatible = filter_factors_by_category(factor_configs, category)
     return {
         "valid": len(incompatible) == 0,
