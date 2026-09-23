@@ -728,7 +728,8 @@ CATEGORY_TO_FACTOR_CLASS = {
 def _factor_class_of(vt_symbol: str) -> str:
     """标的品类 → 因子兼容类（读 security_master.category 真源，非前缀判断）。
 
-    无档/读库失败 → "unknown"（filter_factors_by_category 按默认因子族处理）。
+    无档/读库失败 → 前缀后缀兜底（沿用原 detect_category 逻辑，防未入库标的——尤其加密
+    未同步——因子校验误锁死）；再兜 "unknown"。
     """
     try:
         from src.data_platform.security_master import SMClient
@@ -737,6 +738,16 @@ def _factor_class_of(vt_symbol: str) -> str:
             return CATEGORY_TO_FACTOR_CLASS.get(attr.category, "unknown")
     except Exception:
         pass
+    sym = vt_symbol.upper()
+    if any(x in sym for x in (".BINANCE", ".OKX", "PERP")):
+        return "crypto"
+    code = sym.split(".")[0]
+    if code.startswith(("11", "12")):
+        return "convertible"
+    if code.startswith(("15", "16", "51", "52")):
+        return "etf"
+    if any(x in sym for x in (".SHSE", ".SZSE", ".BSE")):
+        return "astock"
     return "unknown"
 
 

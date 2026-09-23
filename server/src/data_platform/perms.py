@@ -82,13 +82,18 @@ def venue_allows(venue_id: int, symbol: str) -> bool:
     方向无关（SELL 豁免由 ③时点调用方 check_order 只对 BUY 调用本函数实现）。
 
     全链 fail-closed：venue 无权限行 / 标的无档 / board 无档 / 读库失败 → False（宁拒勿错）。
-    board↔exchange 一致性：board=star 必 SHSE、chinext 必 SZSE（矛盾数据 fail-closed）。
+    board↔exchange 一致性：board=star 必 SHSE、chinext 必 SZSE、bse 必 BSE（矛盾数据 fail-closed）。
+    例外：ST「无档」= 非 ST（namechange 派生源戴帽滞后 fail-open，官方名单另批——非读库失败）。
     """
     from datetime import date as _date
     from src.data_platform.db import get_conn as _gc
     from src.data_platform.security_master import SMClient
 
-    attr = SMClient().get(symbol)
+    try:
+        attr = SMClient().get(symbol)
+    except Exception as e:
+        _logger.warning("security_master 读取失败（fail-closed 拒）: %s", e)
+        return False
     if attr is None:
         return False                       # 标的无档 → fail-closed（SM 未回填 ≠ 可交易）
     try:
@@ -120,11 +125,17 @@ def venue_allows(venue_id: int, symbol: str) -> bool:
             return False
         # board↔exchange 一致性（矛盾数据 fail-closed）
         if (board == "star" and attr.exchange != "SHSE") or \
-           (board == "chinext" and attr.exchange != "SZSE"):
+           (board == "chinext" and attr.exchange != "SZSE") or \
+           (board == "bse" and attr.exchange != "BSE"):
             return False
-        # 3. ST 子布尔（仅 board=main）
+        # 3. ST 子布尔（仅 board=main）。ST「无档」=非 ST（namechange 派生源戴帽滞后 fail-open，
+        # 官方名单另批——非读库失败；读库失败仍 fail-closed 拒）。
         if board == "main":
-            st_attr = SMClient().effective_attr(symbol, "st", _date.today())
+            try:
+                st_attr = SMClient().effective_attr(symbol, "st", _date.today())
+            except Exception as e:
+                _logger.warning("security_state(st) 读取失败（fail-closed 拒）: %s", e)
+                return False
             if st_attr and st_attr.get("is_st") and not is_st_ok:
                 return False
     # 4. convertible 权限（10 万+2 年）

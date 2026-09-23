@@ -261,17 +261,27 @@ class MarketHours:
         return datetime.combine(date.today(), anchor, tzinfo=_tz_of(tz))
 
     @staticmethod
-    def _board_of_symbol(vt_symbol: str) -> str | None:
+    def _board_of_symbol(vt_symbol: str) -> str:
         """读 security_master.board 列（退役 _board_of 前缀判断——board 字段化单一真源）。
 
-        None=无档/读库失败：session/timing 路径 fail-open 至「无板块例外」（scope 板块段
-        不匹配）；权限路径（venue_allows）另 fail-closed。
+        无档/读库失败 → 前缀启发式兜底（旧 _board_of 逻辑，session/timing 确定性，永不 None）：
+        688/689→star、300/301→chinext、92/43/83/87→bse、else main。权限路径（venue_allows）
+        不依赖此兜底（board 无档直接 fail-closed）。
         """
         try:
             attr = SMClient().get(vt_symbol)
-            return attr.board if attr else None
+            if attr and attr.board:
+                return attr.board
         except Exception:
-            return None
+            pass
+        code = vt_symbol.split(".", 1)[0]
+        if code.startswith(("688", "689")):
+            return "star"
+        if code.startswith(("300", "301")):
+            return "chinext"
+        if code.startswith(("92", "43", "83", "87")):
+            return "bse"
+        return "main"
 
     @staticmethod
     def _scope_match(scope: str, exch: str, board: str) -> bool:

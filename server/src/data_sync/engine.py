@@ -9,6 +9,7 @@ cb_daily / cb_basic / etf_daily / etf_list / trade_cal
 
 from __future__ import annotations
 from src.data_platform.db import get_conn
+from src.data_platform.security_master import normalize_board
 import os
 import time
 from datetime import date, timedelta
@@ -430,7 +431,7 @@ def _sm_upsert(rows) -> None:
         rows = list(rows)
         if not rows:
             return
-        from src.data_platform.security_master import SMClient, normalize_board
+        from src.data_platform.security_master import SMClient
         SMClient().upsert_rows(rows)
     except Exception as e:
         logger.warning("security_master 填充失败（同步主流程不受影响）: %s", e, exc_info=True)
@@ -442,7 +443,7 @@ def _sm_upsert_state(rows) -> None:
         rows = list(rows)
         if not rows:
             return
-        from src.data_platform.security_master import SMClient, normalize_board
+        from src.data_platform.security_master import SMClient
         SMClient().upsert_state(rows)
     except Exception as e:
         logger.warning("security_state 填充失败（同步主流程不受影响）: %s", e, exc_info=True)
