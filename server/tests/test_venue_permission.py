@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest
+
 from src.data_platform.perms import venue_allows
 
 
@@ -83,3 +85,59 @@ class TestVenueAllows:
 
     def test_no_attr_fail_closed(self):
         assert _call(attr=None, perm=_perm()) is False
+
+
+def _db_up() -> bool:
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
+class TestVenuePermissionSeed:
+    def test_trading_venues_seeded(self):
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            n = conn.execute(
+                "SELECT count(*) FROM venue_permission vp "
+                "JOIN external_interface e ON e.id = vp.venue_id "
+                "WHERE 'trading' = ANY(e.capabilities) AND e.market='astock'").fetchone()[0]
+        assert n >= 1
+
+    def test_venue_allows_seeded_venue(self):
+        # 种子默认权限：中泰XTP venue 放行沪主板 600000（stock+SHSE+main 全在默认集合）
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            vid = conn.execute(
+                "SELECT e.id FROM external_interface e "
+                "WHERE 'trading' = ANY(e.capabilities) AND e.provider='xtp' LIMIT 1").fetchone()
+        if vid is None:
+            pytest.skip("无 xtp 交易 venue")
+        assert venue_allows(vid[0], "600000.SHSE") is True
+        assert venue_allows(999999, "600000.SHSE") is False   # 不存在 venue fail-closed
+
+
+class TestVenuePermissionEndpoint:
+    def test_put_bad_value_400(self):
+        from src.web_api.routes.mgmt import put_venue_permission
+        from src.web_api.models import VenuePermissionReq
+        from src.web_api.errors import ApiError
+        with pytest.raises(ApiError) as e:
+            put_venue_permission(4, VenuePermissionReq(
+                allowed_categories=["stock"], allowed_exchanges=["SHSE"],
+                allowed_boards=["mainn"]), payload={"username": "test"})
+        assert e.value.code == "VENUE_PERM_BAD_VALUE"
+
+    def test_put_nonexistent_venue_404(self):
+        from src.web_api.routes.mgmt import put_venue_permission
+        from src.web_api.models import VenuePermissionReq
+        from src.web_api.errors import ApiError
+        with pytest.raises(ApiError) as e:
+            put_venue_permission(999999, VenuePermissionReq(
+                allowed_categories=["stock"], allowed_exchanges=["SHSE"],
+                allowed_boards=["main"]), payload={"username": "test"})
+        assert e.value.code == "VENUE_NOT_FOUND"

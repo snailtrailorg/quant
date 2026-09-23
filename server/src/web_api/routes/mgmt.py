@@ -9,7 +9,7 @@ import json
 from fastapi import APIRouter, Depends, Request, Body, HTTPException
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import InterfaceReq, InterfaceReorderReq, RateLimitOverrideReq
+from ..models import InterfaceReq, InterfaceReorderReq, RateLimitOverrideReq, VenuePermissionReq
 from src.data_platform.db import get_conn
 import logging
 
@@ -480,5 +480,61 @@ def detect_stuck_api(payload: dict = Depends(require_perm("system_config"))):
     from src.task_manager import detect_stuck
     count = detect_stuck()
     return {"stuck_count": count}
+
+
+# --- venue_permission（D1：venue 侧品种权限——权限人工配置，读/写侧） ---
+
+_VALID_CATEGORIES = {"stock", "etf", "convertible", "fund", "reits", "perp"}
+_VALID_EXCHANGES = {"SHSE", "SZSE", "BSE", "BINANCE", "OKX"}
+_VALID_BOARDS = {"main", "star", "chinext", "bse"}
+_VENUE_PERM_COLS = ("venue_id, allowed_categories, allowed_exchanges, allowed_boards, "
+                    "is_st_allowed, convertible_allowed")
+
+
+def _venue_perm_row(r) -> dict:
+    return {"venue_id": r[0], "allowed_categories": list(r[1]), "allowed_exchanges": list(r[2]),
+            "allowed_boards": list(r[3]), "is_st_allowed": r[4], "convertible_allowed": r[5]}
+
+
+@router.get("/api/venues/{venue_id}/permission")
+def get_venue_permission(venue_id: int, payload: dict = Depends(require_perm("read"))):
+    """venue 权限读（无行 404——权限人工配置，未配置不猜默认）。"""
+    with get_conn() as conn:
+        cur = conn.execute(f"SELECT {_VENUE_PERM_COLS} FROM venue_permission WHERE venue_id=%s", (venue_id,))
+        r = cur.fetchone()
+    if r is None:
+        raise ApiError(404, "VENUE_PERM_NOT_FOUND", f"venue {venue_id} 未配置权限")
+    return _venue_perm_row(r)
+
+
+@router.put("/api/venues/{venue_id}/permission")
+def put_venue_permission(venue_id: int, req: VenuePermissionReq, payload: dict = Depends(require_perm("system_config"))):
+    """venue 权限写（upsert）。校验：venue 存在且交易域；值域 ⊆ 注册表（防拼写错）。"""
+    bad_cats = set(req.allowed_categories) - _VALID_CATEGORIES
+    bad_exch = set(req.allowed_exchanges) - _VALID_EXCHANGES
+    bad_brds = set(req.allowed_boards) - _VALID_BOARDS
+    if bad_cats or bad_exch or bad_brds:
+        raise ApiError(400, "VENUE_PERM_BAD_VALUE",
+                       f"非法值：category={sorted(bad_cats)} exchange={sorted(bad_exch)} board={sorted(bad_brds)}")
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (venue_id,))
+        if cur.fetchone() is None:
+            raise ApiError(404, "VENUE_NOT_FOUND", f"venue {venue_id} 不存在或非交易域")
+        cur = conn.execute(
+            "INSERT INTO venue_permission (venue_id, allowed_categories, allowed_exchanges, "
+            "allowed_boards, is_st_allowed, convertible_allowed) "
+            "VALUES (%s,%s,%s,%s,%s,%s) "
+            "ON CONFLICT (venue_id) DO UPDATE SET "
+            "allowed_categories=EXCLUDED.allowed_categories, "
+            "allowed_exchanges=EXCLUDED.allowed_exchanges, "
+            "allowed_boards=EXCLUDED.allowed_boards, "
+            "is_st_allowed=EXCLUDED.is_st_allowed, "
+            "convertible_allowed=EXCLUDED.convertible_allowed, updated_at=now()",
+            (venue_id, list(req.allowed_categories), list(req.allowed_exchanges),
+             list(req.allowed_boards), req.is_st_allowed, req.convertible_allowed))
+        conn.commit()
+    audit_log(payload["username"], "venue_permission_update", f"venue={venue_id}")
+    return {"venue_id": venue_id}
 
 
