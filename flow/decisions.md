@@ -5,7 +5,15 @@
 
 ---
 
-## 2026-09-23 · 退役自攒历史分钟线（腾讯攒 + XTP bar_hub 落库）
+## 2026-09-23 · 多账号源架构重设计（30 号废弃 → 31 号框架 + D1-D6 详细设计）
+
+1. **重设计方法**（用户裁定）：30 号 v1-v15 共 15 轮 4 盲审未收敛 → 全部重来、换 session。方法=**先写简要但明确的整体框架方案（定义架构+契约）→ 再分头写几个小详细设计方案**。30 号标「废弃」仅参考，不在其上改。
+2. **评审角色换「量化交易高手」替「金融专家」**（方法论裁定）：金融专家会求全金融合规边角（与个人平台定位冲突），量化高手只审「真正影响交易」；框架双盲审=软件架构专家+量化交易高手两角色。
+3. **Venue = 交易账号**（external_interface 行），非「券商」；同源分市场：A股=MD 单 hub（L1 全市场同源，doc14 M5 保留）+ TD per-venue；加密=MD+TD per-venue。同源校验=跨进程运行时事实（流带 venue_id，worker 比对），非「同一行派生两值」空转断言。
+4. **权限三维正交 + 数据字段化四首决**：board **新增枚举列**（main/star/chinext/bse，从 asset_static_info.market 中文归一化回填，否决复用 market 列——中文文本当键=同类漂移）；venue 权限存 **新表 venue_permission**（否决 external_interface 加列/扩 live_trading_config）；is_st 官方名单 fail-closed；强赎/退市整理期是价格事件需字段（非边角排除）。
+5. **身份与数据隔离三首决**：稳定语义键=**资金账号**（external_interface.account_key UNIQUE，股东账号沪/深各一不适合单列键）；**leverage→venue 级**（账号级，账户级敞口实参，券商/交易所约束）；资金基线写侧 per-venue（initial_capital 不再取策略级默认）。
+
+
 
 1. **历史分钟数据「不自攒、买正规」**（用户裁定）：自攒 A 股分钟数据质量存疑（腾讯攒竞价条错位 / 320 根滚动窗口漏一天断 ~4h；XTP bar_hub 自攒与实时分发耦合），维护成本高。退役自攒链路（断档接受），将来买 Tushare `stk_mins`（2000 积分/年）正式数据接入。设计真源 21 号本就是「腾讯攒过渡 + Tushare 终极」，本次提前结束过渡期。
 2. **边界 = 删「攒」留「读」**：删腾讯攒 + XTP bar_hub 落库 + minute_symbols 管理面；保留实时行情分发（`MinuteAggregator` + XADD 流——实盘下单输入，行业标准打法）+ stk_mins 接入位（`engine.py` 分钟编排 + `TushareAdapter`，将来买积分即用）+ 日线。`bar_1min`/`bar_5min` 表结构保留（将来 stk_mins 填），只清空腾讯存量。
