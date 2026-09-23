@@ -258,3 +258,9 @@
 
 - **ST 降级**：30号/31号 原把 ST 列为「第四维正交权限」，用户质疑「为什么要关注 ST」→ 澄清三层（涨跌幅=`band_rules.pct_st` 已覆盖 / 主板 ST 适当性=唯一真权限但薄 / 退市风险=选标的排除）。**裁定：ST 从独立正交维度降级为「board=main 子布尔」**——venue_permission 加 is_st 布尔（仅主板），非第四维。
 - **detect_category 就地退役**：detect_category 返回 astock/crypto（因子兼容词表），与 security_master.category（stock/perp）两套词表打架。**完美方案=品类单一真源 + 因子类=派生映射**（`CATEGORY_TO_FACTOR_CLASS`: stock→astock、etf/fund/reits→etf、convertible→convertible、perp→crypto）。detect_category 仅 1 调用点（factor.py:768），就地退役成本小，纳入 D1（与 _board_of 同「前缀→数据列」模式）。
+
+
+## 2026-09-24 · D1 代码双盲审 B-P0 裁定：写路径/三级时点/回填闸挂账 D5
+
+- **背景**：D1 代码双盲审 B（交易正确性）抓 P0——D1 §五「只做」列「venue_permission 读写」+「三级时点接入调用」，但实际交付只有「读」（venue_allows 读）+「函数」，写路径（管理端点/seed/UI）与三级时点接线均未交付。空表 + 无写路径 = 若接线即全盘锁死。
+- **裁定（挂账，非返工）**：①venue_permission **写路径** ②**三级时点接入调用**（依赖 D2 的 live_task.venue_id）③**board 回填完整性闸**（接线前断言 stock 全量 board 非空）→ 归 **D5**（建任务与 worker 绑定）前置；④**ST 官方名单 fail-closed** → 另批（现 namechange 派生、无档=非 ST fail-open 已知）。已落 D1 §五 + 待办。
