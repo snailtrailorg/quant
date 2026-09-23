@@ -252,3 +252,9 @@
   1. **品类操作插件（预留扩展点）**：可转债转股/回售、ETF/LOF 申赎等品类专属操作当前不实现，但架构预留「品类操作插件」扩展点——品类差异=数据列（属性）+插件（操作），未来加品类/操作不改顶层代码。31号 §七 从「出界」改「预留」。
   2. **exchange 股东户维度**：权限模型三维（category/board/ST）→**四维（category/exchange/board/ST）**。`security_master` 加 `exchange` 枚举列（shse/szse/bse，回填从 vt_symbol 后缀提取，可靠非前缀判断）+ `venue_permission` 加 exchange 维度。根因：board=main 横跨沪/深，单 board 维度分不出「有沪股东户无深股东户」的 venue。
 - **不采纳**：「自动路由层」（与我们「人工显式选源、一策略一账号」方向冲突，31号 §1.1 已钉死）。
+
+
+## 2026-09-23 · ST 维度降级 + detect_category 就地退役（用户裁定）
+
+- **ST 降级**：30号/31号 原把 ST 列为「第四维正交权限」，用户质疑「为什么要关注 ST」→ 澄清三层（涨跌幅=`band_rules.pct_st` 已覆盖 / 主板 ST 适当性=唯一真权限但薄 / 退市风险=选标的排除）。**裁定：ST 从独立正交维度降级为「board=main 子布尔」**——venue_permission 加 is_st 布尔（仅主板），非第四维。
+- **detect_category 就地退役**：detect_category 返回 astock/crypto（因子兼容词表），与 security_master.category（stock/perp）两套词表打架。**完美方案=品类单一真源 + 因子类=派生映射**（`CATEGORY_TO_FACTOR_CLASS`: stock→astock、etf/fund/reits→etf、convertible→convertible、perp→crypto）。detect_category 仅 1 调用点（factor.py:768），就地退役成本小，纳入 D1（与 _board_of 同「前缀→数据列」模式）。
