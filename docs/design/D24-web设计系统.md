@@ -1,5 +1,7 @@
 # D24 · 设计系统规范
 
+> 原 `reference/web-design/04-设计系统.md`（2026-09-24 文档体系重构，从过程记录剥离提升为唯一现行设计规范）。
+
 > 现状：无设计令牌（全局 CSS 仅 3.5KB）、body 字体栈不含中文、Element Plus 默认蓝 + vue-element-admin 深灰侧边栏、emoji 当图标。以下为替换方案。
 
 ## 1. 色彩体系

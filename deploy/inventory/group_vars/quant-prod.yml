@@ -35,7 +35,7 @@ deploy_waves:
   - name: feishu
     # 批11C（B-P0-3）：IM pool 化——波次静态单实例（quant-dbro 的 @{id} SQL 真相源退役；
     # 改 wrapper 是 root 特权通道 deploy 无权，故静态化在 inventory）。上产切换序列见
-    # docs/任务/批11C-IM归属用户pool化.md §1#8（先起 pool 拉齐→停+disable 旧 @10）
+    # docs/obsolete/任务归档/批11C-IM归属用户pool化.md §1#8（先起 pool 拉齐→停+disable 旧 @10）
     units: [quant-im-pool@quant.service]
   # 批 56b 盲审 B：波次序 task 先于 hub（新 worker 兼容旧 hub +08:00 流——_epoch_key 跨表示同键；
   # 反序（新 hub+旧 worker）ISO 字典序去重恒真=当日 bar 全丢锁死）

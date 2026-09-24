@@ -111,7 +111,7 @@
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（19 份，2026-08-21 增 web_api）+ im_bot
 - 本地开发部署（一键脚本 + 排错）：`scripts/LOCAL-DEPLOY.md`（用 `bash scripts/dev-start.sh start`，不要手动起服务）
 - **发布/回滚/彩排**：`deploy/` 目录（现行 Ansible 管道，含前端 dist 同步+双链原子切换；彩排先行的完整制度见记忆 deploy-mechanism 与 docs/obsolete/任务归档/批3-工件化交付.md）
-- **Web 重设计**（2026-08-30 定稿实施）：`docs/reference/web-design/`（11 号施工图 + 12/D13外部验收+回应 + D24-web设计系统 + 05 页面重设计 + 10 权限体系）。前端已按 04 号设计令牌全站替换（品牌/涨跌色/字体/暗色）+ D24（原 05 页面重设计，见 obsolete/web-design过程）核心页面重做（选股器三合一/交易台/风控/对账/设置四 tab）。遗留清单见 `flow/待办.md` web backlog。
+- **Web 重设计**（2026-08-30 定稿实施）：唯一现行设计规范 = `docs/design/D24-web设计系统.md`（设计令牌体系，原 web-design 04 号）；过程记录（体验审计/信息架构/页面重设计/权限体系/各轮验收）归档 `docs/obsolete/web-design过程/`。前端已按设计令牌全站替换（品牌/涨跌色/字体/暗色）+ 核心页面重做（选股器三合一/交易台/风控/对账/设置四 tab）。遗留清单见 `flow/待办.md` web backlog。
 
 ## 项目知识（durable，随项目积累 ↓）
 

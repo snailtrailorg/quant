@@ -322,7 +322,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `account_snapshot` | `risk.update_account_snapshot`（幂等建） | `risk._get_global_state` |
 | `llm_usage` | `gateway._log_usage`（幂等建） | web_api（用量看板） |
 
-> 三档数据 19 张新表（stk_limit 等 9 张一档 + income 等 10 张二档）由 data_sync/pool_data 经本模块 adapter 拉取写入，详见 [17-三档数据与详情页](../17-三档数据与详情页.md)。
+> 三档数据 19 张新表（stk_limit 等 9 张一档 + income 等 10 张二档）由 data_sync/pool_data 经本模块 adapter 拉取写入，详见 [17-三档数据与详情页](../../design/D17-三档数据与详情页.md)。
 > schema 唯一真相源=alembic 迁移链（`server/migrations/versions/`，**head 0090**；**运行时零 DDL**——2026-08-13 起 CREATE TABLE IF NOT EXISTS 已全部入迁移）；启动校验 `db.verify_schema()` 对 `schema_expectations.txt`（**91 表**生成式基线，"表 :: 列"每表一行；每加迁移必重跑生成命令并提交——批55a 链重生成时浮出批11C/43/47/53 等多批欠账一并还清）。
 
 ---
