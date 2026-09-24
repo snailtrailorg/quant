@@ -118,7 +118,7 @@ def test_boot_normal_cold_start():
     with patch("src.md_hub.main._lease_boot", return_value=("uuid-a", 1)) as boot:
         uuid_, gen = _boot_dispatch(r, "quant")
     assert gen == 1
-    boot.assert_called_once_with(r, "quant")
+    boot.assert_called_once_with(r, "quant", None)
 
 
 # ——— _lease_acquire normal 冷启 SET active_instance ———

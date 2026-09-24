@@ -27,6 +27,11 @@ LATEST_TICK_PREFIX = "hub:latest_tick:"   # 三档项 12：详情页实时快照
 LATEST_TICK_TTL = 65                      # 断流 65s 自动过期——详情页不展示陈旧价，降级腾讯/DB
 
 
+def _key(base: str, venue_id) -> str:
+    """D6：键 venue 化——A股 venue_id=None 键不变（现状零回归），加密 per-venue 加 :{venue_id} 后缀。"""
+    return f"{base}:{venue_id}" if venue_id is not None else base
+
+
 def _project_symbol(tick) -> str:
     """vnpy vt 后缀 → 项目后缀（SSE→SHSE），bar 表/流命名统一项目口径。"""
     ex = tick.exchange.value if tick.exchange else ""
@@ -162,48 +167,52 @@ class MinuteAggregator:
         }
 
 
-def _lease_acquire(r, instance_name: str = "") -> tuple[bool, str, int]:
+def _lease_acquire(r, instance_name: str = "", venue_id=None) -> tuple[bool, str, int]:
     """租约 + 代次（R-DL4）。返回 (ok, uuid, gen)。区分 Valkey 不可达与 NX 失败（评审陷阱 8）。
 
     M5：uuid 运行时 token_hex（A/B 同，v15 砍 HUB_UUID）；normal 冷启
     SET active_instance=INSTANCE_NAME（bootstrap，仲裁从首启成立）。
+    D6：键经 _key 分 venue（venue_id=None= A股旧键）。
     """
     import secrets
     uuid_ = secrets.token_hex(8)
+    lease_key = _key(LEASE_KEY, venue_id)
+    gen_key = _key(GEN_KEY, venue_id)
+    active_key = _key(ACTIVE_INSTANCE_KEY, venue_id)
     try:
-        got = r.set(LEASE_KEY, uuid_, nx=True, ex=30)
+        got = r.set(lease_key, uuid_, nx=True, ex=30)
     except Exception as e:
         logger.error("租约存储不可达（重试，不退出）: %s", e)
         return False, uuid_, 0
     if not got:
         try:
-            holder = r.get(LEASE_KEY)
+            holder = r.get(lease_key)
         except Exception:
             holder = "?"
         logger.error("租约被持有（%s），本实例让位退出", holder)
         return False, uuid_, -1   # -1 = 真让位（surrender），0 = 网络问题稍后重试
     try:
-        gen = int(r.incr(GEN_KEY))
+        gen = int(r.incr(gen_key))
     except Exception as e:
         logger.error("gen 计数器不可达: %s", e)
         return False, uuid_, 0
     if instance_name:   # M5：normal 冷启补 SET 现任（guarded 已 SET，这里保首启前仲裁不退化）
         try:
-            r.set(ACTIVE_INSTANCE_KEY, instance_name)
+            r.set(active_key, instance_name)
         except Exception as e:
             logger.warning("SET active_instance 失败: %s", e)
     return True, uuid_, gen
 
 
-def _lease_boot(r, instance_name: str = "") -> tuple[str, int]:
+def _lease_boot(r, instance_name: str = "", venue_id=None) -> tuple[str, int]:
     """启动租约获取（先拿权再连行情）：3 次重试；真让位 SystemExit(3)，重试耗尽 os._exit(4)。"""
     for attempt in range(3):
-        ok, my_uuid, gen = _lease_acquire(r, instance_name)
+        ok, my_uuid, gen = _lease_acquire(r, instance_name, venue_id)
         if ok:
             return my_uuid, gen
         if gen == -1:   # 真让位：写标记退出，unit 的 StartLimit 会接管
             try:
-                r.set(SURRENDER_KEY, datetime.now().isoformat(), ex=600)
+                r.set(_key(SURRENDER_KEY, venue_id), datetime.now().isoformat(), ex=600)
             except Exception:
                 pass
             raise SystemExit(3)
@@ -232,14 +241,15 @@ end
 """
 
 
-def _lease_acquire_guarded(r, expected_gen: int, target: str, uuid_: str) -> tuple[bool, str, int]:
+def _lease_acquire_guarded(r, expected_gen: int, target: str, uuid_: str, venue_id=None) -> tuple[bool, str, int]:
     """切换目标接管（原子 Lua，M5）。返回 (ok, uuid, gen)。
 
     gen = expected_gen（首接 INCR 到 snapshot+1 或重启只抢 lease）；<0 失败：
     -1 = gen 污染（被复活 A 抢在 B 前 INCR）拒接管零污染；0 = 存储不可达 / -2 旧 lease 挡。
     """
     try:
-        res = int(r.eval(_GUARDED_ACQUIRE_LUA, 3, GEN_KEY, LEASE_KEY, ACTIVE_INSTANCE_KEY,
+        res = int(r.eval(_GUARDED_ACQUIRE_LUA, 3,
+                         _key(GEN_KEY, venue_id), _key(LEASE_KEY, venue_id), _key(ACTIVE_INSTANCE_KEY, venue_id),
                          uuid_, expected_gen, target))
     except Exception as e:
         logger.error("guarded 租约存储不可达: %s", e)
@@ -257,10 +267,10 @@ return 0
 """
 
 
-def _lease_release(r, uuid_: str) -> bool:
+def _lease_release(r, uuid_: str, venue_id=None) -> bool:
     """A 让位 CAS DEL lease（M5）：lease 值==my_uuid 才删，防删掉 B 已拿到的 lease。"""
     try:
-        return bool(int(r.eval(_CAS_DEL_LUA, 1, LEASE_KEY, uuid_)))
+        return bool(int(r.eval(_CAS_DEL_LUA, 1, _key(LEASE_KEY, venue_id), uuid_)))
     except Exception as e:
         logger.error("CAS DEL lease 失败: %s", e)
         return False
@@ -274,7 +284,7 @@ return 0
 """
 
 
-def _write_latest_tick(r, symbol: str, tick, fail_ts: dict) -> None:
+def _write_latest_tick(r, symbol: str, tick, fail_ts: dict, venue_id=None) -> None:
     """三档项 12：最新 tick 快照落 Valkey（价量+五档+涨跌停，TTL 65s）。
 
     O 盲审修正：字段名 limit_up/limit_down（vnpy TickData 实名，非 upper_limit）；
@@ -288,7 +298,7 @@ def _write_latest_tick(r, symbol: str, tick, fail_ts: dict) -> None:
     if symbol in fail_ts and now - fail_ts[symbol] < 60:
         return   # 退避窗口内跳过（连败后不再每 tick 撞 Valkey）
     try:
-        r.set(LATEST_TICK_PREFIX + symbol, json.dumps({
+        r.set(_key(LATEST_TICK_PREFIX.rstrip(":"), venue_id) + ":" + symbol, json.dumps({
             "ts": tick.datetime.isoformat() if tick.datetime else None,
             "name": getattr(tick, "name", ""),
             "last": tick.last_price,

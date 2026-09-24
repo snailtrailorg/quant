@@ -27,6 +27,7 @@ from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import
     MinuteAggregator,
     _LEASE_RENEW_LUA,
     _in_bar_session,
+    _key,
     _lease_acquire_guarded,
     _lease_boot,
     _lease_release,
@@ -61,10 +62,10 @@ HB_KEY = "quant:hb:md-hub"
 STREAM_MAXLEN = 5000          # ≈20 交易日分钟 bar（评审：慢消费者 3 周不读才可能被剪）
 
 
-def _read_intent(r):
+def _read_intent(r, venue_id=None):
     """M5：读 hub:switch:intent，返回 {snapshot, target} dict 或 None（键不存在/坏值/不可达）。"""
     try:
-        raw = r.get(INTENT_KEY)
+        raw = r.get(_key(INTENT_KEY, venue_id))
     except Exception:
         return None
     if not raw:
@@ -81,14 +82,14 @@ def _read_intent(r):
     return data
 
 
-def _boot_dispatch(r, instance_name: str) -> tuple[str, int]:
+def _boot_dispatch(r, instance_name: str, venue_id=None) -> tuple[str, int]:
     """M5 boot 单判定 + dispatch 分叉（先仲裁再拿权，插在一切行情初始化之前）。
 
     intent 存在：target==自己→guarded（切换目标接管）；target≠自己→exit(6)（被切走者拦截）。
     intent 不存在：active_instance≠自己→exit(6)（非现任不抢回）；否则→normal 冷启（SET active_instance）。
     """
     import secrets
-    intent = _read_intent(r)
+    intent = _read_intent(r, venue_id)
     if intent is not None:
         target = intent.get("target", "")
         if target != instance_name:
@@ -97,7 +98,7 @@ def _boot_dispatch(r, instance_name: str) -> tuple[str, int]:
         expected_gen = int(intent.get("snapshot", 0)) + 1
         my_uuid = secrets.token_hex(8)   # M5：B 的 uuid 运行时生成（active_instance==target 校验替代 holder==uuid，无需预定）
         for _attempt in range(3):
-            ok, uuid_, gen = _lease_acquire_guarded(r, expected_gen, target, my_uuid)
+            ok, uuid_, gen = _lease_acquire_guarded(r, expected_gen, target, my_uuid, venue_id)
             if ok:
                 return uuid_, gen
             if gen == -1:   # gen 污染（复活 A 抢前 INCR）→ 拒接管，exit 1 让 systemd 重拉
@@ -109,13 +110,13 @@ def _boot_dispatch(r, instance_name: str) -> tuple[str, int]:
     # intent 不存在：active_instance 仲裁
     active = None
     try:
-        active = r.get(ACTIVE_INSTANCE_KEY)
+        active = r.get(_key(ACTIVE_INSTANCE_KEY, venue_id))
     except Exception:
         active = None
     if active and active != instance_name:
         logger.error("非现任（active_instance=%s 本=%s），exit 6", active, instance_name)
         raise SystemExit(6)
-    return _lease_boot(r, instance_name)
+    return _lease_boot(r, instance_name, venue_id)
 
 
 def _poll_iface_switch(r, prev_version, row_id, current_provider):
@@ -162,9 +163,13 @@ def main() -> None:
     r = make_valkey()
 
     # ——— M5 boot 单判定 + dispatch（先仲裁再拿权；重试/让位/退出语义在 parts）———
+    # D6：venue_id = VENUE_ID（= external_interface.id，键分叉用；A股实例名 "quant" 非数字 → None 键不分 venue）。
+    # 与 HUB_INTERFACE_ROW（账号选择，A股 A/B 切换用）拆开——二者语义不同，复用会污染切换（盲审 B P0/P3）
+    _venue_env = os.environ.get("VENUE_ID", "")
+    venue_id = int(_venue_env) if _venue_env.isdigit() else None
     instance_name = os.environ.get("INSTANCE_NAME", "")
-    my_uuid, gen = _boot_dispatch(r, instance_name)
-    logger.info("hub 启动：uuid=%s gen=%d 实例=%s", my_uuid, gen, instance_name or "(空)")
+    my_uuid, gen = _boot_dispatch(r, instance_name, venue_id)
+    logger.info("hub 启动：uuid=%s gen=%d 实例=%s venue=%s", my_uuid, gen, instance_name or "(空)", venue_id)
 
     # ——— 行情网关（批 63 二：插件化——XTP 全套收编 md_gateway.XtpMdGateway，hub 只持通用面）———
     from src.strategy_framework.md_session import is_trading_day
@@ -190,7 +195,7 @@ def main() -> None:
             # 只在盘中喂 on_data：旧 sess_last_tick 仅盘中写入——盘外回放不建断流基线，
             # supervisor 的断流症状/告警不会在盘外（夜间回放停止/假日静默）误触（行为值不变铁律）
             counters.on_data(True)
-        _write_latest_tick(r, symbol, tick, _lt_fail_ts)
+        _write_latest_tick(r, symbol, tick, _lt_fail_ts, venue_id)
         if not _in_bar_session(tick.datetime):
             # P2 修复批（08-28 双轨四分类②④）：盘前/午休尾/收盘后快照不进聚合器。
             # 位置钉死（盲审 A-P1-2/B-P2-3）：latest_tick/stats/counters 已执行照常，
@@ -222,6 +227,7 @@ def main() -> None:
         }
 
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB；批 63 二：接口行 provider 选网关插件）———
+    # row_id = HUB_INTERFACE_ROW（账号选择，A股切换 B 实例用数字选另一 XTP 账号；与 VENUE_ID 分键无关）
     interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
     try:
         row_id = int(interface_row) if interface_row else None
@@ -334,11 +340,11 @@ def main() -> None:
 
         M5：前置查 intent——见切换意图则不再续租（交由 _intent_poll 让位）。
         """
-        intent = _read_intent(r)
+        intent = _read_intent(r, venue_id)
         if intent is not None and intent.get("target", "") != instance_name:
             return   # 被切走者：不再续租，交由 _intent_poll 让位（target==自己仍续租，防泄漏 exit 5）
         try:
-            renewed = r.eval(_LEASE_RENEW_LUA, 1, LEASE_KEY, my_uuid, "30")
+            renewed = r.eval(_LEASE_RENEW_LUA, 1, _key(LEASE_KEY, venue_id), my_uuid, "30")
             if not int(renewed):
                 logger.critical("租约续期失败（被抢占或丢失），退出")
                 _alert("行情 hub 租约丢失，实例退出", "另一实例在位或存储异常；systemd 将接管。", code="hub.lease-lost")
@@ -350,14 +356,14 @@ def main() -> None:
 
     def _intent_poll() -> None:
         """M5：轮询切换意图。见 intent 且 target≠自己 → CAS DEL lease → exit(0)（优雅让位）。"""
-        intent = _read_intent(r)
+        intent = _read_intent(r, venue_id)
         if intent is None:
             return
         target = intent.get("target", "")
         if target == instance_name:
             return   # 我是切换目标，boot 已用 guarded 接管，无需让位
         logger.info("见切换意图 target=%s（本=%s），优雅让位 exit 0", target, instance_name)
-        _lease_release(r, my_uuid)   # CAS DEL lease（==my_uuid 才删，防删 B 已拿到的 lease）
+        _lease_release(r, my_uuid, venue_id)   # CAS DEL lease（==my_uuid 才删，防删 B 已拿到的 lease）
         os._exit(0)
 
     # 三窗分窗 finalize（P2 修复批 08-28 替代 flush_all 双点；盲审 B-P1-1 加宽 5~30s：
@@ -378,7 +384,7 @@ def main() -> None:
                 for bar in agg.flush_rest():
                     _publish(bar)
 
-    hb = HeartbeatWriter(r, HB_KEY, ttl=90)   # R-OBS1；超集原则：旧字段名一字不改，只增 ts
+    hb = HeartbeatWriter(r, _key(HB_KEY, venue_id), ttl=90)   # R-OBS1；超集原则：旧字段名一字不改，只增 ts
 
     def _heartbeat() -> None:
         hb.beat(pid=os.getpid(), gen=gen, subs=len(sm.current),

@@ -14,6 +14,7 @@ EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
 Environment=QUANT_LOG_SOURCE=hub
 Environment=QT_QPA_PLATFORM=offscreen
 Environment=INSTANCE_NAME=%i
+Environment=VENUE_ID=%i
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.md_hub.main
 WatchdogSec=90
 NotifyAccess=main

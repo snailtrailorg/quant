@@ -22,6 +22,13 @@
 - **租约/维护键分 venue**：对齐 D3（`quant:hb:md-hub:{venue_id}` / `hub:lease:{venue_id}`）。
 - **停用反拉起**：停用某 venue 时先设维护键、后停实例，防 SA4 300s 反拉起；新增 venue 先注册 DB 后 systemctl。
 
+> **编码实施补充（2026-09-24，AB 双盲审后）**
+> - **VENUE_ID 与 HUB_INTERFACE_ROW 拆开**（双盲审 B P0/P3）：`HUB_INTERFACE_ROW` 原语义=A股切换 B 实例选账号，D6 不能复用它做 venue 分键（会污染 A股 A/B 切换）。新增独立 `VENUE_ID`（systemd `Environment=VENUE_ID=%i`，仅加密实例 %i=数字），main.py `venue_id = int(VENUE_ID) if VENUE_ID.isdigit() else None`（A股实例名 "quant" 非数字 → None 键不变）。
+> - **键 venue 化**：`_key(base, venue_id)`（venue_id=None → base 零回归，否则 `base:{venue_id}`），parts.py/main.py 的 lease/gen/active_instance/surrender/intent/hb/latest_tick 全经 _key。
+> - **停非期望加密 hub 判定**：实例名解析纯数字 venue_id 才是候选（防误停 A股切换目标 quant2）；不打维护键（反拉保护已由 desired 集合+租约提供，维护键 TTL 会挡重新启用）。
+> - **加密 hub 期望加 provider 过滤**：`AND provider = ANY(list_md_gateway_providers())`——加密 MD 网关未接入的 provider 不进期望表，防「拉起→create_md_gateway ValueError→78→告警」死循环。
+> - **挂账（加密接入批）**：BinanceMdGateway/OkxMdGateway 子类 + register_md_gateway、加密会话模型（24/7 vs A股时段）、bar 流键发布侧 venue 化（`hub:bars:{venue_id}:{symbol}` + venue_id 字段 + 交易所映射）、加密 provider quote 能力声明。
+
 ## 五、限定范围
 
 只做：加密 per-venue hub 的 N 实例生命周期 + SA4 期望态 + 键分 venue + 停用/新增流程。

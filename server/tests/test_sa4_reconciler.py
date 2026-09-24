@@ -286,8 +286,8 @@ class TestSa4Reconciler:
 # ── 批5：L3 扩面——期望表三源归一 + md-hub 三重熔断 + failed 态区分（D1/D2 v2.1）──
 
 
-def _mk_conn2(running_tids=(), linked_sids=()):
-    """_desired_units 用 conn mock：按 SQL 前缀分流（running 查询 / strategy_id 关联查询）。
+def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
+    """_desired_units 用 conn mock：按 SQL 前缀分流（running / strategy 关联 / crypto venue 三查询）。
 
     reconciler 级测试同样可用（"SELECT 1" 走 linked cursor 不 raise）。
     """
@@ -297,8 +297,12 @@ def _mk_conn2(running_tids=(), linked_sids=()):
     cur_running.fetchall.return_value = [(t,) for t in running_tids]
     cur_linked = MagicMock()
     cur_linked.fetchall.return_value = [(s,) for s in linked_sids]
+    cur_crypto = MagicMock()
+    cur_crypto.fetchall.return_value = [(c,) for c in crypto_ids]
     conn.execute.side_effect = lambda sql, *a: (
-        cur_running if "status='running'" in sql else cur_linked)
+        cur_running if "status='running'" in sql
+        else cur_crypto if "market='crypto'" in sql
+        else cur_linked)
     return conn
 
 
