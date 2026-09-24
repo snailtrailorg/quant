@@ -1,7 +1,7 @@
 # DEPLOY · 服务器部署运维手册（现行，Ansible 工件化管道）
 
 > 面向**部署运维者**。继任 `scripts/DEPLOY.md`（bash 链已删除，git 史可考 40fb5fa）。
-> 完整制度与设计：`docs/任务/批3-工件化交付.md` + 记忆 `deploy-mechanism`；本文只给操作。
+> 完整制度与设计：`docs/obsolete/任务归档/批3-工件化交付.md` + 记忆 `deploy-mechanism`；本文只给操作。
 
 ## 三命令（控制机 ~/Projects/quant/deploy 下）
 

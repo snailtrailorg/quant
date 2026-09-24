@@ -1,6 +1,6 @@
 """minute_symbols 展开表 + minute_data_source 开关（分钟数据源重构，2026-09-04）
 
-方案 docs/architecture/21-分钟数据源设计.md §3.1/3.4：
+方案 docs/design/D20-分钟数据源设计.md §3.1/3.4：
 - 建 minute_symbols(symbol PK, source, updated_at)——攒数据标的展开表（池级∪个股级统一，
   一标的只一行，source 纯信息列 direct>pool）
 - system_config 插 minute_data_source='tencent'（数据源开关：tencent/tushare 单选互斥）

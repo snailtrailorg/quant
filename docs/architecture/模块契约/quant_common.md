@@ -3,6 +3,7 @@
 > 本模块的 public API + 依赖 + 被调 + 不变量。任务改本模块前读本文件。
 > 配套：`tests/test_layering.py`（分层断言守门）+ `flow/decisions.md` 归位决策。
 
+> **最近变更（2026-09-24 D4）**：新增 `fees.py`（`symbol_market` 层0单源——risk._market_of 委托之；`calc_trade_fee` 佣金+印花+过户，可转债/ETF 免印花过户）。
 ## 职责
 全平台共享基础设施（层 0）。原设计 T06 规划、2026-08-19 落地——此前共享工具寄生
 web_api/strategy_runner 导致 6 条层级违规（审计实锤，见 decisions）。

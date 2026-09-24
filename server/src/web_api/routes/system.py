@@ -36,7 +36,7 @@ router = APIRouter(tags=["system"])
 
 # ——— 操作指导书（链条打磨批次 4：Web 内置帮助）———
 
-_GUIDE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "docs", "操作指导")  # server/docs/操作指导（随 rsync 部署；根 docs/ 不上传）
+_GUIDE_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "docs", "manual")  # server/docs/manual（随 rsync 部署；根 docs/ 不上传）
 _GUIDES = {"index": "索引.md", "factors": "01-因子.md", "strategy": "02-策略.md",
            "backtest": "03-回测.md", "live": "04-实盘.md"}
 

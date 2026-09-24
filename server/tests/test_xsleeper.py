@@ -1,6 +1,6 @@
 """XReadSleeper 契约测试（批 4b）——never-raise 矩阵 / NOGROUP 75 / 节奏数学 / 单线程契约。
 
-规格：docs/任务/批4-worker迁移与trading解耦.md v2.1「XReadSleeper 规格」节——
+规格：docs/obsolete/任务归档/批4-worker迁移与trading解耦.md v2.1「XReadSleeper 规格」节——
 block=min(500, 距下钩子剩余毫秒)/全异常边界不外抛（含 on_batch）/Timeout 静默其他吞后睡
 1s 返回/NOGROUP os._exit(75)（禁 sys.exit）/单线程禁后台线程。
 """

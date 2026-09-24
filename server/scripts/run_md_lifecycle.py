@@ -11,7 +11,7 @@ A 股三重只读铁律：本脚本绝不触发任何交易接口（无 TD 构�
 运行（server/ 目录下，本脚本随 rsync 部署、两机同路径）：
   LD_LIBRARY_PATH=vendor/xtp/lib QT_QPA_PLATFORM=offscreen \
       venv/bin/python scripts/run_md_lifecycle.py [--wait N]
-（部署前服务器暂存跑法：/tmp/b1 前置 PYTHONPATH，见 docs/任务/批1-*.md）
+（部署前服务器暂存跑法：/tmp/b1 前置 PYTHONPATH，见 docs/obsolete/任务归档/批1-*.md）
 验收：退出码 0，输出含「登录成功」「tick>0」「relogin 往返 OK」「干净退出」。
 """
 import argparse

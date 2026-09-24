@@ -4,7 +4,7 @@
 + SA/SB/SC 机制全复用。交易四件套与 frozen/buy_ok 自 4a 单源化于 strategy_runner.trading；
 批 4b：5s 定时段逐项退化为 EngineLoop.every() 钩子（XReadSleeper 双节奏注入）；停止路径=
 _stop_hook 清理+os._exit(0)（不用 failure=exit）；心跳只写自有 7 字段+ts（D3）；三件套收编
-runtime.alerts。钩子全清单 11 项与知情差异见 docs/任务/批4-worker迁移与trading解耦.md。
+runtime.alerts。钩子全清单 11 项与知情差异见 docs/obsolete/任务归档/批4-worker迁移与trading解耦.md。
 """
 from __future__ import annotations
 

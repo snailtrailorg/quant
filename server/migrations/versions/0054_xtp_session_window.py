@@ -1,4 +1,4 @@
-"""每日连接窗配置键 seed（P2 批 2026-08-28，docs/任务/P2-场内基金与每日连接窗批.md）。
+"""每日连接窗配置键 seed（P2 批 2026-08-28，docs/obsolete/任务归档/P2-场内基金与每日连接窗批.md）。
 
 `xtp_session_lead_min`/`xtp_session_lag_min` 进 system_config（int，默认 10/10）——
 Web SystemConfig 通用卡片自动可编辑（前端零改动）。任一 <=0=禁用日窗（永久连接，

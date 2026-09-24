@@ -64,7 +64,7 @@
 - **双发窗封死**：claim 认领式（queued→sending 单向迁移,rowcount=1 才发）——降级直发与 worker 只有一方获得发送权（短信计费敏感）
 - **凭证面**：SMS 走 system_config 加密列（smtp 先例,Web 配零重启到位即通）；alerts_config 权限 admin 专属锁三处（analyst 有 system_config 不能触告警路由/计费面）
 - **分层层级**：celery 任务定义归 scheduler(3)；alert_notify(2)→im_bot(3) 走 EXEMPT_UPWARD 成文豁免
-- 详 docs/任务/批7-告警订阅分发.md（三轮双盲审 49 条全吸收的完整契约）
+- 详 docs/obsolete/任务归档/批7-告警订阅分发.md（三轮双盲审 49 条全吸收的完整契约）
 
 ## 2026-08-19 · 分钟数据源策略：XTP 自攒为主，Tusharestk_mins 产品包后启（用户拍板）
 
@@ -78,7 +78,7 @@
 - **起因**：用户要求链条"打磨成熟、功能完善、体验良好+操作指导书"。探查实测 26 断点——4 整段断裂（自定义因子出不了 API 进程/因子模式实盘零下单/回测实盘频率+参数双错配/预检失败当成功）+2 UI 页失效+DSL 死功能。
 - **关键决策**：①执行规则**方向感知**（R-F1：SELL=持仓口径 ALL_IN 清仓/BUY=可用资金——持仓走 ST2 position_snapshot 真相源）②DSL 实现而非删除（8 窗口函数+静默错值四形态抛异常——R-F2：错值比崩溃危险）③旧启停移除（LiveTask 唯一入口）④指导书分册+Web /help 内置都要⑤因子试算=写完即看曲线（真实 bar 喂 compute）
 - **架构联动**：自定义因子三进程加载（web/celery/runner）+回测任务头 lazy 重载+factor:recalc 兼热重载钩子；全败 run 不过 F-44 验证门
-- **指导书**：docs/操作指导 五册随 rsync 部署（server/docs/ 镜像），/api/help/{topic} + Web /help（marked 渲染）
+- **指导书**：docs/manual 五册随 rsync 部署（server/docs/ 镜像），/api/help/{topic} + Web /help（marked 渲染）
 
 ## 2026-08-19 · 模块归位：quant_common 底座 + 分层断言测试（消 6 条层级违规）
 
@@ -100,7 +100,7 @@
 - **决定**：①hub/direct 的 tick 断流自杀（300s os._exit）删除，只告警（文案带 runbook）；staleness 基线一律**时段作用域**（进入沿清零）。②BUY 安全判定从后台定时器预计算的 `frozen["now"]` 改为 **send_order 时刻事实检查**（`buy_ok_check`：bar<300s+hub 心跳），日历/交易所规则从动作路径清零；sticky 冻结（untrusted/gap 污染事实）保留。③监控双层：内部 `src/health_monitor/`（30s beat，症状型规则+沿检测+health_event 落库+自身心跳供外部反监）；外部 Zabbix server 装 **NAS**（常在线+自带通知），agent 装 quant 服务器，标准模板+systemd 插件+`/metrics` Prometheus 格式拉取。
 - **为什么**：hub 每晨 09:31 必自杀（基线跨日污染，34627s 假断流）实证了"把交易所/平台节奏预期编进守卫触发器"必翻车；重启治不了平台/网络问题（只治进程自身），真僵尸态罕见且可观察，误重启每天发生——交换正确。暴露端对齐业界（/healthz /readyz /metrics=Prometheus 文本），不自造格式。
 - **边界**：真"连接正常但数据不流"僵尸态改为响亮告警+人工重启（runbook）；后续可按数据加"长时间才重启"末档。
-- **详见**：`docs/architecture/15-服务监控设计.md`（设计+职责划分+runbook）；12 号 ST4 节已加修订指针。
+- **详见**：`docs/design/D15-服务监控设计.md`（设计+职责划分+runbook）；12 号 ST4 节已加修订指针。
 
 ## 2026-08-15 · N 语言架构约束：注册表驱动 + en 缺省
 
@@ -149,7 +149,7 @@
 
 ## 2026-08-09 · 自包含任务文档体系
 
-- 新待办按 `docs/任务/<id>.md` 写（8 字段），做任务只读任务文件+接口契约+模块契约，零代码阅读。
+- 新待办按 `docs/obsolete/任务归档/<id>.md` 写（8 字段），做任务只读任务文件+接口契约+模块契约，零代码阅读。
 
 ## 2026-08-08 · 平台化通用架构方向
 

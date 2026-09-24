@@ -4,7 +4,7 @@
 > 配套：`docs/architecture/接口契约.md`（Signal/StrategyConfig/Order/Position/BacktestResult/live_task/parameter_defs 结构）。
 
 > **最近变更（2026-08-27 深夜）**：adapters 查询超时可观测（P2-1，db73fe0）——`_wait_update -> bool`
-> /`POSITION_STABLE_WINDOW_S` 常量化/稳定窗分级告警。详见任务文件 docs/任务/P2-1-查询超时可观测.md。
+> /`POSITION_STABLE_WINDOW_S` 常量化/稳定窗分级告警。详见任务文件 docs/obsolete/任务归档/P2-1-查询超时可观测.md。
 
 ## 职责
 统一策略基类 + 因子注册制（预置 + DB 自定义）+ 信号聚合 + 执行适配器 + **自建回测引擎**（纯 Python）。

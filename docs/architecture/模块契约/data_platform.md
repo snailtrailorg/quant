@@ -3,6 +3,7 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
+> **最近变更（2026-09-24 D1/D3/加密接入批）**：`perms.venue_allows`（D1）；`db.get_bars(source)` 按 source 过滤（D3）；`get_interface_row(md_only)` 跳过 required_fields（加密 MD 空凭证）。
 ## 职责
 统一数据中台：PG 连接池 + K 线 schema + Tushare 拉取 + 交易日历 + 数据源抽象。
 **所有模块通过本模块访问数据**（`get_conn`/`save_bars`/`get_bars`/`is_trading_day`），不直接接触数据源。
@@ -154,7 +155,7 @@ AkShareDataSource(DataSource)    # stub 未注册 _REGISTRY（东财被反爬弃
 get_data_source(provider: str) -> DataSource | None    # 工厂（DB enabled 行实例化），无配置返回 None
 ```
 
-### rate_limit.py（限流+熔断三件套，2026-08-27 限流治理吸收新建，`docs/任务/限流治理吸收.md`）
+### rate_limit.py（限流+熔断三件套，2026-08-27 限流治理吸收新建，`docs/obsolete/任务归档/限流治理吸收.md`）
 ```python
 class CircuitOpenError(RuntimeError)
     # 熔断打开抛出——engine 循环捕获记 failed_dates 下轮续（幂等），不重试不打爆
@@ -336,7 +337,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 - **save_bars**：`ensure_table` 校验表存在+告警（建表归迁移 0064，不再运行时 DDL）
 - **is_trading_day**：查 trade_cal，查不到回退工作日（不抛）
 - **stk_mins**：per-symbol 接口（不支持按日全市场），2000 积分，单次 8000 条（超限分段，见 engine._split_minute_range）
-- **限流四层**（批55a 勘察定稿，详单 `docs/任务/批55a-限流四层牵连勘察.md`）：**L1** `DEFAULT_RATE_LIMITS` 类默认（代码兜底）← **L2** `params.rate_limits` 单参数覆写（24 号去积分档后两级）；非法值回落+告警不崩同步。**L3 熔断** DataSource 级（D2），参数 `params.circuit_breaker`（代码默认 fail_threshold=5 / reset_timeout=60s）；进程内键=provider——同 provider 多账号共享熔断/限速（勘察发现 3 裂缝，深水区批解）。**L4** `data_source_usage` 用量（provider+interface_id 双填）
+- **限流四层**（批55a 勘察定稿，详单 `docs/obsolete/任务归档/批55a-限流四层牵连勘察.md`）：**L1** `DEFAULT_RATE_LIMITS` 类默认（代码兜底）← **L2** `params.rate_limits` 单参数覆写（24 号去积分档后两级）；非法值回落+告警不崩同步。**L3 熔断** DataSource 级（D2），参数 `params.circuit_breaker`（代码默认 fail_threshold=5 / reset_timeout=60s）；进程内键=provider——同 provider 多账号共享熔断/限速（勘察发现 3 裂缝，深水区批解）。**L4** `data_source_usage` 用量（provider+interface_id 双填）
 - **params 分界**：秘密→`credentials_encrypted`；运维参数（points_tier/rate_limits/rate_time_overrides/circuit_breaker/base_url）→`params` JSON；数值一律经 `get_param_float` 钳位（不信任前端/DB 手写值）
 
 ---
@@ -370,6 +371,6 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 - 2026-08-27 回写：限流治理吸收三件套（rate_limit.py 新建：RateLimiter/CircuitBreaker/rate_limit_context）+ 积分档四层（data_source.py：get_param/get_param_float/POINTS_PRESETS 200/2000/5000/get_rate_limit L0-L3）；补 data_source_usage 表、mgmt 积分档三端点被调；schema head 0049→0053（74 表）
 
 ## 最近变更
-- 2026-08-27 限流治理吸收 + 积分档预设四层限流（`docs/任务/限流治理吸收.md`；双盲补审 fa1f123 全修后产上部署）
+- 2026-08-27 限流治理吸收 + 积分档预设四层限流（`docs/obsolete/任务归档/限流治理吸收.md`；双盲补审 fa1f123 全修后产上部署）
 
-> **批55-0(2026-09-19)能力查询层**:新增 `capabilities.py`(`provider_capabilities`/`check_capability_subset`——能力真源=代码 `_ADAPTERS` sync_id 串经 `quant_common.markets.SYNC_ID_CAP_MAP` 归一;配置能力⊆代码校验,55a 端点写侧与漂移告警消费)。维度注册表本体在 `quant_common/markets.py`(层 0 纯数据——本模块只放读上层代码的查询函数,分层铁律)。立法全文 `docs/architecture/27-外部接口与市场维度设计.md`。
+> **批55-0(2026-09-19)能力查询层**:新增 `capabilities.py`(`provider_capabilities`/`check_capability_subset`——能力真源=代码 `_ADAPTERS` sync_id 串经 `quant_common.markets.SYNC_ID_CAP_MAP` 归一;配置能力⊆代码校验,55a 端点写侧与漂移告警消费)。维度注册表本体在 `quant_common/markets.py`(层 0 纯数据——本模块只放读上层代码的查询函数,分层铁律)。立法全文 `docs/architecture/A02-外部接口与市场维度设计.md`。

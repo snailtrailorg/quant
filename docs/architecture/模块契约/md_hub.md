@@ -1,8 +1,9 @@
 # 模块契约 · md_hub（共享行情 Hub，ST7 2026-08-17）
 
-> 设计：`docs/architecture/14-共享行情hub设计.md` v2；需求：13 号。纯数据面（无下单/无风控）。
+> 设计：`docs/design/D14-共享行情hub设计.md` v2；需求：13 号。纯数据面（无下单/无风控）。
 > 批 2（2026-08-25）主循环迁上 `strategy_framework/runtime/` 骨架：EngineLoop 到期驱动钩子（废 counter%N 相位耦合），L2 会话自愈收编 MdSessionSupervisor——行为值不变（确证差异见「行为差异」节）。
 
+> **最近变更（2026-09-24 D6 + 加密接入批）**：键 venue 化 `_key(base, venue_id)`（租约/心跳/active_instance 加 venue 后缀）；会话 `_in_bar_session(t, market)` 加密 24/7 + `flush_stale`；流键发布侧 crypto 走 `hub:bars:{venue_id}:{symbol}` + venue_id 字段。
 ## 文件结构
 
 ```
@@ -103,7 +104,7 @@ EngineLoop(loop.py, step=5s) ──到期驱动──
 
 超集原则：旧字段名一字不改只增（消费方 `health_monitor/collector.py` 字段清单双向锁进测试）。
 
-## 行为差异（批 2 迁移确证，知情接受——完整老/新映射表见 `docs/任务/批2-runtime骨架与hub首迁.md`）
+## 行为差异（批 2 迁移确证，知情接受——完整老/新映射表见 `docs/obsolete/任务归档/批2-runtime骨架与hub首迁.md`）
 
 - 重放 `%60<10` 相位窗 → 60s 确定性周期（**修复**而非等值——旧法 1/3 分钟可能错过整窗）
 - zombie 判定新增 trading_day 门（有益）；告警节奏锚从进程相位改症状起点（首报恒 +period，更冷静）

@@ -1,4 +1,4 @@
-"""限流治理单测（2026-08-27，docs/任务/限流治理吸收.md）。
+"""限流治理单测（2026-08-27，docs/obsolete/任务归档/限流治理吸收.md）。
 
 覆盖：RateLimiter 间隔执行（假时钟）/ get_rate_limit 三级覆盖（含时段乘数方向）/
 CircuitBreaker 三态（Closed→Open→Half-open→关/再开）/ rate_limit_context 集成 / 线程安全。

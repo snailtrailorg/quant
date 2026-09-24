@@ -102,5 +102,5 @@ bash scripts/smoke-web.sh
 ## 不在本脚本范围
 
 - **实盘 XTP 连接**：需 `broker_config` DB 配 XTP 凭证或 `.env XTP_TEST_*`，见 `docs/architecture/模块契约/strategy_framework.md`
-- **飞书**：需 `feishu_config` DB 配凭证 + 扫码，见 `docs/architecture/11-feishu-lark.md`
+- **飞书**：需 `feishu_config` DB 配凭证 + 扫码，见 `docs/design/D11-feishu-lark.md`
 - **生产部署**：`deploy/DEPLOY.md`（Ansible 三命令+彩排先行+回滚）

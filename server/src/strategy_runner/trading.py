@@ -3,7 +3,7 @@
 九单元：write_trade_log / snapshot_cycle / halt_edge_cancel / recalc_hook / stop_due /
 reconcile_orders / frozen_allows / buy_ok_check / _flush_positions。
 
-设计（docs/任务/批4-worker迁移与trading解耦.md v2.1）：
+设计（docs/obsolete/任务归档/批4-worker迁移与trading解耦.md v2.1）：
 - 依赖注入：函数收 adapter/缓存参数，零模块级可变状态——账户基线缓存改调用方持有 dict
   （每进程恰一个快照调用方，与原模块级缓存"基线不随运行漂移"语义等价）；
 - vnpy 全部函数内 lazy import（本模块须能在无 vnpy 环境被测试加载，与 main.py 同策略）；

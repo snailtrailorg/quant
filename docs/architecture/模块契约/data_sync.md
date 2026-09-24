@@ -253,4 +253,4 @@ class SyncLock:
 - 2026-08-27 回写：限流治理吸收——engine 5 处 sleep 硬编码 → `rate_limit_context`（新增「限流替换」节 + `_api_name_of`）；补 pool_minute 节（`_stk_mins_gate` Valkey 闸门/sync_pools_minute/RateLimited）；依赖表补 rate_limit/alert_notify
 
 ## 最近变更
-- 2026-08-27 限流治理吸收（`docs/任务/限流治理吸收.md`）：限速节奏从代码硬编码改 DataSource 四层配置驱动；分钟线 stk_mins 档归 pool_minute 闸门
+- 2026-08-27 限流治理吸收（`docs/obsolete/任务归档/限流治理吸收.md`）：限速节奏从代码硬编码改 DataSource 四层配置驱动；分钟线 stk_mins 档归 pool_minute 闸门

@@ -1275,7 +1275,7 @@ SA4_BACKOFF_BASE = 300   # 首次自动拉起后退避基数（秒）
 SA4_BACKOFF_CAP = 3600   # 退避封顶 1h
 SA4_STABLE_SECS = 600    # 单元稳定 active 超此时长清退避计数（短暂失败不累积惩罚）
 SA4_KEY_PREFIX = "quant:sa4:backoff:"
-# 批5 L3 扩面（2026-08-27，docs/任务/批5-L3扩面与polkit配套.md）：
+# 批5 L3 扩面（2026-08-27，docs/obsolete/任务归档/批5-L3扩面与polkit配套.md）：
 # md-hub 常开语义 + 三重熔断键（D1）；strategy@* 以 is-enabled 显式意图为判定源（D2）
 SA4_HUB_UNIT = "quant-md-hub@quant.service"      # hub 期望表条目（系统单例数据面，常开）
 SA4_HUB_LEASE_KEY = "hub:lease"                  # 租约 fencing 键（在场=对端实例持有 -> 让位）

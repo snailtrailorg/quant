@@ -265,4 +265,4 @@ from src.quant_common.crypto import encrypt, decrypt, mask
 ## 增量（2026-08-19 链条打磨）
 - 新端点：`POST /api/factors/preview`（试算）/ `GET /api/help/{topic}`（指导书 md）/ backtest 详情 v2 形状（顶层四卡+task_id+symbols 对象数组）
 - 因子删除引用守卫（409 FACTOR_IN_USE）；策略 create/update 品类校验（symbol 空按 type 推断）
-- 本链 17 处 HTTPException→ApiError（14 码）；指导书内容源 server/docs/操作指导（rsync 部署）
+- 本链 17 处 HTTPException→ApiError（14 码）；指导书内容源 server/docs/manual（rsync 部署）

@@ -6,7 +6,7 @@
 
 用法：python3 scripts/eval-col-widths.py [组名]
   组名缺省=全部；可选 research/live/risk/ops
-产出：stdout markdown 表（落 docs/任务/批16-列宽数据评估.md 由人工粘贴）
+产出：stdout markdown 表（落 docs/obsolete/任务归档/批16-列宽数据评估.md 由人工粘贴）
 """
 import os
 import sys

@@ -12,12 +12,12 @@
 ## 目录地图
 
 - `flow/` — 控制层（项目"怎么跑"）：章程 / 计划 / 进展 / 决策 / 踩坑 / 任务 / 规范
-- `docs/` — 内容层（项目"做出什么"）：
-  - `docs/architecture/`（00-总体设计 ～ 19-IM统一接入，20 份架构文档 + 接口契约 + 模块契约 19 份）（P3 回写 2026-08-20：原文"17 份"实数 18（00～17）；同日 DB 盘点批次新增 18 号后现 19 份）
-  - `docs/操作指导/`（面向使用者，索引+因子/策略/回测/实盘四册，server/docs 镜像随 rsync 部署）
-  - `docs/reference/`（外部参考资料，Tushare API 文档等，参考用非原创——`README.md` 有索引）
-  - `docs/obsolete/`（废弃文档归档，保留历史不删除——`README.md` 有归档清单与替代文档对照）
-  - `docs/任务/`（自包含任务文件，做任务时只读任务文件+接口契约+模块契约即可动手）
+- `docs/` — 内容层（项目"做出什么"），五层（2026-09-24 文档体系重构）：
+  - `docs/architecture/` — **架构级真相**：总体方案（`A01-总体设计` ～ `A05-多账号源架构设计`）+ 跨模块契约（`接口契约.md` + `模块契约/` 19 份）
+  - `docs/design/` — **模块设计 + 横切规范**（`D01-llm-gateway` ～ `D24-web设计系统`）+ 未完成任务执行规格（批 61/62/63）
+  - `docs/manual/` — **操作手册**（面向使用者，索引+因子/策略/回测/实盘/数据源切换五册，`server/docs` 镜像随 rsync 部署 + Web 内置 `/help`）
+  - `docs/reference/` — **外部参考资料**（第三方 SDK/协议/客户竞品，非原创——`README.md` 有索引）
+  - `docs/obsolete/` — **过时归档**（已废弃/已吸收文档 + 已完成任务文件，保留历史不删除——`README.md` 有归档清单与替代对照）
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
 - `deploy/` - **工件化交付（现行，2026-08-26 起在管生产）**：Ansible playbooks（release/rollback/bootstrap 三剧本八阶段+自动回滚）+ inventory（quant-prod/quant-staging 彩排）+ wrappers（quant-svc 等 9 只特权通道）+ collections vendor + 六场景失败注入。**发布=彩排绿后跑 release.yml**（详见记忆 deploy-mechanism）
@@ -51,7 +51,7 @@
 - **部署 OS**：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8）。开发机 Fedora（同 dnf/RPM 系）。
 - **回测与实盘 schema 对齐**：数据中台 schema 现在就和未来 XTP 实时行情一致，零迁移。回测费用摩擦：佣金可配+印花税(卖出 0.05%)+过户费(0.001%)+涨跌停一字板不可成交约束（`BacktestAdapter.set_fees`）。
 - **配置驱动非硬编码**：策略因子组合/权重/参数走 Web 配置 + DSL 表达式，每个策略都改代码是错误做法。
-- **外部接口配置模型**（2026-09-19 用户裁定，详 27 号架构文档）：行的边界=账号（连接身份）/列语义=能力/页签=能力过滤视图——统一表 `external_interface`（55a/55b 已落地，旧两表已删）；能力真源=代码 adapter（配置列恒=启用子集，写侧 ⊆ 校验）；XTP 等多能力接口单份配置两页签可见。**配置存放立法**：`.env` 只放加密密钥（SECRET_KEY 类），其余所有配置入库，敏感值用密钥加密后入库（credentials_encrypted）；鸡生蛋例外=DB/Valkey/Celery 连接串；迁移次序=先建库行验证再清 .env 值。
+- **外部接口配置模型**（2026-09-19 用户裁定，详 A02架构文档）：行的边界=账号（连接身份）/列语义=能力/页签=能力过滤视图——统一表 `external_interface`（55a/55b 已落地，旧两表已删）；能力真源=代码 adapter（配置列恒=启用子集，写侧 ⊆ 校验）；XTP 等多能力接口单份配置两页签可见。**配置存放立法**：`.env` 只放加密密钥（SECRET_KEY 类），其余所有配置入库，敏感值用密钥加密后入库（credentials_encrypted）；鸡生蛋例外=DB/Valkey/Celery 连接串；迁移次序=先建库行验证再清 .env 值。
 - **平台化通用接口**：6 大接口抽象（DataSource/Broker/MessageChannel/Task/RiskRule/LLMProvider），结构接口按通用方向设计，实现可简化。业务菜单保留，管理设置类按通用化设计。
 
 - **部署窗三段**（2026-09-01 用户裁定）：交易日 盘前启动截止 8:55 / 午休 11:35 起-12:40 启动截止 / 盘后 15:05 起；闸拦启动时刻（pipeline `deploy_trading_windows`）；staging 彩排绿前提；部署命令一律落文件、输出为空先验状态再动。
@@ -62,7 +62,7 @@
 - **vnpy 核心 + vnpy_xtp**（交易+行情接口）为第三方成熟组件，不重复造轮；**回测自建 BacktestEngine**（纯 Python，不依赖 vnpy CtaBacktestingEngine）。
 - **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade，产上经 `quant-alembic-wrapper` 随 Ansible 管道执行），不手动 ALTER。`init-schema.sql` 保留作手工运维参考。**运行时不再 `CREATE TABLE IF NOT EXISTS`**（2026-08-13 清零，原 30 处全部入迁移 0027；`bar_{freq}` 8 表 2026-09-03 由迁移 0064 补齐）；`db.py` 的 `verify_schema()` 启动时校验表存在并告警，`ensure_table()` 仅 `to_regclass` 校验存在+告警（`_verified_tables` 缓存），不建表。
 - **策略实盘化架构（终态，2026-09-01 批 6b 收官）**：每任务独立子进程（systemd `quant-live-task@{tid}`）+ XTPAdapter 下单；**hub 模式唯一**（worker=TD-only+消费 `hub:bars:*` 流，暖机=PG bar_1min 30 天+流回放 240 根双源；EVENT_LOG 注册→`[gw]` TD 会话日志可见）；direct 已退役——`md_mode=direct → EX_CONFIG(78)` fail-fast，回滚仅整版本 rollback。bar_shadow 冻结（历史表）。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
-- **Web 前端**：Vue3 + Element Plus + 设计令牌体系（`web/src/styles/tokens.css`，04 号设计系统全文：四令牌四色相/暗色变体/六级字号/EP 整组 ramp）。**前端已纳入 Ansible 管道**（web 工件化批 2026-08-30：控制机 build→dist 同步到 `releases/<id>/web/`→`quant-flip-web` wrapper 原子切换→rollback/GC 配套），`web` 符号链接与 `server` 同层同版。菜单 v2.1 四组 16 项（策略研究/实盘交易/风险控制/系统管理）。旧路由 21 条全 redirect 到新壳。
+- **Web 前端**：Vue3 + Element Plus + 设计令牌体系（`web/src/styles/tokens.css`，D24-web设计系统全文：四令牌四色相/暗色变体/六级字号/EP 整组 ramp）。**前端已纳入 Ansible 管道**（web 工件化批 2026-08-30：控制机 build→dist 同步到 `releases/<id>/web/`→`quant-flip-web` wrapper 原子切换→rollback/GC 配套），`web` 符号链接与 `server` 同层同版。菜单 v2.1 四组 16 项（策略研究/实盘交易/风险控制/系统管理）。旧路由 21 条全 redirect 到新壳。
 
 ### 协作约束
 - **禁直接 ssh/scp 服务器**：bernard 持 deploy 密钥能连但仅白名单受限——连上也是死路，失败后换姿势重试纯浪费 token；服务器一切操作唯一通道=`deploy/.venv` 的 ansible（账号权限全景见记忆 accounts-permissions）。
@@ -76,7 +76,7 @@
 - **联网核实**走本机 `spe curl`（WebSearch 不可用，返回幻觉；WebFetch 域安全校验后端不通）。
 - **多语言国际化（N 语言架构）**：注册表驱动（en 为缺省），加语言=只加条目零逻辑改动。页面按浏览器语言自动切换；条款全语言纵向堆叠；邮件跟操作者界面语言；LLM 按输入语言自然回复。详见记忆 `multilang-architecture`。
 - **后端错误码化**：用户流程错误统一 `ApiError(status, CODE, 中文兜底)` → `{detail, code}`；前端 `apiErr(e)` 优先 `err.<CODE>` 本地化。加新码=后端定码+前端 err 命名空间加条目。
-- **待办自包含**：新待办按 `docs/任务/<id>.md`（`flow/规范/任务模板.md` 8 字段）写，做任务时只读「任务文件 + `docs/architecture/接口契约.md` + 本模块契约 `docs/architecture/模块契约/<module>.md`」，零代码阅读。硬约束：限定范围 ≤3 文件 + 参考 ≤2 份。
+- **待办自包含**：新待办条目写在 `flow/待办.md`，任务文件按 `flow/规范/任务模板.md` 8 字段写、放 `docs/design/`（进行中设计，被待办引用），做任务时只读「任务文件 + `docs/architecture/接口契约.md` + 本模块契约 `docs/architecture/模块契约/<module>.md`」，零代码阅读。硬约束：限定范围 ≤3 文件 + 参考 ≤2 份。
 ### 外部 gate（状态见 `flow/待办.md` 外部 gate 表，单一真相源；P3 回写 2026-08-20 改已确认态）
 - ~~中泰 XTP 门槛/品种放行/费率~~ ✅ 已确认（2026-08-10 用户确认：测试账户能当正式账号用，无差别）
 - ~~Tushare 积分是否到 2000~~ ✅ 已确认：积分 200 日线够用；分钟线从 XTP 测试平台自攒（stk_mins 产品包 2000 元/年可选后启）
@@ -92,26 +92,26 @@
 
 - 工作流程（五段循环/进展日志接力/评审）：`flow/规范/工作流程.md`
 - **八步法（强制交付流程，2026-08-26 起）**：`flow/规范/八步法.md`（方案→双盲审→编码→双盲审→单测→提交→部署→集成测试，顺序强制，审核一律独立双盲）
-- 运行时架构对标与重构依据：`docs/architecture/20-运行时架构对标与差距分析.md`（三根源）+ `12-实盘稳定性设计.md` §2.9/2.10（批次表）
+- 运行时架构对标与重构依据：`docs/obsolete/20-运行时架构对标与差距分析.md`（三根源）+ `docs/design/D12-实盘稳定性设计.md` §2.9/2.10（批次表）
 - 文档自检 hook：`flow/规范/hook机制.md`
 - 任务模板（待办自包含写法规范，8 字段 + mock 库）：`flow/规范/任务模板.md`
 - **架构文档导航（智能体按需读取入口）**：`docs/architecture/README.md`（"要做什么读什么"场景表 + 六层文档分层 + 状态注记约定）
-- 架构设计：`docs/architecture/00-总体设计.md`（总体设计 10 节，14 份参考文档已合并）
-- **数据供给总线蓝图（28 号，理想态北极星，双专家三审 9.2/9.0 定稿）**：`docs/architecture/28-数据供给总线设计.md`——五层供给栈/能力模型（kind×时态×范围）/双注册表（映射住代码·偏好住 DB·例外住属性库）/路由解析（硬过滤+软排序+审计）/流协议与水位线/SecurityMaster+节奏域；实施按 29 号《实施模块与契约》（四审冻结后开工）
-- 外部接口与市场维度（27 号）：`docs/architecture/27-外部接口与市场维度设计.md`（行边界=账号/列=能力/页签=过滤视图；55 实施路线；配置存放立法——.env 只放密钥）
-- 实盘稳定性：`docs/architecture/12-实盘稳定性设计.md`（风险清单/监控/守则）；稳定性检查台账 `flow/稳定性检查矩阵.md`（F-1~F-59）
-- 服务监控（S6 修订）：`docs/architecture/15-服务监控设计.md`（断流不自杀/下单时刻判定/health_monitor 内层+Zabbix@NAS 外层//healthz /readyz /metrics=Prometheus）
-- 操作指导书（面向使用者）：`docs/操作指导/`（索引+因子/策略/回测/实盘四册，server/docs 镜像随 rsync 部署）+ Web 内置 `/help`（`/api/help/{topic}`）
-- 多频率数据（16 号 v2.1 定稿，影子门禁后实施）：`docs/architecture/16-多频率数据设计.md`（慢路径日线直读+日界沿/快路径分钟；复权逐行因子链；NULL 因子=1.0 降级；盘口 Phase 2）
-- 三档数据与详情页（17 号，U 审 21 项）：`docs/architecture/17-三档数据与详情页.md`（2026-08-20 三档 6 项+项 5 选股全上线；剩项 18 监控/项 11 质量/项 4 时点实测；含 U 审裁定与坑）
-- 数据库操作规范（18 号，2026-08-21 定稿）：`docs/architecture/18-数据库操作规范.md`（全仓写路径盘点/写路径五规范：executemany+事务禁跨网络+DDL CONCURRENTLY/超时分层 web 10s·同步 60s·idle_tx 5min/长事务告警 R7/pg_stat_activity 诊断钥匙——锁链事件根治）
-- IM 统一接入（19 号，2026-09-09 批11C 归属化+pool 化终态）：`docs/architecture/19-IM统一接入设计.md`（IMBotProvider 抽象/凭证异构 JSON/动态 FIELD_SCHEMA/接入向导）。**批11C 裁定**：`im_bot_config.owner_user_id`（NULL=平台级/非空=自助归属，admin 面创建=平台级）；身份源=`im_bot_users.user_id` 绑定（im_user_id→平台账号，未绑定 fail-closed 拒答并回显 open_id；role 列回落/env 兜底已从身份面摘除）；pool=子进程管理器 `quant-im-pool@quant`（lark SDK 全局单 loop 限制——每 bot spawn ws_client 子进程，30s 对账+坏 bot 退避）；自助面 `/api/my/im-bots`（require_authenticated，owner/default_role 服务端钉死）；**批11D 方式两层模型**：通道注册 `ONBOARDING_METHODS`（方式集合：qr 扫码/form 手填并存，UI 据注册自动生成；旧 `ONBOARDING` 派生=any(interactive) 顺序无关）+自助扫码向导（频控 1 活 ticket/bot 配额 5/ticket 归属绑定/重扫三分支：他人 error·平台只刷凭证·自己现状）+Profile 三 tab（TabsShell queryKey 嵌套隔离）；卡片确认面归用户 bot（**批29 六轮 2026-09-16：平台级概念整体退役**——handlers `tools=None` 纯 perms 档位/ws 面五闸=时效·身份·权限·dedup·exec/回执 per-bot fid；HTTP `/lark/card/callback` 桩化；**批29b 卡片终态化**：任一被处理点击 PATCH 原地更新摘按钮+六态文案 executed/cancelled/expired/denied/unavailable/failed，execute_confirmed_tool 返 bool）；聊天工具档位=gateway 按权限键（trade/halt/resume）；权限解析已下沉 `data_platform/perms.py`（web_api/auth re-export）；**批12A 去 celery 化（2026-09-10）**：扫码出码同步返回（web 线程 run_onboarding+Event≤5s，实测 0.69s——原 celery 排队+10s 轮询双税）+Semaphore(8) 全局帽+confirming=register_app 返回后（SDK 无确认前置信号）+绑定码横条/pending 归零感知 onBindComplete/频控 existing_ticket 解锁；**批13 钉钉/企微接入（2026-09-11）**：三平台页签（注册驱动，页签内容=方式+FIELD_SCHEMA 动态生成；飞书 form 砍除=扫码唯一路径）/钉钉=官方 dingtalk-stream（凭证预检 fail-fast 防 SDK 无限重连僵尸）/企微=自实现 ws（`wecom_ws.py`，协议依据 `docs/reference/企微智能机器人协议参考.md`——官方仅 Node SDK；认证错 fail-fast/心跳 30s missedPong≥2/回复统一流式帧）/通用消息链 `handlers.handle_incoming`（bindcode 留飞书壳/caller=provider/操作类降级文本拒答）/身份解析 per-bot 收口（企微 userid/钉钉 staffId 企业内命名空间——provider 级 join 跨企业串号）/route_key 单点 `routing.py`（app_key/bot_id 进名单）/pool `_RUNNER_MODULES` 多平台映射/建启双闸 CREDENTIALS_INCOMPLETE+自助配额补齐；**五轮终态·IM 全面用户化（2026-09-11）**：**绑定机制全平台取消**（"防陌生人抢占"=越俎代庖——自有 bot 发消息 resolve owner 直通=创建者身份，owner 顺手落绑定行供告警反向收件人；bindcode/待绑定/首见留痕整链退役，扫码 done 即终态）；**admin 全局 IM 设置删除**（功能已移植用户级——ImBots.vue+集成中心 im 页签+admin 组 12 端点退役，迁移 0073 存量平台 bot 归 admin）；**系统告警从用户 bot 中选**（alerts/config im_bots 带 owner 名下拉）；**文案师智能体**（.claude/agents/copywriter.md——用户可见文案必须经它产出：读者视角/禁内部术语/事实+动作/白话/数字精确）
-- 共享行情 Hub（ST7）：`docs/architecture/13-需求书.md` + `14-设计.md` v2（hub=纯数据面 MD **单活双实例**——A 现任+B 按需启动+active_instance 仲裁，批 60 M5 切换协议见 `docs/任务/批60-方案集.md` v15；worker=TD-only；Valkey Streams 分发+租约 fencing）
+- 架构设计：`docs/architecture/A01-总体设计.md`（总体设计 10 节，14 份参考文档已合并）
+- **数据供给总线蓝图（A03，理想态北极星，双专家三审 9.2/9.0 定稿）**：`docs/architecture/A03-数据供给总线设计.md`——五层供给栈/能力模型（kind×时态×范围）/双注册表（映射住代码·偏好住 DB·例外住属性库）/路由解析（硬过滤+软排序+审计）/流协议与水位线/SecurityMaster+节奏域；实施按 A04《实施模块与契约》（四审冻结后开工）
+- 外部接口与市场维度（A02）：`docs/architecture/A02-外部接口与市场维度设计.md`（行边界=账号/列=能力/页签=过滤视图；55 实施路线；配置存放立法——.env 只放密钥）
+- 实盘稳定性：`docs/design/D12-实盘稳定性设计.md`（风险清单/监控/守则）；稳定性检查台账 `flow/稳定性检查矩阵.md`（F-1~F-59）
+- 服务监控（S6 修订）：`docs/design/D15-服务监控设计.md`（断流不自杀/下单时刻判定/health_monitor 内层+Zabbix@NAS 外层//healthz /readyz /metrics=Prometheus）
+- 操作指导书（面向使用者）：`docs/manual/`（索引+因子/策略/回测/实盘四册，server/docs 镜像随 rsync 部署）+ Web 内置 `/help`（`/api/help/{topic}`）
+- 多频率数据（D16 v2.1 定稿，影子门禁后实施）：`docs/design/D16-多频率数据设计.md`（慢路径日线直读+日界沿/快路径分钟；复权逐行因子链；NULL 因子=1.0 降级；盘口 Phase 2）
+- 三档数据与详情页（D17，U 审 21 项）：`docs/design/D17-三档数据与详情页.md`（2026-08-20 三档 6 项+项 5 选股全上线；剩项 18 监控/项 11 质量/项 4 时点实测；含 U 审裁定与坑）
+- 数据库操作规范（D18，2026-08-21 定稿）：`docs/design/D18-数据库操作规范.md`（全仓写路径盘点/写路径五规范：executemany+事务禁跨网络+DDL CONCURRENTLY/超时分层 web 10s·同步 60s·idle_tx 5min/长事务告警 R7/pg_stat_activity 诊断钥匙——锁链事件根治）
+- IM 统一接入（D19，2026-09-09 批11C 归属化+pool 化终态）：`docs/design/D19-IM统一接入设计.md`（IMBotProvider 抽象/凭证异构 JSON/动态 FIELD_SCHEMA/接入向导）。**批11C 裁定**：`im_bot_config.owner_user_id`（NULL=平台级/非空=自助归属，admin 面创建=平台级）；身份源=`im_bot_users.user_id` 绑定（im_user_id→平台账号，未绑定 fail-closed 拒答并回显 open_id；role 列回落/env 兜底已从身份面摘除）；pool=子进程管理器 `quant-im-pool@quant`（lark SDK 全局单 loop 限制——每 bot spawn ws_client 子进程，30s 对账+坏 bot 退避）；自助面 `/api/my/im-bots`（require_authenticated，owner/default_role 服务端钉死）；**批11D 方式两层模型**：通道注册 `ONBOARDING_METHODS`（方式集合：qr 扫码/form 手填并存，UI 据注册自动生成；旧 `ONBOARDING` 派生=any(interactive) 顺序无关）+自助扫码向导（频控 1 活 ticket/bot 配额 5/ticket 归属绑定/重扫三分支：他人 error·平台只刷凭证·自己现状）+Profile 三 tab（TabsShell queryKey 嵌套隔离）；卡片确认面归用户 bot（**批29 六轮 2026-09-16：平台级概念整体退役**——handlers `tools=None` 纯 perms 档位/ws 面五闸=时效·身份·权限·dedup·exec/回执 per-bot fid；HTTP `/lark/card/callback` 桩化；**批29b 卡片终态化**：任一被处理点击 PATCH 原地更新摘按钮+六态文案 executed/cancelled/expired/denied/unavailable/failed，execute_confirmed_tool 返 bool）；聊天工具档位=gateway 按权限键（trade/halt/resume）；权限解析已下沉 `data_platform/perms.py`（web_api/auth re-export）；**批12A 去 celery 化（2026-09-10）**：扫码出码同步返回（web 线程 run_onboarding+Event≤5s，实测 0.69s——原 celery 排队+10s 轮询双税）+Semaphore(8) 全局帽+confirming=register_app 返回后（SDK 无确认前置信号）+绑定码横条/pending 归零感知 onBindComplete/频控 existing_ticket 解锁；**批13 钉钉/企微接入（2026-09-11）**：三平台页签（注册驱动，页签内容=方式+FIELD_SCHEMA 动态生成；飞书 form 砍除=扫码唯一路径）/钉钉=官方 dingtalk-stream（凭证预检 fail-fast 防 SDK 无限重连僵尸）/企微=自实现 ws（`wecom_ws.py`，协议依据 `docs/reference/企微智能机器人协议参考.md`——官方仅 Node SDK；认证错 fail-fast/心跳 30s missedPong≥2/回复统一流式帧）/通用消息链 `handlers.handle_incoming`（bindcode 留飞书壳/caller=provider/操作类降级文本拒答）/身份解析 per-bot 收口（企微 userid/钉钉 staffId 企业内命名空间——provider 级 join 跨企业串号）/route_key 单点 `routing.py`（app_key/bot_id 进名单）/pool `_RUNNER_MODULES` 多平台映射/建启双闸 CREDENTIALS_INCOMPLETE+自助配额补齐；**五轮终态·IM 全面用户化（2026-09-11）**：**绑定机制全平台取消**（"防陌生人抢占"=越俎代庖——自有 bot 发消息 resolve owner 直通=创建者身份，owner 顺手落绑定行供告警反向收件人；bindcode/待绑定/首见留痕整链退役，扫码 done 即终态）；**admin 全局 IM 设置删除**（功能已移植用户级——ImBots.vue+集成中心 im 页签+admin 组 12 端点退役，迁移 0073 存量平台 bot 归 admin）；**系统告警从用户 bot 中选**（alerts/config im_bots 带 owner 名下拉）；**文案师智能体**（.claude/agents/copywriter.md——用户可见文案必须经它产出：读者视角/禁内部术语/事实+动作/白话/数字精确）
+- 共享行情 Hub（ST7）：`docs/design/D13-共享行情hub需求书.md` + `D14-共享行情hub设计.md` v2（hub=纯数据面 MD **单活双实例**——A 现任+B 按需启动+active_instance 仲裁，批 60 M5 切换协议见 `docs/obsolete/任务归档/批60-方案集.md` v15；worker=TD-only；Valkey Streams 分发+租约 fencing）
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（19 份，2026-08-21 增 web_api）+ im_bot
 - 本地开发部署（一键脚本 + 排错）：`scripts/LOCAL-DEPLOY.md`（用 `bash scripts/dev-start.sh start`，不要手动起服务）
-- **发布/回滚/彩排**：`deploy/` 目录（现行 Ansible 管道，含前端 dist 同步+双链原子切换；彩排先行的完整制度见记忆 deploy-mechanism 与 docs/任务/批3-工件化交付.md）
-- **Web 重设计**（2026-08-30 定稿实施）：`docs/reference/web-design/`（11 号施工图 + 12/13 号外部验收+回应 + 04 设计系统 + 05 页面重设计 + 10 权限体系）。前端已按 04 号设计令牌全站替换（品牌/涨跌色/字体/暗色）+ 05 号核心页面重做（选股器三合一/交易台/风控/对账/设置四 tab）。遗留清单见 `flow/待办.md` web backlog。
+- **发布/回滚/彩排**：`deploy/` 目录（现行 Ansible 管道，含前端 dist 同步+双链原子切换；彩排先行的完整制度见记忆 deploy-mechanism 与 docs/obsolete/任务归档/批3-工件化交付.md）
+- **Web 重设计**（2026-08-30 定稿实施）：`docs/reference/web-design/`（11 号施工图 + 12/D13外部验收+回应 + D24-web设计系统 + 05 页面重设计 + 10 权限体系）。前端已按 04 号设计令牌全站替换（品牌/涨跌色/字体/暗色）+ D24（原 05 页面重设计，见 obsolete/web-design过程）核心页面重做（选股器三合一/交易台/风控/对账/设置四 tab）。遗留清单见 `flow/待办.md` web backlog。
 
 ## 项目知识（durable，随项目积累 ↓）
 

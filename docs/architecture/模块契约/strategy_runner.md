@@ -5,6 +5,7 @@
 > 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架。
 > **批 6b（2026-09-01）：direct 退役**——hub 是唯一实盘行情模式（md_mode=direct → EX_CONFIG 拒绝），§二 改退役记录。
 
+> **最近变更（2026-09-24 D2/D5）**：venue_id 注入（`strategy.venue_id` + `adapter.venue_id`）；TD 网关 per-venue `_TD_BUILDERS` 注册表 + `_build_xtp_runtime`（`build_xtp_setting(row_id=venue_id)` 修串账户）。
 ## 职责
 每 live_task 一个子进程（`quant-live-task@{id}`，systemd）：ThinTdGateway（TD-only）+ XTPAdapter +
 hub_worker 消费 `hub:bars:*` 流 → on_bar→信号→风控→下单（批 6b 起 hub 唯一模式）；60s 快照/持仓真相批；SA/SB/SC 稳定性机制宿主。
@@ -118,7 +119,7 @@ systemd `quant-live-task@{tid}` / `quant-strategy@{sid}`；Web `POST /api/live-t
 4. 交易时段外 BUY 拒（回放防护）；SELL 永不放行限制（保止损）
 5. 快照/持仓批在 query_account 断线守卫内（O-F3：断线 [] 不写"新鲜空仓"假真相）
 
-## 八、已知差异（知情接受——裁定全表见 docs/任务/批4-worker迁移与trading解耦.md v2.1）
+## 八、已知差异（知情接受——裁定全表见 docs/obsolete/任务归档/批4-worker迁移与trading解耦.md v2.1）
 
 **4a 双模式统一八条**（语义零漂移的唯一例外；批 6b 后 3/4 条的直接对象已退役，留档）：
 1. reconcile_orders=runner 超集（在场委托+成交补录+WAL 残留）——worker 由只告警升级，启动与每次 TD 重连沿均变化

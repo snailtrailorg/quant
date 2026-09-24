@@ -1,4 +1,4 @@
-"""共享行情 Hub（ST7，设计 docs/architecture/14 v2）。
+"""共享行情 Hub（ST7，设计 docs/design/D14-共享行情hub设计 v2）。
 
 单进程持 XTP MD 连续 + 全市场合约，tick→MinuteAggregator→Valkey Streams 分发。
 纯数据面：无下单/无风控（R-HALT1）；零 TD 会话。

@@ -27,7 +27,7 @@ from src.strategy_framework.broker import build_xtp_setting as _build_xtp_settin
 
 # 批 4a（2026-08-27）：交易域九单元单源化于 trading（write_trade_log/快照/熔断沿/recalc/
 # stop_due/对账/frozen/buy_ok/_flush_positions）——direct 与 hub worker 共享，语义与提取前
-# 零漂移（知情差异五条见 docs/任务/批4-worker迁移与trading解耦.md v2.1）
+# 零漂移（知情差异五条见 docs/obsolete/任务归档/批4-worker迁移与trading解耦.md v2.1）
 from src.strategy_runner import trading
 
 # --- SA4 退出码分类（sysexits 惯例；单元 Restart=on-failure + RestartPreventExitStatus=78）---

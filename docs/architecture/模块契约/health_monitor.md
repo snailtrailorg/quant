@@ -1,7 +1,7 @@
 # 模块契约 · health_monitor（健康监控，15 号设计）
 
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件。
-> 配套：`docs/architecture/15-服务监控设计.md`（设计全貌）+ `docs/architecture/接口契约.md`。
+> 配套：`docs/design/D15-服务监控设计.md`（设计全貌）+ `docs/architecture/接口契约.md`。
 
 ## 职责
 双层监控的内层：采集组件状态（systemd unit/Valkey 心跳族/依赖）→ 症状型规则判定 →

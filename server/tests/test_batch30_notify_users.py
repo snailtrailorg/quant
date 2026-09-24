@@ -1,4 +1,4 @@
-"""批30 · 通知用户化+手机号单测（docs/任务/批30-通知用户化与手机号.md v2 契约）。
+"""批30 · 通知用户化+手机号单测（docs/obsolete/任务归档/批30-通知用户化与手机号.md v2 契约）。
 
 覆盖：
 - dispatch 展开：用户三通道行结构 {id,sub_id}/email-sms id=user_id·im id=bot_id（A-P0-3 契约）/

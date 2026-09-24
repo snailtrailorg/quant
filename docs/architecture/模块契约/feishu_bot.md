@@ -166,7 +166,7 @@ main() -> None                                 # 启动 lark.ws.Client（auto_re
 ### 加新 IM 平台（钉钉/企微，19 号 IM 统一接入）
 - **不在本模块扩展**（本模块=飞书专用入口）。路线：`src/im_bot/` 实现 `IMBotProvider` 子类（FIELD_SCHEMA 凭证声明/MODE/ONBOARDING/send_text/send_card/verify_callback/test_connection）+ `register_provider` 注册 + locales 加字段词条 + DB `im_bot_config` 配一行——**平台代码零改动**
 - 与 `alert_notify.channel` 的 MessageChannel 区别：那是单向告警出站；IMBotProvider 是完整 IM 接入面（收发+确认卡片+接入向导）
-- 详见 `docs/architecture/19-IM统一接入设计.md` + `模块契约/im_bot.md`
+- 详见 `docs/design/D19-IM统一接入设计.md` + `模块契约/im_bot.md`
 
 ---
 

@@ -1,6 +1,6 @@
 """批36a · 全站输入合法性治理（资金面+P0）单测。
 
-覆盖（docs/任务/批36-全站输入合法性治理.md v2）：
+覆盖（docs/obsolete/任务归档/批36-全站输入合法性治理.md v2）：
 - risk_schema.validate_params：type 白名单/JSON/dict/逐键 (type,key) 查表（含 crypto
   daily_loss_limit 比例 vs registry max_loss 绝对额的复合键钉）/int 整数性
 - RuleSanitizer 三层：非 dict 整组回落/键类型非法回落缺省/数值超界钳位+开区间回落/

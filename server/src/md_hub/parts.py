@@ -1,7 +1,7 @@
 """共享行情 Hub 数据面部件（批 2 迁移配套，2026-08-25）。
 
 主循环迁上 strategy_framework/runtime 骨架时，为满足 main.py 行数预算
-（docs/任务/批2-runtime骨架与hub首迁.md 验收 3），与主循环无涉的数据面部件
+（docs/obsolete/任务归档/批2-runtime骨架与hub首迁.md 验收 3），与主循环无涉的数据面部件
 **原样移驻**本模块——代码零改动，仅位置变化；MinuteAggregator/_write_latest_tick
 等在 main.py 顶部 import 重导出，既有测试导入路径（test_hub_arch/test_stock_detail）
 不受影响。

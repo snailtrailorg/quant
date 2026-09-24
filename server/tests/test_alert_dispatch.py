@@ -1,4 +1,4 @@
-"""批 7 · 告警订阅分发单测（docs/任务/批7-告警订阅分发.md mock 18 点）。
+"""批 7 · 告警订阅分发单测（docs/obsolete/任务归档/批7-告警订阅分发.md mock 18 点）。
 
 策略：_dispatch_async 为纯同步函数直测（executor 线程只包 dispatch() 入口）；
 patch _load_channels/_send_*/_get_producer/_writeback/_throttled/_quota_exceeded。

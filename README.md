@@ -101,7 +101,7 @@ quant/
 
 ## 文档
 
-- [总体设计](docs/architecture/00-总体设计.md) — 架构总纲（10 节）
+- [总体设计](docs/architecture/A01-总体设计.md) — 架构总纲（10 节）
 - [安装指南](INSTALL.md) — 全新部署
 - [接口契约](docs/architecture/接口契约.md) — 跨模块签名
 - [模块契约](docs/architecture/模块契约/) — 逐模块 public API（13 份）

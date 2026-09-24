@@ -1,4 +1,4 @@
-"""批 7 · 告警订阅分发（2026-09-02，docs/任务/批7-告警订阅分发.md）
+"""批 7 · 告警订阅分发（2026-09-02，docs/obsolete/任务归档/批7-告警订阅分发.md）
 
 ①alert_channel_sub 表：全局三行（im/email/sms），每行 target+categories(jsonb)+min_level+enabled
 ②notifications 加 dispatch jsonb 列：投递结局审计（ok/queued/failed:reason/skip:reason/null=未跑完；
