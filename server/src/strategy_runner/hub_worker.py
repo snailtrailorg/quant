@@ -26,7 +26,7 @@ STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
 
 
 def _crypto_provider(symbol: str) -> str | None:
-    """加密 symbol 后缀 → provider（D3 同源分源键）；A股/其他返回 None（单 hub 无 exchange 维）。"""
+    """加密 symbol 后缀 → provider（D3 同源分源键）；A股/其他返回 None（单 hub 无 account 维）。"""
     if ".BINANCE" in symbol:
         return "binance_perp"
     if ".OKX" in symbol:
@@ -44,7 +44,7 @@ def bar_stream_key(symbol: str, account_id=None) -> str:
 def _account_mismatch(fields: dict, symbol: str, account_id) -> bool:
     """D3 同源校验：加密 per-account 流消息与本 account 是否不匹配（True=跨源/缺失/非法，fail-fast）。
 
-    A股（无 provider）恒 False（单 hub 无 exchange 维，不做比对）。
+    A股（无 provider）恒 False（单 hub 无 account 维，不做比对）。
     加密但 account_id=None（异常态）→ True（无法判定同源，fail-closed 拒——防吃错行情）。
     decode_responses 读出 account_id 是 str，须 int 转换；缺失/非法按不匹配（fail-closed）。
     """
