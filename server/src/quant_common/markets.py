@@ -28,8 +28,8 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "astock_minute": "minute", "astock_minute_5min": "minute",
 }
 NON_DATA_PROVIDERS = {"tencent": {"minute", "snapshot"}, "xtp": {"trading", "quote"},
-                      "binance_perp": {"trading"}, "okx_perp": {"trading"},
-                      "emt_emq": {"trading", "quote"}}   # 无 adapter 的通道能力(快照/hub 网关层)
+                      "binance_perp": {"trading", "quote"}, "okx_perp": {"trading", "quote"},
+                      "emt_emq": {"trading", "quote"}}   # 无 adapter 的通道能力（加密接入批加 quote=行情能力）
 # emt_emq=东方财富 EMT 极速柜台(交易)+EMQ 极速行情(行情)——批 63 插件化首个新 provider，能力直标
 # 键=Broker._REGISTRY/同步路由的真实 provider 串（binance_perp/okx_perp 非 binance/okx——
 # 55a 修键：与 26 号收尾批 C 对齐，词表键错位会让 ⊆ 校验误拒合法配置）

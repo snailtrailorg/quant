@@ -167,6 +167,7 @@ def main() -> None:
     # 与 HUB_INTERFACE_ROW（账号选择，A股 A/B 切换用）拆开——二者语义不同，复用会污染切换（盲审 B P0/P3）
     _venue_env = os.environ.get("VENUE_ID", "")
     venue_id = int(_venue_env) if _venue_env.isdigit() else None
+    market = "astock"   # 会话模型分支（加密接入批）：iface 读取后更新为 iface["market"]
     instance_name = os.environ.get("INSTANCE_NAME", "")
     my_uuid, gen = _boot_dispatch(r, instance_name, venue_id)
     logger.info("hub 启动：uuid=%s gen=%d 实例=%s venue=%s", my_uuid, gen, instance_name or "(空)", venue_id)
@@ -191,12 +192,13 @@ def main() -> None:
         symbol = _project_symbol(tick)
         stats["ticks"] += 1
         stats["last_tick_wall"] = time.time()
-        if _in_astock_session():
+        if market == "crypto" or _in_astock_session():
             # 只在盘中喂 on_data：旧 sess_last_tick 仅盘中写入——盘外回放不建断流基线，
             # supervisor 的断流症状/告警不会在盘外（夜间回放停止/假日静默）误触（行为值不变铁律）
+            # 加密接入批：crypto 24/7 恒喂
             counters.on_data(True)
         _write_latest_tick(r, symbol, tick, _lt_fail_ts, venue_id)
-        if not _in_bar_session(tick.datetime):
+        if not _in_bar_session(tick.datetime, market):
             # P2 修复批（08-28 双轨四分类②④）：盘前/午休尾/收盘后快照不进聚合器。
             # 位置钉死（盲审 A-P1-2/B-P2-3）：latest_tick/stats/counters 已执行照常，
             # 仅拦 agg 喂入——盘前快照照上详情页，心跳字段语义不变。
@@ -208,7 +210,10 @@ def main() -> None:
     def _publish(bar: dict) -> None:
         with seqs_lock:
             try:
-                r.xadd(BAR_STREAM_PREFIX + bar["symbol"], msg_of(bar, seqs.get(bar["symbol"], 0) + 1),
+                # 加密接入批：crypto per-venue 流键 hub:bars:{venue_id}:{symbol}（D3 worker 消费侧契约）
+                stream = (f"hub:bars:{venue_id}:{bar['symbol']}" if (market == "crypto" and venue_id is not None)
+                          else BAR_STREAM_PREFIX + bar["symbol"])
+                r.xadd(stream, msg_of(bar, seqs.get(bar["symbol"], 0) + 1),
                        maxlen=STREAM_MAXLEN, approximate=True)
                 seqs[bar["symbol"]] = seqs.get(bar["symbol"], 0) + 1   # 评审 B1：成功后才占号（失败不留洞）
             except Exception as e:
@@ -218,22 +223,28 @@ def main() -> None:
         stats["bars"] += 1
 
     def msg_of(bar: dict, seq: int) -> dict:
-        return {
+        m = {
             "gen": gen, "seq": seq,
             "ts": bar["ts"].isoformat(), "pub_ts": time.time(),
             "untrusted": int(bar.get("untrusted", False)),
             "open": bar["open"], "high": bar["high"], "low": bar["low"], "close": bar["close"],
             "volume": bar["volume"], "amount": bar["amount"], "tick_count": bar["tick_count"],
         }
+        if market == "crypto" and venue_id is not None:
+            m["venue_id"] = venue_id   # 加密 per-venue 同源校验（D3 worker _venue_mismatch 读此）
+        return m
 
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB；批 63 二：接口行 provider 选网关插件）———
     # row_id = HUB_INTERFACE_ROW（账号选择，A股切换 B 实例用数字选另一 XTP 账号；与 VENUE_ID 分键无关）
     interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
     try:
-        row_id = int(interface_row) if interface_row else None
+        # 加密 hub：VENUE_ID 数字 → row_id=venue_id 直取本 venue 行（否则缺省选行会选到 XTP 行，盲审 B P0）
+        row_id = int(interface_row) if interface_row else venue_id
         from src.strategy_framework.broker import get_interface_row
-        # 指定行缺必填凭证/解密失败/未注册 provider/无可用行均 raise → 78（盲审 P0-1/P1-2/P1-3 收敛）
-        iface = get_interface_row(row_id)
+        # 指定行缺必填凭证/解密失败/未注册 provider/无可用行均 raise → 78（盲审 P0-1/P1-2/P1-3 收敛）；
+        # md_only=True：MD 数据面空凭证，跳过 required_fields 校验（盲审 B P0）
+        iface = get_interface_row(row_id, md_only=True)
+        market = iface["market"]   # 会话模型分支真源（crypto/astock）
         from src.strategy_framework.md_gateway import create_md_gateway
         md_gw = create_md_gateway(iface["provider"], counters)   # 未注册 provider ValueError → 78（盲审 P1-1）
         md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
@@ -383,6 +394,10 @@ def main() -> None:
                 # 日终兜底（代码盲审 A-P2-b）：收当日一切滞留桶（断流标的尾根），防次日丢根
                 for bar in agg.flush_rest():
                     _publish(bar)
+        elif market == "crypto" and now.minute % 5 == 0 and 5 <= now.second < 30:
+            # 加密 24/7 无 A股三窗/日终：每 5 分钟 flush_stale 收陈旧桶（不碰当前分钟在途桶，盲审 A/B P0）
+            for bar in agg.flush_stale(now):
+                _publish(bar)
 
     hb = HeartbeatWriter(r, _key(HB_KEY, venue_id), ttl=90)   # R-OBS1；超集原则：旧字段名一字不改，只增 ts
 
@@ -409,7 +424,7 @@ def main() -> None:
     loop.every("md-supervise", 0.0,                # 会话监督：每步（批 63 二收编网关内——XTP=L2 五段续航/重登/告警）
                # 批 4b D2：交易日按日缓存下沉 md_session.is_trading_day 本体（等值消重：
                # schedule_due 内部裸打 DB 一并消掉）
-               lambda: md_gw.poll_supervise(in_session=_in_astock_session(), trading_day=is_trading_day()))
+               lambda: md_gw.poll_supervise(in_session=(market == "crypto" or _in_astock_session()), trading_day=is_trading_day()))
     try:
         loop.run()   # 永续（到期驱动；进程域退出在钩子/骨架内 os._exit 带码）
     except KeyboardInterrupt:

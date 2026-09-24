@@ -38,7 +38,7 @@ def _project_symbol(tick) -> str:
     return f"{tick.symbol}.{'SHSE' if ex == 'SSE' else ex}"
 
 
-def _in_bar_session(t: datetime) -> bool:
+def _in_bar_session(t: datetime, market: str = "astock") -> bool:
     """分钟 bar 聚合喂入门（P2 双轨修复批 2026-08-28，双轨四分类②④）。
 
     09:30:00 起喂（含）、11:30:00 起滤（修后 11:30 孤儿桶/伪 bar 不再产）、13:00 起喂、
@@ -47,7 +47,10 @@ def _in_bar_session(t: datetime) -> bool:
     09:30 后首笔——与 vnpy BarGenerator 首笔建基线语义一致化。
     盲审 A-P1-2/B-P2-3 钉死：仅作用于 agg.on_tick 喂入；stats/counters/_write_latest_tick
     （详情页盘前快照）一律不受影响。
+    D6 加密接入批：market="crypto" 恒喂（24/7，每分钟 bar）；market="astock" 用 A股时段。
     """
+    if market == "crypto":
+        return True
     hm = t.hour * 100 + t.minute
     return (930 <= hm < 1130) or (1300 <= hm < 1501)
 
@@ -137,6 +140,19 @@ class MinuteAggregator:
         for symbol in list(self._buckets.keys()):
             b = self._buckets.pop(symbol, None)
             if b:
+                bars.append(self._finalize(symbol, b))
+        return bars
+
+    def flush_stale(self, now: datetime) -> list[dict]:
+        """加密 24/7 滞留桶收口：只 finalize 分钟已过去的桶（b["minute"] < 当前分钟），
+        不碰当前分钟在途桶——flush_rest 的「pop 全部桶」日终语义在 crypto 24/7 下会截断
+        活跃桶（同 symbol 同 ts 重复 bar，盲审 A/B P0）。"""
+        cur_min = now.replace(second=0, microsecond=0)
+        bars = []
+        for symbol in list(self._buckets.keys()):
+            b = self._buckets.get(symbol)
+            if b and b["minute"] < cur_min:
+                del self._buckets[symbol]
                 bars.append(self._finalize(symbol, b))
         return bars
 

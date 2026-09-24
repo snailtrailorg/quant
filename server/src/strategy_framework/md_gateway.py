@@ -466,3 +466,126 @@ class EmqMdGateway(MdGateway):
                     cb(tick)
                 except Exception:
                     logger.exception("EMQ on_tick 回调异常（消费线程）")
+
+
+# ——— 加密行情网关（加密接入批，就绪——加密实盘未开通，真连接挂账）———
+
+def _crypto_tick_ex(value: str):
+    """加密 tick 交易所 duck-type（vnpy Exchange 无 BINANCE/OKX 成员，仿模块 docstring 契约只给 .value）。"""
+    return type("_CryptoExchange", (), {"value": value})()
+
+
+class _BaseCryptoMdGateway(MdGateway):
+    """加密 MD 网关公共基类（币安/OKX 共享 symbol 双向翻译 + vnpy 空凭证 MD-only 骨架）。
+
+    symbol 翻译：项目 `BTCUSDT.{EX}`（裸基+点后缀）↔ vnpy `BTCUSDT_SWAP_{EX}.GLOBAL`
+    （带 _SWAP_* 后缀 + GLOBAL 交易所——vnpy 永续合约真实格式，Explore 实测）。
+    """
+
+    _SWAP_SUFFIX = ""      # 子类：_SWAP_BINANCE / _SWAP_OKX
+    _EX_VALUE = ""         # 子类：BINANCE / OKX
+
+    def __init__(self, counters):
+        from vnpy.event import EventEngine
+        from vnpy.trader.event import EVENT_LOG
+        from src.strategy_framework.runtime.alerts import make_alert, make_guard
+        self._ee = EventEngine()
+        self._ee.start()
+        self._gw = self._make_gateway(self._ee)
+        self._on_tick_cb = None
+        self.event_engines = (self._ee,)
+
+        @make_guard("hub.on_log", make_alert())
+        def _on_log(event):
+            logger.info("[gw] %s", getattr(event.data, "msg", event.data))
+        self._ee.register(EVENT_LOG, _on_log)
+
+    def _make_gateway(self, ee):
+        raise NotImplementedError
+
+    def set_on_tick(self, cb) -> None:
+        from vnpy.trader.event import EVENT_TICK
+
+        def _wrap(event):
+            tick = event.data
+            if tick.symbol.endswith(self._SWAP_SUFFIX):
+                tick.symbol = tick.symbol[:-len(self._SWAP_SUFFIX)]
+            tick.exchange = _crypto_tick_ex(self._EX_VALUE)
+            cb(tick)
+        self._ee.register(EVENT_TICK, _wrap)
+
+    def subscribe(self, symbol: str) -> None:
+        from vnpy.trader.object import SubscribeRequest
+        from vnpy.trader.constant import Exchange
+        raw = symbol.rsplit(".", 1)[0]
+        self._gw.subscribe(SubscribeRequest(symbol=raw + self._SWAP_SUFFIX, exchange=Exchange.GLOBAL))
+
+    def unsubscribe(self, symbol: str) -> None:
+        # vnpy 加密 gateway 无退订原语——退订靠重连后 diff 补齐（对齐 XtpMdGateway 非登录态跳过语义）
+        logger.debug("加密退订 no-op %s（vnpy 无退订原语，重连后 diff 补齐）", symbol)
+
+    @property
+    def connected(self) -> bool:
+        return True   # vnpy 加密 gateway 自带断线重连+重订阅，hub 无需重连沿检测
+
+    def start_ready(self) -> bool:
+        return True   # 24/7 常连（订阅靠 hub sm.poll/replay 周期重放，合约拉完后才真正生效）
+
+    def poll_supervise(self, in_session: bool, trading_day) -> None:
+        pass   # vnpy 自带断线重连，无额外监督
+
+
+@register_md_gateway
+class BinanceMdGateway(_BaseCryptoMdGateway):
+    """币安 USDT 永续行情网关（空凭证 MD-only：on_query_contract 空 key 不启 TD/user stream）。"""
+
+    provider = "binance_perp"
+    _SWAP_SUFFIX = "_SWAP_BINANCE"
+    _EX_VALUE = "BINANCE"
+
+    def _make_gateway(self, ee):
+        from vnpy_binance.linear_gateway import BinanceLinearGateway
+        return BinanceLinearGateway(ee, "BINANCE_LINEAR")
+
+    def connect(self, cred: dict, params: dict) -> None:
+        setting = {
+            "API Key": "", "API Secret": "",
+            "Server": (params.get("server") or "REAL"),
+            "Kline Stream": "False",
+            "Proxy Host": params.get("proxy_host", ""),
+            "Proxy Port": int(params.get("proxy_port", 0) or 0),
+        }
+        self._gw.connect(setting)
+
+
+@register_md_gateway
+class OkxMdGateway(_BaseCryptoMdGateway):
+    """OKX 永续行情网关（MD-only：覆写 connect_ws_api 只连 public_api，跳过空凭证 private login 报错）。"""
+
+    provider = "okx_perp"
+    _SWAP_SUFFIX = "_SWAP_OKX"
+    _EX_VALUE = "OKX"
+
+    def _make_gateway(self, ee):
+        from vnpy_okx.okx_gateway import OkxGateway
+        gw = OkxGateway(ee, "OKX")
+
+        def _connect_ws_only():
+            # 只连 public_api（行情）；跳过 private_api/business_api（空凭证 login 反复报错）
+            gw.public_api.connect(gw.server, gw.proxy_host, gw.proxy_port)
+            from vnpy.trader.event import EVENT_TIMER
+            gw.event_engine.register(EVENT_TIMER, gw.process_timer_event)
+
+        gw.connect_ws_api = _connect_ws_only
+        return gw
+
+    def connect(self, cred: dict, params: dict) -> None:
+        setting = {
+            "API Key": "", "Secret Key": "", "Passphrase": "",
+            "Server": (params.get("server") or "REAL"),
+            "Proxy Host": params.get("proxy_host", ""),
+            "Proxy Port": int(params.get("proxy_port", 0) or 0),
+            "Spread Trading": "False",
+            "Margin Currency": "",
+        }
+        self._gw.connect(setting)

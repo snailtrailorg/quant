@@ -204,14 +204,15 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
     return setting
 
 
-def get_interface_row(row_id: int | None = None) -> dict:
+def get_interface_row(row_id: int | None = None, md_only: bool = False) -> dict:
     """读 external_interface 交易域行（批 63 二：hub 网关按行 provider 选插件）。
 
     返回 {provider, credentials(解密 dict), params, market, capabilities}。
     - row_id 指定：直取该行；**解密失败/缺配置面 required_fields 必填字段即 raise**
       （M5 B 实例 fail-fast——禁 .env fallback 防 B 静默跑 A 账号，双盲审 P0-1/P2-1）。
-    - row_id 缺省：交易域 position 序首行，且 **provider 必须已注册行情网关**
-      （多行时代防 admin 拖序把 hub 引到未实现/跨市场行——盲审 P1）。
+      md_only=True（MD 数据面，加密 MD 网关空凭证）跳过 required_fields 校验（盲审 B P0）。
+    - row_id 缺省：A股交易域 position 序首行，且 provider 必须已注册行情网关
+      （多行时代防 admin 拖序把 hub 引到未实现/跨市场行——盲审 P1；market='astock' 过滤防选加密行——盲审 B P1）。
     无可用行/DB 异常 raise（消费方 exit 78）。
     """
     try:
@@ -227,7 +228,7 @@ def get_interface_row(row_id: int | None = None) -> dict:
                 cur = conn.execute(
                     "SELECT provider, credentials_encrypted, params, market, capabilities "
                     "FROM external_interface WHERE enabled=true AND 'trading' = ANY(capabilities) "
-                    "AND provider = ANY(%s) ORDER BY position, id LIMIT 1", (list(gw_providers),))
+                    "AND market='astock' AND provider = ANY(%s) ORDER BY position, id LIMIT 1", (list(gw_providers),))
             r = cur.fetchone()
         if not r:
             raise RuntimeError(f"external_interface 无可用行（row_id={row_id}，网关 providers={gw_providers}）")
@@ -241,9 +242,10 @@ def get_interface_row(row_id: int | None = None) -> dict:
                 # 解密失败 fail-fast 非 .env 静默（密钥错配要炸出来——盲审 P2-1）
                 raise RuntimeError(f"接口行凭证解密失败（密钥错配？）: {e}")
         params = r[2] if isinstance(r[2], dict) else (json.loads(r[2]) if r[2] else {})
-        if row_id is not None:
+        if row_id is not None and not md_only:
             # M5 fail-fast（双盲审 P0-1）：指定行按配置面 required_fields 校验——
-            # 凭证非空但缺必填字段（如只有 app_secret 没 app_id）禁 .env fallback
+            # 凭证非空但缺必填字段（如只有 app_secret 没 app_id）禁 .env fallback。
+            # md_only=True（MD 数据面空凭证）跳过（盲审 B P0）
             from src.data_platform.interfaces import get_interface_provider
             inst = get_interface_provider(r[0])
             missing = [f for f in (inst.required_fields if inst else set()) if not cred.get(f)]

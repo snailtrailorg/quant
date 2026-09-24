@@ -80,8 +80,8 @@ class TestRegistryKeys:
 
     def test_perp_caps_after_key_fix(self):
         from src.data_platform.capabilities import provider_capabilities
-        assert provider_capabilities("binance_perp") == {"trading"}
-        assert provider_capabilities("okx_perp") == {"trading"}
+        assert provider_capabilities("binance_perp") == {"trading", "quote"}
+        assert provider_capabilities("okx_perp") == {"trading", "quote"}
 
 
 # --- 写侧校验（六必修：⊆ 代码能力 / market 一致 / 交易所归属） ---
