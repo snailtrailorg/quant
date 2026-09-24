@@ -204,24 +204,24 @@ def reconcile_three_books():
                 # O-F2：两侧符号命名空间不同（快照=vt_symbol "600000.SSE" vs trade_log=裸 "600000"）
                 # ——join 前必须归一，否则永不命中→每小时误报
                 cur = conn.execute("SELECT id, name FROM external_interface")
-                venue_names = {r[0]: r[1] for r in cur.fetchall()}
+                account_names = {r[0]: r[1] for r in cur.fetchall()}
                 cur = conn.execute("""
                     SELECT COALESCE(s.sym, t.sym) AS sym,
                            COALESCE(s.vid, t.vid) AS vid,
                            COALESCE(s.snap_vol, 0) AS snap_vol,
                            COALESCE(t.derived_vol, 0) AS derived_vol
-                    FROM (SELECT venue_id AS vid, split_part(symbol, '.', 1) AS sym, SUM(volume) AS snap_vol
+                    FROM (SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym, SUM(volume) AS snap_vol
                           FROM position_snapshot WHERE direction != 'direction_short' GROUP BY 1, 2) s
                     FULL OUTER JOIN (
-                        SELECT venue_id AS vid, split_part(symbol, '.', 1) AS sym,
+                        SELECT account_id AS vid, split_part(symbol, '.', 1) AS sym,
                                SUM(CASE WHEN action='BUY' THEN volume ELSE -volume END) AS derived_vol
                         FROM trade_log GROUP BY 1, 2) t ON s.sym = t.sym AND s.vid IS NOT DISTINCT FROM t.vid
                     WHERE COALESCE(s.snap_vol, 0) != COALESCE(t.derived_vol, 0)""")
                 for sym, vid, sv, dv in cur.fetchall():
                     # O-S2：trade_log 全历史推导（含上线前底仓/场外单）天然有持续差异——
                     # 展示给对账页（issues）即可，归因与处置靠人；不加码告警频率。
-                    # D2：per-venue 分组对账（trade_log 历史 venue_id=NULL 用 IS NOT DISTINCT FROM 保留）
-                    vn = venue_names.get(vid, f"venue#{vid}")
+                    # D2：per-account 分组对账（trade_log 历史 account_id=NULL 用 IS NOT DISTINCT FROM 保留）
+                    vn = account_names.get(vid, f"account#{vid}")
                     issues.append(f"持仓账实分离[{vn}]: {sym} 券商快照={sv} trade_log推导={dv}")
                     # P1-2（web-design 05 §5.4）：结构化差异单双写（旧字符串兼容期保留，勿误修#11）。
                     # upsert 语义：open 单在位则刷新数量/时间（first_seen 保留）；豁免基准内
@@ -261,15 +261,15 @@ def reconcile_three_books():
             # 现金口径（available_cash）而非总资产——总资产含持仓市值，浮盈浮亏会误报（盲审 A-1）。
             try:
                 from src.quant_common.fees import calc_trade_fee
-                # 每 venue baseline 现金（首条快照 available_cash + ts）+ 券商现金（最新快照 available_cash）
+                # 每 account baseline 现金（首条快照 available_cash + ts）+ 券商现金（最新快照 available_cash）
                 cur = conn.execute(
-                    "SELECT DISTINCT ON (venue_id) venue_id, available_cash, ts "
-                    "FROM account_snapshot ORDER BY venue_id, ts ASC")
+                    "SELECT DISTINCT ON (account_id) account_id, available_cash, ts "
+                    "FROM account_snapshot ORDER BY account_id, ts ASC")
                 baseline = {r[0]: (float(r[1]) if r[1] is not None else None, r[2])
                             for r in cur.fetchall()}
                 cur = conn.execute(
-                    "SELECT DISTINCT ON (venue_id) venue_id, available_cash "
-                    "FROM account_snapshot ORDER BY venue_id, ts DESC")
+                    "SELECT DISTINCT ON (account_id) account_id, available_cash "
+                    "FROM account_snapshot ORDER BY account_id, ts DESC")
                 latest = {r[0]: (float(r[1]) if r[1] is not None else None)
                           for r in cur.fetchall()}
                 for vid in set(baseline) | set(latest):
@@ -280,7 +280,7 @@ def reconcile_three_books():
                     # 成交流水（baseline 之后的成交，BUY 现金流出 / SELL 现金流入，窗口对齐盲审 A-3/B-1）
                     cur = conn.execute(
                         "SELECT symbol, action, volume, price FROM trade_log "
-                        "WHERE venue_id=%s AND ts > %s", (vid, base_ts))
+                        "WHERE account_id=%s AND ts > %s", (vid, base_ts))
                     net = 0.0
                     fees = 0.0
                     for sym, act, vol, px in cur.fetchall():
@@ -290,8 +290,8 @@ def reconcile_three_books():
                     local = base_cash + net - fees
                     diff = actual_cash - local
                     if abs(diff) > 1.0:   # 阈值 1 元（浮点噪音容忍）
-                        sym = f"venue#{vid}"
-                        detail = (f"[venue#{vid}] 券商现金={actual_cash:.2f} 本地推导={local:.2f} "
+                        sym = f"account#{vid}"
+                        detail = (f"[account#{vid}] 券商现金={actual_cash:.2f} 本地推导={local:.2f} "
                                   f"差异={diff:.2f}（成交净额={net:.2f} 费用={fees:.2f}）")
                         issues.append(f"资金对账差异: {detail}")
                         conn.execute("""
@@ -307,26 +307,26 @@ def reconcile_three_books():
                 except Exception: pass
                 logging.getLogger("scheduler").warning("资金对账失败（不阻断）: %s", _e)
 
-            # 6. D4 跨 venue 反向识别（对敲）：同 symbol 一 venue long 一 venue short（默认告警不拦截）
+            # 6. D4 跨 account 反向识别（对敲）：同 symbol 一 account long 一 account short（默认告警不拦截）
             try:
                 cur = conn.execute("""
-                    SELECT a.symbol, a.venue_id, b.venue_id
+                    SELECT a.symbol, a.account_id, b.account_id
                     FROM position_snapshot a
-                    JOIN position_snapshot b ON a.symbol=b.symbol AND a.venue_id < b.venue_id
+                    JOIN position_snapshot b ON a.symbol=b.symbol AND a.account_id < b.account_id
                     WHERE a.direction IN ('direction_long','direction_short')
                       AND b.direction IN ('direction_long','direction_short')
                       AND a.direction != b.direction
                       AND a.volume > 0 AND b.volume > 0""")
                 pairs: dict = {}
                 for sym, va, vb in cur.fetchall():
-                    pairs.setdefault(sym, []).append(f"venue#{va}↔venue#{vb}")
+                    pairs.setdefault(sym, []).append(f"account#{va}↔account#{vb}")
                 for sym, plist in pairs.items():
-                    detail = f"跨 venue 反向持仓: {sym}（{'、'.join(plist)}）"
+                    detail = f"跨 account 反向持仓: {sym}（{'、'.join(plist)}）"
                     issues.append(detail)
                     conn.execute("""
                         INSERT INTO reconcile_issue (symbol, issue_type, detail)
-                        SELECT %s, 'cross_venue_reverse', %s
-                        WHERE NOT EXISTS (SELECT 1 FROM reconcile_issue e WHERE e.symbol=%s AND e.issue_type='cross_venue_reverse' AND e.status='exempt' AND (e.exempt_until IS NULL OR e.exempt_until >= current_date))
+                        SELECT %s, 'cross_account_reverse', %s
+                        WHERE NOT EXISTS (SELECT 1 FROM reconcile_issue e WHERE e.symbol=%s AND e.issue_type='cross_account_reverse' AND e.status='exempt' AND (e.exempt_until IS NULL OR e.exempt_until >= current_date))
                         ON CONFLICT (symbol, issue_type) WHERE status='open'
                         DO UPDATE SET detail=EXCLUDED.detail, updated_at=now()
                     """, (sym, detail, sym))
@@ -334,7 +334,7 @@ def reconcile_three_books():
             except Exception as _e:
                 try: conn.rollback()
                 except Exception: pass
-                logging.getLogger("scheduler").warning("跨 venue 反向识别失败（不阻断）: %s", _e)
+                logging.getLogger("scheduler").warning("跨 account 反向识别失败（不阻断）: %s", _e)
 
             # 比对逻辑（实盘数据接入后实现具体核对）
             # 1. 信号无委托：signal_log 中有记录但 order_log 中无对应 signal_id
@@ -1335,7 +1335,7 @@ def _desired_units(conn) -> list[tuple[str, str]]:
         r = _sa4_systemctl("is-enabled", unit)
         if r is not None and r.returncode == 0 and r.stdout.strip() == "enabled":
             desired.append((unit, "strategy"))
-    # D6：加密 per-venue hub 期望（enabled + trading capability + crypto market + 已注册 MD 网关 provider）。
+    # D6：加密 per-account hub 期望（enabled + trading capability + crypto market + 已注册 MD 网关 provider）。
     # provider 过滤：未实现 MD 网关的加密 provider 不进期望表，防「拉起→create_md_gateway ValueError→78→告警」死循环
     from src.strategy_framework.md_gateway import list_md_gateway_providers
     md_providers = list_md_gateway_providers()
@@ -1360,19 +1360,19 @@ def _sa4_exec_status(unit: str):
         return None
 
 
-def _sa4_hub_guards(r, venue_id=None):
+def _sa4_hub_guards(r, account_id=None):
     """md-hub 拉起前置熔断（D1 三重的前两重；第三重退避与 L1 共键，在调用方）。
 
     返回 (ok, reason)：
     - Valkey 不可达/键操作异常 -> fail-closed 跳过（分区期盲拉第二实例会短暂破坏 fencing）
     - 租约键在场 -> 让位跳过（对端实例持有，正常运维态不告警）
     - 维护标记在场 -> 跳过 + 告警（人工维护窗；标记自带 TTL 4h 防裸奔遗忘）
-    D6：venue_id 非 None 时键分 venue（加密 per-venue hub），None=A股全局键。
+    D6：account_id 非 None 时键分 account（加密 per-account hub），None=A股全局键。
     """
     if r is None:
         return False, "valkey-down"
-    lease_key = f"{SA4_HUB_LEASE_KEY}:{venue_id}" if venue_id is not None else SA4_HUB_LEASE_KEY
-    maint_key = f"{SA4_HUB_MAINT_KEY}:{venue_id}" if venue_id is not None else SA4_HUB_MAINT_KEY
+    lease_key = f"{SA4_HUB_LEASE_KEY}:{account_id}" if account_id is not None else SA4_HUB_LEASE_KEY
+    maint_key = f"{SA4_HUB_MAINT_KEY}:{account_id}" if account_id is not None else SA4_HUB_MAINT_KEY
     try:
         if r.exists(lease_key):
             return False, "lease-held"
@@ -1533,7 +1533,7 @@ def sa4_reconciler():
                     continue
                 need_reset = True  # 崩溃 failed（含 StartLimit 打穿）-> 拉起前先清 failed 态
             # md-hub 前置熔断（D1 前两重）：租约（Valkey 不可达 fail-closed）/维护标记。
-            # D6：hub:crypto 按 venue_id 分键（从 unit 名 quant-md-hub@{venue_id}.service 解析）
+            # D6：hub:crypto 按 account_id 分键（从 unit 名 quant-md-hub@{account_id}.service 解析）
             if source in ("builtin", "hub:crypto"):
                 vid = None
                 if source == "hub:crypto":
@@ -1594,9 +1594,9 @@ def sa4_reconciler():
                        code="l3.pull")
             except Exception:
                 pass
-        # D6：停非期望的加密 hub（venue 禁用/删除后实例仍在跑 → stop，防 SA4 反拉）。
+        # D6：停非期望的加密 hub（account 禁用/删除后实例仍在跑 → stop，防 SA4 反拉）。
         # 必须在外层 for 循环之外（否则期望单元全健康时 continue 跳过——盲审 A BUG#2）；
-        # 判定用「实例名解析纯数字 venue_id」而非名字形似（防误停 A股切换目标 quant2——盲审 B P1）；
+        # 判定用「实例名解析纯数字 account_id」而非名字形似（防误停 A股切换目标 quant2——盲审 B P1）；
         # 不打维护键（反拉保护已由 desired 集合+租约提供，维护键 TTL 4h 会挡重新启用——盲审 B P2）
         desired_units = {u for u, _ in desired}
         for unit in actives:
@@ -1607,7 +1607,7 @@ def sa4_reconciler():
                 try:
                     _sa4_systemctl("stop", unit)
                     result.setdefault("l3_stopped", []).append(unit)
-                    logger.warning("L3 停非期望加密 hub: %s（venue %s 已禁用/删除）", unit, vid)
+                    logger.warning("L3 停非期望加密 hub: %s（account %s 已禁用/删除）", unit, vid)
                 except Exception as e:
                     logger.warning("L3 停加密 hub %s 失败: %s", unit, e)
     except Exception as e:

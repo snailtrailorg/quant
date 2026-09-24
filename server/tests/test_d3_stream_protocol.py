@@ -1,4 +1,4 @@
-"""D3 同源与流协议测试：流键 venue-aware / 同源校验 / 暖机 source 过滤。"""
+"""D3 同源与流协议测试：流键 account-aware / 同源校验 / 暖机 source 过滤。"""
 from unittest.mock import MagicMock, patch
 
 import src.strategy_runner.hub_worker as hw
@@ -16,44 +16,44 @@ class TestCryptoProvider:
 
 
 class TestStreamKey:
-    def test_astock_no_venue_dimension(self):
-        """A股单 hub：流键无 venue 维度（即便传了 venue_id 也忽略）。"""
+    def test_astock_no_account_dimension(self):
+        """A股单 hub：流键无 account 维度（即便传了 account_id 也忽略）。"""
         assert hw.bar_stream_key("600000.SHSE") == "hub:bars:600000.SHSE"
-        assert hw.bar_stream_key("600000.SHSE", venue_id=1) == "hub:bars:600000.SHSE"
+        assert hw.bar_stream_key("600000.SHSE", account_id=1) == "hub:bars:600000.SHSE"
 
-    def test_crypto_per_venue(self):
-        assert hw.bar_stream_key("BTCUSDT.BINANCE", venue_id=7) == "hub:bars:7:BTCUSDT.BINANCE"
-        assert hw.bar_stream_key("ETHUSDT.OKX", venue_id=9) == "hub:bars:9:ETHUSDT.OKX"
+    def test_crypto_per_account(self):
+        assert hw.bar_stream_key("BTCUSDT.BINANCE", account_id=7) == "hub:bars:7:BTCUSDT.BINANCE"
+        assert hw.bar_stream_key("ETHUSDT.OKX", account_id=9) == "hub:bars:9:ETHUSDT.OKX"
 
-    def test_crypto_no_venue_falls_back_bare(self):
-        """加密但无 venue_id（异常态）退回裸键——同源校验会在消费侧兜住。"""
+    def test_crypto_no_account_falls_back_bare(self):
+        """加密但无 account_id（异常态）退回裸键——同源校验会在消费侧兜住。"""
         assert hw.bar_stream_key("BTCUSDT.BINANCE") == "hub:bars:BTCUSDT.BINANCE"
 
 
-class TestVenueMismatch:
+class TestAccountMismatch:
     def test_astock_never_mismatch(self):
-        assert hw._venue_mismatch({}, "600000.SHSE", 1) is False
-        assert hw._venue_mismatch({"venue_id": "99"}, "600000.SHSE", 1) is False
+        assert hw._account_mismatch({}, "600000.SHSE", 1) is False
+        assert hw._account_mismatch({"account_id": "99"}, "600000.SHSE", 1) is False
 
-    def test_astock_venue_id_none_never_mismatch(self):
-        assert hw._venue_mismatch({}, "600000.SHSE", None) is False
+    def test_astock_account_id_none_never_mismatch(self):
+        assert hw._account_mismatch({}, "600000.SHSE", None) is False
 
-    def test_crypto_venue_id_none_fail_closed(self):
-        """加密 + venue_id=None（异常态）→ fail-closed（无法判定同源，拒——防吃错行情）。"""
-        assert hw._venue_mismatch({}, "BTCUSDT.BINANCE", None) is True
+    def test_crypto_account_id_none_fail_closed(self):
+        """加密 + account_id=None（异常态）→ fail-closed（无法判定同源，拒——防吃错行情）。"""
+        assert hw._account_mismatch({}, "BTCUSDT.BINANCE", None) is True
 
     def test_crypto_matching(self):
-        assert hw._venue_mismatch({"venue_id": "7"}, "BTCUSDT.BINANCE", 7) is False
+        assert hw._account_mismatch({"account_id": "7"}, "BTCUSDT.BINANCE", 7) is False
 
     def test_crypto_cross_source(self):
-        """A venue worker 收到 venue_id=B 消息 → 跨源 fail-fast。"""
-        assert hw._venue_mismatch({"venue_id": "8"}, "BTCUSDT.BINANCE", 7) is True
+        """A account worker 收到 account_id=B 消息 → 跨源 fail-fast。"""
+        assert hw._account_mismatch({"account_id": "8"}, "BTCUSDT.BINANCE", 7) is True
 
-    def test_crypto_missing_venue_id(self):
-        assert hw._venue_mismatch({}, "BTCUSDT.BINANCE", 7) is True
+    def test_crypto_missing_account_id(self):
+        assert hw._account_mismatch({}, "BTCUSDT.BINANCE", 7) is True
 
-    def test_crypto_invalid_venue_id(self):
-        assert hw._venue_mismatch({"venue_id": "abc"}, "BTCUSDT.BINANCE", 7) is True
+    def test_crypto_invalid_account_id(self):
+        assert hw._account_mismatch({"account_id": "abc"}, "BTCUSDT.BINANCE", 7) is True
 
 
 class TestGetBarsSourceFilter:

@@ -287,7 +287,7 @@ class TestSa4Reconciler:
 
 
 def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
-    """_desired_units 用 conn mock：按 SQL 前缀分流（running / strategy 关联 / crypto venue 三查询）。
+    """_desired_units 用 conn mock：按 SQL 前缀分流（running / strategy 关联 / crypto account 三查询）。
 
     reconciler 级测试同样可用（"SELECT 1" 走 linked cursor 不 raise）。
     """

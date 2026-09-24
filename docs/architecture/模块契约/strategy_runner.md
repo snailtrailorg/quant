@@ -5,7 +5,7 @@
 > 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架。
 > **批 6b（2026-09-01）：direct 退役**——hub 是唯一实盘行情模式（md_mode=direct → EX_CONFIG 拒绝），§二 改退役记录。
 
-> **最近变更（2026-09-24 D2/D5）**：venue_id 注入（`strategy.venue_id` + `adapter.venue_id`）；TD 网关 per-venue `_TD_BUILDERS` 注册表 + `_build_xtp_runtime`（`build_xtp_setting(row_id=venue_id)` 修串账户）。
+> **最近变更（2026-09-24 D2/D5）**：account_id 注入（`strategy.account_id` + `adapter.account_id`）；TD 网关 per-account `_TD_BUILDERS` 注册表 + `_build_xtp_runtime`（`build_xtp_setting(row_id=account_id)` 修串账户）。
 ## 职责
 每 live_task 一个子进程（`quant-live-task@{id}`，systemd）：ThinTdGateway（TD-only）+ XTPAdapter +
 hub_worker 消费 `hub:bars:*` 流 → on_bar→信号→风控→下单（批 6b 起 hub 唯一模式）；60s 快照/持仓真相批；SA/SB/SC 稳定性机制宿主。

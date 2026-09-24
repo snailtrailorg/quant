@@ -21,14 +21,14 @@ def list_live_tasks(status: str | None = None,
         if status:
             cur = conn.execute(
                 "SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-                "lt.venue_id, lt.initial_capital, lt.created_at, ei.name "
-                "FROM live_task lt LEFT JOIN external_interface ei ON ei.id=lt.venue_id "
+                "lt.account_id, lt.initial_capital, lt.created_at, ei.name "
+                "FROM live_task lt LEFT JOIN external_interface ei ON ei.id=lt.account_id "
                 "WHERE lt.status=%s ORDER BY lt.id DESC", (status,))
         else:
             cur = conn.execute(
                 "SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-                "lt.venue_id, lt.initial_capital, lt.created_at, ei.name "
-                "FROM live_task lt LEFT JOIN external_interface ei ON ei.id=lt.venue_id "
+                "lt.account_id, lt.initial_capital, lt.created_at, ei.name "
+                "FROM live_task lt LEFT JOIN external_interface ei ON ei.id=lt.account_id "
                 "ORDER BY lt.id DESC")
         rows = cur.fetchall()
     # P1-5（web-design 05 §5.8/06 B#5）：合并 worker 心跳（md_mode/lag/bars/frozen/gen）——
@@ -49,9 +49,9 @@ def list_live_tasks(status: str | None = None,
         h = hb.get(r[0], {})
         out.append({"id": r[0], "name": r[1], "strategy_id": r[2], "symbol": r[3],
                     "params": json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {}),
-                    "status": r[5], "venue_id": r[6], "initial_capital": float(r[7]) if r[7] else None,
+                    "status": r[5], "account_id": r[6], "initial_capital": float(r[7]) if r[7] else None,
                     "created_at": str(r[8]) if r[8] else None,
-                    "venue_name": r[9],
+                    "account_name": r[9],
                     "md_mode": (h.get("md") if h else None) or (json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {})).get("md_mode") or "hub",
                     "lag": float(h["lag"]) if h.get("lag") not in (None, "", "-1") else (float(h["lag"]) if h.get("lag") == "-1" else None),
                     "bars": int(h["bars"]) if h.get("bars") else 0,
@@ -71,15 +71,15 @@ def create_live_task(body: dict = Body(...),
     strategy_id = body.get("strategy_id", "")
     symbol = body.get("symbol", "")
     params = body.get("params", {})
-    venue_id = body.get("venue_id")
+    account_id = body.get("account_id")
     initial_capital = body.get("initial_capital", 1000000)
 
     if not name or not strategy_id or not symbol:
         raise ApiError(400, "MISSING_FIELDS", "name/strategy_id/symbol 必填")
-    if venue_id is None:
-        raise ApiError(400, "VENUE_REQUIRED", "venue_id 必填（交易账号）")
-    if not isinstance(venue_id, int) or isinstance(venue_id, bool):
-        raise ApiError(400, "VENUE_ID_INVALID", "venue_id 须为整数（交易账号 id）")
+    if account_id is None:
+        raise ApiError(400, "ACCOUNT_REQUIRED", "account_id 必填（交易账号）")
+    if not isinstance(account_id, int) or isinstance(account_id, bool):
+        raise ApiError(400, "ACCOUNT_ID_INVALID", "account_id 须为整数（交易账号 id）")
 
     # 读策略配置
     with get_conn() as conn:
@@ -116,21 +116,21 @@ def create_live_task(body: dict = Body(...),
     }
 
     with get_conn() as conn:
-        # D2：venue 校验——存在且交易域（建任务绑定交易账号，delete_interface 受 FK RESTRICT 守卫）
+        # D2：account 校验——存在且交易域（建任务绑定交易账号，delete_interface 受 FK RESTRICT 守卫）
         cur = conn.execute(
-            "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (venue_id,))
+            "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (account_id,))
         if cur.fetchone() is None:
-            raise ApiError(404, "VENUE_NOT_FOUND", f"venue {venue_id} 不存在或非交易域")
-        # D5 三级时点①：venue 级品种权限（venue_allows）——建任务时拒绝无权限品种
-        from src.data_platform.perms import venue_allows
-        if not venue_allows(venue_id, symbol):
-            raise ApiError(403, "VENUE_NOT_ALLOWED",
-                           f"venue {venue_id} 不允许交易品种 {symbol}（三维 category/exchange/board 权限）")
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易域")
+        # D5 三级时点①：account 级品种权限（account_allows）——建任务时拒绝无权限品种
+        from src.data_platform.perms import account_allows
+        if not account_allows(account_id, symbol):
+            raise ApiError(403, "ACCOUNT_NOT_ALLOWED",
+                           f"account {account_id} 不允许交易品种 {symbol}（三维 category/exchange/board 权限）")
         cur = conn.execute(
             "INSERT INTO live_task (name, strategy_id, symbol, params, strategy_snapshot, status, "
-            "venue_id, initial_capital, owner_username) VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s) RETURNING id",
+            "account_id, initial_capital, owner_username) VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s) RETURNING id",
             (name, strategy_id, symbol, json.dumps(merged_params), json.dumps(strategy_snapshot),
-             venue_id, initial_capital, payload["username"]))
+             account_id, initial_capital, payload["username"]))
         task_id = cur.fetchone()[0]
         conn.commit()
     audit_log(payload["username"], "create_live_task", f"task {task_id} strategy={strategy_id} symbol={symbol}")
@@ -216,19 +216,19 @@ def update_live_trading(market: str, enabled: bool = Query(...),
     return {"market": market, "enabled": row[0]}
 
 
-def _venue_account_state(conn):
-    """D2：读每 venue 最新快照 + 首条基线 + venue 名（全局视图端点复用，决策1「按 venue 分组」）。
+def _account_state(conn):
+    """D2：读每 account 最新快照 + 首条基线 + account 名（全局视图端点复用，决策1「按 account 分组」）。
 
-    返回 list[dict]，每项含 venue_id/venue_name/total_value/daily_pnl/initial。
-    baseline（initial）= 该 venue 首条快照 total_value（#10 口径）；无历史退回快照列值/默认 100 万。
+    返回 list[dict]，每项含 account_id/account_name/total_value/daily_pnl/initial。
+    baseline（initial）= 该 account 首条快照 total_value（#10 口径）；无历史退回快照列值/默认 100 万。
     """
     cur = conn.execute(
-        "SELECT DISTINCT ON (venue_id) venue_id, total_value, daily_pnl, initial_capital "
-        "FROM account_snapshot ORDER BY venue_id, ts DESC")
+        "SELECT DISTINCT ON (account_id) account_id, total_value, daily_pnl, initial_capital "
+        "FROM account_snapshot ORDER BY account_id, ts DESC")
     latest = cur.fetchall()
     cur = conn.execute(
-        "SELECT DISTINCT ON (venue_id) venue_id, total_value "
-        "FROM account_snapshot ORDER BY venue_id, ts ASC")
+        "SELECT DISTINCT ON (account_id) account_id, total_value "
+        "FROM account_snapshot ORDER BY account_id, ts ASC")
     first_map = {r[0]: (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
     cur = conn.execute("SELECT id, name FROM external_interface")
     name_map = {r[0]: r[1] for r in cur.fetchall()}
@@ -238,7 +238,7 @@ def _venue_account_state(conn):
         first = first_map.get(vid)
         initial = first if first is not None else (float(r[3]) if r[3] is not None else 1000000.0)
         out.append({
-            "venue_id": vid, "venue_name": name_map.get(vid),
+            "account_id": vid, "account_name": name_map.get(vid),
             "total_value": float(r[1]) if r[1] is not None else 0.0,
             "daily_pnl": float(r[2]) if r[2] is not None else 0.0,
             "initial": initial,
@@ -250,84 +250,84 @@ def _venue_account_state(conn):
 def get_position(payload: dict = Depends(require_perm("read"))):
     """当前持仓（ST2：券商 position_snapshot 快照=真相源；trade_log 推导已挪 /api/reconcile 归因）。
 
-    D2（决策1）：按 venue 分组返回——venues=per-venue 明细，顶层 total_value/total_pnl/
-    total_pnl_pct=跨 venue 聚合摘要（前端可粗显）。stale 语义（N-S5）：position_refresh.ts
+    D2（决策1）：按 account 分组返回——accounts=per-account 明细，顶层 total_value/total_pnl/
+    total_pnl_pct=跨 account 聚合摘要（前端可粗显）。stale 语义（N-S5）：position_refresh.ts
     距今 >600s 或从未写过 → stale=True。
     """
     import datetime as _pdt
     with get_conn() as conn:
-        venues_state = _venue_account_state(conn)
+        accounts_state = _account_state(conn)
         cur = conn.execute(
-            "SELECT venue_id, symbol, direction, volume, frozen, cost_price, pnl "
-            "FROM position_snapshot WHERE volume != 0 ORDER BY venue_id, symbol")
-        pos_by_venue: dict = {}
+            "SELECT account_id, symbol, direction, volume, frozen, cost_price, pnl "
+            "FROM position_snapshot WHERE volume != 0 ORDER BY account_id, symbol")
+        pos_by_account: dict = {}
         for r in cur.fetchall():
-            pos_by_venue.setdefault(r[0], []).append({
+            pos_by_account.setdefault(r[0], []).append({
                 "symbol": r[1], "direction": r[2], "volume": int(r[3]),
                 "frozen": int(r[4] or 0),
                 "cost_price": float(r[5]) if r[5] is not None else None,
                 "pnl": float(r[6]) if r[6] is not None else None})
-        cur = conn.execute("SELECT venue_id, ts, rows FROM position_refresh")
-        refresh_by_venue = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
+        cur = conn.execute("SELECT account_id, ts, rows FROM position_refresh")
+        refresh_by_account = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
 
     now = _pdt.datetime.now(_pdt.timezone.utc)
-    venues = []
+    accounts = []
     total_value = total_pnl = total_initial = 0.0
-    for vs in venues_state:
-        vid = vs["venue_id"]
+    for vs in accounts_state:
+        vid = vs["account_id"]
         initial = vs["initial"]
         pnl = vs["total_value"] - initial
         total_value += vs["total_value"]
         total_initial += initial
         total_pnl += pnl
-        ref = refresh_by_venue.get(vid)
+        ref = refresh_by_account.get(vid)
         stale = True
         snapshot_ts = None
         if ref and ref[0] is not None:
             ts_aware = ref[0] if ref[0].tzinfo else ref[0].replace(tzinfo=_pdt.timezone.utc)
             snapshot_ts = ts_aware.isoformat()
             stale = (now - ts_aware).total_seconds() > 600
-        venues.append({
-            "venue_id": vid, "venue_name": vs["venue_name"],
+        accounts.append({
+            "account_id": vid, "account_name": vs["account_name"],
             "total_value": vs["total_value"], "total_pnl": pnl,
             "total_pnl_pct": round(pnl/initial*100, 2) if initial else 0,
-            "positions": pos_by_venue.get(vid, []),
+            "positions": pos_by_account.get(vid, []),
             "snapshot_ts": snapshot_ts,
             "snapshot_rows": ref[1] if ref else 0,
             "stale": stale})
-    return {"venues": venues,
+    return {"accounts": accounts,
             "total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl/total_initial*100, 2) if total_initial else 0,
-            "stale": any(v["stale"] for v in venues)}
+            "stale": any(v["stale"] for v in accounts)}
 
 
 @router.get("/api/pnl")
 def get_pnl(payload: dict = Depends(require_perm("read"))):
-    """盈亏曲线（account_snapshot 时间序列，#6）。D2（决策1）：按 venue 分组返回。"""
+    """盈亏曲线（account_snapshot 时间序列，#6）。D2（决策1）：按 account 分组返回。"""
     with get_conn() as conn:
-        venues_state = _venue_account_state(conn)
+        accounts_state = _account_state(conn)
         cur = conn.execute(
-            "SELECT venue_id, ts, total_value, daily_pnl FROM ("
-            "  SELECT venue_id, ts, total_value, daily_pnl, "
-            "         ROW_NUMBER() OVER (PARTITION BY venue_id ORDER BY ts DESC) AS rn "
+            "SELECT account_id, ts, total_value, daily_pnl FROM ("
+            "  SELECT account_id, ts, total_value, daily_pnl, "
+            "         ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY ts DESC) AS rn "
             "  FROM account_snapshot"
-            ") sub WHERE rn <= 90 ORDER BY venue_id, ts DESC")
+            ") sub WHERE rn <= 90 ORDER BY account_id, ts DESC")
         rows = cur.fetchall()
-    curve_by_venue: dict = {}
+    curve_by_account: dict = {}
     for r in rows:
-        curve_by_venue.setdefault(r[0], []).append({
+        curve_by_account.setdefault(r[0], []).append({
             "ts": r[1].isoformat() if r[1] else "",
             "value": float(r[2]) if r[2] is not None else 0,
             "daily_pnl": float(r[3]) if r[3] is not None else 0})
-    venues = []
+    accounts = []
     total_pnl = total_initial = today_pnl = 0.0
-    for vs in venues_state:
-        vid = vs["venue_id"]
-        curve = list(reversed(curve_by_venue.get(vid, [])[:90]))  # 近 90 条，升序（旧→新）
+    for vs in accounts_state:
+        vid = vs["account_id"]
+        curve = list(reversed(curve_by_account.get(vid, [])[:90]))  # 近 90 条，升序（旧→新）
         initial = vs["initial"]
         pnl = (curve[-1]["value"] - initial) if curve else 0
-        venues.append({
-            "venue_id": vid, "venue_name": vs["venue_name"],
+        accounts.append({
+            "account_id": vid, "account_name": vs["account_name"],
             "curve": curve,
             "today_pnl": curve[-1]["daily_pnl"] if curve else 0,
             "total_pnl": pnl,
@@ -335,7 +335,7 @@ def get_pnl(payload: dict = Depends(require_perm("read"))):
         total_initial += initial
         total_pnl += pnl
         today_pnl += (curve[-1]["daily_pnl"] if curve else 0)
-    return {"venues": venues,
+    return {"accounts": accounts,
             "today_pnl": today_pnl, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl/total_initial*100, 2) if total_initial else 0}
 
@@ -412,18 +412,18 @@ def delete_account(aid: int, payload: dict = Depends(require_perm("system_config
 
 @router.get("/api/dashboard")
 def get_dashboard(payload: dict = Depends(require_perm("read"))):
-    """Dashboard 量化指标（account_snapshot + 回测绩效，#10）。D2（决策1）：按 venue 分组返回。"""
+    """Dashboard 量化指标（account_snapshot + 回测绩效，#10）。D2（决策1）：按 account 分组返回。"""
     with get_conn() as conn:
-        venues_state = _venue_account_state(conn)
+        accounts_state = _account_state(conn)
         cur = conn.execute("SELECT COUNT(*) FROM backtest_runs WHERE status='done'")
         bt = cur.fetchone()
-    venues = []
+    accounts = []
     total_value = total_pnl = total_initial = daily_pnl = 0.0
-    for vs in venues_state:
+    for vs in accounts_state:
         initial = vs["initial"]
         pnl = vs["total_value"] - initial
-        venues.append({
-            "venue_id": vs["venue_id"], "venue_name": vs["venue_name"],
+        accounts.append({
+            "account_id": vs["account_id"], "account_name": vs["account_name"],
             "total_value": vs["total_value"], "total_pnl": pnl,
             "total_pnl_pct": round(pnl/initial*100, 2) if initial else 0,
             "daily_pnl": vs["daily_pnl"]})
@@ -431,7 +431,7 @@ def get_dashboard(payload: dict = Depends(require_perm("read"))):
         total_initial += initial
         total_pnl += pnl
         daily_pnl += vs["daily_pnl"]
-    return {"venues": venues,
+    return {"accounts": accounts,
             "total_value": total_value, "total_pnl": total_pnl,
             "total_pnl_pct": round(total_pnl/total_initial*100, 2) if total_initial else 0,
             "daily_pnl": daily_pnl, "backtest_count": bt[0] if bt else 0}

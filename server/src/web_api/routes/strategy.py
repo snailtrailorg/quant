@@ -385,4 +385,4 @@ def delete_factor_api(name: str,
 
 
 # D2：strategy_account 表已退役（迁移 0101 DROP）——「策略-账户绑定」三端点随之移除。
-# 账户绑定语义收编为 live_task.venue_id（建任务选源，见 trading.py create_live_task）。
+# 账户绑定语义收编为 live_task.account_id（建任务选源，见 trading.py create_live_task）。

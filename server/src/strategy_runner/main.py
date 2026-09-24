@@ -80,7 +80,7 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
         from src.quant_common.contract import DataRequest
         from src.strategy_runner.hub_worker import _crypto_provider
         from datetime import datetime as _dt, timedelta
-        source = _crypto_provider(symbol)   # D3：加密 per-venue 暖机按 source 过滤（A股 None 不过滤）
+        source = _crypto_provider(symbol)   # D3：加密 per-account 暖机按 source 过滤（A股 None 不过滤）
         req = DataRequest(kind="bar_minute", symbols=(symbol,), temporality="historical",
                           freq="1min", range_=(_dt.now() - timedelta(days=30), _dt.now()),
                           source=source)
@@ -122,16 +122,16 @@ def _guard(name):
     return _guard_base(name, alert=lambda title, body="": _alert(title, body, code="runtime.guard"))
 
 
-def _build_xtp_runtime(ee, tid, venue_id, boot_epoch) -> dict:
+def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
     """D5：XTP 专属 TD 运行时组装（ThinTdGateway + XtpTdApi + XTPAdapter + 连接窗）。
 
     返回 {gw, td_api, adapter, setting, td_open, lead, lag, cfg_adapter}。
-    row_id=venue_id 显式传（build_xtp_setting 取数失败 raise，禁 .env fallback——防 A 任务串 B 账户）。
+    row_id=account_id 显式传（build_xtp_setting 取数失败 raise，禁 .env fallback——防 A 任务串 B 账户）。
     """
     from vnpy.trader.gateway import BaseGateway
     from vnpy_xtp.gateway.xtp_gateway import XtpTdApi
     from src.strategy_framework.adapters import XTPAdapter
-    setting = _build_xtp_setting(client_id=runner_client_id(tid), row_id=venue_id)
+    setting = _build_xtp_setting(client_id=runner_client_id(tid), row_id=account_id)
 
     # 每日连接窗·TD 侧（只 A股 XTP 套窗）：窗开建连/窗关启动不连（窗开沿由
     # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
@@ -189,7 +189,7 @@ _TD_BUILDERS = {"xtp": _build_xtp_runtime}
 
 
 def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,
-                  venue_id=None, owner_username=None):
+                  account_id=None, owner_username=None):
     """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。
 
     owner_username（批15）：live_task 归属人 → strategy.operator 实例属性 → order["operator"]
@@ -203,12 +203,12 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     logger.info("任务 %s 以 hub 模式启动（策略 %s 标的 %s）", tid or sid, sid, symbol)
     boot_epoch = int(time.time())   # 评审 S8：秒级 epoch（分钟级同分钟重启会撞 id）
 
-    # D5：读 venue 行 → provider（行=venue_id，禁硬编码 XTP）。取数失败（禁用/凭证缺/DB 异常）
+    # D5：读 account 行 → provider（行=account_id，禁硬编码 XTP）。取数失败（禁用/凭证缺/DB 异常）
     # raise → 永久配置错误，单次干净 exit 78（RestartPreventExitStatus 豁免，防 on-failure 重启风暴）
     try:
-        iface = get_interface_row(row_id=venue_id)
+        iface = get_interface_row(row_id=account_id)
     except Exception as e:
-        logger.error("读 venue 行失败（id=%s），拒绝启动: %s", venue_id, e)
+        logger.error("读 account 行失败（id=%s），拒绝启动: %s", account_id, e)
         sys.exit(EX_CONFIG)
     provider = iface["provider"]
 
@@ -227,7 +227,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     builder = _TD_BUILDERS.get(provider)
     if builder is None:
         # 非 XTP：TD 网关未实现（加密 stub / EMT 仅 MD）→ 加密 stub 硬闸（D5 落）
-        # 硬闸用「该 venue 分项实盘开关」（总闸 AND provider 分项），非全局总闸（盲审 B：跨市场耦合）
+        # 硬闸用「该 account 分项实盘开关」（总闸 AND provider 分项），非全局总闸（盲审 B：跨市场耦合）
         from src.data_platform.settings import is_live_trading_enabled
         if is_live_trading_enabled():
             from src.data_platform.db import get_conn
@@ -247,7 +247,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
               "td_open": True, "lead": None, "lag": None, "cfg_adapter": provider}
     else:
         try:
-            rt = builder(ee, tid, venue_id, boot_epoch)
+            rt = builder(ee, tid, account_id, boot_epoch)
         except Exception as e:
             logger.error("TD 运行时组装失败（provider=%s），拒绝启动: %s", provider, e)
             sys.exit(EX_CONFIG)
@@ -260,16 +260,16 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     _lead, _lag = rt["lead"], rt["lag"]
     cfg_adapter = rt["cfg_adapter"]
 
-    adapter.venue_id = venue_id   # D2：成交/委托日志 per-venue 落库（write_trade_log 读此）
+    adapter.account_id = account_id   # D2：成交/委托日志 per-account 落库（write_trade_log 读此）
     cfg = StrategyConfig(id=sid, name=name, type=s_type, symbol=symbol, adapter=cfg_adapter,
                          enabled=True, factors=factors or [], aggregator=aggregator or {}, params=params or {})
     strategy = Strategy.from_config(cfg, adapter)
     # 批15：owner 经实例属性注入（不动构造签名——from_config 调用点含 backtest.py，
     # 改签名会炸回测）；place_order 读 getattr(self, "operator", "")
     strategy.operator = owner_username or ""
-    # D2：venue 身份经实例属性注入（同 operator 模式）——读方 _held_volume 等按此过滤，
-    # 未注入（None）时读方 `venue_id=NULL` 恒 false → 返回 0/空（fail-closed 不混仓）
-    strategy.venue_id = venue_id
+    # D2：account 身份经实例属性注入（同 operator 模式）——读方 _held_volume 等按此过滤，
+    # 未注入（None）时读方 `account_id=NULL` 恒 false → 返回 0/空（fail-closed 不混仓）
+    strategy.account_id = account_id
 
     # 评审 C2：冻结的真实抓手——包 adapter.send_order（下单唯一咽喉，strategy.place_order 必经）。
     # S6 修订（2026-08-18）：两段判定——①sticky 冻结（untrusted/gap=数据污染事实）BUY 拒/SELL 放；
@@ -313,7 +313,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         _reconcile()   # B-P1-1：TD 在线才有对账意义——窗关启动跳过，窗开沿 connect 后由 TD 重连沿触发
     ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
-        "venue_id": venue_id,
+        "account_id": account_id,
         "strategy": strategy, "adapter": adapter, "event_engine": ee,
         "td_api": td_api, "history": history, "frozen": frozen,
         "initial_capital": initial_capital,
@@ -397,13 +397,13 @@ def main():
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
-                "status, venue_id, initial_capital, owner_username FROM live_task WHERE id=%s",
+                "status, account_id, initial_capital, owner_username FROM live_task WHERE id=%s",
                 (args.task_id,))
             row = cur.fetchone()
         if not row:
             logger.error("实盘任务 %s 不存在", args.task_id)
             sys.exit(EX_CONFIG)
-        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, venue_id, initial_capital, owner_username = row
+        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital, owner_username = row
         if status == "stopped":
             logger.info("实盘任务 %s 已停止，退出", tid)
             sys.exit(0)
@@ -441,29 +441,29 @@ def main():
             logger.warning("策略 %s 未启用或未回测验证，跳过", sid)
             sys.exit(0)
         tid = None
-        venue_id = None
+        account_id = None
         initial_capital = 1000000
         owner_username = None   # 旧路径无归属（批15：operator 空 → 2.5 拒单 critical=预期）
-        # D2：旧 --id 路径无 live_task.venue_id——取默认 venue（min 交易域，与迁移 0100 回填一致）。
+        # D2：旧 --id 路径无 live_task.account_id——取默认 account（min 交易域，与迁移 0100 回填一致）。
         # strategy_account 表已退役（0101 DROP），旧「策略-账户绑定」读方随之移除。
         try:
             with get_conn() as conn:
                 row = conn.execute(
                     "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
                 ).fetchone()
-                venue_id = row[0] if row else None
+                account_id = row[0] if row else None
         except Exception as e:
-            logger.warning("读默认 venue 失败（旧 --id 路径无 venue 归属）: %s", e)
-        if venue_id is None:
-            # D2：worker 快照/下单均需 venue_id（account_snapshot NOT NULL）——None 会静默装死
+            logger.warning("读默认 account 失败（旧 --id 路径无 account 归属）: %s", e)
+        if account_id is None:
+            # D2：worker 快照/下单均需 account_id（account_snapshot NOT NULL）——None 会静默装死
             # （INSERT 违约被 except 吞、无快照无下单），显式 fail-fast 对齐 md_mode 处理。
-            logger.error("旧 --id 路径：external_interface 无交易域行，无 venue 归属，拒绝启动")
+            logger.error("旧 --id 路径：external_interface 无交易域行，无 account 归属，拒绝启动")
             sys.exit(EX_CONFIG)
 
-    # 1.6 D5 三级时点②：worker 启动 venue 级品种权限（venue_allows）fail-fast（宁拒勿错）
-    from src.data_platform.perms import venue_allows
-    if not venue_allows(venue_id, symbol):
-        logger.error("venue %s 不允许交易品种 %s（三维 category/exchange/board 权限），拒绝启动", venue_id, symbol)
+    # 1.6 D5 三级时点②：worker 启动 account 级品种权限（account_allows）fail-fast（宁拒勿错）
+    from src.data_platform.perms import account_allows
+    if not account_allows(account_id, symbol):
+        logger.error("account %s 不允许交易品种 %s（三维 category/exchange/board 权限），拒绝启动", account_id, symbol)
         sys.exit(EX_CONFIG)
 
     # 1.5 md_mode 校验（批 6b：direct 退役）：hub 是唯一实盘行情模式。误设 direct
@@ -483,7 +483,7 @@ def main():
 
     _run_hub_mode(sid=sid, tid=tid, name=name, s_type=s_type, symbol=symbol,
                   factors=factors, aggregator=aggregator, params=params,
-                  initial_capital=initial_capital, venue_id=venue_id,
+                  initial_capital=initial_capital, account_id=account_id,
                   owner_username=owner_username)
     return
 

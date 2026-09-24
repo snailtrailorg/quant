@@ -5,13 +5,18 @@
 
 ---
 
+## 2026-09-24 · 术语正名：venue 概念废除（账号→account、交易所→exchange）
+
+1. **venue 一词彻底废除，按语义拆两词**：D1-D6 的 venue（=交易账号/external_interface 行）→ `account`（对齐 vnpy `AccountData` / QuantConnect `account` / FIX Tag 1 `Account`——行业里 venue 本义=交易场所/交易所，拿来指账号是语义错位）；`MARKET_OP_DECOMP` 第三元（=BINANCE/OKX 交易所）→ `exchange`（归一到已有 `EXCHANGES` 概念，本就该叫 exchange）。
+2. **迁移策略**：新增 0104 rename（6 表 `account_id` 列 + `account_permission` 表 + 18 约束 rename + 对账数据 UPDATE）；历史迁移 0097-0103 不改（alembic checksum 不可变，squash 需回滚破坏性迁移有损）。交易所语义 venue 仅存在于注释/docstring（代码标识符早已用 exchange），归位零 DDL。
+
 ## 2026-09-23 · 多账号源架构重设计（30 号废弃 → 31 号框架 + D1-D6 详细设计）
 
 1. **重设计方法**（用户裁定）：30 号 v1-v15 共 15 轮 4 盲审未收敛 → 全部重来、换 session。方法=**先写简要但明确的整体框架方案（定义架构+契约）→ 再分头写几个小详细设计方案**。30 号标「废弃」仅参考，不在其上改。
 2. **评审角色换「量化交易高手」替「金融专家」**（方法论裁定）：金融专家会求全金融合规边角（与个人平台定位冲突），量化高手只审「真正影响交易」；框架双盲审=软件架构专家+量化交易高手两角色。
-3. **Venue = 交易账号**（external_interface 行），非「券商」；同源分市场：A股=MD 单 hub（L1 全市场同源，doc14 M5 保留）+ TD per-venue；加密=MD+TD per-venue。同源校验=跨进程运行时事实（流带 venue_id，worker 比对），非「同一行派生两值」空转断言。
-4. **权限三维正交 + 数据字段化四首决**：board **新增枚举列**（main/star/chinext/bse，从 asset_static_info.market 中文归一化回填，否决复用 market 列——中文文本当键=同类漂移）；venue 权限存 **新表 venue_permission**（否决 external_interface 加列/扩 live_trading_config）；is_st 官方名单 fail-closed；强赎/退市整理期是价格事件需字段（非边角排除）。
-5. **身份与数据隔离三首决**：稳定语义键=**资金账号**（external_interface.account_key UNIQUE，股东账号沪/深各一不适合单列键）；**leverage→venue 级**（账号级，账户级敞口实参，券商/交易所约束）；资金基线写侧 per-venue（initial_capital 不再取策略级默认）。
+3. **Account = 交易账号**（external_interface 行），非「券商」；同源分市场：A股=MD 单 hub（L1 全市场同源，doc14 M5 保留）+ TD per-account；加密=MD+TD per-account。同源校验=跨进程运行时事实（流带 account_id，worker 比对），非「同一行派生两值」空转断言。
+4. **权限三维正交 + 数据字段化四首决**：board **新增枚举列**（main/star/chinext/bse，从 asset_static_info.market 中文归一化回填，否决复用 market 列——中文文本当键=同类漂移）；account 权限存 **新表 account_permission**（否决 external_interface 加列/扩 live_trading_config）；is_st 官方名单 fail-closed；强赎/退市整理期是价格事件需字段（非边角排除）。
+5. **身份与数据隔离三首决**：稳定语义键=**资金账号**（external_interface.account_key UNIQUE，股东账号沪/深各一不适合单列键）；**leverage→account 级**（账号级，账户级敞口实参，券商/交易所约束）；资金基线写侧 per-account（initial_capital 不再取策略级默认）。
 
 
 
@@ -240,9 +245,9 @@
 
 - **双盲审结论**：双同 **PASS（无 P0）**——软件架构专家 + 量化交易高手，同章程互不可见，主会话同判比对。13 P1 + 8 P2，性质=契约遗漏/接线不明确/枚举不全/措辞失实，**无需返工**。按 [[stop-and-question-when-review-loops]] 教训不走「盲审→补缺陷→再盲审」循环，**列全真问题→一次性改→自查无矛盾**。
 - **3 条触首决细节的修正**（盲审发现 + 已逐条查码核实，落 D 文档；待用户确认）：
-  1. **资金基线口径**：D2-3「显式配置」→「per-venue 首条快照 total_value（跟踪起点净值），显式配置仅参考展示、不作回撤分母」——回退到名义入金数会重演 9.99 亿回撤分母错配（2026-08-22 #10 口径已修过）。
-  2. **account_key 唯一作用域**：单列 UNIQUE → `UNIQUE(provider, account_key)` 复合唯一（防跨券商资金账号撞号）+ 加密 venue 取 API uid/自定标签（加密无资金账号）。
-  3. **`_market_of` 不退役**：31号§四 曾把 `_market_of`（分项 market_op 五键）与 `_board_of`/`detect_category` 混为一谈；三者三维度，`_market_of` 是分项（etf 分项=场内基金全体、perp 需 venue.provider），退役即下单闸断裂。仅退役 `_board_of`/`detect_category`。
+  1. **资金基线口径**：D2-3「显式配置」→「per-account 首条快照 total_value（跟踪起点净值），显式配置仅参考展示、不作回撤分母」——回退到名义入金数会重演 9.99 亿回撤分母错配（2026-08-22 #10 口径已修过）。
+  2. **account_key 唯一作用域**：单列 UNIQUE → `UNIQUE(provider, account_key)` 复合唯一（防跨券商资金账号撞号）+ 加密 account 取 API uid/自定标签（加密无资金账号）。
+  3. **`_market_of` 不退役**：31号§四 曾把 `_market_of`（分项 market_op 五键）与 `_board_of`/`detect_category` 混为一谈；三者三维度，`_market_of` 是分项（etf 分项=场内基金全体、perp 需 account.provider），退役即下单闸断裂。仅退役 `_board_of`/`detect_category`。
 
 
 ## 2026-09-23 · 吸收外部架构两可借鉴点（用户裁定）
@@ -250,17 +255,17 @@
 - **背景**：用户提供外部「量化交易系统核心架构设计规范」（机构级通用架构），比对后两条可借鉴——①品类差异化操作插件化 ②交易所/股东户维度显式建模。
 - **裁定（吸收进方案）**：
   1. **品类操作插件（预留扩展点）**：可转债转股/回售、ETF/LOF 申赎等品类专属操作当前不实现，但架构预留「品类操作插件」扩展点——品类差异=数据列（属性）+插件（操作），未来加品类/操作不改顶层代码。31号 §七 从「出界」改「预留」。
-  2. **exchange 股东户维度**：权限模型三维（category/board/ST）→**四维（category/exchange/board/ST）**。`security_master` 加 `exchange` 枚举列（shse/szse/bse，回填从 vt_symbol 后缀提取，可靠非前缀判断）+ `venue_permission` 加 exchange 维度。根因：board=main 横跨沪/深，单 board 维度分不出「有沪股东户无深股东户」的 venue。
+  2. **exchange 股东户维度**：权限模型三维（category/board/ST）→**四维（category/exchange/board/ST）**。`security_master` 加 `exchange` 枚举列（shse/szse/bse，回填从 vt_symbol 后缀提取，可靠非前缀判断）+ `account_permission` 加 exchange 维度。根因：board=main 横跨沪/深，单 board 维度分不出「有沪股东户无深股东户」的 account。
 - **不采纳**：「自动路由层」（与我们「人工显式选源、一策略一账号」方向冲突，31号 §1.1 已钉死）。
 
 
 ## 2026-09-23 · ST 维度降级 + detect_category 就地退役（用户裁定）
 
-- **ST 降级**：30号/31号 原把 ST 列为「第四维正交权限」，用户质疑「为什么要关注 ST」→ 澄清三层（涨跌幅=`band_rules.pct_st` 已覆盖 / 主板 ST 适当性=唯一真权限但薄 / 退市风险=选标的排除）。**裁定：ST 从独立正交维度降级为「board=main 子布尔」**——venue_permission 加 is_st 布尔（仅主板），非第四维。
+- **ST 降级**：30号/31号 原把 ST 列为「第四维正交权限」，用户质疑「为什么要关注 ST」→ 澄清三层（涨跌幅=`band_rules.pct_st` 已覆盖 / 主板 ST 适当性=唯一真权限但薄 / 退市风险=选标的排除）。**裁定：ST 从独立正交维度降级为「board=main 子布尔」**——account_permission 加 is_st 布尔（仅主板），非第四维。
 - **detect_category 就地退役**：detect_category 返回 astock/crypto（因子兼容词表），与 security_master.category（stock/perp）两套词表打架。**完美方案=品类单一真源 + 因子类=派生映射**（`CATEGORY_TO_FACTOR_CLASS`: stock→astock、etf/fund/reits→etf、convertible→convertible、perp→crypto）。detect_category 仅 1 调用点（factor.py:768），就地退役成本小，纳入 D1（与 _board_of 同「前缀→数据列」模式）。
 
 
 ## 2026-09-24 · D1 代码双盲审 B-P0 裁定：写路径/三级时点/回填闸挂账 D5
 
-- **背景**：D1 代码双盲审 B（交易正确性）抓 P0——D1 §五「只做」列「venue_permission 读写」+「三级时点接入调用」，但实际交付只有「读」（venue_allows 读）+「函数」，写路径（管理端点/seed/UI）与三级时点接线均未交付。空表 + 无写路径 = 若接线即全盘锁死。
-- **裁定（挂账，非返工）**：①venue_permission **写路径** ②**三级时点接入调用**（依赖 D2 的 live_task.venue_id）③**board 回填完整性闸**（接线前断言 stock 全量 board 非空）→ 归 **D5**（建任务与 worker 绑定）前置；④**ST 官方名单 fail-closed** → 另批（现 namechange 派生、无档=非 ST fail-open 已知）。已落 D1 §五 + 待办。
+- **背景**：D1 代码双盲审 B（交易正确性）抓 P0——D1 §五「只做」列「account_permission 读写」+「三级时点接入调用」，但实际交付只有「读」（account_allows 读）+「函数」，写路径（管理端点/seed/UI）与三级时点接线均未交付。空表 + 无写路径 = 若接线即全盘锁死。
+- **裁定（挂账，非返工）**：①account_permission **写路径** ②**三级时点接入调用**（依赖 D2 的 live_task.account_id）③**board 回填完整性闸**（接线前断言 stock 全量 board 非空）→ 归 **D5**（建任务与 worker 绑定）前置；④**ST 官方名单 fail-closed** → 另批（现 namechange 派生、无档=非 ST fail-open 已知）。已落 D1 §五 + 待办。

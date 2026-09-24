@@ -145,8 +145,8 @@ class RateLimitOverrideReq(BaseModel):
     value: float | None = None
     circuit_breaker: dict | None = None
 
-class VenuePermissionReq(BaseModel):
-    """venue 侧品种权限（D1——venue_permission 写侧，权限人工配置）。
+class AccountPermissionReq(BaseModel):
+    """account 侧品种权限（D1——account_permission 写侧，权限人工配置）。
 
     三维 category/exchange/board 集合 + ST 子布尔（仅主板）+ 可转债权限。
     """

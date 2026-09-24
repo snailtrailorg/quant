@@ -76,5 +76,5 @@ def _guard(name):
 3. alert 永远回调注入，不直接 import
 
 ## 批55-0(2026-09-19)新增 markets.py
-- **`markets.py`**:维度注册表单源——MARKETS/EXCHANGES(含市场归属)/ASSET_CATEGORIES/DATA_CATEGORIES/CAPABILITIES/SYNC_ID_CAP_MAP(sync_id↔枚举映射)/NON_DATA_PROVIDERS(键=真实 provider 串——55a 修 binance_perp/okx_perp)/PROVIDER_MARKET(55a 新增:provider→市场固定归属,写侧校验)/MARKET_OP_DECOMP(权限五键→(market,category,venue))。**纯数据零 import**;能力查询/⊆校验在 data_platform/capabilities.py(读 _ADAPTERS 属上层)。
+- **`markets.py`**:维度注册表单源——MARKETS/EXCHANGES(含市场归属)/ASSET_CATEGORIES/DATA_CATEGORIES/CAPABILITIES/SYNC_ID_CAP_MAP(sync_id↔枚举映射)/NON_DATA_PROVIDERS(键=真实 provider 串——55a 修 binance_perp/okx_perp)/PROVIDER_MARKET(55a 新增:provider→市场固定归属,写侧校验)/MARKET_OP_DECOMP(权限五键→(market,category,exchange))。**纯数据零 import**;能力查询/⊆校验在 data_platform/capabilities.py(读 _ADAPTERS 属上层)。
 - 修订:2026-09-19 批55-0。

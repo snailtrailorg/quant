@@ -265,7 +265,7 @@ def get_bars(symbol: str, freq: str, start, end, source: str | None = None) -> p
 
     用 cursor.fetchall 替代 pd.read_sql 避免 pandas/psycopg 不兼容警告。
     批 56b 读收口：start/end as_utc（naive 按上海解释——防 pin UTC 后窗口错 8h）。
-    D3：source 非 None 按数据源过滤（bar 表 source 列，加密 per-venue 暖机分源）。
+    D3：source 非 None 按数据源过滤（bar 表 source 列，加密 per-account 暖机分源）。
     """
     import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
     start, end = _win_utc(start), _win_utc(end)

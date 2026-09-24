@@ -9,7 +9,7 @@ import json
 from fastapi import APIRouter, Depends, Request, Body, HTTPException
 from ..auth import require_role, require_perm, audit_log
 from ..errors import ApiError
-from ..models import InterfaceReq, InterfaceReorderReq, RateLimitOverrideReq, VenuePermissionReq
+from ..models import InterfaceReq, InterfaceReorderReq, RateLimitOverrideReq, AccountPermissionReq
 from src.data_platform.db import get_conn
 import logging
 
@@ -55,7 +55,7 @@ def _is_fk_violation(e: Exception) -> bool:
 
 def _default_exchanges(provider: str) -> list[str] | None:
     """perp 类 provider 的默认单所覆盖（盲审 B-P2：不写 exchanges 则 NULL=全所语义错——
-    binance_perp 的 NULL 会含 OKX）。推导源=MARKET_OP_DECOMP 的 venue；其余 None=全所。"""
+    binance_perp 的 NULL 会含 OKX）。推导源=MARKET_OP_DECOMP 的 exchange；其余 None=全所。"""
     from src.quant_common.markets import MARKET_OP_DECOMP
     d = MARKET_OP_DECOMP.get(provider)
     return [d[2]] if d and d[2] else None
@@ -89,7 +89,7 @@ def _validate_iface(provider: str, market: str, exchanges, capabilities) -> tupl
         if bad:
             raise ApiError(400, "IFACE_EXCHANGE_UNKNOWN",
                            f"交易所 {sorted(bad)} 不属于市场 {market}（该市场全所：{sorted(market_ex)}）")
-        # 盲审 B-P1-4：perp 类 provider 只能覆盖自身 venue（防 binance 通道勾 OKX 的语义错行）
+        # 盲审 B-P1-4：perp 类 provider 只能覆盖自身 exchange（防 binance 通道勾 OKX 的语义错行）
         from src.quant_common.markets import MARKET_OP_DECOMP
         d = MARKET_OP_DECOMP.get(provider)
         if d and d[2]:
@@ -294,10 +294,10 @@ def update_interface(iid: int, req: InterfaceReq, payload: dict = Depends(requir
 
 @router.delete("/api/interfaces/{iid}")
 def delete_interface(iid: int, payload: dict = Depends(require_perm("system_config"))):
-    """删除外部接口行。D2：venue 被 live_task 引用时 FK RESTRICT 拒绝（防删实盘任务账号）。"""
+    """删除外部接口行。D2：account 被 live_task 引用时 FK RESTRICT 拒绝（防删实盘任务账号）。"""
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id FROM live_task WHERE venue_id=%s LIMIT 1", (iid,))
+            "SELECT id FROM live_task WHERE account_id=%s LIMIT 1", (iid,))
         if cur.fetchone() is not None:
             raise ApiError(409, "IFACE_IN_USE",
                            "该交易账号下存在实盘任务，禁止删除（请先停止并删除相关任务）")
@@ -520,59 +520,59 @@ def detect_stuck_api(payload: dict = Depends(require_perm("system_config"))):
     return {"stuck_count": count}
 
 
-# --- venue_permission（D1：venue 侧品种权限——权限人工配置，读/写侧） ---
+# --- account_permission（D1：account 侧品种权限——权限人工配置，读/写侧） ---
 
 _VALID_CATEGORIES = {"stock", "etf", "convertible", "fund", "reits", "perp"}
 _VALID_EXCHANGES = {"SHSE", "SZSE", "BSE", "BINANCE", "OKX"}
 _VALID_BOARDS = {"main", "star", "chinext", "bse"}
-_VENUE_PERM_COLS = ("venue_id, allowed_categories, allowed_exchanges, allowed_boards, "
+_ACCOUNT_PERM_COLS = ("account_id, allowed_categories, allowed_exchanges, allowed_boards, "
                     "is_st_allowed, convertible_allowed")
 
 
-def _venue_perm_row(r) -> dict:
-    return {"venue_id": r[0], "allowed_categories": list(r[1]), "allowed_exchanges": list(r[2]),
+def _account_perm_row(r) -> dict:
+    return {"account_id": r[0], "allowed_categories": list(r[1]), "allowed_exchanges": list(r[2]),
             "allowed_boards": list(r[3]), "is_st_allowed": r[4], "convertible_allowed": r[5]}
 
 
-@router.get("/api/venues/{venue_id}/permission")
-def get_venue_permission(venue_id: int, payload: dict = Depends(require_perm("read"))):
-    """venue 权限读（无行 404——权限人工配置，未配置不猜默认）。"""
+@router.get("/api/accounts/{account_id}/permission")
+def get_account_permission(account_id: int, payload: dict = Depends(require_perm("read"))):
+    """account 权限读（无行 404——权限人工配置，未配置不猜默认）。"""
     with get_conn() as conn:
-        cur = conn.execute(f"SELECT {_VENUE_PERM_COLS} FROM venue_permission WHERE venue_id=%s", (venue_id,))
+        cur = conn.execute(f"SELECT {_ACCOUNT_PERM_COLS} FROM account_permission WHERE account_id=%s", (account_id,))
         r = cur.fetchone()
     if r is None:
-        raise ApiError(404, "VENUE_PERM_NOT_FOUND", f"venue {venue_id} 未配置权限")
-    return _venue_perm_row(r)
+        raise ApiError(404, "ACCOUNT_PERM_NOT_FOUND", f"account {account_id} 未配置权限")
+    return _account_perm_row(r)
 
 
-@router.put("/api/venues/{venue_id}/permission")
-def put_venue_permission(venue_id: int, req: VenuePermissionReq, payload: dict = Depends(require_perm("system_config"))):
-    """venue 权限写（upsert）。校验：venue 存在且交易域；值域 ⊆ 注册表（防拼写错）。"""
+@router.put("/api/accounts/{account_id}/permission")
+def put_account_permission(account_id: int, req: AccountPermissionReq, payload: dict = Depends(require_perm("system_config"))):
+    """account 权限写（upsert）。校验：account 存在且交易域；值域 ⊆ 注册表（防拼写错）。"""
     bad_cats = set(req.allowed_categories) - _VALID_CATEGORIES
     bad_exch = set(req.allowed_exchanges) - _VALID_EXCHANGES
     bad_brds = set(req.allowed_boards) - _VALID_BOARDS
     if bad_cats or bad_exch or bad_brds:
-        raise ApiError(400, "VENUE_PERM_BAD_VALUE",
+        raise ApiError(400, "ACCOUNT_PERM_BAD_VALUE",
                        f"非法值：category={sorted(bad_cats)} exchange={sorted(bad_exch)} board={sorted(bad_brds)}")
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (venue_id,))
+            "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (account_id,))
         if cur.fetchone() is None:
-            raise ApiError(404, "VENUE_NOT_FOUND", f"venue {venue_id} 不存在或非交易域")
+            raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易域")
         cur = conn.execute(
-            "INSERT INTO venue_permission (venue_id, allowed_categories, allowed_exchanges, "
+            "INSERT INTO account_permission (account_id, allowed_categories, allowed_exchanges, "
             "allowed_boards, is_st_allowed, convertible_allowed) "
             "VALUES (%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT (venue_id) DO UPDATE SET "
+            "ON CONFLICT (account_id) DO UPDATE SET "
             "allowed_categories=EXCLUDED.allowed_categories, "
             "allowed_exchanges=EXCLUDED.allowed_exchanges, "
             "allowed_boards=EXCLUDED.allowed_boards, "
             "is_st_allowed=EXCLUDED.is_st_allowed, "
             "convertible_allowed=EXCLUDED.convertible_allowed, updated_at=now()",
-            (venue_id, list(req.allowed_categories), list(req.allowed_exchanges),
+            (account_id, list(req.allowed_categories), list(req.allowed_exchanges),
              list(req.allowed_boards), req.is_st_allowed, req.convertible_allowed))
         conn.commit()
-    audit_log(payload["username"], "venue_permission_update", f"venue={venue_id}")
-    return {"venue_id": venue_id}
+    audit_log(payload["username"], "account_permission_update", f"account={account_id}")
+    return {"account_id": account_id}
 
 

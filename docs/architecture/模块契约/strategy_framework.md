@@ -6,7 +6,7 @@
 > **最近变更（2026-08-27 深夜）**：adapters 查询超时可观测（P2-1，db73fe0）——`_wait_update -> bool`
 > /`POSITION_STABLE_WINDOW_S` 常量化/稳定窗分级告警。详见任务文件 docs/obsolete/任务归档/P2-1-查询超时可观测.md。
 
-> **最近变更（2026-09-24 多账号源 D2/D4/D5 + 加密接入批）**：venue_id 注入（`strategy.venue_id`/`adapter.venue_id` 实例属性）；direction 资源 id 化（`adapters.py` 落库 `direction_long/short/net`）；TD 网关 per-venue `_TD_BUILDERS` 注册表 + `_build_xtp_runtime`；加密 MD 网关 `BinanceMdGateway`/`OkxMdGateway`（symbol 双向翻译）+ `get_interface_row(md_only=True)`。
+> **最近变更（2026-09-24 多账号源 D2/D4/D5 + 加密接入批）**：account_id 注入（`strategy.account_id`/`adapter.account_id` 实例属性）；direction 资源 id 化（`adapters.py` 落库 `direction_long/short/net`）；TD 网关 per-account `_TD_BUILDERS` 注册表 + `_build_xtp_runtime`；加密 MD 网关 `BinanceMdGateway`/`OkxMdGateway`（symbol 双向翻译）+ `get_interface_row(md_only=True)`。
 ## 职责
 统一策略基类 + 因子注册制（预置 + DB 自定义）+ 信号聚合 + 执行适配器 + **自建回测引擎**（纯 Python）。
 所有策略（A股分析/可转债ETF/加密合约）共用此基类，差异下沉到 `ExecutionAdapter`。

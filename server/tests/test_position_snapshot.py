@@ -23,11 +23,11 @@ class TestPositionEndpoint:
         import datetime as dt
         conn = MagicMock()
         conn.__enter__.return_value = conn
-        # D2 per-venue：_venue_account_state（latest 快照/首条基线/venue 名）+ 持仓 + refresh（无行）
+        # D2 per-account：_account_state（latest 快照/首条基线/account 名）+ 持仓 + refresh（无行）
         conn.execute.side_effect = [
             MagicMock(fetchall=lambda: [(1, 1000000.0, 0.0, 1000000.0)]),   # latest 快照
             MagicMock(fetchall=lambda: [(1, 1000000.0)]),                    # 首条基线
-            MagicMock(fetchall=lambda: [(1, "ven1")]),                        # venue 名
+            MagicMock(fetchall=lambda: [(1, "ven1")]),                        # account 名
             MagicMock(fetchall=lambda: []),                                   # 持仓
             MagicMock(fetchall=lambda: []),                                   # refresh 无行
         ]
@@ -36,8 +36,8 @@ class TestPositionEndpoint:
             r = self._client().get("/api/position", headers={"Authorization": "Bearer t"})
         body = r.json()
         assert body["stale"] is True                                          # 从未跑≠空仓
-        assert body["venues"][0]["stale"] is True and body["venues"][0]["positions"] == []
-        assert body["venues"][0]["snapshot_ts"] is None
+        assert body["accounts"][0]["stale"] is True and body["accounts"][0]["positions"] == []
+        assert body["accounts"][0]["snapshot_ts"] is None
 
     def test_fresh_empty_is_flat_not_stale(self):
         import datetime as dt
@@ -55,8 +55,8 @@ class TestPositionEndpoint:
         with self._auth(), patch.object(trading_route, "get_conn", return_value=conn):
             r = self._client().get("/api/position", headers={"Authorization": "Bearer t"})
         body = r.json()
-        assert body["stale"] is False and body["venues"][0]["positions"] == []   # 新鲜空=真空仓
-        assert body["venues"][0]["snapshot_rows"] == 0
+        assert body["stale"] is False and body["accounts"][0]["positions"] == []   # 新鲜空=真空仓
+        assert body["accounts"][0]["snapshot_rows"] == 0
 
     def test_total_pnl_uses_account_baseline_not_config(self):
         """#10 口径修正（2026-08-22）：initial=账户首条快照净值，非 initial_capital 列。
@@ -106,14 +106,14 @@ class TestOWiringContracts:
         """O-F3：flush 必须在 query_account 守卫内（断线不写假空仓）——守卫现居 trading.snapshot_cycle。"""
         src = open("src/strategy_runner/trading.py").read()
         i_accounts = src.index("if not accounts:")
-        i_flush = src.index("_flush_positions(adapter, venue_id, tid)")
+        i_flush = src.index("_flush_positions(adapter, account_id, tid)")
         assert i_flush > i_accounts, "snapshot_cycle 的 flush 必须在 query_account 守卫之后（断线双跳过）"
 
     def test_direct_flush_inside_else_branch(self):
         """快照写库（含 available_cash 列）与 flush 同分支：flush 在 INSERT 之后。"""
         src = open("src/strategy_runner/trading.py").read()
-        i_insert = src.index("INSERT INTO account_snapshot (venue_id, total_value, daily_pnl, initial_capital, available_cash)")   # D2 加 venue_id 列
-        i_flush = src.index("_flush_positions(adapter, venue_id, tid)")
+        i_insert = src.index("INSERT INTO account_snapshot (account_id, total_value, daily_pnl, initial_capital, available_cash)")   # D2 加 account_id 列
+        i_flush = src.index("_flush_positions(adapter, account_id, tid)")
         assert i_flush > i_insert, "flush 应在快照写库之后（同 else 分支）"
 
     def test_reconcile_normalizes_symbols_both_sides(self):

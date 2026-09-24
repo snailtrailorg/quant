@@ -1,4 +1,4 @@
-"""D5 建任务与 worker 绑定测试：③时点 venue_allows + TD 网关注册表。"""
+"""D5 建任务与 worker 绑定测试：③时点 account_allows + TD 网关注册表。"""
 from unittest.mock import patch
 
 import pytest
@@ -28,25 +28,25 @@ BUY = {"symbol": "600000.SHSE", "action": "BUY", "volume": 100, "price": 10.0, "
 SELL = {"symbol": "600000.SHSE", "action": "SELL", "volume": 100, "price": 10.0, "operator": "tester"}
 
 
-class TestVenueAllowsCheckOrder:
-    def test_buy_blocked_when_venue_not_allowed(self, rc, monkeypatch):
-        """③时点：venue_allows=False 拦 BUY（D5 三级时点之三）。"""
+class TestAccountAllowsCheckOrder:
+    def test_buy_blocked_when_account_not_allowed(self, rc, monkeypatch):
+        """③时点：account_allows=False 拦 BUY（D5 三级时点之三）。"""
         monkeypatch.setattr(rc, "_get_global_state", lambda vid: _state())
-        monkeypatch.setattr("src.data_platform.perms.venue_allows", lambda vid, sym: False)
-        d = rc.check_order(dict(BUY), venue_id=1)
-        assert not d.approved and d.rule == "VENUE_NOT_ALLOWED"
+        monkeypatch.setattr("src.data_platform.perms.account_allows", lambda vid, sym: False)
+        d = rc.check_order(dict(BUY), account_id=1)
+        assert not d.approved and d.rule == "ACCOUNT_NOT_ALLOWED"
 
-    def test_buy_allowed_when_venue_allows(self, rc, monkeypatch):
+    def test_buy_allowed_when_account_allows(self, rc, monkeypatch):
         monkeypatch.setattr(rc, "_get_global_state", lambda vid: _state())
-        monkeypatch.setattr("src.data_platform.perms.venue_allows", lambda vid, sym: True)
-        d = rc.check_order(dict(BUY), venue_id=1)
+        monkeypatch.setattr("src.data_platform.perms.account_allows", lambda vid, sym: True)
+        d = rc.check_order(dict(BUY), account_id=1)
         assert d.approved
 
     def test_sell_exempt(self, rc, monkeypatch):
-        """③时点：SELL 豁免（venue_allows=False 不拦 SELL，D1 裁定）。"""
+        """③时点：SELL 豁免（account_allows=False 不拦 SELL，D1 裁定）。"""
         monkeypatch.setattr(rc, "_get_global_state", lambda vid: _state())
-        monkeypatch.setattr("src.data_platform.perms.venue_allows", lambda vid, sym: False)
-        d = rc.check_order(dict(SELL), venue_id=1)
+        monkeypatch.setattr("src.data_platform.perms.account_allows", lambda vid, sym: False)
+        d = rc.check_order(dict(SELL), account_id=1)
         assert d.approved
 
 

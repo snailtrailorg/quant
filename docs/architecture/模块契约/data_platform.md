@@ -3,7 +3,7 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
-> **最近变更（2026-09-24 D1/D3/加密接入批）**：`perms.venue_allows`（D1）；`db.get_bars(source)` 按 source 过滤（D3）；`get_interface_row(md_only)` 跳过 required_fields（加密 MD 空凭证）。
+> **最近变更（2026-09-24 D1/D3/加密接入批）**：`perms.account_allows`（D1）；`db.get_bars(source)` 按 source 过滤（D3）；`get_interface_row(md_only)` 跳过 required_fields（加密 MD 空凭证）。
 ## 职责
 统一数据中台：PG 连接池 + K 线 schema + Tushare 拉取 + 交易日历 + 数据源抽象。
 **所有模块通过本模块访问数据**（`get_conn`/`save_bars`/`get_bars`/`is_trading_day`），不直接接触数据源。

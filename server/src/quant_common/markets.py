@@ -41,7 +41,7 @@ PROVIDER_MARKET: dict[str, str] = {
     "emt_emq": "astock",
 }
 
-# 权限五键 → (market, category, venue) 无损映射(market_op 三分混一的立法化解)
+# 权限五键 → (market, category, exchange) 无损映射(market_op 三分混一的立法化解)
 MARKET_OP_DECOMP: dict[str, tuple] = {
     "astock": ("astock", "stock", None), "etf": ("astock", "etf", None),
     "convertible": ("astock", "convertible", None),

@@ -188,8 +188,8 @@ const loadAll = async () => {
   const jobs = [
     async () => { strategies.value = await getStrategies() },
     async () => { dashboard.value = await getDashboard() },
-    async () => { const p = await getPnl(); curve.value = (p.venues || [])[0]?.curve || [] },
-    async () => { positions.value = ((await api.get('/position')).venues || []).flatMap(v => v.positions || []) },
+    async () => { const p = await getPnl(); curve.value = (p.accounts || [])[0]?.curve || [] },
+    async () => { positions.value = ((await api.get('/position')).accounts || []).flatMap(v => v.positions || []) },
     async () => { orders.value = (await getOrders()).orders || [] },   // A-P0-1:后端返 {orders,total}
     async () => { liveTasks.value = await getLiveTasks() },
     async () => { const n = await getNotifications('all', 50)   // 批23 B-P1-2：ack 退役后 active 池只增不减——改拉 all 前端滤今日

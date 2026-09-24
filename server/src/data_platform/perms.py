@@ -74,14 +74,14 @@ def market_op_allowed(username: str, role: str, market: str) -> bool:
     return "allow" in effs
 
 
-def venue_allows(venue_id: int, symbol: str) -> bool:
-    """D1：venue 级品种权限（三维 category/exchange/board + ST 子布尔 + 可转债权限）。
+def account_allows(account_id: int, symbol: str) -> bool:
+    """D1：account 级品种权限（三维 category/exchange/board + ST 子布尔 + 可转债权限）。
 
     判定顺序 category → exchange → board →（board=main 且 is_st）ST → convertible。
     perp 分项 gate（market_op，role 级）不在此函数——check_order 单独查（现有链）。
     方向无关（SELL 豁免由 ③时点调用方 check_order 只对 BUY 调用本函数实现）。
 
-    全链 fail-closed：venue 无权限行 / 标的无档 / board 无档 / 读库失败 → False（宁拒勿错）。
+    全链 fail-closed：account 无权限行 / 标的无档 / board 无档 / 读库失败 → False（宁拒勿错）。
     board↔exchange 一致性：board=star 必 SHSE、chinext 必 SZSE、bse 必 BSE（矛盾数据 fail-closed）。
     例外：ST「无档」= 非 ST（namechange 派生源戴帽滞后 fail-open，官方名单另批——非读库失败）。
     """
@@ -101,13 +101,13 @@ def venue_allows(venue_id: int, symbol: str) -> bool:
             cur = conn.execute(
                 "SELECT allowed_categories, allowed_exchanges, allowed_boards, "
                 "is_st_allowed, convertible_allowed "
-                "FROM venue_permission WHERE venue_id=%s", (venue_id,))
+                "FROM account_permission WHERE account_id=%s", (account_id,))
             row = cur.fetchone()
     except Exception as e:
-        _logger.warning("venue_permission 读取失败（fail-closed 拒）: %s", e)
+        _logger.warning("account_permission 读取失败（fail-closed 拒）: %s", e)
         return False
     if row is None:
-        return False                       # venue 无权限行 → fail-closed（新组零权限起步同哲学）
+        return False                       # account 无权限行 → fail-closed（新组零权限起步同哲学）
 
     cats, exchs, boards, is_st_ok, conv_ok = row
 

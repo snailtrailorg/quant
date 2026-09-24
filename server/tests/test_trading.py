@@ -40,25 +40,25 @@ def _adapter():
 class TestFlushPositions:
     """ST2 持仓真相批（N 审 v2 语义；批 4a 自 test_position_snapshot 收编，断言原样）。"""
 
-    def _run(self, positions, venue_id=1, task_id=8):
+    def _run(self, positions, account_id=1, task_id=8):
         adapter = MagicMock()
         adapter.query_position.return_value = positions
         conn = MagicMock()
         conn.__enter__.return_value = conn
         with patch.object(db, "get_conn", return_value=conn):
-            trading._flush_positions(adapter, venue_id, task_id)
+            trading._flush_positions(adapter, account_id, task_id)
         return conn
 
     def test_overwrite_write_single_transaction(self):
-        """N-v2：单事务 DELETE 该 venue + INSERT 批 + upsert refresh（一次 commit）。"""
+        """N-v2：单事务 DELETE 该 account + INSERT 批 + upsert refresh（一次 commit）。"""
         conn = self._run([_pos()])
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("DELETE FROM position_snapshot" in s for s in sqls)
-        assert any("ON CONFLICT (venue_id)" in s for s in sqls)   # refresh upsert
+        assert any("ON CONFLICT (account_id)" in s for s in sqls)   # refresh upsert
         # O-F1：executemany 走 cursor（池化连接无此方法——F 审同款坑的回归锁）
         cur = conn.cursor.return_value.__enter__.return_value
         cur.executemany.assert_called_once()
-        assert "ON CONFLICT (venue_id, symbol, direction)" in cur.executemany.call_args.args[0]
+        assert "ON CONFLICT (account_id, symbol, direction)" in cur.executemany.call_args.args[0]
         conn.commit.assert_called_once()   # 单事务
 
     def test_empty_batch_clears_state_and_writes_heartbeat(self):
@@ -67,12 +67,12 @@ class TestFlushPositions:
         conn.cursor.assert_not_called()   # 空批不 INSERT
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("DELETE FROM position_snapshot" in s for s in sqls)
-        upsert = [c for c in conn.execute.call_args_list if "ON CONFLICT (venue_id)" in c.args[0]]
+        upsert = [c for c in conn.execute.call_args_list if "ON CONFLICT (account_id)" in c.args[0]]
         assert upsert and upsert[0].args[1] == (1, 0, "8", 0, "8")
 
-    def test_venue_id_passed_directly(self):
-        """D2：venue_id 直接作为真相维度传入（无 account_id 'default' 降级）。"""
-        conn = self._run([], venue_id=7)
+    def test_account_id_passed_directly(self):
+        """D2：account_id 直接作为真相维度传入（无 account_id 'default' 降级）。"""
+        conn = self._run([], account_id=7)
         del_call = [c for c in conn.execute.call_args_list if "DELETE" in c.args[0]][0]
         assert del_call.args[1] == (7,)
 
@@ -218,15 +218,15 @@ class TestSnapshotCycle:
              patch.object(trading, "_flush_positions"):   # 持仓批自持连接/自有事务，单测隔离（挂点另有锁）
             trading.snapshot_cycle(adapter, 1, 8, {"baseline": None})
         sqls = [c.args[0] for c in conn.execute.call_args_list]
-        assert any("SELECT total_value FROM account_snapshot WHERE venue_id=%s" in s for s in sqls)
+        assert any("SELECT total_value FROM account_snapshot WHERE account_id=%s" in s for s in sqls)
         insert = [c for c in conn.execute.call_args_list
                   if "INSERT INTO account_snapshot" in c.args[0]][0]
-        assert insert.args[1] == (1, 150.0, 30.0, 1.0, 120.0)   # venue_id/total/daily_pnl/基线/available
+        assert insert.args[1] == (1, 150.0, 30.0, 1.0, 120.0)   # account_id/total/daily_pnl/基线/available
         base.assert_called_once()
         conn.commit.assert_called_once()
 
-    def test_flush_wired_with_same_venue_and_task(self):
-        """ST2：同拍写持仓批，venue_id/tid 原样透传（挂点契约）。"""
+    def test_flush_wired_with_same_account_and_task(self):
+        """ST2：同拍写持仓批，account_id/tid 原样透传（挂点契约）。"""
         adapter = MagicMock()
         adapter.query_account.return_value = [_acct()]
         conn = MagicMock()
@@ -446,7 +446,7 @@ class TestRealConnectionSmoke:
                     "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
                 ).fetchone()
                 if row is None or row[0] is None:
-                    pytest.skip("无交易域 venue（external_interface 空）")
+                    pytest.skip("无交易域 account（external_interface 空）")
                 vid = row[0]
                 conn.commit()
         except Exception:
@@ -458,10 +458,10 @@ class TestRealConnectionSmoke:
         try:
             with db.get_conn() as conn:
                 cur = conn.execute("SELECT symbol, volume, direction FROM position_snapshot "
-                                   "WHERE venue_id=%s", (vid,))
+                                   "WHERE account_id=%s", (vid,))
                 rows = cur.fetchall()
                 cur = conn.execute("SELECT rows, task_id FROM position_refresh "
-                                   "WHERE venue_id=%s", (vid,))
+                                   "WHERE account_id=%s", (vid,))
                 ref = cur.fetchone()
             assert rows and rows[0][0] == "600000.SHSE" and rows[0][2] == "direction_long"
             assert ref and ref[0] == 1 and ref[1] == "99"
@@ -470,14 +470,14 @@ class TestRealConnectionSmoke:
             adapter2.query_position.return_value = []
             trading._flush_positions(adapter2, vid, 99)
             with db.get_conn() as conn:
-                cur = conn.execute("SELECT count(*) FROM position_snapshot WHERE venue_id=%s",
+                cur = conn.execute("SELECT count(*) FROM position_snapshot WHERE account_id=%s",
                                    (vid,))
                 assert cur.fetchone()[0] == 0, "空批必须清掉旧行（当前状态表语义）"
-                cur = conn.execute("SELECT rows FROM position_refresh WHERE venue_id=%s",
+                cur = conn.execute("SELECT rows FROM position_refresh WHERE account_id=%s",
                                    (vid,))
                 assert cur.fetchone()[0] == 0
         finally:
             with db.get_conn() as conn:
-                conn.execute("DELETE FROM position_snapshot WHERE venue_id=%s", (vid,))
-                conn.execute("DELETE FROM position_refresh WHERE venue_id=%s", (vid,))
+                conn.execute("DELETE FROM position_snapshot WHERE account_id=%s", (vid,))
+                conn.execute("DELETE FROM position_refresh WHERE account_id=%s", (vid,))
                 conn.commit()

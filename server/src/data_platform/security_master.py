@@ -265,7 +265,7 @@ class MarketHours:
         """读 security_master.board 列（退役 _board_of 前缀判断——board 字段化单一真源）。
 
         无档/读库失败 → 前缀启发式兜底（旧 _board_of 逻辑，session/timing 确定性，永不 None）：
-        688/689→star、300/301→chinext、92/43/83/87→bse、else main。权限路径（venue_allows）
+        688/689→star、300/301→chinext、92/43/83/87→bse、else main。权限路径（account_allows）
         不依赖此兜底（board 无档直接 fail-closed）。
         """
         try:

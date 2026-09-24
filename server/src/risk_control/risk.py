@@ -155,10 +155,10 @@ class RiskControl:
 
     # ── 实盘开关（三级 AND：.env 总闸 + Web 分项 + 策略级） ──
 
-    def _symbol_exposure(self, symbol: str, venue_id) -> tuple[float, float]:
+    def _symbol_exposure(self, symbol: str, account_id) -> tuple[float, float]:
         """标的当前市值与账户总值（single_position_pct 判定用；快照缺失返回 (0,0)=不拦）。
 
-        D2：per-venue 过滤（venue_id=None 时 `venue_id=NULL` 恒 false → 返回 0 不拦）。
+        D2：per-account 过滤（account_id=None 时 `account_id=NULL` 恒 false → 返回 0 不拦）。
         D4：净敞口（direction_long 正 / direction_short 负），原无 direction 过滤 short 行误并入市值。
         """
         try:
@@ -170,11 +170,11 @@ class RiskControl:
                     "SELECT COALESCE(SUM(CASE WHEN direction='direction_long' THEN cost_price*volume "
                     "WHEN direction='direction_net' THEN cost_price*volume "
                     "WHEN direction='direction_short' THEN -cost_price*volume ELSE 0 END),0) "
-                    "FROM position_snapshot WHERE symbol=%s AND venue_id=%s", (vt, venue_id))
+                    "FROM position_snapshot WHERE symbol=%s AND account_id=%s", (vt, account_id))
                 held = float(cur.fetchone()[0] or 0)
                 cur = conn.execute(
-                    "SELECT total_value FROM account_snapshot WHERE venue_id=%s ORDER BY ts DESC LIMIT 1",
-                    (venue_id,))
+                    "SELECT total_value FROM account_snapshot WHERE account_id=%s ORDER BY ts DESC LIMIT 1",
+                    (account_id,))
                 row = cur.fetchone()
                 return held, float(row[0]) if row else 0.0
         except Exception:
@@ -222,14 +222,14 @@ class RiskControl:
                 "AND enabled AND deleted_at IS NULL", (username,)).fetchone()
         return row[0] if row else None
 
-    def check_order(self, order: dict, venue_id=None) -> RiskDecision:
+    def check_order(self, order: dict, account_id=None) -> RiskDecision:
         """所有自动交易 send_order 前必调。
 
         P1-1（web-design 06 B#2）：出口统一落 risk_log（approve/reject/adjust 可筛）——
         风控页决策面板数据源。写库失败只 warning 不阻断下单路径（日志是审计面非控制面）。
-        D2：venue_id 为读方/写方 per-venue 过滤真源（order 内 "venue_id" 键同源，由 place_order 注入）。
+        D2：account_id 为读方/写方 per-account 过滤真源（order 内 "account_id" 键同源，由 place_order 注入）。
         """
-        d = self._check_order_inner(order, venue_id)
+        d = self._check_order_inner(order, account_id)
         try:
             # 批19 盲审A-P1 修：按 adjusted 语义判（原 "截断" in reason——场内"截断后 volume=0"
             # 的拒单被记 adjust、真覆写(approved+adjusted)被记 approve，同码横跨三 action）
@@ -245,7 +245,7 @@ class RiskControl:
             logger.warning("risk_log 写入失败（不阻断）: %s", e)
         return d
 
-    def _check_order_inner(self, order: dict, venue_id=None) -> RiskDecision:
+    def _check_order_inner(self, order: dict, account_id=None) -> RiskDecision:
         # SB2（F-23）：规则热加载（60s TTL，失败沿用旧规则）
         self._maybe_reload_rules()
         # 1. 熔断检查
@@ -286,22 +286,22 @@ class RiskControl:
             return RiskDecision(approved=False,
                 reason=f"市场操作权限检查异常（fail-closed）: {e}", severity="critical", rule="MARKET_OP_ERROR")
 
-        # 2.6 D5 三级时点③：venue 级品种权限（venue_allows）——仅拦 BUY/开仓，SELL 豁免（D1 裁定）。
-        # venue_id=None（旧 --id 路径/异常）跳过本段，由全局风控 _get_global_state(None) 读方
-        # fail-closed（WHERE venue_id=NULL 恒 false → available=False 拒单）兜住。
+        # 2.6 D5 三级时点③：account 级品种权限（account_allows）——仅拦 BUY/开仓，SELL 豁免（D1 裁定）。
+        # account_id=None（旧 --id 路径/异常）跳过本段，由全局风控 _get_global_state(None) 读方
+        # fail-closed（WHERE account_id=NULL 恒 false → available=False 拒单）兜住。
         try:
-            if str(order.get("action", "")).upper() == "BUY" and venue_id is not None:
-                from src.data_platform.perms import venue_allows
-                if not venue_allows(venue_id, symbol):
+            if str(order.get("action", "")).upper() == "BUY" and account_id is not None:
+                from src.data_platform.perms import account_allows
+                if not account_allows(account_id, symbol):
                     return RiskDecision(approved=False,
-                        reason=f"venue 级品种权限拒绝: {symbol}（venue_id={venue_id}）",
-                        severity="warn", rule="VENUE_NOT_ALLOWED")
+                        reason=f"account 级品种权限拒绝: {symbol}（account_id={account_id}）",
+                        severity="warn", rule="ACCOUNT_NOT_ALLOWED")
         except Exception as e:
             return RiskDecision(approved=False,
-                reason=f"venue 权限检查异常（fail-closed）: {e}", severity="critical", rule="VENUE_PERM_ERROR")
+                reason=f"account 权限检查异常（fail-closed）: {e}", severity="critical", rule="ACCOUNT_PERM_ERROR")
 
         # 3. 全局风控
-        state = self._get_global_state(venue_id)
+        state = self._get_global_state(account_id)
         # SB1（F-29）fail-closed：快照数据源故障/无数据时拒绝一切新单（故障时保护必须更紧不能更松）
         if not state.available:
             return RiskDecision(approved=False, reason="风控状态不可用（快照数据源故障或无数据，fail-closed），等待快照恢复", severity="critical", rule="SNAPSHOT_UNAVAILABLE")
@@ -320,11 +320,11 @@ class RiskControl:
         if ".BINANCE" in symbol or ".OKX" in symbol or "PERP" in symbol:
             return self._check_crypto(order, state)
         elif ".SHSE" in symbol or ".SZSE" in symbol or ".SSE" in symbol:
-            return self._check_etf_conv(order, venue_id)
+            return self._check_etf_conv(order, account_id)
         return RiskDecision(approved=True, reason="通过")
 
-    def _check_etf_conv(self, order: dict, venue_id) -> RiskDecision:
-        """场内（可转债/ETF）风控。venue_id 来自 _check_order_inner 形参（单一真源，勿用 order 键分叉）。"""
+    def _check_etf_conv(self, order: dict, account_id) -> RiskDecision:
+        """场内（可转债/ETF）风控。account_id 来自 _check_order_inner 形参（单一真源，勿用 order 键分叉）。"""
         rules = self._rules["etf_conv"]  # _merged_rules 保证存在（SB2-F-30）
         # SB3（F-43/F-28 风控层兜底）：数量/价格无效直接拒——0 值单绕过金额上限且是废单
         price = float(order.get("price", 0) or 0)
@@ -360,7 +360,7 @@ class RiskControl:
             try:
                 pct_limit = float(rules.get("single_position_pct", 0.15))
                 sym = order.get("symbol", "")
-                held_val, total_val = self._symbol_exposure(sym, venue_id)
+                held_val, total_val = self._symbol_exposure(sym, account_id)
                 after = held_val + price * volume
                 if total_val > 0 and after / total_val > pct_limit * 1.05:   # 5% 容差防边界抖动
                     return RiskDecision(approved=False,
@@ -403,12 +403,12 @@ class RiskControl:
 
     # ── 全局状态（从数据中台/账户读取，简化） ──
 
-    def _get_global_state(self, venue_id) -> RiskState:
-        """获取账户全局风控状态：从 PG 读该 venue 最新快照计算回撤/亏损。
+    def _get_global_state(self, account_id) -> RiskState:
+        """获取账户全局风控状态：从 PG 读该 account 最新快照计算回撤/亏损。
 
         SB1（F-29/F-34）fail-closed：数据源故障或无任何快照 → available=False，
         check_order 据此拒单——绝不允许"故障时限制归零继续交易"。
-        D2：per-venue 过滤（venue_id=None 恒不命中 → available=False fail-closed）。
+        D2：per-account 过滤（account_id=None 恒不命中 → available=False fail-closed）。
         """
         try:
             with get_conn() as conn:
@@ -418,7 +418,7 @@ class RiskControl:
                 cur = conn.execute(
                     "SELECT total_value, daily_pnl, initial_capital, "
                     "EXTRACT(EPOCH FROM (now() - ts)) FROM account_snapshot "
-                    "WHERE venue_id=%s ORDER BY ts DESC LIMIT 1", (venue_id,))
+                    "WHERE account_id=%s ORDER BY ts DESC LIMIT 1", (account_id,))
                 row = cur.fetchone()
                 if not row:
                     logger.warning("account_snapshot 无数据（风控 fail-closed，等待首个快照）")
@@ -442,13 +442,13 @@ class RiskControl:
             return RiskState(halted=halted, total_drawdown=0.0, daily_loss=0.0, available=False)
 
     def update_account_snapshot(self, total_value: float, daily_pnl: float = 0,
-                                 initial_capital: float = 1_000_000, venue_id=None):
-        """更新账户快照（策略引擎/交易引擎调用，供风控读取）。D2：per-venue 落行。"""
+                                 initial_capital: float = 1_000_000, account_id=None):
+        """更新账户快照（策略引擎/交易引擎调用，供风控读取）。D2：per-account 落行。"""
         import os
         with get_conn() as conn:
             conn.execute(
-                "INSERT INTO account_snapshot (venue_id, total_value, daily_pnl, initial_capital) VALUES (%s,%s,%s,%s)",
-                (venue_id, total_value, daily_pnl, initial_capital))
+                "INSERT INTO account_snapshot (account_id, total_value, daily_pnl, initial_capital) VALUES (%s,%s,%s,%s)",
+                (account_id, total_value, daily_pnl, initial_capital))
             conn.commit()
 
     # ── 规则管理 ──

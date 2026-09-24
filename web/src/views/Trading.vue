@@ -65,13 +65,13 @@
         <el-alert v-if="positionData.stale" type="warning" :closable="false" style="margin: var(--sp-2) 0">
           <template #title>
             {{ t('trading.staleWarn') }}
-            <el-tooltip v-if="snapshotVenue.snapshot_rows != null" :content="t('trading.snapshotRowsTip', { n: snapshotVenue.snapshot_rows })">
+            <el-tooltip v-if="snapshotAccount.snapshot_rows != null" :content="t('trading.snapshotRowsTip', { n: snapshotAccount.snapshot_rows })">
               <el-icon style="vertical-align: middle"><QuestionFilled /></el-icon>
             </el-tooltip>
           </template>
         </el-alert>
         <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 6px; display: flex; justify-content: space-between">
-          <span>{{ t('trading.snapshotNote') }}{{ snapshotVenue.snapshot_ts ? fmtTime.full(snapshotVenue.snapshot_ts) : '—' }}</span>
+          <span>{{ t('trading.snapshotNote') }}{{ snapshotAccount.snapshot_ts ? fmtTime.full(snapshotAccount.snapshot_ts) : '—' }}</span>
           <span>{{ t('trading.lastUpdate') }}: {{ lastUpdate }}</span>
         </div>
       </el-tab-pane>
@@ -149,8 +149,8 @@ use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 const positionData = ref({})
 const ordersData = ref({})
-// D2：get_position 按 venue 分组返回——粗显聚合各 venue 持仓（细显留后续）
-const positions = computed(() => (positionData.value?.venues || []).flatMap(v => v.positions || []))
+// D2：get_position 按 account 分组返回——粗显聚合各 account 持仓（细显留后续）
+const positions = computed(() => (positionData.value?.accounts || []).flatMap(v => v.positions || []))
 
 // 批17 17B：委托表列显隐（方案圈定——时间类低频列默认隐；全列可配，无锁定列）
 const orderColDefs = computed(() => [
@@ -166,10 +166,10 @@ const orderColDefs = computed(() => [
 const orderVisible = ref([])
 const orderOn = k => orderVisible.value.includes(k)
 const pnlData = ref({})
-// D2：get_pnl 按 venue 分组返回——粗显取首个 venue 曲线（细显留后续）
-const pnlCurve = computed(() => (pnlData.value?.venues || [])[0]?.curve || [])
-// D2：snapshot 时间/行数已下沉到 venue 对象——粗显取首个 venue（细显留后续）
-const snapshotVenue = computed(() => (positionData.value?.venues || [])[0] || {})
+// D2：get_pnl 按 account 分组返回——粗显取首个 account 曲线（细显留后续）
+const pnlCurve = computed(() => (pnlData.value?.accounts || [])[0]?.curve || [])
+// D2：snapshot 时间/行数已下沉到 account 对象——粗显取首个 account（细显留后续）
+const snapshotAccount = computed(() => (positionData.value?.accounts || [])[0] || {})
 const lastPrices = ref({})   // wd-20 §1.4.2：现价恢复（行情快照联动）
 const pnlChartOption = computed(() => ({
   tooltip: { trigger: 'axis' },

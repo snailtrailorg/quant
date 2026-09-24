@@ -26,7 +26,7 @@ STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
 
 
 def _crypto_provider(symbol: str) -> str | None:
-    """加密 symbol 后缀 → provider（D3 同源分源键）；A股/其他返回 None（单 hub 无 venue 维）。"""
+    """加密 symbol 后缀 → provider（D3 同源分源键）；A股/其他返回 None（单 hub 无 exchange 维）。"""
     if ".BINANCE" in symbol:
         return "binance_perp"
     if ".OKX" in symbol:
@@ -34,26 +34,26 @@ def _crypto_provider(symbol: str) -> str | None:
     return None
 
 
-def bar_stream_key(symbol: str, venue_id=None) -> str:
-    """D3 流键格式：A股 `hub:bars:{symbol}`（单 hub）；加密 `hub:bars:{venue_id}:{symbol}`（per-venue）。"""
-    if _crypto_provider(symbol) and venue_id is not None:
-        return f"hub:bars:{venue_id}:{symbol}"
+def bar_stream_key(symbol: str, account_id=None) -> str:
+    """D3 流键格式：A股 `hub:bars:{symbol}`（单 hub）；加密 `hub:bars:{account_id}:{symbol}`（per-account）。"""
+    if _crypto_provider(symbol) and account_id is not None:
+        return f"hub:bars:{account_id}:{symbol}"
     return BAR_STREAM_PREFIX + symbol
 
 
-def _venue_mismatch(fields: dict, symbol: str, venue_id) -> bool:
-    """D3 同源校验：加密 per-venue 流消息与本 venue 是否不匹配（True=跨源/缺失/非法，fail-fast）。
+def _account_mismatch(fields: dict, symbol: str, account_id) -> bool:
+    """D3 同源校验：加密 per-account 流消息与本 account 是否不匹配（True=跨源/缺失/非法，fail-fast）。
 
-    A股（无 provider）恒 False（单 hub 无 venue 维，不做比对）。
-    加密但 venue_id=None（异常态）→ True（无法判定同源，fail-closed 拒——防吃错行情）。
-    decode_responses 读出 venue_id 是 str，须 int 转换；缺失/非法按不匹配（fail-closed）。
+    A股（无 provider）恒 False（单 hub 无 exchange 维，不做比对）。
+    加密但 account_id=None（异常态）→ True（无法判定同源，fail-closed 拒——防吃错行情）。
+    decode_responses 读出 account_id 是 str，须 int 转换；缺失/非法按不匹配（fail-closed）。
     """
     if _crypto_provider(symbol) is None:
         return False
-    if venue_id is None:
+    if account_id is None:
         return True
     try:
-        return int(fields.get("venue_id", -1)) != venue_id
+        return int(fields.get("account_id", -1)) != account_id
     except (TypeError, ValueError):
         return True
 # 批 2 骨架三件套（与 hub 同款；_valkey 保留别名供测试/冒烟注入 fake）
@@ -134,13 +134,13 @@ def run(ctx: dict) -> None:
 
     r = _valkey()
     tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
-    venue_id = ctx.get("venue_id")     # D3：per-venue 流键/同源校验真源（A股 None）
+    account_id = ctx.get("account_id")     # D3：per-account 流键/同源校验真源（A股 None）
     strategy, adapter = ctx["strategy"], ctx["adapter"]
     ee = ctx["event_engine"]          # 评审 C1：键名统一
     td_api = ctx.get("td_api")
     history = ctx["history"]
     frozen = ctx["frozen"]            # 与 _run_hub_mode 的 send_order 网关共享同一 dict（评审 C2）
-    stream = bar_stream_key(symbol, venue_id)
+    stream = bar_stream_key(symbol, account_id)
     gname = f"task-{tid}"
     cname = f"w-{os.getpid()}"
     state = BarMsgState()
@@ -168,8 +168,8 @@ def run(ctx: dict) -> None:
             logger.warning("XGROUP CREATE 失败: %s", e)
 
     # P0-3 配套：max_ts 持久化恢复（R-DL1 跨重启去重——曾进程内存失忆）
-    # D3：加密 per-venue 水位键含 venue（防跨 venue 去重串扰）
-    _mts_key = f"hub:worker:max_ts:{venue_id}:{symbol}" if _crypto_provider(symbol) else f"hub:worker:max_ts:{symbol}"
+    # D3：加密 per-account 水位键含 account（防跨 account 去重串扰）
+    _mts_key = f"hub:worker:max_ts:{account_id}:{symbol}" if _crypto_provider(symbol) else f"hub:worker:max_ts:{symbol}"
     try:
         _saved = r.get(_mts_key)
         if _saved:
@@ -203,11 +203,11 @@ def run(ctx: dict) -> None:
     # ——— 消息处理（guard 保护，R-BR12；告警走 _alert——notify 自带 1min 同标题去重）———
     @make_guard("hub.on_msg", _alert)
     def handle_msg(fields: dict) -> None:
-        # D3 同源校验：加密 per-venue 流必须带本 venue_id，跨源消息 fail-fast 不落地（防吃错行情下错单）
-        if _venue_mismatch(fields, symbol, venue_id):
+        # D3 同源校验：加密 per-account 流必须带本 account_id，跨源消息 fail-fast 不落地（防吃错行情下错单）
+        if _account_mismatch(fields, symbol, account_id):
             stats["dropped_cross"] += 1
-            logger.error("跨源消息拒绝（venue_id=%s != %s）: %s",
-                         fields.get("venue_id"), venue_id, fields.get("ts"))
+            logger.error("跨源消息拒绝（account_id=%s != %s）: %s",
+                         fields.get("account_id"), account_id, fields.get("ts"))
             return
         ts_key = _epoch_key(fields.get("ts", ""))
         # R-DL1 持久去重（评审 S7）：ts 回退/重复（含 flush 迟到 tick 重复桶）一律丢弃（epoch 键——跨表示同刻同键）
@@ -369,7 +369,7 @@ def run(ctx: dict) -> None:
     loop.every("blind-watch", 0.0, _blind_watch)     # 盲视判定+告警（喂 frozen 字段）：每步
     loop.every("heartbeat", 5.0, _heartbeat)         # 心跳（D3 七字段+ts）
     loop.every("snapshot", 60.0, lambda: trading.snapshot_cycle(  # 快照+持仓批（旧 12 拍=60s）
-        adapter, ctx.get("venue_id"), tid, _baseline_cache))
+        adapter, ctx.get("account_id"), tid, _baseline_cache))
     loop.every("halt-edge", 0.0, lambda: trading.halt_edge_cancel(adapter, halt_state, sid))  # 熔断沿撤在场单
     loop.every("factor-recalc", 5.0, lambda: trading.recalc_hook(r, _rewarm, history))  # 因子重算+热重载
     loop.every("td-reconnect", 0.0, _td_reconnect)   # TD 重连沿对账：每步
