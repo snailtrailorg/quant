@@ -186,6 +186,16 @@
         deploy_task_units_feishu: "{{ task_units_feishu_db.stdout_lines | default([]) }}"
       when: deploy_task_units_source == 'db' and task_units_feishu_db is succeeded
 
+    - name: preflight —— hub 波次实例采集（systemd 所有 md-hub@* 实例——A股 @quant + 加密 per-account @id；D6 加密 hub 入列后版本收敛缺口修复）
+      ansible.builtin.shell: "systemctl list-units --all 'quant-md-hub@*.service' --no-legend --plain 2>/dev/null | awk '{print $1}' | sort"
+      register: hub_units_systemd
+      changed_when: false
+
+    - name: preflight —— hub 真相源结果解析（每行一个 unit 名；空则兜底 A股 hub）
+      ansible.builtin.set_fact:
+        deploy_hub_units: "{{ (hub_units_systemd.stdout_lines | default([])) or ['quant-md-hub@quant.service'] }}"
+      when: hub_units_systemd is succeeded
+
   tasks:
     # ================= 阶段 2-5：未切换（rescue=清 staged + fail） =================
     - name: 阶段 2-5（未切换）
