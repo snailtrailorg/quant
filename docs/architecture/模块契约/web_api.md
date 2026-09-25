@@ -85,12 +85,8 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 筛选 | `/api/screen/{astock,cb,etf}` | GET | viewer+ | 标的筛选（daily_basic） |
 | **LLM用量** | `/api/llm-usage/series` | GET | viewer+ | 批50：每模型今日汇总+48h×小时曲线（generate_series 补零；原 summary 退役） |
 | **外部接口** | `- `/api/routing/*`（批 57 M2：policies CRUD+dry-run 试算+decisions 审计——全端点 system_config 键）
-/api/interfaces` `?cap=` `{iid}/{test}` `/api/interfaces/reorder` `/api/interfaces/providers` | GET/POST/DELETE | admin | 批55a：统一表 CRUD+分域 reorder（行=账号/列=能力——27 号）；GET 按能力过滤（GIN @>）+漂移告警+附 code_capabilities；批55b：providers=新建下拉目录（注册表派生） |
-| ~~数据源管理（垫片）~~ | ~~`/api/data-sources` 族~~ | — | — | 批55b 删除（55a 过渡垫片完成使命——前端已切 /api/interfaces，批39 channels 同款节奏） |
-| 后台任务 | `/api/tasks` `/api/tasks/{task_id}/{terminate,force-delete}` `/api/tasks/detect-stuck` | GET/POST | viewer+ | PT1（list/get/终止/强删/卡死检测） |
-| 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/POST/DELETE | admin | PT4（channel_config CRUD） |
-| ~~交易通道（垫片）~~ | ~~`/api/brokers` 族~~ | — | — | 批55b 删除（同上） |
-| 风控规则 | `/api/risk-rules` `/api/risk-rules/{types,{rid}}` | GET/POST/POST/DELETE | admin | PT6（risk_rules CRUD） |
+/api/interfaces` `?cap=` `{iid}/{test}` `/api/interfaces/reorder` `/api/interfaces/providers` | GET/POST/DELETE | admin | 批55a：统一表 CRUD+分域 reorder（行=账号/列=能力——27 号）；GET 按能力过滤（GIN @>）+漂移告警+附 code_capabilities；批55b：providers=新建下拉目录（注册表派生） | GET/POST | viewer+ | PT1（list/get/终止/强删/卡死检测） |
+| 消息通道 | `/api/channels` `/api/channels/{cid}/{test}` | GET/POST/POST/DELETE | admin | PT4（channel_config CRUD） | GET/POST/POST/DELETE | admin | PT6（risk_rules CRUD） |
 | 因子 | `/api/factors` `/api/factors/{name}` `/api/factors/validate` | GET/POST/POST/DELETE | viewer+ / strategy_control | 因子 CRUD（预置+自定义）+ 代码校验 |
 | 策略校验 | `/api/strategy/validate-python` `/api/strategy/validate-params` | POST | analyst+ | Python 代码 AST 校验 + parameter_defs 校验 |
 | **实盘任务** | `/api/live-task` `/api/live-task/{tid}/{start,stop}` `/api/live-task/{tid}` | GET/POST/DELETE | viewer+ / strategy_control | 策略与标的分离（live_task CRUD，一标的一进程） |
@@ -100,9 +96,7 @@ PERMISSIONS: dict[str, set[str]]    # 角色 -> 权限集
 | 数据源用量 | `/api/data-source-usage` | GET | viewer+ | A4（data_source_usage 看板） |
 | 回测 | `/api/backtest` `/api/backtest/{run_id}` `/api/backtest/{run_id}/{symbol}/stream` `/api/backtest/{run_id}/summary` | POST/GET | analyst+ | B3（创建含 symbol_params/列表/详情/SSE 流/汇总） |
 | 标的池 | `/api/pool` `/api/pool/{pid}` `/api/pool/{pid}/{symbol,minute-status}` | GET/POST/DELETE | viewer+ / strategy_control | 池 CRUD + 入池（astock 池自动投 symbols 回补）+ 池分钟状态 |
-| 策略-账户绑定 | `/api/strategy_account` `/api/strategy_account/{said}` | GET/POST/DELETE | viewer+ / strategy_control | #27 绑定关系 CRUD |
-| ~~LLM 预算~~ | ~~`/api/llm-budget`~~ | — | — | **批50 彻底退役**（用户裁定 B：beat 任务/端点/`llm_budget` 表 0088 DROP） |
-| 站内通知 | `/api/notifications` `/api/notifications/ack-all` | GET/POST | viewer+ | 通知中心（active 历史 + 全部已读） |
+| 策略-账户绑定 | `/api/strategy_account` `/api/strategy_account/{said}` | GET/POST/DELETE | viewer+ / strategy_control | #27 绑定关系 CRUD | GET/POST | viewer+ | 通知中心（active 历史 + 全部已读） |
 | 通知 runbook | `/api/runbook` | GET | strategy_control | runbook 映射单源（通知 chip/处置行消费；暂仅中文——多语言债） |
 | 系统配置 | `/api/system-config` `/api/system-config/{key}` | GET/POST | viewer+ | system_config 键值（md_mode/celery_concurrency 等）；批36b-α 数值键 bounds 随 GET 下发 `{lo,hi,lo_open,percent}`（批45 加 percent=True 五键=0~1 比例，前端显示层 ×100 百分比化，存储仍 0~1）；description 前端词条优先（`systemConfig.desc.*`）DB 兜底 |
 | SMTP 通道 | `/api/smtp-providers` `/api/smtp-providers/{id}` `/api/smtp-providers/reorder` `/api/email/test` `/api/email-outbox` | GET/POST/DELETE | user_mgmt（admin） | **批47 多通道**（smtp_provider 表——行序即 failover 顺序；旧 /api/smtp-config 单实例端点退役）+ 测试（站名主题）+ 发件箱；凭证三段语义（批38） |
