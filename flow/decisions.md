@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-09-25 · 全市场统一账号级 hub 拓扑（推翻 A05「A股 MD 单 hub」部分裁定）
+
+1. **终裁**：全市场唯一拓扑=**账号级实例化**——一行 trading 域接口配置=一个账号=一个 hub+一套 TD 会话；hub 绑死账号行（MD/TD 同凭证，裁定 A：不做 md_row 跨通道解耦）。XTP 双账号=双行=双 hub（空间换简洁）。
+2. **推翻 A05 五理由**：①分支税（A 股/加密 10+ 处分支，D6 键分叉/flush_stale 等历史 bug 本质是分支税）；②故障域反转（单 hub=全平台单点故障；per-account=故障域恰为账号域——A05「N-1 多余故障点」视角是反的）；③一致性反对弱化（两份聚合 bar 微差在 A03 双时态语义下非新罪：流生成版本本就允许微差，权威=盘后 PG 回补）；④M5 退役红利（互备体系存在的全部理由=多实例抢一键空间，统一后无对象，switch.py/active_instance/intent/guarded Lua/AB 双实例整体蒸发；gen 保留，lease 简化）；⑤**底座同质化**（最根本：「聚合 hub」特殊形态组件消失——hub 从共享基础设施退化为账号附属进程；若保留共享单例，hub 底座须双模式注册，解耦复杂度落在底座上传染全系统；统一后单一形态=注册即行 CRUD、代码路径唯一、故障模式单一）。
+3. **连带退役**：HUB_INTERFACE_ROW 概念（hub 选行语义消失）；position/拖拽的通道切换语义（reorder 端点退役；tushare 多数据源行优先序与 routing 软排序保留）；SA4 期望态统一按行（A 股特例消失）。
+4. **不变式修订**：「同源数据不复制」全市场统一为 **best-effort**（对账锚=PG 盘后回补；消费方不得假设跨账号同 bar）。
+5. **哲学（用户立法）**：逻辑越简洁代码质量越高，真实故障点越少；资源不足加配置即可。
+6. **载体**：`docs/design/D26-市场接入架构.md` v3（§零推翻记录）；**实施批方案细化须重新双盲审**。
+
 ## 2026-09-24 · 术语正名：venue 概念废除（账号→account、交易所→exchange）
 
 1. **venue 一词彻底废除，按语义拆两词**：D1-D6 的 venue（=交易账号/external_interface 行）→ `account`（对齐 vnpy `AccountData` / QuantConnect `account` / FIX Tag 1 `Account`——行业里 venue 本义=交易场所/交易所，拿来指账号是语义错位）；`MARKET_OP_DECOMP` 第三元（=BINANCE/OKX 交易所）→ `exchange`（归一到已有 `EXCHANGES` 概念，本就该叫 exchange）。
