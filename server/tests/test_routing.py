@@ -48,10 +48,46 @@ class _FakeConn:
         pass
 
 
-_ROWS = [  # tushare（kline 能力/astock 全所/position 1）+tencent（quote-only 不入选）
-    ("tushare", "astock", None, ["kline", "daily"], "{}", 1, True),
-    ("tencent", "astock", None, ["quote"], "{}", 2, True),
+_ROWS = [  # D25 token 化后真实形状：tushare{hist_quote}+tencent{rt_quote}+xtp{trading,rt_quote}
+    ("tushare", "astock", None, ["hist_quote"], "{}", 1, True),
+    ("tencent", "astock", None, ["rt_quote"], "{}", 2, True),
+    ("xtp", "astock", None, ["trading", "rt_quote"], "{}", 3, True),
 ]
+
+
+class TestCapCoversD25:
+    """D25 类 token 展开行为钉（盲审 A-P1/B-P1：核心新逻辑零覆盖——旧词夹具假绿教训）。
+
+    直接钉 _cap_covers 纯函数：新 token 展开的命中/排除是路由选源的生死线。"""
+
+    def test_hist_quote_covers_bar_family(self):
+        from src.data_platform.routing import _cap_covers
+        for kind in ("bar_daily", "bar_minute", "index_daily", "adj_factor"):
+            assert _cap_covers(["hist_quote"], kind), kind
+
+    def test_rt_quote_not_cover_bar(self):
+        from src.data_platform.routing import _cap_covers
+        # tencent 行 {rt_quote} 不得入选历史类 kind（盲审 A-P0 的行为面：剥 minute 后只剩 rt_quote）
+        for kind in ("bar_daily", "bar_minute", "index_daily"):
+            assert not _cap_covers(["rt_quote"], kind), kind
+
+    def test_rt_quote_covers_stream_kinds(self):
+        from src.data_platform.routing import _cap_covers
+        # xtp 行 {trading, rt_quote} 展开后覆盖实时类 kind
+        for kind in ("snapshot", "stream_bar", "stream_tick", "depth"):
+            assert _cap_covers(["trading", "rt_quote"], kind), kind
+
+    def test_ref_data_and_inst_event(self):
+        from src.data_platform.routing import _cap_covers
+        assert _cap_covers(["ref_data"], "fundamental_daily")
+        assert _cap_covers(["ref_data"], "trade_cal")
+        assert _cap_covers(["inst_event"], "suspend")
+        assert not _cap_covers(["inst_event"], "bar_daily")
+
+    def test_kline_alias_and_bare_kind_compat(self):
+        from src.data_platform.routing import _cap_covers
+        assert _cap_covers(["kline"], "bar_daily")            # 55a 历史别名
+        assert _cap_covers(["bar_daily"], "bar_daily")        # 裸 DataKind 词兼容
 _POLICIES = [
     ("default", {"completeness": 0.5, "cost": 0.3, "latency": 0.2}, None),
     ("backtest", {"completeness": 0.7, "cost": 0.2, "latency": 0.1}, None),

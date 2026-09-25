@@ -143,9 +143,12 @@ def list_interfaces(cap: str | None = None, payload: dict = Depends(require_perm
     附漂移告警（55-0 共同底座：配置能力不在代码能力集=注册表防漂移闸同模式，批33b 先例）。
     """
     from src.data_platform.capabilities import check_capability_subset
+    from src.quant_common.markets import CAPABILITIES
     sql = f"SELECT {_IFACE_COLS} FROM external_interface"
     args: tuple = ()
     if cap:
+        if cap not in CAPABILITIES:   # 盲审 B-P2-6：值域校验（防旧词深链静默空表）
+            raise ApiError(400, "IFACE_CAP_INVALID", f"cap 须为 {sorted(CAPABILITIES)} 之一")
         sql += " WHERE capabilities @> ARRAY[%s]::text[]"
         args = (cap,)
     sql += " ORDER BY position, id"
@@ -189,16 +192,16 @@ def create_interface(req: InterfaceReq, payload: dict = Depends(require_perm("sy
     params = _normalize_params(req.params)
     _validate_credentials(req.provider, req.credentials)   # 批63：secret 字段必填（对标 IM）
     enc = encrypt(req.credentials) if req.credentials else None
-    domain = _DOMAIN_TRADING if "trading" in caps else _DOMAIN_DATA
     with get_conn() as conn:
         try:
             cur = conn.execute(
                 f"INSERT INTO external_interface "
                 f"(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled, account_key) "
                 f"VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
-                f"(SELECT coalesce(max(position),-1)+1 FROM external_interface WHERE {domain}),%s,%s) RETURNING id",
+                f"(SELECT coalesce(max(position),-1)+1 FROM external_interface),%s,%s) RETURNING id",
                 (req.name, req.provider, req.market, exchanges, enc,
                  json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key))
+                # D25 §九：全局单序列 max+1（原域内 max 与 reorder 全局重编号撞号/插序错位——盲审 A-P1/B-P2-5）
             conn.commit()
         except Exception as e:
             conn.rollback()

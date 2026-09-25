@@ -155,17 +155,17 @@ class TestCreateValidation:
         args = conn.executed[0][1]
         assert args[3] == ["BINANCE"]   # exchanges 位=推导单所
 
-    def test_create_position_in_own_domain(self, admin_client):
-        """position 子查询按域隔离：数据行走数据域谓词、交易行走交易域谓词。"""
-        for caps, frag in ((["hist_quote"], "NOT ('trading' = ANY(capabilities))"),
-                           (["trading", "rt_quote"], "'trading' = ANY(capabilities)")):
+    def test_create_position_global_sequence(self, admin_client):
+        """position=全局 max+1（D25 §九 单列表全局单序列——盲审 A-P1：域内 max 与 reorder 全局重编号冲突）。"""
+        for caps, provider in ((["hist_quote"], "tushare"), (["trading", "rt_quote"], "xtp")):
             with _ConnPatch(one=(9,)) as conn:
                 r = admin_client.post("/api/interfaces", json={
-                    "name": "t", "provider": ("tushare" if caps[0] == "hist_quote" else "xtp"),
+                    "name": "t", "provider": provider,
                     "market": "astock", "capabilities": caps})
             assert r.status_code == 200, r.text
             sql = conn.executed[0][0]
-            assert "coalesce(max(position),-1)+1" in sql and frag in sql
+            assert "coalesce(max(position),-1)+1" in sql
+            assert "ANY(capabilities)" not in sql   # 全局序列无域谓词
 
 
 # --- 列表/过滤/漂移告警 ---

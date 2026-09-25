@@ -71,6 +71,21 @@ def _is_slot(t: datetime) -> bool:
     return (9 * 60 + 31 <= hm <= 11 * 60 + 30) or (13 * 60 + 1 <= hm <= 15 * 60)
 
 
+def _fetch_via_adapter(req):
+    """adapter 取数工厂（盲审 B-P2-2：get_adapter 对无数据 adapter 的 provider（tencent/xtp 等
+    rt_quote 类候选）抛 ValueError，不在 chain.fetch 的 SourceUnavailable 捕获集内——转
+    SourceUnavailable 使链式下移而非整次 fetch 崩溃）。"""
+    from src.data_platform.adapters.base import get_adapter
+    from src.quant_common.contract import SourceUnavailable
+
+    def fn(c):
+        try:
+            return get_adapter(c.adapter).fetch(req, acct=c.account)
+        except ValueError as e:
+            raise SourceUnavailable(f"{c.adapter} 无数据 adapter：{e}") from e
+    return fn
+
+
 class StreamHandle:
     """流订阅句柄（M5 真实现）：回放预取入 .bars，poll 增量 XREAD 续读。
 
@@ -148,10 +163,8 @@ class DataBus:
     # —— 参考数据统一入口（无 local_pg 特判——fundamental/featured 等）——
     def get(self, kind, req):
         from src.data_platform import routing
-        from src.data_platform.adapters.base import get_adapter
         chain = routing.resolve(req)
-        fetch_fn = lambda c: get_adapter(c.adapter).fetch(req, acct=c.account)
-        return chain.fetch(fetch_fn, req)
+        return chain.fetch(_fetch_via_adapter(req), req)
 
     # —— 快照：Valkey TTL + SET NX 写者选举（骨架，28 §7.4；实际读取留后续）——
     def get_snapshot(self, req):
@@ -161,10 +174,8 @@ class DataBus:
         缓存命中/反序列化留 M5/消费方接入时补）。
         """
         from src.data_platform import routing
-        from src.data_platform.adapters.base import get_adapter
         chain = routing.resolve(req)
-        fetch_fn = lambda c: get_adapter(c.adapter).fetch(req, acct=c.account)
-        return chain.fetch(fetch_fn, req)
+        return chain.fetch(_fetch_via_adapter(req), req)
 
     # —— 订阅：M5 真实现（28 §8.3 水位线衔接，批 60 方案集 §八）——
     def subscribe(self, sub, sink=None):

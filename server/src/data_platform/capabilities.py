@@ -1,6 +1,6 @@
 """批55-0:供应商能力查询与 ⊆ 校验(数据层——可向下 import quant_common 词表)。
 
-能力真源=代码(adapter.capabilities sync_id 串,经 CAPABILITY_MAP 归一为配置层枚举);
+能力真源=代码(adapter.capabilities sync_id 串,经 SYNC_ID_CAP_MAP 归一为能力集 token);
 配置列恒为「用户启用子集」——55a 端点写侧校验+启动/GET 漂移告警共用本函数。
 """
 from __future__ import annotations

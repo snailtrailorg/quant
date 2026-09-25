@@ -293,13 +293,13 @@ def resolve(req, principal: tuple[str, str] | None = None) -> CandidateChain:
 # D25 v2：能力集 token → DataKind 覆盖（类粒度展开走 KIND_CAP_CLASS 派生——
 # 旧 _CAP_KIND_ALIASES daily/minute 退役；kline 为 55a 历史别名保留兼容）
 def _cap_covers(caps: list, kind: str) -> bool:
-    from src.quant_common.markets import KIND_CAP_CLASS
+    from src.quant_common.markets import KIND_CAP_CLASS, CAPABILITIES
     covers: set[str] = set()
     for c in caps:
         if c == "kline":                    # 55a 历史别名
             covers.add("bar_daily")
-        elif c in ("hist_quote", "rt_quote", "trading", "ref_data", "inst_event"):
-            covers |= {k for k, cls in KIND_CAP_CLASS.items() if cls == c}   # 类 token 展开全集
+        elif c in CAPABILITIES:             # 类 token 展开全集（盲审 A-P2-6：消硬编码双源）
+            covers |= {k for k, cls in KIND_CAP_CLASS.items() if cls == c}
         else:
             covers.add(c)                   # 直接 DataKind 词（兼容）
     return kind in covers
