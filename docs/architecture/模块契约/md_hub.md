@@ -1,6 +1,6 @@
 # 模块契约 · md_hub（共享行情 Hub，ST7 2026-08-17）
 
-> 设计：`docs/design/D14-共享行情hub设计.md` v2；需求：13 号。纯数据面（无下单/无风控）。
+> 终态设计：`docs/design/D26-市场接入架构.md`（账号级拓扑——本契约记录现行代码形态=单活双实例，D26 实施批切换后更新）。纯数据面（无下单/无风控）。
 > 批 2（2026-08-25）主循环迁上 `strategy_framework/runtime/` 骨架：EngineLoop 到期驱动钩子（废 counter%N 相位耦合），L2 会话自愈收编 MdSessionSupervisor——行为值不变（确证差异见「行为差异」节）。
 
 > **最近变更（2026-09-24 D6 + 加密接入批）**：键 account 化 `_key(base, account_id)`（租约/心跳/active_instance 加 account 后缀）；会话 `_in_bar_session(t, market)` 加密 24/7 + `flush_stale`；流键发布侧 crypto 走 `hub:bars:{account_id}:{symbol}` + account_id 字段。
