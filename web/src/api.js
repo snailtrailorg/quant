@@ -107,7 +107,7 @@ export const createInterface = (data) => api.post('/interfaces', data)
 export const updateInterface = (id, data) => api.post(`/interfaces/${id}`, data)
 export const deleteInterface = (id) => api.delete(`/interfaces/${id}`)
 export const testInterface = (id) => api.post(`/interfaces/${id}/test`)
-export const reorderInterfaces = (domain, ids) => api.post('/interfaces/reorder', { domain, ids })
+export const reorderInterfaces = (ids) => api.post('/interfaces/reorder', { ids })
 // 积分档四层限流（2026-08-27）：预设表/切档/单参数覆写+熔断参数（写端点走项目 PUT→POST 硬切约定）
 export const getRateLimits = (provider) => api.get(`/datasource/${provider}/rate-limits`)
 export const setRateLimitOverride = (provider, data) => api.post(`/datasource/${provider}/rate-limit-override`, data)

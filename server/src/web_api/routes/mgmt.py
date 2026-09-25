@@ -138,7 +138,7 @@ def _normalize_params(params) -> dict:
 
 @router.get("/api/interfaces")
 def list_interfaces(cap: str | None = None, payload: dict = Depends(require_perm("read"))):
-    """外部接口列表（页签=能力过滤视图：?cap=daily|minute|snapshot|quote|trading）。
+    """外部接口列表（D25 单列表：?cap=能力筛选，值域 hist_quote|rt_quote|trading|ref_data|inst_event）。
 
     附漂移告警（55-0 共同底座：配置能力不在代码能力集=注册表防漂移闸同模式，批33b 先例）。
     """
@@ -212,25 +212,19 @@ def create_interface(req: InterfaceReq, payload: dict = Depends(require_perm("sy
 
 @router.post("/api/interfaces/reorder")   # 路由前移防 {iid} int 遮蔽 422（批43 P0-3 教训）
 def interfaces_reorder(req: InterfaceReorderReq, payload: dict = Depends(require_perm("system_config"))):
-    """分域拖拽重排（批43 全集语义×方案一 v2 分域段正交）：body={domain, ids} 全量有序数组。
+    """全局拖拽重排（D25 §九：单列表全局单序列——body={ids} 全量有序数组；domain 参数退役）。
 
-    域内全集校验（防并发丢行/幽灵 id）；域外行不动——XTP 等交易域行在数据页签可见但
-    不可拖（其 position 属交易域——行的边界=账号）。幂等；并发=后写赢（低频管理操作）。
+    全量校验（防并发丢行/幽灵 id）；幂等；并发=后写赢（低频管理操作）。
+    前端筛选态禁拖（D25 §九——规避筛选子集触发全量校验 400）。
     """
-    if req.domain == "trading":
-        frag = _DOMAIN_TRADING
-    elif req.domain == "data":
-        frag = _DOMAIN_DATA
-    else:
-        raise ApiError(400, "IFACE_DOMAIN_INVALID", "domain 须为 data 或 trading")
     if not req.ids or not all(isinstance(i, int) for i in req.ids):
         raise ApiError(400, "BAD_PARAM", "ids 须为非空整数数组")
     with get_conn() as conn:
-        cur = conn.execute(f"SELECT id FROM external_interface WHERE {frag}")
+        cur = conn.execute("SELECT id FROM external_interface")
         existing = {r[0] for r in cur.fetchall()}
         if set(req.ids) != existing or len(req.ids) != len(existing):
             raise ApiError(400, "BAD_PARAM",
-                           f"ids 必须等于 {req.domain} 域当前全部接口 id（全量序列——防并发丢行）")
+                           "ids 必须等于当前全部接口 id（全量序列——防并发丢行）")
         for pos, rid in enumerate(req.ids):
             conn.execute("UPDATE external_interface SET position=%s, updated_at=now() WHERE id=%s",
                          (pos, rid))
@@ -240,7 +234,7 @@ def interfaces_reorder(req: InterfaceReorderReq, payload: dict = Depends(require
         bump_config_version()   # 批 57：position 改动 bump（28 §6.3——epoch 生效验收②闭环）
     except Exception:
         pass
-    audit_log(payload["username"], "interface_reorder", detail=f"{req.domain} order={req.ids}")
+    audit_log(payload["username"], "interface_reorder", detail=f"order={req.ids}")
     return {"ok": True}
 
 

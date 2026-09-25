@@ -1,7 +1,7 @@
 <template>
-  <!-- 批55b:数据源页签=外部接口统一表·数据视图(27 号:页签=能力过滤视图)。
-      表格+弹窗+拖拽归 InterfacesCard(两视图单源);本页保留数据页特有件:
-      今日调用量卡片+Tushare 限速/熔断折叠面板(provider 键端点不变)。 -->
+  <!-- D25:外部接口页（单列表——数据源与交易账户页签合并立法：多能力接口只出现一次）。
+      表格+弹窗+拖拽+能力筛选归 InterfacesCard;本页保留特有件:
+      今日调用量卡片+Tushare 限速/熔断折叠面板+API 密钥账户卡（原交易页内容并入）。 -->
   <div>
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
@@ -15,7 +15,8 @@
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="166" />
       </TableShell>
     </el-card>
-    <InterfacesCard view="data" @loaded="onRowsChanged" />
+    <InterfacesCard @loaded="onRowsChanged" />
+    <AccountsCard />
     <template v-if="tushareExists">
       <el-divider />
       <el-collapse>
@@ -66,6 +67,7 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
 import InterfacesCard from '../components/InterfacesCard.vue'
+import AccountsCard from '../components/AccountsCard.vue'
 import { apiErr, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
 import { ElMessage } from 'element-plus'
 

@@ -131,8 +131,7 @@ class InterfaceReq(BaseModel):
     account_key: str | None = None   # D2：语义键（资金账号），UNIQUE(provider,account_key)
 
 class InterfaceReorderReq(BaseModel):
-    """分域拖拽重排（批43 全集语义+方案一 v2 分域段：数据/交易域各自 0..n）。"""
-    domain: str                       # data|trading（trading∈capabilities=交易域）
+    """全局拖拽重排（D25 §九：单列表全局单序列——ids=全部接口 id 全量有序数组）。"""
     ids: list[int]
 
 class RateLimitOverrideReq(BaseModel):

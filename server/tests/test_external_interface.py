@@ -80,8 +80,8 @@ class TestRegistryKeys:
 
     def test_perp_caps_after_key_fix(self):
         from src.data_platform.capabilities import provider_capabilities
-        assert provider_capabilities("binance_perp") == {"trading", "quote"}
-        assert provider_capabilities("okx_perp") == {"trading", "quote"}
+        assert provider_capabilities("binance_perp") == {"trading", "rt_quote"}
+        assert provider_capabilities("okx_perp") == {"trading", "rt_quote"}
 
 
 # --- 写侧校验（六必修：⊆ 代码能力 / market 一致 / 交易所归属） ---
@@ -92,21 +92,21 @@ class TestCreateValidation:
         with _ConnPatch():
             r = admin_client.post("/api/interfaces", json={
                 "name": "t", "provider": "tushare", "market": "astock",
-                "capabilities": ["daily", "trading"]})
+                "capabilities": ["hist_quote", "trading"]})
         assert r.status_code == 400 and r.json()["code"] == "IFACE_CAP_EXCESS"
 
     def test_market_mismatch_rejected(self, admin_client):
         with _ConnPatch():
             r = admin_client.post("/api/interfaces", json={
                 "name": "t", "provider": "xtp", "market": "crypto",
-                "capabilities": ["trading", "quote"]})
+                "capabilities": ["trading", "rt_quote"]})
         assert r.status_code == 400 and r.json()["code"] == "IFACE_MARKET_MISMATCH"
 
     def test_exchange_out_of_market_rejected(self, admin_client):
         with _ConnPatch():
             r = admin_client.post("/api/interfaces", json={
                 "name": "t", "provider": "tushare", "market": "astock",
-                "exchanges": ["BINANCE"], "capabilities": ["daily"]})
+                "exchanges": ["BINANCE"], "capabilities": ["hist_quote"]})
         assert r.status_code == 400 and r.json()["code"] == "IFACE_EXCHANGE_UNKNOWN"
 
     def test_empty_caps_rejected(self, admin_client):
@@ -118,14 +118,14 @@ class TestCreateValidation:
     def test_unknown_provider_rejected(self, admin_client):
         with _ConnPatch():
             r = admin_client.post("/api/interfaces", json={
-                "name": "t", "provider": "wind", "market": "astock", "capabilities": ["daily"]})
+                "name": "t", "provider": "wind", "market": "astock", "capabilities": ["hist_quote"]})
         assert r.status_code == 400 and r.json()["code"] == "IFACE_PROVIDER_UNKNOWN"
 
     def test_params_invalid_json_rejected(self, admin_client):
         with _ConnPatch():
             r = admin_client.post("/api/interfaces", json={
                 "name": "t", "provider": "tushare", "market": "astock",
-                "capabilities": ["daily"], "params": "{not-json"})
+                "capabilities": ["hist_quote"], "params": "{not-json"})
         assert r.status_code == 400 and r.json()["code"] == "IFACE_PARAMS_INVALID"
 
     def test_params_non_object_json_rejected(self, admin_client):
@@ -134,15 +134,15 @@ class TestCreateValidation:
             with _ConnPatch():
                 r = admin_client.post("/api/interfaces", json={
                     "name": "t", "provider": "tushare", "market": "astock",
-                    "capabilities": ["daily"], "params": bad})
+                    "capabilities": ["hist_quote"], "params": bad})
             assert r.status_code == 400 and r.json()["code"] == "IFACE_PARAMS_INVALID", bad
 
     def test_update_domain_change_rejected(self, admin_client):
         """盲审 B-P1-2 后半修钉：改能力致换域拒（position 残留+选行序破坏）。"""
-        with _ConnPatch(one=(["trading", "quote"],)):   # 现行=交易域
+        with _ConnPatch(one=(["trading", "rt_quote"],)):   # 现行=交易域
             r = admin_client.post("/api/interfaces/2", json={
                 "name": "t", "provider": "xtp", "market": "astock",
-                "capabilities": ["quote"]})             # 改后=数据域
+                "capabilities": ["rt_quote"]})           # 改后=数据域
         assert r.status_code == 400 and r.json()["code"] == "IFACE_DOMAIN_CHANGE"
 
     def test_perp_default_exchanges_derived(self, admin_client):
@@ -157,11 +157,11 @@ class TestCreateValidation:
 
     def test_create_position_in_own_domain(self, admin_client):
         """position 子查询按域隔离：数据行走数据域谓词、交易行走交易域谓词。"""
-        for caps, frag in ((["daily"], "NOT ('trading' = ANY(capabilities))"),
-                           (["trading", "quote"], "'trading' = ANY(capabilities)")):
+        for caps, frag in ((["hist_quote"], "NOT ('trading' = ANY(capabilities))"),
+                           (["trading", "rt_quote"], "'trading' = ANY(capabilities)")):
             with _ConnPatch(one=(9,)) as conn:
                 r = admin_client.post("/api/interfaces", json={
-                    "name": "t", "provider": ("tushare" if caps[0] == "daily" else "xtp"),
+                    "name": "t", "provider": ("tushare" if caps[0] == "hist_quote" else "xtp"),
                     "market": "astock", "capabilities": caps})
             assert r.status_code == 200, r.text
             sql = conn.executed[0][0]
@@ -171,9 +171,9 @@ class TestCreateValidation:
 # --- 列表/过滤/漂移告警 ---
 
 _ROW_TUSHARE = (1, "Tushare主", "tushare", "astock", ["SHSE", "SZSE", "BSE"], True,
-                {"rate_limits": {}}, ["daily"], 0, True, None, None)
+                {"rate_limits": {}}, ["hist_quote"], 0, True, None, None)
 _ROW_XTP = (2, "中泰XTP", "xtp", "astock", None, True,
-            {"td_host": "x"}, ["trading", "quote"], 0, True, None, "253191001822")
+            {"td_host": "x"}, ["trading", "rt_quote"], 0, True, None, "253191001822")
 
 
 class TestListEndpoints:
@@ -185,46 +185,43 @@ class TestListEndpoints:
         items = r.json()
         assert [i["provider"] for i in items] == ["tushare", "xtp"]
         assert items[0]["params"] == {"rate_limits": {}}
-        assert items[1]["code_capabilities"] == ["quote", "trading"]
+        assert items[1]["code_capabilities"] == ["rt_quote", "trading"]
         assert items[1]["account_key"] == "253191001822" and items[0]["account_key"] is None
 
     def test_cap_filter_uses_gin_containment(self, admin_client):
         with _ConnPatch(all_rows=[_ROW_TUSHARE]) as conn:
-            r = admin_client.get("/api/interfaces", params={"cap": "daily"})
+            r = admin_client.get("/api/interfaces", params={"cap": "hist_quote"})
         assert r.status_code == 200
         assert "capabilities @> ARRAY[%s]::text[]" in conn.executed[0][0]
-        assert conn.executed[0][1] == ("daily",)
+        assert conn.executed[0][1] == ("hist_quote",)
 
 
-# --- 分域 reorder（批43 全集语义 × 方案一 v2 分域段正交） ---
+# --- 全局 reorder（D25 §九：单列表全局单序列；domain 参数退役） ---
 
 class TestReorder:
 
-    def test_domain_invalid(self, admin_client):
-        r = admin_client.post("/api/interfaces/reorder", json={"domain": "bogus", "ids": [1]})
-        assert r.status_code == 400 and r.json()["code"] == "IFACE_DOMAIN_INVALID"
+    def test_empty_ids_rejected(self, admin_client):
+        r = admin_client.post("/api/interfaces/reorder", json={"ids": []})
+        assert r.status_code == 400 and r.json()["code"] == "BAD_PARAM"
 
     def test_not_full_set_rejected(self, admin_client):
         with _ConnPatch(all_rows=[(1,), (2,)]) as conn:
-            r = admin_client.post("/api/interfaces/reorder",
-                                  json={"domain": "data", "ids": [1]})
+            r = admin_client.post("/api/interfaces/reorder", json={"ids": [1]})
         assert r.status_code == 400 and r.json()["code"] == "BAD_PARAM"
-        assert "NOT ('trading' = ANY(capabilities))" in conn.executed[0][0]
+        assert "FROM external_interface" in conn.executed[0][0]   # 全量查询无域谓词
 
     def test_reorder_renumbers_in_order(self, admin_client):
         with _ConnPatch(all_rows=[(1,), (2,)]) as conn:
-            r = admin_client.post("/api/interfaces/reorder",
-                                  json={"domain": "data", "ids": [2, 1]})
+            r = admin_client.post("/api/interfaces/reorder", json={"ids": [2, 1]})
         assert r.status_code == 200
         updates = [(sql, a) for sql, a in conn.executed if sql.startswith("UPDATE")]
         assert [a for _, a in updates] == [(0, 2), (1, 1)]   # 按提交序重编号 0..n-1
 
-    def test_trading_domain_query(self, admin_client):
+    def test_global_full_set_ok(self, admin_client):
         with _ConnPatch(all_rows=[(2,)]) as conn:
-            r = admin_client.post("/api/interfaces/reorder",
-                                  json={"domain": "trading", "ids": [2]})
+            r = admin_client.post("/api/interfaces/reorder", json={"ids": [2]})
         assert r.status_code == 200
-        assert "'trading' = ANY(capabilities)" in conn.executed[0][0]
+        assert "'trading' = ANY" not in conn.executed[0][0]   # 无域谓词（D25 单列表）
 
 
 # --- 三消费方（勘察 #1/#3/#5） ---

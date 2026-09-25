@@ -11,7 +11,7 @@
 | L4 门面        | DataBus 契约在 quant_common、实现在 data_platform；TradeBus 执行链在 strategy_framework |
 | L5 消费        | 各消费方（web_api/策略框架/回测）           |
 
-术语速查见 28 号文首；DataKind 词数=26（行情 7+参考 10+事件 2+交易 4+占位 3）。
+术语速查见 28 号文首；DataKind 词数=27（行情 7+参考 11+事件 2+交易 4+占位 3——D25 加 holder_structure）。
 """
 from __future__ import annotations
 
@@ -26,10 +26,10 @@ DataKind = Literal[
     # 行情（7）
     "bar_daily", "bar_minute", "index_daily", "snapshot",
     "stream_bar", "stream_tick", "depth",
-    # 参考数据（10）
+    # 参考数据（11——D25 加 holder_structure：股权结构族有实现（pool_data 在拉）无登记）
     "static_list", "trade_cal", "index_constituents", "industry_class",
     "fundamental_daily", "financial_stmt", "featured_daily",
-    "stk_limit", "adj_factor", "funding_rate",
+    "stk_limit", "adj_factor", "funding_rate", "holder_structure",
     # 事件（2）
     "suspend", "corporate_action",
     # 交易运行时（4）
@@ -62,6 +62,7 @@ KIND_TEMPORALITY: dict[str, frozenset[str]] = {
     "stk_limit":      frozenset({"historical"}),
     "adj_factor":     frozenset({"historical"}),
     "funding_rate":   frozenset({"historical", "snapshot"}),    # 历史 + 当期预测费率
+    "holder_structure": frozenset({"historical"}),   # D25：股权结构（十大股东/质押/解禁/户数/分红史）
     "suspend":        frozenset({"historical", "snapshot"}),    # 事件史 + 当前状态查询
     "corporate_action": frozenset({"historical", "snapshot"}),
     "account_query":  frozenset({"snapshot", "streaming"}),     # 查询 + 推送
@@ -281,9 +282,9 @@ def validate_capability_decls(decls) -> list[str]:
     """声明集校验（CI 断言三核心——register_adapter 钩子调用；返回错误清单，空=合法）。
 
     校验项：kind 已知 / temporality 合法组合 / sub_kinds 非空当且仅当 kind 是聚合域
-    （现状聚合域=featured_daily/financial_stmt/static_list/industry_class）。
+    （聚合域=featured_daily/financial_stmt/static_list/industry_class/holder_structure）。
     """
-    aggregate_kinds = {"featured_daily", "financial_stmt", "static_list", "industry_class"}
+    aggregate_kinds = {"featured_daily", "financial_stmt", "static_list", "industry_class", "holder_structure"}
     errors: list[str] = []
     for d in decls:
         if d.kind not in DATA_KINDS:

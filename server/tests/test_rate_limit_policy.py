@@ -34,4 +34,4 @@ def test_adapter_capabilities():
     """adapter capabilities 类属性（供给矩阵数据源）。"""
     from src.data_platform.adapters.base import TushareAdapter
     assert "astock_daily" in TushareAdapter.capabilities
-    assert "trade_cal" not in TushareAdapter.capabilities   # 静态/日历非 adapter 路由
+    assert "trade_cal" in TushareAdapter.capabilities   # D25：⊆ 宇宙扩至 0094 全集 20 sync_id

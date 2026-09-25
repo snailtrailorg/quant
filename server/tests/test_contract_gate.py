@@ -31,8 +31,8 @@ assert os.path.isdir(SRC), f"扫描目录不存在——CI 断言将空转（曾
 class TestKindRegistry:
     """品类词表与组合表（28 §十一的逐格钉）。"""
 
-    def test_26_kinds(self):
-        assert len(DATA_KINDS) == 26, sorted(DATA_KINDS)  # 行情7+参考10+事件2+交易4+占位3
+    def test_27_kinds(self):
+        assert len(DATA_KINDS) == 27, sorted(DATA_KINDS)  # 行情7+参考11+事件2+交易4+占位3（D25 +holder_structure）
 
     def test_every_kind_has_combo_row(self):
         assert set(KIND_TEMPORALITY) == set(DATA_KINDS)   # 无孤儿 kind/无幽灵行

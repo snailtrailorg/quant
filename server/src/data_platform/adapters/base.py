@@ -130,7 +130,15 @@ class TushareAdapter(BaseDataAdapter):
     """
 
     provider = "tushare"
-    capabilities = {"astock_daily", "etf_daily", "cb_daily", "astock_minute", "astock_minute_5min"}
+    # D25：⊆ 校验宇宙=本声明——0094 归置表 20 个 sync_id 全量（v1 仅 5 项致 15 项能力用户勾不了）
+    capabilities = {
+        "astock_daily", "etf_daily", "cb_daily", "index_daily",
+        "astock_minute", "astock_minute_5min",
+        "astock_basic", "astock_list", "etf_list", "cb_basic",
+        "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
+        "block_trade_sync", "cyq_perf_sync", "forecast_sync", "namechange_sync",
+        "concept_sync", "trade_cal",
+    }
 
     def __init__(self):
         from src.data_platform.data_source import get_data_source, TushareDataSource

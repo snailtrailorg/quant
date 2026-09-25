@@ -1,20 +1,24 @@
 <template>
-  <!-- 批55b:外部接口卡片(统一表两视图单源——数据源/交易账户页签共用,过滤谓词+能力列差异)。
-       立法(27 号):行=账号/列=能力/页签=能力过滤视图;XTP 等交易域行在数据页可见但不可拖。
-       弹窗:provider/market 行种只读(编辑);能力勾选=代码能力全集(⊆ 写侧校验兜底)。 -->
+  <!-- D25:外部接口卡片(单列表+能力筛选——页签合并立法:多能力接口 XTP/币安只出现一次)。
+       立法(27 号/D25):行=账号/列=能力集;能力集从「强制页签」降级为「筛选」;
+       筛选态禁拖(§九——规避 reorder 全量校验 400);编辑态 trading 锁定=域锁预拒。 -->
   <el-card>
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
-        <span style="font-weight: 600">{{ t(view === 'data' ? 'interfaces.cardTitleData' : 'interfaces.cardTitleTrading') }}</span>
+        <span style="font-weight: 600">{{ t('interfaces.cardTitle') }}</span>
         <div style="display:flex; gap:8px; align-items:center">
-          <ColumnSettings :storage-key="`cols.interfaces-${view}`" :columns="colDefs" v-model:visible="visible" />
+          <el-select v-model="capFilter" clearable size="small" style="width: 130px"
+                     :placeholder="t('interfaces.capFilterPh')">
+            <el-option v-for="c in CAP_TOKENS" :key="c" :value="c" :label="t(`interfaces.cap_${c}`)" />
+          </el-select>
+          <ColumnSettings storage-key="cols.interfaces" :columns="colDefs" v-model:visible="visible" />
           <IconBtn :icon="Plus" :title="t('common.create')" @click="openAdd" />
         </div>
       </div>
     </template>
-    <ChannelTableShell ref="shellRef" :rows="rows" :storage-key="`interfaces-${view}`"
-                       :drag-title-key="'interfaces.dragTitle'" :note-key="view === 'data' ? 'interfaces.orderNoteData' : 'interfaces.orderNoteTrading'"
-                       :can-drag="view === 'data' ? canDragRow : null"
+    <ChannelTableShell ref="shellRef" :rows="rows" storage-key="interfaces"
+                       :drag-title-key="'interfaces.dragTitle'" :note-key="'interfaces.orderNote'"
+                       :can-drag="capFilter ? () => false : null"
                        :reorder="doReorder" @reorder-failed="onReorderFailed">
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip>
         <template #default="{ row, $index }">
@@ -25,7 +29,7 @@
       <el-table-column prop="market" :label="t('interfaces.colMarket')" min-width="90">
         <template #default="{ row }">{{ t(row.market === 'astock' ? 'interfaces.marketAstock' : 'interfaces.marketCrypto') }}</template>
       </el-table-column>
-      <el-table-column v-if="view === 'data'" :label="t('interfaces.colCapabilities')" min-width="200">
+      <el-table-column :label="t('interfaces.colCapabilities')" min-width="200">
         <template #default="{ row }">
           <el-tag v-for="c in row.capabilities" :key="c" size="small" style="margin: 1px"
                   :type="c === 'trading' ? 'warning' : 'info'">{{ t(`interfaces.cap_${c}`) }}</el-tag>
@@ -53,11 +57,9 @@
         </template>
       </el-table-column>
     </ChannelTableShell>
-    <div v-if="view === 'data' && crossDomainRows.length" class="cross-note">{{ t('interfaces.crossDomainNote') }}</div>
 
     <el-dialog v-model="dlg" :close-on-click-modal="false"
-               :title="form.id ? t(view === 'data' ? 'interfaces.editTitleData' : 'interfaces.editTitleTrading')
-                               : t(view === 'data' ? 'interfaces.addTitleData' : 'interfaces.addTitleTrading')" width="600px">
+               :title="form.id ? t('interfaces.editTitle') : t('interfaces.addTitle')" width="600px">
       <el-tabs v-if="!form.id" v-model="form.provider" @tab-change="onProviderPick">
         <el-tab-pane v-for="p in providers" :key="p.provider" :name="p.provider"
                      :label="providerLabel(p.provider)" />
@@ -119,7 +121,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ChannelTableShell from './ChannelTableShell.vue'
 import ColumnSettings from './ColumnSettings.vue'
@@ -130,11 +132,12 @@ import { apiErr, getInterfaces, getInterfaceProviders, createInterface, updateIn
          deleteInterface, testInterface, reorderInterfaces } from '../api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const props = defineProps({ view: { type: String, required: true } })   // 'data' | 'trading'
 const emit = defineEmits(['loaded'])   // 批55b 盲审 A-P1-2：CRUD 后通知父组件（限流面板显隐联动）
 const { t, te } = useI18n()
 
-const allRows = ref([])   // 全量缓存（providers 到达后可重过滤）
+// D25：能力集 5 token（与 markets.py CAPABILITIES 同源镜像——注册表派生，加类同步改）
+const CAP_TOKENS = ['hist_quote', 'rt_quote', 'trading', 'ref_data', 'inst_event']
+
 const rows = ref([])
 const providers = ref([])
 const dlg = ref(false)
@@ -143,29 +146,20 @@ const testing = ref(0)
 const shellRef = ref(null)
 const form = ref(emptyForm())
 const visible = ref([])
+const capFilter = ref('')   // D25 §九：能力筛选；筛选态禁拖（全量校验防 400）
 const colDefs = computed(() => [
   { key: 'exchanges', label: t('interfaces.colExchanges') },
   { key: 'updated_at', label: t('common.updatedAt'), hidden: true },
 ])
 const colOn = k => visible.value.includes(k)
 
-// 数据能力集=providers 目录并集去 trading（注册表派生——防 DATA_CAPS 手工副本双源，盲审 A-P2-3）
-const dataCaps = computed(() => {
-  const s = new Set(providers.value.flatMap(p => p.capabilities || []))
-  s.delete('trading')
-  return [...s]
-})
-
-const isTradingRow = (row) => (row.capabilities || []).includes('trading')
-const canDragRow = (row) => !isTradingRow(row)   // 数据视图:交易域行可见不可拖(拖拽归交易域——立法)
-const crossDomainRows = computed(() => rows.value.filter(isTradingRow))   // 数据页交叉可见的交易行(XTP quote)
-
 const applyFilter = () => {
-  rows.value = props.view === 'trading'
-    ? allRows.value.filter(isTradingRow)
-    : allRows.value.filter(r => (r.capabilities || []).some(c => dataCaps.value.includes(c)))
+  rows.value = capFilter.value
+    ? allRows.value.filter(r => (r.capabilities || []).includes(capFilter.value))
+    : allRows.value
 }
 
+const allRows = ref([])   // 全量缓存
 const load = async () => {
   try {
     allRows.value = await getInterfaces()
@@ -179,8 +173,8 @@ const loadProviders = async () => {
     providers.value = []
     console.error('providers 目录加载失败', e)   // 静默退化：新建弹窗空下拉+保存报后端错（盲审 A-P2-7）
   }
-  applyFilter()   // 目录后到也重过滤（dataCaps 派生依赖）
 }
+watch(capFilter, applyFilter)
 onMounted(() => { load(); loadProviders() })
 
 function emptyForm() {
@@ -260,11 +254,11 @@ const onTest = async (id) => {
     const r = await testInterface(id)
     if (r.ok) ElMessage.success(t('common.connectSuccess'))
     else ElMessage.error(t('common.failedPrefix') + r.error)
-  } catch (e) { ElMessage.error(t('common.testFailed')) }
+  } catch (e) { ElMessage.error(apiErr(e, t('common.testFailed'))) }
   finally { testing.value = 0 }
 }
 
-const doReorder = async (ids) => { await reorderInterfaces(props.view, ids) }
+const doReorder = async (ids) => { await reorderInterfaces(ids) }
 const onReorderFailed = async (e) => {
   ElMessage.error(apiErr(e, t('common.saveFailed')))
   await load()
@@ -273,5 +267,4 @@ const onReorderFailed = async (e) => {
 
 <style scoped>
 .exch-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-top: 4px; }
-.cross-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-top: 10px; }
 </style>
