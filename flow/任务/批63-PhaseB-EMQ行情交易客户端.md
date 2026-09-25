@@ -17,7 +17,7 @@
 
 1. **P1 编译链跑通**：本地 g++ + pybind11 编出 `emd_quote_api.cpython-3*.so`（绑定 QuoteApi/QuoteSpi 最小面）。**关键未知**：spdlog/fmt 头文件依赖（EMQ 头文件是否 include spdlog；本地准备 header-only spdlog+fmt，或 SDK 头文件自带）。
 2. **P2 `EmqMdGateway`**：Python 层对接批 63 的 `MdGateway` 抽象（connect/subscribe/unsubscribe/set_on_tick/connected/start_ready/poll_supervise），tick 映射 `EMTMarketDataStruct` → 兼容 TickData（`data_time`→tz-aware datetime、`exchange_id`→SSE/SZSE、十档取五、qty/turnover 当日累计）。
-3. **P3 staging 真连 EMQ 收 tick**：staging 库配 `emt_emq` 行（东财凭证+地址）→ hub 按 provider 切到 EmqMdGateway → 收真实行情（M5 四键协议复用，切源=confirm target）。
+3. **P3 staging 真连 EMQ 收 tick**：staging 库配 `emt_emq` 行（东财凭证+地址）→ hub 按 provider 切到 EmqMdGateway → 收真实行情（M5 四键协议复用，切源=confirm target——现行 M5 机制，D26 终态将退役改换行语义）。
 4. **P4 EMT 交易**：`emt_trader_api` 绑定 + `EmtAdapter`（ExecutionAdapter 子类）——M6 交易门面前置，本批先出接口勘察，完整交易实现随 M6。
 
 ## 文件结构
