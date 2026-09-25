@@ -15,15 +15,15 @@
 
 ## 里程碑（顺序，各自可验收）
 
-1. **P1 编译链跑通**：本地 g++ + pybind11 编出 `emd_quote_api.cpython-3*.so`（绑定 QuoteApi/QuoteSpi 最小面）。**关键未知**：spdlog/fmt 头文件依赖（EMQ 头文件是否 include spdlog；本地准备 header-only spdlog+fmt，或 SDK 头文件自带）。
+1. **P1 编译链跑通**：本地 g++ + pybind11 编出 `emt_quote_api.cpython-3*.so`（绑定产物名 emt_*——代码现名 emd_quote_api 为既有实现，重命名随本批顺手对齐或保留，实施时定）（绑定 QuoteApi/QuoteSpi 最小面）。**关键未知**：spdlog/fmt 头文件依赖（EMQ 头文件是否 include spdlog；本地准备 header-only spdlog+fmt，或 SDK 头文件自带）。
 2. **P2 `EmqMdGateway`**：Python 层对接批 63 的 `MdGateway` 抽象（connect/subscribe/unsubscribe/set_on_tick/connected/start_ready/poll_supervise），tick 映射 `EMTMarketDataStruct` → 兼容 TickData（`data_time`→tz-aware datetime、`exchange_id`→SSE/SZSE、十档取五、qty/turnover 当日累计）。
 3. **P3 staging 真连 EMQ 收 tick**：staging 库配 `emt_emq` 行（东财凭证+地址）→ hub 按 provider 切到 EmqMdGateway → 收真实行情（M5 四键协议复用，切源=confirm target——现行 M5 机制，D26 终态将退役改换行语义）。
-4. **P4 EMT 交易**：`emt_trader_api` 绑定 + `EmtAdapter`（ExecutionAdapter 子类）——M6 交易门面前置，本批先出接口勘察，完整交易实现随 M6。
+4. **P4 EMT 交易**：`emt_trader_api` 绑定 + `EmtAdapter`（ExecutionAdapter 子类）——**完整实现**（依赖序（2026-09-25 重组）：批61 M6（序列2）→ D26-A TD builder 注册表（序列3）→ 本批（序列4）——P4=_TD_BUILDERS 注册表第二实例）。实现步骤：①绑定 emt_trader_api（对齐 P1 模式，EMTMarketDataStruct 同族）②EmtAdapter 实现 send_order/cancel/query_position/query_account（ExecutionAdapter 契约，adapters.py:47）③注册 `_TD_BUILDERS["emt_emq"]` + `create_adapter` 映射（走 D26-A 下沉后的注册表）④staging 真连 EMT TD 下单/查询/对账链验证（凭证=emt_emq 行 EMT 交易身份，与 EMQ 行情身份分离）。
 
 ## 文件结构
 
 - `server/vendor/emt/`：SDK 头文件 + `lib/linux/*.so`（编译/部署资产；git 忽略，部署时放服务器）
-- `server/src/strategy_framework/emd/`：C++ pybind11 绑定源码（`bind_quote.cpp` trampoline 内联）+ **`build.sh` 编译脚本**（可复现，本地 3.10/服务器 3.11 各自 venv 重编）
+- `server/src/strategy_framework/emt/`：C++ pybind11 绑定源码（原笔误 emd——与 SDK 目录 vendor/emt 对齐）（`bind_quote.cpp` trampoline 内联）+ **`build.sh` 编译脚本**（可复现，本地 3.10/服务器 3.11 各自 venv 重编）
 - `server/src/strategy_framework/md_gateway.py`：**`EmqMdGateway(MdGateway)` 与 XtpMdGateway 同文件**（单文件不拆包——两个网关实现共 ~300 行，简洁优先；P1 决策）
 
 ## 关键映射（tick 契约，对齐 md_gateway.py docstring）
