@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-09-26 · A04 §九实施语义 Web 域诚实化（批 61 M6）
+
+1. **两条立法降级实施**（立法意图保留，A04 §九注记为实施真相）：①「提名时刻连通预检」Web 域不可达（`Broker.test_connection`=纯凭证检查零网络；Web 进程无 TD 会话）→落地 **L1=凭证完整性+行校验**，L2 真连+资金挂账 worker/hub 会话探测批；②「在途清零」两源（order_log 无终态回写——成交/撤单不落 status）→DB 近似+确认者人工核实勾选，order_log 终态回写根治挂账。
+2. **确认面=Web 五闸等价**（29b 卡绑飞书 ws 不可直连）：时效=DB 时钟 SQL 谓词/身份=JWT/权限=require_perm（execute=trade 键 analyst 不可达）/dedup=状态机+FOR UPDATE/exec=单事务。
+3. **TradeBus 四方法=worker 链继承**：place/cancel/query 已在 worker 进程落地（时序纪律/幂等全现成）；Web 手动下单永不做（XTPAdapter 无 gateway 返 mock- 前缀=实盘事故面）；幂等键不迁移（`t{tid}:e{boot}:c{seq}` 前缀结构性唯一强于复合键）。
+
+## 2026-09-26 · TD provider 插件注册表立法（批 65 D26-A/批 63 P4 实证）
+
+1. **TD builder 必须注册于 `strategy_runner/td_registry.py` 模块内**（import 即注册；独立文件注册=空表静默）——单文件自足约定。
+2. **键域守门锚 `PROVIDER_MARKET` 非 `Broker._REGISTRY`**（后者无 emt_emq=前向地雷；两角色非 1:1——crypto 有 Broker 无 TD builder）。
+3. **EmtAdapter vnpy 形状合成为强制契约**：worker 四消费链（reconcile/halt_edge_cancel/write_trade_log/snapshot_cycle）假定 vnpy OrderData/TradeData/AccountData+事件引擎——任何新 TD adapter 必须在 SPI 回调内合成 vnpy 形状经 ee 推流，**查询分帧必须帧内物化**（SDK 指针仅帧内有效）。
+
 ## 2026-09-25 · 全市场统一账号级 hub 拓扑（推翻 A05「A股 MD 单 hub」部分裁定）
 
 1. **终裁**：全市场唯一拓扑=**账号级实例化**——一行 trading 域接口配置=一个账号=一个 hub+一套 TD 会话；hub 绑死账号行（MD/TD 同凭证，裁定 A：不做 md_row 跨通道解耦）。XTP 双账号=双行=双 hub（空间换简洁）。
