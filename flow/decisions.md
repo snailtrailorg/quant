@@ -290,3 +290,9 @@
 
 - **背景**：D1 代码双盲审 B（交易正确性）抓 P0——D1 §五「只做」列「account_permission 读写」+「三级时点接入调用」，但实际交付只有「读」（account_allows 读）+「函数」，写路径（管理端点/seed/UI）与三级时点接线均未交付。空表 + 无写路径 = 若接线即全盘锁死。
 - **裁定（挂账，非返工）**：①account_permission **写路径** ②**三级时点接入调用**（依赖 D2 的 live_task.account_id）③**board 回填完整性闸**（接线前断言 stock 全量 board 非空）→ 归 **D5**（建任务与 worker 绑定）前置；④**ST 官方名单 fail-closed** → 另批（现 namechange 派生、无档=非 ST fail-open 已知）。已落 D1 §五 + 待办。
+
+## 2026-09-26 · 批 66a 三裁定（D26-B 切换前收束）
+
+1. **concrete unit 整文件遮蔽替代 drop-in**（编码裁定，回写任务文件 §2.2）：install-units wrapper 只收 `*.service`（文件名正则），drop-in `.conf` 过不了安装通道——过渡注入=仓内 concrete `quant-md-hub@quant.service` 遮蔽模板实例化+`__HUB_ROW_ID__` 占位符经 release.yml 阶段 2 replace 按 inventory 注入（staging/prod 行 id 不同不可写死；replace 在指纹采集前=值变化触发单元重装）。禁入共享模板立法不变（A-P0-2 加密实例污染事故链）。66b 换名后三件套整体退役。
+2. **66b 观察专项挪周二 09-29**（盲审 A-P2-1）：周一窗已承载批 64/61/65/63P4 四批+66a 顺带，第六改动同交易日归因困难——66a 顺带观察周一、66b 键切换专项周二。
+3. **凭证对账读行失败=版本顺延不固化**（双盲 A-P1+编码自查同构洞）：任何「读行失败但固化新版本」的写法都会短路死锁凭证基线（首发失败固 v / 版本轮失败返新 v+旧摘要两洞同构）——统一语义「读行失败=本轮没发生，版本顺延下轮重读」；staging/prod 行 id 填值防呆注释入 inventory（勿填 EMT 行）。
