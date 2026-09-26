@@ -30,6 +30,7 @@ DataKind = Literal[
     "static_list", "trade_cal", "index_constituents", "industry_class",
     "fundamental_daily", "financial_stmt", "featured_daily",
     "stk_limit", "adj_factor", "funding_rate", "holder_structure",
+    #   ↑ adj_factor 归 hist_quote（markets.py KIND_CAP_CLASS 单源；随 bar 同步、BAR_COLUMNS 旁挂列）
     # 事件（2）
     "suspend", "corporate_action",
     # 交易运行时（4）

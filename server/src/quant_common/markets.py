@@ -52,7 +52,8 @@ KIND_CAP_CLASS: dict[str, str] = {
     "suspend": "inst_event", "corporate_action": "inst_event",
 }
 
-# 代码层 sync_id ↔ 能力集 token 映射（0094 归置表 20 项全量——v1 仅 5 项致 31 项能力漏网）
+# 代码层 sync_id ↔ 能力集 token 映射（0094+0106 归置表 30 项全量——v1 仅 5 项致 31 项能力漏网；
+# 0106 增 pool_data 10 项，键=表名裸词；analyst_expect 待 report_rc 实现落行后再加键）
 SYNC_ID_CAP_MAP: dict[str, str] = {
     # hist_quote
     "astock_daily": "hist_quote", "etf_daily": "hist_quote", "cb_daily": "hist_quote",
@@ -63,6 +64,11 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "margin_detail_sync": "ref_data", "top_list_sync": "ref_data", "block_trade_sync": "ref_data",
     "cyq_perf_sync": "ref_data", "forecast_sync": "ref_data", "namechange_sync": "ref_data",
     "concept_sync": "ref_data", "trade_cal": "ref_data",
+    # ref_data（0106：pool_data per-symbol 族——financial_stmt/featured_daily/holder_structure 派生类均 ref_data）
+    "income": "ref_data", "balancesheet": "ref_data", "cashflow": "ref_data",
+    "fina_indicator": "ref_data", "cyq_chips": "ref_data", "top10_holders": "ref_data",
+    "dividend": "ref_data", "pledge_stat": "ref_data", "share_float": "ref_data",
+    "stk_holdernumber": "ref_data",
 }
 NON_DATA_PROVIDERS = {"tencent": {"rt_quote"}, "xtp": {"trading", "rt_quote"},
                       "binance_perp": {"trading", "rt_quote"}, "okx_perp": {"trading", "rt_quote"},
