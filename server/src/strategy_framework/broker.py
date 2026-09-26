@@ -65,8 +65,15 @@ class OKXBroker(_BaseBroker):
     REQUIRED_FIELDS = ["api_key", "api_secret", "passphrase"]
 
 
+class EmtBroker(_BaseBroker):
+    """东财 EMT 极速柜台（批 63 P4：普通账户身份必填；信用/期权三套 FIELD_SCHEMA 可选——
+    required=False 不入 REQUIRED_FIELDS，防只配普通账户的行假阴性；test=纯凭证检查同基类）。"""
+    REQUIRED_FIELDS = ["emt_account", "emt_password"]
+
+
 _REGISTRY: dict[str, type[Broker]] = {
     "xtp": XTPBroker,
+    "emt_emq": EmtBroker,   # 批 63 P4：TD 注册表第二实例（test/切换 L1 消费面打通）
     "binance_perp": BinanceBroker,   # 26 号收尾批 C：与 create_adapter 的 *_perp 对齐
     "okx_perp": OKXBroker,
 }

@@ -3,6 +3,7 @@
 #include <pybind11/pybind11.h>
 #include <string>
 #include <vector>
+#include "bind_common.h"   // 批 63 P4：EMQ_OVERRIDE_GUARDED 公共头（两 cpp 共用防漂移）
 #include "quote_api.h"
 #include "emt_quote_struct.h"
 #include "emt_quote_data_type.h"
@@ -27,22 +28,6 @@ std::vector<char*> _ticker_ptrs(py::list tickers, std::vector<std::string>& keep
     }
     return ptrs;
 }
-
-// 回调覆写统一守卫（SDK 守卫铁律，对标 XTP GuardedXtpMdApi「回调线程永不抛」）：
-// Python 覆写任何异常都不得穿透到 EMQ SDK 回调帧（裸抛 = error_already_set 逃逸 →
-// std::terminate / SIGABRT 整进程崩）。get_override 拿到覆写后 try/catch 兜底，
-// discard_as_unraisable 打印并吞掉，回调线程结构性地永不抛。
-#define EMQ_OVERRIDE_GUARDED(cname, fn, ...)                                    \
-    do {                                                                         \
-        py::gil_scoped_acquire gil;                                              \
-        py::function _f = py::get_override(static_cast<const cname*>(this), fn); \
-        if (!_f) return;                                                         \
-        try {                                                                    \
-            _f(__VA_ARGS__);                                                     \
-        } catch (py::error_already_set& _e) {                                 \
-            _e.discard_as_unraisable(fn);                                        \
-        }                                                                        \
-    } while (0)
 
 // QuoteSpi trampoline：让 Python 侧继承并覆写回调。
 // 队列数组（bid1_qty/ask1_qty 逐笔队列）不消费——十档已在 EMTMarketDataStruct，

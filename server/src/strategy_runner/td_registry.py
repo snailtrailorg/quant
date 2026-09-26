@@ -110,3 +110,43 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
                          order_prefix=f"t{tid}:e{boot_epoch}:")
     return {"gw": gw, "td_api": td_api, "adapter": adapter, "setting": setting,
             "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp"}
+
+
+@register_td_builder("emt_emq")
+def _build_emt_runtime(ee, tid, account_id, boot_epoch) -> dict:
+    """批 63 P4：EMT 极速柜台 TD 运行时（TD_BUILDERS 第二实例——D26-A 框架第一消费者）。
+
+    EmtAdapter 兼任 gw/td_api（薄壳：connect(setting)=Login；connect_status 属性——
+    hub_worker 仅消费这两个面）。凭证=get_interface_row 解密（不加 EmtBroker）；
+    td_host 用 _parse_host_port 拆分（md_gateway 先例）。
+    client_id 派生 (tid-1)%100+20（SDK 实测域 [1-127]——代码审 B-P1-4；真防线=tid 派生唯一性）。
+    连接窗：复用 A 股窗（xtp_session_lead/lag_min 自此双 provider 共用——知情接受）。
+    """
+    from src.strategy_framework.adapters import EmtAdapter
+    from src.strategy_framework.broker import get_interface_row
+    from src.strategy_framework.md_session import (
+        is_trading_day, load_xtp_window_cfg, xtp_session_window_open)
+    from datetime import datetime as _dt
+
+    row = get_interface_row(row_id=account_id)
+    cred = row.get("credentials") or {}
+    params = row.get("params") or {}
+    from src.strategy_framework.md_gateway import _parse_host_port
+    host, port = _parse_host_port(params.get("emt_td_host", ""), default_port=19088)
+    setting = {"td_host": host, "td_port": port,
+               "account": str(cred.get("emt_account", "")),
+               "password": str(cred.get("emt_password", ""))}
+
+    lead, lag = load_xtp_window_cfg()
+    td_open = xtp_session_window_open(_dt.now(), lead, lag, trading_day=is_trading_day())
+
+    adapter = EmtAdapter(event_engine=ee, order_prefix=f"t{tid}:e{boot_epoch}:",
+                         td_client_id=(tid - 1) % 100 + 20)
+    if td_open:
+        adapter.connect(setting)   # Login fail-fast raise → main EX_CONFIG
+    else:
+        adapter.remember_login(setting)
+        logger.info("EMT TD 窗关启动（lead=%d/lag=%d），连接待窗开沿", lead, lag)
+    # gw/td_api 均 adapter（hub_worker: connect_status 消费面；main: gw.connect 窗开沿）
+    return {"gw": adapter, "td_api": adapter, "adapter": adapter, "setting": setting,
+            "td_open": td_open, "lead": lead, "lag": lag, "cfg_adapter": "emt_emq"}

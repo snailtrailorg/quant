@@ -40,4 +40,4 @@ def test_update_sync_config_partial_set():
 
 def test_broker_registry_keys_aligned():
     from src.strategy_framework.broker import _REGISTRY
-    assert set(_REGISTRY) == {"xtp", "binance_perp", "okx_perp"}
+    assert set(_REGISTRY) == {"xtp", "emt_emq", "binance_perp", "okx_perp"}   # 批 63 P4 加 emt_emq

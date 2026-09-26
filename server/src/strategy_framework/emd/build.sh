@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EMQ 行情 pybind11 绑定编译（批 63 Phase B P1/P2）
+# EMQ 行情 + EMT 交易 pybind11 绑定编译（批 63 Phase B P1/P2/P4）
 #
 # 用法：bash server/src/strategy_framework/emd/build.sh
 # - 本地（Fedora，Python 3.10，GCC 14）编译验证用。
@@ -22,13 +22,21 @@ EXT=$($PY -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX'))")
 # 运行时 libstdc++：gcc-toolset 编译的 .so 需 GLIBCXX 3.4.29+，服务器系统 libstdc++（GCC 10.2）
 # 仅 3.4.28——rpath 追加 gcc-toolset 的 libstdc++（.so 自足，免 systemd LD_LIBRARY_PATH）。
 # 本地（Fedora）该路径不存在，动态链接器忽略、fallback 系统 libstdc++，无副作用。
-$GXX -O3 -shared -std=c++11 -fPIC \
-  -I vendor/emt/include \
-  $INCLUDES $PYINC \
-  src/strategy_framework/emd/bind_quote.cpp \
-  -L vendor/emt/lib \
-  -Wl,-rpath,'$ORIGIN/../../../vendor/emt/lib:/opt/rh/gcc-toolset-13/root/usr/lib64' \
-  -lemt_quote_api -lemt_api \
-  -o "src/strategy_framework/emd/emd_quote_api${EXT}"
+COMMON_FLAGS=(-O3 -shared -std=c++11 -fPIC
+  -I vendor/emt/include
+  -I src/strategy_framework/emd
+  $INCLUDES $PYINC
+  -L vendor/emt/lib
+  -Wl,-rpath,'$ORIGIN/../../../vendor/emt/lib:/opt/rh/gcc-toolset-13/root/usr/lib64'
+  -lemt_quote_api -lemt_api)
 
+$GXX "${COMMON_FLAGS[@]}" \
+  src/strategy_framework/emd/bind_quote.cpp \
+  -o "src/strategy_framework/emd/emd_quote_api${EXT}"
 echo "✓ 编译完成：src/strategy_framework/emd/emd_quote_api${EXT}"
+
+# 批 63 P4：EMT 交易绑定（同链接行——libemt_api.so 已含 TraderApi 符号）
+$GXX "${COMMON_FLAGS[@]}" \
+  src/strategy_framework/emd/bind_trader.cpp \
+  -o "src/strategy_framework/emd/emt_trader_api${EXT}"
+echo "✓ 编译完成：src/strategy_framework/emd/emt_trader_api${EXT}"
