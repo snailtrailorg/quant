@@ -131,6 +131,12 @@ def main() -> None:
     # 与 HUB_INTERFACE_ROW（账号选择，A股过渡 concrete unit 注入）拆开——二者语义不同，复用会污染（盲审 B P0/P3）
     _account_env = os.environ.get("ACCOUNT_ID", "")
     account_id = int(_account_env) if _account_env.isdigit() else None
+    if account_id is None:
+        # D26 账号级 hub（批 66b）：实例名=接口行 id（数字）——裸键/None account 形态退役。
+        # @quant 过渡实例以本代码启动即 78 Failed（预期态：新 unit @{id} 由 SA4 新期望源拉起，
+        # 旧 @quant 由 release 波次 mask——波次清单=DB 驱动新名单，不重启 @quant）。
+        logger.error("ACCOUNT_ID 非数字（实例名须=接口行 id，D26 账号级 hub），exit 78")
+        raise SystemExit(78)
     market = "astock"   # 会话模型分支（加密接入批）：iface 读取后更新为 iface["market"]
     instance_name = os.environ.get("INSTANCE_NAME", "")   # 仅日志标识（a′ 后无仲裁用途）
     my_uuid, gen = _lease_boot(r, account_id)
@@ -174,9 +180,9 @@ def main() -> None:
     def _publish(bar: dict) -> None:
         with seqs_lock:
             try:
-                # 加密接入批：crypto per-account 流键 hub:bars:{account_id}:{symbol}（D3 worker 消费侧契约）
-                stream = (f"hub:bars:{account_id}:{bar['symbol']}" if (market == "crypto" and account_id is not None)
-                          else BAR_STREAM_PREFIX + bar["symbol"])
+                # D26 批 66b：全市场统一 per-account 流键 hub:bars:{account_id}:{symbol}
+                # （启动断言 account_id 恒数字——旧 A股裸键/条件分支退役）
+                stream = f"hub:bars:{account_id}:{bar['symbol']}"
                 r.xadd(stream, msg_of(bar, seqs.get(bar["symbol"], 0) + 1),
                        maxlen=STREAM_MAXLEN, approximate=True)
                 seqs[bar["symbol"]] = seqs.get(bar["symbol"], 0) + 1   # 评审 B1：成功后才占号（失败不留洞）
@@ -187,15 +193,16 @@ def main() -> None:
         stats["bars"] += 1
 
     def msg_of(bar: dict, seq: int) -> dict:
+        # payload 契约（批 66b，双盲同判 P0）：account_id 字段全市场无条件写——
+        # 键统一而 payload 不统一=A股 bar 被 worker _account_mismatch 全拒（静默全盲）
         m = {
             "gen": gen, "seq": seq,
             "ts": bar["ts"].isoformat(), "pub_ts": time.time(),
             "untrusted": int(bar.get("untrusted", False)),
             "open": bar["open"], "high": bar["high"], "low": bar["low"], "close": bar["close"],
             "volume": bar["volume"], "amount": bar["amount"], "tick_count": bar["tick_count"],
+            "account_id": account_id,
         }
-        if market == "crypto" and account_id is not None:
-            m["account_id"] = account_id   # 加密 per-account 同源校验（D3 worker _account_mismatch 读此）
         return m
 
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB；批 63 二：接口行 provider 选网关插件）———

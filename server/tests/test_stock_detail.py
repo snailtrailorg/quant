@@ -22,6 +22,12 @@ def _fake_redis(data: dict | None = None):
         def get(self, k):
             return store.get(k)
 
+        def scan_iter(self, match=None, count=None):   # 批 66b：_quote_block SCAN 读者
+            import fnmatch
+            for k in list(store):
+                if match is None or fnmatch.fnmatch(k, match):
+                    yield k
+
         def set(self, k, v, ex=None):
             store[k] = v
             return True
@@ -97,7 +103,7 @@ class TestStockDetail:
 
     def test_quote_fallback_hub_to_tencent(self):
         from src.data_platform import stock_detail as sd
-        r, store = _fake_redis({"hub:latest_tick:600000.SHSE": json.dumps({"last": 9.0})})
+        r, store = _fake_redis({"hub:latest_tick:1:600000.SHSE": json.dumps({"last": 9.0, "ts": "2026-09-26T15:00:00+08:00"})})
         with patch.object(sd, "_r", return_value=r):
             q = sd._quote_block("600000.SH", "600000.SHSE")
         assert q["source"] == "hub" and q["last"] == 9.0

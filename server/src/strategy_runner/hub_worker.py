@@ -20,13 +20,15 @@ from src.strategy_runner import trading
 
 logger = logging.getLogger("hub_worker")
 
-BAR_STREAM_PREFIX = "hub:bars:"
-HB_KEY = "quant:hb:md-hub"
+BAR_STREAM_PREFIX = "hub:bars:"   # 前缀常量（终态键 hub:bars:{account_id}:{symbol}——bar_stream_key 单点构造）
+HB_KEY = "quant:hb:md-hub"        # 前缀常量（per-account 键 quant:hb:md-hub:{account_id}——_hub_alive 单点构造）
 STALE_PUB_S = 60             # pub_ts 超龄丢弃（R-DL3）
 
 
 def _crypto_provider(symbol: str) -> str | None:
-    """加密 symbol 后缀 → provider（D3 同源分源键）；A股/其他返回 None（单 hub 无 account 维）。"""
+    """加密 symbol 后缀 → provider（DataBus 暖机 source 路由用——multi-source 架构的
+    provider 任务级路由，非键域判定）。批 66b：键判定退役 account_id 单一谓词后，
+    本函数仅供 strategy_runner.main._warmup_history 的 DataRequest source 过滤。"""
     if ".BINANCE" in symbol:
         return "binance_perp"
     if ".OKX" in symbol:
@@ -34,22 +36,21 @@ def _crypto_provider(symbol: str) -> str | None:
     return None
 
 
-def bar_stream_key(symbol: str, account_id=None) -> str:
-    """D3 流键格式：A股 `hub:bars:{symbol}`（单 hub）；加密 `hub:bars:{account_id}:{symbol}`（per-account）。"""
-    if _crypto_provider(symbol) and account_id is not None:
-        return f"hub:bars:{account_id}:{symbol}"
-    return BAR_STREAM_PREFIX + symbol
+def bar_stream_key(symbol: str, account_id: int) -> str:
+    """D26 批 66b：全市场统一 per-account 流键 `hub:bars:{account_id}:{symbol}`。
 
-
-def _account_mismatch(fields: dict, symbol: str, account_id) -> bool:
-    """D3 同源校验：加密 per-account 流消息与本 account 是否不匹配（True=跨源/缺失/非法，fail-fast）。
-
-    A股（无 provider）恒 False（单 hub 无 account 维，不做比对）。
-    加密但 account_id=None（异常态）→ True（无法判定同源，fail-closed 拒——防吃错行情）。
-    decode_responses 读出 account_id 是 str，须 int 转换；缺失/非法按不匹配（fail-closed）。
+    account_id 必填（上游 --task-id 路径由 live_task.account_id NOT NULL 保证+main 层
+    get_interface_row 必填 raise 双兜底）；None/非法 raise=第二道防线（防裸键复活）。
     """
-    if _crypto_provider(symbol) is None:
-        return False
+    if account_id is None:
+        raise ValueError("account_id required——裸键形态已退役（批 66b，D26 账号级 hub）")
+    return f"hub:bars:{account_id}:{symbol}"
+
+
+def _account_mismatch(fields: dict, account_id) -> bool:
+    """D26 批 66b 同源校验（无市场跳过分支）：流消息 account_id 与本任务不一致=True
+    （跨源/缺失/非法，fail-closed 拒——防吃错行情下错单）。payload 契约保证全市场
+    消息恒带 account_id（hub msg_of 无条件写）；account_id=None（异常态）→ True。"""
     if account_id is None:
         return True
     try:
@@ -111,9 +112,9 @@ class BarMsgState:   # worker 侧消息序号/去重状态（gen 分区内 seq �
         self.seq = seq
         return "ok"
 
-def _hub_alive(r) -> bool:   # hub 心跳存在（TTL 内）；存储不可查返回 True（断流自然使 bar 过期）
+def _hub_alive(r, account_id) -> bool:   # hub 心跳存在（TTL 内）；存储不可查返回 True（断流自然使 bar 过期）
     try:
-        return r.exists(HB_KEY) == 1
+        return r.exists(f"{HB_KEY}:{account_id}") == 1   # 批 66b：per-account 键（修原裸键读=A股心跳恒真掩盖加密 hub 死亡）
     except Exception: return True
 
 def _td_connect_due(now: float, win, last_conn_ts: float, dt_now) -> bool:
@@ -134,7 +135,9 @@ def run(ctx: dict) -> None:
 
     r = _valkey()
     tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
-    account_id = ctx.get("account_id")     # D3：per-account 流键/同源校验真源（A股 None）
+    account_id = ctx.get("account_id")     # D26 批 66b：per-account 流键/同源校验真源（全市场；上游 NOT NULL+main 层兜底）
+    if account_id is None:
+        raise ValueError("ctx.account_id required——裸键形态已退役（批 66b；上游 live_task.account_id NOT NULL）")
     strategy, adapter = ctx["strategy"], ctx["adapter"]
     ee = ctx["event_engine"]          # 评审 C1：键名统一
     td_api = ctx.get("td_api")
@@ -168,8 +171,8 @@ def run(ctx: dict) -> None:
             logger.warning("XGROUP CREATE 失败: %s", e)
 
     # P0-3 配套：max_ts 持久化恢复（R-DL1 跨重启去重——曾进程内存失忆）
-    # D3：加密 per-account 水位键含 account（防跨 account 去重串扰）
-    _mts_key = f"hub:worker:max_ts:{account_id}:{symbol}" if _crypto_provider(symbol) else f"hub:worker:max_ts:{symbol}"
+    # 批 66b：水位键全市场统一含 account（旧 A股裸水位键失联=重新暖机，部署窗外切换无害）
+    _mts_key = f"hub:worker:max_ts:{account_id}:{symbol}"
     try:
         _saved = r.get(_mts_key)
         if _saved:
@@ -198,13 +201,13 @@ def run(ctx: dict) -> None:
 
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
     # ——— send_order 时刻事实检查（S6）：交易时段+bar 新鲜+hub 心跳；纯逻辑在 trading.buy_ok_check，检查器由 ctx 注入 C2 网关 ———
-    ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r), time.time(),
+    ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r, account_id), time.time(),
                                                 in_session=_in_astock_session())
     # ——— 消息处理（guard 保护，R-BR12；告警走 _alert——notify 自带 1min 同标题去重）———
     @make_guard("hub.on_msg", _alert)
     def handle_msg(fields: dict) -> None:
-        # D3 同源校验：加密 per-account 流必须带本 account_id，跨源消息 fail-fast 不落地（防吃错行情下错单）
-        if _account_mismatch(fields, symbol, account_id):
+        # D26 批 66b 同源校验（全市场）：流消息必带本 account_id（payload 契约），跨源 fail-fast 不落地
+        if _account_mismatch(fields, account_id):
             stats["dropped_cross"] += 1
             logger.error("跨源消息拒绝（account_id=%s != %s）: %s",
                          fields.get("account_id"), account_id, fields.get("ts"))
@@ -308,7 +311,7 @@ def run(ctx: dict) -> None:
     def _blind_watch():
         """盲视观测（S6）：frozen["now"] 只喂心跳/告警，下单判定由 send_order 时刻的 buy_ok 做。"""
         sess_now = _in_astock_session()
-        hub_alive = _hub_alive(r)
+        hub_alive = _hub_alive(r, account_id)
         bar_stale = (sess_now and stats["sess_bar_wall"]
                      and time.time() - stats["sess_bar_wall"] > trading.FROZEN_STALE_BAR_S)
         new_dyn = (not hub_alive) or bool(bar_stale)

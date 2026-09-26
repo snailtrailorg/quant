@@ -1,5 +1,7 @@
-"""D3 同源与流协议测试：流键 account-aware / 同源校验 / 暖机 source 过滤。"""
+"""D3 同源与流协议测试：流键 account-aware / 同源校验 / 暖机 source 过滤（批 66b：全市场 per-account 统一）。"""
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 import src.strategy_runner.hub_worker as hw
 
@@ -16,44 +18,47 @@ class TestCryptoProvider:
 
 
 class TestStreamKey:
-    def test_astock_no_account_dimension(self):
-        """A股单 hub：流键无 account 维度（即便传了 account_id 也忽略）。"""
-        assert hw.bar_stream_key("600000.SHSE") == "hub:bars:600000.SHSE"
-        assert hw.bar_stream_key("600000.SHSE", account_id=1) == "hub:bars:600000.SHSE"
+    """批 66b（D26）：全市场统一 per-account 键——A 股/加密同形，无市场分支。"""
+
+    def test_astock_per_account(self):
+        assert hw.bar_stream_key("600000.SHSE", account_id=1) == "hub:bars:1:600000.SHSE"
+        assert hw.bar_stream_key("000001.SZSE", account_id=4) == "hub:bars:4:000001.SZSE"
 
     def test_crypto_per_account(self):
         assert hw.bar_stream_key("BTCUSDT.BINANCE", account_id=7) == "hub:bars:7:BTCUSDT.BINANCE"
         assert hw.bar_stream_key("ETHUSDT.OKX", account_id=9) == "hub:bars:9:ETHUSDT.OKX"
 
-    def test_crypto_no_account_falls_back_bare(self):
-        """加密但无 account_id（异常态）退回裸键——同源校验会在消费侧兜住。"""
-        assert hw.bar_stream_key("BTCUSDT.BINANCE") == "hub:bars:BTCUSDT.BINANCE"
+    def test_none_raises_no_bare_fallback(self):
+        """批 66b 钉：account_id 必填——裸键形态退役（无「退回裸键」分支，防复活）。"""
+        with pytest.raises(ValueError):
+            hw.bar_stream_key("600000.SHSE", account_id=None)
+        with pytest.raises(ValueError):
+            hw.bar_stream_key("BTCUSDT.BINANCE", account_id=None)
 
 
 class TestAccountMismatch:
-    def test_astock_never_mismatch(self):
-        assert hw._account_mismatch({}, "600000.SHSE", 1) is False
-        assert hw._account_mismatch({"account_id": "99"}, "600000.SHSE", 1) is False
+    """批 66b：同源校验无市场跳过分支（A 股同样必须匹配 account_id——payload 契约保证字段在场）。"""
 
-    def test_astock_account_id_none_never_mismatch(self):
-        assert hw._account_mismatch({}, "600000.SHSE", None) is False
+    def test_matching(self):
+        assert hw._account_mismatch({"account_id": "1"}, 1) is False
+        assert hw._account_mismatch({"account_id": "7"}, 7) is False
 
-    def test_crypto_account_id_none_fail_closed(self):
-        """加密 + account_id=None（异常态）→ fail-closed（无法判定同源，拒——防吃错行情）。"""
-        assert hw._account_mismatch({}, "BTCUSDT.BINANCE", None) is True
+    def test_astock_cross_source_now_rejected(self):
+        """批 66b 反转钉：A 股跳过分支已删——跨源/缺失 account_id 一律拒（旧形态恒 False）。"""
+        assert hw._account_mismatch({}, 1) is True
+        assert hw._account_mismatch({"account_id": "99"}, 1) is True
+        assert hw._account_mismatch({"account_id": "8"}, 7) is True
 
-    def test_crypto_matching(self):
-        assert hw._account_mismatch({"account_id": "7"}, "BTCUSDT.BINANCE", 7) is False
+    def test_account_id_none_fail_closed(self):
+        """account_id=None（异常态）→ fail-closed（无法判定同源，拒——防吃错行情）。"""
+        assert hw._account_mismatch({}, None) is True
+        assert hw._account_mismatch({"account_id": "7"}, None) is True
 
-    def test_crypto_cross_source(self):
-        """A account worker 收到 account_id=B 消息 → 跨源 fail-fast。"""
-        assert hw._account_mismatch({"account_id": "8"}, "BTCUSDT.BINANCE", 7) is True
+    def test_missing_account_id(self):
+        assert hw._account_mismatch({}, 7) is True
 
-    def test_crypto_missing_account_id(self):
-        assert hw._account_mismatch({}, "BTCUSDT.BINANCE", 7) is True
-
-    def test_crypto_invalid_account_id(self):
-        assert hw._account_mismatch({"account_id": "abc"}, "BTCUSDT.BINANCE", 7) is True
+    def test_invalid_account_id(self):
+        assert hw._account_mismatch({"account_id": "abc"}, 7) is True
 
 
 class TestGetBarsSourceFilter:

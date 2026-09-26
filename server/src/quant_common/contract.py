@@ -169,9 +169,13 @@ FetchRequest = DataRequest  # 语义别名（28 §3.1 沿用）
 
 @dataclass(frozen=True)
 class Subscription:
-    """推型订阅。from_watermark=None 从现在起；有值=水位线重放（28 §8.3）。"""
+    """推型订阅。from_watermark=None 从现在起；有值=水位线重放（28 §8.3）。
+
+    account_id（批 66b，D26）：per-account 流键路由——hub:bars:{account_id}:{symbol}
+    （订阅方传 routing 解析的活跃 trading 行 id；必填，无裸键形态）。"""
     kind: str
     symbols: tuple[str, ...]
+    account_id: int
     from_watermark: datetime | None = None
     consumer_tag: str = "default"
 

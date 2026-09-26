@@ -149,7 +149,7 @@ class TestSubscribe:
         rows = _xrev([1, 2, 3, 4, 5], dup_ts=4)
         r.xrevrange.return_value = rows
         wm = as_utc(datetime(2026, 9, 22, 10, 3))
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=wm)
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=wm)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
         tss = [datetime.fromisoformat(m["ts"]).minute for m in h.bars]
@@ -157,13 +157,13 @@ class TestSubscribe:
         assert h.bars[0]["gen"] == "164"  # 同 ts 留新 gen（切换交界信号保留）
         assert h.warmup is None
         assert h.last_id == rows[0][0]  # poll 起点=流内最新 id
-        assert h.stream_key == "hub:bars:600000.SHSE"
+        assert h.stream_key == "hub:bars:1:600000.SHSE"
 
     def test_multi_symbol_fails_fast(self):
         from src.quant_common.contract import Subscription
         from src.data_platform.databus import DataBus
         bus = DataBus()
-        sub = Subscription(kind="bar_minute", symbols=("a.SHSE", "b.SHSE"))
+        sub = Subscription(kind="bar_minute", symbols=("a.SHSE", "b.SHSE"), account_id=1)
         with pytest.raises(ValueError):
             bus.subscribe(sub)
 
@@ -174,7 +174,7 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1, 2, 3])
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",),
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1,
                            from_watermark=datetime(2026, 9, 22, 10, 1))  # naive
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
@@ -188,7 +188,7 @@ class TestSubscribe:
         r = MagicMock()
         r.xrevrange.return_value = _xrev([8, 9, 10])          # 窗头 10:08，wm=10:01 → 洞
         wm = as_utc(datetime(2026, 9, 22, 10, 1))
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=wm)
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=wm)
         frame = _frame()
         with patch("src.data_platform.databus._r", return_value=r), \
              patch.object(bus, "_local_fetch", return_value=frame):
@@ -202,7 +202,7 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = []
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",))
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
         h.poll()
@@ -214,7 +214,7 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1, 2, 3])
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=None)
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=None)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
         assert [datetime.fromisoformat(m["ts"]).minute for m in h.bars] == [1, 2, 3]
@@ -228,7 +228,7 @@ class TestSubscribe:
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1, 2, 3])
         wm = as_utc(datetime(2026, 9, 22, 15, 0))   # 水位线超前于流内全部根
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), from_watermark=wm)
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1, from_watermark=wm)
         frame = _frame()
         with patch("src.data_platform.databus._r", return_value=r), \
              patch.object(bus, "_local_fetch", return_value=frame) as lf:
@@ -243,7 +243,7 @@ class TestSubscribe:
         bus = DataBus()
         r = MagicMock()
         r.xrevrange.return_value = _xrev([1])
-        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",))
+        sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
         r.xread.return_value = [("hub:bars:600000.SHSE", [("1-9", {"gen": "163", "ts": "x", "close": "1"})])]

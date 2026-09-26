@@ -25,7 +25,7 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 HB_TASK_KEY = "quant:hb:task:41001"
-STREAM = "hub:bars:SMOKE.SHSE"
+STREAM = "hub:bars:1:SMOKE.SHSE"   # 批 66b per-account 键（与 ctx.account_id=1 一致，bar_stream_key 单点构造同形）
 
 
 # ── 内存流存储（子进程内；证据落盘）───────────────────────────────────────────

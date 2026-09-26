@@ -18,7 +18,7 @@ import src.strategy_runner.hub_worker as hw
 from src.strategy_framework.runtime.loop import EngineLoop
 from src.strategy_framework.runtime.xsleeper import XReadSleeper
 
-STREAM = "hub:bars:X.SHSE"
+STREAM = "hub:bars:1:X.SHSE"   # 批 66b per-account 键（ctx.account_id=1）
 HB_TASK_KEY = "quant:hb:task:41001"
 
 
@@ -100,7 +100,8 @@ class StubAdapter:
 
 
 def _bar_fields(seq=1, ts="2026-08-27T10:01:00"):
-    return {"gen": 1, "seq": seq, "ts": ts, "pub_ts": time.time(),
+    # 批 66b payload 契约：消息恒带 account_id（与 ctx.account_id="t1" 同源）
+    return {"gen": 1, "seq": seq, "ts": ts, "pub_ts": time.time(), "account_id": "1",
             "open": "10", "high": "10", "low": "10", "close": "10", "volume": "100"}
 
 
@@ -121,7 +122,7 @@ def wired():
         "strategy": strategy, "adapter": StubAdapter(), "event_engine": ee,
         "td_api": td, "history": [], "frozen": {"now": False, "sticky": False},
         "warmup_pg": lambda: [], "stop_check": lambda: False,
-        "reconcile": MagicMock(), "account_id": "t1",
+        "reconcile": MagicMock(), "account_id": 1,
     }
     captured = {}
 

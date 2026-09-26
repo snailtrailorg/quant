@@ -179,8 +179,9 @@ class DataBus:
 
     # —— 订阅：M5 真实现（28 §8.3 水位线衔接，批 60 方案集 §八）——
     def subscribe(self, sub, sink=None):
-        """流订阅：单标的 `hub:bars:{symbol}` 回放+增量。
+        """流订阅：单标的 per-account 流 `hub:bars:{account_id}:{symbol}` 回放+增量（批 66b 键化）。
 
+        account_id 必填（sub.account_id——D26 账号级 hub，无裸键形态）。
         回放：XREVRANGE count=240 → 时间正序 → from_watermark 严格新于截断 → ts 去重
         （同 ts 留新 gen——切换交界 gen 跳变信号保留）。fencing（stale_gen 拒旧/重暖机）是消费方责任。
         未达断言：from_watermark 有值但回放空/窗头未接上水位线（剪尾/断流/有洞）→
@@ -190,8 +191,10 @@ class DataBus:
         r = _r()
         if len(sub.symbols) != 1:
             raise ValueError(f"subscribe 单标的订阅，收到 {len(sub.symbols)} 个标的（多标的聚合挂账 M7）: {sub.symbols}")
+        if sub.account_id is None:
+            raise ValueError("sub.account_id required——裸键形态已退役（批 66b，D26 账号级 hub）")
         symbol = sub.symbols[0]
-        stream_key = "hub:bars:" + symbol
+        stream_key = f"hub:bars:{sub.account_id}:{symbol}"
         raw = r.xrevrange(stream_key, count=_REPLAY_COUNT)   # [(id, fields)] 新→旧
         handle = StreamHandle(r, stream_key, sub)
         handle.last_id = raw[0][0] if raw else "$"            # poll 起点=流内最新 id

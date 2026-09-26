@@ -108,7 +108,7 @@ class TestEvents:
         assert (e.gen, e.seq) == (3, 17)
 
     def test_subscription_watermark_default(self):
-        s = Subscription(kind="stream_bar", symbols=())
+        s = Subscription(kind="stream_bar", symbols=(), account_id=1)
         assert s.from_watermark is None
 
 

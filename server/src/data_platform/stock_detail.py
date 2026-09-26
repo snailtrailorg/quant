@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from datetime import datetime
 
 logger = logging.getLogger("data_platform.stock_detail")
 
@@ -165,11 +166,26 @@ def analyze_cache_set(ts_code: str, text: str, ttl: int = 600) -> None:
 
 def _quote_block(ts_code: str, vt: str) -> dict | None:
     try:
-        raw = _r().get("hub:latest_tick:" + vt)
-        if raw:
+        # 批 66b（D26 §3.3）：多账号 per-account 键 hub:latest_tick:{account_id}:{symbol}——
+        # SCAN 在场集取 payload ts 最大者（TTL 65s 封绝对在场、ts 封相对陈旧；多账号任取
+        # 可显示最长 65s 陈旧价故必比 ts）。COUNT 500 显式：SCAN 成本∝键总量非命中量
+        # （bars 流/hb/task 同库）。ts 经 fromisoformat 归一比较（跨 offset ISO 串序≠时间序）。
+        best, best_ts = None, None
+        keys = list(_r().scan_iter(match=f"hub:latest_tick:*:{vt}", count=500))
+        for key in keys:
+            raw = _r().get(key)
+            if not raw:
+                continue
             q = json.loads(raw)
-            q["source"] = "hub"
-            return q
+            try:
+                ts = datetime.fromisoformat(str(q.get("ts", "")).replace("Z", "+00:00"))
+            except (TypeError, ValueError):
+                continue
+            if best_ts is None or ts > best_ts:
+                best, best_ts = q, ts
+        if best:
+            best["source"] = "hub"
+            return best
     except Exception as e:
         logger.warning("hub tick 读失败 %s: %s", vt, e)
     from .market_snapshot import get_quote
