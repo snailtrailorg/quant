@@ -502,7 +502,9 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """可转债基本信息全量同步。"""
     pro = _get_pro()
-    df = pro.cb_basic()   # DB 优化：拉取在事务外
+    from src.data_platform.rate_limit import rate_limit_context
+    with rate_limit_context(_get_rate_ds("tushare"), "cb_basic"):   # 批 64b 裸调收编（档 0.3s）
+        df = pro.cb_basic()   # DB 优化：拉取在事务外
     rows = [(r.get("ts_code"), r.get("bond_short_name"), r.get("stk_code"), r.get("stk_short_name"),
              str(r.get("maturity", "")), r.get("par"), r.get("issue_price"), r.get("conv_price"),
              str(r.get("conv_start_date", "")), str(r.get("conv_end_date", "")),
@@ -567,7 +569,9 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """ETF基金列表全量同步。"""
     pro = _get_pro()
-    df = pro.fund_basic(market="E")   # DB 优化：拉取在事务外
+    from src.data_platform.rate_limit import rate_limit_context
+    with rate_limit_context(_get_rate_ds("tushare"), "fund_basic"):   # 批 64b 裸调收编（档 0.3s）
+        df = pro.fund_basic(market="E")   # DB 优化：拉取在事务外
     rows = [(r.get("ts_code"), r.get("name"), r.get("management"),
              r.get("fund_type"), r.get("invest_type"), str(r.get("list_date", "")))
             for r in df.to_dict("records")]
@@ -1020,8 +1024,9 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
             td = d.strftime("%Y%m%d")
             try:
                 # forecast 按 ann_date 拉（公告日驱动），其余按 trade_date；
-                # 限速（限流治理吸收）：原 0.3s 硬编码 → rate_limit_context 三级可调（daily 档）
-                with rate_limit_context(ds, "daily"):
+                # 限速（限流治理吸收）：原 0.3s 硬编码 → rate_limit_context 三级可调
+                # 批 64b：档键从 "daily" 改 per-API（table==api 名，DEFAULT_RATE_LIMITS 各键 0.3s）
+                with rate_limit_context(ds, table):
                     if "ann_date" in pull_fn.__code__.co_varnames:
                         df = pull_fn(ann_date=td)
                     else:
@@ -1079,7 +1084,9 @@ def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str]
     def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
                  progress_cb=None) -> dict:
         from src.data_platform.db import get_conn as _gc
-        df = pull_fn(trade_date=end_date) if "trade_date" in pull_fn.__code__.co_varnames else pull_fn()
+        from src.data_platform.rate_limit import rate_limit_context
+        with rate_limit_context(_get_rate_ds("tushare"), table):   # 批 64b 裸调收编（namechange/concept，档 0.3s）
+            df = pull_fn(trade_date=end_date) if "trade_date" in pull_fn.__code__.co_varnames else pull_fn()
         if df is None or df.empty:
             return {"pulled": 0, "saved": 0, "start": "", "failed_dates": ["空数据"], "expected_days": 1, "actual_days": 0}
         cols = list(df.columns)

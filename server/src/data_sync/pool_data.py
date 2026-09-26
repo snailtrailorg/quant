@@ -16,6 +16,8 @@ import json, logging, time
 from datetime import date
 from src.data_platform import db as _pdb
 from .sync_lock import SyncLock
+from .engine import _get_rate_ds
+from src.data_platform.rate_limit import rate_limit_context
 
 logger = logging.getLogger("data_sync.pool_data")
 
@@ -171,6 +173,7 @@ def _sync_pools_data_inner(adapter, timebox_s, full=False, symbols=None):
         ts_codes = list(symbols) if symbols else _get_pool_ts_codes()
         if not ts_codes: return {"status":"idle","reason":"无池标的"}
         pro = adapter.get_pro()
+        ds = _get_rate_ds("tushare")   # 批 64b：限速/熔断选源（engine 同款单源）
         today_str = date.today().strftime("%Y%m%d")
         cursors = {} if (full or backfill) else _load_cursors()
         deadline = time.time() + timebox_s
@@ -190,7 +193,10 @@ def _sync_pools_data_inner(adapter, timebox_s, full=False, symbols=None):
                         # 公告日窗口 [cursor, today]：含起点重叠，幂等防漏（tier1 backfill 同先例）
                         kwargs["start_date"] = cursors[table]
                         kwargs["end_date"] = today_str
-                    df = getattr(pro, spec["api"])(**kwargs)
+                    # 批 64b：拉取收编限速上下文（键=表名=api 名=档键，0.3s；熔断 provider 级
+                    # 与 engine 共享 tushare 账号配额体=D2 立法预期行为）
+                    with rate_limit_context(ds, table):
+                        df = getattr(pro, spec["api"])(**kwargs)
                     total_saved += _upsert_rows(table, spec["pk"], spec["core"], df, ts_code)
                     done_symbols.setdefault(table, set()).add(ts_code)
                 except Exception as e:

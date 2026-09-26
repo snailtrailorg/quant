@@ -33,8 +33,15 @@ class _FakeConn:
     def __exit__(self, *a): return False
 
 
-def _run(cursors=None, full=False, timebox_s=280, pool=None, fail_on=None, symbols=None, fake_clock=False):
-    """跑一轮同步，返回 (result, pro, conn)。fail_on=(ts_code, api) 使该调用抛错。
+class _FakeDS:
+    """限速/熔断替身（批 64b）：间隔 0 不等待；无 get_param_float → 熔断参数走代码默认。"""
+    provider = "tushare"
+    def get_rate_limit(self, api_name): return 0.0
+
+
+def _run(cursors=None, full=False, timebox_s=280, pool=None, fail_on=None, symbols=None, fake_clock=False, ctx=None, fail_all=False):
+    """跑一轮同步，返回 (result, pro, conn)。fail_on=(ts_code, api) 使该调用抛错；fail_all=全部抛错。
+    ctx=限速上下文替身（批 64b 键 spy 用；缺省走真函数+FakeDS 零间隔）。
 
     隔离完备性（曾假绿教训）：sync_pools_data 内部 `import tushare_adapter` 后
     get_pro()，必须 patch 真模块 src.data_platform.adapters.tushare_adapter.get_pro，
@@ -47,7 +54,7 @@ def _run(cursors=None, full=False, timebox_s=280, pool=None, fail_on=None, symbo
 
     def _mk_api(api):
         def _call(**kwargs):
-            if fail_on and kwargs.get("ts_code") == fail_on[0] and api == fail_on[1]:
+            if fail_all or (fail_on and kwargs.get("ts_code") == fail_on[0] and api == fail_on[1]):
                 raise RuntimeError("mock fail")
             pro._calls.setdefault(api, []).append(kwargs)
             return pd.DataFrame()
@@ -60,11 +67,14 @@ def _run(cursors=None, full=False, timebox_s=280, pool=None, fail_on=None, symbo
 
     import itertools
     clock = itertools.count(0, 0.05)  # 假钟：每次 time.time() 前进 50ms
+    from src.data_platform.rate_limit import rate_limit_context as _real_ctx
     with patch("src.data_sync.pool_data.SyncLock", _FakeLock), \
          patch("src.data_sync.pool_data._get_pool_ts_codes", return_value=pool), \
          patch("src.data_sync.pool_data._pdb.get_conn", return_value=conn), \
          patch("src.data_sync.pool_data._upsert_rows", return_value=0), \
          patch("src.data_platform.adapters.tushare_adapter.get_pro", return_value=pro), \
+         patch("src.data_sync.pool_data._get_rate_ds", return_value=_FakeDS()), \
+         patch("src.data_sync.pool_data.rate_limit_context", ctx or _real_ctx), \
          patch("src.data_sync.pool_data.time") as mt:
         mt.time.side_effect = lambda: next(clock) if fake_clock else time.time()
         from src.data_sync.pool_data import sync_pools_data
@@ -172,3 +182,95 @@ def test_error_text_in_error_column():
     logs = _sync_log_inserts(conn)
     assert logs and "000001.SZ/income" in logs[0][1][8]   # error 列
     assert logs[0][1][9] == ""                            # failed_dates 空
+
+
+# --- 批 64b：拉取收编限速上下文（键=表名=DEFAULT_RATE_LIMITS 档键） ---
+
+def test_rate_limit_wrapped_per_table():
+    """10 表拉取各经 rate_limit_context(ds, table)——键=表名与限速档对齐（防漏防错键）。"""
+    from contextlib import contextmanager
+    seen = []
+
+    @contextmanager
+    def spy(ds, api_name, min_interval=None):
+        seen.append(api_name)
+        yield
+
+    _run(pool=["600000.SH"], ctx=spy)
+    assert set(seen) == {"income", "balancesheet", "cashflow", "fina_indicator", "cyq_chips",
+                         "top10_holders", "dividend", "pledge_stat", "share_float", "stk_holdernumber"}
+
+
+def test_rate_limit_failure_counted_not_fatal():
+    """拉取异常经上下文穿透（熔断记账）但被外层捕获——轮次仍产出 partial，不中断。
+
+    单点失败被 interleaved success 重置（熔断=连续失败语义，终态 closed 正确）；
+    连续失败记账由下方开闸测试钉（去掉 with 包装则 breaker 永不参与）。
+    """
+    result, pro, _ = _run(pool=["600000.SH", "000001.SZ"], fail_on=("000001.SZ", "income"))
+    assert result["status"] == "partial" and result["saved"] == 0
+    from src.data_platform import rate_limit
+    assert rate_limit._BREAKERS["tushare"].state == "closed"   # 单点失败被成功重置=连续语义
+
+
+def test_circuit_breaker_opens_on_consecutive_failures():
+    """熔断记账钉（代码审 A/B 同判补）：全表连续失败 ≥5 → tushare 破坏体开闸。
+
+    去掉 rate_limit_context 包装则 _BREAKERS 无此键/永不开闸——record_failure 路径的行为级钉。
+    """
+    result, _, _ = _run(pool=["600000.SH"], fail_all=True)
+    assert result["status"] == "partial"          # 轮次不中断（per-调用 except 兜 CircuitOpenError）
+    from src.data_platform import rate_limit
+    br = rate_limit._BREAKERS["tushare"]
+    assert br.state == "open"                     # 10 连败开闸且无 success 关闭
+
+
+def test_engine_tier1_rate_key_is_table():
+    """批 64b（engine 收编）：tier1 上下文键=table（per-API 档）而非 "daily"。"""
+    from contextlib import contextmanager
+    from datetime import date as _d
+    from src.data_sync import engine
+    seen = []
+
+    @contextmanager
+    def spy(ds, api_name, min_interval=None):
+        seen.append(api_name)
+        yield
+
+    empty = pd.DataFrame()
+
+    def _fake_pull(**kw):          # 真函数（mock 无 __code__——handler 检查 co_varnames 会炸）
+        return empty
+
+    today = _d.today().strftime("%Y%m%d")
+    with patch("src.data_platform.rate_limit.rate_limit_context", spy), \
+         patch("src.data_platform.data_source.get_data_source", return_value=_FakeDS()), \
+         patch("src.data_platform.adapters.tushare_adapter.pull_stk_limit", new=_fake_pull):
+        h = engine._make_tier1_handler("stk_limit", "pull_stk_limit", ["trade_date", "ts_code"], [])
+        r = h({}, today)
+    assert seen and set(seen) == {"stk_limit"}   # 非 "daily"
+    assert r["failed_dates"] == []               # 真走通（非 try 吞异常）
+
+
+def test_engine_full_rebuild_rate_key_is_table():
+    """批 64b（engine 收编）：full_rebuild 工厂（namechange/concept）拉取经上下文，键=table。"""
+    from contextlib import contextmanager
+    from src.data_sync import engine
+    seen = []
+
+    @contextmanager
+    def spy(ds, api_name, min_interval=None):
+        seen.append(api_name)
+        yield
+
+    def _fake_pull(**kw):          # 真函数（mock 无 __code__——handler 检查 co_varnames 会炸）
+        return pd.DataFrame()
+
+    with patch("src.data_platform.rate_limit.rate_limit_context", spy), \
+         patch.object(engine, "_get_rate_ds", return_value=_FakeDS()), \
+         patch("src.data_platform.adapters.tushare_adapter.pull_namechange", new=_fake_pull):
+        h = engine._make_full_rebuild_handler("namechange", "pull_namechange",
+                                              ["ts_code", "name", "start_date"], [])
+        r = h({}, "20260808")
+    assert seen == ["namechange"]
+    assert r["failed_dates"] == ["空数据"]

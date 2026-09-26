@@ -117,6 +117,16 @@ class TushareDataSource(DataSource):
         "cb_daily": 0.5,
         "trade_cal": 0.5,
         "stock_basic": 0.5,
+        # 批 64b：漏网限速档补齐（D25 收尾——同步链两循环全覆盖，全 0.3s 与 adj_factor
+        # 同档=200 积分贴线保守值；DB rate_limits 两级覆写不变）
+        # pool_data per-symbol 族（0106 登记十表）：
+        "income": 0.3, "balancesheet": 0.3, "cashflow": 0.3, "fina_indicator": 0.3,
+        "cyq_chips": 0.3, "top10_holders": 0.3, "dividend": 0.3, "pledge_stat": 0.3,
+        "share_float": 0.3, "stk_holdernumber": 0.3,
+        # engine 侧（tier1 七键从 daily 0.5s 归位 per-API + 四裸调点首接限速）：
+        "stk_limit": 0.3, "moneyflow": 0.3, "margin_detail": 0.3, "top_list": 0.3,
+        "block_trade": 0.3, "cyq_perf": 0.3, "forecast": 0.3,
+        "cb_basic": 0.3, "fund_basic": 0.3, "namechange": 0.3, "concept": 0.3,
     }
 
     def _build_rate_policy(self):
