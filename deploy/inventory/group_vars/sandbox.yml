@@ -61,6 +61,10 @@ deploy_task_units_db_cmd: "{{ quant_dbro_cmd }} live"
 deploy_task_units_db_cmd_feishu: "{{ quant_dbro_cmd }} feishu"
 deploy_postverify_probe: false        # W2：沙箱 web 桩无 /api/_probe（web.py:27）
 postverify_healthz_release: true     # 沙箱 healthz 桩回带 release_id（生产 web_api 无此字段，3b 校正）
+# 批 66b：hub 期望集 DB 驱动变量域（沙箱 hub 波=静态 quant-sbx-hub 不消费清单，但 preflight
+# set_fact 模板必求值——缺定义=沙箱 release 全在 set_fact 中止〔快审 B-P1-1 补〕）
+deploy_hub_units: []
+deploy_hub_md_providers: [xtp, emt_emq, binance_perp, okx_perp]
 deploy_hub_hb_mode: file             # 生产: redis（quant:hb:md-hub，3b 首跑验证）
 deploy_hub_hb_file: "{{ deploy_root }}/shared/runtime/hub_hb.json"
 

@@ -428,7 +428,7 @@
           when: not (server_changed | bool)
 
 
-        - name: 阶段 7.6 —— 旧 @quant hub 退役（批 66b D26：stop+disable+mask；新 unit 已由 hub 波拉起稳定）
+        - name: 阶段 7.6 —— 旧 @quant hub 退役（批 66b D26：stop+disable——mask 弃用；新 unit 已由 hub 波拉起稳定）
           block:
             - name: 旧 @quant 停止（已停/未载入幂等）
               ansible.builtin.command: "{{ quant_svc_cmd }} stop quant-md-hub@quant.service"

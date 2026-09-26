@@ -321,6 +321,6 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 - **白名单「超集」（A-P2-1 驳回）**：A 断言注册表仅 {xtp,emt_emq}——B venv 实跑 list_md_gateway_providers()=四 provider 全注册（加密 MD 网关 D6 已装）+prod @4/@5 本就在跑=虚惊，白名单维持四项与注册表一致。
 - 其余：非空断言豁免门（server_changed+逃生键+static 源 skipped 语义）/monitor state 初值 dict 化（B-P2-1 崩溃防线）/R4 legacy 过渡豁免（B-P2-2 迁移夜假警）/crypto 测试 SECRET_KEY 隔离（B-P2-7 环境红修）/残留 fixture 清零（xsleeper×3+databus）/新行为钉 9 个（_probe 空集地板+ts 陈旧+非数字尾段/collector legacy 双分支/_hub_expected_ids 直测）/P3 注释四处。
 - 两审核实确认：波次实序 task→hub（旧注释纠偏）/双活窗不同键空间安全/payload 三层一致+存量旧消息全路径不可达（XREADGROUP>$/xrevrange/xautoclaim 全核）/Jinja 链 venv 实跑正确/skipped register 语义实测/回灌脚本本体合格（键分类/幂等/maxlen 无剪尾）。
-- 验证：**1460 全绿**（+7 新钉）；syntax-check 双剧本过（YAML name 含 = 的 k=v 误判两处修）。
+- 验证：**1460 全绿**（+6 新钉+1 crypto 环境修复）；syntax-check 双剧本过（YAML name 含 = 的 k=v 误判两处修）。
 
 **快审（第三轮忠实度复核）**：22/24 忠实（含全部 5 条 P0），余 4 项轻量修补已落——#21 双活窗注记虚指→§3-11 正文补写（窗口存在/不同键空间无害/双 XTP 连接瞬态/stop 时序实况）；#23 打折→§2.5 _probe SCAN 补 COUNT 100；§3-9「周一」措辞残留→周二；#12 同步义务载体悬空→钉在过滤处代码注释（模块契约不含 deploy）。#24 来源标注补正（原 A-P1-1②）。快审附带确认：D26 两处改写正确无残留；D26 §4.1:113「续租丢路径均已死」旧句待 66c 文档收尾一并校（既定范围）。**总判 PASS**。

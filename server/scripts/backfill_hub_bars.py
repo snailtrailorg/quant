@@ -5,7 +5,8 @@
 新流为空（PG bar_1min 已退役无暖机源）→ 不回灌=任务首个交易日零历史起步（240 根≈4h 盲窗）。
 
 动作：SCAN 旧形态键（第二段非纯数字=旧键）→ XREAD 全量条目 → XADD 新键（payload 补
-account_id 字段，gen 保留原值——worker gen_jump→rewarm 自动接管）→ 逐键报告。幂等：
+account_id 字段+gen 置 0——0<一切 live gen 任意投递顺序无倒挂，live 首根触发 gen_jump→rewarm）
+→ 逐键报告。幂等：
 --commit 缺省=干跑（只报告不写）；重复执行按 ts 去重天然收敛（worker max_ts 过滤）。
 
 运行（服务器，michael 带外步——批 66b 带外步（§3-7 ④：release 完成后立即跑）；quant 属主能读 .env/venv）：
