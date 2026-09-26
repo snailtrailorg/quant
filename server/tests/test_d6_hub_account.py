@@ -15,26 +15,38 @@ class TestKeyAccount:
 
 
 class TestDesiredUnitsCryptoHub:
-    def test_crypto_account_adds_hub_unit(self):
-        """D6：加密 account（enabled + trading + crypto）→ quant-md-hub@{account_id} 期望项。"""
+    def test_trading_account_adds_hub_unit(self):
+        """批 66b（D26）：trading 域 account（enabled，全市场无 market 过滤）→ quant-md-hub@{id} 期望项。"""
         from src.scheduler import tasks as T
         import tests.test_sa4_reconciler as sa4
         from unittest.mock import patch
         conn = sa4._mk_conn2(crypto_ids=[3, 7])
         with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
             desired = T._desired_units(conn)
-        assert ("quant-md-hub@3.service", "hub:crypto") in desired
-        assert ("quant-md-hub@7.service", "hub:crypto") in desired
-        assert (T.SA4_HUB_UNIT, "builtin") in desired   # A股单 hub 仍常开
+        assert ("quant-md-hub@3.service", "hub") in desired
+        assert ("quant-md-hub@7.service", "hub") in desired
+        assert not any(s == "builtin" for _, s in desired)   # builtin 常开条目已退役（66b）
 
-    def test_no_crypto_account_no_crypto_hub(self):
+    def test_no_trading_account_no_hub(self):
         from src.scheduler import tasks as T
         import tests.test_sa4_reconciler as sa4
         from unittest.mock import patch
         conn = sa4._mk_conn2()   # crypto_ids 空
         with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
             desired = T._desired_units(conn)
-        assert not any(s == "hub:crypto" for _, s in desired)
+        assert not any(s == "hub" for _, s in desired)
+
+    def test_no_market_filter_in_sql(self):
+        """批 66b 钉：期望源 SQL 去 market='crypto' 过滤（全市场行驱动）。"""
+        from src.scheduler import tasks as T
+        import tests.test_sa4_reconciler as sa4
+        from unittest.mock import patch
+        conn = sa4._mk_conn2(crypto_ids=[3])
+        with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
+            T._desired_units(conn)
+        sqls = [c.args[0] for c in conn.execute.call_args_list]
+        hub_sql = [s for s in sqls if "external_interface" in s]
+        assert hub_sql and not any("market='crypto'" in s for s in hub_sql)
 
 
 class TestSa4HubGuardsAccount:

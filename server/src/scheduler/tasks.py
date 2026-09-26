@@ -1276,8 +1276,9 @@ SA4_BACKOFF_CAP = 3600   # 退避封顶 1h
 SA4_STABLE_SECS = 600    # 单元稳定 active 超此时长清退避计数（短暂失败不累积惩罚）
 SA4_KEY_PREFIX = "quant:sa4:backoff:"
 # 批5 L3 扩面（2026-08-27，docs/obsolete/任务归档/批5-L3扩面与polkit配套.md）：
-# md-hub 常开语义 + 三重熔断键（D1）；strategy@* 以 is-enabled 显式意图为判定源（D2）
-SA4_HUB_UNIT = "quant-md-hub@quant.service"      # hub 期望表条目（系统单例数据面，常开）
+# 三重熔断键（D1）；strategy@* 以 is-enabled 显式意图为判定源（D2）。
+# 批 66b（D26）：hub 期望源=DB 行驱动全市场（builtin @quant 常开条目+SA4_HUB_UNIT 常量退役——
+# 旧 @quant 过渡实例的 stop/mask 由 deploy 波次承担，SA4 不越权停非数字实例名）
 SA4_HUB_LEASE_KEY = "hub:lease"                  # 租约 fencing 键（在场=对端实例持有 -> 让位）
 SA4_HUB_MAINT_KEY = "quant:maintenance:md-hub"   # 维护标记（人工停 hub 前打，默认 TTL 4h 防遗忘）
 SA4_ALERT_TTL = 3600                             # 维护/78 告警去重窗（防 300s 周期刷屏）
@@ -1321,7 +1322,9 @@ def _desired_units(conn) -> list[tuple[str, str]]:
       废架构兼容单元：**enabled DB 行不作拉起依据**（D2 v2——镜像实锤 2-3 行 enabled 无
       live_task 关联，按 DB 拉会部署首周期即拉废 runner）；仅显式 enable 过且无关联才期望在跑，
       is-enabled 与 live_task 并存时排除防双拉（v2.1 去重护栏）
-    - md-hub -> 常开（source=builtin，系统单例数据面无 DB 行，永远该在跑）
+    - md-hub -> external_interface trading 域 enabled 行（source=hub，**全市场**——批 66b/D26：
+      一行=一 hub=quant-md-hub@{row.id}；去 crypto 过滤+builtin 常开条目退役）。
+      provider 白名单保留（未实现 MD 网关的 provider 不进期望表——防「拉起→78→告警」死循环）
     """
     cur = conn.execute("SELECT id FROM live_task WHERE status='running'")
     desired = [(f"quant-live-task@{row[0]}.service", "live_task") for row in cur.fetchall()]
@@ -1335,17 +1338,15 @@ def _desired_units(conn) -> list[tuple[str, str]]:
         r = _sa4_systemctl("is-enabled", unit)
         if r is not None and r.returncode == 0 and r.stdout.strip() == "enabled":
             desired.append((unit, "strategy"))
-    # D6：加密 per-account hub 期望（enabled + trading capability + crypto market + 已注册 MD 网关 provider）。
-    # provider 过滤：未实现 MD 网关的加密 provider 不进期望表，防「拉起→create_md_gateway ValueError→78→告警」死循环
+    # 批 66b（D26 账号级 hub）：trading 域 enabled 全市场行驱动期望（unit 名=行 id 数字）
     from src.strategy_framework.md_gateway import list_md_gateway_providers
     md_providers = list_md_gateway_providers()
     cur = conn.execute(
         "SELECT id FROM external_interface "
-        "WHERE enabled=true AND 'trading' = ANY(capabilities) AND market='crypto' "
+        "WHERE enabled=true AND 'trading' = ANY(capabilities) "
         "AND provider = ANY(%s)", (list(md_providers),))
     for row in cur.fetchall():
-        desired.append((f"quant-md-hub@{row[0]}.service", "hub:crypto"))
-    desired.append((SA4_HUB_UNIT, "builtin"))
+        desired.append((f"quant-md-hub@{row[0]}.service", "hub"))
     return desired
 
 
@@ -1365,9 +1366,9 @@ def _sa4_hub_guards(r, account_id=None):
 
     返回 (ok, reason)：
     - Valkey 不可达/键操作异常 -> fail-closed 跳过（分区期盲拉第二实例会短暂破坏 fencing）
-    - 租约键在场 -> 让位跳过（对端实例持有，正常运维态不告警）
+    - 租约键在场 -> 让位跳过（对端实例持有，正常运维态不告警；批 66a a′ 后=boot 守卫 SET NX 键，
+      语义不变——期望源恒数字 account_id，None 全局键分支为遗留防御）
     - 维护标记在场 -> 跳过 + 告警（人工维护窗；标记自带 TTL 4h 防裸奔遗忘）
-    D6：account_id 非 None 时键分 account（加密 per-account hub），None=A股全局键。
     """
     if r is None:
         return False, "valkey-down"
@@ -1533,11 +1534,9 @@ def sa4_reconciler():
                     continue
                 need_reset = True  # 崩溃 failed（含 StartLimit 打穿）-> 拉起前先清 failed 态
             # md-hub 前置熔断（D1 前两重）：租约（Valkey 不可达 fail-closed）/维护标记。
-            # D6：hub:crypto 按 account_id 分键（从 unit 名 quant-md-hub@{account_id}.service 解析）
-            if source in ("builtin", "hub:crypto"):
-                vid = None
-                if source == "hub:crypto":
-                    vid = int(unit.split("@", 1)[1].rsplit(".service", 1)[0])
+            # 批 66b：期望源统一 source="hub"，按 account_id 分键（从 unit 名 quant-md-hub@{account_id}.service 解析）
+            if source == "hub":
+                vid = int(unit.split("@", 1)[1].rsplit(".service", 1)[0])
                 ok, reason = _sa4_hub_guards(r, vid)
                 if not ok:
                     if reason == "maintenance":
@@ -1594,22 +1593,24 @@ def sa4_reconciler():
                        code="l3.pull")
             except Exception:
                 pass
-        # D6：停非期望的加密 hub（account 禁用/删除后实例仍在跑 → stop，防 SA4 反拉）。
+        # 停非期望的账号 hub（account 禁用/删除后实例仍在跑 → stop，防 SA4 反拉）。
         # 必须在外层 for 循环之外（否则期望单元全健康时 continue 跳过——盲审 A BUG#2）；
-        # 判定用「实例名解析纯数字 account_id」而非名字形似（防误停 A股切换目标 quant2——盲审 B P1）；
+        # 判定用「实例名解析纯数字 account_id」而非名字形似（防误停遗留形态——盲审 B P1）；
+        # 批 66b：非数字实例名（@quant 过渡实例）SA4 不越权停——退役 stop/mask 由 deploy 波次承担
+        # （波次清单=DB 驱动新名单，不含 @quant=不重启不误判）
         # 不打维护键（反拉保护已由 desired 集合+租约提供，维护键 TTL 4h 会挡重新启用——盲审 B P2）
         desired_units = {u for u, _ in desired}
         for unit in actives:
             if unit.startswith("quant-md-hub@"):
                 vid = unit.split("@", 1)[1].rsplit(".service", 1)[0]
                 if not vid.isdigit() or unit in desired_units:
-                    continue   # 非数字实例名（quant/quant2）= A股切换，或仍在期望表
+                    continue   # 非数字实例名=遗留过渡态（deploy 退役对象），或仍在期望表
                 try:
                     _sa4_systemctl("stop", unit)
                     result.setdefault("l3_stopped", []).append(unit)
-                    logger.warning("L3 停非期望加密 hub: %s（account %s 已禁用/删除）", unit, vid)
+                    logger.warning("L3 停非期望账号 hub: %s（account %s 已禁用/删除）", unit, vid)
                 except Exception as e:
-                    logger.warning("L3 停加密 hub %s 失败: %s", unit, e)
+                    logger.warning("L3 停账号 hub %s 失败: %s", unit, e)
     except Exception as e:
         logger.warning("L3 意图调和失败: %s", e)
 

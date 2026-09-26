@@ -286,9 +286,14 @@ class TestSa4Reconciler:
 # ── 批5：L3 扩面——期望表三源归一 + md-hub 三重熔断 + failed 态区分（D1/D2 v2.1）──
 
 
-def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
-    """_desired_units 用 conn mock：按 SQL 前缀分流（running / strategy 关联 / crypto account 三查询）。
+HUB_UNIT = "quant-md-hub@4.service"   # 批 66b：期望源=DB 行驱动（数字实例名=行 id）
 
+
+def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
+    """_desired_units 用 conn mock：按 SQL 前缀分流（running / strategy 关联 / hub 期望三查询）。
+
+    批 66b：hub 期望 SQL 去 market='crypto' 过滤（全市场 trading 行）——分流锚 external_interface。
+    crypto_ids 参数名保留（存量调用兼容），语义=trading 域 hub 行 id 集。
     reconciler 级测试同样可用（"SELECT 1" 走 linked cursor 不 raise）。
     """
     conn = MagicMock()
@@ -301,7 +306,7 @@ def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
     cur_crypto.fetchall.return_value = [(c,) for c in crypto_ids]
     conn.execute.side_effect = lambda sql, *a: (
         cur_running if "status='running'" in sql
-        else cur_crypto if "market='crypto'" in sql
+        else cur_crypto if "external_interface" in sql
         else cur_linked)
     return conn
 
@@ -329,6 +334,7 @@ def _run_l3(failed=(), active=(), conn=None, valkey=None, valkey_error=False,
         p_sys.return_value = sys_return
     if conn is None:
         conn = _mk_conn(status="stopped")
+        # 批 66b：hub 期望=external_interface 行驱动——需要 hub 期望的用例显式传 conn=_mk_conn2(crypto_ids=[4])
     with contextlib.ExitStack() as st:
         st.enter_context(patch.object(T, "_sa4_units", side_effect=lambda s: {
             "failed": list(failed), "active": list(active)}[s]))
@@ -365,8 +371,7 @@ class TestDesiredUnits:
         assert desired == [
             ("quant-live-task@8.service", "live_task"),
             ("quant-strategy@5.service", "strategy"),   # enabled 且无 live_task 关联
-            (T.SA4_HUB_UNIT, "builtin"),
-        ]  # @3 关联被护栏排除、@9 is-enabled=disabled 不进表
+        ]  # @3 关联被护栏排除、@9 is-enabled=disabled 不进表；builtin hub 条目已退役（批 66b）
 
     def test_strategy_db_enabled_row_not_pulled(self):
         """D2 v2：strategy_config enabled DB 行不作拉起依据——单元未 is-enabled 即不进期望表。"""
@@ -376,7 +381,7 @@ class TestDesiredUnits:
                           return_value=["quant-strategy@9.service"]), \
              patch.object(T, "_sa4_systemctl", return_value=_cp(returncode=1, stdout="disabled\n")):
             desired = T._desired_units(conn)
-        assert [u for u, _ in desired] == [T.SA4_HUB_UNIT]
+        assert [u for u, _ in desired] == []   # builtin hub 条目已退役（批 66b）——期望表可空
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert not any("strategy_config" in s for s in sqls)  # 全程不读 enabled DB 行
 
@@ -397,19 +402,19 @@ class TestL3HubReconcile:
         """hub 常开期望 + systemd 无实例 -> L3 拉起 + 退避计数写共键 attempts=1。"""
         from src.scheduler import tasks as T
         valkey = _mk_valkey2()
-        result, p_sys, _ = _run_l3(valkey=valkey, sys_return=_cp())
-        assert result.get("l3_restarted") == [T.SA4_HUB_UNIT]
-        assert p_sys.call_args == call("start", T.SA4_HUB_UNIT)
+        result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey, sys_return=_cp())
+        assert result.get("l3_restarted") == [HUB_UNIT]
+        assert p_sys.call_args == call("start", HUB_UNIT)
         assert valkey.hset.call_args.kwargs["mapping"]["attempts"] == 1
-        assert valkey.hset.call_args.args[0] == "quant:sa4:backoff:" + T.SA4_HUB_UNIT
+        assert valkey.hset.call_args.args[0] == "quant:sa4:backoff:" + HUB_UNIT
 
     def test_hub_backoff_window_skips(self):
         """hub 退避与 L1 共键：attempts=1 且 300s 窗口内 -> l3_skipped 不拉不写计数。"""
         from src.scheduler import tasks as T
-        key = "quant:sa4:backoff:" + T.SA4_HUB_UNIT
+        key = "quant:sa4:backoff:" + HUB_UNIT
         valkey = _mk_valkey2(counter={key: {"attempts": "1", "ts": str(time.time())}})
-        result, p_sys, _ = _run_l3(valkey=valkey)
-        assert result.get("l3_skipped") == [T.SA4_HUB_UNIT]
+        result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey)
+        assert result.get("l3_skipped") == [HUB_UNIT]
         assert "l3_restarted" not in result
         p_sys.assert_not_called()
 
@@ -417,12 +422,12 @@ class TestL3HubReconcile:
         """P2(G4 ④a): systemctl start 失败 -> l3_failed 含 stderr + 告警发出(原版静默丢弃)。"""
         from src.scheduler import tasks as T
         valkey = _mk_valkey2()
-        result, _, p_notify = _run_l3(
+        result, _, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), 
             valkey=valkey,
             sys_return=_cp(returncode=1, stderr="Start request repeated too quickly"),
         )
         l3f = result.get("l3_failed", [])
-        assert len(l3f) == 1 and T.SA4_HUB_UNIT in l3f[0]
+        assert len(l3f) == 1 and HUB_UNIT in l3f[0]
         assert "repeated too quickly" in l3f[0]   # stderr 采集
         assert p_notify.called                     # 告警发出(原版零告警)
         assert "l3_restarted" not in result       # 未拉起成功
@@ -430,27 +435,27 @@ class TestL3HubReconcile:
     def test_stable_clear_generalized_to_hub(self):
         """stable-clear 泛化（D1 v2 修）：hub 稳定 active 超 10min -> 共键计数被清。"""
         from src.scheduler import tasks as T
-        key = "quant:sa4:backoff:" + T.SA4_HUB_UNIT
+        key = "quant:sa4:backoff:" + HUB_UNIT
         valkey = _mk_valkey2(counter={key: {"attempts": "3", "ts": str(time.time() - 3600)}})
-        result, p_sys, _ = _run_l3(active=[T.SA4_HUB_UNIT], valkey=valkey)
+        result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), active=[HUB_UNIT], valkey=valkey)
         valkey.delete.assert_called_once_with(key)
         p_sys.assert_not_called()   # 在场不拉
 
     def test_lease_held_skips_without_backoff_write(self):
         """租约残留（对端实例在场）-> 让位跳过且不写退避计数（正常让位不受惩罚）。"""
         from src.scheduler import tasks as T
-        valkey = _mk_valkey2(exists={T.SA4_HUB_LEASE_KEY: 1})
-        result, p_sys, _ = _run_l3(valkey=valkey, sys_return=_cp())
-        assert result.get("l3_guards", {}).get(T.SA4_HUB_UNIT) == "lease-held"
+        valkey = _mk_valkey2(exists={"hub:lease:4": 1})   # 批 66b：per-account 租约键（@4 数字实例名）
+        result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey, sys_return=_cp())
+        assert result.get("l3_guards", {}).get(HUB_UNIT) == "lease-held"
         p_sys.assert_not_called()
         valkey.hset.assert_not_called()
 
     def test_maintenance_marker_skips_and_alerts(self):
         """维护标记在场 -> 跳过 + 告警（写去重键，人工维护窗不打扰）。"""
         from src.scheduler import tasks as T
-        valkey = _mk_valkey2(exists={T.SA4_HUB_MAINT_KEY: 1})
-        result, p_sys, p_notify = _run_l3(valkey=valkey)
-        assert result.get("l3_guards", {}).get(T.SA4_HUB_UNIT) == "maintenance"
+        valkey = _mk_valkey2(exists={"quant:maintenance:md-hub:4": 1})   # per-account 维护键
+        result, p_sys, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey)
+        assert result.get("l3_guards", {}).get(HUB_UNIT) == "maintenance"
         p_sys.assert_not_called()
         p_notify.assert_called_once()
         valkey.set.assert_called_once()   # 告警去重键（SET NX EX）
@@ -458,15 +463,15 @@ class TestL3HubReconcile:
     def test_valkey_down_fail_closed(self):
         """Valkey 不可达 -> fail-closed：hub 跳过不盲拉（防双实例破坏 fencing）+ 告警。"""
         from src.scheduler import tasks as T
-        result, p_sys, p_notify = _run_l3(valkey_error=True, sys_return=_cp())
-        assert result.get("l3_guards", {}).get(T.SA4_HUB_UNIT) == "valkey-down"
+        result, p_sys, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey_error=True, sys_return=_cp())
+        assert result.get("l3_guards", {}).get(HUB_UNIT) == "valkey-down"
         p_sys.assert_not_called()
         p_notify.assert_called_once()
 
     def test_hub_active_not_pulled(self):
         """hub 在场（active）-> 期望已满足不拉（常开语义≠重复拉）。"""
         from src.scheduler import tasks as T
-        result, p_sys, _ = _run_l3(active=[T.SA4_HUB_UNIT])
+        result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), active=[HUB_UNIT])
         p_sys.assert_not_called()
         assert "l3_restarted" not in result and "l3_guards" not in result
 
@@ -479,8 +484,8 @@ class TestL3FailedStates:
         def _sys(*args):
             return _cp(stdout="78\n") if args[0] == "show" else _cp()
 
-        result, p_sys, p_notify = _run_l3(failed=[T.SA4_HUB_UNIT], sys_side_effect=_sys)
-        assert result.get("l3_config_failed") == [T.SA4_HUB_UNIT]
+        result, p_sys, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), failed=[HUB_UNIT], sys_side_effect=_sys)
+        assert result.get("l3_config_failed") == [HUB_UNIT]
         assert not any(c.args[0] in ("start", "reset-failed") for c in p_sys.call_args_list)
         p_notify.assert_called_once()
 
@@ -492,12 +497,12 @@ class TestL3FailedStates:
             return _cp(stdout="1\n") if args[0] == "show" else _cp()
 
         valkey = _mk_valkey2()
-        result, p_sys, _ = _run_l3(failed=[T.SA4_HUB_UNIT], sys_side_effect=_sys, valkey=valkey)
-        assert result.get("l3_restarted") == [T.SA4_HUB_UNIT]
+        result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), failed=[HUB_UNIT], sys_side_effect=_sys, valkey=valkey)
+        assert result.get("l3_restarted") == [HUB_UNIT]
         assert p_sys.call_args_list == [
-            call("show", T.SA4_HUB_UNIT, "--property=ExecMainStatus", "--value"),
-            call("reset-failed", T.SA4_HUB_UNIT),
-            call("start", T.SA4_HUB_UNIT),
+            call("show", HUB_UNIT, "--property=ExecMainStatus", "--value"),
+            call("reset-failed", HUB_UNIT),
+            call("start", HUB_UNIT),
         ]
         assert valkey.hset.call_args.kwargs["mapping"]["attempts"] == 1
 

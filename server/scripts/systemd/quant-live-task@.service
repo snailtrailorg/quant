@@ -2,8 +2,10 @@
 Description=Quant Live Task %i (实盘任务，策略+标的分离)
 # 不 Requires 具体 pg/redis 服务名（各机命名不一，写错=永远起不来）；runner 启动探活退避等依赖（SA4）
 # SA4：Failed 后由 celery reconciler（sa4_reconciler）按退避自动 reset-failed + start
-After=network-online.target quant-md-hub@quant.service
-Wants=network-online.target quant-md-hub@quant.service
+# 批 66b（D26）：去 quant-md-hub@quant.service 具体实例依赖——hub 期望源=external_interface
+# 行驱动（@{id} 数字实例名），任务与 hub 的对账由 SA4 周期调和兜覆盖（worker 流键自带账号维度）
+After=network-online.target
+Wants=network-online.target
 # 5 次/5 分钟失败后放弃进 Failed → 触发 OnFailure 告警（防无限重启风暴，F-1）
 OnFailure=quant-task-failed@%i.service
 StartLimitIntervalSec=300
