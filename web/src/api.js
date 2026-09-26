@@ -302,3 +302,12 @@ export const sse = (() => {
     healthy() { return !!ctrl && !stopped && (Date.now() - lastFrameAt) < FRAME_TIMEOUT_MS },
   }
 })()
+
+// 批 61 M6：账号切换会话（nominate/confirm/extend/abort=strategy_control；execute=trade——后端门）
+export const getTradeSwitchSessions = activeOnly => api.get('/trade-switch', { params: activeOnly ? { active_only: true } : {} })
+export const getTradeSwitchSession = id => api.get(`/trade-switch/${id}`)
+export const nominateTradeSwitch = body => api.post('/trade-switch', body)
+export const confirmTradeSwitch = id => api.post(`/trade-switch/${id}/confirm`)
+export const extendTradeSwitch = id => api.post(`/trade-switch/${id}/extend`)
+export const executeTradeSwitch = (id, body) => api.post(`/trade-switch/${id}/execute`, body)
+export const abortTradeSwitch = (id, body) => api.post(`/trade-switch/${id}/abort`, body)

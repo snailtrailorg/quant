@@ -17,6 +17,7 @@ const routes = [
 
       // 交易
       { path: 'trading', name: 'trading', component: () => import('./views/Trading.vue') },
+      { path: 'trade-switch', name: 'trade-switch', component: () => import('./views/TradeSwitch.vue') },   // 批 61 M6：账号切换（read 可见，动作后端权限门兜底）
       { path: 'monitoring', redirect: '/live-task' },
 
       // 策略

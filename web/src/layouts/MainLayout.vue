@@ -84,6 +84,7 @@
             <template #title><el-icon><Monitor /></el-icon>{{ t('nav.gLive') }}</template>
             <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
             <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.tradingDesk') }}</el-menu-item>
+            <el-menu-item index="/trade-switch"><el-icon><Switch /></el-icon>{{ t('nav.tradeSwitch') }}</el-menu-item>
           </el-sub-menu>
 
           <el-sub-menu index="riskgrp">
@@ -133,7 +134,7 @@
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
-         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Guide } from '@element-plus/icons-vue'
+         ChatDotRound, Bell, User, SwitchButton, Switch, Back, Grid, Guide } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
