@@ -40,6 +40,7 @@ NAV_ITEMS_BASE: list[dict] = [
     {"id": "analysis", "group": "research", "order": 6},
     {"id": "live-task", "group": "live", "order": 1},
     {"id": "trading", "group": "live", "order": 2},
+    {"id": "trade-switch", "group": "live", "order": 3},   # 批 61 M6：账号切换（nav 维缺省 readwrite）
     {"id": "risk", "group": "riskgrp", "order": 1},
     {"id": "reconcile", "group": "riskgrp", "order": 2},
     {"id": "risk-rules", "group": "riskgrp", "order": 3},

@@ -29,6 +29,19 @@ TOKEN=$(python3 -c "import json;print(json.load(open('$TMPD/login.json')).get('t
 [ -n "$TOKEN" ] || { echo "✗ 登录响应无 token 字段"; exit 2; }
 echo "✓ 登录 OK（$SMOKE_USER）"
 
+# check_code <名> <路径> <期望码>（非 200 断言用——批 61：404 形状）
+check_code() {
+  local name="$1" path="$2" want="$3"
+  local code
+  code=$(curl -s --max-time 10 -o "$TMPD/out.json" -w '%{http_code}' \
+    -H "Authorization: Bearer $TOKEN" "$BASE_URL$path")
+  if [ "$code" != "$want" ]; then
+    echo "✗ $name  HTTP $code（期望 $want）  $path"; FAIL=$((FAIL+1)); FAILED+=("$name")
+  else
+    echo "✓ $name"; PASS=$((PASS+1))
+  fi
+}
+
 # check <名> <路径> <顶层形状断言（python 表达式，d=解析后 JSON）>
 check() {
   local name="$1" path="$2" shape="${3:-d is not None}"
@@ -71,6 +84,10 @@ check "回测列表"        "/api/backtest"                    'isinstance(d, di
 check "健康组件"        "/api/health/components"           'isinstance(d, dict) or isinstance(d, list)'
 check "帮助-index"      "/api/help/index"                  '"content" in d'
 check "runbook 映射"     "/api/runbook"                     '"items" in d and len(d["items"]) > 20'
+# 批 61（2026-09-26）：M6 账号切换面（列表+详情 404 形状）
+check "切换会话列表"    "/api/trade-switch"              'isinstance(d, dict) and "items" in d and "timeout_s" in d'
+check_code "切换会话详情404" "/api/trade-switch/999999" "404"
+
 # 批13（2026-09-11）：IM 平台注册表三平台断言（registry 遍历引导+form.fields 契约）
 check "IM平台注册表"    "/api/im-bots/providers"           'isinstance(d, list) and {p.get("provider") for p in d} >= {"feishu", "dingtalk", "wecom"} and d[0]["provider"] == "feishu" and all(any(m.get("kind") == "manual" and m.get("fields") for m in p["methods"]) for p in d if p["provider"] != "feishu")'
 

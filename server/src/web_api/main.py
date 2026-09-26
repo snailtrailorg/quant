@@ -144,6 +144,7 @@ from .routes.mgmt import router as mgmt_router                # /api/interfaces�
 from .routes.risk import router as risk_router                # /api/risk* /api/live-trading /api/reconcile /api/convertible
 from .routes.backtest import router as backtest_router        # /api/backtest* /api/pool* /api/broker-usage
 from .routes.routing import router as routing_router          # 批 57 M2：/api/routing/*（策略+dry-run+审计）
+from .routes.trade_switch import router as trade_switch_router  # 批 61 M6：/api/trade-switch/*（账号切换状态机）
 
 app.include_router(system_router)
 app.include_router(auth_router)
@@ -152,6 +153,7 @@ app.include_router(trading_router)
 app.include_router(sync_router)
 app.include_router(stock_router)
 app.include_router(routing_router)
+app.include_router(trade_switch_router)   # 批 61 M6
 app.include_router(chat_router)
 app.include_router(im_bots_router)
 app.include_router(alerts_router)
