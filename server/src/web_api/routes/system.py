@@ -114,7 +114,8 @@ def api_probe(request: Request):
         # 期望集比对归 SA4 周期对账/hbcheck 发布探针（职责分离，防坏行拖死发布判定）。
         import os, redis, time
         r = redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2)
+            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2,
+            decode_responses=True)   # 彩排实锤：不 decode 则 scan_iter 返 bytes，rsplit(":") 炸 TypeError
         keys = [k for k in r.scan_iter(match="quant:hb:md-hub:*", count=100)
                 if k.rsplit(":", 1)[-1].isdigit()]
         if not keys:
