@@ -18,18 +18,20 @@ Environment=ACCOUNT_ID=%i
 ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.md_hub.main
 WatchdogSec=90
 NotifyAccess=main
-# M5（批60 v15）退出码矩阵：on-failure + Prevent 覆盖
-#   Prevent（不重拉）：0=优雅让位（冗余防御）/ 6=boot 闸拦截（被切走者·非现任——切换窗由它独立承接）/
-#   78=EX_CONFIG 配置错（B 凭证按 row_id 取数失败 fail-fast，Failed 告警人工）
+# 批 66a（D26-B M5 退役 a′）退出码矩阵：on-failure + Prevent 覆盖
+#   Prevent（不重拉）：0=优雅退出（冗余防御）/ 78=EX_CONFIG 配置错（凭证按 row_id 取数
+#   失败 fail-fast，Failed 告警人工）
 #   重启码（on-failure 重拉）：
-#   1=vnpy缺失·EngineLoop fatal·guarded 污染拒 / 3=真让位（**含正常重启的 30s lease 滞后自愈**——
+#   1=故障（vnpy缺失·EngineLoop fatal·租约续期 CAS 败——a′ 下续租原语保留，败=须退出重抢，
+#   原 5 随 M5 退役归入此码）/ 3=boot 守卫真让位（**含正常重启的 30s lease 滞后自愈**——
 #   SIGTERM 不 DEL lease，旧 lease TTL 30s 内新进程 NX 失败 exit(3)，30s 后重拉即愈；staging 实证
 #   2026-09-22：Prevent 3 会把部署波重启打成永久死，故 3 不进 Prevent）/
-#   4=租约重试耗尽 / 5=续租丢（对端接管）/
-#   9=接口行 provider 变更自重启（批 64：对账 cfg:version 检测切换，主动退出让 systemd 拉起读新行）
+#   4=租约重试耗尽（Valkey 不可达）/
+#   9=接口行 provider/凭证变更自重启（批 64+66a：对账 cfg:version 检测，主动退出让 systemd
+#   拉起重读行——RestartSec=30 即 D26 §4.2 ~30s 轻量窗的载体，9 不进 Prevent）
 #   重拉不愈则 5 次打穿 StartLimit 进 failed 黑洞=明确失败态非静默
 Restart=on-failure
-RestartPreventExitStatus=0 6 78
+RestartPreventExitStatus=0 78
 RestartSec=30
 # 合约表尖峰同 direct runner（500-700M 预算）；MemoryHigh 先限流后击杀（12 号 §2.5 落地）
 MemoryHigh=768M

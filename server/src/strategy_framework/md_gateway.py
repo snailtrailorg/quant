@@ -125,7 +125,7 @@ def create_md_gateway(provider: str, counters) -> MdGateway:
 
 
 def list_md_gateway_providers() -> tuple[str, ...]:
-    """已注册网关 provider 集（get_interface_row 缺省选行钉定用——盲审 P1）。"""
+    """已注册网关 provider 集（SA4 期望源/部署波次 provider 白名单过滤用——批 66a 起 get_interface_row 已必填 row_id 无缺省选行）。"""
     return tuple(sorted(_REGISTRY))
 
 

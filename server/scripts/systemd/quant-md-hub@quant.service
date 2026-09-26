@@ -1,0 +1,42 @@
+# 批 66a 过渡 concrete unit（D26-B #6）：@quant 实例遮蔽模板实例化，注入显式接口行 id。
+#
+# ⚠ 过渡件——66b hub unit 换名（quant-md-hub@{row.id}）后本文件+release.yml 占位符
+#   replace task+inventory hub_quant_row_id 键整体退役（清除义务在批 66 任务文件 §4-66b-5）。
+# ⚠ 过渡期内模板 quant-md-hub@.service 任何改动须**双写同步本文件**（无机制守门，人工义务）。
+# ⚠ 禁止把 HUB_INTERFACE_ROW 写进共享模板 quant-md-hub@.service——加密 @4/@5 实例会跟着
+#   读 A 股行（双写裸流+seq 交错→gap 风暴，批 66 方案盲审 A-P0-2 事故链）。
+# __HUB_ROW_ID__ 占位符由 deploy release.yml 在 staged 构建后按 inventory.hub_quant_row_id
+#   replace 注入（staging/prod 行 id 不同，仓内文件不可写死）。
+[Unit]
+Description=Quant MD Hub @quant（过渡 concrete——A股接口行显式绑定，批 66a）
+After=network-online.target
+Wants=network-online.target
+OnFailure=quant-task-failed@%n.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=quant
+WorkingDirectory=/data/websites/snailtrail.cc/quant/shared
+EnvironmentFile=/data/websites/snailtrail.cc/quant/shared/.env
+Environment=QUANT_LOG_SOURCE=hub
+Environment=QT_QPA_PLATFORM=offscreen
+Environment=INSTANCE_NAME=quant
+Environment=ACCOUNT_ID=quant
+Environment=HUB_INTERFACE_ROW=__HUB_ROW_ID__
+ExecStart=/data/websites/snailtrail.cc/quant/bin/run-current -m src.md_hub.main
+WatchdogSec=90
+NotifyAccess=main
+# 退出码矩阵同模板（批 66a a′）：Prevent=0 78；重拉=1/3/4/9（详见模板注释）
+Restart=on-failure
+RestartPreventExitStatus=0 78
+RestartSec=30
+MemoryHigh=768M
+MemoryMax=1G
+CPUQuota=50%
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

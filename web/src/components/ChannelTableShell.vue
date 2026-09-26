@@ -55,7 +55,9 @@ const onDrop = async (i) => {
   arr.forEach((r, idx) => { if (_canDrag(r)) arr[idx] = sub[k++] })
   dragIdx = -1
   try {
-    await props.reorder(arr.filter(_canDrag).map(r => r.id))
+    // 载荷=全量有序集（批 66a 修：子集载荷与全量校验端点结构性冲突 400——interfaces_reorder
+    // 要求 ids=全部行；不可拖行原位不动已由上面 splice 保证，全量序自然保持其相对位置）
+    await props.reorder(arr.map(r => r.id))
     rowsRef.splice(0, rowsRef.length, ...arr)   // 乐观落地(调用方 rows 须响应式数组)
   } catch (e) {
     emit('reorder-failed', e)   // 失败回滚由调用方重拉(load)

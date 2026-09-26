@@ -211,31 +211,27 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
     return setting
 
 
-def get_interface_row(row_id: int | None = None, md_only: bool = False) -> dict:
+def get_interface_row(row_id: int, md_only: bool = False) -> dict:
     """读 external_interface 交易域行（批 63 二：hub 网关按行 provider 选插件）。
 
     返回 {provider, credentials(解密 dict), params, market, capabilities}。
+    - **row_id 必填**（批 66a，D26 #6）：缺省选行分支退役——None raise ValueError
+      （hub 绑死账号行 fail-fast 哲学；无主路径会静默绑首行账号）。
     - row_id 指定：直取该行；**解密失败/缺配置面 required_fields 必填字段即 raise**
       （M5 B 实例 fail-fast——禁 .env fallback 防 B 静默跑 A 账号，双盲审 P0-1/P2-1）。
       md_only=True（MD 数据面，加密 MD 网关空凭证）跳过 required_fields 校验（盲审 B P0）。
-    - row_id 缺省：A股交易域 position 序首行，且 provider 必须已注册行情网关
-      （多行时代防 admin 拖序把 hub 引到未实现/跨市场行——盲审 P1；market='astock' 过滤防选加密行——盲审 B P1）。
     无可用行/DB 异常 raise（消费方 exit 78）。
     """
+    if row_id is None:
+        raise ValueError("row_id required——缺省选行已退役（批 66a，D26 #6）：调用方须显式传接口行 id")
     try:
         from src.strategy_framework.md_gateway import list_md_gateway_providers
         gw_providers = list_md_gateway_providers()
         from src.data_platform.db import get_conn
         with get_conn() as conn:
-            if row_id is not None:
-                cur = conn.execute(
-                    "SELECT provider, credentials_encrypted, params, market, capabilities "
-                    "FROM external_interface WHERE id=%s AND enabled=true", (row_id,))
-            else:
-                cur = conn.execute(
-                    "SELECT provider, credentials_encrypted, params, market, capabilities "
-                    "FROM external_interface WHERE enabled=true AND 'trading' = ANY(capabilities) "
-                    "AND market='astock' AND provider = ANY(%s) ORDER BY position, id LIMIT 1", (list(gw_providers),))
+            cur = conn.execute(
+                "SELECT provider, credentials_encrypted, params, market, capabilities "
+                "FROM external_interface WHERE id=%s AND enabled=true", (row_id,))
             r = cur.fetchone()
         if not r:
             raise RuntimeError(f"external_interface 无可用行（row_id={row_id}，网关 providers={gw_providers}）")

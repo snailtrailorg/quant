@@ -118,10 +118,14 @@ worker_max_ts_key(symbol: str, account_id: int) -> str    # "hub:worker:max_ts:{
 
 ```python
 # main.py 启动（终态）：实例名即 row_id；解析优先序钉死（A-P0-2/B-P1-2）：
-#   row_id = int(interface_row) if interface_row else account_id     # HUB_INTERFACE_ROW 在场优先（仅 per-instance drop-in 注入，禁入共享模板）
+#   row_id = int(interface_row) if interface_row else account_id     # HUB_INTERFACE_ROW 在场优先（仅 concrete unit 注入，禁入共享模板）
 #   两源皆空 → EX_CONFIG(78)；ACCOUNT_ID 非数字且无 interface_row → EX_CONFIG(78)
 # ⚠ 禁止将 HUB_INTERFACE_ROW 写进共享模板 quant-md-hub@.service——加密 hub @4/@5 会读 A 股行→双写裸流+seq 交错→gap 风暴→实盘 sticky 冻结（A-P0-2 事故链）
-#   过渡注入=per-instance drop-in：quant-md-hub@quant.service.d/override.conf（Environment=HUB_INTERFACE_ROW=<A股行id>），值经 deploy inventory 注入；66b unit 换名后 drop-in 随旧 unit 退役清除
+#   过渡注入=concrete unit 整文件遮蔽（编码裁定：drop-in .conf 过不了 install-units *.service 文件名校验）：
+#   仓内 server/scripts/systemd/quant-md-hub@quant.service（遮蔽模板 @quant 实例化，不影响 @4/@5），
+#   Environment=HUB_INTERFACE_ROW=__HUB_ROW_ID__ 占位符 → release.yml 阶段 2 三新 task（stat/assert 哨兵拦/replace）
+#   按 inventory.hub_quant_row_id 注入（staging/prod 行 id 不同不可写死；replace 在指纹采集前=值变化触发单元重装）；
+#   66b unit 换名后 concrete 文件+replace task+inventory 键整体退役
 get_interface_row(row_id: int, md_only: bool = False) -> dict   # broker.py:214——row_id 必填，None → raise ValueError("row_id required")
 msg_of(...) -> dict                                        # 【payload 契约】account_id 字段全市场无条件写入（不再只 crypto 分支）——键与 payload 双统一，缺此=A股 bar 全拒
 _poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash) -> (version, cred_hash, switched)
@@ -204,14 +208,15 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
   - unit `quant-md-hub@.service`：Prevent `0 6 78`→`0 78`（:32）+注释矩阵更新（:21-30，9=自动重拉语义写明）；`run_hub_postverify.py` 旧注释同步
   - `strategy_framework/broker.py:214`：`get_interface_row` row_id 必填 raise；缺省 SQL(234-238) 删
   - `strategy_runner/main.py`：旧 --id 路径退役（288/323-325/367-404——argparse 收敛为 --task-id 唯一；min(id) 兜底删）
-  - `md_hub/main.py:242-246`：row_id 解析优先序钉死（§2.2：HUB_INTERFACE_ROW 在场优先→account_id→皆空 78）；过渡 drop-in `quant-md-hub@quant.service.d/override.conf`（Environment=HUB_INTERFACE_ROW=A股行id，**值经 deploy inventory 注入，禁入共享模板**——A-P0-2 事故链防）；install-units 落位通道编码步核实（drop-in 目录 cp，纯 cp 不删、66b 清除义务写明）
+  - `md_hub/main.py:242-246`：row_id 解析优先序钉死（§2.2：HUB_INTERFACE_ROW 在场优先→account_id→皆空 78）；**concrete unit 过渡件** `server/scripts/systemd/quant-md-hub@quant.service`（整文件遮蔽模板 @quant 实例化——install-units 只收 *.service，drop-in .conf 过不了校验；`__HUB_ROW_ID__` 占位符+release.yml 阶段 2 三新 task〔stat 存在探测/assert `>0` 哨兵拦/replace 注入〕+两套 inventory `hub_quant_row_id: 0` 哨兵键；**禁入共享模板**——A-P0-2 事故链防；过渡期模板改动须双写同步 concrete〔文件头注释立法〕）
   - `md_hub/main.py:122-141`：`_poll_iface_switch` 扩凭证摘要比对（§2.2）
   - 白名单文件预登记（§4.2 冷切换丢根三件套：现象/容差/验证义务——条目随文件存在，引擎随批 62 生效）
   - 前端 `InterfacesCard.vue`：canDrag 接线 `ChannelTableShell` 行级基建——trading 域行不可拖（行谓词，capFilter 全禁逻辑保留）；pull 域行保留
   - 手册 05-数据源切换.md 加「已退役（随批 66a M5 退役）」占位注记（66c 重写）
   - 测试：`test_lease_m5.py` 改写为 a′ 守卫测试（boot NX/续租 CAS/让位 exit 3/Valkey 死 exit 4/续租败 exit 1）；`test_md_gateway.py:55-83` 缺省分支用例改必填 raise；worker 旧路径测试收敛；凭证变更用例新增
-- **限定范围**：md_hub（main/parts/删 switch）+ broker.py + strategy_runner/main.py + unit 文件/drop-in + InterfacesCard.vue + 白名单文件 + 手册占位 + 对应测试；**不碰** hub_worker.py 键逻辑（66b）+ deploy 波次 + 观测面
-- **验收标准**：`pytest server/tests/ -q` 全绿（1454+ 基线不回归+新增）；`python -c "from src.md_hub import main"` import OK；`systemd-analyze verify` unit 模板+drop-in 过（本地）；`grep -r "intent\|active_instance" server/src/md_hub/` 零残留；staging 彩排绿（hub 波次重启后 hub 起来、心跳裸键照常——66a 不切键、drop-in 生效实证=hub 读到显式行 id）
+- **限定范围**：md_hub（main/parts/删 switch）+ broker.py + strategy_runner/main.py + unit 模板/concrete 过渡件 + release.yml 三 task + inventory 两键 + InterfacesCard.vue/ChannelTableShell.vue + 白名单文件 + 手册（真相源+镜像）+ 对应测试；**不碰** hub_worker.py 键逻辑（66b）+ deploy 波次语义 + 观测面
+- **部署前置（五要素）**：①**inventory `hub_quant_row_id` 人工填值**（机器=staging/prod 各自；账号=deploy/.venv ansible；无密码〔wrapper 通道〕；前置=Web 集成中心-外部接口页查 **A 股 trading 域行 id**（⚠ 必须确认 provider=xtp 且 market=astock——填 EMQ/加密行 id=hub 以错数据源运行非 fail-fast，A-P2-2）；不填=release 阶段 2 assert 拦〔哨兵 0〕）②存量扫尾：两环境 `systemctl list-unit-files 'quant-strategy@*'` 确认无 --id 存量单元（§3-8③）
+- **验收标准**：`pytest server/tests/ -q` 全绿（基线不回归+新增：a′ 守卫 10 钉+iface_poll 时序弧+row_id 必填钉）；`python -c "from src.md_hub import main"` import OK；`systemd-analyze verify` unit 模板+concrete（占位符代入）过（本地）；`grep -r "intent\|active_instance" server/src/md_hub/` 零残留；staging 彩排绿（hub 波次重启后 hub 起来、心跳裸键照常——66a 不切键、**concrete 生效实证=hub 读到显式行 id**）
 - **mock 方式**：Valkey mock（fakeredis 或 MagicMock eval/exists/set）；接口行 fake dict（provider/credentials/updated_at）；凭证摘要 sha256 fake 串
 - **参考文档**：D26 §4.1/§4.2 + 模块契约 `docs/architecture/模块契约/md_hub.md`
 
@@ -220,7 +225,7 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 - **目标**：hub unit 换名+四键族 per-account+payload 契约+消费面键化+SA4 期望源+deploy DB 驱动+观测面 N 化+旧流回灌+旧键清理——同版本交付。
 - **依赖（就绪）**：66a ✅（#6 完成是波次前置）；**特权通道前置**=§3-7（quant-svc 扩动词+quant-hbcheck 两代版装位——michael 带外步，staging+prod 各一次）；**上产前检查**=§3-8①②。
 - **产出**（按管道阶段序）：
-  1. **hub 侧**：A 股 hub unit `quant-md-hub@quant`→`quant-md-hub@{row.id}`（实例名=row_id，drop-in 随旧 unit 消解）；`md_hub/main.py:213-215` bar 流写键分支删（统一 `_key(BAR_STREAM_PREFIX, account_id)+":"+symbol`）；**`msg_of`(233-234) account_id 字段全市场无条件写**（payload 契约，双盲同判 P0）；in_session 谓词（main.py:424-427）暂保持（66c 收编）
+  1. **hub 侧**：A 股 hub unit `quant-md-hub@quant`→`quant-md-hub@{row.id}`（实例名=row_id；**concrete 过渡件退役三件套**：删仓内 concrete 文件〔release 三 task 经 stat 自动静默退役〕+inventory `hub_quant_row_id` 键清理+服务器 /etc concrete 残件 stop/disable/mask 随 §4-66b-5 mask 条目同批）；`md_hub/main.py:213-215` bar 流写键分支删（统一 `_key(BAR_STREAM_PREFIX, account_id)+":"+symbol`）；**`msg_of`(233-234) account_id 字段全市场无条件写**（payload 契约，双盲同判 P0）；in_session 谓词（main.py:424-427）暂保持（66c 收编）
   2. **worker 侧**（hub_worker.py）：`bar_stream_key` 单一谓词（§2.1，`_crypto_provider` 判定退役）；`_account_mismatch` 删 A 股跳过分支(51-52)；`_hub_alive(r, account_id)` per-account（**修加密 fail-open**）；水位键统一(172/256)；rewarm(143/182-197) 随 stream 变量自动跟随；`run_worker_smoke.py:28` 冒烟键同步
   3. **databus/stock_detail**：`subscribe` 键化+调用点接线（§2.4）；`_quote_block` SCAN 读者
   4. **SA4**（scheduler/tasks.py）：`_desired_units` 期望源改造（§2.5——builtin @quant(1280/1324/1348) 删、crypto 过滤(1342-1345) 去除改全市场、provider 白名单保留、**source 标签条件(1537) 同步**）；`_sa4_hub_guards` lease 键语义注记清理
@@ -255,7 +260,7 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 | 检查项 | 66a | 66b | 66c |
 |---|---|---|---|
 | pytest 全绿（基线 1454+ 不回归） | ✅ | ✅ | ✅ |
-| staging 彩排绿 | ✅（hub 波次照常+drop-in 生效） | ✅（unit 换名+新键+payload 冒烟+hbcheck+masked @quant+回滚演练） | ✅ |
+| staging 彩排绿 | ✅（hub 波次照常+concrete 生效） | ✅（unit 换名+新键+payload 冒烟+hbcheck+masked @quant+回滚演练） | ✅ |
 | prod 上产三证+hub 心跳+postverify | ✅ | ✅（+新 unit/gen 跳变/worker rewarm+回灌非空+dropped_cross==0） | ✅ |
 | 观察窗（交易日） | 周一顺带 | **周二 09-29 专项**（§3-10） | 下一个交易日 |
 | 加密路径（staging 不可达） | 单测承担 | 单测承担（#2 修复列加密开闸前必修清单） | 单测承担 |
@@ -272,7 +277,7 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 | 1 | P0·A+B 同判 | msg_of payload account_id 只 crypto 分支写——键统一 payload 不统一=A股 bar 全拒+静默全盲（_blind_watch sess_bar_wall=0 恒不报警+hub 侧计数双绿掩盖） | §0.4-7/§2.2 payload 契约+66b-1+验收「stats.bars 递增且 dropped_cross==0」+端到端冒烟入彩排 |
 | 2 | P0·B | quant-hbcheck 是 root 装位件不随 release 版本化——新旧协议互斥锁死发布链 | §2.5 两代自适应（per-account 全缺+裸键在场→legacy 回落）+§3-7 随带外步装位 |
 | 3 | P0·B | quant-svc 动词白名单无 disable/mask/unmask/enable——66b 波次无特权通道 | §3-7 一次性带外步（扩动词+sudoers+重装，michael 执行，staging+prod 各一次） |
-| 4 | P0·A（并入 P1·B 同区域） | HUB_INTERFACE_ROW 落共享模板→加密 @4/@5 被 A 股行覆盖→双写裸流+seq 交错→gap 风暴→实盘 sticky 冻结 | §2.2 per-instance drop-in 钉死+优先序+**禁入共享模板**立法；B 侧通道核实（install-units）并入 66a 产出 |
+| 4 | P0·A（并入 P1·B 同区域） | HUB_INTERFACE_ROW 落共享模板→加密 @4/@5 被 A 股行覆盖→双写裸流+seq 交错→gap 风暴→实盘 sticky 冻结 | §2.2 concrete unit 遮蔽钉死（drop-in 过不了 install-units 校验——编码裁定回写）+优先序+**禁入共享模板**立法 |
 | 5 | P1·B | exit 9 移入 Prevent 与 30s 窗承诺矛盾（v1 错写） | §1.4 修正：9 维持自动重拉不进 Prevent |
 | 6 | P1·A+B 同区域 | rollback 三断点：无 hub 重采/无复活块/清缺省后变量断裂+反序双杀窗 | §3-4 回滚三块+SOP 顺序钉死+66b 验收含回滚演练 |
 | 7 | P1·A | quant-live-task@.service 硬依赖 @quant——mask 后依赖失败噪声+启停次序失守 | §0.4-8+66b-7 去具体实例依赖+grep 清零 |
@@ -295,5 +300,12 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 | 24 | A-P1-1②（量级 P2） | _probe SCAN pattern 会吞垂死裸键 | §2.5 pattern 钉死 `quant:hb:md-hub:*` 尾冒号隔离 |
 
 **D26 文档同步改写两处（真相唯一铁律，随本批 v2 一并落）**：§3.4③ 半根桶 span<60s→双门限；§3.4② 解冻注记→「rewarm 后显式推进 max_ts」（66c 契约）。
+
+**代码双盲审处置（66a，2026-09-26）**：A（交易可靠性）P1×1+P2×4 / B（系统管道）P1×1+P2×4，全修：
+- A-P1 **凭证基线首发失败永久悬空**（版本固化短路死锁基线=首次真实轮换漏检）→ 读行失败版本顺延不固化（首发失败返 None 重走首发；版本变化轮失败返 prev 下轮重读）——**编码中自查发现并同修同构洞**（版本变化轮读失败返回新版本+旧摘要=该轮即轮换时同样漏检）；测试补全弧钉（首发失败→重建→轮换触发 / DB 瞬断不吞轮换）。
+- B-P1 **撤 trading 拖拽激活壳层潜伏 bug**：ChannelTableShell reorder 载荷=可拖子集 vs 全量校验端点 400（canDrag 66a 首个真消费者激活）→ 载荷改全量 `arr.map(r.id)`（不可拖行原位不动由 splice 保证；其他消费者 canDrag=null 行为不变零回归）。
+- A-P2：NX kwargs 钉死（`assert_called_once_with("hub:lease", ANY, nx=True, ex=30)`——丢 nx=双活 fencing 静默失效）；hub_quant_row_id 填错行风险 → 部署前置五要素写明「确认 provider=xtp 且 market=astock」（§4-66a）；文档残留三处（strategy_runner/__init__ docstring 旧启动法/md_gateway 注记/带边界注记「只改凭证不 bump 不触发」）；concrete 双写义务注释。
+- B-P2：inventory 注释错挂归位（hub_quant_row_id 行尾误挂 deploy_hub_units 注释）；手册真相源 docs/manual/05 补同款注记（消除镜像分叉）；**任务文件 concrete 机制回写**（drop-in 方案经编码证实过不了 install-units 校验→concrete 整文件遮蔽，7 处改写+66b 清除义务钉三件套）；测试钉缺口如实声明——①沙箱 concrete 道具不加（三 task 沙箱静默跳过已验证，**staging 彩排承担首验**）②row_id 皆空 78 与 ③续租败 exit 1 均为 main() 闭包分支（get_interface_row(None) 等价防御钉已立；退出码矩阵注释+彩排承担）④前端无组件测试基建（B-P1 载荷全量化=结构性修复兜底）。
+- 两审核实确认：M5 竞态三时序推演安全（同名重启窗/带外误启/Valkey 半死）/row_id 链无静默错行/退出码生产者与注释逐条对上/--id 零现实消费方/systemd-analyze verify+ansible syntax-check 双过/--check/GC/回滚/双向兼容（旧 exit 5 在新 Prevent 下照常重拉）全推演成立。
 
 **快审（第三轮忠实度复核）**：22/24 忠实（含全部 5 条 P0），余 4 项轻量修补已落——#21 双活窗注记虚指→§3-11 正文补写（窗口存在/不同键空间无害/双 XTP 连接瞬态/stop 时序实况）；#23 打折→§2.5 _probe SCAN 补 COUNT 100；§3-9「周一」措辞残留→周二；#12 同步义务载体悬空→钉在过滤处代码注释（模块契约不含 deploy）。#24 来源标注补正（原 A-P1-1②）。快审附带确认：D26 两处改写正确无残留；D26 §4.1:113「续租丢路径均已死」旧句待 66c 文档收尾一并校（既定范围）。**总判 PASS**。

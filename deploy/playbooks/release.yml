@@ -230,6 +230,31 @@
             dest: "{{ deploy_root }}/releases/{{ release_id }}/RELEASE"
             mode: "0644"
 
+        # 批 66a 过渡件：@quant concrete unit（D26-B #6 缺省选行退役——显式行 id 注入）。
+        # 占位符 __HUB_ROW_ID__ 在指纹采集前 replace → 行 id 变化进 scripts/systemd 指纹=触发单元安装。
+        # 66b hub unit 换名后 concrete unit 删除，本块三 task 随之整体退役（任务文件 §4-66b-5 清除义务）。
+        - name: 阶段 2 —— @quant concrete unit 存在探测
+          ansible.builtin.stat:
+            path: "{{ deploy_root }}/releases/{{ release_id }}/scripts/systemd/quant-md-hub@quant.service"
+          register: hub_concrete_unit
+
+        - name: 阶段 2 —— @quant 行 id 配置断言（防占位符裸奔上产→hub exit 78）
+          ansible.builtin.assert:
+            that:
+              - hub_quant_row_id is defined
+              - hub_quant_row_id | int > 0
+            msg: >-
+              staged 含 @quant concrete unit 但 inventory 未配置有效 hub_quant_row_id
+              （各环境 external_interface A股 trading 行 id——Web 集成中心可查；占位符裸奔=hub 起不来）。
+          when: hub_concrete_unit.stat.exists | default(false)
+
+        - name: 阶段 2 —— @quant concrete unit 行 id 注入
+          ansible.builtin.replace:
+            path: "{{ deploy_root }}/releases/{{ release_id }}/scripts/systemd/quant-md-hub@quant.service"
+            regexp: '__HUB_ROW_ID__'
+            replace: "{{ hub_quant_row_id | string }}"
+          when: hub_concrete_unit.stat.exists | default(false)
+
         - name: 阶段 2 —— staged 四切片指纹采集
           ansible.builtin.shell: |
             set -u

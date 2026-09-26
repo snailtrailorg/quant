@@ -52,6 +52,11 @@ deploy_task_units_static: []
 deploy_task_units_live: []            # DB 真相源采集后覆写（live_task running）
 deploy_task_units_feishu: []          # DB 真相源采集后覆写（im_bot_config enabled）
 deploy_hub_units: [quant-md-hub@quant.service]   # systemd 采集后覆写（所有 md-hub@* 实例；默认兜底 A股 hub）
+# 批 66a 过渡键：@quant concrete unit 行 id 注入（release.yml 阶段 2 replace __HUB_ROW_ID__）。
+# ⚠ 0=未配置哨兵——staged 含 concrete unit 时 assert 拦（防占位符裸奔）；
+#   首跑前按本环境 external_interface A股 trading 行 id 校正（Web 集成中心-外部接口页可查行 id）。
+#   66b hub unit 换名后随 concrete unit 整体退役。
+hub_quant_row_id: 0   # 人工配置键（0=哨兵：staged 含 concrete 时 assert 拦）；66b 随 concrete unit 退役
 # v3.3 接线: quant 只读查询走 quant-dbro wrapper（quant 属主，DB 连接封装其内走 PG peer
 # 免密——.env deploy 不可读的解法；替代 v3.2 的 $QUANT_DB_RO 环境变量通道）。
 # 固定 SQL 与单元名拼装见 wrappers/quant-dbro；空/未装位则 preflight 拒。

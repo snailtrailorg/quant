@@ -21,8 +21,6 @@ logger = logging.getLogger("md_hub")
 LEASE_KEY = "hub:lease"
 GEN_KEY = "hub:gen"
 SURRENDER_KEY = "hub:surrender"
-INTENT_KEY = "hub:switch:intent"          # M5 切换意图 {snapshot, target}，EX 300（switch.py 写）
-ACTIVE_INSTANCE_KEY = "hub:active_instance"   # M5 现任实例名（无 TTL），boot 仲裁
 LATEST_TICK_PREFIX = "hub:latest_tick:"   # 三档项 12：详情页实时快照（tick 自带五档，U-2 修正 #2 零订阅变化）
 LATEST_TICK_TTL = 65                      # 断流 65s 自动过期——详情页不展示陈旧价，降级腾讯/DB
 
@@ -183,47 +181,39 @@ class MinuteAggregator:
         }
 
 
-def _lease_acquire(r, instance_name: str = "", account_id=None) -> tuple[bool, str, int]:
-    """租约 + 代次（R-DL4）。返回 (ok, uuid, gen)。区分 Valkey 不可达与 NX 失败（评审陷阱 8）。
+def _lease_acquire(r, account_id=None) -> tuple[bool, str, int]:
+    """租约 + 代次（R-DL4；批 66a a′ 守卫：SET NX EX 30 + 守卫通过后 INCR）。返回 (ok, uuid, gen)。
 
-    M5：uuid 运行时 token_hex（A/B 同，v15 砍 HUB_UUID）；normal 冷启
-    SET active_instance=INSTANCE_NAME（bootstrap，仲裁从首启成立）。
-    D6：键经 _key 分 account（account_id=None= A股旧键）。
+    区分 Valkey 不可达与 NX 失败（评审陷阱 8）：-1 = 真让位（surrender），0 = 网络问题稍后重试。
+    M5 的 active_instance 仲裁与 guarded Lua 已随批 66a 退役（D26 §4.1 a′——拆仲裁不拆续租）；
+    带外第二进程（非 systemd 途径误启）NX 恒失败=同账号双活被防，长活 fencing 成立。
     """
     import secrets
     uuid_ = secrets.token_hex(8)
-    lease_key = _key(LEASE_KEY, account_id)
-    gen_key = _key(GEN_KEY, account_id)
-    active_key = _key(ACTIVE_INSTANCE_KEY, account_id)
     try:
-        got = r.set(lease_key, uuid_, nx=True, ex=30)
+        got = r.set(_key(LEASE_KEY, account_id), uuid_, nx=True, ex=30)
     except Exception as e:
         logger.error("租约存储不可达（重试，不退出）: %s", e)
         return False, uuid_, 0
     if not got:
         try:
-            holder = r.get(lease_key)
+            holder = r.get(_key(LEASE_KEY, account_id))
         except Exception:
             holder = "?"
         logger.error("租约被持有（%s），本实例让位退出", holder)
-        return False, uuid_, -1   # -1 = 真让位（surrender），0 = 网络问题稍后重试
+        return False, uuid_, -1
     try:
-        gen = int(r.incr(gen_key))
+        gen = int(r.incr(_key(GEN_KEY, account_id)))
     except Exception as e:
         logger.error("gen 计数器不可达: %s", e)
         return False, uuid_, 0
-    if instance_name:   # M5：normal 冷启补 SET 现任（guarded 已 SET，这里保首启前仲裁不退化）
-        try:
-            r.set(active_key, instance_name)
-        except Exception as e:
-            logger.warning("SET active_instance 失败: %s", e)
     return True, uuid_, gen
 
 
-def _lease_boot(r, instance_name: str = "", account_id=None) -> tuple[str, int]:
+def _lease_boot(r, account_id=None) -> tuple[str, int]:
     """启动租约获取（先拿权再连行情）：3 次重试；真让位 SystemExit(3)，重试耗尽 os._exit(4)。"""
     for attempt in range(3):
-        ok, my_uuid, gen = _lease_acquire(r, instance_name, account_id)
+        ok, my_uuid, gen = _lease_acquire(r, account_id)
         if ok:
             return my_uuid, gen
         if gen == -1:   # 真让位：写标记退出，unit 的 StartLimit 会接管
@@ -234,62 +224,6 @@ def _lease_boot(r, instance_name: str = "", account_id=None) -> tuple[str, int]:
             raise SystemExit(3)
         time.sleep(5)
     os._exit(4)
-
-
-_GUARDED_ACQUIRE_LUA = """
-local g = tonumber(redis.call('get', KEYS[1]) or '0')
-if g == tonumber(ARGV[2]) then
-    -- 重启场景：gen 已是 snapshot+1（上次 INCR 过），只抢 lease 不 INCR
-    local ok = redis.call('set', KEYS[2], ARGV[1], 'NX', 'EX', 30)
-    if not ok then return -2 end
-    redis.call('set', KEYS[3], ARGV[3])
-    return tonumber(ARGV[2])
-elseif g == tonumber(ARGV[2]) - 1 then
-    -- 首接场景：gen 还是 snapshot，INCR + 抢 lease + SET 现任（原子绑定）
-    local ok = redis.call('set', KEYS[2], ARGV[1], 'NX', 'EX', 30)
-    if not ok then return -2 end
-    redis.call('incr', KEYS[1])
-    redis.call('set', KEYS[3], ARGV[3])
-    return tonumber(ARGV[2])
-else
-    return -1   -- gen 既非 snapshot 也非 snapshot+1（被污染）→ 拒接管，零污染
-end
-"""
-
-
-def _lease_acquire_guarded(r, expected_gen: int, target: str, uuid_: str, account_id=None) -> tuple[bool, str, int]:
-    """切换目标接管（原子 Lua，M5）。返回 (ok, uuid, gen)。
-
-    gen = expected_gen（首接 INCR 到 snapshot+1 或重启只抢 lease）；<0 失败：
-    -1 = gen 污染（被复活 A 抢在 B 前 INCR）拒接管零污染；0 = 存储不可达 / -2 旧 lease 挡。
-    """
-    try:
-        res = int(r.eval(_GUARDED_ACQUIRE_LUA, 3,
-                         _key(GEN_KEY, account_id), _key(LEASE_KEY, account_id), _key(ACTIVE_INSTANCE_KEY, account_id),
-                         uuid_, expected_gen, target))
-    except Exception as e:
-        logger.error("guarded 租约存储不可达: %s", e)
-        return False, uuid_, 0
-    if res < 0:
-        return False, uuid_, res   # -1 污染 / -2 旧 lease 挡
-    return True, uuid_, res
-
-
-_CAS_DEL_LUA = """
-if redis.call('get', KEYS[1]) == ARGV[1] then
-    return redis.call('del', KEYS[1])
-end
-return 0
-"""
-
-
-def _lease_release(r, uuid_: str, account_id=None) -> bool:
-    """A 让位 CAS DEL lease（M5）：lease 值==my_uuid 才删，防删掉 B 已拿到的 lease。"""
-    try:
-        return bool(int(r.eval(_CAS_DEL_LUA, 1, _key(LEASE_KEY, account_id), uuid_)))
-    except Exception as e:
-        logger.error("CAS DEL lease 失败: %s", e)
-        return False
 
 
 _LEASE_RENEW_LUA = """

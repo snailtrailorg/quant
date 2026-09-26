@@ -20,17 +20,13 @@ import time
 from datetime import datetime
 
 from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import 即重导出保测试路径——ThinGateway 批 63 二收编 md_gateway 后不再经 main 重导出）
-    ACTIVE_INSTANCE_KEY,
-    INTENT_KEY,
     LATEST_TICK_PREFIX,
     LEASE_KEY,
     MinuteAggregator,
     _LEASE_RENEW_LUA,
     _in_bar_session,
     _key,
-    _lease_acquire_guarded,
     _lease_boot,
-    _lease_release,
     _project_symbol,
     _write_latest_tick,
 )
@@ -62,83 +58,51 @@ HB_KEY = "quant:hb:md-hub"
 STREAM_MAXLEN = 5000          # ≈20 交易日分钟 bar（评审：慢消费者 3 周不读才可能被剪）
 
 
-def _read_intent(r, account_id=None):
-    """M5：读 hub:switch:intent，返回 {snapshot, target} dict 或 None（键不存在/坏值/不可达）。"""
-    try:
-        raw = r.get(_key(INTENT_KEY, account_id))
-    except Exception:
-        return None
-    if not raw:
-        return None
-    try:
-        import json as _json
-        data = _json.loads(raw)
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    if not isinstance(data.get("target", ""), str) or not isinstance(data.get("snapshot"), (int, float)):
-        return None
-    return data
+def _cred_hash(credentials: dict) -> str:
+    """凭证摘要（批 66a：凭证/参数轮换触发 exit 9 的比对基——解密后明文 canonical json 的 sha256）。
 
-
-def _boot_dispatch(r, instance_name: str, account_id=None) -> tuple[str, int]:
-    """M5 boot 单判定 + dispatch 分叉（先仲裁再拿权，插在一切行情初始化之前）。
-
-    intent 存在：target==自己→guarded（切换目标接管）；target≠自己→exit(6)（被切走者拦截）。
-    intent 不存在：active_instance≠自己→exit(6)（非现任不抢回）；否则→normal 冷启（SET active_instance）。
+    只覆盖 credentials（凭证轮换是安全敏感须重启重读）；params 变更不触发（非建连身份）。
     """
-    import secrets
-    intent = _read_intent(r, account_id)
-    if intent is not None:
-        target = intent.get("target", "")
-        if target != instance_name:
-            logger.error("切换窗内被切走者（target=%s 本=%s），exit 6", target, instance_name)
-            raise SystemExit(6)
-        expected_gen = int(intent.get("snapshot", 0)) + 1
-        my_uuid = secrets.token_hex(8)   # M5：B 的 uuid 运行时生成（active_instance==target 校验替代 holder==uuid，无需预定）
-        for _attempt in range(3):
-            ok, uuid_, gen = _lease_acquire_guarded(r, expected_gen, target, my_uuid, account_id)
-            if ok:
-                return uuid_, gen
-            if gen == -1:   # gen 污染（复活 A 抢前 INCR）→ 拒接管，exit 1 让 systemd 重拉
-                logger.error("guarded 拒接管（gen 污染，期望=%d），exit 1", expected_gen)
-                raise SystemExit(1)
-            time.sleep(5)   # -2 旧 lease 挡（旧化身 TTL 30s 未过期）→ 重试
-        logger.error("guarded 3 次重试耗尽（旧 lease 挡或存储不可达），exit 1")
-        raise SystemExit(1)
-    # intent 不存在：active_instance 仲裁
-    active = None
-    try:
-        active = r.get(_key(ACTIVE_INSTANCE_KEY, account_id))
-    except Exception:
-        active = None
-    if active and active != instance_name:
-        logger.error("非现任（active_instance=%s 本=%s），exit 6", active, instance_name)
-        raise SystemExit(6)
-    return _lease_boot(r, instance_name, account_id)
+    import hashlib
+    import json as _json
+    return hashlib.sha256(_json.dumps(credentials or {}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def _poll_iface_switch(r, prev_version, row_id, current_provider):
-    """批 64：对账 external_interface 行——返回 (新版本, 是否 provider 切换)。
+def _poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash=None):
+    """批 64+66a：对账 external_interface 行——返回 (新版本, 新凭证摘要, 是否切换)。
 
-    prev_version=None=首次读基线；Valkey 读失败返回原版本不判切换；版本变化才重读
-    接口行（get_interface_row，broker.py）比对 provider。main() 的 _iface_poll 消费此函数。
+    prev_version=None=首次读基线（版本与凭证摘要同轮建立；读行失败版本顺延不固化）；
+    Valkey 读失败返回原版本不判切换；版本变化才重读接口行（get_interface_row，broker.py）
+    比对 provider **与凭证摘要**（66a：凭证轮换不触发 exit 9 的现状缺口闭合——D26 §4.2 待实施项）。
+    main() 的 _iface_poll 消费此函数。
+    已知边界：只改凭证不 bump cfg:version（绕过 Web 直改 DB）不触发——Web 路径保存必 bump
+    （mgmt.py bump_config_version），带外 SQL 属运维越轨由告警体系另行覆盖。
     """
     from src.data_platform.routing import CFG_VERSION_KEY
     from src.strategy_framework.broker import get_interface_row
     try:
         v = r.get(CFG_VERSION_KEY) or "0"
     except Exception:
-        return prev_version, False   # Valkey 不可达，跳过本轮
-    if prev_version is None or v == prev_version:
-        return v, False
+        return prev_version, prev_cred_hash, False   # Valkey 不可达，跳过本轮
+    if prev_version is None:
+        # 首发建基线：版本与凭证摘要同轮建立（否则凭证基线要等首次版本变化才建——
+        # 第一次真实凭证轮换会被 prev_hash=None 不比对漏掉）
+        try:
+            iface = get_interface_row(row_id, md_only=True)
+            return v, _cred_hash(iface["credentials"]), False
+        except Exception as e:
+            logger.warning("首发凭证基线读取失败（版本不固化，下轮重走首发）: %s", e)
+            return None, prev_cred_hash, False   # 版本顺延 None=下轮仍走本分支重建（固化 v 会短路死锁基线——盲审 A-P1）
+    if v == prev_version and prev_cred_hash is not None:
+        return v, prev_cred_hash, False
     try:
-        iface = get_interface_row(row_id)
+        iface = get_interface_row(row_id, md_only=True)
     except Exception as e:
-        logger.warning("对账接口行失败（跳过本轮）: %s", e)
-        return v, False
-    return v, (iface["provider"] != current_provider)
+        logger.warning("对账接口行失败（版本顺延下轮重读——固化新版本+旧摘要会漏掉本轮即轮换的检测）: %s", e)
+        return prev_version, prev_cred_hash, False
+    new_hash = _cred_hash(iface["credentials"])
+    switched = (iface["provider"] != current_provider) or (prev_cred_hash is not None and new_hash != prev_cred_hash)
+    return v, new_hash, switched
 
 
 def main() -> None:
@@ -162,14 +126,14 @@ def main() -> None:
 
     r = make_valkey()
 
-    # ——— M5 boot 单判定 + dispatch（先仲裁再拿权；重试/让位/退出语义在 parts）———
+    # ——— boot 守卫（批 66a a′：SET NX EX 30 抢自己的键——拆的是 M5 仲裁复杂度，续租原语保留）———
     # D6：account_id = ACCOUNT_ID（= external_interface.id，键分叉用；A股实例名 "quant" 非数字 → None 键不分 account）。
-    # 与 HUB_INTERFACE_ROW（账号选择，A股 A/B 切换用）拆开——二者语义不同，复用会污染切换（盲审 B P0/P3）
+    # 与 HUB_INTERFACE_ROW（账号选择，A股过渡 concrete unit 注入）拆开——二者语义不同，复用会污染（盲审 B P0/P3）
     _account_env = os.environ.get("ACCOUNT_ID", "")
     account_id = int(_account_env) if _account_env.isdigit() else None
     market = "astock"   # 会话模型分支（加密接入批）：iface 读取后更新为 iface["market"]
-    instance_name = os.environ.get("INSTANCE_NAME", "")
-    my_uuid, gen = _boot_dispatch(r, instance_name, account_id)
+    instance_name = os.environ.get("INSTANCE_NAME", "")   # 仅日志标识（a′ 后无仲裁用途）
+    my_uuid, gen = _lease_boot(r, account_id)
     logger.info("hub 启动：uuid=%s gen=%d 实例=%s account=%s", my_uuid, gen, instance_name or "(空)", account_id)
 
     # ——— 行情网关（批 63 二：插件化——XTP 全套收编 md_gateway.XtpMdGateway，hub 只持通用面）———
@@ -235,13 +199,17 @@ def main() -> None:
         return m
 
     # ——— 连接 + 订阅（真相源=DB，15s diff + 60s 幂等重放，R-SUB；批 63 二：接口行 provider 选网关插件）———
-    # row_id = HUB_INTERFACE_ROW（账号选择，A股切换 B 实例用数字选另一 XTP 账号；与 ACCOUNT_ID 分键无关）
+    # row_id 解析优先序（批 66a 钉死，D26 #6——缺省选行退役，两源皆空 fail-fast）：
+    #   HUB_INTERFACE_ROW 在场优先（A 股 @quant 过渡期由 concrete unit 注入——禁入共享模板，
+    #   会污染加密 @4/@5 实例；66b unit 换名后随 concrete unit 退役）
+    #   → 否则 ACCOUNT_ID 数字（加密 per-account 直取）→ 皆空 = EX_CONFIG(78)
     interface_row = os.environ.get("HUB_INTERFACE_ROW", "")
     try:
-        # 加密 hub：ACCOUNT_ID 数字 → row_id=account_id 直取本 account 行（否则缺省选行会选到 XTP 行，盲审 B P0）
         row_id = int(interface_row) if interface_row else account_id
+        if row_id is None:
+            raise ValueError("row_id 无来源（HUB_INTERFACE_ROW 与 ACCOUNT_ID 均空）——D26 #6 缺省选行已退役")
         from src.strategy_framework.broker import get_interface_row
-        # 指定行缺必填凭证/解密失败/未注册 provider/无可用行均 raise → 78（盲审 P0-1/P1-2/P1-3 收敛）；
+        # 指定行缺必填凭证/解密失败/未注册 provider均 raise → 78（盲审 P0-1/P1-2/P1-3 收敛）；
         # md_only=True：MD 数据面空凭证，跳过 required_fields 校验（盲审 B P0）
         iface = get_interface_row(row_id, md_only=True)
         market = iface["market"]   # 会话模型分支真源（crypto/astock）
@@ -253,16 +221,19 @@ def main() -> None:
         logger.error("行情网关初始化失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
         raise SystemExit(78)
 
-    # 批 64：对账 external_interface 行变更——Web 拖拽/改行 bump cfg:version，provider 变了即
-    # 带码退出让 systemd 拉起重启读新行（Web 操作切换 provider 自动生效；不进程内拆原生库，符合铁律）
-    _cfg_version = None   # 首次 poll 读基线（避免启动即误触）
+    # 批 64+66a：对账 external_interface 行变更——Web 拖拽/改行 bump cfg:version，provider 或
+    # 凭证摘要变化即带码退出让 systemd 拉起重启读新行（Web 操作切换/凭证轮换自动生效；
+    # 不进程内拆原生库，符合铁律）
+    _cfg_version = None       # 首次 poll 读基线（避免启动即误触）
+    _cred_digest = None       # 基线摘要随首次 poll 建立（None=未建立不比对，防启动误触）
 
     def _iface_poll() -> None:
-        nonlocal _cfg_version
-        _cfg_version, switched = _poll_iface_switch(r, _cfg_version, row_id, md_gw.provider)
+        nonlocal _cfg_version, _cred_digest
+        _cfg_version, _cred_digest, switched = _poll_iface_switch(
+            r, _cfg_version, row_id, md_gw.provider, _cred_digest)
         if switched:
-            logger.info("[gw] 接口行 provider 变化（原 %s），主动退出重启", md_gw.provider)
-            os._exit(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus）
+            logger.info("[gw] 接口行 provider/凭证变化（原 provider=%s），主动退出重启", md_gw.provider)
+            os._exit(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus——30s 窗承诺载体）
 
     md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
 
@@ -347,35 +318,21 @@ def main() -> None:
         md_status_was = md_status
 
     def _lease_renew() -> None:
-        """租约续期（Lua CAS）：续不上=被抢占/丢失 → 让位退出（exit 5）；网络异常容忍一轮。
+        """租约续期（Lua CAS，a′ 保留原语）：续不上=被抢占/丢失 → 退出重拉（exit 1）；网络异常容忍一轮。
 
-        M5：前置查 intent——见切换意图则不再续租（交由 _intent_poll 让位）。
+        批 66a：原 exit 5 随 M5 退役（D26 §4.1——退出码矩阵 5/6 唯一生产者均在 M5 路径）；
+        续租失败仍须退出（继续跑=无 fencing 运行），归入通用故障码 1。
         """
-        intent = _read_intent(r, account_id)
-        if intent is not None and intent.get("target", "") != instance_name:
-            return   # 被切走者：不再续租，交由 _intent_poll 让位（target==自己仍续租，防泄漏 exit 5）
         try:
             renewed = r.eval(_LEASE_RENEW_LUA, 1, _key(LEASE_KEY, account_id), my_uuid, "30")
             if not int(renewed):
                 logger.critical("租约续期失败（被抢占或丢失），退出")
                 _alert("行情 hub 租约丢失，实例退出", "另一实例在位或存储异常；systemd 将接管。", code="hub.lease-lost")
-                os._exit(5)
+                os._exit(1)
         except SystemExit:
             raise
         except Exception as e:
             logger.error("租约续期异常（容忍一轮）: %s", e)
-
-    def _intent_poll() -> None:
-        """M5：轮询切换意图。见 intent 且 target≠自己 → CAS DEL lease → exit(0)（优雅让位）。"""
-        intent = _read_intent(r, account_id)
-        if intent is None:
-            return
-        target = intent.get("target", "")
-        if target == instance_name:
-            return   # 我是切换目标，boot 已用 guarded 接管，无需让位
-        logger.info("见切换意图 target=%s（本=%s），优雅让位 exit 0", target, instance_name)
-        _lease_release(r, my_uuid, account_id)   # CAS DEL lease（==my_uuid 才删，防删 B 已拿到的 lease）
-        os._exit(0)
 
     # 三窗分窗 finalize（P2 修复批 08-28 替代 flush_all 双点；盲审 B-P1-1 加宽 5~30s：
     # 钩子实际间隔 5s+δ>原窗宽 5s，straddle 相位会整窗 miss——pop 语义幂等，宽窗安全）：
@@ -413,8 +370,7 @@ def main() -> None:
                                                      "实例退出由 systemd 接管；请查 journalctl 定位首个异常。",
                                                      code="runtime.fatal"),
                       fatal_exit_code=1)
-    loop.every("lease-renew", 5.0, _lease_renew)    # 租约 30s TTL，5s 一续（失败 exit 5 在钩子内自带）
-    loop.every("intent-poll", 5.0, _intent_poll)    # M5：轮询切换意图（见则优雅让位 exit 0）
+    loop.every("lease-renew", 5.0, _lease_renew)    # 租约 30s TTL，5s 一续（TTL/6 对齐 D26 §4.1 a′；失败 exit 1 在钩子内自带）
     loop.every("md-edge", 0.0, _md_edge)            # 重连沿检测：每步
     loop.every("subs-poll", 15.0, sm.poll)          # 订阅 diff（旧 counter%3 = 15s）
     loop.every("subs-replay", 60.0, sm.replay)      # 全量幂等重放（旧 %60<10 窗口法 = 60s）

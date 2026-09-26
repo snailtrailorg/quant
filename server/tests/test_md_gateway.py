@@ -52,6 +52,13 @@ def _xtp_row(cred_enc="ENC", params=None):
     return ("xtp", cred_enc, params or {}, "astock", ["trading", "quote"])
 
 
+def test_get_interface_row_row_id_required():
+    """批 66a 钉（D26 #6）：row_id 必填——缺省选行退役，None raise（无主路径静默绑首行=禁区）。"""
+    from src.strategy_framework.broker import get_interface_row
+    with pytest.raises(ValueError):
+        get_interface_row(row_id=None)
+
+
 def test_get_interface_row_missing_required_field_raises():
     """P0-1 回归：指定行凭证非空但缺 app_id（必填非密字段）→ raise，禁 .env fallback。"""
     from src.strategy_framework.broker import get_interface_row

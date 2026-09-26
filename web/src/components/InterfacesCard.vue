@@ -1,7 +1,8 @@
 <template>
   <!-- D25:外部接口卡片(单列表+能力筛选——页签合并立法:多能力接口 XTP/币安只出现一次)。
        立法(27 号/D25):行=账号/列=能力集;能力集从「强制页签」降级为「筛选」;
-       筛选态禁拖(§九——规避 reorder 全量校验 400);编辑态 trading 锁定=域锁预拒。 -->
+       筛选态禁拖(§九——规避 reorder 全量校验 400);编辑态 trading 锁定=域锁预拒。
+       批 66a(D26 §4.3):trading 域行不可拖(通道切换语义随 M5/hub 绑行消失);pull 型数据源行保留。 -->
   <el-card>
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
@@ -18,7 +19,7 @@
     </template>
     <ChannelTableShell ref="shellRef" :rows="rows" storage-key="interfaces"
                        :drag-title-key="'interfaces.dragTitle'" :note-key="'interfaces.orderNote'"
-                       :can-drag="capFilter ? () => false : null"
+                       :can-drag="capFilter ? () => false : (row) => !(row.capabilities || []).includes('trading')"
                        :reorder="doReorder" @reorder-failed="onReorderFailed">
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip>
         <template #default="{ row, $index }">

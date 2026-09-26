@@ -285,7 +285,6 @@ def _log_timeline(tid, level: str, message: str) -> None:
 def main():
     parser = argparse.ArgumentParser(description="策略实盘化入口")
     parser.add_argument("--task-id", help="live_task.id（新架构：策略与标的分离）")
-    parser.add_argument("--id", help="strategy_config.id（旧架构兼容）")
     parser.add_argument("--verbose", action="store_true", help="详细日志")
     args = parser.parse_args()
 
@@ -320,8 +319,9 @@ def main():
         logger.error("vnpy 未安装，策略实盘需要 vnpy 环境")
         sys.exit(EX_CONFIG)
 
-    if not args.task_id and not args.id:
-        logger.error("必须提供 --task-id（新）或 --id（旧）")
+    if not args.task_id:
+        # 批 66a（D26 #6）：旧 --id 路径（strategy_config 直启）退役——worker 只走 live_task
+        logger.error("必须提供 --task-id（旧 --id 路径已退役，批 66a）")
         sys.exit(EX_CONFIG)
 
     # SA4：启动依赖探活 + 指数退避（服务器重启序 PG 慢启不再 5 连崩打穿 StartLimit）
@@ -331,77 +331,37 @@ def main():
                code="deps.exhausted")
         sys.exit(EX_TEMPFAIL)
 
-    # 1. 读 live_task（新架构）或 strategy_config（旧架构兼容）
+    # 1. 读 live_task（批 66a：唯一路径——旧 --id/strategy_config 直启已退役，D26 #6）
     from src.data_platform.db import get_conn
     import json as _json
 
-    if args.task_id:
-        # 新架构：策略与标的分离
-        with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
-                "status, account_id, initial_capital, owner_username FROM live_task WHERE id=%s",
-                (args.task_id,))
-            row = cur.fetchone()
-        if not row:
-            logger.error("实盘任务 %s 不存在", args.task_id)
-            sys.exit(EX_CONFIG)
-        tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital, owner_username = row
-        if status == "stopped":
-            logger.info("实盘任务 %s 已停止，退出", tid)
-            sys.exit(0)
-        task_params = _json.loads(task_params_raw) if isinstance(task_params_raw, str) else (task_params_raw or {})
-        snapshot = _json.loads(snapshot_raw) if isinstance(snapshot_raw, str) else (snapshot_raw or {})
-        # 从快照构建 StrategyConfig 参数
-        sid = snapshot.get("id", strategy_id)
-        name = snapshot.get("name", task_name)
-        s_type = snapshot.get("type", "astock_analysis")
-        factors = snapshot.get("factors", [])
-        aggregator = snapshot.get("aggregator", {})
-        # params：策略快照的 params（含 mode/python_code）+ 任务级参数覆盖
-        base_params = snapshot.get("params", {})
-        # 任务级参数覆盖策略级（mode/python_code 等保留策略级，数值参数用任务级）
-        params = {**base_params, **task_params}
-        logger.info("实盘任务 %s (策略 %s, 标的 %s) 启动", tid, sid, symbol)
-        _log_timeline(tid, "info", f"任务启动：策略 {sid} 标的 {symbol}（hub 模式，systemd 重启亦走此=重启计数源）")
-    else:
-        # 旧架构兼容：从 strategy_config 读
-        with get_conn() as conn:
-            cur = conn.execute(
-                "SELECT id, name, type, symbol, adapter, enabled, factors, "
-                "aggregator, params, backtest_verified FROM strategy_config WHERE id=%s",
-                (args.id,))
-            row = cur.fetchone()
-        if not row:
-            logger.error("策略 %s 不存在", args.id)
-            sys.exit(EX_CONFIG)
-        # adapter 列不取（批 6b：hub 路径 cfg 固定 "xtp"，盲审 A-P2 死变量）
-        sid, name, s_type, symbol, _adapter, enabled, factors, aggregator, params, bt_verified = row
-        factors = _json.loads(factors) if isinstance(factors, str) else (factors or [])
-        aggregator = _json.loads(aggregator) if isinstance(aggregator, str) else (aggregator or {})
-        params = _json.loads(params) if isinstance(params, str) else (params or {})
-        if not enabled or not bt_verified:
-            logger.warning("策略 %s 未启用或未回测验证，跳过", sid)
-            sys.exit(0)
-        tid = None
-        account_id = None
-        initial_capital = 1000000
-        owner_username = None   # 旧路径无归属（批15：operator 空 → 2.5 拒单 critical=预期）
-        # D2：旧 --id 路径无 live_task.account_id——取默认 account（min 交易域，与迁移 0100 回填一致）。
-        # strategy_account 表已退役（0101 DROP），旧「策略-账户绑定」读方随之移除。
-        try:
-            with get_conn() as conn:
-                row = conn.execute(
-                    "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
-                ).fetchone()
-                account_id = row[0] if row else None
-        except Exception as e:
-            logger.warning("读默认 account 失败（旧 --id 路径无 account 归属）: %s", e)
-        if account_id is None:
-            # D2：worker 快照/下单均需 account_id（account_snapshot NOT NULL）——None 会静默装死
-            # （INSERT 违约被 except 吞、无快照无下单），显式 fail-fast 对齐 md_mode 处理。
-            logger.error("旧 --id 路径：external_interface 无交易域行，无 account 归属，拒绝启动")
-            sys.exit(EX_CONFIG)
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
+            "status, account_id, initial_capital, owner_username FROM live_task WHERE id=%s",
+            (args.task_id,))
+        row = cur.fetchone()
+    if not row:
+        logger.error("实盘任务 %s 不存在", args.task_id)
+        sys.exit(EX_CONFIG)
+    tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital, owner_username = row
+    if status == "stopped":
+        logger.info("实盘任务 %s 已停止，退出", tid)
+        sys.exit(0)
+    task_params = _json.loads(task_params_raw) if isinstance(task_params_raw, str) else (task_params_raw or {})
+    snapshot = _json.loads(snapshot_raw) if isinstance(snapshot_raw, str) else (snapshot_raw or {})
+    # 从快照构建 StrategyConfig 参数
+    sid = snapshot.get("id", strategy_id)
+    name = snapshot.get("name", task_name)
+    s_type = snapshot.get("type", "astock_analysis")
+    factors = snapshot.get("factors", [])
+    aggregator = snapshot.get("aggregator", {})
+    # params：策略快照的 params（含 mode/python_code）+ 任务级参数覆盖
+    base_params = snapshot.get("params", {})
+    # 任务级参数覆盖策略级（mode/python_code 等保留策略级，数值参数用任务级）
+    params = {**base_params, **task_params}
+    logger.info("实盘任务 %s (策略 %s, 标的 %s) 启动", tid, sid, symbol)
+    _log_timeline(tid, "info", f"任务启动：策略 {sid} 标的 {symbol}（hub 模式，systemd 重启亦走此=重启计数源）")
 
     # 1.6 D5 三级时点②：worker 启动 account 级品种权限（account_allows）fail-fast（宁拒勿错）
     from src.data_platform.perms import account_allows
