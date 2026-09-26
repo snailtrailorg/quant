@@ -2,7 +2,7 @@
 
 单进程持 XTP MD 连续 + 全市场合约，tick→MinuteAggregator→Valkey Streams 分发。
 纯数据面：无下单/无风控（R-HALT1）；零 TD 会话。
-启动: python -m src.md_hub.main；systemd: quant-md-hub@quant（单元在 server/scripts/systemd/）。
+启动: python -m src.md_hub.main；systemd: quant-md-hub@{account_id}（实例名=接口行 id，批 66b 账号级）。
 
 关键机制（对齐需求书 R-*）：租约+gen（R-DL4）/分钟末标注（R-BR9）/累计差分（S3）/
 双 flush（S2）/untrusted 双门限（R-BR4）/心跳+看门狗

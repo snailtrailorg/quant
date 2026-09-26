@@ -161,7 +161,10 @@ databus.subscribe(symbols: list[str], *, account_id: int) -> StreamHandle   # �
 #   两代自适应：per-account 期望行全缺且裸键在场 → 回落裸键校验+输出「legacy 模式」（解 wrapper 装位件不随 release 版本化的时序悖论）；SCAN 至多附加不做门
 # /api/_probe hub_hb：SCAN "quant:hb:md-hub:*"（pattern 钉死，尾冒号隔离裸键；COUNT 100 显式——hb 键量级=N 账号个位数）→ 在场集全部新鲜（TTL>0 且 ts 判龄）且在场集非空 → ok；空集 → not ready（空集地板）
 # collector：snap["hubs"] = {account_id: {gen, subs, ticks, bars, sess_ticks, last_tick_ts, dropped_pg, ...}}（N 结构）；render_prometheus quant_hub_* 8 指标加 account_id 维度（B-P2）
-# monitor R4/R6：per-account streak 键 quant:hm:hub_lost_streak:{account_id} 等；component="md-hub:{account_id}"；R4 交叉发现=systemctl list-units 'quant-md-hub@*' 在场集 × SCAN hb 键集合
+# monitor R4/R6：per-account streak 键 quant:hm:hub_lost_streak:{account_id} 等（JSON dict 持久化）；component="md-hub:{account_id}"
+# R4 交叉发现=DB 期望集×SCAN 在场集（代码裁定改写原 systemctl 交叉设计：DB 行缺席发现语义更准+
+#   野 hub〔unit active 而无 DB 行〕由 SA4 L3 ≤300s 兜停，R4 不重复覆盖；legacy 裸键收编在场=
+#   切换/回滚过渡态豁免 R4 防迁移夜假 critical——盲审 B-P2-2）
 ```
 
 ### 2.6 66c 契约（MarketSpec + 缺口检测）
@@ -189,9 +192,9 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 4. **回滚=整版本 rollback+带外 SOP**（B-P1-1/A-P1-2 合并裁定）：rollback-tasks.yml 补三块——①hub 清单 DB 重采（独立回滚时变量不断裂）；②@quant 复活块（unmask+enable）；③新 unit 停用块（stop+disable @{id}）。**SOP 顺序钉死：先 stop+disable @{id}，再 unmask+enable @quant**（反序则旧 SA4 自动 stop 数字名新 unit 与 unmask 的 @quant 并存→双写裸流窗→worker gap→回滚当场把实盘任务打成 sticky 冻结）。inventory `deploy_hub_units` 缺省删除后 rollback 侧变量兜底同批处理。
 5. **不做的事**：不动 TD 侧（批 65 已立）；不动 position/reorder（§4.3 裁定保留）；不动 market_hours 运营真源；不做双源对账（归 M7）；A03 完整五层总线不在本批。
 6. **文档同步**：模块契约 md_hub/strategy_runner/data_platform/**health_monitor/scheduler**（B-P2 补两份）+ 接口契约 §流协议 + 手册 05-数据源切换.md（switch.py 退役——66a 加「已退役」占位注记、66c 重写）+ D26 状态注记——随批 66c 收尾一次过。
-7. **特权通道前置（B-P0-3，66b 硬前置）**：stop+disable+mask/unmask+enable 不在 quant-svc 动词白名单（sudoers 只授固定 wrapper 路径）——66b 上产前一次性带外步（michael/root）：①quant-svc 扩动词 disable/mask/unmask/enable + sudoers 同步（随 bootstrap 重装）；②quant-hbcheck 两代自适应版同批装位（解 B-P0-2）。staging+prod 各执行一次，列入 66b 部署清单显式步骤（带机器/账号/密码指针五要素）。
+7. **特权通道前置（B-P0-3+B-P0-2 修后终版，66b 硬前置四件）**：仓内工件已备（quant-svc 扩 disable/enable/unmask——**mask 弃用**：/etc concrete 残件占位下 systemctl mask 必败〔实测〕且 mask 断回滚复活承载件，防复活由新代码 ACCOUNT_ID 断言 78 Prevent 兜底〔A/B P0 同判裁定〕），装位=michael 一次性（重跑 bootstrap 或定向 copy 到 /usr/local/sbin，staging+prod 各一次）：①quant-svc 扩动词版；②quant-hbcheck v2（两代自适应）；③quant-dbro hub 动作版（SQL 扩 trading 域行查询）；④**回灌**（release 完成后立即：`sudo -u quant bash -c 'cd <deploy_root>/server && set -a && source ../shared/.env && set +a && ../shared/venv/bin/python scripts/backfill_hub_bars.py --account-id 1' ` 先干跑再 --commit——gen 置 0 消倒挂，回写 §3-9）。
 8. **上产前检查**（66b）：①prod/staging 预跑新 `_desired_units` diff 人工确认将拉起 unit 集（防 enabled EMQ 行意外首启，A-P1-6）；②在跑任务无 frozen 态（部署重启会隐式解冻存量 sticky=未经显式接受带洞窗，A-P2-4——有则在窗内先处置）；③66a 退役 --id 前扫尾 `list-unit-files 'quant-strategy@*'` 确认无存量 ad-hoc --id 单元（防重启风暴，A-P2-3）。
-9. **暖机代价与回灌（B-P1-4）**：键切换后新流空+PG bar_1min 空（hub 落库 09-23 已退役）→ 不回灌=唯一任务首个交易日零历史起步（240 根≈4 小时盲窗）。**裁定：做旧流回灌**——66b 波次内 hub unit 换名后、旧键清理前，playbook 一次性 task（redis-cli XREAD 旧流→XADD 新键+payload 补 account_id 字段；现网 1 账号×任务标的数十键，量级可控）；周二 09-29 观察专项加「worker 暖机根数/首信号时刻」。
+9. **暖机代价与回灌（B-P1-4+A-P1 修后终版）**：键切换后新流空+PG bar_1min 空（hub 落库 09-23 已退役）→ 不回灌=唯一任务首个交易日零历史起步（240 根≈4 小时盲窗）。**回灌=带外步④**（release 完成后立即跑——deploy 用户无 quant 侧执行权限〔shared/venv 700〕，playbook task 结构上不可行，§3-7 清单④五要素）；脚本 `server/scripts/backfill_hub_bars.py`（干跑默认/--commit/--delete-old；**消息 gen 置 0**——保留旧 gen 会与新 hub gen〔从 1 起〕倒挂=live bar 永久 stale_gen 拒=静默全盲，A-P1）；周二 09-29 观察专项加「worker 暖机根数/首信号时刻」。
 10. **观察窗排期（A-P2-1）**：周一 09-28 已承载批 64/61/65/63P4 四批+66a 顺带——**66b 观察专项挪周二 09-29**（第六改动同交易日归因困难）；周一窗仅追加 66a 观察项。
 11. **换名窗双活期注记（B-P2，写明非消除）**：celery 波次重启后新 SA4（≤300s 周期）可能**先于** deploy hub 波次拉起新 unit @{id}——与旧 @quant 并存数分钟（跨名无 fencing、systemd 同名串行论证不适用于两个不同名 unit；release.yml 的 stop 旧 unit 任务并非先于新 unit 启动，只保证波次内终态唯一）。无害性：两进程写**不同键空间**（旧裸键 vs 新 per-account 键），worker 按自身 account_id 只消费其一，无双写冲突；代价=双 XTP MD 连接瞬态（同账号双行情连接，XTP 侧可容忍，观察窗记录连接计数）。
 
@@ -229,7 +232,7 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
   2. **worker 侧**（hub_worker.py）：`bar_stream_key` 单一谓词（§2.1，`_crypto_provider` 判定退役）；`_account_mismatch` 删 A 股跳过分支(51-52)；`_hub_alive(r, account_id)` per-account（**修加密 fail-open**）；水位键统一(172/256)；rewarm(143/182-197) 随 stream 变量自动跟随；`run_worker_smoke.py:28` 冒烟键同步
   3. **databus/stock_detail**：`subscribe` 键化+调用点接线（§2.4）；`_quote_block` SCAN 读者
   4. **SA4**（scheduler/tasks.py）：`_desired_units` 期望源改造（§2.5——builtin @quant(1280/1324/1348) 删、crypto 过滤(1342-1345) 去除改全市场、provider 白名单保留、**source 标签条件(1537) 同步**）；`_sa4_hub_guards` lease 键语义注记清理
-  5. **deploy**：release.yml preflight hub units 改 quant-dbro hub 子命令 DB 驱动（§2.5；systemd 采集降附加；fallback @quant 删；三套 group_vars `deploy_hub_units` 缺省与 `deploy_hub_hb_redis_key/url` 死配置清理）；`quant-hbcheck` 两代自适应重写（§2.5——装位随 §3-7 带外步）；release.yml 加旧 unit stop+disable+mask `quant-md-hub@quant`（波次内、SA4 期望源生效前序）；**回滚剧本补块**（§3-4：hub DB 重采+@quant 复活+@{id} 停用+SOP 顺序）；`run_hub_postverify.py` 键改 per-account；`quant-dbro` 扩 hub 子命令（SQL 返全行含 provider）
+  5. **deploy**：release.yml preflight hub units 改 quant-dbro hub 子命令 DB 驱动（§2.5；systemd 采集降附加；fallback @quant 删；三套 group_vars `deploy_hub_units` 缺省与 `deploy_hub_hb_redis_key/url` 死配置清理）；`quant-hbcheck` 两代自适应重写（§2.5——装位随 §3-7 带外步）；release.yml 阶段 7.6 旧 unit 退役（stop+disable，**mask 弃用**——concrete 残件占位必败+断回滚承载件，A/B P0 裁定；残件保留=回滚复活承载，新代码 78 Prevent 兜底防复活）；**回滚剧本补块**（§3-4：hub DB 重采+@quant 复活+@{id} 停用+SOP 顺序）；`run_hub_postverify.py` 键改 per-account；`quant-dbro` 扩 hub 子命令（SQL 返全行含 provider）
   6. **观测面**：collector.py N 化（CORE_UNITS :15-21 去 @quant 硬编码+snap["hubs"] N 结构+SCAN+**render_prometheus quant_hub_* 指标 account_id 维度**）；monitor.py R4/R6 per-account streak+component 去重键+R4 交叉发现（源=systemctl 在场集，§2.5）；system.py `/api/_probe` hub_hb 在场集+空集地板（pattern 钉死）；前端 `ConnectionCards.vue` N 实例卡片（v-for）
   7. **systemd 侧**：`quant-live-task@.service` 去 `After=/Wants=quant-md-hub@quant.service` 具体实例依赖（:5-6，A-P1-3）+全量 grep systemd 目录其余 @quant 引用清零
   8. **波次内回灌+清理**（hub unit 换名后）：旧流回灌 task（§3-9）→ 旧裸键清理（`hub:bars:{symbol}` A股全量+水位键+active_instance/intent 残留键——脚本化键清单）
@@ -307,5 +310,17 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 - A-P2：NX kwargs 钉死（`assert_called_once_with("hub:lease", ANY, nx=True, ex=30)`——丢 nx=双活 fencing 静默失效）；hub_quant_row_id 填错行风险 → 部署前置五要素写明「确认 provider=xtp 且 market=astock」（§4-66a）；文档残留三处（strategy_runner/__init__ docstring 旧启动法/md_gateway 注记/带边界注记「只改凭证不 bump 不触发」）；concrete 双写义务注释。
 - B-P2：inventory 注释错挂归位（hub_quant_row_id 行尾误挂 deploy_hub_units 注释）；手册真相源 docs/manual/05 补同款注记（消除镜像分叉）；**任务文件 concrete 机制回写**（drop-in 方案经编码证实过不了 install-units 校验→concrete 整文件遮蔽，7 处改写+66b 清除义务钉三件套）；测试钉缺口如实声明——①沙箱 concrete 道具不加（三 task 沙箱静默跳过已验证，**staging 彩排承担首验**）②row_id 皆空 78 与 ③续租败 exit 1 均为 main() 闭包分支（get_interface_row(None) 等价防御钉已立；退出码矩阵注释+彩排承担）④前端无组件测试基建（B-P1 载荷全量化=结构性修复兜底）。
 - 两审核实确认：M5 竞态三时序推演安全（同名重启窗/带外误启/Valkey 半死）/row_id 链无静默错行/退出码生产者与注释逐条对上/--id 零现实消费方/systemd-analyze verify+ansible syntax-check 双过/--check/GC/回滚/双向兼容（旧 exit 5 在新 Prevent 下照常重拉）全推演成立。
+
+**代码双盲审处置（66b，2026-09-27）**：A（交易可靠性）P0×1+P1×1+P2×5 / B（系统管道）P0×2+P1×3+P2×7+P3，全处置：
+- **mask 死结（A+B 同判 P0）**：/etc concrete 残件占据 mask 落点必败〔两审本机实测 rc=1〕→ 发布链锁死；且 mask 断回滚复活承载件。**裁定采纳 A 修法**：删 mask task 收敛 stop+disable——残件保留（回滚承载）+新代码 ACCOUNT_ID 断言 78 Prevent 兜底防复活（B 的 rm 残件修法被 A 驳：断回滚）。
+- **quant-svc 工件缺失（B-P0-2）**：§3-7 说「随 bootstrap 重装」但仓内 wrapper 未扩动词=无工件可装+手工改被 bootstrap 覆盖 → 仓内落 disable/enable/unmask 扩展（mask 弃用）。
+- **回灌 gen 倒挂（A-P1）**：保留旧 gen≈203 vs 新 hub gen 从 1 起 → live bar 永久 stale_gen 拒=静默全盲（心跳绿无告警 SELL 停摆）→ 消息 gen 置 "0"；时点钉 release 后带外步④（playbook task 不可行=deploy 无 quant 执行权限，§3-9 回写）。
+- **回滚三块形态闸（B-P1-3）**：无条件执行会在 66b 后回滚（66c→66b 等）拆掉数字 hub+restart 一个 78-Prevent @quant 判死回滚 → 三块加「目标树含 concrete」闸。
+- **hbcheck env 注入删除（B-P1-2）**：sudoers env_reset 剥成 no-op 旋钮+生效即读错库（db4 vs 写侧 db0）必红 → 删 environment 块+清 inventory 两死键，回落 wrapper 内 .env 单一真源。
+- **沙箱道具（B-P1-1）**：make_sandbox_root 补 hub.out（缺=沙箱 release 全在 preflight 中止，新管道零场景覆盖）。
+- **白名单「超集」（A-P2-1 驳回）**：A 断言注册表仅 {xtp,emt_emq}——B venv 实跑 list_md_gateway_providers()=四 provider 全注册（加密 MD 网关 D6 已装）+prod @4/@5 本就在跑=虚惊，白名单维持四项与注册表一致。
+- 其余：非空断言豁免门（server_changed+逃生键+static 源 skipped 语义）/monitor state 初值 dict 化（B-P2-1 崩溃防线）/R4 legacy 过渡豁免（B-P2-2 迁移夜假警）/crypto 测试 SECRET_KEY 隔离（B-P2-7 环境红修）/残留 fixture 清零（xsleeper×3+databus）/新行为钉 9 个（_probe 空集地板+ts 陈旧+非数字尾段/collector legacy 双分支/_hub_expected_ids 直测）/P3 注释四处。
+- 两审核实确认：波次实序 task→hub（旧注释纠偏）/双活窗不同键空间安全/payload 三层一致+存量旧消息全路径不可达（XREADGROUP>$/xrevrange/xautoclaim 全核）/Jinja 链 venv 实跑正确/skipped register 语义实测/回灌脚本本体合格（键分类/幂等/maxlen 无剪尾）。
+- 验证：**1460 全绿**（+7 新钉）；syntax-check 双剧本过（YAML name 含 = 的 k=v 误判两处修）。
 
 **快审（第三轮忠实度复核）**：22/24 忠实（含全部 5 条 P0），余 4 项轻量修补已落——#21 双活窗注记虚指→§3-11 正文补写（窗口存在/不同键空间无害/双 XTP 连接瞬态/stop 时序实况）；#23 打折→§2.5 _probe SCAN 补 COUNT 100；§3-9「周一」措辞残留→周二；#12 同步义务载体悬空→钉在过滤处代码注释（模块契约不含 deploy）。#24 来源标注补正（原 A-P1-1②）。快审附带确认：D26 两处改写正确无残留；D26 §4.1:113「续租丢路径均已死」旧句待 66c 文档收尾一并校（既定范围）。**总判 PASS**。

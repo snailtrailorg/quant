@@ -8,7 +8,7 @@
 account_id 字段，gen 保留原值——worker gen_jump→rewarm 自动接管）→ 逐键报告。幂等：
 --commit 缺省=干跑（只报告不写）；重复执行按 ts 去重天然收敛（worker max_ts 过滤）。
 
-运行（服务器，michael 带外步——批 66b §3-7 清单④；quant 属主能读 .env/venv）：
+运行（服务器，michael 带外步——批 66b 带外步（§3-7 ④：release 完成后立即跑）；quant 属主能读 .env/venv）：
   cd /data/websites/snailtrail.cc/quant/server && \
   sudo -u quant bash -c 'set -a && source ../shared/.env && set +a && \
   QT_QPA_PLATFORM=offscreen ../shared/venv/bin/python scripts/backfill_hub_bars.py --account-id 1' [--commit]
@@ -52,6 +52,7 @@ def main() -> int:
             for eid, fields in entries:
                 f2 = dict(fields)
                 f2.setdefault("account_id", str(args.account_id))   # payload 契约补齐
+                f2["gen"] = "0"   # 盲审 A-P1：gen 置 0——保留旧 gen（≈203）会倒挂（新 hub gen 从 1 起=live bar 永久 stale_gen 拒=静默全盲）；0<一切 live gen，任意投递顺序安全
                 pipe.xadd(target, f2, maxlen=5000, approximate=True)
             pipe.execute()
             moved += len(entries)

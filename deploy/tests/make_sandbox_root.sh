@@ -44,6 +44,7 @@ mkdir -p "$ROOT/bin" "$ROOT/releases" "$ROOT/shared/runtime" "$ROOT/var" "$STAGE
 mkdir -p "$SBX/dbro"
 : > "$SBX/dbro/live.out"
 : > "$SBX/dbro/feishu.out"
+printf '1|xtp\n' > "$SBX/dbro/hub.out"   # 批 66b：hub 期望集道具（缺=沙箱 release 全在 preflight dbro hub 处中止——盲审 B-P1-1）
 
 # --- 2) staging 基线（__SBX_ROOT__ 占位符替换为实际沙箱根） ---
 cp -a "$FIX/." "$STAGE/"

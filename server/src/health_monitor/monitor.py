@@ -147,7 +147,8 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     hubs = snap.get("hubs") or {}
     expected: list = snap.get("hub_expected") or []
     streaks = state["hub_lost_streak"]
-    if deps.get("valkey"):
+    legacy_transition = 0 in hubs   # legacy 裸键收编在场=键切换/回滚过渡态——R4 豁免（终态应消失；盲审 B-P2-2 修：防迁移夜假 critical）
+    if deps.get("valkey") and not legacy_transition:
         for acct in expected:
             missing = int(acct) not in hubs
             streaks[acct] = (streaks.get(acct, 0) + 1) if missing else 0
@@ -244,7 +245,7 @@ def run_check() -> dict:
     from .collector import collect, _valkey
     snap = collect()
     snap["hub_expected"] = _hub_expected_ids()
-    state = {"hub_lost_streak": 0, "sess_stall": 0, "prev_sess_ticks": None}
+    state = {"hub_lost_streak": {}, "sess_stall": {}, "prev_sess_ticks": {}}   # 批 66b dict 形态（标量残留=装载失败崩 evaluate）
     new_events: list[dict] = []
     recovered: list[dict] = []
     valkey_ok = False

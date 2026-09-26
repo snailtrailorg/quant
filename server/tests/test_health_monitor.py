@@ -304,6 +304,54 @@ class TestApiProbe:
         assert d["checks"]["strategy_config"] == "ok:0"    # 0=ok
         assert len(d["checks"]) == 6
 
+    def test_probe_hub_hb_empty_set_floor_not_ready(self):
+        """批 66b 空集地板：SCAN 在场集空（hub 未起/键切换未达）→ not ready（vacuous 真空洞必须红）。"""
+        from unittest.mock import patch, MagicMock
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        conn = MagicMock(); conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = [0]
+        r = MagicMock(); r.ping.return_value = True
+        r.scan_iter.return_value = iter([])
+        with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+             patch("redis.Redis.from_url", return_value=r):
+            resp = TestClient(app).get("/api/_probe")
+        assert resp.status_code == 200
+        d = resp.json()
+        assert d["ok"] is False and "在场集空" in d["checks"]["hub_hb"]
+
+    def test_probe_hub_hb_stale_ts_not_ready(self):
+        """批 66b ts 判龄：键在场 TTL>0 但 hash 内 ts 陈旧（>90s，旧心跳残留）→ not ready。"""
+        from unittest.mock import patch, MagicMock
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        import time as _time
+        conn = MagicMock(); conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = [0]
+        r = MagicMock(); r.ping.return_value = True; r.ttl.return_value = 60
+        r.scan_iter.return_value = iter(["quant:hb:md-hub:1"])
+        r.hget.return_value = str(_time.time() - 300)   # 5 分钟前的心跳
+        with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+             patch("redis.Redis.from_url", return_value=r):
+            resp = TestClient(app).get("/api/_probe")
+        assert resp.json()["ok"] is False
+
+    def test_probe_hub_hb_non_digit_tail_ignored(self):
+        """批 66b pattern 隔离：非数字尾段键（垂死裸键）不计入在场集。"""
+        from unittest.mock import patch, MagicMock
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        conn = MagicMock(); conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchone.return_value = [0]
+        r = MagicMock(); r.ping.return_value = True; r.ttl.return_value = 60
+        r.scan_iter.return_value = iter(["quant:hb:md-hub"])   # 裸键（无 :id 尾段）——scan_iter 匹配 * 但尾段非数字
+        r.hget.return_value = str(0)
+        with patch("src.web_api.routes.system.get_conn", return_value=conn), \
+             patch("redis.Redis.from_url", return_value=r):
+            resp = TestClient(app).get("/api/_probe")
+        d = resp.json()
+        assert d["ok"] is False   # 裸键不救空集（pattern 尾冒号+isdigit 双隔离钉）
+
     def test_probe_single_fail_ok_false_still_200(self):
         from unittest.mock import patch, MagicMock
         from fastapi.testclient import TestClient
@@ -482,3 +530,54 @@ class TestRunCheckStateMachine:
         findings, _ = evaluate(snap)
         assert any(f["rule_id"] == "mem_high" and f["severity"] == "critical" for f in findings)
         assert not any(f["rule_id"] == "disk_high" for f in findings)
+
+
+# ——— 批 66b 新行为钉（防 mock 假绿——盲审 B-P2-6 补）———
+import time as _t
+
+
+class TestCollectorLegacyHub:
+    def test_legacy_bare_key_collected_as_account0(self, monkeypatch):
+        """66b 键切换窗：裸键在场+per-account 全缺 → 收编 hubs[0]（观测面不瞬盲）。"""
+        from unittest.mock import MagicMock
+        from src.health_monitor import collector
+        r = MagicMock()
+        r.ping.return_value = True
+        r.scan_iter.return_value = iter([])   # 无 per-account 键
+        r.hgetall.return_value = {"gen": "5", "subs": "3", "ticks": "9", "bars": "2",
+                                  "sess_ticks": "9", "dropped_pg": "0", "last_tick_ts": str(_t.time())}
+        monkeypatch.setattr(collector, "_valkey", lambda: r)
+        snap = collector.collect()
+        assert 0 in snap["hubs"] and snap["hubs"][0]["gen"] == 5
+
+    def test_per_account_preferred_over_legacy(self, monkeypatch):
+        """per-account 键在场时裸键不收编（legacy 仅过渡兜底）。"""
+        from unittest.mock import MagicMock
+        from src.health_monitor import collector
+        r = MagicMock()
+        r.ping.return_value = True
+        r.scan_iter.return_value = iter(["quant:hb:md-hub:1"])
+
+        def _hgetall(key):
+            return ({"gen": "9", "subs": "1", "ticks": "1", "bars": "1", "sess_ticks": "1",
+                     "dropped_pg": "0", "last_tick_ts": str(_t.time())}
+                    if key == "quant:hb:md-hub:1" else {"gen": "1"})
+        r.hgetall.side_effect = _hgetall
+        monkeypatch.setattr(collector, "_valkey", lambda: r)
+        snap = collector.collect()
+        assert 1 in snap["hubs"] and 0 not in snap["hubs"]
+
+
+class TestHubExpectedIds:
+    def test_provider_filtered_and_fail_closed(self, monkeypatch):
+        """_hub_expected_ids：provider 白名单过滤（未注册行不进期望）+DB 失败降空集。"""
+        from unittest.mock import MagicMock
+        from src.health_monitor import monitor
+        conn = MagicMock(); conn.__enter__.return_value = conn
+        conn.execute.return_value.fetchall.return_value = [(1,), (3,)]
+        monkeypatch.setattr("src.data_platform.db.get_conn", lambda: conn)
+        ids = monitor._hub_expected_ids()
+        assert ids == ["1", "3"]
+        monkeypatch.setattr("src.data_platform.db.get_conn",
+                            MagicMock(side_effect=RuntimeError("db down")))
+        assert monitor._hub_expected_ids() == []

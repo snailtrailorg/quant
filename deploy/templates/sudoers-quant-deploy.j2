@@ -8,7 +8,7 @@ Defaults env_reset
 #     `systemctl restart quant-web sshd` 会整行匹配 `quant-*` = 任意 unit DoS 面）
 #   - 全部白名单命令 = root/quant 属主、deploy 不可写的 wrapper 脚本（改 wrapper 内容=提权）
 #   - wrapper 严参校验: release_id ^\d{12}-[a-f0-9]{7,}$ 且限定 releases/ 下；
-#     unit ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$；which ∈ live|feishu（quant-dbro）
+#     unit ^quant-[a-z-]+(@[A-Za-z0-9_-]+)?\.service$；which ∈ live|feishu|hub（quant-dbro）
 #   - quant-dbro 为 quant 属主（唯一例外: 本体即以 quant 跑，DB 连接封装其内走 PG peer 免密）
 #   - quant-journal 只读诊断通道（2026-09-01 三查需求）：journalctl 收 wrapper 严参校验，
 #     仅 quant-*.service 域 + 只读 flags（-u/--since/--until/-n/-p/-q），deploy 读不到 auth/sshd

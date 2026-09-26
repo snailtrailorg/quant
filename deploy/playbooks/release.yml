@@ -211,8 +211,12 @@
         msg: >-
           hub 期望集为空——DB 采集断链或全 trading 行被 provider 白名单过滤
           （期望行见 Web 集成中心；白名单={{ deploy_hub_md_providers | default([]) }}）。
-          空集豁免仅限全新 bootstrap（此时也无波次可言）。
-      when: hub_units_db is succeeded
+          空集合法态（全新 bootstrap 零行/维护期全禁用/static 演练源）显式放行：
+          -e deploy_hub_allow_empty=true。
+      when:
+        - hub_units_db is not skipped   # static 演练源（不跑 dbro）不判
+        - (server_changed | default(true) | bool)   # web-only 快车道不拦
+        - not (deploy_hub_allow_empty | default(false) | bool)   # 显式豁免逃生键
 
     - name: preflight —— hub systemd 在场集采集（附加校验——波次重启范围仍以 DB 期望集为准）
       ansible.builtin.shell: "systemctl list-units --all 'quant-md-hub@*.service' --no-legend --plain 2>/dev/null | awk '{print $1}' | sort"
@@ -430,12 +434,12 @@
               ansible.builtin.command: "{{ quant_svc_cmd }} stop quant-md-hub@quant.service"
               failed_when: false
               changed_when: true
-            - name: 旧 @quant disable（含 /etc concrete 残件——mask 为单元名级，concrete/模板实例化双形态覆盖）
+            # 盲审 A/B P0 修：不 mask——/etc concrete 残件占据 mask 落点必败（实测 rc 非 0）
+            # 且残件=回滚复活承载件必须保留；防复活由新代码兜底：@quant 以 66b 代码启动即
+            # ACCOUNT_ID 非数字 exit 78 Prevent，永不复活。
+            - name: 旧 @quant disable（stop+disable 收敛——mask 弃用）
               ansible.builtin.command: "{{ quant_svc_cmd }} disable quant-md-hub@quant.service"
               failed_when: false
-              changed_when: true
-            - name: 旧 @quant mask（防旧 SA4 builtin 期望复活——新代码期望源已 DB 驱动不含 @quant）
-              ansible.builtin.command: "{{ quant_svc_cmd }} mask quant-md-hub@quant.service"
               changed_when: true
           when: (server_changed | bool) and (deploy_retire_legacy_hub | default(true) | bool)
         - name: 阶段 8 —— 波次命令层失败终判（续行≠维持混合态——统一回滚，设计稿语义修死）
@@ -500,10 +504,11 @@
           when: deploy_hub_hb_mode == 'file'
           changed_when: false
 
-        - name: 阶段 8 —— hub 心跳复现（批 66b v2：DB 驱动期望集逐行验+两代自适应——quant-hbcheck wrapper）
+        # 批 66b v2：DB 驱动期望集逐行验+两代自适应。不注入 redis url env——sudoers env_reset
+        # 会剥成 no-op 旋钮，且生效即读错库（db4 vs 写侧 db0）必红；wrapper 内 .env VALKEY_URL
+        # 与写侧同源即单一真源（盲审 B-P1-2 修）。
+        - name: 阶段 8 —— hub 心跳复现（quant-hbcheck wrapper v2）
           ansible.builtin.command: "{{ quant_hbcheck_cmd | default('sudo -u quant ' ~ deploy_wrapper_dir ~ '/quant-hbcheck') }}"
-          environment:
-            QUANT_HB_REDIS_URL: "{{ deploy_hub_hb_redis_url | default('redis://127.0.0.1:6379/4') }}"
           register: hb_check
           failed_when: hb_check.rc != 0
           when: deploy_hub_hb_mode == 'redis'

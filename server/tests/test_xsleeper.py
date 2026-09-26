@@ -36,7 +36,7 @@ class _Redis:
 
 
 def _sleeper(r=None, on_batch=None):
-    return XReadSleeper(r if r is not None else _Redis(), "hub:bars:X.SHSE", "task-1",
+    return XReadSleeper(r if r is not None else _Redis(), "hub:bars:1:X.SHSE", "task-1",
                         "w-1", on_batch or (lambda b: None))
 
 
@@ -68,13 +68,13 @@ class TestBlockMath:
         _sleeper(r)(5.0)
         c = r.calls[-1]
         assert c["group"] == "task-1" and c["consumer"] == "w-1"
-        assert c["streams"] == {"hub:bars:X.SHSE": ">"} and c["count"] == 10
+        assert c["streams"] == {"hub:bars:1:X.SHSE": ">"} and c["count"] == 10
 
 
 class TestDelivery:
     def test_batch_delivered_inline(self):
         got = []
-        batch = [("hub:bars:X.SHSE", [("1-1", {"ts": "t"})])]
+        batch = [("hub:bars:1:X.SHSE", [("1-1", {"ts": "t"})])]
         s = _sleeper(_Redis(batch=batch), on_batch=got.append)
         s(5.0)
         assert got and got[0] is batch

@@ -40,7 +40,7 @@ deploy_waves:
     # 2026-09-10 彩排实抓）；入波即每次发布重启收敛，与 prod 波次语义对齐
     units: [quant-im-pool@quant.service]
   - name: hub
-    units: "{{ deploy_hub_units }}"     # systemd 动态采集所有 md-hub@*（preflight 采集，空兜底 @quant）
+    units: "{{ deploy_hub_units }}"     # 批 66b：preflight DB 驱动期望集（dbro hub→provider 白名单过滤）
 deploy_postverify_units: "{{ deploy_waves | map(attribute='units') | flatten }}"
 
 
@@ -63,6 +63,4 @@ deploy_task_units_db_cmd: "{{ quant_dbro_cmd }} live"
 deploy_task_units_db_cmd_feishu: "{{ quant_dbro_cmd }} feishu"
 deploy_postverify_probe: true         # W2：staging 探针开（彩排即真验证）
 postverify_healthz_release: false    # 生产 healthz 无 release 字段（版本收敛由 quant-pinned 通道承载）
-deploy_hub_hb_mode: redis            # quant:hb:md-hub：gen+8 字段（3b 首跑验证）
-deploy_hub_hb_redis_key: "quant:hb:md-hub"
-deploy_hub_hb_redis_url: "redis://127.0.0.1:6379/4"   # 与 key 同源参数化（3b 按服务器 Valkey 实况校正）
+deploy_hub_hb_mode: redis            # quant:hb:md-hub：gen+8 字段；批 66b v2=DB 期望集+两代自适应——redis url 不经 env 注入（env_reset 剥除+读错库风险，wrapper 内 .env 单一真源）

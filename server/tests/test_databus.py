@@ -246,7 +246,7 @@ class TestSubscribe:
         sub = Subscription(kind="bar_minute", symbols=("600000.SHSE",), account_id=1)
         with patch("src.data_platform.databus._r", return_value=r):
             h = bus.subscribe(sub)
-        r.xread.return_value = [("hub:bars:600000.SHSE", [("1-9", {"gen": "163", "ts": "x", "close": "1"})])]
+        r.xread.return_value = [("hub:bars:1:600000.SHSE", [("1-9", {"gen": "163", "ts": "x", "close": "1"})])]
         assert len(h.poll()) == 1 and h.last_id == "1-9"
         r.xread.side_effect = Exception("down")
         assert h.poll() == []          # 失败不崩，下次再试

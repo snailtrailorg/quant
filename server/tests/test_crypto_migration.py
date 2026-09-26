@@ -42,6 +42,7 @@ class TestEncryptionKeyMigration:
         """JWT_SECRET 派生密钥与 crypto._get_encryption_key 一致（无 ENCRYPTION_KEY 时）。"""
         k1 = _old_derive_key("test-secret")
         old_env = os.environ.pop("ENCRYPTION_KEY", None)
+        old_sk = os.environ.pop("SECRET_KEY", None)   # 本地 .env 有 SECRET_KEY（根密钥 HKDF 路径优先）——须一并隔离才测 JWT 回退派生（批 66b 环境红修）
         os.environ["JWT_SECRET"] = "test-secret"
         try:
             import src.quant_common.crypto as crypto_mod
@@ -51,6 +52,8 @@ class TestEncryptionKeyMigration:
         finally:
             if old_env is not None:
                 os.environ["ENCRYPTION_KEY"] = old_env
+            if old_sk is not None:
+                os.environ["SECRET_KEY"] = old_sk
 
     def test_roundtrip_migration(self):
         """旧密钥加密 → 用新密钥解密 → 原文明文不变。"""
