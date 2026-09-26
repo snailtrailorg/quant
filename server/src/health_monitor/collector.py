@@ -12,15 +12,16 @@ import subprocess
 import time
 
 # 常驻单元（实例=quant）。live-task@*/strategy@* 按需，心跳覆盖；feishu 多实例动态发现
+# 批 66b（D26）：md-hub 账号级实例化——@quant 退役，hub 单元按心跳键动态发现（不在 CORE_UNITS）
 CORE_UNITS = [
     "quant-web-api@quant",
     "quant-celery-worker@quant",
     "quant-celery-beat@quant",
     "quant-celery-risk@quant",
-    "quant-md-hub@quant",
 ]
 
 HUB_HB_KEY = "quant:hb:md-hub"
+HUB_HB_PATTERN = "quant:hb:md-hub:*"   # 批 66b：per-account 在场集（SCAN 发现；尾冒号隔离——glob 不吞垂死裸键）
 TASK_HB_PATTERN = "quant:hb:task:*"
 
 
@@ -208,7 +209,7 @@ def systemctl_units(units: list[str]) -> dict:
 def collect(now: float | None = None) -> dict:
     """单次快照：units + 依赖 + hub/任务心跳。幂等无副作用，可被 /metrics 高频调用。"""
     now = now if now is not None else time.time()
-    snap: dict = {"ts": now, "units": {}, "deps": {}, "hub": None, "tasks": {}}
+    snap: dict = {"ts": now, "units": {}, "deps": {}, "hubs": {}, "tasks": {}}   # 批 66b：hub 单对象→hubs N 实例
 
     snap["units"] = systemctl_units(CORE_UNITS)
 
@@ -220,17 +221,39 @@ def collect(now: float | None = None) -> dict:
         r = _valkey()
         r.ping()
         snap["deps"]["valkey"] = True
-        # hub 心跳（key 存在=进程 90s 内活着；last_tick_ts 是数据新鲜度，另列）
-        h = r.hgetall(HUB_HB_KEY)
-        if h:
+        # hub 心跳 N 实例（批 66b：SCAN per-account 在场集——{account_id: {...}}；
+        # legacy 兼容读：键切换窗裸键在场也收编（account_id=0 表示）防观测面瞬盲）
+        for key in list(r.scan_iter(HUB_HB_PATTERN, count=100)):
+            acct = key.rsplit(":", 1)[-1]
+            if not acct.isdigit():
+                continue
+            try:
+                h = r.hgetall(key)
+            except Exception:
+                continue
+            if not h:
+                continue
             last_tick = float(h.get("last_tick_ts") or 0)
-            snap["hub"] = {
+            snap["hubs"][int(acct)] = {
                 "gen": int(h.get("gen") or 0),
                 "subs": int(h.get("subs") or 0),
                 "ticks": int(h.get("ticks") or 0),
                 "sess_ticks": int(h.get("sess_ticks") or 0),
                 "bars": int(h.get("bars") or 0),
                 "dropped_pg": int(h.get("dropped_pg") or 0),
+                "tick_age": (now - last_tick) if last_tick else None,
+            }
+        legacy = r.hgetall(HUB_HB_KEY)
+        if legacy and not snap["hubs"]:
+            # 66b 键切换窗过渡（回滚后亦然）：裸键收编为 account_id=0（观测面不瞬盲；终态应消失）
+            last_tick = float(legacy.get("last_tick_ts") or 0)
+            snap["hubs"][0] = {
+                "gen": int(legacy.get("gen") or 0),
+                "subs": int(legacy.get("subs") or 0),
+                "ticks": int(legacy.get("ticks") or 0),
+                "sess_ticks": int(legacy.get("sess_ticks") or 0),
+                "bars": int(legacy.get("bars") or 0),
+                "dropped_pg": int(legacy.get("dropped_pg") or 0),
                 "tick_age": (now - last_tick) if last_tick else None,
             }
         # 任务心跳（动态发现；key TTL 90s，存在=活）
@@ -344,17 +367,21 @@ def render_prometheus(snap: dict) -> str:
     if "valkey_memory" in snap:
         emit("quant_valkey_memory_bytes", snap["valkey_memory"], "valkey used memory")
 
-    hub = snap.get("hub")
-    emit("quant_hub_hb_present", b(hub is not None), "md-hub heartbeat key present (TTL 90s)")
-    if hub:
-        emit("quant_hub_gen", hub["gen"], "hub generation (fencing)")
-        emit("quant_hub_subs", hub["subs"], "subscribed symbols")
-        emit("quant_hub_ticks_total", hub["ticks"], "ticks since process start", mtype="counter")
-        emit("quant_hub_sess_ticks_total", hub["sess_ticks"], "ticks within current session", mtype="counter")
-        emit("quant_hub_bars_total", hub["bars"], "bars since process start", mtype="counter")
-        emit("quant_hub_dropped_pg_total", hub["dropped_pg"], "bars dropped by PG writer", mtype="counter")
+    # 批 66b：hub 指标 N 实例（account 标签维度；legacy 裸键收编 account=0）
+    hubs = snap.get("hubs") or {}
+    for acct, hub in hubs.items():
+        labels = {"account": str(acct)}
+        emit("quant_hub_hb_present", 1, "md-hub heartbeat key present (TTL 90s)", labels)
+        emit("quant_hub_gen", hub["gen"], "hub generation (fencing)", labels)
+        emit("quant_hub_subs", hub["subs"], "subscribed symbols", labels)
+        emit("quant_hub_ticks_total", hub["ticks"], "ticks since process start", labels, mtype="counter")
+        emit("quant_hub_sess_ticks_total", hub["sess_ticks"], "ticks within current session", labels, mtype="counter")
+        emit("quant_hub_bars_total", hub["bars"], "bars since process start", labels, mtype="counter")
+        emit("quant_hub_dropped_pg_total", hub["dropped_pg"], "bars dropped by PG writer", labels, mtype="counter")
         if hub["tick_age"] is not None:
-            emit("quant_hub_tick_age_seconds", round(hub["tick_age"], 1), "seconds since last tick (wall)")
+            emit("quant_hub_tick_age_seconds", round(hub["tick_age"], 1), "seconds since last tick (wall)", labels)
+    if not hubs:
+        emit("quant_hub_hb_present", 0, "md-hub heartbeat key present (TTL 90s)")
 
     for tid, t in snap.get("tasks", {}).items():
         emit("quant_task_up", 1, "task heartbeat key present", {"task": tid, "md": t["md"]})

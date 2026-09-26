@@ -20,9 +20,9 @@ logger = logging.getLogger("health_monitor")
 HM_HB_KEY = "quant:hm:health-monitor"      # 自身心跳（beat 任务写）
 _STATE_PREFIX = "quant:hm:state:"          # 电平沿状态：{rule_id}:{component} -> "1"
 _NR_PREFIX = "quant:hm:nr:"                # 上次见到的 NRestarts：{unit} -> int
-_R4_STREAK_KEY = "quant:hm:hub_lost_streak"
-_R6_STALL_KEY = "quant:hm:r6_stall"        # 交易时段 sess_ticks 零增长连续轮数
-_R6_PREV_KEY = "quant:hm:r6_prev_sess_ticks"
+_R4_STREAK_KEY = "quant:hm:hub_lost_streak"   # 批 66b：值=JSON dict（per-account streak）
+_R6_STALL_KEY = "quant:hm:r6_stall"           # 批 66b：值=JSON dict（per-account）        # 交易时段 sess_ticks 零增长连续轮数
+_R6_PREV_KEY = "quant:hm:r6_prev_sess_ticks"  # 批 66b：值=JSON dict（per-account）
 EVENT_RETENTION_DAYS = 30
 
 
@@ -94,10 +94,29 @@ def _prune_metrics() -> None:
         logger.debug("system_metric 清理失败（表未建/PG 抖动，忽略）: %s", e)
 
 
+def _hub_expected_ids() -> list[str]:
+    """批 66b：R4 期望集（DB 行=缺席发现唯一正确来源——SCAN 在场测不到缺席；低频 30s 轻查询，
+    不入 collect〔/metrics 高频〕）。provider 白名单过滤同 SA4/deploy（防未实现行误报缺失）；
+    查询失败返回 []（evaluate 降级空集地板判定）。"""
+    try:
+        from src.data_platform.db import get_conn
+        from src.strategy_framework.md_gateway import list_md_gateway_providers
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT id FROM external_interface "
+                "WHERE enabled=true AND 'trading' = ANY(capabilities) "
+                "AND provider = ANY(%s)", (list(list_md_gateway_providers()),))
+            return [str(x[0]) for x in cur.fetchall()]
+    except Exception as e:
+        logger.warning("R4 期望集查询失败（降级空集地板判定）: %s", e)
+        return []
+
+
 def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     """规则判定（纯函数，供测试）。返回 (findings, state)——state 为跨轮状态字典，
     由调用方持久化（R4/R6 需要连续轮次证据）。"""
-    state = dict(state or {"hub_lost_streak": 0, "sess_stall": 0, "prev_sess_ticks": -1})
+    # 批 66b：R4/R6 per-account 化（hub N 实例）——streak/prev 均为 {account_id: n} dict
+    state = dict(state or {"hub_lost_streak": {}, "sess_stall": {}, "prev_sess_ticks": {}})
     out: list[dict] = []
 
     # R1 常驻 unit 掉线（事实信号：systemd 状态）
@@ -122,29 +141,45 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
                     "detail": f"{stale_tx} 个 idle in transaction 事务超 3 分钟（防线 5min 兜杀，"
                               f"诊断：arch-18 §4.3 pg_stat_activity）"})
 
-    # R4 hub 心跳丢失（Valkey 可达但 key 过期 = hub 进程未续）
+    # R4 hub 心跳丢失（批 66b N 实例：期望集×在场集交叉——run_check 注入 snap["hub_expected"]，
+    # DB 行是缺席发现的唯一正确来源〔SCAN 在场发现天然测不到缺席〕；期望集缺供=空集地板降级判定）
     # D-F2：需连续 2 轮——hub 设计内重启（deploy/自愈）首跳心跳要 60s+，单轮闪断不告警
-    hub_missing = bool(deps.get("valkey")) and snap.get("hub") is None
-    state["hub_lost_streak"] = (state["hub_lost_streak"] + 1) if hub_missing else 0
-    if hub_missing and state["hub_lost_streak"] >= 2:
-        out.append({"rule_id": "hub_hb_lost", "component": "md-hub", "severity": "critical",
-                    "detail": f"quant:hb:md-hub 连续 {state['hub_lost_streak']} 轮（30s/轮）缺失——hub 进程未续心跳"})
+    hubs = snap.get("hubs") or {}
+    expected: list = snap.get("hub_expected") or []
+    streaks = state["hub_lost_streak"]
+    if deps.get("valkey"):
+        for acct in expected:
+            missing = int(acct) not in hubs
+            streaks[acct] = (streaks.get(acct, 0) + 1) if missing else 0
+            if missing and streaks[acct] >= 2:
+                out.append({"rule_id": "hub_hb_lost", "component": f"md-hub:{acct}", "severity": "critical",
+                            "detail": f"quant:hb:md-hub:{acct} 连续 {streaks[acct]} 轮（30s/轮）缺失——hub 进程未续心跳"})
+        if not expected:
+            # 空集地板（期望集未注入=交叉不可用）：在场集非空即过，全空按全局 streak（保守告警）
+            missing = not hubs
+            streaks["__all__"] = (streaks.get("__all__", 0) + 1) if missing else 0
+            if missing and streaks["__all__"] >= 2:
+                out.append({"rule_id": "hub_hb_lost", "component": "md-hub", "severity": "critical",
+                            "detail": f"在场集空且期望集未注入，连续 {streaks['__all__']} 轮——hub 心跳全缺失"})
 
-    # R6 交易时段 tick 停滞（盲审 C-S1：删自杀后"半开连接/线程挂死但主循环活着"只剩告警抓手）
-    hub = snap.get("hub")
-    if _in_session() and hub:
-        # E-3：哨兵用 None 判缺失——`or -1` 会把合法值 0 钳成 -1（hub 时段中重启 sess_ticks=0
-        # 恰是 R6 目标场景，曾永远累加不起来）
-        _prev = state.get("prev_sess_ticks")
-        prev = int(_prev) if _prev is not None else -1
-        stalled = prev >= 0 and prev == hub["sess_ticks"]
-        state["sess_stall"] = (state["sess_stall"] + 1) if stalled else 0
-        if state["sess_stall"] >= 2:   # ≥2 轮（约 60-90s）零增长，时段内正常 cadence ~3s/tick
-            out.append({"rule_id": "hub_tick_stalled", "component": "md-hub", "severity": "critical",
-                        "detail": f"交易时段 sess_ticks 零增长持续 {state['sess_stall']} 轮"
-                                  f"（prev={prev} cur={hub['sess_ticks']}）——疑似半开连接/线程挂死，"
-                                  f"runbook：journalctl 查 tick；确认后手动 restart（worker 自动暖机）"})
-        state["prev_sess_ticks"] = hub["sess_ticks"]
+    # R6 交易时段 tick 停滞（批 66b per-account；盲审 C-S1：删自杀后"半开连接/线程挂死但
+    # 主循环活着"只剩告警抓手）
+    if _in_session():
+        prevs = state["prev_sess_ticks"]
+        stalls = state["sess_stall"]
+        for acct, hub in hubs.items():
+            # E-3：哨兵用 None 判缺失——`or -1` 会把合法值 0 钳成 -1（hub 时段中重启 sess_ticks=0
+            # 恰是 R6 目标场景，曾永远累加不起来）
+            _prev = prevs.get(acct)
+            prev = int(_prev) if _prev is not None else -1
+            stalled = prev >= 0 and prev == hub["sess_ticks"]
+            stalls[acct] = (stalls.get(acct, 0) + 1) if stalled else 0
+            if stalls[acct] >= 2:   # ≥2 轮（约 60-90s）零增长，时段内正常 cadence ~3s/tick
+                out.append({"rule_id": "hub_tick_stalled", "component": f"md-hub:{acct}", "severity": "critical",
+                            "detail": f"交易时段 account {acct} sess_ticks 零增长持续 {stalls[acct]} 轮"
+                                      f"（prev={prev} cur={hub['sess_ticks']}）——疑似半开连接/线程挂死，"
+                                      f"runbook：journalctl 查 tick；确认后手动 restart（worker 自动暖机）"})
+            prevs[acct] = hub["sess_ticks"]
 
     # R5 任务盲视观测（frozen=1：worker 已自告警，此处聚合视角降为 warning）
     for tid, t in snap.get("tasks", {}).items():
@@ -208,6 +243,7 @@ def run_check() -> dict:
     """
     from .collector import collect, _valkey
     snap = collect()
+    snap["hub_expected"] = _hub_expected_ids()
     state = {"hub_lost_streak": 0, "sess_stall": 0, "prev_sess_ticks": None}
     new_events: list[dict] = []
     recovered: list[dict] = []
@@ -216,11 +252,18 @@ def run_check() -> dict:
 
     try:
         r = _valkey()
-        # 载入跨轮状态（E-3：0 是合法值，用 None 判缺失）
-        state["hub_lost_streak"] = int(r.get(_R4_STREAK_KEY) or 0)
-        state["sess_stall"] = int(r.get(_R6_STALL_KEY) or 0)
-        _prev = r.get(_R6_PREV_KEY)
-        state["prev_sess_ticks"] = int(_prev) if _prev is not None else None
+        # 载入跨轮状态（批 66b：JSON dict per-account；坏值/旧标量形态按空 dict 从零起）
+        import json as _json
+        def _load_dict(key):
+            try:
+                v = r.get(key)
+                d = _json.loads(v) if v else {}
+                return d if isinstance(d, dict) else {}
+            except Exception:
+                return {}
+        state["hub_lost_streak"] = _load_dict(_R4_STREAK_KEY)
+        state["sess_stall"] = _load_dict(_R6_STALL_KEY)
+        state["prev_sess_ticks"] = _load_dict(_R6_PREV_KEY)
         valkey_ok = True
     except Exception as e:
         logger.warning("health_monitor Valkey 状态载入失败（本轮按无历史状态判定）: %s", e)
@@ -264,9 +307,9 @@ def run_check() -> dict:
                     r.delete(state_key)
                     recovered.append({"rule_id": rule_id, "component": component})
             # 写回跨轮状态 + 自身心跳（供外部/Zabbix 反向监测监控自身）
-            r.set(_R4_STREAK_KEY, state["hub_lost_streak"], ex=7200)
-            r.set(_R6_STALL_KEY, state["sess_stall"], ex=7200)
-            r.set(_R6_PREV_KEY, state["prev_sess_ticks"], ex=7200)
+            r.set(_R4_STREAK_KEY, _json.dumps(state["hub_lost_streak"]), ex=7200)
+            r.set(_R6_STALL_KEY, _json.dumps(state["sess_stall"]), ex=7200)
+            r.set(_R6_PREV_KEY, _json.dumps(state["prev_sess_ticks"]), ex=7200)
             r.hset(HM_HB_KEY, mapping={"ts": snap["ts"]})
             r.expire(HM_HB_KEY, 120)
         except Exception as e:

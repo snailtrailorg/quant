@@ -8,11 +8,13 @@ import pytest
 # ——— 判定规则（evaluate，纯函数）———
 
 def _snap(**over):
+    # 批 66b：hub 单对象→hubs N 实例（{account_id: {...}}）+hub_expected（R4 期望集）
     snap = {"ts": 0.0,
             "units": {"quant-md-hub@quant": {"ActiveState": "active", "SubState": "running", "NRestarts": "0"}},
             "deps": {"postgres": True, "valkey": True},
-            "hub": {"gen": 10, "subs": 1, "ticks": 100, "sess_ticks": 100, "bars": 9,
-                    "dropped_pg": 0, "tick_age": 3.0},
+            "hubs": {1: {"gen": 10, "subs": 1, "ticks": 100, "sess_ticks": 100, "bars": 9,
+                         "dropped_pg": 0, "tick_age": 3.0}},
+            "hub_expected": ["1"],
             "tasks": {}}
     snap.update(over)
     return snap
@@ -23,12 +25,12 @@ class TestEvaluate:
         from src.health_monitor.monitor import evaluate
         findings, state = evaluate(_snap(tasks={"7": {"md": "hub", "bars": 78, "lag": 41.0, "frozen": 0}}))
         assert findings == []
-        assert state["hub_lost_streak"] == 0
+        assert state["hub_lost_streak"] == {"1": 0}   # 批 66b per-account（在场=清零）
 
     def test_unit_down_critical(self):
         from src.health_monitor.monitor import evaluate
-        snap = _snap(units={"quant-md-hub@quant": {"ActiveState": "failed", "SubState": "failed", "NRestarts": "3"}},
-                     hub=None)   # unit 挂了心跳自然也没了
+        snap = _snap(units={"quant-md-hub@1": {"ActiveState": "failed", "SubState": "failed", "NRestarts": "3"}},
+                     hubs={})   # unit 挂了心跳自然也没了
         f1, s1 = evaluate(snap)
         assert {f["rule_id"] for f in f1} == {"unit_down"}   # hub 心跳缺失首轮只累计（D-F2 连续 2 轮）
         f2, _ = evaluate(snap, s1)
@@ -50,14 +52,15 @@ class TestEvaluate:
     def test_hub_hb_lost_needs_two_rounds(self):
         """D-F2：hub 设计内重启首跳心跳 60s+——单轮缺失不告，连续 2 轮才 critical。"""
         from src.health_monitor.monitor import evaluate
-        f1, s1 = evaluate(_snap(hub=None))
+        f1, s1 = evaluate(_snap(hubs={}))
         assert not any(f["rule_id"] == "hub_hb_lost" for f in f1)
-        assert s1["hub_lost_streak"] == 1
-        f2, s2 = evaluate(_snap(hub=None), s1)
-        assert any(f["rule_id"] == "hub_hb_lost" for f in f2)
+        assert s1["hub_lost_streak"] == {"1": 1}
+        f2, s2 = evaluate(_snap(hubs={}), s1)
+        fired = [f for f in f2 if f["rule_id"] == "hub_hb_lost"]
+        assert fired and fired[0]["component"] == "md-hub:1"   # 批 66b：per-account 去重键
         # 恢复即清零
         f3, s3 = evaluate(_snap(), s2)
-        assert not any(f["rule_id"] == "hub_hb_lost" for f in f3) and s3["hub_lost_streak"] == 0
+        assert not any(f["rule_id"] == "hub_hb_lost" for f in f3) and s3["hub_lost_streak"] == {"1": 0}
 
     def test_hub_hb_lost_not_fired_when_valkey_down(self):
         """Valkey 也挂时只报 dep_down，不误报 hub（区分不出 key 过期和存储不可达）。"""
@@ -73,13 +76,13 @@ class TestEvaluate:
         monkeypatch.setattr(monitor, "_in_session", lambda: True)
         hub = {"gen": 10, "subs": 1, "ticks": 500, "sess_ticks": 42, "bars": 9,
                "dropped_pg": 0, "tick_age": 400.0}
-        f1, s1 = monitor.evaluate(_snap(hub=hub))
+        f1, s1 = monitor.evaluate(_snap(hubs={1: hub}))
         assert not any(f["rule_id"] == "hub_tick_stalled" for f in f1)
-        f2, s2 = monitor.evaluate(_snap(hub=hub), s1)
+        f2, s2 = monitor.evaluate(_snap(hubs={1: hub}), s1)
         assert not any(f["rule_id"] == "hub_tick_stalled" for f in f2)   # stall=1 未达阈
-        f3, s3 = monitor.evaluate(_snap(hub=dict(hub, tick_age=520.0)), s2)
+        f3, s3 = monitor.evaluate(_snap(hubs={1: dict(hub, tick_age=520.0)}), s2)
         fired = [f for f in f3 if f["rule_id"] == "hub_tick_stalled"]
-        assert fired and fired[0]["severity"] == "critical"
+        assert fired and fired[0]["severity"] == "critical" and fired[0]["component"] == "md-hub:1"
 
     def test_task_frozen_warning(self):
         from src.health_monitor.monitor import evaluate
@@ -137,10 +140,10 @@ class TestRunCheckChain:
 
 class TestRenderPrometheus:
     def _snap(self):
-        return _snap(units={"quant-md-hub@quant": {"ActiveState": "active", "SubState": "running", "NRestarts": "2"},
+        return _snap(units={"quant-md-hub@1": {"ActiveState": "active", "SubState": "running", "NRestarts": "2"},
                             "quant-web-api@quant": {"ActiveState": "active", "SubState": "running", "NRestarts": "0"}},
-                     hub={"gen": 10, "subs": 1, "ticks": 193, "sess_ticks": 100, "bars": 9,
-                          "dropped_pg": 0, "tick_age": 3.2},
+                     hubs={1: {"gen": 10, "subs": 1, "ticks": 193, "sess_ticks": 100, "bars": 9,
+                               "dropped_pg": 0, "tick_age": 3.2}},
                      tasks={"7": {"md": "hub", "bars": 78, "lag": 41.6, "frozen": 0}})
 
     def test_help_unique_per_family(self):
@@ -162,16 +165,16 @@ class TestRenderPrometheus:
     def test_format_and_metrics_present(self):
         from src.health_monitor.collector import render_prometheus
         text = render_prometheus(self._snap())
-        assert 'quant_unit_nrestarts{unit="quant-md-hub@quant"} 2' in text
+        assert 'quant_unit_nrestarts{unit="quant-md-hub@1"} 2' in text
         assert 'quant_dep_up{dep="postgres"} 1' in text
-        assert 'quant_hub_gen 10' in text
+        assert 'quant_hub_gen{account="1"} 10' in text   # 批 66b：account 标签维度
         assert '# TYPE quant_hub_ticks_total counter' in text   # 计数语义（D 陷阱 8）
         assert 'quant_task_frozen{task="7"} 0' in text
         assert 'quant_task_lag_seconds{task="7"} 41.6' in text
 
     def test_hub_absent_renders_present_zero(self):
         from src.health_monitor.collector import render_prometheus
-        text = render_prometheus(_snap(hub=None))
+        text = render_prometheus(_snap(hubs={}))
         assert "quant_hub_hb_present 0" in text
 
 
@@ -251,8 +254,8 @@ class TestEndpoints:
         r = admin_client.get("/api/health/components")
         assert r.status_code == 200
         body = r.json()
-        assert "units" in body and "deps" in body and "hub" in body
-        assert body["hub"]["gen"] == 10
+        assert "units" in body and "deps" in body and "hubs" in body
+        assert body["hubs"]["1"]["gen"] == 10   # 批 66b：N 实例（JSON 键为 str）
 
     def test_events_endpoint_queries_health_event(self, admin_client):
         """SM2：事件流端点读 health_event 倒序 + limit 传参。"""
@@ -283,7 +286,10 @@ class TestApiProbe:
         from src.web_api.main import app
         conn = MagicMock(); conn.__enter__.return_value = conn
         conn.execute.return_value.fetchone.return_value = [0]
+        # 批 66b：_probe hub_hb=SCAN 在场集+ts 判龄——mock 形态对齐（scan_iter 键+hget ts）
         r = MagicMock(); r.ping.return_value = True; r.ttl.return_value = 60
+        r.scan_iter.return_value = iter(["quant:hb:md-hub:1"])
+        r.hget.return_value = str(__import__("time").time())
         with patch("src.web_api.routes.system.get_conn", return_value=conn), \
              patch("redis.Redis.from_url", return_value=r):
             c = TestClient(app)
@@ -425,6 +431,7 @@ class TestRunCheckStateMachine:
         with patch("src.health_monitor.collector.collect", return_value=snap), \
              patch("src.health_monitor.collector._valkey", return_value=fake), \
              patch.object(M, "_in_session", return_value=False), \
+             patch.object(M, "_hub_expected_ids", return_value=["1"]), \
              patch.object(M, "_write_event"), patch.object(M, "_notify"):
             return M.run_check()
 

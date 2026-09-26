@@ -108,13 +108,33 @@ def api_probe(request: Request):
         return "pong"
 
     def _hub_hb():
-        import os, redis
+        # 批 66b（D26 §4.3#3 语义裁定）：在场集健康+空集地板——SCAN per-account 心跳键
+        # （pattern 尾冒号隔离——glob 不吞垂死裸键）全部新鲜且在场集非空才 ok；
+        # 空集=vacuous 真空洞（发布后全没起来最可能场景）必须 not ready。
+        # 期望集比对归 SA4 周期对账/hbcheck 发布探针（职责分离，防坏行拖死发布判定）。
+        import os, redis, time
         r = redis.Redis.from_url(
             os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2)
-        ttl = r.ttl("quant:hb:md-hub")
-        if ttl is None or ttl <= 0:
-            raise RuntimeError(f"hub 心跳不在场 (ttl={ttl})")
-        return f"ttl={ttl}s"
+        keys = [k for k in r.scan_iter(match="quant:hb:md-hub:*", count=100)
+                if k.rsplit(":", 1)[-1].isdigit()]
+        if not keys:
+            raise RuntimeError("hub 心跳在场集空（无 per-account 键——hub 未起或键切换未达）")
+        stale = []
+        for k in keys:
+            ttl = r.ttl(k)
+            if ttl is None or ttl <= 0:
+                stale.append(f"{k}(ttl={ttl})")
+                continue
+            ts = r.hget(k, "ts")
+            try:
+                age = time.time() - float(ts) if ts else None
+            except (TypeError, ValueError):
+                age = None
+            if age is None or age > 90:
+                stale.append(f"{k}(ts_age={age})")
+        if stale:
+            raise RuntimeError(f"hub 心跳不新鲜: {'; '.join(stale[:3])}")
+        return f"in_set={len(keys)} fresh"
 
     def _factors():
         from src.strategy_framework.factor import list_factors
