@@ -26,8 +26,6 @@ _SRV = os.path.join(_HERE, "..")
 if os.path.isdir(os.path.join(_SRV, "src")):
     sys.path.insert(0, _SRV)
 
-UNIT = "quant-md-hub@quant"
-HB_KEY = "quant:hb:md-hub"
 HUB_FIELDS = ["pid", "gen", "subs", "ticks", "bars", "sess_ticks", "dropped_pg", "last_tick_ts"]
 
 
@@ -37,10 +35,10 @@ def _redis():
                                 decode_responses=True, socket_timeout=3)
 
 
-def _journal_bad(since: str) -> tuple[int, str]:
+def _journal_bad(unit: str, since: str) -> tuple[int, str]:
     """窗口内硬伤（SEGV/Traceback/dumped）计数 + 摘要。"""
     out = subprocess.run(
-        ["journalctl", "-u", UNIT, "--since", since, "--no-pager"],
+        ["journalctl", "-u", unit, "--since", since, "--no-pager"],
         capture_output=True, text=True, timeout=15).stdout
     bad = [ln for ln in out.splitlines()
            if "SEGV" in ln or "dumped" in ln or "Traceback" in ln]
@@ -49,9 +47,14 @@ def _journal_bad(since: str) -> tuple[int, str]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    # 批 66b（D26）：hub 账号级实例化——unit/心跳键由 account_id 派生（必填，无裸键默认）
+    ap.add_argument("--account-id", type=int, required=True,
+                    help="接口行 id（unit=quant-md-hub@{id}，hb 键=quant:hb:md-hub:{id}）")
     ap.add_argument("--minutes", type=int, default=5)
     ap.add_argument("--interval", type=int, default=60)
     args = ap.parse_args()
+    unit = f"quant-md-hub@{args.account_id}"
+    hb_key = f"quant:hb:md-hub:{args.account_id}"
     since = "now"   # 脚本启动即窗口起点（部署方应在部署后立即跑）
     r = _redis()
     deadline = time.time() + args.minutes * 60
@@ -61,14 +64,14 @@ def main() -> int:
         cycle += 1
         problems = []
         # ① 进程稳定
-        bad_n, bad_tail = _journal_bad(since)
+        bad_n, bad_tail = _journal_bad(unit, since)
         if bad_n:
             problems.append(f"journal 硬伤×{bad_n}（{bad_tail}）")
         # ② 心跳
         try:
-            ttl = r.ttl(HB_KEY)
-            fields = list(r.hkeys(HB_KEY))
-            gen = r.hget(HB_KEY, "gen")
+            ttl = r.ttl(hb_key)
+            fields = list(r.hkeys(hb_key))
+            gen = r.hget(hb_key, "gen")
             if ttl is None or ttl <= 0:
                 problems.append(f"心跳键缺失或过期（ttl={ttl}）")
             else:
@@ -84,9 +87,9 @@ def main() -> int:
         # ③ 数据流动（校准 2026-08-25：测试平台晚间不推回放——无新数据在盘外是常态，
         # 降级 info；仅盘中心跳 sess_ticks>0 却不落 bar 才是真故障，保持 fail）
         try:
-            bars_now = int(r.hget(HB_KEY, "bars") or 0)
+            bars_now = int(r.hget(hb_key, "bars") or 0)
             if bars_last is not None and bars_now <= bars_last:
-                sess = r.hget(HB_KEY, "sess_ticks")
+                sess = r.hget(hb_key, "sess_ticks")
                 if sess and int(sess) > 0:
                     problems.append(f"有 tick 但 bar 未增长（{bars_last}->{bars_now}）")
                 else:

@@ -4,12 +4,19 @@
 # 属主约束（3b bootstrap 落实）: quant:quant 755（本体以 quant 跑才能读 shared/.env 与
 # 执行 shared venv——deploy 无权直跑 venv，七跑实锤 EACCES）。
 #
-# 检查对象=真实 hub 心跳：redis HASH quant:hb:md-hub，8 字段
-# （pid/gen/subs/ticks/bars/sess_ticks/last_tick_ts/dropped_pg）+ TTL>0 判活
-# （writer expire 90s）。沙箱 file 模式的 JSON 串道具与本检查无关（形态不同）。
+# 批 66b（D26）v2——DB 驱动期望集 + 两代自适应：
+#   期望集=external_interface trading 域 enabled 行（经 psql peer 免密，同 quant-dbro 通道；
+#   provider 白名单过滤在调用方 release.yml——此处验全部期望行，未实现 provider 的行由
+#   波次清单天然不含，期望集层面不过滤防漏报）。
+#   逐行验证 per-account 心跳键 quant:hb:md-hub:{id}：TTL>0 + 8 字段齐 + hash 内 ts 判龄
+#   （≤90s——防旧心跳 90s 残留 TTL 假过）+ 期望集非空断言。
+#   两代自适应：期望 per-account 键全缺且裸键 quant:hb:md-hub 在场 → 回落 legacy 单键校验
+#   并显式输出「legacy 模式」（解 wrapper 装位件不随 release 版本化的时序悖论——先装新版
+#   后切键的发布链不断）。
+#   期望集空（全新 bootstrap 零行/维护期全禁用）→ 显式输出后 exit 0（豁免非静默绿）。
 #
 # 环境变量（env_reset 下仅控制机/本机直跑可设）:
-#   QUANT_DEPLOY_ROOT / QUANT_HB_REDIS_URL / QUANT_HB_KEY
+#   QUANT_DEPLOY_ROOT / QUANT_HB_REDIS_URL
 set -euo pipefail
 
 ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
@@ -18,23 +25,71 @@ set -a
 [ -f "$ROOT/shared/.env" ] && . "$ROOT/shared/.env"
 set +a
 URL=${QUANT_HB_REDIS_URL:-${VALKEY_URL:-redis://127.0.0.1:6379/4}}
-KEY=${QUANT_HB_KEY:-quant:hb:md-hub}
 
-"$ROOT/shared/venv/bin/python" - "$URL" "$KEY" <<'PYEOF'
+# 期望集：trading 域 enabled 行 id 清单（quant 属主 psql peer 免密——连接封装同 dbro）
+EXPECT=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
+  "SELECT id FROM external_interface WHERE enabled AND 'trading' = ANY(capabilities)")
+
+"$ROOT/shared/venv/bin/python" - "$URL" "$EXPECT" <<'PYEOF'
 import sys
+import time
 import redis
 
-url, key = sys.argv[1], sys.argv[2]
-r = redis.Redis.from_url(url, socket_timeout=3, decode_responses=True)  # bytes/str 比较坑修正
-ttl = r.ttl(key)
-if ttl is None or ttl <= 0:
-    print(f"✗ hub 心跳键缺失或已过期: {key}（TTL={ttl}）", file=sys.stderr)
+url, expect_raw = sys.argv[1], sys.argv[2]
+ids = [x.strip() for x in expect_raw.splitlines() if x.strip()]
+r = redis.Redis.from_url(url, socket_timeout=3, decode_responses=True)
+
+HB_PREFIX = "quant:hb:md-hub"
+NEED = {"pid", "gen", "subs", "ticks", "bars", "sess_ticks", "last_tick_ts", "dropped_pg"}
+
+
+def check_key(key: str) -> tuple[bool, str]:
+    ttl = r.ttl(key)
+    if ttl is None or ttl <= 0:
+        return False, f"TTL={ttl}（键缺失/过期）"
+    fields = set(r.hkeys(key))
+    missing = NEED - fields
+    if missing:
+        return False, f"缺字段 {sorted(missing)}"
+    ts = r.hget(key, "ts")
+    try:
+        age = time.time() - float(ts) if ts else None
+    except (TypeError, ValueError):
+        age = None
+    if age is None or age > 90:   # hash 内 ts 判龄——防旧心跳 90s 残留 TTL 假过
+        return False, f"心跳陈旧（ts={ts}）"
+    return True, f"TTL={ttl}s gen={r.hget(key, 'gen')} ts_age={age:.0f}s"
+
+
+if not ids:
+    print("⚠ 期望集空（bootstrap 零行/维护期全禁用）——跳过 hub 心跳检查（显式豁免非静默绿）")
+    sys.exit(0)
+
+per_account = [f"{HB_PREFIX}:{i}" for i in ids]
+exists = {k: (r.ttl(k) is not None and r.ttl(k) > 0) for k in per_account}
+if not any(exists.values()):
+    # 两代自适应：per-account 全缺且裸键在场 → legacy 模式（66b 键切换前的发布链不断）
+    if r.ttl(HB_PREFIX) is not None and r.ttl(HB_PREFIX) > 0:
+        ok, detail = check_key(HB_PREFIX)
+        if ok:
+            print(f"✓ hub 心跳（legacy 模式·裸键——per-account 键未在位，键切换后本形态应消失）: {detail}")
+            sys.exit(0)
+        print(f"✗ hub 心跳（legacy 模式·裸键）: {detail}", file=sys.stderr)
+        sys.exit(1)
+
+failed = []
+for i, key in zip(ids, per_account):
+    if not exists[key]:
+        failed.append(f"  ✗ 行 id={i} 键 {key} 缺失/过期（hub 未起或心跳断）")
+        continue
+    ok, detail = check_key(key)
+    if not ok:
+        failed.append(f"  ✗ 行 id={i} {key}: {detail}")
+    else:
+        print(f"✓ 行 id={i} 心跳: {detail}")
+if failed:
+    print(f"✗ hub 心跳检查失败（期望 {len(ids)} 行，{len(failed)} 行不健康）:", file=sys.stderr)
+    print("\n".join(failed), file=sys.stderr)
     sys.exit(1)
-fields = set(r.hkeys(key))
-need = {"pid", "gen", "subs", "ticks", "bars", "sess_ticks", "last_tick_ts", "dropped_pg"}
-missing = need - fields
-if missing:
-    print(f"✗ hub 心跳缺字段: {sorted(missing)}（现有 {sorted(fields)}）", file=sys.stderr)
-    sys.exit(1)
-print(f"✓ hub 心跳 TTL={ttl}s，8 字段齐备，gen={r.hget(key, 'gen')}")
+print(f"✓ hub 心跳全过（期望集 {len(ids)} 行，per-account 键齐备且新鲜）")
 PYEOF

@@ -186,15 +186,38 @@
         deploy_task_units_feishu: "{{ task_units_feishu_db.stdout_lines | default([]) }}"
       when: deploy_task_units_source == 'db' and task_units_feishu_db is succeeded
 
-    - name: preflight —— hub 波次实例采集（systemd 所有 md-hub@* 实例——A股 @quant + 加密 per-account @id；D6 加密 hub 入列后版本收敛缺口修复）
+    - name: preflight —— hub 波次实例采集（批 66b D26：DB 驱动期望集——unit 换名窗 systemd 旧名单失效，DB 行是唯一正确来源）
+      ansible.builtin.command: "{{ quant_dbro_cmd }} hub"
+      register: hub_units_db
+      changed_when: false
+      when: deploy_task_units_source == 'db'
+
+    - name: preflight —— hub 期望集解析（id|provider 两列 → provider∈MD 网关白名单过滤 → unit 名）
+      ansible.builtin.set_fact:
+        # ⚠ 同步义务：deploy_hub_md_providers 必须与 server/src md_gateway.list_md_gateway_providers()
+        #   注册表保持一致（真源=python 注册表；此处过滤防未实现 provider 的行拉起→78 死循环）
+        deploy_hub_units: >-
+          {{ hub_units_db.stdout_lines | default([])
+             | map('split', '|')
+             | selectattr(1, 'in', deploy_hub_md_providers)
+             | map(attribute=0)
+             | map('regex_replace', '^(.*)$', 'quant-md-hub@\1.service')
+             | list }}
+      when: hub_units_db is succeeded
+
+    - name: preflight —— hub 期望集非空断言（DB 驱动后空集=采集断链，发布须带期望集——批 66b）
+      ansible.builtin.assert:
+        that: deploy_hub_units | default([]) | length > 0
+        msg: >-
+          hub 期望集为空——DB 采集断链或全 trading 行被 provider 白名单过滤
+          （期望行见 Web 集成中心；白名单={{ deploy_hub_md_providers | default([]) }}）。
+          空集豁免仅限全新 bootstrap（此时也无波次可言）。
+      when: hub_units_db is succeeded
+
+    - name: preflight —— hub systemd 在场集采集（附加校验——波次重启范围仍以 DB 期望集为准）
       ansible.builtin.shell: "systemctl list-units --all 'quant-md-hub@*.service' --no-legend --plain 2>/dev/null | awk '{print $1}' | sort"
       register: hub_units_systemd
       changed_when: false
-
-    - name: preflight —— hub 真相源结果解析（每行一个 unit 名；空则兜底 A股 hub）
-      ansible.builtin.set_fact:
-        deploy_hub_units: "{{ (hub_units_systemd.stdout_lines | default([])) or ['quant-md-hub@quant.service'] }}"
-      when: hub_units_systemd is succeeded
 
   tasks:
     # ================= 阶段 2-5：未切换（rescue=清 staged + fail） =================
@@ -229,31 +252,6 @@
             content: "{{ release_id }}"
             dest: "{{ deploy_root }}/releases/{{ release_id }}/RELEASE"
             mode: "0644"
-
-        # 批 66a 过渡件：@quant concrete unit（D26-B #6 缺省选行退役——显式行 id 注入）。
-        # 占位符 __HUB_ROW_ID__ 在指纹采集前 replace → 行 id 变化进 scripts/systemd 指纹=触发单元安装。
-        # 66b hub unit 换名后 concrete unit 删除，本块三 task 随之整体退役（任务文件 §4-66b-5 清除义务）。
-        - name: 阶段 2 —— @quant concrete unit 存在探测
-          ansible.builtin.stat:
-            path: "{{ deploy_root }}/releases/{{ release_id }}/scripts/systemd/quant-md-hub@quant.service"
-          register: hub_concrete_unit
-
-        - name: 阶段 2 —— @quant 行 id 配置断言（防占位符裸奔上产→hub exit 78）
-          ansible.builtin.assert:
-            that:
-              - hub_quant_row_id is defined
-              - hub_quant_row_id | int > 0
-            msg: >-
-              staged 含 @quant concrete unit 但 inventory 未配置有效 hub_quant_row_id
-              （各环境 external_interface A股 trading 行 id——Web 集成中心可查；占位符裸奔=hub 起不来）。
-          when: hub_concrete_unit.stat.exists | default(false)
-
-        - name: 阶段 2 —— @quant concrete unit 行 id 注入
-          ansible.builtin.replace:
-            path: "{{ deploy_root }}/releases/{{ release_id }}/scripts/systemd/quant-md-hub@quant.service"
-            regexp: '__HUB_ROW_ID__'
-            replace: "{{ hub_quant_row_id | string }}"
-          when: hub_concrete_unit.stat.exists | default(false)
 
         - name: 阶段 2 —— staged 四切片指纹采集
           ansible.builtin.shell: |
@@ -425,6 +423,21 @@
             msg: "🚀 批 8 快车道：{{ deploy_waves | length }} 个波次全部跳过（server 未变）——单元零重启，hub gen 不增"
           when: not (server_changed | bool)
 
+
+        - name: 阶段 7.6 —— 旧 @quant hub 退役（批 66b D26：stop+disable+mask；新 unit 已由 hub 波拉起稳定）
+          block:
+            - name: 旧 @quant 停止（已停/未载入幂等）
+              ansible.builtin.command: "{{ quant_svc_cmd }} stop quant-md-hub@quant.service"
+              failed_when: false
+              changed_when: true
+            - name: 旧 @quant disable（含 /etc concrete 残件——mask 为单元名级，concrete/模板实例化双形态覆盖）
+              ansible.builtin.command: "{{ quant_svc_cmd }} disable quant-md-hub@quant.service"
+              failed_when: false
+              changed_when: true
+            - name: 旧 @quant mask（防旧 SA4 builtin 期望复活——新代码期望源已 DB 驱动不含 @quant）
+              ansible.builtin.command: "{{ quant_svc_cmd }} mask quant-md-hub@quant.service"
+              changed_when: true
+          when: (server_changed | bool) and (deploy_retire_legacy_hub | default(true) | bool)
         - name: 阶段 8 —— 波次命令层失败终判（续行≠维持混合态——统一回滚，设计稿语义修死）
           ansible.builtin.assert:
             that: not (wave_failed | default(false) | bool)
@@ -487,8 +500,10 @@
           when: deploy_hub_hb_mode == 'file'
           changed_when: false
 
-        - name: 阶段 8 —— hub 心跳复现（redis 模式——quant-hbcheck wrapper：真实 HASH schema+TTL 判活）
+        - name: 阶段 8 —— hub 心跳复现（批 66b v2：DB 驱动期望集逐行验+两代自适应——quant-hbcheck wrapper）
           ansible.builtin.command: "{{ quant_hbcheck_cmd | default('sudo -u quant ' ~ deploy_wrapper_dir ~ '/quant-hbcheck') }}"
+          environment:
+            QUANT_HB_REDIS_URL: "{{ deploy_hub_hb_redis_url | default('redis://127.0.0.1:6379/4') }}"
           register: hb_check
           failed_when: hb_check.rc != 0
           when: deploy_hub_hb_mode == 'redis'

@@ -81,6 +81,34 @@
     deploy_task_units_feishu: "{{ rb_units_feishu.stdout_lines | default([]) }}"
   when: deploy_task_units_source == 'db' and rb_units_feishu is succeeded
 
+# ── 批 66b（D26）hub 换名回滚专属三块 ──────────────────────────────────────────
+# 语义：66b 后回滚=回到 @quant 单例形态（旧版本 SA4 builtin 期望自动收敛）。
+# SOP 顺序钉死（任务文件 §3-4）：**先停新 unit，再复活旧 @quant**——反序则旧 SA4 自动 stop
+# 数字名新 unit 与复活的 @quant 并存→双写裸流窗→worker gap→回滚当场把实盘任务打成 sticky 冻结。
+- name: 回滚 pre —— hub 期望行采集（id|provider 两列；quant-dbro hub 动作=批 66b 带外步装位）
+  ansible.builtin.command: "{{ quant_dbro_cmd }} hub"
+  register: rb_units_hub
+  when: deploy_task_units_source == 'db'
+  failed_when: false   # 装位件未更新（回滚到 66b 前）时安静跳过——下方复活块幂等不依赖
+  changed_when: false
+
+- name: 回滚 pre —— ①停用新 unit（数字实例名 @{id}：stop 不 mask——再前滚时 SA4 要能拉回）
+  ansible.builtin.command: "{{ quant_svc_cmd }} stop quant-md-hub@{{ item.split('|')[0] }}.service"
+  loop: "{{ rb_units_hub.stdout_lines | default([]) | select('match', '^[0-9]+\\|') | list }}"
+  failed_when: false
+  changed_when: true
+  when: rb_units_hub is succeeded
+
+- name: 回滚 pre —— ②复活旧 @quant（unmask+enable——旧版本 SA4 builtin 期望的承载单元）
+  ansible.builtin.command: "{{ quant_svc_cmd }} {{ item }} quant-md-hub@quant.service"
+  loop: [unmask, enable]
+  failed_when: false   # 未 mask/不存在=幂等跳过（66a→更早的回滚无此形态）
+  changed_when: true
+
+- name: 回滚 pre —— ③回滚 hub 波清单覆写（旧版本形态=@quant 单例——非 DB 期望集）
+  ansible.builtin.set_fact:
+    deploy_hub_units: ['quant-md-hub@quant.service']
+
 - name: 回滚 —— 波次对象解析（名单 → deploy_waves 全对象，供 include_tasks/wave.yml）
   ansible.builtin.set_fact:
     rollback_waves_resolved: "{{ deploy_waves | selectattr('name', 'in', rb_wave_names) | list }}"

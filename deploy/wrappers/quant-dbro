@@ -7,14 +7,18 @@
 #   （替代 v3.2 的 deploy_task_units_db_cmd 通道：$QUANT_DB_RO 环境变量需 deploy 侧
 #   持有连串，与 .env 属 quant 600 deploy 不可读矛盾——连接下沉到 wrapper 才解得开）。
 #
-# 动作（设计稿 §2 v3.3 / §3 波次真相源采集）:
+# 动作（设计稿 §2 v3.3 / §3 波次真相源采集 + 批 66b D26 hub 期望源）:
 #   quant-dbro live    → live_task status='running' 的单元名清单（task 波）
 #   quant-dbro feishu  → im_bot_config enabled 且 provider='feishu' 的单元名清单（feishu 波）
 #   （0051 后 feishu_config 已并入 im_bot_config——19 号 IM 统一接入，provider 过滤）
-#   固定 SQL 内封不收外部 SQL；输出单元名每行一个（psql -tA）；DB 错误非零退出。
-#
+#   quant-dbro hub     → external_interface trading 域 enabled 行（id|provider 两列——批 66b：
+#                        hub 波次/期望集 DB 驱动；provider 列供 playbook 侧 MD 网关白名单过滤，
+#                        真源=python list_md_gateway_providers（md_gateway.py）——此处不做 provider
+#                        过滤的原因：SQL 无从查注册表，过滤在消费方+同步义务钉 release.yml 注释）
+#   固定 SQL 内封不收外部 SQL；输出每行一个（psql -tA）；DB 错误非零退出。
+
 # 严参校验:
-#   which 白名单 live|feishu；恰一个参数（sudoers `*` 吃空格——多余参数即拒，防夹带）
+#   which 白名单 live|feishu|hub；恰一个参数（sudoers `*` 吃空格——多余参数即拒，防夹带）
 #
 # 环境变量:
 #   QUANT_DBRO_SQL_DIR —— 沙箱模式: 指向假 SQL 输出文件目录（<which>.out=stdout 道具；
@@ -22,14 +26,14 @@
 #                         生产为空（sudoers env_reset 亦会清空）走下方真 psql。
 set -euo pipefail
 
-usage() { echo "用法: quant-dbro <which>  which ∈ live|feishu" >&2; exit 2; }
+usage() { echo "用法: quant-dbro <which>  which ∈ live|feishu|hub" >&2; exit 2; }
 
 [ $# -eq 1 ] || usage
 which_arg=$1
 
 case "$which_arg" in
-  live|feishu) ;;
-  *) echo "✗ which 不在白名单（须 live|feishu）: $which_arg" >&2; exit 2 ;;
+  live|feishu|hub) ;;
+  *) echo "✗ which 不在白名单（须 live|feishu|hub）: $which_arg" >&2; exit 2 ;;
 esac
 
 # 固定 SQL（单元名拼装与 server/src 实况一致: trading.py quant-live-task@{tid} /
@@ -40,6 +44,9 @@ case "$which_arg" in
     ;;
   feishu)
     sql="SELECT 'quant-feishu-bot@' || id || '.service' FROM im_bot_config WHERE enabled AND provider = 'feishu'"
+    ;;
+  hub)
+    sql="SELECT id || '|' || provider FROM external_interface WHERE enabled AND 'trading' = ANY(capabilities)"
     ;;
 esac
 
