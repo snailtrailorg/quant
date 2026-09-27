@@ -148,7 +148,8 @@ def test_md_to_tick_zero_data_time_dropped():
 def test_connect_login_ok():
     mod = _fake_mod(login_ret=0)
     gw = _make_gw()
-    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod):
+    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod), \
+         patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l1_host": "1.2.3.4:8093"})
     assert gw.connected is True
     api = _FakeQuoteApi.instances[-1]
@@ -162,7 +163,8 @@ def test_connect_login_fail_raises():
     """登录失败 fail-fast（对齐 hub「建连异常 → exit 78」，防失聪僵尸）。"""
     mod = _fake_mod(login_ret=-1)
     gw = _make_gw()
-    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod):
+    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod), \
+         patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         with pytest.raises(RuntimeError):
             gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l2_host": "h:9"})
     assert _FakeQuoteApi.instances[-1].last_login == ("h", 9, "u", "p")
@@ -171,7 +173,8 @@ def test_connect_login_fail_raises():
 def test_subscribe_and_unsubscribe():
     mod = _fake_mod(login_ret=0)
     gw = _make_gw()
-    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod):
+    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod), \
+         patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l1_host": "h:9"})
     gw.subscribe("600000.SHSE")
     gw.subscribe("000001.SZSE")
@@ -184,7 +187,8 @@ def test_subscribe_and_unsubscribe():
 def test_subscribe_skips_when_disconnected():
     mod = _fake_mod(login_ret=0)
     gw = _make_gw()
-    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod):
+    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod), \
+         patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l1_host": "h:9"})
     gw._connected = False   # 模拟 OnError 断连
     gw.subscribe("600000.SHSE")
@@ -195,7 +199,8 @@ def test_subscribe_failure_alerts():
     """订阅请求返回非 0（服务器拒收）→ 告警可见化（B-3）。"""
     mod = _fake_mod(login_ret=0, sub_ret=-1)
     gw = _make_gw()
-    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod):
+    with patch("src.strategy_framework.md_gateway._load_emd_binding", return_value=mod), \
+         patch("src.strategy_framework.md_gateway._emq_window_open", return_value=True):   # 批 66b 窗内路径（时间无关化——防周日跑挂）
         gw.connect({"emq_account": "u", "emq_password": "p"}, {"emq_l1_host": "h:9"})
     gw.subscribe("600000.SHSE")
     assert gw._alert.call_count == 1
