@@ -342,8 +342,10 @@ class RiskControl:
                 today = _dt.datetime.now().strftime('%Y-%m-%d')
                 with get_conn() as conn:
                     cur = conn.execute(
+                        # 批 68：语义=已下委托数（对状态推进免疫——回写上线后成交/撤单出旧 IN
+                        # 列表=击穿日频次闸；send_failed 前后都不计〔本地拒发未达柜台〕）
                         "SELECT COUNT(*) FROM order_log WHERE strategy_id=%s AND (ts AT TIME ZONE 'Asia/Shanghai')::date=%s "
-                        "AND status IN ('submitting','submitted','part_filled','filled')",
+                        "AND status != 'send_failed'",
                         (strategy_id, today))
                     n = cur.fetchone()[0]
                 if n >= max_trades:

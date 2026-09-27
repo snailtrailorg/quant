@@ -167,6 +167,14 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     def on_log(event):
         logger.info("[gw] %s", getattr(event.data, "msg", event.data))
     ee.register(EVENT_LOG, on_log)
+    # 批 68：order_log 终态回写（on_log 同位——builder 前注册接住 EMT RESTART 当日重放，
+    # 终态集守卫+同值 UPDATE 幂等治愈漏写）
+    from vnpy.trader.event import EVENT_ORDER
+
+    @_guard("worker.on_order_status")
+    def on_order(event):
+        trading.write_order_status(event.data, adapter, sid, symbol)
+    ee.register(EVENT_ORDER, on_order)
 
     # 批 65a：单入口分发（EX_CONFIG 异常处理留此调用点——78=RestartPrevent 豁免防重启风暴）
     try:

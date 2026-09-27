@@ -56,6 +56,57 @@ def frozen_allows(action: str, frozen: dict) -> bool:
     return str(action).upper() == "SELL"
 
 
+ORDER_FINAL_STATES = ("all_traded", "cancelled", "rejected")   # 批 68 终态集（SQL 闭包=只进不退主防线）
+
+
+def write_order_status(d, adapter, sid: str, symbol: str) -> None:
+    """OrderData → order_log.status 终态回写（批 68，批 61 挂账——在途判定根治）。
+
+    EVENT_ORDER 消费（main on_log 同位注册——EMT RESTART 当日重放可接住并幂等治愈）。
+    映射：PARTTRADED→partial/ALLTRADED→all_traded/CANCELLED→cancelled/REJECTED→rejected；
+    SUBMITTING/NOTTRADED 不回写（提交侧已管）。只进不退：SQL 终态集闭包（迟到片段/乱序
+    天然挡）；send_failed=提交侧伪终态可被覆写（超时类实达柜台终态迟到=合法纠正）。
+    关联键：vt_orderid 两步（非唯一索引——SELECT LIMIT 1 最新再 UPDATE WHERE id）；
+    空则 _lock 下 _vt2cid 反查 client_order_id（唯一索引）。never-raise。
+    """
+    try:
+        from vnpy.trader.constant import Status
+        m = {Status.PARTTRADED: "partial", Status.ALLTRADED: "all_traded",
+             Status.CANCELLED: "cancelled", Status.REJECTED: "rejected"}
+        new_status = m.get(getattr(d, "status", None))
+        if not new_status:
+            return   # SUBMITTING/NOTTRADED=非推进
+        from src.data_platform.db import get_conn
+        vt = getattr(d, "vt_orderid", "") or ""
+        with get_conn() as conn:
+            row = None
+            if vt:
+                # 两步（P2-2）：vt_orderid 非唯一（0063）——EMT per-client 序列跨任务/跨日碰撞，
+                # 直 UPDATE 可击中多行；取最新一行（与 write_trade_log 反查同款）
+                cur = conn.execute(
+                    "SELECT id FROM order_log WHERE vt_orderid=%s ORDER BY id DESC LIMIT 1", (vt,))
+                row = cur.fetchone()
+            if not row:
+                with adapter._lock:
+                    cid = adapter._vt2cid.get(vt)
+                if cid:
+                    cur = conn.execute(
+                        "SELECT id FROM order_log WHERE client_order_id=%s ORDER BY id DESC LIMIT 1", (cid,))
+                    row = cur.fetchone()
+            if not row:
+                logger.warning("order_log 终态回写跳过（无关联行）: vt=%s status=%s %s",
+                               vt, new_status, getattr(d, "symbol", symbol))
+                return
+            cur = conn.execute(
+                "UPDATE order_log SET status=%s WHERE id=%s AND status NOT IN %s",
+                (new_status, row[0], ORDER_FINAL_STATES))
+            if cur.rowcount:
+                logger.info("order_log 终态: #%s → %s (%s)", row[0], new_status, getattr(d, "symbol", symbol))
+            conn.commit()
+    except Exception as e:
+        logger.warning("order_log 终态回写失败(never-raise): %s", e)
+
+
 def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
     """TradeData → trade_log（SC1，EVENT_TRADE 与启动/重连对账共用）。
 
