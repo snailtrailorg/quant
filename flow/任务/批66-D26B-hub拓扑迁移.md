@@ -223,7 +223,7 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 - **mock 方式**：Valkey mock（fakeredis 或 MagicMock eval/exists/set）；接口行 fake dict（provider/credentials/updated_at）；凭证摘要 sha256 fake 串
 - **参考文档**：D26 §4.1/§4.2 + 模块契约 `docs/architecture/模块契约/md_hub.md`
 
-### 66b · 键切换波次批（一次上产，管道阶段保证顺序）
+### 66b · 键切换波次批 ✅ **全链交付**（2026-09-27，prod `202609270822-f2564bf`+回灌 11264 条/24 键；彩排三轮〔probe bytes 假绿→EMQ 连接窗用户裁定→回灌键段序修〕；周一窗三首验点+周二 09-29 专项）
 
 - **目标**：hub unit 换名+四键族 per-account+payload 契约+消费面键化+SA4 期望源+deploy DB 驱动+观测面 N 化+旧流回灌+旧键清理——同版本交付。
 - **依赖（就绪）**：66a ✅（#6 完成是波次前置）；**特权通道前置**=§3-7（quant-svc 扩动词+quant-hbcheck 两代版装位——michael 带外步，staging+prod 各一次）；**上产前检查**=§3-8①②。

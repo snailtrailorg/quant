@@ -296,3 +296,9 @@
 1. **concrete unit 整文件遮蔽替代 drop-in**（编码裁定，回写任务文件 §2.2）：install-units wrapper 只收 `*.service`（文件名正则），drop-in `.conf` 过不了安装通道——过渡注入=仓内 concrete `quant-md-hub@quant.service` 遮蔽模板实例化+`__HUB_ROW_ID__` 占位符经 release.yml 阶段 2 replace 按 inventory 注入（staging/prod 行 id 不同不可写死；replace 在指纹采集前=值变化触发单元重装）。禁入共享模板立法不变（A-P0-2 加密实例污染事故链）。66b 换名后三件套整体退役。
 2. **66b 观察专项挪周二 09-29**（盲审 A-P2-1）：周一窗已承载批 64/61/65/63P4 四批+66a 顺带，第六改动同交易日归因困难——66a 顺带观察周一、66b 键切换专项周二。
 3. **凭证对账读行失败=版本顺延不固化**（双盲 A-P1+编码自查同构洞）：任何「读行失败但固化新版本」的写法都会短路死锁凭证基线（首发失败固 v / 版本轮失败返新 v+旧摘要两洞同构）——统一语义「读行失败=本轮没发生，版本顺延下轮重读」；staging/prod 行 id 填值防呆注释入 inventory（勿填 EMT 行）。
+
+## 2026-09-27 · 批 66b 三裁定
+
+1. **mask 弃用+concrete 残件保留**（双盲 A/B P0 同判）：systemctl mask 对目标位实体文件必败（/etc concrete 残件=66a 装位，实测 rc=1）且 mask 断回滚复活承载件——旧 @quant 退役收敛 stop+disable，防复活由新代码 ACCOUNT_ID 断言 78 Prevent 兜底（残件以新代码启动即拒）。
+2. **EMQ 连接窗=hub 内部状态机（用户裁定）**：柜台时段性失败不下沉为 deploy 闸门豁免——网关层 `_emq_window_open`（交易日 8:25-15:15，东财 FAQ Q12「8:35 起服务」lead 10 分）+窗外 defer_login（api 已建不试不报）+poll_supervise 窗开沿重登（60s 节流）；窗内 Login 失败照旧 78。对齐 XtpMdGateway 先例/D26 §3.3「连接生命周期=hub 内部状态机」立法——「知道不该试」优于「失败不报」，dwell 闸门零改动。
+3. **回滚三块形态闸**：hub 换名回滚专属块（停新 unit/复活 @quant/清单覆写）仅当回滚目标 release 树含 concrete unit（=66a/更早形态）才执行——防 66b 后回滚（66c→66b 等）被无条件拆掉恰需的数字 hub。
