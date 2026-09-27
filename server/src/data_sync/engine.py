@@ -453,7 +453,11 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
                       progress_cb: Callable | None = None) -> dict:
     """A股股票列表全量同步。"""
     pro = _get_pro()
-    df = pro.stock_basic(list_status="L")   # DB 优化：网络拉取在事务外（2026-08-21 盘点）
+    # 批 67：裸调收编（不传 min_interval=档值两级取保 DB 覆写）
+    from src.data_platform.rate_limit import rate_limit_context
+    with rate_limit_context(_get_rate_ds("tushare"), "stock_basic"):
+        df = pro.stock_basic(list_status="L")   # DB 优化：网络拉取在事务外（2026-08-21 盘点）
+        _get_rate_ds("tushare").record_usage(api_calls=1, api_name="stock_basic", provider="tushare")
     rows = [(r.get("ts_code"), r.get("name"), r.get("industry"), r.get("market"),
              r.get("list_status") or "L", str(r.get("list_date", "")), str(r.get("delist_date", "")))
             for r in df.to_dict("records")]
@@ -595,8 +599,12 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
                     progress_cb: Callable | None = None) -> dict:
     """交易日历全量同步。"""
     from src.data_platform.adapters.tushare_adapter import pull_trade_cal
+    from src.data_platform.rate_limit import rate_limit_context   # 批 67：裸调收编（顺手）
     year = date.today().year
-    pull_trade_cal(year)
+    _ds = _get_rate_ds("tushare")
+    with rate_limit_context(_ds, "trade_cal"):
+        pull_trade_cal(year)
+        _ds.record_usage(api_calls=1, api_name="trade_cal", provider="tushare")
     return {"pulled": 365, "saved": 365, "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -1332,8 +1340,12 @@ def _expected_trade_dates(start: str, end: str) -> list[str]:
         pro = _get_pro()
         start_y = int(start[:4]); end_y = int(end[:4])
         all_d = []
+        from src.data_platform.rate_limit import rate_limit_context
+        _ds = _get_rate_ds("tushare")
         for y in range(start_y, end_y + 1):
-            df = pro.trade_cal(exchange="SSE", start_date=f"{y}0101", end_date=f"{y}1231")
+            with rate_limit_context(_ds, "trade_cal"):   # 批 67：裸调收编（按年循环逐次包）
+                df = pro.trade_cal(exchange="SSE", start_date=f"{y}0101", end_date=f"{y}1231")
+                _ds.record_usage(api_calls=1, api_name="trade_cal", provider="tushare")
             if df is not None and not df.empty:
                 all_d.extend([str(d) for d in df[df["is_open"] == 1]["cal_date"].tolist()])
         if all_d:

@@ -1143,14 +1143,24 @@ def convertible_terms_sync():
     """D3 可转债条款数据同步（盘后，每日一次）。拉取活跃可转债基本信息并存 DB。"""
     from src.data_platform.adapters.tushare_adapter import pull_convertible_bonds, pull_cb_basic
     import json
+    # 批 67：裸调收编（补扫——循环突发风险更大）。熔断记账盲区注记（盲审 P2-3）：
+    # pull_cb_basic 内部吞异常返 {}——context 包裹只覆盖构造/穿透失败，per-bond 失败
+    # 记账盲区随 adapter 形态（改造 adapter 另批）。
+    from src.data_platform.rate_limit import rate_limit_context
+    from src.data_sync.engine import _get_rate_ds
+    _ds = _get_rate_ds("tushare")
     try:
-        bonds = pull_convertible_bonds()
+        with rate_limit_context(_ds, "cb_basic"):
+            bonds = pull_convertible_bonds()
+            _ds.record_usage(api_calls=1, api_name="cb_basic", provider="tushare")
     except Exception as e:
         return {"status": "error", "reason": f"pull_convertible_bonds 失败: {e}"}
     results = []
     for ts_code in bonds[:50]:
         try:
-            terms = pull_cb_basic(ts_code)
+            with rate_limit_context(_ds, "cb_basic"):
+                terms = pull_cb_basic(ts_code)
+                _ds.record_usage(api_calls=1, api_name="cb_basic", provider="tushare")
             if terms:
                 with get_conn() as conn:
                     conn.execute("SELECT 1 FROM convertible_terms LIMIT 1")
@@ -1181,7 +1191,12 @@ def static_list_sync():
         # DB 优化（2026-08-21 盘点重灾 #1）：原"SELECT 开事务→事务内 pro.stock_basic() 网络拉取→
         # 逐行 upsert 5400 行"——锁链事件同族（事务跨网络+逐行）。改：先无事务拉取，
         # 再 executemany 批量落库（网络抖动不再持锁；5400 次往返→1 次）。
-        df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
+        # 批 67：裸调收编（挂账原点——批 64 对账表指名点；不传 min_interval=档值两级取保 DB 覆写）
+        from src.data_platform.rate_limit import rate_limit_context
+        from src.data_sync.engine import _get_rate_ds
+        with rate_limit_context(_get_rate_ds("tushare"), "stock_basic"):
+            df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
+            _get_rate_ds("tushare").record_usage(api_calls=1, api_name="stock_basic", provider="tushare")
         if df is None or df.empty:
             return {"status": "ok", "synced": 0}
         rows = [(r["ts_code"], r.get("name", "") or "", r.get("industry", "") or "")

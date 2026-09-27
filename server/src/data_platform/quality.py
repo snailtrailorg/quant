@@ -268,7 +268,8 @@ def whitelist_stats(days: int = 30) -> list[dict]:
                     "SELECT count(*) FROM shadow_diff WHERE whitelist_hit=%s AND created_at >= now() - interval %s day",
                     (e["id"], days))
                 hits = cur.fetchone()[0]
-                stat = {"id": e["id"], "hits": hits, "last_verified": verified.get(f"whitelist_verify:{e['id']}"),
+                stat = {"id": e["id"], "name_zh": e.get("name_zh"), "hits": hits,
+                        "last_verified": verified.get(f"whitelist_verify:{e['id']}"),
                         "opportunity": e.get("适用机会", "daily-expected")}
                 if stat["opportunity"] == "daily-expected" and total:
                     stat["hit_rate"] = round(hits / total, 4)

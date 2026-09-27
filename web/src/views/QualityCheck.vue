@@ -36,7 +36,7 @@
       <el-table-column prop="backup_val" :label="t('quality.backupVal')" min-width="100" />
       <el-table-column prop="whitelist_hit" :label="t('quality.whitelistHit')" min-width="150">
         <template #default="{ row }">
-          <span v-if="row.whitelist_hit" style="color: var(--warn-fill)">{{ row.whitelist_hit }}</span>
+          <span v-if="row.whitelist_hit" style="color: var(--warn-fill)">{{ wlMap[row.whitelist_hit] || row.whitelist_hit }}</span>
           <el-tag v-else type="danger" size="small">{{ t('quality.realDiffTag') }}</el-tag>
         </template>
       </el-table-column>
@@ -45,9 +45,16 @@
 
     <el-divider>{{ t('quality.whitelistSection') }}</el-divider>
     <TableShell :data="wlEntries" :loading="loading" style="width: 100%" storage-key="quality-wl">
-      <el-table-column prop="id" label="ID" min-width="170" />
+      <el-table-column prop="id" :label="t('quality.wlName')" min-width="170">
+        <template #default="{ row }">{{ row.name_zh || row.id }}</template>
+      </el-table-column>
       <el-table-column prop="hits" :label="t('quality.hits')" min-width="80" />
-      <el-table-column prop="hit_rate" :label="t('quality.hitRate')" min-width="100">
+      <el-table-column prop="hit_rate" min-width="100">
+        <template #header>
+          <el-tooltip :content="t('quality.hitRateTip')" placement="top">
+            <span>{{ t('quality.hitRate') }} ⓘ</span>
+          </el-tooltip>
+        </template>
         <template #default="{ row }">
           <span v-if="row.hit_rate != null" :style="{ color: row.hit_rate >= 0.99 ? 'var(--critical)' : 'inherit' }">
             {{ (row.hit_rate * 100).toFixed(1) }}%
@@ -97,6 +104,7 @@ const wlEntries = ref([])
 const sm = ref({})
 const realOnly = ref(false)
 
+const wlMap = computed(() => Object.fromEntries(wlEntries.value.map(e => [e.id, e.name_zh || e.id])))
 const realCount = computed(() => diffRows.value.filter(r => !r.whitelist_hit).length)
 const lastRunAt = computed(() => diffRows.value[0]?.created_at || '—')
 

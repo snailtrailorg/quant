@@ -394,11 +394,22 @@ def _ondemand(ts_code: str, kind: str, pull_fn) -> dict | None:
     return result
 
 
+def _rate_ds():
+    """批 67：按需拉取限速通道（data_platform 层1 禁 import data_sync——ds=get_data_source 直取，
+    quality.py 同款；档值两级取不传 min_interval）。"""
+    from src.data_platform.data_source import get_data_source, TushareDataSource
+    return get_data_source("tushare") or TushareDataSource()
+
+
 def _pull_chips(ts_code: str) -> dict | None:
     from src.data_platform.adapters import tushare_adapter
+    from src.data_platform.rate_limit import rate_limit_context
     # 不传 trade_date：cyq_chips 盘后才有当日数，返回近 60 日——取最新日档位（2026-08-20 实测
     # 单标的 6000 行/99 档；盘中传当日恒空）
-    df = tushare_adapter.get_pro().cyq_chips(ts_code=ts_code)
+    _ds = _rate_ds()
+    with rate_limit_context(_ds, "cyq_chips"):
+        df = tushare_adapter.get_pro().cyq_chips(ts_code=ts_code)
+        _ds.record_usage(api_calls=1, api_name="cyq_chips", provider="tushare")
     if df is None or df.empty:
         return None
     latest = df["trade_date"].max()
@@ -410,9 +421,15 @@ def _pull_chips(ts_code: str) -> dict | None:
 def _pull_finance(ts_code: str) -> dict | None:
     import pandas as pd
     from src.data_platform.adapters import tushare_adapter
+    from src.data_platform.rate_limit import rate_limit_context
     pro = tushare_adapter.get_pro()
-    inc_df = pro.income(ts_code=ts_code, report_type="1")
-    fina_df = pro.fina_indicator(ts_code=ts_code)
+    _ds = _rate_ds()
+    with rate_limit_context(_ds, "income"):
+        inc_df = pro.income(ts_code=ts_code, report_type="1")
+        _ds.record_usage(api_calls=1, api_name="income", provider="tushare")
+    with rate_limit_context(_ds, "fina_indicator"):
+        fina_df = pro.fina_indicator(ts_code=ts_code)
+        _ds.record_usage(api_calls=1, api_name="fina_indicator", provider="tushare")
     _s = lambda v: str(v) if v is not None and pd.notna(v) else None
     income = None
     if inc_df is not None and not inc_df.empty:
