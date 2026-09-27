@@ -124,7 +124,7 @@ export default {
     },
     tabs: {
       astock: 'A股', cb: '可转债', etf: 'ETF',
-      sync: '同步任务', integrity: '完整性体检', sched: '调度',
+      sync: '同步任务', integrity: '完整性体检', quality: '数据核对', sched: '调度',
       logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 im: 'IM 机器人', mail: '邮件 SMTP',
       llm: 'LLM 模型', interfaces: '外部接口', sms: '短信通道',   // 批43 改名（文案师）
@@ -625,6 +625,17 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       rule: '规则',
       subs: '订阅',
       hbLost: '心跳丢失（进程未续或刚重启）',
+    },
+    quality: {
+      title: '数据核对（近 30 天）',
+      selfCheckNote: '系统每个交易日收盘后，从数据源重新拉取一小批数据，与库里已存的逐项比对，检查入库环节有没有改错数、漏行、写坏，本页展示核对结果。请注意边界：比对的双方来自同一个数据源——如果数据源本身给的数据就是错的，两边仍会一致，本页查不出来；所以本页显示无差异，只代表入库环节没有差错，不代表数据绝对正确。表中差异分两类：红色「真实差异」标签需人工处理；黄字为命中的口径白名单条目（已知口径差异，免处理）。',
+      realOnly: '只看真实差异', diffRows: '差异行数', realDiff: '真实差异', whitelisted: '口径白名单内差异',
+      lastRun: '最近核对', tradeDate: '交易日', field: '数据项', mainVal: '库内值', backupVal: '数据源现拉值',
+      missingRow: '库内缺一行', extraRow: '库内多一行', whitelistHit: '差异判定', realDiffTag: '真实差异',
+      checkedAt: '核对时间', whitelistSection: '口径白名单（已知口径差异，命中免处理，需定期人工验证）', hits: '命中次数（近 30 天）', hitRate: '命中率（长期 99% 以上需警惕）',
+      lastVerified: '上次人工验证', verifyNow: '记录首次验证', verifyBtn: '记录人工验证', verifyFromUi: '数据核对页人工记录',
+      smSection: '股票清单核对', smScopeNote: '只比对 A 股在市股票；基金、可转债另有单独清单，不在此列。',
+      smOnly: '库内有 · 上市清单没有（需人工核对）', staticOnly: '上市清单有 · 库内没有（需检查同步）',
     },
     dataIntegrity: {
       title: '数据完整性看板（{n} 只标的）',
@@ -1581,7 +1592,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
     },
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
-      sync: 'Sync Tasks', integrity: 'Integrity', sched: 'Scheduler',
+      sync: 'Sync Tasks', integrity: 'Integrity', quality: 'Data Check', sched: 'Scheduler',
       logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名
 im: 'IM Bots', mail: 'Email SMTP',
       llm: 'LLM Models', interfaces: 'External Interfaces', sms: 'SMS Channels',   // 批37
@@ -2081,6 +2092,16 @@ im: 'IM Bots', mail: 'Email SMTP',
       rule: 'Rule',
       subs: 'subs',
       hbLost: 'heartbeat lost (not renewed or just restarted)',
+    },
+    quality: {
+      title: 'Data Check (last 30 days)', selfCheckNote: 'Every trading day after market close, the system re-fetches a small sample of data from the source and compares it field by field with what is already stored, to catch errors introduced when saving data — altered values, missing rows, corrupted writes. Know the limit: both sides of this comparison come from the same data source — if the source itself provides wrong data, both sides will still match and this page cannot catch it. A clean result here only means the saving step introduced no errors; it does not mean the data is absolutely correct. In the table, rows tagged red "Real diff" need manual follow-up; a whitelist name shown in yellow marks a known methodology difference (both sides may be right) that needs no action.',
+      realOnly: 'Real diffs only', diffRows: 'Differing rows', realDiff: 'Real diffs', whitelisted: 'Whitelisted known diffs',
+      lastRun: 'Last check', tradeDate: 'Trade date', field: 'Field', mainVal: 'Stored value', backupVal: 'Fresh from source',
+      missingRow: 'Row missing in store', extraRow: 'Extra row in store', whitelistHit: 'Verdict', realDiffTag: 'Real diff',
+      checkedAt: 'Checked at', whitelistSection: 'Known-difference whitelist (hits need no action; entries need periodic manual review)', hits: 'Hits (last 30 days)', hitRate: 'Hit rate (sustained 99%+ is a warning)',
+      lastVerified: 'Last manual check', verifyNow: 'Log first check', verifyBtn: 'Log manual check', verifyFromUi: 'logged on Data Check page',
+      smSection: 'Stock list check', smScopeNote: 'Compares listed (active) A-share stocks only; funds and convertibles are tracked on a separate list and are excluded here.',
+      smOnly: 'In our store, not in the listed-stocks list (verify manually)', staticOnly: 'In the listed-stocks list, not in our store (check syncing)',
     },
     dataIntegrity: {
       title: 'Data Integrity ({n} symbols)',

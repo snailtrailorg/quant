@@ -311,3 +311,11 @@ export const confirmTradeSwitch = id => api.post(`/trade-switch/${id}/confirm`)
 export const extendTradeSwitch = id => api.post(`/trade-switch/${id}/extend`)
 export const executeTradeSwitch = (id, body) => api.post(`/trade-switch/${id}/execute`, body)
 export const abortTradeSwitch = (id, body) => api.post(`/trade-switch/${id}/abort`, body)
+
+// 批 62b（M7）：质量对账域
+export const getQualityDiff = (params) => http.get('/api/quality/shadow-diff', { params })
+export const getWhitelistStats = (params) => http.get('/api/quality/whitelist-stats', { params })
+export const verifyWhitelist = (entryId, result) => http.post(`/api/quality/whitelist-verify/${entryId}`, null, { params: { result } })
+export const getSmReconcile = () => http.get('/api/quality/sm-reconcile')
+export const getLineage = (signalId) => http.get(`/api/quality/lineage/${signalId}`)
+export const triggerShadowCheck = (kind) => http.post('/api/quality/shadow-check', null, { params: { kind } })
