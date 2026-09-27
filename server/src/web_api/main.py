@@ -131,6 +131,7 @@ def startup():
 
 # --- 路由注册（端点实现全部在 routes/ 各 APIRouter，此处只 include） ---
 
+from .routes.quality import router as quality_router             # 批 62b：/api/quality 对账域
 from .routes.system import router as system_router            # /healthz /readyz /metrics /api/help /api/system-config /api/smtp-providers 等
 from .routes.auth_routes import router as auth_router         # /api/auth/* /api/user* /api/invites /api/log
 from .routes.strategy import router as strategy_router        # /api/strategy* /api/factors* /api/live-task
@@ -146,6 +147,7 @@ from .routes.backtest import router as backtest_router        # /api/backtest* /
 from .routes.routing import router as routing_router          # 批 57 M2：/api/routing/*（策略+dry-run+审计）
 from .routes.trade_switch import router as trade_switch_router  # 批 61 M6：/api/trade-switch/*（账号切换状态机）
 
+app.include_router(quality_router)   # 批 62b：M7 对账
 app.include_router(system_router)
 app.include_router(auth_router)
 app.include_router(strategy_router)
