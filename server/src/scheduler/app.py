@@ -125,6 +125,17 @@ app.conf.update(
     task_track_started=True,
     task_soft_time_limit=300,  # 5 分钟超时
     beat_schedule={
+
+        "quality-shadow": {
+            "task": "src.scheduler.tasks.quality_shadow_check",
+            "schedule": crontab(hour=16, minute=5),   # 批 62b：盘后采样对账（16:08 锚前——diff 先行）
+            "options": {"queue": "data"},
+        },
+        "quality-cleanup": {
+            "task": "src.scheduler.tasks.quality_cleanup",
+            "schedule": crontab(hour=3, minute=40),
+            "options": {"queue": "data"},
+        },
         "astock-select-daily": {
             "task": "src.scheduler.tasks.astock_select_daily",
             "schedule": crontab(hour=16, minute=8),   # 批27-31：盘后锚（避 16:30 daily-report）
