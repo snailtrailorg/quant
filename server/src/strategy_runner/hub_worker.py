@@ -139,17 +139,17 @@ def _ts_gap_frozen(ts_key: str, max_ts: str, market: str) -> bool:
         bar_dt = datetime.fromtimestamp(int(ts_key), tz=_tz.utc).astimezone()
     except (ValueError, OSError, OverflowError):
         return False
-    if market == "crypto":
-        return True
-    from src.quant_common.session import in_session
-    if not in_session("astock", bar_dt.replace(tzinfo=None)):
-        return False
     from src.quant_common.markets import MARKETS
+    skel = MARKETS.get(market, {}).get("sessions_skeleton")
+    if skel == "24x7":
+        return True   # 连续市场：60s+ 缺口=真断流（无段首豁免）
+    if not skel:
+        return False  # 未知市场无骨架=不判（fail-open 观测面；A 股已覆盖）
     hm = bar_dt.hour * 100 + bar_dt.minute
-    for op, cl in MARKETS["astock"]["sessions_skeleton"]:
+    for op, cl in skel:
         if int(op.replace(":", "")) <= hm <= int(cl.replace(":", "")):
             return (hm - int(op.replace(":", ""))) >= 2   # 段首 2 分钟内豁免
-    return False
+    return False   # 段外（迟到 bar/盘外）不触发
 
 
 def _td_connect_due(now: float, win, last_conn_ts: float, dt_now) -> bool:

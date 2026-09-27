@@ -241,7 +241,7 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 - **mock 方式**：fakeredis SCAN/TTL/xrevrange/xread/xadd；DB 期望集 fake 行集（trading 域 enabled/disabled+provider 未注册态）；unit 清单 fake；deploy 检查=本地 pytest 模拟清单运算；回灌=旧流 fake 条目→断言新键条目数与 payload 字段
 - **参考文档**：D26 §3.3/§4.3/§五 + 模块契约 md_hub/strategy_runner/data_platform + deploy-mechanism 记忆
 
-### 66c · 稳定性配套批（独立上产）
+### 66c · 稳定性配套批 ✅ **代码交付**（2026-09-27；双盲 A P1×1+P2×5 / B P1×1+P2×6 全处置——同判 P1=归一方向杀 DB 配置路径；**文档尾批拆 66c-2**：模块契约×5+接口契约+D26 注记随手册重写同批）
 
 - **目标**：§3.4 四件（ts 缺口检测/解冻闭环/半根桶 untrusted/bar 指纹）+MarketSpec 纯数据+三处归属收编+worker 时段门修（§0.4-1）+文档收尾。
 - **依赖（就绪）**：66b ✅（键模型终态后做缺口检测，避免二次改键域）；批 62 未实施不阻塞（白名单已预登记，验收不依赖）。
@@ -322,5 +322,19 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 - 其余：非空断言豁免门（server_changed+逃生键+static 源 skipped 语义）/monitor state 初值 dict 化（B-P2-1 崩溃防线）/R4 legacy 过渡豁免（B-P2-2 迁移夜假警）/crypto 测试 SECRET_KEY 隔离（B-P2-7 环境红修）/残留 fixture 清零（xsleeper×3+databus）/新行为钉 9 个（_probe 空集地板+ts 陈旧+非数字尾段/collector legacy 双分支/_hub_expected_ids 直测）/P3 注释四处。
 - 两审核实确认：波次实序 task→hub（旧注释纠偏）/双活窗不同键空间安全/payload 三层一致+存量旧消息全路径不可达（XREADGROUP>$/xrevrange/xautoclaim 全核）/Jinja 链 venv 实跑正确/skipped register 语义实测/回灌脚本本体合格（键分类/幂等/maxlen 无剪尾）。
 - 验证：**1460 全绿**（+6 新钉+1 crypto 环境修复）；syntax-check 双剧本过（YAML name 含 = 的 k=v 误判两处修）。
+
+**代码双盲审处置（66c，2026-09-27）**：A（交易可靠性）P1×1+P2×5 / B（系统契约）P1×1+P2×6，全处置：
+- **P1 双审同判**：session 归一化改写 DB 查询键（"A股"→"astock" 再查表=market_session 永远 miss）→0053 运营真源+节假日日历守卫全失+on_tick 热路径每 tick 一发 SELECT。修=原键先查+`_TABLE_NAME_ALIASES` 容错重查+负缓存 10s+回归钉 3 个（表行命中/原键零漂移/负缓存防 chatter）。
+- B-P2-1：0108 JSON→JSONB（未上产原地改+downgrade 注记）——本地三验实换 jsonb。
+- B-P2-2：_ts_gap_frozen 段判定单源骨架（删函数内 in_session 调用——DB/骨架双源分裂+假泛化；24x7 泛化分支）。
+- A-P2-2：PythonStrategy.on_bar 覆写不调 super=python 模式指纹恒 NULL→同款 _last_bar 记忆。
+- B-P2-6：bar 指纹 NaN/inf sanitize（脏值→指纹置 NULL——json allow_nan 的 NaN 字面量 PG 拒收→WAL fail-closed 弃单，归因列不得有杀单能力）。
+- B-P2-5/A-P2-3：STREAM_MAXLEN 接线 MarketSpec channels（真消费消声明孤岛）+一致性钉；flush_policy 注释保持挂靠（三窗值特殊化声明）。
+- B-P2-4 尾：md_hub 两处谓词收编 per-market（66b 任务「66c 收编」悬账清偿）。
+- A-P2-4：测试时区固定 +08:00（DST 机器季节性假红——datetime.now().astimezone() 取当下偏移之坑）。
+- A-P2-5：gen 不入指纹偏差回写 D26 §3.4④（实施裁定：心跳 gen+ts 时间窗交叉可溯）。
+- A-P2-6：盘中临停复牌首根误冻结（市场真实洞 vs 数据故障不可分）——**挂账观察**（周一窗盯临停事件；后续停牌感知豁免或降档告警）。
+- B-P2-3：解冻闭环行为级钉（闭包不可直达）如实声明——纯函数级钉+代码时序双审核实；wiring 桩改造挂账下批。
+- 验证：**1480 全绿**（+4 钉）；JSONB 三验；pyflakes 零新增。
 
 **快审（第三轮忠实度复核）**：22/24 忠实（含全部 5 条 P0），余 4 项轻量修补已落——#21 双活窗注记虚指→§3-11 正文补写（窗口存在/不同键空间无害/双 XTP 连接瞬态/stop 时序实况）；#23 打折→§2.5 _probe SCAN 补 COUNT 100；§3-9「周一」措辞残留→周二；#12 同步义务载体悬空→钉在过滤处代码注释（模块契约不含 deploy）。#24 来源标注补正（原 A-P1-1②）。快审附带确认：D26 两处改写正确无残留；D26 §4.1:113「续租丢路径均已死」旧句待 66c 文档收尾一并校（既定范围）。**总判 PASS**。

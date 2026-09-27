@@ -35,15 +35,19 @@ def _load_market_config(market: str) -> dict | None:
         return None
     now = time.time()
     cached = getattr(_load_market_config, "_cache", {}).get(market)
-    if cached and now < cached[1]:
-        return cached[0]
+    if cached is not None and now < cached[1]:
+        return cached[0]   # 负缓存命中（None）也直接返回——TTL 10s 内不重查
     try:
         cfg = _CONFIG_PROVIDER(market)
+        cache = getattr(_load_market_config, "_cache", {})
         if cfg:
-            cache = getattr(_load_market_config, "_cache", {})
             cache[market] = (cfg, now + 60.0)
             _load_market_config._cache = cache
             return cfg
+        # 负缓存（盲审 B-P1：miss 只在真值时写缓存→on_tick 热路径每 tick 一发 SELECT）——
+        # 短 TTL 10s 收敛快（DB 恢复/行新建后 10s 内可达），chatter 消除
+        cache[market] = (None, now + 10.0)
+        _load_market_config._cache = cache
     except Exception:
         pass
     return None
@@ -67,12 +71,14 @@ def _is_trading_day(cfg: dict, d: _dt.date) -> bool:
     return d.weekday() < 5  # fallback
 
 
-_MARKET_ALIASES = {"A股": "astock", "astock": "astock", "crypto": "crypto", "加密": "crypto"}
+# 别名→market_session 表行名（盲审 A/B 同判 P1 修：归一只做查询容错，方向=表名）。
+# market_session 种子行名（迁移 0053）='A股'/'加密永续'——注册表名 astock/crypto 查表前须经此映射。
+_TABLE_NAME_ALIASES = {"astock": "A股", "crypto": "加密永续"}
 
 
 def _norm_market(market: str) -> str:
-    """市场名归一（market_session 表用中文名 'A股'，markets.py 注册表用 'astock'——双写法兼容）。"""
-    return _MARKET_ALIASES.get(market, market)
+    """注册表名归一（'A股'/'加密'→'astock'/'crypto'——骨架/EXCHANGES 键形态；表查询另走 _TABLE_NAME_ALIASES）。"""
+    return {"A股": "astock", "加密": "crypto"}.get(market, market)
 
 
 def in_session(market: str = "A股", now: _dt.datetime | None = None) -> bool:
@@ -85,8 +91,14 @@ def in_session(market: str = "A股", now: _dt.datetime | None = None) -> bool:
     配置缺失时降级到旧版硬编码（A 股 9:31-11:30/13:01-15:00 + weekday）。
     """
     now = now or _dt.datetime.now()
-    market = _norm_market(market)
+    # 盲审 A/B 同判 P1 修：DB 查询用**原键**（表行名='A股'）——归一改写查询键会让 market_session
+    # 表整体变死配置（0053 运营真源+节假日日历守卫全失）。注册表名（astock/crypto）miss 后经
+    # _TABLE_NAME_ALIASES 容错重查；骨架 fallback 才用 _norm_market。
     cfg = _load_market_config(market)
+    if cfg is None:
+        tbl = _TABLE_NAME_ALIASES.get(_norm_market(market))
+        if tbl and tbl != market:
+            cfg = _load_market_config(tbl)
     if cfg is None:
         # 无配置：fallback 到 MarketSpec 骨架（批 66c 收编——原 A 股硬编码单源化；
         # crypto 无配置时错落 A 股时段的坑同修：骨架 "24x7" 恒 True）

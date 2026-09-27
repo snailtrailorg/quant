@@ -39,7 +39,7 @@ except ImportError:
     EventEngine = None
 
 # 2026-08-19 模块归位：共享工具直连 quant_common（原寄生 strategy_runner.main——连带 vnpy 链）
-from src.quant_common.session import in_astock_session as _in_astock_session
+from src.quant_common.session import in_session
 from src.quant_common.guard import sd_notify as _sd_notify
 from src.strategy_framework.runtime.alerts import make_alert, make_guard, make_valkey
 
@@ -55,7 +55,11 @@ def _guard(name):
 
 BAR_STREAM_PREFIX = "hub:bars:"
 HB_KEY = "quant:hb:md-hub"
-STREAM_MAXLEN = 5000          # ≈20 交易日分钟 bar（评审：慢消费者 3 周不读才可能被剪）
+# 批 66c：maxlen 缺省从 MarketSpec channels 读（消声明孤岛——盲审 B-P2-5：注释宣称同源而值
+# 双份=静默漂移温床）；≈20 交易日分钟 bar（评审：慢消费者 3 周不读才可能被剪）
+def _stream_maxlen(market: str) -> int:
+    from src.quant_common.markets import MARKETS
+    return MARKETS.get(market, {}).get("channels", {}).get("bar", {}).get("stream_maxlen", 5000)
 
 
 def _cred_hash(credentials: dict) -> str:
@@ -162,7 +166,7 @@ def main() -> None:
         symbol = _project_symbol(tick)
         stats["ticks"] += 1
         stats["last_tick_wall"] = time.time()
-        if market == "crypto" or _in_astock_session():
+        if in_session(market):
             # 只在盘中喂 on_data：旧 sess_last_tick 仅盘中写入——盘外回放不建断流基线，
             # supervisor 的断流症状/告警不会在盘外（夜间回放停止/假日静默）误触（行为值不变铁律）
             # 加密接入批：crypto 24/7 恒喂
@@ -184,7 +188,7 @@ def main() -> None:
                 # （启动断言 account_id 恒数字——旧 A股裸键/条件分支退役）
                 stream = f"hub:bars:{account_id}:{bar['symbol']}"
                 r.xadd(stream, msg_of(bar, seqs.get(bar["symbol"], 0) + 1),
-                       maxlen=STREAM_MAXLEN, approximate=True)
+                       maxlen=_stream_maxlen(market), approximate=True)
                 seqs[bar["symbol"]] = seqs.get(bar["symbol"], 0) + 1   # 评审 B1：成功后才占号（失败不留洞）
             except Exception as e:
                 logger.error("XADD 失败（bar 丢失，告警）: %s", e)
@@ -389,7 +393,7 @@ def main() -> None:
     loop.every("md-supervise", 0.0,                # 会话监督：每步（批 63 二收编网关内——XTP=L2 五段续航/重登/告警）
                # 批 4b D2：交易日按日缓存下沉 md_session.is_trading_day 本体（等值消重：
                # schedule_due 内部裸打 DB 一并消掉）
-               lambda: md_gw.poll_supervise(in_session=(market == "crypto" or _in_astock_session()), trading_day=is_trading_day()))
+               lambda: md_gw.poll_supervise(in_session=(in_session(market)), trading_day=is_trading_day()))
     try:
         loop.run()   # 永续（到期驱动；进程域退出在钩子/骨架内 os._exit 带码）
     except KeyboardInterrupt:

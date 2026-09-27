@@ -5,14 +5,16 @@ ts+OHLCV 随下单落（strategy._last_bar 驱动 bar 记忆）；gen 不入指�
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision = "0108"
 down_revision = "0107"
 
 
 def upgrade() -> None:
-    op.add_column("order_log", sa.Column("bar_fingerprint", sa.JSON(), nullable=True))
+    op.add_column("order_log", sa.Column("bar_fingerprint", JSONB(), nullable=True))
 
 
 def downgrade() -> None:
+    # 丢指纹数据（审计列可接受——按库规注记：downgrade 仅用于回滚窗口，历史归因列无重建义务）
     op.drop_column("order_log", "bar_fingerprint")

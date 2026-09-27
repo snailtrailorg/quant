@@ -472,8 +472,14 @@ class Strategy:
                 # 批 66c：bar 指纹（D26 §3.4④ 回补归因）——驱动本单的最近 bar ts+OHLCV（JSONB 单列；
                 # gen 不入指纹：worker 心跳 gen 维度+ts 时间窗交叉可溯）
                 import json as _json
+                from math import isfinite
                 lb = getattr(self, "_last_bar", None) or {}
-                fp = _json.dumps({k: lb.get(k) for k in ("ts", "open", "high", "low", "close", "volume")}) if lb else None
+                # 盲审 B-P2-6：NaN/inf 脏值 sanitize（json.dumps 默认 allow_nan 产出 NaN 字面量→
+                # PG jsonb 拒收→INSERT 异常→WAL fail-closed 弃单——归因列不得有杀单能力）
+                vals = {k: lb.get(k) for k in ("ts", "open", "high", "low", "close", "volume")}
+                ok_fp = lb and all(
+                    v is None or not isinstance(v, float) or isfinite(v) for v in vals.values())
+                fp = _json.dumps(vals) if ok_fp else None
                 cur = conn.execute(
                     "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,account_id,bar_fingerprint) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
@@ -663,6 +669,7 @@ class PythonStrategy(Strategy):
                 raise ValueError(f"Python 策略代码语法错误: {e}")
 
     def on_bar(self, bar: dict, history: list[dict] | None = None) -> Signal | None:
+        self._last_bar = dict(bar)   # 批 66c：基类同款驱动 bar 记忆（盲审 A-P2-2：覆写不调 super=python 模式指纹恒 NULL）
         """Python 模式 on_bar：exec 用户代码，调用户 on_bar(ctx)。
 
         安全：exec 在受限 namespace 中运行，只暴露 ctx 对象和安全的 builtins 子集。
