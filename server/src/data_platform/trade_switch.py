@@ -123,6 +123,48 @@ def _affected_tasks(conn, from_id: int) -> list[dict]:
     return [{"id": r[0], "name": r[1], "status": r[2]} for r in cur.fetchall()]
 
 
+def _l2_probe(to_account: int) -> dict:
+    """批 69b：L2 真连探测（检查单展示项——不入五必过闸；hub/worker 心跳导出字段消费）。
+
+    维度分离（盲审 P2-3）：hub_key_exists=False（SA4 拉起延迟/TTL 过期——查 systemd/等 300s）
+    vs 字段缺失（部署间隙——老版本 hb 无 connected）。窗外挂起 connected=0 属预期态
+    （in_session=False 标注——盲审 P2-2）。td 聚合=all() 保守+running_tasks 数（P2-4）。
+    Valkey 不可达→全 null（fail-open 展示——不阻塞切换流程）。
+    """
+    out = {"hub_key_exists": None, "hub_connected": None, "in_session": None,
+           "td_connected": None, "running_tasks": None}
+    try:
+        import redis as _redis
+        import os
+        r = _redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                                  socket_timeout=2, decode_responses=True)
+        from src.quant_common.session import in_session
+        out["in_session"] = bool(in_session("astock"))
+        hub = r.hgetall(f"quant:hb:md-hub:{to_account}")
+        if hub:
+            out["hub_key_exists"] = True
+            if "connected" in hub:
+                out["hub_connected"] = bool(int(hub["connected"]))
+        else:
+            out["hub_key_exists"] = False
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT id FROM live_task WHERE account_id=%s AND status='running'", (to_account,))
+            tids = [x[0] for x in cur.fetchall()]
+        out["running_tasks"] = len(tids)
+        if tids:
+            vals = []
+            for tid in tids:
+                h = r.hgetall(f"quant:hb:task:{tid}")
+                if h and "td" in h:
+                    vals.append(bool(int(h["td"])))
+            out["td_connected"] = all(vals) if vals else None   # 保守聚合；全缺失=null
+    except Exception:
+        pass
+    return out
+
+
 def _checklist_l1(to: dict, cred_ok: bool) -> dict:
     """L1 检查快照（提名时刻落库；execute 时实时复评更新）。"""
     return {
@@ -130,7 +172,7 @@ def _checklist_l1(to: dict, cred_ok: bool) -> dict:
         "to_enabled": bool(to["enabled"]),
         "to_has_trading": "trading" in to["capabilities"],
         "same_market": True,   # nominate 已校验，execute 复评重算
-        "l2_live_probe": "挂账（Web 域无 TD 会话）",
+        "l2_live_probe": "实时重算展示（批 69b——详情路径现算，提名值仅存档）",
     }
 
 
@@ -235,6 +277,13 @@ def get_session(sid: int) -> dict:
         d.pop("_timeout_s")
         d["timeout_s"] = timeout_s
         d["expired_flipped"] = flipped   # 详情路径 lazy 翻转计数（路由层据此告警）
+        # 批 69b（P1-2）：L2 真连实时重算覆盖（不落库——与五必过 execute 实时复评同构；
+        # 提名时刻 checklist 存档值仅审计）。nominated/confirmed 态才有意义（done 已切完）。
+        if d.get("state") in ("nominated", "confirmed"):
+            try:
+                d["l2_live_probe"] = _l2_probe(d.get("to_account"))
+            except Exception:
+                pass
         return d
 
 

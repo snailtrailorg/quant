@@ -198,6 +198,12 @@ def run(ctx: dict) -> None:
     @make_guard("hub.on_trade", _alert)
     def on_trade(event):
         trading.write_trade_log(event.data, adapter, sid, symbol)
+        # 批 69a：SSE 信号帧（零内容——前端重拉 orders/position）
+        try:
+            from src.quant_common.eventbus import bus   # 惰性导入（notify.py:89 先例）
+            bus.publish_cross_process(0, "trade_update", {})
+        except Exception:
+            pass
 
     ee.register(__import__("vnpy.trader.event", fromlist=["EVENT_TRADE"]).EVENT_TRADE, on_trade)
     # ——— 消费组（先建组后回放，评审陷阱 6）———
@@ -393,11 +399,16 @@ def run(ctx: dict) -> None:
         frozen["now"] = new_dyn or bool(frozen.get("sticky"))
 
     def _heartbeat():
-        """心跳（D3 定案）：只写 worker 自有 7 字段+ts（md 字段区分模式；无 tick 源不冒充）。"""
+        """心跳（D3 定案）：只写 worker 自有字段+ts（md 字段区分模式；无 tick 源不冒充）。
+
+        批 69b：td 导出（TD 会话真连态——L2 真连探测消费；探测导出缺省 False〔td_api
+        None=stub〕，与 _td_reconnect 沿判定缺省 True 目的不同〔沿判定乐观重试〕）。
+        """
         hb.beat(pid=os.getpid(), md="hub", gen=state.gen,
                 last_bar_ts=stats["last_bar_wall"] or 0,
                 lag=(time.time() - stats["last_bar_wall"]) if stats["last_bar_wall"] else -1,
-                bars=stats["bars"], frozen=int(frozen.get("now", False)))
+                bars=stats["bars"], frozen=int(frozen.get("now", False)),
+                td=int(bool(getattr(td_api, "connect_status", False))))
 
     def _td_reconnect():
         """TD 重连沿 → 重跑对账（R-BR11；ctx["reconcile"]=runner 超集含成交补录，4b 收敛冗余循环）。

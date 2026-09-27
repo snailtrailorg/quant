@@ -372,9 +372,11 @@ def main() -> None:
     hb = HeartbeatWriter(r, _key(HB_KEY, account_id), ttl=90)   # R-OBS1；超集原则：旧字段名一字不改，只增 ts
 
     def _heartbeat() -> None:
+        # 批 69b：connected 导出（int(bool) 形态立法——L2 真连探测/检查单消费；窗外挂起=False 属预期态）
         hb.beat(pid=os.getpid(), gen=gen, subs=len(sm.current),
                 ticks=stats["ticks"], bars=stats["bars"], sess_ticks=counters.sess_count,
-                last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=0)
+                last_tick_ts=stats["last_tick_wall"] or 0, dropped_pg=0,
+                connected=int(bool(md_gw.connected)))
 
     loop = EngineLoop(name="md-hub", step=5.0,
                       watchdog=lambda: _sd_notify("WATCHDOG=1"),   # systemd 看门狗喂狗

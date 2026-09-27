@@ -241,6 +241,7 @@ def collect(now: float | None = None) -> dict:
                 "sess_ticks": int(h.get("sess_ticks") or 0),
                 "bars": int(h.get("bars") or 0),
                 "dropped_pg": int(h.get("dropped_pg") or 0),
+                "connected": int(h.get("connected") or 0),   # 批 69b：真连导出（L2 探测）
                 "tick_age": (now - last_tick) if last_tick else None,
             }
         legacy = r.hgetall(HUB_HB_KEY)

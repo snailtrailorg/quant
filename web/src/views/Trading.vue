@@ -134,7 +134,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { fmtTime } from '../utils/fmtTime'
 import SellGuardBanner from '../components/SellGuardBanner.vue'
-import { getPosition, getOrders, getPnl } from '../api'
+import { getPosition, getOrders, getPnl, sse } from '../api'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
@@ -222,11 +222,26 @@ const todayOrders = computed(() => {
 })
 import { onUnmounted } from 'vue'
 let pollTimer = null
+// 批 69a：SSE 帧驱动实时化（order_update/trade_update → trailing 1s 合并重拉——保终态；
+// 桥健康时轮询降级 30s 兜底，桥断回 5s/60s 原节奏——Profile.vue 先例）
+let sseThrottleTimer = null
+const onSseFrame = (ev) => {
+  if (ev.type !== 'order_update' && ev.type !== 'trade_update') return
+  if (sseThrottleTimer) return   // trailing：风暴合并，尾帧后 1s 必拉（终态落地）
+  sseThrottleTimer = setTimeout(() => { sseThrottleTimer = null; load() }, 1000)
+}
+let sseUnsub = null
+const applyPollInterval = () => {
+  clearInterval(pollTimer)
+  pollTimer = setInterval(load, sse.healthy() ? 30000 : (isTradingHours() ? 5000 : 60000))
+}
 onMounted(() => {
   load()
   pollTimer = setInterval(load, isTradingHours() ? 5000 : 60000)
+  sseUnsub = sse.subscribe(onSseFrame)
+  setInterval(applyPollInterval, 60000)   // 桥健康态变化时调整轮询（下一分钟生效）
 })
-onUnmounted(() => clearInterval(pollTimer))
+onUnmounted(() => { clearInterval(pollTimer); if (sseUnsub) sseUnsub(); if (sseThrottleTimer) clearTimeout(sseThrottleTimer) })
 </script>
 
 <style scoped>

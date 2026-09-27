@@ -200,8 +200,25 @@ const checklistItems = computed(() => {
       label: t('tradeSwitch.itemNoRunning') },
     { key: 'from_still_referenced', ok: evaluated ? !failed.has('from_still_referenced') : undefined,
       label: t('tradeSwitch.itemFromRef') },
+    // 批 69b：L2 真连（实时重算展示项——不入闸）：绿=窗内 hub+td 连；黄=窗内断连；
+    // 灰=窗外挂起（预期态）；pending=键/字段缺失（未拉起或部署间隙）
+    l2Item(),
   ]
 })
+
+function l2Item() {
+  const p = detail.data?.l2_live_probe
+  if (!p || p.hub_key_exists === null || p.hub_key_exists === undefined)
+    return { key: 'l2_live', ok: undefined, label: t('tradeSwitch.itemL2') }
+  if (p.hub_key_exists === false)
+    return { key: 'l2_live', ok: undefined, label: t('tradeSwitch.itemL2NoHub') }
+  if (p.hub_connected === null)
+    return { key: 'l2_live', ok: undefined, label: t('tradeSwitch.itemL2Gap') }
+  if (!p.in_session)
+    return { key: 'l2_live', ok: undefined, label: t('tradeSwitch.itemL2OffHours') }   // 窗外挂起=预期
+  const ok = p.hub_connected && (p.running_tasks === 0 ? true : p.td_connected !== false)
+  return { key: 'l2_live', ok, label: t('tradeSwitch.itemL2') }
+}
 
 function fmtTime(v) {
   if (!v) return '—'

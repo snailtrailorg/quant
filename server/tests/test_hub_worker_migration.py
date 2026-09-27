@@ -200,11 +200,11 @@ class TestHeartbeatD3:
     """D3 定案：worker 只写自有 7 字段+ts；direct 专属字段（ticks/sess_ticks/last_tick_ts）不写。"""
 
     def test_fields_exactly_seven_plus_ts(self, wired):
+        """批 69b：+td 字段（int(bool) 形态——L2 真连探测导出；direct 专属字段仍不写）。"""
         _hooks(wired)["heartbeat"].fn()
         m = wired["fake"].hashes[HB_TASK_KEY]
-        assert set(m) == {"pid", "md", "gen", "last_bar_ts", "lag", "bars", "frozen", "ts"}
-        assert m["md"] == "hub" and m["frozen"] == "0"
-        assert not ({"ticks", "sess_ticks", "last_tick_ts"} & set(m))
+        assert set(m) == {"pid", "md", "gen", "last_bar_ts", "lag", "bars", "frozen", "td", "ts"}
+        assert m["md"] == "hub" and m["frozen"] == "0" and m["td"] in ("0", "1")
 
 
 class TestSessEdgeAndBlindWatch:

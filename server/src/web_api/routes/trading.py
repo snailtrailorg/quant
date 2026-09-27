@@ -36,7 +36,7 @@ def list_live_tasks(status: str | None = None,
     hb = {}
     try:
         import redis as _redis, os as _os
-        r_ = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4"),
+        r_ = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
                                    decode_responses=True, socket_timeout=1)
         for rid, *_ in rows:
             h = r_.hgetall(f"quant:hb:task:{rid}")

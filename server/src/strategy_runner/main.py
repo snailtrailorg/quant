@@ -174,6 +174,12 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     @_guard("worker.on_order_status")
     def on_order(event):
         trading.write_order_status(event.data, adapter, sid, symbol)
+        # 批 69a：SSE 信号帧（零内容——信任边界立法；重拉 /api/orders 由前端做）
+        try:
+            from src.quant_common.eventbus import bus   # 惰性导入（notify.py:89 先例）
+            bus.publish_cross_process(0, "order_update", {})
+        except Exception:
+            pass
     ee.register(EVENT_ORDER, on_order)
 
     # 批 65a：单入口分发（EX_CONFIG 异常处理留此调用点——78=RestartPrevent 豁免防重启风暴）
