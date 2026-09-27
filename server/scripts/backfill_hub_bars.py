@@ -41,10 +41,15 @@ def main() -> int:
     moved = 0
     for key in r.scan_iter(match="hub:bars:*", count=500):
         parts = key.split(":")
-        # 新形态=hub:bars:{digit}:{symbol}（≥3 段且第二段纯数字）；旧形态=hub:bars:{symbol}（symbol 无冒号）
-        if len(parts) >= 3 and parts[1].isdigit():
+        # 段序=hub:bars:{account?}:{symbol}——parts[0]="hub" parts[1]="bars"（字面量），
+        # account 段在 parts[2]（纯数字）。新形态=四段+parts[2].isdigit()（含本账号目标键，跳过）；
+        # 旧形态=三段（parts[2]=symbol）。prod 干跑实锤：锚 parts[1] 恒 "bars"——symbol 全解析
+        # 成字面量+新形态漏跳（干跑 0 条写入防住——批 66b 回灌首跑实证）。
+        if len(parts) >= 4 and parts[2].isdigit():
             continue
-        symbol = parts[1]
+        symbol = ":".join(parts[2:])
+        if not symbol or symbol.isdigit():
+            continue   # 不可判形态（裸 prefix 等）跳过不动
         target = f"hub:bars:{args.account_id}:{symbol}"
         entries = r.xrange(key, "-", "+")
         print(f"{'✍' if args.commit else '👁'} {key} → {target}（{len(entries)} 条）")
