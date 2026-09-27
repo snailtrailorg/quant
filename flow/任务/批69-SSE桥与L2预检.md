@@ -1,6 +1,9 @@
 # 批 69 · SSE 订阅桥 + L2 真连预检（批 61 挂账两件——同源清单）
 
-> v1（2026-09-27 勘察底册详尽——全链锚点实测）。来源：批 61「明确不做（挂账）：subscribe_orders SSE 桥；L2 真连预检（worker/hub 会话探测）」。
+> v2（双盲 P1×2+P2×5 全处置——审者判回写即 PASS）。来源：批 61 挂账两件。
+> **P1-1**：两字段统一 `int(bool(...))`（"1"/"0"——同 frozen 惯例，禁裸 bool "True"/"False"）；读侧 int()+键缺失→null；测试钉字面量。
+> **P1-2**：l2 检查单=**实时重算**——get_session/详情路径对 nominated/confirmed 现算覆盖返回（不落库——提名时刻快照最老 600s 与其余四项 execute 实时复评不一致）。
+> **P2**：collector hubs 块同步消费 connected（字段锁联动）；l2 附 xtp_session_window_open（窗外挂起=预期态标注 vs 窗内断连=异常）；hub 键不存在（SA4 延迟/TTL 过期）与字段缺失（部署间隙）分维度 hub_key_exists；多任务 td 聚合=all() 保守+running_tasks 数；前端节流=trailing（保终态）。
 
 ## 一、勘察关键结论（方案输入）
 1. **SSE 桥零新基建**：`publish_cross_process`（worker 任意进程可调）→ `quant:sse:*` pub/sub → SseBridge（web-api 装配）→ `/api/events` → 前端 `sse` 单例（fetch+ReadableStream，Profile.vue 先例）——**全链现成且经批 18 双盲审**。信号帧信任边界立法：频道只承载「触发重拉」零内容帧，永不承载数据。
@@ -16,19 +19,22 @@
 - 写侧契约照 notify.py 先例：短连接+双 1s 超时、永不 raise（挂实盘回调路径）。
 
 ### 前端（Trading.vue 接线——Profile.vue 先例）
-- `sse.subscribe`（order_update/trade_update 帧→节流 1s 合并触发 `load()`——重拉 /api/orders+position）；`sse.healthy()` 时轮询间隔 5s→30s（桥在=帧驱动，轮询降级兜底）；onUnmounted 退订。
+- `sse.subscribe`（order_update/trade_update 帧→**trailing 节流 1s** 合并触发 `load()`——保终态〔风暴尾终态回写后最终 UI 态必重拉〕）；`sse.healthy()` 时轮询间隔 5s→30s（桥在=帧驱动，轮询降级兜底）；onUnmounted 退订。
 - 帧到重拉目标=既有端点（零新读端点；成交列表现状由 orders 前端滤——不扩范围）。
 
 ## 三、69b · L2 真连预检（心跳增字段+检查单真值）
 
 ### 心跳导出（超集只增）
-- **hub**：`_heartbeat`（md_hub/main.py:372-377）增 `connected=md_gw.connected`（@property 四网关统一面）。
-- **worker**：`_heartbeat`（hub_worker.py:395-400）增 `td=int(bool(getattr(td_api, "connect_status", False)))`（XTP/EMT 同形；td_api None=stub 0）。
-- **字段锁测试同步**（test_runtime_pulse.py:85 超集断言+两写点测试）。
+- **hub**：`_heartbeat` 增 `connected=int(bool(md_gw.connected))`（@property 四网关统一面；**统一 int(bool) 形态**——v2 P1-1）。
+- **worker**：`_heartbeat` 增 `td=int(bool(getattr(td_api, "connect_status", False)))`（XTP/EMT 同形；td_api None=stub 0；注释互指 _td_reconnect 缺省语义差异——探测导出 vs 沿判定）。
+- **字段锁测试同步+collector.py hubs 块同步消费 connected**（v2 P2-1：字段锁断言 collector 源含字段名——联动必改）。
+- 读侧统一 `int(hash.get(k))`、键/字段缺失→null。
 
 ### trade_switch 检查单真值
-- `_checklist_l1`（trade_switch.py:133）：占位→`_l2_probe(conn, to_account)`——读目标账号 hub hb `connected` 字段+该账号在跑任务的 worker hb `td` 字段，返回结构 `{hub_connected: bool, td_connected: bool|null(无任务)}`。**不入 _recheck_locked 五闸**（展示项）。
-- 前端 TradeSwitch.vue checklistItems 增 l2 渲染项（真值三态：绿=hub+td 连/黄=部分或无任务/null=字段未上报〔部署间隙〕）——词条走文案师。
+- `_l2_probe(r, to_account)`：读 hub hb（`hub_key_exists` 维度分离「键不存在〔SA4 延迟/TTL 过期〕vs 字段缺失〔部署间隙〕」）+`connected`+xtp_session_window_open（**窗外挂起=预期态标注，窗内断连=异常**——P2-2）+在跑任务 hb `td` 聚合（**all() 保守**+running_tasks 数——P2-4）。返回 `{hub_key_exists, hub_connected, in_session, td_connected, running_tasks}`。
+- **实时重算**（P1-2）：`get_session`/详情路径对 nominated/confirmed 现算 l2 覆盖返回（**不落库**——与五必过 execute 实时复评同构）；提名落库值仅存档。
+- **不入 _recheck_locked 五闸**（展示项——A04 立法变更需用户裁定）。
+- 前端 TradeSwitch.vue checklistItems 增 l2 渲染项（四态：绿=窗内 hub+td 连/黄=窗内断连或部分/灰=窗外挂起〔预期〕/null=键或字段缺失〔两来源文案分列〕）——词条走文案师。
 
 ### 顺手修
 - `routes/trading.py:39` hb 缺省 URL db=4→db=0（与全仓一致；env 已设则零变化）。
