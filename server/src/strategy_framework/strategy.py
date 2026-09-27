@@ -465,21 +465,29 @@ class Strategy:
         try:
             from ..data_platform.db import get_conn
             with get_conn() as conn:
-                cur = conn.execute(
-                    "INSERT INTO signal_log (strategy_id,symbol,action,score,price) VALUES (%s,%s,%s,%s,%s) RETURNING id",
-                    (self.config.id, self.symbol, sig.action.name, sig.score, sig.price))
-                sig_id = cur.fetchone()[0]
                 # 批 66c：bar 指纹（D26 §3.4④ 回补归因）——驱动本单的最近 bar ts+OHLCV（JSONB 单列；
                 # gen 不入指纹：worker 心跳 gen 维度+ts 时间窗交叉可溯）
+                # 批 62a：血缘三列（A03 §15.4）——source=cfg.adapter（与接口行 provider 恒等）/
+                #   fetched_at=流到端时刻 pub_ts（hub_worker handle_msg 注入）/dataset_version=hub 流世代
                 import json as _json
                 from math import isfinite
                 lb = getattr(self, "_last_bar", None) or {}
+                _src = self.config.adapter or None
+                _fat = getattr(self, "_pub_ts", None)
+                _ver = (f"hub:{self.account_id}:{getattr(self, '_hub_gen', '')}"
+                        if getattr(self, "_hub_gen", None) else None)
                 # 盲审 B-P2-6：NaN/inf 脏值 sanitize（json.dumps 默认 allow_nan 产出 NaN 字面量→
                 # PG jsonb 拒收→INSERT 异常→WAL fail-closed 弃单——归因列不得有杀单能力）
                 vals = {k: lb.get(k) for k in ("ts", "open", "high", "low", "close", "volume")}
                 ok_fp = lb and all(
                     v is None or not isinstance(v, float) or isfinite(v) for v in vals.values())
                 fp = _json.dumps(vals) if ok_fp else None
+                cur = conn.execute(
+                    "INSERT INTO signal_log (strategy_id,symbol,action,score,price,source,fetched_at,dataset_version) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                    (self.config.id, self.symbol, sig.action.name, sig.score, sig.price,
+                     _src, _fat, _ver))
+                sig_id = cur.fetchone()[0]
                 cur = conn.execute(
                     "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,account_id,bar_fingerprint) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",

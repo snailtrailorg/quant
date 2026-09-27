@@ -321,6 +321,13 @@ def run(ctx: dict) -> None:
             try:
                 r.set(_mts_key, ts_key)   # P0-3：水位持久化（重启恢复，防 SELL 重放；失败不阻断）——epoch 键
             except Exception: pass
+        # 批 62a：血缘注入（A03 §15.4）——pub_ts=流到端时刻（fetched_at 真源）/gen=流世代
+        # （dataset_version 源）；与 bar 同点更新（strategy 实例属性，_log_signal_order 消费）
+        try:
+            strategy._pub_ts = datetime.fromtimestamp(pub_ts, tz=timezone.utc) if pub_ts else None
+            strategy._hub_gen = fields.get("gen")
+        except Exception:
+            pass
         sig = strategy.on_bar(bar, list(history))
         stats["bars"] += 1
         history.append(bar)

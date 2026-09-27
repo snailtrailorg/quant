@@ -32,6 +32,46 @@ def _is_trading_hours() -> bool:
     return (930 <= hm <= 1130) or (1300 <= hm <= 1500)
 
 
+def _merge_run_lineage(run_id, frame) -> None:
+    """批 62a（A03 §15.4/B-P1-1 裁定）：per-symbol 回测任务→run 级血缘合并（行锁串行）。
+
+    source=逗号集去重并集；fetched_at=GREATEST（最晚读取）；dataset_version=首值保持
+    （store:{kind}:{version}——同 run 同 kind 版本一致）。never-raise（血缘不阻断回测主流程）。
+    """
+    try:
+        from src.data_platform.db import get_conn
+        src_new = frame.source or ""
+        fat_new = frame.fetched_at
+        kind = "bar_daily"
+        with get_conn() as conn:
+            cur = conn.execute("SELECT source, dataset_version FROM backtest_runs WHERE id=%s FOR UPDATE", (run_id,))
+            row = cur.fetchone()
+            if not row:
+                return
+            old_set = {x for x in (row[0] or "").split(",") if x}
+            new_set = {x for x in src_new.split(",") if x}
+            merged = ",".join(sorted(old_set | new_set)) or None
+            ver = row[1]
+            if ver is None:
+                try:
+                    cur2 = conn.execute("SELECT max(dataset_version) FROM bar_1D")
+                    v = cur2.fetchone()[0]
+                except Exception:
+                    v = None
+                ver = f"store:{kind}:{v}" if v is not None else None
+            if fat_new is not None:
+                conn.execute(
+                    "UPDATE backtest_runs SET source=%s, fetched_at=GREATEST(COALESCE(fetched_at, %s), %s), "
+                    "dataset_version=%s WHERE id=%s",
+                    (merged, fat_new, fat_new, ver, run_id))
+            else:
+                conn.execute("UPDATE backtest_runs SET source=%s, dataset_version=%s WHERE id=%s",
+                             (merged, ver, run_id))
+            conn.commit()
+    except Exception as e:
+        logger.warning("血缘合并失败(不阻断回测) run=%s: %s", run_id, e)
+
+
 @app.task(name="src.scheduler.tasks.astock_select_daily", bind=True, max_retries=1)
 def astock_select_daily(self):
     """每日 A 股选股；非交易日跳过。"""
@@ -964,6 +1004,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
                       freq="1D", range_=(_dt.fromisoformat(start), _dt.fromisoformat(end)))
     frame, _wm = DataBus().get_bars(req)
     bars = [dict(zip(BAR_COLUMNS, r)) for r in frame.rows]
+    _merge_run_lineage(run_id, frame)   # 批 62a：血缘合并（never-raise）
 
     # 基准数据（ptrade 批 1）：沪深300 指数日线，对齐回测窗口；缺失降级（α/β 返回 0，不崩回测）
     benchmark_bars = []

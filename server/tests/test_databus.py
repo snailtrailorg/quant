@@ -104,7 +104,8 @@ class TestDataBus:
         bus = DataBus()
         with patch("src.data_platform.db.get_bars", return_value=_bar_df()):
             frame = bus._local_fetch(_req())
-        assert frame.source == "local_pg" and len(frame.rows) == 2
+        # 批 62a：帧级 source=行级 distinct 聚合（_bar_df source 列值）——单值直通
+        assert frame.source == _bar_df()["source"].iloc[0] and len(frame.rows) == 2
 
     def test_get_reference_data(self):
         from src.data_platform.databus import DataBus

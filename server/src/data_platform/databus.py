@@ -256,7 +256,11 @@ class DataBus:
             raise DataGap(f"local_pg 无 {req.kind} 数据: {symbol} {req.freq}")
         # to_dict("records") 对齐 db.get_bars 消费方的字段类型（NaN→Python float，非 numpy）
         rows = [tuple(r[c] for c in BAR_COLUMNS) for r in df.to_dict("records")]
-        return to_contract(rows, source="local_pg", kind=req.kind, freq=req.freq)
+        # 批 62a 帧级 source（B-P2-6 裁定）：行级 BAR_COLUMNS 第 11 字段 distinct 聚合——
+        # 单值直通 str/多值逗号 join（替换原字面量 'local_pg'——血缘 62a 消费；空集回退字面量）
+        srcs = sorted({str(r[10]) for r in rows if r[10]})
+        frame_src = ",".join(srcs) if srcs else "local_pg"
+        return to_contract(rows, source=frame_src, kind=req.kind, freq=req.freq)
 
     @staticmethod
     def _watermark(frame, freq=None) -> datetime | None:
