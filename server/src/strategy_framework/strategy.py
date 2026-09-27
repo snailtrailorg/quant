@@ -219,6 +219,7 @@ class Strategy:
 
     def on_bar(self, bar: dict, history: list[dict] | None = None) -> Signal | None:
         """收到 K 线 → 因子计算 → 信号 → 下单。"""
+        self._last_bar = dict(bar)   # 批 66c：驱动 bar 记忆（_log_signal_order 落 bar_fingerprint 归因）
         ctx = BarContext(
             close=bar.get("close", 0),
             high=bar.get("high", 0),
@@ -468,12 +469,17 @@ class Strategy:
                     "INSERT INTO signal_log (strategy_id,symbol,action,score,price) VALUES (%s,%s,%s,%s,%s) RETURNING id",
                     (self.config.id, self.symbol, sig.action.name, sig.score, sig.price))
                 sig_id = cur.fetchone()[0]
+                # 批 66c：bar 指纹（D26 §3.4④ 回补归因）——驱动本单的最近 bar ts+OHLCV（JSONB 单列；
+                # gen 不入指纹：worker 心跳 gen 维度+ts 时间窗交叉可溯）
+                import json as _json
+                lb = getattr(self, "_last_bar", None) or {}
+                fp = _json.dumps({k: lb.get(k) for k in ("ts", "open", "high", "low", "close", "volume")}) if lb else None
                 cur = conn.execute(
-                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,account_id) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                    "INSERT INTO order_log (strategy_id,symbol,action,volume,price,signal_id,status,account_id,bar_fingerprint) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
                     (self.config.id, self.symbol, final_order.get("action", sig.action.name),
                      final_order.get("volume", 100), final_order.get("price", 0), sig_id, status,
-                     self.account_id))
+                     self.account_id, fp))
                 order_id = cur.fetchone()[0]
                 conn.commit()
                 return sig_id, order_id

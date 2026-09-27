@@ -256,7 +256,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         _reconcile()   # B-P1-1：TD 在线才有对账意义——窗关启动跳过，窗开沿 connect 后由 TD 重连沿触发
     ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
-        "account_id": account_id,
+        "account_id": account_id, "market": iface.get("market"),   # 批 66c：worker 时段门/缺口检测 per-market 真源（接口行）
         "strategy": strategy, "adapter": adapter, "event_engine": ee,
         "td_api": td_api, "history": history, "frozen": frozen,
         "initial_capital": initial_capital,

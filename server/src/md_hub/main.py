@@ -345,6 +345,8 @@ def main() -> None:
     # 钩子实际间隔 5s+δ>原窗宽 5s，straddle 相位会整窗 miss——pop 语义幂等，宽窗安全）：
     #   11:30 窗收 11:29 桶 / 15:00 窗收 14:59 桶 / 15:01 窗收 15:00 桶（竞价快照聚齐后，
     #   原半熟落库 V=0 即双轨四分类③）
+    # 批 66c 收编（D26 §3.2）：三窗值归 MARKETS["astock"]["flush_policy"]="three_window" 声明
+    # （消费点挂靠——market_session/骨架单源原则；值不动）
     flush_slots = {1130: 11 * 60 + 29, 1500: 14 * 60 + 59, 1501: 15 * 60}
 
     def _flush() -> None:

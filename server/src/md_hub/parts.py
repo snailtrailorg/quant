@@ -171,7 +171,9 @@ class MinuteAggregator:
         # 15:00 桶同豁免（P2 修复批盲审 A-P1-1：仅 1~2 笔竞价快照，不豁免则每日 15:01 根
         # untrusted=True 被消费方滤丢收盘竞价根）
         closing = b["minute"].hour * 60 + b["minute"].minute in (11 * 60 + 29, 14 * 60 + 59, 15 * 60)
-        untrusted = (not closing) and span < 30 and b["count"] < 3   # 双门限（评审）
+        # 双门限（评审；批 66c 确认=D26 §3.4③ 改写后契约——span<60s 单门限字面恒真已废，
+        # 现行 _finalize 即正确基底，零改动；C4 跨日清桶锚=MARKETS trading_day_anchor="natural"）
+        untrusted = (not closing) and span < 30 and b["count"] < 3
         return {
             "symbol": symbol,
             "ts": as_utc(b["minute"] + timedelta(minutes=1)),        # 分钟末标注（R-BR9 Tushare 口径）批 56b 起流协议 UTC 表示

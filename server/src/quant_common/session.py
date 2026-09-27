@@ -67,6 +67,14 @@ def _is_trading_day(cfg: dict, d: _dt.date) -> bool:
     return d.weekday() < 5  # fallback
 
 
+_MARKET_ALIASES = {"A股": "astock", "astock": "astock", "crypto": "crypto", "加密": "crypto"}
+
+
+def _norm_market(market: str) -> str:
+    """市场名归一（market_session 表用中文名 'A股'，markets.py 注册表用 'astock'——双写法兼容）。"""
+    return _MARKET_ALIASES.get(market, market)
+
+
 def in_session(market: str = "A股", now: _dt.datetime | None = None) -> bool:
     """判断某市场当前是否在交易时段。
 
@@ -77,13 +85,28 @@ def in_session(market: str = "A股", now: _dt.datetime | None = None) -> bool:
     配置缺失时降级到旧版硬编码（A 股 9:31-11:30/13:01-15:00 + weekday）。
     """
     now = now or _dt.datetime.now()
+    market = _norm_market(market)
     cfg = _load_market_config(market)
     if cfg is None:
-        # 无配置：fallback 旧版硬编码（兼容首次部署/DB 不可达）
+        # 无配置：fallback 到 MarketSpec 骨架（批 66c 收编——原 A 股硬编码单源化；
+        # crypto 无配置时错落 A 股时段的坑同修：骨架 "24x7" 恒 True）
+        from .markets import MARKETS
+        skel = MARKETS.get(_norm_market(market), {}).get("sessions_skeleton")
+        if skel == "24x7":
+            return True
         if now.weekday() >= 5:
             return False
         hm = now.hour * 100 + now.minute
-        return (931 <= hm <= 1130) or (1301 <= hm <= 1500)
+        if not skel:
+            return (931 <= hm <= 1130) or (1301 <= hm <= 1500)
+        for op, cl in skel:
+            try:
+                o, c = int(op.replace(":", "")), int(cl.replace(":", ""))
+            except ValueError:
+                continue
+            if o <= hm <= c:
+                return True
+        return False
 
     # 交易日判定
     if not _is_trading_day(cfg, now.date()):

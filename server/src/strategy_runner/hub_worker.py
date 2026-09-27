@@ -117,6 +117,41 @@ def _hub_alive(r, account_id) -> bool:   # hub 心跳存在（TTL 内）；存�
         return r.exists(f"{HB_KEY}:{account_id}") == 1   # 批 66b：per-account 键（修原裸键读=A股心跳恒真掩盖加密 hub 死亡）
     except Exception: return True
 
+def _ts_gap_frozen(ts_key: str, max_ts: str, market: str) -> bool:
+    """批 66c（D26 §3.4①②）：ts 缺口检测——ts_key−max_ts>60s 且 bar 自身时刻在盘中
+    连续段内（段首 2 分钟豁免：隔段/隔日/重启首根不触发）。检出=源侧丢根（rewarm 补不了
+    的洞——A股 bar_1min 空），比 seq gap 严重：冻结 sticky（重启+rewarm 推进水位=显式
+    接受带洞窗，控制目标=强制人工介入）。
+
+    bar 自身 ts 判时段（非 wall clock）——盘外迟到 bar 不触发（in_session(bar_dt)）。
+    crypto 24x7 连续段：无段首豁免（60s+ 缺口=真断流即冻结）。
+    """
+    if not ts_key or not max_ts:
+        return False
+    try:
+        gap = int(ts_key) - int(max_ts)
+    except ValueError:
+        return False
+    if gap <= 60:
+        return False
+    from datetime import datetime, timezone as _tz
+    try:
+        bar_dt = datetime.fromtimestamp(int(ts_key), tz=_tz.utc).astimezone()
+    except (ValueError, OSError, OverflowError):
+        return False
+    if market == "crypto":
+        return True
+    from src.quant_common.session import in_session
+    if not in_session("astock", bar_dt.replace(tzinfo=None)):
+        return False
+    from src.quant_common.markets import MARKETS
+    hm = bar_dt.hour * 100 + bar_dt.minute
+    for op, cl in MARKETS["astock"]["sessions_skeleton"]:
+        if int(op.replace(":", "")) <= hm <= int(cl.replace(":", "")):
+            return (hm - int(op.replace(":", ""))) >= 2   # 段首 2 分钟内豁免
+    return False
+
+
 def _td_connect_due(now: float, win, last_conn_ts: float, dt_now) -> bool:
     """TD 窗开沿建连判定（P2 批 08-28，代码盲审 B-P1）：交易日门（消周末窗读"开"的
     churn 触发）+ 60s 节流（防每步 5s createTraderApi 循环——失败不 release，08-25
@@ -130,11 +165,18 @@ def _td_connect_due(now: float, win, last_conn_ts: float, dt_now) -> bool:
 def run(ctx: dict) -> None:
     """ctx: {tid, sid, symbol, strategy, adapter, event_engine, td_api, history, frozen, warmup_pg, stop_check, reconcile}"""
     # 2026-08-19 归位：直连 quant_common（原经 main 互指且连带加载入口模块级 vnpy import）
-    from src.quant_common.session import in_astock_session as _in_astock_session, session_edge
+    # 批 66c：时段判定 per-market（原 _in_astock_session 对加密 24/7 误伤——盘外 BUY 误拒+
+    # STALE_PUB_S 丢弃误前置；market=ctx 注入真源（接口行），缺省按 symbol 后缀派生）
+    from src.quant_common.session import in_session, session_edge
+    from src.quant_common.markets import market_of_symbol
     from src.quant_common.guard import sd_notify as _sd_notify
 
     r = _valkey()
     tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
+    market = ctx.get("market") or market_of_symbol(symbol)   # 批 66c：ctx 注入真源（接口行），缺省按 symbol 后缀派生
+
+    def _in_mkt_session(now=None) -> bool:
+        return in_session(market, now)
     account_id = ctx.get("account_id")     # D26 批 66b：per-account 流键/同源校验真源（全市场；上游 NOT NULL+main 层兜底）
     if account_id is None:
         raise ValueError("ctx.account_id required——裸键形态已退役（批 66b；上游 live_task.account_id NOT NULL）")
@@ -198,11 +240,21 @@ def run(ctx: dict) -> None:
         fresh = ctx["warmup_pg"]()
         fresh = _warmup_from_stream(fresh, upto_ts)
         history[:] = fresh[-100:]
+        # 批 66c 解冻闭环（D26 §3.4②）：rewarm 后显式推进 max_ts 至回放尾——否则回放不推水位，
+        # 冻结重启后首根 live bar 仍满足缺口条件再冻结（盘中永远解不了）。跳洞=显式接受。
+        if history:
+            cand = _epoch_key(history[-1].get("ts", ""))
+            if cand and (not state.max_ts or int(cand) > int(state.max_ts)):
+                state.max_ts = cand
+                try:
+                    r.set(_mts_key, cand)   # 持久水位同步（重启一致性）
+                except Exception:
+                    pass
 
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
     # ——— send_order 时刻事实检查（S6）：交易时段+bar 新鲜+hub 心跳；纯逻辑在 trading.buy_ok_check，检查器由 ctx 注入 C2 网关 ———
     ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r, account_id), time.time(),
-                                                in_session=_in_astock_session())
+                                                in_session=_in_mkt_session())
     # ——— 消息处理（guard 保护，R-BR12；告警走 _alert——notify 自带 1min 同标题去重）———
     @make_guard("hub.on_msg", _alert)
     def handle_msg(fields: dict) -> None:
@@ -216,6 +268,17 @@ def run(ctx: dict) -> None:
         # R-DL1 持久去重（评审 S7）：ts 回退/重复（含 flush 迟到 tick 重复桶）一律丢弃（epoch 键——跨表示同刻同键）
         if ts_key and ts_key <= state.max_ts:
             stats["dropped_dup"] += 1
+            return
+        # 批 66c：ts 缺口检测（时段感知+段首豁免——裸比较会在午休/隔夜/节假日每日误触发=
+        # 告警疲劳+rewarm 风暴，D26 §3.4①）。检出=sticky 冻结（比 gen_jump 档严重：源侧丢根
+        # rewarm 补不了；重启+rewarm 推进水位过缺口=操作者显式接受带洞窗）
+        if _ts_gap_frozen(ts_key, state.max_ts, market):
+            frozen["sticky"] = True
+            logger.error("ts 缺口 %s→%s（源侧丢根），冻结", state.max_ts, ts_key)
+            _alert(f"ts 缺口冻结任务 {tid}（{symbol}）",
+                   f"水位 {state.max_ts} 后缺口至 {ts_key}（源侧丢根，rewarm 不可补）；"
+                   "重启任务=显式接受带洞窗继续。SELL 放行。", code="frozen.stream")
+            _rewarm(upto_ts=ts_key)   # 推进水位过缺口（历史面尽力补）——sticky 已拒 BUY
             return
         kind = state.classify(fields)
         if kind == "stale_gen":
@@ -238,7 +301,7 @@ def run(ctx: dict) -> None:
             _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 hub 流。", code="frozen.stream")
         # pub_ts 超龄丢弃（R-DL3）
         pub_ts = float(fields.get("pub_ts", 0) or 0)
-        if pub_ts and _in_astock_session() and (time.time() - pub_ts) > STALE_PUB_S:
+        if pub_ts and _in_mkt_session() and (time.time() - pub_ts) > STALE_PUB_S:
             stats["dropped_stale"] += 1
             return
         if str(fields.get("untrusted", "0")).lower() in ("1", "true"):
@@ -251,7 +314,7 @@ def run(ctx: dict) -> None:
                "volume": float(fields["volume"] or 0)}
         # bar 已接受：先落锚+去重水位再驱动策略（盲审 C-F1——锚后更新则首根 bar 的 BUY 读到昨日旧锚被确定性误拒）
         stats["last_bar_wall"] = time.time()
-        if _in_astock_session():
+        if _in_mkt_session():
             stats["sess_bar_wall"] = stats["last_bar_wall"]
         if ts_key:               # 批 56b 盲审 B：空键不回写内存与 Valkey（脏 ts 不清零水位——R-DL1 失忆防线）
             state.max_ts = ts_key
@@ -281,7 +344,7 @@ def run(ctx: dict) -> None:
         return len(ids)
 
     # ——— 批 4b：EngineLoop 编排（旧 5s 定时段逐项退化为钩子；11 项清单/period 见设计）———
-    sess_was = _in_astock_session()   # 时段沿检测基态
+    sess_was = _in_mkt_session()   # 时段沿检测基态
     td_status_was = True
     _td_conn_ts = [0.0]   # TD 窗开建连 60s 节流锚（P2 批 08-28，B-P1；容器型便 nonlocal 闭包）
     halt_state = {"was": False}
@@ -303,14 +366,14 @@ def run(ctx: dict) -> None:
 
     def _sess_edge():
         nonlocal sess_was
-        sess_now = _in_astock_session()
+        sess_now = _in_mkt_session()
         if session_edge(sess_now, sess_was):
             stats["sess_bar_wall"] = 0.0   # S6 修订：沿上清基线
         sess_was = sess_now
 
     def _blind_watch():
         """盲视观测（S6）：frozen["now"] 只喂心跳/告警，下单判定由 send_order 时刻的 buy_ok 做。"""
-        sess_now = _in_astock_session()
+        sess_now = _in_mkt_session()
         hub_alive = _hub_alive(r, account_id)
         bar_stale = (sess_now and stats["sess_bar_wall"]
                      and time.time() - stats["sess_bar_wall"] > trading.FROZEN_STALE_BAR_S)

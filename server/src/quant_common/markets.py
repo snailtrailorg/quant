@@ -10,10 +10,31 @@
 """
 from __future__ import annotations
 
+# MarketSpec（批 66c，D26 §3.2 纯数据声明——骨架层；market_hours/market_session 表=运营真源不变）：
+#   trading_day_anchor：交易日翻转锚（natural=自然日〔A 股 C4 跨日清累计〕/utc0/night_open——期货夜盘预留）
+#   sessions_skeleton：时段骨架（列表=日盘分段 [(open,close)...]；"24x7"=全天候）——session.py 无配置
+#     fallback 与 worker ts 缺口检测的段判定单源；精确到分钟/节假日归 market_session 表
+#   channels：数据通道旋钮（per-market stream_maxlen 上界——hub STREAM_MAXLEN 缺省同源）
+#   flush_policy：分钟桶收口策略（three_window=A股三窗 finalize〔11:29/14:59/15:01〕；
+#     stale_5min=加密每 5 分钟 flush_stale）——hub main._flush 消费点注释挂靠此声明（值不动）
 MARKETS: dict[str, dict] = {
-    "astock": {"name_zh": "A股", "timezone": "+08:00"},
-    "crypto": {"name_zh": "加密", "timezone": "UTC"},
+    "astock": {"name_zh": "A股", "timezone": "+08:00",
+               "trading_day_anchor": "natural",
+               "sessions_skeleton": [("09:31", "11:30"), ("13:01", "15:00")],
+               "channels": {"bar": {"stream_maxlen": 5000}},
+               "flush_policy": "three_window"},
+    "crypto": {"name_zh": "加密", "timezone": "UTC",
+               "trading_day_anchor": "utc0",
+               "sessions_skeleton": "24x7",
+               "channels": {"bar": {"stream_maxlen": 5000}},
+               "flush_policy": "stale_5min"},
 }
+
+
+def market_of_symbol(symbol: str) -> str:
+    """symbol 后缀（.SHSE/.BINANCE 等）→ 市场域（EXCHANGES 单源派生；未知后缀=astock 缺省）。"""
+    suffix = symbol.rsplit(".", 1)[-1] if "." in symbol else ""
+    return EXCHANGES.get(suffix, {}).get("market", "astock")
 
 EXCHANGES: dict[str, dict] = {
     "SHSE": {"market": "astock"}, "SZSE": {"market": "astock"}, "BSE": {"market": "astock"},
