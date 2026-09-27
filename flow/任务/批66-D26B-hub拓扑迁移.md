@@ -241,7 +241,7 @@ _ts_gap_frozen(ts_key: int, max_ts: int, sessions: SkeletonView) -> bool   # ts_
 - **mock 方式**：fakeredis SCAN/TTL/xrevrange/xread/xadd；DB 期望集 fake 行集（trading 域 enabled/disabled+provider 未注册态）；unit 清单 fake；deploy 检查=本地 pytest 模拟清单运算；回灌=旧流 fake 条目→断言新键条目数与 payload 字段
 - **参考文档**：D26 §3.3/§4.3/§五 + 模块契约 md_hub/strategy_runner/data_platform + deploy-mechanism 记忆
 
-### 66c · 稳定性配套批 ✅ **代码交付**（2026-09-27；双盲 A P1×1+P2×5 / B P1×1+P2×6 全处置——同判 P1=归一方向杀 DB 配置路径；**文档尾批拆 66c-2**：模块契约×5+接口契约+D26 注记随手册重写同批）
+### 66c+66c-2 ✅ **全链交付**（2026-09-27，prod `202609271048-84bf593`——首发收敛断言拦下游离 feishu-bot@10〔用户裁定 stop+disable〕重发绿；1480 全绿+迁移 0108 JSONB；文档尾批=手册重写〔文案师〕+契约×5+接口契约+D26 注记）
 
 - **目标**：§3.4 四件（ts 缺口检测/解冻闭环/半根桶 untrusted/bar 指纹）+MarketSpec 纯数据+三处归属收编+worker 时段门修（§0.4-1）+文档收尾。
 - **依赖（就绪）**：66b ✅（键模型终态后做缺口检测，避免二次改键域）；批 62 未实施不阻塞（白名单已预登记，验收不依赖）。
