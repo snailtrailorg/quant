@@ -309,6 +309,15 @@ def _md_to_tick(md):
     return tick
 
 
+def _emq_window_open(now, trading_day: bool) -> bool:
+    """EMQ 行情连接窗（批 66b）：交易日 8:25-15:15（东财 FAQ Q12「早 8:35 开始提供服务」
+    ——lead 10 分；收盘 15:00 让 15 分收尾）。非交易日全关（staging 实证周日 Login-1）。"""
+    if not trading_day:
+        return False
+    hm = now.hour * 60 + now.minute
+    return 8 * 60 + 25 <= hm < 15 * 60 + 15
+
+
 @register_md_gateway
 class EmqMdGateway(MdGateway):
     """东方财富 EMQ 极速行情网关（批 63 Phase B）。
@@ -333,6 +342,8 @@ class EmqMdGateway(MdGateway):
         self._on_tick_cb = None
         self._connected = False
         self._login_err = 0
+        self._login_addr = None       # 批 66b 窗：defer_login 态保存待窗开沿登录
+        self._last_login_try = 0.0
         self._q = queue.Queue(maxsize=self._TICK_QUEUE_MAX)
         self._worker = None
         self._dropped = 0
@@ -355,13 +366,29 @@ class EmqMdGateway(MdGateway):
         self._api = mod.QuoteApi.CreateQuoteApi(log_dir, mod.EMQ_LOG_LEVEL.INFO, mod.EMQ_LOG_LEVEL.ERROR)
         self._spi = _make_spi(mod, self)
         self._api.RegisterSpi(self._spi)
+        # 批 66b 连接窗（staging 彩排实锤补齐）：非交易日/窗外=defer_login 挂起（api/spi 已建，
+        # 窗开沿 poll_supervise 重登腿接管——对齐 XtpMdGateway 窗关启动/D26 §3.3 hub 进程模型
+        # 立法「连接生命周期=hub 内部状态机」）。东财柜台时段依据=FAQ Q12「早 8:35 开始提供
+        # 服务」+staging 实证周日 Login-1；窗=交易日 8:25-15:15（8:35 前 10 分 lead/收盘让 15 分）。
+        from datetime import datetime as _dt
+        from src.strategy_framework.md_session import is_trading_day
+        self._login_addr = (ip, port, account, pwd)
+        if not _emq_window_open(_dt.now(), is_trading_day()):
+            self._connected = False
+            self._login_err = 0
+            logger.info("[gw] EMQ 窗关启动（defer_login，api 已建待窗开沿登录）")
+            return
+        self._login_now()
+
+    def _login_now(self) -> None:
+        ip, port, account, pwd = self._login_addr
         ret = self._api.Login(ip, port, account, pwd)
         self._login_err = ret
         self._connected = ret >= 0
         if not self._connected:
             # 登录失败 fail-fast（对齐 hub「建连异常 → exit 78」）：EMQ 无 supervisor 重登，
             # 静默 _connected=False 会让 hub 成「失聪僵尸」（占租约心跳却不工作）——raise 让
-            # systemd 重启重试，而非半死存活。
+            # systemd 重启重试，而非半死存活。（窗关启动态不在此路径——defer 不试不报）
             raise RuntimeError(f"EMQ 行情登录失败（Login 返回 {ret}，{ip}:{port}）")
 
     def subscribe(self, symbol: str) -> None:
@@ -391,9 +418,21 @@ class EmqMdGateway(MdGateway):
         return self._connected
 
     def poll_supervise(self, in_session: bool, trading_day) -> None:
-        # EMQ 无每日连接窗（SDK「不支持过夜」）；无 OnDisconnected 回调——断线感知仅 OnError。
-        # 运行期重连语义待 P3 staging 真连实证（Login 同步阻塞原语；SDK 未明示自动重连），
-        # 本钩子暂不主动重登；仅周期清点 tick 丢弃计数（消费停滞可见化）。
+        # 批 66b：窗开沿重登腿（窗关启动 defer_login 的接管者）——窗开且未连 → _login_now
+        # （60s 节流防每步 5s 同步阻塞 Login 循环）。盘中断线重连语义仍待 P3 真连实证
+        # （EMQ 无 OnDisconnected，断线感知仅 OnError）——本腿只管「从未连上→窗开补登」。
+        import time as _time
+        from datetime import datetime as _dt
+        now = _time.time()
+        if (not self._connected and self._login_addr is not None
+                and now - self._last_login_try >= 60.0
+                and _emq_window_open(_dt.now(), trading_day)):
+            self._last_login_try = now
+            try:
+                self._login_now()
+                logger.info("[gw] EMQ 窗开沿登录成功")
+            except Exception as e:
+                logger.warning("[gw] EMQ 窗开沿登录失败（60s 后重试）: %s", e)
         if self._dropped:
             logger.warning("[gw] EMQ tick 队列满丢弃 %d 条（消费停滞？）", self._dropped)
             self._dropped = 0
