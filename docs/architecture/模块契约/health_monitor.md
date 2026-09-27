@@ -2,6 +2,7 @@
 
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件。
 > 配套：`docs/design/D15-服务监控设计.md`（设计全貌）+ `docs/architecture/接口契约.md`。
+> **最近变更（批 66b，2026-09-27 上产）**：hub 观测面 N 实例化——collector `snap["hubs"]`（SCAN per-account+legacy 裸键收编 account=0）+ CORE_UNITS 去 md-hub@quant；R4 期望集×在场集交叉（`_hub_expected_ids` DB 源）+legacy 过渡豁免+per-account streak（JSON dict 持久化）；R6 per-account（component=md-hub:{acct}）；render_prometheus account 标签。
 
 ## 职责
 双层监控的内层：采集组件状态（systemd unit/Valkey 心跳族/依赖）→ 症状型规则判定 →
@@ -22,19 +23,39 @@ server/src/health_monitor/
 
 ### collector.py
 ```python
-CORE_UNITS: list[str]          # 5 个常驻 unit（web-api/celery-worker/beat/risk/md-hub，实例 @quant）
+CORE_UNITS: list[str]          # 4 个常驻 unit（web-api/celery-worker/beat/risk，实例 @quant）——批 66b：
+                               # md-hub 移出（账号级实例化 quant-md-hub@{account_id}，@quant 退役），
+                               # hub 健康=心跳键 SCAN 动态发现（HUB_HB_PATTERN），不在 CORE_UNITS
 systemctl_units(units) -> dict  # 批量 ActiveState/SubState/NRestarts；失败返回 {}（=证据缺失）
-collect(now=None) -> dict      # 幂等快照 {ts, units, deps, hub, tasks, valkey_memory}；子项失败不拖垮整体
-render_prometheus(snap) -> str # Prometheus 文本（按指标族分组——严格解析器兼容）
+collect(now=None) -> dict      # 幂等快照 {ts, units, deps, hubs, tasks, valkey_memory, resources, ...}；
+                               # 子项失败不拖垮整体。snap["hubs"]=N 实例 dict（批 66b：SCAN
+                               # quant:hb:md-hub:* per-account 在场集 {account_id: {gen,subs,ticks,
+                               # sess_ticks,bars,dropped_pg,tick_age}}；legacy 裸键兼容读——per-account
+                               # 集空时收编为 account_id=0，键切换/回滚窗观测面不瞬盲，终态应消失）
+render_prometheus(snap) -> str # Prometheus 文本（按指标族分组——严格解析器兼容）；hub 指标族带
+                               # account 标签（批 66b：quant_hub_*{account="{acct}"}，legacy 收编
+                               # account="0"；无实例时 quant_hub_hb_present 0 无标签）
 ```
 
 ### monitor.py
 ```python
+_hub_expected_ids() -> list[str]
+    # 批 66b：R4 期望集 DB 源——external_interface enabled 且 'trading'=ANY(capabilities) 且
+    # provider∈list_md_gateway_providers() 白名单（同 SA4/deploy，防未实现行误报缺失）；
+    # 低频 30s 查询不入 collect（/metrics 高频）；查询失败返回 []（evaluate 降级空集地板判定）
 evaluate(snap, state=None) -> tuple[list[dict], dict]
-    # 纯函数规则判定；state={"hub_lost_streak","sess_stall","prev_sess_ticks"} 由调用方持久化
+    # 纯函数规则判定；state={"hub_lost_streak","sess_stall","prev_sess_ticks"}——批 66b 起均为
+    # {account_id: n} dict（per-account，调用方持久化）
     # 规则：R1 unit_down（auto-restart 豁免）/R2 unit_restarted（计数沿，绕过电平状态机）
-    #      R3 dep_down / R4 hub_hb_lost（连续 2 轮）/ R5 task_blind（warning）/ R6 hub_tick_stalled（时段内零增长≥2 轮）
-run_check() -> dict            # beat 30s 入口（risk 队列，expires=25）：采集→判定→沿检测→告警/落库→自身心跳
+    #      R3 dep_down / R4 hub_hb_lost（批 66b：期望集(snap["hub_expected"])×在场集(snap["hubs"])
+    #      交叉——DB 行是缺席发现唯一正确来源（SCAN 在场测不到缺席）；连续 2 轮；component=
+    #      md-hub:{acct}；legacy 过渡豁免——裸键收编（0∈hubs）在场=键切换/回滚过渡态整轮豁免
+    #      （防迁移夜假 critical）；期望集缺供=空集地板：在场集非空即过，全空按 "__all__" streak
+    #      保守告警）/ R5 task_blind（warning）/ R6 hub_tick_stalled（批 66b per-account：时段内
+    #      sess_ticks 零增长≥2 轮，component=md-hub:{acct}）
+run_check() -> dict            # beat 30s 入口（risk 队列，expires=25）：采集→snap["hub_expected"] 注入
+                               # →判定→沿检测→告警/落库→自身心跳；跨轮状态三键值=JSON dict（批 66b：
+                               # 坏值/旧标量形态按空 dict 从零起），写回 json.dumps
 report_schema_findings(findings) -> None
     # #48 入口路由：verify_schema 纯函数结果 → 告警/health_event（db 层不引告警依赖）
     # expectations_missing 哨兵 → warning"校验被禁用"
@@ -59,9 +80,9 @@ stdlib only（模块级）；`redis`/`src.data_platform.db`/`src.alert_notify.no
 | 键 | 语义 |
 |---|---|
 | `quant:hm:health-monitor` | 自身心跳（TTL 120s；外层监测"监控死了"用） |
-| `quant:hm:state:{rule}:{component}` | 电平沿状态（TTL 7200） |
+| `quant:hm:state:{rule}:{component}` | 电平沿状态（TTL 7200；R4/R6 的 component=`md-hub:{account_id}`——批 66b per-account） |
 | `quant:hm:nr:{unit}` | NRestarts 上次值（计数沿，TTL 86400） |
-| `quant:hm:hub_lost_streak` / `r6_stall` / `r6_prev_sess_ticks` | R4/R6 跨轮证据 |
+| `quant:hm:hub_lost_streak` / `r6_stall` / `r6_prev_sess_ticks` | R4/R6 跨轮证据——**批 66b 起值=JSON dict** `{account_id: n}`（per-account streak；旧标量形态按空 dict 从零起） |
 
 ## 五、不变量
 1. **通知链独立于存储**：run_check 的通知循环在最外层，Valkey 挂 → 无去重直发（dep_down(valkey) 本身就是最紧急事件）

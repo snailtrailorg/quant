@@ -3,7 +3,8 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
-> **最近变更（2026-09-24 D4/D6）**：资金对账现金口径（available_cash）+ 跨 account 反向识别（D4）；SA4 加密 per-account hub 期望态 + 停非期望（D6）。
+> **最近变更（批 66b，2026-09-27 上产）**：SA4/L3 hub 期望源=DB 行驱动全市场——`_desired_units` 读 `external_interface` trading 域 enabled 行（`quant-md-hub@{row.id}`；**去 crypto 过滤+builtin 常开条目+SA4_HUB_UNIT 常量退役**，provider 白名单保留防「拉起→78→告警」死循环）；source="hub" 统一+per-account 熔断键（`_sa4_hub_guards(r, account_id)`：lease/maintenance 键按 account 分键）；L3 停非期望账号 hub（实例名纯数字判定，@quant 非数字过渡实例不越权停——退役 stop/mask 由 deploy 波次承担）。
+> 2026-09-24 D4/D6：资金对账现金口径（available_cash）+ 跨 account 反向识别（D4）；SA4 加密 per-account hub 期望态 + 停非期望（D6）。
 ## 最近变更
 - **批26（2026-09-15）**：自定义因子加载（`load_factors_from_db`）从 app.py **模块 import 期**挪进 `worker_process_init` 信号——根治 C6 exec 回染（import 期 exec 用户代码把重库拉进 beat/worker 父进程且终身不卸）。beat 只调度零因子；每 prefork 子进程各自加载（任务头 R-S4 lazy 重载仍是运行期兜底）。守门测 `test_beat_import_chain_heavy_free` 升级为哨兵法（import 期必不触碰因子加载）。
 - **批25（2026-09-15）**：system_log 落库 celery 侧装配（`setup_logging` 挂回 root + `worker_process_init` 每子进程自起 flush 线程 + `worker_process_shutdown` 子进程尾窗冲刷）。详见 `docs/architecture/模块契约/` 各模块与 `docs/obsolete/任务归档/批25-全局日志三套体系.md`。
@@ -67,7 +68,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `health_monitor_check` | beat 30s（queue=risk **expires=25**，停机窗消息过期防连环补跑） | 15 号服务监控：30s 采集判定（unit/依赖/心跳+沿检测+health_event 落库+告警；S6"只告警不动作"的聚合点）（P3 回写 2026-08-20 补） |
 | `email_outbox_sweep` | beat 60s | 发件箱扫描重发（`email_service.sweep(3)`，指数退避由 next_attempt_at 控制）（P3 回写 2026-08-20 补） |
 | `notifications_cleanup` | beat 每天 | 通知留存清理（`alert_notify.cleanup`：已确认>7 天、全部>30 天删）（P3 回写 2026-08-20 补） |
-| `sa4_reconciler` | beat 300s（queue=risk expires=290） | **SA4 重启恢复 + L3 三源意图调和（批5 扩 2026-08-27）**。L1：Failed 单元退避恢复（live-task 限定，reset-failed+start，Valkey `quant:sa4:backoff:{unit}` 300s*2^n 封顶 1h，稳定>10min 清零，PG 不可达整体跳过）。L3：`_desired_units(conn)` 期望表三源（live_task running / strategy `is-enabled` 且无关联 / md-hub 常开）→ active+failed 双态调和（failed 按 ExecMainStatus 区分 78 跳过+1h 去重告警 / 崩溃 reset-failed+start 走三重熔断）→ md-hub 熔断（租约 fail-closed 含 Valkey 不可达 / 维护标记 `quant:maintenance:md-hub` db0 / 退避共键） |
+| `sa4_reconciler` | beat 300s（queue=risk expires=290） | **SA4 重启恢复 + L3 三源意图调和（批5 扩 2026-08-27；批 66b hub 期望源改造）**。L1：Failed 单元退避恢复（live-task 限定，reset-failed+start，Valkey `quant:sa4:backoff:{unit}` 300s*2^n 封顶 1h，稳定>10min 清零，PG 不可达整体跳过）。L3：`_desired_units(conn)` 期望表三源（live_task running / strategy `is-enabled` 且无关联 / **hub=external_interface trading 域 enabled 全市场行（批 66b：`quant-md-hub@{row.id}`——builtin 常开+SA4_HUB_UNIT 常量+crypto 过滤均退役）**）→ active+failed 双态调和（failed 按 ExecMainStatus 区分 78 跳过+1h 去重告警 / 崩溃 reset-failed+start 走三重熔断）→ hub 拉起前置熔断 per-account（lease/maintenance 键含 account_id；租约 fail-closed 含 Valkey 不可达 / 维护标记 / 退避共键）→ **停非期望账号 hub**（active 的 `quant-md-hub@*` 实例名纯数字且不在期望表 → stop 防反拉；@quant 非数字过渡实例不越权停——退役由 deploy 波次承担；不打维护键防挡重新启用） |
 
 > beat 定时表完整定义在 `app.conf.beat_schedule`（实盘改 crontab）。每个任务 `options={"queue": "data"/"analysis"/"risk"}` 分队列。
 
@@ -80,10 +81,10 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 - `sync_all_symbols._mark(status, count)` / `progress_cb(i, total, ts_code)`：进度回调（写 sync_config + Valkey）
 - `sync_via_celery.progress_cb(i, total, current)`：进度回调（写 Valkey `sync:type:{sid}` + `update_heartbeat`）
 - `backtest_symbol_task.on_bar_cb(bar, ctx)`：每 bar publish Valkey `backtest:run:{run_id}:{symbol}`
-- `_desired_units(conn) -> list[tuple[unit, source]]`：声明式期望表（批5）——live_task running→live-task@{tid}；strategy 按 `systemctl is-enabled`==enabled 且无 live_task 关联（**enabled DB 行不作拉起依据**——镜像实锤 2-3 行会误拉废 runner）；md-hub 常开末位 (builtin)
+- `_desired_units(conn) -> list[tuple[unit, source]]`：声明式期望表（批5；批 66b hub 源改造）——live_task running→live-task@{tid}；strategy 按 `systemctl is-enabled`==enabled 且无 live_task 关联（**enabled DB 行不作拉起依据**——镜像实锤 2-3 行会误拉废 runner）；hub→external_interface trading 域 enabled 行 `quant-md-hub@{row.id}`（source="hub" **统一**，全市场；provider 白名单保留——未实现 MD 网关不进期望表防「拉起→78→告警」死循环）
 - `_sa4_units(state) -> list[str]`：list-units 三模式（live-task+md-hub+strategy）
 - `_sa4_exec_status(unit) -> int|None`：ExecMainStatus 读（78 判据）；None→按崩溃 fail-open（一周期自愈）
-- `_sa4_hub_guards(r) -> str|None`：md-hub 三重熔断——lease-held / maintenance / 退避窗；Valkey 不可达 fail-closed
+- `_sa4_hub_guards(r, account_id=None) -> (ok, reason)`：md-hub 拉起前置熔断（批 66b per-account 分键——lease `hub:lease:{account_id}` / maintenance `quant:maintenance:md-hub:{account_id}`）——lease-held / maintenance / valkey-down|error（Valkey 不可达 fail-closed）；None 全局键分支为遗留防御（期望源恒数字）
 - `_sa4_alert_once(r, key, title, body)`：1h SET NX EX 去重窗（78/维护电平告警防 288 条/天疲劳）
 
 > （P3 回写 2026-08-20：删"beat_schedule 缩进错乱 TODO 核实"警告——该合并残留已修，beat 顶层正常调度全部条目）
@@ -177,4 +178,5 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 
 
 ## 最近变更
+- 2026-09-27（批 66b）：SA4/L3 hub 期望源=DB 行驱动全市场（external_interface trading 域 enabled；builtin/SA4_HUB_UNIT/crypto 过滤退役）+per-account 熔断键+L3 停非期望账号 hub（纯数字实例名判定）
 - 2026-08-27 批5：sa4_reconciler 扩 L3 三源调和（期望表/failed 双态/三重熔断），详规 `docs/obsolete/任务归档/批5-L3扩面与polkit配套.md` v2.1

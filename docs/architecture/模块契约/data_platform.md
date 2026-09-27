@@ -3,7 +3,8 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
-> **最近变更（2026-09-24 D1/D3/加密接入批）**：`perms.account_allows`（D1）；`db.get_bars(source)` 按 source 过滤（D3）；`get_interface_row(md_only)` 跳过 required_fields（加密 MD 空凭证）。
+> **最近变更（批 66b，2026-09-27 上产）**：databus `Subscription.account_id` 必填+subscribe 键化（`hub:bars:{account_id}:{symbol}`）；stock_detail `_quote_block` SCAN `hub:latest_tick:*:{symbol}`（COUNT 500+ISO 归一比 ts 取最大）。
+> 2026-09-24 D1/D3/加密接入批：`perms.account_allows`（D1）；`db.get_bars(source)` 按 source 过滤（D3）；`get_interface_row(md_only)` 跳过 required_fields（加密 MD 空凭证）。
 ## 职责
 统一数据中台：PG 连接池 + K 线 schema + Tushare 拉取 + 交易日历 + 数据源抽象。
 **所有模块通过本模块访问数据**（`get_conn`/`save_bars`/`get_bars`/`is_trading_day`），不直接接触数据源。
@@ -13,7 +14,7 @@
 server/src/data_platform/
 ├── db.py              # PG 连接池 + K 线读写（validate_bars）+ 交易日历 + verify_schema
 ├── store.py           # 批 59 M4：Store（版本冻结骨架 cur_version/frozen_or_current/save）
-├── databus.py         # 批 59/60a M4：DataBus 消费门面（get_bars/get/get_snapshot/subscribe 真实现 + _watermark 连续无缺；StreamHandle 流句柄；读 Valkey hub:bars:* 依赖）
+├── databus.py         # 批 59/60a M4：DataBus 消费门面（get_bars/get/get_snapshot/subscribe 真实现 + _watermark 连续无缺；StreamHandle 流句柄；读 Valkey hub:bars:{account_id}:{symbol}——批 66b 键化）
 ├── schema.py          # Bar dataclass + vt_symbol 转换 + DDL 模板
 ├── data_source.py     # DataSource 接口（get_param*/get_rate_limit）+ Tushare/AkShare 实现（DB 化凭证 + 积分档预设）
 ├── rate_limit.py      # 限流+熔断三件套：RateLimiter/CircuitBreaker/rate_limit_context（2026-08-27 限流治理新建）
@@ -236,7 +237,8 @@ get_stock_detail(symbol) -> dict
     # 任意格式 symbol 归一 → {symbol, ts_code, name, industry, in_pool, limit,
     #   moneyflow(近5日), events(龙虎榜/大宗/解禁/质押合并 20 条), name_changes,
     #   chips(池内直读/非池按需), finance(池内直读/非池按需), quote}
-    # quote 降级链：hub:latest_tick:{vt}（秒级）→ 腾讯(60s TTL) → null；不缓存
+    # quote 降级链（批 66b）：hub:latest_tick:*:{vt} SCAN 在场集取 payload ts 最大者（COUNT 500 显式
+    #   ——SCAN 成本∝键总量；ts 经 fromisoformat 归一比较——跨 offset ISO 串序≠时间序）→ 腾讯(60s TTL) → null；不缓存
     # 慢变块 Valkey detail:slow:{ts} 10min——完整块才缓存（部分降级不落防缺块 10min）
     # 非池按需 detail:ondemand:{kind}:{ts} 5min（"null" 字串缓存空结果防穿透）
     # 永不抛异常：各块独立降级，坏块 null/[]
@@ -252,7 +254,9 @@ platform.is_trading_day(d=None) -> bool
 platform.get_trade_calendar(year) -> list[date]
 platform.init_calendar(year) -> None            # 调 tushare.pull_trade_cal
 # 占位（T04/T05 实现）：get_realtime / get_fundamental / get_convertible_terms / get_funding_rate
-# subscribe 已真实现（批 60a）——在 databus.DataBus.subscribe（非 platform 单例），流消费经 StreamHandle
+# subscribe 已真实现（批 60a）——在 databus.DataBus.subscribe（非 platform 单例），流消费经 StreamHandle；
+# 批 66b 键化：Subscription.account_id **必填**（None raise——裸键形态已退役），订阅键
+# `hub:bars:{sub.account_id}:{symbol}` 单标的（多标的 fail-fast 挂账 M7）；Subscription 契约见接口契约.md §共享行情 Hub
 ```
 > ⚠️ `platform` 单例职责是"统一入口"，但当前多数模块直接用 `db.save_bars`/`get_bars`/`get_conn`（不绕 platform）。新代码可优先用 platform，旧代码保留。
 

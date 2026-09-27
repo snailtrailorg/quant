@@ -1,12 +1,12 @@
 # 模块契约 · strategy_runner（策略实盘化进程）
 
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量 + 已知差异。任务改本模块前读本文件。
-> 注：流键/水位键条目记录**现行代码形态**（A股裸键）；终态=D26 账号级键（D26 §五 #1/#3，D26-B 批切换）。
+> 注：流键/水位键条目=**批 66b 起 per-account 现行形态**（`hub:bars:{account_id}:{symbol}` / `hub:worker:max_ts:{account_id}:{symbol}`——D26 账号级已实施上产）。
 > 配套：`接口契约.md`（Order/Position/live_task/持仓真相源）+ `模块契约/md_hub.md`（hub 侧）+ `模块契约/strategy_framework.md`（runtime 骨架/SDK 守卫/L2 会话契约）。
 > 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架。
 > **批 6b（2026-09-01）：direct 退役**——hub 是唯一实盘行情模式（md_mode=direct → EX_CONFIG 拒绝），§二 改退役记录。
 
-> **最近变更（2026-09-24 D2/D5）**：account_id 注入（`strategy.account_id` + `adapter.account_id`）；TD 网关 per-account `_TD_BUILDERS` 注册表 + `_build_xtp_runtime`（`build_xtp_setting(row_id=account_id)` 修串账户）。
+> **最近变更（批 66a/66b/66c，2026-09-26/27 上产）**：旧 `--id` 路径退役（批 66a D26 #6——`--task-id` 唯一）；`bar_stream_key(symbol, account_id)` 必填 raise（裸键防线）+ `_account_mismatch` 同源校验（签名去 symbol/market 跳过分支）；`_hub_alive(r, account_id)` per-account（修原裸键读=A股心跳恒真掩盖加密 hub 死亡）；水位键含 account；`ctx.market`（接口行真源）+ `_in_mkt_session` per-market；`_ts_gap_frozen`（60s+ 段内段首 2 分钟豁免→sticky）+ `_rewarm` 推进 max_ts（解冻闭环）。
 ## 职责
 每 live_task 一个子进程（`quant-live-task@{id}`，systemd）：ThinTdGateway（TD-only）+ XTPAdapter +
 hub_worker 消费 `hub:bars:*` 流 → on_bar→信号→风控→下单（批 6b 起 hub 唯一模式）；60s 快照/持仓真相批；SA/SB/SC 稳定性机制宿主。
@@ -14,9 +14,10 @@ hub_worker 消费 `hub:bars:*` 流 → on_bar→信号→风控→下单（批 6
 ## 文件结构
 ```
 server/src/strategy_runner/
-├── main.py         # 入口（--task-id 新 / --id 旧兼容）+ hub 模式 ctx 组装（382 行；direct 主循环批 6b 删）
+├── main.py         # 入口（--task-id 唯一——批 66a 旧 --id 退役）+ hub 模式 ctx 组装（direct 主循环批 6b 删）
 ├── trading.py      # 交易域九单元（4a 新建，306 行）——direct 与 hub worker 单源；依赖注入零模块级可变状态
-├── hub_worker.py   # hub 模式 worker（4b 迁骨架，299 行）：EngineLoop 11 钩子 + XReadSleeper 流消费
+├── hub_worker.py   # hub 模式 worker（4b 迁骨架）：EngineLoop 11 钩子 + XReadSleeper 流消费
+├── td_registry.py  # 批 65a：TD builder 注册表（build_td_runtime 单入口分发）
 └── alert_failed.py # OnFailure 钩子（systemd quant-task-failed@ 调）
 ```
 
@@ -26,15 +27,17 @@ server/src/strategy_runner/
 
 ### main.py——入口与分派
 ```python
-main()                          # --task-id（live_task 新架构）/ --id（strategy_config 旧架构兼容）
-                                # 读任务→SA4 依赖探活→md_mode 校验（批 6b：direct→EX_CONFIG fail-fast，
-                                # 其余一律 hub）→ _run_hub_mode
+main()                          # --task-id（live_task 唯一路径——批 66a D26 #6：旧 --id/strategy_config
+                                # 直启已退役，缺 --task-id 即 EX_CONFIG(78)）→读任务→account_allows 三维
+                                # 权限→md_mode 校验（批 6b：direct→EX_CONFIG fail-fast，其余一律 hub）
+                                # → _run_hub_mode
 # 退出码三分类（SA4）：EX_OK=0 正常停止（不拉起，F-36 churn 根修）/ EX_TEMPFAIL=75 瞬态
 #                     （systemd 重启+reconciler 接管）/ EX_CONFIG=78 永久配置错（不重启，Failed 告警人工）
 _wait_for_deps(max_wait=600) -> bool     # PG 探活指数退避 5→10→20→40→60 封顶（期间喂狗防 WatchdogSec 误杀）
 _run_hub_mode(sid, tid, ...)             # ThinTdGateway（TD-only 壳）+ EVENT_LOG 注册（批 6b：TD 会话日志
                                           # [gw] 可观测）+ Strategy.from_config + _gated_send 网关包装 +
-                                          # ctx 组装 → hub_worker.run(ctx)
+                                          # ctx 组装（含 account_id/market——批 66b/66c：market=接口行真源，
+                                          # worker 时段门/缺口检测 per-market）→ hub_worker.run(ctx)
 _warmup_history(symbol, n=100) -> list   # PG 暖机（worker 侧再叠流回放 _rewarm）
 _guard(name) / _alert(title, body)       # quant_common.guard + safe_notify（lambda 晚绑定保 patch 语义）
 ```
@@ -58,13 +61,29 @@ _account_baseline_capital(total, cache)      # #10 基线=账户首条快照 tot
 
 ### hub_worker.py——worker 编排与流消费
 ```python
-run(ctx) -> None    # ctx: {tid, sid, symbol, account_id, strategy, adapter, event_engine, td_api,
+run(ctx) -> None    # ctx: {tid, sid, symbol, account_id, market, strategy, adapter, event_engine, td_api,
                     #      history, frozen, initial_capital, warmup_pg, stop_check, reconcile}
-                    # buy_ok 由 run 注入 ctx（_gated_send 消费）；frozen 与 main 网关共享同一 dict（C2）
+                    # buy_ok 由 run 注入 ctx（_gated_send 消费）；frozen 与 main 网关共享同一 dict（C2）；
+                    # account_id 必填（None raise——批 66b 裸键防线第二道）；market=ctx 注入真源（接口行），
+                    # 缺省按 symbol 后缀派生（批 66c per-market 时段门/缺口检测）
+bar_stream_key(symbol, account_id) -> str   # 批 66b：全市场统一 per-account 流键 hub:bars:{account_id}:{symbol}
+                    # account_id 必填（None raise=第二道防线防裸键复活；上游 live_task.account_id NOT NULL
+                    # +main 层 get_interface_row 必填 raise 双兜底）
+_account_mismatch(fields, account_id) -> bool
+                    # 批 66b 同源校验（**无市场跳过分支**——签名只 fields/account_id）：流消息 account_id
+                    # 与本任务不一致=True（跨源/缺失/非法，fail-closed 拒——防吃错行情下错单）；
+                    # payload 契约保证全市场消息恒带 account_id；account_id=None（异常态）→True
+_ts_gap_frozen(ts_key, max_ts, market) -> bool
+                    # 批 66c（D26 §3.4①②）ts 缺口检测：ts_key−max_ts>60s 且 bar 自身时刻在盘中连续段内
+                    # （段首 2 分钟豁免——隔段/隔日/重启首根不触发；bar ts 判时段非 wall clock）；
+                    # crypto 24x7 无豁免（60s+ 缺口=真断流）；未知市场无骨架不判（fail-open 观测面）。
+                    # 检出=源侧丢根→frozen sticky（rewarm 补不了的洞，强制人工介入）
 BarMsgState.classify(m) -> str   # gen/seq 序号分类（gen 分区内 seq 连续，R-BR6/R-DL2）：
                                  # stale_gen / gen_jump / dup_or_reorder / gap / ok
 _norm_ts(v) -> str               # ts 归一化（PG str() 与流 isoformat 断裂，S4）
-_hub_alive(r) -> bool            # hub 心跳存在（TTL 内）；存储不可查 True（断流自然使 bar 过期）
+_hub_alive(r, account_id) -> bool  # 批 66b per-account：hub 心跳 quant:hb:md-hub:{account_id} 存在（TTL 内）；
+                                 # 存储不可查 True（断流自然使 bar 过期）——修原裸键读=A股心跳恒真
+                                 # 掩盖加密 hub 死亡（D26 零理由 #1 潜伏 bug）
 ```
 
 #### EngineLoop 钩子表（11 项；name=live-task-{tid}，step=5.0，sleeper=XReadSleeper）
@@ -97,9 +116,10 @@ _hub_alive(r) -> bool            # hub 心跳存在（TTL 内）；存储不可�
 
 ## 三、内部关键结构（不保证稳定，改前看代码）
 - `_gated_send`（C2 网关，下单唯一咽喉）：sticky 冻结拒 BUY + ctx["buy_ok"] 下单时刻检查（缺失保守拒）
-- worker `stats.sess_bar_wall`=时段作用域基线（沿上清零）；`BarMsgState.max_ts` 跨重启持久水位（`hub:worker:max_ts:{symbol}`，R-DL1）
+- worker `stats.sess_bar_wall`=时段作用域基线（沿上清零，`_in_mkt_session` per-market——批 66c）；`BarMsgState.max_ts` 跨重启持久水位（**批 66b 起 `hub:worker:max_ts:{account_id}:{symbol}`**，R-DL1）
+- `_rewarm(upto_ts)` 解冻闭环（批 66c，D26 §3.4②）：rewarm 后显式推进 max_ts 至回放尾并持久化——否则回放不推水位，冻结重启后首根 live bar 仍满足缺口条件再冻结（盘中永远解不了）；跳洞=显式接受
 - 消费组：启动 destroy + create id=$（P0-3 防旧水位重复消费）；暖机只填 history 绝不调 on_bar（F3）
-- 停止条件：trading.stop_due 单源——新架构查 live_task.status；旧架构查 strategy_config.enabled
+- 停止条件：trading.stop_due 单源——查 live_task.status（批 66a 起 --task-id 唯一路径；旧 strategy_config.enabled 查询随 --id 退役）
 
 ## 四、依赖
 vnpy（EventEngine/XtpTdApi）· strategy_framework（adapters.XTPAdapter / broker.build_xtp_setting / runtime：loop·pulse·alerts·xsleeper）· trading（本包，4a）· quant_common（guard）· data_platform.db · alert_notify · health_monitor.report_schema_findings（启动校验）
@@ -111,7 +131,7 @@ systemd `quant-live-task@{tid}` / `quant-strategy@{sid}`；Web `POST /api/live-t
 ## 六、读写表（增量，全量见代码）
 - **写**：order_log（WAL 时序）· trade_log（EVENT_TRADE+对账补录，幂等 trade_ref）· account_snapshot（60s，断线不写假值）· position_snapshot/position_refresh（ST2 真相批，见接口契约）。~~bar_shadow~~（direct 影子期，批 6b 停写）~~live_task 退出回写~~（direct 专属，批 6b 随删，语义见 §二）
 - **读**：live_task（配置+停止条件）· bar_1min（暖机）· strategy_config / strategy_account（旧架构）
-- **Valkey**：hub:bars:{symbol}（worker 消费）· quant:hb:task:{tid}（心跳）· hub:worker:max_ts:{symbol}（水位）· factor:recalc:triggered（读+清）
+- **Valkey**：`hub:bars:{account_id}:{symbol}`（worker 消费——批 66b per-account）· `quant:hb:task:{tid}`（心跳）· `quant:hb:md-hub:{account_id}`（`_hub_alive` 读）· `hub:worker:max_ts:{account_id}:{symbol}`（水位，批 66b per-account）· factor:recalc:triggered（读+清）
 
 ## 七、不变量
 1. 下单唯一咽喉 `_gated_send`——绕过它下单=绕过全部安全门
@@ -137,6 +157,7 @@ systemd `quant-live-task@{tid}` / `quant-strategy@{sid}`；Web `POST /api/live-t
 10. 周期钩子首拍提前：注册即到期（next_due=now）——snapshot 首拍 60s→0s（启动即一拍；同批 2 hub 模式）
 
 ## 最近变更
+- 2026-09-27（批 66a/66b/66c）：旧 --id 退役（--task-id 唯一）；`bar_stream_key`/水位键/`_hub_alive` per-account；`_account_mismatch` 同源校验（无市场跳过分支）；ctx.market per-market 时段门；`_ts_gap_frozen`+`_rewarm` 推进水位（解冻闭环）
 - 2026-09-01（批 6b）：direct 退役（702→382 行）+ EVENT_LOG 注册（TD [gw] 日志可观测）+ md_mode=direct→EX_CONFIG；测试面 -4（_resolve_client_id）-3 patch 行；§二 改退役记录，§四/六/七 同步
 - 2026-08-27（批 4c）：4a/4b 后 public 面全变（main 887→679 / hub_worker 437→299 / trading.py 新建 306）——本文件重写：入口分派/trading 九单元/钩子表 11 项/XReadSleeper 契约/direct 冻结语义/已知差异段（v2.1 八条+4b 两条）
 - 2026-08-19 模块归位：五件套（guard/session/sd_notify）迁 quant_common（本模块经别名+alert 回调注入消费）；build_xtp_setting 迁 strategy_framework/broker（留别名 `_build_xtp_setting`）
