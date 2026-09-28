@@ -61,11 +61,13 @@ const defs = [
   { kind: 'disk', label: () => t('sysmon.disk') },
 ]
 
-// 批78：日期交替背景带——按序列 local 日期边界切区间，隔日着色（日期界限视觉清晰）
-const dayBands = (data) => {
-  const bands = []
+// 批78 步8 修正（用户验收反馈）：日期段全集——按序列 local 日期边界切 [start,end] 段；
+// 两处消费：①隔日着色背景带（第 0 日透明起）②轴标签 customValues=每天数据中点
+// （每天恰好一个标签且居中——窄窗口日不再挤同日重复刻度，minInterval 随之退役）
+const daySpans = (data) => {
+  const spans = []
   let dayKey = null, start = null, end = null
-  const flush = () => { if (dayKey !== null) bands.push([start, end]) }
+  const flush = () => { if (dayKey !== null) spans.push([start, end]) }
   for (const p of data) {
     const d = new Date(p[0])
     const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
@@ -73,7 +75,7 @@ const dayBands = (data) => {
     else end = p[0]
   }
   flush()
-  return bands.filter((_, i) => i % 2 === 1)   // 第 0 日透明起，隔日一带
+  return spans
 }
 
 const cards = computed(() => {
@@ -98,17 +100,20 @@ const cards = computed(() => {
     // echarts canvas（zrender）不解析 CSS 变量——色值经 cssVar 解实值（盲审 B-P1-1，Dashboard 同款约定）
     const lineColor = status === 'critical' ? cssVar('--critical')
       : status === 'warning' ? cssVar('--warn-fill') : cssVar('--brand-600')
+    // 批78 步8 修正：日期段一次算两用（背景带=隔日着色；标签=每天数据中点 customValues——
+    // echarts ≥5.5；空序列=customValues 空数组，无标签）
+    const spans = daySpans(s)
     const option = {
       animation: false,   // 关动画：轮询更新时曲线瞬切不滚动（用户裁定）
       grid: { left: 2, right: 4, top: 2, bottom: 20 },   // 底部留刻度空间（用户裁定：显示时间刻度）
       xAxis: {
         type: 'time', show: true,
-        minInterval: 24 * 3600 * 1000,   // 批78：刻度钉日界（防自动落 12h 档致同日双签「09-21 09-21」并列）
         axisLine: { lineStyle: { color: cssVar('--border-weak') } },
         axisTick: { show: false },
         axisLabel: { show: true, color: cssVar('--text-secondary'), fontSize: 10,
-                     hideOverlap: true,   // 刻度自动按采集周期密度避让（内存60s密/磁盘1h疏）
-                     formatter: '{MM}-{dd}' },   // 批78（用户需求）：纯日期标签——日界由交替背景带承担
+                     hideOverlap: true,
+                     customValues: spans.map(([a, b]) => (a + b) / 2),   // 每天一个标签居当天数据正中（用户验收反馈）
+                     formatter: '{MM}-{dd}' },   // 纯日期标签——日界由交替背景带承担
         splitLine: { show: false },
       },
       yAxis: { type: 'value', show: false, min: 0, max: 1 },
@@ -116,9 +121,9 @@ const cards = computed(() => {
         type: 'line', data: s, showSymbol: false, smooth: true,
         lineStyle: { width: 2, color: lineColor },
         areaStyle: { opacity: 0.08, color: lineColor },
-        markArea: { silent: true,   // 批78：日期交替带（隔日一块浅色）
+        markArea: { silent: true,   // 日期交替带（隔日一块浅色）
           itemStyle: { color: cssVar('--el-fill-color-light') },
-          data: dayBands(s).map(([a, b]) => [{ xAxis: a }, { xAxis: b }]) },
+          data: spans.filter((_, i) => i % 2 === 1).map(([a, b]) => [{ xAxis: a }, { xAxis: b }]) },
         markLine: { silent: true, symbol: 'none', label: { show: false },
           lineStyle: { type: 'dashed', color: cssVar('--text-secondary') },
           data: [ts.warn ? { yAxis: ts.warn } : null, ts.crit ? { yAxis: ts.crit } : null].filter(Boolean) },
