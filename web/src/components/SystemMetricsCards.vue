@@ -31,12 +31,12 @@ import { useI18n } from 'vue-i18n'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
-import { GridComponent, MarkLineComponent } from 'echarts/components'
+import { GridComponent, MarkLineComponent, MarkAreaComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
 import { getSystemMetrics, getSystemAlerts } from '../api'
 import { cssVar } from '../utils/cssVar'
 
-use([CanvasRenderer, LineChart, GridComponent, MarkLineComponent])
+use([CanvasRenderer, LineChart, GridComponent, MarkLineComponent, MarkAreaComponent])   // 批78：MarkArea=日期交替带（不注册=tree-shaking 静默不渲染）
 
 const { t } = useI18n()
 const metrics = ref({})
@@ -54,11 +54,27 @@ const statusText = s => s === 'critical' ? t('sysmon.critical') : s === 'warning
 const hasData = computed(() => !!(metrics.value.resources && Object.keys(metrics.value.resources).length))
 
 const defs = [
-  // 批28-6（用户裁定）：顺序改内存→交换分区→磁盘
+  // 批78（用户裁定）：CPU 前置——卡序 CPU→内存→交换→磁盘（批 28-6「内存起步」序由本批修正）
+  { kind: 'cpu', label: () => t('sysmon.cpu') },
   { kind: 'mem', label: () => t('sysmon.mem') },
   { kind: 'swap', label: () => t('sysmon.swap') },
   { kind: 'disk', label: () => t('sysmon.disk') },
 ]
+
+// 批78：日期交替背景带——按序列 local 日期边界切区间，隔日着色（日期界限视觉清晰）
+const dayBands = (data) => {
+  const bands = []
+  let dayKey = null, start = null, end = null
+  const flush = () => { if (dayKey !== null) bands.push([start, end]) }
+  for (const p of data) {
+    const d = new Date(p[0])
+    const k = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+    if (k !== dayKey) { flush(); dayKey = k; start = p[0]; end = p[0] }
+    else end = p[0]
+  }
+  flush()
+  return bands.filter((_, i) => i % 2 === 1)   // 第 0 日透明起，隔日一带
+}
 
 const cards = computed(() => {
   const res = metrics.value.resources || {}
@@ -67,11 +83,18 @@ const cards = computed(() => {
   return defs.map(({ kind, label }) => {
     const cur = res[kind]
     const pct = cur ? cur.pct : 0
-    const rule = kind === 'mem' ? 'mem_high' : kind === 'disk' ? 'disk_high' : 'swap_high'
+    const rule = { mem: 'mem_high', disk: 'disk_high', swap: 'swap_high', cpu: 'cpu_high' }[kind]
     const a = alerts.value.find(x => x.rule_id === rule)
     const status = a ? (a.severity === 'critical' ? 'critical' : 'warning') : 'normal'
     const ts = thr[kind] || {}
-    const s = (series[kind] || []).map(p => [new Date(p.ts).getTime(), p.total ? p.used / p.total : 0])
+    // 批78：曲线画 FIR 滤波值（5 分钟矩形窗均值落库）——used_avg 缺（历史行/未算出）回退原值；
+    // cpu 无字节语义（pct 本身 0-1），不走 used/total 共享除法（无 total 恒 0 平线陷阱）
+    const mapSeries = p => {
+      const x = new Date(p.ts).getTime()
+      const v = p.used_avg ?? p.used
+      return [x, kind === 'cpu' ? v : (p.total ? v / p.total : 0)]
+    }
+    const s = (series[kind] || []).map(mapSeries)
     // echarts canvas（zrender）不解析 CSS 变量——色值经 cssVar 解实值（盲审 B-P1-1，Dashboard 同款约定）
     const lineColor = status === 'critical' ? cssVar('--critical')
       : status === 'warning' ? cssVar('--warn-fill') : cssVar('--brand-600')
@@ -80,11 +103,12 @@ const cards = computed(() => {
       grid: { left: 2, right: 4, top: 2, bottom: 20 },   // 底部留刻度空间（用户裁定：显示时间刻度）
       xAxis: {
         type: 'time', show: true,
+        minInterval: 24 * 3600 * 1000,   // 批78：刻度钉日界（防自动落 12h 档致同日双签「09-21 09-21」并列）
         axisLine: { lineStyle: { color: cssVar('--border-weak') } },
         axisTick: { show: false },
         axisLabel: { show: true, color: cssVar('--text-secondary'), fontSize: 10,
                      hideOverlap: true,   // 刻度自动按采集周期密度避让（内存60s密/磁盘1h疏）
-                     formatter: '{MM}-{dd} {HH}:{mm}' },
+                     formatter: '{MM}-{dd}' },   // 批78（用户需求）：纯日期标签——日界由交替背景带承担
         splitLine: { show: false },
       },
       yAxis: { type: 'value', show: false, min: 0, max: 1 },
@@ -92,13 +116,16 @@ const cards = computed(() => {
         type: 'line', data: s, showSymbol: false, smooth: true,
         lineStyle: { width: 2, color: lineColor },
         areaStyle: { opacity: 0.08, color: lineColor },
+        markArea: { silent: true,   // 批78：日期交替带（隔日一块浅色）
+          itemStyle: { color: cssVar('--el-fill-color-light') },
+          data: dayBands(s).map(([a, b]) => [{ xAxis: a }, { xAxis: b }]) },
         markLine: { silent: true, symbol: 'none', label: { show: false },
           lineStyle: { type: 'dashed', color: cssVar('--text-secondary') },
           data: [ts.warn ? { yAxis: ts.warn } : null, ts.crit ? { yAxis: ts.crit } : null].filter(Boolean) },
       }],
     }
     return { kind, label: label(), pct, status,
-             bytes: cur ? `${fmtBytes(cur.used)} / ${fmtBytes(cur.total)}` : '—',
+             bytes: kind === 'cpu' || !cur ? '—' : `${fmtBytes(cur.used)} / ${fmtBytes(cur.total)}`,
              series: s, option }
   })
 })
@@ -122,7 +149,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
 <style scoped>
 .empty-group { color: var(--text-secondary); font-size: var(--fs-label); padding: var(--sp-6) 0; text-align: center; }
-.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 批51 追加（用户裁定）：固定 3 列各占 1/3 */
+.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }   /* 批78（用户裁定）：固定 4 列各占 1/4（批51「固定 3 列」随批更新；CPU 卡加入后 4 张一行满） */
 .metric-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
 .card-name { font-size: var(--fs-label); color: var(--text-secondary); }

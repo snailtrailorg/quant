@@ -34,10 +34,11 @@ def _valkey():
 _DISK_PATHS_CACHE: dict = {"paths": None, "ts": 0.0}
 _CFG_CACHE: dict = {"thresholds": None, "periods": None, "ts": 0.0}
 
-# 缺省（批22 迭代用户裁定：内存 warn 缺省 60%；周期内存 60s/磁盘 3600s/swap 300s）
+# 缺省（批22 迭代用户裁定：内存 warn 缺省 60%；周期内存 60s/磁盘 3600s/swap 300s；
+#   批78 cpu：warn 0.70/crit 0.90 用户知情裁定——0.7 档盘中瞬时越限告警属预期；周期 30s）
 _DEF_THRESHOLDS = {"mem": {"warn": 0.6, "crit": 0.9}, "disk": {"warn": 0.8, "crit": 0.9},
-                   "swap": {"warn": 0.8}}
-_DEF_PERIODS = {"mem": 60, "disk": 3600, "swap": 300}
+                   "swap": {"warn": 0.8}, "cpu": {"warn": 0.7, "crit": 0.9}}
+_DEF_PERIODS = {"mem": 60, "disk": 3600, "swap": 300, "cpu": 30}
 _CFG_KEYS = {
     "thresholds": {
         "mem.warn": ("alert_mem_warn", "mem", "warn"),
@@ -45,11 +46,14 @@ _CFG_KEYS = {
         "disk.warn": ("alert_disk_warn", "disk", "warn"),
         "disk.crit": ("alert_disk_crit", "disk", "crit"),
         "swap.warn": ("alert_swap_warn", "swap", "warn"),
+        "cpu.warn": ("alert_cpu_warn", "cpu", "warn"),
+        "cpu.crit": ("alert_cpu_crit", "cpu", "crit"),
     },
     "periods": {
         "mem": ("collect_period_mem", "mem"),
         "disk": ("collect_period_disk", "disk"),
         "swap": ("collect_period_swap", "swap"),
+        "cpu": ("collect_period_cpu", "cpu"),
     },
 }
 
@@ -66,7 +70,7 @@ def _read_cfg() -> tuple[dict, dict]:
             cur = conn.execute("SELECT key, value FROM system_config")
             cfg = {k: v for k, v in cur.fetchall()}
         thresholds = {"mem": dict(_DEF_THRESHOLDS["mem"]), "disk": dict(_DEF_THRESHOLDS["disk"]),
-                      "swap": dict(_DEF_THRESHOLDS["swap"])}
+                      "swap": dict(_DEF_THRESHOLDS["swap"]), "cpu": dict(_DEF_THRESHOLDS["cpu"])}
         from math import isfinite
         for _, (ck, kind, lvl) in _CFG_KEYS["thresholds"].items():
             try:
@@ -123,6 +127,13 @@ def _disk_paths() -> list[str]:
 _RES_CACHE: dict = {}   # kind -> {"data": {...}|None, "ts": float}——按各自周期采一次（批22 迭代）
 
 
+def _collect_cpu():
+    # 批78：interval=0.1 阻塞读真值（免疫 interval=None 首调返 0.0——/metrics 与 beat 任务
+    # 分属进程各持基准，无进程内先行调用保证）；30s 周期一次可容忍。无 total/used 字节语义。
+    import psutil
+    return {"pct": max(0.0, psutil.cpu_percent(interval=0.1) / 100.0)}
+
+
 def _collect_mem():
     import psutil
     m = psutil.virtual_memory()
@@ -163,10 +174,11 @@ def _cached_kind(kind: str, fn, period: int, now: float):
 
 
 def _collect_resources(now: float | None = None) -> dict:
-    """系统资源快照（内存/磁盘/swap），各指标按配置周期采集（缺省 内存60s/磁盘3600s/swap300s）。
+    """系统资源快照（内存/磁盘/swap/cpu），各指标按配置周期采集（缺省 内存60s/磁盘3600s/swap300s/cpu30s）。
 
     磁盘保留逐挂载点明细（paths）——聚合值仅供展示，告警判定按单路径（多路径求和会稀释
     单分区爆满，盲审 A-P1）；psutil 整体缺失时 mem/swap 为 None（证据缺失≠健康，D-F5 同款）。
+    cpu（批78）只有 pct 无字节语义——消费方（render_prometheus/evaluate/前端）须分支处理。
     """
     now = now if now is not None else time.time()
     _, periods = _read_cfg()
@@ -174,6 +186,7 @@ def _collect_resources(now: float | None = None) -> dict:
         "mem": _cached_kind("mem", _collect_mem, periods["mem"], now),
         "swap": _cached_kind("swap", _collect_swap, periods["swap"], now),
         "disk": _cached_kind("disk", _collect_disk, periods["disk"], now),
+        "cpu": _cached_kind("cpu", _collect_cpu, periods["cpu"], now),
     }
 
 
@@ -412,6 +425,11 @@ def render_prometheus(snap: dict) -> str:
 
     for kind, res in (snap.get("resources") or {}).items():
         if not res:
+            continue
+        if kind == "cpu":
+            # 批78：cpu 无 total/used 字节语义（硬下标会 KeyError→/metrics 500——方案盲审 P0-1），
+            # 只发占用率单族
+            emit(f"quant_res_{kind}_pct", round(res["pct"], 4), f"{kind} used ratio")
             continue
         emit(f"quant_res_{kind}_used_bytes", int(res["used"]), f"{kind} used bytes")
         emit(f"quant_res_{kind}_total_bytes", int(res["total"]), f"{kind} total bytes")

@@ -85,7 +85,7 @@ check "健康组件"        "/api/health/components"           'isinstance(d, di
 check "帮助-index"      "/api/help/index"                  '"content" in d'
 check "runbook 映射"     "/api/runbook"                     '"items" in d and len(d["items"]) > 20'
 # 批 61（2026-09-26）：M6 账号切换面（列表+详情 404 形状）
-check "切换会话列表"    "/api/trade-switch"              'isinstance(d, dict) and "items" in d and "timeout_s" in d'
+check_code "切换会话列表404(批70 M6退役)" "/api/trade-switch" "404"
 check_code "切换会话详情404" "/api/trade-switch/999999" "404"
 
 # 批13（2026-09-11）：IM 平台注册表三平台断言（registry 遍历引导+form.fields 契约）

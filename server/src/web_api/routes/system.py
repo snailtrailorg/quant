@@ -21,10 +21,12 @@ SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
     "alert_disk_warn": (0, 1, True, True), "alert_disk_crit": (0, 1, True, True),
     "alert_mem_warn": (0, 1, True, True), "alert_mem_crit": (0, 1, True, True),
     "alert_swap_warn": (0, 1, True, True),
+    "alert_cpu_warn": (0, 1, True, True), "alert_cpu_crit": (0, 1, True, True),   # 批78 CPU 卡阈值（缺省 0.7/0.9 随迁移 0112 seed）
     "log_retention_days": (0, 36500, False, False), "audit_retention_days": (0, 36500, False, False),   # 0=不清理（批28-7 语义）
     "celery_concurrency": (1, 16, False, False),
     "collect_period_disk": (30, 86400, False, False),
     "collect_period_mem": (10, 86400, False, False), "collect_period_swap": (10, 86400, False, False),
+    "collect_period_cpu": (30, 86400, False, False),   # 批78
     "xtp_session_lead_min": (-1440, 1440, False, False), "xtp_session_lag_min": (-1440, 1440, False, False),
     "user_bot_quota": (1, 100, False, False), "platform_bot_quota": (1, 100, False, False),   # 批26 裁定量程（0083 键型归位后生效）
     "smtp_max_attempts": (1, 10, False, False),   # 批47：每通道尝试配额（总尝试=配额——用户裁定 A）
@@ -218,6 +220,8 @@ def system_metrics_api(payload: dict = Depends(require_perm("system_config"))):
 
     阈值与监控判定同源（system_config 配置驱动）；series 60s 进程缓存（=最小采集周期，
     内存 60s 一变，缓存不丢新鲜度且省重复查询）。
+    批78：曲线项目带 used_avg（5 分钟矩形窗 FIR 落库值——前端曲线画 avg、大数字画最新真值）；
+    cpu 无字节语义（resources.cpu 只有 pct；series.cpu 只回 cpu_used 非空行免疫 null 断点）。
     """
     import time as _time
     now = _time.time()
@@ -225,11 +229,13 @@ def system_metrics_api(payload: dict = Depends(require_perm("system_config"))):
         return _METRICS_CACHE["payload"]
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT mem_total, mem_used, swap_total, swap_used, disk_total, disk_used "
+            "SELECT mem_total, mem_used, swap_total, swap_used, disk_total, disk_used, "
+            "cpu_used, mem_used_avg, swap_used_avg, disk_used_avg, cpu_used_avg "
             "FROM system_metric ORDER BY ts DESC LIMIT 1")
         row = cur.fetchone()
         cur = conn.execute(
-            "SELECT ts, mem_total, mem_used, swap_total, swap_used, disk_total, disk_used "
+            "SELECT ts, mem_total, mem_used, swap_total, swap_used, disk_total, disk_used, "
+            "cpu_used, mem_used_avg, swap_used_avg, disk_used_avg, cpu_used_avg "
             "FROM system_metric WHERE ts > now() - interval '7 days' ORDER BY ts")
         rows = cur.fetchall()
 
@@ -240,12 +246,16 @@ def system_metrics_api(payload: dict = Depends(require_perm("system_config"))):
     if row:
         resources = {"mem": _res(row[0], row[1]), "swap": _res(row[2], row[3]),
                      "disk": _res(row[4], row[5])}
-    series = {"mem": [], "swap": [], "disk": []}
+        if row[6] is not None:   # cpu_used（旧版本行=列存在但 NULL——真值缺失不造假 0）
+            resources["cpu"] = {"pct": round(row[6], 4)}
+    series = {"mem": [], "swap": [], "disk": [], "cpu": []}
     for r in rows:
         _ts = r[0].isoformat()   # 带时区 ISO（前端 time 轴直接解析）
-        series["mem"].append({"ts": _ts, "used": r[2], "total": r[1]})
-        series["swap"].append({"ts": _ts, "used": r[4], "total": r[3]})
-        series["disk"].append({"ts": _ts, "used": r[6], "total": r[5]})
+        series["mem"].append({"ts": _ts, "used": r[2], "total": r[1], "used_avg": r[8]})
+        series["swap"].append({"ts": _ts, "used": r[4], "total": r[3], "used_avg": r[9]})
+        series["disk"].append({"ts": _ts, "used": r[6], "total": r[5], "used_avg": r[10]})
+        if r[7] is not None:   # 批78：cpu 序列过滤 NULL 行（历史行/未采集 kind 不进序列）
+            series["cpu"].append({"ts": _ts, "used": r[7], "used_avg": r[11]})
     from src.health_monitor.collector import alerts_thresholds
     payload = {"resources": resources, "thresholds": alerts_thresholds(), "series": series}
     _METRICS_CACHE.update({"ts": now, "payload": payload})
@@ -515,7 +525,8 @@ def update_system_config(key: str, body: dict = Body(...),
         # 阈值对交叉校验（warn < crit——写侧查对方现值；swap 单阈值无对）
         # 批39 A-P2-1 双边化：写 crit 侧也校验（原只拦 warn 侧——crit 调到 warn 之下静默落库=分级反转）
         _pairs = {"alert_disk_warn": "alert_disk_crit", "alert_mem_warn": "alert_mem_crit",
-                  "alert_disk_crit": "alert_disk_warn", "alert_mem_crit": "alert_mem_warn"}
+                  "alert_disk_crit": "alert_disk_warn", "alert_mem_crit": "alert_mem_warn",
+                  "alert_cpu_warn": "alert_cpu_crit", "alert_cpu_crit": "alert_cpu_warn"}   # 批78
         _pair = _pairs.get(key)
         if _pair:
             _is_warn = key.endswith("_warn")

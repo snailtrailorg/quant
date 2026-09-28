@@ -404,7 +404,10 @@ def _load_channels() -> list[dict]:
 
 
 def _dispatch_async(level: str, category: str, title: str, body: str,
-                    code: str | None, notif_id: int | None) -> None:
+                    code: str | None, notif_id: int | None,
+                    skip_level: bool = False) -> None:
+    # 批78 同车 P0：skip_level 形参批 44 半修漏加（_submit put 七元组/此处仍 6 参——worker 每次
+    # 消费必 TypeError 被吞，外推链 09-18 起全断）；broadcast 跳门槛语义（批 39 裁定）随本批兑现。
     rows = _load_channels()
     if not rows:
         # 批30（盲审 A-P1-2 裁定）：零订阅=不外推——旧"legacy webhook 外推"过渡兜底随订阅
@@ -413,7 +416,7 @@ def _dispatch_async(level: str, category: str, title: str, body: str,
         return
     matched = [r for r in rows
                if category in (r["categories"] or [])
-               and _LEVEL_RANK.get(level, 0) >= _LEVEL_RANK.get(r["min_level"], 1)]
+               and (skip_level or _LEVEL_RANK.get(level, 0) >= _LEVEL_RANK.get(r["min_level"], 1))]
     if not matched:
         _writeback_empty(notif_id)
         return

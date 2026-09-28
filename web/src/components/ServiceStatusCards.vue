@@ -44,7 +44,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-3); }   /* 每行 3 卡随容器宽等分伸缩 */
+.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }   /* 每行 4 卡（批78 用户裁定：三卡组统一）随容器宽等分伸缩 */
 .status-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .card-name { font-size: var(--fs-label); font-weight: 600; }

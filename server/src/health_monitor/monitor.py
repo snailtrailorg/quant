@@ -188,14 +188,16 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
             out.append({"rule_id": "task_blind", "component": f"task-{tid}", "severity": "warning",
                         "detail": f"frozen=1 md={t.get('md')} lag={t.get('lag')}"})
 
-    # R8-R10 系统资源阈值（mem/disk/swap；阈值配置驱动 snap["thresholds"]，缺省回落硬编码；
+    # R8-R10 系统资源阈值（mem/disk/swap/cpu；阈值配置驱动 snap["thresholds"]，缺省回落硬编码；
     #   各指标独立采集（周期不同）——某 kind None=证据缺失，只跳过该 kind）
     res = snap.get("resources")
     if res:
         thr = snap.get("thresholds") or {"mem": {"warn": 0.6, "crit": 0.9},
                                          "disk": {"warn": 0.8, "crit": 0.9},
-                                         "swap": {"warn": 0.8}}
-        for kind, comp, rule in (("mem", "memory", "mem_high"), ("swap", "swap", "swap_high")):
+                                         "swap": {"warn": 0.8},
+                                         "cpu": {"warn": 0.7, "crit": 0.9}}
+        for kind, comp, rule in (("mem", "memory", "mem_high"), ("swap", "swap", "swap_high"),
+                                 ("cpu", "cpu", "cpu_high")):
             r = res.get(kind)
             if not r or r.get("pct") is None:
                 continue
@@ -235,6 +237,14 @@ def _detect_restarts(snap: dict, r) -> list[dict]:
                            "detail": f"NRestarts {prev} -> {nr}"})
         r.set(f"{_NR_PREFIX}{unit}", nr, ex=86400)
     return events
+
+
+def _window_avg(vals: list) -> float | None:
+    """批78 FIR：矩形窗均值（5 点滑动平均）。空窗返 None（该 kind 未采集/无历史不落 avg）。
+
+    部分窗口语义：行数不足 5 用可得行全量平均——表初始/重启后不断曲线。
+    """
+    return (sum(vals) / len(vals)) if vals else None
 
 
 def run_check() -> dict:
@@ -296,7 +306,8 @@ def run_check() -> dict:
             _res = snap.get("resources") or {}
             res_evidence = {"mem_high": _res.get("mem") is not None,
                             "disk_high": _res.get("disk") is not None,
-                            "swap_high": _res.get("swap") is not None}
+                            "swap_high": _res.get("swap") is not None,
+                            "cpu_high": _res.get("cpu") is not None}
             for state_key in r.scan_iter(_STATE_PREFIX + "*", count=100):
                 token = state_key[len(_STATE_PREFIX):]
                 rule_id, _, component = token.partition(":")
@@ -338,15 +349,33 @@ def run_check() -> dict:
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
+                # 批78 FIR：5 分钟矩形窗均值（含当前行的最近 5 点；不足 5 行用可得行全量平均
+                # =部分窗口不断曲线）。per-kind 过滤 NULL（历史行无该列值不进窗，均值语义钉死）。
+                # cpu 无字节语义——"used"位=pct（0-1），与 cpu_used 列同源。
+                _cpu_pct = (res.get("cpu") or {}).get("pct")
+                avgs = {}
+                for kind, used in (("mem", (res.get("mem") or {}).get("used")),
+                                   ("swap", (res.get("swap") or {}).get("used")),
+                                   ("disk", (res.get("disk") or {}).get("used")),
+                                   ("cpu", _cpu_pct)):
+                    if used is None:
+                        continue
+                    cur = conn.execute(
+                        f"SELECT {kind}_used FROM system_metric WHERE {kind}_used IS NOT NULL "
+                        "ORDER BY ts DESC LIMIT 4")
+                    avgs[kind] = _window_avg([row[0] for row in cur.fetchall()] + [used])
                 conn.execute(
                     "INSERT INTO system_metric "
-                    "(ts, mem_total, mem_used, swap_total, swap_used, disk_total, disk_used) "
-                    "VALUES (to_timestamp(%s), %s, %s, %s, %s, %s, %s) "
+                    "(ts, mem_total, mem_used, swap_total, swap_used, disk_total, disk_used, "
+                    "cpu_used, mem_used_avg, swap_used_avg, disk_used_avg, cpu_used_avg) "
+                    "VALUES (to_timestamp(%s), %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
                     "ON CONFLICT (ts) DO NOTHING",
                     (snap["ts"],
                      (res.get("mem") or {}).get("total"), (res.get("mem") or {}).get("used"),
                      (res.get("swap") or {}).get("total"), (res.get("swap") or {}).get("used"),
-                     (res.get("disk") or {}).get("total"), (res.get("disk") or {}).get("used")))
+                     (res.get("disk") or {}).get("total"), (res.get("disk") or {}).get("used"),
+                     _cpu_pct,
+                     avgs.get("mem"), avgs.get("swap"), avgs.get("disk"), avgs.get("cpu")))
                 conn.commit()
         except Exception as e:
             logger.warning("system_metric 写入失败: %s", e)

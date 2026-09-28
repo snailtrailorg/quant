@@ -1404,7 +1404,7 @@ hitRateTip: '命中率=该条目命中数 ÷ 近 30 天差异行数。长期 99%
     sysmon: {
       title: '系统监控',
       metrics: '资源消耗', services: '系统服务', connections: '实时连接', runStatus: '运行状态',   // 批31：改名+页签提升（原卡头词条随壳退役）
-      mem: '内存', disk: '磁盘', swap: '交换分区',
+      mem: '内存', disk: '磁盘', swap: '交换分区', cpu: 'CPU',
       critical: '严重', warning: '警告', normal: '正常',
       active: '运行中', inactive: '已停止', online: '在线', offline: '离线',
       running: '运行中', frozen: '冻结', restarts: '重启次数', noData: '暂无数据',
@@ -2801,7 +2801,7 @@ hitRateTip: 'Hit rate = entry hits ÷ diff rows in the last 30 days. A rate pers
     sysmon: {
       title: 'System Monitor',
       metrics: 'Resource Usage', services: 'Services', connections: 'Connections', runStatus: 'System Status',   // batch 31: rename + tab lift (old card-header key retired)
-      mem: 'Memory', disk: 'Disk', swap: 'Swap',
+      mem: 'Memory', disk: 'Disk', swap: 'Swap', cpu: 'CPU',
       critical: 'Critical', warning: 'Warning', normal: 'Normal',
       active: 'Active', inactive: 'Inactive', online: 'Online', offline: 'Offline',
       running: 'Running', frozen: 'Frozen', restarts: 'Restarts', noData: 'No data',

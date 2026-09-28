@@ -17,8 +17,8 @@ def _row(ch="im", target="10", cats=None, min_level="warn", enabled=True, rid=1)
             "min_level": min_level, "enabled": enabled, "id": rid}
 
 
-def _run(level="critical", category="risk", title="t", rows=None, **kw):
-    """跑 _dispatch_async，捕获回写与投递。"""
+def _run(level="critical", category="risk", title="t", rows=None, skip_level=False, **kw):
+    """跑 _dispatch_async，捕获回写与投递。（批78：skip_level 显式透传——**kw 吞掉不起效）"""
     wb, sent = [], []
     prod = MagicMock()
     prod.send_task.side_effect = lambda *a, **k: sent.append((a, k))
@@ -42,7 +42,7 @@ def _run(level="critical", category="risk", title="t", rows=None, **kw):
     with contextlib.ExitStack() as st:
         for p_ in patches:
             st.enter_context(p_)
-        D._dispatch_async(level, category, title, "b", "l3.failed", 42)
+        D._dispatch_async(level, category, title, "b", "l3.failed", 42, skip_level)
     return wb, sent
 
 
@@ -434,3 +434,30 @@ def test_broadcast_submit_real_call_no_mock():
         fake_q.put.side_effect = lambda item: q.append(item)
         D.broadcast("system", "t", "b")
     assert q and q[0] == ("info", "system", "t", "b", None, None, True)
+
+
+# ——— 批78 同车 P0（2026-09-28）：_dispatch_async 签名错配回归钉 ———
+# 背景：批 44 给 _submit 加 skip_level 形参+七元组 put，漏改消费端 def（仍 6 参）——worker 每次
+# 消费必 TypeError 被吞（外推链 09-18 起全断）。既有测试全 6 参直调 _dispatch_async 恰好绕开
+# 真实形状（mock 绿掩盖又一例）——本区两条钉死真实链。
+
+def test_submit_to_worker_chain_no_typeerror(caplog):
+    """真穿链：_submit 七元组 → 队列 → worker 线程真消费 _dispatch_async 不 TypeError。"""
+    import logging
+    with patch.object(D, "_load_channels", MagicMock(return_value=[])), \
+         patch.object(D, "_writeback_empty", MagicMock()):
+        with caplog.at_level(logging.ERROR, logger=D.__name__):
+            D._submit("warn", "risk", "t", "b", "l3.failed", 42)
+            D._q.join()   # 等 worker 消费完（daemon 线程，_submit 首调已启动）
+    assert not any("alert_dispatch chain failed" in r.message for r in caplog.records), \
+        "worker 消费链 TypeError=外推全断（批 44 半修回归禁止再现）"
+
+
+def test_skip_level_bypasses_channel_min_level():
+    """skip_level=True 跳通道 min_level 门槛（broadcast 语义——批 39 裁定，随批 78 首次兑现）。"""
+    # info < 通道 min_level=warn：不跳门槛=滤掉（回归既有语义）
+    wb, sent = _run(level="info", rows=[_row(min_level="warn")])
+    assert not sent and not wb
+    # skip_level=True：同形状放行（info 报告进通道）
+    wb, sent = _run(level="info", rows=[_row(min_level="warn")], skip_level=True)
+    assert len(sent) == 1 and sent[0][1]["kwargs"]["level"] == "info"

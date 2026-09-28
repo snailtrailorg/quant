@@ -32,9 +32,14 @@ collect(now=None) -> dict      # 幂等快照 {ts, units, deps, hubs, tasks, val
                                # quant:hb:md-hub:* per-account 在场集 {account_id: {gen,subs,ticks,
                                # sess_ticks,bars,dropped_pg,tick_age}}；legacy 裸键兼容读——per-account
                                # 集空时收编为 account_id=0，键切换/回滚窗观测面不瞬盲，终态应消失）
+                               # snap["resources"] 各 kind 按周期采集（_cached_kind 进程内节流）：
+                               # mem/swap/disk={total,used,pct[,paths]}；cpu={pct}（批 78——无字节
+                               # 语义，消费方须分支）；snap["thresholds"] 与判定同源（含 cpu 档）
 render_prometheus(snap) -> str # Prometheus 文本（按指标族分组——严格解析器兼容）；hub 指标族带
                                # account 标签（批 66b：quant_hub_*{account="{acct}"}，legacy 收编
-                               # account="0"；无实例时 quant_hub_hb_present 0 无标签）
+                               # account="0"；无实例时 quant_hub_hb_present 0 无标签）；
+                               # 批 78：resources 循环对 cpu 分支只发 quant_res_cpu_pct 单族
+                               # （used/total 字节两族不发——cpu dict 无此键）
 ```
 
 ### monitor.py
@@ -53,6 +58,9 @@ evaluate(snap, state=None) -> tuple[list[dict], dict]
     #      （防迁移夜假 critical）；期望集缺供=空集地板：在场集非空即过，全空按 "__all__" streak
     #      保守告警）/ R5 task_blind（warning）/ R6 hub_tick_stalled（批 66b per-account：时段内
     #      sess_ticks 零增长≥2 轮，component=md-hub:{acct}）
+    #      R8-R10 资源阈值族：mem_high/swap_high/disk_high（逐挂载点，component=disk:{path}）/
+    #      cpu_high（批 78，component=cpu）——阈值 snap["thresholds"]（system_config 配置驱动，
+    #      cpu 缺省 0.70/0.90）；恢复豁免 res_evidence per-kind（采集缺失≠恢复）
 run_check() -> dict            # beat 30s 入口（risk 队列，expires=25）：采集→snap["hub_expected"] 注入
                                # →判定→沿检测→告警/落库→自身心跳；跨轮状态三键值=JSON dict（批 66b：
                                # 坏值/旧标量形态按空 dict 从零起），写回 json.dumps
@@ -73,8 +81,12 @@ stdlib only（模块级）；`redis`/`src.data_platform.db`/`src.alert_notify.no
 - `/metrics` 消费方（外部）：Zabbix HTTP agent（Phase 2）/ Prometheus / Grafana
 
 ## 三、读写表
-- **写**：`health_event`（rule_id/component/severity/detail；30 天保留，每日 prune）
-- **读**：无 PG 业务表（collector 只探活 SELECT 1）
+- **写**：`health_event`（rule_id/component/severity/detail；30 天保留，每日 prune）；
+  `system_metric`（每 60s 落一行 mem/swap/disk total+used + cpu_used + 四个 `*_used_avg`——批 78 起，
+  avg 列=5 分钟矩形窗 FIR 均值（含当前行最近 5 点，部分窗口用可得行；per-kind 过滤 NULL）；
+  大数字/告警判定用真值，avg 仅供 sparkline 曲线）
+- **读**：`system_config`（阈值+采集周期配置，60s 缓存）；`system_metric`（FIR 窗口取最近 4 行）；
+  `_hub_expected_ids` 读 external_interface（66b）；collector 探活 SELECT 1
 
 ## 四、Valkey 键
 | 键 | 语义 |

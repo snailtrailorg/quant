@@ -245,6 +245,7 @@ class TestEndpoints:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/plain")
         assert "# HELP quant_unit_up" in r.text
+        assert "quant_res_cpu_pct" in r.text   # 批78：真实 collect 链 cpu 族在位（P0-1 HTTP 级钉）
 
     def test_components_endpoint_returns_collector_shape(self, admin_client, monkeypatch):
         """SM2：组件矩阵端点 = collector 快照原样（与 /metrics 同源同口径）。"""
@@ -581,3 +582,267 @@ class TestHubExpectedIds:
         monkeypatch.setattr("src.data_platform.db.get_conn",
                             MagicMock(side_effect=RuntimeError("db down")))
         assert monitor._hub_expected_ids() == []
+
+
+# ——— 批78：CPU 卡+曲线 FIR（方案 flow/任务/批78 v2；盲审 P0-1/P0-2 回归钉在此）———
+
+class TestBatch78CpuRules:
+    @staticmethod
+    def _snap_cpu(pct):
+        snap = _snap()
+        snap["resources"] = {
+            "mem": {"total": 100, "used": 10, "pct": 0.1},
+            "swap": {"total": 100, "used": 1, "pct": 0.01},
+            "disk": {"total": 100, "used": 10, "pct": 0.1, "paths": []},
+        }
+        if pct is not None:
+            snap["resources"]["cpu"] = {"pct": pct}   # cpu 形状只有 pct（无 total/used 字节）
+        return snap
+
+    def test_cpu_warning_at_075(self):
+        """synthetic snap 无 thresholds——evaluate 兜底 dict 含 cpu（P0-2 钉：缺 cpu 即 KeyError）。"""
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(self._snap_cpu(0.75))
+        assert any(f["rule_id"] == "cpu_high" and f["severity"] == "warning"
+                   and f["component"] == "cpu" for f in findings)
+
+    def test_cpu_critical_at_095(self):
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(self._snap_cpu(0.95))
+        assert any(f["rule_id"] == "cpu_high" and f["severity"] == "critical" for f in findings)
+
+    def test_cpu_absent_or_none_no_finding(self):
+        """cpu 未采集（键缺/None）=证据缺失不判（D-F5 同款）。"""
+        from src.health_monitor.monitor import evaluate
+        for snap in (self._snap_cpu(None),):
+            snap["resources"]["cpu"] = None
+            findings, _ = evaluate(snap)
+            assert not any(f["rule_id"] == "cpu_high" for f in findings)
+
+    def test_cpu_normal_below_warn(self):
+        from src.health_monitor.monitor import evaluate
+        findings, _ = evaluate(self._snap_cpu(0.5))
+        assert not any(f["rule_id"] == "cpu_high" for f in findings)
+
+
+class TestBatch78Prometheus:
+    def test_render_cpu_single_family_no_keyerror(self):
+        """P0-1 回归钉：cpu dict 无 used/total，render 硬下标必 KeyError→/metrics 500。"""
+        from src.health_monitor.collector import render_prometheus
+        text = render_prometheus({"resources": {"cpu": {"pct": 0.4213}}})
+        assert "quant_res_cpu_pct 0.4213" in text
+        assert "quant_res_cpu_used_bytes" not in text
+        assert "quant_res_cpu_total_bytes" not in text
+
+    def test_render_cpu_none_skipped(self):
+        from src.health_monitor.collector import render_prometheus
+        text = render_prometheus({"resources": {"cpu": None}})
+        assert "quant_res_cpu" not in text
+
+    def test_render_mem_bytes_families_intact(self):
+        """既有 kind 行为不变（used/total/pct 三族保留）。"""
+        from src.health_monitor.collector import render_prometheus
+        text = render_prometheus({"resources": {"mem": {"total": 100, "used": 50, "pct": 0.5}}})
+        assert "quant_res_mem_used_bytes 50" in text
+        assert "quant_res_mem_total_bytes 100" in text
+        assert "quant_res_mem_pct 0.5" in text
+
+
+class TestBatch78WindowAvg:
+    def test_full_five_point(self):
+        from src.health_monitor.monitor import _window_avg
+        assert _window_avg([1, 2, 3, 4, 5]) == 3
+
+    def test_partial_window(self):
+        """不足 5 行用可得行全量平均（表初始不断曲线）。"""
+        from src.health_monitor.monitor import _window_avg
+        assert _window_avg([1]) == 1
+        assert _window_avg([1, 2]) == 1.5
+
+    def test_empty_returns_none(self):
+        from src.health_monitor.monitor import _window_avg
+        assert _window_avg([]) is None
+
+
+class TestBatch78CfgChain:
+    def test_read_cfg_defaults_include_cpu(self):
+        """P0-2 回归钉：_CFG_KEYS/_DEF_THRESHOLDS 缺 cpu → thr["cpu"] KeyError → 30s 链崩。"""
+        from unittest.mock import patch
+        from src.health_monitor import collector
+        collector._CFG_CACHE.update({"thresholds": None, "periods": None, "ts": 0.0})
+        with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
+            thr, periods = collector._read_cfg()
+        assert thr["cpu"] == {"warn": 0.7, "crit": 0.9}
+        assert periods["cpu"] == 30
+        collector._CFG_CACHE.update({"thresholds": None, "periods": None, "ts": 0.0})
+
+    def test_system_config_bounds_include_cpu_keys(self):
+        from src.web_api.routes.system import SYSTEM_CONFIG_BOUNDS
+        for k in ("alert_cpu_warn", "alert_cpu_crit", "collect_period_cpu"):
+            assert k in SYSTEM_CONFIG_BOUNDS
+
+
+class TestBatch78MetricsApi:
+    @pytest.fixture
+    def admin_client(self):
+        """与 TestEndpoints.admin_client 同款（类内 fixture 不可跨类——本类自备）。"""
+        from fastapi.testclient import TestClient
+        from src.web_api.main import app
+        from src.web_api import auth as _auth
+        from unittest.mock import patch as _patch
+        with _patch.object(_auth, "verify_jwt",
+                           return_value={"sub": "1", "username": "admin", "role": "admin"}):
+            client = TestClient(app)
+            client.headers.update({"Authorization": "Bearer test-token"})
+            yield client
+
+    def test_metrics_shape_cpu_and_avg(self, admin_client, monkeypatch):
+        """/api/system/metrics：resources.cpu + series[].used_avg + series.cpu 过滤 NULL 行。"""
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+        from src.web_api.routes import system as sysmod
+        from src.health_monitor import collector
+
+        # 阈值走缓存（免 _read_cfg 打真 DB）；_METRICS_CACHE 清零强制重查
+        collector._CFG_CACHE.update({"thresholds": {"cpu": {"warn": 0.7, "crit": 0.9}},
+                                     "periods": {"cpu": 30}, "ts": time.time()})
+        sysmod._METRICS_CACHE.update({"ts": 0.0})
+
+        dt = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+        latest_row = (100, 50, 100, 10, 200, 100, 0.55, 49.0, 9.5, 99.0, 0.52)   # 11 列（SELECT 无 ts）
+        series_row = (dt, 100, 50, 100, 10, 200, 100, 0.55, 49.0, 9.5, 99.0, 0.52)   # 12 列（ts 前置）
+        series_row_old = (dt, 100, 50, 100, 10, 200, 100, None, 49.0, 9.5, 99.0, 0.52)   # cpu NULL=历史行
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        cur_latest = MagicMock()
+        cur_latest.fetchone.return_value = latest_row
+        cur_series = MagicMock()
+        cur_series.fetchall.return_value = [series_row, series_row_old]
+        mock_conn.execute.side_effect = [cur_latest, cur_series]
+        monkeypatch.setattr(sysmod, "get_conn", lambda: mock_conn)
+
+        r = admin_client.get("/api/system/metrics")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["resources"]["cpu"]["pct"] == 0.55
+        assert body["series"]["mem"][0]["used_avg"] == 49.0
+        assert body["series"]["disk"][0]["used_avg"] == 99.0
+        assert len(body["series"]["cpu"]) == 1          # cpu NULL 历史行被过滤（免疫前端 null 断点）
+        assert body["series"]["cpu"][0]["used"] == 0.55
+        assert body["series"]["cpu"][0]["used_avg"] == 0.52
+        # B-P2-3：进程级缓存写后必重置（防测试序耦合——套件加序/并行即脆）
+        collector._CFG_CACHE.update({"thresholds": None, "periods": None, "ts": 0.0})
+        sysmod._METRICS_CACHE.update({"ts": 0.0, "payload": {}})
+
+
+class TestBatch78Persist:
+    def test_run_check_persists_12_cols_with_fir(self, monkeypatch):
+        """落库段钉（双盲 A/B 同判 P1）：SELECT per-kind WHERE IS NOT NULL+LIMIT 4；
+        INSERT 12 列名序+ON CONFLICT；params 逐位=含当前行的 5 点均值窗组装。"""
+        from unittest.mock import MagicMock
+        from src.health_monitor import monitor, collector
+
+        ts = float(int(time.time()) // 60 * 60 + 5)   # 每分 :05s——命中 %60<30 落库窗
+        snap = {"ts": ts, "units": {}, "deps": {}, "hubs": {}, "tasks": {},
+                "resources": {"mem": {"total": 100, "used": 60, "pct": 0.6},
+                              "swap": {"total": 100, "used": 10, "pct": 0.1},
+                              "disk": {"total": 100, "used": 80, "pct": 0.8, "paths": []},
+                              "cpu": {"pct": 0.5}},
+                "thresholds": {"mem": {"warn": 0.61, "crit": 0.9}, "swap": {"warn": 0.8},
+                               "disk": {"warn": 0.81, "crit": 0.9}, "cpu": {"warn": 0.7, "crit": 0.9}}}
+        monkeypatch.setattr(collector, "collect", lambda now=None: snap)
+        monkeypatch.setattr(monitor, "_hub_expected_ids", lambda: [])
+
+        class FakeR:
+            def get(self, k): return None
+            def set(self, k, v, ex=None): pass
+            def scan_iter(self, pattern, count=None): return iter([])
+            def hset(self, k, mapping=None, **kw): pass
+            def expire(self, k, t): pass
+        monkeypatch.setattr(collector, "_valkey", lambda: FakeR())
+        monkeypatch.setattr(monitor, "_notify", lambda *a, **k: None)
+        monkeypatch.setattr(monitor, "_write_event", lambda *a, **k: None)
+
+        conn = MagicMock()
+        conn.__enter__.return_value = conn
+        _prev = {"mem": [10, 20, 30, 40], "swap": [10, 20, 30, 40],
+                 "disk": [10, 20, 30, 40], "cpu": [0.1, 0.2, 0.3, 0.4]}
+
+        def _exec(sql, *args):
+            cur = MagicMock()
+            if sql.startswith("INSERT INTO system_metric"):
+                return cur
+            for kind, vals in _prev.items():
+                if sql.startswith(f"SELECT {kind}_used"):
+                    assert f"WHERE {kind}_used IS NOT NULL" in sql and "LIMIT 4" in sql, \
+                        "FIR 窗口查询必须 per-kind 过滤 NULL 并限 4 行"
+                    cur.fetchall.return_value = [(v,) for v in vals]
+                    break
+            return cur
+        conn.execute.side_effect = _exec
+
+        import src.data_platform.db as db
+        monkeypatch.setattr(db, "get_conn", lambda: conn)
+
+        monitor.run_check()
+
+        inserts = [c for c in conn.execute.call_args_list
+                   if c.args[0].startswith("INSERT INTO system_metric")]
+        assert len(inserts) == 1
+        sql_i, params = inserts[0].args
+        for col in ("cpu_used", "mem_used_avg", "swap_used_avg", "disk_used_avg", "cpu_used_avg"):
+            assert col in sql_i
+        assert "ON CONFLICT (ts) DO NOTHING" in sql_i
+        assert len(params) == 12
+        assert params[0] == ts                 # to_timestamp 参数位
+        assert params[7] == 0.5                # cpu_used（pct 真值）
+        assert params[8] == (10 + 20 + 30 + 40 + 60) / 5     # mem_used_avg
+        assert params[9] == (10 + 20 + 30 + 40 + 10) / 5     # swap_used_avg
+        assert params[10] == (10 + 20 + 30 + 40 + 80) / 5    # disk_used_avg
+        assert params[11] == (0.1 + 0.2 + 0.3 + 0.4 + 0.5) / 5   # cpu_used_avg
+        conn.commit.assert_called()
+
+    def test_cpu_recovery_exempt_when_evidence_missing(self, monkeypatch):
+        """res_evidence cpu_high：cpu 采集缺失（None）不清 state 键、不发假恢复（D-F5 同款）。"""
+        from unittest.mock import MagicMock
+        from src.health_monitor import monitor, collector
+
+        snap = {"ts": float(int(time.time()) // 60 * 60 + 5), "units": {}, "deps": {},
+                "hubs": {}, "tasks": {},
+                "resources": {"mem": {"total": 100, "used": 10, "pct": 0.1},
+                              "swap": {"total": 100, "used": 1, "pct": 0.01},
+                              "disk": {"total": 100, "used": 10, "pct": 0.1, "paths": []},
+                              "cpu": None},   # 采集缺失
+                "thresholds": {"mem": {"warn": 0.6, "crit": 0.9}, "swap": {"warn": 0.8},
+                               "disk": {"warn": 0.8, "crit": 0.9}, "cpu": {"warn": 0.7, "crit": 0.9}}}
+        monkeypatch.setattr(collector, "collect", lambda now=None: snap)
+        monkeypatch.setattr(monitor, "_hub_expected_ids", lambda: [])
+
+        _STATE_KEY = "quant:hm:state:cpu_high:cpu"
+        _deleted = []
+
+        class FakeR:
+            _d = {_STATE_KEY: "warning"}
+            def get(self, k): return self._d.get(k)
+            def set(self, k, v, ex=None): self._d[k] = v
+            def delete(self, *ks): _deleted.extend(ks); [self._d.pop(k, None) for k in ks]
+            def scan_iter(self, pattern, count=None):
+                return iter([k for k in self._d if k.startswith("quant:hm:state:")])
+            def hset(self, k, mapping=None, **kw): pass
+            def expire(self, k, t): pass
+        monkeypatch.setattr(collector, "_valkey", lambda: FakeR())
+        notified = []
+        monkeypatch.setattr(monitor, "_notify", lambda *a, **k: notified.append(a))
+        monkeypatch.setattr(monitor, "_write_event", lambda *a, **k: None)
+
+        monitor.run_check()
+        assert _STATE_KEY not in _deleted, "cpu 采集缺失期不得清 state 键（证据缺失≠恢复）"
+        assert not any("恢复" in str(a[1]) and "cpu" in str(a[1]) for a in notified)
+
+    def test_collect_cpu_scales_to_ratio(self, monkeypatch):
+        """psutil 百分比 → 0-1 pct 归一。"""
+        import sys, types
+        monkeypatch.setitem(sys.modules, "psutil",
+                            types.SimpleNamespace(cpu_percent=lambda interval=None: 42.13))
+        from src.health_monitor.collector import _collect_cpu
+        assert _collect_cpu() == {"pct": 0.4213}
