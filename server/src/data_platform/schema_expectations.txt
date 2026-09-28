@@ -1,13 +1,13 @@
+__probe_st2 :: id
 account_permission :: account_id,allowed_categories,allowed_exchanges,allowed_boards,is_st_allowed,convertible_allowed,created_at,updated_at
 account_snapshot :: id,ts,total_value,daily_pnl,initial_capital,available_cash,account_id
-accounts :: id,name,exchange,api_key_enc,api_secret_enc,api_key_hint,enabled,created_at
-alembic_version :: version_num
+accounts :: id,name,exchange,api_key_hint,enabled,created_at,api_key_enc,api_secret_enc
 alert_channel_sub :: id,channel,target,categories,min_level,enabled,updated_at
 alert_history :: id,ts,level,title,body,channel
 alert_user_sub :: id,user_id,categories,min_level,enabled,created_at,updated_at,channels
 asset_static_info :: ts_code,name,industry,market,list_status,list_date,delist_date
 astock_analysis :: id,ts,symbol,action,score,rating,factors
-audit_log :: id,actor,action,target,detail,old_value,new_value,ts
+audit_log :: id,actor,action,target,detail,ts,old_value,new_value
 backtest_runs :: id,strategy_config_id,symbols,params,mode,status,summary_metrics,task_id,created_at,finished_at,symbol_params,source,fetched_at,dataset_version
 backtest_symbols :: id,run_id,symbol,status,result,created_at
 balancesheet :: ts_code,ann_date,end_date,report_type,total_assets,total_cur_assets,total_nca,total_liab,total_cur_liab,total_ncl,total_hldr_eqy_exc_min_int,money_cap,goodwill,raw_json
@@ -68,9 +68,11 @@ restate_event :: id,kind,sub_kind,symbols,ann_date,payload,created_at
 risk_log :: id,ts,action,symbol,rule,detail,severity,username
 risk_rules :: id,name,type,params,enabled,created_at,updated_at
 routing_decision :: id,ts,fingerprint,req_summary,chain,epoch,cause
-routing_policy :: consumer_tag,weights,bulkhead_defaults,trade_switch_confirm_timeout_s
+routing_policy :: consumer_tag,weights,bulkhead_defaults
 security_master :: vt_symbol,market,exchange,category,name,industry,list_date,delist_date,multiplier,tick_size,fee_model_ref,margin_model_ref,session_id,trade_phase,routing_hints,updated_at,board
 security_state :: vt_symbol,effective_from,kind,value
+shadow_diff :: id,kind,symbol,trade_date,field,main_val,backup_val,whitelist_hit,created_at
+shadow_policy :: kind,backup_source,sample_n,tolerance,budget_calls_month,enabled,note
 share_float :: ts_code,ann_date,float_date,float_share,float_ratio,holder_name,share_type
 signal_log :: id,ts,strategy_id,symbol,action,score,price,source,fetched_at,dataset_version
 sms_provider :: id,name,provider,access_key_id,access_key_secret,sign_name,alert_template_code,verify_template_code,position,enabled,created_at,updated_at,vendor
@@ -91,7 +93,6 @@ top10_holders :: ts_code,ann_date,end_date,holder_name,hold_amount,hold_ratio,ho
 top_list :: trade_date,ts_code,name,close,pct_change,turnover_rate,amount,l_sell,l_buy,l_amount,net_amount,net_rate,amount_rate,float_values,reason
 trade_cal :: exchange,cal_date,is_open,pretrade_date
 trade_log :: id,ts,order_id,symbol,action,volume,price,commission,strategy_id,trade_ref,account_id
-trade_switch_session :: id,state,from_account,to_account,info_pack,checklist,nominated_at,confirmed_at,done_at,extended_at
 user_group :: id,name,description,builtin,created_at
 user_tokens :: id,user_id,email,token,type,created_at,expires_at,used,revoked
 users :: id,username,password_hash,role,enabled,created_at,email,last_login_at,last_login_ip,nickname,avatar_url,avatar_updated_at,deleted_at,phone
