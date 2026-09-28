@@ -236,6 +236,34 @@ return 0
 """
 
 
+def _pub_write(r, symbol: str, payload_json: str, epoch_ts, account_id) -> None:
+    """批 70c：公共表写（各 hub 独立双写 hub:latest_tick:pub:{symbol}——读者单 GET 零逻辑）。
+
+    防 ts 回退（P1-1 终版）：payload 事件时间（tick.datetime）归一 epoch 比较——新>旧才覆盖
+    （非原子——两 hub 同刻写竞态最坏=后写者赢一轮，下 tick 即校正；TTL 65s 自愈上界）。
+    ts None=跳过 pub 写（无事件时间不进公共表）。never-raise（不拖累主键写）。
+    """
+    if epoch_ts is None:
+        return
+    key = f"hub:latest_tick:pub:{symbol}"
+    try:
+        cur = r.get(key)
+        if cur:
+            try:
+                old = json.loads(cur)
+                old_ts = old.get("_ts_epoch")
+                if old_ts is not None and float(old_ts) > float(epoch_ts):
+                    return   # 对端价更新（事件时间更晚）——不覆盖
+            except Exception:
+                pass
+        d = json.loads(payload_json)
+        d["_ts_epoch"] = float(epoch_ts)
+        d["account_id"] = account_id
+        r.set(key, json.dumps(d, ensure_ascii=False), ex=LATEST_TICK_TTL)
+    except Exception:
+        pass
+
+
 def _write_latest_tick(r, symbol: str, tick, fail_ts: dict, account_id=None) -> None:
     """三档项 12：最新 tick 快照落 Valkey（价量+五档+涨跌停，TTL 65s）。
 
@@ -263,6 +291,18 @@ def _write_latest_tick(r, symbol: str, tick, fail_ts: dict, account_id=None) -> 
             "ask": [tick.ask_price_1, tick.ask_price_2, tick.ask_price_3, tick.ask_price_4, tick.ask_price_5],
             "ask_v": [tick.ask_volume_1, tick.ask_volume_2, tick.ask_volume_3, tick.ask_volume_4, tick.ask_volume_5],
         }), ex=LATEST_TICK_TTL)
+        # 批 70c：公共表双写（同 try 同退避——两键同命运；事件时间归一 epoch）
+        _epoch = None
+        try:
+            if tick.datetime is not None:
+                from datetime import datetime as _dt
+                _epoch = _dt.fromisoformat(str(tick.datetime).replace("Z", "+00:00")).timestamp()
+        except Exception:
+            _epoch = None
+        _pub_write(r, symbol, json.dumps({
+            "ts": tick.datetime.isoformat() if tick.datetime else None,
+            "last": tick.last_price, "volume": tick.volume,
+        }, ensure_ascii=False), _epoch, account_id)
         fail_ts.pop(symbol, None)
     except Exception as e:
         fail_ts[symbol] = now

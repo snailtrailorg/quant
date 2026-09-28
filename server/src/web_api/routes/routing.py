@@ -17,7 +17,7 @@ router = APIRouter(tags=["routing"])
 def list_policies(payload: dict = Depends(require_perm("system_config"))):
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT consumer_tag, weights, bulkhead_defaults, trade_switch_confirm_timeout_s "
+            "SELECT consumer_tag, weights, bulkhead_defaults "
             "FROM routing_policy ORDER BY consumer_tag")
         cols = [d[0] for d in cur.description]
         return {"items": [dict(zip(cols, r)) for r in cur.fetchall()]}
@@ -26,8 +26,8 @@ def list_policies(payload: dict = Depends(require_perm("system_config"))):
 @router.patch("/api/routing/policies/{consumer_tag}")
 def update_policy(consumer_tag: str, body: dict = Body(...),
                   payload: dict = Depends(require_perm("system_config"))):
-    """weights 三键必含（CHECK 锁）；bulkhead_defaults/trade_switch_confirm_timeout_s 可选
-    （批 61：动态 SET——body 无键=该列不动，防部分更新互相覆写）。保存=bump cfg:version。"""
+    """weights 三键必含（CHECK 锁）；bulkhead_defaults 可选（动态 SET——body 无键=该列不动）。
+    批 70：trade_switch_confirm_timeout_s 列随 M6 退役删除。保存=bump cfg:version。"""
     import json
     w = body.get("weights")
     if not isinstance(w, dict) or not {"completeness", "cost", "latency"} <= set(w):
@@ -41,18 +41,12 @@ def update_policy(consumer_tag: str, body: dict = Body(...),
     if bh is not None and (not isinstance(bh, dict)
                            or not all(isinstance(v, int) and v >= 1 for v in bh.values())):
         raise ApiError(400, "PARAM_INVALID", "bulkhead_defaults 须为 {数据源: 正整数} 对象")
-    ts_s = body.get("trade_switch_confirm_timeout_s")
-    if ts_s is not None and not (isinstance(ts_s, int) and 30 <= ts_s <= 86400):
-        raise ApiError(400, "PARAM_INVALID", "trade_switch_confirm_timeout_s 须为 30-86400 整数秒")
     with get_conn() as conn:
         sets = ["weights=%s::jsonb"]
         params: list = [json.dumps(w)]
         if bh is not None:
             sets.append("bulkhead_defaults=%s::jsonb")
             params.append(json.dumps(bh))
-        if ts_s is not None:
-            sets.append("trade_switch_confirm_timeout_s=%s")
-            params.append(ts_s)
         params.append(consumer_tag)
         cur = conn.execute(
             f"UPDATE routing_policy SET {', '.join(sets)} "

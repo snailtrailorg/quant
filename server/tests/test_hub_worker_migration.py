@@ -130,9 +130,10 @@ def wired():
         captured["loop"] = self
 
     sess_mock = MagicMock(return_value=True)
+    # 批 66c per-market：mock in_session（原 in_astock_session 路径退役）
     with patch.object(hw, "_valkey", lambda: fake), \
          patch("src.strategy_framework.runtime.alerts.safe_notify"), \
-         patch("src.quant_common.session.in_astock_session", sess_mock), \
+         patch("src.quant_common.session.in_session", sess_mock), \
          patch.object(EngineLoop, "run", _fake_run), \
          patch("src.strategy_runner.hub_worker.os._exit") as exit_mock:
         hw.run(ctx)

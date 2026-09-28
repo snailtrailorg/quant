@@ -389,14 +389,17 @@ def reconcile_three_books():
             # 2. 委托不成交（F-50 口径收紧：只告警「已提交/提交中 未成交」——原 status!='filled'
             # 恒真，把 send_failed 失败单也误报成噪音；submitting 覆盖「写 WAL 后、send_order 回写
             # 前崩溃」的僵尸单，不因收紧而漏报）
+            # 批 70（P0-1 终版）：翻 status 判定+当日窗——NOT EXISTS 反查退役（终态真实化后
+            # 冗余且 partial 被漏报）；当日窗=存量滞留 submitted 的历史单自然出窗（0111 另有
+            # 存量治愈）。partial 计入=口径修正（真实开放单）。
             cur = conn.execute("""
                 SELECT count(*) FROM order_log o
-                WHERE o.status IN ('submitted','submitting')
-                AND NOT EXISTS (SELECT 1 FROM trade_log t WHERE t.order_id = o.id)
+                WHERE o.status IN ('submitted','submitting','partial')
+                AND (o.ts AT TIME ZONE 'Asia/Shanghai')::date = (now() AT TIME ZONE 'Asia/Shanghai')::date
             """)
             unfilled = cur.fetchone()[0]
             if unfilled > 0:
-                issues.append(f"委托不成交: {unfilled} 笔")
+                issues.append(f"委托未全部成交: {unfilled} 笔")
 
             # 3. 滑点异常（成交价 vs 委托价偏差 > 1%）
             cur = conn.execute("""
