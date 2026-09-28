@@ -115,6 +115,7 @@ class TushareDataSource(DataSource):
         "daily_basic": 0.5,      # 基本面指标（2026-08-27 补：engine 收编 sleep 后走此档）
         "fund_daily": 0.5,
         "cb_daily": 0.5,
+        "index_daily": 0.5,    # 批 73：收编补档（DEFAULT_RATE_LIMITS 原无键→收编后仍不限速的缺口）
         "trade_cal": 0.5,
         "stock_basic": 0.5,
         # 批 64b：漏网限速档补齐（D25 收尾——同步链两循环全覆盖，全 0.3s 与 adj_factor

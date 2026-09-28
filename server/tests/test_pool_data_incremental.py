@@ -210,7 +210,7 @@ def test_rate_limit_failure_counted_not_fatal():
     result, pro, _ = _run(pool=["600000.SH", "000001.SZ"], fail_on=("000001.SZ", "income"))
     assert result["status"] == "partial" and result["saved"] == 0
     from src.data_platform import rate_limit
-    assert rate_limit._BREAKERS["tushare"].state == "closed"   # 单点失败被成功重置=连续语义
+    assert rate_limit._BREAKERS[("tushare", "0")].state == "closed"   # 单点失败被成功重置=连续语义
 
 
 def test_circuit_breaker_opens_on_consecutive_failures():
@@ -221,7 +221,7 @@ def test_circuit_breaker_opens_on_consecutive_failures():
     result, _, _ = _run(pool=["600000.SH"], fail_all=True)
     assert result["status"] == "partial"          # 轮次不中断（per-调用 except 兜 CircuitOpenError）
     from src.data_platform import rate_limit
-    br = rate_limit._BREAKERS["tushare"]
+    br = rate_limit._BREAKERS[("tushare", "0")]
     assert br.state == "open"                     # 10 连败开闸且无 success 关闭
 
 

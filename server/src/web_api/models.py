@@ -141,6 +141,7 @@ class RateLimitOverrideReq(BaseModel):
     - circuit_breaker 非空：写熔断参数 {"fail_threshold": int, "reset_timeout": float}
     """
     api_name: str | None = None
+    pacer: float | None = None   # 批 73：provider 总闸间隔（params.pacer.min_interval；null=不动，0=关）
     value: float | None = None
     circuit_breaker: dict | None = None
 

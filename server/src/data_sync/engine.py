@@ -727,8 +727,10 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
 def _sync_via_kind_cb_daily(adapter, *, start: str, end_date: str,
                             progress_cb: Callable | None = None) -> dict:
     """bar_daily+convertible 区间（镜像已退役的 _sync_cb_daily——批 72 一步切）：单次 fetch → _save_bars；无 last_success_date。"""
-    frame = _fetch_supply(adapter, kind="bar_daily", sub_kind="convertible",
-                          symbols=(), start=start, end=end_date, freq="1D")
+    from src.data_platform.rate_limit import rate_limit_context
+    with rate_limit_context(_get_rate_ds(adapter.provider), "cb_daily"):
+        frame = _fetch_supply(adapter, kind="bar_daily", sub_kind="convertible",
+                              symbols=(), start=start, end=end_date, freq="1D")
     if not frame.rows:
         return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [],
                 "expected_days": 0, "actual_days": 0}
@@ -740,8 +742,10 @@ def _sync_via_kind_index(adapter, *, start: str, end_date: str,
                          progress_cb: Callable | None = None) -> dict:
     """index_daily 区间（镜像已退役的 _sync_index_daily〔000300.SH〕——批 72 一步切）：单次 fetch → save_index_bars；无 last_success_date。"""
     from src.data_platform.db import save_index_bars
-    frame = _fetch_supply(adapter, kind="index_daily", sub_kind=None, symbols=("000300.SH",),
-                          start=start, end=end_date, freq="1D")
+    from src.data_platform.rate_limit import rate_limit_context
+    with rate_limit_context(_get_rate_ds(adapter.provider), "index_daily"):
+        frame = _fetch_supply(adapter, kind="index_daily", sub_kind=None, symbols=("000300.SH",),
+                              start=start, end=end_date, freq="1D")
     saved = save_index_bars(list(frame.rows)) if frame.rows else 0
     return {"pulled": len(frame.rows), "saved": saved, "start": start,
             "failed_dates": [] if frame.rows else ["index_daily:empty"],
@@ -1269,8 +1273,10 @@ def _fetch_and_save(adapter, ts_code: str, start: str, end: str, save_fn,
     df 自身 adj_factor（pro_bar adj=None 时全 NULL），靠 backfill_adj_factor 回填正确因子。
     原 _adj_map_for_df（批 72 已随旧 handler 退役）取首日因子应用到多日全区间，是「首日因子污染多日」的错值源。
     """
+    from src.data_platform.rate_limit import rate_limit_context
     try:
-        df = adapter.pull_daily(ts_code, start, end, kind=kind)
+        with rate_limit_context(_get_rate_ds(adapter.provider), "daily"):
+            df = adapter.pull_daily(ts_code, start, end, kind=kind)
     except Exception:
         return None
     if df is None or df.empty:
@@ -1335,7 +1341,9 @@ def _fetch_minute_and_save(adapter, ts_code: str, freq: str, start: str, end: st
 
     返回 (concat_df, saved)。overwrite=True 覆盖写（回补），False 冲突跳过（增量/全量）。
     """
-    df = _pull_minute(adapter, ts_code, freq, start, end)
+    from src.data_platform.rate_limit import rate_limit_context
+    with rate_limit_context(_get_rate_ds(adapter.provider), "daily"):
+        df = _pull_minute(adapter, ts_code, freq, start, end)
     if df is None or df.empty:
         return None, 0
     saved = _save_minute(adapter, df, freq, overwrite)
@@ -1451,8 +1459,10 @@ def backfill_symbol(sync_id: str, ts_code: str, start: str, end: str) -> dict:
                 "range": [actual_first, actual_last], "overwritten": True}
 
     # 日线分支（原逻辑）
+    from src.data_platform.rate_limit import rate_limit_context
     try:
-        df = adapter.pull_daily(ts_code, start, end, kind=kind)
+        with rate_limit_context(_get_rate_ds(adapter.provider), "daily"):
+            df = adapter.pull_daily(ts_code, start, end, kind=kind)
     except Exception as e:
         return {"status": "error", "error": f"{type(e).__name__}: {str(e)[:120]}"}
 
@@ -1468,7 +1478,8 @@ def backfill_symbol(sync_id: str, ts_code: str, start: str, end: str) -> dict:
     # DO UPDATE 会把已回填的 adj_factor 清回 NULL（E/F 盲审实测的数据破坏路径）；
     # 拉不到因子（降级）时 COALESCE 兜底不清空（schema.py BAR_TABLE_INSERT_OVERWRITE）
     try:
-        fdf = adapter.pull_adj_factor(symbol=ts_code, start=start, end=end)
+        with rate_limit_context(_get_rate_ds(adapter.provider), "adj_factor"):
+            fdf = adapter.pull_adj_factor(symbol=ts_code, start=start, end=end)
         adj_map = (dict(zip(fdf["ts_code"], fdf["adj_factor"]))
                    if fdf is not None and not fdf.empty else {})
     except Exception:

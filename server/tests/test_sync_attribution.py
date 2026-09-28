@@ -32,8 +32,16 @@ def _clean():
 def _breaker_fails() -> int:
     """Tushare 熔断器当前连续失败计数（无则 0）。"""
     from src.data_platform import rate_limit
-    br = rate_limit._BREAKERS.get("tushare")
-    return br._fails if br else 0
+    # 批 73：熔断计数迁 Valkey（fake 经 conftest autouse 注入）——注册表反查实际键
+    # （_get_rate_ds 测试环境可能取真行 interface_id≠0，硬编码 :0 会 miss）
+    from src.data_platform.rate_limit import _r, _BREAKERS
+    for (provider, acct), _br in _BREAKERS.items():
+        if provider == "tushare":
+            try:
+                return int(_r().hget(f"rl:cb:{provider}:{acct}", "fails") or 0)
+            except Exception:
+                return 0
+    return 0
 
 
 # --- _sync_via_kind_minute 归因（批 72：旧 _sync_astock_minute 退役，归因拆分结构保留——

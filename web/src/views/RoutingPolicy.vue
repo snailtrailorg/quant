@@ -141,7 +141,8 @@ const usageLabel = (v) => {
 }
 const kindLabel = (v) => (v === 'bar_daily' ? t('routing.rtKindBarDaily') : v === 'bar_minute' ? t('routing.rtKindBarMinute') : v)
 const healthLabel = (v) => {
-  const map = { closed: 'Closed', open: 'Open', half_open: 'HalfOpen' }
+  // 批 73：unknown=熔断状态读不出（缓存服务故障——fail-open 展示面，文案师词条）
+  const map = { closed: 'Closed', open: 'Open', half_open: 'HalfOpen', unknown: 'Unknown' }
   const key = `routing.rtHealth${map[v] || 'Closed'}`
   return te(key) ? t(key) : v
 }

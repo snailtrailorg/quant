@@ -452,6 +452,13 @@ def set_rate_limit_override(provider: str, req: RateLimitOverrideReq,
         _save_ds_params(dsid, params)
         audit_log(payload["username"], "data_source_cb_update", f"{provider} {cb}")
         return {"ok": True, "circuit_breaker": cb}
+    if req.pacer is not None:   # 批 73：provider 总闸（params.pacer.min_interval——0=关/默认）
+        if not 0 <= req.pacer <= 30:
+            raise ApiError(400, "PACER_VALUE_INVALID", "总闸间隔须在 [0, 30] 秒（等待上限对齐）")
+        params = {**params, "pacer": {"min_interval": req.pacer}}
+        _save_ds_params(dsid, params)
+        audit_log(payload["username"], "data_source_pacer_update", f"{provider} min_interval={req.pacer}s")
+        return {"ok": True, "pacer": {"min_interval": req.pacer}}
     if not req.api_name:
         raise ApiError(400, "OVERRIDE_VALUE_INVALID", "api_name 不能为空")
     overrides = dict(params.get("rate_limits") or {})

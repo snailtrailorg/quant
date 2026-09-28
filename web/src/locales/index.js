@@ -1085,7 +1085,7 @@ hitRateTip: '命中率=该条目命中数 ÷ 近 30 天差异行数。长期 99%
       rtCauseSkipUnhealthy: '健康异常跳过',
       rtUsageDefault: '默认', rtUsageBacktest: '回测', rtUsageLive: '实盘', rtUsageSync: '同步',
       rtKindBarDaily: '日线', rtKindBarMinute: '分钟线',
-      rtHealthClosed: '正常', rtHealthOpen: '熔断中', rtHealthHalfOpen: '恢复探测中',
+      rtHealthClosed: '正常', rtHealthOpen: '熔断中', rtHealthHalfOpen: '恢复探测中', rtHealthUnknown: '状态未知，请检查缓存服务',
     },
     systemConfig: {
       title: '系统配置',
@@ -2500,7 +2500,7 @@ hitRateTip: 'Hit rate = entry hits ÷ diff rows in the last 30 days. A rate pers
       rtCauseSkipUnhealthy: 'Skipped (unhealthy)',
       rtUsageDefault: 'Default', rtUsageBacktest: 'Backtest', rtUsageLive: 'Live', rtUsageSync: 'Sync',
       rtKindBarDaily: 'Daily bars', rtKindBarMinute: 'Minute bars',
-      rtHealthClosed: 'Normal', rtHealthOpen: 'Breaker open', rtHealthHalfOpen: 'Probing',
+      rtHealthClosed: 'Normal', rtHealthOpen: 'Breaker open', rtHealthHalfOpen: 'Probing', rtHealthUnknown: 'Unknown (check cache service)',
     },
     systemConfig: {
       title: 'System Config',

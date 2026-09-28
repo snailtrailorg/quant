@@ -66,16 +66,20 @@ def dry_run(kind: str, symbol: str, consumer: str = "default", mode: str = "cons
     """候选链试算器：输入 kind/symbol/consumer/mode 展示链与决策理由（不真拉——29 号只选不拉）。"""
     from src.quant_common.contract import DataRequest
     from src.data_platform import routing
-    from src.data_platform.rate_limit import _BREAKERS
+    from src.data_platform.rate_limit import _r, breaker_key
     req = DataRequest(kind=kind, symbols=(symbol,), temporality="historical",
                       consumer_tag=consumer, mode=mode)
     chain = routing.resolve(req)
     out = []
     for c in chain.candidates:
-        breaker = _BREAKERS.get(c.adapter)
+        # 批 73：直读 Valkey 熔断状态（两段键）——web dry-run 根治恒 closed（跨进程互见）
+        try:
+            health = _r().hget(breaker_key(c.adapter, (c.account or {}).get("id", 0)), "state") or "closed"
+        except Exception:
+            health = "unknown"   # fail-open 展示面
         out.append({
             "adapter": c.adapter, "is_local": c.is_local, "position": c.position,
-            "health": getattr(breaker, "state", "closed"),
+            "health": health,
             "quality": c.quality,
             "score": routing._score(routing._weights_of(consumer), c.quality),
         })

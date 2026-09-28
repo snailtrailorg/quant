@@ -87,7 +87,7 @@ class CandidateChain:
                 continue
             if time.monotonic() >= deadline:
                 break
-            if _breaker_open(c.adapter):     # 熔断源不占闸门（盲审 A/B 双 P1——先检后 admit 防计数泄漏）
+            if _breaker_open(c.adapter, (c.account or {}).get("id", 0)):     # 熔断源不占闸门（盲审 A/B 双 P1——先检后 admit；批 73 两段键）
                 _audit("skip_unhealthy", req, self, self.candidates, skipped=c.adapter)
                 continue
             if not _bulkhead_admit(c.adapter):
@@ -149,13 +149,17 @@ def _bulkhead_limit(adapter: str) -> int:
     return min(hits) if hits else _BULKHEAD_DERIVED.get(adapter, _BULKHEAD_DEFAULT)
 
 
-def _breaker_open(adapter: str) -> bool:
-    """健康度回流（28 §6.4）：rate_limit 熔断注册表读状态——保护机制复用为决策输入。"""
+def _breaker_open(adapter: str, acct=0) -> bool:
+    """健康度回流（28 §6.4）：直读 Valkey 熔断状态（批 73：状态迁 Valkey——跨进程互见，
+    web dry-run 根治恒 closed）。两段键 rl:cb:{provider}:{acct}（acct=Candidate.account["id"]，
+    与写方 ds.interface_id 同源）。fail-open：Valkey 故障=视为健康（路由可用性优先）。"""
     if adapter == "local_pg":
         return False
-    from .rate_limit import _BREAKERS
-    b = _BREAKERS.get(adapter)
-    return bool(b) and b.state == "open"
+    from .rate_limit import _r, breaker_key
+    try:
+        return _r().hget(breaker_key(adapter, acct), "state") == "open"
+    except Exception:
+        return False
 
 
 class _TableState:
@@ -196,7 +200,7 @@ def _load_state(force: bool = False) -> _TableState:
         rows, policy = [], {}
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT provider, market, exchanges, capabilities, params, position, enabled "
+                "SELECT id, provider, market, exchanges, capabilities, params, position, enabled "
                 "FROM external_interface ORDER BY position, id")
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -284,7 +288,7 @@ def resolve(req, principal: tuple[str, str] | None = None) -> CandidateChain:
                                position=int(row.get("position") or 0)))
     # 排序键：健康一票前置（熔断源无论人工序多靠前都沉底——验收③字面；28 §6.1 样例将
     # health 并入 score，但 position 前置会抵消 −∞——张力裁决：健康>人工序>质量分）
-    cands.sort(key=lambda c: (1 if _breaker_open(c.adapter) else 0, c.position, -_score(w, c.quality)))
+    cands.sort(key=lambda c: (1 if _breaker_open(c.adapter, (c.account or {}).get("id", 0)) else 0, c.position, -_score(w, c.quality)))
     chain = CandidateChain(tuple(cands), epoch=st.version, fingerprint=st.fingerprint)
     _audit("resolve", req, chain, tuple(cands))
     return chain

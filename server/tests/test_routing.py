@@ -31,7 +31,7 @@ class _FakeConn:
     def execute(self, sql, params=None):
         cur = MagicMock()
         if "FROM external_interface" in sql:
-            cur.description = [(d,) for d in ("provider", "market", "exchanges",
+            cur.description = [(d,) for d in ("id", "provider", "market", "exchanges",
                                               "capabilities", "params", "position", "enabled")]
             cur.fetchall.return_value = self.rows
         elif "FROM routing_policy" in sql:
@@ -49,9 +49,9 @@ class _FakeConn:
 
 
 _ROWS = [  # D25 token 化后真实形状：tushare{hist_quote}+tencent{rt_quote}+xtp{trading,rt_quote}
-    ("tushare", "astock", None, ["hist_quote"], "{}", 1, True),
-    ("tencent", "astock", None, ["rt_quote"], "{}", 2, True),
-    ("xtp", "astock", None, ["trading", "rt_quote"], "{}", 3, True),
+    (1, "tushare", "astock", None, ["hist_quote"], "{}", 1, True),
+    (3, "tencent", "astock", None, ["rt_quote"], "{}", 2, True),
+    (4, "xtp", "astock", None, ["trading", "rt_quote"], "{}", 3, True),
 ]
 
 
@@ -168,8 +168,8 @@ class TestResolve:
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical")
-            rows2 = [("tencent", "astock", None, ["kline"], "{}", 1, True),
-                     ("tushare", "astock", None, ["kline"], "{}", 2, True)]
+            rows2 = [(3, "tencent", "astock", None, ["kline"], "{}", 1, True),
+                     (1, "tushare", "astock", None, ["kline"], "{}", 2, True)]
             conn2 = _FakeConn(rows2, _POLICIES)
             with patch.object(rt, "get_conn", return_value=conn2):
                 rt._STATE.rows = []          # 强制重载（真 _load_state 读 conn2）
@@ -187,18 +187,14 @@ class TestResolve:
             e2 = rt.resolve(req).epoch
         assert e1 == 7 and e2 == 8
 
-    def test_breaker_sink_to_bottom(self, sm_covers_all, breakers_clean):
-        """验收③：熔断账号沉底（注入 open——保护机制复用为决策输入，28 §6.4）。"""
-        from src.data_platform import rate_limit
-        from src.data_platform.rate_limit import CircuitBreaker
+    def test_breaker_sink_to_bottom(self, sm_covers_all, breakers_clean, _reset_rate_limit):
+        """验收③：熔断账号沉底（注入 open——批 73 注入面=Valkey 状态直写）。"""
         rt, conn, rds, patches = _setup()
-        rows = [("tushare", "astock", None, ["kline"], "{}", 1, True),
-                ("akshare", "astock", None, ["kline"], "{}", 2, True)]
+        rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True),
+                (2, "akshare", "astock", None, ["kline"], "{}", 2, True)]
         conn.rows = rows
-        b = CircuitBreaker(fail_threshold=2, reset_timeout=300)
-        b.record_failure(); b.record_failure()  # 真实触发：连续失败≥阈值 → Open
-        with patches[0], patches[1], \
-             patch.object(rate_limit, "_BREAKERS", {"tushare": b}):
+        _reset_rate_limit.hset("rl:cb:tushare:1", mapping={"state": "open", "opened_at": 0})
+        with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
@@ -206,7 +202,7 @@ class TestResolve:
 
     def test_disabled_row_filtered(self, sm_covers_all, breakers_clean):
         rt, conn, rds, patches = _setup()
-        conn.rows = [("tushare", "astock", None, ["kline"], "{}", 1, False)]
+        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, False)]
         with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
                               temporality="historical", mode="supply")
@@ -231,8 +227,8 @@ class TestFetchChain:
     def test_failover_and_datagap(self, sm_covers_all, breakers_clean):
         """验收④a：failover 审计——SourceUnavailable 链下移到次候选。"""
         rt, conn, rds, patches = _setup()
-        conn.rows = [("tushare", "astock", None, ["kline"], "{}", 1, True),
-                     ("akshare", "astock", None, ["kline"], "{}", 2, True)]
+        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True),
+                     (2, "akshare", "astock", None, ["kline"], "{}", 2, True)]
         rt._STATE.rows = []
         with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
@@ -254,8 +250,8 @@ class TestFetchChain:
     def test_skip_busy_bulkhead(self, sm_covers_all, breakers_clean):
         """验收④b：skip_busy——bulkhead 闸门满（mock incr 恒返回超限）→审计+下移。"""
         rt, conn, rds, patches = _setup()
-        conn.rows = [("tushare", "astock", None, ["kline"], "{}", 1, True),
-                     ("akshare", "astock", None, ["kline"], "{}", 2, True)]
+        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True),
+                     (2, "akshare", "astock", None, ["kline"], "{}", 2, True)]
 
         class _FullRedis(_RedisMock):
             def incr(self, k):
@@ -271,16 +267,12 @@ class TestFetchChain:
         causes = [p[4] for p in conn.inserts]
         assert "skip_busy" in causes
 
-    def test_skip_unhealthy_no_leak(self, sm_covers_all, breakers_clean):
-        """盲审 A/B P1 修复钉：熔断候选 fetch 时刻跳过且不占闸门（计数不泄漏）。"""
-        from src.data_platform import rate_limit
-        from src.data_platform.rate_limit import CircuitBreaker
+    def test_skip_unhealthy_no_leak(self, sm_covers_all, breakers_clean, _reset_rate_limit):
+        """盲审 A/B P1 修复钉：熔断候选 fetch 时刻跳过且不占闸门（批 73 注入面=Valkey 直写）。"""
         rt, conn, rds, patches = _setup()
-        conn.rows = [("tushare", "astock", None, ["kline"], "{}", 1, True)]
-        b = CircuitBreaker(fail_threshold=2, reset_timeout=300)
-        b.record_failure(); b.record_failure()
-        with patches[0], patches[1], \
-             patch.object(rate_limit, "_BREAKERS", {"tushare": b}):
+        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True)]
+        _reset_rate_limit.hset("rl:cb:tushare:1", mapping={"state": "open", "opened_at": 0})
+        with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
                               temporality="historical", mode="supply")
             ch = rt.resolve(req)
