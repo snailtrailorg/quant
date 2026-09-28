@@ -500,12 +500,14 @@ def validate_bar_quality(df: pd.DataFrame) -> dict:
         if big_gaps > 0:
             issues.append(f"异常跳空(>20%): {big_gaps} 条")
 
-    # 4. 时序断点（日线 >7 天间隔）
+    # 4. 时序断点（日线 >7 天间隔）——per-symbol 向量化（批 71：全市场批跨标的混算
+    #    无意义；sort+diff 后掩掉 ts_code 变更行=组边界，免 groupby-apply 逐组开销）
     if "trade_date" in clean.columns:
-        clean = clean.sort_values("trade_date")
+        clean = clean.sort_values(["ts_code", "trade_date"])
         dates = pd.to_datetime(clean["trade_date"], format="%Y%m%d")
         diffs = dates.diff().dt.days
-        gaps = (diffs > 7).sum()
+        same_sym = clean["ts_code"].eq(clean["ts_code"].shift())
+        gaps = ((diffs > 7) & same_sym).sum()
         if gaps > 0:
             issues.append(f"时序断点(>7天): {gaps} 处")
 

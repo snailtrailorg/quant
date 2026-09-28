@@ -29,6 +29,8 @@ async def api_error_handler(request, exc: ApiError):
     content = {"detail": exc.detail, "code": exc.code}
     if getattr(exc, "extra", None):
         content.update(exc.extra)
+    if getattr(exc, "params", None):
+        content["params"] = exc.params   # 批 71：params 保留键（extra 之后写——v2 #19 立法顺序）
     return JSONResponse(status_code=exc.status_code, content=content)
 
 

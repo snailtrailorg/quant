@@ -429,7 +429,13 @@ class LLMGateway:
     def _log_usage(self, provider: str, model: str, input_tokens: int, output_tokens: int,
                    latency_ms: int, success: bool, error_type: str | None = None,
                    caller: str | None = None) -> None:
-        """写 llm_usage（PG），架构 §8 用量日志。失败不影响主流程。"""
+        """写 llm_usage（PG），架构 §8 用量日志。失败不影响主流程。
+
+        批 71（L4）：同点并入 data_source_usage 记账（api_name='llm:chat'，calls 粒度——
+        与数据源用量同表可观测，/api/data-source-usage 自动上板）。两段独立 try：llm_usage
+        失败不连带跳过 data_source_usage（v2 #13）；interface_id NULL=裸构造（0090 合法）。
+        本批只做记账，限速/熔断语义按总方案另裁。
+        """
         try:
             from src.data_platform.db import get_conn
             with get_conn() as conn:
@@ -441,6 +447,16 @@ class LLMGateway:
                 conn.commit()
         except Exception as e:
             logger.warning(f"llm_usage 写失败: {e}")
+        try:
+            from src.data_platform.db import get_conn
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO data_source_usage (provider, api_name, calls, success, latency_ms) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    (provider, "llm:chat", 1, success, latency_ms))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"data_source_usage 记账写失败（L4，不阻主流程）: {e}")
 
     def _load_failover_config(self, config_path: str | Path | None) -> dict:
         """failover 策略读 config.yaml（模型配置已 DB 化，tiers/providers 段已删）。"""

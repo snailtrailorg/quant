@@ -24,7 +24,7 @@ FastAPI Web 后端，166 端点（12 个 APIRouter 分组）。RBAC 认证（JWT
 server/src/web_api/
 ├── main.py           # FastAPI 引导（~125 行，app 创建 + CORS + startup + include_router）
 ├── auth.py           # JWT + RBAC + 用户管理 + 邀请/重置 + audit_log
-├── errors.py         # ApiError(status, CODE, 中文兜底) → {detail, code} 错误码机制
+├── errors.py         # ApiError(status, CODE, 中文兜底) → {detail, code[, params]} 错误码机制（批 71 插值通道）
 ├── terms.py          # i18n 条款 re-export（注册表本体在 quant_common/terms.py）
 ├── models.py         # Pydantic 请求体模型（22 个，从 main.py 迁出）
 ├── routes/
@@ -130,7 +130,7 @@ PERMISSIONS: dict[str, set[str]]                     # 角色 -> 权限集
 ```python
 # web_api/crypto_utils.py 已不存在；凭证加解统一走 quant_common.crypto：
 from src.quant_common.crypto import encrypt, decrypt, mask
-# ApiError 错误码机制见 web_api/errors.py：ApiError(status, CODE, 中文兜底) → {detail, code}
+# ApiError 错误码机制见 web_api/errors.py：ApiError(status, CODE, 中文兜底) → {detail, code}（批 71：可选 params dict → 顶层 params，前端 apiErr 词条插值 {max}；params=保留键，extra 之后写）
 ```
 
 ---

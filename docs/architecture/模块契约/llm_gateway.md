@@ -85,7 +85,7 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 - `_filter_tools(role, tools)`：角色白名单 ∩ 传入 -> OpenAI tools 格式
 - `_do_chat(...)` / `_do_chat_stream(...)`：实际调 LLM（primary→fallback + 指数退避 + 用量日志）
 - `_parse_response(resp) -> LLMResponse`：解析 OpenAI 响应（content + tool_calls + usage）
-- `_log_usage(provider, model, in, out, latency_ms, success, error_type, caller)`：写 llm_usage（失败不影响主流程）
+- `_log_usage(provider, model, in, out, latency_ms, success, error_type, caller)`：写 llm_usage + data_source_usage（批 71 L4：两段独立 try，api_name=llm:chat；失败不影响主流程）
 - `_load_failover_config(path)`：读 config.yaml 的 failover 段（默认 retry_wait_s=2, fail_threshold=5, pause_s=300）
 
 ---
@@ -97,7 +97,7 @@ OPERATIONAL_TOOLS # = TRADER_TOOLS + ADMIN_TOOLS（供外部判断"需确认卡�
 | `openai.OpenAI` / `AsyncOpenAI`（外部） | 国内模型 OpenAI 兼容协议 |
 | `yaml`（外部） | 读 config.yaml failover 段 |
 | `dotenv`（外部） | 读 .env |
-| `src.data_platform.db.get_conn` | 读 llm_model_config / 写 llm_usage |
+| `src.data_platform.db.get_conn` | 读 llm_model_config / 写 llm_usage + 写 data_source_usage（批 71 L4：api_name=llm:chat，calls 粒度——与数据源用量同表） |
 | `src.quant_common.crypto.decrypt` | 解密 api_key_encrypted（2026-08-19 归位；原 `web_api.crypto_utils` 循环依赖已解）（P3 回写 2026-08-20） |
 
 > 曾有 `llm_gateway` ⇄ `web_api`（crypto_utils/chat）循环依赖，靠函数内 import 打破——crypto 归位 `quant_common` 后解环；web_api 依赖 llm_gateway 方向保留。

@@ -26,9 +26,10 @@ api.interceptors.response.use(
 )
 
 // 错误码本地化：后端返回 code 时显示 err.<CODE> 翻译（N 语言），无映射回落 detail/消息
+// 批 71：params 插值通道——词条 {max} 占位与后端配置值联动（无占位词条多传参数 vue-i18n 自动忽略，存量零回归）
 export function apiErr(e, fallback = '') {
   const g = i18n.global
-  if (e?.code && g.te('err.' + e.code)) return g.t('err.' + e.code)
+  if (e?.code && g.te('err.' + e.code)) return g.t('err.' + e.code, e?.params || {})
   // 批37（用户裁定）：裸英文错误串不上屏——后端默认 404 与 axios 网络层错误双语化
   if (e?.detail === 'Not Found' || e?.message === 'Not Found')
     return g.t('common.apiNotFound')

@@ -496,6 +496,7 @@ def _sync_cb_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
     df = pull_cb_daily(start, end_date)
     if df.empty:
         return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [], "expected_days": 0, "actual_days": 0}
+    _log_bar_quality(df, "cb_daily")
     rows = adapter.to_bar_rows(df, "1D")
     saved = _save_bars(rows)
     return {"pulled": len(df), "saved": saved, "start": start,
@@ -562,7 +563,7 @@ def _sync_etf_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
 
     r = _sync_by_trade_date(
         lambda trade_date: adapter.pull_daily_batch(trade_date, "etf"),
-        lambda df: _daily_to_save_fn(df, adapter),
+        lambda df: _daily_to_save_fn(df, adapter, label="etf_daily"),
         start, end_date, api_name=_api_name_of(cfg), progress_cb=progress_cb,
         provider=adapter.provider)
     r["start"] = start
@@ -685,23 +686,31 @@ def _adj_map_for_df(df: pd.DataFrame, adapter) -> dict:
 
 
 def _save_bars(rows: list[tuple]) -> int:
-    """写入 bar_1D 表。P3-15：save_bars 内部已有 validate_bars，这里补充 validate_bar_quality 调用。"""
+    """写入 bar_1D 表。批 71：旧 validate_bar_quality 坏调用（传 rows 恒 AttributeError 被吞，
+    自引入 0 次成功）已删——质量校验上移至持 Tushare 原生 df 的调用侧（_log_bar_quality）。"""
     if not rows:
         return 0
-    # P3-15: 调用 validate_bar_quality（去重/异常gap/vol=0）
-    try:
-        from src.data_platform.adapters.tushare_adapter import validate_bar_quality
-        quality = validate_bar_quality(rows)
-        if quality.get("issues"):
-            logger.warning(f"数据质量校验: {quality['issues']}")
-    except Exception as e:
-        logger.warning("validate_bar_quality 异常: %s", e)
     from src.data_platform.db import save_bars
     return save_bars("1D", rows)
 
 
-def _daily_to_save_fn(df: pd.DataFrame, adapter) -> int:
-    """daily DataFrame -> 行 -> 入库（_sync_by_trade_date 的 save_fn 适配，24 号 adapter 化）。"""
+def _log_bar_quality(df, label: str) -> None:
+    """批 71：日线质量校验（fail-soft——校验器任何异常只 warning 不阻入库，对齐旧 :692-698
+    语义；v2 #1 双同 P1）。输入=Tushare 原生 df（ts_code/trade_date YYYYMMDD/ohlc/vol/pre_close）；
+    issues 一行一条（观察期统计友好——v2 #16）。"""
+    try:
+        from src.data_platform.adapters.tushare_adapter import validate_bar_quality
+        q = validate_bar_quality(df)
+        for issue in q.get("issues") or []:
+            logger.warning("[quality] %s %s", label, issue)
+    except Exception as e:
+        logger.warning("[quality] %s 校验器异常（不阻入库）: %s", label, e)
+
+
+def _daily_to_save_fn(df: pd.DataFrame, adapter, label: str = "bar_daily") -> int:
+    """daily DataFrame -> 行 -> 入库（_sync_by_trade_date 的 save_fn 适配，24 号 adapter 化）。
+    label=观察期甄别维度（批 71 代码盲审 A P2-5：astock/etf 分开，[quality] 日志可分型）。"""
+    _log_bar_quality(df, label)
     adj_map = _adj_map_for_df(df, adapter)
     return _save_bars(adapter.to_bar_rows(df, "1D", adj_map))
 

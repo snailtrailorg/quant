@@ -27,8 +27,9 @@ class Store:
     def cur_version(self, kind: str) -> int:
         """读表级版本（system_config 键 dataset_version:{kind}，缺省 1；读失败=1）。
 
-        ⚠️ 版本真源=列 DEFAULT（批 58b 已把 bar_minute 推到 2）；本键是读侧真源、缺省 1 与
-        DEFAULT 2 存在不一致——数据变更批推进版本时须同步 seed 本键（挂账：统一版本真源）。
+        批 71（0113）已 seed bar_daily=1/bar_minute=2/index_daily=1——键/列 DEFAULT 对账由
+        迁移验收 SQL 守护（canonical 表口径：bar_1D/bar_1min/bar_index）；新 kind 推进版本时
+        须同步 seed 本键（0095 式推进再忘=对账告警挂账项）。
         """
         try:
             with get_conn() as conn:

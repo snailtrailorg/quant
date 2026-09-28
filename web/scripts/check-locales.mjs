@@ -90,3 +90,38 @@ console.log('✓ locales 无重复键')
   }
   console.log(`✓ en/zh 键集对称（${zhKeys.size} 键）`)
 }
+
+// 批 71 守门（第四门）：词条占位符 zh/en 一致——同一键 {x} 占位符名字集合（去重）相等。
+// 单侧缺占位=该语言渲染残缺（vue-i18n 原样显示 {x}）；集合语义非列表（同名多次出现合法）。
+// JSON 示例类词条（如 IFACE_PARAMS_INVALID）花括号带引号不匹配 /\{(\w+)\}/，无误报（已核）。
+{
+  const root2 = ast.body.find(s => s.type === 'ExportDefaultDeclaration')?.declaration
+  const zh2 = root2?.properties?.find(p => p.key.name === 'zh')?.value
+  const en2 = root2?.properties?.find(p => p.key.name === 'en')?.value
+  const collectMap = (node, prefix, out) => {
+    if (!node || node.type !== 'ObjectExpression') return
+    for (const p of node.properties) {
+      if (p.type !== 'Property' || p.computed || p.key.type !== 'Identifier') continue
+      const path = prefix ? `${prefix}.${p.key.name}` : p.key.name
+      if (p.value.type === 'ObjectExpression') collectMap(p.value, path, out)
+      else if (p.value.type === 'Literal' && typeof p.value.value === 'string') out.set(path, p.value.value)
+    }
+  }
+  const ph = (s) => new Set([...String(s).matchAll(/\{(\w+)\}/g)].map(m => m[1]))
+  const zhMap = new Map(), enMap = new Map()
+  collectMap(zh2, '', zhMap); collectMap(en2, '', enMap)
+  const bad = []
+  for (const [k, v] of zhMap) {
+    const ev = enMap.get(k)
+    if (ev === undefined) continue   // 单侧缺键第三门已管
+    const a = ph(v), b = ph(ev)
+    if (a.size !== b.size || [...a].some(x => !b.has(x)))
+      bad.push(`  ${k}: zh {${[...a].join(',')}} vs en {${[...b].join(',')}}`)
+  }
+  if (bad.length) {
+    console.error(`✗ 词条占位符 zh/en 不一致 ${bad.length} 处:`)
+    bad.forEach(x => console.error(x))
+    process.exit(1)
+  }
+  console.log('✓ 词条占位符 zh/en 一致（集合语义）')
+}

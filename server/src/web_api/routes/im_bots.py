@@ -220,10 +220,11 @@ def _quota_guard(conn, uid: int) -> None:
     uq, pq = _quota_limits()
     n_user = conn.execute("SELECT count(*) FROM im_bot_config WHERE owner_user_id=%s", (uid,)).fetchone()[0]
     if n_user >= uq:
-        raise ApiError(400, "BOT_QUOTA", f"每用户最多 {uq} 个 IM 通道")
+        raise ApiError(400, "BOT_QUOTA", f"每用户最多 {uq} 个 IM 通道", params={"max": uq})
     n_total = conn.execute("SELECT count(*) FROM im_bot_config WHERE enabled").fetchone()[0]
     if n_total >= pq:
-        raise ApiError(400, "BOT_PLATFORM_LIMIT", f"平台 IM 通道总数已达上限（{pq}），请先停用不用的通道")
+        raise ApiError(400, "BOT_PLATFORM_LIMIT", f"平台 IM 通道总数已达上限（{pq}），请先停用不用的通道",
+                       params={"max": pq})
 
 
 def _platform_bot_count() -> int:
@@ -309,7 +310,8 @@ def my_im_start(bid: int, payload: dict = Depends(require_authenticated)):
     # 批27-28/29：上限走 _quota_limits（system_config 可改）。本 bot 已 enabled 时 start 幂等不占新额度
     _pq = _quota_limits()[1]
     if not bot["enabled"] and _platform_bot_count() >= _pq:
-        raise ApiError(400, "BOT_PLATFORM_LIMIT", f"平台 IM 通道总数已达上限（{_pq}），请先停用不用的通道")
+        raise ApiError(400, "BOT_PLATFORM_LIMIT", f"平台 IM 通道总数已达上限（{_pq}），请先停用不用的通道",
+                       params={"max": _pq})
     from src.data_platform.db import get_conn as _gc
     with _gc() as conn:
         _pv = conn.execute("SELECT provider FROM im_bot_config WHERE id=%s", (bid,)).fetchone()
