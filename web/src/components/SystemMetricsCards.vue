@@ -112,7 +112,10 @@ const cards = computed(() => {
         axisTick: { show: false },
         axisLabel: { show: true, color: cssVar('--text-secondary'), fontSize: 10,
                      hideOverlap: true,
-                     customValues: spans.map(([a, b]) => (a + b) / 2),   // 每天一个标签居当天数据正中（用户验收反馈）
+                     // 完整天才给标签（用户验收反馈：两端截断日不显示）——判据=当天数据跨度≥24h-5min
+                     // （序列首日从窗口截断点起/末日未过完，均不足额）；中点仍居当天数据正中
+                     customValues: spans.filter(([a, b]) => b - a >= 24 * 3600 * 1000 - 300000)
+                                        .map(([a, b]) => (a + b) / 2),
                      formatter: '{MM}-{dd}' },   // 纯日期标签——日界由交替背景带承担
         splitLine: { show: false },
       },
