@@ -102,11 +102,12 @@ class TestStockDetail:
         assert _normalize("600000.SHSE") == ("600000.SH", "600000.SHSE")
 
     def test_quote_fallback_hub_to_tencent(self):
+        """批 70c：公共表单 GET（per-account 键写侧仍双写但读者已切 pub）。"""
         from src.data_platform import stock_detail as sd
-        r, store = _fake_redis({"hub:latest_tick:1:600000.SHSE": json.dumps({"last": 9.0, "ts": "2026-09-26T15:00:00+08:00"})})
+        r, store = _fake_redis({"hub:latest_tick:pub:600000.SHSE": json.dumps({"last": 9.0, "ts": "2026-09-26T15:00:00+08:00", "_ts_epoch": 1.0, "account_id": 1})})
         with patch.object(sd, "_r", return_value=r):
             q = sd._quote_block("600000.SH", "600000.SHSE")
-        assert q["source"] == "hub" and q["last"] == 9.0
+        assert q["source"] == "hub" and q["last"] == 9.0 and "_ts_epoch" not in q
         # hub miss → tencent（_quote_block 函数内 from .market_snapshot import——patch 源模块）
         r2, _ = _fake_redis()
         from src.data_platform import market_snapshot as ms
