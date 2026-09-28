@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""批 58·M3 行为等价对照（真库两跑 diff——本地 dev 工具，不传服务器）。
+"""⚠ 已退役（批 72，2026-09-29）：本脚本是批 58 灰度期的 A/B 对照工具——对照对象
+（旧 bar handler）已随批 72 一步切删除，sync_kind_routing 键失效（静态路由
+_VIA_KIND_IDS）。脚本写/清该键已无任何引擎效果，跑不出有意义结果。保留仅供考古。
+
+批 58·M3 行为等价对照（真库两跑 diff——本地 dev 工具，不传服务器）。
 
 对 bar 族 6 sync_id 逐个：flag off 跑 _HANDLERS → 快照窗口行 → 删窗口行 →
 flag on 跑 _sync_via_kind → 快照 → 按 pk 排序全字段 diff。

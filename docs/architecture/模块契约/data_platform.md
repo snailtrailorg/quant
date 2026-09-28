@@ -295,7 +295,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 
 | 调用方 | 调什么 |
 |---|---|
-| `data_sync.engine` | `get_conn` / `save_bars` / `save_bars_overwrite` / `get_data_source`（_get_pro）/ **`rate_limit.rate_limit_context`（5 处拉取点：_sync_by_trade_date / _sync_astock_minute / backfill_adj_factor / tier1 handler / sync_all，2026-08-27）** |
+| `data_sync.engine` | `get_conn` / `save_bars` / `save_bars_overwrite` / `get_data_source`（_get_pro）/ **`rate_limit.rate_limit_context`（批 72 后：_sync_by_trade_date / _sync_via_kind_minute / backfill_adj_factor / tier1 handler / sync_all）** |
 | `data_sync.pool_minute` | `get_data_source` + `get_rate_limit("stk_mins")`（Valkey 全局闸门取间隔） |
 | `strategy_framework.backtest` | `get_bars` |
 | `astock_analysis.analysis` | `get_bars` / `is_trading_day` |

@@ -21,27 +21,9 @@ class TestDailyToRowsAdj:
         assert rows[1][9] is None          # 不在 map 的标保持 NULL
         assert rows[0][10] == "tushare"
 
-    def test_adj_map_degraded_returns_empty_and_rows_still_built(self):
-        """降级（因子接口不可用）→ adj_map={} → 行照常产出（因子 NULL），同步不中断。"""
-        from src.data_sync.engine import _adj_map_for_df
-        from src.data_platform.adapters.base import TushareAdapter
-        adapter = TushareAdapter()
-        with patch.object(adapter, "pull_adj_factor", return_value=None):
-            m = _adj_map_for_df(_daily_df(), adapter)
-        assert m == {}
-        rows = adapter.to_bar_rows(_daily_df(), "1D", m)
-        assert len(rows) == 2 and all(r[9] is None for r in rows)
-
-    def test_adj_map_joins_by_trade_date(self):
-        from src.data_sync.engine import _adj_map_for_df
-        from src.data_platform.adapters.base import TushareAdapter
-        adapter = TushareAdapter()
-        fdf = pd.DataFrame({"ts_code": ["600000.SH"], "trade_date": ["20260815"],
-                            "adj_factor": [3.3]})
-        with patch.object(adapter, "pull_adj_factor", return_value=fdf):
-            m = _adj_map_for_df(_daily_df(), adapter)
-        assert m == {"600000.SH": 3.3}
-
+    # 批 72：_adj_map_for_df 已随旧 handler 退役删除——degraded→{} 与按 ts_code join
+    # 两语义由 fetch 层钉覆盖（test_fetch_contract.py：test_bar_daily_stock_batch /
+    # test_bar_daily_stock_adj_factor / test_bar_daily_empty_skips_adj_factor）。
 
 class TestPullDailyRawDefault:
     def test_default_adj_is_none(self):

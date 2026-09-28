@@ -1,6 +1,6 @@
 """限流熔断归因拆分单测（2026-09-03）。
 
-锁住：sync_all/_sync_astock_minute 的 DB 写不再计入 Tushare 熔断——
+锁住：sync_all/_sync_via_kind_minute 的 DB 写不再计入 Tushare 熔断（批 72 正名）——
 只有 Tushare API 调用失败才计熔断；API 失败同时从「吞成 empty 假装成功」改为
 「记 failed + 计熔断」。归因拆分根治点：熔断上下文只包 Tushare 拉取、DB 写在外。
 """
@@ -36,16 +36,16 @@ def _breaker_fails() -> int:
     return br._fails if br else 0
 
 
-# --- _sync_astock_minute 归因 ---
+# --- _sync_via_kind_minute 归因（批 72：旧 _sync_astock_minute 退役，归因拆分结构保留——
+#     fetch 在 rate_limit_context 内 / save_bars 在外）---
 
 def test_minute_api_error_counts_breaker():
     """API 拉取失败 → 计熔断 + 记 failed（回归锁）。"""
     from src.data_sync import engine
-    cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute",
-               side_effect=Exception("tushare down")):
-        r = engine._sync_astock_minute(cfg, "20260808")
+         patch("src.data_sync.engine._fetch_supply", side_effect=Exception("tushare down")):
+        r = engine._sync_via_kind_minute(MagicMock(provider="tushare"),
+                                         sync_id="astock_minute", start="20260808", end_date="20260808")
     assert len(r["failed_dates"]) == 1
     assert _breaker_fails() == 1
 
@@ -53,11 +53,12 @@ def test_minute_api_error_counts_breaker():
 def test_minute_db_error_not_counts_breaker():
     """DB 写失败 → 记 failed 但不计熔断（归因拆分核心）。"""
     from src.data_sync import engine
-    cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_df()), \
+         patch("src.data_sync.engine._fetch_supply",
+               return_value=MagicMock(rows=["r1"])), \
          patch("src.data_platform.db.save_bars", side_effect=Exception("db down")):
-        r = engine._sync_astock_minute(cfg, "20260808")
+        r = engine._sync_via_kind_minute(MagicMock(provider="tushare"),
+                                         sync_id="astock_minute", start="20260808", end_date="20260808")
     assert len(r["failed_dates"]) == 1
     assert _breaker_fails() == 0
 

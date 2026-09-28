@@ -80,7 +80,7 @@ class TestFetchDispatch:
         tbr.assert_called_once_with(df, "1D", {"600000.SH": 2.5})
 
     def test_bar_daily_empty_skips_adj_factor(self):
-        """缺口 1 加固：空 df（节假日）不拉因子——对齐 _daily_to_save_fn 只在 df 非空时拉。"""
+        """缺口 1 加固：空 df（节假日）不拉因子——对齐已退役 _daily_to_save_fn〔批 72〕只在 df 非空时拉。"""
         from src.data_platform.adapters.base import TushareAdapter
         ad = TushareAdapter()
         with patch.object(ad, "pull_daily_batch", return_value=pd.DataFrame()) as pb, \
@@ -159,3 +159,52 @@ class TestFetchDispatch:
         from src.data_platform.adapters.base import TushareAdapter
         sig = inspect.signature(TushareAdapter.fetch)
         assert "sync_id" not in sig.parameters
+
+
+class TestQualityHook:
+    """批 72 双盲 P2-3：fetch 内质量挂钩钉（fail-soft 吞 MagicMock 的掩盖面对治——
+    真 df 行为级断言挂钩真被调+label 词表+空 df 闸）。"""
+
+    def _req(self, kind, sub=None, symbols=("600000.SHSE",), freq="1D"):
+        return DataRequest(
+            kind=kind, symbols=symbols, temporality="historical", sub_kind=sub, freq=freq,
+            range_=(datetime(2026, 9, 1), datetime(2026, 9, 21)))
+
+    def test_stock_dirty_df_quality_logged(self, caplog):
+        import logging
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        dirty = pd.DataFrame([{"ts_code": "600000.SH", "trade_date": "20260921", "open": 0.0,
+                               "high": 0.0, "low": 0.0, "close": 0.0, "vol": 100, "pre_close": 10.0}])
+        with patch.object(ad, "pull_daily_batch", return_value=dirty), \
+             patch.object(ad, "pull_adj_factor", return_value=None), \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]), \
+             caplog.at_level(logging.WARNING):
+            ad.fetch(self._req("bar_daily", sub="stock"))
+        assert any("[quality] bar_daily" in r.message and "为 0" in r.message
+                   for r in caplog.records)
+
+    def test_etf_label_mapped(self, caplog):
+        import logging
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        dirty = pd.DataFrame([{"ts_code": "510300.SH", "trade_date": "20260921", "open": 0.0,
+                               "high": 0.0, "low": 0.0, "close": 0.0, "vol": 100, "pre_close": 4.0}])
+        with patch.object(ad, "pull_daily_batch", return_value=dirty), \
+             patch.object(ad, "pull_adj_factor", return_value=None), \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]), \
+             caplog.at_level(logging.WARNING):
+            ad.fetch(self._req("bar_daily", sub="etf"))
+        assert any("[quality] etf_daily" in r.message for r in caplog.records)
+
+    def test_cb_empty_df_no_quality_log(self, caplog):
+        """空 df 闸（双同 P1-2 交付物自身回归钉）：convertible 空帧不喷 [quality]。"""
+        import logging
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        with patch("src.data_platform.adapters.tushare_adapter.pull_cb_daily",
+                   return_value=pd.DataFrame()), \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]), \
+             caplog.at_level(logging.WARNING):
+            ad.fetch(self._req("bar_daily", sub="convertible"))
+        assert not any("[quality]" in r.message for r in caplog.records)

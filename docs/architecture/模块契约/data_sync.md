@@ -14,7 +14,8 @@
 ## 文件结构
 ```
 server/src/data_sync/
-├── engine.py        # 同步引擎核心 + _HANDLERS 注册表 + _make_tier1_handler 工厂（三档一档）
+├── engine.py        # 同步引擎核心 + _VIA_KIND_IDS 静态路由（bar 族 6 键，批 72）+ _HANDLERS
+│                  #   注册表（其余键）+ _make_tier1_handler 工厂（三档一档）
 │                    #   限流：5 处拉取点走 data_platform.rate_limit.rate_limit_context（2026-08-27）
 ├── pool_data.py     # 池内深度数据同步（三档二档，独立模块不进 _HANDLERS）
 ├── pool_minute.py   # 池分钟同步（Tushare stk_mins 收费，beat 注释禁用态；stk_mins 硬限=Valkey 全局闸门）
@@ -30,7 +31,10 @@ server/src/data_sync/
 ```python
 sync(sync_id: str, backfill_from: str | None = None,
      progress_cb: Callable | None = None) -> dict
-    # 类型级同步：按 sync_id 路由 _HANDLERS[sync_id]
+    # 类型级同步：按 sync_id 路由——批 72（H12 一步切）：bar 族 6 键（astock_daily/etf_daily/
+    # cb_daily/index_daily/astock_minute/astock_minute_5min）静态走 _VIA_KIND_IDS→_sync_via_kind
+    #（fetch 契约路径，灰度白名单机制退役——system_config.sync_kind_routing 键失效〔保留行
+    # 仅供 revert 后旧代码语义自洽〕）；其余键走 _HANDLERS[sync_id]；防双注册 assert 模块级钉
     # backfill_from=YYYYMMDD：回补历史（不推进 last_sync_date 游标）
     # progress_cb(i: int, total: int, current: str)：进度回调
     # 返回 SyncResult dict（见接口契约 §SyncResult）：{status, pulled, saved, failed_dates, ...}
@@ -144,16 +148,21 @@ class SyncLock:
 ### 日线内部
 - `_fetch_and_save(api_fn, ts_code, start, end, save_fn) -> df | None`
 - `_wrap_result(df, used, cnt, start, end) -> dict`
-- `_daily_to_rows(df, adj_map: dict | None = None) -> list[tuple]` / `_save_bars(rows) -> int` / `_daily_to_save_fn(df) -> int`
+- `_daily_to_rows(df, adj_map: dict | None = None) -> list[tuple]` / `_save_bars(rows) -> int`
+  （`_daily_to_save_fn`/`_adj_map_for_df` 已随批 72 旧 handler 退役——复权/校验迁入 fetch 契约）
     # adj_map 第二参：按 ts_code 映射复权因子（回填链路用）（P3 回写 2026-08-20 补）
 
-### type 级 handler（基础 10 个 sync_id 9 函数 + tier1 工厂 9 个）
-- 基础：`_sync_astock_daily` / `_sync_astock_basic` / `_sync_astock_list` / `_sync_cb_daily` / `_sync_cb_basic` / `_sync_etf_daily` / `_sync_etf_list` / `_sync_trade_cal` / `_sync_astock_minute`（1min+5min 共用）
+### type 级 handler（基础 sync_id（批 72 后：5 键留旧 handler+bar 族 6 键走 via_kind） + tier1 工厂 9 个）
+- 基础（批 72 后）：`_sync_astock_basic` / `_sync_astock_list` / `_sync_cb_basic` / `_sync_etf_list` /
+  `_sync_trade_cal` 留旧 handler；**bar 族 6 键**（astock_daily/etf_daily/cb_daily/index_daily/
+  astock_minute/astock_minute_5min）走 `_sync_via_kind` 四子函数（daily_batch/cb_daily/index/minute）；
+  **质量校验迁移面**（批 71 硬契约）：fetch 内挂钩 `_log_bar_quality_local`（base.py，空 df 闸+
+  fail-soft+label 沿用批 71 词表）+per-symbol 五处=3 代码点（_fetch_and_save/sync_all/backfill_symbol）
 - tier1（`_make_tier1_handler`/`_make_full_rebuild_handler` 批量注册 9 个 sync_id，见 17 号 §3）：stk_limit_sync / moneyflow_sync / margin_detail_sync / top_list_sync / block_trade_sync / cyq_perf_sync / forecast_sync / namechange_sync / concept_sync（P3 回写 2026-08-20 补）
 
 ### 限流替换（限流治理吸收 2026-08-27，五处 sleep 硬编码 → rate_limit_context）
 - `_sync_by_trade_date` 循环体：`rate_limit_context(ds, api_name, min_interval=sleep_s)`——api_name 由 `_api_name_of(cfg)` 取（如 'daily'/'daily_basic'）；sleep_s 显式传入则覆盖间隔（兼容旧调用，测试传 0 关等待），None=走 DataSource 四层配置
-- `_sync_astock_minute` per-symbol 循环：档取 **"daily"**（原 0.15s 硬编码）。**故意不用 stk_mins 档**——3600s 会卡成每小时一只；stk_mins 硬限归 pool_minute 的 Valkey 全局闸门 `_stk_mins_gate` 管
+- `_sync_via_kind_minute`（批 72 后）per-symbol 循环：档取 **"daily"**。**故意不用 stk_mins 档**——3600s 会卡成每小时一只；stk_mins 硬限归 pool_minute 的 Valkey 全局闸门 `_stk_mins_gate` 管
 - `backfill_adj_factor` 逐日：档 "adj_factor"（原 sleep(0.3)，默认档同为 0.3s）
 - `_make_tier1_handler`（一档逐日）：档 "daily"（原 0.3s 硬编码）
 - `sync_all` per-symbol 循环：档 "daily"（原 0.15s 硬编码）

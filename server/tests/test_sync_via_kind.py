@@ -1,7 +1,7 @@
 """批 58·M3 通用引擎循环 `_sync_via_kind` 测试钉（bar 族收编）。
 
 钉什么：①粒度分派（逐日/区间/per-symbol）与返回 dict 形状（last_success_date 有无=三态游标）
-②_fetch_supply 构造 supply DataRequest（不走 resolve）③_sync_kind_whitelist 读灰度白名单
+②_fetch_supply 构造 supply DataRequest（不走 resolve）③批 72：白名单机制退役——静态路由 _VIA_KIND_IDS
 ④落仓分叉（_save_bars/save_index_bars/save_bars(freq)）⑤非 bar 族兜底 UnsupportedFeature。
 """
 import os
@@ -25,16 +25,6 @@ def _frame_mock(rows=("r1", "r2")):
 def _cfg(sync_id="astock_daily"):
     return {"id": sync_id, "provider": "tushare", "last_sync_date": None,
             "api": "pro.daily", "mode": "incremental", "enabled": True}
-
-
-def _conn_mock(value):
-    """get_conn 上下文 mock：execute→fetchone 返回单列 (value,)。"""
-    conn = MagicMock()
-    conn.__enter__.return_value = conn
-    cur = MagicMock()
-    cur.fetchone.return_value = None if value is None else (value,)
-    conn.execute.return_value = cur
-    return conn
 
 
 # ——— _fetch_supply：supply 请求构造（不走 resolve） ———
@@ -179,17 +169,50 @@ class TestLanding:
         assert "last_success_date" not in r
 
 
-# ——— 灰度白名单 ———
 
-class TestWhitelist:
-    def test_parses_comma_list(self):
-        with patch.object(engine, "get_conn", return_value=_conn_mock("astock_daily, etf_daily")):
-            assert engine._sync_kind_whitelist() == {"astock_daily", "etf_daily"}
 
-    def test_empty_off(self):
-        with patch.object(engine, "get_conn", return_value=_conn_mock(None)):
-            assert engine._sync_kind_whitelist() == set()
 
-    def test_db_error_off(self):
-        with patch.object(engine, "get_conn", side_effect=RuntimeError("down")):
-            assert engine._sync_kind_whitelist() == set()
+def test_via_kind_ids_mutex_with_handlers():
+    """防双注册钉（批 72 双盲 A P1-2）：_VIA_KIND_IDS 与 _HANDLERS 全量 14 键
+    （字面量 5+tier1 工厂 9）零交集——未来回填 bar 族键成路由双源即红。"""
+    assert not (engine._VIA_KIND_IDS & set(engine._HANDLERS))
+    assert len(engine._VIA_KIND_IDS) == 6
+
+
+class TestRealFetchPath:
+    """批 72 双盲 B P0-1 回归钉：真调 _fetch_supply 走全程（不 mock——sub_kind required
+    kwarg 缺参 TypeError 被 mock 形状屏蔽的教训，fake 形状差假绿同型）。"""
+
+    def test_index_full_path_no_typeerror(self):
+        adapter = MagicMock()
+        adapter.fetch.return_value = MagicMock(rows=["r1", "r2"])
+        with patch("src.data_platform.db.save_index_bars", return_value=2) as ms:
+            r = engine._sync_via_kind_index(adapter, start="20260901", end_date="20260921")
+        assert r["pulled"] == 2 and r["saved"] == 2
+        ms.assert_called_once_with(["r1", "r2"])
+
+    def test_minute_full_path_no_typeerror(self):
+        adapter = MagicMock()
+        adapter.fetch.return_value = MagicMock(rows=["r1"])
+        adapter.provider = "tushare"
+        with patch.object(engine, "_list_static_ts_codes", return_value=["600000.SH"]), \
+             patch("src.data_platform.db.save_bars", return_value=1):
+            r = engine._sync_via_kind_minute(adapter, sync_id="astock_minute",
+                                             start="20260901", end_date="20260921")
+        assert r["pulled"] == 1 and r["saved"] == 1
+        assert not r["failed_dates"]
+
+
+def test_fetch_and_save_quality_label_per_symbol():
+    """批 72 双盲 P2-3：per-symbol 挂钩 label 映射钉（_fetch_and_save kind=astock→bar_daily）。"""
+    df = MagicMock()
+    df.empty = False
+    df.columns = ["trade_date"]
+    adapter = MagicMock()
+    adapter.pull_daily.return_value = df
+    adapter.to_bar_rows.return_value = ["r1"]
+    with patch.object(engine, "_log_bar_quality") as mq, \
+         patch.object(engine, "_save_bars", return_value=1):
+        engine._fetch_and_save(adapter, "600000.SH", "20260901", "20260921",
+                               save_fn=lambda rows: None, kind="astock")
+    mq.assert_called_once_with(df, "bar_daily")

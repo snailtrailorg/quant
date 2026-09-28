@@ -52,73 +52,74 @@ def test_to_save_rows_min():
     assert row[10] == "tushare"      # source
 
 
-# --- type 级 handler _sync_astock_minute ---
+# --- type 级 handler _sync_via_kind_minute（批 72：旧 _sync_astock_minute 退役——
+#     mock 面=_fetch_supply 契约帧；start 计算在 _sync_via_kind 层）---
 
-def test_sync_astock_minute_incremental():
+def test_via_kind_minute_incremental():
     """增量：2 只标的，per-symbol 循环，save_bars 用 1min freq。"""
     from src.data_sync import engine
-    cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH", "000001.SZ"]), \
-         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_minute_df()), \
+         patch("src.data_sync.engine._fetch_supply", return_value=MagicMock(rows=["r1"])), \
          patch("src.data_platform.db.save_bars", return_value=1) as msave:
-        r = engine._sync_astock_minute(cfg, "20260808")
+        r = engine._sync_via_kind_minute(MagicMock(provider="tushare"),
+                                         sync_id="astock_minute", start="20260808", end_date="20260808")
     assert r["pulled"] == 2          # 2 只 × 1 行
     assert r["saved"] == 2
     assert msave.call_count == 2
     assert msave.call_args_list[0].args[0] == "1min"   # freq
-    assert r["start"] == "20260808"  # last+1
+    assert r["start"] == "20260808"
 
 
-def test_sync_astock_minute_5min_freq():
+def test_via_kind_minute_5min_freq():
     """astock_minute_5min 用 5min freq。"""
     from src.data_sync import engine
-    cfg = {"id": "astock_minute_5min", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_minute_df()), \
+         patch("src.data_sync.engine._fetch_supply", return_value=MagicMock(rows=["r1"])), \
          patch("src.data_platform.db.save_bars", return_value=1) as msave:
-        engine._sync_astock_minute(cfg, "20260808")
+        engine._sync_via_kind_minute(MagicMock(provider="tushare"),
+                                     sync_id="astock_minute_5min", start="20260808", end_date="20260808")
     assert msave.call_args.args[0] == "5min"
 
 
-def test_sync_astock_minute_backfill():
-    """回补：用 backfill_from，不读 last_sync_date。"""
+def test_via_kind_minute_start_passthrough():
+    """start 由调用方（_sync_via_kind 游标层）传入——backfill_from 语义在上层。"""
     from src.data_sync import engine
-    cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH"]), \
-         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", return_value=_fake_minute_df()), \
+         patch("src.data_sync.engine._fetch_supply", return_value=MagicMock(rows=["r1"])), \
          patch("src.data_platform.db.save_bars", return_value=1):
-        r = engine._sync_astock_minute(cfg, "20260808", backfill_from="20260801")
+        r = engine._sync_via_kind_minute(MagicMock(provider="tushare"),
+                                         sync_id="astock_minute", start="20260801", end_date="20260808")
     assert r["start"] == "20260801"
 
 
-def test_sync_astock_minute_uptodate():
-    """start > end_date：返回空，不拉标的。"""
+def test_via_kind_uptodate():
+    """start > end_date：_sync_via_kind 游标层早退，不拉标的。"""
     from src.data_sync import engine
-    cfg = {"id": "astock_minute", "last_sync_date": "20260808", "enabled": True}
-    with patch("src.data_sync.engine._list_static_ts_codes") as ml:
-        r = engine._sync_astock_minute(cfg, "20260808")  # start=20260809 > end
+    with patch.object(engine, "_read_sync_kind", return_value={
+            "kind": "bar_minute", "sub_kind": None, "pg_table": "bar_1min", "rebuild": "incremental"}), \
+         patch.object(engine, "_list_static_ts_codes") as ml:
+        cfg = {"id": "astock_minute", "last_sync_date": "20260808", "enabled": True}
+        r = engine._sync_via_kind(cfg, "20260808")   # start=20260809 > end
     assert r["pulled"] == 0
     ml.assert_not_called()
 
 
-def test_sync_astock_minute_failed_symbol():
+def test_via_kind_minute_failed_symbol():
     """单只失败记 failed_dates，不中断其他标的。"""
     from src.data_sync import engine
-    cfg = {"id": "astock_minute", "last_sync_date": "20260807", "enabled": True}
 
-    def _pull(tc, *a, **kw):
-        if tc == "000001.SZ":
+    def _supply(adapter, *, kind, symbols, start, end, freq, preserve=None, **kw):
+        if symbols[0] == "000001.SZ":
             raise ValueError("tushare error")
-        return _fake_minute_df(tc)
+        return MagicMock(rows=["r1"])
     with patch("src.data_sync.engine._list_static_ts_codes", return_value=["600000.SH", "000001.SZ"]), \
-         patch("src.data_platform.adapters.base.TushareAdapter.pull_minute", side_effect=_pull), \
+         patch("src.data_sync.engine._fetch_supply", side_effect=_supply), \
          patch("src.data_platform.db.save_bars", return_value=1):
-        r = engine._sync_astock_minute(cfg, "20260808")
+        r = engine._sync_via_kind_minute(MagicMock(provider="tushare"),
+                                         sync_id="astock_minute", start="20260808", end_date="20260808")
     assert r["pulled"] == 1
     assert len(r["failed_dates"]) == 1
     assert "000001.SZ" in r["failed_dates"][0]
-
-
 # --- per-symbol ---
 
 def test_sync_symbol_minute_full():

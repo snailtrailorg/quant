@@ -38,6 +38,7 @@ def _run_sync(handler_ret, cfg_last="20260810"):
     handler = MagicMock(return_value=handler_ret)
     with patch("src.data_sync.sync_lock.SyncLock", _FakeLock), \
          patch.object(engine, "_get_config", return_value=fake_cfg), \
+         patch.object(engine, "_VIA_KIND_IDS", frozenset()), \
          patch.object(engine, "_HANDLERS", {"astock_daily": handler}), \
          patch.object(engine, "_log"), \
          patch.object(engine, "_expected_trading_days", return_value=1), \
@@ -103,8 +104,7 @@ class TestSyncByTradeDate:
             if isinstance(v, Exception):
                 raise v
             return v
-        with patch.object(engine, "_expected_trading_days", return_value=len(results)), \
-             patch.object(engine, "_adj_map_for_df", return_value={}):
+        with patch.object(engine, "_expected_trading_days", return_value=len(results)):
             return engine._sync_by_trade_date(api_fn, lambda df: len(df), "20260811", "20260813",
                                                sleep_s=0)
 
@@ -156,6 +156,7 @@ class TestHBlindSpots:
         updates = []
         with patch("src.data_sync.sync_lock.SyncLock", _FakeLock), \
              patch.object(engine, "_get_config", return_value=fake_cfg), \
+             patch.object(engine, "_VIA_KIND_IDS", frozenset()), \
              patch.object(engine, "_HANDLERS", {}), \
              patch.object(engine, "_log"), \
              patch.object(engine, "_mark_running"), \
@@ -183,6 +184,7 @@ class TestHBlindSpots:
         updates = []
         with patch("src.data_sync.sync_lock.SyncLock", _FakeLock), \
              patch.object(engine, "_get_config", return_value=fake_cfg), \
+             patch.object(engine, "_VIA_KIND_IDS", frozenset()), \
              patch.object(engine, "_HANDLERS", {"astock_daily": MagicMock(return_value=ret)}), \
              patch.object(engine, "_log"), \
              patch.object(engine, "_mark_running"), \
@@ -199,8 +201,7 @@ class TestHBlindSpots:
         def api_fn(trade_date):
             return {"20260811": _df("20260811"), "20260812": bad,
                     "20260813": _df("20260813")}[trade_date]
-        with patch.object(engine, "_expected_trading_days", return_value=3), \
-             patch.object(engine, "_adj_map_for_df", return_value={}):
+        with patch.object(engine, "_expected_trading_days", return_value=3):
             r = engine._sync_by_trade_date(api_fn, lambda df: len(df), "20260811", "20260813",
                                            sleep_s=0)
         assert len(r["failed_dates"]) == 1 and "缺trade_date列" in r["failed_dates"][0]

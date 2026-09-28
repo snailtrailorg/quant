@@ -83,20 +83,9 @@ def _routing_pilot_on() -> bool:
         return False
 
 
-def _sync_kind_whitelist() -> set[str]:
-    """批 58·M3 灰度白名单（system_config 键 sync_kind_routing，逗号分隔 sync_id）。
-
-    空/缺省=off（全走 _HANDLERS）。读失败=空集（回退现状路径）。55a 式按 sync_id 逐项切。
-    """
-    try:
-        with get_conn() as conn:
-            cur = conn.execute("SELECT value FROM system_config WHERE key='sync_kind_routing'")
-            r = cur.fetchone()
-            if not r:
-                return set()
-            return {s.strip() for s in str(r[0]).split(",") if s.strip()}
-    except Exception:
-        return set()
+# 批 72：_sync_kind_whitelist() 已退役删除（bar 族 6 键一步切 _sync_via_kind，灰度机制退役；
+# system_config.sync_kind_routing 键失效——保留行仅供 revert 后旧代码语义自洽，
+# 失效声明见模块契约 data_sync.md）
 
 
 def _preserve_normalization() -> bool:
@@ -230,7 +219,7 @@ def sync(sync_id: str, backfill_from: str | None = None,
         end_date = date.today().strftime("%Y%m%d")
 
         try:
-            handler = _sync_via_kind if sync_id in _sync_kind_whitelist() else _HANDLERS.get(sync_id)
+            handler = _sync_via_kind if sync_id in _VIA_KIND_IDS else _HANDLERS.get(sync_id)
             if not handler:
                 # H-S1：路由表外 id（DB 行不受代码控制，真实可达）——原代码会以 0/0 假 success
                 # 推进游标且触发 r 未定义 NameError（双记日志）。显式 error 返回，不动游标。
@@ -371,27 +360,6 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
 
 # --- 具体同步逻辑 ---
 
-def _sync_astock_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
-                      progress_cb: Callable | None = None) -> dict:
-    """A股日线同步（按日期批量拉取，一次全市场）。"""
-    adapter = _get_kline_adapter(cfg)
-    if backfill_from:
-        start = backfill_from
-    else:
-        last = cfg.get("last_sync_date") or (date.today() - timedelta(days=30)).strftime("%Y%m%d")
-        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
-        if start > end_date:
-            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
-
-    r = _sync_by_trade_date(
-        lambda trade_date: adapter.pull_daily_batch(trade_date, "astock"),
-        lambda df: _daily_to_save_fn(df, adapter),
-        start, end_date, api_name=_api_name_of(cfg), progress_cb=progress_cb,
-        provider=adapter.provider)
-    r["start"] = start
-    return r
-
-
 def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                        progress_cb: Callable | None = None) -> dict:
     """A股基本面指标同步（按日期批量拉取，一次全市场）。"""
@@ -480,29 +448,6 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
-def _sync_cb_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
-                   progress_cb: Callable | None = None) -> dict:
-    """可转债日线同步（全量拉取，cb_daily 不支持单标的）。"""
-    from src.data_platform.adapters.tushare_adapter import pull_cb_daily
-    adapter = _get_kline_adapter(cfg)
-    if backfill_from:
-        start = backfill_from
-    else:
-        last = cfg.get("last_sync_date") or (date.today() - timedelta(days=30)).strftime("%Y%m%d")
-        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
-        if start > end_date:
-            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
-
-    df = pull_cb_daily(start, end_date)
-    if df.empty:
-        return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [], "expected_days": 0, "actual_days": 0}
-    _log_bar_quality(df, "cb_daily")
-    rows = adapter.to_bar_rows(df, "1D")
-    saved = _save_bars(rows)
-    return {"pulled": len(df), "saved": saved, "start": start,
-            "failed_dates": [], "expected_days": None, "actual_days": None}
-
-
 def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """可转债基本信息全量同步。"""
@@ -549,27 +494,6 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
-def _sync_etf_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
-                   progress_cb: Callable | None = None) -> dict:
-    """ETF日线同步（按日期批量拉取）。"""
-    adapter = _get_kline_adapter(cfg)
-    if backfill_from:
-        start = backfill_from
-    else:
-        last = cfg.get("last_sync_date") or (date.today() - timedelta(days=30)).strftime("%Y%m%d")
-        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
-        if start > end_date:
-            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
-
-    r = _sync_by_trade_date(
-        lambda trade_date: adapter.pull_daily_batch(trade_date, "etf"),
-        lambda df: _daily_to_save_fn(df, adapter, label="etf_daily"),
-        start, end_date, api_name=_api_name_of(cfg), progress_cb=progress_cb,
-        provider=adapter.provider)
-    r["start"] = start
-    return r
-
-
 def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """ETF基金列表全量同步。"""
@@ -613,78 +537,6 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
 _MINUTE_FREQ = {"astock_minute": "1min", "astock_minute_5min": "5min"}
 
 
-def _sync_astock_minute(cfg: dict, end_date: str, backfill_from: str | None = None,
-                        progress_cb: Callable | None = None) -> dict:
-    """A股分钟线同步（per-symbol 循环 + stk_mins 分段，stk_mins 不支持按日全市场拉）。
-
-    freq 由 sync_id 决定（astock_minute=1min / astock_minute_5min=5min）。
-    增量：start = last_sync_date+1 ~ today；回补：start = backfill_from ~ today。
-    逐只 _pull_minute（内部分段，处理 stk_mins 8000 条限制）+ _save_minute（DB 写在熔断上下文外）。
-    """
-    sync_id = cfg["id"]
-    adapter = _get_kline_adapter(cfg)
-    freq = _MINUTE_FREQ.get(sync_id)
-    if freq is None:
-        return {"pulled": 0, "saved": 0, "start": end_date, "failed_dates": [],
-                "expected_days": None, "actual_days": None}
-
-    if backfill_from:
-        start = backfill_from
-    else:
-        last = cfg.get("last_sync_date") or (date.today() - timedelta(days=7)).strftime("%Y%m%d")
-        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
-        if start > end_date:
-            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [],
-                    "expected_days": 0, "actual_days": 0}
-
-    from src.data_platform.rate_limit import rate_limit_context
-    ds = _get_rate_ds(adapter.provider)
-    ts_codes = _list_static_ts_codes("astock")
-    total = len(ts_codes)
-    total_pulled = 0
-    total_saved = 0
-    failed: list[str] = []
-    for i, tc in enumerate(ts_codes, 1):
-        try:
-            # 限速（限流治理吸收）：节奏档取 daily（原 0.15s 硬编码→三级可调）
-            # 归因拆分（2026-09-03）：熔断上下文只包 Tushare 拉取，DB 写在外——
-            # DB 写失败计入 failed 不误伤熔断器（否则 DB 抖动打穿 Tushare 配额熔断）
-            with rate_limit_context(ds, "daily"):
-                df = _pull_minute(adapter, tc, freq, start, end_date)
-            if df is not None and not df.empty:
-                total_saved += _save_minute(adapter, df, freq)
-                total_pulled += len(df)
-        except Exception as ex:
-            failed.append(f"{tc}:{type(ex).__name__}:{str(ex)[:40]}")
-        if progress_cb:
-            progress_cb(i, total, tc)
-
-    return {"pulled": total_pulled, "saved": total_saved, "start": start,
-            "failed_dates": failed, "expected_days": None,
-            "actual_days": total - len(failed)}
-
-
-# --- 工具函数 ---
-
-def _adj_map_for_df(df: pd.DataFrame, adapter) -> dict:
-    """当日全市场复权因子 {ts_code: factor}。**降级返回 {}——同步继续，因子 NULL**
-    （A/B-F1 契约：积分未到账不阻塞日线同步；到账后回补 adj_factor 即恢复）。
-    adapter 提供 pull_adj_factor（Tushare 拉因子，其他源返回空）。
-    批 58 补限速（用户裁定）：adj_factor 接口有 Tushare 侧速率限制，连续 backfill 无 sleep 会
-    触发限流返回空→因子 NULL（旧路径限速遗漏——backfill_adj_factor 用 adj_factor 档此处未用）。
-    """
-    try:
-        td = str(df["trade_date"].iloc[0])
-        from src.data_platform.rate_limit import rate_limit_context
-        with rate_limit_context(_get_rate_ds(adapter.provider), "adj_factor"):
-            fdf = adapter.pull_adj_factor(trade_date=td)
-        if fdf is None or fdf.empty:
-            return {}
-        return dict(zip(fdf["ts_code"], fdf["adj_factor"]))
-    except Exception:
-        return {}
-
-
 def _save_bars(rows: list[tuple]) -> int:
     """写入 bar_1D 表。批 71：旧 validate_bar_quality 坏调用（传 rows 恒 AttributeError 被吞，
     自引入 0 次成功）已删——质量校验上移至持 Tushare 原生 df 的调用侧（_log_bar_quality）。"""
@@ -707,12 +559,10 @@ def _log_bar_quality(df, label: str) -> None:
         logger.warning("[quality] %s 校验器异常（不阻入库）: %s", label, e)
 
 
-def _daily_to_save_fn(df: pd.DataFrame, adapter, label: str = "bar_daily") -> int:
-    """daily DataFrame -> 行 -> 入库（_sync_by_trade_date 的 save_fn 适配，24 号 adapter 化）。
-    label=观察期甄别维度（批 71 代码盲审 A P2-5：astock/etf 分开，[quality] 日志可分型）。"""
-    _log_bar_quality(df, label)
-    adj_map = _adj_map_for_df(df, adapter)
-    return _save_bars(adapter.to_bar_rows(df, "1D", adj_map))
+# 批 72 v2 #6：质量校验 label 词表映射（沿用批 71——观察期查询零改动）。
+# per-symbol 三调用方只传 kind 词形（astock/etf/cb，源自 _PER_SYMBOL_META）——sub_kind
+# 词形（stock/convertible）到不了本 map（base.py fetch 面 label 内联不经此 map）。
+_QUALITY_LABEL_OF = {"astock": "bar_daily", "etf": "etf_daily", "cb": "cb_daily"}
 
 
 def backfill_adj_factor(start_date: str | None = None, end_date: str | None = None,
@@ -783,38 +633,21 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     return {"status": "success", "days": len(dates), "processed": done, "updated": updated}
 
 
-def _sync_index_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
-                      progress_cb: Callable | None = None) -> dict:
-    """指数日线同步 handler（ptrade 批 1，接入 sync_config 体系）。
-
-    固定拉 000300.SH 沪深300（可配基准列表留 system_config.benchmark_symbols 后续）。
-    返回无 last_success_date 键 → sync() 走无条件推进（分钟线同款，防游标冻死）。
-    """
-    start = backfill_from or "20050408"
-    r = sync_benchmark_index("000300.SH", start=start, end=end_date)
-    return {"pulled": r.get("pulled", 0), "saved": r.get("saved", 0), "start": start,
-            "failed_dates": [] if r.get("status") == "success" else [f"index_daily:{r.get('status')}"],
-            "expected_days": None, "actual_days": None}
-
-
-# --- 路由表 ---
-
 _HANDLERS = {
-    "astock_daily": _sync_astock_daily,
     "astock_basic": _sync_astock_basic,
     "astock_list": _sync_astock_list,
-    "cb_daily": _sync_cb_daily,
     "cb_basic": _sync_cb_basic,
-    "etf_daily": _sync_etf_daily,
     "etf_list": _sync_etf_list,
     "trade_cal": _sync_trade_cal,
-    "astock_minute": _sync_astock_minute,
-    "astock_minute_5min": _sync_astock_minute,
-    "index_daily": _sync_index_daily,
 }
 
+# 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由
+# （防双注册钉=本文件 tier1 注册循环后的 assert，钉全量 14 键）
+_VIA_KIND_IDS = frozenset({
+    "astock_daily", "etf_daily", "cb_daily", "index_daily",
+    "astock_minute", "astock_minute_5min",
+})
 
-# ═══ 批 58·M3 通用引擎循环（bar 族收编——fetch(kind, sub_kind) 统一契约，灰度切）═══
 
 def _read_sync_kind(sync_id: str) -> dict:
     """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild）。无行/表缺返回 {}。"""
@@ -893,7 +726,7 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
 
 def _sync_via_kind_cb_daily(adapter, *, start: str, end_date: str,
                             progress_cb: Callable | None = None) -> dict:
-    """bar_daily+convertible 区间：镜像 _sync_cb_daily——单次 fetch → _save_bars；无 last_success_date。"""
+    """bar_daily+convertible 区间（镜像已退役的 _sync_cb_daily——批 72 一步切）：单次 fetch → _save_bars；无 last_success_date。"""
     frame = _fetch_supply(adapter, kind="bar_daily", sub_kind="convertible",
                           symbols=(), start=start, end=end_date, freq="1D")
     if not frame.rows:
@@ -905,9 +738,9 @@ def _sync_via_kind_cb_daily(adapter, *, start: str, end_date: str,
 
 def _sync_via_kind_index(adapter, *, start: str, end_date: str,
                          progress_cb: Callable | None = None) -> dict:
-    """index_daily 区间：镜像 _sync_index_daily（000300.SH）——单次 fetch → save_index_bars；无 last_success_date。"""
+    """index_daily 区间（镜像已退役的 _sync_index_daily〔000300.SH〕——批 72 一步切）：单次 fetch → save_index_bars；无 last_success_date。"""
     from src.data_platform.db import save_index_bars
-    frame = _fetch_supply(adapter, kind="index_daily", symbols=("000300.SH",),
+    frame = _fetch_supply(adapter, kind="index_daily", sub_kind=None, symbols=("000300.SH",),
                           start=start, end=end_date, freq="1D")
     saved = save_index_bars(list(frame.rows)) if frame.rows else 0
     return {"pulled": len(frame.rows), "saved": saved, "start": start,
@@ -917,9 +750,9 @@ def _sync_via_kind_index(adapter, *, start: str, end_date: str,
 
 def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
                           progress_cb: Callable | None = None) -> dict:
-    """bar_minute per-symbol：镜像 _sync_astock_minute——逐只 fetch（分段在 adapter 内）→ save_bars(freq)。
+    """bar_minute per-symbol（镜像已退役的 _sync_astock_minute——批 72 一步切）：逐只 fetch（分段在 adapter 内）→ save_bars(freq)。
 
-    DB 写在 rate_limit_context 外（归因拆分，同 _sync_astock_minute）；无 last_success_date。
+    DB 写在 rate_limit_context 外（归因拆分，同已退役 _sync_astock_minute）；无 last_success_date。
     """
     from src.data_platform.rate_limit import rate_limit_context
     from src.data_platform.db import save_bars
@@ -937,7 +770,7 @@ def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
     for i, tc in enumerate(ts_codes, 1):
         try:
             with rate_limit_context(ds, "daily"):
-                frame = _fetch_supply(adapter, kind="bar_minute", symbols=(tc,),
+                frame = _fetch_supply(adapter, kind="bar_minute", sub_kind=None, symbols=(tc,),
                                       start=start, end=end_date, freq=freq, preserve=preserve)
             if frame.rows:
                 total_saved += save_bars(freq, list(frame.rows))
@@ -956,7 +789,7 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
     """批 58·M3 通用引擎循环：读 sync_kind_config 归置行 → 按 (kind, sub_kind) 定粒度 → fetch → 落仓。
 
     签名与 _HANDLERS handler 同型（sync() 游标逻辑复用）。本步只收编 bar 族 6 sync_id（决策 4），
-    非 bar 族 kind 抛 UnsupportedFeature 兜底（白名单手动控制只含 bar 族）。
+    非 bar 族 kind 抛 UnsupportedFeature 兜底（批 72：bar 族 6 键静态路由 _VIA_KIND_IDS）。
     """
     from src.data_platform.adapters.base import UnsupportedFeature
     sync_id = cfg["id"]
@@ -964,17 +797,17 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
     if not row:
         # 必须 raise（不能 return error status）——sync() 不查 r.get("status")，返回 error 会被当
         # 成功并无条件推进游标跳过整个窗口（数据丢失）。raise 让 sync() 外层 except 收编→error+不动游标。
-        raise RuntimeError(f"sync_kind_config 无归置行: {sync_id}（迁移 0094 未上产或白名单配错）")
+        raise RuntimeError(f"sync_kind_config 无归置行: {sync_id}（迁移 0094 未上产）")
     kind = row["kind"]
     sub = row["sub_kind"]
-    # index_daily 走 sync_benchmark_index 同款 adapter 选择（_get_kline_adapter({})——指数非 K 线
+    # index_daily 走已退役 sync_benchmark_index 同款 adapter 选择（_get_kline_adapter({})——指数非 K 线
     # 数据面，绕开 M2 试点 resolve 选源，否则 routing_kline_pilot=on 时会误路由到缺能力源）
     adapter = _get_kline_adapter({} if kind == "index_daily" else cfg)
 
     if backfill_from:
         start = backfill_from
     elif kind == "index_daily":
-        start = "20050408"   # 基准指数全量起点（同 _sync_index_daily）
+        start = "20050408"   # 基准指数全量起点（同已退役 _sync_index_daily）
     else:
         default_days = 7 if kind == "bar_minute" else 30
         last = cfg.get("last_sync_date") or (date.today() - timedelta(days=default_days)).strftime("%Y%m%d")
@@ -1214,6 +1047,10 @@ for _sid, (_tbl, _pull, _pk) in _TIER1_FULL.items():
     _HANDLERS[_sid] = _make_full_rebuild_handler(
         _tbl, _pull, _pk, text_cols=_TIER1_TEXT_COLS.get(_tbl, []))
 
+# 防双注册钉（批 72）：位置=两个 tier1 注册循环之后——钉全量 14 键（字面量 5+工厂 9），
+# 未来往 _TIER1_BATCH/_TIER1_FULL 回填 bar 族键也在本钉覆盖内（双盲 A P1-2 修正——
+# 原位于注册循环前只钉 5 键字面量，工厂回填路径静默失效）；测试钉=test_sync_via_kind 导入后态断言
+assert not (_VIA_KIND_IDS & set(_HANDLERS))
 
 
 # ====================================================================
@@ -1430,7 +1267,7 @@ def _fetch_and_save(adapter, ts_code: str, start: str, end: str, save_fn,
 
     因子语义（盲审 A-P1-3/B-P1-2 修复）：per-symbol 多日路径**不传 adj_map**——因子用
     df 自身 adj_factor（pro_bar adj=None 时全 NULL），靠 backfill_adj_factor 回填正确因子。
-    原 _adj_map_for_df 取首日因子应用到多日全区间，是「首日因子污染多日」的错值源。
+    原 _adj_map_for_df（批 72 已随旧 handler 退役）取首日因子应用到多日全区间，是「首日因子污染多日」的错值源。
     """
     try:
         df = adapter.pull_daily(ts_code, start, end, kind=kind)
@@ -1440,6 +1277,7 @@ def _fetch_and_save(adapter, ts_code: str, start: str, end: str, save_fn,
         return df
     if "trade_date" not in df.columns:
         return None
+    _log_bar_quality(df, _QUALITY_LABEL_OF.get(kind, kind))   # 批 72：per-symbol 收编（v2 #3）
     rows = adapter.to_bar_rows(df, "1D", None)
     save_fn(rows)
     return df
@@ -1624,6 +1462,8 @@ def backfill_symbol(sync_id: str, ts_code: str, start: str, end: str) -> dict:
     if "trade_date" not in df.columns:
         return {"status": "error", "error": f"响应缺 trade_date 列: {list(df.columns)[:4]}"}
 
+    _log_bar_quality(df, _QUALITY_LABEL_OF.get(kind, kind))   # 批 72：backfill 收编（v2 #3 第 5 处——overwrite 写路径全仓唯一残口消除）
+
     # F-F2：单标的回补也带因子——to_bar_rows 不传 adj_map 时全 NULL，叠加 overwrite 的
     # DO UPDATE 会把已回填的 adj_factor 清回 NULL（E/F 盲审实测的数据破坏路径）；
     # 拉不到因子（降级）时 COALESCE 兜底不清空（schema.py BAR_TABLE_INSERT_OVERWRITE）
@@ -1736,6 +1576,7 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
                 with rate_limit_context(ds, "daily"):
                     df = _pull_daily_df(adapter, tc, start, today, kind=kind)
                 if df is not None and not df.empty:
+                    _log_bar_quality(df, _QUALITY_LABEL_OF.get(kind, kind))   # 批 72：sync_all 收编（v2 #3）
                     total_saved += _save_bars(adapter.to_bar_rows(df, "1D", None))
             ok += 1
         except Exception as e:
@@ -1811,20 +1652,3 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
     return {"items": items, "total": total}
 
 
-def sync_benchmark_index(ts_code: str = "000300.SH", start: str = "20050408",
-                         end: str | None = None) -> dict:
-    """同步基准指数日线到 bar_index（ptrade 全家桶批 1，2026-09-04）。
-
-    沪深300（000300.SH → 000300.SHSE）等指数独立存 bar_index，与股票 bar_1d 分离。
-    幂等：ON CONFLICT (symbol, ts) DO NOTHING，重复同步跳过。
-    """
-    from src.data_platform.adapters.tushare_adapter import pull_index_daily
-    from src.data_platform.db import save_index_bars
-    adapter = _get_kline_adapter({})   # 基准指数默认 tushare（index_daily 专属）
-    end = end or date.today().strftime("%Y%m%d")
-    df = pull_index_daily(ts_code, start, end)
-    if df.empty:
-        return {"status": "empty", "pulled": 0, "saved": 0, "ts_code": ts_code}
-    rows = adapter.to_bar_rows(df, "1D")
-    saved = save_index_bars(rows)
-    return {"status": "success", "pulled": len(df), "saved": saved, "ts_code": ts_code}

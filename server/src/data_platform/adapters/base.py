@@ -250,7 +250,7 @@ class TushareAdapter(BaseDataAdapter):
 
         分派键=(kind, sub_kind)（DataKind 第一公民，sync_id 不复活）：
         - bar_daily+stock/etf = 按日全市场批拉（pull_daily_batch——引擎循环逐日调，req.range_ 单日）
-          附当日全市场复权因子 adj_map（对齐 _daily_to_save_fn——astock 因子非 NULL 生死线）
+          附当日全市场复权因子 adj_map（对齐已退役 _daily_to_save_fn〔批 72〕——astock 因子非 NULL 生死线）
         - bar_daily+convertible = 区间全量（pull_cb_daily）
         - index_daily = per-symbol 区间（pull_index_daily）
         - bar_minute = per-symbol 区间（split_minute_range 分段 + 09:00/15:00 约定，对齐 _pull_minute）
@@ -269,13 +269,18 @@ class TushareAdapter(BaseDataAdapter):
             if sub == "convertible":
                 from src.data_platform.adapters.tushare_adapter import pull_cb_daily
                 df = pull_cb_daily(start, end)
+                # 批 72 质量校验迁移面（v2 #2 双同：空 df 闸——节假日/非交易区间不喷噪声）
+                if df is not None and not df.empty:
+                    _log_bar_quality_local(df, "cb_daily")
                 rows = self.to_bar_rows(df, freq)
             else:   # stock/etf：按日全市场批拉（sub_kind=stock→astock）+ 当日复权因子 adj_map
                 df = self.pull_daily_batch(start, "astock" if sub == "stock" else sub)
                 adj_map = {}
-                # 空 df（节假日 freq=B 拉到空）不拉因子，对齐 _daily_to_save_fn 只在 df 非空时 _adj_map_for_df
+                # 空 df（节假日 freq=B 拉到空）不拉因子，对齐已退役 _daily_to_save_fn〔批 72〕只在 df 非空时拉因子
                 if start and df is not None and not df.empty:
-                    # adj_factor 独立限速（adj_factor 档，对齐旧路径 _adj_map_for_df 批 58 补的限速）——
+                    # 批 72 质量校验迁移面（落点=非空块内 adj_map 拉取前——v2 #2 双同锚点）
+                    _log_bar_quality_local(df, "bar_daily" if sub == "stock" else "etf_daily")
+                    # adj_factor 独立限速（adj_factor 档，对齐已退役旧路径 _adj_map_for_df〔批 72〕批 58 补的限速）——
                     # 嵌套在引擎 daily 档 with 块内，二者独立 limiter 各自 sleep，时序对齐旧路径
                     from src.data_platform.rate_limit import rate_limit_context
                     with rate_limit_context(self._ds, "adj_factor"):
@@ -340,3 +345,19 @@ class RiceQuantAdapter(BaseDataAdapter):
 
     def to_bar_rows(self, df, freq, adj_map=None):
         raise NotImplementedError("米筐 adapter stub：真接需 rqdatac")
+
+
+def _log_bar_quality_local(df, label: str) -> None:
+    """批 72 质量校验迁移面（fail-soft+一行一 issue——语义照抄 engine._log_bar_quality；
+    下层（data_platform）禁 import 上层（data_sync），复制语义不调函数，test_layering 守门）。
+    空 df 闸在调用侧（v2 #2 双同：节假日/非交易区间不喷噪声）；label 沿用批 71 词表
+    （bar_daily/etf_daily/cb_daily——观察期查询零改动，v2 #6 仲裁）。"""
+    import logging
+    try:
+        from src.data_platform.adapters.tushare_adapter import validate_bar_quality
+        q = validate_bar_quality(df)
+        for issue in q.get("issues") or []:
+            logging.getLogger(__name__).warning("[quality] %s %s", label, issue)
+    except Exception as e:
+        logging.getLogger(__name__).warning("[quality] %s 校验器异常（不阻入库）: %s", label, e)
+
