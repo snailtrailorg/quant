@@ -339,3 +339,11 @@ class TestRunStatusGates:
         with patch.object(db, "get_conn", return_value=conn):
             v = st._resolve_volume(SimpleNamespace(action=SimpleNamespace(name="SELL")), 9.0)
         assert v == 150.0   # 500 × 30%，float 不取整
+
+
+def test_selection_weights_fallback_hardcoded():
+    """P2-9：_load_selection_weights 读 DB 失败/无键时回落硬编码现值（2.0/1.0/1.5/1.5）。"""
+    from src.astock_analysis.analysis import _load_selection_weights
+    with patch("src.data_platform.db.get_conn", side_effect=Exception("no db")):
+        w = _load_selection_weights()
+    assert w == {"net_mf_pct": 2.0, "lg_flow_pct": 1.0, "winner_rate": 1.5, "ma_dev": 1.5}

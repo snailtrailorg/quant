@@ -43,6 +43,25 @@ SELECTION_FACTORS: dict[str, dict] = {
 }
 
 
+def _load_selection_weights() -> dict[str, float]:
+    """选股权重（P2-9：DB 配置驱动——system_config selection_weights 键 JSON；fallback 硬编码现值）。
+
+    只取已注册因子的权重（防 DB 塞未知因子名）；读 DB 失败/键缺失回落硬编码，选股不因配置读取挂掉。
+    """
+    try:
+        import json
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            cur = conn.execute("SELECT value FROM system_config WHERE key='selection_weights'")
+            row = cur.fetchone()
+        if row and row[0]:
+            db_w = json.loads(row[0])
+            return {k: float(db_w[k]) for k in SELECTION_FACTORS if k in db_w}
+    except Exception:  # noqa: S110  # 配置读取失败回落硬编码（选股不因配置挂掉）
+        pass
+    return {k: spec["weight"] for k, spec in SELECTION_FACTORS.items()}
+
+
 class DailySelectionEngine:
     """日线选股模型（横截面版）：一档表全市场批量 → 因子 rank 归一 → 加权打分 → 排序。
 
@@ -116,6 +135,7 @@ class DailySelectionEngine:
         # 因子 rank(pct) 归一 [-1,1]；列级缺数（notna<30）跳过+告警；行级按可用因子重分配权重
         score = pd.Series(0.0, index=df.index)
         w_sum = pd.Series(0.0, index=df.index)
+        weights = _load_selection_weights()   # P2-9：DB 配置驱动（fallback 硬编码现值）
         for name, spec in SELECTION_FACTORS.items():
             col = df.get(spec["col"])
             if col is None or col.notna().sum() < 30:
@@ -124,8 +144,9 @@ class DailySelectionEngine:
                 continue
             r = col.rank(pct=True).sub(0.5).mul(2 * spec["direction"])
             valid = r.notna()
-            score = score + r.fillna(0.0) * spec["weight"] * valid
-            w_sum = w_sum + spec["weight"] * valid
+            w = weights.get(name, spec["weight"])
+            score = score + r.fillna(0.0) * w * valid
+            w_sum = w_sum + w * valid
         usable = w_sum > 0
         if not usable.any():
             return []
