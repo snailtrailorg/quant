@@ -48,11 +48,18 @@ class SignalAggregator:
     method: str = "weighted_sum"
 
     def aggregate(self, factor_values: dict[str, float]) -> Signal:
-        """因子值 → 买卖信号。"""
+        """因子值 → 买卖信号（P2-3 统一：加权平均——除 w_sum，分数恒 [-1,1]，阈值可比；
+        P2-4：未配置权重的因子 fail-closed，不静默按 1.0）。"""
         score = 0.0
+        w_sum = 0.0
         for name, val in factor_values.items():
-            w = self.weights.get(name, 1.0)
+            if name not in self.weights:
+                raise ValueError(f"因子 {name} 未配置权重（与 config.factors 不一致）")
+            w = self.weights[name]
             score += val * w
+            w_sum += w
+        if w_sum > 0:
+            score /= w_sum
 
         if score > self.threshold_buy:
             return Signal(action=Action.BUY, score=score, reason=f"score={score:.3f} > {self.threshold_buy}")
@@ -178,8 +185,17 @@ class Strategy:
         self.adapter = adapter
         self.account_id = None   # D2：account 身份（runner 注入；None=读方 fail-closed 不混仓）
         self._factors: list[Factor] = []
+        weights = {}
+        for f in config.factors:
+            name = f["name"]
+            if "weight" not in f:
+                raise ValueError(f"因子 {name} 缺 weight（P2-4：必须显式填，不允许静默按 1.0）")
+            w = f["weight"]
+            if not isinstance(w, (int, float)) or isinstance(w, bool):
+                raise ValueError(f"因子 {name} 权重非法: {w!r}")
+            weights[name] = float(w)
         self._aggregator = SignalAggregator(
-            weights={f["name"]: f.get("weight", 1.0) for f in config.factors},
+            weights=weights,
             method=config.aggregator.get("method", "weighted_sum"),
             threshold_buy=config.aggregator.get("threshold_buy", 0.3),
             threshold_sell=config.aggregator.get("threshold_sell", -0.3),

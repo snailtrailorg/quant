@@ -178,11 +178,39 @@ class TestSignalBackfill:
         st = Strategy.from_config(cfg, MagicMock())
         bar = {"close": 9.05, "high": 9.1, "low": 9.0, "open": 9.0, "volume": 1000}
         sig = st.on_bar(bar, [])
-        # HOLD 信号不回填——构造 BUY 路径：直接调内部
-        fv_sig = st._aggregator.aggregate({"x": 1.0})   # score=1 > 0.5 → BUY
+        # HOLD 信号不回填——构造 BUY 路径：直接调内部（P2-4 fail-closed：需显式配权重）
+        st._aggregator.weights["x"] = 1.0
+        fv_sig = st._aggregator.aggregate({"x": 1.0})   # score=1.0/1.0=1 > 0.5 → BUY
         if fv_sig.action != Action.HOLD:
             v = st._resolve_volume(fv_sig, 9.05)
             assert v == 500 and 9.05 > 0
+
+
+class TestAggregatorSemantics:
+    def test_weighted_avg_normalizes_score(self):
+        """P2-3：加权平均（除 w_sum）——分数恒 [-1,1]，加因子/调权重不漂移阈值量纲。"""
+        from src.strategy_framework.strategy import SignalAggregator, Action
+        agg = SignalAggregator(weights={"a": 2.0, "b": 1.0}, threshold_buy=0.5, threshold_sell=-0.5)
+        sig = agg.aggregate({"a": 1.0, "b": 1.0})
+        assert sig.score == 1.0   # (2+1)/3 加权平均，恒有界
+        assert sig.action == Action.BUY
+
+    def test_unregistered_factor_fail_closed(self):
+        """P2-4：未配置权重的因子 fail-closed（不静默按 1.0）。"""
+        import pytest
+        from src.strategy_framework.strategy import SignalAggregator
+        agg = SignalAggregator(weights={"a": 1.0})
+        with pytest.raises(ValueError):
+            agg.aggregate({"b": 1.0})
+
+    def test_missing_weight_key_fail_closed(self):
+        """P2-4：config.factors 缺 weight 键 fail-closed（不静默按 1.0）。"""
+        import pytest
+        from src.strategy_framework.strategy import Strategy, StrategyConfig
+        cfg = StrategyConfig(id="t", name="t", type="astock_analysis", symbol="x.SHSE",
+                             adapter="xtp", factors=[{"name": "ma_dev"}])  # 缺 weight
+        with pytest.raises(ValueError):
+            Strategy.from_config(cfg, MagicMock())
 
 
 # ── #8 DSL 窗口函数 ──
