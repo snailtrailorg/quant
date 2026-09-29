@@ -846,3 +846,14 @@ class TestBatch78Persist:
                             types.SimpleNamespace(cpu_percent=lambda interval=None: 42.13))
         from src.health_monitor.collector import _collect_cpu
         assert _collect_cpu() == {"pct": 0.4213}
+
+
+def test_threshold_kind_sets_consistent():
+    """P2-8：_DEF_THRESHOLDS/_DEF_PERIODS 的 kind 集 == _CFG_KEYS 的 kind 集（键集守门，新增 kind 忘同步即红）。"""
+    from src.health_monitor import collector
+    thr_kinds = set(collector._DEF_THRESHOLDS)
+    per_kinds = set(collector._DEF_PERIODS)
+    cfg_thr_kinds = {v[1] for v in collector._CFG_KEYS["thresholds"].values()}
+    cfg_per_kinds = {v[1] for v in collector._CFG_KEYS["periods"].values()}
+    assert thr_kinds == cfg_thr_kinds == {"mem", "disk", "swap", "cpu"}
+    assert per_kinds == cfg_per_kinds == {"mem", "disk", "swap", "cpu"}

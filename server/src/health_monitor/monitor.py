@@ -193,10 +193,10 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
     #   各指标独立采集（周期不同）——某 kind None=证据缺失，只跳过该 kind）
     res = snap.get("resources")
     if res:
-        thr = snap.get("thresholds") or {"mem": {"warn": 0.6, "crit": 0.9},
-                                         "disk": {"warn": 0.8, "crit": 0.9},
-                                         "swap": {"warn": 0.8},
-                                         "cpu": {"warn": 0.7, "crit": 0.9}}
+        from .collector import _DEF_THRESHOLDS as _DEF   # P2-1 单源：内联 dict 删，与 collector 一份
+        _snap_thr = snap.get("thresholds") or {}
+        # P2-2 逐 kind 兜底：查找侧补齐缺 kind，thr[kind] 恒存在——新增 kind 只加 _DEF 一行，不再双处同步
+        thr = {k: {**v, **(_snap_thr.get(k) or {})} for k, v in _DEF.items()}
         for kind, comp, rule in (("mem", "memory", "mem_high"), ("swap", "swap", "swap_high"),
                                  ("cpu", "cpu", "cpu_high")):
             r = res.get(kind)
