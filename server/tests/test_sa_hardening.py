@@ -211,3 +211,13 @@ def test_exit_process_flushes_before_exit():
         log_sink.exit_process(9)
     sink.close.assert_called_once()   # 先冲刷
     ex.assert_called_once_with(9)      # 再退出（退出码原样保留）
+
+
+def test_feishu_redis_pool_uses_dedicated_var():
+    """P0-3：飞书池读 FEISHU_VALKEY_URL（独立变量）——原与业务池同读 VALKEY_URL，db0 时飞书隔离失效。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    rp_src = (root / "src" / "web_api" / "redis_pool.py").read_text()
+    fb_src = (root / "src" / "feishu_bot" / "tasks.py").read_text()
+    assert 'FEISHU_VALKEY_URL' in rp_src
+    assert 'FEISHU_VALKEY_URL' in fb_src

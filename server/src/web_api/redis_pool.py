@@ -14,9 +14,11 @@ redis_pool = redis.ConnectionPool.from_url(
     decode_responses=True,
     socket_timeout=2, socket_connect_timeout=2)   # 批27-2：web 共享池——JWT 黑名单/进度等，Valkey 挂起不拖死请求线程
 
-# 飞书长连接专用库（db4）：ws_client 心跳/重连状态等，与业务库隔离
+# 飞书长连接专用库（db4）：ws_client 心跳/重连状态等，与业务库隔离。
+# P0-3（2026-09-29）：独立环境变量 FEISHU_VALKEY_URL——原与业务池同读 VALKEY_URL，
+# 当 VALKEY_URL 显式 db0 时飞书池也落 db0，隔离从未生效（靠默认值区分语义是反模式）。
 feishu_redis_pool = redis.ConnectionPool.from_url(
-    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/4"),
+    os.environ.get("FEISHU_VALKEY_URL", "redis://127.0.0.1:6379/4"),
     decode_responses=True,
     socket_timeout=2, socket_connect_timeout=2)
 
