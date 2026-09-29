@@ -342,11 +342,16 @@ def run(ctx: dict) -> None:
             strategy._hub_gen = fields.get("gen")
         except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
-        sig = strategy.on_bar(bar, list(history))
-        stats["bars"] += 1
-        history.append(bar)
-        if len(history) > 100:
-            history.pop(0)
+        try:
+            sig = strategy.on_bar(bar, list(history))
+        finally:
+            # 批82（P0-2 盲审 P0-A/B）：on_bar 异常也补 history 护后续因子窗口——bar 已接收，
+            # 照常推水位+xack（不重放：重放经 classify seq 去重吞掉、且 max_ts 不推会触发缺口误冻结）。
+            # 该 bar 信号损失由 guard 的 logger.exception + safe_notify critical 告警暴露。
+            stats["bars"] += 1
+            history.append(bar)
+            if len(history) > 100:
+                history.pop(0)
         sa = getattr(sig, "action", None)
         logger.info("BAR %s close=%.2f vol=%.0f signal=%s", bar["ts"][:19], bar["close"], bar["volume"],
                     sa.name if sa else "NONE")
