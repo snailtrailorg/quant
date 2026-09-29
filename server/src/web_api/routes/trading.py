@@ -350,10 +350,6 @@ def get_pnl(payload: dict = Depends(require_perm("read"))):
 def get_orders(payload: dict = Depends(require_perm("read"))):
     """订单记录（order_log 最近 100，#6）。"""
     with get_conn() as conn:
-        try:
-            conn.execute("SELECT 1 FROM order_log LIMIT 1")
-        except Exception:
-            logger.warning("get_orders: order_log 表不存在（需运行 alembic upgrade head）")
         cur = conn.execute("SELECT ts, strategy_id, symbol, action, volume, price, status, client_order_id, error "
                            "FROM order_log ORDER BY ts DESC LIMIT 100")   # wd-20 §1.4.3：补委托号/失败原因（0039 列）
         rows = cur.fetchall()

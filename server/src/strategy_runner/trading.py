@@ -6,6 +6,7 @@ reconcile_orders / frozen_allows / buy_ok_check / _flush_positions。
 设计（docs/obsolete/任务归档/批4-worker迁移与trading解耦.md v2.1）：
 - 依赖注入：函数收 adapter/缓存参数，零模块级可变状态——账户基线缓存改调用方持有 dict
   （每进程恰一个快照调用方，与原模块级缓存"基线不随运行漂移"语义等价）；
+  （唯一例外：`_recalc_seen`——F-55 因子重算触发标记，本 worker 进程各记、不删全局键，设计内）
 - vnpy 全部函数内 lazy import（本模块须能在无 vnpy 环境被测试加载，与 main.py 同策略）；
 - 知情差异五条（v2.1 裁定的双模式统一，语义零漂移的唯一例外）：
   ① reconcile_orders=runner 超集（在场委托+成交补录+WAL 残留——worker 由只告警升级，知情接受）

@@ -190,3 +190,14 @@ class TestAlertFailed:
             with patch("sys.argv", ["alert_failed", "x.service"]):
                 alert_failed.main()  # 不应 raise
         assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+def test_stmt_timeout_defaults_pinned():
+    """P2-6：QUANT_DB_STMT_TIMEOUT_MS 两处默认值 3600000/60000 是有意差异（迁移放宽 1h vs 运行期 60s），
+    钉住防止后人「顺手统一」把迁移超时压到 60s 杀长迁移。"""
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    env_src = (root / "migrations" / "env.py").read_text()
+    db_src = (root / "src" / "data_platform" / "db.py").read_text()
+    assert '"3600000"' in env_src   # 迁移放宽 1h（env.py:54，同行有注释）
+    assert '"60000"' in db_src       # 运行期 60s（db.py:48）

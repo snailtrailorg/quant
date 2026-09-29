@@ -33,6 +33,9 @@ if _secret_key:
     from src.quant_common.crypto import _derive_key
     JWT_SECRET = _derive_key(_secret_key, b"jwt")
 else:
+    # 保留公开常量而非进程内随机密钥：JWT 用随机密钥会导致重启后全部 token 失效、用户被强制重登；
+    # 故保留常量，由下方 SD1（默认密钥 + 实盘开关 → 拒绝启动）兜底。与 crypto.py 的随机化策略不同
+    # 是刻意的（加密凭证孤儿化可接受，登录态全量失效不可接受）。
     JWT_SECRET = os.environ.get("JWT_SECRET", "quant-dev-secret-change-me")
 if _secret_key:
     pass  # 根密钥派生，无告警

@@ -28,6 +28,8 @@ secrets/
 *.log
 logs/
 data_cache/
+.pytest_cache/
+server/logs_emt/
 
 # 前端构建
 web/node_modules/
