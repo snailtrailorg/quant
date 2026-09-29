@@ -11,6 +11,9 @@ import pytest
 
 from datetime import datetime, timedelta, timezone
 
+import src.data_sync  # noqa: F401  预加载：patch("datetime.datetime") 期间首次 import 会触发 pandas 链，
+# 而 datetime 已被 mock → pandas._libs.interval 类型检查崩（patch sync 首次 import 的坑）
+
 
 # --- F-39 cancel_order 退化路径 ---
 
@@ -68,6 +71,127 @@ def test_sync_scheduler_clamps_future_cursor():
 
     # base 被钳回过去（now-7天，等同空游标），让 croniter 算最近到点判断逾期
     assert abs((captured["base"] - (now - timedelta(days=7)).replace(tzinfo=None)).total_seconds()) < 60
+
+
+# --- 批 80 游标卡非交易日（节假日落 cron 工作日 → next_run 恒停 → 同步卡死）---
+
+def _sched_conn(row):
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    conn.execute.return_value.fetchall.return_value = [row]
+    return conn
+
+
+def test_scheduler_rolls_next_run_to_trading_day():
+    """游标停在节假日前一天，next_run 停非交易日 → 滚到下一个交易日触发 sync（批 80 根因）。"""
+    from datetime import date
+    from src.scheduler import tasks
+    row = ("astock_daily", "30 16 * * 1-5", True, "idle", "20260924",
+           datetime(2026, 9, 24, 16, 33), "trade_day")
+    seq = iter([datetime(2026, 9, 25, 16, 30),   # 中秋周五（非交易日）
+                datetime(2026, 9, 28, 16, 30)])  # 周一（交易日）
+
+    class _Cron:
+        def __init__(self, schedule, base):
+            pass
+        def get_next(self, start):
+            return next(seq)
+
+    def _td(d):
+        return d == date(2026, 9, 28)   # 只有 09-28 是交易日
+
+    fake_now = datetime(2026, 9, 29, 20, 0, tzinfo=timezone(timedelta(hours=8)))   # 钉死时钟
+    with patch("datetime.datetime") as dt_mock:
+        dt_mock.now.return_value = fake_now
+        with patch("src.data_platform.db.get_conn", return_value=_sched_conn(row)), \
+             patch("croniter.croniter", _Cron), \
+             patch("src.data_platform.db.is_trading_day", _td), \
+             patch("src.data_sync.sync") as s:
+            tasks.data_sync_scheduler()
+    s.assert_called_once_with("astock_daily")
+
+
+def test_scheduler_rolls_next_run_to_workday():
+    """workday 对称滚动：schedule 含周末，next_run 停周六 → 滚到周一（工作日）触发。"""
+    from src.scheduler import tasks
+    row = ("astock_daily", "0 9 * * *", True, "idle", "20260924",
+           datetime(2026, 9, 24, 9, 0), "workday")   # 每天 9:00 + workday 过滤
+    seq = iter([datetime(2026, 9, 26, 9, 0),   # 周六
+                datetime(2026, 9, 27, 9, 0),   # 周日
+                datetime(2026, 9, 28, 9, 0)])  # 周一
+
+    class _Cron:
+        def __init__(self, schedule, base):
+            pass
+        def get_next(self, start):
+            return next(seq)
+
+    fake_now = datetime(2026, 9, 29, 9, 30, tzinfo=timezone(timedelta(hours=8)))
+    with patch("datetime.datetime") as dt_mock:
+        dt_mock.now.return_value = fake_now
+        with patch("src.data_platform.db.get_conn", return_value=_sched_conn(row)), \
+             patch("croniter.croniter", _Cron), \
+             patch("src.data_sync.sync") as s:
+            tasks.data_sync_scheduler()
+    s.assert_called_once_with("astock_daily")   # 滚到周一（weekday<5）触发
+
+
+def test_scheduler_breaks_when_next_trading_day_future():
+    """今天=节假日，滚到下一个交易日（未来）时 break，不触发 sync。"""
+    from datetime import date
+    from src.scheduler import tasks
+    row = ("astock_daily", "30 16 * * 1-5", True, "idle", "20260924",
+           datetime(2026, 9, 24, 16, 33), "trade_day")
+    seq = iter([datetime(2026, 9, 25, 16, 30),   # 中秋周五
+                datetime(2026, 9, 28, 16, 30)])  # 周一（未来 > now=09-25）
+
+    class _Cron:
+        def __init__(self, schedule, base):
+            pass
+        def get_next(self, start):
+            return next(seq)
+
+    def _td(d):
+        return d == date(2026, 9, 28)
+
+    fake_now = datetime(2026, 9, 25, 16, 35, tzinfo=timezone(timedelta(hours=8)))
+    with patch("datetime.datetime") as dt_mock:
+        dt_mock.now.return_value = fake_now
+        with patch("src.data_platform.db.get_conn", return_value=_sched_conn(row)), \
+             patch("croniter.croniter", _Cron), \
+             patch("src.data_platform.db.is_trading_day", _td), \
+             patch("src.data_sync.sync") as s:
+            tasks.data_sync_scheduler()
+    s.assert_not_called()   # 下一个交易日 09-28 还没到
+
+
+def test_scheduler_guard_exhausted_no_infinite_loop():
+    """日历异常（is_trading_day 恒 False），guard 耗尽后判非交易日跳过，不死循环。"""
+    from src.scheduler import tasks
+    row = ("astock_daily", "30 16 * * 1-5", True, "idle", "20260924",
+           datetime(2026, 9, 24, 16, 33), "trade_day")
+    base = datetime(2026, 9, 24, 16, 30)
+    cnt = [0]
+
+    class _Cron:
+        def __init__(self, schedule, b):
+            pass
+        def get_next(self, start):
+            cnt[0] += 1
+            return base + timedelta(days=cnt[0])   # 递增日期（全是非交易日）
+
+    def _td(d):
+        return False   # 恒非交易日
+
+    fake_now = datetime(2027, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=8)))
+    with patch("datetime.datetime") as dt_mock:
+        dt_mock.now.return_value = fake_now
+        with patch("src.data_platform.db.get_conn", return_value=_sched_conn(row)), \
+             patch("croniter.croniter", _Cron), \
+             patch("src.data_platform.db.is_trading_day", _td), \
+             patch("src.data_sync.sync") as s:
+            tasks.data_sync_scheduler()
+    s.assert_not_called()   # guard 耗尽后跳过，不触发 sync（不死循环）
 
 
 # --- F-55 factor:recalc 多 worker 各记 last_seen ---

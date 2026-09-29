@@ -790,8 +790,30 @@ def data_sync_scheduler():
             skipped.append(f"{sid}(未到周期)")
             continue
 
-        # 交易日日历过滤
+        # 交易日/工作日日历过滤
         tf = trade_day_filter or "none"
+        if tf in ("trade_day", "workday"):
+            # 滚到 ≤now 的下一个交易日/工作日：next_run 可能停在节假日/周末（cron 匹配但过滤
+            # 跳过不推进游标 → next_run 恒停此日 → 同步卡死，如 09-25 中秋周五；2026-09-29 实测）。
+            # 只改读侧（滚 next_run）不写游标——游标推进仍由 sync() 成功后内部管理（engine.py:162）。
+            _guard = 0
+            try:
+                while _guard < 20:
+                    _bad = (not is_trading_day(next_run.date())) if tf == "trade_day" \
+                        else (next_run.weekday() >= 5)
+                    if not _bad:
+                        break
+                    _nxt = cron.get_next(datetime)
+                    if _nxt > now.replace(tzinfo=None):   # 下一个到点还没到，交给下次调度
+                        break
+                    next_run = _nxt
+                    _guard += 1
+                if _guard >= 20:
+                    # 20 个 cron 匹配仍非交易日（日历缺失/超长休市）——告警防静默卡死
+                    logger.warning("sync %s: next_run 连续 %s 个非交易日未滚到交易日（calendar 缺失？），本 beat 跳过", sid, _guard)
+            except Exception:  # noqa: S110
+                pass   # 异常保持 next_run 原值，下方 is_trading_day 会再抛（同原暴露，fail-loud 非 fail-open）
+
         if tf == "trade_day" and not is_trading_day(next_run.date()):
             skipped.append(f"{sid}(非交易日)")
             continue
