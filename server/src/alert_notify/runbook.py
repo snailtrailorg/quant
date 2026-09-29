@@ -9,12 +9,6 @@ wrapper 变量透传链测不到——main._alert / make_alert 注入链靠人�
 """
 
 RUNBOOK: dict[str, dict] = {
-    # ——— 质量闭环族（批 62b M7） ———
-    "quality.budget-exhausted":  {"label": "shadow 对账预算耗尽", "guide": "当月 shadow: 调用超预算上限两倍已跳过——核对 shadow_policy.budget_calls_month 与 data_source_usage 用量（数据源故障重试风暴会放大调用）。"},
-    "quality.budget-throttle":   {"label": "shadow 对账预算降采样", "guide": "当月用量超预算已降采样（地板 3）——持续出现调增预算或核对用量来源。"},
-    "quality.real-diff":         {"label": "对账真差异", "guide": "超容差（非白名单命中）diff 行数超阈值——对账报表（数据运营→对账）看明细；入库链改数/降级写入/覆写三类归因；restate 排查随缺根模式另批。"},
-    "quality.whitelist-stale":   {"label": "白名单验证逾期", "guide": "口径白名单条目超 90 天未人工验证——对账报表回填验证结果（防白名单退化成告警静音器）。"},
-
     # ——— L3/SA4 自愈族（scheduler） ———
     "l3.failed":        {"label": "L3 拉起失败", "guide": "systemctl start 非零退出——查 journalctl -u <unit> 与 StartLimit 窗口；L3 按 300s 周期重试。"},
     "l3.pull":          {"label": "L3 自动拉起", "guide": "期望源在而 systemd 无实例——若非预期，先在 Web 停任务或打 hub 维护标记。"},

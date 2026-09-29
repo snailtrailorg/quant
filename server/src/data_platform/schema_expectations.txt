@@ -71,8 +71,6 @@ routing_decision :: id,ts,fingerprint,req_summary,chain,epoch,cause
 routing_policy :: consumer_tag,weights,bulkhead_defaults
 security_master :: vt_symbol,market,exchange,category,name,industry,list_date,delist_date,multiplier,tick_size,fee_model_ref,margin_model_ref,session_id,trade_phase,routing_hints,updated_at,board
 security_state :: vt_symbol,effective_from,kind,value
-shadow_diff :: id,kind,symbol,trade_date,field,main_val,backup_val,whitelist_hit,created_at
-shadow_policy :: kind,backup_source,sample_n,tolerance,budget_calls_month,enabled,note
 share_float :: ts_code,ann_date,float_date,float_share,float_ratio,holder_name,share_type
 signal_log :: id,ts,strategy_id,symbol,action,score,price,source,fetched_at,dataset_version
 sms_provider :: id,name,provider,access_key_id,access_key_secret,sign_name,alert_template_code,verify_template_code,position,enabled,created_at,updated_at,vendor

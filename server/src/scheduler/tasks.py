@@ -1702,35 +1702,18 @@ def sa4_reconciler():
     return result
 
 
-# ── 批 62b（M7）：质量闭环任务 ────────────────────────────────────────────────
-@app.task(name="src.scheduler.tasks.quality_shadow_check")
-def quality_shadow_check():
-    """每日盘后采样对账（16:05 交易日——B-P2-4：is_trading_day 守卫防非交易日白烧预算）。
+# ── 批 62c：SM 对账任务（批 79 起 shadow 行情对账已删） ────────────────────────
+@app.task(name="src.scheduler.tasks.sm_reconcile_check")
+def sm_reconcile_check():
+    """每周一 SM 对账（security_master vs static_symbols 差集——62c）。
 
-    含 SM 对账（62c——每周一随批裁定 v3.1）+白名单验证义务 90 天检查（A-P1-7）。
+    批 79 删除 shadow 行情主备对账（同源自检无意义），本任务由 quality_shadow_check
+    瘦身为仅 SM 对账；schedule 收敛到周一 16:05（原每天跑 + weekday 判断）。
     """
     from datetime import datetime as _dt
 
     from src.strategy_framework.md_session import is_trading_day
     if not is_trading_day(_dt.now()):
         return {"skipped": "非交易日"}
-    from src.data_platform.quality import run_shadow_check, sm_reconcile, whitelist_verify_check
-    out = {"shadow": run_shadow_check("bar_daily")}
-    if _dt.now().weekday() == 0:   # 周一：SM 对账
-        out["sm"] = sm_reconcile()
-    out["whitelist_verify"] = whitelist_verify_check()
-    return out
-
-
-@app.task(name="src.scheduler.tasks.quality_cleanup")
-def quality_cleanup():
-    """shadow_diff 30 天清理（B-P2-3：PG 无原生 TTL——beat 惯例）。"""
-    from src.data_platform.db import get_conn
-    try:
-        with get_conn() as conn:
-            cur = conn.execute("DELETE FROM shadow_diff WHERE created_at < now() - interval '30 days'")
-            conn.commit()
-            return {"deleted": cur.rowcount}
-    except Exception as e:
-        logger.warning("shadow_diff 清理失败: %s", e)
-        return {"error": str(e)}
+    from src.data_platform.quality import sm_reconcile
+    return {"sm": sm_reconcile()}

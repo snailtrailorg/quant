@@ -305,10 +305,6 @@ export const sse = (() => {
 })()
 
 // 批 61 M6：账号切换会话（nominate/confirm/extend/abort=strategy_control；execute=trade——后端门）
-// 批 62b（M7）：质量对账域
-export const getQualityDiff = (params) => http.get('/api/quality/shadow-diff', { params })
-export const getWhitelistStats = (params) => http.get('/api/quality/whitelist-stats', { params })
-export const verifyWhitelist = (entryId, result) => http.post(`/api/quality/whitelist-verify/${entryId}`, null, { params: { result } })
-export const getSmReconcile = () => http.get('/api/quality/sm-reconcile')
-export const getLineage = (signalId) => http.get(`/api/quality/lineage/${signalId}`)
-export const triggerShadowCheck = (kind) => http.post('/api/quality/shadow-check', null, { params: { kind } })
+// 批 62c：SM 对账 + 审计血缘（批 79 起 shadow 行情对账已删；http→api 修批 62 存量未定义 bug）
+export const getSmReconcile = () => api.get('/api/quality/sm-reconcile')
+export const getLineage = (signalId) => api.get(`/api/quality/lineage/${signalId}`)

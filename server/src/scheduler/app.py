@@ -130,14 +130,9 @@ app.conf.update(
     task_soft_time_limit=300,  # 5 分钟超时
     beat_schedule={
 
-        "quality-shadow": {
-            "task": "src.scheduler.tasks.quality_shadow_check",
-            "schedule": crontab(hour=16, minute=5),   # 批 62b：盘后采样对账（16:08 锚前——diff 先行）
-            "options": {"queue": "data"},
-        },
-        "quality-cleanup": {
-            "task": "src.scheduler.tasks.quality_cleanup",
-            "schedule": crontab(hour=3, minute=40),
+        "sm-reconcile": {
+            "task": "src.scheduler.tasks.sm_reconcile_check",
+            "schedule": crontab(day_of_week=1, hour=16, minute=5),   # 批 62c：周一 SM 对账（批 79 起 shadow 已删）
             "options": {"queue": "data"},
         },
         "astock-select-daily": {
