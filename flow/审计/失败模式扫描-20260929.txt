@@ -1,0 +1,342 @@
+扫描 260 个 Python 文件；模式 P1,P10,P2,P3,P4,P5,P6,P7,P8,P9
+
+─── P1 跨域同名——A 域的值集被用作 B 域的键（靠命名巧合成立的正确性） —— 1 条
+  server/src/strategy_runner/main.py:199  表 live_trading_config 列 market ← 跨域参数 ['provider', 'provider']（候选 ['provider', 'provider']）
+
+─── P2 副作用先于业务成功——水位/游标/ACK 先提交，业务异常被外层吞掉→不可恢复的数据洞 —— 2 条
+  server/src/md_hub/main.py:165  on_tick(): 副作用@168 早于业务@180 —— stats['last_tick_wall'] = time.time()
+  server/src/strategy_runner/hub_worker.py:266  handle_msg(): 副作用@281 早于业务@337 —— _ts_gap_frozen(ts_key, state.max_ts, market)
+
+─── P4 防线失效静默——安全相关写入/读取失败被 pass 或 debug 吞掉，防线失效无告警 —— 95 条
+  server/src/scheduler/tasks.py:71  except Exception as e:
+  server/src/scheduler/tasks.py:128  except Exception:
+  server/src/scheduler/tasks.py:509  except Exception as e:
+  server/src/scheduler/tasks.py:1216  except Exception as e:
+  server/src/scheduler/tasks.py:1461  except Exception:
+  server/src/scheduler/tasks.py:1673  except Exception as e:
+  server/src/scheduler/tasks.py:1707  except Exception as e:
+  server/src/scheduler/tasks.py:818  except Exception:
+  server/src/scheduler/tasks.py:1176  except Exception as e:
+  server/src/scheduler/tasks.py:1562  except Exception:
+  server/src/scheduler/tasks.py:297  except Exception:
+  server/src/scheduler/tasks.py:1458  except Exception:
+  server/src/scheduler/tasks.py:347  except Exception: pass
+  server/src/scheduler/tasks.py:376  except Exception: pass
+  server/src/scheduler/tasks.py:294  except Exception:
+  ... 其余 80 条省略（--verbose 全列）
+
+─── P5 退出路径绕过清理——os._exit 跳过 atexit/缓冲冲刷，最后一段日志丢失 —— 8 条
+  server/src/md_hub/main.py:404  os._exit(0)   # 原生库拆除规避（同 runner）；SystemExit 路径已直接 os._exit 带码
+  server/src/md_hub/main.py:247  os._exit(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus——30s 窗承诺载体）
+  server/src/md_hub/main.py:342  os._exit(1)
+  server/src/strategy_runner/hub_worker.py:378  os._exit(0)
+  server/src/strategy_runner/hub_worker.py:479  os._exit(0)
+  server/src/md_hub/parts.py:228  os._exit(4)
+  server/src/strategy_framework/runtime/loop.py:79  os._exit(self._fatal_exit_code)
+  server/src/strategy_framework/runtime/xsleeper.py:55  os._exit(NOGROUP_EXIT_CODE)
+
+─── P6 文档与代码矛盾——模块 docstring 的强断言在文件内被自己违反 —— 1 条
+  server/src/strategy_runner/trading.py:1  docstring 断言「零模块级可变状态」
+
+─── P10 反向缺省——同一键/属性在多处 .get() 缺省值不同（含布尔反向） —— 54 条
+  JWT_SECRET                     2 种      "" ×1 | "quant-dev-secret-change-me" ×1
+      ""         server/src/quant_common/crypto.py:44
+      "quant-dev-secret-change-me" server/src/web_api/auth.py:33
+  VALKEY_URL                     2 种      "redis://127.0.0.1:6379/0" ×4 | "redis://127.0.0.1:6379/4" ×2
+      "redis://127.0.0.1:6379/0" server/src/alert_notify/dispatch.py:84, server/src/alert_notify/dispatch.py:92, server/src/alert_notify/notify.py:47, server/src/data_platform/databus.py:33
+      "redis://127.0.0.1:6379/4" server/src/feishu_bot/tasks.py:25, server/src/web_api/redis_pool.py:19
+  _hub_gen                       2 种      '' ×1 | None ×1
+      ''         server/src/strategy_framework/strategy.py:477
+      None       server/src/strategy_framework/strategy.py:478
+  account_id                     2 种      -1 ×1 | None ×2
+      -1         server/src/strategy_runner/hub_worker.py:57
+      None       server/src/strategy_framework/strategy.py:417, server/src/strategy_runner/trading.py:147
+  action                         3 种      "" ×4 | None ×3 | sig.action.name ×2
+      ""         server/src/risk_control/risk.py:276, server/src/risk_control/risk.py:293, server/src/risk_control/risk.py:312, server/src/risk_control/risk.py:316
+      None       server/src/feishu_bot/ws_client.py:234, server/src/strategy_framework/strategy.py:273, server/src/strategy_runner/hub_worker.py:342
+      sig.action.name server/src/strategy_framework/strategy.py:436, server/src/strategy_framework/strategy.py:494
+  arguments                      2 种      "{}" ×2 | {} ×2
+      "{}"       server/src/im_bot/handlers.py:103, server/src/web_api/routes/chat.py:42
+      {}         server/src/im_bot/handlers.py:113, server/src/im_bot/handlers.py:116
+  balance                        2 种      '?' ×1 | 0 ×2
+      '?'        scripts/test_xtp_connect.py:37
+      0          server/src/strategy_runner/trading.py:236, server/src/strategy_runner/trading.py:239
+  capital                        2 种      100000 ×1 | 1_000_000 ×1
+      100000     server/src/scheduler/tasks.py:1036
+      1_000_000  server/src/web_api/routes/backtest.py:186
+  chat_id                        2 种      "" ×1 | open_id ×1
+      ""         server/src/feishu_bot/ws_client.py:48
+      open_id    server/src/feishu_bot/router.py:53
+  client_id                      2 种      "" ×2 | params.get("client_id", 1 ×1
+      ""         server/src/feishu_bot/tasks.py:162, server/src/feishu_bot/tasks.py:165
+      params.get("client_id", 1 server/src/strategy_framework/broker.py:149
+  code                           2 种      "" ×4 | -1 ×1
+      ""         server/src/web_api/routes/auth_routes.py:479, server/src/web_api/routes/strategy.py:97, server/src/web_api/routes/strategy.py:237, server/src/web_api/routes/strategy.py:260
+      -1         server/src/im_bot/feishu_client.py:127
+  connect_status                 布尔反向     False ×2 | True ×3
+      False      server/src/strategy_runner/hub_worker.py:411, server/src/strategy_runner/td_registry.py:96
+      True       server/src/strategy_framework/adapters.py:385, server/src/strategy_framework/md_gateway.py:216, server/src/strategy_runner/hub_worker.py:418
+  content                        2 种      "" ×3 | "{}" ×1
+      ""         server/src/llm_gateway/gateway.py:175, server/src/llm_gateway/gateway.py:181, server/src/llm_gateway/gateway.py:200
+      "{}"       server/src/feishu_bot/router.py:49
+  description                    2 种      "" ×4 | cls.__doc__ or "" ×1
+      ""         server/src/web_api/routes/auth_routes.py:763, server/src/web_api/routes/auth_routes.py:785, server/src/web_api/routes/strategy.py:238, server/src/web_api/routes/strategy.py:351
+      cls.__doc__ or "" server/src/strategy_framework/factor.py:109
+  enabled                        2 种      True ×3 | base.get("enabled", True ×1
+      True       server/src/web_api/routes/alerts.py:458, server/src/web_api/routes/system.py:363, server/src/web_api/routes/trading.py:377
+      base.get("enabled", True server/src/web_api/routes/alerts.py:128
+  end                            2 种      "" ×2 | date.today( ×1
+      ""         server/src/data_platform/security_master.py:239, server/src/web_api/routes/sync.py:193
+      date.today( server/src/scheduler/tasks.py:1001
+  errcode                        2 种      -1 ×1 | 0 ×1
+      -1         server/src/im_bot/wecom.py:32
+      0          server/src/im_bot/wecom_ws.py:95
+  error                          2 种      "接入发起失败" ×1 | "旧数据删除失败，已回滚未切换" ×1
+      "接入发起失败"   server/src/web_api/routes/im_bots.py:151
+      "旧数据删除失败，已回滚未切换" server/src/web_api/routes/sync.py:289
+  error_id                       3 种      '?' ×2 | 0 ×1 | None ×3
+      '?'        server/src/strategy_framework/adapters.py:422, server/src/strategy_framework/adapters.py:477
+      0          server/src/strategy_framework/adapters.py:590
+      None       server/src/strategy_framework/md_gateway.py:472, server/src/strategy_framework/md_gateway.py:480, server/src/strategy_framework/md_gateway.py:487
+  error_msg                      3 种      "" ×2 | "?" ×3 | '?' ×3
+      ""         server/src/strategy_framework/md_api_guard.py:237, server/src/strategy_framework/md_gateway.py:473
+      "?"        server/src/strategy_framework/adapters.py:658, server/src/strategy_framework/adapters.py:688, server/src/strategy_framework/adapters.py:708
+      '?'        server/src/strategy_framework/adapters.py:421, server/src/strategy_framework/adapters.py:477, server/src/strategy_framework/adapters.py:488
+  event                          2 种      None ×1 | {} ×1
+      None       server/src/feishu_bot/ws_client.py:233
+      {}         server/src/feishu_bot/router.py:41
+  event_type                     2 种      "" ×1 | "?" ×1
+      ""         server/src/feishu_bot/ws_client.py:110
+      "?"        server/src/feishu_bot/router.py:77
+  freq                           2 种      "1D" ×1 | None ×2
+      "1D"       server/src/web_api/routes/strategy.py:262
+      None       server/src/data_platform/databus.py:148, server/src/data_platform/adapters/base.py:263
+  header                         2 种      None ×1 | {} ×1
+      None       server/src/feishu_bot/ws_client.py:231
+      {}         server/src/feishu_bot/ws_client.py:110
+  high                           2 种      0 ×4 | base ×1
+      0          server/src/strategies/convertible_doublelow.py:25, server/src/strategies/crypto_cta_trend.py:21, server/src/strategy_framework/strategy.py:225, server/src/strategy_framework/strategy.py:578
+      base       server/src/strategy_framework/backtest.py:101
+  id                             5 种      "" ×1 | '' ×1 | 0 ×3 | _a ×1 | strategy_id ×1
+      ""         server/src/data_sync/engine.py:53
+      ''         server/src/alert_notify/dispatch.py:425
+      0          server/src/data_platform/routing.py:90, server/src/data_platform/routing.py:291, server/src/web_api/routes/routing.py:77
+      _a         server/src/im_bot/feishu_client.py:389
+      strategy_id server/src/strategy_runner/main.py:368
+  kind                           2 种      "" ×2 | '?' ×1
+      ""         server/src/data_platform/routing.py:326, server/src/data_platform/adapters/base.py:261
+      '?'        server/src/data_platform/adapters/base.py:62
+  lineno                         2 种      0 ×1 | None ×1
+      0          scripts/audit-failure-modes.py:295
+      None       scripts/audit-failure-modes.py:192
+  low                            2 种      0 ×4 | base ×1
+      0          server/src/strategies/convertible_doublelow.py:26, server/src/strategies/crypto_cta_trend.py:22, server/src/strategy_framework/strategy.py:226, server/src/strategy_framework/strategy.py:579
+      base       server/src/strategy_framework/backtest.py:102
+  market                         2 种      "" ×1 | "astock" ×1
+      ""         server/src/data_platform/routing.py:282
+      "astock"   server/src/quant_common/markets.py:37
+  max_single_amount              2 种      100000 ×1 | 500000 ×1
+      100000     server/src/risk_control/risk.py:374
+      500000     server/src/risk_control/risk.py:397
+  mode                           3 种      "auto" ×1 | "consume" ×2 | "single" ×1
+      "auto"     server/src/web_api/routes/sync.py:183
+      "consume"  server/src/data_platform/routing.py:248, server/src/data_platform/routing.py:327
+      "single"   server/src/web_api/routes/backtest.py:176
+  msg                            4 种      "" ×2 | data ×1 | event.data ×3 | str(data ×1
+      ""         server/src/im_bot/feishu_client.py:158, server/src/im_bot/feishu_client.py:196
+      data       scripts/test_xtp_connect.py:39
+      event.data server/src/strategy_framework/md_gateway.py:173, server/src/strategy_framework/md_gateway.py:539, server/src/strategy_runner/main.py:168
+      str(data   server/src/im_bot/feishu.py:58
+  n                              3 种      14 ×1 | 20 ×2 | 5 ×1
+      14         server/src/strategy_framework/factor.py:633
+      20         server/src/strategy_framework/backtest.py:592, server/src/strategy_framework/factor.py:627
+      5          server/src/strategy_framework/factor.py:650
+  name                           4 种      "" ×4 | "LONG" ×1 | "test" ×1 | task_name ×1
+      ""         server/src/md_hub/parts.py:283, server/src/scheduler/tasks.py:1205, server/src/strategy_framework/factor.py:763, server/src/strategy_framework/md_session.py:299
+      "LONG"     server/src/strategy_framework/adapters.py:257
+      "test"     server/src/web_api/routes/strategy.py:329
+      task_name  server/src/strategy_runner/main.py:369
+  operator                       2 种      "" ×2 | None ×1
+      ""         server/src/strategy_framework/strategy.py:415, server/src/strategy_runner/main.py:225
+      None       server/src/feishu_bot/ws_client.py:235
+  params                         2 种      None ×1 | {} ×4
+      None       server/src/web_api/main.py:32
+      {}         server/src/strategy_framework/backtest.py:591, server/src/strategy_framework/factor.py:108, server/src/strategy_framework/strategy.py:215, server/src/strategy_framework/strategy.py:653
+  pgcode                         2 种      "" ×1 | None ×1
+      ""         server/src/web_api/routes/auth_routes.py:410
+      None       server/src/web_api/routes/auth_routes.py:773
+  pnl                            2 种      0 ×1 | 0.0 ×1
+      0          server/src/strategy_runner/trading.py:182
+      0.0        server/src/strategy_framework/adapters.py:256
+  price                          2 种      0 ×4 | price ×1
+      0          server/src/risk_control/risk.py:330, server/src/risk_control/risk.py:395, server/src/strategy_framework/strategy.py:495, server/src/strategy_runner/trading.py:145
+      price      server/src/strategy_framework/strategy.py:438
+  provider                       3 种      "" ×1 | "unknown" ×1 | type(ds ×1
+      ""         server/src/web_api/routes/sync.py:283
+      "unknown"  server/src/data_platform/data_source.py:94
+      type(ds    server/src/data_platform/rate_limit.py:282
+  role                           2 种      "analyst" ×1 | "viewer" ×4
+      "analyst"  server/src/web_api/routes/stock.py:111
+      "viewer"   server/src/web_api/auth.py:67, server/src/web_api/auth.py:96, server/src/web_api/routes/chat.py:32, server/src/web_api/routes/chat.py:119
+  shares_per_trade               2 种      1 ×2 | 100 ×1
+      1          server/src/strategies/crypto_cta_trend.py:42, server/src/strategies/crypto_cta_trend.py:49
+      100        server/src/strategies/convertible_doublelow.py:37
+  start                          3 种      "" ×2 | (date.today( ×1 | end_date ×1
+      ""         server/src/data_platform/security_master.py:239, server/src/web_api/routes/sync.py:193
+      (date.today( server/src/scheduler/tasks.py:1000
+      end_date   server/src/data_sync/engine.py:235
+  status                         3 种      "done" ×2 | "success" ×2 | None ×3
+      "done"     server/src/scheduler/tasks.py:835, server/src/scheduler/tasks.py:893
+      "success"  server/src/web_api/routes/sync.py:156, server/src/web_api/routes/sync.py:235
+      None       server/src/strategy_runner/trading.py:76, server/src/strategy_runner/trading.py:276, server/src/strategy_runner/trading.py:346
+  symbol                         5 种      "" ×4 | "600000.SHSE" ×1 | None ×1 | self.symbol ×1 | symbol ×4
+      ""         server/src/im_bot/handlers.py:56, server/src/risk_control/risk.py:241, server/src/risk_control/risk.py:263, server/src/risk_control/risk.py:364
+      "600000.SHSE" server/src/web_api/routes/strategy.py:261
+      None       server/src/strategy_framework/factor.py:664
+      self.symbol server/src/strategy_framework/strategy.py:435
+      symbol     server/src/strategy_runner/trading.py:98, server/src/strategy_runner/trading.py:104, server/src/strategy_runner/trading.py:144, server/src/strategy_runner/trading.py:149
+  symbols                        2 种      ( ×1 | [] ×1
+      (          server/src/data_platform/routing.py:326
+      []         server/src/web_api/routes/backtest.py:166
+  total_return_pct               2 种      "" ×1 | 0 ×2
+      ""         server/src/web_api/routes/backtest.py:546
+      0          server/src/scheduler/tasks.py:212, server/src/web_api/routes/backtest.py:379
+  ts                             3 种      "" ×4 | 0 ×4 | datetime.now( ×1
+      ""         server/src/strategy_runner/hub_worker.py:73, server/src/strategy_runner/hub_worker.py:77, server/src/strategy_runner/hub_worker.py:252, server/src/strategy_runner/hub_worker.py:273
+      0          server/src/scheduler/tasks.py:1515, server/src/scheduler/tasks.py:1544, server/src/scheduler/tasks.py:1625, server/src/web_api/routes/system.py:228
+      datetime.now( server/src/strategy_framework/backtest.py:111
+  type                           3 种      "astock_analysis" ×1 | "number" ×2 | "python" ×3
+      "astock_analysis" server/src/strategy_runner/main.py:370
+      "number"   server/src/strategy_framework/strategy.py:102, server/src/strategy_framework/strategy.py:149
+      "python"   server/src/web_api/routes/strategy.py:241, server/src/web_api/routes/strategy.py:265, server/src/web_api/routes/strategy.py:354
+  untrusted                      2 种      "0" ×1 | False ×1
+      "0"        server/src/strategy_runner/hub_worker.py:313
+      False      server/src/md_hub/main.py:205
+  value                          2 种      '?' ×1 | 0 ×2
+      '?'        server/src/strategy_runner/trading.py:349
+      0          server/src/data_platform/quality.py:66, server/src/data_platform/quality.py:72
+  vendor                         2 种      "" ×1 | '' ×1
+      ""         server/src/web_api/routes/system.py:362
+      ''         server/src/web_api/routes/alerts.py:455
+  volume                         3 种      0 ×4 | 100 ×1 | volume ×1
+      0          server/src/astock_analysis/analysis.py:203, server/src/astock_analysis/analysis.py:216, server/src/risk_control/risk.py:331, server/src/risk_control/risk.py:396
+      100        server/src/strategy_framework/strategy.py:495
+      volume     server/src/strategy_framework/strategy.py:437
+
+▼▼▼ 以下为统计性候选：形状相似，需逐个看上下文，不是结论 ▼▼▼
+
+─── P3 同概念多读取面——同一语义由两个不同变量承担，无一致性断言 —— 437 条
+  server/src/scheduler/tasks.py:1  词根 `daily` → ['astock_daily', 'bar_daily', 'cb_daily', 'daily_report', 'daily_values', 'etf_daily']
+  server/src/scheduler/tasks.py:1  词根 `skipped` → ['l3_skipped', 'skipped']
+  server/src/scheduler/tasks.py:1  词根 `count` → ['count', 'failed_count', 'failed_dates_count', 'stuck_count', 'trade_count']
+  server/src/scheduler/tasks.py:1  词根 `system` → ['system', 'system_log']
+  server/src/scheduler/tasks.py:1  词根 `running` → ['running', 'running_strategies']
+  server/src/scheduler/tasks.py:1  词根 `issues` → ['drift_issues', 'issues']
+  server/src/scheduler/tasks.py:1  词根 `total` → ['total', 'total_return_pct', 'total_trades']
+  server/src/scheduler/tasks.py:1  词根 `return` → ['benchmark_return', 'return', 'total_return_pct']
+  server/src/scheduler/tasks.py:1  词根 `sync` → ['sync', 'sync_id']
+  server/src/scheduler/tasks.py:1  词根 `rows` → ['rows_pulled', 'rows_saved']
+  server/src/scheduler/tasks.py:1  词根 `saved` → ['rows_saved', 'saved']
+  server/src/scheduler/tasks.py:1  词根 `failed` → ['failed', 'failed_count', 'failed_dates', 'failed_dates_count', 'l3_config_failed', '
+  server/src/scheduler/tasks.py:1  词根 `days` → ['actual_days', 'audit_retention_days', 'days', 'expected_days', 'log_retention_days']
+  server/src/scheduler/tasks.py:1  词根 `trade` → ['trade_count', 'trade_day']
+  server/src/scheduler/tasks.py:1  词根 `astock` → ['astock_analysis', 'astock_daily', 'astock_minute', 'astock_minute_5min']
+  server/src/scheduler/tasks.py:1  词根 `sharpe` → ['sharpe', 'sharpe_ratio']
+  server/src/scheduler/tasks.py:1  词根 `ratio` → ['information_ratio', 'sharpe_ratio', 'sortino_ratio']
+  server/src/scheduler/tasks.py:1  词根 `volatility` → ['benchmark_volatility', 'volatility']
+  server/src/scheduler/tasks.py:1  词根 `sortino` → ['sortino', 'sortino_ratio']
+  server/src/scheduler/tasks.py:1  词根 `benchmark` → ['benchmark_return', 'benchmark_volatility']
+  server/src/scheduler/tasks.py:1  词根 `trades` → ['total_trades', 'trades']
+  server/src/scheduler/tasks.py:1  词根 `basic` → ['cb_basic', 'stock_basic']
+  server/src/scheduler/tasks.py:1  词根 `deleted` → ['audit_deleted', 'deleted']
+  ... 其余 414 条省略（--verbose 全列）
+
+─── P7 异常处理复制体——同一段 try/except 块在多个文件出现（修一处漏一处） —— 150 条
+  server/src/data_sync/engine.py:1161  L1161-1164｜"S"" ; with get_conn() as conn: ; cur = conn.execute(  ⇄ server/src/data_platform/store.py:33
+  server/src/data_sync/engine.py:178  L178-181｜"S""S""S" ; with get_conn() as conn: ; cur = conn.execute(  ⇄ server/src/data_platform/store.py:44
+  server/src/data_sync/engine.py:653  L653-656｜"S""S""S" ; with get_conn() as conn: ; cur = conn.execute(  ⇄ server/src/data_platform/store.py:44
+  server/src/data_sync/engine.py:1143  L1143-1146｜"S""S""S" ; with get_conn() as conn: ; cur = conn.execute(  ⇄ server/src/data_platform/store.py:44
+  server/src/data_sync/engine.py:553  L553-556｜from src.data_platform.adapters.tushare_adapter import validate_bar_quality ; q = validate_  ⇄ server/src/data_platform/adapters/base.py:356
+  server/src/data_sync/engine.py:179  L179-182｜with get_conn() as conn: ; cur = conn.execute( ; "S"  ⇄ server/src/health_monitor/collector.py:307, server/src/llm_gateway/gateway.py:104, server/src/scheduler/tasks.py:706, server/src/strategy_framework/strategy.py:352, server/src/web_api/routes/auth_routes.py:950
+  server/src/data_sync/engine.py:654  L654-657｜with get_conn() as conn: ; cur = conn.execute( ; "S",  ⇄ server/src/strategy_framework/md_session.py:29
+  server/src/data_sync/engine.py:1162  L1162-1165｜with get_conn() as conn: ; cur = conn.execute( ; f"S"  ⇄ server/src/web_api/routes/auth_routes.py:978
+  server/src/data_sync/engine.py:1637  L1637-1640｜with get_conn() as conn: ; cur = conn.execute( ; f"S"  ⇄ server/src/web_api/routes/auth_routes.py:978
+  server/src/llm_gateway/gateway.py:143  L143-146｜from src.data_platform.db import get_conn ; with get_conn() as conn: ; cur = conn.execute(  ⇄ server/src/alert_notify/dispatch.py:134, server/src/alert_notify/notify.py:71, server/src/alert_notify/sms.py:39, server/src/data_platform/data_source.py:182, server/src/data_platform/stock_detail.py:298
+  server/src/llm_gateway/gateway.py:450  L450-453｜from src.data_platform.db import get_conn ; with get_conn() as conn: ; conn.execute(  ⇄ server/src/alert_notify/dispatch.py:153, server/src/data_platform/log_sink.py:164, server/src/data_platform/stock_detail.py:65, server/src/health_monitor/monitor.py:62
+  server/src/llm_gateway/gateway.py:104  L104-107｜with get_conn() as conn: ; cur = conn.execute( ; "S"  ⇄ server/src/data_sync/engine.py:179, server/src/health_monitor/collector.py:307, server/src/scheduler/tasks.py:706, server/src/strategy_framework/strategy.py:352, server/src/web_api/routes/auth_routes.py:950
+  server/src/llm_gateway/gateway.py:439  L439-442｜from src.data_platform.db import get_conn ; with get_conn() as conn: ; conn.execute("S")  ⇄ server/src/health_monitor/collector.py:296, server/src/strategy_framework/broker.py:115, server/src/strategy_runner/main.py:45
+  server/src/llm_gateway/gateway.py:101  L101-104｜"S""S""S" ; from src.data_platform.db import get_conn ; from src.quant_common.crypto import  ⇄ server/src/im_bot/credentials.py:14
+  server/src/llm_gateway/gateway.py:102  L102-105｜from src.data_platform.db import get_conn ; from src.quant_common.crypto import decrypt ; w  ⇄ server/src/im_bot/credentials.py:15
+  server/src/llm_gateway/gateway.py:103  L103-106｜from src.quant_common.crypto import decrypt ; with get_conn() as conn: ; cur = conn.execute  ⇄ server/src/im_bot/credentials.py:16
+  server/src/llm_gateway/gateway.py:438  L438-441｜"S"" ; from src.data_platform.db import get_conn ; with get_conn() as conn:  ⇄ server/src/md_hub/main.py:258, server/src/scheduler/app.py:28, server/src/strategy_framework/md_session.py:140, server/src/strategy_runner/trading.py:321
+  ... 其余 133 条省略（--verbose 全列）
+
+─── P8 fail-open 启动——启动/初始化函数内异常只 warning 后继续，无降级无 fail-fast —— 43 条
+  server/src/md_hub/main.py:118  main(): except Exception as e:
+  server/src/md_hub/main.py:285  main(): except Exception as e:
+  server/src/md_hub/main.py:292  main(): except Exception as e:
+  server/src/md_hub/main.py:306  main(): except Exception as e:
+  server/src/md_hub/main.py:345  main(): except Exception as e:
+  server/src/md_hub/main.py:193  main(): except Exception as e:
+  server/src/md_hub/main.py:270  main(): except Exception as e:
+  server/src/md_hub/main.py:282  main(): except Exception as e:
+  server/src/risk_control/risk.py:244  check_order(): except Exception as e:
+  server/src/risk_control/risk.py:255  _check_order_inner(): except Exception as e:
+  server/src/risk_control/risk.py:355  _check_etf_conv(): except Exception as e:
+  server/src/risk_control/risk.py:371  _check_etf_conv(): except Exception as e:
+  ... 其余 31 条省略（--verbose 全列）
+
+─── P9 位置契约脆弱——超长元组解包 / 裸整数下标，列顺序一变即静默错位 —— 391 条
+  server/src/web_api/routes/trading.py:92  row[10]
+  server/src/web_api/routes/trading.py:112  row[4]
+  server/src/web_api/routes/trading.py:390  row[3]
+  server/src/web_api/routes/trading.py:390  row[4]
+  server/src/web_api/routes/trading.py:95  row[9]
+  server/src/web_api/routes/trading.py:95  row[9]
+  server/src/web_api/routes/trading.py:95  row[9]
+  server/src/web_api/routes/trading.py:112  row[6]
+  server/src/web_api/routes/trading.py:113  row[7]
+  server/src/web_api/routes/trading.py:114  row[8]
+  server/src/web_api/routes/trading.py:369  r[3]
+  server/src/web_api/routes/trading.py:370  r[4]
+  server/src/web_api/routes/trading.py:50  r[3]
+  server/src/web_api/routes/trading.py:52  r[5]
+  server/src/web_api/routes/trading.py:52  r[6]
+  server/src/web_api/routes/trading.py:54  r[9]
+  server/src/web_api/routes/trading.py:112  row[6]
+  server/src/web_api/routes/trading.py:113  row[7]
+  server/src/web_api/routes/trading.py:114  row[8]
+  server/src/web_api/routes/trading.py:354  r[3]
+  server/src/web_api/routes/trading.py:354  r[4]
+  server/src/web_api/routes/trading.py:354  r[6]
+  server/src/web_api/routes/trading.py:355  r[7]
+  server/src/web_api/routes/trading.py:355  r[8]
+  server/src/web_api/routes/trading.py:370  r[5]
+  server/src/web_api/routes/trading.py:52  r[7]
+  server/src/web_api/routes/trading.py:53  r[8]
+  server/src/web_api/routes/trading.py:112  row[6]
+  server/src/web_api/routes/trading.py:113  row[7]
+  server/src/web_api/routes/trading.py:114  row[8]
+  server/src/web_api/routes/trading.py:239  r[3]
+  server/src/web_api/routes/trading.py:239  r[3]
+  server/src/web_api/routes/trading.py:354  r[5]
+  server/src/web_api/routes/trading.py:51  r[4]
+  server/src/web_api/routes/trading.py:51  r[4]
+  server/src/web_api/routes/trading.py:51  r[4]
+  server/src/web_api/routes/trading.py:52  r[7]
+  server/src/web_api/routes/trading.py:53  r[8]
+  server/src/web_api/routes/trading.py:266  r[3]
+  server/src/web_api/routes/trading.py:321  r[3]
+  server/src/web_api/routes/trading.py:321  r[3]
+  server/src/web_api/routes/trading.py:354  r[5]
+  server/src/web_api/routes/trading.py:267  r[4]
+  server/src/web_api/routes/trading.py:268  r[5]
+  server/src/web_api/routes/trading.py:268  r[5]
+  server/src/web_api/routes/trading.py:269  r[6]
+  server/src/web_api/routes/trading.py:269  r[6]
+  server/src/web_api/routes/trading.py:55  r[4]
+  server/src/web_api/routes/trading.py:55  r[4]
+  server/src/web_api/routes/trading.py:55  r[4]
+  ... 其余 341 条省略（--verbose 全列）
+
+合计 1182 条（高置信 161 / 低置信 1021）

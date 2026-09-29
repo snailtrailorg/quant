@@ -1,0 +1,69 @@
+8058	RUF002	[ ] ambiguous-unicode-character-docstring
+5956	RUF003	[ ] ambiguous-unicode-character-comment
+3205	E501  	[ ] line-too-long
+1435	RUF001	[ ] ambiguous-unicode-character-string
+ 405	B008  	[ ] function-call-in-default-argument
+ 243	I001  	[*] unsorted-imports
+ 181	F401  	[-] unused-import
+ 131	ARG001	[ ] unused-function-argument
+  88	S110  	[ ] try-except-pass
+  68	ARG002	[ ] unused-method-argument
+  49	E402  	[ ] module-import-not-at-top-of-file
+  45	B904  	[ ] raise-without-from-inside-except
+  38	E701  	[ ] multiple-statements-on-one-line-colon
+  35	S608  	[ ] hardcoded-sql-expression
+  33	SIM105	[ ] suppressible-exception
+  32	RUF012	[ ] mutable-class-default
+  22	W292  	[*] missing-newline-at-end-of-file
+  15	UP035 	[*] deprecated-import
+  15	E401  	[*] multiple-imports-on-one-line
+  14	RUF100	[*] unused-noqa
+  13	UP037 	[*] quoted-annotation
+  12	E702  	[ ] multiple-statements-on-one-line-semicolon
+  12	B905  	[ ] zip-without-explicit-strict
+   9	S603  	[ ] subprocess-without-shell-equals-true
+   8	S607  	[ ] start-process-with-partial-path
+   7	RUF013	[ ] implicit-optional
+   7	RET505	[*] superfluous-else-return
+   6	RUF005	[ ] collection-literal-concatenation
+   6	F541  	[*] f-string-missing-placeholders
+   6	E731  	[ ] lambda-assignment
+   6	RUF022	[*] unsorted-dunder-all
+   5	SIM102	[ ] collapsible-if
+   5	PTH118	[ ] os-path-join
+   5	RET504	[ ] unnecessary-assign
+   5	B007  	[ ] unused-loop-control-variable
+   4	S101  	[ ] assert
+   4	PTH123	[ ] builtin-open
+   4	SIM117	[-] multiple-with-statements
+   4	S112  	[ ] try-except-continue
+   3	B027  	[ ] empty-method-without-abstract-decorator
+   3	PTH120	[ ] os-path-dirname
+   3	F811  	[*] redefined-while-unused
+   3	C416  	[ ] unnecessary-comprehension
+   3	RUF059	[ ] unused-unpacked-variable
+   3	F841  	[ ] unused-variable
+   2	E722  	[ ] bare-except
+   2	S102  	[ ] exec-builtin
+   2	UP032 	[*] f-string
+   2	S324  	[ ] hashlib-insecure-hash-function
+   2	SIM114	[*] if-with-same-arms
+   2	SIM103	[ ] needless-bool
+   2	UP045 	[*] non-pep604-annotation-optional
+   2	PTH111	[ ] os-path-expanduser
+   2	S311  	[ ] suspicious-non-cryptographic-random-usage
+   2	F821  	[ ] undefined-name
+   2	C408  	[ ] unnecessary-collection-call
+   2	RET501	[*] unnecessary-return-none
+   2	SIM300	[*] yoda-conditions
+   1	E741  	[ ] ambiguous-variable-name
+   1	S105  	[ ] hardcoded-password-string
+   1	SIM108	[ ] if-else-block-instead-of-if-exp
+   1	PTH103	[ ] os-makedirs
+   1	UP031 	[ ] printf-string-formatting
+   1	C420  	[*] unnecessary-dict-comprehension-for-iterable
+   1	C401  	[ ] unnecessary-generator-set
+Found 20247 errors.
+[*] 532 fixable with the `--fix` option (79 hidden fixes can be enabled with the `--unsafe-fixes` option).
+warning: Invalid `# noqa` directive on src\data_platform\perms.py:12: expected code to consist of uppercase letters followed by digits only (e.g. `F401`)
+warning: Invalid `# noqa` directive on src\web_api\routes\im_bots.py:240: expected code to consist of uppercase letters followed by digits only (e.g. `F401`)

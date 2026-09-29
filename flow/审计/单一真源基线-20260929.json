@@ -1,0 +1,928 @@
+{
+ "files_scanned": 269,
+ "parse_fail": [],
+ "A": [
+  {
+   "value": "{'cpu':{'crit':0.9,'warn':0.7},'disk':{'crit':0.9,'warn':0.8},'mem':{'crit':0.9,'warn':0.6},'swap':{'warn':0.8}}",
+   "nfiles": 2,
+   "entries": 18,
+   "default_ish": true,
+   "named": [
+    "_DEF_THRESHOLDS @server/src\\health_monitor\\collector.py:39"
+   ],
+   "locs": [
+    "server/src\\health_monitor\\collector.py:39  (_DEF_THRESHOLDS)",
+    "server/src\\health_monitor\\monitor.py:195  (evaluate)"
+   ],
+   "all_locs": 2
+  },
+  {
+   "value": "{'crit':0.9,'warn':0.6}",
+   "nfiles": 2,
+   "entries": 4,
+   "default_ish": false,
+   "named": [],
+   "locs": [
+    "server/src\\health_monitor\\collector.py:39  (<module>)",
+    "server/src\\health_monitor\\monitor.py:195  (evaluate)"
+   ],
+   "all_locs": 2
+  },
+  {
+   "value": "{'crit':0.9,'warn':0.8}",
+   "nfiles": 2,
+   "entries": 4,
+   "default_ish": false,
+   "named": [],
+   "locs": [
+    "server/src\\health_monitor\\collector.py:39  (<module>)",
+    "server/src\\health_monitor\\monitor.py:196  (evaluate)"
+   ],
+   "all_locs": 2
+  },
+  {
+   "value": "{'crit':0.9,'warn':0.7}",
+   "nfiles": 2,
+   "entries": 4,
+   "default_ish": false,
+   "named": [],
+   "locs": [
+    "server/src\\health_monitor\\collector.py:40  (<module>)",
+    "server/src\\health_monitor\\monitor.py:198  (evaluate)"
+   ],
+   "all_locs": 2
+  },
+  {
+   "value": "(None,None,0)",
+   "nfiles": 2,
+   "entries": 3,
+   "default_ish": false,
+   "named": [],
+   "locs": [
+    "server/scripts\\run_hub_postverify.py:61  (main)",
+    "server/src\\data_sync\\engine.py:1151  (_local_bar_range)",
+    "server/src\\data_sync\\engine.py:1153  (_local_bar_range)"
+   ],
+   "all_locs": 3
+  },
+  {
+   "value": "(None,0)",
+   "nfiles": 2,
+   "entries": 2,
+   "default_ish": false,
+   "named": [],
+   "locs": [
+    "server/src\\data_platform\\quality.py:64  (_match_entry)",
+    "server/src\\data_sync\\engine.py:1348  (_fetch_minute_and_save)"
+   ],
+   "all_locs": 2
+  },
+  {
+   "value": "{'warn':0.8}",
+   "nfiles": 2,
+   "entries": 2,
+   "default_ish": false,
+   "named": [],
+   "locs": [
+    "server/src\\health_monitor\\collector.py:40  (<module>)",
+    "server/src\\health_monitor\\monitor.py:197  (evaluate)"
+   ],
+   "all_locs": 2
+  }
+ ],
+ "B": [
+  {
+   "loc": "server/src\\health_monitor\\monitor.py:195",
+   "tgt": "thr",
+   "expr": "{'mem': {'warn': 0.6, 'crit': 0.9}, 'disk': {'warn': 0.8,...",
+   "fn": "evaluate",
+   "container": true,
+   "canon": "{'cpu':{'crit':0.9,'warn':0.7},'disk':{'crit':0.9,'warn':0.8},'mem':{'crit':0.9,'warn':0.6},'swap':{'warn':0.8}}",
+   "dup_of": [
+    "_DEF_THRESHOLDS @collector.py:39"
+   ]
+  },
+  {
+   "loc": "server/src\\data_platform\\routing.py:231",
+   "tgt": "?",
+   "expr": "{'completeness': 0.5, 'cost': 0.3, 'latency': 0.2}",
+   "fn": "_weights_of",
+   "container": true,
+   "canon": "{'completeness':0.5,'cost':0.3,'latency':0.2}",
+   "dup_of": []
+  },
+  {
+   "loc": "server/src\\astock_analysis\\analysis.py:54",
+   "tgt": "?",
+   "expr": "6000",
+   "fn": "__init__",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\data_platform\\adapters\\base.py:263",
+   "tgt": "freq",
+   "expr": "'1D'",
+   "fn": "fetch",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\data_platform\\rate_limit.py:267",
+   "tgt": "?",
+   "expr": "'?'",
+   "fn": "_pace",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\data_platform\\rate_limit.py:97",
+   "tgt": "?",
+   "expr": "'?'",
+   "fn": "acquire",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\data_sync\\engine.py:293",
+   "tgt": "?",
+   "expr": "'daily'",
+   "fn": "_api_name_of",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\data_sync\\engine.py:430",
+   "tgt": "?",
+   "expr": "'L'",
+   "fn": "_sync_astock_list",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\data_sync\\engine.py:52",
+   "tgt": "provider",
+   "expr": "'tushare'",
+   "fn": "_get_kline_adapter",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\email_service\\__init__.py:32",
+   "tgt": "sec",
+   "expr": "'auto'",
+   "fn": "_providers",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\email_service\\__init__.py:32",
+   "tgt": "?",
+   "expr": "'auto'",
+   "fn": "_providers",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\email_service\\__init__.py:33",
+   "tgt": "?",
+   "expr": "587",
+   "fn": "_providers",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\feishu_bot\\tasks.py:310",
+   "tgt": "?",
+   "expr": "'{}'",
+   "fn": "sweep_stale_sessions",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\feishu_bot\\ws_client.py:185",
+   "tgt": "?",
+   "expr": "'(回退 ts:open_id)'",
+   "fn": "_card_gates",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\feishu_bot\\ws_client.py:46",
+   "tgt": "content",
+   "expr": "'{}'",
+   "fn": "on_message",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\feishu_bot\\ws_client.py:91",
+   "tgt": "?",
+   "expr": "'未知'",
+   "fn": "patch_ws_card_frames",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\im_bot\\dingtalk.py:91",
+   "tgt": "?",
+   "expr": "'凭证未配置'",
+   "fn": "test_connection",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\im_bot\\feishu_client.py:291",
+   "tgt": "?",
+   "expr": "'LLM 触发'",
+   "fn": "build_confirm_card",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\im_bot\\feishu_client.py:335",
+   "tgt": "?",
+   "expr": "'?'",
+   "fn": "build_terminal_card",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\im_bot\\handlers.py:41",
+   "tgt": "?",
+   "expr": "'无'",
+   "fn": "execute_read_tool",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\im_bot\\handlers.py:57",
+   "tgt": "?",
+   "expr": "'全部'",
+   "fn": "execute_read_tool",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\llm_gateway\\gateway.py:156",
+   "tgt": "?",
+   "expr": "5",
+   "fn": "_failover_params",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\md_hub\\main.py:147",
+   "tgt": "?",
+   "expr": "'(空)'",
+   "fn": "main",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\md_hub\\main.py:88",
+   "tgt": "v",
+   "expr": "'0'",
+   "fn": "_poll_iface_switch",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\scheduler\\app.py:57",
+   "tgt": "?",
+   "expr": "'celery'",
+   "fn": "_on_celery_setup_logging",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\scheduler\\tasks.py:572",
+   "tgt": "last",
+   "expr": "'从未同步'",
+   "fn": "data_continuity_check",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\scheduler\\tasks.py:779",
+   "tgt": "tf",
+   "expr": "'none'",
+   "fn": "data_sync_scheduler",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\strategy_framework\\broker.py:149",
+   "tgt": "?",
+   "expr": "1",
+   "fn": "xtp_setting_from",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\strategy_framework\\factor.py:210",
+   "tgt": "?",
+   "expr": "'custom'",
+   "fn": "load_factors_from_db",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\strategy_framework\\factor.py:223",
+   "tgt": "?",
+   "expr": "'custom'",
+   "fn": "load_factors_from_db",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\strategy_framework\\factor.py:259",
+   "tgt": "ftype",
+   "expr": "'python'",
+   "fn": "register_custom_factor",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\strategy_framework\\md_gateway.py:592",
+   "tgt": "?",
+   "expr": "'REAL'",
+   "fn": "connect",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\strategy_framework\\md_gateway.py:624",
+   "tgt": "?",
+   "expr": "'REAL'",
+   "fn": "connect",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\strategy_framework\\strategy.py:628",
+   "tgt": "?",
+   "expr": "'Python 策略持有'",
+   "fn": "hold",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\auth_routes.py:279",
+   "tgt": "_summary",
+   "expr": "'（空=清空该维）'",
+   "fn": "update_permissions",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\auth_routes.py:405",
+   "tgt": "?",
+   "expr": "'-'",
+   "fn": "email_change_confirm_api",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\backtest.py:214",
+   "tgt": "?",
+   "expr": "'{}'",
+   "fn": "create_backtest_api",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\chat.py:44",
+   "tgt": "?",
+   "expr": "'（LLM 无响应，请检查 API key）'",
+   "fn": "chat",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\im_bots.py:264",
+   "tgt": "?",
+   "expr": "'(空)'",
+   "fn": "my_im_bots_create",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\routing.py:77",
+   "tgt": "health",
+   "expr": "'closed'",
+   "fn": "dry_run",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\sync.py:118",
+   "tgt": "?",
+   "expr": "'今'",
+   "fn": "adj_factor_backfill_api",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\sync.py:118",
+   "tgt": "?",
+   "expr": "'全历史'",
+   "fn": "adj_factor_backfill_api",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\system.py:281",
+   "tgt": "?",
+   "expr": "'warning'",
+   "fn": "system_alerts_api",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\system.py:348",
+   "tgt": "security",
+   "expr": "'auto'",
+   "fn": "smtp_providers_create",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\system.py:352",
+   "tgt": "?",
+   "expr": "587",
+   "fn": "smtp_providers_create",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\system.py:405",
+   "tgt": "?",
+   "expr": "587",
+   "fn": "smtp_providers_update",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\system.py:413",
+   "tgt": "security",
+   "expr": "'auto'",
+   "fn": "smtp_providers_update",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\trading.py:112",
+   "tgt": "?",
+   "expr": "'[]'",
+   "fn": "create_live_task",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\trading.py:113",
+   "tgt": "?",
+   "expr": "'{}'",
+   "fn": "create_live_task",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\trading.py:114",
+   "tgt": "?",
+   "expr": "'{}'",
+   "fn": "create_live_task",
+   "container": false,
+   "canon": null
+  },
+  {
+   "loc": "server/src\\web_api\\routes\\trading.py:55",
+   "tgt": "?",
+   "expr": "'hub'",
+   "fn": "list_live_tasks",
+   "container": false,
+   "canon": null
+  }
+ ],
+ "C": [
+  {
+   "loc": "server/src\\health_monitor\\monitor.py:206",
+   "var": "thr",
+   "key": "Name(id='kind', ctx=Load())",
+   "fallback_at": "server/src\\health_monitor\\monitor.py:195",
+   "key_in_fallback": false,
+   "fn": "evaluate",
+   "dup_of": [
+    "_DEF_THRESHOLDS @collector.py:39"
+   ]
+  },
+  {
+   "loc": "server/src\\health_monitor\\monitor.py:205",
+   "var": "thr",
+   "key": "Name(id='kind', ctx=Load())",
+   "fallback_at": "server/src\\health_monitor\\monitor.py:195",
+   "key_in_fallback": false,
+   "fn": "evaluate",
+   "dup_of": [
+    "_DEF_THRESHOLDS @collector.py:39"
+   ]
+  },
+  {
+   "loc": "server/src\\health_monitor\\monitor.py:211",
+   "var": "thr",
+   "key": "'disk'",
+   "fallback_at": "server/src\\health_monitor\\monitor.py:195",
+   "key_in_fallback": true,
+   "fn": "evaluate",
+   "dup_of": [
+    "_DEF_THRESHOLDS @collector.py:39"
+   ]
+  }
+ ],
+ "D": [
+  {
+   "key": "VALKEY_URL",
+   "hits": 34,
+   "nfiles": 23,
+   "locs": [
+    "server/scripts\\backfill_hub_bars.py:30  .get(\"VALKEY_URL\", 'redis://127.0.0.1:6379/0')",
+    "server/scripts\\run_hub_postverify.py:34  .get(\"VALKEY_URL\", 'redis://127.0.0.1:6379/0')",
+    "server/src\\alert_notify\\dispatch.py:84  .get(\"VALKEY_URL\", 'redis://127.0.0.1:6379/0')",
+    "server/src\\alert_notify\\dispatch.py:92  .get(\"VALKEY_URL\", 'redis://127.0.0.1:6379/0')",
+    "server/src\\alert_notify\\notify.py:47  .get(\"VALKEY_URL\", 'redis://127.0.0.1:6379/0')",
+    "server/src\\data_platform\\databus.py:33  .get(\"VALKEY_URL\", 'redis://127.0.0.1:6379/0')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "role",
+   "hits": 8,
+   "nfiles": 4,
+   "locs": [
+    "server/src\\web_api\\auth.py:67  .get(\"role\", 'viewer')",
+    "server/src\\web_api\\auth.py:96  .get(\"role\", 'viewer')",
+    "server/src\\web_api\\routes\\chat.py:32  .get(\"role\", 'viewer')",
+    "server/src\\web_api\\routes\\chat.py:119  .get(\"role\", 'viewer')",
+    "server/src\\web_api\\routes\\stock.py:111  .get(\"role\", 'analyst')",
+    "server/src\\web_api\\routes\\system.py:593  .get(\"role\", 'viewer')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "QUANT_DB_URL",
+   "hits": 3,
+   "nfiles": 3,
+   "locs": [
+    "scripts\\eval-col-widths.py:16  .get(\"QUANT_DB_URL\", 'postgresql://quant@127.0.0.1:5432/...)",
+    "server/migrations\\env.py:28  .get(\"QUANT_DB_URL\", 'postgresql://quant@127.0.0.1:5432/...)",
+    "server/src\\data_platform\\db.py:27  .get(\"QUANT_DB_URL\", 'postgresql://quant@127.0.0.1:5432/...)"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "XTP_TEST_CLIENT_ID",
+   "hits": 3,
+   "nfiles": 3,
+   "locs": [
+    "server/scripts\\test_xtp_connect.py:22  .get(\"XTP_TEST_CLIENT_ID\", '1')",
+    "server/scripts\\test_xtp_trading.py:39  .get(\"XTP_TEST_CLIENT_ID\", '1')",
+    "server/src\\strategy_framework\\broker.py:163  .get(\"XTP_TEST_CLIENT_ID\", '1')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "XTP_TEST_QUOTE_PORT",
+   "hits": 3,
+   "nfiles": 3,
+   "locs": [
+    "server/scripts\\test_xtp_connect.py:24  .get(\"XTP_TEST_QUOTE_PORT\", '0')",
+    "server/scripts\\test_xtp_trading.py:41  .get(\"XTP_TEST_QUOTE_PORT\", '0')",
+    "server/src\\strategy_framework\\broker.py:165  .get(\"XTP_TEST_QUOTE_PORT\", '0')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "XTP_TEST_TRADE_PORT",
+   "hits": 3,
+   "nfiles": 3,
+   "locs": [
+    "server/scripts\\test_xtp_connect.py:26  .get(\"XTP_TEST_TRADE_PORT\", '0')",
+    "server/scripts\\test_xtp_trading.py:43  .get(\"XTP_TEST_TRADE_PORT\", '0')",
+    "server/src\\strategy_framework\\broker.py:167  .get(\"XTP_TEST_TRADE_PORT\", '0')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "type",
+   "hits": 6,
+   "nfiles": 3,
+   "locs": [
+    "server/src\\strategy_framework\\strategy.py:102  .get(\"type\", 'number')",
+    "server/src\\strategy_framework\\strategy.py:149  .get(\"type\", 'number')",
+    "server/src\\strategy_runner\\main.py:370  .get(\"type\", 'astock_analysis')",
+    "server/src\\web_api\\routes\\strategy.py:241  .get(\"type\", 'python')",
+    "server/src\\web_api\\routes\\strategy.py:265  .get(\"type\", 'python')",
+    "server/src\\web_api\\routes\\strategy.py:354  .get(\"type\", 'python')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "enabled",
+   "hits": 4,
+   "nfiles": 3,
+   "locs": [
+    "server/src\\web_api\\routes\\alerts.py:128  .get(\"enabled\", True)",
+    "server/src\\web_api\\routes\\alerts.py:458  .get(\"enabled\", True)",
+    "server/src\\web_api\\routes\\system.py:363  .get(\"enabled\", True)",
+    "server/src\\web_api\\routes\\trading.py:377  .get(\"enabled\", True)"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "QUANT_DB_STMT_TIMEOUT_MS",
+   "hits": 2,
+   "nfiles": 2,
+   "locs": [
+    "server/migrations\\env.py:54  .get(\"QUANT_DB_STMT_TIMEOUT_MS\", '3600000')",
+    "server/src\\data_platform\\db.py:44  .get(\"QUANT_DB_STMT_TIMEOUT_MS\", '60000')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "arguments",
+   "hits": 2,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\im_bot\\handlers.py:103  .get(\"arguments\", '{}')",
+    "server/src\\web_api\\routes\\chat.py:42  .get(\"arguments\", '{}')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "status",
+   "hits": 4,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\scheduler\\tasks.py:835  .get(\"status\", 'done')",
+    "server/src\\scheduler\\tasks.py:893  .get(\"status\", 'done')",
+    "server/src\\web_api\\routes\\sync.py:156  .get(\"status\", 'success')",
+    "server/src\\web_api\\routes\\sync.py:235  .get(\"status\", 'success')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "capital",
+   "hits": 2,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\scheduler\\tasks.py:1036  .get(\"capital\", 100000)",
+    "server/src\\web_api\\routes\\backtest.py:186  .get(\"capital\", 1000000)"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "commission",
+   "hits": 2,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\scheduler\\tasks.py:1037  .get(\"commission\", 0.0005)",
+    "server/src\\web_api\\routes\\backtest.py:187  .get(\"commission\", 0.0005)"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "shares_per_trade",
+   "hits": 3,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\strategies\\convertible_doublelow.py:37  .get(\"shares_per_trade\", 100)",
+    "server/src\\strategies\\crypto_cta_trend.py:42  .get(\"shares_per_trade\", 1)",
+    "server/src\\strategies\\crypto_cta_trend.py:49  .get(\"shares_per_trade\", 1)"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "n",
+   "hits": 4,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\strategy_framework\\backtest.py:592  .get(\"n\", 20)",
+    "server/src\\strategy_framework\\factor.py:627  .get(\"n\", 20)",
+    "server/src\\strategy_framework\\factor.py:633  .get(\"n\", 14)",
+    "server/src\\strategy_framework\\factor.py:650  .get(\"n\", 5)"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "AVATAR_DIR",
+   "hits": 2,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\web_api\\main.py:48  .get(\"AVATAR_DIR\", '/data/websites/snailtrail.cc/quant...)",
+    "server/src\\web_api\\routes\\auth_routes.py:28  .get(\"AVATAR_DIR\", '/data/websites/snailtrail.cc/quant...)"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "mode",
+   "hits": 2,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\web_api\\routes\\backtest.py:176  .get(\"mode\", 'single')",
+    "server/src\\web_api\\routes\\sync.py:183  .get(\"mode\", 'auto')"
+   ],
+   "dup_of": []
+  },
+  {
+   "key": "error",
+   "hits": 2,
+   "nfiles": 2,
+   "locs": [
+    "server/src\\web_api\\routes\\im_bots.py:151  .get(\"error\", '接入发起失败')",
+    "server/src\\web_api\\routes\\sync.py:289  .get(\"error\", '旧数据删除失败，已回滚未切换')"
+   ],
+   "dup_of": []
+  }
+ ],
+ "E": {
+  "seed_all": 35,
+  "seed_num": 22,
+  "bound": 22,
+  "cfgref": 11,
+  "num_seed_without_bounds": [],
+  "bounds_without_seed": [],
+  "cfgref_without_seed": [],
+  "seed_without_cfgref": [
+   "alert_sms_access_key_id",
+   "alert_sms_access_key_secret",
+   "alert_sms_sign_name",
+   "alert_sms_template_code",
+   "alert_sms_verify_template_code",
+   "audit_retention_days",
+   "base_url",
+   "celery_concurrency",
+   "disk_monitor_paths",
+   "llm_cooldown_min",
+   "llm_fail_threshold",
+   "llm_retry_wait_s",
+   "log_retention_days",
+   "platform_bot_quota",
+   "smtp_from",
+   "smtp_host",
+   "smtp_max_attempts",
+   "smtp_password",
+   "smtp_port",
+   "smtp_security",
+   "smtp_username",
+   "user_bot_quota",
+   "xtp_session_lag_min",
+   "xtp_session_lead_min"
+  ],
+  "loc_num_seed_no_bound": [],
+  "loc_bound_orphan": [],
+  "loc_cfgref_orphan": []
+ },
+ "F": [
+  {
+   "name": "on_bar",
+   "nf": 5,
+   "shared": 2,
+   "same_pkg": false,
+   "locs": [
+    "server/scripts\\run_worker_smoke.py:154",
+    "server/src\\astock_analysis\\analysis.py:194",
+    "server/src\\strategies\\convertible_doublelow.py:21",
+    "server/src\\strategies\\crypto_cta_trend.py:16",
+    "server/src\\strategy_framework\\strategy.py:220",
+    "server/src\\strategy_framework\\strategy.py:679"
+   ]
+  },
+  {
+   "name": "send_sms",
+   "nf": 2,
+   "shared": 2,
+   "same_pkg": false,
+   "locs": [
+    "server/src\\alert_notify\\sms.py:149",
+    "server/src\\scheduler\\alert_tasks.py:88"
+   ]
+  },
+  {
+   "name": "send_text",
+   "nf": 5,
+   "shared": 3,
+   "same_pkg": true,
+   "locs": [
+    "server/src\\im_bot\\base.py:68",
+    "server/src\\im_bot\\dingtalk.py:54",
+    "server/src\\im_bot\\feishu.py:33",
+    "server/src\\im_bot\\feishu_client.py:135",
+    "server/src\\im_bot\\wecom.py:58"
+   ]
+  },
+  {
+   "name": "send_card",
+   "nf": 5,
+   "shared": 3,
+   "same_pkg": true,
+   "locs": [
+    "server/src\\im_bot\\base.py:72",
+    "server/src\\im_bot\\dingtalk.py:79",
+    "server/src\\im_bot\\feishu.py:37",
+    "server/src\\im_bot\\feishu_client.py:165",
+    "server/src\\im_bot\\wecom.py:62"
+   ]
+  },
+  {
+   "name": "verify_callback",
+   "nf": 3,
+   "shared": 3,
+   "same_pkg": true,
+   "locs": [
+    "server/src\\im_bot\\base.py:75",
+    "server/src\\im_bot\\dingtalk.py:83",
+    "server/src\\im_bot\\wecom.py:65"
+   ]
+  },
+  {
+   "name": "_alert",
+   "nf": 2,
+   "shared": 3,
+   "same_pkg": true,
+   "locs": [
+    "server/src\\strategy_runner\\main.py:114",
+    "server/src\\strategy_runner\\trading.py:26"
+   ]
+  }
+ ],
+ "G": [
+  {
+   "name": "timeout",
+   "distinct": 8,
+   "values": [
+    "2",
+    "3",
+    "5",
+    "8",
+    "10",
+    "15",
+    "30",
+    "60"
+   ],
+   "locs": [
+    "15 @server/scripts\\run_hub_postverify.py:42",
+    "5 @server/scripts\\verify_integration.py:102",
+    "5 @server/scripts\\verify_integration.py:147",
+    "5 @server/scripts\\verify_integration.py:160",
+    "3 @server/src\\data_platform\\log_sink.py:95",
+    "5 @server/src\\data_platform\\market_snapshot.py:73",
+    "5 @server/src\\data_platform\\stock_detail.py:117",
+    "60 @server/src\\email_service\\__init__.py:81"
+   ]
+  },
+  {
+   "name": "ex",
+   "distinct": 8,
+   "values": [
+    "30",
+    "60",
+    "300",
+    "600",
+    "900",
+    "3600",
+    "7200",
+    "86400"
+   ],
+   "locs": [
+    "900 @server/src\\alert_notify\\dispatch.py:172",
+    "30 @server/src\\data_platform\\market_snapshot.py:79",
+    "30 @server/src\\data_platform\\market_snapshot.py:110",
+    "30 @server/src\\data_platform\\stock_detail.py:99",
+    "60 @server/src\\data_platform\\stock_detail.py:104",
+    "300 @server/src\\feishu_bot\\ws_client.py:176",
+    "300 @server/src\\feishu_bot\\ws_client.py:184",
+    "300 @server/src\\feishu_bot\\ws_client.py:215"
+   ]
+  },
+  {
+   "name": "socket_timeout",
+   "distinct": 4,
+   "values": [
+    "1",
+    "2",
+    "3",
+    "5"
+   ],
+   "locs": [
+    "5 @server/scripts\\backfill_hub_bars.py:31",
+    "3 @server/scripts\\run_hub_postverify.py:35",
+    "2 @server/src\\alert_notify\\dispatch.py:92",
+    "1 @server/src\\alert_notify\\notify.py:48",
+    "3 @server/src\\data_platform\\databus.py:34",
+    "5 @server/src\\data_platform\\market_snapshot.py:32",
+    "2 @server/src\\data_platform\\rate_limit.py:34",
+    "2 @server/src\\data_platform\\rate_limit.py:41"
+   ]
+  }
+ ]
+}

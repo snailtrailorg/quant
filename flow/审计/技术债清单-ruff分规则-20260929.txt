@@ -1,0 +1,1408 @@
+# ruff 分规则扫描结果（2026-09-29）
+#
+# 命令：ruff check --isolated --target-version py310 --line-length 140 \
+#         --select <规则> --output-format concise src   （cwd=server）
+# 说明：--isolated 未使用任何仓库配置（本仓暂无 ruff.toml）。
+#       E501/RUF00x 等噪音项未纳入本文件，见《技术债问题清单-20260929》P3-1。
+#
+# 汇总：建议落地集 432 条 / BLE001 444 条（不开）/ ARG 201 条（永久不开）
+
+# ======================================================================
+# E4,E7,E9,F,W,S110,S112 —— 建议落地规则集（432 条）
+# ======================================================================
+src\alert_notify\dispatch.py:40:1: E402 Module level import not at top of file
+src\alert_notify\dispatch.py:303:1: E402 Module level import not at top of file
+src\alert_notify\dispatch.py:304:1: E402 Module level import not at top of file
+src\alert_notify\dispatch.py:304:20: F401 [*] `typing.Any` imported but unused
+src\alert_notify\notify.py:15:8: F401 [*] `time` imported but unused
+src\astock_analysis\analysis.py:233:10: W292 [*] No newline at end of file
+src\data_platform\_platform.py:7:28: F401 [*] `datetime.datetime` imported but unused
+src\data_platform\_platform.py:8:20: F401 [*] `typing.Any` imported but unused
+src\data_platform\_platform.py:14:21: F401 [*] `.schema.Bar` imported but unused
+src\data_platform\_platform.py:14:26: F401 [*] `.schema.to_vt_symbol` imported but unused
+src\data_platform\_platform.py:14:40: F401 [*] `.schema.parse_vt_symbol` imported but unused
+src\data_platform\_platform.py:97:26: W292 [*] No newline at end of file
+src\data_platform\adapters\tushare_adapter.py:10:20: F401 [*] `typing.Any` imported but unused
+src\data_platform\adapters\tushare_adapter.py:54:5: E401 [*] Multiple imports on one line
+src\data_platform\adapters\tushare_adapter.py:65:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\adapters\tushare_adapter.py:348:43: F401 [*] `..db.get_conn` imported but unused
+src\data_platform\adapters\tushare_adapter.py:564:18: E701 Multiple statements on one line (colon)
+src\data_platform\adapters\tushare_adapter.py:565:16: E701 Multiple statements on one line (colon)
+src\data_platform\adapters\tushare_adapter.py:572:18: E701 Multiple statements on one line (colon)
+src\data_platform\adapters\tushare_adapter.py:573:15: E701 Multiple statements on one line (colon)
+src\data_platform\data_source.py:101:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\data_source.py:211:20: F401 `akshare` imported but unused; consider using `importlib.util.find_spec` to test for availability
+src\data_platform\db.py:13:85: F401 [*] `.schema.parse_vt_symbol` imported but unused
+src\data_platform\db.py:329:43: F821 Undefined name `date`
+src\data_platform\db.py:337:34: F401 [*] `datetime.date` imported but unused
+src\data_platform\db.py:342:23: F821 Undefined name `date`
+src\data_platform\db.py:412:82: W292 [*] No newline at end of file
+src\data_platform\log_sink.py:23:8: F401 [*] `time` imported but unused
+src\data_platform\market_snapshot.py:80:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\market_snapshot.py:111:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\perms.py:12:34: F401 [*] `src.data_platform.db.get_conn` imported but unused
+src\data_platform\perms.py:19:1: E402 Module level import not at top of file
+src\data_platform\quality.py:26:1: E402 Module level import not at top of file
+src\data_platform\rate_limit.py:191:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\rate_limit.py:211:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\routing.py:138:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\routing.py:191:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\schema.py:8:22: F401 [*] `datetime.date` imported but unused
+src\data_platform\schema.py:145:4: W292 [*] No newline at end of file
+src\data_platform\security_master.py:275:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:94:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:100:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:105:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:160:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:370:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:379:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:420:5: E731 Do not assign a `lambda` expression, use a `def`
+src\data_sync\__init__.py:14:11: F401 `.engine._HANDLERS` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\data_sync\engine.py:16:20: F401 [*] `typing.Any` imported but unused
+src\data_sync\engine.py:187:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_sync\engine.py:1191:33: E702 Multiple statements on one line (semicolon)
+src\data_sync\engine.py:1204:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_sync\pool_data.py:15:1: E401 [*] Multiple imports on one line
+src\data_sync\pool_data.py:83:30: E701 Multiple statements on one line (colon)
+src\data_sync\pool_data.py:87:27: E701 Multiple statements on one line (colon)
+src\data_sync\pool_data.py:109:25: E722 Do not use bare `except`
+src\data_sync\pool_data.py:109:31: E701 Multiple statements on one line (colon)
+src\data_sync\pool_data.py:120:8: E701 Multiple statements on one line (colon)
+src\data_sync\pool_data.py:120:18: E702 Multiple statements on one line (semicolon)
+src\data_sync\pool_data.py:121:5: E722 Do not use bare `except`
+src\data_sync\pool_data.py:121:11: E701 Multiple statements on one line (colon)
+src\data_sync\pool_data.py:149:39: E701 Multiple statements on one line (colon)
+src\data_sync\pool_data.py:174:24: E701 Multiple statements on one line (colon)
+src\data_sync\pool_data.py:180:24: E702 Multiple statements on one line (semicolon)
+src\data_sync\pool_data.py:205:25: E701 Multiple statements on one line (colon)
+src\email_service\__init__.py:250:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\feishu_bot\__init__.py:5:18: F401 `.bot.FeishuClient` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\feishu_bot\__init__.py:5:32: F401 `.bot.process_message_async` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\feishu_bot\__init__.py:5:55: F401 `.bot.build_confirm_card` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\feishu_bot\router.py:84:100: W292 [*] No newline at end of file
+src\feishu_bot\tasks.py:123:9: E401 [*] Multiple imports on one line
+src\feishu_bot\tasks.py:193:66: F401 [*] `src.im_bot.credentials.get_bot_credentials` imported but unused
+src\feishu_bot\tasks.py:269:16: E701 Multiple statements on one line (colon)
+src\feishu_bot\tasks.py:270:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\feishu_bot\tasks.py:270:29: E701 Multiple statements on one line (colon)
+src\feishu_bot\tasks.py:311:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+src\feishu_bot\tasks.py:328:21: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\feishu_bot\ws_client.py:117:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\feishu_bot\ws_client.py:254:5: E401 [*] Multiple imports on one line
+src\health_monitor\collector.py:94:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:120:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:245:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+src\health_monitor\collector.py:278:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+src\health_monitor\collector.py:290:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:315:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:342:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\monitor.py:16:8: F401 [*] `time` imported but unused
+src\health_monitor\monitor.py:52:1: E402 Module level import not at top of file
+src\im_bot\feishu_client.py:12:20: F401 [*] `typing.Any` imported but unused
+src\im_bot\feishu_client.py:24:1: E402 Module level import not at top of file
+src\im_bot\feishu_client.py:345:26: E701 Multiple statements on one line (colon)
+src\im_bot\feishu_client.py:384:12: F401 [*] `time` imported but unused
+src\im_bot\feishu_client.py:391:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\im_bot\feishu_client.py:431:15: W292 [*] No newline at end of file
+src\im_bot\handlers.py:28:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\im_bot\pool.py:25:1: E402 Module level import not at top of file
+src\im_bot\users.py:141:25: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\llm_gateway\__init__.py:11:94: W292 [*] No newline at end of file
+src\llm_gateway\gateway.py:9:8: F401 [*] `os` imported but unused
+src\md_hub\main.py:42:1: E402 Module level import not at top of file
+src\md_hub\main.py:43:1: E402 Module level import not at top of file
+src\md_hub\main.py:44:1: E402 Module level import not at top of file
+src\md_hub\parts.py:14:8: F401 [*] `threading` imported but unused
+src\md_hub\parts.py:224:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\md_hub\parts.py:257:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\md_hub\parts.py:263:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\contract.py:18:36: F401 [*] `dataclasses.field` imported but unused
+src\quant_common\guard.py:30:21: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\guard.py:48:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\session.py:51:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\session.py:153:27: W292 [*] No newline at end of file
+src\quant_common\sse_bridge.py:72:21: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\risk_control\risk.py:41:1: E402 Module level import not at top of file
+src\risk_control\risk.py:449:16: F401 [*] `os` imported but unused
+src\risk_control\risk.py:461:84: W292 [*] No newline at end of file
+src\scheduler\__init__.py:4:24: F401 `.tasks` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\scheduler\app.py:10:22: F401 [*] `datetime.date` imported but unused
+src\scheduler\app.py:10:28: F401 [*] `datetime.datetime` imported but unused
+src\scheduler\app.py:36:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:50:1: E402 Module level import not at top of file
+src\scheduler\app.py:67:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:85:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:116:1: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:238:2: W292 [*] No newline at end of file
+src\scheduler\tasks.py:6:38: F401 [*] `datetime.timezone` imported but unused
+src\scheduler\tasks.py:128:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:139:5: E401 [*] Multiple imports on one line
+src\scheduler\tasks.py:139:22: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:181:5: E401 [*] Multiple imports on one line
+src\scheduler\tasks.py:181:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:181:21: F401 [*] `os` imported but unused
+src\scheduler\tasks.py:236:5: E401 [*] Multiple imports on one line
+src\scheduler\tasks.py:236:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:236:21: F401 [*] `os` imported but unused
+src\scheduler\tasks.py:294:25: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:297:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:346:20: E701 Multiple statements on one line (colon)
+src\scheduler\tasks.py:347:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:347:33: E701 Multiple statements on one line (colon)
+src\scheduler\tasks.py:375:20: E701 Multiple statements on one line (colon)
+src\scheduler\tasks.py:376:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:376:33: E701 Multiple statements on one line (colon)
+src\scheduler\tasks.py:443:36: F811 [*] Redefinition of unused `timezone` from line 6: `timezone` redefined here
+src\scheduler\tasks.py:548:5: E401 [*] Multiple imports on one line
+src\scheduler\tasks.py:548:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:633:5: E401 [*] Multiple imports on one line
+src\scheduler\tasks.py:700:26: F401 [*] `datetime.date` imported but unused
+src\scheduler\tasks.py:700:53: F811 [*] Redefinition of unused `timezone` from line 6: `timezone` redefined here
+src\scheduler\tasks.py:804:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:818:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:969:5: E401 [*] Multiple imports on one line
+src\scheduler\tasks.py:971:38: F401 [*] `src.data_platform.db.get_bars` imported but unused
+src\scheduler\tasks.py:997:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1018:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1301:47: F811 [*] Redefinition of unused `timezone` from line 6: `timezone` redefined here
+src\scheduler\tasks.py:1458:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1461:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1517:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1562:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1616:25: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1640:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1653:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategies\convertible_doublelow.py:10:43: F401 [*] `src.strategy_framework.factor.get_factor` imported but unused
+src\strategy_framework\adapters.py:18:1: E402 Module level import not at top of file
+src\strategy_framework\adapters.py:19:1: E402 Module level import not at top of file
+src\strategy_framework\adapters.py:19:36: F401 [*] `dataclasses.field` imported but unused
+src\strategy_framework\adapters.py:20:1: E402 Module level import not at top of file
+src\strategy_framework\adapters.py:115:36: F401 [*] `vnpy.event.Event` imported but unused
+src\strategy_framework\adapters.py:414:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\adapters.py:792:37: E702 Multiple statements on one line (semicolon)
+src\strategy_framework\adapters.py:793:40: E702 Multiple statements on one line (semicolon)
+src\strategy_framework\adapters.py:794:37: E702 Multiple statements on one line (semicolon)
+src\strategy_framework\adapters.py:794:59: E702 Multiple statements on one line (semicolon)
+src\strategy_framework\adapters.py:797:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\backtest.py:10:22: F401 [*] `datetime.date` imported but unused
+src\strategy_framework\backtest.py:11:20: F401 [*] `typing.Any` imported but unused
+src\strategy_framework\backtest.py:13:18: F401 [*] `pandas` imported but unused
+src\strategy_framework\backtest.py:17:57: F401 [*] `.strategy.Action` imported but unused
+src\strategy_framework\backtest.py:17:65: F401 [*] `.strategy.SignalAggregator` imported but unused
+src\strategy_framework\backtest.py:211:17: F841 Local variable `sig` is assigned to but never used
+src\strategy_framework\backtest.py:470:38: E702 Multiple statements on one line (semicolon)
+src\strategy_framework\backtest.py:477:21: E702 Multiple statements on one line (semicolon)
+src\strategy_framework\backtest.py:618:23: F541 [*] f-string without any placeholders
+src\strategy_framework\backtest.py:625:23: F541 [*] f-string without any placeholders
+src\strategy_framework\broker.py:270:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\factor.py:11:20: F401 [*] `typing.Any` imported but unused
+src\strategy_framework\factor.py:11:25: F401 [*] `typing.Callable` imported but unused
+src\strategy_framework\factor.py:11:35: F401 [*] `typing.ClassVar` imported but unused
+src\strategy_framework\factor.py:12:25: F401 [*] `dataclasses.dataclass` imported but unused
+src\strategy_framework\factor.py:146:1: E402 Module level import not at top of file
+src\strategy_framework\factor.py:739:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\factor.py:797:6: W292 [*] No newline at end of file
+src\strategy_framework\md_session.py:27:42: F401 [*] `src.quant_common.session._load_market_config` imported but unused
+src\strategy_framework\md_session.py:46:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\md_session.py:53:1: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\strategy.py:11:20: F401 [*] `typing.Any` imported but unused
+src\strategy_framework\strategy.py:11:25: F401 [*] `typing.Callable` imported but unused
+src\strategy_framework\strategy.py:12:41: F401 [*] `.factor.list_factors` imported but unused
+src\strategy_framework\strategy.py:12:78: F401 [*] `.factor._FACTOR_REGISTRY` imported but unused
+src\strategy_framework\strategy.py:271:34: F401 [*] `enum.Enum` imported but unused
+src\strategy_framework\strategy.py:706:20: W292 [*] No newline at end of file
+src\strategy_runner\__init__.py:6:4: W292 [*] No newline at end of file
+src\strategy_runner\hub_worker.py:87:21: E701 Multiple statements on one line (colon)
+src\strategy_runner\hub_worker.py:92:21: E701 Multiple statements on one line (colon)
+src\strategy_runner\hub_worker.py:118:21: E701 Multiple statements on one line (colon)
+src\strategy_runner\hub_worker.py:205:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:214:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:214:21: E701 Multiple statements on one line (colon)
+src\strategy_runner\hub_worker.py:257:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:329:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:329:29: E701 Multiple statements on one line (colon)
+src\strategy_runner\hub_worker.py:335:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:377:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:377:25: E701 Multiple statements on one line (colon)
+src\strategy_runner\hub_worker.py:442:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:442:25: E701 Multiple statements on one line (colon)
+src\strategy_runner\hub_worker.py:473:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:477:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\main.py:29:1: E402 Module level import not at top of file
+src\strategy_runner\main.py:35:1: E402 Module level import not at top of file
+src\strategy_runner\main.py:111:1: E402 Module level import not at top of file
+src\strategy_runner\main.py:131:1: E402 Module level import not at top of file
+src\strategy_runner\main.py:181:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\main.py:394:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\td_registry.py:98:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\trading.py:306:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\task_manager.py:105:65: E741 Ambiguous variable name: `l`
+src\web_api\auth.py:11:8: F401 [*] `time` imported but unused
+src\web_api\auth.py:54:1: E402 Module level import not at top of file
+src\web_api\auth.py:310:1: E402 Module level import not at top of file
+src\web_api\auth.py:322:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\auth.py:440:16: W292 [*] No newline at end of file
+src\web_api\main.py:18:1: E402 Module level import not at top of file
+src\web_api\main.py:19:1: E402 Module level import not at top of file
+src\web_api\main.py:37:1: E402 Module level import not at top of file
+src\web_api\main.py:40:1: E402 Module level import not at top of file
+src\web_api\main.py:46:1: E402 Module level import not at top of file
+src\web_api\main.py:47:1: E402 Module level import not at top of file
+src\web_api\main.py:74:1: E402 Module level import not at top of file
+src\web_api\main.py:79:39: E701 Multiple statements on one line (colon)
+src\web_api\main.py:84:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\main.py:112:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\main.py:136:1: E402 Module level import not at top of file
+src\web_api\main.py:137:1: E402 Module level import not at top of file
+src\web_api\main.py:138:1: E402 Module level import not at top of file
+src\web_api\main.py:139:1: E402 Module level import not at top of file
+src\web_api\main.py:140:1: E402 Module level import not at top of file
+src\web_api\main.py:141:1: E402 Module level import not at top of file
+src\web_api\main.py:142:1: E402 Module level import not at top of file
+src\web_api\main.py:143:1: E402 Module level import not at top of file
+src\web_api\main.py:144:1: E402 Module level import not at top of file
+src\web_api\main.py:145:1: E402 Module level import not at top of file
+src\web_api\main.py:146:1: E402 Module level import not at top of file
+src\web_api\main.py:147:1: E402 Module level import not at top of file
+src\web_api\main.py:148:1: E402 Module level import not at top of file
+src\web_api\main.py:149:1: E402 Module level import not at top of file
+src\web_api\routes\__init__.py:1:43: W292 [*] No newline at end of file
+src\web_api\routes\auth_routes.py:8:44: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\auth_routes.py:9:16: F401 [*] `..auth.ensure_default_admin` imported but unused
+src\web_api\routes\auth_routes.py:9:38: F401 [*] `..auth.init_users_table` imported but unused
+src\web_api\routes\auth_routes.py:9:56: F401 [*] `..auth.PERMISSIONS` imported but unused
+src\web_api\routes\auth_routes.py:14:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\auth_routes.py:14:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\auth_routes.py:14:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\auth_routes.py:14:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\auth_routes.py:14:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\auth_routes.py:14:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\auth_routes.py:14:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\auth_routes.py:14:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\auth_routes.py:103:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\auth_routes.py:127:1: E402 Module level import not at top of file
+src\web_api\routes\auth_routes.py:145:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\auth_routes.py:326:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\auth_routes.py:340:1: E402 Module level import not at top of file
+src\web_api\routes\auth_routes.py:342:1: E402 Module level import not at top of file
+src\web_api\routes\auth_routes.py:742:1: E402 Module level import not at top of file
+src\web_api\routes\auth_routes.py:925:18: F401 [*] `os` imported but unused
+src\web_api\routes\backtest.py:9:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\backtest.py:9:56: F401 [*] `fastapi.WebSocket` imported but unused
+src\web_api\routes\backtest.py:9:67: F401 [*] `fastapi.WebSocketDisconnect` imported but unused
+src\web_api\routes\backtest.py:10:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\backtest.py:12:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\backtest.py:12:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\backtest.py:12:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\backtest.py:12:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\backtest.py:12:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\backtest.py:12:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\backtest.py:12:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\backtest.py:12:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\backtest.py:12:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\backtest.py:12:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\backtest.py:12:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\backtest.py:12:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\backtest.py:12:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\backtest.py:12:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\backtest.py:327:36: E702 Multiple statements on one line (semicolon)
+src\web_api\routes\backtest.py:611:68: W292 [*] No newline at end of file
+src\web_api\routes\chat.py:7:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\chat.py:7:67: F401 [*] `fastapi.WebSocketDisconnect` imported but unused
+src\web_api\routes\chat.py:8:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\chat.py:54:9: F841 Local variable `params` is assigned to but never used
+src\web_api\routes\chat.py:128:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\chat.py:138:9: F841 Local variable `payload` is assigned to but never used
+src\web_api\routes\chat.py:147:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\chat.py:307:59: W292 [*] No newline at end of file
+src\web_api\routes\im_bots.py:4:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\im_bots.py:4:50: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\im_bots.py:4:56: F401 [*] `fastapi.BackgroundTasks` imported but unused
+src\web_api\routes\im_bots.py:6:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\im_bots.py:8:55: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\im_bots.py:12:1: E401 [*] Multiple imports on one line
+src\web_api\routes\im_bots.py:103:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\im_bots.py:120:28: E702 Multiple statements on one line (semicolon)
+src\web_api\routes\im_bots.py:122:30: E702 Multiple statements on one line (semicolon)
+src\web_api\routes\im_bots.py:133:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\im_bots.py:240:40: F401 [*] `src.im_bot.credentials.save_bot_credentials` imported but unused
+src\web_api\routes\mgmt.py:9:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\mgmt.py:9:50: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\mgmt.py:10:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\mgmt.py:198:17: F541 [*] f-string without any placeholders
+src\web_api\routes\mgmt.py:199:17: F541 [*] f-string without any placeholders
+src\web_api\routes\mgmt.py:200:17: F541 [*] f-string without any placeholders
+src\web_api\routes\mgmt.py:201:17: F541 [*] f-string without any placeholders
+src\web_api\routes\mgmt.py:238:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\mgmt.py:286:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\risk.py:2:41: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\risk.py:3:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\risk.py:150:26: F401 [*] `datetime.date` imported but unused
+src\web_api\routes\risk.py:376:32: E701 Multiple statements on one line (colon)
+src\web_api\routes\risk.py:377:33: E701 Multiple statements on one line (colon)
+src\web_api\routes\risk.py:378:13: E701 Multiple statements on one line (colon)
+src\web_api\routes\risk.py:384:19: W292 [*] No newline at end of file
+src\web_api\routes\stock.py:1:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\stock.py:1:50: F401 [*] `fastapi.Query` imported but unused
+src\web_api\routes\stock.py:1:57: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\stock.py:2:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\stock.py:87:5: E731 Do not assign a `lambda` expression, use a `def`
+src\web_api\routes\stock.py:148:5: E731 Do not assign a `lambda` expression, use a `def`
+src\web_api\routes\stock.py:175:5: E731 Do not assign a `lambda` expression, use a `def`
+src\web_api\routes\stock.py:207:70: E701 Multiple statements on one line (colon)
+src\web_api\routes\stock.py:208:64: E701 Multiple statements on one line (colon)
+src\web_api\routes\stock.py:220:5: E731 Do not assign a `lambda` expression, use a `def`
+src\web_api\routes\strategy.py:6:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\strategy.py:7:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\strategy.py:9:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\strategy.py:9:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\strategy.py:9:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\strategy.py:9:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\strategy.py:9:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\strategy.py:9:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\strategy.py:9:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\strategy.py:9:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\strategy.py:9:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\strategy.py:9:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\strategy.py:9:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\strategy.py:9:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\strategy.py:9:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\strategy.py:9:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\strategy.py:259:38: F401 [*] `src.data_platform.db.get_bars` imported but unused
+src\web_api\routes\strategy.py:375:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+src\web_api\routes\strategy.py:388:71: W292 [*] No newline at end of file
+src\web_api\routes\sync.py:3:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\sync.py:3:56: F401 [*] `fastapi.WebSocket` imported but unused
+src\web_api\routes\sync.py:3:67: F401 [*] `fastapi.WebSocketDisconnect` imported but unused
+src\web_api\routes\sync.py:4:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\sync.py:6:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\sync.py:6:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\sync.py:6:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\sync.py:6:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\sync.py:6:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\sync.py:6:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\sync.py:6:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\sync.py:6:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\sync.py:6:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\sync.py:6:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\sync.py:6:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\sync.py:6:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\sync.py:6:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\sync.py:6:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\sync.py:6:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\sync.py:10:8: F401 [*] `json` imported but unused
+src\web_api\routes\sync.py:346:44: W292 [*] No newline at end of file
+src\web_api\routes\system.py:4:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\system.py:6:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\system.py:6:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\system.py:6:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\system.py:6:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\system.py:6:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\system.py:6:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\system.py:6:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\system.py:6:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\system.py:6:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\system.py:6:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\system.py:6:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\system.py:6:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\system.py:6:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\system.py:6:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\system.py:6:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\system.py:106:9: E401 [*] Multiple imports on one line
+src\web_api\routes\system.py:117:9: E401 [*] Multiple imports on one line
+src\web_api\routes\system.py:464:5: E731 Do not assign a `lambda` expression, use a `def`
+src\web_api\routes\system.py:506:16: E701 Multiple statements on one line (colon)
+src\web_api\routes\system.py:507:29: E701 Multiple statements on one line (colon)
+src\web_api\routes\system.py:509:16: E701 Multiple statements on one line (colon)
+src\web_api\routes\system.py:510:29: E701 Multiple statements on one line (colon)
+src\web_api\routes\system.py:545:16: E701 Multiple statements on one line (colon)
+src\web_api\routes\system.py:546:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\system.py:546:29: E701 Multiple statements on one line (colon)
+src\web_api\routes\system.py:672:37: W292 [*] No newline at end of file
+src\web_api\routes\trading.py:1:1: E401 [*] Multiple imports on one line
+src\web_api\routes\trading.py:2:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\trading.py:2:56: F401 [*] `fastapi.Header` imported but unused
+src\web_api\routes\trading.py:3:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\trading.py:5:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\trading.py:5:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\trading.py:5:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\trading.py:5:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\trading.py:5:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\trading.py:5:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\trading.py:5:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\trading.py:5:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\trading.py:5:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\trading.py:5:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\trading.py:5:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\trading.py:5:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\trading.py:5:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\trading.py:5:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\trading.py:5:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\trading.py:12:1: E402 Module level import not at top of file
+src\web_api\routes\trading.py:38:9: E401 [*] Multiple imports on one line
+src\web_api\routes\trading.py:45:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\trading.py:437:74: W292 [*] No newline at end of file
+[*] 221 fixable with the `--fix` option (9 hidden fixes can be enabled with the `--unsafe-fixes` option).
+
+# ======================================================================
+# BLE001 blind-except —— 不建议开启，仅留档（444 条）
+# ======================================================================
+src\alert_notify\dispatch.py:50:16: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:124:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:144:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:160:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:173:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:187:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:201:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:259:20: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:263:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:283:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:401:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:439:16: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:447:20: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\dispatch.py:465:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\notify.py:66:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\notify.py:80:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\notify.py:101:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\notify.py:111:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\sms.py:49:12: BLE001 Do not catch blind exception: `Exception`
+src\alert_notify\sms.py:59:16: BLE001 Do not catch blind exception: `Exception`
+src\astock_analysis\analysis.py:178:20: BLE001 Do not catch blind exception: `Exception`
+src\astock_analysis\convertible_terms.py:41:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\base.py:167:20: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\base.py:244:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\base.py:361:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\tushare_adapter.py:65:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\tushare_adapter.py:87:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\tushare_adapter.py:100:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\tushare_adapter.py:145:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\tushare_adapter.py:169:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\adapters\tushare_adapter.py:198:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\data_source.py:101:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\data_source.py:148:20: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\data_source.py:161:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\data_source.py:195:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\databus.py:42:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\databus.py:118:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\log_sink.py:51:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\log_sink.py:83:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\log_sink.py:171:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\market_snapshot.py:68:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\market_snapshot.py:76:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\market_snapshot.py:80:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\market_snapshot.py:111:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\market_snapshot.py:116:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\perm_registry.py:97:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\perms.py:67:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\perms.py:94:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\perms.py:106:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\perms.py:136:20: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\perms.py:180:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\perms.py:214:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\quality.py:44:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\quality.py:172:24: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\quality.py:277:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\quality.py:299:24: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\quality.py:307:24: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\quality.py:312:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\quality.py:336:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\rate_limit.py:149:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\rate_limit.py:172:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\rate_limit.py:191:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\rate_limit.py:211:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\rate_limit.py:260:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\routing.py:129:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\routing.py:138:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\routing.py:161:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\routing.py:191:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\routing.py:223:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\routing.py:338:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\security_master.py:275:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:77:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:94:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:100:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:105:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:143:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:153:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:160:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:176:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:190:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:197:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:243:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:276:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:288:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:312:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:346:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:370:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:374:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\stock_detail.py:379:12: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\store.py:40:16: BLE001 Do not catch blind exception: `Exception`
+src\data_platform\store.py:51:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:66:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:82:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:102:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:173:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:187:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:282:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:339:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:387:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:558:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:707:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:782:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:915:20: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:1116:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:1204:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:1280:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:1466:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:1485:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\engine.py:1593:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\pool_data.py:127:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\pool_data.py:140:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\pool_data.py:159:20: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\pool_data.py:202:24: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\pool_data.py:227:12: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\sync_lock.py:70:24: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\sync_lock.py:87:16: BLE001 Do not catch blind exception: `Exception`
+src\data_sync\sync_lock.py:101:16: BLE001 Do not catch blind exception: `Exception`
+src\email_service\__init__.py:39:12: BLE001 Do not catch blind exception: `Exception`
+src\email_service\__init__.py:52:12: BLE001 Do not catch blind exception: `Exception`
+src\email_service\__init__.py:115:12: BLE001 Do not catch blind exception: `Exception`
+src\email_service\__init__.py:250:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\router.py:73:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:187:16: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:265:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:270:20: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:285:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:297:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:311:20: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:328:28: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\tasks.py:331:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:57:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:76:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:117:16: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:145:16: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:191:20: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:198:20: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:205:20: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:208:12: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:216:16: BLE001 Do not catch blind exception: `Exception`
+src\feishu_bot\ws_client.py:239:16: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:94:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:120:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:170:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:218:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:245:20: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:278:20: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:290:16: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:292:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:301:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:315:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:342:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\collector.py:419:20: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:69:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:81:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:93:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:110:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:273:20: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:279:12: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:327:16: BLE001 Do not catch blind exception: `Exception`
+src\health_monitor\monitor.py:380:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\credentials.py:25:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\credentials.py:57:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\dingtalk.py:37:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\dingtalk.py:75:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu.py:59:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:79:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:104:20: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:123:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:130:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:192:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:247:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:391:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:411:20: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:419:20: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\feishu_client.py:428:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\handlers.py:28:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\handlers.py:59:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\handlers.py:127:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\pool.py:52:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\pool.py:144:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\users.py:49:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\users.py:141:32: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\users.py:168:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\wecom.py:41:12: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\wecom_ws.py:62:16: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\wecom_ws.py:108:20: BLE001 Do not catch blind exception: `Exception`
+src\im_bot\wecom_ws.py:169:20: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:112:16: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:119:20: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:153:16: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:347:24: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:395:20: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:448:16: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:458:16: BLE001 Do not catch blind exception: `Exception`
+src\llm_gateway\gateway.py:468:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:89:12: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:97:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:104:12: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:118:12: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:193:20: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:231:12: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:270:24: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:282:24: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:285:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:292:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:306:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\main.py:345:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:197:12: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:203:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:209:12: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:224:20: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:257:20: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:263:12: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:300:16: BLE001 Do not catch blind exception: `Exception`
+src\md_hub\parts.py:307:12: BLE001 Do not catch blind exception: `Exception`
+src\quant_common\guard.py:30:28: BLE001 Do not catch blind exception: `Exception`
+src\quant_common\guard.py:48:12: BLE001 Do not catch blind exception: `Exception`
+src\quant_common\session.py:51:12: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:99:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:127:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:180:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:206:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:244:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:255:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:285:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:299:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:355:20: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:371:20: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:438:16: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk.py:442:20: BLE001 Do not catch blind exception: `Exception`
+src\risk_control\risk_rule.py:104:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\alert_tasks.py:44:16: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\alert_tasks.py:76:20: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\app.py:36:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\app.py:67:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\app.py:85:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\app.py:116:8: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:19:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:59:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:71:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:128:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:147:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:154:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:162:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:188:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:219:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:291:28: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:294:32: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:297:20: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:345:20: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:347:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:374:20: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:376:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:414:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:509:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:535:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:565:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:613:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:619:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:713:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:733:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:744:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:770:16: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:818:16: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:997:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1018:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1096:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1159:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1176:16: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1190:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1216:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1240:16: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1270:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1351:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1441:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1458:20: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1461:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1497:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1505:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1517:20: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1532:16: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1562:16: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1616:32: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1640:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1653:20: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1671:24: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1673:12: BLE001 Do not catch blind exception: `Exception`
+src\scheduler\tasks.py:1707:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\adapters.py:414:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\adapters.py:558:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\adapters.py:781:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\adapters.py:797:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\backtest.py:613:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\broker.py:44:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\broker.py:108:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\broker.py:122:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\broker.py:244:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\broker.py:270:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\factor.py:169:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\factor.py:232:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\factor.py:234:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\factor.py:260:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\factor.py:691:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\factor.py:739:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_api_guard.py:108:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_api_guard.py:181:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_api_guard.py:250:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_gateway.py:434:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_session.py:46:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_session.py:53:8: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_session.py:127:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_session.py:159:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_session.py:267:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\md_session.py:326:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\alerts.py:50:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\loop.py:77:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\loop.py:86:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\loop.py:100:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\mdlink.py:46:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\pulse.py:100:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\subs.py:78:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\subs.py:86:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\runtime\xsleeper.py:51:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\strategy.py:197:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\strategy.py:302:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\strategy.py:360:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\strategy.py:371:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\strategy.py:403:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\strategy.py:500:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_framework\strategy.py:524:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:87:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:92:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:118:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:205:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:214:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:217:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:230:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:241:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:257:24: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:329:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:335:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:355:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:377:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:423:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:432:24: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:442:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:473:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\hub_worker.py:477:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:50:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:101:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:154:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:181:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:188:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:206:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:295:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:311:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:319:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\main.py:394:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\td_registry.py:98:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:106:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:152:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:190:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:212:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:254:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:267:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:279:28: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:281:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:306:20: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:310:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:332:12: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:375:16: BLE001 Do not catch blind exception: `Exception`
+src\strategy_runner\trading.py:377:12: BLE001 Do not catch blind exception: `Exception`
+src\task_manager.py:145:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\auth.py:41:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\auth.py:143:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\auth.py:159:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\auth.py:180:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\auth.py:322:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\main.py:84:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\main.py:99:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\main.py:112:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\main.py:120:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\main.py:130:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\alerts.py:95:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\alerts.py:344:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\alerts.py:405:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:88:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:103:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:145:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:175:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:326:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:476:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:528:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:549:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:698:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:956:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:968:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\auth_routes.py:988:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:31:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:35:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:58:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:62:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:243:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:263:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:315:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:339:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:516:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\backtest.py:581:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:45:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:53:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:93:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:112:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:116:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:128:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:139:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:147:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\chat.py:244:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\im_bots.py:99:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\im_bots.py:103:20: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\im_bots.py:133:20: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\im_bots.py:167:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\im_bots.py:208:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\mgmt.py:238:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\mgmt.py:286:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\risk.py:32:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\risk.py:39:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\risk.py:293:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\risk.py:351:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\routing.py:78:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\stock.py:116:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\strategy.py:283:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\strategy.py:311:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\strategy.py:375:20: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\sync.py:343:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\system.py:91:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\system.py:311:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\system.py:507:20: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\system.py:510:20: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\system.py:546:20: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\trading.py:45:12: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\trading.py:349:16: BLE001 Do not catch blind exception: `Exception`
+src\web_api\routes\trading.py:365:16: BLE001 Do not catch blind exception: `Exception`
+
+# ======================================================================
+# S110 try-except-pass
+# ======================================================================
+src\data_platform\adapters\tushare_adapter.py:65:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\data_source.py:101:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\market_snapshot.py:80:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\market_snapshot.py:111:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\rate_limit.py:191:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\rate_limit.py:211:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\routing.py:138:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\routing.py:191:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\security_master.py:275:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:94:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:100:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:105:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:160:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:370:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_platform\stock_detail.py:379:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_sync\engine.py:187:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\data_sync\engine.py:1204:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\email_service\__init__.py:250:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\feishu_bot\tasks.py:270:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\feishu_bot\tasks.py:328:21: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\feishu_bot\ws_client.py:117:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:94:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:120:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:290:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:315:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\health_monitor\collector.py:342:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\im_bot\feishu_client.py:391:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\im_bot\handlers.py:28:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\im_bot\users.py:141:25: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\md_hub\parts.py:224:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\md_hub\parts.py:257:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\md_hub\parts.py:263:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\guard.py:30:21: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\guard.py:48:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\session.py:51:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\quant_common\sse_bridge.py:72:21: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:36:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:67:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:85:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\app.py:116:1: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:128:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:294:25: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:297:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:347:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:376:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:818:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:997:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1018:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1458:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1461:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1517:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1562:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1616:25: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1640:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\scheduler\tasks.py:1653:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\adapters.py:414:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\adapters.py:797:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\broker.py:270:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\factor.py:739:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\md_session.py:46:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_framework\md_session.py:53:1: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:205:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:214:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:257:17: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:329:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:335:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:377:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:442:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:473:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\hub_worker.py:477:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\main.py:181:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\main.py:394:9: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\td_registry.py:98:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\strategy_runner\trading.py:306:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\auth.py:322:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\main.py:84:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\main.py:112:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\auth_routes.py:103:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\auth_routes.py:145:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\auth_routes.py:326:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\chat.py:128:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\chat.py:147:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\im_bots.py:103:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\im_bots.py:133:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\mgmt.py:238:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\mgmt.py:286:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\system.py:546:13: S110 `try`-`except`-`pass` detected, consider logging the exception
+src\web_api\routes\trading.py:45:5: S110 `try`-`except`-`pass` detected, consider logging the exception
+
+# ======================================================================
+# S112 try-except-continue
+# ======================================================================
+src\feishu_bot\tasks.py:311:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+src\health_monitor\collector.py:245:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+src\health_monitor\collector.py:278:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+src\web_api\routes\strategy.py:375:13: S112 `try`-`except`-`continue` detected, consider logging the exception
+
+# ======================================================================
+# F821 undefined-name（真 BUG）
+# ======================================================================
+src\data_platform\db.py:329:43: F821 Undefined name `date`
+src\data_platform\db.py:342:23: F821 Undefined name `date`
+
+# ======================================================================
+# F841 unused-variable
+# ======================================================================
+src\strategy_framework\backtest.py:211:17: F841 Local variable `sig` is assigned to but never used
+src\web_api\routes\chat.py:54:9: F841 Local variable `params` is assigned to but never used
+src\web_api\routes\chat.py:138:9: F841 Local variable `payload` is assigned to but never used
+No fixes available (3 hidden fixes can be enabled with the `--unsafe-fixes` option).
+
+# ======================================================================
+# F811 redefined-while-unused
+# ======================================================================
+src\scheduler\tasks.py:443:36: F811 [*] Redefinition of unused `timezone` from line 6: `timezone` redefined here
+src\scheduler\tasks.py:700:53: F811 [*] Redefinition of unused `timezone` from line 6: `timezone` redefined here
+src\scheduler\tasks.py:1301:47: F811 [*] Redefinition of unused `timezone` from line 6: `timezone` redefined here
+[*] 3 fixable with the `--fix` option.
+
+# ======================================================================
+# F401 unused-import
+# ======================================================================
+src\alert_notify\dispatch.py:304:20: F401 [*] `typing.Any` imported but unused
+src\alert_notify\notify.py:15:8: F401 [*] `time` imported but unused
+src\data_platform\_platform.py:7:28: F401 [*] `datetime.datetime` imported but unused
+src\data_platform\_platform.py:8:20: F401 [*] `typing.Any` imported but unused
+src\data_platform\_platform.py:14:21: F401 [*] `.schema.Bar` imported but unused
+src\data_platform\_platform.py:14:26: F401 [*] `.schema.to_vt_symbol` imported but unused
+src\data_platform\_platform.py:14:40: F401 [*] `.schema.parse_vt_symbol` imported but unused
+src\data_platform\adapters\tushare_adapter.py:10:20: F401 [*] `typing.Any` imported but unused
+src\data_platform\adapters\tushare_adapter.py:348:43: F401 [*] `..db.get_conn` imported but unused
+src\data_platform\data_source.py:211:20: F401 `akshare` imported but unused; consider using `importlib.util.find_spec` to test for availability
+src\data_platform\db.py:13:85: F401 [*] `.schema.parse_vt_symbol` imported but unused
+src\data_platform\db.py:337:34: F401 [*] `datetime.date` imported but unused
+src\data_platform\log_sink.py:23:8: F401 [*] `time` imported but unused
+src\data_platform\perms.py:12:34: F401 [*] `src.data_platform.db.get_conn` imported but unused
+src\data_platform\schema.py:8:22: F401 [*] `datetime.date` imported but unused
+src\data_sync\__init__.py:14:11: F401 `.engine._HANDLERS` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\data_sync\engine.py:16:20: F401 [*] `typing.Any` imported but unused
+src\feishu_bot\__init__.py:5:18: F401 `.bot.FeishuClient` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\feishu_bot\__init__.py:5:32: F401 `.bot.process_message_async` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\feishu_bot\__init__.py:5:55: F401 `.bot.build_confirm_card` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\feishu_bot\tasks.py:193:66: F401 [*] `src.im_bot.credentials.get_bot_credentials` imported but unused
+src\health_monitor\monitor.py:16:8: F401 [*] `time` imported but unused
+src\im_bot\feishu_client.py:12:20: F401 [*] `typing.Any` imported but unused
+src\im_bot\feishu_client.py:384:12: F401 [*] `time` imported but unused
+src\llm_gateway\gateway.py:9:8: F401 [*] `os` imported but unused
+src\md_hub\parts.py:14:8: F401 [*] `threading` imported but unused
+src\quant_common\contract.py:18:36: F401 [*] `dataclasses.field` imported but unused
+src\risk_control\risk.py:449:16: F401 [*] `os` imported but unused
+src\scheduler\__init__.py:4:24: F401 `.tasks` imported but unused; consider removing, adding to `__all__`, or using a redundant alias
+src\scheduler\app.py:10:22: F401 [*] `datetime.date` imported but unused
+src\scheduler\app.py:10:28: F401 [*] `datetime.datetime` imported but unused
+src\scheduler\tasks.py:6:38: F401 [*] `datetime.timezone` imported but unused
+src\scheduler\tasks.py:139:22: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:181:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:181:21: F401 [*] `os` imported but unused
+src\scheduler\tasks.py:236:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:236:21: F401 [*] `os` imported but unused
+src\scheduler\tasks.py:548:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:700:26: F401 [*] `datetime.date` imported but unused
+src\scheduler\tasks.py:804:12: F401 [*] `psycopg` imported but unused
+src\scheduler\tasks.py:971:38: F401 [*] `src.data_platform.db.get_bars` imported but unused
+src\strategies\convertible_doublelow.py:10:43: F401 [*] `src.strategy_framework.factor.get_factor` imported but unused
+src\strategy_framework\adapters.py:19:36: F401 [*] `dataclasses.field` imported but unused
+src\strategy_framework\adapters.py:115:36: F401 [*] `vnpy.event.Event` imported but unused
+src\strategy_framework\backtest.py:10:22: F401 [*] `datetime.date` imported but unused
+src\strategy_framework\backtest.py:11:20: F401 [*] `typing.Any` imported but unused
+src\strategy_framework\backtest.py:13:18: F401 [*] `pandas` imported but unused
+src\strategy_framework\backtest.py:17:57: F401 [*] `.strategy.Action` imported but unused
+src\strategy_framework\backtest.py:17:65: F401 [*] `.strategy.SignalAggregator` imported but unused
+src\strategy_framework\factor.py:11:20: F401 [*] `typing.Any` imported but unused
+src\strategy_framework\factor.py:11:25: F401 [*] `typing.Callable` imported but unused
+src\strategy_framework\factor.py:11:35: F401 [*] `typing.ClassVar` imported but unused
+src\strategy_framework\factor.py:12:25: F401 [*] `dataclasses.dataclass` imported but unused
+src\strategy_framework\md_session.py:27:42: F401 [*] `src.quant_common.session._load_market_config` imported but unused
+src\strategy_framework\strategy.py:11:20: F401 [*] `typing.Any` imported but unused
+src\strategy_framework\strategy.py:11:25: F401 [*] `typing.Callable` imported but unused
+src\strategy_framework\strategy.py:12:41: F401 [*] `.factor.list_factors` imported but unused
+src\strategy_framework\strategy.py:12:78: F401 [*] `.factor._FACTOR_REGISTRY` imported but unused
+src\strategy_framework\strategy.py:271:34: F401 [*] `enum.Enum` imported but unused
+src\web_api\auth.py:11:8: F401 [*] `time` imported but unused
+src\web_api\routes\auth_routes.py:8:44: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\auth_routes.py:9:16: F401 [*] `..auth.ensure_default_admin` imported but unused
+src\web_api\routes\auth_routes.py:9:38: F401 [*] `..auth.init_users_table` imported but unused
+src\web_api\routes\auth_routes.py:9:56: F401 [*] `..auth.PERMISSIONS` imported but unused
+src\web_api\routes\auth_routes.py:14:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\auth_routes.py:14:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\auth_routes.py:14:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\auth_routes.py:14:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\auth_routes.py:14:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\auth_routes.py:14:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\auth_routes.py:14:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\auth_routes.py:14:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\auth_routes.py:925:18: F401 [*] `os` imported but unused
+src\web_api\routes\backtest.py:9:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\backtest.py:9:56: F401 [*] `fastapi.WebSocket` imported but unused
+src\web_api\routes\backtest.py:9:67: F401 [*] `fastapi.WebSocketDisconnect` imported but unused
+src\web_api\routes\backtest.py:10:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\backtest.py:12:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\backtest.py:12:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\backtest.py:12:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\backtest.py:12:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\backtest.py:12:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\backtest.py:12:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\backtest.py:12:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\backtest.py:12:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\backtest.py:12:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\backtest.py:12:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\backtest.py:12:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\backtest.py:12:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\backtest.py:12:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\backtest.py:12:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\chat.py:7:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\chat.py:7:67: F401 [*] `fastapi.WebSocketDisconnect` imported but unused
+src\web_api\routes\chat.py:8:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\im_bots.py:4:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\im_bots.py:4:50: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\im_bots.py:4:56: F401 [*] `fastapi.BackgroundTasks` imported but unused
+src\web_api\routes\im_bots.py:6:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\im_bots.py:8:55: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\im_bots.py:240:40: F401 [*] `src.im_bot.credentials.save_bot_credentials` imported but unused
+src\web_api\routes\mgmt.py:9:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\mgmt.py:9:50: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\mgmt.py:10:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\risk.py:2:41: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\risk.py:3:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\risk.py:150:26: F401 [*] `datetime.date` imported but unused
+src\web_api\routes\stock.py:1:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\stock.py:1:50: F401 [*] `fastapi.Query` imported but unused
+src\web_api\routes\stock.py:1:57: F401 [*] `fastapi.Body` imported but unused
+src\web_api\routes\stock.py:2:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\strategy.py:6:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\strategy.py:7:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\strategy.py:9:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\strategy.py:9:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\strategy.py:9:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\strategy.py:9:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\strategy.py:9:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\strategy.py:9:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\strategy.py:9:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\strategy.py:9:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\strategy.py:9:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\strategy.py:9:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\strategy.py:9:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\strategy.py:9:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\strategy.py:9:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\strategy.py:9:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\strategy.py:259:38: F401 [*] `src.data_platform.db.get_bars` imported but unused
+src\web_api\routes\sync.py:3:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\sync.py:3:56: F401 [*] `fastapi.WebSocket` imported but unused
+src\web_api\routes\sync.py:3:67: F401 [*] `fastapi.WebSocketDisconnect` imported but unused
+src\web_api\routes\sync.py:4:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\sync.py:6:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\sync.py:6:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\sync.py:6:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\sync.py:6:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\sync.py:6:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\sync.py:6:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\sync.py:6:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\sync.py:6:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\sync.py:6:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\sync.py:6:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\sync.py:6:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\sync.py:6:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\sync.py:6:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\sync.py:6:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\sync.py:6:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\sync.py:10:8: F401 [*] `json` imported but unused
+src\web_api\routes\system.py:4:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\system.py:6:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\system.py:6:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\system.py:6:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\system.py:6:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\system.py:6:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\system.py:6:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\system.py:6:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\system.py:6:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\system.py:6:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\system.py:6:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\system.py:6:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\system.py:6:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\system.py:6:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\system.py:6:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\system.py:6:201: F401 [*] `..models.PoolReq` imported but unused
+src\web_api\routes\trading.py:2:41: F401 [*] `fastapi.Request` imported but unused
+src\web_api\routes\trading.py:2:56: F401 [*] `fastapi.Header` imported but unused
+src\web_api\routes\trading.py:3:20: F401 [*] `..auth.require_role` imported but unused
+src\web_api\routes\trading.py:5:23: F401 [*] `..models.LoginReq` imported but unused
+src\web_api\routes\trading.py:5:33: F401 [*] `..models.UserCreate` imported but unused
+src\web_api\routes\trading.py:5:45: F401 [*] `..models.StrategyConfig` imported but unused
+src\web_api\routes\trading.py:5:61: F401 [*] `..models.InviteReq` imported but unused
+src\web_api\routes\trading.py:5:72: F401 [*] `..models.RegisterReq` imported but unused
+src\web_api\routes\trading.py:5:85: F401 [*] `..models.ForgotReq` imported but unused
+src\web_api\routes\trading.py:5:96: F401 [*] `..models.ResetReq` imported but unused
+src\web_api\routes\trading.py:5:106: F401 [*] `..models.ChangePwdReq` imported but unused
+src\web_api\routes\trading.py:5:120: F401 [*] `..models.ChatReq` imported but unused
+src\web_api\routes\trading.py:5:129: F401 [*] `..models.LLMModelReq` imported but unused
+src\web_api\routes\trading.py:5:142: F401 [*] `..models.IMBotCreateReq` imported but unused
+src\web_api\routes\trading.py:5:158: F401 [*] `..models.IMBotUpdateReq` imported but unused
+src\web_api\routes\trading.py:5:174: F401 [*] `..models.IMBotUserReq` imported but unused
+src\web_api\routes\trading.py:5:188: F401 [*] `..models.RiskRuleReq` imported but unused
+src\web_api\routes\trading.py:5:201: F401 [*] `..models.PoolReq` imported but unused
+[*] 175 fixable with the `--fix` option.
+
+# ======================================================================
+# E722 bare-except
+# ======================================================================
+src\data_sync\pool_data.py:109:25: E722 Do not use bare `except`
+src\data_sync\pool_data.py:121:5: E722 Do not use bare `except`
+
+# ======================================================================
+# ARG unused-argument —— 永久不开，仅留档
+# ======================================================================
+src\alert_notify\notify.py:115:35: ARG001 Unused function argument: `channel`
+src\data_platform\_platform.py:24:17: ARG002 Unused method argument: `adj`
+src\data_platform\_platform.py:60:28: ARG002 Unused method argument: `symbol`
+src\data_platform\_platform.py:63:25: ARG002 Unused method argument: `symbol`
+src\data_platform\_platform.py:63:38: ARG002 Unused method argument: `freq`
+src\data_platform\_platform.py:63:49: ARG002 Unused method argument: `handler`
+src\data_platform\_platform.py:71:31: ARG002 Unused method argument: `symbol`
+src\data_platform\_platform.py:75:37: ARG002 Unused method argument: `symbol`
+src\data_platform\_platform.py:79:32: ARG002 Unused method argument: `symbol`
+src\data_platform\adapters\base.py:50:32: ARG002 Unused method argument: `trade_date`
+src\data_platform\adapters\base.py:50:49: ARG002 Unused method argument: `kind`
+src\data_platform\adapters\base.py:54:26: ARG002 Unused method argument: `acct`
+src\data_platform\adapters\base.py:64:31: ARG002 Unused method argument: `symbol`
+src\data_platform\adapters\base.py:64:44: ARG002 Unused method argument: `trade_date`
+src\data_platform\adapters\base.py:64:61: ARG002 Unused method argument: `start`
+src\data_platform\adapters\base.py:64:73: ARG002 Unused method argument: `end`
+src\data_platform\adapters\base.py:248:26: ARG002 Unused method argument: `acct`
+src\data_platform\adapters\tushare_adapter.py:525:37: ARG001 Unused function argument: `end_date`
+src\data_platform\adapters\tushare_adapter.py:530:37: ARG001 Unused function argument: `end_date`
+src\data_platform\adapters\tushare_adapter.py:535:41: ARG001 Unused function argument: `end_date`
+src\data_platform\adapters\tushare_adapter.py:540:36: ARG001 Unused function argument: `end_date`
+src\data_platform\adapters\tushare_adapter.py:545:39: ARG001 Unused function argument: `end_date`
+src\data_platform\adapters\tushare_adapter.py:550:36: ARG001 Unused function argument: `end_date`
+src\data_platform\adapters\tushare_adapter.py:555:34: ARG001 Unused function argument: `end_date`
+src\data_platform\databus.py:164:19: ARG002 Unused method argument: `kind`
+src\data_platform\databus.py:181:30: ARG002 Unused method argument: `sink`
+src\data_platform\db.py:350:25: ARG001 Unused function argument: `year`
+src\data_platform\perms.py:45:23: ARG001 Unused function argument: `username`
+src\data_platform\perms.py:191:18: ARG001 Unused function argument: `username`
+src\data_platform\perms.py:218:32: ARG001 Unused function argument: `username`
+src\data_platform\rate_limit.py:352:28: ARG002 Unused method argument: `api_name`
+src\data_platform\security_master.py:219:41: ARG002 Unused method argument: `at`
+src\data_platform\store.py:54:27: ARG002 Unused method argument: `version`
+src\data_sync\engine.py:420:23: ARG001 Unused function argument: `cfg`
+src\data_sync\engine.py:420:49: ARG001 Unused function argument: `backfill_from`
+src\data_sync\engine.py:421:23: ARG001 Unused function argument: `progress_cb`
+src\data_sync\engine.py:451:20: ARG001 Unused function argument: `cfg`
+src\data_sync\engine.py:451:46: ARG001 Unused function argument: `backfill_from`
+src\data_sync\engine.py:452:20: ARG001 Unused function argument: `progress_cb`
+src\data_sync\engine.py:497:20: ARG001 Unused function argument: `cfg`
+src\data_sync\engine.py:497:46: ARG001 Unused function argument: `backfill_from`
+src\data_sync\engine.py:498:20: ARG001 Unused function argument: `progress_cb`
+src\data_sync\engine.py:523:21: ARG001 Unused function argument: `cfg`
+src\data_sync\engine.py:523:47: ARG001 Unused function argument: `backfill_from`
+src\data_sync\engine.py:524:21: ARG001 Unused function argument: `progress_cb`
+src\data_sync\engine.py:728:29: ARG001 Unused function argument: `progress_cb`
+src\data_sync\engine.py:742:26: ARG001 Unused function argument: `progress_cb`
+src\data_sync\engine.py:926:63: ARG001 Unused function argument: `pk_cols`
+src\data_sync\engine.py:927:31: ARG001 Unused function argument: `text_cols`
+src\data_sync\engine.py:938:18: ARG001 Unused function argument: `cfg`
+src\data_sync\engine.py:938:44: ARG001 Unused function argument: `backfill_from`
+src\data_sync\engine.py:939:18: ARG001 Unused function argument: `progress_cb`
+src\data_sync\engine.py:1210:16: ARG001 Unused function argument: `kind`
+src\data_sync\engine.py:1210:53: ARG001 Unused function argument: `last`
+src\data_sync\pool_data.py:82:48: ARG001 Unused function argument: `ts_code`
+src\im_bot\base.py:75:31: ARG002 Unused method argument: `bot_id`
+src\im_bot\base.py:75:44: ARG002 Unused method argument: `headers`
+src\im_bot\base.py:75:59: ARG002 Unused method argument: `body`
+src\im_bot\dingtalk.py:54:55: ARG002 Unused method argument: `receive_id_type`
+src\im_bot\dingtalk.py:79:25: ARG002 Unused method argument: `bot_id`
+src\im_bot\dingtalk.py:79:38: ARG002 Unused method argument: `receive_id`
+src\im_bot\dingtalk.py:79:55: ARG002 Unused method argument: `receive_id_type`
+src\im_bot\dingtalk.py:79:77: ARG002 Unused method argument: `card`
+src\im_bot\dingtalk.py:83:31: ARG002 Unused method argument: `bot_id`
+src\im_bot\dingtalk.py:83:44: ARG002 Unused method argument: `headers`
+src\im_bot\dingtalk.py:83:59: ARG002 Unused method argument: `body`
+src\im_bot\wecom.py:58:25: ARG002 Unused method argument: `bot_id`
+src\im_bot\wecom.py:58:38: ARG002 Unused method argument: `receive_id`
+src\im_bot\wecom.py:58:55: ARG002 Unused method argument: `receive_id_type`
+src\im_bot\wecom.py:58:77: ARG002 Unused method argument: `text`
+src\im_bot\wecom.py:62:25: ARG002 Unused method argument: `bot_id`
+src\im_bot\wecom.py:62:38: ARG002 Unused method argument: `receive_id`
+src\im_bot\wecom.py:62:55: ARG002 Unused method argument: `receive_id_type`
+src\im_bot\wecom.py:62:77: ARG002 Unused method argument: `card`
+src\im_bot\wecom.py:65:31: ARG002 Unused method argument: `bot_id`
+src\im_bot\wecom.py:65:44: ARG002 Unused method argument: `headers`
+src\im_bot\wecom.py:65:59: ARG002 Unused method argument: `body`
+src\risk_control\risk_rule.py:52:28: ARG002 Unused method argument: `context`
+src\risk_control\risk_rule.py:65:21: ARG002 Unused method argument: `order`
+src\scheduler\tasks.py:94:27: ARG001 Unused function argument: `self`
+src\scheduler\tasks.py:112:18: ARG001 Unused function argument: `self`
+src\scheduler\tasks.py:797:22: ARG001 Unused function argument: `self`
+src\scheduler\tasks.py:967:26: ARG001 Unused function argument: `self`
+src\strategies\convertible_doublelow.py:21:33: ARG002 Unused method argument: `history`
+src\strategy_framework\adapters.py:77:30: ARG002 Unused method argument: `client_id`
+src\strategy_framework\adapters.py:485:50: ARG002 Unused method argument: `session`
+src\strategy_framework\adapters.py:490:39: ARG002 Unused method argument: `err`
+src\strategy_framework\adapters.py:490:65: ARG002 Unused method argument: `session`
+src\strategy_framework\adapters.py:493:42: ARG002 Unused method argument: `err`
+src\strategy_framework\adapters.py:493:68: ARG002 Unused method argument: `session`
+src\strategy_framework\adapters.py:496:39: ARG002 Unused method argument: `err`
+src\strategy_framework\adapters.py:496:65: ARG002 Unused method argument: `session`
+src\strategy_framework\adapters.py:586:37: ARG002 Unused method argument: `session`
+src\strategy_framework\adapters.py:594:32: ARG002 Unused method argument: `session`
+src\strategy_framework\factor.py:26:28: ARG002 Unused method argument: `node`
+src\strategy_framework\factor.py:28:32: ARG002 Unused method argument: `node`
+src\strategy_framework\factor.py:75:22: ARG001 Unused function argument: `signum`
+src\strategy_framework\factor.py:75:30: ARG001 Unused function argument: `frame`
+src\strategy_framework\factor.py:698:23: ARG002 Unused method argument: `ctx`
+src\strategy_framework\md_gateway.py:239:50: ARG002 Unused method argument: `bid1_count`
+src\strategy_framework\md_gateway.py:239:62: ARG002 Unused method argument: `ask1_count`
+src\strategy_framework\md_gateway.py:245:55: ARG002 Unused method argument: `is_last`
+src\strategy_framework\md_gateway.py:248:57: ARG002 Unused method argument: `is_last`
+src\strategy_framework\md_gateway.py:335:24: ARG002 Unused method argument: `counters`
+src\strategy_framework\md_gateway.py:420:30: ARG002 Unused method argument: `in_session`
+src\strategy_framework\md_gateway.py:527:24: ARG002 Unused method argument: `counters`
+src\strategy_framework\md_gateway.py:589:23: ARG002 Unused method argument: `cred`
+src\strategy_framework\md_gateway.py:621:23: ARG002 Unused method argument: `cred`
+src\strategy_runner\trading.py:62:36: ARG001 Unused function argument: `sid`
+src\task_manager.py:140:46: ARG001 Unused function argument: `provider`
+src\web_api\main.py:25:29: ARG001 Unused function argument: `request`
+src\web_api\routes\alerts.py:100:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\alerts.py:426:24: ARG001 Unused function argument: `payload`
+src\web_api\routes\auth_routes.py:183:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\auth_routes.py:599:17: ARG001 Unused function argument: `payload`
+src\web_api\routes\auth_routes.py:747:17: ARG001 Unused function argument: `payload`
+src\web_api\routes\auth_routes.py:878:16: ARG001 Unused function argument: `payload`
+src\web_api\routes\auth_routes.py:939:14: ARG001 Unused function argument: `payload`
+src\web_api\routes\auth_routes.py:1003:24: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:26:16: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:128:27: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:238:18: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:269:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:285:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:367:35: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:395:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:432:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:504:25: ARG001 Unused function argument: `payload`
+src\web_api\routes\backtest.py:590:25: ARG001 Unused function argument: `payload`
+src\web_api\routes\chat.py:155:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\chat.py:231:30: ARG001 Unused function argument: `payload`
+src\web_api\routes\chat.py:252:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\chat.py:297:38: ARG001 Unused function argument: `payload`
+src\web_api\routes\im_bots.py:20:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\im_bots.py:65:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:140:45: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:168:30: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:315:30: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:387:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:398:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:486:20: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:493:18: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:521:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\mgmt.py:542:45: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:16:16: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:47:18: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:68:26: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:206:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:215:26: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:268:19: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:278:15: ARG001 Unused function argument: `payload`
+src\web_api\routes\risk.py:329:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\routing.py:17:19: ARG001 Unused function argument: `payload`
+src\web_api\routes\routing.py:65:13: ARG001 Unused function argument: `payload`
+src\web_api\routes\routing.py:91:37: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:16:35: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:48:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:63:24: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:127:19: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:146:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:172:19: ARG001 Unused function argument: `remaining_min`
+src\web_api\routes\stock.py:173:19: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:218:20: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:238:37: ARG001 Unused function argument: `payload`
+src\web_api\routes\stock.py:252:39: ARG001 Unused function argument: `payload`
+src\web_api\routes\strategy.py:44:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\strategy.py:94:50: ARG001 Unused function argument: `payload`
+src\web_api\routes\strategy.py:105:25: ARG001 Unused function argument: `payload`
+src\web_api\routes\strategy.py:223:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\strategy.py:251:24: ARG001 Unused function argument: `payload`
+src\web_api\routes\strategy.py:325:31: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:18:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:92:28: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:123:38: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:137:26: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:173:22: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:218:28: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:297:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\sync.py:319:27: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:48:18: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:62:17: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:195:27: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:205:41: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:266:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:326:25: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:443:50: ARG001 Unused function argument: `request`
+src\web_api\routes\system.py:460:24: ARG001 Unused function argument: `payload`
+src\web_api\routes\system.py:568:33: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:18:21: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:189:23: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:250:18: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:305:13: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:344:16: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:360:19: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:374:43: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:384:27: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:394:53: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:405:30: ARG001 Unused function argument: `payload`
+src\web_api\routes\trading.py:414:19: ARG001 Unused function argument: `payload`
