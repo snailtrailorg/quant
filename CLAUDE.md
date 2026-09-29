@@ -3,7 +3,7 @@
 > `AGENTS.md` 软链到本文件，两个工具读同一份。**真相源在文件里，不在对话里。**
 > 本文件是**运行时合同**：精要规则 + 约束 + 指针。完整详规在 `flow/规范/`。
 >
-> **分层铁律**（2026-08-19 模块归位，tests/test_layering.py 断言守门）：`quant_common`（层 0 底座，禁业务依赖）← 数据/服务层 ← 应用层 ← 入口层（web_api/feishu_bot 组合根）；下层禁 import 上层（lazy 计入）；共享工具放 `quant_common`、业务逻辑不寄生 HTTP 入口。
+> **分层铁律**（2026-08-19 模块归位，tests/test_layering.py 断言守门）：`quant_common`（层 0 底座，禁业务依赖）← 数据/服务层 ← 应用层 ← 入口层（web_api/feishu_bot 组合根）；下层禁 import 上层（lazy 计入）；共享工具放 `quant_common`、业务逻辑不寄生 HTTP 入口（**新路由禁内联 SQL/get_conn——SQL 下沉 `data_platform` 等层 1-2 模块，`tests/test_no_sql_in_new_routes.py` 断言守门**）。
 > 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（持久化，跨会话）。
   - 服务器部署信息：`server-info.md`（IP/OS/路径/分库/备份/密钥）
   - 部署机制：`deploy-mechanism.md`（三权分立/脚本/闸门/安全边界）
@@ -28,14 +28,14 @@
 
 1. `flow/charter.md` — 目标 / 范围 / 约束 / 成功标准
 2. `flow/plan.md` — 当前计划（**契约**，未确认不要偏离）
-3. `flow/进展.md` **顶部一条** — 上一棒交接棒（做了啥 / 产出路径 / 下一步）
+3. `flow/进展.md` **「最近 3 条」顶部一条**（历史按月归档 `flow/进展/`）— 上一棒交接棒（做了啥 / 产出路径 / 下一步）
 4. `flow/待办.md` - 当前待办跟踪表（**单一真相源**，进展/decisions 不再重复列待办）
 5. 项目记忆: `~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（跨会话持久化，含所有关键决策与选型）
 
 ## 收工前必做
 
 0. **`git push`**（大陆网络 `spe git push`）——远端不同步=收工未完成（教训：118 commits 堆七天跨会话无人发现，2026-08-28）。
-1. 在 `flow/进展.md` **最上面追加一条进展**（做了什么/为什么/产出路径/问题→解决/下一步），**并把这条同时贴在回复里**——这就是交接棒。
+1. 在 `flow/进展/<当前月>.md` **最上面追加一条进展**（做了什么/为什么/产出路径/问题→解决/下一步），同步更新 `flow/进展.md` 索引的「最近 3 条」，**并把这条同时贴在回复里**——这就是交接棒。
 2. 决策追加 `flow/decisions.md`；问题/踩坑追加 `flow/踩坑记录.md`。
 3. 文档自检：本轮若动了结构/方向/约定，主动提议更新本文件。
 
