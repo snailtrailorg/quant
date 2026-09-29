@@ -1,0 +1,148 @@
+## 1. 认证与用户管理
+
+
+### 登录
+- 支持**用户名或邮箱**登录（含 `@` 按 email 查，否则按 username）
+- 被禁账户返回 `ACCOUNT_DISABLED`（不再误报密码错误）
+- JWT 24h + `jti`；logout 将 jti 写入 Valkey 黑名单 `jwt:bl:{jti}`（登出即失效）
+- 登录成功记录 `last_login_at` / `last_login_ip`（X-Forwarded-For 取真实 IP）
+
+### 邀请制（非公开注册）
+- admin 填邮箱发邀请（`POST /api/auth/invite`，语言=操作者界面语言 `lang`）
+- `user_tokens` 表存 invite token（72h 有效，含 `revoked` 撤销标记）
+- 邀请记录页（`GET /api/invites`）：待注册/已使用/已过期/已撤销 + 撤销操作
+- 注册页：验证 token → 设置用户名+密码（二次确认+复杂度≥8位含字母数字）→ **条款强制阅读**（全语言堆叠，滚到底才能点"我已阅读并同意"）→ 默认 Viewer
+- 开通成功自动发通知邮件（附登录链接+条款全文）
+
+### 账户保护（两条不变量）
+- **管理页**：不能动自己（`guard_user_mutation`，删/改角色/禁用）。末位 admin 无需显式规则——user_mgmt 仅 admin 持有 + 不能动自己 ⇒ 不可达
+- **自助注销**：唯一启用的 admin 不能注销自己（`guard_self_deactivate`，此路径下真实可达）
+
+### 软删除/注销
+- `DELETE /api/user/{id}` 和 `POST /api/user/deactivate` 共用 `soft_delete_user()`：`deleted_at` 置时间 + email/nickname 置空 + username 加 `_deleted_随机后缀`（释放占用）+ 头像文件清理
+- 登录/列表过滤已注销；列表显示"已注销" tag
+- 自助注销额外做 token 拉黑（logout 同款）
+
+### 个人中心 `/profile`（所有角色可见）
+- 头像查看/更换（点头像开弹窗：系统图标网格 36 个 / 上传裁剪）、昵称编辑、角色/邮箱只读（纯文本非编辑框）、改密码、注销账号
+- 修复了此前普通用户无入口改密码的缺陷（`/account` 是 admin-only）
+
+### 头像系统
+- `users.avatar_url` 三态语义：空=按昵称 hash 从 36 图标确定性选择 / `/icons/icon_NN.png`=系统图标 / `/api/static/avatars/user_{id}.jpg?t=`=上传
+- 系统图标：用户自制 36 个（`web/public/icons/`），后端正则 `icon_(?:[0-2]\d|3[0-5])\.png` 白名单防注入
+- 上传：vue-cropper 裁剪 1:1（fixed-box=false 可缩放）→ base64 → Pillow 中心裁方+256px JPEG → 覆盖式文件名（无孤儿文件）
+- 静态挂载：`/api/static/avatars`（FastAPI mount，nginx 已代理 `/api/` 零额外配置）
+- **部署注意**：`deploy-server.sh` EXCLUDES 含 `--exclude static/avatars/`（rsync --delete 不删用户上传）
+
+## 2. 邮件体系
+
+### 发件箱（持久化+指数退避）
+- `email_outbox` 表（status/attempts/next_attempt_at/last_error），进程重启不丢
+- 流程：接口触发 → `queue_email()` 落 PG → `try_row()` 立即试发 → 失败按指数退避重发（1→2→4→8→16→30min，6 次耗尽标 failed）
+- Celery beat `email_outbox_sweep` 每分钟扫描（queue=risk，limit=3/轮防超时）
+- 三封邮件（邀请/重置/开通）全走发件箱；接口用 BackgroundTasks 后台发送，永不因 SMTP 超时返回失败
+
+### SMTP 配置（DB 单一真相源）
+- `system_config` 表 `smtp_*` 五项：host/port/security(username/password(加密)/from)
+- **弃 .env**（2026-08-14 决策）：`_smtp_config()` 仅读 DB；`SMTP_DEV=true` 仅本地开发显式开打印模式
+- 加密方式 auto（465→SSL / 587→STARTTLS，RFC 8314）/ ssl / starttls，auto 为默认
+- 前端：系统配置页「邮件发信配置」整组表单 + 发送测试邮件按钮
+- 密码 Fernet 加密存储，API 永不回传明文，留空=不修改
+
+### 邮件可观测
+- Logs 页「邮件发件箱」卡片：status/收件人/主题/尝试次数/下次重发/最后错误
+- 最终失败 → 通知中心（critical/email，admin 铃铛可见，点击直达发件箱）
+
+## 3. 通知中心
+
+### 架构（迁移 0030）
+- `notifications` 表（level/category/title/body/source_ref/status/acked_by/acked_at）
+- 统一入口 `alert_notify.notify(level, category, title, body, source_ref)` → PG 落库 + 按规则外推
+- `report()` 为订阅型（盘后报告）：站内 info + 外部照推
+
+### 类别×角色可见矩阵
+| 类别 | 可见角色 |
+|---|---|
+| email | admin |
+| risk | admin + trader |
+| task | admin + trader |
+| data | admin + analyst |
+| system | admin |
+
+Viewer 无可见类别 → 铃铛隐藏。
+
+### 外部推送规则
+- 仅 **risk + critical** 推外部通道（企微/Discord）；其余仅站内
+- 事件源：email 最终失败(critical) / 任务失败PT7(warn) / 接口健康/磁盘/通道(system) / 漂移/对账(risk) / 数据断连(data)
+
+### 前端闭环
+- MainLayout 顶栏铃铛（60s 轮询 active 数）→ 点击按类别跳转（email→/logs 等）→「全部确认」消红点
+- Logs 页「通知历史」读 PG（替代旧 Valkey alert:history，2026-08-14 直接切换）
+
+## 4. 多语言架构（N 语言，en 缺省）
+
+### 注册表驱动（加语言=只加条目零逻辑改动）
+1. `locales/index.js` 加语言对象
+2. `i18n.js` LANGUAGES 数组注册
+3. `terms.py` TERMS dict + LANG_NAMES dict
+4. `email_service.py` 邮件模板 dict 加条目
+
+### 各层策略
+| 载体 | 策略 |
+|---|---|
+| 平台页面/铃铛 | 浏览器语言自动（`navigator.languages` 遍历匹配，en 兜底） |
+| 条款（页面+邮件） | **全语言纵向堆叠**，不依赖检测 |
+| 邮件 | 操作者界面语言（前端随请求传 `lang`，后端 `normalize_lang` 回落 en） |
+| LLM/飞书 | 跟随输入语言 |
+
+### 条款（terms.py 单一真相源）
+- `GET /api/terms` 返回 `items: [{lang, name, body}]` 数组（前端零语言知识）
+- 注册页弹窗+开通邮件共用；注册时强制阅读（滚到底解锁确认按钮）
+
+## 5. 错误码化
+
+### 后端
+- `ApiError(status, CODE, 中文兜底)` → 响应 `{detail: string, code: string}`（向后兼容）
+- 20 码 22 处用户流程已迁移（认证/邀请/注册/重置/改密/用户管理/SMTP/系统配置）
+- `validate_password` 细分：PASSWORD_TOO_SHORT / PASSWORD_NO_LETTER / PASSWORD_NO_DIGIT
+
+### 前端
+- `apiErr(e, fallback)`：`e.code` 有 `err.<CODE>` 翻译→显示本地化；无映射→回落 `e.detail`
+- `err` 命名空间在 locales 中，加新码=后端 raise 处定码 + 前端加条目
+
+## 6. 前端 UI 规范
+
+详见 `web/DESIGN.md`（单一真相源，10 节）。要点：
+- **全局尺寸**：`App.vue` 的 `<el-config-provider size="default">` 一处控制（禁逐页写 size）
+- **按钮**：默认档（32px）+ 每按钮必有语义色（蓝=主操作+常规 / 绿=启动 / 橙=停止 / 红=删除）；**禁 link/plain/text**（灰=像禁用）
+- **表格**：长文本列 min-width+tooltip；操作列固定宽+nowrap
+- **只读字段**：纯文本展示（不用编辑框）
+- i18n：N 语言注册表，各语言 key 1:1
+
+## 7. 部署
+
+### 脚本链
+```
+deploy-server.sh（bernard 入口）
+  → sudo -u michael quant-deploy.sh（运行副本在 ~/.local/bin/，michael 拥有）
+  → 动作：deploy(rsync) → fix-venv → pip-install → migrate → restart-server/celery/feishu
+```
+
+### 关键 EXCLUDES
+`.env` / `venv/` / `__pycache__/` / `*.pyc` / `.pytest_cache/` / **`static/avatars/`（用户上传头像）**
+
+### deploy 防僵尸校验
+`restart_server()` 先 `_stabilize`（systemctl is-active 连续两次 active）再 health；crash-loop/端口被非 systemd 进程占用时 ❌ 终止部署
+
+---
+
+## 当前测试与迁移状态
+- **223 单测全过**（原 179 + SA 稳定性 9 + SB 风控 14 + SC 订单 8 + SD 安全 13）
+- **迁移链**：0001 → … → 0039（0038=strategy_config 补列；0039=order/trade 对账列+trade_ref 唯一索引）；alembic 唯一真相源
+- **服务器**：quant.snailtrail.cc 全服务健康；systemd 终态=web-api/celery-worker/beat/**risk**/feishu@10 enabled-indirect + strategy/live-task 按需；2G swap；JWT 48B 随机密钥+ENCRYPTION_KEY 独立固化；celery 实跑 db5/6
+
+## 下一步
+- #47 ENCRYPTION_KEY 独立轮换工具（现固化旧派生值可用，轮换需重加密配套）
+- #48 verify_schema 列级校验 + 全表列漂移审计
+- SF 长尾清理（F-36~F-40/49~51/55/56/59）+ ST2 持仓真相源（position_snapshot）
+- SMTP 送达率观察；通知闭环实测
