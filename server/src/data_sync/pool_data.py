@@ -12,12 +12,17 @@ dividend 窗口过滤实测无效（返回 0 行矛盾）维持全量；小表�
 标的、无窗口全量、不推进游标。
 """
 from __future__ import annotations
-import json, logging, time
+
+import json
+import logging
+import time
 from datetime import date
+
 from src.data_platform import db as _pdb
-from .sync_lock import SyncLock
-from .engine import _get_rate_ds
 from src.data_platform.rate_limit import rate_limit_context
+
+from .engine import _get_rate_ds
+from .sync_lock import SyncLock
 
 logger = logging.getLogger("data_sync.pool_data")
 
@@ -80,11 +85,13 @@ def _get_pool_ts_codes():
         return [vt_to_ts(r[0]) for r in cur.fetchall() if r[0]]
 
 def _upsert_rows(table, pk_cols, core_map, df, ts_code):
-    if df is None or df.empty: return 0
+    if df is None or df.empty:
+        return 0
     import pandas as pd
     insert_cols = pk_cols + [c for c in core_map if c not in pk_cols]
     raw_tables = {"income","balancesheet","cashflow","fina_indicator"}
-    if table in raw_tables: insert_cols = insert_cols + ["raw_json"]
+    if table in raw_tables:
+        insert_cols = insert_cols + ["raw_json"]
     placeholders = ", ".join(["%s"]*len(insert_cols))
     conflict = ", ".join(pk_cols)
     updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in insert_cols if c not in pk_cols and c != "raw_json")
@@ -106,7 +113,8 @@ def _upsert_rows(table, pk_cols, core_map, df, ts_code):
                         v = row.get(core_map[c])
                         try:
                             vals.append(float(v) if v is not None and _is_num(v) else (str(v) if v is not None else None))
-                        except: vals.append(str(v) if v is not None else None)
+                        except (TypeError, ValueError):
+                            vals.append(str(v) if v is not None else None)
                     else:
                         v = row.get(c)
                         vals.append(str(v) if v is not None else None)
@@ -117,8 +125,11 @@ def _upsert_rows(table, pk_cols, core_map, df, ts_code):
     return saved
 
 def _is_num(v):
-    try: float(v); return True
-    except: return False
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError, OverflowError):
+        return False   # 非数值一律视为非数字（含溢出）
 
 def sync_pools_data(timebox_s=280, full=False, symbols=None):
     from src.data_platform.adapters import tushare_adapter as adapter
@@ -146,7 +157,8 @@ def _advance_cursors(done_symbols, ts_codes, today_str):
     """游标推进：增量表本轮覆盖全部标的才推进（防 timebox 中断漏标的）。"""
     full_set = set(ts_codes)
     for table, spec in POOL_DATA_TYPES.items():
-        if not spec.get("incremental"): continue
+        if not spec.get("incremental"):
+            continue
         if full_set <= done_symbols.get(table, set()):
             try:
                 with _pdb.get_conn() as conn:
@@ -171,13 +183,15 @@ def _sync_pools_data_inner(adapter, timebox_s, full=False, symbols=None):
         # symbols 模式：定向回补（入池触发）——只跑指定标的，无窗口全量，不推进游标
         backfill = bool(symbols)
         ts_codes = list(symbols) if symbols else _get_pool_ts_codes()
-        if not ts_codes: return {"status":"idle","reason":"无池标的"}
+        if not ts_codes:
+            return {"status": "idle", "reason": "无池标的"}
         pro = adapter.get_pro()
         ds = _get_rate_ds("tushare")   # 批 64b：限速/熔断选源（engine 同款单源）
         today_str = date.today().strftime("%Y%m%d")
         cursors = {} if (full or backfill) else _load_cursors()
         deadline = time.time() + timebox_s
-        total_saved = 0; errors = []
+        total_saved = 0
+        errors = []
         done_symbols = {}  # table -> 已完成标的集合（游标推进判据）
         timeboxed = False
         for ts_code in ts_codes:
@@ -202,7 +216,8 @@ def _sync_pools_data_inner(adapter, timebox_s, full=False, symbols=None):
                 except Exception as e:
                     errors.append(f"{ts_code}/{table}: {type(e).__name__}: {str(e)[:40]}")
                     logger.warning("池数据 %s/%s: %s", ts_code, table, e)
-            if timeboxed: break
+            if timeboxed:
+                break
         # 游标推进在收尾统一做（按表判覆盖：timebox 中断未覆盖的表下轮重拉同窗口幂等）
         if not backfill:
             _advance_cursors(done_symbols, ts_codes, today_str)

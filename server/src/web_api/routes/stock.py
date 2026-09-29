@@ -1,8 +1,12 @@
-from fastapi import APIRouter, Depends, Request, Query, Body, HTTPException
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from src.data_platform.db import get_conn
 import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+
 # 批10：不再模块级 import pandas——web-api 常驻进程的 pandas 唯一用途曾是本文件两个
 # pd.notna()（+57MB RSS）；K 线路由改走 db.get_kline_records 零 pandas 直查。
 # 防回潮守门：tests/test_web_api_lazy.py。
@@ -74,8 +78,7 @@ def analyze_stock_api(symbol: str,
     POST（触发计费）；同标的 10min 缓存（key 用 ts_code 归一——O 审 M3）。
     已知限制（O 审 M4）：并发首 miss 可能重复计费，单用户场景可接受。
     """
-    from src.data_platform.stock_detail import (get_stock_detail, _normalize,
-                                                analyze_cache_get, analyze_cache_set)
+    from src.data_platform.stock_detail import _normalize, analyze_cache_get, analyze_cache_set, get_stock_detail
     ts_code, _vt = _normalize(symbol)
     cached = analyze_cache_get(ts_code)
     if cached:
@@ -84,7 +87,8 @@ def analyze_stock_api(symbol: str,
     if not detail.get("name") and not (detail.get("quote") or {}).get("name"):
         raise ApiError(404, "SYMBOL_NOT_FOUND", f"未识别标的 {symbol}")
     from src.llm_gateway import gateway
-    _clip = lambda v, n=200: str(v).replace("\n", " ")[:n] if v is not None else ""   # B5：外部字段截断防注入
+    def _clip(v, n=200):
+        return str(v).replace("\n", " ")[:n] if v is not None else ""   # B5：外部字段截断防注入
     q = detail.get("quote") or {}
     prompt = (
         f"分析以下 A 股标的投资价值与风险，给出结构化观点（趋势/资金/筹码/风险/关注点），中文回复。\n"
@@ -131,9 +135,10 @@ def get_kline_api(symbol: str, days: int = 0,
     返回 [{ts, open, high, low, close, volume}, ...]。
     批10：改走 get_kline_records 零 pandas 直查（Decimal/NaN 转换在 db 层完成）。
     """
+    from datetime import date, timedelta
+
     from src.data_platform.db import get_kline_records
     from src.data_platform.schema import to_vt_symbol
-    from datetime import date, timedelta
     end = date.today()
     start = end - timedelta(days=days) if days > 0 else date(2010, 1, 1)
     vt = to_vt_symbol(symbol)
@@ -145,7 +150,8 @@ def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
                       turnover_min: float = 0, limit: int = 100,
                       payload: dict = Depends(require_perm("read"))):
     """A股基本面筛选（daily_basic 最新交易日 + join asset_static_info name）。"""
-    _f = lambda x: float(x) if x is not None else None
+    def _f(x):
+        return float(x) if x is not None else None
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT d.ts_code, s.name, d.close, d.pe, d.pe_ttm, d.pb, d.turnover_rate, d.total_mv
@@ -172,7 +178,8 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
                   remaining_min: float = 0,
                   payload: dict = Depends(require_perm("read"))):
     """可转债筛选（cb_basic_info + cb_daily + 正股 daily_basic → 双低/溢价率;05 §5.9）。"""
-    _f = lambda x: float(x) if x is not None else None
+    def _f(x):
+        return float(x) if x is not None else None
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT b.ts_code, b.bond_short_name, b.stk_code, b.stk_short_name,
@@ -204,8 +211,10 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
     out = []
     for r in rows:
         dl, pp = _f(r[8]), _f(r[9])
-        if double_low_max > 0 and (dl is None or dl > double_low_max): continue
-        if premium_max > 0 and (pp is None or pp > premium_max): continue
+        if double_low_max > 0 and (dl is None or dl > double_low_max):
+            continue
+        if premium_max > 0 and (pp is None or pp > premium_max):
+            continue
         out.append({"ts_code": r[0], "name": r[1], "stk_code": r[2], "stk_name": r[3],
                     "conv_price": _f(r[4]), "maturity_date": str(r[5]) if r[5] else "",
                     "bond_close": _f(r[6]), "stk_close": _f(r[7]),
@@ -217,7 +226,8 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
 def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
                    payload: dict = Depends(require_perm("read"))):
     """ETF 基金筛选（etf_basic_info + 规模/费率/跟踪误差;05 §5.9）。"""
-    _f = lambda x: float(x) if x is not None else None
+    def _f(x):
+        return float(x) if x is not None else None
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT ts_code, name, management, fund_type, invest_type,
@@ -237,8 +247,8 @@ def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
 @router.get("/api/convertible/terms")
 def convertible_terms(ts_code: str, payload: dict = Depends(require_perm("read"))):
     """可转债条款 LLM 解读（D3 #33）。"""
-    from src.data_platform.adapters.tushare_adapter import pull_cb_basic
     from src.astock_analysis.convertible_terms import analyze_convertible_terms
+    from src.data_platform.adapters.tushare_adapter import pull_cb_basic
     terms = pull_cb_basic(ts_code)
     if not terms:
         raise HTTPException(404, f"可转债 {ts_code} 条款未找到")
@@ -252,8 +262,9 @@ def convertible_terms(ts_code: str, payload: dict = Depends(require_perm("read")
 def security_attr_api(vt_symbol: str, payload: dict = Depends(require_perm("read"))):
     """标的属性：主档+时变时间线+所属时段表（集成中心·标的属性页数据源）。"""
     import re as _re
-    from src.data_platform.security_master import SMClient, get_market_hours
+
     from src.data_platform.db import get_conn
+    from src.data_platform.security_master import SMClient, get_market_hours
     vt_symbol = vt_symbol.strip()
     if not _re.fullmatch(r"[A-Za-z0-9._-]{1,32}", vt_symbol):
         raise ApiError(400, "PARAM_INVALID", "vt_symbol 格式非法（仅限字母数字与 . _ -，长度 ≤32）")

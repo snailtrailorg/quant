@@ -8,16 +8,19 @@ cb_daily / cb_basic / etf_daily / etf_list / trade_cal
 """
 
 from __future__ import annotations
-from src.data_platform.db import get_conn
-from src.data_platform.security_master import normalize_board
+
+import logging
 import os
 import time
 from datetime import date, timedelta
-from typing import Any, Callable
-import psycopg
+from typing import Callable
+
 import pandas as pd
-import logging
+import psycopg
 from dotenv import load_dotenv
+
+from src.data_platform.db import get_conn
+from src.data_platform.security_master import normalize_board
 
 load_dotenv()
 
@@ -52,8 +55,8 @@ def _get_kline_adapter(cfg: dict):
     provider = cfg.get("provider") or "tushare"
     if _routing_pilot_on() and str(cfg.get("id", "")).endswith("_daily"):
         try:
-            from src.quant_common.contract import DataRequest
             from src.data_platform import routing
+            from src.quant_common.contract import DataRequest
             chain = routing.resolve(DataRequest(
                 kind="bar_daily", symbols=("600000.SHSE",), temporality="historical",
                 consumer_tag="sync", mode="supply"))
@@ -109,7 +112,7 @@ def _get_rate_ds(provider: str):
     盲审 A-P1-3：rate_limit_context 的 ds 原硬编码 tushare，切 provider 后限速/熔断串源——
     新源仍按 Tushare 间隔限速、熔断器 key=tushare。改为按 provider 选。
     """
-    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from src.data_platform.data_source import TushareDataSource, get_data_source
     return get_data_source(provider) or TushareDataSource()
 
 
@@ -184,7 +187,7 @@ def _expected_trading_days(start: str, end: str) -> int:
             cnt = cur.fetchone()[0] or 0
             if cnt > 0:
                 return cnt
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return len(pd.date_range(start=start, end=end, freq="B"))
 
@@ -524,7 +527,7 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
                     progress_cb: Callable | None = None) -> dict:
     """交易日历全量同步。"""
     from src.data_platform.adapters.tushare_adapter import pull_trade_cal
-    from src.data_platform.rate_limit import rate_limit_context   # 批 67：裸调收编（顺手）
+    from src.data_platform.rate_limit import rate_limit_context  # 批 67：裸调收编（顺手）
     year = date.today().year
     _ds = _get_rate_ds("tushare")
     with rate_limit_context(_ds, "trade_cal"):
@@ -578,10 +581,12 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     - **降级容错**（积分未到账）：首个交易日因子接口返回 None 即返回 degraded 状态，
       不抛异常——积分到账后重新触发即可。
     """
-    from datetime import date as _date, timedelta as _td
-    from src.data_platform.schema import to_vt_symbol
-    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from datetime import date as _date
+    from datetime import timedelta as _td
+
+    from src.data_platform.data_source import TushareDataSource, get_data_source
     from src.data_platform.rate_limit import rate_limit_context
+    from src.data_platform.schema import to_vt_symbol
     ds = get_data_source("tushare") or TushareDataSource()
     adapter = _get_kline_adapter({})   # 复权因子默认 tushare
 
@@ -668,6 +673,7 @@ def _fetch_supply(adapter, *, kind: str, sub_kind: str | None, symbols: tuple[st
                   start: str, end: str, freq: str, preserve: bool = True):
     """构造 supply DataRequest → 直接 adapter.fetch（决策 4：不走 routing.resolve）。"""
     from datetime import datetime as _dt
+
     from src.quant_common.contract import DataRequest
     rng = (_dt.strptime(start, "%Y%m%d"), _dt.strptime(end, "%Y%m%d"))
     return adapter.fetch(DataRequest(
@@ -758,8 +764,8 @@ def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
 
     DB 写在 rate_limit_context 外（归因拆分，同已退役 _sync_astock_minute）；无 last_success_date。
     """
-    from src.data_platform.rate_limit import rate_limit_context
     from src.data_platform.db import save_bars
+    from src.data_platform.rate_limit import rate_limit_context
     ds = _get_rate_ds(adapter.provider)
     freq = _MINUTE_FREQ.get(sync_id)
     if freq is None:
@@ -858,8 +864,8 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
     def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
                  progress_cb=None) -> dict:
         """通用第一档同步：按 trade_date 拉全市场 → upsert。"""
+        from src.data_platform.data_source import TushareDataSource, get_data_source
         from src.data_platform.db import get_conn as _gc
-        from src.data_platform.data_source import get_data_source, TushareDataSource
         from src.data_platform.rate_limit import rate_limit_context
         ds = get_data_source("tushare") or TushareDataSource()
         # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日）
@@ -1188,7 +1194,8 @@ def _expected_trade_dates(start: str, end: str) -> list[str]:
     # 2. trade_cal DB 没覆盖该区间 -> pro.trade_cal 按年拉
     try:
         pro = _get_pro()
-        start_y = int(start[:4]); end_y = int(end[:4])
+        start_y = int(start[:4])
+        end_y = int(end[:4])
         all_d = []
         from src.data_platform.rate_limit import rate_limit_context
         _ds = _get_rate_ds("tushare")
@@ -1201,7 +1208,7 @@ def _expected_trade_dates(start: str, end: str) -> list[str]:
         if all_d:
             all_d.sort()
             return all_d
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     # 3. 回退：工作日（pandas freq=B）
     return [d.strftime("%Y%m%d") for d in pd.date_range(start=start, end=end, freq="B")]

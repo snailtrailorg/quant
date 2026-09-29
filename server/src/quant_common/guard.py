@@ -4,6 +4,7 @@ P-F2：本模块**不含告警**（alert 依赖 alert_notify→data_platform，�
 需要"异常时告警"的调用方用回调注入：`guard(name, alert=my_alert_fn)`。
 """
 from __future__ import annotations
+
 import logging
 import os
 
@@ -27,7 +28,7 @@ def guard(name: str, alert=None):
                 if alert is not None:
                     try:
                         alert(f"handler 异常: {name}", "事件已跳过，进程继续。详见 journalctl。")
-                    except Exception:
+                    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                         pass  # 守卫绝不放行任何异常（纵深防御）
         return wrapped
     return deco
@@ -45,5 +46,5 @@ def sd_notify(msg: str) -> None:
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
             s.connect(addr)
             s.sendall(msg.encode())
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass  # 喂狗失败不杀主流程（systemd 会重启，靠 Restart 兜底）

@@ -1,16 +1,20 @@
 """回测 + 标的池 + Broker 用量 · 路由"""
 
 from __future__ import annotations
-import json
+
 import asyncio
+import json
 import logging
 import os
+
 import redis
-from fastapi import APIRouter, Depends, Request, Body, WebSocket, WebSocketDisconnect
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq)
+from fastapi import APIRouter, Body, Depends
+
 from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+from ..models import PoolReq
 
 logger = logging.getLogger("web_api")
 
@@ -178,6 +182,7 @@ def create_backtest_api(body: dict = Body(...),
     # 同构分层：run 级 params 判保留键；symbol_params 每标的含保留键即 400（执行侧不消费=脏配置）
     # +defs 按执行同构 defaults⊕params⊕per_symbol 逐标的判定。
     from math import isfinite
+
     from src.strategy_framework.strategy import validate_params_against_defs
     if not isinstance(params, dict) or not isinstance(symbol_params, dict):
         raise ApiError(400, "BAD_BACKTEST_PARAM", "params/symbol_params 须为对象")
@@ -324,7 +329,8 @@ def get_backtest_api(run_id: int,
         # 度量回测窗口而非执行时长（分钟级 run 用 created→finished 会恒 1 天被 90 门误拦）
         _ss = [_d((_safe_json(_x[2], {})).get("start_date")) for _x in syms if _x[1] == "done" and _x[2]]   # 批27-9
         _ee = [_d((_safe_json(_x[2], {})).get("end_date")) for _x in syms if _x[1] == "done" and _x[2]]
-        _ss = [x for x in _ss if x]; _ee = [x for x in _ee if x]
+        _ss = [x for x in _ss if x]
+        _ee = [x for x in _ee if x]
         if _ss and _ee:
             span_days = (max(_ee) - min(_ss)).days + 1
         else:
@@ -435,8 +441,9 @@ def backtest_export(run_id: int, symbol: str | None = None,
     同步生成（数据量小，10s 内完成），返回 xlsx 文件流。symbol 可选（单标的导出，前端单标视图传）。
     """
     import io
-    from openpyxl import Workbook
+
     from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
 
     sql = "SELECT symbol, result FROM backtest_symbols WHERE run_id=%s AND status='done'"
     params = [run_id]
@@ -509,7 +516,9 @@ def backtest_export_pdf(run_id: int, symbol: str | None = None, lang: str = "en"
     """
     import html as _html
     import io
+
     from fastapi.responses import StreamingResponse
+
     from src.email_service import normalize_lang
     try:
         from weasyprint import HTML

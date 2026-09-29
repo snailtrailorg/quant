@@ -1,15 +1,18 @@
 """系统维护相关端点：健康检查 / 探针 / 系统配置 / 通知 / 邮件 / 条款 / 帮助。"""
 
-from fastapi import APIRouter, Depends, Request, Body, BackgroundTasks
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq)
-from src.data_platform.db import get_conn
-from src.email_service import queue_email, try_row
-from ..terms import get_terms_items
-import os
 import json
 import logging
+import os
+
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Request
+
+from src.data_platform.db import get_conn
+from src.email_service import queue_email, try_row
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+from ..terms import get_terms_items
+
 logger = logging.getLogger("web_api")
 
 
@@ -103,7 +106,9 @@ def api_probe(request: Request):
         return _q
 
     def _valkey():
-        import os, redis
+        import os
+
+        import redis
         r = redis.Redis.from_url(
             os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2)
         r.ping()
@@ -114,7 +119,10 @@ def api_probe(request: Request):
         # （pattern 尾冒号隔离——glob 不吞垂死裸键）全部新鲜且在场集非空才 ok；
         # 空集=vacuous 真空洞（发布后全没起来最可能场景）必须 not ready。
         # 期望集比对归 SA4 周期对账/hbcheck 发布探针（职责分离，防坏行拖死发布判定）。
-        import os, redis, time
+        import os
+        import time
+
+        import redis
         r = redis.Redis.from_url(
             os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2,
             decode_responses=True)   # 彩排实锤：不 decode 则 scan_iter 返 bytes，rsplit(":") 炸 TypeError
@@ -182,8 +190,9 @@ def metrics():
     Zabbix HTTP agent（Prometheus pattern 预处理）/ Prometheus / Grafana 通吃。
     Phase 2 Zabbix 落地时在 nginx 层限源（只许 NAS Zabbix/内网）。
     """
-    from src.health_monitor.collector import collect, render_prometheus
     from fastapi.responses import PlainTextResponse
+
+    from src.health_monitor.collector import collect, render_prometheus
     return PlainTextResponse(render_prometheus(collect()), media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
@@ -270,6 +279,7 @@ def system_alerts_api(payload: dict = Depends(require_perm("system_config"))):
     角标维持上次值。
     """
     import redis
+
     from src.health_monitor.monitor import _STATE_PREFIX as _pfx
     r = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
                              decode_responses=True, socket_timeout=2)
@@ -461,7 +471,8 @@ def list_system_config(payload: dict = Depends(require_perm("read"))):
     """列系统配置（viewer+ 只读）。password 型不回传明文，返回空值 + has_value 标记。
     alert_sms_* 凭证走专用端点 /api/alerts/sms-config（alerts_config=admin 专属），通用面隐藏。"""
     import re as _re
-    _block = lambda k: bool(_re.match(r"^alert_sms_", k))
+    def _block(k):
+        return bool(_re.match(r"^alert_sms_", k))
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT key, value, value_type, description, updated_at, updated_by "
@@ -503,11 +514,15 @@ def update_system_config(key: str, body: dict = Body(...),
         value_type = row[0]
         # 类型校验 + 规范化
         if value_type == "int":
-            try: value = str(int(value))
-            except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 int 值")
+            try:
+                value = str(int(value))
+            except Exception:
+                raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 int 值")
         elif value_type == "float":
-            try: value = str(float(value))
-            except Exception: raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 float 值")
+            try:
+                value = str(float(value))
+            except Exception:
+                raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 float 值")
         # 批36b-α：数值键→(lo,hi) 查表注册表（批28-7 两键特例并入统一；未注册键=仅 cast 零范围
         # ——注册表是增强非强制全集）。NaN/Inf 一并拒（36a 同病）。
         from math import isfinite
@@ -542,8 +557,10 @@ def update_system_config(key: str, body: dict = Body(...),
         elif value_type == "bool":
             value = "true" if value in (True, "true", "True", "1", 1) else "false"
         elif value_type == "json":
-            try: value = json.dumps(value) if not isinstance(value, str) else value
-            except Exception: pass
+            try:
+                value = json.dumps(value) if not isinstance(value, str) else value
+            except Exception:  # noqa: S110
+                pass  # 失败不阻断（fail-open 降级）
         elif value_type == "password":
             value = str(value).strip()
             if not value:

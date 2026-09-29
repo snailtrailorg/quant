@@ -1,14 +1,17 @@
 """聊天/LLM · 路由（自然语言查询、WS 流式、LLM 模型/用量/预算、A股选股）"""
 
 from __future__ import annotations
+
 import asyncio
 import logging
-import json
-from fastapi import APIRouter, Depends, Request, Body, WebSocket, WebSocketDisconnect, Query
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import (ChatReq, LLMModelReq)
+
+from fastapi import APIRouter, Body, Depends, Query, WebSocket
+
 from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+from ..models import ChatReq, LLMModelReq
 
 logger = logging.getLogger("web_api")
 
@@ -47,11 +50,10 @@ def chat(req: ChatReq, payload: dict = Depends(require_perm("strategy_control"))
 
 
 def _execute_readonly_tool(tool_name: str, args: str) -> str:
-    """执行只读工具，返回结果文本（P1-4 LLM 工具闭环）。"""
-    try:
-        params = json.loads(args) if isinstance(args, str) else (args or {})
-    except Exception:
-        params = {}
+    """执行只读工具，返回结果文本（P1-4 LLM 工具闭环）。
+
+    args 预留：当前 readonly 工具均无参，未来参数化工具消费 args 时再解析。
+    """
     try:
         if tool_name == "query_risk_state":
             from src.risk_control import RiskControl
@@ -125,7 +127,7 @@ async def ws_chat(ws: WebSocket, token: str = Query(None)):
             async for chunk in gateway.chat_stream(messages, role=role, caller="web_chat"):
                 await ws.send_text(chunk)
             await ws.send_text("[DONE]")
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
 
@@ -135,7 +137,7 @@ async def ws_market(ws: WebSocket, token: str = Query(...)):
     P0-8：ws 参数缺 WebSocket 注解时被当 query 参数--accept() 对 str 调用必炸。"""
     from ..auth import verify_jwt
     try:
-        payload = verify_jwt(token)
+        verify_jwt(token)   # 仅验证有效性（异常=token 无效），不消费 payload 内容
     except Exception:
         await ws.close(code=4001, reason="token 无效")
         return
@@ -144,7 +146,7 @@ async def ws_market(ws: WebSocket, token: str = Query(...)):
         while True:
             await ws.send_json({"type": "ping", "msg": "行情 WS 待实盘数据接入"})
             await asyncio.sleep(30)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
 
@@ -229,8 +231,9 @@ def delete_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"
 
 @router.post("/api/llm-models/{mid}/test")
 def test_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"))):
-    from src.quant_common.crypto import decrypt
     from openai import OpenAI
+
+    from src.quant_common.crypto import decrypt
     with get_conn() as conn:
         cur = conn.execute("SELECT api_key_encrypted, base_url, model FROM llm_model_config WHERE id=%s", (mid,))
         r = cur.fetchone()
@@ -297,6 +300,7 @@ def llm_usage_series(payload: dict = Depends(require_perm("read"))):
 def astock_selection(date: str = "", payload: dict = Depends(require_perm("read"))):
     """当日选股结果（横截面：一档表全市场一次 SQL）。date=YYYYMMDD 历史截面。"""
     import re
+
     from src.astock_analysis import DailySelectionEngine
     if date and not re.fullmatch(r"\d{8}", date):
         raise ApiError(400, "PARAM_INVALID", "date 需为 YYYYMMDD")

@@ -20,6 +20,7 @@ tick 契约（EMQ 等自研网关 Phase B 须产出兼容对象，duck typing）
 全部 vnpy/XTP import 惰性（模块可被无 vnpy 环境导入——测试/层序）。
 """
 from __future__ import annotations
+
 import logging
 import os
 import queue
@@ -141,8 +142,9 @@ class XtpMdGateway(MdGateway):
 
     def __init__(self, counters):
         from vnpy.event import EventEngine
-        from vnpy.trader.event import EVENT_LOG
         from vnpy.trader.constant import Exchange
+        from vnpy.trader.event import EVENT_LOG
+
         from src.strategy_framework.md_api_guard import GuardedXtpMdApi
         from src.strategy_framework.md_session import XtpMdSession, load_xtp_window_cfg
         from src.strategy_framework.runtime.alerts import make_alert
@@ -198,6 +200,7 @@ class XtpMdGateway(MdGateway):
         非 LOGGED_IN 态裸调 C 面有炸回调线程风险，跳过+debug（真实兜底=重连后全量重放）。
         """
         from vnpy_xtp.gateway.xtp_gateway import EXCHANGE_VT2XTP
+
         from src.strategy_framework.md_api_guard import SdkState
         raw, ex = symbol.rsplit(".", 1)
         e = self._EX.get(ex)
@@ -276,9 +279,10 @@ def _md_to_tick(md):
     """
     if int(md.data_time) <= 0:
         return None
-    from src.data_platform.tz import SHANGHAI
     from vnpy.trader.constant import Exchange
     from vnpy.trader.object import TickData
+
+    from src.data_platform.tz import SHANGHAI
 
     # 交易所映射（EMQ_EXCHANGE_TYPE → vnpy 名）：BJGZ(5)→BSE；vnpy 无 BSE 则丢弃，
     # 绝不回落 SSE 产出 "XXX.SHSE" 错键（模块 docstring 点名警告的坑）。
@@ -371,6 +375,7 @@ class EmqMdGateway(MdGateway):
         # 立法「连接生命周期=hub 内部状态机」）。东财柜台时段依据=FAQ Q12「早 8:35 开始提供
         # 服务」+staging 实证周日 Login-1；窗=交易日 8:25-15:15（8:35 前 10 分 lead/收盘让 15 分）。
         from datetime import datetime as _dt
+
         from src.strategy_framework.md_session import is_trading_day
         self._login_addr = (ip, port, account, pwd)
         if not _emq_window_open(_dt.now(), is_trading_day()):
@@ -527,6 +532,7 @@ class _BaseCryptoMdGateway(MdGateway):
     def __init__(self, counters):
         from vnpy.event import EventEngine
         from vnpy.trader.event import EVENT_LOG
+
         from src.strategy_framework.runtime.alerts import make_alert, make_guard
         self._ee = EventEngine()
         self._ee.start()
@@ -554,8 +560,8 @@ class _BaseCryptoMdGateway(MdGateway):
         self._ee.register(EVENT_TICK, _wrap)
 
     def subscribe(self, symbol: str) -> None:
-        from vnpy.trader.object import SubscribeRequest
         from vnpy.trader.constant import Exchange
+        from vnpy.trader.object import SubscribeRequest
         raw = symbol.rsplit(".", 1)[0]
         self._gw.subscribe(SubscribeRequest(symbol=raw + self._SWAP_SUFFIX, exchange=Exchange.GLOBAL))
 

@@ -12,6 +12,7 @@ InterfaceProvider：每家接口供应商一个子类，声明「凭证字段 sc
 本层只声明「配置面」元数据（schema），不重复声明能力。
 """
 from __future__ import annotations
+
 import logging
 from abc import ABC
 

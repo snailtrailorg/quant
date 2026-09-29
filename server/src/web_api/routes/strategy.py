@@ -1,14 +1,19 @@
 """策略/因子/策略账户路由（从 main.py 提取）。"""
 
 from __future__ import annotations
+
 import json
-import subprocess
-from fastapi import APIRouter, Depends, Request, Body, HTTPException
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq)
-from src.data_platform.db import get_conn
 import logging
+import subprocess
+
+from fastapi import APIRouter, Body, Depends, HTTPException
+
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+from ..models import StrategyConfig
+
 logger = logging.getLogger("web_api")
 
 router = APIRouter(tags=["strategy"])
@@ -104,9 +109,7 @@ def validate_python_code(code: dict = Body(...), payload: dict = Depends(require
 def validate_params_api(body: dict = Body(...),
                         payload: dict = Depends(require_perm("strategy_control"))):
     """校验策略参数定义 + 参数值（parameter_defs 系统）。"""
-    from src.strategy_framework.strategy import (
-        validate_parameter_defs, validate_params_against_defs, build_default_params
-    )
+    from src.strategy_framework.strategy import build_default_params, validate_parameter_defs, validate_params_against_defs
     defs = body.get("parameter_defs", [])
     params = body.get("params", {})
     err = validate_parameter_defs(defs)
@@ -255,8 +258,8 @@ def preview_factor_api(body: dict = Body(...),
     返回 {values: [{ts, value}], stats: {min,max,mean,last,count}, error?}
     """
     import math
-    from src.strategy_framework.factor import _make_factor_class, BarContext, DSLFactor, validate_dsl_expr
-    from src.data_platform.db import get_bars
+
+    from src.strategy_framework.factor import BarContext, DSLFactor, _make_factor_class, validate_dsl_expr
     code = body.get("code", "")
     symbol = body.get("symbol", "600000.SHSE")
     freq = body.get("freq", "1D")
@@ -282,11 +285,12 @@ def preview_factor_api(body: dict = Body(...),
             factor = factor_cls()
     except Exception as e:
         return {"error": f"因子编译失败: {str(e)[:200]}"}
-    from datetime import datetime as _dt, timedelta as _td
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
     end, start = _dt.now(), _dt.now() - _td(days=365 if freq == "1D" else 14)
     # 批 59 M4：因子试算读 bar 走 DataBus（local_pg + fetch-on-miss）
     from src.data_platform.databus import DataBus
-    from src.quant_common.contract import DataRequest, BAR_COLUMNS
+    from src.quant_common.contract import BAR_COLUMNS, DataRequest
     req = DataRequest(kind="bar_daily" if freq == "1D" else "bar_minute", symbols=(symbol,),
                       temporality="historical", freq=freq, range_=(start, end))
     frame, _wm = DataBus().get_bars(req)
@@ -372,7 +376,7 @@ def delete_factor_api(name: str,
                 fl = json.loads(fjson) if fjson else []
                 if any(f.get("name") == name for f in fl):
                     used_by.append(sid_)
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S112
                 continue
     if used_by:
         raise ApiError(409, "FACTOR_IN_USE",

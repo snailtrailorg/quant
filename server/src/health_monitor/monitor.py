@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import logging
-import time
 
 logger = logging.getLogger("health_monitor")
 
@@ -49,7 +48,9 @@ def report_schema_findings(findings: dict) -> None:
     _write_event("schema_drift", "database", "critical", detail)
 
 
-from src.quant_common.session import in_astock_session as _in_session  # 2026-08-19 归位：删本地复制体
+from src.quant_common.session import (
+    in_astock_session as _in_session,  # 2026-08-19 归位：删本地复制体  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
+)
 
 
 def _notify(severity: str, title: str, body: str, code: str | None = None) -> None:
@@ -252,7 +253,7 @@ def run_check() -> dict:
 
     结构约束（D-F1）：通知循环在最外层，任何存储故障都跳过它上面的所有 try 继续到达。
     """
-    from .collector import collect, _valkey
+    from .collector import _valkey, collect
     snap = collect()
     snap["hub_expected"] = _hub_expected_ids()
     state = {"hub_lost_streak": {}, "sess_stall": {}, "prev_sess_ticks": {}}   # 批 66b dict 形态（标量残留=装载失败崩 evaluate）

@@ -4,17 +4,21 @@
 """
 
 from __future__ import annotations
-import os
-from typing import TYPE_CHECKING
-import psycopg
-from sqlalchemy import create_engine
-from dotenv import load_dotenv
 
-from .schema import BAR_TABLE_INSERT, BAR_TABLE_INSERT_OVERWRITE, BAR_TABLE_SELECT, parse_vt_symbol
+import os
+from datetime import date
+from typing import TYPE_CHECKING
+
+import psycopg
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+
+from .schema import BAR_TABLE_INSERT, BAR_TABLE_INSERT_OVERWRITE, BAR_TABLE_SELECT
+
 # 批 9 内存治理：pandas 下沉到唯一使用它的 get_bars/get_index_bars（函数级 import）——
 # 本模块被 beat/调度链模块级引用（tasks.py 顶部），模块级 pandas 会拖进整个调度进程
 if TYPE_CHECKING:
-    import pandas as pd   # 仅注解用（返回类型 pd.DataFrame），运行时不加载
+    import pandas as pd  # 仅注解用（返回类型 pd.DataFrame），运行时不加载
 
 _dotenv_loaded = False
 if not _dotenv_loaded:
@@ -120,6 +124,7 @@ def validate_bars(rows: list[tuple]) -> list[tuple]:
     import logging
     from collections import defaultdict
     from datetime import datetime as _dt
+
     from .tz import as_utc
     logger = logging.getLogger("data_platform")
     if not rows:
@@ -224,7 +229,7 @@ def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
     与 get_bars 同款列转换（数值 float64 + ts datetime）。
     批 56b 读收口：start/end as_utc（同 get_bars）。
     """
-    import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
+    import pandas as pd  # 批 9：函数级（调度链不载 pandas，见文件头注释）
     start, end = _win_utc(start), _win_utc(end)
     cols = ["ts", "open", "high", "low", "close", "volume", "amount"]
     with get_conn() as conn:
@@ -247,7 +252,9 @@ def get_index_bars(symbol: str, start, end) -> pd.DataFrame:
 def _win_utc(v):
     """窗口参数归一（批 56b 盲审 B 扩型）：datetime→as_utc；date→当日上海零点→UTC；
     ISO 串→解析→as_utc；解析失败/其他类型原样（PG 铸型兜底）。"""
-    from datetime import date as _date, datetime as _dt
+    from datetime import date as _date
+    from datetime import datetime as _dt
+
     from .tz import as_utc
     if isinstance(v, _dt):
         return as_utc(v)
@@ -267,7 +274,7 @@ def get_bars(symbol: str, freq: str, start, end, source: str | None = None) -> p
     批 56b 读收口：start/end as_utc（naive 按上海解释——防 pin UTC 后窗口错 8h）。
     D3：source 非 None 按数据源过滤（bar 表 source 列，加密 per-account 暖机分源）。
     """
-    import pandas as pd   # 批 9：函数级（调度链不载 pandas，见文件头注释）
+    import pandas as pd  # 批 9：函数级（调度链不载 pandas，见文件头注释）
     start, end = _win_utc(start), _win_utc(end)
     ensure_table(freq)
     select_sql = BAR_TABLE_SELECT.format(freq=freq)
@@ -303,7 +310,7 @@ def get_kline_records(symbol: str, freq: str, start, end) -> list[dict]:
     批 56b 读收口：start/end as_utc（同 get_bars）。
     """
     start, end = _win_utc(start), _win_utc(end)
-    from .tz import as_shanghai   # ts 输出=上海业务日（批 56b 盲审 A）
+    from .tz import as_shanghai  # ts 输出=上海业务日（批 56b 盲审 A）
     assert freq.lower() in _VALID_FREQS, f"非法 freq: {freq}"   # 对齐 save_bars 写路径标准（批10 盲审同判）
     ensure_table(freq)
     with get_conn() as conn:
@@ -334,14 +341,12 @@ def get_trade_calendar(year: int) -> list[date]:
             (f"{year}0101", f"{year+1}0101"),
         ).fetchall()
         if rows:
-            from datetime import date
             return [r[0] for r in rows]
     return []
 
 
 def is_trading_day(d: date | None = None) -> bool:
     """判断某天是否为 A 股交易日。"""
-    from datetime import date
     d = d or date.today()
     cal = get_trade_calendar(d.year)
     return d in cal

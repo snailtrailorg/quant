@@ -1,15 +1,19 @@
 """Web 后端 · IM 机器人路由（批13 五轮：admin 全局面删除——IM 全面用户化，admin 组端点退役。
 保留：providers 注册表（告警设置/前端共用）+ /api/my/* 自助组（admin 也是用户，自助面建 bot）。"""
 
-from fastapi import APIRouter, Depends, Request, Body, BackgroundTasks
-from fastapi.responses import JSONResponse
-from ..auth import require_role, require_perm, require_authenticated, audit_log
-from ..errors import ApiError
-from ..models import (IMBotCreateReq, IMBotUpdateReq, IMBotUserReq)
-from src.data_platform.db import get_conn
-from ..redis_pool import feishu_redis_client
+import json
 import logging
-import json, uuid
+import uuid
+
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_authenticated, require_perm
+from ..errors import ApiError
+from ..models import IMBotCreateReq, IMBotUpdateReq
+from ..redis_pool import feishu_redis_client
 
 logger = logging.getLogger("web_api")
 
@@ -100,7 +104,7 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
             d = None   # 坏值=对齐旧 scan 版 fail-open（解析失败放行）；DEL 防坏键挡住新 pending 的 NX
             try:
                 r.delete(f"im:onboarding:owner:{uid}")
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
         if d and d.get("status") not in ("done", "error"):
             raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，已为你恢复",
@@ -117,9 +121,11 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
     err_evt = _th.Event()   # 快失败短路（A-P2-4：init 异常不等满 5s）
     holder = {}
     def _on_qr(info):
-        holder.update(info); qr_evt.set()
+        holder.update(info)
+        qr_evt.set()
     def _on_error(msg):
-        holder["error"] = msg; err_evt.set()
+        holder["error"] = msg
+        err_evt.set()
     try:
         from src.feishu_bot.tasks import _set_session
         # 盲审 A-P1-2：pending NX 失败=并发先到 ticket（两请求都过 GET miss 窗口）——必须 429，
@@ -130,7 +136,7 @@ def my_im_onboarding(provider: str, method: str, payload: dict = Depends(require
             _prior = None
             try:
                 _prior = json.loads(_d).get("ticket") if _d else None
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
             raise ApiError(429, "ONBOARDING_BUSY", "已有进行中的接入会话，已为你恢复",
                            extra={"existing_ticket": _prior})
@@ -199,6 +205,7 @@ def _quota_limits() -> tuple[int, int]:
         return _QUOTA_CACHE[0][1]
     try:
         import psycopg
+
         from src.data_platform.db import get_conn_url
         with psycopg.connect(get_conn_url()) as c:
             rows = dict(c.execute(
@@ -237,7 +244,6 @@ def _platform_bot_count() -> int:
 def my_im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_authenticated)):
     """自助创建（owner=会话用户钉死；default_role 服务端恒 viewer；唯一性预检同管理面 A-P1-5）。"""
     from src.im_bot.base import get_im_provider
-    from src.im_bot.credentials import save_bot_credentials   # noqa: F401（与创建语义对齐说明）
     p = get_im_provider(req.provider)
     if p is None:
         raise ApiError(400, "PROVIDER_INVALID", f"未知 IM 平台: {req.provider}")
@@ -246,8 +252,9 @@ def my_im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_authe
     if not any(m.get("kind") == "manual" for m in p.ONBOARDING_METHODS.values()):
         raise ApiError(400, "ONBOARDING_INTERACTIVE_ONLY", f"{req.provider} 仅支持扫码接入，请在集成中心使用扫码向导")
     import json as _json
-    from src.quant_common.crypto import encrypt as _encrypt
+
     from src.im_bot.routing import route_key_from
+    from src.quant_common.crypto import encrypt as _encrypt
     # 批27-28：三面闸并入 _quota_guard 单源（上限走 system_config——批27-29）
     with get_conn() as conn:
         _quota_guard(conn, int(payload["sub"]))

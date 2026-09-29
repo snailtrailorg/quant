@@ -10,6 +10,7 @@ stock/get 对非浏览器 TLS 一律断）→ 改腾讯 qt.gtimg.cn 单股按需
 失败降级返回 None（详情页 quote 降级链 hub tick→腾讯→null）。
 """
 from __future__ import annotations
+
 import json
 import logging
 import os
@@ -77,7 +78,7 @@ def get_quote(ts_code: str, force: bool = False) -> dict | None:
         logger.warning("腾讯行情拉取失败 %s（降级 None）: %s", ts_code, e)
         try:
             r.set(key, "null", ex=30)
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
         return None
     # v_sh600000="1~浦发银行~600000~..." ~ 分隔
@@ -108,7 +109,7 @@ def get_quote(ts_code: str, force: bool = False) -> dict | None:
     if quote["last"] is None:
         try:
             r.set(key, "null", ex=30)   # 无效代码同样负缓存（补盲审 B1）
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
         return None
     try:

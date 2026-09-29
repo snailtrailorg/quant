@@ -24,7 +24,7 @@ def _market_config_provider(market: str) -> dict | None:
     calendar_dates 在此解析（从 DB 取 Tushare 交易日历），quant_common 只拿纯集合作判定。
     """
     import json
-    from src.quant_common.session import _load_market_config  # trigger cache init
+
     from src.data_platform.db import get_conn, get_trade_calendar
     try:
         with get_conn() as conn:
@@ -43,14 +43,14 @@ def _market_config_provider(market: str) -> dict | None:
                 if cal_dates:
                     cfg["calendar_dates"] = set(cal_dates)
             return cfg
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return None
 
 try:
     from src.quant_common.session import set_config_provider
     set_config_provider(_market_config_provider)
-except Exception:
+except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
     pass  # 测试/早期导入窗口静默
 
 

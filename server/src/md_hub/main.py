@@ -19,11 +19,11 @@ import threading
 import time
 from datetime import datetime
 
-from src.md_hub.parts import (   # 数据面部件（批 2 原样移驻；import 即重导出保测试路径——ThinGateway 批 63 二收编 md_gateway 后不再经 main 重导出）
+from src.md_hub.parts import (  # 数据面部件（批 2 原样移驻；import 即重导出保测试路径——ThinGateway 批 63 二收编 md_gateway 后不再经 main 重导出）
+    _LEASE_RENEW_LUA,
     LATEST_TICK_PREFIX,
     LEASE_KEY,
     MinuteAggregator,
-    _LEASE_RENEW_LUA,
     _in_bar_session,
     _key,
     _lease_boot,
@@ -39,8 +39,8 @@ except ImportError:
     EventEngine = None
 
 # 2026-08-19 模块归位：共享工具直连 quant_common（原寄生 strategy_runner.main——连带 vnpy 链）
-from src.quant_common.session import in_session
 from src.quant_common.guard import sd_notify as _sd_notify
+from src.quant_common.session import in_session
 from src.strategy_framework.runtime.alerts import make_alert, make_guard, make_valkey
 
 __all__ = ["LATEST_TICK_PREFIX", "main"]   # LATEST_TICK_PREFIX 仅重导出（test_stock_detail 经 main 取用）
@@ -120,7 +120,9 @@ def main() -> None:
 
     # 批25：system_log 落库（md-hub 装配：source=hub；SIGTERM 链式冲刷）
     import signal as _sig
-    from src.data_platform.log_sink import install as _log_install, chain_sigterm as _chain
+
+    from src.data_platform.log_sink import chain_sigterm as _chain
+    from src.data_platform.log_sink import install as _log_install
     _log_install("hub")
     _chain(_sig.getsignal(_sig.SIGTERM))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")

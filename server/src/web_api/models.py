@@ -1,5 +1,6 @@
 """Web 后端 · Pydantic 请求体模型（从 main.py 迁出，零语义改动）。"""
 from __future__ import annotations
+
 from pydantic import BaseModel, Field, field_validator
 
 

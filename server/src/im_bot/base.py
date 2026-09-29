@@ -7,6 +7,7 @@ IMBotProvider:完整 IM 接入面(区别于 MessageChannel=单向告警出站)�
 路由=平台(feishu_bot/router 与未来通用入口层)。
 """
 from __future__ import annotations
+
 import logging
 from abc import ABC, abstractmethod
 

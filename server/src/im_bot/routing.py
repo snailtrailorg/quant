@@ -4,6 +4,7 @@
 `app_key`、企微 `bot_id` 不在名单 → route 恒空 → 第二只 bot 撞 uq_imbot_provider_route
 唯一索引（迁移 0051），补录还会把存量非空 route 改写为空再撞。收口本函数，名单扩展。"""
 from __future__ import annotations
+
 import logging
 
 logger = logging.getLogger("im_bot.routing")

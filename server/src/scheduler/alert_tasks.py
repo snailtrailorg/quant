@@ -23,9 +23,9 @@ logger = logging.getLogger("alert_dispatch")
 def _register():
     """惰性注册（避免 alert_notify 包导入期触发 scheduler.app 的模块级 DB 读——
     仅 celery worker 启动期经 include 加载本模块时执行）。"""
-    from src.scheduler.app import app
     from src.alert_notify import dispatch as D
     from src.data_platform.db import get_conn
+    from src.scheduler.app import app
 
     def _still_enabled(row: dict) -> bool:
         """行级重查（批7.1 多目标；批30 切表）：入队后订阅行被关/删则 skip（计费敏感）。

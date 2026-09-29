@@ -4,12 +4,12 @@
 每通道尝试配额 system_config `smtp_max_attempts`（默认 3）；无通道时 .env SMTP_DEV=true
 走 DEV 模式（打印不发）。system_config 旧 smtp_* 六键已迁移退役（2026-08-14 曾弃 .env 单实例）。
 """
-import smtplib
-import os
 import asyncio
 import logging
-from email.mime.text import MIMEText
+import os
+import smtplib
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 _logger = logging.getLogger("quant")
 
@@ -124,7 +124,7 @@ def queue_email(to: str, subject: str, html_body: str) -> int:
             "INSERT INTO email_outbox (to_email, subject, html_body) VALUES (%s,%s,%s) RETURNING id",
             (to, subject, html_body))
         conn.commit()
-        from src.data_platform.log_sink import event   # 批25：发送事件进 system_log（入队=WARN 待发）
+        from src.data_platform.log_sink import event  # 批25：发送事件进 system_log（入队=WARN 待发）
         event("WARN", "email", f"入队待发 → {to} ｜ {subject}")
         return cur.fetchone()[0]
 
@@ -247,7 +247,7 @@ def _resolve_base_url(request_base: str = "") -> str:
             row = cur.fetchone()
             if row and row[0] and str(row[0]).strip():
                 return str(row[0]).strip().rstrip("/")
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     # 2. 缺省取访问 hostname
     if request_base:

@@ -5,12 +5,13 @@ Python 代码模式（#15）允许用户写自定义 on_bar 逻辑，替代 DSL 
 """
 
 from __future__ import annotations
+
 import logging
-from enum import Enum
 from dataclasses import dataclass, field
-from typing import Any, Callable
-from .factor import Factor, BarContext, list_factors, get_factor, DSLFactor, _FACTOR_REGISTRY, _check_ast_blacklist
+from enum import Enum
+
 from .broker import record_broker_usage
+from .factor import BarContext, DSLFactor, Factor, _check_ast_blacklist, get_factor
 
 logger = logging.getLogger("strategy")
 
@@ -268,7 +269,6 @@ class Strategy:
         持仓来源 position_snapshot（ST2 真相源，direction != 'direction_short'）。查询失败 →
         告警+降级 SHARES 100（不拒单，风险随信号下发）。
         """
-        from enum import Enum as _E
         vt = self._param("volume_type", "SHARES")
         is_sell = getattr(getattr(sig, "action", None), "name", "") == "SELL"
         try:
@@ -425,8 +425,9 @@ class Strategy:
         if order_row_id is None:
             logger.error("WAL 记账失败，放弃本次下单（fail-closed）: %s %s", self.symbol, sig.action.name)
             return
-        from .adapters import Order
         import time as _t
+
+        from .adapters import Order
         if final.get("validity") == "GTC":
             logger.warning("XTP 限价单无 GTC 语义，按当日有效（DAY）发出——配置降级声明（P2）")
         _t0 = _t.time()

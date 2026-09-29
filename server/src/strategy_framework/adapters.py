@@ -11,13 +11,14 @@ A 股股票走 XTPAdapter（中泰 XTP 能交易 A 股），受 astock 分项开
 """
 
 from __future__ import annotations
+
 import logging
 import threading
 
 logger = logging.getLogger(__name__)
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 import time
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 # 持仓稳定窗秒数（O-S1"键集连续两拍稳定"）：模块常量便于测试收窄（等待原语审计 P2-1）
 POSITION_STABLE_WINDOW_S = 2.0
@@ -112,8 +113,7 @@ class XTPAdapter(ExecutionAdapter):
         self._cid_seq = 0
         self._lock = threading.Lock()
         if self._event_engine:
-            from vnpy.event import Event
-            from vnpy.trader.event import EVENT_ORDER, EVENT_TRADE, EVENT_POSITION, EVENT_ACCOUNT
+            from vnpy.trader.event import EVENT_ACCOUNT, EVENT_ORDER, EVENT_POSITION, EVENT_TRADE
             self._event_engine.register(EVENT_ORDER, self._on_order)
             self._event_engine.register(EVENT_TRADE, self._on_trade)
             self._event_engine.register(EVENT_POSITION, self._on_position)
@@ -156,8 +156,8 @@ class XTPAdapter(ExecutionAdapter):
     def send_order(self, order: Order) -> str:
         if self._gateway is None:
             return f"mock-{order.symbol}-{order.action}"
-        from vnpy.trader.object import OrderRequest
         from vnpy.trader.constant import Direction, Offset, OrderType
+        from vnpy.trader.object import OrderRequest
 
         sym, ex = self.parse_vt_symbol(order.symbol)
         direction = Direction.LONG if order.action.upper() == "BUY" else Direction.SHORT
@@ -411,7 +411,7 @@ class EmtAdapter(ExecutionAdapter):
         if old_session:
             try:
                 self._api.Logout(old_session)
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
         self._api.SubscribePublicTopic(mod.EMT_TE_RESUME_TYPE.RESTART)   # 当日全量重传（N1 钉死）
         sid = self._api.Login(setting["td_host"], int(setting["td_port"]),
@@ -520,8 +520,8 @@ class EmtAdapter(ExecutionAdapter):
 
     def _to_order_data(self, o: dict):
         """o=物化 dict（事件/查询双面统一）。"""
-        from vnpy.trader.object import OrderData
         from vnpy.trader.constant import Direction, Offset, OrderType
+        from vnpy.trader.object import OrderData
         sym, ex = self.parse_vt_symbol((o.get("ticker") or "") + self._ex_suffix(o.get("market")))
         vt = f"EMT.{o['order_emt_id']}"
         pt = o.get("price_type")
@@ -560,8 +560,8 @@ class EmtAdapter(ExecutionAdapter):
 
     def _to_trade_data(self, t: dict):
         """t=物化 dict。tradeid=exec_id（SDK 逐笔唯一键），空则 report_index 兜底。"""
-        from vnpy.trader.object import TradeData
         from vnpy.trader.constant import Direction, Offset
+        from vnpy.trader.object import TradeData
         sym, ex = self.parse_vt_symbol((t.get("ticker") or "") + self._ex_suffix(t.get("market")))
         tradeid = t.get("exec_id") or str(t.get("report_index") or 0)
         sd = t.get("side") or 0
@@ -789,12 +789,16 @@ class EmtAdapter(ExecutionAdapter):
                 EmtAdapter._API_SINGLETON = None
                 self._session_id = 0
                 old_api, self._api, self._spi = self._api, None, None
-                self._orders.clear(); self._trades.clear()
-                self._positions.clear(); self._accounts.clear()
-                self._cid2vt.clear(); self._vt2cid.clear(); self._cid2sn.clear()
+                self._orders.clear()
+                self._trades.clear()
+                self._positions.clear()
+                self._accounts.clear()
+                self._cid2vt.clear()
+                self._vt2cid.clear()
+                self._cid2sn.clear()
             try:
                 old_api.Release()   # 单例句柄必须显式释放（否则 Create 返同句柄=重建失效）
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
             # 重建（上次登录参数缓存）——失败 raise 由调用面接
             self.connect(self._last_setting)

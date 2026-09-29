@@ -10,6 +10,7 @@
 批13 五轮：绑定机制全平台取消——自有 bot 由 resolve owner 直通，无平台特例。
 """
 from __future__ import annotations
+
 import logging
 
 logger = logging.getLogger("im_bot.handlers")
@@ -25,7 +26,7 @@ def _get_max_tool_turns() -> int:
             row = cur.fetchone()
             if row:
                 return int(row[0])
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return 5
 

@@ -6,8 +6,10 @@ systemd quant-feishu-bot@quant.service 管理（auto_reconnect=True 自动重连
 启动：python -m src.feishu_bot.ws_client
 """
 from __future__ import annotations
+
 import json
 import logging
+
 import lark_oapi as lark
 from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
@@ -114,7 +116,7 @@ def patch_ws_card_frames(client) -> bool:
                 if h.key == "type":
                     h.value = MessageType.EVENT.value
             logger.info("ws CARD 帧改写为 event 分发: event_type=%s", et)
-        except Exception:   # peek 容错：任何失败=不改写不冒泡（wrap 抛异常会被 _handle_message 吞掉整帧）
+        except Exception:   # peek 容错：任何失败=不改写不冒泡（wrap 抛异常会被 _handle_message 吞掉整帧）  # noqa: S110
             pass
         return await orig(frame)
 
@@ -132,8 +134,7 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
     app_secret 握手（帧只来自已鉴权连接；卡片 value 由我方建卡写入飞书原样回传，不可注入）。
     mid=卡片消息 id（event.context.open_message_id，每卡唯一）——exec 去重键主成分（代码盲审
     A/B 共识：{ts}:{tool} 键同秒同工具的两张卡互斥，"停掉 s1 和 s2"第二张被静默吞）。"""
-    from src.im_bot.feishu_client import (build_terminal_card, card_action_fresh,
-                                          execute_confirmed_tool, get_feishu_client)
+    from src.im_bot.feishu_client import build_terminal_card, card_action_fresh, execute_confirmed_tool, get_feishu_client
 
     def _terminal(status: str, tool_name: str = "") -> None:
         """批29b：卡片终态化（PATCH 原地更新摘按钮+状态文案）。mid 缺失跳过；fail-soft
@@ -169,6 +170,7 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
         _terminal("denied", tool)
         return
     import os
+
     import redis as _redis
     try:
         r = _redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
@@ -243,7 +245,7 @@ def make_card_handler(fid: int):
 
 
 def main() -> None:
-    import sys   # 顶部导入（函数后段残留旧 import sys 会把 sys 变局部——12:03 prod feishu 波崩溃根因）
+    import sys  # 顶部导入（函数后段残留旧 import sys 会把 sys 变局部——12:03 prod feishu 波崩溃根因）
     # 补审E-8：单元实例名须为数字 bot id（quant-feishu-bot@{bid}）；非数字 fail-fast——
     # 原静默降级会让 _FID 污染流入 SQL DataError→首见整段死火回到零留痕盲区
     if len(sys.argv) < 2 or not sys.argv[1].isdigit():
@@ -251,14 +253,17 @@ def main() -> None:
     # 2026-09-02：启动即回填（arch-19 双轨收尾——env 授权用户入表，告警 dispatch 同源可用）
     from src.im_bot.users import backfill_from_env
     backfill_from_env(int(sys.argv[1]))
-    import sys, logging
+    import logging
+    import sys
     global _FID
     _FID = sys.argv[1] if len(sys.argv) > 1 else None
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(name)s] %(levelname)s %(message)s")
     """启动长连接客户端（阻塞）。"""
     app_id, app_secret = load_feishu_credentials(_FID)
     _fid = int(_FID)
-    from src.im_bot import feishu_client as _fc   # 须先于后段 _fc 引用（探针赋值）——函数内后段 import 会把名字局部化（快审 P0：同款 12:03 prod 崩溃）
+    from src.im_bot import (
+        feishu_client as _fc,  # 须先于后段 _fc 引用（探针赋值）——函数内后段 import 会把名字局部化（快审 P0：同款 12:03 prod 崩溃）
+    )
     event_handler = (
         EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(on_message)

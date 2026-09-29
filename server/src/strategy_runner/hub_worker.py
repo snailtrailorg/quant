@@ -12,6 +12,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+
 from src.strategy_framework.runtime.alerts import make_alert, make_guard, make_valkey
 from src.strategy_framework.runtime.loop import EngineLoop
 from src.strategy_framework.runtime.pulse import HeartbeatWriter
@@ -84,12 +85,14 @@ def _warmup_merge(hist: list, entries: list, upto_ts: str | None = None) -> list
 def _norm_ts(v) -> str:   # 传值归一：UTC ISO（策略/日志面——形状与批 56b 前一致，仅统一 UTC 表示）
     try:
         return datetime.fromisoformat(str(v).replace("Z", "+00:00")).astimezone(timezone.utc).isoformat()
-    except Exception: return str(v)
+    except Exception:
+        return str(v)
 
 def _epoch_key(v) -> str:   # 比较键（批 56b：去重/水位/截断——+08:00/Z 混合窗口同刻同键；29 号歧义消解=Unix 秒）
     try:
         return str(int(datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()))
-    except Exception: return ""
+    except Exception:
+        return ""
 
 class BarMsgState:   # worker 侧消息序号/去重状态（gen 分区内 seq 连续，R-BR6/R-DL2）
     def __init__(self):
@@ -115,7 +118,8 @@ class BarMsgState:   # worker 侧消息序号/去重状态（gen 分区内 seq �
 def _hub_alive(r, account_id) -> bool:   # hub 心跳存在（TTL 内）；存储不可查返回 True（断流自然使 bar 过期）
     try:
         return r.exists(f"{HB_KEY}:{account_id}") == 1   # 批 66b：per-account 键（修原裸键读=A股心跳恒真掩盖加密 hub 死亡）
-    except Exception: return True
+    except Exception:
+        return True
 
 def _ts_gap_frozen(ts_key: str, max_ts: str, market: str) -> bool:
     """批 66c（D26 §3.4①②）：ts 缺口检测——ts_key−max_ts>60s 且 bar 自身时刻在盘中
@@ -134,7 +138,8 @@ def _ts_gap_frozen(ts_key: str, max_ts: str, market: str) -> bool:
         return False
     if gap <= 60:
         return False
-    from datetime import datetime, timezone as _tz
+    from datetime import datetime
+    from datetime import timezone as _tz
     try:
         bar_dt = datetime.fromtimestamp(int(ts_key), tz=_tz.utc).astimezone()
     except (ValueError, OSError, OverflowError):
@@ -167,9 +172,9 @@ def run(ctx: dict) -> None:
     # 2026-08-19 归位：直连 quant_common（原经 main 互指且连带加载入口模块级 vnpy import）
     # 批 66c：时段判定 per-market（原 _in_astock_session 对加密 24/7 误伤——盘外 BUY 误拒+
     # STALE_PUB_S 丢弃误前置；market=ctx 注入真源（接口行），缺省按 symbol 后缀派生）
-    from src.quant_common.session import in_session, session_edge
-    from src.quant_common.markets import market_of_symbol
     from src.quant_common.guard import sd_notify as _sd_notify
+    from src.quant_common.markets import market_of_symbol
+    from src.quant_common.session import in_session, session_edge
 
     r = _valkey()
     tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
@@ -200,9 +205,9 @@ def run(ctx: dict) -> None:
         trading.write_trade_log(event.data, adapter, sid, symbol)
         # 批 69a：SSE 信号帧（零内容——前端重拉 orders/position）
         try:
-            from src.quant_common.eventbus import bus   # 惰性导入（notify.py:89 先例）
+            from src.quant_common.eventbus import bus  # 惰性导入（notify.py:89 先例）
             bus.publish_cross_process(0, "trade_update", {})
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
 
     ee.register(__import__("vnpy.trader.event", fromlist=["EVENT_TRADE"]).EVENT_TRADE, on_trade)
@@ -211,7 +216,8 @@ def run(ctx: dict) -> None:
     # 续消费，重启窗内 bar 重驱动 on_bar=重复下单；丢的 bar 由暖机/gap 从 DB 补，双保险=下方 max_ts 过滤。
     try:
         r.xgroup_destroy(stream, gname)
-    except Exception: pass   # 组不存在（首启）属正常
+    except Exception:  # noqa: S110
+        pass   # 组不存在（首启）属正常  # 失败不阻断（fail-open 降级）  # noqa: S110
     try:
         r.xgroup_create(stream, gname, id="$", mkstream=True)
     except Exception as e:
@@ -254,7 +260,7 @@ def run(ctx: dict) -> None:
                 state.max_ts = cand
                 try:
                     r.set(_mts_key, cand)   # 持久水位同步（重启一致性）
-                except Exception:
+                except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                     pass
 
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
@@ -326,13 +332,14 @@ def run(ctx: dict) -> None:
             state.max_ts = ts_key
             try:
                 r.set(_mts_key, ts_key)   # P0-3：水位持久化（重启恢复，防 SELL 重放；失败不阻断）——epoch 键
-            except Exception: pass
+            except Exception:  # noqa: S110
+                pass  # 失败不阻断（fail-open 降级）  # noqa: S110
         # 批 62a：血缘注入（A03 §15.4）——pub_ts=流到端时刻（fetched_at 真源）/gen=流世代
         # （dataset_version 源）；与 bar 同点更新（strategy 实例属性，_log_signal_order 消费）
         try:
             strategy._pub_ts = datetime.fromtimestamp(pub_ts, tz=timezone.utc) if pub_ts else None
             strategy._hub_gen = fields.get("gen")
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
         sig = strategy.on_bar(bar, list(history))
         stats["bars"] += 1
@@ -374,7 +381,8 @@ def run(ctx: dict) -> None:
         _log_timeline(tid, "info", "任务停止：退出码 0（stop_live_task 置 stopped，清理 xgroup 后退出）")
         try:
             r.xgroup_del(stream, gname)
-        except Exception: pass
+        except Exception:  # noqa: S110
+            pass  # 失败不阻断（fail-open 降级）  # noqa: S110
         os._exit(0)
 
     def _sess_edge():
@@ -439,7 +447,8 @@ def run(ctx: dict) -> None:
             _next, claims = r.xautoclaim(stream, gname, cname, min_idle_time=60000, count=20)
             if claims:
                 process_batch([(stream, claims)])
-        except Exception: pass
+        except Exception:  # noqa: S110
+            pass  # 失败不阻断（fail-open 降级）  # noqa: S110
 
     loop = EngineLoop(
         name=f"live-task-{tid}", step=5.0,
@@ -470,10 +479,10 @@ def run(ctx: dict) -> None:
             try:
                 from src.strategy_runner.main import _log_timeline
                 _log_timeline(tid, "error", f"异常退出：{_exc.__name__}: {str(_sys.exc_info()[1])[:150]}")
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
         try:
             r.xgroup_del(stream, gname)
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
         os._exit(0)

@@ -10,6 +10,7 @@ dist 源码逐帧核出，2026-09-10）。关键语义：
 - 日志纪律（B-P2-4）：认证帧 body 含 secret——日志只打 cmd/errcode/req_id 前缀，禁整帧 body
 """
 from __future__ import annotations
+
 import asyncio
 import json
 import logging

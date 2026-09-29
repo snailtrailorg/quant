@@ -272,7 +272,7 @@ class MarketHours:
             attr = SMClient().get(vt_symbol)
             if attr and attr.board:
                 return attr.board
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
         code = vt_symbol.split(".", 1)[0]
         if code.startswith(("688", "689")):

@@ -6,11 +6,10 @@
 """
 
 from __future__ import annotations
+
 import ast
 import operator as op
-from typing import Any, Callable, ClassVar
-from dataclasses import dataclass, field
-
+from dataclasses import field
 
 # ——— AST 安全校验（#15 Python 代码框 + 自定义因子） ———
 
@@ -143,7 +142,8 @@ _FACTOR_SAFE_BUILTINS = {
     "print": print,
 }
 
-import logging
+import logging  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
+
 _logger = logging.getLogger("factor")
 
 
@@ -270,6 +270,7 @@ def register_custom_factor(name: str, category: str, code: str,
 
     # 2. 写 DB
     import json
+
     from ..data_platform.db import get_conn
     params_json = json.dumps(params or {})
     with get_conn() as conn:
@@ -659,6 +660,7 @@ class DoubleLowFactor(Factor):
         # 数据：convertible_terms.terms JSON {conv_price, stk_code} + bar_1d 正股最近 close。
         # 查不到条款/正股价 → 返回价格本身（溢价项记 0——低价格债券仍排前，弱化但可用，告警一次）。
         import json as _json
+
         from ..data_platform.db import get_conn
         from ..data_platform.schema import to_vt_symbol
         sym = getattr(ctx, "symbol", None) or ""
@@ -736,7 +738,7 @@ def _factor_class_of(vt_symbol: str) -> str:
         attr = SMClient().get(vt_symbol)
         if attr:
             return CATEGORY_TO_FACTOR_CLASS.get(attr.category, "unknown")
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     sym = vt_symbol.upper()
     if any(x in sym for x in (".BINANCE", ".OKX", "PERP")):

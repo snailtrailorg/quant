@@ -16,7 +16,7 @@ reconcile_orders / frozen_allows / buy_ok_check / _flush_positions。
 """
 import logging
 
-from src.data_platform.tz import as_utc   # 批 56b 盲审 B：trade_log ts 收口（vnpy datetime naive——pin UTC 后裸写=错 8h）
+from src.data_platform.tz import as_utc  # 批 56b 盲审 B：trade_log ts 收口（vnpy datetime naive——pin UTC 后裸写=错 8h）
 
 logger = logging.getLogger("strategy_runner.trading")
 
@@ -115,6 +115,7 @@ def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
     """
     try:
         from vnpy.trader.constant import Direction
+
         from src.data_platform.db import get_conn
         action = "BUY" if d.direction == Direction.LONG else "SELL"
         vt = getattr(d, "vt_orderid", "")
@@ -303,7 +304,7 @@ def recalc_hook(r, rewarm, history) -> None:
             try:
                 from src.strategy_framework.factor import load_factors_from_db
                 load_factors_from_db()
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
             rewarm()
             logger.info("因子重算触发：重填 %d 根历史 bar", len(history))

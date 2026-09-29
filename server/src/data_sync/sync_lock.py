@@ -12,11 +12,13 @@ last_status（DB）退化为"上次结果展示"，防重真相源在此锁。
 """
 
 from __future__ import annotations
-import os
-import uuid
-import threading
-import redis
+
 import logging
+import os
+import threading
+import uuid
+
+import redis
 from dotenv import load_dotenv
 
 load_dotenv()

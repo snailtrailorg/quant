@@ -1,0 +1,38 @@
+# ruff 配置（2026-09-29 技术债治理：一次清存量，之后守增量）
+# 运行：cd server && venv/bin/ruff check src
+#
+# 规则集取舍（有意关闭的规则，勿顺手打开——理由见下）：
+#   - BLE001（盲 except）：全仓 442 处，与本项目读侧 fail-open 哲学对撞（漏告警比误冻结安全），
+#     绝大多数会被判「有意忽略」，开了=训练人忽略该规则，比不开更糟。记债单，S110 干净后再评估。
+#   - ARG001/ARG002（未使用参数）：199 处，全是 FastAPI Depends()/Query() 签名与 Celery 任务签名的
+#     天然形态，开=误报海。靠默认参数求值触发权限校验（Depends(require_perm(...))）是设计，不能删。
+#   - B 系列：B008（FastAPI Query/Depends 默认参数是函数调用）必关；其余噪声。
+#   - bandit 其余 S*：中文注释里的「密码/密钥」等词会被 S105/S106 误报。
+#   - I（isort）：import 上挂着中文块注释，机械排序会把注释与 import 脱钩，最后一步单独处理。
+#   - UP/SIM：纯 diff 噪声/形态重构，不是本批目标。
+
+target-version = "py310"        # 本地 venv 3.10（服务器 3.11，取下界）
+line-length = 140
+
+extend-exclude = ["venv", "tests", "migrations", "vendor", "scripts"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "W", "S110", "S112"]
+
+[lint.per-file-ignores]
+# re-export 面：删 F401 会炸
+"src/web_api/auth.py" = ["F401", "E402"]
+"src/feishu_bot/bot.py" = ["F401"]
+"src/**/__init__.py" = ["F401"]
+# 组合根/延迟 import 设计：模块级 import 位置有语义（load_dotenv 后 / 避免循环 import），
+# 非"放错位置"——per-file-ignores 整体豁免，零星处用行级 noqa: E402
+"src/web_api/main.py" = ["E402"]
+"src/web_api/routes/auth_routes.py" = ["E402"]
+"src/strategy_runner/main.py" = ["E402"]
+"src/strategy_framework/adapters.py" = ["E402"]
+"src/md_hub/main.py" = ["E402"]
+"src/alert_notify/dispatch.py" = ["E402"]
+"src/data_platform/perms.py" = ["E402"]
+"src/health_monitor/monitor.py" = ["E402"]
+"src/risk_control/risk.py" = ["E402"]
+"src/scheduler/app.py" = ["E402"]

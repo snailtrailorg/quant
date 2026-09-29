@@ -6,6 +6,6 @@
     print(resp.content)
 """
 
-from .gateway import gateway, LLMGateway, LLMResponse, Tool, READ_TOOLS, OPERATIONAL_TOOLS
+from .gateway import OPERATIONAL_TOOLS, READ_TOOLS, LLMGateway, LLMResponse, Tool, gateway
 
 __all__ = ["gateway", "LLMGateway", "LLMResponse", "Tool", "READ_TOOLS", "OPERATIONAL_TOOLS"]

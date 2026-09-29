@@ -20,7 +20,6 @@ import os
 import signal
 import sys
 import threading
-import time
 from collections import deque
 
 _BATCH = 100

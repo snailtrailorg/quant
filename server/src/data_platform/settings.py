@@ -4,6 +4,7 @@
 现有 db.py / risk.py / scheduler 等 暂保留各自 load_dotenv（兼容），新配置走这里。
 """
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()

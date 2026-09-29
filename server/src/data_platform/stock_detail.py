@@ -10,6 +10,7 @@
   防详情页高频刷新打 DB；quote 不缓存（各源自带 TTL）。
 """
 from __future__ import annotations
+
 import json
 import logging
 import os
@@ -91,18 +92,18 @@ def get_intraday(symbol: str) -> dict | None:
         cached = _r().get(INTRADAY_KEY + ts_code)
         if cached:
             return None if cached == "null" else json.loads(cached)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     r = _intraday_from_tencent(ts_code)
     if r is None:
         try:
             _r().set(INTRADAY_KEY + ts_code, "null", ex=30)
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
         return None
     try:
         _r().set(INTRADAY_KEY + ts_code, json.dumps(r, ensure_ascii=False), ex=60)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return r
 
@@ -111,6 +112,7 @@ def _intraday_from_tencent(ts_code: str) -> dict | None:
     """腾讯分时（累计口径差分成分钟量；VWAP=累计额/累计量）。"""
     try:
         import requests
+
         from .market_snapshot import _tencent_sym
         resp = requests.get(
             f"https://web.ifzq.gtimg.cn/appstock/app/minute/query?code={_tencent_sym(ts_code)}",
@@ -157,7 +159,7 @@ def analyze_cache_get(ts_code: str) -> str | None:
 def analyze_cache_set(ts_code: str, text: str, ttl: int = 600) -> None:
     try:
         _r().set(f"detail:analyze:{ts_code}", text, ex=ttl)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
 
@@ -367,7 +369,7 @@ def _ondemand(ts_code: str, kind: str, pull_fn) -> dict | None:
         cached = _r().get(key)
         if cached:
             return json.loads(cached) if cached != "null" else None
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     try:
         result = pull_fn(ts_code)
@@ -376,7 +378,7 @@ def _ondemand(ts_code: str, kind: str, pull_fn) -> dict | None:
         return None
     try:
         _r().set(key, json.dumps(result, ensure_ascii=False) if result else "null", ex=ONDEMAND_TTL)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return result
 
@@ -384,7 +386,7 @@ def _ondemand(ts_code: str, kind: str, pull_fn) -> dict | None:
 def _rate_ds():
     """批 67：按需拉取限速通道（data_platform 层1 禁 import data_sync——ds=get_data_source 直取，
     quality.py 同款；档值两级取不传 min_interval）。"""
-    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from src.data_platform.data_source import TushareDataSource, get_data_source
     return get_data_source("tushare") or TushareDataSource()
 
 
@@ -407,6 +409,7 @@ def _pull_chips(ts_code: str) -> dict | None:
 
 def _pull_finance(ts_code: str) -> dict | None:
     import pandas as pd
+
     from src.data_platform.adapters import tushare_adapter
     from src.data_platform.rate_limit import rate_limit_context
     pro = tushare_adapter.get_pro()
@@ -417,7 +420,8 @@ def _pull_finance(ts_code: str) -> dict | None:
     with rate_limit_context(_ds, "fina_indicator"):
         fina_df = pro.fina_indicator(ts_code=ts_code)
         _ds.record_usage(api_calls=1, api_name="fina_indicator", provider="tushare")
-    _s = lambda v: str(v) if v is not None and pd.notna(v) else None
+    def _s(v):
+        return str(v) if v is not None and pd.notna(v) else None
     income = None
     if inc_df is not None and not inc_df.empty:
         row = inc_df.sort_values(["ann_date", "end_date"], ascending=False).iloc[0]

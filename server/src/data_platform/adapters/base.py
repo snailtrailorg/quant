@@ -141,7 +141,7 @@ class TushareAdapter(BaseDataAdapter):
     }
 
     def __init__(self):
-        from src.data_platform.data_source import get_data_source, TushareDataSource
+        from src.data_platform.data_source import TushareDataSource, get_data_source
         self._ds = get_data_source("tushare") or TushareDataSource()
         self._pro = None
 
@@ -185,8 +185,8 @@ class TushareAdapter(BaseDataAdapter):
 
     def to_bar_rows(self, df: pd.DataFrame, freq: str, adj_map: dict | None = None) -> list[tuple]:
         """三合一 mapper：原 _daily_to_rows（批量，adj_map）+ to_save_rows（日）+ to_save_rows_min（分钟）。"""
-        from src.data_platform.schema import to_vt_symbol
         from src.data_platform.adapters.tushare_adapter import _safe_float
+        from src.data_platform.schema import to_vt_symbol
         from src.data_platform.tz import as_utc
         rows = []
         is_daily = "min" not in freq

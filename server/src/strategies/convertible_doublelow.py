@@ -6,8 +6,8 @@ on_bar 用 double_low 因子（价格低+溢价率低）打分，低分买入轮
 """
 
 from __future__ import annotations
-from src.strategy_framework.strategy import Strategy, Signal, Action, register_strategy
-from src.strategy_framework.factor import get_factor
+
+from src.strategy_framework.strategy import Action, Signal, Strategy, register_strategy
 
 
 @register_strategy("convertible_t0")

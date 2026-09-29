@@ -5,13 +5,15 @@
 """
 
 import json
-
-from fastapi import APIRouter, Depends, Request, Body, HTTPException
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import InterfaceReq, InterfaceReorderReq, RateLimitOverrideReq, AccountPermissionReq
-from src.data_platform.db import get_conn
 import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+from ..models import AccountPermissionReq, InterfaceReorderReq, InterfaceReq, RateLimitOverrideReq
 
 logger = logging.getLogger("web_api")
 
@@ -64,8 +66,8 @@ def _default_exchanges(provider: str) -> list[str] | None:
 def _validate_iface(provider: str, market: str, exchanges, capabilities) -> tuple[list, list | None]:
     """写侧校验（方案一 v2 六必修）：market∈MARKETS 且=PROVIDER_MARKET[provider]；
     exchanges⊆市场全所；capabilities 非空且⊆代码能力（越集 400）。返回规范化 (caps, exchanges)。"""
-    from src.quant_common.markets import MARKETS, EXCHANGES, PROVIDER_MARKET
     from src.data_platform.capabilities import check_capability_subset
+    from src.quant_common.markets import EXCHANGES, MARKETS, PROVIDER_MARKET
     if market not in MARKETS:
         raise ApiError(400, "IFACE_MARKET_UNKNOWN", f"未知市场 {market}（注册表：{sorted(MARKETS)}）")
     expect = PROVIDER_MARKET.get(provider)
@@ -171,9 +173,9 @@ def list_interface_providers(payload: dict = Depends(require_perm("read"))):
     provider→{market, capabilities=代码能力全集}；代码能力空（stub：joinquant/ricequant）
     不出目录（写侧 ⊆ 校验建不了行，列出来只会引导用户撞 400）。
     """
-    from src.quant_common.markets import PROVIDER_MARKET, EXCHANGES
     from src.data_platform.capabilities import provider_capabilities
     from src.data_platform.interfaces import list_interface_schemas
+    from src.quant_common.markets import EXCHANGES, PROVIDER_MARKET
     schemas = list_interface_schemas()
     return {"providers": [
         {"provider": p, "market": m, "capabilities": sorted(provider_capabilities(p)),
@@ -195,10 +197,10 @@ def create_interface(req: InterfaceReq, payload: dict = Depends(require_perm("sy
     with get_conn() as conn:
         try:
             cur = conn.execute(
-                f"INSERT INTO external_interface "
-                f"(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled, account_key) "
-                f"VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
-                f"(SELECT coalesce(max(position),-1)+1 FROM external_interface),%s,%s) RETURNING id",
+                "INSERT INTO external_interface "
+                "(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled, account_key) "
+                "VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
+                "(SELECT coalesce(max(position),-1)+1 FROM external_interface),%s,%s) RETURNING id",
                 (req.name, req.provider, req.market, exchanges, enc,
                  json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key))
                 # D25 §九：全局单序列 max+1（原域内 max 与 reorder 全局重编号撞号/插序错位——盲审 A-P1/B-P2-5）
@@ -235,7 +237,7 @@ def interfaces_reorder(req: InterfaceReorderReq, payload: dict = Depends(require
     try:
         from src.data_platform.routing import bump_config_version
         bump_config_version()   # 批 57：position 改动 bump（28 §6.3——epoch 生效验收②闭环）
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     audit_log(payload["username"], "interface_reorder", detail=f"order={req.ids}")
     return {"ok": True}
@@ -283,7 +285,7 @@ def update_interface(iid: int, req: InterfaceReq, payload: dict = Depends(requir
     try:
         from src.data_platform.routing import bump_config_version
         bump_config_version()   # 批 57：接口行变更 bump（28 §6.3——position/enabled 改动 epoch 生效）
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     audit_log(payload["username"], "interface_update", f"id={iid}")
     return {"ok": True}
@@ -501,7 +503,7 @@ def get_task_api(task_id: str,
 @router.post("/api/tasks/{task_id}/terminate")
 def terminate_task_api(task_id: str,
                        payload: dict = Depends(require_perm("trade"))):
-    from src.task_manager import terminate_task, log_task
+    from src.task_manager import log_task, terminate_task
     terminate_task(task_id)
     log_task(task_id, "WARN", f"用户 {payload['username']} 终止任务")
     audit_log(payload["username"], "task_terminate", task_id)

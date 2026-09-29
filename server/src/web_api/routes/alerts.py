@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, Body
+from fastapi import APIRouter, Body, Depends
 
-from ..auth import require_perm, audit_log
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
 from ..errors import ApiError
 from ..redis_pool import redis_client as get_redis
-from src.data_platform.db import get_conn
 
 router = APIRouter(tags=["alerts"])
 
@@ -101,8 +102,8 @@ def alerts_config_get(payload: dict = Depends(require_perm("alerts_config"))):
     """订阅列表（批30 用户维度/批34 通道选择）+ 可订阅用户清单 + 旧表遗留行。
     批34 行形状：channels_sel=剥离失效键后的勾选（None=全通道/[]=零通道静音）、
     channels_avail=该用户可用通道（email/sms bool + bots 明细）。"""
-    from src.alert_notify.sms import sms_configured
     from src.alert_notify.dispatch import _LIMITS
+    from src.alert_notify.sms import sms_configured
     users = _users_with_channels()
     avail_by_uid = {u["id"]: u["channels"] for u in users}
     subs = []
@@ -320,7 +321,7 @@ def alerts_test(body: dict = Body(...), payload: dict = Depends(require_perm("al
     except (TypeError, ValueError):
         raise ApiError(400, "BAD_REQUEST", "id 须为数字")
     row = _load_row(_rid)
-    from src.alert_notify.dispatch import _ch_ok   # 与投递面同源谓词（盲审 A-P2-3）
+    from src.alert_notify.dispatch import _ch_ok  # 与投递面同源谓词（盲审 A-P2-3）
     sel = row["channels"]
     actor = payload["username"]
     r = get_redis()

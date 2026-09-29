@@ -8,6 +8,7 @@ AsyncChatbotHandler：sync process 跑在 SDK 内置 ThreadPoolExecutor(8)+立�
 LLM 慢调用占池即天然背压，无需再起线程（盲审 A-P2-9）。
 """
 from __future__ import annotations
+
 import logging
 import sys
 import threading
@@ -37,6 +38,7 @@ def main() -> None:
     logger.info("bot %s 凭证预检通过（accessToken OK）", bid)
 
     import dingtalk_stream
+
     from src.im_bot.handlers import handle_incoming
 
     first_frame = threading.Event()

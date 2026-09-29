@@ -91,7 +91,7 @@ def _read_cfg() -> tuple[dict, dict]:
                     periods[kind] = max(30, min(v, 86400))
             except (TypeError, ValueError):
                 pass
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     if thresholds is None:
         thresholds, periods = _DEF_THRESHOLDS, _DEF_PERIODS
@@ -117,7 +117,7 @@ def _disk_paths() -> list[str]:
             row = cur.fetchone()
         if row and row[0]:
             paths = [p.strip() for p in str(row[0]).split(":") if p.strip()]
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     _DISK_PATHS_CACHE["paths"] = paths
     _DISK_PATHS_CACHE["ts"] = now
@@ -242,7 +242,7 @@ def collect(now: float | None = None) -> dict:
                 continue
             try:
                 h = r.hgetall(key)
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S112
                 continue
             if not h:
                 continue
@@ -275,7 +275,7 @@ def collect(now: float | None = None) -> dict:
             tid = key.rsplit(":", 1)[-1]
             try:
                 t = r.hgetall(key)
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S112
                 continue
             if t:
                 lag = float(t.get("lag") or 0)
@@ -287,7 +287,7 @@ def collect(now: float | None = None) -> dict:
                 }
         try:
             snap["valkey_memory"] = int(r.info("memory").get("used_memory") or 0)
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
     except Exception as e:
         snap["deps"]["valkey"] = False
@@ -312,7 +312,7 @@ def collect(now: float | None = None) -> dict:
                 "AND state = 'idle in transaction' "
                 "AND xact_start < now() - interval '3 minutes'")
             snap["db_idle_tx_stale"] = int(cur.fetchone()[0] or 0)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
     # 项 18：三档 19 张新表新鲜度（2026-08-21）
@@ -339,7 +339,7 @@ def collect(now: float | None = None) -> dict:
             else:
                 _tier.append({"sync_id": f"pool_data:{tbl}", "last_ts": None, "kind": "tier2"})
         snap["tier_freshness"] = _tier
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
     return snap

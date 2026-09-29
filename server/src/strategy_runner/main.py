@@ -27,6 +27,7 @@ except ImportError:
 # 兼容（from-import 的 F401 告警用属性访问规避：pyflakes 不报属性绑定未用；runner_client_id
 # 全仓零处从 main import——不留死兼容面，代码审 P2-3）
 import src.strategy_framework.broker as _broker_mod
+
 _build_xtp_setting = _broker_mod.build_xtp_setting
 
 # 批 4a（2026-08-27）：交易域九单元单源化于 trading（write_trade_log/快照/熔断沿/recalc/
@@ -80,10 +81,12 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
     """PG 暖机：读历史 bar 填充 history（因子初始化 / 断线补缺口，#4）。返回 list。"""
     history = []
     try:
+        from datetime import datetime as _dt
+        from datetime import timedelta
+
         from src.data_platform.databus import DataBus
         from src.quant_common.contract import DataRequest
         from src.strategy_runner.hub_worker import _crypto_provider
-        from datetime import datetime as _dt, timedelta
         source = _crypto_provider(symbol)   # D3：加密 per-account 暖机按 source 过滤（A股 None 不过滤）
         req = DataRequest(kind="bar_minute", symbols=(symbol,), temporality="historical",
                           freq="1min", range_=(_dt.now() - timedelta(days=30), _dt.now()),
@@ -108,7 +111,8 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
 
 # 2026-08-19 模块归位：guard/sd_notify/session 来自 quant_common（本包禁止依赖告警层，
 # alert 回调在此注入——safe_notify 收编三处重复 try/except notify 模式）
-from src.quant_common.guard import guard as _guard_base, sd_notify as _sd_notify
+from src.quant_common.guard import guard as _guard_base
+from src.quant_common.guard import sd_notify as _sd_notify
 
 
 def _alert(title: str, body: str = "", code: str | None = None) -> None:
@@ -128,7 +132,8 @@ def _guard(name):
 
 # 批 65a（D26-A）：TD builder+注册表下沉 td_registry（main 保留分发调用+EX_CONFIG 异常处理）。
 # 兼容 re-export：test_d5_account_binding 断言 main._TD_BUILDERS（同对象别名）。
-from src.strategy_runner.td_registry import build_td_runtime, TD_BUILDERS
+from src.strategy_runner.td_registry import TD_BUILDERS, build_td_runtime
+
 _TD_BUILDERS = TD_BUILDERS
 
 
@@ -140,9 +145,10 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     → check_order 2.5 市场操作权限判定。旧 --id 路径无值=None → operator 空 → 2.5 拒单
     critical（预期 fail-closed）。"""
     from vnpy.event import EventEngine
+
+    from src.strategy_framework.broker import get_interface_row
     from src.strategy_framework.strategy import Strategy, StrategyConfig
     from src.strategy_runner.hub_worker import run as hub_worker_run
-    from src.strategy_framework.broker import get_interface_row
 
     logger.info("任务 %s 以 hub 模式启动（策略 %s 标的 %s）", tid or sid, sid, symbol)
     boot_epoch = int(time.time())   # 评审 S8：秒级 epoch（分钟级同分钟重启会撞 id）
@@ -176,9 +182,9 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         trading.write_order_status(event.data, adapter, sid, symbol)
         # 批 69a：SSE 信号帧（零内容——信任边界立法；重拉 /api/orders 由前端做）
         try:
-            from src.quant_common.eventbus import bus   # 惰性导入（notify.py:89 先例）
+            from src.quant_common.eventbus import bus  # 惰性导入（notify.py:89 先例）
             bus.publish_cross_process(0, "order_update", {})
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
     ee.register(EVENT_ORDER, on_order)
 
@@ -321,7 +327,9 @@ def main():
 
     # 批25：system_log 落库（live-task 装配：source=live:{tid}；SIGTERM 链式冲刷）
     import signal as _sig
-    from src.data_platform.log_sink import install as _log_install, chain_sigterm as _chain
+
+    from src.data_platform.log_sink import chain_sigterm as _chain
+    from src.data_platform.log_sink import install as _log_install
     _log_install(f"live:{args.task_id}" if args.task_id else "live:?")
     _chain(_sig.getsignal(_sig.SIGTERM))
     logging.basicConfig(
@@ -346,8 +354,9 @@ def main():
         sys.exit(EX_TEMPFAIL)
 
     # 1. 读 live_task（批 66a：唯一路径——旧 --id/strategy_config 直启已退役，D26 #6）
-    from src.data_platform.db import get_conn
     import json as _json
+
+    from src.data_platform.db import get_conn
 
     with get_conn() as conn:
         cur = conn.execute(
@@ -391,7 +400,7 @@ def main():
             with get_conn() as conn:
                 row = conn.execute("SELECT value FROM system_config WHERE key='md_mode'").fetchone()
                 _md = str(row[0] if row else "").lower()
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
     if _md == "direct":
         logger.error("md_mode=direct 已退役（批 6b，2026-09-01）：实盘行情统一 hub 模式。"

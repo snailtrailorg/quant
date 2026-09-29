@@ -9,14 +9,13 @@ from __future__ import annotations
 
 import logging
 
-from src.data_platform.db import get_conn   # noqa: F401（部分函数内再 import as _gc 同源）
-
 _logger = logging.getLogger("data_platform.perms")
 
 
 # 批33b（A-P1-4）：唯一字面量层=perm_registry（api 键 14/nav/market 全在那）；本模块
 # 单向 import——admin 集=注册表 api 全键派生（三集实测相等），其余角色子集保留字面量（角色语义独立）。
-from src.data_platform.perm_registry import API_PERM_KEYS as _API_KEYS, MARKET_OP_KEYS as _MKT_KEYS
+from src.data_platform.perm_registry import API_PERM_KEYS as _API_KEYS  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
+from src.data_platform.perm_registry import MARKET_OP_KEYS as _MKT_KEYS
 
 PERMISSIONS = {
     "viewer":  {"read"},
@@ -86,6 +85,7 @@ def account_allows(account_id: int, symbol: str) -> bool:
     例外：ST「无档」= 非 ST（namechange 派生源戴帽滞后 fail-open，官方名单另批——非读库失败）。
     """
     from datetime import date as _date
+
     from src.data_platform.db import get_conn as _gc
     from src.data_platform.security_master import SMClient
 
@@ -197,8 +197,8 @@ def load_nav_map(username: str, role: str) -> dict:
     无配置={}（=readwrite 缺省，前端现行为）。
     """
     try:
-        from src.data_platform.perm_registry import NAV_ITEMS_BASE
         from src.data_platform.db import get_conn as _gc
+        from src.data_platform.perm_registry import NAV_ITEMS_BASE
         with _gc() as conn:
             rows = conn.execute(
                 "SELECT resource, effect FROM permission "

@@ -8,6 +8,7 @@
 - 被动回复=sessionWebhook（免 token）；主动推送=oToMessages/batchSend（本批实现供告警链后续消费）
 """
 from __future__ import annotations
+
 import json
 import logging
 

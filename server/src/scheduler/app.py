@@ -6,8 +6,9 @@
 """
 
 from __future__ import annotations
+
 import os
-from datetime import date, datetime
+
 from celery import Celery
 from celery.schedules import crontab
 from dotenv import load_dotenv
@@ -33,7 +34,7 @@ def _load_celery_concurrency() -> int:
             r = cur.fetchone()
             if r:
                 return int(r[0])
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass  # 表未建或 DB 不可达，用 fallback
     return int(os.environ.get("CELERY_CONCURRENCY", "2"))
 
@@ -47,12 +48,14 @@ app = Celery(
 
 # 批25：system_log 落库——celery 侧装配（盲审 A-P0 三连击根治：hijack_root_logger 摘 root → setup_logging 挂回；
 # prefork 线程不跨 fork → worker_process_init 每子进程自起；billiard os._exit 绕 atexit → worker_shutdown 自冲刷）
-from celery.signals import (setup_logging as _cel_setup_logging, worker_process_init,
-                             worker_shutdown, worker_process_shutdown)
+from celery.signals import setup_logging as _cel_setup_logging  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
+from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
+
 
 @_cel_setup_logging.connect
 def _on_celery_setup_logging(**_kw):
     import logging
+
     from src.data_platform.log_sink import install_worker
     install_worker(os.environ.get("QUANT_LOG_SOURCE") or "celery")
     return logging.getLogger()   # 返回 root：celery 不再自装（hijack 防线）
@@ -64,7 +67,7 @@ def _on_worker_process_init(**_kw):
     try:
         from src.data_platform.db import dispose_fork_inherited_connections
         dispose_fork_inherited_connections()
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass   # 极早期窗口（db 模块未就绪）静默——sink flush 时新连接自建即净
     from src.data_platform.log_sink import install_worker
     install_worker()   # fork 后每子进程重启 flush 线程（source 取 env，systemd 单元 Environment= 各自注入）
@@ -76,13 +79,14 @@ def _on_worker_process_init(**_kw):
     # 信号处理器抛异常会阻断 prefork 子进程启动。
     try:
         import logging
+
         from src.strategy_framework.factor import load_factors_from_db
         _loaded_f = load_factors_from_db()
         if _loaded_f:
             # 行为冒烟实证：print 在子进程 init 时刻 stdout 重定向尚未接管（journal 盲区），
             # logger 走 log_sink→system_log 恒可观测（批26-11）
             logging.getLogger(__name__).info("加载自定义因子(worker 子进程): %s", ", ".join(_loaded_f))
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass   # 表未建/DB 未就绪的子进程早期窗口静默（任务头 R-S4 兜底）
 
 @worker_shutdown.connect
@@ -113,7 +117,7 @@ try:
     from src.data_platform.db import verify_schema
     from src.health_monitor.monitor import report_schema_findings
     report_schema_findings(verify_schema())
-except Exception:
+except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
     pass   # broker/db 未就绪的极早期导入窗口静默（web/runner 入口会再报）
 
 app.conf.update(

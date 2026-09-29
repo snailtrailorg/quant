@@ -16,8 +16,9 @@ import time
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from src.quant_common.eventbus import CLOSE_SENTINEL, bus
+
 from ..auth import require_authenticated
-from src.quant_common.eventbus import bus, CLOSE_SENTINEL
 
 router = APIRouter(tags=["events"])
 

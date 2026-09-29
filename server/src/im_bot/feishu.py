@@ -4,6 +4,7 @@ MODE='websocket':消息+卡片回调均走 ws 长连接(feishu_bot/ws_client—�
 可达;批29-4 卡片确认收敛 ws 面,router webhook 仅备用且卡片路径桩化)。
 """
 from __future__ import annotations
+
 import logging
 
 from .base import IMBotProvider, register_provider
@@ -31,7 +32,7 @@ class FeishuProvider(IMBotProvider):
 
     # ── 通道行为(委托 feishu_bot.bot 的生产实现,bot_id 定位凭证)──
     def send_text(self, bot_id: int, receive_id: str, receive_id_type: str, text: str) -> bool:
-        from .feishu_client import get_feishu_client   # 批 7:单例(token TTL 复用,一告警多接收人不再逐人取 token)
+        from .feishu_client import get_feishu_client  # 批 7:单例(token TTL 复用,一告警多接收人不再逐人取 token)
         return get_feishu_client(bot_id).send_text(receive_id, text, receive_id_type)
 
     def send_card(self, bot_id: int, receive_id: str, receive_id_type: str, card: dict) -> bool:
@@ -43,6 +44,7 @@ class FeishuProvider(IMBotProvider):
     def test_connection(self, bot_id: int) -> tuple[bool, str]:
         """tenant_access_token 获取即连通(同旧 /api/feishu/{fid}/test 逻辑,凭证读新表)。"""
         import requests
+
         from .credentials import get_bot_credentials
         creds = get_bot_credentials(bot_id)
         if not creds.get("app_id") or not creds.get("app_secret"):

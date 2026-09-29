@@ -188,7 +188,7 @@ class CircuitBreaker:
             if dirty:
                 r.hset(self._key, mapping=mapping)
                 r.delete(self._probe_key())
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass   # fail-open：记账失败不阻主流程
 
     def record_failure(self) -> None:
@@ -208,7 +208,7 @@ class CircuitBreaker:
                 r.expire(self._key, int(self._reset_timeout * 2))   # OPEN 态自 GC（closed 稳态零写无键）
                 logger.warning("熔断打开：连续失败 %d 次（阈值 %d，%.0fs 后半开探测）",
                                fails, self._fail_threshold, self._reset_timeout)
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
 
 

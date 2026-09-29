@@ -10,6 +10,6 @@
         print(f"{r.symbol}: 评分={r.score} 评级={r.rating} 结论={r.conclusion}")
 """
 
-from .analysis import DailySelectionEngine, MinuteAnalysisEngine, AnalysisResult
+from .analysis import AnalysisResult, DailySelectionEngine, MinuteAnalysisEngine
 
 __all__ = ["DailySelectionEngine", "MinuteAnalysisEngine", "AnalysisResult"]

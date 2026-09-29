@@ -4,6 +4,7 @@
 消息回调在 asyncio loop 线程触发——慢处理（LLM）起工作线程，回复经 reply_threadsafe 桥回。
 """
 from __future__ import annotations
+
 import asyncio
 import logging
 import sys
@@ -29,8 +30,8 @@ def main() -> None:
     from src.im_bot.users import backfill_from_env
     backfill_from_env(bid)   # 与飞书 ws_client 同构：启动回填
 
-    from src.im_bot.wecom_ws import WecomAIBotWS, WecomAuthError
     from src.im_bot.handlers import handle_incoming
+    from src.im_bot.wecom_ws import WecomAIBotWS, WecomAuthError
 
     def on_message(body: dict, req_id: str) -> None:
         """asyncio loop 线程——快解析后慢处理丢工作线程（不阻塞心跳/收帧）。"""

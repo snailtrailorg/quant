@@ -3,11 +3,17 @@
 
 3 秒超时约束：Webhook 收到消息立即返回 {"code":0}，LLM 任务丢后台线程。
 """
-from src.im_bot.feishu_client import *           # noqa: F401,F403
-from src.im_bot.feishu_client import (            # noqa: F401 显式列(非 __all__ 成员)
-    FeishuClient, get_feishu_client, evict_feishu_client,
-    process_message_async, execute_confirmed_tool,
-    load_feishu_users, FEISHU_USERS,
-    verify_event_signature, _im_bot_secret,   # 批29-4：verify_card_signature 退役（HTTP 卡片面桩化）
-    build_confirm_card, card_action_fresh,
+from src.im_bot.feishu_client import *  # noqa: F401,F403
+from src.im_bot.feishu_client import (  # noqa: F401 显式列(非 __all__ 成员)
+    FEISHU_USERS,
+    FeishuClient,
+    _im_bot_secret,
+    build_confirm_card,
+    card_action_fresh,
+    evict_feishu_client,
+    execute_confirmed_tool,
+    get_feishu_client,
+    load_feishu_users,
+    process_message_async,
+    verify_event_signature,  # 批29-4：verify_card_signature 退役（HTTP 卡片面桩化）
 )

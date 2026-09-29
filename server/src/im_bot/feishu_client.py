@@ -3,13 +3,14 @@ im_bot 为层 3 服务层,不得 import 层 4 入口 feishu_bot;feishu_bot/bot.p
 旧引用(router/ws_client/tests)零改动继续工作)。"""
 
 from __future__ import annotations
-import os
-import json
-import time
+
 import hashlib
-import threading
+import json
 import logging
-from typing import Any
+import os
+import threading
+import time
+
 import httpx
 from dotenv import load_dotenv
 
@@ -21,8 +22,7 @@ _token_lock = threading.Lock()
 # ——— 后台处理（3s 超时绕开） ———
 # 批13：_get_max_tool_turns/_first_seen_note/execute_read_tool 已随通用链迁 handlers.py；
 # execute_read_tool 保留 re-export（旧引用兼容），其余为内部细节不保符号。
-from src.im_bot.handlers import execute_read_tool  # noqa: F401  (re-export)
-
+from src.im_bot.handlers import execute_read_tool  # noqa: F401, E402  (re-export)
 
 # 批 2(arch-19 v2):per-bot 客户端单例——修两个现状隐患:①多 bot 时 FeishuClient() 不带
 # fid 回复走"最新 enabled"的凭证而非收消息的 bot;②每消息 new 实例 token 缓存形同虚设。
@@ -56,8 +56,8 @@ class FeishuClient:
     """飞书开放平台 API 客户端(批 2:凭证读 im_bot_config 统一表)。"""
 
     def __init__(self, bot_id: int | None = None):
-        from src.im_bot.credentials import get_bot_credentials
         from src.data_platform.db import get_conn
+        from src.im_bot.credentials import get_bot_credentials
         creds = {}
         try:
             if bot_id is None:
@@ -230,8 +230,9 @@ def _im_bot_secret(field: str, env_key: str) -> str:
     近似——单 bot 现状足够；批 2 URL bid 精确 per-bot）；无行/无字段/解密失败回落 env。"""
     try:
         import json as _json
-        from src.quant_common.crypto import decrypt
+
         from src.data_platform.db import get_conn
+        from src.quant_common.crypto import decrypt
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT credentials_encrypted FROM im_bot_config "
@@ -342,7 +343,8 @@ def process_message_async(open_id: str, text: str, receive_id_type: str = "open_
     bindcode/首见留痕链退役——自有 bot 由 resolve owner 直通）。
 
     webhook(ws_client/router) 双路径签名零改动。"""
-    if receive_id is None: receive_id = open_id
+    if receive_id is None:
+        receive_id = open_id
     logger.info("process_message_async: fid=%s open_id=%s receive_id=%s type=%s",
                 fid, open_id, receive_id, receive_id_type)   # 批27-8：print→logger（调试遗留 === 格式清）
     client = get_feishu_client(fid)   # 批 2:per-bot 单例(修多 bot 回复走错凭证隐患)
@@ -381,14 +383,13 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: st
     批29b 返 bool（盲审 A-P1-1/文案师随审双判）：True=执行成功（halt/resume/stop/start
     成功路径，含审计）；False=执行失败（stop/start 子进程失败、未知工具、外层异常——
     原实现吞异常无从分辨，调用方据返值选 executed/failed 终态）。"""
-    import time
     import json as _json
     _actor = username or f"feishu:{open_id}"
     try:  # args 可能是 {"id": N} 的 JSON 串或纯 id
         _a = _json.loads(args) if isinstance(args, str) and args.strip().startswith("{") else args
         _sid = _a.get("id", _a) if isinstance(_a, dict) else _a
         args = str(_sid)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     # 批29-2b：回执 per-bot（ws 面传本进程 fid）——平台级查询（owner IS NULL 恒空）已退役
     client = get_feishu_client(fid)

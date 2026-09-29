@@ -2,4 +2,4 @@
 
 挂载到 FastAPI: from src.feishu_bot.router import router; app.include_router(router)
 """
-from .bot import FeishuClient, process_message_async, build_confirm_card
+from .bot import FeishuClient, build_confirm_card, process_message_async

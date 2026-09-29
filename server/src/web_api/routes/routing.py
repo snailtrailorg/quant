@@ -5,10 +5,12 @@ PATCH /api/routing/policies/{tag}  weights/bulkhead 编辑（system_config）—
 GET /api/routing/dry-run      候选链试算器（read）：kind/symbol/consumer/mode → 链+决策理由
 GET /api/routing/decisions    审计最近行（read）
 """
-from fastapi import APIRouter, Depends, Body
-from ..auth import require_perm, audit_log
-from ..errors import ApiError
+from fastapi import APIRouter, Body, Depends
+
 from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
 
 router = APIRouter(tags=["routing"])
 
@@ -64,9 +66,9 @@ def update_policy(consumer_tag: str, body: dict = Body(...),
 def dry_run(kind: str, symbol: str, consumer: str = "default", mode: str = "consume",
             payload: dict = Depends(require_perm("system_config"))):
     """候选链试算器：输入 kind/symbol/consumer/mode 展示链与决策理由（不真拉——29 号只选不拉）。"""
-    from src.quant_common.contract import DataRequest
     from src.data_platform import routing
     from src.data_platform.rate_limit import _r, breaker_key
+    from src.quant_common.contract import DataRequest
     req = DataRequest(kind=kind, symbols=(symbol,), temporality="historical",
                       consumer_tag=consumer, mode=mode)
     chain = routing.resolve(req)

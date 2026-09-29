@@ -58,12 +58,14 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
     """
     from vnpy.trader.gateway import BaseGateway
     from vnpy_xtp.gateway.xtp_gateway import XtpTdApi
+
     from src.strategy_framework.adapters import XTPAdapter
     setting = build_xtp_setting(client_id=runner_client_id(tid), row_id=account_id)
 
     # 每日连接窗·TD 侧（只 A股 XTP 套窗）：窗开建连/窗关启动不连（窗开沿由
     # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
-    from datetime import datetime as _dtnow   # 盲审 A-P0：函数级导入（模块头部无 datetime）
+    from datetime import datetime as _dtnow  # 盲审 A-P0：函数级导入（模块头部无 datetime）
+
     from src.strategy_framework.md_session import is_trading_day as _itd
     from src.strategy_framework.md_session import load_xtp_window_cfg, xtp_session_window_open
     _lead, _lag = load_xtp_window_cfg()
@@ -95,7 +97,7 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
             try:
                 if getattr(self.td_api, "connect_status", False):
                     self.td_api.exit()
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
 
     gw = ThinTdGateway(ee, "XTP")
@@ -122,11 +124,11 @@ def _build_emt_runtime(ee, tid, account_id, boot_epoch) -> dict:
     client_id 派生 (tid-1)%100+20（SDK 实测域 [1-127]——代码审 B-P1-4；真防线=tid 派生唯一性）。
     连接窗：复用 A 股窗（xtp_session_lead/lag_min 自此双 provider 共用——知情接受）。
     """
+    from datetime import datetime as _dt
+
     from src.strategy_framework.adapters import EmtAdapter
     from src.strategy_framework.broker import get_interface_row
-    from src.strategy_framework.md_session import (
-        is_trading_day, load_xtp_window_cfg, xtp_session_window_open)
-    from datetime import datetime as _dt
+    from src.strategy_framework.md_session import is_trading_day, load_xtp_window_cfg, xtp_session_window_open
 
     row = get_interface_row(row_id=account_id)
     cred = row.get("credentials") or {}

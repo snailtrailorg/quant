@@ -6,17 +6,17 @@
 """
 
 from __future__ import annotations
-import os
-import time
-import threading
+
 import logging
-from pathlib import Path
-from typing import Any, Literal, AsyncGenerator
+import threading
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, AsyncGenerator, Literal
 
 import yaml
-from openai import OpenAI, AsyncOpenAI
 from dotenv import load_dotenv
+from openai import AsyncOpenAI, OpenAI
 
 load_dotenv()
 logger = logging.getLogger("llm_gateway")

@@ -6,6 +6,7 @@ ExecutionAdapter 已有交易接口（send_order/cancel/query），Broker 抽象
 别人加 IB/CTP：实现 Broker 子类 + DB 配置。
 """
 from __future__ import annotations
+
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -267,6 +268,6 @@ def get_xtp_param(key: str, default=None):
         broker = get_broker("xtp")
         if broker:
             return (broker._params or {}).get(key, default)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return default

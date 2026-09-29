@@ -4,8 +4,10 @@
 """
 
 from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
+
 import pandas as pd
 
 from src.data_platform import to_vt_symbol

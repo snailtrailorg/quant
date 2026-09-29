@@ -9,14 +9,16 @@ cancel_event+deadline 看门狗+模块级 Semaphore(8) 全局帽——A-P1-1）�
 由端点同步等待返回（≤5s），确认段继续写 session 供轮询/批B SSE。
 """
 from __future__ import annotations
-import os
+
 import json
 import logging
+import os
 import re
 import threading
 import time
-import redis
+
 import lark_oapi as lark
+import redis
 
 from src.data_platform.db import get_conn
 from src.quant_common.crypto import encrypt
@@ -120,7 +122,10 @@ def run_onboarding(session_id: str, owner_user_id: int | None = None,
 
     def on_qr_code(info):
         # info 含 url（二维码内容）+ expire_in；生成 base64 二维码图片供前端渲染
-        import qrcode, io, base64
+        import base64
+        import io
+
+        import qrcode
         url = info.get("url", "")
         img = qrcode.make(url)
         buf = io.BytesIO()
@@ -190,7 +195,8 @@ def run_onboarding(session_id: str, owner_user_id: int | None = None,
         # 批 2(arch-19 v2):存 im_bot_config 统一表——同 app_id 重扫=更新凭证(ON CONFLICT
         # route_key),不再堆重复行(修批 1 审计 A-S1 揭示的旧行为)
         import json as _json
-        from src.im_bot.credentials import save_bot_credentials, get_bot_credentials
+
+        from src.im_bot.credentials import save_bot_credentials
         def _rescan_verdict(row_owner) -> str:
             """重扫三分支判定（批11D 盲审 A-P1-1+B-P1-1）→ 'error'|'platform'|'own'。"""
             if row_owner is not None and owner_user_id is not None and row_owner != owner_user_id:
@@ -266,8 +272,10 @@ def run_onboarding(session_id: str, owner_user_id: int | None = None,
         _set_session(session_id, {"status": "error", "error": str(e), "code": "ONBOARDING_FAILED"},
                      owner_user_id=owner_user_id)
         if on_error:
-            try: on_error(str(e))
-            except Exception: pass
+            try:
+                on_error(str(e))
+            except Exception:  # noqa: S110
+                pass  # 失败不阻断（fail-open 降级）  # noqa: S110
         logger.error(f"feishu register 失败: {e}")
     finally:
         _watchdog.cancel()
@@ -308,7 +316,7 @@ def sweep_stale_sessions() -> int:
         for key in _redis.scan_iter("feishu:session:*", count=100):
             try:
                 d = json.loads(_redis.get(key) or "{}")
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S112
                 continue
             if not isinstance(d, dict):
                 continue   # 盲审 A-P2-1：非字典载荷（null/数字）防 AttributeError 中断全扫
@@ -325,7 +333,7 @@ def sweep_stale_sessions() -> int:
                 if _owner is not None:
                     try:
                         _redis.delete(f"im:onboarding:owner:{_owner}")
-                    except Exception:
+                    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                         pass   # 索引键清理失败不阻断全扫（TTL 尽自愈）
                 n += 1
     except Exception as e:

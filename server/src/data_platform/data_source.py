@@ -5,9 +5,10 @@
 别人加 Wind：实现 DataSource 子类 + DB 配置（provider='wind'），不改 engine 代码。
 """
 from __future__ import annotations
-import os
+
 import json
 import logging
+import os
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger("data_source")
@@ -98,7 +99,7 @@ class DataSource(ABC):
                     "VALUES (%s,%s,%s,%s,%s,%s)",
                     (prov, api_name, api_calls, success, latency_ms, self.interface_id))
                 conn.commit()
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
 
 
@@ -208,7 +209,7 @@ class AkShareDataSource(DataSource):
         return ak
     def test_connection(self) -> bool:
         try:
-            import akshare
+            import akshare  # noqa: F401  # import 成功即可用（可用性探测）
             return True
         except ImportError:
             return False

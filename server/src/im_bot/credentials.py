@@ -4,6 +4,7 @@ credentials_encrypted = encrypt(JSON);JSON 内含 FIELD_SCHEMA 全字段
 (app_id 明文也入 JSON 保持单真相源,params.route_key 为路由冗余,写入时同步)。
 """
 from __future__ import annotations
+
 import json
 import logging
 
@@ -41,6 +42,7 @@ def save_bot_credentials(bot_id: int, creds: dict, partial: bool = True) -> bool
     route_key 单点推导（批13 P0：钉钉 app_key/企微 bot_id 进名单——防补录改写空值撞唯一索引）。"""
     from src.data_platform.db import get_conn
     from src.quant_common.crypto import encrypt
+
     from .routing import route_key_from
     if partial:
         creds = {**get_bot_credentials(bot_id), **{k: v for k, v in creds.items() if v}}

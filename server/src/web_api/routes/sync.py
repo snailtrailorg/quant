@@ -1,13 +1,14 @@
 """Web 后端 · 数据同步路由（/api/sync/* + /api/data-source-usage）。"""
 
-from fastapi import APIRouter, Depends, Request, Body, WebSocket, WebSocketDisconnect
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq)
-from src.data_platform.db import get_conn
-from ..redis_pool import redis_client
 import logging
-import json
+
+from fastapi import APIRouter, Body, Depends
+
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+from ..redis_pool import redis_client
 
 logger = logging.getLogger("web_api")
 

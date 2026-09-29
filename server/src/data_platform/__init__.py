@@ -20,7 +20,7 @@
 
 from importlib import import_module
 
-from .schema import Bar, to_vt_symbol, parse_vt_symbol, to_ts_code
+from .schema import Bar, parse_vt_symbol, to_ts_code, to_vt_symbol
 
 _LAZY_ATTRS: dict[str, str] = {"platform": "._platform", "DataPlatform": "._platform"}
 

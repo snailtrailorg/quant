@@ -38,6 +38,7 @@ _TZ = ZoneInfo("Asia/Shanghai")
 # 解释器退出会 join 并排空队列（live-task stop 被在途发送阻塞超时遭 SIGKILL，A 评 P2-5）；
 # daemon 线程随进程生灭，符合"零阻塞业务/进程退出不等待"契约。
 import queue as _queue
+
 _q: "_queue.Queue" = _queue.Queue()
 _worker_started = False
 
@@ -272,9 +273,9 @@ def _send_email(to: str, *, level: str, category: str, title: str, body: str, co
     if code == "email.failed":
         return False, "skip_recursion"
     try:
-        from src.email_service import queue_email
-        from src.email_service import _try_row_sync
         import html as _html
+
+        from src.email_service import _try_row_sync, queue_email
         subject = f"[{level}][{category}] {title}"
         html_body = f"<pre style=\"font-family:ui-monospace,monospace\">{_html.escape(_compose(body, code, 4000))}</pre>"
         outbox_id = queue_email(to, subject, html_body)
@@ -301,7 +302,7 @@ def _send_sms(phone: str, *, level: str, title: str) -> tuple[bool, str]:
 #   templated = 模板化降维（短信=敲门通知媒介，用户裁定——只传模板变量，
 #               完整信息走 Web 登录或 AI 通道问答；title 截 20 字与阿里云模板 ${title} 对齐）
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -368,8 +369,8 @@ def _load_channels() -> list[dict]:
     （手机无/短信凭证未配；邮箱仅有值判定——发送侧 outbox 兜底失败可见，跳过反而静默）。
     DB 异常 = 空 + warn（订阅在 DB，DB 故障=外推不可用，与旧 webhook 同语义）。"""
     try:
-        from src.data_platform.db import get_conn
         from src.alert_notify.sms import sms_configured as _sms_ok
+        from src.data_platform.db import get_conn
         rows: list[dict] = []
         with get_conn() as conn:
             subs = conn.execute(

@@ -10,6 +10,7 @@
   集做交易日判定，不碰 data_platform 的 import
 """
 from __future__ import annotations
+
 import datetime as _dt
 import time
 from typing import Callable
@@ -48,7 +49,7 @@ def _load_market_config(market: str) -> dict | None:
         # 短 TTL 10s 收敛快（DB 恢复/行新建后 10s 内可达），chatter 消除
         cache[market] = (None, now + 10.0)
         _load_market_config._cache = cache
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return None
 

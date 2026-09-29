@@ -5,17 +5,19 @@
 """
 
 from __future__ import annotations
-import os
+
 import logging
+import os
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger("web_api")
 
-from .auth import init_users_table, ensure_default_admin
+from .auth import ensure_default_admin, init_users_table
 from .errors import ApiError
 
 app = FastAPI(title="量化交易平台 API", version="0.1.0")
@@ -35,16 +37,19 @@ async def api_error_handler(request, exc: ApiError):
 
 
 from src.feishu_bot.router import router as feishu_router
-app.include_router(feishu_router)
 
-from .routes.events import router as events_router   # 批14 SSE（import 在 include 前——顺序无碍）
+app.include_router(feishu_router)
 
 # --- 头像静态服务（批次C）：挂 /api/static/avatars -- nginx 已代理 /api/，零额外配置同源可达 ---
 # 2026-08-26 3b 修正：头像是运行时数据，位置=shared 层（AVATAR_DIR 环境变量可覆盖）。
 # 原 <版本树>/static/avatars 两宗罪：工件化后落在 deploy 属主 releases/<id> 内——
 # ① quant mkdir/写入 EACCES（3b-2 首发导入冒烟拦截）；② 与 3b-1 数据外置位不符且逐版丢失。
 from pathlib import Path as _Path
+
 from fastapi.staticfiles import StaticFiles as _StaticFiles
+
+from .routes.events import router as events_router  # 批14 SSE（import 在 include 前——顺序无碍）
+
 _AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR",
                                    "/data/websites/snailtrail.cc/quant/shared/static/avatars"))
 try:
@@ -71,17 +76,20 @@ app.add_middleware(
 # --- 启动时初始化 ---
 
 # 批25：system_log 统一落库（web-api 装配——不裸抢 SIGTERM，uvicorn 优雅退出→shutdown 钩子冲刷）
-from src.data_platform.log_sink import install as _log_install, sink as _log_sink
+from src.data_platform.log_sink import install as _log_install
+from src.data_platform.log_sink import sink as _log_sink
+
 _log_install("web-api")
 
 @app.on_event("shutdown")
 def shutdown():
-    if (_s := _log_sink()) is not None: _s.close()   # 批25：缓冲日志冲刷（幂等，atexit 兜底）
+    if (_s := _log_sink()) is not None:
+        _s.close()   # 批25：缓冲日志冲刷（幂等，atexit 兜底）
     # 批18：先停桥再关总线（盲审A-P2-4——桥停后 bus.close 哨兵才不会被桥回填的迟到事件跟在后面）
     try:
         from src.quant_common.sse_bridge import _bridge
         _bridge.stop()
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     # 批14（B-P0-1）：停机关总线——SSE 生成器收哨兵即退（配合 systemd --timeout-graceful-shutdown 5）
     from src.quant_common.eventbus import bus
@@ -109,7 +117,7 @@ def startup():
         if n:
             import logging as _lg
             _lg.getLogger("web_api").warning("startup 清扫死扫码会话 %d 个", n)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     init_users_table()
     # #48：启动时列级校验（纯函数 -> 入口层路由告警；失败不阻断启动）
@@ -133,20 +141,20 @@ def startup():
 
 # --- 路由注册（端点实现全部在 routes/ 各 APIRouter，此处只 include） ---
 
-from .routes.quality import router as quality_router             # 批 62b：/api/quality 对账域
-from .routes.system import router as system_router            # /healthz /readyz /metrics /api/help /api/system-config /api/smtp-providers 等
-from .routes.auth_routes import router as auth_router         # /api/auth/* /api/user* /api/invites /api/log
-from .routes.strategy import router as strategy_router        # /api/strategy* /api/factors* /api/live-task
-from .routes.trading import router as trading_router          # /api/position /api/pnl /api/orders /api/account /api/dashboard
-from .routes.sync import router as sync_router                # /api/sync/* /api/data-source-usage
-from .routes.stock import router as stock_router              # /api/stock/* /api/kline /api/screen/*
-from .routes.chat import router as chat_router                # /api/chat /ws/chat /ws/market /api/llm-models /api/llm-*
-from .routes.im_bots import router as im_bots_router          # /api/im-bots/*
-from .routes.alerts import router as alerts_router              # /api/alerts/*（批7 告警订阅）
-from .routes.mgmt import router as mgmt_router                # /api/interfaces（批55 统一表）/api/datasource rate-limits /api/tasks
-from .routes.risk import router as risk_router                # /api/risk* /api/live-trading /api/reconcile /api/convertible
-from .routes.backtest import router as backtest_router        # /api/backtest* /api/pool* /api/broker-usage
-from .routes.routing import router as routing_router          # 批 57 M2：/api/routing/*（策略+dry-run+审计）
+from .routes.alerts import router as alerts_router  # /api/alerts/*（批7 告警订阅）
+from .routes.auth_routes import router as auth_router  # /api/auth/* /api/user* /api/invites /api/log
+from .routes.backtest import router as backtest_router  # /api/backtest* /api/pool* /api/broker-usage
+from .routes.chat import router as chat_router  # /api/chat /ws/chat /ws/market /api/llm-models /api/llm-*
+from .routes.im_bots import router as im_bots_router  # /api/im-bots/*
+from .routes.mgmt import router as mgmt_router  # /api/interfaces（批55 统一表）/api/datasource rate-limits /api/tasks
+from .routes.quality import router as quality_router  # 批 62b：/api/quality 对账域
+from .routes.risk import router as risk_router  # /api/risk* /api/live-trading /api/reconcile /api/convertible
+from .routes.routing import router as routing_router  # 批 57 M2：/api/routing/*（策略+dry-run+审计）
+from .routes.stock import router as stock_router  # /api/stock/* /api/kline /api/screen/*
+from .routes.strategy import router as strategy_router  # /api/strategy* /api/factors* /api/live-task
+from .routes.sync import router as sync_router  # /api/sync/* /api/data-source-usage
+from .routes.system import router as system_router  # /healthz /readyz /metrics /api/help /api/system-config /api/smtp-providers 等
+from .routes.trading import router as trading_router  # /api/position /api/pnl /api/orders /api/account /api/dashboard
 
 app.include_router(quality_router)   # 批 62b：M7 对账
 app.include_router(system_router)

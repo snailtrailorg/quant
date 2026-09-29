@@ -1,5 +1,6 @@
 """im_bot 用户授权(im_bot_users CRUD,批 2 管理面)。"""
 from __future__ import annotations
+
 import logging
 
 logger = logging.getLogger("im_bot.users")
@@ -138,7 +139,7 @@ def resolve_im_identity(im_user_id: str, bot_id: int | None = None) -> dict | No
                                 "ON CONFLICT (bot_id, im_user_id) DO NOTHING",
                                 (bot_id, im_user_id, r2[0]))
                             conn.commit()
-                        except Exception:
+                        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                             pass   # 记账失败不影响身份直通
                     else:
                         uids = set()

@@ -236,6 +236,7 @@ class DataBus:
         盲审 A 实测；now 覆盖「wm 到当下」的 PG 回补）。warmup 含 wm 那根，与流「严格新于」互补。
         """
         from datetime import timezone
+
         from src.quant_common.contract import DataRequest
         freq = _FREQ_BY_KIND.get(sub.kind, "1min")
         req = DataRequest(kind=sub.kind, symbols=tuple(sub.symbols), temporality="historical",

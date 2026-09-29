@@ -4,15 +4,16 @@
 """
 
 from __future__ import annotations
-from datetime import date, datetime
-from typing import Any, Callable
+
+from datetime import date
+from typing import Callable
 
 import pandas as pd
 
-from .db import save_bars, get_bars, is_trading_day as _is_trading_day
-from .db import get_trade_calendar as _get_trade_calendar
-from .schema import Bar, to_vt_symbol, parse_vt_symbol
 from .adapters import tushare_adapter as tushare
+from .db import get_bars, save_bars
+from .db import get_trade_calendar as _get_trade_calendar
+from .db import is_trading_day as _is_trading_day
 
 
 class DataPlatform:

@@ -6,7 +6,8 @@
 """
 
 from __future__ import annotations
-from src.strategy_framework.strategy import Strategy, Signal, Action, register_strategy
+
+from src.strategy_framework.strategy import Action, Signal, Strategy, register_strategy
 
 
 @register_strategy("crypto_perp")

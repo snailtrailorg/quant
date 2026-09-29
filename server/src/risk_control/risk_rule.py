@@ -6,6 +6,7 @@
 risk_control.check_order 后续可改为遍历 risk_rules 表调各 RiskRule.check。
 """
 from __future__ import annotations
+
 import json
 import logging
 from abc import ABC, abstractmethod

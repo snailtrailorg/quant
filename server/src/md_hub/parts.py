@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import threading
 import time
 from datetime import datetime
 from typing import Optional
@@ -161,6 +160,7 @@ class MinuteAggregator:
 
     def _finalize(self, symbol: str, b: dict) -> dict:
         from datetime import timedelta
+
         from src.data_platform.tz import as_utc
         prev = self._last_acc.get(symbol)
         volume = max(0.0, b["vol_acc"] - (prev[0] if prev else 0.0))
@@ -221,7 +221,7 @@ def _lease_boot(r, account_id=None) -> tuple[str, int]:
         if gen == -1:   # 真让位：写标记退出，unit 的 StartLimit 会接管
             try:
                 r.set(_key(SURRENDER_KEY, account_id), datetime.now().isoformat(), ex=600)
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
             raise SystemExit(3)
         time.sleep(5)
@@ -254,13 +254,13 @@ def _pub_write(r, symbol: str, payload_json: str, epoch_ts, account_id) -> None:
                 old_ts = old.get("_ts_epoch")
                 if old_ts is not None and float(old_ts) > float(epoch_ts):
                     return   # 对端价更新（事件时间更晚）——不覆盖
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
         d = json.loads(payload_json)
         d["_ts_epoch"] = float(epoch_ts)
         d["account_id"] = account_id
         r.set(key, json.dumps(d, ensure_ascii=False), ex=LATEST_TICK_TTL)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
 

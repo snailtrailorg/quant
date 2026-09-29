@@ -4,12 +4,17 @@
 """
 
 from __future__ import annotations
-import logging
-import json
+
 import concurrent.futures
-from fastapi import APIRouter, Request, HTTPException
+import json
+import logging
+
+from fastapi import APIRouter, HTTPException, Request
+
 from .bot import (
-    verify_event_signature, process_message_async, load_feishu_users,
+    load_feishu_users,
+    process_message_async,
+    verify_event_signature,
 )
 
 logger = logging.getLogger("feishu_bot.router")

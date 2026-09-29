@@ -11,11 +11,12 @@
 """
 
 from __future__ import annotations
-import os
-import time
+
 import hashlib
 import logging
+import os
 from typing import Literal
+
 import redis
 from dotenv import load_dotenv
 
@@ -86,7 +87,7 @@ def notify(level: Level, category: Category, title: str, body: str = "",
     #     去重命中/insert 失败路径在上方短路——不广播，与铃铛数据一致。
     if notif_id is not None:
         try:
-            from src.quant_common.eventbus import bus   # 惰性导入（eventbus 顶层已 import redis，此处惰性=防冷启动顺序耦合非减依赖）
+            from src.quant_common.eventbus import bus  # 惰性导入（eventbus 顶层已 import redis，此处惰性=防冷启动顺序耦合非减依赖）
             bus.publish_cross_process(0, "notification", {})
         except Exception as e:   # noqa: BLE001
             logger.warning("notification SSE 广播失败（60s 轮询兜底）: %s", e)
@@ -96,7 +97,7 @@ def notify(level: Level, category: Category, title: str, body: str = "",
     #    旧 15min 外推节流已移入 dispatch（原子 SET NX）；零 enabled 订阅时 dispatch 内置
     #    过渡兜底沿用本模块 should_push_external/_push_channel 旧 webhook 规则。
     try:
-        from src.alert_notify.dispatch import dispatch   # 惰性导入（B-P13：httpx/celery 不进 live-task 冷启动链）
+        from src.alert_notify.dispatch import dispatch  # 惰性导入（B-P13：httpx/celery 不进 live-task 冷启动链）
         dispatch(level, category, title, body, code=code, notif_id=notif_id)
     except Exception as e:
         logger.warning("alert dispatch 提交失败（站内不受影响）: %s", e)

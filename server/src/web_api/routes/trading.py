@@ -1,15 +1,21 @@
-import json, subprocess, time
-from fastapi import APIRouter, Depends, Request, Body, Header, HTTPException, Query
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq)
-from src.data_platform.db import get_conn
+import json
 import logging
+import subprocess
+import time
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+
 logger = logging.getLogger("web_api")
 
 router = APIRouter(tags=["trading"])
 
-from src.data_platform.perm_registry import MARKET_OP_KEYS
+from src.data_platform.perm_registry import MARKET_OP_KEYS  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
+
 LIVE_TRADING_MARKETS = MARKET_OP_KEYS   # 批55-0 L0:实盘开关键单源化(原独立硬编码副本——双源漂移=开关失控实弹风险)
 
 
@@ -35,14 +41,16 @@ def list_live_tasks(status: str | None = None,
     # 任务"活着吗、行情新鲜吗、冻没冻"三问列表页直答
     hb = {}
     try:
-        import redis as _redis, os as _os
+        import os as _os
+
+        import redis as _redis
         r_ = _redis.Redis.from_url(_os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
                                    decode_responses=True, socket_timeout=1)
         for rid, *_ in rows:
             h = r_.hgetall(f"quant:hb:task:{rid}")
             if h:
                 hb[rid] = h
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     out = []
     for r in rows:
@@ -64,9 +72,7 @@ def list_live_tasks(status: str | None = None,
 def create_live_task(body: dict = Body(...),
                      payload: dict = Depends(require_perm("strategy_control"))):
     """创建实盘任务：选策略+标的+任务参数值。创建时构建 strategy_snapshot。"""
-    from src.strategy_framework.strategy import (
-        validate_parameter_defs, validate_params_against_defs, build_default_params
-    )
+    from src.strategy_framework.strategy import build_default_params, validate_parameter_defs, validate_params_against_defs
     name = body.get("name", "")
     strategy_id = body.get("strategy_id", "")
     symbol = body.get("symbol", "")

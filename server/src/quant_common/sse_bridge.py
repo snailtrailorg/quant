@@ -69,7 +69,7 @@ class SseBridge:
                 finally:
                     try:
                         pubsub.close()
-                    except Exception:   # noqa: BLE001
+                    except Exception:   # noqa: BLE001, S110  # pubsub.close 清理失败不阻断
                         pass
             except Exception as e:   # noqa: BLE001
                 if not self._stop.is_set():

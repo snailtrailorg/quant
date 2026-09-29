@@ -4,18 +4,18 @@
 """
 
 from __future__ import annotations
+
+import logging
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import date, datetime
-from typing import Any, Callable
+from datetime import datetime
+from typing import Callable
+
 import numpy as np
-import pandas as pd
 
-import logging
-
-from .strategy import Strategy, StrategyConfig, Signal, Action, SignalAggregator
 from .adapters import ExecutionAdapter, Order, Position
+from .strategy import Signal, Strategy, StrategyConfig
 
 logger = logging.getLogger("backtest")
 _patch_lock = threading.Lock()
@@ -207,8 +207,9 @@ class BacktestEngine:
             for i, bar in enumerate(bars):
                 adapter.set_bar(bar)
 
-                # 策略计算（传入历史）
-                sig = strategy.on_bar(bar, history=history)
+                # 策略计算（传入历史）——Signal 返回值仅实盘 runner 消费，
+                # 回测经 adapter 副作用下单，不消费返回值
+                strategy.on_bar(bar, history=history)
                 # 当前 bar 入历史
                 history.append(bar)
 
@@ -404,6 +405,7 @@ def _day_key(v) -> str:
     """业务日键（批 56b 盲审 A 修：日线 ts=上海 00:00=前日 16:00 UTC——字符串切片错一天；
     统一 aware→上海业务日，naive 串/obj 双兼容——daily/benchmark/trades 三源同基准）。"""
     from datetime import datetime as _dt
+
     from src.data_platform.tz import as_shanghai
     if isinstance(v, _dt):
         return as_shanghai(v).strftime("%Y-%m-%d")
@@ -467,14 +469,16 @@ def _window_metrics(win_dv: list, benchmark_bars: list) -> dict:
     total_return = (values[-1] / values[0] - 1) * 100 if values[0] > 0 else 0
     returns = [values[j] / values[j - 1] - 1 for j in range(1, len(values)) if values[j - 1] > 0]
     if returns:
-        avg = float(np.mean(returns)); std = float(np.std(returns))
+        avg = float(np.mean(returns))
+        std = float(np.std(returns))
         sharpe = (avg - 0.02 / 252) / std * np.sqrt(252) if std > 0 else 0
         downside = [r for r in returns if r < 0]
         dstd = float(np.std(downside)) if downside else 0
         sortino = (avg - 0.02 / 252) / dstd * np.sqrt(252) if dstd > 0 else 0
     else:
         sharpe = sortino = 0
-    peak = values[0]; max_dd = 0.0
+    peak = values[0]
+    max_dd = 0.0
     for v in values:
         peak = max(peak, v)
         dd = (peak - v) / peak * 100 if peak > 0 else 0
@@ -615,14 +619,14 @@ def precheck_backtest_data(config: StrategyConfig, bars: list[dict]) -> dict:
     if gaps > 0:
         issues.append(f"时序断点 {gaps} 处")
     else:
-        checks.append(f"✓ 时序连续无断点")
+        checks.append("✓ 时序连续无断点")
 
     # 3. 价量为 0 检查
     zero_count = sum(1 for b in bars if b.get("close", 0) == 0 or b.get("volume", 0) == 0)
     if zero_count > 0:
         issues.append(f"价/量为 0 的 bar: {zero_count} 条")
     else:
-        checks.append(f"✓ 无价/量为 0 数据")
+        checks.append("✓ 无价/量为 0 数据")
 
     # 4. 品类兼容性
     from .factor import validate_strategy_factors

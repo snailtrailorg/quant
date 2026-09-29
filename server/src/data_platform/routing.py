@@ -135,7 +135,7 @@ def _bulkhead_release(adapter: str) -> None:
         return
     try:
         _r().decr(f"routing:bh:{adapter}")
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
 
@@ -188,7 +188,7 @@ def _load_state(force: bool = False) -> _TableState:
     try:
         v = _r().get(CFG_VERSION_KEY)
         version = int(v) if v and str(v).isdigit() else 0
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     if not force and _STATE.rows and (time.monotonic() - _STATE.loaded_at) < _RELOAD_TTL \
             and version == _STATE.version:
@@ -241,7 +241,8 @@ def _score(w: dict, quality: dict) -> float:
 
 def resolve(req, principal: tuple[str, str] | None = None) -> CandidateChain:
     """resolve 五步（28 §6.1 代码级真源）。principal=(username, role)；None=系统任务全过。"""
-    from src.quant_common.contract import is_legal, ParamError
+    from src.quant_common.contract import ParamError, is_legal
+
     from .security_master import SMClient
     st = get_table()
     w = _weights_of(getattr(req, "consumer_tag", "default"))
@@ -297,7 +298,7 @@ def resolve(req, principal: tuple[str, str] | None = None) -> CandidateChain:
 # D25 v2：能力集 token → DataKind 覆盖（类粒度展开走 KIND_CAP_CLASS 派生——
 # 旧 _CAP_KIND_ALIASES daily/minute 退役；kline 为 55a 历史别名保留兼容）
 def _cap_covers(caps: list, kind: str) -> bool:
-    from src.quant_common.markets import KIND_CAP_CLASS, CAPABILITIES
+    from src.quant_common.markets import CAPABILITIES, KIND_CAP_CLASS
     covers: set[str] = set()
     for c in caps:
         if c == "kline":                    # 55a 历史别名

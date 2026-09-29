@@ -8,8 +8,10 @@
 复用 SyncLock 心跳理念（数据同步已有），推广到所有任务。
 """
 from __future__ import annotations
+
 import json
 import logging
+
 from src.data_platform.db import get_conn
 
 logger = logging.getLogger("task_manager")
@@ -101,8 +103,8 @@ def get_task(task_id: str) -> dict | None:
         cur = conn.execute(
             "SELECT level, message, step_name, sql_or_api, created_at FROM task_logs "
             "WHERE task_id=%s ORDER BY created_at DESC LIMIT 50", (task_id,))
-        logs = [{"level": l[0], "message": l[1], "step_name": l[2], "sql_or_api": l[3],
-                 "created_at": str(l[4]) if l[4] else None} for l in cur.fetchall()]
+        logs = [{"level": row[0], "message": row[1], "step_name": row[2], "sql_or_api": row[3],
+                 "created_at": str(row[4]) if row[4] else None} for row in cur.fetchall()]
     return {"id": r[0], "name": r[1], "type": r[2], "trigger_type": r[3], "trigger_user": r[4],
             "status": r[5], "progress": json.loads(r[6]) if r[6] else {}, "params": json.loads(r[7]) if r[7] else {},
             "last_heartbeat": str(r[8]) if r[8] else None, "error_message": r[9],

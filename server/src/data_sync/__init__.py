@@ -11,8 +11,12 @@ per-symbol（完整性驱动）:
 """
 
 from .engine import (
-    sync, _HANDLERS,
-    sync_symbol, backfill_symbol, delete_symbol, sync_all,
+    _HANDLERS,
+    backfill_symbol,
+    delete_symbol,
+    sync,
+    sync_all,
+    sync_symbol,
 )
 
 __all__ = ["sync", "sync_symbol", "backfill_symbol", "delete_symbol", "sync_all"]

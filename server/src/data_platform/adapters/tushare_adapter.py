@@ -5,10 +5,11 @@ Tushare Pro 为 A 股/可转债/ETF 日线主数据源。
 """
 
 from __future__ import annotations
+
 import os
-import pandas as pd
-from typing import Any
 from datetime import date, timedelta
+
+import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -51,7 +52,8 @@ _adj_degraded = {"ts": 0.0}   # 进程级降级标记（每小时最多告警一
 def _adj_degraded_alert(e: Exception) -> None:
     """因子接口降级告警（限频）：积分未到账/接口异常时，日线同步继续（因子 NULL），
     不崩——积分到账后下次同步或手动回补自动恢复。"""
-    import time as _time, logging as _logging
+    import logging as _logging
+    import time as _time
     now = _time.time()
     if now - _adj_degraded["ts"] < 3600:
         return
@@ -62,7 +64,7 @@ def _adj_degraded_alert(e: Exception) -> None:
         notify("warn", "system", "复权因子接口降级",
                "Tushare adj_factor 不可用（积分未到账或接口异常）。日线同步继续（因子 NULL），"
                "跨除权日因子暂不可用；积分到账后触发手动回补即可恢复。", code="data.adj-degrade")
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
 
@@ -345,7 +347,7 @@ def to_save_rows(df: pd.DataFrame, freq: str = "1D") -> list[tuple]:
 
 def pull_trade_cal(year: int) -> list[tuple]:
     """拉取 A 股交易日历并写入 DB。"""
-    from ..db import init_trade_calendar, get_conn
+    from ..db import init_trade_calendar
 
     pro = get_pro()
     df = pro.trade_cal(exchange="SSE", start_date=f"{year}0101", end_date=f"{year}1231")
@@ -561,14 +563,18 @@ def pull_namechange(ts_code: str = "", start_date: str = "", end_date: str = "")
     """股票曾用名（ST 识别）。全量重建模式。"""
     pro = get_pro()
     kwargs = {"ts_code": ts_code} if ts_code else {}
-    if start_date: kwargs["start_date"] = start_date
-    if end_date: kwargs["end_date"] = end_date
+    if start_date:
+        kwargs["start_date"] = start_date
+    if end_date:
+        kwargs["end_date"] = end_date
     return pro.namechange(**kwargs)
 
 def pull_concept(trade_date: str = "", ts_code: str = "") -> pd.DataFrame:
     """概念板块列表。全量重建模式。"""
     pro = get_pro()
     kwargs = {}
-    if trade_date: kwargs["trade_date"] = trade_date
-    if ts_code: kwargs["ts_code"] = ts_code
+    if trade_date:
+        kwargs["trade_date"] = trade_date
+    if ts_code:
+        kwargs["ts_code"] = ts_code
     return pro.concept(**kwargs)

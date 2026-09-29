@@ -4,14 +4,17 @@
 """
 
 from __future__ import annotations
-from src.data_platform.db import get_conn
+
+import logging
 import os
 import time
-import logging
 from dataclasses import dataclass
 from typing import Literal
+
 import redis
 from dotenv import load_dotenv
+
+from src.data_platform.db import get_conn
 
 load_dotenv()
 logger = logging.getLogger("risk_control")
@@ -38,7 +41,9 @@ class RiskState:
 
 # ——— 风控规则配置（默认，可 Web 改） ———
 
-from src.risk_control.risk_schema import RuleSanitizer   # 批36a-1（模块级——去抖指纹跨热加载持久，每进程每因一次）
+from src.risk_control.risk_schema import (
+    RuleSanitizer,  # 批36a-1（模块级——去抖指纹跨热加载持久，每进程每因一次）  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
+)
 
 _SANITIZER = RuleSanitizer(logging.getLogger("risk_control.sanitize"))
 
@@ -446,7 +451,6 @@ class RiskControl:
     def update_account_snapshot(self, total_value: float, daily_pnl: float = 0,
                                  initial_capital: float = 1_000_000, account_id=None):
         """更新账户快照（策略引擎/交易引擎调用，供风控读取）。D2：per-account 落行。"""
-        import os
         with get_conn() as conn:
             conn.execute(
                 "INSERT INTO account_snapshot (account_id, total_value, daily_pnl, initial_capital) VALUES (%s,%s,%s,%s)",

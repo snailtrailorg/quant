@@ -3,20 +3,48 @@
 启动: 由 main.py include_router 挂载。
 """
 from __future__ import annotations
-from fastapi import APIRouter, Depends, Header, Query, Body, Request, BackgroundTasks
-from ..auth import (
-    create_jwt, authenticate, create_user, require_role, require_perm, require_authenticated,
-    audit_log, ensure_default_admin, init_users_table, PERMISSIONS,
-    invite_user, register_user, forgot_password, reset_password, change_password, verify_token,
-    validate_password, guard_user_mutation, soft_delete_user, guard_self_deactivate,
-)
-from ..errors import ApiError
-from ..models import (LoginReq, UserCreate, StrategyConfig, InviteReq, RegisterReq, ForgotReq, ResetReq, ChangePwdReq, ChatReq, LLMModelReq, IMBotCreateReq, IMBotUpdateReq, IMBotUserReq, RiskRuleReq, PoolReq, EmailChangeReq, EmailConfirmReq, PhoneCodeReq, PhoneChangeReq)
-from src.data_platform.db import get_conn
-from src.email_service import send_invite_email, send_activation_email, send_password_reset_email, send_email_change_email
+
 import logging
 import os
 from pathlib import Path as _Path
+
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, Query, Request
+
+from src.data_platform.db import get_conn
+from src.email_service import send_activation_email, send_email_change_email, send_invite_email, send_password_reset_email
+
+from ..auth import (
+    audit_log,
+    authenticate,
+    change_password,
+    create_jwt,
+    create_user,
+    forgot_password,
+    guard_self_deactivate,
+    guard_user_mutation,
+    invite_user,
+    register_user,
+    require_authenticated,
+    require_perm,
+    reset_password,
+    soft_delete_user,
+    validate_password,
+    verify_token,
+)
+from ..errors import ApiError
+from ..models import (
+    ChangePwdReq,
+    EmailChangeReq,
+    EmailConfirmReq,
+    ForgotReq,
+    InviteReq,
+    LoginReq,
+    PhoneChangeReq,
+    PhoneCodeReq,
+    RegisterReq,
+    ResetReq,
+    UserCreate,
+)
 
 logger = logging.getLogger("web_api")
 
@@ -100,7 +128,7 @@ def me(payload: dict = Depends(require_authenticated)):
             r = cur.fetchone()
         if r:
             nickname, avatar_url, db_role = r[0] or payload["username"], r[1], r[2]
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     # P3-7（10 §7 差距 6）：role 以 DB 为准——修 JWT 24h 不刷新（改角色即时生效）；
     # permissions 同步换查表真源
@@ -142,7 +170,7 @@ def _all_group_names() -> list[str]:
         names = [r[0] for r in rows]
         if names:
             return names
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return ["admin", "trader", "analyst", "viewer"]
 
@@ -184,7 +212,7 @@ def get_permissions(payload: dict = Depends(require_perm("user_mgmt"))):
     """W4 三维矩阵（10 §4）：api 键+nav 三态+市场操作权限全景（批33a：user override 维
     退役——权限单源化，用户裁定权限完全追随组）。
     批11B：角色清单动态（user_group 表全量，失败/空回退四内置）+locked 随 GET 返回（前端 🔒 不再硬编码）。"""
-    from ..auth import load_role_permissions, LOCKED_PERM_KEYS, _MARKET_OP_KEYS
+    from ..auth import _MARKET_OP_KEYS, LOCKED_PERM_KEYS, load_role_permissions
     all_keys = load_registry()["api"]   # 批33b：键集注册表单源（admin 回退字典同派生）
     roles = load_role_permissions()
     group_names = _all_group_names()   # 恒以组表为准（与权限数据短暂分叉可接受，盲审 B P2-4）
@@ -214,9 +242,9 @@ def update_permissions(role: str, body: dict, dimension: str = "api",
     双路径同锁——角色重写自动地板保护（请求集被静默校正,锁键恒保持现值）;
     admin 角色另加 ADMIN_ROLE_FLOOR（self-lockout 防线）。返回 preserved 提示校正。
     """
-    from ..auth import (invalidate_perm_cache, load_role_permissions,
-                        LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR, _MARKET_OP_KEYS)
     from src.data_platform.db import get_conn as _gc
+
+    from ..auth import _MARKET_OP_KEYS, ADMIN_ROLE_FLOOR, LOCKED_PERM_KEYS, invalidate_perm_cache, load_role_permissions
     if dimension not in ("api", "nav", "market_op"):
         raise ApiError(400, "BAD_DIMENSION", "dimension ∈ api|nav|market_op")
     if dimension == "api":
@@ -319,11 +347,11 @@ def profile_api(payload: dict = Depends(require_authenticated)):
     # 批20 20B：市场操作权限五键（批15 单源逐键；role 用 DB role——JWT 陈旧角色防漂移，盲审A-P2-6）
     market_op = {}
     try:
-        from src.data_platform.perms import market_op_allowed, _MARKET_OP_KEYS
+        from src.data_platform.perms import _MARKET_OP_KEYS, market_op_allowed
         role = payload.get("db_role") or payload.get("role") or r[2]
         for mk in _MARKET_OP_KEYS:   # 单源五键（盲审B-P2-4：防第二份清单漂移）
             market_op[mk] = bool(market_op_allowed(r[0], role, mk))
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass   # 权限面故障不挡资料展示（chips 空=前端省略）
     return {"username": r[0], "nickname": r[1], "role": r[2], "avatar_url": r[3], "email": r[4],
             "created_at": str(r[5])[:10] if r[5] else None,
@@ -338,8 +366,9 @@ def profile_api(payload: dict = Depends(require_authenticated)):
 # ——— 批20 20C：邮箱修改（验证成功才改——无 email_verified 列、无 pending 态，方案 v2 单事务四防线） ———
 
 import re as _re_email
+
 _EMAIL_RE = _re_email.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-from .alerts import _PHONE_RE   # 批30：单源（A-P2-5——alerts.py 已有 ^1[3-9]\d{9}$，不造第二份）
+from .alerts import _PHONE_RE  # 批30：单源（A-P2-5——alerts.py 已有 ^1[3-9]\d{9}$，不造第二份）
 
 
 @router.post("/api/user/email-change")
@@ -353,7 +382,7 @@ def email_change_api(req: EmailChangeReq, request: Request,
     new_email = req.new_email.strip().lower()          # 规范化全链（盲审A-P2-5：唯一约束区分大小写）
     if not _EMAIL_RE.fullmatch(new_email):
         raise ApiError(400, "EMAIL_INVALID", "邮箱格式不正确")
-    from ..auth import verify_password, create_token
+    from ..auth import create_token, verify_password
     with get_conn() as conn:
         cur = conn.execute("SELECT email, password_hash FROM users WHERE id=%s "
                            "AND deleted_at IS NULL AND enabled=true", (uid,))
@@ -443,9 +472,10 @@ def phone_request_api(req: PhoneCodeReq, payload: dict = Depends(require_authent
             raise ApiError(400, "OLD_PASSWORD_WRONG", "当前密码错误")
         if phone == (row[0] or ""):
             raise ApiError(400, "PHONE_SAME_AS_CURRENT", "新手机号与当前手机号相同")   # B-P2-2：独立码——复用邮箱码会弹邮箱文案
-    from ..redis_pool import redis_client as _rc
-    import secrets as _secrets
     import json as _json
+    import secrets as _secrets
+
+    from ..redis_pool import redis_client as _rc
     r = _rc()
     if not r.set(f"phone:chg:cd:{uid}", "1", nx=True, ex=60):
         raise ApiError(429, "PHONE_CODE_TOO_FREQUENT", "验证码 60 秒内只能获取一次")
@@ -465,9 +495,10 @@ def phone_change_api(req: PhoneChangeReq, payload: dict = Depends(require_authen
     """确认改手机（登录态）：码对 → UPDATE users.phone=存侧手机号。码错 5 次作废（A-P1-6）；
     比对用 compare_digest（A-P2-7 防时序逐位爆破）。"""
     uid = int(payload["sub"])
-    from ..redis_pool import redis_client as _rc
-    import secrets as _secrets
     import json as _json
+    import secrets as _secrets
+
+    from ..redis_pool import redis_client as _rc
     r = _rc()
     raw = r.get(f"phone:chg:{uid}")
     data = None
@@ -740,6 +771,7 @@ def change_password_api(req: ChangePwdReq, payload: dict = Depends(require_authe
 # ——— 用户组管理（批11B：四角色硬编码 → DB 用户组实体；方案双盲审 A/B 修订全吸收） ———
 
 import re as _re_group
+
 _GROUP_NAME_RE = _re_group.compile(r"^[a-z][a-z0-9_]{1,29}$")   # 总长 2..30（盲审 B P2-4）
 
 
@@ -922,7 +954,6 @@ def delete_user(uid: int, payload: dict = Depends(require_perm("user_mgmt"))):
     guard_user_mutation(row[0], payload["username"])
     soft_delete_user(uid)  # 批次D：软删+脱敏（审计/关联数据保留）
     # 清头像文件
-    import os as _os
     _af = _AVATAR_DIR / f"user_{uid}.jpg"
     if _af.exists():
         _af.unlink()
@@ -961,7 +992,8 @@ def get_logs(task_id: str | None = None, before: str | None = None, limit: int =
     if before:
         try:
             _us, _rid = before.split("|")
-            from datetime import datetime as _dt, timezone as _tz
+            from datetime import datetime as _dt
+            from datetime import timezone as _tz
             _ts = _dt.fromtimestamp(int(_us) / 1_000_000, tz=_tz.utc)
             where += " WHERE (ts, id) < (%s, %s)"
             params += [_ts, int(_rid)]
@@ -1025,7 +1057,8 @@ def perm_resource_patch(kind: str, res_id: str, body: dict,
     ①kind∈{nav}（api/market 键集不可覆盖——A-P1-6：api enabled 触鉴权面=降权可配置，禁）
     ②res_id ∈ 注册表（防幽灵）③非 upsert：仅允许 UPDATE 既有覆盖行或插入合法行。"""
     import json as _json
-    from src.data_platform.perm_registry import invalidate_registry_cache, NAV_ITEMS_BASE
+
+    from src.data_platform.perm_registry import NAV_ITEMS_BASE, invalidate_registry_cache
     if kind != "nav":
         raise ApiError(400, "PERM_RES_KIND", "仅 nav 条目可改（api/market 键集代码单源）")
     if res_id not in {e["id"] for e in NAV_ITEMS_BASE}:

@@ -4,7 +4,8 @@
 配置列恒为「用户启用子集」——55a 端点写侧校验+启动/GET 漂移告警共用本函数。
 """
 from __future__ import annotations
-from src.quant_common.markets import SYNC_ID_CAP_MAP, NON_DATA_PROVIDERS
+
+from src.quant_common.markets import NON_DATA_PROVIDERS, SYNC_ID_CAP_MAP
 
 
 def provider_capabilities(provider: str) -> set[str]:

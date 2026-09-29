@@ -1,10 +1,12 @@
 """Celery 定时任务实现。"""
 
 from __future__ import annotations
+
+import logging
+from datetime import date, datetime, timezone
+
 from src.data_platform.db import get_conn
 from src.data_platform.tier_tables import TIER1_SYNC_IDS, TIER2_INCREMENTAL_TABLES
-from datetime import date, datetime, timezone
-import logging
 
 from .app import app
 
@@ -125,7 +127,7 @@ def daily_report(self):
         )
         if response.content:
             body = response.content
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
     from src.alert_notify import report
@@ -136,7 +138,10 @@ def daily_report(self):
 @app.task(name="src.scheduler.tasks.health_check")
 def health_check():
     """定时探测 LLM/PG/Valkey/交易所连通性，异常告警。"""
-    import os, time, psycopg, redis
+    import os
+    import time
+
+    import redis
     results = {}
 
     # PG
@@ -178,7 +183,6 @@ def drift_check():
     实盘开始后自动运行。无实盘数据时跳过。
     """
     # 检查是否有实盘运行中的策略
-    import psycopg, os
     try:
         with get_conn() as conn:
             cur = conn.execute("SELECT id FROM strategy_config WHERE enabled=true AND backtest_verified=true")
@@ -233,7 +237,6 @@ def reconcile_three_books():
     定时核对：模型信号日志、系统委托日志、交易所成交日志。
     识别：信号无委托、委托不成交、滑点异常、成交偏差。
     """
-    import psycopg, os
     issues = []
 
     try:
@@ -291,10 +294,10 @@ def reconcile_three_books():
                     except Exception as _e:
                         try:
                             conn.rollback()   # 终止 aborted 态——后续 INSERT/SELECT 存活
-                        except Exception:
+                        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                             pass
                         logging.getLogger("scheduler").warning("reconcile_issue 双写失败（不阻断）: %s", _e)
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass   # 表未就绪静默（与上方三表探测一致，O-S2）
 
             # 5. D4 资金对账（现金口径）：本地推导现金 vs 券商查询可用现金，差异=漏记+费用误差+出入金。
@@ -343,8 +346,10 @@ def reconcile_three_books():
                         """, (sym, detail, actual_cash, local, sym))
                         conn.commit()
             except Exception as _e:
-                try: conn.rollback()
-                except Exception: pass
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: S110
+                    pass  # 失败不阻断（fail-open 降级）  # noqa: S110
                 logging.getLogger("scheduler").warning("资金对账失败（不阻断）: %s", _e)
 
             # 6. D4 跨 account 反向识别（对敲）：同 symbol 一 account long 一 account short（默认告警不拦截）
@@ -372,8 +377,10 @@ def reconcile_three_books():
                     """, (sym, detail, sym))
                     conn.commit()
             except Exception as _e:
-                try: conn.rollback()
-                except Exception: pass
+                try:
+                    conn.rollback()
+                except Exception:  # noqa: S110
+                    pass  # 失败不阻断（fail-open 降级）  # noqa: S110
                 logging.getLogger("scheduler").warning("跨 account 反向识别失败（不阻断）: %s", _e)
 
             # 比对逻辑（实盘数据接入后实现具体核对）
@@ -440,7 +447,7 @@ def _check_tier_freshness() -> list[dict]:
     返回 [{"sync_id": str, "last_ts": str|None, "age_hours": float|None, "kind": str}]，
     仅含超阈值条目。
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
     try:
         from src.data_platform.db import get_conn
         stale = []
@@ -521,6 +528,7 @@ def _tier_alert_filter(stale: list[dict]) -> tuple[list[dict], set[str]]:
     返回 (参与告警的条目, 恢复的 sync_id 集合)。
     """
     import os
+
     import redis
     key = "tier_stale:prev"
     try:
@@ -545,8 +553,10 @@ def data_continuity_check():
     断线检测（Valkey 心跳）+ 因子重算触发补采。
     三档新表新鲜度检测（项 18，2026-08-21）。
     """
-    import psycopg, os, redis
+    import os
     from datetime import date, timedelta
+
+    import redis
 
     issues = []
     repaired = 0
@@ -601,8 +611,8 @@ def data_continuity_check():
                 issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{expected})")
                 try:
                     ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
-                    from src.data_platform.adapters.tushare_adapter import pull_daily
                     from src.data_platform.adapters.base import TushareAdapter
+                    from src.data_platform.adapters.tushare_adapter import pull_daily
                     from src.data_platform.db import save_bars
                     df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
                     if not df.empty:
@@ -630,9 +640,12 @@ def data_continuity_check():
           bind=True, soft_time_limit=7200, time_limit=7500)   # F-F1：全量 ~50min，留余量；被杀可重触发续填
 def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str | None = None):
     """复权因子回填（A/B-F1：bar_1D 历史全 NULL）。手动触发（积分到账后），降级即返回不抛。"""
-    import redis as _redis, os as _os
+    import os as _os
+
+    import redis as _redis
+
     from src.data_sync.engine import backfill_adj_factor
-    from src.task_manager import create_task, update_heartbeat, complete_task
+    from src.task_manager import complete_task, create_task, update_heartbeat
     task_id = self.request.id
     create_task(task_id, "复权因子回填", "sync", "manual", "system",
                 {"start": start_date, "end": end_date})
@@ -696,9 +709,11 @@ def data_sync_scheduler():
     从 last_sync_ts 算下次 cron 到点，<= now 则触发（不错过）。
     manual/空 schedule 跳过。
     """
+    from datetime import datetime, timedelta
+
     from croniter import croniter
-    from datetime import date, datetime, timedelta, timezone
-    from src.data_platform.db import is_trading_day, get_conn
+
+    from src.data_platform.db import get_conn, is_trading_day
 
     triggered = []
     skipped = []
@@ -800,8 +815,9 @@ def sync_all_symbols(self, sync_id: str):
     单独放宽超时到 70 分钟（全市场约 37 分钟 + 余量），覆盖全局 task_soft_time_limit=300。
     """
     import os
+
     import redis
-    import psycopg
+
     from src.data_sync.engine import sync_all
 
     r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2, socket_connect_timeout=2)
@@ -815,7 +831,7 @@ def sync_all_symbols(self, sync_id: str):
                     "UPDATE sync_config SET last_status=%s, last_sync_count=%s, last_sync_ts=now() WHERE id=%s",
                     (status, count, sync_id))
                 conn.commit()
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
 
     def progress_cb(i: int, total: int, ts_code: str):
@@ -863,9 +879,11 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
     完成态存 result 关键字段供前端 notifyResult 显示。
     """
     import os
+
     import redis
+
     from src.data_sync.engine import sync
-    from src.task_manager import create_task, update_heartbeat, complete_task, log_task, notify_on_failure
+    from src.task_manager import complete_task, create_task, log_task, notify_on_failure, update_heartbeat
     task_id = self.request.id
     create_task(task_id, f"同步 {sync_id}", "sync", "manual", "system",
                 {"sync_id": sync_id, "backfill_from": backfill_from})
@@ -926,7 +944,8 @@ def task_stuck_check():
 def backtest_run_task(self, run_id: int):
     """回测组任务：读 run + 写 backtest_symbols pending + 按 mode 分发子任务（B3）。"""
     import json
-    from src.task_manager import create_task, update_heartbeat, complete_task
+
+    from src.task_manager import complete_task, create_task, update_heartbeat
     task_id = self.request.id
     create_task(task_id, f"回测 run {run_id}", "backtest", "manual", "system", {"run_id": run_id})
 
@@ -966,11 +985,14 @@ def backtest_run_task(self, run_id: int):
           bind=True, soft_time_limit=3600, time_limit=4200)
 def backtest_symbol_task(self, run_id: int, symbol: str):
     """单标的回测子任务：跑 BacktestEngine + on_bar publish Valkey + 存 result（B3）。"""
-    import json, os, redis
+    import json
+    import os
     from datetime import date, timedelta
-    from src.data_platform.db import get_bars
-    from src.strategy_framework.strategy import StrategyConfig
+
+    import redis
+
     from src.strategy_framework.backtest import BacktestEngine
+    from src.strategy_framework.strategy import StrategyConfig
 
     r = redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2, socket_connect_timeout=2)
     pub_key = f"backtest:run:{run_id}:{symbol}"
@@ -994,15 +1016,16 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
     try:
         from src.strategy_framework.factor import load_factors_from_db
         load_factors_from_db()
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
     start = params.get("start", (date.today() - timedelta(days=365)).isoformat())
     end = params.get("end", date.today().isoformat())
     # 批 59 M4：回测读 bar 走 DataBus（local_pg 候选 + fetch-on-miss），等价 db.get_bars
     from datetime import datetime as _dt
+
     from src.data_platform.databus import DataBus
-    from src.quant_common.contract import DataRequest, BAR_COLUMNS
+    from src.quant_common.contract import BAR_COLUMNS, DataRequest
     req = DataRequest(kind="bar_daily", symbols=(symbol,), temporality="historical",
                       freq="1D", range_=(_dt.fromisoformat(start), _dt.fromisoformat(end)))
     frame, _wm = DataBus().get_bars(req)
@@ -1015,7 +1038,7 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
         from src.data_platform.db import get_index_bars
         bench_df = get_index_bars("000300.SHSE", start, end)
         benchmark_bars = bench_df.to_dict("records") if not bench_df.empty else []
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
     # 合并参数（链条打磨#14）：parameter_defs 默认值 → 策略级 params → per-symbol 覆盖。
@@ -1108,7 +1131,7 @@ def write_summary_metrics(conn, run_id: int) -> None:
     前端成绩单恒空）。键名（summary 层缩写约定，前端消费此层）：total_return_pct/max_drawdown_pct/
     sharpe(←sharpe_ratio)/sortino(←sortino_ratio)/win_rate/trade_count(←total_trades)；
     ptrade 批 1 新增 volatility/alpha/beta/information_ratio/benchmark_return/benchmark_volatility 用全名（与 result_json 一致）。"""
-    import json   # 该文件惯例：函数内导入（模块级无 json——原 NameError 盲审复验抓出）
+    import json  # 该文件惯例：函数内导入（模块级无 json——原 NameError 盲审复验抓出）
     cur = conn.execute(
         "SELECT result FROM backtest_symbols WHERE run_id=%s AND status='done'", (run_id,))
     rows = [json.loads(r[0]) for r in cur.fetchall() if r[0]]
@@ -1144,8 +1167,10 @@ def write_summary_metrics(conn, run_id: int) -> None:
 @app.task(name="src.scheduler.tasks.convertible_terms_sync")
 def convertible_terms_sync():
     """D3 可转债条款数据同步（盘后，每日一次）。拉取活跃可转债基本信息并存 DB。"""
-    from src.data_platform.adapters.tushare_adapter import pull_convertible_bonds, pull_cb_basic
     import json
+
+    from src.data_platform.adapters.tushare_adapter import pull_cb_basic, pull_convertible_bonds
+
     # 批 67：裸调收编（补扫——循环突发风险更大）。熔断记账盲区注记（盲审 P2-3）：
     # pull_cb_basic 内部吞异常返 {}——context 包裹只覆盖构造/穿透失败，per-bond 失败
     # 记账盲区随 adapter 形态（改造 adapter 另批）。
@@ -1226,8 +1251,8 @@ def broker_health_check():
     每 6h 必报"全通道离线"假告警（告警疲劳）。改走 get_broker()（Broker DB 真凭证），
     未配置的通道报 skipped 不告警。
     """
-    from src.strategy_framework.broker import get_broker
     from src.alert_notify import notify
+    from src.strategy_framework.broker import get_broker
     results = {}
     for provider in ("xtp", "binance_perp", "okx_perp"):   # 26 号收尾批 C：与 broker._REGISTRY *_perp 对齐
         try:
@@ -1298,7 +1323,7 @@ def cleanup_logs():
     "0=保留 0 天"误读=全表清空——任务侧纵深，API 校验+UI :min 是前两道）。截止时刻
     Python 侧算+参数化（盲审 A P1-5：禁 f-string interval——注入面）。audit 并入本任务
     （零 beat 改动）。"""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
     log_days = _read_int_cfg("log_retention_days", 30)
     audit_days = _read_int_cfg("audit_retention_days", 0)
     result = {"deleted": 0, "audit_deleted": 0}
@@ -1455,10 +1480,10 @@ def _sa4_alert_once(r, dedup_key: str, title: str, body: str, code: str | None =
             try:
                 if r.set(dedup_key, "1", nx=True, ex=SA4_ALERT_TTL) is None:
                     return  # 去重窗内已发过
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
         notify("warn", "system", title, body, code=code)
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
 
 
@@ -1484,6 +1509,7 @@ def sa4_reconciler():
     """
     import os
     import time as _time
+
     import redis as _redis
 
     failed = _sa4_units("failed")
@@ -1514,7 +1540,7 @@ def sa4_reconciler():
                 data = r.hgetall(key)
                 if data and now - float(data.get("ts", 0)) >= SA4_STABLE_SECS:
                     r.delete(key)
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
 
     from src.alert_notify import notify
@@ -1559,7 +1585,7 @@ def sa4_reconciler():
             notify("warn", "system", f"SA4 自动重启实盘单元: {unit}",
                    f"第 {attempts + 1} 次自动拉起；若再失败将退避 {_sa4_backoff_delay(attempts + 1):.0f}s。",
                    code="sa4.restart")
-        except Exception:
+        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
     # --- L3 意图调和（2026-08-24 韧性分层模型；批5 扩面三源）：期望表 -> systemd 实际状态 ---
     # 任务 8 躺 2.5 天实锤（systemctl stop 后 DB 残留 running 无人拉起）；hub 停 2.5 天同类
@@ -1613,7 +1639,7 @@ def sa4_reconciler():
                                    "Valkey 不可达无法验 hub 租约，本轮不拉起"
                                    "（防盲拉第二实例短暂破坏 fencing）。",
                                    code="l3.skip-valkey")
-                        except Exception:
+                        except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                             pass
                     result.setdefault("l3_guards", {})[unit] = reason
                     continue
@@ -1637,7 +1663,7 @@ def sa4_reconciler():
                            f"systemctl start 非零退出。stderr: {stderr}；"
                            "L3 将按 beat 周期重试，持续失败请手动 journalctl -u {unit} 定位。",
                            code="l3.failed")
-                except Exception:
+                except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                     pass
                 continue
             if r is not None:
@@ -1650,7 +1676,7 @@ def sa4_reconciler():
                        f"期望源={source}，systemd 无实例或崩溃 failed，已自动拉起。"
                        "若预期停用：live-task 先在 Web 停止任务；hub 打维护标记或 systemctl mask。",
                        code="l3.pull")
-            except Exception:
+            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
                 pass
         # 停非期望的账号 hub（account 禁用/删除后实例仍在跑 → stop，防 SA4 反拉）。
         # 必须在外层 for 循环之外（否则期望单元全健康时 continue 跳过——盲审 A BUG#2）；
@@ -1683,8 +1709,9 @@ def quality_shadow_check():
 
     含 SM 对账（62c——每周一随批裁定 v3.1）+白名单验证义务 90 天检查（A-P1-7）。
     """
-    from src.strategy_framework.md_session import is_trading_day
     from datetime import datetime as _dt
+
+    from src.strategy_framework.md_session import is_trading_day
     if not is_trading_day(_dt.now()):
         return {"skipped": "非交易日"}
     from src.data_platform.quality import run_shadow_check, sm_reconcile, whitelist_verify_check

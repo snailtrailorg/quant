@@ -5,19 +5,22 @@ Trader（交易：启停策略/熔断/下单）与 Analyst（研究：策略/回
 """
 
 from __future__ import annotations
-from src.data_platform.db import get_conn
+
+import logging
 import os
 import re
-import time
-import bcrypt
 import secrets
-from typing import Literal
+import time
 from datetime import datetime, timedelta, timezone
+from typing import Literal
+
+import bcrypt
 import jwt
 import psycopg
-import logging
-from fastapi import HTTPException, Header
 from dotenv import load_dotenv
+from fastapi import Header, HTTPException
+
+from src.data_platform.db import get_conn
 
 load_dotenv()
 
@@ -51,10 +54,16 @@ JWT_TTL_HOURS = 24
 # P3-7（web-design 10 §6 阶段 A）：字典保留为 fallback（表空/DB 故障时行为兜底，改权限不发版）；
 # 运行时真源=permission 表（60s 缓存热加载），_load_permissions() 合并 deny>allow>默认拒绝。
 # 批11C：权限解析下沉 data_platform/perms.py（IM 身份链同源）；此处 re-export 兼容全部既有引用
-from src.data_platform.perms import (   # noqa: F401
-    PERMISSIONS, LOCKED_PERM_KEYS, ADMIN_ROLE_FLOOR, _MARKET_OP_KEYS,
-    load_role_permissions, invalidate_perm_cache, load_effective_permissions,
-    load_nav_map, market_op_allowed,
+from src.data_platform.perms import (  # noqa: F401
+    _MARKET_OP_KEYS,
+    ADMIN_ROLE_FLOOR,
+    LOCKED_PERM_KEYS,
+    PERMISSIONS,
+    invalidate_perm_cache,
+    load_effective_permissions,
+    load_nav_map,
+    load_role_permissions,
+    market_op_allowed,
 )
 
 
@@ -172,6 +181,7 @@ def revoke_jwt(token: str) -> bool:
     if not jti:
         return False  # 旧 token 无 jti（自然过期兜底）
     from datetime import datetime as _dt
+
     from src.web_api.redis_pool import redis_client
     remaining = payload["exp"] - int(_dt.utcnow().timestamp())
     if remaining > 0:
@@ -319,7 +329,7 @@ def _default_admin_password() -> str:
             pwd = _sec.token_urlsafe(12)
             _logger.critical("生产模式：admin 初始密码已随机生成（仅本次打印，请立即登录修改）: %s", pwd)
             return pwd
-    except Exception:
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
     return "admin123"
 

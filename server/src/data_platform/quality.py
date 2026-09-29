@@ -23,7 +23,7 @@ from pathlib import Path
 logger = logging.getLogger("quality")
 
 # 层 1 → alert_notify：分层豁免表内（EXEMPT_UPWARD 先例——日志/告警面横切）；模块级便于测试 patch
-from src.alert_notify.notify import safe_notify
+from src.alert_notify.notify import safe_notify  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
 
 _WHITELIST_PATH = Path(__file__).parent / "whitelist_semantic.json"
 SAMPLE_FLOOR = 3            # A-P1-6：采样地板——破地板跳过执行而非静默缩量
@@ -155,7 +155,7 @@ def _fetch_backup_daily(days: list[date]) -> dict[str, dict]:
     """备源=Tushare 逐交易日全市场批拉→过滤为 {(symbol, date): row}（B-P1-2 裁定：
     fetch(bar_daily) 是按日全市场批无 per-symbol）。每次调用包 rate_limit_context
     +record_usage('shadow:daily')（B-P1-3/v3.1）。"""
-    from src.data_platform.data_source import get_data_source, TushareDataSource
+    from src.data_platform.data_source import TushareDataSource, get_data_source
     from src.data_platform.rate_limit import rate_limit_context
     out: dict[str, dict] = {}
     # 分层：data_platform(层1) 禁 import data_sync(层3)——ds=adapter 同一 DataSource 实例

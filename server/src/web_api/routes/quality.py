@@ -50,6 +50,7 @@ async def whitelist_stats(days: int = Query(default=30), _u=require_perm("system
 async def whitelist_verify(entry_id: str, result: str = Query(default=""), _u=require_perm("system_config")):
     """验证义务回填（A-P1-7：system_config whitelist_verify:{id}——报表列读它）。"""
     from datetime import date
+
     from src.data_platform.db import get_conn
     from src.data_platform.quality import load_whitelist
     if entry_id not in {e["id"] for e in load_whitelist()}:

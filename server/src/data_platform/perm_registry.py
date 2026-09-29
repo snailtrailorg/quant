@@ -135,6 +135,7 @@ def scan_perm_bindings(routers: list | None = None) -> list[dict]:
     _perm_key 挂在 require_perm 返回的 checker 闭包上（web_api/auth.py 消费方约定）。"""
     if routers is None:
         import sys as _sys
+
         from fastapi import APIRouter as _AR
         try:
             mods = list(_sys.modules.values())   # 并发 import 期理论竞态——A-P2-5 兜

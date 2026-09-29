@@ -5,6 +5,7 @@ send_text/send_card 本批诚实桩（False）——ws 连接活在 pool runner 
 无连接可推帧；跨进程推送通道+chatid 留存设计归告警批（双盲审 A-P1-2/B-P1-1）。
 """
 from __future__ import annotations
+
 import asyncio
 import logging
 
@@ -19,6 +20,7 @@ def _probe_auth(bot_id: str, secret: str, timeout_s: float = 10) -> tuple[bool, 
     注意（方案 §4 联调清单）：runner 活连接下再开探测连接是否被服务端踢——真机联调首验。"""
     import json
     import uuid
+
     import websockets
 
     async def _once():

@@ -1,10 +1,14 @@
 """风控路由：熔断开关 + 风控规则 CRUD + 三账对账 + 审计日志 + 数据完整性看板。"""
-from fastapi import APIRouter, Depends, Body, Query
-from ..auth import require_role, require_perm, audit_log
-from ..errors import ApiError
-from ..models import (RiskRuleReq)
-from src.data_platform.db import get_conn
 import logging
+
+from fastapi import APIRouter, Depends, Query
+
+from src.data_platform.db import get_conn
+
+from ..auth import audit_log, require_perm
+from ..errors import ApiError
+from ..models import RiskRuleReq
+
 logger = logging.getLogger("web_api")
 
 _AGG_CACHE: dict[str, tuple[float, dict]] = {}   # 批27-26：全表聚合 60s 缓存（键含参数——integrity:{freq}）
@@ -147,7 +151,6 @@ def reconcile_exempt(iid: int, body: dict, payload: dict = Depends(require_perm(
 @router.post("/api/reconcile/manual-order")
 def reconcile_manual_order(body: dict, payload: dict = Depends(require_perm("user_mgmt"))):
     """场外单登记（红队#4：底仓/手动单回流对账豁免基准，仅 admin）。"""
-    from datetime import date
     sym = str(body.get("symbol", "")).strip()
     try:
         qty = float(body.get("volume", 0) or 0)   # 批27-10：非数字串原直接 ValueError 500
@@ -286,7 +289,8 @@ def get_audit(before: str | None = None, limit: int = 100,
     if before:
         try:
             _us, _rid = before.split("|")
-            from datetime import datetime as _dt, timezone as _tz
+            from datetime import datetime as _dt
+            from datetime import timezone as _tz
             _ts = _dt.fromtimestamp(int(_us) / 1_000_000, tz=_tz.utc)
             where += " WHERE (ts, id) < (%s, %s)"
             params += [_ts, int(_rid)]
@@ -373,9 +377,12 @@ def data_integrity_api(freq: str = "1D",
             expected = ((last - first).days + 1) * bars_per_day
         pct = round(cnt / expected * 100, 1) if expected else 0
         status = "complete" if pct >= 99 else ("partial" if pct > 0 else "missing")
-        if status == "complete": complete += 1
-        elif status == "partial": partial += 1
-        else: missing += 1
+        if status == "complete":
+            complete += 1
+        elif status == "partial":
+            partial += 1
+        else:
+            missing += 1
         items.append({"symbol": sym, "local_count": cnt, "first": str(first), "last": str(last),
                       "expected": expected, "pct": pct, "status": status})
     _result = {"items": items, "summary": {"total": len(items), "complete": complete,
