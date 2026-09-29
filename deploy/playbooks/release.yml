@@ -279,7 +279,7 @@
         - name: 阶段 2 —— 切片变更判定（requirements→pip 真装；scripts/systemd→单元安装通道）
           ansible.builtin.set_fact:
             staged_slice_fp: "{{ dict(staged_fp.stdout_lines | default([]) | select('search', '=') | map('split', '=')) }}"
-            req_changed: "{{ prev_slice_fp.get('requirements.txt', '') != dict(staged_fp.stdout_lines | default([]) | select('search', '=') | map('split', '=')).get('requirements.txt', '') }}"
+            req_changed: "{{ prev_slice_fp.get('requirements.lock', '') != dict(staged_fp.stdout_lines | default([]) | select('search', '=') | map('split', '=')).get('requirements.lock', '') }}"
 
         # ---- 批 8 · 变更感知发布：server_changed=false（server 全切片指纹一致）→ 快车道 ----
         # 判据完备性=deploy_slices 覆盖全部 server 输入（src/migrations/scripts/systemd/requirements.txt/alembic.ini）；

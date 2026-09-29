@@ -7,8 +7,8 @@
 # 子命令（设计稿 §3 阶段 5 / §3 rollback freeze diff）:
 #   freeze                —— pip freeze 输出到 stdout（quant 不写 var/；
 #                            ansible 会话捕获后落 var/，deploy 写权——设计稿 §3 注）
-#   dry-run <release_id>  —— pip install --dry-run -r <staged>/requirements.txt 预检
-#                            （解析失败即非零退出——场景 1 坏 requirements 的拦截点）
+#   dry-run <release_id>  —— pip install --dry-run --require-hashes -r <staged>/requirements.lock 预检
+#                            （解析失败即非零退出——场景 1 坏 requirements 的拦截点；哈希校验防依赖漂移）
 #   install <release_id>  —— 真装（调用侧按指纹变化才触发）
 #
 # 严参校验:
@@ -48,12 +48,12 @@ if [[ ! "$release_id" =~ ^[0-9]{12}-[a-f0-9]{7,}$ ]]; then
   exit 2
 fi
 
-REQ="$ROOT/releases/$release_id/requirements.txt"
-[ -f "$REQ" ] || { echo "✗ requirements.txt 不存在: $REQ" >&2; exit 1; }
+REQ="$ROOT/releases/$release_id/requirements.lock"
+[ -f "$REQ" ] || { echo "✗ requirements.lock 不存在: $REQ" >&2; exit 1; }
 
 if [ "$sub" = "dry-run" ]; then
-  # 预检：解析/下载校验，不改 venv；解析不了（坏包名/冲突）即非零退出
-  exec "$PIP" install --dry-run -i "$INDEX" -r "$REQ"
+  # 预检：解析/哈希校验，不改 venv；解析不了（坏包名/冲突）即非零退出
+  exec "$PIP" install --dry-run --require-hashes -i "$INDEX" -r "$REQ"
 else
-  exec "$PIP" install -i "$INDEX" -r "$REQ"
+  exec "$PIP" install --require-hashes -i "$INDEX" -r "$REQ"
 fi
