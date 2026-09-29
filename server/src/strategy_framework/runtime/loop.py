@@ -11,10 +11,11 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Literal
+
+from src.data_platform.log_sink import exit_process
 
 logger = logging.getLogger("runtime.loop")
 
@@ -76,7 +77,7 @@ class EngineLoop:
                 self._on_fatal(reason)
             except Exception as e:
                 logger.warning("[%s] on_fatal 回调失败: %s", self.name, e)
-        os._exit(self._fatal_exit_code)
+        exit_process(self._fatal_exit_code)
 
     def _preflight(self) -> None:
         """每步前置：喂狗 + 事件线程存活。"""

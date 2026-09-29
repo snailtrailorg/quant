@@ -18,6 +18,7 @@ from src.strategy_framework.runtime.loop import EngineLoop
 from src.strategy_framework.runtime.pulse import HeartbeatWriter
 from src.strategy_framework.runtime.xsleeper import XReadSleeper
 from src.strategy_runner import trading
+from src.data_platform.log_sink import exit_process
 
 logger = logging.getLogger("hub_worker")
 
@@ -383,7 +384,7 @@ def run(ctx: dict) -> None:
             r.xgroup_del(stream, gname)
         except Exception:  # noqa: S110
             pass  # 失败不阻断（fail-open 降级）  # noqa: S110
-        os._exit(0)
+        exit_process(0)
 
     def _sess_edge():
         nonlocal sess_was
@@ -485,4 +486,4 @@ def run(ctx: dict) -> None:
             r.xgroup_del(stream, gname)
         except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
-        os._exit(0)
+        exit_process(0)

@@ -42,6 +42,7 @@ except ImportError:
 from src.quant_common.guard import sd_notify as _sd_notify
 from src.quant_common.session import in_session
 from src.strategy_framework.runtime.alerts import make_alert, make_guard, make_valkey
+from src.data_platform.log_sink import exit_process
 
 __all__ = ["LATEST_TICK_PREFIX", "main"]   # LATEST_TICK_PREFIX 仅重导出（test_stock_detail 经 main 取用）
 
@@ -246,7 +247,7 @@ def main() -> None:
             r, _cfg_version, row_id, md_gw.provider, _cred_digest)
         if switched:
             logger.info("[gw] 接口行 provider/凭证变化（原 provider=%s），主动退出重启", md_gw.provider)
-            os._exit(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus——30s 窗承诺载体）
+            exit_process(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus——30s 窗承诺载体）
 
     md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
 
@@ -341,7 +342,7 @@ def main() -> None:
             if not int(renewed):
                 logger.critical("租约续期失败（被抢占或丢失），退出")
                 _alert("行情 hub 租约丢失，实例退出", "另一实例在位或存储异常；systemd 将接管。", code="hub.lease-lost")
-                os._exit(1)
+                exit_process(1)
         except SystemExit:
             raise
         except Exception as e:
@@ -403,7 +404,7 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        os._exit(0)   # 原生库拆除规避（同 runner）；SystemExit 路径已直接 os._exit 带码
+        exit_process(0)   # 原生库拆除规避（同 runner）；SystemExit 路径已直接 exit_process 带码
 
 
 if __name__ == "__main__":

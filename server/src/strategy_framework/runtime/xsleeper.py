@@ -21,8 +21,9 @@ never-raise 契约（设计 v2.1，双盲审 P1 双同）：
 from __future__ import annotations
 
 import logging
-import os
 import time
+
+from src.data_platform.log_sink import exit_process
 
 logger = logging.getLogger("runtime.xsleeper")
 
@@ -52,8 +53,8 @@ class XReadSleeper:
             if "NOGROUP" in str(e):
                 logger.critical("消费组 %s 不存在（NOGROUP），退出码 %d 交 systemd 重启组重建",
                                 self._group, NOGROUP_EXIT_CODE)
-                os._exit(NOGROUP_EXIT_CODE)
-                return   # 生产不可达（os._exit 不返）；测试打桩时防落穿到重试睡
+                exit_process(NOGROUP_EXIT_CODE)
+                return   # 生产不可达（exit_process 不返）；测试打桩时防落穿到重试睡
             if "Timeout" not in type(e).__name__:
                 logger.warning("XREADGROUP 异常: %s", e)
                 time.sleep(RETRY_SLEEP_S)   # 吞后睡 1s 返回，下轮再试

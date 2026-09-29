@@ -75,7 +75,7 @@ def test_boot_retry_exhausted_exit4():
     r.set.side_effect = Exception("down")   # 持续网络问题 → (False, _, 0) ×3
     from src.md_hub.parts import _lease_boot
     with patch("src.md_hub.parts.time.sleep"), \
-         patch("src.md_hub.parts.os._exit") as xe:
+         patch("src.md_hub.parts.exit_process") as xe:
         _lease_boot(r)   # os._exit 是 syscall 非异常——patch 断言调用码（真退出会杀 pytest 进程）
     xe.assert_called_once_with(4)
 

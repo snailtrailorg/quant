@@ -169,3 +169,17 @@ def event(level: str, module: str, message: str) -> None:
                 conn.commit()
         except Exception as e:
             print(f"[log_sink] event dropped: {e}", file=sys.stderr)
+
+
+def exit_process(code: int) -> None:
+    """冲刷日志后 os._exit（P1-5 单源退出通道——os._exit 绕过 atexit，最后一批日志不刷会丢）。
+
+    strategy_runner/md_hub 等 os._exit 退出点统一走本函数：先冲刷 log_sink，再退出。
+    只加冲刷，不改退出码（9/75/0 各自对应 systemd 行为，见各调用点注释）。
+    """
+    if _sink is not None:
+        try:
+            _sink.close()
+        except Exception:  # noqa: S110  # 冲刷失败不阻断退出（日志系统不拖死退出路径）
+            pass
+    os._exit(code)

@@ -121,7 +121,7 @@ class TestNogroupPath:
     组重建接手——禁 sys.exit（SystemExit 传穿 finally 吞成 0=自设陷阱反噬）。"""
 
     def test_nogroup_exits_75(self):
-        with patch("src.strategy_framework.runtime.xsleeper.os._exit") as ex, \
+        with patch("src.strategy_framework.runtime.xsleeper.exit_process") as ex, \
              patch("src.strategy_framework.runtime.xsleeper.time.sleep") as sl:
             _sleeper(_Redis(exc=Exception("NOGROUP No such key 'hub:bars:X' or group 'task-1'")))(5.0)
         ex.assert_called_once_with(NOGROUP_EXIT_CODE)
@@ -129,7 +129,7 @@ class TestNogroupPath:
         sl.assert_not_called()   # NOGROUP 不走重试睡（进程已退出）
 
     def test_nogroup_matched_within_message(self):
-        with patch("src.strategy_framework.runtime.xsleeper.os._exit") as ex:
+        with patch("src.strategy_framework.runtime.xsleeper.exit_process") as ex:
             _sleeper(_Redis(exc=RuntimeError("BUSYGROUP consumer group ... NOGROUP ...")))(5.0)
         ex.assert_called_once_with(75)
 
@@ -148,6 +148,6 @@ class TestSingleThread:
         """模块源不 import threading（后台线程的结构性禁止——源断言锁，E-1 教训同款）。"""
         import src.strategy_framework.runtime.xsleeper as m
         assert not any("threading" in str(getattr(v, "__name__", ""))
-                       for v in (m.time, m.os, m.logging))
+                       for v in (m.time, m.logging))
         import inspect
         assert "import threading" not in inspect.getsource(m)

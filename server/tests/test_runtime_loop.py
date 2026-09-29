@@ -84,7 +84,7 @@ class TestFailurePolicy:
         clock = FakeClock()
         loop = _loop(clock, fatal_exit_code=7)
         loop.every("fatal", 0, lambda: (_ for _ in ()).throw(RuntimeError("boom")), failure="exit")
-        with patch("src.strategy_framework.runtime.loop.os._exit") as ex:
+        with patch("src.strategy_framework.runtime.loop.exit_process") as ex:
             loop.run(stop_after_iterations=3)
         assert ex.call_args_list[0].args == (7,)
 
@@ -115,7 +115,7 @@ class TestPreflight:
         ee._thread.is_alive.return_value = False
         loop = _loop(clock, event_engines=(ee,))
         loop.every("n", 0, lambda: None)
-        with patch("src.strategy_framework.runtime.loop.os._exit") as ex:
+        with patch("src.strategy_framework.runtime.loop.exit_process") as ex:
             loop.run(stop_after_iterations=2)
         assert ex.call_args_list[0].args == (1,)
 
@@ -129,7 +129,7 @@ class TestOnFatal:
         calls = []
         loop = _loop(clock, event_engines=(ee,), on_fatal=calls.append)
         loop.every("n", 0, lambda: None)
-        with patch("src.strategy_framework.runtime.loop.os._exit") as ex:
+        with patch("src.strategy_framework.runtime.loop.exit_process") as ex:
             loop.run(stop_after_iterations=2)
         assert calls and calls[0] == "EventEngine 事件线程已死亡"   # 告警先行（mock 不真退故可重复）
         assert ex.call_args_list[0].args == (1,)
@@ -139,6 +139,6 @@ class TestOnFatal:
         calls = []
         loop = _loop(clock, on_fatal=calls.append)
         loop.every("f", 0, lambda: (_ for _ in ()).throw(RuntimeError("x")), failure="exit")
-        with patch("src.strategy_framework.runtime.loop.os._exit"):
+        with patch("src.strategy_framework.runtime.loop.exit_process"):
             loop.run(stop_after_iterations=1)
         assert len(calls) == 1 and "f" in calls[0]

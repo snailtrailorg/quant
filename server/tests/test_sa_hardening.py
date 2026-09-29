@@ -201,3 +201,13 @@ def test_stmt_timeout_defaults_pinned():
     db_src = (root / "src" / "data_platform" / "db.py").read_text()
     assert '"3600000"' in env_src   # 迁移放宽 1h（env.py:54，同行有注释）
     assert '"60000"' in db_src       # 运行期 60s（db.py:48）
+
+
+def test_exit_process_flushes_before_exit():
+    """P1-5：exit_process 先冲刷 log_sink 再 os._exit（os._exit 绕过 atexit，最后一批日志不刷会丢）。"""
+    from src.data_platform import log_sink
+    with patch.object(log_sink, "_sink") as sink, \
+         patch.object(log_sink.os, "_exit") as ex:
+        log_sink.exit_process(9)
+    sink.close.assert_called_once()   # 先冲刷
+    ex.assert_called_once_with(9)      # 再退出（退出码原样保留）

@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from datetime import datetime
 from typing import Optional
+
+from src.data_platform.log_sink import exit_process
 
 logger = logging.getLogger("md_hub")
 
@@ -225,7 +226,7 @@ def _lease_boot(r, account_id=None) -> tuple[str, int]:
                 pass
             raise SystemExit(3)
         time.sleep(5)
-    os._exit(4)
+    exit_process(4)
 
 
 _LEASE_RENEW_LUA = """
