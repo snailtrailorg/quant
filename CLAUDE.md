@@ -4,6 +4,7 @@
 > 本文件是**运行时合同**：精要规则 + 约束 + 指针。完整详规在 `flow/规范/`。
 >
 > **分层铁律**（2026-08-19 模块归位，tests/test_layering.py 断言守门）：`quant_common`（层 0 底座，禁业务依赖）← 数据/服务层 ← 应用层 ← 入口层（web_api/feishu_bot 组合根）；下层禁 import 上层（lazy 计入）；共享工具放 `quant_common`、业务逻辑不寄生 HTTP 入口（**新路由禁内联 SQL/get_conn——SQL 下沉 `data_platform` 等层 1-2 模块，`tests/test_no_sql_in_new_routes.py` 断言守门**）。
+> **路由认证守门**（2026-09-30，`tests/test_route_auth_gate.py` 断言守门）：每条 HTTP/WS 路由必须挂 `require_authenticated`/`require_perm` checker，且**必须经 `Depends()` 包裹**——直接写成参数默认值（`_u=require_perm("k")`）=依赖工厂静默短路，checker 永不运行、裸请求 200（批79 遗留坑，全仓仅 2 处），绑定扫描扫不到这类漏挂。合法无认证端点（login/register/health/metrics/webhook 等 17 条）须精确命中白名单，白名单反向校验防腐化；**新增或改动端点后必跑本测试**。
 > 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（持久化，跨会话）。
   - 服务器部署信息：`server-info.md`（IP/OS/路径/分库/备份/密钥）
   - 部署机制：`deploy-mechanism.md`（三权分立/脚本/闸门/安全边界）
@@ -47,7 +48,7 @@
 - **加密合约**：币安/OKX 永续，vnpy 加密网关，低杠杆+逐仓。
 - **XTP 每日连接窗**（2026-08-28）：A 股 MD/TD 连接按交易日窗管理——`system_config` 键 `xtp_session_lead_min`/`xtp_session_lag_min`（默认 10/10，即 9:05 建连/15:10 断开，锚点=集合竞价 9:15/收盘 15:00）；任一 ≤0 =禁用（永久连接）。日历读不到=当自然日（fail-open，weekday 故障点消除）。窗内单原语建连（renew→relogin CREATED 直登），窗外 guard `suspend()` 挂起（logout 保持 CREATED）。worker TD 侧窗开沿 60s 节流建连（`_td_connect_due` 纯函数）。
 - **运行期 AI 只用国内模型**：DeepSeek（主）+ GLM（备），**不接 Claude/OpenAI 运行期**。Claude Code 仅作开发助手。LLM 网关按 `priority` 全局主备容灾。
-- **单系统 RBAC（批33a 单源化+批33b 注册表化 2026-09-17）**：四内置组 Admin/Trader/Analyst/Viewer（`user_group` builtin 锁名）+自定义组（新组零权限起步），非多租户。权限真源=`permission` 表（subject_type='role' 单维，0082 CHECK 锁；维度=api（allow/deny）+nav（hidden/readonly/readwrite）+market_op（allow/deny，下单卡口）），join 键=组名。**资源定义真源=`perm_registry`（批33b 唯一字面量层：api 14 键/nav 18/market 5/别名）+`perm_resource` 覆盖表（0084，只改显示四字段——条目集恒代码单源）**；绑定扫描 router-walk 175 处+防漂移闸（startup 键集⊆注册表告警）；nav 幽灵行读侧剥离（批39）。身份类 7 端点走 `require_authenticated`，功能端点 `require_perm` 全站统一；锁键组层单锁+admin 地板（含 alerts_config）；组 rename 三表级联。管理=系统管理→用户管理（组弹窗 PermMatrix=**权限配置唯一入口**）+**系统权限页（批37 前称资源注册表：三页签=菜单权限/功能权限/交易权限——绑定反查只读+菜单项编辑四字段）**；设置页=运行配置+告警通道两 tab；集成中心按 tab 权限键显隐（批38）。
+- **单系统 RBAC（批33a 单源化+批33b 注册表化 2026-09-17）**：四内置组 Admin/Trader/Analyst/Viewer（`user_group` builtin 锁名）+自定义组（新组零权限起步），非多租户。权限真源=`permission` 表（subject_type='role' 单维，0082 CHECK 锁；维度=api（allow/deny）+nav（hidden/readonly/readwrite）+market_op（allow/deny，下单卡口）），join 键=组名。**资源定义真源=`perm_registry`（批33b 唯一字面量层：api 14 键/nav 18/market 5/别名）+`perm_resource` 覆盖表（0084，只改显示四字段——条目集恒代码单源）**；绑定扫描 router-walk 175 处+防漂移闸（startup 键集⊆注册表告警）；nav 幽灵行读侧剥离（批39）。身份类 7 端点走 `require_authenticated`，功能端点 `require_perm` 全站统一（**须 `Depends()` 包裹 + 断言守门，见文件头『路由认证守门』**）；锁键组层单锁+admin 地板（含 alerts_config）；组 rename 三表级联。管理=系统管理→用户管理（组弹窗 PermMatrix=**权限配置唯一入口**）+**系统权限页（批37 前称资源注册表：三页签=菜单权限/功能权限/交易权限——绑定反查只读+菜单项编辑四字段）**；设置页=运行配置+告警通道两 tab；集成中心按 tab 权限键显隐（批38）。
 - **部署 OS**：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8）。开发机 Fedora（同 dnf/RPM 系）。
 - **回测与实盘 schema 对齐**：数据中台 schema 现在就和未来 XTP 实时行情一致，零迁移。回测费用摩擦：佣金可配+印花税(卖出 0.05%)+过户费(0.001%)+涨跌停一字板不可成交约束（`BacktestAdapter.set_fees`）。
 - **配置驱动非硬编码**：策略因子组合/权重/参数走 Web 配置 + DSL 表达式，每个策略都改代码是错误做法。
