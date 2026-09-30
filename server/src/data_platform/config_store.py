@@ -176,15 +176,48 @@ def _val_ph(col: str) -> str:
     return "%s::jsonb" if col == "params" else "%s"
 
 
+def _param_jsonb(v):
+    """`params` 值**唯一出口**——入参契约 = **dict**，序列化是本模块的存储细节。
+
+    2026-09-30 顺手裁定「契约统一」（复审清单 §七 顺带发现：原单模块内两套相反契约——
+    `save_provider_params` 收 dict 内部 dumps，`insert_row`/`update_row` 却收「已序列化
+    JSON 字符串」、把序列化下放给 `mgmt.py`）。统一方向 = **dict 入参 + 内部 dumps**，理由：
+
+    ① **读写对称**：读路径 `load_provider_params` 已 `json.loads` 返 dict，写路径同型
+       → `config_store` 的 params 契约进出同型，值可盲传不透传序列化形态；
+    ② **消灭白跑一趟**：路由侧 `_normalize_params` 刚把 str 归一成 dict，紧接着
+       `json.dumps` 又变回 str——同一份数据在层间 parse→dump 一轮纯消耗；
+    ③ **知识归属**：`%s::jsonb` 转型占位符（`_ph`/`_val_ph`）已在本模块，「params 是
+       jsonb」这件事本模块已知，序列化不该外泄给调用方（存储细节随列走）。
+
+    **`str` 响亮拒绝**——本契约最危险的失败模式：`json.dumps(json.dumps(x))` 不报错，
+    会静默把对象存成 JSON **字符串**（库里 `"{\\"a\\":1}"` 而非 `{"a":1}`），读写往返时
+    才炸，且报错点离病根很远。宁可在此抛。`None` → SQL NULL（显式清空 params），与
+    「键缺席=不改」的三段语义互补。
+    """
+    if v is None:
+        return None
+    if isinstance(v, str):
+        raise TypeError(
+            "params 入参契约已统一为 dict（序列化由 config_store 内部完成）；收到已序列化"
+            f"字符串 {v[:40]!r}——疑似双重编码，请传 dict")
+    return json.dumps(v, ensure_ascii=False)
+
+
+def _row_values(cols: list[str], values: dict) -> tuple:
+    """按列序取参数元组——`params` 列过 `_param_jsonb` 单出口，其余原样。"""
+    return tuple(_param_jsonb(values[c]) if c == "params" else values[c] for c in cols)
+
+
 def insert_row(kind: str, values: dict) -> int:
     """新增本域行，position=**本表** max+1（单表单序列），返回新 id。
 
     两表 id 各自独立序列；position 亦各表独立（原「全局单序列」随拆表退役）。
     异常显式 rollback（沿用路由层原语义：失败不留半事务）。
 
-    **入参契约**：`values["params"]` 必须是**已序列化的 JSON 字符串**（jsonb 列不接受
-    dict——psycopg 会报 `cannot adapt type 'dict'`）。序列化在路由层（`mgmt.py`）完成，
-    本模块不做二次 dumps；`capabilities` 传 list（PG 原生数组），`exchanges` 传 list 或 None。
+    **入参契约**（2026-09-30 裁定统一）：`values["params"]` 传 **dict**——本模块内部
+    序列化（`_param_jsonb`），**已序列化字符串会响亮拒绝**（防双重编码静默损坏）；
+    `capabilities` 传 list（PG 原生数组），`exchanges` 传 list 或 None。
     """
     tbl = _tbl(kind)
     cols = _write_cols(kind, values)
@@ -193,7 +226,7 @@ def insert_row(kind: str, values: dict) -> int:
            f"(SELECT coalesce(max(position),-1)+1 FROM {tbl})) RETURNING id")
     with get_conn() as conn:
         try:
-            cur = conn.execute(sql, tuple(values[c] for c in cols))
+            cur = conn.execute(sql, _row_values(cols, values))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -204,7 +237,7 @@ def insert_row(kind: str, values: dict) -> int:
 def update_row(kind: str, iid: int, values: dict) -> None:
     """改本域行（仅写 values 提供的列；credentials_encrypted 缺席=不改）。
 
-    入参契约同 `insert_row`（`params` 须为 JSON 字符串）。
+    入参契约同 `insert_row`（`params` 传 **dict**，内部序列化；字符串响亮拒绝）。
     """
     tbl = _tbl(kind)
     cols = _write_cols(kind, values)
@@ -212,7 +245,7 @@ def update_row(kind: str, iid: int, values: dict) -> None:
     with get_conn() as conn:
         try:
             conn.execute(f"UPDATE {tbl} SET {sets}, updated_at=now() WHERE id=%s",
-                         tuple(values[c] for c in cols) + (iid,))
+                         _row_values(cols, values) + (iid,))
             conn.commit()
         except Exception:
             conn.rollback()
@@ -247,11 +280,14 @@ def save_provider_params(row_id: int, params: dict) -> None:
     """数据源行 params 整体写回（读-改-写）。双盲补审修正：有 last-writer-wins 窗口
     （两 admin 并发、或 cb 与 rate_limits 两端点并发丢一边修改）——admin 低频可接受，
     根治需 SELECT FOR UPDATE 同事务。
+
+    入参契约与 `insert_row`/`update_row` 一致（dict，`_param_jsonb` 单出口）——本函数原就是
+    dict 口径，2026-09-30 契约统一是让另两个函数向它看齐，非反向。
     """
     with get_conn() as conn:
         try:
             conn.execute(f"UPDATE {_tbl(KIND_DATA)} SET params=%s::jsonb, updated_at=now() "
-                         "WHERE id=%s", (json.dumps(params, ensure_ascii=False), row_id))
+                         "WHERE id=%s", (_param_jsonb(params), row_id))
             conn.commit()
         except Exception:
             conn.rollback()

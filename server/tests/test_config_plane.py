@@ -588,9 +588,9 @@ class TestRealDbRoundTrip:
 
     @staticmethod
     def _mk_values(kind, cs, tag):
-        """两族各造一份合法 values（params 走 JSON 字符串——insert_row 入参契约）。"""
+        """两族各造一份合法 values（params 走 **dict**——2026-09-30 契约统一后 insert_row 入参）。"""
         vals = {"name": f"RT-{tag}", "provider": cs.KIND_DATA == kind and "tushare" or "xtp",
-                "market": "astock", "params": json.dumps({"rate_limits": {"a": 1}}),
+                "market": "astock", "params": {"rate_limits": {"a": 1}},
                 "capabilities": ["hist_quote"] if kind == cs.KIND_DATA else ["trading"],
                 "enabled": True}
         if kind == cs.KIND_TRADING:
@@ -629,8 +629,8 @@ class TestRealDbRoundTrip:
             else:
                 assert d["exchanges"] is None and d["account_key"] is None   # 数据源族无此二列
 
-            # UPDATE：params 亦走 SET 占位符（两条 SQL 的占位符形态各自独立）
-            cs.update_row(kind, rid, {"name": f"RT2-{tag}", "params": json.dumps({"b": 2})})
+            # UPDATE：params 亦走 SET 占位符（两条 SQL 的占位符形态各自独立）+ dict 入参
+            cs.update_row(kind, rid, {"name": f"RT2-{tag}", "params": {"b": 2}})
             d2 = self._read(kind, cs, rid)
             assert d2["name"] == f"RT2-{tag}"
             assert d2["params"] == {"b": 2}

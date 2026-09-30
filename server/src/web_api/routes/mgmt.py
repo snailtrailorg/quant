@@ -196,10 +196,15 @@ def _providers(kind: str) -> dict:
 
 
 def _write_values(kind: str, req, caps: list) -> dict:
-    """请求 → 写入列 dict（列名白名单在 config_store；credentials 空=键缺席=不改，三段语义）。"""
+    """请求 → 写入列 dict（列名白名单在 config_store；credentials 空=键缺席=不改，三段语义）。
+
+    `params` 传 **dict**（`_normalize_params` 已把 HTTP 边界的 str/dict 归一为 dict，
+    原在此 `json.dumps` 又被 config_store 收成字符串——2026-09-30 裁定契约统一后删除该
+    白跑一趟：序列化归 `config_store._param_jsonb` 单出口，且字符串入参会响亮拒绝）。
+    """
     from src.quant_common.crypto import encrypt
     values = {"name": req.name, "provider": req.provider, "market": req.market,
-              "params": json.dumps(_normalize_params(req.params), ensure_ascii=False),
+              "params": _normalize_params(req.params),
               "capabilities": caps, "enabled": req.enabled}
     if kind == KIND_TRADING:
         values["exchanges"] = _validate_exchanges(req.provider, req.market, req.exchanges)
