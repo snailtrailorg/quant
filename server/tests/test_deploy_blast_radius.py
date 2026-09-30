@@ -26,11 +26,13 @@ staging 彩排 preflight（阶段 1 `quant-dbro hub`）当场撞
    external_interface 拆 data_source + trading_account」），不构成回归。
    **例外＝第 4 段的哨兵行**（显式声明的过渡期兼容分支）。
 3. **真源在效**：`schema_expectations.txt` 必须存在且非空——第 1 段赖以成立的基线不能退化成空集假绿。
-4. **过渡期哨兵纪律（`TRANSITION-0115`）**：装位件不随 release 版本化，而 83a 的 `0116` 是
-   **contract 型迁移**（DROP 旧表），且 `quant-dbro hub` 在 alembic **之前**跑、`quant-hbcheck` 在
-   **之后**跑（阶段 8 postverify，`failed_when: rc != 0`）——单态 wrapper **无装位时序可解**：
-   先装查新表 → preflight 撞未建的表拦停；不装 → postverify 撞已删的旧表失败，而回滚**不回退 schema**
-   → 旧代码 + 已删表 = 撕裂态（2026-09-30 对 prod 实查后定论）。故过渡期**必须**双态。
+4. **过渡期哨兵纪律（`TRANSITION-0115`）**：装位件不随 release 版本化，且 `quant-dbro hub` 在
+   alembic **之前**跑、`quant-hbcheck` 在 **之后**跑（阶段 8 postverify，`failed_when: rc != 0`）
+   ——单态 wrapper **无装位时序可解**：先装查新表 → preflight 撞未建的表拦停；不装 → postverify
+   读到已停止写入的旧表（真源漂移）。（2026-09-30 对 prod 实查后定论。）
+   **2026-09-30 补**：`0116` 由单步 contract 改成 **expand 步**（旧表留存、DROP 拆到 `0122`，
+   两次发布＝「两步走」裁定）——此后「两表并存」由「迁移半途异常」变为**长期正常态**，
+   wrapper 必须**优先选 `trading_account`**（详见第 5 段）。
    代价要**被声明、有界、可检测**，而不是悄悄留在代码里：
    - 旧态 SQL 行须带哨兵——两形态：**行内**（该行出现 `TRANSITION-0115`）或**域内**
      （被 `TRANSITION-0115:BEGIN` / `:END` 包住的整段，用于跨行 SQL 串），且该行引用的非
@@ -40,14 +42,22 @@ staging 彩排 preflight（阶段 1 `quant-dbro hub`）当场撞
    - **残留也红**：声明还在但已无哨兵行（收口后忘删声明）同样报错——逼收口动作闭环；
    - 哨兵只许出现在 `deploy/wrappers/`（装位件目录），不得扩散到其它部署链文件。
 
-**覆盖边界（诚实声明）**：本闸门只保证「**部署链的表名/退役谓词不漂移 + 过渡期哨兵有据**」，
-不覆盖 SQL 语义（列名、占位符形态、JOIN 正确性）——那类靠真库往返钉（本例：两态 scratch schema
-跑真 wrapper 的回归已人工执行，见提交信息）。也不扫 `server/migrations/`（迁移**本就**
-引用历史表名，如 0116 的 DROP external_interface）。
+5. **双态选表的**行为**回归（假 `psql` 驱动真 wrapper）**：第 1-4 段全是**静态文本**判据——
+   `11) …return 1` 这种**行为**回归（把「两表并存」当异常拒绝）它们**一条都看不见**。而
+   0116 改 expand 后并存态是正常态，旧行为会在 expand 环境**自锁死 preflight**。故本段用
+   一个假 `psql`（只应答 `to_regclass` 探测）驱动真 wrapper 跑 `hub`，钉四态：
+   `11`→`trading_account`、`01`→`trading_account`、`10`→`external_interface`、`00`→非零退出。
+
+**覆盖边界（诚实声明）**：本闸门只保证「**部署链的表名/退役谓词不漂移 + 过渡期哨兵有据 +
+双态选表行为不回归**」，不覆盖 SQL 语义（列名、占位符形态、JOIN 正确性）——那类靠真库往返钉
+（本例：两态 scratch schema 跑真 wrapper 的回归已人工执行，见提交信息）。也不扫
+`server/migrations/`（迁移**本就**引用历史表名，如 0116 搬迁段的 `FROM external_interface`）。
 """
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -66,7 +76,7 @@ _SQL_LINE_RE = re.compile(r"\b(select|insert|update|delete|from|where|join|into)
 
 # 已退役 artifact：出现（于 SQL 行）即回归——除哨兵行外
 _RETIRED = {
-    "external_interface": "批 83a 已 DROP 的表（拆为 data_source + trading_account）",
+    "external_interface": "批 83a 拆表中退役的表（0116 expand 后已停止写入，0122 才 DROP 物理删）",
     "ANY(capabilities)": "退役的域谓词——拆表后「表本身即域」，勿再按 capabilities 过滤域",
 }
 
@@ -243,3 +253,59 @@ def test_transition_sentinel_is_declared_and_paired():
                 )
 
     assert not errs, "过渡期哨兵纪律违规:\n  " + "\n  ".join(errs)
+
+
+# ---- 第 5 段：双态选表的**行为**回归（假 psql 驱动真 wrapper）----
+
+# (to_regclass 探测对, 期望选表, 期望 rc==0)
+#   11 = 两表并存 —— 0116 改 expand 后的**长期正常态**：核心回归点（旧版在此 return 1 会自锁）
+#   01 = 仅新表（0122 contract 后）; 10 = 仅旧表（真 0115，本版上产前）; 00 = 两表皆缺
+_SELECT_CASES = (
+    ("11", "trading_account", True),
+    ("01", "trading_account", True),
+    ("10", "external_interface", True),
+    ("00", None, False),
+)
+
+# 假 psql：只应答 to_regclass 探测（回带 $FAKE_PAIR），其余调用返回空集。
+# 生产 wrapper 用裸 `psql` 名调用 ⇒ PATH 前置即可替换，wrapper 本体零改动。
+_FAKE_PSQL = """#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    *to_regclass*) printf '%s\\n' "$FAKE_PAIR"; exit 0 ;;
+  esac
+done
+exit 0
+"""
+
+
+@pytest.mark.skipif(not _WRAPPERS.is_dir(), reason="无 deploy/wrappers（非本仓布局）")
+@pytest.mark.parametrize("pair,expect_tbl,expect_ok", _SELECT_CASES)
+def test_transition_two_state_selection_is_behavioral(
+    tmp_path: Path, pair: str, expect_tbl: str | None, expect_ok: bool
+) -> None:
+    """§5：双态选表**行为**——防「11 报错」式回归（静态闸门看不见这层）。"""
+    fake = tmp_path / "psql"
+    fake.write_text(_FAKE_PSQL, encoding="utf-8")
+    fake.chmod(0o755)
+    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "FAKE_PAIR": pair}
+
+    proc = subprocess.run(
+        ["bash", str(_WRAPPERS / "quant-dbro"), "hub"],
+        capture_output=True, text=True, env=env, timeout=30,
+    )
+
+    assert (proc.returncode == 0) is expect_ok, (
+        f"pair={pair}: rc={proc.returncode}（期望 {'0' if expect_ok else '非 0'}）\n"
+        f"stderr: {proc.stderr.strip()[:400]}"
+    )
+    if expect_tbl is None:
+        assert "两表皆不在位" in proc.stderr, (
+            f"pair={pair}: 两表皆缺须响亮拒绝（stderr）:\n{proc.stderr.strip()[:400]}"
+        )
+    else:
+        assert f"选表={expect_tbl}" in proc.stderr, (
+            f"pair={pair}: 选表应为 `{expect_tbl}`（stderr 无 `选表={expect_tbl}`）:\n"
+            f"{proc.stderr.strip()[:400]}\n"
+            "→ 0116 为 expand 步（旧表留存）⇒ 并存态必须优先取 trading_account，不得报错"
+        )

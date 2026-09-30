@@ -17,14 +17,16 @@
 #                        过滤的原因：SQL 无从查注册表，过滤在消费方+同步义务钉 release.yml 注释）
 #   固定 SQL 内封不收外部 SQL；输出每行一个（psql -tA）；DB 错误非零退出。
 #
-# TRANSITION-0115:收口=0116（批 83a 拆表）全环境上产后，重装位并删除本文件的两态分支
+# TRANSITION-0115:收口=0116（批 83a 拆表 expand）全环境上产后，重装位并删除本文件的两态分支
 #   （`select_trading_table` + 标 `# TRANSITION-0115` 的旧态 SQL 行 + 本注记），回到单态
 #   `trading_account`。标记者 = 该行 SQL 属**旧态（0115）**分支，闸门
 #   `server/tests/test_deploy_blast_radius.py` 据此放行退役表名/域谓词；未标记者一律禁。
 #   背景：release preflight（本 wrapper hub）在 alembic 之前跑、阶段 8 postverify（quant-hbcheck）
-#   在之后跑——而 prod DB 在 0115、新表在 0116 才建，单态 wrapper **无**装位时序可解：
-#   先装查新表 → preflight 撞未建的表拦停；不装 → postverify 撞已删的旧表失败且回滚不动 schema
-#   （撕裂态）。故过渡期双态是唯一无时序约束解（2026-09-30 prod 实查后定论）。
+#   在之后跑——环境 DB 上产前停在 0115（无新表）、上产后为 0116（新旧两表并存）。单态 wrapper
+#   **无**装位时序可解：先装查新表 → preflight 撞未建的表拦停；不装 → postverify 读到**已停止
+#   写入的旧表**（真源漂移/漏报）。故过渡期双态是唯一无时序约束解（2026-09-30 prod 实查后定论）。
+#   0116 由单步 contract 改为 expand（2026-09-30「两步走」裁定）后，「两态并存」不再是迁移半途
+#   异常而是**长期正常态**，故选表须**优先 trading_account**（见 select_trading_table 注释）。
 
 # 严参校验:
 #   which 白名单 live|feishu|hub；恰一个参数（sudoers `*` 吃空格——多余参数即拒，防夹带）
@@ -46,9 +48,13 @@ case "$which_arg" in
 esac
 
 # ---- 交易域选表：过渡期双态（TRANSITION-0115——收口条件见文件头）----
-#   0115 及以前: external_interface —— 须保留 'trading' = ANY(capabilities) 域谓词
-#   0116 及以后: trading_account    —— 表本身即交易域，无谓词
-#   两态并存 / 皆缺 = schema 异常 → 响亮拒绝（不猜、不静默选一侧）
+#   真 0115（本版上产前）  : 仅 external_interface → 旧表 + 'trading' = ANY(capabilities) 域谓词
+#   0116 expand 后（并存）  : 两表同在 → **优先 trading_account**（新表=真源：新代码只写它；
+#                             旧表已停止写入，读它会漏掉新账号=期望集漂移）
+#   0122 contract 后        : 仅 trading_account → 新表，无谓词（表本身即交易域）
+#   皆缺 = schema 异常 → 响亮拒绝（不猜、不静默选一侧）
+#   注：0116 改为 expand 步后，并存态由「迁移半途异常」变为**长期正常态**——故 pair=11 是
+#   **选择**而非报错（旧版在此 return 1，会在 expand 态自锁死 preflight，2026-09-30 修正）。
 #   to_regclass 取 search_path 相对名（生产缺省含 public）——故可在 scratch schema 里
 #   对两态做本机回归，不必有服务器。
 # TRANSITION-0115:BEGIN（本域含旧表名——闸门据此放行；收口时连同函数整段删除）
@@ -58,9 +64,9 @@ select_trading_table() {
     "SELECT (to_regclass('external_interface') IS NOT NULL)::int::text ||
             (to_regclass('trading_account')    IS NOT NULL)::int::text")
   case "$pair" in
-    10) printf '%s\n' external_interface ;;
-    01) printf '%s\n' trading_account ;;
-    11) echo "✗ 选表：两态并存（external_interface 与 trading_account 同时在场）——迁移半途/未收口，人工处置" >&2; return 1 ;;
+    11) printf '%s\n' trading_account ;;      # expand 并存态：新表即真源
+    01) printf '%s\n' trading_account ;;      # contract（0122）后
+    10) printf '%s\n' external_interface ;;   # 真 0115（本版上产前）
     00) echo "✗ 选表：两表皆不在位——schema 异常，人工处置" >&2; return 1 ;;
     *)  echo "✗ 选表：探测输出异常 [$pair]" >&2; return 1 ;;
   esac

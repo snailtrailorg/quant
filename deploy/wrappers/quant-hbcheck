@@ -9,13 +9,15 @@
 #   调用方 release.yml——此处验全部期望行，未实现 provider 的行由波次清单天然不含，
 #   期望集层面不过滤防漏报）。
 #
-# TRANSITION-0115:收口=0116（批 83a 拆表）全环境上产后，重装位并删除本文件的两态分支
+# TRANSITION-0115:收口=0116（批 83a 拆表 expand）全环境上产后，重装位并删除本文件的两态分支
 #   （`select_trading_table` + 标 `# TRANSITION-0115` 的旧态 SQL 行 + 本注记），回到单态
 #   `trading_account`。标记者 = 该行 SQL 属**旧态（0115）**分支，闸门
 #   `server/tests/test_deploy_blast_radius.py` 据此放行退役表名/域谓词；未标记者一律禁。
 #   理由同 quant-dbro：本 wrapper 在**阶段 8 postverify** 跑（alembic 之后），而 release
-#   preflight（quant-dbro hub）在 alembic 之前——单态 wrapper 无装位时序可解（2026-09-30 实查）。
-#   逐行验证 per-account 心跳键 quant:hb:md-hub:{id}：TTL>0 + 8 字段齐 + hash 内 ts 判龄
+#   preflight（quant-dbro hub）在 alembic 之前。0116 为 expand 步（旧表留存，2026-09-30 两步走
+#   裁定）⇒ 上产后是**新旧两表长期并存**态，期望集必须取新表（旧表已停止写入，读它=期望集漂移）。
+#   故 pair=11 为**选择 trading_account**而非报错（逐行验证 per-account 心跳键 quant:hb:md-hub:{id}：
+#   TTL>0 + 8 字段齐 + hash 内 ts 判龄
 #   （≤90s——防旧心跳 90s 残留 TTL 假过）+ 期望集非空断言。
 #   两代自适应：期望 per-account 键全缺且裸键 quant:hb:md-hub 在场 → 回落 legacy 单键校验
 #   并显式输出「legacy 模式」（解 wrapper 装位件不随 release 版本化的时序悖论——先装新版
@@ -34,6 +36,8 @@ set +a
 URL=${QUANT_HB_REDIS_URL:-${VALKEY_URL:-redis://127.0.0.1:6379/4}}
 
 # ---- 交易域选表：过渡期双态（TRANSITION-0115——收口条件见文件头；律同 quant-dbro）----
+#   真 0115（本版上产前） → 仅旧表：须带 'trading' = ANY(capabilities) 域谓词
+#   expand 并存态 / contract 后 → trading_account（新表=真源；并存时优先取它，防期望集漂移）
 # TRANSITION-0115:BEGIN（本域含旧表名——闸门据此放行；收口时连同函数整段删除）
 select_trading_table() {
   local pair
@@ -41,9 +45,9 @@ select_trading_table() {
     "SELECT (to_regclass('external_interface') IS NOT NULL)::int::text ||
             (to_regclass('trading_account')    IS NOT NULL)::int::text")
   case "$pair" in
-    10) printf '%s\n' external_interface ;;
-    01) printf '%s\n' trading_account ;;
-    11) echo "✗ 选表：两态并存（external_interface 与 trading_account 同时在场）——迁移半途/未收口，人工处置" >&2; return 1 ;;
+    11) printf '%s\n' trading_account ;;      # expand 并存态：新表即真源
+    01) printf '%s\n' trading_account ;;      # contract（0122）后
+    10) printf '%s\n' external_interface ;;   # 真 0115（本版上产前）
     00) echo "✗ 选表：两表皆不在位——schema 异常，人工处置" >&2; return 1 ;;
     *)  echo "✗ 选表：探测输出异常 [$pair]" >&2; return 1 ;;
   esac

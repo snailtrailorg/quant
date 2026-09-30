@@ -1,16 +1,30 @@
-"""批 83a：external_interface 拆表 —— data_source + trading_account（重构，行为不变）。
+"""批 83a：external_interface 拆表 —— data_source + trading_account（**expand 步**，行为不变）。
 
-**抽象判据**（2026-09-29 用户裁定）：数据源账号（Tushare 拉取）与交易账号（XTP/EMT 下单+行情）
-功能完全不同、无继承关系，用能力集 5 token 强行揉合成一类实体 = 过度统一（错误统一）。
-拆两张表：列集各取所需（data_source 无 exchanges/account_key；trading_account 有）。
+**本迁移只做 expand，不做 contract**（2026-09-30 用户裁定＝「两步走」）：
+建两表 + 搬迁 + 显式摘旧 FK + FK 重指向 trading_account —— **旧表 `external_interface` 保留不删**。
+DROP 旧索引/旧表拆到后续版本 `0122`（草稿见 `flow/任务/批85-破坏性迁移两步走立法.md`）。
 
-四要点（盲审 P0-1，一个都不能少）：
+**为什么拆**（安全判据，2026-09-30 定论）：
+破坏性步骤（DROP）必须发生在「**上一版代码已不再依赖被删对象**之后」。
+本版代码已 0 处实读 external_interface，但**回滚目标 = 上一版（pre-83a）代码仍实读它**，而
+`deploy/playbooks/rollback-tasks.yml` **无 alembic/downgrade**（回滚只回代码、schema 一律不后退）。
+若本版就 DROP：阶段 6-8 任一失败 → rescue(6-8) 自动翻回旧代码 + 表已删 = **应用硬崩且自动路径救不回**
+（撕毁「任何发布都能安全回滚到上一版」这条地基不变量）。拆两步后：本版**任何回滚落点都有一张可用表**；
+下一次发布时上一版代码已读新表，那时 DROP 才真的安全（DDL 门届时放行＝诚实的放行）。
+
+四要点（盲审 P0-1，本版做实 1-4 的**前半**）：
 1. **两域行均保留原 id** 迁入新表 —— 7 表 account_id FK 零重映射 + data_source_usage.interface_id
    零迁移（该列无 FK 约束，仅取值引用；0090 建列时为裸 BigInteger）。
 2. 7 表 FK 重指向 trading_account.id（约束名保持 0104 现行名，只换目标表）。
 3. account_key UNIQUE(provider, account_key) 在 trading_account 上重建。
-4. **显式 drop FK 再 drop 表**（禁裸 DROP 的静默 CASCADE 删 FK）；顺序=先建新表→搬迁→
-   显式 drop 旧 FK→重指向→显式 drop 旧索引/表。破坏性 DDL → 部署走 allow_contract 通道。
+4. **显式 drop FK 再重指向**（禁裸 DROP 的静默 CASCADE 连带）；顺序=先建新表→搬迁→
+   显式 drop 旧 FK→重指向。**旧索引/旧表 drop 已移出本迁移**（见上）。
+
+过渡期并存态（0116 → 0122，可跨多个发布周期）：
+- `trading_account`/`data_source` = **真源**（新代码唯一写入目标）；
+- `external_interface` = **停止写入的旧表**，仅为「回滚到 pre-83a 代码」提供安全垫而留存。
+- wrapper 侧两态选表（`quant-dbro`/`quant-hbcheck`）**优先 trading_account**——两态并存时新表即真源，
+  旧表分支只为真 0115 环境保留；哨兵 `TRANSITION-0115`，闸门 `server/tests/test_deploy_blast_radius.py` §4/§5。
 
 数据加工点：
 - **tencent 僵尸行退役**（盲审 P1-2）：0096 退役自攒分钟线后其唯一能力 rt_quote 无代码消费
@@ -18,16 +32,22 @@
 - 序列复位：两表显式插入原 id 后须 setval，否则后续 INSERT 撞既有 id（新表各自新序列）。
 
 存量分域判据 = 盲审 P0-1 原文：`'trading' = ANY(capabilities)` → trading_account，其余 → data_source
-（与 0090 分域段、mgmt 域谓词同源；拆表后该谓词在表层面退役）。
+（与 0090 分域段、mgmt 域谓词同源；拆表后该谓词仅在 wrapper 的旧态分支里暂存）。
 
-downgrade：还原 external_interface（0090 结构 + 0099 的 account_key/唯一索引），两表 UNION ALL
-按原 id 回填，7 表 FK 重指回 external_interface.id。**tencent 行不可恢复**（数据删除不可逆，
-与 0096 先例同口径）。
+downgrade（0116 → 0115）：本版**不删旧表**，故 downgrade 无需重建 external_interface——
+摘 FKs → **前置断言两域 id 未撞号**（响亮拒绝，禁静默丢行）→ 旧表内容按新表刷新 →
+FK 重指回 external_interface.id → drop 两新表。**tencent 行不可恢复**（数据删除不可逆，与 0096 先例同口径）。
+
+⚠ **已知设计债（本步不修）**：拆表后 `data_source` 与 `trading_account` **各持独立序列**（各表 BIGSERIAL），
+新行 id 落在共同区间 ⇒ 长期运行后必然跨域撞号，此时降级合并回单表会主键冲突（故 downgrade 第 2 步拦停）。
+根治 = 两表共用一条序列；但那是 0116 **建表内容**的改动，而 staging 的这两张表已由「旧版 0116」建好
+（alembic 不会重跑）⇒ 改建表内容会与 staging 现状分叉。故本版按**最小改动**原则只摘 DROP 步骤。
+遗留项已登记待裁定（见 `flow/待办.md`）。
 
 Revision ID: 0116
 Revises: 0115
 """
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 
 revision = "0116"
@@ -52,14 +72,6 @@ _DATA_PRED = f"NOT ({_TRADING_PRED})"
 # 两表列（除 id）——搬迁/回填共用一份，防两侧列名漂移
 _SHARED_COLS = ("name, provider, market, credentials_encrypted, params, "
                 "capabilities, position, enabled, created_at, updated_at")
-
-# 旧表索引（显式 drop，禁靠 drop_table 隐式连带）
-_OLD_INDEXES = (
-    "ix_external_interface_provider",
-    "ix_external_interface_position",
-    "ix_external_interface_capabilities",
-    "ix_external_interface_account_key",
-)
 
 
 def upgrade() -> None:
@@ -125,7 +137,7 @@ def upgrade() -> None:
         op.execute(f"SELECT setval(pg_get_serial_sequence('{tbl}', 'id'), "
                    f"coalesce((SELECT max(id) FROM {tbl}), 1))")
 
-    # 3. 显式 drop 7 表 FK（禁裸 drop_table 的 CASCADE 静默连带）
+    # 3. 显式 drop 7 表 FK（禁裸 drop_table 的 CASCADE 静默连带；本版不 drop 表，摘除仍必要）
     for tbl, cname, _col, _act in _FKS:
         op.drop_constraint(cname, tbl, type_="foreignkey")
 
@@ -133,10 +145,8 @@ def upgrade() -> None:
     for tbl, cname, col, act in _FKS:
         op.create_foreign_key(cname, tbl, "trading_account", [col], ["id"], ondelete=act)
 
-    # 5. 显式 drop 旧索引 + 旧表（此时 FK 已全部摘除，裸 drop 亦不会静默连带）
-    for idx in _OLD_INDEXES:
-        op.drop_index(idx, table_name="external_interface")
-    op.drop_table("external_interface")
+    # 【5. drop 旧索引 + 旧表 —— 已移出本迁移，落 0122（两步走的 contract 步）】
+    #   旧表在本版**留存**：它是「回滚到 pre-83a 代码」的安全垫，见文件头「为什么拆」。
 
 
 def downgrade() -> None:
@@ -144,31 +154,30 @@ def downgrade() -> None:
     for tbl, cname, _col, _act in _FKS:
         op.drop_constraint(cname, tbl, type_="foreignkey")
 
-    # 2. 还原 external_interface（0090 结构 + 0099 的 account_key）
-    op.create_table(
-        "external_interface",
-        sa.Column("id", sa.BigInteger(), primary_key=True, autoincrement=True),
-        sa.Column("name", sa.Text(), nullable=False),
-        sa.Column("provider", sa.Text(), nullable=False),
-        sa.Column("market", sa.Text(), nullable=False),
-        sa.Column("exchanges", sa.ARRAY(sa.Text()), nullable=True),
-        sa.Column("credentials_encrypted", sa.Text()),
-        sa.Column("params", sa.dialects.postgresql.JSONB(), nullable=True),
-        sa.Column("capabilities", sa.ARRAY(sa.Text()), nullable=False),
-        sa.Column("position", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("enabled", sa.Boolean(), server_default=sa.text("true")),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
-        sa.Column("account_key", sa.Text(), nullable=True),
-    )
-    op.create_index("ix_external_interface_provider", "external_interface", ["provider"])
-    op.create_index("ix_external_interface_position", "external_interface", ["position"])
-    op.create_index("ix_external_interface_capabilities", "external_interface",
-                    ["capabilities"], postgresql_using="gin")
-    op.create_index("ix_external_interface_account_key", "external_interface",
-                    ["provider", "account_key"], unique=True)
+    # 2. **前置断言：两域 id 不得撞号**（响亮拒绝，禁静默丢行）
+    #    拆表后两表**各持独立序列**（各自 BIGSERIAL），新行 id 会落在共同区间 → 长期运行后必然撞号
+    #    （本机 scratch 实证：data_source ids={2} 与 trading_account ids={1,2} 已撞）。
+    #    撞号时「合并回单表」会主键冲突：若靠 ON CONFLICT DO NOTHING 会**静默丢掉一整行账号**，
+    #    那比报错更坏。故此处显式断言，把处置权交回人。
+    #    offline（--sql）模式下 get_bind() 是 mock、查不了库 ⇒ 跳过（该模式产物本就不是执行路径；
+    #    若不跳过，离线渲染会在断言处截断整个 downgrade 的 SQL）。
+    if not context.is_offline_mode():
+        _row = op.get_bind().execute(sa.text(
+            "SELECT count(*), min(d.id) FROM data_source d JOIN trading_account t ON d.id = t.id"
+        )).one()
+        if _row[0]:
+            raise RuntimeError(
+                f"降级阻断：拆表后两域 id 撞号 {_row[0]} 行（最小示例 id={_row[1]}）。"
+                "两表各持独立序列，合并回 external_interface 会主键冲突，须人工重编号后再降级。"
+            )
 
-    # 3. 两表按原 id 回填（id 两域互斥，UNION ALL 无冲突）
+    # 3. 让旧表内容**对齐新表这一真源**（本版未删旧表，故不重建结构）
+    #    先删掉「新表中仍存在的 id」的旧行，再整行插入——等价于「新表为准的刷新」，
+    #    既覆盖并存期内的改名/改参，也清掉并存期内被删的账号，且**不需要 ON CONFLICT**。
+    op.execute("""
+        DELETE FROM external_interface WHERE id IN (
+            SELECT id FROM trading_account UNION SELECT id FROM data_source)
+    """)
     op.execute(f"""
         INSERT INTO external_interface (id, {_SHARED_COLS}, exchanges, account_key)
         SELECT id, {_SHARED_COLS}, exchanges, account_key FROM trading_account
@@ -180,7 +189,7 @@ def downgrade() -> None:
     op.execute("SELECT setval(pg_get_serial_sequence('external_interface', 'id'), "
                "coalesce((SELECT max(id) FROM external_interface), 1))")
 
-    # 4. FK 重指回 external_interface.id
+    # 4. FK 重指回 external_interface.id（旧表在，无需重建结构；数据已由第 3 步补齐）
     for tbl, cname, col, act in _FKS:
         op.create_foreign_key(cname, tbl, "external_interface", [col], ["id"], ondelete=act)
 
