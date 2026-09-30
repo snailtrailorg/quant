@@ -343,6 +343,21 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 - **stk_mins**：per-symbol 接口（不支持按日全市场），2000 积分，单次 8000 条（超限分段，见 engine._split_minute_range）
 - **限流四层**（批55a 勘察定稿，详单 `docs/obsolete/任务归档/批55a-限流四层牵连勘察.md`）：**L1** `DEFAULT_RATE_LIMITS` 类默认（代码兜底）← **L2** `params.rate_limits` 单参数覆写（24 号去积分档后两级）；非法值回落+告警不崩同步。**L3 熔断** DataSource 级（D2），参数 `params.circuit_breaker`（代码默认 fail_threshold=5 / reset_timeout=60s）；进程内键=provider——同 provider 多账号共享熔断/限速（勘察发现 3 裂缝，深水区批解）。**L4** `data_source_usage` 用量（provider+interface_id 双填）
 - **params 分界**：秘密→`credentials_encrypted`；运维参数（points_tier/rate_limits/rate_time_overrides/circuit_breaker/base_url）→`params` JSON；数值一律经 `get_param_float` 钳位（不信任前端/DB 手写值）
+- **params 写契约（三层同一条律 = jsonb 对象）**——`data_source` / `trading_account` 两表：
+  **① HTTP 边界** `mgmt._normalize_params`（合法 JSON 但非对象 → 400）；**② 应用层**
+  `config_store._param_jsonb` 单出口（非 dict → TypeError，三写函数 `insert_row`/`update_row`/
+  `save_provider_params` 共用）；**③ 存储层** CHECK `ck_<tbl>_params_object`
+  （`params IS NULL OR jsonb_typeof(params)='object'`，迁移 **0120**）。
+  为什么三层都要：① 报错最近，② 管本模块调用方，**③ 是唯一能看见「所有写者」的一层**
+  （未来新写路径 / 手工 SQL / 运维脚本 / 一次性数据搬运都绕过 ①②）。
+  防的失败模式是**静默**的：`json.dumps(json.dumps(x))` 不报错，只把对象降级存成 jsonb
+  **字符串**（库里 `"{\"a\": 1}"`），下游 `params->>'k'` 取不到而写入端全绿；
+  且 `load_provider_params` 的 `json.loads` 兜底会**恰好治愈一层**、把损坏藏起来
+  （故该兜底现改为 **ERROR 级**日志并点名 row id 与约束名）。
+  判据只能靠 `jsonb_typeof()`——假连接/单测永远看不见这一层，真库钉在
+  `tests/test_config_params_contract.py`（含裸 SQL 直写被 23514 拒的反证）。
+  **范围**：本律只及 config_store 两表；`strategy_config.params` 等由调用方 dumps 写各自域表，
+  尚未纳入（2026-09-30 全库扫描：仅这两表各有 1 行存量损坏，已由 0120 修复）。
 
 ---
 

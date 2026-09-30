@@ -146,10 +146,18 @@ def load_provider_params(provider: str) -> tuple[int, dict] | None:
         return None
     if isinstance(r[1], dict):
         return r[0], r[1]          # params=jsonb（psycopg 读侧已 dict）
+    # ↓ 只有「jsonb 字符串」才走到这里（正常是 object）。**必须响亮**：本兜底原先只静默
+    #   `json.loads` 治愈，正是这层静默让双重编码损坏能长期潜伏——写端全绿、读端自愈，
+    #   只有「在 SQL 里 params->>'k'」的消费方悄悄取不到值。迁移 0120 的 CHECK 约束本应
+    #   让此分支**不可达**；一旦可达即说明有写者绕过约束（或约束被 DROP），要立刻可见。
+    logger.error(
+        "data_source(%s, id=%s) params 是 jsonb **字符串**而非对象——双重编码损坏。"
+        "迁移 0120 的 ck_data_source_params_object 本应拦住它，请核查该行的写入路径；"
+        "本次按 json.loads 兜底治愈（原值 %r）", provider, r[0], r[1])
     try:
         return r[0], (json.loads(r[1]) if r[1] else {})
     except (TypeError, ValueError):
-        logger.warning("data_source(%s) params 非法 JSON，按空处理", provider)
+        logger.error("data_source(%s, id=%s) params 内层亦非合法 JSON，按空处理", provider, r[0])
         return r[0], {}
 
 
@@ -190,17 +198,29 @@ def _param_jsonb(v):
     ③ **知识归属**：`%s::jsonb` 转型占位符（`_ph`/`_val_ph`）已在本模块，「params 是
        jsonb」这件事本模块已知，序列化不该外泄给调用方（存储细节随列走）。
 
-    **`str` 响亮拒绝**——本契约最危险的失败模式：`json.dumps(json.dumps(x))` 不报错，
-    会静默把对象存成 JSON **字符串**（库里 `"{\\"a\\":1}"` 而非 `{"a":1}`），读写往返时
-    才炸，且报错点离病根很远。宁可在此抛。`None` → SQL NULL（显式清空 params），与
-    「键缺席=不改」的三段语义互补。
+    **唯一入口守卫（`str` / 非 dict 一律响亮拒绝）**——本契约最危险的失败模式是**静默**的：
+    `json.dumps(json.dumps(x))` **不报错**，只会把对象降级存成 JSON **字符串**（库里
+    `"{\\"a\\":1}"` 而非 `{"a":1}`）；下游 `params->>'k'` 取不到值而写入端全绿，
+    报错点离病根很远。宁可在此抛。
+
+    **守卫面 = dict-only**，与另两层表达**同一条律**：HTTP 边界 `mgmt._normalize_params`
+    （合法 JSON 但非对象 → 400）与存储层 CHECK（迁移 0120 `ck_<tbl>_params_object`：
+    `jsonb_typeof(params)='object'`）。两层缺一不可——应用层报错近，存储层覆盖**所有**写者
+    （未来新代码 / 手工 SQL / 运维脚本 / 一次性数据搬运都绕过本函数）。
+    `None` → SQL NULL（显式清空 params），与「键缺席=不改」的三段语义互补。
     """
     if v is None:
         return None
     if isinstance(v, str):
         raise TypeError(
-            "params 入参契约已统一为 dict（序列化由 config_store 内部完成）；收到已序列化"
-            f"字符串 {v[:40]!r}——疑似双重编码，请传 dict")
+            "params 入参契约 = dict（序列化由 config_store 内部完成）；收到**已序列化字符串**"
+            f" {v[:40]!r}——疑似双重编码（json.dumps(json.dumps(x)) 会把对象静默降级存成 "
+            "jsonb 字符串、且不报错），请传 dict")
+    if not isinstance(v, dict):
+        raise TypeError(
+            f"params 入参契约 = dict（存 jsonb 对象）；收到 {type(v).__name__} {v!r}"
+            "——存储层有 CHECK jsonb_typeof(params)='object'（迁移 0120）兜底，"
+            "但在入口抛比落库时吃 23514 更贴病根")
     return json.dumps(v, ensure_ascii=False)
 
 
