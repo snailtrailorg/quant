@@ -156,11 +156,17 @@ class TestParamJsonbOutlet:
 class TestSingleOutletNoDrift:
     """防回退：三函数共用一处 dumps；路由层不再承担序列化。"""
 
-    def test_json_dumps_appears_exactly_once_in_module(self):
-        """`config_store` 内 `json.dumps` **恰一处**（`_param_jsonb`）——多一处即新出口=漂移。"""
+    def test_no_dumps_left_in_module(self):
+        """`config_store` 内 `json.dumps` **零处**——2026-09-30 全仓收口后，序列化统一落
+        `quant_common.jsonb`（唯一实现处：`dumps_jsonb`）。留一处即新出口=漂移。"""
         hits = [c for c in _calls_in(_SRC / "data_platform" / "config_store.py")
                 if c == "json.dumps"]
-        assert len(hits) == 1, f"json.dumps 出口数 = {len(hits)}（应恰 1 处，见 _param_jsonb）"
+        assert hits == [], f"config_store 仍有 json.dumps 出口 {hits}——应经 quant_common.jsonb 单出口"
+
+    def test_param_jsonb_delegates_to_shared_outlet(self):
+        """`_param_jsonb` 只保留 params 专属判据，序列化**委派**给全仓单出口 `dumps_jsonb`。"""
+        calls = _calls_in(_SRC / "data_platform" / "config_store.py", "_param_jsonb")
+        assert "dumps_jsonb" in calls
 
     @pytest.mark.parametrize("fn", ["insert_row", "update_row", "save_provider_params"])
     def test_every_writer_routes_through_outlet(self, fn):

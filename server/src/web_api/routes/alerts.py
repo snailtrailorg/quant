@@ -12,6 +12,7 @@ import re
 from fastapi import APIRouter, Body, Depends
 
 from src.data_platform.db import get_conn
+from src.data_platform.jsonb import jsonb
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
@@ -201,14 +202,13 @@ def alerts_config_create(body: dict = Body(...), payload: dict = Depends(require
     stripped: list = []
     if "channels" in body:   # 批34：显式提交才校验（缺键=INSERT 全通道缺省）
         sel, stripped = _validate_channels(uid, body.get("channels"))
-    import json as _json
     with get_conn() as conn:
         try:
             cur = conn.execute(
                 "INSERT INTO alert_user_sub (user_id, categories, min_level, enabled, channels) "
                 "VALUES (%s, %s::jsonb, %s, %s, %s::jsonb) RETURNING id",
-                (uid, _json.dumps(cats), min_level, enabled,
-                 _json.dumps(sel) if sel is not None else None))
+                (uid, jsonb(cats), min_level, enabled,
+                 jsonb(sel)))
             new_id = cur.fetchone()[0]
             conn.commit()
         except Exception as e:
@@ -254,13 +254,12 @@ def alerts_config_update(row_id: int, body: dict = Body(...),
     stripped: list = []
     if "channels" in body:
         sel, stripped = _validate_channels(row["user_id"], body.get("channels"))
-    import json as _json
     with get_conn() as conn:
         conn.execute(
             "UPDATE alert_user_sub SET categories=%s::jsonb, min_level=%s, enabled=%s, "
             "channels=%s::jsonb, updated_at=now() WHERE id=%s",
-            (_json.dumps(cats), min_level, enabled,
-             _json.dumps(sel) if sel is not None else None, row_id))
+            (jsonb(cats), min_level, enabled,
+             jsonb(sel), row_id))
         conn.commit()
     audit_log(payload["username"], "alerts_config_update",
               detail=f"#{row_id} user={row['username']} cats={cats} level={min_level} enabled={enabled}"

@@ -42,6 +42,7 @@ def save_bot_credentials(bot_id: int, creds: dict, partial: bool = True) -> bool
     route_key 单点推导（批13 P0：钉钉 app_key/企微 bot_id 进名单——防补录改写空值撞唯一索引）。"""
     from src.data_platform.db import get_conn
     from src.quant_common.crypto import encrypt
+    from src.data_platform.jsonb import jsonb
 
     from .routing import route_key_from
     if partial:
@@ -53,7 +54,7 @@ def save_bot_credentials(bot_id: int, creds: dict, partial: bool = True) -> bool
                 "UPDATE im_bot_config SET credentials_encrypted=%s, "
                 "params = COALESCE(params,'{}'::jsonb) || %s::jsonb, updated_at=now() WHERE id=%s",
                 (encrypt(json.dumps(creds, ensure_ascii=False)) if has_any else None,
-                 json.dumps({"route_key": route_key_from(creds)}), bot_id))
+                 jsonb({"route_key": route_key_from(creds)}), bot_id))
             conn.commit()
         return True
     except Exception as e:

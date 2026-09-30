@@ -9,6 +9,7 @@ import subprocess
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from src.data_platform.db import get_conn
+from src.data_platform.jsonb import jsonb
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
@@ -89,7 +90,7 @@ def create_strategy(req: StrategyConfig, payload: dict = Depends(require_perm("s
             "INSERT INTO strategy_config (id, name, type, symbol, adapter, enabled, factors, aggregator, risk, params) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (req.id, req.name, req.type, req.symbol, req.adapter, req.enabled,
-             json.dumps(req.factors), json.dumps(req.aggregator), json.dumps(req.risk), json.dumps(req.params)))
+             jsonb(req.factors), jsonb(req.aggregator), jsonb(req.risk), jsonb(req.params)))
         conn.commit()
     audit_log(payload["username"], "create_strategy", req.id, json.dumps({"name": req.name}))
     return {"id": req.id, "status": "created"}
@@ -147,7 +148,7 @@ def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(requi
             "UPDATE strategy_config SET name=%s, type=%s, symbol=%s, adapter=%s, enabled=%s, "
             "factors=%s, aggregator=%s, risk=%s, params=%s, updated_at=now() WHERE id=%s",
             (req.name, req.type, req.symbol, req.adapter, req.enabled,
-             json.dumps(req.factors), json.dumps(req.aggregator), json.dumps(req.risk), json.dumps(req.params), sid))
+             jsonb(req.factors), jsonb(req.aggregator), jsonb(req.risk), jsonb(req.params), sid))
         conn.commit()
     audit_log(payload["username"], "update_strategy", sid,
               old_value=json.dumps({"factors": old[0], "aggregator": old[1]}) if old else "",

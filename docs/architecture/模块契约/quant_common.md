@@ -15,8 +15,14 @@ server/src/quant_common/
 ├── session.py   # in_astock_session / session_edge（从 strategy_runner 归位——hub 曾因此模块级 import runner 连带 vnpy 链）
 ├── guard.py     # guard(name, alert=None) 回调注入 / sd_notify
 ├── terms.py     # TERMS / LANG_NAMES i18n 注册表（层测试白捡的寄生项，从 web_api 归位）
-└── contract.py  # 批 56a：数据供给总线契约类型（29 号 §三——见下节）
+├── contract.py  # 批 56a：数据供给总线契约类型（29 号 §三——见下节）
 ```
+
+> **jsonb.py 不在本模块（2026-09-30 更正）**：jsonb 写路径唯一出口初版曾落于此，被分层闸
+> `tests/test_layering.py::test_quant_common_third_party_whitelist` 当场拦下——层 0 底座只许
+> stdlib + 显式白名单，而该模块必须 import **psycopg**（「写 jsonb 列」是存储关切）。现已归位到
+> **`data_platform/jsonb.py`**（层 1），契约与防漂移闸见 `data_platform.md` 六节不变量。**闸门拦对了**：
+> 扩层 0 白名单会让纯底座从此知道 PostgreSQL 的存在。
 
 ---
 

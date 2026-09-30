@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
+from src.data_platform.jsonb import jsonb
+
 from .broker import record_broker_usage
 from .factor import BarContext, DSLFactor, Factor, _check_ast_blacklist, get_factor
 
@@ -486,7 +488,6 @@ class Strategy:
                 # gen 不入指纹：worker 心跳 gen 维度+ts 时间窗交叉可溯）
                 # 批 62a：血缘三列（A03 §15.4）——source=cfg.adapter（与接口行 provider 恒等）/
                 #   fetched_at=流到端时刻 pub_ts（hub_worker handle_msg 注入）/dataset_version=hub 流世代
-                import json as _json
                 from math import isfinite
                 lb = getattr(self, "_last_bar", None) or {}
                 _src = self.config.adapter or None
@@ -498,7 +499,7 @@ class Strategy:
                 vals = {k: lb.get(k) for k in ("ts", "open", "high", "low", "close", "volume")}
                 ok_fp = lb and all(
                     v is None or not isinstance(v, float) or isfinite(v) for v in vals.values())
-                fp = _json.dumps(vals) if ok_fp else None
+                fp = jsonb(vals) if ok_fp else None
                 cur = conn.execute(
                     "INSERT INTO signal_log (strategy_id,symbol,action,score,price,source,fetched_at,dataset_version) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",

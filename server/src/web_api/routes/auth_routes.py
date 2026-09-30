@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, Query, Re
 
 from src.data_platform.db import get_conn
 from src.email_service import send_activation_email, send_email_change_email, send_invite_email, send_password_reset_email
+from src.data_platform.jsonb import jsonb
 
 from ..auth import (
     audit_log,
@@ -1087,7 +1088,7 @@ def perm_resource_patch(kind: str, res_id: str, body: dict,
             "sort_order=EXCLUDED.sort_order, label_json=EXCLUDED.label_json, "
             "enabled=EXCLUDED.enabled, updated_by=EXCLUDED.updated_by, updated_at=now()",
             (res_id, group_key, sort_order,
-             _json.dumps(label_json) if label_json else None, enabled, payload["username"]))
+             jsonb(label_json) if label_json else None, enabled, payload["username"]))
         conn.commit()
     invalidate_registry_cache()
     audit_log(payload["username"], "perm_resource_update", f"{kind}/{res_id}",

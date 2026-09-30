@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from src.data_platform.db import get_conn
 from src.data_platform.security_master import normalize_board
+from src.data_platform.jsonb import jsonb
 
 load_dotenv()
 
@@ -515,7 +516,6 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                 (vt.rsplit(".", 1) + [""])[1], "convertible", None, r[1], None,
                 10, 0.001, "T+0", r[12], r[13])
                for r in rows if r[0])
-    import json as _json
     def _norm_date(s, fallback="") -> str:
         """YYYYMMDD→YYYY-MM-DD；脏值（空串/'None'/NaN）回落 fallback（发行日 list_date）再兜 2010-01-01。"""
         def _ok(v):
@@ -526,7 +526,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
         return f"{v[:4]}-{v[4:6]}-{v[6:8]}" if v else "2010-01-01"
     # NaN 过滤（盲审 B：NaN 进 json.dumps 产非法 JSON 毒化整批）
     _sm_upsert_state(((vt := _ts_to_vt_prefix(r[0])), _norm_date(r[8], r[12]),
-                       "conv_price", _json.dumps({"conv_price": float(r[7])}))
+                       "conv_price", {"conv_price": float(r[7])})
                       for r in rows if r[0] and r[7] is not None and not pd.isna(r[7]))
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
@@ -627,8 +627,6 @@ def _sync_convertible_terms(cfg: dict, end_date: str, backfill_from: str | None 
     **保留原语义**：只取前 50 只（原代码 `bonds[:50]`——条款接口慢，单轮限量，
     靠每日重复覆盖）；逐只失败只记 failed 不中断整轮。
     """
-    import json
-
     from src.data_platform.adapters.tushare_adapter import pull_cb_basic, pull_convertible_bonds
     from src.data_platform.rate_limit import rate_limit_context
     prov = _provider_of(cfg)
@@ -655,7 +653,7 @@ def _sync_convertible_terms(cfg: dict, end_date: str, backfill_from: str | None 
                         "INSERT INTO convertible_terms (ts_code, terms, updated_at) "
                         "VALUES (%s,%s,now()) "
                         "ON CONFLICT (ts_code) DO UPDATE SET terms=EXCLUDED.terms, updated_at=now()",
-                        (ts_code, json.dumps(terms, ensure_ascii=False)))
+                        (ts_code, jsonb(terms)))
                     conn.commit()
                 saved += 1
         except Exception as e:
@@ -1149,7 +1147,6 @@ def _derive_st_states(df) -> None:
     历史区间（end_date 非空）缺 start_date 跳行——防伪行以 today 为 effective_from
     遮蔽现行 ST 状态；现行名（end_date 空）缺 start 落 today（现行状态不丢）。
     """
-    import json as _json
     from datetime import date as _d
     try:
         rows = []
@@ -1171,7 +1168,7 @@ def _derive_st_states(df) -> None:
             else:
                 continue
             rows.append((_ts_to_vt_prefix(ts), eff, "st",
-                         _json.dumps({"name": name, "is_st": "ST" in name.upper()})))
+                         {"name": name, "is_st": "ST" in name.upper()}))
         _sm_upsert_state(rows)
         logger.info("security_state(st) 派生 %d 行（namechange 重建）", len(rows))
     except Exception as e:

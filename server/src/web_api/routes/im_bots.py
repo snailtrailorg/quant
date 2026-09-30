@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 from src.data_platform.db import get_conn
+from src.data_platform.jsonb import jsonb
 
 from ..auth import audit_log, require_authenticated, require_perm
 from ..errors import ApiError
@@ -275,7 +276,7 @@ def my_im_bots_create(req: IMBotCreateReq, payload: dict = Depends(require_authe
             "VALUES (%s,%s,%s,'viewer',true,%s,%s,%s::jsonb) RETURNING id",   # 六轮裁定：建完即启用——凭证建时已过 CREDENTIALS_INCOMPLETE 校验，无需再让用户手动点启动
             (req.provider, req.name, req.description, int(payload["sub"]),
              _encrypt(_json.dumps(req.credentials, ensure_ascii=False)) if has_any else None,
-             _json.dumps({"route_key": route})))
+             jsonb({"route_key": route})))
         bid = cur.fetchone()[0]
         conn.commit()
     audit_log(payload["username"], "owner_im_bot_create", detail=f"{req.provider}/{req.name}#{bid}")

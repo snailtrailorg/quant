@@ -194,7 +194,10 @@ def test_alerts_create_with_channels(authed_client):
                                json={"user_id": 7, "channels": ["email", "im:3"], "categories": ["risk"]})
     assert r.status_code == 200 and r.json()["id"] == 101
     ins_call = conn.execute.call_args_list[2]
-    assert '"email"' in ins_call.args[1][4] and '"im:3"' in ins_call.args[1][4]   # channels JSON=参数元组第 5 位
+    # channels = 参数元组第 5 位；2026-09-30 jsonb 收口后为**驱动级 Jsonb 包装**（对象进、单出口序列化）
+    from psycopg.types.json import Jsonb
+    ch = ins_call.args[1][4]
+    assert isinstance(ch, Jsonb) and ch.obj == ["email", "im:3"]
 
 
 def test_alerts_put_omits_channels_keeps_row_value(authed_client):
@@ -209,7 +212,11 @@ def test_alerts_put_omits_channels_keeps_row_value(authed_client):
         r = authed_client.put("/api/alerts/config/5", json={"enabled": False})
     assert r.status_code == 200
     sql, args = upd.execute.call_args_list[0].args
-    assert "channels=%s::jsonb" in sql and '"sms"' in args[3]   # 沿用行现值落库
+    # PUT 的 SET 子句参数序：0=cats 1=min_level 2=enabled 3=channels 4=row_id；
+    # 2026-09-30 jsonb 收口后 channels 为**驱动级 Jsonb 包装**（对象进、单出口序列化）
+    from psycopg.types.json import Jsonb
+    assert ("channels=%s::jsonb" in sql and isinstance(args[3], Jsonb)
+            and args[3].obj == ["sms"])                          # 沿用行现值落库
     assert upd.execute.call_count == 1 and row_conn.execute.call_count == 1   # 无校验查询
 
 

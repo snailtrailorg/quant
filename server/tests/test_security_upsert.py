@@ -6,6 +6,8 @@
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 _ROW = ("600000.SHSE", "astock", "SHSE", "stock", "main", "浦发银行", None,
@@ -58,8 +60,21 @@ class TestUpsertState:
         conn, cur = _mock_conn()
         with patch.object(dbm, "get_conn", return_value=conn):
             from src.data_platform.security_master import SMClient
-            n = SMClient().upsert_state([("600000.SHSE", "2026-01-01", "st", '{"is_st": false}')])
+            n = SMClient().upsert_state([("600000.SHSE", "2026-01-01", "st", {"is_st": False})])
         assert n == 1
         cur.executemany.assert_called_once()
-        sql = cur.executemany.call_args[0][0]
+        sql, params = cur.executemany.call_args[0]
         assert "ON CONFLICT (vt_symbol, effective_from, kind)" in sql
+        # 2026-09-30 jsonb 收口：value 入参 = **对象**，经 quant_common.jsonb 单出口包装
+        from psycopg.types.json import Jsonb
+        assert isinstance(params[0][3], Jsonb) and params[0][3].obj == {"is_st": False}
+
+    def test_serialized_string_rejected(self):
+        """已序列化字符串必须**响亮拒绝**——静默双重编码会把 jsonb 对象降级成 jsonb 字符串
+        （迁移 0120 在 data_source/trading_account 实测到该损坏形态）。"""
+        import src.data_platform.db as dbm
+        conn, cur = _mock_conn()
+        with patch.object(dbm, "get_conn", return_value=conn):
+            from src.data_platform.security_master import SMClient
+            with pytest.raises(TypeError):
+                SMClient().upsert_state([("600000.SHSE", "2026-01-01", "st", '{"is_st": false}')])

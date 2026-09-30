@@ -26,6 +26,7 @@ server/src/data_platform/
 ├── stock_detail.py    # 三档详情聚合层（quote 降级链+慢变块缓存）
 ├── routing.py         # 批 57 M2：路由内核（resolve 五步/bulkhead/审计/热更新对账）——见下节
 ├── security_master.py # 批 56a：SMClient（标的属性库读侧+engine 填充链写侧）+MarketHours（节奏域）——见下节
+├── jsonb.py           # 2026-09-30：jsonb 写路径**唯一出口**（jsonb/dumps_jsonb——静默降级治理，见六节不变量）
 ├── tz.py             # 批 56b：as_utc（写/读 PG 统一收口——naive 按上海解释转 UTC aware）+as_shanghai（显示层）
 ├── schema_expectations.txt  # verify_schema 期望基线（迁移链生成物，禁手写）
 └── adapters/
@@ -356,8 +357,12 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
   （故该兜底现改为 **ERROR 级**日志并点名 row id 与约束名）。
   判据只能靠 `jsonb_typeof()`——假连接/单测永远看不见这一层，真库钉在
   `tests/test_config_params_contract.py`（含裸 SQL 直写被 23514 拒的反证）。
-  **范围**：本律只及 config_store 两表；`strategy_config.params` 等由调用方 dumps 写各自域表，
-  尚未纳入（2026-09-30 全库扫描：仅这两表各有 1 行存量损坏，已由 0120 修复）。
+  **范围（2026-09-30 当日已由「表」收到「类」）**：本条原只及 config_store 两表；同日全库普查
+  （public 下 json/jsonb 列共 24 个，**仅 2 个有守卫**）后按类级收口——迁移 **0121** 给余 22 列
+  补类型守卫 CHECK（三律：`object` / `array` / `structured`），应用层序列化收归
+  **`data_platform.jsonb`** 单出口（`jsonb()` 驱动级包装 + str 拒收），防腐化闸
+  `tests/test_jsonb_columns_guarded.py` 枚举全部列（**新增 jsonb 列无守卫即变红**）。
+  存量损坏仅这两表各 1 行（0120 已修），余列 0 损坏。
 
 ---
 

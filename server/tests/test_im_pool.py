@@ -76,7 +76,6 @@ class TestCredentialsRouteKey:
     partial 合并仍保非空 route（P0 修的另一半：补录曾把存量 route 改写为空再撞唯一索引）。"""
 
     def test_partial_merge_keeps_route(self):
-        import json as _json
         from unittest.mock import call
         from src.im_bot import credentials as C
         # 现值 app_key=ak9/app_secret=s1；补录只改 app_secret
@@ -85,5 +84,5 @@ class TestCredentialsRouteKey:
              patch("src.data_platform.db.get_conn") as mg:
             conn = mg.return_value.__enter__.return_value
             C.save_bot_credentials(7, {"app_secret": "s2"}, partial=True)
-        sql_params = conn.execute.call_args[0][1]   # (enc, json_params, bot_id)
-        assert _json.loads(sql_params[1])["route_key"] == "ak9"   # 非空且正确
+        sql_params = conn.execute.call_args[0][1]   # (enc, jsonb_params, bot_id)
+        assert sql_params[1].obj["route_key"] == "ak9"   # 非空且正确（驱动级 Jsonb 包装）

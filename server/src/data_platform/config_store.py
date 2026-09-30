@@ -18,6 +18,7 @@ import json
 import logging
 
 from src.data_platform.db import get_conn
+from src.data_platform.jsonb import dumps_jsonb
 from src.quant_common.markets import DOMAIN_DATA, DOMAIN_TRADING
 
 logger = logging.getLogger("data_platform.config_store")
@@ -208,6 +209,12 @@ def _param_jsonb(v):
     `jsonb_typeof(params)='object'`）。两层缺一不可——应用层报错近，存储层覆盖**所有**写者
     （未来新代码 / 手工 SQL / 运维脚本 / 一次性数据搬运都绕过本函数）。
     `None` → SQL NULL（显式清空 params），与「键缺席=不改」的三段语义互补。
+
+    **序列化落 `quant_common.jsonb` 单出口**（2026-09-30 全仓收口 jsonb 写路径）：
+    本函数只保留「params 专属的 dict-only 判据与错误消息」，真正的 `json.dumps` 实现
+    全仓唯一（`dumps_jsonb`）。本仓另有驱动级包装 `jsonb()` 供「直接绑参」的写点使用
+    ——两者**线表示不同（文本经 `%s::jsonb` / 驱动 `Jsonb` 参数）、契约律相同**
+    （对象进、单出口序列化、`str` 拒收）。
     """
     if v is None:
         return None
@@ -221,7 +228,7 @@ def _param_jsonb(v):
             f"params 入参契约 = dict（存 jsonb 对象）；收到 {type(v).__name__} {v!r}"
             "——存储层有 CHECK jsonb_typeof(params)='object'（迁移 0120）兜底，"
             "但在入口抛比落库时吃 23514 更贴病根")
-    return json.dumps(v, ensure_ascii=False)
+    return dumps_jsonb(v)
 
 
 def _row_values(cols: list[str], values: dict) -> tuple:

@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 
+from src.data_platform.jsonb import jsonb
+
 logger = logging.getLogger("data_platform.security_master")
 
 # YYYYMMDD / YYYY-MM-DD（engine 填充链日期列清洗用——脏值统一 NULL 不炸批）
@@ -185,7 +187,15 @@ class SMClient:
         return len(clean)
 
     def upsert_state(self, rows: list[tuple]) -> int:
-        """时变行写侧（rows=(vt_symbol, effective_from, kind, value_json_str)——幂等 executemany）。"""
+        """时变行写侧（`rows=(vt_symbol, effective_from, kind, value)`，**value = Python 对象**；
+        幂等 executemany 单批）。
+
+        2026-09-30 全仓 jsonb 写路径收口：入参契约由「已序列化 JSON 字符串」改为 **对象**，
+        序列化下沉 `quant_common.jsonb` 单出口（`jsonb()` 对 str 响亮拒绝——防
+        `json.dumps(json.dumps(x))` 把对象静默降级存成 jsonb **字符串**；该形态 2026-09-30
+        在 `data_source`/`trading_account` 实测到两行真实损坏，迁移 0120 修复）。
+        存储层另有 `ck_security_state_value_object`（迁移 0121）兜住所有写者。
+        """
         if not rows:
             return 0
         from .db import get_conn
@@ -195,7 +205,7 @@ class SMClient:
                     "INSERT INTO security_state (vt_symbol, effective_from, kind, value) "
                     "VALUES (%s,%s,%s,%s::jsonb) "
                     "ON CONFLICT (vt_symbol, effective_from, kind) DO UPDATE SET value=EXCLUDED.value",
-                    list(rows))
+                    [(a, b, c, jsonb(v)) for a, b, c, v in rows])
             conn.commit()
         return len(rows)
 

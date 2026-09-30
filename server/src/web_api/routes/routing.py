@@ -8,6 +8,7 @@ GET /api/routing/decisions    审计最近行（read）
 from fastapi import APIRouter, Body, Depends
 
 from src.data_platform.db import get_conn
+from src.data_platform.jsonb import jsonb
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
@@ -30,7 +31,6 @@ def update_policy(consumer_tag: str, body: dict = Body(...),
                   payload: dict = Depends(require_perm("system_config"))):
     """weights 三键必含（CHECK 锁）；bulkhead_defaults 可选（动态 SET——body 无键=该列不动）。
     批 70：trade_switch_confirm_timeout_s 列随 M6 退役删除。保存=bump cfg:version。"""
-    import json
     w = body.get("weights")
     if not isinstance(w, dict) or not {"completeness", "cost", "latency"} <= set(w):
         raise ApiError(400, "PARAM_INVALID", "weights 须含 completeness/cost/latency 三键")
@@ -45,10 +45,10 @@ def update_policy(consumer_tag: str, body: dict = Body(...),
         raise ApiError(400, "PARAM_INVALID", "bulkhead_defaults 须为 {数据源: 正整数} 对象")
     with get_conn() as conn:
         sets = ["weights=%s::jsonb"]
-        params: list = [json.dumps(w)]
+        params: list = [jsonb(w)]
         if bh is not None:
             sets.append("bulkhead_defaults=%s::jsonb")
-            params.append(json.dumps(bh))
+            params.append(jsonb(bh))
         params.append(consumer_tag)
         cur = conn.execute(
             f"UPDATE routing_policy SET {', '.join(sets)} "

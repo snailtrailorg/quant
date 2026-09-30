@@ -21,6 +21,7 @@ import time
 from dataclasses import dataclass, field
 
 from .db import get_conn
+from src.data_platform.jsonb import jsonb
 from src.quant_common.redis_client import business_redis
 
 
@@ -334,8 +335,8 @@ def _audit(cause: str, req, chain, cands, skipped: str | None = None) -> None:
             conn.execute(
                 "INSERT INTO routing_decision (fingerprint, req_summary, chain, epoch, cause) "
                 "VALUES (%s,%s,%s::jsonb,%s,%s)",
-                (_STATE.fingerprint, json.dumps(summary, ensure_ascii=False),
-                 json.dumps(names), chain.epoch, cause))
+                (_STATE.fingerprint, jsonb(summary),
+                 jsonb(names), chain.epoch, cause))
             conn.commit()
     except Exception as e:
         logger.warning("路由审计落库失败（不阻断路由）: %s", e)

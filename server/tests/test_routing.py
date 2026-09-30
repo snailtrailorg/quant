@@ -216,14 +216,15 @@ class TestResolve:
         assert ch.candidates == ()
 
     def test_audit_req_summary_readable(self, sm_covers_all, breakers_clean):
-        """验收⑥：审计行 req_summary 可读（kind+symbols 数+mode+consumer）。"""
-        import json
+        """验收⑥：审计行 req_summary 可读（kind+symbols 数+mode+consumer）。
+
+        2026-09-30 jsonb 收口：SQL 参数现为**驱动级 Jsonb 包装**，取 `.obj` 读回原对象。"""
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
             rt.resolve(DataRequest(kind="bar_daily", symbols=("600000.SHSE", "510300.SHSE"),
                                    temporality="historical", consumer_tag="backtest"))
         [p] = conn.inserts
-        summary = json.loads(p[1])
+        summary = p[1].obj
         assert summary["kind"] == "bar_daily" and summary["n_symbols"] == 2
         assert summary["consumer"] == "backtest" and summary["mode"] == "consume"
         assert p[4] == "resolve"

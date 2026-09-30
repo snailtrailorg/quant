@@ -20,6 +20,7 @@ import lark_oapi as lark
 
 from src.data_platform.db import get_conn
 from src.quant_common.crypto import encrypt
+from src.data_platform.jsonb import jsonb
 from src.quant_common.redis_client import feishu_redis
 
 logger = logging.getLogger("feishu_bot")
@@ -223,7 +224,7 @@ def run_onboarding(session_id: str, owner_user_id: int | None = None,
                     "RETURNING id",
                     (app_name, owner_user_id,
                      encrypt(_json.dumps(creds, ensure_ascii=False)),
-                     _json.dumps({"route_key": app_id}))).fetchone()
+                     jsonb({"route_key": app_id}))).fetchone()
                 conn.commit()
             if ins:
                 _audit(owner_user_id, "im_register_create", ins[0], app_id)   # 真插入=新 bot（盲审 P2-1：避开重扫分支误标）
