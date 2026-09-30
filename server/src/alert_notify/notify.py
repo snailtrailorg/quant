@@ -18,7 +18,8 @@ from typing import Literal
 
 import redis
 from dotenv import load_dotenv
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 load_dotenv()
 logger = logging.getLogger("alert_notify")
@@ -44,9 +45,7 @@ def visible_categories(role: str) -> list[str]:
 def _redis() -> redis.Redis:
     # 批18 盲审A-P0-2 同修：双 1s 超时——Valkey hung 时缺省无超时会永久阻塞调用线程
     #（notify 挂在实盘告警路径=冻结交易主流程；超时=跳过去重继续发送）
-    return redis.Redis.from_url(
-        valkey_url(),
-        socket_connect_timeout=1, socket_timeout=1, decode_responses=True)
+    return business_redis(socket_connect_timeout=1, socket_timeout=1, decode_responses=True)
 
 
 def notify(level: Level, category: Category, title: str, body: str = "",

@@ -41,8 +41,7 @@ class TestPublishCrossProcess:
     def test_broadcast_channel_and_payload(self):
         bus = self._bus()
         fake = _FakeRedis()
-        with patch("src.quant_common.eventbus.redis") as rmod:
-            rmod.Redis.from_url.return_value = fake
+        with patch("redis.Redis.from_url", return_value=fake):
             bus.publish_cross_process(0, "notification", {})
         ch, payload = _FakeRedis.calls[0]
         assert ch == SSE_CHANNEL_ALL
@@ -51,25 +50,22 @@ class TestPublishCrossProcess:
 
     def test_user_channel_routing(self):
         bus = self._bus()
-        with patch("src.quant_common.eventbus.redis") as rmod:
-            rmod.Redis.from_url.return_value = _FakeRedis()
+        with patch("redis.Redis.from_url", return_value=_FakeRedis()):
             bus.publish_cross_process(42, "im", {"x": 1})
         assert _FakeRedis.calls[0][0] == SSE_CHANNEL_USER.format(uid=42)
 
     def test_never_raises_on_redis_failure(self):
         """redis 异常永不 raise（调用方=实盘告警路径；轮询兜底覆盖）。"""
         bus = self._bus()
-        with patch("src.quant_common.eventbus.redis") as rmod:
-            rmod.Redis.from_url.side_effect = ConnectionError("valkey down")
+        with patch("redis.Redis.from_url", side_effect=ConnectionError("valkey down")):
             bus.publish_cross_process(0, "notification", {})   # 不炸即过
 
     def test_timeout_params_present(self):
         """盲审A-P0-2：连接必须带双 1s 超时（Valkey hung 防挂死）。"""
         bus = self._bus()
-        with patch("src.quant_common.eventbus.redis") as rmod:
-            rmod.Redis.from_url.return_value = _FakeRedis()
+        with patch("redis.Redis.from_url", return_value=_FakeRedis()) as from_url:
             bus.publish_cross_process(0, "notification", {})
-        kwargs = rmod.Redis.from_url.call_args.kwargs
+        kwargs = from_url.call_args.kwargs
         assert kwargs.get("socket_connect_timeout") == 1 and kwargs.get("socket_timeout") == 1
 
 
@@ -188,8 +184,7 @@ class TestBridgeRunLoop:
             assert item["type"] == "notification"
             t.join(timeout=3)
             assert not t.is_alive()   # stop 必达——run() 自行退出
-        with patch("src.quant_common.sse_bridge.redis") as rmod:
-            rmod.Redis.from_url = _FakeR
+        with patch("redis.Redis.from_url", _FakeR):
             _run(_drive())
 
     def test_ensure_bridge_rebuilds_after_stop(self):

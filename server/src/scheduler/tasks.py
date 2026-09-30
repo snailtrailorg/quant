@@ -9,7 +9,8 @@ from src.data_platform.db import get_conn
 from src.data_platform.tier_tables import TIER1_SYNC_IDS, TIER2_INCREMENTAL_TABLES
 
 from .app import app
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("scheduler")
 
@@ -141,7 +142,6 @@ def health_check():
     """定时探测 LLM/PG/Valkey/交易所连通性，异常告警。"""
     import time
 
-    import redis
     results = {}
 
     # PG
@@ -154,7 +154,7 @@ def health_check():
 
     # Valkey
     try:
-        r = redis.Redis.from_url(valkey_url(), socket_timeout=3)
+        r = business_redis(socket_timeout=3)
         results["valkey"] = {"status": "ok" if r.ping() else "error"}
     except Exception as e:
         results["valkey"] = {"status": "error", "msg": str(e)[:100]}
@@ -528,11 +528,9 @@ def _tier_alert_filter(stale: list[dict]) -> tuple[list[dict], set[str]]:
     返回 (参与告警的条目, 恢复的 sync_id 集合)。
     """
 
-    import redis
     key = "tier_stale:prev"
     try:
-        r = redis.Redis.from_url(valkey_url(),
-                                 socket_timeout=3, decode_responses=True)
+        r = business_redis(socket_timeout=3, decode_responses=True)
         prev = set(r.smembers(key))
         cur = {t["sync_id"] for t in stale}
         r.delete(key)
@@ -554,7 +552,6 @@ def data_continuity_check():
     """
     from datetime import date, timedelta
 
-    import redis
 
     issues = []
     repaired = 0
@@ -563,8 +560,7 @@ def data_continuity_check():
 
     # 1. 断线检测（Valkey 心跳网关）
     try:
-        r = redis.Redis.from_url(valkey_url(),
-                                 socket_timeout=3, decode_responses=True)
+        r = business_redis(socket_timeout=3, decode_responses=True)
         beat = r.get("heartbeat:gateway")
         if beat is None:
             reconnected += 1
@@ -639,14 +635,13 @@ def data_continuity_check():
 def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str | None = None):
     """复权因子回填（A/B-F1：bar_1D 历史全 NULL）。手动触发（积分到账后），降级即返回不抛。"""
 
-    import redis as _redis
 
     from src.data_sync.engine import backfill_adj_factor
     from src.task_manager import complete_task, create_task, update_heartbeat
     task_id = self.request.id
     create_task(task_id, "复权因子回填", "sync", "manual", "system",
                 {"start": start_date, "end": end_date})
-    r = _redis.from_url(valkey_url(), socket_timeout=2, socket_connect_timeout=2)
+    r = business_redis(socket_timeout=2, socket_connect_timeout=2)
     key = "sync:adj-factor"
 
     def progress_cb(i: int, total: int, current: str):
@@ -834,11 +829,10 @@ def sync_all_symbols(self, sync_id: str):
     单独放宽超时到 70 分钟（全市场约 37 分钟 + 余量），覆盖全局 task_soft_time_limit=300。
     """
 
-    import redis
 
     from src.data_sync.engine import sync_all
 
-    r = redis.from_url(valkey_url(), socket_timeout=2, socket_connect_timeout=2)
+    r = business_redis(socket_timeout=2, socket_connect_timeout=2)
     key = f"sync:progress:{sync_id}"
 
     def _mark(status: str, count: int = 0):
@@ -897,7 +891,6 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
     完成态存 result 关键字段供前端 notifyResult 显示。
     """
 
-    import redis
 
     from src.data_sync.engine import sync
     from src.task_manager import complete_task, create_task, log_task, notify_on_failure, update_heartbeat
@@ -905,7 +898,7 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
     create_task(task_id, f"同步 {sync_id}", "sync", "manual", "system",
                 {"sync_id": sync_id, "backfill_from": backfill_from})
 
-    r = redis.from_url(valkey_url(), socket_timeout=2, socket_connect_timeout=2)
+    r = business_redis(socket_timeout=2, socket_connect_timeout=2)
     key = f"sync:type:{sync_id}"
 
     def progress_cb(i: int, total: int, current: str):
@@ -1005,12 +998,11 @@ def backtest_symbol_task(self, run_id: int, symbol: str):
     import json
     from datetime import date, timedelta
 
-    import redis
 
     from src.strategy_framework.backtest import BacktestEngine
     from src.strategy_framework.strategy import StrategyConfig
 
-    r = redis.from_url(valkey_url(), socket_timeout=2, socket_connect_timeout=2)
+    r = business_redis(socket_timeout=2, socket_connect_timeout=2)
     pub_key = f"backtest:run:{run_id}:{symbol}"
 
     with get_conn() as conn:
@@ -1525,7 +1517,6 @@ def sa4_reconciler():
     """
     import time as _time
 
-    import redis as _redis
 
     failed = _sa4_units("failed")
     active = _sa4_units("active")
@@ -1540,8 +1531,7 @@ def sa4_reconciler():
 
     r = None
     try:
-        r = _redis.Redis.from_url(
-            valkey_url(), decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+        r = business_redis(decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
         r.ping()
     except Exception as e:
         logger.warning("sa4: Valkey 不可达（退避计数不可用，按首档拉起）: %s", e)

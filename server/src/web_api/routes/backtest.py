@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 
-import redis
 from fastapi import APIRouter, Body, Depends
 
 from src.data_platform.db import get_conn
@@ -14,14 +13,13 @@ from src.data_platform.db import get_conn
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
 from ..models import PoolReq
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("web_api")
 
-_redis_pool = redis.ConnectionPool.from_url(
-    valkey_url(),
-    decode_responses=True,
-    socket_timeout=2, socket_connect_timeout=2)   # 批27-2：SSE gen() 内同步 get——挂起时帧断而非冻事件循环
+_redis_client = business_redis(decode_responses=True,
+                               socket_timeout=2, socket_connect_timeout=2)   # 批27-2：SSE gen() 内同步 get——挂起时帧断而非冻事件循环
 
 router = APIRouter(tags=["backtest"])
 
@@ -599,7 +597,7 @@ def backtest_stream_api(run_id: int, symbol: str,
                         payload: dict = Depends(require_perm("read"))):
     """SSE 单标的实时（轮询 Valkey backtest:run:{run_id}:{symbol}）。"""
     from fastapi.responses import StreamingResponse
-    r = redis.Redis(connection_pool=_redis_pool)
+    r = _redis_client
     key = f"backtest:run:{run_id}:{symbol}"
 
     async def gen():

@@ -11,7 +11,6 @@
 
 import os
 import base64
-import json
 import logging
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF

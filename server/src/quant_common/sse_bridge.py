@@ -15,10 +15,9 @@ import json
 import logging
 import threading
 
-import redis
 
 from .eventbus import SSE_CHANNEL_ALL, SSE_CHANNEL_USER
-from .config import valkey_url
+from .redis_client import business_redis
 
 logger = logging.getLogger("quant_common.sse_bridge")
 
@@ -53,10 +52,8 @@ class SseBridge:
     def run(self) -> None:
         while not self._stop.is_set():
             try:
-                r = redis.Redis.from_url(
-                    valkey_url(),
-                    socket_connect_timeout=2, socket_timeout=SOCKET_TIMEOUT_S,
-                    decode_responses=True)
+                r = business_redis(socket_connect_timeout=2, socket_timeout=SOCKET_TIMEOUT_S,
+                                   decode_responses=True)
                 pubsub = r.pubsub(ignore_subscribe_messages=True)
                 pubsub.psubscribe("quant:sse:*")   # 模式串（通配符语义，独立于单频道常量）
                 try:

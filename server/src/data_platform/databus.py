@@ -13,7 +13,8 @@ import logging
 from datetime import datetime, timedelta
 
 from .store import Store
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("data_platform.databus")
 
@@ -27,11 +28,8 @@ _R = None
 def _r():
     """Valkey 单例（routing/market_snapshot 同款）。"""
     global _R
-    import redis
     if _R is None:
-        _R = redis.Redis.from_url(
-            valkey_url(),
-            decode_responses=True, socket_timeout=3)
+        _R = business_redis(decode_responses=True, socket_timeout=3)
     return _R
 
 

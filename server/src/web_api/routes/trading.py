@@ -6,7 +6,8 @@ import time
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 
 from src.data_platform.db import get_conn
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
@@ -42,9 +43,7 @@ def list_live_tasks(status: str | None = None,
     # 任务"活着吗、行情新鲜吗、冻没冻"三问列表页直答
     hb = {}
     try:
-        import redis as _redis
-        r_ = _redis.Redis.from_url(valkey_url(),
-                                   decode_responses=True, socket_timeout=1)
+        r_ = business_redis(decode_responses=True, socket_timeout=1)
         for rid, *_ in rows:
             h = r_.hgetall(f"quant:hb:task:{rid}")
             if h:

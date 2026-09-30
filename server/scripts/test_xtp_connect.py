@@ -3,7 +3,7 @@
 A 股三重只读铁律：此脚本不触发任何下单调用。
 运行：LD_LIBRARY_PATH=vendor/xtp/lib QT_QPA_PLATFORM=offscreen venv/bin/python scripts/test_xtp_connect.py
 """
-import os, sys, time
+import os, time
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from vnpy.event import EventEngine, Event

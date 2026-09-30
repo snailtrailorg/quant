@@ -21,7 +21,8 @@ import time
 from dataclasses import dataclass, field
 
 from .db import get_conn
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("data_platform.routing")
 
@@ -39,11 +40,8 @@ _LOCAL_MARKETS = ("astock", "crypto")
 def _r():
     """Valkey 单例（market_snapshot 同款）。"""
     global _R
-    import redis
     if _R is None:
-        _R = redis.Redis.from_url(
-            valkey_url(),
-            decode_responses=True, socket_timeout=5)
+        _R = business_redis(decode_responses=True, socket_timeout=5)
     return _R
 
 

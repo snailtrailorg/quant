@@ -89,8 +89,7 @@ def _get_producer():
 
 
 def _redis() -> redis.Redis:
-    return redis.Redis.from_url(
-        valkey_url(), decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+    return business_redis(decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
 
 
 # ── 回写契约（A3-F2/F3/F4/F5，B3-1/10 收口）──
@@ -303,6 +302,7 @@ def _send_sms(phone: str, *, level: str, title: str) -> tuple[bool, str]:
 #               完整信息走 Web 登录或 AI 通道问答；title 截 20 字与阿里云模板 ${title} 对齐）
 from dataclasses import dataclass
 from typing import Callable
+from src.quant_common.redis_client import business_redis
 from src.quant_common.config import valkey_url
 
 

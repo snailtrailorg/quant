@@ -18,7 +18,8 @@ import os
 import subprocess
 import sys
 import time
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 # 路径 bootstrap（与 run_md_lifecycle 同款——scripts/ 下的脚本 sys.path[0] 是本目录，
 # 必须补 server/ 根才能 import src.*；2026-08-25 两次同坑后固化为固定开头）
@@ -31,9 +32,7 @@ HUB_FIELDS = ["pid", "gen", "subs", "ticks", "bars", "sess_ticks", "dropped_pg",
 
 
 def _redis():
-    import redis
-    return redis.Redis.from_url(valkey_url(),
-                                decode_responses=True, socket_timeout=3)
+    return business_redis(decode_responses=True, socket_timeout=3)
 
 
 def _journal_bad(unit: str, since: str) -> tuple[int, str]:

@@ -12,7 +12,8 @@ from src.email_service import queue_email, try_row
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
 from ..terms import get_terms_items
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("web_api")
 
@@ -108,9 +109,7 @@ def api_probe(request: Request):
 
     def _valkey():
 
-        import redis
-        r = redis.Redis.from_url(
-            valkey_url(), socket_timeout=2)
+        r = business_redis(socket_timeout=2)
         r.ping()
         return "pong"
 
@@ -121,10 +120,8 @@ def api_probe(request: Request):
         # 期望集比对归 SA4 周期对账/hbcheck 发布探针（职责分离，防坏行拖死发布判定）。
         import time
 
-        import redis
-        r = redis.Redis.from_url(
-            valkey_url(), socket_timeout=2,
-            decode_responses=True)   # 彩排实锤：不 decode 则 scan_iter 返 bytes，rsplit(":") 炸 TypeError
+        r = business_redis(socket_timeout=2,
+                           decode_responses=True)   # 彩排实锤：不 decode 则 scan_iter 返 bytes，rsplit(":") 炸 TypeError
         keys = [k for k in r.scan_iter(match="quant:hb:md-hub:*", count=100)
                 if k.rsplit(":", 1)[-1].isdigit()]
         if not keys:
@@ -277,11 +274,9 @@ def system_alerts_api(payload: dict = Depends(require_perm("system_config"))):
     Valkey 不可达时抛 503 而非返回空集——证据缺失≠无告警（盲审 A-P2），前端 catch 后
     角标维持上次值。
     """
-    import redis
 
     from src.health_monitor.monitor import _STATE_PREFIX as _pfx
-    r = redis.Redis.from_url(valkey_url(),
-                             decode_responses=True, socket_timeout=2)
+    r = business_redis(decode_responses=True, socket_timeout=2)
     items = []
     for key in r.scan_iter(_pfx + "*", count=100):
         token = key[len(_pfx):]

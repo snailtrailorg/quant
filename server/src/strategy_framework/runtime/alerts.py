@@ -14,7 +14,8 @@ from typing import Callable
 
 from src.alert_notify.notify import safe_notify
 from src.quant_common.guard import guard as _guard_base
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("runtime.alerts")
 
@@ -60,7 +61,4 @@ def make_guard(name: str, alert: Callable[[str, str], None]):
 
 def make_valkey():
     """Valkey 连接（hub/_valkey 收编）：VALKEY_URL 环境变量，短超时防监控组件被拖死。"""
-    import redis
-    return redis.Redis.from_url(
-        valkey_url(),
-        decode_responses=True, socket_timeout=3)
+    return business_redis(decode_responses=True, socket_timeout=3)

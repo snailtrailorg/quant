@@ -17,9 +17,9 @@ import logging
 import threading
 import uuid
 
-import redis
 from dotenv import load_dotenv
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 load_dotenv()
 
@@ -48,9 +48,7 @@ class SyncLock:
         if self._r is None:
             # DB 优化（2026-08-21 审计 A-数据层 A3）：补 socket_timeout——四处 Valkey 客户端
             # 唯一裸奔的一处，抖动时 celery worker 卡死在拿锁
-            self._r = redis.from_url(
-                valkey_url(),
-                socket_timeout=5, socket_connect_timeout=5)
+            self._r = business_redis(socket_timeout=5, socket_connect_timeout=5)
         self.acquired = self._r.set(self.key, self.token, nx=True, ex=self.ttl) is not None
         return self.acquired
 

@@ -13,7 +13,8 @@ from __future__ import annotations
 
 import json
 import logging
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("data_platform.market_snapshot")
 
@@ -26,11 +27,8 @@ _HEADERS = {"User-Agent": "Mozilla/5.0"}
 def _r():
     """模块级单例（O 审 M7：防每请求新建连接池）。"""
     global _R
-    import redis
     if _R is None:
-        _R = redis.Redis.from_url(
-            valkey_url(),
-            decode_responses=True, socket_timeout=5)
+        _R = business_redis(decode_responses=True, socket_timeout=5)
     return _R
 
 

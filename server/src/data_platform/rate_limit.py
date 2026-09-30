@@ -21,7 +21,8 @@ import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Callable, Iterator
-from src.quant_common.config import valkey_url
+from src.quant_common.redis_client import business_redis
+
 
 logger = logging.getLogger("rate_limit")
 
@@ -35,11 +36,9 @@ def _r():
     批 73 双盲 A P2-3：per-call 新建=热路径每命令一次 TCP 建连。socket_timeout=2 短——
     fail-open 快速）。"""
     global _R_PID, _R_CLI
-    import redis
     pid = os.getpid()
     if _R_CLI is None or _R_PID != pid:
-        _R_CLI = redis.Redis.from_url(valkey_url(),
-                                      decode_responses=True, socket_timeout=2)
+        _R_CLI = business_redis(decode_responses=True, socket_timeout=2)
         _R_PID = pid
     return _R_CLI
 

@@ -77,6 +77,40 @@ def test_no_env_get_valkey_url_literals():
         f"{offenders}")
 
 
+def test_no_scattered_from_url_on_valkey_url():
+    """业务库 client 一律走 quant_common.redis_client.business_redis()——
+    禁止 `from_url(valkey_url(...))` 再散落（P2-5 收敛后补的 client 层守门；
+    白名单=单源工厂自身 + web_api/redis_pool（web 共享池本体，批27-2 语义）。"""
+    offenders = []
+    for p in _iter_py_files():
+        rel = p.relative_to(_SERVER_ROOT).as_posix()
+        if rel in {"src/quant_common/redis_client.py", "src/web_api/redis_pool.py"}:
+            continue
+        src = p.read_text(encoding="utf-8")
+        # 文本层初筛 + 剥 docstring 后 AST 复核：from_url 的首个位置参数是 valkey_url()/feishu_valkey_url() 调用
+        if "from_url" not in src or "valkey_url" not in src:
+            continue
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            offenders.append(rel)
+            continue
+        _strip_docstrings(tree)
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "from_url"
+                    and node.args
+                    and isinstance(node.args[0], ast.Call)
+                    and isinstance(node.args[0].func, ast.Name)
+                    and node.args[0].func.id in ("valkey_url", "feishu_valkey_url")):
+                offenders.append(f"{rel}:line{node.lineno}")
+                break
+    assert not offenders, (
+        "业务库 client 须走 quant_common.redis_client.business_redis()（池按参数共享），"
+        f"禁止散落 from_url(valkey_url(...))：{offenders}")
+
+
 def test_valkey_url_semantics(monkeypatch):
     """语义钉：各读各变量、未配置落各自默认库；FEISHU 不跟随 VALKEY_URL（P0-3）。"""
     from src.quant_common import config
