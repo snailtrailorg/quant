@@ -253,33 +253,56 @@ ALLOWED_SNAPSHOT_COLUMNS: frozenset[str] = frozenset(SnapshotRow.__annotations__
 class ContractFrame:
     """fetch 返回的统一帧（28 §5.2 to_contract 产物——同步/消费共用）。
 
-    rows=统一 11 字段行（BAR_COLUMNS 序，元组）；source=数据源 provider；
-    fetched_at=摄取时间戳（UTC aware——28 §15.1 血缘链第二环）。
+    rows=契约行（元组，列序=columns）；source=数据源 provider；
+    freq=bar 族频率（非 bar 族不适用=空串）；fetched_at=摄取时间戳（UTC aware——28 §15.1
+    血缘链第二环）；columns=**声明列序**（批 83b 立法）：bar 族恒 BAR_COLUMNS（11 字段），
+    非 bar kind（financial_stmt/featured_daily/holder_structure 等）由 adapter 声明其形状
+    ——财务/股东/筹码表列数与语义各异，硬套 11 字段=削足适履。columns 是 producer（adapter）
+    与 consumer（落库/消费）之间唯一的形状接口：落库侧按 columns 建列清单，零表名硬编码。
     """
     kind: str
     rows: tuple[tuple, ...]
     source: str
     freq: str
     fetched_at: datetime
+    columns: tuple[str, ...] = BAR_COLUMNS
 
 
-def to_contract(rows, *, source: str, kind: str, freq: str, fetched_at: datetime | None = None) -> ContractFrame:
-    """归一义务④（28 §5.2 结束时刻）：11 字段序校验 + ts UTC aware 校验 + 包帧。
+def to_contract(rows, *, source: str, kind: str, freq: str = "",
+                fetched_at: datetime | None = None,
+                columns: tuple[str, ...] | None = None) -> ContractFrame:
+    """归一义务④（28 §5.2 结束时刻）：列序校验 + ts UTC aware 校验 + 包帧。
 
     收编统一出口（29 §三 CI 断言二运行时执法）：任何 adapter 的 fetch 输出都过此关——
-    rows 必须是 to_bar_rows 产物的 11 字段元组（BAR_COLUMNS 序），ts 必须 UTC aware；
     违者抛 ContractError（不 failover，请求/实现错）。
+
+    两条形状律（批 83b 把「11 字段」泛化为「声明列序」——bar 族语义零变化）：
+    - **列序律**：columns 省略/给 BAR_COLUMNS（bar 族）= 行恒 11 字段；显式给声明列序
+      （非 bar 族）= 行须与声明等长。声明列须非空且不重复（重复列在 SQL 里必然歧义）。
+    - **ts 律**：**凡声明列含 "ts" 者**，ts 必须 UTC aware。非 bar 族的时点列是 TEXT 日期
+      （ann_date/end_date/trade_date——`sync_kind_config` 归置为 text 型，库中既有表示，
+      本批不迁移），故不受此律；此律按列名触发而非按 kind 白名单，无 27 词逐词登记负担。
     """
     from datetime import timezone as _tz
     if fetched_at is None:
         fetched_at = datetime.now(tz=_tz.utc)
+    cols = tuple(columns) if columns is not None else BAR_COLUMNS
+    if not cols:
+        raise ContractError(f"{source} 契约列声明为空（columns 不可为空）")
+    if len(set(cols)) != len(cols):
+        dup = sorted({c for c in cols if cols.count(c) > 1})
+        raise ContractError(f"{source} 契约列声明有重复列: {dup}")
+    n = len(cols)
+    ts_idx = cols.index("ts") if "ts" in cols else None   # 仅声明含 ts 列的族受 UTC 律
     for r in rows:
-        if len(r) != 11:
-            raise ContractError(f"{source} 输出非 11 字段（{len(r)}）: {r[:3]}")
-        ts = r[2]
-        if ts is None or ts.tzinfo is None or ts.utcoffset().total_seconds() != 0:
-            raise ContractError(f"{source} 输出 ts 非 UTC aware: {ts!r}")
-    return ContractFrame(kind=kind, rows=tuple(rows), source=source, freq=freq, fetched_at=fetched_at)
+        if len(r) != n:
+            raise ContractError(f"{source} 输出非 {n} 字段（{len(r)}）: {r[:3]}")
+        if ts_idx is not None:
+            ts = r[ts_idx]
+            if ts is None or ts.tzinfo is None or ts.utcoffset().total_seconds() != 0:
+                raise ContractError(f"{source} 输出 ts 非 UTC aware: {ts!r}")
+    return ContractFrame(kind=kind, rows=tuple(rows), source=source, freq=freq,
+                         fetched_at=fetched_at, columns=cols)
 
 
 # ─────────────────────────── 注册表声明类型（28 §5.2） ───────────────────────────

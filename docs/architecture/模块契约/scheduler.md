@@ -62,7 +62,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 | `static_list_sync` | beat 7天 | F-DATA-004 静态标的清单（`stock_basic`，存 static_symbols） |
 | `broker_health_check` | beat 6h | #37 通道连通性（遍历 `broker._REGISTRY` 调 `test_connection`），异常告警 |
 | `astock_minute_analysis` | （任务） | 盘中分钟研判（占位，待实时行情订阅） |
-| `pool_data_sync_task` | beat 5min + 周日 04:07 full | 池内深度数据同步（三档二档：`pool_data.sync_pools_data`，queue=data expires=290/3600，soft_time_limit=320；周日轮 `pool-data-full-calibrate` kwargs full=True 全量校准；web 入池端点 delay(symbols=) 定向回补） |
+| `pool_data_sync_task` | （任务，beat 已退役 2026-09-30 批83b） | 池内深度数据同步手动/定向入口（三档二档）。**beat 轮次已收编 sync_config**：`pool_data`(增量 `*/5 * * * *`) / `pool_data_full_calibrate`(全量 `7 4 * * 0`) 两行由 `data_sync_scheduler` **异步派发** `sync_via_celery(track=False)`（queue=data expires=290/3600）→ engine `_HANDLERS` → `pool_data.run_pool_sync`（soft_time_limit=320；`track=False` 因 5 分钟轮无需 tasks 表行）。本任务仅承载 web 入池端点 `delay(symbols=)` 定向回补与 full 手动校准 |
 | `pool_minute_sync_task` | beat 注释态 | 池分钟同步（Tushare stk_mins 收费未启用，基础设施保留） |
 | `adj_factor_backfill_task` | web `.delay` | 复权因子回填（A/B-F1，`engine.backfill_adj_factor`；手动触发，积分未到账降级返回不抛；任务纳入 task_manager）（P3 回写 2026-08-20 补） |
 | `health_monitor_check` | beat 30s（queue=risk **expires=25**，停机窗消息过期防连环补跑） | 15 号服务监控：30s 采集判定（unit/依赖/心跳+沿检测+health_event 落库+告警；S6"只告警不动作"的聚合点）（P3 回写 2026-08-20 补） |

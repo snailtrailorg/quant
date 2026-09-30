@@ -202,20 +202,11 @@ app.conf.update(
             "options": {"queue": "risk"},
         },
         # 15-服务监控：30s 症状型判定（unit/依赖/心跳，沿检测去重），S6 修订配套
-        # 池内深度数据同步（三档第二档：财务/筹码/股东 per-symbol，Tushare 5000 积分内免费）
-        "pool-data-sync": {
-            "task": "src.scheduler.tasks.pool_data_sync_task",
-            "schedule": 300.0,
-            "options": {"queue": "data", "expires": 290},
-        },
-        # 二档周日全量校准（O-F1/6）：增量窗口兜底——迟到公告/上游改历史/长期失败冻结的
-        # 游标（full 推进游标=窗口解冻）。04:07 错峰（避开 04:00 备份/03:xx 其他任务）
-        "pool-data-full-calibrate": {
-            "task": "src.scheduler.tasks.pool_data_sync_task",
-            "schedule": crontab(day_of_week=0, hour=4, minute=7),
-            "options": {"queue": "data", "expires": 3600},
-            "kwargs": {"full": True},
-        },
+        # 批 83b：池内深度数据两条 beat（pool-data-sync 5min / pool-data-full-calibrate 周日
+        # 04:07）已收编为 sync_config 驱动（sync_id=pool_data / pool_data_full_calibrate，
+        # 迁移 0119），由 data_sync_scheduler 扫描调度并**异步派发**（池轮时间盒 280s 逼近
+        # 该 beat 300s 软超时——异步执行机制见 tasks._SYNC_ASYNC_DISPATCH）。至此任务书 83b
+        # 点 3「四条硬编码 beat 收编」四条全部落地（另两条见 0118）。
         # 腾讯分钟攒已退役（2026-09-23：自攒历史分钟线退役，将来买 Tushare stk_mins 正式数据）
         "health-monitor": {
             "task": "src.scheduler.tasks.health_monitor_check",

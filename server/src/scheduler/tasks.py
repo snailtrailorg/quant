@@ -436,7 +436,6 @@ def reconcile_three_books():
 _TIER1_THRESHOLD_HOURS = 48   # 日频盘后族，跨周末/节假日容忍
 _TIER2_THRESHOLD_HOURS = 192  # 8 天，财务季频大容忍
 
-
 def _check_tier_freshness() -> list[dict]:
     """三档 19 张新表新鲜度检测。
 
@@ -495,9 +494,12 @@ def _check_tier_freshness() -> list[dict]:
                         "age_hours": None, "kind": "tier2"})
 
             # 二档任务心跳（盲审 A-2）：非增量 6 表无游标，由 pool_data 任务整体
-            # done 心跳覆盖（任务 done = 全部 10 表都拉过一轮）
+            # done 心跳覆盖（任务 done = 全部 10 表都拉过一轮）。
+            # 批 83b：池数据收编进 sync() 后终态词统一为 success（原独立实现写 'done'），
+            # 故两词并收——否则收编后心跳永查不到行，tier2 会永久误报 stale。
+            # （timeout/skipped 两词刻意不在此列：时间盒中断与撞锁轮次不算健康心跳，同原口径）
             cur = conn.execute(
-                "SELECT ts FROM sync_log WHERE sync_id='pool_data' AND status='done' "
+                "SELECT ts FROM sync_log WHERE sync_id='pool_data' AND status IN ('done','success') "
                 "ORDER BY ts DESC LIMIT 1")
             row = cur.fetchone()
             if row and row[0]:
@@ -669,14 +671,25 @@ def adj_factor_backfill_task(self, start_date: str | None = None, end_date: str 
 @app.task(name="src.scheduler.tasks.pool_data_sync_task",
           bind=True, soft_time_limit=320, time_limit=350)
 def pool_data_sync_task(self, full=False, symbols=None):
-    """池内深度数据同步（三档第二档，2026-08-19）。独立于已禁用的分钟同步。
+    """池内深度数据同步——**手动/定向回补入口**（批 83b 收编后本任务只剩这两路）。
 
-    full=True 全量校准（无视游标窗口，游标照常推进）——周日 beat 自动 + 手动定期跑。
-    symbols=[ts_code...] 定向回补（入池触发）：无窗口全量、不推进游标。
-    回补/校准撞 SyncLock 有限重试（O 复审 G1：一次性触发丢一轮=校准丢一周，不重试不可接受）。
+    定时两路已收编为配置驱动：`sync_config` 的 `pool_data`（每 5 分钟增量）/
+    `pool_data_full_calibrate`（周日 04:07 全量），由 data_sync_scheduler 扫描并异步派发
+    `sync()`（迁移 0119）；本任务不再承担定时职责。
+    - `symbols=[ts_code...]` 定向回补（入池触发 / 前端 pool_id）：无窗口全量、不推进游标，
+      无 sync_config 行可驱动 → 直调 `run_pool_sync` + `log_round` 留痕（原口径）。
+    - `full=True` 手动全量校准：走 `sync('pool_data_full_calibrate')`——与定时路径同一条链
+      （统一 sync_log 留痕 / 防重锁 / 失败告警）。
+    撞锁（资源锁或 sync() 防重锁）→ 状态 skipped → 有限重试（O 复审 G1：一次性触发丢一轮
+    = 校准丢一周，不重试不可接受）。
     """
-    from src.data_sync.pool_data import sync_pools_data
-    result = sync_pools_data(full=full, symbols=symbols)
+    from src.data_sync.engine import sync
+    from src.data_sync.pool_data import log_round, run_pool_sync
+    if symbols:
+        result = run_pool_sync(None, symbols=symbols)
+        log_round(result, mode="backfill")
+    else:
+        result = sync("pool_data_full_calibrate" if full else "pool_data")
     if result.get("status") == "skipped" and (full or symbols):
         raise self.retry(countdown=60, max_retries=5)
     return result
@@ -690,6 +703,18 @@ def health_monitor_check():
     """
     from src.health_monitor.monitor import run_check
     return run_check()
+
+
+# 长任务异步派发声明（批 83b）——**执行机制声明，非注册表**：同步项注册在 sync_config（行）
+# + engine._HANDLERS（handler）；此处只声明「到点后怎么跑」。值 = celery 消息 expires 秒
+# （原 beat 的 options.expires 沿用值，防 worker 停机期间堆积过期轮次）。
+# 为什么要它：这两条原为独立 beat（自带 celery 任务 + soft_time_limit=320），收编后若在
+# data_sync_scheduler 进程内联跑，池轮 280s 时间盒会逼近该 beat 的 300s 软超时，并挤掉
+# 同周期其他到期同步项（内联路径 = tier1 九键用的小任务，秒级完成）。
+_SYNC_ASYNC_DISPATCH: dict[str, int] = {
+    "pool_data": 290,
+    "pool_data_full_calibrate": 3600,
+}
 
 
 @app.task(name="src.scheduler.tasks.data_sync_scheduler")
@@ -814,6 +839,14 @@ def data_sync_scheduler():
             continue
 
         # 到点 + 过滤通过，触发同步
+        if sid in _SYNC_ASYNC_DISPATCH:
+            # 长任务异步派发（批 83b）：独立 celery 任务执行，不阻塞本 beat（见常量处说明）。
+            # track=False：不建 tasks 表行（定时路径每 5 分钟一轮=一年约 10 万行噪声；
+            # 手动触发的 /api/sync/trigger 仍走 track=True 建行，触发人可见）。
+            sync_via_celery.apply_async(args=[sid], kwargs={"track": False},
+                                       queue="data", expires=_SYNC_ASYNC_DISPATCH[sid])
+            triggered.append({"id": sid, "dispatched": "async"})
+            continue
         from src.data_sync import sync
         result = sync(sid)
         triggered.append({"id": sid, "result": result})
@@ -884,19 +917,21 @@ _TIER1_TIME_LIMITS = {
 
 @app.task(name="src.scheduler.tasks.sync_via_celery",
           bind=True, soft_time_limit=3600, time_limit=4200)
-def sync_via_celery(self, sync_id: str, backfill_from: str | None = None):
+def sync_via_celery(self, sync_id: str, backfill_from: str | None = None, track: bool = True):
     """类型级同步异步执行（HTTP trigger 立即返回 task_id，前端轮询进度）。
 
     progress 写 Valkey sync:type:{sid}（与全量重建 sync_all_symbols 的 sync:progress:{sid} 分开）。
     完成态存 result 关键字段供前端 notifyResult 显示。
+    track=False（批 83b）：不建 tasks 表行——定时长任务（data_sync_scheduler 异步派发的池数据轮，
+    每 5 分钟一轮）建行=一年约 10 万行噪声且无触发人；手动触发（trigger_type=manual，触发人可见）
+    保留建行。task_logs/心跳在无 tasks 行时为空操作（UPDATE 0 行不报错），不影响同步语义。
     """
-
-
     from src.data_sync.engine import sync
     from src.task_manager import complete_task, create_task, log_task, notify_on_failure, update_heartbeat
     task_id = self.request.id
-    create_task(task_id, f"同步 {sync_id}", "sync", "manual", "system",
-                {"sync_id": sync_id, "backfill_from": backfill_from})
+    if track:
+        create_task(task_id, f"同步 {sync_id}", "sync", "manual", "system",
+                    {"sync_id": sync_id, "backfill_from": backfill_from})
 
     r = business_redis(socket_timeout=2, socket_connect_timeout=2)
     key = f"sync:type:{sync_id}"

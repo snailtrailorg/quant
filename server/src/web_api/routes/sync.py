@@ -95,16 +95,19 @@ def pool_data_progress_api(payload: dict = Depends(require_perm("read"))):
 
     2026-08-20 修正：原读 Valkey sync:pool:minute（池分钟同步的键，pool_data 从不写）→ 恒 idle。
     pool_data 结果落 sync_log（sync_id='pool_data'），rows_pulled 列存标的数。
+    批 83b 收编补充：定时轮经 `engine.sync()` 统一留痕 → 错误文本落 **failed_dates**、
+    error 列为空（通用口径）；手动定向回补仍经 `pool_data.log_round()` 落 error 列（原口径）。
+    故两列取或——否则收编后失败原因在前端静默消失（可观测性回归）。
     """
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT ts, rows_pulled, rows_saved, status, error FROM sync_log "
+            "SELECT ts, rows_pulled, rows_saved, status, error, failed_dates FROM sync_log "
             "WHERE sync_id='pool_data' ORDER BY ts DESC LIMIT 1")
         r = cur.fetchone()
     if not r:
         return {"status": "idle", "reason": "无同步记录"}
     return {"status": r[3], "symbols": r[1], "saved": r[2],
-            "error": r[4] or "", "ts": str(r[0]) if r[0] else None}
+            "error": r[4] or r[5] or "", "ts": str(r[0]) if r[0] else None}
 
 
 @router.post("/api/sync/adj-factor-backfill")

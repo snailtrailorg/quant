@@ -246,7 +246,7 @@ class TushareAdapter(BaseDataAdapter):
             return None
 
     def fetch(self, req, acct=None):
-        """批 58·M3 拉取统一契约（28 §5.2——同步/消费共用；58a 先覆盖 bar 族）。
+        """批 58·M3 拉取统一契约（28 §5.2——同步/消费共用；58a bar 族 + 批 83b 池内族）。
 
         分派键=(kind, sub_kind)（DataKind 第一公民，sync_id 不复活）：
         - bar_daily+stock/etf = 按日全市场批拉（pull_daily_batch——引擎循环逐日调，req.range_ 单日）
@@ -254,10 +254,15 @@ class TushareAdapter(BaseDataAdapter):
         - bar_daily+convertible = 区间全量（pull_cb_daily）
         - index_daily = per-symbol 区间（pull_index_daily）
         - bar_minute = per-symbol 区间（split_minute_range 分段 + 09:00/15:00 约定，对齐 _pull_minute）
-        拉取粒度差异是 adapter 内部批量优化策略，不改签名。返回 to_contract（11 字段+UTC 校验）。
-        非 bar 族（fundamental_daily/featured_daily 等）列形状不同，58a 后续切——先抛 UnsupportedFeature。
+        - financial_stmt / featured_daily / holder_structure = per-symbol 池内深度数据
+          （sub_kind=表名；形状由 POOL_TABLE_SPECS 声明，见下）
+        拉取粒度差异是 adapter 内部批量优化策略，不改签名。返回 to_contract
+        （bar 族 11 字段+UTC 校验；池内族按声明列序校验——两条形状律见 contract.to_contract）。
+        其余非 bar 族（fundamental_daily 等）列形状未立法，仍抛 UnsupportedFeature。
         """
         from src.quant_common.contract import to_contract
+        from src.data_platform.adapters.tushare_adapter import (
+            POOL_FETCH_KINDS, POOL_TABLE_SPECS, pull_pool_table, to_pool_rows)
         kind = getattr(req, "kind", "")
         sub = getattr(req, "sub_kind", None)
         freq = getattr(req, "freq", None) or "1D"
@@ -307,6 +312,23 @@ class TushareAdapter(BaseDataAdapter):
                     from src.data_platform.adapters.tushare_adapter import merge_auction_into_first
                     df = merge_auction_into_first(df)
                 rows = self.to_bar_rows(df, freq)
+        elif kind in POOL_FETCH_KINDS:
+            # 批 83b：池内深度数据（三档二档 10 表）收编 fetch 契约——sub_kind=**表名**
+            # （归置键，与 sync_kind_config 0094/0106 的 sync_id 同词），列形状由
+            # POOL_TABLE_SPECS 声明（非 bar 族不套 11 字段，见 contract.to_contract 两条形状律）。
+            # 引擎侧只给 (kind, sub_kind, symbols, range_)；源 API/参数/窗口形态全在本层。
+            spec = POOL_TABLE_SPECS.get(sub or "")
+            if spec is None:
+                raise UnsupportedFeature(f"tushare 未声明池内表 sub_kind={sub!r}")
+            if spec["kind"] != kind:
+                # 归置行 kind 与 adapter 声明漂移（test_pool_specs 断言守门）——运行时也响亮
+                # 拒绝而非就近拉数：错族拉取会往错表写数（防串源的形状维）
+                raise UnsupportedFeature(
+                    f"tushare 池内表 {sub} 属 kind={spec['kind']}，请求 kind={kind} 不符")
+            sym = req.symbols[0] if req.symbols else ""
+            df = pull_pool_table(spec, sym, start, end, pro=self.get_client())
+            rows = to_pool_rows(spec, df, sym)
+            return to_contract(rows, source=self.provider, kind=kind, columns=spec["columns"])
         else:
             raise UnsupportedFeature(f"tushare 未实现 fetch(kind={kind}, sub_kind={sub})")
         return to_contract(rows, source=self.provider, kind=kind, freq=freq)

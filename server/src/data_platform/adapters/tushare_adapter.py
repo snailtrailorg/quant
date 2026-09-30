@@ -578,3 +578,180 @@ def pull_concept(trade_date: str = "", ts_code: str = "") -> pd.DataFrame:
     if ts_code:
         kwargs["ts_code"] = ts_code
     return pro.concept(**kwargs)
+
+
+# ─────────────────── 池内深度数据（三档第二档 10 表）——批 83b：拉取下沉 fetch 契约 ───────────────────
+# 位置立法（任务书 83b「分层判据」）：**源特定**部分（源 API 名 / 源参数 / 源列名 / 窗口参数
+# 形态 / 值归一语义）住本文件（adapter 层）；**通用**部分（游标 / 时间盒 / SyncLock / 幂等 /
+# 血缘 / 落库）留 data_sync.pool_data（引擎编排层）。原 POOL_DATA_TYPES 把两者揉在 data_sync
+# 层——收编后本表是「怎么拉」的唯一真相源，引擎零源 API、零表名硬编码（多源=新增 adapter
+# 实现同族 kind 的 fetch + 注册，引擎零改动）。
+#
+# kind ←→ sub_kind 的**归置真相在 sync_kind_config**（0094/0106，kind 维单源）；本表只声明
+# 「源侧怎么拉」，其中 kind 字段供 test_pool_specs 与归置行对账（漂移即红）。
+
+POOL_FETCH_KINDS: tuple[str, ...] = ("financial_stmt", "featured_daily", "holder_structure")
+
+POOL_TABLE_SPECS: dict[str, dict] = {
+    # ── 财务四表（raw_json=全列存档；window=range 走公告日窗口）──
+    "income": {
+        "kind": "financial_stmt", "api": "income", "params": {"report_type": "1"},
+        "window": "range", "raw_json": True,
+        "columns": ("ts_code", "ann_date", "end_date", "total_revenue", "revenue",
+                    "total_profit", "n_income", "n_income_attr_p", "basic_eps",
+                    "diluted_eps", "rd_exp", "report_type", "raw_json"),
+        "nums": ("total_revenue", "revenue", "total_profit", "n_income", "n_income_attr_p",
+                 "basic_eps", "diluted_eps", "rd_exp", "report_type"),
+    },
+    "balancesheet": {
+        "kind": "financial_stmt", "api": "balancesheet", "params": {"report_type": "1"},
+        "window": "range", "raw_json": True,
+        "columns": ("ts_code", "ann_date", "end_date", "total_assets", "total_cur_assets",
+                    "total_nca", "total_liab", "total_cur_liab", "total_ncl",
+                    "total_hldr_eqy_exc_min_int", "money_cap", "goodwill", "report_type",
+                    "raw_json"),
+        "nums": ("total_assets", "total_cur_assets", "total_nca", "total_liab",
+                 "total_cur_liab", "total_ncl", "total_hldr_eqy_exc_min_int", "money_cap",
+                 "goodwill", "report_type"),
+    },
+    "cashflow": {
+        "kind": "financial_stmt", "api": "cashflow", "params": {"report_type": "1"},
+        "window": "range", "raw_json": True,
+        "columns": ("ts_code", "ann_date", "end_date", "n_cashflow_act", "n_cashflow_inv_act",
+                    "n_cash_flows_fnc_act", "net_profit", "c_fr_sale_sg", "free_cashflow",
+                    "report_type", "raw_json"),
+        "nums": ("n_cashflow_act", "n_cashflow_inv_act", "n_cash_flows_fnc_act", "net_profit",
+                 "c_fr_sale_sg", "free_cashflow", "report_type"),
+    },
+    "fina_indicator": {
+        "kind": "financial_stmt", "api": "fina_indicator", "params": {},
+        "window": "range", "raw_json": True,
+        "columns": ("ts_code", "ann_date", "end_date", "eps", "roe", "roa", "gross_margin",
+                    "netprofit_margin", "current_ratio", "quick_ratio", "debt_to_assets",
+                    "assets_turn", "revenue_ps", "bps", "ocfps", "roe_yearly",
+                    "netprofit_yoy", "revenue_yoy", "raw_json"),
+        "nums": ("eps", "roe", "roa", "gross_margin", "netprofit_margin", "current_ratio",
+                 "quick_ratio", "debt_to_assets", "assets_turn", "revenue_ps", "bps", "ocfps",
+                 "roe_yearly", "netprofit_yoy", "revenue_yoy"),
+    },
+    # ── 筹码分布（window=date：源接口按单日取，无区间语义）──
+    "cyq_chips": {
+        "kind": "featured_daily", "api": "cyq_chips", "params": {},
+        "window": "date", "raw_json": False,
+        "columns": ("ts_code", "trade_date", "price", "percent"),
+        "nums": ("percent",),
+    },
+    # ── 股东/股权结构五表（季频/事件表，量小，每轮全量幂等）──
+    "top10_holders": {
+        "kind": "holder_structure", "api": "top10_holders", "params": {},
+        "window": "range", "raw_json": False,
+        "columns": ("ts_code", "ann_date", "end_date", "holder_name", "hold_amount",
+                    "hold_ratio", "hold_float_ratio", "hold_change", "holder_type"),
+        "nums": ("hold_amount", "hold_ratio", "hold_float_ratio", "hold_change"),
+    },
+    "dividend": {
+        "kind": "holder_structure", "api": "dividend", "params": {},
+        "window": "range", "raw_json": False,
+        "columns": ("ts_code", "end_date", "div_proc", "ann_date", "stk_div", "cash_div",
+                    "cash_div_tax", "record_date", "ex_date", "pay_date"),
+        "nums": ("ann_date", "stk_div", "cash_div", "cash_div_tax", "record_date",
+                 "ex_date", "pay_date"),
+    },
+    "pledge_stat": {
+        "kind": "holder_structure", "api": "pledge_stat", "params": {},
+        "window": "range", "raw_json": False,
+        "columns": ("ts_code", "end_date", "pledge_count", "unrest_pledge", "rest_pledge",
+                    "total_share", "pledge_ratio"),
+        "nums": ("pledge_count", "unrest_pledge", "rest_pledge", "total_share", "pledge_ratio"),
+    },
+    "share_float": {
+        "kind": "holder_structure", "api": "share_float", "params": {},
+        "window": "range", "raw_json": False,
+        "columns": ("ts_code", "float_date", "ann_date", "float_share", "float_ratio",
+                    "holder_name", "share_type"),
+        "nums": ("float_share", "float_ratio"),
+    },
+    "stk_holdernumber": {
+        "kind": "holder_structure", "api": "stk_holdernumber", "params": {},
+        "window": "range", "raw_json": False,
+        "columns": ("ts_code", "end_date", "ann_date", "holder_num"),
+        "nums": ("holder_num",),
+    },
+}
+
+
+def pull_pool_table(spec: dict, ts_code: str, start: str | None, end: str | None,
+                    pro=None) -> pd.DataFrame:
+    """池内表单标的拉取（源 API 调用 + 窗口参数形态）。
+
+    `pro` = Tushare 客户端，由 adapter 方法传入 `self.get_client()`（DB 解密 token——
+    批 24 立法「废弃模块级 get_pro（.env token），消除双 pro 实例/token 源不一致」；
+    池数据是批 24 收编面的**遗漏点**：原 pool_data 一直用模块级 get_pro()，与同账号的
+    限速/用量/熔断（走 DataSource）分属两套 token 源。收编 fetch 契约时一并对齐。
+    缺省 None 时回退模块级 get_pro()，便于单测直调。
+
+    **不带限速**：限速/熔断由引擎在 `adapter.fetch` 外层统一包（`rate_limit_context(ds, 表名)`，
+    批 64b 语义原样保留——键=表名与限速档对齐，单点失败经熔断记账）。
+    窗口参数形态由 spec["window"] 决定：`date`=源接口按单日取（cyq_chips 用 trade_date 而非
+    区间）；`range`=源接口收 start_date/end_date（无窗口时不传=全量）。
+    """
+    if pro is None:
+        pro = get_pro()
+    kwargs = {"ts_code": ts_code, **spec["params"]}
+    if spec["window"] == "date":
+        if start:
+            kwargs["trade_date"] = start
+    elif start:
+        kwargs["start_date"] = start
+        kwargs["end_date"] = end or ""
+    return getattr(pro, spec["api"])(**kwargs)
+
+
+def to_pool_rows(spec: dict, df: pd.DataFrame, ts_code: str) -> list[tuple]:
+    """源 df → 契约行（列序=spec["columns"]）。
+
+    值归一语义**逐字对齐**原 `data_sync.pool_data._upsert_rows`（83b 行为等价验收）：
+    - `raw_json` 列：全源列（含未入选的列）json.dumps——NaN/None 滤除、键序=df 列序、
+      ensure_ascii=False；
+    - `nums` 列：可数值化（float() 成功）→ float 值；否则原值 str；None→None；
+    - 其余列：str；None→None（由落库侧建 SQL 参数，本层不碰 SQL）。
+
+    ⚠️ `nums` 的定义面 = **原 POOL_DATA_TYPES 的 core 键集**，非 sync_kind_config.float_cols：
+    前者含 report_type（text 型）与 dividend 的日期列等「text 型但可数值解析」列——保留原
+    float 强转 = 保留既有**存储形态**（report_type 存 '1.0'、dividend 日期存 'YYYYMMDD.0'）。
+    改用 float_cols 会静默改变已入库内容，属独立的数据语义清理项（挂账，非本批：收编批的
+    验收判据是「行为等价」）。
+    """
+    if df is None or getattr(df, "empty", True):
+        return []
+    import json as _json
+    nums = set(spec["nums"])
+    cols = spec["columns"]
+    want_raw = bool(spec.get("raw_json"))
+    rows: list[tuple] = []
+    for record in df.to_dict("records"):
+        raw = (_json.dumps({k: str(v) for k, v in record.items() if pd.notna(v)},
+                           ensure_ascii=False) if want_raw else None)
+        vals: list = []
+        for c in cols:
+            if c == "raw_json":
+                vals.append(raw)
+                continue
+            v = record.get(c)
+            if v is None:
+                vals.append(None)
+            elif c in nums and _is_num(v):
+                vals.append(float(v))
+            else:
+                vals.append(str(v))
+        rows.append(tuple(vals))
+    return rows
+
+
+def _is_num(v) -> bool:
+    """可数值化判定（原 pool_data._is_num 同语义；溢出/非数一律 False）。"""
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError, OverflowError):
+        return False

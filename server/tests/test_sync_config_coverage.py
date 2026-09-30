@@ -56,10 +56,11 @@ class TestDispatchTables:
         assert not (_VIA_KIND_IDS & set(_HANDLERS))
 
     def test_handlers_count(self):
-        """字面量 7（含批 83b 收编的 static_symbols/convertible_terms）
-        + tier1 工厂 7 + 全量重建工厂 2 = 16（防工厂回填静默失效）。"""
+        """字面量 handler 表：批 83b 收编前 7 + tier1 工厂 7 + 全量重建工厂 2
+        + 批 83b 池数据工厂 2（pool_data / pool_data_full_calibrate）= 18
+        （含 0118 收编的 static_symbols/convertible_terms；防工厂回填静默失效）。"""
         from src.data_sync.engine import _HANDLERS
-        assert len(_HANDLERS) == 16, sorted(_HANDLERS)
+        assert len(_HANDLERS) == 18, sorted(_HANDLERS)
 
 
 @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
@@ -75,7 +76,8 @@ class TestSyncConfigBijection:
             f"代码有 handler 而配置面无行（页面看不到/调度器不跑）：{sorted(dispatch - cfg)}")
 
     def test_row_count_equals_dispatch_count(self):
-        """行数 == 可调度 sync_id 数（17 存量 + 0117 步0 三键 + 0118 收编两条 = 22）。
+        """行数 == 可调度 sync_id 数（17 存量 + 0117 步0 三键 + 0118 收编两条
+        + 0119 收编池数据两条 = 24）。
 
         不写死字面量，而用配置面↔代码面的等式表达——表增长时本钉不必改，只有**不匹配**
         才红；行数字面量另有 test_row_count_arithmetic 守（防"少了一条但两边一起少"）。
@@ -84,11 +86,11 @@ class TestSyncConfigBijection:
         assert len(_cfgs()) == len(set(_HANDLERS) | set(_VIA_KIND_IDS))
 
     def test_row_count_arithmetic(self):
-        """行数量级守门：17 存量 + 3（迁移 0117）+ 2（迁移 0118 收编）= 22。
+        """行数量级守门：17 存量 + 3（迁移 0117）+ 2（0118 收编）+ 2（0119 收编）= 24。
 
         防的是"某条 cfg 行丢了而代码路由也一起丢"（双射仍成立但能力真空）这种同向漂移。
         """
-        assert len(_cfgs()) == 22
+        assert len(_cfgs()) == 24
 
     def test_via_kind_ids_all_have_kind_rows(self):
         """每个 bar 族 sync_id 必须有 sync_kind_config 归置行——

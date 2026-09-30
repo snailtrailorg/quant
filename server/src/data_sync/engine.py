@@ -269,7 +269,10 @@ def sync(sync_id: str, backfill_from: str | None = None,
             failed_dates = r.get("failed_dates", [])
             expected_days = r.get("expected_days")
             actual_days = r.get("actual_days")
-            status = "partial" if failed_dates else "success"
+            # 终态词：handler 可显式声明 log_status（批 83b——池内族收编后要保留原独立实现的
+            # 'timeout'/'skipped' 两个词：时间盒中断既非失败也非健康心跳、撞锁轮次同理，
+            # 15-服务监控的 tier2 心跳只认 done/success）。未声明=通用口径。
+            status = r.get("log_status") or ("partial" if failed_dates else "success")
             duration_ms = int((time.time() - t0) * 1000)
             _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
                  status, "", failed_dates, expected_days, actual_days)
@@ -664,6 +667,29 @@ def _sync_convertible_terms(cfg: dict, end_date: str, backfill_from: str | None 
             "actual_days": 1 if not failed else 0}
 
 
+def _make_pool_handler(full: bool):
+    """池内深度数据 handler 工厂（批 83b 收编 last 两条 beat）。
+
+    full=False=5 分钟增量轮（`pool_data`）；full=True=周日全量校准
+    （`pool_data_full_calibrate`，无视游标窗口，游标照常推进）。两条同源不同参，
+    故用工厂同 `_make_tier1_handler`/`_make_full_rebuild_handler` 先例，不写 if 分派。
+
+    返回值适配 sync() 的 handler 契约：标的数→rows_pulled（原口径：sync_log.rows_pulled
+    存标的数，`routes/sync.py` progress 端点按此展示）；逐标的错误→failed_dates（触发
+    partial 终态 + 失败告警）；`log_status` 透传原实现的状态词（timeout/skipped——
+    见 sync() 内的口径说明）。
+    """
+    def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
+                 progress_cb: Callable | None = None) -> dict:
+        from .pool_data import _ROUND_LOG_STATUS, run_pool_sync
+        r = run_pool_sync(cfg, full=full)
+        return {"pulled": r.get("symbols", 0), "saved": r.get("saved", 0),
+                "start": end_date, "failed_dates": list(r.get("errors") or []),
+                "expected_days": None, "actual_days": None,
+                "log_status": _ROUND_LOG_STATUS.get(r.get("status"))}
+    return _handler
+
+
 _MINUTE_FREQ = {"astock_minute": "1min", "astock_minute_5min": "5min"}
 
 
@@ -781,6 +807,10 @@ _HANDLERS = {
     # sync_kind_config 的 kind 词（static_list）混读。
     "static_symbols": _sync_static_list,
     "convertible_terms": _sync_convertible_terms,
+    # 批 83b：池内深度数据两条 beat 收编（原独立 celery beat：5 分钟增量轮 + 周日全量校准）。
+    # 拉取已下沉 adapter.fetch（POOL_TABLE_SPECS）；本处只挂编排 handler。
+    "pool_data": _make_pool_handler(full=False),
+    "pool_data_full_calibrate": _make_pool_handler(full=True),
 }
 
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由
@@ -792,18 +822,23 @@ _VIA_KIND_IDS = frozenset({
 
 
 def _read_sync_kind(sync_id: str) -> dict:
-    """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild）。无行/表缺返回 {}。"""
+    """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild/pk_cols）。无行/表缺返回 {}。
+
+    pk_cols（批 83b 补）：池内族通用落库的 ON CONFLICT 主键来源——落库层不硬编码表名/主键。
+    """
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT kind, sub_kind, pg_table, rebuild FROM sync_kind_config WHERE sync_id=%s",
+                "SELECT kind, sub_kind, pg_table, rebuild, pk_cols FROM sync_kind_config "
+                "WHERE sync_id=%s",
                 (sync_id,))
             row = cur.fetchone()
     except psycopg.errors.UndefinedTable:
         return {}
     if not row:
         return {}
-    return {"kind": row[0], "sub_kind": row[1], "pg_table": row[2], "rebuild": row[3]}
+    return {"kind": row[0], "sub_kind": row[1], "pg_table": row[2], "rebuild": row[3],
+            "pk_cols": list(row[4] or [])}
 
 
 def _fetch_supply(adapter, *, kind: str, sub_kind: str | None, symbols: tuple[str, ...],

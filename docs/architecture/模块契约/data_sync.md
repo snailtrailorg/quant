@@ -17,7 +17,9 @@ server/src/data_sync/
 ├── engine.py        # 同步引擎核心 + _VIA_KIND_IDS 静态路由（bar 族 6 键，批 72）+ _HANDLERS
 │                  #   注册表（其余键）+ _make_tier1_handler 工厂（三档一档）
 │                    #   限流：5 处拉取点走 data_platform.rate_limit.rate_limit_context（2026-08-27）
-├── pool_data.py     # 池内深度数据同步（三档二档，独立模块不进 _HANDLERS）
+├── pool_data.py     # 池内深度数据同步编排（三档二档）：批 83b 收编后**拉取下沉 adapter.fetch**
+│                  #   （POOL_TABLE_SPECS），本模块只留通用编排（游标/时间盒/锁/通用落库）；
+│                  #   已进 _HANDLERS（sync_id=pool_data / pool_data_full_calibrate）
 ├── pool_minute.py   # 池分钟同步（Tushare stk_mins 收费，beat 注释禁用态；stk_mins 硬限=Valkey 全局闸门）
 ├── sync_lock.py     # Valkey 心跳锁
 └── __init__.py      # 导出 sync/sync_symbol/backfill_symbol/delete_symbol/sync_all
@@ -79,18 +81,27 @@ _make_tier1_handler(table, pull_fn_name, pk_cols, float_cols=None, text_cols=Non
     # forecast 按 ann_date 拉非 trade_date（handler 按 pull 函数签名自动区分）
 ```
 
-### pool_data.py（三档二档，池成员驱动非 sync_config）
+### pool_data.py（三档二档，批 83b 收编：sync_config 驱动 + 拉取下沉 fetch 契约）
 ```python
-sync_pools_data(timebox_s: int = 280, full: bool = False, symbols: list[str] | None = None) -> dict
+run_pool_sync(cfg: dict | None = None, *, full: bool = False,
+              symbols: list[str] | None = None, timebox_s: int = 280) -> dict
     # 池内 astock 标的 × 10 类深度数据（财务四表/筹码分布/十大股东/分红/质押/解禁/股东人数）
     # _get_pool_ts_codes(): pools JOIN pool_symbols WHERE category='astock'（出池自动停更）
-    # 时间盒到即收工下轮续 + SyncLock("pool_data") 防重叠 + 必写日志护栏（FATAL/skipped 也落 sync_log）
-    # 增量（2026-08-20）：财务四表窗口 [cursor, today]（含起点重叠幂等），游标 pool_data_cursor
-    #   表级（迁移 0047）；推进=该表覆盖全部标的；dividend 窗口实测无效维持全量
+    # **分层**：源特定（源 API/参数/窗口形态/值归一/列形状）在
+    #   data_platform.adapters.tushare_adapter.POOL_TABLE_SPECS + TushareAdapter.fetch；
+    #   本模块只留编排——资源锁 SyncLock("pool_data_exec") 防重叠（两个 sync_config 行必须互斥
+    #   同一实体资源，故锁键≠任一 sync_id）、表级游标窗口策略、时间盒、错误聚合、
+    #   通用落库 _sink_frame（列序=帧声明、主键= sync_kind_config.pk_cols，零表名硬编码）
+    # 增量（2026-08-20 原语义）：财务四表窗口 [cursor, today]（含起点重叠幂等），
+    #   游标 pool_data_cursor 表级（迁移 0047）；推进=该表覆盖全部标的；dividend 维持全量
     # full=True 全量校准（游标照常推进）；symbols=[ts] 定向回补（入池触发，无窗口不推进游标）
-    # 返回 {status: done|partial|timebox|skipped|idle|error, symbols, saved, errors[:5]}
-    # 被 scheduler.pool_data_sync_task（beat 300s + 周日 full 校准）与 web
-    #   POST /api/sync/pool-data/trigger?full= 与入池端点（symbols 回补）调用
+    # 返回 {status: done|partial|timebox|skipped|idle, symbols, saved, errors[:5], duration_ms}
+    # 调用面（批 83b）：① sync_config 行 pool_data（*/5 * * * *）/ pool_data_full_calibrate
+    #   （7 4 * * 0）经 data_sync_scheduler **异步派发** sync()（长任务不内联挤爆 300s 软超时）
+    #   ② 手动：scheduler.pool_data_sync_task（full/symbols）+ web
+    #   POST /api/sync/pool-data/trigger?full= 与入池端点（symbols 回补）
+    # sync_log 留痕：配置驱动路径由 engine.sync() 统一留痕（status 词 timeout/skipped 由
+    #   handler 的 log_status 透传）；手动 symbols 路径由 log_round() 留痕（原口径）
 ```
 
 ### pool_minute.py（池驱动分钟同步，beat 注释禁用态 + stk_mins 硬限闸门）
@@ -217,9 +228,9 @@ class SyncLock:
 | `asset_static_info`/`etf_basic_info`/`cb_basic_info` | 各 list handler（全量写） | `_list_static_ts_codes`/`_get_list_date`/`list_symbols` |
 | `trade_cal` | `_sync_trade_cal`（pull_trade_cal） | `_expected_trade_dates`/`_expected_trading_days` |
 | `daily_basic` | `_sync_astock_basic`（save_daily_basic） | - |
-| `external_interface`（批55a 合表，经 get_data_source） | - | `_get_pro`（经 get_data_source） |
+| `data_source`（批83a 拆表；此前名 `external_interface`） | - | `_get_pro`/`_get_rate_ds`（经 get_data_source + 批83b provider 真路由） |
 | 一档 9 表（stk_limit/moneyflow/margin_detail/top_list/block_trade/cyq_perf/forecast/namechange/concept） | tier1 handler 工厂（batch/全量重建） | - |
-| 二档 10 表（income/balancesheet/cashflow/fina_indicator/cyq_chips/top10_holders/dividend/pledge_stat/share_float/stk_holdernumber） | `pool_data._upsert_rows`（幂等 upsert） | 详情页三档已实施（`stock_detail` 池内直读：筹码/财务块）（P3 回写 2026-08-20：原"未实施"过时） |
+| 二档 10 表（income/balancesheet/cashflow/fina_indicator/cyq_chips/top10_holders/dividend/pledge_stat/share_float/stk_holdernumber） | `pool_data._sink_frame`（通用 upsert：列序=契约帧 columns、主键=`sync_kind_config.pk_cols`；批 83b 前为 `_upsert_rows`） | 详情页三档已实施（`stock_detail` 池内直读：筹码/财务块）（P3 回写 2026-08-20：原"未实施"过时） |
 | `pool_data_cursor` | `pool_data._advance_cursors`（游标推进，迁移 0047） | `pool_data._load_cursors` |
 
 ---
