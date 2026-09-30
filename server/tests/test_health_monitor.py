@@ -241,6 +241,12 @@ class TestEndpoints:
         assert client.get("/health").status_code == 200
 
     def test_metrics_prometheus_text(self, client):
+        # 2026-09-30：quant_unit_up 族需 systemd（CORE_UNITS=quant-* 服务器单元）。
+        # 本地开发机非 systemd init（/run/systemd/system 不存在）→ 该族必然缺席，
+        # 跳过而非误红；服务器/CI（有 systemd）照常断言。
+        import pathlib
+        if not pathlib.Path("/run/systemd/system").exists():
+            pytest.skip("非 systemd 主机（本地开发机）：quant-* 单元不存在，unit_up 族缺席属预期")
         r = client.get("/metrics")
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/plain")
