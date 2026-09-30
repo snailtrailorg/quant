@@ -7,21 +7,21 @@
 > **路由认证守门**（2026-09-30，`tests/test_route_auth_gate.py` 断言守门）：每条 HTTP/WS 路由必须挂 `require_authenticated`/`require_perm` checker，且**必须经 `Depends()` 包裹**——直接写成参数默认值（`_u=require_perm("k")`）=依赖工厂静默短路，checker 永不运行、裸请求 200（批79 遗留坑，全仓仅 2 处），绑定扫描扫不到这类漏挂。合法无认证端点（login/register/health/metrics/webhook 等 17 条）须精确命中白名单，白名单反向校验防腐化；**新增或改动端点后必跑本测试**。
 > 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（持久化，跨会话）。
   - 服务器部署信息：`server-info.md`（IP/OS/路径/分库/备份/密钥）
-  - 部署机制：`deploy-mechanism.md`（三权分立/脚本/闸门/安全边界）
+  - 部署机制：**`docs/architecture/A06-部署管道架构.md`（真源：架构/账号权限/八阶段/回滚语义/炸半径清单）** + 记忆 `deploy-mechanism.md`（速记，可能滞后于 A06）
   - 服务列表：`server-services.md`（systemd/Polkit/Nginx/日志）
 
 ## 目录地图
 
 - `flow/` — 控制层（项目"怎么跑"）：章程 / 计划 / 进展 / 决策 / 踩坑 / 规范 / **`任务/`（未完成任务执行规格，批号命名 `批xxx-描述.md`，被待办引用；完成后归档 `docs/obsolete/任务归档/`）**
 - `docs/` — 内容层（项目"做出什么"），五层（2026-09-24 文档体系重构）：
-  - `docs/architecture/` — **架构级真相**：总体方案（`A01-总体设计` ～ `A05-多账号源架构设计`）+ 跨模块契约（`接口契约.md` + `模块契约/` 19 份）
+  - `docs/architecture/` — **架构级真相**：总体方案（`A01-总体设计` ～ `A05-多账号源架构设计`）+ **部署管道（`A06-部署管道架构`）** + 跨模块契约（`接口契约.md` + `模块契约/` 19 份）
   - `docs/design/` — **模块设计 + 横切规范（纯知识，D 系列编号）**（`D01-llm-gateway` ～ `D26-市场接入架构`）——任务规格已迁 `flow/任务/`（2026-09-25 规则变更）
   - `docs/manual/` — **操作手册**（面向使用者，索引+因子/策略/回测/实盘/数据源切换五册，`server/docs` 镜像随 rsync 部署 + Web 内置 `/help`）
   - `docs/reference/` — **外部参考资料**（第三方 SDK/协议/客户竞品，非原创——`README.md` 有索引）
   - `docs/obsolete/` — **过时归档**（已废弃/已吸收文档 + 已完成任务文件，保留历史不删除——`README.md` 有归档清单与替代对照）
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
-- `deploy/` - **工件化交付（现行，2026-08-26 起在管生产）**：Ansible playbooks（release/rollback/bootstrap 三剧本八阶段+自动回滚）+ inventory（quant-prod/quant-staging 彩排）+ wrappers（quant-svc 等 9 只特权通道）+ collections vendor + 六场景失败注入。**发布=彩排绿后跑 release.yml**（详见记忆 deploy-mechanism）
+- `deploy/` - **工件化交付（现行，2026-08-26 起在管生产）**：Ansible playbooks（release/rollback/bootstrap 三剧本八阶段+自动回滚）+ inventory（quant-prod/quant-staging 彩排：同路径/同权限/同 sudoers/真 ssh）+ wrappers（**12 只特权通道**，sudoers 白名单唯一真源）+ collections vendor + 六场景失败注入。**发布=彩排绿后跑 release.yml**（机制全貌详见 `docs/architecture/A06-部署管道架构.md`）
 - `scripts/` - 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`dev-start.sh`/`verify.sh`）+ 独立运维工具（`migrate-encryption-key.sh`/`test-live-pipeline.sh`/`test_xtp_connect.py`）。**不传服务器**。旧 bash 部署链已删除（2026-08-27 git 史可考 40fb5fa，Ansible 接管后回滚周期已过）
 - **判据**：协调/推进项目的 → `flow/`；要交付的内容 → `docs/`（知识/文档）或 `server/src/`（代码）
 
@@ -113,7 +113,7 @@
 - 接口契约字典（跨模块签名 + 数据结构，任务自包含基础）：`docs/architecture/接口契约.md`
 - 模块契约（逐模块 public API + 依赖 + 被调 + 读写表）：`docs/architecture/模块契约/`（19 份，2026-08-21 增 web_api）+ im_bot
 - 本地开发部署（一键脚本 + 排错）：`scripts/LOCAL-DEPLOY.md`（用 `bash scripts/dev-start.sh start`，不要手动起服务）
-- **发布/回滚/彩排**：`deploy/` 目录（现行 Ansible 管道，含前端 dist 同步+双链原子切换；彩排先行的完整制度见记忆 deploy-mechanism 与 docs/obsolete/任务归档/批3-工件化交付.md）
+- **发布/回滚/彩排**：`deploy/` 目录（现行 Ansible 管道，含前端 dist 同步+双链原子切换）；**改这条链之前先读 `docs/architecture/A06-部署管道架构.md` §9 炸半径清单**（拆表须扫 wrapper、加单元须进波次、加 server 输入须双写指纹+白名单、改 wrapper 须重装位）
 - **Web 重设计**（2026-08-30 定稿实施）：唯一现行设计规范 = `docs/design/D24-web设计系统.md`（设计令牌体系，原 web-design 04 号）；过程记录（体验审计/信息架构/页面重设计/权限体系/各轮验收）归档 `docs/obsolete/web-design过程/`。前端已按设计令牌全站替换（品牌/涨跌色/字体/暗色）+ 核心页面重做（选股器三合一/交易台/风控/对账/设置四 tab）。遗留清单见 `flow/待办.md` web backlog。
 
 ## 项目知识（durable，随项目积累 ↓）
