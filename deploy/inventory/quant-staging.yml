@@ -7,4 +7,9 @@ quant-staging:
       ansible_port: 22
       ansible_user: deploy
       ansible_ssh_private_key_file: ~/.ssh/quant_deploy_ed25519
+      # 与 quant-prod 同款 TOFU 收紧（2026-09-30 补齐）：全局 host_key_checking=False
+      #   只服务沙箱 local 连接，本机彩排走真 ssh，须与 prod 一致。
+      #   缺此项时 rsync 腿（release.yml 已置 use_ssh_args=true 会继承本项）
+      #   在 staging 与 prod 之间产生「校不校验主机键」的分叉。
+      ansible_ssh_common_args: '-o StrictHostKeyChecking=accept-new'
       ansible_python_interpreter: /usr/bin/python3

@@ -238,6 +238,14 @@
           ansible.posix.synchronize:
             src: "{{ deploy_stage_root }}/{{ item.path }}{{ '/' if item.dir else '' }}"
             dest: "{{ deploy_root }}/releases/{{ release_id }}/{{ item.path }}{{ '/' if item.dir else '' }}"
+            # rsync 腿自带一个 ssh 进程，与 ansible 连接腿【不共享配置】——
+            #   use_ssh_args=true 才把 ansible_ssh_args/ssh_common_args/ssh_extra_args 传下去。
+            #   （模块源码 modules/synchronize.py:577 是「追加」到 -S none 之后，不是替换，无冲突。）
+            use_ssh_args: true
+            # 模块默认 verify_host=false（源码 :574）会硬加
+            #   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null，
+            #   把 TOFU 完全绕过、与连接腿的 accept-new 形成分叉。置真后交给 inventory 统一裁决。
+            verify_host: true
             rsync_opts: "{{ ['--exclude=__pycache__', '--exclude=*.pyc', '--delete']
                             + (['--exclude=*.so'] if item.get('exclude_so') else []) }}"
           loop: "{{ deploy_sync_whitelist }}"
@@ -246,6 +254,8 @@
           ansible.posix.synchronize:
             src: "{{ playbook_dir | dirname | dirname }}/web/dist/"
             dest: "{{ deploy_root }}/releases/{{ release_id }}/web/"
+            use_ssh_args: true    # 同上一任务：rsync 腿继承 ssh 配置
+            verify_host: true     # 同上一任务：不绕过 host key 校验
             rsync_opts:
               - "--exclude=__pycache__"
               - "--exclude=*.pyc"
