@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import threading
 import time
@@ -22,9 +21,10 @@ import redis
 
 from src.data_platform.db import get_conn
 from src.quant_common.crypto import encrypt
+from src.quant_common.config import feishu_valkey_url
 
 logger = logging.getLogger("feishu_bot")
-VALKEY_URL = os.environ.get("FEISHU_VALKEY_URL", "redis://127.0.0.1:6379/4")   # P0-3：独立变量，与业务库隔离（原读 VALKEY_URL 在 db0 时隔离失效）
+VALKEY_URL = feishu_valkey_url()   # P0-3：独立变量，与业务库隔离（原读 VALKEY_URL 在 db0 时隔离失效）
 _redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
 
 

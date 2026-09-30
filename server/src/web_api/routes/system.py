@@ -12,6 +12,7 @@ from src.email_service import queue_email, try_row
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
 from ..terms import get_terms_items
+from src.quant_common.config import valkey_url
 
 logger = logging.getLogger("web_api")
 
@@ -106,11 +107,10 @@ def api_probe(request: Request):
         return _q
 
     def _valkey():
-        import os
 
         import redis
         r = redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2)
+            valkey_url(), socket_timeout=2)
         r.ping()
         return "pong"
 
@@ -119,12 +119,11 @@ def api_probe(request: Request):
         # （pattern 尾冒号隔离——glob 不吞垂死裸键）全部新鲜且在场集非空才 ok；
         # 空集=vacuous 真空洞（发布后全没起来最可能场景）必须 not ready。
         # 期望集比对归 SA4 周期对账/hbcheck 发布探针（职责分离，防坏行拖死发布判定）。
-        import os
         import time
 
         import redis
         r = redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), socket_timeout=2,
+            valkey_url(), socket_timeout=2,
             decode_responses=True)   # 彩排实锤：不 decode 则 scan_iter 返 bytes，rsplit(":") 炸 TypeError
         keys = [k for k in r.scan_iter(match="quant:hb:md-hub:*", count=100)
                 if k.rsplit(":", 1)[-1].isdigit()]
@@ -281,7 +280,7 @@ def system_alerts_api(payload: dict = Depends(require_perm("system_config"))):
     import redis
 
     from src.health_monitor.monitor import _STATE_PREFIX as _pfx
-    r = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+    r = redis.Redis.from_url(valkey_url(),
                              decode_responses=True, socket_timeout=2)
     items = []
     for key in r.scan_iter(_pfx + "*", count=100):

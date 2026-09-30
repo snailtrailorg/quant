@@ -21,6 +21,7 @@ import time
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from typing import Callable, Iterator
+from src.quant_common.config import valkey_url
 
 logger = logging.getLogger("rate_limit")
 
@@ -37,7 +38,7 @@ def _r():
     import redis
     pid = os.getpid()
     if _R_CLI is None or _R_PID != pid:
-        _R_CLI = redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+        _R_CLI = redis.Redis.from_url(valkey_url(),
                                       decode_responses=True, socket_timeout=2)
         _R_PID = pid
     return _R_CLI

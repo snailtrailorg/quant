@@ -17,10 +17,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import threading
 
 import redis
+from .config import valkey_url
 
 logger = logging.getLogger("quant_common.eventbus")
 
@@ -129,7 +129,7 @@ class EventBus:
         try:
             ch = SSE_CHANNEL_ALL if uid == 0 else SSE_CHANNEL_USER.format(uid=uid)
             r = redis.Redis.from_url(
-                os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                valkey_url(),
                 socket_connect_timeout=1, socket_timeout=1, decode_responses=True)
             try:
                 r.publish(ch, json.dumps({"type": ev_type, **data}, ensure_ascii=False))

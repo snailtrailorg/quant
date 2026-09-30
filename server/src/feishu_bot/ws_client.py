@@ -15,6 +15,7 @@ from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
 
 from src.data_platform.db import get_conn
 from src.feishu_bot.bot import process_message_async
+from src.quant_common.config import valkey_url
 
 logger = logging.getLogger("feishu_bot")
 _FID = None  # 当前机器人 id（main 设置，on_message 用）
@@ -169,11 +170,10 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
                        identity["username"], tool, _need)
         _terminal("denied", tool)
         return
-    import os
 
     import redis as _redis
     try:
-        r = _redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+        r = _redis.Redis.from_url(valkey_url(),
                                   decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
         if event_id and not r.set(f"feishu:card:{event_id}", "1", nx=True, ex=300):
             logger.warning("重复卡片回调丢弃: event_id=%s", event_id)

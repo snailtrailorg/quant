@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 
 import redis
 
 from .eventbus import SSE_CHANNEL_ALL, SSE_CHANNEL_USER
+from .config import valkey_url
 
 logger = logging.getLogger("quant_common.sse_bridge")
 
@@ -54,7 +54,7 @@ class SseBridge:
         while not self._stop.is_set():
             try:
                 r = redis.Redis.from_url(
-                    os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                    valkey_url(),
                     socket_connect_timeout=2, socket_timeout=SOCKET_TIMEOUT_S,
                     decode_responses=True)
                 pubsub = r.pubsub(ignore_subscribe_messages=True)

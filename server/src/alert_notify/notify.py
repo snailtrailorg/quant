@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 from typing import Literal
 
 import redis
 from dotenv import load_dotenv
+from src.quant_common.config import valkey_url
 
 load_dotenv()
 logger = logging.getLogger("alert_notify")
@@ -45,7 +45,7 @@ def _redis() -> redis.Redis:
     # 批18 盲审A-P0-2 同修：双 1s 超时——Valkey hung 时缺省无超时会永久阻塞调用线程
     #（notify 挂在实盘告警路径=冻结交易主流程；超时=跳过去重继续发送）
     return redis.Redis.from_url(
-        os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+        valkey_url(),
         socket_connect_timeout=1, socket_timeout=1, decode_responses=True)
 
 

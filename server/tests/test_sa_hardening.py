@@ -214,10 +214,19 @@ def test_exit_process_flushes_before_exit():
 
 
 def test_feishu_redis_pool_uses_dedicated_var():
-    """P0-3：飞书池读 FEISHU_VALKEY_URL（独立变量）——原与业务池同读 VALKEY_URL，db0 时飞书隔离失效。"""
+    """P0-3：飞书池读 FEISHU_VALKEY_URL（独立变量）——原与业务池同读 VALKEY_URL，db0 时飞书隔离失效。
+
+    P2-5（2026-09-30）单源收敛后源码不再出现字面变量名：改断言两处均走
+    quant_common.config 的单源函数（且飞书侧**不得**回落 valkey_url——隔离语义）。
+    """
+    import re
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     rp_src = (root / "src" / "web_api" / "redis_pool.py").read_text()
     fb_src = (root / "src" / "feishu_bot" / "tasks.py").read_text()
-    assert 'FEISHU_VALKEY_URL' in rp_src
-    assert 'FEISHU_VALKEY_URL' in fb_src
+    cfg_src = (root / "src" / "quant_common" / "config.py").read_text()
+    assert 'FEISHU_VALKEY_URL' in cfg_src          # 变量名真源在单源模块
+    assert 'feishu_valkey_url()' in rp_src         # 飞书池走单源函数
+    assert 'feishu_valkey_url()' in fb_src
+    # 隔离：飞书侧不得回落业务库单源（排除 feishu_valkey_url 自身的前缀匹配）
+    assert not re.search(r"(?<!feishu_)valkey_url\(\)", fb_src)

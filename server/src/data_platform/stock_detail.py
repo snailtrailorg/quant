@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+from src.quant_common.config import valkey_url
 
 logger = logging.getLogger("data_platform.stock_detail")
 
@@ -30,7 +30,7 @@ def _r():
     import redis
     if _R is None:
         _R = redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+            valkey_url(),
             decode_responses=True, socket_timeout=5)
     return _R
 

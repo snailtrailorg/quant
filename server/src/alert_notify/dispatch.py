@@ -82,7 +82,7 @@ def _get_producer():
     global _producer
     if _producer is None:
         from celery import Celery
-        broker = os.environ.get("CELERY_BROKER_URL") or os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0")
+        broker = os.environ.get("CELERY_BROKER_URL") or valkey_url()
         _producer = Celery("quant", broker=broker,
                            broker_transport_options={"socket_connect_timeout": 3, "socket_timeout": 5})
     return _producer
@@ -90,7 +90,7 @@ def _get_producer():
 
 def _redis() -> redis.Redis:
     return redis.Redis.from_url(
-        os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"), decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+        valkey_url(), decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
 
 
 # ── 回写契约（A3-F2/F3/F4/F5，B3-1/10 收口）──
@@ -303,6 +303,7 @@ def _send_sms(phone: str, *, level: str, title: str) -> tuple[bool, str]:
 #               完整信息走 Web 登录或 AI 通道问答；title 截 20 字与阿里云模板 ${title} 对齐）
 from dataclasses import dataclass
 from typing import Callable
+from src.quant_common.config import valkey_url
 
 
 @dataclass(frozen=True)

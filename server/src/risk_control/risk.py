@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 from typing import Literal
@@ -44,6 +43,7 @@ class RiskState:
 from src.risk_control.risk_schema import (
     RuleSanitizer,  # 批36a-1（模块级——去抖指纹跨热加载持久，每进程每因一次）  # noqa: E402  # 延迟/位置语义 import（load_dotenv 后等）
 )
+from src.quant_common.config import valkey_url
 
 _SANITIZER = RuleSanitizer(logging.getLogger("risk_control.sanitize"))
 
@@ -74,7 +74,7 @@ class RiskControl:
 
     def __init__(self):
         self._redis = redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+            valkey_url(),
             decode_responses=True,
             socket_timeout=2, socket_connect_timeout=2)   # 批27-2：is_halted 在下单主路径——Valkey 挂起不冻下单线程（超时异常走 check_order 既有 fail-closed 拒单）
         # SB2（F-30/F-23）：DEFAULT 兜底合并保证三个 key 永远存在（部分规则不再 KeyError 杀事件线程）；

@@ -7,9 +7,9 @@
 """
 from __future__ import annotations
 
-import os
 import subprocess
 import time
+from src.quant_common.config import valkey_url
 
 # 常驻单元（实例=quant）。live-task@*/strategy@* 按需，心跳覆盖；feishu 多实例动态发现
 # 批 66b（D26）：md-hub 账号级实例化——@quant 退役，hub 单元按心跳键动态发现（不在 CORE_UNITS）
@@ -27,7 +27,7 @@ TASK_HB_PATTERN = "quant:hb:task:*"
 
 def _valkey():
     import redis
-    return redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+    return redis.Redis.from_url(valkey_url(),
                                 decode_responses=True, socket_timeout=2)
 
 

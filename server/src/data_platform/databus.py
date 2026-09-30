@@ -10,10 +10,10 @@ subscribe/水位线为 M5 真实现（批 60：回放 240+ts 截断+去重+未�
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timedelta
 
 from .store import Store
+from src.quant_common.config import valkey_url
 
 logger = logging.getLogger("data_platform.databus")
 
@@ -30,7 +30,7 @@ def _r():
     import redis
     if _R is None:
         _R = redis.Redis.from_url(
-            os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+            valkey_url(),
             decode_responses=True, socket_timeout=3)
     return _R
 

@@ -14,12 +14,12 @@ last_status（DB）退化为"上次结果展示"，防重真相源在此锁。
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import uuid
 
 import redis
 from dotenv import load_dotenv
+from src.quant_common.config import valkey_url
 
 load_dotenv()
 
@@ -49,7 +49,7 @@ class SyncLock:
             # DB 优化（2026-08-21 审计 A-数据层 A3）：补 socket_timeout——四处 Valkey 客户端
             # 唯一裸奔的一处，抖动时 celery worker 卡死在拿锁
             self._r = redis.from_url(
-                os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+                valkey_url(),
                 socket_timeout=5, socket_connect_timeout=5)
         self.acquired = self._r.set(self.key, self.token, nx=True, ex=self.ttl) is not None
         return self.acquired

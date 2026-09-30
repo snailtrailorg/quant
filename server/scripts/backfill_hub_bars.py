@@ -18,6 +18,7 @@ account_id 字段+gen 置 0——0<一切 live gen 任意投递顺序无倒挂�
 import argparse
 import os
 import sys
+from src.quant_common.config import valkey_url
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SRV = os.path.join(_HERE, "..")
@@ -27,7 +28,7 @@ if os.path.isdir(os.path.join(_SRV, "src")):
 
 def _redis():
     import redis
-    return redis.Redis.from_url(os.environ.get("VALKEY_URL", "redis://127.0.0.1:6379/0"),
+    return redis.Redis.from_url(valkey_url(),
                                 decode_responses=True, socket_timeout=5)
 
 
