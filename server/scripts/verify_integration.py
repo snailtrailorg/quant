@@ -118,7 +118,7 @@ def verify_broker_config():
     try:
         with get_conn() as conn:
             cur = conn.execute("SELECT id, name, provider, enabled FROM trading_account "
-                               "WHERE provider='xtp' AND 'trading' = ANY(capabilities)")
+                               "WHERE provider='xtp'")
             rows = cur.fetchall()
             if rows:
                 check("XTP broker 配置", True,

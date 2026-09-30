@@ -11,8 +11,10 @@
 #   quant-dbro live    → live_task status='running' 的单元名清单（task 波）
 #   quant-dbro feishu  → im_bot_config enabled 且 provider='feishu' 的单元名清单（feishu 波）
 #   （0051 后 feishu_config 已并入 im_bot_config——19 号 IM 统一接入，provider 过滤）
-#   quant-dbro hub     → external_interface trading 域 enabled 行（id|provider 两列——批 66b：
-#                        hub 波次/期望集 DB 驱动；provider 列供 playbook 侧 MD 网关白名单过滤，
+#   quant-dbro hub     → trading_account enabled 行（id|provider 两列——批 66b：
+#                        hub 波次/期望集 DB 驱动；批 83a 拆表：external_interface → trading_account，
+#                        `'trading' = ANY(capabilities)` 域谓词退役〔表本身即交易域〕；
+#                        provider 列供 playbook 侧 MD 网关白名单过滤，
 #                        真源=python list_md_gateway_providers（md_gateway.py）——此处不做 provider
 #                        过滤的原因：SQL 无从查注册表，过滤在消费方+同步义务钉 release.yml 注释）
 #   固定 SQL 内封不收外部 SQL；输出每行一个（psql -tA）；DB 错误非零退出。
@@ -46,7 +48,7 @@ case "$which_arg" in
     sql="SELECT 'quant-feishu-bot@' || id || '.service' FROM im_bot_config WHERE enabled AND provider = 'feishu'"
     ;;
   hub)
-    sql="SELECT id || '|' || provider FROM external_interface WHERE enabled AND 'trading' = ANY(capabilities)"
+    sql="SELECT id || '|' || provider FROM trading_account WHERE enabled"
     ;;
 esac
 
