@@ -12,12 +12,19 @@
 #   quant-dbro feishu  → im_bot_config enabled 且 provider='feishu' 的单元名清单（feishu 波）
 #   （0051 后 feishu_config 已并入 im_bot_config——19 号 IM 统一接入，provider 过滤）
 #   quant-dbro hub     → trading_account enabled 行（id|provider 两列——批 66b：
-#                        hub 波次/期望集 DB 驱动；批 83a 拆表：external_interface → trading_account，
-#                        `'trading' = ANY(capabilities)` 域谓词退役〔表本身即交易域〕；
-#                        provider 列供 playbook 侧 MD 网关白名单过滤，
+#                        hub 波次/期望集 DB 驱动；provider 列供 playbook 侧 MD 网关白名单过滤，
 #                        真源=python list_md_gateway_providers（md_gateway.py）——此处不做 provider
 #                        过滤的原因：SQL 无从查注册表，过滤在消费方+同步义务钉 release.yml 注释）
 #   固定 SQL 内封不收外部 SQL；输出每行一个（psql -tA）；DB 错误非零退出。
+#
+# TRANSITION-0115:收口=0116（批 83a 拆表）全环境上产后，重装位并删除本文件的两态分支
+#   （`select_trading_table` + 标 `# TRANSITION-0115` 的旧态 SQL 行 + 本注记），回到单态
+#   `trading_account`。标记者 = 该行 SQL 属**旧态（0115）**分支，闸门
+#   `server/tests/test_deploy_blast_radius.py` 据此放行退役表名/域谓词；未标记者一律禁。
+#   背景：release preflight（本 wrapper hub）在 alembic 之前跑、阶段 8 postverify（quant-hbcheck）
+#   在之后跑——而 prod DB 在 0115、新表在 0116 才建，单态 wrapper **无**装位时序可解：
+#   先装查新表 → preflight 撞未建的表拦停；不装 → postverify 撞已删的旧表失败且回滚不动 schema
+#   （撕裂态）。故过渡期双态是唯一无时序约束解（2026-09-30 prod 实查后定论）。
 
 # 严参校验:
 #   which 白名单 live|feishu|hub；恰一个参数（sudoers `*` 吃空格——多余参数即拒，防夹带）
@@ -38,21 +45,30 @@ case "$which_arg" in
   *) echo "✗ which 不在白名单（须 live|feishu|hub）: $which_arg" >&2; exit 2 ;;
 esac
 
-# 固定 SQL（单元名拼装与 server/src 实况一致: trading.py quant-live-task@{tid} /
-# im_bots.py quant-feishu-bot@{bid}；live_task.status 有索引 ix_live_task_status）
-case "$which_arg" in
-  live)
-    sql="SELECT 'quant-live-task@' || id || '.service' FROM live_task WHERE status = 'running'"
-    ;;
-  feishu)
-    sql="SELECT 'quant-feishu-bot@' || id || '.service' FROM im_bot_config WHERE enabled AND provider = 'feishu'"
-    ;;
-  hub)
-    sql="SELECT id || '|' || provider FROM trading_account WHERE enabled"
-    ;;
-esac
+# ---- 交易域选表：过渡期双态（TRANSITION-0115——收口条件见文件头）----
+#   0115 及以前: external_interface —— 须保留 'trading' = ANY(capabilities) 域谓词
+#   0116 及以后: trading_account    —— 表本身即交易域，无谓词
+#   两态并存 / 皆缺 = schema 异常 → 响亮拒绝（不猜、不静默选一侧）
+#   to_regclass 取 search_path 相对名（生产缺省含 public）——故可在 scratch schema 里
+#   对两态做本机回归，不必有服务器。
+# TRANSITION-0115:BEGIN（本域含旧表名——闸门据此放行；收口时连同函数整段删除）
+select_trading_table() {
+  local pair
+  pair=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
+    "SELECT (to_regclass('external_interface') IS NOT NULL)::int::text ||
+            (to_regclass('trading_account')    IS NOT NULL)::int::text")
+  case "$pair" in
+    10) printf '%s\n' external_interface ;;
+    01) printf '%s\n' trading_account ;;
+    11) echo "✗ 选表：两态并存（external_interface 与 trading_account 同时在场）——迁移半途/未收口，人工处置" >&2; return 1 ;;
+    00) echo "✗ 选表：两表皆不在位——schema 异常，人工处置" >&2; return 1 ;;
+    *)  echo "✗ 选表：探测输出异常 [$pair]" >&2; return 1 ;;
+  esac
+}
+# TRANSITION-0115:END
 
-# 沙箱模式: 假 SQL 输出文件（套件负例/回归道具；生产 QUANT_DBRO_SQL_DIR 为空不走此分支）
+# 沙箱模式: 假 SQL 输出文件（套件负例/回归道具；生产 QUANT_DBRO_SQL_DIR 为空不走此分支）。
+#   置于固定 SQL 构造**之前**——沙箱路径一律不触库（hub 的选表探测亦不跑）。
 if [ -n "${QUANT_DBRO_SQL_DIR:-}" ]; then
   sbx_dir=$QUANT_DBRO_SQL_DIR
   if [ -f "$sbx_dir/$which_arg.err" ]; then
@@ -64,6 +80,26 @@ if [ -n "${QUANT_DBRO_SQL_DIR:-}" ]; then
   cat "$sbx_dir/$which_arg.out"
   exit 0
 fi
+
+# 固定 SQL（单元名拼装与 server/src 实况一致: trading.py quant-live-task@{tid} /
+# im_bots.py quant-feishu-bot@{bid}；live_task.status 有索引 ix_live_task_status）
+case "$which_arg" in
+  live)
+    sql="SELECT 'quant-live-task@' || id || '.service' FROM live_task WHERE status = 'running'"
+    ;;
+  feishu)
+    sql="SELECT 'quant-feishu-bot@' || id || '.service' FROM im_bot_config WHERE enabled AND provider = 'feishu'"
+    ;;
+  hub)
+    hub_tbl=$(select_trading_table) || exit 1
+    echo "[quant-dbro] hub 选表=$hub_tbl（过渡期双态 TRANSITION-0115）" >&2
+    if [ "$hub_tbl" = trading_account ]; then
+      sql="SELECT id || '|' || provider FROM trading_account WHERE enabled"
+    else
+      sql="SELECT id || '|' || provider FROM external_interface WHERE enabled AND 'trading' = ANY(capabilities)"  # TRANSITION-0115
+    fi
+    ;;
+esac
 
 # 真 psql: 以 quant OS 用户走 PG peer 免密（unix socket，无连串无密码——连接封装于此）。
 #   -tA 每行一个值无表头；ON_ERROR_STOP 保证 SQL/DB 错误非零退出（psql 缺省对 -c 错误

@@ -5,10 +5,16 @@
 # 执行 shared venv——deploy 无权直跑 venv，七跑实锤 EACCES）。
 #
 # 批 66b（D26）v2——DB 驱动期望集 + 两代自适应：
-#   期望集=trading_account enabled 行（批 83a 拆表：external_interface → trading_account，
-#   `'trading' = ANY(capabilities)` 域谓词退役〔表本身即交易域〕；经 psql peer 免密，同 quant-dbro 通道；
-#   provider 白名单过滤在调用方 release.yml——此处验全部期望行，未实现 provider 的行由
-#   波次清单天然不含，期望集层面不过滤防漏报）。
+#   期望集=交易域 enabled 行（经 psql peer 免密，同 quant-dbro 通道；provider 白名单过滤在
+#   调用方 release.yml——此处验全部期望行，未实现 provider 的行由波次清单天然不含，
+#   期望集层面不过滤防漏报）。
+#
+# TRANSITION-0115:收口=0116（批 83a 拆表）全环境上产后，重装位并删除本文件的两态分支
+#   （`select_trading_table` + 标 `# TRANSITION-0115` 的旧态 SQL 行 + 本注记），回到单态
+#   `trading_account`。标记者 = 该行 SQL 属**旧态（0115）**分支，闸门
+#   `server/tests/test_deploy_blast_radius.py` 据此放行退役表名/域谓词；未标记者一律禁。
+#   理由同 quant-dbro：本 wrapper 在**阶段 8 postverify** 跑（alembic 之后），而 release
+#   preflight（quant-dbro hub）在 alembic 之前——单态 wrapper 无装位时序可解（2026-09-30 实查）。
 #   逐行验证 per-account 心跳键 quant:hb:md-hub:{id}：TTL>0 + 8 字段齐 + hash 内 ts 判龄
 #   （≤90s——防旧心跳 90s 残留 TTL 假过）+ 期望集非空断言。
 #   两代自适应：期望 per-account 键全缺且裸键 quant:hb:md-hub 在场 → 回落 legacy 单键校验
@@ -27,9 +33,32 @@ set -a
 set +a
 URL=${QUANT_HB_REDIS_URL:-${VALKEY_URL:-redis://127.0.0.1:6379/4}}
 
-# 期望集：trading_account enabled 行 id 清单（批 83a 拆表——quant 属主 psql peer 免密，连接封装同 dbro）
-EXPECT=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
-  "SELECT id FROM trading_account WHERE enabled")
+# ---- 交易域选表：过渡期双态（TRANSITION-0115——收口条件见文件头；律同 quant-dbro）----
+# TRANSITION-0115:BEGIN（本域含旧表名——闸门据此放行；收口时连同函数整段删除）
+select_trading_table() {
+  local pair
+  pair=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
+    "SELECT (to_regclass('external_interface') IS NOT NULL)::int::text ||
+            (to_regclass('trading_account')    IS NOT NULL)::int::text")
+  case "$pair" in
+    10) printf '%s\n' external_interface ;;
+    01) printf '%s\n' trading_account ;;
+    11) echo "✗ 选表：两态并存（external_interface 与 trading_account 同时在场）——迁移半途/未收口，人工处置" >&2; return 1 ;;
+    00) echo "✗ 选表：两表皆不在位——schema 异常，人工处置" >&2; return 1 ;;
+    *)  echo "✗ 选表：探测输出异常 [$pair]" >&2; return 1 ;;
+  esac
+}
+# TRANSITION-0115:END
+
+# 期望集：交易域 enabled 行 id 清单（quant 属主 psql peer 免密，连接封装同 dbro）
+TRADING_TBL=$(select_trading_table) || exit 1
+echo "[quant-hbcheck] 期望集选表=$TRADING_TBL（过渡期双态 TRANSITION-0115）" >&2
+if [ "$TRADING_TBL" = trading_account ]; then
+  expect_sql="SELECT id FROM trading_account WHERE enabled"
+else
+  expect_sql="SELECT id FROM external_interface WHERE enabled AND 'trading' = ANY(capabilities)"  # TRANSITION-0115
+fi
+EXPECT=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc "$expect_sql")
 
 "$ROOT/shared/venv/bin/python" - "$URL" "$EXPECT" <<'PYEOF'
 import sys
