@@ -1,7 +1,8 @@
 # DEPLOY · 服务器部署运维手册（现行，Ansible 工件化管道）
 
 > 面向**部署运维者**。继任 `scripts/DEPLOY.md`（bash 链已删除，git 史可考 40fb5fa）。
-> 完整制度与设计：`docs/obsolete/任务归档/批3-工件化交付.md` + 记忆 `deploy-mechanism`；本文只给操作。
+> **机制全貌看 `docs/architecture/A06-部署管道架构.md`**（为什么这样设计 / 权限矩阵 / 八阶段语义 / 回滚缺口 / 改链炸半径清单）；
+> 设计稿原始出处 `docs/obsolete/任务归档/批3-工件化交付.md`（v3.3，已归档、内容被 A06 覆盖）。本文只给操作。
 
 ## 三命令（控制机 ~/Projects/quant/deploy 下）
 
@@ -33,7 +34,7 @@
 └── var/                # deploy 状态（指纹/部署日志）
 ```
 
-- **root/michael 退出管道**：deploy 用户经 sudoers 白名单调 9 只 wrapper（quant-svc/quant-pinned/quant-flip-server/quant-alembic-wrapper/quant-importsmoke-wrapper/quant-pip-wrapper/quant-dbro/quant-hbcheck/quant-install-units）——无裸 systemctl/裸 alembic
+- **root/michael 退出管道**：deploy 用户经 sudoers 白名单调 **12 只 wrapper**（root 属主 7：quant-flip-server / **quant-flip-web** / quant-install-units / quant-pinned / **quant-journal** / **quant-emd-build** / quant-svc；quant 属主 5：quant-alembic-wrapper / quant-importsmoke-wrapper / quant-pip-wrapper / **quant-dbro** / **quant-hbcheck**）——无裸 systemctl/裸 alembic/裸 psql。**wrapper 内容变更不进 release 管道，须 michael 重装位才生效**（清单见 `deploy/templates/sudoers-quant-deploy.j2`）
 - **新服务器装机**：`deploy/scripts/bootstrap_server.sh`（一次性加法：deploy 用户/sudoers/wrappers/单元）；本地彩排环境 `bootstrap_staging.sh`
 - **迁移**：随 release 自动走 quant-alembic-wrapper（timeout+ON_ERROR_STOP+破坏性 DDL 门）
 
