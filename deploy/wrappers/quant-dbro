@@ -59,17 +59,22 @@ esac
 #   对两态做本机回归，不必有服务器。
 # TRANSITION-0115:BEGIN（本域含旧表名——闸门据此放行；收口时连同函数整段删除）
 select_trading_table() {
-  local pair
+  local pair tbl
   pair=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
     "SELECT (to_regclass('external_interface') IS NOT NULL)::int::text ||
             (to_regclass('trading_account')    IS NOT NULL)::int::text")
   case "$pair" in
-    11) printf '%s\n' trading_account ;;      # expand 并存态：新表即真源
-    01) printf '%s\n' trading_account ;;      # contract（0122）后
-    10) printf '%s\n' external_interface ;;   # 真 0115（本版上产前）
+    11) tbl=trading_account ;;      # expand 并存态：新表即真源
+    01) tbl=trading_account ;;      # contract（0122）后
+    10) tbl=external_interface ;;   # 真 0115（本版上产前）
     00) echo "✗ 选表：两表皆不在位——schema 异常，人工处置" >&2; return 1 ;;
     *)  echo "✗ 选表：探测输出异常 [$pair]" >&2; return 1 ;;
   esac
+  # 可观测性（2026-10-01）：选表行回带原始 pair——此前 01（仅新表）与 11（两表并存）打印同款，
+  # 无法从日志分辨是否仍在 expand 态（prod 上产核验时差点误判）。诊断走 stderr（命令替换
+  # 捕获不到 stderr，不污染 stdout）；stdout 仍纯表名，调用方直接拼 SQL。
+  echo "[quant-dbro] 选表=$tbl（pair=$pair，过渡期双态 TRANSITION-0115）" >&2
+  printf '%s\n' "$tbl"
 }
 # TRANSITION-0115:END
 
@@ -98,7 +103,6 @@ case "$which_arg" in
     ;;
   hub)
     hub_tbl=$(select_trading_table) || exit 1
-    echo "[quant-dbro] hub 选表=$hub_tbl（过渡期双态 TRANSITION-0115）" >&2
     if [ "$hub_tbl" = trading_account ]; then
       sql="SELECT id || '|' || provider FROM trading_account WHERE enabled"
     else

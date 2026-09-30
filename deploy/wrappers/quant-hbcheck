@@ -40,23 +40,26 @@ URL=${QUANT_HB_REDIS_URL:-${VALKEY_URL:-redis://127.0.0.1:6379/4}}
 #   expand 并存态 / contract 后 → trading_account（新表=真源；并存时优先取它，防期望集漂移）
 # TRANSITION-0115:BEGIN（本域含旧表名——闸门据此放行；收口时连同函数整段删除）
 select_trading_table() {
-  local pair
+  local pair tbl
   pair=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
     "SELECT (to_regclass('external_interface') IS NOT NULL)::int::text ||
             (to_regclass('trading_account')    IS NOT NULL)::int::text")
   case "$pair" in
-    11) printf '%s\n' trading_account ;;      # expand 并存态：新表即真源
-    01) printf '%s\n' trading_account ;;      # contract（0122）后
-    10) printf '%s\n' external_interface ;;   # 真 0115（本版上产前）
+    11) tbl=trading_account ;;      # expand 并存态：新表即真源
+    01) tbl=trading_account ;;      # contract（0122）后
+    10) tbl=external_interface ;;   # 真 0115（本版上产前）
     00) echo "✗ 选表：两表皆不在位——schema 异常，人工处置" >&2; return 1 ;;
     *)  echo "✗ 选表：探测输出异常 [$pair]" >&2; return 1 ;;
   esac
+  # 可观测性（2026-10-01）：选表行回带原始 pair——01（仅新表）与 11（两表并存）打印同款
+  # 曾致无法从日志分辨是否仍在 expand 态。诊断走 stderr；stdout 仍纯表名。
+  echo "[quant-hbcheck] 选表=$tbl（pair=$pair，过渡期双态 TRANSITION-0115）" >&2
+  printf '%s\n' "$tbl"
 }
 # TRANSITION-0115:END
 
 # 期望集：交易域 enabled 行 id 清单（quant 属主 psql peer 免密，连接封装同 dbro）
 TRADING_TBL=$(select_trading_table) || exit 1
-echo "[quant-hbcheck] 期望集选表=$TRADING_TBL（过渡期双态 TRANSITION-0115）" >&2
 if [ "$TRADING_TBL" = trading_account ]; then
   expect_sql="SELECT id FROM trading_account WHERE enabled"
 else

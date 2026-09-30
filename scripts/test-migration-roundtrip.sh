@@ -223,10 +223,134 @@ chk "upgrade 渲染以 COMMIT 收尾" "$(tail -2 "$tmp/up.sql" | grep -c '^COMMI
 rm -rf "$tmp"
 }
 
+# ── 用例 D：0122 contract（两步走收口步：DROP 旧表），2026-10-01 ──
+# 前置 = 0116 expand 后的**并存态**（0121）：两新表为真源 + 旧表留存（停止写入的陈旧快照）
+# + 7 子表 FK 已重指 trading_account。旧表里故意留一条「并存期被删账号」的陈旧行（id=3）——
+# 验证「重建以新表为真源」：陈旧行不得复活。
+FROM_D=0121
+TO_D=0122
+
+fixture_contract() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE data_source (
+  id bigserial PRIMARY KEY, name text NOT NULL, provider text NOT NULL, market text NOT NULL,
+  credentials_encrypted text, params jsonb, capabilities text[] NOT NULL,
+  position integer NOT NULL DEFAULT 0, enabled boolean DEFAULT true,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
+CREATE TABLE trading_account (
+  id bigserial PRIMARY KEY, name text NOT NULL, provider text NOT NULL, market text NOT NULL,
+  exchanges text[], account_key text, credentials_encrypted text, params jsonb,
+  capabilities text[] NOT NULL, position integer NOT NULL DEFAULT 0, enabled boolean DEFAULT true,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
+CREATE UNIQUE INDEX ix_trading_account_account_key ON trading_account(provider, account_key);
+CREATE TABLE external_interface (
+  id bigserial PRIMARY KEY, name text NOT NULL, provider text NOT NULL, market text NOT NULL,
+  exchanges text[], credentials_encrypted text, params jsonb, capabilities text[] NOT NULL,
+  position integer NOT NULL DEFAULT 0, enabled boolean DEFAULT true,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(), account_key text);
+CREATE UNIQUE INDEX ix_external_interface_account_key ON external_interface(provider, account_key);
+CREATE TABLE live_task (id bigserial PRIMARY KEY, account_id bigint,
+  CONSTRAINT fk_live_task_account FOREIGN KEY (account_id) REFERENCES trading_account(id) ON DELETE RESTRICT);
+CREATE TABLE position_snapshot (id bigserial PRIMARY KEY, account_id bigint,
+  CONSTRAINT fk_position_snapshot_account FOREIGN KEY (account_id) REFERENCES trading_account(id) ON DELETE CASCADE);
+CREATE TABLE position_refresh (id bigserial PRIMARY KEY, account_id bigint,
+  CONSTRAINT fk_position_refresh_account FOREIGN KEY (account_id) REFERENCES trading_account(id) ON DELETE CASCADE);
+CREATE TABLE account_snapshot (id bigserial PRIMARY KEY, account_id bigint,
+  CONSTRAINT fk_account_snapshot_account FOREIGN KEY (account_id) REFERENCES trading_account(id) ON DELETE CASCADE);
+CREATE TABLE order_log (id bigserial PRIMARY KEY, account_id bigint,
+  CONSTRAINT fk_order_log_account FOREIGN KEY (account_id) REFERENCES trading_account(id) ON DELETE SET NULL);
+CREATE TABLE trade_log (id bigserial PRIMARY KEY, account_id bigint,
+  CONSTRAINT fk_trade_log_account FOREIGN KEY (account_id) REFERENCES trading_account(id) ON DELETE SET NULL);
+CREATE TABLE account_permission (account_id bigint PRIMARY KEY,
+  CONSTRAINT account_permission_account_id_fkey FOREIGN KEY (account_id) REFERENCES trading_account(id) ON DELETE CASCADE);
+INSERT INTO trading_account (id, name, provider, market, capabilities, exchanges, account_key) VALUES
+  (1, 'xtp主','xtp','astock','{trading,rt_quote}','{SSE,SZSE}','8888');
+INSERT INTO data_source (id, name, provider, market, capabilities) VALUES
+  (2, 'tushare源','tushare','astock','{hist_quote}');
+-- 旧表 = 0116 搬迁时刻的陈旧快照 + 一条「并存期被删账号」（id=3，新表里已无此行）
+INSERT INTO external_interface (id, name, provider, market, capabilities, exchanges, account_key) VALUES
+  (1, 'xtp主','xtp','astock','{trading,rt_quote}','{SSE,SZSE}','8888'),
+  (2, 'tushare源','tushare','astock','{hist_quote}',NULL,NULL),
+  (3, '已删账号','xtp','astock','{trading}','{SSE}','9999');
+-- 序列复位（对齐 0116 upgrade 的真实后置态：显式 id 插入后必须 setval，
+-- 否则用例 E 的自增插入会 nextval=1 撞自家主键、静默失败，造不出撞号）
+SELECT setval(pg_get_serial_sequence('trading_account','id'), (SELECT max(id) FROM trading_account));
+SELECT setval(pg_get_serial_sequence('data_source','id'),    (SELECT max(id) FROM data_source));
+SQL
+}
+
+case_d() {
+echo
+echo "########## 用例 D：0122 contract（并存 → 旧表消失 → 降级重建） ##########"
+reset_scratch
+fixture_contract
+stamp "$FROM_D"
+step up "$TO_D" "D1 upgrade（DROP 旧表）"
+
+chk "旧表已消失（contract 关键）" "$(q "select to_regclass('external_interface') is null")" "t"
+chk "两新表仍在（真源不动）" "$(q "select (to_regclass('data_source') is not null) and (to_regclass('trading_account') is not null)")" "t"
+chk "子表 FK 不受 0122 影响" "$(fktargets)" "trading_account"
+
+step down "$FROM_D" "D2 downgrade（重建旧表）"
+
+chk "旧表已重建" "$(q "select to_regclass('external_interface') is not null")" "t"
+chk "行数=新表合并（陈旧行 id=3 不复活）" "$(q "select count(*) from external_interface")" "2"
+chk "陈旧行确未复活" "$(q "select count(*) from external_interface where id=3")" "0"
+chk "交易行整行回填（exchanges/account_key）" "$(q "select exchanges::text||'/'||account_key from external_interface where id=1")" "{SSE,SZSE}/8888"
+chk "数据源行 exchanges/account_key 为 NULL" "$(q "select exchanges is null and account_key is null from external_interface where id=2")" "t"
+chk "重建含 0099 唯一索引" "$(q "select count(*) from pg_indexes where schemaname='$SCRATCH' and tablename='external_interface' and indexname='ix_external_interface_account_key'")" "1"
+chk "子表 FK 仍指 trading_account（0122 不动 FK）" "$(fktargets)" "trading_account"
+chk "两新表仍在" "$(q "select (to_regclass('data_source') is not null) and (to_regclass('trading_account') is not null)")" "t"
+}
+
+# ── 用例 E：contract 降级的跨域撞号拦停（同 0116 的 B 用例，钉 0122 的 downgrade 断言） ──
+case_e() {
+echo
+echo "########## 用例 E：contract 降级撞号（须响亮拦停） ##########"
+reset_scratch
+fixture_contract
+stamp "$FROM_D"
+step up "$TO_D" "E1 upgrade"
+x "insert into trading_account (name,provider,market,capabilities,exchanges) values ('新交易账号','xtp','astock','{trading}','{SSE}')"
+echo "    trading_account ids=$(q "select string_agg(id::text,',') from trading_account")  data_source ids=$(q "select string_agg(id::text,',') from data_source")  ← 撞号"
+a="$(alp downgrade "$FROM_D")"
+if echo "$a" | grep -q '撞号'; then
+  echo "  ✓ 降级被响亮拦停"; echo "    $(echo "$a" | grep -m1 '撞号')"
+else
+  echo "  ✗ 撞号未被拦停（或错误形态不对）"; echo "$a" | tail -8; FAIL=1
+fi
+chk "被拦停后旧表未半建" "$(q "select to_regclass('external_interface') is null")" "t"
+}
+
+# ── 用例 F：0122 离线渲染完整性（不连库） ──
+case_f() {
+echo
+echo "########## 用例 F：0122 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_D:$TO_D" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_D:$FROM_D" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染未被截断（含版本推进）" "$(grep -c "SET version_num='$TO_D'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染未被截断（含版本回退）" "$(grep -c "SET version_num='$FROM_D'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含 DROP TABLE IF EXISTS" "$(grep -c 'DROP TABLE IF EXISTS external_interface' "$tmp/up.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D） ##########"
 precheck
 case_a
 case_b
 case_c
+case_d
+case_e
+case_f
 finish
