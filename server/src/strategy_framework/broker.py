@@ -1,7 +1,7 @@
 """交易通道抽象基类（平台化：别人实现接口接入自己的券商/交易所）。
 
 接口：get_credentials() / test_connection()。
-实现：XTPBroker / BinanceBroker / OKXBroker（凭证从 external_interface 交易域行读，批55a 合表）。
+实现：XTPBroker / BinanceBroker / OKXBroker（凭证从 trading_account 表读，批 83a 拆表）。
 ExecutionAdapter 已有交易接口（send_order/cancel/query），Broker 抽象"配置 + 连接测试"。
 别人加 IB/CTP：实现 Broker 子类 + DB 配置。
 """
@@ -81,10 +81,11 @@ _REGISTRY: dict[str, type[Broker]] = {
 
 
 def get_broker(provider: str, row_id: int | None = None) -> Broker | None:
-    """从 DB external_interface 交易域行实例化通道（批55a 合表）。
+    """从 DB trading_account 表实例化通道（批 83a 拆表——原 external_interface 交易域行）。
 
-    row_id 指定行（M5：B 实例 HUB_INTERFACE_ROW 选账号，按 id 直取不限制能力域）；
-    缺省=域内 position 序首行（勘察 #4：确定性排序防多账号选行漂移）。
+    row_id 指定行（M5：B 实例 HUB_INTERFACE_ROW 选账号，按 id 直取）；
+    缺省=表内 position 序首行（勘察 #4：确定性排序防多账号选行漂移）。
+    83a 拆表后表内行恒为交易账号（原 `'trading' = ANY(capabilities)` 域谓词在表层面退役）。
     """
     cls = _REGISTRY.get(provider)
     if not cls:
@@ -94,12 +95,12 @@ def get_broker(provider: str, row_id: int | None = None) -> Broker | None:
         with get_conn() as conn:
             if row_id is not None:
                 cur = conn.execute(
-                    "SELECT credentials_encrypted, params FROM external_interface "
+                    "SELECT credentials_encrypted, params FROM trading_account "
                     "WHERE id=%s AND provider=%s AND enabled=true", (row_id, provider))
             else:
                 cur = conn.execute(
-                    "SELECT credentials_encrypted, params FROM external_interface "
-                    "WHERE provider=%s AND enabled=true AND 'trading' = ANY(capabilities) "
+                    "SELECT credentials_encrypted, params FROM trading_account "
+                    "WHERE provider=%s AND enabled=true "
                     "ORDER BY position, id LIMIT 1", (provider,))
             r = cur.fetchone()
         if not r:
@@ -107,7 +108,7 @@ def get_broker(provider: str, row_id: int | None = None) -> Broker | None:
         params_str = json.dumps(r[1]) if isinstance(r[1], dict) else r[1]   # jsonb→str 喂 __init__ 契约
         return cls(credentials_encrypted=r[0], params=params_str)
     except Exception as e:
-        logger.warning(f"读 external_interface({provider}) 失败: {e}")
+        logger.warning(f"读 trading_account({provider}) 失败: {e}")
         return None
 
 
@@ -200,7 +201,7 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
                 return setting
         if row_id is not None:
             # M5：指定 B 行但取数失败/凭证不完整 → fail-fast，禁 .env fallback
-            raise RuntimeError(f"external_interface 行 id={row_id} 无 XTP 凭证或凭证不完整")
+            raise RuntimeError(f"trading_account 行 id={row_id} 无 XTP 凭证或凭证不完整")
     except Exception as e:
         if row_id is not None:
             raise   # fail-fast 上抛（消费方捕获 → exit 78）
@@ -213,7 +214,7 @@ def build_xtp_setting(client_id: int | None = None, row_id: int | None = None) -
 
 
 def get_interface_row(row_id: int, md_only: bool = False) -> dict:
-    """读 external_interface 交易域行（批 63 二：hub 网关按行 provider 选插件）。
+    """读 trading_account 行（批 63 二：hub 网关按行 provider 选插件；批 83a 拆表）。
 
     返回 {provider, credentials(解密 dict), params, market, capabilities}。
     - **row_id 必填**（批 66a，D26 #6）：缺省选行分支退役——None raise ValueError
@@ -232,10 +233,10 @@ def get_interface_row(row_id: int, md_only: bool = False) -> dict:
         with get_conn() as conn:
             cur = conn.execute(
                 "SELECT provider, credentials_encrypted, params, market, capabilities "
-                "FROM external_interface WHERE id=%s AND enabled=true", (row_id,))
+                "FROM trading_account WHERE id=%s AND enabled=true", (row_id,))
             r = cur.fetchone()
         if not r:
-            raise RuntimeError(f"external_interface 无可用行（row_id={row_id}，网关 providers={gw_providers}）")
+            raise RuntimeError(f"trading_account 无可用行（row_id={row_id}，网关 providers={gw_providers}）")
         cred = {}
         if r[1]:
             try:
@@ -258,12 +259,12 @@ def get_interface_row(row_id: int, md_only: bool = False) -> dict:
         return {"provider": r[0], "credentials": cred, "params": params,
                 "market": r[3], "capabilities": list(r[4] or [])}
     except Exception as e:
-        logger.warning("读 external_interface 失败: %s", e)
+        logger.warning("读 trading_account 失败: %s", e)
         raise
 
 
 def get_xtp_param(key: str, default=None):
-    """读 external_interface xtp 交易域行 params JSON 的指定键（通道级配置正位）；缺省/异常回 default。"""
+    """读 trading_account xtp 行 params JSON 的指定键（通道级配置正位）；缺省/异常回 default。"""
     try:
         broker = get_broker("xtp")
         if broker:

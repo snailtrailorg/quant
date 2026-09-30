@@ -104,8 +104,8 @@ class TestAccountPermissionSeed:
         with get_conn() as conn:
             n = conn.execute(
                 "SELECT count(*) FROM account_permission vp "
-                "JOIN external_interface e ON e.id = vp.account_id "
-                "WHERE 'trading' = ANY(e.capabilities) AND e.market='astock'").fetchone()[0]
+                "JOIN trading_account e ON e.id = vp.account_id "
+                "WHERE e.market='astock'").fetchone()[0]
         assert n >= 1
 
     def test_account_allows_seeded_account(self):
@@ -113,8 +113,7 @@ class TestAccountPermissionSeed:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             vid = conn.execute(
-                "SELECT e.id FROM external_interface e "
-                "WHERE 'trading' = ANY(e.capabilities) AND e.provider='xtp' LIMIT 1").fetchone()
+                "SELECT id FROM trading_account WHERE provider='xtp' LIMIT 1").fetchone()
         if vid is None:
             pytest.skip("无 xtp 交易 account")
         assert account_allows(vid[0], "600000.SHSE") is True

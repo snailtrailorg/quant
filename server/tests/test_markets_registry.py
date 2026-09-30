@@ -40,7 +40,14 @@ def test_sync_id_cap_map_covers_30():
 
 
 def test_cap_label_mirror():
-    """批 64a：能力标签三处镜像守门——markets.py（token+zh 标签）/ InterfacesCard CAP_TOKENS / locales cap_* 词条。
+    """能力词表守门：后端 token 单一真源 + 前端零字面量消费 + locales 标签全覆盖。
+
+    批 83a 重构：原「三处镜像」（markets.py / InterfacesCard CAP_TOKENS / locales cap_*）
+    退化为「一处真源 + 一层派生」——前端曾镜像 5 token 字面量，拆表后由 `/providers`
+    响应回 `domain_capabilities`（同源 `markets.DOMAIN_CAPS`），镜像点消除（镜像=漂移源）。
+    故 ① 由「字面量 == CAPABILITIES」改为「无字面量 + 真消费 registry 字段」——
+    更严的等价物：断言零字面量防止镜像回潮，再断言消费链不断（配合 test_config_plane
+    的 `/providers` 响应断言，构成 后端词表 → HTTP → 前端 的完整链路钉）。
 
     N 语言架构兼容（加语言=只加条目零逻辑改动）：断言「全键等频 ≥2」而非「恰 2 次」——
     等频断裂=某语言漏条目，恰好是要抓的漂移；zh 块在前（缺省语言），首现值==后端标签。
@@ -52,11 +59,12 @@ def test_cap_label_mirror():
 
     web_root = Path(__file__).resolve().parents[2] / "web" / "src"
 
-    # ① 前端 CAP_TOKENS 字面量 == 后端 CAPABILITIES
+    # ① 前端零字面量（83a）：能力 token 表不再前端镜像
     vue = (web_root / "components" / "InterfacesCard.vue").read_text(encoding="utf-8")
-    m = re.search(r"CAP_TOKENS\s*=\s*\[([^\]]*)\]", vue)
-    assert m, "InterfacesCard.vue CAP_TOKENS 未命中（组件重构？）"
-    assert set(re.findall(r"['\"](\w+)['\"]", m.group(1))) == set(CAPABILITIES)
+    assert not re.search(r"CAP_TOKENS\s*=\s*\[", vue), \
+        "InterfacesCard.vue 重现能力 token 字面量镜像（83a 已改注册表驱动，镜像=漂移源）"
+    assert "domain_capabilities" in vue, \
+        "InterfacesCard.vue 未消费后端 domain_capabilities 字段（能力集来源断链）"
 
     # ② locales cap_* 词条：全键等频 ≥2，zh 首现值==CAP_CLASS_LABELS
     js = (web_root / "locales" / "index.js").read_text(encoding="utf-8")

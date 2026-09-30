@@ -1,7 +1,9 @@
 <template>
-  <!-- D25:外部接口页（单列表——数据源与交易账户页签合并立法：多能力接口只出现一次）。
-      表格+弹窗+拖拽+能力筛选归 InterfacesCard;本页保留特有件:
-      今日调用量卡片+Tushare 限速/熔断折叠面板+API 密钥账户卡（原交易页内容并入）。 -->
+  <!-- 批 83a：集成中心「数据源」页签（拉取侧）——83a 拆表后原单列表按域拆两页签：
+       本页=数据源（Tushare 等拉取侧账号）；交易账号见 TradingAccounts.vue。
+       表格+弹窗+拖拽+能力筛选归 InterfacesCard（kind 参数化）；本页保留特有件：
+       今日调用量卡片 + Tushare 限速/熔断折叠面板（数据源侧运维参数）。
+       API 密钥账户卡（P4-5 accounts 表，实盘任务绑定用）随账号语义迁「交易账号」页签。 -->
   <div>
     <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
@@ -15,8 +17,7 @@
         <el-table-column prop="avg_latency" :label="t('common.avgLatency')" min-width="166" />
       </TableShell>
     </el-card>
-    <InterfacesCard @loaded="onRowsChanged" />
-    <AccountsCard />
+    <InterfacesCard kind="data_source" @loaded="onRowsChanged" />
     <template v-if="tushareExists">
       <el-divider />
       <el-collapse>
@@ -67,20 +68,20 @@ import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import TableShell from '../components/TableShell.vue'
 import InterfacesCard from '../components/InterfacesCard.vue'
-import AccountsCard from '../components/AccountsCard.vue'
 import { apiErr, getDataSourceUsage, getRateLimits, setRateLimitOverride } from '../api'
 import { ElMessage } from 'element-plus'
 
 const { t } = useI18n()
 const usage = ref({ today: [], trend: [] })
 
-// 限速/熔断（provider 键端点不变）：数据域存在 tushare 行即显示——随 CRUD 联动（盲审 A-P1-2：旧快照式滞留）
+// 限速/熔断（provider 键端点不变）：本页（数据源域）存在 tushare 行即显示——随 CRUD 联动
+// （盲审 A-P1-2：旧快照式滞留；83a 拆表后本页签即数据源域，无需再按能力排除交易行）
 const tushareExists = ref(false)
 const presets = ref({ apis: [] })
 const cb = ref({ fail_threshold: 5, reset_timeout: 60 })
 
 const onRowsChanged = (allRows) => {
-  tushareExists.value = (allRows || []).some(r => r.provider === 'tushare' && !(r.capabilities || []).includes('trading'))
+  tushareExists.value = (allRows || []).some(r => r.provider === 'tushare')
   loadPresets()
 }
 

@@ -112,21 +112,21 @@ def verify_server_endpoints():
 
 
 def verify_broker_config():
-    """验证 external_interface 交易域有 XTP 配置（批55a 合表）。"""
+    """验证 trading_account 有 XTP 配置（批 83a 拆表）。"""
     print("\n=== 5. 交易接口配置 ===")
     from src.data_platform.db import get_conn
     try:
         with get_conn() as conn:
-            cur = conn.execute("SELECT id, name, provider, enabled FROM external_interface "
+            cur = conn.execute("SELECT id, name, provider, enabled FROM trading_account "
                                "WHERE provider='xtp' AND 'trading' = ANY(capabilities)")
             rows = cur.fetchall()
             if rows:
                 check("XTP broker 配置", True,
                       "; ".join(f"id={r[0]} name={r[1]} enabled={r[3]}" for r in rows))
             else:
-                check("XTP broker 配置", False, "external_interface 无 xtp 交易行（用 .env 备选）")
+                check("XTP broker 配置", False, "trading_account 无 xtp 行（用 .env 备选）")
     except Exception as e:
-        check("external_interface 查询", False, str(e))
+        check("trading_account 查询", False, str(e))
 
 
 def verify_services():

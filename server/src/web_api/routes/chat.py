@@ -67,7 +67,7 @@ def _execute_readonly_tool(tool_name: str, args: str) -> str:
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT DISTINCT ON (a.account_id) a.account_id, a.total_value, e.name "
-                    "FROM account_snapshot a JOIN external_interface e ON e.id=a.account_id "
+                    "FROM account_snapshot a JOIN trading_account e ON e.id=a.account_id "
                     "ORDER BY a.account_id, a.ts DESC")
                 rows = cur.fetchall()
             if not rows:
@@ -78,7 +78,7 @@ def _execute_readonly_tool(tool_name: str, args: str) -> str:
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT DISTINCT ON (a.account_id) a.account_id, a.total_value, a.daily_pnl, a.initial_capital, e.name "
-                    "FROM account_snapshot a JOIN external_interface e ON e.id=a.account_id "
+                    "FROM account_snapshot a JOIN trading_account e ON e.id=a.account_id "
                     "ORDER BY a.account_id, a.ts DESC")
                 rows = cur.fetchall()
             if not rows:

@@ -127,7 +127,7 @@ export default {
       sync: '同步任务', integrity: '完整性体检', quality: '股票清单核对', sched: '调度',
       logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 im: 'IM 机器人', mail: '邮件 SMTP',
-      llm: 'LLM 模型', interfaces: '外部接口', sms: '短信通道',   // 批43 改名（文案师）
+      llm: 'LLM 模型', dataSources: '数据源', tradingAccounts: '交易账号', sms: '短信通道',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签
       run: '运行配置', users: 'API 密钥', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
     },
     emailChg: {   // 批20 20C：改邮箱（文案经文案师）
@@ -946,12 +946,14 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       cbResetTimeout: '半开探测等待（秒）',
       cbSaved: '熔断参数已保存（新进程生效）',
     },
-    interfaces: {   // 批55b:外部接口统一表两页签（文案师终稿）
-      cardTitle: '外部接口（数据源与交易账户）',
+    interfaces: {   // 批55b:外部接口统一表两页签（文案师终稿）   // 批83a:统一表拆两族——两页签各自成卡（cardTitleData/cardTitleTrading）
+      cardTitleData: '数据源',
+      cardTitleTrading: '交易账号',
       capFilterPh: '按能力筛选',
       colMarket: '市场',
       colCapabilities: '支持项',
       colExchanges: '覆盖交易所',
+      colAccountKey: '资金账号',
       allExchanges: '全部',
       orderNote: '拖动调整顺序：同一供应商配了多个账号时，排在前面的先用。筛选状态下不可拖动。',
       addTitle: '添加接口',
@@ -961,6 +963,8 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       capsLabel: '支持项',
       exchangesLabel: '覆盖交易所',
       exchangesNote: '不选表示覆盖该市场的全部交易所；需要限定范围时再勾选。',
+      accountKeyLabel: '资金账号',
+      accountKeyPh: '如 1234567，用于区分同一供应商下的多个账户',
       credentialNote: '留空表示不修改已保存的凭证。',
       marketAstock: 'A股',
       marketCrypto: '加密',
@@ -1540,7 +1544,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       sync: 'Sync Tasks', integrity: 'Integrity', quality: 'Stock List Check', sched: 'Scheduler',
       logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名
 im: 'IM Bots', mail: 'Email SMTP',
-      llm: 'LLM Models', interfaces: 'External Interfaces', sms: 'SMS Channels',   // 批37
+      llm: 'LLM Models', dataSources: 'Data Sources', tradingAccounts: 'Trading Accounts', sms: 'SMS Channels',   // 批37   // 批83a
       run: 'Run Config', users: 'API Keys', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
     },
     emailChg: {
@@ -2354,12 +2358,14 @@ im: 'IM Bots', mail: 'Email SMTP',
       cbResetTimeout: 'Half-open wait (s)',
       cbSaved: 'Circuit breaker params saved (applies to new processes)',
     },
-    interfaces: {   // 批55b:外部接口统一表两页签（文案师终稿）
-      cardTitle: 'External Interfaces (data sources & trading accounts)',
+    interfaces: {   // 批55b:外部接口统一表两页签（文案师终稿）   // 批83a:统一表拆两族——两页签各自成卡（cardTitleData/cardTitleTrading）
+      cardTitleData: 'Data Sources',
+      cardTitleTrading: 'Trading Accounts',
       capFilterPh: 'Filter by capability',
       colMarket: 'Market',
       colCapabilities: 'Provides',
       colExchanges: 'Exchanges',
+      colAccountKey: 'Fund Account',
       allExchanges: 'All',
       orderNote: 'Drag to reorder. When a provider has multiple accounts, the top one is used first. Dragging is disabled while a filter is active.',
       addTitle: 'Add Interface',
@@ -2369,6 +2375,8 @@ im: 'IM Bots', mail: 'Email SMTP',
       capsLabel: 'Provides',
       exchangesLabel: 'Exchanges',
       exchangesNote: 'Leave empty to cover every exchange in this market; select only to limit the scope.',
+      accountKeyLabel: 'Fund Account',
+      accountKeyPh: 'e.g. 1234567 — distinguishes multiple accounts under one vendor',
       credentialNote: 'Leave blank to keep the saved credentials.',
       marketAstock: 'A-shares',
       marketCrypto: 'Crypto',

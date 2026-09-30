@@ -30,7 +30,7 @@ _sync_log_table_created = False
 
 
 def _get_pro():
-    """从 external_interface 数据域行读 Tushare（DB 优先，.env fallback）。静态/日历/三档专用。"""
+    """从 data_source 表读 Tushare（DB 优先，.env fallback；批 83a 拆表）。静态/日历/三档专用。"""
     from src.data_platform.data_source import get_data_source
     ds = get_data_source("tushare")
     if ds:

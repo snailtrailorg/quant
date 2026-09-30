@@ -5,8 +5,9 @@
 - 能力真源=DataKind(contract.py 27 词);能力集=派生归类视图(KIND_CAP_CLASS 单源映射,
   非独立建模);配置列恒为「用户启用子集」(写侧校验 ⊆)
 - 词表三层(D25):代码层 sync_id(品类×粒度复合串) → DataKind(细粒度能力) → 能力集 token(5 类)
-- token 立法:trading 保词(8 处 SQL 域谓词 'trading'=ANY(capabilities) 零改动——实盘选账号链路),
-  daily/minute/snapshot/quote 四旧词退役(SQL 消费唯 routing._CAP_KIND_ALIASES 一处随派生表重写)
+- token 立法:trading 保词(**能力集 token 名不动**);批 83a 拆表后 `'trading' = ANY(capabilities)`
+  域谓词在表层面退役(域=表,见 DOMAIN_* 段)——只剩能力集校验用途
+- daily/minute/snapshot/quote 四旧词退役(SQL 消费唯 routing._CAP_KIND_ALIASES 一处随派生表重写)
 """
 from __future__ import annotations
 
@@ -103,6 +104,21 @@ PROVIDER_MARKET: dict[str, str] = {
     "tushare": "astock", "joinquant": "astock", "ricequant": "astock", "tencent": "astock",
     "xtp": "astock", "binance_perp": "crypto", "okx_perp": "crypto",
     "emt_emq": "astock",
+}
+
+# 批 83a 拆表立法（2026-09-29 用户裁定·抽象判据）：行的边界=账号，**域=表**。
+# 两个配置域 = 两张表 = 两个端点族（三者同源）。域词=表名（避免与能力 token 'trading' 撞词）。
+# 合表时代（55a external_interface）用 `'trading' = ANY(capabilities)` 域谓词临时区分两类账号；
+# 拆表后该谓词**在表层面退役**（表本身即域，消费侧零谓词）。
+DOMAIN_DATA = "data_source"          # 数据源域（拉取侧：token/限速/熔断/用量/pacer）
+DOMAIN_TRADING = "trading_account"   # 交易账号域（下单/行情侧：连接参数/资金账号/交易所覆盖）
+
+# 域能力集（收窄立法）：写入某域行的 capabilities 必须 ⊆ 该域集。
+# 合表时代可建出「交易行挂 hist_quote」这类揉合行；拆表后写侧不可能建出（前端每页签也收窄）。
+# 两集互斥且并集=CAPABILITIES（test_markets_registry 断言守门）。
+DOMAIN_CAPS: dict[str, tuple] = {
+    DOMAIN_DATA: ("hist_quote", "ref_data", "inst_event"),
+    DOMAIN_TRADING: ("rt_quote", "trading"),
 }
 
 # 权限五键 → (market, category, exchange) 无损映射(market_op 三分混一的立法化解)

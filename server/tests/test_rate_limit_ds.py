@@ -112,6 +112,9 @@ class _FakeConn:
     def commit(self):
         pass
 
+    def rollback(self):
+        pass
+
 
 @pytest.fixture
 def admin_client():
@@ -127,9 +130,10 @@ def admin_client():
 
 class _ConnPatch:
     def __init__(self, row):
-        import src.web_api.routes.mgmt as mgmt
+        # 批 83a：限流参数读写已下沉 config_store（层 1）——补丁点随之下移
+        import src.data_platform.config_store as cs
         self.conn = _FakeConn(row)
-        self._p = patch.object(mgmt, "get_conn", lambda: self.conn)
+        self._p = patch.object(cs, "get_conn", lambda: self.conn)
 
     def __enter__(self):
         self._p.start()

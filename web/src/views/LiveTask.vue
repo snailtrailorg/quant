@@ -159,7 +159,9 @@ const accounts = ref([])
 const symbolOptions = ref([])
 const symbolSearching = ref(false)
 const loadAccounts = async () => {
-  try { accounts.value = await getInterfaces('trading') || [] } catch { accounts.value = [] }
+  // 批83a：拆表后实盘任务绑定的是交易账号族（域=trading_account）——旧 'trading' 是能力 token 不是域；
+  // 仍按 trading 能力筛选（行为不变：纯行情账号不进出绑定下拉，live_task.account_id FK 指向 trading_account.id）
+  try { accounts.value = await getInterfaces('trading_account', 'trading') || [] } catch { accounts.value = [] }
 }
 const searchSymbols = async (q) => {
   if (!q || q.length < 2) { symbolOptions.value = []; return }

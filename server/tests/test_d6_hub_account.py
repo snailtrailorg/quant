@@ -45,7 +45,7 @@ class TestDesiredUnitsCryptoHub:
         with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
             T._desired_units(conn)
         sqls = [c.args[0] for c in conn.execute.call_args_list]
-        hub_sql = [s for s in sqls if "external_interface" in s]
+        hub_sql = [s for s in sqls if "trading_account" in s]
         assert hub_sql and not any("market='crypto'" in s for s in hub_sql)
 
 

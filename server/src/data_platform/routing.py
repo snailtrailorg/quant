@@ -50,7 +50,7 @@ _R = None
 
 @dataclass(frozen=True)
 class Candidate:
-    """resolve 产物的一档候选（29 号 §五）。account=external_interface 行快照 dict。"""
+    """resolve 产物的一档候选（29 号 §五）。account=data_source 行快照 dict（83a 拆表后=数据源侧）。"""
     adapter: str                    # provider 名（local_pg 为保留名）
     account: dict | None            # local_pg 无账号语义=None
     is_local: bool
@@ -197,9 +197,11 @@ def _load_state(force: bool = False) -> _TableState:
             return _STATE
         rows, policy = [], {}
         with get_conn() as conn:
+            # 批 83a 拆表：路由表读「数据源」侧（data_source）——原 external_interface 混表已拆，
+            # exchanges 列随交易侧迁走（数据源无该列，_row_covers 走 row.get 缺项→None=全所语义）
             cur = conn.execute(
-                "SELECT id, provider, market, exchanges, capabilities, params, position, enabled "
-                "FROM external_interface ORDER BY position, id")
+                "SELECT id, provider, market, capabilities, params, position, enabled "
+                "FROM data_source ORDER BY position, id")
             cols = [d[0] for d in cur.description]
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
             cur = conn.execute("SELECT consumer_tag, weights, bulkhead_defaults FROM routing_policy")
@@ -312,6 +314,7 @@ def _row_covers(sm, row, symbols) -> bool:
     from src.quant_common.contract import Scope
     market = row.get("market") or ""
     markets = frozenset({market}) if market else frozenset(_LOCAL_MARKETS)
+    # 83a 拆表后行来自 data_source（无 exchanges 列）→ 恒 None = 该市场全所（原 NULL 语义一致）
     exchanges = row.get("exchanges")
     scope = Scope(markets,
                   frozenset(exchanges) if isinstance(exchanges, (list, tuple)) and exchanges else None,

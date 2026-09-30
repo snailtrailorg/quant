@@ -78,7 +78,7 @@ class MdGateway(ABC):
 
     @abstractmethod
     def connect(self, cred: dict, params: dict) -> None:
-        """建连（凭证/参数来自 external_interface 行解密；会话窗策略由实现内部管理）。"""
+        """建连（凭证/参数来自 trading_account 行解密；会话窗策略由实现内部管理）。"""
 
     @abstractmethod
     def subscribe(self, symbol: str) -> None:

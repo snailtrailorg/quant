@@ -358,15 +358,18 @@ def init_trade_calendar(year: int) -> None:
 
 
 def load_schema_expectations() -> dict[str, set[str]]:
-    """加载链生成的期望清单（schema_expectations.txt，91 表，随迁移增长）。
+    """加载链生成的期望清单（schema_expectations.txt，96 表，随迁移增长）。
 
     生成方式（#48 L-S-A 生成式，禁手写）：
       PGPASSWORD=… psql -d quant -q -c "DROP SCHEMA IF EXISTS chain_scratch CASCADE; CREATE SCHEMA chain_scratch;"
       QUANT_DB_URL=… PGOPTIONS="-c search_path=chain_scratch" python -m alembic upgrade head
       psql -At -c "SELECT table_name||' :: '||string_agg(column_name, ',' ORDER BY ordinal_position)
                    FROM information_schema.columns WHERE table_schema='chain_scratch'
+                     AND table_name <> 'alembic_version'
                    GROUP BY table_name ORDER BY table_name;" > src/data_platform/schema_expectations.txt
       （用完 DROP SCHEMA chain_scratch CASCADE）——每加迁移重跑并提交。
+    注：排除 `alembic_version`（迁移器自身的簿记表，非应用 schema——2026-09-30 批 83a 重跑时
+    补进命令，此前靠人工剔除，换人重跑必复发）。比对口径=列集合（set），列序变化不影响判定。
     """
     import os
     exp: dict[str, set[str]] = {}

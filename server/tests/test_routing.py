@@ -16,7 +16,12 @@ from src.quant_common.contract import DataRequest, DataGap, SourceUnavailable
 
 
 class _FakeConn:
-    """routing 两个 SELECT 的构造行应答（external_interface+routing_policy+routing_decision insert）。"""
+    """routing 两个 SELECT 的构造行应答（data_source+routing_policy+routing_decision insert）。
+
+    批 83a 拆表：路由表读 `data_source`（**无 exchanges 列**——该列随交易侧迁 trading_account），
+    故行夹具为 7 列。夹具保留「能力不足」的负例行（仅 rt_quote/trading）以继续钉路由侧
+    的能力硬过滤（写侧已不容建出此类行，但读侧过滤不该依赖写侧约束）。
+    """
 
     def __init__(self, rows, policies):
         self.rows, self.policies = rows, policies
@@ -30,8 +35,9 @@ class _FakeConn:
 
     def execute(self, sql, params=None):
         cur = MagicMock()
-        if "FROM external_interface" in sql:
-            cur.description = [(d,) for d in ("id", "provider", "market", "exchanges",
+        if "FROM data_source" in sql:
+            # 83a：SELECT 已去 exchanges 列（7 列——漏改则此处解包错位）
+            cur.description = [(d,) for d in ("id", "provider", "market",
                                               "capabilities", "params", "position", "enabled")]
             cur.fetchall.return_value = self.rows
         elif "FROM routing_policy" in sql:
@@ -49,9 +55,9 @@ class _FakeConn:
 
 
 _ROWS = [  # D25 token 化后真实形状：tushare{hist_quote}+tencent{rt_quote}+xtp{trading,rt_quote}
-    (1, "tushare", "astock", None, ["hist_quote"], "{}", 1, True),
-    (3, "tencent", "astock", None, ["rt_quote"], "{}", 2, True),
-    (4, "xtp", "astock", None, ["trading", "rt_quote"], "{}", 3, True),
+    (1, "tushare", "astock", ["hist_quote"], "{}", 1, True),
+    (3, "tencent", "astock", ["rt_quote"], "{}", 2, True),
+    (4, "xtp", "astock", ["trading", "rt_quote"], "{}", 3, True),
 ]
 
 
@@ -168,8 +174,8 @@ class TestResolve:
         rt, conn, rds, patches = _setup()
         with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical")
-            rows2 = [(3, "tencent", "astock", None, ["kline"], "{}", 1, True),
-                     (1, "tushare", "astock", None, ["kline"], "{}", 2, True)]
+            rows2 = [(3, "tencent", "astock", ["kline"], "{}", 1, True),
+                     (1, "tushare", "astock", ["kline"], "{}", 2, True)]
             conn2 = _FakeConn(rows2, _POLICIES)
             with patch.object(rt, "get_conn", return_value=conn2):
                 rt._STATE.rows = []          # 强制重载（真 _load_state 读 conn2）
@@ -190,8 +196,8 @@ class TestResolve:
     def test_breaker_sink_to_bottom(self, sm_covers_all, breakers_clean, _reset_rate_limit):
         """验收③：熔断账号沉底（注入 open——批 73 注入面=Valkey 状态直写）。"""
         rt, conn, rds, patches = _setup()
-        rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True),
-                (2, "akshare", "astock", None, ["kline"], "{}", 2, True)]
+        rows = [(1, "tushare", "astock", ["kline"], "{}", 1, True),
+                (2, "akshare", "astock", ["kline"], "{}", 2, True)]
         conn.rows = rows
         _reset_rate_limit.hset("rl:cb:tushare:1", mapping={"state": "open", "opened_at": 0})
         with patches[0], patches[1]:
@@ -202,7 +208,7 @@ class TestResolve:
 
     def test_disabled_row_filtered(self, sm_covers_all, breakers_clean):
         rt, conn, rds, patches = _setup()
-        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, False)]
+        conn.rows = [(1, "tushare", "astock", ["kline"], "{}", 1, False)]
         with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
                               temporality="historical", mode="supply")
@@ -227,8 +233,8 @@ class TestFetchChain:
     def test_failover_and_datagap(self, sm_covers_all, breakers_clean):
         """验收④a：failover 审计——SourceUnavailable 链下移到次候选。"""
         rt, conn, rds, patches = _setup()
-        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True),
-                     (2, "akshare", "astock", None, ["kline"], "{}", 2, True)]
+        conn.rows = [(1, "tushare", "astock", ["kline"], "{}", 1, True),
+                     (2, "akshare", "astock", ["kline"], "{}", 2, True)]
         rt._STATE.rows = []
         with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),
@@ -250,8 +256,8 @@ class TestFetchChain:
     def test_skip_busy_bulkhead(self, sm_covers_all, breakers_clean):
         """验收④b：skip_busy——bulkhead 闸门满（mock incr 恒返回超限）→审计+下移。"""
         rt, conn, rds, patches = _setup()
-        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True),
-                     (2, "akshare", "astock", None, ["kline"], "{}", 2, True)]
+        conn.rows = [(1, "tushare", "astock", ["kline"], "{}", 1, True),
+                     (2, "akshare", "astock", ["kline"], "{}", 2, True)]
 
         class _FullRedis(_RedisMock):
             def incr(self, k):
@@ -270,7 +276,7 @@ class TestFetchChain:
     def test_skip_unhealthy_no_leak(self, sm_covers_all, breakers_clean, _reset_rate_limit):
         """盲审 A/B P1 修复钉：熔断候选 fetch 时刻跳过且不占闸门（批 73 注入面=Valkey 直写）。"""
         rt, conn, rds, patches = _setup()
-        conn.rows = [(1, "tushare", "astock", None, ["kline"], "{}", 1, True)]
+        conn.rows = [(1, "tushare", "astock", ["kline"], "{}", 1, True)]
         _reset_rate_limit.hset("rl:cb:tushare:1", mapping={"state": "open", "opened_at": 0})
         with patches[0], patches[1]:
             req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",),

@@ -120,7 +120,7 @@ class CircuitBreaker:
 
     def __init__(self, fail_threshold: int | None = None, reset_timeout: float | None = None,
                  clock: Callable[[], float] = time.time, ds=None, key: str = ""):
-        """ds 有则从 external_interface.params.circuit_breaker 读熔断参数（显式实参 >
+        """ds 有则从配置行 params.circuit_breaker 读熔断参数（批 83a 拆表后=data_source；显式实参 >
         params 配置 > 代码默认兜底）。ds 无 get_param（测试替身）跳过。key=Valkey 状态键
         （空=无共享，进程内也不记忆——仅测试直接构造用）。"""
         if ds is not None:

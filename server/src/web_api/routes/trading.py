@@ -29,14 +29,14 @@ def list_live_tasks(status: str | None = None,
         if status:
             cur = conn.execute(
                 "SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-                "lt.account_id, lt.initial_capital, lt.created_at, ei.name "
-                "FROM live_task lt LEFT JOIN external_interface ei ON ei.id=lt.account_id "
+                "lt.account_id, lt.initial_capital, lt.created_at, ta.name "
+                "FROM live_task lt LEFT JOIN trading_account ta ON ta.id=lt.account_id "
                 "WHERE lt.status=%s ORDER BY lt.id DESC", (status,))
         else:
             cur = conn.execute(
                 "SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-                "lt.account_id, lt.initial_capital, lt.created_at, ei.name "
-                "FROM live_task lt LEFT JOIN external_interface ei ON ei.id=lt.account_id "
+                "lt.account_id, lt.initial_capital, lt.created_at, ta.name "
+                "FROM live_task lt LEFT JOIN trading_account ta ON ta.id=lt.account_id "
                 "ORDER BY lt.id DESC")
         rows = cur.fetchall()
     # P1-5（web-design 05 §5.8/06 B#5）：合并 worker 心跳（md_mode/lag/bars/frozen/gen）——
@@ -122,7 +122,7 @@ def create_live_task(body: dict = Body(...),
     with get_conn() as conn:
         # D2：account 校验——存在且交易域（建任务绑定交易账号，delete_interface 受 FK RESTRICT 守卫）
         cur = conn.execute(
-            "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (account_id,))
+            "SELECT id FROM trading_account WHERE id=%s", (account_id,))
         if cur.fetchone() is None:
             raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易域")
         # D5 三级时点①：account 级品种权限（account_allows）——建任务时拒绝无权限品种
@@ -234,7 +234,7 @@ def _account_state(conn):
         "SELECT DISTINCT ON (account_id) account_id, total_value "
         "FROM account_snapshot ORDER BY account_id, ts ASC")
     first_map = {r[0]: (float(r[1]) if r[1] is not None else None) for r in cur.fetchall()}
-    cur = conn.execute("SELECT id, name FROM external_interface")
+    cur = conn.execute("SELECT id, name FROM trading_account")
     name_map = {r[0]: r[1] for r in cur.fetchall()}
     out = []
     for r in latest:

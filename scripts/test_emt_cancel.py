@@ -25,7 +25,7 @@
 
 ═══ 运行前提（五要素）═══
   盘中：A 股交易时段（9:30-11:30 / 13:00-15:00）；午休/盘前柜台不接受委托与撤单。
-  账号：external_interface emt_emq 行凭证已落位（批 63 ④a，staging 行 id=6）。
+  账号：trading_account emt_emq 行凭证已落位（批 63 ④a；批 83a 拆表，staging 行 id=6）。
   权限：以 quant 用户跑（shared/.env 是 quant 700）。
   授权：--cancel-test 产生真实委托（不成交价挂单→撤单），执行前须用户明确授权。
 
@@ -83,12 +83,12 @@ def _find_row_id(provider: str) -> int:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id FROM external_interface WHERE provider=%s AND enabled=true ORDER BY id",
+            "SELECT id FROM trading_account WHERE provider=%s AND enabled=true ORDER BY id",
             (provider,)).fetchall()
     if not rows:
         with get_conn() as conn:
             allrows = conn.execute(
-                "SELECT id, provider, enabled FROM external_interface ORDER BY id").fetchall()
+                "SELECT id, provider, enabled FROM trading_account ORDER BY id").fetchall()
         raise SystemExit(f"[FAIL] 无 provider={provider} 的 enabled 行。全表：{allrows}")
     if len(rows) > 1:
         print(f"[WARN] provider={provider} 有 {len(rows)} 个 enabled 行（{rows}），取第一个")
@@ -96,7 +96,7 @@ def _find_row_id(provider: str) -> int:
 
 
 def _build_setting(provider: str, row_id: int | None) -> tuple[dict, str, int]:
-    """读 external_interface 行组装 EMT setting（复用 td_registry._build_emt_runtime 逻辑）。"""
+    """读 trading_account 行组装 EMT setting（复用 td_registry._build_emt_runtime 逻辑）。"""
     if row_id is None:
         row_id = _find_row_id(provider)
     row = get_interface_row(row_id=row_id)
@@ -136,8 +136,8 @@ def _wait_status(adapter: EmtAdapter, client_id: str, statuses: set, timeout: fl
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="EMT 柜台验证（撤单链补验）")
-    ap.add_argument("--provider", default="emt_emq", help="external_interface provider（默认 emt_emq）")
-    ap.add_argument("--row-id", type=int, default=None, help="external_interface 行 id（缺省按 provider 自动查）")
+    ap.add_argument("--provider", default="emt_emq", help="trading_account provider（默认 emt_emq）")
+    ap.add_argument("--row-id", type=int, default=None, help="trading_account 行 id（缺省按 provider 自动查）")
     ap.add_argument("--cancel-test", action="store_true", help="执行撤单链验证（真实委托，需授权）")
     ap.add_argument("--symbol", default="510300.SHSE", help="挂单标的（vt_symbol 格式）")
     ap.add_argument("--price", type=float, default=1.00, help="限价（不成交价——远低于现价的买单价）")

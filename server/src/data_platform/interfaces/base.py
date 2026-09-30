@@ -1,7 +1,8 @@
 """外部接口插件化接入层（批 63）——对标 im_bot/base.py 的 FIELD_SCHEMA 机制。
 
 InterfaceProvider：每家接口供应商一个子类，声明「凭证字段 schema + 参数字段 schema」，
-前端据 schema 动态生成配置表单（弹窗增删改），凭证整包加密存 external_interface.credentials_encrypted、
+前端据 schema 动态生成配置表单（弹窗增删改），凭证整包加密存
+配置行 credentials_encrypted（批 83a 拆表：数据源→data_source / 交易账号→trading_account）、
 参数明文存 params JSONB。
 
 与 im_bot 的两点差异：
@@ -22,7 +23,7 @@ _REGISTRY: dict[str, "InterfaceProvider"] = {}
 
 
 class InterfaceProvider(ABC):
-    """外部接口供应商接入抽象。每家一个子类 + external_interface 配一行（行=账号）。
+    """供应商接入抽象。每家一个子类 + 配置行一行（行=账号；批 83a 拆表后为 data_source/trading_account）。
 
     FIELD_SCHEMA：凭证字段（身份秘密：账号/密码/密钥），secret 字段前端 password 框，
                   整包 JSON Fernet 加密存 credentials_encrypted。

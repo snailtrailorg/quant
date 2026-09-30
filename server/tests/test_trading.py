@@ -443,10 +443,10 @@ class TestRealConnectionSmoke:
             with db.get_conn() as conn:
                 conn.execute("SELECT 1 FROM position_snapshot LIMIT 1")
                 row = conn.execute(
-                    "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
+                    "SELECT min(id) FROM trading_account"
                 ).fetchone()
                 if row is None or row[0] is None:
-                    pytest.skip("无交易域 account（external_interface 空）")
+                    pytest.skip("无交易账号（trading_account 空）")
                 vid = row[0]
                 conn.commit()
         except Exception:

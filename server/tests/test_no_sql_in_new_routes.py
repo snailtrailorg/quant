@@ -21,10 +21,13 @@ FROZEN_ROUTES = {
     "stock.py", "strategy.py", "sync.py", "system.py", "trading.py",
 }
 
-# 存量 SQL 基线（ast 字符串字面量口径，2026-09-29 冻结时点实测）
+# 存量 SQL 基线（ast 字符串字面量口径，2026-09-29 冻结时点实测；**只许调低不许调高**）
+# 2026-09-30 批 83a 下调：mgmt.py 19 → 0（配置面两族 CRUD/拖拽/限流参数/账号权限的 SQL
+#   全量下沉 `src/data_platform/config_store.py`（层 1）——该文件本是拆表后「域=表」两族
+#   端点的数据访问正位，顺手清掉路由层最后 19 处内联 SQL；本测试不扫 data_platform/，无需登记）。
 SQL_BASELINE = {
     "alerts.py": 27, "auth_routes.py": 53, "backtest.py": 27, "chat.py": 14,
-    "events.py": 0, "im_bots.py": 14, "mgmt.py": 19, "quality.py": 3,
+    "events.py": 0, "im_bots.py": 14, "mgmt.py": 0, "quality.py": 3,
     "risk.py": 20, "routing.py": 4, "stock.py": 8, "strategy.py": 14,
     "sync.py": 13, "system.py": 25, "trading.py": 28,
 }

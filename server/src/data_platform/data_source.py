@@ -1,7 +1,7 @@
 """数据源抽象基类 + 注册表（平台化：别人实现 DataSource 接入自己的数据源）。
 
 接口：get_client / test_connection / record_usage。
-实现：TushareDataSource（token 从 external_interface 数据域行读，.env fallback）。
+实现：TushareDataSource（token 从 data_source 表读，.env fallback）。
 别人加 Wind：实现 DataSource 子类 + DB 配置（provider='wind'），不改 engine 代码。
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ class DataSource(ABC):
 
     限速（24 号抽象聚合）：`get_rate_limit(api_name)` 委托限速策略（非 abstract——
     带默认实现，AkShare stub 零改动，未来 Wind 不强制实现）。配置归
-    `external_interface.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
+    `data_source.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
     params 分界：秘密→credentials_encrypted；运维参数（rate_limits/base_url）→params。
     """
 
@@ -29,7 +29,7 @@ class DataSource(ABC):
                  interface_id: int | None = None):
         self._credentials_encrypted = credentials_encrypted
         self._params = json.loads(params) if params else {}
-        self.interface_id = interface_id   # 批55a：external_interface 行 id（record_usage 双填用；裸构造=None）
+        self.interface_id = interface_id   # 批55a：配置行 id（record_usage 双填用；裸构造=None）
         self._policy = self._build_rate_policy()
 
     def get_param(self, *keys, default=None):
@@ -104,7 +104,7 @@ class DataSource(ABC):
 
 
 class TushareDataSource(DataSource):
-    """Tushare 数据源（token 从 external_interface 数据域行读，.env fallback）。"""
+    """Tushare 数据源（token 从 data_source 表读，.env fallback）。"""
 
     provider = "tushare"
 
@@ -172,10 +172,11 @@ _REGISTRY: dict[str, type[DataSource]] = {
 
 
 def get_data_source(provider: str) -> DataSource | None:
-    """从 DB external_interface 读数据域配置行实例化对应 DataSource（批55a 合表）。
+    """从 DB data_source 表读数据源配置行实例化对应 DataSource（批 83a 拆表）。
 
     provider 不存在或无配置返回 None（调用方 fallback .env）。
-    选行=enabled 过滤+域内 position 序（勘察 #3：确定性排序防多账号选行漂移）。
+    选行=enabled 过滤+表内 position 序（勘察 #3：确定性排序防多账号选行漂移）。
+    83a 拆表后表内行恒为数据源（原 `NOT ('trading' = ANY(capabilities))` 域谓词在表层面退役）。
     """
     cls = _REGISTRY.get(provider)
     if not cls:
@@ -184,9 +185,8 @@ def get_data_source(provider: str) -> DataSource | None:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT id, credentials_encrypted, params FROM external_interface "
+                "SELECT id, credentials_encrypted, params FROM data_source "
                 "WHERE provider=%s AND enabled=true "
-                "AND NOT ('trading' = ANY(capabilities)) "
                 "ORDER BY position, id LIMIT 1", (provider,))
             r = cur.fetchone()
         if not r:
@@ -194,7 +194,7 @@ def get_data_source(provider: str) -> DataSource | None:
         params_str = json.dumps(r[2]) if isinstance(r[2], dict) else r[2]   # jsonb→str 喂 __init__ 契约
         return cls(credentials_encrypted=r[1], params=params_str, interface_id=r[0])
     except Exception as e:
-        logger.warning(f"读 external_interface({provider}) 失败: {e}")
+        logger.warning(f"读 data_source({provider}) 失败: {e}")
         return None
 
 

@@ -112,27 +112,46 @@ class IMBotUserReq(BaseModel):
     role: str
     user_id: int | None = None   # 批11C：绑定平台账号（管理面通道——平台级 bot 的绑定恢复路径，A-P0-1 修）
 
-class InterfaceReq(BaseModel):
-    """外部接口行（批55a：行=账号/列=能力——27 号架构文档）。
+class DataSourceReq(BaseModel):
+    """数据源行（批 83a 拆表：/api/data-sources 端点族——原 InterfaceReq 揉合形态退役）。
 
-    - capabilities=启用子集（写侧 ⊆ 代码能力校验，越集 400）
+    - capabilities=启用子集（写侧 ⊆ 代码能力 且 ⊆ 数据域能力集 hist_quote/ref_data/inst_event）
     - market=MARKETS 注册表键；provider∈PROVIDER_MARKET 时须一致
-    - exchanges=None 即注册表该市场全所（包含式；excluded 机制退役）
+    - **无 exchanges/account_key**（数据源侧无此语义——合表两列随交易侧迁 trading_account）
     - params 接受 JSON 字符串或对象（旧端点字符串惯例/新端点对象皆可）
     - credentials 空=创建无凭证/更新不改（三段语义对齐旧两族端点）
     """
     name: str
     provider: str
     market: str
-    exchanges: list[str] | None = None
     credentials: str = ""
     params: str | dict | None = None
     capabilities: list[str]
     enabled: bool = True
+
+class TradingAccountReq(BaseModel):
+    """交易账号行（批 83a 拆表：/api/trading-accounts 端点族）。
+
+    - capabilities=启用子集（写侧 ⊆ 代码能力 且 ⊆ 交易域能力集 rt_quote/trading）
+    - exchanges=None 即注册表该市场全所（包含式；excluded 机制退役）
+    - account_key=D2 语义键（资金账号），UNIQUE(provider, account_key)
+    - 其余同 DataSourceReq（params 双形态 / credentials 三段语义）
+    """
+    name: str
+    provider: str
+    market: str
+    exchanges: list[str] | None = None
     account_key: str | None = None   # D2：语义键（资金账号），UNIQUE(provider,account_key)
+    credentials: str = ""
+    params: str | dict | None = None
+    capabilities: list[str]
+    enabled: bool = True
 
 class InterfaceReorderReq(BaseModel):
-    """全局拖拽重排（D25 §九：单列表全局单序列——ids=全部接口 id 全量有序数组）。"""
+    """表内拖拽重排（批 83a：单表单序列——ids=该表全部行 id 全量有序数组）。
+
+    原「单列表全局单序列」随拆表退役（两表各一条 position 序列，互不干扰）。
+    """
     ids: list[int]
 
 class RateLimitOverrideReq(BaseModel):

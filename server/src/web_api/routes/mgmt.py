@@ -1,7 +1,19 @@
-"""平台化管理路由：外部接口（批55 统一表）/限流四层/任务 —— 从 main.py 提取的 mgmt 端点。
+"""平台化管理路由：配置面两族（数据源/交易账号）/限流四层/任务 —— 从 main.py 提取的 mgmt 端点。
 
-批55a（27 号架构文档）：data_source_config+broker_config 合并为 external_interface——
-行=账号/列=能力/页签=过滤视图。批55b：旧端点垫片已随前端切换删除（批39 channels 同款）。
+批55a：data_source_config+broker_config 合并为 external_interface（行=账号/列=能力/页签=过滤视图）。
+批55b：旧端点垫片已随前端切换删除（批39 channels 同款）。
+**批 83a 拆表**（2026-09-29 用户裁定·抽象判据——无继承不揉合）：external_interface 拆
+`data_source`（拉取侧：token/rate_limits/熔断，无 exchanges/account_key）+ `trading_account`
+（下单/行情侧：exchanges/account_key/连接参数）。CRUD 拆两族端点（/api/data-sources 与
+/api/trading-accounts）——**域=表=端点族=列集=能力集**五者同源（字面量真源 markets.DOMAIN_*）：
+原「单列表+能力筛选」可枚举出的揉合行（如「交易行挂 hist_quote」）不再可能被建出。
+
+两族端点同构（7 端点 × 2），实现共用 `_list/_providers/_create/_reorder/_update/_delete/_test`
+（kind 参数分叉列集），端点本体只是路径 + 权限门。
+
+错误码沿用历史 `IFACE_*` 前缀（前端/运维手册已引；换前缀=纯改名无收益）；新增域维两码
+`IFACE_CAP_DOMAIN`（越域能力）/`IFACE_DOMAIN_MISMATCH`（provider 与端点族错域）。
+注意 `/api/datasource/*`（单数）是无关的限流/能力矩阵族，勿与 `/api/data-sources` 混。
 """
 
 import json
@@ -9,50 +21,25 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from src.data_platform.db import get_conn
+from src.data_platform import config_store
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
-from ..models import AccountPermissionReq, InterfaceReorderReq, InterfaceReq, RateLimitOverrideReq
+from ..models import (AccountPermissionReq, DataSourceReq, InterfaceReorderReq,
+                      RateLimitOverrideReq, TradingAccountReq)
 
 logger = logging.getLogger("web_api")
 
 router = APIRouter(tags=["mgmt"])
 
+# --- 配置面两族（批 83a：域=表——端点族/表名/列集/能力集同源，字面量只有 markets.DOMAIN_*） ---
 
-# --- 外部接口（批55a：行=账号/列=能力/页签=过滤视图——27 号架构文档） ---
-
-# 域谓词（分域段）：trading∈capabilities=交易域；其余=数据域（域内 position 独立 0..n）
-_DOMAIN_TRADING = "'trading' = ANY(capabilities)"
-_DOMAIN_DATA = "NOT ('trading' = ANY(capabilities))"
-
-
-def _iface_row(r, with_code_caps: bool = True) -> dict:
-    """DB 行 → API 形状（params=jsonb 读侧已是 dict；附 code_capabilities=能力真源）。"""
-    d = {"id": r[0], "name": r[1], "provider": r[2], "market": r[3],
-         "exchanges": list(r[4]) if r[4] else None,
-         "has_credentials": bool(r[5]), "params": r[6],
-         "capabilities": list(r[7]), "position": r[8], "enabled": r[9],
-         "updated_at": str(r[10]) if r[10] else None,
-         "account_key": r[11]}   # D2：语义键（资金账号，可空）
-    if with_code_caps:
-        from src.data_platform.capabilities import provider_capabilities
-        d["code_capabilities"] = sorted(provider_capabilities(r[2]))
-    return d
-
-
-_IFACE_COLS = ("id, name, provider, market, exchanges, credentials_encrypted IS NOT NULL, "
-               "params, capabilities, position, enabled, updated_at, account_key")
-
-
-def _is_unique_violation(e: Exception) -> bool:
-    """psycopg3 唯一约束冲突（SQLSTATE 23505）——account_key UNIQUE(provider,account_key) 判重。"""
-    return getattr(e, "sqlstate", None) == "23505"
-
-
-def _is_fk_violation(e: Exception) -> bool:
-    """psycopg3 外键约束冲突（SQLSTATE 23503）——delete_interface 守卫兜底。"""
-    return getattr(e, "sqlstate", None) == "23503"
+KIND_DATA = config_store.KIND_DATA          # 数据源（拉取侧）
+KIND_TRADING = config_store.KIND_TRADING    # 交易账号（下单/行情侧）
+_KIND_LABEL = config_store.LABEL
+# 每域能力集真源=markets.DOMAIN_CAPS，经 capabilities.domain_capabilities 消费（域逻辑在数据层）；
+# 收窄立法：写侧 ⊆ 本域集——合表时代可建出混合行，拆表后不可能。
+# 两族数据面 SQL 全部在 data_platform/config_store.py（层 1）——本文件 SQL 计数为 0。
 
 
 def _default_exchanges(provider: str) -> list[str] | None:
@@ -63,11 +50,14 @@ def _default_exchanges(provider: str) -> list[str] | None:
     return [d[2]] if d and d[2] else None
 
 
-def _validate_iface(provider: str, market: str, exchanges, capabilities) -> tuple[list, list | None]:
-    """写侧校验（方案一 v2 六必修）：market∈MARKETS 且=PROVIDER_MARKET[provider]；
-    exchanges⊆市场全所；capabilities 非空且⊆代码能力（越集 400）。返回规范化 (caps, exchanges)。"""
-    from src.data_platform.capabilities import check_capability_subset
-    from src.quant_common.markets import EXCHANGES, MARKETS, PROVIDER_MARKET
+def _validate_iface(provider: str, market: str, capabilities, kind: str) -> list:
+    """写侧校验（方案一 v2 六必修 + 83a 域收窄）：market∈MARKETS 且=PROVIDER_MARKET[provider]；
+    provider 归属域=本端点族；capabilities 非空、⊆代码能力、且 ⊆本域能力集（越集/错域 400）。
+    返回规范化 caps。exchanges 校验见 _validate_exchanges（仅交易族调用）。
+    """
+    from src.data_platform.capabilities import (check_capability_domain,
+                                                check_capability_subset, provider_domain)
+    from src.quant_common.markets import MARKETS, PROVIDER_MARKET
     if market not in MARKETS:
         raise ApiError(400, "IFACE_MARKET_UNKNOWN", f"未知市场 {market}（注册表：{sorted(MARKETS)}）")
     expect = PROVIDER_MARKET.get(provider)
@@ -77,12 +67,28 @@ def _validate_iface(provider: str, market: str, exchanges, capabilities) -> tupl
     if market != expect:
         raise ApiError(400, "IFACE_MARKET_MISMATCH",
                        f"provider {provider} 归属市场 {expect}，与提交 {market} 不符")
+    # 83a：provider 归属域须与本端点族一致（防「数据源端点建 XTP 行」这类跨域错行）。
+    # 跨域/空能力 provider（provider_domain=None）不在此拦——由下方 ⊆代码能力 兜底。
+    dom = provider_domain(provider)
+    if dom is not None and dom != kind:
+        raise ApiError(400, "IFACE_DOMAIN_MISMATCH",
+                       f"provider {provider} 属于「{_KIND_LABEL.get(dom, dom)}」域，"
+                       f"不能经「{_KIND_LABEL[kind]}」端点配置")
     caps = set(capabilities or [])
     if not caps:
         raise ApiError(400, "IFACE_CAP_EMPTY", "capabilities 不能为空（至少启用一项能力）")
     ok, msg = check_capability_subset(provider, caps)
     if not ok:
         raise ApiError(400, "IFACE_CAP_EXCESS", msg)
+    ok, msg = check_capability_domain(kind, caps)
+    if not ok:
+        raise ApiError(400, "IFACE_CAP_DOMAIN", msg)
+    return sorted(caps)
+
+
+def _validate_exchanges(provider: str, market: str, exchanges) -> list | None:
+    """交易族 exchanges 校验（含 perp 单所覆盖约束）。返回规范化值（None=全所）。"""
+    from src.quant_common.markets import EXCHANGES
     if exchanges is None:
         exchanges = _default_exchanges(provider)   # perp 缺省=单所（防 NULL 全所语义错）
     if exchanges:
@@ -99,7 +105,7 @@ def _validate_iface(provider: str, market: str, exchanges, capabilities) -> tupl
             if bad:
                 raise ApiError(400, "IFACE_EXCHANGE_UNKNOWN",
                                f"provider {provider} 仅覆盖 {[d[2]]}（不可勾 {sorted(bad)}）")
-    return sorted(caps), (list(exchanges) if exchanges else None)
+    return list(exchanges) if exchanges else None
 
 
 def _validate_credentials(provider: str, credentials: str) -> None:
@@ -138,200 +144,173 @@ def _normalize_params(params) -> dict:
     return v
 
 
-@router.get("/api/interfaces")
-def list_interfaces(cap: str | None = None, payload: dict = Depends(require_perm("read"))):
-    """外部接口列表（D25 单列表：?cap=能力筛选，值域 hist_quote|rt_quote|trading|ref_data|inst_event）。
+# --- 两族共用的实现（端点本体只做路径 + 权限门，逻辑在此——kind 分叉列集） ---
+
+
+def _list(kind: str, cap: str | None = None) -> list[dict]:
+    """本域行列表（?cap=能力筛选，值域=本域能力集——跨域/旧词深链 400 而非静默空表）。
 
     附漂移告警（55-0 共同底座：配置能力不在代码能力集=注册表防漂移闸同模式，批33b 先例）。
     """
-    from src.data_platform.capabilities import check_capability_subset
-    from src.quant_common.markets import CAPABILITIES
-    sql = f"SELECT {_IFACE_COLS} FROM external_interface"
-    args: tuple = ()
-    if cap:
-        if cap not in CAPABILITIES:   # 盲审 B-P2-6：值域校验（防旧词深链静默空表）
-            raise ApiError(400, "IFACE_CAP_INVALID", f"cap 须为 {sorted(CAPABILITIES)} 之一")
-        sql += " WHERE capabilities @> ARRAY[%s]::text[]"
-        args = (cap,)
-    sql += " ORDER BY position, id"
-    with get_conn() as conn:
-        cur = conn.execute(sql, args)
-        rows = cur.fetchall()
+    from src.data_platform.capabilities import check_capability_subset, domain_capabilities
+    if cap and cap not in domain_capabilities(kind):   # 盲审 B-P2-6：值域校验（防旧词/跨域深链静默空表）
+        raise ApiError(400, "IFACE_CAP_INVALID",
+                       f"cap 须为 {sorted(domain_capabilities(kind))} 之一（{_KIND_LABEL[kind]}域）")
     items = []
-    for r in rows:
-        ok, msg = check_capability_subset(r[2], set(r[7]))
+    for r in config_store.list_rows(kind, cap):
+        d = config_store.row_dict(r, kind)
+        ok, msg = check_capability_subset(d["provider"], set(d["capabilities"]))
         if not ok:
-            logger.warning("外部接口 %s(id=%s) 能力漂移：%s", r[2], r[0], msg)
-        items.append(_iface_row(r))
+            logger.warning("%s %s(id=%s) 能力漂移：%s", _KIND_LABEL[kind], d["provider"], d["id"], msg)
+        items.append(d)
     return items
 
 
-@router.get("/api/interfaces/providers")   # 静态路由前移防 {iid} 遮蔽（批43 P0-3 同款）
-def list_interface_providers(payload: dict = Depends(require_perm("read"))):
-    """provider 目录（55b：新建弹窗下拉零硬编码——注册表派生）。
+def _providers(kind: str) -> dict:
+    """本域 provider 目录（55b：新建弹窗下拉零硬编码——注册表派生 + 83a 域过滤）。
 
-    provider→{market, capabilities=代码能力全集}；代码能力空（stub：joinquant/ricequant）
-    不出目录（写侧 ⊆ 校验建不了行，列出来只会引导用户撞 400）。
+    provider→{market, capabilities=代码能力全集}；**域外 provider 与空能力 stub 源不出目录**
+    （前者本端点族必拒，后者写侧 ⊆ 校验建不了行——列出来只会引导用户撞 400）。
+    83a：随目录回 `domain_capabilities`=本域能力集（前端能力筛选/勾选零字面量，与写侧
+    `check_capability_domain` 同源 `markets.DOMAIN_CAPS`——前端不再镜像 token 表）。
     """
-    from src.data_platform.capabilities import provider_capabilities
+    from src.data_platform.capabilities import (domain_capabilities, provider_capabilities,
+                                                provider_domain)
     from src.data_platform.interfaces import list_interface_schemas
     from src.quant_common.markets import EXCHANGES, PROVIDER_MARKET
     schemas = list_interface_schemas()
-    return {"providers": [
-        {"provider": p, "market": m, "capabilities": sorted(provider_capabilities(p)),
-         "market_exchanges": sorted(e for e, v in EXCHANGES.items() if v["market"] == m),
-         "default_exchanges": _default_exchanges(p),   # 批55b 盲审修：perp 预填单所（防"不选=全部"文案与后端钉默认不一致）
-         "field_schema": schemas.get(p, {}).get("field_schema", []),      # 批63：凭证字段 schema（前端动态表单）
-         "params_schema": schemas.get(p, {}).get("params_schema", [])}    # 批63：参数字段 schema
-        for p, m in sorted(PROVIDER_MARKET.items()) if provider_capabilities(p)
-    ]}
+    out = []
+    for p, m in sorted(PROVIDER_MARKET.items()):
+        if provider_domain(p) != kind:
+            continue
+        caps = provider_capabilities(p)
+        if not caps:
+            continue
+        out.append(
+            {"provider": p, "market": m, "capabilities": sorted(caps),
+             "market_exchanges": sorted(e for e, v in EXCHANGES.items() if v["market"] == m),
+             "default_exchanges": _default_exchanges(p),   # 批55b 盲审修：perp 预填单所（防"不选=全部"文案与后端钉默认不一致）
+             "field_schema": schemas.get(p, {}).get("field_schema", []),      # 批63：凭证字段 schema（前端动态表单）
+             "params_schema": schemas.get(p, {}).get("params_schema", [])})   # 批63：参数字段 schema
+    return {"providers": out, "domain_capabilities": sorted(domain_capabilities(kind))}
 
 
-@router.post("/api/interfaces")
-def create_interface(req: InterfaceReq, payload: dict = Depends(require_perm("system_config"))):
+def _write_values(kind: str, req, caps: list) -> dict:
+    """请求 → 写入列 dict（列名白名单在 config_store；credentials 空=键缺席=不改，三段语义）。"""
     from src.quant_common.crypto import encrypt
-    caps, exchanges = _validate_iface(req.provider, req.market, req.exchanges, req.capabilities)
-    params = _normalize_params(req.params)
+    values = {"name": req.name, "provider": req.provider, "market": req.market,
+              "params": json.dumps(_normalize_params(req.params), ensure_ascii=False),
+              "capabilities": caps, "enabled": req.enabled}
+    if kind == KIND_TRADING:
+        values["exchanges"] = _validate_exchanges(req.provider, req.market, req.exchanges)
+        values["account_key"] = req.account_key
+    if req.credentials:
+        values["credentials_encrypted"] = encrypt(req.credentials)
+    return values
+
+
+def _create(kind: str, req, payload: dict) -> dict:
+    """新增本域行。position=**本表** max+1（批 83a：单表单序列——原全局单序列随拆表退役，
+    两表各一条序列，互不干扰；合表时代域内 max 与全局重编号撞号的问题一并消失）。"""
+    caps = _validate_iface(req.provider, req.market, req.capabilities, kind)
     _validate_credentials(req.provider, req.credentials)   # 批63：secret 字段必填（对标 IM）
-    enc = encrypt(req.credentials) if req.credentials else None
-    with get_conn() as conn:
-        try:
-            cur = conn.execute(
-                "INSERT INTO external_interface "
-                "(name, provider, market, exchanges, credentials_encrypted, params, capabilities, position, enabled, account_key) "
-                "VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,"
-                "(SELECT coalesce(max(position),-1)+1 FROM external_interface),%s,%s) RETURNING id",
-                (req.name, req.provider, req.market, exchanges, enc,
-                 json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key))
-                # D25 §九：全局单序列 max+1（原域内 max 与 reorder 全局重编号撞号/插序错位——盲审 A-P1/B-P2-5）
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            if _is_unique_violation(e):
-                raise ApiError(409, "IFACE_ACCOUNT_KEY_DUP",
-                               f"account_key {req.account_key!r} 已被 provider {req.provider} 占用")
-            raise
-    audit_log(payload["username"], "interface_create", f"{req.provider} caps={caps}")
-    return {"id": cur.fetchone()[0]}
+    values = _write_values(kind, req, caps)   # 凭证空=键缺席→INSERT 该列 NULL（新建无凭证）
+    try:
+        new_id = config_store.insert_row(kind, values)
+    except Exception as e:
+        if config_store.is_unique_violation(e):
+            raise ApiError(409, "IFACE_ACCOUNT_KEY_DUP",
+                           f"account_key {req.account_key!r} 已被 provider {req.provider} 占用")
+        raise
+    audit_log(payload["username"], f"{kind}_create", f"{req.provider} caps={caps}")
+    return {"id": new_id}
 
 
-@router.post("/api/interfaces/reorder")   # 路由前移防 {iid} int 遮蔽 422（批43 P0-3 教训）
-def interfaces_reorder(req: InterfaceReorderReq, payload: dict = Depends(require_perm("system_config"))):
-    """全局拖拽重排（D25 §九：单列表全局单序列——body={ids} 全量有序数组；domain 参数退役）。
+def _reorder(kind: str, req, payload: dict) -> dict:
+    """本表拖拽重排（批 83a：**单表单序列**——body={ids} 为本表全量有序数组）。
 
     全量校验（防并发丢行/幽灵 id）；幂等；并发=后写赢（低频管理操作）。
-    前端筛选态禁拖（D25 §九——规避筛选子集触发全量校验 400）。
+    前端筛选态禁拖（规避筛选子集触发全量校验 400）。
     """
     if not req.ids or not all(isinstance(i, int) for i in req.ids):
         raise ApiError(400, "BAD_PARAM", "ids 须为非空整数数组")
-    with get_conn() as conn:
-        cur = conn.execute("SELECT id FROM external_interface")
-        existing = {r[0] for r in cur.fetchall()}
-        if set(req.ids) != existing or len(req.ids) != len(existing):
-            raise ApiError(400, "BAD_PARAM",
-                           "ids 必须等于当前全部接口 id（全量序列——防并发丢行）")
-        for pos, rid in enumerate(req.ids):
-            conn.execute("UPDATE external_interface SET position=%s, updated_at=now() WHERE id=%s",
-                         (pos, rid))
-        conn.commit()
+    existing = config_store.all_ids(kind)
+    if set(req.ids) != existing or len(req.ids) != len(existing):
+        raise ApiError(400, "BAD_PARAM",
+                       f"ids 必须等于当前全部{_KIND_LABEL[kind]}行 id（本表全量序列——防并发丢行）")
+    config_store.set_positions(kind, list(req.ids))
     try:
         from src.data_platform.routing import bump_config_version
         bump_config_version()   # 批 57：position 改动 bump（28 §6.3——epoch 生效验收②闭环）
     except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
-    audit_log(payload["username"], "interface_reorder", detail=f"order={req.ids}")
+    audit_log(payload["username"], f"{kind}_reorder", detail=f"order={req.ids}")
     return {"ok": True}
 
 
-@router.post("/api/interfaces/{iid}")
-def update_interface(iid: int, req: InterfaceReq, payload: dict = Depends(require_perm("system_config"))):
-    from src.quant_common.crypto import encrypt
-    caps, exchanges = _validate_iface(req.provider, req.market, req.exchanges, req.capabilities)
-    params = _normalize_params(req.params)
+def _update(kind: str, iid: int, req, payload: dict) -> dict:
+    """改本域行。credentials 空=不改（三段语义）。
+
+    **域锁退役**：合表时代「改能力致换域」须拒（IFACE_DOMAIN_CHANGE，position/选行序语义破坏）；
+    拆表后域由端点族钉死（能力集 ⊆ 本域），换域只能删了在另一族重建——该校验自然消失。
+    """
+    caps = _validate_iface(req.provider, req.market, req.capabilities, kind)
     if req.credentials:   # 空=不改（三段语义），非空才校验 secret 字段
         _validate_credentials(req.provider, req.credentials)
-    enc = encrypt(req.credentials) if req.credentials else None   # 空=不改（三段语义）
-    with get_conn() as conn:
-        cur = conn.execute("SELECT capabilities FROM external_interface WHERE id=%s", (iid,))
-        r = cur.fetchone()
-        if not r:
-            raise ApiError(404, "IFACE_NOT_FOUND", "接口不存在")
-        old_domain_trading = "trading" in list(r[0] or [])
-        # 盲审 B-P1：改能力致换域=行种变更（position 残留旧域+消费方选行被遮蔽）——拒，删了重建
-        if old_domain_trading != ("trading" in caps):
-            raise ApiError(400, "IFACE_DOMAIN_CHANGE",
-                           "本次修改会使行在数据域/交易域间切换（position 与选行序语义破坏）——请删除后按新行种重建")
-        try:
-            if enc is not None:
-                conn.execute(
-                    "UPDATE external_interface SET name=%s, provider=%s, market=%s, exchanges=%s, "
-                    "credentials_encrypted=%s, params=%s::jsonb, capabilities=%s, enabled=%s, account_key=%s, updated_at=now() "
-                    "WHERE id=%s",
-                    (req.name, req.provider, req.market, exchanges, enc,
-                     json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key, iid))
-            else:
-                conn.execute(
-                    "UPDATE external_interface SET name=%s, provider=%s, market=%s, exchanges=%s, "
-                    "params=%s::jsonb, capabilities=%s, enabled=%s, account_key=%s, updated_at=now() WHERE id=%s",
-                    (req.name, req.provider, req.market, exchanges,
-                     json.dumps(params, ensure_ascii=False), caps, req.enabled, req.account_key, iid))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            if _is_unique_violation(e):
-                raise ApiError(409, "IFACE_ACCOUNT_KEY_DUP",
-                               f"account_key {req.account_key!r} 已被 provider {req.provider} 占用")
-            raise
+    if not config_store.row_exists(kind, iid):
+        raise ApiError(404, "IFACE_NOT_FOUND", f"{_KIND_LABEL[kind]}行不存在")
+    values = _write_values(kind, req, caps)   # 凭证空=键缺席=不改（_WRITE_COLS 子集语义）
+    try:
+        config_store.update_row(kind, iid, values)
+    except Exception as e:
+        if config_store.is_unique_violation(e):
+            raise ApiError(409, "IFACE_ACCOUNT_KEY_DUP",
+                           f"account_key {req.account_key!r} 已被 provider {req.provider} 占用")
+        raise
     try:
         from src.data_platform.routing import bump_config_version
         bump_config_version()   # 批 57：接口行变更 bump（28 §6.3——position/enabled 改动 epoch 生效）
     except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
         pass
-    audit_log(payload["username"], "interface_update", f"id={iid}")
+    audit_log(payload["username"], f"{kind}_update", f"id={iid}")
     return {"ok": True}
 
 
-@router.delete("/api/interfaces/{iid}")
-def delete_interface(iid: int, payload: dict = Depends(require_perm("system_config"))):
-    """删除外部接口行。D2：account 被 live_task 引用时 FK RESTRICT 拒绝（防删实盘任务账号）。"""
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT id FROM live_task WHERE account_id=%s LIMIT 1", (iid,))
-        if cur.fetchone() is not None:
+def _delete(kind: str, iid: int, payload: dict) -> dict:
+    """删本域行。交易族：account 被 live_task 引用时 FK RESTRICT 拒绝（防删实盘任务账号）。
+
+    **预检只对交易族**（83a 拆表踩点）：live_task.account_id 指向 trading_account.id；
+    两表 id 各自独立，数据源行 id 可能与某 live_task.account_id 数值撞车——若不分域预检，
+    删数据源行会被误判「该交易账号下有实盘任务」。数据源族仅靠 FK 兜底（本无 FK 指向它）。
+    """
+    if kind == KIND_TRADING and config_store.has_live_task(iid):
+        raise ApiError(409, "IFACE_IN_USE",
+                       "该交易账号下存在实盘任务，禁止删除（请先停止并删除相关任务）")
+    try:
+        config_store.delete_row(kind, iid)
+    except Exception as e:
+        if config_store.is_fk_violation(e):
             raise ApiError(409, "IFACE_IN_USE",
-                           "该交易账号下存在实盘任务，禁止删除（请先停止并删除相关任务）")
-        try:
-            conn.execute("DELETE FROM external_interface WHERE id=%s", (iid,))
-            conn.commit()
-        except Exception as e:
-            conn.rollback()
-            if _is_fk_violation(e):
-                raise ApiError(409, "IFACE_IN_USE",
-                               "该接口被其他记录引用（外键约束），禁止删除")
-            raise
-    audit_log(payload["username"], "interface_delete", f"id={iid}")
+                           "该行被其他记录引用（外键约束），禁止删除")
+        raise
+    audit_log(payload["username"], f"{kind}_delete", f"id={iid}")
     return {"ok": True}
 
 
-@router.post("/api/interfaces/{iid}/test")
-def test_interface(iid: int, payload: dict = Depends(require_perm("read"))):
-    """连接测试：按能力路由注册表（trading∈caps 或 provider∈Broker 注册表→Broker；
-    否则 DataSource）——盲审 A-P2：quote-only 交易 provider 行也须测得了。"""
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT provider, credentials_encrypted, params, capabilities "
-            "FROM external_interface WHERE id=%s", (iid,))
-        r = cur.fetchone()
+def _test(kind: str, iid: int) -> dict:
+    """连接测试：按族路由注册表（交易族→Broker 注册表，回落 DataSource 以覆盖纯行情通道行；
+    数据源族→DataSource 注册表）——盲审 A-P2：quote-only 行也须测得了。"""
+    r = config_store.get_conn_row(kind, iid)
     if not r:
-        return {"ok": False, "error": "接口不存在"}
-    provider, caps = r[0], list(r[3])
+        return {"ok": False, "error": f"{_KIND_LABEL[kind]}行不存在"}
+    provider = r[0]
     params_str = json.dumps(r[2]) if isinstance(r[2], dict) else r[2]
-    from src.strategy_framework.broker import _REGISTRY as _broker_reg
-    if "trading" in caps or provider in _broker_reg:
-        cls = _broker_reg.get(provider)
+    from src.data_platform.data_source import _REGISTRY as _ds_reg
+    if kind == KIND_TRADING:
+        from src.strategy_framework.broker import _REGISTRY as _broker_reg
+        cls = _broker_reg.get(provider) or _ds_reg.get(provider)
         fail_msg = "凭证不完整或连接失败（真连 vnpy 在服务器）"
     else:
-        from src.data_platform.data_source import _REGISTRY as _ds_reg
         cls = _ds_reg.get(provider)
         fail_msg = "连接测试失败，看日志"
     if not cls:
@@ -339,6 +318,102 @@ def test_interface(iid: int, payload: dict = Depends(require_perm("read"))):
     obj = cls(credentials_encrypted=r[1], params=params_str)
     ok = obj.test_connection()
     return {"ok": ok, "error": "" if ok else fail_msg}
+
+
+# --- 数据源族（/api/data-sources）---
+# 注意：本族与无关的单数 `/api/datasource/*`（能力矩阵/限流覆写）不同名，勿混。
+
+
+@router.get("/api/data-sources")
+def list_data_sources(cap: str | None = None, payload: dict = Depends(require_perm("read"))):
+    """数据源列表（?cap=能力筛选，值域 hist_quote|ref_data|inst_event）。"""
+    return _list(KIND_DATA, cap)
+
+
+@router.get("/api/data-sources/providers")   # 静态路由前移防 {iid} 遮蔽（批43 P0-3 同款）
+def list_data_source_providers(payload: dict = Depends(require_perm("read"))):
+    """数据源 provider 目录（域外 provider 与空能力 stub 源不出目录）。"""
+    return _providers(KIND_DATA)
+
+
+@router.post("/api/data-sources")
+def create_data_source(req: DataSourceReq, payload: dict = Depends(require_perm("system_config"))):
+    """新增数据源行（position=本表 max+1）。"""
+    return _create(KIND_DATA, req, payload)
+
+
+@router.post("/api/data-sources/reorder")   # 路由前移防 {iid} int 遮蔽 422（批43 P0-3 教训）
+def data_sources_reorder(req: InterfaceReorderReq,
+                         payload: dict = Depends(require_perm("system_config"))):
+    """数据源表内拖拽重排（单表单序列——ids=本表全部行 id）。"""
+    return _reorder(KIND_DATA, req, payload)
+
+
+@router.post("/api/data-sources/{iid}")
+def update_data_source(iid: int, req: DataSourceReq,
+                       payload: dict = Depends(require_perm("system_config"))):
+    """改数据源行（credentials 空=不改）。"""
+    return _update(KIND_DATA, iid, req, payload)
+
+
+@router.delete("/api/data-sources/{iid}")
+def delete_data_source(iid: int, payload: dict = Depends(require_perm("system_config"))):
+    """删数据源行（无 FK 指向本表，仅兜底映射）。"""
+    return _delete(KIND_DATA, iid, payload)
+
+
+@router.post("/api/data-sources/{iid}/test")
+def test_data_source(iid: int, payload: dict = Depends(require_perm("read"))):
+    """数据源连接测试（DataSource 注册表）。"""
+    return _test(KIND_DATA, iid)
+
+
+# --- 交易账号族（/api/trading-accounts）---
+
+
+@router.get("/api/trading-accounts")
+def list_trading_accounts(cap: str | None = None, payload: dict = Depends(require_perm("read"))):
+    """交易账号列表（?cap=能力筛选，值域 rt_quote|trading）。"""
+    return _list(KIND_TRADING, cap)
+
+
+@router.get("/api/trading-accounts/providers")   # 静态路由前移防 {iid} 遮蔽
+def list_trading_account_providers(payload: dict = Depends(require_perm("read"))):
+    """交易账号 provider 目录（域外 provider 与空能力 stub 源不出目录）。"""
+    return _providers(KIND_TRADING)
+
+
+@router.post("/api/trading-accounts")
+def create_trading_account(req: TradingAccountReq,
+                           payload: dict = Depends(require_perm("system_config"))):
+    """新增交易账号行（position=本表 max+1）。"""
+    return _create(KIND_TRADING, req, payload)
+
+
+@router.post("/api/trading-accounts/reorder")   # 路由前移防 {iid} int 遮蔽 422
+def trading_accounts_reorder(req: InterfaceReorderReq,
+                             payload: dict = Depends(require_perm("system_config"))):
+    """交易账号表内拖拽重排（单表单序列——ids=本表全部行 id）。"""
+    return _reorder(KIND_TRADING, req, payload)
+
+
+@router.post("/api/trading-accounts/{iid}")
+def update_trading_account(iid: int, req: TradingAccountReq,
+                           payload: dict = Depends(require_perm("system_config"))):
+    """改交易账号行（credentials 空=不改）。"""
+    return _update(KIND_TRADING, iid, req, payload)
+
+
+@router.delete("/api/trading-accounts/{iid}")
+def delete_trading_account(iid: int, payload: dict = Depends(require_perm("system_config"))):
+    """删交易账号行。D2：account 被 live_task 引用时 FK RESTRICT 拒绝（防删实盘任务账号）。"""
+    return _delete(KIND_TRADING, iid, payload)
+
+
+@router.post("/api/trading-accounts/{iid}/test")
+def test_trading_account(iid: int, payload: dict = Depends(require_perm("read"))):
+    """交易账号连接测试（Broker 注册表，回落 DataSource）。"""
+    return _test(KIND_TRADING, iid)
 
 
 # --- 积分档四层限流（points_tier 预设 / rate_limits 覆写 / 熔断参数，2026-08-27） ---
@@ -354,35 +429,19 @@ def _ds_cls(provider: str):
 
 
 def _load_ds_params(provider: str) -> tuple[int, dict]:
-    """读 provider 数据域配置行（enabled 优先，域内 position 序）→ (id, params dict)；无配置 404。
+    """读 provider 数据源配置行 → (id, params dict)；无配置 404（限流四层三消费方①）。
 
-    批55a：data_source_config→external_interface（终裁三消费方①——provider+position 域内序）。
+    批 83a：读表下沉 config_store（层 1）——本函数只做「无行 → 404」的错误码映射。
     """
-    with get_conn() as conn:
-        cur = conn.execute(
-            f"SELECT id, params FROM external_interface WHERE provider=%s AND {_DOMAIN_DATA} "
-            "ORDER BY enabled DESC, position, id LIMIT 1", (provider,))
-        r = cur.fetchone()
-    if not r:
+    r = config_store.load_provider_params(provider)
+    if r is None:
         raise ApiError(404, "DS_NOT_FOUND", f"数据源 {provider} 无配置")
-    if isinstance(r[1], dict):
-        return r[0], r[1]          # params=jsonb（psycopg 读侧已 dict）
-    try:
-        return r[0], (json.loads(r[1]) if r[1] else {})
-    except (TypeError, ValueError):
-        logger.warning("external_interface(%s) params 非法 JSON，按空处理", provider)
-        return r[0], {}
+    return r
 
 
 def _save_ds_params(dsid: int, params: dict) -> None:
-    """params 整体写回（读-改-写）。双盲补审修正：有 last-writer-wins 窗口
-    （两 admin 并发、或 cb 与 rate_limits 两端点并发丢一边修改）——admin 低频可接受，
-    根治需 SELECT FOR UPDATE 同事务。
-    """
-    with get_conn() as conn:
-        conn.execute("UPDATE external_interface SET params=%s::jsonb, updated_at=now() WHERE id=%s",
-                     (json.dumps(params, ensure_ascii=False), dsid))
-        conn.commit()
+    """params 整体写回（读-改-写）——写路径下沉 config_store。"""
+    config_store.save_provider_params(dsid, params)
 
 
 @router.get("/api/datasource/capabilities")
@@ -531,8 +590,6 @@ def detect_stuck_api(payload: dict = Depends(require_perm("system_config"))):
 _VALID_CATEGORIES = {"stock", "etf", "convertible", "fund", "reits", "perp"}
 _VALID_EXCHANGES = {"SHSE", "SZSE", "BSE", "BINANCE", "OKX"}
 _VALID_BOARDS = {"main", "star", "chinext", "bse"}
-_ACCOUNT_PERM_COLS = ("account_id, allowed_categories, allowed_exchanges, allowed_boards, "
-                    "is_st_allowed, convertible_allowed")
 
 
 def _account_perm_row(r) -> dict:
@@ -543,9 +600,7 @@ def _account_perm_row(r) -> dict:
 @router.get("/api/accounts/{account_id}/permission")
 def get_account_permission(account_id: int, payload: dict = Depends(require_perm("read"))):
     """account 权限读（无行 404——权限人工配置，未配置不猜默认）。"""
-    with get_conn() as conn:
-        cur = conn.execute(f"SELECT {_ACCOUNT_PERM_COLS} FROM account_permission WHERE account_id=%s", (account_id,))
-        r = cur.fetchone()
+    r = config_store.get_account_permission(account_id)
     if r is None:
         raise ApiError(404, "ACCOUNT_PERM_NOT_FOUND", f"account {account_id} 未配置权限")
     return _account_perm_row(r)
@@ -553,32 +608,24 @@ def get_account_permission(account_id: int, payload: dict = Depends(require_perm
 
 @router.put("/api/accounts/{account_id}/permission")
 def put_account_permission(account_id: int, req: AccountPermissionReq, payload: dict = Depends(require_perm("system_config"))):
-    """account 权限写（upsert）。校验：account 存在且交易域；值域 ⊆ 注册表（防拼写错）。"""
+    """account 权限写（upsert）。校验：account 存在且为交易账号；值域 ⊆ 注册表（防拼写错）。
+
+    批 83a：存在性判据从「external_interface 交易域行」改为「trading_account 行」
+    （表本身即交易域，域谓词退役）。
+    """
     bad_cats = set(req.allowed_categories) - _VALID_CATEGORIES
     bad_exch = set(req.allowed_exchanges) - _VALID_EXCHANGES
     bad_brds = set(req.allowed_boards) - _VALID_BOARDS
     if bad_cats or bad_exch or bad_brds:
         raise ApiError(400, "ACCOUNT_PERM_BAD_VALUE",
                        f"非法值：category={sorted(bad_cats)} exchange={sorted(bad_exch)} board={sorted(bad_brds)}")
-    with get_conn() as conn:
-        cur = conn.execute(
-            "SELECT id FROM external_interface WHERE id=%s AND 'trading' = ANY(capabilities)", (account_id,))
-        if cur.fetchone() is None:
-            raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易域")
-        cur = conn.execute(
-            "INSERT INTO account_permission (account_id, allowed_categories, allowed_exchanges, "
-            "allowed_boards, is_st_allowed, convertible_allowed) "
-            "VALUES (%s,%s,%s,%s,%s,%s) "
-            "ON CONFLICT (account_id) DO UPDATE SET "
-            "allowed_categories=EXCLUDED.allowed_categories, "
-            "allowed_exchanges=EXCLUDED.allowed_exchanges, "
-            "allowed_boards=EXCLUDED.allowed_boards, "
-            "is_st_allowed=EXCLUDED.is_st_allowed, "
-            "convertible_allowed=EXCLUDED.convertible_allowed, updated_at=now()",
-            (account_id, list(req.allowed_categories), list(req.allowed_exchanges),
-             list(req.allowed_boards), req.is_st_allowed, req.convertible_allowed))
-        conn.commit()
+    if not config_store.row_exists(KIND_TRADING, account_id):
+        raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易账号")
+    config_store.upsert_account_permission(
+        account_id, req.allowed_categories, req.allowed_exchanges, req.allowed_boards,
+        req.is_st_allowed, req.convertible_allowed)
     audit_log(payload["username"], "account_permission_update", f"account={account_id}")
     return {"account_id": account_id}
+
 
 

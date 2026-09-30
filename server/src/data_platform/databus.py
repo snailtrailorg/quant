@@ -135,7 +135,7 @@ class DataBus:
     def get_bars(self, req):
         """local_pg 首候选 → DataGap 则 fetch-on-miss → (frame, watermark)。
 
-        resolve 只在 miss 时发生（local 命中零路由依赖——不读 external_interface/路由表，
+        resolve 只在 miss 时发生（local 命中零路由依赖——不读配置行/路由表，
         避免本地热路径被路由表/DB 抖动拖垮，批 59 双盲审 P1）。
         """
         from src.quant_common.contract import DataGap

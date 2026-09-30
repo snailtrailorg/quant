@@ -27,7 +27,7 @@ def risk_state(payload: dict = Depends(require_perm("read"))):
         # 旧 "" 无「读全局」语义（传空串按 account_id 过滤恒不命中→available=False 假「不可用」）
         with get_conn() as conn:
             row = conn.execute(
-                "SELECT min(id) FROM external_interface WHERE 'trading' = ANY(capabilities)"
+                "SELECT min(id) FROM trading_account"
             ).fetchone()
             vid = row[0] if row else None
         st = rc._get_global_state(vid)

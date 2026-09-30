@@ -246,7 +246,7 @@ def reconcile_three_books():
             try:
                 # O-F2：两侧符号命名空间不同（快照=vt_symbol "600000.SSE" vs trade_log=裸 "600000"）
                 # ——join 前必须归一，否则永不命中→每小时误报
-                cur = conn.execute("SELECT id, name FROM external_interface")
+                cur = conn.execute("SELECT id, name FROM trading_account")
                 account_names = {r[0]: r[1] for r in cur.fetchall()}
                 cur = conn.execute("""
                     SELECT COALESCE(s.sym, t.sym) AS sym,
@@ -1414,7 +1414,7 @@ def _desired_units(conn) -> list[tuple[str, str]]:
       废架构兼容单元：**enabled DB 行不作拉起依据**（D2 v2——镜像实锤 2-3 行 enabled 无
       live_task 关联，按 DB 拉会部署首周期即拉废 runner）；仅显式 enable 过且无关联才期望在跑，
       is-enabled 与 live_task 并存时排除防双拉（v2.1 去重护栏）
-    - md-hub -> external_interface trading 域 enabled 行（source=hub，**全市场**——批 66b/D26：
+    - md-hub -> trading_account enabled 行（source=hub，**全市场**——批 66b/D26：
       一行=一 hub=quant-md-hub@{row.id}；去 crypto 过滤+builtin 常开条目退役）。
       provider 白名单保留（未实现 MD 网关的 provider 不进期望表——防「拉起→78→告警」死循环）
     """
@@ -1434,8 +1434,8 @@ def _desired_units(conn) -> list[tuple[str, str]]:
     from src.strategy_framework.md_gateway import list_md_gateway_providers
     md_providers = list_md_gateway_providers()
     cur = conn.execute(
-        "SELECT id FROM external_interface "
-        "WHERE enabled=true AND 'trading' = ANY(capabilities) "
+        "SELECT id FROM trading_account "
+        "WHERE enabled=true "
         "AND provider = ANY(%s)", (list(md_providers),))
     for row in cur.fetchall():
         desired.append((f"quant-md-hub@{row[0]}.service", "hub"))

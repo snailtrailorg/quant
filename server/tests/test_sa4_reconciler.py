@@ -292,7 +292,8 @@ HUB_UNIT = "quant-md-hub@4.service"   # 批 66b：期望源=DB 行驱动（数�
 def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
     """_desired_units 用 conn mock：按 SQL 前缀分流（running / strategy 关联 / hub 期望三查询）。
 
-    批 66b：hub 期望 SQL 去 market='crypto' 过滤（全市场 trading 行）——分流锚 external_interface。
+    批 66b：hub 期望 SQL 去 market='crypto' 过滤（全市场 trading 行）——分流锚 trading_account
+    （批 83a 拆表：原 external_interface 交易域行迁入该表）。
     crypto_ids 参数名保留（存量调用兼容），语义=trading 域 hub 行 id 集。
     reconciler 级测试同样可用（"SELECT 1" 走 linked cursor 不 raise）。
     """
@@ -306,7 +307,7 @@ def _mk_conn2(running_tids=(), linked_sids=(), crypto_ids=()):
     cur_crypto.fetchall.return_value = [(c,) for c in crypto_ids]
     conn.execute.side_effect = lambda sql, *a: (
         cur_running if "status='running'" in sql
-        else cur_crypto if "external_interface" in sql
+        else cur_crypto if "trading_account" in sql
         else cur_linked)
     return conn
 
@@ -334,7 +335,8 @@ def _run_l3(failed=(), active=(), conn=None, valkey=None, valkey_error=False,
         p_sys.return_value = sys_return
     if conn is None:
         conn = _mk_conn(status="stopped")
-        # 批 66b：hub 期望=external_interface 行驱动——需要 hub 期望的用例显式传 conn=_mk_conn2(crypto_ids=[4])
+        # 批 66b：hub 期望=trading 域行驱动（批 83a 后=trading_account 表）
+        # ——需要 hub 期望的用例显式传 conn=_mk_conn2(crypto_ids=[4])
     with contextlib.ExitStack() as st:
         st.enter_context(patch.object(T, "_sa4_units", side_effect=lambda s: {
             "failed": list(failed), "active": list(active)}[s]))

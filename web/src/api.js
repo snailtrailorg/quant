@@ -101,14 +101,15 @@ export const testLLMModel = (id) => api.post(`/llm-models/${id}/test`)
 export const reorderLLMModels = (ids) => api.post('/llm-models/reorder', { ids })   // 批50：拖拽行序=容灾链序
 export const getLLMUsageSeries = () => api.get('/llm-usage/series')   // 批54 追加三:单档日粒度全历史(两档退役)
 
-// 批55：外部接口统一表（行=账号/列=能力/页签=过滤视图）——旧 /data-sources+/brokers 族随 55b 退役
-export const getInterfaces = (cap) => api.get('/interfaces', { params: cap ? { cap } : {} })
-export const getInterfaceProviders = () => api.get('/interfaces/providers')
-export const createInterface = (data) => api.post('/interfaces', data)
-export const updateInterface = (id, data) => api.post(`/interfaces/${id}`, data)
-export const deleteInterface = (id) => api.delete(`/interfaces/${id}`)
-export const testInterface = (id) => api.post(`/interfaces/${id}/test`)
-export const reorderInterfaces = (ids) => api.post('/interfaces/reorder', { ids })
+// 批 83a：配置面两族（域=表=端点族——kind ∈ data_source|trading_account，与后端 markets.DOMAIN_* 同源）
+const IFACE_PATH = { data_source: '/data-sources', trading_account: '/trading-accounts' }
+export const getInterfaces = (kind, cap) => api.get(IFACE_PATH[kind], { params: cap ? { cap } : {} })
+export const getInterfaceProviders = (kind) => api.get(`${IFACE_PATH[kind]}/providers`)
+export const createInterface = (kind, data) => api.post(IFACE_PATH[kind], data)
+export const updateInterface = (kind, id, data) => api.post(`${IFACE_PATH[kind]}/${id}`, data)
+export const deleteInterface = (kind, id) => api.delete(`${IFACE_PATH[kind]}/${id}`)
+export const testInterface = (kind, id) => api.post(`${IFACE_PATH[kind]}/${id}/test`)
+export const reorderInterfaces = (kind, ids) => api.post(`${IFACE_PATH[kind]}/reorder`, { ids })
 // 积分档四层限流（2026-08-27）：预设表/切档/单参数覆写+熔断参数（写端点走项目 PUT→POST 硬切约定）
 export const getRateLimits = (provider) => api.get(`/datasource/${provider}/rate-limits`)
 export const setRateLimitOverride = (provider, data) => api.post(`/datasource/${provider}/rate-limit-override`, data)

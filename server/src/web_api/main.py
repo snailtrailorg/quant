@@ -146,7 +146,7 @@ from .routes.auth_routes import router as auth_router  # /api/auth/* /api/user* 
 from .routes.backtest import router as backtest_router  # /api/backtest* /api/pool* /api/broker-usage
 from .routes.chat import router as chat_router  # /api/chat /ws/chat /ws/market /api/llm-models /api/llm-*
 from .routes.im_bots import router as im_bots_router  # /api/im-bots/*
-from .routes.mgmt import router as mgmt_router  # /api/interfaces（批55 统一表）/api/datasource rate-limits /api/tasks
+from .routes.mgmt import router as mgmt_router  # /api/data-sources + /api/trading-accounts（批 83a 拆表两族）/api/datasource rate-limits /api/tasks
 from .routes.quality import router as quality_router  # 批 62b：/api/quality 对账域
 from .routes.risk import router as risk_router  # /api/risk* /api/live-trading /api/reconcile /api/convertible
 from .routes.routing import router as routing_router  # 批 57 M2：/api/routing/*（策略+dry-run+审计）

@@ -27,9 +27,11 @@ POST_ENDPOINTS = [
     "/api/llm-models/1",
     "/api/my/im-bots/1",   # 五轮：admin IM 面删除——自助端点
     "/api/sync/config/astock_daily",
-    "/api/interfaces/1",
-    
-    "/api/interfaces/1/test",
+    # 批 83a：配置面 CRUD 拆两族（原 /api/interfaces 合表端点退役）
+    "/api/data-sources/1",
+    "/api/trading-accounts/1",
+    "/api/data-sources/1/test",
+    "/api/trading-accounts/1/test",
     "/api/risk-rules/1",
     "/api/factors/some-name",
 ]

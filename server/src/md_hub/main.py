@@ -74,7 +74,7 @@ def _cred_hash(credentials: dict) -> str:
 
 
 def _poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash=None):
-    """批 64+66a：对账 external_interface 行——返回 (新版本, 新凭证摘要, 是否切换)。
+    """批 64+66a：对账 trading_account 行——返回 (新版本, 新凭证摘要, 是否切换)。
 
     prev_version=None=首次读基线（版本与凭证摘要同轮建立；读行失败版本顺延不固化）；
     Valkey 读失败返回原版本不判切换；版本变化才重读接口行（get_interface_row，broker.py）
@@ -134,7 +134,7 @@ def main() -> None:
     r = make_valkey()
 
     # ——— boot 守卫（批 66a a′：SET NX EX 30 抢自己的键——拆的是 M5 仲裁复杂度，续租原语保留）———
-    # D6：account_id = ACCOUNT_ID（= external_interface.id，键分叉用；A股实例名 "quant" 非数字 → None 键不分 account）。
+    # D6：account_id = ACCOUNT_ID（= trading_account.id，键分叉用；A股实例名 "quant" 非数字 → None 键不分 account）。
     # 与 HUB_INTERFACE_ROW（账号选择，A股过渡 concrete unit 注入）拆开——二者语义不同，复用会污染（盲审 B P0/P3）
     _account_env = os.environ.get("ACCOUNT_ID", "")
     account_id = int(_account_env) if _account_env.isdigit() else None
@@ -235,7 +235,7 @@ def main() -> None:
         logger.error("行情网关初始化失败（HUB_INTERFACE_ROW=%s），exit 78: %s", interface_row, e)
         raise SystemExit(78)
 
-    # 批 64+66a：对账 external_interface 行变更——Web 拖拽/改行 bump cfg:version，provider 或
+    # 批 64+66a：对账 trading_account 行变更——Web 拖拽/改行 bump cfg:version，provider 或
     # 凭证摘要变化即带码退出让 systemd 拉起重启读新行（Web 操作切换/凭证轮换自动生效；
     # 不进程内拆原生库，符合铁律）
     _cfg_version = None       # 首次 poll 读基线（避免启动即误触）
