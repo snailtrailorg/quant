@@ -2,7 +2,10 @@
 
 钉的是拆表后的行为契约：**域=表=端点族=列集=能力集**五者同源（markets.DOMAIN_*）；
 原 external_interface 合表 + `'trading' = ANY(capabilities)` 域谓词整套退役。
-DB 走 _FakeConn 惯例（test_rate_limit_ds 同款），真跑验证在 dev 实测面（staging 验收）。
+DB 走 _FakeConn 惯例（test_rate_limit_ds 同款）——**但假连接不真执行 SQL**，
+`INSERT ... VALUES (name=%s)` 这类**语句形态**错误 PG 永不校验（复审 P0：接口必然 500
+而本文件全绿）。故**写路径另设真库往返钉** `TestRealDbRoundTrip`（无 dev 库自动跳过）——
+形态类错误只有真库抓得住（记忆 handoff-no-shortcuts：行为级验收不可用 mock 绿替代）。
 
 夹具约定：SQL 带表名（`data_source`/`trading_account`），故按表名分流并断言「打到了哪张表」——
 拆表最典型的回归就是「某读点漏改仍读旧表」，这类必须能被断言抓住。
@@ -558,3 +561,130 @@ class TestAccountPermission:
         assert _normalize_params({"a": 1}) == {"a": 1}
         assert _normalize_params("") == {} and _normalize_params(None) == {}
         assert json.loads(json.dumps(_normalize_params('{"a": 1}'))) == {"a": 1}
+
+
+# --- 真库往返（批 83a 复审 P0 回归钉：SQL 形态错误 mock 绿抓不到） ---
+
+def _db_up() -> bool:
+    """dev 库可达？（无库自动跳过——test_account_permission 同款惯例）"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
+class TestRealDbRoundTrip:
+    """config_store 写路径**真库**往返：insert → 读回 → update → delete（两族各一遍）。
+
+    复审 P0 的回归钉：`insert_row` 曾把 UPDATE 的 `_ph`（返回 `col=%s`）复用到 VALUES，
+    生成 `VALUES (name=%s, ...)` → PG 报 `column "name" does not exist`，**新建数据源/
+    交易账号接口必然 500**，而本文件其余 _FakeConn 用例全绿（假连接不真执行 SQL，
+    语句形态错误 PG 永不校验）。故形态类错误必须在真库钉住。
+    """
+
+    @staticmethod
+    def _mk_values(kind, cs, tag):
+        """两族各造一份合法 values（params 走 JSON 字符串——insert_row 入参契约）。"""
+        vals = {"name": f"RT-{tag}", "provider": cs.KIND_DATA == kind and "tushare" or "xtp",
+                "market": "astock", "params": json.dumps({"rate_limits": {"a": 1}}),
+                "capabilities": ["hist_quote"] if kind == cs.KIND_DATA else ["trading"],
+                "enabled": True}
+        if kind == cs.KIND_TRADING:
+            vals["exchanges"] = ["SHSE"]
+            vals["account_key"] = f"RT-{tag}"          # UNIQUE(provider, account_key)——uuid 唯一
+        return vals
+
+    @staticmethod
+    def _read(kind, cs, rid):
+        return next(cs.row_dict(r, kind) for r in cs.list_rows(kind) if r[0] == rid)
+
+    _KINDS = ["data_source", "trading_account"]
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_insert_read_update_delete(self, kind):
+        """写全链路真库往返——INSERT 语句形态正确性（P0）+ jsonb/数组往返 + 列集差异。"""
+        import uuid
+        from src.data_platform import config_store as cs
+        tag = uuid.uuid4().hex[:8]
+        rid = None
+        try:
+            vals = self._mk_values(kind, cs, tag)
+            # INSERT 是本钉的核心：形态错误在此抛 UndefinedColumn（不再假绿）
+            rid = cs.insert_row(kind, vals)
+            assert isinstance(rid, int) and rid > 0
+
+            d = self._read(kind, cs, rid)
+            assert d["name"] == f"RT-{tag}" and d["enabled"] is True
+            assert d["market"] == "astock" and d["provider"] == vals["provider"]
+            assert d["params"] == {"rate_limits": {"a": 1}}      # jsonb 往返成 dict
+            assert d["capabilities"] == vals["capabilities"]     # text[] 往返
+            assert d["has_credentials"] is False
+            if kind == cs.KIND_TRADING:
+                assert d["exchanges"] == ["SHSE"]                # 交易族专有两列
+                assert d["account_key"] == f"RT-{tag}"
+            else:
+                assert d["exchanges"] is None and d["account_key"] is None   # 数据源族无此二列
+
+            # UPDATE：params 亦走 SET 占位符（两条 SQL 的占位符形态各自独立）
+            cs.update_row(kind, rid, {"name": f"RT2-{tag}", "params": json.dumps({"b": 2})})
+            d2 = self._read(kind, cs, rid)
+            assert d2["name"] == f"RT2-{tag}"
+            assert d2["params"] == {"b": 2}
+            assert d2["capabilities"] == vals["capabilities"]     # 未提交的列不动
+
+            # DELETE
+            cs.delete_row(kind, rid)
+            assert cs.row_exists(kind, rid) is False
+            rid = None
+        finally:
+            if rid is not None and cs.row_exists(kind, rid):
+                cs.delete_row(kind, rid)                          # 断言失败也不留脏行
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_position_is_per_table_sequence(self, kind):
+        """position=**本表**单序（拆表立法）：连插两行 position 严格递增，且不看另一张表。"""
+        import uuid
+        from src.data_platform import config_store as cs
+        other = cs.KIND_TRADING if kind == cs.KIND_DATA else cs.KIND_DATA
+        ids = []
+        try:
+            tag = uuid.uuid4().hex[:8]
+            for i in (1, 2):
+                ids.append(cs.insert_row(kind, self._mk_values(kind, cs, f"{tag}{i}")))
+            pos = [self._read(kind, cs, i)["position"] for i in ids]
+            assert pos[1] == pos[0] + 1                           # 本表内严格递增
+            # 另一张表的 position 与本表无关（同值可各自存在=独立序列，不跨表推断）
+            other_max = max([r for r in cs.list_rows(other)], key=lambda r: r[0])[0] if cs.list_rows(other) else None
+            ids_other = {r[0] for r in cs.list_rows(other)}
+            assert ids[0] not in ids_other                        # 两表 id 空间独立（禁跨表按 id 推断）
+            del other_max
+        finally:
+            for i in ids:
+                if cs.row_exists(kind, i):
+                    cs.delete_row(kind, i)
+
+    def test_update_omits_credentials_keeps_value(self):
+        """三段语义真库钉：UPDATE 不带 credentials_encrypted = 不改（不是清空）。"""
+        import uuid
+        from src.data_platform import config_store as cs
+        from src.quant_common.crypto import encrypt
+        rid = None
+        try:
+            tag = uuid.uuid4().hex[:8]
+            vals = self._mk_values(cs.KIND_DATA, cs, tag)
+            vals["credentials_encrypted"] = encrypt(json.dumps({"token": "seed-token"}))
+            rid = cs.insert_row(cs.KIND_DATA, vals)
+            assert self._read(cs.KIND_DATA, cs, rid)["has_credentials"] is True
+
+            cs.update_row(cs.KIND_DATA, rid, {"name": f"RT3-{tag}"})   # 故意不带 credentials
+            d = self._read(cs.KIND_DATA, cs, rid)
+            assert d["has_credentials"] is True                       # 保留，未被清空
+            assert d["name"] == f"RT3-{tag}"
+            assert cs.get_conn_row(cs.KIND_DATA, rid)[1] is not None   # 密文列未被动过
+        finally:
+            if rid is not None and cs.row_exists(cs.KIND_DATA, rid):
+                cs.delete_row(cs.KIND_DATA, rid)

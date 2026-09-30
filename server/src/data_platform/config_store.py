@@ -161,7 +161,19 @@ def _write_cols(kind: str, values: dict) -> list[str]:
 
 
 def _ph(col: str) -> str:
+    """**UPDATE SET** 占位符：`col=%s`（params 需 jsonb 转型）。"""
     return f"{col}=%s::jsonb" if col == "params" else f"{col}=%s"
+
+
+def _val_ph(col: str) -> str:
+    """**INSERT VALUES** 占位符：**裸占位符**（params 需 jsonb 转型）。
+
+    与 `_ph` 必须分开：`_ph` 返回 `col=%s`（SET 语法），塞进 VALUES 会生成
+    `VALUES (name=%s, ...)` → PG 报 `column "name" does not exist ... cannot be
+    referenced from this part of the query`（批 83a 复审 P0——下沉时误复用 `_ph`）。
+    列表内带列名只是语法错误、不是注入面，但两处共用同一函数=必然复发，故拆开。
+    """
+    return "%s::jsonb" if col == "params" else "%s"
 
 
 def insert_row(kind: str, values: dict) -> int:
@@ -169,11 +181,15 @@ def insert_row(kind: str, values: dict) -> int:
 
     两表 id 各自独立序列；position 亦各表独立（原「全局单序列」随拆表退役）。
     异常显式 rollback（沿用路由层原语义：失败不留半事务）。
+
+    **入参契约**：`values["params"]` 必须是**已序列化的 JSON 字符串**（jsonb 列不接受
+    dict——psycopg 会报 `cannot adapt type 'dict'`）。序列化在路由层（`mgmt.py`）完成，
+    本模块不做二次 dumps；`capabilities` 传 list（PG 原生数组），`exchanges` 传 list 或 None。
     """
     tbl = _tbl(kind)
     cols = _write_cols(kind, values)
     sql = (f"INSERT INTO {tbl} ({', '.join(cols)}, position) "
-           f"VALUES ({', '.join(_ph(c) for c in cols)}, "
+           f"VALUES ({', '.join(_val_ph(c) for c in cols)}, "
            f"(SELECT coalesce(max(position),-1)+1 FROM {tbl})) RETURNING id")
     with get_conn() as conn:
         try:
@@ -186,7 +202,10 @@ def insert_row(kind: str, values: dict) -> int:
 
 
 def update_row(kind: str, iid: int, values: dict) -> None:
-    """改本域行（仅写 values 提供的列；credentials_encrypted 缺席=不改）。"""
+    """改本域行（仅写 values 提供的列；credentials_encrypted 缺席=不改）。
+
+    入参契约同 `insert_row`（`params` 须为 JSON 字符串）。
+    """
     tbl = _tbl(kind)
     cols = _write_cols(kind, values)
     sets = ", ".join(_ph(c) for c in cols)
