@@ -22,7 +22,7 @@
 - `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
 - `deploy/` - **工件化交付（现行，2026-08-26 起在管生产）**：Ansible playbooks（release/rollback/bootstrap 三剧本八阶段+自动回滚）+ inventory（quant-prod/quant-staging 彩排：同路径/同权限/同 sudoers/真 ssh）+ wrappers（**12 只特权通道**，sudoers 白名单唯一真源）+ collections vendor + 六场景失败注入。**发布=彩排绿后跑 release.yml**（机制全貌详见 `docs/architecture/A06-部署管道架构.md`）
-- `scripts/` - 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`dev-start.sh`/`verify.sh`）+ 独立运维工具（`migrate-encryption-key.sh`/`test-live-pipeline.sh`/`test_xtp_connect.py`）。**不传服务器**。旧 bash 部署链已删除（2026-08-27 git 史可考 40fb5fa，Ansible 接管后回滚周期已过）
+- `scripts/` - 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`dev-start.sh`/`verify.sh`）+ 独立运维工具（`migrate-encryption-key.sh`/`test-live-pipeline.sh`/`test_xtp_connect.py`/**`test-migration-roundtrip.sh`**——破坏性/改写过的迁移在 scratch schema 里真跑 upgrade+downgrade 的往返回归，为什么必须存在见 `flow/任务/批85-破坏性迁移两步走立法.md`）。**不传服务器**。旧 bash 部署链已删除（2026-08-27 git 史可考 40fb5fa，Ansible 接管后回滚周期已过）
 - **判据**：协调/推进项目的 → `flow/`；要交付的内容 → `docs/`（知识/文档）或 `server/src/`（代码）
 
 ## 开工前必读
