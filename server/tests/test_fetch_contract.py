@@ -5,7 +5,7 @@
 （fetch 签名无 sync_id——用户裁定）。
 """
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -14,7 +14,7 @@ import pandas as pd
 import pytest
 
 from src.quant_common.contract import (
-    to_contract, ContractFrame, ContractError, DataRequest,
+    to_contract, ContractError, DataRequest,
 )
 from src.data_platform.tz import as_utc
 
@@ -47,10 +47,11 @@ class TestToContract:
 class TestFetchDispatch:
     """fetch (kind,sub_kind) 分派——mock pull（不真拉网络）；sync_id 不进签名（用户裁定）。"""
 
-    def _req(self, kind, sub=None, symbols=("600000.SHSE",), start="20260901", end="20260921", freq="1D"):
+    def _req(self, kind, sub=None, symbols=("600000.SHSE",), start="20260901", end="20260921",
+             freq="1D", mode="consume"):
         return DataRequest(
             kind=kind, symbols=symbols, temporality="historical", sub_kind=sub, freq=freq,
-            range_=(datetime(2026, 9, 1), datetime(2026, 9, 21)))
+            range_=(datetime(2026, 9, 1), datetime(2026, 9, 21)), mode=mode)
 
     def test_bar_daily_stock_batch(self):
         from src.data_platform.adapters.base import TushareAdapter
@@ -60,7 +61,7 @@ class TestFetchDispatch:
         with patch.object(ad, "pull_daily_batch", return_value=df) as pb, \
              patch.object(ad, "pull_adj_factor", return_value=None) as paf, \
              patch.object(ad, "to_bar_rows", return_value=[_row()]) as tbr:
-            f = ad.fetch(self._req("bar_daily", sub="stock"))
+            f = ad.fetch(self._req("bar_daily", sub="stock", mode="supply"))
         pb.assert_called_once_with("20260901", "astock")   # sub_kind=stock → 拉取 kind=astock
         paf.assert_called_once_with(trade_date="20260901")  # 当日全市场复权因子
         tbr.assert_called_once_with(df, "1D", {})          # 无因子 → adj_map={}
@@ -76,17 +77,17 @@ class TestFetchDispatch:
         with patch.object(ad, "pull_daily_batch", return_value=df), \
              patch.object(ad, "pull_adj_factor", return_value=fdf), \
              patch.object(ad, "to_bar_rows", return_value=[_row()]) as tbr:
-            ad.fetch(self._req("bar_daily", sub="stock"))
+            ad.fetch(self._req("bar_daily", sub="stock", mode="supply"))
         tbr.assert_called_once_with(df, "1D", {"600000.SH": 2.5})
 
     def test_bar_daily_empty_skips_adj_factor(self):
         """缺口 1 加固：空 df（节假日）不拉因子——对齐已退役 _daily_to_save_fn〔批 72〕只在 df 非空时拉。"""
         from src.data_platform.adapters.base import TushareAdapter
         ad = TushareAdapter()
-        with patch.object(ad, "pull_daily_batch", return_value=pd.DataFrame()) as pb, \
+        with patch.object(ad, "pull_daily_batch", return_value=pd.DataFrame()), \
              patch.object(ad, "pull_adj_factor", return_value=None) as paf, \
              patch.object(ad, "to_bar_rows", return_value=[_row()]):
-            ad.fetch(self._req("bar_daily", sub="stock"))
+            ad.fetch(self._req("bar_daily", sub="stock", mode="supply"))
         paf.assert_not_called()
 
     def test_bar_daily_etf_batch(self):
@@ -95,8 +96,41 @@ class TestFetchDispatch:
         with patch.object(ad, "pull_daily_batch", return_value=MagicMock()) as pb, \
              patch.object(ad, "pull_adj_factor", return_value=None), \
              patch.object(ad, "to_bar_rows", return_value=[_row()]):
-            ad.fetch(self._req("bar_daily", sub="etf"))
+            ad.fetch(self._req("bar_daily", sub="etf", mode="supply"))
         pb.assert_called_once_with("20260901", "etf")
+
+    # —— 批 75·H7：consume 口径（per-symbol 区间）分派钉 ——
+
+    def test_bar_daily_consume_uses_per_symbol(self):
+        """默认 mode=consume → pull_daily per-symbol 区间（不复权 adj=None），不走按日批拉。"""
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        with patch.object(ad, "pull_daily", return_value=pd.DataFrame()) as pd_, \
+             patch.object(ad, "pull_daily_batch", return_value=MagicMock()) as pb, \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]) as tbr:
+            ad.fetch(self._req("bar_daily", sub="stock"))
+        pd_.assert_called_once_with("600000.SHSE", "20260901", "20260921", adj=None, kind="astock")
+        pb.assert_not_called()
+        tbr.assert_called_once()   # adj_map 不传=缺省 None（逐行 adj_factor）——消费面不复权口径
+
+    def test_bar_daily_consume_etf_kind_routing(self):
+        """consume+etf → pull_daily kind=etf（fund_daily 接口路由）。"""
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        with patch.object(ad, "pull_daily", return_value=pd.DataFrame()) as pd_, \
+             patch.object(ad, "to_bar_rows", return_value=[_row()]):
+            ad.fetch(self._req("bar_daily", sub="etf"))
+        pd_.assert_called_once_with("600000.SHSE", "20260901", "20260921", adj=None, kind="etf")
+
+    def test_bar_daily_consume_empty_is_quiet(self):
+        """停牌/缺根：pull_daily 空 df → to_bar_rows 空入参不崩（空帧语义，缺根豁免=天然成立）。"""
+        from src.data_platform.adapters.base import TushareAdapter
+        ad = TushareAdapter()
+        with patch.object(ad, "pull_daily", return_value=pd.DataFrame()), \
+             patch.object(ad, "to_bar_rows", return_value=[]) as tbr:
+            f = ad.fetch(self._req("bar_daily", sub="stock"))
+        assert f.rows == ()
+        tbr.assert_called_once()
 
     def test_bar_minute_segmented(self):
         """缺口 2：bar_minute 必须按 split_minute_range 分段 + 09:00/15:00 约定拉取。"""
@@ -165,10 +199,10 @@ class TestQualityHook:
     """批 72 双盲 P2-3：fetch 内质量挂钩钉（fail-soft 吞 MagicMock 的掩盖面对治——
     真 df 行为级断言挂钩真被调+label 词表+空 df 闸）。"""
 
-    def _req(self, kind, sub=None, symbols=("600000.SHSE",), freq="1D"):
+    def _req(self, kind, sub=None, symbols=("600000.SHSE",), freq="1D", mode="consume"):
         return DataRequest(
             kind=kind, symbols=symbols, temporality="historical", sub_kind=sub, freq=freq,
-            range_=(datetime(2026, 9, 1), datetime(2026, 9, 21)))
+            range_=(datetime(2026, 9, 1), datetime(2026, 9, 21)), mode=mode)
 
     def test_stock_dirty_df_quality_logged(self, caplog):
         import logging
@@ -180,7 +214,7 @@ class TestQualityHook:
              patch.object(ad, "pull_adj_factor", return_value=None), \
              patch.object(ad, "to_bar_rows", return_value=[_row()]), \
              caplog.at_level(logging.WARNING):
-            ad.fetch(self._req("bar_daily", sub="stock"))
+            ad.fetch(self._req("bar_daily", sub="stock", mode="supply"))
         assert any("[quality] bar_daily" in r.message and "为 0" in r.message
                    for r in caplog.records)
 
@@ -194,7 +228,7 @@ class TestQualityHook:
              patch.object(ad, "pull_adj_factor", return_value=None), \
              patch.object(ad, "to_bar_rows", return_value=[_row()]), \
              caplog.at_level(logging.WARNING):
-            ad.fetch(self._req("bar_daily", sub="etf"))
+            ad.fetch(self._req("bar_daily", sub="etf", mode="supply"))
         assert any("[quality] etf_daily" in r.message for r in caplog.records)
 
     def test_cb_empty_df_no_quality_log(self, caplog):

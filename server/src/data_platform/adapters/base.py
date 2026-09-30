@@ -248,9 +248,11 @@ class TushareAdapter(BaseDataAdapter):
     def fetch(self, req, acct=None):
         """批 58·M3 拉取统一契约（28 §5.2——同步/消费共用；58a bar 族 + 批 83b 池内族）。
 
-        分派键=(kind, sub_kind)（DataKind 第一公民，sync_id 不复活）：
-        - bar_daily+stock/etf = 按日全市场批拉（pull_daily_batch——引擎循环逐日调，req.range_ 单日）
+        分派键=(kind, sub_kind)（DataKind 第一公民，sync_id 不复活）；bar_daily+stock/etf 再按
+        req.mode 分叉（批 75·H7）：
+        - supply（同步引擎）= 按日全市场批拉（pull_daily_batch——引擎循环逐日调，req.range_ 单日）
           附当日全市场复权因子 adj_map（对齐已退役 _daily_to_save_fn〔批 72〕——astock 因子非 NULL 生死线）
+        - consume（DataBus fetch-on-miss）= per-symbol 单标的区间（pull_daily，不复权+逐行 adj_factor）
         - bar_daily+convertible = 区间全量（pull_cb_daily）
         - index_daily = per-symbol 区间（pull_index_daily）
         - bar_minute = per-symbol 区间（split_minute_range 分段 + 09:00/15:00 约定，对齐 _pull_minute）
@@ -277,6 +279,23 @@ class TushareAdapter(BaseDataAdapter):
                 # 批 72 质量校验迁移面（v2 #2 双同：空 df 闸——节假日/非交易区间不喷噪声）
                 if df is not None and not df.empty:
                     _log_bar_quality_local(df, "cb_daily")
+                rows = self.to_bar_rows(df, freq)
+            elif getattr(req, "mode", "consume") == "consume":
+                # 批 75·H7：消费面口径——per-symbol 单标的区间拉取（fetch-on-miss 兜长尾，28 §7.2）。
+                # 不复权（adj=None=原始价）+ 逐行 adj_factor（to_bar_rows adj_map=None 分支读
+                # df["adj_factor"]——pro_bar 原生带列，回落 pro.daily 缺列补 None）——对齐 bar_1D 契约。
+                # 限速档对齐 DEFAULT_RATE_LIMITS 键：stock=daily / etf=fund_daily（逐标的各一次
+                # 上下文=一次进账/熔断计数，对齐供给域逐 API 记账口径）。
+                from src.data_platform.rate_limit import rate_limit_context
+                api = "fund_daily" if sub == "etf" else "daily"
+                kind_param = "etf" if sub == "etf" else "astock"
+                dfs = []
+                for sym in (req.symbols or ()):
+                    with rate_limit_context(self._ds, api):
+                        dfs.append(self.pull_daily(sym, start, end, adj=None, kind=kind_param))
+                df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+                if df is not None and not df.empty:
+                    _log_bar_quality_local(df, "bar_daily" if sub == "stock" else "etf_daily")
                 rows = self.to_bar_rows(df, freq)
             else:   # stock/etf：按日全市场批拉（sub_kind=stock→astock）+ 当日复权因子 adj_map
                 df = self.pull_daily_batch(start, "astock" if sub == "stock" else sub)

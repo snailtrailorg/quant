@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pandas as pd
 import pytest
 
-from src.quant_common.contract import DataRequest, DataGap, ContractFrame
+from src.quant_common.contract import DataRequest, DataGap
 from src.data_platform.tz import as_utc
 
 
@@ -79,18 +79,33 @@ class TestDataBus:
         bus = DataBus()
         frame = _frame()
         with patch.object(bus, "_local_fetch", return_value=frame) as lf, \
-             patch("src.data_platform.routing.resolve") as rs:
+             patch("src.data_platform.routing.resolve"):
             out, wm = bus.get_bars(_req())
         lf.assert_called_once()
         assert out is frame and wm is not None
 
-    def test_get_bars_miss_degrades_empty(self):
-        """local 空→fetch-on-miss 本批降级空帧（adapter 无 per-symbol 区间拉取，挂账——不崩）。"""
+    def test_get_bars_miss_degrades_when_remote_fails(self):
+        """local 空→fetch-on-miss 远端失败（全链尽）→ 降级空帧不崩（fail-soft）。"""
+        from src.quant_common.contract import SourceUnavailable
         from src.data_platform.databus import DataBus
         bus = DataBus()
-        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")):
+        chain = MagicMock()
+        chain.fetch.side_effect = SourceUnavailable("全链尽")
+        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
+             patch("src.data_platform.routing.resolve", return_value=chain):
             out, wm = bus.get_bars(_req())
         assert out.rows == () and out.source == "local_pg" and wm is None
+
+    def test_get_bars_miss_non_bar_kind_degrades(self):
+        """bar 族外 kind 维持旧降级空帧（consume 口径不在本批——不做路由不拉远端）。"""
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        req = DataRequest(kind="astock_basic", symbols=("600000.SHSE",), temporality="historical")
+        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
+             patch("src.data_platform.routing.resolve") as rs:
+            out, wm = bus.get_bars(req)
+        assert out.rows == () and wm is None
+        rs.assert_not_called()
 
     def test_local_fetch_empty_raises_data_gap(self):
         from src.data_platform.databus import DataBus
@@ -114,6 +129,78 @@ class TestDataBus:
         chain.fetch.return_value = _frame()
         with patch("src.data_platform.routing.resolve", return_value=chain):
             out = bus.get("bar_daily", _req())
+        assert out is chain.fetch.return_value
+
+
+class TestFetchOnMiss:
+    """批 75·H7：fetch-on-miss 真拉（单标的 bar 族+显式区间）与范围外降级。"""
+
+    def test_single_symbol_bar_real_pull_and_save(self):
+        """真拉路径：resolve→chain.fetch(skip local_pg)→非空帧落仓（下次 local 命中）。"""
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        chain = MagicMock()
+        chain.fetch.return_value = _frame()
+        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
+             patch("src.data_platform.routing.resolve", return_value=chain) as rs, \
+             patch.object(bus.store, "save", return_value=1) as sv:
+            out, wm = bus.get_bars(_req())
+        assert out is chain.fetch.return_value and wm is not None
+        assert rs.call_args[0][0].mode == "consume"          # 消费口径进 adapter 分派
+        assert chain.fetch.call_args[1]["skip"] == frozenset({"local_pg"})
+        sv.assert_called_once_with(chain.fetch.return_value)
+
+    def test_multi_symbol_degrades_without_resolve(self):
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        req = DataRequest(kind="bar_daily", symbols=("a.SHSE", "b.SHSE"),
+                          temporality="historical", freq="1D",
+                          range_=(datetime(2025, 9, 21), datetime(2026, 9, 21)))
+        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
+             patch("src.data_platform.routing.resolve") as rs, \
+             patch.object(bus.store, "save") as sv:
+            out, wm = bus.get_bars(req)
+        assert out.rows == () and out.source == "local_pg" and wm is None
+        rs.assert_not_called()
+        sv.assert_not_called()
+
+    def test_no_range_degrades(self):
+        """无显式区间（拉取窗不定）→ 降级，不真拉。"""
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        req = DataRequest(kind="bar_daily", symbols=("600000.SHSE",), temporality="historical", freq="1D")
+        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
+             patch("src.data_platform.routing.resolve") as rs, \
+             patch.object(bus.store, "save") as sv:
+            out, _wm = bus.get_bars(req)
+        assert out.rows == ()
+        rs.assert_not_called()
+        sv.assert_not_called()
+
+    def test_suspended_symbol_empty_frame_quiet(self):
+        """停牌缺根：远端拉到空帧（缺根=正常非错误）→ 返回空帧、不落仓、不二次告警。"""
+        from src.quant_common.contract import to_contract
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        chain = MagicMock()
+        chain.fetch.return_value = to_contract([], source="tushare", kind="bar_daily", freq="1D")
+        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
+             patch("src.data_platform.routing.resolve", return_value=chain), \
+             patch.object(bus.store, "save") as sv:
+            out, wm = bus.get_bars(_req())
+        assert out.rows == () and wm is None
+        sv.assert_not_called()
+
+    def test_save_failure_does_not_break_frame(self):
+        """落仓失败 fail-soft：帧照常返回消费方，不崩。"""
+        from src.data_platform.databus import DataBus
+        bus = DataBus()
+        chain = MagicMock()
+        chain.fetch.return_value = _frame()
+        with patch.object(bus, "_local_fetch", side_effect=DataGap("无")), \
+             patch("src.data_platform.routing.resolve", return_value=chain), \
+             patch.object(bus.store, "save", side_effect=RuntimeError("pg down")):
+            out, _wm = bus.get_bars(_req())
         assert out is chain.fetch.return_value
 
 

@@ -24,6 +24,11 @@ _FREQ_BY_KIND = {"bar_minute": "1min", "bar_daily": "1D"}   # 未达降级 get_b
 
 _R = None
 
+# 批 75·H7：fetch-on-miss 真拉范围=单标的 bar 族且本地读写路径对称的两种。
+# index_daily 不在内——其本地仓=bar_index（读走 db.get_index_bars），db.get_bars 读不回，
+# 接真拉=每次 miss 都重复打远端（落仓读不回），挂账「指数消费统一走 DataBus」时一并接。
+_FETCH_ON_MISS_KINDS = frozenset({"bar_daily", "bar_minute"})
+
 
 def _r():
     """Valkey 单例（routing/market_snapshot 同款）。"""
@@ -146,17 +151,42 @@ class DataBus:
         return frame, self._watermark(frame, getattr(req, "freq", None))
 
     def _fetch_on_miss(self, req):
-        """本地空→远端 fetch-on-miss（28 §7.2「兜长尾冷门」）。
+        """本地空→远端 fetch-on-miss 真拉（28 §7.2「兜长尾冷门」；批 75·H7 落地）。
 
-        本批 adapter.fetch 的 bar 族只实现「同步引擎口径」（逐日批/区间，29 §六 决策1），未实现
-        「消费面口径」（per-symbol 区间）——直接 fetch 会 UnsupportedFeature 或数据范围错
-        （按日全市场 vs 单标的区间）。故本批降级空帧 + 告警；per-symbol 区间拉取留后续批
-        （挂账：adapter 补 consume 口径 fetch）。
+        范围=单标的 bar_daily/bar_minute 且带显式 range_——adapter 按 req.mode="consume"
+        走 per-symbol 口径（base.py fetch 分派：bar_daily+stock/etf → pull_daily 单标的区间，
+        不复权+逐行 adj_factor；bar_minute 本就 per-symbol）。链=resolve 后 chain.fetch
+        skip local_pg（仓已知 miss，不再问一次）；拉到非空帧落仓（store.save，下次 local 命中）。
+        其余情形维持旧降级空帧+告警（挂账可观测）：非 bar 族 consume 口径、多标的聚合（M7）、
+        无显式区间（拉取窗不定）。拉取/落仓失败 fail-soft 降级空帧不崩。
         """
         from src.quant_common.contract import to_contract
-        logger.warning("fetch-on-miss 未接（adapter 无 per-symbol 区间拉取，挂账）: %s %s",
-                       req.kind, req.symbols)
-        return to_contract([], source="local_pg", kind=req.kind, freq=req.freq)
+
+        def _degrade(reason: str):
+            logger.warning("fetch-on-miss 降级空帧（%s）: %s %s",
+                           reason, req.kind, getattr(req, "symbols", ()))
+            return to_contract([], source="local_pg", kind=req.kind, freq=req.freq)
+
+        if req.kind not in _FETCH_ON_MISS_KINDS:
+            return _degrade("kind 不在真拉范围（bar 族外挂账）")
+        if len(req.symbols) != 1:
+            return _degrade("多标的聚合未接（挂账 M7 同源）")
+        if not req.range_ or req.range_[0] is None or req.range_[1] is None:
+            return _degrade("无显式区间（拉取窗不定）")
+        try:
+            from src.data_platform import routing
+            chain = routing.resolve(req)
+            frame = chain.fetch(_fetch_via_adapter(req), req, skip=frozenset({"local_pg"}))
+        except Exception as e:
+            logger.warning("fetch-on-miss 远端拉取失败，降级空帧: %s %s: %s",
+                           req.kind, req.symbols, e)
+            return to_contract([], source="local_pg", kind=req.kind, freq=req.freq)
+        if frame.rows:
+            try:
+                self.store.save(frame)
+            except Exception as e:
+                logger.warning("fetch-on-miss 落仓失败（帧照常返回）: %s", e)
+        return frame
 
     # —— 参考数据统一入口（无 local_pg 特判——fundamental/featured 等）——
     def get(self, kind, req):
