@@ -1169,87 +1169,12 @@ def write_summary_metrics(conn, run_id: int) -> None:
 
 
 # ====================================================================
-# Phase 1 小任务（D3 条款同步 / D5 定时闹钟 / #37 通道监控）
+# Phase 1 小任务（#37 通道监控等）
+# 批 83b：D3 条款同步（convertible_terms_sync）与 F-DATA-004 静态清单
+# （static_list_sync）已收编为 sync_config 驱动——逻辑迁 src/data_sync/engine.py
+# 的 _sync_convertible_terms / _sync_static_list，beat 条目退役（迁移 0118 补 cfg 行）。
 # ====================================================================
 
-@app.task(name="src.scheduler.tasks.convertible_terms_sync")
-def convertible_terms_sync():
-    """D3 可转债条款数据同步（盘后，每日一次）。拉取活跃可转债基本信息并存 DB。"""
-    import json
-
-    from src.data_platform.adapters.tushare_adapter import pull_cb_basic, pull_convertible_bonds
-
-    # 批 67：裸调收编（补扫——循环突发风险更大）。熔断记账盲区注记（盲审 P2-3）：
-    # pull_cb_basic 内部吞异常返 {}——context 包裹只覆盖构造/穿透失败，per-bond 失败
-    # 记账盲区随 adapter 形态（改造 adapter 另批）。
-    from src.data_platform.rate_limit import rate_limit_context
-    from src.data_sync.engine import _get_rate_ds
-    _ds = _get_rate_ds("tushare")
-    try:
-        with rate_limit_context(_ds, "cb_basic"):
-            bonds = pull_convertible_bonds()
-            _ds.record_usage(api_calls=1, api_name="cb_basic", provider="tushare")
-    except Exception as e:
-        return {"status": "error", "reason": f"pull_convertible_bonds 失败: {e}"}
-    results = []
-    for ts_code in bonds[:50]:
-        try:
-            with rate_limit_context(_ds, "cb_basic"):
-                terms = pull_cb_basic(ts_code)
-                _ds.record_usage(api_calls=1, api_name="cb_basic", provider="tushare")
-            if terms:
-                with get_conn() as conn:
-                    conn.execute("SELECT 1 FROM convertible_terms LIMIT 1")
-                    conn.execute(
-                        "INSERT INTO convertible_terms (ts_code, terms, updated_at) VALUES (%s,%s,now()) "
-                        "ON CONFLICT (ts_code) DO UPDATE SET terms=EXCLUDED.terms, updated_at=now()",
-                        (ts_code, json.dumps(terms, ensure_ascii=False)))
-                    conn.commit()
-                results.append(ts_code)
-        except Exception as e:
-            logger.warning("convertible_terms_sync 处理 %s 失败: %s", ts_code, e)
-            continue
-    return {"status": "ok", "count": len(results)}
-
-
-
-
-@app.task(name="src.scheduler.tasks.static_list_sync")
-def static_list_sync():
-    """F-DATA-004 静态标的清单同步（定期拉 stock_basic + 标记退市）。"""
-    try:
-        from src.data_platform.adapters.tushare_adapter import get_pro
-        pro = get_pro()
-    except Exception:
-        return {"status": "skipped", "reason": "tushare 未配"}
-    synced = 0
-    try:
-        # DB 优化（2026-08-21 盘点重灾 #1）：原"SELECT 开事务→事务内 pro.stock_basic() 网络拉取→
-        # 逐行 upsert 5400 行"——锁链事件同族（事务跨网络+逐行）。改：先无事务拉取，
-        # 再 executemany 批量落库（网络抖动不再持锁；5400 次往返→1 次）。
-        # 批 67：裸调收编（挂账原点——批 64 对账表指名点；不传 min_interval=档值两级取保 DB 覆写）
-        from src.data_platform.rate_limit import rate_limit_context
-        from src.data_sync.engine import _get_rate_ds
-        with rate_limit_context(_get_rate_ds("tushare"), "stock_basic"):
-            df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
-            _get_rate_ds("tushare").record_usage(api_calls=1, api_name="stock_basic", provider="tushare")
-        if df is None or df.empty:
-            return {"status": "ok", "synced": 0}
-        rows = [(r["ts_code"], r.get("name", "") or "", r.get("industry", "") or "")
-                for r in df.to_dict("records")]
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.executemany(
-                    "INSERT INTO static_symbols (ts_code,name,industry,list_status,delisted) VALUES (%s,%s,%s,'L',false) "
-                    "ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name,industry=EXCLUDED.industry,"
-                    "list_status='L',delisted=false,updated_at=now()",
-                    rows)
-            conn.commit()
-        synced = len(rows)
-    except Exception as e:
-        logger.warning(f"static_list_sync 失败: {e}")
-        return {"status": "error", "reason": str(e)[:100]}
-    return {"status": "ok", "synced": synced}
 
 @app.task(name="src.scheduler.tasks.broker_health_check")
 def broker_health_check():

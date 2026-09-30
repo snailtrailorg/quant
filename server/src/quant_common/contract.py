@@ -82,7 +82,9 @@ def is_legal(kind: str, temporality: str) -> bool:
     return ts is not None and temporality in ts
 
 
-# ─────────────────────────── 错误三分类（28 §3.3） ───────────────────────────
+# ─────────────────────────── 错误三分类（28 §3.3）+ 批 83b provider 配置错 ───────────────────────────
+# 前三类=28 §3.3 原分类（请求错/源故障/无数据）；ProviderConfigError 为批 83b 防串源新增，
+# 不计入三分类（它不参与 failover 决策，而是配置不完整时**直接终止**）。
 
 class ContractError(Exception):
     """契约层错误基类。"""
@@ -98,6 +100,24 @@ class SourceUnavailable(ContractError):
 
 class DataGap(ContractError):
     """源正常但无此数据（停牌/未上市/覆盖外）→ 可降级/换覆盖更广候选。"""
+
+
+class ProviderConfigError(ContractError):
+    """provider 配置错（批 83b P0 防串源）——**永久配置错，不 failover、不回落、不重试**。
+
+    语义对齐 EX_CONFIG(78)（`strategy_runner/main.py` 同口径：永久配置错不自动重启）。
+    触发条件=「provider 在 adapter 注册表已注册，但 DataSource 注册表未注册」——这是**串源
+    必经之路**：调用方 `get_data_source(p) or TushareDataSource()` 会静默回落到 Tushare，
+    于是新源的失败/限速/熔断/用量全记到 tushare 头上（熔断键 `rl:cb:tushare:0` 串源），
+    是确定性 bug 而非降级。故此处**必须抛**，把"配置不完整"变成响亮的启动期错误。
+
+    三分域边界（批 83b 用户裁定"按分域分治"，与盲审 A-P2/B-P2 并存）：
+    | 情形                                  | 语义                          |
+    |---------------------------------------|-------------------------------|
+    | adapter 已注册 + DataSource 已注册     | 正常（DB 无行 → None 交调用方）|
+    | adapter 已注册 + DataSource 未注册     | **本异常**（防串源）           |
+    | provider 完全未知（两边都没注册）      | 维持 A-P2/B-P2：engine 层 fail-soft + 告警 |
+    """
 
 
 # ─────────────────────────── 范围（29 §三——六审软件必问①立法） ───────────────────────────

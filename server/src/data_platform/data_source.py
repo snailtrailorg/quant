@@ -3,6 +3,13 @@
 接口：get_client / test_connection / record_usage。
 实现：TushareDataSource（token 从 data_source 表读，.env fallback）。
 别人加 Wind：实现 DataSource 子类 + DB 配置（provider='wind'），不改 engine 代码。
+
+⚠️ **加新源须三处各注册一类**（批 83b P1-1/P1-2：漏一处=串源，确定性 bug）：
+1. 本文件 `_REGISTRY`（DataSource：连接/token/限速/熔断/用量/pacer）
+2. `adapters/base.py` `_ADAPTERS`（BaseDataAdapter：fetch 契约 + capabilities 真源）
+3. `interfaces/base.py` `_REGISTRY` + `_PROVIDER_MODULES`（InterfaceProvider：配置表单 schema）
+漏第 1 处 → `get_data_source` 抛 `ProviderConfigError`（原为静默回落 tushare=串源）。
+守门见 `tests/test_provider_registry.py`。
 """
 from __future__ import annotations
 
@@ -10,6 +17,8 @@ import json
 import logging
 import os
 from abc import ABC, abstractmethod
+
+from src.quant_common.contract import ProviderConfigError
 
 logger = logging.getLogger("data_source")
 
@@ -170,16 +179,50 @@ _REGISTRY: dict[str, type[DataSource]] = {
     "tushare": TushareDataSource,
 }
 
+# 兜底源声明（**单点真相**）：所有源都无实例可用时的回落目标。
+# 为什么需要它：盲审 A-P2/B-P2 裁定"配置错 provider 不应打断同步"（fail-soft），
+# 故无实例时须回落一个可用源；而这个回落目标若不在此声明、任由散落的"provider 是否
+# 等于某个源名"字面量分支散在各层，就正好撞上 CI 断言一（test_contract_gate：全仓禁
+# provider 字面量分支，多源路由必须查表）。声明在此处后，engine 只问"是否等于声明的
+# 兜底源"，新增数据源无需改 engine 一行。
+FALLBACK_PROVIDER: str = "tushare"
+
+
+def fallback_data_source() -> DataSource:
+    """无可用实例时的兜底 DataSource（A-P2/B-P2 fail-soft 的**唯一出口**）。
+
+    语义=tushare 专属的".env token 直连"路径（DB 无配置行时仍可拉数）。
+    """
+    return _REGISTRY[FALLBACK_PROVIDER]()
+
 
 def get_data_source(provider: str) -> DataSource | None:
     """从 DB data_source 表读数据源配置行实例化对应 DataSource（批 83a 拆表）。
 
-    provider 不存在或无配置返回 None（调用方 fallback .env）。
+    **三分域语义（批 83b P0 防串源）**：
+    - provider 在 adapter 注册表**已注册**但本表 `_REGISTRY` 未注册 → **抛
+      `ProviderConfigError`**（fail-fast，EX_CONFIG 语义）。这是**串源必经之路**：调用方
+      普遍写 `get_data_source(p) or TushareDataSource()`，静默回落会让新源的失败/限速/
+      熔断/用量全记到 tushare 头上（确定性 bug），故必须响亮失败而非降级。
+    - provider 在本表已注册、DB 无匹配行 → 返回 None（调用方按需要走 .env fallback——
+      tushare 合法的"未配库行"路径）。
+    - provider **两边都未注册**（完全未知）→ 返回 None，由 engine 层维持盲审 A-P2/B-P2
+      的 fail-soft + 告警（"配置错 provider 不应打断同步"）。两裁定各守其域。
+
     选行=enabled 过滤+表内 position 序（勘察 #3：确定性排序防多账号选行漂移）。
     83a 拆表后表内行恒为数据源（原 `NOT ('trading' = ANY(capabilities))` 域谓词在表层面退役）。
     """
     cls = _REGISTRY.get(provider)
     if not cls:
+        # 懒 import 断开 data_source ↔ adapters 的模块级回环（adapters 反向依赖本模块）
+        from src.data_platform.adapters.base import _ADAPTERS
+        if provider in _ADAPTERS:
+            raise ProviderConfigError(
+                f"provider={provider} 已注册 adapter 但未注册 DataSource——加新源须"
+                f"**三处各注册一类**（data_source._REGISTRY / adapters._ADAPTERS / "
+                f"interfaces._REGISTRY），否则熔断/限速/用量会串到 tushare 头上。"
+                f"当前已注册 DataSource={sorted(_REGISTRY)}；若该源暂时不完整，"
+                f"请勿在 sync_config 里选它")
         return None
     try:
         from src.data_platform.db import get_conn
@@ -193,6 +236,8 @@ def get_data_source(provider: str) -> DataSource | None:
             return None
         params_str = json.dumps(r[2]) if isinstance(r[2], dict) else r[2]   # jsonb→str 喂 __init__ 契约
         return cls(credentials_encrypted=r[1], params=params_str, interface_id=r[0])
+    except ProviderConfigError:
+        raise                      # 不吞（形态错是配置错，不是"读表失败"）
     except Exception as e:
         logger.warning(f"读 data_source({provider}) 失败: {e}")
         return None

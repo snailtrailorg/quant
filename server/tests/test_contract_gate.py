@@ -19,7 +19,8 @@ from src.quant_common.contract import (
     DATA_KINDS, KIND_TEMPORALITY, TEMPORALITIES, AsOf, ASTOCK_ALL,
     ASTOCK_SHSE_SZSE, ALLOWED_BAR_COLUMNS, ALLOWED_SNAPSHOT_COLUMNS,
     BAR_COLUMNS, CapabilityDecl, ContractError, ContractEvent, DataGap,
-    DataRequest, ParamError, Quality, Scope, SourceUnavailable, SnapshotRow,
+    DataRequest, ParamError, ProviderConfigError, Quality, Scope,
+    SourceUnavailable, SnapshotRow,
     Subscription, CRYPTO_ALL, is_legal, validate_capability_decls,
 )
 
@@ -114,7 +115,9 @@ class TestEvents:
 
 class TestErrorTaxonomy:
     def test_hierarchy(self):
-        for cls in (ParamError, SourceUnavailable, DataGap):
+        # ProviderConfigError 加入（批 83b 防串源）：它是**配置错**，不参与 failover 决策，
+        # 但归 ContractError 家族以便上层统一语义（见 contract.py 错误分类注释）。
+        for cls in (ParamError, SourceUnavailable, DataGap, ProviderConfigError):
             assert issubclass(cls, ContractError)
 
 

@@ -187,16 +187,10 @@ app.conf.update(
             "schedule": crontab(hour=3, minute=23),   # 批27-31：低峰（避 04:00 备份/04:07 校准）
             "options": {"queue": "risk"},
         },
-        "convertible-terms-sync": {
-            "task": "src.scheduler.tasks.convertible_terms_sync",
-            "schedule": crontab(hour=3, minute=43),   # 批27-31：低峰
-            "options": {"queue": "data"},
-        },
-        "static-list-sync": {
-            "task": "src.scheduler.tasks.static_list_sync",
-            "schedule": crontab(day_of_week=0, hour=4, minute=37),   # 批27-31：周日低峰（避 04:07 校准）
-            "options": {"queue": "data"},
-        },
+        # 批 83b：convertible-terms-sync / static-list-sync 两条 beat 已收编为
+        # sync_config 驱动（sync_id=convertible_terms / static_symbols，迁移 0118），
+        # cron 串逐字对齐原 crontab；统一下沉 data_sync_scheduler 扫描调度，
+        # 从而与 tier1 九键同等待遇（sync_log 留痕/防重锁/失败告警/页面可配）。
         "daily-report": {
             "task": "src.scheduler.tasks.daily_report",
             "schedule": crontab(hour=16, minute=30),

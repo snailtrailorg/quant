@@ -29,15 +29,34 @@ logger = logging.getLogger("data_sync")
 _sync_log_table_created = False
 
 
-def _get_pro():
-    """从 data_source 表读 Tushare（DB 优先，.env fallback；批 83a 拆表）。静态/日历/三档专用。"""
-    from src.data_platform.data_source import get_data_source
-    ds = get_data_source("tushare")
-    if ds:
-        ds.record_usage(provider="tushare", api_name="get_pro")
-        return ds.get_client()
-    import tushare as ts
-    return ts.pro_api(os.environ.get("TUSHARE_TOKEN", ""))
+def _provider_of(cfg: dict) -> str:
+    """sync_config 行的 provider（批 83b 真路由唯一入口；缺省 tushare，与 0067 列默认一致）。"""
+    return str((cfg or {}).get("provider") or "tushare")
+
+
+def _get_pro(provider: str = "tushare"):
+    """读 provider 对应数据源客户端（DB 优先，.env fallback；批 83b 从死钉 tushare 改读 provider）。
+
+    非 bar 同步项（静态清单/日历/三档）的拉取函数在 tushare_adapter 内，按 P1-4 裁定
+    **provider 恒 tushare**；此处读 provider 是让（a）限速/用量归属随配置走、
+    （b）配置指向"半成品集成"时响亮失败而非静默按 tushare 拉数（防串源）。
+
+    两种错误分域处理（批 83b 裁定，与 `_get_rate_ds`/`_get_kline_adapter` 三处口径一致）：
+    - provider 已注册 adapter 但未注册 DataSource（半成品集成）→ `get_data_source` 抛
+      `ProviderConfigError`，**直接穿透**（不吞、不回落——回落=把数据与用量记到 tushare 头上）。
+    - provider 完全未知且未配库行（多为配置笔误）→ 维持盲审 A-P2/B-P2 fail-soft：
+      告警 + 回落 tushare（"配置错 provider 不应打断同步"）。
+    """
+    from src.data_platform.data_source import FALLBACK_PROVIDER, fallback_data_source, get_data_source
+    ds = get_data_source(provider)
+    if ds is None:
+        if provider != FALLBACK_PROVIDER:   # 兜底源自身无 DB 行=.env 合法路径，不该告警
+            logger.warning("provider=%s 未注册 DataSource 且无 DB 配置行，回落兜底源 %s"
+                           "（A-P2/B-P2 fail-soft）——存在串源风险，请核对 sync_config.provider",
+                           provider, FALLBACK_PROVIDER)
+        ds = fallback_data_source()
+    ds.record_usage(provider=ds.provider, api_name="get_pro")
+    return ds.get_client()
 
 
 def _get_kline_adapter(cfg: dict):
@@ -107,13 +126,24 @@ def _preserve_normalization() -> bool:
 
 
 def _get_rate_ds(provider: str):
-    """按 provider 选限速/熔断 DataSource（fallback tushare）。
+    """按 provider 选限速/熔断 DataSource（批 83b：get_data_source 抛穿透，不再静默换源）。
 
     盲审 A-P1-3：rate_limit_context 的 ds 原硬编码 tushare，切 provider 后限速/熔断串源——
     新源仍按 Tushare 间隔限速、熔断器 key=tushare。改为按 provider 选。
+
+    `get_data_source` 的「半成品集成」→ `ProviderConfigError` **直接穿透**（本函数不捕获）；
+    「provider 完全未知」→ None → 告警 + 回落兜底源（A-P2/B-P2 fail-soft，口径同 `_get_pro`）。
+    兜底源自身无 DB 行 = 合法 .env fallback，不告警。
     """
-    from src.data_platform.data_source import TushareDataSource, get_data_source
-    return get_data_source(provider) or TushareDataSource()
+    from src.data_platform.data_source import FALLBACK_PROVIDER, fallback_data_source, get_data_source
+    ds = get_data_source(provider)
+    if ds is None:
+        if provider != FALLBACK_PROVIDER:
+            logger.warning("provider=%s 无 DataSource 实例（未注册且无 DB 配置行），"
+                           "限速/熔断/用量回落兜底源 %s（A-P2/B-P2 fail-soft）——存在串源风险",
+                           provider, FALLBACK_PROVIDER)
+        return fallback_data_source()
+    return ds
 
 
 def _log(sync_id: str, mode: str, start: str, end: str, pulled: int, saved: int,
@@ -367,7 +397,7 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
                        progress_cb: Callable | None = None) -> dict:
     """A股基本面指标同步（按日期批量拉取，一次全市场）。"""
     from src.data_platform.adapters.tushare_adapter import save_daily_basic
-    pro = _get_pro()
+    pro = _get_pro(_provider_of(cfg))
     if backfill_from:
         start = backfill_from
     else:
@@ -423,12 +453,14 @@ def _sm_upsert_state(rows) -> None:
 def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                       progress_cb: Callable | None = None) -> dict:
     """A股股票列表全量同步。"""
-    pro = _get_pro()
+    prov = _provider_of(cfg)      # 批 83b：provider 真路由（原死钉 tushare）
+    pro = _get_pro(prov)
     # 批 67：裸调收编（不传 min_interval=档值两级取保 DB 覆写）
     from src.data_platform.rate_limit import rate_limit_context
-    with rate_limit_context(_get_rate_ds("tushare"), "stock_basic"):
+    _ds = _get_rate_ds(prov)      # 批 83b：原两处重复解析同一 provider，收成一次
+    with rate_limit_context(_ds, "stock_basic"):
         df = pro.stock_basic(list_status="L")   # DB 优化：网络拉取在事务外（2026-08-21 盘点）
-        _get_rate_ds("tushare").record_usage(api_calls=1, api_name="stock_basic", provider="tushare")
+        _ds.record_usage(api_calls=1, api_name="stock_basic", provider=_ds.provider)
     rows = [(r.get("ts_code"), r.get("name"), r.get("industry"), r.get("market"),
              r.get("list_status") or "L", str(r.get("list_date", "")), str(r.get("delist_date", "")))
             for r in df.to_dict("records")]
@@ -454,9 +486,9 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
 def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """可转债基本信息全量同步。"""
-    pro = _get_pro()
+    pro = _get_pro(_provider_of(cfg))
     from src.data_platform.rate_limit import rate_limit_context
-    with rate_limit_context(_get_rate_ds("tushare"), "cb_basic"):   # 批 64b 裸调收编（档 0.3s）
+    with rate_limit_context(_get_rate_ds(_provider_of(cfg)), "cb_basic"):   # 批 64b 裸调收编（档 0.3s）
         df = pro.cb_basic()   # DB 优化：拉取在事务外
     rows = [(r.get("ts_code"), r.get("bond_short_name"), r.get("stk_code"), r.get("stk_short_name"),
              str(r.get("maturity", "")), r.get("par"), r.get("issue_price"), r.get("conv_price"),
@@ -500,9 +532,9 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
 def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """ETF基金列表全量同步。"""
-    pro = _get_pro()
+    pro = _get_pro(_provider_of(cfg))
     from src.data_platform.rate_limit import rate_limit_context
-    with rate_limit_context(_get_rate_ds("tushare"), "fund_basic"):   # 批 64b 裸调收编（档 0.3s）
+    with rate_limit_context(_get_rate_ds(_provider_of(cfg)), "fund_basic"):   # 批 64b 裸调收编（档 0.3s）
         df = pro.fund_basic(market="E")   # DB 优化：拉取在事务外
     rows = [(r.get("ts_code"), r.get("name"), r.get("management"),
              r.get("fund_type"), r.get("invest_type"), str(r.get("list_date", "")))
@@ -529,12 +561,107 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
     from src.data_platform.adapters.tushare_adapter import pull_trade_cal
     from src.data_platform.rate_limit import rate_limit_context  # 批 67：裸调收编（顺手）
     year = date.today().year
-    _ds = _get_rate_ds("tushare")
+    prov = _provider_of(cfg)      # 批 83b：provider 真路由（原死钉 tushare）
+    _ds = _get_rate_ds(prov)
     with rate_limit_context(_ds, "trade_cal"):
         pull_trade_cal(year)
-        _ds.record_usage(api_calls=1, api_name="trade_cal", provider="tushare")
+        _ds.record_usage(api_calls=1, api_name="trade_cal", provider=_ds.provider)
     return {"pulled": 365, "saved": 365, "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
+
+
+# ─── 批 83b：原独立 beat 收编为 sync_config 驱动的 handler ───
+# 立法（任务书 83b 点 3）：tier1 九键自 0045 起已是"配置驱动"，真硬编码的只剩这四条 beat；
+# 收编=tasks.py 的独立 @app.task 逻辑搬进 engine，beat 条目从 app.py 退役，改由
+# sync_config 行 + data_sync_scheduler（300s 扫描 cron）统一调度——与 tier1 同等待遇。
+# 收编后一律经 sync()：拿到防重 SyncLock、sync_log 留痕、失败告警、游标三态，不再各写一套。
+
+def _sync_static_list(cfg: dict, end_date: str, backfill_from: str | None = None,
+                      progress_cb: Callable | None = None) -> dict:
+    """静态标的清单同步（F-DATA-004）——原 `tasks.static_list_sync` 收编（批 83b）。
+
+    拉 `pro.stock_basic`（在市）→ upsert `static_symbols`（退市标记由 delisted 列保留，
+    本路径只写在市行）。原实现语义照搬：网络拉取在事务外 + executemany 一次提交
+    （2026-08-21 盘点重灾 #1：原为"开事务→事务内网络拉取 5400 行→逐行 upsert"）。
+    """
+    prov = _provider_of(cfg)
+    from src.data_platform.rate_limit import rate_limit_context
+    _ds = _get_rate_ds(prov)
+    pulled = 0
+    try:
+        pro = _get_pro(prov)
+        with rate_limit_context(_ds, "stock_basic"):
+            df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
+            _ds.record_usage(api_calls=1, api_name="stock_basic", provider=_ds.provider)
+    except Exception as e:
+        return {"pulled": 0, "saved": 0, "start": end_date,
+                "failed_dates": [f"pull:{type(e).__name__}:{str(e)[:60]}"],
+                "expected_days": 1, "actual_days": 0}
+    if df is None or df.empty:
+        return {"pulled": 0, "saved": 0, "start": end_date,
+                "failed_dates": [], "expected_days": 0, "actual_days": 0}
+    pulled = len(df)
+    rows = [(r["ts_code"], r.get("name", "") or "", r.get("industry", "") or "")
+            for r in df.to_dict("records")]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO static_symbols (ts_code,name,industry,list_status,delisted) "
+                "VALUES (%s,%s,%s,'L',false) "
+                "ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name,"
+                "industry=EXCLUDED.industry,list_status='L',delisted=false,updated_at=now()",
+                rows)
+        conn.commit()
+    return {"pulled": pulled, "saved": len(rows), "start": end_date,
+            "failed_dates": [], "expected_days": 1, "actual_days": 1}
+
+
+def _sync_convertible_terms(cfg: dict, end_date: str, backfill_from: str | None = None,
+                            progress_cb: Callable | None = None) -> dict:
+    """可转债条款数据同步（D3）——原 `tasks.convertible_terms_sync` 收编（批 83b）。
+
+    拉活跃可转债清单 → 逐只 `pull_cb_basic` → upsert `convertible_terms`。
+    **保留原语义**：只取前 50 只（原代码 `bonds[:50]`——条款接口慢，单轮限量，
+    靠每日重复覆盖）；逐只失败只记 failed 不中断整轮。
+    """
+    import json
+
+    from src.data_platform.adapters.tushare_adapter import pull_cb_basic, pull_convertible_bonds
+    from src.data_platform.rate_limit import rate_limit_context
+    prov = _provider_of(cfg)
+    _ds = _get_rate_ds(prov)
+    try:
+        with rate_limit_context(_ds, "cb_basic"):
+            bonds = pull_convertible_bonds()
+            _ds.record_usage(api_calls=1, api_name="cb_basic", provider=_ds.provider)
+    except Exception as e:
+        return {"pulled": 0, "saved": 0, "start": end_date,
+                "failed_dates": [f"pull_list:{type(e).__name__}:{str(e)[:60]}"],
+                "expected_days": 1, "actual_days": 0}
+    failed: list[str] = []
+    saved = 0
+    for ts_code in (bonds or [])[:50]:
+        try:
+            with rate_limit_context(_ds, "cb_basic"):
+                terms = pull_cb_basic(ts_code)
+                _ds.record_usage(api_calls=1, api_name="cb_basic", provider=_ds.provider)
+            if terms:
+                with get_conn() as conn:
+                    conn.execute("SELECT 1 FROM convertible_terms LIMIT 1")
+                    conn.execute(
+                        "INSERT INTO convertible_terms (ts_code, terms, updated_at) "
+                        "VALUES (%s,%s,now()) "
+                        "ON CONFLICT (ts_code) DO UPDATE SET terms=EXCLUDED.terms, updated_at=now()",
+                        (ts_code, json.dumps(terms, ensure_ascii=False)))
+                    conn.commit()
+                saved += 1
+        except Exception as e:
+            failed.append(f"{ts_code}:{type(e).__name__}")
+            logger.warning("_sync_convertible_terms 处理 %s 失败: %s", ts_code, e)
+            continue
+    return {"pulled": len(bonds or []), "saved": saved, "start": end_date,
+            "failed_dates": failed, "expected_days": 1,
+            "actual_days": 1 if not failed else 0}
 
 
 _MINUTE_FREQ = {"astock_minute": "1min", "astock_minute_5min": "5min"}
@@ -587,6 +714,10 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     from src.data_platform.data_source import TushareDataSource, get_data_source
     from src.data_platform.rate_limit import rate_limit_context
     from src.data_platform.schema import to_vt_symbol
+    # 批 83b：显式 tushare 例外（P2）。adj_factor 是 Tushare 独有接口（pull_adj_factor），
+    # 本函数也无 cfg 可读 provider（手动/定时回补入口，非 sync_config 驱动）。此处
+    # `get_data_source("tushare") or TushareDataSource()` 是 tushare 自身"DB 无行→.env"
+    # 的合法回退，**不是**串源（provider 就是 tushare）。与 index_daily 的例外同理。
     ds = get_data_source("tushare") or TushareDataSource()
     adapter = _get_kline_adapter({})   # 复权因子默认 tushare
 
@@ -644,6 +775,12 @@ _HANDLERS = {
     "cb_basic": _sync_cb_basic,
     "etf_list": _sync_etf_list,
     "trade_cal": _sync_trade_cal,
+    # 批 83b：两条原独立 beat 收编（tasks.py 的 @app.task 逻辑迁入本表；
+    # app.py beat 条目退役，改由 sync_config 行 + data_sync_scheduler 调度）。
+    # sync_id 取**目标表名**（static_symbols / convertible_terms）——避免与
+    # sync_kind_config 的 kind 词（static_list）混读。
+    "static_symbols": _sync_static_list,
+    "convertible_terms": _sync_convertible_terms,
 }
 
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由
@@ -864,10 +1001,10 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
     def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
                  progress_cb=None) -> dict:
         """通用第一档同步：按 trade_date 拉全市场 → upsert。"""
-        from src.data_platform.data_source import TushareDataSource, get_data_source
         from src.data_platform.db import get_conn as _gc
         from src.data_platform.rate_limit import rate_limit_context
-        ds = get_data_source("tushare") or TushareDataSource()
+        # 批 83b：限速/熔断/用量归属随 sync_config.provider 走（原死钉 get_data_source("tushare")）
+        ds = _get_rate_ds(_provider_of(cfg))
         # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日）
         if backfill_from:
             start_ts = backfill_from
@@ -945,7 +1082,7 @@ def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str]
                  progress_cb=None) -> dict:
         from src.data_platform.db import get_conn as _gc
         from src.data_platform.rate_limit import rate_limit_context
-        with rate_limit_context(_get_rate_ds("tushare"), table):   # 批 64b 裸调收编（namechange/concept，档 0.3s）
+        with rate_limit_context(_get_rate_ds(_provider_of(cfg)), table):   # 批 64b 裸调收编（namechange/concept，档 0.3s）；批 83b provider 真路由
             df = pull_fn(trade_date=end_date) if "trade_date" in pull_fn.__code__.co_varnames else pull_fn()
         if df is None or df.empty:
             return {"pulled": 0, "saved": 0, "start": "", "failed_dates": ["空数据"], "expected_days": 1, "actual_days": 0}
@@ -1192,6 +1329,9 @@ def _expected_trade_dates(start: str, end: str) -> list[str]:
     if dates:
         return dates
     # 2. trade_cal DB 没覆盖该区间 -> pro.trade_cal 按年拉
+    #    批 83b：此处**故意**仍钉 tushare（不做 provider 真路由）——交易日历是交易所的
+    #    市场级共同事实、非某数据源私有数据，P1-4 已裁"非 bar 项 provider 恒 tushare"；
+    #    且本函数是无 cfg 的完整性工具（_find_gaps 调用），无 provider 可读。
     try:
         pro = _get_pro()
         start_y = int(start[:4])
