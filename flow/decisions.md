@@ -337,3 +337,11 @@
 1. **mask 弃用+concrete 残件保留**（双盲 A/B P0 同判）：systemctl mask 对目标位实体文件必败（/etc concrete 残件=66a 装位，实测 rc=1）且 mask 断回滚复活承载件——旧 @quant 退役收敛 stop+disable，防复活由新代码 ACCOUNT_ID 断言 78 Prevent 兜底（残件以新代码启动即拒）。
 2. **EMQ 连接窗=hub 内部状态机（用户裁定）**：柜台时段性失败不下沉为 deploy 闸门豁免——网关层 `_emq_window_open`（交易日 8:25-15:15，东财 FAQ Q12「8:35 起服务」lead 10 分）+窗外 defer_login（api 已建不试不报）+poll_supervise 窗开沿重登（60s 节流）；窗内 Login 失败照旧 78。对齐 XtpMdGateway 先例/D26 §3.3「连接生命周期=hub 内部状态机」立法——「知道不该试」优于「失败不报」，dwell 闸门零改动。
 3. **回滚三块形态闸**：hub 换名回滚专属块（停新 unit/复活 @quant/清单覆写）仅当回滚目标 release 树含 concrete unit（=66a/更早形态）才执行——防 66b 后回滚（66c→66b 等）被无条件拆掉恰需的数字 hub。
+
+## 2026-09-30 · 部署管道两个结构性缺口立项（批 84/85——用户裁定「立」）
+
+- **缘起**：批 83a 拆表过渡期对 prod 只读实查时，照出两条**与 83a 本身无关**的缺口。用户裁定**拆两项独立立项**（不裹进 83a）：84＝管道不许撒谎（工程诚实性），85＝迁移不许违规（纪律立法）。
+- **批 84 · 回滚诚实性**：`rollback-tasks.yml` 无 alembic/downgrade → **回滚只回代码**；其「回滚复验」仅两项＝版本收敛（`:138`）+ `/healthz` 200（`:163`），而 `/healthz`＝**liveness「不查依赖」**（`web_api/routes/system.py:162-164`）、`/readyz` 升级也不够（只查 PG/Valkey **可达性**，`:167-179`）→ **「旧代码 + 已删表」这条撕裂态在整条复验里完全不可见**，管道照旧输出「已自动回滚」（`release.yml:585`）。且 `release.yml:582` 自称「schema 已前进不回滚——**expand-only 前提经 DDL 门保证**」，而阶段 4 门（`:315-350`）只认 `-e allow_contract=true` 即放行、**不校验是否真 expand-only**；该标志只置 `auto_rollback_disabled`（`:349`）、**仅被 rescue(2-5) 消费**（`:385`/`:392`），**rescue(6-8) 不看它**——即那句「保证」在门里**尚无实现**（自我陈述与实现的落差）。
+- **批 85 · 破坏性迁移两步走立法**：把 expand → 双读双写/回填 → contract 从口头前提写成 `flow/规范/` + 迁移文件头声明（`# EXPAND-CONTRACT: phase=<expand|contract> pair=<id>`）+ 新闸门（无声明/不成对/孤儿/白名单反向校验）+ 既有违规迁移（`0116` 等）逐条处置结论。
+- **执行前待裁定三项**（已写入任务文件与待办）：① 批 84 探针方案 **A**（`deploy/compat/<release_id>.json` + `quant-hbcheck compat`，**推荐**）vs **B**（`/readyz` 加表存在性）；② `auto_rollback_disabled` 语义一致化取 **(i)+(iii)**（禁用即整轮不自动回滚 + DDL 门拒绝 contract）还是仅 **(ii)**（最低限度诚实：改文案+打印实际版本）；③ 批 85 现有破坏性迁移逐条「补两步走 / 有意识接受并标遗留」。
+- **本次未动**：零代码改动、零迁移改动、未碰 `deploy/`。任务文件：`flow/任务/批84-回滚诚实性与schema一致性.md`、`flow/任务/批85-破坏性迁移两步走立法.md`。
