@@ -17,15 +17,16 @@ import threading
 import time
 
 import lark_oapi as lark
-import redis
 
 from src.data_platform.db import get_conn
 from src.quant_common.crypto import encrypt
-from src.quant_common.config import feishu_valkey_url
+from src.quant_common.redis_client import feishu_redis
 
 logger = logging.getLogger("feishu_bot")
-VALKEY_URL = feishu_valkey_url()   # P0-3：独立变量，与业务库隔离（原读 VALKEY_URL 在 db0 时隔离失效）
-_redis = redis.Redis.from_url(VALKEY_URL, decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
+# P0-3：飞书长连接库（db4）——走飞书专用工厂，读 FEISHU_VALKEY_URL，与业务库隔离。
+# （原写法 `VALKEY_URL = feishu_valkey_url()` 变量名指向 db4，字面易误读为业务库；且
+#  「先算值再 from_url(变量)」绕过 client 层守门的名字匹配——已随守门收紧一并消除。）
+_redis = feishu_redis(decode_responses=True, socket_timeout=2, socket_connect_timeout=2)
 
 
 def _set_session(session_id: str, data: dict, expire: int = 600,

@@ -10,6 +10,14 @@ server/tests/test_valkey_url_single_source.py 锁死）。
 - VALKEY_URL       → db0 业务库（熔断/JWT 黑名单/锁/进度/hub 流等）
 - FEISHU_VALKEY_URL → db4 飞书长连接库（P0-3 独立变量，与业务库隔离；
   未显式配置时独立落 db4——不跟随 VALKEY_URL）
+
+**空串语义（2026-09-30 裁定，专家复核项）**：取数用严格 `.get(key, default)` 而非
+`os.environ.get(key) or default`——**空串不等于未配置**。理由：本模块的唯一目的是
+「消灭静默连错实例」，而 `or` 会把 `VALKEY_URL=`（空串，配置错误）静默降级成
+127.0.0.1 默认实例：服务器上若有历史本地 Valkey，即无声连到另一个实例——正是 P0-3
+那一类失败。空串应让建连当场暴露（`from_url("")` 立即抛错），而不是换个地方悄悄成功。
+（仓内 `scheduler/app.py` 等处仍用 `or` 读 CELERY_* ——那是历史写法，非本模块口径；
+如需全仓统一为「空串=未配置」，应作为独立决策整体裁定，不要只在单源处改。）
 """
 from __future__ import annotations
 
@@ -20,10 +28,10 @@ DEFAULT_FEISHU_VALKEY_URL = "redis://127.0.0.1:6379/4"
 
 
 def valkey_url() -> str:
-    """业务库（db0）连接串单源。"""
-    return os.environ.get("VALKEY_URL") or DEFAULT_VALKEY_URL
+    """业务库（db0）连接串单源。空串按配置错误原样返回（不回落默认实例，见模块 docstring）。"""
+    return os.environ.get("VALKEY_URL", DEFAULT_VALKEY_URL)
 
 
 def feishu_valkey_url() -> str:
-    """飞书长连接库（db4）连接串单源。"""
-    return os.environ.get("FEISHU_VALKEY_URL") or DEFAULT_FEISHU_VALKEY_URL
+    """飞书长连接库（db4）连接串单源。空串按配置错误原样返回（不回落默认实例）。"""
+    return os.environ.get("FEISHU_VALKEY_URL", DEFAULT_FEISHU_VALKEY_URL)

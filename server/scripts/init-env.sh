@@ -39,6 +39,7 @@ cat > "$ENV" <<EOF
 # 生成的 .env（init-env.sh），勿提交
 QUANT_DB_URL=postgresql://quant:${PGPWD}@127.0.0.1:5432/quant
 VALKEY_URL=redis://127.0.0.1:6379/4
+FEISHU_VALKEY_URL=redis://127.0.0.1:6379/7
 CELERY_BROKER_URL=redis://127.0.0.1:6379/5
 CELERY_RESULT_BACKEND=redis://127.0.0.1:6379/6
 TUSHARE_TOKEN=${TOKEN}

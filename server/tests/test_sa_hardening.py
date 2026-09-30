@@ -225,8 +225,11 @@ def test_feishu_redis_pool_uses_dedicated_var():
     rp_src = (root / "src" / "web_api" / "redis_pool.py").read_text()
     fb_src = (root / "src" / "feishu_bot" / "tasks.py").read_text()
     cfg_src = (root / "src" / "quant_common" / "config.py").read_text()
+    rc_src = (root / "src" / "quant_common" / "redis_client.py").read_text()
     assert 'FEISHU_VALKEY_URL' in cfg_src          # 变量名真源在单源模块
     assert 'feishu_valkey_url()' in rp_src         # 飞书池走单源函数
-    assert 'feishu_valkey_url()' in fb_src
+    assert 'feishu_valkey_url()' in rc_src         # 飞书 client 工厂亦读飞书库单源
+    assert 'feishu_redis(' in fb_src               # 飞书侧走飞书专用工厂（2026-09-30）
+    assert 'business_redis' not in fb_src          # 不得误用业务库工厂
     # 隔离：飞书侧不得回落业务库单源（排除 feishu_valkey_url 自身的前缀匹配）
     assert not re.search(r"(?<!feishu_)valkey_url\(\)", fb_src)
