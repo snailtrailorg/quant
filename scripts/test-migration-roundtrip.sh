@@ -344,8 +344,91 @@ chk "upgrade 渲染含 DROP TABLE IF EXISTS" "$(grep -c 'DROP TABLE IF EXISTS ex
 rm -rf "$tmp"
 }
 
+# ── 用例 G：0123 freeze_event（纯 expand 建表 + 幂等 seed），2026-10-01 批 76 ──
+# 前置 = 0122 contract 之后。0123 **无破坏性 DDL**（只 CREATE TABLE + CREATE INDEX +
+# INSERT ON CONFLICT DO NOTHING）⇒ 不需要 allow_contract，但 downgrade 有两条真断言：
+#   ① drop_table freeze_event 须干净回收；
+#   ② `DELETE FROM system_config WHERE key='web_base_url'` —— 依赖 system_config 表在
+#      **scratch 里也必须存在**（stamp 到空 schema 时该表不存在，DELETE 会炸）。
+#      这正是本用例的价值：把「降级依赖前序表」这个隐式前提显式钉住。
+FROM_E=0122
+TO_E=0123
+
+fixture_freeze() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+-- 前序面：system_config（0123 downgrade 的 DELETE 目标）+ freeze_event 的引用面 live_task
+CREATE TABLE system_config (
+  key text PRIMARY KEY, value text, value_type text, description text,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
+CREATE TABLE live_task (id bigserial PRIMARY KEY, symbol text, status text);
+-- 预置一个「运维已填值」的 web_base_url —— 验幂等 seed 不覆盖（真上产场景）
+INSERT INTO system_config (key, value, value_type, description)
+  VALUES ('web_base_url', 'https://quant.snailtrail.cc', 'text', '运维预填')
+  ON CONFLICT (key) DO NOTHING;
+-- 一条无关键，验降级只删 web_base_url、不动邻居
+INSERT INTO system_config (key, value, value_type, description)
+  VALUES ('unrelated_key', 'keepme', 'text', 'downgrade 不得误删') ON CONFLICT (key) DO NOTHING;
+SQL
+}
+
+case_g() {
+echo
+echo "########## 用例 G：0123 freeze_event（建表 + seed 幂等 + 降级回收） ##########"
+reset_scratch
+fixture_freeze
+stamp "$FROM_E"
+
+# --- G1 upgrade ---
+step up "$TO_E" "G1 upgrade（建 freeze_event + seed）"
+chk "freeze_event 表已在位" "$(q "select to_regclass('freeze_event') is not null" )" "t"
+chk "进行中事件部分索引在位" "$(q "select count(*) from pg_indexes where schemaname='$SCRATCH' and indexname='ix_freeze_event_open'")" "1"
+chk "时间线索引在位" "$(q "select count(*) from pg_indexes where schemaname='$SCRATCH' and indexname='ix_freeze_event_task_frozen_at'")" "1"
+# scene：四 CHECK 里最易写错的两条——闭环一致性 + jsonb 守卫，各打一枪
+chk "CHECK 闭环一致性拒绝「解了无方法」" \
+  "$(q "insert into freeze_event (task_id,symbol,freeze_type,unfrozen_at) values (1,'X.SH','ts_gap',now())" | grep -c 'ck_freeze_event_close_consistent')" "1"
+chk "CHECK jsonb 守卫拒绝非 object" \
+  "$(q "insert into freeze_event (task_id,symbol,freeze_type,detail) values (2,'X.SH','ts_gap','[1,2]'::jsonb)" | grep -c 'ck_freeze_event_detail_jsonb')" "1"
+chk "CHECK 冻结类型枚举拒绝非法值" \
+  "$(q "insert into freeze_event (task_id,symbol,freeze_type) values (3,'X.SH','bogus')" | grep -c 'ck_freeze_event_type')" "1"
+# 正向：一条合法行须能落（防「全拒绝」假绿）
+x "insert into freeze_event (task_id,symbol,freeze_type,detail) values (9,'510300.SHSE','seq_gap','{\"gap\":65}'::jsonb)"
+chk "合法行可插入" "$(q "select count(*) from freeze_event where task_id=9")" "1"
+# seed 幂等：预填的运维值**不得被覆盖**（ON CONFLICT DO NOTHING 的关键语义）
+chk "seed 不覆盖已填的 web_base_url" \
+  "$(q "select value from system_config where key='web_base_url'")" "https://quant.snailtrail.cc"
+
+# --- G2 downgrade ---
+step down "$FROM_E" "G2 downgrade（删表 + 回收键）"
+chk "freeze_event 表已消失" "$(q "select to_regclass('freeze_event') is null")" "t"
+chk "web_base_url 键已回收" "$(q "select count(*) from system_config where key='web_base_url'")" "0"
+chk "无关键未被误删" "$(q "select value from system_config where key='unrelated_key'")" "keepme"
+}
+
+# ── 用例 H：0123 离线渲染完整性（不连库） ──
+case_h() {
+echo
+echo "########## 用例 H：0123 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_E:$TO_E" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_E:$FROM_E" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染未被截断（含版本推进）" "$(grep -c "SET version_num='$TO_E'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染未被截断（含版本回退）" "$(grep -c "SET version_num='$FROM_E'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含建表" "$(grep -c 'CREATE TABLE freeze_event' "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 seed" "$(grep -c "VALUES ('web_base_url'" "$tmp/up.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E） ##########"
 precheck
 case_a
 case_b
@@ -353,4 +436,6 @@ case_c
 case_d
 case_e
 case_f
+case_g
+case_h
 finish
