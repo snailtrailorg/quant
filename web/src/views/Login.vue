@@ -38,8 +38,10 @@ const onLogin = async () => {
     localStorage.setItem('token', res.token)
     localStorage.setItem('role', res.role)
     // 批76：带回跳（未登录被守卫拦下的深链目标——如 IM 解冻确认页）；默认原行为 '/'
-    router.push(typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
-      ? route.query.redirect : '/')
+    // 拒 `//`（协议相对 URL 形态）：vue-router push 本走同源 pushState 无跨站风险（2026-10-02 用户注记），
+    // 此为纵深防御——防将来有人把 push 换成 location.href 类原生跳转时校验被绕过。
+    const rd = route.query.redirect
+    router.push(typeof rd === 'string' && rd.startsWith('/') && !rd.startsWith('//') ? rd : '/')
   } catch (e) {
     ElMessage.error(apiErr(e, t('login.error')))
   } finally {
