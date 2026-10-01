@@ -577,7 +577,7 @@ B 找的是 hub 面（冻结不在那儿）。而 §2.1 的任务页展开行，
 | 后端全量 | ✓ **1805 passed, 1 skipped**（与改前基线**逐数一致**，零回归） |
 | 后端相关 | ✓ `test_batch76_freeze_event.py` + `test_deploy_blast_radius.py` 14 passed |
 
-**上产**：非迁移（不触 DDL 门）、需重启 `quant-web-api@quant`——随下个部署窗，不额外开窗。
+**上产**：✅ **prod `202610020100-53e7523`（2026-10-02 01:00）**。彩排 staging `ok=76 changed=19 failed=0 rescued=0` → prod `ok=81 changed=20 unreachable=0 failed=0 rescued=0`（八阶段全绿）。同窗附带 **Login.vue redirect 补 `//` 拒绝**（`53e7523`，用户注记的非 bug 纵深防御）。**五证**：① 双链→`202610020100-53e7523` ② `quant-pinned` 同 id（九单元收敛）③ alembic-wrapper 重跑**零 `Running upgrade`**（零新迁移，DB 在 head）④ `healthz/readyz` 200 + `_probe {"ok":true}` 六检查全绿 ⑤ `quant-hbcheck` ok（playbook 阶段 8 内）。
 
 ## ⚖ 裁决点（**① ② ③ 均已由用户 2026-10-01 22:18 裁定**；④⑤ 见 §8.1）
 
