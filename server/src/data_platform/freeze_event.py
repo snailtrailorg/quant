@@ -78,7 +78,12 @@ def close_freeze(task_id: int, *, method: str, operator: str | None = None,
 
 
 def list_events(task_id: int | None = None, limit: int = 50) -> list[dict]:
-    """事件查询面（任务页/运维/测试）：默认全量最近 limit 条，可按 task 过滤。"""
+    """事件查询面（任务页/运维/测试）：默认全量最近 limit 条，可按 task 过滤。
+
+    时刻列（frozen_at/unfrozen_at）序列化用 **`isoformat()`**——显式契约（带 `T` 分隔符与
+    完整时区偏移），前端 `new Date()` 一族解析器全兼容。**勿用 `str(datetime)`**：丢分隔符、
+    且隐式绑定 Python 默认表示（驱动/时区处理一变即静默漂移；批 76b 裁决点①定稿于此）。
+    """
     sql = ("SELECT id, task_id, account_id, symbol, freeze_type, frozen_at, watermark, "
            "gap_target_ts, unfrozen_at, unfreeze_method, operator FROM freeze_event")
     args: list = []
@@ -90,8 +95,8 @@ def list_events(task_id: int | None = None, limit: int = 50) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(sql, tuple(args)).fetchall()
     return [{"id": r[0], "task_id": r[1], "account_id": r[2], "symbol": r[3], "freeze_type": r[4],
-             "frozen_at": str(r[5]) if r[5] else None, "watermark": r[6], "gap_target_ts": r[7],
-             "unfrozen_at": str(r[8]) if r[8] else None, "unfreeze_method": r[9],
+             "frozen_at": r[5].isoformat() if r[5] else None, "watermark": r[6], "gap_target_ts": r[7],
+             "unfrozen_at": r[8].isoformat() if r[8] else None, "unfreeze_method": r[9],
              "operator": r[10]} for r in rows]
 
 
