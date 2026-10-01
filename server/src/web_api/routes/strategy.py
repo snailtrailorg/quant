@@ -157,7 +157,7 @@ def update_strategy(sid: str, req: StrategyConfig, payload: dict = Depends(requi
 
 
 @router.post("/api/strategy/{sid}/start")
-def start_strategy(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
+def start_strategy(sid: str, payload: dict = Depends(require_perm("live_control"))):
     """启动策略。未通过回测验证禁止实盘（EXE-003）。策略必须绑定标的或标的池（F-POOL-003）。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT backtest_verified, symbol, params FROM strategy_config WHERE id=%s", (sid,))
@@ -182,7 +182,7 @@ def start_strategy(sid: str, payload: dict = Depends(require_perm("strategy_cont
 
 
 @router.post("/api/strategy/{sid}/stop")
-def stop_strategy(sid: str, payload: dict = Depends(require_perm("strategy_control"))):
+def stop_strategy(sid: str, payload: dict = Depends(require_perm("live_control"))):
     with get_conn() as conn:
         conn.execute("UPDATE strategy_config SET enabled=false WHERE id=%s", (sid,))
         conn.commit()

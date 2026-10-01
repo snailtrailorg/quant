@@ -21,11 +21,13 @@ _logger = logging.getLogger("data_platform.perm_registry")
 
 # ——— 代码底座（唯一字面量层） ———
 
-# api 权限键 13（顺序=原 all_keys 声明序——GET /permissions 供形保序等价）
-# 批 76 曾增 `unfreeze`（14 键），2026-10-01 二次裁定**退役**：解冻统一挂 `strategy_control`
-# （Web 端点 / IM 卡片面 / LLM 工具档三面同键，trader 与 admin 皆可）——不新增注册表面。
+# api 权限键 14（顺序=原 all_keys 声明序——GET /permissions 供形保序等价）
+# 批 77 增 `live_control`（实盘面：起停实盘任务/策略进程、解冻）——从 `strategy_control` 拆出。
+# 起因：`strategy_control` 一键两域（研究面=写策略/因子/回测；实盘面=起 systemd 进程/解冻），
+# analyst 持该键即越界（「analyst 只能回测与实盘测试，不执行实盘交易」）。权限矩阵见
+# `flow/任务/批77-权限矩阵与实盘面分离.md` §四。
 API_PERM_KEYS: list[str] = [
-    "read", "strategy_control", "data_sync", "halt", "resume", "trade",
+    "read", "strategy_control", "live_control", "data_sync", "halt", "resume", "trade",
     "live_trading_control", "risk_rules", "user_mgmt",
     "system_config", "llm_config", "im_bots_config", "alerts_config",
 ]

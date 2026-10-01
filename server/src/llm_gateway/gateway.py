@@ -56,14 +56,32 @@ READ_TOOLS = [
          input_schema={"type": "object", "properties": {"symbol": {"type": "string"}}, "required": []}),
 ]
 
-# 交易操作类（trader+admin，需确认卡片）：halt + 启停策略（resume 仅 Admin，见 ADMIN_TOOLS）
+# 交易操作类（trader+admin，需确认卡片）。批 77 拆分后**仅剩** `emergency_halt`——
+# 键 `halt`（放行条件 `"trade" in perms or "halt" in perms`，见 `_filter_tools`）。
+# ⚠️ 档位归属别压平（批 77 教训）：`strategy_start`/`strategy_stop` 曾混在本组靠 `halt` 放行，
+#    实为起停 `quant-strategy@N` 真实盘进程 ⇒ 已迁入 LIVE_TOOLS 挂 `live_control` 键。
 TRADER_TOOLS = [
     Tool(name="emergency_halt",    description="一键熔断，停止所有自动开仓",
          input_schema={"type": "object", "properties": {"reason": {"type": "string"}}, "required": []}),
+]
+
+# 实盘面工具（起停 systemd 实盘进程 / 解冻）——判 `live_control` 键（trader+admin）。
+# 合并 UNFREEZE_TOOLS 成同一档：解冻与策略启停同属「改真实盘执行状态」，键相同、工具分开列。
+# 判据（批 77 §四立法）：动作是否**启动真实盘进程或改变实盘执行状态**——是 ⇒ live_control；
+# 只写库内资产（策略/因子/回测/校验）不动进程 ⇒ strategy_control。analyst 只持后者。
+LIVE_TOOLS = [
     Tool(name="strategy_stop",     description="停某策略",
          input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
     Tool(name="strategy_start",    description="启某策略",
          input_schema={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}),
+    # 批76 F2 解冻（与风控急停不同域：数据冻结=per-task 行情面，熔断=全站交易面，
+    # 故不复用 halt/resume 档——P2-2 裁决点 a）。不直接执行：回执带一次性 token 的
+    # Web 深链，管理员在 Web 登录态确认。
+    # ⚠️ 档位归属必须与 HTTP/IM 面同源（批 77 拆出 LIVE_TOOLS 就是为了把三面钉在一键上）。
+    Tool(name="task_unfreeze",     description="解冻实盘任务（回 Web 确认链）",
+         input_schema={"type": "object",
+                       "properties": {"id": {"type": "string", "description": "实盘任务 id"}},
+                       "required": ["id"]}),
 ]
 
 # Admin 专属（resume 仅 Admin）
@@ -72,29 +90,16 @@ ADMIN_TOOLS = [
          input_schema={"type": "object", "properties": {}, "required": []}),
 ]
 
-# 批76 F2 · 数据冻结解冻（与风控急停不同域：数据冻结=per-task 行情面（流 gap / 不可信 bar），
-# 熔断=全站交易面，故**不复用 halt/resume 档**——P2-2 裁决点 a）。
-# 档位归属（2026-10-01 二次裁定）：挂 `strategy_control`——与 Web 端点
-# (`web_api/routes/trading.py::unfreeze_live_task`)、IM 卡片面 (`feishu_bot/ws_client.py::_need`)
-# **三面同键** ⇒ trader 与 admin 皆可解冻，与启停任务同档。
-# ⚠️ 三处必须同键：`_filter_tools` 用 "strategy_control" 放行本集，任一处改档即三方错位
-# （拿到工具→出卡→点确认被 denied 的死胡同）。闸门
-# `tests/test_batch76_unfreeze_surface.py::TestToolGatingContract`（跨文件抽字面量互比）。
-# 工具本身不直接执行——回执带一次性 token 的 Web 深链，管理员在 Web 登录态确认。
-UNFREEZE_TOOLS = [
-    Tool(name="task_unfreeze",     description="解冻实盘任务（回 Web 确认链）",
-         input_schema={"type": "object",
-                       "properties": {"id": {"type": "string", "description": "实盘任务 id"}},
-                       "required": ["id"]}),
-]
-
 # 永不注册（高危参数修改类）。注：聊天/IM 面无下单工具（曾有"place_order 已放开"的
 # 过时注释——实无此工具，批15 双盲审证伪）；真实下单唯一链=策略 runner → check_order。
 # 未来若加聊天下单：operator=聊天登录用户/IM bot owner（批15 方案预写语义）
 FORBIDDEN_TOOLS = {"modify_risk_rule", "modify_strategy_params", "place_order", "cancel_order"}
 
-# 操作类合集（TRADER+ADMIN+UNFREEZE），供外部判断"需确认卡片"的工具
-OPERATIONAL_TOOLS = TRADER_TOOLS + ADMIN_TOOLS + UNFREEZE_TOOLS
+# 操作类合集（TRADER+ADMIN+LIVE），供外部判断"需确认卡片"的工具
+OPERATIONAL_TOOLS = TRADER_TOOLS + ADMIN_TOOLS + LIVE_TOOLS
+
+# 向后兼容别名（批76 引入 UNFREEZE_TOOLS；批77 并入 LIVE_TOOLS 同档）——测试/消费方按语义取用
+UNFREEZE_TOOLS = [t for t in LIVE_TOOLS if t.name == "task_unfreeze"]
 
 
 # --- LLM 网关核心 ---
@@ -264,11 +269,13 @@ class LLMGateway:
                       perms: set | None = None) -> list[dict]:
         """按角色过滤可用工具 -> OpenAI 格式。
 
-        角色白名单：viewer/analyst=读类；trader=读+halt+启停策略；admin=+resume。
+        角色白名单：viewer/analyst=读类；trader=读+halt+live_control（起停实盘/解冻）；
+        admin=+resume（风控恢复，仅 Admin）。viewer/analyst **无** live_control（批 77 原则：
+        analyst 只回测与实盘测试，不执行实盘交易）。
         传入 tools 时与角色白名单取交集（调用方只能缩小范围，不能越权）。
         批11C（B-P1-1）：perms 非空时按**权限键档位**（trade/halt=操作档，resume=管理档，
-        strategy_control=策略/任务管理档（含解冻），与 require_perm / IM 卡片面同键）
-        ——动态组用户按组权限拿工具；None=旧 role 档位（Web 兼容）。
+        live_control=实盘面档（起停实盘任务/策略/解冻），strategy_control=研究面档，
+        与 require_perm / IM 卡片面同键）——动态组用户按组权限拿工具；None=旧 role 档位。
         """
         if perms is not None and "read" not in perms:
             return []   # 代码盲审 A-P1-3：无 read 键=零权限用户（Web 面同被拒）——IM 面不给读工具
@@ -278,11 +285,11 @@ class LLMGateway:
                 allowed += TRADER_TOOLS
             if "resume" in perms:
                 allowed += ADMIN_TOOLS
-            if "strategy_control" in perms:
-                allowed += UNFREEZE_TOOLS
+            if "live_control" in perms:
+                allowed += LIVE_TOOLS
         else:
             if role in ("trader", "admin"):
-                allowed += TRADER_TOOLS + UNFREEZE_TOOLS
+                allowed += TRADER_TOOLS + LIVE_TOOLS
             if role == "admin":
                 allowed += ADMIN_TOOLS
         allowed = [t for t in allowed if t.name not in FORBIDDEN_TOOLS]

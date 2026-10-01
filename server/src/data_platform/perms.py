@@ -19,11 +19,11 @@ from src.data_platform.perm_registry import MARKET_OP_KEYS as _MKT_KEYS
 
 PERMISSIONS = {
     "viewer":  {"read"},
-    "analyst": {"read", "strategy_control", "data_sync"},   # 研究：策略/回测/数据同步。
+    "analyst": {"read", "strategy_control", "data_sync"},   # 研究：策略/因子/回测/数据同步——**无 live_control**（不执行实盘交易，批 77）
     # W5 修 P0（盲审 B）：system_config 原为死键（迁移前 0 端点消费）——W5 迁移把 16 个
     # admin-only 门（数据源/通道/券商凭证 CRUD/system-config 写/health）挂上后 analyst
     # 经回退字典全部可达=扩权回归。删键归位 admin-only（wd-10"收紧 analyst"方向）。
-    "trader":  {"read", "strategy_control", "halt", "trade", "live_trading_control"},  # 交易：策略启停/熔断/下单/实盘开关
+    "trader":  {"read", "strategy_control", "live_control", "halt", "trade", "live_trading_control"},  # 交易：策略启停/实盘任务启停与解冻/熔断/下单/实盘开关
     "admin":   set(_API_KEYS),   # 批33b：注册表派生（admin 专属全集；analyst 无）
 }
 

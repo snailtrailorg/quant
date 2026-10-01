@@ -367,3 +367,34 @@
 - **理由（保留原裁决点 a 的正确部分）**：① 与启停任务**同页同档**——同页的「启停/删除/解冻」是同一管理动作族的既有边界；② 消除「同一操作两入口不同判」的**同型债**（P1 教训正是同键才是对）。
 - **连带（退役一键=五处）**：`perm_registry` 13、`test_batch33b_perm_registry` 三处断言、前端 `permGroups.js`、`locales.key_unfreeze`、`test_gateway.py` 原钉按新裁定反转；三面同键加**跨文件契约钉** `TestToolGatingContract`（从 ws_client 与 trading.py 源码抽键字面量互比，反证已做）。
 - **副作用（有意接受）**：`analyst` 亦持 `strategy_control` ⇒ IM/LLM 面也可见解冻工具。不比现状更松——analyst **本就可 Web 调启停与解冻端点**（同键），原 IM 档反造成「Web 可、IM 不可」的不一致；要挡 analyst 须动 `strategy_control` 的角色分配（启停任务同款独立议题）。
+
+## 2026-10-01 · 批 77 · 权限矩阵与实盘面分离（用户裁定「拆键 + 一并复核写进立法」）
+
+- **缘起**：批 76 二次裁定把解冻统一到 `strategy_control` 后，用户提出**基础原则**：
+  「**analyst 只能进行回测和实盘测试，不能执行实盘交易**」，要求**据原则推演**（非据现状）
+  analyst 是否该有解冻权限。推演结论＝**不该**，且暴露出 `strategy_control` 键**粒度太粗**：
+  一键同时管「研究面（写策略/因子/回测/验证，只写资产不起进程）」与「实盘面（起停 systemd
+  进程/解冻）」——analyst 持该键＝拿两域＝越界。
+- **裁定**：① 新增 **`live_control`** 键承载实盘面；analyst 保留 `strategy_control`（研究面）。
+  ② trader 边界**一并复核并写进立法**（权限矩阵 + 新增动作归类判据）。
+- **推翻前一轮**：批 76 二次裁定（统一 `strategy_control`）被本批替换——当时理由「与启停任务
+  同页同档」把**现状**当**依据**；本批按原则判「启停实盘任务＝实盘动作，不该与写策略同键」。
+  `unfreeze` 键仍退役（API 键 13→**14**，净增 `live_control`）。
+- **落地**（详见 `flow/任务/批77-权限矩阵与实盘面分离.md`）：
+  - **HTTP**：`trading.py` 6 端点（create/start/stop/delete live-task + unfreeze + unfreeze-request）
+    + `strategy.py` 2 端点（start/stop strategy）从 `strategy_control` → `live_control`。
+  - **角色集**：`trader` **显式 +`live_control`**（否则拆分削掉其原经 strategy_control 拿到的实盘
+    起停权＝功能回归）；`analyst` 字面量不变但**语义净化**为纯研究；`admin` 自动派生零改动。
+  - **IM**：`_need` 三工具（`task_unfreeze`/`strategy_start`/`strategy_stop`）→ `live_control`
+    （修前更早状态是策略启停落 `trade`＝谁有下单权就自动能起进程）。
+  - **LLM**：新 `LIVE_TOOLS`（strategy_start/stop + task_unfreeze）由 `live_control` 放行；
+    `TRADER_TOOLS` 缩到仅 `emergency_halt`；`ADMIN_TOOLS` 仅 `risk_resume`；`UNFREEZE_TOOLS`
+    保留为 `LIVE_TOOLS` 子集别名（旧裁定点 a 的域语义不变）。
+  - **前端**：`permGroups` `live_control` 入 trading 组；`locales` 双语词条；`MainLayout` 新增
+    **动作级权限注入** `provide('canPerm', k => perms.includes(k))`；`LiveTask.vue` 起停/解冻/建/删
+    按钮按 `canLive` 显隐（此前仅 `navReadonly`，analyst 看得到按钮点了报 403＝死胡同）。
+- **不动**：`live_trading_control`（市场级实盘总闸）**不并入** `live_control`——粒度不同
+  （全市场闸 vs 单任务起停），并入会把两个粒度压平。
+- **三面同键闸门**：`tests/test_batch76_unfreeze_surface.py::TestToolGatingContract` 8 钉；
+  **逆转测试三重实证**（gateway 键、IM 键、HTTP 端点各逆转一次，分别红 2/2/3 钉）——证明闸门非恒绿。
+- **验证**：全量 pytest **1798 passed / 2 skipped**；`ruff check src/` 绿；前端 build 绿。

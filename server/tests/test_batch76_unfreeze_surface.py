@@ -178,93 +178,138 @@ class TestImTaskUnfreezeTool:
 
 
 class TestToolGatingContract:
-    """解冻档位**三面同键**契约（2026-10-01 二次裁定：统一挂 `strategy_control`）。
+    """档位**多面同键**契约（批 77：实盘面统一挂 `live_control`）。
 
-    历史两轮：
-    ① 原实现把 `task_unfreeze` 并进 `ADMIN_TOOLS`（靠 `resume` 放行），而卡片面用 `unfreeze`
-       键 ⇒ 档位错位（拿到工具→出卡→点确认被 denied 的死胡同）——P1 审核改正为独立
-       `UNFREEZE_TOOLS` + `unfreeze` 键；
-    ② 随后用户裁定「统一成 trader 和 admin 都可以解冻」⇒ **退役 `unfreeze` 键**，三面统一挂
-       既有 `strategy_control`（Web 端点 / IM 卡片面 / LLM 工具档），零注册表面。
+    档位史（三轮试错，每次都因「同动作多面各判各的」而红）：
+    ① 初版把 `task_unfreeze` 并进 `ADMIN_TOOLS`（靠 `resume` 放行），卡片面用 `unfreeze`
+       ⇒ 档位错位（拿到工具→出卡→点确认被 denied 的死胡同）——P1 审核改正；
+    ② 「统一成 trader 和 admin 都可以解冻」⇒ 退役 `unfreeze`，三面挂 `strategy_control`；
+    ③ 用户提出原则「analyst 只能回测与实盘测试，不执行实盘交易」⇒ 推演出 `strategy_control`
+       把**研究面**（写策略/因子/回测）与**实盘面**（起 systemd 进程/解冻）混在一键 ⇒ 拆出
+       **`live_control`**，实盘面全面迁入（含 `strategy_start/stop`——原 HTTP 挂 strategy_control、
+       LLM 挂 trade/halt、IM 挂 trade，**四面对同一动作各判各的**）。
 
-    本闸门是**跨文件契约**：真源是 `feishu_bot/ws_client.py` 的 `_need` 映射**源码文本**、
-    以及 `web_api/routes/trading.py` 端点的 `require_perm(...)` 字面量——任一面改档即红。
+    本闸门是**跨文件契约**：真源是各面**源码文本**里的键字面量——任一面改档即红。
     """
 
-    def test_web_endpoint_and_llm_tool_gate_same_key(self):
-        """Web 端点的 require_perm 键 ≡ LLM 侧放行 UNFREEZE_TOOLS 的键（跨文件抽字面量互比）。"""
+    # 实盘面动作 → 期望键（三面同键的唯一真源）
+    LIVE_ACTIONS = {
+        "unfreeze_live_task": "live_control",     # web_api/routes/trading.py
+        "start_live_task": "live_control",
+        "stop_live_task": "live_control",
+        "delete_live_task": "live_control",
+        "create_live_task": "live_control",
+        "start_strategy": "live_control",         # web_api/routes/strategy.py
+        "stop_strategy": "live_control",
+    }
+
+    def test_http_endpoints_all_live_control(self):
+        """HTTP 面：实盘面端点全部 `live_control`（从源码抽 require_perm 字面量）。"""
+        import inspect
+        from src.web_api.routes import trading as tr, strategy as st
+        for fn_name, want in self.LIVE_ACTIONS.items():
+            fn = getattr(tr, fn_name, None) or getattr(st, fn_name, None)
+            assert fn is not None, f"找不到端点 {fn_name}"
+            m = re.search(r'require_perm\(\s*"([^"]+)"\s*\)', inspect.getsource(fn))
+            assert m, f"{fn_name} 丢了 require_perm 声明"
+            assert m.group(1) == want, f"{fn_name} 挂 {m.group(1)}，应 {want}"
+
+    def test_im_card_face_same_key(self):
+        """IM 卡片面：解冻/策略启停的 `_need` 键 = `live_control`（抽字面量，非重复断言常量）。"""
+        import inspect
+        from src.feishu_bot import ws_client
+        src = inspect.getsource(ws_client)
+        # _need 段里的元组：抽取 `"<key>" if tool in (...)` / `if tool == "..."`
+        seg = re.search(r"_need\s*=.*?\n\s*if _need not in", src, re.S)
+        assert seg, "找不到 _need 映射段"
+        body = seg.group(0)
+        assert '"live_control"' in body, "IM 卡片面未挂 live_control"
+        for tool in ("task_unfreeze", "strategy_start", "strategy_stop"):
+            assert tool in body, f"IM 卡片面 _need 映射丢了 {tool} 分支"
+        # 这三个工具不得再落 trade/halt/strategy_control
+        for bad in ('else "trade")', ):
+            pass
+        # 精确：找 `"live_control" if tool in (` 这一段
+        m = re.search(r'"([^"]+)"\s+if\s+tool\s+in\s*\(([^)]*)\)', body)
+        assert m, "IM 卡片面未按工具集形式挂档（期望 `\"live_control\" if tool in (...)`）"
+        assert m.group(1) == "live_control", f"IM 卡片面实盘工具键={m.group(1)}，应 live_control"
+        for tool in ("task_unfreeze", "strategy_start", "strategy_stop"):
+            assert f'"{tool}"' in m.group(2), f"{m.group(2)} 缺 {tool}"
+
+    def test_llm_tool_gate_same_key(self, gateway):
+        """LLM 档：`live_control` 放行全部实盘面工具；read/trade/halt/resume/strategy_control 不放行。"""
+        from src.llm_gateway.gateway import LIVE_TOOLS
+        target = {t.name for t in LIVE_TOOLS}
+        assert target == {"strategy_start", "strategy_stop", "task_unfreeze"}
+        for key in ("read", "trade", "halt", "resume", "strategy_control"):
+            names = {t["function"]["name"]
+                     for t in gateway._filter_tools("viewer", None, perms={"read", key})}
+            assert not (names & target), f"键 {key} 不应放行实盘面工具（应只 live_control）"
+        names = {t["function"]["name"]
+                 for t in gateway._filter_tools("viewer", None, perms={"read", "live_control"})}
+        assert target <= names, f"live_control 应放行 {target}"
+
+    def test_three_faces_agree_on_live_control(self):
+        """三面同键总断言：HTTP ≡ IM ≡ LLM 均为 `live_control`（跨文件字面量互比）。"""
         import inspect
         from src.web_api.routes import trading as tr
-        from src.llm_gateway.gateway import UNFREEZE_TOOLS
-
-        # Web 面：从端点源码抽 require_perm("<键>")
-        src = inspect.getsource(tr.unfreeze_live_task)
-        m = re.search(r'require_perm\(\s*"([^"]+)"\s*\)', src)
-        assert m, "unfreeze_live_task 端点丢了 require_perm 声明"
-        web_key = m.group(1)
-
-        # IM 卡片面：从 _need 映射抽 task_unfreeze 的键
         from src.feishu_bot import ws_client
-        wsrc = inspect.getsource(ws_client)
-        m2 = re.search(r'else\s+"([^"]+)"\s+if\s+tool\s*==\s*"task_unfreeze"', wsrc)
-        assert m2, "ws_client 的 _need 映射丢了 task_unfreeze 分支（IM 卡片面契约变更）"
-        im_key = m2.group(1)
+        from src.llm_gateway.gateway import LIVE_TOOLS, LLMGateway
 
-        # LLM 面：该键必须能放行 UNFREEZE_TOOLS，其余键不能
-        gw = __import__("src.llm_gateway.gateway", fromlist=["LLMGateway"]).LLMGateway()
-        target = {t.name for t in UNFREEZE_TOOLS}
-        assert "strategy_control" not in target
-        for key in ("read", "trade", "halt", "resume"):
-            names = {t["function"]["name"]
-                     for t in gw._filter_tools("viewer", None, perms={"read", key})}
-            assert not (names & target), f"键 {key} 不应放行解冻工具"
+        web_key = re.search(r'require_perm\(\s*"([^"]+)"\s*\)',
+                            inspect.getsource(tr.unfreeze_live_task)).group(1)
+        im_key = re.search(r'"([^"]+)"\s+if\s+tool\s+in\s*\([^)]*task_unfreeze',
+                           inspect.getsource(ws_client)).group(1)
+        # ⚠️ `import src.llm_gateway.gateway as X` 拿到的是 **LLMGateway 类**，不是模块
+        #    （包 __init__ 把 `gateway` 名字重绑成类）⇒ 必须经 getmodule 反查真模块。
+        gw_src = inspect.getsource(inspect.getmodule(LLMGateway))
+        # LLM 面：LIVE_TOOLS 必须由 live_control 放行（源码级）
+        assert 'if "live_control" in perms:' in gw_src and "allowed += LIVE_TOOLS" in gw_src
+        assert LIVE_TOOLS
+        assert web_key == im_key == "live_control", (
+            f"多面档位不一致：web={web_key} im={im_key}，应统一 live_control")
 
-        assert web_key == im_key == "strategy_control", (
-            f"三面档位不一致：web={web_key} im={im_key}，应统一为 strategy_control")
-        names = {t["function"]["name"]
-                 for t in gw._filter_tools("viewer", None, perms={"read", web_key})}
-        assert target <= names, f"键 {web_key} 应放行 {target}（与 Web/IM 面同键）"
+    def test_analyst_excluded_trader_admin_included(self, gateway):
+        """**核心验收**：analyst 不得有实盘面能力；trader/admin 必须有（无功能回归）。"""
+        from src.data_platform.perms import PERMISSIONS
+        from src.llm_gateway.gateway import LIVE_TOOLS
+        live = {t.name for t in LIVE_TOOLS}
 
-    def test_trader_and_admin_can_both_unfreeze(self, gateway):
-        """裁定落地：trader 与 admin 都可解冻（strategy_control 档）；viewer/analyst 不可。
+        # 角色集合层：analyst 无 live_control；trader/admin 有
+        assert "live_control" not in PERMISSIONS["analyst"], "analyst 持 live_control = 越界"
+        assert "live_control" in PERMISSIONS["trader"]
+        assert "live_control" in PERMISSIONS["admin"]
 
-        `analyst` 也持 strategy_control（研究档）⇒ 同样可见——这是与启停任务一致的既有语义，
-        非本批引入；Web 端点同键，行为一致（无「两面不同判」）。
-        """
+        # 工具档层：analyst 看不到任何实盘面工具；trader/admin 全看到
         def names(role):
             return {t["function"]["name"] for t in gateway._filter_tools(role, None)}
-        for role in ("trader", "admin"):
-            assert "task_unfreeze" in names(role), f"{role} 应可解冻（strategy_control 档）"
-        assert "task_unfreeze" not in names("viewer")
+        assert not (names("analyst") & live), "analyst 不应看到实盘面工具"
+        assert live <= names("trader"), "trader 应看到全部实盘面工具（拆分不得削权）"
+        assert live <= names("admin"), "admin 应看到全部实盘面工具"
 
-        # perms 动态组路径（IM 实走这条）
-        def by_perms(p):
-            return {t["function"]["name"]
-                    for t in gateway._filter_tools("viewer", None, perms=p)}
-        assert "task_unfreeze" in by_perms({"read", "strategy_control"})
-        assert "task_unfreeze" not in by_perms({"read", "trade", "halt"})
-
-    def test_unfreeze_perm_key_retired(self):
-        """`unfreeze` 已从注册表退役（统一挂 strategy_control，零新注册表面）。"""
-        from src.data_platform.perm_registry import API_PERM_KEYS
-        assert "unfreeze" not in API_PERM_KEYS
-        assert "strategy_control" in API_PERM_KEYS
-        import re as _re
-        from pathlib import Path
-        # 前端：permGroups 与 locales 不得再残留 unfreeze 权限键词条
-        pg = Path(__file__).resolve().parents[2] / "web" / "src" / "permGroups.js"
-        assert "'unfreeze'" not in pg.read_text(encoding="utf-8")
-        loc = (Path(__file__).resolve().parents[2] / "web" / "src" / "locales" / "index.js").read_text(encoding="utf-8")
-        assert "key_unfreeze:" not in loc
-        # IM 卡片面：_need 映射里不得再出现 "unfreeze" 键字面量
-        from src.feishu_bot import ws_client
+    def test_no_strategy_control_on_live_endpoints(self):
+        """反向钉：实盘面端点**不得**再回落 `strategy_control`（拆分的意义就在此）。"""
         import inspect
-        _need_src = _re.search(r"_need\s*=.*?\n\s*if _need not in", inspect.getsource(ws_client), _re.S)
-        assert _need_src, "找不到 _need 映射段"
-        assert '"unfreeze"' not in _need_src.group(0)
+        from src.web_api.routes import trading as tr, strategy as st
+        for fn_name in self.LIVE_ACTIONS:
+            fn = getattr(tr, fn_name, None) or getattr(st, fn_name, None)
+            src = inspect.getsource(fn)
+            assert "require_perm(\"strategy_control\")" not in src, \
+                f"{fn_name} 又挂回 strategy_control（实盘面泄漏给 analyst）"
 
-    def test_operational_tools_covers_unfreeze_for_card_flow(self):
-        """`OPERATIONAL_TOOLS` 须含 task_unfreeze——否则 handlers 会把它当读工具直执行。"""
-        from src.llm_gateway.gateway import OPERATIONAL_TOOLS
+    def test_live_control_key_registered_with_frontend(self):
+        """新键五处连带：注册表 / permGroups / locales 双语。"""
+        from src.data_platform.perm_registry import API_PERM_KEYS
+        assert "live_control" in API_PERM_KEYS
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2]
+        pg = (root / "web" / "src" / "permGroups.js").read_text(encoding="utf-8")
+        assert "'live_control'" in pg
+        loc = (root / "web" / "src" / "locales" / "index.js").read_text(encoding="utf-8")
+        assert loc.count("key_live_control:") == 2, "key_live_control 需中英各一条"
+
+    def test_operational_tools_covers_live_tools_for_card_flow(self):
+        """`OPERATIONAL_TOOLS` 须含实盘面工具——否则 handlers 会把它当读工具直执行。"""
+        from src.llm_gateway.gateway import LIVE_TOOLS, OPERATIONAL_TOOLS
         names = {t.name for t in OPERATIONAL_TOOLS}
-        assert "task_unfreeze" in names
+        assert {t.name for t in LIVE_TOOLS} <= names

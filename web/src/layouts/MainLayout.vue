@@ -179,6 +179,12 @@ const navReadonly = computed(() => {
   return navMap.value[navAliases.value[seg] || seg] === 'readonly'
 })
 provide('navReadonly', navReadonly)
+// 批 77：动作级权限注入——`canPerm(k)` 判 API 权限键（与后端 `require_perm` 同源）。
+// 用途：页面可进（nav 维允许）但**动作**另有更严档位时（如实盘任务页对 analyst 可读、
+// 起停/解冻须 `live_control`），按钮按此显隐——否则「看得到按钮→点了报 403」=死胡同
+// （批 76 P1 同类病）。**仅 UI 提示层，不放宽任何东西**：后端闸独立，前端漏改只是体验差。
+const canPerm = k => perms.value.includes(k)
+provide('canPerm', canPerm)
 
 getMe().then(me => { username.value = me.username; role.value = me.role; nickname.value = me.nickname || ''; avatarUrl.value = me.avatar_url || '' }).catch(e => { console.error(e); username.value = ''; role.value = '' })
 // 用户下拉（批21：头像触发；个人中心/AI/退出）

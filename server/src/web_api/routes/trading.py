@@ -68,7 +68,7 @@ def list_live_tasks(status: str | None = None,
 
 @router.post("/api/live-task")
 def create_live_task(body: dict = Body(...),
-                     payload: dict = Depends(require_perm("strategy_control"))):
+                     payload: dict = Depends(require_perm("live_control"))):
     """创建实盘任务：选策略+标的+任务参数值。创建时构建 strategy_snapshot。"""
     from src.strategy_framework.strategy import build_default_params, validate_parameter_defs, validate_params_against_defs
     name = body.get("name", "")
@@ -142,7 +142,7 @@ def create_live_task(body: dict = Body(...),
 
 
 @router.post("/api/live-task/{tid}/start")
-def start_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
+def start_live_task(tid: int, payload: dict = Depends(require_perm("live_control"))):
     """启动实盘任务。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT status, strategy_id FROM live_task WHERE id=%s", (tid,))
@@ -160,7 +160,7 @@ def start_live_task(tid: int, payload: dict = Depends(require_perm("strategy_con
 
 
 @router.post("/api/live-task/{tid}/stop")
-def stop_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
+def stop_live_task(tid: int, payload: dict = Depends(require_perm("live_control"))):
     """停止实盘任务。"""
     with get_conn() as conn:
         conn.execute("UPDATE live_task SET status='stopped', updated_at=now() WHERE id=%s", (tid,))
@@ -175,7 +175,7 @@ def stop_live_task(tid: int, payload: dict = Depends(require_perm("strategy_cont
 
 @router.get("/api/live-task/unfreeze-request")
 def get_unfreeze_request(token: str = Query(...),
-                         payload: dict = Depends(require_perm("strategy_control"))):
+                         payload: dict = Depends(require_perm("live_control"))):
     """批 76 F2：IM 发起解冻的一次性确认 token 预览（Web 确认页展示用；**只读不消费**）。
 
     确认链=IM 发起（确认卡闸：身份+unfreeze 档+去重）→ bot 回执带 token 深链 → 管理员在 Web
@@ -192,7 +192,7 @@ def get_unfreeze_request(token: str = Query(...),
 
 @router.post("/api/live-task/{tid}/unfreeze")
 def unfreeze_live_task(tid: int, body: dict = Body(default=None),
-                       payload: dict = Depends(require_perm("strategy_control"))):
+                       payload: dict = Depends(require_perm("live_control"))):
     """批 76 F2 解冻面·Web 入口：人工解冻（**不重启任务**）——写 Valkey 请求键，worker 5s 内消费。
 
     两形态同端点：
@@ -236,7 +236,7 @@ def list_freeze_events(tid: int, limit: int = 50, payload: dict = Depends(requir
 
 
 @router.delete("/api/live-task/{tid}")
-def delete_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
+def delete_live_task(tid: int, payload: dict = Depends(require_perm("live_control"))):
     """删除实盘任务（仅 stopped/error 可删）。"""
     with get_conn() as conn:
         cur = conn.execute("SELECT status FROM live_task WHERE id=%s", (tid,))

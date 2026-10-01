@@ -5,7 +5,7 @@
         <span>{{ t('liveTask.title') }}</span>
         <div style="display: flex; gap: 8px; align-items: center">
           <ColumnSettings storage-key="cols.live-tasks" :columns="taskColDefs" v-model:visible="taskVisible" />
-          <IconBtn :icon="Plus" :title="t('liveTask.create')" @click="openCreate" />
+          <IconBtn v-if="canLive" :icon="Plus" :title="t('liveTask.create')" @click="openCreate" />
         </div>
       </div>
     </template>
@@ -67,11 +67,11 @@
                删除收进「更多」弹窗（裁定#8+删除分界纪律：输入名强确认类进弹窗；
                盲审A-P2-8 曾留行内=偏离裁定，文案师裁定弹窗无可编辑字段名「编辑」名不副实——
                对齐 Backtest 同批「更多」模式） -->
-          <el-button v-if="row.status !== 'running'" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
-          <el-button v-if="row.status === 'running'" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
-          <IconBtn size="small" type="warning" :icon="Unlock" :title="t('liveTask.unfreeze')" v-if="row.status === 'running' && row.frozen" @click="onUnfreeze(row)" :disabled="navReadonly" />
+          <el-button v-if="row.status !== 'running' && canLive" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
+          <el-button v-if="row.status === 'running' && canLive" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
+          <IconBtn size="small" type="warning" :icon="Unlock" :title="t('liveTask.unfreeze')" v-if="row.status === 'running' && row.frozen && canLive" @click="onUnfreeze(row)" :disabled="navReadonly" />
           <el-button @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
-          <el-button v-if="row.status !== 'running'" @click="openMore(row)" :disabled="navReadonly">{{ t('common.more') }}</el-button>
+          <el-button v-if="row.status !== 'running' && canLive" @click="openMore(row)" :disabled="navReadonly">{{ t('common.more') }}</el-button>
         </template>
       </el-table-column>
     </TableShell>
@@ -153,6 +153,10 @@ const route = useRoute()
 const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
+// 批 77：实盘面动作（建/启/停/删任务、解冻）须 `live_control`——与后端 require_perm 同键。
+// analyst 只持研究面 strategy_control（可读本页、可回测）⇒ 实盘按钮不显示（避免点了 403 的死胡同）。
+const canPerm = inject('canPerm', () => true)
+const canLive = computed(() => canPerm('live_control'))
 const tasks = ref([])
 const strategies = ref([])
 const accounts = ref([])

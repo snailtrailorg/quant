@@ -165,12 +165,16 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
         logger.warning("卡片确认未绑定拒绝: open_id=%s tool=%s", open_id, tool)
         _terminal("unavailable", tool)
         return
-    # 批 76 · 2026-10-01 二次裁定：解冻统一挂 `strategy_control`——与 Web 端点**同键**，
-    # 故 trader 与 admin 皆可（与启停任务同页同档）。原挂独立 `unfreeze` 键造成两入口
-    # 权限梯度不一致（IM 仅 Admin / Web trader 亦可），已被用户裁定取消。
+    # 批 77 · 实盘面统一判 `live_control`（起停实盘进程/解冻/启停策略进程——这些都会
+    # 起 systemd 服务或改真实盘执行状态）。批 76 二次裁定曾统一到 `strategy_control`，
+    # 但批 77 按「analyst 只回测与实盘测试、不执行实盘交易」原则拆键后，`strategy_control`
+    # 归研究面（analyst 持有），实盘面迁 `live_control`（trader+admin）。修前更早状态：
+    # strategy_start/stop 落 `trade`、task_unfreeze 落 strategy_control ⇒ 与 HTTP 面
+    # （strategy.py/trading.py 均 live_control）**不同键**、且 `trade` 比 `live_control`
+    # 更松（谁有下单权就自动能起停策略进程）——四面对同一动作各判各的，正是批 76 P1 同型病。
     _need = ("resume" if tool == "risk_resume"
              else "halt" if tool == "emergency_halt"
-             else "strategy_control" if tool == "task_unfreeze"
+             else "live_control" if tool in ("task_unfreeze", "strategy_start", "strategy_stop")
              else "trade")
     if _need not in identity["perms"]:
         logger.warning("卡片确认权限不足拒绝执行: user=%s tool=%s need=%s",
