@@ -174,3 +174,61 @@ class TestImTaskUnfreezeTool:
         text = fc.send_text.call_args.args[1]
         assert "web_base_url" in text and "手工解冻" in text
         assert not mk.called
+
+
+class TestToolGatingContract:
+    """P1（2026-10-01 审核）：LLM 聊天工具档位必须与 IM 卡片确认面**同键**。
+
+    回归场景（原缺陷）：`task_unfreeze` 曾被并进 `ADMIN_TOOLS`、靠 `resume` 键放行，
+    而卡片面用 `unfreeze` 键 ⇒ ① 有 resume 无 unfreeze 的人看得到工具、点确认被 denied
+    （死胡同）；② 有 unfreeze 无 resume 的人看不到工具（勾了键不生效）。
+    修法=独立 `UNFREEZE_TOOLS` 靠 `unfreeze` 键放行。
+
+    本闸门是**跨文件契约**：真源是 `feishu_bot/ws_client.py` 的 `_need` 映射源码文本——
+    两处任一方改了档位归属，此测试即红（不靠人记）。
+    """
+
+    def test_llm_tool_gate_is_unfreeze_key_not_resume(self, gateway):
+        """有 unfreeze 无 resume ⇒ 看得到；有 resume 无 unfreeze ⇒ 看不到。"""
+        with_unf = {t["function"]["name"]
+                    for t in gateway._filter_tools("viewer", None, perms={"read", "unfreeze"})}
+        assert "task_unfreeze" in with_unf
+        with_res = {t["function"]["name"]
+                    for t in gateway._filter_tools("viewer", None, perms={"read", "resume"})}
+        assert "task_unfreeze" not in with_res, "task_unfreeze 不得靠 resume 键放行（P1 回归）"
+
+    def test_im_tool_gate_and_llm_tool_gate_same_key(self):
+        """两侧档位映射同源：从 ws_client 源码抽出 task_unfreeze 的键，与 LLM 侧常量比对。"""
+        import inspect
+        import re
+        from src.feishu_bot import ws_client
+        from src.llm_gateway import gateway as gw
+
+        src = inspect.getsource(ws_client)
+        m = re.search(r'else\s+"(\w+)"\s+if\s+tool\s*==\s*"task_unfreeze"', src)
+        assert m, "ws_client 的 _need 档位映射丢了 task_unfreeze 分支（IM 卡片面契约变更）"
+        im_key = m.group(1)
+        assert im_key == "unfreeze", f"IM 卡片面档位={im_key}，应为 unfreeze"
+
+        # LLM 侧：该键必须能拿到工具，其余键都必须拿不到
+        for key in ("read", "trade", "halt", "resume", "strategy_control"):
+            names = {t["function"]["name"]
+                     for t in gw._filter_tools("viewer", None, perms={"read", key})}
+            assert "task_unfreeze" not in names, f"键 {key} 不应放行 task_unfreeze"
+        names = {t["function"]["name"]
+                 for t in gw._filter_tools("viewer", None, perms={"read", im_key})}
+        assert "task_unfreeze" in names, f"键 {im_key} 应放行 task_unfreeze（与 IM 面同源）"
+
+    def test_operational_tools_covers_unfreeze_for_card_flow(self):
+        """`OPERATIONAL_TOOLS` 须含 task_unfreeze——否则 handlers 会把它当读工具直执行。"""
+        from src.llm_gateway.gateway import OPERATIONAL_TOOLS
+        names = {t.name for t in OPERATIONAL_TOOLS}
+        assert "task_unfreeze" in names
+
+    def test_role_default_still_admin_only(self, gateway):
+        """role 档（perms=None，Web 兼容路径）不变：admin 可见，trader/viewer 不可见。"""
+        def names(role):
+            return {t["function"]["name"] for t in gateway._filter_tools(role, None)}
+        assert "task_unfreeze" in names("admin")
+        assert "task_unfreeze" not in names("trader")
+        assert "task_unfreeze" not in names("viewer")
