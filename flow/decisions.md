@@ -355,7 +355,15 @@
 
 ## 2026-10-01 · 批 76 三裁决点（用户「按建议走」）
 
-- **① unfreeze 档位**：IM 新工具 `task_unfreeze` 进 ADMIN_TOOLS + 新 perm 键 `unfreeze`（perm_registry api 13→14 键）；Web 端点挂**既有** `strategy_control`（与启停任务同页同键、零注册表面）。
-- **② IM 验证通道**：**Web 确认链**——IM 发起（确认卡闸：身份+unfreeze 档+去重）→ 回执带一次性 token 的 Web 深链 → 管理员在 **Web 登录态**确认 → token 一次性消费后写解冻请求键。**明文密码禁进聊天记录**（IM 只当唤起面）。
+- **① unfreeze 档位**（**同日二次修订**，见下条）：~~IM 新工具 `task_unfreeze` 进 ADMIN_TOOLS + 新 perm 键 `unfreeze`（perm_registry api 13→14 键）；Web 端点挂**既有** `strategy_control`（与启停任务同页同键、零注册表面）。~~
+- **② IM 验证通道**：**Web 确认链**——IM 发起（确认卡闸：身份+档位+去重）→ 回执带一次性 token 的 Web 深链 → 管理员在 **Web 登录态**确认 → token 一次性消费后写解冻请求键。**明文密码禁进聊天记录**（IM 只当唤起面）。
 - **③ 临停误冻结归类**（66c 挂账）：归 `ts_gap` 同型**人工解**（零代码改动）——临停=市场真实洞与数据故障数据面不可分，宁多一次人工确认，**不自动放行**；冻结事实仍落 F1 可回看。
 - **副产品裁定口径（沿用现状不另立）**：seq_gap 冻结的**自动解冻**由「衔接判定」驱动（本根未触发 ts 缺口且续上序号）——安全性来自判定标准是客观流连续性，非进程自证。
+
+## 2026-10-01 · 批 76 裁决点①修订：解冻档位统一 `strategy_control`
+
+- **裁定（用户）**：「统一成 trader 和 admin 都可以解冻吧」。
+- **落地**：Web 端点（本已 `strategy_control`）/ IM 卡片确认面（原 `unfreeze`）/ LLM 聊天工具档（原 `unfreeze`）**三面同键** = `strategy_control`；`unfreeze` 注册键**退役**（API 键 14→13，零新注册表面）。`UNFREEZE_TOOLS` 常量保留（独立集=「不复用 halt/resume 档」的域语义不变），仅判定键改。
+- **理由（保留原裁决点 a 的正确部分）**：① 与启停任务**同页同档**——同页的「启停/删除/解冻」是同一管理动作族的既有边界；② 消除「同一操作两入口不同判」的**同型债**（P1 教训正是同键才是对）。
+- **连带（退役一键=五处）**：`perm_registry` 13、`test_batch33b_perm_registry` 三处断言、前端 `permGroups.js`、`locales.key_unfreeze`、`test_gateway.py` 原钉按新裁定反转；三面同键加**跨文件契约钉** `TestToolGatingContract`（从 ws_client 与 trading.py 源码抽键字面量互比，反证已做）。
+- **副作用（有意接受）**：`analyst` 亦持 `strategy_control` ⇒ IM/LLM 面也可见解冻工具。不比现状更松——analyst **本就可 Web 调启停与解冻端点**（同键），原 IM 档反造成「Web 可、IM 不可」的不一致；要挡 analyst 须动 `strategy_control` 的角色分配（启停任务同款独立议题）。

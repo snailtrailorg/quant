@@ -81,13 +81,14 @@ def test_filter_trader_has_halt_no_resume(gateway):
     assert "emergency_halt" in names
     assert "strategy_start" in names
     assert "risk_resume" not in names
-    assert "task_unfreeze" not in names   # 批 76：解冻=Admin 档（trader 无）
+    # 批 76 · 2026-10-01 二次裁定：解冻统一挂 strategy_control ⇒ trader 亦可（与启停任务同档）
+    assert "task_unfreeze" in names
 
 def test_filter_admin_has_resume(gateway):
     tools = gateway._filter_tools("admin", None)
     names = [t["function"]["name"] for t in tools]
     assert "risk_resume" in names
-    assert "task_unfreeze" in names   # 批 76：数据解冻（独立档位，仅 Admin）
+    assert "task_unfreeze" in names   # 批 76：解冻（strategy_control 档，admin/trader 皆可）
 
 def test_filter_analyst_read_only(gateway):
     tools = gateway._filter_tools("analyst", None)

@@ -165,10 +165,12 @@ def _card_gates(event_id: str, value: dict, open_id: str, fid: int,
         logger.warning("卡片确认未绑定拒绝: open_id=%s tool=%s", open_id, tool)
         _terminal("unavailable", tool)
         return
-    # 批 76：task_unfreeze（数据冻结解冻）走独立档位 unfreeze（仅 Admin）——不与 halt/resume 混档
+    # 批 76 · 2026-10-01 二次裁定：解冻统一挂 `strategy_control`——与 Web 端点**同键**，
+    # 故 trader 与 admin 皆可（与启停任务同页同档）。原挂独立 `unfreeze` 键造成两入口
+    # 权限梯度不一致（IM 仅 Admin / Web trader 亦可），已被用户裁定取消。
     _need = ("resume" if tool == "risk_resume"
              else "halt" if tool == "emergency_halt"
-             else "unfreeze" if tool == "task_unfreeze"
+             else "strategy_control" if tool == "task_unfreeze"
              else "trade")
     if _need not in identity["perms"]:
         logger.warning("卡片确认权限不足拒绝执行: user=%s tool=%s need=%s",

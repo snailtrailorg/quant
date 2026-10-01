@@ -72,16 +72,17 @@ ADMIN_TOOLS = [
          input_schema={"type": "object", "properties": {}, "required": []}),
 ]
 
-# 批76 F2 · 数据冻结解冻（**独立档**，仅 unfreeze 键）。
-# 与风控急停不同域：数据冻结=per-task 行情面（流 gap / 不可信 bar），熔断=全站交易面，
-# 故不复用 halt/resume 档（P2-2 裁决点 a）。工具本身不直接执行——回执带一次性 token 的
-# Web 深链，管理员在 Web 登录态确认。
-# ⚠️ 档位归属必须与 IM 卡片确认面同源：`feishu_bot/ws_client.py` 的 `_need` 映射里
-# task_unfreeze → "unfreeze"。若此处并进 ADMIN_TOOLS（靠 resume 放行），会出现
-# 「拿到工具 → 出卡 → 点确认被 denied」的死胡同，且「勾了 unfreeze 却看不到工具」。
-# 闸门：`tests/test_batch76_unfreeze_surface.py::TestToolGatingContract`（两面对齐）。
+# 批76 F2 · 数据冻结解冻（与风控急停不同域：数据冻结=per-task 行情面（流 gap / 不可信 bar），
+# 熔断=全站交易面，故**不复用 halt/resume 档**——P2-2 裁决点 a）。
+# 档位归属（2026-10-01 二次裁定）：挂 `strategy_control`——与 Web 端点
+# (`web_api/routes/trading.py::unfreeze_live_task`)、IM 卡片面 (`feishu_bot/ws_client.py::_need`)
+# **三面同键** ⇒ trader 与 admin 皆可解冻，与启停任务同档。
+# ⚠️ 三处必须同键：`_filter_tools` 用 "strategy_control" 放行本集，任一处改档即三方错位
+# （拿到工具→出卡→点确认被 denied 的死胡同）。闸门
+# `tests/test_batch76_unfreeze_surface.py::TestToolGatingContract`（跨文件抽字面量互比）。
+# 工具本身不直接执行——回执带一次性 token 的 Web 深链，管理员在 Web 登录态确认。
 UNFREEZE_TOOLS = [
-    Tool(name="task_unfreeze",     description="解冻实盘任务（仅 Admin；回 Web 确认链）",
+    Tool(name="task_unfreeze",     description="解冻实盘任务（回 Web 确认链）",
          input_schema={"type": "object",
                        "properties": {"id": {"type": "string", "description": "实盘任务 id"}},
                        "required": ["id"]}),
@@ -266,8 +267,8 @@ class LLMGateway:
         角色白名单：viewer/analyst=读类；trader=读+halt+启停策略；admin=+resume。
         传入 tools 时与角色白名单取交集（调用方只能缩小范围，不能越权）。
         批11C（B-P1-1）：perms 非空时按**权限键档位**（trade/halt=操作档，resume=管理档，
-        unfreeze=数据冻结解冻独立档，与 require_perm / IM 卡片面同源）——动态组用户按组
-        权限拿工具；None=旧 role 档位（Web 兼容）。
+        strategy_control=策略/任务管理档（含解冻），与 require_perm / IM 卡片面同键）
+        ——动态组用户按组权限拿工具；None=旧 role 档位（Web 兼容）。
         """
         if perms is not None and "read" not in perms:
             return []   # 代码盲审 A-P1-3：无 read 键=零权限用户（Web 面同被拒）——IM 面不给读工具
@@ -277,13 +278,13 @@ class LLMGateway:
                 allowed += TRADER_TOOLS
             if "resume" in perms:
                 allowed += ADMIN_TOOLS
-            if "unfreeze" in perms:
+            if "strategy_control" in perms:
                 allowed += UNFREEZE_TOOLS
         else:
             if role in ("trader", "admin"):
-                allowed += TRADER_TOOLS
+                allowed += TRADER_TOOLS + UNFREEZE_TOOLS
             if role == "admin":
-                allowed += ADMIN_TOOLS + UNFREEZE_TOOLS
+                allowed += ADMIN_TOOLS
         allowed = [t for t in allowed if t.name not in FORBIDDEN_TOOLS]
         # None=角色默认白名单；[]=显式无工具（三档 analyze 踩到：空列表意图被无视
         # → LLM 看到工具集自发请求"查询更多信息"，非循环 chat 直接吐过渡语）

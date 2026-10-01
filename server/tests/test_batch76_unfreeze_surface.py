@@ -6,6 +6,7 @@ IM 侧打桩 FeishuClient 与 freeze_event 握手，断言的是**回执内容�
 - Web 端点两形态（无 token=manual_web；带 token=manual_im 且 token 一次性、须与 tid 一致）；
 - 未配置 web_base_url 时 IM 诚实降级（不静默失败）。
 """
+import re
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -177,58 +178,93 @@ class TestImTaskUnfreezeTool:
 
 
 class TestToolGatingContract:
-    """P1（2026-10-01 审核）：LLM 聊天工具档位必须与 IM 卡片确认面**同键**。
+    """解冻档位**三面同键**契约（2026-10-01 二次裁定：统一挂 `strategy_control`）。
 
-    回归场景（原缺陷）：`task_unfreeze` 曾被并进 `ADMIN_TOOLS`、靠 `resume` 键放行，
-    而卡片面用 `unfreeze` 键 ⇒ ① 有 resume 无 unfreeze 的人看得到工具、点确认被 denied
-    （死胡同）；② 有 unfreeze 无 resume 的人看不到工具（勾了键不生效）。
-    修法=独立 `UNFREEZE_TOOLS` 靠 `unfreeze` 键放行。
+    历史两轮：
+    ① 原实现把 `task_unfreeze` 并进 `ADMIN_TOOLS`（靠 `resume` 放行），而卡片面用 `unfreeze`
+       键 ⇒ 档位错位（拿到工具→出卡→点确认被 denied 的死胡同）——P1 审核改正为独立
+       `UNFREEZE_TOOLS` + `unfreeze` 键；
+    ② 随后用户裁定「统一成 trader 和 admin 都可以解冻」⇒ **退役 `unfreeze` 键**，三面统一挂
+       既有 `strategy_control`（Web 端点 / IM 卡片面 / LLM 工具档），零注册表面。
 
-    本闸门是**跨文件契约**：真源是 `feishu_bot/ws_client.py` 的 `_need` 映射源码文本——
-    两处任一方改了档位归属，此测试即红（不靠人记）。
+    本闸门是**跨文件契约**：真源是 `feishu_bot/ws_client.py` 的 `_need` 映射**源码文本**、
+    以及 `web_api/routes/trading.py` 端点的 `require_perm(...)` 字面量——任一面改档即红。
     """
 
-    def test_llm_tool_gate_is_unfreeze_key_not_resume(self, gateway):
-        """有 unfreeze 无 resume ⇒ 看得到；有 resume 无 unfreeze ⇒ 看不到。"""
-        with_unf = {t["function"]["name"]
-                    for t in gateway._filter_tools("viewer", None, perms={"read", "unfreeze"})}
-        assert "task_unfreeze" in with_unf
-        with_res = {t["function"]["name"]
-                    for t in gateway._filter_tools("viewer", None, perms={"read", "resume"})}
-        assert "task_unfreeze" not in with_res, "task_unfreeze 不得靠 resume 键放行（P1 回归）"
-
-    def test_im_tool_gate_and_llm_tool_gate_same_key(self):
-        """两侧档位映射同源：从 ws_client 源码抽出 task_unfreeze 的键，与 LLM 侧常量比对。"""
+    def test_web_endpoint_and_llm_tool_gate_same_key(self):
+        """Web 端点的 require_perm 键 ≡ LLM 侧放行 UNFREEZE_TOOLS 的键（跨文件抽字面量互比）。"""
         import inspect
-        import re
+        from src.web_api.routes import trading as tr
+        from src.llm_gateway.gateway import UNFREEZE_TOOLS
+
+        # Web 面：从端点源码抽 require_perm("<键>")
+        src = inspect.getsource(tr.unfreeze_live_task)
+        m = re.search(r'require_perm\(\s*"([^"]+)"\s*\)', src)
+        assert m, "unfreeze_live_task 端点丢了 require_perm 声明"
+        web_key = m.group(1)
+
+        # IM 卡片面：从 _need 映射抽 task_unfreeze 的键
         from src.feishu_bot import ws_client
-        from src.llm_gateway import gateway as gw
+        wsrc = inspect.getsource(ws_client)
+        m2 = re.search(r'else\s+"([^"]+)"\s+if\s+tool\s*==\s*"task_unfreeze"', wsrc)
+        assert m2, "ws_client 的 _need 映射丢了 task_unfreeze 分支（IM 卡片面契约变更）"
+        im_key = m2.group(1)
 
-        src = inspect.getsource(ws_client)
-        m = re.search(r'else\s+"(\w+)"\s+if\s+tool\s*==\s*"task_unfreeze"', src)
-        assert m, "ws_client 的 _need 档位映射丢了 task_unfreeze 分支（IM 卡片面契约变更）"
-        im_key = m.group(1)
-        assert im_key == "unfreeze", f"IM 卡片面档位={im_key}，应为 unfreeze"
-
-        # LLM 侧：该键必须能拿到工具，其余键都必须拿不到
-        for key in ("read", "trade", "halt", "resume", "strategy_control"):
+        # LLM 面：该键必须能放行 UNFREEZE_TOOLS，其余键不能
+        gw = __import__("src.llm_gateway.gateway", fromlist=["LLMGateway"]).LLMGateway()
+        target = {t.name for t in UNFREEZE_TOOLS}
+        assert "strategy_control" not in target
+        for key in ("read", "trade", "halt", "resume"):
             names = {t["function"]["name"]
                      for t in gw._filter_tools("viewer", None, perms={"read", key})}
-            assert "task_unfreeze" not in names, f"键 {key} 不应放行 task_unfreeze"
+            assert not (names & target), f"键 {key} 不应放行解冻工具"
+
+        assert web_key == im_key == "strategy_control", (
+            f"三面档位不一致：web={web_key} im={im_key}，应统一为 strategy_control")
         names = {t["function"]["name"]
-                 for t in gw._filter_tools("viewer", None, perms={"read", im_key})}
-        assert "task_unfreeze" in names, f"键 {im_key} 应放行 task_unfreeze（与 IM 面同源）"
+                 for t in gw._filter_tools("viewer", None, perms={"read", web_key})}
+        assert target <= names, f"键 {web_key} 应放行 {target}（与 Web/IM 面同键）"
+
+    def test_trader_and_admin_can_both_unfreeze(self, gateway):
+        """裁定落地：trader 与 admin 都可解冻（strategy_control 档）；viewer/analyst 不可。
+
+        `analyst` 也持 strategy_control（研究档）⇒ 同样可见——这是与启停任务一致的既有语义，
+        非本批引入；Web 端点同键，行为一致（无「两面不同判」）。
+        """
+        def names(role):
+            return {t["function"]["name"] for t in gateway._filter_tools(role, None)}
+        for role in ("trader", "admin"):
+            assert "task_unfreeze" in names(role), f"{role} 应可解冻（strategy_control 档）"
+        assert "task_unfreeze" not in names("viewer")
+
+        # perms 动态组路径（IM 实走这条）
+        def by_perms(p):
+            return {t["function"]["name"]
+                    for t in gateway._filter_tools("viewer", None, perms=p)}
+        assert "task_unfreeze" in by_perms({"read", "strategy_control"})
+        assert "task_unfreeze" not in by_perms({"read", "trade", "halt"})
+
+    def test_unfreeze_perm_key_retired(self):
+        """`unfreeze` 已从注册表退役（统一挂 strategy_control，零新注册表面）。"""
+        from src.data_platform.perm_registry import API_PERM_KEYS
+        assert "unfreeze" not in API_PERM_KEYS
+        assert "strategy_control" in API_PERM_KEYS
+        import re as _re
+        from pathlib import Path
+        # 前端：permGroups 与 locales 不得再残留 unfreeze 权限键词条
+        pg = Path(__file__).resolve().parents[2] / "web" / "src" / "permGroups.js"
+        assert "'unfreeze'" not in pg.read_text(encoding="utf-8")
+        loc = (Path(__file__).resolve().parents[2] / "web" / "src" / "locales" / "index.js").read_text(encoding="utf-8")
+        assert "key_unfreeze:" not in loc
+        # IM 卡片面：_need 映射里不得再出现 "unfreeze" 键字面量
+        from src.feishu_bot import ws_client
+        import inspect
+        _need_src = _re.search(r"_need\s*=.*?\n\s*if _need not in", inspect.getsource(ws_client), _re.S)
+        assert _need_src, "找不到 _need 映射段"
+        assert '"unfreeze"' not in _need_src.group(0)
 
     def test_operational_tools_covers_unfreeze_for_card_flow(self):
         """`OPERATIONAL_TOOLS` 须含 task_unfreeze——否则 handlers 会把它当读工具直执行。"""
         from src.llm_gateway.gateway import OPERATIONAL_TOOLS
         names = {t.name for t in OPERATIONAL_TOOLS}
         assert "task_unfreeze" in names
-
-    def test_role_default_still_admin_only(self, gateway):
-        """role 档（perms=None，Web 兼容路径）不变：admin 可见，trader/viewer 不可见。"""
-        def names(role):
-            return {t["function"]["name"] for t in gateway._filter_tools(role, None)}
-        assert "task_unfreeze" in names("admin")
-        assert "task_unfreeze" not in names("trader")
-        assert "task_unfreeze" not in names("viewer")
