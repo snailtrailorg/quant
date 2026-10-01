@@ -236,6 +236,12 @@ gap_target_ts, unfrozen_at, unfreeze_method, operator
 | `web/src/api.js`（可选） | 加 `getFreezeEvents = tid => api.get(\`/live-task/${tid}/freeze-events\`)` | 1 行 |
 | `flow/任务/批76b-冻结史UI.md` | 本文件 + 交付记录 | — |
 
+> **落码实况（2026-10-02 00:20，见 §8.2）**：实际改 **3 个源码文件**（`api.js` +5、
+> `locales/index.js` +16、`LiveTask.vue` +97），净 **+109/-9**。与原计划差异两处：
+> ① 本文件 §8.2 追加记录；② **`LiveTask.vue` 多出一个 `<style scoped>`**
+> （`var(--warn-bg)` 不存在，见 §8.3 缺陷 4）——原计划「~60 行含样式」估得不准，
+> 实际因**四列对齐 + 三态 + 行内解冻钮 + 5 个逻辑函数**而翻倍。
+
 **后端 2 行的连带自查（落码第一步做，别跳）**：
 1. `grep -rn "frozen_at" server/ --include=*.py` —— 确认**除 `list_events` 外无其他读点**；
 2. `grep -rn "frozen_at" server/tests/` —— 确认测试断言不依赖 `str()` 形状
@@ -517,7 +523,67 @@ B 找的是 hub 面（冻结不在那儿）。而 §2.1 的任务页展开行，
 
 ---
 
-## ⚖ 裁决点（**均已由用户 2026-10-01 22:18 裁定**）
+## 8. 【2026-10-02 00:20 落码】实现记录 + 权限模型三问收口
+
+### 8.1 权限模型：三问三答（**结论=零改动**，但每条都有实证依据）
+
+用户连问三题，逐题核证后收口。**净结论：权限模型自洽，本批不动任何权限键。**
+
+| 问 | 用户原话（要点） | 结论 | 实证 |
+|---|---|---|---|
+| ③ | 「每个任务能对应到某用户创建，创建者是不是该有解冻权？」 | **否。创建者不是权限锚点。** | `live_task.owner_username`（迁移 `0074`）确实存在，但**唯一用途是市场风控**：`owner_username` → runner 注入 `strategy.operator`（`main.py:232`）→ `order["operator"]` → `RiskControl.check_order`（`strategy.py:431` 注释明写「服务端钉死——Signal/策略参数无此通道」）。**从无任何权限判断读它。** 按创建者授权会在两处崩：① 同 trader 建的任务落到他人账号（「建的人」≠「管账号的人」）② 多 trader 共管一账号。正解锚点=`account_id` 授权，**不是** 创建者。 |
+| ④ | 「analyst 也能建回测/实盘测试任务，都不发生交易，所以不存在冻结概念，对吗？」 | **对一半 —— 「实盘测试」这个词是陷阱。** | **回测侧对**：全仓冻结写入点**只有 3 处**（`hub_worker.py:324/347/373`），回测链路（`strategy_framework/backtest.py`、`web_api/routes/backtest.py`）`freeze`/`sticky`/`HeartbeatWriter` **零命中**——冻结的物理定义是「实时流断了/失真了不敢放 BUY」，回测读已落库历史数据，无此问题。**但「实盘测试」≠ `live_task`**：analyst 权限 = `{read, strategy_control, data_sync}`（`0056` seed，`0074` 还删了它越权的 `system_config`）——**analyst 从无 `live_control`，也建不了 `live_task`**。批 77 §一 已把 `POST /api/live-task` 及起停/删除/解冻全判 analyst ❌。「实盘测试」指的是**研究面**的策略验证（`strategy_control` 域），不是实盘任务。**AI 前一回复据「analyst 建的 live_task」立的反例 2 已撤回——批 77 早已堵住。** |
+| ⑤ | 「我（admin）建新角色，授权它操作某市场实盘，但不给解冻权——合理吗？」→ **随后用户自己修正**：「有某市场实盘操作权就该能解冻，**应该合并而不是拆分**」 | ✅ **用户最终裁定正确 —— 合并，不拆键。** | `live_control` 现挂 **8 端点**（`strategy.py:160/185` + `trading.py:71/145/163/178/195/239`），**全是实盘面操作，语义完全同质**。而 `market_op` 是**独立维**（`market_op_allowed()` 查 `dimension='market_op'`，挂 `risk.py:286` 的 `check_order`）管「哪个市场」。故：<br>**允许操作实盘任务 := `live_control`(能力) ∧ `market_op[market]`(市场)**<br>**解冻与起停需要的条件一字不差** ⇒ 拆键是**凭空发明区别**，拆完两键 seed 永远一致（同给同收）。<br>**判据是「面」不是「动作危险梯度」**：批 77 拆 `strategy_control`→`live_control` 对，因为拆的是**面**（研究面 vs 实盘面）；再拆 `live_control` 内部**已无第二个面**。两次判断同一判据。 |
+
+**AI 撤回项（诚实记录）**：① 「`live_control` 打包三件危险方向不同的事」——**错**，8 端点同面同方向；② 「拆键」建议——**伪解法**；③ 「值班死角」论证——**建立在拆分之上，地基不成立**。
+**AI 保留项（与拆不拆无关）**：① `owner_username` 非权限锚点（`market_op` 是 role 级，与创建者无关）；② 解冻是**不可撤销的风险接受**（端点注释原话「操作者显式接受当前数据状态」）——但这只构成**留痕**理由，而留痕**已有**（`freeze_event.operator` + `manual_web/manual_im`）。
+**用户模型（四维）**：能力 `live_control` × 市场 `market_op` × 账号 `account_allows`（开仓级，SELL 豁免）× 页面 nav。
+
+### 8.2 落码清单（3 文件，+109/-9）
+
+| 文件 | 改动 |
+|---|---|
+| `web/src/api.js` | +`getFreezeEvents(id, limit)`（perm `read`）+`unfreezeLiveTask(id)`（真端点） |
+| `web/src/views/LiveTask.vue` | 展开行第二区块（冻结史六列 + 进行中高亮 + 三态分离 + 行内解冻钮）；`onUnfreeze` **改调真端点**；`preloadFreeze`/`loadFreeze`/`freezing`/`frozenFor`/`onExpand`；操作列解冻钮判据换持久账；新增 `<style scoped>` |
+| `web/src/locales/index.js` | +20 键 × 双语（50/50 对齐）；**并修正既有 2 键**——`unfreeze`/`confirmUnfreeze` 原文「重启解冻 / Restart & unfreeze」**已因本次改动失实**（不再重启），改为「解冻 / Unfreeze」+ 准确语义说明 |
+
+### 8.3 落码中自查出的 4 个缺陷（**单测捕获，非目视**）
+
+写了一个 24 断言的纯逻辑单测复刻 `freezing`/`frozenFor`/`onExpand`/`preloadFreeze`，**首轮 3 红**——全是我自己刚写的 bug：
+
+| # | 缺陷 | 根因 | 后果 |
+|---|---|---|---|
+| 1 | `onExpand` 不认 boolean 重载 | EP `expand-change` 有**双重重载**（`defaults.d.ts:331-332`：`(row, T[])` 与 `(row, boolean)`）；我把 `true` 包成 `[true]`，`r?.id === row?.id` 恒 false | 一旦落到 boolean 重载，展开**永不拉取** |
+| 2 | `preloadFreeze` 判据写反 | `_freeze === undefined \|\| !freezing(x).length` = 「没拉过 **或** 没有未闭合」⇒ 已冻行 `_freeze` 有值且 `freezing().length>0` ⇒ 条件 false | **已冻行永不刷新** ⇒ 时长冻住、解冻后不消失 |
+| 3 | 同上的另一面 | 干净行 `_freeze=[]` ⇒ `!freezing().length`=true ⇒ **每 30s 重复请求** | 请求放大 N 倍（N=运行中任务数） |
+| 4 | `var(--warn-bg)` 不存在 | tokens.css 只有 `--warn`（文本档）/`--warn-fill`（填充档） | **静默透明**——CSS 无报错，高亮失效而无人知 |
+
+**修法**：① 分流 `Array.isArray` → `some(id)`／`=== true`；② 归正为 `_freeze === undefined \|\| freezing(x).length`；③ 同上（一次写对两处）；④ 删 inline style 改 `<style scoped>` + `color-mix(in srgb, var(--warn-fill) 14%, transparent)`——**不引新 hex**（令牌门只许减不许增），也不依赖不存在的 token。
+
+**另修一处时序缺陷**：`onUnfreeze` 原本在 POST 后立即 `loadFreeze` —— 但后端**只写 Valkey 请求键**，worker **5s 钩子**（`hub_worker.py:509-513` `GETDEL`）消费后才闭环 F1 ⇒ 立即重拉**必然仍显「进行中」**，用户会以为没生效。改为**只提示「已下发（5 秒内生效）」，不立即重拉**；闭环交给 `load()` 的 30s 轮询 → `preloadFreeze` 对有未闭合事件的行重拉自然带出。
+
+> **方法论**：这 4 个都不编译报错、不冒烟失败——**只有跑断言才现形**。第 4 个尤其典型（CSS 静默失败）。
+> 教训：**新写的前端纯逻辑，落码即单测**（复刻函数即可，不需跑组件），比目视可靠。
+
+### 8.4 验收证据
+
+| 项 | 结果 |
+|---|---|
+| 令牌门 | ✓ PX=39≤43 HEX=18≤18 FS=0≤0（**无新增字面量**） |
+| locales 门 | ✓ 无重复键 / 行内注释吞键 0 / **en-zh 键集对称 1784** / 占位符一致 |
+| 词条死键 | ✓ 新增 20 键**全部被引用**（逐键 `grep -c` = 1） |
+| 逻辑单测 | ✓ **24 passed 0 failed** |
+| 前端 build | ✓ built in 29.41s |
+| 后端全量 | ✓ **1805 passed, 1 skipped**（与改前基线**逐数一致**，零回归） |
+| 后端相关 | ✓ `test_batch76_freeze_event.py` + `test_deploy_blast_radius.py` 14 passed |
+
+**上产**：非迁移（不触 DDL 门）、需重启 `quant-web-api@quant`——随下个部署窗，不额外开窗。
+
+## ⚖ 裁决点（**① ② ③ 均已由用户 2026-10-01 22:18 裁定**；④⑤ 见 §8.1）
+
+**① 时刻列序列化契约** —— ✅ **「马上改」已落码 + 验绿**（`freeze_event.py:93-99` `str → isoformat()`）
+
+
 
 **① `frozen_at` / `unfrozen_at` 改 `isoformat()`** —— ✅ **已裁定「马上改」，且已落码+验绿**：
 

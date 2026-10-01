@@ -162,6 +162,11 @@ export const createLiveTask = data => api.post('/live-task', data)
 export const startLiveTask = id => api.post(`/live-task/${id}/start`)
 export const stopLiveTask = id => api.post(`/live-task/${id}/stop`)
 export const deleteLiveTask = id => api.delete(`/live-task/${id}`)
+// 批 76b：F1 冻结史（进行中= unfrozen_at 为 null）。perm `read`（与解冻动作门分离）
+export const getFreezeEvents = (id, limit = 20) => api.get(`/live-task/${id}/freeze-events`, { params: { limit } })
+// 批 76b：真解冻入口——写 Valkey 请求键、worker 5s 内消费、**不重启任务**、记 manual_web。
+// ⚠️ 勿用 start/stop 替代：那走 restart 闭环（operator 空、方式错记为 restart），是审计失真。
+export const unfreezeLiveTask = id => api.post(`/live-task/${id}/unfreeze`)
 
 // 系统配置（admin 可改，celery_concurrency 支持动态生效）
 export const getSystemConfig = () => api.get('/system-config')

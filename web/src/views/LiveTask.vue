@@ -10,7 +10,7 @@
       </div>
     </template>
     <!-- 批17 17A：列宽拖拽+持久化 -->
-    <TableShell :data="tasks" storage-key="live-tasks">
+    <TableShell :data="tasks" storage-key="live-tasks" @expand-change="onExpand">
       <el-table-column v-if="colOn('id')" prop="id" label="ID" width="80" />
       <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
       <el-table-column v-if="colOn('strategy_id')" prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
@@ -57,6 +57,43 @@
                 <span :style="{ color: ['ERROR', 'error'].includes(l.level) ? 'var(--critical)' : ['WARNING', 'warning', 'WARN'].includes(l.level) ? 'var(--warn)' : 'inherit' }">{{ l.msg?.slice(0, 100) }}</span>
               </div>
             </div>
+
+            <!-- 批 76b：冻结史（F1 freeze_event 持久账）——瞬时灯的对立面：
+                 列表行的 ❄ 是 30s 轮询布尔（短冻结会整跳），此处是「冻过几次/谁解的/用哪种方式」的事实。
+                 三态：null=无 read 权限（与空区分，防误读为「没冻过」）/ []=真没冻过 / [...]=有记录 -->
+            <div style="margin-top: var(--sp-2); border-top: 1px solid var(--border-light); padding-top: var(--sp-2)">
+              <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-bottom: 6px">
+                {{ t('liveTask.freezeHistory') }}
+                <span v-if="!row._freeze?.length" style="opacity: 0.7">{{ t('liveTask.freezeSince') }}</span>
+              </div>
+              <div v-if="row._freeze === null" style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ t('liveTask.freezeNoPerm') }}</div>
+              <div v-else-if="!row._freeze?.length" style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ t('liveTask.freezeNone') }}</div>
+              <div v-else style="font-size: var(--fs-foot); font-family: var(--font-num)">
+                <div style="display: flex; gap: 8px; color: var(--text-secondary); margin-bottom: 4px">
+                  <span style="min-width: 150px">{{ t('liveTask.colFrozenAt') }}</span>
+                  <span style="min-width: 68px">{{ t('liveTask.colType') }}</span>
+                  <span style="min-width: 92px">{{ t('liveTask.colWatermark') }}</span>
+                  <span style="min-width: 150px">{{ t('liveTask.colUnfrozenAt') }}</span>
+                  <span>{{ t('liveTask.colMethod') }}</span>
+                </div>
+                <div v-for="e in row._freeze" :key="e.id"
+                     :class="e.unfrozen_at ? 'fz-closed' : 'fz-open'"
+                     style="display: flex; gap: 8px; padding: 2px 0">
+                  <span style="min-width: 150px">{{ fmtTime.s(e.frozen_at) }}</span>
+                  <span style="min-width: 68px">{{ t(FT[e.freeze_type] || 'liveTask.ftUnknown') }}</span>
+                  <span style="min-width: 92px">{{ e.watermark ?? '—' }} → {{ e.gap_target_ts ?? '—' }}</span>
+                  <span style="min-width: 150px">{{ e.unfrozen_at ? fmtTime.s(e.unfrozen_at) : t('liveTask.inProgress') }}</span>
+                  <span>
+                    {{ e.unfrozen_at ? t(UM[e.unfreeze_method] || 'liveTask.umUnknown') : '⏱ ' + frozenFor(row) }}
+                    <span v-if="e.operator" style="color: var(--text-secondary)"> · {{ e.operator }}</span>
+                  </span>
+                  <!-- 批 76b：解冻入口移入「进行中」行——判据是 F1 未闭合（持久），
+                       而非 30s 瞬时灯，故短冻结也找得到入口；信息（原因/水位差/已冻时长）同屏可见 -->
+                  <IconBtn v-if="!e.unfrozen_at && canLive" size="small" type="warning" :icon="Unlock"
+                           :title="t('liveTask.unfreeze')" @click="onUnfreeze(row)" :disabled="navReadonly" />
+                </div>
+              </div>
+            </div>
           </div>
         </template>
       </el-table-column>
@@ -69,7 +106,10 @@
                对齐 Backtest 同批「更多」模式） -->
           <el-button v-if="row.status !== 'running' && canLive" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
           <el-button v-if="row.status === 'running' && canLive" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
-          <IconBtn size="small" type="warning" :icon="Unlock" :title="t('liveTask.unfreeze')" v-if="row.status === 'running' && row.frozen && canLive" @click="onUnfreeze(row)" :disabled="navReadonly" />
+          <!-- 批 76b：解冻钮判据由「30s 瞬时灯 row.frozen」改为「F1 未闭合事件」（持久）——
+               灯会丢帧（短冻结整跳 ⇒ 想解冻却找不到入口）；与展开行同一 handler，无第二套语义。
+               注：row.frozen 仍用于状态列的 ❄ 即时标记，两者用途不同（灯=此刻/账=历史）。 -->
+          <IconBtn size="small" type="warning" :icon="Unlock" :title="t('liveTask.unfreeze')" v-if="row.status === 'running' && freezing(row).length && canLive" @click="onUnfreeze(row)" :disabled="navReadonly" />
           <el-button @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
           <el-button v-if="row.status !== 'running' && canLive" @click="openMore(row)" :disabled="navReadonly">{{ t('common.more') }}</el-button>
         </template>
@@ -138,7 +178,7 @@ import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getStrategies, getInterfaces, apiErr } from '../api'
+import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getFreezeEvents, unfreezeLiveTask, getStrategies, getInterfaces, apiErr } from '../api'
 import { CAPITAL_INPUT } from '../utils/inputRanges'
 import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
@@ -203,7 +243,7 @@ const colOn = k => taskVisible.value.includes(k)
 
 
 const load = async () => {
-  try { tasks.value = await getLiveTasks(); enrichTasks() } catch { ElMessage.error(t('common.loadFailed')) }
+  try { tasks.value = await getLiveTasks(); enrichTasks(); preloadFreeze() } catch { ElMessage.error(t('common.loadFailed')) }
 }   // 盲审A-P2-8：load 后 enrich（start/stop 重建 tasks 后重启数不回落）
 const loadStrategies = async () => {
   try {
@@ -244,13 +284,56 @@ const save = async () => {
   finally { saving.value = false }
 }
 
-// P1-5/06 B#6 冻结处置闭环:重启解冻(frozen 是 worker 态,重启清退)
+// 批 76b：解冻=人工接受当前数据状态（带洞窗/污染窗），**不重启任务**。
+// 旧实现误走 stop+start ⇒ 记 `restart` 闭环（operator 空、方式错）+ 白白打断运行，已修正。
+// ⚠️ 生效有延迟：后端只写 Valkey 请求键，worker 5s 钩子 GETDEL 消费后才闭环 F1。
+// 故此处**不立即重拉冻结史**（拉了也仍是「进行中」= 误导），只给「已下发」提示；
+// 闭环由 load() 的 30s 轮询 → preloadFreeze 对有未闭合事件的行重拉自然带出。
 const onUnfreeze = async (row) => {
   try {
     await ElMessageBox.confirm(t('liveTask.confirmUnfreeze'), t('common.confirm'), { type: 'warning' })
-    await stopLiveTask(row.id); await startLiveTask(row.id)
-    ElMessage.success(t('common.success')); load()
+    await unfreezeLiveTask(row.id)
+    ElMessage.success(t('liveTask.unfreezeSent'))
   } catch (e) { if (e?.response) ElMessage.error(t('common.failed')) }
+}
+// 批 76b：冻结史惰性拉取（展开时 + 解冻后刷新）。三态：null=无权限 / []=空 / [...]=有
+const loadFreeze = async (tid) => {
+  const row = tasks.value.find(x => x.id === tid)
+  if (!row) return
+  try {
+    const r = await getFreezeEvents(tid, 20)
+    row._freeze = r?.events || []
+  } catch (e) { row._freeze = e?.response?.status === 403 ? null : [] }
+}
+// 有未闭合事件（unfrozen_at 为 null）= 此刻真冻着——持久判据，不受 30s 瞬时灯丢帧影响
+const freezing = row => (row._freeze || []).filter(e => !e.unfrozen_at)
+// 批 76b：展开时惰性拉冻结史。EP `expand-change` 双重重载：多列展开表=`(row, T[])`，
+// 树/单列=`(row, boolean)`。两种都要认（boolean=true 即「本行刚展开」，目标就是 row 自身）。
+const onExpand = (row, expandedRows) => {
+  let open
+  if (Array.isArray(expandedRows)) open = expandedRows.some(r => r?.id === row?.id)
+  else open = expandedRows === true
+  if (open && row._freeze === undefined) loadFreeze(row.id)
+}
+// 已冻结时长（秒）——进行中行显示；只算「现在还在冻」的那条
+const frozenFor = (row) => {
+  const e = freezing(row)[0]
+  if (!e?.frozen_at) return ''
+  const secs = Math.max(0, Math.floor((Date.now() - new Date(e.frozen_at).getTime()) / 1000))
+  if (secs < 60) return `${secs} 秒`
+  if (secs < 3600) return `${Math.floor(secs / 60)} 分 ${secs % 60} 秒`
+  return `${Math.floor(secs / 3600)} 时 ${Math.floor((secs % 3600) / 60)} 分`
+}
+// 三类冻结 + 四值解冻方式的词条映射（枚举由 0123 CHECK 锁死）
+const FT = { ts_gap: 'liveTask.ftTsGap', seq_gap: 'liveTask.ftSeqGap', untrusted: 'liveTask.ftUntrusted' }
+const UM = { restart: 'liveTask.umRestart', auto_reconnect: 'liveTask.umAuto', manual_web: 'liveTask.umWeb', manual_im: 'liveTask.umIm' }
+// 批 76b：running 行的冻结史预拉（操作列解冻钮的判据依赖它——不预拉则钮永不显示）。
+// 只拉 running（stopped/error 不可能冻着），随 load 的 30s 轮询走，量=运行中任务数。
+// 判据两条：① 从未拉过（undefined）② 当前有未闭合事件（要跟时长、也要发现「已解冻」）。
+// ⚠️ 不能写成「无未闭合就拉」——那会让每个干净行每 30s 重复请求一次（放大 N 倍）。
+const preloadFreeze = () => {
+  tasks.value.filter(x => x.status === 'running' && (x._freeze === undefined || freezing(x).length))
+    .forEach(x => loadFreeze(x.id))
 }
 const onStart = async (id) => {
   try { await startLiveTask(id); ElMessage.success(t('common.started')); load() }
@@ -322,3 +405,10 @@ const lastExit = row => {
 // P1-5(05 §5.8):自愈时间线数据(NRestarts)+快照查看
 
 </script>
+
+<style scoped>
+/* 批 76b：进行中冻结行高亮。用 color-mix 派生透明底——不引新 hex（令牌门只许减不许增），
+   也不依赖不存在的 --warn-bg（曾误用 ⇒ 静默透明，无任何报错）。 */
+.fz-open { background: color-mix(in srgb, var(--warn-fill) 14%, transparent); color: var(--warn); }
+.fz-closed { color: inherit; }
+</style>
