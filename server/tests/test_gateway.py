@@ -75,20 +75,41 @@ def test_filter_empty_list_means_no_tools(gateway):
     assert gateway._filter_tools("admin", []) == []
     assert gateway._filter_tools("viewer", None) != []   # None 语义不变
 
-def test_filter_trader_has_halt_no_resume(gateway):
+def test_filter_trader_no_halt_no_resume(gateway):
+    """批 77 续（2026-10-01 用户裁定）：`halt` 与 `live_trading_control` 收回 admin 独占
+    ⇒ trader **不再**有 `emergency_halt`（原钉 `assert "emergency_halt" in names` 按新裁定反转，
+    非删除——保留「此处曾有过裁定」的痕迹）。trader 保留实盘面工具（live_control）。"""
     tools = gateway._filter_tools("trader", None)
     names = [t["function"]["name"] for t in tools]
-    assert "emergency_halt" in names
+    assert "emergency_halt" not in names, "halt 已收回 admin 独占（trader 不得有全站急停权）"
     assert "strategy_start" in names
     assert "risk_resume" not in names
-    # 批 76 · 2026-10-01 二次裁定：解冻统一挂 strategy_control ⇒ trader 亦可（与启停任务同档）
+    # 批 77：解冻/起停策略挂 live_control ⇒ trader 亦可（同实盘面档）
     assert "task_unfreeze" in names
+
+def test_filter_trader_halt_requires_halt_key_not_trade(gateway):
+    """批 77 续关键钉：`emergency_halt` 的放行键是 `halt` **而非** `trade`。
+
+    修前条件 `"trade" in perms or "halt" in perms` 使任何能下单的角色连坐获得全站急停权
+    ——halt 收回 admin 后该连坐必须断开，否则「收回」是假的：trader 仍有 trade ⇒ 仍有 halt。"""
+    from src.llm_gateway.gateway import TRADER_TOOLS
+    halt_tools = {t.name for t in TRADER_TOOLS}
+    assert "emergency_halt" in halt_tools
+    # 仅有 trade 不成 ⇒ 不放行
+    names = {t["function"]["name"]
+             for t in gateway._filter_tools("viewer", None, perms={"read", "trade"})}
+    assert not (names & halt_tools), "只有 trade 键不应放行 emergency_halt（连坐已断）"
+    # 有 halt 才放行
+    names = {t["function"]["name"]
+             for t in gateway._filter_tools("viewer", None, perms={"read", "halt"})}
+    assert halt_tools <= names, "halt 键应放行 emergency_halt"
 
 def test_filter_admin_has_resume(gateway):
     tools = gateway._filter_tools("admin", None)
     names = [t["function"]["name"] for t in tools]
     assert "risk_resume" in names
-    assert "task_unfreeze" in names   # 批 76：解冻（strategy_control 档，admin/trader 皆可）
+    assert "task_unfreeze" in names   # 批 76：解冻（live_control 档，admin/trader 皆可）
+    assert "emergency_halt" in names  # 批 77 续：halt 收回 admin 独占 ⇒ admin 有
 
 def test_filter_analyst_read_only(gateway):
     tools = gateway._filter_tools("analyst", None)

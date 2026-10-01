@@ -23,7 +23,12 @@ PERMISSIONS = {
     # W5 修 P0（盲审 B）：system_config 原为死键（迁移前 0 端点消费）——W5 迁移把 16 个
     # admin-only 门（数据源/通道/券商凭证 CRUD/system-config 写/health）挂上后 analyst
     # 经回退字典全部可达=扩权回归。删键归位 admin-only（wd-10"收紧 analyst"方向）。
-    "trader":  {"read", "strategy_control", "live_control", "halt", "trade", "live_trading_control"},  # 交易：策略启停/实盘任务启停与解冻/熔断/下单/实盘开关
+    "trader":  {"read", "strategy_control", "live_control", "trade"},  # 交易：策略启停/实盘任务启停与解冻/下单
+    # 批 77 续：`halt`（全站熔断）与 `live_trading_control`（市场级分项开关）**收回 admin 独占**。
+    # 判据（用户 2026-10-01）：两者的影响半径都是**全站/全市场**，且「开」比「停」危险——
+    # 与既有的 `resume` 仅 admin 同一逻辑（trader 本就从无 resume）。改动仅**缺省种子**：
+    # 线上真相在 permission 表（用户已在界面删 trader 的 halt/live_trading_control 行）；
+    # 此处同步是防**新环境**（表空回落字典）复活该权。要恢复 trader 的急停权＝建显式角色赋键。
     "admin":   set(_API_KEYS),   # 批33b：注册表派生（admin 专属全集；analyst 无）
 }
 

@@ -313,3 +313,53 @@ class TestToolGatingContract:
         from src.llm_gateway.gateway import LIVE_TOOLS, OPERATIONAL_TOOLS
         names = {t.name for t in OPERATIONAL_TOOLS}
         assert {t.name for t in LIVE_TOOLS} <= names
+
+
+class TestGlobalGatesAdminOnly:
+    """批 77 续（2026-10-01 用户裁定）：**全站/全市场闸收回 admin 独占**。
+
+    判据：`halt`（全站熔断）、`live_trading_control`（市场级分项开关）的影响半径是**全站/全市场**
+    （非单任务），且「开」比「停」危险 ⇒ 与既有 `resume` 仅 admin 同一逻辑。
+    `live_control`（单任务粒度）**不在**此行——trader 保留实盘单任务起停权。
+
+    改动落点是**缺省种子** `perms.PERMISSIONS`（线上真相在 permission 表，用户已界面删除）；
+    本闸门防「新环境表空回落字典」时该权复活。
+    """
+
+    ADMIN_ONLY_KEYS = ("halt", "resume", "live_trading_control")
+
+    def test_trader_lacks_global_gate_keys(self):
+        from src.data_platform.perms import PERMISSIONS
+        for k in self.ADMIN_ONLY_KEYS:
+            assert k not in PERMISSIONS["trader"], f"trader 不应持全站/全市场闸 {k}"
+
+    def test_trader_keeps_single_task_live_control(self):
+        """收闸**不得**误伤 `live_control`（单任务粒度，trader 本该有）。"""
+        from src.data_platform.perms import PERMISSIONS
+        assert "live_control" in PERMISSIONS["trader"], "trader 应保留单任务实盘起停权"
+
+    def test_admin_holds_all_global_gates(self):
+        from src.data_platform.perms import PERMISSIONS
+        for k in self.ADMIN_ONLY_KEYS:
+            assert k in PERMISSIONS["admin"], f"admin 应有 {k}"
+
+    def test_halt_not_granted_via_trade_connivance(self, gateway):
+        """**连坐断开的守卫**：仅有 `trade` 键不得放行 `emergency_halt`。
+
+        修前 `"trade" in perms or "halt" in perms` 使任何能下单的角色自动获得全站急停权
+        ——那样「halt 收回 admin」就是假的（trader 有 trade ⇒ 仍有 halt）。"""
+        from src.llm_gateway.gateway import TRADER_TOOLS
+        halt_tools = {t.name for t in TRADER_TOOLS}
+        assert "emergency_halt" in halt_tools
+        names = {t["function"]["name"]
+                 for t in gateway._filter_tools("viewer", None, perms={"read", "trade"})}
+        assert not (names & halt_tools), "trade 键连坐放行 halt 的旧病复发"
+
+    def test_frontend_risk_buttons_gated_by_perm(self):
+        """前端 `Risk.vue` 熔断/恢复/市场开关三按钮须按 API 权限键显隐（防「点了 403」死胡同）。"""
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[2]
+        risk = (root / "web" / "src" / "views" / "Risk.vue").read_text(encoding="utf-8")
+        assert "canPerm" in risk, "Risk.vue 未接动作级权限注入"
+        for key in ("halt", "resume", "live_trading_control"):
+            assert f"canPerm('{key}')" in risk, f"Risk.vue 未按 {key} 判按钮显隐"

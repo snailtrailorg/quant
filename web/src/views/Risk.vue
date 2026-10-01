@@ -13,8 +13,8 @@
         <el-descriptions-item :label="t('risk.leverageMax')">{{ state.rules?.crypto?.leverage_max || 5 }}x</el-descriptions-item>
       </el-descriptions>
       <div style="margin-top: 20px; display: flex; gap: 12px">
-        <el-button type="danger" @click="onHalt" :disabled="state.halted">{{ t('risk.halt') }}</el-button>
-        <el-button type="success" @click="onResume" :disabled="!state.halted">{{ t('risk.resume') }}</el-button>
+        <el-button v-if="canHalt" type="danger" @click="onHalt" :disabled="state.halted">{{ t('risk.halt') }}</el-button>
+        <el-button v-if="canResume" type="success" @click="onResume" :disabled="!state.halted">{{ t('risk.resume') }}</el-button>
       </div>
     </el-card>
 
@@ -51,7 +51,8 @@
         <el-table-column prop="enabled" :label="t('common.status')" width="120">
           <template #default="{ row }">
             <!-- P1-1（05 §5.3 要点 5）：switch→按钮+确认弹窗（显示影响面） -->
-            <el-button size="small" :type="row.enabled ? 'warning' : 'success'" :loading="row.loading"
+            <!-- 批 77 续：市场分项开关 admin 独占（live_trading_control）⇒ 按钮按权限显隐 -->
+            <el-button v-if="canSwitch" size="small" :type="row.enabled ? 'warning' : 'success'" :loading="row.loading"
                        @click="onToggleLive(row.market, !row.enabled)">
               {{ row.enabled ? t('risk.pauseBtn') : t('risk.enableBtn') }}
             </el-button>
@@ -90,7 +91,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import TableShell from '../components/TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
@@ -98,6 +99,14 @@ import { getRiskState, riskHalt, riskResume, getLiveTrading, updateLiveTrading }
 import SellGuardBanner from '../components/SellGuardBanner.vue'
 
 const { t } = useI18n()
+// 批 77 续：动作级权限显隐——本页可进（nav 维允许）但**动作**另有更严档位：
+//   熔断 `halt` / 恢复 `resume` → admin 独占；市场分项开关 `live_trading_control` → admin 独占。
+// 不挂显隐＝trader 看得到按钮、点了 403＝死胡同（批 76 P1 同型病）。**仅 UI 提示层**，
+// 后端闸独立（少挂只是体验差，不会放宽任何东西）。
+const canPerm = inject('canPerm', () => true)
+const canHalt = computed(() => canPerm('halt'))
+const canResume = computed(() => canPerm('resume'))
+const canSwitch = computed(() => canPerm('live_trading_control'))
 const state = ref({ halted: false, reason: '', rules: { global: { max_drawdown: 0.15, daily_loss_limit: 0.05 }, crypto: { leverage_max: 5 } } })
 const liveTradingMarkets = ref([
   { market: 'convertible', labelKey: 'risk.mConvertible', enabled: false, loading: false },

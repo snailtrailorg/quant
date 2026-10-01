@@ -56,8 +56,9 @@ READ_TOOLS = [
          input_schema={"type": "object", "properties": {"symbol": {"type": "string"}}, "required": []}),
 ]
 
-# 交易操作类（trader+admin，需确认卡片）。批 77 拆分后**仅剩** `emergency_halt`——
-# 键 `halt`（放行条件 `"trade" in perms or "halt" in perms`，见 `_filter_tools`）。
+# 熔断类（批 77 续后 **admin 独占**，需确认卡片）。仅剩 `emergency_halt`——键 `halt`。
+# ⚠️ 放行条件已收紧为 `if "halt" in perms`（见 `_filter_tools`）——**不再由 `trade` 连坐**：
+#    修前任何能下单的角色都自动获得全站急停权，halt 收回 admin 后该连坐必须断开。
 # ⚠️ 档位归属别压平（批 77 教训）：`strategy_start`/`strategy_stop` 曾混在本组靠 `halt` 放行，
 #    实为起停 `quant-strategy@N` 真实盘进程 ⇒ 已迁入 LIVE_TOOLS 挂 `live_control` 键。
 TRADER_TOOLS = [
@@ -269,29 +270,33 @@ class LLMGateway:
                       perms: set | None = None) -> list[dict]:
         """按角色过滤可用工具 -> OpenAI 格式。
 
-        角色白名单：viewer/analyst=读类；trader=读+halt+live_control（起停实盘/解冻）；
-        admin=+resume（风控恢复，仅 Admin）。viewer/analyst **无** live_control（批 77 原则：
-        analyst 只回测与实盘测试，不执行实盘交易）。
+        角色白名单：viewer/analyst=读类；trader=读+live_control（起停实盘/解冻）+trade；
+        admin=+halt（全站熔断）+resume（风控恢复）。viewer/analyst **无** live_control
+        （批 77 原则：analyst 只回测与实盘测试，不执行实盘交易）。
         传入 tools 时与角色白名单取交集（调用方只能缩小范围，不能越权）。
-        批11C（B-P1-1）：perms 非空时按**权限键档位**（trade/halt=操作档，resume=管理档，
-        live_control=实盘面档（起停实盘任务/策略/解冻），strategy_control=研究面档，
-        与 require_perm / IM 卡片面同键）——动态组用户按组权限拿工具；None=旧 role 档位。
+        批11C（B-P1-1）：perms 非空时按**权限键档位**（trade=下单档，halt=熔断档（admin），
+        resume=管理档（admin），live_control=实盘面档（起停实盘任务/策略/解冻），
+        strategy_control=研究面档，与 require_perm / IM 卡片面同键）——动态组用户按组
+        权限拿工具；None=旧 role 档位。
         """
         if perms is not None and "read" not in perms:
             return []   # 代码盲审 A-P1-3：无 read 键=零权限用户（Web 面同被拒）——IM 面不给读工具
         allowed = list(READ_TOOLS)
         if perms is not None:
-            if "trade" in perms or "halt" in perms:
+            # ⚠️ 批 77 续：`emergency_halt` 挂 `halt` 键（**admin 独占**），**不再**由 `trade`
+            # 连坐放行——修前条件 `"trade" in perms or "halt" in perms` 让任何能下单的角色
+            # 自动获得全站急停权（halt 收回 admin 后该连坐必须断开）。
+            if "halt" in perms:
                 allowed += TRADER_TOOLS
             if "resume" in perms:
                 allowed += ADMIN_TOOLS
             if "live_control" in perms:
                 allowed += LIVE_TOOLS
         else:
-            if role in ("trader", "admin"):
-                allowed += TRADER_TOOLS + LIVE_TOOLS
             if role == "admin":
-                allowed += ADMIN_TOOLS
+                allowed += TRADER_TOOLS + ADMIN_TOOLS
+            if role in ("trader", "admin"):
+                allowed += LIVE_TOOLS
         allowed = [t for t in allowed if t.name not in FORBIDDEN_TOOLS]
         # None=角色默认白名单；[]=显式无工具（三档 analyze 踩到：空列表意图被无视
         # → LLM 看到工具集自发请求"查询更多信息"，非循环 chat 直接吐过渡语）

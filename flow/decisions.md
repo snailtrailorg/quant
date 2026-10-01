@@ -398,3 +398,30 @@
 - **三面同键闸门**：`tests/test_batch76_unfreeze_surface.py::TestToolGatingContract` 8 钉；
   **逆转测试三重实证**（gateway 键、IM 键、HTTP 端点各逆转一次，分别红 2/2/3 钉）——证明闸门非恒绿。
 - **验证**：全量 pytest **1798 passed / 2 skipped**；`ruff check src/` 绿；前端 build 绿。
+
+## 2026-10-01 · 批 77 续 · 全站/全市场闸收回 admin 独占（用户裁定「halt/resume 都只挂 admin」）
+
+- **裁定**：`halt`（全站熔断）、`live_trading_control`（市场级分项开关）**都只挂 admin**。
+  `resume` 本就仅 admin（trader 集从无此键），无需改。trader 保留 `live_control`（单任务粒度）。
+- **判据（粒度分档）**：**越粗的档越危险，持有者越少**——
+  单任务 `live_control`（trader+admin）→ 全市场 `live_trading_control`（admin）→ 全站 `halt`/`resume`（admin）。
+  且「开」比「停」危险，与既有 `resume` 仅 admin 同源。
+- **落点性质（重要）**：本次改的是**缺省种子** `perms.PERMISSIONS`。**线上真相在 `permission` 表**
+  ——用户已在界面删除 trader 的 `halt` / `live_trading_control` 行，线上行为即刻生效。
+  改种子的目的是防**新环境**（表空回落字典）复活该权。**缺省收权 ≠ 堵死路径**：将来若需
+  「实盘运维」角色，建显式角色赋键即可（非 admin 角色是字面量子集，加键自由）。
+- **关键连带（同型病新形态）**：`llm_gateway._filter_tools` 修前条件
+  `if "trade" in perms or "halt" in perms: allowed += TRADER_TOOLS` —— **`halt` 靠 `trade` 连坐放行**。
+  若只改 `perms.PERMISSIONS` 而不动此处，「收回 halt」是假的（trader 仍有 `trade` ⇒ 仍拿到
+  `emergency_halt`）。已改为 `if "halt" in perms:`。**教训**：批 76 P1 是「同动作多**面**各判各的」，
+  本条是「同动作多**键**连坐」——同一个病的两种形态，收权时必须同时查**连坐条件**。
+- **前端连带**：`Risk.vue` 三按钮补权限显隐（熔断 `halt` / 恢复 `resume` / 市场开关
+  `live_trading_control`）。此前该页**完全无权限判据**（连 `navReadonly` 都没接）⇒ 任何进得来的
+  角色都看得到按钮、点了才 403（批 76 P1 同型死胡同）。
+- **IM 面无需改**：`_need` 里 `emergency_halt` → `"halt"`，键本身收回 admin 后**自动只放 admin**
+  （IM 判的是该用户角色权限集，用户口径「按归属角色授权」）。这印证 `_need` 只是「问哪个键」，
+  真正的判定由角色集决定。
+- **闸门**：`TestGlobalGatesAdminOnly`（5 钉，含前端按钮显隐钉）+ `test_filter_trader_no_halt_no_resume`
+  （**反转**原钉，非删除）+ `test_filter_trader_halt_requires_halt_key_not_trade`（连坐守卫）。
+  **双逆转实证**：① 加回 `trade` 连坐 → 连坐守卫红；② `halt` 加回 trader 集 → 缺键钉红。
+- **验证**：全量 pytest **1805 passed / 1 skipped**；ruff 绿；前端 build 绿。未上产（与批 77 主体同行）。
