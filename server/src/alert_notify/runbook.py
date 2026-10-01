@@ -23,8 +23,11 @@ RUNBOOK: dict[str, dict] = {
     "im.first-seen":     {"label": "飞书新用户首见", "guide": "首次给 bot 发消息者已按 default_role 自动登记（同时成告警收件人）——非预期则到 设置→集成→IM→用户管理 调整。"},
     # ——— 数据面（hub/worker） ———
     "deps.exhausted":   {"label": "依赖探活耗尽", "guide": "PG 持续不可达超 10 分钟——查 PG 服务与网络；runner 已退出待 systemd 重试。"},
-    "frozen.stream":    {"label": "流异常冻结", "guide": "流序号跳变/不可信 bar（数据污染事实）——重启任务解冻；SELL 不受限。"},
-    "frozen.intercept": {"label": "冻结期拦截 BUY", "guide": "不可信 bar/流 gap（数据污染事实）——重启任务解冻；SELL 不受限。"},
+    "frozen.stream":    {"label": "流异常冻结", "guide": "流序号跳变/不可信 bar（数据污染事实）——流衔接自动解/人工解（Web 或 IM 发起→Web 确认）；SELL 不受限。"},
+    # 批 76 F2：解冻两通道（自动/人工）——冻结不再以重启为唯一解
+    "frozen.auto":      {"label": "冻结自动解除", "guide": "seq 跳变冻结随流衔接自动解（rewarm 已补历史）——无需行动；反复出现查源侧断流。"},
+    "frozen.manual":    {"label": "人工解冻", "guide": "管理员已确认当前数据状态（Web 或 IM→Web 确认链）——冻结解除、BUY 恢复；非预期则查风控/审计。"},
+    "frozen.intercept": {"label": "冻结期拦截 BUY", "guide": "不可信 bar/流 gap（数据污染事实）——流衔接自动解或人工解冻（Web/IM→Web 确认）；SELL 不受限。"},
     "buy.blocked":      {"label": "BUY 拦截(数据不新鲜)", "guide": "bar 停更>300s 或 hub 心跳丢失——查 hub 状态与行情流；恢复后自动放行。"},
     "buy.blind":        {"label": "任务盲视", "guide": "hub 心跳丢失或 bar 停更——数据面不驱动决策中；查 hub 与流消费。"},
     "hub.xadd-fail":    {"label": "hub XADD 失败", "guide": "bar 写流失败即丢当根——查 Valkey 流。"},

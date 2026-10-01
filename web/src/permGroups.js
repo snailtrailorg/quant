@@ -3,7 +3,7 @@
 // 分组与侧栏菜单分区（实盘交易/策略研究/风险控制/系统管理）一一对应——文案师裁定（交易员看权限即知"哪个区的钥匙"）。
 export const PERM_GROUPS = [
   { id: 'basic', keys: ['read'] },
-  { id: 'trading', keys: ['trade', 'halt', 'resume', 'live_trading_control'] },
+  { id: 'trading', keys: ['trade', 'halt', 'resume', 'unfreeze', 'live_trading_control'] },
   { id: 'strategy', keys: ['strategy_control', 'data_sync'] },
   { id: 'risk', keys: ['risk_rules'] },
   { id: 'system', keys: ['system_config', 'user_mgmt', 'llm_config', 'im_bots_config', 'alerts_config'] },

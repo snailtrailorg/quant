@@ -173,6 +173,68 @@ def stop_live_task(tid: int, payload: dict = Depends(require_perm("strategy_cont
     return {"id": tid, "status": "stopped"}
 
 
+@router.get("/api/live-task/unfreeze-request")
+def get_unfreeze_request(token: str = Query(...),
+                         payload: dict = Depends(require_perm("strategy_control"))):
+    """批 76 F2：IM 发起解冻的一次性确认 token 预览（Web 确认页展示用；**只读不消费**）。
+
+    确认链=IM 发起（确认卡闸：身份+unfreeze 档+去重）→ bot 回执带 token 深链 → 管理员在 Web
+    登录态打开本页 → 确认后 POST /api/live-task/{tid}/unfreeze 带同一 token（此刻才消费）。
+    """
+    from src.data_platform import freeze_event as _fe
+    info = _fe.peek_confirm_token(token)
+    if not info:
+        raise ApiError(400, "UNFREEZE_TOKEN_INVALID", "确认链接已失效或已被使用，请在 IM 重新发起")
+    return {"tid": info.get("tid"), "symbol": info.get("symbol", ""),
+            "freeze_type": info.get("freeze_type", ""), "initiator": info.get("operator", ""),
+            "created_at": info.get("created_at")}
+
+
+@router.post("/api/live-task/{tid}/unfreeze")
+def unfreeze_live_task(tid: int, body: dict = Body(default=None),
+                       payload: dict = Depends(require_perm("strategy_control"))):
+    """批 76 F2 解冻面·Web 入口：人工解冻（**不重启任务**）——写 Valkey 请求键，worker 5s 内消费。
+
+    两形态同端点：
+    - Web 直接操作（无 token）→ `manual_web`；
+    - IM 发起→Web 确认链（带 `confirm_token`）→ `manual_im`：token 一次性消费（GETDEL）且
+      必须与路径 tid 一致（防「A 任务的确认链接解冻 B 任务」）。
+    语义=操作者**显式接受当前数据状态**（带洞窗/污染窗），故必须留操作者与通道（审计）。
+    """
+    from src.data_platform import freeze_event as _fe
+    body = body or {}
+    with get_conn() as conn:
+        row = conn.execute("SELECT status, symbol FROM live_task WHERE id=%s", (tid,)).fetchone()
+    if not row:
+        raise ApiError(404, "LIVE_TASK_NOT_FOUND", "实盘任务不存在")
+    token = body.get("confirm_token")
+    channel = "manual_web"
+    operator = payload["username"]
+    if token:
+        info = _fe.consume_confirm_token(token)
+        if not info:
+            raise ApiError(400, "UNFREEZE_TOKEN_INVALID", "确认链接已失效或已被使用，请在 IM 重新发起")
+        if int(info.get("tid") or -1) != int(tid):
+            raise ApiError(400, "UNFREEZE_TOKEN_MISMATCH", "确认链接与目标任务不一致，token 已作废")
+        channel = "manual_im"
+        operator = f"{payload['username']}（IM 发起:{info.get('operator') or '?'}）"
+    try:
+        _fe.request_unfreeze(tid, operator=operator, channel=channel)
+    except Exception as e:
+        logger.error("unfreeze_live_task: 解冻请求写入失败 tid=%s", tid, exc_info=True)
+        raise ApiError(503, "UNFREEZE_CHANNEL_UNAVAILABLE",
+                       "解冻通道不可用（Valkey），请稍后重试") from e
+    audit_log(payload["username"], "unfreeze_live_task", f"task {tid} channel={channel}")
+    return {"ok": True, "tid": tid, "channel": channel, "symbol": row[1], "status": row[0]}
+
+
+@router.get("/api/live-task/{tid}/freeze-events")
+def list_freeze_events(tid: int, limit: int = 50, payload: dict = Depends(require_perm("read"))):
+    """批 76 F1：冻结事件事实（最近 limit 条；进行中= unfrozen_at 为 null）。"""
+    from src.data_platform import freeze_event as _fe
+    return {"events": _fe.list_events(task_id=tid, limit=min(max(limit, 1), 200))}
+
+
 @router.delete("/api/live-task/{tid}")
 def delete_live_task(tid: int, payload: dict = Depends(require_perm("strategy_control"))):
     """删除实盘任务（仅 stopped/error 可删）。"""

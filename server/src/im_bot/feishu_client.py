@@ -420,6 +420,40 @@ def execute_confirmed_tool(open_id: str, tool_name: str, args: str, username: st
             except Exception as e:
                 client.send_text(open_id, f"⚠️ 启动失败（polkit 未配? 待办#14）: {e}")
                 _ok = False
+        elif tool_name == "task_unfreeze":
+            # 批 76 F2：解冻**不在此直接生效**——生成一次性 token，回执带 Web 确认链深链，
+            # 管理员在 Web 登录态确认后才写解冻请求键（明文密码禁进聊天记录：IM 只当唤起面）。
+            # 未配置 web_base_url ⇒ 诚实降级（提示到 Web 任务页手工解冻），不静默失败。
+            from src.data_platform import freeze_event as _fe
+            try:
+                _tid = int(str(_sid).strip())
+            except (TypeError, ValueError):
+                client.send_text(open_id, "⚠️ 任务 id 无效（用法：解冻任务 <id>）")
+                _ok = False
+            else:
+                _sym, _ftype = "", ""
+                try:
+                    from src.data_platform.db import get_conn
+                    with get_conn() as _conn:
+                        _row = _conn.execute("SELECT symbol FROM live_task WHERE id=%s",
+                                             (_tid,)).fetchone()
+                    _sym = _row[0] if _row else ""
+                    _open = [e for e in _fe.list_events(task_id=_tid, limit=5) if not e["unfrozen_at"]]
+                    _ftype = _open[0]["freeze_type"] if _open else ""
+                except Exception as _e:
+                    logger.warning("解冻上下文查询失败（仍继续发链）: %s", _e)
+                _base = _fe.web_base_url()
+                if not _base:
+                    client.send_text(open_id,
+                                     "⚠️ 未配置 Web 基址（system_config: web_base_url）——"
+                                     f"请在 Web「实盘任务」页对任务 {_tid} 手工解冻。")
+                else:
+                    _tk = _fe.make_confirm_token(_tid, operator=_actor, open_id=open_id,
+                                                 symbol=_sym, freeze_type=_ftype)
+                    client.send_text(open_id,
+                                     f"🔓 解冻任务 {_tid}（{_sym or '-'}）需在 Web 确认：\n"
+                                     f"{_base}/unfreeze-confirm?token={_tk}\n"
+                                     "链接 10 分钟内有效、仅可使用一次。")
         else:
             client.send_text(open_id, f"⚠️ 未知操作: {tool_name}")
             _ok = False

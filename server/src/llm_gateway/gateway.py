@@ -70,6 +70,12 @@ TRADER_TOOLS = [
 ADMIN_TOOLS = [
     Tool(name="risk_resume",       description="恢复交易（仅 Admin）",
          input_schema={"type": "object", "properties": {}, "required": []}),
+    # 批 76 F2：数据冻结解冻（与风控急停**不同域**——数据冻结=per-task 行情面，熔断=全站交易面，
+    # 故不复用 halt/resume 档）。不直接执行：回执带一次性 token 的 Web 深链，管理员在 Web 登录态确认。
+    Tool(name="task_unfreeze",     description="解冻实盘任务（仅 Admin；回 Web 确认链）",
+         input_schema={"type": "object",
+                       "properties": {"id": {"type": "string", "description": "实盘任务 id"}},
+                       "required": ["id"]}),
 ]
 
 # 永不注册（高危参数修改类）。注：聊天/IM 面无下单工具（曾有"place_order 已放开"的

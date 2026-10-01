@@ -20,13 +20,14 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { login, apiErr } from '../api'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const form = ref({ username: '', password: '' })
 
@@ -36,7 +37,9 @@ const onLogin = async () => {
     const res = await login(form.value.username, form.value.password)
     localStorage.setItem('token', res.token)
     localStorage.setItem('role', res.role)
-    router.push('/')
+    // 批76：带回跳（未登录被守卫拦下的深链目标——如 IM 解冻确认页）；默认原行为 '/'
+    router.push(typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+      ? route.query.redirect : '/')
   } catch (e) {
     ElMessage.error(apiErr(e, t('login.error')))
   } finally {

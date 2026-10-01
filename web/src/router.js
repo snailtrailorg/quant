@@ -22,6 +22,8 @@ const routes = [
       // 策略
       { path: 'strategy', name: 'strategy', component: () => import('./views/Strategy.vue') },
       { path: 'live-task', name: 'live-task', component: () => import('./views/LiveTask.vue') },
+      // 批76 F2：IM 发起解冻 → Web 登录态确认页（token 一次性；perm 门与后端端点同键）
+      { path: 'unfreeze-confirm', name: 'unfreeze-confirm', component: () => import('./views/UnfreezeConfirm.vue'), meta: { perm: 'strategy_control' } },
       { path: 'backtest', name: 'backtest', component: () => import('./views/Backtest.vue') },
       { path: 'backtest/:id', name: 'backtest-run', component: () => import('./views/BacktestRun.vue') },
       { path: 'backtest/:id/view/:symbol', name: 'backtest-view', component: () => import('./views/BacktestView.vue') },
@@ -77,7 +79,11 @@ import { meOnce } from './api'   // W6 修:meOnce 落户 api.js(动态导入 chu
 router.beforeEach(async (to, from, next) => {
   const token = localStorage.getItem('token')
   const publicPages = ['login', 'register', 'forgot-password', 'reset-password', 'email-confirm']   // 批20：邮件链接免登录进入
-  if (!publicPages.includes(to.name) && !token) { next('/login'); return }
+  if (!publicPages.includes(to.name) && !token) {
+    // 批76：未登录时保留原目标（IM 解冻深链 → 登录 → 回确认页；原实现一律丢回 /login 无回跳）
+    next(to.fullPath && to.fullPath !== '/login' ? { path: '/login', query: { redirect: to.fullPath } } : '/login')
+    return
+  }
   // nav 维:hidden 拒路由+readonly 放行(标志经 me 消费方读取)。nav=UI 提示层,
   // 执行面在 api 维(直连 API 不受 nav 限=设计)
   if (token && !publicPages.includes(to.name)) {

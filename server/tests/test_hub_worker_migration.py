@@ -154,10 +154,11 @@ class TestWiringMatrix:
         "stop-check": 5.0, "sess-edge": 0.0, "blind-watch": 0.0, "heartbeat": 5.0,
         "snapshot": 60.0, "halt-edge": 0.0, "factor-recalc": 5.0,
         "td-reconnect": 0.0, "zombie-claim": 5.0,
+        "unfreeze-poll": 5.0,   # 批 76 F2：人工解冻请求消费（Valkey 键）
     }
 
-    def test_nine_every_hooks_exact(self, wired):
-        """项 2/4/5/6/7/8/9/10/11：九个 every 注册，名字与 period 逐一锁定（多缺错皆红）。"""
+    def test_every_hooks_exact(self, wired):
+        """项 2/4/5/6/7/8/9/10/11 + 批 76 解冻轮询：every 注册逐一锁定（多缺错皆红）。"""
         hooks = {h.name: h.period for h in wired["loop"]._hooks}
         assert hooks == self.EXPECT
 

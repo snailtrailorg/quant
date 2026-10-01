@@ -8,6 +8,7 @@ runtime.alerts。钩子全清单 11 项与知情差异见 docs/obsolete/任务�
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
@@ -265,6 +266,30 @@ def run(ctx: dict) -> None:
                     pass
 
     _rewarm()   # 初始暖机（消费组建在 $，流内现有 bar 全部是"过去"，无未来泄漏）
+    # ——— 批 76 F1：事实表记账/闭环（fail-soft——冻结优先于记账，写库失败只告警不上抛） ———
+    def _record_freeze(freeze_type: str, *, gap_target_ts: str | None = None,
+                       detail: dict | None = None) -> None:
+        try:
+            from src.data_platform.freeze_event import record_freeze
+            record_freeze(tid, symbol, freeze_type, account_id=account_id,
+                          watermark=state.max_ts or None, gap_target_ts=gap_target_ts,
+                          detail=detail)
+        except Exception as e:
+            logger.warning("冻结事件记账失败（不阻断冻结）: %s", e)
+
+    def _close_freeze(method: str, operator: str | None = None) -> None:
+        try:
+            from src.data_platform.freeze_event import close_freeze
+            n = close_freeze(tid, method=method, operator=operator, symbol=symbol)
+            if n:
+                logger.info("冻结事件闭环 %d 行（method=%s operator=%s）", n, method, operator)
+        except Exception as e:
+            logger.warning("冻结事件闭环失败（不阻断解冻）: %s", e)
+
+    # 启动补记：上一进程若冻结着退出（正常停/被杀皆然），其进行中事件随本次启动闭环为 restart。
+    # 本进程尚未冻结 ⇒ 该 tid 的任何进行中事件必属上一进程，归属无歧义。
+    _close_freeze("restart")
+
     # ——— send_order 时刻事实检查（S6）：交易时段+bar 新鲜+hub 心跳；纯逻辑在 trading.buy_ok_check，检查器由 ctx 注入 C2 网关 ———
     ctx["buy_ok"] = lambda: trading.buy_ok_check(frozen, stats, _hub_alive(r, account_id), time.time(),
                                                 in_session=_in_mkt_session())
@@ -287,10 +312,17 @@ def run(ctx: dict) -> None:
         # rewarm 补不了；重启+rewarm 推进水位过缺口=操作者显式接受带洞窗）
         if _ts_gap_frozen(ts_key, state.max_ts, market):
             frozen["sticky"] = True
+            frozen["sticky_cause"] = "ts_gap"     # 批 76：冻结成因（人工解档——自动解只对 seq_gap）
             logger.error("ts 缺口 %s→%s（源侧丢根），冻结", state.max_ts, ts_key)
             _alert(f"ts 缺口冻结任务 {tid}（{symbol}）",
                    f"水位 {state.max_ts} 后缺口至 {ts_key}（源侧丢根，rewarm 不可补）；"
-                   "重启任务=显式接受带洞窗继续。SELL 放行。", code="frozen.stream")
+                   "请在 Web/IM 人工解冻（显示接受带洞窗）——SELL 放行。", code="frozen.stream")
+            try:
+                _gap_s = int(ts_key) - int(state.max_ts)
+            except (TypeError, ValueError):
+                _gap_s = None
+            _record_freeze("ts_gap", gap_target_ts=ts_key,
+                           detail={"watermark": state.max_ts, "gap_s": _gap_s})
             _rewarm(upto_ts=ts_key)   # 推进水位过缺口（历史面尽力补）——sticky 已拒 BUY
             return
         kind = state.classify(fields)
@@ -308,10 +340,25 @@ def run(ctx: dict) -> None:
             stats["dropped_dup"] += 1
             return
         elif kind == "gap":
-            logger.warning("seq 跳变（gap），重暖机并冻结直至人工确认")
-            frozen["sticky"] = True   # gap 冻结 sticky（评审 C2：只能重启解）
+            logger.warning("seq 跳变（gap），重暖机并冻结，待流衔接后自动解冻")
+            frozen["sticky"] = True
+            frozen["sticky_cause"] = "seq_gap"    # 批 76：自动解档（衔接判定通过即清）
             _rewarm(upto_ts=ts_key)
-            _alert(f"流序号跳变，任务 {tid} 冻结（需重启解冻）", "bar 明细见 hub 流。", code="frozen.stream")
+            _record_freeze("seq_gap", gap_target_ts=ts_key,
+                           detail={"watermark": state.max_ts})
+            _alert(f"流序号跳变，任务 {tid} 冻结（流衔接后自动解冻）",
+                   "rewarm 已补历史；后续 bar 连续即自动解冻，无需人工。", code="frozen.stream")
+        # ——— 批 76 F2：衔接判定（自动解冻）———
+        # 到达此处 = 本根既未触发 ts 缺口（上方已过）、又续上了序号（ok/gen_jump）⇒ 流真的回来了。
+        # 仅对 seq_gap 档自动解（rewarm 已补历史=数据面已无残留）；ts_gap/untrusted 不信自证，人工解。
+        if (kind in ("ok", "gen_jump") and frozen.get("sticky")
+                and frozen.get("sticky_cause") == "seq_gap"):
+            frozen["sticky"] = False
+            frozen["sticky_cause"] = None
+            logger.warning("流已衔接（kind=%s），自动解冻任务 %s", kind, tid)
+            _alert(f"任务 {tid} 流已衔接，自动解冻",
+                   "seq 跳变冻结随流恢复自动解除（rewarm 已补历史；BUY 恢复）。", code="frozen.auto")
+            _close_freeze("auto_reconnect")
         # pub_ts 超龄丢弃（R-DL3）
         pub_ts = float(fields.get("pub_ts", 0) or 0)
         if pub_ts and _in_mkt_session() and (time.time() - pub_ts) > STALE_PUB_S:
@@ -319,8 +366,11 @@ def run(ctx: dict) -> None:
             return
         if str(fields.get("untrusted", "0")).lower() in ("1", "true"):
             frozen["sticky"] = True
+            frozen["sticky_cause"] = "untrusted"   # 批 76：人工解档（污染事实不自动翻案）
             logger.error("untrusted bar（断线失真），冻结: %s", fields.get("ts"))
-            _alert(f"不可信 bar，冻结任务 {tid}（{symbol}）", "断线跨分钟失真，重启任务解冻。", code="frozen.stream")
+            _alert(f"不可信 bar，冻结任务 {tid}（{symbol}）",
+                   "断线跨分钟失真，请在 Web/IM 人工解冻（显示接受当前数据）。", code="frozen.stream")
+            _record_freeze("untrusted", gap_target_ts=ts_key or None)
             return
         bar = {"ts": _norm_ts(fields.get("ts", "")), "open": float(fields["open"]), "high": float(fields["high"]),
                "low": float(fields["low"]), "close": float(fields["close"]),
@@ -456,6 +506,43 @@ def run(ctx: dict) -> None:
         except Exception:  # noqa: S110
             pass  # 失败不阻断（fail-open 降级）  # noqa: S110
 
+    def _unfreeze_poll():
+        """批 76 F2：人工解冻请求消费（Web 端点/IM 指令写 `hub:unfreeze:{tid}` → 本钩子 GETDEL）。
+
+        这是「任务内解冻」的落地：外界够不着进程内 frozen 变量，故以 Valkey 请求键为通道，
+        5s 钩子原子取删消费（重复/并发请求只有一个生效）。未冻结时的请求=空操作（记日志）。
+        """
+        try:
+            from src.data_platform.freeze_event import UNFREEZE_REQ_KEY
+            _k = UNFREEZE_REQ_KEY.format(tid=tid)
+            try:
+                raw = r.getdel(_k)
+            except AttributeError:            # 老驱动回退（非原子）
+                raw = r.get(_k)
+                if raw:
+                    r.delete(_k)
+        except Exception as e:                # 存储不可查/网络抖动：下轮重试（请求键有 TTL 兜底）
+            logger.debug("解冻请求轮询失败: %s", e)
+            return
+        if not raw:
+            return
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else {}
+        except (ValueError, TypeError):
+            payload = {}
+        operator = payload.get("operator") or "?"
+        channel = payload.get("channel") or "manual_web"
+        if frozen.get("sticky"):
+            frozen["sticky"] = False
+            frozen["sticky_cause"] = None
+            logger.warning("人工解冻（channel=%s operator=%s）——操作者已显式接受当前数据状态",
+                           channel, operator)
+            _alert(f"任务 {tid} 人工解冻", f"操作者 {operator}（{channel}）已接受当前数据状态，BUY 恢复。",
+                   code="frozen.manual")
+            _close_freeze(channel, operator=operator)
+        else:
+            logger.info("收到解冻请求但当前未冻结（忽略）: %s", payload)
+
     loop = EngineLoop(
         name=f"live-task-{tid}", step=5.0,
         sleeper=XReadSleeper(r, stream, gname, cname, process_batch),  # 流消费=sleeper 注入
@@ -473,6 +560,7 @@ def run(ctx: dict) -> None:
     loop.every("factor-recalc", 5.0, lambda: trading.recalc_hook(r, _rewarm, history))  # 因子重算+热重载
     loop.every("td-reconnect", 0.0, _td_reconnect)   # TD 重连沿对账：每步
     loop.every("zombie-claim", 5.0, _zombie_claim)   # xautoclaim 僵尸认领（评审 S3）
+    loop.every("unfreeze-poll", 5.0, _unfreeze_poll)  # 批 76 F2：人工解冻请求消费（Valkey 键）
     try:
         loop.run()   # 永续（XReadSleeper never-raise 保证 sleep 位不抛；停止/NOGROUP 带码直达）
     except KeyboardInterrupt:

@@ -238,7 +238,9 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     # S6 修订（2026-08-18）：两段判定——①sticky 冻结（untrusted/gap=数据污染事实）BUY 拒/SELL 放；
     # ②动态新鲜度（bar 停更/hub 心跳）在 send_order 时刻按事实判定（ctx["buy_ok"] 由 hub_worker.run
     # 注入），不再依赖后台定时器预计算的 frozen["now"]——日历/节奏预期从动作路径清零。
-    frozen: dict = {"now": False, "sticky": False}
+    # 批 76（F2）：新增 sticky_cause 成因键——"ts_gap"/"seq_gap"/"untrusted"，决定自动化档位
+    # （仅 seq_gap 走衔接自动解；真坏两类人工解）。判据仍是 sticky 布尔（frozen_allows 零改动）。
+    frozen: dict = {"now": False, "sticky": False, "sticky_cause": None}
     _orig_send = adapter.send_order
     ctx: dict = {}   # hub_worker.run 的上下文（buy_ok 在 run 内注入）
 

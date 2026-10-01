@@ -38,6 +38,7 @@ etf_basic_info :: ts_code,name,management,fund_type,invest_type,list_date,fund_s
 factor_def :: id,name,category,description,code,params,created_at,updated_at,needs_history,type
 fina_indicator :: ts_code,ann_date,end_date,eps,roe,roa,gross_margin,netprofit_margin,current_ratio,quick_ratio,debt_to_assets,assets_turn,revenue_ps,bps,ocfps,roe_yearly,netprofit_yoy,revenue_yoy,raw_json
 forecast :: ts_code,ann_date,end_date,type,p_change_min,p_change_max,net_profit_min,net_profit_max,last_parent_net,first_ann_date,summary,change_reason
+freeze_event :: id,task_id,account_id,symbol,freeze_type,frozen_at,watermark,gap_target_ts,detail,unfrozen_at,unfreeze_method,operator
 health_event :: id,ts,rule_id,component,severity,detail
 hub_transient_subs :: symbol,expire_at
 im_bot_config :: id,provider,name,description,default_role,lang,enabled,priority,credentials_encrypted,params,created_at,updated_at,owner_user_id

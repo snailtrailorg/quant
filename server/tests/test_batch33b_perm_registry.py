@@ -30,7 +30,7 @@ def authed_client(client):
 def test_registry_base_three_lists():
     """底座三清单：api 13/nav 20（含管理页自身吃狗粮；批 57 加 data-routing；批 61 加 trade-switch）/market 5。"""
     from src.data_platform.perm_registry import API_PERM_KEYS, NAV_ITEMS_BASE, MARKET_OP_KEYS, NAV_ALIASES
-    assert len(API_PERM_KEYS) == 13 and len(set(API_PERM_KEYS)) == 13   # 批55b:account_keys 退役
+    assert len(API_PERM_KEYS) == 14 and len(set(API_PERM_KEYS)) == 14   # 批55b:account_keys 退役；批76:+unfreeze
     assert len(NAV_ITEMS_BASE) == 19   # 17+perm-resources（批33b）+routing（批57）——trade-switch 随批 70 M6 退役
     assert len(MARKET_OP_KEYS) == 5
     assert len(NAV_ALIASES) == 2       # 批38：8 条死别名已清（活=stock/data-manage）
@@ -73,7 +73,7 @@ def test_get_permissions_shape_compat(authed_client):
         r = authed_client.get("/api/permissions")
     assert r.status_code == 200
     j = r.json()
-    assert len(j["keys"]) == 13 and j["keys"][0] == "read"
+    assert len(j["keys"]) == 14 and j["keys"][0] == "read"   # 批76:+unfreeze
     nav = j["nav"]["items"]
     assert all("id" in e and "group" in e for e in nav)      # 原名保留（PermMatrix prop=group 直绑）
     # A-P1-2 修后等价钉：前 17 项 id 序==原 NAV_ITEMS 声明序（组秩排序非字母序）
@@ -127,7 +127,7 @@ def test_perm_resources_get_shape(authed_client):
         r = authed_client.get("/api/perm-resources")
     assert r.status_code == 200
     j = r.json()
-    assert len(j["api"]) == 13 and j["bindings_total"] >= 170
+    assert len(j["api"]) == 14 and j["bindings_total"] >= 170   # 批76:+unfreeze
     user_mgmt = next(a for a in j["api"] if a["key"] == "user_mgmt")
     assert user_mgmt["locked"] is True and user_mgmt["endpoints"]
 
