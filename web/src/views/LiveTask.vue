@@ -12,7 +12,14 @@
     <!-- 批17 17A：列宽拖拽+持久化 -->
     <TableShell :data="tasks" storage-key="live-tasks" @expand-change="onExpand">
       <el-table-column v-if="colOn('id')" prop="id" label="ID" width="80" />
-      <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+      <!-- 批86-UI：「个股」从操作列移入名称列（router-link）——原样是个 6 字文本按钮摆在启停之间，
+           语义是「跳到标的详情」而非「对任务做什么」，混在动作组里既挤又容易被误读成任务动作。 -->
+      <el-table-column :label="t('common.name')" min-width="140" show-overflow-tooltip>
+        <template #default="{ row }">
+          <router-link v-if="row.symbol" :to="`/stock/${row.symbol}`">{{ row.name }}</router-link>
+          <span v-else>{{ row.name }}</span>
+        </template>
+      </el-table-column>
       <el-table-column v-if="colOn('strategy_id')" prop="strategy_id" :label="t('liveTask.strategy')" min-width="120" show-overflow-tooltip />
       <el-table-column v-if="colOn('symbol')" prop="symbol" :label="t('common.symbol')" min-width="100" show-overflow-tooltip />
       <!-- P1-5（06 B#5）：md_mode/行情 lag/bars 消费/frozen——活着吗/新鲜吗/冻没冻直答 -->
@@ -97,35 +104,46 @@
           </div>
         </template>
       </el-table-column>
-<el-table-column prop="actions" :label="t('common.action')" width="260">
+<el-table-column prop="actions" :label="t('common.action')" width="200" fixed="right">
         <template #default="{ row }">
-          <!-- 批16 v2：行内=启停（互斥同位）+解冻（frozen 态才现=火警级不进弹窗）+标的详情链接；
-               「详情」按钮本就是死的（toggleTimeline 无消费者，展开走 expand 箭头）——删；
-               删除收进「更多」弹窗（裁定#8+删除分界纪律：输入名强确认类进弹窗；
-               盲审A-P2-8 曾留行内=偏离裁定，文案师裁定弹窗无可编辑字段名「编辑」名不副实——
-               对齐 Backtest 同批「更多」模式） -->
-          <el-button v-if="row.status !== 'running' && canLive" type="success" @click="onStart(row.id)" :disabled="navReadonly">{{ t('common.start') }}</el-button>
-          <el-button v-if="row.status === 'running' && canLive" type="danger" @click="onStop(row)" :disabled="navReadonly">{{ t('common.stop') }}</el-button>
+          <!-- 批86-UI：操作列全量对齐批21「全站圆形图标按钮」（Backtest 为同类样板）。
+               改前是一半图标一半文本：解冻钮批76b 已按 IconBtn 做，启/停/个股/更多仍是批16 原生的
+               el-button type=success|danger —— 那三个色是 EP 语义色，不是我们的金融令牌，
+               而令牌门只数 px/hex/font-size 三维，结构上看不见 type= ⇒ 色漂移永不告警（批86 补第四维）。
+               颜色语义收敛为三档：success=启 / danger=停·删 / warning=解冻 / ''(品牌蓝)=看·改。
+               删除的强确认（输入任务名）保留，只是入口从「更多」弹窗改为直接点删除图标。 -->
+          <IconBtn size="small" type="success" :icon="VideoPlay" :title="t('common.start')"
+                   v-if="row.status !== 'running' && canLive" @click="onStart(row.id)" :disabled="navReadonly" />
+          <IconBtn size="small" type="danger" :icon="VideoPause" :title="t('common.stop')"
+                   v-if="row.status === 'running' && canLive" @click="onStop(row)" :disabled="navReadonly" />
           <!-- 批 76b：解冻钮判据由「30s 瞬时灯 row.frozen」改为「F1 未闭合事件」（持久）——
                灯会丢帧（短冻结整跳 ⇒ 想解冻却找不到入口）；与展开行同一 handler，无第二套语义。
                注：row.frozen 仍用于状态列的 ❄ 即时标记，两者用途不同（灯=此刻/账=历史）。 -->
           <IconBtn size="small" type="warning" :icon="Unlock" :title="t('liveTask.unfreeze')" v-if="row.status === 'running' && freezing(row).length && canLive" @click="onUnfreeze(row)" :disabled="navReadonly" />
-          <el-button @click="gotoDetail(row.symbol)">{{ t('liveTask.symbolDetail') }}</el-button>
-          <el-button v-if="row.status !== 'running' && canLive" @click="openMore(row)" :disabled="navReadonly">{{ t('common.more') }}</el-button>
+          <!-- 查看结果：批86-B 的实测权益曲线落位点。当前 disabled 常显——
+               不藏（藏了让人以为没有这个能力）、不静默（静默死按钮是本仓在录缺陷类）。
+               语义色用 ''（品牌蓝）而非 success：非成交/非盈利反馈，借 success 会污染「success=操作反馈」的约定。 -->
+          <IconBtn size="small" :icon="TrendCharts" :title="t('liveTask.viewResult')" disabled />
+          <!-- 删除：入口即语义（原藏在名为「更多」的弹窗里，且弹窗内只有删除这一件事）。
+               running 中不允许删——后端会拒（任务在跑先停），故此处直接不显示，避免 403 死胡同。 -->
+          <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')"
+                   v-if="row.status !== 'running' && canLive" @click="openDelete(row)" :disabled="navReadonly" />
         </template>
       </el-table-column>
     </TableShell>
 
-    <!-- 批16：「更多」弹窗（收删除——输入任务名启用按钮，站内最强确认；原 ElMessageBox.prompt 平移入内） -->
-    <el-dialog v-model="moreVisible" :title="moreRow?.name" width="420px" :close-on-click-modal="false">
+    <!-- 批86-UI：原「更多」弹窗拆除。它里面只有一件事（删除），名字叫「更多」名不副实——
+         对照 Backtest 的「更多」是两件事（终止/删除）。现在删除是操作列的红色垃圾桶图标，
+         入口即语义；这里只剩强确认本身（输入任务名，站内最强确认），标题也改为直陈「删除任务」。 -->
+    <el-dialog v-model="delVisible" :title="t('liveTask.deleteTitle')" width="420px" :close-on-click-modal="false">
       <el-form @submit.prevent>
-        <el-form-item :label="t('liveTask.deletePromptTip', { name: moreRow?.name })">
-          <el-input v-model="deleteConfirmName" :placeholder="moreRow?.name" />
+        <el-form-item :label="t('liveTask.deletePromptTip', { name: delRow?.name })">
+          <el-input v-model="deleteConfirmName" :placeholder="delRow?.name" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="moreVisible = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="danger" :disabled="!moreRow || deleteConfirmName.trim() !== moreRow.name" @click="onDelete(moreRow)">{{ t('common.delete') }}</el-button>
+        <el-button @click="delVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="danger" :disabled="!delRow || deleteConfirmName.trim() !== delRow.name" @click="onDelete(delRow)">{{ t('common.delete') }}</el-button>
       </template>
     </el-dialog>
 
@@ -185,12 +203,11 @@ import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Plus, Unlock } from '@element-plus/icons-vue'
+import { Plus, Unlock, VideoPlay, VideoPause, TrendCharts, Delete } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 
 const router = useRouter()
 const route = useRoute()
-const gotoDetail = symbol => router.push(`/stock/${symbol}`)
 const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
 // 批 77：实盘面动作（建/启/停/删任务、解冻）须 `live_control`——与后端 require_perm 同键。
@@ -346,23 +363,27 @@ const onStop = async (row) => {
     await stopLiveTask(row.id); ElMessage.success(t('common.stopped')); load()
   } catch (e) { if (e !== 'cancel' && e?.message) ElMessage.error(t('common.stopFailed')); else if (e?.response) ElMessage.error(t('common.stopFailed')) }
 }
-// 批16「更多」弹窗（收删除）：输入任务名才启用删除按钮（与原 prompt 确认等强）
-const moreRow = ref(null)
-const moreVisible = computed({
-  get: () => !!moreRow.value,
-  set: v => { if (!v) moreRow.value = null },
+// 批86-UI：删除确认（原批16「更多」弹窗的壳，现在只承载删除这一件事）
+const delRow = ref(null)
+const delVisible = computed({
+  get: () => !!delRow.value,
+  set: v => { if (!v) delRow.value = null },
 })
 const deleteConfirmName = ref('')
-const openMore = (row) => { moreRow.value = row; deleteConfirmName.value = ''; moreVisible.value = true }
+const openDelete = (row) => { delRow.value = row; deleteConfirmName.value = ''; delVisible.value = true }
 const onDelete = async (row) => {
   if (!row) return
   try {
     await deleteLiveTask(row.id)
     ElMessage.success(t('common.deleteSuccess'))
-    moreRow.value = null
+    delRow.value = null
     load()
   } catch (e) { ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
 }
+
+// 批86-B 预留：编辑任务。当前**无端点**（PUT /api/live-task/{tid} 属批86-B）⇒ 这里什么都不留。
+// 本仓在录缺陷类：无消费者的死壳（幽灵端点 /live-task/{id}/detail 恒 404、toggleTimeline 无消费者）。
+// 半个编辑弹窗 + 禁用保存按钮同样是死壳，还会被误读成「只是暂时禁用」。批86-B 连端点一起落。
 
 // 盲审A-P2-9：心跳年龄人性化（原裸秒数——stale 86400s 无读性）
 const fmtAge = (s) => {

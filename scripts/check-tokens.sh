@@ -10,16 +10,24 @@ count_px()   { grep -rEo "(margin|padding): ?[0-9]+px" web/src/views/ web/src/co
 count_hex()  { grep -rEoh "#[0-9a-fA-F]{3,6}" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | grep -v "^#defa" | wc -l; }
 # 批24：字号旁路第三维（px/em/rem/% 相对单位同属排版旁路；驼峰 fontSize=编辑器/图表/头像 API 参数非 CSS 排版，天然不匹配）
 count_fs()   { grep -rEo "font-size: ?[0-9.]+(px|em|rem|%)" web/src/views/ web/src/components/ web/src/layouts/ web/src/App.vue --include="*.vue" 2>/dev/null | wc -l; }
-PX=$(count_px); HEX=$(count_hex); FS=$(count_fs)
+# 批86 第四维：el-button 语义色 type=（success|warning|danger）计数。
+# 前三维（px/hex/font-size）结构上看不见 `type=` ⇒ 操作列把 type=success|danger 当按钮色用，
+# 用 EP 语义色替代本仓令牌/IconBtn tone，色漂移永不告警（批86 实证：LiveTask 操作列 4 处）。
+# 只数 el-button 起始标签内的语义三色：primary 是 EP 主色非语义分档，info 是中性，均不计。
+# 与 IconBtn 的关系：IconBtn 的 tone 是唯一受批的语义色入口（内部用 EP 变量，本身不产生 type= 字面量）。
+count_btn_type() { grep -rEoh "<el-button[^>]*type=\"(success|warning|danger)\"" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | wc -l; }
+PX=$(count_px); HEX=$(count_hex); FS=$(count_fs); BTN=$(count_btn_type)
 if [ "${1:-}" = "--update" ]; then
-  echo "BASE_PX=$PX BASE_HEX=$HEX BASE_FS=$FS" > "$BASE_FILE"; echo "基线更新: PX=$PX HEX=$HEX FS=$FS"; exit 0
+  echo "BASE_PX=$PX BASE_HEX=$HEX BASE_FS=$FS BASE_BTN=$BTN" > "$BASE_FILE"; echo "基线更新: PX=$PX HEX=$HEX FS=$FS BTN=$BTN"; exit 0
 fi
-if [ ! -f "$BASE_FILE" ]; then echo "BASE_PX=$PX BASE_HEX=$HEX BASE_FS=$FS" > "$BASE_FILE"; echo "首采基线: PX=$PX HEX=$HEX FS=$FS"; exit 0; fi
+if [ ! -f "$BASE_FILE" ]; then echo "BASE_PX=$PX BASE_HEX=$HEX BASE_FS=$FS BASE_BTN=$BTN" > "$BASE_FILE"; echo "首采基线: PX=$PX HEX=$HEX FS=$FS BTN=$BTN"; exit 0; fi
 source "$BASE_FILE"
 : "${BASE_FS:=0}"   # 旧基线无 FS 键时兜底 0（批24 前基线只有 PX/HEX 两键）
+: "${BASE_BTN:=0}"  # 旧基线无 BTN 键时兜底 0（批86 前基线只有 PX/HEX/FS 三键）
 RC=0
 [ "$PX" -gt "$BASE_PX" ] && { echo "✗ 内联 px 计数上升: $PX > $BASE_PX（令牌禁新增——wd-20 §2.3-C）"; RC=1; }
 [ "$HEX" -gt "$BASE_HEX" ] && { echo "✗ 内联 hex 计数上升: $HEX > $BASE_HEX（色值禁新增）"; RC=1; }
 [ "$FS" -gt "$BASE_FS" ] && { echo "✗ font-size 硬编码上升: $FS > $BASE_FS（字号唯一真相源=六级令牌——批24）"; RC=1; }
-[ "$RC" -eq 0 ] && echo "✓ 令牌门: PX=$PX≤$BASE_PX HEX=$HEX≤$BASE_HEX FS=$FS≤$BASE_FS"
+[ "$BTN" -gt "$BASE_BTN" ] && { echo "✗ el-button 语义色 type= 计数上升: $BTN > $BASE_BTN（行内动作按钮须用 IconBtn 及其 tone——批86）"; RC=1; }
+[ "$RC" -eq 0 ] && echo "✓ 令牌门: PX=$PX≤$BASE_PX HEX=$HEX≤$BASE_HEX FS=$FS≤$BASE_FS BTN=$BTN≤$BASE_BTN"
 exit $RC
