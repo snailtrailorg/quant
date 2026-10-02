@@ -29,12 +29,13 @@
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
         <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: 4px" />
       </div></el-card></div>
-      <KpiCard :label="t('dashboard.tasksRunning')" :value="liveTasks.filter(x => x.status === 'running').length + '/' + liveTasks.length" />
+      <KpiCard v-if="canLive" :label="t('dashboard.tasksRunning')" :value="liveTasks.filter(x => x.status === 'running').length + '/' + liveTasks.length" />
     </div>
 
-    <!-- 权益曲线 + 实盘任务（wd-14 §2.4 :md/:xs 降列：<992 堆叠） -->
-    <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
-      <el-col :xs="24" :sm="24" :md="15">
+      <!-- 权益曲线 + 实盘任务（wd-14 §2.4 :md/:xs 降列：<992 堆叠）。
+           批 86-B：无 live_control 时实盘任务列整列不渲染，曲线列扩满整行（不留 9 栅空位）。 -->
+      <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
+      <el-col :xs="24" :sm="24" :md="canLive ? 15 : 24">
         <el-card shadow="never">
           <template #header>
             <div style="display:flex; justify-content:space-between; align-items:center">
@@ -48,7 +49,7 @@
           <EmptyState size="small" :description="t('dashboard.noCurve')" />
         </el-card>
       </el-col>
-      <el-col :xs="24" :sm="24" :md="9">
+      <el-col v-if="canLive" :xs="24" :sm="24" :md="9">
         <el-card shadow="never">
           <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.liveTasks') }}<el-button text size="small" @click="$router.push('/live-task')">{{ t('dashboard.more') }}→</el-button></div></template>
           <div v-for="task in liveTasks.slice(0, 5)" :key="task.id" class="task-row">
@@ -106,7 +107,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { fmtTime } from '../utils/fmtTime'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -138,6 +139,10 @@ const integrity = ref({})
 const recentBacktests = ref([])
 const riskMetrics = ref({})
 const partialFail = ref(0)
+
+// 批 86-B：实盘任务卡/面板的动作键（与后端 list 端点同键）——无权者不渲染、不发请求
+const canPerm = inject('canPerm', () => true)
+const canLive = computed(() => canPerm('live_control'))
 
 const pnlClass = v => (v || 0) >= 0 ? 'up' : 'down'
 const pnlArrow = v => (v || 0) >= 0 ? '▲' : '▼'
@@ -191,7 +196,6 @@ const loadAll = async () => {
     async () => { const p = await getPnl(); curve.value = (p.accounts || [])[0]?.curve || [] },
     async () => { positions.value = ((await api.get('/position')).accounts || []).flatMap(v => v.positions || []) },
     async () => { orders.value = (await getOrders()).orders || [] },   // A-P0-1:后端返 {orders,total}
-    async () => { liveTasks.value = await getLiveTasks() },
     async () => { const n = await getNotifications('all', 50)   // 批23 B-P1-2：ack 退役后 active 池只增不减——改拉 all 前端滤今日
                   const items = n.items || n || []
                   const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10)
@@ -201,6 +205,10 @@ const loadAll = async () => {
     async () => { recentBacktests.value = (await getBacktests()).slice(0, 4) },
     async () => { const r = await getRiskState(); riskMetrics.value = r.metrics || {} },
   ]
+  // 批 86-B：实盘任务列表读门已收紧为 `live_control`（治理裁定：analyst/viewer 连只读都不可见）。
+  // 无权者**不发这个请求**——发了就是每次进总览都挂一个「部分失败」红标，把设计内拒绝误报成故障。
+  // 卡片与面板同键 v-if（下方），三处同源 canLive，不出现「卡在数没在」的错位。
+  if (canLive.value) jobs.push(async () => { liveTasks.value = await getLiveTasks() })
   // wd-20 §2.6：部分失败可见+可重试（原静默吞——部分卡空被读成无数据）
   const errs = []
   await Promise.all(jobs.map(fn => fn().catch(e => errs.push(String(e).slice(0, 60)))))

@@ -8,8 +8,13 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from src.data_platform.db import get_conn
 from src.quant_common.redis_client import business_redis
 
+# 批 86-B：纸上交易数据面下沉层 1（no_sql 闸门——routes 的 SQL 计数只许调低不许调高）
+from src.data_platform.paper_trade import (
+    get_task_equity_source, get_task_snapshot_params, get_virtual_account_id,
+    list_paper_task_rows, update_task_fields)
 
-from ..auth import audit_log, require_perm
+
+from ..auth import assert_task_perm, audit_log, require_perm, require_perm_any
 from ..errors import ApiError
 
 logger = logging.getLogger("web_api")
@@ -23,21 +28,30 @@ LIVE_TRADING_MARKETS = MARKET_OP_KEYS   # 批55-0 L0:实盘开关键单源化(�
 
 @router.get("/api/live-task")
 def list_live_tasks(status: str | None = None,
-                    payload: dict = Depends(require_perm("read"))):
-    """列实盘任务。"""
+                    payload: dict = Depends(require_perm("live_control"))):
+    """列**实盘**任务（批 86-B：读门由 `read` 收紧为 `live_control`）。
+
+    **为什么读门要收紧（治理原则的落地）**：批 86-B 裁定「analyst 连实盘任务列表都不该看到」
+    ——造策略的人≠验策略的人，不透明是刻意的（防「为通过而调参」，Goodhart 定律）。
+    只在 nav 层隐藏是不够的：`live-task` 页面本身原先无 api 维门槛（只要 `read`），
+    analyst 有 `read` ⇒ 直接敲 URL `/live-task` 仍能看到全部实盘任务细节。
+    ⇒ **读与写同门 `live_control`**（有实盘权的人才有必要看实盘任务），语义干净且不新增键。
+
+    ⚠️ 副作用（接受）：`viewer`/`analyst` 连只读都看不到实盘任务——**这正是要的严格性**。
+
+    批 86-B：**只列实盘任务**（`mode='live'`）。paper 任务由 `GET /api/paper-trade` 提供，
+    两者列表不混——否则 analyst 打开纸上交易页会看到实盘任务（等于绕过了上面的收紧）。
+    """
     with get_conn() as conn:
+        _base = ("SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
+                 "lt.account_id, lt.initial_capital, lt.created_at, ta.name "
+                 "FROM live_task lt LEFT JOIN trading_account ta ON ta.id=lt.account_id ")
+        _filter = "lt.mode='live'"
         if status:
             cur = conn.execute(
-                "SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-                "lt.account_id, lt.initial_capital, lt.created_at, ta.name "
-                "FROM live_task lt LEFT JOIN trading_account ta ON ta.id=lt.account_id "
-                "WHERE lt.status=%s ORDER BY lt.id DESC", (status,))
+                _base + f"WHERE {_filter} AND lt.status=%s ORDER BY lt.id DESC", (status,))
         else:
-            cur = conn.execute(
-                "SELECT lt.id, lt.name, lt.strategy_id, lt.symbol, lt.params, lt.status, "
-                "lt.account_id, lt.initial_capital, lt.created_at, ta.name "
-                "FROM live_task lt LEFT JOIN trading_account ta ON ta.id=lt.account_id "
-                "ORDER BY lt.id DESC")
+            cur = conn.execute(_base + f"WHERE {_filter} ORDER BY lt.id DESC")
         rows = cur.fetchall()
     # P1-5（web-design 05 §5.8/06 B#5）：合并 worker 心跳（md_mode/lag/bars/frozen/gen）——
     # 任务"活着吗、行情新鲜吗、冻没冻"三问列表页直答
@@ -68,8 +82,15 @@ def list_live_tasks(status: str | None = None,
 
 @router.post("/api/live-task")
 def create_live_task(body: dict = Body(...),
-                     payload: dict = Depends(require_perm("live_control"))):
-    """创建实盘任务：选策略+标的+任务参数值。创建时构建 strategy_snapshot。"""
+                     payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):
+    """创建任务：选策略+标的+任务参数值。创建时构建 strategy_snapshot。
+
+    批 86-B：body 新增 `mode`（`live`｜`paper`，缺省 `live`=完全现行为）。
+    - `mode='paper'`（纸上交易）：**account_id 忽略/覆盖为虚拟账户**——风控预算隔离的落点
+      （见 `0127` 注释）；门= `paper_trade`。
+    - `mode='live'`（实盘）：门= `live_control`（原样）。
+    两道门：粗筛在依赖（任一键），**分档判定在函数体**（按 mode 查所需键）。
+    """
     from src.strategy_framework.strategy import build_default_params, validate_parameter_defs, validate_params_against_defs
     name = body.get("name", "")
     strategy_id = body.get("strategy_id", "")
@@ -77,10 +98,35 @@ def create_live_task(body: dict = Body(...),
     params = body.get("params", {})
     account_id = body.get("account_id")
     initial_capital = body.get("initial_capital", 1000000)
+    # 批 86-B：mode（0125 的 CHECK 锁值域；此处再校验一次以给出可读 400 而非 DB 异常）
+    mode = str(body.get("mode") or "live").lower()
+    if mode not in ("live", "paper"):
+        raise ApiError(400, "MODE_INVALID", f"mode 须为 live 或 paper，收到 {mode!r}")
+    is_paper = mode == "paper"
 
     if not name or not strategy_id or not symbol:
         raise ApiError(400, "MISSING_FIELDS", "name/strategy_id/symbol 必填")
-    if account_id is None:
+
+    # 批 86-B：分档权限判定（粗筛已在依赖层）。
+    # paper 任务须 paper_trade；live 任务须 live_control（analyst 有前者无后者 ⇒ 建不了实盘任务）。
+    _need = "paper_trade" if is_paper else "live_control"
+    _role = payload.get("db_role") or payload.get("role", "viewer")
+    from ..auth import load_effective_permissions as _lep
+    _have, _ = _lep(payload.get("username", ""), _role)
+    if _need not in _have:
+        raise ApiError(403, "PERM_DENIED",
+                       f"创建{'纸上' if is_paper else '实盘'}任务需要 {_need} 权限，角色 {_role} 无")
+
+    if is_paper:
+        # paper 任务**强制绑定虚拟账户**（忽略前端传入）——这是预算隔离的实现点，
+        # 不可由客户端覆盖（否则「传一个真实 account_id 的 paper 任务」会污染实盘预算）。
+        # 数据面在层 1（paper_trade.get_virtual_account_id）；None=0127 未执行，
+        # 必须 500 显式报错而非静默回退到真实账户（隔离的最后一道保险）。
+        account_id = get_virtual_account_id()
+        if account_id is None:
+            raise ApiError(500, "VIRTUAL_ACCOUNT_MISSING",
+                           "虚拟账户不存在（迁移 0127 未执行？）——纸上任务无法创建")
+    elif account_id is None:
         raise ApiError(400, "ACCOUNT_REQUIRED", "account_id 必填（交易账号）")
     if not isinstance(account_id, int) or isinstance(account_id, bool):
         raise ApiError(400, "ACCOUNT_ID_INVALID", "account_id 须为整数（交易账号 id）")
@@ -132,18 +178,22 @@ def create_live_task(body: dict = Body(...),
                            f"account {account_id} 不允许交易品种 {symbol}（三维 category/exchange/board 权限）")
         cur = conn.execute(
             "INSERT INTO live_task (name, strategy_id, symbol, params, strategy_snapshot, status, "
-            "account_id, initial_capital, owner_username) VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s) RETURNING id",
+            "account_id, initial_capital, owner_username, mode) "
+            "VALUES (%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s) RETURNING id",
             (name, strategy_id, symbol, json.dumps(merged_params), json.dumps(strategy_snapshot),
-             account_id, initial_capital, payload["username"]))
+             account_id, initial_capital, payload["username"], mode))
         task_id = cur.fetchone()[0]
         conn.commit()
-    audit_log(payload["username"], "create_live_task", f"task {task_id} strategy={strategy_id} symbol={symbol}")
-    return {"id": task_id, "status": "pending"}
+    audit_log(payload["username"], "create_live_task",
+              f"task {task_id} mode={mode} strategy={strategy_id} symbol={symbol}")
+    return {"id": task_id, "status": "pending", "mode": mode}
 
 
 @router.post("/api/live-task/{tid}/start")
-def start_live_task(tid: int, payload: dict = Depends(require_perm("live_control"))):
-    """启动实盘任务。"""
+def start_live_task(tid: int,
+                    payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):
+    """启动任务（批 86-B：按任务 mode 分档判权——paper 须 paper_trade，live 须 live_control）。"""
+    assert_task_perm(payload, tid, action="启动")
     with get_conn() as conn:
         cur = conn.execute("SELECT status, strategy_id FROM live_task WHERE id=%s", (tid,))
         row = cur.fetchone()
@@ -160,8 +210,10 @@ def start_live_task(tid: int, payload: dict = Depends(require_perm("live_control
 
 
 @router.post("/api/live-task/{tid}/stop")
-def stop_live_task(tid: int, payload: dict = Depends(require_perm("live_control"))):
-    """停止实盘任务。"""
+def stop_live_task(tid: int,
+                   payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):
+    """停止任务（批 86-B：按 mode 分档判权，同 start）。"""
+    assert_task_perm(payload, tid, action="停止")
     with get_conn() as conn:
         conn.execute("UPDATE live_task SET status='stopped', updated_at=now() WHERE id=%s", (tid,))
         conn.commit()
@@ -192,8 +244,11 @@ def get_unfreeze_request(token: str = Query(...),
 
 @router.post("/api/live-task/{tid}/unfreeze")
 def unfreeze_live_task(tid: int, body: dict = Body(default=None),
-                       payload: dict = Depends(require_perm("live_control"))):
+                       payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):
     """批 76 F2 解冻面·Web 入口：人工解冻（**不重启任务**）——写 Valkey 请求键，worker 5s 内消费。
+
+    批 86-B：按任务 mode 分档判权（paper 须 paper_trade）。**paper 任务同样需要解冻**——
+    它也消费实时行情流 ⇒ 也会有 gap/污染冻窗（冻结语义对 paper 照常适用，见设计文档 §六）。
 
     两形态同端点：
     - Web 直接操作（无 token）→ `manual_web`；
@@ -202,6 +257,7 @@ def unfreeze_live_task(tid: int, body: dict = Body(default=None),
     语义=操作者**显式接受当前数据状态**（带洞窗/污染窗），故必须留操作者与通道（审计）。
     """
     from src.data_platform import freeze_event as _fe
+    assert_task_perm(payload, tid, action="解冻")
     body = body or {}
     with get_conn() as conn:
         row = conn.execute("SELECT status, symbol FROM live_task WHERE id=%s", (tid,)).fetchone()
@@ -229,15 +285,23 @@ def unfreeze_live_task(tid: int, body: dict = Body(default=None),
 
 
 @router.get("/api/live-task/{tid}/freeze-events")
-def list_freeze_events(tid: int, limit: int = 50, payload: dict = Depends(require_perm("read"))):
-    """批 76 F1：冻结事件事实（最近 limit 条；进行中= unfrozen_at 为 null）。"""
+def list_freeze_events(tid: int, limit: int = 50,
+                       payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):
+    """批 76 F1：冻结事件事实（最近 limit 条；进行中= unfrozen_at 为 null）。
+
+    批 86-B：读门由 `read` 收紧为「按任务 mode 分档」——冻结事件含任务运行细节
+    （冻因/水位/缺口目标时刻），属治理原则要挡住 analyst 的那类信息（可推知策略实证表现）。
+    """
     from src.data_platform import freeze_event as _fe
+    assert_task_perm(payload, tid, action="查看冻结事件")
     return {"events": _fe.list_events(task_id=tid, limit=min(max(limit, 1), 200))}
 
 
 @router.delete("/api/live-task/{tid}")
-def delete_live_task(tid: int, payload: dict = Depends(require_perm("live_control"))):
-    """删除实盘任务（仅 stopped/error 可删）。"""
+def delete_live_task(tid: int,
+                     payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):
+    """删除任务（仅 stopped/error 可删）。批 86-B：按 mode 分档判权。"""
+    assert_task_perm(payload, tid, action="删除")
     with get_conn() as conn:
         cur = conn.execute("SELECT status FROM live_task WHERE id=%s", (tid,))
         row = cur.fetchone()
@@ -249,6 +313,131 @@ def delete_live_task(tid: int, payload: dict = Depends(require_perm("live_contro
         conn.commit()
     audit_log(payload["username"], "delete_live_task", f"task {tid}")
     return {"ok": True}
+
+
+@router.put("/api/live-task/{tid}")
+def update_live_task(tid: int, body: dict = Body(...),
+                     payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):
+    """批 86-B 新增：编辑任务（改 name/params/initial_capital）。
+
+    ⚠️ **不可改 `strategy_id` / `symbol` / `account_id` / `mode`**：它们决定已启动进程的身份
+    （systemd 单元名绑 tid、策略快照在建任务时固化、账户决定风控预算归属）——
+    改它们须「删掉重建」，不是编辑。传了就 400（显式拒绝优于静默忽略）。
+
+    权限：按任务 mode 分档（`assert_task_perm`）。**特别是防 analyst 通过编辑绕到实盘任务上**——
+    若不判 mode，analyst 拿 `paper_trade` 过粗筛后可以 PATCH 一个 live 任务的参数。
+    """
+    assert_task_perm(payload, tid, action="编辑")
+    _immutable = [k for k in ("strategy_id", "symbol", "account_id", "mode") if k in body]
+    if _immutable:
+        raise ApiError(400, "FIELD_IMMUTABLE",
+                       f"字段不可编辑（决定任务身份，请删除后重建）: {','.join(_immutable)}")
+    _fields: dict = {}
+    if "name" in body:
+        if not str(body["name"]).strip():
+            raise ApiError(400, "NAME_INVALID", "name 不可为空")
+        _fields["name"] = body["name"]
+    if "initial_capital" in body:
+        try:
+            ic = float(body["initial_capital"])
+        except (TypeError, ValueError):
+            raise ApiError(400, "INITIAL_CAPITAL_INVALID", "initial_capital 须为数值") from None
+        _fields["initial_capital"] = ic
+    if "params" in body:
+        # 参数校验与建任务同源（策略快照里固化的 parameter_defs 是真源）——防编辑绕过校验写入非法值。
+        # 快照读取在层 1（paper_trade.get_task_snapshot_params）。
+        from src.strategy_framework.strategy import (
+            build_default_params, validate_parameter_defs, validate_params_against_defs)
+        _r = get_task_snapshot_params(tid)
+        if _r is None:
+            raise ApiError(404, "LIVE_TASK_NOT_FOUND", "任务不存在")
+        _snap = _r[0] if isinstance(_r[0], dict) else json.loads(_r[0] or "{}")
+        _defs = (_snap.get("params") or {}).get("parameter_defs", [])
+        _err = validate_parameter_defs(_defs)
+        if _err:
+            raise ApiError(400, "PARAM_DEFS_INVALID", f"策略参数定义错误: {_err}")
+        _merged = {**build_default_params(_defs), **(body["params"] or {})}
+        _err = validate_params_against_defs(_merged, _defs)
+        if _err:
+            raise ApiError(400, "PARAM_INVALID", f"参数值错误: {_err}")
+        _fields["params"] = json.dumps(_merged)
+    if not _fields:
+        raise ApiError(400, "NOTHING_TO_UPDATE", "无可更新字段（name/params/initial_capital）")
+    updated = update_task_fields(tid, _fields)
+    if not updated:
+        raise ApiError(404, "LIVE_TASK_NOT_FOUND", "任务不存在")
+    audit_log(payload["username"], "update_live_task",
+              f"task {tid} fields={','.join(k for k in body if k in ('name','params','initial_capital'))}")
+    return {"ok": True, "id": tid}
+
+
+@router.get("/api/paper-trade")
+def list_paper_tasks(status: str | None = None,
+                     payload: dict = Depends(require_perm("paper_trade"))):
+    """批 86-B：列**纸上交易**任务（`mode='paper'`）。
+
+    与 `GET /api/live-task` 是两个端点、两个门——这是刻意的：
+    - `live-task` 门 = `live_control`（实盘面，analyst/viewer 全不可见）
+    - `paper-trade` 门 = `paper_trade`（analyst 可见可用，这是他的「策略前测」入口）
+
+    返回体与实盘任务列表同形（前端可复用列定义与心跳展示），仅数据源不同。
+    """
+    rows = list_paper_task_rows(status)   # 数据面在层 1（no_sql 闸门）
+    hb = {}
+    try:
+        r_ = business_redis(decode_responses=True, socket_timeout=1)
+        for rid, *_ in rows:
+            h = r_.hgetall(f"quant:hb:task:{rid}")
+            if h:
+                hb[rid] = h
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
+        pass
+    out = []
+    for r in rows:
+        h = hb.get(r[0], {})
+        out.append({"id": r[0], "name": r[1], "strategy_id": r[2], "symbol": r[3],
+                    "params": json.loads(r[4]) if isinstance(r[4], str) else (r[4] or {}),
+                    "status": r[5], "account_id": r[6],
+                    "initial_capital": float(r[7]) if r[7] else None,
+                    "created_at": str(r[8]) if r[8] else None,
+                    "account_name": r[9], "mode": "paper",
+                    "bars": int(h["bars"]) if h.get("bars") else 0,
+                    "frozen": h.get("frozen") == "1",
+                    "hb_age_s": (time.time() - float(h["ts"])) if h.get("ts") else None})
+    return out
+
+
+@router.get("/api/paper-trade/{tid}/equity")
+def paper_task_equity(tid: int, limit: int = 2000,
+                      payload: dict = Depends(require_perm("paper_trade"))):
+    """批 86-B：纸上任务权益曲线（「查看结果」的数据源）。
+
+    从 `paper_trade_log` 回算**累计已实现现金流**（SELL 收，BUY 付，按价×量），
+    以任务 `initial_capital` 为起点产生逐点权益。
+
+    ⚠️ **这是简化曲线，不是逐笔盯市**：它不读虚拟账户的 `position_snapshot`
+    做浮动盈亏（那需要行情快照，而快照只对运行中任务新鲜）。本端点给的是
+    **已实现**曲线 + 当前虚拟持仓快照，二者并列呈现——前端须**明确标注**
+    「已实现」与「浮动」分开，不得合成一条「总权益」（会误导成精确盈亏）。
+    """
+    _src = get_task_equity_source(tid, min(max(limit, 1), 10000))   # 数据面在层 1
+    if _src is None:
+        raise ApiError(404, "TASK_NOT_FOUND", f"任务 {tid} 不存在")
+    mode, init_raw, fills = _src
+    if (mode or "live") != "paper":
+        raise ApiError(400, "NOT_PAPER_TASK", f"任务 {tid} 不是纸上交易任务")
+    init = float(init_raw or 0)
+    cash = init
+    pts, realized = [], 0.0
+    for ts, sym, act, vol, px in fills:
+        amt = float(vol or 0) * float(px or 0)
+        cash += amt if str(act).upper() == "SELL" else -amt
+        realized = cash - init
+        pts.append({"ts": str(ts), "equity": cash, "realized": realized,
+                    "symbol": sym, "action": act})
+    return {"task_id": tid, "initial_capital": init, "points": pts,
+            "realized_pnl": realized, "trade_count": len(fills),
+            "note": "已实现现金流曲线（不含浮动盈亏）；成交为纸上模拟，未进入市场"}
 
 
 @router.get("/api/live-trading")

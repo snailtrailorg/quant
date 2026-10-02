@@ -23,15 +23,54 @@ def _conn(row=("running", "600000.SHSE")):
     return conn
 
 
+def _conn_for_task_mode(mode="live", row=("running", "600000.SHSE")):
+    """批 86-B：`assert_task_perm` 会**额外查一次** `live_task.mode`（在 auth 模块里
+    import `get_conn`，与 trading 模块的补丁**不是同一个符号**）。
+
+    ⇒ 需按查询内容分派返回值：查 mode 的返回 `(mode,)`，其余（原解冻面查 status/symbol）
+    返回既定 row。用 `side_effect` 按 SQL 文本判——比给两个独立 mock 更贴近真实链路。
+    """
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+
+    def _exec(sql, *a, **kw):
+        s = str(sql)
+        if "SELECT mode FROM live_task" in s:
+            return MagicMock(fetchone=MagicMock(return_value=(mode,)))
+        return MagicMock(fetchone=MagicMock(return_value=row))
+    conn.execute.side_effect = _exec
+    return conn
+
+
 def _call_endpoint(mod_name, fn_name, *args, **kw):
     from src.web_api.routes import trading as tr
     return getattr(tr, fn_name)(*args, **kw)
 
 
+def _extract_live_keys(src):
+    r"""从端点源码抽「依赖声明里的键集合」。
+
+    批 86-B 后单键与多键两种形态并存：
+    - 单键 `require_perm("k")` → `{"k"}`
+    - 多键 `require_perm_any("k1", "k2")` → `{"k1", "k2"}`（任务端点按 mode 二选一）
+
+    ⇒ 返回 **set**，调用方用「含」而非「等」判（多键形态下 live_control 仍须在集合内，
+    否则实盘任务的操作门整体漏掉）。注意先试单键：`require_perm_any(` 的首个 `require_perm`
+    子串会被单键正则误命中，故 `require_perm\(` 的 `\(` 是必须的。
+    """
+    m = re.search(r'require_perm_any\(([^)]*)\)', src)
+    if m:
+        return set(re.findall(r'"([a-z_]+)"', m.group(1)))
+    m = re.search(r'require_perm\(\s*"([^"]+)"\s*\)', src)
+    assert m, "端点未挂 require_perm / require_perm_any"
+    return {m.group(1)}
+
+
 class TestUnfreezeWebEndpoint:
     def test_web_direct_path_no_token(self):
         """无 token（Web 直接点）→ channel=manual_web，操作者=登录用户，审计留痕。"""
-        with patch("src.web_api.routes.trading.get_conn", return_value=_conn()), \
+        with patch("src.web_api.routes.trading.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.db.get_conn", return_value=_conn_for_task_mode()), \
              patch("src.data_platform.freeze_event.request_unfreeze",
                    return_value={"operator": "admin"}) as req, \
              patch("src.web_api.routes.trading.audit_log") as au:
@@ -43,7 +82,8 @@ class TestUnfreezeWebEndpoint:
 
     def test_im_confirm_chain_token_path(self):
         """带 confirm_token（IM 确认链）→ 一次性消费 + channel=manual_im（记 IM 发起人）。"""
-        with patch("src.web_api.routes.trading.get_conn", return_value=_conn()), \
+        with patch("src.web_api.routes.trading.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.db.get_conn", return_value=_conn_for_task_mode()), \
              patch("src.data_platform.freeze_event.consume_confirm_token",
                    return_value={"tid": 5, "operator": "william"}), \
              patch("src.data_platform.freeze_event.request_unfreeze", return_value={}) as req, \
@@ -56,7 +96,8 @@ class TestUnfreezeWebEndpoint:
     def test_token_tid_mismatch_rejected(self):
         """确认链接与目标任务不一致 ⇒ 400 且 token 已作废（防 A 任务链接解冻 B 任务）。"""
         from src.web_api.errors import ApiError
-        with patch("src.web_api.routes.trading.get_conn", return_value=_conn()), \
+        with patch("src.web_api.routes.trading.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.db.get_conn", return_value=_conn_for_task_mode()), \
              patch("src.data_platform.freeze_event.consume_confirm_token",
                    return_value={"tid": 9, "operator": "w"}):
             with pytest.raises(ApiError) as e:
@@ -67,7 +108,8 @@ class TestUnfreezeWebEndpoint:
     def test_token_invalid_or_replayed(self):
         """已被用过/过期（GETDEL 返回 None）⇒ 400 明确提示回 IM 重发。"""
         from src.web_api.errors import ApiError
-        with patch("src.web_api.routes.trading.get_conn", return_value=_conn()), \
+        with patch("src.web_api.routes.trading.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.db.get_conn", return_value=_conn_for_task_mode()), \
              patch("src.data_platform.freeze_event.consume_confirm_token", return_value=None):
             with pytest.raises(ApiError) as e:
                 _call_endpoint("trading", "unfreeze_live_task", 5,
@@ -84,7 +126,8 @@ class TestUnfreezeWebEndpoint:
     def test_channel_down_is_honest_503(self):
         """Valkey 不可达 ⇒ 503（不许假装成功——解冻命令必须真的到得了 worker）。"""
         from src.web_api.errors import ApiError
-        with patch("src.web_api.routes.trading.get_conn", return_value=_conn()), \
+        with patch("src.web_api.routes.trading.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.db.get_conn", return_value=_conn_for_task_mode()), \
              patch("src.data_platform.freeze_event.request_unfreeze",
                    side_effect=RuntimeError("valkey down")):
             with pytest.raises(ApiError) as e:
@@ -108,7 +151,9 @@ class TestUnfreezeWebEndpoint:
         assert e.value.status_code == 400
 
     def test_freeze_events_endpoint(self):
-        with patch("src.data_platform.freeze_event.list_events",
+        with patch("src.web_api.routes.trading.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.db.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.freeze_event.list_events",
                    return_value=[{"id": 1, "freeze_type": "seq_gap"}]) as le:
             out = _call_endpoint("trading", "list_freeze_events", 5, limit=10, payload=ADMIN)
         assert out["events"][0]["freeze_type"] == "seq_gap"
@@ -126,7 +171,8 @@ class TestUnfreezeAuthGate:
         from fastapi.testclient import TestClient
         from src.web_api.main import app
         with patch("src.web_api.auth.verify_jwt", return_value=who), \
-             patch("src.web_api.routes.trading.get_conn", return_value=_conn()), \
+             patch("src.web_api.routes.trading.get_conn", return_value=_conn_for_task_mode()), \
+             patch("src.data_platform.db.get_conn", return_value=_conn_for_task_mode()), \
              patch("src.data_platform.db.get_conn", return_value=_conn()), \
              patch("src.data_platform.freeze_event.request_unfreeze", return_value={}):
             return TestClient(app).post("/api/live-task/5/unfreeze", json={},
@@ -204,15 +250,28 @@ class TestToolGatingContract:
     }
 
     def test_http_endpoints_all_live_control(self):
-        """HTTP 面：实盘面端点全部 `live_control`（从源码抽 require_perm 字面量）。"""
+        """HTTP 面：实盘面端点全部牵涉 `live_control`（从源码抽字面量）。
+
+        批 86-B：正则**同时认** `require_perm("k")` 与 `require_perm_any("k1","k2")`——
+        后者是多键形态（任务端点同时吃 paper_trade 与 live_control，按任务 mode 二选一）。
+        断言从「唯一键 == live_control」放宽为「**含** live_control」：多键形态下
+        live_control 仍需在依赖列表里（否则实盘任务的操作门整体漏掉）。
+        """
         import inspect
         from src.web_api.routes import trading as tr, strategy as st
         for fn_name, want in self.LIVE_ACTIONS.items():
             fn = getattr(tr, fn_name, None) or getattr(st, fn_name, None)
             assert fn is not None, f"找不到端点 {fn_name}"
-            m = re.search(r'require_perm\(\s*"([^"]+)"\s*\)', inspect.getsource(fn))
+            src = inspect.getsource(fn)
+            m = re.search(r'require_perm\(\s*"([^"]+)"\s*\)', src)
+            if m:
+                assert m.group(1) == want, f"{fn_name} 挂 {m.group(1)}，应 {want}"
+                continue
+            # 批 86-B 多键形态：require_perm_any("paper_trade", "live_control")
+            m = re.search(r'require_perm_any\(([^)]*)\)', src)
             assert m, f"{fn_name} 丢了 require_perm 声明"
-            assert m.group(1) == want, f"{fn_name} 挂 {m.group(1)}，应 {want}"
+            keys = re.findall(r'"([a-z_]+)"', m.group(1))
+            assert want in keys, f"{fn_name} 的 any 键集 {keys} 不含 {want}"
 
     def test_im_card_face_same_key(self):
         """IM 卡片面：解冻/策略启停的 `_need` 键 = `live_control`（抽字面量，非重复断言常量）。"""
@@ -256,8 +315,7 @@ class TestToolGatingContract:
         from src.feishu_bot import ws_client
         from src.llm_gateway.gateway import LIVE_TOOLS, LLMGateway
 
-        web_key = re.search(r'require_perm\(\s*"([^"]+)"\s*\)',
-                            inspect.getsource(tr.unfreeze_live_task)).group(1)
+        web_key = _extract_live_keys(inspect.getsource(tr.unfreeze_live_task))
         im_key = re.search(r'"([^"]+)"\s+if\s+tool\s+in\s*\([^)]*task_unfreeze',
                            inspect.getsource(ws_client)).group(1)
         # ⚠️ `import src.llm_gateway.gateway as X` 拿到的是 **LLMGateway 类**，不是模块
@@ -266,8 +324,12 @@ class TestToolGatingContract:
         # LLM 面：LIVE_TOOLS 必须由 live_control 放行（源码级）
         assert 'if "live_control" in perms:' in gw_src and "allowed += LIVE_TOOLS" in gw_src
         assert LIVE_TOOLS
-        assert web_key == im_key == "live_control", (
-            f"多面档位不一致：web={web_key} im={im_key}，应统一 live_control")
+        assert "live_control" in web_key, (
+            f"HTTP 面实盘依赖集 {sorted(web_key)} 不含 live_control——实盘任务操作门漏档")
+        assert im_key == "live_control", f"IM 面档位={im_key}，应 live_control"
+        assert set(web_key) == {"paper_trade", "live_control"}, (
+            f"HTTP 面解冻端点依赖集={sorted(web_key)}，"
+            "批 86-B 期望恰为 {paper_trade, live_control}（纸/实盘按 mode 二选一）")
 
     def test_analyst_excluded_trader_admin_included(self, gateway):
         """**核心验收**：analyst 不得有实盘面能力；trader/admin 必须有（无功能回归）。"""

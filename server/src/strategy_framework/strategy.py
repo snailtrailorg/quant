@@ -434,7 +434,10 @@ class Strategy:
             # D2：account 身份（读方/写方 per-account 过滤的真源；runner 注入）
             "account_id": getattr(self, "account_id", None),
         }
-        decision = RiskControl.get().check_order(order, self.account_id)
+        # 批 86-B：paper 模式随实例属性注入（同 operator/account_id 模式）——
+        # 走完整风控链但跳过「实盘开关」一级（见 RiskControl.check_order 的 paper 形参说明）。
+        decision = RiskControl.get().check_order(
+            order, self.account_id, paper=bool(getattr(self, "paper_mode", False)))
         if not decision.approved:
             return
         final = decision.adjusted if decision.adjusted is not None else order  # B8 风控覆写：用 adjusted（如截断 volume），无则原值

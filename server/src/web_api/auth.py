@@ -117,8 +117,79 @@ def require_perm(perm: str):
     return checker
 
 
-# ——— JWT ———
+def require_perm_any(*perms: str, bind_key: str | list[str] | None = None):
+    """FastAPI 依赖：角色持有 **任一** 给定键即放行（批 86-B 新建）。
 
+    **为什么需要它**：实盘任务/纸上任务的写端点**共用同一组路径与函数**
+    （`/api/live-task` 系列被 6 个前端页面引用，改路径会大面积炸），
+    但两者的权限门**必须不同**（paper 任务须 `paper_trade`、live 任务须 `live_control`）。
+    而 `require_perm` 是**单键、声明期固定**的——拿不到任务 mode。
+
+    ⇒ 本依赖只做**第一道粗筛**（「够资格进门」），真正按 mode 分档的判定在**函数体内**
+    用 `assert_task_perm()` 做（见下）。两道叠加 = 窄的那道说了算。
+
+    `bind_key`：给绑定扫描（`perm_registry.scan_perm_bindings`）看的键。
+    可传 str 或 list（本依赖**可以**对应多个键——见 `_perm_key` 说明）。
+    """
+    def checker(authorization: str = Header(...)):
+        token = re.sub(r'^Bearer\s+', '', authorization, flags=re.IGNORECASE)
+        payload = verify_jwt(token)
+        role = payload.get("db_role") or payload.get("role", "viewer")
+        perms_have, _ = load_effective_permissions(payload.get("username", ""), role)
+        if not any(p in perms_have for p in perms):
+            from .errors import ApiError
+            raise ApiError(403, "PERM_DENIED",
+                           f"角色 {role} 无 {'/'.join(perms)} 任一权限")
+        return payload
+    # 批33b：绑定扫描提取点。
+    # 批 86-B：**可为 list**——本依赖语义上同时牵涉多个键（如「够资格操作任务」=
+    # paper_trade ∪ live_control），只记一个会让 `GET /permissions` 的绑定视图漏报
+    # 另一半（管理员看不出这些端点也吃 live_control）。scan 侧已按 str|list 兼容处理。
+    checker._perm_key = bind_key if bind_key is not None else (perms[0] if len(perms) == 1 else list(perms))
+    return checker
+
+
+# 批 86-B：任务 mode → 所需写权限键 的映射（唯一真源；改这里即改全站写门档位）。
+# paper 任务的写动作须 `paper_trade`；live 任务的写动作须 `live_control`。
+# 语义依据：`flow/任务/批86B-命名裁决.md` §7.2——paper 是**非执行面**，故用独立键，
+# 且该键给 analyst（「造策略的人可以做前测」），而 live 写门只给 trader/admin。
+TASK_MODE_PERM: dict[str, str] = {"paper": "paper_trade", "live": "live_control"}
+
+
+def assert_task_perm(payload: dict, tid: int, *, action: str = "操作") -> str:
+    """按**任务 mode** 二次判定写权限（批 86-B）——`require_perm_any` 之后的第二道门。
+
+    用法（写端点函数体开头）：
+
+        assert_task_perm(payload, tid, action="启动")
+
+    **为什么必须二次判定**：`require_perm_any("paper_trade", "live_control")` 只保证
+    「有其中**一个**键」。analyst 有 `paper_trade` ⇒ 能过粗筛 ⇒ 若不再判定，
+    analyst 就能**对实盘任务**执行启动/停止/删除——正是治理原则要禁止的越界。
+    本函数用任务的 mode 决定**该任务需要哪个键**，缺则 403。
+
+    返回该任务所需的键名（调用方可复用，避免二次查库）。
+    """
+    from .errors import ApiError
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        row = conn.execute("SELECT mode FROM live_task WHERE id=%s", (tid,)).fetchone()
+    if row is None:
+        raise ApiError(404, "TASK_NOT_FOUND", f"任务 {tid} 不存在")
+    mode = (row[0] or "live")
+    need = TASK_MODE_PERM.get(mode)
+    if need is None:
+        # unknown mode：fail-closed 按最严（live_control）处理，宁拒勿放。
+        need = "live_control"
+    role = payload.get("db_role") or payload.get("role", "viewer")
+    have, _ = load_effective_permissions(payload.get("username", ""), role)
+    if need not in have:
+        raise ApiError(403, "PERM_DENIED",
+                       f"{action}该任务（mode={mode}）需要 {need} 权限，角色 {role} 无")
+    return need
+
+
+# ——— JWT ———
 def create_jwt(user_id: str, username: str, role: Role) -> str:
     import uuid
     payload = {

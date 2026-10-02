@@ -138,12 +138,14 @@ _TD_BUILDERS = TD_BUILDERS
 
 
 def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, initial_capital,
-                  account_id=None, owner_username=None):
+                  account_id=None, owner_username=None, is_paper=False):
     """ST7 hub 模式 worker（设计 14 v2 §3）：TD-only 接入 + 流消费，SA/SB/SC 机制全复用。
 
     owner_username（批15）：live_task 归属人 → strategy.operator 实例属性 → order["operator"]
     → check_order 2.5 市场操作权限判定。旧 --id 路径无值=None → operator 空 → 2.5 拒单
-    critical（预期 fail-closed）。"""
+    critical（预期 fail-closed）。
+    is_paper（批 86-B）：paper 任务豁免 stub 硬闸 + paper_mode 注入（adapters/strategy）。
+    缺省 False=实盘语义——未显式传值的调用路径一律按实盘（fail-safe）。"""
     from vnpy.event import EventEngine
 
     from src.strategy_framework.broker import get_interface_row
@@ -197,23 +199,40 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     if rt is None:
         # 非 XTP：TD 网关未实现（加密 stub / EMT 仅 MD）→ 加密 stub 硬闸（D5 落）
         # 硬闸用「该 account 分项实盘开关」（总闸 AND provider 分项），非全局总闸（盲审 B：跨市场耦合）
-        from src.data_platform.settings import is_live_trading_enabled
-        if is_live_trading_enabled():
-            from src.data_platform.db import get_conn
-            with get_conn() as conn:
-                row = conn.execute(
-                    "SELECT enabled FROM live_trading_config WHERE market=%s", (provider,)).fetchone()
-            if row and row[0]:
-                logger.error("provider %s 的 TD 网关未实现（加密 stub 硬闸），拒绝启动", provider)
-                sys.exit(EX_CONFIG)
+        #
+        # 批 86-B：**paper 任务豁免本硬闸**。硬闸的语义是「该 provider 没有真网关，
+        # 若实盘开关是开的就说明有人以为能下单 ⇒ 拒绝启动」（防静默装死）。但 paper
+        # 任务**按定义就不打算下单** ⇒ 它落到 stub 是**预期行为而非故障** ⇒ 硬闸对它
+        # 只会造成「纸上交易永远起不来」（总闸一开、paper 全灭），是纯粹的功能性阻塞。
+        # ⇒ paper 直接进 stub 分支，不查开关。live 任务一字不改（原语义完整保留）。
+        if not is_paper:
+            from src.data_platform.settings import is_live_trading_enabled
+            if is_live_trading_enabled():
+                from src.data_platform.db import get_conn
+                with get_conn() as conn:
+                    row = conn.execute(
+                        "SELECT enabled FROM live_trading_config WHERE market=%s", (provider,)).fetchone()
+                if row and row[0]:
+                    logger.error("provider %s 的 TD 网关未实现（加密 stub 硬闸），拒绝启动", provider)
+                    sys.exit(EX_CONFIG)
         try:
             from src.strategy_framework.adapters import create_adapter
-            stub_adapter = create_adapter(provider)   # stub（is_live 关时仅启动不下单）
+            # stub（is_live 关时仅启动不下单）
+            # 批 86-B：paper 走同一 stub——**「不下单」这个机制本就在这里，本批只是把它的
+            # 触发条件从「全局总闸关」提升为「per-task 显式 mode」**（设计文档 §2.3）。
+            # ⚠️ stub 的 send_order 仍会触发 RiskControl.check_order（paper=True）——
+            # 见 adapters.py 的批 86-B 注记：走完整风控链是 paper 结论可信的前提。
+            stub_adapter = create_adapter(provider)
+            if is_paper:
+                stub_adapter.paper_mode = True   # 供 send_order 判「假装成交 + 落 paper_trade_log」
+                stub_adapter.paper_task_id = tid  # paper_trade_log 的外键
         except Exception as e:
             logger.error("provider %s 未注册 TD 适配器，拒绝启动: %s", provider, e)
             sys.exit(EX_CONFIG)
         rt = {"gw": None, "td_api": None, "adapter": stub_adapter, "setting": None,
               "td_open": True, "lead": None, "lag": None, "cfg_adapter": provider}
+        if is_paper:
+            logger.info("实盘任务 %s 以【纸上交易】模式启动：实时行情 + 完整风控链，订单不进入市场", tid)
 
     gw = rt["gw"]
     td_api = rt["td_api"]
@@ -233,6 +252,9 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     # D2：account 身份经实例属性注入（同 operator 模式）——读方 _held_volume 等按此过滤，
     # 未注入（None）时读方 `account_id=NULL` 恒 false → 返回 0/空（fail-closed 不混仓）
     strategy.account_id = account_id
+    # 批 86-B：paper 标记注入（同 operator/account_id 模式）——place_order 读它决定
+    # 是否让 check_order 跳过「实盘开关」一级。**未注入时 getattr 默认 False=实盘语义**（fail-safe）。
+    strategy.paper_mode = is_paper
 
     # 评审 C2：冻结的真实抓手——包 adapter.send_order（下单唯一咽喉，strategy.place_order 必经）。
     # S6 修订（2026-08-18）：两段判定——①sticky 冻结（untrusted/gap=数据污染事实）BUY 拒/SELL 放；
@@ -363,16 +385,25 @@ def main():
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT id, name, strategy_id, symbol, params, strategy_snapshot, "
-            "status, account_id, initial_capital, owner_username FROM live_task WHERE id=%s",
+            "status, account_id, initial_capital, owner_username, mode FROM live_task WHERE id=%s",
             (args.task_id,))
         row = cur.fetchone()
     if not row:
         logger.error("实盘任务 %s 不存在", args.task_id)
         sys.exit(EX_CONFIG)
-    tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id, initial_capital, owner_username = row
+    (tid, task_name, strategy_id, symbol, task_params_raw, snapshot_raw, status, account_id,
+     initial_capital, owner_username, task_mode) = row
     if status == "stopped":
         logger.info("实盘任务 %s 已停止，退出", tid)
         sys.exit(0)
+    # 批 86-B：纸上交易（paper trading）与实盘的唯一分叉点。
+    # 取值由 0125 迁移的 CHECK 锁为 {live, paper}；未定义值理论上不可达，
+    # 但按 fail-closed 处理——宁拒勿错（避免未知值被当作 live 真的下单）。
+    task_mode = (task_mode or "live")
+    if task_mode not in ("live", "paper"):
+        logger.error("实盘任务 %s 的 mode 非法: %r（0125 CHECK 应已拦截），拒绝启动", tid, task_mode)
+        sys.exit(EX_CONFIG)
+    is_paper = task_mode == "paper"
     task_params = _json.loads(task_params_raw) if isinstance(task_params_raw, str) else (task_params_raw or {})
     snapshot = _json.loads(snapshot_raw) if isinstance(snapshot_raw, str) else (snapshot_raw or {})
     # 从快照构建 StrategyConfig 参数
@@ -412,7 +443,7 @@ def main():
     _run_hub_mode(sid=sid, tid=tid, name=name, s_type=s_type, symbol=symbol,
                   factors=factors, aggregator=aggregator, params=params,
                   initial_capital=initial_capital, account_id=account_id,
-                  owner_username=owner_username)
+                  owner_username=owner_username, is_paper=is_paper)
     return
 
 

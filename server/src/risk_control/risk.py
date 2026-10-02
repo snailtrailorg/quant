@@ -226,14 +226,26 @@ class RiskControl:
                 "AND enabled AND deleted_at IS NULL", (username,)).fetchone()
         return row[0] if row else None
 
-    def check_order(self, order: dict, account_id=None) -> RiskDecision:
+    def check_order(self, order: dict, account_id=None, *, paper: bool = False) -> RiskDecision:
         """所有自动交易 send_order 前必调。
 
         P1-1（web-design 06 B#2）：出口统一落 risk_log（approve/reject/adjust 可筛）——
         风控页决策面板数据源。写库失败只 warning 不阻断下单路径（日志是审计面非控制面）。
         D2：account_id 为读方/写方 per-account 过滤真源（order 内 "account_id" 键同源，由 place_order 注入）。
+
+        批 86-B `paper`（纸上交易模式，默认 False=现行为零回归）：
+        **走完整风控链，仅跳过第 2 步「实盘开关」**。理由：第 2 步检查的是「能不能动真钱」
+        （`.env` 总闸 AND 分项），而 paper **按定义不动钱** ⇒ 若照走，paper 每单都会被
+        `LIVE_SWITCH_OFF` 拒掉，根本到不了第 3/4 步的仓位/日亏/频次判定 ⇒「走完整风控链」
+        退化成「验证了实盘开关会拒绝一切」，零信息量。
+        熔断(1)/市场操作权限(2.5)/账户品种权限(2.6)/全局风控(3)/分市场(4) **全部照走**。
+        风险预算隔离不在此处实现——由「paper 任务绑定独立虚拟账户」达成，
+        因为全链预算读取本就按 account_id 分桶（见 `flow/任务/批86B-命名裁决.md` §7.3）。
+
+        ⚠️ 用**显式关键字形参**而非在 order 里加 `mode` 键：order 是跨进程可变结构，
+        加键会被 `**order` 透传/日志序列化/测试断言集扫到，是扩散型隐式契约。
         """
-        d = self._check_order_inner(order, account_id)
+        d = self._check_order_inner(order, account_id, paper=paper)
         try:
             # 批19 盲审A-P1 修：按 adjusted 语义判（原 "截断" in reason——场内"截断后 volume=0"
             # 的拒单被记 adjust、真覆写(approved+adjusted)被记 approve，同码横跨三 action）
@@ -249,7 +261,7 @@ class RiskControl:
             logger.warning("risk_log 写入失败（不阻断）: %s", e)
         return d
 
-    def _check_order_inner(self, order: dict, account_id=None) -> RiskDecision:
+    def _check_order_inner(self, order: dict, account_id=None, *, paper: bool = False) -> RiskDecision:
         # SB2（F-23）：规则热加载（60s TTL，失败沿用旧规则）
         self._maybe_reload_rules()
         # 1. 熔断检查
@@ -264,11 +276,13 @@ class RiskControl:
             return RiskDecision(approved=False, reason=f"熔断中: {_halt_reason}", severity="critical", rule="HALTED")
 
         # 2. 实盘开关（三级 AND：.env 总闸 + Web 分项 live_trading_config）
+        # 批 86-B：**paper 跳过本步**（唯一跳过的一步）——语义是「能不能动真钱」，
+        # paper 按定义不动钱；不跳过则 paper 单全被 LIVE_SWITCH_OFF 拒，风控链走不到 3/4 步。
         symbol = order.get("symbol", "")
         market = self._market_of(symbol)
         if market is None:
             return RiskDecision(approved=False, reason=f"未授权实盘品种或 A 股只读: {symbol}", severity="critical", rule="MARKET_UNAUTHORIZED")
-        if not self.is_live_trading_allowed(market):
+        if not paper and not self.is_live_trading_allowed(market):
             return RiskDecision(approved=False, reason=f"实盘开关未开: {market}（需 .env ENABLE_LIVE_TRADING=true 且 Web 分项开启）", severity="warn", rule="LIVE_SWITCH_OFF")
 
         # 2.5 市场操作权限（批15 market_op 维；SELL/平仓完全豁免——F-31 同哲学：准入拦

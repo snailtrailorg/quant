@@ -167,6 +167,14 @@ export const getFreezeEvents = (id, limit = 20) => api.get(`/live-task/${id}/fre
 // 批 76b：真解冻入口——写 Valkey 请求键、worker 5s 内消费、**不重启任务**、记 manual_web。
 // ⚠️ 勿用 start/stop 替代：那走 restart 闭环（operator 空、方式错记为 restart），是审计失真。
 export const unfreezeLiveTask = id => api.post(`/live-task/${id}/unfreeze`)
+// 批 86-B：编辑任务（仅 name/initial_capital/params——strategy_id/symbol/account_id/mode 不可改，
+// 后端显式 400 FIELD_IMMUTABLE：它们决定已启动进程的身份，改=删掉重建）
+export const updateLiveTask = (id, data) => api.put(`/live-task/${id}`, data)
+
+// 批 86-B：纸上交易（paper trading）——实时行情驱动、完整风控链、订单不进市场（影子撮合）。
+// 列表只含 mode='paper' 任务；equity 曲线是**已实现**现金流回算（不含浮动盈亏，页面须注明）。
+export const getPaperTasks = (status) => api.get('/paper-trade', { params: status ? { status } : {} })
+export const getPaperEquity = (id) => api.get(`/paper-trade/${id}/equity`)
 
 // 系统配置（admin 可改，celery_concurrency 支持动态生效）
 export const getSystemConfig = () => api.get('/system-config')

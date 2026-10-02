@@ -566,8 +566,179 @@ chk "upgrade 渲染含幂等子句" "$(grep -c 'ON CONFLICT DO NOTHING' "$tmp/up
 rm -rf "$tmp"
 }
 
+# ── 用例 K：0125/0126/0127 三连（批 86-B 纸上交易），2026-10-02 ──
+# 前置 = 0124 之后（live_control 行已在）。三连内容：
+#   0125 live_task+mode（CHECK 锁 live/paper）  0126 补种 paper_trade + nav 行
+#   0127 paper_trade_log 表 + trading_account.is_virtual + 虚拟账户 + 其 account_permission
+# 本用例的价值（不是「upgrade 没报错」）：
+#   ① mode 默认值：存量行**必须**被 DEFAULT 'live' 正确语义化（零回填立法的落点）；
+#   ② CHECK 拦截：mode='bogus' 必须**被拒**（非法值静默落库=本仓立法明令禁止），
+#     且 mode='paper' 正常放行（正反两面都要证）；
+#   ③ 两维行数：api（3 行）与 nav（6 行：paper-trade×4 + live-task×2）逐格断言；
+#   ④ 隔离真源：虚拟账户恰好 1 行 + 它的 account_permission 三维放行**非空**（0127 注释里
+#     「空数组=静默零权限」陷阱的直接防线）；真实账户行不被误标 is_virtual；
+#   ⑤ **强制复跑**（比 case_i 的「alembic 已在 head 再 upgrade」更狠）：stamp 回 0124 再
+#     upgrade——三个迁移在**已迁移过的 schema 上原样重执行**（对应「部署中断后重跑」的真实场景），
+#     依 IF NOT EXISTS / ON CONFLICT / WHERE NOT EXISTS 三重守卫须零副作用；
+#   ⑥ 降级回收：表/列/行四层全回收，且**不误伤**真实账户与其权限行。
+FROM_K=0124
+TO_K=0127
+
+fixture_paper() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+-- permission（prod 形状，0124 已应用的语义——含 live_control 两行）
+CREATE TABLE permission (
+  id BIGSERIAL PRIMARY KEY,
+  subject_type TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  dimension TEXT NOT NULL DEFAULT 'api',
+  resource TEXT NOT NULL,
+  effect TEXT NOT NULL DEFAULT 'allow',
+  note TEXT, updated_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (subject_type, subject_id, dimension, resource, effect));
+INSERT INTO permission (subject_type,subject_id,dimension,resource,effect,note) VALUES
+  ('role','viewer','api','read','allow','0056 seed'),
+  ('role','analyst','api','read','allow','0056 seed'),
+  ('role','analyst','api','strategy_control','allow','0056 seed'),
+  ('role','analyst','api','data_sync','allow','0056 seed'),
+  ('role','trader','api','read','allow','0056 seed'),
+  ('role','trader','api','strategy_control','allow','0056 seed'),
+  ('role','trader','api','halt','allow','0056 seed'),
+  ('role','trader','api','trade','allow','0056 seed'),
+  ('role','trader','api','live_trading_control','allow','0056 seed'),
+  ('role','admin','api','read','allow','0056 seed'),
+  ('role','admin','api','halt','allow','0056 seed'),
+  ('role','admin','api','alerts_config','allow','0061 seed'),
+  ('role','admin','api','live_control','allow','0124 seed'),
+  ('role','trader','api','live_control','allow','0124 seed');
+-- trading_account（0116 拆表后的形状，**无 is_virtual**——0127 才加）
+CREATE TABLE trading_account (
+  id bigserial PRIMARY KEY, name text NOT NULL, provider text NOT NULL, market text NOT NULL,
+  exchanges text[], account_key text, credentials_encrypted text, params jsonb,
+  capabilities text[] NOT NULL, position integer NOT NULL DEFAULT 0, enabled boolean DEFAULT true,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now());
+CREATE UNIQUE INDEX ix_trading_account_account_key ON trading_account (provider, account_key);
+INSERT INTO trading_account (name, provider, market, capabilities, account_key) VALUES
+  ('xtp主','xtp','astock','{trading,rt_quote}','8888');
+-- account_permission（真实形状：三维 NOT NULL DEFAULT '{}'——空数组=零权限的陷阱载体）
+CREATE TABLE account_permission (
+  account_id bigint PRIMARY KEY,
+  allowed_categories text[] NOT NULL DEFAULT '{}',
+  allowed_exchanges text[] NOT NULL DEFAULT '{}',
+  allowed_boards text[] NOT NULL DEFAULT '{}',
+  is_st_allowed boolean NOT NULL DEFAULT false,
+  convertible_allowed boolean NOT NULL DEFAULT false,
+  created_at timestamptz DEFAULT now(), updated_at timestamptz DEFAULT now(),
+  CONSTRAINT account_permission_account_id_fkey FOREIGN KEY (account_id)
+    REFERENCES trading_account(id) ON DELETE CASCADE);
+INSERT INTO account_permission (account_id, allowed_categories, allowed_exchanges, allowed_boards, is_st_allowed, convertible_allowed)
+  SELECT id, '{stock,etf}', '{SHSE,SZSE}', '{main,star}', false, false FROM trading_account WHERE provider='xtp';
+-- live_task（0116 后形状，**无 mode**——0125 才加）+ 一条存量行（验 DEFAULT 'live' 语义化）
+CREATE TABLE live_task (
+  id bigserial PRIMARY KEY, name text NOT NULL, strategy_id text, symbol text, params jsonb,
+  status text NOT NULL DEFAULT 'pending',
+  account_id bigint CONSTRAINT fk_live_task_account REFERENCES trading_account(id) ON DELETE RESTRICT,
+  initial_capital numeric, created_at timestamptz DEFAULT now());
+INSERT INTO live_task (name, status, account_id, initial_capital)
+  VALUES ('存量实盘任务', 'pending', (SELECT id FROM trading_account WHERE provider='xtp'), 1000000);
+SQL
+}
+
+case_k() {
+echo
+echo "########## 用例 K：0125/0126/0127 三连（mode 默认/CHECK/两维行数/隔离真源/强制复跑） ##########"
+reset_scratch
+fixture_paper
+stamp "$FROM_K"
+
+# --- K1 upgrade 0124→0127（三连一次跑完） ---
+step up "$TO_K" "K1 upgrade（0125+0126+0127）"
+chk "存量行 mode 被默认为 live（正确语义，非占位）" \
+  "$(q "select mode from live_task where name='存量实盘任务'")" "live"
+chk "live_task 的 CHECK 存在" \
+  "$(q "select count(*) from pg_constraint where conname='live_task_mode_chk' and connamespace=current_schema()::regnamespace")" "1"
+chk "paper_trade_log 表已建" \
+  "$(q "select count(*) from information_schema.tables where table_name='paper_trade_log' and table_schema=current_schema()")" "1"
+chk "paper_trade_log 复合索引已建" \
+  "$(q "select count(*) from pg_indexes where indexname='idx_paper_trade_log_task_ts' and schemaname=current_schema()")" "1"
+chk "真实账户未被误标 virtual" \
+  "$(q "select count(*) from trading_account where provider='xtp' and is_virtual=false")" "1"
+chk "虚拟账户恰好 1 行（provider=paper）" \
+  "$(q "select count(*) from trading_account where provider='paper' and is_virtual=true")" "1"
+chk "虚拟账户的三维放行非空（反『空数组=静默零权限』陷阱）" \
+  "$(q "select count(*) from account_permission ap join trading_account ta on ta.id=ap.account_id where ta.provider='paper' and array_length(ap.allowed_categories,1) >= 3 and array_length(ap.allowed_exchanges,1) >= 3 and array_length(ap.allowed_boards,1) >= 3")" "1"
+chk "api 维 paper_trade 恰 3 行（analyst/trader/admin，无 viewer）" \
+  "$(q "select count(*) from permission where dimension='api' and resource='paper_trade'")" "3"
+chk "viewer 无 paper_trade 行" \
+  "$(q "select count(*) from permission where subject_id='viewer' and resource='paper_trade'")" "0"
+chk "nav 维共 6 行（paper-trade×4 + live-task hidden×2）" \
+  "$(q "select count(*) from permission where dimension='nav' and resource in ('paper-trade','live-task')")" "6"
+chk "nav paper-trade readwrite × 三角色" \
+  "$(q "select count(*) from permission where dimension='nav' and resource='paper-trade' and effect='readwrite'")" "3"
+chk "nav paper-trade hidden × viewer" \
+  "$(q "select count(*) from permission where dimension='nav' and resource='paper-trade' and effect='hidden'")" "1"
+chk "nav live-task hidden × analyst+viewer" \
+  "$(q "select count(*) from permission where dimension='nav' and resource='live-task' and effect='hidden' and subject_id in ('analyst','viewer')")" "2"
+
+# --- K2 CHECK 拦截（反证 + 正证） ---
+if x "insert into live_task (name, status, mode) values ('非法mode', 'pending', 'bogus')"; then
+  echo "  ✗ CHECK 未拦截 mode='bogus'（非法值落库）"; FAIL=1
+else
+  echo "  ✓ CHECK 拦截 mode='bogus'"
+fi
+chk "非法行未落库" "$(q "select count(*) from live_task where name='非法mode'")" "0"
+if x "insert into live_task (name, status, mode) values ('纸上任务', 'pending', 'paper')"; then
+  echo "  ✓ mode='paper' 正常放行"
+else
+  echo "  ✗ mode='paper' 被误拒（CHECK 值域写错了）"; FAIL=1
+fi
+
+# --- K3 强制复跑（stamp 回 0124 再 upgrade：三迁移在已迁移 schema 上原样重执行） ---
+stamp "$FROM_K"
+step up "$TO_K" "K3 强制复跑（部署中断重跑场景）"
+chk "复跑后 mode 列仍 1 个（IF NOT EXISTS）" \
+  "$(q "select count(*) from information_schema.columns where table_name='live_task' and column_name='mode' and table_schema=current_schema()")" "1"
+chk "复跑后 CHECK 仍 1 个（DO \$\$ 幂等）" \
+  "$(q "select count(*) from pg_constraint where conname='live_task_mode_chk' and connamespace=current_schema()::regnamespace")" "1"
+chk "复跑后虚拟账户仍恰 1 行（WHERE NOT EXISTS）" \
+  "$(q "select count(*) from trading_account where provider='paper'")" "1"
+chk "复跑后 api paper_trade 仍 3 行（ON CONFLICT）" \
+  "$(q "select count(*) from permission where dimension='api' and resource='paper_trade'")" "3"
+chk "复跑后 nav 两资源仍 6 行" \
+  "$(q "select count(*) from permission where dimension='nav' and resource in ('paper-trade','live-task')")" "6"
+chk "复跑后总行数不变（permission=23：fixture 14 + api 3 + nav 6）" "$(q "select count(*) from permission")" "23"
+
+# --- K4 downgrade 0127→0124（四层回收 + 不误伤） ---
+step down "$FROM_K" "K4 downgrade（回收三连）"
+chk "paper_trade_log 已删" \
+  "$(q "select count(*) from information_schema.tables where table_name='paper_trade_log' and table_schema=current_schema()")" "0"
+chk "复合索引已删" \
+  "$(q "select count(*) from pg_indexes where indexname='idx_paper_trade_log_task_ts' and schemaname=current_schema()")" "0"
+chk "is_virtual 列已删" \
+  "$(q "select count(*) from information_schema.columns where table_name='trading_account' and column_name='is_virtual' and table_schema=current_schema()")" "0"
+chk "虚拟账户行已删（真实账户保留）" \
+  "$(q "select count(*) from trading_account")" "1"
+chk "真实账户的 account_permission 保留（不误伤）" \
+  "$(q "select count(*) from account_permission")" "1"
+chk "api paper_trade 行已清" \
+  "$(q "select count(*) from permission where dimension='api' and resource='paper_trade'")" "0"
+chk "nav paper-trade 行已清" \
+  "$(q "select count(*) from permission where dimension='nav' and resource='paper-trade'")" "0"
+chk "nav live-task hidden 行已清" \
+  "$(q "select count(*) from permission where dimension='nav' and resource='live-task'")" "0"
+chk "mode 列已删（0125 降级）" \
+  "$(q "select count(*) from information_schema.columns where table_name='live_task' and column_name='mode' and table_schema=current_schema()")" "0"
+chk "CHECK 已删（0125 降级）" \
+  "$(q "select count(*) from pg_constraint where conname='live_task_mode_chk' and connamespace=current_schema()::regnamespace")" "0"
+chk "live_task 存量行仍在（降级不丢任务）" \
+  "$(q "select count(*) from live_task")" "2"
+chk "permission 总行数回到 14" "$(q "select count(*) from permission")" "14"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K） ##########"
 precheck
 case_a
 case_b
@@ -579,4 +750,5 @@ case_g
 case_h
 case_i
 case_j
+case_k
 finish

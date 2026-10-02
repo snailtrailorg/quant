@@ -1,5 +1,5 @@
 """批 70：M6 退役测试钉（删干净+告警翻转当日窗+pub 键单账户来源+perm 退役）。"""
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 class TestRetirement:
@@ -20,7 +20,8 @@ class TestRetirement:
     def test_nav_key_retired(self):
         from src.data_platform.perm_registry import NAV_ITEMS_BASE
         ids = {e["id"] for e in NAV_ITEMS_BASE}
-        assert "trade-switch" not in ids and len(ids) == 19
+        # 批 86-B：19 → 20（新增 paper-trade 入册，live 组 order 顺延）
+        assert "trade-switch" not in ids and len(ids) == 20
 
     def test_routing_endpoint_no_column(self):
         """P0-2 钉：routing 端点不再 SELECT 已 drop 列。"""

@@ -120,10 +120,14 @@
                灯会丢帧（短冻结整跳 ⇒ 想解冻却找不到入口）；与展开行同一 handler，无第二套语义。
                注：row.frozen 仍用于状态列的 ❄ 即时标记，两者用途不同（灯=此刻/账=历史）。 -->
           <IconBtn size="small" type="warning" :icon="Unlock" :title="t('liveTask.unfreeze')" v-if="row.status === 'running' && freezing(row).length && canLive" @click="onUnfreeze(row)" :disabled="navReadonly" />
-          <!-- 查看结果：批86-B 的实测权益曲线落位点。当前 disabled 常显——
-               不藏（藏了让人以为没有这个能力）、不静默（静默死按钮是本仓在录缺陷类）。
-               语义色用 ''（品牌蓝）而非 success：非成交/非盈利反馈，借 success 会污染「success=操作反馈」的约定。 -->
-          <IconBtn size="small" :icon="TrendCharts" :title="t('liveTask.viewResult')" disabled />
+          <!-- 查看结果：批 86-B 拆页后**从本页移除**。原批 86-UI 留的 disabled 占位
+               （「不藏、不静默」）其前提是 paper 任务还混在本列表里；现在本列表只含
+               mode='live'（后端过滤），而权益曲线是 paper_trade_log 的产物——实盘任务
+               没有这个能力，常显 disabled 就是本仓在录的「死按钮」缺陷类。真按钮在纸上交易页。
+               编辑（批 86-B 端点 PUT /api/live-task/{tid} 已落）：仅 name/资金/params，
+               身份字段（strategy_id/symbol/account_id/mode）不可改=后端 400。 -->
+          <IconBtn size="small" :icon="Edit" :title="t('common.edit')"
+                   v-if="row.status !== 'running' && canLive" @click="openEdit(row)" :disabled="navReadonly" />
           <!-- 删除：入口即语义（原藏在名为「更多」的弹窗里，且弹窗内只有删除这一件事）。
                running 中不允许删——后端会拒（任务在跑先停），故此处直接不显示，避免 403 死胡同。 -->
           <IconBtn size="small" type="danger" :icon="Delete" :title="t('common.delete')"
@@ -188,6 +192,28 @@
         <el-button type="primary" @click="save" :loading="saving" :disabled="navReadonly">{{ t('liveTask.createBtn') }}</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批 86-B：编辑任务弹窗——身份字段（策略/标的/账户/mode）不出现于此（不可改=删除重建），
+         参数定义取自策略当前定义（与后端「按策略快照校验」可能存在策略被改后的窗口差，见 saveEdit 注释）。 -->
+    <el-dialog v-model="editVisible" :title="t('paperTrade.editTitle')" width="720px" :close-on-click-modal="false">
+      <el-form :model="editForm" label-width="120px" v-loading="saving">
+        <el-form-item :label="t('liveTask.taskName')">
+          <el-input v-model="editForm.name" :placeholder="t('liveTask.phName')" />
+        </el-form-item>
+        <el-form-item :label="t('liveTask.initialCapital')">
+          <el-input-number v-model="editForm.initial_capital" v-bind="CAPITAL_INPUT" />
+        </el-form-item>
+        <el-divider content-position="left">{{ t('liveTask.taskParams') }}</el-divider>
+        <ParameterForm v-if="editDefs.length" :defs="editDefs" v-model="editForm.params" />
+        <div v-else style="color: var(--text-secondary); font-size: var(--fs-foot)">
+          {{ t('paperTrade.noParamDefs') }}
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button type="primary" @click="editVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="saveEdit" :loading="saving" :disabled="navReadonly">{{ t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -196,14 +222,14 @@ import { ref, computed, onMounted, inject } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import api, { getLiveTasks, createLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getFreezeEvents, unfreezeLiveTask, getStrategies, getInterfaces, apiErr } from '../api'
+import api, { getLiveTasks, createLiveTask, updateLiveTask, startLiveTask, stopLiveTask, deleteLiveTask, getFreezeEvents, unfreezeLiveTask, getStrategies, getInterfaces, apiErr } from '../api'
 import { CAPITAL_INPUT } from '../utils/inputRanges'
 import ParameterForm from '../components/ParameterForm.vue'
 import StatusTag from '../components/StatusTag.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Plus, Unlock, VideoPlay, VideoPause, TrendCharts, Delete } from '@element-plus/icons-vue'
+import { Plus, Unlock, VideoPlay, VideoPause, Edit, Delete } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 
 const router = useRouter()
@@ -381,9 +407,42 @@ const onDelete = async (row) => {
   } catch (e) { ElMessage.error(apiErr(e, t('common.deleteFailed'))) }
 }
 
-// 批86-B 预留：编辑任务。当前**无端点**（PUT /api/live-task/{tid} 属批86-B）⇒ 这里什么都不留。
-// 本仓在录缺陷类：无消费者的死壳（幽灵端点 /live-task/{id}/detail 恒 404、toggleTimeline 无消费者）。
-// 半个编辑弹窗 + 禁用保存按钮同样是死壳，还会被误读成「只是暂时禁用」。批86-B 连端点一起落。
+// 批 86-B：编辑任务（原批86-UI 预留注释移除——端点已落，连按钮一起上）。
+// 可编辑=name/initial_capital/params；strategy_id/symbol/account_id/mode 是身份字段
+// （systemd 单元名绑 tid、策略快照建任务时固化、账户决定风控预算归属），改=删掉重建，
+// 后端对不可改字段显式 400 FIELD_IMMUTABLE（优于静默忽略）。
+// 参数定义取自策略当前定义；若策略在任务创建后被改过，服务端按**策略快照**校验（真源），
+// UI 定义与服务端不一致时以 400 PARAM_INVALID 为准——两处同错的窗口只在「策略建任务后被编辑」。
+const editVisible = ref(false)
+const editRow = ref(null)
+const editDefs = ref([])
+const editForm = ref({ name: '', initial_capital: 0, params: {} })
+const openEdit = (row) => {
+  editRow.value = row
+  editForm.value = {
+    name: row.name,
+    initial_capital: row.initial_capital ?? 0,
+    params: { ...(row.params || {}) },   // 现值回填（浅拷贝展开，防表格行被就地改）
+  }
+  const s = strategies.value.find(x => x.id === row.strategy_id)
+  editDefs.value = s?.params?.parameter_defs || []
+  editVisible.value = true
+}
+const saveEdit = async () => {
+  if (!editForm.value.name?.trim()) { ElMessage.warning(t('paperTrade.nameRequired')); return }
+  saving.value = true
+  try {
+    await updateLiveTask(editRow.value.id, {
+      name: editForm.value.name,
+      initial_capital: editForm.value.initial_capital,
+      params: editForm.value.params,
+    })
+    ElMessage.success(t('common.save') + ' ✓')
+    editVisible.value = false
+    await load()
+  } catch (e) { ElMessage.error(t('common.failed') + ': ' + apiErr(e)) }
+  finally { saving.value = false }
+}
 
 // 盲审A-P2-9：心跳年龄人性化（原裸秒数——stale 86400s 无读性）
 const fmtAge = (s) => {

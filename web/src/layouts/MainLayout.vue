@@ -82,7 +82,10 @@
 
           <el-sub-menu index="live">
             <template #title><el-icon><Monitor /></el-icon>{{ t('nav.gLive') }}</template>
-            <el-menu-item index="/live-task"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
+            <!-- 批 86-B：菜单可见性与后端闸同键（canPerm）——viewer/analyst 不显示实盘任务（后端
+                 list 端点同键收紧，nav hidden 行兜底），纸上交易对 analyst/trader/admin 显示。 -->
+            <el-menu-item index="/live-task" v-if="canPerm('live_control')"><el-icon><VideoPlay /></el-icon>{{ t('nav.liveTasks') }}</el-menu-item>
+            <el-menu-item index="/paper-trade" v-if="canPerm('paper_trade')"><el-icon><Document /></el-icon>{{ t('nav.paperTrade') }}</el-menu-item>
             <el-menu-item index="/trading"><el-icon><Coin /></el-icon>{{ t('nav.tradingDesk') }}</el-menu-item>
           </el-sub-menu>
 
@@ -132,7 +135,7 @@
 <script setup>
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
-         ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock,
+         ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock, Document,
          ChatDotRound, Bell, User, SwitchButton, Back, Grid, Guide } from '@element-plus/icons-vue'
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'

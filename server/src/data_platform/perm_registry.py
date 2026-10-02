@@ -21,18 +21,33 @@ _logger = logging.getLogger("data_platform.perm_registry")
 
 # ——— 代码底座（唯一字面量层） ———
 
-# api 权限键 14（顺序=原 all_keys 声明序——GET /permissions 供形保序等价）
+# api 权限键 15（顺序=原 all_keys 声明序——GET /permissions 供形保序等价）
 # 批 77 增 `live_control`（实盘面：起停实盘任务/策略进程、解冻）——从 `strategy_control` 拆出。
 # 起因：`strategy_control` 一键两域（研究面=写策略/因子/回测；实盘面=起 systemd 进程/解冻），
 # analyst 持该键即越界（「analyst 只能回测与实盘测试，不执行实盘交易」）。权限矩阵见
 # `flow/任务/批77-权限矩阵与实盘面分离.md` §四。
+# 批 86-B 增 `paper_trade`（纸上交易面）——**新增的第三个维**：
+#   跑**纸上任务**（paper mode：实时数据 + 完整风控 + 不下单）的能力。
+#   同时承载批 77 那句「analyst 只能回测和实盘测试」里的「实盘测试」职能（见下）。
+# 命名依据（业界规范，非自造词）：`flow/任务/批86B-命名裁决.md`。原拟名 `live_test` 已废
+# （`test` 无出处；且「实盘」修饰一个不下单的东西自相矛盾）。
+#
+# ⚠️ **曾拟增设第二个键 `strategy_pretest`（「策略前测」职能名），落码时撤销**：
+#    覆盖性闸门实测证明它是**零消费者的死键**（16 键里唯独它无端点绑定）——
+#    正是本仓在录的「声明有·真源无」缺陷家族（批 76/77 同型病第三形态）。
+#    按「不留死构件」立法，**职能标注不配拥有独立的 api 键**：键=端点准入，不是职责说明。
+#    ⇒ analyst 的「前测职责」由 `paper_trade` 这一个键承载（有端点为证），
+#      职责语义写在文档与界面文案里，不写进权限键表。
+# ⚠️ **加键必补表行**（批 77 P0）：迁移 `0126` 补 `permission` 表 api 维行。字典（PERMISSIONS）
+# 只是新环境兜底——表有行即完全盖住字典。
 API_PERM_KEYS: list[str] = [
     "read", "strategy_control", "live_control", "data_sync", "halt", "resume", "trade",
     "live_trading_control", "risk_rules", "user_mgmt",
     "system_config", "llm_config", "im_bots_config", "alerts_config",
+    "paper_trade",
 ]
 
-# nav 条目 17（id+分组码+序——与原 NAV_ITEMS 声明序逐项一致，A-P1-3 等价钉；
+# nav 条目 18（id+分组码+序——与原 NAV_ITEMS 声明序逐项一致，A-P1-3 等价钉；
 # group 字段名保留原样：PermMatrix 列 prop="group" 直绑，改名即列空）
 NAV_ITEMS_BASE: list[dict] = [
     {"id": "dashboard", "group": "base", "order": 1},
@@ -42,8 +57,14 @@ NAV_ITEMS_BASE: list[dict] = [
     {"id": "strategy", "group": "research", "order": 4},
     {"id": "backtest", "group": "research", "order": 5},
     {"id": "analysis", "group": "research", "order": 6},
+    # 批 86-B：纸上交易（paper-trade）**独立菜单项**，非实盘任务页的 tab。
+    # 理由（设计文档 §2.2.1）：tab 切换不经过路由 ⇒ nav 维管不到 tab 级 ⇒
+    # analyst 会陷入「设 hidden 连测试 tab 也进不去 / 保留则菜单名与内容不符」的两难。
+    # 独立页后：`live-task` 对 analyst hidden、`paper-trade` readwrite，
+    # analyst 的「实盘」组只剩纸上交易一项（达成「一个角色功能集中一组」）。
     {"id": "live-task", "group": "live", "order": 1},
-    {"id": "trading", "group": "live", "order": 2},
+    {"id": "paper-trade", "group": "live", "order": 2},
+    {"id": "trading", "group": "live", "order": 3},   # 批86-B：原 order 2，随 paper-trade 入册顺延
     {"id": "risk", "group": "riskgrp", "order": 1},
     {"id": "reconcile", "group": "riskgrp", "order": 2},
     {"id": "risk-rules", "group": "riskgrp", "order": 3},
@@ -160,15 +181,28 @@ def scan_perm_bindings(routers: list | None = None) -> list[dict]:
     for r in routers:
         for route in getattr(r, "routes", []):
             key = _extract_perm_key(getattr(route, "dependant", None))
-            if key:
+            if not key:
+                continue
+            # 批 86-B：多键绑定（`require_perm_any`）**展开成多条记录**，每条 `key` 仍是 str。
+            # 为什么不让 key 保持 list：本函数的消费者（`GET /permissions` 的绑定视图、
+            # 测试里的 `{x["key"] for x in b}` 集合化、drift 检查）**全都假定 key 是 str**
+            # ——返回 list 会直接抛 `TypeError: unhashable type: 'list'`（实测踩到）。
+            # 展开是**对外零契约变更**的解法：调用方看到的是「同一 path 有两条绑定」，语义正确。
+            keys = key if isinstance(key, list) else [key]
+            for k in keys:
                 out.append({"path": getattr(route, "path", ""),
                             "methods": sorted(getattr(route, "methods", None) or []),
-                            "key": key})
+                            "key": k})
     return out
 
 
-def _extract_perm_key(dependant) -> str | None:
-    """递归依赖树找 checker._perm_key（Dependant.call=闭包；Depends 对象在图中不保留）。"""
+def _extract_perm_key(dependant) -> str | list[str] | None:
+    """递归依赖树找 checker._perm_key（Dependant.call=闭包；Depends 对象在图中不保留）。
+
+    批 86-B：`_perm_key` **可为 list**（`require_perm_any` 牵涉多键时）——
+    原实现只认 str，list 会被当作 truthy 直接返回而下游 `not in known` 抛
+    `TypeError: unhashable type: 'list'`；drift 检查侧已按 list 展开处理。
+    """
     if dependant is None:
         return None
     call = getattr(dependant, "call", None)
@@ -183,7 +217,11 @@ def _extract_perm_key(dependant) -> str | None:
 
 
 def check_binding_drift(routers: list | None = None) -> list[str]:
-    """防漂移闸：绑定键集 ⊆ 注册表 api 键集——违例清单（启动告警+测试断言共用）。"""
+    """防漂移闸：绑定键集 ⊆ 注册表 api 键集——违例清单（启动告警+测试断言共用）。
+
+    批 86-B：多键绑定已在 `scan_perm_bindings` 内展开成多条 str 记录，
+    故此处无需特判（key 恒为 str）。
+    """
     reg = load_registry()
     known = set(reg["api"])
     return [f"{b['path']} → {b['key']}" for b in scan_perm_bindings(routers)

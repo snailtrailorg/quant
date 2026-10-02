@@ -91,12 +91,25 @@ def row_dict(r, kind: str, with_code_caps: bool = True) -> dict:
 
 
 def list_rows(kind: str, cap: str | None = None) -> list:
-    """本域行原始元组列表（cap=GIN 包含式过滤；值域校验在路由层做，避免静默空表）。"""
+    """本域行原始元组列表（cap=GIN 包含式过滤；值域校验在路由层做，避免静默空表）。
+
+    批 86-B：**交易域过滤虚拟账户**（`is_virtual = true` 的行不出列表）。
+    虚拟账户（纸上交易用）不是用户可管理的账号——它出现在「建任务绑账号」下拉里，
+    管理员可能给一个**实盘任务**选上它 ⇒ 该实盘任务的风控预算变成空虚拟账户 ⇒
+    **风控形同关闭**。⇒ 从源头（列表）就不可见，比在前端过滤更可靠
+    （前端过滤只挡 UI，直连 API 仍可读；且后端 `create_live_task` 也须拒绝，见 trading.py）。
+    `data_source` 表无该列，故按 kind 判定。
+    """
     sql = f"SELECT {_READ_COLS[kind]} FROM {_tbl(kind)}"
     args: tuple = ()
+    conds: list[str] = []
     if cap:
-        sql += " WHERE capabilities @> ARRAY[%s]::text[]"
+        conds.append("capabilities @> ARRAY[%s]::text[]")
         args = (cap,)
+    if kind == KIND_TRADING:
+        conds.append("is_virtual = false")
+    if conds:
+        sql += " WHERE " + " AND ".join(conds)
     sql += " ORDER BY position, id"
     with get_conn() as conn:
         return conn.execute(sql, args).fetchall()

@@ -46,7 +46,44 @@ class Position:
 
 
 class ExecutionAdapter(ABC):
-    """执行适配器抽象。查询类默认空实现，子类按需 override。"""
+    """执行适配器抽象。查询类默认空实现，子类按需 override。
+
+    批 86-B `paper_mode`：纸上交易标记（默认 False=现行为）。`main.py` 在
+    `live_task.mode='paper'` 时置 True。语义=「实时行情 + 完整风控链 + 订单不进入市场」，
+    即业界 `paper trading`（见 `flow/任务/批86B-命名裁决.md`）。声明在**基类**而非
+    某个子类，因为它是**模式**（横切所有适配器），不是某种渠道的特性。
+    """
+
+    # 批 86-B：纸上交易模式标记（类级默认，main.py 按 live_task.mode 覆盖实例属性）
+    paper_mode: bool = False
+    # 批 86-B：live_task.id 注入位（同 paper_mode，main.py 注入）——paper_trade_log 的外键。
+    # 未注入（None）时 _log_paper_fill 记 0 并告警，不静默丢（可观测优先于静默）。
+    paper_task_id: int | None = None
+
+    def _log_paper_fill(self, order: Order) -> None:
+        """批 86-B：纸上下单落 `paper_trade_log`（假装成交的审计真源）。
+
+        **失败不阻断下单路径**（对齐 risk_log 的哲学：日志是审计面非控制面）——
+        paper 任务的核心价值是「跑通链路」，记账失败不应让链路停摆；但**必须告警**，
+        因为丢记录会让权益曲线缺数据（静默缺 = 曲线不可信）。
+        """
+        try:
+            from src.data_platform.db import get_conn
+            tid = self.paper_task_id
+            if tid is None:
+                logger.warning("paper 成交记账缺 live_task_id，记录将被丢弃（订单 %s %s）",
+                               order.symbol, order.action)
+                return
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO paper_trade_log "
+                    "(live_task_id, symbol, action, volume, price, reason) "
+                    "VALUES (%s,%s,%s,%s,%s,%s)",
+                    (tid, order.symbol, order.action, order.volume, order.price,
+                     "纸上成交（订单未进入市场）"))
+                conn.commit()
+        except Exception as e:
+            logger.warning("paper_trade_log 写入失败（不阻断）: %s", e)
 
     @abstractmethod
     def send_order(self, order: Order) -> str:
@@ -155,6 +192,14 @@ class XTPAdapter(ExecutionAdapter):
 
     def send_order(self, order: Order) -> str:
         if self._gateway is None:
+            # 批 86-B：gateway=None 的 stub 形态=「订单不进入市场」的既有实现。
+            # paper 模式下额外落一行 `paper_trade_log`（假装成交的审计真源）——
+            # 权益曲线（「查看结果」）从这里回算。
+            # ⚠️ **此处不调 check_order**——风控在 strategy.place_order 已前置调用过
+            # （唯一咽喉，`strategy.py:437`），在此重复调用会造成「同一单两次风控判定」
+            # 与双份 risk_log。本分支只负责**记账**。
+            if self.paper_mode:
+                self._log_paper_fill(order)
             return f"mock-{order.symbol}-{order.action}"
         from vnpy.trader.constant import Direction, Offset, OrderType
         from vnpy.trader.object import OrderRequest

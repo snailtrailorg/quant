@@ -21,7 +21,11 @@ const routes = [
 
       // 策略
       { path: 'strategy', name: 'strategy', component: () => import('./views/Strategy.vue') },
-      { path: 'live-task', name: 'live-task', component: () => import('./views/LiveTask.vue') },
+      // 批 86-B：两页读写同门分档——实盘任务面=live_control（analyst/viewer 连只读都不可见，
+      // 治理裁定「造策略的人≠验策略的人」）；纸上交易面=paper_trade（analyst 的前测主场）。
+      // meta.perm 是**路由门**（第二层），API 闸在后端（第三层），nav hidden 行在 DB（第一层）。
+      { path: 'live-task', name: 'live-task', component: () => import('./views/LiveTask.vue'), meta: { perm: 'live_control' } },
+      { path: 'paper-trade', name: 'paper-trade', component: () => import('./views/PaperTrade.vue'), meta: { perm: 'paper_trade' } },
       // 批76 F2：IM 发起解冻 → Web 登录态确认页（token 一次性；perm 门与后端端点同键）
       { path: 'unfreeze-confirm', name: 'unfreeze-confirm', component: () => import('./views/UnfreezeConfirm.vue'), meta: { perm: 'strategy_control' } },
       { path: 'backtest', name: 'backtest', component: () => import('./views/Backtest.vue') },

@@ -15,6 +15,9 @@ count_fs()   { grep -rEo "font-size: ?[0-9.]+(px|em|rem|%)" web/src/views/ web/s
 # 用 EP 语义色替代本仓令牌/IconBtn tone，色漂移永不告警（批86 实证：LiveTask 操作列 4 处）。
 # 只数 el-button 起始标签内的语义三色：primary 是 EP 主色非语义分档，info 是中性，均不计。
 # 与 IconBtn 的关系：IconBtn 的 tone 是唯一受批的语义色入口（内部用 EP 变量，本身不产生 type= 字面量）。
+# 豁免类（计数存在、随批显式落基线）：**弹窗 footer 的强确认按钮**（如删除「输入任务名」确认，
+# 批16 裁定的站内最强确认，语义红是设计约定非行内色漂移；LiveTask/PaperTrade 删除弹窗各 1）。
+# 本门防的是**行内动作按钮**绕开 IconBtn 用 type= 上色，不是禁掉 footer 确认。
 count_btn_type() { grep -rEoh "<el-button[^>]*type=\"(success|warning|danger)\"" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | wc -l; }
 PX=$(count_px); HEX=$(count_hex); FS=$(count_fs); BTN=$(count_btn_type)
 if [ "${1:-}" = "--update" ]; then

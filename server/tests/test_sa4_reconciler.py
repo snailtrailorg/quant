@@ -63,7 +63,9 @@ class TestExitCodes:
         conn = MagicMock()
         conn.__enter__.return_value = conn
         cur = MagicMock()
-        cur.fetchone.return_value = (8, "t", 1, "600000.SHSE", "{}", "{}", "stopped", None, None, "admin")
+        # 批 86-B：SELECT 加了 mode 列（main.py 任务模式分派）⇒ 桩行 10 → 11 元组；
+        # 存量任务语义 = 'live'（0125 的 DEFAULT 'live' 即此意）
+        cur.fetchone.return_value = (8, "t", 1, "600000.SHSE", "{}", "{}", "stopped", None, None, "admin", "live")
         conn.execute.return_value = cur
         with patch.object(m, "_wait_for_deps", return_value=True), \
              patch("src.data_platform.db.get_conn", return_value=conn), \
@@ -193,9 +195,8 @@ class TestSa4Reconciler:
             call("reset-failed", "quant-live-task@8.service"),
             call("start", "quant-live-task@8.service"),
         ]
-        key = "quant:sa4:backoff:quant-live-task@8.service"
-        mapping = valkey.hset.call_args.kwargs["mapping"]
-        assert mapping["attempts"] == 1
+        assert valkey.hset.call_args.args[0] == "quant:sa4:backoff:quant-live-task@8.service"
+        assert valkey.hset.call_args.kwargs["mapping"]["attempts"] == 1
 
     def test_backoff_window_blocks_restart(self):
         """计数 attempts=1 且 ts=now（300s 窗口内）-> 跳过不拉起。"""
@@ -223,7 +224,7 @@ class TestSa4Reconciler:
         with patch.object(T, "_sa4_units", side_effect=lambda s: {
                 "failed": ["quant-live-task@8.service"], "active": []}[s]), \
              patch.object(T, "get_conn", return_value=conn), \
-             patch.object(T, "_sa4_systemctl", return_value=_cp()) as p_sys, \
+             patch.object(T, "_sa4_systemctl", return_value=_cp()), \
              patch("redis.Redis.from_url", return_value=valkey), \
              patch("src.alert_notify.notify"):
             result = T.sa4_reconciler()
@@ -402,7 +403,6 @@ class TestDesiredUnits:
 class TestL3HubReconcile:
     def test_drift_starts_hub(self):
         """hub 常开期望 + systemd 无实例 -> L3 拉起 + 退避计数写共键 attempts=1。"""
-        from src.scheduler import tasks as T
         valkey = _mk_valkey2()
         result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey, sys_return=_cp())
         assert result.get("l3_restarted") == [HUB_UNIT]
@@ -412,7 +412,6 @@ class TestL3HubReconcile:
 
     def test_hub_backoff_window_skips(self):
         """hub 退避与 L1 共键：attempts=1 且 300s 窗口内 -> l3_skipped 不拉不写计数。"""
-        from src.scheduler import tasks as T
         key = "quant:sa4:backoff:" + HUB_UNIT
         valkey = _mk_valkey2(counter={key: {"attempts": "1", "ts": str(time.time())}})
         result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey)
@@ -422,9 +421,8 @@ class TestL3HubReconcile:
 
     def test_l3_start_failed_stderr_and_alert(self):
         """P2(G4 ④a): systemctl start 失败 -> l3_failed 含 stderr + 告警发出(原版静默丢弃)。"""
-        from src.scheduler import tasks as T
         valkey = _mk_valkey2()
-        result, _, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), 
+        result, _, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]),
             valkey=valkey,
             sys_return=_cp(returncode=1, stderr="Start request repeated too quickly"),
         )
@@ -436,7 +434,6 @@ class TestL3HubReconcile:
 
     def test_stable_clear_generalized_to_hub(self):
         """stable-clear 泛化（D1 v2 修）：hub 稳定 active 超 10min -> 共键计数被清。"""
-        from src.scheduler import tasks as T
         key = "quant:sa4:backoff:" + HUB_UNIT
         valkey = _mk_valkey2(counter={key: {"attempts": "3", "ts": str(time.time() - 3600)}})
         result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), active=[HUB_UNIT], valkey=valkey)
@@ -445,7 +442,6 @@ class TestL3HubReconcile:
 
     def test_lease_held_skips_without_backoff_write(self):
         """租约残留（对端实例在场）-> 让位跳过且不写退避计数（正常让位不受惩罚）。"""
-        from src.scheduler import tasks as T
         valkey = _mk_valkey2(exists={"hub:lease:4": 1})   # 批 66b：per-account 租约键（@4 数字实例名）
         result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey, sys_return=_cp())
         assert result.get("l3_guards", {}).get(HUB_UNIT) == "lease-held"
@@ -454,7 +450,6 @@ class TestL3HubReconcile:
 
     def test_maintenance_marker_skips_and_alerts(self):
         """维护标记在场 -> 跳过 + 告警（写去重键，人工维护窗不打扰）。"""
-        from src.scheduler import tasks as T
         valkey = _mk_valkey2(exists={"quant:maintenance:md-hub:4": 1})   # per-account 维护键
         result, p_sys, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey=valkey)
         assert result.get("l3_guards", {}).get(HUB_UNIT) == "maintenance"
@@ -464,7 +459,6 @@ class TestL3HubReconcile:
 
     def test_valkey_down_fail_closed(self):
         """Valkey 不可达 -> fail-closed：hub 跳过不盲拉（防双实例破坏 fencing）+ 告警。"""
-        from src.scheduler import tasks as T
         result, p_sys, p_notify = _run_l3(conn=_mk_conn2(crypto_ids=[4]), valkey_error=True, sys_return=_cp())
         assert result.get("l3_guards", {}).get(HUB_UNIT) == "valkey-down"
         p_sys.assert_not_called()
@@ -472,7 +466,6 @@ class TestL3HubReconcile:
 
     def test_hub_active_not_pulled(self):
         """hub 在场（active）-> 期望已满足不拉（常开语义≠重复拉）。"""
-        from src.scheduler import tasks as T
         result, p_sys, _ = _run_l3(conn=_mk_conn2(crypto_ids=[4]), active=[HUB_UNIT])
         p_sys.assert_not_called()
         assert "l3_restarted" not in result and "l3_guards" not in result
@@ -481,7 +474,6 @@ class TestL3HubReconcile:
 class TestL3FailedStates:
     def test_failed_78_skipped_manual(self):
         """hub failed + ExecMainStatus=78 -> 不拉 + 告警人工（D1 v2 P0-1：78 黑洞不自动拉）。"""
-        from src.scheduler import tasks as T
 
         def _sys(*args):
             return _cp(stdout="78\n") if args[0] == "show" else _cp()
@@ -493,7 +485,6 @@ class TestL3FailedStates:
 
     def test_failed_crash_reset_and_start(self):
         """hub failed + ExecMainStatus=1（崩溃/StartLimit 打穿）-> reset-failed + start + 计数。"""
-        from src.scheduler import tasks as T
 
         def _sys(*args):
             return _cp(stdout="1\n") if args[0] == "show" else _cp()
@@ -578,7 +569,7 @@ class TestL3LiveTaskBoundary:
              patch.object(T, "_sa4_strategy_unit_files", return_value=[]), \
              patch("redis.Redis.from_url", return_value=r), \
              patch("src.alert_notify.notify"):
-            result = T.sa4_reconciler()
+            T.sa4_reconciler()
         starts = [a for a in calls if a and a[0] == "start"]
         resets = [a for a in calls if a and a[0] == "reset-failed"]
         # L1 恰一组（reset-failed + start live-task@8）；L3 对 live_task continue 不重复拉

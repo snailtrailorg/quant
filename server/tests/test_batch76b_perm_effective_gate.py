@@ -63,6 +63,17 @@ _PROD_SHAPED_ROWS = [
 # 顺序敏感：先证**补种前的形状会红**（见 TestGateCatchesRegression），再证补种后绿。
 _MIGRATION_0124_ADDS = [("admin", "live_control", "allow"), ("trader", "live_control", "allow")]
 
+# 迁移 0126 补种的键（批 86-B 纸上交易键）——同 0124 的模式：
+# 这是**字典/表脱钩**那个 P0 的同型病防线，任何新 api 键都必须在此登记才可能「绿」。
+# 顺序：0124 之后。
+# ⚠️ 原含 `strategy_pretest` 三行，**落码时撤销**——覆盖性闸门证明它是零消费者死键
+#    （16 键里唯独无端点绑定），按「不留死构件」并入 `paper_trade`。
+_MIGRATION_0126_ADDS = [
+    ("analyst", "paper_trade", "allow"),
+    ("trader", "paper_trade", "allow"),
+    ("admin", "paper_trade", "allow"),
+]
+
 # 有意为之的「全局零持有」键——每条必须写理由，防闸门被当成绊脚石而整体关掉。
 # 当前为空：真源 `API_PERM_KEYS` 的 14 键都该有人持有（batch33b 注册表闸另有 170+ 绑定断言）。
 _NO_HOLDER_OK: dict[str, str] = {}
@@ -97,10 +108,20 @@ def _post_0124():
     return _PROD_SHAPED_ROWS + _MIGRATION_0124_ADDS
 
 
+def _post_0126():
+    """0124 + 0126 全部补种后的形状（当前 head 语义）。"""
+    return _PROD_SHAPED_ROWS + _MIGRATION_0124_ADDS + _MIGRATION_0126_ADDS
+
+
 def _collect_perm_bindings():
-    """扫全部路由源码，抽 `require_perm("k")` 字面量 → {key: [endpoint 描述]}。
+    """扫全部路由源码，抽 perm 绑定 → {key: [endpoint 描述]}。
 
     真源=源码文本（与 batch33b `scan_perm_bindings` 同思路，此处自抽以保持测试独立）。
+
+    批 86-B：**同时认 `require_perm` 与 `require_perm_any`**。
+    `require_perm_any("paper_trade", "live_control")` 在原正则下**完全不可见**
+    ⇒ 那 4 个任务写端点会从本闸门的视野里消失（覆盖性断言假绿）。
+    多键绑定的每个键都计入（语义：该端点**同时**属于这两个键的面）。
     """
     import pathlib
     import src.web_api.routes as routes_pkg
@@ -109,8 +130,14 @@ def _collect_perm_bindings():
     root = pathlib.Path(routes_pkg.__file__).parent
     for pyf in sorted(root.glob("*.py")):
         text = pyf.read_text(encoding="utf-8")
+        # 单键形态
         for m in re.finditer(r'require_perm\(\s*["\']([a-z_]+)["\']\s*\)', text):
             out.setdefault(m.group(1), []).append(f"{pyf.name}:{text[:m.start()].count(chr(10)) + 1}")
+        # 批 86-B 多键形态（require_perm_any 的每个位置参数都是一个被依赖的键）
+        for m in re.finditer(r'require_perm_any\(([^)]*)\)', text):
+            line = text[:m.start()].count(chr(10)) + 1
+            for km in re.finditer(r'["\']([a-z_]+)["\']', m.group(1)):
+                out.setdefault(km.group(1), []).append(f"{pyf.name}:{line}")
     return out
 
 
@@ -121,7 +148,7 @@ class TestEveryPermKeyIsHoldable:
     """
 
     def test_all_keys_holdable_after_0124(self):
-        roles = _resolve(_post_0124())
+        roles = _resolve(_post_0126())
         held = set()
         for perms in roles.values():
             held |= perms
@@ -143,7 +170,7 @@ class TestEveryPermKeyIsHoldable:
         真正防回归的是上面的 orphans 断言。
         """
         from src.data_platform.perm_registry import API_PERM_KEYS
-        roles = _resolve(_post_0124())
+        roles = _resolve(_post_0126())
         # 字典侧：admin = 注册表全键（派生式，不应漂移）
         assert perms_mod.PERMISSIONS["admin"] == set(API_PERM_KEYS), \
             "admin 字典未与注册表同步（admin 应为 set(API_PERM_KEYS) 派生）"
@@ -155,25 +182,50 @@ class TestLiveControlEffectiveInTablePath:
     """② 批 77 多面同键契约的**表路径**半边（源码闸门测不到的那半）。"""
 
     def test_trader_and_admin_hold_live_control(self):
-        roles = _resolve(_post_0124())
+        roles = _resolve(_post_0126())
         assert "live_control" in roles["admin"], "admin 无 live_control ⇒ 实盘面 8 端点全 403"
         assert "live_control" in roles["trader"], "trader 无 live_control ⇒ 实盘面 8 端点全 403"
 
     def test_analyst_and_viewer_do_not_hold_live_control(self):
-        roles = _resolve(_post_0124())
+        roles = _resolve(_post_0126())
         assert "live_control" not in roles["analyst"], \
             "analyst 不得持 live_control（批 77 §一 原则：只回测/实盘测试，不执行实盘交易）"
         assert "live_control" not in roles["viewer"]
 
     def test_live_control_bound_endpoints_are_live_surface(self):
-        """钉住 `live_control` 的绑定集 = 实盘面 7 动作 + 解冻预览（源=迁移注释同一份清单）。"""
+        """钉住 `live_control` 的绑定集 = 实盘面动作 + 解冻预览（源=迁移注释同一份清单）。
+
+        批 86-B 变更：原 8 处中**有 4 处**（trading.py 的 start/stop/unfreeze/delete）
+        改成了 `require_perm_any("paper_trade", "live_control")`——它们**同时**是
+        `live_control` 面（操作实盘任务）与 `paper_trade` 面（操作纸上任务），
+        按任务 mode 在函数体内二选一（`assert_task_perm`）。
+        ⇒ 本闸门把多键绑定的每个键都计入，故 live_control 侧仍是 12 处：
+        8（原）+ 4（这批新形态）……准确说：原 8 处里 4 处换了形态但**未流失**，
+        外加 create_live_task 也从单键换成了 any 形态（净 +1 个 live_control 绑定）。
+        """
         bindings = _collect_perm_bindings()
         assert bindings.get("live_control"), "无端点挂 live_control——批 77 拆分被回退了？"
-        # 数量守卫：批 77 落地时是 8 处（trading.py 6 + strategy.py 2）。
-        # 新增/删除须同步迁移注释与批 77 文件——此处故意用 >= 防脆断，用 == 防误加。
-        assert len(bindings["live_control"]) == 8, (
-            f"live_control 绑定数 {len(bindings['live_control'])} ≠ 8："
-            f"{bindings['live_control']}——若是有意增删请同步本断言与 0124 迁移注释")
+        # 数量守卫：批 77 落地 8 处（trading.py 6 + strategy.py 2）；
+        # 批 86-B 后为 **11** 处：strategy.py 2（原样）+ trading.py 9
+        # （list/create/start/stop/unfreeze-preview/unfreeze/freeze-events/delete/PUT）。
+        # ⚠️ 新增/删除须同步本断言——这是**故意的摩擦**，防绑定被静默改走。
+        assert len(bindings["live_control"]) == 11, (
+            f"live_control 绑定数 {len(bindings['live_control'])} ≠ 11："
+            f"{sorted(bindings['live_control'])}——若是有意增删请同步本断言与迁移注释")
+
+    def test_paper_trade_bound_endpoints_are_paper_surface(self):
+        """批 86-B 新立据：`paper_trade` 的绑定集 = 纸上交易面（含多键形态）。
+
+        与 `live_control` 的那条断言对称——两个键**共享**同一批任务端点（any 形态），
+        但各自的绑定集必须都能被扫到（漏扫=该面从 `GET /permissions` 绑定视图消失）。
+        """
+        bindings = _collect_perm_bindings()
+        assert bindings.get("paper_trade"), \
+            "无端点挂 paper_trade——批 86-B 的纸上交易面整体流失（两条新端点 + 4 个 any 形态）"
+        # paper 面：2 条独立端点（list_paper_tasks / paper_task_equity）+ 5 处 any 形态
+        # （create/start/stop/unfreeze/delete + PUT）……下限守卫防脆断，上限防误加。
+        n = len(bindings["paper_trade"])
+        assert n >= 5, f"paper_trade 绑定数 {n} 过少，疑似面被改走：{sorted(bindings['paper_trade'])}"
 
 
 class TestMigration0124Shape:

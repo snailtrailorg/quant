@@ -170,7 +170,10 @@ class TestOperatorInjection:
         captured = {}
 
         class FakeRC:
-            def check_order(self, order, account=""):
+            # 批 86-B：实参签名随真 RiskControl.check_order 加 `paper=` kwarg
+            # （strategy.py:439 恒传 paper=bool(getattr(self,"paper_mode",False))）——
+            # 桩只捕获 order，paper 形参收下不用。
+            def check_order(self, order, account="", paper=False):
                 captured.update(order)
                 from src.risk_control.risk import RiskDecision
                 return RiskDecision(approved=False, reason="拒（仅捕获 order）")
@@ -191,7 +194,10 @@ class TestOperatorInjection:
         captured = {}
 
         class FakeRC:
-            def check_order(self, order, account=""):
+            # 批 86-B：实参签名随真 RiskControl.check_order 加 `paper=` kwarg
+            # （strategy.py:439 恒传 paper=bool(getattr(self,"paper_mode",False))）——
+            # 桩只捕获 order，paper 形参收下不用。
+            def check_order(self, order, account="", paper=False):
                 captured.update(order)
                 from src.risk_control.risk import RiskDecision
                 return RiskDecision(approved=False, reason="拒（仅捕获 order）")
