@@ -422,13 +422,152 @@ else
 fi
 chk "upgrade 渲染未被截断（含版本推进）" "$(grep -c "SET version_num='$TO_E'" "$tmp/up.sql")" "1"
 chk "downgrade 渲染未被截断（含版本回退）" "$(grep -c "SET version_num='$FROM_E'" "$tmp/dn.sql")" "1"
-chk "upgrade 渲染含建表" "$(grep -c 'CREATE TABLE freeze_event' "$tmp/up.sql")" "1"
+    chk "upgrade 渲染含建表" "$(grep -c 'CREATE TABLE freeze_event' "$tmp/up.sql")" "1"
 chk "upgrade 渲染含 seed" "$(grep -c "VALUES ('web_base_url'" "$tmp/up.sql")" "1"
 rm -rf "$tmp"
 }
 
+# ── 用例 I：0124 补种 live_control（纯 permit 表 DML，无 DDL），2026-10-01 批 76b ──
+# 前置 = 0123 之后。0124 **零 DDL**（只 INSERT/DELETE permission 行）⇒ 无 allow_contract。
+# 本用例的价值全在**语义断言**（不是「upgrade 没报错」）：
+#   ① 幂等：permission 的 UNIQUE 约束 + ON CONFLICT DO NOTHING ⇒ **重跑不报错、不重复**；
+#   ② **不覆盖用户态**：用户若已把 live_control 设成 **deny**（或已在界面勾成 allow），
+#      迁移**不得**翻转其 effect（这是「补种」与「强写」的分界——补种只在缺行时落行）；
+#   ③ 边界：**只碰 live_control**，不得误动 halt/live_trading_control（批 77 续的 admin 独占裁定）；
+#   ④ 降级回收：删 live_control 行 + **不误删邻居行**。
+FROM_I=0123
+TO_I=0124
+
+fixture_liveperm() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE permission (
+  id BIGSERIAL PRIMARY KEY,
+  subject_type TEXT NOT NULL,
+  subject_id TEXT NOT NULL,
+  dimension TEXT NOT NULL DEFAULT 'api',
+  resource TEXT NOT NULL,
+  effect TEXT NOT NULL DEFAULT 'allow',
+  note TEXT, updated_by TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (subject_type, subject_id, dimension, resource, effect));
+-- 复刻 prod 形状：四角色 api 行（0056 seed）+ market_op 行（0074）+ admin alerts_config（0061）。
+-- 关键：**故意都不含 live_control**——这就是 P0 现场。
+INSERT INTO permission (subject_type,subject_id,dimension,resource,effect,note) VALUES
+  ('role','viewer','api','read','allow','0056 seed'),
+  ('role','analyst','api','read','allow','0056 seed'),
+  ('role','analyst','api','strategy_control','allow','0056 seed'),
+  ('role','analyst','api','data_sync','allow','0056 seed'),
+  ('role','trader','api','read','allow','0056 seed'),
+  ('role','trader','api','strategy_control','allow','0056 seed'),
+  ('role','trader','api','halt','allow','0056 seed'),
+  ('role','trader','api','trade','allow','0056 seed'),
+  ('role','trader','api','live_trading_control','allow','0056 seed'),
+  ('role','admin','api','read','allow','0056 seed'),
+  ('role','admin','api','halt','allow','0056 seed'),
+  ('role','admin','api','live_trading_control','allow','0056 seed'),
+  ('role','admin','api','alerts_config','allow','0061 seed'),
+  ('role','admin','market_op','astock','allow','0074 seed'),
+  ('role','trader','market_op','astock','allow','0074 seed');
+-- 预置一条**用户态 deny**（模拟「运维已在界面显式拒绝某组用实盘面」）：
+-- 用在 viewer 上（本迁移不碰 viewer）——同时可验「迁移只写 admin/trader」。
+INSERT INTO permission (subject_type,subject_id,dimension,resource,effect,note)
+  VALUES ('role','viewer','api','trade','deny','运维显式拒绝');
+SQL
+}
+
+case_i() {
+echo
+echo "########## 用例 I：0124 补种 live_control（幂等 + 不覆盖 + 边界 + 回收） ##########"
+reset_scratch
+fixture_liveperm
+stamp "$FROM_I"
+
+# --- I1 upgrade ---
+step up "$TO_I" "I1 upgrade（补种 admin/trader 的 live_control）"
+chk "admin 已获 live_control" \
+  "$(q "select count(*) from permission where subject_type='role' and subject_id='admin' and dimension='api' and resource='live_control' and effect='allow'")" "1"
+chk "trader 已获 live_control" \
+  "$(q "select count(*) from permission where subject_type='role' and subject_id='trader' and dimension='api' and resource='live_control' and effect='allow'")" "1"
+# 原则守卫（批 77 §一）：analyst/viewer **不得**被补种——本迁移是「补漏」不是「扩权」
+chk "analyst 未被补种（零 live_control 行）" \
+  "$(q "select count(*) from permission where subject_id='analyst' and resource='live_control'")" "0"
+chk "viewer 未被补种（零 live_control 行）" \
+  "$(q "select count(*) from permission where subject_id='viewer' and resource='live_control'")" "0"
+# 边界：只碰 live_control，halt/live_trading_control 行数不变（批 77 续 admin 独占裁定不受扰）
+chk "halt 行数未变（2: admin+trader）" \
+  "$(q "select count(*) from permission where resource='halt'")" "2"
+chk "live_trading_control 行数未变（2）" \
+  "$(q "select count(*) from permission where resource='live_trading_control'")" "2"
+# 用户态不被覆盖：viewer 的显式 deny 行仍在（迁移不得清整表）
+chk "用户显式 deny 行未被清" \
+  "$(q "select count(*) from permission where subject_id='viewer' and resource='trade' and effect='deny'")" "1"
+chk "market_op 维不受扰（2 行）" \
+  "$(q "select count(*) from permission where dimension='market_op'")" "2"
+chk "总行数 = 16 + 2（只多两行）" "$(q "select count(*) from permission")" "18"
+
+# --- I2 幂等复跑（关键：真上产会 upgrade 两次/与 UI 勾选并发） ---
+a="$(alp upgrade "$TO_I")"
+if echo "$a" | grep -qi 'error\|Traceback'; then
+  echo "  ✗ 复跑 upgrade 报错（幂等性破了）"; echo "$a" | tail -6; FAIL=1
+else
+  echo "  ✓ 复跑 upgrade 无错（ON CONFLICT DO NOTHING 生效）"
+fi
+chk "复跑后 admin 仍恰好 1 行（未重复插）" \
+  "$(q "select count(*) from permission where subject_id='admin' and resource='live_control'")" "1"
+chk "复跑后总行数不变（仍 18）" "$(q "select count(*) from permission")" "18"
+
+# --- I3 模拟「用户已在界面勾选」（迁移前已有 allow 行）⇒ 迁移须为 no-op 且不覆盖 note ---
+x "update permission set note='用户手工勾选' where subject_id='admin' and resource='live_control'"
+b="$(alp upgrade "$TO_I")"
+if echo "$b" | grep -qi 'error\|Traceback'; then
+  echo "  ✗ 有行时复跑报错"; echo "$b" | tail -6; FAIL=1
+else
+  echo "  ✓ 已有行时复跑无错（no-op）"
+fi
+chk "既有行的 note 未被迁移覆写（真 no-op）" \
+  "$(q "select note from permission where subject_id='admin' and resource='live_control'")" "用户手工勾选"
+
+# --- I4 downgrade ---
+step down "$FROM_I" "I4 downgrade（回收 live_control 行）"
+chk "live_control 行已全清" \
+  "$(q "select count(*) from permission where resource='live_control'")" "0"
+chk "admin 其余行未被误删" \
+  "$(q "select count(*) from permission where subject_id='admin' and dimension='api'")" "4"
+chk "trader 其余行未被误删" \
+  "$(q "select count(*) from permission where subject_id='trader' and dimension='api'")" "5"
+chk "用户显式 deny 行仍在（降级不碰无关行）" \
+  "$(q "select count(*) from permission where subject_id='viewer' and resource='trade' and effect='deny'")" "1"
+chk "market_op 维未动（2 行）" \
+  "$(q "select count(*) from permission where dimension='market_op'")" "2"
+chk "总行数回到 16" "$(q "select count(*) from permission")" "16"
+}
+
+# ── 用例 J：0124 离线渲染完整性（不连库） ──
+case_j() {
+echo
+echo "########## 用例 J：0124 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_I:$TO_I" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_I:$FROM_I" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染未被截断（含版本推进）" "$(grep -c "SET version_num='$TO_I'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染未被截断（含版本回退）" "$(grep -c "SET version_num='$FROM_I'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含 admin 补种" "$(grep -c "'admin', 'api', 'live_control'" "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 trader 补种" "$(grep -c "'trader', 'api', 'live_control'" "$tmp/up.sql")" "1"
+chk "upgrade 渲染含幂等子句" "$(grep -c 'ON CONFLICT DO NOTHING' "$tmp/up.sql")" "2"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I） ##########"
 precheck
 case_a
 case_b
@@ -438,4 +577,6 @@ case_e
 case_f
 case_g
 case_h
+case_i
+case_j
 finish
