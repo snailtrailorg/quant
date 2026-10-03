@@ -47,10 +47,14 @@ API_PERM_KEYS: list[str] = [
     "paper_trade",
 ]
 
-# nav 条目 18（id+分组码+序——与原 NAV_ITEMS 声明序逐项一致，A-P1-3 等价钉；
+# nav 条目 20（id+分组码+序——批 87 起 dataops 独立组 `data` 插 base 之后，其余沿原声明序；
 # group 字段名保留原样：PermMatrix 列 prop="group" 直绑，改名即列空）
 NAV_ITEMS_BASE: list[dict] = [
     {"id": "dashboard", "group": "base", "order": 1},
+    # 批 87：数据中心迁组（用户 2026-10-03 裁决）——数据获取=研究链第一环（业务面），
+    # 不再寄居 ops（系统管理）。独立一级组 `data`（总揽下、策略研究上）；
+    # 可见性/路由门/写 API 三层同锚 `data_sync`（方案 A）。DB perm_resource 无 dataops 行 ⇒ 挪组零数据迁移。
+    {"id": "dataops", "group": "data", "order": 1},
     {"id": "screener", "group": "research", "order": 1},
     {"id": "pool", "group": "research", "order": 2},
     {"id": "factors", "group": "research", "order": 3},
@@ -69,7 +73,6 @@ NAV_ITEMS_BASE: list[dict] = [
     {"id": "reconcile", "group": "riskgrp", "order": 2},
     {"id": "risk-rules", "group": "riskgrp", "order": 3},
     {"id": "users", "group": "ops", "order": 1},
-    {"id": "dataops", "group": "ops", "order": 2},
     {"id": "routing", "group": "ops", "order": 3},       # 批 57 M2：数据路由（策略权重+dry-run 试算器+审计）
     {"id": "integrations", "group": "ops", "order": 4},
     {"id": "observe", "group": "ops", "order": 5},
@@ -141,8 +144,8 @@ def load_registry() -> dict:
                 pass
         if enabled is not None:
             e["enabled"] = bool(enabled)
-    # A-P1-2 修：组序=底座声明序组秩（非字母序——原 NAV_ITEMS 声明序 base→research→live→riskgrp→ops
-    # 等价钉）；未知覆盖组（管理页新造组名）排末尾组内按 order
+    # A-P1-2 修：组序=底座声明序组秩（非字母序——声明序 base→data→research→live→riskgrp→ops，
+    # 批 87 data 入列）；未知覆盖组（管理页新造组名）排末尾组内按 order
     _rank = {g: i for i, g in enumerate(dict.fromkeys(e["group"] for e in NAV_ITEMS_BASE))}
     registry["nav"].sort(key=lambda e: (_rank.get(e["group"], 999), e["order"], e["id"]))
     _REGISTRY_CACHE.update(at=now, data=registry)

@@ -39,7 +39,7 @@ const routes = [
       { path: 'stock/:symbol', name: 'stock-detail', component: () => import('./views/StockDetail.vue') },
       { path: 'integrations', name: 'integrations', component: () => import('./views/Integrations.vue'), meta: { perm: 'llm_config' } },   // 批39 A-P1-2：路由门（任一集成 tab 权限可进；空 tabs 组件侧空态兜底）
       { path: 'users', name: 'users', component: () => import('./views/UserManagement.vue'), meta: { admin: true } },   // 批11：用户管理（系统管理第一项；user_mgmt=admin-only 同 permissions 守卫）
-      { path: 'dataops', name: 'dataops', component: () => import('./views/DataOps.vue') },
+      { path: 'dataops', name: 'dataops', component: () => import('./views/DataOps.vue'), meta: { perm: 'data_sync' } },   // 批87：门=data_sync，与菜单 v-if/后端写键三层对齐（此前无守卫=viewer/trader 直链半开门，写全 403）
       { path: 'routing', name: 'routing', component: () => import('./views/RoutingPolicy.vue'), meta: { perm: 'system_config' } },   // 批 57 M2：数据路由（权重编辑门=system_config）
       { path: 'observe', name: 'observe', component: () => import('./views/Observe.vue') },
       { path: 'permissions', redirect: '/users?tab=groups' },   // 批33a：权限页退役——权限单入口=用户管理·用户群组（PermMatrix 组弹窗）；旧深链归位

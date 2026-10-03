@@ -132,7 +132,6 @@ def _check_one(sync_id: str, start: str, end: str, sleep_s: float = 0.0) -> dict
         return {"sync_id": sync_id, "ok": False, "reason": f"新路径失败: {r_new}"}
 
     if old_snap != new_snap:
-        n = max(len(old_snap), len(new_snap))
         diffs = []
         for i, (a, b) in enumerate(zip(old_snap, new_snap)):
             if a != b:

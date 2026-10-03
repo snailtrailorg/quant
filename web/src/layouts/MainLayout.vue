@@ -70,6 +70,11 @@
           <!-- P3-9（web-design 03 v2.1）：菜单 v2.1 四组 16 项——组标题与菜单项同字号;组内流程序 -->
           <el-menu-item index="/"><el-icon><DataBoard /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
 
+          <!-- 批 87：数据中心迁组（用户 2026-10-03 裁决方案 A）——数据获取=研究链第一环，提为一级
+               菜单项（总揽下、策略研究上）。可见性自挂 has('data_sync')：终结「骑 ops 组门」的隐性耦合，
+               与路由 meta.perm、后端写键三层同锚 data_sync（analyst 可见可用；viewer/trader 关门外）。 -->
+          <el-menu-item v-if="has('data_sync')" index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataops') }}</el-menu-item>
+
           <el-sub-menu index="research">
             <template #title><el-icon><DataAnalysis /></el-icon>{{ t('nav.gResearch') }}</template>
             <el-menu-item index="/screener"><el-icon><Search /></el-icon>{{ t('nav.screener') }}</el-menu-item>
@@ -99,7 +104,6 @@
           <el-sub-menu index="ops" v-if="has('data_sync') || has('system_config')">
             <template #title><el-icon><Setting /></el-icon>{{ t('nav.gOps') }}</template>
             <el-menu-item v-if="has('user_mgmt')" index="/users"><el-icon><User /></el-icon>{{ t('nav.userMgmt') }}</el-menu-item>
-            <el-menu-item index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataCenter') }}</el-menu-item>
             <el-menu-item v-if="has('llm_config') || has('im_bots_config')" index="/integrations"><el-icon><Link /></el-icon>{{ t('nav.gIntegrations') }}</el-menu-item>
             <el-menu-item index="/observe"><el-icon><FirstAidKit /></el-icon>{{ t('nav.healthLogs') }}</el-menu-item>
             <el-menu-item v-if="has('system_config')" index="/routing"><el-icon><Guide /></el-icon>{{ t('nav.dataRouting') }}</el-menu-item>

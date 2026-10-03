@@ -185,7 +185,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
     nav: {
       gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性',   // 批33a：permissions 死键清（菜单从无此项）
       userMgmt: '用户管理', aiChat: 'AI 助手',
-      dataCenter: '数据中心', healthLogs: '系统监控',
+      healthLogs: '系统监控',   // 批87：dataCenter 死键清——菜单/⌘K 统一用 nav.dataops（双键并存=存量债）
       stockPool: '股票池', dailyInsight: '每日研判',
       tradingDesk: '交易台', liveTasks: '实盘任务',
       paperTrade: '纸上交易',   // 批 86-B：业界规范名（Backtesting→Paper trading→Live trading 链；「实盘测试」土语废弃）
@@ -196,7 +196,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       backtest: '回测中心',
       factors: '因子库',
       screener: '选股器', settings: '系统设置', permResources: '系统权限', dataRouting: '数据源优先级',   // 批37 改名；批 57 加 dataRouting
-      pool: '股票池', analysis: '每日研判', dataops: '数据中心',
+      pool: '股票池', analysis: '每日研判', dataops: '数据管理',   // 批87：改名——「数据中心/Data Center」业界指 IDC 机房，页面实为数据管理（Data Management）
       integrations: '集成中心', observe: '系统监控', chat: 'AI 助手',
       risk: '风控总览',
       reconcile: '三账对账',
@@ -1642,7 +1642,7 @@ im: 'IM Bots', mail: 'Email SMTP',
     nav: {
       gData: 'Data Ops', gIntegrations: 'Integrations', gObserve: 'Observability',   // 批33a：permissions dead key removed
       userMgmt: 'User Management', aiChat: 'AI Assistant',
-      dataCenter: 'Data Center', healthLogs: 'System Monitor',
+      healthLogs: 'System Monitor',   // batch87: dead key dataCenter removed — menu/⌘K use nav.dataops
       stockPool: 'Stock Pool', dailyInsight: 'Daily Insight',
       tradingDesk: 'Trading Desk', liveTasks: 'Live Tasks',
       paperTrade: 'Paper Trading',   // 批 86-B：业界规范名
@@ -1653,7 +1653,7 @@ im: 'IM Bots', mail: 'Email SMTP',
       backtest: 'Backtest',
       factors: 'Factors',
       screener: 'Screener', settings: 'System Settings', permResources: 'System Permissions', dataRouting: 'Data Source Priority',
-      pool: 'Stock Pool', analysis: 'Daily Analysis', dataops: 'Data Center',
+      pool: 'Stock Pool', analysis: 'Daily Analysis', dataops: 'Data Management',   // batch87: renamed (industry "Data Center" = IDC; page is data management)
       integrations: 'Integrations', observe: 'System Monitor', chat: 'AI Assistant',
       risk: 'Risk',
       reconcile: 'Reconcile',
