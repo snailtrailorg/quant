@@ -737,8 +737,82 @@ chk "live_task 存量行仍在（降级不丢任务）" \
 chk "permission 总行数回到 14" "$(q "select count(*) from permission")" "14"
 }
 
+# ── 用例 L：0128 虚拟账户 enabled 翻转（批 86-B 彩排红修复），2026-10-03 ──
+# 彩排实录（202610030826-072149c staging）：阶段 8 quant-hbcheck wrapper v2 报
+# 「行 id=502 键 quant:hb:md-hub:502 缺失/过期（期望 4 行，1 行不健康）」——wrapper
+# 期望集 SQL=SELECT id FROM trading_account WHERE enabled（deploy/wrappers/quant-hbcheck:64，
+# 「期望集层面不过滤防漏报」是批 66b 立法），0127 种下的虚拟账户进期望集但 md-hub 不为
+# 它写心跳 ⇒ 永久红 ⇒ rescue 自动回滚。修在数据侧（enabled 语义=启用中的真实交易通道）。
+# 前置注意：fixture_paper=0124 形态（无 is_virtual），而 **stamp 只改版本号不执行迁移体**
+# （本用例首跑实证：直接 stamp 0127 ⇒ 0128 撞「column is_virtual does not exist」）——
+# 故 L0 须 stamp 0124 真跑三连到 0127（三连本体已由用例 K 验过，此处只借其产物），
+# 并显式断言「病灶态起点」（期望集 2 行、虚拟账户 enabled=true）——证明翻转不是空转。
+# 本用例的价值（不是「upgrade 没报错」）：
+#   ① 病灶清除：enabled 翻 false 后 wrapper 期望集恰 1 行（xtp）——彩排红的直接防线，
+#     且正面点名「期望集里不得混入非 xtp 行」；
+#   ② 不误伤：真实账户 enabled 不动、is_virtual 语义不碰；
+#   ③ 纸任务链路无损：get_virtual_account_id 读 is_virtual（paper_trade.py:47 无 enabled
+#     条件）——虚拟账户仍恰 1 行可被找到；
+#   ④ 强制复跑幂等：enabled=false 后重跑 0128（WHERE ... AND enabled 不命中）零行更新
+#     （部署中断重跑场景）；
+#   ⑤ 降级诚实回翻：down 恢复 enabled=true（0127 时点数据语义），且结构零变化
+#     （0128 是纯数据迁移，无 DDL——is_virtual 删列是 0127.down 的职责）。
+FROM_L=0127
+TO_L=0128
+
+case_l() {
+echo
+echo "########## 用例 L：0128 虚拟账户 enabled 翻转（hbcheck 期望集防线/复跑幂等/降级回翻） ##########"
+reset_scratch
+fixture_paper
+stamp "$FROM_K"
+step up "$TO_K" "L0 真跑三连至 0127（借用例 K 产物，stamp 不执行迁移体）"
+chk "病灶态起点：虚拟账户 enabled=true（0127 种下即病灶）" \
+  "$(q "select count(*) from trading_account where provider='paper' and is_virtual=true and enabled=true")" "1"
+chk "病灶态起点：wrapper 期望集 2 行（xtp+虚拟账户——彩排红现场复刻）" \
+  "$(q "select count(*) from trading_account where enabled")" "2"
+
+# --- L1 upgrade 0127→0128（病灶清除） ---
+step up "$TO_L" "L1 upgrade（0128 enabled 翻转）"
+chk "虚拟账户 enabled 已翻 false（病灶清除）" \
+  "$(q "select count(*) from trading_account where provider='paper' and is_virtual=true and enabled=false")" "1"
+chk "is_virtual 语义不碰（仍 true）" \
+  "$(q "select count(*) from trading_account where provider='paper' and is_virtual=true")" "1"
+chk "wrapper 期望集恰 1 行（enabled 驱动=只含 xtp；彩排红的直接防线）" \
+  "$(q "select count(*) from trading_account where enabled")" "1"
+chk "期望集里无非 xtp 行（正面点名）" \
+  "$(q "select count(*) from trading_account where enabled and provider<>'xtp'")" "0"
+chk "真实账户 enabled 不误伤" \
+  "$(q "select count(*) from trading_account where provider='xtp' and enabled=true")" "1"
+chk "纸任务读点无损（is_virtual 驱动，无 enabled 条件）" \
+  "$(q "select count(*) from trading_account where is_virtual=true")" "1"
+
+# --- L2 强制复跑（stamp 回 0127 再 upgrade：部署中断重跑场景，UPDATE 零行命中） ---
+stamp "$FROM_L"
+step up "$TO_L" "L2 强制复跑（enabled 已 false，WHERE 不命中）"
+chk "复跑后虚拟账户仍恰 1 行且 enabled=false" \
+  "$(q "select count(*) from trading_account where provider='paper' and is_virtual=true and enabled=false")" "1"
+chk "复跑后期望集仍 1 行" \
+  "$(q "select count(*) from trading_account where enabled")" "1"
+chk "复跑后真实账户仍 enabled=true" \
+  "$(q "select count(*) from trading_account where provider='xtp' and enabled=true")" "1"
+
+# --- L3 downgrade 0128→0127（诚实回翻 + 结构零变化） ---
+step down "$FROM_L" "L3 downgrade（回翻 enabled=true，0127 时点语义）"
+chk "虚拟账户 enabled 回翻 true（downgrade 诚实还原 0127 时点数据）" \
+  "$(q "select count(*) from trading_account where provider='paper' and is_virtual=true and enabled=true")" "1"
+chk "真实账户仍 enabled=true" \
+  "$(q "select count(*) from trading_account where provider='xtp' and enabled=true")" "1"
+chk "is_virtual 列仍在（0128 无 DDL）" \
+  "$(q "select count(*) from information_schema.columns where table_name='trading_account' and column_name='is_virtual' and table_schema=current_schema()")" "1"
+chk "paper_trade_log 表仍在（结构零变化）" \
+  "$(q "select count(*) from information_schema.tables where table_name='paper_trade_log' and table_schema=current_schema()")" "1"
+chk "live_task 行数不变（0128 不碰任务）" \
+  "$(q "select count(*) from live_task")" "1"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L） ##########"
 precheck
 case_a
 case_b
@@ -751,4 +825,5 @@ case_h
 case_i
 case_j
 case_k
+case_l
 finish
