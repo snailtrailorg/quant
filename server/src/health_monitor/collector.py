@@ -318,8 +318,17 @@ def collect(now: float | None = None) -> dict:
     # 表清单单一真相源：src/data_platform/tier_tables.py（tasks.py 同源，盲审遗留收敛）
     try:
         from src.data_platform.tier_tables import TIER1_SYNC_IDS, TIER2_ALL_TABLES
+        # TRANSITION-0129：停采（sync_config.enabled=false）的 sync 不进新鲜度指标——
+        #   与 tasks.py::_check_tier_freshness 同口径（禁用＝平台主动放弃该数据）。
+        #   fail-open：读不到任何 enabled 行 ⇒ 退回全量采集，宁多采不漏采。
+        with get_conn() as conn:
+            cur = conn.execute("SELECT id FROM sync_config WHERE enabled")
+            enabled_ids = {r[0] for r in cur.fetchall()}
+        skip_disabled = bool(enabled_ids)
         _tier = []
         for sid in TIER1_SYNC_IDS:
+            if skip_disabled and sid not in enabled_ids:
+                continue
             with get_conn() as conn:
                 cur = conn.execute(
                     "SELECT ts FROM sync_log WHERE sync_id=%s AND status='success' "

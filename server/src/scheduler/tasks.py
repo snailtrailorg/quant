@@ -453,6 +453,14 @@ def _check_tier_freshness() -> list[dict]:
         now = datetime.now(timezone.utc)
 
         with get_conn() as conn:
+            # TRANSITION-0129（见 migrations/versions/0129_concept_sync_disabled.py 头注）：
+            #   已停采（sync_config.enabled=false）的 sync 不参与断流检测——「禁用」＝平台主动
+            #   放弃该数据，再报「断流」是语义噪音。恢复 enabled 即自动回归监控（实时读，无缓存）。
+            #   fail-open：读不到任何 enabled 行（表空/异常环境）⇒ 退回全量检查，宁可按清单
+            #   全查（可能误报）也不静默失效（对齐 _tier_alert_filter 的 fail-open 立法）。
+            cur = conn.execute("SELECT id FROM sync_config WHERE enabled")
+            enabled_ids = {r[0] for r in cur.fetchall()}
+            skip_disabled = bool(enabled_ids)
             # 一档：按 sync_id 取最新 success 行 ts
             cur = conn.execute(
                 "SELECT DISTINCT ON (sync_id) sync_id, ts "
@@ -462,6 +470,8 @@ def _check_tier_freshness() -> list[dict]:
             rows = cur.fetchall()
             seen = {r[0] for r in rows}
             for sid in TIER1_SYNC_IDS:
+                if skip_disabled and sid not in enabled_ids:
+                    continue
                 if sid in seen:
                     last_ts = rows[[r[0] for r in rows].index(sid)][1]
                     if last_ts.tzinfo is None:
