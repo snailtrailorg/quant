@@ -28,10 +28,10 @@ def authed_client(client):
 
 
 def test_registry_base_three_lists():
-    """底座三清单：api 13/nav 20（含管理页自身吃狗粮；批 57 加 data-routing；批 61 加 trade-switch）/market 5。"""
+    """底座三清单：api 13/nav 19（批 88：routing 退册——页面降 tab，nav 维管不到）/market 5。"""
     from src.data_platform.perm_registry import API_PERM_KEYS, NAV_ITEMS_BASE, MARKET_OP_KEYS, NAV_ALIASES
     assert len(API_PERM_KEYS) == 15 and len(set(API_PERM_KEYS)) == 15   # 批55b:account_keys 退役；批77:+live_control；批86-B:+paper_trade/strategy_pretest（纸上交易面）
-    assert len(NAV_ITEMS_BASE) == 20   # 17+perm-resources（批33b）+routing（批57）+paper-trade（批86-B）——trade-switch 随批 70 M6 退役
+    assert len(NAV_ITEMS_BASE) == 19   # 17+perm-resources（批33b）+paper-trade（批86-B）−routing（批88 降 tab 退册）——trade-switch 随批 70 M6 退役
     assert len(MARKET_OP_KEYS) == 5
     assert len(NAV_ALIASES) == 2       # 批38：8 条死别名已清（活=stock/data-manage）
 
@@ -42,7 +42,7 @@ def test_load_registry_fallback_on_db_fail():
     PR._REGISTRY_CACHE.update(at=0.0, data=None)
     with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
         reg1 = PR.load_registry()
-        assert len(reg1["nav"]) == 20   # 批 70：trade-switch 退役
+        assert len(reg1["nav"]) == 19   # 批 70：trade-switch 退役；批 88：routing 退册（降 tab）
         assert PR._REGISTRY_CACHE["data"] is None   # 失败不缓存
 
 

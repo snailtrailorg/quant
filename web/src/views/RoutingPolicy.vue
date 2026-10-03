@@ -1,39 +1,10 @@
 <template>
-  <!-- 批 57 M2：数据路由页（29 号 §五"面"——weights 编辑+候选链试算器+审计） -->
+  <!-- 批 57 M2：数据路由页（29 号 §五"面"——weights 编辑+候选链试算器+审计）。
+       批 88：**权重编辑卡下架**（安慰剂实证——排序键=熔断>position>score，而 quality 档案全仓恒空
+       （仅 local_pg 常量有值）⇒ 外部候选 score≡0.5×Σw=常数，权重怎么改排序都不动；真优先级=position，
+       编辑入口在集成中心·数据源 tab（set_positions）。后端 PATCH /routing/policies 与 _score 机制保留，
+       M3+ quality 真实化时随该批恢复 UI。页面更名「路由诊断」，自 ops 组菜单降为数据管理页 tab。 -->
   <div>
-    <el-card shadow="never" style="margin-bottom: 12px">
-      <template #header><span style="font-weight: 600">{{ t('routing.rtPolicyTitle') }}</span></template>
-      <el-alert type="info" :title="t('routing.rtPolicyTip')" :closable="false" style="margin-bottom: 12px" />
-      <el-table :data="policies" size="small" style="width: 100%">
-        <el-table-column prop="consumer_tag" :label="t('routing.rtConsumer')" width="140"
-                         :formatter="(r) => usageLabel(r.consumer_tag)" />
-        <el-table-column :label="t('routing.rtCompleteness')" min-width="140">
-          <template #default="{ row }">
-            <el-input-number v-model="row.weights.completeness" :min="0" :max="1" :step="0.1" size="small"
-                             :disabled="!canEdit" controls-position="right" style="width: 110px" />
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('routing.rtCost')" min-width="140">
-          <template #default="{ row }">
-            <el-input-number v-model="row.weights.cost" :min="0" :max="1" :step="0.1" size="small"
-                             :disabled="!canEdit" controls-position="right" style="width: 110px" />
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('routing.rtLatency')" min-width="140">
-          <template #default="{ row }">
-            <el-input-number v-model="row.weights.latency" :min="0" :max="1" :step="0.1" size="small"
-                             :disabled="!canEdit" controls-position="right" style="width: 110px" />
-          </template>
-        </el-table-column>
-        <el-table-column width="100" align="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" :loading="row._saving" :disabled="!canEdit"
-                       @click="save(row)">{{ t('routing.rtSave') }}</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
     <el-card shadow="never" style="margin-bottom: 12px">
       <template #header><span style="font-weight: 600">{{ t('routing.rtDryTitle') }}</span></template>
       <el-alert type="info" :title="t('routing.rtDryTip')" :closable="false" style="margin-bottom: 12px" />
@@ -58,7 +29,7 @@
           </el-table-column>
           <el-table-column prop="position" :label="t('routing.rtColPosition')" width="90" />
           <el-table-column prop="health" :label="t('routing.rtColHealth')" width="110"
-                         :formatter="(r) => healthLabel(r.health)" />
+                           :formatter="(r) => healthLabel(r.health)" />
           <el-table-column prop="score" :label="t('routing.rtColScore')" width="100"
                            :formatter="(r) => Number(r.score).toFixed(2)" />
         </TableShell>
@@ -97,30 +68,16 @@ import { fmtTime } from '../utils/fmtTime'
 import { ElMessage } from 'element-plus'
 
 const { t, te } = useI18n()
-const policies = ref([])
 const decisions = ref([])
-const canEdit = ref(false)
 const dryKinds = ['bar_daily', 'bar_minute']
 const consumers = ['default', 'backtest', 'live', 'sync']
 const dry = reactive({ kind: 'bar_daily', symbol: '', consumer: 'default', loading: false, result: null })
 
 const load = async () => {
   try {
-    const [p, d, me] = await Promise.all([
-      api.get('/routing/policies'), api.get('/routing/decisions?limit=50'), api.get('/auth/me')])
-    policies.value = (p.items || []).map(r => ({ ...r, weights: { ...r.weights }, _saving: false }))
+    const d = await api.get('/routing/decisions?limit=50')
     decisions.value = d.items || []
-    canEdit.value = (me.permissions || []).includes('system_config')
   } catch (e) { ElMessage.error(apiErr(e)) }
-}
-
-const save = async (row) => {
-  row._saving = true
-  try {
-    await api.patch(`/routing/policies/${row.consumer_tag}`, { weights: row.weights })
-    ElMessage.success(t('routing.rtSaved'))
-  } catch (e) { ElMessage.error(apiErr(e)) }
-  finally { row._saving = false }
 }
 
 const runDry = async () => {

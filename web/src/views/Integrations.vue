@@ -21,7 +21,6 @@ import TradingAccounts from './TradingAccounts.vue'
 import LLMModels from './LLMModels.vue'
 import SmtpCard from '../components/SmtpCard.vue'
 import SmsCard from '../components/SmsCard.vue'
-import SecurityMaster from './SecurityMaster.vue'
 // 批38：tab 级权限门——每 tab 按后端写端点权限键过滤（审批37 快审 P2-2；后端 fail-closed 兜底不变）
 // 批83a：原 D25 单「外部接口」tab 拆两 tab（数据源=拉取侧 / 交易账号=下单+行情侧）——
 //        域=表=端点族，页签边界与后端两族端点一一对应，多能力接口归交易族（rt_quote/trading）。
@@ -32,7 +31,6 @@ const ALL_TABS = [
     { key: 'llm', i18nKey: 'tabs.llm', c: LLMModels, perm: 'llm_config' },
     { key: 'dataSources', i18nKey: 'tabs.dataSources', c: DataSources, perm: 'system_config' },
     { key: 'tradingAccounts', i18nKey: 'tabs.tradingAccounts', c: TradingAccounts, perm: 'system_config' },
-    { key: 'security', i18nKey: 'interfaces.secTab', c: SecurityMaster, perm: 'read' },   // 批 56a：标的属性只读查询   // 批55b:交易视图写端点=system_config(旧 accounts UI 的 account_keys 门随重写退役)
 ]
 const _perms = ref([])
 const tabs = computed(() => ALL_TABS.filter(x => _perms.value.includes(x.perm)))

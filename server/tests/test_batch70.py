@@ -20,8 +20,8 @@ class TestRetirement:
     def test_nav_key_retired(self):
         from src.data_platform.perm_registry import NAV_ITEMS_BASE
         ids = {e["id"] for e in NAV_ITEMS_BASE}
-        # 批 86-B：19 → 20（新增 paper-trade 入册，live 组 order 顺延）
-        assert "trade-switch" not in ids and len(ids) == 20
+        # 批 86-B：19 → 20（新增 paper-trade 入册，live 组 order 顺延）；批 88：20 → 19（routing 退册——页面降 tab，nav 维管不到）
+        assert "trade-switch" not in ids and len(ids) == 19
 
     def test_routing_endpoint_no_column(self):
         """P0-2 钉：routing 端点不再 SELECT 已 drop 列。"""

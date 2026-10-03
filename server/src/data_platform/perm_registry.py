@@ -47,8 +47,8 @@ API_PERM_KEYS: list[str] = [
     "paper_trade",
 ]
 
-# nav 条目 20（id+分组码+序——批 87 起 dataops 独立组 `data` 插 base 之后，其余沿原声明序；
-# group 字段名保留原样：PermMatrix 列 prop="group" 直绑，改名即列空）
+# nav 条目 19（id+分组码+序——批 88 起 routing 退册：页面降为数据管理页 tab，tab 不走路由 ⇒
+# nav 维管不到（86-B 同款立法）；group 字段名保留原样：PermMatrix 列 prop="group" 直绑，改名即列空）
 NAV_ITEMS_BASE: list[dict] = [
     {"id": "dashboard", "group": "base", "order": 1},
     # 批 87：数据中心迁组（用户 2026-10-03 裁决）——数据获取=研究链第一环（业务面），
@@ -73,8 +73,7 @@ NAV_ITEMS_BASE: list[dict] = [
     {"id": "reconcile", "group": "riskgrp", "order": 2},
     {"id": "risk-rules", "group": "riskgrp", "order": 3},
     {"id": "users", "group": "ops", "order": 1},
-    {"id": "routing", "group": "ops", "order": 3},       # 批 57 M2：数据路由（策略权重+dry-run 试算器+审计）
-    {"id": "integrations", "group": "ops", "order": 4},
+    {"id": "integrations", "group": "ops", "order": 4},   # 批 88：原 order 3 的 routing 退册（降 tab），order 值不重排仅排序键
     {"id": "observe", "group": "ops", "order": 5},
     {"id": "perm-resources", "group": "ops", "order": 6},   # 批33b 入册；批37 组内序=系统权限前系统设置底
     {"id": "settings", "group": "ops", "order": 7},

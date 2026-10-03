@@ -1,5 +1,6 @@
 <template>
-  <!-- 批 56a·M1：标的属性查询页（只读——主档+时变时间线+时段表；29 号 §四面三件套） -->
+  <!-- 批 56a·M1：标的属性查询页（只读——主档+时变时间线+时段表；29 号 §四面三件套）。
+       批 88：自集成中心 security tab 迁入数据管理页（域对齐——security_master 是数据域真源，非集成配置）。 -->
   <div>
     <el-card shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; gap: 8px; align-items: center">
