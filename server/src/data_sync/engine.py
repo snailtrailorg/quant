@@ -185,9 +185,13 @@ def _get_config(sync_id: str) -> dict:
                 "last_sync_ts": row[9], "last_status": row[10], "provider": row[11]}
 
 
-def _update_sync_state(sync_id: str, last_date: str, count: int, status: str = "idle"):
+def _update_sync_state(sync_id: str, last_date: str | None, count: int, status: str = "idle"):
     """写终态（G-审 2026-08-18：status 支持 idle/partial/failed；调用方必须在本函数之后
-    不再调 _mark_running(False)——后者会无条件覆盖回 'idle'）。"""
+    不再调 _mark_running(False)——后者会无条件覆盖回 'idle'）。
+
+    last_date=None（配置游标本就为空）时写 NULL=不变，仅刷新 last_sync_ts——异常路径
+    （P1-B 2026-10-03）用它表达「游标不动、只退避」。
+    """
     with get_conn() as conn:
         conn.execute(
             "UPDATE sync_config SET last_sync_date=%s, last_sync_ts=now(), last_sync_count=%s, last_status=%s WHERE id=%s",
@@ -317,9 +321,24 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     "backfill": bool(backfill_from)}
 
         except Exception as e:
+            # P1-B 修复（2026-10-03 数据同步验证）：**异常型失败同样推进 last_sync_ts**。
+            # G-S3（上方 :285）只覆盖「handler 正常返回 + failed_dates」路径，漏了「handler
+            # 抛异常」路径——原实现仅 _mark_running(False)，last_sync_ts 停旧值 ⇒ 调度器
+            # base 恒旧（tasks.py:792）⇒ croniter.get_next 恒返回已过去的到点 ⇒ 每 300s
+            # 重触发一次，永不停止（重试风暴）。
+            # 实证：concept_sync 上游 Error 1054 后 last_sync_ts 停在 2026-09-25，本地
+            # sync_log 积 1876 条、生产每 5 分钟一轮（24h 238 轮）。
+            # 语义与「返回型全失败」对齐：**游标不动**（写回旧值，绝不写 NULL——写 NULL 会
+            # 清掉游标让下轮全量重拉）、status=failed、last_sync_ts 刷新（退避的关键）。
+            # 回补模式沿用「不碰游标/ts」现状（与上方 _advance=None 同源语义）。
             duration_ms = int((time.time() - t0) * 1000)
             _log(sync_id, cfg["mode"], "", end_date, 0, 0, duration_ms, "error", str(e)[:200])
-            _mark_running(sync_id, False)
+            _mark_running(sync_id, False)   # G-S2：先清 running，终态随后覆盖
+            if not backfill_from:
+                _update_sync_state(sync_id, cfg["last_sync_date"], 0, "failed")
+            # 异常型失败此前零告警（P1-A 被埋 1873 条无人知的直接原因）——补主动告警，
+            # 与返回型失败同 wait 级（notify 同标题 1min 去重，不刷屏）。
+            _alert_sync_failure(sync_id, "failed", [str(e)[:100]])
             return {"status": "error", "error": str(e)[:200], "duration_ms": duration_ms}
 
 

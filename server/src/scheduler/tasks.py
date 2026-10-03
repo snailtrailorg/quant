@@ -725,6 +725,9 @@ def data_sync_scheduler():
     trade_day_filter: none（不过滤）/ workday（工作日）/ trade_day（交易日，用 is_trading_day）
     从 last_sync_ts 算下次 cron 到点，<= now 则触发（不错过）。
     manual/空 schedule 跳过。
+
+    Returns: {status, triggered: [{"id", "result"|"dispatched"}], n_triggered, skipped[]}
+    ——triggered 原来的整型计数在 OBS-1 修复中换成明细列表（见下方注释）。
     """
     from datetime import datetime, timedelta
 
@@ -851,7 +854,13 @@ def data_sync_scheduler():
         result = sync(sid)
         triggered.append({"id": sid, "result": result})
 
-    return {"status": "ok", "triggered": len(triggered), "skipped": skipped}
+    # OBS-1 修复（2026-10-03 数据同步验证）：返回**触发明细**而非仅数量。原
+    # `len(triggered)` 把上面 append 已带的 {"id","result"}（或 {"id","dispatched"}）
+    # 抹掉，生产日志只剩 `triggered: 2` ⇒ 判不出发起的 sync 到底是被 SyncLock 秒回
+    # 的 skipped 还是真发的 error（诊断 concept_sync 重试风暴时为此绕道）。
+    # 明细含 id 与 handler 返回值（error 摘要亦在其中），n_triggered 保留计数供聚合。
+    return {"status": "ok", "triggered": triggered,
+            "n_triggered": len(triggered), "skipped": skipped}
 
 
 @app.task(name="src.scheduler.tasks.sync_all_symbols",

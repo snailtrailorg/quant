@@ -276,3 +276,41 @@ def test_runner_client_id_derivation():
     for tid in range(1, 300):
         cid = runner_client_id(tid)
         assert 2 <= cid <= 99, f"task_id={tid} -> client_id={cid} 越界"
+
+
+# --- OBS-1 调度器返回触发明细（2026-10-03 数据同步验证）---
+
+def test_scheduler_returns_triggered_detail():
+    """OBS-1：返回 triggered 明细（id + handler 返回值），不再被 len() 抹成数量。
+
+    原 `{"triggered": len(triggered)}` 使生产日志只剩 `triggered: 2`——判不出发起的
+    同步是被 SyncLock 秒回的 skipped 还是真发的 error（诊断重试风暴时为此绕道）。
+    """
+    from src.scheduler import tasks
+    TZ_CN = timezone(timedelta(hours=8))
+    # 刻意**不** patch datetime.datetime：croniter.get_next(datetime) 收的是真类，patch 后
+    # 传入 MagicMock 会让其 issubclass 检查抛 TypeError（被 except 吞成「cron无效」→ 空触发）。
+    # 改把游标设到 1 天前 + 高频 cron，让「到点」天然成立（时区无关）。
+    past = (datetime.now(TZ_CN) - timedelta(days=1)).replace(tzinfo=None)
+    row = ("astock_daily", "*/5 * * * *", True, "idle", "20260901", past, "none")
+    with patch("src.data_platform.db.get_conn", return_value=_sched_conn(row)), \
+         patch("src.data_sync.sync",
+               return_value={"status": "error", "error": "boom"}) as s:
+        r = tasks.data_sync_scheduler()
+    assert r["n_triggered"] == 1
+    assert r["triggered"] == [{"id": "astock_daily",
+                               "result": {"status": "error", "error": "boom"}}]
+    s.assert_called_once_with("astock_daily")
+
+
+def test_scheduler_returns_async_dispatch_detail():
+    """OBS-1：异步派发项明细标 dispatched=async（无内联 result）。"""
+    from src.scheduler import tasks
+    TZ_CN = timezone(timedelta(hours=8))
+    past = (datetime.now(TZ_CN) - timedelta(days=1)).replace(tzinfo=None)
+    row = ("pool_data", "*/5 * * * *", True, "idle", "20260901", past, "none")
+    with patch("src.data_platform.db.get_conn", return_value=_sched_conn(row)), \
+         patch.object(tasks.sync_via_celery, "apply_async") as ap:
+        r = tasks.data_sync_scheduler()
+    assert r["triggered"] == [{"id": "pool_data", "dispatched": "async"}]
+    ap.assert_called_once()

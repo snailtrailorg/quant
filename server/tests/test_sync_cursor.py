@@ -213,3 +213,69 @@ class TestHBlindSpots:
                "failed_dates": ["20260811:E:x"], "last_success_date": None}
         _, _, _, alerts = _run_sync(ret, cfg_last="20260810")
         assert alerts[0][1] == "failed"   # (sync_id, status, failed_dates)
+
+
+def _run_sync_raises(cfg_last="20260925", backfill=False):
+    """跑 engine.sync()，**handler 抛异常**（非返回型失败）。返回 (result, updates, running, alerts)。
+
+    P1-B 修复锁（2026-10-03 数据同步验证）：原 except 分支只 _mark_running(False)、
+    不写终态 ⇒ last_sync_ts 停旧值 ⇒ 调度器 base 恒旧 ⇒ 每 300s 重触发（重试风暴）。
+    """
+    from src.data_sync import engine
+    fake_cfg = {"id": "concept_sync", "name": "x", "mode": "incremental", "enabled": True,
+                "last_sync_date": cfg_last, "last_sync_ts": None, "last_status": "idle"}
+    update_calls, running_calls, alerts = [], [], []
+
+    def _boom(*a, **k):
+        raise RuntimeError("Error 1054 (42S22): Unknown column 'name' in 'field list'")
+
+    with patch("src.data_sync.sync_lock.SyncLock", _FakeLock), \
+         patch.object(engine, "_get_config", return_value=fake_cfg), \
+         patch.object(engine, "_VIA_KIND_IDS", frozenset()), \
+         patch.object(engine, "_HANDLERS", {"concept_sync": _boom}), \
+         patch.object(engine, "_log"), \
+         patch.object(engine, "_mark_running",
+                      side_effect=lambda sid, running: running_calls.append(running)), \
+         patch.object(engine, "_update_sync_state",
+                      side_effect=lambda *a, **k: update_calls.append((a, k))), \
+         patch.object(engine, "_alert_sync_failure",
+                      side_effect=lambda *a, **k: alerts.append(a)):
+        result = engine.sync("concept_sync",
+                             **({"backfill_from": "20260811"} if backfill else {}))
+    return result, update_calls, running_calls, alerts
+
+
+class TestExceptionPathBackoff:
+    """P1-B（2026-10-03 数据同步验证）：handler 抛异常同样推进 last_sync_ts。
+
+    原缺陷（G-S3 覆盖漏洞）：except 分支只 _mark_running(False)，last_sync_ts 停旧值
+    ⇒ 调度器 base 恒旧 ⇒ croniter.get_next 恒返回已过去的到点 ⇒ 每 300s 重触发。
+    实证：concept_sync 上游 Error 1054 后 ts 停 2026-09-25、sync_log 积 1876 条。
+    """
+
+    def test_exception_writes_terminal_state_with_old_cursor(self):
+        """异常：必须写终态（=刷新 ts）、游标写回**旧值**（不动）、status=failed。"""
+        result, updates, _, _ = _run_sync_raises(cfg_last="20260925")
+        assert result["status"] == "error" and "1054" in result["error"]
+        assert len(updates) == 1, "异常路径必须写终态——否则 last_sync_ts 不刷新=重试风暴"
+        assert updates[0][0] == ("concept_sync", "20260925", 0, "failed")   # 游标=旧值
+
+    def test_exception_null_cursor_stays_null(self):
+        """新配置游标 NULL 时异常：写回 None（不变），绝不写空串污染游标。"""
+        _, updates, _, _ = _run_sync_raises(cfg_last=None)
+        assert updates[0][0] == ("concept_sync", None, 0, "failed")
+
+    def test_exception_mark_running_order(self):
+        """G-S2 顺序在异常路径同样成立：先 True（running）后 False（清），终态随后覆盖。"""
+        _, _, running, _ = _run_sync_raises()
+        assert running == [True, False]
+
+    def test_exception_alerts_failure(self):
+        """异常型失败补主动告警（status=failed）——P1-A 被埋 1873 条无人知的直接原因。"""
+        _, _, _, alerts = _run_sync_raises()
+        assert alerts and alerts[0][1] == "failed"
+
+    def test_backfill_exception_does_not_touch_cursor(self):
+        """回补模式异常：不写游标/ts（与返回路径 _advance=None 同源语义）。"""
+        _, updates, _, _ = _run_sync_raises(backfill=True)
+        assert updates == []
