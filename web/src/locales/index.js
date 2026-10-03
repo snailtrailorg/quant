@@ -187,17 +187,17 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       gData: '数据运维', gIntegrations: '集成中心', gObserve: '可观测性',   // 批33a：permissions 死键清（菜单从无此项）
       userMgmt: '用户管理', aiChat: 'AI 助手',
       healthLogs: '系统监控',   // 批87：dataCenter 死键清——菜单/⌘K 统一用 nav.dataops（双键并存=存量债）
-      stockPool: '股票池', dailyInsight: '每日研判',
-      tradingDesk: '交易台', liveTasks: '实盘任务',
+      stockPool: '自选标的', dailyInsight: '每日研判',   // 批89：四字统一+去股（多市场心智：池可装转债/ETF/crypto 标的）
+      tradingDesk: '交易终端', liveTasks: '实盘任务',
       paperTrade: '纸上交易',   // 批 86-B：业界规范名（Backtesting→Paper trading→Live trading 链；「实盘测试」土语废弃）
-      liveTask: '实盘任务', trading: '交易台', users: '用户管理',   // 批49：NAV id camel 形态（菜单权限表显示名兜底链——id 与侧栏词条键不同名 3 枚）
+      liveTask: '实盘任务', trading: '交易终端', users: '用户管理',   // 批49：NAV id camel 形态（菜单权限表显示名兜底链——id 与侧栏词条键不同名 3 枚）；批89 trading 与 tradingDesk 同步改，PermMatrix 显示名不分裂
       gResearch: '策略研究', gLive: '实盘交易', gRisk: '风险控制', gOps: '系统管理',
-      dashboard: '总览',
+      dashboard: '全局总览',   // 批89：四字统一
       strategy: '策略管理',
       backtest: '回测中心',
-      factors: '因子库',
-      screener: '选股器', settings: '系统设置', permResources: '系统权限',   // 批37 改名；批88 dataRouting 死键清（页面降 tab 迁数据管理）
-      pool: '股票池', analysis: '每日研判', dataops: '数据管理',   // 批87：改名——「数据中心/Data Center」业界指 IDC 机房，页面实为数据管理（Data Management）
+      factors: '因子管理',   // 批89：四字统一（库→管理，与页面 header factors.title 同步）
+      screener: '标的筛选', settings: '系统设置', permResources: '系统权限',   // 批37 改名；批88 dataRouting 死键清（页面降 tab 迁数据管理）；批89 四字统一+去股（三 tab=A股/转债/ETF，威廉姆裁决：标的是交易所官方术语且平台内三处已用）
+      pool: '自选标的', analysis: '每日研判', dataops: '数据管理',   // 批87：改名——「数据中心/Data Center」业界指 IDC 机房，页面实为数据管理（Data Management）；批89 pool 四字统一+去股（⌘K 与侧栏 stockPool 双键同值）
       integrations: '集成中心', observe: '系统监控', chat: 'AI 助手',
       risk: '风控总览',
       reconcile: '三账对账',
@@ -491,7 +491,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       phAddSymbol: '输入标的（如 600000.SHSE）回车添加',
       phSymbols: '多个标的用逗号分隔，如 600000.SHSE,600001.SHSE',
       phPool: '或选标的池（覆盖上面）',
-      pool: '股票池',   // 盲审B题外：回测表单池下拉原裸键
+      pool: '自选标的',   // 盲审B题外：回测表单池下拉原裸键；批89 跟随菜单新名（下拉选项文本与侧栏一致）
       confirmDelete: '确定删除回测 #{id}（{name}）？该次的收益曲线和成交记录将一并删除，不可恢复。',
       dateRange: '回测区间',
       modeParallel: '并行',
@@ -632,8 +632,8 @@ im: 'IM 机器人', mail: '邮件 SMTP',
     dashboard: {
       partialFail: '{n} 项数据加载失败（部分卡片可能为空）——点击重试',
       welcome: '欢迎使用{app}',   // 品牌名复用 app.title 资源 ID（2026-09-09 用户裁定,与 register.welcome 同范式）
-      step1: '建因子', step1d: '从因子库开始', step2: '写策略', step2d: 'DSL 或 Python', step3: '跑回测', step3d: '验证后上实盘',
-      goFactors: '去因子库', goStrategy: '去策略', goBacktest: '去回测',
+      step1: '建因子', step1d: '从因子管理开始', step2: '写策略', step2d: 'DSL 或 Python', step3: '跑回测', step3d: '验证后上实盘',   // 批89：跟随菜单改名（旧称「因子库」正文残留会与菜单分裂）
+      goFactors: '去因子管理', goStrategy: '去策略', goBacktest: '去回测',   // 批89：跟随菜单改名
       sinceInception: '成立以来', riskGauge: '风控水位（回撤）', tasksRunning: '实盘任务',
       equityCurve: '权益曲线', noCurve: '暂无权益数据',
       liveTasks: '实盘任务', noTasks: '暂无实盘任务',
@@ -777,7 +777,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
     },
     trading: {
       strategyColTip: '本列显示策略 ID；同策略多任务时，以委托记录归属为准',
-      longTag: '多', shortTag: '空', manualNote: '交易台人工单登记', wanUnit: '万',
+      longTag: '多', shortTag: '空', manualNote: '交易终端人工单登记', wanUnit: '万',   // 批89：跟随菜单改名（指代页面旧称）
       dirCol: '方向', frozenCol: '可用', costCol: '成本价', pnlCol: '浮盈', orderRefCol: '委托号',
       snapshotNote: '快照时间：', staleWarn: '持仓快照已停更（>600s）——当前展示为最后快照，非实时空仓判定依据', snapshotRowsTip: '最后快照行数：{n}', lastUpdate: '最后更新',
       dailySummary: '当日汇总', totalTrades: '总笔数', buyCount: '买入笔数', sellCount: '卖出笔数',
@@ -839,7 +839,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       pvParams: '试算参数（标的/频率/根数）',
       refsTitle: '「{name}」被以下策略引用', weightInStrategy: '权重',
 
-      title: '因子库',
+      title: '因子管理',   // 批89：页面 header 跟随菜单新名（菜单/页头不分裂）
       create: '新建',
       dsl: 'DSL表达式',
       edit: '编辑',
@@ -1391,7 +1391,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       run: '运行配置', users: '账号与邀请', profile: '个人资料', alertsTab: '告警通道',   // 批33a：perm 键删（盲审 B-P1 两区对齐）
     },
     screener: {
-      filters: '筛选条件', results: '结果', run: '筛选', addToPool: '加入股票池', selectPool: '选择池',
+      filters: '筛选条件', results: '结果', run: '筛选', addToPool: '加入自选标的', selectPool: '选择池',   // 批89：跟随池改名（「股票池」→「自选标的」正文残留清零）
       added: '已添加 {n} 只标的到池', savedPlans: '已保存方案', savePlan: '保存当前方案', planName: '方案名称',
       peMax: 'PE 上限', pbMax: 'PB 上限', mvMin: '市值下限(万元)', turnoverMin: '换手率下限(%)',
       marketCap: '市值', turnover: '换手率',
