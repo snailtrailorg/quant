@@ -15,6 +15,10 @@
       </div>
     </template>
 
+    <!-- 批 91：本地计数聚合降级提示（后端 count_error）——勿把「查不到」当「本地 0 条」 -->
+    <el-alert v-if="countError" type="warning" :closable="false" show-icon
+      :title="t('symbol.countDegraded', { err: countError })" style="margin-bottom: var(--sp-3)" />
+
     <!-- 全量同步进度条 -->
     <el-card v-if="allRunning || progress.status === 'running' || progress.status === 'error'" shadow="never" style="margin-bottom: 12px">
       <div style="display: flex; align-items: center; gap: 12px">
@@ -87,6 +91,7 @@ const q = ref('')
 const loading = ref(false)
 
 const allRunning = ref(false)
+const countError = ref('')   // 批 91：本地计数聚合降级标记（后端 count_error）
 const progress = ref({})
 const taskId = ref('')
 const idleSince = ref(0)
@@ -122,6 +127,7 @@ const load = async () => {
     const r = await api.get(`/sync/symbols/${syncId}`, { params: { q: q.value, page: 1, size: 9999 } })
     items.value = r.items
     total.value = r.total
+    countError.value = r.count_error || ''   // 批 91：聚合降级时后端带此标记（local_count 全 0 不可信）
   } finally { loading.value = false }
 }
 const onSearch = () => load()

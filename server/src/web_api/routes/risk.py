@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query
 
-from src.data_platform.db import get_conn
+from src.data_platform.db import get_conn, get_conn_for_heavy_read
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
@@ -347,18 +347,25 @@ def data_integrity_api(freq: str = "1D",
         return _hit[1]
     table = "bar_1D" if freq == "1D" else f"bar_{freq}"
     bars_per_day = {"1D": 1, "1min": 240, "5min": 48}[freq]
-    with get_conn() as conn:
-        try:
+    try:
+        # 批 91：① 时区转换移出聚合——min/max 直接作用于索引列 ts（dev 1371 万行实测
+        #          1.87s→1.00s）；② 只读全表聚合放宽 statement_timeout（prod 10s 过紧）。
+        with get_conn_for_heavy_read() as conn:
             cur = conn.execute(
-                f"SELECT symbol, count(*), min(ts AT TIME ZONE 'Asia/Shanghai')::date, max(ts AT TIME ZONE 'Asia/Shanghai')::date FROM {table} GROUP BY symbol ORDER BY symbol")
+                f"SELECT symbol, count(*), (min(ts) AT TIME ZONE 'Asia/Shanghai')::date, "
+                f"(max(ts) AT TIME ZONE 'Asia/Shanghai')::date FROM {table} GROUP BY symbol ORDER BY symbol")
             rows = cur.fetchall()
-        except Exception:
-            return {"items": [], "summary": {"total": 0, "complete": 0, "partial": 0, "missing": 0}}
-        if freq == "1D":
-            cur = conn.execute("SELECT cal_date FROM trade_cal WHERE is_open=1")
-            day_set = {r[0] for r in cur.fetchall()}
-        else:
-            day_set = None
+            if freq == "1D":
+                cur = conn.execute("SELECT cal_date FROM trade_cal WHERE is_open=1")
+                day_set = {r[0] for r in cur.fetchall()}
+            else:
+                day_set = None
+    except Exception as e:
+        # 批 91：不再静默吞错。此前该分支返回的体与「表真的空」**逐字相同** ⇒ 界面把
+        # 「查询失败」谎报成「0 只标的 / 暂无数据」，前端错误条（loadFailed）永不亮。
+        logger.exception("data-integrity 查询失败（freq=%s table=%s）", freq, table)
+        return {"items": [], "summary": {"total": 0, "complete": 0, "partial": 0, "missing": 0},
+                "error": f"{type(e).__name__}: {str(e)[:160]}"}
 
     items = []
     complete = partial = missing = 0

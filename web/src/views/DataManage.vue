@@ -239,7 +239,13 @@ const load = async () => {
       api.get('/sync/log'),
       api.get('/datasource/capabilities'),
     ])
-    configs.value = cfg.map(c => ({ ...c, status: c.last_status ?? 'idle', _prevSchedule: c.schedule, _prevFilter: c.trade_day_filter }))
+    // 批 91：停用任务不显示残留 last_status（concept_sync 停采后 last_status='failed' 恒留
+    // ⇒ 界面永远挂一个红「失败」，让人误以为系统有病）。disabled 优先于 last_status。
+    configs.value = cfg.map(c => ({
+      ...c,
+      status: c.enabled === false ? 'disabled' : (c.last_status ?? 'idle'),
+      _prevSchedule: c.schedule, _prevFilter: c.trade_day_filter,
+    }))
     logs.value = lg
     providers.value = caps.providers || {}
   } finally { loading.value = false }

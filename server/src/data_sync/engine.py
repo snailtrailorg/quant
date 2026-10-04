@@ -19,7 +19,7 @@ import pandas as pd
 import psycopg
 from dotenv import load_dotenv
 
-from src.data_platform.db import get_conn
+from src.data_platform.db import get_conn, get_conn_for_heavy_read
 from src.data_platform.security_master import normalize_board
 from src.data_platform.jsonb import jsonb
 
@@ -1832,8 +1832,11 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
     # 批量聚合查 bar_1D 本地数据范围（一次 ANY 查询，非逐只）
     vts = {to_vt_symbol(r[0]): r[0] for r in rows}
     local: dict = {}
+    count_error: str | None = None
     try:
-        with get_conn() as conn:
+        # 批 91：只读全表聚合放宽 statement_timeout（prod 10s 下该查询被 PG 取消，
+        # 此前只吞 UndefinedTable ⇒ 超时异常逃逸成 500，整页不可用）。
+        with get_conn_for_heavy_read() as conn:
             cur = conn.execute(
                 f"SELECT symbol, count(*), min(ts), max(ts) FROM {bar_table} "
                 "WHERE symbol = ANY(%s) GROUP BY symbol",
@@ -1846,6 +1849,11 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
                               as_shanghai(mx).strftime("%Y%m%d") if mx else None)
     except psycopg.errors.UndefinedTable:
         pass
+    except Exception as e:
+        # 批 91：聚合失败不再逃逸成 500——降级为「清单可看、本地计数不可用」，并显著标出
+        # （count_error 由前端提示，避免把「查不到」伪装成「本地 0 条」）。
+        logger.warning("list_symbols(%s) 本地计数聚合失败（降级 local_count=0）: %s", sync_id, e)
+        count_error = f"{type(e).__name__}: {str(e)[:160]}"
 
     items = []
     for ts_code, name, list_date in rows:
@@ -1858,6 +1866,10 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
             "local_first": loc[1] if loc else None,
             "local_last": loc[2] if loc else None,
         })
-    return {"items": items, "total": total}
+    out = {"items": items, "total": total}
+    if count_error:
+        # 批 91：本地计数聚合降级标记（前端须显著提示，勿把「查不到」显示成「0 条」）
+        out["count_error"] = count_error
+    return out
 
 

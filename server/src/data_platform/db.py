@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 from datetime import date
 from typing import TYPE_CHECKING
 
@@ -71,6 +72,34 @@ _verified_tables: set = set()
 def get_conn() -> psycopg.Connection:
     """从连接池获取 psycopg 连接（with 退出还池，保留 psycopg 裸 SQL 风格）。"""
     return _engine.raw_connection()
+
+
+# 批 91：只读重查询的超时放宽值。web 进程的 statement_timeout 由 systemd 环境压到 10s
+# （见上方 _db_session_options 注释），对「全表聚合」类看板查询过紧——prod 实测
+# /api/data-integrity 与 /api/sync/symbols 的 bar_1d per-symbol 聚合均被 PG 取消
+# （psycopg.errors.QueryCanceled: statement timeout）。这里给这类只读聚合更宽的窗口。
+HEAVY_READ_STMT_TIMEOUT_MS = 30_000
+
+
+@contextmanager
+def get_conn_for_heavy_read(stmt_timeout_ms: int | None = None):
+    """只读重查询专用连接：**本事务内**放宽 statement_timeout，事务结束自动复位。
+
+    用 ``set_config(..., is_local=true)`` = ``SET LOCAL`` 语义——只作用于本事务，退出即
+    复位，**不污染池连接、不影响其他请求**（对比：直接 ``SET statement_timeout`` 会把
+    放宽值留在还池的连接上，泄漏给后续请求）。
+
+    用途：全表聚合类看板查询（``bar_1d`` per-symbol 统计）。调用方须自行 try/except——
+    超时（QueryCanceled）会照常抛出，由调用方决定「报错」还是「降级」。
+    """
+    ms = HEAVY_READ_STMT_TIMEOUT_MS if stmt_timeout_ms is None else int(stmt_timeout_ms)
+    conn = _engine.raw_connection()
+    try:
+        with conn.transaction():
+            conn.execute("SELECT set_config('statement_timeout', %s, true)", (f"{ms}ms",))
+            yield conn
+    finally:
+        conn.close()   # PoolProxiedConnection.close = 还池，非断连
 
 
 def dispose_fork_inherited_connections() -> None:

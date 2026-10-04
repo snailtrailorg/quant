@@ -67,6 +67,14 @@ const load = async () => {
   loadFailed.value = false
   try {
     const r = await getDataIntegrity(freq.value)
+    // 批 91：后端失败不再返回 200 空体——带 error 字段（此前与「表真的空」同形，
+    // 界面把「查询失败」谎报成「0 只标的 / 暂无数据」，错误条永不亮）。
+    if (r.error) {
+      loadFailed.value = true
+      items.value = []
+      summary.value = {}
+      return
+    }
     items.value = r.items || []
     summary.value = r.summary || {}
   } catch { loadFailed.value = true }
