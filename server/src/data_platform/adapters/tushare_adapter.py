@@ -357,7 +357,10 @@ def pull_trade_cal(year: int) -> list[tuple]:
     init_trade_calendar(year)
     rows = []
     # DB 优化（2026-08-21 盘点）：全仓唯一不带 with 的连接——泄漏实锤，改池化用法
-    from .db import get_conn as _get_pooled_conn
+    # 批 94 修复：`.db` 是坏相对导入（adapters 包内无 db.py，正确层级是 `..db`，
+    # 同文件 :350/:439 均为 `..db`）⇒ pull_trade_cal 自该行引入起 ModuleNotFoundError，
+    # trade_cal 同步一直失败。staging 彩排（批 94）实挖。
+    from ..db import get_conn as _get_pooled_conn
     with _get_pooled_conn() as pro:
         with pro.cursor() as cur:
             for r in df.to_dict("records"):

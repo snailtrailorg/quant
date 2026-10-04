@@ -128,11 +128,41 @@
     <!-- 编辑弹窗（批16 操作收编：调度+回补进弹窗，删除进 footer；吸收原 cron/回补双弹窗） -->
     <el-dialog v-model="cronDialog" :close-on-click-modal="false" :title="t('dataManage.editTitle')" width="560px">
       <el-form label-width="80px">
-        <el-form-item label="Cron">
+        <!-- 批 93：结构化编辑器（频率/时间/重复日）——提交时编译回 cron，库里仍存 cron -->
+        <el-form-item :label="t('dataManage.freq')">
+          <el-radio-group v-model="cronForm.freq" @change="syncModelToCron">
+            <el-radio-button value="scheduled">{{ t('dataManage.freqScheduled') }}</el-radio-button>
+            <el-radio-button value="interval">{{ t('dataManage.freqInterval') }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <template v-if="cronForm.freq === 'scheduled'">
+          <el-form-item :label="t('dataManage.timeLabel')">
+            <el-time-select v-model="cronForm.time" start="00:00" step="00:05" end="23:55"
+                            style="width: 100%" @change="syncModelToCron" />
+          </el-form-item>
+          <el-form-item :label="t('dataManage.repeatDays')">
+            <el-select v-model="cronForm.days" multiple collapse-tags style="width: 100%"
+                       :placeholder="t('cronText.everyDay')" @change="syncModelToCron">
+              <el-option v-for="d in 7" :key="d" :value="d" :label="t('cronText.wd' + d)" />
+            </el-select>
+          </el-form-item>
+        </template>
+        <el-form-item v-else-if="cronForm.freq === 'interval'" :label="t('dataManage.intervalMin')">
+          <el-select v-model="cronForm.minutes" style="width: 100%" @change="syncModelToCron">
+            <el-option v-for="m in [5, 10, 15, 30, 60, 120, 240, 1440]" :key="m"
+                       :value="m" :label="t('cronText.everyNMin', { n: m })" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-else label="Cron">
+          <!-- raw 兜底：表达式超出图形编辑器表达范围（如 0 9 1 1 *）→ 原文编辑，绝不锁死 -->
           <el-input v-model="cronForm.schedule" placeholder="30 16 * * 1-5" />
+          <div class="cron-raw-hint">{{ t('dataManage.cronRawHint') }}</div>
         </el-form-item>
         <el-form-item :label="t('dataManage.tpl')">
-          <el-button v-for="tpl in cronTemplates" :key="tpl.expr" size="small" text type="primary" @click="cronForm.schedule = tpl.expr">{{ tpl.label }}</el-button>
+          <el-button v-for="tpl in cronTemplates" :key="tpl.expr" size="small" text type="primary" @click="applyTemplate(tpl)">{{ tpl.label }}</el-button>
+        </el-form-item>
+        <el-form-item :label="t('dataManage.cronPreview')">
+          <code class="cron-code">{{ cronForm.schedule || '-' }}</code>
         </el-form-item>
         <el-form-item :label="t('dataManage.tradeDay')">
           <el-select v-model="cronForm.trade_day_filter" style="width: 100%">
@@ -170,6 +200,7 @@ import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { Refresh, Setting, Edit } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
+import { cronToModel, modelToCron, describeCron } from '../utils/cronText'
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -385,17 +416,33 @@ onUnmounted(stopPoll)
 
 // 编辑弹窗（批16 操作收编，吸收原 Cron 弹窗；footer 删除用的行对象按 id 反查）
 const cronDialog = ref(false)
-const cronForm = ref({ id: '', name: '', sync_mode: '', schedule: '', trade_day_filter: 'none', date: '' })
+const cronForm = ref({ id: '', name: '', sync_mode: '', schedule: '', trade_day_filter: 'none', date: '',
+                       freq: 'scheduled', time: '09:00', days: [], minutes: 15 })
 const cronRow = computed(() => configs.value.find(c => c.id === cronForm.value.id))
 const cronTemplates = [
   { label: t('dataManage.tplDaily'), expr: '30 16 * * 1-5' },
   { label: t('dataManage.tplMorning'), expr: '0 9 * * 1-5' },
   { label: t('dataManage.tplWeekly'), expr: '0 9 * * 1' },
 ]
+// 批 93：结构化模型 ⇄ cron（schedule 仍是保存的真源；raw 档不回编译）
+const syncModelToCron = () => {
+  const f = cronForm.value
+  if (f.freq !== 'raw') f.schedule = modelToCron({ freq: f.freq, time: f.time, days: f.days, minutes: f.minutes })
+}
+const applyTemplate = (tpl) => {
+  const m = cronToModel(tpl.expr)
+  Object.assign(cronForm.value, {
+    freq: m.freq, time: m.time || '09:00', days: m.days || [], minutes: m.minutes || 15,
+    ...(m.freq === 'raw' ? { schedule: tpl.expr } : {}),
+  })
+  syncModelToCron()
+}
 const openCron = (row) => {
   const d = new Date(); d.setDate(d.getDate() - 30)   // 回补默认起始：30 天前
-  cronForm.value = { id: row.id, name: row.name, sync_mode: row.sync_mode, schedule: row.schedule,
-                     trade_day_filter: row.trade_day_filter || 'none', date: d.toISOString().slice(0, 10).replace(/-/g, '') }
+  const m = cronToModel(row.schedule || '')
+  cronForm.value = { id: row.id, name: row.name, sync_mode: row.sync_mode, schedule: row.schedule || '',
+                     trade_day_filter: row.trade_day_filter || 'none', date: d.toISOString().slice(0, 10).replace(/-/g, ''),
+                     freq: m.freq, time: m.time || '09:00', days: m.days || [], minutes: m.minutes || 15 }
   cronDialog.value = true
 }
 const saveCron = async () => {
