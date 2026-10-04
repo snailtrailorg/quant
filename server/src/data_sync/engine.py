@@ -254,6 +254,37 @@ def _data_ready_end_date(lag_trade_days: int = 0) -> str:
     return (date.today() - timedelta(days=lag_trade_days)).strftime("%Y%m%d")
 
 
+def _trade_dates_in_range(start_ts: str, end_ts: str) -> list[str] | None:
+    """[start_ts, end_ts] 内的交易日（trade_cal is_open=1，SSE）。
+
+    批 97：tier1 逐日循环的"不空跑"依据——freq="B" 只排周末，法定节假日全在空调用。
+    返回 None ＝ 日历未覆盖该区间（fresh 库/深度不足/异常），调用方 fail-open 回
+    freq="B"（宁多打、不漏拉）。覆盖度守卫：日历首行距区间起点 >3 天视为未覆盖
+    （如库里只有 2026 一年而回补从 2010 起——只回补 2026 段会静默漏掉 2010-2025）。
+    """
+    try:
+        from src.data_platform.db import get_conn as _gc
+        d0 = f"{start_ts[:4]}-{start_ts[4:6]}-{start_ts[6:8]}"
+        d1 = f"{end_ts[:4]}-{end_ts[4:6]}-{end_ts[6:8]}"
+        with _gc() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT cal_date, is_open FROM trade_cal "
+                    "WHERE exchange='SSE' AND cal_date BETWEEN %s AND %s "
+                    "ORDER BY cal_date", (d0, d1))
+                rows = cur.fetchall()
+        if not rows:
+            return None
+        if (rows[0][0] - date(int(start_ts[:4]), int(start_ts[4:6]), int(start_ts[6:8]))).days > 3:
+            logger.warning("trade_cal 覆盖度不足（首行 %s 晚于区间起点 %s），回退 freq=B",
+                           rows[0][0], d0)
+            return None
+        return [r[0].strftime("%Y%m%d") for r in rows if r[1]]
+    except Exception as e:
+        logger.warning("交易日历区间读取失败（回退 freq=B）: %s", e)
+        return None
+
+
 # --- 同步调度入口 ---
 
 def sync(sync_id: str, backfill_from: str | None = None,
@@ -609,16 +640,21 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
 
 def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
                     progress_cb: Callable | None = None) -> dict:
-    """交易日历全量同步。"""
+    """交易日历同步。批 97：backfill_from 起**逐年**拉到当年（每年 1 次调用）——
+    原实现无视 backfill_from 只拉当年，导致 trade_cal 恒 365 行、tier1 交易日
+    循环与 _data_ready_end_date 在深回补区间无日历可用（fail-open 空跑）。"""
     from src.data_platform.adapters.tushare_adapter import pull_trade_cal
     from src.data_platform.rate_limit import rate_limit_context  # 批 67：裸调收编（顺手）
-    year = date.today().year
+    year_now = date.today().year
+    year0 = int(backfill_from[:4]) if backfill_from else year_now
     prov = _provider_of(cfg)      # 批 83b：provider 真路由（原死钉 tushare）
     _ds = _get_rate_ds(prov)
-    with rate_limit_context(_ds, "trade_cal"):
-        pull_trade_cal(year)
-        _ds.record_usage(api_calls=1, api_name="trade_cal", provider=_ds.provider)
-    return {"pulled": 365, "saved": 365, "start": end_date,
+    pulled = 0
+    for y in range(year0, year_now + 1):
+        with rate_limit_context(_ds, "trade_cal"):
+            pulled += len(pull_trade_cal(y) or [])
+            _ds.record_usage(api_calls=1, api_name="trade_cal", provider=_ds.provider)
+    return {"pulled": pulled, "saved": pulled, "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
 
@@ -1114,11 +1150,18 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
             return {"pulled": 0, "saved": 0, "start": start_ts, "cursor_upto": end_date,
                     "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
-        date_range = pd.date_range(start=start_ts, end=end_date, freq="B")
+        # 批 97：逐日循环接交易日历（法定节假日不再空调用）——日历未覆盖区间时
+        # fail-open 回 freq="B"（宁多打、不漏拉）。trade days ⊆ business days，
+        # 收窄只会少拉节假日，对 ann_date 驱动的表（forecast）也无回归。
+        _trade_days = _trade_dates_in_range(start_ts, end_date)
+        if _trade_days is not None:
+            date_range = _trade_days
+        else:
+            date_range = [d.strftime("%Y%m%d")
+                          for d in pd.date_range(start=start_ts, end=end_date, freq="B")]
         total_pulled = total_saved = 0
         failed_dates = []
-        for d in date_range:
-            td = d.strftime("%Y%m%d")
+        for td in date_range:
             try:
                 # forecast 按 ann_date 拉（公告日驱动），其余按 trade_date；
                 # 限速（限流治理吸收）：原 0.3s 硬编码 → rate_limit_context 三级可调
