@@ -227,6 +227,33 @@ def _expected_trading_days(start: str, end: str) -> int:
     return len(pd.date_range(start=start, end=end, freq="B"))
 
 
+def _data_ready_end_date(lag_trade_days: int = 0) -> str:
+    """增量窗口上界（YYYYMMDD）＝最近一个「数据已可用」的交易日。
+
+    批 92 根因修复：原 `sync()` 一律以 `date.today()` 作窗口上界，而按 trade_date 的增量
+    数据**当日盘中/次日 T+1 前均不可得** ⇒ 逐日循环的前沿日必然空拉；又因下游无条件把
+    游标推到 end_date，**该前沿日永不复访 ⇒ 静默永久缺失**。确定性受害样本＝
+    `margin_detail`（cron 09:00、T+1 数据，当日必空 ⇒ 全表恒空）。
+
+    - lag_trade_days=0：今日若为交易日则取今日，否则取上一交易日。
+    - lag_trade_days=1：**严格早于今日**的上一交易日（T+1 数据用，如 margin_detail）。
+    - trade_cal 不可用/缺表 → 回退 `today - lag 自然日`（fail-open，绝不抛）。
+    """
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(
+                "SELECT to_char(cal_date, 'YYYYMMDD') FROM trade_cal "
+                "WHERE exchange='SSE' AND is_open=1 AND cal_date <= %s "
+                "ORDER BY cal_date DESC LIMIT %s",
+                (date.today(), lag_trade_days + 1))
+            rows = cur.fetchall()
+            if len(rows) > lag_trade_days:
+                return rows[lag_trade_days][0]
+    except Exception as e:   # noqa: BLE001 —— fail-open：日历缺失不得阻断同步
+        logger.warning("交易日历读取失败（回退自然日上界）: %s", e)
+    return (date.today() - timedelta(days=lag_trade_days)).strftime("%Y%m%d")
+
+
 # --- 同步调度入口 ---
 
 def sync(sync_id: str, backfill_from: str | None = None,
@@ -305,7 +332,10 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     else:
                         _advance = (end_date, saved, "idle")
                 else:
-                    _advance = (end_date, saved, "idle")
+                    # 批 92：无 last_success_date 键的 handler（tier1 按日族）改从返回体取
+                    # 「游标上界」——它可能窄于 end_date（如 margin_detail 的 T+1 数据可用日
+                    # ＝上一交易日）。缺省仍 end_date ⇒ 未声明者零行为变化。
+                    _advance = (r.get("cursor_upto") or end_date, saved, "idle")
             else:
                 _advance = None   # 回补不推进游标（现状）
             _mark_running(sync_id, False)   # G-S2：先清 running（置 idle），终态随后覆盖——
@@ -1032,8 +1062,18 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
 # 通用模式：pull(trade_date) → DataFrame → 逐行 upsert 到专用表
 # soft_time_limit 由 celery task 侧覆盖（≥600s），此处只做数据层
 
+# 批 92：窗口下界回看重叠（自然日）。上游某日数据迟发布（>T+1）时，游标已推进到可用日
+# ⇒ 下一轮窗口不再含该日 ⇒ 永久漏。回看 K 天用 upsert 幂等重拉，把这类延迟兜进窗口。
+_TIER1_OVERLAP_DAYS = 3
+
+# 批 92：按 sync_id 声明的「数据可用延迟」（交易日数）——窗口上界＝today 回推 N 个交易日。
+# 未声明者 lag=0（盘后当日可得）。T+1 表必须显式声明，否则前沿日恒空拉。
+_TIER1_LAG_TRADING_DAYS: dict[str, int] = {"margin_detail_sync": 1}
+
+
 def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
-                        float_cols: list[str] | None = None, text_cols: list[str] | None = None):
+                        float_cols: list[str] | None = None, text_cols: list[str] | None = None,
+                        lag_trade_days: int = 0):
     """工厂：生成第一档按日批量同步 handler。
 
     Args:
@@ -1042,6 +1082,8 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
         pk_cols: 主键列（用于 ON CONFLICT）
         float_cols: NUMERIC 列名列表
         text_cols: TEXT 列名列表
+        lag_trade_days: 数据可用延迟（交易日数，批 92）——窗口上界＝today 回推 N 个交易日。
+            0＝当日盘后可得（默认）；1＝T+1（如 margin_detail，09:00 拉昨日）。
     """
     import importlib
     adapter = importlib.import_module("src.data_platform.adapters.tushare_adapter")
@@ -1057,14 +1099,20 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
         from src.data_platform.rate_limit import rate_limit_context
         # 批 83b：限速/熔断/用量归属随 sync_config.provider 走（原死钉 get_data_source("tushare")）
         ds = _get_rate_ds(_provider_of(cfg))
-        # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日）
+        # 批 92：窗口上界＝数据可用日（不再无条件用 sync() 传入的 today）——T+1 表
+        # （margin_detail，lag=1）上界＝上一交易日，逐日循环不再空拉尚不可得的当日。
+        end_date = _data_ready_end_date(lag_trade_days)
+        # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日），
+        # 批 92 再回看 _TIER1_OVERLAP_DAYS 天兜上游迟发布（upsert 幂等，不重复计数）。
         if backfill_from:
             start_ts = backfill_from
         else:
             _last = cfg.get("last_sync_date") or (date.today() - timedelta(days=3)).strftime("%Y%m%d")
-            start_ts = (pd.Timestamp(_last) + timedelta(days=1)).strftime("%Y%m%d")
+            start_ts = (pd.Timestamp(_last)
+                        + timedelta(days=1 - _TIER1_OVERLAP_DAYS)).strftime("%Y%m%d")
         if start_ts > end_date:
-            return {"pulled": 0, "saved": 0, "start": start_ts, "failed_dates": [], "expected_days": 0, "actual_days": 0}
+            return {"pulled": 0, "saved": 0, "start": start_ts, "cursor_upto": end_date,
+                    "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
         date_range = pd.date_range(start=start_ts, end=end_date, freq="B")
         total_pulled = total_saved = 0
@@ -1112,6 +1160,7 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
             if progress_cb:
                 progress_cb(len(date_range), len(date_range), td)
         return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
+                "cursor_upto": end_date,
                 "failed_dates": failed_dates,
                 "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates)}
 
@@ -1234,7 +1283,8 @@ for _sid, (_tbl, _pull, _pk) in _TIER1_BATCH.items():
     _HANDLERS[_sid] = _make_tier1_handler(
         _tbl, _pull, _pk,
         float_cols=_TIER1_FLOAT_COLS.get(_tbl, []),
-        text_cols=_TIER1_TEXT_COLS.get(_tbl, []))
+        text_cols=_TIER1_TEXT_COLS.get(_tbl, []),
+        lag_trade_days=_TIER1_LAG_TRADING_DAYS.get(_sid, 0))
 
 # 全量重建的（2 个）
 _TIER1_FULL = {

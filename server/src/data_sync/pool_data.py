@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date
+from datetime import date, timedelta
 
 from src.data_platform import db as _pdb
 from src.data_platform.rate_limit import rate_limit_context
@@ -57,6 +57,10 @@ _SINGLE_DAY_TABLES: frozenset[str] = frozenset({"cyq_chips"})
 # engine.sync() 已持 SyncLock(sync_id)，本键若同名则该轮必然拿不到锁）。
 _RESOURCE_LOCK = "pool_data_exec"
 
+# 批 92：窗口回看重叠（自然日）。上游公告/财务数据迟发布时游标已推过上界 ⇒ 下轮窗口不再含
+# 该日 ⇒ 永久漏。回看 K 天靠 upsert 幂等兜住（增量表窗口 [cursor-K, 上界]）。
+_POOL_OVERLAP_DAYS = 7
+
 
 def _get_pool_ts_codes() -> list[str]:
     """池内 A 股标的（pools.category='astock'）→ Tushare ts_code。"""
@@ -79,8 +83,12 @@ def _load_cursors() -> dict:
         return {}
 
 
-def _advance_cursors(done_symbols: dict, ts_codes: list[str], today_str: str) -> None:
-    """游标推进：增量表本轮覆盖全部标的才推进（防 timebox 中断漏标的）。"""
+def _advance_cursors(done_symbols: dict, ts_codes: list[str], upper_str: str) -> None:
+    """游标推进：增量表本轮覆盖全部标的才推进（防 timebox 中断漏标的）。
+
+    upper_str＝窗口上界（批 92：昨日自然日，与 `_window_of` 同源）。下一轮下界＝
+    upper+1-回看重叠（`_window_of` 内叠加），故游标只会**保守前进**，不会越过未覆盖日。
+    """
     full_set = set(ts_codes)
     for table in sorted(_INCREMENTAL_TABLES):
         if full_set <= done_symbols.get(table, set()):
@@ -91,7 +99,7 @@ def _advance_cursors(done_symbols: dict, ts_codes: list[str], today_str: str) ->
                         "VALUES (%s, %s, now()) "
                         "ON CONFLICT (table_name) DO UPDATE SET "
                         "last_pull_date=EXCLUDED.last_pull_date, updated_at=now()",
-                        (table, today_str))
+                        (table, upper_str))
                     conn.commit()
             except Exception as e:
                 logger.warning("游标推进失败 %s: %s", table, e)
@@ -109,16 +117,22 @@ def _pool_meta(table: str) -> dict | None:
     return {"kind": row["kind"], "pg_table": row["pg_table"], "pk": list(row["pk_cols"])}
 
 
-def _window_of(table: str, cursors: dict, today_str: str) -> tuple[str | None, str | None]:
+def _window_of(table: str, cursors: dict, upper_str: str) -> tuple[str | None, str | None]:
     """表级窗口策略（引擎侧编排声明——「请求哪段」；「怎么向源表达」在 adapter）。
 
-    单日表 → (today, today)；增量表且有游标 → (cursor, today) 含起点重叠幂等防漏；
+    单日表 → (upper, upper)；增量表且有游标 → (cursor-回看重叠, upper) 含起点重叠幂等防漏；
     其余 → (None, None) 全量（不传窗口参数）。
+
+    upper_str＝窗口上界（批 92：由 run_pool_sync 传入的「昨日自然日」，非 today——cron 改每日
+    02:00 后当日公告尚未发布，用 today 作上界会让当轮恒拉不到当天公告且游标已越过）。
     """
     if table in _SINGLE_DAY_TABLES:
-        return today_str, today_str
+        return upper_str, upper_str
     if table in _INCREMENTAL_TABLES and cursors.get(table):
-        return cursors[table], today_str
+        cur = cursors[table]
+        start = (date.fromisoformat(f"{cur[:4]}-{cur[4:6]}-{cur[6:8]}")
+                 - timedelta(days=_POOL_OVERLAP_DAYS)).strftime("%Y%m%d")
+        return start, upper_str
     return None, None
 
 
@@ -184,7 +198,9 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
         # DataSource 缺位由 _get_rate_ds 抛 ProviderConfigError 穿透=响亮失败，不静默串源）
         adapter = _get_kline_adapter(cfg if cfg is not None else {"provider": provider})
         ds = _get_rate_ds(provider)
-        today_str = date.today().strftime("%Y%m%d")
+        # 批 92：窗口上界＝昨日自然日（cron 改每日 02:00 后当日公告尚未发布）——用 today 会让
+        # 当轮恒拉不到当天公告、游标又已越过 ⇒ 静默漏。增量窗口回看重叠在 _window_of 内叠加。
+        upper_str = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
         cursors = {} if (full or symbols) else _load_cursors()
         deadline = time.time() + timebox_s
         errors: list[str] = []
@@ -205,7 +221,7 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
                     break
                 try:
                     req = _pool_request(table, ts_code, meta["kind"],
-                                        _window_of(table, cursors, today_str))
+                                        _window_of(table, cursors, upper_str))
                     # 限速/熔断收编（批 64b 原语义）：键=表名=限速档键；窗口组装与列归一等
                     # 纯计算在上下文外，**只有源拉取**计入配额与熔断（与旧实现同锚点）
                     with rate_limit_context(ds, table):
@@ -219,7 +235,7 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
                 break
         # 游标推进在收尾统一做（按表判覆盖：timebox 中断未覆盖的表下轮重拉同窗口幂等）
         if not symbols:
-            _advance_cursors(done_symbols, ts_codes, today_str)
+            _advance_cursors(done_symbols, ts_codes, upper_str)
         duration_ms = int((time.time() - t0) * 1000)
         if timeboxed:
             return {"status": "timebox", "symbols": len(ts_codes), "saved": total_saved,

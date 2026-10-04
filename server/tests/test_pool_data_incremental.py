@@ -15,7 +15,7 @@ sync_log 留痕已移交给 engine.sync()（见 test_pool_data_collected）；�
 """
 import time
 from contextlib import contextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,9 +38,16 @@ needs_db = pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev �
 
 class _FakeLock:
     """永远抢到（测增量逻辑不测锁）。"""
-    def __init__(self, *a, **kw): self.acquired = True; self.key = a[0] if a else ""
-    def __enter__(self): return self
-    def __exit__(self, *a): return False
+
+    def __init__(self, *a, **kw):
+        self.acquired = True
+        self.key = a[0] if a else ""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
 
 
 class _FakeResult:
@@ -136,7 +143,8 @@ def _cursor_upserts(conn):
             if sql.startswith("INSERT INTO pool_data_cursor")}
 
 
-TODAY = date.today().strftime("%Y%m%d")
+# 批 92：池数据窗口上界改「昨日自然日」（`_POOL_OVERLAP_DAYS`=7 天回看），游标亦推进到该上界
+YESTERDAY = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
 INC_TABLES = ["income", "balancesheet", "cashflow", "fina_indicator"]
 
 
@@ -146,13 +154,15 @@ INC_TABLES = ["income", "balancesheet", "cashflow", "fina_indicator"]
 class TestWindow:
 
     def test_incremental_window_applied(self):
-        """有游标 → 增量表请求 range_=[cursor, today]；非增量表 range_=None。"""
+        """有游标 → 增量表请求 range_=[cursor-回看7天, 上界(昨日)]；非增量表 range_=None。"""
         _, ad, _ = _run(cursors={"income": "20260801"})
+        exp_start = datetime(2026, 7, 25)                 # 20260801 - 7 天回看（批 92）
+        exp_end = datetime.strptime(YESTERDAY, "%Y%m%d")  # 上界=昨日自然日（批 92）
         for r in ad.reqs_of("income"):
-            assert r.range_ == (datetime(2026, 8, 1), datetime.strptime(TODAY, "%Y%m%d"))
+            assert r.range_ == (exp_start, exp_end)
         assert all(r.range_ is None for r in ad.reqs_of("top10_holders"))
-        # cyq_chips 保持当日单日模式（引擎给 (today, today)，源侧译成 trade_date=）
-        td = datetime.strptime(TODAY, "%Y%m%d")
+        # cyq_chips 单日模式（引擎给 (上界, 上界)，源侧译成 trade_date=）
+        td = exp_end
         assert all(r.range_ == (td, td) for r in ad.reqs_of("cyq_chips"))
 
     def test_request_shape_is_supply_contract(self):
@@ -185,13 +195,13 @@ class TestCursor:
     def test_cursor_advance_on_complete(self):
         result, _, conn = _run(cursors={"income": "20260801"})
         assert result["status"] == "done"
-        assert _cursor_upserts(conn) == {t: TODAY for t in INC_TABLES}
+        assert _cursor_upserts(conn) == {t: YESTERDAY for t in INC_TABLES}
 
     def test_cursor_not_advance_on_error(self):
         result, _, conn = _run(fail_on=("000001.SZ", "income"))
         assert result["status"] == "partial"
         adv = _cursor_upserts(conn)
-        assert "income" not in adv and adv.get("balancesheet") == TODAY
+        assert "income" not in adv and adv.get("balancesheet") == YESTERDAY
 
     def test_cursor_not_advance_on_timebox(self):
         result, _, conn = _run(timebox_s=0)

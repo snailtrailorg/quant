@@ -160,9 +160,10 @@ class TestScheduleEquivalence:
         # 前两条与原 beat 的 crontab **逐字**对齐；后两条原为 celery interval / crontab：
         #   pool-data-sync: schedule=300.0（interval 秒）→ */5 * * * *（周期等价，同 5 分钟）
         #   pool-data-full-calibrate: crontab(day_of_week=0, hour=4, minute=7) → 逐字
+        # 0130（批 92）：pool_data 改 0 2 * * *——季度级/公告级数据不配 5 分钟轮（见该迁移）。
         "static_symbols": ("37 4 * * 0", "none"),            # crontab(day_of_week=0, hour=4, minute=37)
         "convertible_terms": ("43 3 * * *", "none"),         # crontab(hour=3, minute=43)
-        "pool_data": ("*/5 * * * *", "none"),                # schedule=300.0（interval）
+        "pool_data": ("0 2 * * *", "none"),                  # 0130：每日 02:00（原 */5，批 92 降频）
         "pool_data_full_calibrate": ("7 4 * * 0", "none"),   # crontab(day_of_week=0, hour=4, minute=7)
     }
 
