@@ -19,5 +19,5 @@ fi
 touch "$marker" 2>/dev/null || true
 isoweek="$(date +%G-W%V)"
 
-reason="【收工自检】① 文档:本轮若有 结构/方案、心智模型、方向、外部资料、设计 变更 → 提议更新 ${docname}(注明层级)或 DESIGN.md,列出修改点等确认。② 交接:在 flow/进展/${isoweek}.md 最上面追加一条进展(做了什么/为什么/怎么理解/产出路径/问题→解决/下一步)并同步更新 flow/进展.md 索引的「最近 3 条」,把这条贴在回复里给用户看,决策落 decisions.md、坑落 踩坑记录.md。都没有就回复「无需更新」。"
+reason="【收工自检】① 文档:本轮若有 结构/方案、心智模型、方向、外部资料、设计 变更 → 提议更新 ${docname}(注明层级)或设计文档(docs/design/·docs/architecture/·flow/方案/),列出修改点等确认;状态文档(设计/规范/CLAUDE.md)改就重写整篇、勿追加时间线。② 交接:在 flow/进展/${isoweek}.md 最上面追加一条进展(做了什么/为什么/怎么理解/产出路径/问题→解决/下一步)并同步更新 flow/进展.md 索引的「最近 3 条」,把这条贴在回复里给用户看,决策落 decisions.md、坑落 踩坑记录.md。都没有就回复「无需更新」。"
 jq -n --arg r "$reason" '{decision:"block", reason:$r}'
