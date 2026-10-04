@@ -13,7 +13,7 @@
 
 ## 步骤
 1. **判断状态**:目录有无 `CLAUDE.md` / 已有内容 → 决定全量铺 or 合并。
-2. **目录骨架**:建 `flow/`(`charter.md` `plan.md` `待办.md`(索引) `进展.md`(索引)+`进展/`(按周归档) `任务/` `方案/` `规范/` `decisions.md` `踩坑记录.md`)+ `docs/`(放 `README.md`)。**代码项目**另建 `scripts/`(或 `src/`)放代码。〔归属规则见 `工作流程.md` §五〕
+2. **目录骨架**:建 `flow/`(`charter.md` `plan.md` `待办.md`(索引) `进展.md`(索引)+`进展/`(按周归档) `任务/` `方案/` `规范/` `decisions.md` `踩坑记录.md`)+ `docs/`(放 `README.md`)。**代码项目**另建 `scripts/`(或 `src/`)放代码。〔归属规则见 `工作流程.md` §六〕
 3. **入口注入**:
    - 写 `CLAUDE.md`(从 `templates/CLAUDE.md`:精要规则 + 约束 + 目录地图 + 指针;已有项目则**合并**进现有 CLAUDE.md)。
    - 建软链:`ln -s CLAUDE.md AGENTS.md`(Windows 改复制一份)。
