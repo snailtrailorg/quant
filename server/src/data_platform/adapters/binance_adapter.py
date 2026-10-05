@@ -5,7 +5,7 @@
 - ✅ `s3.ap-northeast-1.amazonaws.com/data.binance.vision`——S3 ListObjectsV2（符号枚举）
 - ❌ `fapi.binance.com`——永续**实时**/下单端点，**网络阻断**（需境外 relay，非本 adapter 范围）
 
-**能力边界**：`capabilities` 只含 `crypto_perp_daily`（历史批量）；**不含 `rt_quote`**——
+**能力边界**：`capabilities` 只含 `binance_perp_daily`（历史批量）；**不含 `rt_quote`**——
 批量站给的是 T+1 静态文件，虚报实时会让 resolve 把实盘决策路由到一个没有实时能力的源。
 
 **T+1 语义**（实测）：UTC 当日文件 404、前一日 200 ⇒ 窗口上界由 handler 定为 UTC 昨日。
@@ -122,7 +122,7 @@ class BinanceAdapter(BaseDataAdapter):
 
     provider = "binance"
     # 供给项（sync_id）：本 adapter 只服务加密永续日线（批 101）
-    capabilities = {"crypto_perp_daily"}
+    capabilities = {"binance_perp_daily"}
     # 契约层能力声明（粒度＝kind）——只声明**真实现**的能力：bar_daily（historical，crypto 全域）。
     # bar_daily 非聚合域 ⇒ sub_kinds 必须为空（contract.validate_capability_decls 硬约束）。
     capability_decls = [CapabilityDecl("bar_daily", "historical", CRYPTO_ALL)]
@@ -263,7 +263,7 @@ class BinanceAdapter(BaseDataAdapter):
         """批 100 供给端口：`('bar_daily', 'perp')` → 逐标的区间批量拉取（源原生 DataFrame）。
 
         参数：`symbol`（源符号，可带 .BINANCE）/ `start` / `end`（'YYYYMMDD'）。
-        本 adapter 的 `capabilities` 是 sync_id 级（crypto_perp_daily），端口这里按 kind 分派，
+        本 adapter 的 `capabilities` 是 sync_id 级（binance_perp_daily），端口这里按 kind 分派，
         与 tushare 侧同构——证明批 100 的端口**与 provider 无关**。
         """
         if kind == "bar_daily" and sub_kind in (None, "perp"):

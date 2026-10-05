@@ -47,7 +47,7 @@ server/src/data_platform/
 
 ## 批 101 新模块：adapters/binance_adapter.py（2026-10-06）
 
-- **能力边界**：`capabilities={"crypto_perp_daily"}`（sync_id 级）+ `capability_decls=[CapabilityDecl("bar_daily","historical",CRYPTO_ALL)]`。
+- **能力边界**：`capabilities={"binance_perp_daily"}`（sync_id 级）+ `capability_decls=[CapabilityDecl("bar_daily","historical",CRYPTO_ALL)]`。
   **不含 `rt_quote`**——批量站给的是 T+1 静态文件，虚报实时会让 resolve 把实盘决策路由到无实时能力的源。
 - **真 gate 是网络不是 key**：`data.binance.vision`（官方批量 ZIP，含 `futures/um` 永续）prod 直连可达；
   `fapi.binance.com`（永续实时/下单）/`www.okx.com` **网络阻断** ⇒ 实时腿需境外 relay（批 102）。
@@ -422,6 +422,6 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 ## 最近变更
 - 2026-08-27 限流治理吸收 + 积分档预设四层限流（`docs/obsolete/任务归档/限流治理吸收.md`；双盲补审 fa1f123 全修后产上部署）
 - 2026-10-06 批 101：新增加密数据源 `binance`（批量历史 adapter + DataSource + InterfaceProvider 三处注册）、
-  `markets.PROVIDER_MARKET["binance"]`、`sync_config.crypto_perp_daily`（迁移 0132）；退役 `data_increment_crypto` 死构件。
+  `markets.PROVIDER_MARKET["binance"]`、`sync_config.binance_perp_daily`（迁移 0132）；退役 `data_increment_crypto` 死构件。
 
 > **批55-0(2026-09-19)能力查询层**:新增 `capabilities.py`(`provider_capabilities`/`check_capability_subset`——能力真源=代码 `_ADAPTERS` sync_id 串经 `quant_common.markets.SYNC_ID_CAP_MAP` 归一;配置能力⊆代码校验,55a 端点写侧与漂移告警消费)。维度注册表本体在 `quant_common/markets.py`(层 0 纯数据——本模块只放读上层代码的查询函数,分层铁律)。立法全文 `docs/architecture/A02-外部接口与市场维度设计.md`。

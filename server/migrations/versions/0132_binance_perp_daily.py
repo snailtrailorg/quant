@@ -11,13 +11,13 @@
 证据与设计见 `flow/方案/crypto数据层-立项设计-20261006.md`。
 
 **本迁移只插两行配置**（expand-only：无 DDL、无 DELETE/RENAME）：
-1. `sync_config.crypto_perp_daily`——provider=`binance`（新数据源 provider，0 密钥）、
+1. `sync_config.binance_perp_daily`——provider=`binance`（新数据源 provider，0 密钥）、
    `trade_day_filter='none'`（crypto = **连续轴**，无交易日历）、`start_floor='2019-09-08'`
    （USDT-M 永续上线日；实测月包自 2020-01、更早回退日包）、`supports_backfill=true`
    （handler 真读 `backfill_from`）、`schedule='30 8 * * *'`。
    ⚠️ `data_sync_scheduler` 以**北京时区**解释 cron（见 `tasks.data_sync_scheduler` 的 TZ_CN），
    故 08:30 北京 = **00:30 UTC**——正是 UTC 昨日文件落盘之后（T+1 语义）。
-2. `sync_kind_config.crypto_perp_daily`——归置 `(kind=bar_daily, sub_kind=perp)` → `bar_1d`；
+2. `sync_kind_config.binance_perp_daily`——归置 `(kind=bar_daily, sub_kind=perp)` → `bar_1d`；
    `sub_kind='perp'` 是**新增子类**（原 bar_daily 只有 stock/etf/convertible）。
 
 **downgrade**：删这两行（对称）。行内无历史依赖——bar_1d 里的 crypto 行不随配置回滚删除
@@ -37,7 +37,7 @@ down_revision: Union[str, Sequence[str], None] = "0131"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-_SYNC_ID = "crypto_perp_daily"
+_SYNC_ID = "binance_perp_daily"
 
 
 def upgrade() -> None:
@@ -46,7 +46,7 @@ def upgrade() -> None:
         "INSERT INTO sync_config (id, name, tushare_api, pg_table, data_type, sync_mode, "
         "schedule, enabled, trade_day_filter, provider, supports_backfill, start_floor, "
         "description) VALUES ("
-        "'crypto_perp_daily', '加密永续日线', 'binance.klines', 'bar_1D', 'crypto', "
+        "'binance_perp_daily', '加密永续日线', 'binance.klines', 'bar_1D', 'crypto', "
         "'incremental', '30 8 * * *', true, 'none', 'binance', true, '2019-09-08', "
         "'币安 USDT-M 永续日线（data.binance.vision 批量 ZIP，T+1）。全标的（排除 _YYMMDD 交割合约）。') "
         "ON CONFLICT (id) DO NOTHING")
@@ -54,7 +54,7 @@ def upgrade() -> None:
     op.execute(
         "INSERT INTO sync_kind_config (sync_id, kind, sub_kind, pg_table, pk_cols, "
         "float_cols, text_cols, rebuild) VALUES ("
-        "'crypto_perp_daily', 'bar_daily', 'perp', 'bar_1d', "
+        "'binance_perp_daily', 'bar_daily', 'perp', 'bar_1d', "
         "'{symbol,ts}', '{open,high,low,close,volume,amount}', '{}', 'incremental') "
         "ON CONFLICT (sync_id) DO NOTHING")
 

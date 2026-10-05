@@ -860,10 +860,10 @@ stamp "$FROM_M"
 # --- M1 upgrade ---
 step up "$TO_M" "M1 upgrade（插两行配置）"
 chk "sync_config 行已插（值级：provider/过滤/可回补/下界/类型/形态/cron）" \
-  "$(q "select provider||'/'||trade_day_filter||'/'||supports_backfill::text||'/'||start_floor::text||'/'||data_type||'/'||sync_mode||'/'||schedule from sync_config where id='crypto_perp_daily'")" \
+  "$(q "select provider||'/'||trade_day_filter||'/'||supports_backfill::text||'/'||start_floor::text||'/'||data_type||'/'||sync_mode||'/'||schedule from sync_config where id='binance_perp_daily'")" \
   "binance/none/true/2019-09-08/crypto/incremental/30 8 * * *"
 chk "sync_kind_config 归置行已插（值级）" \
-  "$(q "select kind||'/'||sub_kind||'/'||pg_table||'/'||rebuild from sync_kind_config where sync_id='crypto_perp_daily'")" \
+  "$(q "select kind||'/'||sub_kind||'/'||pg_table||'/'||rebuild from sync_kind_config where sync_id='binance_perp_daily'")" \
   "bar_daily/perp/bar_1d/incremental"
 chk "邻居行数不变（sync_config 3 行）" "$(q "select count(*) from sync_config")" "3"
 chk "astock_basic 的 start_floor 未被动" \
@@ -876,23 +876,23 @@ chk "sync_kind_config 邻居行数不变（2 行）" "$(q "select count(*) from 
 stamp "$FROM_M"
 step up "$TO_M" "M2 强制复跑（部署中断重跑场景）"
 chk "复跑后 crypto 配置行仍恰 1 行" \
-  "$(q "select count(*) from sync_config where id='crypto_perp_daily'")" "1"
+  "$(q "select count(*) from sync_config where id='binance_perp_daily'")" "1"
 chk "复跑后 kind 归置行仍恰 1 行" \
-  "$(q "select count(*) from sync_kind_config where sync_id='crypto_perp_daily'")" "1"
+  "$(q "select count(*) from sync_kind_config where sync_id='binance_perp_daily'")" "1"
 
 # --- M3 幂等复跑 + 不覆盖运维编辑（真上产：upgrade 与界面改 schedule 并发） ---
-x "update sync_config set schedule='0 9 * * *', enabled=false where id='crypto_perp_daily'"
+x "update sync_config set schedule='0 9 * * *', enabled=false where id='binance_perp_daily'"
 stamp "$FROM_M"
 step up "$TO_M" "M3 幂等复跑（运维已改该行）"
 chk "运维改过的 schedule 未被覆盖（ON CONFLICT DO NOTHING）" \
-  "$(q "select schedule from sync_config where id='crypto_perp_daily'")" "0 9 * * *"
+  "$(q "select schedule from sync_config where id='binance_perp_daily'")" "0 9 * * *"
 chk "运维置的 enabled=false 未被翻回" \
-  "$(q "select enabled::text from sync_config where id='crypto_perp_daily'")" "false"
+  "$(q "select enabled::text from sync_config where id='binance_perp_daily'")" "false"
 
 # --- M4 downgrade ---
 step down "$FROM_M" "M4 downgrade（回收两行）"
-chk "crypto 配置行已回收" "$(q "select count(*) from sync_config where id='crypto_perp_daily'")" "0"
-chk "kind 归置行已回收" "$(q "select count(*) from sync_kind_config where sync_id='crypto_perp_daily'")" "0"
+chk "crypto 配置行已回收" "$(q "select count(*) from sync_config where id='binance_perp_daily'")" "0"
+chk "kind 归置行已回收" "$(q "select count(*) from sync_kind_config where sync_id='binance_perp_daily'")" "0"
 chk "邻居行未被误删（sync_config）" "$(q "select count(*) from sync_config")" "2"
 chk "邻居行未被误删（sync_kind_config）" "$(q "select count(*) from sync_kind_config")" "1"
 }
@@ -915,7 +915,7 @@ fi
 chk "upgrade 渲染未被截断（含版本推进）" "$(grep -c "SET version_num='$TO_M'" "$tmp/up.sql")" "1"
 chk "downgrade 渲染未被截断（含版本回退）" "$(grep -c "SET version_num='$FROM_M'" "$tmp/dn.sql")" "1"
 chk "upgrade 渲染含两条幂等子句" "$(grep -c 'ON CONFLICT' "$tmp/up.sql")" "2"
-chk "upgrade 渲染含 crypto_perp_daily（两行配置各一）" "$(grep -c 'crypto_perp_daily' "$tmp/up.sql")" "2"
+chk "upgrade 渲染含 binance_perp_daily（两行配置各一）" "$(grep -c 'binance_perp_daily' "$tmp/up.sql")" "2"
 rm -rf "$tmp"
 }
 

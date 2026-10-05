@@ -146,8 +146,8 @@ app.conf.update(
         # `data_increment_crypto`，而该 task 恒 `return {"status":"skipped","reason":"待币安/OKX
         # API 配置"}` ⇒ 每 15 分钟白耗唤醒的**死构件**，违反「不留死构件」纪律）。
         # 处置＝**真落地 + 收编**（同批 83b 四条 beat 范式）：改由 `sync_config` 行
-        # `crypto_perp_daily`（迁移 0132，schedule=`30 8 * * *` 北京 = 00:30 UTC，T+1 语义）
-        # 经 `data_sync_scheduler` 调度 → `engine._sync_crypto_perp_daily`。
+        # `binance_perp_daily`（迁移 0132，schedule=`30 8 * * *` 北京 = 00:30 UTC，T+1 语义）
+        # 经 `data_sync_scheduler` 调度 → `engine._sync_binance_perp_daily`。
         # 原来的 15min 周期在 T+1 批量语义下本就无意义；实时腿（fapi）待境外代理，批 102。
         "sync-scheduler": {
             "task": "src.scheduler.tasks.data_sync_scheduler",

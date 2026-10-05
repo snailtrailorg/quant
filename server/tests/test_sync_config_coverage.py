@@ -58,7 +58,7 @@ class TestDispatchTables:
     def test_handlers_count(self):
         """字面量 handler 表：批 83b 收编前 7 + tier1 工厂 7 + 全量重建工厂 2
         + 批 83b 池数据工厂 2（pool_data / pool_data_full_calibrate）+ 批 101 加密 1
-        （crypto_perp_daily）= 19（含 0118 收编的 static_symbols/convertible_terms；
+        （binance_perp_daily）= 19（含 0118 收编的 static_symbols/convertible_terms；
         防工厂回填静默失效）。"""
         from src.data_sync.engine import _HANDLERS
         assert len(_HANDLERS) == 19, sorted(_HANDLERS)
@@ -88,7 +88,7 @@ class TestSyncConfigBijection:
 
     def test_row_count_arithmetic(self):
         """行数量级守门：17 存量 + 3（迁移 0117）+ 2（0118 收编）+ 2（0119 收编）
-        + 1（批 101 加密 crypto_perp_daily）= 25。
+        + 1（批 101 加密 binance_perp_daily）= 25。
 
         防的是"某条 cfg 行丢了而代码路由也一起丢"（双射仍成立但能力真空）这种同向漂移。
         """

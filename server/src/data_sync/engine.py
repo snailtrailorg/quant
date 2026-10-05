@@ -931,7 +931,7 @@ def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None) -> tuple
     return start, end
 
 
-def _sync_crypto_perp_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
+def _sync_binance_perp_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
                             progress_cb: Callable | None = None) -> dict:
     """币安 USDT-M 永续日线 → `bar_1d`（`symbol='BTCUSDT.BINANCE'`、`source='binance'`）。
 
@@ -972,7 +972,7 @@ def _sync_crypto_perp_daily(cfg: dict, end_date: str, backfill_from: str | None 
     if pulled == 0:
         # 「全窗口 0 行」非正常态（T+1 窗口内每个在市合约都该有数据）——显式记账，勿静默成功
         failed.append("no_rows:窗口内 0 行（上游不可达 / T+1 未落盘 / 窗口压空）")
-    logger.info("crypto_perp_daily %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d",
+    logger.info("binance_perp_daily %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d",
                 start_s, end_s, total, pulled, saved, len(failed))
     return {"pulled": pulled, "saved": saved, "start": start_s,
             "failed_dates": failed, "expected_days": None,
@@ -997,7 +997,7 @@ _HANDLERS = {
     "pool_data_full_calibrate": _make_pool_handler(full=True),
     # 批 101：加密数据层第一步（原 beat `data-increment-crypto` 收编——原实现是
     # 「每 15min 被唤醒、永远 return skipped」的死构件，现真落地为币安永续 T+1 日线）
-    "crypto_perp_daily": _sync_crypto_perp_daily,
+    "binance_perp_daily": _sync_binance_perp_daily,
 }
 
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由

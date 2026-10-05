@@ -34,8 +34,8 @@ BACKFILLABLE_EXPECTED = {
     # tier1 批量 7（_TIER1_BATCH）
     "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
     "block_trade_sync", "cyq_perf_sync", "forecast_sync",
-    # 单表专项 3（astock_basic / trade_cal / 批 101 crypto_perp_daily）
-    "astock_basic", "trade_cal", "crypto_perp_daily",
+    # 单表专项 3（astock_basic / trade_cal / 批 101 binance_perp_daily）
+    "astock_basic", "trade_cal", "binance_perp_daily",
 }
 # 必须**没有**回补入口的 9 项（静态清单 5 / 全量重建 2 / 池内 2）
 NOT_BACKFILLABLE_EXPECTED = {
@@ -66,10 +66,10 @@ class TestBackfillCapabilityTruth:
     def test_code_truth_equals_literal(self):
         """代码结构推出的可回补集 == 字面量 16 项（防「加/删 handler 忘更新声明」）。"""
         from src.data_sync.engine import _HANDLERS, _TIER1_BATCH, _TIER1_FULL, _VIA_KIND_IDS
-        # 单表专项＝「不在两个工厂里、但 handler 真读 backfill_from」的项（crypto_perp_daily
+        # 单表专项＝「不在两个工厂里、但 handler 真读 backfill_from」的项（binance_perp_daily
         # 经 _HANDLERS 直挂，与 astock_basic/trade_cal 同族）
         code_truth = (set(_VIA_KIND_IDS) | set(_TIER1_BATCH)
-                      | {"astock_basic", "trade_cal", "crypto_perp_daily"})
+                      | {"astock_basic", "trade_cal", "binance_perp_daily"})
         assert code_truth == BACKFILLABLE_EXPECTED, (
             f"代码真源漂移：多 {sorted(code_truth - BACKFILLABLE_EXPECTED)} / "
             f"少 {sorted(BACKFILLABLE_EXPECTED - code_truth)}")
@@ -96,15 +96,15 @@ class TestBackfillCapabilityTruth:
     def test_start_floor_seeded_only_where_known(self):
         """start_floor 只填已实证的下界，其余 NULL（不臆造）。
 
-        批 101 新增 `crypto_perp_daily='2019-09-08'`——USDT-M 永续上线日（币安官方事实），
+        批 101 新增 `binance_perp_daily='2019-09-08'`——USDT-M 永续上线日（币安官方事实），
         且 adapter 的 pull_daily 真能投递该起点（早期靠日包；月包自 2020-01）。
         """
         rows = dict(_q("SELECT id, start_floor FROM sync_config"))
         assert str(rows["astock_basic"]) == "1990-12-19"
         assert str(rows["index_daily"]) == "2005-04-08"
-        assert str(rows["crypto_perp_daily"]) == "2019-09-08"
+        assert str(rows["binance_perp_daily"]) == "2019-09-08"
         assert {k for k, v in rows.items() if v is not None} == {
-            "astock_basic", "index_daily", "crypto_perp_daily"}
+            "astock_basic", "index_daily", "binance_perp_daily"}
 
     @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
     def test_columns_shape(self):

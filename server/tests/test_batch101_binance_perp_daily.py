@@ -15,7 +15,7 @@
 5. **月包压缩**：整月走 monthly（≥2020-01）、其余 daily —— 回补请求数从「全 daily」压到 ~1/30；
 6. **T+1 窗口上界＝UTC 昨日**：否则每轮把「尚未落盘的今天」记成失败，游标永不动；
 7. **handler 失败必须可见**：符号枚举空 → 响亮 raise（不静默 success）；全窗 0 行 → 进 failed；
-8. **死构件真退役**：原 `data-increment-crypto` beat（每 15min 唤醒、恒 return skipped）+ 
+8. **死构件真退役**：原 `data-increment-crypto` beat（每 15min 唤醒、恒 return skipped）+
    `tasks.data_increment_crypto` 已删——回归即红。
 """
 from __future__ import annotations
@@ -110,7 +110,7 @@ class TestRegistration:
     def test_capabilities_are_sync_id_level(self):
         """`capabilities`=sync_id 集合（供 `_validate_provider` 查表），不含 trading/rt_quote。"""
         caps = BC.BinanceAdapter.capabilities
-        assert caps == {"crypto_perp_daily"}
+        assert caps == {"binance_perp_daily"}
         assert "rt_quote" not in caps, "批量站是 T+1 静态文件，虚报实时＝把实盘决策路由到无实时能力的源"
 
 
@@ -143,15 +143,15 @@ class TestProviderKeyDisambiguation:
         """
         from src.data_sync.engine import _get_supply_adapter
         from src.data_platform.adapters.base import TushareAdapter
-        ad = _get_supply_adapter({"id": "crypto_perp_daily", "provider": "binance"})
+        ad = _get_supply_adapter({"id": "binance_perp_daily", "provider": "binance"})
         assert isinstance(ad, BC.BinanceAdapter)
         assert not isinstance(ad, TushareAdapter), "provider='binance' 回落 tushare＝拉错源"
 
     def test_cap_map_and_provider_market_registered(self):
         """`SYNC_ID_CAP_MAP` / `PROVIDER_MARKET` 双登记（漏登记＝「清单有·能力无」）。"""
         from src.quant_common.markets import CAPABILITIES, PROVIDER_MARKET, SYNC_ID_CAP_MAP
-        assert SYNC_ID_CAP_MAP["crypto_perp_daily"] == "hist_quote"
-        assert SYNC_ID_CAP_MAP["crypto_perp_daily"] in CAPABILITIES
+        assert SYNC_ID_CAP_MAP["binance_perp_daily"] == "hist_quote"
+        assert SYNC_ID_CAP_MAP["binance_perp_daily"] in CAPABILITIES
         assert PROVIDER_MARKET["binance"] == "crypto"
 
 
@@ -469,11 +469,11 @@ class _FakeAdapter:
 class TestHandler:
     def _run(self, adapter, cfg=None, backfill=None):
         from src.data_sync import engine
-        cfg = cfg or {"id": "crypto_perp_daily", "provider": "binance", "last_sync_date": "20240101"}
+        cfg = cfg or {"id": "binance_perp_daily", "provider": "binance", "last_sync_date": "20240101"}
         with patch.object(engine, "_get_supply_adapter", return_value=adapter), \
              patch("src.data_platform.db.save_bars", return_value=2) as sb, \
              patch("src.data_platform.db.save_bars_overwrite", return_value=2) as so:
-            r = engine._sync_crypto_perp_daily(cfg, "20240131", backfill)
+            r = engine._sync_binance_perp_daily(cfg, "20240131", backfill)
         return r, sb, so
 
     def test_writes_rows_and_returns_cursor_upto(self):
@@ -494,7 +494,7 @@ class TestHandler:
         from src.data_sync import engine
         with patch.object(engine, "_get_supply_adapter", return_value=_FakeAdapter(symbols=())):
             with pytest.raises(RuntimeError):
-                engine._sync_crypto_perp_daily({"id": "crypto_perp_daily", "provider": "binance"},
+                engine._sync_binance_perp_daily({"id": "binance_perp_daily", "provider": "binance"},
                                                "20240131", None)
 
     def test_all_window_zero_rows_is_visible(self):
@@ -507,8 +507,8 @@ class TestHandler:
         """窗口压空（如回补起点晚于 T+1 上界）＝显式 0 行，不抛、不写。"""
         from src.data_sync import engine
         with patch.object(engine, "_get_supply_adapter", return_value=_FakeAdapter()):
-            r = engine._sync_crypto_perp_daily(
-                {"id": "crypto_perp_daily", "provider": "binance"}, "20240101", "20240105")
+            r = engine._sync_binance_perp_daily(
+                {"id": "binance_perp_daily", "provider": "binance"}, "20240101", "20240105")
         assert r["pulled"] == 0 and r["saved"] == 0 and r["cursor_upto"] == "20240101"
 
 
@@ -519,14 +519,14 @@ class TestHandler:
 class TestSchedulerWiring:
     def test_handler_registered(self):
         from src.data_sync import engine
-        assert "crypto_perp_daily" in engine._HANDLERS
-        assert engine._HANDLERS["crypto_perp_daily"] is engine._sync_crypto_perp_daily
+        assert "binance_perp_daily" in engine._HANDLERS
+        assert engine._HANDLERS["binance_perp_daily"] is engine._sync_binance_perp_daily
 
     def test_crypto_not_in_via_kind_ids(self):
         """bar 族静态路由（逐日 _sync_via_kind）不适用于 crypto（无交易日历、按标的×窗口）——
         误入会让它走 A 股心智的逐日批路径。"""
         from src.data_sync import engine
-        assert "crypto_perp_daily" not in engine._VIA_KIND_IDS
+        assert "binance_perp_daily" not in engine._VIA_KIND_IDS
 
     def test_beat_has_no_dead_crypto_increment(self):
         """反证：原 beat 条目（每 15min 唤醒一个恒 return skipped 的 task）已退役——加回即红。"""
@@ -563,10 +563,10 @@ class TestCapabilityCompleteness:
         把「漏登记即红」这件事在本文件内做成可证的谓词。
         """
         from src.quant_common.markets import SYNC_ID_CAP_MAP
-        declared = {"astock_daily", "crypto_perp_daily"}          # 代码侧声明（_HANDLERS ∪ _VIA_KIND_IDS）
+        declared = {"astock_daily", "binance_perp_daily"}          # 代码侧声明（_HANDLERS ∪ _VIA_KIND_IDS）
         assert declared <= set(SYNC_ID_CAP_MAP)                    # 现状：全覆盖
-        broken = {k: v for k, v in SYNC_ID_CAP_MAP.items() if k != "crypto_perp_daily"}
-        assert declared - set(broken) == {"crypto_perp_daily"}, "判据无法发现漏登记"
+        broken = {k: v for k, v in SYNC_ID_CAP_MAP.items() if k != "binance_perp_daily"}
+        assert declared - set(broken) == {"binance_perp_daily"}, "判据无法发现漏登记"
 
     def test_crypto_symbol_convention_agrees_with_data_layer(self):
         """数据层写的 `.BINANCE` 后缀 → crypto 市场（markets 与 security_master 双单源一致）。"""
@@ -590,7 +590,7 @@ class TestCapabilityCompleteness:
 class TestMigrationShape:
     def _mod(self):
         import importlib
-        return importlib.import_module("migrations.versions.0132_crypto_perp_daily")
+        return importlib.import_module("migrations.versions.0132_binance_perp_daily")
 
     def test_revision_chain(self):
         m = self._mod()
@@ -641,8 +641,8 @@ class TestRealDb:
 
     def test_sync_config_row(self):
         rows = self._q("SELECT provider, trade_day_filter, supports_backfill, start_floor::text, "
-                       "data_type, enabled, sync_mode FROM sync_config WHERE id='crypto_perp_daily'")
-        assert len(rows) == 1, "迁移 0132 未跑（crypto_perp_daily 行缺失）"
+                       "data_type, enabled, sync_mode FROM sync_config WHERE id='binance_perp_daily'")
+        assert len(rows) == 1, "迁移 0132 未跑（binance_perp_daily 行缺失）"
         provider, tdf, sbf, floor, dtype, enabled, mode = rows[0]
         assert (provider, tdf, dtype) == ("binance", "none", "crypto")
         assert sbf is True and floor == "2019-09-08"
@@ -650,7 +650,7 @@ class TestRealDb:
 
     def test_sync_kind_config_row(self):
         rows = self._q("SELECT kind, sub_kind, pg_table, rebuild FROM sync_kind_config "
-                       "WHERE sync_id='crypto_perp_daily'")
+                       "WHERE sync_id='binance_perp_daily'")
         assert rows == [("bar_daily", "perp", "bar_1d", "incremental")]
 
     def test_capabilities_cover_own_sync_ids(self):

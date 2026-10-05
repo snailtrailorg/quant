@@ -81,7 +81,7 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "astock_daily": "hist_quote", "etf_daily": "hist_quote", "cb_daily": "hist_quote",
     "index_daily": "hist_quote", "astock_minute": "hist_quote", "astock_minute_5min": "hist_quote",
     # 批 101：加密永续日线（币安批量历史，历史行情类）
-    "crypto_perp_daily": "hist_quote",
+    "binance_perp_daily": "hist_quote",
     # ref_data
     "astock_basic": "ref_data", "astock_list": "ref_data", "etf_list": "ref_data",
     "cb_basic": "ref_data", "stk_limit_sync": "ref_data", "moneyflow_sync": "ref_data",

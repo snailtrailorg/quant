@@ -8,7 +8,7 @@
 
 **三面一致**（本文件把裁定钉成可执行断言）：
 1. **能力面**——非 bar 同步项不得被 **≥2 个源**声明（＝前端「可切」的真实条件；
-   批 101 前写作「非 bar 项恒 tushare」，因引入 binance 独占的 crypto_perp_daily 而收紧判据）。
+   批 101 前写作「非 bar 项恒 tushare」，因引入 binance 独占的 binance_perp_daily 而收紧判据）。
 2. **切换面**——`delete_by_sync_item` 的表清单（`_PER_SYMBOL_META`）只含 bar 族键；
    非 bar 键不得进入（否则切换会 rollback+500 或删错表）。
 3. **前端面**——下拉可用性由「能力矩阵里该 sync_id 的供源数」派生，故 1 成立即禁用态成立。
@@ -53,7 +53,7 @@ class TestSwitchableScope:
         """非 bar 同步项（`_HANDLERS` 直挂键）**不得可切源**——即不得被 ≥2 个源声明。
 
         判据演进（批 101）：原判据是「非 bar 项只被 tushare 声明」，太粗——它隐含
-        「非 bar 项恒 tushare」，而批 101 引入 `crypto_perp_daily`（非 bar 项，`_HANDLERS`
+        「非 bar 项恒 tushare」，而批 101 引入 `binance_perp_daily`（非 bar 项，`_HANDLERS`
         直挂，但**只有 binance 一家声明**）。前端的「可切」条件本就是
         `providerOptions(row).length > 1`（**供源数 ≥2**），故把断言改正为**同源判据**：
         供源 ≥2 才不可接受（下拉放开 → `switch_provider_api` → `delete_by_sync_item`
@@ -72,12 +72,12 @@ class TestSwitchableScope:
             f"这些非 bar 项被多个源声明（前端下拉会放开，而后端 delete_by_sync_item 不支持）："
             f"{switchable}；要么撤掉能力声明，要么先扩 delete_by_sync_item")
 
-    def test_crypto_perp_daily_is_binance_exclusive(self):
-        """批 101 落点：`crypto_perp_daily` 是非 bar 项且 **binance 独占**（tushare 不得声称）。"""
+    def test_binance_perp_daily_is_binance_exclusive(self):
+        """批 101 落点：`binance_perp_daily` 是非 bar 项且 **binance 独占**（tushare 不得声称）。"""
         from src.data_platform.adapters.base import _ADAPTERS
-        claim = [p for p, c in _ADAPTERS.items() if "crypto_perp_daily" in set(c.capabilities)]
+        claim = [p for p, c in _ADAPTERS.items() if "binance_perp_daily" in set(c.capabilities)]
         assert claim == ["binance"], claim
-        assert "crypto_perp_daily" not in set(_ADAPTERS["tushare"].capabilities)
+        assert "binance_perp_daily" not in set(_ADAPTERS["tushare"].capabilities)
 
     def test_bar_items_are_switchable_by_at_least_one_provider(self):
         """反向：bar 族键必须至少被一个源声明（否则它永远只能跑 tushare 之外的空菜单）。"""

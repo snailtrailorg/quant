@@ -183,7 +183,7 @@ class BinanceDataSource(DataSource):
     限速：批量站是**静态文件 CDN**（无 weight 模型、无配额概念）⇒ `DEFAULT_RATE_LIMITS` 空、
     不设限速；礼貌性由 adapter 的 ≤8 并发表达。**刻意不接 `rate_limit_context`**——
     `_get_rate_ds("binance")` 若回落 tushare 兜底源会把币安的下载计进 tushare 的熔断器
-    （串源），故 `engine._sync_crypto_perp_daily` 直接走 adapter，不取限速句柄。
+    （串源），故 `engine._sync_binance_perp_daily` 直接走 adapter，不取限速句柄。
 
     `test_connection` 是可达性探测（GET 批量站已知文件）——这是本源的**真 gate**：
     2026-10-06 prod 实测 `data.binance.vision` 直连 200，而 `fapi.binance.com`（实时）被阻断。

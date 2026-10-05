@@ -43,7 +43,7 @@ app: Celery                        # name="quant", broker/backend=VALKEY_URL
 |---|---|---|
 | `data_increment_daily` | beat 每天 | 盘后日线增量（`platform.ensure_daily`）；非交易日跳；max_retries=2 |
 | `astock_select_daily` | beat 每天 | 每日 A 股选股（`DailySelectionEngine`）；非交易日跳；max_retries=1 |
-| ~~`data_increment_crypto`~~ | ~~beat 15min~~ | **批 101 已退役**（死构件：恒 `skipped` 却每 15min 被 beat 唤醒）——**收编**为 `sync_config.crypto_perp_daily`（迁移 0132，schedule `30 8 * * *` 北京＝00:30 UTC，T+1），由 `data_sync_scheduler` 驱动 → `engine._sync_crypto_perp_daily` |
+| ~~`data_increment_crypto`~~ | ~~beat 15min~~ | **批 101 已退役**（死构件：恒 `skipped` 却每 15min 被 beat 唤醒）——**收编**为 `sync_config.binance_perp_daily`（迁移 0132，schedule `30 8 * * *` 北京＝00:30 UTC，T+1），由 `data_sync_scheduler` 驱动 → `engine._sync_binance_perp_daily` |
 | `data_sync_scheduler` | beat 5min | 扫 `sync_config` 按 cron + 交易日日历触发 `data_sync.sync`（三档一档 2026-08-19 起 300s） |
 | `sync_via_celery(sync_id, backfill_from=None)` | web `.delay` | 类型级同步（HTTP 立即返回 task_id；进度写 Valkey `sync:type:{sid}` + task_manager） |
 | `sync_all_symbols(sync_id)` | web `.delay` | 全市场全量 per-symbol 同步（`engine.sync_all`；进度 Valkey `sync:progress:{sid}`） |
