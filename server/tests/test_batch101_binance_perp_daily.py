@@ -135,6 +135,20 @@ class TestProviderKeyDisambiguation:
         assert provider_domain("binance") == "data_source"
         assert provider_domain("binance_perp") == "trading_account"
 
+    def test_trading_channel_skeletons_not_in_provider_modules(self):
+        """批 101 收口钉（威廉姆 2026-10-06 质疑后裁定）：交易通道桩不进凭证页。
+
+        `binance_perp`/`okx_perp` 是批 63 的凭证模板桩，当前零消费者（无实盘任务、
+        两域表无行）——挂进 `_PROVIDER_MODULES` = 凭证页出现「要你填 key」的死页签。
+        102 实时腿开工（消费者到场）时才挂回——挂回本钉反转，勿删。
+        """
+        from src.data_platform.interfaces import base as iface_base
+        assert "binance_perp" not in iface_base._PROVIDER_MODULES
+        assert "okx_perp" not in iface_base._PROVIDER_MODULES
+        # 数据源/待用面 provider 仍在（摘除只针对零消费者的交易桩）
+        assert "binance" in iface_base._PROVIDER_MODULES
+        assert "joinquant" in iface_base._PROVIDER_MODULES
+
     def test_supply_adapter_resolves_to_binance_not_tushare(self):
         """消费者断言：`provider='binance'` 真路由到 BinanceAdapter（不是回落 tushare）。
 

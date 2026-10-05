@@ -56,8 +56,11 @@ def register_provider(inst: InterfaceProvider) -> None:
 # 新 Provider 永不注册）。ricequant 仍无 schema（stub 无凭证字段）不入此表。
 # 批 101：`binance`（数据源，0 密钥，schema 空）；批 103：`joinquant`（凭证模板，
 # 账号+密码——测试账号已申请，能力暂不声明，见 interfaces/joinquant.py 模块注释）。
-_PROVIDER_MODULES = ("tushare", "tencent", "xtp", "binance_perp", "okx_perp", "emt_emq", "binance",
-                     "joinquant")
+# 批 101 收口（2026-10-06 威廉姆质疑后裁定）：`binance_perp`/`okx_perp` 摘出本表——
+# 二者是批 63 的交易通道凭证桩，当前零消费者（无实盘任务、两域表无行），UI 页签＝
+# 「有入口没功能」的死构件；同步面走数据源 `binance`（数据源域）不读交易账号。
+# 模块保留在位（binance_perp.py/okx_perp.py 不删），102 实时腿开工时再挂回。
+_PROVIDER_MODULES = ("tushare", "tencent", "xtp", "emt_emq", "binance", "joinquant")
 _BOOTSTRAPPED = False
 
 
