@@ -2,7 +2,10 @@
 
 双均线交叉（快线上穿慢线 BUY / 下穿 SELL），适用于 BTC/ETH 4H/1H。
 继承 Strategy + @register_strategy('crypto_perp')。
-外部 gate：币安/OKX API 未开通，回测用 PG bar，实盘待接网关。
+数据源：批 101 起币安 USDT-M 永续日线落 PG（`bar_1d`，`symbol='BTCUSDT.BINANCE'`、
+`source='binance'`，经 `data.binance.vision` 批量 ZIP，T+1）；实盘仍待接网关——币安**实时/下单**
+端点（`fapi.binance.com`）在大陆 prod 被网络阻断，需境外 relay（批 102）。
+注：原「外部 gate：币安/OKX API 未开通」是**误判**——公开行情端点本就无鉴权，真阻碍是网络可达性。
 """
 
 from __future__ import annotations

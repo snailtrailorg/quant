@@ -80,6 +80,8 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     # hist_quote
     "astock_daily": "hist_quote", "etf_daily": "hist_quote", "cb_daily": "hist_quote",
     "index_daily": "hist_quote", "astock_minute": "hist_quote", "astock_minute_5min": "hist_quote",
+    # 批 101：加密永续日线（币安批量历史，历史行情类）
+    "crypto_perp_daily": "hist_quote",
     # ref_data
     "astock_basic": "ref_data", "astock_list": "ref_data", "etf_list": "ref_data",
     "cb_basic": "ref_data", "stk_limit_sync": "ref_data", "moneyflow_sync": "ref_data",
@@ -109,6 +111,10 @@ PROVIDER_MARKET: dict[str, str] = {
     "tushare": "astock", "joinquant": "astock", "ricequant": "astock", "tencent": "astock",
     "xtp": "astock", "binance_perp": "crypto", "okx_perp": "crypto",
     "emt_emq": "astock",
+    # 批 101：加密**数据源** provider（`binance` = 批量历史 adapter，0 密钥）——注意与交易
+    # 通道 `binance_perp`（NON_DATA_PROVIDERS，trading/rt_quote）**是两把键**：一个是拉数面、
+    # 一个是下单面。混用会让 `_get_supply_adapter` 找不到 adapter 而静默回落 tushare 拉错源。
+    "binance": "crypto",
 }
 
 # 批 83a 拆表立法（2026-09-29 用户裁定·抽象判据）：行的边界=账号，**域=表**。

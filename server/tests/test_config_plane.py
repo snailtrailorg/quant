@@ -352,7 +352,12 @@ class TestProvidersDirectory:
     def test_data_directory_lists_data_providers_only(self, admin_client):
         r = admin_client.get(f"{DATA_URL}/providers")
         assert r.status_code == 200
-        assert [p["provider"] for p in r.json()["providers"]] == ["tushare"]
+        # 批 101：数据源目录新增 `binance`（加密永续日线，0 密钥批量历史 adapter）——
+        # 与交易通道 `binance_perp` 是两把键（前者出本目录、后者出交易页签，见下方断言）。
+        got = [p["provider"] for p in r.json()["providers"]]
+        assert got == sorted(["tushare", "binance"])
+        assert "binance_perp" not in got               # 交易通道 key 不得混入数据源目录
+        assert "xtp" not in got and "okx_perp" not in got
         # 83a：目录随回本域能力集——前端能力筛选/勾选零字面量（同源 markets.DOMAIN_CAPS）
         assert r.json()["domain_capabilities"] == sorted(["hist_quote", "ref_data", "inst_event"])
 

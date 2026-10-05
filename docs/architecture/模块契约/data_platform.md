@@ -29,8 +29,10 @@ server/src/data_platform/
 ├── jsonb.py           # 2026-09-30：jsonb 写路径**唯一出口**（jsonb/dumps_jsonb——静默降级治理，见六节不变量）
 ├── tz.py             # 批 56b：as_utc（写/读 PG 统一收口——naive 按上海解释转 UTC aware）+as_shanghai（显示层）
 ├── schema_expectations.txt  # verify_schema 期望基线（迁移链生成物，禁手写）
+├── interfaces/        # 批 63：配置面元数据（FIELD_SCHEMA/PARAMS_SCHEMA——前端动态表单；tushare/tencent/xtp/binance_perp/okx_perp/emt_emq/binance）
 └── adapters/
-    └── tushare_adapter.py  # Tushare 拉取 + DataFrame->rows 转换 + 质量校验
+    ├── tushare_adapter.py  # Tushare 拉取 + DataFrame->rows 转换 + 质量校验
+    └── binance_adapter.py  # 批 101：币安 USDⓈ-M 永续批量历史（data.binance.vision，0 密钥，T+1）——见下节
 ```
 （P3 回写 2026-08-20：补 audit/market_snapshot/stock_detail/schema_expectations.txt 四文件）
 
@@ -42,6 +44,21 @@ server/src/data_platform/
 - **DB 覆盖层**：`perm_resource` 表（迁移 0084）只改显示四字段（group/order/label per-locale/enabled）——条目集恒代码单源红线（PATCH 仅 nav kind+id∈注册表预检）；`load_registry()` 容错回底座不缓存。
 - **绑定扫描**：`scan_perm_bindings()` router-walk（FastAPI 0.141 懒 include——app.routes 零 APIRoute，扫 APIRouter 实例 175 处）；`check_binding_drift()` 键集⊆注册表防漂移闸（web_api startup 落点）。
 - GET `/api/perm-resources`（system_config）三段+绑定反查；PATCH `/api/perm-resources/{kind}/{id}`（四键全量显式）。
+
+## 批 101 新模块：adapters/binance_adapter.py（2026-10-06）
+
+- **能力边界**：`capabilities={"crypto_perp_daily"}`（sync_id 级）+ `capability_decls=[CapabilityDecl("bar_daily","historical",CRYPTO_ALL)]`。
+  **不含 `rt_quote`**——批量站给的是 T+1 静态文件，虚报实时会让 resolve 把实盘决策路由到无实时能力的源。
+- **真 gate 是网络不是 key**：`data.binance.vision`（官方批量 ZIP，含 `futures/um` 永续）prod 直连可达；
+  `fapi.binance.com`（永续实时/下单）/`www.okx.com` **网络阻断** ⇒ 实时腿需境外 relay（批 102）。
+- **符号枚举**：S3 `ListObjectsV2`（`s3.ap-northeast-1` 区域端点）分页取全 + 排除 `_YYMMDD` 交割合约；
+  `fapi` 被墙时这是唯一权威通道。非 ASCII 符号（如中文名合约）须 URL 编码。
+- **区间→文件**：整月走 monthly（实测月包自 2020-01 起）、其余 daily；>90 天先探测最早月包省流，
+  但**不得裁掉 pre-floor 日包区间**（否则静默丢 2019-09~2019-12 历史，与 `start_floor` 声明矛盾）。
+- **ts 口径**：`ts=open_time`（bar 起始，**UTC aware**——naive 会被 `db.validate_bars`/`as_utc` 按上海解释＝静默错 8h）。
+- **限速**：**刻意不套 `rate_limit_context`**（`_get_rate_ds("binance")` 回落 tushare 兜底源＝把币安下载计进 tushare 熔断器）；
+  静态文件 CDN 无 weight 模型，礼貌性由 adapter 内 ≤8 并发表达。
+- **两把键**：数据源 `binance`（hist_quote，0 密钥）≠ 交易通道 `binance_perp`（trading/rt_quote）。混用＝静默回落 tushare 拉错源。
 
 ## 批 57 新模块：routing.py（2026-09-20，29 号 §五 M2）
 
@@ -371,9 +388,17 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 ### 加新数据源（如 Wind）
 1. 实现 `DataSource` 子类（`get_client`/`test_connection`）
 2. `data_source._REGISTRY["wind"] = WindDataSource` + `markets.PROVIDER_MARKET["wind"]` 登记（层 0 纯数据）
-3. Web 配 `external_interface`（批55a 统一表：provider='wind'，market，capabilities=启用子集，credentials 加密）
+3. Web 配 `data_source` 行（批55a/83a 拆表：provider='wind'，market，capabilities=启用子集，credentials 加密）
 4. 不改 engine（`_get_pro` 走 `get_data_source`）
 5. 限速可选：子类设 `DEFAULT_RATE_LIMITS` 即自动进 `rate_limit_context` 体系，engine 拉取点零改动
+   （**反例**：批 101 `binance` 故意**不**接限速体系——批量站是静态 CDN，接了会把下载计进 tushare 熔断器）
+
+> ⚠️ **三处各注册一类**（批 83b 立法，`tests/test_provider_registry.py` 构建期闸）：
+> `data_source._REGISTRY`（连接/限速/熔断/用量）+ `adapters._ADAPTERS`（fetch 契约 + 能力真源）
+> + `interfaces._REGISTRY`&`_PROVIDER_MODULES`（配置表单 schema）。
+> **漏第 1 处 ⇒ `get_data_source` 抛 `ProviderConfigError`（不是静默回落＝串源）**；漏第 2 处见
+> `adapters/__init__.py`（未导入＝adapter 静默缺席＝回落 tushare 拉错源）。
+> 0 密钥源（如 `binance`）的 `FIELD_SCHEMA`/`PARAMS_SCHEMA` 皆空＝「此源不需凭证」的正确表达。
 
 ### 加新 K 线频率（如 15min）
 1. migration 建 `bar_15min` 表（0064 的 `_create_bar_table` 模式，结构同 bar_1d）
@@ -396,5 +421,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 
 ## 最近变更
 - 2026-08-27 限流治理吸收 + 积分档预设四层限流（`docs/obsolete/任务归档/限流治理吸收.md`；双盲补审 fa1f123 全修后产上部署）
+- 2026-10-06 批 101：新增加密数据源 `binance`（批量历史 adapter + DataSource + InterfaceProvider 三处注册）、
+  `markets.PROVIDER_MARKET["binance"]`、`sync_config.crypto_perp_daily`（迁移 0132）；退役 `data_increment_crypto` 死构件。
 
 > **批55-0(2026-09-19)能力查询层**:新增 `capabilities.py`(`provider_capabilities`/`check_capability_subset`——能力真源=代码 `_ADAPTERS` sync_id 串经 `quant_common.markets.SYNC_ID_CAP_MAP` 归一;配置能力⊆代码校验,55a 端点写侧与漂移告警消费)。维度注册表本体在 `quant_common/markets.py`(层 0 纯数据——本模块只放读上层代码的查询函数,分层铁律)。立法全文 `docs/architecture/A02-外部接口与市场维度设计.md`。

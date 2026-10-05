@@ -94,12 +94,6 @@ def astock_select_daily(self):
         raise self.retry(exc=exc, countdown=30)
 
 
-@app.task(name="src.scheduler.tasks.data_increment_crypto", bind=True, max_retries=2)
-def data_increment_crypto(self):
-    """加密 K 线增量（24h）。网关 API key 未配置时安全跳过。"""
-    return {"status": "skipped", "reason": "待币安/OKX API 配置"}
-
-
 @app.task(name="src.scheduler.tasks.risk_sweep")
 def risk_sweep():
     """扫描全局风控状态。"""

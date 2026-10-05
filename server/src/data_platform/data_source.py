@@ -173,10 +173,52 @@ class TushareDataSource(DataSource):
             return False
 
 
+class BinanceDataSource(DataSource):
+    """币安公开数据源（批 101）——**0 密钥**、只读批量历史（官方 `data.binance.vision`）。
+
+    与 `binance_perp`（交易通道：api_key/api_secret 下单/实时）**是两把键**：
+    `binance` = 拉数面（本类，公开端点本就无鉴权，故无凭证字段）；
+    `binance_perp` = 下单面（NON_DATA_PROVIDERS，批 101 之前的既有键）。
+
+    限速：批量站是**静态文件 CDN**（无 weight 模型、无配额概念）⇒ `DEFAULT_RATE_LIMITS` 空、
+    不设限速；礼貌性由 adapter 的 ≤8 并发表达。**刻意不接 `rate_limit_context`**——
+    `_get_rate_ds("binance")` 若回落 tushare 兜底源会把币安的下载计进 tushare 的熔断器
+    （串源），故 `engine._sync_crypto_perp_daily` 直接走 adapter，不取限速句柄。
+
+    `test_connection` 是可达性探测（GET 批量站已知文件）——这是本源的**真 gate**：
+    2026-10-06 prod 实测 `data.binance.vision` 直连 200，而 `fapi.binance.com`（实时）被阻断。
+    """
+
+    provider = "binance"
+    DEFAULT_RATE_LIMITS: dict[str, float] = {}   # 静态文件 CDN：无限速档
+
+    def get_client(self):
+        """本源无「客户端对象」——数据取用是 HTTP GET 批量 ZIP（在 adapter 内完成），无 SDK 句柄。
+
+        显式返回 None（而非编造一个假对象）：调用方若需要「拉数」应走 `adapter.fetch_supply`，
+        不要指望本方法给出可用句柄——`_get_pro` 那条 tushare-only 的路径与本源无关。
+        """
+        return None
+
+    def test_connection(self) -> bool:
+        """可达性探测：GET 批量站的已知小文件（BTCUSDT 首个完整月包）。200 即可达。"""
+        import urllib.request
+        url = ("https://data.binance.vision/data/futures/um/monthly/klines/"
+               "BTCUSDT/1d/BTCUSDT-1d-2020-01.zip")
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "quant-data-sync/1.0"})
+            with urllib.request.urlopen(req, timeout=10):
+                return True
+        except Exception as e:
+            logger.warning(f"Binance 连接测试失败: {e}")
+            return False
+
+
 # ── 注册表：provider -> DataSource 类（别人加数据源在此注册） ──
 
 _REGISTRY: dict[str, type[DataSource]] = {
     "tushare": TushareDataSource,
+    "binance": BinanceDataSource,   # 批 101：加密永续日线（0 密钥批量历史）
 }
 
 # 兜底源声明（**单点真相**）：所有源都无实例可用时的回落目标。

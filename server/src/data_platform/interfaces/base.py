@@ -54,7 +54,8 @@ def register_provider(inst: InterfaceProvider) -> None:
 
 # Provider 模块名单（bootstrap 遍历，对标 im_bot _PROVIDER_MODULES——原只 import 首个，
 # 新 Provider 永不注册）。jqq/ricequant 无 schema（stub 无凭证字段）不入此表。
-_PROVIDER_MODULES = ("tushare", "tencent", "xtp", "binance_perp", "okx_perp", "emt_emq")
+# 批 101：`binance`（数据源，0 密钥，schema 空）——与 `binance_perp`（交易通道）并列入表。
+_PROVIDER_MODULES = ("tushare", "tencent", "xtp", "binance_perp", "okx_perp", "emt_emq", "binance")
 _BOOTSTRAPPED = False
 
 

@@ -902,6 +902,83 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     return {"status": "success", "days": len(dates), "processed": done, "updated": updated}
 
 
+# ═══ 批 101：加密（币安 USDT-M 永续）日线 ═══
+# 与 A 股族的**三处结构性差异**（写在代码边上，避免下一个人按 A 股心智改它）：
+# 1) **形态**＝按标的 × 时间窗（crypto 无「全市场单日」概念）⇒ 不走 `_sync_via_kind` 逐日批路径；
+# 2) **日历**＝连续轴（无 trade_cal）⇒ 不用 `_trade_dates_in_range` / `freq="B"`；
+# 3) **限速**＝批量站是静态文件 CDN（无 weight 模型）⇒ **刻意不套 `rate_limit_context`**：
+#    `_get_rate_ds("binance")` 无 DataSource 会回落 tushare 兜底源并告警「串源风险」（把币安下载
+#    计进 tushare 的熔断器是错的）；礼貌性由 adapter 内 ≤8 并发表达。
+
+def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None) -> tuple[date, date]:
+    """定窗口 [start, end]（含）。crypto = 连续轴；**T+1 上界＝UTC 昨日**。
+
+    `data.binance.vision` 实测：UTC 当日文件 404、前一日 200 ⇒ 上界必须是昨日，
+    否则每轮都把「尚未落盘的今天」记成失败日，游标永不动。
+    """
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+
+    def _d(s: str) -> date:
+        return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+
+    end = min(_d(end_date), _dt.now(_tz.utc).date() - _td(days=1))
+    if backfill_from:
+        start = _d(backfill_from)                        # 回补显式起点（sync() 保证不推游标）
+    else:
+        last = cfg.get("last_sync_date")
+        # 首跑给 30 天窗口（对齐 _sync_via_kind 默认 30 天）；全量历史走 backfill_from
+        start = _d(last) + _td(days=1) if last else end - _td(days=30)
+    return start, end
+
+
+def _sync_crypto_perp_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
+                            progress_cb: Callable | None = None) -> dict:
+    """币安 USDT-M 永续日线 → `bar_1d`（`symbol='BTCUSDT.BINANCE'`、`source='binance'`）。
+
+    返回 `cursor_upto`（＝窗口上界 ≤ end_date）：`sync()` 对无 `last_success_date` 的 handler
+    用该键推游标——不给会按 end_date（＝今天）推，而今天的数据尚未落盘 ⇒ 次日
+    start=今天+1 > end=昨天 ⇒ **永久空跑**。
+    """
+    from src.data_platform.db import save_bars, save_bars_overwrite
+    adapter = _get_supply_adapter(cfg)
+    start, end = _crypto_window(cfg, end_date, backfill_from)
+    start_s, end_s = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+    if start > end:
+        return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
+                "expected_days": 0, "actual_days": 0, "cursor_upto": end_s}
+
+    syms = adapter.list_symbols()
+    if not syms:
+        # 符号枚举失败必须**响亮**：静默返回 0 行会让 sync() 记 success 并推进游标
+        # （＝把整段窗口的数据洞掩埋）。raise 走 sync() 的 except → error + 游标不动 + 告警。
+        raise RuntimeError("binance 符号枚举为空（S3 list 不可达或返回异常）")
+    total = len(syms)
+    pulled = saved = 0
+    failed: list[str] = []
+    # 回补用 overwrite：本地可能已存不完整/旧值，手动回补优先级最高（同 db.save_bars_overwrite 立法）
+    write = save_bars_overwrite if backfill_from else save_bars
+    for i, sym in enumerate(syms, 1):
+        try:
+            df = adapter.fetch_supply("bar_daily", "perp", symbol=sym, start=start_s, end=end_s)
+            if df is not None and not df.empty:
+                rows = adapter.to_bar_rows(df, "1D")
+                if rows:
+                    pulled += len(rows)
+                    saved += write("1D", rows)
+        except Exception as e:
+            failed.append(f"{sym}:{type(e).__name__}:{str(e)[:40]}")
+        if progress_cb:
+            progress_cb(i, total, sym)
+    if pulled == 0:
+        # 「全窗口 0 行」非正常态（T+1 窗口内每个在市合约都该有数据）——显式记账，勿静默成功
+        failed.append("no_rows:窗口内 0 行（上游不可达 / T+1 未落盘 / 窗口压空）")
+    logger.info("crypto_perp_daily %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d",
+                start_s, end_s, total, pulled, saved, len(failed))
+    return {"pulled": pulled, "saved": saved, "start": start_s,
+            "failed_dates": failed, "expected_days": None,
+            "actual_days": total - len(failed), "cursor_upto": end_s}
+
+
 _HANDLERS = {
     "astock_basic": _sync_astock_basic,
     "astock_list": _sync_astock_list,
@@ -918,6 +995,9 @@ _HANDLERS = {
     # 拉取已下沉 adapter.fetch（POOL_TABLE_SPECS）；本处只挂编排 handler。
     "pool_data": _make_pool_handler(full=False),
     "pool_data_full_calibrate": _make_pool_handler(full=True),
+    # 批 101：加密数据层第一步（原 beat `data-increment-crypto` 收编——原实现是
+    # 「每 15min 被唤醒、永远 return skipped」的死构件，现真落地为币安永续 T+1 日线）
+    "crypto_perp_daily": _sync_crypto_perp_daily,
 }
 
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由

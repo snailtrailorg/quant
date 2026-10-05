@@ -142,11 +142,13 @@ app.conf.update(
             "schedule": crontab(hour=16, minute=8),   # 批27-31：盘后锚（避 16:30 daily-report）
             "options": {"queue": "analysis"},
         },
-        "data-increment-crypto": {
-            "task": "src.scheduler.tasks.data_increment_crypto",
-            "schedule": crontab(minute="*/15"),   # 批27-31：15min 无损表达
-            "options": {"queue": "data"},
-        },
+        # 批 101：「data-increment-crypto」beat 条目**已退役**（原 `crontab(minute="*/15")` 唤醒
+        # `data_increment_crypto`，而该 task 恒 `return {"status":"skipped","reason":"待币安/OKX
+        # API 配置"}` ⇒ 每 15 分钟白耗唤醒的**死构件**，违反「不留死构件」纪律）。
+        # 处置＝**真落地 + 收编**（同批 83b 四条 beat 范式）：改由 `sync_config` 行
+        # `crypto_perp_daily`（迁移 0132，schedule=`30 8 * * *` 北京 = 00:30 UTC，T+1 语义）
+        # 经 `data_sync_scheduler` 调度 → `engine._sync_crypto_perp_daily`。
+        # 原来的 15min 周期在 T+1 批量语义下本就无意义；实时腿（fapi）待境外代理，批 102。
         "sync-scheduler": {
             "task": "src.scheduler.tasks.data_sync_scheduler",
             "schedule": 300.0,   # U-4: 300s 才对得上 cron 窗口（08:45 等分钟级 schedule）
