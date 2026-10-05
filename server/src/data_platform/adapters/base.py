@@ -63,6 +63,20 @@ class BaseDataAdapter(ABC):
         """
         raise UnsupportedFeature(f"{self.provider} 未实现 fetch({getattr(req, 'kind', '?')})")
 
+    def fetch_supply(self, kind: str, sub_kind: str | None = None, **params) -> pd.DataFrame:
+        """批 100：供给面拉取端口（按 `(kind, sub_kind)` 分派，返回**源原生 DataFrame**）。
+
+        与 `fetch`（消费/供给统一契约，返回 `ContractFrame`）分开：本端口给「全市场日均 /
+        快照清单 / 逐年」这类**写入面**同步项用——它们的落库列形状真源是 `sync_kind_config`
+        的 `pk_cols/float_cols/text_cols` + 目标表，引擎沿用原 upsert（**零行为漂移**）。
+        全契约化（改返回 ContractFrame + adapter 侧列声明）留后续小批，避免列形状双真源。
+
+        分派键＝`(kind, sub_kind)`（DataKind 第一公民，`sync_id` 不复活）；`params` 透传源侧
+        窗口参数（`trade_date`/`ann_date`/`year`/...）。默认不支持即抛 `UnsupportedFeature`。
+        """
+        raise UnsupportedFeature(
+            f"{self.provider} 未实现 fetch_supply(kind={kind}, sub_kind={sub_kind})")
+
     def pull_adj_factor(self, symbol=None, trade_date=None, start=None, end=None) -> pd.DataFrame:
         """复权因子（Tushare adj_factor 专属）。默认空（因子缺省 NULL）。
 
@@ -389,6 +403,42 @@ class TushareAdapter(BaseDataAdapter):
         else:
             raise UnsupportedFeature(f"tushare 未实现 fetch(kind={kind}, sub_kind={sub})")
         return to_contract(rows, source=self.provider, kind=kind, freq=freq)
+
+    def fetch_supply(self, kind: str, sub_kind: str | None = None, **params) -> pd.DataFrame:
+        """批 100：供给面 `(kind, sub_kind)` → 源侧拉取（全市场日均 / 快照 / 全量重建）。
+
+        现状：本端口先收编引擎里 **9 个 `importlib.import_module("…tushare_adapter")` 硬编码**
+        的工厂项（tier1 逐日 7 + 全量重建 2）——使 `sync_config.provider` 对这些项生效、写入
+        侧可换源（第二 adapter 实现同族 `fetch_supply` 即可，引擎零改动）。
+        分派与参数按 `_SUPPLY_PULL` 声明；`params` 透传源侧窗口参数（`trade_date`/`ann_date`）。
+        """
+        from src.data_platform.adapters import tushare_adapter as ta
+        fn_name = _SUPPLY_PULL.get((kind, sub_kind))
+        if fn_name is None:
+            raise UnsupportedFeature(
+                f"tushare 未实现 fetch_supply(kind={kind}, sub_kind={sub_kind})")
+        fn = getattr(ta, fn_name)
+        # 只透传源函数真正接受的参数（如 namechange 不吃 trade_date、concept 吃）——
+        # 让引擎对同族 kind 用统一调用形态（都传 trade_date），adapter 侧各取所需。
+        import inspect
+        _accepts = set(inspect.signature(fn).parameters)
+        return fn(**{k: v for k, v in params.items() if k in _accepts})
+
+
+# 批 100：供给面 `(kind, sub_kind)` → tushare_adapter 的 pull 函数名。
+# 值域口径：tier1 逐日表（全市场单日）+ 全量重建表（快照）。`(kind, sub_kind)` 归置真相在
+# `sync_kind_config`（0094/0106）——本表只声明「源侧怎么拉」，由 test_batch100 与归置行对账（漂移即红）。
+_SUPPLY_PULL: dict[tuple[str, str | None], str] = {
+    ("stk_limit", None): "pull_stk_limit",
+    ("featured_daily", "moneyflow"): "pull_moneyflow",
+    ("featured_daily", "margin_detail"): "pull_margin_detail",
+    ("featured_daily", "top_list"): "pull_top_list",
+    ("featured_daily", "block_trade"): "pull_block_trade",
+    ("featured_daily", "cyq_perf"): "pull_cyq_perf",
+    ("financial_stmt", "forecast"): "pull_forecast",
+    ("static_list", "namechange"): "pull_namechange",
+    ("industry_class", "concept"): "pull_concept",
+}
 
 
 @register_adapter

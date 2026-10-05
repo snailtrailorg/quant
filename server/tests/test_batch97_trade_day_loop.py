@@ -137,16 +137,21 @@ class TestTier1TradeDayLoop:
             calls.append(trade_date)
             return pd.DataFrame()
 
+        class _FakeAdapter:
+            provider = "tushare"
+
+            def fetch_supply(self, kind, sub_kind=None, **kw):
+                return fake_pull(**kw)
+
         with patch.object(engine, "_data_ready_end_date", return_value=ready), \
              patch.object(engine, "_trade_dates_in_range",
                           return_value=trade_days), \
              patch.object(engine, "_get_rate_ds", return_value=_FakeDS()), \
+             patch.object(engine, "_get_supply_adapter", return_value=_FakeAdapter()), \
              patch("src.data_platform.rate_limit.rate_limit_context", MagicMock()), \
-             patch("src.data_platform.adapters.tushare_adapter.pull_margin_detail",
-                   fake_pull), \
              patch("src.data_platform.db.get_conn", MagicMock()):
             h = engine._make_tier1_handler(
-                "margin_detail", "pull_margin_detail", ["trade_date", "ts_code"],
+                "featured_daily", "margin_detail", "margin_detail", ["trade_date", "ts_code"],
                 float_cols=["rzye"], text_cols=[], lag_trade_days=1)
             r = h({"id": "margin_detail_sync", "provider": "tushare",
                    "last_sync_date": last}, "20261010")

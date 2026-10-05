@@ -395,14 +395,17 @@ def test_engine_tier1_rate_key_is_table():
 
     empty = pd.DataFrame()
 
-    def _fake_pull(**kw):          # 真函数（mock 无 __code__——handler 检查 co_varnames 会炸）
+    def _fake_pull(**kw):          # 替身源拉取（批 100：经 adapter.fetch_supply 分派到模块 pull）
         return empty
 
     with patch("src.data_platform.rate_limit.rate_limit_context", spy), \
          patch("src.data_platform.data_source.get_data_source", return_value=_FakeDS()), \
          patch("src.data_platform.adapters.tushare_adapter.pull_stk_limit", new=_fake_pull):
-        h = engine._make_tier1_handler("stk_limit", "pull_stk_limit", ["trade_date", "ts_code"], [])
-        r = h({}, date.today().strftime("%Y%m%d"))
+            h = engine._make_tier1_handler("stk_limit", None, "stk_limit", ["trade_date", "ts_code"], [])
+            # 窗口非空才进循环：给足够早的游标，防「长节假日 + 邻近今日」把窗口压空 ⇒ 假红
+            # （原传 {} 依赖 today-3：遇 10-01~10-08 类整段休市，end_date 恒节前 ⇒ start>end 早退）
+            _cfg = {"last_sync_date": (date.today() - timedelta(days=10)).strftime("%Y%m%d")}
+            r = h(_cfg, date.today().strftime("%Y%m%d"))
     assert seen and set(seen) == {"stk_limit"}
     assert r["failed_dates"] == []
 
@@ -424,8 +427,9 @@ def test_engine_full_rebuild_rate_key_is_table():
 
     with patch("src.data_platform.rate_limit.rate_limit_context", spy), \
          patch.object(engine, "_get_rate_ds", return_value=_FakeDS()), \
+         patch("src.data_platform.data_source.get_data_source", return_value=_FakeDS()), \
          patch("src.data_platform.adapters.tushare_adapter.pull_namechange", new=_fake_pull):
-        h = engine._make_full_rebuild_handler("namechange", "pull_namechange",
+        h = engine._make_full_rebuild_handler("static_list", "namechange", "namechange",
                                               ["ts_code", "name", "start_date"], [])
         r = h({}, "20260808")
     assert seen == ["namechange"]

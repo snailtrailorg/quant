@@ -95,6 +95,21 @@ def _get_kline_adapter(cfg: dict):
         return get_adapter("tushare")
 
 
+def _get_supply_adapter(cfg: dict):
+    """供给面 adapter（批 100：按 `sync_config.provider` 选，未知回退 tushare + 告警）。
+
+    tier1/全量重建等「非 bar 族」写入面同步项经此拿 adapter，再 `adapter.fetch_supply(kind, sub_kind, ...)`
+    ——原 9 个 `importlib.import_module("…tushare_adapter")` 硬编码即在此收编。独立入口便于测试替身。
+    """
+    from src.data_platform.adapters.base import get_adapter
+    provider = _provider_of(cfg)
+    try:
+        return get_adapter(provider)
+    except ValueError:
+        logger.warning("未注册的数据源 provider=%s，回退 tushare", provider)
+        return get_adapter("tushare")
+
+
 def _routing_pilot_on() -> bool:
     """试点开关（system_config 键；读失败=off——回退现状路径）。"""
     try:
@@ -1122,23 +1137,23 @@ _TIER1_OVERLAP_DAYS = 3
 _TIER1_LAG_TRADING_DAYS: dict[str, int] = {"margin_detail_sync": 1}
 
 
-def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
+def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: list[str],
                         float_cols: list[str] | None = None, text_cols: list[str] | None = None,
-                        lag_trade_days: int = 0):
-    """工厂：生成第一档按日批量同步 handler。
+                        lag_trade_days: int = 0, date_param: str = "trade_date"):
+    """工厂：生成第一档按日批量同步 handler（批 100：拉取改走 `adapter.fetch_supply(kind, sub_kind)`）。
 
     Args:
+        kind / sub_kind: 归置键（真源 `sync_kind_config`；批 100 前本工厂硬编码 `importlib` 直连
+            tushare_adapter ⇒ `sync_config.provider` 对这些项失效。现由 provider 选 adapter。
         table: 目标表名（如 'stk_limit'）
-        pull_fn_name: tushare_adapter 里的 pull 函数名（如 'pull_stk_limit'）
         pk_cols: 主键列（用于 ON CONFLICT）
         float_cols: NUMERIC 列名列表
         text_cols: TEXT 列名列表
         lag_trade_days: 数据可用延迟（交易日数，批 92）——窗口上界＝today 回推 N 个交易日。
             0＝当日盘后可得（默认）；1＝T+1（如 margin_detail，09:00 拉昨日）。
+        date_param: 源侧窗口参数名——`trade_date`（常规，默认）/ `ann_date`（公告日驱动，如 forecast）。
     """
-    import importlib
-    adapter = importlib.import_module("src.data_platform.adapters.tushare_adapter")
-    pull_fn = getattr(adapter, pull_fn_name)
+    from src.data_platform.adapters.tushare_adapter import _safe_float   # 值归一（非分派，源无关）
     all_cols = (float_cols or []) + (text_cols or [])
     conflict = ", ".join(pk_cols)
     updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in all_cols if c not in pk_cols)
@@ -1148,8 +1163,10 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
         """通用第一档同步：按 trade_date 拉全市场 → upsert。"""
         from src.data_platform.db import get_conn as _gc
         from src.data_platform.rate_limit import rate_limit_context
+        prov = _provider_of(cfg)
+        adapter = _get_supply_adapter(cfg)
         # 批 83b：限速/熔断/用量归属随 sync_config.provider 走（原死钉 get_data_source("tushare")）
-        ds = _get_rate_ds(_provider_of(cfg))
+        ds = _get_rate_ds(prov)
         # 批 92：窗口上界＝数据可用日（不再无条件用 sync() 传入的 today）——T+1 表
         # （margin_detail，lag=1）上界＝上一交易日，逐日循环不再空拉尚不可得的当日。
         end_date = _data_ready_end_date(lag_trade_days)
@@ -1182,10 +1199,8 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                 # 限速（限流治理吸收）：原 0.3s 硬编码 → rate_limit_context 三级可调
                 # 批 64b：档键从 "daily" 改 per-API（table==api 名，DEFAULT_RATE_LIMITS 各键 0.3s）
                 with rate_limit_context(ds, table):
-                    if "ann_date" in pull_fn.__code__.co_varnames:
-                        df = pull_fn(ann_date=td)
-                    else:
-                        df = pull_fn(trade_date=td)
+                    # 批 100：拉取经 adapter（provider 生效）——日期参数由 date_param 声明
+                    df = adapter.fetch_supply(kind, sub_kind, **{date_param: td})
                 if df is not None and not df.empty:
                     # 修 2026-08-19：insert_cols 含 PK，placeholders 必须同长（原漏 PK 导致每日 INSERT 失败）
                     insert_cols = pk_cols + [c for c in all_cols if c not in pk_cols]
@@ -1205,7 +1220,7 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
                                 for c in insert_cols:
                                     v = row.get(c)
                                     if c in (float_cols or []):
-                                        vals.append(adapter._safe_float(v) if v is not None else None)
+                                        vals.append(_safe_float(v) if v is not None else None)
                                     else:
                                         vals.append(str(v) if v is not None else None)
                                 batch.append(tuple(vals))
@@ -1225,24 +1240,26 @@ def _make_tier1_handler(table: str, pull_fn_name: str, pk_cols: list[str],
     return _handler
 
 
-def _make_full_rebuild_handler(table: str, pull_fn_name: str, pk_cols: list[str],
-                              text_cols: list[str]):
+def _make_full_rebuild_handler(kind: str, sub_kind: str | None, table: str, pk_cols: list[str],
+                              text_cols: list[str], date_param: str | None = None):
     """工厂：生成全量重建 handler（每周一跑，DELETE 全表后 INSERT）。
+
+    批 100：拉取改走 `adapter.fetch_supply(kind, sub_kind)`（provider 生效）；`date_param=None`
+    表示源接口无窗口参数（快照，如 namechange）——引擎对同族 kind 传统一形态，adapter 侧各取所需。
 
     批 56a·M1：重建后若表=namechange，追加派生 security_state(st) 时变行——
     ST 状态从曾用名推断（当前有效名含 ST→is_st=true，start_date=生效日，
     29 号 §四六源之一：st←namechange_sync，含 start_date 天然 PIT）。
     """
-    import importlib
-    adapter = importlib.import_module("src.data_platform.adapters.tushare_adapter")
-    pull_fn = getattr(adapter, pull_fn_name)
-
     def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
                  progress_cb=None) -> dict:
         from src.data_platform.db import get_conn as _gc
         from src.data_platform.rate_limit import rate_limit_context
-        with rate_limit_context(_get_rate_ds(_provider_of(cfg)), table):   # 批 64b 裸调收编（namechange/concept，档 0.3s）；批 83b provider 真路由
-            df = pull_fn(trade_date=end_date) if "trade_date" in pull_fn.__code__.co_varnames else pull_fn()
+        prov = _provider_of(cfg)
+        adapter = _get_supply_adapter(cfg)
+        _kw = {date_param: end_date} if date_param else {}
+        with rate_limit_context(_get_rate_ds(prov), table):   # 批 64b 裸调收编（namechange/concept，档 0.3s）；批 83b provider 真路由；批 100 拉取经 adapter
+            df = adapter.fetch_supply(kind, sub_kind, **_kw)
         if df is None or df.empty:
             return {"pulled": 0, "saved": 0, "start": "", "failed_dates": ["空数据"], "expected_days": 1, "actual_days": 0}
         cols = list(df.columns)
@@ -1327,31 +1344,33 @@ _TIER1_TEXT_COLS = {
     "concept": ["name"],
 }
 
-# 按日批量的（7 个）
+# 按日批量的（7 个）。元组＝(kind, sub_kind, 目标表, 主键)。kind/sub_kind 真源＝sync_kind_config
+# （批 100：test_batch100 与归置行对账，漂移即红）；date_param 声明源侧窗口参数名。
 _TIER1_BATCH = {
-    "stk_limit_sync":     ("stk_limit",     "pull_stk_limit",     ["trade_date","ts_code"]),
-    "moneyflow_sync":     ("moneyflow",     "pull_moneyflow",     ["ts_code","trade_date"]),
-    "margin_detail_sync": ("margin_detail", "pull_margin_detail", ["trade_date","ts_code"]),
-    "top_list_sync":      ("top_list",      "pull_top_list",      ["trade_date","ts_code"]),
-    "block_trade_sync":   ("block_trade",   "pull_block_trade",   ["ts_code","trade_date"]),
-    "cyq_perf_sync":      ("cyq_perf",      "pull_cyq_perf",      ["ts_code","trade_date"]),
-    "forecast_sync":      ("forecast",      "pull_forecast",      ["ts_code","ann_date","end_date"]),
+    "stk_limit_sync":     ("stk_limit",      None,            "stk_limit",     ["trade_date","ts_code"]),
+    "moneyflow_sync":     ("featured_daily", "moneyflow",     "moneyflow",     ["ts_code","trade_date"]),
+    "margin_detail_sync": ("featured_daily", "margin_detail", "margin_detail", ["trade_date","ts_code"]),
+    "top_list_sync":      ("featured_daily", "top_list",      "top_list",      ["trade_date","ts_code"]),
+    "block_trade_sync":   ("featured_daily", "block_trade",   "block_trade",   ["ts_code","trade_date"]),
+    "cyq_perf_sync":      ("featured_daily", "cyq_perf",      "cyq_perf",      ["ts_code","trade_date"]),
+    "forecast_sync":      ("financial_stmt", "forecast",      "forecast",      ["ts_code","ann_date","end_date"]),
 }
-for _sid, (_tbl, _pull, _pk) in _TIER1_BATCH.items():
+for _sid, (_kind, _sub, _tbl, _pk) in _TIER1_BATCH.items():
     _HANDLERS[_sid] = _make_tier1_handler(
-        _tbl, _pull, _pk,
+        _kind, _sub, _tbl, _pk,
         float_cols=_TIER1_FLOAT_COLS.get(_tbl, []),
         text_cols=_TIER1_TEXT_COLS.get(_tbl, []),
-        lag_trade_days=_TIER1_LAG_TRADING_DAYS.get(_sid, 0))
+        lag_trade_days=_TIER1_LAG_TRADING_DAYS.get(_sid, 0),
+        date_param="ann_date" if _sid == "forecast_sync" else "trade_date")
 
-# 全量重建的（2 个）
+# 全量重建的（2 个）。元组＝(kind, sub_kind, 目标表, 主键, date_param)；date_param=None＝源无窗口（快照）
 _TIER1_FULL = {
-    "namechange_sync": ("namechange", "pull_namechange", ["ts_code","name","start_date"]),
-    "concept_sync":    ("concept",    "pull_concept",    ["ts_code"]),
+    "namechange_sync": ("static_list",    "namechange", "namechange", ["ts_code","name","start_date"], None),
+    "concept_sync":    ("industry_class", "concept",    "concept",    ["ts_code"],                       "trade_date"),
 }
-for _sid, (_tbl, _pull, _pk) in _TIER1_FULL.items():
+for _sid, (_kind, _sub, _tbl, _pk, _dp) in _TIER1_FULL.items():
     _HANDLERS[_sid] = _make_full_rebuild_handler(
-        _tbl, _pull, _pk, text_cols=_TIER1_TEXT_COLS.get(_tbl, []))
+        _kind, _sub, _tbl, _pk, text_cols=_TIER1_TEXT_COLS.get(_tbl, []), date_param=_dp)
 
 # 防双注册钉（批 72）：位置=两个 tier1 注册循环之后——钉全量 14 键（字面量 5+工厂 9），
 # 未来往 _TIER1_BATCH/_TIER1_FULL 回填 bar 族键也在本钉覆盖内（双盲 A P1-2 修正——
