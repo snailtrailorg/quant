@@ -14,7 +14,7 @@
    （宁多打、不漏拉；trade days ⊆ business days，收窄无漏拉风险）。
 3. `_sync_trade_cal`：backfill_from 起逐年拉到当年（每年 1 次调用）。
 """
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -110,9 +110,21 @@ class TestTradeDatesInRange:
         assert got and all(g <= "20261005" for g in got)
 
     @needs_db
-    def test_real_db_deep_range_not_covered(self):
-        """真库只有 2026 日历 ⇒ 2010-2020 区间未覆盖 ⇒ None（fail-open）。"""
-        assert engine._trade_dates_in_range("20100101", "20200930") is None
+    def test_real_db_uncovered_range_fails_open(self):
+        """日历未覆盖区间 ⇒ None（fail-open，宁多打不漏拉）。
+
+        批 99 修正：本钉原为「真库只有 2026 日历 ⇒ 2010-2020 未覆盖 ⇒ None」——那是对
+        **可变环境状态**取断言，`trade_cal` 深回补（1990 起）之后前提出错（现 2010-2020 已覆盖）。
+        改为**自适配**：取真库最早日历日向前推 30 天作区间起点（首行距起点 >3 天 ⇒ 触发
+        覆盖度守卫），无论日历回补到多深都成立。
+        """
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            mn = conn.execute("SELECT min(cal_date) FROM trade_cal").fetchone()[0]
+        if mn is None:
+            pytest.skip("trade_cal 为空，推导不出未覆盖区间")
+        start = (mn - timedelta(days=30)).strftime("%Y%m%d")
+        assert engine._trade_dates_in_range(start, mn.strftime("%Y%m%d")) is None
 
 
 class TestTier1TradeDayLoop:

@@ -427,7 +427,15 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
     """
     from src.data_platform.rate_limit import rate_limit_context
     ds = _get_rate_ds(provider)   # 按 provider 选限速/熔断 DataSource（24 号，不串源）
-    date_range = pd.date_range(start=start, end=end, freq="B")
+    # 批 99（闭合待办 98）：逐日循环接交易日历——freq="B" 只排周末，法定节假日全在空调用
+    # （astock_basic 本函数是唯一调用方，回补 1990 起实测 603 次）。日历未覆盖区间则 fail-open
+    # 回 freq="B"（宁多打、不漏拉，同批 97 口径）。交易日 ⊆ 工作日 ⇒ 收窄只会少拉节假日。
+    _trade_days = _trade_dates_in_range(start, end)
+    if _trade_days is not None:
+        date_range = _trade_days
+    else:
+        date_range = [d.strftime("%Y%m%d")
+                      for d in pd.date_range(start=start, end=end, freq="B")]
     total = len(date_range)
     total_pulled = 0
     total_saved = 0
@@ -438,7 +446,8 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
     broken = False
 
     for i, d in enumerate(date_range, 1):
-        trade_date = d.strftime("%Y%m%d")
+        # 批 99：date_range 可能是交易日字符串列表（接日历路径）或 Timestamp（fail-open 路径）
+        trade_date = d if isinstance(d, str) else d.strftime("%Y%m%d")
         try:
             with rate_limit_context(ds, api_name, min_interval=sleep_s):
                 df = pro_api_fn(trade_date=trade_date)
@@ -948,7 +957,13 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
     from src.data_platform.rate_limit import rate_limit_context
     ds = _get_rate_ds(adapter.provider)
     api_name = _api_name_of(cfg)
-    date_range = pd.date_range(start=start, end=end_date, freq="B")
+    # 批 99：同 _sync_by_trade_date 接交易日历（bar 族日线回补也走本函数，原同为 freq="B"）
+    _trade_days = _trade_dates_in_range(start, end_date)
+    if _trade_days is not None:
+        date_range = _trade_days
+    else:
+        date_range = [d.strftime("%Y%m%d")
+                      for d in pd.date_range(start=start, end=end_date, freq="B")]
     total = len(date_range)
     total_pulled = 0
     total_saved = 0
@@ -957,7 +972,7 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
     broken = False
 
     for i, d in enumerate(date_range, 1):
-        trade_date = d.strftime("%Y%m%d")
+        trade_date = d if isinstance(d, str) else d.strftime("%Y%m%d")
         try:
             with rate_limit_context(ds, api_name):
                 frame = _fetch_supply(adapter, kind="bar_daily", sub_kind=sub,

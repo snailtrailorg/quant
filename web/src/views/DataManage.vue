@@ -171,15 +171,21 @@
             <el-option value="trade_day" :label="t('dataManage.filterTradeDay')" />
           </el-select>
         </el-form-item>
-        <template v-if="cronForm.sync_mode === 'incremental'">
+        <!-- 批 99：门由「形态标签 sync_mode」改判「能力真源 supports_backfill」——
+             该键 = 后端 handler 是否真消费 backfill_from（sync_config 列，迁移 0131）。
+             旧门两个方向都错：trade_cal(sync_mode=full) 该有入口却没有（prod 回补链第一环卡死）；
+             pool_data(incremental) 不该有却渲染了假按钮（点了只跑常规增量、还报成功）。 -->
+        <template v-if="cronForm.supports_backfill">
           <el-divider style="margin: var(--sp-1) 0 var(--sp-3)" />
           <el-form-item :label="t('dataManage.backfillFrom')">
             <div style="display: flex; gap: 8px; width: 100%">
-              <!-- el-date-picker 组件级校验天然只出合法日期（value-format=YYYYMMDD 对齐后端契约），默认 30 天前 -->
+              <!-- el-date-picker 组件级校验天然只出合法日期（value-format=YYYYMMDD 对齐后端契约）；
+                   下限＝start_floor（数据起点下界）——早于它的请求是纯空调用（上游无数据） -->
               <el-date-picker v-model="cronForm.date" type="date" value-format="YYYYMMDD"
-                              :disabled-date="d => d.getTime() > Date.now()" :clearable="false" style="flex: 1" />
+                              :disabled-date="backfillDisabledDate" :clearable="false" style="flex: 1" />
               <el-button type="warning" :disabled="!cronForm.date" @click="submitBackfill">{{ t('symbol.backfill') }}</el-button>
             </div>
+            <div class="cron-raw-hint" v-if="cronForm.start_floor">{{ t('dataManage.startFloorHint', { date: cronForm.start_floor }) }}</div>
           </el-form-item>
         </template>
       </el-form>
@@ -417,7 +423,8 @@ onUnmounted(stopPoll)
 // 编辑弹窗（批16 操作收编，吸收原 Cron 弹窗；footer 删除用的行对象按 id 反查）
 const cronDialog = ref(false)
 const cronForm = ref({ id: '', name: '', sync_mode: '', schedule: '', trade_day_filter: 'none', date: '',
-                       freq: 'scheduled', time: '09:00', days: [], minutes: 15 })
+                       freq: 'scheduled', time: '09:00', days: [], minutes: 15,
+                       supports_backfill: false, start_floor: null })
 const cronRow = computed(() => configs.value.find(c => c.id === cronForm.value.id))
 const cronTemplates = [
   { label: t('dataManage.tplDaily'), expr: '30 16 * * 1-5' },
@@ -442,9 +449,22 @@ const openCron = (row) => {
   const m = cronToModel(row.schedule || '')
   cronForm.value = { id: row.id, name: row.name, sync_mode: row.sync_mode, schedule: row.schedule || '',
                      trade_day_filter: row.trade_day_filter || 'none', date: d.toISOString().slice(0, 10).replace(/-/g, ''),
-                     freq: m.freq, time: m.time || '09:00', days: m.days || [], minutes: m.minutes || 15 }
+                     freq: m.freq, time: m.time || '09:00', days: m.days || [], minutes: m.minutes || 15,
+                     // 批 99：能力真源（后端 /sync/config 返回）——门与日期下限都由它决定
+                     supports_backfill: row.supports_backfill === true,
+                     start_floor: row.start_floor || null }
   cronDialog.value = true
 }
+// 批 99：回补日期下限＝start_floor（数据起点下界，YYYYMMDD）。早于它的请求上游必空返回，
+// 是纯空调用（对齐「不机械空跑」立法）；未声明（null）则不设下限。
+// 拆出纯函数便于复刻单测（组件无测试框架）；floor=null/非法长度＝不设下限。
+const floorDisabled = (dTs, floor, nowTs) => {
+  if (dTs > nowTs) return true
+  if (!floor || String(floor).length !== 8) return false
+  return dTs < new Date(+String(floor).slice(0, 4), +String(floor).slice(4, 6) - 1,
+                        +String(floor).slice(6, 8)).getTime()
+}
+const backfillDisabledDate = (d) => floorDisabled(d.getTime(), cronForm.value.start_floor, Date.now())
 const saveCron = async () => {
   try {
     // 批27-16：透传原 enabled——编辑停用行的 cron 不再被强制启用

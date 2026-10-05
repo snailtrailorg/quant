@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 
 import pandas as pd
 
+from src.quant_common.contract import ASTOCK_ALL, CapabilityDecl
+
 
 class UnsupportedFeature(Exception):
     """该数据源不支持某能力（如按日全市场批量拉取）。真接批实现 per-symbol 降级，本批只抛出。"""
@@ -131,6 +133,9 @@ class TushareAdapter(BaseDataAdapter):
 
     provider = "tushare"
     # D25：⊆ 校验宇宙=本声明——0094 归置表 20 个 sync_id 全量（v1 仅 5 项致 15 项能力用户勾不了）
+    # 批 99：补 4 缺项（convertible_terms/static_symbols/pool_data/pool_data_full_calibrate）——
+    # 它们有 sync_config 行却在能力声明与 SYNC_ID_CAP_MAP 双双缺席（「清单有·声明无」，
+    # 后果＝前端 provider 下拉对这 4 行恒空、_validate_provider 拒改源）。
     capabilities = {
         "astock_daily", "etf_daily", "cb_daily", "index_daily",
         "astock_minute", "astock_minute_5min",
@@ -138,7 +143,40 @@ class TushareAdapter(BaseDataAdapter):
         "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
         "block_trade_sync", "cyq_perf_sync", "forecast_sync", "namechange_sync",
         "concept_sync", "trade_cal",
+        "convertible_terms", "static_symbols", "pool_data", "pool_data_full_calibrate",
     }
+
+    # 批 99：契约层能力声明（contract.CapabilityDecl）——**真声明**，激活 `register_adapter`
+    # 里装好的 `validate_capability_decls` 钩子（此前零 adapter 声明 ⇒ 钩子空转）。
+    # 粒度＝kind（不是 sync_id）：同一 (kind, temporality) 可被多源实现，供应商差异落在
+    # to_source_* 映射方法上（「同一接口多实现」而非「一数据一接口」）。
+    # sub_kinds 仅聚合域声明（contract.validate_capability_decls 硬约束：聚合域必须非空、
+    # 非聚合域必须为空——故 bar_daily/bar_minute 不带 sub_kinds，其 stock/etf/convertible
+    # 判别在 sync_kind_config 行上）。
+    capability_decls = [
+        # 行情（hist_quote）
+        CapabilityDecl("bar_daily", "historical", ASTOCK_ALL),
+        CapabilityDecl("bar_minute", "historical", ASTOCK_ALL),
+        CapabilityDecl("index_daily", "historical", ASTOCK_ALL),
+        CapabilityDecl("adj_factor", "historical", ASTOCK_ALL),
+        # 参考数据（ref_data）
+        CapabilityDecl("fundamental_daily", "historical", ASTOCK_ALL),
+        CapabilityDecl("stk_limit", "historical", ASTOCK_ALL),
+        CapabilityDecl("trade_cal", "historical", ASTOCK_ALL),
+        CapabilityDecl("static_list", "historical", ASTOCK_ALL,
+                       sub_kinds=frozenset({"stock", "etf", "convertible", "namechange"})),
+        CapabilityDecl("industry_class", "historical", ASTOCK_ALL,
+                       sub_kinds=frozenset({"concept"})),
+        CapabilityDecl("featured_daily", "historical", ASTOCK_ALL,
+                       sub_kinds=frozenset({"moneyflow", "margin_detail", "top_list",
+                                            "block_trade", "cyq_perf", "cyq_chips"})),
+        CapabilityDecl("financial_stmt", "historical", ASTOCK_ALL,
+                       sub_kinds=frozenset({"forecast", "income", "balancesheet",
+                                            "cashflow", "fina_indicator"})),
+        CapabilityDecl("holder_structure", "historical", ASTOCK_ALL,
+                       sub_kinds=frozenset({"top10_holders", "dividend", "pledge_stat",
+                                            "share_float", "stk_holdernumber"})),
+    ]
 
     def __init__(self):
         from src.data_platform.data_source import TushareDataSource, get_data_source

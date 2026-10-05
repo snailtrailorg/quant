@@ -74,8 +74,8 @@ KIND_CAP_CLASS: dict[str, str] = {
     "suspend": "inst_event", "corporate_action": "inst_event",
 }
 
-# 代码层 sync_id ↔ 能力集 token 映射（0094+0106 归置表 30 项全量——v1 仅 5 项致 31 项能力漏网；
-# 0106 增 pool_data 10 项，键=表名裸词；analyst_expect 待 report_rc 实现落行后再加键）
+# 代码层 sync_id ↔ 能力集 token 映射（键集须 ⊇ sync_config.id ∪ sync_kind_config.sync_id；
+# 批 99 起钉「完备性」而非字面量键数——加同步项忘了登记即红。v1 仅 5 项致 31 项能力漏网是前科）
 SYNC_ID_CAP_MAP: dict[str, str] = {
     # hist_quote
     "astock_daily": "hist_quote", "etf_daily": "hist_quote", "cb_daily": "hist_quote",
@@ -91,6 +91,11 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "fina_indicator": "ref_data", "cyq_chips": "ref_data", "top10_holders": "ref_data",
     "dividend": "ref_data", "pledge_stat": "ref_data", "share_float": "ref_data",
     "stk_holdernumber": "ref_data",
+    # 批 99：补 4 缺项——有 sync_config 行却在归置键/能力声明双双缺席（批 83b 收编 0118/0119
+    # 时漏更新；与「清单有·能力无」同族）。补后本表 ⊇ sync_config.id ∪ sync_kind_config.sync_id，
+    # 由 tests/test_markets_registry 的完备性钉守（不再是字面量 30 键）。
+    "convertible_terms": "ref_data", "static_symbols": "ref_data",
+    "pool_data": "ref_data", "pool_data_full_calibrate": "ref_data",
 }
 NON_DATA_PROVIDERS = {"tencent": {"rt_quote"}, "xtp": {"trading", "rt_quote"},
                       "binance_perp": {"trading", "rt_quote"}, "okx_perp": {"trading", "rt_quote"},

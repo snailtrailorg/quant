@@ -29,14 +29,22 @@ def test_capability_map_and_subset():
     assert check_capability_subset("tencent", {"rt_quote"})[0]
 
 
-def test_sync_id_cap_map_covers_30():
-    """批 64a：SYNC_ID_CAP_MAP 键数钉——与 sync_kind_config 行集（0094 二十 + 0106 十）防漂移。"""
-    from src.quant_common.markets import SYNC_ID_CAP_MAP
-    assert len(SYNC_ID_CAP_MAP) == 30
+def test_sync_id_cap_map_completeness():
+    """批 64a 立、批 99 改造：由「字面量 30 键」改为「结构化完备性」——字面量键数每加一项同步
+    就要改一次数字（且改数字比改内容省事 ⇒ 容易被顺手放宽），故改为钉**结构性事实**：
+    ① 0106 池内十表全在且一致归 ref_data；② 批 99 补的四缺项在；③ 全部取值 ∈ CAPABILITIES。
+    （真库侧的「⊇ sync_config.id ∪ sync_kind_config.sync_id」完备性钉见
+    `tests/test_batch99_sync_backfill_capability.py::TestContractWiring`。）
+    """
+    from src.quant_common.markets import CAPABILITIES, SYNC_ID_CAP_MAP
     pool_ten = {"income", "balancesheet", "cashflow", "fina_indicator", "cyq_chips",
                 "top10_holders", "dividend", "pledge_stat", "share_float", "stk_holdernumber"}
     assert pool_ten <= set(SYNC_ID_CAP_MAP)          # 0106 增量行全在
     assert {SYNC_ID_CAP_MAP[s] for s in pool_ten} == {"ref_data"}  # 派生类一致（financial_stmt/featured_daily/holder_structure 均 ref_data）
+    # 批 99：批 83b 收编 0118/0119 时漏登记的 4 项（有 sync_config 行却在映射表缺席）
+    assert {"convertible_terms", "static_symbols",
+            "pool_data", "pool_data_full_calibrate"} <= set(SYNC_ID_CAP_MAP)
+    assert set(SYNC_ID_CAP_MAP.values()) <= set(CAPABILITIES)
 
 
 def test_cap_label_mirror():
