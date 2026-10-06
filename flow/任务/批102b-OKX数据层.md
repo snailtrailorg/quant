@@ -8,11 +8,12 @@
 
 | 段 | 状态 |
 |---|---|
-| 代码（adapter / 三注册表 / 泛化 handler / 迁移 0136） | ✅ 完成 |
-| mock 单测（`test_batch102b_okx.py` 60 例）+ 往返用例 S/T + 全量 pytest 2160 绿 + ruff + 令牌/词条门 | ✅ 完成 |
-| dev 真库 `alembic upgrade head` → 0136（含 downgrade 复核） | ✅ 完成 |
-| **prod 真机尾段（六步，见「验收标准」末）** | ⛔ **未做**（dev 出不到 OKX；上产后必做） |
-| `sync_config.start_floor` 回填 | ⛔ 待第 4 步实测后 |
+| 代码（adapter / 三注册表 / 泛化 handler / 迁移 0136） | ✅ 完成（上产 `202610061506-96acbca`） |
+| mock 单测（`test_batch102b_okx.py` **67 例**）+ 往返用例 S/T/**U/V** + 全量 pytest **2167** 绿 + ruff + 令牌/词条门 | ✅ 完成 |
+| dev 真库 `alembic upgrade head` → **0137**（含 downgrade 复核） | ✅ 完成 |
+| **prod 真机尾段（六步，见「验收标准」末）** | ✅ **已执行**（prod 真机取证；唯一残项＝probe `Connection reset`，已挂待办） |
+| `sync_config.start_floor` 回填 | ✅ 实测 **2020-01-01** → 迁移 **0137**，已上产 prod（release `202610061532-f5d0e55`；prod 读回 `start_floor=20200101`） |
+| prod 五证 | ✅ 双链/`RELEASE`=`202610061532-f5d0e55`；`healthz=200`/`readyz=200`/`_probe ok:true`（含 `hub_hb in_set=4 fresh`）；迁移 0136+0137 在部署树；`PLAY RECAP failed=0 unreachable=0` |
 
 ## 目标
 
@@ -36,8 +37,14 @@
 | 11 | **dev 机出不到 OKX**：直连 `www.okx.com` 超时（curl exit 124）；经 AWS 代理 `snailtrail.org:12345` **TCP 不可连**（DNS 正常 `54.248.171.145`、443 通，唯 12345 不可达）⇒ 本批**无法做 dev 端到端实证**（威廉姆 2026-10-06 裁定：写码+mock，真机留 prod 实测） | 本机 `curl` / `/dev/tcp` 实测 |
 | 12 | 101b 的 handler 工厂范式：`_BINANCE_BAR_SPECS: sync_id → (kind, sub_kind, freq, 首跑天数)` + `_make_binance_bar_handler`，逐 sync_id 生成 `_HANDLERS[<id>]` | `engine.py:952-1071` |
 
-> **待验（标明，勿当事实——全部只能在 prod 真机确认）**：OKX 历史深度是否回溯到 2019-09（与币安对齐）；
-> `bar=1Dutc` 参数名是否被 API 接受（否定则备选 `1Hutc` 聚合）；IP 限频实测档位；是否需按 `state` 收窄标的。
+> **待验 → 已验（2026-10-06 prod 真机；结论文档见设计 §4.6）**：
+> ① 历史深度＝**2020-01-01 起**（OKX `history-candles` 的**保留窗**，2019 全空；**`instruments.listTime` 不是下界**）
+>    ⇒ `start_floor='2020-01-01'`（迁移 **0137**）；
+> ② `bar=1Dutc` **被 API 接受**（`1D` ⟷ `1Dutc` 的 ts 差 28800000ms＝正好 8h）⇒ **无需 `1Hutc` 备选**；
+> ③ 限频：全窗 485 标的 / **940s（≈1.94s/标的）**，**失败项里无 `code=50011`**（限频业务码）⇒ 未见限频退避风暴；
+>    但出口侧有 **7/485 标的**（≈1.4%）在跑完 3 次退避后仍被 `ConnectionReset` ⇒ **重试预算偏薄**（已挂待办）；
+> ④ `state` 收窄**仍未做**（证据不足，保持只按 `settleCcy` 过滤）——本轮 7 个失败标的（EDGE/LGELECTRONICS/MEGA/
+>    UP/UVXY 等）恰是早期/低流动性类目，**可作「是否该按 `state` 收窄」的后续证据**。
 
 ## 依赖（就绪）
 
@@ -148,11 +155,11 @@ class OkxProvider(InterfaceProvider):
 ## 验收标准（与实证结果）
 
 ```bash
-cd server && venv/bin/python -m pytest tests/test_batch102b_okx.py -q     # ✅ 60 passed
-cd server && venv/bin/python -m pytest tests/ -q                          # ✅ 2160 passed / 1 skipped（基线 2100）
+cd server && venv/bin/python -m pytest tests/test_batch102b_okx.py -q     # ✅ 67 passed
+cd server && venv/bin/python -m pytest tests/ -q                          # ✅ 2167 passed / 1 skipped（基线 2100）
 cd server && venv/bin/python -m ruff check <改动文件…>                     # ✅ All checks passed!
-bash scripts/test-migration-roundtrip.sh                                  # ✅ 用例 S/T 全绿（含全脚本其余用例）
-cd server && venv/bin/alembic upgrade head                                # ✅ dev 真库到 0136（另跑过 downgrade 0135 复核）
+bash scripts/test-migration-roundtrip.sh                                  # ✅ 用例 S/T/U/V 全绿（含全脚本其余用例）
+cd server && venv/bin/alembic upgrade head                                # ✅ dev 真库到 0137（另跑过 downgrade 复核）
 cd web && npm run prebuild                                                # ✅ 令牌门 PX39/HEX18/FS0/BTN21；词条门 1861 键对称
 cd server && venv/bin/python -c "from src.data_platform.adapters.base import get_adapter; \
   a=get_adapter('okx'); print(a.provider, sorted(a.capabilities), a.supports_exit_config)"
@@ -167,14 +174,24 @@ cd server && venv/bin/python -c "from src.data_platform.adapters.base import get
 `_PROVIDER_MODULES` 含 okx/不含 okx_perp；`PROVIDER_MARKET`/`SYNC_ID_CAP_MAP` 已登记；`capable_consumers()` 含 okx；
 `supports_exit_config` 真落到 requests.proxies；handler 游标/回补/失败可见/`label`；迁移 0136 结构与**零 start_floor 反臆造钉**。
 
-**⛔ 真机验证（上产后，prod——本批必做尾段，六步）**：
-① `POST /api/proxies/<name>/probe` 出口可用；
-② UI 配 `proxy_binding('okx', enabled=true, proxy_name=<aws-tokyo>)`；
-③ 手动触发 `okx_perp_daily` → `sync_log` success 且 `bar_1d` 出现 `%.OKX` 行，与 `%.BINANCE` 行
-   **共存不混**（同一 UTC 日两所各一行 BTC）；
-④ 抽样对账（同一时刻 OHLC 与 OKX 官方一致）、核实 `volume` 量纲＝币量；
-⑤ 实测最老可得日期 → **回填 `sync_config.start_floor`**（在此之前它保持 NULL）；
-⑥ 若 `1Dutc` 不被接受 → 改走 `1Hutc` 聚合（设计 §4.3.1 备选，届时才加代码）。
+**✅ 真机验证（上产后，prod · 2026-10-06 · 已执行，六步）**：
+① `POST /api/proxies/aws-tokyo/probe` —— ⚠️ **未消**：补 PySocks 后不再 `InvalidSchema`，但经代理报
+   `ConnectionError: Connection reset by peer`（**与数据面 7 标的失败同族**——出口侧压力下零星重置 ≈1.4%，
+   非 probe 独有；已挂待办）；
+② 配 `proxy_binding('okx', enabled=true, proxy_name='aws-tokyo')` —— ✅（`capable_consumers()==['binance','okx']`）；
+③ 手动触发 `okx_perp_daily` → `bar_1d` 出现 `%.OKX` 行，与 `%.BINANCE` 行 **共存不混** —— ✅
+   （**485 标的 / 13921 行 / 940s**，`status=partial`（7 标的失败，见下）；BTC/ETH/SOL 各 30 行，与
+   `BTCUSDT.BINANCE` 同日共存；游标 `last_sync_date=20261005`）；
+④ 抽样对账 + 量纲 —— ✅ **逐位一致**：`BTC-USDT-SWAP.OKX` 末根 `close=85715.0 vol=73622.5554` ⟷
+   官方 `c=85715 / volCcy=73622.5554`；`ETH-USDT-SWAP.OKX` 末根 `close=2708.96 vol=1991154.761` ⟷
+   官方 `c=2708.96 / volCcy=1991154.761`；`confirm=0` 的 2026-10-06（未收盘）被正确剔除；
+⑤ 实测最老可得日期 → 回填 `sync_config.start_floor` —— ✅ 实测 **2020-01-01**
+   （`instruments.listTime` **不是**数据下界）→ 迁移 **0137**；
+⑥ 若 `1Dutc` 不被接受 → 改走 `1Hutc` 聚合 —— ✅ **被接受**（`1D` ⟷ `1Dutc` 的 ts 差 28800000ms＝正好 8h）
+   ⇒ 不需 `1Hutc` 分支，**零多余代码**。
+
+> 完整取证（含「**上产即暴露的运维事实**：0136 `enabled=true` ⇒ 部署后 beat 立刻自动触发一次、
+> 此刻代理未配 ⇒ 直连超时 4×30s+退避＝134.3s ⇒ 响亮失败/游标不动」与 probe 残项定性）见设计 **§4.6**。
 
 ## mock 方式（实现后的真实打桩点）
 
