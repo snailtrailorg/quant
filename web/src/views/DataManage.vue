@@ -180,12 +180,12 @@
           <el-form-item :label="t('dataManage.backfillFrom')">
             <div style="display: flex; gap: 8px; width: 100%">
               <!-- el-date-picker 组件级校验天然只出合法日期（value-format=YYYYMMDD 对齐后端契约）；
-                   下限＝start_floor（数据起点下界）——早于它的请求是纯空调用（上游无数据） -->
+                   下限＝retention（保留策略下界）——早于它的请求上游无数据 / 我们主动不保留 -->
               <el-date-picker v-model="cronForm.date" type="date" value-format="YYYYMMDD"
                               :disabled-date="backfillDisabledDate" :clearable="false" style="flex: 1" />
               <el-button type="warning" :disabled="!cronForm.date" @click="submitBackfill">{{ t('symbol.backfill') }}</el-button>
             </div>
-            <div class="cron-raw-hint" v-if="cronForm.start_floor">{{ t('dataManage.startFloorHint', { date: cronForm.start_floor }) }}</div>
+            <div class="cron-raw-hint" v-if="cronForm.retention">{{ t('dataManage.retentionHint', { date: cronForm.retention }) }}</div>
           </el-form-item>
         </template>
       </el-form>
@@ -424,7 +424,7 @@ onUnmounted(stopPoll)
 const cronDialog = ref(false)
 const cronForm = ref({ id: '', name: '', sync_mode: '', schedule: '', trade_day_filter: 'none', date: '',
                        freq: 'scheduled', time: '09:00', days: [], minutes: 15,
-                       supports_backfill: false, start_floor: null })
+                       supports_backfill: false, retention: null })
 const cronRow = computed(() => configs.value.find(c => c.id === cronForm.value.id))
 const cronTemplates = [
   { label: t('dataManage.tplDaily'), expr: '30 16 * * 1-5' },
@@ -451,20 +451,21 @@ const openCron = (row) => {
                      trade_day_filter: row.trade_day_filter || 'none', date: d.toISOString().slice(0, 10).replace(/-/g, ''),
                      freq: m.freq, time: m.time || '09:00', days: m.days || [], minutes: m.minutes || 15,
                      // 批 99：能力真源（后端 /sync/config 返回）——门与日期下限都由它决定
+                     // 批 108·步 3：下限列由 start_floor 换为 retention（一列三义已拆正名）
                      supports_backfill: row.supports_backfill === true,
-                     start_floor: row.start_floor || null }
+                     retention: row.retention || null }
   cronDialog.value = true
 }
-// 批 99：回补日期下限＝start_floor（数据起点下界，YYYYMMDD）。早于它的请求上游必空返回，
-// 是纯空调用（对齐「不机械空跑」立法）；未声明（null）则不设下限。
-// 拆出纯函数便于复刻单测（组件无测试框架）；floor=null/非法长度＝不设下限。
+// 批 99／批 108·步 3：回补日期下限＝`retention`（保留策略下界，YYYYMMDD）。早于它的请求
+// 上游必空返回（源界）或我们主动不保留（策略）——都属纯空调用（对齐「不机械空跑」立法）；
+// 未声明（null）则不设下限。拆出纯函数便于复刻单测（组件无测试框架）；floor=null/非法长度＝不设下限。
 const floorDisabled = (dTs, floor, nowTs) => {
   if (dTs > nowTs) return true
   if (!floor || String(floor).length !== 8) return false
   return dTs < new Date(+String(floor).slice(0, 4), +String(floor).slice(4, 6) - 1,
                         +String(floor).slice(6, 8)).getTime()
 }
-const backfillDisabledDate = (d) => floorDisabled(d.getTime(), cronForm.value.start_floor, Date.now())
+const backfillDisabledDate = (d) => floorDisabled(d.getTime(), cronForm.value.retention, Date.now())
 const saveCron = async () => {
   try {
     // 批27-16：透传原 enabled——编辑停用行的 cron 不再被强制启用

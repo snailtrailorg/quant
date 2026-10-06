@@ -75,6 +75,13 @@ class TestTier1ReadyWindow:
         class _FakeAdapter:
             provider = "tushare"
 
+            # 批 108·步 3：tier1 工厂起手取家族地板（kind 级源界，tushare 默认 2010-01-01）
+            def available_range(self, kind):
+                return ("2010-01-01", None)
+
+            def publish_lag(self, kind):
+                return 0
+
             def fetch_supply(self, kind, sub_kind=None, **kw):
                 return fake_pull(**kw)
 

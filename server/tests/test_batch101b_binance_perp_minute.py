@@ -145,29 +145,42 @@ class TestCapabilityAndRegistry:
 
 
 class TestCryptoWindow:
-    def test_first_run_window_is_exactly_n_days(self):
-        from src.data_sync.engine import _crypto_window
-        # end_date 取过去日，避开 UTC 昨日夹取
-        s, e = _crypto_window({"id": "x", "last_sync_date": None}, "20260131", None, 7)
-        assert e == date(2026, 1, 31)
-        assert s == date(2026, 1, 25), "首跑窗口＝7 天（含端点）"
+    """批 108·步 3：`_crypto_window` 拆为 `_crypto_end`（上界）＋ `_crypto_base_start`（下界）——
+    `first_run_days` 假首跑地板已删（设计 §5.1：一个假值同时冒充 inception 与 retention）。"""
+
+    def test_first_run_start_is_retention_floor(self):
+        """无游标 ⇒ 下界＝`max(retention, source_earliest)`（**不是** today−N）。"""
+        from src.data_sync.engine import _crypto_base_start
+        s, _ex = _crypto_base_start({"id": "x", "last_sync_date": None,
+                                     "retention": date(2026, 1, 25)}, None,
+                                    _FakeBinance(), "bar_minute")
+        assert s == date(2026, 1, 25), "retention 晚于源界（2019-12-31）⇒ 取 retention"
+
+    def test_first_run_falls_back_to_source_earliest(self):
+        """未声明 retention ⇒ 下界＝源界＝**首跑即全史**（F-1 路径）。"""
+        from src.data_sync.engine import _crypto_base_start
+        s, _ex = _crypto_base_start({"id": "x", "last_sync_date": None}, None,
+                                    _FakeBinance(), "bar_minute")
+        assert s == date(2019, 12, 31)
 
     def test_incremental_start_is_cursor_plus_one(self):
-        from src.data_sync.engine import _crypto_window
-        s, _e = _crypto_window({"id": "x", "last_sync_date": "20260110"}, "20260131", None, 7)
-        assert s == date(2026, 1, 11), "有游标时**不用**首跑窗口，逐日续"
+        from src.data_sync.engine import _crypto_base_start
+        s, _ex = _crypto_base_start({"id": "x", "last_sync_date": "20260110"}, None,
+                                    _FakeBinance(), "bar_minute")
+        assert s == date(2026, 1, 11), "有游标时**不用**地板兜底，逐日续"
 
-    def test_backfill_from_wins(self):
-        from src.data_sync.engine import _crypto_window
-        s, _e = _crypto_window({"id": "x", "last_sync_date": "20260110"}, "20260131",
-                               "20250601", 7)
-        assert s == date(2025, 6, 1)
+    def test_backfill_start_clamped_by_floor(self):
+        """回补显式起点与地板取 max（源拿不到更早——旧实现照单全收）。"""
+        from src.data_sync.engine import _crypto_base_start
+        s, _ex = _crypto_base_start({"id": "x", "last_sync_date": "20260110"}, "20000101",
+                                    _FakeBinance(), "bar_minute")
+        assert s == date(2019, 12, 31), "回补起点早于源界 ⇒ 抬到源界"
 
     def test_end_clamped_to_utc_yesterday(self):
-        from src.data_sync.engine import _crypto_window
+        from src.data_sync.engine import _crypto_end
         today = datetime.now(timezone.utc).date()
-        _s, e = _crypto_window({"id": "x"}, (today + timedelta(days=3)).strftime("%Y%m%d"),
-                               None, 1)
+        e = _crypto_end((today + timedelta(days=3)).strftime("%Y%m%d"), _FakeBinance(),
+                        "bar_minute")
         assert e == today - timedelta(days=1), "上界不得是 UTC 今日（当日文件必 404）"
 
 
@@ -194,6 +207,12 @@ class _FakeBinance:
     def symbol_inception(self, symbol):    # 批 108·步 2：生命周期未知（本测试不关心）
         return None
 
+    def available_range(self, kind):       # 批 108·步 3：币安批量站实测源界
+        return ("2019-12-31", None)
+
+    def publish_lag(self, kind):           # 批 108·步 3：批量站 T+1（自然日）
+        return 1
+
     def fetch_supply(self, kind, sub_kind=None, **p):
         self.calls.append({"kind": kind, "sub_kind": sub_kind, **p})
         if self._boom:
@@ -212,7 +231,10 @@ class _FakeBinance:
 
 def _run(sync_id, adapter, cfg=None, end_date="20260131", backfill=None):
     from src.data_sync import engine
-    cfg = cfg or {"id": sync_id, "provider": "binance", "last_sync_date": None}
+    # 批 108·步 3：下界由 `retention`（策略）表达，不再是 spec 里的假首跑天数。
+    # 默认 retention=2026-01-25 ⇒ 配 end 20260131 得窗口 7 天（与原断言同形）。
+    cfg = cfg or {"id": sync_id, "provider": "binance", "last_sync_date": None,
+                  "retention": date(2026, 1, 25)}
     with patch.object(engine, "_get_supply_adapter", return_value=adapter), \
          patch("src.data_platform.db.save_bars", return_value=1) as sb, \
          patch("src.data_platform.db.save_bars_overwrite", return_value=1) as so:
@@ -235,8 +257,8 @@ class TestHandlerFactory:
         _run("binance_perp_1min", ad)
         c = ad.calls[0]
         assert (c["kind"], c["sub_kind"], c["freq"]) == ("bar_minute", "perp", "1min")
-        # 1min 首跑窗口＝1 天（spec 的 first_run_days；存储闸门），故 start == end
-        assert c["start"] == "20260131" and c["end"] == "20260131"
+        # 批 108·步 3：下界＝cfg.retention（策略），不再是 spec 的假首跑天数
+        assert c["start"] == "20260125" and c["end"] == "20260131"
 
     def test_cursor_is_last_day_with_data_not_window_end(self):
         """⭐ 本批修的真缺陷：游标落在**真取到数据的那一日**。
@@ -274,7 +296,8 @@ class TestHandlerFactory:
         from src.data_sync import engine
         today = datetime.now(timezone.utc).date()
         ad = _FakeBinance(empty=True)
-        cfg = {"id": "binance_perp_1min", "provider": "binance", "last_sync_date": None}
+        cfg = {"id": "binance_perp_1min", "provider": "binance", "last_sync_date": None,
+               "retention": today - timedelta(days=1)}
         end = (today - timedelta(days=1)).strftime("%Y%m%d")
         with patch.object(engine, "_get_supply_adapter", return_value=ad), \
              patch("src.data_platform.db.save_bars", return_value=0):
@@ -400,24 +423,24 @@ class TestDbReconciliation:
         from src.data_sync.engine import _BINANCE_BAR_SPECS
         got = {r[0]: r for r in self._rows(
             "SELECT id, provider, pg_table, data_type, sync_mode, trade_day_filter, "
-            "supports_backfill, enabled, schedule, start_floor FROM sync_config "
+            "supports_backfill, enabled, schedule, retention FROM sync_config "
             "WHERE id = ANY(%s)", (list(self.NEW),))}
         assert set(got) == set(self.NEW), got
         for sid in self.NEW:
-            _kind, _sub, freq, _days = _BINANCE_BAR_SPECS[sid]
+            _kind, _sub, freq = _BINANCE_BAR_SPECS[sid]
             r = got[sid]
             assert r[1] == "binance" and r[3] == "crypto"
             assert r[2] == f"bar_{freq.lower()}", (sid, r[2], freq)
             assert r[4] == "incremental" and r[5] == "none", "crypto＝连续轴，无交易日历"
             assert r[6] is True, "handler 真读 backfill_from ⇒ supports_backfill 必须 true"
             assert r[7] is True, "enabled=true 才允许 UI 手动触发（disabled 会被 sync() 拒）"
-            assert r[9] is not None, "start_floor＝回补下限（有界占用闸门）"
+            assert r[9] is not None, "retention＝回补下限（有界占用闸门，批 108·步 3 正名）"
 
     def test_manual_schedule_is_the_storage_gate(self):
         """🔴 `schedule='manual'` 是**存储闸门**，不是笔误。
 
         日调度＝每天新增一天且只增不删：1min ≈450MB/天、prod 可用 8.3G ⇒ 约 18 天打满磁盘。
-        改成 cron 前必须先扩盘（并把 start_floor 一起放宽）——那是运维显式决策。
+        改成 cron 前必须先扩盘（并把 retention 一起放宽）——那是运维显式决策。
         """
         rows = dict(self._rows("SELECT id, schedule FROM sync_config WHERE id = ANY(%s)",
                                (list(self.NEW),)))
@@ -430,7 +453,7 @@ class TestDbReconciliation:
             "WHERE sync_id = ANY(%s)", (list(self.NEW),))}
         assert set(got) == set(self.NEW), got
         for sid in self.NEW:
-            kind, sub, freq, _days = _BINANCE_BAR_SPECS[sid]
+            kind, sub, freq = _BINANCE_BAR_SPECS[sid]
             r = got[sid]
             assert (r[1], r[2]) == (kind, sub), (sid, r[1], r[2], kind, sub)
             assert r[3] == f"bar_{freq.lower()}"

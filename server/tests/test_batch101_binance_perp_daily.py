@@ -454,38 +454,45 @@ class TestFetchSupply:
 # ---------------------------------------------------------------------------
 
 class TestCryptoWindow:
-    def test_end_is_utc_yesterday(self):
-        """上界＝UTC 昨日（实测：UTC 当日文件 404、前一日 200）。
+    """批 108·步 3：`_crypto_window` 拆为 `_crypto_end`（上界＝源上限扣 publish_lag）＋
+    `_crypto_base_start`（下界＝游标+1 / 三方地板）——`first_run_days` 假首跑地板已删。"""
+
+    def test_end_is_source_latest_minus_publish_lag(self):
+        """上界＝`today(UTC) − publish_lag`（实测：UTC 当日文件 404、前一日 200）。
 
         反证意义：上界若取 end_date（＝今天），每轮把「未落盘的今天」记成失败日，
         `sync()` 因 failed_dates 走 partial ⇒ 游标只推到「连续成功末日」…最终卡在 1 天前，
-        且每天刷一条失败告警。
+        且每天刷一条失败告警。滞后本身是**源属性**（`adapter.publish_lag`）。
         """
-        from src.data_sync.engine import _crypto_window
+        from src.data_sync.engine import _crypto_end
         utc_today = datetime.now(timezone.utc).date()
-        _s, e = _crypto_window({"last_sync_date": None}, utc_today.strftime("%Y%m%d"), None)
+        e = _crypto_end(utc_today.strftime("%Y%m%d"), _FakeAdapter(), "bar_daily")
         assert e == utc_today - timedelta(days=1)
         assert e < utc_today, "上界绝不可取「今天」（UTC 当日文件尚未落盘）"
 
-    def test_backfill_from_sets_start(self):
-        from src.data_sync.engine import _crypto_window
-        s, e = _crypto_window({"last_sync_date": "20240101"}, "20240131", "20190908")
-        assert s == date(2019, 9, 8)
-        assert e == min(date(2024, 1, 31), date.today() - timedelta(days=1))
+    def test_backfill_start_is_clamped_by_source_floor(self):
+        """回补显式起点受**三方地板**夹：`max(backfill_from, 地板)`（源拿不到更早）。"""
+        from src.data_sync.engine import _crypto_base_start
+        s, _ex = _crypto_base_start({"last_sync_date": "20240101"}, "20190908",
+                                    _FakeAdapter(), "bar_daily")
+        assert s == date(2019, 12, 31), "回补起点早于源界 ⇒ 抬到源界（旧实现照单全收）"
 
     def test_incremental_start_is_cursor_plus_one(self):
-        from src.data_sync.engine import _crypto_window
-        s, _e = _crypto_window({"last_sync_date": "20240101"}, "20240131", None)
-        assert s == date(2024, 1, 2)
+        from src.data_sync.engine import _crypto_base_start
+        s, _ex = _crypto_base_start({"last_sync_date": "20240101"}, None,
+                                    _FakeAdapter(), "bar_daily")
+        assert s == date(2024, 1, 2), "有游标时逐日续——地板不参与"
 
-    def test_first_run_30_day_window(self):
-        """首跑窗口＝30 天（**含端点**，批 101b 起统一用 first_run_days 语义）。"""
-        from src.data_sync.engine import _crypto_window
-        s, e = _crypto_window({"last_sync_date": None}, "20240131", None)
-        assert s == e - timedelta(days=29)
-        # 显式传参同语义（handler 工厂按 sync_id 给值）
-        s2, _e2 = _crypto_window({"last_sync_date": None}, "20240131", None, 7)
-        assert s2 == date(2024, 1, 25)
+    def test_first_run_start_is_three_floor_max(self):
+        """⭐ F-1「首跑即全史」：无游标 ⇒ 下界＝`max(retention, source_earliest)`，
+        **不是** `today−30d`（那是假首跑地板：一个假值同时冒充 inception 与 retention）。"""
+        from src.data_sync.engine import _crypto_base_start
+        s, _ex = _crypto_base_start({"last_sync_date": None}, None, _FakeAdapter(), "bar_daily")
+        assert s == date(2019, 12, 31), "币安实测源界（旧实现给 today−30d）"
+        s2, _ex2 = _crypto_base_start(
+            {"last_sync_date": None, "retention": date(2026, 1, 25)}, None,
+            _FakeAdapter(), "bar_daily")
+        assert s2 == date(2026, 1, 25), "retention 晚于源界 ⇒ 取 retention（策略封顶可见）"
 
 
 # ---------------------------------------------------------------------------
@@ -506,6 +513,12 @@ class _FakeAdapter:
 
     def symbol_inception(self, symbol):    # 批 108·步 2：生命周期未知（本测试不关心）
         return None
+
+    def available_range(self, kind):       # 批 108·步 3：币安批量站实测源界
+        return ("2019-12-31", None)
+
+    def publish_lag(self, kind):           # 批 108·步 3：批量站 T+1（自然日）
+        return 1
 
     def fetch_supply(self, kind, sub_kind=None, **params):
         assert (kind, sub_kind) == ("bar_daily", "perp")

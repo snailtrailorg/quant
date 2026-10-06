@@ -216,14 +216,18 @@ def _mark_running(sync_id: str, running: bool):
 
 def _get_config(sync_id: str) -> dict:
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider FROM sync_config WHERE id=%s", (sync_id,))
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider, retention FROM sync_config WHERE id=%s", (sync_id,))
         row = cur.fetchone()
         if not row:
             return {}
         return {"id": row[0], "name": row[1], "api": row[2], "pg_table": row[3],
                 "data_type": row[4], "mode": row[5], "schedule": row[6],
                 "enabled": row[7], "last_sync_date": row[8],
-                "last_sync_ts": row[9], "last_status": row[10], "provider": row[11]}
+                "last_sync_ts": row[9], "last_status": row[10], "provider": row[11],
+                # 批 108·步 3（裁定 H）：`retention` ＝ 保留策略下界（date | None）。一列三义的
+                # `start_floor` 已拆 ⇒ 本键是「窗口下界三地板」之一（设计 §5.1）；**引擎真读**
+                # （`_window_floors`），不是装饰列。
+                "retention": row[12]}
 
 
 def _update_sync_state(sync_id: str, last_date: str | None, count: int, status: str = "idle"):
@@ -380,6 +384,15 @@ def sync(sync_id: str, backfill_from: str | None = None,
             duration_ms = int((time.time() - t0) * 1000)
             _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
                  status, "", failed_dates, expected_days, actual_days)
+            # 批 108·步 3（设计 §5.3「封顶不得静默」）：`policy_discard`（主动不保留）/
+            # `unreachable`（源不可达）**不是缺口** ⇒ 只记日志、不进 failed_dates（不误告警）。
+            # 落表 `sync_gap` ＋ 对账输出闭环属批 109。
+            _excl = r.get("excluded") or []
+            if _excl:
+                logger.warning("%s：排除段登记 %d 条 [%s]（主动不保留/源不可达，非缺口）",
+                               sync_id, len(_excl),
+                               ", ".join(sorted({f"{e.get('kind')}:{e.get('from')}..{e.get('to')}"
+                                                 for e in _excl})))
             # ——— 游标推进（F2 根因收尾 2026-08-18，G 审修订 + H 修）———
             # 三态只作用于**返回 last_success_date 键**的 handler（_sync_by_trade_date 系：
             # astock_daily/etf_daily/astock_basic）。其余（分钟线=per-symbol 失败粒度、cb_daily、
@@ -560,13 +573,19 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
     from src.data_platform.adapters.tushare_adapter import save_daily_basic   # save 面（批 107 不动）
     kind, sub, _tbl = _LITERAL_SUPPLY["astock_basic"]
     adapter = _get_supply_adapter(cfg)      # 批 107：拉取经 adapter（provider 生效）
+    # 批 108·步 3：下界＝三方地板（per-date 族 ⇒ 家族级 `max(retention, source_earliest)`）。
+    # 本项是 `retention='1990-12-19'`（迁移 0139 逐行归义）**唯一的引擎消费点**——不接则该 seed
+    # 是死值（死构件）。行为零漂移：无游标时 `max(today−7d, 1990-12-19)`＝today−7d，有游标时
+    # `max(cursor+1, ·)`＝cursor+1。
+    _floor, _excl = _family_start(adapter, kind, cfg)
+    _floor_s = _floor.strftime("%Y%m%d")
     if backfill_from:
-        start = backfill_from
+        start = max(backfill_from, _floor_s)
     else:
         last = cfg.get("last_sync_date") or (date.today() - timedelta(days=7)).strftime("%Y%m%d")
-        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
+        start = max((pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d"), _floor_s)
         if start > end_date:
-            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
+            return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
     r = _sync_by_trade_date(lambda trade_date: adapter.fetch_supply(kind, sub, trade_date=trade_date),
                             lambda df: save_daily_basic(df), start, end_date,
@@ -682,9 +701,13 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                     rate_clause=EXCLUDED.rate_clause
             """, rows)
         conn.commit()
+    # 批 108 步 4 盲审必修-1：cb 行元组是 **15 元**（`rate_clause` 在 `r[12]`）⇒
+    # `list_date/delist_date` 是 `r[13]/r[14]`，原写 `r[12]/r[13]` 把 `rate_clause` 当
+    # `list_date`（`_null_date` 过滤非日期串 → NULL）、把 `list_date` 当 `delist_date`
+    # （**上市即退市**）。见 `盲审批108代码-同判综合.md` 必修-1。
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
                 (vt.rsplit(".", 1) + [""])[1], "convertible", None, r[1], None,
-                10, 0.001, "T+0", r[12], r[13], SM_SESSION_ASTOCK)
+                10, 0.001, "T+0", r[13], r[14], SM_SESSION_ASTOCK)
                for r in rows if r[0])
     def _norm_date(s, fallback="") -> str:
         """YYYYMMDD→YYYY-MM-DD；脏值（空串/'None'/NaN）回落 fallback（发行日 list_date）再兜 2010-01-01。"""
@@ -695,7 +718,9 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
         v = s or fb
         return f"{v[:4]}-{v[4:6]}-{v[6:8]}" if v else "2010-01-01"
     # NaN 过滤（盲审 B：NaN 进 json.dumps 产非法 JSON 毒化整批）
-    _sm_upsert_state(((vt := _ts_to_vt_prefix(r[0])), _norm_date(r[8], r[12]),
+    # 批 108 步 4 盲审必修-1（同族）：fallback 按 docstring 是「发行日 list_date」＝`r[13]`，
+    # 原写 `r[12]`＝`rate_clause` ⇒ 文档承诺的回落**永不生效**、静默退 `2010-01-01`。
+    _sm_upsert_state(((vt := _ts_to_vt_prefix(r[0])), _norm_date(r[8], r[13]),
                        "conv_price", {"conv_price": float(r[7])})
                       for r in rows if r[0] and r[7] is not None and not pd.isna(r[7]))
     return {"pulled": len(df), "saved": len(df), "start": end_date,
@@ -994,7 +1019,7 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
 
 
 # ═══ 批 101：加密（币安 USDT-M 永续）日线 · 批 102b：OKX 永续日线 ═══
-# 两所共用同一条 crypto bar 链（本工厂 + `_crypto_window`），差异只在 adapter（源侧）与
+# 两所共用同一条 crypto bar 链（本工厂 + `_crypto_end`/`_crypto_base_start`），差异只在 adapter（源侧）与
 # 配置行（sync_id / 表 / 调度）。与 A 股族的**三处结构性差异**（写在代码边上，避免下一个人
 # 按 A 股心智改它）：
 # 1) **形态**＝按标的 × 时间窗（crypto 无「全市场单日」概念）⇒ 不走 `_sync_via_kind` 逐日批路径；
@@ -1003,57 +1028,147 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
 #    自持）⇒ **刻意不套 `rate_limit_context`**：`_get_rate_ds(<provider>)` 无 DB 行会回落
 #    tushare 兜底源并告警「串源风险」（把加密下载计进 tushare 的熔断器是错的）。
 
-def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None,
-                   first_run_days: int = 30) -> tuple[date, date]:
-    """定窗口 [start, end]（含）。crypto = 连续轴；**T+1 上界＝UTC 昨日**。
+# ═══════════ 批 108·步 3：窗口下界三地板（设计 §5.1 / 裁定 B·H）═══════════
 
-    `data.binance.vision` 实测：UTC 当日文件 404、前一日 200 ⇒ 上界必须是昨日，
-    否则每轮都把「尚未落盘的今天」记成失败日，游标永不动。
+# ⚠️ 裁定 B（「任务列为准 + kind 默认作默认值来源」）在本批的**落地形态**：kind 默认由
+# **迁移 0139 的 seed（任务列）** 承担（`index_daily` / `astock_basic` 的绝对起点），
+# 代码侧**不设** kind 默认表。理由（架构）：kind 级默认若取**相对**值（如「前推 7 天」），
+# 它就是设计 §5.1 点名要消灭的**假首跑地板**——「用一个假值同时冒充 inception 与 retention」
+# 换了个名字回来，且会**静默**把窗口压成滚动区间（甚至压空 ⇒ `start > end` 无声 no-op）；
+# 而 minute 族的 kind 级**绝对**起点**不存在自然值**（要「从哪一分钟起负责」是**策略**，
+# 只能逐任务声明）。⇒ 未声明 `retention` 就是**「从源头全要」**这个可读的语义。
+# 连带（**启用前必读**）：`astock_minute` / `astock_minute_5min` 现为 `enabled=false` 且游标
+# 为 NULL ⇒ 开用前**必须**先显式填 `retention`（否则首跑＝2010 起的全部分钟）。
 
-    ⚠️ **上界「昨日」不等于「昨日已发布」**（批 101b 复核）：实测北京时间 10:46（UTC 02:46）
-    时 `2026-10-05` 在全部 interval 上仍 404，最新只到 `2026-10-04`（＝UTC 昨日再减一天）。
-    08:30 北京（00:30 UTC）的调度只会更早 ⇒ **窗口末日通常在批量站尚未发布**。
-    这不是本函数的错（上界必须 ≥ 昨日才不漏），而是**游标侧的契约**：见
-    `_make_binance_bar_handler` 里「游标＝实际取到数据的最后一日」那段。
+# 三地板全空时的**有界**兜底（配响亮告警——不静默退化成全史）。
+_WINDOW_FALLBACK_DAYS = 30
 
-    `first_run_days`＝**首跑窗口天数**（无游标时），逐 sync_id 由 `_BINANCE_BAR_SPECS` 给
-    （日线 30 / 小时 7 / 1min·15min 1）——即「功能验证档」的初始载入量。
 
-    **日界（批 102b）**：本函数的「上界＝UTC 昨日」是 **UTC 锚定**的口径，两所必须一致——
-    币安日线本就是 UTC 日界；OKX 的 `bar=1D` 是 **UTC+8** 日界，故 `OkxAdapter` 一律用
-    `bar=1Dutc` 对齐（详见该 adapter 模块 docstring 语义①）。**两源日界不同裸混一张
-    `bar_1d` 是静默错位**，这条一致性是前提而非风格。
+def _ymd(s) -> date:
+    """`'YYYY-MM-DD'` / `'YYYYMMDD'` / `date` → `date`。"""
+    if isinstance(s, date):
+        return s
+    t = str(s).strip().replace("-", "").replace("/", "")
+    return date(int(t[:4]), int(t[4:6]), int(t[6:8]))
+
+
+def _window_floors(adapter, kind: str, cfg: dict, *, sym: str | None = None,
+                   ) -> tuple[date | None, list[dict]]:
+    """**三方地板取 max**：`max(inception, retention, source_earliest)`（设计 §5.1）。
+
+    返回 `(地板日 | None, 排除段登记)`；`None` ⇒ 三源皆未声明（调用方须给有界缺省 + 告警）。
+
+    - **inception**（生命周期主档）：仅 per-symbol 族有，取 `adapter.symbol_inception(sym)`；
+      `None` ＝ **显式「未知」**（裁定 F，禁用源可达性冒充）。`sym=None` ⇒ 家族级
+      （per-date 族本就没有逐个标的的生命周期 ⇒ 该族只能靠 `retention` ＋ 源界，设计 §九.7）。
+    - **retention**（策略）：`sync_config.retention`（任务级，裁定 B）；未声明 ⇒ kind 默认。
+    - **source_earliest**（源属性）：`adapter.available_range(kind)[0]`（批 108·步 1 硬契约）——
+      **未实现即响亮抛** `NotImplementedError`（禁以 today/(None,None) 冒充）。
+
+    排除段登记（设计 §5.3「**封顶不得静默**」，只在该段非空时登记）：
+    - `unreachable` ＝ `[inception, source_earliest)`：**存在**但批量源不可达（源界绑定）；
+    - `policy_discard` ＝ `[max(inception, source_earliest), retention)`：我们**主动不保留**（带理由）。
+      ⚠️ 判据用**已知下界**（`max(inception, source_earliest)`）而非仅 `inception`——否则
+      inception 未知的源（裁定 F）在 `retention` 截窗时**永不登记**（步骤 4 盲审必修-2）。
+    ⚠️ 本批只**登记 + 日志**（进 handler 返回体 `excluded`）；落表 `sync_gap` ＝ 批 109。
+    """
+    inception = adapter.symbol_inception(sym) if sym is not None else None
+    src_lo, _src_hi = adapter.available_range(kind)      # fail-loud 硬契约（批 108·步 1）
+    ret = cfg.get("retention")
+    ret_s = ret.strftime("%Y-%m-%d") if ret else None
+
+    known = {k: _ymd(v) for k, v in (("inception", inception), ("retention", ret_s),
+                                     ("source_earliest", src_lo)) if v}
+    floor = max(known.values()) if known else None
+
+    excl: list[dict] = []
+    if inception and src_lo and _ymd(src_lo) > _ymd(inception):
+        excl.append({"kind": "unreachable", "from": str(inception), "to": str(src_lo),
+                     "reason": f"{getattr(adapter, 'provider', '?')} 源可达下界（实测）"})
+    # 批 108 步 4 盲审必修-2：`policy_discard` 判据＝「已知下界」而非仅 `inception`。
+    # `retention` 抬升下界时，`[已知下界, retention)` 段是**我们主动不保留**（§5.3「封顶不得静默」）。
+    # 只用 `inception` 会让**inception 未知的源**（裁定 F：Binance 落 NULL）在 `retention`
+    # 截窗时**永不登记**（静默封顶）——实例 `binance_perp_hourly`（retention 2026-09-29
+    # vs source 2019-12-31、inception NULL ⇒ 静默弃约 7 年）。
+    _lower = [_ymd(v) for v in (inception, src_lo) if v]
+    lo_known = max(_lower) if _lower else None
+    if ret_s and lo_known and _ymd(ret_s) > lo_known:
+        excl.append({"kind": "policy_discard", "from": lo_known.isoformat(), "to": ret_s,
+                     "reason": "任务 retention 晚于已知下界（上币日/源界）⇒ 该段为主动不保留（非不存在）"})
+    return floor, excl
+
+
+def _family_start(adapter, kind: str, cfg: dict, fallback_days: int = _WINDOW_FALLBACK_DAYS,
+                  ) -> tuple[date, list[dict]]:
+    """**家族级**下界 ＝ `max(retention, source_earliest)`（per-date 族；不含 per-symbol inception）。
+
+    三源皆未声明 ⇒ 回退 `fallback_days` 天**并响亮告警**（有界兜底，不静默全史）。
+    """
+    floor, excl = _window_floors(adapter, kind, cfg, sym=None)
+    if floor is None:
+        floor = date.today() - timedelta(days=fallback_days)
+        logger.warning("窗口下界三源皆未声明（kind=%s sync=%s）⇒ 有界回退 %d 天；"
+                       "请补 sync_config.retention 或 adapter.available_range",
+                       kind, cfg.get("id"), fallback_days)
+    return floor, excl
+
+
+def _crypto_end(end_date: str, adapter, kind: str) -> date:
+    """crypto 窗口上界（含）＝ `min(end_date, today(UTC) − publish_lag(kind))`（设计 §5.1 第四边界）。
+
+    `data.binance.vision` 实测：UTC 当日文件 404、前一日 200 ⇒ 上界须扣发布滞后，否则每轮都把
+    「尚未落盘的今天」记成失败日，游标永不动。滞后本身是**源属性**（`adapter.publish_lag`），
+    原先只是常量散文里的隐含值——批 108·步 3 搬到接入层（设计 §六「并入 publish_lag」）。
+
+    ⚠️ **上界「扣滞后」≠「已发布」**（批 101b 复核）：实测 UTC 02:46 时 D-1 在全部 interval 上
+    仍 404 ⇒ 窗口末日通常仍在**批量站未发布区**。这不是本函数的错（上界必须 ≥ 昨日才不漏），
+    而是**游标侧契约**：见 handler「游标＝实际取到数据的最后一日」那段。
+
+    **日界（批 102b）**：「UTC 锚定」是两所**必须一致**的口径——币安日线本就是 UTC 日界；
+    OKX 的 `bar=1D` 是 **UTC+8** 日界，故 `OkxAdapter` 一律 `bar=1Dutc` 对齐。
+    **两源日界不同裸混一张 `bar_1d` 是静默错位**，一致性是前提而非风格。
     """
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
-    def _d(s: str) -> date:
-        return date(int(s[:4]), int(s[4:6]), int(s[6:8]))
+    return min(_ymd(end_date),
+               _dt.now(_tz.utc).date() - _td(days=int(adapter.publish_lag(kind))))
 
-    end = min(_d(end_date), _dt.now(_tz.utc).date() - _td(days=1))
+
+def _crypto_base_start(cfg: dict, backfill_from: str | None, adapter, kind: str,
+                       ) -> tuple[date, list[dict]]:
+    """crypto **家族级**窗口下界：游标在 ⇒ 游标＋1；无游标 ⇒ 三方地板（设计 §5.1）。
+
+    ⚠️ **本批（步 3）之前**无游标时给 `end − first_run_days + 1`（首跑 30/7/1 天）——那是
+    **假首跑地板**（「用一个假值同时冒充 inception 与 retention」，设计 §5.1），已换掉：
+    crypto 族游标**从未闭合**（`last_sync_date` 全 NULL）⇒ 首跑下界＝`max(retention, 源界)`，
+    即 **F-1「首跑即全史」**（全史由 `retention` 声明裁短，不由假天数裁）。
+    """
+    fam, excl = _family_start(adapter, kind, cfg)
     if backfill_from:
-        start = _d(backfill_from)                        # 回补显式起点（sync() 保证不推游标）
-    else:
-        last = cfg.get("last_sync_date")
-        # 首跑给 first_run_days 天（含 end）；全量历史走 backfill_from
-        start = _d(last) + _td(days=1) if last else end - _td(days=first_run_days - 1)
-    return start, end
+        return max(_ymd(backfill_from), fam), excl      # 回补显式起点，仍受地板夹（源拿不到更早）
+    last = cfg.get("last_sync_date")
+    if last:
+        return _ymd(last) + timedelta(days=1), excl
+    return fam, excl
 
 
-# sync_id → (kind, sub_kind, freq, 首跑窗口天数)
+# sync_id → (kind, sub_kind, freq)
 #   kind/sub_kind = `fetch_supply` 分派键（与 sync_kind_config 归置行**必须一致**，由
 #     tests/test_batch101b_* 的真库对账钉守——代码是声明面，DB 行不是第二真源）
 #   freq = 内部 K 线频率；**同时是 `bar_{freq.lower()}` 表名后缀**（db.save_bars 的
 #     insert 模板即如此），故 pg_table 不需要在代码里再写一遍
-#   首跑窗口天数：日线 30（对齐 _sync_via_kind 默认）/ 小时 7 / 1min·15min 1
-#     —— 「功能验证档」的初始载入量（批 101b §二）；扩盘后走 UI 回补入口放宽
-_BINANCE_BAR_SPECS: dict[str, tuple[str, str, str, int]] = {
-    "binance_perp_daily": ("bar_daily", "perp", "1D", 30),
-    "binance_perp_hourly": ("bar_minute", "perp", "1h", 7),
-    "binance_perp_1min": ("bar_minute", "perp", "1min", 1),
-    "binance_perp_15min": ("bar_minute", "perp", "15min", 1),
+#   ⚠️ 批 108·步 3：原第 4 元 `first_run_days`（假首跑地板）已删——首跑下界改由
+#     `max(inception, retention, source_earliest)` 决定（见 `_crypto_base_start`）。
+_BINANCE_BAR_SPECS: dict[str, tuple[str, str, str]] = {
+    "binance_perp_daily": ("bar_daily", "perp", "1D"),
+    "binance_perp_hourly": ("bar_minute", "perp", "1h"),
+    "binance_perp_1min": ("bar_minute", "perp", "1min"),
+    "binance_perp_15min": ("bar_minute", "perp", "15min"),
 }
 
-# 「整个窗口都落在批量站未发布尾区」的容忍天数（见 handler 内 0 行判定）
+# 「整个窗口都落在批量站未发布尾区」的容忍天数（见 handler 内 0 行判定）。
+# ⚠️ 与 `publish_lag` 的**分工**：`publish_lag` 定**窗口上界**（源属性）；本常量只定
+# 「0 行算**正常等待**还是**故障**」的**归类阈值**。上界搬走后本常量只剩归类职责，故保留。
 _CRYPTO_TAIL_GRACE = 2
 
 # 批 105：partial 冻结时游标回退的**下限**（相对窗口 end 的天数）——防 ratchet：
@@ -1096,13 +1211,18 @@ def _sm_upsert_crypto(adapter, syms) -> None:
 
 
 def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
-                             first_run_days: int, *, label: str, enum_hint: str,
+                             *, label: str, enum_hint: str,
                              freeze_on_partial: bool = False):
     """工厂：crypto 永续 bar 族 handler（批 101 币安；批 102b 泛化到 provider 无关）。
 
     `label`＝日志/错误里的源名（`binance`/`okx`）；`enum_hint`＝符号枚举失败的可能原因
     （币安＝S3 list；OKX＝instruments 接口）。**只此两处 provider 差异**——其余逻辑
     （窗口、游标、失败可见性、回补 overwrite）两所完全同构，故一条实现，不复制两份。
+
+    **窗口（批 108·步 3）**：上界＝`today(UTC) − publish_lag`；下界＝家族级
+    `max(retention, source_earliest)`（`_crypto_base_start`），再 **per-symbol** 叠
+    `max(., inception(sym))`（设计 §5.1「标的×日」；inception 未知 ⇒ 家族起点）。原「首跑给 N 天」
+    的假地板已删——`retention` 才是「我们关心的最早时点」的表达口。
 
     **游标契约（批 101b 修正，勿回退）**：`cursor_upto` ＝ **实际取到数据的最后一日**，
     而不是窗口上界。原实现取窗口上界（`end_s`），与批量站的发布滞后叠加后**必然吃日成洞**：
@@ -1132,7 +1252,8 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
 
         from src.data_platform.db import save_bars, save_bars_overwrite
         adapter = _get_supply_adapter(cfg)
-        start, end = _crypto_window(cfg, end_date, backfill_from, first_run_days)
+        end = _crypto_end(end_date, adapter, kind)
+        start, _fam_excl = _crypto_base_start(cfg, backfill_from, adapter, kind)
         start_s, end_s = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
         if start > end:
             return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
@@ -1153,11 +1274,27 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
         reached = ""      # 实际取到数据的最后一日（游标真值，见上方契约）
         # 回补用 overwrite：本地可能已存不完整/旧值，手动回补优先级最高（同 db.save_bars_overwrite 立法）
         write = save_bars_overwrite if backfill_from else save_bars
+        # 排除段登记（§5.3）：per-symbol inception 才产出 → 按 (kind,from,to) 去重
+        excl: dict[str, dict] = {f"{e['kind']}|{e['from']}|{e['to']}": e for e in _fam_excl}
+
+        def _start_of(sym: str) -> date:
+            """per-symbol 下界 ＝ `max(家族起点, inception(sym))`（设计 §5.1「标的×日」）。
+
+            inception 未知（裁定 F）⇒ 家族起点（**不**用源可达性冒充上币日）。
+            顺带把该标的的 `policy_discard`/`unreachable` 段登记收上来。
+            """
+            f, ex = _window_floors(adapter, kind, cfg, sym=sym)
+            for e in ex:
+                excl.setdefault(f"{e['kind']}|{e['from']}|{e['to']}", e)
+            return max(start, f) if f else start
 
         def _pull_one(sym: str) -> None:
             nonlocal pulled, saved, reached
+            s0 = _start_of(sym)
+            if s0 > end:
+                return        # 该标的下界晚于窗口上界（如新上币）⇒ 本轮无作业，非失败
             df = adapter.fetch_supply(kind, sub_kind, symbol=sym,
-                                      start=start_s, end=end_s, freq=freq)
+                                      start=s0.strftime("%Y%m%d"), end=end_s, freq=freq)
             if df is not None and not df.empty:
                 rows = adapter.to_bar_rows(df, freq)
                 if rows:
@@ -1209,6 +1346,13 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
                "actual_days": total - len(failed_list), "cursor_upto": cursor}
         if log_status:
             out["log_status"] = log_status
+        if excl:
+            # §5.3：排除段**必须登记**（policy_discard＝主动不保留 / unreachable＝源不可达）——
+            # 它们**不是缺口**，绝不进 failed_dates（否则误触发告警）。落表 sync_gap 属批 109。
+            out["excluded"] = sorted(excl.values(), key=lambda e: (e["kind"], e["from"]))
+            logger.warning("%s %s：排除段登记 %d 条 %s（非缺口；批 109 落 sync_gap）",
+                           label, sync_id, len(out["excluded"]),
+                           [(e["kind"], e["from"], e["to"]) for e in out["excluded"][:5]])
         return out
 
     _handler.__name__ = f"_sync_{sync_id}"
@@ -1232,9 +1376,9 @@ _sync_binance_perp_15min = _make_crypto_bar_handler(
 
 # ── 批 102b：OKX 永续日线（同一条 crypto bar 链，仅 adapter 与 label 不同） ──
 # 首跑 30 天与币安日线同档（「功能验证档」的量级；全史走 backfill_from，下界待 prod 实测后
-# 才写进 sync_config.start_floor——**当前 NULL**，见迁移 0136 的说明）。
+# 才写进 sync_config.retention——**当前 NULL**，见迁移 0136/0139 的说明）。
 _sync_okx_perp_daily = _make_crypto_bar_handler(
-    "okx_perp_daily", "bar_daily", "perp", "1D", 30,
+    "okx_perp_daily", "bar_daily", "perp", "1D",
     label="okx", enum_hint="instruments 接口不可达或返回异常（含代理出口未配/不通）",
     freeze_on_partial=True)      # 批 105：日线档 partial 冻结（102b 首跑 7/485 缺窗的直接教训）
 
@@ -1255,7 +1399,7 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
        （续期/到期会变）。
     2. **自夹 start**：jqdatasdk 的边界检查**只查 `end_date`、不查 `start_date`**
        （实测 `2020-01-01~2026-01-01` 放行返 1455 行）⇒ 不夹 start 就是**额度炸弹**
-       （单次请求可静默拉回全史，并把 config 的 `start_floor` 变成谎言）。
+       （单次请求可静默拉回全史，并把 config 的 `retention` 变成谎言）。
     3. **行预算 + 交易日分片**：额度按**返回行数**计（100 万/日）⇒ 按交易日推进、累计近预算即止。
        `cursor_upto` = **已完成的最后交易日**（`sync()` 用它推游标 ＝ `last_sync_date`，
        下轮 `+1 天` 续传）——**永不跳日**；一天都没完成时退回 `start-1`，下轮重试该日。
@@ -1282,7 +1426,11 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
         start_d = _d(backfill_from)
     else:
         start_d = (_d(prev_cursor) + timedelta(days=1)) if prev_cursor else win["start"]
-    start_d = max(start_d, win["start"])          # 起点自夹（SDK 不查 start）
+    # 批 108·步 3：起点自夹（SDK 不查 start）＋ **家族级三方地板**。聚宽族无 per-symbol
+    # 生命周期 ⇒ 只能靠 `retention`（＝任务列；本族未声明）＋ `available_range`（＝账号窗口，
+    # 步 1 实现）——设计 §九.7「无 inception 族只能靠 retention（＋源下界）」。
+    _floor, _excl = _family_start(adapter, "bar_daily", cfg)
+    start_d = max(start_d, win["start"], _floor)
     start_s, end_s = start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d")
 
     if start_d > end_d:
@@ -1559,16 +1707,19 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
     # 数据面，绕开 M2 试点 resolve 选源，否则 routing_kline_pilot=on 时会误路由到缺能力源）
     adapter = _get_kline_adapter({} if kind == "index_daily" else cfg)
 
+    # 批 108·步 3：下界＝三方地板取 max（`retention` 真读 ＋ 源界）——替换三处**假首跑地板**：
+    # ① `index_daily` 的硬编码 `20050408`（现由 `retention=2005-04-08` 承载，值不变）
+    # ② `default_days`（7 / 30）③ 无游标分支的「今日回推」。
+    # ⚠️ 本族**无 inception**（per-date 拉取，无逐个标的生命周期）⇒ 只能靠 retention ＋ 源界（§九.7）。
+    floor_s = _family_start(adapter, kind, cfg)[0].strftime("%Y%m%d")
     if backfill_from:
-        start = backfill_from
-    elif kind == "index_daily":
-        start = "20050408"   # 基准指数全量起点（同已退役 _sync_index_daily）
+        start = max(backfill_from, floor_s)          # 回补显式起点仍受地板夹（源拿不到更早）
     else:
-        default_days = 7 if kind == "bar_minute" else 30
-        last = cfg.get("last_sync_date") or (date.today() - timedelta(days=default_days)).strftime("%Y%m%d")
-        start = (pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
+        last = cfg.get("last_sync_date")
+        start = ((pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
+                 if last else floor_s)
         if start > end_date:
-            return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [],
+            return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [],
                     "expected_days": 0, "actual_days": 0}
 
     if kind == "bar_daily" and sub in ("stock", "etf"):
@@ -1632,12 +1783,17 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         end_date = _data_ready_end_date(lag_trade_days)
         # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日），
         # 批 92 再回看 _TIER1_OVERLAP_DAYS 天兜上游迟发布（upsert 幂等，不重复计数）。
+        # 批 108·步 3：无游标时的下界＝三方地板（替换 `today−3d` 的**假首跑地板**）。
+        # `_TIER1_OVERLAP_DAYS` 保留：它是**主动重叠**（兜上游迟发布），归批 109 的日期级对账
+        # 取代（设计 §六），与下界无关。
+        _floor_s = _family_start(adapter, kind, cfg)[0].strftime("%Y%m%d")
         if backfill_from:
-            start_ts = backfill_from
+            start_ts = max(backfill_from, _floor_s)
         else:
-            _last = cfg.get("last_sync_date") or (date.today() - timedelta(days=3)).strftime("%Y%m%d")
-            start_ts = (pd.Timestamp(_last)
-                        + timedelta(days=1 - _TIER1_OVERLAP_DAYS)).strftime("%Y%m%d")
+            _last = cfg.get("last_sync_date")
+            start_ts = ((pd.Timestamp(_last)
+                         + timedelta(days=1 - _TIER1_OVERLAP_DAYS)).strftime("%Y%m%d")
+                        if _last else _floor_s)
         if start_ts > end_date:
             return {"pulled": 0, "saved": 0, "start": start_ts, "cursor_upto": end_date,
                     "failed_dates": [], "expected_days": 0, "actual_days": 0}

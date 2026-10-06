@@ -518,6 +518,12 @@ class _FakeAdapter:
     def symbol_inception(self, symbol):    # 批 108·步 2：生命周期未知（本测试不关心）
         return None
 
+    def available_range(self, kind):       # 批 108·步 3：OKX 实测 K 线边界（0137）
+        return ("2020-01-01", None)
+
+    def publish_lag(self, kind):           # 批 108·步 3：批量站 T+1（自然日）
+        return 1
+
     def fetch_supply(self, kind, sub_kind=None, **params):
         assert (kind, sub_kind) == ("bar_daily", "perp")
         if self._empty:
@@ -731,8 +737,8 @@ class TestMigration0137Shape:
         """head 钉（链尾钉；后续批再往后接时本钉会红——照此挪，勿删）。
 
         历史：0137（批 102b 时）→ **0138**（批 107 补 `sync_kind_config` 两行 + 修
-        `etf_list.pg_table`）。挪钉时**同时**确认 0138 的 `down_revision=="0137"`
-        （`TestMigration0138Shape.test_revision_chain` 已钉），保证 0137 未被断链。
+        `etf_list.pg_table`）→ **0139**（批 108·步 3 加 `sync_config.retention`）。挪钉时
+        **同时**确认 0139 的 `down_revision=="0138"`，保证 0137/0138 未被断链。
         """
         import importlib
         import pathlib
@@ -742,7 +748,7 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        assert heads == {"0138"}, f"head 不是唯一 0138：{sorted(heads)}"
+        assert heads == {"0139"}, f"head 不是唯一 0139：{sorted(heads)}"
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

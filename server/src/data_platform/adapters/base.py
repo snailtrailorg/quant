@@ -377,10 +377,16 @@ class TushareAdapter(BaseDataAdapter):
           下界只能靠 `retention`（现＝`20050408`）；而 tushare 指数数据远早于该值 ⇒ 若在此返回
           `2010-01-01`，则 `max(retention=2005-04-08, source=2010-01-01)` ＝ **2010**
           ⇒ **静默丢掉 2005-2009 历史**（对已上线族的直接回归）。故本源下界对该族显式「无界」。
+        - `fundamental_daily` → **`1990-12-19`**（批 108·步 3 补，**实测值**）：上游
+          `daily_basic` 的最早行（迁移 `0131` 已记录，`astock_basic` 的 `retention` 也是它）。
+          为何必须补：`astock_basic` 的 `retention='1990-12-19'` 若被 `2010-01-01` 抬起 ⇒
+          `max` ＝ 2010 ⇒ **裁掉 1990-2009 这段合法区间**（「省流阀不得裁掉合法区间」族）。
+          其余 kind 的**真实**源下界未实测 ⇒ 仍在下一行用保守值（挂账 G-1 未闭）。
         - 其余 kind → `SOURCE_EARLIEST`：这些族的**个股 inception** 已被 `_get_list_date` 的
-          「早于 2010 抬到 2010」（`engine.py:1875`）夹住 ⇒ `max` 结果不变、**不回归**。
+          「早于 2010 抬到 2010」（`engine.py`）夹住 ⇒ `max` 结果不变、**不回归**。
 
-        ⚠️ **语义注（已知混装，同 `start_floor` 一列三义族）**：tushare 的真实可达性受**账号
+        ⚠️ **语义注（已知混装，同为「一列多义」族——旧 `start_floor` 已由批 108·步 3 拆正名）**：
+        tushare 的真实可达性受**账号
         积分/权限**约束，而 `SOURCE_EARLIEST` 与 `engine._TUSHARE_MIN_DATE`（env
         `SYNC_START_DATE`）**同值同源**——即本返回值同时承载「源可达」与「我们配置的起点」
         两层语义。取**保守偏晚**值：用它当窗口下界只会「少拉本就不在系统范围内的更早历史」，
@@ -388,6 +394,8 @@ class TushareAdapter(BaseDataAdapter):
         """
         if kind == "index_daily":
             return (None, None)
+        if kind == "fundamental_daily":
+            return ("1990-12-19", None)      # 上游 daily_basic 实测最早行（迁移 0131 记录）
         return (self.SOURCE_EARLIEST, None)
 
     def pull_adj_factor(self, symbol=None, trade_date=None, start=None, end=None) -> pd.DataFrame:

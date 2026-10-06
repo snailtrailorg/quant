@@ -5,7 +5,7 @@
 ④落仓分叉（_save_bars/save_index_bars/save_bars(freq)）⑤非 bar 族兜底 UnsupportedFeature。
 """
 import os
-from datetime import datetime
+from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -16,15 +16,26 @@ from src.data_sync import engine
 from src.data_platform.adapters.base import UnsupportedFeature
 
 
+def _adapter(src_lo="2010-01-01", lag=0):
+    """批 108·步 3：`_sync_via_kind` 起手取家族地板 ⇒ 桩 adapter 须给**真元组**
+    （MagicMock 默认返回 MagicMock，解包即 `ValueError`）。"""
+    ad = MagicMock()
+    ad.available_range.return_value = (src_lo, None)
+    ad.publish_lag.return_value = lag
+    return ad
+
+
 def _frame_mock(rows=("r1", "r2")):
     f = MagicMock()
     f.rows = list(rows)
     return f
 
 
-def _cfg(sync_id="astock_daily"):
-    return {"id": sync_id, "provider": "tushare", "last_sync_date": None,
-            "api": "pro.daily", "mode": "incremental", "enabled": True}
+def _cfg(sync_id="astock_daily", **extra):
+    d = {"id": sync_id, "provider": "tushare", "last_sync_date": None,
+         "api": "pro.daily", "mode": "incremental", "enabled": True}
+    d.update(extra)
+    return d
 
 
 # ——— _fetch_supply：supply 请求构造（不走 resolve） ———
@@ -58,7 +69,7 @@ class TestDispatch:
     def test_daily_batch_stock(self):
         with patch.object(engine, "_read_sync_kind", return_value={
                 "kind": "bar_daily", "sub_kind": "stock", "pg_table": "bar_1d", "rebuild": "incremental"}), \
-             patch.object(engine, "_get_kline_adapter", return_value=MagicMock()) as ga, \
+             patch.object(engine, "_get_kline_adapter", return_value=_adapter()) as ga, \
              patch.object(engine, "_sync_via_kind_daily_batch", return_value={"x": 1}) as db:
             r = engine._sync_via_kind(_cfg("astock_daily"), "20260921", backfill_from="20260901")
         assert r == {"x": 1}
@@ -68,7 +79,7 @@ class TestDispatch:
     def test_daily_batch_convertible_interval(self):
         with patch.object(engine, "_read_sync_kind", return_value={
                 "kind": "bar_daily", "sub_kind": "convertible", "pg_table": "bar_1d", "rebuild": "incremental"}), \
-             patch.object(engine, "_get_kline_adapter", return_value=MagicMock()) as ga, \
+             patch.object(engine, "_get_kline_adapter", return_value=_adapter()) as ga, \
              patch.object(engine, "_sync_via_kind_cb_daily", return_value={"x": 2}) as cb:
             r = engine._sync_via_kind(_cfg("cb_daily"), "20260921", backfill_from="20260901")
         assert r == {"x": 2}
@@ -77,16 +88,18 @@ class TestDispatch:
     def test_index_daily(self):
         with patch.object(engine, "_read_sync_kind", return_value={
                 "kind": "index_daily", "sub_kind": None, "pg_table": "bar_index", "rebuild": "incremental"}), \
-             patch.object(engine, "_get_kline_adapter", return_value=MagicMock()) as ga, \
+             patch.object(engine, "_get_kline_adapter", return_value=_adapter(src_lo=None)) as ga, \
              patch.object(engine, "_sync_via_kind_index", return_value={"x": 3}) as idx:
-            r = engine._sync_via_kind(_cfg("index_daily"), "20260921")
+            # 批 108·步 3：`20050408` 从**硬编码**改为 `retention` 列承载（值不变、来源正名）
+            r = engine._sync_via_kind(
+                _cfg("index_daily", retention=date(2005, 4, 8)), "20260921")
         assert r == {"x": 3}
         idx.assert_called_once_with(ga.return_value, start="20050408", end_date="20260921", progress_cb=None)
 
     def test_minute(self):
         with patch.object(engine, "_read_sync_kind", return_value={
                 "kind": "bar_minute", "sub_kind": None, "pg_table": "bar_1min", "rebuild": "incremental"}), \
-             patch.object(engine, "_get_kline_adapter", return_value=MagicMock()) as ga, \
+             patch.object(engine, "_get_kline_adapter", return_value=_adapter()) as ga, \
              patch.object(engine, "_sync_via_kind_minute", return_value={"x": 4}) as mn:
             r = engine._sync_via_kind(_cfg("astock_minute"), "20260921", backfill_from="20260901")
         assert r == {"x": 4}
@@ -96,7 +109,7 @@ class TestDispatch:
     def test_non_bar_unsupported(self):
         with patch.object(engine, "_read_sync_kind", return_value={
                 "kind": "fundamental_daily", "sub_kind": None, "pg_table": "daily_basic", "rebuild": "incremental"}), \
-             patch.object(engine, "_get_kline_adapter", return_value=MagicMock()):
+             patch.object(engine, "_get_kline_adapter", return_value=_adapter()):
             with pytest.raises(UnsupportedFeature):
                 engine._sync_via_kind(_cfg("astock_basic"), "20260921", backfill_from="20260901")
 

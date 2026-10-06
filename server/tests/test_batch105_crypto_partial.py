@@ -54,6 +54,12 @@ class _StubAdapter:
     def symbol_inception(self, symbol):    # 批 108·步 2：生命周期未知（本测试不关心）
         return None
 
+    def available_range(self, kind):       # 批 108·步 3：源界（远早于本测试窗口，不参与 max）
+        return ("2020-01-01", None)
+
+    def publish_lag(self, kind):           # 批 108·步 3：批量站 T+1（自然日）
+        return 1
+
     def fetch_supply(self, kind, sub_kind=None, **params):
         self._cur = str(params["symbol"])
         self.calls.append(self._cur)

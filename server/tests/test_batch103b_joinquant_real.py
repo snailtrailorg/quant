@@ -97,6 +97,13 @@ class _FakeJQAdapter:
     def account_window(self):
         return dict(self._win)
 
+    def available_range(self, kind):
+        """批 108·步 3：聚宽源界＝**账号窗口**（JQData 的绝对区间，非滚动）。"""
+        return (self._win["start"].isoformat(), self._win["end"].isoformat())
+
+    def publish_lag(self, kind):
+        return 0
+
     def pull_daily_batch(self, d, kind="astock", symbols=None):
         self.calls.append(d)
         if d in self._fail:

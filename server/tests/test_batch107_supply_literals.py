@@ -66,6 +66,12 @@ def _make_spy_cls():
         def to_bar_rows(self, df, freq, adj_map=None):
             return []
 
+        def available_range(self, kind):     # 批 108·步 3：源界（窗口第四边界硬契约）
+            return ("2010-01-01", None)
+
+        def publish_lag(self, kind):
+            return 0
+
         def fetch_supply(self, kind, sub_kind=None, **params):
             _SPY_CALLS.append((kind, sub_kind, params))
             return _spy_df(kind, sub_kind)

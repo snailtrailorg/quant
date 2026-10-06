@@ -99,25 +99,26 @@ class TestBackfillCapabilityTruth:
         assert "pool_data" in db_false and "trade_cal" not in db_false
 
     @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
-    def test_start_floor_seeded_only_where_known(self):
-        """start_floor 只填已实证的下界，其余 NULL（不臆造）。
+    def test_retention_seeded_only_where_known(self):
+        """`retention` 只填已实证的下界，其余 NULL（不臆造）。
 
-        批 101 新增 `binance_perp_daily='2019-09-08'`——USDT-M 永续上线日（币安官方事实），
-        且 adapter 的 pull_daily 真能投递该起点（早期靠日包；月包自 2020-01）。
-        批 101b 新增三条**存储闸门**下界（迁移 0134，`CURRENT_DATE-N` 相对量）：
-        hourly＝执行日前推 7 天、1min/15min＝前推 1 天——「功能验证档」的有界占用上限，
-        不是上游能力边界（上游有全史，是磁盘没到）。故此处只钉「非 NULL」，值随迁移执行日变。
-        批 102b 补（迁移 0137）新增 `okx_perp_daily='2020-01-01'`——OKX **K 线保留边界**
-        （prod 经代理实测：BTC/ETH 的 `1Dutc` 日线**恰从 2020-01-01 起**，2019 全空）。
-        ⚠️ 该值**不是** `instruments.listTime`（那是 2019-11-12，是上线日不是数据下界）。
+        **批 108·步 3（裁定 H）**：`start_floor` 一列三义已拆正名 ⇒ 真值搬进 `retention`：
+        - **retention 语义**（照抄）：`binance_perp_hourly='2026-09-29'`、
+          `1min`/`15min='2026-10-05'`（存储闸门）、`index_daily='2005-04-08'`
+          （设计 §九.7「无 inception 族只能靠 retention」）、`astock_basic='1990-12-19'`。
+        - **不再入列**：`binance_perp_daily='2019-09-08'`（那是 **inception**，归
+          `security_master.list_date`，批 108·步 2）、`okx_perp_daily='2020-01-01'`
+          （那是**源可达下界**，归 `available_range`，批 108·步 1）——照抄＝把源属性/上币日
+          坐进策略列，与本次要消灭的一列三义同病。
+        ⇒ 两行 `retention` 为 NULL 是**正确表达**（未声明策略下界），不是漏填。
         """
-        rows = dict(_q("SELECT id, start_floor FROM sync_config"))
+        rows = dict(_q("SELECT id, retention FROM sync_config"))
         assert str(rows["astock_basic"]) == "1990-12-19"
         assert str(rows["index_daily"]) == "2005-04-08"
-        assert str(rows["binance_perp_daily"]) == "2019-09-08"
-        assert str(rows["okx_perp_daily"]) == "2020-01-01"
+        assert rows["binance_perp_daily"] is None, "inception 不属策略列（归 SM）"
+        assert rows["okx_perp_daily"] is None, "源下限不属策略列（归 available_range）"
         assert {k for k, v in rows.items() if v is not None} == {
-            "astock_basic", "index_daily", "binance_perp_daily", "okx_perp_daily",
+            "astock_basic", "index_daily",
             "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min"}
         assert rows["binance_perp_hourly"] < rows["binance_perp_1min"], \
             "hourly 的保留窗更长（7 天 vs 1 天）"
@@ -134,6 +135,13 @@ class TestBackfillCapabilityTruth:
         assert "false" in (rows["supports_backfill"][3] or "")
         assert rows["start_floor"][1] == "date"
         assert rows["start_floor"][2] == "YES"
+        # 批 108·步 3：retention 同形（可空 date）——`start_floor` 留至下版 DROP（两步走）
+        ret = {r[0]: r for r in _q(
+            "SELECT column_name, data_type, is_nullable, column_default "
+            "FROM information_schema.columns WHERE table_name='sync_config' "
+            "AND column_name IN ('retention')")}
+        assert ret["retention"][1] == "date"
+        assert ret["retention"][2] == "YES"
 
 
 class TestContractWiring:
@@ -212,22 +220,23 @@ class TestConfigEndpoint:
                 return False
 
             def execute(self, sql, args=()):
-                assert "supports_backfill" in sql and "start_floor" in sql, \
-                    "路由 SQL 必须显式取两新列（该端点用列清单、非 SELECT *）"
+                assert "supports_backfill" in sql and "retention" in sql and "start_floor" not in sql, \
+                    "路由 SQL 必须显式取能力列 + retention（批 108·步 3 换列；该端点用列清单）"
                 return SimpleNamespace(fetchall=lambda: [row])
 
         with patch.object(sync_routes, "get_conn", return_value=_C()):
             return sync_routes.list_sync_config()
 
-    def test_serializes_capability_and_floor(self):
+    def test_serializes_capability_and_retention(self):
         out = self._call(self._row(True, _dt.date(2005, 4, 8)))
         assert out[0]["supports_backfill"] is True
-        assert out[0]["start_floor"] == "20050408"
+        assert out[0]["retention"] == "20050408"
+        assert "start_floor" not in out[0], "一列三义已拆 ⇒ 端点不得再出旧键（单一真源）"
 
-    def test_null_floor_is_none(self):
+    def test_null_retention_is_none(self):
         out = self._call(self._row(False, None))
         assert out[0]["supports_backfill"] is False
-        assert out[0]["start_floor"] is None
+        assert out[0]["retention"] is None
 
 
 class TestTradeDayLoop:

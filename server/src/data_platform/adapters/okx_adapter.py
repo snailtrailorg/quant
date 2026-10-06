@@ -290,7 +290,7 @@ class OkxAdapter(BaseDataAdapter):
                 break
             cursor = oldest
         else:
-            logger.warning("okx %s 分页触顶 %d 页仍未到 %s——区间被截断（与 start_floor 一并复核）",
+            logger.warning("okx %s 分页触顶 %d 页仍未到 %s——区间被截断（与 retention 一并复核）",
                            inst, _MAX_PAGES, start)
         if not frames:
             return pd.DataFrame()

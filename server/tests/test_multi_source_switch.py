@@ -63,6 +63,12 @@ def _make_stub_classes():
         def to_bar_rows(self, df, freq, adj_map=None):
             raise UnsupportedFeature("stub 只实现 fetch")
 
+        def available_range(self, kind):     # 批 108·步 3：源界（窗口第四边界硬契约）
+            return ("2010-01-01", None)
+
+        def publish_lag(self, kind):
+            return 0
+
         def fetch(self, req, acct=None):
             from datetime import datetime
             from src.quant_common.contract import to_contract

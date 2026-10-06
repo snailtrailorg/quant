@@ -1404,8 +1404,129 @@ chk "downgrade 渲染含复原 UPDATE" "$(grep -c "pg_table='asset_static_info'"
 rm -rf "$tmp"
 }
 
+# ── 用例 Y：0139 `sync_config.retention` 正名（一列三义拆解），2026-10-07 批 108·步 3 ──
+# 0139 的 DDL 只有一句 `ADD COLUMN IF NOT EXISTS retention date`，**价值全在回填的逐行归义**：
+#   ① 🔴 **只回填 5 行**：7 行 `start_floor` 里只有 5 行是 retention 语义；另 2 行是
+#      **inception**（binance_perp_daily）与**源可达下界**（okx_perp_daily）——照抄＝把源属性/
+#      上币日坐进策略列，正是本次要消灭的「一列三义」同病复发 ⇒ **必须留 NULL**（核心断言）；
+#   ② 🔴 **`start_floor` 不得被删/改**：expand-only 两步走的**第一步**，删列留下版；降级亦不后退；
+#   ③ 幂等（`ADD COLUMN IF NOT EXISTS` + `AND retention IS NULL`）+ **不覆盖运维手改**（Y3）；
+#   ④ 降级对称回收 `retention`、`start_floor` 分毫不动。
+FROM_Y=0138
+TO_Y=0139
+
+fixture_retention() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE sync_config (
+  id text PRIMARY KEY, name text NOT NULL, tushare_api text, pg_table text,
+  data_type text NOT NULL, sync_mode text NOT NULL, schedule text,
+  enabled boolean NOT NULL DEFAULT true,
+  last_sync_date text, last_sync_ts timestamptz, last_sync_count integer DEFAULT 0,
+  last_status text, description text, created_at timestamptz DEFAULT now(),
+  trade_day_filter text DEFAULT 'none', provider text DEFAULT 'tushare',
+  supports_backfill boolean NOT NULL DEFAULT false, start_floor date);
+-- 7 行非空 start_floor ＝ 真库现状；最后一行为「未声明的邻居」
+INSERT INTO sync_config (id,name,tushare_api,pg_table,data_type,sync_mode,schedule,trade_day_filter,provider,start_floor) VALUES
+  ('binance_perp_daily','币安永续日线','','bar_1d','crypto','incremental','30 8 * * *','none','binance',DATE '2019-09-08'),
+  ('okx_perp_daily','OKX永续日线','','bar_1d','crypto','incremental','40 8 * * *','none','okx',DATE '2020-01-01'),
+  ('binance_perp_hourly','币安永续小时','','bar_1h','crypto','incremental','manual','none','binance',DATE '2026-09-29'),
+  ('binance_perp_1min','币安永续1min','','bar_1min','crypto','incremental','manual','none','binance',DATE '2026-10-05'),
+  ('binance_perp_15min','币安永续15min','','bar_15min','crypto','incremental','manual','none','binance',DATE '2026-10-05'),
+  ('index_daily','基准指数日线','index_daily','index_daily','index','incremental','30 16 * * 1-5','none','tushare',DATE '2005-04-08'),
+  ('astock_basic','A股基本面','daily_basic','daily_basic','astock','incremental','0 9 * * 1-5','none','tushare',DATE '1990-12-19'),
+  ('astock_daily','A股日线','daily','bar_1d','astock','incremental','30 16 * * 1-5','none','tushare',NULL);
+SQL
+}
+
+case_y() {
+echo
+echo "########## 用例 Y：0139 retention 正名（逐行归义 + start_floor 不动 + 幂等 + 降级） ##########"
+reset_scratch
+fixture_retention
+stamp "$FROM_Y"
+
+# --- Y1 upgrade ---
+step up "$TO_Y" "Y1 upgrade（加列 + 按语义回填 5 行）"
+chk "retention 列已加（可空 date）" \
+  "$(q "select data_type||'/'||is_nullable from information_schema.columns where table_name='sync_config' and column_name='retention' and table_schema=current_schema()")" \
+  "date/YES"
+chk "🔴 非空恰 5 行（7 行 start_floor 里只有 5 行是 retention 语义）" \
+  "$(q "select count(*) from sync_config where retention is not null")" "5"
+chk "hourly 照抄旧值（本就是 retention）" \
+  "$(q "select retention::text from sync_config where id='binance_perp_hourly'")" "2026-09-29"
+chk "1min/15min 照抄旧值（存储闸门）" \
+  "$(q "select count(*) from sync_config where id in ('binance_perp_1min','binance_perp_15min') and retention=DATE '2026-10-05'")" "2"
+chk "index_daily 照抄（无 inception 族，设计 §九.7）" \
+  "$(q "select retention::text from sync_config where id='index_daily'")" "2005-04-08"
+chk "astock_basic 照抄（无 inception 族）" \
+  "$(q "select retention::text from sync_config where id='astock_basic'")" "1990-12-19"
+chk "🔴 binance_perp_daily 留 NULL（旧值是 inception ⇒ 归 SM，不得坐进策略列）" \
+  "$(q "select coalesce(retention::text,'<NULL>') from sync_config where id='binance_perp_daily'")" "<NULL>"
+chk "🔴 okx_perp_daily 留 NULL（旧值是源下限 ⇒ 归 available_range）" \
+  "$(q "select coalesce(retention::text,'<NULL>') from sync_config where id='okx_perp_daily'")" "<NULL>"
+chk "未声明的邻居保持 NULL" \
+  "$(q "select coalesce(retention::text,'<NULL>') from sync_config where id='astock_daily'")" "<NULL>"
+chk "🔴 start_floor 列仍在（expand-only 第一步）" \
+  "$(q "select count(*) from information_schema.columns where table_name='sync_config' and column_name='start_floor' and table_schema=current_schema()")" "1"
+chk "🔴 start_floor 值分毫未动（仍 7 行非空）" \
+  "$(q "select count(*) from sync_config where start_floor is not null")" "7"
+chk "行数不变（纯加列 + UPDATE，无插入）" "$(q "select count(*) from sync_config")" "8"
+
+# --- Y2 幂等复跑（部署中断重跑场景） ---
+stamp "$FROM_Y"
+step up "$TO_Y" "Y2 强制复跑（部署中断重跑场景）"
+chk "复跑后非空仍恰 5 行（ADD COLUMN IF NOT EXISTS + 幂等 UPDATE）" \
+  "$(q "select count(*) from sync_config where retention is not null")" "5"
+chk "复跑后 start_floor 仍 7 行" "$(q "select count(*) from sync_config where start_floor is not null")" "7"
+
+# --- Y3 不覆盖运维手改 ---
+x "update sync_config set retention = DATE '2021-01-01' where id='index_daily'"
+step up "$TO_Y" "Y3 幂等复跑（运维已手改 index_daily.retention）"
+chk "运维手改值被尊重（AND retention IS NULL 让位）" \
+  "$(q "select retention::text from sync_config where id='index_daily'")" "2021-01-01"
+
+# --- Y4 downgrade（对称回收 retention；不后退 0131） ---
+step down "$FROM_Y" "Y4 downgrade（只回收 retention）"
+chk "retention 列已删" \
+  "$(q "select count(*) from information_schema.columns where table_name='sync_config' and column_name='retention' and table_schema=current_schema()")" "0"
+chk "🔴 start_floor 与值仍在（降级不后退 0131）" \
+  "$(q "select count(*) from sync_config where start_floor is not null")" "7"
+
+# --- Y5 再 upgrade（可重放 / 干净 A→B→A） ---
+step up "$TO_Y" "Y5 再 upgrade（可重放）"
+chk "重放后非空复位 5 行（Y3 的手改已随降级消失）" \
+  "$(q "select count(*) from sync_config where retention is not null")" "5"
+}
+
+# ── 用例 Z：0139 离线渲染完整性（不连库） ──
+case_z() {
+echo
+echo "########## 用例 Z：0139 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_Y:$TO_Y" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_Y:$FROM_Y" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_Y'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含版本回退" "$(grep -c "SET version_num='$FROM_Y'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含 ADD COLUMN IF NOT EXISTS retention" \
+  "$(grep -ci 'add column if not exists retention' "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 5 条带守卫的回填 UPDATE" "$(grep -ci 'retention is null' "$tmp/up.sql")" "5"
+chk "🔴 upgrade 渲染不含 DROP COLUMN（expand-only）" "$(grep -ci 'drop column' "$tmp/up.sql")" "0"
+chk "downgrade 渲染含 DROP COLUMN IF EXISTS retention" \
+  "$(grep -ci 'drop column if exists retention' "$tmp/dn.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y） ##########"
 precheck
 case_a
 case_b
@@ -1431,4 +1552,6 @@ case_u
 case_v
 case_w
 case_x
+case_y
+case_z
 finish
