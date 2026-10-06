@@ -498,3 +498,26 @@
   （**反转**原钉，非删除）+ `test_filter_trader_halt_requires_halt_key_not_trade`（连坐守卫）。
   **双逆转实证**：① 加回 `trade` 连坐 → 连坐守卫红；② `halt` 加回 trader 集 → 缺键钉红。
 - **验证**：全量 pytest **1805 passed / 1 skipped**；ruff 绿；前端 build 绿。未上产（与批 77 主体同行）。
+
+## 2026-10-06 · 同步窗口边界模型与参数分层（用户裁定「② 假地板无意义；加标的产生时间；冻结删掉、统一走边界模型」）
+
+**背景**：OKX 首跑 7/485 标的缺 19 天不自愈（`_crypto_window` 首跑窗 30 天 > `_PARTIAL_FREEZE_MAX_DAYS` 10 天下限；且冻结 2026-10-06 20:21 才上线、晚于 102b 下午首跑）。由此引出「同步窗口该由什么决定、参数该归哪一层」的逐轮讨论。
+
+**裁定**（用户逐轮拍板）：
+
+1. **窗口 = 三边界交集**：`[ max(inception, retention) , 源上限 − 发布滞后 ]`。**两个地板语义不同、都显式化取 max——不用一个冒充另一个**（`first_run_days=30` 正是坏样本：既非真 inception 也非有依据的 retention）。
+2. **`inception`（标的产生时间）＝每标的事实**，从列表快照派生。**非新建**——`security_master.list_date` / `engine._get_list_date` 已存在且已用，只是**仅用于单标的修复路径**；本次**升格为期望集定义**（存量资产，非新造）。
+3. **参数三层归位**：换任务才变 → 定义层 DB；同类共享 → 代码按 kind 默认；连某源才需 → 接入层。**能力/列形状留代码（绝不进 DB，进 DB 即双真源漂移——批 107 `etf_list.pg_table` 同族教训）**；连接值/凭证进 DB。
+4. **四条启发式收编**：`_PARTIAL_FREEZE_MAX_DAYS` **删**、`_TIER1_OVERLAP_DAYS` **删**、`_CRYPTO_TAIL_GRACE`+`_TIER1_LAG_TRADING_DAYS` **并入源边界**（发布滞后是源属性、非 kind 属性）、`first_run_days`/`default_days`/`20050408` **换 `max(inception, retention)`**。
+5. **冻结删除是收尾步、不是起点**，**门控**：crypto perp 生命周期落地 + 对账在 prod 证明覆盖同一缺口。
+
+**关键理由（为什么不能先删）**：
+
+- **粒度错配（冻结缺陷的本质）**：游标是 **sync_id 级单值**、失败是 **symbol 级** ⇒ 485 永续里坏 1 个、整族游标就退回、下轮全族重拉；10 天界只是给这个「全族重拉」封顶防 ratchet。对账搬到标的/日期粒度是根治。
+- **依赖倒置**：inception 是**派生数据**（来自 `asset_static_info`/`security_master`，本身是快照族同步项）⇒ 时序族完整性依赖快照族新鲜度；快照 stale 须判「**不确定**」而非「无缺」。同族前科：清单检测点不看 `enabled`（P1-A）。
+- **只对 per-symbol 族有效**：per-date 整市场族（`astock_daily` 走 `pro.daily(trade_date=X)`）上游只返当日存活标的 ⇒ lifecycle **不产生缺口**，其洞是**整日失败**，须靠**日期级差集**；lifecycle 对它无效。**minute/pool 族才是正解，两类分开治。**
+- **crypto 空白**：`security_master` 无 crypto 行 ⇒ 生命周期对 crypto 为空、对账空转；**不补 perp 生命周期就删冻结 ＝ 重开 OKX 那类洞。**
+- **修正前论**：此前曾说「冻结与边界模型并存会**语义打架**」——**过头**，实为**冗余非冲突**（都幂等）；真问题是粒度错配 + 假愈合错觉（「愈合了最近 10 天」≠「已完整」）。
+
+**文献**：`flow/方案/同步窗口与参数分层-设计.md`（设计定稿）。
+**状态**：设计定稿，实施未开始；待裁点（crypto 生命周期来源 / retention 落地形态 / 对账调度频率 / per-date 优先级 / 孤儿参数键闸门）见文档 §十。
