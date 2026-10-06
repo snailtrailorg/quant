@@ -4,6 +4,7 @@
 修复语义：返回 last_success_date 键的 handler 才走三态（全失败不动/部分失败推连续末日/全成功推末）；
 其余 handler 无条件推进（分钟线 per-symbol 失败粒度不能被卷入三态——200 积分全失败会冻游标重试风暴）。
 """
+from datetime import date
 from unittest.mock import patch, MagicMock
 import pandas as pd
 
@@ -79,12 +80,30 @@ class TestCursorThreeState:
         assert not alerts
 
     def test_handler_without_key_advances_unconditionally(self):
-        """无 last_success_date 键的 handler（分钟线 per-symbol 失败粒度）：有失败也照推——
-        防重试风暴（G-S1）。"""
+        """无 last_success_date 键的 handler（分钟线 per-symbol 失败粒度）：有失败也照推**游标**——
+        防重试风暴（G-S1）。**批 104**：游标推进语义不变，但**终态词如实**记 failed——
+        原实现恒给 'idle' ⇒ `sync_config.last_status` 与失败告警标题双双掩盖失败。"""
         ret = {"pulled": 0, "saved": 0, "start": "20260811",
                "failed_dates": ["000001.SZ:Error:积分不足"]}   # 分钟线失败粒度=per-symbol
-        _, updates, _, _ = _run_sync(ret)
-        assert updates[-1][0][3] == "idle"   # 推进且 idle（现状语义保留）
+        _, updates, _, alerts = _run_sync(ret)
+        assert updates[-1][0][1] == date.today().strftime("%Y%m%d")   # 游标仍无条件推进
+        assert updates[-1][0][3] == "failed"        # 批 104：终态词如实（原为 'idle'）
+        assert alerts and alerts[-1][1] == "failed", alerts            # 告警标题不再写 'idle'
+
+    def test_handler_without_key_partial_when_some_saved(self):
+        """**批 104**：无 last_success_date 键 + 有失败但**也有入库** ⇒ partial（非 idle、非 failed）。"""
+        ret = {"pulled": 5, "saved": 5, "start": "20260811",
+               "failed_dates": ["000001.SZ:Error:积分不足"]}
+        _, updates, _, alerts = _run_sync(ret)
+        assert updates[-1][0] == ("astock_daily", date.today().strftime("%Y%m%d"), 5, "partial")
+        assert alerts and alerts[-1][1] == "partial", alerts
+
+    def test_handler_without_key_no_failure_stays_idle(self):
+        """**批 104 回归钉**：无失败时终态词仍是 idle（本次改动**不动**健康路径的词）。"""
+        ret = {"pulled": 3, "saved": 3, "start": "20260811", "failed_dates": []}
+        _, updates, _, alerts = _run_sync(ret)
+        assert updates[-1][0][3] == "idle"
+        assert not alerts
 
     def test_terminal_state_written_after_mark_running(self):
         """G-S2：_mark_running(False) 先执行、终态后写——反序会把 partial/failed 覆盖回 idle。"""

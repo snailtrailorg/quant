@@ -407,7 +407,16 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     # 批 92：无 last_success_date 键的 handler（tier1 按日族）改从返回体取
                     # 「游标上界」——它可能窄于 end_date（如 margin_detail 的 T+1 数据可用日
                     # ＝上一交易日）。缺省仍 end_date ⇒ 未声明者零行为变化。
-                    _advance = (r.get("cursor_upto") or end_date, saved, "idle")
+                    # 批 104：终态词**如实反映失败**。原实现恒给 'idle'，而这一处同时
+                    #   ①写进 `sync_config.last_status`、②被下方 `_alert_sync_failure` 取作
+                    #   告警标题 ⇒ 有失败时**两处一起失真**（prod 实证：`last_status='idle'`
+                    #   而 `sync_log.status='partial'`；告警标题成「数据同步 idle: okx_perp_daily」
+                    #   正文却是「失败 7 项」）。故修**源头**而非只改告警词——一处真源。
+                    #   ⚠ 游标推进语义**不变**（这两个族仍无条件推进：分钟线档若全市场失败
+                    #   就冻游标会引发 beat 重试风暴，见上方 :384-387 与 G-S1）。只改词。
+                    _term = ("idle" if not failed_dates
+                             else ("partial" if saved else "failed"))
+                    _advance = (r.get("cursor_upto") or end_date, saved, _term)
             else:
                 _advance = None   # 回补不推进游标（现状）
             _mark_running(sync_id, False)   # G-S2：先清 running（置 idle），终态随后覆盖——
@@ -415,7 +424,9 @@ def sync(sync_id: str, backfill_from: str | None = None,
             if _advance is not None:
                 _update_sync_state(sync_id, *_advance)
             if failed_dates:
-                # H 口径统一：告警用终态（failed/partial，与 sync_config.last_status 一致）
+                # H 口径统一：告警用终态（failed/partial，与 sync_config.last_status 一致）。
+                # 批 104：`_advance[2]` 不再对「无 last_success_date 族」恒给 'idle'
+                #   （上方 :406 起如实给 idle/partial/failed）⇒ 告警标题与正文不再自相矛盾。
                 _alert_sync_failure(sync_id, _advance[2] if _advance else status, failed_dates)
             return {"status": status, "rows_pulled": pulled, "rows_saved": saved,
                     "duration_ms": duration_ms, "failed_dates": failed_dates,

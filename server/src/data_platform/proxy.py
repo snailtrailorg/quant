@@ -43,6 +43,13 @@ LOCAL_DNS_SCHEMES = frozenset({"socks5"})
 # 探测出口 IP 的默认目标（运维一键诊断用；可用 target 覆盖成真实 provider 端点）
 PROBE_DEFAULT_TARGET = "https://api.ipify.org?format=json"
 
+# 批 104：probe 的瞬态重试预算。**只重试「连接层瞬态」**（见 _PROBE_TRANSIENT），
+# 不重试 HTTP 4xx / InvalidSchema 等确定性错误。预算刻意**短于** adapter 的 2/4/8s：
+# probe 是 UI 上的「测试出口」按钮，不能像 adapter 的 30s×4+退避（实测 134s）那样久等。
+PROBE_RETRY_ATTEMPTS = 3
+PROBE_RETRY_BACKOFF = (0.5, 1.0)   # 第 1 次失败后等 0.5s，第 2 次后等 1.0s
+_PROBE_TRANSIENT = (requests.exceptions.ConnectionError, requests.exceptions.Timeout)
+
 
 # ─────────────────────────── 纯函数：校验 / 掩码 ───────────────────────────
 
@@ -318,14 +325,21 @@ def capable_consumers() -> list[str]:
 # ─────────────────────────── 探连通（运维一键诊断） ───────────────────────────
 
 
-def probe(name: str, target: str | None = None, timeout: int = 15) -> dict:
+def probe(name: str, target: str | None = None, timeout: int = 15,
+          attempts: int | None = None) -> dict:
     """经该代理 GET `target`（默认 ipify）→ 出口 IP + 延迟。
 
     **这是「代理是否真能出网」的唯一权威判据**：`socks5://`（本地 DNS）在污染域上会
     表现为连接错误，probe 会如实报错而不是静默通过。
 
-    返回 `{"ok", "exit_ip", "elapsed_ms", "status", "error"}`；**失败不抛**（诊断端点，
-    失败信息本身就是结果）。
+    返回 `{"ok", "exit_ip", "elapsed_ms", "status", "attempts", "error"}`；**失败不抛**
+    （诊断端点，失败信息本身就是结果）。
+
+    **批 104 — 瞬态重试**：原实现**单发**，经 socks5h 代理偶发 `ConnectionResetError`
+    就直接判「出口不可用」。而 102b 实测：**同一代理**上 485 标的 × 30 天数据全窗拉通
+    ⇒ 出口其实可用，probe 的报错是**误报**。故对连接层瞬态（`_PROBE_TRANSIENT`）重试
+    `attempts` 次、按 `PROBE_RETRY_BACKOFF` 退避；**HTTP 4xx 与 `InvalidSchema` 等确定性
+    错误不重试**（重试无意义，只会拖慢诊断）。多次尝试的错误逐条返回在 `errors` 里。
     """
     row = get_proxy_raw(name)
     if not row:
@@ -333,21 +347,36 @@ def probe(name: str, target: str | None = None, timeout: int = 15) -> dict:
     url = row["url"]
     tgt = target or PROBE_DEFAULT_TARGET
     proxies = {"http": url, "https": url}
+    tries = max(1, int(attempts or PROBE_RETRY_ATTEMPTS))
+    errors: list[str] = []
     t0 = time.monotonic()
-    try:
-        resp = requests.get(tgt, proxies=proxies, timeout=timeout,
-                            headers={"User-Agent": "quant-proxy-probe/1.0"})
+    for i in range(tries):
+        try:
+            resp = requests.get(tgt, proxies=proxies, timeout=timeout,
+                                headers={"User-Agent": "quant-proxy-probe/1.0"})
+        except _PROBE_TRANSIENT as e:          # 瞬态：连接被重置/超时 ⇒ 值得再试
+            errors.append(f"{type(e).__name__}: {str(e)[:120]}")
+            if i + 1 < tries:
+                time.sleep(PROBE_RETRY_BACKOFF[min(i, len(PROBE_RETRY_BACKOFF) - 1)])
+                continue
+            break
+        except Exception as e:                 # 确定性错误（InvalidSchema/URL 非法…）⇒ 不重试
+            errors.append(f"{type(e).__name__}: {str(e)[:160]}")
+            break
         elapsed = int((time.monotonic() - t0) * 1000)
         if resp.status_code >= 400:
-            return {"ok": False, "status": resp.status_code, "elapsed_ms": elapsed,
-                    "error": f"目标返回 {resp.status_code}"}
+            return {"ok": False, "attempts": i + 1, "status": resp.status_code,
+                    "elapsed_ms": elapsed, "error": f"目标返回 {resp.status_code}"}
         ip = None
         try:
             ip = resp.json().get("ip")
         except Exception:
             ip = (resp.text or "").strip()[:64] or None
-        return {"ok": True, "exit_ip": ip, "status": resp.status_code,
+        return {"ok": True, "attempts": i + 1, "exit_ip": ip, "status": resp.status_code,
                 "elapsed_ms": elapsed, "error": None}
-    except Exception as e:
-        elapsed = int((time.monotonic() - t0) * 1000)
-        return {"ok": False, "elapsed_ms": elapsed, "error": f"{type(e).__name__}: {str(e)[:160]}"}
+    out = {"ok": False, "attempts": len(errors) or 1,
+           "elapsed_ms": int((time.monotonic() - t0) * 1000),
+           "error": errors[-1] if errors else "未知错误"}
+    if len(errors) > 1:
+        out["errors"] = errors
+    return out
