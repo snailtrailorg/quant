@@ -144,6 +144,8 @@ class JoinQuantAdapter(BaseDataAdapter):
 
     def __init__(self):
         self._ds = None
+        # 批 108·步 1：账号窗口实例级缓存（adapter 由 engine **每任务新建** ⇒ 任务内不变）。
+        self._acct_win: dict | None = None
         # 最近一次 `pull_daily` 被**跳过**的标的（非 XSHE/XSHG、或单只取数被上游拒）——
         # 供编排层记账/日志，**不是**失败（聚宽无北交所是静态能力边界）。
         self.last_skipped: list[str] = []
@@ -163,9 +165,36 @@ class JoinQuantAdapter(BaseDataAdapter):
         """已 auth 的 jqdatasdk 模块（auth 门见模块 docstring）。"""
         return self._data_source().get_client()
 
-    def account_window(self) -> dict:
-        """账号窗口/额度（`get_account_info`/`get_query_count` 真值；窗口**动态取**）。"""
-        return self._data_source().account_window()
+    def account_window(self, refresh: bool = False) -> dict:
+        """账号窗口/额度（`get_account_info`/`get_query_count` 真值；窗口**动态取**）。
+
+        批 108·步 1：加**实例级缓存**——本 adapter 由 engine **每任务新建**（base.py 契约），
+        任务内窗口/额度不会变；步 3 的窗口计算与 `_sync_astock_daily_jq` 各自取用时只 auth 一次。
+        `refresh=True` 强制重取（诊断/运维用）。
+        """
+        if refresh or self._acct_win is None:
+            self._acct_win = self._data_source().account_window()
+        return self._acct_win
+
+    # ── 源可达区间（批 108·步 1）──
+
+    def available_range(self, kind: str) -> tuple[str | None, str | None]:
+        """见基类契约。取值＝**账号可用窗口**（`account_window()` 真值；动态取、禁硬编码）。
+
+        - `earliest` ＝ `win["start"]`——聚宽**订阅期**起点：更早的历史本账号拿不到
+          （SDK `get_price` **不查 start**，故 engine 侧另有「起点自夹」，见 `_sync_astock_daily_jq`）。
+        - `latest` ＝ `win["end"]`——**显式上界（非滚动）**：试用账号窗口止于某日
+          （威廉姆 2026-10-06 裁定：试用窗口无最近 3 个月 ⇒ `astock_daily_jq` 是独立 sync_id）。
+
+        设计 §八.1/§九.5：本项目**三个窗口起点站点**之一（另两＝`_sync_via_kind` / crypto
+        handler）；此处不纳入契约，换源 bug 会残留在该类源上。
+        """
+        win = self.account_window()
+        return (win["start"].strftime("%Y-%m-%d"), win["end"].strftime("%Y-%m-%d"))
+
+    def publish_lag(self, kind: str) -> int:
+        """0——聚宽按交易日切片返回，窗口上界已由 `account_window().end` **显式**表达（非滚动）。"""
+        return 0
 
     # ── 符号归一 ──
 

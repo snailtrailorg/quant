@@ -50,6 +50,13 @@ _MONTHLY_FROM = (2020, 1)                    # 实测：月包自 2020-01（2019
 _FLOOR_DATE = date(2020, 1, 1)               # 月包 floor 的 date 形态（_pull 省流阀的边界判据）
 _DELIVERY_RE = re.compile(r"_[0-9]{6}$")     # BTCUSDT_210129 = 交割合约（非永续，排除）
 
+# 批 108·步 1：**源可达下界**（窗口第四边界的真源）——与上面两个「批量路径优化边界」**不同义**：
+#   实测（2026-10-07 主会话探 data.binance.vision）：**日包** `2019-12-30`→404 / `2019-12-31`→200；
+#   四个 interval（1d/1h/1m/15m）**同值**。月包自 2020-01（更晚）⇒ 日包才是真实下界。
+#   `2019-09-08`＝USDT-M **上线日**（≠ 源可得）；`2020-01-01`＝月包 floor。
+#   ⇒ 用后两者当源界会让 §5.3 的 unreachable 段**永不触发**（永久 phantom gap，双盲审② A2 P1-a）。
+_SOURCE_EARLIEST = "2019-12-31"
+
 # 内部 freq → 批量站 interval 目录名（**映射真源**；`to_source_freq` 暴露给契约层）。
 # freq 同时是 `bar_{freq.lower()}` 表名后缀（db.save_bars 的 insert 模板即如此）——
 # 故 '1D'→bar_1D / '1h'→bar_1h / '1min'→bar_1min / '15min'→bar_15min 一一对应（PG 折叠大小写）。
@@ -234,6 +241,28 @@ class BinanceAdapter(BaseDataAdapter):
             else:
                 lo = mid + 1
         return _MONTHLY_FROM[0] + lo // 12, _MONTHLY_FROM[1] + lo % 12
+
+    # ——— 源可达区间（批 108·步 1）———
+
+    def available_range(self, kind: str) -> tuple[str | None, str | None]:
+        """见基类契约。**实测取值**（2026-10-07 主会话探 `data.binance.vision`）：
+
+        - `earliest` ＝ **`2019-12-31`**——USDⓈ-M 批量集实际最早**日包**（`2019-12-30`→404 /
+          `2019-12-31`→200）；**四个 interval 一致**（`1d`/`1h`/`1m`/`15m` 逐一同测）。
+          三个易混值须辨（设计 §5.1）：`2019-09-08` ＝ **上线日**（≠ 批量源可得）；
+          `2020-01`/`_FLOOR_DATE` ＝ **月包** floor（仅批量路径的优化边界）——**都不是本源下界**。
+        - `latest` ＝ `None`（随今日滚动）；实际可用上界另受 `publish_lag` 与游标契约约束。
+        """
+        return (_SOURCE_EARLIEST, None)
+
+    def publish_lag(self, kind: str) -> int:
+        """1 自然日（对齐批量站 T+1 发布：UTC 当日文件 404、前一日 200）。
+
+        实测补充（批 101b）：上一日的包在 UTC 早间**可能尚未发布**（北京时间 10:46 时 `D-1`
+        在全部 interval 上仍 404）。该发布**抖动**不由本值承担，而由 crypto handler 的
+        **游标契约**（游标＝实际取到数据的最后一日）兜住——两处是**分工**不是重复。
+        """
+        return 1
 
     # ——— 拉取 ———
 

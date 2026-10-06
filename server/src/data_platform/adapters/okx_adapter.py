@@ -50,6 +50,12 @@ _INSTRUMENTS = "/api/v5/public/instruments"       # ?instType=SWAP
 _CANDLES = "/api/v5/market/history-candles"       # ?instId=&bar=&after=&limit=
 _BAR = "1Dutc"                                    # **UTC 日界**（见模块 docstring 语义①）
 
+# 批 108·步 1：**源可达下界**（窗口第四边界的真源）＝**迁移 `0137` 的 prod 实测值**——
+# 「K 线 API 在 2019 全空」，故 floor 取实测 K 线边界，**不臆造**。
+# ⚠️ 与 `listTime`（真上币日）**不同义**：后者报 BTC/ATOM `2019-11-12`、FIL `2019-08-10`，
+#    两者差 ≈2 月（设计 §2.6/§九.3 的实证样本）。inception 取 listTime，源界取本值，禁互替。
+_SOURCE_EARLIEST = "2020-01-01"
+
 _LIMIT = 100                                      # history-candles 单页上限（接口硬上限）
 _MAX_PAGES = 600                                  # 防御上限（6 年日线 ≈ 22 页，600 远超需求）
 _RATE_MAX = 20                                    # IP 级 20 req…
@@ -205,6 +211,22 @@ class OkxAdapter(BaseDataAdapter):
             str(it.get("instId")) for it in insts
             if it.get("instId") and str(it.get("settleCcy", "")).upper() == "USDT")
         return self._symbols
+
+    # ——— 源可达区间（批 108·步 1）———
+
+    def available_range(self, kind: str) -> tuple[str | None, str | None]:
+        """见基类契约。取值＝**`2020-01-01`**（迁移 `0137` 的 **prod 实测**：「K 线 API 在
+        2019 全空」，故 floor 取实测 K 线边界，**不臆造**）。
+
+        ⚠️ 本条同时是「**可达性 ≠ 上币日**」的实证样本（设计 §2.6/§九.3）：`instruments.listTime`
+        报 BTC/ATOM `2019-11-12`、FIL `2019-08-10`，而 K 线 2019 **全空** ⇒ 差 ≈2 月。
+        **inception 取 `listTime`、源界取本值**，两者不得互替。
+        """
+        return (_SOURCE_EARLIEST, None)
+
+    def publish_lag(self, kind: str) -> int:
+        """1 自然日（`1Dutc` 日线在 UTC 日界后可用；对齐 `_crypto_window` 的「上界＝UTC 昨日」）。"""
+        return 1
 
     # ——— 拉取 ———
 

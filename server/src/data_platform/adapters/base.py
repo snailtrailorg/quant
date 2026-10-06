@@ -108,6 +108,44 @@ class BaseDataAdapter(ABC):
         """
         return pd.DataFrame()
 
+    # —— 源可达区间（批 108·步 1；设计 §5.1 第四边界 / §八.1 硬契约）——
+
+    def available_range(self, kind: str) -> tuple[str | None, str | None]:
+        """源侧可达区间 `(earliest, latest)`，ISO `'YYYY-MM-DD'`——**窗口第四边界的唯一真源**。
+
+        - `earliest` ＝ 源在 `kind` 上**最早可得**的数据日期（`None` ＝ 源不构成下界约束）。
+        - `latest`   ＝ 源在 `kind` 上**最晚可得**的数据日期；`None` ＝「**随今日滚动**」
+          （由调用方按 `publish_lag` 回推），**不是**「不知道」。
+
+        **为什么要有它（设计 §5.1）**：模型若只有上界，adapter 会在内部**私自收窄起点**
+        （先例＝`binance_adapter._pull` 的省流阀），于是「模型窗口 ≠ 真实窗口」，
+        对账层便不可信——「拉回了空」与「源本来就没有」**同形**。
+
+        **硬契约（设计 §八.1 / 双盲审① P0-2）**：所有**可拉** adapter（`capabilities` 非空）
+        **必须覆写**本方法。未覆写的子类落进本默认实现 ⇒ **`NotImplementedError`（fail-loud）**；
+        **禁止**返回 `today` / `(None, None)` 冒充——漏实现会让新源默认「今天起」，
+        历史**永不回补**且无告警（source_upper 变软真源）。
+
+        粒度＝**kind 级**（不是 per-symbol）：源可达性逐标的不同由 **inception**
+        （SM `list_date`）承担，两者取 `max`（设计 §5.1「粒度陷阱与绑定点」）。
+
+        `kind` ＝ DataKind 词（`bar_daily` / `bar_minute` / `index_daily` / …）。
+        **取值须实测、禁臆造**（先例＝迁移 `0137`「只填已实证下界，不臆造」）。
+        """
+        raise NotImplementedError(
+            f"{self.provider} adapter 未实现 available_range(kind={kind!r})——"
+            f"源可达下界（窗口第四边界）无真源；禁止以 today/None 冒充（设计 §八.1 硬契约）")
+
+    def publish_lag(self, kind: str) -> int:
+        """源发布滞后（**自然日**）：数据「已发生」→「源可得」的时延。默认 `0`＝盘后当日可得。
+
+        窗口上界 ＝ `available_range(kind).latest − publish_lag`（`latest is None` 时以今日推）。
+        收编原两处启发式的语义（设计 §六）：`_CRYPTO_TAIL_GRACE`（批量站 T+1 发布，自然日）
+        与 `_TIER1_LAG_TRADING_DAYS`（T+1 表，**交易日**）——后者单位不同，收编时由调用点
+        按日历换算，**本方法统一以自然日计**。
+        """
+        return 0
+
     # —— 归一化（带默认实现，Tushare 直通，聚宽/米筐覆写，24 号 §2.1）——
     def to_source_symbol(self, symbol: str) -> str:
         """内部 ts_code（600000.SH）→ 源格式（聚宽 600000.XSHG）。默认直通。"""
@@ -310,6 +348,29 @@ class TushareAdapter(BaseDataAdapter):
         if kind == "etf":
             return pro.fund_daily(trade_date=trade_date)
         raise UnsupportedFeature(f"tushare 不支持 kind={kind} 按日批量")
+
+    # 批 108·步 1：源可达下界（kind 级，见 available_range 覆写处的语义注）。
+    SOURCE_EARLIEST = "2010-01-01"
+
+    def available_range(self, kind: str) -> tuple[str | None, str | None]:
+        """见基类契约。**kind 分级（批 108 复核修正——设计稿 §八.1 单一取值会造成回归）**：
+
+        - `index_daily` → **`(None, None)`**：基准指数**无 inception**（设计 §九.7），其窗口
+          下界只能靠 `retention`（现＝`20050408`）；而 tushare 指数数据远早于该值 ⇒ 若在此返回
+          `2010-01-01`，则 `max(retention=2005-04-08, source=2010-01-01)` ＝ **2010**
+          ⇒ **静默丢掉 2005-2009 历史**（对已上线族的直接回归）。故本源下界对该族显式「无界」。
+        - 其余 kind → `SOURCE_EARLIEST`：这些族的**个股 inception** 已被 `_get_list_date` 的
+          「早于 2010 抬到 2010」（`engine.py:1875`）夹住 ⇒ `max` 结果不变、**不回归**。
+
+        ⚠️ **语义注（已知混装，同 `start_floor` 一列三义族）**：tushare 的真实可达性受**账号
+        积分/权限**约束，而 `SOURCE_EARLIEST` 与 `engine._TUSHARE_MIN_DATE`（env
+        `SYNC_START_DATE`）**同值同源**——即本返回值同时承载「源可达」与「我们配置的起点」
+        两层语义。取**保守偏晚**值：用它当窗口下界只会「少拉本就不在系统范围内的更早历史」，
+        **不会**漏拉范围内的数据、也不会产生假缺口。（拆义挂账见任务文件 §挂账。）
+        """
+        if kind == "index_daily":
+            return (None, None)
+        return (self.SOURCE_EARLIEST, None)
 
     def pull_adj_factor(self, symbol=None, trade_date=None, start=None, end=None) -> pd.DataFrame:
         """复权因子。保留 None（接口不可用）与空 df（无数据）区分——backfill_adj_factor 靠 None 判 degraded。"""
