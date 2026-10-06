@@ -78,9 +78,12 @@ echo " 批3 3a 六场景注入（沙箱零生产触碰）"
 echo "=============================================================="
 
 # ---------- 附加断言: 交易窗口闸（确定性注入 deploy_fake_now=uHHMM） ----------
-echo "[A0] 交易窗口闸（周一 09:30 注入 → enforce=true 须拒绝）"
+# 批 106：门现在还要查交易日历 ⇒ 必须同时注入 deploy_fake_date（否则用真实日期——
+# 假日跑测试会假绿）。A0 用「周一且开市」的 2026-09-28 保「盘中仍拒绝」语义。
+echo "[A0] 交易窗口闸（周一 09:30 + 交易日 2026-09-28 → enforce=true 须拒绝）"
 bash "$HERE/make_sandbox_root.sh" >>"$LOGDIR/a0.log" 2>&1
-run_release "$R_AUX" -e "deploy_fake_now=10930" -e "deploy_trading_window_enforce=true" \
+run_release "$R_AUX" -e "deploy_fake_now=10930" -e "deploy_fake_date=2026-09-28" \
+  -e "deploy_trading_window_enforce=true" \
   >"$LOGDIR/a0-release.log" 2>&1
 A0_RC=$?
 if [ $A0_RC -ne 0 ] && grep -q "交易窗口" "$LOGDIR/a0-release.log"; then
@@ -88,6 +91,21 @@ if [ $A0_RC -ne 0 ] && grep -q "交易窗口" "$LOGDIR/a0-release.log"; then
 else
   scenario_row A0 "交易窗口闸" "非零" "$A0_RC" "FAIL（须盘中拒绝）"
   FAILED=$((FAILED + 1))
+fi
+
+# ---------- 附加断言: 假日放行（批 106 新语义——同一时刻，非交易日不得拦） ----------
+# 2026-10-01 是周四（钟点在窗内）但 is_open=0 ⇒ 门须放行（走完 preflight 之外的阶段）。
+echo "[A0b] 假日放行（周四 09:30 + 假日 2026-10-01 → 不得因交易窗被拒）"
+bash "$HERE/make_sandbox_root.sh" >>"$LOGDIR/a0b.log" 2>&1
+run_release "$R_AUX" -e "deploy_fake_now=40930" -e "deploy_fake_date=2026-10-01" \
+  -e "deploy_trading_window_enforce=true" \
+  >"$LOGDIR/a0b-release.log" 2>&1
+A0B_RC=$?
+if grep -q "盘中（TZ=Asia/Shanghai）拒绝发布" "$LOGDIR/a0b-release.log"; then
+  scenario_row A0b "假日放行" "任意" "$A0B_RC" "FAIL（假日误拦）"
+  FAILED=$((FAILED + 1))
+else
+  scenario_row A0b "假日放行" "任意" "$A0B_RC" "PASS（假日未被交易窗拦）"
 fi
 
 # ---------- 附加断言: wrapper 负例（双盲审修补①②: 拒符号链接/拒缺 User=quant） ----------
@@ -185,7 +203,9 @@ fi
 # ---------- 场景 1: 坏 requirements（本地 pip 真验） ----------
 echo "[S1] 坏 requirements（pip dry-run 拦截）"
 seed_baseline
-echo "quant-sbx-nonexistent-broken-package==999.99.99" >>"$STAGE/requirements.txt"
+# 批 106：3980c0c 起 quant-pip-wrapper 读的是 **requirements.lock**（--require-hashes），
+# 故注入点必须是 lock 而非 .txt——否则 pip 根本看不见，S1 永远拦不住＝假绿。
+echo "quant-sbx-nonexistent-broken-package==999.99.99" >>"$STAGE/requirements.lock"
 run_release "$R_NEW" >"$LOGDIR/s1.log" 2>&1
 S1=$?
 echo "  rc=$S1（期望非零）"

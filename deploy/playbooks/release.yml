@@ -39,24 +39,60 @@
       register: now_raw
       changed_when: false
       check_mode: false          # 只读探针：--check 下也须真跑（断言依赖其输出）
+      tags: [tradegate]          # 批 106：--tags tradegate 可单跑交易窗门（免跑整条发布链）
 
-    - name: preflight —— 交易窗口判定（周一~周五 09:15-11:35 / 12:55-15:05）
+    # 批 106：原判定只认「周一~五 + 钟点」而不查交易日历 ⇒ 法定假日（如 2026-10-06，
+    # trade_cal.is_open=0；今天恰是周二）也落在窗内被拒，须人工 -e force=true 绕过。
+    # 修法：控制器侧（delegate_to localhost）查 dev 库 trade_cal，**非交易日直接放行**。
+    - name: preflight —— 交易日判定（trade_cal.is_open；控制器侧查 dev 库——批 106）
+      ansible.builtin.shell: |
+        D='{{ deploy_fake_date | default("") }}'
+        [ -n "$D" ] || D=$(TZ=Asia/Shanghai date +%F)
+        psql -w -h 127.0.0.1 -U quant -d quant -X -tA \
+             -c "select is_open from trade_cal where exchange='SSE' and cal_date='$D'"
+      delegate_to: localhost
+      register: trade_cal_raw
+      failed_when: false          # 查库失败**不得**失败本 play（fail-open，见下）
+      changed_when: false
+      check_mode: false           # 只读探针：--check 下也须真跑（断言依赖其输出）
+      when: deploy_trading_window_enforce | bool     # 非强制环境（staging/sandbox）零副作用
+      tags: [tradegate]
+
+    - name: preflight —— 交易日判定事实（is_open='1' 才算交易日；'0'=假日；缺失/查库失败=未知）
+      ansible.builtin.set_fact:
+        trade_cal_known: "{{ (trade_cal_raw.stdout | default('') | trim) in ['0', '1'] }}"
+        is_trading_day: "{{ (trade_cal_raw.stdout | default('') | trim) == '1' }}"
+      tags: [tradegate]
+
+    - name: preflight —— 交易窗口判定（周一~周五 09:15-11:35 / 12:55-15:05 **且为交易日**——批 106）
       ansible.builtin.set_fact:
         in_window: >-
           {{ (deploy_trading_windows | selectattr('begin', 'le', now_raw.stdout[1:] | int)
                                         | selectattr('end', 'ge', now_raw.stdout[1:] | int)
                                         | list | length > 0)
-             and (now_raw.stdout[:1] | int <= 5) }}
+             and (now_raw.stdout[:1] | int <= 5)
+             and (is_trading_day | bool) }}
+      tags: [tradegate]
+
+    - name: preflight —— 交易日历不可用告警（fail-open：不阻断发布，仅留痕——批 106）
+      ansible.builtin.debug:
+        msg: >-
+          ⚠ 无法确认今日是否为交易日（trade_cal 不可达 / 无当日行）⇒ 交易窗口闸 **fail-open 放行**；
+          若此刻确实盘中，请人工确认后再决定是否继续（设计取舍：日历不可用不应成为新的发布阻断点）
+      when: (deploy_trading_window_enforce | bool) and (not (trade_cal_known | bool))
+      tags: [tradegate]
 
     - name: preflight —— 交易窗口断言（盘中拒绝；force 需显式确认）
       ansible.builtin.assert:
         that: (not (in_window and deploy_trading_window_enforce | bool)) or (force | default(false) | bool)
         msg: "盘中（TZ=Asia/Shanghai）拒绝发布；自担风险须显式 -e force=true"
+      tags: [tradegate]
 
     - name: preflight —— 盘中强制发布告警（操作者留痕；3b 接通知中心）
       ansible.builtin.debug:
         msg: "⚠ force=true 于交易窗口内发布——自担风险，操作者留痕"
       when: (in_window and deploy_trading_window_enforce | bool) and (force | default(false) | bool)
+      tags: [tradegate]
 
     - name: preflight —— 磁盘余量采集
       ansible.builtin.command: df -BM --output=avail {{ deploy_root }}

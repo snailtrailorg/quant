@@ -52,6 +52,12 @@ cp -a "$FIX/." "$STAGE/"
 # 补占位道具（vendor 内容随场景无关——同步通道存在性即所验）
 mkdir -p "$STAGE/vendor"
 echo ".sbx vendor 占位（make_sandbox_root 生成）" > "$STAGE/vendor/README"
+# 批 106 同款：3980c0c 把 requirements.lock 加进白名单 + 改 quant-pip-wrapper 读 lock，
+# 但基线只有 requirements.txt ⇒ 基线发布 rsync code 23 中止（整套六场景自 2026-09-29 起全红）。
+# 补占位 lock：**注释-only ⇒ pip `--dry-run --require-hashes` rc=0**（已实测），
+# 不引网络/不锁真实依赖（沙箱所验的是同步/pip **通道**，非真装）。
+printf '# 沙箱占位 lock（make_sandbox_root 生成；注释-only ⇒ pip --require-hashes 空装成功）\n' \
+  > "$STAGE/requirements.lock"
 grep -rl '__SBX_ROOT__' "$STAGE" | while IFS= read -r f; do
   sed -i "s|__SBX_ROOT__|$ROOT|g" "$f"
 done
