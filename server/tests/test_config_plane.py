@@ -357,8 +357,9 @@ class TestProvidersDirectory:
         # 批 101：数据源目录新增 `binance`（加密永续日线，0 密钥批量历史 adapter）——
         # 与交易通道 `binance_perp` 是两把键（前者出本目录、后者出交易页签，见下方断言）。
         # 批 103b：聚宽 `joinquant` 由 stub 毕业（能力集 {hist_quote}）⇒ 出本目录。
+        # 批 102b：`okx`（OKX 公共行情，0 密钥）——同样与交易通道 `okx_perp` 两把键。
         got = [p["provider"] for p in r.json()["providers"]]
-        assert got == sorted(["tushare", "binance", "joinquant"])
+        assert got == sorted(["tushare", "binance", "joinquant", "okx"])
         assert "binance_perp" not in got               # 交易通道 key 不得混入数据源目录
         assert "xtp" not in got and "okx_perp" not in got
         # 83a：目录随回本域能力集——前端能力筛选/勾选零字面量（同源 markets.DOMAIN_CAPS）

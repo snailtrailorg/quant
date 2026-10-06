@@ -60,7 +60,9 @@ def register_provider(inst: InterfaceProvider) -> None:
 # 二者是批 63 的交易通道凭证桩，当前零消费者（无实盘任务、两域表无行），UI 页签＝
 # 「有入口没功能」的死构件；同步面走数据源 `binance`（数据源域）不读交易账号。
 # 模块保留在位（binance_perp.py/okx_perp.py 不删），102 实时腿开工时再挂回。
-_PROVIDER_MODULES = ("tushare", "tencent", "xtp", "emt_emq", "binance", "joinquant")
+# 批 102b：`okx`（数据源，0 密钥，schema 空）——与 `binance` 同为「无凭证数据源」；
+# 交易桩 `okx_perp` 仍不挂（理由同上，零消费者）。
+_PROVIDER_MODULES = ("tushare", "tencent", "xtp", "emt_emq", "binance", "joinquant", "okx")
 _BOOTSTRAPPED = False
 
 

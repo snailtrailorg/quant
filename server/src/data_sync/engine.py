@@ -928,13 +928,15 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
     return {"status": "success", "days": len(dates), "processed": done, "updated": updated}
 
 
-# ═══ 批 101：加密（币安 USDT-M 永续）日线 ═══
-# 与 A 股族的**三处结构性差异**（写在代码边上，避免下一个人按 A 股心智改它）：
+# ═══ 批 101：加密（币安 USDT-M 永续）日线 · 批 102b：OKX 永续日线 ═══
+# 两所共用同一条 crypto bar 链（本工厂 + `_crypto_window`），差异只在 adapter（源侧）与
+# 配置行（sync_id / 表 / 调度）。与 A 股族的**三处结构性差异**（写在代码边上，避免下一个人
+# 按 A 股心智改它）：
 # 1) **形态**＝按标的 × 时间窗（crypto 无「全市场单日」概念）⇒ 不走 `_sync_via_kind` 逐日批路径；
 # 2) **日历**＝连续轴（无 trade_cal）⇒ 不用 `_trade_dates_in_range` / `freq="B"`；
-# 3) **限速**＝批量站是静态文件 CDN（无 weight 模型）⇒ **刻意不套 `rate_limit_context`**：
-#    `_get_rate_ds("binance")` 无 DataSource 会回落 tushare 兜底源并告警「串源风险」（把币安下载
-#    计进 tushare 的熔断器是错的）；礼貌性由 adapter 内 ≤8 并发表达。
+# 3) **限速**＝批量站/公共 API 无 weight 模型（币安＝静态文件 CDN；OKX＝IP 级窗口，由 adapter
+#    自持）⇒ **刻意不套 `rate_limit_context`**：`_get_rate_ds(<provider>)` 无 DB 行会回落
+#    tushare 兜底源并告警「串源风险」（把加密下载计进 tushare 的熔断器是错的）。
 
 def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None,
                    first_run_days: int = 30) -> tuple[date, date]:
@@ -951,6 +953,11 @@ def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None,
 
     `first_run_days`＝**首跑窗口天数**（无游标时），逐 sync_id 由 `_BINANCE_BAR_SPECS` 给
     （日线 30 / 小时 7 / 1min·15min 1）——即「功能验证档」的初始载入量。
+
+    **日界（批 102b）**：本函数的「上界＝UTC 昨日」是 **UTC 锚定**的口径，两所必须一致——
+    币安日线本就是 UTC 日界；OKX 的 `bar=1D` 是 **UTC+8** 日界，故 `OkxAdapter` 一律用
+    `bar=1Dutc` 对齐（详见该 adapter 模块 docstring 语义①）。**两源日界不同裸混一张
+    `bar_1d` 是静默错位**，这条一致性是前提而非风格。
     """
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
@@ -982,12 +989,16 @@ _BINANCE_BAR_SPECS: dict[str, tuple[str, str, str, int]] = {
 }
 
 # 「整个窗口都落在批量站未发布尾区」的容忍天数（见 handler 内 0 行判定）
-_BINANCE_TAIL_GRACE = 2
+_CRYPTO_TAIL_GRACE = 2
 
 
-def _make_binance_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
-                              first_run_days: int):
-    """工厂：币安永续 bar 族 handler（日线 / 小时 / 1min / 15min 共一条实现，批 101b 泛化）。
+def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
+                             first_run_days: int, *, label: str, enum_hint: str):
+    """工厂：crypto 永续 bar 族 handler（批 101 币安；批 102b 泛化到 provider 无关）。
+
+    `label`＝日志/错误里的源名（`binance`/`okx`）；`enum_hint`＝符号枚举失败的可能原因
+    （币安＝S3 list；OKX＝instruments 接口）。**只此两处 provider 差异**——其余逻辑
+    （窗口、游标、失败可见性、回补 overwrite）两所完全同构，故一条实现，不复制两份。
 
     **游标契约（批 101b 修正，勿回退）**：`cursor_upto` ＝ **实际取到数据的最后一日**，
     而不是窗口上界。原实现取窗口上界（`end_s`），与批量站的发布滞后叠加后**必然吃日成洞**：
@@ -1000,7 +1011,7 @@ def _make_binance_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
     取「实际取到数据的最后一日」后：D-1 未发布 ⇒ 游标停在 D-2 ⇒ 下一轮 `start = D-1`
     自动重试；一旦发布即补齐。稳态落后 1 天，**零洞**。
 
-    **0 行不是必然故障**：窗口整段落进「未发布尾区」（`UTC今日 - start ≤ _BINANCE_TAIL_GRACE`）
+    **0 行不是必然故障**：窗口整段落进「未发布尾区」（`UTC今日 - start ≤ _CRYPTO_TAIL_GRACE`）
     时，0 行是**正常等待**——标 `log_status='skipped'` 而非 `failed`（否则每次调度都刷一条
     假告警，真故障会被淹没）。窗口更长却 0 行＝真异常，照旧进 `failed_dates`。
     """
@@ -1020,7 +1031,7 @@ def _make_binance_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
         if not syms:
             # 符号枚举失败必须**响亮**：静默返回 0 行会让 sync() 记 success 并推进游标
             # （＝把整段窗口的数据洞掩埋）。raise 走 sync() 的 except → error + 游标不动 + 告警。
-            raise RuntimeError("binance 符号枚举为空（S3 list 不可达或返回异常）")
+            raise RuntimeError(f"{label} 符号枚举为空（{enum_hint}）")
         total = len(syms)
         pulled = saved = 0
         failed: list[str] = []
@@ -1047,13 +1058,13 @@ def _make_binance_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
         cursor = reached or (start - timedelta(days=1)).strftime("%Y%m%d")
         log_status = None
         if pulled == 0 and not failed:
-            if (datetime.now(timezone.utc).date() - start).days <= _BINANCE_TAIL_GRACE:
+            if (datetime.now(timezone.utc).date() - start).days <= _CRYPTO_TAIL_GRACE:
                 log_status = "skipped"    # 整窗未发布＝正常等待（上游 T+1 滞后），非故障
             else:
                 # 「全窗口 0 行」但窗口足够长 ⇒ 异常态（上游不可达 / 路径变更）——勿静默成功
                 failed.append("no_rows:窗口内 0 行（上游不可达 / T+1 未落盘 / 窗口压空）")
-        logger.info("binance %s %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d（游标 %s）",
-                    sync_id, start_s, end_s, total, pulled, saved, len(failed), cursor)
+        logger.info("%s %s %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d（游标 %s）",
+                    label, sync_id, start_s, end_s, total, pulled, saved, len(failed), cursor)
         out = {"pulled": pulled, "saved": saved, "start": start_s,
                "failed_dates": failed, "expected_days": None,
                "actual_days": total - len(failed), "cursor_upto": cursor}
@@ -1065,10 +1076,26 @@ def _make_binance_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
     return _handler
 
 
-_sync_binance_perp_daily = _make_binance_bar_handler("binance_perp_daily", *_BINANCE_BAR_SPECS["binance_perp_daily"])
-_sync_binance_perp_hourly = _make_binance_bar_handler("binance_perp_hourly", *_BINANCE_BAR_SPECS["binance_perp_hourly"])
-_sync_binance_perp_1min = _make_binance_bar_handler("binance_perp_1min", *_BINANCE_BAR_SPECS["binance_perp_1min"])
-_sync_binance_perp_15min = _make_binance_bar_handler("binance_perp_15min", *_BINANCE_BAR_SPECS["binance_perp_15min"])
+_BINANCE_ENUM_HINT = "S3 list 不可达或返回异常"
+_sync_binance_perp_daily = _make_crypto_bar_handler(
+    "binance_perp_daily", *_BINANCE_BAR_SPECS["binance_perp_daily"],
+    label="binance", enum_hint=_BINANCE_ENUM_HINT)
+_sync_binance_perp_hourly = _make_crypto_bar_handler(
+    "binance_perp_hourly", *_BINANCE_BAR_SPECS["binance_perp_hourly"],
+    label="binance", enum_hint=_BINANCE_ENUM_HINT)
+_sync_binance_perp_1min = _make_crypto_bar_handler(
+    "binance_perp_1min", *_BINANCE_BAR_SPECS["binance_perp_1min"],
+    label="binance", enum_hint=_BINANCE_ENUM_HINT)
+_sync_binance_perp_15min = _make_crypto_bar_handler(
+    "binance_perp_15min", *_BINANCE_BAR_SPECS["binance_perp_15min"],
+    label="binance", enum_hint=_BINANCE_ENUM_HINT)
+
+# ── 批 102b：OKX 永续日线（同一条 crypto bar 链，仅 adapter 与 label 不同） ──
+# 首跑 30 天与币安日线同档（「功能验证档」的量级；全史走 backfill_from，下界待 prod 实测后
+# 才写进 sync_config.start_floor——**当前 NULL**，见迁移 0136 的说明）。
+_sync_okx_perp_daily = _make_crypto_bar_handler(
+    "okx_perp_daily", "bar_daily", "perp", "1D", 30,
+    label="okx", enum_hint="instruments 接口不可达或返回异常（含代理出口未配/不通）")
 
 
 # ── 批 103b：聚宽 A 股日线（窗口动态取 + 行预算 + 按交易日分片） ──
@@ -1207,6 +1234,9 @@ _HANDLERS = {
     "binance_perp_15min": _sync_binance_perp_15min,
     # 批 103b：聚宽 A 股历史切片（独立 sync_id——窗口无最近 3 个月，不占 astock_daily 切换位）
     "astock_daily_jq": _sync_astock_daily_jq,
+    # 批 102b：OKX 永续日线（第 2 个 crypto 数据源——验证「多加密市场共存」；
+    # 与 binance 同一条 `_make_crypto_bar_handler` 链，仅 adapter/label 不同）
+    "okx_perp_daily": _sync_okx_perp_daily,
 }
 
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由

@@ -109,6 +109,18 @@ def is_local_dns(url: str) -> bool:
         return False
 
 
+def proxies_map(dsn: str | None) -> dict | None:
+    """requests 的 `proxies` 参数；`None` ＝**直连**。
+
+    **唯一真源**（批 102b 收编：原散在 `binance_adapter._proxies`）——okx 及其后每个
+    自持 HTTP 的 adapter 都用它，避免「两处各写一遍 map」日后一处改一处忘。
+
+    两路走**同一个 map**（形态统一，依赖面不同）：`http(s)://` 代理是 requests 原生；
+    `socks5h://`/`socks5://` 由 **PySocks** 提供传输层。
+    """
+    return {"http": dsn, "https": dsn} if dsn else None
+
+
 # ─────────────────────────── 代理池 CRUD ───────────────────────────
 
 

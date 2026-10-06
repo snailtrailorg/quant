@@ -310,12 +310,70 @@ class JoinQuantDataSource(DataSource):
             return False
 
 
+# ── 批 102b：OKX 数据源（0 密钥，公共行情；**prod 必须经代理出口**） ──
+
+class OkxDataSource(DataSource):
+    """OKX 公开数据源（批 102b）——**0 密钥**、只读公共行情（`www.okx.com/api/v5/market/*`）。
+
+    与 `okx_perp`（交易通道：api_key/api_secret/passphrase 下单/实时）**是两把键**：
+    `okx` = 拉数面（本类，公共端点本就无鉴权，故无凭证字段）；
+    `okx_perp` = 下单面（NON_DATA_PROVIDERS，批 63 既有桩）。混用会让 `_get_supply_adapter`
+    找不到 adapter 而静默回落 tushare 拉错源（与 binance / binance_perp 同族）。
+
+    🔴 **本源的真 gate 是「出口」不是「凭证」**（2026-10-06 实测）：prod 上 `www.okx.com`
+    被解析到 `169.254.0.2`（污染）⇒ 直连不可达；只有经代理出口（102a 的
+    `proxy_binding.consumer='okx'`）才通。故 `test_connection` **复用同一出口配置**做探测
+    ——若像 `binance` 那样裸直连探测，prod 上会把「配好代理即可用」误报成「不可用」，
+    把运维引向错误方向。
+
+    限速：IP 级 **20 req / 2s**（代理出口 IP 共享）——由 adapter 内滚动窗口
+    （`OkxAdapter._wait_slot`）表达，**不用 `DEFAULT_RATE_LIMITS` 间隔制**；
+    **刻意不接 `rate_limit_context`**（同 `BinanceDataSource`：`_get_rate_ds('okx')` 若回落
+    tushare 兜底源会把 OKX 的请求计进 tushare 的熔断器＝串源）。
+    """
+
+    provider = "okx"
+    DEFAULT_RATE_LIMITS: dict[str, float] = {}   # 窗口制在 adapter 内表达，非间隔制
+
+    def get_client(self):
+        """本源无 SDK 句柄——取数是 HTTP GET JSON（在 adapter 内完成）。
+
+        显式返回 None（而非编造假对象）：调用方要拉数应走 `adapter.fetch_supply`。
+        """
+        return None
+
+    def test_connection(self) -> bool:
+        """可达性探测：GET `public/instruments?instType=SWAP`，**经该消费方的出口配置**。
+
+        判据＝`code == '0'`（OKX 业务码；HTTP 200 也可能是错误体）。出口解析失败不抛——
+        回落直连再探（失败本身即诊断结果，端点须如实回 False 而非 500）。
+        """
+        import requests
+
+        from src.data_platform.proxy import proxies_map, resolve_proxy
+        try:
+            proxy = resolve_proxy(self.provider)
+        except Exception as e:                     # 表缺/DB 抖动 → 裸连探测（失败=结果）
+            logger.warning(f"OKX 出口配置解析失败，回落直连探测: {e}")
+            proxy = None
+        url = "https://www.okx.com/api/v5/public/instruments?instType=SWAP"
+        try:
+            resp = requests.get(url, timeout=10, proxies=proxies_map(proxy),
+                                headers={"User-Agent": "quant-data-sync/1.0"})
+            resp.raise_for_status()
+            return str(resp.json().get("code")) == "0"
+        except Exception as e:
+            logger.warning(f"OKX 连接测试失败: {e}")
+            return False
+
+
 # ── 注册表：provider -> DataSource 类（别人加数据源在此注册） ──
 
 _REGISTRY: dict[str, type[DataSource]] = {
     "tushare": TushareDataSource,
     "binance": BinanceDataSource,   # 批 101：加密永续日线（0 密钥批量历史）
     "joinquant": JoinQuantDataSource,  # 批 103b：聚宽 A 股历史切片（账号/密码，额度制）
+    "okx": OkxDataSource,   # 批 102b：OKX 永续日线（0 密钥公共行情，经代理出口）
 }
 
 # 兜底源声明（**单点真相**）：所有源都无实例可用时的回落目标。

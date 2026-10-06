@@ -1086,8 +1086,95 @@ chk "upgrade 渲染含两条幂等建表" "$(grep -c 'CREATE TABLE IF NOT EXISTS
 rm -rf "$tmp"
 }
 
+# ── 用例 S：0136 OKX 永续日线配置两行（纯 expand DML），2026-10-06 批 102b ──
+# 表前置与用例 M 同（0131 之后：sync_config 已有 supports_backfill/start_floor），故复用
+# fixture_crypto。0136 **零 DDL**（sync_config + sync_kind_config 各一行，仅 INSERT）。
+# 不建 proxy 表也能跑：本迁移不触代理表。
+# 本用例的价值：
+#   ① 两行**值级**：provider='okx'（第 2 个 crypto 数据源）/ trade_day_filter='none'（连续轴）/
+#      supports_backfill=true / data_type='crypto' / schedule='40 8 * * *'（与币安 30 8 错峰）
+#      + kind/sub_kind/pg_table；
+#   ② 🔴 **`start_floor` 必须 NULL**：币安行填 '2019-09-08' 是**已实证**上线日；OKX 最早可得日
+#      未验证（dev 出不到、prod 未实测）⇒ 按「只填已实证下界」的纪律留空。本断言是**反臆造钉**；
+#   ③ **多加密市场共存**：`okx_perp_daily` 与 `astock_daily` 的 kind/pg_table 一致性由本用例
+#      的 kind 断言覆盖（两者在此 fixture 中并存，同表 bar_1d）；
+#   ④ 幂等复跑 + 不覆盖运维编辑 + 降级对称回收、邻居不动。
+FROM_S=0135
+TO_S=0136
+
+case_s() {
+echo
+echo "########## 用例 S：0136 OKX 永续日线配置（值级 + 零下界 + 幂等 + 降级） ##########"
+reset_scratch
+fixture_crypto
+stamp "$FROM_S"
+
+# --- S1 upgrade ---
+step up "$TO_S" "S1 upgrade（插两行配置）"
+chk "sync_config 行值级（provider/过滤/可回补/类型/形态/cron）" \
+  "$(q "select provider||'/'||trade_day_filter||'/'||supports_backfill::text||'/'||data_type||'/'||sync_mode||'/'||schedule from sync_config where id='okx_perp_daily'")" \
+  "okx/none/true/crypto/incremental/40 8 * * *"
+chk "🔴 start_floor 必须 NULL（未实证，禁臆造下界）" \
+  "$(q "select coalesce(start_floor::text,'<NULL>') from sync_config where id='okx_perp_daily'")" "<NULL>"
+chk "sync_kind_config 归置行值级（复用 bar_daily/perp 子类）" \
+  "$(q "select kind||'/'||sub_kind||'/'||pg_table||'/'||rebuild from sync_kind_config where sync_id='okx_perp_daily'")" \
+  "bar_daily/perp/bar_1d/incremental"
+chk "sync_config 邻居行数不变（2 邻居 + 1 新 = 3）" "$(q "select count(*) from sync_config")" "3"
+chk "sync_kind_config 邻居行数不变（1 邻居 + 1 新 = 2）" "$(q "select count(*) from sync_kind_config")" "2"
+chk "astock_basic 的 start_floor 未被动" \
+  "$(q "select start_floor::text from sync_config where id='astock_basic'")" "1990-12-19"
+chk "astock_daily 的 supports_backfill 未被动" \
+  "$(q "select supports_backfill::text from sync_config where id='astock_daily'")" "true"
+
+# --- S2 幂等复跑（stamp 回 0135 再 upgrade：部署中断重跑场景） ---
+stamp "$FROM_S"
+step up "$TO_S" "S2 强制复跑（部署中断重跑场景）"
+chk "复跑后 okx 配置行仍恰 1 行" \
+  "$(q "select count(*) from sync_config where id='okx_perp_daily'")" "1"
+chk "复跑后 kind 归置行仍恰 1 行" \
+  "$(q "select count(*) from sync_kind_config where sync_id='okx_perp_daily'")" "1"
+
+# --- S3 幂等复跑 + 不覆盖运维编辑（真上产：upgrade 与界面改 schedule 并发） ---
+x "update sync_config set schedule='45 9 * * *', enabled=false where id='okx_perp_daily'"
+stamp "$FROM_S"
+step up "$TO_S" "S3 幂等复跑（运维已改该行）"
+chk "运维改过的 schedule 未被覆盖（ON CONFLICT DO NOTHING）" \
+  "$(q "select schedule from sync_config where id='okx_perp_daily'")" "45 9 * * *"
+chk "运维置的 enabled=false 未被翻回" \
+  "$(q "select enabled::text from sync_config where id='okx_perp_daily'")" "false"
+
+# --- S4 downgrade ---
+step down "$FROM_S" "S4 downgrade（回收两行）"
+chk "okx 配置行已回收" "$(q "select count(*) from sync_config where id='okx_perp_daily'")" "0"
+chk "kind 归置行已回收" "$(q "select count(*) from sync_kind_config where sync_id='okx_perp_daily'")" "0"
+chk "邻居行未被误删（sync_config）" "$(q "select count(*) from sync_config")" "2"
+chk "邻居行未被误删（sync_kind_config）" "$(q "select count(*) from sync_kind_config")" "1"
+}
+
+# ── 用例 T：0136 离线渲染完整性（不连库） ──
+case_t() {
+echo
+echo "########## 用例 T：0136 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_S:$TO_S" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_S:$FROM_S" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_S'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含版本回退" "$(grep -c "SET version_num='$FROM_S'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含两条幂等子句" "$(grep -c 'ON CONFLICT' "$tmp/up.sql")" "2"
+chk "upgrade 渲染含 okx_perp_daily（两行配置各一）" "$(grep -c 'okx_perp_daily' "$tmp/up.sql")" "2"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S） ##########"
 precheck
 case_a
 case_b
@@ -1107,4 +1194,6 @@ case_o
 case_p
 case_q
 case_r
+case_s
+case_t
 finish

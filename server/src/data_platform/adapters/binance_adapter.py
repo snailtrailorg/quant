@@ -64,10 +64,11 @@ _INTERVAL_BY_FREQ: dict[str, str] = {
 def _proxies(proxy: str | None) -> dict | None:
     """requests 的 `proxies` 参数；None ＝ 直连。
 
-    两路走**同一个 map**（形态统一，依赖面不同）：`http(s)://` 代理是 requests 原生；
-    `socks5h://`/`socks5://` 由 **PySocks** 提供传输层。
+    批 102b 收编：真源迁到 `data_platform/proxy.py::proxies_map`（okx 等新 adapter 直接用
+    那个）——本函数只留名字做薄转发，**不再自持一份 map 语义**（两处各写一遍必日后漂移）。
     """
-    return {"http": proxy, "https": proxy} if proxy else None
+    from src.data_platform.proxy import proxies_map
+    return proxies_map(proxy)
 
 
 def _get(url: str, timeout: int = _TIMEOUT, proxy: str | None = None) -> bytes | None:

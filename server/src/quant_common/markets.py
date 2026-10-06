@@ -89,6 +89,8 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     # 批 103b：聚宽 A 股历史切片——**独立 sync_id**，不占 `astock_daily` 的切换位
     # （试用窗口无最近 3 个月，不能当 astock_daily 的常规替代源；威廉姆 2026-10-06 裁定）
     "astock_daily_jq": "hist_quote",
+    # 批 102b：OKX 永续日线（公共行情 API，历史行情类）——第 2 个 crypto **数据源**
+    "okx_perp_daily": "hist_quote",
     # ref_data
     "astock_basic": "ref_data", "astock_list": "ref_data", "etf_list": "ref_data",
     "cb_basic": "ref_data", "stk_limit_sync": "ref_data", "moneyflow_sync": "ref_data",
@@ -122,6 +124,9 @@ PROVIDER_MARKET: dict[str, str] = {
     # 通道 `binance_perp`（NON_DATA_PROVIDERS，trading/rt_quote）**是两把键**：一个是拉数面、
     # 一个是下单面。混用会让 `_get_supply_adapter` 找不到 adapter 而静默回落 tushare 拉错源。
     "binance": "crypto",
+    # 批 102b：`okx` 数据源（公共行情 adapter，0 密钥）——同 binance 的「两把键」结构，
+    # 与交易通道 `okx_perp` 区分。**多加密市场共存**的验证载体。
+    "okx": "crypto",
 }
 
 # 批 83a 拆表立法（2026-09-29 用户裁定·抽象判据）：行的边界=账号，**域=表**。

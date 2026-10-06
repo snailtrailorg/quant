@@ -26,8 +26,8 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-# 真源字面量：真吃 backfill_from 的 20 项（与迁移 0131 的 seed 同源；批 101 加加密 1 项；
-# 批 103b 加聚宽 A 股日线 1 项；批 101b 加加密盘中 bar 3 项）
+# 真源字面量：真吃 backfill_from 的 21 项（与迁移 0131 的 seed 同源；批 101 加加密 1 项；
+# 批 103b 加聚宽 A 股日线 1 项；批 101b 加加密盘中 bar 3 项；批 102b 加 OKX 日线 1 项）
 BACKFILLABLE_EXPECTED = {
     # bar 族 6（_VIA_KIND_IDS）
     "astock_daily", "etf_daily", "cb_daily", "index_daily",
@@ -35,10 +35,11 @@ BACKFILLABLE_EXPECTED = {
     # tier1 批量 7（_TIER1_BATCH）
     "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
     "block_trade_sync", "cyq_perf_sync", "forecast_sync",
-    # 单表专项 8（astock_basic / trade_cal / 批 101 binance_perp_daily / 批 103b astock_daily_jq
-    #   / 批 101b binance_perp_{hourly,1min,15min}）
+    # 单表专项 9（astock_basic / trade_cal / 批 101 binance_perp_daily / 批 103b astock_daily_jq
+    #   / 批 101b binance_perp_{hourly,1min,15min} / 批 102b okx_perp_daily）
     "astock_basic", "trade_cal", "binance_perp_daily", "astock_daily_jq",
     "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
+    "okx_perp_daily",
 }
 # 必须**没有**回补入口的 9 项（静态清单 5 / 全量重建 2 / 池内 2）
 NOT_BACKFILLABLE_EXPECTED = {
@@ -73,7 +74,8 @@ class TestBackfillCapabilityTruth:
         # astock_daily_jq 经 _HANDLERS 直挂，与 astock_basic/trade_cal 同族）
         code_truth = (set(_VIA_KIND_IDS) | set(_TIER1_BATCH)
                       | {"astock_basic", "trade_cal", "binance_perp_daily", "astock_daily_jq",
-                         "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min"})
+                         "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
+                         "okx_perp_daily"})
         assert code_truth == BACKFILLABLE_EXPECTED, (
             f"代码真源漂移：多 {sorted(code_truth - BACKFILLABLE_EXPECTED)} / "
             f"少 {sorted(BACKFILLABLE_EXPECTED - code_truth)}")
@@ -105,6 +107,8 @@ class TestBackfillCapabilityTruth:
         批 101b 新增三条**存储闸门**下界（迁移 0134，`CURRENT_DATE-N` 相对量）：
         hourly＝执行日前推 7 天、1min/15min＝前推 1 天——「功能验证档」的有界占用上限，
         不是上游能力边界（上游有全史，是磁盘没到）。故此处只钉「非 NULL」，值随迁移执行日变。
+        批 102b 的 `okx_perp_daily` **故意 NULL**（OKX 最早可得日未实证，禁臆造）——它恰好
+        同时是本钉的**反证面**：若有人给它填个猜的下界，本集合会多出键 ⇒ 红。
         """
         rows = dict(_q("SELECT id, start_floor FROM sync_config"))
         assert str(rows["astock_basic"]) == "1990-12-19"
