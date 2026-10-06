@@ -110,7 +110,9 @@ class TestRegistration:
     def test_capabilities_are_sync_id_level(self):
         """`capabilities`=sync_id 集合（供 `_validate_provider` 查表），不含 trading/rt_quote。"""
         caps = BC.BinanceAdapter.capabilities
-        assert caps == {"binance_perp_daily"}
+        # 批 101b：同族三条（hourly/1min/15min）并入本 adapter
+        assert caps == {"binance_perp_daily", "binance_perp_hourly",
+                        "binance_perp_1min", "binance_perp_15min"}
         assert "rt_quote" not in caps, "批量站是 T+1 静态文件，虚报实时＝把实盘决策路由到无实时能力的源"
 
 
@@ -409,11 +411,23 @@ class TestFetchSupply:
         with pytest.raises(UnsupportedFeature):
             ad.fetch_supply("bar_daily", "stock")          # 非本端口域
         with pytest.raises(UnsupportedFeature):
-            ad.fetch_supply("bar_minute", "perp")          # 分钟线留批 101b
+            # 批 101b：分钟域已实现，但**必须给 freq**——缺 freq 会落到 pull_minute 的严格校验
+            # （不是靠"该域未实现"兜底了；真正的域外 kind 见下行）
+            ad.fetch_supply("bar_minute", "perp")
+        with pytest.raises(UnsupportedFeature):
+            ad.fetch_supply("bar_minute", "stock")         # 域外 sub_kind
 
     def test_pull_minute_marker(self):
-        with pytest.raises(NotImplementedError):
-            BC.BinanceAdapter().pull_minute("BTCUSDT", "1h", "20240101", "20240105")
+        """批 101b 反转：`pull_minute` 不再是 NotImplementedError 占位，而是真实现。
+
+        旧的「stub 必抛」钉改写成**真实现诚实性钉**：日粒度仍必须响亮拒绝（走 pull_daily），
+        而小时粒度必须真的投递到批量站（此处只验不抛；形状/URL 由 101b 专属测试守）。
+        """
+        from src.data_platform.adapters.base import UnsupportedFeature
+        with pytest.raises(UnsupportedFeature):
+            BC.BinanceAdapter().pull_minute("BTCUSDT", "1D", "20240101", "20240105")
+        with pytest.raises(UnsupportedFeature):
+            BC.BinanceAdapter().pull_minute("BTCUSDT", "15m", "20240101", "20240105")
 
 
 # ---------------------------------------------------------------------------
@@ -446,9 +460,13 @@ class TestCryptoWindow:
         assert s == date(2024, 1, 2)
 
     def test_first_run_30_day_window(self):
+        """首跑窗口＝30 天（**含端点**，批 101b 起统一用 first_run_days 语义）。"""
         from src.data_sync.engine import _crypto_window
         s, e = _crypto_window({"last_sync_date": None}, "20240131", None)
-        assert s == e - timedelta(days=30)
+        assert s == e - timedelta(days=29)
+        # 显式传参同语义（handler 工厂按 sync_id 给值）
+        s2, _e2 = _crypto_window({"last_sync_date": None}, "20240131", None, 7)
+        assert s2 == date(2024, 1, 25)
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +514,9 @@ class TestHandler:
         assert r["saved"] == 4, "save_bars 被调 2 次、每次 mock 返回 2"
         assert sb.call_count == 2 and so.call_count == 0     # 增量走 save_bars
         assert r["failed_dates"] == []
-        assert r["cursor_upto"] == "20240131", "游标上界＝窗口上界（≤ end_date，绝不推到今天）"
+        # 批 101b 修正：游标＝**实际取到数据的最后一日**（假行 ts=2024-01-02），不是窗口上界。
+        # 原口径（=窗口上界 20240131）与批量站发布滞后叠加会吃日成洞，见 _make_binance_bar_handler。
+        assert r["cursor_upto"] == "20240102", "游标必须落在真取到数据的那一日"
         assert r["start"] == "20240102"                       # last_sync_date 20240101 + 1
 
     def test_backfill_uses_overwrite(self):

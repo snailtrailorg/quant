@@ -82,6 +82,10 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "index_daily": "hist_quote", "astock_minute": "hist_quote", "astock_minute_5min": "hist_quote",
     # 批 101：加密永续日线（币安批量历史，历史行情类）
     "binance_perp_daily": "hist_quote",
+    # 批 101b：同族盘中 bar（小时/1min/15min）——同属历史行情（批量站 T+1 日频发布）
+    "binance_perp_hourly": "hist_quote",
+    "binance_perp_1min": "hist_quote",
+    "binance_perp_15min": "hist_quote",
     # 批 103b：聚宽 A 股历史切片——**独立 sync_id**，不占 `astock_daily` 的切换位
     # （试用窗口无最近 3 个月，不能当 astock_daily 的常规替代源；威廉姆 2026-10-06 裁定）
     "astock_daily_jq": "hist_quote",

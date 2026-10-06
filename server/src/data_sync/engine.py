@@ -910,11 +910,21 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
 #    `_get_rate_ds("binance")` 无 DataSource 会回落 tushare 兜底源并告警「串源风险」（把币安下载
 #    计进 tushare 的熔断器是错的）；礼貌性由 adapter 内 ≤8 并发表达。
 
-def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None) -> tuple[date, date]:
+def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None,
+                   first_run_days: int = 30) -> tuple[date, date]:
     """定窗口 [start, end]（含）。crypto = 连续轴；**T+1 上界＝UTC 昨日**。
 
     `data.binance.vision` 实测：UTC 当日文件 404、前一日 200 ⇒ 上界必须是昨日，
     否则每轮都把「尚未落盘的今天」记成失败日，游标永不动。
+
+    ⚠️ **上界「昨日」不等于「昨日已发布」**（批 101b 复核）：实测北京时间 10:46（UTC 02:46）
+    时 `2026-10-05` 在全部 interval 上仍 404，最新只到 `2026-10-04`（＝UTC 昨日再减一天）。
+    08:30 北京（00:30 UTC）的调度只会更早 ⇒ **窗口末日通常在批量站尚未发布**。
+    这不是本函数的错（上界必须 ≥ 昨日才不漏），而是**游标侧的契约**：见
+    `_make_binance_bar_handler` 里「游标＝实际取到数据的最后一日」那段。
+
+    `first_run_days`＝**首跑窗口天数**（无游标时），逐 sync_id 由 `_BINANCE_BAR_SPECS` 给
+    （日线 30 / 小时 7 / 1min·15min 1）——即「功能验证档」的初始载入量。
     """
     from datetime import datetime as _dt, timedelta as _td, timezone as _tz
 
@@ -926,57 +936,113 @@ def _crypto_window(cfg: dict, end_date: str, backfill_from: str | None) -> tuple
         start = _d(backfill_from)                        # 回补显式起点（sync() 保证不推游标）
     else:
         last = cfg.get("last_sync_date")
-        # 首跑给 30 天窗口（对齐 _sync_via_kind 默认 30 天）；全量历史走 backfill_from
-        start = _d(last) + _td(days=1) if last else end - _td(days=30)
+        # 首跑给 first_run_days 天（含 end）；全量历史走 backfill_from
+        start = _d(last) + _td(days=1) if last else end - _td(days=first_run_days - 1)
     return start, end
 
 
-def _sync_binance_perp_daily(cfg: dict, end_date: str, backfill_from: str | None = None,
-                            progress_cb: Callable | None = None) -> dict:
-    """币安 USDT-M 永续日线 → `bar_1d`（`symbol='BTCUSDT.BINANCE'`、`source='binance'`）。
+# sync_id → (kind, sub_kind, freq, 首跑窗口天数)
+#   kind/sub_kind = `fetch_supply` 分派键（与 sync_kind_config 归置行**必须一致**，由
+#     tests/test_batch101b_* 的真库对账钉守——代码是声明面，DB 行不是第二真源）
+#   freq = 内部 K 线频率；**同时是 `bar_{freq.lower()}` 表名后缀**（db.save_bars 的
+#     insert 模板即如此），故 pg_table 不需要在代码里再写一遍
+#   首跑窗口天数：日线 30（对齐 _sync_via_kind 默认）/ 小时 7 / 1min·15min 1
+#     —— 「功能验证档」的初始载入量（批 101b §二）；扩盘后走 UI 回补入口放宽
+_BINANCE_BAR_SPECS: dict[str, tuple[str, str, str, int]] = {
+    "binance_perp_daily": ("bar_daily", "perp", "1D", 30),
+    "binance_perp_hourly": ("bar_minute", "perp", "1h", 7),
+    "binance_perp_1min": ("bar_minute", "perp", "1min", 1),
+    "binance_perp_15min": ("bar_minute", "perp", "15min", 1),
+}
 
-    返回 `cursor_upto`（＝窗口上界 ≤ end_date）：`sync()` 对无 `last_success_date` 的 handler
-    用该键推游标——不给会按 end_date（＝今天）推，而今天的数据尚未落盘 ⇒ 次日
-    start=今天+1 > end=昨天 ⇒ **永久空跑**。
+# 「整个窗口都落在批量站未发布尾区」的容忍天数（见 handler 内 0 行判定）
+_BINANCE_TAIL_GRACE = 2
+
+
+def _make_binance_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
+                              first_run_days: int):
+    """工厂：币安永续 bar 族 handler（日线 / 小时 / 1min / 15min 共一条实现，批 101b 泛化）。
+
+    **游标契约（批 101b 修正，勿回退）**：`cursor_upto` ＝ **实际取到数据的最后一日**，
+    而不是窗口上界。原实现取窗口上界（`end_s`），与批量站的发布滞后叠加后**必然吃日成洞**：
+
+      08:30 北京 = 00:30 UTC 跑 ⇒ `end = min(end_date, UTC 昨日)` = D-1；但实测 D-1 的文件
+      此刻**还没发布**（2026-10-06 02:46 UTC 复核：10-05 在全部 interval 上仍 404）。
+      于是该轮 D-1 取到 0 行，而游标仍被推到 D-1 ⇒ 下一轮 `start = D-1+1 = D`
+      ⇒ **D-1 永不重试**（静默数据洞，且 sync_log 记 success）。
+
+    取「实际取到数据的最后一日」后：D-1 未发布 ⇒ 游标停在 D-2 ⇒ 下一轮 `start = D-1`
+    自动重试；一旦发布即补齐。稳态落后 1 天，**零洞**。
+
+    **0 行不是必然故障**：窗口整段落进「未发布尾区」（`UTC今日 - start ≤ _BINANCE_TAIL_GRACE`）
+    时，0 行是**正常等待**——标 `log_status='skipped'` 而非 `failed`（否则每次调度都刷一条
+    假告警，真故障会被淹没）。窗口更长却 0 行＝真异常，照旧进 `failed_dates`。
     """
-    from src.data_platform.db import save_bars, save_bars_overwrite
-    adapter = _get_supply_adapter(cfg)
-    start, end = _crypto_window(cfg, end_date, backfill_from)
-    start_s, end_s = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
-    if start > end:
-        return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
-                "expected_days": 0, "actual_days": 0, "cursor_upto": end_s}
+    def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
+                 progress_cb: Callable | None = None) -> dict:
+        from datetime import datetime, timezone
 
-    syms = adapter.list_symbols()
-    if not syms:
-        # 符号枚举失败必须**响亮**：静默返回 0 行会让 sync() 记 success 并推进游标
-        # （＝把整段窗口的数据洞掩埋）。raise 走 sync() 的 except → error + 游标不动 + 告警。
-        raise RuntimeError("binance 符号枚举为空（S3 list 不可达或返回异常）")
-    total = len(syms)
-    pulled = saved = 0
-    failed: list[str] = []
-    # 回补用 overwrite：本地可能已存不完整/旧值，手动回补优先级最高（同 db.save_bars_overwrite 立法）
-    write = save_bars_overwrite if backfill_from else save_bars
-    for i, sym in enumerate(syms, 1):
-        try:
-            df = adapter.fetch_supply("bar_daily", "perp", symbol=sym, start=start_s, end=end_s)
-            if df is not None and not df.empty:
-                rows = adapter.to_bar_rows(df, "1D")
-                if rows:
-                    pulled += len(rows)
-                    saved += write("1D", rows)
-        except Exception as e:
-            failed.append(f"{sym}:{type(e).__name__}:{str(e)[:40]}")
-        if progress_cb:
-            progress_cb(i, total, sym)
-    if pulled == 0:
-        # 「全窗口 0 行」非正常态（T+1 窗口内每个在市合约都该有数据）——显式记账，勿静默成功
-        failed.append("no_rows:窗口内 0 行（上游不可达 / T+1 未落盘 / 窗口压空）")
-    logger.info("binance_perp_daily %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d",
-                start_s, end_s, total, pulled, saved, len(failed))
-    return {"pulled": pulled, "saved": saved, "start": start_s,
-            "failed_dates": failed, "expected_days": None,
-            "actual_days": total - len(failed), "cursor_upto": end_s}
+        from src.data_platform.db import save_bars, save_bars_overwrite
+        adapter = _get_supply_adapter(cfg)
+        start, end = _crypto_window(cfg, end_date, backfill_from, first_run_days)
+        start_s, end_s = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+        if start > end:
+            return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
+                    "expected_days": 0, "actual_days": 0, "cursor_upto": end_s}
+
+        syms = adapter.list_symbols()
+        if not syms:
+            # 符号枚举失败必须**响亮**：静默返回 0 行会让 sync() 记 success 并推进游标
+            # （＝把整段窗口的数据洞掩埋）。raise 走 sync() 的 except → error + 游标不动 + 告警。
+            raise RuntimeError("binance 符号枚举为空（S3 list 不可达或返回异常）")
+        total = len(syms)
+        pulled = saved = 0
+        failed: list[str] = []
+        reached = ""      # 实际取到数据的最后一日（游标真值，见上方契约）
+        # 回补用 overwrite：本地可能已存不完整/旧值，手动回补优先级最高（同 db.save_bars_overwrite 立法）
+        write = save_bars_overwrite if backfill_from else save_bars
+        for i, sym in enumerate(syms, 1):
+            try:
+                df = adapter.fetch_supply(kind, sub_kind, symbol=sym,
+                                          start=start_s, end=end_s, freq=freq)
+                if df is not None and not df.empty:
+                    rows = adapter.to_bar_rows(df, freq)
+                    if rows:
+                        pulled += len(rows)
+                        saved += write(freq, rows)
+                        day = max(r[2] for r in rows)      # r[2]=ts（UTC aware）
+                        ds = day.strftime("%Y%m%d")
+                        if ds > reached:
+                            reached = ds
+            except Exception as e:
+                failed.append(f"{sym}:{type(e).__name__}:{str(e)[:40]}")
+            if progress_cb:
+                progress_cb(i, total, sym)
+        cursor = reached or (start - timedelta(days=1)).strftime("%Y%m%d")
+        log_status = None
+        if pulled == 0 and not failed:
+            if (datetime.now(timezone.utc).date() - start).days <= _BINANCE_TAIL_GRACE:
+                log_status = "skipped"    # 整窗未发布＝正常等待（上游 T+1 滞后），非故障
+            else:
+                # 「全窗口 0 行」但窗口足够长 ⇒ 异常态（上游不可达 / 路径变更）——勿静默成功
+                failed.append("no_rows:窗口内 0 行（上游不可达 / T+1 未落盘 / 窗口压空）")
+        logger.info("binance %s %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d（游标 %s）",
+                    sync_id, start_s, end_s, total, pulled, saved, len(failed), cursor)
+        out = {"pulled": pulled, "saved": saved, "start": start_s,
+               "failed_dates": failed, "expected_days": None,
+               "actual_days": total - len(failed), "cursor_upto": cursor}
+        if log_status:
+            out["log_status"] = log_status
+        return out
+
+    _handler.__name__ = f"_sync_{sync_id}"
+    return _handler
+
+
+_sync_binance_perp_daily = _make_binance_bar_handler("binance_perp_daily", *_BINANCE_BAR_SPECS["binance_perp_daily"])
+_sync_binance_perp_hourly = _make_binance_bar_handler("binance_perp_hourly", *_BINANCE_BAR_SPECS["binance_perp_hourly"])
+_sync_binance_perp_1min = _make_binance_bar_handler("binance_perp_1min", *_BINANCE_BAR_SPECS["binance_perp_1min"])
+_sync_binance_perp_15min = _make_binance_bar_handler("binance_perp_15min", *_BINANCE_BAR_SPECS["binance_perp_15min"])
 
 
 # ── 批 103b：聚宽 A 股日线（窗口动态取 + 行预算 + 按交易日分片） ──
@@ -1108,6 +1174,11 @@ _HANDLERS = {
     # 批 101：加密数据层第一步（原 beat `data-increment-crypto` 收编——原实现是
     # 「每 15min 被唤醒、永远 return skipped」的死构件，现真落地为币安永续 T+1 日线）
     "binance_perp_daily": _sync_binance_perp_daily,
+    # 批 101b：同族三条（小时/1min/15min）——同一工厂产出，仅 (kind, freq, 首跑窗口) 不同；
+    # 落表由 `bar_{freq.lower()}` 决定（bar_1h / bar_1min / bar_15min）
+    "binance_perp_hourly": _sync_binance_perp_hourly,
+    "binance_perp_1min": _sync_binance_perp_1min,
+    "binance_perp_15min": _sync_binance_perp_15min,
     # 批 103b：聚宽 A 股历史切片（独立 sync_id——窗口无最近 3 个月，不占 astock_daily 切换位）
     "astock_daily_jq": _sync_astock_daily_jq,
 }

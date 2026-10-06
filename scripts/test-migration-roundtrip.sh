@@ -919,8 +919,92 @@ chk "upgrade 渲染含 binance_perp_daily（两行配置各一）" "$(grep -c 'b
 rm -rf "$tmp"
 }
 
+# ── 用例 O：0134 币安永续盘中 bar 配置三行（纯 expand DML），2026-10-06 批 101b ──
+# 表前置与用例 M 同（0131 之后：sync_config 已有 supports_backfill/start_floor），故复用
+# fixture_crypto。0134 **零 DDL**（sync_config×3 + sync_kind_config×3，仅 INSERT）。
+# 本用例的价值：
+#   ① 三行**值级**：provider/data_type/sync_mode/trade_day_filter/supports_backfill +
+#      kind='bar_minute'/sub_kind='perp' + pg_table=bar_1h/bar_1min/bar_15min 一一对应；
+#   ② 🔴 `schedule='manual'`＝**存储闸门**（不是笔误）：批量站日频发布 + 1min≈450MB/天
+#      ⇒ cron 化＝无界增长，prod 8.3G 可用约 18 天打满。断言值级钉死，防"顺手改回 cron"；
+#   ③ `start_floor` 是**执行日相对量**（hourly 前推 7 天 / 1min·15min 前推 1 天）⇒ 断言
+#      用 (CURRENT_DATE - start_floor) 差值，别硬编码日期（跨日跑会假红）；
+#   ④ 幂等复跑 + 不覆盖运维编辑（on conflict do nothing）+ 降级对称回收三行、邻居不动。
+FROM_O=0133
+TO_O=0134
+
+case_o() {
+echo
+echo "########## 用例 O：0134 币安永续盘中 bar 配置（值级 + 相对下界 + 幂等 + 降级） ##########"
+reset_scratch
+fixture_crypto
+stamp "$FROM_O"
+
+# --- O1 upgrade ---
+step up "$TO_O" "O1 upgrade（插三行配置）"
+chk "hourly 行值级（provider/manual 闸门/连续轴/可回补/类型/形态）" \
+  "$(q "select provider||'/'||schedule||'/'||trade_day_filter||'/'||supports_backfill::text||'/'||data_type||'/'||sync_mode from sync_config where id='binance_perp_hourly'")" \
+  "binance/manual/none/true/crypto/incremental"
+chk "hourly 下界＝执行日前推 7 天（相对量）" \
+  "$(q "select (CURRENT_DATE - start_floor) from sync_config where id='binance_perp_hourly'")" "7"
+chk "1min/15min 下界＝执行日前推 1 天（两行）" \
+  "$(q "select count(*) from sync_config where id in ('binance_perp_1min','binance_perp_15min') and (CURRENT_DATE - start_floor)=1")" "2"
+chk "三行归置 kind/sub_kind 一致（bar_minute/perp）" \
+  "$(q "select count(*) from sync_kind_config where sync_id like 'binance_perp_%' and kind='bar_minute' and sub_kind='perp'")" "3"
+chk "pg_table 三表各一（bar_1h/bar_1min/bar_15min）" \
+  "$(q "select string_agg(pg_table,',' order by pg_table) from sync_kind_config where sync_id like 'binance_perp_%'")" "bar_15min,bar_1h,bar_1min"
+chk "sync_config 邻居未被增删（2 邻居 + 3 新 = 5）" "$(q "select count(*) from sync_config")" "5"
+chk "sync_kind_config 邻居未被增删（1 邻居 + 3 新 = 4）" "$(q "select count(*) from sync_kind_config")" "4"
+chk "astock_basic 的 start_floor 未被动" \
+  "$(q "select start_floor::text from sync_config where id='astock_basic'")" "1990-12-19"
+
+# --- O2 幂等复跑 ---
+stamp "$FROM_O"
+step up "$TO_O" "O2 强制复跑（部署中断重跑场景）"
+chk "复跑后三行仍恰 3 行" "$(q "select count(*) from sync_config where id like 'binance_perp_%'")" "3"
+chk "复跑后归置行仍恰 3 行" "$(q "select count(*) from sync_kind_config where sync_id like 'binance_perp_%'")" "3"
+
+# --- O3 幂等复跑 + 不覆盖运维编辑（运维把 1min 改 cron 并停用） ---
+x "update sync_config set schedule='30 8 * * *', enabled=false where id='binance_perp_1min'"
+stamp "$FROM_O"
+step up "$TO_O" "O3 幂等复跑（运维已改 1min 行）"
+chk "运维改过的 schedule 未被覆盖（ON CONFLICT DO NOTHING）" \
+  "$(q "select schedule from sync_config where id='binance_perp_1min'")" "30 8 * * *"
+chk "运维置的 enabled=false 未被翻回" \
+  "$(q "select enabled::text from sync_config where id='binance_perp_1min'")" "false"
+
+# --- O4 downgrade ---
+step down "$FROM_O" "O4 downgrade（回收三行）"
+chk "三行配置已回收" "$(q "select count(*) from sync_config where id like 'binance_perp_%'")" "0"
+chk "三行归置行已回收" "$(q "select count(*) from sync_kind_config where sync_id like 'binance_perp_%'")" "0"
+chk "邻居行未被误删（sync_config）" "$(q "select count(*) from sync_config")" "2"
+chk "邻居行未被误删（sync_kind_config）" "$(q "select count(*) from sync_kind_config")" "1"
+}
+
+# ── 用例 P：0134 离线渲染完整性（不连库） ──
+case_p() {
+echo
+echo "########## 用例 P：0134 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_O:$TO_O" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_O:$FROM_O" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染未被截断（含版本推进）" "$(grep -c "SET version_num='$TO_O'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染未被截断（含版本回退）" "$(grep -c "SET version_num='$FROM_O'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含三条 sync_config 幂等子句" "$(grep -c 'ON CONFLICT (id) DO NOTHING' "$tmp/up.sql")" "3"
+chk "upgrade 渲染含三条 sync_kind_config 幂等子句" "$(grep -c 'ON CONFLICT (sync_id) DO NOTHING' "$tmp/up.sql")" "3"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O） ##########"
 precheck
 case_a
 case_b
@@ -936,4 +1020,6 @@ case_k
 case_l
 case_m
 case_n
+case_o
+case_p
 finish

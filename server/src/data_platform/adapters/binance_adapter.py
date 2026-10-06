@@ -48,8 +48,18 @@ _COLS = ["open_time", "open", "high", "low", "close", "volume", "close_time",
          "quote_volume", "count", "taker_buy_volume", "taker_buy_quote_volume", "ignore"]
 
 _MONTHLY_FROM = (2020, 1)                    # 实测：月包自 2020-01（2019-09/10 → 404）
-_FLOOR_DATE = date(2020, 1, 1)               # 月包 floor 的 date 形态（pull_daily 省流阀的边界判据）
+_FLOOR_DATE = date(2020, 1, 1)               # 月包 floor 的 date 形态（_pull 省流阀的边界判据）
 _DELIVERY_RE = re.compile(r"_[0-9]{6}$")     # BTCUSDT_210129 = 交割合约（非永续，排除）
+
+# 内部 freq → 批量站 interval 目录名（**映射真源**；`to_source_freq` 暴露给契约层）。
+# freq 同时是 `bar_{freq.lower()}` 表名后缀（db.save_bars 的 insert 模板即如此）——
+# 故 '1D'→bar_1D / '1h'→bar_1h / '1min'→bar_1min / '15min'→bar_15min 一一对应（PG 折叠大小写）。
+_INTERVAL_BY_FREQ: dict[str, str] = {
+    "1D": "1d", "1d": "1d",
+    "1h": "1h", "1H": "1h",
+    "1min": "1m",
+    "15min": "15m",
+}
 
 
 def _get(url: str, timeout: int = _TIMEOUT) -> bytes | None:
@@ -121,11 +131,20 @@ class BinanceAdapter(BaseDataAdapter):
     """币安 USDⓈ-M 永续公开数据（批量历史；非实时）。"""
 
     provider = "binance"
-    # 供给项（sync_id）：本 adapter 只服务加密永续日线（批 101）
-    capabilities = {"binance_perp_daily"}
-    # 契约层能力声明（粒度＝kind）——只声明**真实现**的能力：bar_daily（historical，crypto 全域）。
-    # bar_daily 非聚合域 ⇒ sub_kinds 必须为空（contract.validate_capability_decls 硬约束）。
-    capability_decls = [CapabilityDecl("bar_daily", "historical", CRYPTO_ALL)]
+    # 供给项（sync_id）：币安永续公开数据——日线（批 101）+ 小时/1min/15min（批 101b）
+    capabilities = {"binance_perp_daily", "binance_perp_hourly",
+                    "binance_perp_1min", "binance_perp_15min"}
+    # 契约层能力声明（粒度＝kind）——只声明**真实现**的能力：crypto 全域的日线 + 盘中 bar。
+    # ⚠️ 盘中 bar 三种粒度（1h/1min/15min）**都归 `bar_minute`**：27 词 DataKind 立法里
+    # **没有 hour 粒度词**，而 `bar_minute` 的合法时态含 historical（盘中 K 线族）。
+    # 加新 DataKind 是立法动作（contract 27 词 + KIND_CAP_CLASS + 三条钉），本批不做——
+    # 故 1h 在 kind 维**名义收窄**为 bar_minute，落表靠 `sync_kind_config.pg_table` 区分
+    # （bar_1h / bar_1min / bar_15min，与 freq 互为大小写同形）。
+    # 非聚合域 ⇒ sub_kinds 必须为空（contract.validate_capability_decls 硬约束）。
+    capability_decls = [
+        CapabilityDecl("bar_daily", "historical", CRYPTO_ALL),
+        CapabilityDecl("bar_minute", "historical", CRYPTO_ALL),
+    ]
 
     def __init__(self):
         self._symbols: list[str] | None = None
@@ -189,10 +208,11 @@ class BinanceAdapter(BaseDataAdapter):
 
     # ——— 拉取 ———
 
-    def pull_daily(self, symbol: str, start: str, end: str, adj=None, kind: str = "crypto") -> pd.DataFrame:
-        """per-symbol 日线（symbol 可带/不带 `.BINANCE`；start/end = 'YYYYMMDD'）。
+    def _pull(self, sym: str, interval: str, start: str, end: str) -> pd.DataFrame:
+        """区间拉取（interval = `1d`/`1h`/`1m`/`15m`；start/end = 'YYYYMMDD'）。
 
         长区间（>90 天）先探测最早**月包**，把起点抬到有数据处——省掉成片 404 空跑。
+        月包探测统一用 `1d` 月包（最便宜，且各 interval 的上线月相同——同一合约同刻上市）。
 
         ⚠️ **省流阀不得裁掉 pre-floor 日包区间**：月包自 `_MONTHLY_FROM` 起，而日包更早
         （`start_floor='2019-09-08'` 的 USDT-M 上线日就在月包 floor 之前）。若无条件
@@ -200,7 +220,6 @@ class BinanceAdapter(BaseDataAdapter):
         2019-09~2019-12 的逐日历史**（且 config 里声明的 start_floor 变成谎言）。
         故：仅当请求起点已 ≥ floor、或探到的月包起点**晚于** floor（＝该符号上线晚）时才上抬。
         """
-        sym = str(symbol).split(".")[0]
         s, e = _to_date(start), _to_date(end)
         if s > e:
             return pd.DataFrame()
@@ -220,7 +239,7 @@ class BinanceAdapter(BaseDataAdapter):
         keys = _period_keys(s, e)
         frames: list[pd.DataFrame] = []
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
-            for blob in ex.map(lambda pk: _get(_kline_url(sym, "1d", pk[0], pk[1])), keys):
+            for blob in ex.map(lambda pk: _get(_kline_url(sym, interval, pk[0], pk[1])), keys):
                 if blob:
                     frames.append(_parse_kline_csv(blob))
         if not frames:
@@ -229,9 +248,31 @@ class BinanceAdapter(BaseDataAdapter):
         df["binance_symbol"] = sym
         return df.drop_duplicates(subset=["open_time"]).sort_values("open_time").reset_index(drop=True)
 
+    def pull_daily(self, symbol: str, start: str, end: str, adj=None, kind: str = "crypto") -> pd.DataFrame:
+        """per-symbol 日线（symbol 可带/不带 `.BINANCE`；start/end = 'YYYYMMDD'）。"""
+        return self._pull(str(symbol).split(".")[0], "1d", start, end)
+
     def pull_minute(self, symbol: str, freq: str, start: str, end: str) -> pd.DataFrame:
-        """分钟线留批 101b（同 adapter，仅加 interval 映射与 freq→表映射）。"""
-        raise NotImplementedError("BinanceAdapter.pull_minute 未实现（批 101b）")
+        """per-symbol 分钟/小时线（批 101b）：freq（内部 `1min`/`15min`/`1h`）→ interval。
+
+        - 只认**内部 freq**：不支持/未映射/日粒度（走 `pull_daily`）/源 interval 名（如 `15m`）
+          一律 `UnsupportedFeature`（**响亮**，不是空帧——空帧会被上游当「该窗口无数据」
+          静默记账；而放行 `15m` 会让 `to_bar_rows` 把 `15m` 当 freq 写进列、`bar_15m`
+          表也不存在，等于把调用方 bug 变成脏数据）。
+        - start/end 容忍 `'YYYYMMDD HH:MM:SS'` 形态（基类分钟契约如此；本源只需日期）——
+          取空格前段，避免调用方被迫改写。
+        - 文件 404（未发布/该日无包）→ 空帧，**不是异常**（T+1 滞后是常态，见模块 docstring）。
+        """
+        if freq not in _INTERVAL_BY_FREQ or _INTERVAL_BY_FREQ[freq] == "1d":
+            raise UnsupportedFeature(
+                f"binance pull_minute 不支持 freq={freq!r}（支持 {sorted(_INTERVAL_BY_FREQ)}）")
+        interval = _INTERVAL_BY_FREQ[freq]
+        return self._pull(str(symbol).split(".")[0], interval,
+                          str(start).split(" ")[0], str(end).split(" ")[0])
+
+    def to_source_freq(self, freq: str) -> str:
+        """内部 freq → 源 interval 目录名（`1min`→`1m`）。未映射直通（由调用方判合法性）。"""
+        return _INTERVAL_BY_FREQ.get(freq, freq)
 
     def to_bar_rows(self, df: pd.DataFrame, freq: str, adj_map: dict | None = None) -> list[tuple]:
         """→ 统一 11 字段 (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)。
@@ -260,14 +301,19 @@ class BinanceAdapter(BaseDataAdapter):
         return rows
 
     def fetch_supply(self, kind: str, sub_kind: str | None = None, **params) -> pd.DataFrame:
-        """批 100 供给端口：`('bar_daily', 'perp')` → 逐标的区间批量拉取（源原生 DataFrame）。
+        """批 100 供给端口：`('bar_daily'|'bar_minute', 'perp')` → 逐标的区间批量拉取（源原生 DataFrame）。
 
-        参数：`symbol`（源符号，可带 .BINANCE）/ `start` / `end`（'YYYYMMDD'）。
-        本 adapter 的 `capabilities` 是 sync_id 级（binance_perp_daily），端口这里按 kind 分派，
+        参数：`symbol`（源符号，可带 .BINANCE）/ `start` / `end`（'YYYYMMDD'）；
+        `bar_minute` 另收 `freq`（内部 freq，`1min`/`15min`/`1h`——由本 adapter 映射到 interval，
+        引擎不持有源 interval 词表）。
+        本 adapter 的 `capabilities` 是 sync_id 级（binance_perp_*），端口这里按 kind 分派，
         与 tushare 侧同构——证明批 100 的端口**与 provider 无关**。
         """
         if kind == "bar_daily" and sub_kind in (None, "perp"):
             return self.pull_daily(params.get("symbol", ""),
                                    params.get("start", ""), params.get("end", ""))
+        if kind == "bar_minute" and sub_kind in (None, "perp"):
+            return self.pull_minute(params.get("symbol", ""), params.get("freq", ""),
+                                    params.get("start", ""), params.get("end", ""))
         raise UnsupportedFeature(
             f"binance 未实现 fetch_supply(kind={kind}, sub_kind={sub_kind})")
