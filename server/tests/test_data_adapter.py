@@ -6,7 +6,8 @@ import pandas as pd
 import pytest
 
 from src.data_platform.adapters.base import (
-    TushareAdapter, JoinQuantAdapter, get_adapter, UnsupportedFeature)
+    TushareAdapter, get_adapter, UnsupportedFeature)
+from src.data_platform.adapters.joinquant_adapter import JoinQuantAdapter   # 批 103b：迁出 base.py
 
 
 def _daily_df():
@@ -81,11 +82,31 @@ def test_get_adapter_routes():
         get_adapter("unknown_provider")
 
 
-def test_stub_raises_not_implemented():
-    """stub 不接真源：方法抛 NotImplementedError，证明接口能接。"""
+def test_joinquant_real_impl_honesty():
+    """批 103b 真接后：`JoinQuantAdapter` **不是** stub——接口形态从「抛 NotImplementedError」
+    改为「真取数（缺凭证响亮抛 ProviderConfigError）＋明确不支持项抛 UnsupportedFeature」。
+
+    证的是「接口能接且不谎报」：日线路径可调用（此处以缺凭证的响亮失败为界，不做真网络请求），
+    分钟线路径显式 UnsupportedFeature（不静默返回空＝假成功）。
+    """
+    from src.quant_common.contract import ProviderConfigError
+    from src.data_platform.data_source import get_data_source
     jq = JoinQuantAdapter()
-    with pytest.raises(NotImplementedError):
-        jq.pull_daily("000001.XSHE", "20260101", "20260105")
+    # 日线：缺凭证必须**响亮**抛 ProviderConfigError（静默回落 tushare＝串源）；
+    # 若抛 NotImplementedError 则说明真接被撤回——那时的能力声明必须同步撤回。
+    try:
+        jq.pull_daily("000001.SZSE", "20260601", "20260602")
+        raise AssertionError("缺凭证时 pull_daily 未响亮失败")
+    except ProviderConfigError:
+        pass
+    except NotImplementedError as e:                     # pragma: no cover
+        raise AssertionError("真接被撤回（stub 语义回归）——能力声明必须同步撤回") from e
+    # 分钟线：批 103c 未实现 ⇒ 显式不支持
+    with pytest.raises(UnsupportedFeature):
+        jq.pull_minute("000001.SZSE", "1m", "20260601", "20260602")
+    # DB 可无行（走 .env 兜底），但 _REGISTRY 必须注册（否则 get_data_source 抛错＝串源立法）
+    assert get_data_source("joinquant") is None or \
+        get_data_source("joinquant").provider == "joinquant"
 
 
 def test_daily_unit_conversion_regression():

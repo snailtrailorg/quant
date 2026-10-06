@@ -58,10 +58,10 @@ class TestDispatchTables:
     def test_handlers_count(self):
         """字面量 handler 表：批 83b 收编前 7 + tier1 工厂 7 + 全量重建工厂 2
         + 批 83b 池数据工厂 2（pool_data / pool_data_full_calibrate）+ 批 101 加密 1
-        （binance_perp_daily）= 19（含 0118 收编的 static_symbols/convertible_terms；
-        防工厂回填静默失效）。"""
+        （binance_perp_daily）+ 批 103b 聚宽 A 股日线 1（astock_daily_jq）= 20
+        （含 0118 收编的 static_symbols/convertible_terms；防工厂回填静默失效）。"""
         from src.data_sync.engine import _HANDLERS
-        assert len(_HANDLERS) == 19, sorted(_HANDLERS)
+        assert len(_HANDLERS) == 20, sorted(_HANDLERS)
 
 
 @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
@@ -78,7 +78,7 @@ class TestSyncConfigBijection:
 
     def test_row_count_equals_dispatch_count(self):
         """行数 == 可调度 sync_id 数（17 存量 + 0117 步0 三键 + 0118 收编两条
-        + 0119 收编池数据两条 = 24）。
+        + 0119 收编池数据两条 + 批 101 加密 1 + 批 103b 聚宽 1 = 26）。
 
         不写死字面量，而用配置面↔代码面的等式表达——表增长时本钉不必改，只有**不匹配**
         才红；行数字面量另有 test_row_count_arithmetic 守（防"少了一条但两边一起少"）。
@@ -88,11 +88,11 @@ class TestSyncConfigBijection:
 
     def test_row_count_arithmetic(self):
         """行数量级守门：17 存量 + 3（迁移 0117）+ 2（0118 收编）+ 2（0119 收编）
-        + 1（批 101 加密 binance_perp_daily）= 25。
+        + 1（批 101 加密 binance_perp_daily）+ 1（批 103b 聚宽 astock_daily_jq）= 26。
 
         防的是"某条 cfg 行丢了而代码路由也一起丢"（双射仍成立但能力真空）这种同向漂移。
         """
-        assert len(_cfgs()) == 25
+        assert len(_cfgs()) == 26
 
     def test_via_kind_ids_all_have_kind_rows(self):
         """每个 bar 族 sync_id 必须有 sync_kind_config 归置行——

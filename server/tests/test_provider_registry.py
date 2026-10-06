@@ -22,7 +22,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # 声明为「已知半成品」的 adapter：只有 adapter 注册，DataSource/InterfaceProvider 未注册。
 # 加新源时**不要**往这里加——正解是补齐三处注册；本表只登记历史遗留 stub。
 # 本表存在即说明这些 provider 在 sync_config 里被选中会 fail-fast（而非静默串源）。
-INCOMPLETE_ADAPTERS = frozenset({"joinquant", "ricequant"})
+INCOMPLETE_ADAPTERS = frozenset({"ricequant"})
 
 
 class TestThreeRegistryConsistency:
@@ -107,13 +107,13 @@ class TestEngineProviderResolution:
         from src.data_sync.engine import _get_rate_ds
         from src.quant_common.contract import ProviderConfigError
         with pytest.raises(ProviderConfigError):
-            _get_rate_ds("joinquant")
+            _get_rate_ds("ricequant")
 
     def test_rate_ds_unknown_falls_back_with_warning(self, caplog):
         """完全未知 provider → 兜底源 + 告警（A-P2/B-P2 fail-soft，不得静默）。"""
         import logging
         from src.data_sync.engine import _get_rate_ds
-        from src.data_platform.data_source import FALLBACK_PROVIDER, TushareDataSource
+        from src.data_platform.data_source import TushareDataSource
         with caplog.at_level(logging.WARNING):
             ds = _get_rate_ds("__no_such_provider__")
         assert isinstance(ds, TushareDataSource)
@@ -151,4 +151,18 @@ class TestEngineProviderResolution:
         from src.data_sync.engine import _get_pro
         from src.quant_common.contract import ProviderConfigError
         with pytest.raises(ProviderConfigError):
-            _get_pro("joinquant")
+            _get_pro("ricequant")
+
+    def test_joinquant_is_fully_registered(self):
+        """批 103b：聚宽**已毕业**（三注册表齐）——必须不再是半成品 fixture。
+
+        反回归钉：若有人回退 `data_source._REGISTRY` 的 joinquant 注册，
+        `get_data_source('joinquant')` 会改抛 ProviderConfigError ⇒ 本条红。
+        （ricequant 仍是历史 stub，fail-fast 域的代表。）
+        """
+        from src.data_platform.data_source import _REGISTRY, get_data_source
+        from src.data_platform.adapters.base import _ADAPTERS
+        assert "joinquant" in _REGISTRY and "joinquant" in _ADAPTERS
+        assert "joinquant" not in INCOMPLETE_ADAPTERS
+        ds = get_data_source("joinquant")   # 无库行 → None（已注册源的 .env 路径）
+        assert ds is None or ds.provider == "joinquant"

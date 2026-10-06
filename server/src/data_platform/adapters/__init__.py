@@ -6,3 +6,4 @@
 tushare 侧无需此步：`TushareAdapter` 定义在 `base.py` 内，导入 base 即注册。
 """
 from . import binance_adapter as binance_adapter  # noqa: F401
+from . import joinquant_adapter as joinquant_adapter  # noqa: F401  （批 103b 真接）

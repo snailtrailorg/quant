@@ -1,7 +1,8 @@
 """engine 数据源路由测试（24 号多数据源架构，盲审 B-P2 补）。"""
 from unittest.mock import patch
 
-from src.data_platform.adapters.base import TushareAdapter, JoinQuantAdapter
+from src.data_platform.adapters.base import TushareAdapter
+from src.data_platform.adapters.joinquant_adapter import JoinQuantAdapter   # 批 103b：迁出 base.py
 
 
 def test_get_kline_adapter_routes_by_provider():

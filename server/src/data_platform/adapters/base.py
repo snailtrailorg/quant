@@ -441,24 +441,9 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
 }
 
 
-@register_adapter
-class JoinQuantAdapter(BaseDataAdapter):
-    """聚宽 adapter（stub，证明接口能接；真接需装 jqdatasdk + 实现字段映射）。
-
-    真接要点（记入注释，24 号 §8.2）：
-    - 字段映射：聚宽 volume(股)/money(元)，fq='pre' 前复权 → 须 pin fq=None 对齐「未复权价+adj_factor」契约
-    - symbol 归一化：聚宽 000001.XSHE ↔ 内部 ts_code 000001.SZ（§4.4 留真接批）
-    """
-    provider = "joinquant"
-
-    def pull_daily(self, symbol, start, end, adj=None, kind="astock"):
-        raise NotImplementedError("聚宽 adapter stub：真接需 jqdatasdk")
-
-    def pull_minute(self, symbol, freq, start, end):
-        raise NotImplementedError("聚宽 adapter stub：真接需 jqdatasdk")
-
-    def to_bar_rows(self, df, freq, adj_map=None):
-        raise NotImplementedError("聚宽 adapter stub：真接需 jqdatasdk")
+# 批 103b：`JoinQuantAdapter` 已从本文件迁出至 `joinquant_adapter.py`（真接实现 + jqdatasdk
+# 形状知识）。注册仍靠 `@register_adapter` 的 import 副作用——`adapters/__init__.py` 显式
+# import 该模块，否则 adapter 静默缺席（`get_adapter` 抛 ValueError → engine 回落 tushare 拉错源）。
 
 
 @register_adapter

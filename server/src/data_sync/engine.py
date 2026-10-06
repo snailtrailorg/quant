@@ -979,6 +979,116 @@ def _sync_binance_perp_daily(cfg: dict, end_date: str, backfill_from: str | None
             "actual_days": total - len(failed), "cursor_upto": end_s}
 
 
+# ── 批 103b：聚宽 A 股日线（窗口动态取 + 行预算 + 按交易日分片） ──
+
+_JQ_ROW_RESERVE = 50_000   # 额度安全余量（100 万条留 5%，避免贴线触发上游拒绝）
+
+
+def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = None,
+                          progress_cb: Callable | None = None) -> dict:
+    """聚宽 JQData A 股日线 → `bar_1d`（同键 upsert；**只互写 OHLCV**）。
+
+    三条硬约束（2026-10-06 实测，见 `flow/任务/批103b-聚宽真接.md` §0）：
+
+    1. **窗口动态取**：`get_account_info()` 的 `date_range_start/end` 是**绝对区间**
+       （实测 2025-06-28~2026-07-05），非「今日−15月~今日−3月」滚动式 ⇒ **禁硬编码**
+       （续期/到期会变）。
+    2. **自夹 start**：jqdatasdk 的边界检查**只查 `end_date`、不查 `start_date`**
+       （实测 `2020-01-01~2026-01-01` 放行返 1455 行）⇒ 不夹 start 就是**额度炸弹**
+       （单次请求可静默拉回全史，并把 config 的 `start_floor` 变成谎言）。
+    3. **行预算 + 交易日分片**：额度按**返回行数**计（100 万/日）⇒ 按交易日推进、累计近预算即止。
+       `cursor_upto` = **已完成的最后交易日**（`sync()` 用它推游标 ＝ `last_sync_date`，
+       下轮 `+1 天` 续传）——**永不跳日**；一天都没完成时退回 `start-1`，下轮重试该日。
+
+    **复权因子不提供**（见 §0.4）：adapter 的 `to_bar_rows` 写 `None`，由既有
+    `backfill_adj_factor`（tushare 独有通道）补齐——本 handler 不碰因子。
+
+    **provider 级互斥**（试用账号连接数=1）：`SyncLock("provider:joinquant")`——per-sync_id
+    锁不够（两个 joinquant 同步项同刻 auth 会撞连接）。
+    """
+    from src.data_platform.db import save_bars_overwrite
+    from .sync_lock import SyncLock
+
+    def _d(s: str) -> date:
+        return date(int(str(s)[:4]), int(str(s)[4:6]), int(str(s)[6:8]))
+
+    adapter = _get_kline_adapter(cfg)
+    prev_cursor = str(cfg.get("last_sync_date") or "")
+
+    # 先取窗口（auth 属元数据调用，不耗行额度）——凭证缺失在此**响亮**抛 ProviderConfigError
+    win = adapter.account_window()
+    end_d = min(_d(end_date), win["end"])
+    if backfill_from:
+        start_d = _d(backfill_from)
+    else:
+        start_d = (_d(prev_cursor) + timedelta(days=1)) if prev_cursor else win["start"]
+    start_d = max(start_d, win["start"])          # 起点自夹（SDK 不查 start）
+    start_s, end_s = start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d")
+
+    if start_d > end_d:
+        # 窗口内已全部完成（或本次请求与窗口无交集）——不推进（cursor=窗口止，稳定不 churn）
+        return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
+                "expected_days": 0, "actual_days": 0, "log_status": "skipped",
+                "cursor_upto": end_s}
+
+    with SyncLock("provider:" + str(adapter.provider)) as plock:
+        if not plock.acquired:
+            # 连接数=1：另一个聚宽任务在跑。**不推进游标**（保守回退到本次起点前一日）
+            return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
+                    "expected_days": None, "actual_days": 0, "log_status": "skipped",
+                    "cursor_upto": (start_d - timedelta(days=1)).strftime("%Y%m%d")}
+
+        budget = max(0, int(win["spare"]) - _JQ_ROW_RESERVE)
+        if budget <= 0:
+            # 当日额度已耗尽（同日内多轮/被别处占用）——不推进，次日续
+            return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
+                    "expected_days": None, "actual_days": 0, "log_status": "skipped",
+                    "cursor_upto": (start_d - timedelta(days=1)).strftime("%Y%m%d")}
+
+        symbols = _list_static_ts_codes("astock")
+        if not symbols:
+            # 在册标的为空＝上游静态表未同步——响亮失败（静默 0 行会被记 success 并推游标）
+            raise RuntimeError("聚宽日线：在册 A 股标的为空（asset_static_info / static_symbols 未同步？）")
+
+        dates = _trade_dates_in_range(start_s, end_s)
+        if dates is None:   # 日历未覆盖 → fail-open 逐自然日（宁多打不漏拉）
+            dates = [(start_d + timedelta(days=i)).strftime("%Y%m%d")
+                     for i in range((end_d - start_d).days + 1)]
+
+        pulled = saved = 0
+        failed: list[str] = []
+        reached = ""
+        skipped: list[str] = []
+        for i, d in enumerate(dates, 1):
+            if pulled >= budget:
+                break
+            try:
+                df = adapter.pull_daily_batch(d, "astock", symbols=symbols)
+                skipped.extend(getattr(adapter, "last_skipped", None) or [])
+                if df is not None and not df.empty:
+                    rows = adapter.to_bar_rows(df, "1D")
+                    if rows:
+                        pulled += len(rows)
+                        saved += save_bars_overwrite("1D", rows)
+                reached = d
+            except Exception as e:
+                failed.append(f"{d}:{type(e).__name__}:{str(e)[:60]}")
+            if progress_cb:
+                progress_cb(i, len(dates), d)
+
+        cursor = reached or (start_d - timedelta(days=1)).strftime("%Y%m%d")
+        if pulled == 0 and not failed:
+            failed.append("no_rows:窗口内 0 行（上游不可达 / 窗口压空 / 非交易日）")
+        logger.info("astock_daily_jq %s~%s：%d 交易日，拉 %d 行，存 %d 行，失败 %d，"
+                    "跳过 %d（非 XSHE/XSHG，如 %s）（额度余 %d/%d）",
+                    start_s, end_s, len(dates), pulled, saved, len(failed),
+                    len(set(skipped)), sorted(set(skipped))[:3], win["spare"], win["total"])
+        return {"pulled": pulled, "saved": saved, "start": start_s,
+                "failed_dates": failed, "expected_days": len(dates),
+                "actual_days": len([d for d in dates if d <= cursor]) if cursor else 0,
+                "cursor_upto": cursor}
+
+
 _HANDLERS = {
     "astock_basic": _sync_astock_basic,
     "astock_list": _sync_astock_list,
@@ -998,6 +1108,8 @@ _HANDLERS = {
     # 批 101：加密数据层第一步（原 beat `data-increment-crypto` 收编——原实现是
     # 「每 15min 被唤醒、永远 return skipped」的死构件，现真落地为币安永续 T+1 日线）
     "binance_perp_daily": _sync_binance_perp_daily,
+    # 批 103b：聚宽 A 股历史切片（独立 sync_id——窗口无最近 3 个月，不占 astock_daily 切换位）
+    "astock_daily_jq": _sync_astock_daily_jq,
 }
 
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由

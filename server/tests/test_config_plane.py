@@ -134,9 +134,11 @@ class TestDomainVocabulary:
         """provider 归属域按代码能力集推导；空能力 stub 源=None（两族目录都不出）。"""
         from src.data_platform.capabilities import provider_domain
         assert provider_domain("tushare") == "data_source"
+        # 批 103b：joinquant 已由 stub 毕业为真实现（能力集 {hist_quote}）⇒ 归 data_source
+        assert provider_domain("joinquant") == "data_source"
         for p in ("xtp", "emt_emq", "binance_perp", "okx_perp", "tencent"):
             assert provider_domain(p) == "trading_account", p
-        for p in ("joinquant", "ricequant"):     # stub：能力集空
+        for p in ("ricequant",):     # stub：能力集空
             assert provider_domain(p) is None, p
 
     def test_check_capability_domain_rejects_cross_domain(self):
@@ -354,8 +356,9 @@ class TestProvidersDirectory:
         assert r.status_code == 200
         # 批 101：数据源目录新增 `binance`（加密永续日线，0 密钥批量历史 adapter）——
         # 与交易通道 `binance_perp` 是两把键（前者出本目录、后者出交易页签，见下方断言）。
+        # 批 103b：聚宽 `joinquant` 由 stub 毕业（能力集 {hist_quote}）⇒ 出本目录。
         got = [p["provider"] for p in r.json()["providers"]]
-        assert got == sorted(["tushare", "binance"])
+        assert got == sorted(["tushare", "binance", "joinquant"])
         assert "binance_perp" not in got               # 交易通道 key 不得混入数据源目录
         assert "xtp" not in got and "okx_perp" not in got
         # 83a：目录随回本域能力集——前端能力筛选/勾选零字面量（同源 markets.DOMAIN_CAPS）
@@ -367,7 +370,8 @@ class TestProvidersDirectory:
         got = [p["provider"] for p in r.json()["providers"]]
         assert got == sorted(["xtp", "emt_emq", "binance_perp", "okx_perp", "tencent"])
         assert "tushare" not in got                    # 数据源 provider 不出交易页签下拉
-        assert "joinquant" not in got                  # 空能力 stub 源两族都不出目录
+        assert "joinquant" not in got                  # 批 103b：joinquant 归 data_source，不出交易页签
+        assert "ricequant" not in got                  # 空能力 stub 源两族都不出目录
         assert r.json()["domain_capabilities"] == sorted(["rt_quote", "trading"])
 
 

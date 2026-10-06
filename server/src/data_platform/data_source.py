@@ -214,11 +214,108 @@ class BinanceDataSource(DataSource):
             return False
 
 
+# ── 批 103b：聚宽数据源（账号/密码，额度制） ──
+
+class JoinQuantDataSource(DataSource):
+    """聚宽 JQData 数据源（批 103b 真接）——`jqdatasdk` 账号/密码，**额度制**（行计数）。
+
+    真源事实（2026-10-06 dev 实测，勿凭文档）：
+    - **auth 门**：jqdatasdk **所有**调用（含纯本地的 `normalize_code`）前置 `auth`，
+      未登录抛 "Please run jqdatasdk.auth first" ⇒ 本类 `get_client()` 返回**已 auth** 的模块句柄。
+    - **额度按「返回行数」计**（`get_query_count() -> {"total":1e6,"spare":…}`）——**不是调用次数**。
+      故 `DEFAULT_RATE_LIMITS` 留空（间隔制模型对本源无意义），行预算由调用方（engine handler）管。
+    - **窗口是绝对区间**（`get_account_info().date_range_start/end`），**非**「今日−15月~今日−3月」滚动式。
+    - **连接数 = 1**：同刻只允许一个任务 auth ⇒ 调用方须持 **provider 级**互斥锁
+      （`SyncLock("provider:joinquant")`），per-sync_id 锁不够。
+    - **SDK 边界检查不对称**：只查 `end_date ∈ [窗口起, 窗口止]`，**`start_date` 完全不查**
+      （实测 `2020-01-01~2026-01-01` 放行返 1455 行）⇒ 调用方**必须自夹 start**，
+      否则单次请求可静默拉回全史 = 额度炸弹。
+    """
+
+    provider = "joinquant"
+    DEFAULT_RATE_LIMITS: dict[str, float] = {}   # 额度制（行计数），非间隔制
+
+    def __init__(self, credentials_encrypted: str | None = None, params: str | None = None,
+                 interface_id: int | None = None):
+        super().__init__(credentials_encrypted, params, interface_id)
+        self._jq = None   # auth 后的 jqdatasdk 模块句柄（实例内缓存；跨实例不共享）
+
+    def _get_credentials(self) -> tuple[str, str]:
+        """解密 (account, password)。DB 优先，.env `JQDATA_USER`/`JQDATA_PASSWORD` 兜底。
+
+        凭证形态：`credentials_encrypted` 解密后是 **JSON 对象**（键＝`interfaces/joinquant.py`
+        的 `FIELD_SCHEMA` 键：account/password）——写侧 `mgmt._validate_credentials` 即按此约定校验。
+        容错：非 JSON 时按 `account:password` 单串解析（手工放库的运维路径）。
+        """
+        raw = ""
+        if self._credentials_encrypted:
+            try:
+                from src.quant_common.crypto import decrypt
+                raw = decrypt(self._credentials_encrypted)
+            except Exception as e:
+                logger.warning(f"解密聚宽凭证失败: {e}")
+        if raw:
+            try:
+                d = json.loads(raw)
+                if isinstance(d, dict):
+                    return str(d.get("account") or d.get("user") or ""), str(d.get("password") or "")
+            except (TypeError, ValueError):
+                if ":" in raw:
+                    a, b = raw.split(":", 1)
+                    return a, b
+                return raw, ""
+        return os.environ.get("JQDATA_USER", ""), os.environ.get("JQDATA_PASSWORD", "")
+
+    def get_client(self):
+        """返回**已 auth** 的 jqdatasdk 模块（auth 门见类 docstring）。
+
+        凭证缺失 → 抛 `ProviderConfigError`（响亮失败，不静默回落 tushare——回落会把聚宽的
+        额度/用量记到 tushare 头上，即串源）。
+        """
+        import jqdatasdk as jq
+        if self._jq is None:
+            account, password = self._get_credentials()
+            if not account or not password:
+                raise ProviderConfigError(
+                    "聚宽凭证缺失：请在数据源页为 joinquant 填写 account/password，"
+                    "或设 .env JQDATA_USER/JQDATA_PASSWORD")
+            jq.auth(account, password)
+            self._jq = jq
+        return self._jq
+
+    def account_window(self) -> dict:
+        """账号可用窗口 + 额度（`get_account_info()` / `get_query_count()` 真值）。
+
+        返回 {start, end, expire_time, spare, total}；`start/end` 为 `datetime.date`。
+        窗口**动态取**（禁硬编码）——续期/到期会变。
+        """
+        import datetime as _dt
+        jq = self.get_client()
+        info = jq.get_account_info() or {}
+        qc = jq.get_query_count() or {}
+        return {
+            "start": _dt.datetime.strptime(str(info.get("date_range_start"))[:10], "%Y-%m-%d").date(),
+            "end": _dt.datetime.strptime(str(info.get("date_range_end"))[:10], "%Y-%m-%d").date(),
+            "expire_time": str(info.get("expire_time") or ""),
+            "spare": int(qc.get("spare") or 0),
+            "total": int(qc.get("total") or 0),
+        }
+
+    def test_connection(self) -> bool:
+        """auth + 额度查询（最小真实调用，不耗行数——get_query_count 是元数据）。"""
+        try:
+            return self.account_window()["total"] > 0
+        except Exception as e:
+            logger.warning(f"聚宽连接测试失败: {e}")
+            return False
+
+
 # ── 注册表：provider -> DataSource 类（别人加数据源在此注册） ──
 
 _REGISTRY: dict[str, type[DataSource]] = {
     "tushare": TushareDataSource,
     "binance": BinanceDataSource,   # 批 101：加密永续日线（0 密钥批量历史）
+    "joinquant": JoinQuantDataSource,  # 批 103b：聚宽 A 股历史切片（账号/密码，额度制）
 }
 
 # 兜底源声明（**单点真相**）：所有源都无实例可用时的回落目标。

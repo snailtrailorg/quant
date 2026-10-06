@@ -1,21 +1,23 @@
-"""JoinQuant Provider（批 103 第一步）——数据拉取凭证（jqdatasdk 账号/密码）。
+"""JoinQuant Provider —— 数据拉取凭证（jqdatasdk 账号/密码）。
 
-威廉姆 2026-10-06：聚宽测试账号已申请，凭证由他经 UI 凭证页设置。本模块只注册
-**配置模板**（credentials 表单来源），不实现拉取、不声明能力。
+本模块只注册 **配置模板**（credentials 表单来源＝`FIELD_SCHEMA`），不实现拉取。
+真实现与能力声明在 `adapters/joinquant_adapter.py` + `data_source.JoinQuantDataSource`。
 
-能力纪律（勿反转）：`adapters.base.JoinQuantAdapter` 仍是 stub（三方法全
-NotImplementedError），`provider_capabilities('joinquant')` 须保持**空集**——
-能力声明的门＝真实现（批 83b/99 立法）；stub 期声明能力＝前端把 `astock_daily`
-判为「可切聚宽」（≥2 源声明即「可切换」），运维真切过去当场 NotImplementedError。
-真接批（后续）实现 pull_daily 等之后，才随 capability_decls 一起声明并反转
-`test_batch103_joinquant_registration.py` 的反谎报钉。
+**状态（2026-10-06 批 103b 真接后）**：`provider_capabilities('joinquant')` ＝
+`{"hist_quote"}`（由 `astock_daily_jq` 经 `SYNC_ID_CAP_MAP` 归一），`provider_domain`
+＝`data_source` ⇒ **凭证页「数据源」页签的新增下拉会出现「聚宽」**，威廉姆可自行填
+account/password。（批 103 期该 provider 能力集为空，两道目录门全跳 ⇒ 界面不可见；
+这是「stub 期注册模板」在现有立法下的必然结果，非缺陷。）
 
-真接批要点（承 adapters/base.py stub 注释 + rate_limit 已备）：
-- 依赖：jqdatasdk（新依赖，进 requirements）
-- 字段映射：聚宽 volume(股)/money(元)；fq='pre' 前复权 → 须 pin fq=None 对齐
-  「未复权价 + adj_factor」统一契约
-- 符号归一：聚宽 000001.XSHE ↔ 内部 ts_code 000001.SZ（`to_source_symbol` 覆写）
-- 限频：DailyQuotaPolicy（每日额度，试用账号额度以实测为准）
+**能力纪律（勿回退）**：能力声明的门＝真实现（批 83b/99 立法）。若撤回真接实现，
+必须**同时**撤回 `capabilities` 并反转 `test_batch103_joinquant_registration.py` 的
+证钉——否则前端把 `astock_daily_jq` 判为「可切聚宽」而真切当场失败。
+
+**已知边界**（试用账号，见 `flow/任务/批103b-聚宽真接.md`）：
+- 窗口＝**绝对区间**（实测 2025-06-28~2026-07-05），动态取自 `get_account_info()`；
+  **不含最近 3 个月** ⇒ 聚宽是**历史切片补充源**，不能替代 `astock_daily`。
+- 每日额度 100 万条（按**返回行数**计）；连接数=1 ⇒ provider 级互斥。
+- 复权因子跨源基准不同 ⇒ 不声明 `adj_factor` 能力、不写因子（由 tushare 回填通道补）。
 """
 from .base import InterfaceProvider, register_provider
 

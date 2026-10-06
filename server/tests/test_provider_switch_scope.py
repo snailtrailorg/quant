@@ -93,11 +93,14 @@ class TestSwitchableScope:
 
         前端 `providerOptions(row)` = 该列表含 row.id 的 provider 集；长度 ≤1 即禁用。
         故空能力源的 provider 会**出现**在矩阵里但列表为空 → 不参与任何行 → 不放开任何下拉。
+        批 103b：joinquant 由空能力 stub 毕业（声明 astock_daily_jq），故移出 stub 组，
+        锚定其能力为**聚宽独占**的 astock_daily_jq（不得与 tushare 撞键，否则下拉放开→后端 500）。
         """
         from src.data_platform.adapters.base import _ADAPTERS
         matrix = {p: sorted(c.capabilities) for p, c in _ADAPTERS.items()}
         assert "tushare" in matrix and matrix["tushare"], "tushare 能力矩阵不得为空"
+        assert matrix["joinquant"] == ["astock_daily_jq"], matrix.get("joinquant")
         # 空能力 stub 源：出现在矩阵里但列表为空（前端 filter 后自然不入选）
-        for stub in ("joinquant", "ricequant"):
+        for stub in ("ricequant",):
             if stub in matrix:
                 assert matrix[stub] == [], f"{stub} 应为空能力 stub，实际 {matrix[stub]}"
