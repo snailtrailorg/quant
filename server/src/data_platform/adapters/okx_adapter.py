@@ -25,12 +25,14 @@ tushare 兜底源会把 OKX 的请求计进 tushare 的熔断器＝串源）。
 from __future__ import annotations
 
 import logging
+import random
 import time
 from collections import deque
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import requests
+from requests.adapters import HTTPAdapter
 
 from src.data_platform.proxy import proxies_map
 from src.quant_common.contract import CRYPTO_ALL, CapabilityDecl
@@ -54,6 +56,9 @@ _RATE_MAX = 20                                    # IP 级 20 req…
 _RATE_WINDOW = 2.0                                # …/ 2s（设计 §4.2）
 _RETRY_BASE = 2.0                                 # 退避基数（秒）：2 / 4 / 8
 _MAX_RETRY = 3
+_RETRY_JITTER = 0.3                               # 退避抖动上限（±0–30%，批 105）
+_POOL_CONNS = 2                                   # urllib3 连接池：本 adapter 单线程顺序请求
+_POOL_MAXSIZE = 4
 _RETRYABLE_CODE = "50011"                         # 业务层限频（HTTP 仍 200）
 
 # candles 返回列（实测 9 列；`confirm` 缺失的历史形态按已收盘处理）
@@ -80,6 +85,16 @@ def _retry_after(resp) -> float | None:
         return None
 
 
+def _backoff(attempt: int) -> float:
+    """指数退避 **+ 抖动**：`2/4/8s` × (1 + U(0, 0.3))。
+
+    抖动是**必要的不是装饰**（批 105）：102b prod 首跑 7/485 标的 `Connection reset`——
+    全部标的按同一节奏重试时，重试流量自己排成同步波峰，正好再撞同一代理出口的
+    连接表/限流；抖动把波峰打散。
+    """
+    return _RETRY_BASE * (2 ** attempt) * (1 + random.uniform(0, _RETRY_JITTER))
+
+
 @register_adapter
 class OkxAdapter(BaseDataAdapter):
     """OKX USDⓈ-M 永续公开数据（`history-candles`；非实时）。"""
@@ -100,6 +115,13 @@ class OkxAdapter(BaseDataAdapter):
     def __init__(self):
         self._symbols: list[str] | None = None
         self._req_times: deque[float] = deque()   # 滚动窗口节流的时间戳（实例级；每任务新建）
+        # 批 105：会话级连接复用——原实现每请求新建 TCP+TLS(+SOCKS) 连接，485 标的 × 多页
+        # ＝ 数千次握手全压同一代理出口（连接表/限流），是 `Connection reset` 的第一嫌疑。
+        # 会话让连接在任务生命周期内复用（keep-alive），握手数降约两个数量级。
+        self._session = requests.Session()
+        _pool = HTTPAdapter(pool_connections=_POOL_CONNS, pool_maxsize=_POOL_MAXSIZE)
+        self._session.mount("https://", _pool)
+        self._session.mount("http://", _pool)
 
     # ——— 出口配置（102a 注入）———
 
@@ -124,11 +146,12 @@ class OkxAdapter(BaseDataAdapter):
             time.sleep(max(_RATE_WINDOW - (now - self._req_times[0]), 0.01))
 
     def _request(self, path: str, params: dict) -> dict:
-        """GET `path`（经代理出口）→ 返回 JSON body；`code!='0'` **响亮抛**。
+        """GET `path`（经代理出口，**会话内连接复用**）→ 返回 JSON body；`code!='0'` **响亮抛**。
 
-        重试面（三次退避 2/4/8s）：**网络异常**、**HTTP 429/5xx**（优先用 `Retry-After`）、
-        **业务限频 `code=50011`**（HTTP 仍 200，实现时最易漏的一路）。重试耗尽即抛，
-        **不静默返回空**——空帧会被上游当「该窗口无数据」记 success，把故障埋掉。
+        重试面（三次退避 `_backoff`＝2/4/8s×(1+U(0,0.3))）：**网络异常**、**HTTP 429/5xx**
+        （优先用 `Retry-After`，该值由服务端给出、不加抖动）、**业务限频 `code=50011`**
+        （HTTP 仍 200，实现时最易漏的一路）。重试耗尽即抛，**不静默返回空**——空帧会被
+        上游当「该窗口无数据」记 success，把故障埋掉。
         """
         proxy, base = self._exit()
         url = f"{base}{path}"
@@ -136,19 +159,19 @@ class OkxAdapter(BaseDataAdapter):
         for attempt in range(_MAX_RETRY + 1):
             self._wait_slot()
             try:
-                resp = requests.get(url, params=params, timeout=_TIMEOUT,
-                                    headers={"User-Agent": _UA}, proxies=proxies_map(proxy))
+                resp = self._session.get(url, params=params, timeout=_TIMEOUT,
+                                         headers={"User-Agent": _UA}, proxies=proxies_map(proxy))
             except requests.RequestException as e:
                 last = e
                 if attempt >= _MAX_RETRY:
                     raise
-                time.sleep(_RETRY_BASE * (2 ** attempt))
+                time.sleep(_backoff(attempt))
                 continue
             if resp.status_code == 429 or resp.status_code >= 500:
                 last = requests.HTTPError(f"okx HTTP {resp.status_code}")
                 if attempt >= _MAX_RETRY:
                     raise last
-                time.sleep(_retry_after(resp) or _RETRY_BASE * (2 ** attempt))
+                time.sleep(_retry_after(resp) or _backoff(attempt))
                 continue
             resp.raise_for_status()
             body = resp.json()
@@ -158,7 +181,7 @@ class OkxAdapter(BaseDataAdapter):
             msg = f"okx 接口错误 code={code} msg={body.get('msg')!r} path={path}"
             if code == _RETRYABLE_CODE and attempt < _MAX_RETRY:
                 last = RuntimeError(msg)
-                time.sleep(_RETRY_BASE * (2 ** attempt))
+                time.sleep(_backoff(attempt))
                 continue
             raise RuntimeError(msg)
         raise RuntimeError(f"okx 请求重试耗尽（{_MAX_RETRY} 次）: {path}: {last}")

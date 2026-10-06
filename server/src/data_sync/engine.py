@@ -1002,9 +1002,15 @@ _BINANCE_BAR_SPECS: dict[str, tuple[str, str, str, int]] = {
 # 「整个窗口都落在批量站未发布尾区」的容忍天数（见 handler 内 0 行判定）
 _CRYPTO_TAIL_GRACE = 2
 
+# 批 105：partial 冻结时游标回退的**下限**（相对窗口 end 的天数）——防 ratchet：
+# 若某标的**永久**失败（下架/停牌态漏过滤），冻结语义会让重拉窗逐日增大；
+# 卡在 `end-10d` 让单轮重拉有界（≈11 天 × 全标的），更老的洞靠人工 backfill（告警已响）。
+_PARTIAL_FREEZE_MAX_DAYS = 10
+
 
 def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
-                             first_run_days: int, *, label: str, enum_hint: str):
+                             first_run_days: int, *, label: str, enum_hint: str,
+                             freeze_on_partial: bool = False):
     """工厂：crypto 永续 bar 族 handler（批 101 币安；批 102b 泛化到 provider 无关）。
 
     `label`＝日志/错误里的源名（`binance`/`okx`）；`enum_hint`＝符号枚举失败的可能原因
@@ -1025,6 +1031,13 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
     **0 行不是必然故障**：窗口整段落进「未发布尾区」（`UTC今日 - start ≤ _CRYPTO_TAIL_GRACE`）
     时，0 行是**正常等待**——标 `log_status='skipped'` 而非 `failed`（否则每次调度都刷一条
     假告警，真故障会被淹没）。窗口更长却 0 行＝真异常，照旧进 `failed_dates`。
+
+    **partial 冻结（批 105）**：二轮补拉后**仍有**失败标的 ⇒ `freeze_on_partial=True` 的
+    同步（**日线档**）游标**退回窗口起点前一日**（下限 `end - _PARTIAL_FREEZE_MAX_DAYS`，
+    防 ratchet），下一轮整窗重拉自动补缺。动机：102b 首跑 7/485 标的失败而游标照推 ⇒
+    首跑 30 天窗**永久缺失**（下轮只补 1 天）。日线档 cron 日频，冻结最多一天一重试，
+    无风暴；**分钟/小时档保持无条件推进**（G-S1：高频 beat × 冻结＝整窗重拉风暴，
+    宁可窗口洞靠告警暴露）。backfill 不冻结（sync() 对回补本就不推游标）。
     """
     def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
                  progress_cb: Callable | None = None) -> dict:
@@ -1045,40 +1058,64 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
             raise RuntimeError(f"{label} 符号枚举为空（{enum_hint}）")
         total = len(syms)
         pulled = saved = 0
-        failed: list[str] = []
+        failed: dict[str, str] = {}   # sym → 首轮错误（dict 便于二轮补拉按标的清账）
         reached = ""      # 实际取到数据的最后一日（游标真值，见上方契约）
         # 回补用 overwrite：本地可能已存不完整/旧值，手动回补优先级最高（同 db.save_bars_overwrite 立法）
         write = save_bars_overwrite if backfill_from else save_bars
+
+        def _pull_one(sym: str) -> None:
+            nonlocal pulled, saved, reached
+            df = adapter.fetch_supply(kind, sub_kind, symbol=sym,
+                                      start=start_s, end=end_s, freq=freq)
+            if df is not None and not df.empty:
+                rows = adapter.to_bar_rows(df, freq)
+                if rows:
+                    pulled += len(rows)
+                    saved += write(freq, rows)
+                    day = max(r[2] for r in rows)      # r[2]=ts（UTC aware）
+                    ds = day.strftime("%Y%m%d")
+                    if ds > reached:
+                        reached = ds
+
         for i, sym in enumerate(syms, 1):
             try:
-                df = adapter.fetch_supply(kind, sub_kind, symbol=sym,
-                                          start=start_s, end=end_s, freq=freq)
-                if df is not None and not df.empty:
-                    rows = adapter.to_bar_rows(df, freq)
-                    if rows:
-                        pulled += len(rows)
-                        saved += write(freq, rows)
-                        day = max(r[2] for r in rows)      # r[2]=ts（UTC aware）
-                        ds = day.strftime("%Y%m%d")
-                        if ds > reached:
-                            reached = ds
+                _pull_one(sym)
             except Exception as e:
-                failed.append(f"{sym}:{type(e).__name__}:{str(e)[:40]}")
+                failed[sym] = f"{type(e).__name__}:{str(e)[:40]}"
             if progress_cb:
                 progress_cb(i, total, sym)
-        cursor = reached or (start - timedelta(days=1)).strftime("%Y%m%d")
+
+        # 批 105 二轮补拉：首轮失败标的**立即**各重试一次（不 sleep——瞬时抖动大多秒级自愈，
+        # 而 sleep 会把全任务时长乘进去；adapter 内部已有 2/4/8s 退避兜着间隔）。成功即清账。
+        if failed:
+            for sym in list(failed):
+                try:
+                    _pull_one(sym)
+                    failed.pop(sym, None)
+                except Exception as e:
+                    failed[sym] = f"{type(e).__name__}:{str(e)[:40]}"
+
+        # 游标契约（批 105 扩展，逐字见工厂 docstring「partial 冻结」段）：
+        # 无残留失败 ⇒ 实际取到数据的最后一日（批 101b 契约不变）；
+        # 有残留失败且 freeze_on_partial 且非 backfill ⇒ 冻结回窗口起点前一日（带 ratchet 下限）。
+        if failed and freeze_on_partial and not backfill_from:
+            freeze_floor = end - timedelta(days=_PARTIAL_FREEZE_MAX_DAYS)
+            cursor = (max(start, freeze_floor) - timedelta(days=1)).strftime("%Y%m%d")
+        else:
+            cursor = reached or (start - timedelta(days=1)).strftime("%Y%m%d")
         log_status = None
         if pulled == 0 and not failed:
             if (datetime.now(timezone.utc).date() - start).days <= _CRYPTO_TAIL_GRACE:
                 log_status = "skipped"    # 整窗未发布＝正常等待（上游 T+1 滞后），非故障
             else:
                 # 「全窗口 0 行」但窗口足够长 ⇒ 异常态（上游不可达 / 路径变更）——勿静默成功
-                failed.append("no_rows:窗口内 0 行（上游不可达 / T+1 未落盘 / 窗口压空）")
+                failed["no_rows"] = "窗口内 0 行（上游不可达 / T+1 未落盘 / 窗口压空）"
+        failed_list = [f"{sym}:{err}" for sym, err in sorted(failed.items())]
         logger.info("%s %s %s~%s：%d 标的，拉 %d 行，存 %d 行，失败 %d（游标 %s）",
-                    label, sync_id, start_s, end_s, total, pulled, saved, len(failed), cursor)
+                    label, sync_id, start_s, end_s, total, pulled, saved, len(failed_list), cursor)
         out = {"pulled": pulled, "saved": saved, "start": start_s,
-               "failed_dates": failed, "expected_days": None,
-               "actual_days": total - len(failed), "cursor_upto": cursor}
+               "failed_dates": failed_list, "expected_days": None,
+               "actual_days": total - len(failed_list), "cursor_upto": cursor}
         if log_status:
             out["log_status"] = log_status
         return out
@@ -1090,7 +1127,8 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
 _BINANCE_ENUM_HINT = "S3 list 不可达或返回异常"
 _sync_binance_perp_daily = _make_crypto_bar_handler(
     "binance_perp_daily", *_BINANCE_BAR_SPECS["binance_perp_daily"],
-    label="binance", enum_hint=_BINANCE_ENUM_HINT)
+    label="binance", enum_hint=_BINANCE_ENUM_HINT,
+    freeze_on_partial=True)      # 批 105：日线档 partial 冻结（分钟/小时档不冻结＝G-S1）
 _sync_binance_perp_hourly = _make_crypto_bar_handler(
     "binance_perp_hourly", *_BINANCE_BAR_SPECS["binance_perp_hourly"],
     label="binance", enum_hint=_BINANCE_ENUM_HINT)
@@ -1106,7 +1144,8 @@ _sync_binance_perp_15min = _make_crypto_bar_handler(
 # 才写进 sync_config.start_floor——**当前 NULL**，见迁移 0136 的说明）。
 _sync_okx_perp_daily = _make_crypto_bar_handler(
     "okx_perp_daily", "bar_daily", "perp", "1D", 30,
-    label="okx", enum_hint="instruments 接口不可达或返回异常（含代理出口未配/不通）")
+    label="okx", enum_hint="instruments 接口不可达或返回异常（含代理出口未配/不通）",
+    freeze_on_partial=True)      # 批 105：日线档 partial 冻结（102b 首跑 7/485 缺窗的直接教训）
 
 
 # ── 批 103b：聚宽 A 股日线（窗口动态取 + 行预算 + 按交易日分片） ──

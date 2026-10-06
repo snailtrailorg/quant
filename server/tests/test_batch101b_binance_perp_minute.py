@@ -286,20 +286,40 @@ class TestHandlerFactory:
         assert "log_status" not in r
 
     def test_per_symbol_exception_does_not_abort(self):
+        """单标的异常不中断整批（批 101b 原契约保留）。
+
+        批 105 起 handler 有**二轮补拉**：每标的只首轮失败一次 ⇒ 二轮全部自愈清账
+        （failed 空、两标的都入库、游标正常推进）。持久失败走下个用例。
+        """
         ad = _FakeBinance(symbols=("A", "B"), day=date(2026, 1, 29))
-        calls = {"n": 0}
+        seen: set[str] = set()
         orig = ad.fetch_supply
 
         def _flaky(kind, sub_kind=None, **p):
-            calls["n"] += 1
-            if calls["n"] == 1:
+            sym = str(p["symbol"])
+            if sym not in seen:
+                seen.add(sym)
                 raise RuntimeError("hiccup")
             return orig(kind, sub_kind, **p)
 
         ad.fetch_supply = _flaky
         r, _sb, _so = _run("binance_perp_hourly", ad)
-        assert r["pulled"] == 1 and any(x.startswith("A:") for x in r["failed_dates"]), r
-        assert r["cursor_upto"] == "20260129", "B 成功 ⇒ 游标仍推进到 01-29"
+        assert r["pulled"] == 2 and r["failed_dates"] == [], r
+        assert r["cursor_upto"] == "20260129"
+
+    def test_persistent_failure_minute_tier_still_advances(self):
+        """持久失败（二轮补拉仍炸）：分钟档照旧记账 + **无条件推进**（G-S1 防 beat 风暴；
+        批 105 的 partial 冻结只给日线档——见 test_batch105_crypto_partial.py）。"""
+        class _Mixed(_FakeBinance):
+            def fetch_supply(self, kind, sub_kind=None, **p):
+                if str(p["symbol"]) == "A":
+                    raise RuntimeError("upstream down")
+                return super().fetch_supply(kind, sub_kind, **p)
+
+        r, _sb, _so = _run("binance_perp_hourly", _Mixed(symbols=("A", "B"),
+                                                         day=date(2026, 1, 29)))
+        assert any(x.startswith("A:") for x in r["failed_dates"]), r
+        assert r["cursor_upto"] == "20260129", "B 成功 ⇒ 游标仍推进到 01-29（分钟档不冻结）"
 
     def test_partial_advance_uses_last_successful_day(self):
         """全部失败：游标退回「起点前一日」＝**旧游标值**（绝不空转、绝不跳日）。"""

@@ -194,7 +194,7 @@ class TestExitConfig:
         """代理必须真落到 requests 的 `proxies` 上（否则「配了但没生效」＝静默无效配置）。"""
         ad = OA.OkxAdapter()
         ad.configure_exit(proxy="socks5h://h:1080")
-        with patch.object(OA.requests, "get", return_value=_resp()) as g, \
+        with patch.object(ad._session, "get", return_value=_resp()) as g, \
              patch.object(OA.time, "sleep"):
             ad._request(OA._INSTRUMENTS, {"instType": "SWAP"})
         assert g.call_args.kwargs["proxies"] == {"http": "socks5h://h:1080",
@@ -202,7 +202,7 @@ class TestExitConfig:
 
     def test_direct_when_no_proxy(self):
         ad = OA.OkxAdapter()
-        with patch.object(OA.requests, "get", return_value=_resp()) as g, \
+        with patch.object(ad._session, "get", return_value=_resp()) as g, \
              patch.object(OA.time, "sleep"):
             ad._request(OA._INSTRUMENTS, {"instType": "SWAP"})
         assert g.call_args.kwargs["proxies"] is None
@@ -216,7 +216,7 @@ class TestExitConfig:
 class TestRequestRetry:
     def test_ok_body_returns_immediately(self):
         ad = OA.OkxAdapter()
-        with patch.object(OA.requests, "get", return_value=_resp(body={"code": "0", "data": [1]})) as g, \
+        with patch.object(ad._session, "get", return_value=_resp(body={"code": "0", "data": [1]})) as g, \
              patch.object(OA.time, "sleep") as sl:
             body = ad._request("/x", {})
         assert body["data"] == [1]
@@ -226,21 +226,21 @@ class TestRequestRetry:
         ad = OA.OkxAdapter()
         seq = [_resp(status=429, headers={"Retry-After": "1"}),
                _resp(body={"code": "0", "data": []})]
-        with patch.object(OA.requests, "get", side_effect=seq), patch.object(OA.time, "sleep") as sl:
+        with patch.object(ad._session, "get", side_effect=seq), patch.object(OA.time, "sleep") as sl:
             assert ad._request("/x", {})["code"] == "0"
         assert sl.call_args.args[0] == 1.0, "429 应优先采用 Retry-After"
 
     def test_retries_on_5xx(self):
         ad = OA.OkxAdapter()
         seq = [_resp(status=503), _resp(body={"code": "0", "data": []})]
-        with patch.object(OA.requests, "get", side_effect=seq), patch.object(OA.time, "sleep"):
+        with patch.object(ad._session, "get", side_effect=seq), patch.object(OA.time, "sleep"):
             assert ad._request("/x", {})["code"] == "0"
 
     def test_retries_on_network_exception(self):
         import requests as rq
         ad = OA.OkxAdapter()
         seq = [rq.ConnectionError("boom"), _resp(body={"code": "0", "data": []})]
-        with patch.object(OA.requests, "get", side_effect=seq), patch.object(OA.time, "sleep"):
+        with patch.object(ad._session, "get", side_effect=seq), patch.object(OA.time, "sleep"):
             assert ad._request("/x", {})["code"] == "0"
 
     def test_retries_on_business_rate_limit_code(self):
@@ -248,14 +248,14 @@ class TestRequestRetry:
         ad = OA.OkxAdapter()
         seq = [_resp(body={"code": "50011", "msg": "too many requests"}),
                _resp(body={"code": "0", "data": []})]
-        with patch.object(OA.requests, "get", side_effect=seq), patch.object(OA.time, "sleep") as sl:
+        with patch.object(ad._session, "get", side_effect=seq), patch.object(OA.time, "sleep") as sl:
             assert ad._request("/x", {})["code"] == "0"
         assert sl.called
 
     def test_exhausted_retries_raises_not_empty(self):
         """重试耗尽必须**抛**——返回空帧会被上游当「该窗口无数据」记 success，把故障埋掉。"""
         ad = OA.OkxAdapter()
-        with patch.object(OA.requests, "get", return_value=_resp(status=503)), \
+        with patch.object(ad._session, "get", return_value=_resp(status=503)), \
              patch.object(OA.time, "sleep"):
             with pytest.raises(Exception):
                 ad._request("/x", {})
@@ -263,7 +263,7 @@ class TestRequestRetry:
     def test_business_error_raises_loud(self):
         """非限频业务码（如 51001 参数错）**不重试、直接抛**，且消息含 code（可诊断）。"""
         ad = OA.OkxAdapter()
-        with patch.object(OA.requests, "get", return_value=_resp(
+        with patch.object(ad._session, "get", return_value=_resp(
                 body={"code": "51001", "msg": "Instrument ID does not exist"})) as g, \
              patch.object(OA.time, "sleep") as sl:
             with pytest.raises(RuntimeError) as ei:
