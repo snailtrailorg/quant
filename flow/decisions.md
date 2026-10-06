@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-10-07 · `inception` 不得取自「源可达性探测」（窗口边界模型步 2 双盲审 P0）
+
+**背景**：窗口边界模型设计稿（`flow/方案/同步窗口与参数分层-设计.md`）步 2 双盲审，两代理**独立收敛**同一 P0：§八.2 拟「把 Binance 月包下限解析成 `list_date`」。
+
+**裁定**：
+
+1. **`inception`（标的产生时间）只能是「事实上的上市/上币日」，不得由任何「源可达性探测」冒充。** OKX 取 `listTime`（已在响应内、现被丢弃）；Binance 取真上币日（`exchangeInfo.onboardDate`）；**fapi 被墙时须显式标「inception 未知」，不得用 `first_available_month` 兜底**。
+   **理由**：可达性探的是「源从哪个月起有包」，不是「标的何时存在」。拿它当期望集下界 ⇒ **源比我们更早知道的行情被判为「不存在」**——错误性质从「拉不到」（可见）恶化为「**不认为缺失**」（静默）。`binance_adapter.py:242-250` 的 docstring **已自证该陷阱**（静默丢 2019-09~12 逐日历史），设计稿等于把已知陷阱换个位置重装。
+2. **窗口是四边界交集**：`[ max(inception, retention, source_earliest) , source_latest − publish_lag ]`。**源下界与源上界同为源属性**，须由 `available_range(kind) → (earliest, latest)` 一并返回；未实现的 pull-capable adapter 即 CI 红（fail-loud），**禁适配器内部私自收窄起点**（否则「模型窗口 ≠ 真实窗口」，对账层不可信）。
+3. **§十 待裁点 A 结论修订**：由「同意」改为「**有条件同意**」——条件 = ① `inception` 取自真上币日（本条 1）② `upsert_rows` 补 `session_id` 通道。B/C/D 不变；**E 追加「CI 强制」**。
+4. **`start_floor` 正名须逐行判**：同列已混装两义，且**同 provider 内部就有**（`binance_perp_daily=2019-09-08` 源下限 vs `binance_perp_hourly=2026-09-29` retention）⇒ 不得按 provider 一刀切迁移。
+
+**同车更正设计稿三处事实错误**：窗口起点站点 **4 处非 2 处**（`engine.py:998/1202/1497/1555`）；Binance `2019-09-08` 是**上线日/日包下界**非月包 floor（月包=`2020-01`）；「`crypto_perp_daily` 孤儿调度」已过时（改名 `binance_perp_daily`，旧名仅存 69 条 2026-10-06 的 error 日志）。
+**文献**：`flow/稳定性检查/盲审窗口边界模型-同判综合.md`（含 A/B 两份原报告索引与必修清单）。
+
+---
+
 ## 2026-10-04 · 看板类只读接口：失败必须可见 + 只读重查询放宽超时（批 91）
 
 **裁定**：
