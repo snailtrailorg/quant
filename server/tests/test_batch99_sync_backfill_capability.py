@@ -107,15 +107,17 @@ class TestBackfillCapabilityTruth:
         批 101b 新增三条**存储闸门**下界（迁移 0134，`CURRENT_DATE-N` 相对量）：
         hourly＝执行日前推 7 天、1min/15min＝前推 1 天——「功能验证档」的有界占用上限，
         不是上游能力边界（上游有全史，是磁盘没到）。故此处只钉「非 NULL」，值随迁移执行日变。
-        批 102b 的 `okx_perp_daily` **故意 NULL**（OKX 最早可得日未实证，禁臆造）——它恰好
-        同时是本钉的**反证面**：若有人给它填个猜的下界，本集合会多出键 ⇒ 红。
+        批 102b 补（迁移 0137）新增 `okx_perp_daily='2020-01-01'`——OKX **K 线保留边界**
+        （prod 经代理实测：BTC/ETH 的 `1Dutc` 日线**恰从 2020-01-01 起**，2019 全空）。
+        ⚠️ 该值**不是** `instruments.listTime`（那是 2019-11-12，是上线日不是数据下界）。
         """
         rows = dict(_q("SELECT id, start_floor FROM sync_config"))
         assert str(rows["astock_basic"]) == "1990-12-19"
         assert str(rows["index_daily"]) == "2005-04-08"
         assert str(rows["binance_perp_daily"]) == "2019-09-08"
+        assert str(rows["okx_perp_daily"]) == "2020-01-01"
         assert {k for k, v in rows.items() if v is not None} == {
-            "astock_basic", "index_daily", "binance_perp_daily",
+            "astock_basic", "index_daily", "binance_perp_daily", "okx_perp_daily",
             "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min"}
         assert rows["binance_perp_hourly"] < rows["binance_perp_1min"], \
             "hourly 的保留窗更长（7 天 vs 1 天）"

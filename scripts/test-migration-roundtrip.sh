@@ -1173,8 +1173,80 @@ chk "upgrade 渲染含 okx_perp_daily（两行配置各一）" "$(grep -c 'okx_p
 rm -rf "$tmp"
 }
 
+# ── 用例 U：0137 OKX start_floor 回填（值级 + 守卫 + 幂等 + 降级） ──
+FROM_U=0136
+TO_U=0137
+case_u() {
+echo
+echo "########## 用例 U：0137 start_floor 回填（值级 + 不覆盖手改 + 降级） ##########"
+reset_scratch
+fixture_crypto
+stamp "$FROM_S"          # 0135
+step up "$TO_S" "前置：0136 建 okx 行（start_floor 留 NULL）"
+chk "前置：0136 后 okx 的 start_floor 仍为 NULL" \
+  "$(q "select coalesce(start_floor::text,'<NULL>') from sync_config where id='okx_perp_daily'")" "<NULL>"
+
+# --- U1 upgrade ---
+step up "$TO_U" "U1 upgrade（回填 start_floor）"
+chk "okx start_floor 已回填（实测 K 线保留边界）" \
+  "$(q "select start_floor::text from sync_config where id='okx_perp_daily'")" "2020-01-01"
+chk "邻居行 start_floor 未被动（astock_basic）" \
+  "$(q "select start_floor::text from sync_config where id='astock_basic'")" "1990-12-19"
+chk "行数不变（纯 UPDATE，无插入）" "$(q "select count(*) from sync_config")" "3"
+
+# --- U2 幂等复跑（stamp 回 0136 再 upgrade：部署中断重跑场景） ---
+stamp "$FROM_U"
+step up "$TO_U" "U2 强制复跑（部署中断重跑场景）"
+chk "复跑后仍为 2020-01-01（幂等）" \
+  "$(q "select start_floor::text from sync_config where id='okx_perp_daily'")" "2020-01-01"
+
+# --- U3 downgrade ---
+step down "$FROM_U" "U3 downgrade（回收为 NULL）"
+chk "okx start_floor 已回收为 NULL" \
+  "$(q "select coalesce(start_floor::text,'<NULL>') from sync_config where id='okx_perp_daily'")" "<NULL>"
+chk "邻居行未被误动（astock_basic）" \
+  "$(q "select start_floor::text from sync_config where id='astock_basic'")" "1990-12-19"
+
+# --- U4 再 upgrade（可重放）---
+step up "$TO_U" "U4 再 upgrade（可重放）"
+chk "重放后回到 2020-01-01" \
+  "$(q "select start_floor::text from sync_config where id='okx_perp_daily'")" "2020-01-01"
+
+# --- U5 不覆盖运维手改（IS NULL 守卫；真上产：upgrade 与界面手填并发）---
+x "update sync_config set start_floor='2019-11-12' where id='okx_perp_daily'"
+stamp "$FROM_U"
+step up "$TO_U" "U5 幂等复跑（运维已按 listTime 手填）"
+chk "运维手填的 2019-11-12 未被覆盖（IS NULL 守卫）" \
+  "$(q "select start_floor::text from sync_config where id='okx_perp_daily'")" "2019-11-12"
+step down "$FROM_U" "U5b downgrade（现值非本迁移所设 ⇒ 不动）"
+chk "手填值未被降级清空（降级同守卫）" \
+  "$(q "select start_floor::text from sync_config where id='okx_perp_daily'")" "2019-11-12"
+}
+
+# ── 用例 V：0137 离线渲染完整性（不连库） ──
+case_v() {
+echo
+echo "########## 用例 V：0137 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_U:$TO_U" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_U:$FROM_U" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_U'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含版本回退" "$(grep -c "SET version_num='$FROM_U'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含回填 UPDATE（值=实测边界）" "$(grep -c "2020-01-01" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含回收 UPDATE" "$(grep -c "start_floor = NULL" "$tmp/dn.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U） ##########"
 precheck
 case_a
 case_b
@@ -1196,4 +1268,6 @@ case_q
 case_r
 case_s
 case_t
+case_u
+case_v
 finish

@@ -599,8 +599,12 @@ class TestMigrationShape:
         m = self._mod()
         assert m.revision == "0136" and m.down_revision == "0135"
 
-    def test_is_chain_head(self):
-        """0136 必须是当前 head（后面还有迁移时本钉会红——提醒把它挪到链尾）。"""
+    def test_0136_is_followed_by_0137(self):
+        """head 交棒钉：0136 已不再是 head，而是被 **0137**（start_floor 证据化回填）接续。
+
+        原 `test_is_chain_head`（`heads == {"0136"}`）在批 102b 补新增 0137 后按设计**交棒**
+        ——head 钉恒挂在链尾、挪而不删，现由 `TestMigration0137Shape.test_is_chain_head` 承载。
+        """
         import importlib
         import pathlib
         revs = {}
@@ -608,8 +612,7 @@ class TestMigrationShape:
         for p in base.glob("0*.py"):
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
-        heads = set(revs) - set(revs.values())
-        assert heads == {"0136"}, f"head 不是唯一 0136：{sorted(heads)}"
+        assert revs.get("0137") == "0136", f"0137 未接在 0136 之后：{revs.get('0137')}"
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""
@@ -638,7 +641,12 @@ class TestMigrationShape:
         assert "40 8 * * *" in src and "30 8 * * *" not in src
 
     def test_start_floor_deliberately_absent(self):
-        """`start_floor` 必须**不在插入的列清单里**（OKX 最早可得日未实证，禁臆造下界）。"""
+        """`start_floor` 必须**不在 0136 的插入列清单里**（当时最早可得日未实证，禁臆造下界）。
+
+        值本身**不臆造**：0136 留 NULL ⇒ 由 **0137** 在 prod 实测后回填（OKX `history-candles`
+        的保留边界 = `2020-01-01`；**不用 `instruments.listTime`**——它对 BTC/ATOM 给 2019-11-12、
+        对 FIL 给 2019-08-10，而 K 线 API 在 2019 全空）。故本钉只保证「0136 不写它」。
+        """
         import re
         src = inspect.getsource(self._mod().upgrade)
         m = re.search(r"INSERT INTO sync_config\s*\(([^)]*)\)", src)
@@ -677,7 +685,9 @@ class TestRealDb:
         assert len(rows) == 1, "迁移 0136 未跑（okx_perp_daily 行缺失）"
         provider, tdf, sbf, floor, dtype, enabled, mode, sched = rows[0]
         assert (provider, tdf, dtype) == ("okx", "none", "crypto")
-        assert sbf is True and floor is None, "start_floor 必须 NULL（未实证）"
+        assert sbf is True
+        assert str(floor) == "2020-01-01", (
+            "0137 已按 prod 实测回填 start_floor（OKX K 线保留边界；非 listTime=2019-11-12）")
         assert enabled is True and mode == "incremental"
         assert sched == "40 8 * * *", "须与币安 30 8 错峰（设计 §4.2）"
 
@@ -697,3 +707,57 @@ class TestRealDb:
         rows = self._q("SELECT sync_id, pg_table FROM sync_kind_config "
                        "WHERE sync_id IN ('okx_perp_daily','binance_perp_daily')")
         assert dict(rows) == {"okx_perp_daily": "bar_1d", "binance_perp_daily": "bar_1d"}
+
+
+# ---------------------------------------------------------------------------
+# 13：迁移 0137 结构（source 级；不打库）——start_floor 证据化回填
+# ---------------------------------------------------------------------------
+
+
+class TestMigration0137Shape:
+    def _mod(self):
+        import importlib
+        return importlib.import_module("migrations.versions.0137_okx_start_floor")
+
+    def test_revision_chain(self):
+        m = self._mod()
+        assert m.revision == "0137" and m.down_revision == "0136"
+
+    def test_is_chain_head(self):
+        """0137 是当前 head（链尾钉；后续批再往后接时本钉会红——照此挪，勿删）。"""
+        import importlib
+        import pathlib
+        revs = {}
+        base = pathlib.Path("migrations/versions")
+        for p in base.glob("0*.py"):
+            mod = importlib.import_module(f"migrations.versions.{p.stem}")
+            revs[mod.revision] = str(mod.down_revision)
+        heads = set(revs) - set(revs.values())
+        assert heads == {"0137"}, f"head 不是唯一 0137：{sorted(heads)}"
+
+    def test_expand_only_no_ddl(self):
+        """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""
+        src = inspect.getsource(self._mod().upgrade).upper()
+        for bad in ("ALTER TABLE", "DROP ", "TRUNCATE", "RENAME", "DELETE "):
+            assert bad not in src, f"upgrade 含破坏性语句 {bad}"
+
+    def test_upgrade_value_is_measured_not_listtime(self):
+        """🔴 回填值必须是**实测的 K 线保留边界** `2020-01-01`。
+
+        反面：`instruments.listTime` 给 BTC/ATOM `2019-11-12`、FIL `2019-08-10`，但 K 线 API
+        在 2019 **全空**——拿 listTime 当 floor 会让回补白烧限频额度（20req/2s 共享出口）。
+        """
+        src = inspect.getsource(self._mod().upgrade)
+        assert "2020-01-01" in src, "值应为 prod 实测的 K 线保留边界"
+        assert "2019" not in src, "不得用 listTime（2019-xx）当数据下界"
+
+    def test_upgrade_does_not_clobber_manual_edit(self):
+        """带 `IS NULL` 守卫：只填未声明行 ⇒ 运维若已手填，本迁移让位。"""
+        src = inspect.getsource(self._mod().upgrade)
+        assert "start_floor IS NULL" in src, "须加 IS NULL 守卫（不覆盖运维手改）"
+
+    def test_downgrade_symmetric_and_guarded(self):
+        """降级只回收**本迁移所设**的值（现值被手改成别的则不动）。"""
+        src = inspect.getsource(self._mod().downgrade)
+        assert "SET start_floor = NULL" in src
+        assert "2020-01-01" in src, "仅当现值仍为本迁移所设值才回收（不覆盖手改）"
