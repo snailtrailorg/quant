@@ -550,9 +550,13 @@ class TestWiring:
         assert _REGISTRY.get("joinquant") is not None, "缺 DataSource 注册 ⇒ get_data_source 抛错"
 
     def test_capability_is_sync_id_level_exclusive(self):
-        """声明的是**独立** `astock_daily_jq`（不占 `astock_daily` 切换位）。"""
+        """声明的是**独立** sync_id（不占 `astock_daily`/`astock_list` 切换位）。
+
+        批 107 起增 `astock_list`（聚宽 `get_all_securities` 供给 A 股清单，与 tushare 同 sync_id
+        ⇒ 前者成为 `astock_list` 的**第二 provider**，切换位由此合法开启）。
+        """
         caps = set(JQ.JoinQuantAdapter.capabilities)
-        assert caps == {"astock_daily_jq"}
+        assert caps == {"astock_daily_jq", "astock_list"}
         assert "astock_daily" not in caps, "占位会把 astock_daily 判成「可切聚宽」⇒ 最近 3 月数据倒退"
 
     def test_capability_decls_omit_adj_factor(self):

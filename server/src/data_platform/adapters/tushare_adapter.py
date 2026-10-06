@@ -392,6 +392,55 @@ def pull_etf_list() -> list[str]:
     df = pro.fund_basic(market="E", fields="ts_code")
     return df["ts_code"].tolist() if df is not None and not df.empty else []
 
+
+# ——— 批 107：供给面「纯读」pull 壳（fetch_supply 经 _SUPPLY_PULL 分派到此） ———
+# 立法：本组函数**只读**（返回源原生 DataFrame），**不写库、不做归一**——落库与列形状映射
+# 由调用方负责（口径见 base.py::fetch_supply：列形状真源＝sync_kind_config）。与写库融合的
+# 旧函数（pull_trade_cal 自写库）区分开：旧函数**保留不动**（其他调用方在用），本组是新端口。
+
+def pull_daily_basic_raw(trade_date: str) -> pd.DataFrame:
+    """`astock_basic`：单日全市场每日基本面指标（原 `_sync_astock_basic` 的 `pro.daily_basic`）。"""
+    return get_pro().daily_basic(trade_date=trade_date)
+
+
+def pull_stock_basic_raw(exchange: str = "", list_status: str = "L",
+                         fields: str | None = None) -> pd.DataFrame:
+    """`astock_list` / `static_symbols`：股票列表快照。
+
+    `astock_list` 用默认（`list_status="L"` 全字段）；`static_symbols` 传
+    `fields="ts_code,name,industry"`（原实现只取三列）。`exchange=""`＝全市场（与原调用一致）。
+    """
+    pro = get_pro()
+    kw: dict = {"exchange": exchange, "list_status": list_status}
+    if fields:
+        kw["fields"] = fields
+    return pro.stock_basic(**kw)
+
+
+def pull_cb_basic_raw(ts_code: str | None = None) -> pd.DataFrame:
+    """`cb_basic`（全量）/ `convertible_terms`（逐只）：可转债基本信息。
+
+    无 `ts_code`＝全量（原 `pro.cb_basic()`）；有＝单只（原 `pull_cb_basic` 的 `cb_basic(ts_code=)`，
+    但**纯读返回 df**——原 `pull_cb_basic` 返回 `dict`、失败吞成 `{}`，本壳不吞，由调用方 catch）。
+    """
+    pro = get_pro()
+    return pro.cb_basic(ts_code=ts_code) if ts_code else pro.cb_basic()
+
+
+def pull_fund_basic_raw(market: str = "E") -> pd.DataFrame:
+    """`etf_list`：场内基金列表（原 `pro.fund_basic(market="E")`）。"""
+    return get_pro().fund_basic(market=market)
+
+
+def pull_trade_cal_raw(year: int) -> pd.DataFrame:
+    """`trade_cal`：某年 A 股交易日历（**纯读**——写入由 engine 负责）。
+
+    与旧 `pull_trade_cal(year)` 的差别：后者自带 `init_trade_calendar` + INSERT（副作用），
+    本壳只返回源 df；旧函数保留供 `_platform.py` 等既有调用方。
+    """
+    return get_pro().trade_cal(exchange="SSE", start_date=f"{year}0101", end_date=f"{year}1231")
+
+
 # --- 财务指标（daily_basic） ---
 
 def pull_daily_basic(ts_code: str, start_date: str, end_date: str | None = None) -> pd.DataFrame:

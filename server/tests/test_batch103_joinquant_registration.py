@@ -42,13 +42,15 @@ class TestJoinQuantRegistration:
     def test_capability_declared_after_real_implementation(self):
         """**批 103b 反转**：真接后能力必须非空且 ⊆ 数据源域（原反谎报钉＝空集）。
 
+        批 107 起增 `ref_data`（首个「非 bar 多源」样板：`astock_list` 走聚宽静态清单）。
+
         反证：若有人回退 `JoinQuantAdapter.capabilities`（撤回真接）而不改本测试，
         本条红；若有人给空能力 stub 声明能力，本条也会因域不符而红。
         """
         cls = _ADAPTERS.get("joinquant")
         assert cls is not None and cls.__name__ == "JoinQuantAdapter"
         caps = provider_capabilities("joinquant")
-        assert caps == {"hist_quote"}, caps
+        assert caps == {"hist_quote", "ref_data"}, caps
         assert caps <= set(DOMAIN_CAPS["data_source"]), (
             f"聚宽能力越出数据源域：{sorted(caps - set(DOMAIN_CAPS['data_source']))}")
 

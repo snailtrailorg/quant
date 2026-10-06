@@ -54,6 +54,31 @@ _SYM_BATCH = 800
 # 取数字段（一次拿全 OLHCV+money，免二次调用）
 _FIELDS = ["open", "close", "high", "low", "volume", "money"]
 
+# 批 107：聚宽「未退市」哨兵日（`get_all_securities.end_date` 实测）——归一为内部空串
+_JQ_LISTED_SENTINEL = "22000101"
+
+
+def _board_of_code(ts_code: str) -> str:
+    """ts_code → `asset_static_info.market` 中文板块（词表同 tushare `stock_basic.market`）。
+
+    聚宽 `get_all_securities` **无此字段** ⇒ 由代码前缀**确定性推导**（避免 `security_master.board`
+    全空）。词表＝`security_master.normalize_board` 的输入：主板/创业板/科创板。
+    """
+    code = str(ts_code).split(".")[0]
+    if code[:3] in ("300", "301"):
+        return "创业板"
+    if code[:3] in ("688", "689"):
+        return "科创板"
+    return "主板"
+
+
+def _delist_or_blank(v) -> str:
+    """聚宽 `end_date` → 内部 `delist_date`：哨兵 `2200-01-01`（未退市）→ 空串，否则 YYYYMMDD。"""
+    if v is None or pd.isna(v):
+        return ""
+    s = pd.Timestamp(v).strftime("%Y%m%d")
+    return "" if s == _JQ_LISTED_SENTINEL else s
+
 
 def _norm_date(v) -> str:
     """'YYYYMMDD' / 'YYYY-MM-DD' / date / datetime → 'YYYY-MM-DD'（jqdatasdk 的入参形态）。"""
@@ -107,12 +132,14 @@ class JoinQuantAdapter(BaseDataAdapter):
     # 能力矩阵＝sync_id 级（`provider_capabilities` 的真源，经 SYNC_ID_CAP_MAP 归一）。
     # `astock_daily_jq` 是**独立 sync_id**（不占 `astock_daily` 的切换位——威廉姆 2026-10-06
     # 裁定：聚宽试用窗口无最近 3 个月，不能当 astock_daily 的常规替代源）。
-    # 批 103b A 步将并入 `astock_list`。
-    capabilities = {"astock_daily_jq"}
+    # 批 107 A 步并入 `astock_list`（→ 经 SYNC_ID_CAP_MAP 归一为 `ref_data`）——首个「非 bar 多源」。
+    capabilities = {"astock_daily_jq", "astock_list"}
 
     # 契约层能力声明（kind 粒度，`register_adapter` import 时执法）。
     capability_decls = [
         CapabilityDecl("bar_daily", "historical", ASTOCK_ALL),
+        CapabilityDecl("static_list", "historical", ASTOCK_ALL,
+                       sub_kinds=frozenset({"stock"})),   # 批 107：ref_data 首批（仅股票清单）
     ]
 
     def __init__(self):
@@ -237,6 +264,59 @@ class JoinQuantAdapter(BaseDataAdapter):
 
     def pull_minute(self, symbol: str, freq: str, start: str, end: str) -> pd.DataFrame:
         raise UnsupportedFeature("聚宽分钟线未实现（批 103c）")
+
+    # ── 批 107：供给面端口（首个「非 bar 多源」样板） ──
+
+    def fetch_supply(self, kind: str, sub_kind: str | None = None, **params) -> pd.DataFrame:
+        """供给面 `(kind, sub_kind)` → **归一化 DataFrame**（列形状 = 目标表列）。
+
+        与 `fetch`（消费/供给统一 ContractFrame）分开：本端口给**写入面**同步项用，输出
+        **目标表列形状**（真源 `sync_kind_config`），由 adapter 负责「源侧 → canonical」映射
+        ——这是「列形状单一真源」在多源下的落地（见 `base.py::fetch_supply` 立法）。
+
+        现状（批 107 A 步样板）：实现 `(static_list, stock)` → `asset_static_info` 列形状
+        （让 `sync_config.provider=joinquant` 对 `astock_list` 真切，不再抛 `ProviderConfigError`）。
+        其余供给项对聚宽未实现 ⇒ `UnsupportedFeature`（**响亮**，非静默串源）。
+        """
+        if kind == "static_list" and sub_kind == "stock":
+            return self._supply_static_list_stock()
+        raise UnsupportedFeature(
+            f"joinquant 未实现 fetch_supply(kind={kind}, sub_kind={sub_kind})")
+
+    def _supply_static_list_stock(self) -> pd.DataFrame:
+        """`get_all_securities(types=['stock'])` → `asset_static_info` 列形状。
+
+        列序/列名 = `ts_code,name,industry,market,list_status,list_date,delist_date`（与 tushare
+        `pull_stock_basic_raw` 输出同形 ⇒ 消费方 `engine._sync_astock_list` **零分支**）。
+
+        **字段缺口（响亮声明，非静默降级）**：
+        - `industry`：聚宽 `get_all_securities` **不含**行业 ⇒ 落空串 + 一次性告警
+          （需行业须另调 `get_industry`，本样板不取）。
+        - `market`：聚宽无「市场板块」字段 ⇒ 由代码前缀**确定性推导**（见 `_board_of_code`）。
+        - `delist_date`：聚宽哨兵 `2200-01-01`＝未退市 ⇒ 归一空串（见 `_delist_or_blank`）。
+        """
+        jq = self.get_client()
+        df = jq.get_all_securities(types=["stock"], date=None)
+        if df is None or len(df) == 0:
+            return pd.DataFrame()
+        ts_codes = [f"{str(c).split('.')[0]}.{_JQ_TO_TS.get(str(c).split('.')[-1].upper(), str(c).split('.')[-1])}"
+                    for c in df.index]
+        names = (df["display_name"] if "display_name" in df.columns else df["name"]).astype(str)
+        start = pd.to_datetime(df["start_date"]) if "start_date" in df.columns else pd.Series([pd.NaT] * len(df))
+        end = pd.to_datetime(df["end_date"]) if "end_date" in df.columns else pd.Series([pd.NaT] * len(df))
+        if not getattr(self, "_industry_gap_warned", False):
+            logger.warning("joinquant static_list/stock 不提供 `industry`（get_all_securities 无该字段）"
+                           "——asset_static_info.industry 将落空串；如需行业须另接 get_industry")
+            self._industry_gap_warned = True
+        return pd.DataFrame({
+            "ts_code": ts_codes,
+            "name": list(names),
+            "industry": "",                              # 缺口（响亮声明，见 docstring）
+            "market": [_board_of_code(c) for c in ts_codes],
+            "list_status": "L",
+            "list_date": start.dt.strftime("%Y%m%d").fillna("").tolist(),
+            "delist_date": [_delist_or_blank(v) for v in end],
+        })
 
     def to_bar_rows(self, df: pd.DataFrame, freq: str, adj_map: dict | None = None) -> list[tuple]:
         """统一帧 → 11 字段落库行 `(symbol, freq, ts, o,h,l,c, volume, amount, adj_factor, source)`。

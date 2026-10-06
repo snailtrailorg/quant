@@ -37,13 +37,22 @@ _RESULT_KEYS = {"pulled", "saved", "start", "failed_dates", "expected_days", "ac
 
 
 class TestStaticSymbolsHandler:
-    """`_sync_static_list`（原 static-list-sync beat）。"""
+    """`_sync_static_list`（原 static-list-sync beat）。
+
+    批 107：拉取改经 `_get_supply_adapter(cfg).fetch_supply("static_list","symbols", …)`
+    （原经 `engine._get_pro`）⇒ 桩改在 `_get_supply_adapter`（替身 adapter）。
+    """
 
     def test_pull_failure_is_reported_not_raised(self):
         """拉取异常 → 返回 failed_dates（不抛）——原 beat 是 return {"status":"error"}，
         收编后必须转成 sync() 认的 failed_dates，否则会被当 success 推进游标。"""
         from src.data_sync.engine import _sync_static_list
-        with patch("src.data_sync.engine._get_pro", side_effect=RuntimeError("boom")):
+
+        class _A:
+            def fetch_supply(self, kind, sub_kind=None, **params):
+                raise RuntimeError("boom")
+
+        with patch("src.data_sync.engine._get_supply_adapter", return_value=_A()):
             r = _sync_static_list({"id": "static_symbols"}, "20260930")
         assert _RESULT_KEYS <= set(r)
         assert r["failed_dates"] and "boom" in r["failed_dates"][0]
@@ -51,25 +60,29 @@ class TestStaticSymbolsHandler:
 
     def test_empty_df_is_not_a_failure(self):
         from src.data_sync.engine import _sync_static_list
-        from unittest.mock import MagicMock
-        pro = MagicMock()
-        pro.stock_basic.return_value = pd.DataFrame()
-        with patch("src.data_sync.engine._get_pro", return_value=pro):
+
+        class _A:
+            def fetch_supply(self, kind, sub_kind=None, **params):
+                return pd.DataFrame()
+
+        with patch("src.data_sync.engine._get_supply_adapter", return_value=_A()):
             r = _sync_static_list({"id": "static_symbols"}, "20260930")
         assert _RESULT_KEYS <= set(r) and not r["failed_dates"]
 
     @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
     def test_writes_to_real_db(self):
         """真库往返回归钉：假 DataFrame 进 → static_symbols 真出行 → 清理。"""
-        from unittest.mock import MagicMock
         from src.data_platform.db import get_conn
         from src.data_sync.engine import _sync_static_list
         code = "TT.B83BTEST"
-        pro = MagicMock()
-        pro.stock_basic.return_value = pd.DataFrame(
-            [{"ts_code": code, "name": "批83b行为钉", "industry": "测试"}])
+
+        class _A:
+            def fetch_supply(self, kind, sub_kind=None, **params):
+                return pd.DataFrame(
+                    [{"ts_code": code, "name": "批83b行为钉", "industry": "测试"}])
+
         try:
-            with patch("src.data_sync.engine._get_pro", return_value=pro):
+            with patch("src.data_sync.engine._get_supply_adapter", return_value=_A()):
                 r = _sync_static_list({"id": "static_symbols", "provider": "tushare"}, "20260930")
             assert _RESULT_KEYS <= set(r)
             assert r["saved"] == 1, r
@@ -85,47 +98,72 @@ class TestStaticSymbolsHandler:
 
 
 class TestConvertibleTermsHandler:
-    """`_sync_convertible_terms`（原 convertible-terms-sync beat）。"""
+    """`_sync_convertible_terms`（原 convertible-terms-sync beat）。
+
+    批 107：拉取改经 `_get_supply_adapter(cfg).fetch_supply("static_list","terms", …)`
+    （原直连 `tushare_adapter.pull_convertible_bonds` / `pull_cb_basic`）⇒ 桩改在
+    `_get_supply_adapter`（替身 adapter）。只盖「网络边」，其余逻辑（50 只上限、逐只失败不中断、
+    jsonb 落库）全真跑。
+    """
+
+    @staticmethod
+    def _patch(bonds, terms):
+        """替身供给 adapter：无 `ts_code` 参数 → 清单 df；有 → 单只条款 df（或抛异常/空）。"""
+        class _A:
+            def fetch_supply(self, kind, sub_kind=None, **params):
+                tc = params.get("ts_code")
+                if tc is None:
+                    if isinstance(bonds, Exception):
+                        raise bonds
+                    return pd.DataFrame({"ts_code": list(bonds)})
+                v = terms(tc) if callable(terms) else terms
+                if isinstance(v, Exception):
+                    raise v
+                return pd.DataFrame() if v is None else pd.DataFrame([v])
+        return patch("src.data_sync.engine._get_supply_adapter", return_value=_A())
 
     def test_list_failure_is_reported(self):
         from src.data_sync.engine import _sync_convertible_terms
-        with patch("src.data_platform.adapters.tushare_adapter.pull_convertible_bonds",
-                   side_effect=RuntimeError("no net")):
+        with self._patch(RuntimeError("no net"), {}):
             r = _sync_convertible_terms({"id": "convertible_terms"}, "20260930")
         assert _RESULT_KEYS <= set(r)
         assert r["failed_dates"] and "pull_list" in r["failed_dates"][0]
 
     def test_per_bond_failure_does_not_abort_round(self):
-        """逐只失败只记 failed 不中断（原 beat 的 continue 语义），且限 50 只。"""
+        """逐只失败只记 failed 不中断（原 beat 的 continue 语义）。"""
         from src.data_sync.engine import _sync_convertible_terms
-        with patch("src.data_platform.adapters.tushare_adapter.pull_convertible_bonds",
-                   return_value=["A.SH", "B.SH", "C.SH"]), \
-             patch("src.data_platform.adapters.tushare_adapter.pull_cb_basic",
-                   side_effect=[{"conv_price": 1.0}, RuntimeError("bad bond"), {}]):
+
+        def _terms(tc):
+            if tc == "B.SH":
+                raise RuntimeError("bad bond")
+            return {"conv_price": 1.0} if tc == "A.SH" else None
+
+        with self._patch(["A.SH", "B.SH", "C.SH"], _terms):
             r = _sync_convertible_terms({"id": "convertible_terms"}, "20260930")
         assert r["failed_dates"] == ["B.SH:RuntimeError"], r       # 只有中间那只失败
         assert r["pulled"] == 3
 
     def test_only_first_fifty_bonds(self):
-        """单轮限 50 只（原代码 bonds[:50]）——不变量，防收编时被"顺手优化"成全量。
-
-        这里把限速档配成 0（走**真实** DataSource + 真实 FixedIntervalPolicy 的 DB 覆写
-        路径，`get_interval` 对覆写值取 `max(0.0, x)`），否则 50 次调用要真睡 15s——
-        不是把限速器 mock 掉，而是给它一份合法的零间隔配置。
-        """
+        """单轮限 50 只（原代码 bonds[:50]）——不变量，防收编时被"顺手优化"成全量。"""
         import json
 
         from src.data_platform.data_source import TushareDataSource
         from src.data_sync.engine import _sync_convertible_terms
         zero = TushareDataSource(params=json.dumps({"rate_limits": {"cb_basic": 0}}))
         codes = [f"{i}.SH" for i in range(80)]
+        calls = {"n": 0}
+
+        class _A:
+            def fetch_supply(self, kind, sub_kind=None, **params):
+                if params.get("ts_code") is None:
+                    return pd.DataFrame({"ts_code": codes})
+                calls["n"] += 1
+                return pd.DataFrame()
+
         with patch("src.data_sync.engine._get_rate_ds", return_value=zero), \
-             patch("src.data_platform.adapters.tushare_adapter.pull_convertible_bonds",
-                   return_value=codes), \
-             patch("src.data_platform.adapters.tushare_adapter.pull_cb_basic",
-                   return_value={}) as pb:
+             patch("src.data_sync.engine._get_supply_adapter", return_value=_A()):
             _sync_convertible_terms({"id": "convertible_terms"}, "20260930")
-        assert pb.call_count == 50
+        assert calls["n"] == 50
 
     @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
     def test_writes_to_real_db(self):
@@ -134,10 +172,7 @@ class TestConvertibleTermsHandler:
         from src.data_sync.engine import _sync_convertible_terms
         code = "TT.B83CB"
         try:
-            with patch("src.data_platform.adapters.tushare_adapter.pull_convertible_bonds",
-                       return_value=[code]), \
-                 patch("src.data_platform.adapters.tushare_adapter.pull_cb_basic",
-                       return_value={"conv_price": 12.34, "备注": "中文不转义"}):
+            with self._patch([code], {"conv_price": 12.34, "备注": "中文不转义"}):
                 r = _sync_convertible_terms({"id": "convertible_terms", "provider": "tushare"},
                                             "20260930")
             assert r["saved"] == 1, r

@@ -207,7 +207,8 @@ class TushareAdapter(BaseDataAdapter):
         CapabilityDecl("stk_limit", "historical", ASTOCK_ALL),
         CapabilityDecl("trade_cal", "historical", ASTOCK_ALL),
         CapabilityDecl("static_list", "historical", ASTOCK_ALL,
-                       sub_kinds=frozenset({"stock", "etf", "convertible", "namechange"})),
+                       sub_kinds=frozenset({"stock", "etf", "convertible", "namechange",
+                                            "symbols", "terms"})),   # 批 107：+symbols/+terms（字面量收编）
         CapabilityDecl("industry_class", "historical", ASTOCK_ALL,
                        sub_kinds=frozenset({"concept"})),
         CapabilityDecl("featured_daily", "historical", ASTOCK_ALL,
@@ -467,6 +468,16 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("financial_stmt", "forecast"): "pull_forecast",
     ("static_list", "namechange"): "pull_namechange",
     ("industry_class", "concept"): "pull_concept",
+    # 批 107：7 个字面量供给项收编（原 `_get_pro(prov).xxx` / 直连 pull_* ⇒ 经 adapter）。
+    # `static_list` 四子类共用 `pull_stock_basic_raw` / `pull_cb_basic_raw` 两个壳（靠 params 区分：
+    # fields= 取三列 / ts_code= 取单只），归置键 `(kind, sub_kind)` 仍一項一键（真源 sync_kind_config）。
+    ("fundamental_daily", None): "pull_daily_basic_raw",       # astock_basic
+    ("static_list", "stock"): "pull_stock_basic_raw",          # astock_list
+    ("static_list", "symbols"): "pull_stock_basic_raw",        # static_symbols
+    ("static_list", "convertible"): "pull_cb_basic_raw",       # cb_basic（全量）
+    ("static_list", "terms"): "pull_cb_basic_raw",             # convertible_terms（逐只 ts_code=）
+    ("static_list", "etf"): "pull_fund_basic_raw",             # etf_list
+    ("trade_cal", None): "pull_trade_cal_raw",                 # trade_cal（逐年，纯读）
 }
 
 

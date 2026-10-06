@@ -31,12 +31,17 @@ class _FakeDS:
 
 class TestSupplyMap:
     def test_covers_all_factory_items(self):
-        """`_SUPPLY_PULL` 键集 == 引擎 `_TIER1_BATCH`/`_TIER1_FULL` 的 (kind, sub_kind) 并集。"""
+        """`_SUPPLY_PULL` 键集 == 引擎 `_TIER1_*`（工厂项）∪ `_LITERAL_SUPPLY`（字面量项）。
+
+        批 107 前：== 工厂项 9 键；批 107 把 7 个字面量供给项（astock_basic/astock_list/
+        cb_basic/etf_list/trade_cal/static_symbols/convertible_terms）也收编到同一端口 ⇒ 并集。
+        """
         from src.data_platform.adapters.base import _SUPPLY_PULL
         from src.data_sync import engine
         engine_keys = {(k, s) for (k, s, _t, _p) in engine._TIER1_BATCH.values()}
         engine_keys |= {(k, s) for (k, s, _t, _p, _d) in engine._TIER1_FULL.values()}
         assert len(engine_keys) == 9, f"工厂项应为 9（tier1 7 + full 2），实得 {len(engine_keys)}"
+        engine_keys |= {(k, s) for (k, s, _t) in engine._LITERAL_SUPPLY.values()}
         assert set(_SUPPLY_PULL) == engine_keys
 
     def test_all_pull_functions_exist(self):

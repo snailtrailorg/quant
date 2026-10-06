@@ -1245,8 +1245,167 @@ chk "downgrade 渲染含回收 UPDATE" "$(grep -c "start_floor = NULL" "$tmp/dn.
 rm -rf "$tmp"
 }
 
+# ── 用例 W：0138 供给面 7 字面量项归置（补两行 + 修 pg_table 错配），2026-10-06 批 107 ──
+# 0138 **零 DDL**（sync_kind_config 两行 INSERT + sync_config 一行 UPDATE）。
+# 本用例的价值：
+#   ① 🔴 **跨项数据丢失修复**：`UPDATE sync_config ... WHERE id='etf_list' AND pg_table='asset_static_info'`
+#      —— 无 `id=` 过滤的「整表 UPDATE」会把**邻居 `astock_list`**（同值 'asset_static_info'）
+#      一起改掉。故「astock_list 未被误改」是本用例的核心断言（不是凑数）；
+#   ② **旧值守卫（双向）**：upgrade 的 `AND pg_table='asset_static_info'` 与 downgrade 的
+#      `AND pg_table='etf_basic_info'` 都是守卫 ⇒ 运维若已手改成第三值（如 'my_etf'），
+#      双向都让位（W3b 专门钉这条）；
+#   ③ 两行归置**值级**：kind/sub_kind/pg_table/rebuild（`terms` 走 jsonb、不进 float/text 分类）；
+#   ④ 幂等复跑（部署中断重跑）+ 不覆盖运维编辑（ON CONFLICT DO NOTHING）；
+#   ⑤ 降级对称回收 + 邻居不受扰 + 干净 A→B→A 往返（W4/W5 另起 scratch，避免被 W3 的扰动污染）。
+# ⚠️ 已知**有意不对称**（同 0132/0136 口径）：upgrade 用 `DO NOTHING` 尊重运维对**内容**的编辑，
+#    而 downgrade 按 `sync_id` 直接 DELETE ⇒ 若某行本就是运维手加，降级会连它一起删
+#    （「行是否存在」是 0138 的贡献）。这是接受的取舍，非缺陷（W3b2 亦钉此点）。
+FROM_W=0137
+TO_W=0138
+
+fixture_supply() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE sync_config (
+  id text PRIMARY KEY, name text NOT NULL, tushare_api text, pg_table text,
+  data_type text NOT NULL, sync_mode text NOT NULL, schedule text,
+  enabled boolean NOT NULL DEFAULT true,
+  last_sync_date text, last_sync_ts timestamptz, last_sync_count integer DEFAULT 0,
+  last_status text, description text, created_at timestamptz DEFAULT now(),
+  trade_day_filter text DEFAULT 'none', provider text DEFAULT 'tushare',
+  supports_backfill boolean NOT NULL DEFAULT false, start_floor date);
+-- 列型**照真库**：pk_cols/float_cols/text_cols 为 text[]（既有用例用 text 属近似）
+CREATE TABLE sync_kind_config (
+  sync_id text PRIMARY KEY, kind text NOT NULL, sub_kind text,
+  pg_table text NOT NULL, pk_cols text[], float_cols text[], text_cols text[],
+  rebuild text NOT NULL);
+-- 🔴 etf_list 的 pg_table 是**错配值**（应为 etf_basic_info）；astock_list 是**同值邻居**
+INSERT INTO sync_config (id,name,tushare_api,pg_table,data_type,sync_mode,schedule,trade_day_filter,provider,supports_backfill) VALUES
+  ('astock_list','A股清单','stock_basic','asset_static_info','basic','full','0 7 * * *','none','tushare',false),
+  ('etf_list','ETF清单','fund_basic','asset_static_info','basic','full','0 7 * * *','none','tushare',false),
+  ('static_symbols','静态符号表','stock_basic','static_symbols','basic','full','0 7 * * *','none','tushare',false);
+INSERT INTO sync_kind_config (sync_id,kind,sub_kind,pg_table,pk_cols,float_cols,text_cols,rebuild) VALUES
+  ('astock_list','static_list','stock','asset_static_info','{ts_code}','{}','{name,industry,market,list_status,list_date,delist_date}','full_rebuild'),
+  ('etf_list','static_list','etf','etf_basic_info','{ts_code}','{}','{name,management,fund_type,invest_type,list_date}','full_rebuild');
+SQL
+}
+
+case_w() {
+echo
+echo "########## 用例 W：0138 补归置行 + 修 etf_list.pg_table 错配（值级 + 不误伤邻居 + 幂等 + 降级） ##########"
+reset_scratch
+fixture_supply
+stamp "$FROM_W"
+
+# --- W1 upgrade ---
+step up "$TO_W" "W1 upgrade（补两行 + 修一行 pg_table）"
+chk "static_symbols 归置行值级" \
+  "$(q "select kind||'/'||sub_kind||'/'||pg_table||'/'||rebuild from sync_kind_config where sync_id='static_symbols'")" \
+  "static_list/symbols/static_symbols/full_rebuild"
+chk "static_symbols 列声明（pk/text）" \
+  "$(q "select pk_cols::text||'|'||text_cols::text from sync_kind_config where sync_id='static_symbols'")" \
+  "{ts_code}|{name,industry}"
+chk "convertible_terms 归置行值级" \
+  "$(q "select kind||'/'||sub_kind||'/'||pg_table||'/'||rebuild from sync_kind_config where sync_id='convertible_terms'")" \
+  "static_list/terms/convertible_terms/full_rebuild"
+chk "convertible_terms 列分类为空（terms 走 jsonb，非 float/text）" \
+  "$(q "select coalesce(float_cols::text,'<>')||'|'||coalesce(text_cols::text,'<>') from sync_kind_config where sync_id='convertible_terms'")" \
+  "{}|{}"
+chk "🔴 etf_list.pg_table 已修为 etf_basic_info（跨项数据丢失修复）" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "etf_basic_info"
+chk "🔴 同值邻居 astock_list 未被误改（整表 UPDATE 会误伤）" \
+  "$(q "select pg_table from sync_config where id='astock_list'")" "asset_static_info"
+chk "sync_config 行数不变（纯 UPDATE，无插入）" "$(q "select count(*) from sync_config")" "3"
+chk "sync_kind_config 邻居行数不变 + 新增 2 = 4" "$(q "select count(*) from sync_kind_config")" "4"
+
+# --- W2 幂等复跑（stamp 回 0137 再 upgrade：部署中断重跑场景） ---
+stamp "$FROM_W"
+step up "$TO_W" "W2 强制复跑（部署中断重跑场景）"
+chk "复跑后 static_symbols 仍恰 1 行" \
+  "$(q "select count(*) from sync_kind_config where sync_id='static_symbols'")" "1"
+chk "复跑后 sync_kind_config 仍 4 行" "$(q "select count(*) from sync_kind_config")" "4"
+chk "复跑后 etf_list 仍为 etf_basic_info" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "etf_basic_info"
+
+# --- W3 不覆盖运维编辑（归置行**内容**：ON CONFLICT DO NOTHING） ---
+x "update sync_kind_config set pg_table='ops_symbols' where sync_id='static_symbols'"
+stamp "$FROM_W"
+step up "$TO_W" "W3 幂等复跑（运维已手改归置行内容）"
+chk "运维手改的归置行内容未被覆盖（ON CONFLICT DO NOTHING）" \
+  "$(q "select pg_table from sync_kind_config where sync_id='static_symbols'")" "ops_symbols"
+chk "W3 未扰 etf_list（本步不动该行）" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "etf_basic_info"
+
+# --- W3b 旧值守卫（etf_list 的 UPDATE 双向有守卫；另起干净 scratch） ---
+# 语义：upgrade 只在**现值 == 迁移前值**（asset_static_info）时改写；downgrade 只在
+#       **现值 == 本迁移所设值**（etf_basic_info）时复原。运维手改成第三种值 ⇒ 双向都让位。
+reset_scratch
+fixture_supply
+x "update sync_config set pg_table='my_etf' where id='etf_list'"
+stamp "$FROM_W"
+step up "$TO_W" "W3b upgrade（运维已把 etf_list.pg_table 手修为 my_etf）"
+chk "运维手修值未被 upgrade 覆盖（旧值守卫：现值≠asset_static_info ⇒ 不动）" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "my_etf"
+step down "$FROM_W" "W3b2 downgrade（现值非本迁移所设 ⇒ 同守卫让位）"
+chk "手修值未被 downgrade 改写" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "my_etf"
+chk "W3b2 归置行仍已回收（行存在性归 0138 管，与值守卫无关）" \
+  "$(q "select count(*) from sync_kind_config where sync_id in ('static_symbols','convertible_terms')")" "0"
+
+# --- W4 downgrade（干净往返：A→B→A） ---
+reset_scratch
+fixture_supply
+stamp "$FROM_W"
+step up "$TO_W" "W4-前置 upgrade"
+chk "W4-前置：etf_list 已是 etf_basic_info" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "etf_basic_info"
+step down "$FROM_W" "W4 downgrade（回收两行 + 复原 pg_table）"
+chk "static_symbols 归置行已回收" \
+  "$(q "select count(*) from sync_kind_config where sync_id='static_symbols'")" "0"
+chk "convertible_terms 归置行已回收" \
+  "$(q "select count(*) from sync_kind_config where sync_id='convertible_terms'")" "0"
+chk "邻居归置行未被误删（剩 2）" "$(q "select count(*) from sync_kind_config")" "2"
+chk "邻居 sync_config 行未被误删（仍 3）" "$(q "select count(*) from sync_config")" "3"
+chk "etf_list.pg_table 已复原为 asset_static_info" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "asset_static_info"
+chk "复原只动本行（astock_list 未受扰）" \
+  "$(q "select pg_table from sync_config where id='astock_list'")" "asset_static_info"
+
+# --- W5 再 upgrade（可重放） ---
+step up "$TO_W" "W5 再 upgrade（可重放）"
+chk "重放后 etf_list 回到 etf_basic_info" \
+  "$(q "select pg_table from sync_config where id='etf_list'")" "etf_basic_info"
+chk "重放后两行归置复位" \
+  "$(q "select count(*) from sync_kind_config where sync_id in ('static_symbols','convertible_terms')")" "2"
+}
+
+# ── 用例 X：0138 离线渲染完整性（不连库） ──
+case_x() {
+echo
+echo "########## 用例 X：0138 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_W:$TO_W" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_W:$FROM_W" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_W'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含版本回退" "$(grep -c "SET version_num='$FROM_W'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含两条幂等子句" "$(grep -c 'ON CONFLICT' "$tmp/up.sql")" "2"
+chk "upgrade 渲染含 static_symbols" "$(grep -c "static_symbols" "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 convertible_terms" "$(grep -c "convertible_terms" "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 etf_list 修复 UPDATE" "$(grep -c "pg_table='etf_basic_info'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含复原 UPDATE" "$(grep -c "pg_table='asset_static_info'" "$tmp/dn.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W） ##########"
 precheck
 case_a
 case_b
@@ -1270,4 +1429,6 @@ case_s
 case_t
 case_u
 case_v
+case_w
+case_x
 finish

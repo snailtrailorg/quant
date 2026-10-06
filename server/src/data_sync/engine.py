@@ -538,11 +538,28 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
 
 # --- 具体同步逻辑 ---
 
+# ─── 批 107：7 个字面量供给项（bespoke handler——保留各自写入/SM 侧效应） ───
+# 与 `_TIER1_BATCH`/`_TIER1_FULL`（走通用工厂）并列：本表只声明**归置键**（真源
+# `sync_kind_config`），供 ① 对账门逐项校验（漂移即红）② `fetch_supply` 调用点集中。
+# 拉取经 `_get_supply_adapter(cfg).fetch_supply(kind, sub_kind, …)` ⇒ `sync_config.provider` 生效。
+# 列形状真源＝`sync_kind_config`（`base.py::fetch_supply` 立法）；本表不声明列。
+_LITERAL_SUPPLY: dict[str, tuple[str, str | None, str]] = {
+    "astock_basic":      ("fundamental_daily", None,          "daily_basic"),
+    "astock_list":       ("static_list",       "stock",       "asset_static_info"),
+    "static_symbols":    ("static_list",       "symbols",     "static_symbols"),
+    "cb_basic":          ("static_list",       "convertible", "cb_basic_info"),
+    "convertible_terms": ("static_list",       "terms",       "convertible_terms"),
+    "etf_list":          ("static_list",       "etf",         "etf_basic_info"),
+    "trade_cal":         ("trade_cal",         None,          "trade_cal"),
+}
+
+
 def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                        progress_cb: Callable | None = None) -> dict:
     """A股基本面指标同步（按日期批量拉取，一次全市场）。"""
-    from src.data_platform.adapters.tushare_adapter import save_daily_basic
-    pro = _get_pro(_provider_of(cfg))
+    from src.data_platform.adapters.tushare_adapter import save_daily_basic   # save 面（批 107 不动）
+    kind, sub, _tbl = _LITERAL_SUPPLY["astock_basic"]
+    adapter = _get_supply_adapter(cfg)      # 批 107：拉取经 adapter（provider 生效）
     if backfill_from:
         start = backfill_from
     else:
@@ -551,8 +568,10 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
         if start > end_date:
             return {"pulled": 0, "saved": 0, "start": last, "failed_dates": [], "expected_days": 0, "actual_days": 0}
 
-    r = _sync_by_trade_date(pro.daily_basic, lambda df: save_daily_basic(df), start, end_date,
-                            api_name=_api_name_of(cfg), progress_cb=progress_cb)
+    r = _sync_by_trade_date(lambda trade_date: adapter.fetch_supply(kind, sub, trade_date=trade_date),
+                            lambda df: save_daily_basic(df), start, end_date,
+                            api_name=_api_name_of(cfg), progress_cb=progress_cb,
+                            provider=_provider_of(cfg))
     r["start"] = start
     return r
 
@@ -598,13 +617,14 @@ def _sm_upsert_state(rows) -> None:
 def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                       progress_cb: Callable | None = None) -> dict:
     """A股股票列表全量同步。"""
+    kind, sub, _tbl = _LITERAL_SUPPLY["astock_list"]
     prov = _provider_of(cfg)      # 批 83b：provider 真路由（原死钉 tushare）
-    pro = _get_pro(prov)
+    adapter = _get_supply_adapter(cfg)   # 批 107：拉取经 adapter（原 `_get_pro` 直连 `stock_basic` 已移除）
     # 批 67：裸调收编（不传 min_interval=档值两级取保 DB 覆写）
     from src.data_platform.rate_limit import rate_limit_context
     _ds = _get_rate_ds(prov)      # 批 83b：原两处重复解析同一 provider，收成一次
     with rate_limit_context(_ds, "stock_basic"):
-        df = pro.stock_basic(list_status="L")   # DB 优化：网络拉取在事务外（2026-08-21 盘点）
+        df = adapter.fetch_supply(kind, sub)   # DB 优化：网络拉取在事务外（2026-08-21 盘点）
         _ds.record_usage(api_calls=1, api_name="stock_basic", provider=_ds.provider)
     rows = [(r.get("ts_code"), r.get("name"), r.get("industry"), r.get("market"),
              r.get("list_status") or "L", str(r.get("list_date", "")), str(r.get("delist_date", "")))
@@ -631,10 +651,11 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
 def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """可转债基本信息全量同步。"""
-    pro = _get_pro(_provider_of(cfg))
+    kind, sub, _tbl = _LITERAL_SUPPLY["cb_basic"]
+    adapter = _get_supply_adapter(cfg)   # 批 107：拉取经 adapter
     from src.data_platform.rate_limit import rate_limit_context
     with rate_limit_context(_get_rate_ds(_provider_of(cfg)), "cb_basic"):   # 批 64b 裸调收编（档 0.3s）
-        df = pro.cb_basic()   # DB 优化：拉取在事务外
+        df = adapter.fetch_supply(kind, sub)   # DB 优化：拉取在事务外
     rows = [(r.get("ts_code"), r.get("bond_short_name"), r.get("stk_code"), r.get("stk_short_name"),
              str(r.get("maturity", "")), r.get("par"), r.get("issue_price"), r.get("conv_price"),
              str(r.get("conv_start_date", "")), str(r.get("conv_end_date", "")),
@@ -676,10 +697,11 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
 def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """ETF基金列表全量同步。"""
-    pro = _get_pro(_provider_of(cfg))
+    kind, sub, _tbl = _LITERAL_SUPPLY["etf_list"]
+    adapter = _get_supply_adapter(cfg)   # 批 107：拉取经 adapter
     from src.data_platform.rate_limit import rate_limit_context
     with rate_limit_context(_get_rate_ds(_provider_of(cfg)), "fund_basic"):   # 批 64b 裸调收编（档 0.3s）
-        df = pro.fund_basic(market="E")   # DB 优化：拉取在事务外
+        df = adapter.fetch_supply(kind, sub)   # DB 优化：拉取在事务外
     rows = [(r.get("ts_code"), r.get("name"), r.get("management"),
              r.get("fund_type"), r.get("invest_type"), str(r.get("list_date", "")))
             for r in df.to_dict("records")]
@@ -703,18 +725,38 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
                     progress_cb: Callable | None = None) -> dict:
     """交易日历同步。批 97：backfill_from 起**逐年**拉到当年（每年 1 次调用）——
     原实现无视 backfill_from 只拉当年，导致 trade_cal 恒 365 行、tier1 交易日
-    循环与 _data_ready_end_date 在深回补区间无日历可用（fail-open 空跑）。"""
-    from src.data_platform.adapters.tushare_adapter import pull_trade_cal
+    循环与 _data_ready_end_date 在深回补区间无日历可用（fail-open 空跑）。
+
+    批 107：拉取改经 `adapter.fetch_supply("trade_cal", None, year=y)`（**纯读**），
+    写入（`init_trade_calendar` + INSERT）从旧 `pull_trade_cal` 搬入本 handler。
+    """
+    from src.data_platform.db import init_trade_calendar
     from src.data_platform.rate_limit import rate_limit_context  # 批 67：裸调收编（顺手）
+    kind, sub, _tbl = _LITERAL_SUPPLY["trade_cal"]
     year_now = date.today().year
     year0 = int(backfill_from[:4]) if backfill_from else year_now
     prov = _provider_of(cfg)      # 批 83b：provider 真路由（原死钉 tushare）
+    adapter = _get_supply_adapter(cfg)   # 批 107
     _ds = _get_rate_ds(prov)
     pulled = 0
     for y in range(year0, year_now + 1):
         with rate_limit_context(_ds, "trade_cal"):
-            pulled += len(pull_trade_cal(y) or [])
+            df = adapter.fetch_supply(kind, sub, year=y)
             _ds.record_usage(api_calls=1, api_name="trade_cal", provider=_ds.provider)
+        if df is None or df.empty:
+            continue
+        rows = [(r["exchange"], r["cal_date"], int(r["is_open"]), r.get("pretrade_date"))
+                for r in df.to_dict("records")]
+        init_trade_calendar(y)      # 表已在 0001 建，保留接口兼容（当前为 no-op）
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO trade_cal (exchange, cal_date, is_open, pretrade_date) "
+                    "VALUES (%s,%s,%s,%s) ON CONFLICT (exchange, cal_date) DO NOTHING",
+                    rows,
+                )
+            conn.commit()
+        pulled += len(rows)
     return {"pulled": pulled, "saved": pulled, "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
@@ -733,14 +775,15 @@ def _sync_static_list(cfg: dict, end_date: str, backfill_from: str | None = None
     本路径只写在市行）。原实现语义照搬：网络拉取在事务外 + executemany 一次提交
     （2026-08-21 盘点重灾 #1：原为"开事务→事务内网络拉取 5400 行→逐行 upsert"）。
     """
+    kind, sub, _tbl = _LITERAL_SUPPLY["static_symbols"]
     prov = _provider_of(cfg)
     from src.data_platform.rate_limit import rate_limit_context
     _ds = _get_rate_ds(prov)
     pulled = 0
     try:
-        pro = _get_pro(prov)
+        adapter = _get_supply_adapter(cfg)   # 批 107：拉取经 adapter（原 `_get_pro` 直连已移除）
         with rate_limit_context(_ds, "stock_basic"):
-            df = pro.stock_basic(exchange="", list_status="L", fields="ts_code,name,industry")
+            df = adapter.fetch_supply(kind, sub, fields="ts_code,name,industry")
             _ds.record_usage(api_calls=1, api_name="stock_basic", provider=_ds.provider)
     except Exception as e:
         return {"pulled": 0, "saved": 0, "start": end_date,
@@ -773,14 +816,16 @@ def _sync_convertible_terms(cfg: dict, end_date: str, backfill_from: str | None 
     **保留原语义**：只取前 50 只（原代码 `bonds[:50]`——条款接口慢，单轮限量，
     靠每日重复覆盖）；逐只失败只记 failed 不中断整轮。
     """
-    from src.data_platform.adapters.tushare_adapter import pull_cb_basic, pull_convertible_bonds
     from src.data_platform.rate_limit import rate_limit_context
+    kind, sub, _tbl = _LITERAL_SUPPLY["convertible_terms"]
     prov = _provider_of(cfg)
+    adapter = _get_supply_adapter(cfg)   # 批 107：拉取经 adapter（原直连 pull_convertible_bonds/pull_cb_basic）
     _ds = _get_rate_ds(prov)
     try:
         with rate_limit_context(_ds, "cb_basic"):
-            bonds = pull_convertible_bonds()
+            df_bonds = adapter.fetch_supply(kind, sub)      # 全量清单（纯读 df，取 ts_code）
             _ds.record_usage(api_calls=1, api_name="cb_basic", provider=_ds.provider)
+        bonds = df_bonds["ts_code"].tolist() if df_bonds is not None and not df_bonds.empty else []
     except Exception as e:
         return {"pulled": 0, "saved": 0, "start": end_date,
                 "failed_dates": [f"pull_list:{type(e).__name__}:{str(e)[:60]}"],
@@ -790,8 +835,9 @@ def _sync_convertible_terms(cfg: dict, end_date: str, backfill_from: str | None 
     for ts_code in (bonds or [])[:50]:
         try:
             with rate_limit_context(_ds, "cb_basic"):
-                terms = pull_cb_basic(ts_code)
+                df1 = adapter.fetch_supply(kind, sub, ts_code=ts_code)   # 单只条款（纯读 df）
                 _ds.record_usage(api_calls=1, api_name="cb_basic", provider=_ds.provider)
+            terms = df1.iloc[0].to_dict() if df1 is not None and not df1.empty else {}
             if terms:
                 with get_conn() as conn:
                     conn.execute("SELECT 1 FROM convertible_terms LIMIT 1")
@@ -2205,6 +2251,45 @@ def delete_symbol(sync_id: str, ts_code: str) -> dict:
     return {"status": "success", "deleted": deleted, "symbol": vt}
 
 
+def _delete_supply_item(sync_id: str, conn=None) -> dict:
+    """批 107：供给面项的「切换重建」删除——**清整表** + 重置游标。
+
+    与 `delete_by_sync_item` 的 per-symbol 分支并列：供给面项（`_LITERAL_SUPPLY` 7 项）的表是
+    **全量重建/快照**语义（无 `symbol` 列、无 per-symbol 维度），per-symbol 分支不适用；
+    「切换 provider 重建」的正确语义＝清空该表后由 handler 全量重拉。
+
+    背景（批 83b P1-4 裁定）：非 bar 项要对前端**放开切换**，前提是 `delete_by_sync_item` 支持它
+    ——否则 `switch_provider_api` 会 rollback + 500（「界面允许切、后端 500」）。本分支即该前提
+    （判据门 `test_provider_switch_scope`）。
+
+    ⚠️ 表名取 `_LITERAL_SUPPLY[sync_id][2]`（代码内字面量，非用户输入 ⇒ f-string 无注入面）；
+    该值与 `sync_config.pg_table` / `sync_kind_config.pg_table` 三处一致，由
+    `test_batch107::test_pg_table_single_source` + `test_literal_keys_match_placement_rows` 钉住
+    （`etf_list` 原错配 `asset_static_info` 的清空会误删 A 股整表＝跨项数据丢失，已被修）。
+    """
+    entry = _LITERAL_SUPPLY.get(sync_id)
+    if entry is None:
+        return {"status": "error", "error": f"不支持删除: {sync_id}"}
+    table = entry[2]
+
+    def _body(c) -> int:
+        try:
+            cur = c.execute(f'DELETE FROM "{table}"')
+            deleted = cur.rowcount
+        except psycopg.errors.UndefinedTable:
+            deleted = 0
+        c.execute("UPDATE sync_config SET last_sync_date=NULL, last_sync_ts=NULL, "
+                  "last_sync_count=0, last_status='idle' WHERE id=%s", (sync_id,))   # 重置游标
+        return deleted
+
+    if conn is not None:
+        return {"status": "success", "deleted": _body(conn)}   # 调用方事务（不 commit）
+    with get_conn() as c:
+        deleted = _body(c)
+        c.commit()
+    return {"status": "success", "deleted": deleted}
+
+
 def delete_by_sync_item(sync_id: str, conn=None) -> dict:
     """全量删该同步项的本地数据 + 重置游标（切换 provider 用，24 号 §2.3 切换重建原语）。
 
@@ -2212,11 +2297,12 @@ def delete_by_sync_item(sync_id: str, conn=None) -> dict:
     调用方随后 full 回填。静态表空（无法确定删什么）返回 error 防静默假删。
     批27-23：conn 可选传入——传入则事务归调用方（switch-provider 原子化：改 provider+删数据
     一次 commit，防"删成功改失败=数据已丢未切换"与倒置的"新配置+旧数据混合"两种中间态）。
+    批 107：非 bar 供给面项走 `_delete_supply_item` 分支（清整表）——见其 docstring。
     """
     from src.data_platform.schema import to_vt_symbol
     meta = _PER_SYMBOL_META.get(sync_id)
     if meta is None:
-        return {"status": "error", "error": f"不支持删除: {sync_id}"}
+        return _delete_supply_item(sync_id, conn)
     table = meta[1]
     kind = meta[2]
     ts_codes = _list_static_ts_codes(kind)

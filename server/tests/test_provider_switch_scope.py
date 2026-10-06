@@ -1,16 +1,18 @@
-"""批 83b：provider 切换范围裁定钉（P1-4）——「只有 bar 族可切源」。
+"""批 83b：provider 切换范围裁定钉（P1-4）——「可切源」集合与其**后端前提**。
 
 **裁定原文**（任务书 83b 盲审 P1-4）：`delete_by_sync_item` 只支持 5 个 bar 族 sync_id
 （`_PER_SYMBOL_META`，不含 index_daily），`switch_provider_api` 对 tier1/静态/日历/index_daily
 会 rollback+500。**裁定**：83b 只对 bar 族提供切换，非 bar 项 provider 恒 tushare 且前端下拉
-禁用（现状 `DataManage.vue` 的 `:disabled="providerOptions(row).length <= 1"` 已实现禁用态），
-不扩 `delete_by_sync_item`。
+禁用（现状 `DataManage.vue` 的 `:disabled="providerOptions(row).length <= 1"` 已实现禁用态）。
+
+**批 107 演进**：供给面 7 项（`_LITERAL_SUPPLY`）经 adapter 收编后**可切源**，
+前提＝`delete_by_sync_item` 新增「清整表 + 重置游标」分支支持它们（**先扩 delete，再开能力**）。
 
 **三面一致**（本文件把裁定钉成可执行断言）：
-1. **能力面**——非 bar 同步项不得被 **≥2 个源**声明（＝前端「可切」的真实条件；
-   批 101 前写作「非 bar 项恒 tushare」，因引入 binance 独占的 binance_perp_daily 而收紧判据）。
-2. **切换面**——`delete_by_sync_item` 的表清单（`_PER_SYMBOL_META`）只含 bar 族键；
-   非 bar 键不得进入（否则切换会 rollback+500 或删错表）。
+1. **能力面**——可切的非 bar 同步项（被 **≥2 个源**声明）必须 ⊆ `delete_by_sync_item` 支持集
+   （批 107 起＝`_LITERAL_SUPPLY`）。
+2. **切换面**——`delete_by_sync_item` 的 per-symbol 清单（`_PER_SYMBOL_META`）只含 bar 族键；
+   供给面项走独立分支（清整表）。
 3. **前端面**——下拉可用性由「能力矩阵里该 sync_id 的供源数」派生，故 1 成立即禁用态成立。
 
 这三面是同一事实的三种投影；任何一面单独漂移都会造成"界面允许切但后端 500"或反之。
@@ -49,28 +51,61 @@ class TestSwitchableScope:
         assert "index_daily" in _VIA_KIND_IDS
         assert "index_daily" not in _PER_SYMBOL_META
 
-    def test_no_non_bar_item_is_switchable(self):
-        """非 bar 同步项（`_HANDLERS` 直挂键）**不得可切源**——即不得被 ≥2 个源声明。
+    def test_switchable_nonbar_must_have_delete_support(self):
+        """非 bar 同步项**可切源的前提**＝`delete_by_sync_item` 支持它。
 
-        判据演进（批 101）：原判据是「非 bar 项只被 tushare 声明」，太粗——它隐含
-        「非 bar 项恒 tushare」，而批 101 引入 `binance_perp_daily`（非 bar 项，`_HANDLERS`
-        直挂，但**只有 binance 一家声明**）。前端的「可切」条件本就是
-        `providerOptions(row).length > 1`（**供源数 ≥2**），故把断言改正为**同源判据**：
-        供源 ≥2 才不可接受（下拉放开 → `switch_provider_api` → `delete_by_sync_item`
-        对非 bar 键 rollback+500）。单供源项安全（下拉 `:disabled` 恒真）。
+        判据演进（批 101）：原判据「非 bar 项恒 tushare」太粗——它把 binance 独占的
+        `binance_perp_daily` 误伤；改为同源判据「供源数 ≥2 即可切，故必须后端支持」。
+        判据**再演进（批 107）**：把供给面 7 项（`_LITERAL_SUPPLY`：astock_basic/astock_list/
+        static_symbols/cb_basic/convertible_terms/etf_list/trade_cal）纳入 `delete_by_sync_item`
+        （新增「清整表 + 重置游标」分支）⇒ 它们**可以**可切源。
 
-        若将来真要让某项可切：**先扩 `delete_by_sync_item`（`_PER_SYMBOL_META`），再开能力**。
+        故断言＝**可切的非 bar 项必须 ⊆ delete 支持集**（`_LITERAL_SUPPLY`）；
+        否则＝「前端下拉放开 → `switch_provider_api` → rollback+500」。
+
+        若将来要让更多项可切：**先扩 `delete_by_sync_item` 的支持集，再开能力**。
         """
         from src.data_platform.adapters.base import _ADAPTERS
-        from src.data_sync.engine import _HANDLERS
+        from src.data_sync import engine
         claim: dict[str, list[str]] = {}
         for provider, cls in _ADAPTERS.items():
-            for sid in set(cls.capabilities) & set(_HANDLERS):
+            for sid in set(cls.capabilities) & set(engine._HANDLERS):
                 claim.setdefault(sid, []).append(provider)
         switchable = {sid: sorted(ps) for sid, ps in claim.items() if len(ps) > 1}
-        assert not switchable, (
-            f"这些非 bar 项被多个源声明（前端下拉会放开，而后端 delete_by_sync_item 不支持）："
-            f"{switchable}；要么撤掉能力声明，要么先扩 delete_by_sync_item")
+        supported = set(engine._LITERAL_SUPPLY)
+        bad = {sid: ps for sid, ps in switchable.items() if sid not in supported}
+        assert not bad, (
+            f"这些非 bar 项被多个源声明但 `delete_by_sync_item` 不支持"
+            f"（前端下拉会放开而后端 500）：{bad}；要么撤掉能力声明，要么先扩 delete_by_sync_item")
+
+    def test_literal_items_have_delete_support(self):
+        """批 107：供给面 7 项在 `delete_by_sync_item` 有「清整表」专用分支（非 error）。"""
+
+        class _Cur:
+            rowcount = 0
+
+        class _Conn:
+            def __init__(self):
+                self.sqls: list[str] = []
+
+            def execute(self, sql, params=None):
+                self.sqls.append(sql)
+                return _Cur()
+
+        from src.data_sync.engine import _LITERAL_SUPPLY, delete_by_sync_item
+        for sid, (_k, _s, tbl) in _LITERAL_SUPPLY.items():
+            c = _Conn()
+            r = delete_by_sync_item(sid, conn=c)
+            assert r["status"] == "success", (sid, r)
+            assert any(f'DELETE FROM "{tbl}"' in s for s in c.sqls), (sid, c.sqls)
+            assert any("UPDATE sync_config" in s for s in c.sqls), (sid, c.sqls)
+
+    def test_unknown_item_still_rejected(self):
+        """未支持项仍响亮拒绝（不静默假删）。"""
+        from unittest.mock import MagicMock
+        from src.data_sync.engine import delete_by_sync_item
+        r = delete_by_sync_item("no_such_sync_id", conn=MagicMock())
+        assert r["status"] == "error" and "不支持删除" in r["error"]
 
     def test_binance_perp_daily_is_binance_exclusive(self):
         """批 101 落点：`binance_perp_daily` 是非 bar 项且 **binance 独占**（tushare 不得声称）。"""
@@ -95,11 +130,14 @@ class TestSwitchableScope:
         故空能力源的 provider 会**出现**在矩阵里但列表为空 → 不参与任何行 → 不放开任何下拉。
         批 103b：joinquant 由空能力 stub 毕业（声明 astock_daily_jq），故移出 stub 组，
         锚定其能力为**聚宽独占**的 astock_daily_jq（不得与 tushare 撞键，否则下拉放开→后端 500）。
+        批 107：joinquant 再增 `astock_list`（首个「非 bar 多源」样板）——**此处撞键是设计意图**
+        （`astock_list` 由此可切源），前提已由 `delete_by_sync_item` 的清整表分支满足
+        （见 `test_literal_items_have_delete_support`）。
         """
         from src.data_platform.adapters.base import _ADAPTERS
         matrix = {p: sorted(c.capabilities) for p, c in _ADAPTERS.items()}
         assert "tushare" in matrix and matrix["tushare"], "tushare 能力矩阵不得为空"
-        assert matrix["joinquant"] == ["astock_daily_jq"], matrix.get("joinquant")
+        assert matrix["joinquant"] == ["astock_daily_jq", "astock_list"], matrix.get("joinquant")
         # 空能力 stub 源：出现在矩阵里但列表为空（前端 filter 后自然不入选）
         for stub in ("ricequant",):
             if stub in matrix:

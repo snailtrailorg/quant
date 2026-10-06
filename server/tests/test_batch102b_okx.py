@@ -724,7 +724,12 @@ class TestMigration0137Shape:
         assert m.revision == "0137" and m.down_revision == "0136"
 
     def test_is_chain_head(self):
-        """0137 是当前 head（链尾钉；后续批再往后接时本钉会红——照此挪，勿删）。"""
+        """head 钉（链尾钉；后续批再往后接时本钉会红——照此挪，勿删）。
+
+        历史：0137（批 102b 时）→ **0138**（批 107 补 `sync_kind_config` 两行 + 修
+        `etf_list.pg_table`）。挪钉时**同时**确认 0138 的 `down_revision=="0137"`
+        （`TestMigration0138Shape.test_revision_chain` 已钉），保证 0137 未被断链。
+        """
         import importlib
         import pathlib
         revs = {}
@@ -733,7 +738,7 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        assert heads == {"0137"}, f"head 不是唯一 0137：{sorted(heads)}"
+        assert heads == {"0138"}, f"head 不是唯一 0138：{sorted(heads)}"
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

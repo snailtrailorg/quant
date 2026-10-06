@@ -173,16 +173,30 @@ class TestTier1TradeDayLoop:
 
 
 class TestTradeCalDeepBackfill:
-    """`_sync_trade_cal`：backfill_from 起逐年拉到当年（每年 1 次调用）。"""
+    """`_sync_trade_cal`：backfill_from 起逐年拉到当年（每年 1 次调用）。
+
+    批 107：拉取改经 `adapter.fetch_supply("trade_cal", None, year=y)`（**纯读** df），
+    写入（`init_trade_calendar` + INSERT）搬入 handler ⇒ 桩改在 `_get_supply_adapter`
+    （替身 adapter 记 year）+ `engine.get_conn`（不触库）。
+    """
+
+    @staticmethod
+    def _fake_adapter(years: list):
+        def _fetch(kind, sub_kind=None, **params):
+            years.append(params.get("year"))
+            return pd.DataFrame({"exchange": ["SSE"] * 365,
+                                 "cal_date": ["20260101"] * 365,
+                                 "is_open": [1] * 365,
+                                 "pretrade_date": [None] * 365})
+
+        class _A:
+            fetch_supply = staticmethod(_fetch)
+        return _A()
 
     def test_backfill_loops_years(self):
         years: list = []
-
-        def fake_pull(year):
-            years.append(year)
-            return list(range(365))
-
-        with patch("src.data_platform.adapters.tushare_adapter.pull_trade_cal", fake_pull), \
+        with patch.object(engine, "_get_supply_adapter", return_value=self._fake_adapter(years)), \
+             patch.object(engine, "get_conn", MagicMock()), \
              patch("src.data_platform.rate_limit.rate_limit_context", MagicMock()), \
              patch.object(engine, "_get_rate_ds", return_value=_FakeDS()), \
              patch.object(engine, "_provider_of", return_value="tushare"):
@@ -194,12 +208,8 @@ class TestTradeCalDeepBackfill:
 
     def test_no_backfill_single_year(self):
         years: list = []
-
-        def fake_pull(year):
-            years.append(year)
-            return list(range(365))
-
-        with patch("src.data_platform.adapters.tushare_adapter.pull_trade_cal", fake_pull), \
+        with patch.object(engine, "_get_supply_adapter", return_value=self._fake_adapter(years)), \
+             patch.object(engine, "get_conn", MagicMock()), \
              patch("src.data_platform.rate_limit.rate_limit_context", MagicMock()), \
              patch.object(engine, "_get_rate_ds", return_value=_FakeDS()), \
              patch.object(engine, "_provider_of", return_value="tushare"):
