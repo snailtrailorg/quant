@@ -91,6 +91,21 @@ export const updateSmtpProvider = (id, data) => api.post(`/smtp-providers/${id}`
 export const deleteSmtpProvider = (id) => api.delete(`/smtp-providers/${id}`)
 export const reorderSmtpProviders = (ids) => api.post('/smtp-providers/reorder', { ids })   // 批47：多通道 failover（旧 /smtp-config 单实例端点退役）
 export const sendTestEmail = (data) => api.post('/email/test', data)
+
+// 批 102a：代理配置面（全局池 + 按消费方绑定 + 测连通）。
+// 端点形态见 server/src/web_api/routes/proxies.py；写端点为 POST/DELETE（PUT→POST 硬切）。
+// 注意 `bindings` 是**静态段**——后端把它注册在 `{name}` 之前（遮蔽防御），前端照抄即可。
+export const listProxies = () => api.get('/proxies')
+export const upsertProxy = (data) => api.post('/proxies', data)
+export const deleteProxy = (name) => api.delete(`/proxies/${encodeURIComponent(name)}`)
+export const listProxyBindings = () => api.get('/proxies/bindings')
+export const setProxyBinding = (consumer, data) =>
+  api.post(`/proxies/bindings/${encodeURIComponent(consumer)}`, data)
+export const deleteProxyBinding = (consumer) =>
+  api.delete(`/proxies/bindings/${encodeURIComponent(consumer)}`)
+export const probeProxy = (name, target) =>
+  api.post(`/proxies/${encodeURIComponent(name)}/probe`, target ? { target } : {})
+
 export const chat = message => api.post('/chat', { message })
 
 export const getLLMModels = () => api.get('/llm-models')

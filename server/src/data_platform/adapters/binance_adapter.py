@@ -21,14 +21,13 @@ import csv
 import io
 import logging
 import re
-import urllib.error
 import urllib.parse
-import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
+import requests
 
 from src.quant_common.contract import CRYPTO_ALL, CapabilityDecl
 
@@ -62,23 +61,37 @@ _INTERVAL_BY_FREQ: dict[str, str] = {
 }
 
 
-def _get(url: str, timeout: int = _TIMEOUT) -> bytes | None:
-    """GET 原始字节；404 → None（文件不存在＝正常态，不是错误：未上市/未到账/停牌）。"""
-    req = urllib.request.Request(url, headers={"User-Agent": "quant-data-sync/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise
+def _proxies(proxy: str | None) -> dict | None:
+    """requests 的 `proxies` 参数；None ＝ 直连。
+
+    两路走**同一个 map**（形态统一，依赖面不同）：`http(s)://` 代理是 requests 原生；
+    `socks5h://`/`socks5://` 由 **PySocks** 提供传输层。
+    """
+    return {"http": proxy, "https": proxy} if proxy else None
 
 
-def _kline_url(sym: str, interval: str, period: str, key: str) -> str:
+def _get(url: str, timeout: int = _TIMEOUT, proxy: str | None = None) -> bytes | None:
+    """GET 原始字节；404 → None（文件不存在＝正常态，不是错误：未上市/未到账/停牌）。
+
+    批 102a：由 `urllib` 迁到 **requests**——唯一动机＝代理出口（urllib 没有 socks/http
+    代理的统一接线）。**行为等价**：404 → None；其余 4xx/5xx → 抛 `requests.HTTPError`。
+    """
+    resp = requests.get(url, headers={"User-Agent": "quant-data-sync/1.0"},
+                        timeout=timeout, proxies=_proxies(proxy))
+    if resp.status_code == 404:
+        return None
+    resp.raise_for_status()
+    return resp.content
+
+
+def _kline_url(sym: str, interval: str, period: str, key: str, base: str = _BATCH) -> str:
     """period='daily' → key=YYYY-MM-DD；'monthly' → key=YYYY-MM。非 ASCII 符号须百分号编码
-    （实测存在中文名符号如 `币安人生USDT`，URL 编码后方可下载）。"""
+    （实测存在中文名符号如 `币安人生USDT`，URL 编码后方可下载）。
+
+    `base` 默认 `_BATCH`；批 102a 可由 `proxy_binding.endpoint_override` 覆盖（镜像站/换区域）。
+    """
     q = urllib.parse.quote(sym, safe="")
-    return f"{_BATCH}/data/{_UM}/{period}/klines/{q}/{interval}/{q}-{interval}-{key}.zip"
+    return f"{base}/data/{_UM}/{period}/klines/{q}/{interval}/{q}-{interval}-{key}.zip"
 
 
 def _parse_kline_csv(blob: bytes) -> pd.DataFrame:
@@ -146,8 +159,21 @@ class BinanceAdapter(BaseDataAdapter):
         CapabilityDecl("bar_minute", "historical", CRYPTO_ALL),
     ]
 
+    # 批 102a：本 adapter 自己发 HTTP（`_get` 走 requests）⇒ 出口可注入代理 / 端点覆盖。
+    supports_exit_config = True
+
     def __init__(self):
         self._symbols: list[str] | None = None
+
+    def _exit(self) -> tuple[str | None, str]:
+        """→ `(proxy, kline_base)`。
+
+        端点覆盖（`proxy_binding.endpoint_override`）**只作用于 K 线下载基址**（`_BATCH`）；
+        符号枚举走的是 Amazon S3 的固定入口（`_S3`），**不随覆盖**——换 S3 区域是另一维，
+        留待真实需求（挂账，见任务文件 §挂账）。代理对两条通道都生效。
+        """
+        proxy, endpoint = self.exit_config()
+        return proxy, (endpoint or _BATCH)
 
     # ——— 符号主体（S3 ListObjectsV2 分页；fapi 被墙时唯一权威枚举通道）———
 
@@ -160,11 +186,12 @@ class BinanceAdapter(BaseDataAdapter):
             return self._symbols
         found: set[str] = set()
         token: str | None = None
+        proxy, _ = self._exit()
         for _ in range(40):                      # 防御上限（实测 2 页）
             q = f"{_S3}?list-type=2&prefix=data/{_UM}/monthly/klines/&delimiter=/&max-keys=1000"
             if token:
                 q += "&continuation-token=" + urllib.parse.quote(token, safe="")
-            blob = _get(q)
+            blob = _get(q, proxy=proxy)
             if not blob:
                 break
             xml = blob.decode("utf-8", "replace")
@@ -180,8 +207,9 @@ class BinanceAdapter(BaseDataAdapter):
     def _month_ok(self, sym: str, idx: int) -> bool:
         y = _MONTHLY_FROM[0] + idx // 12
         m = _MONTHLY_FROM[1] + idx % 12
-        return _get(_kline_url(sym, "1d", "monthly", f"{y:04d}-{m:02d}"),
-                    timeout=15) is not None
+        proxy, kb = self._exit()
+        return _get(_kline_url(sym, "1d", "monthly", f"{y:04d}-{m:02d}", base=kb),
+                    timeout=15, proxy=proxy) is not None
 
     def first_available_month(self, sym: str) -> tuple[int, int] | None:
         """二分探测该符号**最早可得月包**（返回 (年, 月)；无月包返回 None）。
@@ -237,9 +265,12 @@ class BinanceAdapter(BaseDataAdapter):
             else:
                 s = max(s, e - timedelta(days=30))
         keys = _period_keys(s, e)
+        proxy, kb = self._exit()                 # 出口配置一次解析，供本区间全部下载复用
         frames: list[pd.DataFrame] = []
         with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as ex:
-            for blob in ex.map(lambda pk: _get(_kline_url(sym, interval, pk[0], pk[1])), keys):
+            for blob in ex.map(
+                    lambda pk: _get(_kline_url(sym, interval, pk[0], pk[1], base=kb),
+                                    proxy=proxy), keys):
                 if blob:
                     frames.append(_parse_kline_csv(blob))
         if not frames:

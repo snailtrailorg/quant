@@ -129,8 +129,29 @@ export default {
       routing: '路由诊断', security: '标的资料',   // 批88：自集成中心/ops 组迁入数据管理页（域对齐）
       logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 im: 'IM 机器人', mail: '邮件 SMTP',
-      llm: 'LLM 模型', dataSources: '数据源', tradingAccounts: '交易账号', sms: '短信通道',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签
+      llm: 'LLM 模型', dataSources: '数据源', tradingAccounts: '交易账号', sms: '短信通道', proxy: '代理出口',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签   // 批102a:代理出口页签
       run: '运行配置', users: 'API 密钥', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
+    },
+    proxy: {   // 批102a：代理出口（全局池 + 按消费方绑定 + 测连通）
+      poolTitle: '代理池',
+      poolHint: '出口代理 DSN 池。列表里的地址只显示掩码（凭证不上屏）；编辑时把地址留空即保留原值。',
+      add: '新增代理', addTitle: '新增代理', editTitle: '编辑代理',
+      name: '名称', namePh: '如 aws-tokyo', url: '代理地址',
+      // 注意：urlPh 的值含 `//`，词条门把它当行内注释起始 ⇒ 本行**不得**再跟其他键
+      urlPh: 'socks5h://host:1080',
+      urlKeepPh: '留空=不改（当前 {url}）',
+      urlHint: '支持 socks5h / socks5 / http / https 四种写法，且必须带端口。域名被污染的源（如 OKX）请用 socks5h 或 http(s)——这两种由代理解析 DNS；socks5 在本机解析，遇到污染域必然失败。',
+      notes: '备注', notesPh: '用途或归属，便于日后辨认',
+      scheme: 'DNS 解析', localDns: '本机解析', proxyDns: '代理侧解析',
+      status: '状态', enabled: '启用', disabled: '停用',
+      probe: '测连通', probeOk: '连通：出口 IP {ip}（{ms} ms）', probeFail: '不通：{err}',
+      delConfirm: '删除代理 {name}？仍被「已启用」的绑定引用时会被拒绝，请先关掉那边的开关。',
+      bindTitle: '按消费方绑定',
+      bindHint: '「是否启用」与「选池中哪一个」是两个独立选项：换代理不必动开关，关开关也不会丢选择。消费方集合＝已接线代理出口的数据源（服务端派生，接入新源后自动出现）。',
+      consumer: '消费方', enable: '启用', pick: '选用代理', pickPh: '选择池中代理',
+      endpoint: '端点覆盖', endpointPh: '留空=用代码缺省',
+      clearBinding: '清除绑定', clearConfirm: '清除 {consumer} 的绑定（恢复直连、清掉端点覆盖）？',
+      needProxy: '启用代理必须先在池中选一个代理',
     },
     emailChg: {   // 批20 20C：改邮箱（文案经文案师）
       title: '修改邮箱', newEmail: '新邮箱', password: '当前密码（验证身份用）',
@@ -1594,8 +1615,30 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       routing: 'Route Diagnostics', security: 'Security Master',   // batch88: migrated into Data Ops (domain alignment)
       logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名
 im: 'IM Bots', mail: 'Email SMTP',
-      llm: 'LLM Models', dataSources: 'Data Sources', tradingAccounts: 'Trading Accounts', sms: 'SMS Channels',   // 批37   // 批83a
+      llm: 'LLM Models', dataSources: 'Data Sources', tradingAccounts: 'Trading Accounts', sms: 'SMS Channels', proxy: 'Proxy Egress',   // 批37   // 批83a   // 批102a
       run: 'Run Config', users: 'API Keys', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
+    },
+    proxy: {   // batch102a: proxy egress (pool + per-consumer binding + connectivity test)
+      poolTitle: 'Proxy Pool',
+      poolHint: 'Egress proxy DSN pool. Addresses are always shown masked here (credentials never reach the UI); leave the field blank while editing to keep the current value.',
+      add: 'Add proxy', addTitle: 'Add Proxy', editTitle: 'Edit Proxy',
+      name: 'Name', namePh: 'e.g. aws-tokyo', url: 'Proxy URL',
+      // NOTE: urlPh contains `//`, which the locale gate reads as a line-comment start —
+      // so no other key may share this line.
+      urlPh: 'socks5h://host:1080',
+      urlKeepPh: 'Leave blank to keep the current one ({url})',
+      urlHint: 'Four schemes are accepted — socks5h / socks5 / http / https — and a port is required. For a DNS-polluted source (e.g. OKX) use socks5h or http(s): those resolve DNS on the proxy side. socks5 resolves locally and will fail on polluted domains.',
+      notes: 'Notes', notesPh: 'Purpose or owner, for later identification',
+      scheme: 'DNS Resolution', localDns: 'Local', proxyDns: 'At proxy',
+      status: 'Status', enabled: 'Enabled', disabled: 'Disabled',
+      probe: 'Test connectivity', probeOk: 'Reachable: exit IP {ip} ({ms} ms)', probeFail: 'Unreachable: {err}',
+      delConfirm: 'Delete proxy {name}? Deletion is rejected while an enabled binding still references it — turn that switch off first.',
+      bindTitle: 'Bindings per Consumer',
+      bindHint: '"Enabled" and "which proxy" are two independent options: swapping proxies does not touch the switch, and switching off does not lose the selection. Consumers are the data sources whose adapters are wired for egress (derived on the server; new sources appear automatically).',
+      consumer: 'Consumer', enable: 'Enabled', pick: 'Proxy', pickPh: 'Pick a proxy from the pool',
+      endpoint: 'Endpoint Override', endpointPh: 'Blank = use the code default',
+      clearBinding: 'Clear binding', clearConfirm: 'Clear the binding for {consumer} (go back to direct and drop the endpoint override)?',
+      needProxy: 'Pick a proxy from the pool before enabling',
     },
     emailChg: {
       title: 'Change Email', newEmail: 'New Email', password: 'Current Password (to verify it\'s you)',

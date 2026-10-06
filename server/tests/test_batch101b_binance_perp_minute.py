@@ -57,7 +57,7 @@ class TestIntervalMapping:
         """`pull_minute('15min')` 必须去打 `15m` 目录（而不是 15min/1m）。"""
         seen: list[str] = []
 
-        def _fake_get(url, timeout=30):
+        def _fake_get(url, timeout=30, proxy=None):
             seen.append(url)
             return None          # 全 404 ⇒ 空帧，但 URL 已留证
 
@@ -72,7 +72,7 @@ class TestIntervalMapping:
         """基类分钟契约给 `'YYYYMMDD HH:MM:SS'`——本源只取日期段，不得因此炸。"""
         seen: list[str] = []
 
-        def _fake_get(url, timeout=30):
+        def _fake_get(url, timeout=30, proxy=None):
             seen.append(url)
             return None
 

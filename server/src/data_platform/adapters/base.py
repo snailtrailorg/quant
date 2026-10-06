@@ -31,6 +31,30 @@ class BaseDataAdapter(ABC):
     # （由 adapter 类属性派生，非 DB JSON——盲审 A-P2/B-P2 双真相源会漂移）
     capabilities: set[str] = set()
 
+    # ——— 批 102a：出口配置（代理 / 端点覆盖）———
+    # 只有**自己发 HTTP** 的 adapter 才置 True（出口可注入代理）；SDK 型（tushare/jqdatasdk
+    # 的官方客户端不暴露 per-call 代理）保持 False ⇒ 为其配代理会被 API 写入侧**响亮拒绝**
+    # （400，见 `web_api/routes/proxies.py`），**不静默绕过**。
+    supports_exit_config: bool = False
+
+    def configure_exit(self, proxy: str | None = None, endpoint: str | None = None) -> None:
+        """注入出口配置。**engine 在构造 adapter 时解析一次并调用**（`_apply_exit_config`）。
+
+        本方法**不触库**——解析在 engine 侧，adapter 只持有结果。这样两点成立：
+        ① 语义＝「每任务启动解析一次」（adapter 由 engine 每任务新建）；
+        ② 直接手搓 adapter 的单测（`_pull`/`list_symbols`）零 DB 耦合。
+        """
+        if proxy and not self.supports_exit_config:
+            raise UnsupportedFeature(
+                f"{self.provider} adapter 未接线代理出口（supports_exit_config=False）——"
+                f"为其配代理不会生效，拒绝静默绕过")
+        self._proxy, self._endpoint = proxy, endpoint          # type: ignore[attr-defined]
+
+    def exit_config(self) -> tuple[str | None, str | None]:
+        """→ `(proxy_dsn, endpoint_override)`；**未注入 ⇒ `(None, None)`＝直连**。不触库。"""
+        return (getattr(self, "_proxy", None),                        # type: ignore[attr-defined]
+                getattr(self, "_endpoint", None))                     # type: ignore[attr-defined]
+
     @abstractmethod
     def pull_daily(self, symbol: str, start: str, end: str, adj=None, kind: str = "astock") -> pd.DataFrame:
         """per-symbol 日线。symbol=ts_code（如 600000.SH）；kind=astock/etf/cb（源接口路由）。"""
@@ -134,6 +158,11 @@ def get_adapter(provider: str) -> BaseDataAdapter:
     if not cls:
         raise ValueError(f"未注册的数据源 adapter: {provider}")
     return cls()
+
+
+def list_adapters() -> dict[str, type[BaseDataAdapter]]:
+    """注册表只读快照（provider → 类）。批 102a 用于派生「可配代理的消费方」集合。"""
+    return dict(_ADAPTERS)
 
 
 @register_adapter

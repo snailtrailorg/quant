@@ -21,6 +21,7 @@ import TradingAccounts from './TradingAccounts.vue'
 import LLMModels from './LLMModels.vue'
 import SmtpCard from '../components/SmtpCard.vue'
 import SmsCard from '../components/SmsCard.vue'
+import ProxyCard from '../components/ProxyCard.vue'
 // 批38：tab 级权限门——每 tab 按后端写端点权限键过滤（审批37 快审 P2-2；后端 fail-closed 兜底不变）
 // 批83a：原 D25 单「外部接口」tab 拆两 tab（数据源=拉取侧 / 交易账号=下单+行情侧）——
 //        域=表=端点族，页签边界与后端两族端点一一对应，多能力接口归交易族（rt_quote/trading）。
@@ -31,6 +32,9 @@ const ALL_TABS = [
     { key: 'llm', i18nKey: 'tabs.llm', c: LLMModels, perm: 'llm_config' },
     { key: 'dataSources', i18nKey: 'tabs.dataSources', c: DataSources, perm: 'system_config' },
     { key: 'tradingAccounts', i18nKey: 'tabs.tradingAccounts', c: TradingAccounts, perm: 'system_config' },
+    // 批102a：代理出口。写在数据源/交易账号之后（域上是它们的**下游配置**：先有源，才轮到
+    // 给这个源配出口）。perm 复用 system_config（后端 proxies 路由同键，不新增 perm 键）。
+    { key: 'proxy', i18nKey: 'tabs.proxy', c: ProxyCard, perm: 'system_config' },
 ]
 const _perms = ref([])
 const tabs = computed(() => ALL_TABS.filter(x => _perms.value.includes(x.perm)))

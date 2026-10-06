@@ -64,6 +64,8 @@ pool_symbols :: id,pool_id,symbol
 pools :: id,name,category,description,created_at
 position_refresh :: ts,rows,task_id,account_id
 position_snapshot :: symbol,direction,volume,frozen,cost_price,pnl,yd_volume,task_id,ts,account_id
+proxy_binding :: consumer,proxy_enabled,proxy_name,endpoint_override,updated_at
+proxy_config :: name,url,notes,enabled,created_at,updated_at
 reconcile_issue :: id,symbol,issue_type,detail,broker_qty,derived_qty,status,first_seen,updated_at,handled_by,note,exempt_qty,exempt_until
 restate_event :: id,kind,sub_kind,symbols,ann_date,payload,created_at
 risk_log :: id,ts,action,symbol,rule,detail,severity,username

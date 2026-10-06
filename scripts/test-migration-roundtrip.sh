@@ -1003,8 +1003,91 @@ chk "upgrade 渲染含三条 sync_kind_config 幂等子句" "$(grep -c 'ON CONFL
 rm -rf "$tmp"
 }
 
+# ── 用例 Q：0135 代理配置体系（expand-only 建两表：池 + 按消费方绑定），2026-10-05 ──
+# 断言清单（三层，缺一层就不算验证过）：
+#   ① DDL 真建出两表且**零 seed**（DSN 属运维态，见迁移 docstring）；
+#   ② **DB 层两条语义约束真在**：`ON DELETE SET NULL`（池行删→绑定行的 proxy_name 变 NULL、
+#      绑定行本身不消失）＋ `CHECK (NOT proxy_enabled OR proxy_name IS NOT NULL)`
+#      （→「启用了却没有代理」被 DB 拒；也是路由层 `PROXY_IN_USE` 报错的**根据**）；
+#   ③ **幂等**：建表用 `IF NOT EXISTS`（本仓 16/17 建表迁移惯例）⇒ 部署中断强制复跑
+#      **不清既有行**、不炸；降级对称回收两表。
+# 无需前置 fixture（expand-only 建表，scratch 空库即「迁移前」形态）。
+FROM_Q=0134
+TO_Q=0135
+
+case_q() {
+echo
+echo "########## 用例 Q：0135 代理配置体系（建两表 + FK/CHECK 语义 + 幂等复跑 + 降级） ##########"
+reset_scratch
+stamp "$FROM_Q"
+
+count_tables() {
+  q "select count(*) from information_schema.tables where table_schema='$SCRATCH' and table_name in ('proxy_config','proxy_binding')"
+}
+
+# --- Q1 upgrade ---
+step up "$TO_Q" "Q1 upgrade（建 proxy_config + proxy_binding）"
+chk "两表已建" "$(count_tables)" "2"
+chk "池表零 seed（DSN 属运维态）" "$(q "select count(*) from proxy_config")" "0"
+chk "绑定表零 seed" "$(q "select count(*) from proxy_binding")" "0"
+
+# --- Q2 CHECK：启用却没选代理 → DB 拒 ---
+if $PSQL -c "SET search_path = $SCRATCH; insert into proxy_binding(consumer,proxy_enabled,proxy_name) values ('bad',true,null)" >/dev/null 2>&1; then
+  echo "  ✗ CHECK 未拦住「enabled 且 name 为空」"; FAIL=1
+else echo "  ✓ CHECK 拦住「enabled 且 name 为空」（往坏里写被 DB 拒）"; fi
+
+# --- Q3 FK ON DELETE SET NULL：池行删 → 绑定行 proxy_name 变 NULL，绑定行不消失 ---
+x "insert into proxy_config(name,url) values ('aws','socks5h://h:1080')"
+x "insert into proxy_binding(consumer,proxy_enabled,proxy_name) values ('binance',false,'aws')"
+chk "绑定指向池行" "$(q "select proxy_name from proxy_binding where consumer='binance'")" "aws"
+x "delete from proxy_config where name='aws'"
+chk "删池行 → proxy_name 置 NULL（ON DELETE SET NULL）" \
+  "$(q "select coalesce(proxy_name,'<NULL>') from proxy_binding where consumer='binance'")" "<NULL>"
+chk "绑定行本身未被级联删除" "$(q "select count(*) from proxy_binding where consumer='binance'")" "1"
+
+# --- Q4 删「被**启用**绑定引用」的池行 → FK 置 NULL 违 CHECK → 整条 DELETE 被拒 ---
+x "insert into proxy_config(name,url) values ('aws2','socks5h://h:1080')"
+x "insert into proxy_binding(consumer,proxy_enabled,proxy_name) values ('okx',true,'aws2')"
+if $PSQL -c "SET search_path = $SCRATCH; delete from proxy_config where name='aws2'" >/dev/null 2>&1; then
+  echo "  ✗ 删被启用绑定引用的池行未被拒（会留下悬空启用态）"; FAIL=1
+else echo "  ✓ 删被启用绑定引用的池行被拒（＝路由层 PROXY_IN_USE 的 DB 层根据）"; fi
+chk "被拒后池行仍在（事务回滚）" "$(q "select count(*) from proxy_config where name='aws2'")" "1"
+
+# --- Q5 强制复跑（部署中断重跑场景）：IF NOT EXISTS ⇒ 不炸且不清既有行 ---
+stamp "$FROM_Q"
+step up "$TO_Q" "Q5 强制复跑（幂等建表）"
+chk "复跑后仍 2 表" "$(count_tables)" "2"
+chk "复跑不清既有池行（aws2 仍在）" "$(q "select count(*) from proxy_config where name='aws2'")" "1"
+chk "复跑不清既有绑定行（okx 仍在）" "$(q "select count(*) from proxy_binding where consumer='okx'")" "1"
+
+# --- Q6 downgrade ---
+step down "$FROM_Q" "Q6 downgrade（回收两表）"
+chk "两表已回收" "$(count_tables)" "0"
+}
+
+# ── 用例 R：0135 离线渲染完整性（不连库） ──
+case_r() {
+echo
+echo "########## 用例 R：0135 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_Q:$TO_Q" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_Q:$FROM_Q" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_Q'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含版本回退" "$(grep -c "SET version_num='$FROM_Q'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含两条幂等建表" "$(grep -c 'CREATE TABLE IF NOT EXISTS' "$tmp/up.sql")" "2"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q） ##########"
 precheck
 case_a
 case_b
@@ -1022,4 +1105,6 @@ case_m
 case_n
 case_o
 case_p
+case_q
+case_r
 finish

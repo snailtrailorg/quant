@@ -185,7 +185,7 @@ class TestListSymbols:
         ]
         calls = []
 
-        def _fake_get(url, timeout=BC._TIMEOUT):
+        def _fake_get(url, timeout=BC._TIMEOUT, proxy=None):
             calls.append(url)
             return pages[len(calls) - 1]
 
@@ -247,7 +247,7 @@ class TestPullDailySavingsValve:
         ad = BC.BinanceAdapter()
         seen: list[str] = []
 
-        def _fake_get(url, timeout=BC._TIMEOUT):
+        def _fake_get(url, timeout=BC._TIMEOUT, proxy=None):
             seen.append(url)
             return None
 
@@ -318,13 +318,30 @@ class TestParseKlineCsv:
         assert len(validate_bars(rows_out)) == 1, "ohlc=0 坏行应在写入门被剔"
 
     def test_get_returns_none_on_404_only(self):
-        """404 = 正常态（未上市/未到账/停牌）；其它 HTTP 错必须抛（不吞）。"""
-        import urllib.error
-        with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("u", 404, "nf", {}, None)):
+        """404 = 正常态（未上市/未到账/停牌）；其它 HTTP 错必须抛（不吞）。
+
+        批 102a：`_get` 由 urllib 迁到 requests（为代理出口）——本钉随实现同步改打桩点，
+        语义不变（404→None、5xx→raise）。
+        """
+        import requests
+        with patch.object(BC.requests, "get", return_value=MagicMock(status_code=404)):
             assert BC._get("http://x") is None
-        with patch("urllib.request.urlopen", side_effect=urllib.error.HTTPError("u", 500, "err", {}, None)):
-            with pytest.raises(urllib.error.HTTPError):
+        bad = MagicMock(status_code=500)
+        bad.raise_for_status.side_effect = requests.HTTPError("500")
+        with patch.object(BC.requests, "get", return_value=bad):
+            with pytest.raises(requests.HTTPError):
                 BC._get("http://x")
+
+    def test_get_passes_proxy_to_requests(self):
+        """批 102a：proxy 非空 ⇒ requests 收到 `proxies={'http','https'}`；None ⇒ 直连。"""
+        r = MagicMock(status_code=200, content=b"ok")
+        with patch.object(BC.requests, "get", return_value=r) as g:
+            BC._get("http://x", proxy="socks5h://h:1080")
+            assert g.call_args.kwargs["proxies"] == {"http": "socks5h://h:1080",
+                                                     "https": "socks5h://h:1080"}
+            g.reset_mock()
+            BC._get("http://x")
+            assert g.call_args.kwargs["proxies"] is None
 
 
 # ---------------------------------------------------------------------------

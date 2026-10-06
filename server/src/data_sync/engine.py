@@ -60,6 +60,31 @@ def _get_pro(provider: str = "tushare"):
     return ds.get_client()
 
 
+def _apply_exit_config(adapter):
+    """批 102a：把该 adapter 的**出口配置**（代理 DSN / 端点覆盖）注入——**构造 adapter 时一次**。
+
+    - 解析真源＝`data_platform/proxy.py`（`proxy_binding` + `proxy_config` 两表，迁移 0135）；
+    - **禁进程级缓存**：每次构造都重新解析（写进程缓存会在测试打桩 DB 后污染后续用例）；
+    - **只对 `supports_exit_config=True` 的 adapter 触库**：SDK 型（tushare/聚宽官方客户端不
+      暴露 per-call 代理）不解析 ⇒ 既不让「无效配置」悄悄存在（写入侧已拒），
+      也让 `test_engine_provider` 这类手搓 cfg 的单测**零 DB 耦合**；
+    - **解析失败回落直连 + 响亮告警**（口径同本文件 `_routing_pilot_on`：配置表读不到＝
+      回退现状路径）。出口代理是**增强**不是前置——一个可选配置的存储异常不该把同步任务
+      整体打挂。**代价（明账）**：表缺/DB 抖动期代理不生效且直连可通时，表象与「正常直连」
+      同形 ⇒ 靠本条 WARNING（journal 可查）+ `POST /api/proxies/{name}/probe` 实测兜底。
+    """
+    if not getattr(adapter, "supports_exit_config", False):
+        return adapter
+    from src.data_platform import proxy as proxy_store
+    try:
+        adapter.configure_exit(proxy=proxy_store.resolve_proxy(adapter.provider),
+                               endpoint=proxy_store.resolve_endpoint(adapter.provider))
+    except Exception as e:
+        logger.warning("provider=%s 出口配置解析失败，本次回落直连（代理不生效）: %s: %s",
+                       adapter.provider, type(e).__name__, e)
+    return adapter
+
+
 def _get_kline_adapter(cfg: dict):
     """K 线数据源 adapter（按 sync_config.provider 路由，24 号多数据源架构）。
 
@@ -104,10 +129,11 @@ def _get_supply_adapter(cfg: dict):
     from src.data_platform.adapters.base import get_adapter
     provider = _provider_of(cfg)
     try:
-        return get_adapter(provider)
+        adapter = get_adapter(provider)
     except ValueError:
         logger.warning("未注册的数据源 provider=%s，回退 tushare", provider)
-        return get_adapter("tushare")
+        adapter = get_adapter("tushare")
+    return _apply_exit_config(adapter)
 
 
 def _routing_pilot_on() -> bool:
