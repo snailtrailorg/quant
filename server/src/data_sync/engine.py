@@ -586,6 +586,14 @@ def _ts_to_vt_prefix(ts_code: str) -> str:
         return ts_code
 
 
+# 批 108·步 2：`security_master.session_id` 的显式取值（真源＝`market_hours.session_id` 主键，
+# 迁移 0092 种子 `astock_main`/`crypto_247`）。该列 `NOT NULL DEFAULT 'astock_main'`——
+# **必须显式传**：否则 crypto 行会静默落进 A 股 session（`SMClient.upsert_rows` 已加
+# 「13 列且 session_id 非空」校验兜底，漏传即响亮 ValueError）。
+SM_SESSION_ASTOCK = "astock_main"
+SM_SESSION_CRYPTO = "crypto_247"
+
+
 def _sm_upsert(rows) -> None:
     """批 56a·M1 填充链：security_master upsert（fail-soft——SM 失败不打断数据同步）。
 
@@ -642,7 +650,7 @@ def _sync_astock_list(cfg: dict, end_date: str, backfill_from: str | None = None
     # (vt.rsplit+[""])[1]=无后缀安全提取（脏 ts_code 落 try 内 fail-soft）
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
                 (vt.rsplit(".", 1) + [""])[1], "stock", normalize_board(r[3]), r[1], r[2],
-                100, 0.01, "T+1", r[5], r[6])
+                100, 0.01, "T+1", r[5], r[6], SM_SESSION_ASTOCK)
                for r in rows if r[0])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
@@ -676,7 +684,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
         conn.commit()
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
                 (vt.rsplit(".", 1) + [""])[1], "convertible", None, r[1], None,
-                10, 0.001, "T+0", r[12], r[13])
+                10, 0.001, "T+0", r[12], r[13], SM_SESSION_ASTOCK)
                for r in rows if r[0])
     def _norm_date(s, fallback="") -> str:
         """YYYYMMDD→YYYY-MM-DD；脏值（空串/'None'/NaN）回落 fallback（发行日 list_date）再兜 2010-01-01。"""
@@ -715,7 +723,7 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
         conn.commit()
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
                 (vt.rsplit(".", 1) + [""])[1], "etf", None, r[1], None,
-                100, 0.001, "T+1", r[5], None)
+                100, 0.001, "T+1", r[5], None, SM_SESSION_ASTOCK)
                for r in rows if r[0])
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
@@ -1054,6 +1062,39 @@ _CRYPTO_TAIL_GRACE = 2
 _PARTIAL_FREEZE_MAX_DAYS = 10
 
 
+def _sm_upsert_crypto(adapter, syms) -> None:
+    """批 108·步 2：crypto 永续的**身份 + 生命周期**写入 `security_master`（裁定 A / G①）。
+
+    行形状（13 列，见 `SMClient.upsert_rows`）：
+
+    - `market='crypto'`、`exchange=adapter.venue`（`BINANCE`/`OKX`）、`category='perp'`
+    - `session_id='crypto_247'`、`trade_phase='T+0'`（crypto 24/7 连续、当日可平）
+    - `list_date = adapter.symbol_inception(sym)`——**真上币日**；不可得 ⇒ `None`
+      （**显式「未知」**，裁定 F：禁用源可达性/首行数据冒充；对账按 `uncertain` 处理）
+    - `vt_symbol = <源符号>.<venue>`（与 `to_bar_rows` 的落库形态同源，防 SM 与 bar 表两套键）
+
+    **为什么在拉取前写**：元数据与拉取成败无关，且**对账需要期望集**——即使本轮全窗 0 行
+    （OKX 7/485 那种「某标的整窗无数据」），SM 也须已有该标的，否则期望集为空 ⇒ **对账看不见它**。
+
+    ⚠️ **元数据可得性（本批边界，挂账 G-4）**：`multiplier`（合约面值）/ `tick_size`（最小变动）
+    在**批量站拿不到**（Binance `fapi` 被墙 ⇒ 无 `exchangeInfo`；OKX `instruments` 有
+    `ctVal`/`tickSz` 但未接线）。⇒ 当前落**列默认值**（1 / 0.01），对 crypto **目前零消费者**
+    （消费方是回测费用/限价对齐，均未接 crypto）故无实害；但**语义上是近似**，
+    接 crypto 回测/交易前必须补真值。
+    """
+    venue = adapter.venue
+    if not venue:
+        # 单交易所源的 adapter 必须声明 venue——否则 vt_symbol 拼不出、SM 行全脏
+        raise RuntimeError(f"{adapter.provider} adapter 未声明 venue（crypto SM 写入必需）")
+    rows = []
+    for sym in syms:
+        s = str(sym)
+        vt = s if s.upper().endswith("." + venue) else f"{s}.{venue}"
+        rows.append((vt, "crypto", venue, "perp", None, None, None,
+                     1, 0.01, "T+0", adapter.symbol_inception(sym), None, SM_SESSION_CRYPTO))
+    _sm_upsert(rows)
+
+
 def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
                              first_run_days: int, *, label: str, enum_hint: str,
                              freeze_on_partial: bool = False):
@@ -1102,6 +1143,10 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
             # 符号枚举失败必须**响亮**：静默返回 0 行会让 sync() 记 success 并推进游标
             # （＝把整段窗口的数据洞掩埋）。raise 走 sync() 的 except → error + 游标不动 + 告警。
             raise RuntimeError(f"{label} 符号枚举为空（{enum_hint}）")
+        # 批 108·步 2（裁定 A）：标的身份/生命周期入 SM——**在拉取前**写，与拉取成败无关。
+        # 元数据独立于数据；且**对账需要期望集**：某标的整窗 0 行时 SM 仍须有它（否则看不见）。
+        # fail-soft（_sm_upsert 内部吞异常记 warning），不阻断主同步。
+        _sm_upsert_crypto(adapter, syms)
         total = len(syms)
         pulled = saved = 0
         failed: dict[str, str] = {}   # sym → 首轮错误（dict 便于二轮补拉按标的清账）
@@ -1858,17 +1903,25 @@ def _list_static_ts_codes(kind: str) -> list[str]:
 
 
 def _get_list_date(kind: str, ts_code: str) -> str:
-    """查某标的上市日（YYYYMMDD）。查不到回退 Tushare 最早 2010。"""
-    table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
+    """查某标的**产生时间**（上市/上币日，YYYYMMDD）；不可得 ⇒ 回退 `_TUSHARE_MIN_DATE`。
+
+    批 108·步 2（裁定 G①）：**真源改读 `security_master.list_date`**。原读
+    `asset_static_info` / `etf_basic_info` / `cb_basic_info` 三张**源表**——与 SM 构成
+    **inception 双源**（两处都由同一 df fan-out 写 ⇒ 可漂移），且那三表是 **tushare 专属**
+    形状（§九.6「换源即错」）。SM 是**跨市场**主档 ⇒ 唯一真源，crypto 与 astock 同形取用。
+
+    `kind` 参数保留（5 个调用点同签名），但本实现**不再按 kind 选表**——SM 按 `vt_symbol` 查。
+    回退值 `_TUSHARE_MIN_DATE` 仍为 **tushare 专属**（挂账 G-3：真换源时须换）。
+    """
+    vt = _ts_to_vt_prefix(ts_code)
     with get_conn() as conn:
-        cur = conn.execute(f"SELECT list_date FROM {table} WHERE ts_code=%s", (ts_code,))
+        cur = conn.execute("SELECT list_date FROM security_master WHERE vt_symbol=%s", (vt,))
         row = cur.fetchone()
     ld = row[0] if row else None
     if not ld or str(ld).strip() in ("", "None", "nan"):
         return _TUSHARE_MIN_DATE
-    s = str(ld).strip()
-    # 形如 19901219 / 1990-12-19
-    s = s.replace("-", "").replace("/", "")
+    # 形如 1990-12-19 / 19901219
+    s = str(ld).strip().replace("-", "").replace("/", "")
     if len(s) != 8 or not s.isdigit():
         return _TUSHARE_MIN_DATE
     # 早于 2010 的从 2010 起（Tushare daily 最早）

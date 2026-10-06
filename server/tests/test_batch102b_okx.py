@@ -506,6 +506,7 @@ class TestFetchSupply:
 
 class _FakeAdapter:
     provider = "okx"
+    venue = "OKX"              # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
 
     def __init__(self, symbols=("BTC-USDT-SWAP", "ETH-USDT-SWAP"), empty=False):
         self._symbols = list(symbols)
@@ -513,6 +514,9 @@ class _FakeAdapter:
 
     def list_symbols(self, refresh=False):
         return list(self._symbols)
+
+    def symbol_inception(self, symbol):    # 批 108·步 2：生命周期未知（本测试不关心）
+        return None
 
     def fetch_supply(self, kind, sub_kind=None, **params):
         assert (kind, sub_kind) == ("bar_daily", "perp")

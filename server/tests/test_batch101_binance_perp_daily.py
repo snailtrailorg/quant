@@ -256,15 +256,17 @@ class TestPullDailySavingsValve:
             ad.pull_daily(sym, start, "20240101")
         return seen
 
-    def test_pre_floor_history_not_silently_cut(self):
-        """反证：起点早于月包 floor 时**不得**把起点抬到 floor。
+    def test_pre_floor_no_longer_wastes_404s(self):
+        """修正（批 108·步 2）：起点早于**实测源下界**时须抬到 `2019-12-31`。
 
-        否则 2019-09~2019-12 的逐日历史静默消失，而 config 声明的
-        `start_floor='2019-09-08'` 就变成谎言（静默缺口＝本仓 P0 病类）。
+        旧行为把起点留在 `2019-09-08`，对 2019-09~2019-12 逐日打约 115 次必 404 的请求
+        （批量站**根本没有** pre-`2019-12-31` 的包）——「省流阀」实为「费流阀」。
+        但**不得**多抬到 `2020-01-01`（月包 floor）：那会漏掉 `2019-12-31` 这天
+        （它在**日包**里，是源可达的最早一天）。两个边界一起钉住。
         """
         urls = self._urls(probe=(2020, 1))
-        assert any("BTCUSDT-1d-2019-09-08.zip" in u for u in urls), "pre-floor 日包被裁掉"
-        assert any("/daily/" in u and "BTCUSDT-1d-2019-12-31.zip" in u for u in urls)
+        y2019 = [u.rsplit("/", 1)[-1] for u in urls if "-2019-" in u]
+        assert y2019 == ["BTCUSDT-1d-2019-12-31.zip"], f"pre-floor 请求未收敛到源下界: {y2019}"
         assert any("/monthly/" in u and "BTCUSDT-1d-2020-01.zip" in u for u in urls), "月包未接管 2020+"
 
     def test_late_listed_symbol_clamped_to_probe(self):
@@ -492,6 +494,7 @@ class TestCryptoWindow:
 
 class _FakeAdapter:
     provider = "binance"
+    venue = "BINANCE"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
 
     def __init__(self, symbols=("BTCUSDT", "ETHUSDT"), rows_per_symbol=1, empty=False):
         self._symbols = list(symbols)
@@ -500,6 +503,9 @@ class _FakeAdapter:
 
     def list_symbols(self, refresh=False):
         return list(self._symbols)
+
+    def symbol_inception(self, symbol):    # 批 108·步 2：生命周期未知（本测试不关心）
+        return None
 
     def fetch_supply(self, kind, sub_kind=None, **params):
         assert (kind, sub_kind) == ("bar_daily", "perp")

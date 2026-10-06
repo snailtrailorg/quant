@@ -106,6 +106,7 @@ class OkxAdapter(BaseDataAdapter):
     """OKX USDⓈ-M 永续公开数据（`history-candles`；非实时）。"""
 
     provider = "okx"
+    venue = "OKX"             # 批 108·步 2：vt_symbol 后缀（与 `_SYMBOL_SUFFIX` 同值）
     # 供给项（sync_id）：本批只做日线；盘中 bar / 实时腿留后续（设计 §4.5：实时未做不动）
     capabilities = {"okx_perp_daily"}
     # 契约层能力声明（粒度＝kind）。bar_daily 非聚合域 ⇒ sub_kinds 必须为空
@@ -120,6 +121,7 @@ class OkxAdapter(BaseDataAdapter):
 
     def __init__(self):
         self._symbols: list[str] | None = None
+        self._insts: list[dict] | None = None     # 批 108·步 2：instruments 响应缓存（list_symbols/symbol_inception 共用）
         self._req_times: deque[float] = deque()   # 滚动窗口节流的时间戳（实例级；每任务新建）
         # 批 105：会话级连接复用——原实现每请求新建 TCP+TLS(+SOCKS) 连接，485 标的 × 多页
         # ＝ 数千次握手全压同一代理出口（连接表/限流），是 `Connection reset` 的第一嫌疑。
@@ -203,14 +205,43 @@ class OkxAdapter(BaseDataAdapter):
         会白耗配额并让 `actual_days` 虚低）。当前**按设计 §4.2 只做 settleCcy 过滤**——
         证据不足时不预先收窄。
         """
+        if refresh:
+            self._insts = None            # 批 108·步 2：refresh 须让 instruments 缓存**一并失效**
         if self._symbols is not None and not refresh:
             return self._symbols
-        body = self._request(_INSTRUMENTS, {"instType": "SWAP"})
-        insts = body.get("data") or []
         self._symbols = sorted(
-            str(it.get("instId")) for it in insts
+            str(it.get("instId")) for it in self._instruments()
             if it.get("instId") and str(it.get("settleCcy", "")).upper() == "USDT")
         return self._symbols
+
+    def _instruments(self) -> list[dict]:
+        """`instruments?instType=SWAP` 全量 `data`（实例级缓存）——`list_symbols` 与
+        `symbol_inception` **共用一次请求**（批 108·步 2）。"""
+        if self._insts is None:
+            body = self._request(_INSTRUMENTS, {"instType": "SWAP"})
+            self._insts = body.get("data") or []
+        return self._insts
+
+    def symbol_inception(self, symbol: str) -> str | None:
+        """`listTime`（交易所自报**上币时间**，毫秒 epoch 字符串）→ ISO 日期；缺失/畸形 ⇒ `None`。
+
+        批 108·步 2：`listTime` **一直在响应里、此前被丢弃**（`list_symbols` 只取 `instId`）。
+        它是**真上币日**，与 `available_range`（源可达下界 `2020-01-01`）**不同义**——
+        实测差 ≈2 月（`listTime=2019-11-12` vs K 线可达 `2020-01-01`，迁移 `0137` prod 实测）。
+        ⇒ 本值供 **inception**（SM `list_date`），**不得**拿去当源界（裁定 F / §九.3）。
+        """
+        inst = str(symbol).split(".")[0]
+        for it in self._instruments():
+            if str(it.get("instId")) == inst:
+                ms = it.get("listTime")
+                if ms in (None, ""):
+                    return None
+                try:
+                    return datetime.fromtimestamp(
+                        int(ms) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+                except (TypeError, ValueError):
+                    return None
+        return None
 
     # ——— 源可达区间（批 108·步 1）———
 

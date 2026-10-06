@@ -13,10 +13,16 @@
 **本迁移只插两行配置**（expand-only：无 DDL、无 DELETE/RENAME）：
 1. `sync_config.binance_perp_daily`——provider=`binance`（新数据源 provider，0 密钥）、
    `trade_day_filter='none'`（crypto = **连续轴**，无交易日历）、`start_floor='2019-09-08'`
-   （USDT-M 永续上线日；实测月包自 2020-01、更早回退日包）、`supports_backfill=true`
+   （USDT-M 永续**上线日**）、`supports_backfill=true`
    （handler 真读 `backfill_from`）、`schedule='30 8 * * *'`。
    ⚠️ `data_sync_scheduler` 以**北京时区**解释 cron（见 `tasks.data_sync_scheduler` 的 TZ_CN），
    故 08:30 北京 = **00:30 UTC**——正是 UTC 昨日文件落盘之后（T+1 语义）。
+   ⚠️ **注释更正（批 108·步 2，2026-10-07 实测）**：本行原注「实测月包自 2020-01、更早回退
+   日包」隐含「日包更早」——经探 `data.binance.vision` 复核为**假**：**日包最早也是
+   `2019-12-31`**（`2019-12-30`→404；1d/1h/1m/15m 四 interval 同值），与月包 floor 同期；
+   **pre-`2019-12-31` 在批量站根本不存在**（`2019-09-08` 是上线日，早期数据未进批量集）。
+   ⇒ 该列是**上线日**、**不是源可达下界**；源界已迁 `BinanceAdapter.available_range()`
+   ＝`'2019-12-31'`（批 108 步 1）。本列的语义正名见批 108 步 3（拆 `start_floor` 三义）。
 2. `sync_kind_config.binance_perp_daily`——归置 `(kind=bar_daily, sub_kind=perp)` → `bar_1d`；
    `sub_kind='perp'` 是**新增子类**（原 bar_daily 只有 stock/etf/convertible）。
 

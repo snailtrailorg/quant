@@ -47,7 +47,6 @@ _COLS = ["open_time", "open", "high", "low", "close", "volume", "close_time",
          "quote_volume", "count", "taker_buy_volume", "taker_buy_quote_volume", "ignore"]
 
 _MONTHLY_FROM = (2020, 1)                    # 实测：月包自 2020-01（2019-09/10 → 404）
-_FLOOR_DATE = date(2020, 1, 1)               # 月包 floor 的 date 形态（_pull 省流阀的边界判据）
 _DELIVERY_RE = re.compile(r"_[0-9]{6}$")     # BTCUSDT_210129 = 交割合约（非永续，排除）
 
 # 批 108·步 1：**源可达下界**（窗口第四边界的真源）——与上面两个「批量路径优化边界」**不同义**：
@@ -56,6 +55,7 @@ _DELIVERY_RE = re.compile(r"_[0-9]{6}$")     # BTCUSDT_210129 = 交割合约（�
 #   `2019-09-08`＝USDT-M **上线日**（≠ 源可得）；`2020-01-01`＝月包 floor。
 #   ⇒ 用后两者当源界会让 §5.3 的 unreachable 段**永不触发**（永久 phantom gap，双盲审② A2 P1-a）。
 _SOURCE_EARLIEST = "2019-12-31"
+_SOURCE_EARLIEST_DATE = date(2019, 12, 31)   # 同上，date 形态（`_pull` 起点地板的判据）
 
 # 内部 freq → 批量站 interval 目录名（**映射真源**；`to_source_freq` 暴露给契约层）。
 # freq 同时是 `bar_{freq.lower()}` 表名后缀（db.save_bars 的 insert 模板即如此）——
@@ -152,6 +152,7 @@ class BinanceAdapter(BaseDataAdapter):
     """币安 USDⓈ-M 永续公开数据（批量历史；非实时）。"""
 
     provider = "binance"
+    venue = _VENUE            # 批 108·步 2：vt_symbol 后缀（'BINANCE'）——crypto handler 写 SM 用
     # 供给项（sync_id）：币安永续公开数据——日线（批 101）+ 小时/1min/15min（批 101b）
     capabilities = {"binance_perp_daily", "binance_perp_hourly",
                     "binance_perp_1min", "binance_perp_15min"}
@@ -250,7 +251,7 @@ class BinanceAdapter(BaseDataAdapter):
         - `earliest` ＝ **`2019-12-31`**——USDⓈ-M 批量集实际最早**日包**（`2019-12-30`→404 /
           `2019-12-31`→200）；**四个 interval 一致**（`1d`/`1h`/`1m`/`15m` 逐一同测）。
           三个易混值须辨（设计 §5.1）：`2019-09-08` ＝ **上线日**（≠ 批量源可得）；
-          `2020-01`/`_FLOOR_DATE` ＝ **月包** floor（仅批量路径的优化边界）——**都不是本源下界**。
+          `2020-01`/`_MONTHLY_FROM` ＝ **月包** floor（仅批量路径的优化边界）——**都不是本源下界**。
         - `latest` ＝ `None`（随今日滚动）；实际可用上界另受 `publish_lag` 与游标契约约束。
         """
         return (_SOURCE_EARLIEST, None)
@@ -272,26 +273,29 @@ class BinanceAdapter(BaseDataAdapter):
         长区间（>90 天）先探测最早**月包**，把起点抬到有数据处——省掉成片 404 空跑。
         月包探测统一用 `1d` 月包（最便宜，且各 interval 的上线月相同——同一合约同刻上市）。
 
-        ⚠️ **省流阀不得裁掉 pre-floor 日包区间**：月包自 `_MONTHLY_FROM` 起，而日包更早
-        （`start_floor='2019-09-08'` 的 USDT-M 上线日就在月包 floor 之前）。若无条件
-        `s = max(s, 月包起点)`，请求起点早于 floor 时会被抬到 floor ⇒ **静默丢掉
-        2019-09~2019-12 的逐日历史**（且 config 里声明的 start_floor 变成谎言）。
-        故：仅当请求起点已 ≥ floor、或探到的月包起点**晚于** floor（＝该符号上线晚）时才上抬。
+        **实测修正（批 108·步 2）**：旧版本此处写着「日包更早，故起点早于月包 floor 时须
+        保留原起点走日包，否则静默丢掉 2019-09~2019-12 逐日历史」——该前提**经实测证伪**：
+        `data.binance.vision` 的**日包**最早也是 `2019-12-31`（`2019-12-30`→404），与月包
+        floor 同期；**pre-`2019-12-31` 在批量站根本不存在**（`2019-09-08` 是 USDT-M
+        **上线日**，交易所早期数据未进批量集）。⇒ 旧逻辑对 `start=2019-09-08` 的长区间会
+        **静默发起约百次必 404 的日包请求**（「省流阀」实为「费流阀」），并让 config 里
+        声明的 `start_floor` 看起来像谎言。
+
+        现统一抬到 `max(请求起点, 实测源下界, 该符号最早月包)`——与 `available_range(kind)`
+        的源界**同值**（模型窗口若已取 max，此处为幂等优化，不改变结果）。
         """
         s, e = _to_date(start), _to_date(end)
         if s > e:
             return pd.DataFrame()
         if (e - s).days > 90:
+            s = max(s, _SOURCE_EARLIEST_DATE)     # 实测源下界（日包＝月包同期，见上）
             probe = self.first_available_month(sym)
             if probe:
-                pstart = date(probe[0], probe[1], 1)
-                if s < _FLOOR_DATE:
-                    # 起点在 floor 之前：只有探到「晚于 floor 的月包起点」（＝上线晚）才上抬；
-                    # 探到的恰是 floor 当月 ⇒ 该符号可能自 2019 即有数据，保留原起点走日包。
-                    if pstart > _FLOOR_DATE:
-                        s = pstart
-                else:
-                    s = max(s, pstart)
+                # 仅当**该符号月包起点晚于月包全局最早月**（＝该符号上线晚）才上抬。若 probe 恰等于
+                # `_MONTHLY_FROM`（2020-01）⇒ 该符号自批量集最早即有数据，**不得**上抬到 2020-01-01
+                # ——那会漏掉 `2019-12-31`（它在**日包**里，是源可达的最早一天）。
+                if (probe[0], probe[1]) > _MONTHLY_FROM:
+                    s = max(s, date(probe[0], probe[1], 1))
             else:
                 s = max(s, e - timedelta(days=30))
         keys = _period_keys(s, e)

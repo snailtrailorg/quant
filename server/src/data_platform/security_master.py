@@ -161,13 +161,26 @@ class SMClient:
     def upsert_rows(self, rows: list[tuple]) -> int:
         """填充链写侧（engine 同步任务调用——executemany 单批，18 号 §2.1）。
 
-        rows 元组序=(vt_symbol, market, exchange, category, board, name, industry,
-        multiplier, tick_size, trade_phase, list_date, delist_date)。
+        rows 元组序（**13 列，批 108·步 2 起**）=(vt_symbol, market, exchange, category, board,
+        name, industry, multiplier, tick_size, trade_phase, list_date, delist_date, **session_id**)。
         品类值随行携带（新标的 INSERT 不落 server_default 错值——转债 T+0/乘数 10 等）；
         DO UPDATE 字段级更新（29 §四：append-only 会让 delist_date/名称变更永远为空）；
-        list_date 空值不抹旧（COALESCE），delist_date 恒覆盖（退市事实只进不退）。
+        `list_date` 空值不抹旧（COALESCE），`delist_date` 恒覆盖（退市事实只进不退）。
+
+        **`session_id` 为何必须有（批 108·步 2）**：该列 `NOT NULL DEFAULT 'astock_main'`
+        （迁移 `0092`）——crypto 行若走旧 12 列签名会**落进 A 股 session**（语义污染：
+        `market_hours` 时段判定/日锚全错）。⇒ 由调用方**显式**给出（crypto＝`'crypto_247'`，
+        astock 族＝`'astock_main'`）。
+        **新列追加在末尾**（而非插中段）是刻意的：漏改的调用点会因元组长度不足**响亮失败**
+        （`ValueError`），而不是把 `list_date` 静默塞进 `session_id`。
         """
-        clean = [(*r[:9], r[9], _null_date(r[10]), _null_date(r[11])) for r in rows]
+        rows = list(rows)
+        bad = [r for r in rows if len(r) < 13 or not r[12]]
+        if bad:
+            raise ValueError(
+                f"upsert_rows 需 13 列且 session_id 非空（批 108 起）；"
+                f"收到 {len(bad)}/{len(rows)} 行不合规，首行={tuple(bad[0])[:4]}…")
+        clean = [(*r[:9], r[9], _null_date(r[10]), _null_date(r[11]), r[12]) for r in rows]
         if not clean:
             return 0
         from .db import get_conn
@@ -175,12 +188,12 @@ class SMClient:
             with conn.cursor() as cur:
                 cur.executemany(
                     "INSERT INTO security_master (vt_symbol, market, exchange, category, board, name, "
-                    "industry, multiplier, tick_size, trade_phase, list_date, delist_date) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
+                    "industry, multiplier, tick_size, trade_phase, list_date, delist_date, session_id) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
                     "ON CONFLICT (vt_symbol) DO UPDATE SET "
                     "name=EXCLUDED.name, industry=EXCLUDED.industry, board=EXCLUDED.board, "
                     "multiplier=EXCLUDED.multiplier, tick_size=EXCLUDED.tick_size, "
-                    "trade_phase=EXCLUDED.trade_phase, "
+                    "trade_phase=EXCLUDED.trade_phase, session_id=EXCLUDED.session_id, "
                     "list_date=COALESCE(EXCLUDED.list_date, security_master.list_date), "
                     "delist_date=EXCLUDED.delist_date, updated_at=now()", clean)
             conn.commit()

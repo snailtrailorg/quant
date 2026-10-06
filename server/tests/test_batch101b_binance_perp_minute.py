@@ -179,6 +179,8 @@ class TestCryptoWindow:
 class _FakeBinance:
     """最小供给面替身：记录调用 + 按给定日造行。"""
 
+    venue = "BINANCE"          # 批 108·步 2：crypto SM 写入需要（handler 在拉取前调 _sm_upsert_crypto）
+
     def __init__(self, symbols=("BTCUSDT",), day: date | None = None, empty=False, boom=False):
         self._symbols = list(symbols)
         self._day = day
@@ -188,6 +190,9 @@ class _FakeBinance:
 
     def list_symbols(self, refresh=False):
         return list(self._symbols)
+
+    def symbol_inception(self, symbol):    # 批 108·步 2：生命周期未知（本测试不关心）
+        return None
 
     def fetch_supply(self, kind, sub_kind=None, **p):
         self.calls.append({"kind": kind, "sub_kind": sub_kind, **p})

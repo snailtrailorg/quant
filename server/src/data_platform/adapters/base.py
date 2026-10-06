@@ -27,6 +27,10 @@ class BaseDataAdapter(ABC):
     to_bar_rows 转统一 (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)。
     """
     provider: str = ""
+    # 批 108·步 2：本源对应的**交易所后缀**（vt_symbol 的 `.XXX` 段）。**仅「单交易所源」
+    # （crypto）有意义**——多交易所源（tushare/joinquant 一条 sync 覆盖沪深北）留空，
+    # 其交易所由 ts_code 派生（`schema.to_vt_symbol`）。
+    venue: str = ""
     # 能力矩阵（24 号）：该平台能提供的同步项 sync_id 集合。供给矩阵只列这些
     # （由 adapter 类属性派生，非 DB JSON——盲审 A-P2/B-P2 双真相源会漂移）
     capabilities: set[str] = set()
@@ -145,6 +149,20 @@ class BaseDataAdapter(ABC):
         按日历换算，**本方法统一以自然日计**。
         """
         return 0
+
+    def symbol_inception(self, symbol: str) -> str | None:
+        """该标的的**产生时间**（上币/上市日），ISO `'YYYY-MM-DD'`；**不可得 ⇒ `None`＝显式「未知」**。
+
+        窗口起点第一地板 `inception` 的**源侧取值口**（设计 §八.2 / §5.4）。三条约法：
+
+        1. **禁以源可达性冒充**（裁定 F / §九.3）：`available_range().earliest` 是**源属性**、
+           `first_available_month()` 是**批量路径优化边界**——二者都 ≠ 上币日（OKX 差 ≈2 月、
+           Binance 差 ≈4 月，两手实测）。拿它们当 inception ⇒「**不认为缺失**」（静默）。
+        2. **不可得就返回 `None`**：调用方须按 §5.4 将该标的/族标 `uncertain`
+           （**抑制一切缺口主张**），**不得**退化成某个「看起来合理」的日期。
+        3. 默认 `None` ＝本源不提供标的级生命周期（如 Binance：`fapi` 被墙 ⇒ `onboardDate` 不可得）。
+        """
+        return None
 
     # —— 归一化（带默认实现，Tushare 直通，聚宽/米筐覆写，24 号 §2.1）——
     def to_source_symbol(self, symbol: str) -> str:
