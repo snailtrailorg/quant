@@ -1,5 +1,9 @@
 # 批 84 · 回滚诚实性：让「自动回滚」不再掩盖 schema–代码撕裂
 
+> ✅ **2026-10-07 威廉姆裁定（开工许可）**：探针选 **A**；开关语义 **（i）+（iii）**（（iii）根治在批 85，本条只做开关语义对齐）；**（ii）无条件做**（最低限度文案诚实，不得再输出「已自动回滚」掩盖 schema 未回退）。
+> 判据（非成本）：**执行面闭合**——撕裂发生在「运行时读表」，B 只在启动期设防、防不住它要防的东西；A 的清单从**代码树导出**（非手写）⇒ 真源仍是代码，不制造第二真源。
+> 关联：本条与 `批 85·b` 同根因（84＝管道诚实性，85＝迁移纪律），实施时**批内不展开 85 的 DDL 门立法**，只对齐开关语义。
+
 > 立项 2026-09-30（威廉姆裁定「立」）。来源＝批 83a 拆表过渡期勘察（对 prod 只读实查）时发现：
 > 拆表迁移（`DROP external_interface`）与「失败自动回滚」这张安全网**互相矛盾**，且回滚后的
 > 复验**看不见**这个矛盾。本条**与 83a 无关**——83a 只是把它照出来的那束光。
@@ -38,22 +42,22 @@
 
 ## 产出
 
-1. **代码↔schema 兼容探针通道**（本批核心，二选一请审；**推荐 A**）
-   - **A（推荐）**：新增 `deploy/compat/<release_id>.json` 兼容清单——由 release 阶段从**待部署 release 树**
+1. **代码↔schema 兼容探针通道**（本批核心）—— ✅ **已裁定 A**：
+   - ✅ **A（裁定）**：新增 `deploy/compat/<release_id>.json` 兼容清单——由 release 阶段从**待部署 release 树**
      导出该版代码的运行时表/列依赖（来源：`src/data_platform/schema_expectations.txt` 同源机制或新增
      导出脚本），装位为 `/usr/local/sbin/quant-hbcheck` 的兄弟动作 `quant-hbcheck compat`（复用其 psql 通道）；
      回滚后用它断言**回滚目标版的清单 ⊆ 当前库实际 schema**。
-   - B（轻量但覆盖窄，不推荐）：回滚目标版跑 `quant-importsmoke-wrapper` + `/readyz` 加「关键表存在性」——
+   - B（轻量但覆盖窄，**已否决**）：回滚目标版跑 `quant-importsmoke-wrapper` + `/readyz` 加「关键表存在性」——
      只能覆盖启动期，运行时读表仍可漏。
 2. `deploy/playbooks/rollback-tasks.yml`：在「回滚复验」（`:138`/`:163`）之后**新增兼容复验任务**；失败 →
    输出固定词条 **`SCHEMA_CODE_SPLIT`（schema–代码撕裂）** + 非零退出 + 告警，**并明确声明「不建议前滚/回滚
    自动处置，须人工」**。
 3. `deploy/playbooks/release.yml`：
    - ① rescue(6-8) 复用同一兼容复验（不得只在 rollback.yml 做）；
-   - ② **`auto_rollback_disabled` 语义一致化**（三选一，**推荐 (i)+(iii)**）：
-     (i) 置该标志时 rescue(6-8) **也不自动回滚**——改为「停在已切换态 + 明确人工 runbook」，让「禁用自动回滚」名副其实；
-     (ii) 保持行为但把回滚文案里的「已自动回滚」改为「已回滚代码、**schema 未回退**」并打印实际 alembic 版本（最低限度诚实）；
-     (iii) DDL 门**拒绝** contract 型迁移（不再「给个 flag 就放行」）——根治在批 85，本条只做开关语义对齐。
+   - ② **`auto_rollback_disabled` 语义一致化**（✅ **已裁定 (i)+(iii)，且 (ii) 无条件做**）：
+     (i) ✅ **裁定**：置该标志时 rescue(6-8) **也不自动回滚**——改为「停在已切换态 + 明确人工 runbook」，让「禁用自动回滚」名副其实；
+     (ii) ✅ **裁定·无条件做**：把回滚文案里的「已自动回滚」一律改为「已回滚代码、**schema 未回退**」并打印实际 alembic 版本（最低限度诚实；**无论 (i) 是否落地都必须先做**）；
+     (iii) ✅ **裁定·本批只做开关语义对齐**：DDL 门**拒绝** contract 型迁移（不再「给个 flag 就放行」）——**根治立法在批 85，本批不展开**。
 4. 新增闸门 `server/tests/test_release_rollback_honesty.py`：静态断言（读 yml，`yaml.safe_load` + 结构断言）
    ① rescue(6-8) 与 `rollback.yml` **都**含兼容复验任务（防未来被删）；② `allow_contract` 与「自动回滚代码」
    不得共存而不声明；③ 回滚路径的失败词条必须含 `SCHEMA_CODE_SPLIT`。
