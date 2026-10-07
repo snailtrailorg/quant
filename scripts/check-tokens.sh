@@ -5,7 +5,11 @@
 set -u
 cd "$(dirname "$0")/.."
 BASE_FILE=web/scripts/.token-baseline
-count_px()   { grep -rEo "(margin|padding): ?[0-9]+px" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | wc -l; }
+# 批111：补盲区。原正则 `(margin|padding): ?[0-9]+px` **只匹配单值简写** ⇒ 长写
+# (`margin-bottom: 12px`)、多值简写 (`margin: 0 0 12px`)、混合 (`padding: var(--sp-2) 16px`)
+# 一律**漏计**（批91 实证：新增一处内联 `12px` 门纹丝不动）。盲区实测 175 处 vs 现看守 39 处。
+# 现覆盖＝margin|padding[-(top|bottom|left|right)]? 的**任意形态**值含 `Npx`（declaration 级计 1）。
+count_px()   { grep -rEoh "(margin|padding)(-(top|bottom|left|right))?: ?[^;\"]*[0-9]+px" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | wc -l; }
 # hex 排除 K 线数据面色（#defa*——图表数据非 UI 语义色）
 count_hex()  { grep -rEoh "#[0-9a-fA-F]{3,6}" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | grep -v "^#defa" | wc -l; }
 # 批24：字号旁路第三维（px/em/rem/% 相对单位同属排版旁路；驼峰 fontSize=编辑器/图表/头像 API 参数非 CSS 排版，天然不匹配）
