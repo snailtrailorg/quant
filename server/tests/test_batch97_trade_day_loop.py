@@ -153,6 +153,8 @@ class TestTier1TradeDayLoop:
         with patch.object(engine, "_data_ready_end_date", return_value=ready), \
              patch.object(engine, "_trade_dates_in_range",
                           return_value=trade_days), \
+             patch.object(engine, "_local_dates",
+                          return_value=set(trade_days or [])), \
              patch.object(engine, "_get_rate_ds", return_value=_FakeDS()), \
              patch.object(engine, "_get_supply_adapter", return_value=_FakeAdapter()), \
              patch("src.data_platform.rate_limit.rate_limit_context", MagicMock()), \

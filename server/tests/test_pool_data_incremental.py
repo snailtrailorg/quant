@@ -23,6 +23,18 @@ import pytest
 from src.quant_common.contract import ContractFrame, DataRequest
 
 
+class _AllPresent(set):
+    """`engine._local_dates` 替身：声称本地已有**全部**期望日。
+
+    批 109 起 tier1/per-date handler 收尾会做日期级对账（读本地 → 差集 → 内联重拉）。本文件的
+    用例只钉「拉取循环与限速键」，**不**想被对账真读 dev 库（那会让每个期望日都判为缺 ⇒ 重复拉 +
+    往 `sync_gap` 落行）。⇒ 以「本地全在」隔离对账：缺口为空 ⇒ 零重拉、零落表。
+    """
+
+    def __contains__(self, _item):  # noqa: D105
+        return True
+
+
 def _db_up() -> bool:
     try:
         from src.data_platform.db import get_conn
@@ -400,6 +412,7 @@ def test_engine_tier1_rate_key_is_table():
 
     with patch("src.data_platform.rate_limit.rate_limit_context", spy), \
          patch("src.data_platform.data_source.get_data_source", return_value=_FakeDS()), \
+         patch.object(engine, "_local_dates", return_value=_AllPresent()), \
          patch("src.data_platform.adapters.tushare_adapter.pull_stk_limit", new=_fake_pull):
             h = engine._make_tier1_handler("stk_limit", None, "stk_limit", ["trade_date", "ts_code"], [])
             # 窗口非空才进循环：给足够早的游标，防「长节假日 + 邻近今日」把窗口压空 ⇒ 假红

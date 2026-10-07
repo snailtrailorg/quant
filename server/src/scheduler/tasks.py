@@ -1695,3 +1695,18 @@ def sm_reconcile_check():
         return {"skipped": "非交易日"}
     from src.data_platform.quality import sm_reconcile
     return {"sm": sm_reconcile()}
+
+
+# ── 批 109：per-symbol 缺口对账（旁路低频；**对账非拉取 ⇒ 不进 sync_config**） ─────
+@app.task(name="src.scheduler.tasks.data_gap_reconcile")
+def data_gap_reconcile():
+    """每周日 03:33 标的级缺口对账（批 109 · 设计 §7.1/§7.2 输出闭环）。
+
+    与 `sm_reconcile_check`（周一 16:05）同类：对账/维护性质、低频、**无游标** ⇒ 走 beat 独立
+    条目（裁定 Q2：批 83b 的「收编进 sync_config」针对**拉取**任务——需要 provider/限速/游标
+    配置；对账无这些，故与本决策无冲突）。
+    结果落 `sync_gap`（新 `open` 触发**聚合**告警）；单 scope 异常不阻断其余（engine 内逐标的
+    try/except 已收编，本任务只做入口）。
+    """
+    from src.data_sync.engine import _reconcile_symbols
+    return {"reconcile": _reconcile_symbols()}

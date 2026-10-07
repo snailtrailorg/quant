@@ -403,6 +403,8 @@ class TestHandler:
         with patch.object(engine, "_get_kline_adapter", return_value=adapter), \
              patch.object(engine, "_list_static_ts_codes", return_value=list(symbols)), \
              patch.object(engine, "_trade_dates_in_range", side_effect=_range), \
+             patch.object(engine, "_local_dates",
+                          return_value=set(dates) if dates else set()), \
              patch.object(sl, "SyncLock", lock), \
              patch("src.data_platform.db.save_bars_overwrite", return_value=saved) as so:
             r = engine._sync_astock_daily_jq(cfg, end, backfill)

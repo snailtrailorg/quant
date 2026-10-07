@@ -392,7 +392,8 @@ class TestPileUp:
         with patch("src.data_sync.engine._fetch_supply", side_effect=RuntimeError("api down")), \
              patch.object(engine, "_get_rate_ds", return_value=_StubDS()):
             with pytest.raises(RuntimeError):
-                engine._sync_via_kind_cb_daily(adapter, start="20260901", end_date="20260921")
+                engine._sync_via_kind_cb_daily(adapter, sync_id="cb_daily",
+                                               start="20260901", end_date="20260921")
         from src.data_platform.rate_limit import _r, _BREAKERS
         for (provider, acct), _b in _BREAKERS.items():
             if provider == "tushare":

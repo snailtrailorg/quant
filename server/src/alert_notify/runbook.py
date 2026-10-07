@@ -45,6 +45,7 @@ RUNBOOK: dict[str, dict] = {
     "data.disconn":     {"label": "数据断连", "guide": "行情/数据源连接断开——查 dataops 数据源页与适配器状态。"},
     "data.adj-degrade": {"label": "复权因子降级", "guide": "积分不足复权接口降级——跨除权日因子暂不可用；积分到账后触发回补。"},
     "sync.status":      {"label": "同步状态", "guide": "数据同步完成/失败状态——dataops 同步日志归因。"},
+    "sync.gap":         {"label": "数据缺口", "guide": "对账检出缺口（per-date 已内联重拉、仍缺者落 sync_gap）——dataops 查 `sync_gap` 表 state='open' 行；长期停留＝存量缺口，须人工裁定（补拉/改 retention/换源）。"},
     "disk.warning":     {"label": "磁盘告警", "guide": "磁盘余量触警——清理 var/log 与旧 release（GC 保 N=5）。"},
     # ——— 健康监控 ———
     "health.iface-down":   {"label": "接口健康异常", "guide": "LLM/PG/Valkey 有离线——查 /observe 健康页与对应服务。"},

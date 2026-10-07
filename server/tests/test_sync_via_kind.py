@@ -83,7 +83,8 @@ class TestDispatch:
              patch.object(engine, "_sync_via_kind_cb_daily", return_value={"x": 2}) as cb:
             r = engine._sync_via_kind(_cfg("cb_daily"), "20260921", backfill_from="20260901")
         assert r == {"x": 2}
-        cb.assert_called_once_with(ga.return_value, start="20260901", end_date="20260921", progress_cb=None)
+        cb.assert_called_once_with(ga.return_value, sync_id="cb_daily", start="20260901",
+                                   end_date="20260921", progress_cb=None)
 
     def test_index_daily(self):
         with patch.object(engine, "_read_sync_kind", return_value={

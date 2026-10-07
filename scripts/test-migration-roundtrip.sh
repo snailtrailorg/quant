@@ -1525,8 +1525,77 @@ chk "downgrade 渲染含 DROP COLUMN IF EXISTS retention" \
 rm -rf "$tmp"
 }
 
+# ── 用例 AA：0140 sync_gap（纯 expand 建表 + CHECK/UNIQUE 真拦 + 强制复跑 + 降级回收），2026-10-07 批 109 ──
+# 前置 = 0139 之后。0140 **无破坏性 DDL**（只 `CREATE TABLE IF NOT EXISTS` + 2×`CREATE INDEX
+# IF NOT EXISTS`）⇒ 不需要 allow_contract，但对账结果表带**两条真约束**，必须逐条证「真拦」：
+#   ① CHECK：非法 `state` 必须**被拒**（静默落库＝本仓立法明令禁止），合法值放行（正反两面）；
+#   ② UNIQUE (sync_id, symbol, gap_start)：**锚键＝起点非整区间**（步 2 双盲审 P0-1 修正）——
+#      同锚重复插入必须被拒，否则视图式同步的集合差失去唯一性前提；
+#   ③ `symbol` 默认空串（非 NULL）——NULL 会让 UNIQUE 去重失效（家族级行的正确形态）；
+#   ④ **强制复跑**（stamp 回 0139 再 upgrade ＝「部署中断后重跑」真实场景）：`IF NOT EXISTS`
+#      须零副作用、**不丢已有行**（裸 CREATE TABLE 会在此炸 DuplicateTable，本用例当场抓红）；
+#   ⑤ 降级 DROP 干净回收（派生数据可重建，无信息损失）。
+FROM_AA=0139
+TO_AA=0140
+
+case_aa() {
+echo
+echo "########## 用例 AA：0140 sync_gap（建表 + CHECK/UNIQUE 真拦 + 强制复跑 + 降级回收） ##########"
+reset_scratch
+stamp "$FROM_AA"
+
+# --- AA1 upgrade ---
+step up "$TO_AA" "AA1 upgrade（建 sync_gap + 2 索引）"
+chk "sync_gap 表已在位" "$(q "select to_regclass('sync_gap') is not null")" "t"
+chk "open 部分索引在位" "$(q "select count(*) from pg_indexes where schemaname='$SCRATCH' and indexname='idx_sync_gap_open'")" "1"
+chk "scope 索引在位" "$(q "select count(*) from pg_indexes where schemaname='$SCRATCH' and indexname='idx_sync_gap_scope'")" "1"
+# CHECK 真拦（非法 state）
+chk "CHECK 拒绝非法 state" \
+  "$(q "insert into sync_gap (sync_id,gap_start,gap_end,state) values ('s',DATE '2026-10-01',DATE '2026-10-01','bogus')" | grep -c 'sync_gap_state_chk')" "1"
+# 正向：合法行须能落（防「全拒绝」假绿）+ symbol 默认空串
+x "insert into sync_gap (sync_id,gap_start,gap_end,state) values ('s',DATE '2026-10-02',DATE '2026-10-02','open')"
+chk "合法行可插入 + symbol 默认空串" "$(q "select symbol||'/'||state from sync_gap where sync_id='s'")" "/open"
+# UNIQUE 锚键真拦（同 (sync_id,symbol,gap_start) 重复插入）
+chk "UNIQUE 锚键拒绝重复插入" \
+  "$(q "insert into sync_gap (sync_id,symbol,gap_start,gap_end,state) values ('s','',DATE '2026-10-02',DATE '2026-10-03','open')" | grep -c 'sync_gap_ident')" "1"
+chk "重复插入未落新行（仍 1 行）" "$(q "select count(*) from sync_gap")" "1"
+
+# --- AA2 强制复跑（部署中断后重跑） ---
+stamp "$FROM_AA"
+step up "$TO_AA" "AA2 强制复跑 upgrade（IF NOT EXISTS 须零副作用）"
+chk "复跑后行数不变（已有行未丢）" "$(q "select count(*) from sync_gap")" "1"
+
+# --- AA3 downgrade ---
+step down "$FROM_AA" "AA3 downgrade（DROP TABLE）"
+chk "sync_gap 表已消失" "$(q "select to_regclass('sync_gap') is null")" "t"
+}
+
+# ── 用例 AB：0140 离线渲染完整性（不连库） ──
+case_ab() {
+echo
+echo "########## 用例 AB：0140 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_AA:$TO_AA" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_AA:$FROM_AA" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_AA'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含版本回退" "$(grep -c "SET version_num='$FROM_AA'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含建表" "$(grep -c 'CREATE TABLE IF NOT EXISTS sync_gap' "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 CHECK 约束" "$(grep -c 'sync_gap_state_chk' "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 UNIQUE 锚键" "$(grep -c 'sync_gap_ident' "$tmp/up.sql")" "1"
+chk "downgrade 渲染含 DROP TABLE IF EXISTS" "$(grep -c 'DROP TABLE IF EXISTS sync_gap' "$tmp/dn.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA） ##########"
 precheck
 case_a
 case_b
@@ -1554,4 +1623,6 @@ case_w
 case_x
 case_y
 case_z
+case_aa
+case_ab
 finish

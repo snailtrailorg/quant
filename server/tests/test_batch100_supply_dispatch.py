@@ -147,6 +147,7 @@ class TestProviderEffective:
             with patch.object(engine, "_get_rate_ds", return_value=_FakeDS()), \
                  patch.object(engine, "_data_ready_end_date", return_value="20261001"), \
                  patch.object(engine, "_trade_dates_in_range", return_value=["20261001"]), \
+                 patch.object(engine, "_local_dates", return_value={"20261001"}), \
                  patch("src.data_platform.rate_limit.rate_limit_context", MagicMock()), \
                  patch("src.data_platform.db.get_conn", MagicMock()):
                 h = engine._make_tier1_handler(

@@ -137,6 +137,14 @@ app.conf.update(
             "schedule": crontab(day_of_week=1, hour=16, minute=5),   # 批 62c：周一 SM 对账（批 79 起 shadow 已删）
             "options": {"queue": "data"},
         },
+        # 批 109：per-symbol 缺口对账（周日 03:33 低峰）。**对账非拉取**（无游标/provider 配置）
+        # ⇒ 走 beat 独立条目，不进 sync_config（裁定 Q2；先例＝上面的 sm-reconcile）。
+        # 结果落 sync_gap；per-date 族的对账在同步收尾内联跑，不经此处。
+        "data-gap-reconcile": {
+            "task": "src.scheduler.tasks.data_gap_reconcile",
+            "schedule": crontab(day_of_week=0, hour=3, minute=33),
+            "options": {"queue": "data"},
+        },
         "astock-select-daily": {
             "task": "src.scheduler.tasks.astock_select_daily",
             "schedule": crontab(hour=16, minute=8),   # 批27-31：盘后锚（避 16:30 daily-report）
