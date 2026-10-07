@@ -45,7 +45,11 @@ RUNBOOK: dict[str, dict] = {
     "data.disconn":     {"label": "数据断连", "guide": "行情/数据源连接断开——查 dataops 数据源页与适配器状态。"},
     "data.adj-degrade": {"label": "复权因子降级", "guide": "积分不足复权接口降级——跨除权日因子暂不可用；积分到账后触发回补。"},
     "sync.status":      {"label": "同步状态", "guide": "数据同步完成/失败状态——dataops 同步日志归因。"},
-    "sync.gap":         {"label": "数据缺口", "guide": "对账检出缺口（per-date 已内联重拉、仍缺者落 sync_gap）——dataops 查 `sync_gap` 表 state='open' 行；长期停留＝存量缺口，须人工裁定（补拉/改 retention/换源）。"},
+    "sync.gap":         {"label": "数据缺口", "guide": "对账检出缺口（per-date 已内联重拉、仍缺者落 sync_gap）——dataops 查 `sync_gap` 表 state='open' 行；长期停留＝存量缺口，须人工裁定（补拉/改 retention/换源）。**取数配方（批 110）**：`sudo -n /usr/local/sbin/quant-journal -u quant-celery-worker@quant --since \"1 week ago\" | grep gap_reconcile` ⇒ 每 scope 一行结构化摘要（含 `round_id`/`N`/`hit_ge_N`/`sm_covered/sm_total`/`budget_exceeded`）；母设计 §八.5 的删除门控判据由该摘要自动判定（连续 N 轮同缺口＝`hit_rounds>=N`）。"},
+    "sync.universe_missing": {"label": "对账宇宙缺失", "guide": "per-symbol 对账的标的宇宙取自 `security_master`，**该 category/exchange 零行** ⇒ 期望集为空、对账静默失效（列表同步未跑/未写 SM）。查 dataops 数据源页该 provider 的列表同步与 SM 填充链；**不得**用外部 instruments 列表替代（对账是本地审计动作）。"},
+    "sync.inception_cover_low": {"label": "inception 可及性异常", "guide": "两种形态：① `security_master.list_date` 覆盖率**连续多轮**不足（≥2 轮）⇒ 该 scope 缺口被 §5.4 的 uncertain **永久静默抑制**（抑制本是安全网，失修即变盲区）——查刷新链是否持续探不到源（crypto 看代理出口）；② **互证闸不符**：`engine._RECONCILE_UNKNOWN_INCEPTION` 的声明与实测「有 symbol 且 list_date 空」漂移 ⇒ 复核声明集（源可及性可能已变）。"},
+    "sync.local_unreadable": {"label": "对账本地不可读", "guide": "`_local_dates_map` 对 bar 表**整 scope**读取失败（表未建/权限/连接）⇒ 该 scope 全族转 `uncertain`（**不是**「无缺口」）——bar 表系统性不可读时，真实大段缺失会被压成不确定且**只**在 journal 摘要留 `uncertain=N`。查该表是否存在、连接与权限；这是**观测盲区的补救告警**（与 `sync.universe_missing` 同级）。"},
+    "sync.reconcile_budget": {"label": "对账体量超阈", "guide": "本轮该 scope 的**落表行数**超 `engine._GAP_ROW_BUDGET[kind]` ⇒ **不落主张**（该 scope 当轮缺口**不报**＝显名取舍「用漏报换稳定」，以本告警替代静默）＋ 其判据不许过门。通常预示窗口下界/期望集算错或库被污染——查 floor 计算与 bar 表；确需放宽时调 `_GAP_ROW_BUDGET`（按族字典，daily/minute 量级差大）。"},
     "disk.warning":     {"label": "磁盘告警", "guide": "磁盘余量触警——清理 var/log 与旧 release（GC 保 N=5）。"},
     # ——— 健康监控 ———
     "health.iface-down":   {"label": "接口健康异常", "guide": "LLM/PG/Valkey 有离线——查 /observe 健康页与对应服务。"},

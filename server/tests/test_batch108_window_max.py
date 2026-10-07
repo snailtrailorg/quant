@@ -33,12 +33,14 @@ class _Stub:
 
     provider = "stub"
     venue = "STUB"
+    _last = None            # 批 110：最近构造的实例（供 `_window_floors` 的 SM 读口 fixture 取用）
 
     def __init__(self, src_lo=None, lag=0, inceptions=None):
         self._src_lo = src_lo
         self._lag = lag
         self._inc = {str(k): v for k, v in (inceptions or {}).items()}
         self.calls: list[dict] = []
+        _Stub._last = self
 
     def available_range(self, kind):
         return (self._src_lo, None)
@@ -48,6 +50,24 @@ class _Stub:
 
     def symbol_inception(self, symbol):
         return self._inc.get(str(symbol))
+
+
+@pytest.fixture(autouse=True)
+def _sm_inception_via_stub(monkeypatch):
+    """批 110：inception 读口由 `adapter.symbol_inception`（活体）改为 `sm_inception`（SM **单一
+    真源**，裁定 G①收尾）——本文件用最近构造的 `_Stub._inc` 模拟「SM 里存的值」。
+
+    键同时接受 `vt_symbol`（`NEW.STUB`）与源侧形态（`NEW`）：`_vt_of_source` 会给 crypto 拉取路径
+    拼上 venue，而本文件的 `sym=` 多传源侧形态。
+    """
+    def _fake(vt):
+        st = _Stub._last
+        if st is None:
+            return None
+        v = str(vt)
+        return st._inc.get(v) or st._inc.get(v.rsplit(".", 1)[0])
+
+    monkeypatch.setattr(engine, "sm_inception", _fake)
 
 
 # ---------------------------------------------------------------------------

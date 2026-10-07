@@ -77,9 +77,12 @@ def _rows(sid: str) -> list[tuple]:
 
 
 def _vsync(sid: str, symbol: str = "", gaps=None, uncertain_reason=None) -> dict:
-    """视图式同步的测试封装（`win_lo/win_hi` 只被 uncertain-插入路径消费，此处给足缺省窗）。"""
-    return engine._sync_gap_sync(sid, symbol, win_lo="2026-10-01", win_hi="2026-10-10",
-                                 gaps=gaps, uncertain_reason=uncertain_reason)
+    """视图式同步的测试封装（批 110：改调单 symbol 薄包装 `_sync_gap_sync_one`）。
+
+    `win_lo/win_hi` 只被 uncertain-插入路径消费，此处给足缺省窗。
+    """
+    return engine._sync_gap_sync_one(sid, symbol, win_lo="2026-10-01", win_hi="2026-10-10",
+                                     gaps=gaps, uncertain_reason=uncertain_reason)
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +92,8 @@ def _vsync(sid: str, symbol: str = "", gaps=None, uncertain_reason=None) -> dict
 
 class TestTableShape:
     EXPECTED_COLS = ["id", "sync_id", "symbol", "gap_start", "gap_end", "state", "reason",
-                     "pull_count", "first_seen", "last_seen", "closed_at"]
+                     "pull_count", "first_seen", "last_seen", "closed_at",
+                     "hit_rounds", "last_hit_round"]   # 批 110 迁移 0141 追加（`false_rounds` 经步 4 盲审删列）
 
     @needs_db
     def test_columns_in_order(self):
@@ -378,7 +382,8 @@ class TestNoBackflowGate:
         计算读它 ⇒ 派生值回流成真源（本表可清空重算的前提即此禁令）。本闸用 AST 钉住：
         除白名单外，**任何函数体内的 SQL 字面量**（docstring 除外）不得触 `sync_gap` 表。
         """
-        allowed = {"_gap_put", "_upsert_sync_gap", "_sync_gap_sync", "_list_repullable"}
+        allowed = {"_gap_put", "_upsert_sync_gap", "_sync_gap_sync", "_list_repullable",
+                   "_sync_gap_scope_rows"}   # 批 110：scope 级读取口（写侧的读前一步）
         pat = re.compile(r"\b(FROM|INTO|UPDATE|JOIN|TABLE)\s+sync_gap\b")
         p = pathlib.Path(engine.__file__)
         tree = ast.parse(p.read_text(encoding="utf-8"))

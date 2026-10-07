@@ -1594,8 +1594,115 @@ chk "downgrade 渲染含 DROP TABLE IF EXISTS" "$(grep -c 'DROP TABLE IF EXISTS 
 rm -rf "$tmp"
 }
 
+# ── 用例 AC：0141 sync_gap 判据三列（add column + 存量回填 + 复跑不重置 + 降级），2026-10-07 批 110 ──
+# 0141 的 DDL 只有三句 `ADD COLUMN IF NOT EXISTS`，**价值不在「有没有列」而在三条语义**：
+#   ① 🔴 **存量行回填**：`NOT NULL DEFAULT 0` ⇒ 0140 起已有的 `sync_gap` 行必须被回填 `0`
+#      （不是 NULL、也不是拒绝加列）——判据的**初始态**必须是「未命中」，而非「未知」；
+#   ② 🔴 **强制复跑不得重置**：`ADD COLUMN IF NOT EXISTS` 在列已存在时是 **no-op** ⇒ 引擎/运维
+#      已推进的 `hit_rounds/last_hit_round` **不得被清零**（部署中断后重跑是真实场景；
+#      若写成 `DROP + ADD` 或无条件 `UPDATE ... SET 0`，本用例当场抓红 = **静默丢失判据史**）；
+#   ③ 降级只回收这三列（`sync_gap` 基表与数据分毫不动）＋ 可重放。
+FROM_AC=0140
+TO_AC=0141
+
+fixture_judge() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+-- 形态照 0140 建表后的真库（**不含** 0141 的三列）
+CREATE TABLE sync_gap (
+    id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    sync_id     text        NOT NULL,
+    symbol      text        NOT NULL DEFAULT '',
+    gap_start   date        NOT NULL,
+    gap_end     date        NOT NULL,
+    state       text        NOT NULL,
+    reason      text,
+    pull_count  int         NOT NULL DEFAULT 0,
+    first_seen  timestamptz NOT NULL DEFAULT now(),
+    last_seen   timestamptz NOT NULL DEFAULT now(),
+    closed_at   timestamptz,
+    CONSTRAINT sync_gap_state_chk CHECK (state IN
+        ('open','closed','unreachable','policy_discard','uncertain')),
+    CONSTRAINT sync_gap_ident UNIQUE (sync_id, symbol, gap_start)
+);
+INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state) VALUES
+  ('p110','BTCUSDT.BINANCE',DATE '2026-10-02',DATE '2026-10-02','open');
+SQL
+}
+
+case_ac() {
+echo
+echo "########## 用例 AC：0141 sync_gap 判据三列（add column + 存量回填 + 复跑不重置 + 降级） ##########"
+reset_scratch
+fixture_judge
+stamp "$FROM_AC"
+
+# --- AC1 upgrade ---
+step up "$TO_AC" "AC1 upgrade（加两列）"
+chk "hit_rounds 列形状（int / NOT NULL / 默认 0）" \
+  "$(q "select data_type||'/'||is_nullable||'/'||coalesce(column_default,'<>') from information_schema.columns where table_name='sync_gap' and column_name='hit_rounds' and table_schema=current_schema()")" \
+  "integer/NO/0"
+chk "last_hit_round 列形状（bigint）" \
+  "$(q "select data_type||'/'||is_nullable from information_schema.columns where table_name='sync_gap' and column_name='last_hit_round' and table_schema=current_schema()")" \
+  "bigint/NO"
+chk "🔴 **无** false_rounds 列（步 4 盲审 P1-2：R2 检测器结构不可达 ⇒ 死列 ⇒ 删）" \
+  "$(q "select count(*) from information_schema.columns where table_name='sync_gap' and column_name='false_rounds' and table_schema=current_schema()")" "0"
+chk "🔴 存量行被回填 0（判据初始态＝「未命中」，非「未知」）" \
+  "$(q "select hit_rounds||'/'||last_hit_round from sync_gap where sync_id='p110'")" \
+  "0/0"
+chk "既有约束未动（CHECK + UNIQUE 仍在）" \
+  "$(q "select count(*) from pg_constraint where conrelid='sync_gap'::regclass and conname in ('sync_gap_state_chk','sync_gap_ident')")" "2"
+chk "行数不变（纯加列，无插入）" "$(q "select count(*) from sync_gap")" "1"
+
+# --- AC2 强制复跑（stamp 回 0140 再 upgrade：部署中断重跑场景） ---
+x "update sync_gap set hit_rounds=3, last_hit_round=42 where sync_id='p110'"
+stamp "$FROM_AC"
+step up "$TO_AC" "AC2 强制复跑（部署中断重跑场景）"
+chk "🔴 复跑**不重置**已推进的判据状态（ADD COLUMN IF NOT EXISTS 是 no-op）" \
+  "$(q "select hit_rounds||'/'||last_hit_round from sync_gap where sync_id='p110'")" "3/42"
+
+# --- AC3 downgrade（只回收两列，基表与数据分毫不动） ---
+step down "$FROM_AC" "AC3 downgrade（回收两列）"
+chk "两列已回收" \
+  "$(q "select count(*) from information_schema.columns where table_name='sync_gap' and column_name in ('hit_rounds','last_hit_round') and table_schema=current_schema()")" "0"
+chk "基表仍在 + 数据未丢" "$(q "select count(*) from sync_gap")" "1"
+chk "既有约束仍在" \
+  "$(q "select count(*) from pg_constraint where conrelid='sync_gap'::regclass and conname in ('sync_gap_state_chk','sync_gap_ident')")" "2"
+
+# --- AC4 再 upgrade（可重放 / 干净 A→B→A） ---
+step up "$TO_AC" "AC4 再 upgrade（可重放）"
+chk "重放后两列复位（存量行回填 0）" \
+  "$(q "select hit_rounds||'/'||last_hit_round from sync_gap where sync_id='p110'")" "0/0"
+}
+
+# ── 用例 AD：0141 离线渲染完整性（不连库） ──
+case_ad() {
+echo
+echo "########## 用例 AD：0141 离线渲染完整性（不连库） ##########"
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_AC:$TO_AC" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_AC:$FROM_AC" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_AC'" "$tmp/up.sql")" "1"
+chk "downgrade 渲染含版本回退" "$(grep -c "SET version_num='$FROM_AC'" "$tmp/dn.sql")" "1"
+chk "upgrade 渲染含两条 ADD COLUMN IF NOT EXISTS" "$(grep -ci 'add column if not exists' "$tmp/up.sql")" "2"
+chk "upgrade 渲染含 hit_rounds" "$(grep -c 'hit_rounds' "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 last_hit_round" "$(grep -c 'last_hit_round' "$tmp/up.sql")" "1"
+chk "🔴 upgrade 渲染**不含** false_rounds（死列已删）" "$(grep -c 'false_rounds' "$tmp/up.sql")" "0"
+chk "🔴 upgrade 渲染不含 DROP COLUMN（expand-only）" "$(grep -ci 'drop column' "$tmp/up.sql")" "0"
+chk "downgrade 渲染含两条 DROP COLUMN IF EXISTS" "$(grep -ci 'drop column if exists' "$tmp/dn.sql")" "2"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA + $FROM_AC→$TO_AC） ##########"
 precheck
 case_a
 case_b
@@ -1625,4 +1732,6 @@ case_y
 case_z
 case_aa
 case_ab
+case_ac
+case_ad
 finish

@@ -375,3 +375,36 @@ def get_market_hours() -> MarketHours:
     if _hours is None:
         _hours = MarketHours()
     return _hours
+
+
+def sm_inception(vt_symbol: str) -> str | None:
+    """标的**产生时间**（上市/上币日）＝ `security_master.list_date`，ISO `'YYYY-MM-DD'`；
+    **不可得 ⇒ `None`**（显式「未知」，与接入层 `adapter.symbol_inception` 同语义）。
+
+    **裁定 G① 收尾（批 110 · 母设计 §十 G①）**：`inception` 的**唯一可读点＝SM**（跨市场主档）。
+    **生产者**仍是接入层的 `adapter.symbol_inception`（填充链在拉取前写 SM，见
+    `engine._sm_upsert_crypto`／`_sm_upsert`），但**读侧不再直连 adapter 活体**——该活体当前
+    只有 OKX 有实现（`okx_adapter.symbol_inception`），binance／tushare／joinquant **恒 `None`**，
+    使「窗口下界」在 6/7 个 scope 上静默退化成家族起点（批 110 事实 6/7）。
+
+    **不设回退**（与 `engine._get_list_date` 的 `_TUSHARE_MIN_DATE` 回退**刻意不同**——后者把
+    「未知」伪装成 `2010-01-01`，与本门「未知即显式未知」语义冲突；那处是挂账 G-3）。
+    畸形值（非 8 位数字）同样 ⇒ `None`（**不得**猜）。
+
+    **两类「缺」由此可区分**（调用方责任）：
+      - SM **有**该 `vt_symbol` 行但 `list_date` 为空 ⇒ **结构性未知**（§5.4 ⇒ `uncertain`）；
+      - SM **无**该 `vt_symbol` 行 ⇒ 快照不完整（scope 级可见性问题，见 `_sm_universe` 的告警）。
+    """
+    from .db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute("SELECT list_date FROM security_master WHERE vt_symbol=%s", (vt_symbol,))
+        row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    v = row[0]
+    if isinstance(v, date):
+        return v.isoformat()
+    s = str(v).strip().replace("-", "").replace("/", "")
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return None

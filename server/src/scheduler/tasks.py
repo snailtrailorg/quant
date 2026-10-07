@@ -1697,16 +1697,25 @@ def sm_reconcile_check():
     return {"sm": sm_reconcile()}
 
 
-# ── 批 109：per-symbol 缺口对账（旁路低频；**对账非拉取 ⇒ 不进 sync_config**） ─────
-@app.task(name="src.scheduler.tasks.data_gap_reconcile")
+# ── 批 109/110：per-symbol 缺口对账（旁路低频；**对账非拉取 ⇒ 不进 sync_config**） ─────
+@app.task(name="src.scheduler.tasks.data_gap_reconcile",
+          soft_time_limit=1800, time_limit=1980)
 def data_gap_reconcile():
-    """每周日 03:33 标的级缺口对账（批 109 · 设计 §7.1/§7.2 输出闭环）。
+    """每周日 03:33 标的级缺口对账（批 109 · 设计 §7.1/§7.2 输出闭环；批 110 判据地基）。
 
     与 `sm_reconcile_check`（周一 16:05）同类：对账/维护性质、低频、**无游标** ⇒ 走 beat 独立
     条目（裁定 Q2：批 83b 的「收编进 sync_config」针对**拉取**任务——需要 provider/限速/游标
     配置；对账无这些，故与本决策无冲突）。
-    结果落 `sync_gap`（新 `open` 触发**聚合**告警）；单 scope 异常不阻断其余（engine 内逐标的
-    try/except 已收编，本任务只做入口）。
+    结果落 `sync_gap`（新 `open` 触发**聚合**告警）；单 scope 异常不阻断其余（engine 内逐 scope
+    收编，本任务只做入口）。
+
+    **时限显式声明（批 110·D）**：消除「隐式继承全局 `task_soft_time_limit=300`」的**沉默态**
+    （`app.py` 全局默认 300s，而 worker 未加 `--soft-time-limit` ⇒ 真生效）。初值
+    `1800/1980`（与仓内重任务同制：`sync_all_symbols`/`backtest_run_task` = 3600/4200）。
+    **校准机制**：触发＝首个实跑轮（2026-10-11）；归属＝批 110 步 8 集成观察——主会话读 journal
+    实测单轮耗时，若 > 1800s 则**改此常量**并重跑门。
+    超时语义（契约，见 `engine._reconcile_symbols`）：软限**直抛**（per-symbol `except` 不吞）
+    ⇒ **中止整轮**（失去 per-symbol 隔离）＝「整轮放弃、幂等、下轮续」。
     """
     from src.data_sync.engine import _reconcile_symbols
     return {"reconcile": _reconcile_symbols()}

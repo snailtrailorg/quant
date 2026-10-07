@@ -749,7 +749,7 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        assert heads == {"0140"}, f"head 不是唯一 0140：{sorted(heads)}"
+        assert heads == {"0141"}, f"head 不是唯一 0141：{sorted(heads)}"
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

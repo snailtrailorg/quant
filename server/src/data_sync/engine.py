@@ -20,12 +20,19 @@ import psycopg
 from dotenv import load_dotenv
 
 from src.data_platform.db import get_conn, get_conn_for_heavy_read
-from src.data_platform.security_master import normalize_board
+from src.data_platform.security_master import normalize_board, sm_inception
 from src.data_platform.jsonb import jsonb
 
 load_dotenv()
 
 logger = logging.getLogger("data_sync")
+
+# 批 110·D：软时限异常的**窄捕获**用（per-symbol `except` 不吞它——见 `_reconcile_symbols`）。
+# celery 缺席（纯数据层单测环境）⇒ `None` ⇒ 该分支恒不通（等价于「环境无软时限」）。
+try:                                        # pragma: no cover - 环境相关
+    from celery.exceptions import SoftTimeLimitExceeded as _CelerySoftTimeLimit
+except Exception:                           # pragma: no cover - 环境相关
+    _CelerySoftTimeLimit = None
 
 _sync_log_table_created = False
 
@@ -1066,18 +1073,32 @@ def _ymd(s) -> date:
     return date(int(t[:4]), int(t[4:6]), int(t[6:8]))
 
 
+# 哨兵：区分「未传 inception」与「显式传 None（未知）」（`_window_floors` 的批量预取口）。
+_UNSET = object()
+
+
 def _window_floors(adapter, kind: str, cfg: dict, *, sym: str | None = None,
+                   inception: object = _UNSET,
                    ) -> tuple[date | None, list[dict]]:
     """**三方地板取 max**：`max(inception, retention, source_earliest)`（设计 §5.1）。
 
     返回 `(地板日 | None, 排除段登记)`；`None` ⇒ 三源皆未声明（调用方须给有界缺省 + 告警）。
 
-    - **inception**（生命周期主档）：仅 per-symbol 族有，取 `adapter.symbol_inception(sym)`；
-      `None` ＝ **显式「未知」**（裁定 F，禁用源可达性冒充）。`sym=None` ⇒ 家族级
-      （per-date 族本就没有逐个标的的生命周期 ⇒ 该族只能靠 `retention` ＋ 源界，设计 §九.7）。
+    - **inception**（生命周期主档）：仅 per-symbol 族有，取 **`sm_inception(sym)`**（SM 单一真源，
+      裁定 G①／批 110 收编——原读 `adapter.symbol_inception` 活体，该活体只有 OKX 有实现，
+      使 binance/tushare/joinquant 恒 `None`、窗口下界静默退化）；`None` ＝ **显式「未知」**
+      （裁定 F，禁用源可达性冒充）。`sym=None` ⇒ 家族级（per-date 族本就没有逐个标的的
+      生命周期 ⇒ 该族只能靠 `retention` ＋ 源界，设计 §九.7）。
+      ⚠️ **`sym` 的形态＝`vt_symbol`**（含交易所后缀，如 `BTCUSDT.BINANCE`）——SM 按该键精确查
+      （模糊匹配＝第二真源）。crypto 拉取路径的 `list_symbols()` 返回**源侧形态**，调用方须先
+      `_vt_of_source()` 转换。
     - **retention**（策略）：`sync_config.retention`（任务级，裁定 B）；未声明 ⇒ kind 默认。
     - **source_earliest**（源属性）：`adapter.available_range(kind)[0]`（批 108·步 1 硬契约）——
       **未实现即响亮抛** `NotImplementedError`（禁以 today/(None,None) 冒充）。
+
+    `inception` kwarg 显式传入时**不再查 SM**（`_UNSET` ⇒ 内部查 `sm_inception(sym)`）——
+    `_reconcile_symbols` 用 `_sm_universe` **批量预取**的 `list_date` 传入，**消除 per-symbol 的
+    N+1**（读取规模契约：成本由 scope 数决定，不由标的数决定）。
 
     排除段登记（设计 §5.3「**封顶不得静默**」，只在该段非空时登记）：
     - `unreachable` ＝ `[inception, source_earliest)`：**存在**但批量源不可达（源界绑定）；
@@ -1086,7 +1107,8 @@ def _window_floors(adapter, kind: str, cfg: dict, *, sym: str | None = None,
       inception 未知的源（裁定 F）在 `retention` 截窗时**永不登记**（步骤 4 盲审必修-2）。
     ⚠️ 本批只**登记 + 日志**（进 handler 返回体 `excluded`）；落表 `sync_gap` ＝ 批 109。
     """
-    inception = adapter.symbol_inception(sym) if sym is not None else None
+    if inception is _UNSET:
+        inception = sm_inception(sym) if sym is not None else None
     src_lo, _src_hi = adapter.available_range(kind)      # fail-loud 硬契约（批 108·步 1）
     ret = cfg.get("retention")
     ret_s = ret.strftime("%Y-%m-%d") if ret else None
@@ -1302,8 +1324,13 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
 
             inception 未知（裁定 F）⇒ 家族起点（**不**用源可达性冒充上币日）。
             顺带把该标的的 `policy_discard`/`unreachable` 段登记收上来。
+
+            批 110：`_window_floors` 的 `sym` 语义＝ **`vt_symbol`**（SM 按该键精确查 inception；
+            `sm_inception` 是裁定 G① 的唯一可读点）。此处 `sym` 是**源侧形态**（`list_symbols()`
+            的返回），须先 `_vt_of_source` 转换——两者是不同键空间（`BTCUSDT` vs `BTCUSDT.BINANCE`）。
             """
-            f, ex = _window_floors(adapter, kind, cfg, sym=sym)
+            vt = _vt_of_source(sym, getattr(adapter, "venue", None))
+            f, ex = _window_floors(adapter, kind, cfg, sym=vt)
             for e in ex:
                 excl.setdefault(f"{e.get('symbol', '')}|{e['kind']}|{e['from']}|{e['to']}", e)
             return max(start, f) if f else start
@@ -1454,6 +1481,175 @@ _RECONCILE_SYMBOL_SCOPE: dict[str, tuple[str, str | None, str, str, str, str]] =
 }
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# 批 110：**对账判据地基**（母设计 §八.5 的门控判据从散文变可判定；方案 v3）
+#
+# 三条并列目标（缺一不算成功）：① 每轮落结构化摘要 ⇒ 判据**可自动判定**；② 成本由 **scope 数**
+# 决定、不由数据量决定（真批量）；③ 「哪些 scope 的 inception 真值可读」是**显式声明**且被
+# 互证闸与真实可及性**互证**。**本批不删冻结**（R0：判据四者皆缺时删＝摘安全网）。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# 判据「**连续 N 轮**同缺口」的 N（R3 定值）：周频 ⇒ 4 轮 ≈ 1 个自然月，覆盖 `publish_lag`
+# 迟发布与周末/节假日两类边界。**落点＝代码常量**（母设计 §三「同类任务共享 ⇒ 代码按 kind 给默认」；
+# §四 DB 承载物清单**不含**任何判据阈值）——但**必须进可观测摘要**（N7），否则判据不可复核。
+_GAP_JUDGE_ROUNDS: int = 4
+
+# 显式声明「inception 真值**结构性不可得**」的 scope（裁定 F）。当前＝4 个 binance perp scope
+# （`fapi` 被墙 ⇒ `onboardDate` 不可得 ⇒ SM `list_date` 结构性 NULL，事实 6/9）。
+# **互证闸**（`_reconcile_symbols`）在 SM 快照**新鲜**时比对「有 symbol 且 `list_date` 空」的
+# **实测集**与该**声明集**：不等 ⇒ 声明失真（可能是「一条路径现已可及」或「快照抖动」）⇒ 告警。
+# ⚠️ 只在新鲜时评估（stale ⇒ `unverified`，**不判**）——避免把「瞬时探不到」误判为结构性未知。
+_RECONCILE_UNKNOWN_INCEPTION: frozenset[str] = frozenset({
+    "binance_perp_daily", "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
+})
+
+# 本轮该 scope 的**落表行数**上界（**按 kind/family 给**——daily 与 minute 量级差三四个数量级，
+# 单值必致「minute 恒漏报」或「daily 无保护」）。**语义钉死＝落表行数**（**不**约束扫描量——扫描
+# 量须先读才知，不可预算）。超阈 ⇒ **不落该 scope 的缺口主张** ＋ 告警 ＋ 摘要标 `budget_exceeded`。
+# ⚠️ **显名取舍：用漏报换稳定**——该 scope 当轮缺口不报，以**告警**替代**静默**；且其判据
+# **不许过门**（与覆盖率<1 同制）。astock_minute 族一旦启用，`bar_1min` 每标行数远大于日线
+# ⇒「启用前先评估对账体量」是前置条件。
+_GAP_ROW_BUDGET: dict[str, int] = {"bar_daily": 5_000, "bar_minute": 50_000}
+
+# SM 覆盖率「**长期**」低（≥ 此连续轮数）⇒ 响亮告警（v3 V7）：防「一次刷新网络抖动写 `None`
+# 且**未恢复**」使缺口被 §5.4 **永久静默抑制**（抑制本是安全网，失修即变盲区）。
+_SM_COVER_STALE_ROUNDS: int = 2
+
+# 轮次身份（严格单调）的 Valkey 键：`INCR` ⇒ 每轮入口无条件推进一次。
+_ROUND_KEY = "reconcile:round"
+# 覆盖率低轮次计数的 Valkey 键前缀（跨轮「连续」计数）。
+_COVER_LOW_KEY = "reconcile:cover_low"
+
+
+def _vt_of_source(sym: str, venue: str | None) -> str | None:
+    """源侧符号 ＋ venue → `vt_symbol`（与 `_sm_upsert_crypto` **同源拼法**）；venue 缺失 ⇒ `None`。
+
+    crypto 的 `list_symbols()` 返回**源侧形态**（binance `BTCUSDT`／okx `BTC-USDT-SWAP`），
+    而 SM 主键是 `vt_symbol`（`*.BINANCE`／`*.OKX`）——两者是不同键空间，**必须显式转换**
+    （`sm_inception` 按 vt_symbol 精确查，不做模糊匹配：模糊匹配＝第二真源）。
+    """
+    if not venue:
+        return None
+    s = str(sym)
+    return s if s.upper().endswith("." + venue) else f"{s}.{venue}"
+
+
+def _next_round_id() -> int | None:
+    """本轮对账的**轮次身份**（严格单调）：Valkey `INCR reconcile:round`。不可用 ⇒ `None`。
+
+    **为什么必须是「无条件推进的序号」而非墙钟**（v3 V1 核心）：
+    ① 裸 Unix 秒在 beat **周频**下手动重跑**可达同秒** ⇒ 碰撞（双计/误判）；
+    ② NTP 回拨可非单调；
+    ③ DB `MAX(last_hit_round)+1` 派生在「该轮**所有** scope 均未写行」（全族跳过）时**不推进**
+       ⇒ 断档被当连续（**假过门**）。
+    Valkey 的**失效方向安全**：丢 ⇒ 计数回退 ⇒ `last_hit_round != round_id-1` ⇒ **复位** ⇒
+    只推迟过门，不产生假过门。**不可用 ⇒ `None`** ⇒ 该轮**只观测不判定**（判据不过门）＋ 摘要标注。
+    """
+    try:
+        from src.quant_common.redis_client import business_redis
+        return int(business_redis(socket_timeout=5, socket_connect_timeout=5).incr(_ROUND_KEY))
+    except Exception as e:
+        logger.warning("对账轮次 id 不可得（Valkey）⇒ 本轮只观测不判定: %s", e)
+        return None
+
+
+def _bump_cover_low(sync_id: str, low: bool, round_id: int | None) -> int | None:
+    """覆盖率低的**连续轮次**计数（Valkey，跨轮）。`low` ⇒ 累加；否则清零。不可用 ⇒ `None`。
+
+    ⭐ **断档复位（批 110 步 4 盲审 P1-5，与 `hit_rounds` 同构）**：只有
+    `last_cover_round == round_id-1`（上一**评估**轮就是上一轮）才累加，否则**归 1**。
+
+    为什么不能只靠「不低时清零」（原实现）：该 scope **整轮未被评估**时（未配置/已禁用 ⇒
+    `continue`；V6「SM 无该族 symbol」⇒ `continue`）本函数**根本不被调用** ⇒ 计数被**冻结**
+    ⇒ 下次评估跨过未评估轮继续累加 ⇒ `streak >= _SM_COVER_STALE_ROUNDS` 被**跨过断档**满足
+    ⇒ **假告警**。这正是 V1 立项的同一反例（「中间整轮跳过 ⇒ 断档被当连续」）在 V7 上的复发；
+    状态标记必须连**维护语义（何时累加/何时复位）**一起写死——字段存在 ≠ 判据闭合。
+
+    `round_id is None`（Valkey 不可用）⇒ 不维护、不告警（返回 `None`，失效方向＝少报）。
+    """
+    if round_id is None:
+        return None
+    try:
+        from src.quant_common.redis_client import business_redis
+        r = business_redis(socket_timeout=5, socket_connect_timeout=5, decode_responses=True)
+        key = f"{_COVER_LOW_KEY}:{sync_id}"
+        last_key = f"{_COVER_LOW_KEY}:{sync_id}:last_round"
+        if not low:
+            r.delete(key)
+            r.delete(last_key)
+            return 0
+        prev = r.get(key)
+        last = r.get(last_key)
+        streak = (int(prev) + 1) if (prev is not None and last is not None
+                                     and int(last) == round_id - 1) else 1
+        r.set(key, streak)
+        r.set(last_key, round_id)
+        return streak
+    except Exception as e:
+        logger.warning("覆盖率低计数不可得（Valkey，%s）: %s", sync_id, e)
+        return None
+
+
+def _gap_judge(stats: dict, scope_rows: list[tuple], round_id: int | None,
+               *, suppressed: bool = False) -> dict:
+    """判据计算（**纯函数，无 IO**）：本轮**误报证据**（R2）＋ **连续命中分布**（R3）。
+
+    返回 `{"hit_ge_n": int, "false_evidence": {...}, "by_anchor": [...]}`。
+
+    `stats` ＝ 本轮该 scope 的聚合统计（`opened/reopened/closed/new/uncertain_*`）；
+    `scope_rows` ＝ 本轮写完后该 scope 的行 `(symbol, gap_start, state, hit_rounds, last_hit_round)`。
+
+    **R2「零误报」只覆盖可自动判定的两类**（**P-2 已删**——它会把主同步补齐后的**正常
+    `closed`** 误判为误报）：
+      - **P-1 同轮振荡**：同一锚本轮既 `opened` 又 `closed`（自相矛盾）；
+      - **P-3 抑制失效**：`uncertain` 的本轮仍产出 `open`/`new`（代码不应到达）。
+    ⚠️ **诚实边界（第四类判不了）**：「主张了不存在的缺口」且**行为自洽**的误报，本判据**看不见**
+    ——须靠**金标准对照**（批 105 的 OKX 7 标的）在步 8 集成观察里核。本函数**不**假装能判它。
+
+    **判定式**：`hit_rounds >= _GAP_JUDGE_ROUNDS`（**复位已自证连续**——`_sync_gap_sync` 维护时
+    `last_hit_round == round_id-1` 才累加，否则归 1；故 `== 本轮` 冗余，仅作摘要断言）。
+
+    ⭐ **门控合取（批 110 步 4 盲审 P1-1；落地方案 §产出B「`budget_exceeded` 的 scope 其判据
+    不许过门（与覆盖率<1 同制）」）**：`suppressed=True` ⇒ **本轮不构成「命中」** ⇒ `hit_ge_n=0`
+    且 `judged=False`。取值面＝**该轮本轮主张被抑制**：
+      - `budget_exceeded`（`:2364` 把 `gaps_map` 全置 `None`）——此时行**保持 `open` 且
+        `hit_rounds` 保留旧值**，故不显式归零就会「拿旧值过门」；
+      - `sm_covered < sm_total`（部分标的 `inception` 结构性未知、被 §5.4 抑制）。
+    （`round_id is None`（Valkey 不可用）与 `stale_source` 两路**已天然闭合**：前者由
+    `round_id is not None` 条件，后者因全族转 `uncertain` ⇒ 无 `open` 行可数——不必入 `suppressed`。）
+
+    ⚠️ **诚实边界（R2 的实测修正，批 110 步 4 盲审 C3/D1）**：`false_evidence` 两类（P-1/P-3）
+    在 `_sync_gap_sync` 的**单分支结构**下**结构不可达**（同一 `(symbol, anchor)` 一轮内只走
+    opened/closed/uncertain **之一**）⇒ 它们是**防御性哨兵**（防将来重构引入该缺陷），
+    **不构成自动误报门**。「零误报」的实质核验在**第四类金标准对照**（步 8 集成观察）。
+    """
+    # 三集**必须同形态**（`(symbol, anchor)`）：`new` 是 `(sym, a, e)`、`closed_anchors`/
+    # `uncertain_anchors` 是 `(sym, a)`。若 `opened` 取裸锚 `a`，则 `opened & closed` 与
+    # `uncertain & opened` **恒为空集**（str vs tuple 永不相等）⇒ 两类误报检测器**静默失效**
+    # （判据绿而实无保护）。批 110 自查由 `TestFalseEvidence` 抓出。
+    opened = {(s, a) for s, a, _e in (stats.get("new") or [])}
+    closed = set(stats.get("closed_anchors") or [])
+    uncertain = set(stats.get("uncertain_anchors") or [])
+    by_anchor = [{"symbol": r[0], "gap_start": r[1], "state": r[2],
+                  "hit_rounds": r[3], "last_hit_round": r[4]} for r in scope_rows]
+    blocked = round_id is None or suppressed
+    hit_ge_n = 0 if blocked else sum(
+        1 for r in scope_rows
+        if r[2] == "open" and int(r[3] or 0) >= _GAP_JUDGE_ROUNDS)
+    return {
+        "hit_ge_n": hit_ge_n,
+        "judged": not blocked,
+        "suppressed": bool(suppressed),
+        "false_evidence": {
+            # P-1：同轮振荡（同锚既 opened 又 closed）
+            "same_round_oscillation": sorted(opened & closed),
+            # P-3：抑制失效（uncertain 的本轮仍产主张）
+            "suppress_leak": sorted(uncertain & opened),
+        },
+        "by_anchor": by_anchor,
+    }
+
+
 def _gap_span(spans: list[str], sample: int = _SYNC_GAP_ALERT_SAMPLE) -> str:
     """告警/日志用短串：前 N 项 + 其余计数（整轮聚合，不逐条刷）。"""
     head = "; ".join(spans[:sample])
@@ -1500,6 +1696,33 @@ def _local_dates(table: str, date_expr: str, where: str = "",
             return {r[0] for r in cur.fetchall() if r[0]}
     except Exception as e:
         logger.warning("对账本地日期读取失败（table=%s）⇒ 该 scope 转 uncertain: %s", table, e)
+        return None
+
+
+def _local_dates_map(table: str, date_expr: str, symbols: list[str],
+                     ) -> dict[str, set[str]] | None:
+    """**scope 级一次**取本地日期集：`{symbol: {date}}`（**读取规模契约**：不逐标的往返）。
+
+    与 `_local_dates(table, date_expr, "symbol=%s", (sym,))` **语义等价**（后者是单标的 SQL 版，
+    仍是 per-date 族的口）——等价性由 `test_batch110_reconcile_scale.TestBatchEquivalence` 钉住：
+    同一表同一表达式下，`_local_dates_map(...).get(sym, set())` 必须逐值等于单标的 `_local_dates`。
+
+    不可判 ⇒ `None`（fail-closed ⇒ **整个 scope** 转 `uncertain`）——与 `_local_dates` 同纪律：
+    不得退化成「空集」（那会被当成「一天都没有」⇒ 全窗口假缺口）。
+    """
+    if not symbols:
+        return {}
+    sql = f"SELECT symbol, {date_expr} FROM {table} WHERE symbol = ANY(%s)"
+    try:
+        with get_conn() as conn:
+            cur = conn.execute(sql, (list(symbols),))
+            out: dict[str, set[str]] = {}
+            for s, d in cur.fetchall():
+                if d:
+                    out.setdefault(s, set()).add(d)
+            return out
+    except Exception as e:
+        logger.warning("对账本地日期批量读取失败（table=%s）⇒ 该 scope 转 uncertain: %s", table, e)
         return None
 
 
@@ -1571,86 +1794,254 @@ def _anchor(x) -> str:
     return _ymd(x).isoformat()
 
 
-def _sync_gap_sync(sync_id: str, symbol: str, *, win_lo: str, win_hi: str,
-                   gaps: list[tuple[str, str]] | None = None,
-                   uncertain_reason: str | None = None,
-                   pulled_anchors: list[str] | None = None) -> dict:
-    """**视图式全量重同步**（scope ＝ `(sync_id, symbol)`）：以**本轮现算**为唯一真源，与 scope 内
-    非终态行（`open`＋`uncertain`）做**集合差**。读-改-写。
+def _sync_gap_scope_rows(sync_id: str, symbols: list[str]) -> dict[str, list[tuple]]:
+    """**一次**读该 scope 的**全部** `sync_gap` 行（含终态）——视图式同步与重拉候选的共同读取口。
 
-    唯一算子（设计 §7.2；步 2 双盲审 P0-1 修正、复审 R2 措辞统一）：
-    ① 非终态行锚 ∈ 本轮缺口起点集 ⇒ `UPDATE gap_end=本轮现算 / last_seen`（**整值对齐**，
-       **不是**「收缩旧值」——字面「收缩」会回潮 P0-1 的幽灵 open）；
-    ② 锚 ∉ ⇒ 置 `closed`（`closed_at=now()`）——**这同时是 uncertain 的恢复路径**（复审 R1）；
-    ③ 本轮有起点而 scope 无该锚行 ⇒ `_gap_put`（无行 INSERT / `closed` 再现 ⇒ 重开）。
-    ⇒ 「缺口补了一半」自然由 ③ 产出新起点行，**不可能出现幽灵 open 或谎报 closed**。
+    返回 `{symbol: [(gap_start, gap_end, state, pull_count, last_seen, hit_rounds, last_hit_round)]}`
+    （日期已 `_anchor` 归一）。
 
-    `uncertain_reason` 非空 ⇒ §5.4 **抑制一切缺口主张**：既有非终态行统一转 `uncertain`
-    （保留各自区间＝「这段以前判为缺，现在无法判定」）；无行 ⇒ 落一条 scope 级 `uncertain`
-    （区间＝本 scope 判定窗）。`gaps=None` 且无 `uncertain_reason` ⇒ 本轮**不主张**（只刷 last_seen）。
+    **为什么读全部状态而非只读非终态**（批 110）：新起点判定要知道「该锚是否落在 `closed` 行上」
+    （⇒ reopen 而非 INSERT）或「是否撞排除段登记」（`unreachable`/`policy_discard` ⇒ 只告警不改写）。
+    只读非终态会把这两种情形误判为 INSERT ⇒ 撞 UNIQUE（`sync_gap_ident`）而**响亮炸**，或静默
+    丢掉排除段可见性。
     """
-    stats = {"opened": 0, "reopened": 0, "updated": 0, "closed": 0, "uncertain": 0, "new": []}
+    out: dict[str, list[tuple]] = {}
+    if not symbols:
+        return out
     with get_conn() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT gap_start, gap_end, state FROM sync_gap "
-            "WHERE sync_id=%s AND symbol=%s AND state = ANY(%s) ORDER BY gap_start",
-            (sync_id, symbol, list(_SYNC_GAP_LIVE_STATES)))
-        prev = [(_anchor(r[0]), _anchor(r[1]), r[2]) for r in cur.fetchall()]
+        cur = conn.execute(
+            "SELECT symbol, gap_start, gap_end, state, pull_count, last_seen, "
+            "hit_rounds, last_hit_round FROM sync_gap "
+            "WHERE sync_id=%s AND symbol = ANY(%s) ORDER BY symbol, gap_start",
+            (sync_id, list(symbols)))
+        for r in cur.fetchall():
+            out.setdefault(r[0], []).append(
+                (_anchor(r[1]), _anchor(r[2]), r[3], r[4], r[5], r[6], r[7]))
+    return out
 
-        if uncertain_reason:
-            if prev:
-                cur.execute(
-                    "UPDATE sync_gap SET state='uncertain', reason=%s, last_seen=now(), closed_at=NULL "
-                    "WHERE sync_id=%s AND symbol=%s AND state = ANY(%s)",
-                    (uncertain_reason, sync_id, symbol, list(_SYNC_GAP_LIVE_STATES)))
-                stats["uncertain"] = len(prev)
+
+def _repullable_map(prev_map: dict[str, list[tuple]]) -> dict[str, list[tuple[str, str]]]:
+    """从 scope 行**内存**筛限频重拉候选：`open` 且 `pull_count < _GAP_REPULL_MAX` 且
+    `last_seen` 距 now ≥ `_GAP_REPULL_MIN_INTERVAL_DAYS` 天。
+
+    与 `_list_repullable`（单标的 SQL 版）**语义等价**——批量路径不逐标的查库（读取规模契约）。
+    `(now - last_seen).days >= 1` ⇔ SQL 的 `last_seen <= now() - interval '1 day'`（正 timedelta
+    的 `.days` 是 floor ⇒ 两者严格等价）。
+    """
+    from datetime import datetime as _dtm, timezone as _tzz
+    now = _dtm.now(_tzz.utc)
+    out: dict[str, list[tuple[str, str]]] = {}
+    for sym, rows in (prev_map or {}).items():
+        cand = [(r[0], r[1]) for r in rows
+                if r[2] == "open" and (r[3] or 0) < _GAP_REPULL_MAX
+                and r[4] is not None and (now - r[4]).days >= _GAP_REPULL_MIN_INTERVAL_DAYS]
+        if cand:
+            out[sym] = cand
+    return out
+
+
+def _sync_gap_sync(sync_id: str, *, symbols: list[str], win_map: dict[str, tuple[str, str]],
+                   round_id: int | None = None,
+                   gaps_map: dict[str, list[tuple[str, str]]] | None = None,
+                   uncertain_map: dict[str, str] | None = None,
+                   pulled_map: dict[str, list[str]] | None = None,
+                   prev_map: dict[str, list[tuple]] | None = None) -> dict:
+    """**视图式全量重同步（scope 级）**：以**本轮现算**为唯一真源，与 scope 内行做**集合差**。
+
+    **读取规模契约（批 110 · 产出 D）**：live 行**一次**读出（`prev_map` 可复用调用方已读的口，
+    避免重复往返），随后全程**内存集合运算**，最后**逐锚批量语句**（`executemany`）落库
+    ⇒ 往返次数＝**常数**，与**标的数无关**（陈述与验收均不含 O(标的数)）。
+
+    **禁 `ON CONFLICT` 盲合并**（迁移 0140 纪律）：盲合并会把旧行的 `pull_count/last_seen/
+    hit_rounds` 带进无关的新缺口 ⇒ 污染「连续 N 轮同缺口」判据。
+
+    唯一算子（设计 §7.2；步 2 双盲审 P0-1 修正、复审 R2 措辞统一；批 110 加**命中维护**）：
+    ① 非终态行锚 ∈ 本轮缺口起点集 ⇒ `UPDATE gap_end=本轮现算 / last_seen` ＋ **命中累加/复位**
+       （**整值对齐**，**不是**「收缩旧值」——字面「收缩」会回潮 P0-1 的幽灵 open）；
+    ② 锚 ∉ ⇒ 置 `closed`（**保留** `hit_rounds/last_hit_round` 供判据读史）——**这同时是
+       uncertain 的恢复路径**（复审 R1）；
+    ③ 本轮有起点而 scope 无该锚行 ⇒ 无行 INSERT ／ `closed` 行 ⇒ **重开＝新事件**
+       （`hit_rounds=1`、`pull_count=0`、`first_seen=now()`、`closed_at=NULL`）／
+       排除段登记（`unreachable`/`policy_discard`）⇒ **只告警不改写**（两类语义互不覆盖）。
+
+    **命中维护语义（批 110 核心 · 断档复位）**：
+      - 新开/reopen ⇒ `hit_rounds=1`、`last_hit_round=round_id`；
+      - 本轮对齐 ⇒ `hit_rounds = hit_rounds+1 if last_hit_round == round_id-1 else 1`；
+      - `closed` ⇒ **保留**（判据读史）。
+      **为什么必须复位**：`hit_rounds>=N 且 last_hit_round==本轮` **只证「最近一次命中＝本轮」，
+      不证「最近 N 轮连续」**。反例：轮 1–4 命中 → 轮 5 该 scope **整轮跳过**（行不动）→ 轮 6–7
+      命中 ⇒ `hr=6` 判过门，**实际连续仅 2 轮**。复位（`== round_id-1` 才累加）把它归 1 ⇒ 正确不过门。
+
+    `uncertain_map[sym]` 非空 ⇒ §5.4 **抑制一切缺口主张**：既有非终态行统一转 `uncertain`
+    （保留各自区间＝「这段以前判为缺，现在无法判定」）；无行 ⇒ 落一条 scope 级 `uncertain`
+    （区间＝`win_map[sym]`）。`gaps_map` 为 `None`、或某 sym **不在其中** ⇒ 该 sym 本轮**未现算**
+    （响亮告警 ＋ 只刷 `last_seen`）；`gaps_map[sym] is None` ⇒ 显式「本轮无作业/不主张」（静默）。
+    `round_id is None`（Valkey 不可用）⇒ **只观测不判定**（不更新命中列）。
+
+    返回聚合统计：`{opened, reopened, updated, closed, uncertain, new:[(symbol,a,e)],
+    closed_anchors:[(symbol,a)], uncertain_anchors:[(symbol,a)]}`。
+    """
+    symbols = list(symbols or [])
+    stats = {"opened": 0, "reopened": 0, "updated": 0, "closed": 0, "uncertain": 0,
+             "new": [], "closed_anchors": [], "uncertain_anchors": []}
+    if not symbols:
+        return stats
+    prev_map = prev_map if prev_map is not None else _sync_gap_scope_rows(sync_id, symbols)
+
+    align: list[tuple] = []        # ① 对齐（含命中维护）
+    align_nh: list[tuple] = []     # ① 对齐（round_id 不可用 ⇒ 不维护命中）
+    clo: list[tuple] = []          # ② closed
+    unc_u: list[tuple] = []        # uncertain（既有行转）
+    unc_i: list[tuple] = []        # uncertain（无行 ⇒ 落 scope 级）
+    ins: list[tuple] = []          # ③ INSERT
+    reopen: list[tuple] = []       # ③ closed 再现 ⇒ 重开
+    touch: list[tuple] = []        # 不主张 ⇒ 只刷 last_seen
+    pull: list[tuple] = []         # 限频重拉尝试计数
+
+    for sym in symbols:
+        _w = win_map.get(sym) or ("", "")
+        # 窗口端点**一律 `_anchor` 归一**（与既有行/现算集的键空间对齐）——否则 `unc_i` 的 INSERT
+        # 会用紧凑 `20260927` 而既有行的 `gap_start` 读回是 `2026-09-27` ⇒ 锚不等 ⇒ 撞 UNIQUE
+        # `sync_gap_ident`（这正是 `_anchor` docstring 说的「两者做差集永不相等」同族）。
+        lo = _anchor(_w[0]) if _w[0] else ""
+        hi = _anchor(_w[1]) if _w[1] else ""
+        prev = prev_map.get(sym) or []
+        by_anchor = {r[0]: r for r in prev}
+        live = [r for r in prev if r[2] in _SYNC_GAP_LIVE_STATES]
+        ureason = (uncertain_map or {}).get(sym)
+
+        if ureason:
+            if live:
+                for r in live:
+                    unc_u.append((ureason, sync_id, sym, r[0]))
+                    stats["uncertain"] += 1
+                    stats["uncertain_anchors"].append((sym, r[0]))
             else:
-                _gap_put(cur, sync_id, symbol, win_lo, win_hi, "uncertain", uncertain_reason)
-                stats["uncertain"] = 1
-            conn.commit()
-            return stats
+                # 无 live 行 ⇒ 该锚（`win_map` 的 `lo`）上可能已有**终态**行（`closed`/排除段）——
+                # 必须**读-改-写**（`_gap_put` 语义），**不得**盲 INSERT（会撞 UNIQUE `sync_gap_ident`）。
+                row = by_anchor.get(lo)
+                if row is None:
+                    unc_i.append((sync_id, sym, lo, hi, ureason))
+                    stats["uncertain"] += 1
+                    stats["uncertain_anchors"].append((sym, lo))
+                elif row[2] in _SYNC_GAP_EXCLUDED_STATES:
+                    logger.warning("sync_gap 锚冲突（%s/%s/%s）：既有 %s vs 本次 uncertain —— 不改写"
+                                   "（缺口主张与排除段登记互不覆盖）", sync_id, sym, lo, row[2])
+                else:
+                    unc_u.append((ureason, sync_id, sym, lo))
+                    stats["uncertain"] += 1
+                    stats["uncertain_anchors"].append((sym, lo))
+            continue
 
-        if gaps is None:
+        if gaps_map is None or sym not in gaps_map:
             # 「本轮未现算」≠「本轮现算为空」：前者**不主张**（只刷 last_seen），后者才是「全补齐 ⇒
             # 逐行 closed」。把 None 当空集会**谎报 closed**（P0-1 同族）⇒ 响亮告警后原样返回。
-            logger.warning("sync_gap 视图式同步收到 gaps=None（未现算）⇒ 本轮不主张（%s/%s）",
-                           sync_id, symbol)
-            cur.execute("UPDATE sync_gap SET last_seen=now() WHERE sync_id=%s AND symbol=%s "
-                        "AND state = ANY(%s)", (sync_id, symbol, list(_SYNC_GAP_LIVE_STATES)))
-            conn.commit()
-            return stats
-        current = {_anchor(a): _anchor(e) for a, e in (gaps or [])}
-        # ① 对齐（含 uncertain → open 的翻正）；② 失配 ⇒ closed
-        for a, _e, _s in prev:
+            logger.warning("sync_gap 视图式同步收到未现算（⇒ 本轮不主张，%s/%s）", sync_id, sym)
+            for r in live:
+                touch.append((sync_id, sym, r[0]))
+            continue
+        gm = gaps_map[sym]
+        if gm is None:
+            # 显式「本轮无作业/不主张」（如 per-symbol 下界晚于窗口上界的新上币）⇒ 静默刷 last_seen
+            for r in live:
+                touch.append((sync_id, sym, r[0]))
+            continue
+
+        current = {_anchor(a): _anchor(e) for a, e in (gm or [])}
+        live_anchors = {r[0] for r in live}
+        for r in live:
+            a = r[0]
             if a in current:
-                cur.execute(
-                    "UPDATE sync_gap SET gap_end=%s, state='open', reason=NULL, last_seen=now(), "
-                    "closed_at=NULL WHERE sync_id=%s AND symbol=%s AND gap_start=%s",
-                    (current[a], sync_id, symbol, a))
+                if round_id is None:
+                    align_nh.append((current[a], sync_id, sym, a))
+                else:
+                    align.append((current[a], round_id - 1, round_id, sync_id, sym, a))
                 stats["updated"] += 1
             else:
-                cur.execute(
-                    "UPDATE sync_gap SET state='closed', closed_at=now(), last_seen=now() "
-                    "WHERE sync_id=%s AND symbol=%s AND gap_start=%s", (sync_id, symbol, a))
+                clo.append((sync_id, sym, a))
                 stats["closed"] += 1
-        # ③ 新起点
-        known = {a for a, _e, _s in prev}
-        for a in sorted(set(current) - known):
-            r = _gap_put(cur, sync_id, symbol, a, current[a], "open", None)
-            if r == "inserted":
+                stats["closed_anchors"].append((sym, a))
+        for a in sorted(set(current) - live_anchors):
+            row = by_anchor.get(a)
+            hr = 1 if round_id is not None else 0
+            if row is None:
+                ins.append((sync_id, sym, a, current[a], hr, round_id or 0))
                 stats["opened"] += 1
-                stats["new"].append((a, current[a]))
-            elif r == "reopened":
+                stats["new"].append((sym, a, current[a]))
+            elif row[2] == "closed":
+                reopen.append((current[a], hr, round_id or 0, sync_id, sym, a))
                 stats["reopened"] += 1
-                stats["new"].append((a, current[a]))
-        # 限频重拉的尝试计数（pull_count 只增不清；`closed` 重开时归零由 `_gap_put` 负责）
-        for a in (pulled_anchors or []):
-            cur.execute("UPDATE sync_gap SET pull_count = pull_count + 1 "
-                        "WHERE sync_id=%s AND symbol=%s AND gap_start=%s",
-                        (sync_id, symbol, _anchor(a)))
+                stats["new"].append((sym, a, current[a]))
+            else:
+                # 排除段登记撞缺口主张 ⇒ **只告警不改写**（「不得静默」，两类语义互不覆盖）
+                logger.warning("sync_gap 锚冲突（%s/%s/%s）：既有 %s vs 本次 open —— 不改写"
+                               "（缺口主张与排除段登记互不覆盖）", sync_id, sym, a, row[2])
+        for a in (pulled_map or {}).get(sym, []):
+            pull.append((sync_id, sym, _anchor(a)))
+
+    with get_conn() as conn:
+        cur = conn.cursor()
+        if align:
+            cur.executemany(
+                "UPDATE sync_gap SET gap_end=%s, state='open', reason=NULL, last_seen=now(), "
+                "closed_at=NULL, "
+                "hit_rounds=CASE WHEN last_hit_round=%s THEN hit_rounds+1 ELSE 1 END, "
+                "last_hit_round=%s WHERE sync_id=%s AND symbol=%s AND gap_start=%s", align)
+        if align_nh:
+            cur.executemany(
+                "UPDATE sync_gap SET gap_end=%s, state='open', reason=NULL, last_seen=now(), "
+                "closed_at=NULL WHERE sync_id=%s AND symbol=%s AND gap_start=%s", align_nh)
+        if clo:
+            cur.executemany(
+                "UPDATE sync_gap SET state='closed', closed_at=now(), last_seen=now() "
+                "WHERE sync_id=%s AND symbol=%s AND gap_start=%s", clo)
+        if unc_u:
+            # `closed` 再现 ⇒ 按 `_gap_put` 语义**重开＝新事件**（`first_seen=now()`、`pull_count=0`）；
+            # `open`/`uncertain` ⇒ 只翻态不动事件字段（CASE 读的是**旧行值**）。
+            cur.executemany(
+                "UPDATE sync_gap SET state='uncertain', reason=%s, last_seen=now(), closed_at=NULL, "
+                "first_seen=CASE WHEN state='closed' THEN now() ELSE first_seen END, "
+                "pull_count=CASE WHEN state='closed' THEN 0 ELSE pull_count END "
+                "WHERE sync_id=%s AND symbol=%s AND gap_start=%s", unc_u)
+        if unc_i:
+            cur.executemany(
+                "INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, reason) "
+                "VALUES (%s,%s,%s,%s,'uncertain',%s)", unc_i)
+        if ins:
+            cur.executemany(
+                "INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, reason, "
+                "hit_rounds, last_hit_round) VALUES (%s,%s,%s,%s,'open',NULL,%s,%s)", ins)
+        if reopen:
+            cur.executemany(
+                "UPDATE sync_gap SET gap_end=%s, state='open', reason=NULL, last_seen=now(), "
+                "closed_at=NULL, first_seen=now(), pull_count=0, hit_rounds=%s, last_hit_round=%s "
+                "WHERE sync_id=%s AND symbol=%s AND gap_start=%s", reopen)
+        if touch:
+            cur.executemany("UPDATE sync_gap SET last_seen=now() "
+                            "WHERE sync_id=%s AND symbol=%s AND gap_start=%s", touch)
+        if pull:
+            cur.executemany("UPDATE sync_gap SET pull_count = pull_count + 1 "
+                            "WHERE sync_id=%s AND symbol=%s AND gap_start=%s", pull)
         conn.commit()
     return stats
+
+
+def _sync_gap_sync_one(sync_id: str, symbol: str, *, win_lo: str, win_hi: str,
+                       gaps: list[tuple[str, str]] | None = None,
+                       uncertain_reason: str | None = None,
+                       pulled_anchors: list[str] | None = None) -> dict:
+    """**单 symbol** 便捷入口（per-date 族／单测用）——薄包装 scope 级 `_sync_gap_sync`。
+
+    `round_id=None`（per-date 对账不做「连续 N 轮」判据——该判据是 per-symbol 旁路的门控）；
+    返回体把 `new` 归一成旧形态 `[(gap_start, gap_end)]`（per-date 调用方只关心段）。
+    """
+    st = _sync_gap_sync(
+        sync_id, symbols=[symbol], win_map={symbol: (win_lo, win_hi)}, round_id=None,
+        gaps_map=None if gaps is None else {symbol: gaps},
+        uncertain_map={symbol: uncertain_reason} if uncertain_reason else None,
+        pulled_map={symbol: pulled_anchors} if pulled_anchors else None)
+    st["new"] = [(a, e) for _s, a, e in st["new"]]
+    return st
 
 
 def _alert_sync_gaps(label: str, spans: list[str]) -> None:
@@ -1671,6 +2062,78 @@ def _alert_sync_gaps(label: str, spans: list[str]) -> None:
         logger.warning("缺口告警发送失败（不阻塞同步流程）: %s", e)
 
 
+def _alert_generic(code: str, title: str, body: str) -> None:
+    """对账侧告警的**统一出口**（warn 级站内铃铛；异常不阻断对账）。
+
+    与 `_alert_sync_gaps` 同范式——**新 alert code 必须进 `alert_notify/runbook.py`**（仓规）。
+    """
+    try:
+        from src.alert_notify.notify import notify
+        notify("warn", "data", title, body, code=code)
+    except Exception as e:
+        logger.warning("告警发送失败（code=%s，不阻断对账）: %s", code, e)
+
+
+def _alert_sm_universe_missing(sync_id: str, category: str, venue: str | None) -> None:
+    """**V6**：SM **无**该族 symbol ⇒ 快照不完整（scope 级，per-symbol 级结构上不可达）。
+
+    `_sm_universe` 就是遍历源 ⇒ 「SM 无 symbol」只可能整族为空。原实现只 `logger.warning`
+    （静默度不足：日志无人看即等于没做）。升级为 alert code `sync.universe_missing`。
+    ⚠️ **不引入外部对照宇宙**（交易所 instruments 列表）来探测——对账是**本地审计动作**，
+    读外部 API 违「连源才需 → 接入层」且与 §九.1 依赖倒置冲突。
+    """
+    _alert_generic(
+        "sync.universe_missing", f"对账标的宇宙缺失 {sync_id}",
+        f"`security_master` 中 category={category}"
+        + (f"/exchange={venue}" if venue else "")
+        + " **零行** ⇒ 该族期望集为空、对账静默失效（列表同步未跑/未写 SM？）。")
+
+
+def _alert_local_unreadable(sync_id: str, table: str) -> None:
+    """**P1-4（步 4 盲审）**：`_local_dates_map` 整 scope 不可读 ⇒ 全族转 `uncertain`。
+
+    与 V6（`:2315`）/V7（`:2347`）**同级**（都是 scope 级可见性），却唯此一路**无告警** ⇒
+    bar 表系统性不可读（表未建/权限/连接）时，真实大段缺失被压成 `uncertain` 且**只**在
+    journal 摘要里留 `uncertain=N` —— 无人盯日志即盲区。
+    ⚠️ 本函数**不**主张缺口（`uncertain` 是 §5.4 的正确语义），只把「为什么变成不确定」喊出来。
+    """
+    _alert_generic(
+        "sync.local_unreadable", f"对账本地不可读 {sync_id}",
+        f"`{table}` 本地日期集**整 scope 读取失败** ⇒ 该 scope 全族转 `uncertain`（**不是**「无缺口」）；"
+        f"bar 表系统性不可读时真实缺失会被压成不确定。查表是否存在/权限/连接，明细见 journal 摘要。")
+
+
+def _alert_inception_cover_low(sync_id: str, covered: int, total: int, streak: int,
+                               declared: bool | None = None) -> None:
+    """**V7 / V5**：inception 真值可及性异常。
+
+    - 覆盖率**长期**低（连续 ≥ `_SM_COVER_STALE_ROUNDS` 轮）⇒ 缺口被 §5.4 **永久静默抑制**
+      （一次刷新网络抖动写 `None` 且未恢复即触发）——抑制本是安全网，失修即变盲区；
+    - `declared` 非 `None` ⇒ **互证闸**（V5）判定：`_RECONCILE_UNKNOWN_INCEPTION` 的**声明**
+      与「SM 有 symbol 且 `list_date` 空」的**实测**不符（快照新鲜时评估）。
+    """
+    if declared is None:
+        body = (f"`{sync_id}` 覆盖率 {covered}/{total} **连续 {streak} 轮**不足 ⇒ "
+                f"该 scope 的缺口被 uncertain 抑制且**判据不许过门**；查刷新链是否持续探不到源。")
+    else:
+        body = (f"`{sync_id}` 互证闸不符：声明 `unknown_inception`={declared}，"
+                f"实测「有 symbol 且 list_date 空」={covered < total}（{covered}/{total}）⇒ "
+                f"`_RECONCILE_UNKNOWN_INCEPTION` 与真实可及性**漂移**，须复核声明。")
+    _alert_generic("sync.inception_cover_low", f"inception 可及性异常 {sync_id}", body)
+
+
+def _alert_reconcile_budget(sync_id: str, segs: int, budget: int, kind: str) -> None:
+    """**产出 D**：本轮该 scope 的**落表行数**超上界 ⇒ **不落主张**（`_GAP_ROW_BUDGET`）。
+
+    **显名取舍：用漏报换稳定**——该 scope 当轮缺口**不报**，以**告警**替代**静默**；其判据
+    **不许过门**。超阈通常预示 `floor`/期望集算错或库被污染，人工介入优于放任落表。
+    """
+    _alert_generic(
+        "sync.reconcile_budget", f"对账体量超阈 {sync_id}",
+        f"本轮落表行数 {segs} > 上界 {budget}（kind={kind}）⇒ **不落主张**（当轮漏报，"
+        f"以告警替代静默）；查窗口下界/期望集是否异常，必要时调 `_GAP_ROW_BUDGET`。")
+
+
 def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list[str] | None,
                      win_lo: str, win_hi: str, where: str = "", where_params: tuple = (),
                      repull_fn: Callable[[str], None] | None = None,
@@ -1683,7 +2146,7 @@ def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list
     （否则把节假日当期望日 ⇒ **假缺口**）。
     """
     if expected is None:
-        _sync_gap_sync(sync_id, symbol, win_lo=win_lo, win_hi=win_hi,
+        _sync_gap_sync_one(sync_id, symbol, win_lo=win_lo, win_hi=win_hi,
                        uncertain_reason="calendar_uncovered")
         return {"expected": 0, "missing": 0, "repulled": 0, "repull_failed": 0,
                 "still_missing": [], "gap_dates": [], "segments": [], "new_segments": [], "gaps": {},
@@ -1695,7 +2158,7 @@ def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list
 
     local = _local_dates(table, date_expr, where, where_params)
     if local is None:
-        _sync_gap_sync(sync_id, symbol, win_lo=win_lo, win_hi=win_hi,
+        _sync_gap_sync_one(sync_id, symbol, win_lo=win_lo, win_hi=win_hi,
                        uncertain_reason="local_unreadable")
         return {"expected": len(expected), "missing": 0, "repulled": 0, "repull_failed": 0,
                 "still_missing": [], "gap_dates": [], "segments": [], "new_segments": [], "gaps": {},
@@ -1719,14 +2182,14 @@ def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list
     if repulled:
         local2 = _local_dates(table, date_expr, where, where_params)
         if local2 is None:
-            _sync_gap_sync(sync_id, symbol, win_lo=win_lo, win_hi=win_hi,
+            _sync_gap_sync_one(sync_id, symbol, win_lo=win_lo, win_hi=win_hi,
                            uncertain_reason="local_unreadable")
             return {"expected": len(expected), "missing": len(missing), "repulled": repulled,
                     "repull_failed": failed, "still_missing": [], "gap_dates": [], "segments": [],
                     "new_segments": [], "gaps": {}, "uncertain": "local_unreadable"}
         still = [d for d in missing if d not in local2]
     segs = _to_segments(still, expected)
-    stats = _sync_gap_sync(sync_id, symbol, win_lo=win_lo, win_hi=win_hi, gaps=segs)
+    stats = _sync_gap_sync_one(sync_id, symbol, win_lo=win_lo, win_hi=win_hi, gaps=segs)
     return {"expected": len(expected), "missing": len(missing), "repulled": repulled,
             "repull_failed": failed, "still_missing": still, "gap_dates": still,
             "segments": segs, "new_segments": stats.get("new") or [], "gaps": stats,
@@ -1763,16 +2226,21 @@ def _repull_symbol(adapter, kind: str, sub_kind: str | None, freq: str,
     return save_bars(freq, rows) if rows else 0
 
 
-def _sm_universe(category: str, venue: str | None = None) -> list[tuple[str, object]]:
-    """per-symbol 对账的标的宇宙 —— **单一真源＝`security_master`**，返回 `[(vt_symbol, updated_at)]`。
+def _sm_universe(category: str, venue: str | None = None) -> list[tuple[str, object, object]]:
+    """per-symbol 对账的标的宇宙 —— **单一真源＝`security_master`**，
+    返回 `[(vt_symbol, updated_at, list_date)]`。
 
     **禁按 symbol 前缀猜**（裁定 Q3，双同）：前缀法 `11/12/13` 实测**漏** `10`×13 只 + `14`×5 只
     共 18 只转债；`bar_1d` 里 stock/etf/convertible 同用 `.SHSE/.SZSE` 后缀 ⇒ 后缀也区分不了族。
     `venue` 非空（crypto）时按 `exchange` 收窄（`.BINANCE` / `.OKX` 共享 `bar_1d`）。
 
     `updated_at` 是**快照 age** 的度量（调用方据此判 `stale_source`，设计 §5.4）。
+
+    **批 110**：一并取 `list_date`（inception 真值）——**不额外往返**，且供调用方
+    ① 传 `_window_floors(inception=…)`（**消除 per-symbol N+1**）② 判「结构性未知」（`list_date` 空）
+    ③ 算**覆盖率**（`sm_covered/sm_total`）。这是「一次读取满足多个消费者」的口。
     """
-    sql = "SELECT vt_symbol, updated_at FROM security_master WHERE category=%s"
+    sql = "SELECT vt_symbol, updated_at, list_date FROM security_master WHERE category=%s"
     params: tuple = (category,)
     if venue:
         sql += " AND exchange=%s"
@@ -1781,19 +2249,60 @@ def _sm_universe(category: str, venue: str | None = None) -> list[tuple[str, obj
         return list(conn.execute(sql, params).fetchall())
 
 
+def _log_scope_summary(sync_id: str, stat: dict) -> None:
+    """**产出 C**：每 scope 一行结构化摘要（唯一现成可观测通道＝`quant-journal`，事实 12）
+    ⇒ 母设计 §八.5 的判据**可复核、可自动判定**（含 `round_id`/`N`/覆盖率/误报证据计数）。
+
+    取数配方（RUNBOOK `sync.gap`）：
+    `quant-journal -u quant-celery-worker@quant --since "1 week ago" | grep gap_reconcile`
+    """
+    logger.info(
+        "gap_reconcile sync_id=%s round_id=%s symbols=%d uncertain=%d hit_ge_N=%d opened=%d "
+        "closed=%d repulled=%d errors=%d false_=%d unknown_inception=%d sm_covered=%s/%s "
+        "budget_exceeded=%d suppressed=%s stale=%d cover_low_streak=%s judged=%s N=%d",
+        sync_id, stat.get("round_id"), stat.get("symbols", 0), stat.get("uncertain", 0),
+        stat.get("hit_ge_n", 0), stat.get("new_open", 0), stat.get("closed", 0),
+        stat.get("repulled", 0), stat.get("errors", 0), stat.get("false_", 0),
+        stat.get("unknown_inception", 0), stat.get("sm_covered"), stat.get("sm_total"),
+        stat.get("budget_exceeded", 0), int(bool(stat.get("suppressed"))),
+        int(bool(stat.get("stale_source"))),
+        stat.get("cover_low_streak"), stat.get("judged"), _GAP_JUDGE_ROUNDS)
+
+
 def _reconcile_symbols() -> dict:
     """per-symbol 旁路对账（beat 周日 03:33）。**不进 `sync_config`**——对账无游标、非拉取任务
     （裁定 Q2；批 83b 的「收编进 sync_config」针对**拉取**任务，与本事无冲突）。
 
-    每标的：下界＝`_window_floors(adapter, kind, cfg, sym=…)`（**复用批 108 同一真源，不二算**，
-    §5.3-1）；上界＝`end − publish_lag`。输出＝落表 ＋ 聚合告警 ＋ 限频重拉。
+    批 110（**判据地基**）三条新增：
+      ① **轮次身份**（`round_id`，Valkey 严格单调）＋ 行上 `hit_rounds/last_hit_round`
+         ⇒「连续 N 轮同缺口」**可自动判定**（`_gap_judge`；含**断档复位**，见 `_sync_gap_sync`）；
+      ② **inception 收编**（裁定 G①）⇒ 下界取口＝SM 单一真源 ＋ **覆盖率进摘要**
+         ＋ **互证闸**（声明 vs 实测，**快照新鲜时**才评估）；
+      ③ **读取规模契约**：按 scope **一次**取本地日期集（`_local_dates_map`）＋ **一次**取
+         `sync_gap` 行（`_sync_gap_scope_rows`，重拉候选由它内存筛）⇒ 成本由 **scope 数**决定。
 
-    §5.4 两道不确定门（**抑制一切缺口主张**）：`inception` 未知（裁定 F）⇒ `inception_unknown`；
-    SM 快照 age 超阈 ⇒ `stale_source`（§九.1 依赖倒置的闭合口）。
+    每标的：下界＝`_window_floors(adapter, kind, cfg, sym=vt_symbol, inception=…)`（**复用批 108
+    同一真源，不二算**，§5.3-1）；上界＝`end − publish_lag`。输出＝落表 ＋ 聚合告警 ＋ 限频重拉。
+
+    §5.4 两道不确定门（**抑制一切缺口主张**）：`inception` 未知／SM 缺 `list_date`（裁定 F）
+    ⇒ `inception_unknown`；SM 快照 age 超阈 ⇒ `stale_source`（§九.1 依赖倒置的闭合口）。
+    ⚠️ per-symbol 重拉的 `except` **不吞 `SoftTimeLimitExceeded`**（批 110·D）：软时限直抛 ⇒
+    **中止整轮**（**失去** per-symbol 隔离）；契约＝「整轮放弃、幂等、下轮续」。
     """
     out: dict[str, dict] = {}
     today_s = date.today().strftime("%Y%m%d")
+    round_id = _next_round_id()      # **每轮入口无条件推进一次**（与 scope 是否写行无关）
     from datetime import datetime as _dtm, timezone as _tzz
+    round_tot = {"scopes": 0, "symbols": 0, "uncertain": 0, "new_open": 0, "closed": 0,
+                 "repulled": 0, "errors": 0, "hit_ge_n": 0, "false_": 0,
+                 "unknown_inception": 0, "budget_exceeded": 0, "suppressed": 0}
+
+    def _accumulate(s: dict) -> None:
+        for k in ("symbols", "uncertain", "new_open", "closed", "repulled", "errors",
+                  "hit_ge_n", "false_", "unknown_inception", "budget_exceeded", "suppressed"):
+            round_tot[k] += s.get(k, 0)
+        round_tot["scopes"] += 1
+
     for sync_id, spec in _RECONCILE_SYMBOL_SCOPE.items():
         kind, sub_kind, freq, table, tzname, category = spec
         cfg = _get_config(sync_id)
@@ -1809,84 +2318,182 @@ def _reconcile_symbols() -> dict:
         end_s = end_d.strftime("%Y%m%d")
         venue = getattr(adapter, "venue", None)
         try:
-            sm_rows = _sm_universe(category, venue)
+            sm_rows = _sm_universe(category, venue)      # [(vt_symbol, updated_at, list_date)]
         except Exception as e:
             out[sync_id] = {"error": f"SM 读取失败: {type(e).__name__}: {e}"}
             continue
         if not sm_rows:
-            # 记 warning 而非静默跳过：该族在 SM 无标的＝列表同步没跑/没写 SM ⇒ 期望集为空
+            # V6：「SM 无该族 symbol」＝**scope 级**快照不完整（per-symbol 级结构上不可达——遍历源
+            # 就是 SM 本身）⇒ 由 warning 升级为 **alert code**，不静默跳过。
             logger.warning("per-symbol 对账：SM 无 %s%s 标的，跳过 %s（列表同步未跑？）",
                            category, f"/{venue}" if venue else "", sync_id)
+            _alert_sm_universe_missing(sync_id, category, venue)
             out[sync_id] = {"skipped": "SM 无该族标的"}
             continue
         # 快照 age（§5.4 第一行）：SM 该族最新 `updated_at` 超阈 ⇒ 期望集不完整 ⇒ 全族 uncertain
         newest = max((r[1] for r in sm_rows if r[1]), default=None)
         stale = newest is None or (_dtm.now(_tzz.utc) - newest).days > _SNAPSHOT_STALE_DAYS
-        stat = {"symbols": 0, "uncertain": 0, "new_open": 0, "closed": 0, "repulled": 0,
-                "errors": 0, "stale_source": stale}
+        symbols = [r[0] for r in sm_rows]
+        sm_total = len(symbols)
+        sm_covered = sum(1 for r in sm_rows if r[2])
+
+        stat: dict = {"symbols": sm_total, "uncertain": 0, "new_open": 0, "closed": 0,
+                      "repulled": 0, "errors": 0, "stale_source": stale,
+                      "sm_covered": sm_covered, "sm_total": sm_total,
+                      "unknown_inception": 0, "hit_ge_n": 0, "false_": 0,
+                      "budget_exceeded": 0, "round_id": round_id,
+                      "judged": round_id is not None, "suppressed": 0}
+
+        # —— 互证闸（V5）：比对键＝「SM **有** symbol 且 `list_date` **空**」；只在**新鲜时**评估 ——
+        if not stale:
+            measured_empty = sm_covered < sm_total
+            declared = sync_id in _RECONCILE_UNKNOWN_INCEPTION
+            if measured_empty != declared:
+                logger.warning("互证闸不符 %s：声明 unknown_inception=%s，实测 list_date 空=%s",
+                               sync_id, declared, measured_empty)
+                _alert_inception_cover_low(sync_id, sm_covered, sm_total, 0, declared=declared)
+
+        # —— 覆盖率长期低（V7）：连续低轮次计数（Valkey，跨轮），每 N 轮响一次（防每轮重响）——
+        # ⭐ 传 `round_id` ⇒ 断档复位（P1-5）：该 scope 整轮未评估时本函数不被调用 ⇒ 靠
+        # `last_cover_round != round_id-1` 在**下次评估**归 1，否则会跨过断档假告警。
+        streak = _bump_cover_low(sync_id, sm_covered < sm_total, round_id)
+        stat["cover_low_streak"] = streak
+        if (sm_covered < sm_total and streak is not None
+                and streak >= _SM_COVER_STALE_ROUNDS
+                and (streak == _SM_COVER_STALE_ROUNDS or streak % _SM_COVER_STALE_ROUNDS == 0)):
+            _alert_inception_cover_low(sync_id, sm_covered, sm_total, streak)
+
         news: list[str] = []
-        for vt_symbol, _upd in sm_rows:
-            stat["symbols"] += 1
-            try:
-                src_sym = vt_symbol.rsplit(".", 1)[0]
-                # 下界＝三方地板（批 108 同一真源，不二算）；`None` ⇒ 三源皆未声明
-                floor, _excl = _window_floors(adapter, kind, cfg, sym=src_sym)
-                lo_known = (floor or end_d).strftime("%Y%m%d")
-                if stale or not adapter.symbol_inception(src_sym):
-                    # 裁定 F / §5.4：真上币日不可得 ⇒ **显式未知** ⇒ 不主张任何缺口；
-                    # 快照过期 ⇒ 期望集不完整 ⇒ 同理（`stale_source` 优先级更高：它同时使
-                    # 已登记的 `inception` 可疑）。
-                    _sync_gap_sync(sync_id, vt_symbol, win_lo=lo_known, win_hi=end_s,
-                                   uncertain_reason="stale_source" if stale else "inception_unknown")
-                    stat["uncertain"] += 1
+        if stale:
+            _sync_gap_sync(sync_id, symbols=symbols,
+                           win_map={s: (end_s, end_s) for s in symbols},
+                           round_id=round_id,
+                           uncertain_map={s: "stale_source" for s in symbols})
+            stat["uncertain"] = sm_total
+        else:
+            dexpr = f"to_char(ts AT TIME ZONE '{tzname}','YYYYMMDD')"
+            # ① 一次取本地日期集（读侧批量）② 一次取 sync_gap 行（重拉候选内存筛，不逐标的查）
+            local_map = _local_dates_map(table, dexpr, symbols)
+            if local_map is None:
+                # P1-4（步 4 盲审）：`_local_dates_map` 返回 `None` ⇒ **整 scope** 不可读 ⇒
+                # 下面逐标的落 `uncertain(local_unreadable)` ⇒ 真实大段缺失被**压成 uncertain**，
+                # 而仅 journal 摘要里有 `uncertain=N`（无人盯日志＝盲区）。与 V6/V7 同级问题
+                # （都是 scope 级可见性）⇒ 同制响亮告警。
+                _alert_local_unreadable(sync_id, table)
+            prev_map = _sync_gap_scope_rows(sync_id, symbols)
+
+            win_map: dict[str, tuple[str, str]] = {}
+            uncertain_map: dict[str, str] = {}
+            gaps_map: dict[str, list | None] = {}
+            exp_map: dict[str, list[str]] = {}
+            for vt_symbol, _upd, ld in sm_rows:
+                # 下界＝三方地板（批 108 同一真源，不二算）；`inception` 由**批量预取**传入（消 N+1）
+                floor, _excl = _window_floors(adapter, kind, cfg, sym=vt_symbol, inception=ld)
+                win_map[vt_symbol] = ((floor or end_d).strftime("%Y%m%d"), end_s)
+                if not ld:
+                    # 裁定 F / §5.4：真上币日不可得（结构性未知）⇒ **不主张任何缺口**
+                    uncertain_map[vt_symbol] = "inception_unknown"
+                    stat["unknown_inception"] += 1
                     continue
                 if floor is None or floor > end_d:
-                    continue      # 下界晚于窗口上界（新上币）⇒ 本轮无作业，非缺口
+                    gaps_map[vt_symbol] = None   # 下界晚于窗口上界（新上币）⇒ 无作业、非缺口
+                    continue
+                if local_map is None:
+                    uncertain_map[vt_symbol] = "local_unreadable"
+                    continue
                 lo_s = floor.strftime("%Y%m%d")
+                win_map[vt_symbol] = (lo_s, end_s)
                 if tzname == "UTC":
                     expected = [(floor + timedelta(days=i)).strftime("%Y%m%d")
                                 for i in range((end_d - floor).days + 1)]
                 else:
                     expected = _trade_dates_in_range(lo_s, end_s)
                     if expected is None:
-                        _sync_gap_sync(sync_id, vt_symbol, win_lo=lo_s, win_hi=end_s,
-                                       uncertain_reason="calendar_uncovered")
-                        stat["uncertain"] += 1
+                        uncertain_map[vt_symbol] = "calendar_uncovered"
                         continue
-                dexpr = f"to_char(ts AT TIME ZONE '{tzname}','YYYYMMDD')"
-                local = _local_dates(table, dexpr, "symbol=%s", (vt_symbol,))
-                if local is None:
-                    _sync_gap_sync(sync_id, vt_symbol, win_lo=lo_s, win_hi=end_s,
-                                   uncertain_reason="local_unreadable")
-                    stat["uncertain"] += 1
-                    continue
-                # 限频重拉（上一轮遗留的 open 行）→ 成功后由下方视图式同步自然闭合
-                pulled_anchors: list[str] = []
-                for g0, g1 in _list_repullable(sync_id, vt_symbol):
+                exp_map[vt_symbol] = expected
+                local = local_map.get(vt_symbol, set())
+                gaps_map[vt_symbol] = _to_segments([d for d in expected if d not in local], expected)
+
+            # —— 体量上界（产出 D）：**先判预算再动作**（超阈 ⇒ 不重拉、不主张；告警替代静默）——
+            total_segs = sum(len(v) for v in gaps_map.values() if v)
+            budget = _GAP_ROW_BUDGET.get(kind, _GAP_ROW_BUDGET["bar_daily"])
+            if total_segs > budget:
+                stat["budget_exceeded"] = 1
+                logger.error("对账体量超阈 %s：落表行数 %d > %d（kind=%s）⇒ 本轮不主张",
+                             sync_id, total_segs, budget, kind)
+                _alert_reconcile_budget(sync_id, total_segs, budget, kind)
+                gaps_map = {s: None for s in gaps_map}      # 整 scope 静默不主张
+
+            # —— 限频重拉（上轮遗留 open 行）→ 成功后由视图式同步自然闭合 ——
+            repull_map = {} if stat["budget_exceeded"] else _repullable_map(prev_map)
+            pulled_map: dict[str, list[str]] = {}
+            for vt_symbol, cand in repull_map.items():
+                src_sym = vt_symbol.rsplit(".", 1)[0]
+                for g0, g1 in cand:
                     try:
                         _repull_symbol(adapter, kind, sub_kind, freq, src_sym, g0, g1)
                         stat["repulled"] += 1
-                        pulled_anchors.append(g0)
+                        pulled_map.setdefault(vt_symbol, []).append(g0)
                     except Exception as e:
+                        if (_CelerySoftTimeLimit is not None
+                                and isinstance(e, _CelerySoftTimeLimit)):
+                            raise   # 软时限**直抛**（不吞）：中止整轮，下轮续（契约见 docstring）
                         stat["errors"] += 1
                         logger.warning("per-symbol 重拉失败 %s %s %s~%s: %s",
                                        sync_id, vt_symbol, g0, g1, e)
-                if pulled_anchors:
-                    local2 = _local_dates(table, dexpr, "symbol=%s", (vt_symbol,))
-                    if local2 is not None:
-                        local = local2
-                segs = _to_segments([d for d in expected if d not in local], expected)
-                st = _sync_gap_sync(sync_id, vt_symbol, win_lo=lo_s, win_hi=end_s, gaps=segs,
-                                    pulled_anchors=pulled_anchors)
-                stat["new_open"] += st["opened"] + st["reopened"]
-                stat["closed"] += st["closed"]
-                news.extend(f"{sync_id}/{vt_symbol} {a}~{b}" for a, b in st["new"])
-            except Exception as e:
-                stat["errors"] += 1
-                logger.warning("per-symbol 对账失败 %s %s: %s", sync_id, vt_symbol, e, exc_info=True)
+            if pulled_map:
+                # 重拉后**一次**刷新（只对发生重拉的标的）⇒ 重算其段（不再逐标的查）
+                refreshed = _local_dates_map(table, dexpr, list(pulled_map))
+                if refreshed is not None:
+                    local_map.update(refreshed)
+                    for vt_symbol in pulled_map:
+                        exp = exp_map.get(vt_symbol)
+                        if exp is None or gaps_map.get(vt_symbol) is None:
+                            continue
+                        local = local_map.get(vt_symbol, set())
+                        gaps_map[vt_symbol] = _to_segments(
+                            [d for d in exp if d not in local], exp)
+
+            # —— ③ 落表（**一次**批量写；`prev_map` 复用 ⇒ 不再读）——
+            st = _sync_gap_sync(sync_id, symbols=symbols, win_map=win_map, round_id=round_id,
+                                gaps_map=gaps_map, uncertain_map=uncertain_map,
+                                pulled_map=pulled_map, prev_map=prev_map)
+            stat["new_open"] = st["opened"] + st["reopened"]
+            stat["closed"] = st["closed"]
+            stat["uncertain"] = st["uncertain"]
+
+            # —— 判据（纯函数；读**写后**的行——仍是常数级往返）——
+            # 行形态转换：`_sync_gap_scope_rows` 给 7 元组；`_gap_judge` 要
+            # `(symbol, gap_start, state, hit_rounds, last_hit_round)`（见其 docstring）。
+            rows_after = [(s, r[0], r[2], r[5], r[6])
+                          for s, rs in _sync_gap_scope_rows(sync_id, symbols).items()
+                          for r in rs]
+            # 门控**合取**（P1-1；方案 §产出B「budget_exceeded 的 scope 判据不许过门
+            # （与覆盖率<1 同制）」）：本轮主张被抑制 ⇒ 不构成「命中」⇒ 判据不过门。
+            _sup = bool(stat["budget_exceeded"]) or sm_covered < sm_total
+            judge = _gap_judge(st, rows_after, round_id, suppressed=_sup)
+            stat["hit_ge_n"] = judge["hit_ge_n"]
+            stat["judged"] = judge["judged"]
+            stat["suppressed"] = judge["suppressed"]
+            fe = judge["false_evidence"]
+            stat["false_"] = len(fe["same_round_oscillation"]) + len(fe["suppress_leak"])
+            news = [f"{sync_id}/{sym} {a}~{b}" for sym, a, b in st["new"]]
+
         out[sync_id] = stat
+        _log_scope_summary(sync_id, stat)
+        _accumulate(stat)
         if news:
             _alert_sync_gaps(sync_id, news)
+
+    logger.info("gap_reconcile_done round_id=%s scopes=%d symbols=%d uncertain=%d hit_ge_N=%d "
+                "opened=%d closed=%d repulled=%d errors=%d false_=%d unknown_inception=%d "
+                "budget_exceeded=%d suppressed=%d N=%d",
+                round_id, round_tot["scopes"], round_tot["symbols"], round_tot["uncertain"],
+                round_tot["hit_ge_n"], round_tot["new_open"], round_tot["closed"],
+                round_tot["repulled"], round_tot["errors"], round_tot["false_"],
+                round_tot["unknown_inception"], round_tot["budget_exceeded"],
+                round_tot["suppressed"], _GAP_JUDGE_ROUNDS)
     return out
 
 

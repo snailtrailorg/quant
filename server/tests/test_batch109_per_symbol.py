@@ -106,17 +106,25 @@ class _FakeCrypto:
 
 
 def _run(adapter, *, universe, local, cfg_retention=None, today_end=date(2026, 10, 6),
-         repull=None, alerts=None, tz="UTC", repull_error=None):
+         repull=None, alerts=None, tz="UTC", repull_error=None, round_id=None):
     """跑 `_reconcile_symbols`（scope 收窄成单条；DB 侧只碰 `__t109s` 命名空间）。
 
+    `universe` ＝ `_sm_universe` 的返回形态 `[(vt_symbol, updated_at, list_date)]`（**批 110 起三列**：
+    第 3 列是 SM 的 inception 真值——读口收编（裁定 G①）后 inception 由**它**驱动，
+    `adapter.symbol_inception` 活体**不再被对账读**）。
+    `local` ＝ 本地已有日期集（`set`；`None` ⇒ 不可读）；内部展开成 `_local_dates_map`
+    的批量形态 `{symbol: set}`（批 110 读取规模契约：按 scope 一次取，不逐标的）。
     `repull_error` 非空 ⇒ 该异常作为 `_repull_symbol` 的 side_effect（重拉失败路径）。**必须在
     本口注入**（不能在用例里再套一层 `patch.object`——内层 patch 后启动，会盖掉用例的 patch，
     使「重拉失败」静默变成「重拉成功」）。
+    `round_id` ⇒ patch `_next_round_id`（批 110 命中维护需要轮次身份；默认 `None` ⇒ 只观测不判定）。
     """
     cfg = {"id": SID, "enabled": True, "provider": "binance", "retention": cfg_retention}
     scope = {SID: ("bar_daily", "perp", "1D", "bar_1d", tz, "perp")}
     repull_calls = repull if repull is not None else []
     alert_calls = alerts if alerts is not None else []
+    uni = [(v[0], v[1], (v[2] if len(v) > 2 else None)) for v in universe]
+    local_map = None if local is None else {v[0]: set(local) for v in uni}
 
     def _fake_repull(ad, kind, sub_kind, freq, src_sym, g0, g1):
         repull_calls.append((src_sym, g0, g1))
@@ -127,11 +135,14 @@ def _run(adapter, *, universe, local, cfg_retention=None, today_end=date(2026, 1
     with patch.object(engine, "_RECONCILE_SYMBOL_SCOPE", scope), \
          patch.object(engine, "_get_config", return_value=cfg), \
          patch.object(engine, "_get_supply_adapter", return_value=adapter), \
-         patch.object(engine, "_sm_universe", return_value=universe), \
+         patch.object(engine, "_sm_universe", return_value=uni), \
          patch.object(engine, "_crypto_end", return_value=today_end), \
-         patch.object(engine, "_local_dates", side_effect=lambda *a, **k: local), \
+         patch.object(engine, "_local_dates_map", side_effect=lambda *a, **k: local_map), \
          patch.object(engine, "_trade_dates_in_range", return_value=None), \
          patch.object(engine, "_repull_symbol", side_effect=repull_se), \
+         patch.object(engine, "_next_round_id", return_value=round_id), \
+         patch.object(engine, "_bump_cover_low", return_value=0), \
+         patch.object(engine, "_alert_generic"), \
          patch.object(engine, "_alert_sync_gaps",
                       side_effect=lambda label, spans: alert_calls.append((label, spans))):
         out = engine._reconcile_symbols()
@@ -162,13 +173,13 @@ class TestScope:
     @needs_db
     def test_sm_universe_is_the_universe_source(self):
         """宇宙取自 `security_master`（裁定 Q3：前缀法漏 18 只转债；后缀法分不清 stock/etf）。"""
-        astock = engine._sm_universe("stock")
-        assert astock and all(v.endswith((".SZSE", ".SHSE", ".BSE")) for v, _u in astock)
+        astock = engine._sm_universe("stock")       # 批 110：三元组 (vt_symbol, updated_at, list_date)
+        assert astock and all(v.endswith((".SZSE", ".SHSE", ".BSE")) for v, _u, _ld in astock)
         # venue 收窄：crypto 两所共享 bar_1d ⇒ 必须按 exchange 区分
         binance = engine._sm_universe("perp", "BINANCE")
         okx = engine._sm_universe("perp", "OKX")
-        assert all(v.endswith(".BINANCE") for v, _u in binance)
-        assert all(v.endswith(".OKX") for v, _u in okx)
+        assert all(v.endswith(".BINANCE") for v, _u, _ld in binance)
+        assert all(v.endswith(".OKX") for v, _u, _ld in okx)
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +196,7 @@ class TestUncertainGate:
         「用源可达性冒充 inception」，本测必红（那是把「拉不到」恶化为「不认为缺失」）。
         """
         ad = _FakeCrypto(inception=None)
-        out, repulls, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc))],
+        out, repulls, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), None)],
                                     local={"20261001", "20261002", "20261003", "20261004"},
                                     today_end=date(2026, 10, 4))
         assert out[SID]["uncertain"] == 1 and out[SID]["new_open"] == 0
@@ -209,7 +220,7 @@ class TestUncertainGate:
     def test_fresh_snapshot_with_known_inception_claims_gaps(self):
         """门槛之外的正常路径：inception 已知 ＋ 快照新鲜 ⇒ 差集落 `open` ＋ 聚合告警。"""
         ad = _FakeCrypto(inception="2026-10-01")     # 下界＝max(inception, src_lo)=2026-10-01
-        out, _r, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc))],
+        out, _r, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
                                local={"20261001", "20261003", "20261004"},
                                today_end=date(2026, 10, 4))
         assert out[SID]["new_open"] == 1
@@ -221,7 +232,7 @@ class TestUncertainGate:
     def test_expected_lower_bound_uses_window_floors(self):
         """下界＝`_window_floors`（**同一真源**）：retention 晚于 inception 时由 retention 绑。"""
         ad = _FakeCrypto(inception="2026-01-01")
-        out, _r, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc))],
+        out, _r, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
                            local={"20261003"}, cfg_retention=date(2026, 10, 2),
                            today_end=date(2026, 10, 4))
         # 下界＝max(2026-01-01, retention 2026-10-02, 2019-12-31) = 2026-10-02
@@ -234,7 +245,8 @@ class TestUncertainGate:
     def test_floor_after_window_end_is_noop(self):
         """新上币（下界晚于窗口上界）⇒ 本轮无作业，**不是**缺口（也不得落 uncertain）。"""
         ad = _FakeCrypto(inception="2026-12-01")
-        out, _r, alerts = _run(ad, universe=[("NEW.BINANCE", datetime.now(timezone.utc))],
+        out, _r, alerts = _run(ad, universe=[("NEW.BINANCE", datetime.now(timezone.utc),
+                                             "2026-12-01")],
                                local=set(), today_end=date(2026, 10, 4))
         assert out[SID]["new_open"] == 0 and out[SID]["uncertain"] == 0
         assert _rows(SID) == [] and alerts == []
@@ -271,7 +283,7 @@ class TestLimitedRepull:
         _exec("INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, pull_count,"
               " last_seen) VALUES (%s,'BTC.BINANCE',DATE '2026-10-02',DATE '2026-10-02',"
               "'open',0, now() - interval '2 days')", (sid,))
-        out, repulls, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc))],
+        out, repulls, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
                                 local={"20261001", "20261002", "20261003", "20261004"},
                                 today_end=date(2026, 10, 4))
         assert repulls == [("BTC", "2026-10-02", "2026-10-02")], "按缺口区间重拉（源符号形态）"
@@ -287,7 +299,7 @@ class TestLimitedRepull:
         _exec("INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, pull_count,"
               " last_seen) VALUES (%s,'BTC.BINANCE',DATE '2026-10-02',DATE '2026-10-02',"
               "'open',0, now() - interval '2 days')", (sid,))
-        out, _r, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc))],
+        out, _r, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
                            local={"20261001", "20261003", "20261004"},
                            today_end=date(2026, 10, 4), repull_error=RuntimeError("代理不通"))
         assert out[SID]["errors"] == 1
@@ -310,7 +322,7 @@ class TestLimitedRepull:
         _exec("INSERT INTO sync_gap (sync_id, symbol, gap_start, gap_end, state, pull_count,"
               " last_seen) VALUES (%s,'BTC.BINANCE',DATE '2026-10-02',DATE '2026-10-02',"
               "'open',9, now())", (sid,))
-        _out, _r, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc))],
+        _out, _r, alerts = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
                                 local={"20261001", "20261003", "20261004"},
                                 today_end=date(2026, 10, 4))
         assert alerts == [], "同一缺口续存 ⇒ 不是新 open"
