@@ -42,7 +42,9 @@ import ...` 导入，也被部署门当独立脚本跑（目标机 `shared/venv/
   op 与排除项同行 / 同注 / 逗号并列 action 都不会被洗白。残留：
   ① `;` 落在**字符串字面量内**的多语句 SQL 会被切碎——无害（碎片仍各自匹配，破坏性 op 仍被捕获）；
   ② **SQL 行内注释（`--` / `/* */`）位于字符串字面量内 ⇒ 不剥、参与匹配**（fail-closed：注释里
-  出现判定表关键词会误报红，方向安全）。
+  出现判定表关键词会误报红，方向安全）；
+  ③ 排除项 #3 摘除的是 `SET DEFAULT <值至分隔符>` ⇒ 若同一语句在**无分隔符**处紧跟另一个
+  action（非合法多 action SQL），该 action 会随默认值一并被摘除。
 - 迁移文件视为不可变：`check_release` 对**冻结 legacy** 另比 `upgrade` 段与**上一已部署版**
   逐字一致（防「改已部署迁移的函数体」）。**逐字＝含注释与空白**（改一个字符即拒——
   fail-closed 方向，非假红）。残留：**`downgrade` 段与 docstring** 不参与该比对
@@ -106,12 +108,17 @@ ROLLBACK_UNSAFE_PATTERNS: tuple[tuple[str, str, str], ...] = (
 EXPLICIT_EXCLUSIONS: tuple[tuple[str, str], ...] = (
     (r"DROP\s+CONSTRAINT", "放宽约束（删 CHECK/UNIQUE 不删数据）；不破坏旧代码读新 schema"),
     (r"op\.drop_constraint\s*\(", "同上（pythonic 形态；0116/0062 upgrade 段实例）"),
-    # ⚠ 必须写成**单 action 形态**（`ALTER COLUMN <列名> SET DEFAULT`，中间只允许一个标识符）：
-    #   写成 `[^;\n]*` 会贪婪跨越分隔符（逗号**与空格**）⇒ 把同一语句里排在它前后的另一个
-    #   §1.1 明列破坏性 action 一并摘除（P0-D，实测：`… ALTER COLUMN c TYPE int,
-    #   ALTER COLUMN d SET DEFAULT 1` ⇒ 0 命中；`… DROP COLUMN c set default 1` 同）。
-    (r"ALTER\s+COLUMN\s+\w+\s+SET\s+DEFAULT\b", "元数据放宽（0095 实例：SET DEFAULT 可回退，无数据重写）；"
-     "单 action 形态——豁免的只是一个 action，不得跨分隔符吃掉同一语句的其它 action"),
+    # ⚠ 豁免的是 **SET DEFAULT 这个 action 本身**（连同其默认值表达式，至分隔符为止），
+    #   而**不摘除** `ALTER COLUMN <列名>` 锚点——理由（复审轮四 P1-F/P1-G，均有实测）：
+    #   ① 写成 `ALTER COLUMN <列名> SET DEFAULT` 并要求列名匹配 `\w+`/`[^\s,;]+` ⇒ 引号或
+    #      schema 限定的列名失配 ⇒ §1.3 明文豁免的 SET DEFAULT 反被判红（假红）；
+    #      且用 `"ALTER COLUMN"` 作替换串会把默认值里的 `TYPE` 变成 `ALTER COLUMN 'TYPE'`（仍假红）。
+    #   ② 写成 `[^;\n]*` 会贪婪跨越分隔符 ⇒ 吃掉同语句另一个 §1.1 明列 op（P0-D）。
+    #   ③ 摘除时**连锚点一起删** ⇒ 残句失去 `ALTER COLUMN` ⇒ 后续 `, TYPE …` 失配（减法残留洞）。
+    #   ⇒ 只摘 `SET DEFAULT <值>`、保留锚点，三者同时闭合（16 例语料全达标、全仓 16/33 不变）。
+    (r"\bSET\s+DEFAULT\b[^,;]*", "元数据放宽（0095 实例：SET DEFAULT 可回退，无数据重写）；"
+     "豁免的只是 SET DEFAULT 这个 action 及其默认值——`ALTER COLUMN <列名>` 锚点保留，"
+     "使同一语句的其它 action 继续被判定"),
 )
 
 # ---------------------------------------------------------------------------

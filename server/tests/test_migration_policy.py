@@ -496,6 +496,37 @@ def test_exclusion_subtractive_keeps_true_exclusions(tmp_path: Path) -> None:
     _ = tmp_path
 
 
+def test_exclusion_keeps_alter_column_anchor() -> None:
+    """复审轮四 P1-F/P1-G（双向：漏检 **与** 假红）。
+
+    排除项 #3 豁免的只是 `SET DEFAULT <值>`，`ALTER COLUMN <列名>` 锚点必须保留 ⇒
+    ① 引号/schema 限定列名不失豁免（不得假红）；② 同语句后续的 `, TYPE …` 仍能被判定（不得漏检）。
+    """
+    # ① 假红面：引号列名 + 默认值里含 TYPE 关键字 ⇒ 仍须豁免（§1.3 明文）
+    assert scan_unsafe_lines(
+        _mig(upgrade="op.execute('ALTER TABLE t ALTER COLUMN \"c\" SET DEFAULT ''TYPE''')")
+    ) == []
+    # ② 漏检面：SET DEFAULT 之后的并列 TYPE 变更 ⇒ 仍须命中
+    assert scan_unsafe_lines(_mig(
+        upgrade='op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 1 , TYPE varchar(8)")'))
+    # ③ 全局替换串曾引入的新假红：豁免片段 + 无关的 ADD COLUMN … TYPE ⇒ 不得判红
+    assert scan_unsafe_lines(_mig(
+        upgrade='op.execute("ALTER TABLE t DROP CONSTRAINT ck_x, ADD COLUMN x TYPE int")')) == []
+
+
+def test_spec_claims_have_cases() -> None:
+    """纪律「承诺必须先有用例」——§1.1 宽口径 / §1.3 收紧类 / §6 动态 SQL 三条承诺各钉一例。"""
+    # §1.1 实现是宽口径 `DROP\s+\w+`：未列对象（VIEW/TRIGGER/SCHEMA/FUNCTION）默认落网
+    for obj in ("VIEW v", "TRIGGER tr", "SCHEMA s", "FUNCTION f"):
+        assert scan_unsafe_lines(_mig(upgrade=f'op.execute("DROP {obj}")')), obj
+    # §1.3 收紧类保守归入本门（fail-closed）⇒ 命中，须两步走
+    for body in ("op.execute(\"ALTER TABLE t ALTER COLUMN c DROP DEFAULT\")",
+                 "op.execute(\"ALTER TABLE t ALTER COLUMN c DROP NOT NULL\")"):
+        assert scan_unsafe_lines(_mig(upgrade=body)), body
+    # §6 声明的边界：动态拼接的 SQL 不在判定面内（只匹配字面文本）
+    assert scan_unsafe_lines(_mig(upgrade='op.execute("DROP " + obj + " TABLE t")')) == []
+
+
 def test_frozen_legacy_relabeled_contract_still_body_checked(tmp_path: Path) -> None:
     """P0-A（门）：冻结集 keying＝**文件名**，与声明解耦——重标 `phase=contract` 不得旁路
     「upgrade 段逐字一致」比对（旧实现读 `decl["legacy"]` ⇒ 实测 rc=0 放行）。"""
