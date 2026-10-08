@@ -557,3 +557,32 @@ def test_exclusion_narrowed_comment_and_semicolon() -> None:
     # 而真排除项仍豁免（收窄不得误伤 0116/0062/0095 形态）
     assert not scan_unsafe_lines(_mig(upgrade="op.drop_constraint('ck','t',type_='check')"))
     assert not scan_unsafe_lines(_mig(upgrade='op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 0")'))
+
+
+# ---------------------------------------------------------------------------
+# 复审轮五 P1-2a：把 §6 的「已知边界」用**断言**锁定（反向钉）
+# —— 消「声明面未被消费」：残留一旦漂移（射程内出现漏检 / 假红消除）即红。
+# ---------------------------------------------------------------------------
+
+def test_known_residual_set_default_leading_space_parallel() -> None:
+    """反向钉（**记录已知 fail-open 边界，非期望行为**）：排除项 #3 的 `[^,;]*` **不排除空格**
+    ⇒ `SET DEFAULT` 在前、后续 action 以**空格**并列时，该 action 随默认值一并被摘除（0 命中）。
+
+    该形态**非合法多 action SQL**——PG 要求 action 以逗号分隔，空格并列执行即语法报错 ⇒
+    **无静默数据错误**（PG 语法层兜底）。此处显式锁定，使**射程内**（合法 SQL）若出现漏检即红。
+    复活条件＝本仓出现该形态的真实迁移 / 下批门加固（见 `flow/待办.md` 🔖）。
+    """
+    # 已知 fail-open：空格并列 ⇒ 0 命中（非期望，仅记录边界）
+    assert scan_unsafe_lines(_mig(
+        upgrade='op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 1 DROP COLUMN d")')) == []
+    # 对照（**合法**逗号分隔）：必须命中——此处若变空，即射程内漏检（漂移）
+    assert scan_unsafe_lines(_mig(
+        upgrade='op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 1, DROP COLUMN d")'))
+
+
+def test_known_residual_separator_inside_string_literal() -> None:
+    """已知边界锁定：默认值**字符串字面量内**含 `,` / `;` ⇒ `[^,;]*` 按分隔符提前截断、且
+    **不识别引号** ⇒ 残余片段留在残句里可能**误判红**（**假红**方向，fail-closed：多报不放过）。
+    与「`;` 落在字符串内被切碎」（复审 P1-a 已声明的残留）同族。"""
+    assert scan_unsafe_lines(_mig(
+        upgrade="op.execute(\"ALTER TABLE t ALTER COLUMN c SET DEFAULT 'a, DROP TABLE t'\")"))
