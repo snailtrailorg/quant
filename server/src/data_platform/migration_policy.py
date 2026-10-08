@@ -20,7 +20,10 @@
 ## 两用约束
 
 纯 stdlib、**不 import 同包任何模块**——既被 pytest `from src.data_platform.migration_policy
-import ...` 导入，也被部署门当独立脚本跑（目标机 `shared/venv/bin/python`）。
+import ...` 导入，也被部署门当独立脚本跑（目标机 **`/usr/bin/python3`**）。
+⚠ 部署门**不得**改用应用 venv：`shared/` 为 `0700 quant:quant`（secrets 隔离，bootstrap 声明）
+⇒ deploy 身份物理上读不到 `shared/venv/bin/python` ⇒ 2026-10-08 真机 rc=126，配合「门恒跑＋
+封闭式补集」＝**拦死每次发布**。纯 stdlib 是这条判据的前提，不是巧合。
 
 ## 退出码契约（bash 侧零映射、原样上浮；`failed_when` 用封闭式补集消费）
 

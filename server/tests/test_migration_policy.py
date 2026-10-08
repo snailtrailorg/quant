@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -586,3 +587,93 @@ def test_known_residual_separator_inside_string_literal() -> None:
     与「`;` 落在字符串内被切碎」（复审 P1-a 已声明的残留）同族。"""
     assert scan_unsafe_lines(_mig(
         upgrade="op.execute(\"ALTER TABLE t ALTER COLUMN c SET DEFAULT 'a, DROP TABLE t'\")"))
+
+
+# ---------------------------------------------------------------------------
+# 补审 A P1-2：「纯 stdlib、可当独立脚本跑」是本次 P0 修复的**前提**，机检它
+# —— 模块 docstring 声明了这条两用约束（门在目标机走 `/usr/bin/python3`，不经应用 venv），
+#    但此前**无任何测试强制**。前提被无声破坏（有人加一句 `import sqlalchemy` 或
+#    `from . import x`）⇒ 真机上照样 ModuleNotFoundError ⇒ 门 rc=2 恒红 ⇒ 又拦死每次发布。
+# 判据方向：**闭式 allow-list**（`sys.stdlib_module_names`）——不枚举黑名单（必漂）。
+# ---------------------------------------------------------------------------
+
+
+def _audit_module_imports(src: str) -> tuple[set[str], list[str]]:
+    """AST 审计模块导入面。返回（顶层被导入模块名, 违规说明列表）。
+
+    违规＝① 相对导入（`from . import x`——当独立脚本跑时无包上下文）② 动态导入
+    （`__import__` / `import_module` / `exec` / `eval` / `compile` /
+    `importlib.util.spec_from_file_location` / `module_from_spec`——绕过一切静态判据）
+    ③ `sys.path` 被引用（当独立脚本跑时应由解释器自身决定搜索路径，改它＝把 venv 依赖偷偷接回来）。
+    """
+    tops: set[str] = set()
+    bad: list[str] = []
+    for node in ast.walk(ast.parse(src)):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                tops.add(alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                bad.append(f"相对导入 level={node.level} @line {node.lineno}")
+            elif node.module:
+                tops.add(node.module.split(".")[0])
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            # ⚠ 必须按 **Name / Attribute 分流**：`re.compile(...)` 是正则编译（合法，本模块判定表
+            #   大量使用），只有**裸名** `compile(...)` 才是动态执行。合在一条里 ⇒ 假红（实测踩过）。
+            if isinstance(fn, ast.Name) and fn.id in {"__import__", "exec", "eval", "compile"}:
+                bad.append(f"动态导入/执行 {fn.id}() @line {node.lineno}")
+            elif isinstance(fn, ast.Attribute) and fn.attr in {
+                    "import_module", "spec_from_file_location", "module_from_spec"}:
+                bad.append(f"动态导入 {fn.attr}() @line {node.lineno}")
+        elif isinstance(node, ast.Attribute):
+            if isinstance(node.value, ast.Name) and node.value.id == "sys" \
+                    and node.attr == "path":
+                bad.append(f"sys.path 被引用 @line {node.lineno}")
+    return tops, bad
+
+
+def test_migration_policy_is_stdlib_only() -> None:
+    """P1-2：`migration_policy.py` 顶层只许 import stdlib（闭式判据）。破坏它＝真机门恒红。"""
+    tops, bad = _audit_module_imports(_MODULE.read_text(encoding="utf-8"))
+    assert tops, "AST 未解析到任何导入 ⇒ 提取器失效（守卫假绿）"
+    assert not bad, f"出现相对/动态导入或 sys.path 操纵 ⇒ 无法当独立脚本跑: {bad}"
+    non_std = sorted(t for t in tops if t not in sys.stdlib_module_names)
+    assert not non_std, (
+        f"顶层导入非 stdlib 模块 {non_std} ⇒ 目标机 `/usr/bin/python3`（无应用 venv）会 "
+        f"ModuleNotFoundError ⇒ 门 rc=2 恒红拦死每次发布（2026-10-08 rc=126 的同类后果）"
+    )
+
+
+def test_import_audit_guard_detects_poisons() -> None:
+    """守卫自身的守卫：注入各类反例，提取器须逐条标出（判据须配机械执行者）。"""
+    tops, bad = _audit_module_imports(
+        "import os\n"
+        "import sqlalchemy\n"
+        "from alembic import op\n"
+        "from . import sibling\n"
+        "m = __import__('x')\n"
+        "import importlib\n"
+        "importlib.import_module('y')\n"
+        "sys.path.insert(0, '/tmp')\n"
+    )
+    assert {"os", "sqlalchemy", "alembic", "importlib"} <= tops, tops
+    assert len(bad) == 4, f"相对导入 + 两个动态导入 + sys.path 须逐条标出: {bad}"
+    # 复审补（2026-10-08）：另五种动态形态亦须抓——否则「动态导入」判据可被换名字绕过
+    for body, kind in (
+        ("exec('import sqlalchemy')\n", "exec"),
+        ("eval('1+1')\n", "eval"),
+        ("compile('x=1', '<s>', 'exec')\n", "compile"),
+        ("import importlib.util as u\nu.spec_from_file_location('m', '/x')\n", "spec_from_file_location"),
+        ("import importlib.util as u\nu.module_from_spec(None)\n", "module_from_spec"),
+        ("__import__('sqlalchemy')\n", "__import__"),
+    ):
+        _, b = _audit_module_imports(body)
+        assert any(kind in x for x in b), f"动态形态 `{kind}` 漏检: {b}"
+    # 负向：`re.compile` 是正则编译（本模块判定表大量使用）不得误判为动态执行
+    assert not _audit_module_imports("import re\nRX = re.compile('x')\n")[1], "re.compile 假红"
+    # 反证：允许面不被误伤（纯 stdlib + `__future__` 须过）
+    clean_tops, clean_bad = _audit_module_imports(
+        "from __future__ import annotations\nimport re\nfrom pathlib import Path\n")
+    assert not clean_bad, clean_bad
+    assert clean_tops <= set(sys.stdlib_module_names), clean_tops

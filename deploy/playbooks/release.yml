@@ -357,10 +357,10 @@
             msg: >-
               🚀 批 8 快车道：server 四切片+units 指纹与上一版 {{ prev_release_id }} 一致
               —— 跳过导入冒烟/pip/迁移/波次重启（web-only 发布）；双链照切，postverify pinned 断言=旧版。
-              ⚠️ shared/.env 与 shared/venv 是管道外输入（结构上不可指纹）——本轮若改过它们，须 -e force_full=true 重跑（补审A-P1）。
+              ⚠️ 共享目录下的 .env 与应用 venv 是管道外输入（结构上不可指纹）——本轮若改过它们，须 -e force_full=true 重跑（补审A-P1）。
           when: not (server_changed | bool)
 
-        - name: 阶段 2.5 —— 编译 EMQ 绑定 .so（quant-emd-build，gcc-toolset-13 + shared/venv）
+        - name: 阶段 2.5 —— 编译 EMQ 绑定 .so（quant-emd-build wrapper；gcc-toolset-13；venv 由 wrapper 内部取）
           ansible.builtin.command: "{{ quant_emd_build_cmd }} {{ release_id }}"
           changed_when: true
           when: server_changed | bool and (deploy_emd_build | default(true) | bool)   # 批 63：src 变更才重编；沙箱关
@@ -376,12 +376,21 @@
         # （无上一版=首部署）。failed_when 用封闭式补集（枚举「不 fail 的集合」）：
         # rc=0 / rc=3 / (rc=1 且 allow_contract) 之外的一切码（2/126/127/137…）恒红——
         # 逃生门只能取消「命中」的阻断，门不可用在任何情形下都必须亮红（三审 P0-α）。
+        #
+        # ⚠ 解释器＝**系统 /usr/bin/python3**，不得改回应用 venv（2026-10-08 真机 P0 根修）：
+        #   `shared/` 为 `0700 quant:quant`（secrets 隔离，bootstrap.yml 声明）⇒ deploy 身份
+        #   物理上进不去 ⇒ 旧写法 rc=126 Permission denied，而「门恒跑＋封闭式补集」把它变成
+        #   **每次都拦死发布**（逃生门救不了——它只取消 rc=1）。判据＝**依赖方向**：本模块自称
+        #   纯 stdlib（import 仅 argparse/hashlib/re/sys/pathlib）⇒ 不该依赖应用的 venv；目标机
+        #   必有 python3（ansible 自身前提）⇒ 非新增依赖。既有正确形态＝需读 quant 私域者一律走
+        #   `sudo -u quant <wrapper>`（阶段 2.5/3/8）；本门不需要私域 ⇒ 不需要 wrapper。
+        #   机械执行者＝server/tests/test_release_playbook_has_no_ddl_logic.py（token 白名单＋身份断言）。
         - name: 阶段 4 —— 本版新增迁移的破坏性 DDL 门（判定真源＝src/data_platform/migration_policy.py；门恒跑——批 111）
           ansible.builtin.shell: |
             set -u
             rel='{{ deploy_root }}/releases/{{ release_id }}'
             prev=$(readlink -f '{{ deploy_root }}/server' 2>/dev/null || true)
-            '{{ deploy_root }}/shared/venv/bin/python' "$rel/src/data_platform/migration_policy.py" \
+            '/usr/bin/python3' "$rel/src/data_platform/migration_policy.py" \
               --check-release "$rel/migrations/versions" ${prev:+"$prev/migrations/versions"}
           register: ddl_gate
           changed_when: false
@@ -414,10 +423,15 @@
             mode: "0644"
           when: ddl_gate.rc == 1 and (allow_contract | default(false) | bool)
 
-        - name: 阶段 4 —— allow_contract 联动置 auto_rollback_disabled（安全捆绑保留——最小惊讶，批 111 产出 7）
+        - name: 阶段 4 —— 豁免实际生效时联动置 auto_rollback_disabled（绑事实不绑意图——2026-10-08 修）
           ansible.builtin.set_fact:
             auto_rollback_disabled: true
-          when: allow_contract | default(false) | bool
+          # 判据＝「豁免**生效**」＝ rc=1 命中**且被** allow_contract 放行（门确实检出破坏性变更
+          # 并放行 ⇒ expand-only 前提已破 ⇒ 回滚会以旧代码配新 schema）。**不**绑「请求豁免」的
+          # 意图：否则 rc=0（干净发布或合规 contract）仅因带了旗标就白丢自动回滚——2026-10-08
+          # rc=126 实测暴露（豁免从未生效，回滚却被无谓关闭）。
+          # 机械执行者＝server/tests/test_release_playbook_has_no_ddl_logic.py。
+          when: ddl_gate.rc == 1 and (allow_contract | default(false) | bool)
 
         - name: 阶段 5 —— pip freeze 快照（经 stdout 返回；quant 不写 var/）
           ansible.builtin.command: "{{ quant_pip_cmd }} freeze"
@@ -461,7 +475,7 @@
               失败任务: {{ ansible_failed_task.name | default('(rescue 内失败)') }}
               {% if auto_rollback_disabled | default(false) | bool %}
               【auto_rollback_disabled=true：staged 保留于 releases/{{ release_id }}/，人工 runbook 接管
-              （来源：allow_contract 联动或显式 -e，批 111 产出 7）】{% endif %}
+              （来源：豁免**实际生效**＝ddl_gate.rc == 1 且 allow_contract，或显式 -e；2026-10-08 修）】{% endif %}
 
     # ================= 阶段 6-8：已切换（rescue=自动回滚 + fail） =================
     - name: 阶段 6-8（已切换）
@@ -555,6 +569,16 @@
             - deploy_postverify_probe | default(false) | bool
             - postverify_probe.json is defined
 
+        # ⚠ 沙箱专属分支（仅 sandbox.yml 配 deploy_hub_hb_mode=file；staging/prod 皆 redis）：
+        #   ① 解释器随 2026-10-08 P0 根修统一为**系统 /usr/bin/python3**（同一依赖方向判据：
+        #      验证步骤不得依赖应用 venv）。本段只解析 JSON（json/sys 皆 stdlib）⇒ 无 venv 需求；
+        #      改回 `shared/venv` 会被 test_release_playbook_has_no_ddl_logic.py 的全文守卫判红。
+        #   ② **仍挂账（🔖）**：`[ -f ]`/`stat` 读的是 `shared/runtime/hub_hb.json`，该目录
+        #      `0700 quant:quant` ⇒ 真机若切 file 模式必 EACCES（与阶段 4 原写法 rc=126 同源）。
+        #      本支改身份需新 wrapper（装位只能人做）⇒ 现挂账，**勿照抄本形态**（见 flow/待办.md）。
+        #   ⚠ 勿误读下方 redis 支：它**现在**走 `sudo -u quant <quant-hbcheck wrapper>`（合规）；
+        #   被改掉的正是它的**历史形态**——`f8f767e`（2026-08-26）提交信息「quant-hbcheck
+        #   wrapper…替换 redis 模式直跑——治 deploy 无权 venv」，即同坑先例与既定出口。
         - name: 阶段 8 —— hub 心跳复现（gen+8 字段；文件模式）
           ansible.builtin.shell: |
             set -u
@@ -562,7 +586,7 @@
             [ -f "$f" ] || { echo "✗ hub 心跳文件缺失: $f" >&2; exit 1; }
             age=$(( $(date +%s) - $(stat -c %Y "$f") ))
             [ "$age" -le 10 ] || { echo "✗ hub 心跳过期（${age}s 无更新）" >&2; exit 1; }
-            '{{ deploy_root }}'/shared/venv/bin/python - "$f" <<'PYEOF'
+            '/usr/bin/python3' - "$f" <<'PYEOF'
             import json, sys
             data = json.load(open(sys.argv[1]))
             need = ["gen", "ts", "unit", "state", "bar_count", "stream_lag_ms", "xtp_ok", "valkey_ok", "lease"]
