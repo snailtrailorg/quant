@@ -10,8 +10,9 @@
 ② phase=contract 的 pair 必须真实存在且声明 expand（本版目录即全链）。
 ③ 孤儿 expand（声明了 pair 而对手不在）⇒ 进报告**不红**（避免半成品迁移被误卡）；
   contract 无 expand 对手 ⇒ 红（归 ②）。
-④ legacy 白名单双向校验（照 test_jsonb_columns_guarded.py 豁免表先例）：
-  `_LEGACY_EXPECTED`（冻结 15 项）与文件内 legacy 标记互为子集；标记陈旧（已无命中）⇒ 红。
+④ legacy 白名单双向校验（照 test_jsonb_columns_guarded.py 豁免表先例）：白名单**真源＝
+  模块 `LEGACY_FROZEN`**（本文件只做别名，步 4 同判 P0-1）与文件内 legacy 标记互为子集；
+  标记陈旧（已无命中）⇒ 红。
 ⑤ 真源非空（防空集假绿）。
 ⑥ 判定逐条取自产出 4 模块——本文件**不自建任何判定正则**（结构断言守）。
 ⑦ 模块内清单反向校验在 test_migration_policy.py（同族守卫），此处不重复。
@@ -23,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from src.data_platform.migration_policy import (
+    LEGACY_FROZEN,
     evaluate,
     parse_declaration,
     scan_unsafe_lines,
@@ -30,25 +32,11 @@ from src.data_platform.migration_policy import (
 
 _VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
 
-# 冻结的 legacy 白名单（批 111 处置结论表；**只能减不能增**——加一项必须先过用户裁定）。
+# 冻结的 legacy 白名单（批 111 处置结论表）。**真源在 `migration_policy.LEGACY_FROZEN`**
+# （步 4 同判 P0-1：清单必须住执行侧模块，否则「谁知道合法」与「谁在 prod 执行」是两处）
+# ——本处只作别名，**不得**再写第二份字面量。
 # 双向校验：白名单外新建 legacy ⇒ 红；白名单内文件删 legacy 标记 ⇒ 红。
-_LEGACY_EXPECTED: frozenset[str] = frozenset({
-    "0010_simplify_llm_gateway.py",
-    "0012_llm_token_limits.py",
-    "0042_schema_consolidate.py",
-    "0052_drop_feishu_config.py",
-    "0070_drop_email_verified.py",
-    "0085_drop_channel_config.py",
-    "0088_llm_position_budget_drop.py",
-    "0090_external_interface.py",
-    "0096_retire_self_collected_minute.py",
-    "0100_venue_backfill.py",
-    "0101_retire_strategy_account.py",
-    "0102_retire_live_task_account_id.py",
-    "0104_rename_venue_to_account.py",
-    "0111_m6_retire.py",
-    "0114_drop_shadow_quality.py",
-})
+_LEGACY_EXPECTED: frozenset[str] = frozenset(LEGACY_FROZEN)
 
 _TWO_STEP = {"0116": "0122", "0122": "0116"}  # 本仓唯一真正两步走的实例（批 85·a/c）
 
@@ -109,21 +97,27 @@ def test_contract_pair_exists_and_declares_expand() -> None:
         )
 
 
-def test_orphan_expand_reported_not_red(capsys: pytest.CaptureFixture[str]) -> None:
-    """expand 声明了 pair 而对手不在 ⇒ 允许（pair 允许指向后续 contract）；打印报告。"""
+def test_orphan_expand_reported_not_red() -> None:
+    """expand 声明了 pair 而对手不在 ⇒ **允许**（pair 允许指向后续 contract），只报告、不判红。
+
+    ⚠ 步 4 同判 P1-b：旧版误写 `assert not orphans`——把闸门③ / 规范 §4 的「孤儿允许」
+    写成「禁止存在」，会**误卡正当进行中的两步走**。已改：孤儿是合法中间态。
+    保留一条**方向**校验：pair 须指向**更晚**的 id（contract 在 expand 之后），防误标。
+    """
     orphans = []
     for p in _all_migrations():
         decl = _decl_of(p)
         if decl["phase"] != "expand" or not decl["pair"]:
             continue
+        assert decl["pair"] > p.name[:4], (
+            f"{p.name}: pair={decl['pair']} 须晚于 expand 自身 id（两步走方向 expand→contract）"
+        )
         if not sorted(_VERSIONS.glob(f"{decl['pair']}_*.py")):
             orphans.append(f"{p.name}: pair={decl['pair']}（contract 尚未产出——两步走进行中）")
     if orphans:
-        print("ℹ 孤儿 expand（不红，两步走进行中）:")
+        print("ℹ 孤儿 expand（允许，两步走进行中，不判红）:")
         for ln in orphans:
             print("  ", ln)
-    # 当前唯一两步走实例 0116↔0122 已收口 ⇒ 现状应无孤儿
-    assert not orphans, f"存在孤儿 expand（确认是否两步走进行中，否则收口）: {orphans}"
 
 
 # ---------------------------------------------------------------------------

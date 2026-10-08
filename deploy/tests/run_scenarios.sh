@@ -316,7 +316,7 @@ check "S6b: 快车道零删除（基线与上一发布版原样保留——被�
   bash -c "test -d '$ROOT/releases/$R_BASE' && test -d '$ROOT/releases/$R_NEW'"
 [ $S6B -eq 0 ] && scenario_row 6 "同内容再发布" "零" "$S6B" "PASS（units_changed=false）" || scenario_row 6 "同内容再发布" "零" "$S6B" "FAIL"
 
-# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，七例） ----------
+# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，九例） ----------
 # 道具生成器：write_mig <文件名> <首行声明（可空）> <upgrade 体>
 write_mig() {
   local fname=$1 decl=$2 body=$3
@@ -439,6 +439,26 @@ mv "$ROOT/shared/venv/bin/python.s7g-bak" "$ROOT/shared/venv/bin/python"   # 恢
 echo "  rc=$S7G（期望非零——封闭式补集：127 不在放行集）"
 [ $S7G -ne 0 ] || FAILED=$((FAILED + 1))
 [ $S7G -ne 0 ] && scenario_row 7g "门不可用恒红" "非零" "$S7G" "PASS（rc=127 恒红）" || scenario_row 7g "门不可用恒红" "非零" "$S7G" "FAIL（逃生门越界豁免了门崩溃！）"
+
+echo "[S7h] 非冻结 legacy 自声明 ⇒ rc=1（P0-1：门**验证** legacy 标记，不再零验证放行）"
+seed_baseline
+write_mig "0199_sbx_evil.py" '# EXPAND-CONTRACT: legacy reason="自称历史遗留"' 'op.execute("DROP TABLE demo_t")'
+run_release "$R_NEW" >"$LOGDIR/s7h.log" 2>&1
+S7H=$?
+echo "  rc=$S7H（期望非零——非冻结 legacy 拒）"
+[ $S7H -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "非冻结 legacy" "$LOGDIR/s7h.log" && echo "  ✓ 非冻结 legacy 判据在案" || { echo "  ✗ 未捕获非冻结 legacy"; FAILED=$((FAILED + 1)); }
+[ $S7H -ne 0 ] && scenario_row 7h "非冻结legacy" "非零" "$S7H" "PASS" || scenario_row 7h "非冻结legacy" "非零" "$S7H" "FAIL（门零验证放行了自声明 legacy！）"
+
+echo "[S7i] 门内部错（迁移文件编码非法）⇒ 恒红——即使 allow_contract=true（P0-2）"
+seed_baseline
+printf '"""x"""\nrevision = "0199"\ndef upgrade() -> None:\n    pass\ndef downgrade() -> None:\n    pass\n\xff\xfe' \
+  >"$STAGE/migrations/versions/0199_sbx_badenc.py"
+run_release "$R_NEW" -e allow_contract=true -e 'contract_reason=S7i 门不可用须恒红' >"$LOGDIR/s7i.log" 2>&1
+S7I=$?
+echo "  rc=$S7I（期望非零——内部错 rc=2 不在放行集）"
+[ $S7I -ne 0 ] || FAILED=$((FAILED + 1))
+[ $S7I -ne 0 ] && scenario_row 7i "内部错恒红" "非零" "$S7I" "PASS（rc=2 恒红）" || scenario_row 7i "内部错恒红" "非零" "$S7I" "FAIL（门崩溃被 allow_contract 豁免！）"
 
 # ---------- 汇总 ----------
 echo

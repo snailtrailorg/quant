@@ -8,7 +8,10 @@
 2. **声明解析**：文件第 1 行 `# EXPAND-CONTRACT: ...`。
 3. **受管集**：本版相对上一已部署版「新增 ∪ 内容变更」的迁移（sha256 指纹差集，
    非文件名差集——同名就地改同样落网，复审 P1-6）。
-4. **部署门入口**：`check_release(new_dir, prev_dir)` 汇总退出码，CLI `--check-release` 消费。
+4. **冻结 legacy 白名单**（`LEGACY_FROZEN`）：**唯一真源在此**（测试从本模块 import，防
+   「执行侧无清单」——步 4 同判 P0-1）。受管集内 legacy 文件二分流：名在冻结集 ⇒ 可见不
+   阻断（历史遗留，且 upgrade 段须与已部署版**逐字一致**）；名不在 ⇒ 拒（新迁移禁标 legacy）。
+5. **部署门入口**：`check_release(new_dir, prev_dir)` 汇总退出码，CLI `--check-release` 消费。
 
 ## 两用约束
 
@@ -22,12 +25,23 @@ import ...` 导入，也被部署门当独立脚本跑（目标机 `shared/venv/
 - `2` = 用法或内部错（argparse 用法错误天然 exit 2）
 - `3` = 不可判定（无上一版 / prev 目录无效 ⇒ 首部署，门跳过 + 显著告警）
 
+⚠ **`1` 的语义必须唯一＝「有命中且拒」**（步 4 同判 P0-2）：`failed_when` 的封闭式补集
+把 `rc=1` 当作「命中」处理（`allow_contract` 时豁免阻断）⇒ 任何**内部异常**（含文件不可读、
+编码非法）都**必须**映射为 `2`，**绝不落 `1`**——否则门崩溃会伪装成命中、被逃生门静默放行。
+实现保证：`check_release` 的整段（含逐文件分类）包在 `except Exception` 内恒返 `2`。
+
 ## 已知边界（诚实声明）
 
 - 只扫 `def upgrade` → `def downgrade` 段（downgrade 是合法回滚路径，不拦）；缺
-  `def downgrade` 时截到文件尾。行级匹配：与排除项**同行**的破坏性 op 不拦（本仓
-  无此形态；若未来出现须拆行或扩展为 AST 级）。
-- 迁移文件视为不可变；alembic 之外的 SQL 手工执行不在门覆盖内。
+  `def downgrade` 时截到文件尾。
+- **排除判定＝「剥行内注释 → 按 `;` 切分语句 → 逐语句豁免」**（步 4 P1-a）：不再整行赦免，
+  故「破坏性 op 与 `DROP CONSTRAINT` 同行/同注」不会静默放行。残留：`;` 落在**字符串字面量
+  内**的多语句 SQL 会被切碎——无害（碎片仍各自匹配，破坏性 op 仍被捕获）。
+- 迁移文件视为不可变：`check_release` 对**冻结 legacy** 另比 `upgrade` 段与**上一已部署版**
+  逐字一致（防「改已部署迁移的函数体」）。残留：**`downgrade` 段与 docstring** 不参与该比对
+  （downgrade 是合法回滚路径，不在门覆盖内）。
+- `legacy` 与 `phase`/`pair` **互斥**（同现即拒）——防「一行声明同时拿到双通道」。
+- alembic 之外的 SQL 手工执行不在门覆盖内。
 """
 from __future__ import annotations
 
@@ -75,6 +89,35 @@ EXPLICIT_EXCLUSIONS: tuple[tuple[str, str], ...] = (
     (r"ALTER\s+COLUMN[^;\n]*\bSET\s+DEFAULT\b", "元数据放宽（0095 实例：SET DEFAULT 可回退，无数据重写）"),
 )
 
+# ---------------------------------------------------------------------------
+# 冻结 legacy 白名单（**唯一真源**——测试从本模块 import，不得在别处复刻）
+# ---------------------------------------------------------------------------
+#
+# 语义：`legacy` 声明＝「历史遗留、纪律之前上产的破坏性迁移」。**只减不增**——新增一项
+# 须过用户裁定并同步改本常量。
+#
+# 为何必须有这张表：批 111 步 4 同判 P0-1——`legacy` 是自声明标记，若部署门仅凭标记放行，
+# 则「新迁移标 legacy」＝ 一条**比 allow_contract 更易达、且零留痕**的绕过通道（prod 唯一
+# 机械强制点被一行注释绕过）。故门须**验证**：名在冻结集内 ⇒ 历史遗留（放行为「可见不阻
+# 断」）；名不在 ⇒ 拒。
+LEGACY_FROZEN: frozenset[str] = frozenset({
+    "0010_simplify_llm_gateway.py",
+    "0012_llm_token_limits.py",
+    "0042_schema_consolidate.py",
+    "0052_drop_feishu_config.py",
+    "0070_drop_email_verified.py",
+    "0085_drop_channel_config.py",
+    "0088_llm_position_budget_drop.py",
+    "0090_external_interface.py",
+    "0096_retire_self_collected_minute.py",
+    "0100_venue_backfill.py",
+    "0101_retire_strategy_account.py",
+    "0102_retire_live_task_account_id.py",
+    "0104_rename_venue_to_account.py",
+    "0111_m6_retire.py",
+    "0114_drop_shadow_quality.py",
+})
+
 _DECL_RE = re.compile(r"^#\s*EXPAND-CONTRACT:\s*(.*)$")
 _UPGRADE_RE = re.compile(r"^def\s+upgrade\s*\(")
 _DOWNGRADE_RE = re.compile(r"^def\s+downgrade\s*\(")
@@ -110,11 +153,32 @@ def _upgrade_body(text: str) -> str:
     return seg.split("\n", 1)[1] if "\n" in seg else ""
 
 
+def _strip_comment(line: str) -> str:
+    """去掉行内注释：仅当 `#` 位于字符串字面量**之外**才视为注释起点。逐字符扫描、不用正则。"""
+    out: list[str] = []
+    quote: str | None = None
+    for ch in line:
+        if quote is not None:
+            out.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "\"'":
+            quote = ch
+            out.append(ch)
+        elif ch == "#":
+            break
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def scan_unsafe_lines(text: str) -> list[tuple[int, str, str, str]]:
     """upgrade 段内的回滚安全类命中。
 
-    行级算法：先对每行求显式排除（排除行整行豁免），再对剩余行匹配宽口径 unsafe。
-    返回 [(行号(1-based, 全文坐标), 类别, 危险说明, 命中行文本)]。
+    行内算法：**先剥行内注释（字符串外的 `#`），再按 `;` 切分语句，逐语句**先求显式排除
+    （该语句被豁免则跳过），否则匹配宽口径 unsafe。**不再整行赦免**（步 4 同判 P1-a：
+    与排除项同行/同注的破坏性 op 不得静默放行）。
+    返回 [(行号(1-based, 全文坐标), 类别, 危险说明, 命中语句文本)]。
     """
     seg = scan_upgrade_section(text)
     if not seg:
@@ -125,12 +189,19 @@ def scan_unsafe_lines(text: str) -> list[tuple[int, str, str, str]]:
         stripped = ln.strip()
         if _UPGRADE_RE.match(stripped):
             continue  # def upgrade 行本身
-        if any(re.search(rx, stripped) for rx, _ in EXPLICIT_EXCLUSIONS):
+        code = _strip_comment(stripped).strip()
+        if not code:
             continue
-        for rx, kind, why in ROLLBACK_UNSAFE_PATTERNS:
-            if re.search(rx, stripped):
-                out.append((seg_start_line + off, kind, why, stripped))
-                break
+        for stmt in code.split(";"):
+            s = stmt.strip()
+            if not s:
+                continue
+            if any(re.search(rx, s) for rx, _ in EXPLICIT_EXCLUSIONS):
+                continue  # 该**语句**被豁免（非整行）
+            for rx, kind, why in ROLLBACK_UNSAFE_PATTERNS:
+                if re.search(rx, s):
+                    out.append((seg_start_line + off, kind, why, s))
+                    break
     return out
 
 
@@ -165,6 +236,10 @@ def evaluate(path: Path | str, chain_dir: Path | str,
              prev_dir: Path | str | None = None) -> tuple[bool, str]:
     """单文件判定。返回 (放行?, 原因)。
 
+    ⚠ 文件不可读/编码非法时**抛出** `OSError`/`UnicodeDecodeError`（不再吞成「拒」——否则
+    门崩溃会伪装成「命中」并被逃生门豁免，见模块头「退出码契约 ⚠」）。部署门侧由
+    `check_release` 统一映射为 `rc=2`。
+
     `chain_dir`＝new_dir（本版迁移目录即全链，rsync 全量）。`prev_dir`＝上一**已部署**版
     迁移目录——提供时 pair 校验锚定它（pair 在 prev 存在且声明 expand ⇒ expand 已上产，
     「两步走要求跨发布」成立）；未提供（pytest 单文件场景）⇒ 回落 chain_dir 做存在性校验。
@@ -172,21 +247,21 @@ def evaluate(path: Path | str, chain_dir: Path | str,
     p = Path(path)
     chain = Path(chain_dir)
     name = p.name
-    try:
-        text = p.read_text(encoding="utf-8")
-    except OSError as e:
-        return False, f"{name}: 文件不可读（{e}）"
+    text = p.read_text(encoding="utf-8")
     decl = parse_declaration(text)
     hits = scan_unsafe_lines(text)
+
+    if decl["legacy"] and (decl["phase"] or decl["pair"]):
+        return False, f"{name}: legacy 与 phase/pair 不得同现（互斥声明）"
 
     if not hits:
         return True, "无回滚安全类命中"
 
     if decl["legacy"]:
         return False, (
-            f"{name}: legacy 白名单文件有回滚安全类命中——legacy 仅限历史遗留（只减不增），"
-            f"单文件判定不合规；⚠ 部署门上下文（check_release）对受管集内的 legacy 文件"
-            f"分流为「可见不阻断」，合规性归仓内闸门④"
+            f"{name}: legacy 白名单文件有回滚安全类命中——legacy 仅限历史遗留（只减不增）；"
+            f"单文件判定不合规。⚠ 部署门（check_release）仅对**冻结集内** legacy 分流"
+            f"「可见不阻断」，非冻结 legacy 直接拒；合规性归仓内闸门④"
         )
     phase = decl["phase"]
     if phase is None:
@@ -255,43 +330,87 @@ def managed_set(new_dir: Path | str, prev_dir: Path | str | None) -> tuple[list[
     return managed, f"受管 {len(managed)} / 共 {len(new)} 个迁移"
 
 
-def check_release(new_dir: Path | str, prev_dir: Path | str | None) -> tuple[int, list[str]]:
-    """部署门入口。返回 (退出码 0/1/2/3, stdout 行列表)。"""
-    try:
-        managed, note = managed_set(new_dir, prev_dir)
-    except OSError as e:
-        return 2, [f"✗ 受管集计算内部错误: {e}"]
-    if managed is None:
-        return 3, [f"⚠ {note}——DDL 门不可判定，跳过（该窗口 prod 侧无门覆盖）"]
+def _frozen_legacy_unchanged(name: str, new_path: Path,
+                             prev_path: Path | None) -> tuple[bool, str]:
+    """冻结 legacy 的终局校验：`upgrade` 段须与上一已部署版**逐字一致**。
+
+    冻结集只保证「名字是历史遗留」，**不保证内容没被改过**（步 4 同判 P0-1 对「门仅凭
+    标记放行」的批评）。声明行在第 1 行、位于 `upgrade` 段之外 ⇒ 加声明行不影响本比对。
+    """
+    if prev_path is None:
+        return True, "冻结 legacy（无上一版可比）"
+    prev_file = prev_path / name
+    if not prev_file.is_file():
+        return False, "冻结 legacy 不在上一已部署版（历史遗留文件必已上产——矛盾）"
+    if scan_upgrade_section((new_path / name).read_text(encoding="utf-8")) != \
+            scan_upgrade_section(prev_file.read_text(encoding="utf-8")):
+        return False, "冻结 legacy 的 upgrade 段相对已部署版发生变化（违反迁移不可变约定）"
+    return True, "冻结 legacy 且 upgrade 段与已部署版一致"
+
+
+def _classify_managed(new_dir: Path | str, prev_dir: Path | str | None,
+                      managed: list[str], note: str) -> tuple[list[str], list[str]]:
+    """逐文件分类受管集（纯内部；所有异常上浮给 check_release 映射为 rc=2）。"""
     lines = [note]
     if not managed:
         lines.append("（无新增/变更迁移——受管集为空）")
-        return 0, lines
+        return lines, []
     new_path = Path(new_dir)
     prev_path = Path(prev_dir) if prev_dir is not None else None
     rejects: list[str] = []
     for name in managed:
-        decl = parse_declaration((new_path / name).read_text(encoding="utf-8"))
+        text = (new_path / name).read_text(encoding="utf-8")
+        decl = parse_declaration(text)
+        if decl["legacy"] and (decl["phase"] or decl["pair"]):
+            rejects.append(f"✗ 破坏性 DDL 命中: {name}——legacy 与 phase/pair 不得同现（互斥声明）")
+            continue
         if decl["legacy"]:
-            # 实现裁定（批 111 步 3，设计稿未覆盖的死锁出口）：legacy 白名单文件本批
-            # 加声明行即内容变更 ⇒ 若拒则门开箱即拦死本批自己的上产。legacy 的合规性
-            # 由仓内闸门 test_migration_expand_contract.py ④（双向校验+陈旧检测）守——
-            # 契约闭合：部署门管「本版新增/变更的非 legacy 迁移」，仓内闸门管 legacy。
-            # 此处保留可见性（不静默——复审 P1-6 的「不设防」至少留 stdout 痕迹）。
-            lines.append(
-                f"ℹ {name}: legacy 白名单文件新增/内容变更（已上产迁移不再执行；"
-                f"历史不可变约定须人工确认，合规性归仓内闸门④）"
-            )
+            # 步 4 同判 P0-1：legacy 是**自声明**标记，门须**验证**而非信任。
+            if name not in LEGACY_FROZEN:
+                if scan_unsafe_lines(text):
+                    rejects.append(
+                        f"✗ 破坏性 DDL 命中: {name}——非冻结 legacy（legacy 只减不增；"
+                        f"新迁移禁标 legacy——规范硬规则①）+ 破坏性 op"
+                    )
+                else:
+                    lines.append(
+                        f"ℹ {name}: 标记 legacy 但无破坏性 op（非冻结，不阻断；合规性归仓内闸门④）"
+                    )
+                continue
+            ok, why = _frozen_legacy_unchanged(name, new_path, prev_path)
+            if ok:
+                lines.append(f"ℹ {name}: {why}（已上产迁移，不阻断；合规性归仓内闸门④）")
+            else:
+                rejects.append(f"✗ 破坏性 DDL 命中: {name}——{why}")
             continue
         ok, why = evaluate(new_path / name, new_path, prev_path)
         if ok:
             lines.append(f"✓ {name}: {why}")
         else:
             rejects.append(f"✗ 破坏性 DDL 命中: {name}——{why}")
+    return lines, rejects
+
+
+def check_release(new_dir: Path | str, prev_dir: Path | str | None) -> tuple[int, list[str]]:
+    """部署门入口。返回 (退出码 0/1/2/3, stdout 行列表)。
+
+    ⚠ **整段包在 `except Exception` 内 ⇒ 任何非预期异常恒返 2**（门不可用），**绝不落 `1`**
+    （步 4 同判 P0-2：`1` 的语义必须唯一＝「有命中且拒」；否则门崩溃（如迁移文件编码非法
+    ⇒ `UnicodeDecodeError`，属 `ValueError` 非 `OSError`）会伪装成命中，被 `allow_contract`
+    当「命中豁免」静默放行）。`2` 不在封闭式补集的放行集内 ⇒ 恒红。
+    """
+    try:
+        managed, note = managed_set(new_dir, prev_dir)
+        if managed is None:
+            return 3, [f"⚠ {note}——DDL 门不可判定，跳过（该窗口 prod 侧无门覆盖）"]
+        lines, rejects = _classify_managed(new_dir, prev_dir, managed, note)
+    except Exception as e:  # 门须 fail-closed：任何异常＝不可判定＝恒红（不当成「命中」，也不放行）
+        return 2, [
+            f"✗ DDL 门内部错误（不可判定，恒红——即使 allow_contract）: {type(e).__name__}: {e}"
+        ]
     if rejects:
         # 判据接口行前缀 `✗ 破坏性 DDL 命中: <file>`：S2/S7 沙箱以 grep "破坏性 DDL 命中"
-        # 判门生效——勿改文本。所有拒均发生在有命中的前提下（evaluate 的各拒分支
-        # 皆在 hits 非空之后），故该前缀对全部拒成立。
+        # 判门生效——勿改文本。所有拒均发生在有命中的前提下（各拒分支皆在 hits 非空之后）。
         lines.extend(rejects)
         return 1, lines
     return 0, lines

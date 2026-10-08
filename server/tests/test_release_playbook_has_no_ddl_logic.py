@@ -4,8 +4,9 @@ P0-β 的教训：反面枚举清单（「不得出现 grep/awk/RENAME…」）�
 本闸门只用**封闭正向判据（allow-list）**：
 
 ⑴ 判定入口唯一性（结构必然性，非语汇黑名单）：**任何 DDL 判定必读迁移目录** ⇒
-  全 playbook 内引用 `migrations/versions` 的任务恰 1 个、`migration_policy.py` 字面恰 1 次
-  ⇒ 把判定挪到 pre_tasks/post_tasks/另一个 block ⇒ 引用任务数变 2 ⇒ 红。
+  **扫描语料＝release.yml ＋ 其 include_tasks/import_tasks 目标**（步 4 同判 P1-c）内
+  引用 `migrations/versions` 的任务恰 1 个、`migration_policy.py` 字面恰 1 次
+  ⇒ 把判定挪到 pre_tasks/post_tasks/另一个 block/**被包含文件** ⇒ 引用任务数变 2 ⇒ 红。
 ⑵ 阶段 4 段内**命令 token ⊆ {set, readlink, <deploy_root>/shared/venv/bin/python}**（allow-list）。
 ⑶ 无分支控制关键字（`||`/`&&`/`${x:+y}` 属取值兜底，不在禁列）。
 ⑷ python 调用形态白名单：首个参数须是 `"$rel/src/data_platform/migration_policy.py"`——
@@ -119,29 +120,67 @@ def _tasks_referencing(text: str, needle: str) -> list[str]:
     current: list[str] | None = None
     for ln in text.splitlines():
         if re.match(r"\s*-\s+name:", ln):
-            if current is not None and any(needle in l for l in current):
+            if current is not None and any(needle in body_line for body_line in current):
                 tasks.append(current[0])
             current = [ln]
         elif current is not None:
             current.append(ln)
-    if current is not None and any(needle in l for l in current):
+    if current is not None and any(needle in body_line for body_line in current):
         tasks.append(current[0])
     return tasks
 
 
-def test_ddl_judgment_entry_is_unique() -> None:
+_PLAYBOOK_DIR = _PLAYBOOK.parent
+
+
+def _include_targets(text: str) -> list[Path]:
+    """收集 `include_tasks:`/`import_tasks:` 的静态目标（相对 playbook 目录）。
+
+    ⚠ 步 4 同判 P1-c：判定若逃逸到被包含文件，只扫 release.yml 会漏 ⇒ 扫描语料须含之。
+    **模板化目标**（含 `{{`）无法静态解析 ⇒ 直接断言其不存在（防静默漏扫）。
+    """
+    targets: list[Path] = []
+    for m in re.finditer(r"^\s*(?:include_tasks|import_tasks):\s*(.+?)\s*$", text, re.M):
+        raw = m.group(1).strip().strip("\"'")
+        assert "{{" not in raw, f"include 目标被模板化，守卫无法覆盖（须改静态路径）: {raw}"
+        targets.append(_PLAYBOOK_DIR / raw)
+    return targets
+
+
+def _corpus() -> str:
+    """扫描语料＝release.yml ＋ 其 include/import 目标（守卫覆盖被包含文件）。"""
     text = _playbook_text()
+    parts = [text]
+    for path in _include_targets(text):
+        assert path.is_file(), f"include_tasks 目标不存在（守卫无法覆盖）: {path}"
+        parts.append(path.read_text(encoding="utf-8"))
+    return "\n".join(parts)
+
+
+def test_ddl_judgment_entry_is_unique() -> None:
+    text = _corpus()
     ref_tasks = _tasks_referencing(text, "migrations/versions")
     assert len(ref_tasks) == 1, (
-        f"引用 migrations/versions 的任务必须恰 1 个（判定入口唯一），实得 {len(ref_tasks)}: "
-        f"{[t.strip() for t in ref_tasks]}——新增判定必读迁移目录 ⇒ 任何旁路判定都会让计数变 2"
+        f"引用 migrations/versions 的任务必须恰 1 个（判定入口唯一；**含 include 目标**），"
+        f"实得 {len(ref_tasks)}: {[t.strip() for t in ref_tasks]}——"
+        f"新增判定必读迁移目录 ⇒ 任何旁路判定都会让计数变 2"
     )
     code_lines = [ln for ln in text.splitlines() if not ln.strip().startswith("#")]
     mp_tasks = _tasks_referencing("\n".join(code_lines), "migration_policy.py")
     assert len(mp_tasks) == 1, (
-        f"非注释行引用 migration_policy.py 的任务须恰 1 个（判定真源唯一调用点），"
+        f"非注释行引用 migration_policy.py 的任务须恰 1 个（判定真源唯一调用点；含 include 目标），"
         f"实得 {len(mp_tasks)}: {[t.strip()[:60] for t in mp_tasks]}"
     )
+
+
+def test_include_targets_carry_no_ddl_logic() -> None:
+    """步 4 同判 P1-c：被 include 的文件不得含判定入口。"""
+    targets = _include_targets(_playbook_text())
+    assert targets, "release.yml 已无 include_tasks —— 若确为删光请同步本断言"
+    for path in targets:
+        body = path.read_text(encoding="utf-8")
+        assert "migrations/versions" not in body, f"{path.name}: 含迁移目录引用（判定入口逃逸）"
+        assert "migration_policy.py" not in body, f"{path.name}: 含判定模块引用（判定入口逃逸）"
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +271,16 @@ def test_injection_post_tasks_turns_red() -> None:
         "      ansible.builtin.shell: ls 'x/migrations/versions'\n"
     )
     assert len(_tasks_referencing(poisoned, "migrations/versions")) == 2, "判定挪 post_tasks ⇒ 计数变 2 ⇒ 红"
+
+
+def test_injection_in_include_target_turns_red() -> None:
+    """反向（P1-c）：判定挪进**被 include 的文件** ⇒ 合并语料后引用任务数 = 2 ⇒ 红。"""
+    text = _playbook_text()
+    assert len(_tasks_referencing(text, "migrations/versions")) == 1
+    evil = "    - name: 旁路判定（藏在被包含文件里）\n      ansible.builtin.shell: ls 'x/migrations/versions'\n"
+    assert len(_tasks_referencing(text + "\n" + evil, "migrations/versions")) == 2, (
+        "判定逃逸到 include 目标 ⇒ 语料合并后必须 > 1"
+    )
 
 
 def test_injection_failed_when_rewrite_turns_red() -> None:

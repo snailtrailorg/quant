@@ -323,3 +323,93 @@ def test_exclusion_patterns_live_and_reasoned(idx: int) -> None:
     ]
     assert any(re.search(rx, c) for c in corpus), f"排除表第 {idx} 条零命中（陈旧）: {rx}"
     assert len(why) >= 8, f"排除表第 {idx} 条缺理由: {rx}"
+
+
+# ---------------------------------------------------------------------------
+# 步 4 双盲审修复项（P0-1 / P0-2 / P1-a / legacy-phase 互斥）
+# ---------------------------------------------------------------------------
+
+def test_legacy_frozen_nonempty() -> None:
+    """P0-1：冻结 legacy 白名单是「门验证 legacy 标记」的唯一真源，不得为空。"""
+    from src.data_platform.migration_policy import LEGACY_FROZEN
+
+    assert LEGACY_FROZEN, "冻结 legacy 白名单为空＝假绿"
+
+
+def test_nonfrozen_legacy_with_hit_rejected_at_gate(tmp_path: Path) -> None:
+    """P0-1（门）：新迁移标 legacy + 破坏性 op ⇒ 部署门**拒**（旧版零验证放行 rc=0）。"""
+    new, prev = _pair_fixture(tmp_path)
+    _write(new / "0199_evil.py",
+           _mig('# EXPAND-CONTRACT: legacy reason="自称历史"',
+                upgrade='op.execute("DROP TABLE important")'))
+    rc, lines = check_release(new, prev)
+    joined = "\n".join(lines)
+    assert rc == 1, f"非冻结 legacy 必须拒（实得 {rc}）:\n{joined}"
+    assert "非冻结 legacy" in joined
+
+
+def test_frozen_legacy_body_unchanged_not_blocking(tmp_path: Path) -> None:
+    """冻结集内 legacy、upgrade 段与已部署版一致 ⇒ 可见不阻断（本批 15 文件加声明行自洽）。"""
+    new, prev = _pair_fixture(tmp_path)
+    name = "0104_rename_venue_to_account.py"
+    body = ('"""x"""\nrevision = "0104"\ndef upgrade() -> None:\n'
+            '    op.execute("ALTER TABLE t RENAME COLUMN a TO b")\n\ndef downgrade() -> None:\n    pass\n')
+    _write(prev / name, body)
+    _write(new / name, '# EXPAND-CONTRACT: legacy reason="事故当事人"\n' + body)
+    rc, lines = check_release(new, prev)
+    joined = "\n".join(lines)
+    assert rc == 0, joined
+    assert "不阻断" in joined and name in joined
+
+
+def test_frozen_legacy_body_tampered_rejected(tmp_path: Path) -> None:
+    """冻结集内 legacy 的 upgrade 段被改（偷加破坏性 op）⇒ 拒（门验证内容，非只信名字）。"""
+    new, prev = _pair_fixture(tmp_path)
+    name = "0104_rename_venue_to_account.py"
+    body = ('"""x"""\nrevision = "0104"\ndef upgrade() -> None:\n'
+            '    op.execute("ALTER TABLE t RENAME COLUMN a TO b")\ndef downgrade() -> None:\n    pass\n')
+    _write(prev / name, body)
+    _write(new / name, '# EXPAND-CONTRACT: legacy reason="x"\n'
+                       + body.replace("RENAME COLUMN a TO b", "DROP COLUMN a"))
+    rc, lines = check_release(new, prev)
+    assert rc == 1 and "发生变化" in "\n".join(lines)
+
+
+def test_legacy_phase_mutual_exclusion(tmp_path: Path) -> None:
+    """`legacy` 与 `phase`/`pair` 不得同现（防一行声明拿双通道）。"""
+    new, prev = _pair_fixture(tmp_path)
+    _write(new / "0198_x.py",
+           _mig('# EXPAND-CONTRACT: legacy phase=contract pair=0116',
+                upgrade='op.execute("DROP TABLE t")'))
+    ok, why = evaluate(new / "0198_x.py", new, prev)
+    assert not ok and "互斥" in why
+    rc, lines = check_release(new, prev)
+    assert rc == 1 and "互斥" in "\n".join(lines)
+
+
+def test_indecodable_file_gives_rc2_not_1(tmp_path: Path) -> None:
+    """P0-2：模块内部错（解码失败，属 ValueError 非 OSError）恒返 **2**——绝不伪装成 1。
+
+    否则 `failed_when` 的封闭式补集会把 rc=1 当「命中」，`allow_contract=true` 时被豁免 ⇒
+    门崩溃被静默放行。
+    """
+    new, prev = tmp_path / "new", tmp_path / "prev"
+    new.mkdir()
+    prev.mkdir()
+    good = b'"""x"""\nrevision="1"\ndef upgrade() -> None:\n    pass\ndef downgrade() -> None:\n    pass\n'
+    (prev / "0001_a.py").write_bytes(good)
+    (new / "0001_a.py").write_bytes(good + b"\xff\xfe")  # 非法 UTF-8：read_bytes 过、read_text 崩
+    rc, lines = check_release(new, prev)
+    assert rc == 2, f"期望 2（内部错），实得 {rc}: {lines}"
+    assert "内部错误" in "\n".join(lines)
+
+
+def test_exclusion_narrowed_comment_and_semicolon() -> None:
+    """P1-a：排除项**不再整行赦免**——注释/分号同行的破坏性 op 必须命中。"""
+    assert scan_unsafe_lines(_mig(upgrade='op.drop_table("t")  # 与 DROP CONSTRAINT 无关'))
+    assert scan_unsafe_lines(_mig(upgrade='op.drop_table("t"); op.drop_constraint("ck","t")'))
+    assert scan_unsafe_lines(_mig(
+        upgrade='op.execute("ALTER TABLE t DROP CONSTRAINT ck; DROP COLUMN c")'))
+    # 而真排除项仍豁免（收窄不得误伤 0116/0062/0095 形态）
+    assert not scan_unsafe_lines(_mig(upgrade="op.drop_constraint('ck','t',type_='check')"))
+    assert not scan_unsafe_lines(_mig(upgrade='op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 0")'))
