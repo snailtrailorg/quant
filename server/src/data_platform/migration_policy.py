@@ -9,8 +9,9 @@
 3. **受管集**：本版相对上一已部署版「新增 ∪ 内容变更」的迁移（sha256 指纹差集，
    非文件名差集——同名就地改同样落网，复审 P1-6）。
 4. **冻结 legacy 白名单**（`LEGACY_FROZEN`）：**唯一真源在此**（测试从本模块 import，防
-   「执行侧无清单」——步 4 同判 P0-1）。受管集内 legacy 文件二分流：名在冻结集 ⇒ 可见不
-   阻断（历史遗留，且 upgrade 段须与已部署版**逐字一致**）；名不在 ⇒ 拒（新迁移禁标 legacy）。
+   「执行侧无清单」——步 4 同判 P0-1）。受管集内 legacy 文件二分流：**keying＝文件名**
+   （与声明无关，P0-A）：名在冻结集 ⇒ 可见不阻断（历史遗留，且 upgrade 段须与已部署版
+   **逐字一致**）；名不在 ⇒ 拒（新迁移禁标 legacy）。
 5. **部署门入口**：`check_release(new_dir, prev_dir)` 汇总退出码，CLI `--check-release` 消费。
 
 ## 两用约束
@@ -38,8 +39,13 @@ import ...` 导入，也被部署门当独立脚本跑（目标机 `shared/venv/
   故「破坏性 op 与 `DROP CONSTRAINT` 同行/同注」不会静默放行。残留：`;` 落在**字符串字面量
   内**的多语句 SQL 会被切碎——无害（碎片仍各自匹配，破坏性 op 仍被捕获）。
 - 迁移文件视为不可变：`check_release` 对**冻结 legacy** 另比 `upgrade` 段与**上一已部署版**
-  逐字一致（防「改已部署迁移的函数体」）。残留：**`downgrade` 段与 docstring** 不参与该比对
+  逐字一致（防「改已部署迁移的函数体」）。**逐字＝含注释与空白**（改一个字符即拒——
+  fail-closed 方向，非假红）。残留：**`downgrade` 段与 docstring** 不参与该比对
   （downgrade 是合法回滚路径，不在门覆盖内）。
+- 冻结集校验的 keying 是**文件名**、**不读声明**（P0-A）⇒ 冻结集内文件无论头写 `legacy`／
+  `phase=contract`／无声明，一律逐字比对 `upgrade` 段。
+- **匹配大小写不敏感**（`_MATCH_FLAGS = re.IGNORECASE`，判定表与排除表共用）——SQL 关键字
+  与 alembic op 名大小写不敏感，规范 §1.1 的对象是**语句本身**（P0-B）。
 - `legacy` 与 `phase`/`pair` **互斥**（同现即拒）——防「一行声明同时拿到双通道」。
 - alembic 之外的 SQL 手工执行不在门覆盖内。
 """
@@ -55,13 +61,20 @@ from pathlib import Path
 # 判定表（唯一真源；新增一类 op 只改这里）
 # ---------------------------------------------------------------------------
 
+# 匹配旗标（**两表共用，单一处**）：SQL 关键字与 alembic op 名大小写不敏感 ⇒
+# 规范 §1.1 声明的对象是**语句本身**，`drop table t` 与 `DROP TABLE t` 必须同判
+# （步 4 复审轮② P0-B：大小写敏感 ⇒ 一整类等价破坏性语句对 prod 唯一机械强制点隐形）。
+_MATCH_FLAGS = re.IGNORECASE
+
 # 回滚安全类（宽口径）：(正则, 类别, 为何危险)。
-# ⚠ 宽口径是刻意的：`drop_(table|column|index|constraint)`、`DROP\s+\w+` 先宽命中，
-#   再由 EXPLICIT_EXCLUSIONS 洗白放宽类——这样排除项才是**被真消费**的（反证钉⑤：
-#   删掉 DROP CONSTRAINT 排除项 ⇒ 0116/0062 立即变红），而不是永远不触发的装饰。
+# ⚠ 宽口径是刻意的（**禁枚举式 deny-list——枚举必漂**）：裸 SQL `DROP\s+\w+` 与 pythonic
+#   `op.drop_\w+(` 一律**按对象类型无关**宽命中，再由 EXPLICIT_EXCLUSIONS 洗白放宽类——
+#   这样排除项才是**被真消费**的（反证钉⑤：删掉 DROP CONSTRAINT 排除项 ⇒ 0116/0062 立即
+#   变红），且未列对象（SCHEMA/VIEW/TRIGGER/FUNCTION…）默认落网而非静默放行。
 ROLLBACK_UNSAFE_PATTERNS: tuple[tuple[str, str, str], ...] = (
-    (r"DROP\s+(TABLE|COLUMN|INDEX)", "bare_sql_drop",
-     "裸 SQL 删表/删列/删索引——数据不可逆丢失，旧代码读新 schema 直接崩"),
+    (r"DROP\s+\w+", "bare_sql_drop",
+     "裸 SQL DROP <任意对象>——删表/删列/删索引等数据不可逆丢失，旧代码读新 schema 直接崩；"
+     "不枚举对象类型 ⇒ 未列对象（SCHEMA/VIEW/TRIGGER…）默认落网，放宽类由排除项洗白"),
     (r"ALTER\s+COLUMN[^;\n]*\bTYPE\b", "alter_column_type",
      "ALTER COLUMN ... TYPE——类型收窄可截断/丢数据，回滚后旧代码读写新类型崩"),
     (r"op\.drop_(table|column|index)\s*\(", "op_drop",
@@ -83,6 +96,8 @@ ROLLBACK_UNSAFE_PATTERNS: tuple[tuple[str, str, str], ...] = (
 # 显式排除：(正则, 理由)。**放宽类 op 不破坏「旧代码可读新 schema」⇒ 与回滚安全无关**。
 # ⚠ 后两条是本机制自洽的必要条件：0116（唯一两步走实例的 expand 侧）含 op.drop_constraint、
 #   0062 upgrade 段含 op.drop_constraint——不排除则 P0-2 收紧后它们反成非法。
+# ⚠ 匹配同用 `_MATCH_FLAGS`（大小写不敏感）——否则「宽口径先命中、排除项后洗白」在
+#   小写拼写下断裂（写 `drop constraint` 既没被宽口径命中、也没被排除，实为放行）。
 EXPLICIT_EXCLUSIONS: tuple[tuple[str, str], ...] = (
     (r"DROP\s+CONSTRAINT", "放宽约束（删 CHECK/UNIQUE 不删数据）；不破坏旧代码读新 schema"),
     (r"op\.drop_constraint\s*\(", "同上（pythonic 形态；0116/0062 upgrade 段实例）"),
@@ -178,6 +193,8 @@ def scan_unsafe_lines(text: str) -> list[tuple[int, str, str, str]]:
     行内算法：**先剥行内注释（字符串外的 `#`），再按 `;` 切分语句，逐语句**先求显式排除
     （该语句被豁免则跳过），否则匹配宽口径 unsafe。**不再整行赦免**（步 4 同判 P1-a：
     与排除项同行/同注的破坏性 op 不得静默放行）。
+
+    判定表与排除表**一律按 `_MATCH_FLAGS`（`re.IGNORECASE`）匹配**（步 4 复审轮② P0-B）。
     返回 [(行号(1-based, 全文坐标), 类别, 危险说明, 命中语句文本)]。
     """
     seg = scan_upgrade_section(text)
@@ -196,10 +213,10 @@ def scan_unsafe_lines(text: str) -> list[tuple[int, str, str, str]]:
             s = stmt.strip()
             if not s:
                 continue
-            if any(re.search(rx, s) for rx, _ in EXPLICIT_EXCLUSIONS):
+            if any(re.search(rx, s, _MATCH_FLAGS) for rx, _ in EXPLICIT_EXCLUSIONS):
                 continue  # 该**语句**被豁免（非整行）
             for rx, kind, why in ROLLBACK_UNSAFE_PATTERNS:
-                if re.search(rx, s):
+                if re.search(rx, s, _MATCH_FLAGS):
                     out.append((seg_start_line + off, kind, why, s))
                     break
     return out
@@ -364,24 +381,27 @@ def _classify_managed(new_dir: Path | str, prev_dir: Path | str | None,
         if decl["legacy"] and (decl["phase"] or decl["pair"]):
             rejects.append(f"✗ 破坏性 DDL 命中: {name}——legacy 与 phase/pair 不得同现（互斥声明）")
             continue
-        if decl["legacy"]:
-            # 步 4 同判 P0-1：legacy 是**自声明**标记，门须**验证**而非信任。
-            if name not in LEGACY_FROZEN:
-                if scan_unsafe_lines(text):
-                    rejects.append(
-                        f"✗ 破坏性 DDL 命中: {name}——非冻结 legacy（legacy 只减不增；"
-                        f"新迁移禁标 legacy——规范硬规则①）+ 破坏性 op"
-                    )
-                else:
-                    lines.append(
-                        f"ℹ {name}: 标记 legacy 但无破坏性 op（非冻结，不阻断；合规性归仓内闸门④）"
-                    )
-                continue
+        # P0-A（步 4 复审轮②）：冻结集的 keying 是「**名在冻结集内**」（规范 §5.1 原文），
+        # **与自声明解耦**——触发条件不得读 `decl["legacy"]`，否则「body 篡改 + 头重标
+        # phase=contract pair=<已上产 expand>」即旁路本比对（实测 rc=0，见同判② 分歧 2）。
+        if name in LEGACY_FROZEN:
             ok, why = _frozen_legacy_unchanged(name, new_path, prev_path)
             if ok:
                 lines.append(f"ℹ {name}: {why}（已上产迁移，不阻断；合规性归仓内闸门④）")
             else:
                 rejects.append(f"✗ 破坏性 DDL 命中: {name}——{why}")
+            continue
+        if decl["legacy"]:
+            # 步 4 同判 P0-1：legacy 是**自声明**标记 ⇒ 名不在冻结集一律拒（门**验证**非信任）。
+            if scan_unsafe_lines(text):
+                rejects.append(
+                    f"✗ 破坏性 DDL 命中: {name}——非冻结 legacy（legacy 只减不增；"
+                    f"新迁移禁标 legacy——规范硬规则①）+ 破坏性 op"
+                )
+            else:
+                lines.append(
+                    f"ℹ {name}: 标记 legacy 但无破坏性 op（非冻结，不阻断；合规性归仓内闸门④）"
+                )
             continue
         ok, why = evaluate(new_path / name, new_path, prev_path)
         if ok:

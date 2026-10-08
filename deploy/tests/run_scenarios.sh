@@ -316,10 +316,10 @@ check "S6b: 快车道零删除（基线与上一发布版原样保留——被�
   bash -c "test -d '$ROOT/releases/$R_BASE' && test -d '$ROOT/releases/$R_NEW'"
 [ $S6B -eq 0 ] && scenario_row 6 "同内容再发布" "零" "$S6B" "PASS（units_changed=false）" || scenario_row 6 "同内容再发布" "零" "$S6B" "FAIL"
 
-# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，九例） ----------
-# 道具生成器：write_mig <文件名> <首行声明（可空）> <upgrade 体>
+# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，十一例） ----------
+# 道具生成器：write_mig <文件名> <首行声明（可空）> <upgrade 体> [目标目录，默认 STAGE]
 write_mig() {
-  local fname=$1 decl=$2 body=$3
+  local fname=$1 decl=$2 body=$3 dest=${4:-$STAGE/migrations/versions}
   local rid=${fname%%_*}
   {
     [ -n "$decl" ] && echo "$decl"
@@ -336,7 +336,7 @@ write_mig() {
     echo
     echo 'def downgrade() -> None:'
     echo '    pass'
-  } >"$STAGE/migrations/versions/$fname"
+  } >"$dest/$fname"
 }
 
 echo "[S7a] 两步走正例：expand 上产 → contract 上产（跨发布）"
@@ -459,6 +459,35 @@ S7I=$?
 echo "  rc=$S7I（期望非零——内部错 rc=2 不在放行集）"
 [ $S7I -ne 0 ] || FAILED=$((FAILED + 1))
 [ $S7I -ne 0 ] && scenario_row 7i "内部错恒红" "非零" "$S7I" "PASS（rc=2 恒红）" || scenario_row 7i "内部错恒红" "非零" "$S7I" "FAIL（门崩溃被 allow_contract 豁免！）"
+
+echo "[S7j] 冻结集内文件 body 篡改 + 重标 phase=contract ⇒ rc=1（P0-A：冻结集 keying＝文件名，与声明解耦）"
+seed_baseline
+# 道具：把「已上产的冻结 legacy ＋ 它的 expand 对手」直接写进**已部署版**迁移目录——
+# 冻结集文件的定义就是「历史遗留、必已上产」，而沙箱基线是精简面，历史只能这样造。
+DEPLOYED="$(readlink -f "$ROOT/server")/migrations/versions"
+write_mig "0098_sbx_expand_add.py" '# EXPAND-CONTRACT: phase=expand pair=0099' \
+  'op.execute("SELECT 1")' "$DEPLOYED"
+write_mig "0100_venue_backfill.py" '# EXPAND-CONTRACT: legacy reason="历史遗留"' \
+  'op.execute("SELECT 1")' "$DEPLOYED"
+# 本版：同一冻结集文件 body 篡改 + 头重标 contract（旧实现按自声明触发比对 ⇒ rc=0 放行）
+write_mig "0100_venue_backfill.py" '# EXPAND-CONTRACT: phase=contract pair=0098' \
+  'op.execute("DROP TABLE demo_t")'
+run_release "$R_NEW" >"$LOGDIR/s7j.log" 2>&1
+S7J=$?
+echo "  rc=$S7J（期望非零——冻结集 body 被改须拒，重标 contract 不得旁路）"
+[ $S7J -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "发生变化" "$LOGDIR/s7j.log" && echo "  ✓ 冻结集 body 比对判据在案" || { echo "  ✗ 未捕获冻结集 body 比对"; FAILED=$((FAILED + 1)); }
+[ $S7J -ne 0 ] && scenario_row 7j "冻结集重标绕过" "非零" "$S7J" "PASS" || scenario_row 7j "冻结集重标绕过" "非零" "$S7J" "FAIL（重标 contract 旁路了冻结集 body 校验！）"
+
+echo "[S7k] 小写 SQL（drop table demo_t）⇒ rc=1（P0-B：判定表须大小写不敏感）"
+seed_baseline
+write_mig "0099_sbx_lower_drop.py" "" 'op.execute("drop table demo_t")'
+run_release "$R_NEW" >"$LOGDIR/s7k.log" 2>&1
+S7K=$?
+echo "  rc=$S7K（期望非零——小写 SQL 与大写同判）"
+[ $S7K -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "破坏性 DDL 命中" "$LOGDIR/s7k.log" && echo "  ✓ 小写 SQL 命中判据在案" || { echo "  ✗ 未捕获小写 SQL 命中"; FAILED=$((FAILED + 1)); }
+[ $S7K -ne 0 ] && scenario_row 7k "小写SQL" "非零" "$S7K" "PASS" || scenario_row 7k "小写SQL" "非零" "$S7K" "FAIL（小写破坏性 SQL 静默放行！）"
 
 # ---------- 汇总 ----------
 echo

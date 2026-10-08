@@ -404,6 +404,80 @@ def test_indecodable_file_gives_rc2_not_1(tmp_path: Path) -> None:
     assert "内部错误" in "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# 步 4 复审轮② 修复项（P0-A 冻结集 keying 与声明解耦 / P0-B 大小写不敏感）
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'op.execute("drop table demo_t")',                     # P0-B 复现原式
+        'op.execute("alter table t rename to t2")',
+        'op.execute("alter table t alter column c type varchar(8)")',
+        'op.execute("Drop Table demo_t")',                     # 混合大小写
+        "op.DROP_TABLE('t')",                                  # pythonic 形态大写
+    ],
+)
+def test_lowercase_sql_hits_like_uppercase(body: str) -> None:
+    """P0-B（门）：判定表须 `re.IGNORECASE`——SQL 关键字大小写不敏感，小写拼写不得静默放行。"""
+    assert scan_unsafe_lines(_mig(upgrade=body)), f"小写/混合大小写须与全大写同判: {body}"
+
+
+def test_lowercase_exclusion_still_consumed() -> None:
+    """排除项同样须 re.I——否则「宽口径先命中、排除后洗白」在小写拼写下断裂（放行而非洗白）。"""
+    body = 'op.execute("alter table t drop constraint ck_x")'
+    assert scan_unsafe_lines(_mig(upgrade=body)) == [], "小写 DROP CONSTRAINT 仍须豁免"
+    import src.data_platform.migration_policy as mp
+
+    saved = mp.EXPLICIT_EXCLUSIONS
+    try:
+        mp.EXPLICIT_EXCLUSIONS = tuple()
+        assert scan_unsafe_lines(_mig(upgrade=body)), \
+            "裸 SQL 形态的排除项须**真消费**（删排除项 ⇒ 该语句变红）"
+    finally:
+        mp.EXPLICIT_EXCLUSIONS = saved
+
+
+def _frozen_fixture(tmp_path: Path, new_decl: str, tamper: bool) -> tuple[Path, Path]:
+    """冻结集内文件已上产（prev 有同名同体），new 侧按参数声明 + 可选篡改。"""
+    from src.data_platform.migration_policy import LEGACY_FROZEN
+
+    new, prev = tmp_path / "new", tmp_path / "prev"
+    new.mkdir()
+    prev.mkdir()
+    name = sorted(LEGACY_FROZEN)[0]
+    base = ('"""x"""\nrevision = "0100"\ndef upgrade() -> None:\n'
+            '    op.execute("SELECT 1")\ndef downgrade() -> None:\n    pass\n')
+    body = base.replace("SELECT 1", "DROP TABLE important_t") if tamper else base
+    _write(prev / name, '# EXPAND-CONTRACT: legacy reason="历史"\n' + base)
+    expand = _mig('# EXPAND-CONTRACT: phase=expand pair=0099')
+    _write(prev / "0098_e.py", expand)
+    _write(new / "0098_e.py", expand)
+    _write(new / name, (f'{new_decl}\n' if new_decl else "") + body)
+    return new, prev
+
+
+def test_frozen_legacy_relabeled_contract_still_body_checked(tmp_path: Path) -> None:
+    """P0-A（门）：冻结集 keying＝**文件名**，与声明解耦——重标 `phase=contract` 不得旁路
+    「upgrade 段逐字一致」比对（旧实现读 `decl["legacy"]` ⇒ 实测 rc=0 放行）。"""
+    new, prev = _frozen_fixture(
+        tmp_path, '# EXPAND-CONTRACT: phase=contract pair=0098', tamper=True)
+    rc, lines = check_release(new, prev)
+    joined = "\n".join(lines)
+    assert rc == 1, f"冻结集内文件 body 被改 ⇒ 必须拒（实得 {rc}）:\n{joined}"
+    assert "发生变化" in joined
+
+
+def test_frozen_legacy_relabeled_unchanged_not_blocking(tmp_path: Path) -> None:
+    """同声明、body 未变 ⇒ 可见不阻断（冻结集的名义是「历史遗留」，不是「一律拒」）。"""
+    new, prev = _frozen_fixture(
+        tmp_path, '# EXPAND-CONTRACT: phase=contract pair=0098', tamper=False)
+    rc, lines = check_release(new, prev)
+    joined = "\n".join(lines)
+    assert rc == 0, joined
+    assert "不阻断" in joined
+
+
 def test_exclusion_narrowed_comment_and_semicolon() -> None:
     """P1-a：排除项**不再整行赦免**——注释/分号同行的破坏性 op 必须命中。"""
     assert scan_unsafe_lines(_mig(upgrade='op.drop_table("t")  # 与 DROP CONSTRAINT 无关'))
