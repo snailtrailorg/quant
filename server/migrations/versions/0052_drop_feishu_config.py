@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="数据先迁 im_bot_config(0051)、代码切读；expand 侧非迁移，不虚构 pair"
 """IM 统一接入批 2 收尾:DROP feishu_config(19 号 v2 §5——批 2 切完全部读路径)。
 
 批 2 读写点全清单已切换(19 号 v2):FeishuClient/ws_client/web 端点(新 /api/im-bots)/

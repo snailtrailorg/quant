@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: phase=expand pair=0122
 """批 83a：external_interface 拆表 —— data_source + trading_account（**expand 步**，行为不变）。
 
 **本迁移只做 expand，不做 contract**（2026-09-30 用户裁定＝「两步走」）：

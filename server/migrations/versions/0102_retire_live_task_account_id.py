@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="建表与退役同批未跨发布（D2 段 4）"
 """多账号源 D2 段4：删 live_task.account_id（身份线统一收尾）。
 
 live_task.venue_id（0099 加列 + 0100 回填 NOT NULL + FK RESTRICT）已取代 account_id

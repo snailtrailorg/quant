@@ -48,6 +48,11 @@ printf '1|xtp\n' > "$SBX/dbro/hub.out"   # 批 66b：hub 期望集道具（缺=�
 
 # --- 2) staging 基线（__SBX_ROOT__ 占位符替换为实际沙箱根） ---
 cp -a "$FIX/." "$STAGE/"
+# 批 111：DDL 门判定真源从真仓复制（fixture 为精简面不含 data_platform）。
+# ⚠ 副本=每次构建的产物，真源唯一在 server/src/data_platform/migration_policy.py——
+# 不得把模块手抄进 fixtures/（那会造出第二真源，漂移无闸门看守）。
+mkdir -p "$STAGE/src/data_platform"
+cp "$HERE/../../server/src/data_platform/migration_policy.py" "$STAGE/src/data_platform/"
 # 批 63 加 vendor 白名单切片后沙箱基线一直缺此目录（基线发布 rsync code 23 中止——66b 快审实跑暴露）；
 # 补占位道具（vendor 内容随场景无关——同步通道存在性即所验）
 mkdir -p "$STAGE/vendor"

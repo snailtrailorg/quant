@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="条件/幂等对齐迁移，非两步走"
 """schema 收编与漂移修复（#48，L 审修正案 F-B/审计裁定 2026-08-18）
 
 - strategy_config 收编进迁移链（F-B：42 个迁移无一定义它——全新库 upgrade head 不建此表，

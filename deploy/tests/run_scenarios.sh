@@ -316,10 +316,134 @@ check "S6b: 快车道零删除（基线与上一发布版原样保留——被�
   bash -c "test -d '$ROOT/releases/$R_BASE' && test -d '$ROOT/releases/$R_NEW'"
 [ $S6B -eq 0 ] && scenario_row 6 "同内容再发布" "零" "$S6B" "PASS（units_changed=false）" || scenario_row 6 "同内容再发布" "零" "$S6B" "FAIL"
 
+# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，七例） ----------
+# 道具生成器：write_mig <文件名> <首行声明（可空）> <upgrade 体>
+write_mig() {
+  local fname=$1 decl=$2 body=$3
+  local rid=${fname%%_*}
+  {
+    [ -n "$decl" ] && echo "$decl"
+    echo '"""sbx S7 道具"""'
+    echo 'revision = "'"$rid"'"'
+    echo 'down_revision = "0001"'
+    echo 'branch_labels = None'
+    echo 'depends_on = None'
+    echo
+    echo 'def upgrade() -> None:'
+    echo '    from alembic import op'
+    echo
+    echo "    $body"
+    echo
+    echo 'def downgrade() -> None:'
+    echo '    pass'
+  } >"$STAGE/migrations/versions/$fname"
+}
+
+echo "[S7a] 两步走正例：expand 上产 → contract 上产（跨发布）"
+seed_baseline
+R_EXP=202608260210-0000eee
+R_CON=202608260220-0000abc
+write_mig "0098_sbx_expand_add.py" '# EXPAND-CONTRACT: phase=expand pair=0099' \
+  'op.execute("CREATE TABLE sbx_new_t (id serial PRIMARY KEY)")'
+run_release "$R_EXP" >"$LOGDIR/s7a1.log" 2>&1
+S7A1=$?
+echo "  expand rc=$S7A1（期望零）"
+[ $S7A1 -eq 0 ] || { FAILED=$((FAILED + 1)); tail -20 "$LOGDIR/s7a1.log"; }
+check "S7a: expand 上产（server → $R_EXP）" test "$(link_id)" = "$R_EXP"
+cat >"$STAGE/migrations/versions/0099_sbx_contract_drop.py" <<'EOF'
+# EXPAND-CONTRACT: phase=contract pair=0098
+"""sbx S7a contract 步：DROP 旧表（收口两步走）"""
+revision = "0099"
+down_revision = "0098"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    from alembic import op
+
+    op.execute("DROP TABLE demo_t")
+
+
+def downgrade() -> None:
+    pass
+EOF
+run_release "$R_CON" >"$LOGDIR/s7a2.log" 2>&1
+S7A2=$?
+echo "  contract rc=$S7A2（期望零——pair=0098 已随 $R_EXP 上产）"
+[ $S7A2 -eq 0 ] || { FAILED=$((FAILED + 1)); tail -30 "$LOGDIR/s7a2.log"; }
+check "S7a: contract 放行（server → $R_CON）" test "$(link_id)" = "$R_CON"
+check "S7a: contract 真跑（alembic_version=0099）" bash -c "psql -U quant -h 127.0.0.1 -d quant -tAc 'select version_num from sbx_deploy.alembic_version' | grep -qx 0099"
+[ $S7A1 -eq 0 ] && [ $S7A2 -eq 0 ] && scenario_row 7a "两步走正例" "零/零" "$S7A1/$S7A2" "PASS（跨发布）" || scenario_row 7a "两步走正例" "零/零" "$S7A1/$S7A2" "FAIL"
+
+echo "[S7b] 命中但无声明 ⇒ rc=1（与 S2 同构，独立成例）"
+seed_baseline
+write_mig "0099_sbx_bad_drop.py" "" 'op.execute("DROP TABLE demo_t")'
+run_release "$R_NEW" >"$LOGDIR/s7b.log" 2>&1
+S7B=$?
+echo "  rc=$S7B（期望非零）"
+[ $S7B -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "破坏性 DDL 命中" "$LOGDIR/s7b.log" && echo "  ✓ 判据接口文本在案" || { echo "  ✗ 未捕获命中文本"; FAILED=$((FAILED + 1)); }
+[ $S7B -ne 0 ] && scenario_row 7b "无声明命中" "非零" "$S7B" "PASS" || scenario_row 7b "无声明命中" "非零" "$S7B" "FAIL"
+
+echo "[S7c] contract 但 pair 不在已部署链 ⇒ rc=1（两步走要求跨发布）"
+seed_baseline
+write_mig "0099_sbx_orphan_c.py" '# EXPAND-CONTRACT: phase=contract pair=0096' \
+  'op.execute("DROP TABLE demo_t")'
+run_release "$R_NEW" >"$LOGDIR/s7c.log" 2>&1
+S7C=$?
+echo "  rc=$S7C（期望非零）"
+[ $S7C -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "两步走要求" "$LOGDIR/s7c.log" && echo "  ✓ 跨发布语义文本在案" || { echo "  ✗ 未捕获跨发布文本"; FAILED=$((FAILED + 1)); }
+[ $S7C -ne 0 ] && scenario_row 7c "pair未上产" "非零" "$S7C" "PASS" || scenario_row 7c "pair未上产" "非零" "$S7C" "FAIL"
+
+echo "[S7d] 同名迁移内容变更 ⇒ 纳入受管集（内容指纹差集，非文件名差集）"
+seed_baseline
+sed -i 's/^def upgrade() -> None:$/def upgrade() -> None:\n    import os; _ = os.environ.get("SBX_TOUCH")\n    op.execute("DROP TABLE demo_t")/' \
+  "$STAGE/migrations/versions/0001_sbx_baseline.py"
+grep -q "DROP TABLE demo_t" "$STAGE/migrations/versions/0001_sbx_baseline.py" || { echo "  ✗ 注入失败"; FAILED=$((FAILED + 1)); }
+run_release "$R_NEW" >"$LOGDIR/s7d.log" 2>&1
+S7D=$?
+echo "  rc=$S7D（期望非零——0001 内容变更且命中）"
+[ $S7D -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "破坏性 DDL 命中: 0001_sbx_baseline.py" "$LOGDIR/s7d.log" && echo "  ✓ 内容变更被受管集捕获" || { echo "  ✗ 同名变更未被捕获（文件名差集复活？）"; FAILED=$((FAILED + 1)); }
+[ $S7D -ne 0 ] && scenario_row 7d "同名内容变更" "非零" "$S7D" "PASS" || scenario_row 7d "同名内容变更" "非零" "$S7D" "FAIL"
+
+echo "[S7e] 逃生门：allow_contract+contract_reason ⇒ 不阻断 + 告警 + 留痕"
+seed_baseline
+write_mig "0099_sbx_bad_drop.py" "" 'op.execute("DROP TABLE demo_t")'
+run_release "$R_NEW" -e allow_contract=true -e 'contract_reason=S7e 调试期显式豁免（场景注入）' >"$LOGDIR/s7e.log" 2>&1
+S7E=$?
+echo "  rc=$S7E（期望零——只取消 rc=1 的阻断）"
+[ $S7E -eq 0 ] || { FAILED=$((FAILED + 1)); tail -20 "$LOGDIR/s7e.log"; }
+grep -q "豁免阻断" "$LOGDIR/s7e.log" && echo "  ✓ 旁路告警在案" || { echo "  ✗ 旁路告警缺失"; FAILED=$((FAILED + 1)); }
+check "S7e: 留痕落 var/（不落 release 树）" test -f "$ROOT/var/ddl-gate-bypassed-$R_NEW.txt"
+[ $S7E -eq 0 ] && scenario_row 7e "逃生门豁免" "零" "$S7E" "PASS（告警+留痕）" || scenario_row 7e "逃生门豁免" "零" "$S7E" "FAIL"
+
+echo "[S7f] 首部署（无上一版）⇒ rc=3 门跳过 + 显著告警，发布不阻断"
+bash "$HERE/make_sandbox_root.sh" >>"$LOGDIR/s7f-seed.log" 2>&1
+run_release "$R_BASE" >"$LOGDIR/s7f.log" 2>&1
+S7F=$?
+echo "  rc=$S7F（期望零——首部署窗口门不可判定但放行）"
+[ $S7F -eq 0 ] || { FAILED=$((FAILED + 1)); tail -20 "$LOGDIR/s7f.log"; }
+grep -q "首部署" "$LOGDIR/s7f.log" && echo "  ✓ 首部署告警在案" || { echo "  ✗ 首部署告警缺失"; FAILED=$((FAILED + 1)); }
+[ $S7F -eq 0 ] && scenario_row 7f "首部署rc=3" "零" "$S7F" "PASS（告警不阻断）" || scenario_row 7f "首部署rc=3" "零" "$S7F" "FAIL"
+
+echo "[S7g] 门不可用恒红：解释器缺失（rc=127）即使 allow_contract=true ⇒ fail"
+seed_baseline
+write_mig "0099_sbx_bad_drop.py" "" 'op.execute("DROP TABLE demo_t")'
+mv "$ROOT/shared/venv/bin/python" "$ROOT/shared/venv/bin/python.s7g-bak"
+run_release "$R_NEW" -e allow_contract=true -e 'contract_reason=S7g 调试期豁免（门不可用须恒红）' >"$LOGDIR/s7g.log" 2>&1
+S7G=$?
+mv "$ROOT/shared/venv/bin/python.s7g-bak" "$ROOT/shared/venv/bin/python"   # 恢复，不留残沙
+echo "  rc=$S7G（期望非零——封闭式补集：127 不在放行集）"
+[ $S7G -ne 0 ] || FAILED=$((FAILED + 1))
+[ $S7G -ne 0 ] && scenario_row 7g "门不可用恒红" "非零" "$S7G" "PASS（rc=127 恒红）" || scenario_row 7g "门不可用恒红" "非零" "$S7G" "FAIL（逃生门越界豁免了门崩溃！）"
+
 # ---------- 汇总 ----------
 echo
 echo "=============================================================="
-echo " 六场景汇总（断言 ansible-playbook 退出码 + 场景态断言）"
+echo " 场景汇总（断言 ansible-playbook 退出码 + 场景态断言）"
 echo "=============================================================="
 printf '%-4s %-18s %-10s %-8s %s\n' "编号" "场景" "期望" "实际" "判定"
 for row in "${ROWS[@]}"; do echo "$row"; done

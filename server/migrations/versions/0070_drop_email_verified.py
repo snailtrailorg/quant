@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="用户裁定连库删；列本无信息量"
 """users 删 email_verified 列（批11 用户裁定③：连库列一起删）。
 
 邮箱验证流程从未启用（邀请制开通即置 true，无独立验证链路），列纯冗余。

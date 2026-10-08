@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: phase=contract pair=0116
 """批 83a：external_interface 拆表 —— **contract 步**（DROP 旧表，收口两步走）。
 
 **承 0116（expand 步）**：0116 已建 `data_source` + `trading_account`、搬迁（原 id）、FK 重指，

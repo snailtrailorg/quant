@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="2026-08-07 纪律之前；无配对 expand 迁移"
 """LLM 网关简化：移除 llm_model_config.tier + feishu_config.lang（2026-08-07）
 
 - llm_model_config.tier：死代码（6 调用点全 regular），改 priority 全局主备容灾

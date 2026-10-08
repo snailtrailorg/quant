@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="建新表与删旧表同迁移＝单步合并"
 """批55a：external_interface 表（方案一 v2 终裁——行=账号/列=能力/页签=过滤视图）。
 
 合并 data_source_config + broker_config（27 号架构文档；批43 channel_config 同版 drop 先例）。

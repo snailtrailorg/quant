@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="批 70；建表(0107)与退役同批"
 """批 70：M6 账号切换退役（D26 账号级拓扑下切换语义不成立——2026-09-27 用户裁定）。
 
 - drop trade_switch_session（0107 建）+drop routing_policy.trade_switch_confirm_timeout_s（0093 建）

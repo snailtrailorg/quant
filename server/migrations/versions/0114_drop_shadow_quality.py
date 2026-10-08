@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="批 79；建表(0110)与退役同批"
 """批 79：删除 shadow 对账（同源自检无意义）——DROP shadow_policy / shadow_diff 表。
 
 shadow 行情主备对账（主源 bar_1D vs 备源 Tushare 现拉，底层同源 pro.daily）整体删除，

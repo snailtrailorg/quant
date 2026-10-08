@@ -1,0 +1,325 @@
+"""migration_policy.py 单元测试（批 111 产出 5·test_migration_policy）。
+
+纯函数级：判定分类 / 显式排除真生效 / 声明解析 / upgrade 段截断 /
+受管集内容指纹 / CLI 退出码 0/1/2/3 / 清单反向校验（守卫自身的守卫）。
+不连 DB、不跑迁移。
+"""
+from __future__ import annotations
+
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from src.data_platform.migration_policy import (
+    EXPLICIT_EXCLUSIONS,
+    ROLLBACK_UNSAFE_PATTERNS,
+    check_release,
+    evaluate,
+    managed_set,
+    parse_declaration,
+    scan_unsafe_lines,
+    scan_upgrade_section,
+)
+
+_MODULE = Path(__file__).resolve().parents[1] / "src" / "data_platform" / "migration_policy.py"
+_VERSIONS = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+
+
+def _mig(decl: str = "", upgrade: str = 'op.execute("SELECT 1")') -> str:
+    head = f'{decl}\n"""docstring 保持成立"""\n' if decl else '"""docstring"""\n'
+    return (
+        head
+        + 'revision = "0099"\n\n\n'
+        + "def upgrade() -> None:\n    from alembic import op\n\n    "
+        + upgrade
+        + "\n\n\ndef downgrade() -> None:\n    pass\n"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 判定分类
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        'op.execute("DROP TABLE old_t")',
+        'op.execute("DROP COLUMN c")',
+        'op.execute("DROP INDEX idx")',
+        'op.execute("ALTER TABLE t ALTER COLUMN c TYPE varchar(8)")',
+        "op.drop_table('t')",
+        "op.drop_column('t', 'c')",
+        "op.drop_index('ix')",
+        "op.alter_column('t', 'c', type_=sa.String(8))",
+        "op.alter_column('t', 'c', existing_type=sa.Integer(), new_column_name='c2')",
+        'op.execute("ALTER TABLE t RENAME COLUMN a TO b")',
+        'op.execute("ALTER TABLE t RENAME TO t2")',
+        "op.rename_table('t', 't2')",
+    ],
+)
+def test_rollback_unsafe_ops_hit(body: str) -> None:
+    hits = scan_unsafe_lines(_mig(upgrade=body))
+    assert hits, f"须命中: {body}"
+    kind, why = hits[0][1], hits[0][2]
+    assert kind and why  # 类别与「为何危险」齐备
+
+
+def test_renames_hit_not_silent() -> None:
+    """RENAME 三形态全命中——2026-09-24 生产分裂事故当事 op 不得再是盲区。"""
+    for body in (
+        "op.alter_column('t', 'c', new_column_name='c2')",
+        'op.execute("ALTER TABLE t RENAME COLUMN a TO b")',
+        "op.rename_table('a', 'b')",
+    ):
+        assert scan_unsafe_lines(_mig(upgrade=body)), body
+
+
+# ---------------------------------------------------------------------------
+# 显式排除（真消费——宽口径先命中、排除后洗白；删任一条 ⇒ 对应形态变红，见反证钉⑤）
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "op.drop_constraint('ck_x', 't', type_='check')",  # 0116/0062 upgrade 段实例
+        'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x")',
+        'op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 0")',  # 0095 实例
+    ],
+)
+def test_explicit_exclusions_whitelist(body: str) -> None:
+    assert scan_unsafe_lines(_mig(upgrade=body)) == [], body
+
+
+def test_exclusion_is_consumed_not_decorative() -> None:
+    """排除项必须「先有宽命中、后被洗白」——若宽口径根本不匹配 drop_constraint，
+    排除项即装饰。验证：把 EXPLICIT_EXCLUSIONS 清空后 drop_constraint 会命中。"""
+    body = "op.drop_constraint('ck_x', 't', type_='check')"
+    assert not scan_unsafe_lines(_mig(upgrade=body))
+    saved = EXPLICIT_EXCLUSIONS
+    try:
+        import src.data_platform.migration_policy as mp
+
+        mp.EXPLICIT_EXCLUSIONS = tuple()
+        assert scan_unsafe_lines(_mig(upgrade=body)), "排除项清空后必须变红（排除被真消费）"
+    finally:
+        import src.data_platform.migration_policy as mp
+
+        mp.EXPLICIT_EXCLUSIONS = saved
+
+
+# ---------------------------------------------------------------------------
+# 声明解析 / 段截断
+# ---------------------------------------------------------------------------
+
+def test_parse_declaration_forms() -> None:
+    d = parse_declaration('# EXPAND-CONTRACT: phase=expand pair=0122\n"""x"""\n')
+    assert d == {"phase": "expand", "pair": "0122", "legacy": False, "reason": None}
+    d = parse_declaration('# EXPAND-CONTRACT: legacy reason="早期实例"\n"""x"""\n')
+    assert d["legacy"] is True and d["reason"] == "早期实例" and d["phase"] is None
+    d = parse_declaration('"""无声明"""\n')
+    assert d["phase"] is None and d["legacy"] is False
+
+
+def test_scan_upgrade_section_truncates() -> None:
+    """downgrade 段内的破坏性 op 是合法回滚路径——不得命中。"""
+    text = (
+        '"""x"""\ndef upgrade() -> None:\n    op.drop_table("t")\n\n\n'
+        'def downgrade() -> None:\n    op.drop_table("t")\n'
+    )
+    seg = scan_upgrade_section(text)
+    assert "def downgrade" not in seg
+    hits = scan_unsafe_lines(text)
+    assert len(hits) == 1 and "upgrade" not in hits[0][3]
+
+
+def test_missing_downgrade_reads_to_eof() -> None:
+    text = '"""x"""\ndef upgrade() -> None:\n    op.drop_table("t")\n'
+    assert scan_unsafe_lines(text), "缺 def downgrade 时截到文件尾（仍命中）"
+
+
+def test_no_upgrade_no_hit() -> None:
+    assert scan_unsafe_lines('"""x"""\nrevision="0099"\n') == []
+
+
+# ---------------------------------------------------------------------------
+# 受管集（内容指纹差集，非文件名差集——复审 P1-6）
+# ---------------------------------------------------------------------------
+
+def _write(p: Path, text: str) -> None:
+    p.write_text(text, encoding="utf-8")
+
+
+def test_managed_set_content_hash(tmp_path: Path) -> None:
+    new, prev = tmp_path / "new", tmp_path / "prev"
+    new.mkdir()
+    prev.mkdir()
+    base = _mig()
+    _write(prev / "0001_a.py", base)
+    _write(new / "0001_a.py", base + "\n# 内容变更\n")  # 同名就地改 ⇒ 必须落网
+    managed, _ = managed_set(new, prev)
+    assert managed == ["0001_a.py"]
+
+
+def test_managed_set_new_and_unchanged(tmp_path: Path) -> None:
+    new, prev = tmp_path / "new", tmp_path / "prev"
+    new.mkdir()
+    prev.mkdir()
+    base = _mig()
+    _write(prev / "0001_a.py", base)
+    _write(new / "0001_a.py", base)  # 未变 ⇒ 不受管
+    _write(new / "0002_b.py", base)  # 新增 ⇒ 受管
+    managed, _ = managed_set(new, prev)
+    assert managed == ["0002_b.py"]
+
+
+def test_managed_set_undeterminable(tmp_path: Path) -> None:
+    new = tmp_path / "new"
+    new.mkdir()
+    _write(new / "0001_a.py", _mig())
+    managed, _note = managed_set(new, None)
+    assert managed is None  # 首部署 ⇒ 不可判定（部署门 rc=3）
+    managed, _note = managed_set(new, tmp_path / "nope")
+    assert managed is None  # prev 无效 ⇒ 不可判定
+
+
+# ---------------------------------------------------------------------------
+# evaluate 契约（含 pair 锚定已部署链——同发布捆绑拒）
+# ---------------------------------------------------------------------------
+
+def _pair_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    new, prev = tmp_path / "new", tmp_path / "prev"
+    new.mkdir()
+    prev.mkdir()
+    expand = _mig('# EXPAND-CONTRACT: phase=expand pair=0099')
+    contract = _mig(
+        '# EXPAND-CONTRACT: phase=contract pair=0098',
+        upgrade='op.execute("DROP TABLE old_t")',
+    )
+    _write(prev / "0098_e.py", expand)
+    _write(new / "0098_e.py", expand)
+    _write(new / "0099_c.py", contract)
+    return new, prev
+
+
+def test_contract_pair_deployed_ok(tmp_path: Path) -> None:
+    new, prev = _pair_fixture(tmp_path)
+    ok, why = evaluate(new / "0099_c.py", new, prev)
+    assert ok and "已上产" in why
+
+
+def test_contract_bundled_with_expand_rejected(tmp_path: Path) -> None:
+    """同发布捆绑（expand 未上产）⇒ 拒——两步走的定义就是跨发布（产出 6 边界②）。"""
+    new, prev = _pair_fixture(tmp_path)
+    (prev / "0098_e.py").unlink()  # expand 只存在于本版 ⇒ 未上产
+    ok, why = evaluate(new / "0099_c.py", new, prev)
+    assert not ok and "跨发布" in why
+
+
+def test_expand_with_hit_rejected(tmp_path: Path) -> None:
+    new, _ = _pair_fixture(tmp_path)
+    bad = _mig('# EXPAND-CONTRACT: phase=expand pair=0099',
+               upgrade='op.execute("DROP TABLE old_t")')
+    _write(new / "0097_bad.py", bad)
+    ok, why = evaluate(new / "0097_bad.py", new, new)
+    assert not ok and "expand" in why
+
+
+def test_undeclared_hit_rejected(tmp_path: Path) -> None:
+    new, prev = _pair_fixture(tmp_path)
+    bad = _mig(upgrade='op.execute("DROP TABLE old_t")')
+    _write(new / "0096_bad.py", bad)
+    ok, why = evaluate(new / "0096_bad.py", new, prev)
+    assert not ok and "未声明" in why
+
+
+def test_legacy_hit_rejected_singly(tmp_path: Path) -> None:
+    new, prev = _pair_fixture(tmp_path)
+    bad = _mig('# EXPAND-CONTRACT: legacy reason="历史"', upgrade='op.execute("DROP TABLE old_t")')
+    _write(new / "0095_bad.py", bad)
+    ok, why = evaluate(new / "0095_bad.py", new, prev)
+    assert not ok and "legacy" in why
+
+
+# ---------------------------------------------------------------------------
+# check_release / CLI 退出码
+# ---------------------------------------------------------------------------
+
+def test_check_release_rc_matrix(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    new, prev = _pair_fixture(tmp_path)
+    rc, lines = check_release(new, prev)
+    assert rc == 0 and capsys.readouterr()  # 首行=受管统计
+
+    rc, lines = check_release(tmp_path / "empty_none", None)
+    assert rc == 2  # 新目录不存在 ⇒ 内部错
+
+    (tmp_path / "empty_new").mkdir()
+    rc, _lines = check_release(tmp_path / "empty_new", None)
+    assert rc == 3  # 无上一版 ⇒ 不可判定
+
+
+def test_check_release_reject_has_interface_line(tmp_path: Path) -> None:
+    """rc=1 时 stdout 必含 `✗ 破坏性 DDL 命中: <file>`——S2/S7 沙箱判据接口。"""
+    new, prev = _pair_fixture(tmp_path)
+    _write(new / "0095_bad.py", _mig(upgrade='op.execute("DROP TABLE old_t")'))
+    rc, lines = check_release(new, prev)
+    assert rc == 1
+    joined = "\n".join(lines)
+    assert re.search(r"✗ 破坏性 DDL 命中: 0095_bad\.py", joined)
+
+
+def _run_cli(*args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        [sys.executable, str(_MODULE), *args], capture_output=True, check=False
+    )
+
+
+def test_cli_exit_codes(tmp_path: Path) -> None:
+    new, prev = _pair_fixture(tmp_path)
+    assert _run_cli("--check-release", str(new), str(prev)).returncode == 0
+    _write(new / "0095_bad.py", _mig(upgrade='op.execute("DROP TABLE old_t")'))
+    r = _run_cli("--check-release", str(new), str(prev))
+    assert r.returncode == 1 and "破坏性 DDL 命中" in r.stdout.decode()
+    assert _run_cli("--check-release", str(tmp_path / "nope")).returncode == 2
+    assert _run_cli().returncode == 2  # 缺子命令 ⇒ 用法错（argparse 天然 2）
+    assert _run_cli("--check-release", str(tmp_path)).returncode == 3  # 空目录 + 无 prev
+
+
+# ---------------------------------------------------------------------------
+# 清单反向校验（照 test_exempt_entries_are_live_and_reasoned 先例）
+# ---------------------------------------------------------------------------
+
+_CORPUS = [
+    "DROP TABLE t",
+    "op.drop_table('t')",
+    "op.drop_column('t', 'c')",
+    "op.drop_index('ix')",
+    "ALTER TABLE t ALTER COLUMN c TYPE varchar(8)",
+    "op.alter_column('t', 'c', type_=None)",
+    "op.alter_column('t', 'c', new_column_name='x')",
+    "ALTER TABLE t RENAME COLUMN a TO b",
+    "ALTER TABLE t RENAME TO x",
+    "op.rename_table('a', 'b')",
+]
+
+
+@pytest.mark.parametrize("idx", range(len(list(ROLLBACK_UNSAFE_PATTERNS))))
+def test_unsafe_patterns_live_and_reasoned(idx: int) -> None:
+    rx, kind, why = ROLLBACK_UNSAFE_PATTERNS[idx]
+    assert any(re.search(rx, c) for c in _CORPUS), \
+        f"判定表第 {idx} 条在语料上零命中（陈旧清单）: {rx}"
+    assert kind and len(why) >= 8, f"第 {idx} 条缺类别或「为何危险」: {rx}"
+
+
+@pytest.mark.parametrize("idx", range(len(EXPLICIT_EXCLUSIONS)))
+def test_exclusion_patterns_live_and_reasoned(idx: int) -> None:
+    rx, why = EXPLICIT_EXCLUSIONS[idx]
+    corpus = [
+        "ALTER TABLE t DROP CONSTRAINT ck",
+        "op.drop_constraint('ck', 't', type_='check')",
+        "ALTER TABLE t ALTER COLUMN c SET DEFAULT 0",
+    ]
+    assert any(re.search(rx, c) for c in corpus), f"排除表第 {idx} 条零命中（陈旧）: {rx}"
+    assert len(why) >= 8, f"排除表第 {idx} 条缺理由: {rx}"

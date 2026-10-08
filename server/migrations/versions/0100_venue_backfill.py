@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="add(0099)+回填+DROP 同批，未跨发布"
 """多账号源 D2 段2：venue_id 回填 + 约束（NOT NULL/FK/PK 改键/删 account_id）。
 
 回填规则（pre-D2 单账户 → 全映射到「默认 venue」= min 交易域 id）：

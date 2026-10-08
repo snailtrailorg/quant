@@ -7,7 +7,7 @@
 # 结构（设计稿 §3）:
 #   pre_tasks  —— preflight 断言（交易窗口/磁盘/rsync/四切片指纹采集）+ release_id 校验
 #                 + 特权 wrapper 在位（v3.3: quant-dbro/quant-pinned）
-#   阶段 2-5   —— block（未切换）: synchronize/导入冒烟/DDL 门/pip/迁移；rescue=清 staged+fail
+#   阶段 2-5   —— block（未切换）: synchronize/导入冒烟/DDL 门（恒跑，判定真源=migration_policy.py）/pip/迁移；rescue=清 staged+fail
 #   阶段 6-8   —— block（已切换）: flip/单元安装/波次/postverify；rescue=include rollback+fail
 #   post_tasks —— 仅成功路径可达: 已切换标记/freeze 滚动/GC（孤儿 staged+保留 N=5）
 #
@@ -31,6 +31,18 @@
       ansible.builtin.assert:
         that: release_id is match(deploy_release_id_regex)
         msg: "release_id 非法: {{ release_id }}（须 {{ deploy_release_id_regex }}）"
+
+    # 批 111：逃生门（allow_contract）降级为「只取消 rc=1 的阻断、不能免检」，且须是声明——
+    # 缺 contract_reason ⇒ preflight 直接 fail（把「裸开关」变成「带理由的声明」）。
+    # 无条件执行（allow_contract 与否都跑）；reason 为 honorsystem 声明，只校验非空（W6 第 3 条）。
+    - name: preflight —— allow_contract 必须带 contract_reason（批 111：旁路须是声明）
+      ansible.builtin.assert:
+        that:
+          - not (allow_contract | default(false) | bool) or ((contract_reason | default('')) | length > 0)
+        msg: >-
+          allow_contract=true 须同时带 -e contract_reason="<文本>"（调试期显式豁免阻断的声明，
+          留痕落 var/ddl-gate-bypassed-<release_id>.txt；见批 111 🔖）。裸开关已废除——门恒跑，
+          逃生门只能取消「命中」的阻断，不能取消检测。
 
     - name: preflight —— 当前时刻采集（TZ=Asia/Shanghai 显式；deploy_fake_now 供确定性测试，格式 uHHMM）
       ansible.builtin.shell: |
@@ -358,39 +370,51 @@
           changed_when: true
           when: server_changed | bool   # 批 8：src 同内容=导入结果必然与上一版相同
 
-        - name: 阶段 4 —— 本版新增迁移的破坏性 DDL 门（新增=staged 与上一版的 versions/ 目录 diff，实现注记①）
+        # 批 111：门恒跑（检测不被任何旗标跳过）——判定单一真源＝release 树自带的
+        # src/data_platform/migration_policy.py（判定表+受管集唯一实现）；bash 零判定、
+        # 零映射、纯转发（退出码原样上浮）。0=放行 / 1=命中拒 / 2=用法或内部错 / 3=不可判定
+        # （无上一版=首部署）。failed_when 用封闭式补集（枚举「不 fail 的集合」）：
+        # rc=0 / rc=3 / (rc=1 且 allow_contract) 之外的一切码（2/126/127/137…）恒红——
+        # 逃生门只能取消「命中」的阻断，门不可用在任何情形下都必须亮红（三审 P0-α）。
+        - name: 阶段 4 —— 本版新增迁移的破坏性 DDL 门（判定真源＝src/data_platform/migration_policy.py；门恒跑——批 111）
           ansible.builtin.shell: |
             set -u
             rel='{{ deploy_root }}/releases/{{ release_id }}'
             prev=$(readlink -f '{{ deploy_root }}/server' 2>/dev/null || true)
-            a=$(mktemp); b=$(mktemp); trap 'rm -f "$a" "$b"' EXIT
-            ls -1 "$rel/migrations/versions" 2>/dev/null | sort > "$a"
-            if [ -n "$prev" ] && [ -d "$prev/migrations/versions" ]; then
-              ls -1 "$prev/migrations/versions" | sort > "$b"
-            else
-              : > "$b"                       # 无上一版（首次发布）：全部视为新增
-            fi
-            news=$(comm -23 "$a" "$b")
-            [ -z "$news" ] && { echo "（无新增迁移）"; exit 0; }
-            rc=0
-            while IFS= read -r f; do
-              # 双盲审修补: 先截 upgrade→downgrade 段再匹配（downgrade 的破坏性 DDL 是合法回滚路径，不拦）；
-              # 双形态正则——裸 SQL（op.execute("DROP TABLE/COLUMN"、"ALTER COLUMN ... TYPE"）+ pythonic（op.drop_* / alter_column type_）
-              hits=$(awk '/^def upgrade/,/^def downgrade/' "$rel/migrations/versions/$f" 2>/dev/null \
-                     | grep -nE 'DROP[[:space:]]+(TABLE|COLUMN)|ALTER[[:space:]]+COLUMN[^;]*TYPE|op\.(drop_table|drop_column|drop_index)|alter_column.*type_' \
-                     || true)
-              if [ -n "$hits" ]; then
-                echo "✗ 破坏性 DDL 命中: $f"
-                echo "$hits"
-                rc=1
-              fi
-            done <<< "$news"
-            exit $rc
+            '{{ deploy_root }}/shared/venv/bin/python' "$rel/src/data_platform/migration_policy.py" \
+              --check-release "$rel/migrations/versions" ${prev:+"$prev/migrations/versions"}
           register: ddl_gate
           changed_when: false
-          when: not (allow_contract | default(false) | bool)
+          failed_when: >
+            not (ddl_gate.rc == 0 or ddl_gate.rc == 3
+                 or (ddl_gate.rc == 1 and (allow_contract | default(false) | bool)))
 
-        - name: 阶段 4 —— allow_contract 显式标记（禁用自动清理/回滚，人工 runbook 接管）
+        - name: 阶段 4 —— 旁路告警（命中被 allow_contract 豁免阻断；门已检测，仅未阻断——告警/留痕分治，只有 rc=1 真命中才报）
+          ansible.builtin.debug:
+            msg: >-
+              ⚠ 破坏性 DDL 门命中但被 allow_contract 豁免阻断（reason={{ contract_reason | default('') }}）；
+              门已检测，仅未阻断；调试期显式豁免，见批 111 🔖。
+          changed_when: true
+          when: ddl_gate.rc == 1 and (allow_contract | default(false) | bool)
+
+        - name: 阶段 4 —— 首部署告警（无上一版，门不可判定跳过；该窗口 prod 侧无门覆盖）
+          ansible.builtin.debug:
+            msg: "⚠ 无上一版（首部署）——DDL 门跳过；该窗口 prod 侧无门覆盖"
+          changed_when: true
+          when: ddl_gate.rc == 3
+
+        # 人工审计留痕（无自动消费方——措辞诚实，不假装有自动闸门）。
+        # 落 var/ 不落 release 树：release 树受 deploy_keep_releases:5 GC，标记会被删（自相矛盾）。
+        - name: 阶段 4 —— 旁路留痕落盘（var/ddl-gate-bypassed-<release_id>.txt；人工审计留痕）
+          ansible.builtin.copy:
+            content: >-
+              allow_contract by "{{ contract_reason | default('') }}" @ {{ lookup('pipe', 'TZ=Asia/Shanghai date +%F_%T') }}；
+              ddl_rc={{ ddl_gate.rc }}；命中=是
+            dest: "{{ deploy_root }}/var/ddl-gate-bypassed-{{ release_id }}.txt"
+            mode: "0644"
+          when: ddl_gate.rc == 1 and (allow_contract | default(false) | bool)
+
+        - name: 阶段 4 —— allow_contract 联动置 auto_rollback_disabled（安全捆绑保留——最小惊讶，批 111 产出 7）
           ansible.builtin.set_fact:
             auto_rollback_disabled: true
           when: allow_contract | default(false) | bool
@@ -424,7 +448,7 @@
           # （备份恢复/人工 stamp 后指纹一致也会自愈到 head；migrations 同内容=空跑）
 
       rescue:
-        - name: rescue(2-5) —— 清理 staged（allow_contract 时保留供人工处置）
+        - name: rescue(2-5) —— 清理 staged（auto_rollback_disabled 时保留供人工处置）
           ansible.builtin.file:
             path: "{{ deploy_root }}/releases/{{ release_id }}"
             state: absent
@@ -436,7 +460,8 @@
               发布中止于未切换阶段（staged 已清理，线上未触碰除 venv 依赖追加——见部署日志）。
               失败任务: {{ ansible_failed_task.name | default('(rescue 内失败)') }}
               {% if auto_rollback_disabled | default(false) | bool %}
-              【allow_contract=true：staged 保留于 releases/{{ release_id }}/，人工 runbook 接管】{% endif %}
+              【auto_rollback_disabled=true：staged 保留于 releases/{{ release_id }}/，人工 runbook 接管
+              （来源：allow_contract 联动或显式 -e，批 111 产出 7）】{% endif %}
 
     # ================= 阶段 6-8：已切换（rescue=自动回滚 + fail） =================
     - name: 阶段 6-8（已切换）
@@ -623,13 +648,26 @@
 
         - name: rescue(6-8) —— 自动回滚（flip 回上一版 + 重启受影响波 + 复验 + freeze diff）
           include_tasks: rollback-tasks.yml
-          when: (prev_release_id | default('')) | length > 0
+          # 批 111 产出 7：auto_rollback_disabled 独立化——禁用自动回滚须名副其实（allow_contract
+          # 联动置位或显式 -e 均生效）；prev 为空（首发布）本就无可回滚。
+          when: >-
+            (prev_release_id | default('')) | length > 0
+            and not (auto_rollback_disabled | default(false) | bool)
 
-        - name: rescue(6-8) —— 回滚收尾（非零退出+告警；schema 已前进不回滚——expand-only 前提经 DDL 门保证）
+        - name: rescue(6-8) —— 回滚收尾（非零退出+告警；回滚与否看 auto_rollback_disabled、门豁免与否看 allow_contract——两语义不互替，批 111 P1-c）
           ansible.builtin.fail:
             msg: >-
-              发布失败已自动回滚（代码已回旧版；schema 已前进不回滚——expand-only 前提经 DDL 门保证）。
+              {% if auto_rollback_disabled | default(false) | bool %}
+              发布失败（本版已禁用自动回滚——未回滚）。
+              {% else %}
+              发布失败已自动回滚（代码已回旧版）。
+              {% endif %}
               失败任务: {{ ansible_failed_task.name | default('(rescue 内失败)') }}
+              {% if ddl_gate is defined and ddl_gate.rc is defined and ddl_gate.rc == 1 and (allow_contract | default(false) | bool) %}
+              【门命中但被 allow_contract 豁免阻断——无 expand-only 保证】
+              {% else %}
+              （expand-only 前提经 DDL 门恒跑检测保证）
+              {% endif %}
               {% if (prev_release_id | default('')) | length == 0 %}
               【首次发布无上一版可回滚——人工处置】{% endif %}
               【告警：3b 接通知中心】

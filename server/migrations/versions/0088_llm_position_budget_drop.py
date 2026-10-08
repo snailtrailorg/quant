@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="存量物化与 DROP 同迁移内完成＝单步"
 """批50：LLM 模型页重构——position 接管 priority（拖拽行序=优先级）+预算链彻底退役（DROP llm_budget）。
 
 用户裁定（2026-09-18）：①priority DROP（发布走 allow_contract 通道——批11A 先例）②预算告警彻底停

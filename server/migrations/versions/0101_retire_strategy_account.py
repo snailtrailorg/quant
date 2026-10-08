@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="建表与退役同批未跨发布（D2 段 3）"
 """多账号源 D2 段3：strategy_account 退役（venue 化收编——身份线统一）。
 
 - initial_capital → per-venue 资金基线（首条快照 total_value，_account_baseline_capital 已实现）

@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="纪律之前；rename 类早期实例"
 """LLM token 限制：加 max_input_tokens（程序控制输入上限）+ 改名 max_tokens -> max_output_tokens（API 输出参数）
 
 - max_input_tokens：输入上限，gateway 估算 token + 截断（程序控制，不传 API）

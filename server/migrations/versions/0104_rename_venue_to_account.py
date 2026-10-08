@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="2026-09-24 事故当事人；门当时看不见 rename，本批已把 rename 纳入判定"
 """术语正名：venue → account（账号语义）+ exchange（交易所语义仅注释归位，无 DDL）。
 
 D1-D6 的 venue 概念 = 交易账号（external_interface 行），行业主流叫 account

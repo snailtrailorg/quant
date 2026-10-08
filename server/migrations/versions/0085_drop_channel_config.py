@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: legacy reason="批 38/39 代码侧退役，无迁移型 expand"
 """批39：channel_config 表 drop（死码连根——用户裁定）。
 
 webhook 推送链整体退役（Channels UI 批38 删/端点+channel.py 批39 删），表零读者。
