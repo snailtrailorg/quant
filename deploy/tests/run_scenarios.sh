@@ -514,6 +514,18 @@ echo "  rc=$S7M（期望非零——SET DEFAULT 豁免不得吃掉同语句的 T
 grep -q "破坏性 DDL 命中" "$LOGDIR/s7m.log" && echo "  ✓ 单 action 收窄判据在案" || { echo "  ✗ 未捕获（贪婪跨分隔符复活？）"; FAILED=$((FAILED + 1)); }
 [ $S7M -ne 0 ] && scenario_row 7m "排除项跨分隔符" "非零" "$S7M" "PASS" || scenario_row 7m "排除项跨分隔符" "非零" "$S7M" "FAIL（排除项吃掉了同语句的破坏性 action！）"
 
+echo "[S7n] 排除项须保留 ALTER COLUMN 锚点：SET DEFAULT 后的并列 TYPE ⇒ rc=1（P1-G 减法残留洞）"
+seed_baseline
+# ⚠ 摘除 SET DEFAULT 时若连 `ALTER COLUMN` 锚点一起删 ⇒ 残句失配 ⇒ TYPE 变更静默放行。
+write_mig "0099_sbx_anchor_lost.py" "" \
+  'op.execute("ALTER TABLE demo_t ALTER COLUMN payload SET DEFAULT 1 , TYPE varchar(8)")'
+run_release "$R_NEW" >"$LOGDIR/s7n.log" 2>&1
+S7N=$?
+echo "  rc=$S7N（期望非零——锚点保留后并列 TYPE 仍须命中）"
+[ $S7N -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "破坏性 DDL 命中" "$LOGDIR/s7n.log" && echo "  ✓ 锚点保留判据在案" || { echo "  ✗ 未捕获（锚点被摘除？）"; FAILED=$((FAILED + 1)); }
+[ $S7N -ne 0 ] && scenario_row 7n "锚点保留" "非零" "$S7N" "PASS" || scenario_row 7n "锚点保留" "非零" "$S7N" "FAIL（SET DEFAULT 摘除吃掉了并列 TYPE！）"
+
 # ---------- 汇总 ----------
 echo
 echo "=============================================================="
