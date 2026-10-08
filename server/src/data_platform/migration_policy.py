@@ -3,8 +3,10 @@
 
 ## 职责（只有这一个实现，别处不得复刻判定逻辑）
 
-1. **判定表**：upgrade 段内的回滚安全类 op（宽口径命中）+ 显式排除（真消费——
-   宽口径先命中、排除项后洗白，删除任一排除项都会让对应迁移变红，见闸门反证钉⑤）。
+1. **判定表**：upgrade 段内的回滚安全类 op（宽口径命中）+ 显式排除（**减法**——摘除被豁免
+   片段后残句再匹配，豁免的是**形态**而非整语句）。反证钉⑤（删 `DROP CONSTRAINT` 两形态 ⇒
+   0116/0062 变红）对**第 1/2 条**成立；**第 3 条**（`SET DEFAULT`）是**前瞻性声明**——当前
+   判定表不命中该形态（删之全仓零变化），判定表扩展后即生效（实测见复审二同判 C3）。
 2. **声明解析**：文件第 1 行 `# EXPAND-CONTRACT: ...`。
 3. **受管集**：本版相对上一已部署版「新增 ∪ 内容变更」的迁移（sha256 指纹差集，
    非文件名差集——同名就地改同样落网，复审 P1-6）。
@@ -35,9 +37,12 @@ import ...` 导入，也被部署门当独立脚本跑（目标机 `shared/venv/
 
 - 只扫 `def upgrade` → `def downgrade` 段（downgrade 是合法回滚路径，不拦）；缺
   `def downgrade` 时截到文件尾。
-- **排除判定＝「剥行内注释 → 按 `;` 切分语句 → 逐语句豁免」**（步 4 P1-a）：不再整行赦免，
-  故「破坏性 op 与 `DROP CONSTRAINT` 同行/同注」不会静默放行。残留：`;` 落在**字符串字面量
-  内**的多语句 SQL 会被切碎——无害（碎片仍各自匹配，破坏性 op 仍被捕获）。
+- **排除判定＝「剥行内注释 → 按 `;` 切分语句 → 逐语句**减法**（摘除被豁免片段 → 残句再匹配）」**
+  （步 4 P1-a 收窄到语句级；复审轮二 P0-C 再收窄到**片段级**）：不再整行/整句赦免 ⇒ 破坏性
+  op 与排除项同行 / 同注 / 逗号并列 action 都不会被洗白。残留：
+  ① `;` 落在**字符串字面量内**的多语句 SQL 会被切碎——无害（碎片仍各自匹配，破坏性 op 仍被捕获）；
+  ② **SQL 行内注释（`--` / `/* */`）位于字符串字面量内 ⇒ 不剥、参与匹配**（fail-closed：注释里
+  出现判定表关键词会误报红，方向安全）。
 - 迁移文件视为不可变：`check_release` 对**冻结 legacy** 另比 `upgrade` 段与**上一已部署版**
   逐字一致（防「改已部署迁移的函数体」）。**逐字＝含注释与空白**（改一个字符即拒——
   fail-closed 方向，非假红）。残留：**`downgrade` 段与 docstring** 不参与该比对
@@ -190,12 +195,13 @@ def _strip_comment(line: str) -> str:
 def scan_unsafe_lines(text: str) -> list[tuple[int, str, str, str]]:
     """upgrade 段内的回滚安全类命中。
 
-    行内算法：**先剥行内注释（字符串外的 `#`），再按 `;` 切分语句，逐语句**先求显式排除
-    （该语句被豁免则跳过），否则匹配宽口径 unsafe。**不再整行赦免**（步 4 同判 P1-a：
-    与排除项同行/同注的破坏性 op 不得静默放行）。
+    行内算法：**先剥行内注释（字符串外的 `#`），再按 `;` 切分语句，逐语句**先做显式排除的
+    **减法**（摘除被豁免片段），再对**残句**匹配宽口径 unsafe。**既不整行、也不整句赦免**
+    （步 4 同判 P1-a：语句级；复审轮二 P0-C：片段级）——与排除项同行/同注/逗号并列的破坏性
+    op 不得静默放行。
 
     判定表与排除表**一律按 `_MATCH_FLAGS`（`re.IGNORECASE`）匹配**（步 4 复审轮② P0-B）。
-    返回 [(行号(1-based, 全文坐标), 类别, 危险说明, 命中语句文本)]。
+    返回 [(行号(1-based, 全文坐标), 类别, 危险说明, 命中语句文本（**原始**语句，非残句）)]。
     """
     seg = scan_upgrade_section(text)
     if not seg:
@@ -210,14 +216,20 @@ def scan_unsafe_lines(text: str) -> list[tuple[int, str, str, str]]:
         if not code:
             continue
         for stmt in code.split(";"):
-            s = stmt.strip()
-            if not s:
+            raw = stmt.strip()
+            if not raw:
                 continue
-            if any(re.search(rx, s, _MATCH_FLAGS) for rx, _ in EXPLICIT_EXCLUSIONS):
-                continue  # 该**语句**被豁免（非整行）
+            # P0-C：排除项按**减法**处理——只摘除被豁免的**片段**，再对残句匹配判定表。
+            # 旧实现「语句含排除项关键词 ⇒ 整句跳过」：关键词出现在 SQL 注释（`--`/`/* */`）
+            # 或逗号并列的其它 action 中时，同语句的破坏性 op 被**静默洗白**——且是本轮
+            # `re.IGNORECASE` 引入的**回归**（`DROP TABLE old_t -- drop constraint later`
+            # 旧命中 1 ⇒ 新 0）。豁免的是**形态**，不是**语句**（规范 §1.3）。
+            s = raw
+            for rx, _ in EXPLICIT_EXCLUSIONS:
+                s = re.sub(rx, " ", s, flags=_MATCH_FLAGS)
             for rx, kind, why in ROLLBACK_UNSAFE_PATTERNS:
                 if re.search(rx, s, _MATCH_FLAGS):
-                    out.append((seg_start_line + off, kind, why, s))
+                    out.append((seg_start_line + off, kind, why, raw))
                     break
     return out
 

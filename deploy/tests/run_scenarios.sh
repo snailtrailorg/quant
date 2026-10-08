@@ -316,7 +316,7 @@ check "S6b: 快车道零删除（基线与上一发布版原样保留——被�
   bash -c "test -d '$ROOT/releases/$R_BASE' && test -d '$ROOT/releases/$R_NEW'"
 [ $S6B -eq 0 ] && scenario_row 6 "同内容再发布" "零" "$S6B" "PASS（units_changed=false）" || scenario_row 6 "同内容再发布" "零" "$S6B" "FAIL"
 
-# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，十一例） ----------
+# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，十二例） ----------
 # 道具生成器：write_mig <文件名> <首行声明（可空）> <upgrade 体> [目标目录，默认 STAGE]
 write_mig() {
   local fname=$1 decl=$2 body=$3 dest=${4:-$STAGE/migrations/versions}
@@ -488,6 +488,18 @@ echo "  rc=$S7K（期望非零——小写 SQL 与大写同判）"
 [ $S7K -ne 0 ] || FAILED=$((FAILED + 1))
 grep -q "破坏性 DDL 命中" "$LOGDIR/s7k.log" && echo "  ✓ 小写 SQL 命中判据在案" || { echo "  ✗ 未捕获小写 SQL 命中"; FAILED=$((FAILED + 1)); }
 [ $S7K -ne 0 ] && scenario_row 7k "小写SQL" "非零" "$S7K" "PASS" || scenario_row 7k "小写SQL" "非零" "$S7K" "FAIL（小写破坏性 SQL 静默放行！）"
+
+echo "[S7l] 排除项不得整句赦免：DROP TABLE 后跟注释里的 drop constraint ⇒ rc=1（P0-C：豁免的是形态非语句）"
+seed_baseline
+# ⚠ 本例是**回归钉**：re.IGNORECASE 之前小写 `drop constraint` 不匹配排除项 ⇒ 旧实现反而命中；
+#   加 re.I 后「语句含关键词即整句跳过」⇒ 由红变绿。门不得比修复前更弱。
+write_mig "0099_sbx_comment_wash.py" "" 'op.execute("DROP TABLE demo_t -- drop constraint later")'
+run_release "$R_NEW" >"$LOGDIR/s7l.log" 2>&1
+S7L=$?
+echo "  rc=$S7L（期望非零——注释/并列 action 中的排除项关键词不得洗白同语句的 DROP）"
+[ $S7L -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "破坏性 DDL 命中" "$LOGDIR/s7l.log" && echo "  ✓ 排除项减法判据在案" || { echo "  ✗ 未捕获（整句赦免复活？）"; FAILED=$((FAILED + 1)); }
+[ $S7L -ne 0 ] && scenario_row 7l "排除项整句赦免" "非零" "$S7L" "PASS" || scenario_row 7l "排除项整句赦免" "非零" "$S7L" "FAIL（排除项洗白了同语句的破坏性 op！）"
 
 # ---------- 汇总 ----------
 echo

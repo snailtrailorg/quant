@@ -457,6 +457,38 @@ def _frozen_fixture(tmp_path: Path, new_decl: str, tamper: bool) -> tuple[Path, 
     return new, prev
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        # P0-C：排除项关键词出现在**同一语句的其它位置**——不得整句赦免。
+        'op.execute("DROP TABLE old_t -- drop constraint later")',     # SQL 行内注释（本轮回归式）
+        'op.execute("DROP TABLE old_t /* drop constraint */")',        # 块注释
+        'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x, DROP COLUMN c")',       # 逗号并列 action
+        'op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 1, DROP COLUMN d")',
+        'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x, RENAME TO t2")',
+    ],
+)
+def test_exclusion_does_not_whitelist_whole_statement(body: str) -> None:
+    """P0-C（门）：规范 §1.3 豁免的是**形态**（`DROP CONSTRAINT` / `SET DEFAULT`），
+    不是**整语句**——关键词出现在注释或并列 action 中时，同语句的破坏性 op 仍须命中。
+
+    ⚠ 其中前两例是**本轮回归**：`re.IGNORECASE` 之前 `drop constraint`（小写）不匹配排除项
+    ⇒ 旧实现反而命中；加 re.I 后整句被豁免 ⇒ 由红变绿（门比修复前更弱）。
+    """
+    assert scan_unsafe_lines(_mig(upgrade=body)), f"排除项不得整句赦免: {body}"
+
+
+def test_exclusion_subtractive_keeps_true_exclusions(tmp_path: Path) -> None:
+    """减法不得误伤真排除形态（0116/0062/0095）——收窄只为闭合漏检，不是改判放宽类。"""
+    for body in (
+        'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x")',
+        "op.drop_constraint('ck_x', 't', type_='check')",
+        'op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 0")',
+    ):
+        assert scan_unsafe_lines(_mig(upgrade=body)) == [], body
+    _ = tmp_path
+
+
 def test_frozen_legacy_relabeled_contract_still_body_checked(tmp_path: Path) -> None:
     """P0-A（门）：冻结集 keying＝**文件名**，与声明解耦——重标 `phase=contract` 不得旁路
     「upgrade 段逐字一致」比对（旧实现读 `decl["legacy"]` ⇒ 实测 rc=0 放行）。"""
