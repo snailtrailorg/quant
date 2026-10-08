@@ -106,7 +106,12 @@ ROLLBACK_UNSAFE_PATTERNS: tuple[tuple[str, str, str], ...] = (
 EXPLICIT_EXCLUSIONS: tuple[tuple[str, str], ...] = (
     (r"DROP\s+CONSTRAINT", "放宽约束（删 CHECK/UNIQUE 不删数据）；不破坏旧代码读新 schema"),
     (r"op\.drop_constraint\s*\(", "同上（pythonic 形态；0116/0062 upgrade 段实例）"),
-    (r"ALTER\s+COLUMN[^;\n]*\bSET\s+DEFAULT\b", "元数据放宽（0095 实例：SET DEFAULT 可回退，无数据重写）"),
+    # ⚠ 必须写成**单 action 形态**（`ALTER COLUMN <列名> SET DEFAULT`，中间只允许一个标识符）：
+    #   写成 `[^;\n]*` 会贪婪跨越分隔符（逗号**与空格**）⇒ 把同一语句里排在它前后的另一个
+    #   §1.1 明列破坏性 action 一并摘除（P0-D，实测：`… ALTER COLUMN c TYPE int,
+    #   ALTER COLUMN d SET DEFAULT 1` ⇒ 0 命中；`… DROP COLUMN c set default 1` 同）。
+    (r"ALTER\s+COLUMN\s+\w+\s+SET\s+DEFAULT\b", "元数据放宽（0095 实例：SET DEFAULT 可回退，无数据重写）；"
+     "单 action 形态——豁免的只是一个 action，不得跨分隔符吃掉同一语句的其它 action"),
 )
 
 # ---------------------------------------------------------------------------

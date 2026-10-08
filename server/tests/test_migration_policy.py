@@ -466,6 +466,11 @@ def _frozen_fixture(tmp_path: Path, new_decl: str, tamper: bool) -> tuple[Path, 
         'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x, DROP COLUMN c")',       # 逗号并列 action
         'op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 1, DROP COLUMN d")',
         'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x, RENAME TO t2")',
+        # P0-D：排除项 #3 曾贪婪跨分隔符 ⇒ 吃掉同语句另一个 §1.1 明列 op
+        'op.execute("ALTER TABLE t ALTER COLUMN c TYPE int, ALTER COLUMN d SET DEFAULT 1")',
+        'op.execute("ALTER COLUMN c, set default 1, TYPE varchar(8)")',
+        'op.execute("ALTER COLUMN c DROP COLUMN c set default 1")',              # 空格分隔（无逗号）
+        'op.execute("ALTER COLUMN c RENAME TO t2 set default 1 -- drop constraint later")',
     ],
 )
 def test_exclusion_does_not_whitelist_whole_statement(body: str) -> None:
@@ -479,11 +484,13 @@ def test_exclusion_does_not_whitelist_whole_statement(body: str) -> None:
 
 
 def test_exclusion_subtractive_keeps_true_exclusions(tmp_path: Path) -> None:
-    """减法不得误伤真排除形态（0116/0062/0095）——收窄只为闭合漏检，不是改判放宽类。"""
+    """减法与收窄不得误伤真排除形态（0116/0062/0095）——收窄只为闭合漏检，不是改判放宽类。"""
     for body in (
         'op.execute("ALTER TABLE t DROP CONSTRAINT ck_x")',
         "op.drop_constraint('ck_x', 't', type_='check')",
         'op.execute("ALTER TABLE t ALTER COLUMN c SET DEFAULT 0")',
+        'op.execute("ALTER TABLE t ALTER COLUMN c set default 0")',        # 小写变体
+        'op.execute("ALTER TABLE tbl ALTER COLUMN dataset_version SET DEFAULT 2")',  # 0095 实际形态
     ):
         assert scan_unsafe_lines(_mig(upgrade=body)) == [], body
     _ = tmp_path

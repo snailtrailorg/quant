@@ -316,7 +316,7 @@ check "S6b: 快车道零删除（基线与上一发布版原样保留——被�
   bash -c "test -d '$ROOT/releases/$R_BASE' && test -d '$ROOT/releases/$R_NEW'"
 [ $S6B -eq 0 ] && scenario_row 6 "同内容再发布" "零" "$S6B" "PASS（units_changed=false）" || scenario_row 6 "同内容再发布" "零" "$S6B" "FAIL"
 
-# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，十二例） ----------
+# ---------- S7: 破坏性 DDL 两步走门（批 111——判定真源=migration_policy.py，十三例） ----------
 # 道具生成器：write_mig <文件名> <首行声明（可空）> <upgrade 体> [目标目录，默认 STAGE]
 write_mig() {
   local fname=$1 decl=$2 body=$3 dest=${4:-$STAGE/migrations/versions}
@@ -500,6 +500,19 @@ echo "  rc=$S7L（期望非零——注释/并列 action 中的排除项关键�
 [ $S7L -ne 0 ] || FAILED=$((FAILED + 1))
 grep -q "破坏性 DDL 命中" "$LOGDIR/s7l.log" && echo "  ✓ 排除项减法判据在案" || { echo "  ✗ 未捕获（整句赦免复活？）"; FAILED=$((FAILED + 1)); }
 [ $S7L -ne 0 ] && scenario_row 7l "排除项整句赦免" "非零" "$S7L" "PASS" || scenario_row 7l "排除项整句赦免" "非零" "$S7L" "FAIL（排除项洗白了同语句的破坏性 op！）"
+
+echo "[S7m] 排除项不得跨分隔符：SET DEFAULT 与破坏性 action 并列 ⇒ rc=1（P0-D：豁免的只是一个 action）"
+seed_baseline
+# ⚠ 本例是**回归钉**：排除项 #3 曾写 `[^;\n]*`（贪婪跨逗号**与空格**）⇒ 把同语句的
+#   `ALTER COLUMN … TYPE`（§1.1 明列 op）一并摘掉 ⇒ 相对最初基线 9fa0e7f 检测面缩小。
+write_mig "0099_sbx_greedy_wash.py" "" \
+  'op.execute("ALTER TABLE demo_t ALTER COLUMN payload TYPE varchar(8), ALTER COLUMN v SET DEFAULT 1")'
+run_release "$R_NEW" >"$LOGDIR/s7m.log" 2>&1
+S7M=$?
+echo "  rc=$S7M（期望非零——SET DEFAULT 豁免不得吃掉同语句的 TYPE 变更）"
+[ $S7M -ne 0 ] || FAILED=$((FAILED + 1))
+grep -q "破坏性 DDL 命中" "$LOGDIR/s7m.log" && echo "  ✓ 单 action 收窄判据在案" || { echo "  ✗ 未捕获（贪婪跨分隔符复活？）"; FAILED=$((FAILED + 1)); }
+[ $S7M -ne 0 ] && scenario_row 7m "排除项跨分隔符" "非零" "$S7M" "PASS" || scenario_row 7m "排除项跨分隔符" "非零" "$S7M" "FAIL（排除项吃掉了同语句的破坏性 action！）"
 
 # ---------- 汇总 ----------
 echo
