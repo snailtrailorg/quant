@@ -48,5 +48,8 @@ deploy/tests/logs/
 # WorkBuddy 内部工作区（agent 记忆/会话数据，非项目产物）
 .workbuddy/
 
+# CodeBuddy Code 内部工作区（定时任务持久化等，非项目产物）
+.codebuddy/
+
 # 仓根 Linux 回收站目录（gio trash 落到仓根时），非项目产物
 .Trash-0/
