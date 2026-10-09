@@ -1,6 +1,6 @@
 """项 18 三档新表新鲜度检测测试。
 
-测试目标：_check_tier_freshness() 函数 -- 一档 9 表 sync_log 新鲜度、二档 4 增量表游标
+测试目标：_check_tier_freshness() 函数 -- 一档 8 表 sync_log 新鲜度、二档 4 增量表游标
 + pool_data 任务心跳（盲审 A-2：6 非增量表无游标由心跳覆盖）、异常容错。
 纯 mock 不连真实 PG/Valkey。
 """
@@ -19,7 +19,7 @@ def _fresh_tier1_rows():
     return [(sid, _fresh_ts(0.04)) for sid in [
         "stk_limit_sync", "moneyflow_sync", "margin_detail_sync",
         "top_list_sync", "block_trade_sync", "cyq_perf_sync",
-        "forecast_sync", "namechange_sync", "concept_sync",
+        "forecast_sync", "namechange_sync",
     ]]
 
 
@@ -29,7 +29,7 @@ def _fresh_cursor_rows():
 
 
 def _enabled_rows(sids=None):
-    """sync_config 里 enabled 的 id 集合（TRANSITION-0129：检测先读它过滤停采项）。
+    """sync_config 里 enabled 的 id 集合（通用停采机制：检测先读它过滤停采项）。
 
     默认返回全部 tier1（等价「全部启用」），与加 enabled 过滤前行为一致。
     传 sids 可构造「部分停采」场景（缺哪个即视为该 sync enabled=false）。
@@ -44,12 +44,12 @@ def _enabled_rows(sids=None):
 class TestTierFreshness:
 
     def test_fresh_tier1_no_alert(self):
-        """一档 9 表 + 二档游标 + pool_data 心跳全新鲜 -> 返回空列表。"""
+        """一档 8 表 + 二档游标 + pool_data 心跳全新鲜 -> 返回空列表。"""
         from src.scheduler.tasks import _check_tier_freshness
         conn = MagicMock()
         conn.__enter__.return_value = conn
         conn.execute.return_value.fetchall.side_effect = [
-            _enabled_rows(),          # ① enabled 集合（TRANSITION-0129 前置查询）
+            _enabled_rows(),          # ① enabled 集合（通用停采过滤前置查询）
             _fresh_tier1_rows(),      # ② 一档 sync_log
             _fresh_cursor_rows(),     # ③ 二档游标
         ]
@@ -68,7 +68,7 @@ class TestTierFreshness:
         tier1_rows = [r for r in _fresh_tier1_rows() if r[0] != "stk_limit_sync"]
         tier1_rows.append(("stk_limit_sync", stale_ts))
         conn.execute.return_value.fetchall.side_effect = [
-            _enabled_rows(),          # ① enabled 集合（TRANSITION-0129 前置查询）
+            _enabled_rows(),          # ① enabled 集合（通用停采过滤前置查询）
             tier1_rows,               # ② 一档 sync_log
             _fresh_cursor_rows(),     # ③ 二档游标
         ]
@@ -87,7 +87,7 @@ class TestTierFreshness:
         conn = MagicMock()
         conn.__enter__.return_value = conn
         conn.execute.return_value.fetchall.side_effect = [
-            _enabled_rows(),          # ① enabled 集合（TRANSITION-0129 前置查询）
+            _enabled_rows(),          # ① enabled 集合（通用停采过滤前置查询）
             _fresh_tier1_rows(),      # ② 一档 sync_log
             [],                       # ③ pool_data_cursor 空
         ]
@@ -111,19 +111,19 @@ class TestTierFreshness:
         assert result == []
 
     def test_disabled_sync_excluded_from_stale(self):
-        """TRANSITION-0129：已停采（enabled=false）的 tier1 sync 不进断流告警。
+        """通用停采机制：已停采（enabled=false）的 tier1 sync 不进断流告警。
 
-        场景=concept_sync 上游接口不可用已停采（0129），它永无 success 行；无 enabled
+        场景=namechange_sync 已停采（enabled=false），它永无 success 行；无 enabled
         过滤则永久 stale（语义噪音）。反证同组：enabled 且陈旧的 moneyflow_sync 仍须
         报（防「过滤过宽致静默」）。
         """
         from src.scheduler.tasks import _check_tier_freshness
         stale_ts = _fresh_ts(3)   # 3 天前 > 48h 阈值
-        enabled = [s for s in [r[0] for r in _fresh_tier1_rows()] if s != "concept_sync"]
+        enabled = [s for s in [r[0] for r in _fresh_tier1_rows()] if s != "namechange_sync"]
         conn = MagicMock()
         conn.__enter__.return_value = conn
         conn.execute.return_value.fetchall.side_effect = [
-            _enabled_rows(enabled),           # ① 不含 concept_sync（已停采）
+            _enabled_rows(enabled),           # ① 不含 namechange_sync（已停采）
             [("moneyflow_sync", stale_ts)],   # ② 仅 moneyflow 有 success 行（陈旧）
             _fresh_cursor_rows(),             # ③ 二档游标
         ]
@@ -132,7 +132,7 @@ class TestTierFreshness:
         with patch.object(db, "get_conn", return_value=conn):
             result = _check_tier_freshness()
         ids = {r["sync_id"] for r in result}
-        assert "concept_sync" not in ids, "停采的 sync 仍被报 stale（enabled 过滤失效）"
+        assert "namechange_sync" not in ids, "停采的 sync 仍被报 stale（enabled 过滤失效）"
         assert "moneyflow_sync" in ids, "enabled 且陈旧者未报（过滤过宽致静默）"
 
     def test_no_enabled_rows_fail_open(self):
@@ -154,8 +154,8 @@ class TestTierFreshness:
         with patch.object(db, "get_conn", return_value=conn):
             result = _check_tier_freshness()
         ids = {r["sync_id"] for r in result}
-        assert "concept_sync" in ids, "enabled 空集时未退回全量口径（fail-open 失效）"
-        assert len([r for r in result if r["kind"] == "tier1"]) == 9
+        assert "stk_limit_sync" in ids, "enabled 空集时未退回全量口径（fail-open 失效）"
+        assert len([r for r in result if r["kind"] == "tier1"]) == 8
 
 # ── 状态翻转告警过滤（盲审遗留 2026-08-22）──
 

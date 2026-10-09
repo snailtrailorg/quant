@@ -447,11 +447,12 @@ def _check_tier_freshness() -> list[dict]:
         now = datetime.now(timezone.utc)
 
         with get_conn() as conn:
-            # TRANSITION-0129（见 migrations/versions/0129_concept_sync_disabled.py 头注）：
-            #   已停采（sync_config.enabled=false）的 sync 不参与断流检测——「禁用」＝平台主动
-            #   放弃该数据，再报「断流」是语义噪音。恢复 enabled 即自动回归监控（实时读，无缓存）。
-            #   fail-open：读不到任何 enabled 行（表空/异常环境）⇒ 退回全量检查，宁可按清单
-            #   全查（可能误报）也不静默失效（对齐 _tier_alert_filter 的 fail-open 立法）。
+            # 已停采（sync_config.enabled=false）的 sync 不参与断流检测——「禁用」＝平台主动
+            # 放弃该数据，再报「断流」是语义噪音。恢复 enabled 即自动回归监控（实时读，无缓存）。
+            # 通用停采机制（批 96 收口：原 TRANSITION-0129 哨兵已撤——concept_sync 从
+            # TIER1_SYNC_IDS 移除；enabled 过滤保留为通用 guard，未来停采任一 tier1 sync 同样生效）。
+            # fail-open：读不到任何 enabled 行（表空/异常环境）⇒ 退回全量检查，宁可按清单
+            # 全查（可能误报）也不静默失效（对齐 _tier_alert_filter 的 fail-open 立法）。
             cur = conn.execute("SELECT id FROM sync_config WHERE enabled")
             enabled_ids = {r[0] for r in cur.fetchall()}
             skip_disabled = bool(enabled_ids)
