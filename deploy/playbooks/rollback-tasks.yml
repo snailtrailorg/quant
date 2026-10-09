@@ -168,8 +168,9 @@
 
 # 批 112 回滚诚实性：回滚后代码 ↔ 当前 schema 兼容复验（expected ⊆ actual，quant-hbcheck compat）。
 # 语义：schema 迁移不回退，回滚只翻回旧代码——旧代码配新 schema 若缺列即「代码/schema 撕裂」。
-# 失败不硬断回滚（回滚已完成，断也回不去），只响亮报 SCHEMA_CODE_SPLIT + rc 留痕 + 须人工：
-# 由下方 release.yml rescue 的诚实词条（已回滚代码、schema 未回退 + alembic 版本）统一收尾。
+# 失败不硬断回滚（回滚已完成，断也回不去），只响亮报 SCHEMA_CODE_SPLIT + rc≠0 落 var/ 留痕
+# （机器可检索——步4复审 P1-1：只进 operator 终端＝机器面为零）+ 须人工：
+# 由 release.yml rescue 的诚实词条（已回滚代码、schema 未回退 + alembic 版本）统一收尾。
 - name: 回滚复验 —— 兼容复验（quant-hbcheck compat：回滚后代码 ↔ 当前 schema）
   ansible.builtin.shell: |
     set -u
@@ -178,6 +179,13 @@
     rc=$?
     if [ "$rc" -ne 0 ]; then
       echo "⚠ SCHEMA_CODE_SPLIT：回滚后代码与当前 schema 不兼容（schema 不回退，代码已回旧版）——须人工处置（前进=重跑 release；后退=手动回退 schema）" >&2
+      # 落 var/ 留痕（批 111 同手法：不落 release 树——受 keep-N GC 会删；var/ 持久）
+      vdir='{{ deploy_root }}/var'
+      [ -d "$vdir" ] || mkdir -p "$vdir"
+      { echo "SCHEMA_CODE_SPLIT @ $(date '+%Y-%m-%d_%H:%M:%S')"
+        echo "rollback_target={{ rollback_target | default('') }} rc=$rc"
+        echo "by 批112 兼容复验（quant-hbcheck compat）"
+      } > "$vdir/schema-code-split-{{ rollback_target | default('unknown') }}-$(date +%Y%m%d%H%M%S).txt"
     fi
     exit "$rc"
   register: rb_compat

@@ -12,3 +12,12 @@
   environment: "{{ deploy_wrapper_env }}"
   tasks:
     - include_tasks: rollback-tasks.yml
+
+    # 批 112 步 4 复审 P1-A：兼容复验失败（SCHEMA_CODE_SPLIT）在 rollback.yml 独立路径
+    # 不得静默绿退——include 内 failed_when:false 只告警（回滚已完成，硬断截断收尾无益），
+    # 但独立入口**必须**以非零退出暴露撕裂态（release.yml rescue 路径已有诚实词条收尾，
+    # 此处补独立路径的等价收尾）。留痕已落 var/schema-code-split-*.txt。
+    - name: 回滚收尾 —— SCHEMA_CODE_SPLIT 硬断（独立路径非零退出；撕裂须人工）
+      ansible.builtin.fail:
+        msg: "⚠ SCHEMA_CODE_SPLIT：回滚后代码与当前 schema 不兼容（rollback_target={{ rollback_target | default('') }}）——须人工处置（前进=重跑 release；后退=手动回退 schema）；留痕见 var/schema-code-split-*.txt"
+      when: rb_compat is defined and rb_compat.rc is defined and rb_compat.rc != 0

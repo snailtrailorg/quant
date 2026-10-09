@@ -77,6 +77,9 @@ do_compat() {
     || { echo "✗ compat: information_schema 查询失败（DB 不可达）" >&2; return 1; }
 
   "$ROOT/shared/venv/bin/python" - "$exp_file" "$actual" <<'PYEOF'
+# ⚠ 批 112 步 4 复审 P1-2 备注：本脚本纯 stdlib（仅 import sys），按批 111 依赖方向律
+#   （纯 stdlib 不依赖应用 venv）最终应收口为 /usr/bin/python3；本次保持 shared/venv 与
+#   上方既有 hub 心跳一致（sudo -u quant 身份下可执行，无 EACCES 面），下次触本文件时统一改。
 import sys
 
 exp_path = sys.argv[1]
