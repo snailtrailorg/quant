@@ -5,7 +5,7 @@
 
 ## 目标
 
-crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨档缺跑排查（新发现，见现状 #6）；② OKX 盘中粒度（hourly/1min/15min，如需）；③ crypto 时间轴表达重裁（`streaming` vs 契约层扩枚举——设计变更须设计先行）。
+crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨档缺跑排查（新发现，见现状 #5）；② OKX 盘中粒度（hourly/1min/15min，如需）；③ crypto 时间轴表达重裁（`streaming` vs 契约层扩枚举——设计变更须设计先行）。
 
 ## 现状（已实证 · 2026-10-09 对库/真机核实）
 
@@ -15,7 +15,7 @@ crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨�
 | 2 | 5 个 crypto 同步项已配置且 enabled：`binance_perp_{daily,hourly,1min,15min}` + `okx_perp_daily`；`start_floor` 已回填（daily 2019-09-08 / okx 2020-01-01 / hourly 2026-09-29 / 分钟 2026-10-05） | dev 库 `sync_config` 实查；批 102b 迁移 0137 五证上产 |
 | 3 | 死构件 `data_increment_crypto` 已随批 101 退役 | `scheduler/app.py:154` 仅存注释；`tasks.py` grep 零命中 |
 | 4 | prod 运行证据：`binance_perp_daily` 今晨 08:51 成功（1004 标的，拉/存 914 行，失败 0，游标 20261007）——08:38 僵尸复位（1423 min 未更新＝10-08 08:55 起挂）后重跑成功 | prod worker journal 2026-10-09 |
-| 5 | `okx_perp_daily` 最近可见成功＝**10-07 08:44**（485 标的全存，排除段登记 2 条落 sync_gap）；10-08/10-09 晨档**无执行痕迹**（无成功行、无僵尸复位行；今晚调度器显示其「未到周期」⇒ next_run 已滚至 10-10） | prod worker journal -72h |
+| 5 | `okx_perp_daily` 最近可见成功＝**10-07 08:44**（485 标的全存，排除段登记 2 条落 sync_gap）；10-08/10-09 晨档**无执行痕迹**（无成功行、无僵尸复位行；今晚调度器显示其「未到周期」⇒ next_run 已滚至 10-10）。**复现**：`quant-journal -u quant-celery-worker@quant.service --since -72h -n 300000 | grep okx_perp_daily`（ansible ad-hoc）；或查 `sync_log` `id='okx_perp_daily'` 最新行 | prod worker journal -72h（2026-10-09 20:29 取证） |
 | 6 | OKX **盘中粒度未做**：`okx_perp_hourly/1min/15min` 全仓 grep 零命中 | grep `server/src/` |
 | 7 | `Temporality` 无 `continuous` 枚举（仅 historical/snapshot/streaming）——决策 B 该子句已撤回 | `quant_common/contract.py:44` |
 | 8 | OKX 源重试预算偏薄（102b 挂账：7/485 标的 3 次退避后仍 ConnectionReset） | `flow/任务/批102b-OKX数据层.md` 待办注记 |
@@ -32,7 +32,7 @@ crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨�
 ## 产出
 
 1. **步 0 · okx_perp_daily 缺跑排查（最优先，数据完整性）**：查 10-08/10-09 晨档为何未触发/无痕（对照 binance 僵尸复位路径——okx 是否也挂了但复位行丢失？`sync_log`/`sync_gap` 落库核对），补拉缺口（手动触发 `sync("okx_perp_daily")` 或等 10-10 晨档并验证），根因若在调度器/zombie-reset 则修。
-2. **OKX 盘中粒度**（hourly/1min/15min，沿用 101b 工厂范式 `_make_binance_bar_handler` 的 OKX 版）——**须先确认需求**（威廉姆 101b 裁定「功能验证优先」时未承诺 OKX 盘中；若不需要则从本批范围移除并记待办）。
+2. **OKX 盘中粒度**（hourly/1min/15min，沿用已泛化的工厂范式 `_make_crypto_bar_handler`（`engine.py:1254`，币安四项均经它生成）加 OKX 规格）——**须先确认需求**（威廉姆 101b 裁定「功能验证优先」时未承诺 OKX 盘中；若不需要则从本批范围移除并记待办）。
 3. **时间轴表达重裁（设计变更，设计先行）**：crypto 日线现走 `bar_daily` kind（trade_date 语义）实际是 24/7 连续流——重裁「用 `streaming` 语义 re-label vs 扩 `Temporality` 枚举 vs 维持现状（bar_daily + trade_day_filter=none 已工作）」。**若结论是「维持现状」则零代码**，只把决策写进设计文档。
 4. OKX 重试预算（102b 挂账，随批顺带：退避 3→5 次或加 ConnectionReset 专项重试）。
 
