@@ -1,52 +1,58 @@
-# 批 116 · crypto 数据层
+# 批 116 · crypto 数据层（剩余范围）
 
-> 立项 2026-10-09（主会话补决策后立项；决策 B）。来源＝研究稿 §七「crypto 数据层单独立项」。
-> 关联：批 99（期一）/ 批 115（期三）/ `flow/decisions.md` 2026-10-09 决策 B
+> 立项 2026-10-09（主会话补决策后立项）。**2026-10-09 C 组步 2 双盲审 P0-1/P0-2 返工重写**：原版按 10-05 研究稿把批 101/101b/102b 已落地项当待做（83b 教训二犯），且引用了不存在的 `Temporality.continuous` 枚举。本版按库/真机实测重写现状与剩余范围。
+> 关联：批 101（币安日线）/ 101b（币安盘中）/ 102b（OKX 日线，五证上产 `202610061532-f5d0e55`）/ `flow/decisions.md` 2026-10-09 决策 B（**已修正**：continuous 子句撤回）
 
 ## 目标
 
-crypto 数据层落地：数据源接入 + 采集器 + 回补 + 落库；时间轴＝`continuous`（24/7 无交易日历）；死构件 `data_increment_crypto` 处置（落地或删除二选一）。
+crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨档缺跑排查（新发现，见现状 #6）；② OKX 盘中粒度（hourly/1min/15min，如需）；③ crypto 时间轴表达重裁（`streaming` vs 契约层扩枚举——设计变更须设计先行）。
 
-## 现状（已实证）
+## 现状（已实证 · 2026-10-09 对库/真机核实）
 
 | # | 事实 | 锚点 |
 |---|---|---|
-| 1 | crypto 无交易日日历、24/7 连续 | 决策 B |
-| 2 | `data_increment_crypto` 每 15min 被 beat 唤醒、永远 `skipped`（死构件） | 研究稿 §七风险4 |
-| 3 | 窗口下界＝交易所保留窗口（`start_floor=NULL` 语义） | 研究稿 §六期一 |
-| 4 | per-symbol 键＝`(symbol)`（非 `(symbol, trade_date)`） | 决策 B |
+| 1 | 币安 + OKX **数据源层已完成**：adapter（`binance_adapter.py`/`okx_adapter.py`）、三注册表、接口层（`interfaces/binance_perp.py`/`okx_perp.py`） | `server/src/data_platform/adapters/`、`interfaces/` |
+| 2 | 5 个 crypto 同步项已配置且 enabled：`binance_perp_{daily,hourly,1min,15min}` + `okx_perp_daily`；`start_floor` 已回填（daily 2019-09-08 / okx 2020-01-01 / hourly 2026-09-29 / 分钟 2026-10-05） | dev 库 `sync_config` 实查；批 102b 迁移 0137 五证上产 |
+| 3 | 死构件 `data_increment_crypto` 已随批 101 退役 | `scheduler/app.py:154` 仅存注释；`tasks.py` grep 零命中 |
+| 4 | prod 运行证据：`binance_perp_daily` 今晨 08:51 成功（1004 标的，拉/存 914 行，失败 0，游标 20261007）——08:38 僵尸复位（1423 min 未更新＝10-08 08:55 起挂）后重跑成功 | prod worker journal 2026-10-09 |
+| 5 | `okx_perp_daily` 最近可见成功＝**10-07 08:44**（485 标的全存，排除段登记 2 条落 sync_gap）；10-08/10-09 晨档**无执行痕迹**（无成功行、无僵尸复位行；今晚调度器显示其「未到周期」⇒ next_run 已滚至 10-10） | prod worker journal -72h |
+| 6 | OKX **盘中粒度未做**：`okx_perp_hourly/1min/15min` 全仓 grep 零命中 | grep `server/src/` |
+| 7 | `Temporality` 无 `continuous` 枚举（仅 historical/snapshot/streaming）——决策 B 该子句已撤回 | `quant_common/contract.py:44` |
+| 8 | OKX 源重试预算偏薄（102b 挂账：7/485 标的 3 次退避后仍 ConnectionReset） | `flow/任务/批102b-OKX数据层.md` 待办注记 |
 
 ## 依赖（就绪）
 
-批 99 期一（族层 `supports_backfill`/`start_floor` 列）✅。**立项前置已由决策 B 补**：时间轴契约已定（`continuous`）。
+批 101/101b/102b 全部 ✅（上产）；`sync_gap` 排除段机制 ✅（批 109）；102a 代理体系 ✅。
 
 ## 引用（设计 / 方案）
 
-- `flow/方案/数据同步配置架构研究-20261005.md` §七（crypto 数据层单独立项 + 形状须现在容纳）—— 只给指针。
-- `flow/decisions.md` 2026-10-09 决策 B —— 时间轴契约。
+- `flow/方案/多市场数据接入与代理体系-设计-20261006.md` §二/§四 —— crypto 接入设计真源。
+- `flow/decisions.md` 2026-10-09 决策 B（修正版）—— start_floor=NULL 保留窗口、键 (symbol) 仍有效；时间轴表达待重裁。
 
 ## 产出
 
-1. 数据源接入（交易所 crypto 源，接入时定）+ 采集器 + 回补 + 落库。
-2. 时间轴按 `continuous` 接线（复用契约层 `Temporality` 枚举，不新造词汇）。
-3. `data_increment_crypto` 死构件处置（落地或删除二选一，不留死构件）。
+1. **步 0 · okx_perp_daily 缺跑排查（最优先，数据完整性）**：查 10-08/10-09 晨档为何未触发/无痕（对照 binance 僵尸复位路径——okx 是否也挂了但复位行丢失？`sync_log`/`sync_gap` 落库核对），补拉缺口（手动触发 `sync("okx_perp_daily")` 或等 10-10 晨档并验证），根因若在调度器/zombie-reset 则修。
+2. **OKX 盘中粒度**（hourly/1min/15min，沿用 101b 工厂范式 `_make_binance_bar_handler` 的 OKX 版）——**须先确认需求**（威廉姆 101b 裁定「功能验证优先」时未承诺 OKX 盘中；若不需要则从本批范围移除并记待办）。
+3. **时间轴表达重裁（设计变更，设计先行）**：crypto 日线现走 `bar_daily` kind（trade_date 语义）实际是 24/7 连续流——重裁「用 `streaming` 语义 re-label vs 扩 `Temporality` 枚举 vs 维持现状（bar_daily + trade_day_filter=none 已工作）」。**若结论是「维持现状」则零代码**，只把决策写进设计文档。
+4. OKX 重试预算（102b 挂账，随批顺带：退避 3→5 次或加 ConnectionReset 专项重试）。
 
 ## 限定范围
 
-只做 crypto 数据层。
-**不碰**：`sync()` 游标契约、配置抽象形状（已在批 99 容纳）、限速熔断（批 73 独立）。
+只改 `okx_adapter.py`/`engine.py`（若做盘中粒度）、调度器 zombie-reset（若步 0 根因在此）、设计文档（时间轴重裁）。
+**不碰**：币安侧已稳定路径、批 109 `sync_gap` 机制、A 股同步。
 
 ## 接口契约
 
-- 新增：crypto 采集器实现 fetch 契约（三注册表各注册一类，复用批 83b 注册制）。
-- 时间轴：`Temporality.continuous`（契约层已有枚举）。
+- （步 0 排查产出：缺跑根因 + 补拉凭证 `sync_log` 行；若修调度器给出 diff）
+- （盘中粒度若做：`okx_perp_hourly/1min/15min` 三个 sync_config 行 + handler，契约同 101b 范式）
 
 ## 验收标准
 
-- `cd server && ./venv/bin/python -m pytest tests/ -q` → 全绿
-- 行为级：crypto 源连上、回补落库、时间轴 `continuous` 无交易日过滤
-- 死构件：`data_increment_crypto` 落地或删除（不得留 `skipped` 空转）
+- 步 0：okx_perp_daily 缺口补拉成功（`sync_log` 最新 success 行，游标追平今日）+ 根因结论落任务文件
+- `cd server && ./venv/bin/python -m pytest tests/ -q` → 全绿（若改代码）
+- 盘中粒度若做：对照 101b 验收（mock 单测 + 真机尾段）
+- 时间轴重裁：决策落 `docs/design/` 对应文档并引用回本文件
 
 ## mock 方式
 
-crypto 源 mock（返回可辨识假数据）；不连真交易所（源接入前标「服务器测前置」）。
+同 101b/102b（adapter mock 返回可辨识假数据；不连真 OKX——dev 出不了网，真机留 prod 实测）。
