@@ -306,11 +306,19 @@ def list_all_freeze_events(open_only: bool = False, limit: int = 50,
     入口图标的目标是「把当前冻着的任务整体列出来」，不是某任务的运行细节。故权限面回到
     `read`（四角色可见）——角标「有几个任务冻着」是全局健康信号，与铃铛的 admin-only 告警面
     不同源也不同门。`open_only=true` 只取未闭合（`unfrozen_at IS NULL`），角标计数用；
-    默认 false 行为=全量最近 limit 条（与 per-task 端点同源 `list_events`）。
+    默认 false 行为=全量最近 limit 条。
+
+    批 86-B 治理（步 4 复审 P0-1 返工）：**投影最小字段集**——只回 `id`/`task_id`/`symbol`/
+    `freeze_type`/`frozen_at`。水位 `watermark`/缺口目标时刻 `gap_target_ts`/`account_id`/
+    `operator`/`unfreeze_method` 等运行细节**不投影**（它们属「可推知策略实证表现」的敏感面，
+    per-task 端点正是为挡 analyst 才收紧到 paper_trade/live_control）；明细回 per-task 分档端点。
     """
     from src.data_platform import freeze_event as _fe
-    return {"events": _fe.list_events(task_id=None, limit=min(max(limit, 1), 200),
-                                      open_only=open_only)}
+    events = _fe.list_events(task_id=None, limit=min(max(limit, 1), 200),
+                             open_only=open_only)
+    return {"events": [{"id": e["id"], "task_id": e["task_id"], "symbol": e["symbol"],
+                        "freeze_type": e["freeze_type"], "frozen_at": e["frozen_at"]}
+                       for e in events]}
 
 
 @router.delete("/api/live-task/{tid}")

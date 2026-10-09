@@ -12,8 +12,6 @@ mock `freeze_event.list_events` 断言 open_only 透传 + limit 夹取；HTTP �
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 
 def _conn(rows=()):
     conn = MagicMock()
@@ -75,11 +73,31 @@ class TestFreezeEventsGlobalEndpoint:
 
     def test_returns_events_shape(self):
         with patch("src.data_platform.freeze_event.list_events",
-                   return_value=[{"id": 1, "task_id": 5, "freeze_type": "ts_gap"}]) as le:
+                   return_value=[{"id": 1, "task_id": 5, "symbol": "600000.SH",
+                                  "freeze_type": "ts_gap", "frozen_at": "2026-10-09T00:00:00+08:00"}]) as le:
             out = self._call(open_only=True, limit=50,
                              payload={"username": "admin", "db_role": "admin"})
         assert out["events"][0]["task_id"] == 5
         assert le.call_args.kwargs == {"task_id": None, "limit": 50, "open_only": True}
+
+    def test_projects_minimal_field_set(self):
+        """治理反证（步 4 P0-1 返工）：敏感字段不得投影给 read 面。
+
+        list_events 返回全字段（含 watermark/gap_target_ts/account_id/operator），
+        全局端点须只投影 task_id/symbol/freeze_type/frozen_at，其余一律不出现在响应里。
+        若字段集被扩回敏感字段，本用例红。
+        """
+        full = [{"id": 1, "task_id": 5, "account_id": 99, "symbol": "600000.SH",
+                 "freeze_type": "ts_gap", "frozen_at": "2026-10-09T00:00:00+08:00",
+                 "watermark": "secret", "gap_target_ts": "secret2",
+                 "unfrozen_at": None, "unfreeze_method": None, "operator": "admin"}]
+        with patch("src.data_platform.freeze_event.list_events", return_value=full):
+            out = self._call(open_only=True, limit=50, payload={"db_role": "admin"})
+        ev = out["events"][0]
+        assert set(ev.keys()) == {"id", "task_id", "symbol", "freeze_type", "frozen_at"}
+        for sensitive in ("watermark", "gap_target_ts", "account_id", "operator",
+                          "unfrozen_at", "unfreeze_method"):
+            assert sensitive not in ev, f"敏感字段 {sensitive} 泄漏到 read 面"
 
     def test_limit_clamped(self):
         """limit 夹取 1..200（与 per-task 端点同语义）。"""
