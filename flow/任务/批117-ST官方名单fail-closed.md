@@ -19,7 +19,22 @@ ST 判定从「`namechange` 派生（戴帽滞后）+ 无档=非 ST（fail-open�
 
 ## 依赖（就绪）
 
-namechange 现判定路径 ✅（替换目标）。**步 0 接口探查为本批强制前置**（见产出 0）。
+namechange 现判定路径 ✅（替换目标）。**步 0 接口探查已完成（2026-10-09 深夜，见下）**。
+
+## 步 0 探查结论（2026-10-09 dev 实调，token 从 .env）
+
+**a. tushare 官方 ST 接口：存在 → 走「官方接口」分支（产 1 形态定了）**
+- 接口名＝**`pro.stock_st(trade_date=YYYYMMDD)`**（非 `stk_st`——该名报「请指定正确的接口名」）。
+- 实测 2026-10-09 全市场：**201 行**（非整数截断 ⇒ 全量），列 `ts_code/name/trade_date/type/type_name`，`type_name` 分布＝风险警示板 201。
+- 支持 `limit/offset` 参数（offset=500 返回 0 行 ⇒ 分页参数被接受；全量 201 < 500 上限 ⇒ 无截断风险）。
+- ⚠ pro client 是 `__getattr__` 动态代理：`hasattr` 恒 True，**存在性只能实调判**（本探查法）。
+
+**b. namechange 分页：`limit/offset` 真生效**
+- 全量（19000101~20261009）＝**恰好 10000 行**（坐实单次上限截断）。
+- `limit=500, offset=0` 与 `offset=500`：各 500 行、首 ts_code 不同（920157.BJ / 920160.BJ）、两页前 10 无交集 ⇒ **分页真翻页**。
+- 修法定案：`pull_namechange` 加 `limit/offset` 循环翻页（累积至返回 < limit 即止），消 10000 截断。
+
+**产 1 形态（据 a/b 定）**：新增 `pull_stock_st(trade_date)`（全市场快照，~201 行单页足够，仍带分页参数留扩展）；ST 判定源切 `stock_st` 快照（每交易日同步落表），namechange 降级为历史参考（分页修复保留——与 ST 判定同源弱化收口）。
 
 ## 引用（设计 / 方案）
 
@@ -27,12 +42,10 @@ namechange 现判定路径 ✅（替换目标）。**步 0 接口探查为本批
 
 ## 产出
 
-0. **步 0 · 接口探查（强制前置，一次核实两个前提）**：
-   a. tushare 官方 ST 标记接口存在性（候选：`namechange` 的 change_reason 正则之外，tushare 是否有 `stk_st`/`namechange` 之外的 ST 专用端点；官方文档 doc_id 检索 + dev 实调一次探针）。**结果三分支**：①存在且可用 ⇒ 产 1 按「官方接口」做；②不存在 ⇒ 降级为「namechange 派生强化」（分页修复 + 无档 fail-closed，官方名单从交易所名单人工导入另议）；③不可达/无法判定 ⇒ 本批只做 namechange 分页修复 + fail-closed，官方名单挂账。
-   b. `pro.namechange()` offset/limit 分页支持性（dev 实调：`pro.namechange(limit=100, offset=9000)` 是否返回第 9001 条起——若不支持分页则改为「按 ts_code 首字母/交易所分段拉取」或「计数校验告警」）。
-1. 接源侧官方 ST 名单（按步 0 结果定形态）。
-2. ST 判定读官方名单；**无档改 fail-closed**（`perms.py:139-147` 的「无档=非 ST」分支改为拒绝/告警，与既有「读库失败 fail-closed」同向）。
-3. `pull_namechange` 分页/截断修复（`tushare_adapter.py:614-622` + 分派点 `base.py:556` + 重建联动 `engine.py:3099` 三处同核）。
+0. ~~**步 0 · 接口探查（强制前置）**~~ ✅ **已完成（2026-10-09 深夜，结论见「步 0 探查结论」节）**——两个前提均走最优分支：`pro.stock_st()` 官方接口存在（201 行全量）；namechange `limit/offset` 分页真生效。
+1. 新增 `pull_stock_st(trade_date)`（`tushare_adapter.py`）：全市场 ST 快照（~201 行，单页足够；签名带 `limit/offset` 留扩展）＋ 新 sync 项（每交易日同步落表，表名 `st_list`；`base.py` 分派 + `sync_config`/`sync_kind_config` 行）。
+2. ST 判定读 `st_list` 快照；**无档改 fail-closed**（`perms.py:139-147` 的「无档=非 ST」分支改为拒绝/告警，与既有「读库失败 fail-closed」同向）。
+3. `pull_namechange` 分页/截断修复（`tushare_adapter.py:614-622` 加 `limit/offset` 循环翻页，累积至返回 < limit 即止 + 分派点 `base.py:556` + 重建联动 `engine.py:3099` 三处同核）。
 
 ## 限定范围
 
