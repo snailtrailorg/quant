@@ -10,7 +10,8 @@
       </div>
     </template>
     <!-- 批17 17A：列宽拖拽+持久化 -->
-    <TableShell :data="tasks" storage-key="live-tasks" @expand-change="onExpand">
+    <!-- 批113：row-key + expand-row-keys 受控展开（Pool.vue 同款）——支持 query.freeze 深链程序化展开该任务行 -->
+    <TableShell :data="tasks" storage-key="live-tasks" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand">
       <el-table-column v-if="colOn('id')" prop="id" label="ID" width="80" />
       <!-- 批86-UI：「个股」从操作列移入名称列（router-link）——原样是个 6 字文本按钮摆在启停之间，
            语义是「跳到标的详情」而非「对任务做什么」，混在动作组里既挤又容易被误读成任务动作。 -->
@@ -218,7 +219,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -241,6 +242,7 @@ const navReadonly = inject('navReadonly', ref(false))
 const canPerm = inject('canPerm', () => true)
 const canLive = computed(() => canPerm('live_control'))
 const tasks = ref([])
+const expanded = ref([])   // 批113：受控展开行 id 集（row-key=r=>r.id），深链 query.freeze 程序化展开
 const strategies = ref([])
 const accounts = ref([])
 const symbolOptions = ref([])
@@ -356,6 +358,9 @@ const onExpand = (row, expandedRows) => {
   let open
   if (Array.isArray(expandedRows)) open = expandedRows.some(r => r?.id === row?.id)
   else open = expandedRows === true
+  // 批113：受控 expand-row-keys 需回写展开 id 集（Pool.vue 同款），深链/手点展开都走这里
+  if (Array.isArray(expandedRows)) expanded.value = expandedRows.map(r => r.id)
+  else if (open) expanded.value = [row.id]
   if (open && row._freeze === undefined) loadFreeze(row.id)
 }
 // 已冻结时长（秒）——进行中行显示；只算「现在还在冻」的那条
@@ -462,7 +467,19 @@ onMounted(async () => {
   const pre = route.query.strategy   // 深链预填(回测页'创建实盘任务')
   if (pre) { dialogVisible.value = true; form.value.strategy_id = String(pre) }
   // 批9：三 loader 互不依赖→并发；尾部 enrichTasks 删（load() 内已调，纯冗余双跑）
-  await Promise.all([load(), loadStrategies(), loadAccounts()]) })
+  await Promise.all([load(), loadStrategies(), loadAccounts()])
+  // 批113：ConnectionCards「历史」深链（query.freeze=<tid>）→ 程序化展开该任务行并拉冻结史。
+  // 受控 expand-row-keys 改值不触发 expand-change，故手动 loadFreeze（stopped 行 preloadFreeze 不拉）。
+  const freeze = route.query.freeze
+  if (freeze != null && freeze !== '') {
+    await nextTick()
+    const row = tasks.value.find(x => String(x.id) === String(freeze))
+    if (row) {
+      expanded.value = [row.id]
+      if (row._freeze === undefined) loadFreeze(row.id)
+    }
+  }
+})
 
 // wd-20 §1.5 方案 A：自愈时间线（05 §5.8）——幽灵端点 /live-task/{id}/detail 已删
 // （wd-19 P0：404 恒吞）。数据源两路：①列表行已有字段（NRestarts 语义近似=心跳龄/冻结/

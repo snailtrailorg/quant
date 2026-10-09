@@ -29,6 +29,10 @@
           </el-tag>
         </div>
         <div class="card-meta">md {{ tk.md }} · lag {{ tk.lag == null ? '—' : Math.round(tk.lag) + 's' }}</div>
+        <!-- 批113：冻结是 30s 瞬时灯（短冻结会整跳）→「历史」入口接通 F1 持久账（LiveTask 展开行） -->
+        <div class="card-hist">
+          <el-link type="primary" :underline="false" @click="goHistory(tid)">{{ t('sysmon.history') }}</el-link>
+        </div>
       </el-card>
     </div>
   </el-card>
@@ -36,13 +40,18 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getHealthComponents } from '../api'
 
 const { t } = useI18n()
+const router = useRouter()
 const hubs = ref({})   // 批66b：{account_id: {gen, subs, bars, ...}}（后端 snap.hubs；legacy account=0）
 const tasks = ref({})
 let pollTimer = null
+
+// 批113：task 卡片「历史」→ LiveTask 展开行冻结史深链（query.freeze=<tid>，LiveTask 读它自动展开该行）
+const goHistory = (tid) => router.push({ name: 'live-task', query: { freeze: tid } })
 
 const load = async () => {
   try {
@@ -63,4 +72,5 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .card-name { font-size: var(--fs-label); font-weight: 600; }
 .card-meta { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: var(--sp-1); }
+.card-hist { margin-top: var(--sp-1); font-size: var(--fs-foot); }
 </style>
