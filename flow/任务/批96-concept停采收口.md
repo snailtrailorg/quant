@@ -17,6 +17,9 @@ concept_sync 上游接口已失效，裁定 A（零消费者 ⇒ 消悬而未决
 | 4 | `concept_sync` 仍在 `TIER1_SYNC_IDS`（一档 9 表） | `server/src/data_platform/tier_tables.py:12-16` |
 | 5 | `health_monitor.collector` 遍历 `TIER1_SYNC_IDS` 采集指标 | `server/src/health_monitor/collector.py:329` |
 | 6 | `tasks.py` 有 TRANSITION-0129 分支引用 | `server/src/scheduler/tasks.py:450,463` |
+| 7 | 另 4 处硬编码 concept_sync 引用（移除后须逐一核去向） | `engine.py:3192`（kind 映射）、`markets.py:99`（ref_data 归置）、`adapters/base.py:244`（能力列表）、`rehearse.py:66` |
+| 8 | `health_monitor.collector` 具体遍历在 `:321-331`（非仅 `:329`） | `server/src/health_monitor/collector.py:321-331` |
+| 9 | 单测硬编码 `TIER1_SYNC_IDS` 长度/成员 | `test_tier_freshness.py:22/135/157/158` + 5 测 mock 序列 |
 
 ## 依赖（就绪）
 
@@ -30,9 +33,10 @@ concept_sync 上游接口已失效，裁定 A（零消费者 ⇒ 消悬而未决
 ## 产出
 
 1. `server/src/data_platform/tier_tables.py`：从 `TIER1_SYNC_IDS` 移除 `"concept_sync"`（9 → 8 表）。
-2. `server/src/scheduler/tasks.py`：清理 TRANSITION-0129 相关分支（`:450,463`），确认无残留对 concept_sync 的 TIER1 遍历假设。
-3. `server/src/data_platform/adapters/base.py`：确认 `:244` 的能力列表对 concept_sync 的处置（停采后该项应从可拉列表移除或标注 disabled）。
-4. 单测同步：`TIER1_SYNC_IDS` 长度断言（若有）从 9 → 8。
+2. `server/src/scheduler/tasks.py`：TRANSITION-0129 分支**只删 concept 专属判断、保留 `enabled` 通用 guard**（`enabled` 过滤是通用停采机制，删则未来停采项误报）。
+3. 逐一核 4 处硬编码引用去向（`engine.py:3192`/`markets.py:99`/`adapters/base.py:244`/`rehearse.py:66`）：移除后各自应是「死代码可清」或「显式标注 disabled」，不得留「引用不存在 id 的活遍历」。
+4. `server/src/health_monitor/collector.py:321-331`：确认遍历 `TIER1_SYNC_IDS` 自动收敛（无需改，但须在验收里证明）。
+5. 单测同步：`test_tier_freshness.py` 4 处硬编码 + mock 序列重排；`TIER1_SYNC_IDS` 长度断言 9 → 8。
 
 ## 限定范围
 
@@ -45,9 +49,9 @@ concept_sync 上游接口已失效，裁定 A（零消费者 ⇒ 消悬而未决
 
 ## 验收标准
 
-- `cd server && ./venv/bin/python -m pytest tests/ -q` → 全绿
+- `cd server && ./venv/bin/python -m pytest tests/ -q` → 全绿（含 `test_tier_freshness.py` 改后的 4 处硬编码 + mock 序列）
 - `./venv/bin/python -c "from src.data_platform.tier_tables import TIER1_SYNC_IDS; assert 'concept_sync' not in TIER1_SYNC_IDS; print(len(TIER1_SYNC_IDS))"` → `8`
-- grep 全仓 `concept_sync` 无残留 TIER1 遍历假设
+- grep 全仓 `concept_sync`：无残留「活遍历」（死代码已清或显式标注 disabled）；`tasks.py` 仍保留 `enabled` 通用 guard
 
 ## mock 方式
 
