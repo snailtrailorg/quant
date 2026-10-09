@@ -18,6 +18,26 @@
             <IconBtn :icon="Bell" :title="t('sysmon.title')" @click="$router.push('/observe')" />
           </el-badge>
 
+          <!-- ═ 冻结入口（批114：独立图标，read 四角色可见；角标=未闭合冻结事件数，
+               点击下拉列出冻着的任务，逐条跳 LiveTask 展开行——不是 /observe） ═
+               不复用铃铛/el-badge 组件实例：铃铛点击目标=/observe（admin-only 告警面），
+               冻结面=read、点击目标=冻结任务下拉，两者来源/门/目标全不同，合并即「两类并发无解」。 -->
+          <el-dropdown v-if="has('read')" trigger="click" @command="onFreezeCommand">
+            <span class="freeze-trigger" :title="t('liveTask.freezeEntry')">
+              <IconBtn :icon="Lock" :title="t('liveTask.freezeEntry')" />
+              <span v-if="freezeCount" class="freeze-badge">{{ freezeCount > 99 ? '99+' : freezeCount }}</span>
+            </span>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="e in freezeEvents" :key="e.id" :command="e.task_id">
+                  <span style="margin-right: 8px">{{ e.symbol || ('#' + e.task_id) }}</span>
+                  <span style="color: var(--text-secondary)">{{ t(FT[e.freeze_type] || 'liveTask.ftUnknown') }}</span>
+                </el-dropdown-item>
+                <el-dropdown-item v-if="!freezeEvents.length" disabled>{{ t('liveTask.freezeNone') }}</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+
           <!-- ═ 偏好组（语言/暗色乒乓，恢复到标题栏） ═ -->
           <div style="display: flex; align-items: center; gap: 16px">
             <IconBtn :title="langTitle" @click="toggleLang">{{ langLabel }}</IconBtn>
@@ -144,7 +164,7 @@ import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getMe, meOnce, resetMeCache, getSystemAlerts } from '../api'
+import { getMe, meOnce, resetMeCache, getSystemAlerts, getOpenFreezeEvents } from '../api'
 import api, { getStrategies, getFactorList } from '../api'
 import { setLang } from '../i18n'
 import Avatar from '../components/Avatar.vue'
@@ -174,6 +194,7 @@ const loadPerms = async () => {
     role.value = me.role || role.value
     navMap.value = me.nav || {}
   } catch {}
+  loadFreezeEntry()   // 批114：perms 就绪后立刻拉角标（否则首屏要等 30s 轮询）
 }
 // 批27-18（全局检视 B-P2 面修）：路由首段 ≠ NAV_ITEMS 键的子页全部补映射——原只按首段直查，
 // data-manage/:syncId（SymbolManage）等子页 readonly 守卫失效（首段 'data-manage' 查 navMap 恒 undefined）
@@ -233,6 +254,23 @@ const loadAlerts = async () => {
     alertLevel.value = items.some(x => x.severity === 'critical') ? 'critical' : 'warning'
   } catch {}
 }
+// ——— 冻结入口角标（批114：未闭合冻结事件数，30s 轮询；read 四角色可见，独立于铃铛） ———
+const freezeCount = ref(0)
+const freezeEvents = ref([])
+let freezeTimer = null
+// 三类冻结类型词条映射（枚举由后端 0123 CHECK 锁死，与 LiveTask.vue 同源）
+const FT = { ts_gap: 'liveTask.ftTsGap', seq_gap: 'liveTask.ftSeqGap', untrusted: 'liveTask.ftUntrusted' }
+const loadFreezeEntry = async () => {
+  if (!perms.value.includes('read')) { freezeCount.value = 0; freezeEvents.value = []; return }
+  try {
+    const r = await getOpenFreezeEvents()
+    const events = r?.events || []
+    freezeEvents.value = events
+    freezeCount.value = events.length
+  } catch { freezeCount.value = 0; freezeEvents.value = [] }
+}
+// 批114：下拉项点击 → LiveTask 该任务展开行（query.freeze 深链，LiveTask onMounted 自动展开）
+const onFreezeCommand = (tid) => router.push({ name: 'live-task', query: { freeze: tid } })
 // 类别 → 页面路由（点击通知直达）
 // P3-2/P3-8：暗色+帮助抽屉+我的权限玻璃盒
 // 主界面框架改版（2026-09-09 用户裁定）：侧栏平时隐藏,hover 热区向右展开/失焦左滑收起（覆盖式）——
@@ -260,8 +298,8 @@ const onEmergencyHalt = async () => {
 }
 // 批22：告警角标初始化 + 30s 轮询（健康/通知逻辑迁至系统监控页与 NotificationList 组件）
 loadPerms()
-onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loadDynamicIndex() })
-onUnmounted(() => { if (alertTimer) clearInterval(alertTimer) })
+onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loadDynamicIndex(); loadFreezeEntry(); freezeTimer = setInterval(loadFreezeEntry, 30000) })
+onUnmounted(() => { if (alertTimer) clearInterval(alertTimer); if (freezeTimer) clearInterval(freezeTimer) })
 
 // 批21：语言乒乓（真源 locale.value）；批48 后用户裁定：按钮显示**当前语言**（中文态"中"/英文态"EN"），title 仍指目标语言
 const langLabel = computed(() => locale.value === 'zh' ? '中' : 'EN')
@@ -331,6 +369,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 /* 主界面框架改版（2026-09-09 用户裁定）：顶栏全宽+标题居左;侧栏到顶 hover 覆盖式。
    .aside-brand 用 el-header 组件（padding/高度=EP 默认,与顶栏同源）;去 .el-menu 自带 border-right 消 1px 宽差 */
 .app-title { font-size: var(--fs-page); font-weight: 700; color: var(--brand-600); }
+/* 批114：冻结入口独立图标角标（不复用 el-badge——与铃铛告警面解耦，角标自绘） */
+.freeze-trigger { position: relative; display: inline-flex; align-items: center; }
+.freeze-badge { position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px;
+  padding: 0 4px; border-radius: 8px; box-sizing: border-box;
+  background: var(--warn-fill); color: #fff; font-size: var(--fs-foot); line-height: 16px; text-align: center;
+  font-family: var(--font-num); font-weight: 600; pointer-events: none; }
 .aside-brand { display: flex; align-items: center; gap: 8px; }
 .aside-brand-text { color: #fff; font-size: var(--fs-page); font-weight: 700; }
 /* 图钉（2026-09-10）：标题后右对齐——flex 布局 text 撑开+margin-left:auto；钉死=竖直针高亮,浮动=斜 45°灰 */

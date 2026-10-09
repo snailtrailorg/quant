@@ -297,6 +297,22 @@ def list_freeze_events(tid: int, limit: int = 50,
     return {"events": _fe.list_events(task_id=tid, limit=min(max(limit, 1), 200))}
 
 
+@router.get("/api/freeze-events")
+def list_all_freeze_events(open_only: bool = False, limit: int = 50,
+                           payload: dict = Depends(require_perm("read"))):
+    """批 114：全局冻结事件（顶栏冻结入口角标/下拉的数据源）。
+
+    与 per-task `GET /api/live-task/{tid}/freeze-events` 的区别：**跨任务、无 mode 分档**——
+    入口图标的目标是「把当前冻着的任务整体列出来」，不是某任务的运行细节。故权限面回到
+    `read`（四角色可见）——角标「有几个任务冻着」是全局健康信号，与铃铛的 admin-only 告警面
+    不同源也不同门。`open_only=true` 只取未闭合（`unfrozen_at IS NULL`），角标计数用；
+    默认 false 行为=全量最近 limit 条（与 per-task 端点同源 `list_events`）。
+    """
+    from src.data_platform import freeze_event as _fe
+    return {"events": _fe.list_events(task_id=None, limit=min(max(limit, 1), 200),
+                                      open_only=open_only)}
+
+
 @router.delete("/api/live-task/{tid}")
 def delete_live_task(tid: int,
                      payload: dict = Depends(require_perm_any("paper_trade", "live_control"))):

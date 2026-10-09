@@ -77,8 +77,12 @@ def close_freeze(task_id: int, *, method: str, operator: str | None = None,
     return n
 
 
-def list_events(task_id: int | None = None, limit: int = 50) -> list[dict]:
-    """事件查询面（任务页/运维/测试）：默认全量最近 limit 条，可按 task 过滤。
+def list_events(task_id: int | None = None, limit: int = 50, *, open_only: bool = False) -> list[dict]:
+    """事件查询面（任务页/运维/测试）：默认全量最近 limit 条，可按 task 过滤、可只取未闭合。
+
+    批 114：`open_only=True` 时 SQL 追加 `unfrozen_at IS NULL`（**在 `ORDER BY ... LIMIT` 之前**
+    过滤——先过滤后截断，否则「LIMIT 50 先截断」会漏计第 51 条起的未闭合行，角标计数失真）。
+    过滤条件与 task_id 组合时按 WHERE/AND 正确拼接（两个条件可各自独立出现）。
 
     时刻列（frozen_at/unfrozen_at）序列化用 **`isoformat()`**——显式契约（带 `T` 分隔符与
     完整时区偏移），前端 `new Date()` 一族解析器全兼容。**勿用 `str(datetime)`**：丢分隔符、
@@ -87,9 +91,14 @@ def list_events(task_id: int | None = None, limit: int = 50) -> list[dict]:
     sql = ("SELECT id, task_id, account_id, symbol, freeze_type, frozen_at, watermark, "
            "gap_target_ts, unfrozen_at, unfreeze_method, operator FROM freeze_event")
     args: list = []
+    where: list[str] = []
     if task_id is not None:
-        sql += " WHERE task_id=%s"
+        where.append("task_id=%s")
         args.append(task_id)
+    if open_only:
+        where.append("unfrozen_at IS NULL")
+    if where:
+        sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY id DESC LIMIT %s"
     args.append(int(limit))
     with get_conn() as conn:
