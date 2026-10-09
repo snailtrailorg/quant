@@ -678,19 +678,25 @@
             (prev_release_id | default('')) | length > 0
             and not (auto_rollback_disabled | default(false) | bool)
 
+        # 批 112 回滚诚实性：采集实际 alembic 版本（schema 不回退，故回滚后 DB 仍停在新版）——
+        # 供下方诚实词条打印，揭穿「已自动回滚」的假话（回滚只翻代码，schema 版本没动）。
+        - name: rescue(6-8) —— alembic 版本采集（诚实词条打印实际 schema 版本）
+          ansible.builtin.command: "{{ quant_hbcheck_cmd | default('sudo -u quant ' ~ deploy_wrapper_dir ~ '/quant-hbcheck') }} alembic-version"
+          register: alembic_version_after
+          changed_when: false
+          failed_when: false
+
         - name: rescue(6-8) —— 回滚收尾（非零退出+告警；回滚与否看 auto_rollback_disabled、门豁免与否看 allow_contract——两语义不互替，批 111 P1-c）
           ansible.builtin.fail:
             msg: >-
               {% if auto_rollback_disabled | default(false) | bool %}
               发布失败（本版已禁用自动回滚——未回滚）。
               {% else %}
-              发布失败已自动回滚（代码已回旧版）。
+              发布失败已回滚代码、schema 未回退（当前 alembic 版本={{ alembic_version_after.stdout | default('(未知)') | trim }}）。
               {% endif %}
               失败任务: {{ ansible_failed_task.name | default('(rescue 内失败)') }}
               {% if ddl_gate is defined and ddl_gate.rc is defined and ddl_gate.rc == 1 and (allow_contract | default(false) | bool) %}
               【门命中但被 allow_contract 豁免阻断——无 expand-only 保证】
-              {% else %}
-              （expand-only 前提经 DDL 门恒跑检测保证）
               {% endif %}
               {% if (prev_release_id | default('')) | length == 0 %}
               【首次发布无上一版可回滚——人工处置】{% endif %}

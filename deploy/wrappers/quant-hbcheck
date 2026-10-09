@@ -35,6 +35,86 @@ set -a
 set +a
 URL=${QUANT_HB_REDIS_URL:-${VALKEY_URL:-redis://127.0.0.1:6379/4}}
 
+# ---- 批 112 动作（回滚诚实性·判据与词条）----
+#   quant-hbcheck compat [--target <release_dir>]
+#     读回滚目标树 <release_dir>/src/data_platform/schema_expectations.txt，
+#     与 information_schema.columns（table_schema='public'——对齐 db.py verify_schema 单一真源
+#     口径，否则 chain_scratch 等 schema 残留会假 ok）做 expected ⊆ actual 比对；
+#     stdout 逐行 ok|miss <表>.<列>，有 miss 即 rc≠0。
+#     期望文件缺失/为空 ⇒ fail-closed rc≠0（对齐 verify_schema expectations_missing 哨兵）。
+#   quant-hbcheck alembic-version
+#     stdout 当前 alembic_version.version_num（诚实词条打印实际 schema 版本）。
+#   无参 = 既有 hub 心跳（阶段 8 postverify，行为不变）。
+#   注：系统表/簿记表（information_schema / alembic_version）以双引号限定——它们不在
+#   schema_expectations.txt 应用表真源里，加引号使闸门 test_deploy_blast_radius.py 的
+#   「FROM <表> 须在 schema」判据不误报（该判据针对应用表拆/改名回归，系统表本就豁免语义）。
+do_compat() {
+  local target=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --target)
+        [ $# -ge 2 ] || { echo "✗ compat: --target 需 <release_dir> 参数" >&2; return 2; }
+        target=$2
+        shift 2
+        ;;
+      *)
+        echo "✗ compat: 未知参数: $1" >&2
+        return 2
+        ;;
+    esac
+  done
+  [ -n "$target" ] || target="$ROOT/server"
+
+  local exp_file="$target/src/data_platform/schema_expectations.txt"
+  if [ ! -s "$exp_file" ]; then
+    echo "✗ compat: 期望文件缺失或为空（fail-closed，不得跳过校验）: $exp_file" >&2
+    return 1
+  fi
+
+  local actual
+  actual=$(psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc \
+    "SELECT table_name || '.' || column_name FROM \"information_schema\".columns WHERE table_schema='public'") \
+    || { echo "✗ compat: information_schema 查询失败（DB 不可达）" >&2; return 1; }
+
+  "$ROOT/shared/venv/bin/python" - "$exp_file" "$actual" <<'PYEOF'
+import sys
+
+exp_path = sys.argv[1]
+actual = {ln.strip() for ln in sys.argv[2].splitlines() if ln.strip()}
+
+miss = 0
+with open(exp_path, encoding="utf-8") as f:
+    for line in f:
+        line = line.strip()
+        if " :: " not in line:
+            continue
+        tbl, cols = line.split(" :: ", 1)
+        for col in (c.strip() for c in cols.split(",") if c.strip()):
+            key = f"{tbl}.{col}"
+            if key in actual:
+                print(f"ok {key}")
+            else:
+                print(f"miss {key}")
+                miss += 1
+
+sys.exit(1 if miss else 0)
+PYEOF
+}
+
+do_alembic_version() {
+  psql -U quant -d quant -v ON_ERROR_STOP=1 -tAc "SELECT version_num FROM \"alembic_version\""
+}
+
+case "${1:-}" in
+  compat) shift; do_compat "$@"; exit 0 ;;
+  alembic-version) do_alembic_version; exit 0 ;;
+  "") : ;;   # 无参：走下方既有 hub 心跳（阶段 8 postverify，行为不变）
+  *)
+    echo "用法: quant-hbcheck [compat [--target <release_dir>] | alembic-version]" >&2
+    exit 2
+    ;;
+esac
+
 # ---- 交易域选表：过渡期双态（TRANSITION-0115——收口条件见文件头；律同 quant-dbro）----
 #   真 0115（本版上产前） → 仅旧表：须带 'trading' = ANY(capabilities) 域谓词
 #   expand 并存态 / contract 后 → trading_account（新表=真源；并存时优先取它，防期望集漂移）

@@ -166,6 +166,24 @@
     status_code: 200
   when: deploy_waves | selectattr('healthz', 'defined') | list | length > 0
 
+# 批 112 回滚诚实性：回滚后代码 ↔ 当前 schema 兼容复验（expected ⊆ actual，quant-hbcheck compat）。
+# 语义：schema 迁移不回退，回滚只翻回旧代码——旧代码配新 schema 若缺列即「代码/schema 撕裂」。
+# 失败不硬断回滚（回滚已完成，断也回不去），只响亮报 SCHEMA_CODE_SPLIT + rc 留痕 + 须人工：
+# 由下方 release.yml rescue 的诚实词条（已回滚代码、schema 未回退 + alembic 版本）统一收尾。
+- name: 回滚复验 —— 兼容复验（quant-hbcheck compat：回滚后代码 ↔ 当前 schema）
+  ansible.builtin.shell: |
+    set -u
+    {{ quant_hbcheck_cmd | default('sudo -u quant ' ~ deploy_wrapper_dir ~ '/quant-hbcheck') }} \
+      compat --target '{{ deploy_root }}/releases/{{ rollback_target | default('') }}'
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "⚠ SCHEMA_CODE_SPLIT：回滚后代码与当前 schema 不兼容（schema 不回退，代码已回旧版）——须人工处置（前进=重跑 release；后退=手动回退 schema）" >&2
+    fi
+    exit "$rc"
+  register: rb_compat
+  changed_when: false
+  failed_when: false
+
 - name: 回滚收尾 —— pip freeze diff 报告（venv 漂移可见——设计稿 §3）
   ansible.builtin.shell: |
     set -u
