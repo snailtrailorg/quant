@@ -20,9 +20,19 @@ crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨�
 | 7 | `Temporality` 无 `continuous` 枚举（仅 historical/snapshot/streaming）——决策 B 该子句已撤回 | `quant_common/contract.py:44` |
 | 8 | OKX 源重试预算偏薄（102b 挂账：7/485 标的 3 次退避后仍 ConnectionReset） | `flow/任务/批102b-OKX数据层.md` 待办注记 |
 
+## 步 0 排查结论（2026-10-09 深夜落账）
+
+**A. okx_perp_daily 10-08/09 晨档缺跑——根因定案：OKX 代理出口不通（infra）**
+- 证据链：① 调度器两晨档**确有触发**（10-08 08:43:57 / 10-09 08:43:59 `n_triggered=2` 含 okx，内联跑 16-18s）；② 无 handler 完成行 ⇒ `list_symbols()` 阻塞 ~16s 后 `raise RuntimeError`（`engine.py:1307`，enum_hint 自述「instruments 接口不可达（含代理出口未配/不通）」）；③ `sync()` except（`:470`）落 `sync_log` error 行 + 告警 + `last_sync_ts` 刷新（⇒ 调度器下轮「未到周期」，无重试风暴——机制按设计工作）；④ **prod 直连 OKX 实测 `curl rc=124` 超时**（OKX 大陆被墙，批 102a 设计须走代理出口；代理出口 10-08 起不通）。
+- **数据面**：游标停 20261006，10-07 起缺数据（游标契约会自动补——代理恢复后下一轮从 10-07 重拉，`cursor_upto`＝实际取到数据的最后一日）。
+- **处置**：代理出口修复属 **infra/装位**（同批 111 infra 两则，交办 michael/用户）；代码面**无需修**——失败可见性（sync_log error + 告警）按设计工作。附产品缺陷：调度器 16s 内联阻塞（okx 不在 `_SYNC_ASYNC_DISPATCH` 异步清单）——**顺手改进候选**：把 crypto 日线档加进 `_SYNC_ASYNC_DISPATCH` 防调度轮长阻塞（beat 5min 一轮被占 16s+）。
+- 待办：代理恢复后验证一轮自动补拉（游标 20261006 → 追平）。
+
+**B. 其余步 0 项**（时间轴重裁 / OKX 盘中需求确认）：未做，随批推进。
+
 ## 依赖（就绪）
 
-批 101/101b/102b 全部 ✅（上产）；`sync_gap` 排除段机制 ✅（批 109）；102a 代理体系 ✅。
+批 101/101b/102b 全部 ✅（上产）；`sync_gap` 排除段机制 ✅（批 109）；102a 代理体系 ✅（**但出口当前不通**，见步 0-A——infra 修复前置）。
 
 ## 引用（设计 / 方案）
 
