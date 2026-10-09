@@ -12,6 +12,7 @@
 **决策 A —— 83b provider 真路由的验收口径**（依赖方向）：第二源验证**不阻塞立项**。83b 的「选源真生效」无法靠 tushare 单源行为级验证（joinquant/ricequant 是 stub 空能力集）。立项**前置＝注入 spy stub 第二源**（实现 fetch 契约、返回可辨识假数据），断言「切换 provider ⇒ 引擎走 spy 而非 tushare」＋「adapter 已注册但 DataSource 未注册 ⇒ fail-fast（EX_CONFIG）不静默回落」。**不得用「直改 DB provider 断言不回落」冒充选源验证**——那是验错误路径，不是验路由。
 
 **决策 B —— 同步④ crypto 数据层的时间轴契约**（契约闭合）：crypto 无交易日日历、24/7 连续。时间轴＝**`continuous`**（契约层 `Temporality` 已有该枚举，不新造词汇）；窗口下界＝**交易所保留窗口**（`start_floor=NULL` 语义＝「下界由数据源运行期决定」）；per-symbol 键＝`(symbol)`（非 `(symbol, trade_date)`）。**立项前置＝该契约已定**（本决策即定）。
+**⚠ 2026-10-09 C 组步 2 双盲审修正**：上段「`Temporality` 已有 `continuous` 枚举」**失实**（`contract.py:44` 仅 historical/snapshot/streaming，grep 零命中；研究稿 §八-5 亦已撤回该枚举方案）——该子句撤回。时间轴表达（用 `streaming` vs 契约层扩枚举）属设计变更，待批 116 现状重盘（101/101b/102b 已落地大部分）后回步 1 重裁。决策 B 其余两条（`start_floor=NULL` 保留窗口、键 `(symbol)`）保留。
 
 **决策 C —— 同步③ 期三双真源收编的执行顺序**（职责层级）：`float_cols`/`text_cols` 单源化**会改已入库内容语义**。顺序＝**先数据语义清理（列类型对齐真值，真库往返验证）→ 再切读侧单源**。**两步不许合一步**（合一步＝语义变更与真源切换混叠，回归无法定位责任方）。**不得只加测试跳过往返**——切换即改已入库内容，非纯读侧。
 
