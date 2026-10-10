@@ -120,7 +120,8 @@ class TestBackfillCapabilityTruth:
         assert rows["okx_perp_daily"] is None, "源下限不属策略列（归 available_range）"
         assert {k for k, v in rows.items() if v is not None} == {
             "astock_basic", "index_daily",
-            "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min"}
+            "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
+            "st_list_sync"}   # 批 117 P0-2/0143：retention='2026-01-01' 地板（防全史首跑）
         assert rows["binance_perp_hourly"] < rows["binance_perp_1min"], \
             "hourly 的保留窗更长（7 天 vs 1 天）"
 

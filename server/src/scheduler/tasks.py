@@ -765,8 +765,14 @@ def data_sync_scheduler():
             # P1 修复（2026-08-20 双盲审计 A2）：僵尸 running 复位——OOM/SIGKILL 后无代码
             # 复位（_mark_running(False) 只在进程活着时执行）→ beat 永久 skip 该同步。
             # 判定：last_sync_ts 超 2h 未更新（最长任务 sync_all ~70min 留余量）=进程已死。
+            # 批 117 步 8 补：last_sync_ts **为 NULL** 且 running ⇒ 同判僵尸——NULL＝从未
+            # 成功写终态（新 sync 项首跑被杀的形态，st_list_sync 2026-10-10 实证：进程
+            # 11:15 被回滚重启杀死、ts 停 NULL ⇒ 原 `if last_sync_ts:` 恒假 ⇒ **永不复位**，
+            # 本修复自己注释批判的「永久 skip」在 NULL 分支复活）。
             _stale = False
-            if last_sync_ts:
+            if last_sync_ts is None:
+                _stale = True
+            elif last_sync_ts:
                 try:
                     _age = (now - last_sync_ts.astimezone(TZ_CN)).total_seconds()
                     _stale = _age > 7200
