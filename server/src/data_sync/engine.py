@@ -3058,9 +3058,9 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
                         batch.append(tuple(vals))
                     cur.executemany(upsert, batch)
                 conn.commit()
-            # 批 117：st_list 落表后派生 security_state(st) 时变行（官方名单=当日快照，
-            # 全市场两态全集——在档=is_st:true；不在档=非 ST（无行，effective_attr 查不到
-            # 即非 ST）。fail-soft 同 _derive_st_states 范式。
+            # 批 117：st_list 落表后派生 security_state(st) 时变行（ST-only 单态名单——
+            # 在档=is_st:true；不在档=非 ST（无行即默认态）。P0-2 教训：名单是单态的，
+            # 权限层只消费正向事实（见 decisions.md 2026-10-10 架构律）。
             if table == "st_list":
                 _derive_st_states_from_st_list(df)
             return len(df)
@@ -3178,9 +3178,10 @@ def _derive_st_states(df) -> None:
 def _derive_st_states_from_st_list(df) -> None:
     """批 117：从 st_list 官方名单快照派生 security_state(st) 时变行（fail-soft）。
 
-    与 namechange 派生的差异：官方名单是**当日全市场两态全集**——在档即 is_st=true
-    （type_name 全「风险警示板」，步 0 实测），不在档=非 ST（无须写行——非 ST 是
-    「无行」默认态）。effective_from=快照 trade_date（官方口径，非 today 兜底）。
+    与 namechange 派生的差异：官方名单是 **ST-only 单态快照**（P0-2 实证修正：
+    当日全市场 ST 股 ~200 行，非 ST 不在档是正常态）——在档即 is_st=true，
+    不在档=非 ST（无须写行——非 ST 是「无行」默认态）。effective_from=快照 trade_date
+    （官方口径，非 today 兜底）。
     """
     try:
         rows = []

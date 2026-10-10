@@ -5,7 +5,7 @@
 
 ## 目标
 
-ST 判定从「`namechange` 派生（戴帽滞后）+ 无档=非 ST（fail-open）」改为**接源侧官方 ST 名单 + 无档 fail-closed**，对齐 `perms.py` 读库失败即拒的不变量。
+ST 判定从「`namechange` 派生（戴帽滞后）」改为**接源侧官方 ST 名单**（判定层只消费正向事实：在档=ST；不在档=非 ST 放行——**P0-2 修正后的终态语义**，初版「无档 fail-closed」判据已被 prod 实战否定并立法废除，见 `decisions.md` 2026-10-10）。
 
 ## 现状（已实证 · 2026-10-09 锚点补齐）
 
@@ -54,8 +54,9 @@ namechange 现判定路径 ✅（替换目标）。**步 0 接口探查已完成
 
 0. ~~**步 0 · 接口探查（强制前置）**~~ ✅ **已完成（2026-10-09 深夜，结论见「步 0 探查结论」节）**——两个前提均走最优分支：`pro.stock_st()` 官方接口存在（201 行全量）；namechange `limit/offset` 分页真生效。
 1. 新增 `pull_stock_st(trade_date)`（`tushare_adapter.py`）：全市场 ST 快照（~201 行，单页足够；签名带 `limit/offset` 留扩展）＋ 新 sync 项（每交易日同步落表，表名 `st_list`；`base.py` 分派 + `sync_config`/`sync_kind_config` 行）。
-2. ST 判定读 `st_list` 快照；**无档改 fail-closed**（`perms.py:139-147` 的「无档=非 ST」分支改为拒绝/告警，与既有「读库失败 fail-closed」同向）。
+2. ST 判定读 `st_list` 快照；~~**无档改 fail-closed**~~ **【P0-2 废除——初版判据，见返工补充段】** 终态：在档=ST（按 `account.is_st_allowed` 判拒）；**不在档=非 ST 放行**；表空/表缺=冷启动放行；读库失败仍 fail-closed（不变量）。
 3. `pull_namechange` 分页/截断修复（`tushare_adapter.py:614-622` 加 `limit/offset` 循环翻页，累积至返回 < limit 即止 + 分派点 `base.py:556` + 重建联动 `engine.py:3099` 三处同核）。
+4. （P0-2 补）迁移 0143：description 去假判据 + `retention='2026-01-01'` 补地板（防 16 年全史首跑——0142 种子 `retention=NULL` 叠加批 108「F-1 首跑即全史」⇒ dev 实测 4069 日 50 万行撞 SoftTimeLimit）。
 
 ## 限定范围
 
@@ -64,7 +65,7 @@ namechange 现判定路径 ✅（替换目标）。**步 0 接口探查已完成
 
 ## 接口契约
 
-- 改：`perms.py` ST 无档分支（fail-open → fail-closed）。
+- 改：`perms.py` ST 判定分支（在档拒/不在档放行/读库失败拒——终态语义见产出 2）。
 - 改：`pull_namechange`（按步 0-b 结果定签名：+`offset`/`limit` 参数，或分段策略）。
 - 不改：`effective_attr` 接口签名。
 
@@ -72,9 +73,10 @@ namechange 现判定路径 ✅（替换目标）。**步 0 接口探查已完成
 
 - 步 0 探查结论落任务文件（两前提各一段：结论 + 证据）
 - `cd server && ./venv/bin/python -m pytest tests/ -q` → 全绿
-- 行为级：无档 → fail-closed（拒绝）；有档 → 正确判定；`pull_namechange` >10000 条不截断（反证钉：单次调用 mock 只回 10000 ⇒ 分页用例红）
+- 行为级：~~无档 → fail-closed（拒绝）~~【P0-2 反转】**非 ST 股（600000.SH）不在档 → 放行**；在档 ST + 账户不许 → 拒；读库失败 → 拒；`pull_namechange` >10000 条不截断（反证钉：单次调用 mock 只回 10000 ⇒ 分页用例红）
 - namechange 重建后 st 派生行数不回归（往返验证）
+- **【P0-2 补】prod 真机**：live-task 重启不因 ST 判定 78/CONFIG（首部署曾因此回滚）
 
 ## mock 方式
 
-ST 名单接口 mock；namechange 分页用假数据分段返回验证循环；`perms` 用例 mock `SMClient().effective_attr` 返回 None（无档）/有档两态；不连真 Tushare。
+ST 名单接口 mock；namechange 分页用假数据分段返回验证循环；`perms` 用例 mock st_list 查询返回 在档/不在档/表空/读库异常 四态；不连真 Tushare。
