@@ -741,8 +741,9 @@ class TestMigration0137Shape:
         **0140**（批 109 建 `sync_gap` 对账结果表）→ **0141**（批 110 `sync_gap`
         判据两列）→ **0142**（批 117 `st_list` 表 + ST 名单同步项）→ **0143**
         （批 117 P0-2 纠偏：st_list 语义修正——description 去假判据 + retention
-        补地板防 16 年全史首跑）。挪钉时**同时**
-        确认 0142 的 `down_revision=="0141"`，保证链未断。
+        补地板防 16 年全史首跑）→ **0144**（批 118 `factor_def.needs` JSONB 列——
+        因子多维数据依赖声明持久化）。挪钉时**同时**
+        确认 0143 的 `down_revision=="0142"`，保证链未断。
         """
         import importlib
         import pathlib
@@ -752,8 +753,8 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        # 0143（批 117 P0-2 纠偏：st_list 语义修正迁移——数据修正零 DDL）
-        assert heads == {"0143"}, f"head 不是唯一 0143：{sorted(heads)}"
+        # 0144（批 118：factor_def 加 needs JSONB 列 + object 形状守卫）
+        assert heads == {"0144"}, f"head 不是唯一 0144：{sorted(heads)}"
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

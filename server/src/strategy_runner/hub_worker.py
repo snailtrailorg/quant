@@ -181,6 +181,12 @@ def run(ctx: dict) -> None:
     r = _valkey()
     tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
     market = ctx.get("market") or market_of_symbol(symbol)   # 批 66c：ctx 注入真源（接口行），缺省按 symbol 后缀派生
+    # 批 118：暖机/运行窗常量真源=src.strategy_runner（WARMUP_BASELINE=100/WARMUP_CAP=5000）。
+    # 此处窗长=运行期 history 上限：needs 聚合声明窗与基线取大（needs 随 ctx 注入——
+    # runner 装载侧算好；未注入（测试/旧调用方）回退基线窗）。
+    from src.strategy_runner import WARMUP_BASELINE
+    _needs = ctx.get("needs") or {}
+    hist_window = max(WARMUP_BASELINE, int(_needs.get("bar_minute", 0)))
 
     def _in_mkt_session(now=None) -> bool:
         return in_session(market, now)
@@ -240,12 +246,15 @@ def run(ctx: dict) -> None:
     # ——— 暖机：只填 history 绝不调 on_bar（评审 F3）———
     def _warmup_from_stream(hist: list, upto_ts: str | None = None) -> list:
         """流回放填 history。upto_ts（epoch 键）截断（rewarm 时防未来泄漏，评审 S4）。
-        合入逻辑在模块级 _warmup_merge（可测——批 56b 盲审 A 修）。"""
+        合入逻辑在模块级 _warmup_merge（可测——批 56b 盲审 A 修）。
+        回放窗=hist_window（needs 聚合声明窗与基线取大，批 118——原硬编码 240 根
+        恒小于基线窗 100 时首启即缺根；常量真源见 src.strategy_runner）。"""
         try:
-            entries = r.xrevrange(stream, count=240)
+            entries = r.xrevrange(stream, count=hist_window)
             before = len(hist)
             _warmup_merge(hist, entries, upto_ts)
-            logger.info("hub 暖机：流回放补 %d 根（history 总 %d）", len(hist) - before, len(hist))
+            logger.info("hub 暖机：流回放补 %d 根（history 总 %d，回放窗 %d）",
+                        len(hist) - before, len(hist), hist_window)
         except Exception as e:
             logger.warning("hub 暖机回放失败: %s", e)
         return hist
@@ -253,7 +262,25 @@ def run(ctx: dict) -> None:
     def _rewarm(upto_ts: str | None = None) -> None:
         fresh = ctx["warmup_pg"]()
         fresh = _warmup_from_stream(fresh, upto_ts)
-        history[:] = fresh[-100:]
+        fresh = fresh[-hist_window:]
+        # 批 118 判定三分支·补充分支：rewarm 后窗口 < 声明窗 ⇒ 视同分支② degraded
+        # （瞬态——流回放窗有限是常态，不升级为拒启）。仅告警+记档，不冻结不退出；
+        # 首启判定已在 runner 装载侧（judge_supply），此处收运行期收缩面。
+        _declared = int(_needs.get("bar_minute", 0))
+        if _declared and len(fresh) < _declared:
+            logger.warning("rewarm 后窗口 %d < 声明窗 %d（%s）——degraded：因子窗口不足，"
+                           "值可能不准；数据面恢复后自动补齐", len(fresh), _declared, symbol)
+            try:
+                from src.strategy_runner.main import judge_supply
+                d = judge_supply(symbol, _needs, len(fresh))
+                _alert(f"任务 {tid} rewarm 窗口不足（{symbol}）",
+                       f"{d['reason']}（实得 {d['actual']}/{d['declared']}）", code="warmup.degraded")
+                _st = getattr(ctx.get("strategy"), "warmup_result", None)
+                if isinstance(_st, dict):
+                    _st.update(d)
+            except Exception:   # noqa: S110  # 告警链 never-raise（fail-open 降级）
+                pass
+        history[:] = fresh
         # 批 66c 解冻闭环（D26 §3.4②）：rewarm 后显式推进 max_ts 至回放尾——否则回放不推水位，
         # 冻结重启后首根 live bar 仍满足缺口条件再冻结（盘中永远解不了）。跳洞=显式接受。
         if history:
@@ -400,7 +427,7 @@ def run(ctx: dict) -> None:
             # 该 bar 信号损失由 guard 的 logger.exception + safe_notify critical 告警暴露。
             stats["bars"] += 1
             history.append(bar)
-            if len(history) > 100:
+            if len(history) > hist_window:   # 批 118：运行窗=needs 聚合声明窗（原硬编码 100）
                 history.pop(0)
         sa = getattr(sig, "action", None)
         logger.info("BAR %s close=%.2f vol=%.0f signal=%s", bar["ts"][:19], bar["close"], bar["volume"],

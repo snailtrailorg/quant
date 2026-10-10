@@ -144,24 +144,27 @@ class TestDslFactorRegister:
             register_custom_factor("bad_dsl", "custom", "not an expression!", ftype="dsl")
 
     def test_load_dsl_registers_partial(self):
-        """load_factors_from_db 的 dsl 分流：partial 注册零参可调+needs_history=窗口 n。"""
+        """load_factors_from_db 的 dsl 分流：partial 注册零参可调+needs_history=窗口 n。
+        批 118：行加 needs 列（8 列）——NULL 走 int 糖升格。"""
         from unittest.mock import patch, MagicMock
         from src.strategy_framework.factor import load_factors_from_db, _FACTOR_REGISTRY
         conn = MagicMock()
         conn.__enter__.return_value = conn
         conn.execute.return_value.fetchall.return_value = [
-            ("dslma", "custom", "d", "mean(close,20) / close - 1", "{}", 0, "dsl"),
-            ("pyma", "custom", "d", "def compute(ctx):\n    return ctx.close", "{}", 5, "python"),
-            ("baddsl", "custom", "d", "oops(", "{}", 0, "dsl"),
+            ("dslma", "custom", "d", "mean(close,20) / close - 1", "{}", 0, "dsl", None),
+            ("pyma", "custom", "d", "def compute(ctx):\n    return ctx.close", "{}", 5, "python", None),
+            ("baddsl", "custom", "d", "oops(", "{}", 0, "dsl", None),
         ]
         with patch("src.data_platform.db.get_conn", return_value=conn):
             loaded = load_factors_from_db()
         assert set(loaded) == {"dslma", "pyma"}          # 坏表达式跳过不炸
         e = _FACTOR_REGISTRY["dslma"]
         assert e["type"] == "dsl" and e["needs_history"] == 20
+        assert e["needs"] == {"bar_minute": 20}          # DSL 窗口糖升格
         inst = e["cls"]()                                  # 零参调用语义（strategy.py 消费面）
         assert inst.expr == "mean(close,20) / close - 1"
         assert _FACTOR_REGISTRY["pyma"]["type"] == "python"
+        assert _FACTOR_REGISTRY["pyma"]["needs"] == {"bar_minute": 5}
         assert "baddsl" not in _FACTOR_REGISTRY
         del _FACTOR_REGISTRY["dslma"], _FACTOR_REGISTRY["pyma"]
 

@@ -77,8 +77,105 @@ def _wait_for_deps(max_wait: float = 600.0) -> bool:
         time.sleep(d)
 
 
-def _warmup_history(symbol: str, n: int = 100) -> list:
-    """PG 暖机：读历史 bar 填充 history（因子初始化 / 断线补缺口，#4）。返回 list。"""
+def judge_supply(symbol: str, needs: dict[str, int], history_len: int,
+                 list_date_fn=None, trading_days_between=None) -> dict:
+    """批 118 判定语义（钉死于任务文件产出 4——**纯函数**，main/hub_worker 双消费）。
+
+    入参：
+      symbol          标的（branch② 读 list_date 用）
+      needs           策略聚合声明（aggregate_needs 产物；bar_minute 窗=声明窗）
+      history_len     暖机后实得根数（PG + 流回放合并后）
+      list_date_fn    依赖注入（默认 security_master.sm_inception——测试 mock 点；
+                      返回 ISO 'YYYY-MM-DD' 或 None）
+      trading_days_between 依赖注入（默认=日历自然日近似；A 股真交易日历见
+                      md_session.get_trade_calendar，此处自然日近似偏保守：
+                      高估可得根数 ⇒ 误拒少/误 degraded 少）
+
+    返回 dict（调用方照 decision 行动——本函数不 exit 不告警）：
+      {"action": "ok"|"degraded"|"reject",
+       "reason": str, "kind": str|None, "declared": int, "actual": int}
+
+    三分支 + 两补充（任务文件产出 4）：
+      ① kind ∉ DATA_KINDS 或 ∈ L2 占位集 ⇒ reject——EX_CONFIG 拒启（消静默不供给；
+         词表校验在写侧已拦，此处兜底防 DB 手改/旧数据）；
+      ② kind 合法但供给不足（history_len < 声明窗）⇒ list_date 判界：
+         上市 ≥ 声明窗（标的够老而数据缺）⇒ degraded+告警（瞬态，同步层追）；
+         上市 < 声明窗（标的太新，真不可满足）⇒ reject；
+         list_date 无档（SM 未回填）⇒ 归 degraded（≠标的太新——判定层不依赖
+         数据模块生命周期，2026-10-10 立法）；
+      ③ rewarm 后窗口缩至 < 声明窗 ⇒ 同②（degraded——流回放窗有限是常态，不升级拒启；
+         hub_worker._rewarm 消费侧：judge_supply(symbol, needs, len(fresh)) 取 reason 告警）；
+      补充：读库失败 ⇒ 调用侧 fail-open+告警（现状 #7，D27 边界，不在本函数）。
+    """
+    from src.quant_common.contract import DATA_KINDS
+    from src.strategy_framework.factor import L2_PLACEHOLDER_KINDS
+    from src.strategy_runner import WARMUP_CAP
+    if list_date_fn is None:
+        from src.data_platform.security_master import sm_inception as list_date_fn
+    _BARS_PER_DAY = 240   # 上市时长→分钟根数估算系数（A 股 4h/日；crypto 24h 偏保守=不误拒）
+    if trading_days_between is None:
+        def trading_days_between(d0, d1):   # 自然日近似（保守：高估可得根数）
+            return (d1 - d0).days * _BARS_PER_DAY // 365
+
+    minute_n = int(needs.get("bar_minute", 0))
+    # 分支①：词表/占位/L2 兜底校验（写侧已拦；DB 手改/旧脏行防线）——先于一切
+    # （纯 L2 声明 bar_minute=0 也要拒——不因无分钟窗短路放过非法键）
+    bad = [k for k in needs if k not in DATA_KINDS or k in L2_PLACEHOLDER_KINDS]
+    if bad:
+        return {"action": "reject",
+                "reason": f"needs 含非法/L2 占位键: {bad}（词表=DATA_KINDS；depth/stream_tick 引擎侧无供给管道）",
+                "kind": bad[0], "declared": minute_n, "actual": history_len}
+    if minute_n <= 0:
+        return {"action": "ok", "reason": "无 bar_minute 声明", "kind": None,
+                "declared": 0, "actual": history_len}
+    if minute_n > WARMUP_CAP:
+        return {"action": "reject",
+                "reason": f"bar_minute 声明 {minute_n} 超 cap {WARMUP_CAP}——请改小窗口或联系管理员上调",
+                "kind": "bar_minute", "declared": minute_n, "actual": history_len}
+    if history_len >= minute_n:
+        return {"action": "ok", "reason": "", "kind": "bar_minute",
+                "declared": minute_n, "actual": history_len}
+    # 分支②：供给不足 ⇒ list_date 判界
+    try:
+        ld = list_date_fn(symbol)
+    except Exception:   # SM 读失败=无档语义（fail-soft 归 degraded——判定层不依赖数据模块生命周期）
+        ld = None
+    if ld is None:
+        return {"action": "degraded",
+                "reason": f"{symbol} list_date 无档（SM 未回填≠标的太新）——实得 {history_len} < 声明 {minute_n}，"
+                          "按瞬态供给不足降级（同步层追），不拒启",
+                "kind": "bar_minute", "declared": minute_n, "actual": history_len}
+    from datetime import date
+    from datetime import datetime as _dt
+    try:
+        d0 = date.fromisoformat(str(ld)[:10])
+    except ValueError:
+        return {"action": "degraded",
+                "reason": f"{symbol} list_date 脏值 {ld!r}——同无档归 degraded（不猜）",
+                "kind": "bar_minute", "declared": minute_n, "actual": history_len}
+    listed_days = trading_days_between(d0, _dt.now().date())
+    if listed_days * _BARS_PER_DAY < minute_n:
+        return {"action": "reject",
+                "reason": f"{symbol} 上市 {_dt.now().date() - d0}（{ld}）短于声明窗 {minute_n} 根分钟"
+                          f"（估可得 ~{listed_days * _BARS_PER_DAY} 根）——真不可满足，拒启",
+                "kind": "bar_minute", "declared": minute_n, "actual": history_len}
+    return {"action": "degraded",
+            "reason": f"{symbol} 上市 {ld} 够老但实得 {history_len} < 声明 {minute_n}"
+                      "（上市 ≥ 声明窗缺数据=瞬态，同步层追）",
+            "kind": "bar_minute", "declared": minute_n, "actual": history_len}
+
+
+def _warmup_history(symbol: str, n: int | None = None) -> list:
+    """PG 暖机：读历史 bar 填充 history（因子初始化 / 断线补缺口，#4）。返回 list。
+
+    批 118：n=None ⇒ 由调用侧按 needs 聚合传入（本函数不再持默认值——基线窗真源=
+    WARMUP_BASELINE，消费点唯一化）；读库窗 cap=WARMUP_CAP（rewarm 兜底重入时
+    超限裁到 cap——启动路径的超 cap 由 _judge_needs 拒启前置，能走到这里的多为
+    rewarm 侧回填，裁剪+日志即可，不静默截首启声明）。
+    """
+    from src.strategy_runner import WARMUP_BASELINE, WARMUP_CAP
+    if n is None:
+        n = WARMUP_BASELINE
     history = []
     try:
         from datetime import datetime as _dt
@@ -92,15 +189,17 @@ def _warmup_history(symbol: str, n: int = 100) -> list:
                           freq="1min", range_=(_dt.now() - timedelta(days=30), _dt.now()),
                           source=source)
         frame, _wm = DataBus().get_bars(req)
+        if len(frame.rows) > WARMUP_CAP:
+            logger.warning("暖机读库窗 %d 超 cap %d，裁到 cap（rewarm 回填路径）", len(frame.rows), WARMUP_CAP)
         # 11 字段序（BAR_COLUMNS）：symbol,freq,ts,open,high,low,close,volume,amount,adj_factor,source
-        for r in frame.rows[-min(n, 500):]:
+        for r in frame.rows[-min(n, WARMUP_CAP):]:
             history.append({
                 "ts": r[2],
                 "open": float(r[3]), "high": float(r[4]),
                 "low": float(r[5]), "close": float(r[6]),
                 "volume": float(r[7]) if r[7] else 0,
             })
-        logger.info("PG 暖机: 读 %d 根历史 bar", len(history))
+        logger.info("PG 暖机: 读 %d 根历史 bar（窗 n=%d）", len(history), n)
     except Exception as e:
         logger.warning("PG 暖机失败（因子首次可能不准）: %s", e)
     return history
@@ -256,6 +355,40 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     # 是否让 check_order 跳过「实盘开关」一级。**未注入时 getattr 默认 False=实盘语义**（fail-safe）。
     strategy.paper_mode = is_paper
 
+    # ——— 批 118：needs 声明真源 → 暖机自适应 + 判定三分支（装载后、暖机前）———
+    from src.strategy_framework.factor import NeedsError, aggregate_needs, validate_needs
+
+    from src.strategy_runner import WARMUP_BASELINE, WARMUP_CAP
+    needs = aggregate_needs(strategy)
+    try:
+        # 分支①兜底：拼错键 / L2 占位键 ⇒ EX_CONFIG（词表校验写侧已拦；此处防
+        # DB 手改/迁移前旧脏行——启动期响亮失败，消「声明了却静默不供给」）
+        validate_needs(needs)
+    except NeedsError as e:
+        logger.error("策略 %s 因子 needs 声明非法，拒绝启动: %s", sid, e)
+        sys.exit(EX_CONFIG)
+    _minute_n = int(needs.get("bar_minute", 0))
+    if _minute_n > WARMUP_CAP:
+        logger.error("bar_minute 声明 %d 超暖机上限 %d，拒绝启动（不静默截）——改小因子窗口或上调上限",
+                     _minute_n, WARMUP_CAP)
+        sys.exit(EX_CONFIG)
+    warmup_n = max(WARMUP_BASELINE, _minute_n)
+    logger.info("策略 %s 数据声明 needs=%s（bar_minute=%d）→ 暖机窗 %d", sid, needs, _minute_n, warmup_n)
+
+    history = _warmup_history(symbol, n=warmup_n)
+    decision = judge_supply(symbol, needs, len(history))
+    # degraded/reject 信息挂 strategy 实例属性（批 119 BarContext 扩展的读点；
+    # 本批消费面=runner 启动日志+告警）
+    strategy.warmup_result = decision
+    if decision["action"] == "reject":
+        logger.error("暖机判定拒启（%s 实得 %s/%s 根）: %s",
+                     symbol, decision["actual"], decision["declared"], decision["reason"])
+        sys.exit(EX_CONFIG)
+    if decision["action"] == "degraded":
+        logger.warning("暖机判定降级（%s）: %s——继续启动（瞬态供给不足，同步层追）", symbol, decision["reason"])
+        _alert(f"实盘任务 {tid or sid} 暖机供给不足（{symbol}）",
+               decision["reason"], code="warmup.degraded")
+
     # 评审 C2：冻结的真实抓手——包 adapter.send_order（下单唯一咽喉，strategy.place_order 必经）。
     # S6 修订（2026-08-18）：两段判定——①sticky 冻结（untrusted/gap=数据污染事实）BUY 拒/SELL 放；
     # ②动态新鲜度（bar 停更/hub 心跳）在 send_order 时刻按事实判定（ctx["buy_ok"] 由 hub_worker.run
@@ -285,8 +418,6 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
 
     adapter.send_order = _gated_send
 
-    history = _warmup_history(symbol)
-
     def _stop_check() -> bool:
         # 4a 单源化：停止判定收口 trading.stop_due（worker 5s 节奏在 hub_worker.run 调用侧保持）
         return trading.stop_due(tid, sid)
@@ -304,10 +435,11 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         "strategy": strategy, "adapter": adapter, "event_engine": ee,
         "td_api": td_api, "history": history, "frozen": frozen,
         "initial_capital": initial_capital,
-        "warmup_pg": lambda: _warmup_history(symbol),
+        "warmup_pg": lambda: _warmup_history(symbol, n=warmup_n),   # 批 118：rewarm 侧同窗（needs 自适应）
         "stop_check": _stop_check, "reconcile": _reconcile,
         "td_connect": (lambda: gw.connect(setting)) if gw is not None else (lambda: None),   # 窗开沿建连（XTP 专属）
         "td_window": (_lead, _lag) if _lead is not None else None,   # 非 XTP=None（_td_connect_due 首行短路）
+        "needs": needs,   # 批 118：聚合声明（worker hist_window/rewarm degraded 消费）
     })
     hub_worker_run(ctx)
 

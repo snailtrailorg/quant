@@ -243,6 +243,7 @@ def create_factor_api(req: dict = Body(...),
             params=req.get("params", {}),
             needs_history=_int_or(req.get("needs_history", 0), 0, lo=0, hi=5000),   # 批36b-α：非数字原 500+值域
             ftype=req.get("type", "python"),
+            needs=req.get("needs") or None,   # 批 118：多维声明（键∈DATA_KINDS，validate_needs 拦非法）
         )
         audit_log(payload["username"], "create_factor", req.get("name", ""))
         return result
@@ -357,6 +358,7 @@ def update_factor_api(name: str, req: dict = Body(...),
             params=req.get("params", {}),
             needs_history=_int_or(req.get("needs_history", 0), 0, lo=0, hi=5000),   # 批36b-α：非数字原 500+值域
             ftype=req.get("type", "python"),
+            needs=req.get("needs") or None,   # 批 118：多维声明（键∈DATA_KINDS，validate_needs 拦非法）
         )
         audit_log(payload["username"], "update_factor", name)
         return result

@@ -87,18 +87,75 @@ def run_user_code_sandboxed(code: str, namespace: dict, timeout_s: int = 5) -> N
 
 _FACTOR_REGISTRY: dict[str, dict] = {}
 
+# 批 118：needs 词表与 L2 占位集（词表真源＝quant_common.contract.DATA_KINDS，
+# 禁 bar_1d（表名）/static（自造词）等漂移写法）。L2 键语法合法但引擎侧无供给
+# 管道——运行时占位拒启（EX_CONFIG），不留「声明了却静默不供给」的口子。
+L2_PLACEHOLDER_KINDS = frozenset({"depth", "stream_tick"})
 
-def register_factor(name: str, *, category: str = "custom", needs_history: int = 0, **kwargs):
+
+class NeedsError(ValueError):
+    """needs 声明非法（未知 kind / L2 占位 / 值非正整数）。
+
+    语义对齐 EX_CONFIG(78)：永久配置错——web 侧 400 拒写，runner 侧拒启。
+    继承 ValueError：现有路由的 `except ValueError → HTTP 400` 链零改动收编。
+    """
+
+
+def validate_needs(needs: dict | None) -> dict[str, int]:
+    """校验并规整 needs 声明。返回规整后的 dict（原 dict 不动）。
+
+    - 键必须 ∈ DATA_KINDS（contract.py 唯一词表）——拼错键（bar_1d/static）抛 NeedsError；
+    - L2 键（depth/stream_tick）语法合法但引擎侧无供给管道——同样抛 NeedsError（占位拒启）；
+    - 值必须为正整数（窗口根数/条数，0 无意义）。
+    """
+    from src.quant_common.contract import DATA_KINDS
+    if not needs:
+        return {}
+    if not isinstance(needs, dict):
+        raise NeedsError(f"needs 必须是 dict[str,int]，got {type(needs).__name__}")
+    out: dict[str, int] = {}
+    for k, v in needs.items():
+        if k not in DATA_KINDS:
+            raise NeedsError(f"needs 未知数据类型: {k!r}（词表=DATA_KINDS，如 bar_minute/bar_daily——注意不是表名 bar_1d）")
+        if k in L2_PLACEHOLDER_KINDS:
+            raise NeedsError(f"needs 含 L2 占位键: {k!r}（depth/stream_tick 引擎侧暂无供给管道，批 118 拒启）")
+        if isinstance(v, bool) or not isinstance(v, int) or v <= 0:
+            raise NeedsError(f"needs[{k!r}] 必须为正整数（got {v!r}）")
+        out[k] = v
+    return out
+
+
+def merge_needs(needs: dict | None, needs_history: int) -> dict[str, int]:
+    """装饰器/DB load 双侧统一的糖映射：needs_history: int 糖＝needs={"bar_minute": N}。
+
+    显式 needs 优先——同名键 bar_minute 以 needs 为准（needs_history 兜底 0=不加键）。
+    """
+    merged: dict[str, int] = {}
+    if needs_history:
+        merged["bar_minute"] = int(needs_history)
+    merged.update(validate_needs(needs))
+    return merged
+
+
+def register_factor(name: str, *, category: str = "custom", needs_history: int = 0,
+                    needs: dict[str, int] | None = None, **kwargs):
     """装饰器：将因子类注册到全局注册表。
 
     needs_history: 需要的历史窗口大小。0=静态因子（只用当前 bar，可选股+策略）；
                    >0=动态因子（需要历史窗口，只能用于策略，不能选股）。
+                   等价糖：needs={"bar_minute": N}（批 118 多维声明，显式 needs 优先）。
+    needs: 多维数据依赖声明（批 118）。键 ∈ DATA_KINDS（contract.py 唯一词表），
+           非法键/L2 占位键抛 NeedsError（fail-fast——启动期响亮失败，不静默不供给）。
 
     Usage:
         @register_factor("ma_dev", category="trend", params={"n": 20}, needs_history=20)
         class MADevFactor(Factor):
             ...
     """
+    final_needs = merge_needs(needs, needs_history)
+    # 糖值回写：web/选股面消费 needs_history（静态/动态档），以合并结果为准
+    needs_history = final_needs.get("bar_minute", 0)
+
     def wrapper(cls):
         _FACTOR_REGISTRY[name] = {
             "cls": cls,
@@ -108,6 +165,7 @@ def register_factor(name: str, *, category: str = "custom", needs_history: int =
             "description": kwargs.get("description", cls.__doc__ or ""),
             "is_custom": False,
             "needs_history": needs_history,
+            "needs": final_needs,
         }
         return cls
     return wrapper
@@ -129,6 +187,39 @@ def list_factors(category: str | None = None, static_only: bool = False) -> list
 
 def get_factor(name: str) -> dict | None:
     return _FACTOR_REGISTRY.get(name)
+
+
+def aggregate_needs(strategy) -> dict[str, int]:
+    """策略装载时聚合全部因子的 needs（批 118 接口契约）：逐 kind 取 max。
+
+    入参=Strategy 实例（含 config.factors / _factors）。三条取 needs 通道按序回退：
+      ① 因子注册表 entry["needs"]（装饰器注册/load 闭环写入——含 DSL）；
+      ② DSLFactor 实例自身（内联 dsl: 因子不进注册表，validate_dsl_expr 现算）；
+      ③ needs_history 糖升格（旧 entry 无 needs 键=批 118 前注册的兜底）。
+    策略 Python 代码模式（PythonStrategy 不走因子注册表）⇒ 空声明（暖机落基线窗，
+    其窗口需求由用户代码 get_history(n) 自理——批 119 ctx 扩展再接）。
+    """
+    agg: dict[str, int] = {}
+    for fc in getattr(getattr(strategy, "config", None), "factors", None) or []:
+        name = fc.get("name", "")
+        if name.startswith("dsl:"):
+            try:
+                n = validate_dsl_expr(fc.get("expr", ""))
+            except Exception:
+                n = 0
+            if n > 0:
+                k = "bar_minute"
+                agg[k] = max(agg.get(k, 0), n)
+            continue
+        entry = _FACTOR_REGISTRY.get(name)
+        if entry is None:
+            continue
+        needs = entry.get("needs")
+        if not needs:
+            needs = merge_needs(None, entry.get("needs_history", 0))
+        for k, v in needs.items():
+            agg[k] = max(agg.get(k, 0), int(v))
+    return agg
 
 
 # ——— 自定义因子：DB 加载 + 编译 ———
@@ -186,19 +277,36 @@ def _make_factor_class(name: str, code: str, default_params: dict) -> type:
 
 
 def load_factors_from_db() -> list[str]:
-    """从 factor_def 表加载自定义因子到注册表。返回加载的因子名列表。"""
+    """从 factor_def 表加载自定义因子到注册表。返回加载的因子名列表。
+
+    批 118：needs JSONB 列（迁移 0144）读侧——NULL≡旧 int 糖自动升格
+    {"bar_minute": int(needs_history)}；非 NULL 走 merge_needs 规整（非法键
+    warning 跳过该因子不炸进程——与坏代码因子同档处理，写侧已拦）。
+    """
     loaded = []
     try:
         from ..data_platform.db import get_conn
         with get_conn() as conn:
             rows = conn.execute(
-                "SELECT name, category, description, code, params, needs_history, type FROM factor_def"
+                "SELECT name, category, description, code, params, needs_history, type, needs "
+                "FROM factor_def"
             ).fetchall()
         import functools
-        for name, category, description, code, params, needs_history, ftype in rows:
+        import json as _json
+        for name, category, description, code, params, needs_history, ftype, needs_raw in rows:
             import json
             params_dict = json.loads(params) if isinstance(params, str) else (params or {})
             try:
+                # 批 118 糖映射 load 侧：NULL needs 列 ≡ {"bar_minute": int 列值}
+                if needs_raw is None:
+                    final_needs = merge_needs(None, int(needs_history or 0))
+                elif isinstance(needs_raw, str):
+                    final_needs = merge_needs(_json.loads(needs_raw), int(needs_history or 0))
+                elif isinstance(needs_raw, dict):
+                    final_needs = merge_needs(needs_raw, int(needs_history or 0))
+                else:
+                    raise NeedsError(f"needs 列类型非法: {type(needs_raw).__name__}")
+                needs_history = final_needs.get("bar_minute", 0)
                 if ftype == "dsl":
                     # web 长尾批（wd-13 #2）：DSL 因子——静态校验（坏表达式启动期
                     # 跳过并 warning，不炸进程）+ partial 注册（entry["cls"]() 零参
@@ -213,6 +321,7 @@ def load_factors_from_db() -> list[str]:
                         "description": description or "",
                         "is_custom": True,
                         "needs_history": n,
+                        "needs": merge_needs(None, n),   # DSL 窗口=表达式静态校验真源（bar_minute 糖）
                         "type": "dsl",
                     }
                 else:
@@ -226,6 +335,7 @@ def load_factors_from_db() -> list[str]:
                         "description": description or "",
                         "is_custom": True,
                         "needs_history": int(needs_history or 0),
+                        "needs": final_needs,   # 批 118：多维声明（NULL 列=糖升格结果）
                         "type": "python",
                     }
                 loaded.append(name)
@@ -238,11 +348,15 @@ def load_factors_from_db() -> list[str]:
 
 def register_custom_factor(name: str, category: str, code: str,
                             description: str = "", params: dict | None = None,
-                            needs_history: int = 0, ftype: str = "python") -> dict:
+                            needs_history: int = 0, ftype: str = "python",
+                            needs: dict | None = None) -> dict:
     """创建或更新自定义因子：编译代码 → 写 DB → 进注册表。
 
     ftype="dsl"（web 长尾批 2026-09-01，wd-13 #2）：code=受限表达式——静态校验
     （validate_dsl_expr）+needs_history=最大窗口 n；不做 python 编译。
+    needs（批 118）：多维数据依赖声明，键 ∈ DATA_KINDS——非法键/L2 占位键抛
+    NeedsError（ValueError 子类，路由 400 链零改动收编）。与 needs_history 糖
+    合并（显式 needs 优先）后写 needs JSONB 列（迁移 0144）——重启 load 不丢。
     Returns: {"id": int, "name": str, ...}
     """
     if name.startswith("dsl:") or name == "dsl":
@@ -268,11 +382,16 @@ def register_custom_factor(name: str, category: str, code: str,
     else:
         factor_cls = _make_factor_class(name, code, params or {})
 
+    # 批 118：糖合并（DSL 的窗口 n 也并进来；显式 needs 优先）+ 词表校验
+    final_needs = merge_needs(needs, int(needs_history or 0))
+    needs_history = final_needs.get("bar_minute", 0)
+
     # 2. 写 DB
     import json
 
     from ..data_platform.db import get_conn
     params_json = json.dumps(params or {})
+    needs_json = json.dumps(final_needs) if final_needs else None   # 空声明存 NULL（≡旧糖 0）
     with get_conn() as conn:
         # UPSERT
         cur = conn.execute(
@@ -281,14 +400,14 @@ def register_custom_factor(name: str, category: str, code: str,
         existing = cur.fetchone()
         if existing:
             conn.execute(
-                "UPDATE factor_def SET category=%s, description=%s, code=%s, params=%s, needs_history=%s, type=%s, updated_at=now() WHERE name=%s",
-                (category, description, code, params_json, needs_history, ftype, name),
+                "UPDATE factor_def SET category=%s, description=%s, code=%s, params=%s, needs_history=%s, type=%s, needs=%s, updated_at=now() WHERE name=%s",
+                (category, description, code, params_json, needs_history, ftype, needs_json, name),
             )
             fid = existing[0]
         else:
             cur = conn.execute(
-                "INSERT INTO factor_def (name, category, description, code, params, needs_history, type) VALUES (%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-                (name, category, description, code, params_json, needs_history, ftype),
+                "INSERT INTO factor_def (name, category, description, code, params, needs_history, type, needs) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+                (name, category, description, code, params_json, needs_history, ftype, needs_json),
             )
             fid = cur.fetchone()[0]
         conn.commit()
@@ -303,6 +422,7 @@ def register_custom_factor(name: str, category: str, code: str,
             "code": code,   # W1（盲审 B-P1-2）：行内试算消费
             "description": description, "is_custom": True,
             "needs_history": needs_history, "type": "dsl",
+            "needs": final_needs,
         }
     else:
         _FACTOR_REGISTRY[name] = {
@@ -311,8 +431,10 @@ def register_custom_factor(name: str, category: str, code: str,
             "code": code,   # W1（盲审 B-P1-2）：同上
             "description": description, "is_custom": True,
             "needs_history": needs_history, "type": "python",
+            "needs": final_needs,
         }
-    return {"id": fid, "name": name, "category": category, "is_custom": True, "needs_history": needs_history}
+    return {"id": fid, "name": name, "category": category, "is_custom": True,
+            "needs_history": needs_history, "needs": final_needs}
 
 
 def delete_custom_factor(name: str) -> bool:
