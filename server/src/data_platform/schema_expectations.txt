@@ -80,6 +80,7 @@ sms_provider :: id,name,provider,access_key_id,access_key_secret,sign_name,alert
 smtp_provider :: id,name,host,port,security,username,password,from_addr,position,enabled,created_at,updated_at,vendor
 static_symbols :: ts_code,name,industry,list_status,delisted,updated_at
 stk_holdernumber :: ts_code,ann_date,end_date,holder_num
+st_list :: trade_date,ts_code,name,type,type_name
 stk_limit :: trade_date,ts_code,pre_close,up_limit,down_limit
 strategy_config :: id,name,type,symbol,adapter,enabled,factors,aggregator,risk,params,backtest_verified,updated_at
 sync_config :: id,name,tushare_api,pg_table,data_type,sync_mode,schedule,enabled,last_sync_date,last_sync_ts,last_sync_count,last_status,description,created_at,trade_day_filter,provider,supports_backfill,start_floor,retention

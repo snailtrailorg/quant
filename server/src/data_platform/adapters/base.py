@@ -243,6 +243,7 @@ class TushareAdapter(BaseDataAdapter):
         "block_trade_sync", "cyq_perf_sync", "forecast_sync", "namechange_sync",
         "concept_sync", "trade_cal",
         "convertible_terms", "static_symbols", "pool_data", "pool_data_full_calibrate",
+        "st_list_sync",   # 批 117：ST 官方名单（featured_daily 族）
     }
 
     # 批 99：契约层能力声明（contract.CapabilityDecl）——**真声明**，激活 `register_adapter`
@@ -552,6 +553,8 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("featured_daily", "top_list"): "pull_top_list",
     ("featured_daily", "block_trade"): "pull_block_trade",
     ("featured_daily", "cyq_perf"): "pull_cyq_perf",
+    # 批 117：ST 官方名单快照（同族「按日全市场快照」——步 0 实测 pro.stock_st 全量 201 行）
+    ("featured_daily", "st_list"): "pull_stock_st",
     ("financial_stmt", "forecast"): "pull_forecast",
     ("static_list", "namechange"): "pull_namechange",
     ("industry_class", "concept"): "pull_concept",

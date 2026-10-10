@@ -26,15 +26,16 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-# 真源字面量：真吃 backfill_from 的 21 项（与迁移 0131 的 seed 同源；批 101 加加密 1 项；
-# 批 103b 加聚宽 A 股日线 1 项；批 101b 加加密盘中 bar 3 项；批 102b 加 OKX 日线 1 项）
+# 真源字面量：真吃 backfill_from 的 22 项（与迁移 0131 的 seed 同源；批 101 加加密 1 项；
+# 批 103b 加聚宽 A 股日线 1 项；批 101b 加加密盘中 bar 3 项；批 102b 加 OKX 日线 1 项；
+# 批 117 加 st_list ST 官方名单 1 项）
 BACKFILLABLE_EXPECTED = {
     # bar 族 6（_VIA_KIND_IDS）
     "astock_daily", "etf_daily", "cb_daily", "index_daily",
     "astock_minute", "astock_minute_5min",
-    # tier1 批量 7（_TIER1_BATCH）
+    # tier1 批量 8（_TIER1_BATCH；批 117 +st_list_sync）
     "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
-    "block_trade_sync", "cyq_perf_sync", "forecast_sync",
+    "block_trade_sync", "cyq_perf_sync", "forecast_sync", "st_list_sync",
     # 单表专项 9（astock_basic / trade_cal / 批 101 binance_perp_daily / 批 103b astock_daily_jq
     #   / 批 101b binance_perp_{hourly,1min,15min} / 批 102b okx_perp_daily）
     "astock_basic", "trade_cal", "binance_perp_daily", "astock_daily_jq",

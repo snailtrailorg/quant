@@ -3033,6 +3033,11 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
                         batch.append(tuple(vals))
                     cur.executemany(upsert, batch)
                 conn.commit()
+            # 批 117：st_list 落表后派生 security_state(st) 时变行（官方名单=当日快照，
+            # 全市场两态全集——在档=is_st:true；不在档=非 ST（无行，effective_attr 查不到
+            # 即非 ST）。fail-soft 同 _derive_st_states 范式。
+            if table == "st_list":
+                _derive_st_states_from_st_list(df)
             return len(df)
 
         total_pulled = total_saved = 0
@@ -3111,6 +3116,8 @@ def _derive_st_states(df) -> None:
     脏值防御（盲审 B）：ts_code/name/start_date 为 NaN 等非字符串跳行；
     历史区间（end_date 非空）缺 start_date 跳行——防伪行以 today 为 effective_from
     遮蔽现行 ST 状态；现行名（end_date 空）缺 start 落 today（现行状态不丢）。
+    ⚠️ 批 117 起 ST 判定真源=st_list 官方快照（perms 直读 st_list 表）；本派生保留为
+    历史/降级参考（namechange 重建联动不删——任务书「namechange 派生保留为 fallback」）。
     """
     from datetime import date as _d
     try:
@@ -3140,6 +3147,34 @@ def _derive_st_states(df) -> None:
         logger.warning("security_state(st) 派生失败（不影响 namechange 同步）: %s", e, exc_info=True)
 
 
+def _derive_st_states_from_st_list(df) -> None:
+    """批 117：从 st_list 官方名单快照派生 security_state(st) 时变行（fail-soft）。
+
+    与 namechange 派生的差异：官方名单是**当日全市场两态全集**——在档即 is_st=true
+    （type_name 全「风险警示板」，步 0 实测），不在档=非 ST（无须写行——非 ST 是
+    「无行」默认态）。effective_from=快照 trade_date（官方口径，非 today 兜底）。
+    """
+    try:
+        rows = []
+        for r in df.to_dict("records"):
+            ts = r.get("ts_code")
+            td = r.get("trade_date")
+            name = r.get("name") if isinstance(r.get("name"), str) else ""
+            if not isinstance(ts, str) or not ts:
+                continue
+            td = str(td) if td is not None else ""
+            if len(td) == 8 and td.isdigit():
+                eff = f"{td[:4]}-{td[4:6]}-{td[6:8]}"
+            else:
+                continue
+            rows.append((_ts_to_vt_prefix(ts), eff, "st",
+                         {"name": name, "is_st": True, "type_name": r.get("type_name")}))
+        _sm_upsert_state(rows)
+        logger.info("security_state(st) 派生 %d 行（st_list 官方名单）", len(rows))
+    except Exception as e:
+        logger.warning("security_state(st) 派生失败（不影响 st_list 同步）: %s", e, exc_info=True)
+
+
 # 注册 9 个 handler（按迁移 0045 表结构）
 _TIER1_FLOAT_COLS = {
     "stk_limit": ["pre_close", "up_limit", "down_limit"],
@@ -3164,6 +3199,8 @@ _TIER1_TEXT_COLS = {
     "forecast": ["type","summary","change_reason","first_ann_date"],
     "namechange": ["name","start_date","end_date","ann_date","change_reason"],
     "concept": ["name"],
+    # 批 117：ST 官方名单快照（stock_st 实测列——type/type_name 全「风险警示板」）
+    "st_list": ["name","type","type_name"],
 }
 
 # 按日批量的（7 个）。元组＝(kind, sub_kind, 目标表, 主键)。kind/sub_kind 真源＝sync_kind_config
@@ -3176,6 +3213,8 @@ _TIER1_BATCH = {
     "block_trade_sync":   ("featured_daily", "block_trade",   "block_trade",   ["ts_code","trade_date"]),
     "cyq_perf_sync":      ("featured_daily", "cyq_perf",      "cyq_perf",      ["ts_code","trade_date"]),
     "forecast_sync":      ("financial_stmt", "forecast",      "forecast",      ["ts_code","ann_date","end_date"]),
+    # 批 117：ST 官方名单（按日全市场快照，范式照抄 stk_limit；ST 判定真源切此表）
+    "st_list_sync":       ("featured_daily", "st_list",       "st_list",       ["trade_date","ts_code"]),
 }
 for _sid, (_kind, _sub, _tbl, _pk) in _TIER1_BATCH.items():
     _HANDLERS[_sid] = _make_tier1_handler(

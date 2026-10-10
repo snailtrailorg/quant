@@ -611,15 +611,59 @@ def pull_forecast(ann_date: str, end_date: str | None = None) -> pd.DataFrame:
     pro = get_pro()
     return pro.forecast(ann_date=ann_date)
 
+# 批 117：全量单次上限（步 0 实测——namechange 全量恰 10000 行=单次上限截断实锤）。
+_NAMECHANGE_PAGE = 500
+
 def pull_namechange(ts_code: str = "", start_date: str = "", end_date: str = "") -> pd.DataFrame:
-    """股票曾用名（ST 识别）。全量重建模式。"""
+    """股票曾用名（历史参考）。全量重建模式。
+
+    批 117：`limit/offset` 循环翻页——源单次上限 10000 行（步 0 实测全量恰 10000=截断），
+    逐页累积至返回 < limit 即止，消截断。ST 判定已切 `st_list` 官方快照（本表降级历史参考，
+    分页修复保留——与 ST 判定同源弱化收口）。
+    """
     pro = get_pro()
     kwargs = {"ts_code": ts_code} if ts_code else {}
     if start_date:
         kwargs["start_date"] = start_date
     if end_date:
         kwargs["end_date"] = end_date
-    return pro.namechange(**kwargs)
+    frames: list[pd.DataFrame] = []
+    offset = 0
+    while True:
+        page = pro.namechange(**kwargs, limit=_NAMECHANGE_PAGE, offset=offset)
+        if page is None or page.empty:
+            break
+        frames.append(page)
+        if len(page) < _NAMECHANGE_PAGE:
+            break
+        offset += _NAMECHANGE_PAGE
+    if not frames:
+        return pd.DataFrame()
+    return (frames[0] if len(frames) == 1
+            else pd.concat(frames, ignore_index=True))
+
+def pull_stock_st(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """每日官方 ST 名单快照（批 117——ST 判定源切此表，替代 namechange 派生）。
+
+    源接口 `pro.stock_st(trade_date=)`（步 0 实测 2026-10-09 全市场 201 行=全量；
+    列 ts_code/name/trade_date/type/type_name）。`limit/offset` 分页参数被接口接受
+    且全量 ~200 行单页足够——签名留分页循环与 namechange 同形，超 500 行时自动翻页。
+    """
+    pro = get_pro()
+    frames: list[pd.DataFrame] = []
+    offset = 0
+    while True:
+        page = pro.stock_st(trade_date=trade_date, limit=_NAMECHANGE_PAGE, offset=offset)
+        if page is None or page.empty:
+            break
+        frames.append(page)
+        if len(page) < _NAMECHANGE_PAGE:
+            break
+        offset += _NAMECHANGE_PAGE
+    if not frames:
+        return pd.DataFrame()
+    return (frames[0] if len(frames) == 1
+            else pd.concat(frames, ignore_index=True))
 
 def pull_concept(trade_date: str = "", ts_code: str = "") -> pd.DataFrame:
     """概念板块列表。全量重建模式。"""

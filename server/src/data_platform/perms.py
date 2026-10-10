@@ -90,10 +90,9 @@ def account_allows(account_id: int, symbol: str) -> bool:
 
     全链 fail-closed：account 无权限行 / 标的无档 / board 无档 / 读库失败 → False（宁拒勿错）。
     board↔exchange 一致性：board=star 必 SHSE、chinext 必 SZSE、bse 必 BSE（矛盾数据 fail-closed）。
-    例外：ST「无档」= 非 ST（namechange 派生源戴帽滞后 fail-open，官方名单另批——非读库失败）。
+    批 117：ST 判定切 st_list 官方快照——表空（冷启动）=fail-open 例外；表非空标的无档 /
+    读库失败 = fail-closed 拒（原 namechange 派生「无档=非 ST」fail-open 已退役）。
     """
-    from datetime import date as _date
-
     from src.data_platform.db import get_conn as _gc
     from src.data_platform.security_master import SMClient
 
@@ -136,15 +135,34 @@ def account_allows(account_id: int, symbol: str) -> bool:
            (board == "chinext" and attr.exchange != "SZSE") or \
            (board == "bse" and attr.exchange != "BSE"):
             return False
-        # 3. ST 子布尔（仅 board=main）。ST「无档」=非 ST（namechange 派生源戴帽滞后 fail-open，
-        # 官方名单另批——非读库失败；读库失败仍 fail-closed 拒）。
+        # 3. ST 子布尔（仅 board=main）。批 117 起真源=st_list 官方名单快照：
+        #    表空（从未同步，冷启动期）⇒ 维持 fail-open（平台未就绪≠标的无档）+ warning；
+        #    表非空但标的无行 ⇒ 真 fail-closed 拒（官方名单是全市场两态全集，不在档=非 ST，
+        #    但标的在 SM 有档却不在最新快照 ⇒ 数据漂移，宁拒勿错）；读库失败仍 fail-closed 拒。
         if board == "main":
             try:
-                st_attr = SMClient().effective_attr(symbol, "st", _date.today())
+                with _gc() as conn:
+                    cur = conn.execute(
+                        "SELECT to_regclass('st_list')")   # 表未建（迁移未跑）=冷启动态
+                    if cur.fetchone()[0] is None:
+                        _logger.warning("st_list 表不存在（冷启动 fail-open，非 ST 处理）")
+                    else:
+                        cur = conn.execute(
+                            "SELECT 1 FROM st_list WHERE ts_code=%s "
+                            "ORDER BY trade_date DESC LIMIT 1", (symbol,))
+                        row = cur.fetchone()
+                        if row is None:
+                            # 最新快照有档性确认（表非空才拒——空表=从未同步，冷启动 fail-open）
+                            cur = conn.execute("SELECT 1 FROM st_list LIMIT 1")
+                            if cur.fetchone() is not None:
+                                _logger.warning(
+                                    "st_list 有数据但标的 %s 无档（fail-closed 拒）", symbol)
+                                return False
+                        else:
+                            if not is_st_ok:
+                                return False           # 官方名单在档=ST，账户不许 ST
             except Exception as e:
-                _logger.warning("security_state(st) 读取失败（fail-closed 拒）: %s", e)
-                return False
-            if st_attr and st_attr.get("is_st") and not is_st_ok:
+                _logger.warning("st_list 读取失败（fail-closed 拒）: %s", e)
                 return False
     # 4. convertible 权限（10 万+2 年）
     if attr.category == "convertible" and not conv_ok:

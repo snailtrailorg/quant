@@ -107,6 +107,8 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     # 由 tests/test_markets_registry 的完备性钉守（不再是字面量 30 键）。
     "convertible_terms": "ref_data", "static_symbols": "ref_data",
     "pool_data": "ref_data", "pool_data_full_calibrate": "ref_data",
+    # 批 117：ST 官方名单快照（featured_daily 族，参考数据类）
+    "st_list_sync": "ref_data",
 }
 NON_DATA_PROVIDERS = {"tencent": {"rt_quote"}, "xtp": {"trading", "rt_quote"},
                       "binance_perp": {"trading", "rt_quote"}, "okx_perp": {"trading", "rt_quote"},

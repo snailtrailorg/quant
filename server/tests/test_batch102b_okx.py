@@ -738,8 +738,9 @@ class TestMigration0137Shape:
 
         历史：0137（批 102b 时）→ **0138**（批 107 补 `sync_kind_config` 两行 + 修
         `etf_list.pg_table`）→ **0139**（批 108·步 3 加 `sync_config.retention`）→
-        **0140**（批 109 建 `sync_gap` 对账结果表）。挪钉时**同时**确认 0140 的
-        `down_revision=="0139"`，保证 0137/0138/0139 未被断链。
+        **0140**（批 109 建 `sync_gap` 对账结果表）→ **0141**（批 110 `sync_gap`
+        判据两列）→ **0142**（批 117 `st_list` 表 + ST 名单同步项）。挪钉时**同时**
+        确认 0141 的 `down_revision=="0140"`，保证链未断。
         """
         import importlib
         import pathlib
@@ -749,7 +750,7 @@ class TestMigration0137Shape:
             mod = importlib.import_module(f"migrations.versions.{p.stem}")
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
-        assert heads == {"0141"}, f"head 不是唯一 0141：{sorted(heads)}"
+        assert heads == {"0142"}, f"head 不是唯一 0142：{sorted(heads)}"
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""
