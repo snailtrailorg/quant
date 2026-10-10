@@ -152,28 +152,49 @@ class TestReconcileWithDb:
         assert not bad, f"pg_table 双真源错配: {bad}"
 
     def test_factory_declared_cols_match_placement_rows(self):
-        """engine `_TIER1_*` 声明列 == `sync_kind_config` 列（**批 107 列形状对账门**）。
+        """`sync_kind_config` 列 == 目标表真 DDL（**批 107 列形状对账门 · 批 115 步 2 改写**）。
 
-        背景：`_TIER1_BATCH`(pk) + `_TIER1_FLOAT_COLS`/`_TIER1_TEXT_COLS` 与 `sync_kind_config`
-        的 `pk_cols/float_cols/text_cols` 是同一份列形状的两处声明（内联 dict 保留作 import 骨架
-        ——engine import 时不得触库）。本门把两处钉成一致：漂移即红。
+        背景：批 115·步 2 读侧切换后，tier1 列形状单一真源=`sync_kind_config`（引擎代码常量
+        `_TIER1_FLOAT_COLS`/`_TIER1_TEXT_COLS` 已退役，handler 首调读归置行——
+        test_batch115）。本门随之升级：归置行的 float/text 列必须与**目标表真实 DDL**逐列
+        一致（numeric↔float_cols、text↔text_cols，均排除主键）——DB 行漂移（列改名/加列
+        不更新归置行）会直接把漂移写进 upsert，故用 DDL 锚死。
         """
         from src.data_platform.db import get_conn
         from src.data_sync import engine
+        sids = {**{s: t for (s, (_k, _sub, t, _p)) in engine._TIER1_BATCH.items()},
+                **{s: t for (s, (_k, _sub, t, _p, _d)) in engine._TIER1_FULL.items()}}
         with get_conn() as conn:
-            rows = conn.execute(
-                "SELECT sync_id, pk_cols, float_cols, text_cols FROM sync_kind_config").fetchall()
-        place = {r[0]: (set(r[1] or []), set(r[2] or []), set(r[3] or [])) for r in rows}
-        declared = {}
-        for sid, (_k, _s, tbl, pk) in engine._TIER1_BATCH.items():
-            declared[sid] = (set(pk), set(engine._TIER1_FLOAT_COLS.get(tbl, [])),
-                             set(engine._TIER1_TEXT_COLS.get(tbl, [])))
-        for sid, (_k, _s, tbl, pk, _d) in engine._TIER1_FULL.items():
-            declared[sid] = (set(pk), set(engine._TIER1_FLOAT_COLS.get(tbl, [])),
-                             set(engine._TIER1_TEXT_COLS.get(tbl, [])))
-        for sid, (pk, fl, tx) in declared.items():
-            assert sid in place, f"{sid} 无归置行"
-            assert place[sid] == (pk, fl, tx), f"{sid} 列形状漂移：声明 {(pk, fl, tx)} != 库 {place[sid]}"
+            for sid, tbl in sids.items():
+                place = conn.execute(
+                    "SELECT float_cols, text_cols FROM sync_kind_config WHERE sync_id=%s",
+                    (sid,)).fetchone()
+                assert place is not None, f"{sid} 无归置行"
+                ddl = conn.execute(
+                    "SELECT column_name, data_type FROM information_schema.columns "
+                    "WHERE table_name=%s", (tbl,)).fetchall()
+                pk = {r[0] for r in conn.execute(
+                    "SELECT kcu.column_name FROM information_schema.table_constraints tc "
+                    "JOIN information_schema.key_column_usage kcu "
+                    "ON tc.constraint_name=kcu.constraint_name "
+                    "WHERE tc.table_name=%s AND tc.constraint_type='PRIMARY KEY'",
+                    (tbl,)).fetchall()}
+                num = {n for n, d in ddl if d == "numeric" and n not in pk}
+                txt = {n for n, d in ddl if d == "text" and n not in pk}
+                # 主键成员冗余出现在 text_cols（namechange 的 name/start_date）合法：PK 列
+                # 恒走 str 落库（值归一 else 支），列不进 upsert 更新集 ⇒ 行为等价，不动 DB 数据。
+                assert set(place[0] or []) == num, \
+                    f"{sid} float_cols 漂移: 行 {sorted(place[0] or [])} != DDL numeric {sorted(num)}"
+                assert set(place[1] or []) - pk == txt, \
+                    f"{sid} text_cols 漂移: 行 {sorted(place[1] or [])} != DDL text {sorted(txt)}"
+
+    def test_tier1_col_constants_retired(self):
+        """批 115·步 2：列形状代码常量退役钉——engine 源码不得再有 `_TIER1_FLOAT_COLS`/
+        `_TIER1_TEXT_COLS`（复活=双真源回潮）。"""
+        from src.data_sync import engine
+        src = inspect.getsource(engine)
+        for name in ("_TIER1_FLOAT_COLS", "_TIER1_TEXT_COLS"):
+            assert name not in src, f"{name} 已退役（批 115 单源化），不得回潮"
 
 
 # ---------------------------------------------------------------------------

@@ -170,7 +170,7 @@ class TestProviderEffective:
                  patch("src.data_platform.db.get_conn", MagicMock()):
                 h = engine._make_full_rebuild_handler(
                     "static_list", "namechange", "namechange",
-                    ["ts_code", "name", "start_date"], [], date_param=None)
+                    ["ts_code", "name", "start_date"], date_param=None)
                 h({"id": "namechange_sync", "provider": "spy100"}, "20261002")
             assert _SPY_CALLS and _SPY_CALLS[0][:2] == ("static_list", "namechange"), _SPY_CALLS
             assert _SPY_CALLS[0][2] == {}, "快照表不该带窗口参数"

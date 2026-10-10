@@ -2671,15 +2671,17 @@ _VIA_KIND_IDS = frozenset({
 
 
 def _read_sync_kind(sync_id: str) -> dict:
-    """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild/pk_cols）。无行/表缺返回 {}。
+    """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild/pk_cols/float_cols/text_cols）。
 
     pk_cols（批 83b 补）：池内族通用落库的 ON CONFLICT 主键来源——落库层不硬编码表名/主键。
+    float_cols/text_cols（批 115·步 2 补）：tier1 列形状**单一真源**——`_make_tier1_handler`
+    注册路径首调读本行取列（代码常量 `_TIER1_*_COLS` 已退役）。无行/表缺返回 {}。
     """
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT kind, sub_kind, pg_table, rebuild, pk_cols FROM sync_kind_config "
-                "WHERE sync_id=%s",
+                "SELECT kind, sub_kind, pg_table, rebuild, pk_cols, float_cols, text_cols "
+                "FROM sync_kind_config WHERE sync_id=%s",
                 (sync_id,))
             row = cur.fetchone()
     except psycopg.errors.UndefinedTable:
@@ -2687,7 +2689,8 @@ def _read_sync_kind(sync_id: str) -> dict:
     if not row:
         return {}
     return {"kind": row[0], "sub_kind": row[1], "pg_table": row[2], "rebuild": row[3],
-            "pk_cols": list(row[4] or [])}
+            "pk_cols": list(row[4] or []),
+            "float_cols": list(row[5] or []), "text_cols": list(row[6] or [])}
 
 
 def _fetch_supply(adapter, *, kind: str, sub_kind: str | None, symbols: tuple[str, ...],
@@ -2937,7 +2940,7 @@ _TIER1_LAG_TRADING_DAYS: dict[str, int] = {"margin_detail_sync": 1}
 def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: list[str],
                         float_cols: list[str] | None = None, text_cols: list[str] | None = None,
                         lag_trade_days: int = 0, date_param: str = "trade_date",
-                        sync_id: str | None = None):
+                        sync_id: str | None = None, cols_from_sync_kind: bool = False):
     """工厂：生成第一档按日批量同步 handler（批 100：拉取改走 `adapter.fetch_supply(kind, sub_kind)`）。
 
     Args:
@@ -2952,17 +2955,39 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         date_param: 源侧窗口参数名——`trade_date`（常规，默认）/ `ann_date`（公告日驱动，如 forecast）。
         sync_id: 注册处传入的同步项 id（批 109 日期级对账的 `sync_gap` scope 键）。缺省时回落
             `cfg['id']`（运行期配置恒有），再回落 `kind`（仅供直接构造 handler 的单元测试）。
+        cols_from_sync_kind: 批 115·步 2——True 时 float_cols/text_cols **忽略入参**，首调读
+            `sync_kind_config`（sync_id 键）取列：列形状单一真源收编 DB（代码常量已退役）。
+            **延迟到 handler 首调**而非 import 期——engine import 不得触库（批 107 立法）。
+            单元测试直接构造 handler（传显式列）不受影响（本旗缺省 False）。
     """
     from src.data_platform.adapters.tushare_adapter import _safe_float   # 值归一（非分派，源无关）
-    all_cols = (float_cols or []) + (text_cols or [])
+
+    def _resolve_cols() -> tuple[list[str], list[str]]:
+        """批 115·步 2：注册路径列形状取自 sync_kind_config（单源）；显式传参路径原样返回。
+
+        **每轮 handler 调用读一次**（非首调缓存）——配置变更（加列/改列）下轮生效无须重启；
+        反证也据此钉：DB 行改错 ⇒ 下一轮 sync 即红。
+        """
+        if not cols_from_sync_kind:
+            return list(float_cols or []), list(text_cols or [])
+        row = _read_sync_kind(sync_id or "")
+        if not row:
+            # 归置行缺失=配置债——静默退空列会把全表写成仅主键行（丢数据面），必须响亮
+            raise RuntimeError(
+                f"sync_kind_config 无归置行: {sync_id}（列形状单源读不到，批 115 读侧切换）")
+        return row["float_cols"], row["text_cols"]
+
     conflict = ", ".join(pk_cols)
-    updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in all_cols if c not in pk_cols)
 
     def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
                  progress_cb=None) -> dict:
         """通用第一档同步：按 trade_date 拉全市场 → upsert。"""
         from src.data_platform.db import get_conn as _gc
         from src.data_platform.rate_limit import rate_limit_context
+        # 批 115·步 2：列形状每轮解析（注册路径=sync_kind_config 单源；SQL/值归一在解析后构造）
+        float_cols, text_cols = _resolve_cols()
+        all_cols = float_cols + text_cols
+        updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in all_cols if c not in pk_cols)
         prov = _provider_of(cfg)
         adapter = _get_supply_adapter(cfg)
         # 批 83b：限速/熔断/用量归属随 sync_config.provider 走（原死钉 get_data_source("tushare")）
@@ -3068,7 +3093,7 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
 
 
 def _make_full_rebuild_handler(kind: str, sub_kind: str | None, table: str, pk_cols: list[str],
-                              text_cols: list[str], date_param: str | None = None):
+                              date_param: str | None = None):
     """工厂：生成全量重建 handler（每周一跑，DELETE 全表后 INSERT）。
 
     批 100：拉取改走 `adapter.fetch_supply(kind, sub_kind)`（provider 生效）；`date_param=None`
@@ -3077,6 +3102,9 @@ def _make_full_rebuild_handler(kind: str, sub_kind: str | None, table: str, pk_c
     批 56a·M1：重建后若表=namechange，追加派生 security_state(st) 时变行——
     ST 状态从曾用名推断（当前有效名含 ST→is_st=true，start_date=生效日，
     29 号 §四六源之一：st←namechange_sync，含 start_date 天然 PIT）。
+
+    批 115·步 2：`text_cols` 参数退役——批 100 起 handler 体按 `df.columns` 全列 str 落库，
+    本参数已无消费点（死参数）；列形状单源收编见 `_make_tier1_handler(cols_from_sync_kind)`。
     """
     def _handler(cfg: dict, end_date: str, backfill_from: str | None = None,
                  progress_cb=None) -> dict:
@@ -3175,36 +3203,11 @@ def _derive_st_states_from_st_list(df) -> None:
         logger.warning("security_state(st) 派生失败（不影响 st_list 同步）: %s", e, exc_info=True)
 
 
-# 注册 9 个 handler（按迁移 0045 表结构）
-_TIER1_FLOAT_COLS = {
-    "stk_limit": ["pre_close", "up_limit", "down_limit"],
-    "moneyflow": ["buy_sm_vol","buy_sm_amount","sell_sm_vol","sell_sm_amount",
-                   "buy_md_vol","buy_md_amount","sell_md_vol","sell_md_amount",
-                   "buy_lg_vol","buy_lg_amount","sell_lg_vol","sell_lg_amount",
-                   "buy_elg_vol","buy_elg_amount","sell_elg_vol","sell_elg_amount",
-                   "net_mf_vol","net_mf_amount"],
-    "margin_detail": ["rzye","rqye","rzmre","rqyl","rzche","rqchl","rqmcl","rzrqye"],
-    "top_list": ["close","pct_change","turnover_rate","amount","l_sell","l_buy","l_amount","net_amount","net_rate","amount_rate","float_values"],
-    "block_trade": ["price","vol","amount"],
-    "cyq_perf": ["his_low","his_high","cost_5pct","cost_15pct","cost_50pct","cost_85pct","cost_95pct","weight_avg","winner_rate"],
-    "forecast": ["p_change_min","p_change_max","net_profit_min","net_profit_max","last_parent_net"],
-}
-_TIER1_TEXT_COLS = {
-    "stk_limit": [],
-    "moneyflow": [],
-    "margin_detail": [],
-    "top_list": ["name","reason"],
-    "block_trade": ["buyer","seller"],
-    "cyq_perf": [],
-    "forecast": ["type","summary","change_reason","first_ann_date"],
-    "namechange": ["name","start_date","end_date","ann_date","change_reason"],
-    "concept": ["name"],
-    # 批 117：ST 官方名单快照（stock_st 实测列——type/type_name 全「风险警示板」）
-    "st_list": ["name","type","type_name"],
-}
-
-# 按日批量的（7 个）。元组＝(kind, sub_kind, 目标表, 主键)。kind/sub_kind 真源＝sync_kind_config
-# （批 100：test_batch100 与归置行对账，漂移即红）；date_param 声明源侧窗口参数名。
+# 注册 tier1 handler（批 115·步 2：列形状单一真源=sync_kind_config，代码常量退役）。
+# 按日批量的（7 个）。元组＝(kind, sub_kind, 目标表, 主键)。kind/sub_kind/pk_cols 真源＝
+# sync_kind_config（批 100：test_batch100 与归置行对账，漂移即红）；date_param 声明源侧窗口
+# 参数名。float/text_cols 由 handler 首调读本表归置行（cols_from_sync_kind=True）——import
+# 期零触库（批 107 立法），注册处零列字面量（单源化）。
 _TIER1_BATCH = {
     "stk_limit_sync":     ("stk_limit",      None,            "stk_limit",     ["trade_date","ts_code"]),
     "moneyflow_sync":     ("featured_daily", "moneyflow",     "moneyflow",     ["ts_code","trade_date"]),
@@ -3219,11 +3222,9 @@ _TIER1_BATCH = {
 for _sid, (_kind, _sub, _tbl, _pk) in _TIER1_BATCH.items():
     _HANDLERS[_sid] = _make_tier1_handler(
         _kind, _sub, _tbl, _pk,
-        float_cols=_TIER1_FLOAT_COLS.get(_tbl, []),
-        text_cols=_TIER1_TEXT_COLS.get(_tbl, []),
         lag_trade_days=_TIER1_LAG_TRADING_DAYS.get(_sid, 0),
         date_param="ann_date" if _sid == "forecast_sync" else "trade_date",
-        sync_id=_sid)
+        sync_id=_sid, cols_from_sync_kind=True)
 
 # 全量重建的（2 个）。元组＝(kind, sub_kind, 目标表, 主键, date_param)；date_param=None＝源无窗口（快照）
 _TIER1_FULL = {
@@ -3232,7 +3233,7 @@ _TIER1_FULL = {
 }
 for _sid, (_kind, _sub, _tbl, _pk, _dp) in _TIER1_FULL.items():
     _HANDLERS[_sid] = _make_full_rebuild_handler(
-        _kind, _sub, _tbl, _pk, text_cols=_TIER1_TEXT_COLS.get(_tbl, []), date_param=_dp)
+        _kind, _sub, _tbl, _pk, date_param=_dp)
 
 # 防双注册钉（批 72）：位置=两个 tier1 注册循环之后——钉全量 14 键（字面量 5+工厂 9），
 # 未来往 _TIER1_BATCH/_TIER1_FULL 回填 bar 族键也在本钉覆盖内（双盲 A P1-2 修正——

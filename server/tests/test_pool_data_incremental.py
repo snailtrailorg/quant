@@ -443,7 +443,7 @@ def test_engine_full_rebuild_rate_key_is_table():
          patch("src.data_platform.data_source.get_data_source", return_value=_FakeDS()), \
          patch("src.data_platform.adapters.tushare_adapter.pull_namechange", new=_fake_pull):
         h = engine._make_full_rebuild_handler("static_list", "namechange", "namechange",
-                                              ["ts_code", "name", "start_date"], [])
+                                              ["ts_code", "name", "start_date"])
         r = h({}, "20260808")
     assert seen == ["namechange"]
     assert r["failed_dates"] == ["空数据"]
