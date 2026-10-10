@@ -88,8 +88,8 @@ def judge_supply(symbol: str, needs: dict[str, int], history_len: int,
       list_date_fn    依赖注入（默认 security_master.sm_inception——测试 mock 点；
                       返回 ISO 'YYYY-MM-DD' 或 None）
       trading_days_between 依赖注入（默认=日历自然日近似；A 股真交易日历见
-                      md_session.get_trade_calendar，此处自然日近似偏保守：
-                      高估可得根数 ⇒ 误拒少/误 degraded 少）
+                      md_session.get_trade_calendar，此处自然日近似**低估**可得根数：
+                      （自然日≤交易日数 ⇒ 估算偏小 ⇒ 偏向 degraded 而非放行）。
 
     返回 dict（调用方照 decision 行动——本函数不 exit 不告警）：
       {"action": "ok"|"degraded"|"reject",
@@ -112,7 +112,9 @@ def judge_supply(symbol: str, needs: dict[str, int], history_len: int,
     from src.strategy_runner import WARMUP_CAP
     if list_date_fn is None:
         from src.data_platform.security_master import sm_inception as list_date_fn
-    _BARS_PER_DAY = 240   # 上市时长→分钟根数估算系数（A 股 4h/日；crypto 24h 偏保守=不误拒）
+    _BARS_PER_DAY = 240   # 上市时长→分钟根数估算系数（A 股 4h/日）。⚠ crypto=1440 根/日，本系数
+                      # 低估 ~9 倍 ⇒ 分支②「标的太新」对 crypto 误拒——crypto gate 未开暂不触发，
+                      # 修法（按 market 分系数）挂待办 §二，随 116 时间轴重裁一并
     if trading_days_between is None:
         def trading_days_between(d0, d1):   # 自然日近似（保守：高估可得根数）
             return (d1 - d0).days * _BARS_PER_DAY // 365
