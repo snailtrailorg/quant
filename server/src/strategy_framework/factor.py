@@ -321,7 +321,10 @@ def load_factors_from_db() -> list[str]:
                         "description": description or "",
                         "is_custom": True,
                         "needs_history": n,
-                        "needs": merge_needs(None, n),   # DSL 窗口=表达式静态校验真源（bar_minute 糖）
+                        # 步 4 复审 P1-1 修：DSL 窗口=表达式静态校验（bar_minute 真源），
+                        # 但 DB needs 列的其余键（bar_daily 等）不得丢——以 final_needs
+                        # 为底、n 覆盖 bar_minute（表达式是分钟窗唯一真源）。
+                        "needs": {**final_needs, "bar_minute": n},
                         "type": "dsl",
                     }
                 else:

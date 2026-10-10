@@ -159,6 +159,22 @@ class TestSugarMapping:
         assert loaded == []
         assert get_factor("z118c") is None
 
+    def test_dsl_load_keeps_non_minute_keys(self):
+        """步 4 复审 P1-1 反证钉：DSL 因子 load 不得丢 DB needs 的非分钟键。
+
+        原 bug：load 侧 dsl 分支写死 merge_needs(None, n)——DB 有 {"bar_minute":20,
+        "bar_daily":30} 重启后 load 回 {"bar_minute":20}（bar_daily 静默丢失＝批 118
+        要消灭的降级形态在 DSL 子路径复活）。修法：final_needs 为底、表达式窗口覆盖
+        bar_minute。撤修（回写 merge_needs(None,n)）⇒ 本钉红。
+        """
+        rows = [("z118d", "custom", "", "mean(close,20)", "{}", 20, "dsl",
+                 {"bar_minute": 20, "bar_daily": 30})]
+        _load_with_rows(rows)
+        entry = get_factor("z118d")
+        assert entry is not None
+        assert entry["needs"] == {"bar_minute": 20, "bar_daily": 30}, \
+            f"DSL 往返丢键: {entry['needs']}"
+
 
 def _load_with_rows(rows):
     """mock get_conn 喂 factor_def 行（列序同 load SELECT）。
