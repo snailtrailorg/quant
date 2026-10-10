@@ -221,6 +221,30 @@ class TestPermsStFailClosed:
         assert _call(_attr(exchange="SHSE", board="star"),
                      exc=RuntimeError("不应触达 st_list"), perm_is_st=False) is True
 
+    def test_query_param_is_ts_form_not_vt(self):
+        """步4复审 P0-1 反证钉：st_list 查询 params 必须是 tushare 形态。
+
+        account_allows 收 vt_symbol（600000.SHSE）；st_list.ts_code 是 tushare 形态
+        （600000.SH）。读侧漏转＝恒无交集＝表非空后全市场 main 板 fail-closed 全拒
+        （mock 按 SQL 关键词分派不咬 params，实值须显式断言——去掉 vt_to_ts 即红）。
+        """
+        sm = MagicMock()
+        sm.get.return_value = _attr()
+        conn = _st_conn(st_rows=(1,), perm_is_st=True)
+        with patch("src.data_platform.security_master.SMClient", return_value=sm), \
+             patch("src.data_platform.db.get_conn", return_value=conn):
+            account_allows(1, "600000.SHSE")
+        # 翻 execute 调用记录：标的查询（ORDER BY trade_date DESC）那条的 params[0]
+        for args, kwargs in conn.execute.call_args_list:
+            sql = args[0] if args else kwargs.get("sql", "")
+            if "ORDER BY trade_date DESC" in sql:
+                p = (args[1] if len(args) > 1 else kwargs.get("params", ()))[0]
+                assert p == "600000.SH", \
+                    f"st_list 查询键须为 tushare 形态，实得 {p!r}（漏 vt_to_ts 归一？）"
+                break
+        else:
+            raise AssertionError("未捕获标的查询（用例失效）")
+
 
 # ---------------------------------------------------------------------------
 # 4：_derive_st_states_from_st_list（security_state(st) 时变行派生）

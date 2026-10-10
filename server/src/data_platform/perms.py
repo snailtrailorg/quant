@@ -141,6 +141,12 @@ def account_allows(account_id: int, symbol: str) -> bool:
         #    但标的在 SM 有档却不在最新快照 ⇒ 数据漂移，宁拒勿错）；读库失败仍 fail-closed 拒。
         if board == "main":
             try:
+                # 步 4 复审 P0-1 修：account_allows 收 vt_symbol（600000.SHSE——SM 主档键、
+                # 三调用方全 vt），st_list.ts_code 是 tushare 形态（600000.SH）⇒ 读侧须归一
+                # （对偶 schema.vt_to_ts，与 pool_data/stock_detail 既有惯例一致——漏转＝
+                # 恒无交集＝表非空后全市场 main 板 fail-closed 全拒）。
+                from src.data_platform.schema import vt_to_ts
+                ts = vt_to_ts(symbol)
                 with _gc() as conn:
                     cur = conn.execute(
                         "SELECT to_regclass('st_list')")   # 表未建（迁移未跑）=冷启动态
@@ -149,7 +155,7 @@ def account_allows(account_id: int, symbol: str) -> bool:
                     else:
                         cur = conn.execute(
                             "SELECT 1 FROM st_list WHERE ts_code=%s "
-                            "ORDER BY trade_date DESC LIMIT 1", (symbol,))
+                            "ORDER BY trade_date DESC LIMIT 1", (ts,))
                         row = cur.fetchone()
                         if row is None:
                             # 最新快照有档性确认（表非空才拒——空表=从未同步，冷启动 fail-open）

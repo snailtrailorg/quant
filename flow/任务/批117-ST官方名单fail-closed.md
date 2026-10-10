@@ -36,6 +36,11 @@ namechange 现判定路径 ✅（替换目标）。**步 0 接口探查已完成
 
 **产 1 形态（据 a/b 定）**：新增 `pull_stock_st(trade_date)`（全市场快照，~201 行单页足够，仍带分页参数留扩展）；ST 判定源切 `stock_st` 快照（每交易日同步落表），namechange 降级为历史参考（分页修复保留——与 ST 判定同源弱化收口）。
 
+**步 4 代码双盲审返工补充（2026-10-10，同判件 `步4代码双盲审-C组115-117-同判综合.md`）**：
+1. **P0-1 修**：perms 读侧 `vt_to_ts(symbol)` 归一（`schema.py:32` 现成对偶；`account_allows` 收 vt 形态、`st_list.ts_code` 是 tushare 形态，漏转＝表非空后全市场 main 板全拒）＋ params 实值断言反证钉（`test_query_param_is_ts_form_not_vt`，撤转换实测红）。
+2. **冷启动窗口语义（P1-1）**：表空/表缺期 ST 判定＝恒非 ST 放行（fail-open 例外）——**窗口有界**：首个 18:10 调度同步成功即闭合；同步持续失败 ⇒ sync_log error + 告警既有机制暴露（不新造监控），窗口延长由告警通道可见。
+3. **派生真源归属（P1-2）**：`security_state(st)` 双写源收口——**st_list 派生为主（官方名单，每交易日新鲜）**；namechange 派生（`_derive_st_states`）**降级为历史回填源**（仅补充 st_list 快照起点之前的历史段）。effective_attr 现无读者 ⇒ 冲突面无消费者，归属裁定即收口；若 effective_attr 未来有读者，effective_from DESC 排序天然让新快照行胜出。
+
 ## 引用（设计 / 方案）
 
 - `flow/decisions.md` 2026-09-24 D1 B-P0 ④ + 2026-10-09 决策 D —— 只给指针不复述。
