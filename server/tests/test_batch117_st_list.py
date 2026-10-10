@@ -195,9 +195,11 @@ class TestPermsStFailClosed:
         """表空（从未同步）⇒ 冷启动 fail-open（平台未就绪≠标的无档）。"""
         assert _call(_attr(), has_any=False, st_rows=(), perm_is_st=False) is True
 
-    def test_symbol_missing_fail_closed(self):
-        """表非空但标的无行 ⇒ 真 fail-closed 拒（官方名单两态全集下的数据漂移）。"""
-        assert _call(_attr(), has_any=True, st_rows=(), perm_is_st=True) is False
+    def test_symbol_missing_is_non_st_allow(self):
+        """表非空但标的无行 ⇒ **非 ST 放行**（prod 2026-10-10 首部署实证修正：
+        stock_st 是 ST-only 单态名单，非 ST 股不在档是正常态——原「无档=fail-closed 拒」
+        语义导致表非空瞬间 5000+ 非 ST 股全拒、live-task 78/CONFIG、部署自动回滚）。"""
+        assert _call(_attr(), has_any=True, st_rows=(), perm_is_st=False) is True
 
     def test_st_in_list_rejected_when_not_allowed(self):
         """在档 ST + 账户 is_st=False ⇒ 拒（对齐原 namechange 语义）。"""

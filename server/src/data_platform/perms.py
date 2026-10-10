@@ -136,15 +136,17 @@ def account_allows(account_id: int, symbol: str) -> bool:
            (board == "bse" and attr.exchange != "BSE"):
             return False
         # 3. ST 子布尔（仅 board=main）。批 117 起真源=st_list 官方名单快照：
-        #    表空（从未同步，冷启动期）⇒ 维持 fail-open（平台未就绪≠标的无档）+ warning；
-        #    表非空但标的无行 ⇒ 真 fail-closed 拒（官方名单是全市场两态全集，不在档=非 ST，
-        #    但标的在 SM 有档却不在最新快照 ⇒ 数据漂移，宁拒勿错）；读库失败仍 fail-closed 拒。
+        #    ⚠ 语义（prod 2026-10-10 首部署实证修正）：stock_st 是 **ST-only 单态名单**
+        #    （当日全市场 ST 股 ~200 行，非 ST 股不在档是**正常态**，不是数据漂移）——
+        #    原初版把「不在档」当 fail-closed 拒 ⇒ 表非空瞬间 5000+ 非 ST 股全拒 ⇒
+        #    live-task 78/CONFIG、部署 dwell 判死自动回滚（管道安全网首次实战成功）。
+        #    现语义：在档=ST（按 account is_st_allowed 判）；不在档=**非 ST 放行**；
+        #    表空/表缺=冷启动 fail-open（同放行）；读库失败仍 fail-closed 拒（不变量）。
         if board == "main":
             try:
-                # 步 4 复审 P0-1 修：account_allows 收 vt_symbol（600000.SHSE——SM 主档键、
-                # 三调用方全 vt），st_list.ts_code 是 tushare 形态（600000.SH）⇒ 读侧须归一
-                # （对偶 schema.vt_to_ts，与 pool_data/stock_detail 既有惯例一致——漏转＝
-                # 恒无交集＝表非空后全市场 main 板 fail-closed 全拒）。
+                # account_allows 收 vt_symbol（600000.SHSE——SM 主档键、三调用方全 vt），
+                # st_list.ts_code 是 tushare 形态（600000.SH）⇒ 读侧须归一
+                # （对偶 schema.vt_to_ts，与 pool_data/stock_detail 既有惯例一致）。
                 from src.data_platform.schema import vt_to_ts
                 ts = vt_to_ts(symbol)
                 with _gc() as conn:
@@ -156,17 +158,9 @@ def account_allows(account_id: int, symbol: str) -> bool:
                         cur = conn.execute(
                             "SELECT 1 FROM st_list WHERE ts_code=%s "
                             "ORDER BY trade_date DESC LIMIT 1", (ts,))
-                        row = cur.fetchone()
-                        if row is None:
-                            # 最新快照有档性确认（表非空才拒——空表=从未同步，冷启动 fail-open）
-                            cur = conn.execute("SELECT 1 FROM st_list LIMIT 1")
-                            if cur.fetchone() is not None:
-                                _logger.warning(
-                                    "st_list 有数据但标的 %s 无档（fail-closed 拒）", symbol)
-                                return False
-                        else:
-                            if not is_st_ok:
-                                return False           # 官方名单在档=ST，账户不许 ST
+                        if cur.fetchone() is not None and not is_st_ok:
+                            return False       # 官方 ST 名单在档=ST，账户不许 ST ⇒ 拒
+                        # 不在档=非 ST（单态名单语义）⇒ 放行，继续后续判定
             except Exception as e:
                 _logger.warning("st_list 读取失败（fail-closed 拒）: %s", e)
                 return False
