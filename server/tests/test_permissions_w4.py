@@ -3,6 +3,7 @@
 分层（批33a 单源化后）：①基线锁（现行为先钉死再重构的防线）②effective=角色单源
 （签名/形状契约钉）③锁键组层单锁 ④user override 端点退役 ⑤GET 三维形状。
 """
+import importlib
 from unittest.mock import patch, MagicMock
 
 import src.web_api.auth as auth_mod
@@ -104,18 +105,21 @@ class TestAuthMatrixW5:
         """OpenAPI 规范枚举全部 GET 端点（app.routes 惰性壳不含 include 路由）。"""
         from unittest.mock import patch, MagicMock
         from fastapi.testclient import TestClient
-        from src.web_api.main import app
         conn = MagicMock(); conn.__enter__.return_value = conn
         conn.execute.return_value.fetchall.return_value = []   # permission 表空→字典回退
         conn.execute.return_value.fetchone.return_value = None
-        import src.web_api.auth as A
         perms_mod._PERM_CACHE.update(at=0.0, roles=None)   # 批33a：users 槽随 user 维退役删
         out = {}
+        import os as _os
+        _os.environ["SHOW_DOCS"] = "1"   # 权限矩阵从 openapi.json 枚举端点——安全评估#1 关闭后须显式开（仅测试进程内）
+        import src.web_api.main as _m
+        importlib.reload(_m)
         with patch("src.web_api.auth.verify_jwt",
                    return_value={"sub": "1", "username": "bob", "role": role, "db_role": role}), \
              patch("src.data_platform.db.get_conn", return_value=conn):
-            c = TestClient(app)
+            c = TestClient(_m.app)
             spec = c.get("/openapi.json").json()
+            assert spec.get("paths"), "openapi 不可达——SHOW_DOCS 未生效"
             for path, methods in spec.get("paths", {}).items():
                 if "get" not in methods or "{" in path:
                     continue
@@ -126,6 +130,8 @@ class TestAuthMatrixW5:
                     out[path] = resp.status_code
                 except Exception:
                     out[path] = -1
+        _os.environ.pop("SHOW_DOCS", None)
+        importlib.reload(_m)   # 还原无文档态（后续测试默认面）
         return out
 
     def test_viewer_blocked_on_admin_perm_endpoints(self):

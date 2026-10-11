@@ -20,7 +20,14 @@ logger = logging.getLogger("web_api")
 from .auth import ensure_default_admin, init_users_table
 from .errors import ApiError
 
-app = FastAPI(title="量化交易平台 API", version="0.1.0")
+# 安全（2026-10-11 安全评估 #1）：生产关闭交互文档与 OpenAPI schema——
+# 两者公网匿名可达（/docs /openapi.json 200）会把全部端点/参数/模型结构递给侦察者。
+# 环境开关保留：非生产（本机 dev/staging 调试）可 SHOW_DOCS=1 开回。
+_show_docs = os.environ.get("SHOW_DOCS", "") not in ("", "0", "false")
+app = FastAPI(title="量化交易平台 API", version="0.1.0",
+              docs_url="/docs" if _show_docs else None,
+              redoc_url="/redoc" if _show_docs else None,
+              openapi_url="/openapi.json" if _show_docs else None)
 
 
 @app.exception_handler(ApiError)
