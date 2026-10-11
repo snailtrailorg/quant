@@ -72,6 +72,56 @@ _RATE_LIMITS: dict[str, dict[str, list[float]]] = {}
 _RATE_RULES = {"login": (10, 60), "forgot": (3, 60), "emailchg": (3, 3600),
                "phonechg": (3, 3600)}   # 批20 发信+批30 发码（宽窗——发信有成本）；批30 桶键=uid（反代后 host 共桶坑不复制）
 
+# ── 安全评估 #3（2026-10-11）：登录失败双钥限速——u:（用户名）+ ip:（来源 IP），只记失败 ──
+# 设计要点（用户裁定「IP 桶须防局域网连坐」）：
+#   * **只计失败**：成功登录清零该用户的 u: 桶且不计 ip: 桶——同 IP 正常用户一万次成功登录
+#     互不影响（连坐解除：正常人不会连续输错 100 次）；
+#   * ip: 桶**高阈值**（100 失败/时）：只拦喷洒式（换用户名爆破），不拦公网出口共享的办公室；
+#   * u: 桶维持 10 失败/分（防定向爆破 admin）——语义与批39 一致，仅「失败才计数」更宽于
+#     原先「连成功也计数」（原实现在 authenticate 前计数，10 次成功登录也 429——顺手修正）；
+#   * 存储＝Valkey（INCR+EXPIRE 原子；重启不清零、多 worker 共享；Redis 不可用时
+#     fail-open 降级回内存桶——登录是可用性优先面，拒绝服务不可接受）。
+_LOGIN_IP_FAILS = (100, 3600)   # ip: 100 次失败/小时
+
+def _login_ip(request) -> str:
+    """客户端 IP：直连取 remote.host；反代取 X-Forwarded-For 首值（nginx 已设）。"""
+    xff = request.headers.get("x-forwarded-for") or ""
+    return (xff.split(",")[0].strip() or request.client.host or "?")[:45]
+
+def _fail_count(key: str) -> int:
+    """Valkey 失败计数（只读）。"""
+    try:
+        from ..redis_pool import redis_client
+        return int(redis_client().get(f"loginfail:{key}") or 0)
+    except Exception:
+        store = _RATE_LIMITS.setdefault("loginfail", {}).setdefault(key, [])
+        return len(store)
+
+def _record_fail(key: str, window: int) -> None:
+    """记一次失败（Valkey INCR+EXPIRE；降级内存桶）。"""
+    try:
+        from ..redis_pool import redis_client
+        r = redis_client()
+        k = f"loginfail:{key}"
+        pipe = r.pipeline()
+        pipe.incr(k)
+        pipe.expire(k, window)
+        pipe.execute()
+    except Exception:
+        import time as _t
+        now = _t.time()
+        store = _RATE_LIMITS.setdefault("loginfail", {}).setdefault(key, [])
+        store[:] = [ts for ts in store if now - ts < window]
+        store.append(now)
+
+def _clear_fails(key: str) -> None:
+    """成功登录：清零该用户的 u: 桶（ip: 桶保留——同 IP 其他失败仍在追）。"""
+    try:
+        from ..redis_pool import redis_client
+        redis_client().delete(f"loginfail:{key}")
+    except Exception:
+        _RATE_LIMITS.setdefault("loginfail", {}).pop(key, None)
+
 # 批11：注册用户名保留字（防冒充系统身份；大小写不敏感）。
 # 批26-8：补"官方客服"（批11A 盲审 P2-11 词表缺口）；比对统一走 _username_reserved
 # （NFKC 归一化防全角 ａｄｍｉｎ 绕过）。边界声明：不做前缀模糊匹配（误伤 admin2 类正常名）；
@@ -101,11 +151,32 @@ def _rate_limited(bucket: str, key: str) -> bool:
 def login(req: LoginReq, request: Request):
     # 批39 A-P2-4 解耦：桶键=请求体用户名（零 HTTP 头依赖——nginx 配不配 XFF 不影响；
     # 防定向扫号足够/牺牲分布式喷洒检测=可接受权衡，用户裁定）
-    if _rate_limited("login", f"u:{(req.username or '').strip().lower()}"):
-        raise ApiError(429, "RATE_LIMITED", "尝试过于频繁，请稍后再试")
+    # 安全评估 #3（2026-10-11）：在此之上加双钥失败限速（见 _LOGIN_IP_FAILS 注释块）——
+    # u: 桶查失败数（≥10 拒）；ip: 桶查失败数（≥100 拒）。失败才计数/成功清 u: 桶。
+    _u = f"u:{(req.username or '').strip().lower()}"
+    _ip = f"ip:{_login_ip(request)}"
+    # fail-open：限速面任何故障（Valkey/内存）不阻断登录——返回保守值（未超限）
+    try:
+        if _fail_count(_u) >= _RATE_RULES["login"][0]:
+            raise ApiError(429, "RATE_LIMITED", "尝试过于频繁，请稍后再试")
+        if _fail_count(_ip) >= _LOGIN_IP_FAILS[0]:
+            raise ApiError(429, "RATE_LIMITED", "尝试过于频繁，请稍后再试")
+    except ApiError:
+        raise
+    except Exception:
+        logger.warning("登录限速计数面故障（fail-open 放行本次判定）", exc_info=True)
     user = authenticate(req.username, req.password)  # 支持 用户名 或 邮箱（含 @）
     if not user:
+        try:
+            _record_fail(_u, _RATE_RULES["login"][1])
+            _record_fail(_ip, _LOGIN_IP_FAILS[1])
+        except Exception:
+            logger.warning("登录失败计数写入故障（不阻断 401）", exc_info=True)
         raise ApiError(401, "INVALID_CREDENTIALS", "用户名或密码错误")
+    try:
+        _clear_fails(_u)   # 成功：清用户桶（ip: 桶保留——攻击者同 IP 失败史仍被追）
+    except Exception:
+        logger.warning("登录成功清桶故障（不阻断登录）", exc_info=True)
     token = create_jwt(str(user["id"]), user["username"], user["role"])
     # A3: 记录上次登录（时间 + IP，X-Forwarded-For 取真实来源）
     client_ip = (request.headers.get("x-forwarded-for") or request.client.host or "")[:45]
