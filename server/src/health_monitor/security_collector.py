@@ -23,8 +23,9 @@ from pathlib import Path
 
 logger = logging.getLogger("health_monitor.security")
 
-# 部署管道（release.yml）落的只读数据文件；服务器路径相对部署根，dev 机不存在 ⇒ degraded
-DNF_SECURITY_FILE = Path("/opt/quant/shared/security/dnf-security.json")
+# 部署管道（release.yml）落的只读数据文件；服务器路径=deploy_root/shared/security/
+# （inventory group_vars 各环境 deploy_root 同构），dev 机无此文件 ⇒ 该分区 degraded
+DNF_SECURITY_FILE = Path("/data/websites/snailtrail.cc/quant/shared/security/dnf-security.json")
 
 _CMD_TIMEOUT = 30          # 版本/端口类命令超时（秒）
 _PIP_AUDIT_TIMEOUT = 120   # OSV 网络比对留余量（实测 ~12s）
