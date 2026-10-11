@@ -1,6 +1,8 @@
 """Web 后端 · 数据同步路由（/api/sync/* + /api/data-source-usage）。"""
 
+import datetime as _dt
 import logging
+import re as _re
 
 from fastapi import APIRouter, Body, Depends
 
@@ -13,6 +15,28 @@ from ..redis_pool import redis_client
 logger = logging.getLogger("web_api")
 
 router = APIRouter(tags=["sync"])
+
+# 健壮性测试（2026-10-11）立的入口闸：sid/日期是 DB 键与窗口下界，只收合法形态。
+_SID_RE = _re.compile(r"^[a-z0-9_]{1,64}$")          # sync_config.id 全集形态（snake_case）
+_DATE_RE = _re.compile(r"^\d{8}$")                    # YYYYMMDD（引擎契约）
+
+
+def _validate_sid(sid: str) -> None:
+    if not _SID_RE.match(sid):
+        raise ApiError(400, "SYNC_SID_INVALID",
+                       f"同步项 id 非法（须为 snake_case 标识符，≤64 字符）: {sid[:40]!r}")
+
+
+def _validate_backfill(backfill_from: str | None) -> None:
+    if backfill_from is None:
+        return
+    if not _DATE_RE.match(backfill_from):
+        raise ApiError(400, "SYNC_BACKFILL_INVALID",
+                       f"backfill_from 须为 YYYYMMDD 八位日期: {backfill_from[:40]!r}")
+    try:
+        _dt.datetime.strptime(backfill_from, "%Y%m%d")
+    except ValueError as e:
+        raise ApiError(400, "SYNC_BACKFILL_INVALID", f"backfill_from 非法日期: {e}")
 
 
 @router.get("/api/sync/config")
@@ -64,6 +88,8 @@ def update_sync_config_api(sid: str, body: dict, payload: dict = Depends(require
 @router.post("/api/sync/trigger/{sid}")
 def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict = Depends(require_perm("data_sync"))):
     """异步触发类型级同步：提交 Celery 后台任务，立即返回 task_id（不阻塞 HTTP）。"""
+    _validate_sid(sid)            # D-1 配套：入口 4xx 预检（此前任意 sid 200，校验延后 worker）
+    _validate_backfill(backfill_from)   # D-2：非法日期此前静默成功（abc 落 start 列）
     from src.scheduler.tasks import sync_via_celery
     task = sync_via_celery.delay(sid, backfill_from)
     audit_log(payload["username"], "trigger_sync", sid)
@@ -191,6 +217,8 @@ def list_symbols_api(sid: str, q: str = "", page: int = 1, size: int = 9999,
 @router.post("/api/sync/symbol/{sid}/{ts_code}")
 def sync_symbol_api(sid: str, ts_code: str, body: dict = Body(default={}),
                     payload: dict = Depends(require_perm("data_sync"))):
+    _validate_sid(sid)
+    ts_code = ts_code.replace("\x00", "")   # 引擎键无 NUL 形态；防下游/审计炸
     from src.data_sync.engine import sync_symbol
     mode = body.get("mode", "auto") if body else "auto"
     result = sync_symbol(sid, ts_code, mode=mode)
@@ -201,6 +229,10 @@ def sync_symbol_api(sid: str, ts_code: str, body: dict = Body(default={}),
 @router.post("/api/sync/symbol/{sid}/{ts_code}/backfill")
 def backfill_symbol_api(sid: str, ts_code: str, body: dict = Body(...),
                         payload: dict = Depends(require_perm("data_sync"))):
+    _validate_sid(sid)
+    for d in (body.get("start", ""), body.get("end", "")):
+        if d:
+            _validate_backfill(d if len(d) == 8 else d.replace("-", ""))
     from src.data_sync.engine import backfill_symbol
     result = backfill_symbol(sid, ts_code, body.get("start", ""), body.get("end", ""))
     audit_log(payload["username"], "backfill_symbol", f"{sid}:{ts_code}:{body.get('start')}~{body.get('end')}")
@@ -210,6 +242,7 @@ def backfill_symbol_api(sid: str, ts_code: str, body: dict = Body(...),
 @router.delete("/api/sync/symbol/{sid}/{ts_code}")
 def delete_symbol_api(sid: str, ts_code: str,
                       payload: dict = Depends(require_perm("data_sync"))):
+    _validate_sid(sid)
     from src.data_sync.engine import delete_symbol
     result = delete_symbol(sid, ts_code)
     audit_log(payload["username"], "delete_symbol", f"{sid}:{ts_code}")
