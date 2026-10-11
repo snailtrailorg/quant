@@ -1,0 +1,78 @@
+"""安全态势查询（批 120 线②）：security_snapshot / security_finding 只读面。
+
+本模块是安全域 SQL 唯一落点（test_no_sql_in_new_routes.py 立法：新路由文件禁
+get_conn/内联 SQL）；业务判定（停留天数/基线 diff/组件变更）在路由层
+web_api/routes/security.py——其中基线 diff 复用 health_monitor._baseline_diff
+（判定单源：AI 只做摘要员，判定必须是确定性规则的同判件裁定）。
+"""
+from __future__ import annotations
+
+import logging
+from datetime import date
+
+logger = logging.getLogger("security_store")
+
+_SNAP_COLS = ("scan_date, status, components, ports, ssh_cfg, dnf, headers, "
+              "ai_summary, created_at")
+
+
+def _rows_to_dicts(cur, cols: tuple[str, ...]) -> list[dict]:
+    return [dict(zip(cols, r)) for r in cur.fetchall()]
+
+
+def get_snapshot(scan_date: date) -> dict | None:
+    """当日快照行（六分区 jsonb 已反序列化为 dict）；无行返回 None（路由层转 404）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"SELECT {_SNAP_COLS} FROM security_snapshot WHERE scan_date = %s",
+            (scan_date,))
+        row = cur.fetchone()
+    cols = ("scan_date", "status", "components", "ports", "ssh_cfg",
+            "dnf", "headers", "ai_summary", "created_at")
+    return dict(zip(cols, row)) if row else None
+
+
+def get_prev_snapshot(scan_date: date) -> dict | None:
+    """早于 scan_date 的最近一日快照（基线 diff 基线侧；同 run_security_scan 取法）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT components, ports, ssh_cfg FROM security_snapshot "
+            "WHERE scan_date < %s ORDER BY scan_date DESC LIMIT 1", (scan_date,))
+        row = cur.fetchone()
+    cols = ("components", "ports", "ssh_cfg")
+    return dict(zip(cols, row)) if row else None
+
+
+def get_findings_active(day: date) -> list[dict]:
+    """截至 day 的 finding 行（first_seen ≤ day——含已消失项：last_seen < day 由
+    路由层标 fixed 灰显沉底，当日还在的 last_seen ≥ day 正常显示）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT source, pkg, vuln_id, fix_version, first_seen, last_seen "
+            "FROM security_finding WHERE first_seen <= %s",
+            (day,))
+        cols = ("source", "pkg", "vuln_id", "fix_version", "first_seen", "last_seen")
+        return _rows_to_dicts(cur, cols)
+
+
+def get_snapshots_recent(days: int, today: date) -> list[dict]:
+    """近 N 天快照行（升序；history 逐日循环的原料——含 ports/ssh_cfg 供基线 diff）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"SELECT {_SNAP_COLS} FROM security_snapshot "
+            "WHERE scan_date > %s - %s::int ORDER BY scan_date", (today, days))
+    cols = ("scan_date", "status", "components", "ports", "ssh_cfg",
+            "dnf", "headers", "ai_summary", "created_at")
+    return _rows_to_dicts(cur, cols)
+
+
+def get_finding_spans() -> list[tuple]:
+    """全表 (first_seen, last_seen) 二列——history 逐日活跃计数用（表小：漏洞数十行级）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute("SELECT first_seen, last_seen FROM security_finding")
+        return cur.fetchall()

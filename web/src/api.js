@@ -340,3 +340,7 @@ export const sse = (() => {
 // 批 62c：SM 对账 + 审计血缘（批 79 起 shadow 行情对账已删；http→api 修批 62 存量未定义 bug）
 export const getSmReconcile = () => api.get('/api/quality/sm-reconcile')
 export const getLineage = (signalId) => api.get(`/api/quality/lineage/${signalId}`)
+
+// 批 120：安全态势（Observe 安全 Tab——快照默认今日；history 近 N 天趋势）
+export const getSecuritySnapshot = (date) => api.get('/security/snapshot', { params: date ? { date } : {} })
+export const getSecurityHistory = (days = 30) => api.get('/security/history', { params: { days } })

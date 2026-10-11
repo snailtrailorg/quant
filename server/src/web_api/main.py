@@ -158,6 +158,7 @@ from .routes.proxies import router as proxies_router  # 批 102a：/api/proxies/
 from .routes.quality import router as quality_router  # 批 62b：/api/quality 对账域
 from .routes.risk import router as risk_router  # /api/risk* /api/live-trading /api/reconcile /api/convertible
 from .routes.routing import router as routing_router  # 批 57 M2：/api/routing/*（策略+dry-run+审计）
+from .routes.security import router as security_router  # 批 120：/api/security/snapshot|history（须先于 stock——其 /api/security/{vt_symbol} 通配会吞两字面量）
 from .routes.stock import router as stock_router  # /api/stock/* /api/kline /api/screen/*
 from .routes.strategy import router as strategy_router  # /api/strategy* /api/factors* /api/live-task
 from .routes.sync import router as sync_router  # /api/sync/* /api/data-source-usage
@@ -170,6 +171,7 @@ app.include_router(auth_router)
 app.include_router(strategy_router)
 app.include_router(trading_router)
 app.include_router(sync_router)
+app.include_router(security_router)   # 批 120：/api/security/snapshot|history——须先于 stock 注册（其 /api/security/{vt_symbol} 通配先挂即吞两字面量路由）
 app.include_router(stock_router)
 app.include_router(routing_router)
 app.include_router(chat_router)
