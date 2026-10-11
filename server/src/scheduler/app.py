@@ -145,6 +145,14 @@ app.conf.update(
             "schedule": crontab(day_of_week=0, hour=3, minute=33),
             "options": {"queue": "data"},
         },
+        # 批 120：每日安全态势扫描（06:00 盘前低峰）。**非拉取不进 sync_config**（守批 109
+        # 裁定，先例=data-gap-reconcile/sm-reconcile）——六分区采集+基线 diff+AI 摘要，
+        # 任务侧 soft_time_limit=600 覆盖全局 300s。
+        "security-scan": {
+            "task": "src.scheduler.tasks.security_scan",
+            "schedule": crontab(hour=6, minute=0),
+            "options": {"queue": "data"},
+        },
         "astock-select-daily": {
             "task": "src.scheduler.tasks.astock_select_daily",
             "schedule": crontab(hour=16, minute=8),   # 批27-31：盘后锚（避 16:30 daily-report）

@@ -710,6 +710,15 @@ def health_monitor_check():
     return run_check()
 
 
+@app.task(name="src.scheduler.tasks.security_scan",
+          bind=True, soft_time_limit=600, time_limit=660)   # 批120：覆盖全局 300s（pip-audit OSV 网络比对留余量；先例=pool_data 320s）
+def security_scan(self):
+    """批 120：每日安全态势扫描（组件/端口/ssh/dnf/头/漏洞六分区 → 快照落库 + 基线 diff
+    告警 + AI 摘要 fail-soft）。单分区失败只标该分区 degraded，不抛。"""
+    from src.health_monitor.security_collector import run_security_scan
+    return run_security_scan()
+
+
 # 长任务异步派发声明（批 83b）——**执行机制声明，非注册表**：同步项注册在 sync_config（行）
 # + engine._HANDLERS（handler）；此处只声明「到点后怎么跑」。值 = celery 消息 expires 秒
 # （原 beat 的 options.expires 沿用值，防 worker 停机期间堆积过期轮次）。

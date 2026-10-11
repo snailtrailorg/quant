@@ -1604,6 +1604,8 @@ rm -rf "$tmp"
 #   ③ 降级只回收这三列（`sync_gap` 基表与数据分毫不动）＋ 可重放。
 FROM_AC=0140
 TO_AC=0141
+FROM_AD=0144
+TO_AD=0145
 
 fixture_judge() {
 $PSQL <<SQL
@@ -1701,6 +1703,52 @@ chk "downgrade 渲染含两条 DROP COLUMN IF EXISTS" "$(grep -ci 'drop column i
 rm -rf "$tmp"
 }
 
+# ── 用例 AE：0145 安全态势两表（批 120 线①）——真跑 upgrade→downgrade→upgrade + 断言 ──
+FROM_AE=0144
+TO_AE=0145
+case_ae() {
+echo
+echo "########## 用例 AE：0145 安全态势两表（upgrade→downgrade→upgrade 往返） ##########"
+reset_scratch
+stamp "$FROM_AE"
+step up "$TO_AE" "AE1 upgrade"
+
+chk "security_snapshot 已建" "$(q "select to_regclass('security_snapshot') is not null")" "t"
+chk "security_finding 已建" "$(q "select to_regclass('security_finding') is not null")" "t"
+chk "snapshot 唯一键 scan_date（同日二写被拒）" \
+    "$(q "insert into security_snapshot (scan_date,status) values ('2026-10-12','ok'); insert into security_snapshot (scan_date,status) values ('2026-10-12','ok'); select count(*) from security_snapshot" 2>&1 | grep -c 'duplicate key')" \
+    "1"
+chk "finding 唯一键 (source,pkg,vuln_id)" \
+    "$(q "insert into security_finding (source,pkg,vuln_id,first_seen,last_seen) values ('pip-audit','x','V1','2026-10-12','2026-10-12'); insert into security_finding (source,pkg,vuln_id,first_seen,last_seen) values ('pip-audit','x','V1','2026-10-12','2026-10-12'); select count(*) from security_finding" 2>&1 | grep -c 'duplicate key')" \
+    "1"
+chk "jsonb 形状律咬双重编码（json.dumps 串被 23514 拒）" \
+    "$(x "insert into security_snapshot (scan_date, components) values ('2026-10-13', '\"double-encoded\"')"; q "select count(*) from security_snapshot where scan_date='2026-10-13'")" "0"
+chk "合法 object 快照可写" "$(x "insert into security_snapshot (scan_date, status, components) values ('2026-10-14', 'degraded', '{\"nginx\":null}')"; q "select count(*) from security_snapshot where scan_date='2026-10-14'")" "1"
+
+step down "$FROM_AE" "AE2 downgrade"
+chk "downgrade 后两表已删" "$(q "select (to_regclass('security_snapshot') is null) and (to_regclass('security_finding') is null)")" "t"
+
+step up "$TO_AE" "AE3 复 upgrade（复跑幂等）"
+chk "复 upgrade 后表在" "$(q "select to_regclass('security_snapshot') is not null")" "t"
+
+# 离线渲染完整性（同 case_c 判据）
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_AE:$TO_AE" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_AE:$FROM_AE" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_AE'" "$tmp/up.sql")" "1"
+chk "upgrade 渲染含五条形状律" "$(grep -c "jsonb_typeof" "$tmp/up.sql")" "5"
+chk "🔴 upgrade 渲染不含 DROP TABLE（expand-only）" "$(grep -ci 'drop table' "$tmp/up.sql")" "0"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
 echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA + $FROM_AC→$TO_AC） ##########"
 precheck
@@ -1734,4 +1782,5 @@ case_aa
 case_ab
 case_ac
 case_ad
+case_ae
 finish

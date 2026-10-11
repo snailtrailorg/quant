@@ -59,6 +59,9 @@ RUNBOOK: dict[str, dict] = {
     "health.schema-off":   {"label": "schema 校验禁用", "guide": "校验开关被关——确认是否有意，防漂移盲区。"},
     "health.recovery":     {"label": "健康恢复", "guide": "组件恢复正常（信息性）。"},
     "health.component":    {"label": "组件阈值告警", "guide": "健康组件指标越限——/observe 健康页看趋势归因。"},
+    # ——— 安全态势（批 120） ———
+    "security.baseline_change": {"label": "安全基线变更", "guide": "安全扫描基线 diff 检出变化（新增监听端口/lock 外新增包/ssh 配置翻转）——/observe 安全 Tab 看当日 diff 项；非预期变更须归因（部署引入 or 环境漂移），ssh 翻转优先处置。"},
+    "security.vuln_new":   {"label": "新漏洞", "guide": "pip-audit 检出当日新漏洞（first_seen=当日，只告一次）——/observe 安全 Tab 漏洞列表看详情与修复版本；升级走正常发布管道。"},
     # ——— 平台杂项 ———
     "task.failed":      {"label": "后台任务失败", "guide": "任务管理器登记失败——任务列表看错误详情，重试或修配置。"},
     "llm.budget":       {"label": "LLM 预算预警", "guide": "用量接近预算上限——设置页调额或收敛调用方。"},
