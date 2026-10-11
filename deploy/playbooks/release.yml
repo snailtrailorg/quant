@@ -703,6 +703,14 @@
               【告警：3b 接通知中心】
 
   post_tasks:
+    # 批 120：dnf --security 快照采集（独立任务——wrapper 内部三态全 exit 0：
+    # ok/degraded 都落文件；此处 failed_when:false 再兜一层：**任何异常不阻发布收尾**，
+    # 采集器读不到文件自会标 degraded，假绿不可能）
+    - name: 收尾 —— dnf 安全更新快照（quant-dnf-security；落 shared/security/ 供采集器只读）
+      ansible.builtin.command: "{{ quant_dnf_security_cmd }}"
+      failed_when: false
+      changed_when: false
+
     - name: 收尾 —— 本版已切换标记（GC 依据）
       ansible.builtin.file:
         path: "{{ deploy_root }}/releases/{{ release_id }}/.deployed"

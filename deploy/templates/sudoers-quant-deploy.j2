@@ -12,8 +12,12 @@ Defaults env_reset
 #   - quant-dbro 为 quant 属主（唯一例外: 本体即以 quant 跑，DB 连接封装其内走 PG peer 免密）
 #   - quant-journal 只读诊断通道（2026-09-01 三查需求）：journalctl 收 wrapper 严参校验，
 #     仅 quant-*.service 域 + 只读 flags（-u/--since/--until/-n/-p/-q），deploy 读不到 auth/sshd
+#   - quant-dnf-security 安全更新快照通道（批 120）：dnf --security 需 root 且带参不裸列
+#     sudoers；wrapper 无参化 + 输出固定路径 shared/security/dnf-security.json（root 属主
+#     wrapper 收口，deploy 只能触发该动作）
 Cmnd_Alias QUANT_DEPLOY_ROOT = /usr/local/sbin/quant-flip-server, /usr/local/sbin/quant-flip-web, /usr/local/sbin/quant-install-units, \
-                               /usr/local/sbin/quant-pinned, /usr/local/sbin/quant-journal, /usr/local/sbin/quant-emd-build
+                               /usr/local/sbin/quant-pinned, /usr/local/sbin/quant-journal, /usr/local/sbin/quant-emd-build, \
+                               /usr/local/sbin/quant-dnf-security
 Cmnd_Alias QUANT_DEPLOY_SYS  = /usr/local/sbin/quant-svc
 Cmnd_Alias QUANT_DEPLOY_QUANT = /usr/local/sbin/quant-alembic-wrapper, \
                                 /usr/local/sbin/quant-importsmoke-wrapper, \

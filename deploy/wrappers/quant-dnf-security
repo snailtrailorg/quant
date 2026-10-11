@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# quant-dnf-security —— 系统安全更新快照采集通道（sudoers QUANT_DEPLOY_ROOT，root 属主）。
+#
+# 属主约束（同 quant-svc/quant-pinned）: root:root 755，部署于 /usr/local/sbin/quant-dnf-security。
+#   白名单命令=deploy 不可写的 wrapper（改本文件内容=提权）。
+#
+# 为什么 wrapper 化（批 120 线①任务文件「特权命令降级」裁定）:
+#   `dnf check-update --security` 需 root；采集器（quant 身份）只读数据文件
+#   shared/security/dnf-security.json —— 走部署管道落文件=零特权扩张给 quant/deploy，
+#   sudoers 不裸列 dnf（带参 `*` 吃空格=任意参数注入面，同 systemctl 族教训）。
+#   输出固定路径/root 属主 wrapper 收口，deploy 只能触发本动作。
+#
+# 动作: `dnf -q check-update --security` → JSON 落 $ROOT/shared/security/dnf-security.json
+#   {status:"ok", checked_at, pending_count, packages:[{name,errata}]}——packages 与 updates
+#   同数组双键（updates=线①采集器消费面形状，security_collector._collect_dnf 宽容合并；
+#   packages=批 120 任务文件指定形状）。
+#   dnf 退出码 100=有待更（正常业务态）；0=无待更；其他/网络失败 ⇒ {status:"degraded"} 落文件
+#   ——**仍 exit 0**（degraded 是显式状态非失败，不阻部署；空表=假绿是批 120 红线）。
+#   文件属主 chown quant:quant（shared/ 0700，quant 采集器要读）。
+#
+# 严参校验: 不收任何参数（无参化设计——sudoers `*` 吃空格，夹带参数即拒）。
+#
+# 环境变量: QUANT_DEPLOY_ROOT（沙箱指向测试树；生产空=内置默认路径）
+set -euo pipefail
+
+[ $# -eq 0 ] || { echo "用法: quant-dnf-security（不收参数）" >&2; exit 2; }
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+OUT_DIR="$ROOT/shared/security"
+OUT="$OUT_DIR/dnf-security.json"
+
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+write_json() {  # $1=json 全文
+  mkdir -p "$OUT_DIR"
+  printf '%s\n' "$1" > "$OUT"
+  chown quant:quant "$OUT_DIR" "$OUT" 2>/dev/null || true   # 沙箱无 quant 用户时容错（属主仅生产语义）
+}
+
+tmp=$(mktemp)
+trap 'rm -f "$tmp"' EXIT
+rc=0
+dnf -q check-update --security >"$tmp" 2>/dev/null || rc=$?
+
+if [ "$rc" -eq 0 ]; then
+  write_json "{\"status\": \"ok\", \"checked_at\": \"$now\", \"pending_count\": 0, \"packages\": [], \"updates\": []}"
+  echo "✓ dnf --security：无待更安全更新"
+  exit 0
+fi
+
+if [ "$rc" -eq 100 ]; then
+  # 输出行形如 "openssl-1.1.1k-14.el8.x86_64   ALBA-2026:1234   security"；
+  # 末尾空行/告警行跳过；列1=包 NEVRA、列2=公告号。
+  pkgs=$(awk 'NF>=3 && $1!~/^Last/{print $1"\t"$2}' "$tmp" | wc -l)
+  arr=$(awk 'NF>=3 && $1!~/^Last/{if(n++)printf ","; printf "{\"name\": \"%s\", \"errata\": \"%s\"}", $1, $2}' "$tmp")
+  write_json "{\"status\": \"ok\", \"checked_at\": \"$now\", \"pending_count\": ${pkgs}, \"packages\": [${arr}], \"updates\": [${arr}]}"
+  echo "✓ dnf --security：${pkgs} 个待更安全更新已落 $OUT"
+  exit 0
+fi
+
+# 其他退出码（repo 网络失败/锁占用等）⇒ degraded 显式落文件，不阻部署
+write_json "{\"status\": \"degraded\", \"checked_at\": \"$now\", \"reason\": \"dnf exit=$rc\"}"
+echo "⚠ dnf --security 退出码 $rc ⇒ degraded 落 $OUT（不阻部署）"
+exit 0

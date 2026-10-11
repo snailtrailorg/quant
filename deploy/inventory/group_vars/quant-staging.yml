@@ -15,6 +15,7 @@ quant_emd_build_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-
 quant_flip_web_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-flip-web') | trim }}"   # web 工件化批 2026-08-30
 quant_install_units_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-install-units') | trim }}"
 quant_pinned_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pinned') | trim }}"   # v3.3: 被钉 release 探测（root 特权读 /proc/cwd）
+quant_dnf_security_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-dnf-security') | trim }}"   # 批 120: dnf --security 快照（root；落 shared/security/dnf-security.json）
 quant_alembic_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-alembic-wrapper') | trim }}"
 quant_importsmoke_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-importsmoke-wrapper') | trim }}"
 quant_pip_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pip-wrapper') | trim }}"

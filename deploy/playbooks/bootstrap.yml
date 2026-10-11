@@ -88,6 +88,7 @@
             - {path: "{{ deploy_root }}/shared/venv", mode: "0755"}
             - {path: "{{ deploy_root }}/shared/runtime", mode: "0700"}
             - {path: "{{ deploy_root }}/shared/static/avatars", mode: "0700"}
+            - {path: "{{ deploy_root }}/shared/security", mode: "0755"}   # 批 120: dnf-security.json 数据位（quant 采集器可读即可）
 
         - name: 【3b】shared/.env 属主（quant:quant 600，deploy 不可读——secrets 隔离）
           ansible.builtin.file:
@@ -110,6 +111,7 @@
             - quant-install-units
             - quant-pinned          # v3.3: 被钉 release 探测（root 属主——/proc/<pid>/cwd 特权读）
             - quant-journal         # 2026-09-01: journalctl 只读诊断通道（三查需求，quant-* 域严参校验）
+            - quant-dnf-security    # 批 120: dnf --security 快照采集（root 跑，落 shared/security/ 供采集器只读）
             - quant-alembic-wrapper
             - quant-importsmoke-wrapper
             - quant-pip-wrapper
