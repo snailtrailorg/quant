@@ -2,7 +2,9 @@
   <!-- 批 120 线③：安全态势 Tab（五区布局 A~E，任务文件钉死）。
        数据两请求：snapshot（默认今日）+ history（30 天）；轮询 5min（每日数据，无需 ws）。 -->
   <div v-if="loadFailed" class="sec-empty">
-    <el-alert type="warning" :closable="false">{{ t('secpage.noSnapshot') }}</el-alert>
+    <el-alert :type="isNoSnapshot ? 'info' : 'error'" :closable="false">
+      {{ isNoSnapshot ? t('secpage.noSnapshot') : t('secpage.loadFailed') }}
+    </el-alert>
   </div>
   <template v-else-if="snap">
     <!-- A 顶部状态卡：漏洞总数+按来源分色点 / status(degraded 黄) / 上次扫描 / 新鲜度(>26h 黄) -->
@@ -132,6 +134,7 @@ const { t } = useI18n()
 const snap = ref(null)
 const history = ref([])
 const loadFailed = ref(false)
+const isNoSnapshot = ref(false)
 const srcFilter = ref('')
 const expandedDays = ref([])
 let pollTimer = null
@@ -143,8 +146,12 @@ const load = async () => {
     history.value = h.items || []
     loadFailed.value = false
   } catch (e) {
-    // 404（当日未扫）与其他失败同形：提示区而非假绿空表（空表=假绿红线）
-    if (!snap.value) loadFailed.value = true
+    // 404（当日未扫）≠ 其他失败（网络/500）：前者提示区信息文案，后者错误文案——
+    // 空表=假绿红线，两者都不落到假数据展示（步 4 P1-5）
+    if (!snap.value) {
+      isNoSnapshot.value = e?.code === 'SECURITY_SNAPSHOT_NOT_FOUND' || e?.detail === 'Not Found'
+      loadFailed.value = true
+    }
   }
 }
 onMounted(() => { load(); pollTimer = setInterval(load, 300000) })

@@ -106,13 +106,41 @@ class TestParsers:
         assert part["findings"] == [{"pkg": "requests", "vuln_id": "GHSA-1",
                                      "fix_version": "2.32.0", "description": "D"}]
 
-    def test_vulns_degraded_on_nonzero(self):
+    def test_vulns_rc1_with_vulns_is_ok_and_lands(self):
+        """**反证钉（P0-1）**：rc=1+漏洞 JSON = pip-audit 官方「有漏洞」语义 ⇒ 正常解析、
+        findings 落库。若把 rc≠0 一律当失败的旧逻辑回归 ⇒ 本用例必红（主会话实测
+        cryptography==3.3.2 ⇒ rc=1 + 20 vulns，旧语义会使有洞日恒 degraded、告警永不触发）。
+        """
+        from src.health_monitor.security_collector import _collect_vulns
+        audit_json = ('{"dependencies": ['
+                      '{"name": "cryptography", "version": "3.3.2", "vulns": ['
+                      '{"id": "GHSA-abc", "fix_versions": ["3.4.0"], "description": "bad"}]}]}')
+        fake = MagicMock(returncode=1, stdout=audit_json, stderr="")
+        with patch("subprocess.run", return_value=fake):
+            part = _collect_vulns()
+        assert part["status"] == "ok"
+        assert part["findings"] == [{"pkg": "cryptography", "vuln_id": "GHSA-abc",
+                                     "fix_version": "3.4.0", "description": "bad"}]
+        assert part["n_deps"] == 1
+
+    def test_vulns_degraded_on_rc2(self):
+        """rc≥2 才是真失败（用法错/内部错）⇒ degraded（语义演进：旧用例钉 rc=1，步 4
+        P0-1 后改钉 rc=2——rc=1 已是合法「有漏洞」态，见上一用例）。"""
+        from src.health_monitor.security_collector import _collect_vulns
+        fake = MagicMock(returncode=2, stdout="", stderr="usage error")
+        with patch("subprocess.run", return_value=fake):
+            part = _collect_vulns()
+        assert part["status"] == "degraded"
+        assert "findings" not in part   # degraded 不产空表（绝不静默空表红线）
+
+    def test_vulns_degraded_on_rc1_without_json(self):
+        """rc=1 但 stdout 无 JSON 主体 ⇒ degraded（rc 合法≠输出可用，双层校验）。"""
         from src.health_monitor.security_collector import _collect_vulns
         fake = MagicMock(returncode=1, stdout="", stderr="OSV unreachable")
         with patch("subprocess.run", return_value=fake):
             part = _collect_vulns()
         assert part["status"] == "degraded"
-        assert "findings" not in part   # degraded 不产空表（绝不静默空表红线）
+        assert "findings" not in part
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +188,37 @@ class TestBaselineDiff:
         from src.health_monitor.security_collector import _baseline_diff
         with patch("src.health_monitor.security_collector._load_lock_packages", return_value=LOCK_MAP):
             assert _baseline_diff(None, _snap()) == []
+
+    def test_prev_degraded_partitions_skipped(self):
+        """**反证钉（P0-3）**：prev 分区 degraded ⇒ 该分区跳过 diff（宁少告不假告）。
+
+        构造 prev 三分区全 degraded（listening=None）+ cur 4 端口——旧逻辑把空集当
+        合法基线 ⇒ 4 条假「新增监听」告警风暴；守卫后 diff 必须为空。撤守卫必红。
+        """
+        from src.health_monitor.security_collector import _baseline_diff
+        prev = {
+            "ports": {"status": "degraded", "degraded_reason": "ss 失败", "listening": None},
+            "components": {"status": "degraded", "degraded_reason": "pip freeze 失败"},
+            "ssh_cfg": {"status": "degraded", "degraded_reason": "sshd_config 不可读", "cfg": None},
+        }
+        cur = _snap(ports=[{"addr": "0.0.0.0", "port": p} for p in (22, 80, 443, 8080)],
+                    pip={"flask": "3.0.0", "mystery": "1.0"},
+                    ssh={"passwordauthentication": "yes"})
+        with patch("src.health_monitor.security_collector._load_lock_packages", return_value=LOCK_MAP):
+            assert _baseline_diff(prev, cur) == []
+
+    def test_prev_degraded_ports_only_skips_port_diff(self):
+        """单分区粒度：prev 仅 ports degraded ⇒ 端口不比（0 假告），包/ssh 照常比。"""
+        from src.health_monitor.security_collector import _baseline_diff
+        prev = _snap(ports=[], pip={"flask": "3.0.0"},
+                     ssh={"passwordauthentication": "no"})
+        prev["ports"] = {"status": "degraded", "degraded_reason": "ss 失败", "listening": None}
+        cur = _snap(ports=[{"addr": "0.0.0.0", "port": 8080}], pip={"flask": "3.0.0"},
+                    ssh={"passwordauthentication": "yes"})
+        with patch("src.health_monitor.security_collector._load_lock_packages", return_value=LOCK_MAP):
+            items = _baseline_diff(prev, cur)
+        assert not any(i["type"] == "port" for i in items), "prev 空集基线 ⇒ 端口 diff 必须跳过"
+        assert any(i["type"] == "config" for i in items)   # ssh 分区健康 ⇒ 照常比
 
     def test_package_in_lock_suppressed(self):
         """**抑制反证钉**：新增包 ⊆ requirements.lock ⇒ 部署引入（预期）不告。

@@ -109,6 +109,29 @@ class TestSnapshot404:
             r = client.get("/api/security/snapshot", params={"date": "2026-10-11"})
         assert r.status_code == 400 and r.json()["code"] == "SECURITY_DATE_INVALID"
 
+    def test_no_param_defaults_to_today(self):
+        """**反证钉（P0-2）**：无参（前端唯一入口形态）⇒ 默认今日 + 当日快照存在 ⇒ 200。
+
+        旧签名参数名 `date` 遮蔽 `datetime.date`，无参路径 `date.today()` 炸 500——
+        参数若改回 `date` 名（不走 alias）此用例必红。
+        """
+        from src.web_api.main import app
+        client = TestClient(app)
+        today = date.today()
+        c = _dispatch([
+            ("WHERE scan_date = %s", [_snap_row(day=today)]),
+            ("ORDER BY scan_date DESC LIMIT 1", []),
+            ("FROM security_finding WHERE first_seen <= %s", []),
+        ])
+        with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
+             patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \
+             patch("src.data_platform.db.get_conn", return_value=c), \
+             patch("src.health_monitor.security_collector._load_lock_packages", return_value=_LOCK):
+            client.headers.update({"Authorization": "Bearer t"})
+            r = client.get("/api/security/snapshot")
+        assert r.status_code == 200
+        assert r.json()["scan_date"] == today.isoformat()
+
 
 # ---------------------------------------------------------------------------
 # 2：findings 排序 + 停留天数 + fixed 标记
@@ -146,6 +169,31 @@ class TestFindingsOrder:
         assert d["findings"][2]["dwell_days"] == 0
         assert d["findings"][3]["fixed"] is True
         assert all(f["fixed"] is False for f in d["findings"][:3])
+
+    def test_degraded_day_nothing_marked_fixed(self):
+        """**反证钉（P1-2）**：当日快照 degraded ⇒ 任何 finding 不判 fixed。
+
+        降级日采集侧不推 last_seen（_upsert_findings 仅 ok 分支）——last_seen<day
+        只是旧值不是「已修复」证据；判 fixed=假清零。撤 vulns_ok 参数必红。
+        """
+        from src.web_api.main import app
+        client = TestClient(app)
+        findings = [
+            _finding_row(pkg="old", vuln="V1", first=date(2026, 10, 8), last=PREV),
+        ]
+        c = _dispatch([
+            ("WHERE scan_date = %s", [_snap_row(status="degraded")]),
+            ("ORDER BY scan_date DESC LIMIT 1", []),
+            ("FROM security_finding WHERE first_seen <= %s", findings),
+        ])
+        with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
+             patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \
+             patch("src.data_platform.db.get_conn", return_value=c), \
+             patch("src.health_monitor.security_collector._load_lock_packages", return_value=_LOCK):
+            client.headers.update({"Authorization": "Bearer t"})
+            r = client.get("/api/security/snapshot", params={"date": "20261011"})
+        assert r.status_code == 200
+        assert all(f["fixed"] is False for f in r.json()["findings"])
 
 
 # ---------------------------------------------------------------------------

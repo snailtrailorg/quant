@@ -14,7 +14,7 @@ import logging
 import re
 from datetime import date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from src.data_platform import security_store as store
 from src.web_api.auth import require_perm
@@ -45,9 +45,13 @@ def _days_between(later: date, earlier: date) -> int:
     return (later - earlier).days
 
 
-def _enrich_findings(day: date) -> list[dict]:
-    """finding 行 → 前端形状：停留天数（day - first_seen）+ fixed 标记（last_seen < day
-    ⇒ 采集降级期旧值，或快照日复扫口径——灰显沉底用）。"""
+def _enrich_findings(day: date, vulns_ok: bool = True) -> list[dict]:
+    """finding 行 → 前端形状：停留天数（day - first_seen）+ fixed 标记。
+
+    fixed=last_seen < day 且当日 vulns 分区 ok（步 4 P1-2：降级日采集侧不推 last_seen
+    ——_upsert_findings 仅 ok 分支，旧值保留 ⇒ last_seen<day 不构成「已修复」证据；
+    降级日一律不判 fixed——宁多显示不可假清零）。
+    """
     out = []
     for f in store.get_findings_active(day):
         first, last = f["first_seen"], f["last_seen"]
@@ -56,7 +60,7 @@ def _enrich_findings(day: date) -> list[dict]:
             "fix_version": f["fix_version"],
             "first_seen": first.isoformat(), "last_seen": last.isoformat(),
             "dwell_days": max(_days_between(day, first), 0),
-            "fixed": last < day,
+            "fixed": vulns_ok and last < day,
         })
     # 停留天数降序（同天数按 pkg 稳定序）；已修复（fixed）沉底
     out.sort(key=lambda x: (x["fixed"], -x["dwell_days"], x["pkg"], x["vuln_id"]))
@@ -68,9 +72,15 @@ def _count_new_findings(day: date, spans: list[tuple]) -> int:
 
 
 @router.get("/snapshot")
-def security_snapshot(date: str = "", _u: dict = Depends(require_perm("read"))):
-    """当日安全快照（默认今日）：六分区 + findings + 与前一快照的基线 diff。"""
-    day = _parse_date(date) if date else date.today()
+def security_snapshot(date_str: str = Query("", alias="date"),
+                      _u: dict = Depends(require_perm("read"))):
+    """当日安全快照（默认今日）：六分区 + findings + 与前一快照的基线 diff。
+
+    参数名用 date_str + alias="date"（步 4 P0-2）：原名 `date` 遮蔽模块级
+    `datetime.date`，无参默认路径 `date.today()` 炸 500——前端唯一入口即无参。
+    alias 保持 `?date=` 对外契约不变。
+    """
+    day = _parse_date(date_str) if date_str else date.today()
     snap = store.get_snapshot(day)
     if snap is None:
         raise ApiError(404, "SECURITY_SNAPSHOT_NOT_FOUND",
@@ -86,12 +96,14 @@ def security_snapshot(date: str = "", _u: dict = Depends(require_perm("read"))):
         "new_packages": [d["detail"] for d in diff_items if d["type"] == "package"],
         "cfg_flips": [d["detail"] for d in diff_items if d["type"] == "config"],
     }
+    # vulns 分区不单独落列（快照 status 含 vulns 取最差）——整体 degraded ⇒ 保守
+    # 视作 vulns 未证实，不判任何 fixed（P1-2：宁多显示不假清零）
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
         "ai_summary": snap["ai_summary"] or "",
         "created_at": snap["created_at"].isoformat() if snap["created_at"] else None,
-        "findings": _enrich_findings(day),
+        "findings": _enrich_findings(day, vulns_ok=snap["status"] == "ok"),
         "components": snap["components"],
         "ports": snap["ports"],
         "ssh_cfg": snap["ssh_cfg"],
@@ -104,8 +116,9 @@ def security_snapshot(date: str = "", _u: dict = Depends(require_perm("read"))):
 @router.get("/history")
 def security_history(days: int = 30, _u: dict = Depends(require_perm("read"))):
     """近 N 天逐日趋势：漏洞计数/新增/基线变更/组件变更（版本差真算）+ ai_summary 首行
-    （B 区历史摘要折叠——日期+首行预览）。"""
-    days = max(1, min(days, 120))
+    （B 区历史摘要折叠——日期+首行预览）。days 护栏 [1,31]（步 4 P1-5：>31 取 31——
+    逐日行×基线 diff 的计算量与 payload 有界）。"""
+    days = max(1, min(days, 31))
     today = date.today()
     snaps = store.get_snapshots_recent(days, today)
     spans = store.get_finding_spans()

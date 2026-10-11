@@ -189,8 +189,10 @@ def _collect_dnf(path: Path | None = None) -> dict:
 def _collect_vulns(lock_path: Path | None = None) -> dict:
     """pip-audit OSV 比对（subprocess 调 `sys.executable -m pip_audit`，不依赖「谁的本机」）。
 
-    退出码非 0/超时/无输出 ⇒ degraded——**绝不静默空表**（同判返工裁定 3）；
-    degraded 时 findings 不更新（调用方按 status 分支）。
+    退出码语义（pip-audit 官方，步 4 同判 P0-1 主会话实测 cryptography==3.3.2 ⇒ rc=1+20
+    vulns）：rc=0 无漏洞 / rc=1 有漏洞——**两者均正常解析 JSON**；rc≥2 才是真失败
+    （用法错/内部错）⇒ degraded。无 JSON 主体同理 degraded——**绝不静默空表**
+    （同判返工裁定 3）；degraded 时 findings 不更新（调用方按 status 分支）。
     """
     part: dict = {"status": "ok"}
     lock = lock_path if lock_path is not None else _LOCK_FILE
@@ -198,7 +200,7 @@ def _collect_vulns(lock_path: Path | None = None) -> dict:
         out = subprocess.run(
             [sys.executable, "-m", "pip_audit", "-r", str(lock), "--no-deps", "--format", "json"],
             capture_output=True, text=True, timeout=_PIP_AUDIT_TIMEOUT)
-        if out.returncode != 0:
+        if out.returncode >= 2:
             raise RuntimeError(f"pip-audit 退出码 {out.returncode}: {out.stderr.strip()[:150]}")
         payload = None
         for line in out.stdout.splitlines():           # 前置可能有 "No known vulnerabilities found" 行
@@ -304,32 +306,45 @@ def _baseline_diff(prev: dict | None, cur: dict) -> list[dict]:
 
     判据三项：新增监听端口 / lock 外新增包 / ssh 安全配置翻转。
     prev=None（首跑/前日缺）⇒ 空 diff（无基线不告，防首跑风暴——同 _alert_sync_gaps 语义）。
+    prev 侧守卫（步 4 P0-3，与 cur 侧对称）：prev 分区 status=degraded 或判据键
+    （listening/pip/cfg）为 None/缺失 ⇒ 该分区跳过 diff——prev 是空集假基线时比出的是
+    全量假「新增」（告警风暴），宁少告不假告。
     """
     if not prev:
         return []
     items: list[dict] = []
 
-    prev_ports = {(p.get("addr"), p.get("port")) for p in (prev.get("ports") or {}).get("listening") or []}
-    cur_ports_part = cur.get("ports") or {}
-    if cur_ports_part.get("listening") is not None:
-        for p in cur_ports_part["listening"]:
-            key = (p.get("addr"), p.get("port"))
-            if key not in prev_ports:
-                items.append({"type": "port", "detail": f"新增监听 {p.get('addr')}:{p.get('port')}"})
+    prev_ports_part = prev.get("ports") or {}
+    if prev_ports_part.get("status") != "degraded" and \
+            prev_ports_part.get("listening") is not None:
+        prev_ports = {(p.get("addr"), p.get("port")) for p in prev_ports_part["listening"]}
+        cur_ports_part = cur.get("ports") or {}
+        if cur_ports_part.get("listening") is not None:
+            for p in cur_ports_part["listening"]:
+                key = (p.get("addr"), p.get("port"))
+                if key not in prev_ports:
+                    items.append({"type": "port", "detail": f"新增监听 {p.get('addr')}:{p.get('port')}"})
 
     lock_map = _load_lock_packages()
-    prev_pip = (prev.get("components") or {}).get("pip")
-    cur_pip = (cur.get("components") or {}).get("pip")
-    for pkg in _diff_new_packages(prev_pip, cur_pip, lock_map):
-        ver = (_norm_pkgs(cur_pip)).get(pkg, "?")
-        items.append({"type": "package", "detail": f"新增包 {pkg}=={ver}（lock 外=环境漂移）"})
+    prev_comp_part = prev.get("components") or {}
+    if prev_comp_part.get("status") != "degraded" and prev_comp_part.get("pip") is not None:
+        prev_pip = prev_comp_part.get("pip")
+        cur_pip = (cur.get("components") or {}).get("pip")
+        for pkg in _diff_new_packages(prev_pip, cur_pip, lock_map):
+            ver = (_norm_pkgs(cur_pip)).get(pkg, "?")
+            items.append({"type": "package",
+                          "detail": f"新增包 {pkg}=={ver}（lock 不可读未抑制，可能含预期变更）"
+                          if lock_map is None else
+                          f"新增包 {pkg}=={ver}（lock 外=环境漂移）"})
 
-    prev_ssh = (prev.get("ssh_cfg") or {}).get("cfg") or {}
-    cur_ssh = (cur.get("ssh_cfg") or {}).get("cfg") or {}
-    for key in _SSH_KEYS:
-        p_v, c_v = prev_ssh.get(key), cur_ssh.get(key)
-        if p_v is not None and c_v is not None and p_v != c_v:
-            items.append({"type": "config", "detail": f"ssh {key}: {p_v} → {c_v}"})
+    prev_ssh_part = prev.get("ssh_cfg") or {}
+    if prev_ssh_part.get("status") != "degraded" and prev_ssh_part.get("cfg") is not None:
+        prev_ssh = prev_ssh_part.get("cfg") or {}
+        cur_ssh = (cur.get("ssh_cfg") or {}).get("cfg") or {}
+        for key in _SSH_KEYS:
+            p_v, c_v = prev_ssh.get(key), cur_ssh.get(key)
+            if p_v is not None and c_v is not None and p_v != c_v:
+                items.append({"type": "config", "detail": f"ssh {key}: {p_v} → {c_v}"})
     return items
 
 
