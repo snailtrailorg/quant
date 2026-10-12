@@ -13,6 +13,7 @@ quant_flip_web_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-f
 quant_install_units_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-install-units') | trim }}"
 quant_pinned_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pinned') | trim }}"   # v3.3: 被钉 release 探测（root 特权读 /proc/cwd）
 quant_dnf_security_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-dnf-security') | trim }}"   # 批 120: dnf --security 快照（root；落 shared/security/dnf-security.json）
+quant_ssh_snapshot_cmd: "{{ (deploy_sudo_root ~ ' ' ~ deploy_wrapper_dir ~ '/quant-ssh-snapshot') | trim }}"    # 批 120 首采补: sshd 姿态快照（root；落 shared/security/sshd-config.txt）
 quant_alembic_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-alembic-wrapper') | trim }}"
 quant_importsmoke_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-importsmoke-wrapper') | trim }}"
 quant_pip_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pip-wrapper') | trim }}"

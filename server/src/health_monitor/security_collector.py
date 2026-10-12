@@ -32,8 +32,11 @@ _PIP_AUDIT_TIMEOUT = 120   # OSV 网络比对留余量（实测 ~12s）
 
 _SSH_KEYS = ("passwordauthentication", "permitrootlogin")
 
-# nginx 等安全头探针目标（本机 443，跳过证书校验——探针目的是看头而非验证证书）
-_HEADER_PROBE_HOST = "127.0.0.1"
+# nginx 等安全头探针目标（本机 443，跳过证书校验——探针目的是看头而非验证证书）。
+# Host 头必须用域名：连 127.0.0.1 但 Host 也 127.0.0.1 时 nginx 落 default/http-redirect
+# vhost 回 301 自指（首采实证），Host 用 vhost 域名才命中 quant 站点。
+_HEADER_PROBE_ADDR = "127.0.0.1"
+_HEADER_PROBE_HOST = "quant.snailtrail.cc"
 _HEADER_PROBE_NAMES = ("strict-transport-security", "x-content-type-options",
                        "x-frame-options", "content-security-policy")
 
@@ -114,15 +117,27 @@ def _parse_sshd_config(text: str) -> dict:
     return {k: cfg.get(k) for k in _SSH_KEYS}
 
 
+_SSH_CONFIG_PATH = Path("/etc/ssh/sshd_config")
+# sshd_config 直接读取可能 600 root（收紧后 quant 不可读）——部署管道 wrapper 落的
+# 只读快照兜底（同 dnf-security 模式）；两者都不可得 ⇒ degraded 明示。
+_SSH_SNAPSHOT_PATH = Path("/data/websites/snailtrail.cc/quant/shared/security/sshd-config.txt")
+
+
 def _collect_ssh() -> dict:
-    """读 /etc/ssh/sshd_config 文本（644 quant 可读——不跑 `sshd -T`，它要 root）。"""
+    """sshd 安全姿态：优先直读 /etc/ssh/sshd_config（世界可读时）；不可读则用部署
+    管道落的只读快照（wrapper 模式——`sshd -T`/特权读由管道侧 root 完成，采集器零特权）。"""
     part: dict = {"status": "ok"}
-    try:
-        part["cfg"] = _parse_sshd_config(Path("/etc/ssh/sshd_config").read_text())
-    except Exception as e:
-        logger.warning("sshd_config 读取失败: %s", e)
-        _degraded(part, f"sshd_config 不可读: {e}")
-        part["cfg"] = None
+    for src, path in (("direct", _SSH_CONFIG_PATH), ("snapshot", _SSH_SNAPSHOT_PATH)):
+        try:
+            part["cfg"] = _parse_sshd_config(path.read_text())
+            part["source"] = src
+            return part
+        except Exception as e:
+            if src == "direct":
+                continue          # 直读失败不落 degraded，先试快照
+            logger.warning("sshd_config 读取失败（直读+快照均不可得）: %s", e)
+            _degraded(part, f"sshd_config 不可读: {e}")
+            part["cfg"] = None
     return part
 
 
@@ -241,7 +256,8 @@ def _collect_headers(host: str = _HEADER_PROBE_HOST) -> dict:
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(f"https://{host}/", headers={"Host": host})
+        req = urllib.request.Request(f"https://{_HEADER_PROBE_ADDR}/",
+                                     headers={"Host": _HEADER_PROBE_HOST})
         with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
             lower = {k.lower(): v for k, v in resp.headers.items()}
         part["headers"] = {name: lower.get(name) for name in _HEADER_PROBE_NAMES}

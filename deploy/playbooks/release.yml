@@ -711,6 +711,12 @@
       failed_when: false
       changed_when: false
 
+    # 批 120 首采补：sshd_config 600 root 后 quant 不可直读——随 release 落只读快照
+    - name: 收尾 —— sshd 姿态快照（quant-ssh-snapshot；落 shared/security/ 供采集器只读）
+      ansible.builtin.command: "{{ quant_ssh_snapshot_cmd }}"
+      failed_when: false
+      changed_when: false
+
     - name: 收尾 —— 本版已切换标记（GC 依据）
       ansible.builtin.file:
         path: "{{ deploy_root }}/releases/{{ release_id }}/.deployed"

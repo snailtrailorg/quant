@@ -55,5 +55,11 @@ if [ "$sub" = "dry-run" ]; then
   # 预检：解析/哈希校验，不改 venv；解析不了（坏包名/冲突）即非零退出
   exec "$PIP" install --dry-run --require-hashes -i "$INDEX" -r "$REQ"
 else
-  exec "$PIP" install --require-hashes -i "$INDEX" -r "$REQ"
+  # 真装：生产 lock（--require-hashes）+ requirements-dev（工具链：ruff/pip-audit——
+  # 批 120 采集器 subprocess 调 venv 内 pip_audit；dev 无 hash 不校验，装失败不阻发布）
+  "$PIP" install --require-hashes -i "$INDEX" -r "$REQ"
+  DEV="$ROOT/releases/$release_id/requirements-dev.txt"
+  if [ -f "$DEV" ]; then
+    "$PIP" install -i "$INDEX" -r "$DEV" || echo "⚠ requirements-dev 安装失败（工具链缺位，不阻发布——采集器自会标 degraded）" >&2
+  fi
 fi

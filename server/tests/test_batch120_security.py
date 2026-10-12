@@ -487,3 +487,43 @@ class TestRegistration:
     def test_pip_audit_in_requirements_dev(self):
         from pathlib import Path
         assert "pip-audit" in Path("requirements-dev.txt").read_text()
+
+
+class TestBatch120FirstScanFixes:
+    """首采（2026-10-12 06:00 prod）四分区降级的修复钉。"""
+
+    def test_probe_host_header_uses_domain(self):
+        """探针 Host 头须用 vhost 域名——Host:127.0.0.1 落 default/http-redirect vhost
+        回 301 自指（prod 首采实证），域名才命中 quant 站点。"""
+        import src.health_monitor.security_collector as sc
+        assert sc._HEADER_PROBE_HOST == "quant.snailtrail.cc"
+        assert sc._HEADER_PROBE_ADDR == "127.0.0.1"   # 连接走本机，不走公网
+
+    def test_ssh_snapshot_fallback(self, monkeypatch, tmp_path):
+        """直读失败（600 root）⇒ 落快照源；两者皆无 ⇒ degraded。"""
+        import src.health_monitor.security_collector as sc
+        snap = tmp_path / "sshd-config.txt"
+        snap.write_text("PasswordAuthentication no\nPermitRootLogin yes\n")
+        monkeypatch.setattr(sc, "_SSH_CONFIG_PATH", tmp_path / "nonexistent")
+        monkeypatch.setattr(sc, "_SSH_SNAPSHOT_PATH", snap)
+        part = sc._collect_ssh()
+        assert part["status"] == "ok"
+        assert part["source"] == "snapshot"
+        assert part["cfg"]["passwordauthentication"] == "no"
+
+    def test_ssh_snapshot_also_missing_degraded(self, monkeypatch, tmp_path):
+        import src.health_monitor.security_collector as sc
+        monkeypatch.setattr(sc, "_SSH_CONFIG_PATH", tmp_path / "nonexistent")
+        monkeypatch.setattr(sc, "_SSH_SNAPSHOT_PATH", tmp_path / "also-missing")
+        part = sc._collect_ssh()
+        assert part["status"] == "degraded"
+        assert part["cfg"] is None
+
+    def test_ssh_direct_read_preferred(self, monkeypatch, tmp_path):
+        import src.health_monitor.security_collector as sc
+        direct = tmp_path / "sshd_config"
+        direct.write_text("PasswordAuthentication yes\n")
+        monkeypatch.setattr(sc, "_SSH_CONFIG_PATH", direct)
+        part = sc._collect_ssh()
+        assert part["source"] == "direct"
+        assert part["cfg"]["passwordauthentication"] == "yes"

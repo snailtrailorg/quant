@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# quant-ssh-snapshot —— sshd 安全姿态快照采集通道（sudoers QUANT_DEPLOY_ROOT，root 属主）。
+#
+# 属主约束（同 quant-dnf-security）: root:root 755，部署于 /usr/local/sbin/quant-ssh-snapshot。
+#
+# 为什么（批 120 首采实证）: /etc/ssh/sshd_config 收紧为 600 root:root 后 quant
+#   采集器不可直读——部署管道随 release 落只读快照到 shared/security/，采集器
+#   读快照（security_collector._collect_ssh 直读失败时 fallback），零特权扩张。
+#
+# 动作: /etc/ssh/sshd_config 复制为 $ROOT/shared/security/sshd-config.txt
+#   （纯文本；采集器 _parse_sshd_config 解析两键 passwordauthentication/
+#   permitrootlogin——快照含敏感键之外内容，shared/ 0700 quant:quant 已隔离）。
+#   文件不可读 ⇒ {status:"degraded", reason} 同目录 .degraded 标记文件（采集器
+#   以快照存在性+可读性判定，不静默）。
+#
+# 严参校验: 不收任何参数（无参化设计——sudoers `*` 吃空格，夹带参数即拒）。
+#
+# 环境变量: QUANT_DEPLOY_ROOT（沙箱指向测试树；生产空=内置默认路径）
+set -euo pipefail
+
+[ $# -eq 0 ] || { echo "用法: quant-ssh-snapshot（不收参数）" >&2; exit 2; }
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+OUT_DIR="$ROOT/shared/security"
+OUT="$OUT_DIR/sshd-config.txt"
+
+mkdir -p "$OUT_DIR"
+if cat /etc/ssh/sshd_config >"$OUT" 2>/dev/null; then
+  chown quant:quant "$OUT_DIR" "$OUT" 2>/dev/null || true   # 沙箱无 quant 用户时容错
+  echo "✓ sshd_config 快照已落 $OUT"
+  exit 0
+fi
+
+printf 'status=degraded reason=sshd_config-unreadable at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$OUT_DIR/sshd-config.degraded"
+chown quant:quant "$OUT_DIR" "$OUT_DIR/sshd-config.degraded" 2>/dev/null || true
+echo "⚠ sshd_config 不可读 ⇒ degraded 标记已落（不阻部署）"
+exit 0

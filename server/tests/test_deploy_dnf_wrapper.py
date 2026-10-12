@@ -96,3 +96,35 @@ class TestFourWayConsistency:
 
     def test_wrapper_file_exists(self):
         assert _WRAPPER.is_file(), f"缺 wrapper 本体: {_WRAPPER}"
+
+
+class TestSshSnapshotGuard:
+    """批 120 首采补 · quant-ssh-snapshot 部署守卫（同四方一致性模式——sshd_config 600 后采集通道）。"""
+
+    SSH_NAME = "quant-ssh-snapshot"
+    _SSH_WRAPPER = _REPO / "deploy" / "wrappers" / "quant-ssh-snapshot"
+
+    def test_wrapper_source_contract(self):
+        src = _read(self._SSH_WRAPPER)
+        assert '[ $# -eq 0 ]' in src, "须无参化严参校验（sudoers * 吃空格的注入面）"
+        assert "/etc/ssh/sshd_config" in src
+        assert "sshd-config.txt" in src, "快照落点须为采集器消费路径"
+        assert "exit 0" in src, "全部路径 exit 0（degraded 不阻部署）"
+
+    def test_sudoers_whitelist_line(self):
+        src = _read(_SUDOERS)
+        assert f"/usr/local/sbin/{self.SSH_NAME}" in src, "sudoers 缺白名单行"
+
+    def test_release_yml_has_task(self):
+        src = _read(_RELEASE)
+        assert "quant-ssh-snapshot" in src and "quant_ssh_snapshot_cmd" in src, \
+            "release.yml 缺 ssh 快照任务（快照不更新 ⇒ 采集器 ssh 分区恒 degraded）"
+
+    def test_bootstrap_yml_installs_wrapper(self):
+        src = _read(_BOOTSTRAP)
+        assert self.SSH_NAME in src, "bootstrap.yml 缺 wrapper 装位行"
+
+    def test_inventory_vars_three_envs(self):
+        for env in ("quant-prod", "quant-staging", "sandbox"):
+            f = _REPO / "deploy" / "inventory" / "group_vars" / f"{env}.yml"
+            assert "quant_ssh_snapshot_cmd" in _read(f), f"{env} 缺 quant_ssh_snapshot_cmd 变量"
