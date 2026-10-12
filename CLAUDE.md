@@ -8,6 +8,7 @@
 > 项目记忆在 `~/.claude/projects/-home-bernard-Projects-quant/memory/MEMORY.md`（持久化，跨会话）。
   - 服务器部署信息：`server-info.md`（IP/OS/路径/分库/备份/密钥）
   - 部署机制：**`docs/architecture/A06-部署管道架构.md`（真源：架构/账号权限/八阶段/回滚语义/炸半径清单）** + 记忆 `deploy-mechanism.md`（速记，可能滞后于 A06）
+  - **部署机制操作纪律**（批 121 立）：**不越权尝试、不绕架构自创脚本/命令**——权限不够（sudoers 白名单只认 wrapper）停下要通道（michael/用户），连上服务器换姿势重试是纯浪费；**常规操作（部署/回滚/查日志）走 `deploy/DEPLOY.md` 速查节**（一页，不读全档）；**改机制（release/bootstrap/wrapper/sudoers/nginx conf）必先通读 A06 + §11 输入→消费者地图**（改输入先查表知下游），权限全景见 A06 §3.6
   - 服务列表：`server-services.md`（systemd/Polkit/Nginx/日志）
 
 ## 目录地图
