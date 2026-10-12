@@ -30,6 +30,7 @@
 # ⑥ 手动触发安全扫描（POST /api/security/scan 端点尚不存在——此为唯一手动通道，
 #    2026-10-12 验证：task 1bdbf58d 全绿。在服务器上跑（michael shell 或等效 sudo 通道））
 sudo -u quant bash -c 'set -a && source /data/websites/snailtrail.cc/quant/shared/.env && set +a && cd $(readlink -f /data/websites/snailtrail.cc/quant/server) && /data/websites/snailtrail.cc/quant/shared/venv/bin/python -c "from src.scheduler.app import app; print(\"task:\", app.send_task(\"src.scheduler.tasks.security_scan\").id)"'
+# （安全扫描手动触发——michael root 会话跑；.env 只在子进程 source 不落 shell 历史；扫描结果见 web 观察→安全页签）
 # 出 task: <uuid> 即已入队；跑完（~1-2min）看 Web 观察页安全 Tab 或 journal
 
 # ⑦ 查 readyz（依赖可达性：PG/Valkey）
@@ -48,8 +49,8 @@ sudo -u quant bash -c 'set -a && source /data/websites/snailtrail.cc/quant/share
 # ② 发布（八阶段：交易窗→指纹→导入冒烟→DDL 门→波次重启→postverify→收敛断言→GC）
 .venv/bin/ansible-playbook -i inventory/quant-prod.yml playbooks/release.yml
 
-# ③ 回滚（任一阶段失败 rescue 自动执行；手动回滚同款）
-.venv/bin/ansible-playbook -i inventory/quant-prod.yml playbooks/rollback.yml
+# ③ 回滚（任一阶段失败 rescue 自动执行；手动回滚**必须带 confirm=true**——防手滑）
+.venv/bin/ansible-playbook -i inventory/quant-prod.yml playbooks/rollback.yml -e confirm=true
 ```
 
 **退出码语义**：中止/回滚=非零退出+告警——CI 门不吃假绿。release 成功后核对三证：

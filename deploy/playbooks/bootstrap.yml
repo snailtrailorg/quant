@@ -123,6 +123,8 @@
           loop:
             - quant-svc
             - quant-flip-server
+            - quant-flip-web        # 批 121 清账 #6：曾长期缺席（§8-6 挂账项）——web 原子切换通道
+            - quant-emd-build       # 批 121 清账 #6：EMQ 绑定编译通道
             - quant-install-units
             - quant-pinned          # v3.3: 被钉 release 探测（root 属主——/proc/<pid>/cwd 特权读）
             - quant-journal         # 2026-09-01: journalctl 只读诊断通道（三查需求，quant-* 域严参校验）
