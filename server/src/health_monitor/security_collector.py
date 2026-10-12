@@ -29,7 +29,7 @@ logger = logging.getLogger("health_monitor.security")
 DNF_SECURITY_FILE = Path("/data/websites/snailtrail.cc/quant/shared/security/dnf-security.json")
 
 _CMD_TIMEOUT = 30          # 版本/端口类命令超时（秒）
-_PIP_AUDIT_TIMEOUT = 120   # OSV 网络比对留余量（实测 ~12s）
+_PIP_AUDIT_TIMEOUT = 300   # OSV 网络比对——prod 实测可 >120s（2026-10-12 首真跑 130.8s 任务被 120s 子进程超时杀；本机 ~12s 是本地网络快）
 
 _SSH_KEYS = ("passwordauthentication", "permitrootlogin")
 
@@ -243,6 +243,7 @@ def _collect_vulns(lock_path: Path | None = None) -> dict:
         part["findings"] = findings
         part["n_deps"] = len(payload["dependencies"])
     except subprocess.TimeoutExpired:
+        logger.warning("pip-audit 超时 >%ss（OSV 网络？）", _PIP_AUDIT_TIMEOUT)
         _degraded(part, f"pip-audit 超时 >{_PIP_AUDIT_TIMEOUT}s（OSV 网络？）")
     except Exception as e:
         logger.warning("pip-audit 失败: %s", e)
