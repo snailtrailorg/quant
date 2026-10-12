@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 import subprocess
 import sys
 from datetime import date
@@ -78,6 +79,7 @@ def _collect_components() -> dict:
     except Exception as e:
         logger.warning("pip freeze 采集失败: %s", e)
         _degraded(part, f"pip freeze 失败: {e}")
+    part["python"] = platform.python_version()      # 解释器版本（无子进程——直接查）
     for key, cmd in (
         ("nginx", ["nginx", "-v"]),                      # nginx -v 走 stderr（官方行为）
         ("openssl", ["rpm", "-q", "--qf", "%{VERSION}", "openssl"]),

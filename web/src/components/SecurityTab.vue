@@ -195,7 +195,7 @@ const lastChangeDate = (name) => {
 const componentRows = computed(() => {
   const comp = snap.value?.components || {}
   const rows = []
-  for (const k of ['nginx', 'openssl', 'postgres', 'redis']) {
+  for (const k of ['nginx', 'openssl', 'postgres', 'redis', 'python']) {
     if (comp[k] !== undefined) rows.push({ name: k, version: comp[k], note: COMPONENT_NOTES[k] || '' })
   }
   const pip = comp.pip || {}
