@@ -29,7 +29,10 @@ logger = logging.getLogger("health_monitor.security")
 DNF_SECURITY_FILE = Path("/data/websites/snailtrail.cc/quant/shared/security/dnf-security.json")
 
 _CMD_TIMEOUT = 30          # 版本/端口类命令超时（秒）
-_PIP_AUDIT_TIMEOUT = 300   # OSV 网络比对——prod 实测可 >120s（2026-10-12 首真跑 130.8s 任务被 120s 子进程超时杀；本机 ~12s 是本地网络快）
+_PIP_AUDIT_TIMEOUT = 300   # OSV 网络比对上限。prod 实测教训（2026-10-12）：不加 --disable-pip 时
+                           # pip-audit 把 155 包重装进隔离 venv（走镜像网络）6m40s——CPU 仅 12.5s。
+                           # --disable-pip 跳过重装（lock 带 hash + --no-deps 恰为其快路前提），
+                           # 只剩 OSV 查询时间。300s 为 OSV 慢日余量。
 
 _SSH_KEYS = ("passwordauthentication", "permitrootlogin")
 
@@ -220,7 +223,8 @@ def _collect_vulns(lock_path: Path | None = None) -> dict:
     lock = lock_path if lock_path is not None else _LOCK_FILE
     try:
         out = subprocess.run(
-            [sys.executable, "-m", "pip_audit", "-r", str(lock), "--no-deps", "--format", "json"],
+            [sys.executable, "-m", "pip_audit", "-r", str(lock), "--no-deps",
+             "--disable-pip", "--format", "json"],
             capture_output=True, text=True, timeout=_PIP_AUDIT_TIMEOUT)
         if out.returncode >= 2:
             raise RuntimeError(f"pip-audit 退出码 {out.returncode}: {out.stderr.strip()[:150]}")
