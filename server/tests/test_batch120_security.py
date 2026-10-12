@@ -527,3 +527,23 @@ class TestBatch120FirstScanFixes:
         part = sc._collect_ssh()
         assert part["source"] == "direct"
         assert part["cfg"]["passwordauthentication"] == "yes"
+
+
+class TestSysdepComponents:
+    """系统组件纳管（dnf 层直接依赖）：pango/cairo/wqy 字体版本入快照。"""
+
+    def test_sysdep_keys_collected(self):
+        """三键在 _collect_components 命令清单（rpm -q 形态）；未装=None 不算失败。"""
+        import inspect
+        import src.health_monitor.security_collector as sc
+        src_text = inspect.getsource(sc._collect_components)
+        for pkg in ("pango", "cairo", "wqy-microhei-fonts"):
+            assert pkg in src_text, f"组件命令清单缺 {pkg}"
+
+    def test_bootstrap_asserts_sysdeps(self):
+        """bootstrap.yml 须有系统依赖在位断言（缺位 fail 明示装法——新机重建清单）。"""
+        from pathlib import Path
+        bs = Path(__file__).resolve().parents[2] / "deploy" / "playbooks" / "bootstrap.yml"
+        t = bs.read_text(encoding="utf-8")
+        assert "rpm -q pango cairo wqy-microhei-fonts" in t, "缺在位断言命令"
+        assert "dnf install -y pango cairo wqy-microhei-fonts" in t, "缺位提示须含装法"

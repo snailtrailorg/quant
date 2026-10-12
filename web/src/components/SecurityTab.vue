@@ -185,6 +185,9 @@ const filteredFindings = computed(() => {
 const KEY_PIP = ['fastapi', 'vnpy', 'psycopg', 'pandas', 'numpy', 'celery', 'redis']
 const COMPONENT_NOTES = {
   openssl: 'al8 backport 维护（以 dnf --security 为准）',
+  pango: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',
+  cairo: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',
+  'wqy-microhei': 'PDF 中文字体（dnf 层）',
 }
 const lastChangeDate = (name) => {
   for (const d of history.value) {
@@ -195,7 +198,7 @@ const lastChangeDate = (name) => {
 const componentRows = computed(() => {
   const comp = snap.value?.components || {}
   const rows = []
-  for (const k of ['nginx', 'openssl', 'postgres', 'redis', 'python']) {
+  for (const k of ['nginx', 'openssl', 'postgres', 'redis', 'python', 'pango', 'cairo', 'wqy-microhei']) {
     if (comp[k] !== undefined) rows.push({ name: k, version: comp[k], note: COMPONENT_NOTES[k] || '' })
   }
   const pip = comp.pip || {}

@@ -55,6 +55,21 @@
             echo "✓ 无 requiretty"
           changed_when: false
 
+        # ---------- quant 直接依赖的系统组件断言（批 120 系统层纳管；不自动装——infra 属
+        #     michael 分工，装的动作留人；缺位 fail 明示装法，防"新机重建靠翻文档回忆"） ----------
+        - name: 【3b】quant 系统依赖在位断言（weasyprint 的 pango/cairo/wqy 字体——PDF 导出 dlopen）
+          ansible.builtin.command: rpm -q pango cairo wqy-microhei-fonts
+          changed_when: false
+          failed_when: false
+          register: sysdep_pdf
+        - name: 【3b】断言结果（缺位即 fail——新机重建清单在此）
+          ansible.builtin.fail:
+            msg: |
+              ✗ PDF 导出系统依赖缺失: {{ sysdep_pdf.stdout_lines | default([]) | join('; ') }}
+              装法: sudo dnf install -y pango cairo wqy-microhei-fonts
+              （gcc-toolset-13 为 EMQ 编译依赖，仅生产/彩排需要——沙箱跳过）
+          when: sysdep_pdf.rc != 0 and (bootstrap_check_sysdeps | default(true) | bool)
+
         # ---------- SSH 密钥（设计稿 §2：禁 command=；加 no-forwarding 族；from= 待出口 IP 确认） ----------
         - name: 【3b】deploy authorized_keys（禁 command=——与 Ansible 多命令冲突，写明禁防后人好心加）
           ansible.posix.authorized_key:

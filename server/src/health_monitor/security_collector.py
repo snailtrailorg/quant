@@ -85,6 +85,11 @@ def _collect_components() -> dict:
         ("openssl", ["rpm", "-q", "--qf", "%{VERSION}", "openssl"]),
         ("postgres", ["psql", "--version"]),
         ("redis", ["redis-server", "--version"]),
+        # quant 直接依赖的系统组件（dnf 装、非 pip 层可重建——版本入快照纳管）：
+        # pango/cairo=weasyprint PDF 渲染 dlopen；wqy 字体=PDF 中文；gcc-toolset=EMQ 绑定编译
+        ("pango", ["rpm", "-q", "--qf", "%{NAME}-%{VERSION}", "pango"]),
+        ("cairo", ["rpm", "-q", "--qf", "%{NAME}-%{VERSION}", "cairo"]),
+        ("wqy-microhei", ["rpm", "-q", "--qf", "%{NAME}-%{VERSION}", "wqy-microhei-fonts"]),
     ):
         try:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=_CMD_TIMEOUT)
