@@ -1477,7 +1477,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       critical: '严重', warning: '警告', normal: '正常',
       active: '运行中', inactive: '已停止', online: '在线', offline: '离线',
       running: '运行中', frozen: '冻结', restarts: '重启次数', noData: '暂无数据', history: '历史',
-      tabSecurity: '安全',   // 批 120：安全态势页签（与 tabs.security「标的资料」异键防撞）
+      tabSecurity: '系统安全',   // 批 120 页签（与 tabs.security「标的资料」异键防撞；2026-10-13 用户更名）
     },
     secpage: {   // 批 120：安全态势五区（A 状态卡/B AI 摘要/C 漏洞列表/D 组件版本/E 基线时间线）
       vulnTotal: '活跃漏洞', status: '扫描状态', scanDate: '快照日期', lastScan: '上次扫描',
@@ -2956,7 +2956,7 @@ im: 'IM Bots', mail: 'Email SMTP',
       critical: 'Critical', warning: 'Warning', normal: 'Normal',
       active: 'Active', inactive: 'Inactive', online: 'Online', offline: 'Offline',
       running: 'Running', frozen: 'Frozen', restarts: 'Restarts', noData: 'No data', history: 'History',
-      tabSecurity: 'Security',   // batch 120
+      tabSecurity: 'System Security',   // batch 120
     },
     secpage: {   // batch 120: security posture five zones
       vulnTotal: 'Active vulns', status: 'Scan status', scanDate: 'Snapshot date', lastScan: 'Last scan',

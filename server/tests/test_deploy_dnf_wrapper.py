@@ -128,3 +128,32 @@ class TestSshSnapshotGuard:
         for env in ("quant-prod", "quant-staging", "sandbox"):
             f = _REPO / "deploy" / "inventory" / "group_vars" / f"{env}.yml"
             assert "quant_ssh_snapshot_cmd" in _read(f), f"{env} 缺 quant_ssh_snapshot_cmd 变量"
+
+
+class TestSectriggerGuard:
+    """批 122 · quant-sectrigger 部署守卫（四方一致性——依赖变更触发当日安全扫描通道）。"""
+
+    def test_wrapper_source_contract(self):
+        w = _REPO / "deploy" / "wrappers" / "quant-sectrigger"
+        src = _read(w)
+        assert '[ $# -eq 0 ]' in src, "须无参化严参校验"
+        assert "security_scan" in src and "send_task" in src
+        assert 'src.scheduler.app' in src, "celery app 真实模块路径（防再走错端点）"
+        assert "exit 0" not in src.split("exec")[1] if "exec" in src else True
+
+    def test_sudoers_whitelist(self):
+        assert "/usr/local/sbin/quant-sectrigger" in _read(_SUDOERS)
+
+    def test_release_yml_task(self):
+        src = _read(_RELEASE)
+        assert "quant-sectrigger" in src and "quant_sectrigger_cmd" in src
+        assert "req_changed | bool" in src, "仅依赖变更日触发"
+
+    def test_bootstrap_installs(self):
+        assert "quant-sectrigger" in _read(_BOOTSTRAP)
+        for f in ("bootstrap_server.sh", "bootstrap_staging.sh"):
+            assert "sectrigger" in _read(_REPO / "deploy" / "scripts" / f), f
+
+    def test_inventory_three_envs(self):
+        for env in ("quant-prod", "quant-staging", "sandbox"):
+            assert "quant_sectrigger_cmd" in _read(_REPO / "deploy" / "inventory" / "group_vars" / f"{env}.yml")

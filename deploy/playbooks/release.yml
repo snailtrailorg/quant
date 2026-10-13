@@ -715,6 +715,15 @@
       failed_when: false
       changed_when: false
 
+    # 批 122 精修：依赖指纹变化 ⇒ 当日补一轮安全扫描（不等次日 06:00）——新依赖上线
+    # 即是漏洞面变化时刻，盲窗 24h→部署即时。仅 req_changed 时触发（无变更零成本）。
+    # 走 quant-sectrigger wrapper（读 shared/ 私域的立法通道——playbook 不直引 venv 字面）。
+    - name: 收尾 —— 依赖变更触发当日安全扫描（quant-sectrigger；req_changed 时）
+      ansible.builtin.command: "{{ quant_sectrigger_cmd }}"
+      when: req_changed | bool
+      failed_when: false
+      changed_when: true
+
     # 批 120 首采补：sshd_config 600 root 后 quant 不可直读——随 release 落只读快照
     - name: 收尾 —— sshd 姿态快照（quant-ssh-snapshot；落 shared/security/ 供采集器只读）
       ansible.builtin.command: "{{ quant_ssh_snapshot_cmd }}"

@@ -181,8 +181,18 @@ const filteredFindings = computed(() => {
   return srcFilter.value ? all.filter(f => f.source === srcFilter.value) : all
 })
 
-// D 区：pip 关键包 + 顶层组件；距上次变更=history.component_changes 反查最近一次出现日
-const KEY_PIP = ['fastapi', 'vnpy', 'psycopg', 'pandas', 'numpy', 'celery', 'redis']
+// D 区：pip 关注包按暴露面分层（公网认证/传输→数据→框架——出事时的关键行优先）；
+// 顶层系统组件在前。距上次变更=history.component_changes 反查最近一次出现日
+const KEY_PIP = [
+  // 公网认证与传输层（攻击面最前——TLS/签名/凭据）
+  'pyjwt', 'bcrypt', 'cryptography', 'uvicorn', 'starlette',
+  // 数据层
+  'psycopg', 'redis',
+  // 框架与任务
+  'fastapi', 'celery',
+  // 策略运行时
+  'vnpy',
+]
 const COMPONENT_NOTES = {
   openssl: 'al8 backport 维护（以 dnf --security 为准）',
   pango: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',

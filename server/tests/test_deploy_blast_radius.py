@@ -68,8 +68,12 @@ _DEPLOY = _REPO / "deploy"
 _SERVER_SCRIPTS = _REPO / "server" / "scripts"
 _SCHEMA_EXP = _REPO / "server" / "src" / "data_platform" / "schema_expectations.txt"
 
-# 表引用：FROM/INTO/UPDATE/JOIN <ident>（wrapper 为 bash——无 Python `from … import` 撞名）
-_TABLE_REF_RE = re.compile(r"\b(?:from|into|update|join)\s+([a-z_][a-z0-9_]*)\b", re.IGNORECASE)
+# 表引用：FROM/INTO/UPDATE/JOIN <ident>（wrapper 为 bash——无 Python `from … import` 撞名。
+# 例外（批 122）：quant-sectrigger 内联 `python -c 'from src.scheduler.app import …'`——
+# python 的 from-import 不构成 SQL 表引用，负向排除 `import` 尾随形态）
+_TABLE_REF_RE = re.compile(
+    r"\b(?:from|into|update|join)\s+([a-z_][a-z0-9_]*)\b(?!\.|\s+import)", re.IGNORECASE
+)
 
 # SQL 语句行判据（排除注释/文档串/散文里的历史提法）
 _SQL_LINE_RE = re.compile(r"\b(select|insert|update|delete|from|where|join|into)\b", re.IGNORECASE)

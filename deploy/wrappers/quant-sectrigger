@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# quant-sectrigger —— 安全扫描触发通道（sudoers QUANT_DEPLOY_QUANT，以 quant 跑）。
+#
+# 属主约束（同 quant-alembic-wrapper）: root:root 755，部署于 /usr/local/sbin/quant-sectrigger。
+#
+# 为什么 wrapper 化（批 122 精修）: release 收尾「依赖变更⇒当日补扫」最初写成
+# playbook 内联 `sudo -u quant bash -c '... shared/venv/bin/python ...'`——被守卫
+# test_release_playbook_has_no_ddl_logic ⑻b 拦截（playbook 直引 shared/venv 字面
+# = rc=126 形态，凡读 shared/ 私域一律走 wrapper——既有立法）。本 wrapper 即该
+# 立法的正道：与 quant-alembic-wrapper 同形态（venv python + .env + cwd 锁 release）。
+#
+# 动作: 向 celery 发 security_scan 任务（异步——立即返回 task id，扫描由 worker 执行）。
+#   每日 06:00 beat 例行之外的补充触发点，仅在依赖指纹变化日由 release 收尾调用。
+#
+# 严参校验: 不收任何参数（无参化设计——sudoers `*` 吃空格，夹带参数即拒）。
+#
+# 环境变量: QUANT_DEPLOY_ROOT（沙箱指向测试树；生产空=内置默认路径）
+set -euo pipefail
+
+[ $# -eq 0 ] || { echo "用法: quant-sectrigger（不收参数）" >&2; exit 2; }
+
+ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
+REL=$(readlink -f "$ROOT/server")
+[ -d "$REL" ] || { echo "✗ server 链接解析失败" >&2; exit 1; }
+
+PY="$ROOT/shared/venv/bin/python"
+[ -x "$PY" ] || { echo "✗ shared/venv 解释器不存在: $PY" >&2; exit 1; }
+
+set -a
+# shellcheck disable=SC1091
+[ -f "$ROOT/shared/.env" ] && . "$ROOT/shared/.env"
+set +a
+
+cd "$REL"
+exec "$PY" -c 'from src.scheduler.app import app; print("task:", app.send_task("src.scheduler.tasks.security_scan").id)'

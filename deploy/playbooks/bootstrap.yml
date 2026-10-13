@@ -130,6 +130,7 @@
             - quant-journal         # 2026-09-01: journalctl 只读诊断通道（三查需求，quant-* 域严参校验）
             - quant-dnf-security    # 批 120: dnf --security 快照采集（root 跑，落 shared/security/ 供采集器只读）
             - quant-ssh-snapshot    # 批 120 首采补: sshd_config 600 后的只读快照通道（同 dnf 模式）
+            - quant-sectrigger      # 批 122: 依赖变更触发当日安全扫描（quant 身份 celery send_task）
             - quant-alembic-wrapper
             - quant-importsmoke-wrapper
             - quant-pip-wrapper
