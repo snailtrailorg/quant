@@ -248,7 +248,7 @@ def _collect_dnf(path: Path | None = None) -> dict:
     return part
 
 
-def _collect_vulns(lock_path: Path | None = None) -> dict:
+def _collect_vulns() -> dict:
     """grype 单源 CVE 扫描（批 123 终裁：pip+rpm 一体，无回退编排）。
 
     链路：syft dir 扫 site-packages（dist-info=已装包——release 树只含声明不扫）
@@ -289,14 +289,10 @@ def _collect_vulns(lock_path: Path | None = None) -> dict:
             pkg = (m.get("artifact") or {}).get("name", "").lower()
             if not pkg or not v.get("id"):
                 continue
-            # alias 归一：CVE 号优先。grype JSON 字段名装机前未实测（盲审 A 置信
-            # ~55%），双通道兜底：aliases[] 与 relatedVulnerabilities[].id 都扫——
-            # 任一命中 CVE 即用；装机首轮真实输出比对后校准（任务文件待裁点①）
-            _alias_pool = list(v.get("aliases") or [])
-            for rv in v.get("relatedVulnerabilities") or []:
-                if isinstance(rv, dict) and rv.get("id"):
-                    _alias_pool.append(rv["id"])
-            cve = next((a for a in _alias_pool if a.upper().startswith("CVE-")), None)
+            # alias 归一：CVE 号优先（v6 DB 实测主 id 已是 CVE 号 42/42——aliases
+            # 兜底留零成本防御：非 CVE namespace 主键时归一，跨日键稳定）
+            cve = next((a for a in (v.get("aliases") or [])
+                        if a.upper().startswith("CVE-")), None)
             vuln_id = cve or v["id"]
             key = (pkg, vuln_id)
             if key in seen:

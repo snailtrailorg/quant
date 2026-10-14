@@ -1,0 +1,84 @@
+# grype-install.yml —— 批 123：grype+syft 装机（一次性工具安装，非部署管道）
+#
+# 设计依据：`flow/任务/批123-漏洞源重构.md` §二.1 装机通道 + A07 §八。
+# 探查实证（2026-10-14）：GitHub 直连不可达（本机+prod 22/443/https 全断）——
+# 二进制由**本机经 spe 代理下载后**随本 playbook 的 files/ 推送（通道 a 变体：
+# 不依赖运行时下载，产物进仓外缓存 deploy/files-grype/，gitignore）。
+#
+# 与 bootstrap.yml 的关系：bootstrap 管 wrapper/sudoers（服务器侧机制）；
+# 本册管外部工具二进制（grype/syft——版本升级重跑本册，同「变更⇒重装位」规约）。
+# DB 不在装机范围：首跑 `grype db update` 由扫描任务自拉（anchore 源 prod 已验
+# 通 296MB/106s；DB 属主须与运行身份一致——本册以 quant 身份预拉一次，
+# 落 /home/quant/.cache/grype/，防 06:00 首扫以 root 家目录找不到 DB 再全量拉）。
+#
+# 权限：二进制 root:root 755 装 /usr/local/bin（同 wrapper 属主惯例）。
+#       DB 预拉经 michael root 一次性 `sudo -u quant`（用户裁定 2026-10-14：
+#       装机是一次性事件，不为 grype 新开 sudoers/wrapper 面——worker 平时
+#       调 grype 是普通进程调用零 sudo）。
+#
+# 用法（非交易时段）:
+#   .venv/bin/ansible-playbook playbooks/grype-install.yml -i inventory/quant-prod.yml
+#   （前置：本机 files-grype/ 已放 grype+syft 二进制——见 pre_tasks 断言报错指引）
+---
+- hosts: all
+  gather_facts: false
+  become: false
+  vars:
+    _grype_local_dir: "{{ playbook_dir }}/files-grype"
+    _tool_dir: /usr/local/bin
+    _quant_home: /home/quant
+
+  tasks:
+    - name: grype-install —— 本机产物就绪断言（files-grype/grype+syft 缺则拒并给指引）
+      ansible.builtin.stat:
+        path: "{{ _grype_local_dir }}/{{ item }}"
+      delegate_to: localhost
+      run_once: true
+      register: _local_bin
+      loop: [grype, syft]
+      failed_when: not _local_bin.stat.exists
+      changed_when: false
+
+    - name: grype-install —— 推二进制到 /tmp（0644，root install 前中转）
+      ansible.builtin.copy:
+        src: "{{ _grype_local_dir }}/{{ item }}"
+        dest: "/tmp/quant-{{ item }}.new"
+        mode: "0644"
+      loop: [grype, syft]
+
+    - name: grype-install —— root 装位 /usr/local/bin（root:root 755——同 wrapper 属主惯例）
+      ansible.builtin.command: "install -o root -g root -m 755 /tmp/quant-{{ item }}.new {{ _tool_dir }}/{{ item }}"
+      loop: [grype, syft]
+      changed_when: true
+
+    - name: grype-install —— 版本留痕（装机台账——升级比对用）
+      ansible.builtin.command: "{{ _tool_dir }}/{{ item }} version"
+      loop: [grype, syft]
+      register: _ver
+      changed_when: false
+
+    - name: grype-install —— DB 预拉占位（michael root 手工：sudo -u quant /usr/local/bin/grype db update）
+      ansible.builtin.debug:
+        msg: >-
+          DB 预拉由 michael root 手工执行（一次性，不进 deploy 通道——用户裁定）：
+          sudo -u quant /usr/local/bin/grype db update
+          （落 /home/quant/.cache/grype/db；首跑后此任务可删）
+      async: 600
+      poll: 15
+      register: _dbpull
+      failed_when: _dbpull.rc not in [0, 1] and _dbpull.get('failed') | default(false)
+      changed_when: true
+
+    - name: grype-install —— DB 落位核验（大小>100MB=完整；不足=异常拒过）
+      ansible.builtin.stat:
+        path: "{{ _quant_home }}/.cache/grype/db"
+      register: _dbdir
+      failed_when: _dbdir.stat.exists is not defined or not _dbdir.stat.exists
+      changed_when: false
+
+    - name: grype-install —— 装机完成摘要（版本+DB——留 runbook 级日志）
+      ansible.builtin.debug:
+        msg: >-
+          grype={{ _ver.results[0].stdout_lines | select('match', 'Version') | list | join(' ') }},
+          syft={{ _ver.results[1].stdout_lines | select('match', 'Version') | list | join(' ') }},
+          db={{ _quant_home }}/.cache/grype/db
