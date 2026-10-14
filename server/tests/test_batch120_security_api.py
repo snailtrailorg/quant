@@ -59,8 +59,13 @@ def _snap_row(day=DAY, status="ok", pip=None, listening=None, ssh=None, summary=
 
 
 def _finding_row(source="pip-audit", pkg="requests", vuln="GHSA-1", fix="2.32.0",
-                 first=DAY, last=DAY):
-    return (source, pkg, vuln, fix, first, last)
+                 first=DAY, last=DAY, severity=None):
+    return (source, pkg, vuln, fix, severity, first, last)
+
+
+def _ledger_rows():
+    """批 123 台账行（(source,name,version,last_changed) fetchall）——默认空表账。"""
+    return [("pip", "requests", "2.31.0", date(2026, 9, 1))]
 
 
 def _prev_row(day=DAY):
@@ -91,7 +96,8 @@ class TestSnapshot404:
     def test_no_snapshot_404_structured(self):
         from src.web_api.main import app
         client = TestClient(app)
-        c = _dispatch([("FROM security_snapshot WHERE scan_date = %s", [])])
+        c = _dispatch([("FROM security_snapshot WHERE scan_date = %s", []),
+                   ("FROM security_component", _ledger_rows())])
         with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
              patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \
              patch("src.data_platform.db.get_conn", return_value=c):
@@ -122,6 +128,7 @@ class TestSnapshot404:
             ("WHERE scan_date = %s", [_snap_row(day=today)]),
             ("ORDER BY scan_date DESC LIMIT 1", []),
             ("FROM security_finding WHERE first_seen <= %s", []),
+            ("FROM security_component", _ledger_rows()),
         ])
         with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
              patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \
@@ -153,6 +160,7 @@ class TestFindingsOrder:
             ("WHERE scan_date = %s", [_snap_row()]),
             ("ORDER BY scan_date DESC LIMIT 1", [_prev_row()]),
             ("FROM security_finding WHERE first_seen <= %s", findings),
+            ("FROM security_component", _ledger_rows()),
         ])
         with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
              patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \
@@ -185,6 +193,7 @@ class TestFindingsOrder:
             ("WHERE scan_date = %s", [_snap_row(status="degraded")]),
             ("ORDER BY scan_date DESC LIMIT 1", []),
             ("FROM security_finding WHERE first_seen <= %s", findings),
+            ("FROM security_component", _ledger_rows()),
         ])
         with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
              patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \
@@ -211,6 +220,7 @@ class TestBaselineDiff:
                 ssh={"passwordauthentication": "yes"})]),
             ("ORDER BY scan_date DESC LIMIT 1", [_prev_row()]),   # 前日：无 8080/无 mystery/pwd=no
             ("FROM security_finding WHERE first_seen <= %s", []),
+            ("FROM security_component", _ledger_rows()),
         ])
         with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
              patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \
@@ -230,6 +240,7 @@ class TestBaselineDiff:
             ("WHERE scan_date = %s", [_snap_row()]),
             ("ORDER BY scan_date DESC LIMIT 1", []),   # 无前快照=首日
             ("FROM security_finding WHERE first_seen <= %s", []),
+            ("FROM security_component", _ledger_rows()),
         ])
         with patch("src.web_api.auth.verify_jwt", return_value=ADMIN), \
              patch("src.web_api.auth.load_effective_permissions", return_value=({"read"}, set())), \

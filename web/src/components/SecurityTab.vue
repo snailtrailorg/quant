@@ -39,7 +39,11 @@
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.status') }}</span></div>
           <div class="card-value"><StatusTag :value="snap.status" /></div>
-          <div class="kpi-sub">{{ statusZoneHint }}</div>
+          <div v-if="degradedZones.length" class="zone-list">
+            <div v-for="z in degradedZones" :key="z.zone" class="zone-item"
+                 :title="z.reason">⚠ {{ z.zone }}：{{ z.reason.slice(0, 40) }}</div>
+          </div>
+          <div v-else class="kpi-sub">{{ statusZoneHint }}</div>
         </el-card>
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.scanDate') }}</span></div>
@@ -90,12 +94,20 @@
                   :row-class-name="({ row }) => row.fixed ? 'fixed-row' : ''">
         <el-table-column prop="pkg" :label="t('secpage.pkg')" min-width="140" />
         <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="160" />
+        <el-table-column prop="severity" :label="t('secpage.severity')" min-width="95" sortable
+                         :sort-method="(a, b) => sevRank(b.severity) - sevRank(a.severity)">
+          <template #default="{ row }">
+            <span v-if="row.severity" :class="['sev', 'sev-' + row.severity.toLowerCase()]">{{ row.severity }}</span>
+            <span v-else class="sev-none">{{ t('secpage.sevUnrated') }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="fix_version" :label="t('secpage.fixVersion')" min-width="110">
           <template #default="{ row }">{{ row.fix_version || '—' }}</template>
         </el-table-column>
-        <el-table-column prop="dwell_days" :label="t('secpage.dwellDays')" min-width="100" sortable>
+        <el-table-column prop="expose_days" :label="t('secpage.exposeDays')" min-width="110" sortable>
           <template #default="{ row }">
-            <span :class="{ 'dw-old': row.dwell_days >= 30 }">{{ row.dwell_days }}</span>
+            <span :class="{ 'dw-old': row.expose_days >= 30 }">{{ row.expose_days }}</span>
+            <span class="dwell-sub">（{{ t('secpage.found') }} {{ row.dwell_days }}）</span>
           </template>
         </el-table-column>
         <el-table-column prop="source" :label="t('secpage.source')" min-width="100">
@@ -112,16 +124,10 @@
       <template #header><span>{{ t('secpage.components') }}</span></template>
       <TableShell :data="componentRows" storage-key="security-components" style="width:100%">
         <el-table-column prop="name" :label="t('secpage.component')" min-width="130" />
-        <el-table-column prop="layer" :label="t('secpage.layer')" min-width="110">
-          <template #default="{ row }">
-            <el-tag v-if="row.layer" size="small" effect="plain">{{ row.layer }}</el-tag>
-            <span v-else>—</span>
-          </template>
-        </el-table-column>
         <el-table-column prop="version" :label="t('secpage.version')" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="since_days" :label="t('secpage.daysSinceChange')" min-width="130">
+        <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="130">
           <template #default="{ row }">
-            {{ row.since_days === null ? '—' : row.since_days }}
+            {{ row.last_changed || '—' }}
           </template>
         </el-table-column>
         <el-table-column prop="note" :label="t('common.remark')" min-width="200">
@@ -209,13 +215,9 @@ const lastScanAt = computed(() => {
   const ts = snap.value?.created_at
   return ts ? new Date(ts).toLocaleString() : '—'
 })
-// A 区状态卡副行：一句话点明当前 status 意味着什么（六分区逐区状态见各区）
-const statusZoneHint = computed(() => {
-  const s = snap.value?.status
-  if (s === 'ok') return t('secpage.zoneOk')
-  if (s === 'degraded') return t('secpage.zoneDegraded')
-  return ''
-})
+// A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
+const statusZoneHint = computed(() => t('secpage.zoneOk'))
+const degradedZones = computed(() => snap.value?.degraded_zones || [])
 
 // C 区
 const allSources = computed(() => [...new Set((snap.value?.findings || []).map(f => f.source))])
@@ -236,41 +238,33 @@ const KEY_PIP = [
   // 策略运行时
   'vnpy',
 ]
-// 层 tag（批 122 分层的视觉表达）——与 KEY_PIP 分组注释一一对应
-const PIP_LAYERS = {
-  pyjwt: 'secpage.layerAuth', bcrypt: 'secpage.layerAuth', cryptography: 'secpage.layerAuth',
-  uvicorn: 'secpage.layerAuth', starlette: 'secpage.layerAuth',
-  psycopg: 'secpage.layerData', redis: 'secpage.layerData',
-  fastapi: 'secpage.layerFrame', celery: 'secpage.layerFrame',
-  vnpy: 'secpage.layerRuntime',
-}
-const SYS_LAYER = { nginx: 'secpage.layerNet', openssl: 'secpage.layerNet' }
+// C 区严重度排序（Critical 最高→Unknown 最低；NULL 最低）
+const _SEV_ORDER = ['critical', 'high', 'medium', 'low', 'negligible', 'unknown']
+const sevRank = s => _SEV_ORDER.indexOf((s || '').toLowerCase())
 const COMPONENT_NOTES = {
   openssl: 'al8 backport 维护（以 dnf --security 为准）',
   pango: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',
   cairo: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',
   'wqy-microhei': 'PDF 中文字体（dnf 层）',
 }
-const lastChangeDate = (name) => {
-  for (const d of history.value) {
-    if ((d.component_changes || []).includes(name)) return d.scan_date
-  }
-  return null
-}
+// D 区「上次变更日期」：台账（components_ledger）直读——批 123 终结 30 天窗口反查
+const ledgerMap = computed(() => {
+  const m = {}
+  for (const r of (snap.value?.components_ledger || [])) m[`${r.source}/${r.name}`] = r.last_changed
+  return m
+})
 const componentRows = computed(() => {
   const comp = snap.value?.components || {}
   const rows = []
   for (const k of ['nginx', 'openssl', 'postgres', 'redis', 'python', 'pango', 'cairo', 'wqy-microhei']) {
-    if (comp[k] !== undefined) rows.push({ name: k, version: comp[k], note: COMPONENT_NOTES[k] || '', layer: SYS_LAYER[k] ? t(SYS_LAYER[k]) : '' })
+    if (comp[k] !== undefined) rows.push({ name: k, version: comp[k], note: COMPONENT_NOTES[k] || '' })
   }
   const pip = comp.pip || {}
   for (const k of KEY_PIP) {
-    if (pip[k]) rows.push({ name: k, version: pip[k], note: '', layer: PIP_LAYERS[k] ? t(PIP_LAYERS[k]) : '' })
+    if (pip[k]) rows.push({ name: k, version: pip[k], note: '' })
   }
-  const today = snap.value?.scan_date
   for (const r of rows) {
-    const lc = lastChangeDate(r.name)
-    r.since_days = (lc && today) ? Math.max(0, Math.round((new Date(today) - new Date(lc)) / 86400000)) : null
+    r.last_changed = ledgerMap.value[`system/${r.name}`] || ledgerMap.value[`pip/${r.name}`] || ''
   }
   return rows
 })
@@ -358,6 +352,17 @@ const sparkOption = computed(() => {
 .hist-date { color: var(--text-secondary); flex: none; }
 .hist-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dw-old { color: var(--critical); font-weight: 600; }
+.dwell-sub { color: var(--text-secondary); font-size: var(--fs-foot); }
+.zone-list { margin-top: var(--sp-1); }
+.zone-item { color: var(--warn-fill); font-size: var(--fs-foot); line-height: 1.7;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+/* 严重度色（tokens 语义复用：critical 深红/warn 橙/主文灰） */
+.sev { font-size: var(--fs-foot); font-weight: 600; }
+.sev-critical { color: var(--critical); }
+.sev-high { color: var(--warn-fill); }
+.sev-medium { color: var(--brand-500); }
+.sev-low, .sev-negligible, .sev-unknown { color: var(--text-secondary); }
+.sev-none { color: var(--flat); font-size: var(--fs-foot); }
 .tl-date { font-weight: 600; }
 .tl-item { padding: 0 var(--sp-3); color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.8; }
 .sec-empty { color: var(--text-secondary); font-size: var(--fs-foot); padding: var(--sp-3) 0; }

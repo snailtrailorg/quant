@@ -51,10 +51,21 @@ def get_findings_active(day: date) -> list[dict]:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT source, pkg, vuln_id, fix_version, first_seen, last_seen "
+            "SELECT source, pkg, vuln_id, fix_version, severity, first_seen, last_seen "
             "FROM security_finding WHERE first_seen <= %s",
             (day,))
-        cols = ("source", "pkg", "vuln_id", "fix_version", "first_seen", "last_seen")
+        cols = ("source", "pkg", "vuln_id", "fix_version", "severity",
+                "first_seen", "last_seen")
+        return _rows_to_dicts(cur, cols)
+
+
+def get_component_ledger() -> list[dict]:
+    """组件台账全行（批 123——D 区「上次变更日期」直读，替代 30 天窗口反查）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT source, name, version, last_changed FROM security_component")
+        cols = ("source", "name", "version", "last_changed")
         return _rows_to_dicts(cur, cols)
 
 

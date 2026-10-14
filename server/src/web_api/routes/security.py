@@ -45,21 +45,27 @@ def _days_between(later: date, earlier: date) -> int:
     return (later - earlier).days
 
 
-def _enrich_findings(day: date, vulns_ok: bool = True) -> list[dict]:
-    """finding 行 → 前端形状：停留天数（day - first_seen）+ fixed 标记。
+def _enrich_findings(day: date, vulns_ok: bool = True,
+                     ledger: dict[str, date] | None = None) -> list[dict]:
+    """finding 行 → 前端形状：严重度/暴露时长/停留天数 + fixed 标记。
 
     fixed=last_seen < day 且当日 vulns 分区 ok（步 4 P1-2：降级日采集侧不推 last_seen
     ——_upsert_findings 仅 ok 分支，旧值保留 ⇒ last_seen<day 不构成「已修复」证据；
     降级日一律不判 fixed——宁多显示不可假清零）。
+    expose_days（批 123）：台账 last_changed（漏洞版本的上线日）→ day——漏洞真实
+    存在了多久；台账缺行（存量/未采）⇒ 回退 first_seen（发现日——宁保守）。
     """
+    ledger = ledger or {}
     out = []
     for f in store.get_findings_active(day):
         first, last = f["first_seen"], f["last_seen"]
+        base = ledger.get(f["pkg"], first)          # 暴露起点：版本变更日 > 发现日
         out.append({
             "source": f["source"], "pkg": f["pkg"], "vuln_id": f["vuln_id"],
-            "fix_version": f["fix_version"],
+            "fix_version": f["fix_version"], "severity": f["severity"],
             "first_seen": first.isoformat(), "last_seen": last.isoformat(),
             "dwell_days": max(_days_between(day, first), 0),
+            "expose_days": max(_days_between(day, base), 0),
             "fixed": vulns_ok and last < day,
         })
     # 停留天数降序（同天数按 pkg 稳定序）；已修复（fixed）沉底
@@ -98,17 +104,33 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     }
     # vulns 分区不单独落列（快照 status 含 vulns 取最差）——整体 degraded ⇒ 保守
     # 视作 vulns 未证实，不判任何 fixed（P1-2：宁多显示不假清零）
+    # 批 123：降级分区明细（A 区状态卡直读——六分区 status/degraded_reason 既有数据，
+    # 此前前端从未渲染）；台账 pip 域→findings 暴露时长 + 直出 components_ledger
+    ledger_rows = store.get_component_ledger()
+    ledger = {r["name"]: r["last_changed"] for r in ledger_rows if r["source"] == "pip"}
+    degraded_zones = [
+        {"zone": z, "reason": (snap.get(z) or {}).get("degraded_reason") or ""}
+        for z in ("headers", "ports", "ssh_cfg", "dnf", "components")
+        if (snap.get(z) or {}).get("status") == "degraded"
+    ]
+    if snap["status"] == "degraded" and not degraded_zones:
+        degraded_zones.append({"zone": "vulns", "reason": "grype 分区 degraded（快照 status 含最差）"})
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
         "ai_summary": snap["ai_summary"] or "",
         "created_at": snap["created_at"].isoformat() if snap["created_at"] else None,
-        "findings": _enrich_findings(day, vulns_ok=snap["status"] == "ok"),
+        "findings": _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger),
         "components": snap["components"],
+        "components_ledger": [
+            {"source": r["source"], "name": r["name"],
+             "last_changed": r["last_changed"].isoformat()}
+            for r in ledger_rows],
         "ports": snap["ports"],
         "ssh_cfg": snap["ssh_cfg"],
         "dnf": snap["dnf"],
         "headers": snap["headers"],
+        "degraded_zones": degraded_zones,
         "baseline_diff": baseline_diff,
     }
 
