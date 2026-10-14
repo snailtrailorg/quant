@@ -1,40 +1,59 @@
 <template>
   <!-- 批 120 线③：安全态势 Tab（五区布局 A~E，任务文件钉死）。
-       数据两请求：snapshot（默认今日）+ history（30 天）；轮询 5min（每日数据，无需 ws）。 -->
+       数据两请求：snapshot（默认今日）+ history（30 天）；轮询 5min（每日数据，无需 ws）。
+       批 124 美化（B 档）：A 区四卡化（同 SystemMetricsCards card-grid 形态——wd-20「首屏同构」）；
+       数字走 --font-num；漏洞>0 用 --critical 配警示图标（tokens.css:48 语义色立法）；
+       D 区分层 tag（批 122 暴露面分层的视觉表达）；E 区头部 30 天迷你条形图（复刻
+       sparkline 模式：cssVar 取色+animation:false）。五区布局/StatusTag/TableShell/
+       AI 纯文本不动。 -->
   <div v-if="loadFailed" class="sec-empty">
     <el-alert :type="isNoSnapshot ? 'info' : 'error'" :closable="false">
       {{ isNoSnapshot ? t('secpage.noSnapshot') : t('secpage.loadFailed') }}
     </el-alert>
   </div>
   <template v-else-if="snap">
-    <!-- A 顶部状态卡：漏洞总数+按来源分色点 / status(degraded 黄) / 上次扫描 / 新鲜度(>26h 黄) -->
+    <!-- A 顶部状态卡组：漏洞总数+来源分色 / status / 扫描时间 / 基线偏差（四卡同构） -->
     <el-card>
-      <el-row :gutter="12">
-        <el-col :span="6">
-          <div class="kpi-label">{{ t('secpage.vulnTotal') }}</div>
-          <div class="kpi-num">{{ activeFindings.length }}</div>
+      <template #header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>{{ t('secpage.postureTitle') }}</span>
+          <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
+        </div>
+      </template>
+      <div class="card-grid">
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head">
+            <span class="card-name">{{ t('secpage.vulnTotal') }}</span>
+            <el-icon v-if="activeFindings.length" :size="15" class="ic-critical"><WarningFilled /></el-icon>
+          </div>
+          <div class="card-value">
+            <span class="pct" :class="{ critical: activeFindings.length }">{{ activeFindings.length }}</span>
+          </div>
           <div class="src-dots">
             <span v-for="n in srcCounts" :key="n.source" class="src-dot-item">
               <span :class="['dot', srcDotClass(n.source)]" />{{ n.source }} {{ n.count }}
             </span>
+            <span v-if="!srcCounts.length" class="kpi-sub">{{ t('secpage.noVuln') }}</span>
           </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="kpi-label">{{ t('secpage.status') }}</div>
-          <StatusTag :value="snap.status" />
-          <div v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</div>
-        </el-col>
-        <el-col :span="6">
-          <div class="kpi-label">{{ t('secpage.scanDate') }}</div>
-          <div class="kpi-num small">{{ snap.scan_date }}</div>
+        </el-card>
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head"><span class="card-name">{{ t('secpage.status') }}</span></div>
+          <div class="card-value"><StatusTag :value="snap.status" /></div>
+          <div class="kpi-sub">{{ statusZoneHint }}</div>
+        </el-card>
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head"><span class="card-name">{{ t('secpage.scanDate') }}</span></div>
+          <div class="card-value"><span class="pct small">{{ snap.scan_date }}</span></div>
           <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
-        </el-col>
-        <el-col :span="6">
-          <div class="kpi-label">{{ t('secpage.baselineChanges') }}</div>
-          <div class="kpi-num">{{ baselineTotal }}</div>
+        </el-card>
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head"><span class="card-name">{{ t('secpage.baselineChanges') }}</span></div>
+          <div class="card-value">
+            <span class="pct" :class="{ warn: baselineTotal > 0 }">{{ baselineTotal }}</span>
+          </div>
           <div class="kpi-sub">{{ t('secpage.baselineHint') }}</div>
-        </el-col>
-      </el-row>
+        </el-card>
+      </div>
     </el-card>
 
     <!-- B AI 摘要卡：当日纯文本渲染（{{ }} 转义，禁 v-html——注入面裁定）+ 历史折叠 -->
@@ -88,11 +107,17 @@
       </TableShell>
     </el-card>
 
-    <!-- D 组件版本表：当前版本 + 距上次变更天数（history.component_changes 反查）+ 备注 -->
+    <!-- D 组件版本表：当前版本 + 距上次变更天数 + 层级 tag（批 122 暴露面分层的视觉表达）+ 备注 -->
     <el-card style="margin-top: var(--sp-3)">
       <template #header><span>{{ t('secpage.components') }}</span></template>
       <TableShell :data="componentRows" storage-key="security-components" style="width:100%">
         <el-table-column prop="name" :label="t('secpage.component')" min-width="130" />
+        <el-table-column prop="layer" :label="t('secpage.layer')" min-width="110">
+          <template #default="{ row }">
+            <el-tag v-if="row.layer" size="small" effect="plain">{{ row.layer }}</el-tag>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="version" :label="t('secpage.version')" min-width="220" show-overflow-tooltip />
         <el-table-column prop="since_days" :label="t('secpage.daysSinceChange')" min-width="130">
           <template #default="{ row }">
@@ -105,9 +130,10 @@
       </TableShell>
     </el-card>
 
-    <!-- E 基线 diff 时间线：近 30 天逐日变更（计数来自 history；当日明细来自 snapshot 展开） -->
+    <!-- E 基线 diff 时间线：头部 30 天迷你条形图（变更数趋势）+ 逐日折叠明细 -->
     <el-card style="margin-top: var(--sp-3)">
       <template #header><span>{{ t('secpage.baselineTimeline') }}</span></template>
+      <VChart v-if="sparkOption" :option="sparkOption" autoresize style="height: 96px" />
       <el-collapse v-if="baselineDays.length" v-model="expandedDays">
         <el-collapse-item v-for="d in baselineDays" :key="d.scan_date" :name="d.scan_date">
           <template #title>
@@ -117,7 +143,7 @@
           <div v-for="(item, i) in d.items" :key="i" class="tl-item">· {{ item }}</div>
         </el-collapse-item>
       </el-collapse>
-      <div v-else class="sec-empty">{{ t('secpage.noBaseline') }}</div>
+      <EmptyState v-else :description="t('secpage.noBaseline')" size="small" />
     </el-card>
   </template>
   <div v-else v-loading="true" class="sec-loading" />
@@ -126,9 +152,19 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+import { BarChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import VChart from 'vue-echarts'
+import { WarningFilled } from '@element-plus/icons-vue'
 import { getSecuritySnapshot, getSecurityHistory } from '../api'
+import { cssVar } from '../utils/cssVar'
 import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
+import EmptyState from './EmptyState.vue'
+
+use([CanvasRenderer, BarChart, GridComponent, TooltipComponent])
 
 const { t } = useI18n()
 const snap = ref(null)
@@ -173,6 +209,13 @@ const lastScanAt = computed(() => {
   const ts = snap.value?.created_at
   return ts ? new Date(ts).toLocaleString() : '—'
 })
+// A 区状态卡副行：一句话点明当前 status 意味着什么（六分区逐区状态见各区）
+const statusZoneHint = computed(() => {
+  const s = snap.value?.status
+  if (s === 'ok') return t('secpage.zoneOk')
+  if (s === 'degraded') return t('secpage.zoneDegraded')
+  return ''
+})
 
 // C 区
 const allSources = computed(() => [...new Set((snap.value?.findings || []).map(f => f.source))])
@@ -193,6 +236,15 @@ const KEY_PIP = [
   // 策略运行时
   'vnpy',
 ]
+// 层 tag（批 122 分层的视觉表达）——与 KEY_PIP 分组注释一一对应
+const PIP_LAYERS = {
+  pyjwt: 'secpage.layerAuth', bcrypt: 'secpage.layerAuth', cryptography: 'secpage.layerAuth',
+  uvicorn: 'secpage.layerAuth', starlette: 'secpage.layerAuth',
+  psycopg: 'secpage.layerData', redis: 'secpage.layerData',
+  fastapi: 'secpage.layerFrame', celery: 'secpage.layerFrame',
+  vnpy: 'secpage.layerRuntime',
+}
+const SYS_LAYER = { nginx: 'secpage.layerNet', openssl: 'secpage.layerNet' }
 const COMPONENT_NOTES = {
   openssl: 'al8 backport 维护（以 dnf --security 为准）',
   pango: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',
@@ -209,11 +261,11 @@ const componentRows = computed(() => {
   const comp = snap.value?.components || {}
   const rows = []
   for (const k of ['nginx', 'openssl', 'postgres', 'redis', 'python', 'pango', 'cairo', 'wqy-microhei']) {
-    if (comp[k] !== undefined) rows.push({ name: k, version: comp[k], note: COMPONENT_NOTES[k] || '' })
+    if (comp[k] !== undefined) rows.push({ name: k, version: comp[k], note: COMPONENT_NOTES[k] || '', layer: SYS_LAYER[k] ? t(SYS_LAYER[k]) : '' })
   }
   const pip = comp.pip || {}
   for (const k of KEY_PIP) {
-    if (pip[k]) rows.push({ name: k, version: pip[k], note: '' })
+    if (pip[k]) rows.push({ name: k, version: pip[k], note: '', layer: PIP_LAYERS[k] ? t(PIP_LAYERS[k]) : '' })
   }
   const today = snap.value?.scan_date
   for (const r of rows) {
@@ -245,21 +297,62 @@ const baselineTotal = computed(() => (snap.value?.baseline_diff
 
 const historySummaries = computed(() =>
   (history.value || []).filter(d => d.scan_date !== snap.value?.scan_date && d.ai_summary_preview))
+
+// E 区头部迷你条形图：30 天逐日基线变更数（含 0 日——空洞=未扫日，非 0 变更）。
+// 复刻 SystemMetricsCards sparkline 约定：cssVar 取实值（canvas 不解析 CSS 变量）、
+// animation:false（轮询瞬切不滚动）、hidden 轴只留极简刻度。有变更日着 warn 色。
+const sparkOption = computed(() => {
+  const days = history.value || []
+  if (!days.length) return null
+  const chrono = [...days].reverse()   // history 新→旧，图要旧→右新
+  const data = chrono.map(d => [d.scan_date, d.baseline_changes || 0])
+  const max = Math.max(1, ...data.map(p => p[1]))
+  return {
+    animation: false,
+    grid: { left: 2, right: 4, top: 6, bottom: 18 },
+    tooltip: {
+      trigger: 'axis', formatter: (ps) => {
+        const p = ps[0]
+        return `${p.name}<br/>${t('secpage.baselineChanges')}: <b>${p.value}</b>`
+      },
+    },
+    xAxis: {
+      type: 'category', data: data.map(p => p[0].slice(5)),   // MM-DD
+      axisLine: { lineStyle: { color: cssVar('--border-weak') } },
+      axisTick: { show: false },
+      axisLabel: { color: cssVar('--text-secondary'), fontSize: 10, hideOverlap: true },
+    },
+    yAxis: { type: 'value', show: false, min: 0, max },
+    series: [{
+      type: 'bar', data: data.map(([d, v]) => ({ value: v, itemStyle: { color: v > 0 ? cssVar('--warn-fill') : cssVar('--el-fill-color-light') } })),
+      barMaxWidth: 10,
+    }],
+  }
+})
 </script>
 
 <style scoped>
-.kpi-label { color: var(--text-secondary); font-size: var(--fs-label); }
-.kpi-num { font-size: var(--fs-kpi); margin-top: var(--sp-1); }
-.kpi-num.small { font-size: var(--fs-body); font-weight: 600; }
-.kpi-sub { color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-1); }
-.src-dots { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-1); font-size: var(--fs-foot); color: var(--text-secondary); }
+/* A 区四卡——同 SystemMetricsCards 形态（wd-20 首屏同构；窄屏 2×2 回退同款） */
+.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
+.metric-card { border: 1px solid var(--border-weak); }
+.card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-2); }
+.card-name { font-size: var(--fs-label); color: var(--text-secondary); }
+.card-value { display: flex; align-items: center; min-height: 34px; margin-bottom: var(--sp-2); }
+.pct { font-family: var(--font-num); font-size: var(--fs-page); font-weight: 600; font-variant-numeric: tabular-nums; }
+.pct.critical { color: var(--critical); }
+.pct.warn { color: var(--warn-fill); }
+.pct.small { font-size: var(--fs-body); }
+.ic-critical { color: var(--critical); }
+.kpi-sub { color: var(--text-secondary); font-size: var(--fs-foot); }
+@media (max-width: 900px) { .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.src-dots { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-foot); color: var(--text-secondary); }
 .src-dot-item { display: inline-flex; align-items: center; gap: 4px; }
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 .dot.warn { background: var(--warn-fill); }
 .dot.critical { background: var(--critical); }
 .dot.info { background: var(--brand-500); }
 .dot.neutral { background: var(--flat); }
-.stale-warn { color: var(--warn-fill); font-size: var(--fs-foot); margin-top: var(--sp-1); }
+.stale-warn { color: var(--warn-fill); font-size: var(--fs-foot); }
 .ai-text { white-space: pre-wrap; line-height: 1.7; font-size: var(--fs-body); }
 .hist-item { display: flex; gap: var(--sp-3); padding: var(--sp-1) 0; font-size: var(--fs-foot); }
 .hist-date { color: var(--text-secondary); flex: none; }
