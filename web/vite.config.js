@@ -11,10 +11,11 @@ export default defineConfig({
     },
   },
   // 本机彩排验证规约（2026-10-14 用户裁定）：彩排后视觉验证用 vite preview 起同 dist
-  // 产物（=staging 同 hash bundle）。preview 转发同 dev 栈指向本机 8000
-  // （dev-start.sh 起的后端）——本地验证全链本地闭环，不依赖 prod/外网。
+  // 产物（=staging 同 hash bundle）。preview 固定 5174 与 dev 栈 5173 分端口并存
+  // （互不挤占——同端口时后起 vite 自动跳端口，现场难排查）；转发同 dev 栈指向
+  // 本机 8000（dev-start.sh 起的后端）——本地验证全链本地闭环，不依赖 prod/外网。
   preview: {
-    port: 5173,
+    port: 5174,
     proxy: {
       '/api': 'http://127.0.0.1:8000',
       '/ws': { target: 'ws://127.0.0.1:8000', ws: true },

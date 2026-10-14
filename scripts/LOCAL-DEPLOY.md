@@ -104,13 +104,13 @@ bash scripts/smoke-web.sh
 | | dev 栈（本脚本管） | staging 彩排栈（release 部署管） |
 |---|---|---|
 | 后端 | uvicorn `127.0.0.1:8000`（`dev-start.sh` 起停，日志 /tmp/quant-uvicorn.log） | systemd `quant-web-api@quant`（`127.0.0.1:8001`，跑 /data/websites/... 发布树，走 Ansible release 翻链） |
-| 前端 | vite dev `5173`（源码热更，开发迭代用） | 无独立前端服务——发布树 web/ 由部署管道落 dist |
+| 前端 | vite dev `5173`（源码热更，开发迭代用）；彩排验收另用 preview `5174`（见下节，serve 构建产物） | 无独立前端服务——发布树 web/ 由部署管道落 dist |
 | 用途 | 日常开发验证（admin/admin123，非实盘） | 部署管道彩排（验证的是"要上 prod 的东西"） |
 
-**5173 端口两方共用会撞**：彩排验证（preview）与 dev 前端（vite dev）都定死 5173——
-先起者占住，后者 vite 自动跳 5174（dev）/ strictPort 直接失败（preview）。规约：
-**同一时间只跑一个**——彩排验证完停 preview（`pkill -f "vite preview"`）再起 dev 栈，
-反之亦然。8000/8001 无冲突（各是各的后端）。
+**5173（dev vite）与 5174（preview）分端口并存**，互不挤占——preview 固定 5174
+（vite.config.js preview 段），dev 前端固定 5173。两者共用同一后端 8000；同一时间
+两个前端都跑也不冲突（各看各的：5173=源码热更，5174=构建产物）。8000/8001 各是
+各的后端，无冲突。
 
 ## 彩排后本机验证（规约：用彩排产物，不用开发目录）
 
@@ -118,10 +118,10 @@ bash scripts/smoke-web.sh
 bundle 同 hash——"彩排上去的是什么就验什么"），不是源码 dev server：
 
 ```bash
-cd web && npx vite preview --strictPort   # 5173，配置已含 /api → 127.0.0.1:8000
+cd web && npx vite preview   # 5174（端口已在 vite.config.js 定），配置含 /api → 127.0.0.1:8000
 # 前置：dev 栈后端须在跑（bash scripts/dev-start.sh start 已含）
-# 浏览器开 http://localhost:5173，用 admin/admin123 登录（本机库数据）
-# 验完：pkill -f "vite preview" 让出 5173
+# 浏览器开 http://localhost:5174，用 admin/admin123 登录（本机库数据）
+# 验完：kill preview 进程（先 ss -tlnp | grep 5174 查 PID 再 kill——勿 pkill 模式串，会匹配自身 shell）
 ```
 
 - preview 转发指向**本机 8000**（vite.config.js preview 段）——本地验证全链本地闭环，
