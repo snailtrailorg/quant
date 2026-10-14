@@ -11,13 +11,13 @@ export default defineConfig({
     },
   },
   // 本机彩排验证规约（2026-10-14 用户裁定）：彩排后视觉验证用 vite preview 起同 dist
-  // 产物（=staging 同 hash bundle）——preview 需自带 /api 转发（否则页面 500），
-  // 目标 prod 域名（本机 8000 无服务；SSH 断时 HTTPS 仍通）。
+  // 产物（=staging 同 hash bundle）。preview 转发同 dev 栈指向本机 8000
+  // （dev-start.sh 起的后端）——本地验证全链本地闭环，不依赖 prod/外网。
   preview: {
     port: 5173,
     proxy: {
-      '/api': 'https://quant.snailtrail.cc',
-      '/ws': { target: 'wss://quant.snailtrail.cc', ws: true },
+      '/api': 'http://127.0.0.1:8000',
+      '/ws': { target: 'ws://127.0.0.1:8000', ws: true },
     },
   },
   build: {
