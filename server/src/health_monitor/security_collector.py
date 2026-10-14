@@ -29,10 +29,6 @@ logger = logging.getLogger("health_monitor.security")
 DNF_SECURITY_FILE = Path("/data/websites/snailtrail.cc/quant/shared/security/dnf-security.json")
 
 _CMD_TIMEOUT = 30          # 版本/端口类命令超时（秒）
-_PIP_AUDIT_TIMEOUT = 300   # OSV 网络比对上限。prod 实测教训（2026-10-12）：不加 --disable-pip 时
-                           # pip-audit 把 155 包重装进隔离 venv（走镜像网络）6m40s——CPU 仅 12.5s。
-                           # --disable-pip 跳过重装（lock 带 hash + --no-deps 恰为其快路前提），
-                           # 只剩 OSV 查询时间。300s 为 OSV 慢日余量。
 
 _SSH_KEYS = ("passwordauthentication", "permitrootlogin")
 
@@ -46,6 +42,14 @@ _HEADER_PROBE_NAMES = ("strict-transport-security", "x-content-type-options",
 
 # requirements.lock 集合加载（新增包抑制判据）；失败=文件缺失 ⇒ 返回 None（抑制判据退化为不抑制）
 _LOCK_FILE = Path(__file__).resolve().parents[2] / "requirements.lock"
+
+# grype/syft 二进制（批 123 单源 CVE 扫描——/usr/local/bin，装机走批 123 通道）。
+# 未装机 ⇒ vulns 分区 degraded（单源失败语义：诚实显示，无回退编排）。
+_GRYPE_TIMEOUT = 420   # syft SBOM(~30s) + grype 首日 DB 下载(106s 实测) + 匹配(~60s) + 余量；
+                       # 后续日 DB 已在本地仅增量时间戳检查。任务层 soft_time_limit=600 容纳。
+_SITE_PACKAGES = Path(
+    "/data/websites/snailtrail.cc/quant/shared/venv/lib/python3.11/site-packages"
+)   # syft 扫描目标（dist-info 实证——release 树只含声明不含安装）
 
 
 def _run(cmd: list[str], timeout: int = _CMD_TIMEOUT) -> str:
@@ -212,46 +216,67 @@ def _collect_dnf(path: Path | None = None) -> dict:
 
 
 def _collect_vulns(lock_path: Path | None = None) -> dict:
-    """pip-audit OSV 比对（subprocess 调 `sys.executable -m pip_audit`，不依赖「谁的本机」）。
+    """grype 单源 CVE 扫描（批 123 终裁：pip+rpm 一体，无回退编排）。
 
-    退出码语义（pip-audit 官方，步 4 同判 P0-1 主会话实测 cryptography==3.3.2 ⇒ rc=1+20
-    vulns）：rc=0 无漏洞 / rc=1 有漏洞——**两者均正常解析 JSON**；rc≥2 才是真失败
-    （用法错/内部错）⇒ degraded。无 JSON 主体同理 degraded——**绝不静默空表**
-    （同判返工裁定 3）；degraded 时 findings 不更新（调用方按 status 分支）。
+    链路：syft dir 扫 site-packages（dist-info=已装包——release 树只含声明不扫）
+    + rpmdb（syft 默认）→ SBOM JSON → grype sbom: 匹配 → findings（severity 原生
+    CVSS 词表）。alias 归一：vuln_id 优先取 CVE 号（跨日键稳定），pkg lowercase。
+
+    降级语义（同 0145 立法）：二进制缺失/超时/输出异常 ⇒ degraded 显式落库，
+    绝不静默空表；degraded 时 findings 不更新（调用方按 status 分支）。
     """
     part: dict = {"status": "ok"}
-    lock = lock_path if lock_path is not None else _LOCK_FILE
     try:
+        import shutil
+        if not (shutil.which("grype") and shutil.which("syft")):
+            raise RuntimeError("grype/syft 未装机（批 123 装机通道见任务文件 §二.1）")
+
+        sbom = subprocess.run(
+            ["syft", "scan", f"dir:{_SITE_PACKAGES}", "-o", "syft-json"],
+            capture_output=True, text=True, timeout=_GRYPE_TIMEOUT,
+        )
+        if sbom.returncode != 0:
+            raise RuntimeError(f"syft 退出码 {sbom.returncode}: {sbom.stderr.strip()[:150]}")
+
         out = subprocess.run(
-            [sys.executable, "-m", "pip_audit", "-r", str(lock), "--no-deps",
-             "--disable-pip", "--format", "json"],
-            capture_output=True, text=True, timeout=_PIP_AUDIT_TIMEOUT)
-        if out.returncode >= 2:
-            raise RuntimeError(f"pip-audit 退出码 {out.returncode}: {out.stderr.strip()[:150]}")
-        payload = None
-        for line in out.stdout.splitlines():           # 前置可能有 "No known vulnerabilities found" 行
-            if line.startswith("{"):
-                payload = json.loads(line)
-                break
-        if not payload or "dependencies" not in payload:
-            raise RuntimeError("pip-audit 输出无 JSON 主体")
+            ["grype", "sbom:STDIN", "-o", "json", "--quiet"],
+            input=sbom.stdout, capture_output=True, text=True, timeout=_GRYPE_TIMEOUT,
+        )
+        if out.returncode not in (0, 1):   # grype：0=无洞 1=有洞，均正常出 JSON
+            raise RuntimeError(f"grype 退出码 {out.returncode}: {out.stderr.strip()[:150]}")
+        payload = json.loads(out.stdout) if out.stdout.strip().startswith("{") else None
+        if not payload or "matches" not in payload:
+            raise RuntimeError("grype 输出无 JSON 主体")
+
         findings = []
-        for dep in payload["dependencies"]:
-            for v in dep.get("vulns") or []:
-                findings.append({
-                    "pkg": dep["name"],
-                    "vuln_id": v.get("id", ""),
-                    "fix_version": ",".join(v.get("fix_versions") or []) or None,
-                    "description": (v.get("description") or "")[:600],   # CVE 描述（AI prompt 用）
-                })
+        seen: set[tuple[str, str]] = set()
+        for m in payload["matches"]:
+            v = m.get("vulnerability") or {}
+            pkg = (m.get("artifact") or {}).get("name", "").lower()
+            if not pkg or not v.get("id"):
+                continue
+            # alias 归一：CVE 号优先（grype vulnerabilities[].aliases 含 CVE 列表）
+            cve = next((a for a in (v.get("aliases") or []) if a.upper().startswith("CVE-")), None)
+            vuln_id = cve or v["id"]
+            key = (pkg, vuln_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append({
+                "pkg": pkg,
+                "vuln_id": vuln_id,
+                "severity": v.get("severity") or None,
+                "fix_version": ",".join(v.get("fix", {}).get("versions") or []) or None,
+                "description": (v.get("description") or "")[:600],   # AI prompt 用
+            })
         part["findings"] = findings
-        part["n_deps"] = len(payload["dependencies"])
+        part["n_matches"] = len(payload["matches"])
     except subprocess.TimeoutExpired:
-        logger.warning("pip-audit 超时 >%ss（OSV 网络？）", _PIP_AUDIT_TIMEOUT)
-        _degraded(part, f"pip-audit 超时 >{_PIP_AUDIT_TIMEOUT}s（OSV 网络？）")
+        logger.warning("grype 链超时 >%ss（DB 下载/网络？）", _GRYPE_TIMEOUT)
+        _degraded(part, f"grype 超时 >{_GRYPE_TIMEOUT}s（DB 下载/网络？）")
     except Exception as e:
-        logger.warning("pip-audit 失败: %s", e)
-        _degraded(part, f"pip-audit 失败: {e}")
+        logger.warning("grype 扫描失败: %s", e)
+        _degraded(part, f"grype 失败: {str(e)[:150]}")
     return part
 
 
@@ -377,26 +402,30 @@ def _baseline_diff(prev: dict | None, cur: dict) -> list[dict]:
 
 
 def _upsert_findings(conn, scan_date: date, findings: list[dict]) -> list[dict]:
-    """pip-audit findings 落 security_finding（first_seen 固定/last_seen 滚动），返回当日新发现。
+    """grype findings 落 security_finding（first_seen 固定/last_seen 滚动），返回当日新发现。
 
-    事务内：既有行只推 last_seen（first_seen 不动——first_seen=当日 ⇒ 告警一次的判据）。
+    事务内：既有行只推 last_seen/severity/fix_version（first_seen 不动——
+    first_seen=当日 ⇒ 告警一次的判据）。source='grype'（单源终裁）；
+    存量 pip-audit/dnf 行 last_seen 停更自然沉底（前端灰显——修复语义既有）。
     """
     fresh: list[dict] = []
     for f in findings:
         cur = conn.execute(
             "SELECT first_seen, last_seen FROM security_finding "
-            "WHERE source='pip-audit' AND pkg=%s AND vuln_id=%s", (f["pkg"], f["vuln_id"]))
+            "WHERE source='grype' AND pkg=%s AND vuln_id=%s", (f["pkg"], f["vuln_id"]))
         row = cur.fetchone()
         if row:
             conn.execute(
-                "UPDATE security_finding SET last_seen=%s, fix_version=%s "
-                "WHERE source='pip-audit' AND pkg=%s AND vuln_id=%s",
-                (scan_date, f.get("fix_version"), f["pkg"], f["vuln_id"]))
+                "UPDATE security_finding SET last_seen=%s, fix_version=%s, severity=%s "
+                "WHERE source='grype' AND pkg=%s AND vuln_id=%s",
+                (scan_date, f.get("fix_version"), f.get("severity"), f["pkg"], f["vuln_id"]))
         else:
             conn.execute(
-                "INSERT INTO security_finding (source, pkg, vuln_id, fix_version, first_seen, last_seen) "
-                "VALUES ('pip-audit', %s, %s, %s, %s, %s)",
-                (f["pkg"], f["vuln_id"], f.get("fix_version"), scan_date, scan_date))
+                "INSERT INTO security_finding "
+                "(source, pkg, vuln_id, fix_version, severity, first_seen, last_seen) "
+                "VALUES ('grype', %s, %s, %s, %s, %s, %s)",
+                (f["pkg"], f["vuln_id"], f.get("fix_version"), f.get("severity"),
+                 scan_date, scan_date))
             fresh.append(f)
     return fresh
 
@@ -441,7 +470,7 @@ def _ai_summary(scan_date: date, fresh: list[dict], diff_items: list[dict]) -> s
 def run_security_scan(today: date | None = None) -> dict:
     """总入口：并集各分区 → 落库 → 基线 diff 告警 → 新漏洞告警 → AI 摘要。
 
-    单分区失败只标该分区 degraded（快照 status 取最差值）；pip-audit degraded 时
+    单分区失败只标该分区 degraded（快照 status 取最差值）；grype degraded 时
     findings 不更新（旧值保留，避免假绿/假清零）。
     """
     today = today or date.today()

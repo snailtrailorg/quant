@@ -92,36 +92,56 @@ class TestParsers:
         assert part["status"] == "ok" and part["updates"][0]["name"] == "openssl"
 
     def test_vulns_parses_json(self):
+        """grype 输出解析（批 123 单源）：matches → findings（alias 归一 CVE 优先/
+        severity 原生/pkg lowercase/同键去重）。"""
         from src.health_monitor.security_collector import _collect_vulns
-        audit_json = ('{"dependencies": ['
-                      '{"name": "requests", "version": "2.31.0", "vulns": ['
-                      '{"id": "GHSA-1", "fix_versions": ["2.32.0"], "description": "D"}]},'
-                      '{"name": "flask", "version": "3.0.0", "vulns": []}]}')
-        fake = MagicMock(returncode=0, stdout="No known vulnerabilities found\n" + audit_json,
-                         stderr="")
-        with patch("subprocess.run", return_value=fake), \
-             patch("src.health_monitor.security_collector._LOCK_FILE", MagicMock()):
-            part = _collect_vulns(lock_path=MagicMock())
+        grype_json = ('{"matches": ['
+                      '{"vulnerability": {"id": "GHSA-1", "aliases": ["CVE-2024-1"],'
+                      ' "severity": "High", "fix": {"versions": ["2.32.0"]}, "description": "D"},'
+                      ' "artifact": {"name": "Requests"}},'
+                      '{"vulnerability": {"id": "CVE-2024-1", "aliases": [],'
+                      ' "severity": "High", "fix": {"versions": []}, "description": "dup-of-above"},'
+                      ' "artifact": {"name": "requests"}}]}')
+        sbom_fake = MagicMock(returncode=0, stdout="{}")
+        grype_fake = MagicMock(returncode=1, stdout=grype_json, stderr="")
+
+        def _route(cmd, **kw):
+            return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
+
+        with patch("subprocess.run", side_effect=_route), \
+             patch("shutil.which", return_value="/usr/local/bin/grype"):
+            part = _collect_vulns()
         assert part["status"] == "ok"
-        assert part["findings"] == [{"pkg": "requests", "vuln_id": "GHSA-1",
-                                     "fix_version": "2.32.0", "description": "D"}]
+        # CVE 号优先归一后两条 match 去重为一条；pkg lowercase；severity 原生透传
+        assert part["findings"] == [{"pkg": "requests", "vuln_id": "CVE-2024-1",
+                                     "severity": "High", "fix_version": "2.32.0",
+                                     "description": "D"}]
+        assert part["n_matches"] == 2
 
     def test_vulns_rc1_with_vulns_is_ok_and_lands(self):
-        """**反证钉（P0-1）**：rc=1+漏洞 JSON = pip-audit 官方「有漏洞」语义 ⇒ 正常解析、
-        findings 落库。若把 rc≠0 一律当失败的旧逻辑回归 ⇒ 本用例必红（主会话实测
-        cryptography==3.3.2 ⇒ rc=1 + 20 vulns，旧语义会使有洞日恒 degraded、告警永不触发）。
+        """**反证钉（批 123 grype 版）**：grype rc=1+matches =「有洞」正常语义 ⇒ 正常解析、
+        findings 落库。若把 rc≠0 一律当失败 ⇒ 有洞日恒 degraded、告警永不触发
+        （红线原版是 pip-audit cryptography 实测，单源化后语义平移到 grype）。
+        无 CVE 别名的洞保留原生 ID（alias 归一降级路径）。
         """
         from src.health_monitor.security_collector import _collect_vulns
-        audit_json = ('{"dependencies": ['
-                      '{"name": "cryptography", "version": "3.3.2", "vulns": ['
-                      '{"id": "GHSA-abc", "fix_versions": ["3.4.0"], "description": "bad"}]}]}')
-        fake = MagicMock(returncode=1, stdout=audit_json, stderr="")
-        with patch("subprocess.run", return_value=fake):
+        grype_json = ('{"matches": ['
+                      '{"vulnerability": {"id": "GHSA-abc", "aliases": [],'
+                      ' "severity": "Critical", "fix": {"versions": ["3.4.0"]}, "description": "bad"},'
+                      ' "artifact": {"name": "cryptography"}}]}')
+        sbom_fake = MagicMock(returncode=0, stdout="{}")
+        grype_fake = MagicMock(returncode=1, stdout=grype_json, stderr="")
+
+        def _route(cmd, **kw):
+            return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
+
+        with patch("subprocess.run", side_effect=_route), \
+             patch("shutil.which", return_value="/usr/local/bin/grype"):
             part = _collect_vulns()
         assert part["status"] == "ok"
         assert part["findings"] == [{"pkg": "cryptography", "vuln_id": "GHSA-abc",
-                                     "fix_version": "3.4.0", "description": "bad"}]
-        assert part["n_deps"] == 1
+                                     "severity": "Critical", "fix_version": "3.4.0",
+                                     "description": "bad"}]
 
     def test_vulns_degraded_on_rc2(self):
         """rc≥2 才是真失败（用法错/内部错）⇒ degraded（语义演进：旧用例钉 rc=1，步 4
