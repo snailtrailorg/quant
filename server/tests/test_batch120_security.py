@@ -567,3 +567,55 @@ class TestSysdepComponents:
         t = bs.read_text(encoding="utf-8")
         assert "rpm -q pango cairo wqy-microhei-fonts" in t, "缺在位断言命令"
         assert "dnf install -y pango cairo wqy-microhei-fonts" in t, "缺位提示须含装法"
+
+
+class TestComponentLedger:
+    """批 123 · security_component 台账 UPSERT（版本变更史一等表）。"""
+
+    def test_upsert_semantics(self):
+        """三态：新组件三日同值 / 版本没变只推 last_seen / 变了同步 version+last_changed。
+        psycopg 风格 FakeConn（记录 SQL 序列断言分支——不落真库，语义可验）。"""
+
+        class _Cur:
+            def __init__(self, row): self._row = row
+            def fetchone(self): return self._row
+
+        class FakeConn:
+            def __init__(self): self.calls = []
+            def execute(self, sql, params=()):
+                self.calls.append((sql, params))
+                if sql.startswith("SELECT version"):   # 按 store 状态回放
+                    return _Cur(self._ver)
+                return _Cur(None)
+
+        from src.health_monitor.security_collector import _upsert_components
+        fc = FakeConn()
+        d1, d2, d3 = "2026-10-01", "2026-10-02", "2026-10-03"
+        fc._ver = None
+        _upsert_components(fc, d1, [("pip", "requests", "2.31.0")])   # 新 → INSERT
+        assert fc.calls[-1][0].startswith("INSERT")
+        fc._ver = ("2.31.0",)
+        _upsert_components(fc, d2, [("pip", "requests", "2.31.0")])   # 未变 → 只推 last_seen
+        assert "last_changed=%s" not in fc.calls[-1][0] and "SET last_seen" in fc.calls[-1][0]
+        fc._ver = ("2.31.0",)
+        _upsert_components(fc, d3, [("pip", "requests", "2.32.0")])   # 变 → version+last_changed 同步
+        assert "last_changed=%s" in fc.calls[-1][0] and "2.32.0" in fc.calls[-1][1]
+
+    def test_ledger_from_sbom(self):
+        """grype 链 ok 时 ledger 顺带产出（pip/rpm 分型+lowercase）。"""
+        from src.health_monitor.security_collector import _collect_vulns
+        sbom_json = ('{"artifacts": ['
+                     '{"type": "python", "name": "Requests", "version": "2.31.0"},'
+                     '{"type": "rpm", "name": "openssl", "version": "1.1.1k"}]}')
+        grype_json = '{"matches": []}'
+        sbom_fake = MagicMock(returncode=0, stdout=sbom_json)
+        grype_fake = MagicMock(returncode=0, stdout=grype_json, stderr="")
+
+        def _route(cmd, **kw):
+            return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
+
+        with patch("subprocess.run", side_effect=_route), \
+             patch("shutil.which", return_value="/usr/local/bin/grype"):
+            part = _collect_vulns()
+        assert part["ledger"] == [("pip", "requests", "2.31.0"),
+                                  ("rpm", "openssl", "1.1.1k")]

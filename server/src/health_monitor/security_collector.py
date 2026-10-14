@@ -67,6 +67,39 @@ def _degraded(part: dict, reason: str) -> dict:
     return part
 
 
+def _upsert_components(conn, scan_date: date, rows: list[tuple[str, str, str]]) -> None:
+    """组件台账 UPSERT（批 123·security_component——版本变更史一等表）。
+
+    rows=[(source, name, version)]；语义（任务文件 §二.3）：
+    新组件 → 三日同值入库；版本没变 → 只推 last_seen；变了 → version+last_changed 同步。
+    单行失败跳过（台账不炸扫描）。
+    """
+    for source, name, version in rows:
+        try:
+            cur = conn.execute(
+                "SELECT version FROM security_component WHERE source=%s AND name=%s",
+                (source, name))
+            row = cur.fetchone()
+            if row is None:
+                conn.execute(
+                    "INSERT INTO security_component "
+                    "(source, name, version, first_seen, last_changed, last_seen) "
+                    "VALUES (%s,%s,%s,%s,%s,%s)",
+                    (source, name, version, scan_date, scan_date, scan_date))
+            elif row[0] != version:
+                conn.execute(
+                    "UPDATE security_component SET version=%s, last_changed=%s, last_seen=%s "
+                    "WHERE source=%s AND name=%s",
+                    (version, scan_date, scan_date, source, name))
+            else:
+                conn.execute(
+                    "UPDATE security_component SET last_seen=%s "
+                    "WHERE source=%s AND name=%s",
+                    (scan_date, source, name))
+        except Exception as e:
+            logger.warning("台账 UPSERT 失败 %s/%s（跳过）: %s", source, name, e)
+
+
 # ── 分区采集 ───────────────────────────────────────────────────────────────
 
 def _collect_components() -> dict:
@@ -237,6 +270,7 @@ def _collect_vulns(lock_path: Path | None = None) -> dict:
         )
         if sbom.returncode != 0:
             raise RuntimeError(f"syft 退出码 {sbom.returncode}: {sbom.stderr.strip()[:150]}")
+        sbom_arts = (json.loads(sbom.stdout).get("artifacts") or []) if sbom.stdout.strip().startswith("{") else []
 
         out = subprocess.run(
             ["grype", "sbom:STDIN", "-o", "json", "--quiet"],
@@ -271,6 +305,15 @@ def _collect_vulns(lock_path: Path | None = None) -> dict:
             })
         part["findings"] = findings
         part["n_matches"] = len(payload["matches"])
+        # 台账 pip/rpm 域顺带产出（SBOM arts 零额外成本）；type 判源：python→pip，rpm→rpm
+        ledger: list[tuple[str, str, str]] = []
+        for art in sbom_arts:
+            a_type = (art.get("type") or "").lower()
+            if a_type not in ("python", "rpm"):
+                continue
+            src = "pip" if a_type == "python" else "rpm"
+            ledger.append((src, (art.get("name") or "").lower(), str(art.get("version") or "")))
+        part["ledger"] = ledger
     except subprocess.TimeoutExpired:
         logger.warning("grype 链超时 >%ss（DB 下载/网络？）", _GRYPE_TIMEOUT)
         _degraded(part, f"grype 超时 >{_GRYPE_TIMEOUT}s（DB 下载/网络？）")
@@ -500,6 +543,15 @@ def run_security_scan(today: date | None = None) -> dict:
 
         if vulns.get("status") == "ok":
             fresh = _upsert_findings(conn, today, vulns.get("findings") or [])
+            # 台账 pip/rpm 域（SBOM 顺带产出——grype 链 ok 才有）
+            _upsert_components(conn, today, vulns.get("ledger") or [])
+
+        # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）
+        sys_rows = [
+            ("system", k, str(v)) for k, v in parts["components"].items()
+            if k != "pip" and v  # pip 键是大 dict 非 version；空值不入账
+        ]
+        _upsert_components(conn, today, sys_rows)
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
         conn.execute(
