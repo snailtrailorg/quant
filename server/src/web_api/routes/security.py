@@ -59,17 +59,26 @@ def _enrich_findings(day: date, vulns_ok: bool = True,
     out = []
     for f in store.get_findings_active(day):
         first, last = f["first_seen"], f["last_seen"]
-        base = ledger.get(f["pkg"], first)          # 暴露起点：版本变更日 > 发现日
+        base = ledger.get(f["pkg"]) or first          # 暴露起点：版本变更日；缺行回退发现日
         out.append({
             "source": f["source"], "pkg": f["pkg"], "vuln_id": f["vuln_id"],
             "fix_version": f["fix_version"], "severity": f["severity"],
             "first_seen": first.isoformat(), "last_seen": last.isoformat(),
             "dwell_days": max(_days_between(day, first), 0),
             "expose_days": max(_days_between(day, base), 0),
+            "expose_est": f["pkg"] not in ledger,   # ≈ 标记：台账缺行=回退发现日（估计值）
             "fixed": vulns_ok and last < day,
         })
-    # 停留天数降序（同天数按 pkg 稳定序）；已修复（fixed）沉底
-    out.sort(key=lambda x: (x["fixed"], -x["dwell_days"], x["pkg"], x["vuln_id"]))
+    # 排序（批 123·A07 §六）：已修复沉底 → 严重度降序（Critical 最高）→
+    # 暴露时长降序 → pkg/vuln_id 稳定序。severity NULL 按 Unknown 档（最低）
+    _sev_order = ("critical", "high", "medium", "low", "negligible", "unknown")
+
+    def _sev_key(f):
+        s = (f.get("severity") or "unknown").lower()
+        return _sev_order.index(s) if s in _sev_order else len(_sev_order)
+
+    out.sort(key=lambda x: (x["fixed"], _sev_key(x), -x["expose_days"],
+                            -x["dwell_days"], x["pkg"], x["vuln_id"]))
     return out
 
 

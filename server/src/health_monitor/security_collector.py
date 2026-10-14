@@ -289,8 +289,14 @@ def _collect_vulns(lock_path: Path | None = None) -> dict:
             pkg = (m.get("artifact") or {}).get("name", "").lower()
             if not pkg or not v.get("id"):
                 continue
-            # alias 归一：CVE 号优先（grype vulnerabilities[].aliases 含 CVE 列表）
-            cve = next((a for a in (v.get("aliases") or []) if a.upper().startswith("CVE-")), None)
+            # alias 归一：CVE 号优先。grype JSON 字段名装机前未实测（盲审 A 置信
+            # ~55%），双通道兜底：aliases[] 与 relatedVulnerabilities[].id 都扫——
+            # 任一命中 CVE 即用；装机首轮真实输出比对后校准（任务文件待裁点①）
+            _alias_pool = list(v.get("aliases") or [])
+            for rv in v.get("relatedVulnerabilities") or []:
+                if isinstance(rv, dict) and rv.get("id"):
+                    _alias_pool.append(rv["id"])
+            cve = next((a for a in _alias_pool if a.upper().startswith("CVE-")), None)
             vuln_id = cve or v["id"]
             key = (pkg, vuln_id)
             if key in seen:
@@ -546,10 +552,11 @@ def run_security_scan(today: date | None = None) -> dict:
             # 台账 pip/rpm 域（SBOM 顺带产出——grype 链 ok 才有）
             _upsert_components(conn, today, vulns.get("ledger") or [])
 
-        # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）
+        # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）。
+        # 排除 "pip"（大 dict 非版本）与 "status"（分区标记非组件——盲审 A/B 同发现伪组件）
         sys_rows = [
             ("system", k, str(v)) for k, v in parts["components"].items()
-            if k != "pip" and v  # pip 键是大 dict 非 version；空值不入账
+            if k not in ("pip", "status") and v
         ]
         _upsert_components(conn, today, sys_rows)
 

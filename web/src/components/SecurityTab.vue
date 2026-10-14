@@ -106,7 +106,8 @@
         </el-table-column>
         <el-table-column prop="expose_days" :label="t('secpage.exposeDays')" min-width="110" sortable>
           <template #default="{ row }">
-            <span :class="{ 'dw-old': row.expose_days >= 30 }">{{ row.expose_days }}</span>
+            <span :class="{ 'dw-old': row.expose_days >= 30 }"
+                  :title="row.expose_est ? t('secpage.exposeEstHint') : ''">{{ row.expose_days }}{{ row.expose_est ? '≈' : '' }}</span>
             <span class="dwell-sub">（{{ t('secpage.found') }} {{ row.dwell_days }}）</span>
           </template>
         </el-table-column>

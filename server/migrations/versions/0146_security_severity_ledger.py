@@ -1,4 +1,4 @@
-# EXPAND-CONTRACT: phase=expand
+# EXPAND-CONTRACT: phase=expand（新增性迁移——severity 列/台账表无既有消费者，contract 随表退役批次走，同 0145 惯例）
 """批 123：漏洞源重构线①——`security_finding` 加 severity 列 + `security_component` 组件台账。
 
 任务＝`flow/任务/批123-漏洞源重构.md`（grype+syft 插件化/severity/台账/前端修正）。
