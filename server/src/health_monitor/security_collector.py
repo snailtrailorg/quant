@@ -47,9 +47,24 @@ _LOCK_FILE = Path(__file__).resolve().parents[2] / "requirements.lock"
 # 未装机 ⇒ vulns 分区 degraded（单源失败语义：诚实显示，无回退编排）。
 _GRYPE_TIMEOUT = 420   # syft SBOM(~30s) + grype 首日 DB 下载(106s 实测) + 匹配(~60s) + 余量；
                        # 后续日 DB 已在本地仅增量时间戳检查。任务层 soft_time_limit=600 容纳。
-_SITE_PACKAGES = Path(
-    "/data/websites/snailtrail.cc/quant/shared/venv/lib/python3.11/site-packages"
-)   # syft 扫描目标（dist-info 实证——release 树只含声明不含安装）
+_VENV_ROOT = Path("/data/websites/snailtrail.cc/quant/shared/venv/lib")   # pip venv 布局 lib/（有的发行版建 lib64 软链同源）
+
+
+def _site_packages() -> Path:
+    """syft 扫描目标（dist-info 实证——release 树只含声明不含安装）。
+
+    python 次版本随环境（staging=3.10 / prod=3.11——2026-10-15 staging 复现实证
+    硬编码 3.11 在本机 syft 直接 source 错）：glob lib*/python*/site-packages
+    取唯一命中；多命中或零命中=分区降级（诚实显示，不猜）。
+    """
+    try:
+        cands = sorted(_VENV_ROOT.glob("python*/site-packages"))
+    except PermissionError as e:
+        raise RuntimeError(f"shared/ 不可读（须 quant 身份跑——worker 内=正常）: {e}") from e
+    if len(cands) == 1:
+        return cands[0]
+    raise RuntimeError(
+        f"site-packages 探测异常：{[str(c) for c in cands] or '零命中'}（期望唯一）")
 
 
 def _run(cmd: list[str], timeout: int = _CMD_TIMEOUT) -> str:
@@ -264,9 +279,13 @@ def _collect_vulns() -> dict:
         if not (shutil.which("grype") and shutil.which("syft")):
             raise RuntimeError("grype/syft 未装机（批 123 装机通道见任务文件 §二.1）")
 
+        # HOME 显式传 quant 家目录：systemd worker 无 HOME=（默认 /root）——grype
+        # 按 HOME 找 DB 缓存，找不到=stderr 报错 stdout 空（2026-10-15 prod 首跑实证：
+        # 手动 sudo -u quant 正常/worker 内失败，根因即此）。env 只覆盖 HOME 不继承余。
+        _env = {**__import__("os").environ, "HOME": "/home/quant"}
         sbom = subprocess.run(
-            ["syft", "scan", f"dir:{_SITE_PACKAGES}", "-o", "syft-json"],
-            capture_output=True, text=True, timeout=_GRYPE_TIMEOUT,
+            ["syft", "scan", f"dir:{_site_packages()}", "-o", "syft-json"],
+            capture_output=True, text=True, timeout=_GRYPE_TIMEOUT, env=_env,
         )
         if sbom.returncode != 0:
             raise RuntimeError(f"syft 退出码 {sbom.returncode}: {sbom.stderr.strip()[:150]}")
@@ -275,6 +294,7 @@ def _collect_vulns() -> dict:
         out = subprocess.run(
             ["grype", "sbom:STDIN", "-o", "json", "--quiet"],
             input=sbom.stdout, capture_output=True, text=True, timeout=_GRYPE_TIMEOUT,
+            env=_env,
         )
         if out.returncode not in (0, 1):   # grype：0=无洞 1=有洞，均正常出 JSON
             raise RuntimeError(f"grype 退出码 {out.returncode}: {out.stderr.strip()[:150]}")

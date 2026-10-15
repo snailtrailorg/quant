@@ -109,7 +109,9 @@ class TestParsers:
             return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
 
         with patch("subprocess.run", side_effect=_route), \
-             patch("shutil.which", return_value="/usr/local/bin/grype"):
+             patch("shutil.which", return_value="/usr/local/bin/grype"), \
+             patch("src.health_monitor.security_collector._site_packages",
+                   return_value=MagicMock()):
             part = _collect_vulns()
         assert part["status"] == "ok"
         # CVE 号优先归一后两条 match 去重为一条；pkg lowercase；severity 原生透传
@@ -136,7 +138,9 @@ class TestParsers:
             return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
 
         with patch("subprocess.run", side_effect=_route), \
-             patch("shutil.which", return_value="/usr/local/bin/grype"):
+             patch("shutil.which", return_value="/usr/local/bin/grype"), \
+             patch("src.health_monitor.security_collector._site_packages",
+                   return_value=MagicMock()):
             part = _collect_vulns()
         assert part["status"] == "ok"
         assert part["findings"] == [{"pkg": "cryptography", "vuln_id": "GHSA-abc",
@@ -615,7 +619,9 @@ class TestComponentLedger:
             return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
 
         with patch("subprocess.run", side_effect=_route), \
-             patch("shutil.which", return_value="/usr/local/bin/grype"):
+             patch("shutil.which", return_value="/usr/local/bin/grype"), \
+             patch("src.health_monitor.security_collector._site_packages",
+                   return_value=MagicMock()):
             part = _collect_vulns()
         assert part["ledger"] == [("pip", "requests", "2.31.0"),
                                   ("rpm", "openssl", "1.1.1k")]
