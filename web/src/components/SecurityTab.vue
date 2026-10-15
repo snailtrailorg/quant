@@ -77,8 +77,8 @@
       <div v-else class="sec-empty">{{ t('secpage.noSummary') }}</div>
     </el-card>
 
-    <!-- C 漏洞列表：严重度前置（业界惯例：Severity 最左——一眼见「多严重/什么洞」，
-         包名是定位次要信息）；来源列删（单值时零信息量——筛选器多源才显示）；
+    <!-- C 漏洞列表：**漏洞 ID 第一列、严重度第二列**（用户裁定 2026-10-15——ID 是引用/检索
+         主键，先见标识再判严重度）；来源列删（单值时零信息量——筛选器多源才显示）；
          后端已按 严重度→暴露时长 排序；已修复灰显沉底 -->
     <el-card style="margin-top: var(--sp-3)">
       <template #header>
@@ -92,6 +92,7 @@
       </template>
       <TableShell :data="filteredFindings" storage-key="security-findings" style="width:100%"
                   :row-class-name="({ row }) => row.fixed ? 'fixed-row' : ''">
+        <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="170" />
         <el-table-column prop="severity" :label="t('secpage.severity')" min-width="95" sortable
                          :sort-method="(a, b) => sevRank(b.severity) - sevRank(a.severity)">
           <template #default="{ row }">
@@ -99,7 +100,6 @@
             <span v-else class="sev-none">{{ t('secpage.sevUnrated') }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="170" />
         <el-table-column prop="pkg" :label="t('secpage.pkg')" min-width="140" />
         <el-table-column prop="fix_version" :label="t('secpage.fixVersion')" min-width="110">
           <template #default="{ row }">{{ row.fix_version || '—' }}</template>
