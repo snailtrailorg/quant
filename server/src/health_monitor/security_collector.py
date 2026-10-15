@@ -289,9 +289,16 @@ def _collect_vulns() -> dict:
         # 推导——systemd worker 无 HOME=/手动身份各异，两路径各找各缓存的漂移
         # 一并终结（2026-10-15 用户裁定：DB=部署产物，缺省 shared/grype-db）。
         _env = {**os.environ, "GRYPE_DB_CACHE_DIR": _GRYPE_DB_DIR}
+        # cwd=/tmp 显式：syft 启动要逐级 stat 祖先目录推断 chroot 上下文——
+        # worker 的 cwd=shared/ 祖先链对 quant 有权限断点（prod 实证 2026-10-15：
+        # "could not get current working directory: stat .: permission denied"，
+        # 同命令在 /tmp 下 rc=0）。--source-name/version=syft 官方建议（消除
+        # 从路径推断 ID 的 WARN 与 chroot 推断依赖）。
         sbom = subprocess.run(
-            ["syft", "scan", f"dir:{_site_packages()}", "-o", "syft-json"],
+            ["syft", "scan", f"dir:{_site_packages()}", "-o", "syft-json",
+             "--source-name", "quant-venv", "--source-version", "1"],
             capture_output=True, text=True, timeout=_GRYPE_TIMEOUT, env=_env,
+            cwd="/tmp",
         )
         if sbom.returncode != 0:
             raise RuntimeError(f"syft 退出码 {sbom.returncode}: {sbom.stderr.strip()[:150]}")
@@ -300,7 +307,7 @@ def _collect_vulns() -> dict:
         out = subprocess.run(
             ["grype", "sbom:STDIN", "-o", "json", "--quiet"],
             input=sbom.stdout, capture_output=True, text=True, timeout=_GRYPE_TIMEOUT,
-            env=_env,
+            env=_env, cwd="/tmp",   # 同 syft：避开 worker cwd 权限断点
         )
         if out.returncode not in (0, 1):   # grype：0=无洞 1=有洞，均正常出 JSON
             raise RuntimeError(f"grype 退出码 {out.returncode}: {out.stderr.strip()[:150]}")
