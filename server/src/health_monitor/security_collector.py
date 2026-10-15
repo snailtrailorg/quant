@@ -291,7 +291,16 @@ def _collect_vulns() -> dict:
         # DB 缓存显式注入（GRYPE_DB_CACHE_DIR=grype 官方 env）：不再依赖 HOME
         # 推导——systemd worker 无 HOME=/手动身份各异，两路径各找各缓存的漂移
         # 一并终结（2026-10-15 用户裁定：DB=部署产物，缺省 shared/grype-db）。
-        _env = {**os.environ, "GRYPE_DB_CACHE_DIR": _GRYPE_DB_DIR}
+        # grype 两个默认联网检查须关（`grype config` 官方默认值实证 2026-10-15：
+        # db.auto-update=true=每次执行查 DB 更新、check-for-app-update=true=查自身更新）
+        # ——离线/受控环境会卡在网络重试（本机端到端 420s 超时实证）。DB 更新时机
+        # 由我们显式控制（部署/维护任务跑 `grype db update`），扫描路径纯本地。
+        _env = {
+            **os.environ,
+            "GRYPE_DB_CACHE_DIR": _GRYPE_DB_DIR,
+            "GRYPE_DB_AUTO_UPDATE": "false",
+            "GRYPE_CHECK_FOR_APP_UPDATE": "false",
+        }
         # 调用规范（grype/syft 官方 CLI reference，2026-10-15 读档重写——不再试错）：
         # ① SBOM 传递官方仅两式：`grype sbom:<file>` 或 `syft…| grype`（无参）；
         #    原 `sbom:STDIN` 不在规范内。选**文件式**（33MB 不经 python 中转，
