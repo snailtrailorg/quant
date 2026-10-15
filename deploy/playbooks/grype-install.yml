@@ -68,10 +68,11 @@
     - name: grype-install —— DB 预拉占位（michael root 手工：sudo -u quant /usr/local/bin/grype db update）
       ansible.builtin.debug:
         msg: >-
-          DB 预拉由 michael root 手工执行（一次性，不进 deploy 通道——用户裁定）：
-          sudo -u quant env GRYPE_DB_CACHE_DIR=/data/websites/snailtrail.cc/quant/shared/grype-db \
-            /usr/local/bin/grype db update
-          （DB=部署产物落 shared/grype-db 非 ~/；quant 属主；首跑后此任务可删）
+          DB 就位已由 michael 完成（2026-10-15 两环境：~/ 迁移至 shared/grype-db——
+          3.1GB 纯文件搬移非重下载，grype DB 自包含无绝对路径内嵌）。今后 DB 重建
+          （目录损坏等）才需：sudo -u quant env \
+          GRYPE_DB_CACHE_DIR=/data/websites/snailtrail.cc/quant/shared/grype-db \
+          /usr/local/bin/grype db update
 
     - name: grype-install —— DB 落位核验（装位+预拉后重跑时验——shared/grype-db 部署树）
       ansible.builtin.stat:
