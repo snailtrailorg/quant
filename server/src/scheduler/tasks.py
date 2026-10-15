@@ -711,7 +711,9 @@ def health_monitor_check():
 
 
 @app.task(name="src.scheduler.tasks.security_scan",
-          bind=True, soft_time_limit=600, time_limit=660)   # 批120：覆盖全局 300s（pip-audit OSV 网络比对留余量；先例=pool_data 320s）
+          bind=True, soft_time_limit=2400, time_limit=2500)
+# 批120：覆盖全局 300s；批124 提至 2400s——扫描前置 grype db update（每次先更新，
+# 首次/大版本全量 ~3.1GB，prod 带宽 2.8MB/s ⇒ 最长 ~20min）+ syft/grype 链 + 五分区
 def security_scan(self):
     """批 120：每日安全态势扫描（组件/端口/ssh/dnf/头/漏洞六分区 → 快照落库 + 基线 diff
     告警 + AI 摘要 fail-soft）。单分区失败只标该分区 degraded，不抛。"""

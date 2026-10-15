@@ -46,7 +46,8 @@ def _days_between(later: date, earlier: date) -> int:
 
 
 def _enrich_findings(day: date, vulns_ok: bool = True,
-                     ledger: dict[str, date] | None = None) -> list[dict]:
+                     ledger: dict[str, date] | None = None,
+                     snap_created_at=None) -> list[dict]:
     """finding 行 → 前端形状：严重度/暴露时长/停留天数 + fixed 标记。
 
     fixed=last_seen < day 且当日 vulns 分区 ok（步 4 P1-2：降级日采集侧不推 last_seen
@@ -67,7 +68,12 @@ def _enrich_findings(day: date, vulns_ok: bool = True,
             "dwell_days": max(_days_between(day, first), 0),
             "expose_days": max(_days_between(day, base), 0),
             "expose_est": f["pkg"] not in ledger,   # ≈ 标记：台账缺行=回退发现日（估计值）
-            "fixed": vulns_ok and last < day,
+            # fixed 判据（批 124 同日复跑重判）：本轮报了 ⇒ last_seen_at=clock_timestamp()
+            # （晚于快照 created_at=now()=事务开始）⇒ 未 fixed；本轮未报 ⇒ 停在旧时刻
+            # ⇒ fixed（同日升级当日沉底，不必等次日）。无 created_at（异常）=回退日粒度
+            "fixed": vulns_ok and (
+                f["last_seen_at"] < snap_created_at if (f.get("last_seen_at") and snap_created_at)
+                else last < day),
         })
     # 排序（批 123·A07 §六）：已修复沉底 → 严重度降序（Critical 最高）→
     # 暴露时长降序 → pkg/vuln_id 稳定序。severity NULL 按 Unknown 档（最低）
@@ -129,7 +135,8 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "scan_date": day.isoformat(),
         "ai_summary": snap["ai_summary"] or "",
         "created_at": snap["created_at"].isoformat() if snap["created_at"] else None,
-        "findings": _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger),
+        "findings": _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger,
+                                      snap_created_at=snap["created_at"]),
         "components": snap["components"],
         "components_ledger": [
             {"source": r["source"], "name": r["name"], "version": r["version"],
@@ -140,6 +147,7 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "dnf": snap["dnf"],
         "headers": snap["headers"],
         "degraded_zones": degraded_zones,
+        "vulns_db": (snap.get("components") or {}).get("vulns_db") or {},
         "baseline_diff": baseline_diff,
     }
 

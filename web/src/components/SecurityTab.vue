@@ -49,11 +49,9 @@
           <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
         </el-card>
         <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.baselineChanges') }}</span></div>
-          <div class="card-value">
-            <span class="pct" :class="{ warn: baselineTotal > 0 }">{{ baselineTotal }}</span>
-          </div>
-          <div class="kpi-sub">{{ t('secpage.baselineHint') }}</div>
+          <div class="card-head"><span class="card-name">{{ t('secpage.vulnDb') }}</span></div>
+          <div class="card-value"><span class="pct small">{{ dbBuiltDate || '—' }}</span></div>
+          <div class="kpi-sub">{{ dbStateHint }}</div>
         </el-card>
       </div>
     </el-card>
@@ -240,12 +238,21 @@ const compHint = computed(() => compFilter.value
   ? t('secpage.compMatch', { n: compRowsShown.value.length, total: componentRows.value.length })
   : t('secpage.compVulnOnly', { n: compRowsShown.value.length, total: componentRows.value.length }))
 
-// A 区基线偏差卡（E 区时间线已删——批 124）
-const baselineTotal = computed(() => (snap.value?.baseline_diff
-  ? (snap.value.baseline_diff.new_ports?.length || 0)
-    + (snap.value.baseline_diff.new_packages?.length || 0)
-    + (snap.value.baseline_diff.cfg_flips?.length || 0)
-  : 0))
+// A 区漏洞库卡（批 124 用户裁定换基线偏差卡——「漏洞判定的时效边界」）：
+// DB 构建日（import.json URL 时间戳——采集器提取）；>3 天黄（上游日更 1 次，
+// 超龄=anchore 断更或 update 通道故障——值得人看一眼）
+const dbBuiltDate = computed(() => {
+  const s = (snap.value?.vulns_db || {}).built_at
+  return s ? s.slice(0, 10) : ''
+})
+const dbStateHint = computed(() => {
+  const vd = snap.value?.vulns_db || {}
+  const days = vd.built_at
+    ? Math.floor((Date.now() - new Date(vd.built_at).getTime()) / 86400000) : null
+  if (vd.state === 'update-failed') return t('secpage.dbUpdateFailed')
+  if (days === null) return t('secpage.dbUnknown')
+  return days > 3 ? t('secpage.dbStale', { n: days }) : t('secpage.dbFresh', { n: days })
+})
 
 const historySummaries = computed(() =>
   (history.value || []).filter(d => d.scan_date !== snap.value?.scan_date && d.ai_summary_preview))

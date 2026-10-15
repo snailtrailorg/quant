@@ -121,7 +121,9 @@ class TestParsers:
              patch("src.health_monitor.security_collector._site_packages",
                    return_value=MagicMock()), \
              patch("src.health_monitor.security_collector._SBOM_FILE",
-                   Path(sbom_path)):
+                   Path(sbom_path)), \
+             patch("src.health_monitor.security_collector._update_db",
+                   return_value="updated"):
             part = _collect_vulns()
         assert part["status"] == "ok"
         # CVE 号优先归一后两条 match 去重为一条；pkg lowercase；severity 原生透传
@@ -158,7 +160,9 @@ class TestParsers:
              patch("src.health_monitor.security_collector._site_packages",
                    return_value=MagicMock()), \
              patch("src.health_monitor.security_collector._SBOM_FILE",
-                   Path(sbom_path)):
+                   Path(sbom_path)), \
+             patch("src.health_monitor.security_collector._update_db",
+                   return_value="updated"):
             part = _collect_vulns()
         assert part["status"] == "ok"
         assert part["findings"] == [{"pkg": "cryptography", "vuln_id": "GHSA-abc",
@@ -183,7 +187,9 @@ class TestParsers:
              patch("src.health_monitor.security_collector._site_packages",
                    return_value=MagicMock()), \
              patch("src.health_monitor.security_collector._SBOM_FILE",
-                   Path(sbom_path)):
+                   Path(sbom_path)), \
+             patch("src.health_monitor.security_collector._update_db",
+                   return_value="updated"):
             part = _collect_vulns()
         assert part["status"] == "degraded"
         assert "findings" not in part   # degraded 不产空表（绝不静默空表红线）
@@ -205,7 +211,9 @@ class TestParsers:
              patch("src.health_monitor.security_collector._site_packages",
                    return_value=MagicMock()), \
              patch("src.health_monitor.security_collector._SBOM_FILE",
-                   Path(sbom_path)):
+                   Path(sbom_path)), \
+             patch("src.health_monitor.security_collector._update_db",
+                   return_value="updated"):
             part = _collect_vulns()
         assert part["status"] == "degraded"
         assert "findings" not in part
@@ -527,7 +535,7 @@ class TestRegistration:
         import src.scheduler.tasks as tasks
         assert hasattr(tasks, "security_scan")
         deco_src = inspect.getsource(tasks.security_scan)
-        assert "soft_time_limit=600" in deco_src and "time_limit=660" in deco_src
+        assert "soft_time_limit=2400" in deco_src and "time_limit=2500" in deco_src   # 批124：容纳扫描前 DB update
 
     def test_beat_entry_daily_6am(self):
         import re
@@ -676,7 +684,28 @@ class TestComponentLedger:
              patch("src.health_monitor.security_collector._site_packages",
                    return_value=MagicMock()), \
              patch("src.health_monitor.security_collector._SBOM_FILE",
-                   Path(sbom_path)):
+                   Path(sbom_path)), \
+             patch("src.health_monitor.security_collector._update_db",
+                   return_value="updated"):
             part = _collect_vulns()
         assert part["ledger"] == [("pip", "requests", "2.31.0", "pip 安装"),
                                   ("rpm", "openssl", "1.1.1k", "系统 rpm（dnf）")]
+
+
+class TestDbUpdateGate:
+    """批 124 · 扫描前置 DB 更新（每次——用户裁定「先 update 再扫描 ⇒ 误报最小」）。"""
+
+    def test_update_called_and_ok(self):
+        """每次扫描前置 grype db update；成功返回 'updated'。幂等性由 grype 保证
+        （无新版时秒级 no-update-available——prod 2026-10-15 实测 8s）。"""
+        import src.health_monitor.security_collector as sc
+        with patch("subprocess.run", return_value=MagicMock(returncode=0)) as m:
+            assert sc._update_db({}) == "updated"
+            m.assert_called_once()
+            assert m.call_args.args[0][:2] == ["grype", "db"]
+
+    def test_update_failure_is_fail_soft(self):
+        """update 失败 ⇒ 'update-failed'（不抛——旧 DB 继续用，扫描不阻）。"""
+        import src.health_monitor.security_collector as sc
+        with patch("subprocess.run", return_value=MagicMock(returncode=1, stderr="net down")):
+            assert sc._update_db({}) == "update-failed"

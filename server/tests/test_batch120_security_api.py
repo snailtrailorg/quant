@@ -59,8 +59,16 @@ def _snap_row(day=DAY, status="ok", pip=None, listening=None, ssh=None, summary=
 
 
 def _finding_row(source="pip-audit", pkg="requests", vuln="GHSA-1", fix="2.32.0",
-                 first=DAY, last=DAY, severity=None):
-    return (source, pkg, vuln, fix, severity, first, last)
+                 first=DAY, last=DAY, severity=None, reported_this_scan=True):
+    """last_seen_at（批 124 同日重判）：缺省=本扫描时刻 06:00:30（晚于快照
+    created_at=06:00 ⇒ active）；reported_this_scan=False ⇒ 05:59（早 ⇒ fixed
+    ——模拟同日内"本轮未报"）。"""
+    from datetime import datetime, timezone
+    if reported_this_scan:
+        last_at = datetime.combine(last, datetime.min.time(), tzinfo=timezone.utc).replace(hour=6, minute=0, second=30)
+    else:
+        last_at = datetime.combine(last, datetime.min.time(), tzinfo=timezone.utc).replace(hour=5, minute=59)
+    return (source, pkg, vuln, fix, severity, first, last, last_at)
 
 
 def _ledger_rows():
@@ -153,7 +161,7 @@ class TestFindingsOrder:
             _finding_row(pkg="c", vuln="V3", first=date(2026, 10, 11)),             # 0 天
             _finding_row(pkg="a", vuln="V1", first=date(2026, 10, 8)),               # 3 天
             _finding_row(pkg="fixed-pkg", vuln="VX", first=date(2026, 10, 9),
-                         last=PREV),                                                 # 已修复
+                         last=PREV),   # last_seen=PREV < DAY ⇒ 日粒度已 fixed
             _finding_row(pkg="b", vuln="V2", first=date(2026, 10, 10)),             # 1 天
         ]
         c = _dispatch([

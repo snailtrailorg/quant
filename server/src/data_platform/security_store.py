@@ -51,11 +51,12 @@ def get_findings_active(day: date) -> list[dict]:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT source, pkg, vuln_id, fix_version, severity, first_seen, last_seen "
+            "SELECT source, pkg, vuln_id, fix_version, severity, first_seen, last_seen, "
+            "last_seen_at "
             "FROM security_finding WHERE first_seen <= %s",
             (day,))
         cols = ("source", "pkg", "vuln_id", "fix_version", "severity",
-                "first_seen", "last_seen")
+                "first_seen", "last_seen", "last_seen_at")
         return _rows_to_dicts(cur, cols)
 
 

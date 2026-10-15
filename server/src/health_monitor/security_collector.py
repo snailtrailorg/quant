@@ -296,6 +296,30 @@ def _collect_dnf(path: Path | None = None) -> dict:
     return part
 
 
+_DB_UPDATE_TIMEOUT = 1800   # DB 更新上限（首次/大版本全量 ~3.1GB——prod 带宽实测 2.8MB/s）
+
+
+def _update_db(env: dict) -> str:
+    """扫描前置 DB 更新（**每次**——用户裁定 2026-10-15：「先 update 再扫描 ⇒ 误报最小」）。
+
+    grype db update 幂等：无新版时仅查 listing（小请求，秒级）；有新版才下载。
+    此前"7 天闸"（省流量）引入最长 7 天陈旧窗口——用户判定不值（陈旧 ⇒ 已修复
+    CVE 仍报 = 误报）。更新时间进任务时限预算（tasks.py soft_time_limit 已提）。
+    fail-soft：更新失败用旧 DB 继续（扫描不阻——DB 全缺时后续 grype 自然 degraded）。
+    """
+    try:
+        r = subprocess.run(["grype", "db", "update"], capture_output=True, text=True,
+                           timeout=_DB_UPDATE_TIMEOUT, env=env, cwd="/tmp")
+        if r.returncode == 0:
+            return "updated"
+        logger.warning("grype DB 更新失败（用旧 DB 继续）: rc=%s %s",
+                       r.returncode, r.stderr.strip()[:150])
+        return "update-failed"
+    except Exception as e:
+        logger.warning("grype DB 更新异常（用旧 DB 继续）: %s", e)
+        return "update-failed"
+
+
 def _collect_vulns() -> dict:
     """grype 单源 CVE 扫描（批 123 终裁：pip+rpm 一体，无回退编排）。
 
@@ -335,6 +359,7 @@ def _collect_vulns() -> dict:
         #    手工扫 aliases。
         # ④ cwd=/tmp + --source-name/version：syft 要逐级 stat 祖先目录推断 chroot
         #    上下文，worker cwd=shared/ 有权限断点（prod 实证）；source 参数消 WARN。
+        db_state = _update_db(_env)   # 每次先 update（批 124 用户裁定——误报最小）
         sbom_file = _SBOM_FILE   # 覆盖写，留最新一份供诊断（模块常量——测试可注）
         sbom = subprocess.run(
             ["syft", "scan", f"dir:{_site_packages()}", "-o", f"syft-json={sbom_file}",
@@ -387,6 +412,19 @@ def _collect_vulns() -> dict:
             })
         part["findings"] = findings
         part["n_matches"] = len(payload["matches"])
+        part["db"] = db_state   # updated/update-failed（可观测——snapshot 可见）
+        # DB 构建时刻（A 区卡——「漏洞判定的时效边界」）：import.json 的 source URL
+        # 内嵌构建时间戳（_2026-10-14T00:28:57Z_ 段——grype 官方命名约定），比文件
+        # mtime 可靠（迁移/copy 会刷新 mtime，URL 里的才是 DB 真实年龄）
+        try:
+            import re as _re
+            src_url = json.loads(
+                (Path(_GRYPE_DB_DIR) / "6" / "import.json").read_text(encoding="utf-8")
+            ).get("source", "")
+            m = _re.search(r"_((?:19|20)\d{2}-\d{2}-\d{2}T[\d:]+Z)_", src_url)
+            part["db_built_at"] = m.group(1) if m else None
+        except Exception:
+            part["db_built_at"] = None
         # 台账 pip/rpm 域顺带产出（SBOM arts 零额外成本）；type 判源：python→pip，rpm→rpm
         # 台账收 python/rpm/binary 三型（批 124：binary 必须入账——否则列表里
         # 找不到 ffmpeg 这类捆绑原生库，正是用户痛点）；origin 自动推导
@@ -544,16 +582,20 @@ def _upsert_findings(conn, scan_date: date, findings: list[dict]) -> list[dict]:
             "SELECT first_seen, last_seen FROM security_finding "
             "WHERE source='grype' AND pkg=%s AND vuln_id=%s", (f["pkg"], f["vuln_id"]))
         row = cur.fetchone()
+        # last_seen_at=clock_timestamp()（真实时刻，晚于事务开始）——同日复跑重判
+        # 的判据锚（快照 created_at=now()=事务开始，早于它 ⇒ last_seen_at 较新=本轮
+        # 报了；较旧/相等=本轮未报 ⇒ fixed。批 124；date 粒度的同日死结由此解开）
         if row:
             conn.execute(
-                "UPDATE security_finding SET last_seen=%s, fix_version=%s, severity=%s "
+                "UPDATE security_finding SET last_seen=%s, last_seen_at=clock_timestamp(), "
+                "fix_version=%s, severity=%s "
                 "WHERE source='grype' AND pkg=%s AND vuln_id=%s",
                 (scan_date, f.get("fix_version"), f.get("severity"), f["pkg"], f["vuln_id"]))
         else:
             conn.execute(
                 "INSERT INTO security_finding "
-                "(source, pkg, vuln_id, fix_version, severity, first_seen, last_seen) "
-                "VALUES ('grype', %s, %s, %s, %s, %s, %s)",
+                "(source, pkg, vuln_id, fix_version, severity, first_seen, last_seen, last_seen_at) "
+                "VALUES ('grype', %s, %s, %s, %s, %s, %s, clock_timestamp())",
                 (f["pkg"], f["vuln_id"], f.get("fix_version"), f.get("severity"),
                  scan_date, scan_date))
             fresh.append(f)
@@ -612,6 +654,10 @@ def run_security_scan(today: date | None = None) -> dict:
         "headers": _collect_headers(),
     }
     vulns = _collect_vulns()
+    # vulns 分区元数据入 components（A 区 DB 卡消费——快照表无 vulns 独立列，
+    # components.python 键同款先例：分区外挂元数据走相邻 jsonb）
+    parts["components"]["vulns_db"] = {
+        "state": vulns.get("db"), "built_at": vulns.get("db_built_at")}
     status = "degraded" if any(p.get("status") == "degraded" for p in
                                (*parts.values(), vulns)) else "ok"
 
