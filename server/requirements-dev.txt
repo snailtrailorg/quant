@@ -1,8 +1,6 @@
 # 开发依赖（不随 requirements.txt 进生产运行时，独立 venv 安装）
 # 用法：venv/bin/pip install -r requirements-dev.txt
 ruff>=0.9
-# 批 123 退役预告：pip-audit 已被 grype 单源取代（采集器 2026-10-14 重写）——
-# 本行待 prod 首轮 grype 扫描验证后删除（A07 观察口径；先留=回退窗口）。
-# 批 120 旧注：安全态势扫描的漏洞比对工具（采集器 subprocess 调 `sys.executable -m pip_audit`
+# 批 123 已退役（2026-10-15 prod 首轮 grype 扫描绿：status=ok/45 findings 带
+# severity/台账 189 行——观察条件满足即删，回退窗口关闭；退役史见 A07 §二）
 # ——随 venv 存在，不依赖「谁的本机」；部署管道随 release 装进 shared venv）
-pip-audit
