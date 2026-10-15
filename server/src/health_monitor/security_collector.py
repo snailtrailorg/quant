@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import platform
 import subprocess
 import sys
@@ -45,6 +46,11 @@ _LOCK_FILE = Path(__file__).resolve().parents[2] / "requirements.lock"
 
 # grype/syft 二进制（批 123 单源 CVE 扫描——/usr/local/bin，装机走批 123 通道）。
 # 未装机 ⇒ vulns 分区 degraded（单源失败语义：诚实显示，无回退编排）。
+# DB 缓存目录=env 配置项 GRYPE_DB_CACHE_DIR（用户裁定 2026-10-15：DB 是部署产物
+# 非用户数据——放家目录的实害：HOME 环境差异丢缓存/systemd worker 无 HOME 时指向
+# /root/两身份缓存漂移。缺省 shared/grype-db=部署树内与 pg 数据同层，可备份可治理）。
+_GRYPE_DB_DIR = os.environ.get(
+    "GRYPE_DB_CACHE_DIR", "/data/websites/snailtrail.cc/quant/shared/grype-db")
 _GRYPE_TIMEOUT = 420   # syft SBOM(~30s) + grype 首日 DB 下载(106s 实测) + 匹配(~60s) + 余量；
                        # 后续日 DB 已在本地仅增量时间戳检查。任务层 soft_time_limit=600 容纳。
 _VENV_ROOT = Path("/data/websites/snailtrail.cc/quant/shared/venv/lib")   # pip venv 布局 lib/（有的发行版建 lib64 软链同源）
@@ -279,10 +285,10 @@ def _collect_vulns() -> dict:
         if not (shutil.which("grype") and shutil.which("syft")):
             raise RuntimeError("grype/syft 未装机（批 123 装机通道见任务文件 §二.1）")
 
-        # HOME 显式传 quant 家目录：systemd worker 无 HOME=（默认 /root）——grype
-        # 按 HOME 找 DB 缓存，找不到=stderr 报错 stdout 空（2026-10-15 prod 首跑实证：
-        # 手动 sudo -u quant 正常/worker 内失败，根因即此）。env 只覆盖 HOME 不继承余。
-        _env = {**__import__("os").environ, "HOME": "/home/quant"}
+        # DB 缓存显式注入（GRYPE_DB_CACHE_DIR=grype 官方 env）：不再依赖 HOME
+        # 推导——systemd worker 无 HOME=/手动身份各异，两路径各找各缓存的漂移
+        # 一并终结（2026-10-15 用户裁定：DB=部署产物，缺省 shared/grype-db）。
+        _env = {**os.environ, "GRYPE_DB_CACHE_DIR": _GRYPE_DB_DIR}
         sbom = subprocess.run(
             ["syft", "scan", f"dir:{_site_packages()}", "-o", "syft-json"],
             capture_output=True, text=True, timeout=_GRYPE_TIMEOUT, env=_env,

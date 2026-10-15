@@ -29,56 +29,62 @@
     _quant_home: /home/quant
 
   tasks:
-    - name: grype-install —— 本机产物就绪断言（files-grype/grype+syft 缺则拒并给指引）
+    # 产物分发=外部前置（操作机 curl 经代理下载 → 推各环境 /tmp/quant-{grype,syft}.new）：
+    # staging 的 localhost=deploy@127.0.0.1（真 ssh 同机），读不到控制机家目录——
+    # ansible copy 的 src 也走同通道（实际由 controller 推送但权限随 deploy），实测
+    # Permission denied。/tmp 中转=两环境同构（deploy 可读，root install 收尾）。
+    - name: grype-install —— 远端 /tmp 产物就绪断言（缺则拒并给分发指引）
       ansible.builtin.stat:
-        path: "{{ _grype_local_dir }}/{{ item }}"
-      delegate_to: localhost
-      run_once: true
-      register: _local_bin
+        path: "/tmp/quant-{{ item }}.new"
+      register: _remote_bin
       loop: [grype, syft]
-      failed_when: not _local_bin.stat.exists
+      failed_when: not _remote_bin.stat.exists
       changed_when: false
 
-    - name: grype-install —— 推二进制到 /tmp（0644，root install 前中转）
-      ansible.builtin.copy:
-        src: "{{ _grype_local_dir }}/{{ item }}"
-        dest: "/tmp/quant-{{ item }}.new"
-        mode: "0644"
-      loop: [grype, syft]
+    - name: grype-install —— root 装位指引（michael break-glass：deploy 无 /usr/local/bin 写权——staging 实证 Permission denied）
+      ansible.builtin.debug:
+        msg: >-
+          michael root 手工两条（同 wrapper 属主惯例 root:root 755）：
+          install -o root -g root -m 755 /tmp/quant-grype.new /usr/local/bin/grype &&
+          install -o root -g root -m 755 /tmp/quant-syft.new /usr/local/bin/syft
 
-    - name: grype-install —— root 装位 /usr/local/bin（root:root 755——同 wrapper 属主惯例）
-      ansible.builtin.command: "install -o root -g root -m 755 /tmp/quant-{{ item }}.new {{ _tool_dir }}/{{ item }}"
-      loop: [grype, syft]
-      changed_when: true
+    - name: grype-install —— 装位完成探测（michael 手工后重跑本册即过此闸）
+      ansible.builtin.stat:
+        path: "{{ _tool_dir }}/grype"
+      register: _installed
+
+    - name: grype-install —— 未装位提示（首次跑=正常路径，非失败）
+      ansible.builtin.debug:
+        msg: "二进制尚未装位（michael 手工步骤未执行）——装位后重跑本册出终验。"
+      when: not _installed.stat.exists
 
     - name: grype-install —— 版本留痕（装机台账——升级比对用）
       ansible.builtin.command: "{{ _tool_dir }}/{{ item }} version"
       loop: [grype, syft]
       register: _ver
+      when: _installed.stat.exists
       changed_when: false
 
     - name: grype-install —— DB 预拉占位（michael root 手工：sudo -u quant /usr/local/bin/grype db update）
       ansible.builtin.debug:
         msg: >-
           DB 预拉由 michael root 手工执行（一次性，不进 deploy 通道——用户裁定）：
-          sudo -u quant /usr/local/bin/grype db update
-          （落 /home/quant/.cache/grype/db；首跑后此任务可删）
-      async: 600
-      poll: 15
-      register: _dbpull
-      failed_when: _dbpull.rc not in [0, 1] and _dbpull.get('failed') | default(false)
-      changed_when: true
+          sudo -u quant env GRYPE_DB_CACHE_DIR=/data/websites/snailtrail.cc/quant/shared/grype-db \
+            /usr/local/bin/grype db update
+          （DB=部署产物落 shared/grype-db 非 ~/；quant 属主；首跑后此任务可删）
 
-    - name: grype-install —— DB 落位核验（大小>100MB=完整；不足=异常拒过）
+    - name: grype-install —— DB 落位核验（装位+预拉后重跑时验——shared/grype-db 部署树）
       ansible.builtin.stat:
-        path: "{{ _quant_home }}/.cache/grype/db"
+        path: "/data/websites/snailtrail.cc/quant/shared/grype-db"
       register: _dbdir
-      failed_when: _dbdir.stat.exists is not defined or not _dbdir.stat.exists
+      when: _installed.stat.exists
+      failed_when: _dbdir.stat.exists is defined and not _dbdir.stat.exists
       changed_when: false
 
     - name: grype-install —— 装机完成摘要（版本+DB——留 runbook 级日志）
       ansible.builtin.debug:
         msg: >-
-          grype={{ _ver.results[0].stdout_lines | select('match', 'Version') | list | join(' ') }},
-          syft={{ _ver.results[1].stdout_lines | select('match', 'Version') | list | join(' ') }},
-          db={{ _quant_home }}/.cache/grype/db
+          grype={{ (_ver.results[0].stdout_lines | default([])) | select('match', 'Version') | list | join(' ') }},
+          syft={{ (_ver.results[1].stdout_lines | default([])) | select('match', 'Version') | list | join(' ') }},
+          db=/data/websites/snailtrail.cc/quant/shared/grype-db
+      when: _installed.stat.exists
