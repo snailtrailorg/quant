@@ -132,8 +132,8 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "findings": _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger),
         "components": snap["components"],
         "components_ledger": [
-            {"source": r["source"], "name": r["name"],
-             "last_changed": r["last_changed"].isoformat()}
+            {"source": r["source"], "name": r["name"], "version": r["version"],
+             "origin": r["origin"] or "", "last_changed": r["last_changed"].isoformat()}
             for r in ledger_rows],
         "ports": snap["ports"],
         "ssh_cfg": snap["ssh_cfg"],

@@ -1,11 +1,9 @@
 <template>
-  <!-- 批 120 线③：安全态势 Tab（五区布局 A~E，任务文件钉死）。
-       数据两请求：snapshot（默认今日）+ history（30 天）；轮询 5min（每日数据，无需 ws）。
-       批 124 美化（B 档）：A 区四卡化（同 SystemMetricsCards card-grid 形态——wd-20「首屏同构」）；
-       数字走 --font-num；漏洞>0 用 --critical 配警示图标（tokens.css:48 语义色立法）；
-       D 区分层 tag（批 122 暴露面分层的视觉表达）；E 区头部 30 天迷你条形图（复刻
-       sparkline 模式：cssVar 取色+animation:false）。五区布局/StatusTag/TableShell/
-       AI 纯文本不动。 -->
+  <!-- 系统安全 Tab（批 120 建，批 122/123/124 演进）：四区布局 A~D——
+       A 状态卡 / B AI 摘要 / C 漏洞列表 / D 组件列表（原 E 区基线时间线批 124 删）。
+       数据两请求：snapshot（默认今日）+ history（30 天，B 区历史摘要用）；轮询 5min。
+       批 124 体验：C 区严重度前置+去单值来源列；D 区全量组件+来源自解释（origin
+       自动推导）+漏洞数+默认有漏洞视图+搜索；A 区四卡化（首屏同构 wd-20）。 -->
   <div v-if="loadFailed" class="sec-empty">
     <el-alert :type="isNoSnapshot ? 'info' : 'error'" :closable="false">
       {{ isNoSnapshot ? t('secpage.noSnapshot') : t('secpage.loadFailed') }}
@@ -79,12 +77,14 @@
       <div v-else class="sec-empty">{{ t('secpage.noSummary') }}</div>
     </el-card>
 
-    <!-- C 漏洞列表：停留天数降序（后端已排）；已修复灰显沉底；按来源筛选 -->
+    <!-- C 漏洞列表：严重度前置（业界惯例：Severity 最左——一眼见「多严重/什么洞」，
+         包名是定位次要信息）；来源列删（单值时零信息量——筛选器多源才显示）；
+         后端已按 严重度→暴露时长 排序；已修复灰显沉底 -->
     <el-card style="margin-top: var(--sp-3)">
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.vulnList') }}</span>
-          <el-select v-model="srcFilter" clearable size="small" style="width:140px"
+          <el-select v-if="allSources.length > 1" v-model="srcFilter" clearable size="small" style="width:140px"
                      :placeholder="t('secpage.filterBySource')">
             <el-option v-for="s in allSources" :key="s" :label="s" :value="s" />
           </el-select>
@@ -92,8 +92,6 @@
       </template>
       <TableShell :data="filteredFindings" storage-key="security-findings" style="width:100%"
                   :row-class-name="({ row }) => row.fixed ? 'fixed-row' : ''">
-        <el-table-column prop="pkg" :label="t('secpage.pkg')" min-width="140" />
-        <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="160" />
         <el-table-column prop="severity" :label="t('secpage.severity')" min-width="95" sortable
                          :sort-method="(a, b) => sevRank(b.severity) - sevRank(a.severity)">
           <template #default="{ row }">
@@ -101,6 +99,8 @@
             <span v-else class="sev-none">{{ t('secpage.sevUnrated') }}</span>
           </template>
         </el-table-column>
+        <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="170" />
+        <el-table-column prop="pkg" :label="t('secpage.pkg')" min-width="140" />
         <el-table-column prop="fix_version" :label="t('secpage.fixVersion')" min-width="110">
           <template #default="{ row }">{{ row.fix_version || '—' }}</template>
         </el-table-column>
@@ -111,47 +111,43 @@
             <span class="dwell-sub">（{{ t('secpage.found') }} {{ row.dwell_days }}）</span>
           </template>
         </el-table-column>
-        <el-table-column prop="source" :label="t('secpage.source')" min-width="100">
-          <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ row.source }}</el-tag>
-          </template>
-        </el-table-column>
         <el-table-column prop="first_seen" :label="t('secpage.firstSeen')" min-width="110" />
       </TableShell>
     </el-card>
 
-    <!-- D 组件版本表：当前版本 + 距上次变更天数 + 层级 tag（批 122 暴露面分层的视觉表达）+ 备注 -->
+    <!-- D 组件列表（批 124：版本表→列表，全量组件 + 来源自解释 + 漏洞数）。
+         默认视图=有漏洞的（行动导向）；搜索时查全量（信息完备）——业界组件清单惯例：
+         默认聚焦可行动项、搜索兜底完备性。来源列=采集侧从 SBOM locations 自动推导
+         （origin，无需人工备注——「ffmpeg 哪来的」答案在表里）。 -->
     <el-card style="margin-top: var(--sp-3)">
-      <template #header><span>{{ t('secpage.components') }}</span></template>
-      <TableShell :data="componentRows" storage-key="security-components" style="width:100%">
-        <el-table-column prop="name" :label="t('secpage.component')" min-width="130" />
-        <el-table-column prop="version" :label="t('secpage.version')" min-width="220" show-overflow-tooltip />
-        <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="130">
+      <template #header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>{{ t('secpage.components') }}
+            <span class="kpi-sub" style="margin-left: var(--sp-2)">{{ compHint }}</span>
+          </span>
+          <el-input v-model="compFilter" clearable size="small" style="width:200px"
+                    :placeholder="t('secpage.searchComponent')" />
+        </div>
+      </template>
+      <TableShell :data="compRowsShown" storage-key="security-components" style="width:100%">
+        <el-table-column prop="name" :label="t('secpage.component')" min-width="170" />
+        <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="origin" :label="t('secpage.origin')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="vuln_count" :label="t('secpage.vulnCount')" min-width="90"
+                         :sort-method="(a, b) => b.vuln_count - a.vuln_count" sortable>
           <template #default="{ row }">
-            {{ row.last_changed || '—' }}
+            <span v-if="row.vuln_count" class="sev-critical">{{ row.vuln_count }}</span>
+            <span v-else class="sev-none">—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="note" :label="t('common.remark')" min-width="200">
-          <template #default="{ row }">{{ row.note || '—' }}</template>
+        <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="120">
+          <template #default="{ row }">{{ row.last_changed || '—' }}</template>
         </el-table-column>
       </TableShell>
     </el-card>
 
-    <!-- E 基线 diff 时间线：头部 30 天迷你条形图（变更数趋势）+ 逐日折叠明细 -->
-    <el-card style="margin-top: var(--sp-3)">
-      <template #header><span>{{ t('secpage.baselineTimeline') }}</span></template>
-      <VChart v-if="sparkOption" :option="sparkOption" autoresize style="height: 96px" />
-      <el-collapse v-if="baselineDays.length" v-model="expandedDays">
-        <el-collapse-item v-for="d in baselineDays" :key="d.scan_date" :name="d.scan_date">
-          <template #title>
-            <span class="tl-date">{{ d.scan_date }}</span>
-            <el-tag size="small" effect="light" style="margin-left: var(--sp-2)">{{ d.count }}</el-tag>
-          </template>
-          <div v-for="(item, i) in d.items" :key="i" class="tl-item">· {{ item }}</div>
-        </el-collapse-item>
-      </el-collapse>
-      <EmptyState v-else :description="t('secpage.noBaseline')" size="small" />
-    </el-card>
+    <!-- 批 124：原 E 区「基线变更时间线」删除（用户裁定无价值：冷启动无数据、
+         历史只存计数不存明细——基线变化本身已在 A 区卡与告警面覆盖） -->
   </template>
   <div v-else v-loading="true" class="sec-loading" />
 </template>
@@ -159,19 +155,11 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { use } from 'echarts/core'
-import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
-import VChart from 'vue-echarts'
 import { WarningFilled } from '@element-plus/icons-vue'
 import { getSecuritySnapshot, getSecurityHistory } from '../api'
-import { cssVar } from '../utils/cssVar'
 import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
-import EmptyState from './EmptyState.vue'
 
-use([CanvasRenderer, BarChart, GridComponent, TooltipComponent])
 
 const { t } = useI18n()
 const snap = ref(null)
@@ -227,63 +215,32 @@ const filteredFindings = computed(() => {
   return srcFilter.value ? all.filter(f => f.source === srcFilter.value) : all
 })
 
-// D 区：pip 关注包按暴露面分层（公网认证/传输→数据→框架——出事时的关键行优先）；
-// 顶层系统组件在前。距上次变更=history.component_changes 反查最近一次出现日
-const KEY_PIP = [
-  // 公网认证与传输层（攻击面最前——TLS/签名/凭据）
-  'pyjwt', 'bcrypt', 'cryptography', 'uvicorn', 'starlette',
-  // 数据层
-  'psycopg', 'redis',
-  // 框架与任务
-  'fastapi', 'celery',
-  // 策略运行时
-  'vnpy',
-]
 // C 区严重度排序（Critical 最高→Unknown 最低；NULL 最低）
 const _SEV_ORDER = ['critical', 'high', 'medium', 'low', 'negligible', 'unknown']
 const sevRank = s => _SEV_ORDER.indexOf((s || '').toLowerCase())
-const COMPONENT_NOTES = {
-  openssl: 'al8 backport 维护（以 dnf --security 为准）',
-  pango: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',
-  cairo: 'weasyprint PDF 渲染系统依赖（dnf 层，非 pip 可重建）',
-  'wqy-microhei': 'PDF 中文字体（dnf 层）',
-}
-// D 区「上次变更日期」：台账（components_ledger）直读——批 123 终结 30 天窗口反查
-const ledgerMap = computed(() => {
-  const m = {}
-  for (const r of (snap.value?.components_ledger || [])) m[`${r.source}/${r.name}`] = r.last_changed
-  return m
-})
+const compFilter = ref('')
+// 组件全量（台账：pip+rpm+binary+system——批 124 起 binary 也入账，ffmpeg 这类
+// 捆绑原生库由此可见）+ 每组件漏洞数（findings 聚合）
 const componentRows = computed(() => {
-  const comp = snap.value?.components || {}
-  const rows = []
-  for (const k of ['nginx', 'openssl', 'postgres', 'redis', 'python', 'pango', 'cairo', 'wqy-microhei']) {
-    if (comp[k] !== undefined) rows.push({ name: k, version: comp[k], note: COMPONENT_NOTES[k] || '' })
-  }
-  const pip = comp.pip || {}
-  for (const k of KEY_PIP) {
-    if (pip[k]) rows.push({ name: k, version: pip[k], note: '' })
-  }
-  for (const r of rows) {
-    r.last_changed = ledgerMap.value[`system/${r.name}`] || ledgerMap.value[`pip/${r.name}`] || ''
-  }
-  return rows
+  const led = snap.value?.components_ledger || []
+  const vc = {}
+  for (const f of (snap.value?.findings || [])) vc[f.pkg] = (vc[f.pkg] || 0) + 1
+  return led.map(r => ({ ...r, vuln_count: vc[r.name] || 0 }))
 })
+// 默认=有漏洞的（行动导向）；输入搜索=全量匹配（信息完备）
+const compRowsShown = computed(() => {
+  const all = componentRows.value
+  if (compFilter.value) {
+    const q = compFilter.value.toLowerCase()
+    return all.filter(r => (r.name || '').toLowerCase().includes(q))
+  }
+  return all.filter(r => r.vuln_count > 0)
+})
+const compHint = computed(() => compFilter.value
+  ? t('secpage.compMatch', { n: compRowsShown.value.length, total: componentRows.value.length })
+  : t('secpage.compVulnOnly', { n: compRowsShown.value.length, total: componentRows.value.length }))
 
-// E 区：逐日基线变更——count 取 history.baseline_changes；当日明细取 snapshot.baseline_diff
-// （历史日明细采集侧未落快照，从简只展示计数，与任务文件「点击仅展开详情」从简裁定一致）
-const baselineDays = computed(() => {
-  const out = []
-  for (const d of history.value) {
-    const items = []
-    if (d.scan_date === snap.value?.scan_date) {
-      const bd = snap.value.baseline_diff || {}
-      items.push(...(bd.new_ports || []), ...(bd.new_packages || []), ...(bd.cfg_flips || []))
-    }
-    out.push({ scan_date: d.scan_date, count: d.baseline_changes || 0, items })
-  }
-  return out.filter(d => d.count > 0)
-})
+// A 区基线偏差卡（E 区时间线已删——批 124）
 const baselineTotal = computed(() => (snap.value?.baseline_diff
   ? (snap.value.baseline_diff.new_ports?.length || 0)
     + (snap.value.baseline_diff.new_packages?.length || 0)
@@ -293,37 +250,6 @@ const baselineTotal = computed(() => (snap.value?.baseline_diff
 const historySummaries = computed(() =>
   (history.value || []).filter(d => d.scan_date !== snap.value?.scan_date && d.ai_summary_preview))
 
-// E 区头部迷你条形图：30 天逐日基线变更数（含 0 日——空洞=未扫日，非 0 变更）。
-// 复刻 SystemMetricsCards sparkline 约定：cssVar 取实值（canvas 不解析 CSS 变量）、
-// animation:false（轮询瞬切不滚动）、hidden 轴只留极简刻度。有变更日着 warn 色。
-const sparkOption = computed(() => {
-  const days = history.value || []
-  if (!days.length) return null
-  const chrono = [...days].reverse()   // history 新→旧，图要旧→右新
-  const data = chrono.map(d => [d.scan_date, d.baseline_changes || 0])
-  const max = Math.max(1, ...data.map(p => p[1]))
-  return {
-    animation: false,
-    grid: { left: 2, right: 4, top: 6, bottom: 18 },
-    tooltip: {
-      trigger: 'axis', formatter: (ps) => {
-        const p = ps[0]
-        return `${p.name}<br/>${t('secpage.baselineChanges')}: <b>${p.value}</b>`
-      },
-    },
-    xAxis: {
-      type: 'category', data: data.map(p => p[0].slice(5)),   // MM-DD
-      axisLine: { lineStyle: { color: cssVar('--border-weak') } },
-      axisTick: { show: false },
-      axisLabel: { color: cssVar('--text-secondary'), fontSize: 10, hideOverlap: true },
-    },
-    yAxis: { type: 'value', show: false, min: 0, max },
-    series: [{
-      type: 'bar', data: data.map(([d, v]) => ({ value: v, itemStyle: { color: v > 0 ? cssVar('--warn-fill') : cssVar('--el-fill-color-light') } })),
-      barMaxWidth: 10,
-    }],
-  }
-})
 </script>
 
 <style scoped>

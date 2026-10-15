@@ -64,8 +64,8 @@ def _finding_row(source="pip-audit", pkg="requests", vuln="GHSA-1", fix="2.32.0"
 
 
 def _ledger_rows():
-    """批 123 台账行（(source,name,version,last_changed) fetchall）——默认空表账。"""
-    return [("pip", "requests", "2.31.0", date(2026, 9, 1))]
+    """台账行（(source,name,version,origin,last_changed) fetchall——批 124 加 origin）。"""
+    return [("pip", "requests", "2.31.0", "pip 安装", date(2026, 9, 1))]
 
 
 def _prev_row(day=DAY):

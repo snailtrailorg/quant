@@ -552,9 +552,13 @@ class TestRegistration:
         assert "security.baseline_change" in RUNBOOK
         assert "security.vuln_new" in RUNBOOK
 
-    def test_pip_audit_in_requirements_dev(self):
+    def test_pip_audit_retired(self):
+        """批 124 退役守卫：pip-audit 已被 grype 单源取代（prod 首轮绿后退役）——
+        此钉防误加回（若有人重新引入，采集器已无消费者，徒增工具链面）。"""
         from pathlib import Path
-        assert "pip-audit" in Path("requirements-dev.txt").read_text()
+        src = Path("requirements-dev.txt").read_text()
+        assert "pip-audit" not in src.replace("# ", "#")   # 注释里的退役史不算
+        assert "已退役" in src   # 退役注记在位（判定依据可查）
 
 
 class TestBatch120FirstScanFixes:
@@ -640,13 +644,13 @@ class TestComponentLedger:
         fc = FakeConn()
         d1, d2, d3 = "2026-10-01", "2026-10-02", "2026-10-03"
         fc._ver = None
-        _upsert_components(fc, d1, [("pip", "requests", "2.31.0")])   # 新 → INSERT
+        _upsert_components(fc, d1, [("pip", "requests", "2.31.0", "pip 安装")])   # 新 → INSERT
         assert fc.calls[-1][0].startswith("INSERT")
         fc._ver = ("2.31.0",)
-        _upsert_components(fc, d2, [("pip", "requests", "2.31.0")])   # 未变 → 只推 last_seen
+        _upsert_components(fc, d2, [("pip", "requests", "2.31.0", "pip 安装")])   # 未变 → 只推 last_seen/origin
         assert "last_changed=%s" not in fc.calls[-1][0] and "SET last_seen" in fc.calls[-1][0]
         fc._ver = ("2.31.0",)
-        _upsert_components(fc, d3, [("pip", "requests", "2.32.0")])   # 变 → version+last_changed 同步
+        _upsert_components(fc, d3, [("pip", "requests", "2.32.0", "pip 安装")])   # 变 → version+last_changed 同步
         assert "last_changed=%s" in fc.calls[-1][0] and "2.32.0" in fc.calls[-1][1]
 
     def test_ledger_from_sbom(self, tmp_path):
@@ -674,5 +678,5 @@ class TestComponentLedger:
              patch("src.health_monitor.security_collector._SBOM_FILE",
                    Path(sbom_path)):
             part = _collect_vulns()
-        assert part["ledger"] == [("pip", "requests", "2.31.0"),
-                                  ("rpm", "openssl", "1.1.1k")]
+        assert part["ledger"] == [("pip", "requests", "2.31.0", "pip 安装"),
+                                  ("rpm", "openssl", "1.1.1k", "系统 rpm（dnf）")]

@@ -91,14 +91,37 @@ def _degraded(part: dict, reason: str) -> dict:
     return part
 
 
-def _upsert_components(conn, scan_date: date, rows: list[tuple[str, str, str]]) -> None:
-    """组件台账 UPSERT（批 123·security_component——版本变更史一等表）。
+def _component_origin(a_type: str, locations: list | None) -> str:
+    """组件来源自解释（批 124——用户需求「不用问 AI ffmpeg 哪来的」）。
 
-    rows=[(source, name, version)]；语义（任务文件 §二.3）：
-    新组件 → 三日同值入库；版本没变 → 只推 last_seen；变了 → version+last_changed 同步。
-    单行失败跳过（台账不炸扫描）。
+    从 syft artifact type+locations **自动推导**（不手工备注——会烂）：
+    python→pip 安装 / rpm→系统 rpm（dnf）/ binary→<宿主包> 捆绑（路径首段：扫
+    site-packages 时 /PySide6/Qt/lib/libavcodec.so ⇒ 'PySide6 捆绑'）/
+    其余→原生库（未识别）。单一真源（DB 只存结果）。
     """
-    for source, name, version in rows:
+    if a_type == "python":
+        return "pip 安装"
+    if a_type == "rpm":
+        return "系统 rpm（dnf）"
+    if a_type == "binary":
+        for loc in (locations or []):
+            path = (loc or {}).get("path") or ""
+            seg = [s for s in path.split("/") if s]
+            if seg:                       # 扫 dir=site-packages ⇒ 首段=宿主目录名
+                return f"{seg[0]} 捆绑"
+        return "原生库（来源未识别）"
+    return "原生库（来源未识别）"
+
+
+def _upsert_components(conn, scan_date: date,
+                       rows: list[tuple[str, str, str, str]]) -> None:
+    """组件台账 UPSERT（批 123/124·security_component——版本变更史一等表）。
+
+    rows=[(source, name, version, origin)]；语义（任务文件 §二.3）：
+    新组件 → 三日同值入库；版本没变 → 只推 last_seen/origin 刷新；变了 →
+    version+last_changed 同步。单行失败跳过（台账不炸扫描）。
+    """
+    for source, name, version, origin in rows:
         try:
             cur = conn.execute(
                 "SELECT version FROM security_component WHERE source=%s AND name=%s",
@@ -107,19 +130,20 @@ def _upsert_components(conn, scan_date: date, rows: list[tuple[str, str, str]]) 
             if row is None:
                 conn.execute(
                     "INSERT INTO security_component "
-                    "(source, name, version, first_seen, last_changed, last_seen) "
-                    "VALUES (%s,%s,%s,%s,%s,%s)",
-                    (source, name, version, scan_date, scan_date, scan_date))
+                    "(source, name, version, origin, first_seen, last_changed, last_seen) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (source, name, version, origin, scan_date, scan_date, scan_date))
             elif row[0] != version:
                 conn.execute(
-                    "UPDATE security_component SET version=%s, last_changed=%s, last_seen=%s "
+                    "UPDATE security_component "
+                    "SET version=%s, last_changed=%s, last_seen=%s, origin=%s "
                     "WHERE source=%s AND name=%s",
-                    (version, scan_date, scan_date, source, name))
+                    (version, scan_date, scan_date, origin, source, name))
             else:
                 conn.execute(
-                    "UPDATE security_component SET last_seen=%s "
+                    "UPDATE security_component SET last_seen=%s, origin=%s "
                     "WHERE source=%s AND name=%s",
-                    (scan_date, source, name))
+                    (scan_date, origin, source, name))
         except Exception as e:
             logger.warning("台账 UPSERT 失败 %s/%s（跳过）: %s", source, name, e)
 
@@ -364,13 +388,18 @@ def _collect_vulns() -> dict:
         part["findings"] = findings
         part["n_matches"] = len(payload["matches"])
         # 台账 pip/rpm 域顺带产出（SBOM arts 零额外成本）；type 判源：python→pip，rpm→rpm
-        ledger: list[tuple[str, str, str]] = []
+        # 台账收 python/rpm/binary 三型（批 124：binary 必须入账——否则列表里
+        # 找不到 ffmpeg 这类捆绑原生库，正是用户痛点）；origin 自动推导
+        ledger: list[tuple[str, str, str, str]] = []
         for art in sbom_arts:
             a_type = (art.get("type") or "").lower()
-            if a_type not in ("python", "rpm"):
+            if a_type not in ("python", "rpm", "binary"):
                 continue
-            src = "pip" if a_type == "python" else "rpm"
-            ledger.append((src, (art.get("name") or "").lower(), str(art.get("version") or "")))
+            src = {"python": "pip", "rpm": "rpm", "binary": "binary"}[a_type]
+            ledger.append((
+                src, (art.get("name") or "").lower(), str(art.get("version") or ""),
+                _component_origin(a_type, art.get("locations")),
+            ))
         part["ledger"] = ledger
     except subprocess.TimeoutExpired:
         logger.warning("grype 链超时 >%ss（DB 下载/网络？）", _GRYPE_TIMEOUT)
@@ -607,7 +636,7 @@ def run_security_scan(today: date | None = None) -> dict:
         # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）。
         # 排除 "pip"（大 dict 非版本）与 "status"（分区标记非组件——盲审 A/B 同发现伪组件）
         sys_rows = [
-            ("system", k, str(v)) for k, v in parts["components"].items()
+            ("system", k, str(v), "系统组件") for k, v in parts["components"].items()
             if k not in ("pip", "status") and v
         ]
         _upsert_components(conn, today, sys_rows)
