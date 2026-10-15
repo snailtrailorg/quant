@@ -68,13 +68,16 @@
     - name: grype-install —— DB 预拉占位（michael root 手工：sudo -u quant /usr/local/bin/grype db update）
       ansible.builtin.debug:
         msg: >-
-          DB 就位已由 michael 完成（2026-10-15 两环境：~/ 迁移至 shared/grype-db——
-          3.1GB 纯文件搬移非重下载，grype DB 自包含无绝对路径内嵌）。今后 DB 重建
-          （目录损坏等）才需：sudo -u quant env \
-          GRYPE_DB_CACHE_DIR=/data/websites/snailtrail.cc/quant/shared/grype-db \
-          /usr/local/bin/grype db update
+          DB 就位已由 michael 完成（2026-10-15 两环境）。迁移/重建正确命令（注意
+          剥 db/ 层——GRYPE_DB_CACHE_DIR 是 DB 根语义）：
+            sudo bash -c 'cd .../shared && mv grype-db/db grype-db.tmp && rmdir grype-db
+              && mv grype-db.tmp grype-db && chown -R quant:quant grype-db'
+          验证：sudo -u quant env GRYPE_DB_CACHE_DIR=.../shared/grype-db grype db status
 
-    - name: grype-install —— DB 落位核验（装位+预拉后重跑时验——shared/grype-db 部署树）
+    # DB 语义坑（2026-10-15 实测）：GRYPE_DB_CACHE_DIR 名为 cache 实为 **DB 根**——
+    # 显式设置时 grype 不再自动拼 db/ 层，直找 <值>/<schema>/vulnerability.db。
+    # 故 shared/grype-db 下应直接是 6/vulnerability.db（迁移时 db/ 层要剥掉）。
+    - name: grype-install —— DB 落位核验（装位+预拉后重跑时验——shared/grype-db=<DB根>/）
       ansible.builtin.stat:
         path: "/data/websites/snailtrail.cc/quant/shared/grype-db"
       register: _dbdir

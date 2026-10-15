@@ -29,6 +29,9 @@ VAR = DEPLOY_ROOT / "var"
 # shared/ 子路径（运行时与跨版本数据）
 SHARED_SECURITY = SHARED / "security"
 VENV_LIB = SHARED / "venv" / "lib"
+# grype DB 根（注意：GRYPE_DB_CACHE_DIR 名为 cache 实为 DB 根——显式设置时
+# grype 直找 <值>/<schema>/，不再自动拼 db/。本目录下应直接是 6/vulnerability.db。
+# 2026-10-15 实测：设成上一层会导致 invalid）
 GRYPE_DB = SHARED / "grype-db"
 STATIC_AVATARS = SHARED / "static" / "avatars"
 
