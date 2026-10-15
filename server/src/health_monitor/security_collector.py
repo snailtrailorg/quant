@@ -23,11 +23,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from src.data_platform.paths import GRYPE_DB, SHARED_SECURITY, VENV_LIB
+
 logger = logging.getLogger("health_monitor.security")
 
 # 部署管道（release.yml）落的只读数据文件；服务器路径=deploy_root/shared/security/
 # （inventory group_vars 各环境 deploy_root 同构），dev 机无此文件 ⇒ 该分区 degraded
-DNF_SECURITY_FILE = Path("/data/websites/snailtrail.cc/quant/shared/security/dnf-security.json")
+DNF_SECURITY_FILE = SHARED_SECURITY / "dnf-security.json"
 
 _CMD_TIMEOUT = 30          # 版本/端口类命令超时（秒）
 
@@ -46,14 +48,12 @@ _LOCK_FILE = Path(__file__).resolve().parents[2] / "requirements.lock"
 
 # grype/syft 二进制（批 123 单源 CVE 扫描——/usr/local/bin，装机走批 123 通道）。
 # 未装机 ⇒ vulns 分区 degraded（单源失败语义：诚实显示，无回退编排）。
-# DB 缓存目录=env 配置项 GRYPE_DB_CACHE_DIR（用户裁定 2026-10-15：DB 是部署产物
-# 非用户数据——放家目录的实害：HOME 环境差异丢缓存/systemd worker 无 HOME 时指向
-# /root/两身份缓存漂移。缺省 shared/grype-db=部署树内与 pg 数据同层，可备份可治理）。
-_GRYPE_DB_DIR = os.environ.get(
-    "GRYPE_DB_CACHE_DIR", "/data/websites/snailtrail.cc/quant/shared/grype-db")
+# DB 缓存=部署树派生（paths.GRYPE_DB=shared/grype-db——用户裁定 2026-10-15；
+# 演进史与设计依据见 paths.py 模块 docstring）
+_GRYPE_DB_DIR = str(GRYPE_DB)
 _GRYPE_TIMEOUT = 420   # syft SBOM(~30s) + grype 首日 DB 下载(106s 实测) + 匹配(~60s) + 余量；
                        # 后续日 DB 已在本地仅增量时间戳检查。任务层 soft_time_limit=600 容纳。
-_VENV_ROOT = Path("/data/websites/snailtrail.cc/quant/shared/venv/lib")   # pip venv 布局 lib/（有的发行版建 lib64 软链同源）
+_VENV_ROOT = VENV_LIB   # pip venv 布局 lib/（有的发行版建 lib64 软链同源）
 
 
 def _site_packages() -> Path:
@@ -188,7 +188,7 @@ def _parse_sshd_config(text: str) -> dict:
 _SSH_CONFIG_PATH = Path("/etc/ssh/sshd_config")
 # sshd_config 直接读取可能 600 root（收紧后 quant 不可读）——部署管道 wrapper 落的
 # 只读快照兜底（同 dnf-security 模式）；两者都不可得 ⇒ degraded 明示。
-_SSH_SNAPSHOT_PATH = Path("/data/websites/snailtrail.cc/quant/shared/security/sshd-config.txt")
+_SSH_SNAPSHOT_PATH = SHARED_SECURITY / "sshd-config.txt"
 
 
 def _collect_ssh() -> dict:

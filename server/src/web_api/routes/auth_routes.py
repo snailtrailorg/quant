@@ -11,6 +11,7 @@ from pathlib import Path as _Path
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, Header, Query, Request
 
 from src.data_platform.db import get_conn
+from src.data_platform.paths import STATIC_AVATARS
 from src.email_service import send_activation_email, send_email_change_email, send_invite_email, send_password_reset_email
 from src.data_platform.jsonb import jsonb
 
@@ -55,7 +56,7 @@ router = APIRouter(tags=["auth_routes"])
 # 2026-08-26 3b 修正：运行时数据位=shared 层（与 main.py 同源同默认；版本树内逐版丢失且 quant 无权写）。
 # 开发机回退：shared 位不存在（无 /data）时用代码树相对位，与 main.py 回退链同构。
 _AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR",
-                                   "/data/websites/snailtrail.cc/quant/shared/static/avatars"))
+                                   str(STATIC_AVATARS)))
 # 2026-08-27 双盲审 P1-1：Path.is_dir() 遇 EACCES 会 raise（非返回 False）——staging 建成后
 # 开发机 import 即崩（批23 前的 log_analyze 测试实锤）。对齐 main.py 回退机制：except OSError 判回退。
 try:

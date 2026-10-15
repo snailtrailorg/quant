@@ -57,8 +57,8 @@ from fastapi.staticfiles import StaticFiles as _StaticFiles
 
 from .routes.events import router as events_router  # 批14 SSE（import 在 include 前——顺序无碍）
 
-_AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR",
-                                   "/data/websites/snailtrail.cc/quant/shared/static/avatars"))
+from src.data_platform.paths import STATIC_AVATARS   # 部署树派生（批 123：QUANT_DEPLOY_ROOT 单配置）
+_AVATAR_DIR = _Path(os.environ.get("AVATAR_DIR", str(STATIC_AVATARS)))
 try:
     _AVATAR_DIR.mkdir(parents=True, exist_ok=True)   # 服务器：shared 属 quant，服务/冒烟（均 quant）有权
 except PermissionError:
