@@ -51,6 +51,9 @@ _LOCK_FILE = Path(__file__).resolve().parents[2] / "requirements.lock"
 # DB 缓存=部署树派生（paths.GRYPE_DB=shared/grype-db——用户裁定 2026-10-15；
 # 演进史与设计依据见 paths.py 模块 docstring）
 _GRYPE_DB_DIR = str(GRYPE_DB)
+
+# SBOM 中转文件（syft → grype 官方文件式；/tmp=worker/手工两态均可写）
+_SBOM_FILE = Path("/tmp/quant-sbom.json")
 _GRYPE_TIMEOUT = 420   # syft SBOM(~30s) + grype 首日 DB 下载(106s 实测) + 匹配(~60s) + 余量；
                        # 后续日 DB 已在本地仅增量时间戳检查。任务层 soft_time_limit=600 容纳。
 _VENV_ROOT = VENV_LIB   # pip venv 布局 lib/（有的发行版建 lib64 软链同源）
@@ -289,31 +292,44 @@ def _collect_vulns() -> dict:
         # 推导——systemd worker 无 HOME=/手动身份各异，两路径各找各缓存的漂移
         # 一并终结（2026-10-15 用户裁定：DB=部署产物，缺省 shared/grype-db）。
         _env = {**os.environ, "GRYPE_DB_CACHE_DIR": _GRYPE_DB_DIR}
-        # cwd=/tmp 显式：syft 启动要逐级 stat 祖先目录推断 chroot 上下文——
-        # worker 的 cwd=shared/ 祖先链对 quant 有权限断点（prod 实证 2026-10-15：
-        # "could not get current working directory: stat .: permission denied"，
-        # 同命令在 /tmp 下 rc=0）。--source-name/version=syft 官方建议（消除
-        # 从路径推断 ID 的 WARN 与 chroot 推断依赖）。
+        # 调用规范（grype/syft 官方 CLI reference，2026-10-15 读档重写——不再试错）：
+        # ① SBOM 传递官方仅两式：`grype sbom:<file>` 或 `syft…| grype`（无参）；
+        #    原 `sbom:STDIN` 不在规范内。选**文件式**（33MB 不经 python 中转，
+        #    失败可留档诊断）——syft `-o syft-json=<path>` 官方语法。
+        # ② rc 语义：不设 --fail-on 时**有洞也是 rc=0**，rc≠0=错误
+        #    （原实现按 pip-audit 惯性把 rc=1 当"有洞"，吞掉真错）。
+        # ③ alias 归一走官方 `--by-cve`（orient by CVE when possible）——替代
+        #    手工扫 aliases。
+        # ④ cwd=/tmp + --source-name/version：syft 要逐级 stat 祖先目录推断 chroot
+        #    上下文，worker cwd=shared/ 有权限断点（prod 实证）；source 参数消 WARN。
+        sbom_file = _SBOM_FILE   # 覆盖写，留最新一份供诊断（模块常量——测试可注）
         sbom = subprocess.run(
-            ["syft", "scan", f"dir:{_site_packages()}", "-o", "syft-json",
+            ["syft", "scan", f"dir:{_site_packages()}", "-o", f"syft-json={sbom_file}",
              "--source-name", "quant-venv", "--source-version", "1"],
             capture_output=True, text=True, timeout=_GRYPE_TIMEOUT, env=_env,
             cwd="/tmp",
         )
         if sbom.returncode != 0:
-            raise RuntimeError(f"syft 退出码 {sbom.returncode}: {sbom.stderr.strip()[:150]}")
-        sbom_arts = (json.loads(sbom.stdout).get("artifacts") or []) if sbom.stdout.strip().startswith("{") else []
+            raise RuntimeError(f"syft 退出码 {sbom.returncode}: {sbom.stderr.strip()[:200]}")
+        sbom_arts = (json.loads(sbom_file.read_text(encoding="utf-8")).get("artifacts") or [])
 
         out = subprocess.run(
-            ["grype", "sbom:STDIN", "-o", "json", "--quiet"],
-            input=sbom.stdout, capture_output=True, text=True, timeout=_GRYPE_TIMEOUT,
-            env=_env, cwd="/tmp",   # 同 syft：避开 worker cwd 权限断点
+            ["grype", f"sbom:{sbom_file}", "-o", "json", "-q", "--by-cve"],
+            capture_output=True, text=True, timeout=_GRYPE_TIMEOUT, env=_env, cwd="/tmp",
         )
-        if out.returncode not in (0, 1):   # grype：0=无洞 1=有洞，均正常出 JSON
-            raise RuntimeError(f"grype 退出码 {out.returncode}: {out.stderr.strip()[:150]}")
-        payload = json.loads(out.stdout) if out.stdout.strip().startswith("{") else None
-        if not payload or "matches" not in payload:
-            raise RuntimeError("grype 输出无 JSON 主体")
+        if out.returncode != 0:
+            raise RuntimeError(
+                f"grype 退出码 {out.returncode}: {out.stderr.strip()[:200]}")
+        try:
+            payload = json.loads(out.stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"grype 输出非 JSON（stdout {len(out.stdout)}B，stderr: "
+                f"{out.stderr.strip()[:200]}）: {e}") from e
+        if "matches" not in payload:
+            raise RuntimeError(
+                f"grype JSON 无 matches 键（keys={list(payload)[:5]}，"
+                f"stderr: {out.stderr.strip()[:150]}）")
 
         findings = []
         seen: set[tuple[str, str]] = set()
@@ -322,11 +338,9 @@ def _collect_vulns() -> dict:
             pkg = (m.get("artifact") or {}).get("name", "").lower()
             if not pkg or not v.get("id"):
                 continue
-            # alias 归一：CVE 号优先（v6 DB 实测主 id 已是 CVE 号 42/42——aliases
-            # 兜底留零成本防御：非 CVE namespace 主键时归一，跨日键稳定）
-            cve = next((a for a in (v.get("aliases") or [])
-                        if a.upper().startswith("CVE-")), None)
-            vuln_id = cve or v["id"]
+            # vuln_id：`--by-cve` 已保证 CVE 优先（官方 orient 语义——非 CVE 才落
+            # 原生 ID），无需手工扫 aliases（原实现重复造轮子，2026-10-15 删）
+            vuln_id = v["id"]
             key = (pkg, vuln_id)
             if key in seen:
                 continue

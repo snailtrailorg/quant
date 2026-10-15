@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib
 import inspect
 from datetime import date
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
@@ -91,27 +92,36 @@ class TestParsers:
         part = _collect_dnf(f)
         assert part["status"] == "ok" and part["updates"][0]["name"] == "openssl"
 
-    def test_vulns_parses_json(self):
-        """grype 输出解析（批 123 单源）：matches → findings（alias 归一 CVE 优先/
+    def test_vulns_parses_json(self, tmp_path):
+        sbom_path = tmp_path / "sbom.json"
+        """grype 输出解析（批 123 单源）：matches → findings（--by-cve 后 id 即 CVE/
         severity 原生/pkg lowercase/同键去重）。"""
         from src.health_monitor.security_collector import _collect_vulns
+        # --by-cve 形态：grype 已把 id oriented 成 CVE（两条同 CVE ⇒ 去重成一条）
         grype_json = ('{"matches": ['
-                      '{"vulnerability": {"id": "GHSA-1", "aliases": ["CVE-2024-1"],'
+                      '{"vulnerability": {"id": "CVE-2024-1",'
                       ' "severity": "High", "fix": {"versions": ["2.32.0"]}, "description": "D"},'
                       ' "artifact": {"name": "Requests"}},'
-                      '{"vulnerability": {"id": "CVE-2024-1", "aliases": [],'
-                      ' "severity": "High", "fix": {"versions": []}, "description": "dup-of-above"},'
+                      '{"vulnerability": {"id": "CVE-2024-1",'
+                      ' "severity": "High", "fix": {"versions": []}, "description": "dup"},'
                       ' "artifact": {"name": "requests"}}]}')
-        sbom_fake = MagicMock(returncode=0, stdout="{}")
-        grype_fake = MagicMock(returncode=1, stdout=grype_json, stderr="")
+        sbom_fake = MagicMock(returncode=0, stdout="", stderr="")
+        grype_fake = MagicMock(returncode=0, stdout=grype_json, stderr="")
+        sbom_json_src = '{"artifacts": []}'   # syft 写文件内容（本用例无需 artifacts）
 
         def _route(cmd, **kw):
-            return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
+            if cmd and cmd[0] == "syft":
+                # 新形态：syft -o syft-json=<path> 写文件（mock 就位）
+                Path(sbom_path).write_text(sbom_json_src, encoding="utf-8")
+                return sbom_fake
+            return grype_fake
 
         with patch("subprocess.run", side_effect=_route), \
              patch("shutil.which", return_value="/usr/local/bin/grype"), \
              patch("src.health_monitor.security_collector._site_packages",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("src.health_monitor.security_collector._SBOM_FILE",
+                   Path(sbom_path)):
             part = _collect_vulns()
         assert part["status"] == "ok"
         # CVE 号优先归一后两条 match 去重为一条；pkg lowercase；severity 原生透传
@@ -120,7 +130,8 @@ class TestParsers:
                                      "description": "D"}]
         assert part["n_matches"] == 2
 
-    def test_vulns_rc1_with_vulns_is_ok_and_lands(self):
+    def test_vulns_rc1_with_vulns_is_ok_and_lands(self, tmp_path):
+        sbom_path = tmp_path / "sbom.json"
         """**反证钉（批 123 grype 版）**：grype rc=1+matches =「有洞」正常语义 ⇒ 正常解析、
         findings 落库。若把 rc≠0 一律当失败 ⇒ 有洞日恒 degraded、告警永不触发
         （红线原版是 pip-audit cryptography 实测，单源化后语义平移到 grype）。
@@ -131,37 +142,70 @@ class TestParsers:
                       '{"vulnerability": {"id": "GHSA-abc", "aliases": [],'
                       ' "severity": "Critical", "fix": {"versions": ["3.4.0"]}, "description": "bad"},'
                       ' "artifact": {"name": "cryptography"}}]}')
-        sbom_fake = MagicMock(returncode=0, stdout="{}")
-        grype_fake = MagicMock(returncode=1, stdout=grype_json, stderr="")
+        sbom_fake = MagicMock(returncode=0, stdout="", stderr="")
+        grype_fake = MagicMock(returncode=0, stdout=grype_json, stderr="")
+        sbom_json_src = '{"artifacts": []}'   # syft 写文件内容（本用例无需 artifacts）
 
         def _route(cmd, **kw):
-            return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
+            if cmd and cmd[0] == "syft":
+                # 新形态：syft -o syft-json=<path> 写文件（mock 就位）
+                Path(sbom_path).write_text(sbom_json_src, encoding="utf-8")
+                return sbom_fake
+            return grype_fake
 
         with patch("subprocess.run", side_effect=_route), \
              patch("shutil.which", return_value="/usr/local/bin/grype"), \
              patch("src.health_monitor.security_collector._site_packages",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("src.health_monitor.security_collector._SBOM_FILE",
+                   Path(sbom_path)):
             part = _collect_vulns()
         assert part["status"] == "ok"
         assert part["findings"] == [{"pkg": "cryptography", "vuln_id": "GHSA-abc",
                                      "severity": "Critical", "fix_version": "3.4.0",
                                      "description": "bad"}]
 
-    def test_vulns_degraded_on_rc2(self):
-        """rc≥2 才是真失败（用法错/内部错）⇒ degraded（语义演进：旧用例钉 rc=1，步 4
-        P0-1 后改钉 rc=2——rc=1 已是合法「有漏洞」态，见上一用例）。"""
+    def test_vulns_degraded_on_grype_error(self, tmp_path):
+        """grype rc≠0 = 错误 ⇒ degraded（官方语义，2026-10-15 读档修正：不设
+        --fail-on 时**有洞也 rc=0**，故 rc≠0 即失败——旧实现按 pip-audit 惯性
+        把 rc=1 当「有洞」会吞真错，见 collector 调用规范注释）。"""
+        sbom_path = tmp_path / "sbom.json"
         from src.health_monitor.security_collector import _collect_vulns
-        fake = MagicMock(returncode=2, stdout="", stderr="usage error")
-        with patch("subprocess.run", return_value=fake):
+
+        def _route(cmd, **kw):
+            if cmd and cmd[0] == "syft":
+                Path(sbom_path).write_text('{"artifacts": []}', encoding="utf-8")
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=1, stdout="", stderr="vulnerability db not found")
+
+        with patch("subprocess.run", side_effect=_route), \
+             patch("shutil.which", return_value="/usr/local/bin/grype"), \
+             patch("src.health_monitor.security_collector._site_packages",
+                   return_value=MagicMock()), \
+             patch("src.health_monitor.security_collector._SBOM_FILE",
+                   Path(sbom_path)):
             part = _collect_vulns()
         assert part["status"] == "degraded"
         assert "findings" not in part   # degraded 不产空表（绝不静默空表红线）
+        assert "db not found" in part["degraded_reason"]   # 真错已透出（旧实现会吞）
 
-    def test_vulns_degraded_on_rc1_without_json(self):
-        """rc=1 但 stdout 无 JSON 主体 ⇒ degraded（rc 合法≠输出可用，双层校验）。"""
+    def test_vulns_degraded_on_non_json_output(self, tmp_path):
+        """grype rc=0 但输出非 JSON（异常形态）⇒ degraded（双保险：rc 合法≠输出可用）。"""
+        sbom_path = tmp_path / "sbom.json"
         from src.health_monitor.security_collector import _collect_vulns
-        fake = MagicMock(returncode=1, stdout="", stderr="OSV unreachable")
-        with patch("subprocess.run", return_value=fake):
+
+        def _route(cmd, **kw):
+            if cmd and cmd[0] == "syft":
+                Path(sbom_path).write_text('{"artifacts": []}', encoding="utf-8")
+                return MagicMock(returncode=0, stdout="", stderr="")
+            return MagicMock(returncode=0, stdout="not json at all", stderr="")
+
+        with patch("subprocess.run", side_effect=_route), \
+             patch("shutil.which", return_value="/usr/local/bin/grype"), \
+             patch("src.health_monitor.security_collector._site_packages",
+                   return_value=MagicMock()), \
+             patch("src.health_monitor.security_collector._SBOM_FILE",
+                   Path(sbom_path)):
             part = _collect_vulns()
         assert part["status"] == "degraded"
         assert "findings" not in part
@@ -605,23 +649,30 @@ class TestComponentLedger:
         _upsert_components(fc, d3, [("pip", "requests", "2.32.0")])   # 变 → version+last_changed 同步
         assert "last_changed=%s" in fc.calls[-1][0] and "2.32.0" in fc.calls[-1][1]
 
-    def test_ledger_from_sbom(self):
+    def test_ledger_from_sbom(self, tmp_path):
+        sbom_path = tmp_path / "sbom.json"
         """grype 链 ok 时 ledger 顺带产出（pip/rpm 分型+lowercase）。"""
         from src.health_monitor.security_collector import _collect_vulns
         sbom_json = ('{"artifacts": ['
                      '{"type": "python", "name": "Requests", "version": "2.31.0"},'
                      '{"type": "rpm", "name": "openssl", "version": "1.1.1k"}]}')
         grype_json = '{"matches": []}'
-        sbom_fake = MagicMock(returncode=0, stdout=sbom_json)
+        sbom_fake = MagicMock(returncode=0, stdout="", stderr="")
         grype_fake = MagicMock(returncode=0, stdout=grype_json, stderr="")
 
         def _route(cmd, **kw):
-            return sbom_fake if cmd and cmd[0] == "syft" else grype_fake
+            if cmd and cmd[0] == "syft":
+                # 新形态：syft -o syft-json=<path> 写文件（mock 就位）
+                Path(sbom_path).write_text(sbom_json, encoding="utf-8")
+                return sbom_fake
+            return grype_fake
 
         with patch("subprocess.run", side_effect=_route), \
              patch("shutil.which", return_value="/usr/local/bin/grype"), \
              patch("src.health_monitor.security_collector._site_packages",
-                   return_value=MagicMock()):
+                   return_value=MagicMock()), \
+             patch("src.health_monitor.security_collector._SBOM_FILE",
+                   Path(sbom_path)):
             part = _collect_vulns()
         assert part["ledger"] == [("pip", "requests", "2.31.0"),
                                   ("rpm", "openssl", "1.1.1k")]
