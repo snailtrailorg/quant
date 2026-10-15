@@ -459,6 +459,12 @@
           ansible.builtin.command: "{{ quant_pip_cmd }} install {{ release_id }}"
           when: req_changed | bool
 
+        - name: 阶段 5 —— venv 工具链升级（pip/setuptools/wheel；修 CVE——批 124）
+          ansible.builtin.command: "{{ quant_pip_cmd }} upgrade-tools"
+          failed_when: false   # 工具链升级失败不阻断发布（网络抖动；幂等下次补）
+          changed_when: false
+          when: server_changed | bool   # 纯前端发布不动 venv
+
         - name: 阶段 5 —— 迁移实跑（quant-alembic-wrapper upgrade head）
           ansible.builtin.command: "{{ quant_alembic_cmd }} {{ release_id }}"
           changed_when: true

@@ -33,7 +33,7 @@ _A06 = _REPO / "docs" / "architecture" / "A06-部署管道架构.md"
 # 抽核行（强断言样本）: (输入名片段, 消费者 path 尾段, 行锚, 该行±50 行窗口必含词)
 _STRONG_SPOT_CHECKS = [
     ("requirements.lock", "quant-pip-wrapper", 51, "requirements.lock"),
-    ("requirements-dev", "quant-pip-wrapper", 61, "requirements-dev"),
+    ("requirements-dev", "quant-pip-wrapper", 69, "requirements-dev"),   # 批 124 校准（upgrade-tools 分支加入后行移）
     ("deploy_slices", "release.yml", 162, "deploy_slices"),
     ("sudoers", "bootstrap.yml", 41, "sudoers-quant-deploy.j2"),
     ("deploy_hub_md_providers", "release.yml", 243, "deploy_hub_md_providers"),

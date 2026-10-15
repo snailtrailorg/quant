@@ -157,3 +157,30 @@ class TestSectriggerGuard:
     def test_inventory_three_envs(self):
         for env in ("quant-prod", "quant-staging", "sandbox"):
             assert "quant_sectrigger_cmd" in _read(_REPO / "deploy" / "inventory" / "group_vars" / f"{env}.yml")
+
+
+class TestPipWrapperUpgradeTools:
+    """批 124 · venv 工具链升级通道守卫（setuptools 旧版 3 CVE 的自动化修复）。"""
+
+    _PIP_WRAPPER = _REPO / "deploy" / "wrappers" / "quant-pip-wrapper"
+
+    def test_wrapper_has_subcommand(self):
+        """wrapper 须含 upgrade-tools 分支（严参白名单内）+ 升级集明确。"""
+        src = _read(self._PIP_WRAPPER)
+        assert "upgrade-tools)" in src
+        assert "install -U --upgrade-strategy only-if-needed pip setuptools wheel" in src
+        assert "upgrade-tools 不收参数" in src   # 严参校验（同 freeze）
+
+    def test_release_calls_upgrade_tools(self):
+        """release.yml 阶段 5 须调 upgrade-tools（server_changed 门 + fail-soft）。"""
+        src = _read(_RELEASE)
+        assert "quant_pip_cmd }} upgrade-tools" in src
+        # 失败不阻断发布（工具链升级非发布阻塞项）
+        idx = src.index("upgrade-tools")
+        seg = src[max(0, idx - 400):idx + 400]
+        assert "failed_when: false" in seg
+
+    def test_in_sudoers_whitelist(self):
+        """quant-pip-wrapper 已在 QUANT_DEPLOY_QUANT 白名单（复用通道——零新权限面）。"""
+        sudoers = _read(_REPO / "deploy" / "templates" / "sudoers-quant-deploy.j2")
+        assert "/usr/local/sbin/quant-pip-wrapper" in sudoers
