@@ -767,6 +767,11 @@ def run_security_scan(today: date | None = None) -> dict:
             # 台账 pip/rpm 域（SBOM 顺带产出——grype 链 ok 才有）
             _upsert_components(conn, today, vulns.get("ledger") or [])
 
+        # 台账噪声自愈（批 124）：清 binary+UNKNOWN 存量（syft 误识别 launcher——
+        # 入库过滤防新增；此处 DELETE 治旧——规则变更自动收敛存量）
+        conn.execute(
+            "DELETE FROM security_component WHERE source='binary' AND version='UNKNOWN'")
+
         # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）。
         # 排除 "pip"（大 dict 非版本）与 "status"（分区标记非组件——盲审 A/B 同发现伪组件）
         sys_rows = [
