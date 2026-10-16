@@ -31,7 +31,7 @@
             <span v-for="n in srcCounts" :key="n.source" class="src-dot-item">
               <span :class="['dot', srcDotClass(n.source)]" />{{ n.source }} {{ n.count }}
             </span>
-            <span v-if="!srcCounts.length" class="kpi-sub">{{ t('secpage.noVuln') }}</span>
+            <span v-if="!srcCounts.length" class="kpi-sub">{{ t('secpage.noVulnOpt') }}</span>
           </div>
         </el-card>
         <el-card shadow="never" class="metric-card">
@@ -241,7 +241,7 @@ const compFilterGroups = computed(() => {
     { key: 'source', label: t('secpage.originCol'), options: srcs.map(s => ({ value: s, label: s })) },
     { key: 'vuln', label: t('secpage.vulnState'), options: [
       { value: 'yes', label: t('secpage.hasVuln') },
-      { value: 'no', label: t('secpage.noVuln') },
+      { value: 'no', label: t('secpage.noVulnOpt') },
     ] },
   ]
 })
