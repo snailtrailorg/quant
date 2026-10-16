@@ -427,8 +427,10 @@ class TestRunScan:
         result, _ = self._run_scan(conn, vulns_status="degraded")
         assert result["status"] == "degraded"
         assert result["parts"]["vulns"] == "degraded"
-        finding_sql = [c[0] for c in conn.cur.calls if "security_finding" in c[0]]
-        assert finding_sql == [], "degraded 时 findings 必须不更新（旧值保留）"
+        # 批 125 GC 例外：DELETE（90 天清理）不算"更新"——degraded 时 GC 照跑无妨
+        finding_sql = [c[0] for c in conn.cur.calls
+                       if "security_finding" in c[0] and not c[0].startswith("DELETE")]
+        assert finding_sql == [], "degraded 时 findings 必须不更新（旧值保留；GC DELETE 除外）"
 
     def test_ai_summary_persisted(self):
         conn = _FakeConn()
@@ -709,3 +711,10 @@ class TestDbUpdateGate:
         import src.health_monitor.security_collector as sc
         with patch("subprocess.run", return_value=MagicMock(returncode=1, stderr="net down")):
             assert sc._update_db({}) == "update-failed"
+
+    def test_finding_gc_90d(self):
+        """批 125 · finding GC：90 天未再报即删（active 行每日推 last_seen 不会命中）。"""
+        import inspect
+        import src.health_monitor.security_collector as sc
+        src_text = inspect.getsource(sc.run_security_scan)
+        assert "DELETE FROM security_finding WHERE last_seen < current_date - 90" in src_text

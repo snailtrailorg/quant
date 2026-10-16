@@ -772,6 +772,13 @@ def run_security_scan(today: date | None = None) -> dict:
         conn.execute(
             "DELETE FROM security_component WHERE source='binary' AND version='UNKNOWN'")
 
+        # finding GC（批 125 用户问「已修复积累太多如何删」）：last_seen 超 90 天
+        # 未再报的行删除——该行必为 fixed（active 行每天扫描都推 last_seen=今天）；
+        # history API 只查 31 天（计数价值窗口），90 天=三倍余量。同时防 findings
+        # 列表（first_seen<=today 全量查）无限增长。
+        conn.execute(
+            "DELETE FROM security_finding WHERE last_seen < current_date - 90")
+
         # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）。
         # 排除 "pip"（大 dict 非版本）与 "status"（分区标记非组件——盲审 A/B 同发现伪组件）
         sys_rows = [
