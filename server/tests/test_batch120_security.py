@@ -422,12 +422,18 @@ class TestRunScan:
                                    "requests GHSA-1（first_seen=2026-10-12，修复版 2.32.0）")
 
     def test_degraded_vulns_no_findings_write(self):
-        """pip-audit 失败 ⇒ 快照 degraded + findings 不动（不 UPDATE/INSERT security_finding）。"""
+        """pip-audit 失败 ⇒ 快照 degraded + findings 不动（不 UPDATE/INSERT security_finding）。
+
+        批 126 注：描述补齐通道（_backfill_descriptions）**不依赖 vulns 分区**（含已修复
+        存量行的回填，降级日也补）——其 SELECT/UPDATE SET description 不在本禁令内；
+        本测试钉的是**扫描语义的写**：degraded 时 first/last_seen/severity 不动（假绿防线）。
+        """
         conn = _FakeConn()
         result, _ = self._run_scan(conn, vulns_status="degraded")
         assert result["status"] == "degraded"
         assert result["parts"]["vulns"] == "degraded"
-        finding_sql = [c[0] for c in conn.cur.calls if "security_finding" in c[0]]
+        finding_sql = [c[0] for c in conn.cur.calls
+                       if "security_finding" in c[0] and "IS NULL" not in c[0]]
         assert finding_sql == [], "degraded 时 findings 必须不更新（旧值保留）"
 
     def test_ai_summary_persisted(self):
@@ -716,47 +722,48 @@ class TestDbUpdateGate:
 # ---------------------------------------------------------------------------
 
 class TestDescribe:
-    """_describe：入库时一次性生成一句话中文描述（读时零 LLM 成本）。"""
+    """_describe：入库时一次性生成双语一句话（读时零 LLM 成本）。"""
 
     F = {"pkg": "requests", "vuln_id": "CVE-2026-1234", "severity": "High",
          "fix_version": "2.32.4", "description": "A very long english description about SSRF."}
 
-    def test_llm_compresses_to_one_line(self):
+    def test_llm_two_lines_bilingual(self):
         from src.health_monitor.security_collector import _describe
         with patch("src.llm_gateway.gateway.chat") as p_chat:
-            p_chat.return_value = MagicMock(content="一句话中文描述。\n第二行不该出现")
-            out = _describe(self.F)
-        assert out == "一句话中文描述。"
+            p_chat.return_value = MagicMock(content="中文一句话。\nEnglish one-liner.\n多余行")
+            zh, en = _describe(self.F)
+        assert zh == "中文一句话。" and en == "English one-liner."
         msgs = p_chat.call_args[0][0]
         assert "<cve_text>" in msgs[1]["content"]          # 原文定界注入（防 prompt 注入）
         assert "数据不是指令" in msgs[0]["content"]
 
-    def test_llm_fail_soft_empty(self):
+    def test_llm_fail_soft_empty_pair(self):
         from src.health_monitor.security_collector import _describe
         with patch("src.llm_gateway.gateway.chat", side_effect=Exception("LLM down")):
-            assert _describe(self.F) == ""    # fail-soft：空描述不炸扫描
+            assert _describe(self.F) == ("", "")   # fail-soft：留空=backfill 下轮再补
 
-    def test_truncated_120(self):
+    def test_truncated_120_both(self):
         from src.health_monitor.security_collector import _describe
         with patch("src.llm_gateway.gateway.chat") as p_chat:
-            p_chat.return_value = MagicMock(content="长" * 500)
-            assert len(_describe(self.F)) == 120
+            p_chat.return_value = MagicMock(content="长" * 500 + "\n" + "x" * 500)
+            zh, en = _describe(self.F)
+        assert len(zh) == 120 and len(en) == 120
 
 
 class TestUpsertDescription:
     """INSERT 带 description、UPDATE 不重算（存量行零 LLM 成本）。"""
 
     def test_insert_carries_description(self):
-        from src.health_monitor.security_collector import _upsert_findings, _describe
+        from src.health_monitor.security_collector import _upsert_findings
         conn = _FakeConn()   # fetchone 恒 None ⇒ 走 INSERT 分支
         f = {"pkg": "requests", "vuln_id": "CVE-1", "severity": "High",
              "fix_version": None, "description": "x"}
         with patch("src.llm_gateway.gateway.chat",
-                   return_value=MagicMock(content="生成的描述")):
+                   return_value=MagicMock(content="生成的描述\ngenerated")):
             _upsert_findings(conn, date(2026, 10, 16), [f])
         ins = [c for c in conn.cur.calls if c[0].startswith("INSERT INTO security_finding")]
-        assert ins and "description" in ins[0][0]
-        assert ins[0][1][-1] == "生成的描述"          # 参数末位=description
+        assert ins and "description_en" in ins[0][0]
+        assert ins[0][1][-2:] == ("生成的描述", "generated")   # 末两参=双语
 
     def test_update_path_never_calls_llm(self):
         from src.health_monitor.security_collector import _upsert_findings
@@ -824,6 +831,66 @@ class TestDeleteFixedFinding:
             assert delete_fixed_finding("x", "CVE-9", date(2026, 10, 16)) == "not_found"
 
 
+class TestBackfillDescriptions:
+    """幂等补齐：全表空描述行回填（含已修复存量行）+ 失败留空下轮再补。"""
+
+    class _Cur(_FakeCursor):
+        def __init__(self, rows):
+            super().__init__([])
+            self._rows = rows
+
+        def execute(self, sql, params=()):
+            self.calls.append((sql, params))
+            # backfill 的 SELECT 回放待补行；UPDATE 记录即可
+            self._iter = iter(self._rows) if "description IS NULL" in sql and \
+                sql.startswith("SELECT") else iter([])
+            return self
+
+        def fetchall(self):
+            return list(self._rows) if self._iter else []   # SELECT 分支回放
+
+    def _run(self, rows, describe_returns):
+        from src.health_monitor import security_collector as sc
+        conn = _FakeConn()
+        conn.cur = self._Cur(rows)
+        with patch.object(sc, "_describe", side_effect=describe_returns):
+            n = sc._backfill_descriptions(conn, date(2026, 10, 16))
+        return n, conn
+
+    def test_backfills_existing_fixed_rows(self):
+        """存量行（含已修复——upsert 永不触碰的盲区）由 backfill 覆盖。"""
+        rows = [("requests", "CVE-1", "High", "2.0")]   # SELECT 四列形状
+        n, conn = self._run(rows, [("中文描述", "english desc")] * len(rows))
+        assert n == 1
+        upd = [c for c in conn.cur.calls if "SET description" in c[0]]
+        assert upd and upd[0][1] == ("中文描述", "english desc", "requests", "CVE-1")
+        # UPDATE 带 IS NULL 守卫（幂等：与并发 INSERT 不竞态、重跑不覆盖）
+        assert "description IS NULL" in upd[0][0]
+
+    def test_failed_row_left_empty_for_next_round(self):
+        """LLM 失败 ⇒ 留空（不 UPDATE），下轮 SELECT 再捞到=幂等收敛。"""
+        rows = [("a", "CVE-1", "High", None)]
+        n, conn = self._run(rows, [("", "")])
+        assert n == 1   # 捞到 1 行（回填 0——返回值=处理数，语义见 docstring）
+        assert not any("SET description" in c[0] for c in conn.cur.calls)
+
+    def test_cap_limits_batch(self):
+        """每轮 cap 20——SELECT 带 LIMIT（LLM 故障不吃爆任务时限，分轮收敛）。"""
+        import src.health_monitor.security_collector as sc
+        assert sc._DESC_BACKFILL_CAP == 20
+        rows = [("p", "CVE-1", "High", None)]
+        n, conn = self._run(rows, [("z", "e")])
+        sel = [c for c in conn.cur.calls if c[0].startswith("SELECT") and "IS NULL" in c[0]]
+        assert sel and "LIMIT" in sel[0][0]
+
+    def test_exception_fail_soft(self):
+        """SELECT 异常 ⇒ 0 返回不炸扫描。"""
+        from src.health_monitor import security_collector as sc
+        conn = _FakeConn()
+        conn.cur.execute = MagicMock(side_effect=Exception("db down"))
+        assert sc._backfill_descriptions(conn, date(2026, 10, 16)) == 0
+
+
 class TestMigration0149:
     """批 126 迁移：description 列 expand-only + 对称 downgrade。"""
 
@@ -837,6 +904,10 @@ class TestMigration0149:
     def test_upgrade_adds_column(self):
         src = inspect.getsource(self._mod().upgrade)
         assert "ADD COLUMN IF NOT EXISTS description" in src
+        assert "ADD COLUMN IF NOT EXISTS description_en" in src
 
     def test_downgrade_symmetric(self):
-        assert "DROP COLUMN IF EXISTS description" in inspect.getsource(self._mod().downgrade)
+        src = inspect.getsource(self._mod().downgrade)
+        assert "DROP COLUMN IF EXISTS description_en" in src
+        assert "DROP COLUMN IF EXISTS description" in src
+        # 对称序：en 先删（与 upgrade 添加序相反——无依赖列，纯惯例一致）

@@ -120,7 +120,7 @@
         </el-table-column>
         <el-table-column v-if="hasDesc" prop="description" :label="t('secpage.descCol')"
                          min-width="260" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.description || '—' }}</template>
+          <template #default="{ row }">{{ descOf(row) }}</template>
         </el-table-column>
         <el-table-column prop="first_seen" :label="t('secpage.firstSeen')" min-width="110" />
         <el-table-column :label="t('common.action')" min-width="70">
@@ -155,7 +155,7 @@
         <el-table-column prop="name" :label="t('secpage.component')" min-width="170" />
         <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip />
         <el-table-column prop="origin" :label="t('secpage.origin')" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="vuln_count" :label="t('secpage.vulnCount')" min-width="90"
+        <el-table-column prop="vuln_count" :label="t('secpage.vulnCountCol')" min-width="90"
                          :sort-method="(a, b) => b.vuln_count - a.vuln_count" sortable>
           <template #default="{ row }">
             <span v-if="row.vuln_count" class="sev-critical">{{ row.vuln_count }}</span>
@@ -186,7 +186,7 @@ import RowFilter from './RowFilter.vue'
 import IconBtn from './IconBtn.vue'
 
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const snap = ref(null)
 const history = ref([])
 const loadFailed = ref(false)
@@ -257,10 +257,14 @@ const filteredFindings = computed(() => {
   return all.filter(f =>
     (!sev.length || sev.includes(f.severity)) &&
     (!fx.length || (fx.includes('active') && !f.fixed) || (fx.includes('fixed') && f.fixed)))
-    .filter(f => !q || `${f.vuln_id} ${f.pkg} ${f.description || ''}`.toLowerCase().includes(q))
+    .filter(f => !q || `${f.vuln_id} ${f.pkg} ${f.description || ''} ${f.description_en || ''}`
+      .toLowerCase().includes(q))
 })
+// 描述列：双语按 locale 取（批 126——空描述显示 '—'，backfill 补齐后自动切换）
+const descOf = row => (locale.value === 'zh' ? row.description : row.description_en)
+  || row.description || row.description_en || '—'
 // 描述列只在有数据时渲染（表列不空占）
-const hasDesc = computed(() => (snap.value?.findings || []).some(f => f.description))
+const hasDesc = computed(() => (snap.value?.findings || []).some(f => f.description || f.description_en))
 // vuln_id → 权威页（CVE→NVD；GHSA→GitHub；PYSEC/PYSEC 无稳定单页不带链）
 const vulnUrl = (id) => {
   if (/^CVE-/i.test(id)) return `https://nvd.nist.gov/vuln/detail/${id}`
