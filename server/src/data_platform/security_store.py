@@ -52,11 +52,11 @@ def get_findings_active(day: date) -> list[dict]:
     with get_conn() as conn:
         cur = conn.execute(
             "SELECT source, pkg, vuln_id, fix_version, severity, first_seen, last_seen, "
-            "last_seen_at "
+            "last_seen_at, description "
             "FROM security_finding WHERE first_seen <= %s",
             (day,))
         cols = ("source", "pkg", "vuln_id", "fix_version", "severity",
-                "first_seen", "last_seen", "last_seen_at")
+                "first_seen", "last_seen", "last_seen_at", "description")
         return _rows_to_dicts(cur, cols)
 
 
@@ -88,3 +88,28 @@ def get_finding_spans() -> list[tuple]:
     with get_conn() as conn:
         cur = conn.execute("SELECT first_seen, last_seen FROM security_finding")
         return cur.fetchall()
+
+
+def delete_fixed_finding(pkg: str, vuln_id: str, today: date) -> str:
+    """删一行**已修复** finding（批 126：显式删除取代隐藏 GC——用户裁定）。
+
+    返回三态："ok"（已删）/ "not_found" / "active"（last_seen ≥ today=当前风险
+    证据，误删=假绿——路由转 409）。判定与删除同事务窗口（无 TOCTOU）。
+    """
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT last_seen FROM security_finding "
+            "WHERE source='grype' AND pkg=%s AND vuln_id=%s", (pkg, vuln_id))
+        row = cur.fetchone()
+        if row is None:
+            conn.commit()
+            return "not_found"
+        if row[0] >= today:
+            conn.commit()
+            return "active"
+        conn.execute(
+            "DELETE FROM security_finding WHERE source='grype' AND pkg=%s AND vuln_id=%s",
+            (pkg, vuln_id))
+        conn.commit()
+    return "ok"

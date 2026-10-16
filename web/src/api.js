@@ -344,3 +344,5 @@ export const getLineage = (signalId) => api.get(`/api/quality/lineage/${signalId
 // 批 120：安全态势（Observe 安全 Tab——快照默认今日；history 近 N 天趋势）
 export const getSecuritySnapshot = (date) => api.get('/security/snapshot', { params: date ? { date } : {} })
 export const getSecurityHistory = (days = 30) => api.get('/security/history', { params: { days } })
+// 批 126：已修复漏洞行显式删除（admin-only，替代隐藏定期清理——用户裁定）
+export const deleteSecurityFinding = (pkg, vulnId) => api.delete('/security/finding', { params: { pkg, vuln_id: vulnId } })

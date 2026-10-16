@@ -64,6 +64,7 @@ def _enrich_findings(day: date, vulns_ok: bool = True,
         out.append({
             "source": f["source"], "pkg": f["pkg"], "vuln_id": f["vuln_id"],
             "fix_version": f["fix_version"], "severity": f["severity"],
+            "description": f.get("description") or "",
             "first_seen": first.isoformat(), "last_seen": last.isoformat(),
             "dwell_days": max(_days_between(day, first), 0),
             "expose_days": max(_days_between(day, base), 0),
@@ -150,6 +151,26 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "vulns_db": (snap.get("components") or {}).get("vulns_db") or {},
         "baseline_diff": baseline_diff,
     }
+
+
+@router.delete("/finding")
+def security_finding_delete(pkg: str = Query(...), vuln_id: str = Query(...),
+                            _u: dict = Depends(require_perm("system_config"))):
+    """删除已修复漏洞行（批 126 用户裁定：显式删除取代隐藏定期清理）。
+
+    守卫在 store（last_seen < 今日才删——活跃行是当前风险证据，误删=假绿；
+    三态 ok/not_found→404/active→409）。权限 system_config（admin-only 运维面，
+    同 smtp_providers_delete 先例）+ 审计。
+    """
+    state = store.delete_fixed_finding(pkg, vuln_id, date.today())
+    if state == "not_found":
+        raise ApiError(404, "SECURITY_FINDING_NOT_FOUND", f"{pkg}/{vuln_id} 无此行")
+    if state == "active":
+        raise ApiError(409, "SECURITY_FINDING_ACTIVE",
+                       f"{pkg}/{vuln_id} 仍活跃，仅已修复行可删")
+    from src.data_platform.audit import audit_log
+    audit_log(_u["username"], "security_finding_delete", f"{pkg}/{vuln_id}")
+    return {"ok": True}
 
 
 @router.get("/history")

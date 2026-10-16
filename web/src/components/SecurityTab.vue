@@ -123,6 +123,12 @@
           <template #default="{ row }">{{ row.description || '—' }}</template>
         </el-table-column>
         <el-table-column prop="first_seen" :label="t('secpage.firstSeen')" min-width="110" />
+        <el-table-column :label="t('common.action')" min-width="70">
+          <template #default="{ row }">
+            <IconBtn v-if="row.fixed" :icon="Delete" type="danger" size="small"
+                     :title="t('common.delete')" @click="onDeleteFinding(row)" />
+          </template>
+        </el-table-column>
       </TableShell>
     </el-card>
 
@@ -171,11 +177,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { WarningFilled } from '@element-plus/icons-vue'
-import { getSecuritySnapshot, getSecurityHistory } from '../api'
+import { WarningFilled, Delete } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding } from '../api'
 import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
 import RowFilter from './RowFilter.vue'
+import IconBtn from './IconBtn.vue'
 
 
 const { t } = useI18n()
@@ -326,6 +334,23 @@ const dbStateHint = computed(() => {
   if (days === null) return t('secpage.dbUnknown')
   return days > 3 ? t('secpage.dbStale', { n: days }) : t('secpage.dbFresh', { n: days })
 })
+
+// 已修复行显式删除（批 126 用户裁定：弃隐藏 GC，行内操作可见可审——后端守卫
+// last_seen<今日+admin 权限+审计；前端确认弹窗=仓内范式 BacktestRun.vue:152）
+const onDeleteFinding = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      t('secpage.confirmDelFinding', { id: row.vuln_id, pkg: row.pkg }),
+      t('common.confirm'), { type: 'warning' })
+  } catch { return }   // 取消=不动
+  try {
+    await deleteSecurityFinding(row.pkg, row.vuln_id)
+    ElMessage.success(t('common.deleteSuccess'))
+    load()
+  } catch (e) {
+    ElMessage.error(e?.detail || t('common.deleteFailed'))
+  }
+}
 
 const historySummaries = computed(() =>
   (history.value || []).filter(d => d.scan_date !== snap.value?.scan_date && d.ai_summary_preview))
