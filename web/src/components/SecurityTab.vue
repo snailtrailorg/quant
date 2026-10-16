@@ -113,18 +113,23 @@
       </TableShell>
     </el-card>
 
-    <!-- D 组件列表（批 124：版本表→列表，全量组件 + 来源自解释 + 漏洞数）。
-         默认视图=有漏洞的（行动导向）；搜索时查全量（信息完备）——业界组件清单惯例：
-         默认聚焦可行动项、搜索兜底完备性。来源列=采集侧从 SBOM locations 自动推导
-         （origin，无需人工备注——「ffmpeg 哪来的」答案在表里）。 -->
+    <!-- D 组件列表（批 124：版本表→列表，全量组件 + 来源自解释 + 漏洞数 + RowFilter）。
+         行筛选走仓内既有体系（RowFilter 分组多选——同 Audit/Logs 范式）：来源类型
+         （数据 distinct）× 漏洞状态（默认勾"有漏洞"=行动导向视图，状态可见可改——
+         取消即健康面）；搜索=name/origin/version 三字段子串（叠加上述过滤）。
+         来源列=采集侧从 SBOM locations + 依赖链自动推导（「ffmpeg 哪来的」在表里）。 -->
     <el-card style="margin-top: var(--sp-3)">
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.components') }}
             <span class="kpi-sub" style="margin-left: var(--sp-2)">{{ compHint }}</span>
           </span>
-          <el-input v-model="compFilter" clearable size="small" style="width:200px"
-                    :placeholder="t('secpage.searchComponent')" />
+          <div style="display:flex;align-items:center;gap:8px">
+            <RowFilter v-model="compRowFilter" :groups="compFilterGroups"
+                       :title="t('common.filter')" />
+            <el-input v-model="compFilter" clearable size="small" style="width:220px"
+                      :placeholder="t('secpage.searchComponent')" />
+          </div>
         </div>
       </template>
       <TableShell :data="compRowsShown" storage-key="security-components" style="width:100%">
@@ -157,6 +162,7 @@ import { WarningFilled } from '@element-plus/icons-vue'
 import { getSecuritySnapshot, getSecurityHistory } from '../api'
 import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
+import RowFilter from './RowFilter.vue'
 
 
 const { t } = useI18n()
@@ -217,6 +223,9 @@ const filteredFindings = computed(() => {
 const _SEV_ORDER = ['critical', 'high', 'medium', 'low', 'negligible', 'unknown']
 const sevRank = s => _SEV_ORDER.indexOf((s || '').toLowerCase())
 const compFilter = ref('')
+// 行筛选（RowFilter 分组——批 124）：默认 {vuln: ['yes']}（=行动导向默认视图，
+// 状态可见可改——取消"有漏洞"=健康面）；来源组选项从台账数据 distinct 预取
+const compRowFilter = ref({ vuln: ['yes'] })
 // 组件全量（台账：pip+rpm+binary+system——批 124 起 binary 也入账，ffmpeg 这类
 // 捆绑原生库由此可见）+ 每组件漏洞数（findings 聚合）
 const componentRows = computed(() => {
@@ -225,18 +234,32 @@ const componentRows = computed(() => {
   for (const f of (snap.value?.findings || [])) vc[f.pkg] = (vc[f.pkg] || 0) + 1
   return led.map(r => ({ ...r, vuln_count: vc[r.name] || 0 }))
 })
-// 默认=有漏洞的（行动导向）；输入搜索=全量匹配（信息完备）
+// 行筛选组（Audit 范式）：来源类型（distinct 预取）× 漏洞状态（固定枚举）
+const compFilterGroups = computed(() => {
+  const srcs = [...new Set(componentRows.value.map(r => r.source))].sort()
+  return [
+    { key: 'source', label: t('secpage.originCol'), options: srcs.map(s => ({ value: s, label: s })) },
+    { key: 'vuln', label: t('secpage.vulnState'), options: [
+      { value: 'yes', label: t('secpage.hasVuln') },
+      { value: 'no', label: t('secpage.noVuln') },
+    ] },
+  ]
+})
+// 三层叠加：RowFilter（来源×状态）→ 搜索（name/origin/version 多字段子串——
+// "vnpy" 能带出 origin=vnpy→pyside6 捆绑 的 ffmpeg）
 const compRowsShown = computed(() => {
   const all = componentRows.value
-  if (compFilter.value) {
-    const q = compFilter.value.toLowerCase()
-    return all.filter(r => (r.name || '').toLowerCase().includes(q))
-  }
-  return all.filter(r => r.vuln_count > 0)
+  const { source = [], vuln = ['yes'] } = compRowFilter.value
+  const rows = all.filter(r =>
+    (!source.length || source.includes(r.source)) &&
+    (!vuln.length || (vuln.includes('yes') && r.vuln_count) || (vuln.includes('no') && !r.vuln_count)))
+  if (!compFilter.value.trim()) return rows
+  const q = compFilter.value.toLowerCase()
+  return rows.filter(r =>
+    `${r.name || ''} ${r.origin || ''} ${r.version || ''}`.toLowerCase().includes(q))
 })
-const compHint = computed(() => compFilter.value
-  ? t('secpage.compMatch', { n: compRowsShown.value.length, total: componentRows.value.length })
-  : t('secpage.compVulnOnly', { n: compRowsShown.value.length, total: componentRows.value.length }))
+const compHint = computed(() =>
+  t('secpage.compMatch', { n: compRowsShown.value.length, total: componentRows.value.length }))
 
 // A 区漏洞库卡（批 124 用户裁定换基线偏差卡——「漏洞判定的时效边界」）：
 // DB 构建日（import.json URL 时间戳——采集器提取）；>3 天黄（上游日更 1 次，
