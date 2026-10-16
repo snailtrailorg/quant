@@ -195,7 +195,7 @@ class TestPipWrapperNoguiRewrite:
         """install/dry-run 须消费 REQ_STAGED（sed 重写 file:///home/bernard → releases 树）。"""
         src = _read(self._PIP_WRAPPER)
         assert "REQ_STAGED=" in src
-        assert 'file:///home/bernard/Projects/quant/server/deps/' in src   # 重写源路径
+        assert 'file://[^ ]*/deps/' in src   # 重写源模式（无条件——staging 同机存在无权读实证）
         assert '$ROOT/releases/$release_id/deps/' in src                    # 重写目标
         assert '-r "$REQ_STAGED"' in src
         assert '-r "$REQ"' not in src.replace('-r "$REQ_STAGED"', '')      # 旧直引已清
