@@ -228,10 +228,9 @@ const degradedZones = computed(() => snap.value?.degraded_zones || [])
 // 默认 active——原 header checkbox 裁，状态语义归筛选组；红点/清除钮组件级生效）
 const vulnSearch = ref('')
 const vulnRowFilter = ref({ fixed: ['active'] })
-const _SEV_ORDER = ['Critical', 'High', 'Medium', 'Low', 'Negligible', 'Unknown']
 const vulnFilterGroups = computed(() => {
   const sevs = [...new Set((snap.value?.findings || []).map(f => f.severity).filter(Boolean))]
-  sevs.sort((a, b) => _SEV_ORDER.indexOf(a) - _SEV_ORDER.indexOf(b))
+  sevs.sort((a, b) => _SEV_ORDER.indexOf(a.toLowerCase()) - _SEV_ORDER.indexOf(b.toLowerCase()))
   return [
     { key: 'severity', label: t('secpage.severity'),
       options: sevs.map(s => ({ value: s, label: s })) },
