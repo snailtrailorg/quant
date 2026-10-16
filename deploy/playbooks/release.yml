@@ -354,7 +354,8 @@
                                 or prev_slice_fp.get('migrations', '') != staged_slice_fp.get('migrations', '')
                                 or prev_slice_fp.get('scripts/systemd', '') != staged_slice_fp.get('scripts/systemd', '')
                                 or prev_slice_fp.get('alembic.ini', '') != staged_slice_fp.get('alembic.ini', '')
-                                or prev_slice_fp.get('requirements-dev.txt', '') != staged_slice_fp.get('requirements-dev.txt', '') }}"
+                                or prev_slice_fp.get('requirements-dev.txt', '') != staged_slice_fp.get('requirements-dev.txt', '')
+                                or prev_slice_fp.get('deps', '') != staged_slice_fp.get('deps', '')   # 批 125：fork wheel 变更触发重装 }}"
 
         - name: 阶段 2 —— 快车道通告（server 指纹一致：跳过阶段 3/5/7，只翻链+探针）
           ansible.builtin.debug:

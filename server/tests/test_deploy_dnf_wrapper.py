@@ -184,3 +184,26 @@ class TestPipWrapperUpgradeTools:
         """quant-pip-wrapper 已在 QUANT_DEPLOY_QUANT 白名单（复用通道——零新权限面）。"""
         sudoers = _read(_REPO / "deploy" / "templates" / "sudoers-quant-deploy.j2")
         assert "/usr/local/sbin/quant-pip-wrapper" in sudoers
+
+
+class TestPipWrapperNoguiRewrite:
+    """批 125 · fork wheel 的 file:// 路径重写守卫（服务器上控制机绝对路径不存在）。"""
+
+    _PIP_WRAPPER = _REPO / "deploy" / "wrappers" / "quant-pip-wrapper"
+
+    def test_wrapper_rewrites_file_uri(self):
+        """install/dry-run 须消费 REQ_STAGED（sed 重写 file:///home/bernard → releases 树）。"""
+        src = _read(self._PIP_WRAPPER)
+        assert "REQ_STAGED=" in src
+        assert 'file:///home/bernard/Projects/quant/server/deps/' in src   # 重写源路径
+        assert '$ROOT/releases/$release_id/deps/' in src                    # 重写目标
+        assert '-r "$REQ_STAGED"' in src
+        assert '-r "$REQ"' not in src.replace('-r "$REQ_STAGED"', '')      # 旧直引已清
+
+    def test_deps_in_slices_and_fingerprint(self):
+        """deps 切片+白名单+指纹判据三处（缺一=服务器装不到 wheel 或变更不触发重装）。"""
+        gv = _read(_REPO / "deploy" / "inventory" / "group_vars" / "all.yml")
+        assert "alembic.ini, deps]" in gv
+        assert "{path: deps, dir: true}" in gv
+        rel = _read(_RELEASE)
+        assert "get('deps', '')" in rel
