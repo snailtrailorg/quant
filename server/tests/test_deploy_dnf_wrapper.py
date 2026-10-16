@@ -207,3 +207,9 @@ class TestPipWrapperNoguiRewrite:
         assert "{path: deps, dir: true}" in gv
         rel = _read(_RELEASE)
         assert "get('deps', '')" in rel
+
+    def test_wrapper_orphan_cleanup(self):
+        """批 125：install 段须清 GUI 孤儿（pyside6 出闭包后 shiboken6/pyqtgraph 残留）。"""
+        src = _read(self._PIP_WRAPPER)
+        assert "uninstall -y pyside6" in src
+        assert "shiboken6 pyqtgraph qdarkstyle" in src

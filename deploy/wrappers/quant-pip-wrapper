@@ -59,12 +59,16 @@ fi
 REQ="$ROOT/releases/$release_id/requirements.lock"
 [ -f "$REQ" ] || { echo "✗ requirements.lock 不存在: $REQ" >&2; exit 1; }
 
-# 批 125：本地 fork wheel 的 file:// 绝对路径重写为 release 树内（lock 生成于控制机
-# 绝对路径——pip-compile file: 限制；服务器上该路径不存在。deps/ 随切片同步到
-# releases/<id>/deps/，重写后路径同构可装。hash 不动（wheel 字节相同）。
+# 批 125：本地 fork wheel 的 file:// 绝对路径**无条件**重写为 release 树内。
+# lock 生成于控制机绝对路径（pip-compile file: 限制）；deps/ 随切片同步到
+# releases/<id>/deps/——那是部署的正道位置（venv 重建只依赖 release 树=自包含）。
+# 首版 sed 只在服务器跑（控制机路径不存在）——staging=本机同路径存在但 quant
+# 无权读=Permission denied 实证：重写必须无条件（正道位置优先于本机偶然存在的路径）。
 REQ_STAGED="/tmp/quant-req-$release_id.lock"
-sed "s|file:///home/bernard/Projects/quant/server/deps/|$ROOT/releases/$release_id/deps/|g" \
+sed "s|file://[^ ]*/deps/|file://$ROOT/releases/$release_id/deps/|g" \
   "$REQ" > "$REQ_STAGED" || { echo "✗ lock 路径重写失败" >&2; exit 1; }
+[ -f "$ROOT/releases/$release_id/deps/vnpy-4.5.0+nogui-py3-none-any.whl" ] \
+  || { echo "✗ deps/ 未随切片同步（检查 deploy_slices）" >&2; exit 1; }
 
 if [ "$sub" = "dry-run" ]; then
   # 预检：解析/哈希校验，不改 venv；解析不了（坏包名/冲突）即非零退出
