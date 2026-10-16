@@ -82,14 +82,16 @@
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.vulnList') }}</span>
-          <el-select v-if="allSources.length > 1" v-model="srcFilter" clearable size="small" style="width:140px"
-                     :placeholder="t('secpage.filterBySource')">
-            <el-option v-for="s in allSources" :key="s" :label="s" :value="s" />
-          </el-select>
+          <div style="display:flex;align-items:center;gap:12px">
+            <el-checkbox v-model="showFixed" size="small">{{ t('secpage.showFixed') }}（{{ fixedCount }}）</el-checkbox>
+            <el-select v-if="allSources.length > 1" v-model="srcFilter" clearable size="small" style="width:140px"
+                       :placeholder="t('secpage.filterBySource')">
+              <el-option v-for="s in allSources" :key="s" :label="s" :value="s" />
+            </el-select>
+          </div>
         </div>
       </template>
-      <TableShell :data="filteredFindings" storage-key="security-findings" style="width:100%"
-                  :row-class-name="({ row }) => row.fixed ? 'fixed-row' : ''">
+      <TableShell :data="filteredFindings" storage-key="security-findings" style="width:100%">
         <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="170" />
         <el-table-column prop="severity" :label="t('secpage.severity')" min-width="95" sortable
                          :sort-method="(a, b) => sevRank(b.severity) - sevRank(a.severity)">
@@ -101,13 +103,6 @@
         <el-table-column prop="pkg" :label="t('secpage.pkg')" min-width="140" />
         <el-table-column prop="fix_version" :label="t('secpage.fixVersion')" min-width="110">
           <template #default="{ row }">{{ row.fix_version || '—' }}</template>
-        </el-table-column>
-        <el-table-column prop="expose_days" :label="t('secpage.exposeDays')" min-width="110" sortable>
-          <template #default="{ row }">
-            <span :class="{ 'dw-old': row.expose_days >= 30 }"
-                  :title="row.expose_est ? t('secpage.exposeEstHint') : ''">{{ row.expose_days }}{{ row.expose_est ? '≈' : '' }}</span>
-            <span class="dwell-sub">（{{ t('secpage.found') }} {{ row.dwell_days }}）</span>
-          </template>
         </el-table-column>
         <el-table-column prop="first_seen" :label="t('secpage.firstSeen')" min-width="110" />
       </TableShell>
@@ -214,9 +209,14 @@ const degradedZones = computed(() => snap.value?.degraded_zones || [])
 
 // C 区
 const allSources = computed(() => [...new Set((snap.value?.findings || []).map(f => f.source))])
+// 方案 A（批 125 用户裁定）：默认只显示 active（可行动项——GitHub/Snyk 惯例），
+// 「显示已修复」开关才带历史（灰显语义由开关承担，不靠行内样式）
+const showFixed = ref(false)
+const fixedCount = computed(() => (snap.value?.findings || []).filter(f => f.fixed).length)
 const filteredFindings = computed(() => {
   const all = snap.value?.findings || []
-  return srcFilter.value ? all.filter(f => f.source === srcFilter.value) : all
+  return all.filter(f => (showFixed.value || !f.fixed)
+    && (!srcFilter.value || f.source === srcFilter.value))
 })
 
 // C 区严重度排序（Critical 最高→Unknown 最低；NULL 最低）
@@ -225,7 +225,7 @@ const sevRank = s => _SEV_ORDER.indexOf((s || '').toLowerCase())
 const compFilter = ref('')
 // 行筛选（RowFilter 分组——批 124）：默认 {vuln: ['yes']}（=行动导向默认视图，
 // 状态可见可改——取消"有漏洞"=健康面）；来源组选项从台账数据 distinct 预取
-const compRowFilter = ref({ vuln: ['yes'] })
+const compRowFilter = ref({ vuln: ['yes'] })   // 初始=行动导向；「全部」清 {} ⇒ 下行 hasOwn 判据区分
 // 组件全量（台账：pip+rpm+binary+system——批 124 起 binary 也入账，ffmpeg 这类
 // 捆绑原生库由此可见）+ 每组件漏洞数（findings 聚合）
 const componentRows = computed(() => {
@@ -249,7 +249,12 @@ const compFilterGroups = computed(() => {
 // "vnpy" 能带出 origin=vnpy→pyside6 捆绑 的 ffmpeg）
 const compRowsShown = computed(() => {
   const all = componentRows.value
-  const { source = [], vuln = ['yes'] } = compRowFilter.value
+  const rf = compRowFilter.value
+  // 「全部」语义修复 v2（批 125）：永远按 rf.vuln 实际值——初始 ['yes']（行动导向）、
+  // 点「全部」onAll 清成 {} 后无 key ⇒ **默认 []（全部显示）**。v1 的 hasOwn 判据
+  // 写反（无 key 给 ['yes'] = 全选后回到只看有漏洞=「没反应」的根因）。
+  const vuln = rf.vuln ?? []
+  const source = rf.source ?? []
   const rows = all.filter(r =>
     (!source.length || source.includes(r.source)) &&
     (!vuln.length || (vuln.includes('yes') && r.vuln_count) || (vuln.includes('no') && !r.vuln_count)))
