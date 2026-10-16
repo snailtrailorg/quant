@@ -75,24 +75,31 @@
       <div v-else class="sec-empty">{{ t('secpage.noSummary') }}</div>
     </el-card>
 
-    <!-- C 漏洞列表：**漏洞 ID 第一列、严重度第二列**（用户裁定 2026-10-15——ID 是引用/检索
-         主键，先见标识再判严重度）；来源列删（单值时零信息量——筛选器多源才显示）；
-         后端已按 严重度→暴露时长 排序；已修复灰显沉底 -->
+    <!-- C 漏洞列表（批 125 四项用户裁定）：
+         ① ID 第一列+严重度第二列（ID=引用主键）；② vuln_id 超链到权威页
+         （CVE→NVD / GHSA→GitHub advisories——PYSEC 无稳定单页不带链）；
+         ③ 状态列（未修复/已修复）——行筛选用（原 header checkbox 裁）；
+         ④ description 列（show-overflow-tooltip 一行截断，完整文本 hover）。 -->
     <el-card style="margin-top: var(--sp-3)">
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.vulnList') }}</span>
-          <div style="display:flex;align-items:center;gap:12px">
-            <el-checkbox v-model="showFixed" size="small">{{ t('secpage.showFixed') }}（{{ fixedCount }}）</el-checkbox>
-            <el-select v-if="allSources.length > 1" v-model="srcFilter" clearable size="small" style="width:140px"
-                       :placeholder="t('secpage.filterBySource')">
-              <el-option v-for="s in allSources" :key="s" :label="s" :value="s" />
-            </el-select>
+          <div style="display:flex;align-items:center;gap:8px">
+            <el-input v-model="vulnSearch" clearable size="small" style="width:200px"
+                      :placeholder="t('secpage.searchVuln')" />
+            <RowFilter v-model="vulnRowFilter" :groups="vulnFilterGroups"
+                       :title="t('common.filter')" />
           </div>
         </div>
       </template>
       <TableShell :data="filteredFindings" storage-key="security-findings" style="width:100%">
-        <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="170" />
+        <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="170">
+          <template #default="{ row }">
+            <a v-if="vulnUrl(row.vuln_id)" :href="vulnUrl(row.vuln_id)" target="_blank"
+               rel="noopener noreferrer" class="vuln-link">{{ row.vuln_id }}</a>
+            <span v-else>{{ row.vuln_id }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="severity" :label="t('secpage.severity')" min-width="95" sortable
                          :sort-method="(a, b) => sevRank(b.severity) - sevRank(a.severity)">
           <template #default="{ row }">
@@ -103,6 +110,17 @@
         <el-table-column prop="pkg" :label="t('secpage.pkg')" min-width="140" />
         <el-table-column prop="fix_version" :label="t('secpage.fixVersion')" min-width="110">
           <template #default="{ row }">{{ row.fix_version || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="fixed" :label="t('secpage.vulnState')" min-width="90">
+          <template #default="{ row }">
+            <span :class="row.fixed ? 'sev-none' : 'sev-critical'">
+              {{ row.fixed ? t('secpage.fixedLabel') : t('secpage.activeLabel') }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="hasDesc" prop="description" :label="t('secpage.descCol')"
+                         min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.description || '—' }}</template>
         </el-table-column>
         <el-table-column prop="first_seen" :label="t('secpage.firstSeen')" min-width="110" />
       </TableShell>
@@ -165,7 +183,6 @@ const snap = ref(null)
 const history = ref([])
 const loadFailed = ref(false)
 const isNoSnapshot = ref(false)
-const srcFilter = ref('')
 const expandedDays = ref([])
 let pollTimer = null
 
@@ -207,17 +224,42 @@ const lastScanAt = computed(() => {
 const statusZoneHint = computed(() => t('secpage.zoneOk'))
 const degradedZones = computed(() => snap.value?.degraded_zones || [])
 
-// C 区
-const allSources = computed(() => [...new Set((snap.value?.findings || []).map(f => f.source))])
-// 方案 A（批 125 用户裁定）：默认只显示 active（可行动项——GitHub/Snyk 惯例），
-// 「显示已修复」开关才带历史（灰显语义由开关承担，不靠行内样式）
-const showFixed = ref(false)
-const fixedCount = computed(() => (snap.value?.findings || []).filter(f => f.fixed).length)
+// C 区（批 125 重构）：搜索（ID/包/描述子串）× RowFilter（严重度 distinct × 状态
+// 默认 active——原 header checkbox 裁，状态语义归筛选组；红点/清除钮组件级生效）
+const vulnSearch = ref('')
+const vulnRowFilter = ref({ fixed: ['active'] })
+const _SEV_ORDER = ['Critical', 'High', 'Medium', 'Low', 'Negligible', 'Unknown']
+const vulnFilterGroups = computed(() => {
+  const sevs = [...new Set((snap.value?.findings || []).map(f => f.severity).filter(Boolean))]
+  sevs.sort((a, b) => _SEV_ORDER.indexOf(a) - _SEV_ORDER.indexOf(b))
+  return [
+    { key: 'severity', label: t('secpage.severity'),
+      options: sevs.map(s => ({ value: s, label: s })) },
+    { key: 'fixed', label: t('secpage.vulnState'), options: [
+      { value: 'active', label: t('secpage.activeLabel') },
+      { value: 'fixed', label: t('secpage.fixedLabel') },
+    ] },
+  ]
+})
 const filteredFindings = computed(() => {
   const all = snap.value?.findings || []
-  return all.filter(f => (showFixed.value || !f.fixed)
-    && (!srcFilter.value || f.source === srcFilter.value))
+  const rf = vulnRowFilter.value
+  const sev = rf.severity ?? []
+  const fx = rf.fixed ?? ['active']   // 未设时默认 active（行动导向）——与 D 区 v2 同法
+  const q = vulnSearch.value.trim().toLowerCase()
+  return all.filter(f =>
+    (!sev.length || sev.includes(f.severity)) &&
+    (!fx.length || (fx.includes('active') && !f.fixed) || (fx.includes('fixed') && f.fixed)))
+    .filter(f => !q || `${f.vuln_id} ${f.pkg} ${f.description || ''}`.toLowerCase().includes(q))
 })
+// 描述列只在有数据时渲染（表列不空占）
+const hasDesc = computed(() => (snap.value?.findings || []).some(f => f.description))
+// vuln_id → 权威页（CVE→NVD；GHSA→GitHub；PYSEC/PYSEC 无稳定单页不带链）
+const vulnUrl = (id) => {
+  if (/^CVE-/i.test(id)) return `https://nvd.nist.gov/vuln/detail/${id}`
+  if (/^GHSA-/i.test(id)) return `https://github.com/advisories/${id}`
+  return null
+}
 
 // C 区严重度排序（Critical 最高→Unknown 最低；NULL 最低）
 const _SEV_ORDER = ['critical', 'high', 'medium', 'low', 'negligible', 'unknown']
@@ -318,6 +360,8 @@ const historySummaries = computed(() =>
 .hist-date { color: var(--text-secondary); flex: none; }
 .hist-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dw-old { color: var(--critical); font-weight: 600; }
+.vuln-link { color: var(--brand-500); text-decoration: none; }
+.vuln-link:hover { text-decoration: underline; }
 .dwell-sub { color: var(--text-secondary); font-size: var(--fs-foot); }
 .zone-list { margin-top: var(--sp-1); }
 .zone-item { color: var(--warn-fill); font-size: var(--fs-foot); line-height: 1.7;
@@ -333,5 +377,4 @@ const historySummaries = computed(() =>
 .tl-item { padding: 0 var(--sp-3); color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.8; }
 .sec-empty { color: var(--text-secondary); font-size: var(--fs-foot); padding: var(--sp-3) 0; }
 .sec-loading { min-height: 200px; }
-:deep(.fixed-row) td { opacity: 0.55; }   /* 已修复项灰显沉底（排序后端已沉底） */
 </style>
