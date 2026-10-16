@@ -3,13 +3,19 @@
        批24 迭代十六：分组模式——groups=[{key,label,options}]（一钮多列筛选，下拉按列分组显示），
        modelValue=对象 {key: [选中值]}；「全部」=空对象。单组模式（options）批23 语义不变。
        动态选项（module/actor 等非固定枚举）由调用方从数据 distinct 预取后传入。
-       语义契约：空 modelValue=全显（5 消费页一致）；有勾选时底部「清除筛选」钮（批 125
-       替代原「全部」复选框+角标——语义歧义/反向复选框/数学冗余三缺陷，用户裁定）；
+       语义契约：空 modelValue=全显（5 消费页一致）；有勾选时底部「清除筛选」钮 + 图标红点激活指示（批 125
+       替代原「全部」复选框+数字角标——语义歧义/反向复选框/数学冗余三缺陷+数字语义
+       不符，用户裁定：红点=有筛选，几项 popover 内自明）；
        与 ColumnSettings（Operation=列显隐）成对：本组件管"行"（数据维度筛选），
        放 header 右侧动作区（统一序：筛选→…→列设置）。 -->
   <el-popover :width="260" trigger="click">
     <template #reference>
-      <IconBtn :icon="Filter" :title="title" />
+      <!-- 筛选激活指示：红点（有任一勾选）——数字角标已裁（语义=项数与直觉不符，
+           批 125 用户裁定：状态可见性用最小标记恢复，具体几项 popover 内自明） -->
+      <span class="rf-ref" :class="{ active: selCount > 0 }">
+        <IconBtn :icon="Filter" :title="title" />
+        <span v-if="selCount > 0" class="rf-dot" />
+      </span>
     </template>
     <div style="max-height: 300px; overflow-y: auto">
       <!-- 单组模式（批23 兼容） -->
@@ -72,6 +78,10 @@ const onGroup = (key, vals) => {
 
 <style scoped>
 .rf-opt { display: block; height: 26px; line-height: 26px; margin-right: 0; width: 100% }
+/* 激活指示：包裹层相对定位，红点贴图标右上角（6px——比 badge 数字克制） */
+.rf-ref { position: relative; display: inline-flex; }
+.rf-dot { position: absolute; top: 0; right: 0; width: 6px; height: 6px;
+  border-radius: 50%; background: var(--critical); }
 /* 清除筛选钮：占满宽左对齐（文字钮，非复选框——承载动作非状态） */
 .rf-clear { width: 100%; justify-content: flex-start; padding: 0 8px; }
 /* 分组标签（迭代十六）：列名小标题 */
