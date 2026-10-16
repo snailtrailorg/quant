@@ -51,7 +51,7 @@ while IFS= read -r line; do
     [[ "$line" =~ ^[a-zA-Z] ]] || continue
     name=$(echo "$line" | sed 's/\[.*//; s/[<>=!~; ].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
     [[ -n "$name" ]] || continue
-    grep -qiE "^${name//+/\\+}(\[[^]]*\])?==" "$LOCK" || { echo "   ❌ $name 不在 lock（typo？）"; miss=1; }
+    grep -qiE "^${name//+/\\+}(\[[^]]*\])?(==| @ )" "$LOCK" || { echo "   ❌ $name 不在 lock（typo？）"; miss=1; }
 done < "$REQ"
 [[ "$miss" -eq 0 ]] || exit 1
 echo "   ✓ 全部命中"

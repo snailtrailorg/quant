@@ -3,7 +3,11 @@
 # 镜像: pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 # === vnpy 生态（交易内核/网关/回测/数据）===
-vnpy>=4.0                  # 核心引擎
+# vnpy 4.5.0+nogui（批 125 fork 删 GUI pin）：METADATA 去 pyside6/pyqtgraph/qdarkstyle/
+# qrcode（生产零 GUI 实证——server/src 无任何 Qt import；vnpy GUI 只在其 trader.app 我们不用）。
+# 消 54 条 active CVE（ffmpeg 53+qtbase——全来自 PySide6_Addons 捆绑 FFmpeg 7.1）。
+# 升级路径：上游新版 → deps/ 重打（scripts/build-vnpy-nogui.sh）。
+vnpy @ file:///home/bernard/Projects/quant/server/deps/vnpy-4.5.0+nogui-py3-none-any.whl   # 绝对路径（pip-compile file: 限制——PIPs #7559）
 vnpy-ctastrategy>=1.4      # CTA 策略 + 回测引擎 CtaBacktestingEngine
 vnpy-datamanager>=1.2      # 数据管理
 vnpy-binance               # 币安网关（永续合约）

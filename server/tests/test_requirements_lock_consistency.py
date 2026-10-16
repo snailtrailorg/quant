@@ -32,7 +32,9 @@ _NAME_HEAD = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)")
 # ⚠ 必须容忍 extras：`pip-compile` 对带 extras 的声明**原样保留**中括号，
 #   写成 `psycopg[binary]==3.3.6`（本仓还有 `fonttools[woff]`、`uvicorn[standard]`）。
 #   漏了这个，闸门会对这三种依赖**假报缺失**（本闸门首跑实测抓出的正是 psycopg/uvicorn）。
-_LOCK_PIN = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==")
+# 批 125：兼容 file:// 直接引用形态（`vnpy @ file:///...`——fork nogui wheel）
+_LOCK_PIN = re.compile(
+    r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?(?:==| @ )")
 
 
 def canon(name: str) -> str:
