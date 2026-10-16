@@ -230,8 +230,12 @@ const compRowFilter = ref({ vuln: ['yes'] })   // 初始=行动导向；「全�
 // 捆绑原生库由此可见）+ 每组件漏洞数（findings 聚合）
 const componentRows = computed(() => {
   const led = snap.value?.components_ledger || []
+  // 漏洞数=**active** 聚合（批 125 修：与 A/C 区同口径——此前含 fixed 导致
+  // 「漏洞表空、组件表还有漏洞」的不一致；已修复历史不进组件当前风险计数）
   const vc = {}
-  for (const f of (snap.value?.findings || [])) vc[f.pkg] = (vc[f.pkg] || 0) + 1
+  for (const f of (snap.value?.findings || [])) {
+    if (!f.fixed) vc[f.pkg] = (vc[f.pkg] || 0) + 1
+  }
   return led.map(r => ({ ...r, vuln_count: vc[r.name] || 0 }))
 })
 // 行筛选组（Audit 范式）：来源类型（distinct 预取）× 漏洞状态（固定枚举）
