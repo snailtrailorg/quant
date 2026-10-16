@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import platform
+import re
 import subprocess
 import sys
 from datetime import date
@@ -91,26 +92,109 @@ def _degraded(part: dict, reason: str) -> dict:
     return part
 
 
-def _component_origin(a_type: str, locations: list | None) -> str:
+def _dep_requesters(site_packages: Path) -> dict[str, set[str]]:
+    """反向依赖图：{被依赖包名(规范化小写): {要求者名集合}}。
+
+    原料=各 dist-info/METADATA 的 Requires-Dist（pip 离线安装事实，零网络零 AI）。
+    规范化：名字小写、剥 extras（PySide6-Addons[x] → pyside6-addons）、剥版本约束。
+    """
+    req_map: dict[str, set[str]] = {}
+    for meta in site_packages.glob("*.dist-info/METADATA"):
+        owner = meta.parent.name.split("-")[0].lower()
+        try:
+            for line in meta.read_text(encoding="utf-8").splitlines():
+                if not line.startswith("Requires-Dist:"):
+                    continue
+                dep = line[len("Requires-Dist:"):]
+                dep = dep.split(";")[0].split("[")[0]      # 剥环境标记/extras
+                dep = dep.strip()
+                for sep in (" ", "==", ">=", "<=", "~=", "!=", ">", "<"):
+                    dep = dep.split(sep)[0] if sep in dep else dep
+                dep = dep.strip().lower()
+                if dep:
+                    req_map.setdefault(dep, set()).add(owner)
+        except OSError:
+            continue
+    return req_map
+
+
+def _origin_chain(host_pkg: str, site_packages: Path,
+                  req_map: dict[str, set[str]] | None = None) -> str:
+    """完整依赖链回溯（批 124——用户：「ffmpeg 只到 pyside6 没到 vnpy」）。
+
+    host → 要求者 → … → 根（requirements.txt 直接声明的包），形如
+    "vnpy→pyside6 捆绑"。BFS 最短路径；多根任取（确定性排序）；无路径=只显示宿主
+    （可能是直接装的工具或孤儿）。编码规则（dist-info 事实），非 AI 推测。
+    """
+    if req_map is None:
+        req_map = _dep_requesters(site_packages)
+    try:
+        roots = set()
+        for ln in (_LOCK_FILE.parent / "requirements.txt").read_text(
+                encoding="utf-8").splitlines():
+            ln = ln.strip()
+            if not ln or ln.startswith(("#", "-", " ")):
+                continue
+            name = ln.split(";")[0].split("[")[0].strip().lower()
+            for sep in (" ", "==", ">=", "<=", "~=", "!=", ">", "<"):
+                name = name.split(sep)[0] if sep in name else name   # 剥版本约束
+            if name:
+                roots.add(name)
+    except OSError:
+        roots = set()
+
+    from collections import deque
+    # BFS：从宿主向上找最近的 requirements.txt 根
+    visited = {host_pkg}
+    queue = deque([(host_pkg, [host_pkg])])
+    while queue:
+        cur, path = queue.popleft()
+        if cur in roots and len(path) > 1:
+            return "→".join(reversed(path))
+        for nxt in sorted(req_map.get(cur, ())):
+            if nxt not in visited:
+                visited.add(nxt)
+                queue.append((nxt, path + [nxt]))
+    return host_pkg   # 无根路径（直接安装/孤儿）
+
+
+def _component_origin(a_type: str, locations: list | None,
+                      site_packages: Path | None = None) -> str:
     """组件来源自解释（批 124——用户需求「不用问 AI ffmpeg 哪来的」）。
 
-    从 syft artifact type+locations **自动推导**（不手工备注——会烂）：
-    python→pip 安装 / rpm→系统 rpm（dnf）/ binary→<宿主包> 捆绑（路径首段：扫
-    site-packages 时 /PySide6/Qt/lib/libavcodec.so ⇒ 'PySide6 捆绑'）/
-    其余→原生库（未识别）。单一真源（DB 只存结果）。
+    python→完整依赖链（_origin_chain：venv→…→requirements 根，如 vnpy→pyside6）/
+    直接声明的根→'pip 安装'；
+    rpm→系统 rpm（dnf）；
+    binary→<宿主链> 捆绑（locations 首段=宿主目录，再向上追链——ffmpeg ⇒
+    'vnpy→pyside6 捆绑'：要治它就得动 vnpy 的 pin，行动含义完整）。
+    噪声过滤：syft 误识别的 setuptools 内部 launcher（cli/gui* UNKNOWN）不入账
+    （调用方按 version=UNKNOWN 剔除）。单一真源（DB 只存结果）。
     """
-    if a_type == "python":
-        return "pip 安装"
     if a_type == "rpm":
         return "系统 rpm（dnf）"
     if a_type == "binary":
         for loc in (locations or []):
             path = (loc or {}).get("path") or ""
             seg = [s for s in path.split("/") if s]
-            if seg:                       # 扫 dir=site-packages ⇒ 首段=宿主目录名
-                return f"{seg[0]} 捆绑"
+            if not seg:
+                continue
+            host = seg[0].lower()
+            chain = _origin_chain(host, site_packages) if site_packages else host
+            return f"{chain} 捆绑"
         return "原生库（来源未识别）"
-    return "原生库（来源未识别）"
+    # python：短链（自身就是根）→'pip 安装'；否则显示链
+    if site_packages:
+        name_guess = None
+        for loc in (locations or []):
+            p = (loc or {}).get("path") or ""
+            m = re.match(r"([A-Za-z0-9_.-]+)-[0-9]", p.strip("/").split("/")[0])
+            if m:
+                name_guess = m.group(1).lower()
+                break
+        if name_guess:
+            chain = _origin_chain(name_guess, site_packages)
+            return chain if "→" in chain else "pip 安装"
+    return "pip 安装"
 
 
 def _upsert_components(conn, scan_date: date,
@@ -360,6 +444,7 @@ def _collect_vulns() -> dict:
         # ④ cwd=/tmp + --source-name/version：syft 要逐级 stat 祖先目录推断 chroot
         #    上下文，worker cwd=shared/ 有权限断点（prod 实证）；source 参数消 WARN。
         db_state = _update_db(_env)   # 每次先 update（批 124 用户裁定——误报最小）
+        _sp = _site_packages()   # ledger 追链用（与 syft 同源）
         sbom_file = _SBOM_FILE   # 覆盖写，留最新一份供诊断（模块常量——测试可注）
         sbom = subprocess.run(
             ["syft", "scan", f"dir:{_site_packages()}", "-o", f"syft-json={sbom_file}",
@@ -433,10 +518,13 @@ def _collect_vulns() -> dict:
             a_type = (art.get("type") or "").lower()
             if a_type not in ("python", "rpm", "binary"):
                 continue
+            ver = str(art.get("version") or "")
+            if ver.upper() == "UNKNOWN":   # syft 噪声（setuptools 内部 launcher 等）
+                continue
             src = {"python": "pip", "rpm": "rpm", "binary": "binary"}[a_type]
             ledger.append((
-                src, (art.get("name") or "").lower(), str(art.get("version") or ""),
-                _component_origin(a_type, art.get("locations")),
+                src, (art.get("name") or "").lower(), ver,
+                _component_origin(a_type, art.get("locations"), _sp),
             ))
         part["ledger"] = ledger
     except subprocess.TimeoutExpired:
