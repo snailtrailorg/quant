@@ -1,13 +1,16 @@
-# EXPAND-CONTRACT: phase=contract  # RENAME 属 contract 相；0149 同窗无依赖，独立可回滚
-"""批 126q：etf_basic_info → listed_fund_basic（正名——用户裁定 2026-10-17）。
+# EXPAND-CONTRACT: phase=expand  # 表正名两步走之 expand：新表名先行、旧表保留可回滚
+"""批 126q·expand：场内基金正名第一步——listed_fund_basic 并行立表（用户裁定 2026-10-17）。
 
-概念纠偏：本表存的是 Tushare `fund_basic(market='E')` 全量=**场内基金全集**
-（ETF+LOF+封基，2973 行中约 500 只名称含 LOF、239 只主动管理型），表名 etf 名不副实
-（窄名宽用——ETF 只是场内基金的子集）。改名零数据迁移（RENAME 即时），配套：
-- sync_config.pg_table 'etf_basic_info' 行同步 UPDATE（kind='etf_list' 的真源指向）；
-- 代码引用（engine.py/stock.py）随批改；
-- 市场维度键 'etf'（ASSET_CATEGORIES/SM category/permission）**不在本批**——注册键
-  另立大批（炸半径横跨交易风控，C 档挂账）。
+概念纠偏：etf_basic_info 实存 Tushare fund_basic(market='E') 全量=**场内基金全集**
+（ETF+LOF+封基，2973 行中约 500 只名称含 LOF、239 只主动管理型），窄名宽用。
+
+两步走（表 RENAME 属回滚不安全 op——migration_policy 立法，DDL 门拦截后改走正道）：
+- **本步（expand）**：`CREATE TABLE IF NOT EXISTS listed_fund_basic (LIKE ... INCLUDING ALL)`
+  + 全量拷贝（幂等 ON CONFLICT）+ sync_config/sync_kind_config pg_table 指向新表；
+  旧表 etf_basic_info **原样保留**（回滚=改回 pg_table 即可，旧代码仍可读旧表）。
+  同步 handler（_sync_etf_list）随批改写新表——旧表自本版起停更（快照语义，无损）。
+- **contract 步（下一发布 0151）**：RENAME etf_basic_info → 归档名 / DROP，pair=0150
+  （expand 先行上产的跨发布要求）。
 """
 from typing import Sequence, Union
 
@@ -20,18 +23,23 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE etf_basic_info RENAME TO listed_fund_basic")
+    op.execute(
+        "CREATE TABLE IF NOT EXISTS listed_fund_basic "
+        "(LIKE etf_basic_info INCLUDING ALL)")
+    # 全量拷贝（幂等：复跑不重不覆盖——ts_code PK 由 INCLUDING ALL 带入）
+    op.execute(
+        "INSERT INTO listed_fund_basic SELECT * FROM etf_basic_info "
+        "ON CONFLICT (ts_code) DO NOTHING")
+    # 三真源指向切换（sync_config/sync_kind_config——对账测试守门）
     op.execute("UPDATE sync_config SET pg_table='listed_fund_basic' "
                "WHERE pg_table='etf_basic_info'")
-    # sync_kind_config 归置表也存 pg_table（三真源之一——测试双真源对账抓出的漏网，
-    # test_batch107_supply_literals::test_pg_table_single_source 守门）
     op.execute("UPDATE sync_kind_config SET pg_table='listed_fund_basic' "
                "WHERE pg_table='etf_basic_info'")
 
 
 def downgrade() -> None:
+    # expand 可回滚：指回旧表（新表留观或 DROP 皆可——选保守留表，GC 另批）
     op.execute("UPDATE sync_kind_config SET pg_table='etf_basic_info' "
                "WHERE pg_table='listed_fund_basic'")
     op.execute("UPDATE sync_config SET pg_table='etf_basic_info' "
                "WHERE pg_table='listed_fund_basic'")
-    op.execute("ALTER TABLE listed_fund_basic RENAME TO etf_basic_info")
