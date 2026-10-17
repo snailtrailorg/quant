@@ -8,7 +8,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span style="font-weight: 600">{{ t(titleKey) }}</span>
-        <div style="display:flex; gap:8px; align-items:center">
+        <div style="display:flex; gap:var(--icon-gap); align-items:center">
           <!-- 批126d：能力筛选弃自制 el-select → RowFilter 单组模式（用户裁定：标准图标钮+
                下拉+蓝点+清除筛选，全站一套）。多选=原单选超集；空=全显契约同 RowFilter。 -->
           <RowFilter v-model="capFilter" :options="capOptions" :title="t('interfaces.capFilterPh')" />

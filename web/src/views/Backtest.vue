@@ -10,7 +10,7 @@
             <el-tag size="small" type="info" style="margin-left: 4px">{{ t('backtest.todayTag') }} {{ todayCount }}</el-tag>
             <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">{{ t('backtest.failedTag') }} {{ failedCount }}</el-tag>
           </span>
-          <span style="display: inline-flex; gap: 8px; align-items: center">
+          <span style="display: inline-flex; gap: var(--icon-gap); align-items: center">
             <!-- 批23：动作组统一序=筛选→新建→列设置（本页轮询自刷无刷新钮）；状态筛选 RowFilter 多选本地过滤 -->
             <RowFilter v-model="filterStatus" :options="statusOptions" :title="t('common.filter')" />
             <IconBtn :icon="Plus" :title="t('backtest.create')" @click="showForm = true" :disabled="navReadonly" />

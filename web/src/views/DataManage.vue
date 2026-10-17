@@ -3,7 +3,7 @@
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span>{{ t('dataManage.title') }}</span>
-        <div style="display: flex; gap: 8px; align-items: center">
+        <div style="display: flex; gap: var(--icon-gap); align-items: center">
           <ColumnSettings storage-key="cols.sync-config" :columns="syncColDefs" v-model:visible="syncVisible" />
           <RefreshBtn :loading="loading" @refresh="load" />
         </div>

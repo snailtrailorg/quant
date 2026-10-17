@@ -6,7 +6,7 @@
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span style="font-weight: 600">{{ t('smtp.title') }}</span>
-          <span style="display: flex; gap: 8px; align-items: center">
+          <span style="display: flex; gap: var(--icon-gap); align-items: center">
             <IconBtn :icon="Plus" :title="t('alerts.smtpProvAdd')" @click="openAdd" />
           </span>
         </div>

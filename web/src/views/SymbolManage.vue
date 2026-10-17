@@ -6,7 +6,7 @@
           <el-button type="primary" @click="$router.back()">← {{ t('common.return') }}</el-button>
           <span style="margin-left: var(--sp-2)">{{ t('symbol.listTitle', { title, n: total }) }}</span>
         </div>
-        <div style="display: flex; gap: 8px; align-items: center">
+        <div style="display: flex; gap: var(--icon-gap); align-items: center">
           <el-input v-model="q" :placeholder="t('symbol.phSearch')" style="width: 180px" clearable @keyup.enter="onSearch" />
           <el-button type="primary" @click="onSearch">{{ t('common.search') }}</el-button>
           <RefreshBtn @refresh="load" />

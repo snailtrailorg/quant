@@ -3,7 +3,7 @@
     <!-- 批24 迭代十六 hotfix4（用户裁定：条目级整合非页面拼接）：邮件发送记录映射为日志条目混排进本表
          （level=status 映射/module=email/msg=收件人+主题+错误），双源合并按时间倒序；
          分组筛选（级别+模块——模块 distinct 预取自然含 email）+导出（合并行） -->
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: var(--sp-3)">
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: var(--icon-gap); margin-bottom: var(--sp-3)">
       <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
       <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExport" />
     </div>

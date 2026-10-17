@@ -4,7 +4,7 @@
   <div>
     <!-- 批24 迭代十六：el-card 退役（Observe 页签卡内防卡中卡）；筛选文字框→RowFilter 分组（用户+动作，均数据 distinct 预取——
          用户裁定：用户相关等非固定下拉提前备好）；删除钮图标化（Delete/DeleteFilled） -->
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-bottom: var(--sp-3)">
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: var(--icon-gap); margin-bottom: var(--sp-3)">
       <!-- 批25：审计删除退役（系统记录，用户裁定 UI 简化）；动作序=筛选→导出 -->
       <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
       <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExportCsv" />

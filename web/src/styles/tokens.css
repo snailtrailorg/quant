@@ -75,6 +75,9 @@
   --icon-glyph: 18px; /* 批21：圆钮内图标字形尺寸（el-icon 1em，改此处调图标大小） */
   --dot: 7px;         /* 批126c：全站指示点直径唯一源（用户裁定 7px 标准——StatusTag/来源点/筛选
                         激活点/通知点同尺寸；颜色语义各处自持，尺寸不得散落字面量） */
+  --icon-gap: 8px;    /* 批126f：图标钮间距唯一源（用户裁定 8px 标准）——header 工具栏 gap 与
+                        行内操作列相邻钮 margin 同值；EP 默认 .el-button+.el-button=12px
+                        由 IconBtn 组件相邻覆写收敛，字面量不得散落 */
   --lh-tight: 1.3;    /* 数字/KPI */
   --lh-base: 1.5;     /* 正文 */
   --lh-loose: 1.7;    /* 段落/描述 */
@@ -189,3 +192,6 @@ html.dark {
 /* 行高令牌绑定 */
 .kpi-num, .num { line-height: var(--lh-tight); }
 body, .el-table, .el-form-item__label { line-height: var(--lh-base); }
+/* 批126f：图标钮相邻间距立法（用户裁定 8px 标准）——EP 默认 .el-button+.el-button=12px
+   偏松；行内操作列（IconBtn 并排）与 header 工具栏（gap: var(--icon-gap)）同值全站统一 */
+.icon-btn + .icon-btn { margin-left: var(--icon-gap); }
