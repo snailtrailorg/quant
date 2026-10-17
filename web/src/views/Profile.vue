@@ -222,7 +222,7 @@
           <div v-else-if="qrStatus === 'error'" style="text-align: center; color: var(--critical)">{{ qrNote || t('common.failed') }}</div>
           <!-- 五轮：绑定机制取消——done 即成功终态（发消息即 owner 身份，无需绑定步骤） -->
           <div v-if="qrStatus === 'done'" style="text-align: center; padding: var(--sp-4) 0">
-            <div style="font-size: calc(var(--fs-kpi) * 1.6); line-height: 1">✅</div>
+            <el-icon :size="48" color="var(--success)"><CircleCheckFilled /></el-icon>
             <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 6px">{{ t('myIm.doneTitle') }}</div>
             <div style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.doneGuide') }}</div>
           </div>
@@ -338,7 +338,7 @@ import TableShell from '../components/TableShell.vue'
 import api, { apiErr, sse, getMe } from '../api'
 import { validatePassword } from '../password'
 import IconBtn from '../components/IconBtn.vue'
-import { Delete, Plus, Edit } from '@element-plus/icons-vue'
+import { Delete, Plus, Edit, CircleCheckFilled } from '@element-plus/icons-vue'
 import { permGroupsOf } from '../permGroups'
 
 const props = defineProps({

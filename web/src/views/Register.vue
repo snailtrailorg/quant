@@ -7,7 +7,7 @@
       <div v-if="verifying" class="state-msg">{{ t('register.verifying') }}</div>
 
       <div v-else-if="!valid" class="state-msg error">
-        ❌ {{ t('register.invalid') }}<br/>
+        <el-icon :size="18" color="var(--el-color-danger)"><CircleCloseFilled /></el-icon> {{ t('register.invalid') }}<br/>
         <router-link to="/login" class="link">{{ t('login.backToLogin') }}</router-link>
       </div>
 
@@ -79,7 +79,7 @@ import { ref, nextTick, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, CircleCloseFilled } from '@element-plus/icons-vue'
 import { verifyInviteToken, registerUser, getTerms, apiErr } from '../api'
 import { validatePassword } from '../password'
 import Avatar from '../components/Avatar.vue'

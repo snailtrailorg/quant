@@ -7,12 +7,12 @@
         {{ t('emailConfirm.verifying') }}
       </div>
       <div v-else-if="state === 'success'" style="text-align: center; padding: var(--sp-4) 0">
-        <div style="font-size: calc(var(--fs-kpi) * 1.4); line-height: 1">✅</div>
+        <el-icon :size="42" color="var(--success)"><CircleCheckFilled /></el-icon>
         <p style="margin: var(--sp-2) 0">{{ t('emailConfirm.success') }}</p>
         <el-button type="primary" @click="$router.push('/login')">{{ t('emailConfirm.successBtn') }}</el-button>
       </div>
       <div v-else style="text-align: center; padding: var(--sp-4) 0">
-        <div style="font-size: calc(var(--fs-kpi) * 1.4); line-height: 1">⚠️</div>
+        <el-icon :size="42" color="var(--warn-fill)"><WarningFilled /></el-icon>
         <p style="margin: var(--sp-2) 0">{{ t('emailConfirm.failed') }}</p>
       </div>
     </el-card>
@@ -21,6 +21,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
+import { CircleCheckFilled, WarningFilled } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import api from '../api'

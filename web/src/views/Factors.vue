@@ -121,8 +121,8 @@
             <div style="margin-top: var(--sp-2); display: flex; gap: 8px; align-items: center">
               <el-button type="primary" @click="validateCode" :loading="validating">{{ t('factors.validate') }}</el-button>
               <el-button type="success" @click="previewFactor" :loading="previewing">{{ t('factors.preview') }}</el-button>
-              <span v-if="codeValid === true" style="color: var(--el-color-success)">✅ {{ t('factors.codeValid') }}</span>
-              <span v-else-if="codeValid === false" style="color: var(--el-color-danger)">❌ {{ codeError }}</span>
+              <span v-if="codeValid === true" style="color: var(--el-color-success); display: inline-flex; align-items: center; gap: 4px"><el-icon :size="14"><CircleCheckFilled /></el-icon>{{ t('factors.codeValid') }}</span>
+              <span v-else-if="codeValid === false" style="color: var(--el-color-danger); display: inline-flex; align-items: center; gap: 4px"><el-icon :size="14"><CircleCloseFilled /></el-icon>{{ codeError }}</span>
             </div>
           </div>
         </el-form-item>
@@ -175,7 +175,7 @@ import PythonEditor from '../components/PythonEditor.vue'
 import DslEditor from '../components/DslEditor.vue'
 import TableShell from '../components/TableShell.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Plus, Edit } from '@element-plus/icons-vue'
+import { Plus, Edit, CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const factors = ref([])

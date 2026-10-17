@@ -7,13 +7,13 @@
       </h2>
       <div v-if="state === 'loading'" style="text-align: center; color: var(--text-secondary); padding: var(--sp-4) 0">
         {{ t('unfreezeConfirm.loading') }}
-      </div><div v-else-if="state === 'failed'" style="text-align: center; padding: var(--sp-4) 0">
-        <div style="font-size: calc(var(--fs-kpi) * 1.4); line-height: 1">⚠️</div>
+      </div>      <div v-else-if="state === 'failed'" style="text-align: center; padding: var(--sp-4) 0">
+        <el-icon :size="42" color="var(--warn-fill)"><WarningFilled /></el-icon>
         <p style="margin: var(--sp-2) 0">{{ t('unfreezeConfirm.failed') }}</p>
         <el-button type="primary" @click="$router.push('/live-task')">{{ t('unfreezeConfirm.backTask') }}</el-button>
       </div>
       <div v-else-if="state === 'done'" style="text-align: center; padding: var(--sp-4) 0">
-        <div style="font-size: calc(var(--fs-kpi) * 1.4); line-height: 1">✅</div>
+        <el-icon :size="42" color="var(--success)"><CircleCheckFilled /></el-icon>
         <p style="margin: var(--sp-2) 0">{{ t('unfreezeConfirm.done') }}</p>
         <el-button type="primary" @click="$router.push('/live-task')">{{ t('unfreezeConfirm.backTask') }}</el-button>
       </div>
@@ -36,6 +36,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { CircleCheckFilled, WarningFilled } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'

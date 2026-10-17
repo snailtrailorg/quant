@@ -452,7 +452,7 @@ async def email_test_api(body: dict = Body(...), request: Request = None,
     if not to or "@" not in to:
         raise ApiError(400, "EMAIL_INVALID", "请填有效收件邮箱")
     subject = "测试邮件 · 蜗牛量化交易"   # 批47 顺手修：站名遗留文案（原"人工智能开发学习平台"）
-    html = ("<html><body style='font-family:sans-serif'><h3>✅ 测试邮件</h3>"
+    html = ("<html><body style='font-family:sans-serif'><h3>测试邮件</h3>"
             "<p>这是一封配置验证邮件。收到即表示 SMTP 发信配置正确。</p></body></html>")
     outbox_id = queue_email(to, subject, html)
     background_tasks.add_task(try_row, outbox_id)
