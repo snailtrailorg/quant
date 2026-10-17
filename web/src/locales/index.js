@@ -124,7 +124,7 @@ export default {
       disabled: '已停用',
     },
     tabs: {
-      astock: 'A股', cb: '可转债', etf: 'ETF',
+      astock: 'A股', cb: '可转债', etf: '场内基金',
       sync: '同步任务', integrity: '完整性体检', quality: '股票清单核对', sched: '调度',
       routing: '路由诊断', security: '标的资料',   // 批88：自集成中心/ops 组迁入数据管理页（域对齐）
       logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
@@ -1439,7 +1439,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       marketCap: '市值', turnover: '换手率',
       cbFilters: '转债筛选', doubleLowMax: '双低上限', premiumMax: '溢价率上限(%)', remainingMin: '剩余年限下限',
       doubleLow: '双低', premium: '溢价率', convPrice: '转股价', maturity: '到期日', bondName: '转债名', stkName: '正股名',
-      etfFilters: 'ETF 筛选', scaleMin: '规模下限(亿)', feeMax: '费率上限(%)',
+      etfFilters: '场内基金筛选', scaleMin: '规模下限(亿)', feeMax: '费率上限(%)',
       fundScale: '规模', mgmtFee: '管理费', trackingErr: '跟踪误差', fundType: '类型',
     },
     perm: {
@@ -1508,7 +1508,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       marketCap: 'Mkt Cap', turnover: 'Turnover',
       cbFilters: 'CB Filters', doubleLowMax: 'Double-low max', premiumMax: 'Premium max (%)', remainingMin: 'Remaining yrs min',
       doubleLow: 'D-Low', premium: 'Premium', convPrice: 'Conv px', maturity: 'Maturity', bondName: 'Bond', stkName: 'Stock',
-      etfFilters: 'ETF Filters', scaleMin: 'Scale min (yi)', feeMax: 'Fee max (%)',
+      etfFilters: 'Listed Fund Filters', scaleMin: 'Scale min (yi)', feeMax: 'Fee max (%)',
       fundScale: 'Scale', mgmtFee: 'Mgmt fee', trackingErr: 'Track err', fundType: 'Type',
     },
     app: { title: 'Snail Quant' },   // 2026-09-09 用户裁定：侧栏 200px 容不下长文案（161.8px>160px 内容区），缩短
@@ -1635,7 +1635,7 @@ im: 'IM 机器人', mail: '邮件 SMTP',
       disabled: 'Disabled',
     },
     tabs: {
-      astock: 'A-Shares', cb: 'Convertibles', etf: 'ETF',
+      astock: 'A-Shares', cb: 'Convertibles', etf: 'Listed Funds',
       sync: 'Sync Tasks', integrity: 'Integrity', quality: 'Stock List Check', sched: 'Scheduler',
       routing: 'Route Diagnostics', security: 'Security Master',   // batch88: migrated into Data Ops (domain alignment)
       logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名

@@ -583,7 +583,7 @@ _LITERAL_SUPPLY: dict[str, tuple[str, str | None, str]] = {
     "static_symbols":    ("static_list",       "symbols",     "static_symbols"),
     "cb_basic":          ("static_list",       "convertible", "cb_basic_info"),
     "convertible_terms": ("static_list",       "terms",       "convertible_terms"),
-    "etf_list":          ("static_list",       "etf",         "etf_basic_info"),
+    "etf_list":          ("static_list",       "etf",         "listed_fund_basic"),
     "trade_cal":         ("trade_cal",         None,          "trade_cal"),
 }
 
@@ -762,7 +762,7 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany("""
-                INSERT INTO etf_basic_info (ts_code, name, management, fund_type, invest_type, list_date)
+                INSERT INTO listed_fund_basic (ts_code, name, management, fund_type, invest_type, list_date)
                 VALUES (%s,%s,%s,%s,%s,%s)
                 ON CONFLICT (ts_code) DO UPDATE SET name=EXCLUDED.name, management=EXCLUDED.management
             """, rows)
@@ -3262,7 +3262,7 @@ _PER_SYMBOL_SYNC_IDS = set(_PER_SYMBOL_META)
 
 # 各 sync_id 对应的：tushare 拉取 API / 静态信息表 / ts_code 来源
 # astock_daily -> pro.daily(ts_code=) / asset_static_info
-# etf_daily    -> pro.fund_daily(ts_code=) / etf_basic_info
+# etf_daily    -> pro.fund_daily(ts_code=) / listed_fund_basic
 # cb_daily     -> pro.cb_daily(ts_code=) / cb_basic_info（注：cb_daily 按日期拉全量更高效，per-symbol 仍支持）
 # astock_minute/_5min -> pro.stk_mins(ts_code=,freq=) / asset_static_info（per-symbol only，不支持按日全市场）
 
@@ -3300,7 +3300,7 @@ def _list_static_ts_codes(kind: str) -> list[str]:
                 return [r[0] for r in rows]
         except Exception as e:
             logger.warning("查询 static_symbols 失败: %s", e)
-    table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
+    table = {"astock": "asset_static_info", "etf": "listed_fund_basic", "cb": "cb_basic_info"}[kind]
     with get_conn() as conn:
         cur = conn.execute(f"SELECT ts_code FROM {table} ORDER BY ts_code")
         return [r[0] for r in cur.fetchall()]
@@ -3310,7 +3310,7 @@ def _get_list_date(kind: str, ts_code: str) -> str:
     """查某标的**产生时间**（上市/上币日，YYYYMMDD）；不可得 ⇒ 回退 `_TUSHARE_MIN_DATE`。
 
     批 108·步 2（裁定 G①）：**真源改读 `security_master.list_date`**。原读
-    `asset_static_info` / `etf_basic_info` / `cb_basic_info` 三张**源表**——与 SM 构成
+    `asset_static_info` / `listed_fund_basic` / `cb_basic_info` 三张**源表**——与 SM 构成
     **inception 双源**（两处都由同一 df fan-out 写 ⇒ 可漂移），且那三表是 **tushare 专属**
     形状（§九.6「换源即错」）。SM 是**跨市场**主档 ⇒ 唯一真源，crypto 与 astock 同形取用。
 
@@ -3846,7 +3846,7 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
     _, kind, _freq, _bar_type = _get_pro_api(sync_id)
     if kind is None:
         return {"items": [], "total": 0}
-    table = {"astock": "asset_static_info", "etf": "etf_basic_info", "cb": "cb_basic_info"}[kind]
+    table = {"astock": "asset_static_info", "etf": "listed_fund_basic", "cb": "cb_basic_info"}[kind]
     name_col = "bond_short_name" if kind == "cb" else "name"
     bar_table = _PER_SYMBOL_META[sync_id][1]
 

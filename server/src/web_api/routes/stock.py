@@ -225,14 +225,14 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
 @router.get("/api/screen/etf")
 def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
                    payload: dict = Depends(require_perm("read"))):
-    """ETF 基金筛选（etf_basic_info + 规模/费率/跟踪误差;05 §5.9）。"""
+    """场内基金筛选（listed_fund_basic + 规模/费率/跟踪误差;05 §5.9；批126q 正名——表含 ETF+LOF 全集）。"""
     def _f(x):
         return float(x) if x is not None else None
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT ts_code, name, management, fund_type, invest_type,
                    fund_scale, management_fee, tracking_error
-            FROM etf_basic_info
+            FROM listed_fund_basic
             WHERE (%s = 0 OR fund_scale >= %s)
               AND (%s = 0 OR management_fee <= %s)
             ORDER BY fund_scale DESC NULLS LAST
