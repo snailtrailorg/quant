@@ -6,7 +6,7 @@
     <template #header>
       <div style="display:flex;justify-content:space-between;align-items:center"><span>{{ t('sysmon.connections') }}</span></div>
     </template>
-    <div class="card-grid">
+    <div class="card-grid" v-loading="firstLoading">
       <el-card v-for="(hb, acct) in hubs" :key="acct" shadow="never" class="status-card">
         <div class="card-head">
           <span class="card-name">md-hub·{{ acct }}</span>
@@ -53,6 +53,7 @@ let pollTimer = null
 // 批113：task 卡片「历史」→ LiveTask 展开行冻结史深链（query.freeze=<tid>，LiveTask 读它自动展开该行）
 const goHistory = (tid) => router.push({ name: 'live-task', query: { freeze: tid } })
 
+const firstLoading = ref(true)   // 批126o：首载转圈（与其他异步页反馈一致）
 const load = async () => {
   try {
     const snap = await getHealthComponents()
@@ -60,6 +61,7 @@ const load = async () => {
     const sig = JSON.stringify(next)
     if (sig !== lastSig) { lastSig = sig; hubs.value = next.hubs; tasks.value = next.tasks }   // 数据未变不赋值
   } catch {}
+  finally { firstLoading.value = false }
 }
 let lastSig = ''
 onMounted(() => { load(); pollTimer = setInterval(load, 30000) })
@@ -67,7 +69,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }   /* 每行 4 卡（批78 用户裁定：三卡组统一）随容器宽等分伸缩 */
+.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); min-height: var(--sp-8); }   /* 每行 4 卡（批78 用户裁定：三卡组统一）随容器宽等分伸缩；min-height 供首载 v-loading 可见（批126o） */
 .status-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .card-name { font-size: var(--fs-label); font-weight: 600; }

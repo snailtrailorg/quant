@@ -195,6 +195,10 @@ def metrics():
 # --- 健康监控（arch-15 SM2：组件矩阵 + 事件流，admin）---
 
 _METRICS_CACHE: dict = {}   # /api/system/metrics 60s 进程缓存（=最小采集周期）
+_COMPONENTS_CACHE: dict = {}   # /api/health/components 30s 进程缓存（批126o：collect 实时
+                               # 跑 systemctl show 子进程 ~1.4s——运行状态页两组件（服务/连接）
+                               # 各打一次=同快照双采集；30s 内共享（30s 轮询周期内毫秒级
+                               # systemctl 态变化无感知，快照语义无损）
 
 @router.get("/api/health/components")
 def health_components_api(payload: dict = Depends(require_perm("system_config"))):
@@ -202,8 +206,15 @@ def health_components_api(payload: dict = Depends(require_perm("system_config"))
 
     与 /metrics 同源同口径（collector.collect），本端点给 Web 健康页用（带鉴权）。
     """
+    import time as _time
+    now = _time.time()
+    if now - _COMPONENTS_CACHE.get("ts", 0) < 30:
+        return _COMPONENTS_CACHE["payload"]
     from src.health_monitor.collector import collect
-    return collect()
+    snap = collect()
+    _COMPONENTS_CACHE["ts"] = now
+    _COMPONENTS_CACHE["payload"] = snap
+    return snap
 
 
 @router.get("/api/health/events")

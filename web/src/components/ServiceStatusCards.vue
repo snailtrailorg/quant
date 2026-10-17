@@ -5,7 +5,7 @@
     <template #header>
       <div style="display:flex;justify-content:space-between;align-items:center"><span>{{ t('sysmon.services') }}</span></div>
     </template>
-    <div class="card-grid">
+    <div class="card-grid" v-loading="firstLoading">
       <el-card v-for="(st, unit) in units" :key="unit" shadow="never" class="status-card">
         <div class="card-head">
           <span class="card-name">{{ shortName(unit) }}</span>
@@ -31,12 +31,14 @@ let pollTimer = null
 const isActive = st => st && st.ActiveState === 'active'
 const shortName = u => u.replace(/^quant-/, '').replace(/@quant\.service$/, '')
 
+const firstLoading = ref(true)   // 批126o：首载转圈（与其他异步页反馈一致）
 const load = async () => {
   try {
     const u = (await getHealthComponents()).units || {}
     const sig = JSON.stringify(u)
     if (sig !== lastSig) { lastSig = sig; units.value = u }   // 数据未变不赋值，轮询视觉连续
   } catch {}
+  finally { firstLoading.value = false }
 }
 let lastSig = ''
 onMounted(() => { load(); pollTimer = setInterval(load, 30000) })
@@ -44,7 +46,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
-.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }   /* 每行 4 卡（批78 用户裁定：三卡组统一）随容器宽等分伸缩 */
+.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); min-height: var(--sp-8); }   /* 每行 4 卡（批78 用户裁定：三卡组统一）随容器宽等分伸缩；min-height 供首载 v-loading 可见（批126o） */
 .status-card { border: 1px solid var(--border-weak); }
 .card-head { display: flex; justify-content: space-between; align-items: center; }
 .card-name { font-size: var(--fs-label); font-weight: 600; }

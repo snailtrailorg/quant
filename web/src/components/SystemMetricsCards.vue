@@ -7,6 +7,8 @@
     <template #header>
       <div style="display:flex;justify-content:space-between;align-items:center"><span>{{ t('sysmon.metrics') }}</span></div>
     </template>
+    <!-- 批126o：首载 v-loading（与其他异步页反馈一致——原裸空白被用户感知为「无响应」） -->
+    <div v-loading="firstLoading" class="load-zone">
     <div v-if="!hasData" class="empty-group">{{ t('sysmon.noData') }}</div>
     <div v-else class="card-grid">
       <el-card v-for="c in cards" :key="c.kind" shadow="never" class="metric-card">
@@ -21,6 +23,7 @@
         <VChart v-if="c.series.length" :option="c.option" autoresize style="height: 128px" />
         <div v-else class="empty-spark">{{ t('sysmon.noData') }}</div>
       </el-card>
+    </div>
     </div>
   </el-card>
 </template>
@@ -138,17 +141,18 @@ const cards = computed(() => {
   })
 })
 
+// 批126o：metrics+alerts 并行（原串行两段 await——首载双延时叠加）；首载转圈仅第一次
+const firstLoading = ref(true)
 const load = async () => {
   try {
-    const m = await getSystemMetrics()
+    const [m, a] = await Promise.all([getSystemMetrics(), getSystemAlerts().catch(() => null)])
     const sig = JSON.stringify([m.resources, m.thresholds, m.series])
     if (sig !== lastSig) { lastSig = sig; metrics.value = m }
+    const items = (a?.items) || []
+    const asig = JSON.stringify(items)
+    if (asig !== alertsSig) { alertsSig = asig; alerts.value = items }
   } catch {}
-  try {
-    const a = (await getSystemAlerts()).items || []
-    const sig = JSON.stringify(a)
-    if (sig !== alertsSig) { alertsSig = sig; alerts.value = a }
-  } catch {}
+  finally { firstLoading.value = false }
 }
 let alertsSig = ''
 onMounted(() => { load(); pollTimer = setInterval(load, 30000) })
@@ -156,6 +160,7 @@ onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 </script>
 
 <style scoped>
+.load-zone { min-height: var(--sp-8); }   /* 首载 v-loading 落点（批126o） */
 .empty-group { color: var(--text-secondary); font-size: var(--fs-label); padding: var(--sp-6) 0; text-align: center; }
 .card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }   /* 批78（用户裁定）：固定 4 列各占 1/4（批51「固定 3 列」随批更新；CPU 卡加入后 4 张一行满） */
 .metric-card { border: 1px solid var(--border-weak); }
