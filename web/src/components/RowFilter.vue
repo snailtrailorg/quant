@@ -76,18 +76,23 @@ const onGroup = (key, vals) => {
 </script>
 
 <style scoped>
-.rf-opt { display: block; height: 26px; line-height: 26px; margin-right: 0; width: 100% }
+/* 批126e 用户裁定：popover 菜单内**统一字体**——全菜单一个字号（fs-label=「严重级别」
+   列头同款），层级只靠字重（分组标题 600 粗体/选项与清除钮常规）。EP checkbox
+   label 默认 --el-font-size-base(14px) 须显式覆盖归一 */
+.rf-opt { display: block; height: 26px; line-height: 26px; margin-right: 0; width: 100%;
+  font-size: var(--fs-label); font-weight: 400; }
+:deep(.rf-opt .el-checkbox__label) { font-size: var(--fs-label); font-weight: 400; }
 /* 激活指示：包裹层相对定位，蓝点贴图标右上角（尺寸 var(--dot)=7px 全站标准，
      色 brand-500=选中/激活语义——批126c 用户裁定，红留给故障态） */
 .rf-ref { position: relative; display: inline-flex; }
 .rf-dot { position: absolute; top: 0; right: 0; width: var(--dot); height: var(--dot);
   border-radius: 50%; background: var(--brand-500); }
-/* 清除筛选：原生 button 裸样式——字号/色对齐选项行（fs-foot+主文本，批126c）；
-     disabled 态 EP 变量灰置；常驻保 popover 高度稳定（批126c） */
+/* 清除筛选：与选项同字号同字重（fs-label/400——全菜单统一，批126e）；
+     disabled 态灰置；常驻保 popover 高度稳定（批126c） */
 .rf-clear { width: 100%; display: block; text-align: left; padding: 2px 8px;
   border: none; background: none; cursor: pointer;
-  font: inherit; font-size: var(--fs-foot); color: var(--text-primary); }
+  font: inherit; font-size: var(--fs-label); font-weight: 400; color: var(--text-primary); }
 .rf-clear:disabled { color: var(--text-secondary); opacity: .5; cursor: default; }
-/* 分组标签（迭代十六）：列名小标题 */
-.rf-group-label { font-size: var(--fs-foot); font-weight: 600; color: var(--text-secondary); padding: var(--sp-1) 8px 2px; }
+/* 分组标签（一级菜单）：同字号+粗体区分层级（批126e——原 fs-foot 与选项不同号） */
+.rf-group-label { font-size: var(--fs-label); font-weight: 600; color: var(--text-secondary); padding: var(--sp-1) 8px 2px; }
 </style>
