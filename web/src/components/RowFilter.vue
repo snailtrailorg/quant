@@ -87,13 +87,14 @@ const onGroup = (key, vals) => {
 .rf-ref { position: relative; display: inline-flex; }
 .rf-dot { position: absolute; top: 0; right: 0; width: var(--dot); height: var(--dot);
   border-radius: 50%; background: var(--brand-500); }
-/* 清除筛选：同字号+粗体（fs-label/600——与分组标题同层级强调，批126e 用户裁定
-     「清除钮 600 粗」）；disabled 态灰置；常驻保 popover 高度稳定（批126c） */
+/* 清除筛选：同字号+粗体（fs-label/600——批126e 用户裁定「清除钮 600 粗」）；
+     色回归 text-secondary 灰（批126j 用户裁定：黑白对比后原灰更好——菜单动作钮
+     不与正文抢重；disabled 态再降透明度）；常驻保 popover 高度稳定（批126c） */
 .rf-clear { width: 100%; display: block; text-align: left; padding: 2px 8px;
   border: none; background: none; cursor: pointer;
-  font: inherit; font-size: var(--fs-label); font-weight: 600; color: var(--text-primary); }
-.rf-clear:disabled { color: var(--text-secondary); opacity: .5; cursor: default; }
-/* 分组标签（一级菜单）：同字号+粗体区分层级（批126e）；色与清除钮统一 text-primary
-   （批126g 用户裁定——同层级同色，secondary 灰只留 disabled 态） */
-.rf-group-label { font-size: var(--fs-label); font-weight: 600; color: var(--text-primary); padding: var(--sp-1) 8px 2px; }
+  font: inherit; font-size: var(--fs-label); font-weight: 600; color: var(--text-secondary); }
+.rf-clear:disabled { opacity: .5; cursor: default; }
+/* 分组标签（一级菜单）：同字号+粗体区分层级（批126e）；灰色回归（批126j 用户裁定
+   ——126g 的 text-primary 黑被否，一级菜单灰+粗体已够层级） */
+.rf-group-label { font-size: var(--fs-label); font-weight: 600; color: var(--text-secondary); padding: var(--sp-1) 8px 2px; }
 </style>

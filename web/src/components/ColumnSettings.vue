@@ -81,11 +81,12 @@ const resetDefault = () => { visible.value = defaultKeys.value }
 .cs-ref { position: relative; display: inline-flex; }
 .cs-dot { position: absolute; top: 0; right: 0; width: var(--dot); height: var(--dot);
   border-radius: 50%; background: var(--brand-500); }
-/* 恢复默认：rf-clear 同款（fs-label/600/text-primary）；disabled=已在默认态；
+/* 恢复默认：rf-clear 同款（fs-label/600）；色 text-secondary 灰（批126j 用户裁定：
+     菜单动作钮灰色回归——与正文黑拉开，不抢重）；disabled=已在默认态再降透明度；
      padding 走 tokens（令牌门禁新增内联 px） */
 .cs-reset { width: 100%; display: block; text-align: left;
   padding: var(--sp-1) var(--sp-2);
   border: none; background: none; cursor: pointer;
-  font: inherit; font-size: var(--fs-label); font-weight: 600; color: var(--text-primary); }
-.cs-reset:disabled { color: var(--text-secondary); opacity: .5; cursor: default; }
+  font: inherit; font-size: var(--fs-label); font-weight: 600; color: var(--text-secondary); }
+.cs-reset:disabled { opacity: .5; cursor: default; }
 </style>
