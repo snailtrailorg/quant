@@ -101,6 +101,11 @@
             <span v-else>{{ row.vuln_id }}</span>
           </template>
         </el-table-column>
+        <!-- 批126i：描述列移第二列（用户裁定——编号后即看本质，严重级别等量化列随右） -->
+        <el-table-column v-if="hasDesc" prop="description" :label="t('secpage.descCol')"
+                         min-width="260" show-overflow-tooltip>
+          <template #default="{ row }">{{ descOf(row) }}</template>
+        </el-table-column>
         <el-table-column prop="severity" :label="t('secpage.severity')" min-width="95" sortable
                          :sort-method="(a, b) => sevRank(b.severity) - sevRank(a.severity)">
           <template #default="{ row }">
@@ -118,10 +123,6 @@
               {{ row.fixed ? t('secpage.fixedLabel') : t('secpage.activeLabel') }}
             </span>
           </template>
-        </el-table-column>
-        <el-table-column v-if="hasDesc" prop="description" :label="t('secpage.descCol')"
-                         min-width="260" show-overflow-tooltip>
-          <template #default="{ row }">{{ descOf(row) }}</template>
         </el-table-column>
         <el-table-column prop="first_seen" :label="t('secpage.firstSeen')" min-width="110" />
         <el-table-column :label="t('common.action')" min-width="70">
