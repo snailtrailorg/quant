@@ -174,11 +174,20 @@ def security_finding_delete(pkg: str = Query(...), vuln_id: str = Query(...),
     return {"ok": True}
 
 
+_SECURITY_HISTORY_CACHE: dict = {}   # 批126p：31 天逐行×基线 diff 真算实测 1.4s；扫描
+                                     # 06:00 日更+安全页 5min 轮询——60s 缓存新鲜度绝对够
+
 @router.get("/history")
 def security_history(days: int = 30, _u: dict = Depends(require_perm("read"))):
     """近 N 天逐日趋势：漏洞计数/新增/基线变更/组件变更（版本差真算）+ ai_summary 首行
     （B 区历史摘要折叠——日期+首行预览）。days 护栏 [1,31]（步 4 P1-5：>31 取 31——
     逐日行×基线 diff 的计算量与 payload 有界）。"""
+    import time as _time
+    now = _time.time()
+    key = f"ts:{now // 60}:days:{max(1, min(days, 31))}"   # 分钟桶+days 参数分键
+    hit = _SECURITY_HISTORY_CACHE.get(key)
+    if hit is not None:
+        return hit
     days = max(1, min(days, 31))
     today = date.today()
     snaps = store.get_snapshots_recent(days, today)
@@ -207,7 +216,9 @@ def security_history(days: int = 30, _u: dict = Depends(require_perm("read"))):
         })
         prev_snap = s
     rows.reverse()   # 近日在前
-    return {"days": days, "items": rows}
+    out = {"days": days, "items": rows}
+    _SECURITY_HISTORY_CACHE[key] = out   # 单槽分钟桶（旧键被替换，无泄漏）
+    return out
 
 
 def _baseline_diff_safe(prev: dict | None, cur: dict) -> list[dict]:

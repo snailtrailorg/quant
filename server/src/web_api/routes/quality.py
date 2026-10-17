@@ -11,11 +11,21 @@ from src.web_api.errors import ApiError
 router = APIRouter(prefix="/api/quality", tags=["quality"])
 
 
+_SM_RECONCILE_CACHE: dict = {}   # 批126p：SM 差集全量对账实测 0.7s；对账快照语义，
+                                 # 60s 内双击刷新共享一次计算无损
+
 @router.get("/sm-reconcile")
 async def sm_reconcile(_u: dict = Depends(require_perm("system_config"))):
     """SM 差集报告（62c——范围钉死 stock×L；ETF/转债范围外不计）。"""
+    import time as _time
+    now = _time.time()
+    if now - _SM_RECONCILE_CACHE.get("ts", 0) < 60:
+        return _SM_RECONCILE_CACHE["payload"]
     from src.data_platform.quality import sm_reconcile as _sr
-    return _sr()
+    out = _sr()
+    _SM_RECONCILE_CACHE["ts"] = now
+    _SM_RECONCILE_CACHE["payload"] = out
+    return out
 
 
 @router.get("/lineage/{signal_id}")

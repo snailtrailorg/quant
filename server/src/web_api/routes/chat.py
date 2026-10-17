@@ -251,10 +251,17 @@ def test_llm_model(mid: int, payload: dict = Depends(require_perm("llm_config"))
 # ——— LLM 用量 ——
 
 
+_LLM_USAGE_CACHE: dict = {}   # 批126p：日粒度聚合 60s 进程缓存（全表三扫实测 1.6s；
+                              # 日粒度数据 60s 内「今日」计数变化无感知，快照语义无损）
+
 @router.get("/api/llm-usage/series")
 def llm_usage_series(payload: dict = Depends(require_perm("read"))):
     """批50 起/批54 终态(用户裁定:去两档只留日):每模型 {今日汇总+日粒度全历史曲线(补零)}。
     provider+model 双键;左界=数据 min(从有数据时刻起)。原 hour 档/48h 固定窗均退役。"""
+    import time as _time
+    now = _time.time()
+    if now - _LLM_USAGE_CACHE.get("ts", 0) < 60:
+        return _LLM_USAGE_CACHE["payload"]
     with get_conn() as conn:
         cur = conn.execute("""
             SELECT provider, model, count(*),
@@ -289,7 +296,10 @@ def llm_usage_series(payload: dict = Depends(require_perm("read"))):
                        "series": [{"ts": ts, "calls": pts[ts]["calls"] if ts in pts else 0,
                                    "tokens": pts[ts]["tokens"] if ts in pts else 0} for ts in grid]})
     models.sort(key=lambda m: -m["today"]["calls"])
-    return {"models": models}
+    out = {"models": models}
+    _LLM_USAGE_CACHE["ts"] = now
+    _LLM_USAGE_CACHE["payload"] = out
+    return out
 
 
 
