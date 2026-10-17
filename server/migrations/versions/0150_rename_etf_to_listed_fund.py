@@ -1,4 +1,4 @@
-# EXPAND-CONTRACT: phase=contract（RENAME——0149 同窗无依赖，独立可回滚）
+# EXPAND-CONTRACT: phase=contract  # RENAME 属 contract 相；0149 同窗无依赖，独立可回滚
 """批 126q：etf_basic_info → listed_fund_basic（正名——用户裁定 2026-10-17）。
 
 概念纠偏：本表存的是 Tushare `fund_basic(market='E')` 全量=**场内基金全集**
