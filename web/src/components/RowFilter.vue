@@ -93,6 +93,7 @@ const onGroup = (key, vals) => {
   border: none; background: none; cursor: pointer;
   font: inherit; font-size: var(--fs-label); font-weight: 600; color: var(--text-primary); }
 .rf-clear:disabled { color: var(--text-secondary); opacity: .5; cursor: default; }
-/* 分组标签（一级菜单）：同字号+粗体区分层级（批126e——原 fs-foot 与选项不同号） */
-.rf-group-label { font-size: var(--fs-label); font-weight: 600; color: var(--text-secondary); padding: var(--sp-1) 8px 2px; }
+/* 分组标签（一级菜单）：同字号+粗体区分层级（批126e）；色与清除钮统一 text-primary
+   （批126g 用户裁定——同层级同色，secondary 灰只留 disabled 态） */
+.rf-group-label { font-size: var(--fs-label); font-weight: 600; color: var(--text-primary); padding: var(--sp-1) 8px 2px; }
 </style>
