@@ -87,11 +87,11 @@ const onGroup = (key, vals) => {
 .rf-ref { position: relative; display: inline-flex; }
 .rf-dot { position: absolute; top: 0; right: 0; width: var(--dot); height: var(--dot);
   border-radius: 50%; background: var(--brand-500); }
-/* 清除筛选：与选项同字号同字重（fs-label/400——全菜单统一，批126e）；
-     disabled 态灰置；常驻保 popover 高度稳定（批126c） */
+/* 清除筛选：同字号+粗体（fs-label/600——与分组标题同层级强调，批126e 用户裁定
+     「清除钮 600 粗」）；disabled 态灰置；常驻保 popover 高度稳定（批126c） */
 .rf-clear { width: 100%; display: block; text-align: left; padding: 2px 8px;
   border: none; background: none; cursor: pointer;
-  font: inherit; font-size: var(--fs-label); font-weight: 400; color: var(--text-primary); }
+  font: inherit; font-size: var(--fs-label); font-weight: 600; color: var(--text-primary); }
 .rf-clear:disabled { color: var(--text-secondary); opacity: .5; cursor: default; }
 /* 分组标签（一级菜单）：同字号+粗体区分层级（批126e——原 fs-foot 与选项不同号） */
 .rf-group-label { font-size: var(--fs-label); font-weight: 600; color: var(--text-secondary); padding: var(--sp-1) 8px 2px; }
