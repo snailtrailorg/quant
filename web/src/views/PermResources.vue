@@ -50,7 +50,7 @@
           </el-table-column>
           <el-table-column :label="t('permRes.colRes')" min-width="140">
             <template #default="{ row }">
-              {{ keyLabel(row.key) }}<span v-if="row.locked" :title="t('permRes.locked')"> 🔒</span>
+              {{ keyLabel(row.key) }}<span v-if="row.locked" :title="t('permRes.locked')"> <el-icon :size="12"><Lock /></el-icon></span>
             </template>
           </el-table-column>
           <el-table-column :label="t('permRes.colEndpoints')" min-width="420">
@@ -115,7 +115,7 @@ import api, { apiErr } from '../api'
 import TableShell from '../components/TableShell.vue'
 import TabsShell from '../components/TabsShell.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Edit, Refresh } from '@element-plus/icons-vue'
+import { Edit, Refresh, Lock } from '@element-plus/icons-vue'
 
 const { t, te } = useI18n()
 const tabs = [

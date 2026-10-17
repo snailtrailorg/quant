@@ -19,7 +19,7 @@
           </div>
           <el-checkbox-group v-model="apiSel" class="perm-grid">
             <el-checkbox v-for="k in g.keys" :key="k" :value="k" :disabled="lockedKeys.includes(k)" :title="k">
-              {{ te('perm.key_' + k) ? t('perm.key_' + k) : k }}<span v-if="lockedKeys.includes(k)"> 🔒</span>
+              {{ te('perm.key_' + k) ? t('perm.key_' + k) : k }}<span v-if="lockedKeys.includes(k)"> <el-icon :size="12"><Lock /></el-icon></span>
             </el-checkbox>
           </el-checkbox-group>
         </div>
@@ -65,6 +65,7 @@
 
 <script setup>
 import { ref, reactive, watch } from 'vue'
+import { Lock } from '@element-plus/icons-vue'
 import TableShell from './TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'

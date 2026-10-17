@@ -146,7 +146,7 @@
             <el-table-column prop="description" :label="t('common.description')" min-width="240" show-overflow-tooltip />
             <el-table-column prop="builtin" :label="t('um.groupType')" min-width="110">
               <template #default="{ row }">
-                <el-tag v-if="row.builtin" type="warning">builtin 🔒</el-tag>
+                <el-tag v-if="row.builtin" type="warning">builtin <el-icon :size="12"><Lock /></el-icon></el-tag>
                 <el-tag v-else type="info">custom</el-tag>
               </template>
             </el-table-column>
@@ -213,7 +213,7 @@ import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import PermMatrix from '../components/PermMatrix.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Plus, Edit, Delete, Close } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Close, Lock } from '@element-plus/icons-vue'
 import { computed } from 'vue'
 
 const { t, locale } = useI18n()
