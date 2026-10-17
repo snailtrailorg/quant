@@ -9,10 +9,9 @@
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span style="font-weight: 600">{{ t(titleKey) }}</span>
         <div style="display:flex; gap:8px; align-items:center">
-          <el-select v-model="capFilter" clearable size="small" style="width: 130px"
-                     :placeholder="t('interfaces.capFilterPh')">
-            <el-option v-for="c in capTokens" :key="c" :value="c" :label="t(`interfaces.cap_${c}`)" />
-          </el-select>
+          <!-- 批126d：能力筛选弃自制 el-select → RowFilter 单组模式（用户裁定：标准图标钮+
+               下拉+蓝点+清除筛选，全站一套）。多选=原单选超集；空=全显契约同 RowFilter。 -->
+          <RowFilter v-model="capFilter" :options="capOptions" :title="t('interfaces.capFilterPh')" />
           <ColumnSettings :storage-key="'cols.interfaces.' + kind" :columns="colDefs" v-model:visible="visible" />
           <IconBtn :icon="Plus" :title="t('common.create')" @click="openAdd" />
         </div>
@@ -21,7 +20,7 @@
     <!-- 83a：两族列集不同（交易族多 exchanges/account_key 两列），列宽/列显隐按 kind 各存一份 -->
     <ChannelTableShell ref="shellRef" :rows="rows" :storage-key="'interfaces.' + kind"
                        :drag-title-key="'interfaces.dragTitle'" :note-key="'interfaces.orderNote'"
-                       :can-drag="capFilter ? () => false : () => canDragRow"
+                       :can-drag="capFilter.length ? () => false : () => canDragRow"
                        :reorder="doReorder" @reorder-failed="onReorderFailed">
       <el-table-column prop="name" :label="t('common.name')" min-width="160" show-overflow-tooltip>
         <template #default="{ row, $index }">
@@ -135,6 +134,7 @@ import { useI18n } from 'vue-i18n'
 import ChannelTableShell from './ChannelTableShell.vue'
 import ColumnSettings from './ColumnSettings.vue'
 import IconBtn from './IconBtn.vue'
+import RowFilter from './RowFilter.vue'
 import { Plus, VideoPlay, Edit, Delete } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import { apiErr, getInterfaces, getInterfaceProviders, createInterface, updateInterface,
@@ -164,8 +164,9 @@ const testing = ref(0)
 const shellRef = ref(null)
 const form = ref(emptyForm())
 const visible = ref([])
-const capFilter = ref('')   // D25 §九：能力筛选；筛选态禁拖（全量校验防 400）
-const capTokens = computed(() => domainCaps.value)
+const capFilter = ref([])   // D25 §九：能力筛选（批126d 改多选数组——RowFilter 单组模式）；
+                            // 筛选态禁拖（全量校验防 400）
+const capOptions = computed(() => domainCaps.value.map(c => ({ value: c, label: t(`interfaces.cap_${c}`) })))
 const colDefs = computed(() => [
   // 83a：exchanges 列仅交易族有（数据源族列集不含该列——不出列显隐项，防幻影开关）
   ...(showExchanges.value ? [{ key: 'exchanges', label: t('interfaces.colExchanges') }] : []),
@@ -174,8 +175,10 @@ const colDefs = computed(() => [
 const colOn = k => visible.value.includes(k)
 
 const applyFilter = () => {
-  rows.value = capFilter.value
-    ? allRows.value.filter(r => (r.capabilities || []).includes(capFilter.value))
+  // 批126d：多选数组判据（含任意勾选能力即命中；空数组=全显——RowFilter 契约）
+  const caps = capFilter.value || []
+  rows.value = caps.length
+    ? allRows.value.filter(r => caps.some(c => (r.capabilities || []).includes(c)))
     : allRows.value
 }
 

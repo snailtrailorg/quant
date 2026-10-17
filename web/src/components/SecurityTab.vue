@@ -85,10 +85,11 @@
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.vulnList') }}</span>
           <div style="display:flex;align-items:center;gap:8px">
-            <RowFilter v-model="vulnRowFilter" :groups="vulnFilterGroups"
-                       :title="t('common.filter')" />
+            <!-- 批126d：搜索在左/图标钮在右（输入在左动作在右惯例）；两表统一 200px（用户裁定） -->
             <el-input v-model="vulnSearch" clearable size="small" style="width:200px"
                       :placeholder="t('secpage.searchVuln')" />
+            <RowFilter v-model="vulnRowFilter" :groups="vulnFilterGroups"
+                       :title="t('common.filter')" />
           </div>
         </div>
       </template>
@@ -144,10 +145,11 @@
             <span class="kpi-sub" style="margin-left: var(--sp-2)">{{ compHint }}</span>
           </span>
           <div style="display:flex;align-items:center;gap:8px">
+            <!-- 批126d：搜索在左/图标钮在右+统一 200px（与 C 区同款） -->
+            <el-input v-model="compFilter" clearable size="small" style="width:200px"
+                      :placeholder="t('secpage.searchComponent')" />
             <RowFilter v-model="compRowFilter" :groups="compFilterGroups"
                        :title="t('common.filter')" />
-            <el-input v-model="compFilter" clearable size="small" style="width:220px"
-                      :placeholder="t('secpage.searchComponent')" />
           </div>
         </div>
       </template>

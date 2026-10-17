@@ -7,8 +7,6 @@
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span style="font-weight: 600">{{ t('smtp.title') }}</span>
           <span style="display: flex; gap: 8px; align-items: center">
-            <el-input v-model="testTo" :placeholder="t('smtp.testPh')" size="small" style="width: 200px" />
-            <IconBtn :icon="Promotion" :loading="testing" :title="t('smtp.test')" @click="sendTest" />
             <IconBtn :icon="Plus" :title="t('alerts.smtpProvAdd')" @click="openAdd" />
           </span>
         </div>
@@ -38,8 +36,13 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="actions" :label="t('common.action')" width="110">
+        <el-table-column prop="actions" :label="t('common.action')" width="140">
           <template #default="{ row }">
+            <!-- 批126d：测试邮件入行（用户裁定——测哪个通道行内一目了然；header 输入框+图标的
+                 全局测试形态退役）。testing=行 id（loading 只挂当前行）。收件人走 prompt 输入
+                 （Risk.vue:203 仓内范式）；后端按 failover 顺序发——提示语含通道名自解释。 -->
+            <IconBtn size="small" :icon="Promotion" :loading="testing === row.id"
+                     :title="t('smtp.test')" @click="sendTest(row)" />
             <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openEdit(row)" />
             <IconBtn size="small" :icon="Delete" type="danger" :title="t('common.delete')" @click="del(row)" />
           </template>
@@ -114,8 +117,7 @@ const dlg = ref(false)
 const isEdit = ref(false)
 const editingId = ref(null)
 const saving = ref(false)
-const testing = ref(false)
-const testTo = ref('')
+const testing = ref(0)   // 行内测试 loading 钮=正在测的行 id（0=无）
 const emptyForm = () => ({ name: '', vendor: '', host: '', port: 587, security: 'auto', username: '',
                            password: '', from: '', enabled: true })
 const form = ref(emptyForm())
@@ -171,14 +173,22 @@ const onDrop = async (i) => {
   catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))); await load() }
 }
 
-const sendTest = async () => {
-  if (!testTo.value || !testTo.value.includes('@')) { ElMessage.warning(t('smtp.testPh')); return }
-  testing.value = true
+// 批126d：行内测试（收件人 prompt 输入——header 全局测试退役）。后端按 failover
+// 顺序发信（走通道队列非指定 provider 行），提示语带通道名辅助定位；取消=不动。
+const sendTest = async (row) => {
+  let to
   try {
-    await sendTestEmail({ to: testTo.value })
+    const { value } = await ElMessageBox.prompt(
+      t('smtp.testRowPrompt', { name: row.name }), t('smtp.test'),
+      { inputPlaceholder: t('smtp.testPh'), inputPattern: /@/, inputErrorMessage: t('smtp.testPh') })
+    to = value
+  } catch { return }
+  testing.value = row.id
+  try {
+    await sendTestEmail({ to })
     ElMessage.success(t('smtp.testSent'))
   } catch (e) { ElMessage.error(apiErr(e, t('common.operationFailed'))) }
-  finally { testing.value = false }
+  finally { testing.value = 0 }
 }
 onMounted(load)
 </script>
