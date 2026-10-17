@@ -36,6 +36,7 @@ import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Operation } from '@element-plus/icons-vue'
 import IconBtn from './IconBtn.vue'
+import { colOffCount } from '../utils/colDiff'
 
 const props = defineProps({
   storageKey: { type: String, required: true },
@@ -47,15 +48,9 @@ const visible = defineModel('visible', { type: Array, default: () => [] })
 const { t } = useI18n()
 const defaultKeys = computed(() => props.columns.filter(c => !c.hidden).map(c => c.key))
 
-// 与默认列集的对称差数（隐藏了 N 列或开出了 N 个默认隐藏列都算偏离；0=默认态）
-const offCount = computed(() => {
-  const d = new Set(defaultKeys.value)
-  const v = new Set(visible.value)
-  let n = 0
-  d.forEach(k => { if (!v.has(k)) n++ })
-  v.forEach(k => { if (!d.has(k)) n++ })
-  return n
-})
+// 与默认列集的对称差数（隐藏了 N 列或开出了 N 个默认隐藏列都算偏离；0=默认态）——
+// 判定核心抽 utils/colDiff.js 纯函数（批126h 单测通道：web/scripts/test-coldiff.mjs）
+const offCount = computed(() => colOffCount(defaultKeys.value, visible.value))
 
 // 初始化：localStorage 优先（剔掉已下线的键），无存档用默认。
 // 盲审A-P2-5：全隐藏（空档）也是有效用户选择要持久化——"空档≠无档"；
