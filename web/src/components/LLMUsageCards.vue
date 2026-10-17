@@ -61,7 +61,9 @@ const option = computed(() => {
     animation: false,
     tooltip: { trigger: 'axis' },
     legend: { show: true, bottom: 0, textStyle: { color: cssVar('--text-secondary'), fontSize: 11 } },
-    grid: { left: 8, right: 12, top: 8, bottom: 64 },
+    // 批126k：grid bottom 64→86——滑块上移到 44（图例 0~20/滑块 44~58/x 轴以上，三层分离
+    // 不再重叠——用户实测图例与缩放轴重叠）
+    grid: { left: 8, right: 12, top: 8, bottom: 86 },
     xAxis: {
       type: 'category', show: true, data: grid, min: axisMin,
       axisLine: { lineStyle: { color: cssVar('--border-weak') } },
@@ -69,9 +71,10 @@ const option = computed(() => {
       axisLabel: { color: cssVar('--text-secondary'), fontSize: 10, hideOverlap: true, interval: 5 },
       splitLine: { show: false },
     },
-    dataZoom: [   // 批54 追加三:单档——初始窗 30 天+滚轮/slider 回看全历史
+    dataZoom: [   // 批54 追加三:单档——初始窗 30 天+滚轮/slider 回看全历史；批126k 滑块
+                  // bottom 22→44（让出图例区——原与图例重叠，用户实测）
       { type: 'inside', start: 100 - 30 / (grid.length || 1) * 100, end: 100 },
-      { type: 'slider', height: 14, bottom: 22, start: 100 - 30 / (grid.length || 1) * 100, end: 100 },
+      { type: 'slider', height: 14, bottom: 44, start: 100 - 30 / (grid.length || 1) * 100, end: 100 },
     ],
     yAxis: { type: 'value', show: true,
              axisLabel: { color: cssVar('--text-secondary'), fontSize: 10 },

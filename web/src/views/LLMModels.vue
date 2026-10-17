@@ -96,12 +96,15 @@ const usageModels = ref([])
 const dlg = ref(false)
 const saving = ref(false)
 const testing = ref({})
-const modelVisible = ref({})
+// 批126k 修：原 ref({}) 对象与 ColumnSettings 数组契约不匹配——勾选写数组而
+// modelColOn 读对象键恒 undefined ⇒ 列筛选完全不生效。改数组+includes（InterfacesCard
+// colOn 同范式；true 全显时空数组碰撞——初始化即被 ColumnSettings 写默认集）
+const modelVisible = ref([])
 const modelColDefs = [   // 批53 追加三:ID/Key/ctx 列删(用户裁定——内部键/凭证/配置项不占表)
   { key: 'provider', label: t('llm.providerCol') },
   { key: 'model', label: t('llm.model') }, { key: 'enabled', label: t('common.enable') },
 ]
-const modelColOn = k => modelVisible.value[k] !== false
+const modelColOn = k => modelVisible.value.includes(k)
 const emptyForm = () => ({ id: null, name: '', provider: '', model: '', api_key: '', base_url: '',
                            context_window: 32768, max_input_tokens: null, enabled: true })
 const form = ref(emptyForm())
