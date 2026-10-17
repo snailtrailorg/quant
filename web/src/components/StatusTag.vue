@@ -14,7 +14,7 @@ const meta = computed(() => statusMeta(props.value, t))
 .st { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; height: 22px;
   border-radius: 11px; background: var(--bg-canvas); font-size: var(--fs-foot);
   color: var(--text-primary); white-space: nowrap; }
-.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex: none; }
 .dot.success { background: var(--success); }
 .dot.warn { background: var(--warn-fill); }
 .dot.critical { background: var(--critical); }

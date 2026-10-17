@@ -85,10 +85,10 @@
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.vulnList') }}</span>
           <div style="display:flex;align-items:center;gap:8px">
-            <el-input v-model="vulnSearch" clearable size="small" style="width:200px"
-                      :placeholder="t('secpage.searchVuln')" />
             <RowFilter v-model="vulnRowFilter" :groups="vulnFilterGroups"
                        :title="t('common.filter')" />
+            <el-input v-model="vulnSearch" clearable size="small" style="width:200px"
+                      :placeholder="t('secpage.searchVuln')" />
           </div>
         </div>
       </template>
@@ -252,7 +252,10 @@ const filteredFindings = computed(() => {
   const all = snap.value?.findings || []
   const rf = vulnRowFilter.value
   const sev = rf.severity ?? []
-  const fx = rf.fixed ?? ['active']   // 未设时默认 active（行动导向）——与 D 区 v2 同法
+  // 批126c 修：原 rf.fixed ?? ['active'] 与「空=全显」契约冲突——清除筛选后 fallback
+  // 又把 active 塞回=列表不变（用户实测 bug）。默认行动导向视图由上方初值
+  // {fixed:['active']} 承载；清除⇒{}⇒此处 []=全显，与 D 区 v2 同法
+  const fx = rf.fixed ?? []
   const q = vulnSearch.value.trim().toLowerCase()
   return all.filter(f =>
     (!sev.length || sev.includes(f.severity)) &&
@@ -377,7 +380,7 @@ const historySummaries = computed(() =>
 @media (max-width: 900px) { .card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .src-dots { display: flex; flex-wrap: wrap; gap: var(--sp-2); font-size: var(--fs-foot); color: var(--text-secondary); }
 .src-dot-item { display: inline-flex; align-items: center; gap: 4px; }
-.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.dot { width: var(--dot); height: var(--dot); border-radius: 50%; display: inline-block; }
 .dot.warn { background: var(--warn-fill); }
 .dot.critical { background: var(--critical); }
 .dot.info { background: var(--brand-500); }

@@ -92,7 +92,7 @@ const option = computed(() => {
 .chip-btn { cursor: pointer; user-select: none; }
 .chip-btn.off { opacity: .35; }
 .chip { display: inline-flex; align-items: center; gap: 6px; }
-.dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex-shrink: 0; }
 .chip-name { font-size: var(--fs-label); font-weight: 600; }
 .chip-sub { font-size: var(--fs-foot); color: var(--text-secondary); }
 .empty-group { color: var(--text-secondary); font-size: var(--fs-foot); padding: 18px 0; text-align: center; }

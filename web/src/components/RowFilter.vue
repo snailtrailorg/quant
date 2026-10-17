@@ -3,20 +3,26 @@
        批24 迭代十六：分组模式——groups=[{key,label,options}]（一钮多列筛选，下拉按列分组显示），
        modelValue=对象 {key: [选中值]}；「全部」=空对象。单组模式（options）批23 语义不变。
        动态选项（module/actor 等非固定枚举）由调用方从数据 distinct 预取后传入。
-       语义契约：空 modelValue=全显（5 消费页一致）；有勾选时底部「清除筛选」钮 + 图标红点激活指示（批 125
-       替代原「全部」复选框+数字角标——语义歧义/反向复选框/数学冗余三缺陷+数字语义
-       不符，用户裁定：红点=有筛选，几项 popover 内自明）；
+       语义契约：空 modelValue=全显（5 消费页一致）；激活指示=图标角蓝点（批126c 用户裁定：
+       红点违语义法——红=故障/绿=无故障，筛选激活非故障态，改 brand-500 蓝=选中/激活；
+       尺寸 var(--dot)=7px 全站唯一源）；顶部「清除筛选」**常驻**+无筛选时 disabled
+       （批126c 用户裁定：v-if 显隐致 popover 高度跳变，disable 保排布稳定——
+       回原「全部」顶部位置）；文字样式对齐选项行（fs-foot——同 popover 视觉一致）；
        与 ColumnSettings（Operation=列显隐）成对：本组件管"行"（数据维度筛选），
        放 header 右侧动作区（统一序：筛选→…→列设置）。 -->
   <el-popover :width="260" trigger="click">
     <template #reference>
-      <!-- 筛选激活指示：红点（有任一勾选）——数字角标已裁（语义=项数与直觉不符，
-           批 125 用户裁定：状态可见性用最小标记恢复，具体几项 popover 内自明） -->
+      <!-- 筛选激活指示：蓝点（有任一勾选）——尺寸/色均走 tokens（批126c） -->
       <span class="rf-ref" :class="{ active: selCount > 0 }">
         <IconBtn :icon="Filter" :title="title" />
         <span v-if="selCount > 0" class="rf-dot" />
       </span>
     </template>
+    <!-- 清除筛选：顶部常驻（原「全部」位）+disabled 防跳变（批126c 用户裁定） -->
+    <button type="button" class="rf-clear" :disabled="!selCount" @click="onClear">
+      {{ t('common.clearFilter') }}（{{ selCount }}）
+    </button>
+    <el-divider style="margin: var(--sp-1) 0" />
     <div style="max-height: 300px; overflow-y: auto">
       <!-- 单组模式（批23 兼容） -->
       <el-checkbox-group v-if="!groups" :model-value="modelValue" @update:model-value="v => emit('update:modelValue', v)">
@@ -32,13 +38,6 @@
         </div>
       </template>
     </div>
-    <el-divider style="margin: var(--sp-1) 0" />
-    <!-- 批 125 用户裁定：原「全部」复选框三缺陷——语义歧义（勾≠全勾而是清空）/
-         反向复选框（勾上=其他全灭视觉打架）/全选与全清数学等价（只需一个真动作）。
-         业界印证：GitHub/Gmail/EP 官方面板均用「清除」文字钮。有勾选才显示。 -->
-    <el-button v-if="selCount" text size="small" class="rf-clear" @click="onClear">
-      {{ t('common.clearFilter') }}（{{ selCount }}）
-    </el-button>
   </el-popover>
 </template>
 
@@ -78,12 +77,17 @@ const onGroup = (key, vals) => {
 
 <style scoped>
 .rf-opt { display: block; height: 26px; line-height: 26px; margin-right: 0; width: 100% }
-/* 激活指示：包裹层相对定位，红点贴图标右上角（6px——比 badge 数字克制） */
+/* 激活指示：包裹层相对定位，蓝点贴图标右上角（尺寸 var(--dot)=7px 全站标准，
+     色 brand-500=选中/激活语义——批126c 用户裁定，红留给故障态） */
 .rf-ref { position: relative; display: inline-flex; }
-.rf-dot { position: absolute; top: 0; right: 0; width: 6px; height: 6px;
-  border-radius: 50%; background: var(--critical); }
-/* 清除筛选钮：占满宽左对齐（文字钮，非复选框——承载动作非状态） */
-.rf-clear { width: 100%; justify-content: flex-start; padding: 0 8px; }
+.rf-dot { position: absolute; top: 0; right: 0; width: var(--dot); height: var(--dot);
+  border-radius: 50%; background: var(--brand-500); }
+/* 清除筛选：原生 button 裸样式——字号/色对齐选项行（fs-foot+主文本，批126c）；
+     disabled 态 EP 变量灰置；常驻保 popover 高度稳定（批126c） */
+.rf-clear { width: 100%; display: block; text-align: left; padding: 2px 8px;
+  border: none; background: none; cursor: pointer;
+  font: inherit; font-size: var(--fs-foot); color: var(--text-primary); }
+.rf-clear:disabled { color: var(--text-secondary); opacity: .5; cursor: default; }
 /* 分组标签（迭代十六）：列名小标题 */
 .rf-group-label { font-size: var(--fs-foot); font-weight: 600; color: var(--text-secondary); padding: var(--sp-1) 8px 2px; }
 </style>

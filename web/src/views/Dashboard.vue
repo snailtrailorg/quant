@@ -258,7 +258,7 @@ const sparkline = computed(() => {
 .klabel { color: var(--text-secondary); font-size: var(--fs-label); }
 .task-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
 .task-row:last-child { border-bottom: none; }
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot { width: var(--dot); height: var(--dot); border-radius: 50%; display: inline-block; }
 .dot.running { background: var(--success); }
 .dot.stopped { background: var(--flat); }
 .dot.error { background: var(--critical); }

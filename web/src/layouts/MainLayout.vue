@@ -408,7 +408,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .pinned-shift { margin-left: 200px; }   /* 顶栏+inner 容器同让位（推挤式缩范围） */
 
 /* 通知级别色点：critical 深红 / warn 橙 / info 灰（走 tokens：--critical/--warn-fill/--text-secondary） */
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.dot { display: inline-block; width: var(--dot); height: var(--dot); border-radius: 50%; margin-right: 6px; }
 .dot.critical { background: var(--critical); }
 .dot.warn { background: var(--warn-fill); }
 .dot.info { background: var(--text-secondary); }
