@@ -2,8 +2,8 @@
 
 用法:
     from src.data_platform import platform
-    platform.ensure_daily("600000.SH", "20260701", "20260710")
-    bars = platform.get_bar("600000.SHSE", "1D", date(2026,7,1), date(2026,7,10))
+    platform.is_trading_day(date(2026,7,1))   # 批 127 Z2：ensure_daily 等旧 API 面已删
+    from src.data_platform.db import get_bars   # 取数走 db 层（adapter 架构）
 
 批 9 内存治理（2026-09-08）：
 1. platform/DataPlatform 惰性导出（PEP 562）——_platform.py 的模块级 pandas 不再
