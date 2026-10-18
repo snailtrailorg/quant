@@ -114,13 +114,13 @@ class TestFetchDispatch:
         tbr.assert_called_once()   # adj_map 不传=缺省 None（逐行 adj_factor）——消费面不复权口径
 
     def test_bar_daily_consume_etf_kind_routing(self):
-        """consume+etf → pull_daily kind=etf（fund_daily 接口路由）。"""
+        """consume+listed_fund → pull_daily kind=E/fund_daily 接口路由（批 127 sub 正名）。"""
         from src.data_platform.adapters.base import TushareAdapter
         ad = TushareAdapter()
         with patch.object(ad, "pull_daily", return_value=pd.DataFrame()) as pd_, \
              patch.object(ad, "to_bar_rows", return_value=[_row()]):
-            ad.fetch(self._req("bar_daily", sub="etf"))
-        pd_.assert_called_once_with("600000.SHSE", "20260901", "20260921", adj=None, kind="etf")
+            ad.fetch(self._req("bar_daily", sub="listed_fund"))
+        pd_.assert_called_once_with("600000.SHSE", "20260901", "20260921", adj=None, kind="E")
 
     def test_bar_daily_consume_empty_is_quiet(self):
         """停牌/缺根：pull_daily 空 df → to_bar_rows 空入参不崩（空帧语义，缺根豁免=天然成立）。"""

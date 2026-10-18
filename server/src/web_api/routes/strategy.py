@@ -26,7 +26,7 @@ def _validate_strategy_category(stype: str, symbol: str, factors: list) -> dict:
     sym = symbol or ""
     if not sym:
         t = (stype or "").lower()
-        cat = "cb" if "convertible" in t or "cb" in t else ("etf" if "etf" in t else "astock")
+        cat = "cb" if "convertible" in t or "cb" in t else ("etf" if ("etf" in t or "listed_fund" in t or "fund" in t) else "astock")   # 批 127：补正名词形（etf 容错留）
         sym = {"cb": "113000.SHSE", "etf": "510300.SHSE", "astock": "600000.SHSE"}[cat]  # 探测代号
     return validate_strategy_factors(sym, factors)
 

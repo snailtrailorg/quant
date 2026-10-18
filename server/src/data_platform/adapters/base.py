@@ -264,7 +264,7 @@ class TushareAdapter(BaseDataAdapter):
         CapabilityDecl("stk_limit", "historical", ASTOCK_ALL),
         CapabilityDecl("trade_cal", "historical", ASTOCK_ALL),
         CapabilityDecl("static_list", "historical", ASTOCK_ALL,
-                       sub_kinds=frozenset({"stock", "etf", "convertible", "namechange",
+                       sub_kinds=frozenset({"stock", "listed_fund", "convertible", "namechange",
                                             "symbols", "terms"})),   # 批 107：+symbols/+terms（字面量收编）
         CapabilityDecl("industry_class", "historical", ASTOCK_ALL,
                        sub_kinds=frozenset({"concept"})),
@@ -296,7 +296,7 @@ class TushareAdapter(BaseDataAdapter):
         from datetime import date as _date
         pro = self.get_client()
         end = end or _date.today().strftime("%Y%m%d")
-        if kind == "etf":
+        if kind == "listed_fund":
             df = pro.fund_daily(ts_code=symbol, start_date=start, end_date=end)
         elif kind == "cb":
             df = pro.cb_daily(ts_code=symbol, start_date=start, end_date=end)
@@ -364,7 +364,7 @@ class TushareAdapter(BaseDataAdapter):
         pro = self.get_client()
         if kind == "astock":
             return pro.daily(trade_date=trade_date)
-        if kind == "etf":
+        if kind == "listed_fund":
             return pro.fund_daily(trade_date=trade_date)
         raise UnsupportedFeature(f"tushare 不支持 kind={kind} 按日批量")
 
@@ -457,8 +457,8 @@ class TushareAdapter(BaseDataAdapter):
                 # 限速档对齐 DEFAULT_RATE_LIMITS 键：stock=daily / etf=fund_daily（逐标的各一次
                 # 上下文=一次进账/熔断计数，对齐供给域逐 API 记账口径）。
                 from src.data_platform.rate_limit import rate_limit_context
-                api = "fund_daily" if sub == "etf" else "daily"
-                kind_param = "etf" if sub == "etf" else "astock"
+                api = "fund_daily" if sub == "listed_fund" else "daily"
+                kind_param = "E" if sub == "listed_fund" else "astock"
                 dfs = []
                 for sym in (req.symbols or ()):
                     with rate_limit_context(self._ds, api):
@@ -566,7 +566,7 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("static_list", "symbols"): "pull_stock_basic_raw",        # static_symbols
     ("static_list", "convertible"): "pull_cb_basic_raw",       # cb_basic（全量）
     ("static_list", "terms"): "pull_cb_basic_raw",             # convertible_terms（逐只 ts_code=）
-    ("static_list", "etf"): "pull_fund_basic_raw",             # listed_fund_list
+    ("static_list", "listed_fund"): "pull_fund_basic_raw",      # listed_fund_list
     ("trade_cal", None): "pull_trade_cal_raw",                 # trade_cal（逐年，纯读）
 }
 

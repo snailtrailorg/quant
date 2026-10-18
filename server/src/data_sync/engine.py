@@ -583,7 +583,7 @@ _LITERAL_SUPPLY: dict[str, tuple[str, str | None, str]] = {
     "static_symbols":    ("static_list",       "symbols",     "static_symbols"),
     "cb_basic":          ("static_list",       "convertible", "cb_basic_info"),
     "convertible_terms": ("static_list",       "terms",       "convertible_terms"),
-    "listed_fund_list":          ("static_list",       "etf",         "listed_fund_basic"),
+    "listed_fund_list":          ("static_list",       "listed_fund", "listed_fund_basic"),
     "trade_cal":         ("trade_cal",         None,          "trade_cal"),
 }
 
@@ -962,7 +962,7 @@ def _log_bar_quality(df, label: str) -> None:
 # 批 72 v2 #6：质量校验 label 词表映射（沿用批 71——观察期查询零改动）。
 # per-symbol 三调用方只传 kind 词形（astock/etf/cb，源自 _PER_SYMBOL_META）——sub_kind
 # 词形（stock/convertible）到不了本 map（base.py fetch 面 label 内联不经此 map）。
-_QUALITY_LABEL_OF = {"astock": "bar_daily", "etf": "listed_fund_daily", "cb": "cb_daily"}
+_QUALITY_LABEL_OF = {"astock": "bar_daily", "listed_fund": "listed_fund_daily", "cb": "cb_daily"}
 
 
 def backfill_adj_factor(start_date: str | None = None, end_date: str | None = None,
@@ -2903,7 +2903,7 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
             return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [],
                     "expected_days": 0, "actual_days": 0, "excluded": _fam_excl}
 
-    if kind == "bar_daily" and sub in ("stock", "etf"):
+    if kind == "bar_daily" and sub in ("stock", "listed_fund"):
         r = _sync_via_kind_daily_batch(adapter, sub=sub, cfg=cfg, start=start,
                                        end_date=end_date, progress_cb=progress_cb)
     elif kind == "bar_daily" and sub == "convertible":
@@ -3253,7 +3253,7 @@ assert not (_VIA_KIND_IDS & set(_HANDLERS))
 #   bar_type: daily（按交易日，pro.daily/fund_daily/cb_daily）/ minute（stk_mins per-symbol 拉取）
 _PER_SYMBOL_META: dict[str, tuple[str, str, str, str]] = {
     "astock_daily":       ("1D",   "bar_1D",   "astock", "daily"),
-    "listed_fund_daily":          ("1D",   "bar_1D",   "etf",    "daily"),
+    "listed_fund_daily":          ("1D",   "bar_1D",   "listed_fund", "daily"),
     "cb_daily":           ("1D",   "bar_1D",   "cb",     "daily"),
     "astock_minute":      ("1min", "bar_1min", "astock", "minute"),
     "astock_minute_5min": ("5min", "bar_5min", "astock", "minute"),
@@ -3300,7 +3300,7 @@ def _list_static_ts_codes(kind: str) -> list[str]:
                 return [r[0] for r in rows]
         except Exception as e:
             logger.warning("查询 static_symbols 失败: %s", e)
-    table = {"astock": "asset_static_info", "etf": "listed_fund_basic", "cb": "cb_basic_info"}[kind]
+    table = {"astock": "asset_static_info", "listed_fund": "listed_fund_basic", "cb": "cb_basic_info"}[kind]
     with get_conn() as conn:
         cur = conn.execute(f"SELECT ts_code FROM {table} ORDER BY ts_code")
         return [r[0] for r in cur.fetchall()]
@@ -3846,7 +3846,7 @@ def list_symbols(sync_id: str, q: str = "", page: int = 1, size: int = 9999) -> 
     _, kind, _freq, _bar_type = _get_pro_api(sync_id)
     if kind is None:
         return {"items": [], "total": 0}
-    table = {"astock": "asset_static_info", "etf": "listed_fund_basic", "cb": "cb_basic_info"}[kind]
+    table = {"astock": "asset_static_info", "listed_fund": "listed_fund_basic", "cb": "cb_basic_info"}[kind]
     name_col = "bond_short_name" if kind == "cb" else "name"
     bar_table = _PER_SYMBOL_META[sync_id][1]
 
