@@ -223,18 +223,19 @@ def _mark_running(sync_id: str, running: bool):
 
 def _get_config(sync_id: str) -> dict:
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider, retention FROM sync_config WHERE id=%s", (sync_id,))
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider, retention FROM sync_config WHERE id=%s", (sync_id,))
         row = cur.fetchone()
         if not row:
             return {}
         return {"id": row[0], "name": row[1], "api": row[2], "pg_table": row[3],
-                "data_type": row[4], "mode": row[5], "schedule": row[6],
-                "enabled": row[7], "last_sync_date": row[8],
-                "last_sync_ts": row[9], "last_status": row[10], "provider": row[11],
+                "mode": row[4], "schedule": row[5],
+                "enabled": row[6], "last_sync_date": row[7],
+                "last_sync_ts": row[8], "last_status": row[9], "provider": row[10],
                 # 批 108·步 3（裁定 H）：`retention` ＝ 保留策略下界（date | None）。一列三义的
                 # `start_floor` 已拆 ⇒ 本键是「窗口下界三地板」之一（设计 §5.1）；**引擎真读**
                 # （`_window_floors`），不是装饰列。
-                "retention": row[12]}
+                # 批 127 Z4：data_type 零消费已删（列留下一版 contract DROP）。
+                "retention": row[11]}
 
 
 def _update_sync_state(sync_id: str, last_date: str | None, count: int, status: str = "idle"):

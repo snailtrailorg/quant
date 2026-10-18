@@ -207,7 +207,8 @@ class TestConfigEndpoint:
     """`/api/sync/config` 必须带出能力两键（前端门的输入）。"""
 
     def _row(self, supports, floor):
-        return ("trade_cal", "交易日历", "pro.trade_cal", "trade_cal", "astock", "full",
+        # 批 127 Z4：data_type 列退出 SELECT（零消费）——夹具同步去该列（16 列）
+        return ("trade_cal", "交易日历", "pro.trade_cal", "trade_cal", "full",
                 "0 9 1 * *", "none", True, None, None, 0, "idle", "", "tushare",
                 supports, floor)
 

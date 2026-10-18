@@ -8,8 +8,6 @@
 # 消 54 条 active CVE（ffmpeg 53+qtbase——全来自 PySide6_Addons 捆绑 FFmpeg 7.1）。
 # 升级路径：上游新版 → deps/ 重打（scripts/build-vnpy-nogui.sh）。
 vnpy @ file:///home/bernard/Projects/quant/server/deps/vnpy-4.5.0+nogui-py3-none-any.whl   # 绝对路径（pip-compile file: 限制——PIPs #7559）
-vnpy-ctastrategy>=1.4      # CTA 策略 + 回测引擎 CtaBacktestingEngine
-vnpy-datamanager>=1.2      # 数据管理
 vnpy-binance               # 币安网关（永续合约）
 vnpy-okx                   # OKX 网关（永续合约）
 # vnpy_xtp —— 待中泰 XTP SDK 到位后安装（外部 gate，见 04 §11 编译指南）
@@ -27,7 +25,6 @@ python-multipart>=0.0.9    # 表单/上传
 
 # === 数据库 / 缓存 / 向量 ===
 psycopg[binary]>=3.1       # PostgreSQL 18
-pgvector>=0.3              # pgvector python 驱动
 redis>=5.0                 # Valkey（Redis 协议兼容）/ Celery broker
 
 # === 调度 ===
@@ -68,5 +65,4 @@ Pillow>=10.0
 
 # === 测试 ===
 pytest>=8.0
-pytest-mock>=3.12
 psutil

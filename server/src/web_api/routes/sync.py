@@ -42,16 +42,17 @@ def _validate_backfill(backfill_from: str | None) -> None:
 @router.get("/api/sync/config")
 def list_sync_config(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, tushare_api, pg_table, data_type, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description, provider, supports_backfill, retention FROM sync_config ORDER BY id")
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description, provider, supports_backfill, retention FROM sync_config ORDER BY id")
         rows = cur.fetchall()
-        return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "data_type": r[4], "sync_mode": r[5], "schedule": r[6], "trade_day_filter": r[7], "enabled": r[8], "last_sync_date": r[9], "last_sync_ts": str(r[10]) if r[10] else None, "last_sync_count": r[11], "last_status": r[12], "description": r[13], "provider": r[14],
+        return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "sync_mode": r[4], "schedule": r[5], "trade_day_filter": r[6], "enabled": r[7], "last_sync_date": r[8], "last_sync_ts": str(r[9]) if r[9] else None, "last_sync_count": r[10], "last_status": r[11], "description": r[12], "provider": r[13],
             # 批 99：能力真源（项层）——supports_backfill=该 handler 是否消费 backfill_from。
             # 前端回补表单的门由 sync_mode 改判本键（sync_mode 是形态标签、不参与分派）。
             # 批 108·步 3（裁定 H）：`start_floor` 一列三义已拆 ⇒ 本端点改出 `retention`
             # （保留策略下界，YYYYMMDD；NULL=未声明不设下限）。列本身留下版 DROP，
             # 本版起**零读点**（API 是那唯一的读点）。
-            "supports_backfill": bool(r[15]),
-            "retention": r[16].strftime("%Y%m%d") if r[16] else None}
+            # 批 127 Z4：data_type 列零消费——本版起零读点（DROP 留下一版 contract）。
+            "supports_backfill": bool(r[14]),
+            "retention": r[15].strftime("%Y%m%d") if r[15] else None}
             for r in rows]
 
 
