@@ -91,13 +91,14 @@ class TestSessionConfig:
     def test_config_based_astock(self):
         """配置驱动：A 股 09:31-11:30/13:01-15:00 + 交易日历。"""
         # 清缓存让 _load_market_config 走真实 DB（本地有 pg + 迁移后表）
+        from src.quant_common.session import _load_market_config
         _load_market_config._cache = {}
-        t = dt.datetime(2026, 8, 24, 9, 30)  # 周一开盘前
-        v = in_session("A股", t)
-        # 测试在本地 dev 环境下跑可能走配置也可能 fallback（取决于 DB 中 market_session 表是否存在）
-        # 两种都接受：assert 范围
-        if v is not None:
-            pass  # 合法
+        cfg = _load_market_config("A股")
+        if cfg is None:
+            pytest.skip("A股配置未部署或 DB 不可达")
+        t = dt.datetime(2026, 8, 24, 9, 30)  # 周一一，09:31 开盘前
+        # 批 128 Z7：原 `if v is not None: pass` 无论结果都过=真空测试；改为真断言
+        assert in_session("A股", t) is False
 
     def test_crypto_always_session(self):
         """加密永续 24h 全部返回 True。"""

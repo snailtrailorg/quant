@@ -30,7 +30,9 @@ def test_authenticate_username_lookup():
     row = (1, "alice", "$2b$hash", "viewer", True)
     with patch.object(auth_mod, "get_conn", return_value=_auth_conn(row)), \
          patch.object(auth_mod, "verify_password", return_value=True):
-        auth_mod.authenticate("alice", "pw12345")  # 不抛
+        out = auth_mod.authenticate("alice", "pw12345")
+    # 批 128 Z7：原只测「不抛」——补返回形状断言
+    assert out is not None and out["username"] == "alice" and out["role"] == "viewer"
 
 
 def test_authenticate_disabled_raises_code():
