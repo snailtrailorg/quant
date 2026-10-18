@@ -525,20 +525,54 @@
           when: units_changed | bool
           changed_when: true
 
+        # 批 127：快车道进程钉版探测（缺口四现身立法——"链新码旧"窗口根治）。
+        # 方法=时间戳对比（deploy 无权读 quant 进程 /proc cwd——systemd ActiveEnterTimestamp
+        # 与 staged release 目录 mtime 皆 deploy 可见，免新 wrapper）：任一波主单元启动早于
+        # 本 release staged 目录时间 ⇒ 进程钉旧目录 ⇒ 波次升格重启（快车道豁免面收缩为
+        # 「指纹一致且进程已在新目录」——真 web-only）。hub 波豁免探测（@1..N 实例名
+        # 动态，时间戳对比取 systemd 属性同法但波内多单元;首版先护 web/celery/feishu 三波
+        # ——四现身事故全在这三波；hub 靠 hbcheck 兜底）。
+        - name: 阶段 6.5 —— 运行进程钉版探测（stale=启动早于本 release staged 目录）
+          ansible.builtin.shell: |
+            set -u
+            staged='{{ deploy_root }}/releases/{{ release_id }}'
+            [ -d "$staged" ] || { echo "false"; exit 0; }
+            staged_ts=$(stat -c %Y "$staged")
+            stale=0
+            for unit in quant-web-api@quant.service quant-celery-worker@quant.service \
+                        quant-celery-beat@quant.service quant-celery-risk@quant.service \
+                        quant-im-pool@quant.service; do
+              ent=$(systemctl show "$unit" -p ActiveEnterTimestampMonotonic --value 2>/dev/null)
+              [ -n "$ent" ] && [ "$ent" != "0" ] || continue
+              boot=$(cat /proc/uptime | cut -d. -f1)
+              start_ts=$(( $(date +%s) - boot + ent / 1000000 ))
+              if [ "$start_ts" -lt "$staged_ts" ]; then
+                echo "stale: $unit (start $(date -d @$start_ts '+%F %T') < staged $(date -d @$staged_ts '+%F %T'))" >&2
+                stale=1
+              fi
+            done
+            [ "$stale" -eq 1 ] && echo "true" || echo "false"
+          register: stale_procs
+          changed_when: false
+          failed_when: false
+
         - name: 阶段 7 —— 波次重启 + 稳定窗（web→celery→feishu→hub→task）
           include_tasks: wave.yml
           loop: "{{ deploy_waves }}"
           loop_control:
             loop_var: wave
-          when: (wave.units | length > 0) and (server_changed | bool)
+          when: (wave.units | length > 0) and
+                (server_changed | bool or (stale_procs.stdout | default('false')) == 'true')
           # 批 8：server 指纹一致=零单元需重启（web-only 发布）——hub gen 不增=零扰交易进程。
+          # 批 127 修：stale_procs（进程钉旧目录）也升格——快车道连续发布同工作区快照时
+          # 指纹一致判定正确但进程从未重启（四现身：126p/126q×2/127S3 均手动补重启收场）。
           # 回滚语义（补审A-P1 纠偏）：快车道失败时 waves_touched 未定义→rollback-tasks 缺省
           # else 分支=翻链+全波次重启收敛（非"零重启"——顺带兜住崩溃自拉起钉新版的混合态）。
 
         - name: 阶段 7 —— 快车道跳过通告（波次全免——进程钉旧版目录运行同内容）
           ansible.builtin.debug:
-            msg: "🚀 批 8 快车道：{{ deploy_waves | length }} 个波次全部跳过（server 未变）——单元零重启，hub gen 不增"
-          when: not (server_changed | bool)
+            msg: "🚀 批 8 快车道：{{ deploy_waves | length }} 个波次全部跳过（server 未变且进程钉版探测通过）——单元零重启，hub gen 不增"
+          when: not (server_changed | bool) and (stale_procs.stdout | default('false')) != 'true'
 
 
         - name: 阶段 7.6 —— 旧 @quant hub 退役（批 66b D26：stop+disable——mask 弃用；新 unit 已由 hub 波拉起稳定）
