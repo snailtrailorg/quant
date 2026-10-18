@@ -32,7 +32,7 @@ def test_registry_base_three_lists():
     from src.data_platform.perm_registry import API_PERM_KEYS, NAV_ITEMS_BASE, MARKET_OP_KEYS, NAV_ALIASES
     assert len(API_PERM_KEYS) == 15 and len(set(API_PERM_KEYS)) == 15   # 批55b:account_keys 退役；批77:+live_control；批86-B:+paper_trade/strategy_pretest（纸上交易面）
     assert len(NAV_ITEMS_BASE) == 19   # 17+perm-resources（批33b）+paper-trade（批86-B）−routing（批88 降 tab 退册）——trade-switch 随批 70 M6 退役
-    assert len(MARKET_OP_KEYS) == 6   # 批127 Step1：+listed_fund 双键期
+    assert len(MARKET_OP_KEYS) == 5   # 批127 Step3：正名单键（etf 清）
     assert len(NAV_ALIASES) == 2       # 批38：8 条死别名已清（活=stock/data-manage）
 
 

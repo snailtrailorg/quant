@@ -232,14 +232,14 @@ class TestMarketOpEndpoints:
         conn = MagicMock()
         conn.__enter__.return_value = conn
         with patch("src.data_platform.db.get_conn", return_value=conn):
-            out = self._call_save("trader", {"astock": "allow", "etf": "deny"})
-        assert out["resources"] == {"astock": "allow", "etf": "deny"}
+            out = self._call_save("trader", {"astock": "allow", "listed_fund": "deny"})   # 批127 Step3：正名键
+        assert out["resources"] == {"astock": "allow", "listed_fund": "deny"}
         sqls = [c.args[0] for c in conn.execute.call_args_list]
         assert any("DELETE FROM permission" in s and "dimension=%s" in s for s in sqls)
         inserts = [c for c in conn.execute.call_args_list if "INSERT INTO permission" in c.args[0]]
         # INSERT 参数列序：(role, dimension, resource, effect, updated_by)——取 resource/effect/by
         got = {(c.args[1][2], c.args[1][3], c.args[1][4]) for c in inserts}
-        assert got == {("astock", "allow", "admin"), ("etf", "deny", "admin")}
+        assert got == {("astock", "allow", "admin"), ("listed_fund", "deny", "admin")}
 
     def test_market_op_bad_resource_rejected(self):
         """未知市场键（如旧 data 维的 'crypto' 合并键）→ 400 BAD_RESOURCE。"""
@@ -262,6 +262,6 @@ class TestMarketOpEndpoints:
 
         with patch("src.data_platform.db.get_conn", side_effect=side_conn):
             r = get_permissions(payload={"username": "admin"})
-        assert list(r["market_op"]["keys"]) == ["convertible", "etf", "listed_fund", "astock", "binance_perp", "okx_perp"]   # 批127 Step1
+        assert list(r["market_op"]["keys"]) == ["convertible", "listed_fund", "astock", "binance_perp", "okx_perp"]   # 批127 Step3：正名单键
         assert "data" not in r and "user_overrides" not in r   # 批33a：user 维键退役（行为级）
 

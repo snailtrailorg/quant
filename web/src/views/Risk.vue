@@ -110,7 +110,7 @@ const canSwitch = computed(() => canPerm('live_trading_control'))
 const state = ref({ halted: false, reason: '', rules: { global: { max_drawdown: 0.15, daily_loss_limit: 0.05 }, crypto: { leverage_max: 5 } } })
 const liveTradingMarkets = ref([
   { market: 'convertible', labelKey: 'risk.mConvertible', enabled: false, loading: false },
-  { market: 'listed_fund', labelKey: 'risk.mEtf', enabled: false, loading: false },   // 批 127 Step2：正名键（i18n 键名 mEtf 留待 Step3 换）
+  { market: 'listed_fund', labelKey: 'risk.mListedFund', enabled: false, loading: false },   // 批 127 Step3：i18n 键随正名
   { market: 'astock', labelKey: 'risk.mAstock', enabled: false, loading: false },
   { market: 'binance_perp', labelKey: 'risk.mBinancePerp', enabled: false, loading: false },
   { market: 'okx_perp', labelKey: 'risk.mOkxPerp', enabled: false, loading: false },

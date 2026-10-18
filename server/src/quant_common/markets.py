@@ -42,17 +42,9 @@ EXCHANGES: dict[str, dict] = {
     "BINANCE": {"market": "crypto"}, "OKX": {"market": "crypto"},
 }
 
-# 批 127 Step1：etf→listed_fund 双键期（SM 写入端未切值前读端等价）。
-# Step3 contract 删 etf 后回归单键。
-ASSET_CATEGORIES = ("stock", "etf", "listed_fund", "convertible", "fund", "reits", "perp")
-
-# 市场键别名（批 127 Step1：旧值兼容读——SM 2973 行 category='etf' 在 Step2 才 UPDATE）
-CATEGORY_ALIASES: dict[str, str] = {"etf": "listed_fund"}
-
-
-def canonical_category(cat: str) -> str:
-    """category 规范化（别名折叠——listed_fund 为正名，etf 为历史值）。"""
-    return CATEGORY_ALIASES.get(cat, cat)
+# 批 127 Step3（contract）：正名完成——单键 listed_fund（etf 键 0153 已清，
+# 别名层 CATEGORY_ALIASES 随旧键退役删除）。
+ASSET_CATEGORIES = ("stock", "listed_fund", "convertible", "fund", "reits", "perp")
 
 # 配置层能力集 token（D25 v2 立法：5 类；中文名经文案师审校定稿——「行情」撞 cap_quote/
 # 「事件」撞事件时间线/「公司事件」不适配 OKX 均已消歧为下述命名）
@@ -158,10 +150,10 @@ DOMAIN_CAPS: dict[str, tuple] = {
 
 # 权限五键 → (market, category, exchange) 无损映射(market_op 三分混一的立法化解)
 MARKET_OP_DECOMP: dict[str, tuple] = {
-    "astock": ("astock", "stock", None), "etf": ("astock", "etf", None),
+    "astock": ("astock", "stock", None),
     "convertible": ("astock", "convertible", None),
     "binance_perp": ("crypto", "perp", "BINANCE"), "okx_perp": ("crypto", "perp", "OKX"),
-    "listed_fund": ("astock", "listed_fund", None),   # 批 127 Step1：etf 正名新键
+    "listed_fund": ("astock", "listed_fund", None),   # 批 127：正名键（etf 0153 清）
 }
 
 

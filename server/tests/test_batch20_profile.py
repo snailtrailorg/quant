@@ -55,14 +55,14 @@ class TestProfileExpansion:
              patch("src.web_api.routes.auth_routes.require_authenticated",
                    return_value={"sub": 1, "username": "u1", "db_role": "trader"}), \
              patch("src.data_platform.perms.market_op_allowed",
-                   side_effect=lambda u, r, m: m in ("astock", "etf", "listed_fund", "binance_perp", "okx_perp")):
+                   side_effect=lambda u, r, m: m in ("astock", "listed_fund", "binance_perp", "okx_perp")):
             r = authed_client.get("/api/user/profile")
         assert r.status_code == 200
         d = r.json()
         assert d["created_at"] == "2026-01-01" and d["last_login_at"].startswith("2026-09-13")
         assert d["last_login_ip"] == "1.2.3.4" and d["deactivated"] is False
-        assert d["market_op"] == {"astock": True, "convertible": False, "etf": True,
-                                  "listed_fund": True, "binance_perp": True, "okx_perp": True}   # 批127 Step1
+        assert d["market_op"] == {"astock": True, "convertible": False,
+                                  "listed_fund": True, "binance_perp": True, "okx_perp": True}   # 批127 Step3：正名单键
 
     def test_market_op_role_uses_db_role(self, client):
         """JWT 陈旧 role 不漂移（盲审A-P2-6）：以 db_role 判（自带 verify_jwt 桩注入 viewer）。"""

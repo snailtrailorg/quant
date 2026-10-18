@@ -80,7 +80,7 @@ NAV_ITEMS_BASE: list[dict] = [
 ]
 
 # 市场操作键 5（原 perms._MARKET_OP_KEYS 字面量迁此——perms 改派生 re-export 保调用方零改动）
-MARKET_OP_KEYS: tuple[str, ...] = ("convertible", "etf", "listed_fund", "astock", "binance_perp", "okx_perp")   # 批 127 Step1：listed_fund 新键（etf 兼容期）
+MARKET_OP_KEYS: tuple[str, ...] = ("convertible", "listed_fund", "astock", "binance_perp", "okx_perp")   # 批 127 Step3：正名单键（etf 0153 清）
 
 # 路由别名（原 MainLayout ROUTE_TO_NAV 硬编码 10 条实测——批33a 删 permissions 后；
 # 批38：8 条死别名已清（见下））

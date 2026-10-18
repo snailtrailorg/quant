@@ -468,25 +468,15 @@ def paper_task_equity(tid: int, limit: int = 2000,
 def list_live_trading(payload: dict = Depends(require_perm("read"))):
     """列实盘分项开关 + .env 总闸状态。三级 AND：总闸 AND 分项 AND 策略 enabled。
 
-    批 127 Step2：别名折叠——双键期表内 etf/listed_fund 两行并存（0151 复制），
-    展示/写回都走正名键（etf 行由 0153 contract 删；enabled 真源在 listed_fund 行）。
+    批 127 Step3：旧键行 0153 已清——折叠逻辑随别名层退役，直读直返。
     """
     from src.data_platform.settings import is_live_trading_enabled
-    from src.quant_common.markets import canonical_category
     with get_conn() as conn:
         cur = conn.execute("SELECT market, enabled, updated_at FROM live_trading_config ORDER BY market")
         rows = cur.fetchall()
-    seen: set[str] = set()
-    items = []
-    for m, enabled, updated_at in rows:
-        key = canonical_category(m)
-        if key in seen:
-            continue          # 别名行折叠（listed_fund 已出现过则跳过 etf 行）
-        seen.add(key)
-        items.append({"market": key, "enabled": enabled, "updated_at": updated_at})
     return {
         "master_enabled": is_live_trading_enabled(),
-        "items": items,
+        "items": [{"market": r[0], "enabled": r[1], "updated_at": r[2]} for r in rows],
     }
 
 

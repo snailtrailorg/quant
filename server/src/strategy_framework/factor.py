@@ -846,8 +846,7 @@ FACTOR_EXCLUSIVE = {
 # 品类 → 因子兼容类（退役 detect_category 前缀判断——单源：security_master.category）
 CATEGORY_TO_FACTOR_CLASS = {
     "stock": "astock",
-    "etf": "etf", "fund": "etf", "reits": "etf",
-    "listed_fund": "etf",   # 批 127 Step1：市场键正名（SM 值 Step2 切——两值期同归 etf 因子类）
+    "listed_fund": "etf", "fund": "etf", "reits": "etf",   # 批 127：正名键（因子类标识 etf 为内部词形，非市场键）
     "convertible": "convertible",
     "perp": "crypto",
 }
