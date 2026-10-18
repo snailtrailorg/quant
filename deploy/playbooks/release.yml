@@ -823,6 +823,14 @@
         fi
         pinned=$(printf '%s\n' "$pinned" | tr '\n' ' ')
         is_pinned() { case " $pinned " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+        # 批 128：删除失败可见化（2026-10-18 实证：8 月孤儿内含 root 属主 __pycache__，
+        # deploy 的 rm -rf 静默失败、每轮 GC 空转——失败必须报出来，但不以非零退出
+        # 连坐发布（清理失败≠部署失败，回滚好版本得不偿失）
+        gc_fail=0
+        gc_rm() {   # $1=说明 $2=路径
+          if rm -rf "$2"; then echo "GC $1"
+          else echo "⚠ GC 失败（权限？需 root 清理）: $1 —— $2"; gc_fail=$((gc_fail+1)); fi
+        }
         # 1) 孤儿 staged（无 .deployed 标记=从未切换成功的中断残留，下次部署顺带 GC）
         for d in "$rel"/*/; do
           [ -d "$d" ] || continue
@@ -831,7 +839,7 @@
           [ "$rel/$id" = "$cur" ] && continue
           [ "$rel/$id" = "$curw_dir" ] && continue
           if is_pinned "$id"; then echo "跳过钉住孤儿: $id"; continue; fi
-          rm -rf "$d" && echo "GC 孤儿 staged: $id"
+          gc_rm "孤儿 staged: $id" "$d"
         done
         # 2) 已部署版按 release_id 字典序保留 N 个（含当前指向版；跳过钉住项）
         done_ids=$(for d in "$rel"/*/; do
@@ -851,9 +859,20 @@
         over=$(( $(echo $remove | wc -w) - keep ))
         if [ "$over" -gt 0 ]; then
           for id in "${remove_ids[@]:0:$over}"; do
-            rm -rf "$rel/$id" && echo "GC 旧版: $id"
+            gc_rm "旧版: $id" "$rel/$id"
           done
         fi
+        # 3) pip-freeze 快照保留最近 20 份（批 128：原无保留策略，prod 182/staging 222 份无界增长；
+        # 只有最新一份被 rollback diff 当基准，历史份无消费）
+        var='{{ deploy_root }}/var'
+        if [ -d "$var" ]; then
+          n_freeze=$(ls "$var"/pip-freeze-*.txt 2>/dev/null | wc -l)
+          if [ "$n_freeze" -gt 20 ]; then
+            ls -t "$var"/pip-freeze-*.txt | tail -n +21 | xargs -r rm -f \
+              && echo "GC pip-freeze: $n_freeze -> $(ls "$var"/pip-freeze-*.txt 2>/dev/null | wc -l)（保留 20）"
+          fi
+        fi
+        [ "$gc_fail" -eq 0 ] || echo "⚠ 本轮 GC 有 $gc_fail 项失败（见上——root 属主文件需人工清理）"
         exit 0
       args:
         executable: /bin/bash
