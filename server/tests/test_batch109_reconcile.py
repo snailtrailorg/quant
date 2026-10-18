@@ -254,7 +254,7 @@ class TestStationWiring:
              patch.object(engine, "_trade_dates_in_range", return_value=None), \
              patch.object(engine, "_get_rate_ds", return_value=MagicMock()):
             engine._sync_via_kind_daily_batch(
-                ad, sub="etf", cfg={"id": "etf_daily", "api": "pro.fund_daily"}, start="20260105", end_date="20260106")
+                ad, sub="etf", cfg={"id": "listed_fund_daily", "api": "pro.fund_daily"}, start="20260105", end_date="20260106")
         assert spy.calls[0]["expected"] is None
         assert spy.calls[0]["where_params"] == ("etf",)
 

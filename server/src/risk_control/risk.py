@@ -342,7 +342,7 @@ class RiskControl:
         return RiskDecision(approved=True, reason="通过")
 
     def _check_etf_conv(self, order: dict, account_id) -> RiskDecision:
-        """场内（可转债/ETF）风控。account_id 来自 _check_order_inner 形参（单一真源，勿用 order 键分叉）。"""
+        """场内（可转债/场内基金）风控。account_id 来自 _check_order_inner 形参（单一真源，勿用 order 键分叉）。"""
         rules = self._rules["etf_conv"]  # _merged_rules 保证存在（SB2-F-30）
         # SB3（F-43/F-28 风控层兜底）：数量/价格无效直接拒——0 值单绕过金额上限且是废单
         price = float(order.get("price", 0) or 0)

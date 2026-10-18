@@ -12,12 +12,12 @@ logger = logging.getLogger("quality")
 
 def sm_reconcile() -> dict:
     """批 62c：SM 对账差集（A-P1-4/B-P1-5 终版——范围钉死 category='stock'×list_status='L'，
-    键归一 ts_code→vt_symbol；ETF/转债=范围外不计；退市漂移单列）。金标准源=
+    键归一 ts_code→vt_symbol；场内基金/转债=范围外不计；退市漂移单列）。金标准源=
     system_config sm_golden_static_list（多源 static_list diff 留桩——第二源接入前单源自检）。"""
     from src.data_platform.db import get_conn
     from src.data_platform.schema import to_vt_symbol
     res = {"sm_only": [], "static_only": [], "delist_drift": [], "out_of_scope_note":
-           "ETF/转债不在本差集范围（static_symbols 仅 A 股股票——范围外不计）"}
+           "场内基金/转债不在本差集范围（static_symbols 仅 A 股股票——范围外不计）"}
     try:
         with get_conn() as conn:
             cur = conn.execute("SELECT vt_symbol FROM security_master WHERE category='stock'")

@@ -236,9 +236,9 @@ class TushareAdapter(BaseDataAdapter):
     # 它们有 sync_config 行却在能力声明与 SYNC_ID_CAP_MAP 双双缺席（「清单有·声明无」，
     # 后果＝前端 provider 下拉对这 4 行恒空、_validate_provider 拒改源）。
     capabilities = {
-        "astock_daily", "etf_daily", "cb_daily", "index_daily",
+        "astock_daily", "listed_fund_daily", "cb_daily", "index_daily",
         "astock_minute", "astock_minute_5min",
-        "astock_basic", "astock_list", "etf_list", "cb_basic",
+        "astock_basic", "astock_list", "listed_fund_list", "cb_basic",
         "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
         "block_trade_sync", "cyq_perf_sync", "forecast_sync", "namechange_sync",
         "concept_sync", "trade_cal",
@@ -292,7 +292,7 @@ class TushareAdapter(BaseDataAdapter):
 
     def pull_daily(self, symbol: str, start: str, end: str, adj=None, kind: str = "astock") -> pd.DataFrame:
         """per-symbol 日线。kind 路由到 daily/fund_daily/cb_daily（盲审 A-P1-2：pro_bar 默认
-        asset='E' 股票，对 ETF/转债返回空——原 _get_pro_api 按 kind 路由三条 API）。"""
+        asset='E' 股票，对场内基金/转债返回空——原 _get_pro_api 按 kind 路由三条 API）。"""
         from datetime import date as _date
         pro = self.get_client()
         end = end or _date.today().strftime("%Y%m%d")
@@ -465,7 +465,7 @@ class TushareAdapter(BaseDataAdapter):
                         dfs.append(self.pull_daily(sym, start, end, adj=None, kind=kind_param))
                 df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
                 if df is not None and not df.empty:
-                    _log_bar_quality_local(df, "bar_daily" if sub == "stock" else "etf_daily")
+                    _log_bar_quality_local(df, "bar_daily" if sub == "stock" else "listed_fund_daily")
                 rows = self.to_bar_rows(df, freq)
             else:   # stock/etf：按日全市场批拉（sub_kind=stock→astock）+ 当日复权因子 adj_map
                 df = self.pull_daily_batch(start, "astock" if sub == "stock" else sub)
@@ -473,7 +473,7 @@ class TushareAdapter(BaseDataAdapter):
                 # 空 df（节假日 freq=B 拉到空）不拉因子，对齐已退役 _daily_to_save_fn〔批 72〕只在 df 非空时拉因子
                 if start and df is not None and not df.empty:
                     # 批 72 质量校验迁移面（落点=非空块内 adj_map 拉取前——v2 #2 双同锚点）
-                    _log_bar_quality_local(df, "bar_daily" if sub == "stock" else "etf_daily")
+                    _log_bar_quality_local(df, "bar_daily" if sub == "stock" else "listed_fund_daily")
                     # adj_factor 独立限速（adj_factor 档，对齐已退役旧路径 _adj_map_for_df〔批 72〕批 58 补的限速）——
                     # 嵌套在引擎 daily 档 with 块内，二者独立 limiter 各自 sleep，时序对齐旧路径
                     from src.data_platform.rate_limit import rate_limit_context
@@ -566,7 +566,7 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("static_list", "symbols"): "pull_stock_basic_raw",        # static_symbols
     ("static_list", "convertible"): "pull_cb_basic_raw",       # cb_basic（全量）
     ("static_list", "terms"): "pull_cb_basic_raw",             # convertible_terms（逐只 ts_code=）
-    ("static_list", "etf"): "pull_fund_basic_raw",             # etf_list
+    ("static_list", "etf"): "pull_fund_basic_raw",             # listed_fund_list
     ("trade_cal", None): "pull_trade_cal_raw",                 # trade_cal（逐年，纯读）
 }
 
@@ -595,7 +595,7 @@ def _log_bar_quality_local(df, label: str) -> None:
     """批 72 质量校验迁移面（fail-soft+一行一 issue——语义照抄 engine._log_bar_quality；
     下层（data_platform）禁 import 上层（data_sync），复制语义不调函数，test_layering 守门）。
     空 df 闸在调用侧（v2 #2 双同：节假日/非交易区间不喷噪声）；label 沿用批 71 词表
-    （bar_daily/etf_daily/cb_daily——观察期查询零改动，v2 #6 仲裁）。"""
+    （bar_daily/listed_fund_daily/cb_daily——观察期查询零改动，v2 #6 仲裁）。"""
     import logging
     try:
         from src.data_platform.adapters.tushare_adapter import validate_bar_quality

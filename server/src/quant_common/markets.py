@@ -80,7 +80,7 @@ KIND_CAP_CLASS: dict[str, str] = {
 # 批 99 起钉「完备性」而非字面量键数——加同步项忘了登记即红。v1 仅 5 项致 31 项能力漏网是前科）
 SYNC_ID_CAP_MAP: dict[str, str] = {
     # hist_quote
-    "astock_daily": "hist_quote", "etf_daily": "hist_quote", "cb_daily": "hist_quote",
+    "astock_daily": "hist_quote", "listed_fund_daily": "hist_quote", "cb_daily": "hist_quote",
     "index_daily": "hist_quote", "astock_minute": "hist_quote", "astock_minute_5min": "hist_quote",
     # 批 101：加密永续日线（币安批量历史，历史行情类）
     "binance_perp_daily": "hist_quote",
@@ -94,7 +94,7 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     # 批 102b：OKX 永续日线（公共行情 API，历史行情类）——第 2 个 crypto **数据源**
     "okx_perp_daily": "hist_quote",
     # ref_data
-    "astock_basic": "ref_data", "astock_list": "ref_data", "etf_list": "ref_data",
+    "astock_basic": "ref_data", "astock_list": "ref_data", "listed_fund_list": "ref_data",
     "cb_basic": "ref_data", "stk_limit_sync": "ref_data", "moneyflow_sync": "ref_data",
     "margin_detail_sync": "ref_data", "top_list_sync": "ref_data", "block_trade_sync": "ref_data",
     "cyq_perf_sync": "ref_data", "forecast_sync": "ref_data", "namechange_sync": "ref_data",

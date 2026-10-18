@@ -1,6 +1,6 @@
 """数据中台 · Tushare 数据源适配器。
 
-Tushare Pro 为 A 股/可转债/ETF 日线主数据源。
+Tushare Pro 为 A 股/可转债/场内基金日线主数据源。
 分钟线需 2000 积分，当前先用日线（token 已验通）。
 """
 
@@ -107,7 +107,7 @@ def pull_adj_factor_by_code(ts_code: str, start_date: str, end_date: str) -> pd.
 # ——— 日线拉取 ———
 
 def get_daily_symbols() -> list[str]:
-    """获取当前可交易的 A 股/可转债/ETF 列表（含上市状态过滤）。
+    """获取当前可交易的 A 股/可转债/场内基金列表（含上市状态过滤）。
 
     返回 Tushare ts_code 列表，如 ['600000.SH', '113549.SH', …]。
     """
@@ -377,7 +377,7 @@ def pull_trade_cal(year: int) -> list[tuple]:
     return rows
 
 
-# ——— 可转债/ETF ———
+# ——— 可转债/场内基金 ———
 
 def pull_convertible_bonds() -> list[str]:
     """获取可转债列表（ts_code）。"""
@@ -387,7 +387,7 @@ def pull_convertible_bonds() -> list[str]:
 
 
 def pull_etf_list() -> list[str]:
-    """获取 ETF 列表（ts_code）。"""
+    """获取场内基金列表（ts_code，ETF+LOF+封基全集）。"""
     pro = get_pro()
     df = pro.fund_basic(market="E", fields="ts_code")
     return df["ts_code"].tolist() if df is not None and not df.empty else []
@@ -428,7 +428,7 @@ def pull_cb_basic_raw(ts_code: str | None = None) -> pd.DataFrame:
 
 
 def pull_fund_basic_raw(market: str = "E") -> pd.DataFrame:
-    """`etf_list`：场内基金列表（原 `pro.fund_basic(market="E")`）。"""
+    """`listed_fund_list`：场内基金列表（原 `pro.fund_basic(market="E")`）。"""
     return get_pro().fund_basic(market=market)
 
 

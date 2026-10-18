@@ -57,6 +57,6 @@ def test_delete_by_sync_item_empty_static_returns_error():
     from unittest.mock import patch
     from src.data_sync import engine
     with patch.object(engine, "_list_static_ts_codes", return_value=[]):
-        r = engine.delete_by_sync_item("etf_daily")
+        r = engine.delete_by_sync_item("listed_fund_daily")
     assert r["status"] == "error"
     assert "空" in r["error"]

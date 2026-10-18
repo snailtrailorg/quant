@@ -1,7 +1,7 @@
 """数据同步引擎 -- 通用增量/全量同步，按 sync_config.id 调度。
 
 支持8种数据类型：astock_daily / astock_basic / astock_list /
-cb_daily / cb_basic / etf_daily / etf_list / trade_cal
+cb_daily / cb_basic / listed_fund_daily / listed_fund_list / trade_cal
 
 回补：sync(sync_id, backfill_from=YYYYMMDD) 回补历史缺口，不推进 last_sync_date 游标。
 完整性：按日拉取的同步用 trade_cal 校验预期交易日 vs 实际成功日，缺口暴露在 sync_log。
@@ -416,7 +416,7 @@ def sync(sync_id: str, backfill_from: str | None = None,
                 _alert_sync_gaps(sync_id, [f"{a}~{b}" for a, b in _new])
             # ——— 游标推进（F2 根因收尾 2026-08-18，G 审修订 + H 修）———
             # 三态只作用于**返回 last_success_date 键**的 handler（_sync_by_trade_date 系：
-            # astock_daily/etf_daily/astock_basic）。其余（分钟线=per-symbol 失败粒度、cb_daily、
+            # astock_daily/listed_fund_daily/astock_basic）。其余（分钟线=per-symbol 失败粒度、cb_daily、
             # list/trade_cal）维持无条件推进——分钟线若被卷入三态，200 积分下全市场失败会
             # 冻游标 → beat 每 30min 重试风暴。
             # 全失败仍刷 last_sync_ts（G-S3：调度器以旧 ts 算 next_run 会连发重试）。
@@ -583,7 +583,7 @@ _LITERAL_SUPPLY: dict[str, tuple[str, str | None, str]] = {
     "static_symbols":    ("static_list",       "symbols",     "static_symbols"),
     "cb_basic":          ("static_list",       "convertible", "cb_basic_info"),
     "convertible_terms": ("static_list",       "terms",       "convertible_terms"),
-    "etf_list":          ("static_list",       "etf",         "listed_fund_basic"),
+    "listed_fund_list":          ("static_list",       "etf",         "listed_fund_basic"),
     "trade_cal":         ("trade_cal",         None,          "trade_cal"),
 }
 
@@ -751,7 +751,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
 def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
     """场内基金列表全量同步（批 127 正名——含 ETF+LOF+封基全集）。"""
-    kind, sub, _tbl = _LITERAL_SUPPLY["etf_list"]
+    kind, sub, _tbl = _LITERAL_SUPPLY["listed_fund_list"]
     adapter = _get_supply_adapter(cfg)   # 批 107：拉取经 adapter
     from src.data_platform.rate_limit import rate_limit_context
     with rate_limit_context(_get_rate_ds(_provider_of(cfg)), "fund_basic"):   # 批 64b 裸调收编（档 0.3s）
@@ -962,7 +962,7 @@ def _log_bar_quality(df, label: str) -> None:
 # 批 72 v2 #6：质量校验 label 词表映射（沿用批 71——观察期查询零改动）。
 # per-symbol 三调用方只传 kind 词形（astock/etf/cb，源自 _PER_SYMBOL_META）——sub_kind
 # 词形（stock/convertible）到不了本 map（base.py fetch 面 label 内联不经此 map）。
-_QUALITY_LABEL_OF = {"astock": "bar_daily", "etf": "etf_daily", "cb": "cb_daily"}
+_QUALITY_LABEL_OF = {"astock": "bar_daily", "etf": "listed_fund_daily", "cb": "cb_daily"}
 
 
 def backfill_adj_factor(start_date: str | None = None, end_date: str | None = None,
@@ -971,7 +971,7 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
 
     按交易日拉全市场因子 → 批量 UPDATE（只填 NULL 行，不覆盖非空）。
     E/F 盲审修订（2026-08-18）：
-    - **只扫股票行**（F-S1：adj_factor 接口实测只含沪深京股票，ETF 因子在 fund_adj、转债无——
+    - **只扫股票行**（F-S1：adj_factor 接口实测只含沪深京股票，场内基金因子在 fund_adj、转债无——
       不限定则回填永不收敛且每次全量空转 ~4h）
     - **范围谓词**（F-F1：`ts::date=%s` 用不上索引实测 3.68s/日，`ts>=d AND ts<d+1` 0.20s/日，18x）
     - updated 用 cursor.rowcount 真实受影响行数（F-S3：提交行数虚报含 0 命中）
@@ -993,7 +993,7 @@ def backfill_adj_factor(start_date: str | None = None, end_date: str | None = No
 
     with get_conn() as conn:
         sql = ("SELECT DISTINCT (ts AT TIME ZONE 'Asia/Shanghai')::date FROM bar_1d WHERE adj_factor IS NULL "
-               # 只扫股票行：asset_static_info 是 A 股静态表（ETF/转债不在其中）
+               # 只扫股票行：asset_static_info 是 A 股静态表（场内基金/转债不在其中）
                "AND symbol IN (SELECT DISTINCT REPLACE(REPLACE(REPLACE(ts_code,'.SH','.SHSE'),"
                "'.SZ','.SZSE'),'.BJ','.BSE') FROM asset_static_info)")
         params: list = []
@@ -2635,7 +2635,7 @@ _HANDLERS = {
     "astock_basic": _sync_astock_basic,
     "astock_list": _sync_astock_list,
     "cb_basic": _sync_cb_basic,
-    "etf_list": _sync_etf_list,
+    "listed_fund_list": _sync_etf_list,
     "trade_cal": _sync_trade_cal,
     # 批 83b：两条原独立 beat 收编（tasks.py 的 @app.task 逻辑迁入本表；
     # app.py beat 条目退役，改由 sync_config 行 + data_sync_scheduler 调度）。
@@ -2665,7 +2665,7 @@ _HANDLERS = {
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由
 # （防双注册钉=本文件 tier1 注册循环后的 assert，钉全量 14 键）
 _VIA_KIND_IDS = frozenset({
-    "astock_daily", "etf_daily", "cb_daily", "index_daily",
+    "astock_daily", "listed_fund_daily", "cb_daily", "index_daily",
     "astock_minute", "astock_minute_5min",
 })
 
@@ -3253,7 +3253,7 @@ assert not (_VIA_KIND_IDS & set(_HANDLERS))
 #   bar_type: daily（按交易日，pro.daily/fund_daily/cb_daily）/ minute（stk_mins per-symbol 拉取）
 _PER_SYMBOL_META: dict[str, tuple[str, str, str, str]] = {
     "astock_daily":       ("1D",   "bar_1D",   "astock", "daily"),
-    "etf_daily":          ("1D",   "bar_1D",   "etf",    "daily"),
+    "listed_fund_daily":          ("1D",   "bar_1D",   "etf",    "daily"),
     "cb_daily":           ("1D",   "bar_1D",   "cb",     "daily"),
     "astock_minute":      ("1min", "bar_1min", "astock", "minute"),
     "astock_minute_5min": ("5min", "bar_5min", "astock", "minute"),
@@ -3262,7 +3262,7 @@ _PER_SYMBOL_SYNC_IDS = set(_PER_SYMBOL_META)
 
 # 各 sync_id 对应的：tushare 拉取 API / 静态信息表 / ts_code 来源
 # astock_daily -> pro.daily(ts_code=) / asset_static_info
-# etf_daily    -> pro.fund_daily(ts_code=) / listed_fund_basic
+# listed_fund_daily    -> pro.fund_daily(ts_code=) / listed_fund_basic
 # cb_daily     -> pro.cb_daily(ts_code=) / cb_basic_info（注：cb_daily 按日期拉全量更高效，per-symbol 仍支持）
 # astock_minute/_5min -> pro.stk_mins(ts_code=,freq=) / asset_static_info（per-symbol only，不支持按日全市场）
 
@@ -3722,7 +3722,7 @@ def _delete_supply_item(sync_id: str, conn=None) -> dict:
     ⚠️ 表名取 `_LITERAL_SUPPLY[sync_id][2]`（代码内字面量，非用户输入 ⇒ f-string 无注入面）；
     该值与 `sync_config.pg_table` / `sync_kind_config.pg_table` 三处一致，由
     `test_batch107::test_pg_table_single_source` + `test_literal_keys_match_placement_rows` 钉住
-    （`etf_list` 原错配 `asset_static_info` 的清空会误删 A 股整表＝跨项数据丢失，已被修）。
+    （`listed_fund_list` 原错配 `asset_static_info` 的清空会误删 A 股整表＝跨项数据丢失，已被修）。
     """
     entry = _LITERAL_SUPPLY.get(sync_id)
     if entry is None:

@@ -5,7 +5,7 @@
 2. **消费者断言**：替身 provider ⇒ 7 个 handler 都改走它（`fetch_supply` 被调且 `(kind, sub_kind)` 正确）。
 3. **聚宽样板**：`fetch_supply("static_list","stock")` 归一化到 `asset_static_info` 列形状；能力声明生效。
 4. **列形状单一真源**：engine `_TIER1_*` 声明列 == `sync_kind_config` 列（漂移即红）；
-   `sync_config.pg_table == sync_kind_config.pg_table`（`etf_list` 错配修复的守卫）。
+   `sync_config.pg_table == sync_kind_config.pg_table`（`listed_fund_list` 错配修复的守卫）。
 5. **反证（源码级）**：7 handler 均含 `_get_supply_adapter(` 且**无** `_get_pro(` 直连。
 """
 from __future__ import annotations
@@ -85,7 +85,7 @@ def _make_spy_cls():
 
 class TestLiteralRegistry:
     _SEVEN = ("astock_basic", "astock_list", "static_symbols", "cb_basic",
-              "convertible_terms", "etf_list", "trade_cal")
+              "convertible_terms", "listed_fund_list", "trade_cal")
 
     def test_seven_items_declared(self):
         from src.data_sync import engine
@@ -139,7 +139,7 @@ class TestReconcileWithDb:
             assert place[sid] == (k, s, t), f"{sid} 声明 {(k, s, t)} != 归置行 {place[sid]}"
 
     def test_pg_table_single_source(self):
-        """`sync_config.pg_table` == `sync_kind_config.pg_table`（批 107 修 `etf_list` 错配的守卫）。
+        """`sync_config.pg_table` == `sync_kind_config.pg_table`（批 107 修 `listed_fund_list` 错配的守卫）。
 
         错配危害不止台账：`DELETE /api/sync/data/{sid}` 直接 `DELETE FROM "{pg_table}"`。
         """
@@ -231,7 +231,7 @@ class TestLiteralProviderEffective:
             "static_symbols": engine._sync_static_list,
             "cb_basic": engine._sync_cb_basic,
             "convertible_terms": engine._sync_convertible_terms,
-            "etf_list": engine._sync_etf_list,
+            "listed_fund_list": engine._sync_etf_list,
             "trade_cal": engine._sync_trade_cal,
         }
         for sid, fn in cases.items():
@@ -331,7 +331,7 @@ class TestMigration0138Shape:
         assert "ON CONFLICT (sync_id) DO NOTHING" in src, "须幂等——复跑不得覆盖运维编辑"
 
     def test_fixes_etf_list_pg_table_mismatch(self):
-        """`etf_list.pg_table` 由 `asset_static_info`（错）改为 `etf_basic_info`。
+        """`listed_fund_list.pg_table` 由 `asset_static_info`（错）改为 `etf_basic_info`。
 
         危害：`DELETE FROM "{pg_table}"` 会删掉 A 股整表 ⇒ 跨项数据丢失。
         """

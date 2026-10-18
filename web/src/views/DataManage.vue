@@ -22,9 +22,6 @@
     <!-- 批17 TableShell：列宽拖拽+持久化（批16 试点 border 升级为全站机制的首两表） -->
     <TableShell :data="configs" :loading="loading" storage-key="sync-config">
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
-      <el-table-column v-if="colOn('data_type')" prop="data_type" :label="t('dataManage.category')" min-width="100">
-        <template #default="{ row }"><el-tag>{{ row.data_type }}</el-tag></template>
-      </el-table-column>
       <el-table-column v-if="colOn('provider')" prop="provider" :label="t('dataManage.provider')" min-width="140">
         <template #default="{ row }">
           <el-select :model-value="row.provider || 'tushare'" size="small"
@@ -232,7 +229,6 @@ const setRowStatus = (id, status) => { configs.value = configs.value.map(c => c.
 
 // 批16 列显示配置（新列默认隐）：colDefs 不含名称/操作两锁定列
 const syncColDefs = computed(() => [
-  { key: 'data_type', label: t('dataManage.category') },
   { key: 'provider', label: t('dataManage.provider') },
   { key: 'mode', label: t('common.mode') },
   { key: 'schedule', label: t('dataManage.cronSchedule') },
@@ -263,7 +259,7 @@ const logColDefs = computed(() => [
 const logVisible = ref([])
 const logColOn = k => logVisible.value.includes(k)
 
-const PER_SYMBOL_IDS = ['astock_daily', 'etf_daily', 'cb_daily', 'astock_minute', 'astock_minute_5min']
+const PER_SYMBOL_IDS = ['astock_daily', 'listed_fund_daily', 'cb_daily', 'astock_minute', 'astock_minute_5min']
 const isPerSymbol = id => PER_SYMBOL_IDS.includes(id)
 const goSymbols = row => router.push(`/data-manage/${row.id}`)
 

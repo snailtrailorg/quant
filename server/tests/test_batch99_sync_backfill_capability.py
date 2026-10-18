@@ -31,7 +31,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # 批 117 加 st_list ST 官方名单 1 项）
 BACKFILLABLE_EXPECTED = {
     # bar 族 6（_VIA_KIND_IDS）
-    "astock_daily", "etf_daily", "cb_daily", "index_daily",
+    "astock_daily", "listed_fund_daily", "cb_daily", "index_daily",
     "astock_minute", "astock_minute_5min",
     # tier1 批量 8（_TIER1_BATCH；批 117 +st_list_sync）
     "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
@@ -44,7 +44,7 @@ BACKFILLABLE_EXPECTED = {
 }
 # 必须**没有**回补入口的 9 项（静态清单 5 / 全量重建 2 / 池内 2）
 NOT_BACKFILLABLE_EXPECTED = {
-    "astock_list", "cb_basic", "etf_list", "static_symbols", "convertible_terms",
+    "astock_list", "cb_basic", "listed_fund_list", "static_symbols", "convertible_terms",
     "namechange_sync", "concept_sync", "pool_data", "pool_data_full_calibrate",
 }
 

@@ -229,7 +229,7 @@ class TestQualityHook:
              patch.object(ad, "to_bar_rows", return_value=[_row()]), \
              caplog.at_level(logging.WARNING):
             ad.fetch(self._req("bar_daily", sub="etf", mode="supply"))
-        assert any("[quality] etf_daily" in r.message for r in caplog.records)
+        assert any("[quality] listed_fund_daily" in r.message for r in caplog.records)
 
     def test_cb_empty_df_no_quality_log(self, caplog):
         """空 df 闸（双同 P1-2 交付物自身回归钉）：convertible 空帧不喷 [quality]。"""

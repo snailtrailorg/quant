@@ -1,5 +1,5 @@
 <template>
-  <!-- 05 §5.9 ETF 筛选:规模/费率/跟踪误差 条件+核心列+勾选入池 -->
+  <!-- 05 §5.9 场内基金筛选（批 127 正名）:规模/费率/跟踪误差 条件+核心列+勾选入池 -->
   <div style="display: flex; gap: 16px">
     <el-card style="width: 260px; flex-shrink: 0">
       <template #header>{{ t('screener.etfFilters') }}</template>

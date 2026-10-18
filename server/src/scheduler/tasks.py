@@ -804,7 +804,7 @@ def data_sync_scheduler():
                 skipped.append(f"{sid}(运行中)")
             continue
         # 空状态（数据被删/从未初始化）跳过增量，需用户手动全量重建
-        if last_sync_date is None and sid in ("astock_daily", "etf_daily", "cb_daily",
+        if last_sync_date is None and sid in ("astock_daily", "listed_fund_daily", "cb_daily",
                                                "astock_minute", "astock_minute_5min"):
             skipped.append(f"{sid}(空状态,需全量重建)")
             continue

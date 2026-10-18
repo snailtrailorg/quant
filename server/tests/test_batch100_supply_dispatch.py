@@ -34,7 +34,7 @@ class TestSupplyMap:
         """`_SUPPLY_PULL` 键集 == 引擎 `_TIER1_*`（工厂项）∪ `_LITERAL_SUPPLY`（字面量项）。
 
         批 107 前：== 工厂项 9 键；批 107 把 7 个字面量供给项（astock_basic/astock_list/
-        cb_basic/etf_list/trade_cal/static_symbols/convertible_terms）也收编到同一端口 ⇒ 并集。
+        cb_basic/listed_fund_list/trade_cal/static_symbols/convertible_terms）也收编到同一端口 ⇒ 并集。
         批 117 加 st_list（tier1 8 + full 2 = 10）。
         """
         from src.data_platform.adapters.base import _SUPPLY_PULL

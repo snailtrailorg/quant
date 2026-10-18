@@ -5,7 +5,7 @@
       <TabsShell :tabs="tabs" default-tab="astock" v-slot="slotProps">
               <AScreen v-if="slotProps.tab === 'astock'" />
               <CBScreen v-else-if="slotProps.tab === 'cb'" />
-              <ETFScreen v-else />
+              <ListedFundScreen v-else />
       </TabsShell>
     </template>
   </el-card>
@@ -14,7 +14,7 @@
 import TabsShell from '../components/TabsShell.vue'
 import AScreen from './AScreen.vue'
 import CBScreen from './CBScreen.vue'
-import ETFScreen from './ETFScreen.vue'
+import ListedFundScreen from './ListedFundScreen.vue'
 const tabs = [
     { key: 'astock', i18nKey: 'tabs.astock' },
     { key: 'cb', i18nKey: 'tabs.cb' },

@@ -57,7 +57,7 @@ class TestSwitchableScope:
         判据演进（批 101）：原判据「非 bar 项恒 tushare」太粗——它把 binance 独占的
         `binance_perp_daily` 误伤；改为同源判据「供源数 ≥2 即可切，故必须后端支持」。
         判据**再演进（批 107）**：把供给面 7 项（`_LITERAL_SUPPLY`：astock_basic/astock_list/
-        static_symbols/cb_basic/convertible_terms/etf_list/trade_cal）纳入 `delete_by_sync_item`
+        static_symbols/cb_basic/convertible_terms/listed_fund_list/trade_cal）纳入 `delete_by_sync_item`
         （新增「清整表 + 重置游标」分支）⇒ 它们**可以**可切源。
 
         故断言＝**可切的非 bar 项必须 ⊆ delete 支持集**（`_LITERAL_SUPPLY`）；

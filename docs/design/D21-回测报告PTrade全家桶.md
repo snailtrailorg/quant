@@ -100,7 +100,7 @@
 
 ## 十、验收
 
-- 批0：index_daily/ETF 实测结论
+- 批0：index_daily/ETF（510300 代基准——真指 ETF 子类）实测结论
 - 批1：pytest 全绿 + **α/β 黄金用例数值断言** + 基准落库 + 指标传播链路 5 处一致 + 全量回归
 - 批2：新端点结构正确 + overview==metrics==summary 断言 + 旧端点不回归
 - 批3：多标签页渲染 + 导出文件可下载 + build/smoke 绿
