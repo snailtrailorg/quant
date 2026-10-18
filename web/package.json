@@ -7,7 +7,7 @@
     "dev": "vite --port 5173",
     "build": "vite build",
     "preview": "vite preview",
-    "prebuild": "bash ../scripts/check-tokens.sh && node scripts/check-locales.mjs && node scripts/test-coldiff.mjs"
+    "prebuild": "bash ../scripts/check-tokens.sh && node scripts/check-locales.mjs && node scripts/test-coldiff.mjs && node scripts/check-orphans.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.0",
