@@ -56,7 +56,7 @@ class TestSMBackfill:
 
     def test_etf(self, sm):
         a = sm.get("510300.SHSE")
-        assert a is not None and a.category == "etf" and a.multiplier == 100
+        assert a is not None and a.category == "listed_fund" and a.multiplier == 100   # 批 127 Step2：SM 归一后正名键
 
     def test_bse_backfilled(self, sm):
         a = sm.get("920726.BSE")

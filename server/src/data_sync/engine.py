@@ -768,9 +768,9 @@ def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
             """, rows)
         conn.commit()
     _sm_upsert(((vt := _ts_to_vt_prefix(r[0])), "astock",
-                (vt.rsplit(".", 1) + [""])[1], "etf", None, r[1], None,
+                (vt.rsplit(".", 1) + [""])[1], "listed_fund", None, r[1], None,
                 100, 0.001, "T+1", r[5], None, SM_SESSION_ASTOCK)
-               for r in rows if r[0])
+               for r in rows if r[0])   # 批 127 Step2：写入 category 切正名键（存量 0152 归一）
     return {"pulled": len(df), "saved": len(df), "start": end_date,
             "failed_dates": [], "expected_days": None, "actual_days": None}
 
