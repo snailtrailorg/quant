@@ -190,16 +190,6 @@ def upsert_proxy(name: str, url: str, notes: str | None = None,
         conn.commit()
 
 
-def set_proxy_enabled(name: str, enabled: bool) -> bool:
-    with get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE proxy_config SET enabled=%s, updated_at=now() WHERE name=%s "
-            "RETURNING name", (bool(enabled), name))
-        ok = cur.fetchone() is not None
-        conn.commit()
-    return ok
-
-
 def delete_proxy(name: str) -> bool:
     """删池中一行。被绑定引用时 FK 是 `ON DELETE SET NULL`——绑定行的 proxy_name 变 NULL；
     若该绑定 `proxy_enabled=true`，CHECK 会拒（`NOT enabled OR name IS NOT NULL`）⇒

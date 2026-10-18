@@ -23,7 +23,7 @@ def test_platform_attr_is_instance_not_module():
     assert isinstance(platform, DataPlatform)
     assert not isinstance(platform, types.ModuleType)
     assert dp.platform is platform
-    assert hasattr(platform, "is_trading_day") and hasattr(platform, "ensure_daily")
+    assert hasattr(platform, "is_trading_day")   # 批127 Z2：ensure_daily 等 7 方法已死删
 
 
 def test_cross_name_resolution_order():

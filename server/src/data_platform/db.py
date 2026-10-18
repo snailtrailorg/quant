@@ -113,11 +113,6 @@ def dispose_fork_inherited_connections() -> None:
     _engine.dispose(close=False)
 
 
-def get_engine():
-    """返回 SQLAlchemy engine（alembic/pandas 等用）。"""
-    return _engine
-
-
 def ensure_table(freq: str) -> None:
     """校验 K 线表存在（建表由 alembic 迁移负责，运行时不再 CREATE TABLE IF NOT EXISTS）。
 

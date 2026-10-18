@@ -168,24 +168,9 @@ class BaseDataAdapter(ABC):
     def to_source_symbol(self, symbol: str) -> str:
         """内部 ts_code（600000.SH）→ 源格式（聚宽 600000.XSHG）。默认直通。"""
         return symbol
-
-    def from_source_symbol(self, source_symbol: str) -> str:
-        """源格式 → 内部 ts_code（to_bar_rows 归一到 vt_symbol 的输入）。默认直通。"""
-        return source_symbol
-
     def to_source_freq(self, freq: str) -> str:
         """内部 freq（'1min'）→ 源格式（聚宽 '1m'）。默认直通。"""
         return freq
-
-    def to_source_adj(self, adj: str | None) -> str | None:
-        """语义复权 → 源格式。默认直通。
-
-        注意（盲审 A-P2/B-P2）：当前内部约定即 Tushare 原语 'qfq'/'hfq'/None（tushare_adapter
-        直用），Tushare 直通。接聚宽/米筐时统一为语义化 'pre'/'post'，各源 to_source_adj
-        做映射（聚宽 pre→fq='pre'、Tushare pre→qfq）——真接批一并统一，本批只预留接口。
-        """
-        return adj
-
 
 # ——— 注册表 ———
 _ADAPTERS: dict[str, type[BaseDataAdapter]] = {}

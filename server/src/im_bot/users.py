@@ -169,15 +169,3 @@ def resolve_im_identity(im_user_id: str, bot_id: int | None = None) -> dict | No
     except Exception as e:
         logger.warning("身份解析失败 fail-closed: %s", e)
         return None
-
-
-def bind_owner(bot_id: int, open_id: str, user_id: int) -> dict:
-    """绑定 IM 身份到平台账号（批11C 自助面——user_id 服务端钉死，调用方传认证会话值）。"""
-    from src.data_platform.db import get_conn
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO im_bot_users (bot_id, im_user_id, role, user_id) VALUES (%s,%s,'viewer',%s) "
-            "ON CONFLICT (bot_id, im_user_id) DO UPDATE SET user_id=EXCLUDED.user_id",
-            (bot_id, open_id, user_id))   # 批11C（B-P2-7）：ON CONFLICT 原子化（并发首见留痕不再裸 500）
-        conn.commit()
-    return {"ok": True}

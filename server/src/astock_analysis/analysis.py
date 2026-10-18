@@ -182,27 +182,6 @@ class DailySelectionEngine:
             ))
         return results
 
-    def enhance_with_llm(self, results: list[AnalysisResult]) -> list[AnalysisResult]:
-        """用 LLM 增强分析——为高评分股票生成自然语言研判（需 LLM 网关可用）。"""
-        try:
-            from src.llm_gateway import gateway
-        except ImportError:
-            return results
-
-        for r in results[:5]:  # 只分析前 5 只
-            try:
-                resp = gateway.chat([
-                    {"role": "system", "content": "你是一个 A 股分析助手，输出简洁的个股研判。用中文回复。"},
-                    {"role": "user", "content": f"分析 {r.symbol}：{r.conclusion}。评分 {r.score}，评级 {r.rating}。"
-                     f"支撑 {r.support}，阻力 {r.resistance}。给出简要研判。"}
-                ], role="viewer", caller="astock")
-                if resp and resp.content:
-                    r.llm_summary = resp.content[:200]
-            except Exception:
-                r.llm_summary = "（LLM 暂不可用）"
-        return results
-
-
 # ——— 分钟级研判引擎（占位，T10 后续实现） ———
 
 class MinuteAnalysisEngine:

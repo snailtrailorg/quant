@@ -80,30 +80,10 @@ class IMBotProvider(ABC):
         /api/im-bots/{bid}/callback 通用入口就绪后此方法成为主路径(批 3 强制)。
         """
         return None
-
-    def build_confirm(self, tool: str, args: dict, reason: str = "") -> dict:
-        """操作确认卡片(各家 schema)。默认极简文本卡——子类按需覆写。"""
-        return {"type": "text", "text": f"确认执行 {tool} {args}? (1=是/0=否, {reason})"}
-
-    def parse_confirm(self, action_value: dict) -> dict | None:
-        """卡片按钮值 → {tool, args, ts}。默认透传。"""
-        return action_value or None
-
     @abstractmethod
     def test_connection(self, bot_id: int) -> tuple[bool, str]:
         """连通测试。返回 (ok, detail)。"""
         ...
-
-    # ── 接入向导(ONBOARDING=interactive 才有意义)──
-    def start_onboarding(self) -> dict:
-        """启动辅助接入(扫码/回跳)。返回 {"type": "qr"|"url", ...}。默认不支持。"""
-        raise NotImplementedError(f"{self.provider} 不支持辅助接入(manual)")
-
-    def poll_onboarding(self, ticket: str) -> dict:
-        """轮询接入状态:{"status": pending|done|failed, credentials?: {...}, qr?: ...}"""
-        raise NotImplementedError(f"{self.provider} 不支持辅助接入(manual)")
-
-
 def register_provider(inst: IMBotProvider) -> None:
     _REGISTRY[inst.provider] = inst
 

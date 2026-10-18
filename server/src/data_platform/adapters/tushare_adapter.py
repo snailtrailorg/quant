@@ -91,33 +91,7 @@ def pull_adj_factor_by_date(trade_date: str) -> pd.DataFrame | None:
         return None
 
 
-def pull_adj_factor_by_code(ts_code: str, start_date: str, end_date: str) -> pd.DataFrame | None:
-    """单标的区间复权因子（修复路径用）。降级语义同 pull_adj_factor_by_date。"""
-    pro = get_pro()
-    try:
-        df = pro.adj_factor(ts_code=ts_code, start_date=start_date, end_date=end_date)
-        if df is None or df.empty:
-            return pd.DataFrame()
-        return df[["ts_code", "trade_date", "adj_factor"]]
-    except Exception as e:
-        _adj_degraded_alert(e)
-        return None
-
-
 # ——— 日线拉取 ———
-
-def get_daily_symbols() -> list[str]:
-    """获取当前可交易的 A 股/可转债/场内基金列表（含上市状态过滤）。
-
-    返回 Tushare ts_code 列表，如 ['600000.SH', '113549.SH', …]。
-    """
-    pro = get_pro()
-    all_codes = []
-    # 股票
-    df = pro.query("stock_basic", exchange="", list_status="L", fields="ts_code")
-    all_codes.extend(df["ts_code"].tolist())
-    return all_codes
-
 
 def pull_daily(ts_code: str, start_date: str, end_date: str | None = None,
                adj: str | None = None) -> pd.DataFrame:
@@ -379,20 +353,6 @@ def pull_trade_cal(year: int) -> list[tuple]:
 
 # ——— 可转债/场内基金 ———
 
-def pull_convertible_bonds() -> list[str]:
-    """获取可转债列表（ts_code）。"""
-    pro = get_pro()
-    df = pro.cb_basic(fields="ts_code")
-    return df["ts_code"].tolist() if df is not None and not df.empty else []
-
-
-def pull_etf_list() -> list[str]:
-    """获取场内基金列表（ts_code，ETF+LOF+封基全集）。"""
-    pro = get_pro()
-    df = pro.fund_basic(market="E", fields="ts_code")
-    return df["ts_code"].tolist() if df is not None and not df.empty else []
-
-
 # ——— 批 107：供给面「纯读」pull 壳（fetch_supply 经 _SUPPLY_PULL 分派到此） ———
 # 立法：本组函数**只读**（返回源原生 DataFrame），**不写库、不做归一**——落库与列形状映射
 # 由调用方负责（口径见 base.py::fetch_supply：列形状真源＝sync_kind_config）。与写库融合的
@@ -442,20 +402,6 @@ def pull_trade_cal_raw(year: int) -> pd.DataFrame:
 
 
 # --- 财务指标（daily_basic） ---
-
-def pull_daily_basic(ts_code: str, start_date: str, end_date: str | None = None) -> pd.DataFrame:
-    """拉取每日基本面指标（PE/PB/换手率/市值等）。需 Tushare 积分。
-
-    Returns: DataFrame with ts_code, trade_date, close, turnover_rate, pe, pe_ttm,
-             pb, ps, ps_ttm, dv_ratio, total_mv, circ_mv, ...
-    """
-    pro = get_pro()
-    end_date = end_date or date.today().strftime("%Y%m%d")
-    df = pro.daily_basic(ts_code=ts_code, start_date=start_date, end_date=end_date)
-    if df is None or df.empty:
-        return pd.DataFrame()
-    return df
-
 
 DAILY_BASIC_DDL = """
 CREATE TABLE IF NOT EXISTS daily_basic (

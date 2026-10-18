@@ -101,26 +101,6 @@ class Bar:
     adj_factor: Decimal | None = None   # 复权因子
     source: str = "tushare"             # 数据源标识
 
-    @classmethod
-    def from_tushare_row(cls, row: dict, symbol: str | None = None) -> "Bar":
-        """从 Tushare 日线 dict 构建 Bar。"""
-        import pandas as pd
-        ts = pd.Timestamp(row.get("trade_date", row.get("ts"))).to_pydatetime()
-        return cls(
-            symbol=symbol or to_vt_symbol(row.get("ts_code", "")),
-            freq="1D",
-            ts=ts,
-            open=Decimal(str(row["open"])),
-            high=Decimal(str(row["high"])),
-            low=Decimal(str(row["low"])),
-            close=Decimal(str(row["close"])),
-            volume=Decimal(str(row.get("vol", 0))),
-            amount=Decimal(str(row.get("amount", 0))),
-            adj_factor=Decimal(str(row["adj_factor"])) if row.get("adj_factor") is not None else None,
-            source="tushare",
-        )
-
-
 BAR_TABLE_INSERT = """
 INSERT INTO bar_{freq} (symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)
 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)

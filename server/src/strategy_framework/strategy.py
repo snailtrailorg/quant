@@ -615,11 +615,6 @@ class StrategyContext:
         """取最近 n 根 bar 的 close 价格列表（不含当前 bar）。"""
         closes = [h.get("close", 0) for h in self._history[-n:]] if self._history else []
         return closes
-
-    def get_full_history(self, n: int = 20) -> list[dict]:
-        """取最近 n 根 bar 的完整 dict 列表。"""
-        return self._history[-n:] if self._history else []
-
     def get_param(self, key: str, default=None):
         """取策略参数（由 Web 编辑页配置）。"""
         return self._params.get(key, default)

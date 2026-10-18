@@ -352,10 +352,6 @@ class CryptoPerpAdapter(ExecutionAdapter):
         self._gateway = gateway
         self._leverage = 1
         self._margin_mode = "isolated"
-
-    def set_leverage(self, leverage: int):
-        self._leverage = max(1, min(leverage, 5))  # 上限 5x
-
     def send_order(self, order: Order) -> str:
         if self._gateway is None:
             return f"mock-crypto-{order.symbol}-{order.action}"
