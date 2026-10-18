@@ -262,6 +262,6 @@ class TestMarketOpEndpoints:
 
         with patch("src.data_platform.db.get_conn", side_effect=side_conn):
             r = get_permissions(payload={"username": "admin"})
-        assert list(r["market_op"]["keys"]) == ["convertible", "etf", "astock", "binance_perp", "okx_perp"]
+        assert list(r["market_op"]["keys"]) == ["convertible", "etf", "listed_fund", "astock", "binance_perp", "okx_perp"]   # 批127 Step1
         assert "data" not in r and "user_overrides" not in r   # 批33a：user 维键退役（行为级）
 

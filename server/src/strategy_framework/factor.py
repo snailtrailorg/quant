@@ -847,6 +847,7 @@ FACTOR_EXCLUSIVE = {
 CATEGORY_TO_FACTOR_CLASS = {
     "stock": "astock",
     "etf": "etf", "fund": "etf", "reits": "etf",
+    "listed_fund": "etf",   # 批 127 Step1：市场键正名（SM 值 Step2 切——两值期同归 etf 因子类）
     "convertible": "convertible",
     "perp": "crypto",
 }

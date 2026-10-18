@@ -14,8 +14,8 @@ class TestSymbolMarket:
         assert symbol_market("123001.SZSE") == "convertible"   # 深转债 12
 
     def test_etf(self):
-        assert symbol_market("510300.SHSE") == "etf"   # 沪 ETF
-        assert symbol_market("159915.SZSE") == "etf"   # 深 ETF
+        assert symbol_market("510300.SHSE") == "listed_fund"   # 沪 ETF
+        assert symbol_market("159915.SZSE") == "listed_fund"   # 深 ETF
 
     def test_crypto(self):
         assert symbol_market("BTCUSDT.BINANCE") == "binance_perp"

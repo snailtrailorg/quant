@@ -592,7 +592,7 @@ def detect_stuck_api(payload: dict = Depends(require_perm("system_config"))):
 
 # --- account_permission（D1：account 侧品种权限——权限人工配置，读/写侧） ---
 
-_VALID_CATEGORIES = {"stock", "etf", "convertible", "fund", "reits", "perp"}
+_VALID_CATEGORIES = {"stock", "etf", "listed_fund", "convertible", "fund", "reits", "perp"}   # 批 127 Step1：listed_fund 新键（etf 兼容期）
 _VALID_EXCHANGES = {"SHSE", "SZSE", "BSE", "BINANCE", "OKX"}
 _VALID_BOARDS = {"main", "star", "chinext", "bse"}
 

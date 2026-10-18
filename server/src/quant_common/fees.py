@@ -29,7 +29,8 @@ def symbol_market(symbol: str) -> str | None:
     if code.startswith(("11", "12")):   # 沪/深可转债
         return "convertible"
     if code.startswith(("50", "51", "56", "58")) or code.startswith(("15", "16", "18")):
-        return "etf"   # 场内基金全体（ETF/LOF/封基/REITs）
+        return "listed_fund"   # 场内基金全体（ETF/LOF/封基/REITs）——批 127 正名键；
+                               # 消费方经 canonical_category 兼容旧值 'etf'
     if any(symbol.endswith(s) for s in (".SHSE", ".SZSE", ".SSE")) or (len(code) == 6 and code.isdigit()):
         return "astock"
     return None

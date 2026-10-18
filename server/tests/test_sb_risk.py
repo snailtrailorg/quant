@@ -138,13 +138,13 @@ class TestRulesIntegrity:
 
 class TestMarketOf:
     def test_etf_588(self, rc):
-        assert rc._market_of("588000.SHSE") == "etf"  # F-42
+        assert rc._market_of("588000.SHSE") == "listed_fund"  # F-42
 
     def test_others_unchanged(self, rc):
         assert rc._market_of("600000.SHSE") == "astock"
         assert rc._market_of("113000.SHSE") == "convertible"
-        assert rc._market_of("510300.SHSE") == "etf"
-        assert rc._market_of("159915.SZSE") == "etf"
+        assert rc._market_of("510300.SHSE") == "listed_fund"
+        assert rc._market_of("159915.SZSE") == "listed_fund"
         assert rc._market_of("BTCUSDT.BINANCE") == "binance_perp"
 
     def test_listed_funds_all_segments(self, rc):
@@ -155,7 +155,7 @@ class TestMarketOf:
                     "159915.SZSE", "150018.SZSE",                   # 深 ETF(含分级残余)
                     "160211.SZSE", "166005.SZSE",                   # 深 LOF
                     "180101.SZSE", "184801.SZSE"):                  # 深 REITs/封基
-            assert rc._market_of(sym) == "etf", sym
+            assert rc._market_of(sym) == "listed_fund", sym
 
 
 class TestOrderValidity:

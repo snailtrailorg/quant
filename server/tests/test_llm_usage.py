@@ -2,6 +2,7 @@
 史:批50 真库版(空库假绿)→批54 两档 mock 版→追加三 gran 参数退役固定 day。"""
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
 
@@ -19,6 +20,15 @@ def _conn_with(*fetchalls):
             cursors.append(cur)
         c.execute.side_effect = cursors
     return c
+
+
+@pytest.fixture(autouse=True)
+def _clear_usage_cache():
+    """批126p 缓存的测试隔离（全量跑序污染实证：前测试命中缓存致后测试拿旧 payload）。"""
+    from src.web_api.routes import chat as _chat
+    _chat._LLM_USAGE_CACHE.clear()
+    yield
+    _chat._LLM_USAGE_CACHE.clear()
 
 
 def test_series_day_grid_and_today():
