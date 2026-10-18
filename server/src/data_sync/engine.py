@@ -750,7 +750,7 @@ def _sync_cb_basic(cfg: dict, end_date: str, backfill_from: str | None = None,
 
 def _sync_etf_list(cfg: dict, end_date: str, backfill_from: str | None = None,
                    progress_cb: Callable | None = None) -> dict:
-    """ETF基金列表全量同步。"""
+    """场内基金列表全量同步（批 127 正名——含 ETF+LOF+封基全集）。"""
     kind, sub, _tbl = _LITERAL_SUPPLY["etf_list"]
     adapter = _get_supply_adapter(cfg)   # 批 107：拉取经 adapter
     from src.data_platform.rate_limit import rate_limit_context

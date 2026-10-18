@@ -82,6 +82,9 @@ entries = [
     "src.md_hub.main",              # quant-md-hub
     "src.strategy_runner.main",     # quant-live-task
     "src.strategy_runner.alert_failed",  # quant-task-failed 告警钩子
+    "src.strategy_framework.emd.emd_quote_api",  # 批 127：EMQ .so 惰性绑定——六入口
+    #   测不到（md_gateway connect 期才 import），缺 .so 的 hub 起动即 exit 78
+    #   （staging 2026-10-18 实证：快车道+exclude_so 交叉）——显式入列前置拦截
 ]
 
 bad = []
