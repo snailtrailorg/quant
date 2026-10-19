@@ -1709,6 +1709,9 @@ TO_AE=0145
 
 FROM_AF=0157
 TO_AF=0158
+
+FROM_AG=0158
+TO_AG=0159
 case_ae() {
 echo
 echo "########## 用例 AE：0145 安全态势两表（upgrade→downgrade→upgrade 往返） ##########"
@@ -1809,6 +1812,43 @@ chk "upgrade 渲染含 DROP COLUMN" "$(grep -ci 'drop column' "$tmp/up.sql")" "1
 rm -rf "$tmp"
 }
 
+case_ag() {
+echo
+echo "########## 用例 AG：0159 OKX 盘中三行（expand-only 配置行；upgrade→downgrade 往返） ##########"
+reset_scratch
+# fixture：0158 形态最小 sync_config（无 data_type——0158 已删）+ sync_kind_config 表
+fixture() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE sync_config (
+  id text PRIMARY KEY, name text NOT NULL, tushare_api text, pg_table text,
+  sync_mode text NOT NULL DEFAULT 'incremental', schedule text NOT NULL DEFAULT 'manual',
+  trade_day_filter text DEFAULT 'none', enabled boolean DEFAULT true,
+  last_sync_date text, last_sync_ts timestamptz, last_sync_count integer DEFAULT 0,
+  last_status text DEFAULT 'idle', description text, created_at timestamptz DEFAULT now(),
+  provider text NOT NULL DEFAULT 'tushare', supports_backfill boolean, start_floor date, retention date);
+CREATE TABLE sync_kind_config (
+  sync_id text PRIMARY KEY, kind text NOT NULL, sub_kind text, pg_table text,
+  pk_cols text, float_cols text, text_cols text, rebuild text);
+SQL
+}
+fixture
+stamp "$FROM_AG"
+step up "$TO_AG" "AG1 upgrade（三行 INSERT）"
+
+chk "sync_config +3 行" "$(q "select count(*) from sync_config where id in ('okx_perp_hourly','okx_perp_1min','okx_perp_15min')")" "3"
+chk "retention 非空（错列即红——start_floor 已死列）" "$(q "select count(*) from sync_config where id in ('okx_perp_hourly','okx_perp_1min','okx_perp_15min') and retention is not null")" "3"
+chk "schedule=manual 钉（存储+代理双闸门）" "$(q "select count(*) from sync_config where id in ('okx_perp_hourly','okx_perp_1min','okx_perp_15min') and schedule='manual'")" "3"
+chk "kind_config +3 行（bar_minute/perp）" "$(q "select count(*) from sync_kind_config where kind='bar_minute' and sub_kind='perp'")" "3"
+
+step down "$FROM_AG" "AG2 downgrade（三行 DELETE）"
+chk "downgrade 后 sync_config 清零" "$(q "select count(*) from sync_config where id like 'okx_perp_%'")" "0"
+chk "downgrade 后 kind_config 清零" "$(q "select count(*) from sync_kind_config where sync_id like 'okx_perp_%'")" "0"
+
+step up "$TO_AG" "AG3 复 upgrade（幂等）"
+chk "复 upgrade 后三行回" "$(q "select count(*) from sync_config where id like 'okx_perp_%'")" "3"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
 echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA + $FROM_AC→$TO_AC + $FROM_AF→$TO_AF） ##########"
 precheck
@@ -1844,4 +1884,5 @@ case_ac
 case_ad
 case_ae
 case_af
+case_ag
 finish

@@ -110,13 +110,12 @@ class TestRegistration:
         assert d.scope == CRYPTO_ALL
         assert d.sub_kinds == frozenset(), "bar_daily 非聚合域，sub_kinds 必须为空"
 
-    def test_capabilities_are_sync_id_level_and_day_only(self):
-        """本批只做日线：`capabilities` 恰一条，且不含实时/分钟（虚报会让 resolve 路由错）。"""
+    def test_capabilities_are_sync_id_level(self):
+        """批 102b 只做日线；批 116 扩盘中三档（manual 功能验证档）。
+        capabilities=四 sync_id；仍不含实时（虚报会让 resolve 路由错）。"""
         caps = OA.OkxAdapter.capabilities
-        assert caps == {"okx_perp_daily"}
+        assert caps == {"okx_perp_daily", "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min"}
         assert "rt_quote" not in caps
-        assert not any("minute" in c or "hourly" in c for c in caps), \
-            "本批不做盘中 bar，虚留 sync_id ＝「清单有·实现无」"
 
 
 # ---------------------------------------------------------------------------
@@ -493,10 +492,12 @@ class TestFetchSupply:
         with pytest.raises(UnsupportedFeature):
             ad.fetch_supply("bar_minute", "perp")
 
-    def test_pull_minute_raises_loud(self):
-        """本批不做盘中 bar——**响亮拒绝**，不返回空帧（空帧会被上游静默记账）。"""
-        with pytest.raises(UnsupportedFeature):
-            OA.OkxAdapter().pull_minute("BTC-USDT-SWAP", "1min", "20240101", "20240105")
+    def test_pull_minute_non_internal_raises_loud(self):
+        """批 116 起 pull_minute 真实现（盘中三档）——非内部 freq 仍**响亮拒绝**
+        （ValueError；源词/日粒度放行会把调用方 bug 变脏表）。详细映射断言在
+        test_batch116_okx_intraday.py（本文件只钉拒绝语义）。"""
+        with pytest.raises(ValueError):
+            OA.OkxAdapter().pull_minute("BTC-USDT-SWAP", "1D", "20240101", "20240105")
 
 
 # ---------------------------------------------------------------------------
@@ -755,7 +756,7 @@ class TestMigration0137Shape:
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
         # 0145（批 120：安全态势页两表 expand-only）
-        assert heads == {"0158"}, f"head 不是唯一 0158：{sorted(heads)}"   # 批 129：0158 新链头（DROP data_type）——链头钉随批交棒
+        assert heads == {"0159"}, f"head 不是唯一 0159：{sorted(heads)}"   # 批 116：0159 新链头（OKX 盘中三行）——链头钉随批交棒
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

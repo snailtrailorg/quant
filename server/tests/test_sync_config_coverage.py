@@ -60,10 +60,11 @@ class TestDispatchTables:
         + 批 83b 池数据工厂 2（pool_data / pool_data_full_calibrate）+ 批 101 加密 1
         （binance_perp_daily）+ 批 103b 聚宽 A 股日线 1（astock_daily_jq）
         + 批 101b 加密盘中 bar 3（binance_perp_hourly/1min/15min）
-        + 批 102b OKX 日线 1（okx_perp_daily）+ 批 117 ST 名单 1（st_list_sync）= 25
+        + 批 102b OKX 日线 1（okx_perp_daily）+ 批 117 ST 名单 1（st_list_sync）
+        + 批 116 OKX 盘中 bar 3（okx_perp_hourly/1min/15min）= 28
         （含 0118 收编的 static_symbols/convertible_terms；防工厂回填静默失效）。"""
         from src.data_sync.engine import _HANDLERS
-        assert len(_HANDLERS) == 25, sorted(_HANDLERS)
+        assert len(_HANDLERS) == 28, sorted(_HANDLERS)
 
 
 @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
@@ -93,11 +94,12 @@ class TestSyncConfigBijection:
         """行数量级守门：17 存量 + 3（迁移 0117）+ 2（0118 收编）+ 2（0119 收编）
         + 1（批 101 加密 binance_perp_daily）+ 1（批 103b 聚宽 astock_daily_jq）
         + 3（批 101b 加密盘中 bar）+ 1（批 102b OKX okx_perp_daily）
-        + 1（批 117 ST 名单 st_list_sync）= 31。
+        + 1（批 117 ST 名单 st_list_sync）
+        + 3（批 116 OKX 盘中 bar，迁移 0159）= 34。
 
         防的是"某条 cfg 行丢了而代码路由也一起丢"（双射仍成立但能力真空）这种同向漂移。
         """
-        assert len(_cfgs()) == 31
+        assert len(_cfgs()) == 34
 
     def test_via_kind_ids_all_have_kind_rows(self):
         """每个 bar 族 sync_id 必须有 sync_kind_config 归置行——

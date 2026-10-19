@@ -1208,6 +1208,14 @@ _BINANCE_BAR_SPECS: dict[str, tuple[str, str, str]] = {
     "binance_perp_15min": ("bar_minute", "perp", "15min"),
 }
 
+# 批 116：OKX 永续盘中三档（0134 范式功能验证档——manual 调度，cron 化＝用户显式决策）。
+# freq 同时是 bar_{freq.lower()} 表名后缀（同上注释）；retention 下界在迁移 0159。
+_OKX_BAR_SPECS: dict[str, tuple[str, str, str]] = {
+    "okx_perp_hourly": ("bar_minute", "perp", "1h"),
+    "okx_perp_1min": ("bar_minute", "perp", "1min"),
+    "okx_perp_15min": ("bar_minute", "perp", "15min"),
+}
+
 # 「整个窗口都落在批量站未发布尾区」的容忍天数（见 handler 内 0 行判定）。
 # ⚠️ 与 `publish_lag` 的**分工**：`publish_lag` 定**窗口上界**（源属性）；本常量只定
 # 「0 行算**正常等待**还是**故障**」的**归类阈值**。上界搬走后本常量只剩归类职责，故保留。
@@ -1431,6 +1439,19 @@ _sync_okx_perp_daily = _make_crypto_bar_handler(
     freeze_on_partial=True)      # 批 105：日线档 partial 冻结（102b 首跑 7/485 缺窗的直接教训）
 
 
+# ── 批 116：OKX 永续盘中三档（同链工厂；freeze_on_partial 不带——分钟/小时档 G-S1 惯例，
+#    partial 由日线档下轮兜底；调度压力见任务文件：1min 一轮≈12min 经代理限频） ──
+_sync_okx_perp_hourly = _make_crypto_bar_handler(
+    "okx_perp_hourly", "bar_minute", "perp", "1h", label="okx",
+    enum_hint="instruments 接口不可达或返回异常（含代理出口未配/不通）")
+_sync_okx_perp_1min = _make_crypto_bar_handler(
+    "okx_perp_1min", "bar_minute", "perp", "1min", label="okx",
+    enum_hint="instruments 接口不可达或返回异常（含代理出口未配/不通）")
+_sync_okx_perp_15min = _make_crypto_bar_handler(
+    "okx_perp_15min", "bar_minute", "perp", "15min", label="okx",
+    enum_hint="instruments 接口不可达或返回异常（含代理出口未配/不通）")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 批 109：分族对账 ＋ **输出闭环**（设计 §7.1 分族治法 / §7.2 输出闭环 / §5.3 / §5.4）
 #
@@ -1477,6 +1498,10 @@ _RECONCILE_SYMBOL_SCOPE: dict[str, tuple[str, str | None, str, str, str, str]] =
     "binance_perp_1min": ("bar_minute", "perp", "1min", "bar_1min", "UTC", "perp"),
     "binance_perp_15min": ("bar_minute", "perp", "15min", "bar_15min", "UTC", "perp"),
     "okx_perp_daily": ("bar_daily", "perp", "1D", "bar_1d", "UTC", "perp"),
+    # 批 116：OKX 盘中三档（对账 scope——缺则 per-symbol 对账静默跳过）
+    "okx_perp_hourly": ("bar_minute", "perp", "1h", "bar_1h", "UTC", "perp"),
+    "okx_perp_1min": ("bar_minute", "perp", "1min", "bar_1min", "UTC", "perp"),
+    "okx_perp_15min": ("bar_minute", "perp", "15min", "bar_15min", "UTC", "perp"),
     "astock_minute": ("bar_minute", None, "1min", "bar_1min", "Asia/Shanghai", "stock"),
     "astock_minute_5min": ("bar_minute", None, "5min", "bar_5min", "Asia/Shanghai", "stock"),
 }
@@ -2661,6 +2686,10 @@ _HANDLERS = {
     # 批 102b：OKX 永续日线（第 2 个 crypto 数据源——验证「多加密市场共存」；
     # 与 binance 同一条 `_make_crypto_bar_handler` 链，仅 adapter/label 不同）
     "okx_perp_daily": _sync_okx_perp_daily,
+    # 批 116：OKX 盘中三档（manual 功能验证档）
+    "okx_perp_hourly": _sync_okx_perp_hourly,
+    "okx_perp_1min": _sync_okx_perp_1min,
+    "okx_perp_15min": _sync_okx_perp_15min,
 }
 
 # 批 72（H12 一步切）：bar 族 6 键静态路由 _sync_via_kind——与 _HANDLERS 互斥=单源路由

@@ -93,6 +93,10 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "astock_daily_jq": "hist_quote",
     # 批 102b：OKX 永续日线（公共行情 API，历史行情类）——第 2 个 crypto **数据源**
     "okx_perp_daily": "hist_quote",
+    # 批 116：OKX 永续盘中 bar（0134 同族功能验证档，manual 调度）
+    "okx_perp_hourly": "hist_quote",
+    "okx_perp_1min": "hist_quote",
+    "okx_perp_15min": "hist_quote",
     # ref_data
     "astock_basic": "ref_data", "astock_list": "ref_data", "listed_fund_list": "ref_data",
     "cb_basic": "ref_data", "stk_limit_sync": "ref_data", "moneyflow_sync": "ref_data",

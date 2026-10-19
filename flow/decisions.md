@@ -740,3 +740,9 @@
 
 **文献**：`flow/方案/同步窗口与参数分层-设计.md`（设计定稿）。
 **状态**：设计定稿，实施未开始；待裁点（crypto 生命周期来源 / retention 落地形态 / 对账调度频率 / per-date 优先级 / 孤儿参数键闸门）见文档 §十。
+
+## 2026-10-20 · 批 116：crypto 时间轴表达裁定「维持现状」（决策 B 闭合行）
+
+- **裁定**：crypto 日线＝`bar_daily` + `trade_day_filter='none'`（连续自然日语义）；盘中三档＝`bar_minute`（`1h` 名义收窄）。不扩 `Temporality` 枚举、不 re-label `streaming`。判据（hard gate）：`contract.py:56` kind→时态硬闸 + 零消费者不造第二真源——详见设计 §4.6（追加）。
+- **同批裁定**：OKX 盘中三档全铺（用户裁）；manual 调度起步＝存储+代理双闸门，cron 化与 retention 放宽＝后续用户显式决策（relay 带宽实测+存储评估后）。
+

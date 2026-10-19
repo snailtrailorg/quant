@@ -50,6 +50,9 @@ _INSTRUMENTS = "/api/v5/public/instruments"       # ?instType=SWAP
 _CANDLES = "/api/v5/market/history-candles"       # ?instId=&bar=&after=&limit=
 _BAR = "1Dutc"                                    # **UTC 日界**（见模块 docstring 语义①）
 
+# 批 116：内部 freq → OKX 盘中 bar 源词（大小写敏感——OKX 拒 `1h` 形态；契约=任务文件接口契约节）
+_INTRADAY_BAR_MAP: dict[str, str] = {"1h": "1H", "1min": "1m", "15min": "15m"}
+
 # 批 108·步 1：**源可达下界**（窗口第四边界的真源）＝**迁移 `0137` 的 prod 实测值**——
 # 「K 线 API 在 2019 全空」，故 floor 取实测 K 线边界，**不臆造**。
 # ⚠️ 与 `listTime`（真上币日）**不同义**：后者报 BTC/ATOM `2019-11-12`、FIL `2019-08-10`，
@@ -61,7 +64,7 @@ _MAX_PAGES = 600                                  # 防御上限（6 年日线 �
 _RATE_MAX = 20                                    # IP 级 20 req…
 _RATE_WINDOW = 2.0                                # …/ 2s（设计 §4.2）
 _RETRY_BASE = 2.0                                 # 退避基数（秒）：2 / 4 / 8
-_MAX_RETRY = 3
+_MAX_RETRY = 5                                      # 批 116：3→5（102b 挂账——7/485 标的 3 次退避后仍 ConnectionReset；预算不够，非异常未捕）
 _RETRY_JITTER = 0.3                               # 退避抖动上限（±0–30%，批 105）
 _POOL_CONNS = 2                                   # urllib3 连接池：本 adapter 单线程顺序请求
 _POOL_MAXSIZE = 4
@@ -107,12 +110,13 @@ class OkxAdapter(BaseDataAdapter):
 
     provider = "okx"
     venue = "OKX"             # 批 108·步 2：vt_symbol 后缀（与 `_SYMBOL_SUFFIX` 同值）
-    # 供给项（sync_id）：本批只做日线；盘中 bar / 实时腿留后续（设计 §4.5：实时未做不动）
-    capabilities = {"okx_perp_daily"}
-    # 契约层能力声明（粒度＝kind）。bar_daily 非聚合域 ⇒ sub_kinds 必须为空
-    # （contract.validate_capability_decls 硬约束）。
+    # 供给项（sync_id）：日线（102b）+ 盘中三档（批 116，manual 功能验证档）
+    capabilities = {"okx_perp_daily", "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min"}
+    # 契约层能力声明（粒度＝kind）。bar_daily/bar_minute 均非聚合域 ⇒ sub_kinds 必须为空
+    # （contract.validate_capability_decls 硬约束——binance 同款形态）。
     capability_decls = [
         CapabilityDecl("bar_daily", "historical", CRYPTO_ALL),
+        CapabilityDecl("bar_minute", "historical", CRYPTO_ALL),
     ]
 
     # 批 102a：本 adapter 自己发 HTTP（`requests`）⇒ 出口可注入代理 / 端点覆盖。
@@ -300,11 +304,46 @@ class OkxAdapter(BaseDataAdapter):
         return df
 
     def pull_minute(self, symbol: str, freq: str, start: str, end: str) -> pd.DataFrame:
-        """本批不做盘中 bar（`capabilities` 只含日线）——**响亮拒绝**，不返回空帧。
+        """per-symbol 盘中 bar（批 116：hourly/1min/15min；`start`/`end`='YYYYMMDD'）。
 
-        空帧会被上游当「该窗口无数据」静默记账（与 binance `pull_minute` 的拒绝理由同源）。
+        与 `pull_daily` 同一 history-candles + `after` 游标分页；窗口外剔除同源。
+        bar 词映射（OKX 大小写敏感，拒 `1h` 形态）：内部 freq → 源词。
+        盘中档**不加 utc 变体**（`1Hutc` 族）：小时/分钟界天然 UTC 无日界歧义
+        （与日线 `1Dutc` 的理由不同层——日线是「日界锚定」，盘中是「整点对齐」）。
+        非内部 freq 响亮拒绝（ValueError，与空帧语义区分——空帧会被上游静默记账）。
         """
-        raise UnsupportedFeature("okx adapter 本批只做日线（okx_perp_daily）；盘中 bar 未实现")
+        bar = _INTRADAY_BAR_MAP.get(freq)
+        if bar is None:
+            raise ValueError(
+                f"okx pull_minute 非内部 freq（合法 {sorted(_INTRADAY_BAR_MAP)}）: {freq!r}")
+        inst = str(symbol).split(".")[0]
+        s_d, e_d = _to_date(start), _to_date(end)
+        if s_d > e_d:
+            return pd.DataFrame()
+        start_ms = _ms(s_d)
+        end_ms = _ms(e_d + timedelta(days=1))
+        frames: list[list] = []
+        cursor = end_ms
+        for _ in range(_MAX_PAGES):
+            body = self._request(_CANDLES, {"instId": inst, "bar": bar,
+                                            "after": str(cursor), "limit": _LIMIT})
+            data = body.get("data") or []
+            if not data:
+                break
+            frames.extend(r for r in data if start_ms <= int(r[0]) < end_ms)
+            oldest = min(int(r[0]) for r in data)
+            if oldest <= start_ms or len(data) < _LIMIT:
+                break
+            cursor = oldest
+        else:
+            logger.warning("okx %s %s 分页触顶 %d 页仍未到 %s——区间被截断（与 retention 一并复核）",
+                           inst, bar, _MAX_PAGES, start)
+        if not frames:
+            return pd.DataFrame()
+        df = pd.DataFrame(frames, columns=_CANDLE_COLS).drop_duplicates(subset=["ts"])
+        df = df.sort_values("ts").reset_index(drop=True)
+        df["okx_symbol"] = inst
+        return df
 
     # ——— 归一化 ———
 

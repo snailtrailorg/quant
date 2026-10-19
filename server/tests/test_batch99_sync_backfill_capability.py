@@ -36,11 +36,12 @@ BACKFILLABLE_EXPECTED = {
     # tier1 批量 8（_TIER1_BATCH；批 117 +st_list_sync）
     "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
     "block_trade_sync", "cyq_perf_sync", "forecast_sync", "st_list_sync",
-    # 单表专项 9（astock_basic / trade_cal / 批 101 binance_perp_daily / 批 103b astock_daily_jq
-    #   / 批 101b binance_perp_{hourly,1min,15min} / 批 102b okx_perp_daily）
+    # 单表专项 12（astock_basic / trade_cal / 批 101 binance_perp_daily / 批 103b astock_daily_jq
+    #   / 批 101b binance_perp_{hourly,1min,15min} / 批 102b okx_perp_daily
+    #   / 批 116 okx_perp_{hourly,1min,15min}）
     "astock_basic", "trade_cal", "binance_perp_daily", "astock_daily_jq",
     "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
-    "okx_perp_daily",
+    "okx_perp_daily", "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min",
 }
 # 必须**没有**回补入口的 9 项（静态清单 5 / 全量重建 2 / 池内 2）
 NOT_BACKFILLABLE_EXPECTED = {
@@ -76,7 +77,7 @@ class TestBackfillCapabilityTruth:
         code_truth = (set(_VIA_KIND_IDS) | set(_TIER1_BATCH)
                       | {"astock_basic", "trade_cal", "binance_perp_daily", "astock_daily_jq",
                          "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
-                         "okx_perp_daily"})
+                         "okx_perp_daily", "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min"})
         assert code_truth == BACKFILLABLE_EXPECTED, (
             f"代码真源漂移：多 {sorted(code_truth - BACKFILLABLE_EXPECTED)} / "
             f"少 {sorted(BACKFILLABLE_EXPECTED - code_truth)}")
@@ -121,9 +122,12 @@ class TestBackfillCapabilityTruth:
         assert {k for k, v in rows.items() if v is not None} == {
             "astock_basic", "index_daily",
             "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
+            "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min",
             "st_list_sync"}   # 批 117 P0-2/0143：retention='2026-01-01' 地板（防全史首跑）
         assert rows["binance_perp_hourly"] < rows["binance_perp_1min"], \
             "hourly 的保留窗更长（7 天 vs 1 天）"
+        assert str(rows["okx_perp_hourly"]) < str(rows["okx_perp_1min"]), \
+            "批 116/0159：OKX hourly 保留窗 7 天 > 分钟档 1 天（存储+代理双闸门）"
 
     @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
     def test_columns_shape(self):

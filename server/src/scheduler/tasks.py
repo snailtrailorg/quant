@@ -730,6 +730,10 @@ def security_scan(self):
 _SYNC_ASYNC_DISPATCH: dict[str, int] = {
     "pool_data": 290,
     "pool_data_full_calibrate": 3600,
+    # 批 116（步 0-A 挂账收口）：crypto 日线档内联实测 135~1660s（dev sync_log）——
+    # 300s 软限下无保护且挤占同轮其他项；派发后由 sync_via_celery（soft 3600）承接。
+    "okx_perp_daily": 3600,
+    "binance_perp_daily": 3600,
 }
 
 
