@@ -87,6 +87,6 @@ def test_revoke_jwt_sets_blacklist():
     r = MagicMock()
     with patch("src.web_api.redis_pool.redis_client", return_value=r):
         assert auth_mod.revoke_jwt(token) is True
-    r.setex.assert_called_once()
-    args = r.setex.call_args[0]
-    assert args[0].startswith("jwt:bl:") and args[1] > 0
+    r.set.assert_called_once()   # 批 128b：setex 已弃用改 set(k, v, ex=)
+    args = r.set.call_args
+    assert args[0][0].startswith("jwt:bl:") and args.kwargs["ex"] > 0

@@ -260,7 +260,7 @@ def revoke_jwt(token: str) -> bool:
     remaining = payload["exp"] - int(_dt.utcnow().timestamp())
     if remaining > 0:
         try:
-            redis_client().setex(f"jwt:bl:{jti}", remaining, "1")
+            redis_client().set(f"jwt:bl:{jti}", "1", ex=remaining)
         except Exception as e:
             # F-59（2026-09-03）：Valkey 不可达时降级——登出仍成功（客户端丢弃 token），
             # 黑名单未记录则 token 靠自然过期兜底，不阻塞登出流程。

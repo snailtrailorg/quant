@@ -46,7 +46,7 @@ def _set_session(session_id: str, data: dict, expire: int = 600,
     前缀刻意避开 feishu:session:*——sweep_stale_sessions 的 scan 模式不触碰本键。
     返回值：pending 分支返回 NX 成败（False=并发先到）；其余分支恒 True。"""
     data = {**data, "owner_user_id": owner_user_id, "ts": time.time()}
-    _redis.setex(f"feishu:session:{session_id}", expire, json.dumps(data, ensure_ascii=False))
+    _redis.set(f"feishu:session:{session_id}", json.dumps(data, ensure_ascii=False), ex=expire)
     if owner_user_id is None:
         return True
     status = data.get("status")
@@ -326,7 +326,7 @@ def sweep_stale_sessions() -> int:
                 d.update(status="error", code="ONBOARDING_INTERRUPTED",
                          error="服务重启导致会话中断，请重新发起")
                 ttl = _redis.ttl(key)
-                _redis.setex(key, max(ttl, 60), json.dumps(d, ensure_ascii=False))
+                _redis.set(key, json.dumps(d, ensure_ascii=False), ex=max(ttl, 60))
                 # 批26-5 盲审 A-P1-1：error=终态语义——owner 索引键必须同步 DEL，否则重启后
                 # 新频控（单键查 owner 键）仍见非终态 → 用户 429 困到 TTL 尽（批12A #8 当年
                 # 做 sweep 就是为解此困局，索引键时代 sweep 必须同步覆盖）；scanning 态 TTL 随

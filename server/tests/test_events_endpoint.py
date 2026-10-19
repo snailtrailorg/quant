@@ -59,7 +59,7 @@ class TestSetSessionPublish:
              patch("src.quant_common.eventbus.bus") as mb:
             mb.publish.side_effect = RuntimeError("bus boom")
             T._set_session("tick2", {"status": "error"}, expire=60, owner_user_id=9)
-        rd.setex.assert_called_once()   # 真相源写入不受影响
+        rd.set.assert_called_once()   # 真相源写入不受影响（set 形态——批 128b）
 
     def test_payload_matches_status_endpoint_shape(self):
         """B-P1-4 一致性契约：事件载荷 ⊇ onboarding-status 端点返回的关键字段（两路共用处理）。"""

@@ -62,7 +62,7 @@ def notify(level: Level, category: Category, title: str, body: str = "",
         key = f"notify:dedup:{hashlib.md5(f'{title}:{level}:{category}'.encode()).hexdigest()[:12]}"
         if r.exists(key):
             return None  # 1min 内同标题去重
-        r.setex(key, 60, "1")
+        r.set(key, "1", ex=60)
     except Exception as e:
         logger.warning("去重键不可用（Valkey 故障？），跳过去重继续发送: %s", e)
 

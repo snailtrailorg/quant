@@ -189,5 +189,5 @@ class TestOnboardingCore:
         with patch.object(T, "_redis", rd):
             n = T.sweep_stale_sessions()
         assert n == 1
-        written = _j.loads(rd.setex.call_args[0][2])
+        written = _j.loads(rd.set.call_args_list[0].args[1])   # 批 128b：set(k,v,ex=)形态；首个 set=会话主键
         assert written["code"] == "ONBOARDING_INTERRUPTED" and written["status"] == "error"

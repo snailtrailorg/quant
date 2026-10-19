@@ -246,7 +246,7 @@ class TestPostCodeReview:
         rd = MagicMock()
         T._redis = rd
         T._set_session("s1", {"status": "scanning", "qr_img": "x"}, expire=600, owner_user_id=9)   # 批12A：owner 显式传参（_SESSION_OWNER 退役）
-        payload = _j.loads(rd.setex.call_args[0][2])
+        payload = _j.loads(rd.set.call_args_list[0].args[1])   # 批 128b：set(k,v,ex=)形态；首个 set=会话主键（后续还有 owner 索引键）
         assert payload["owner_user_id"] == 9 and payload["status"] == "scanning" and "ts" in payload
 
     def test_own_status_200(self):

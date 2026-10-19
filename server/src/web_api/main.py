@@ -24,7 +24,67 @@ from .errors import ApiError
 # 两者公网匿名可达（/docs /openapi.json 200）会把全部端点/参数/模型结构递给侦察者。
 # 环境开关保留：非生产（本机 dev/staging 调试）可 SHOW_DOCS=1 开回。
 _show_docs = os.environ.get("SHOW_DOCS", "") not in ("", "0", "false")
+
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    # 批33b：防漂移闸——绑定键集 ⊆ 注册表 api 键集（违例=新增 require_perm 键忘进注册表；
+    # 落点在入口层 startup——verify_schema 在 data_platform 禁 import 上层，盲审 A-P1-2）
+    try:
+        from src.data_platform.perm_registry import check_binding_drift
+        for _v in check_binding_drift():
+            logger.warning("权限绑定漂移（键未注册）: %s", _v)
+    except Exception as e:
+        logger.warning("perm binding drift 检查失败: %s", e)
+    # 批18：SSE 跨进程桥线程（仅 web-api 进程；Valkey 不可达时桥内退避重连，不阻 startup）
+    from src.quant_common.sse_bridge import ensure_bridge
+    ensure_bridge()
+    # 批12A（A-P1-2）：清非终态扫码会话——发布重启杀 daemon 线程的死会话若不扫，
+    # existing_ticket 会把死人还给前端"恢复"（白扫+频控困局加重版）
+    try:
+        from src.feishu_bot.tasks import sweep_stale_sessions
+        n = sweep_stale_sessions()
+        if n:
+            logger.warning("startup 清扫死扫码会话 %d 个", n)
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
+        pass
+    init_users_table()
+    # #48：启动时列级校验（纯函数 -> 入口层路由告警；失败不阻断启动）
+    try:
+        from src.data_platform.db import verify_schema
+        from src.health_monitor.monitor import report_schema_findings
+        report_schema_findings(verify_schema())
+    except Exception as e:
+        logger.warning("startup: schema 校验异常（不阻断）: %s", e)
+    if ensure_default_admin():
+        logger.info("已创建默认 admin（admin/admin123，请改密码）")   # 批27-8：print→logger
+    # 加载自定义因子（因子平台化）
+    try:
+        from src.strategy_framework.factor import load_factors_from_db
+        loaded = load_factors_from_db()
+        if loaded:
+            logger.info("加载自定义因子: %s", ", ".join(loaded))   # 批27-8：print→logger（log_sink 恒可观测）
+    except Exception as e:
+        logger.warning("startup: 加载自定义因子失败（表可能未创建）: %s", e)
+    yield
+    if (_s := _log_sink()) is not None:
+        _s.close()   # 批25：缓冲日志冲刷（幂等，atexit 兜底）
+    # 批18：先停桥再关总线（盲审A-P2-4——桥停后 bus.close 哨兵才不会被桥回填的迟到事件跟在后面）
+    try:
+        from src.quant_common.sse_bridge import _bridge
+        _bridge.stop()
+    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
+        pass
+    # 批14（B-P0-1）：停机关总线——SSE 生成器收哨兵即退（配合 systemd --timeout-graceful-shutdown 5）
+    from src.quant_common.eventbus import bus
+    bus.close()
+
+
 app = FastAPI(title="量化交易平台 API", version="0.1.0",
+              lifespan=_lifespan,
               docs_url="/docs" if _show_docs else None,
               redoc_url="/redoc" if _show_docs else None,
               openapi_url="/openapi.json" if _show_docs else None)
@@ -88,62 +148,6 @@ from src.data_platform.log_sink import sink as _log_sink
 
 _log_install("web-api")
 
-@app.on_event("shutdown")
-def shutdown():
-    if (_s := _log_sink()) is not None:
-        _s.close()   # 批25：缓冲日志冲刷（幂等，atexit 兜底）
-    # 批18：先停桥再关总线（盲审A-P2-4——桥停后 bus.close 哨兵才不会被桥回填的迟到事件跟在后面）
-    try:
-        from src.quant_common.sse_bridge import _bridge
-        _bridge.stop()
-    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
-        pass
-    # 批14（B-P0-1）：停机关总线——SSE 生成器收哨兵即退（配合 systemd --timeout-graceful-shutdown 5）
-    from src.quant_common.eventbus import bus
-    bus.close()
-
-
-@app.on_event("startup")
-def startup():
-    # 批33b：防漂移闸——绑定键集 ⊆ 注册表 api 键集（违例=新增 require_perm 键忘进注册表；
-    # 落点在入口层 startup——verify_schema 在 data_platform 禁 import 上层，盲审 A-P1-2）
-    try:
-        from src.data_platform.perm_registry import check_binding_drift
-        for _v in check_binding_drift():
-            logger.warning("权限绑定漂移（键未注册）: %s", _v)
-    except Exception as e:
-        logger.warning("perm binding drift 检查失败: %s", e)
-    # 批18：SSE 跨进程桥线程（仅 web-api 进程；Valkey 不可达时桥内退避重连，不阻 startup）
-    from src.quant_common.sse_bridge import ensure_bridge
-    ensure_bridge()
-    # 批12A（A-P1-2）：清非终态扫码会话——发布重启杀 daemon 线程的死会话若不扫，
-    # existing_ticket 会把死人还给前端"恢复"（白扫+频控困局加重版）
-    try:
-        from src.feishu_bot.tasks import sweep_stale_sessions
-        n = sweep_stale_sessions()
-        if n:
-            import logging as _lg
-            _lg.getLogger("web_api").warning("startup 清扫死扫码会话 %d 个", n)
-    except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
-        pass
-    init_users_table()
-    # #48：启动时列级校验（纯函数 -> 入口层路由告警；失败不阻断启动）
-    try:
-        from src.data_platform.db import verify_schema
-        from src.health_monitor.monitor import report_schema_findings
-        report_schema_findings(verify_schema())
-    except Exception as e:
-        logger.warning("startup: schema 校验异常（不阻断）: %s", e)
-    if ensure_default_admin():
-        logger.info("已创建默认 admin（admin/admin123，请改密码）")   # 批27-8：print→logger
-    # 加载自定义因子（因子平台化）
-    try:
-        from src.strategy_framework.factor import load_factors_from_db
-        loaded = load_factors_from_db()
-        if loaded:
-            logger.info("加载自定义因子: %s", ", ".join(loaded))   # 批27-8：print→logger（log_sink 恒可观测）
-    except Exception as e:
-        logger.warning("startup: 加载自定义因子失败（表可能未创建）: %s", e)
 
 
 # --- 路由注册（端点实现全部在 routes/ 各 APIRouter，此处只 include） ---
