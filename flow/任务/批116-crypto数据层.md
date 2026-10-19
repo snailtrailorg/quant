@@ -1,7 +1,8 @@
 # 批 116 · crypto 数据层（剩余范围）
 
 > 立项 2026-10-09（主会话补决策后立项）。**2026-10-09 C 组步 2 双盲审 P0-1/P0-2 返工重写**：原版按 10-05 研究稿把批 101/101b/102b 已落地项当待做（83b 教训二犯），且引用了不存在的 `Temporality.continuous` 枚举。本版按库/真机实测重写现状与剩余范围。
-> 关联：批 101（币安日线）/ 101b（币安盘中）/ 102b（OKX 日线，五证上产 `202610061532-f5d0e55`）/ `flow/decisions.md` 2026-10-09 决策 B（**已修正**：continuous 子句撤回）
+> **2026-10-20 凌晨 v2（步 0 全闭环后收窄）**：产出 1 缺跑排查+补拉已全闭环（代理出口修复＝michael SOCKS 服务 + proxy_config 切本地隧道，2026-10-19/20 深夜；游标 20261006→20261018 补拉 3915 行实证）；剩余范围＝产出 2/3/4。步 1 方案随 v2 定稿：产出 3 时间轴裁定「维持现状」（判据见 §产出 3）；产出 2 盘中粒度＝用户裁定点；产出 4 重试预算小改。
+> 关联：批 101（币安日线）/ 101b（币安盘中）/ 102b（OKX 日线，五证上产 `202610061532-f5d0e55`）/ `flow/decisions.md` 2026-10-09 决策 B（已修正）
 
 ## 目标
 
@@ -44,9 +45,9 @@ crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨�
 ## 产出
 
 1. **步 0 · okx_perp_daily 缺跑排查（最优先，数据完整性）**：查 10-08/10-09 晨档为何未触发/无痕（对照 binance 僵尸复位路径——okx 是否也挂了但复位行丢失？`sync_log`/`sync_gap` 落库核对），补拉缺口（手动触发 `sync("okx_perp_daily")` 或等 10-10 晨档并验证），根因若在调度器/zombie-reset 则修。
-2. **OKX 盘中粒度**（hourly/1min/15min，沿用已泛化的工厂范式 `_make_crypto_bar_handler`（`engine.py:1254`，币安四项均经它生成）加 OKX 规格）——**须先确认需求**（威廉姆 101b 裁定「功能验证优先」时未承诺 OKX 盘中；若不需要则从本批范围移除并记待办）。
-3. **时间轴表达重裁（设计变更，设计先行）**：crypto 日线现走 `bar_daily` kind（trade_date 语义）实际是 24/7 连续流——重裁「用 `streaming` 语义 re-label vs 扩 `Temporality` 枚举 vs 维持现状（bar_daily + trade_day_filter=none 已工作）」。**若结论是「维持现状」则零代码**，只把决策写进设计文档。
-4. OKX 重试预算（102b 挂账，随批顺带：退避 3→5 次或加 ConnectionReset 专项重试）。
+2. **OKX 盘中粒度全铺（2026-10-20 用户裁定）**：`okx_perp_hourly/1min/15min` 三项，沿用 `_make_crypto_bar_handler` 工厂范式（`engine.py:1254`，币安四项同款）加 OKX 规格——`okx_adapter` 补 `bar=1H/1m/15m` candles 拉取（history-candles 端点，同日线）；sync_config 三行（`start_floor`：hourly=2026-09-29 / 1min、15min=2026-10-05，对齐币安同档）；窗口语义同币安盘中（hourly 7 天 / 分钟档 1 天滚动）。**调度压力预估**：485 标的经代理 20req/2s ⇒ 一轮 ~50s 请求 + 重试余量；盘中档全部 `schedule=manual` 起步（同币安 0134 惯例——启用节奏另定），避免晨档自动放大代理负载。
+3. **时间轴表达重裁（v2 已裁定「维持现状」，待落档）**：`bar_daily` kind + `trade_day_filter=none` 表达 crypto 连续自然日语义。**判据**：① `historical` 语义＝「逐日权威批量」，与 crypto 日线逐日落库的消费形态一致（回测/因子按日重放不区分交易日/自然日）；② `streaming` 是流式推送语义，re-label 会破坏 kind→时态映射的语义精度（`contract.py:44-51`）；③ 扩枚举（如 `continuous`）无消费者——零读点的类型词=第二真源；④ 实证：`bar_1d` crypto 段 44~500 天连续自然日无断裂（2026-10-20 dev 库查）。**零代码**，决策落 `flow/方案/多市场数据接入与代理体系-设计-20261006.md` §二并引用回本文件。
+4. OKX 重试预算（102b 挂账）：`okx_adapter.py:64` `_MAX_RETRY = 3` → **5**；并把 `ConnectionResetError`/`ConnectionError` 加入可重试异常集（当前仅限频码 50011 与 5xx——102b 实锤 7/485 标的 ConnectionReset 三次退避后仍失败）。退避基数 2s 不动（2/4/8/16/32s 上界可接受）。
 
 ## 限定范围
 
