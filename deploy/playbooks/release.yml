@@ -346,6 +346,9 @@
         # 判据完备性=deploy_slices 覆盖全部 server 输入（src/migrations/scripts/systemd/requirements.txt/alembic.ini）；
         # 首发布（prev 空）/任一切片不同（含空指纹=视为变更既有防御）/force_full 逃生门 → 全量。
         - name: 阶段 2 —— server 变更判定（批 8：web-only 发布走快车道的唯一判据）
+          # 批 128c P0 根修：批 125 曾把 deps 注释写进 {{ }} 表达式内（"注释放表达式外"实未做到）——
+          # 渲染后 server_changed = "True # 批 125：…" 字符串，| bool 恒 False ⇒ 批 125 起所有发布
+          # 恒走快车道零重启（全靠 6.5 钉版探针兜底）。本修：表达式只留纯布尔，注释移出 YAML 值外。
           ansible.builtin.set_fact:
             server_changed: "{{ (prev_release_id | default('')) | length == 0
                                 or (force_full | default(false) | bool)
@@ -355,8 +358,7 @@
                                 or prev_slice_fp.get('scripts/systemd', '') != staged_slice_fp.get('scripts/systemd', '')
                                 or prev_slice_fp.get('alembic.ini', '') != staged_slice_fp.get('alembic.ini', '')
                                 or prev_slice_fp.get('requirements-dev.txt', '') != staged_slice_fp.get('requirements-dev.txt', '')
-                                or prev_slice_fp.get('deps', '') != staged_slice_fp.get('deps', '') }}
-                                # 批 125：deps（vnpy nogui fork wheel）变更触发重装——注释放表达式外（Jinja 禁 #） }}"
+                                or prev_slice_fp.get('deps', '') != staged_slice_fp.get('deps', '') }}"
 
         - name: 阶段 2 —— 快车道通告（server 指纹一致：跳过阶段 3/5/7，只翻链+探针）
           ansible.builtin.debug:
