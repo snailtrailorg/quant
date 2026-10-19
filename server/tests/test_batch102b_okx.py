@@ -690,11 +690,11 @@ class TestRealDb:
 
     def test_sync_config_row(self):
         rows = self._q("SELECT provider, trade_day_filter, supports_backfill, start_floor, "
-                       "data_type, enabled, sync_mode, schedule FROM sync_config "
+                       "enabled, sync_mode, schedule FROM sync_config "
                        "WHERE id='okx_perp_daily'")
         assert len(rows) == 1, "迁移 0136 未跑（okx_perp_daily 行缺失）"
-        provider, tdf, sbf, floor, dtype, enabled, mode, sched = rows[0]
-        assert (provider, tdf, dtype) == ("okx", "none", "crypto")
+        provider, tdf, sbf, floor, enabled, mode, sched = rows[0]
+        assert (provider, tdf) == ("okx", "none")
         assert sbf is True
         assert str(floor) == "2020-01-01", (
             "0137 已按 prod 实测回填 start_floor（OKX K 线保留边界；非 listTime=2019-11-12）")
@@ -755,7 +755,7 @@ class TestMigration0137Shape:
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
         # 0145（批 120：安全态势页两表 expand-only）
-        assert heads == {"0157"}, f"head 不是唯一 0157：{sorted(heads)}"   # 批 127 Z1：0157 新链头（DROP 归档表）——链头钉随批交棒
+        assert heads == {"0158"}, f"head 不是唯一 0158：{sorted(heads)}"   # 批 129：0158 新链头（DROP data_type）——链头钉随批交棒
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

@@ -234,7 +234,7 @@ def _get_config(sync_id: str) -> dict:
                 # 批 108·步 3（裁定 H）：`retention` ＝ 保留策略下界（date | None）。一列三义的
                 # `start_floor` 已拆 ⇒ 本键是「窗口下界三地板」之一（设计 §5.1）；**引擎真读**
                 # （`_window_floors`），不是装饰列。
-                # 批 127 Z4：data_type 零消费已删（列留下一版 contract DROP）。
+                # 批 129：data_type 列已随 0158 contract DROP（批 127 Z4 起零消费）。
                 "retention": row[11]}
 
 

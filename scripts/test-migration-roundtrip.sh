@@ -1706,6 +1706,9 @@ rm -rf "$tmp"
 # ── 用例 AE：0145 安全态势两表（批 120 线①）——真跑 upgrade→downgrade→upgrade + 断言 ──
 FROM_AE=0144
 TO_AE=0145
+
+FROM_AF=0157
+TO_AF=0158
 case_ae() {
 echo
 echo "########## 用例 AE：0145 安全态势两表（upgrade→downgrade→upgrade 往返） ##########"
@@ -1749,8 +1752,65 @@ chk "🔴 upgrade 渲染不含 DROP TABLE（expand-only）" "$(grep -ci 'drop ta
 rm -rf "$tmp"
 }
 
+case_af() {
+echo
+echo "########## 用例 AF：0158 DROP sync_config.data_type（contract pair=0154；upgrade→downgrade→upgrade 往返） ##########"
+reset_scratch
+# fixture：0157 形态最小 sync_config（列集=0157 链末形态的关键子集；含 data_type NOT NULL + 样本行）
+fixture() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE sync_config (
+  id text PRIMARY KEY, name text NOT NULL, tushare_api text, pg_table text,
+  data_type text NOT NULL,
+  sync_mode text NOT NULL DEFAULT 'incremental', schedule text NOT NULL DEFAULT 'manual',
+  trade_day_filter text DEFAULT 'none', enabled boolean DEFAULT true,
+  last_sync_date text, last_sync_ts timestamptz, last_sync_count integer DEFAULT 0,
+  last_status text DEFAULT 'idle', description text, created_at timestamptz DEFAULT now(),
+  provider text NOT NULL DEFAULT 'tushare', supports_backfill boolean, start_floor date, retention date);
+INSERT INTO sync_config (id, name, data_type) VALUES
+  ('binance_perp_daily', '币安永续日线', 'crypto'),
+  ('listed_fund_daily', '场内基金日线行情', 'listed_fund');
+SQL
+}
+fixture
+stamp "$FROM_AF"
+step up "$TO_AF" "AF1 upgrade（DROP COLUMN）"
+
+chk "data_type 列已删" "$(q "select count(*) from information_schema.columns where table_schema='$SCRATCH' and table_name='sync_config' and column_name='data_type'")" "0"
+chk "邻居列不动（18 列名集不变——显式对比防 fixture 漂移）" "$(q "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_schema='$SCRATCH' and table_name='sync_config'")" "created_at,description,enabled,id,last_status,last_sync_count,last_sync_date,last_sync_ts,name,pg_table,provider,retention,schedule,start_floor,supports_backfill,sync_mode,trade_day_filter,tushare_api"
+chk "样本行无损（2 行）" "$(q "select count(*) from sync_config")" "2"
+chk "行内容不漂（id 集合）" "$(q "select string_agg(id, ',' order by id) from sync_config")" "binance_perp_daily,listed_fund_daily"
+
+step down "$FROM_AF" "AF2 downgrade（列回归）"
+chk "data_type 列已回" "$(q "select count(*) from information_schema.columns where table_schema='$SCRATCH' and table_name='sync_config' and column_name='data_type'")" "1"
+chk "downgrade 语义＝可空（is_nullable=YES，不 resurrect 数据）" "$(q "select is_nullable from information_schema.columns where table_schema='$SCRATCH' and table_name='sync_config' and column_name='data_type'")" "YES"
+chk "downgrade 后样本行仍在且值为 NULL" "$(q "select count(*) from sync_config where data_type is null")" "2"
+chk "NOT NULL 不在行写入面复活（NULL 行可存在）" "$(q "select count(*) from sync_config")" "2"
+
+step up "$TO_AF" "AF3 复 upgrade（复跑幂等）"
+chk "复 upgrade 后列已再删" "$(q "select count(*) from information_schema.columns where table_schema='$SCRATCH' and table_name='sync_config' and column_name='data_type'")" "0"
+chk "复 upgrade 后行数不丢" "$(q "select count(*) from sync_config")" "2"
+
+# 离线渲染完整性
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_AF:$TO_AF" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_AF:$FROM_AF" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_AF'" "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 DROP COLUMN" "$(grep -ci 'drop column' "$tmp/up.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
-echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA + $FROM_AC→$TO_AC） ##########"
+echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA + $FROM_AC→$TO_AC + $FROM_AF→$TO_AF） ##########"
 precheck
 case_a
 case_b
@@ -1783,4 +1843,5 @@ case_ab
 case_ac
 case_ad
 case_ae
+case_af
 finish

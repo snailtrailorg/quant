@@ -50,7 +50,6 @@ CREATE TABLE IF NOT EXISTS sync_config (
     name            TEXT NOT NULL,
     tushare_api     TEXT NOT NULL,
     pg_table        TEXT NOT NULL,
-    data_type       TEXT NOT NULL,
     sync_mode       TEXT NOT NULL DEFAULT 'incremental',
     schedule        TEXT NOT NULL DEFAULT 'manual',
     trade_day_filter TEXT DEFAULT 'none',
@@ -69,18 +68,18 @@ CREATE TABLE IF NOT EXISTS sync_config (
 -- 种子数据（8 条同步任务）
 -- ON CONFLICT DO NOTHING: 已存在不覆盖（用户在 Web 改过的配置不会丢）
 -- ============================================================
-INSERT INTO sync_config (id, name, tushare_api, pg_table, data_type, sync_mode, schedule, trade_day_filter, enabled, description) VALUES
-    ('astock_daily', 'A股日线行情',    'pro.daily',       'bar_1D',          'astock',     'incremental', :'ASTOCK_DAILY_SCHEDULE', :'ASTOCK_DAILY_FILTER', 'true', 'A股全市场日线OHLCV，按日批量拉取'),
-    ('astock_basic', 'A股基本面指标',  'pro.daily_basic', 'daily_basic',     'astock',     'incremental', :'ASTOCK_BASIC_SCHEDULE', :'ASTOCK_BASIC_FILTER', 'true', 'PE/PB/市值/换手率等'),
-    ('astock_list',  'A股股票列表',    'pro.stock_basic', 'asset_static_info','astock',    'full',        :'ASTOCK_LIST_SCHEDULE',  :'ASTOCK_LIST_FILTER',  'true', '全市场股票基本信息+上市日'),
-    ('cb_daily',     '可转债日线行情', 'pro.cb_daily',    'bar_1D',          'convertible','incremental', :'CB_DAILY_SCHEDULE',     :'CB_DAILY_FILTER',     'true', '可转债日线OHLCV'),
-    ('cb_basic',     '可转债基本信息', 'pro.cb_basic',    'cb_basic_info',   'convertible','full',        :'CB_BASIC_SCHEDULE',     :'CB_BASIC_FILTER',     'true', '可转债条款/转股价/到期日等'),
-    ('etf_daily',    'ETF日线行情',    'pro.fund_daily',  'bar_1D',          'etf',        'incremental', :'ETF_DAILY_SCHEDULE',    :'ETF_DAILY_FILTER',    'true', 'ETF日线OHLCV'),
-    ('etf_list',     'ETF基金列表',    'pro.fund_basic',  'etf_basic_info',  'etf',        'full',        :'ETF_LIST_SCHEDULE',     :'ETF_LIST_FILTER',     'true', 'ETF基金基本信息'),
-    ('trade_cal',    '交易日历',       'pro.trade_cal',   'trade_cal',       'astock',     'full',        :'TRADE_CAL_SCHEDULE',    :'TRADE_CAL_FILTER',    'true', 'SSE交易日历，is_trading_day依据'),
-    ('astock_minute',      'A股分钟线1分', 'pro.stk_mins', 'bar_1min', 'astock', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股1分钟K线，per-symbol拉取（stk_mins需2000积分，全市场量大）'),
-    ('astock_minute_5min', 'A股分钟线5分', 'pro.stk_mins', 'bar_5min', 'astock', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股5分钟K线，per-symbol拉取'),
-    ('index_daily',  '基准指数日线',  'pro.index_daily', 'bar_index', 'index', 'incremental', :'INDEX_DAILY_SCHEDULE', :'INDEX_DAILY_FILTER', 'true', '沪深300基准指数日线，回测基准对比')
+INSERT INTO sync_config (id, name, tushare_api, pg_table, sync_mode, schedule, trade_day_filter, enabled, description) VALUES
+    ('astock_daily', 'A股日线行情',    'pro.daily',       'bar_1D',          'incremental', :'ASTOCK_DAILY_SCHEDULE', :'ASTOCK_DAILY_FILTER', 'true', 'A股全市场日线OHLCV，按日批量拉取'),
+    ('astock_basic', 'A股基本面指标',  'pro.daily_basic', 'daily_basic',     'incremental', :'ASTOCK_BASIC_SCHEDULE', :'ASTOCK_BASIC_FILTER', 'true', 'PE/PB/市值/换手率等'),
+    ('astock_list',  'A股股票列表',    'pro.stock_basic', 'asset_static_info','full',        :'ASTOCK_LIST_SCHEDULE',  :'ASTOCK_LIST_FILTER',  'true', '全市场股票基本信息+上市日'),
+    ('cb_daily',     '可转债日线行情', 'pro.cb_daily',    'bar_1D',          'incremental', :'CB_DAILY_SCHEDULE',     :'CB_DAILY_FILTER',     'true', '可转债日线OHLCV'),
+    ('cb_basic',     '可转债基本信息', 'pro.cb_basic',    'cb_basic_info',   'full',        :'CB_BASIC_SCHEDULE',     :'CB_BASIC_FILTER',     'true', '可转债条款/转股价/到期日等'),
+    ('etf_daily',    'ETF日线行情',    'pro.fund_daily',  'bar_1D',          'incremental', :'ETF_DAILY_SCHEDULE',    :'ETF_DAILY_FILTER',    'true', 'ETF日线OHLCV'),
+    ('etf_list',     'ETF基金列表',    'pro.fund_basic',  'etf_basic_info',  'full',        :'ETF_LIST_SCHEDULE',     :'ETF_LIST_FILTER',     'true', 'ETF基金基本信息'),
+    ('trade_cal',    '交易日历',       'pro.trade_cal',   'trade_cal',       'full',        :'TRADE_CAL_SCHEDULE',    :'TRADE_CAL_FILTER',    'true', 'SSE交易日历，is_trading_day依据'),
+    ('astock_minute',      'A股分钟线1分', 'pro.stk_mins', 'bar_1min', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股1分钟K线，per-symbol拉取（stk_mins需2000积分，全市场量大）'),
+    ('astock_minute_5min', 'A股分钟线5分', 'pro.stk_mins', 'bar_5min', 'incremental', :'ASTOCK_MINUTE_SCHEDULE', :'ASTOCK_MINUTE_FILTER', 'true', 'A股5分钟K线，per-symbol拉取'),
+    ('index_daily',  '基准指数日线',  'pro.index_daily', 'bar_index', 'incremental', :'INDEX_DAILY_SCHEDULE', :'INDEX_DAILY_FILTER', 'true', '沪深300基准指数日线，回测基准对比')
 ON CONFLICT (id) DO NOTHING;
 
 

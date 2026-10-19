@@ -422,19 +422,19 @@ class TestDbReconciliation:
     def test_sync_config_rows_match_spec(self):
         from src.data_sync.engine import _BINANCE_BAR_SPECS
         got = {r[0]: r for r in self._rows(
-            "SELECT id, provider, pg_table, data_type, sync_mode, trade_day_filter, "
+            "SELECT id, provider, pg_table, sync_mode, trade_day_filter, "
             "supports_backfill, enabled, schedule, retention FROM sync_config "
             "WHERE id = ANY(%s)", (list(self.NEW),))}
         assert set(got) == set(self.NEW), got
         for sid in self.NEW:
             _kind, _sub, freq = _BINANCE_BAR_SPECS[sid]
             r = got[sid]
-            assert r[1] == "binance" and r[3] == "crypto"
+            assert r[1] == "binance" and r[3] == "incremental"
             assert r[2] == f"bar_{freq.lower()}", (sid, r[2], freq)
-            assert r[4] == "incremental" and r[5] == "none", "crypto＝连续轴，无交易日历"
-            assert r[6] is True, "handler 真读 backfill_from ⇒ supports_backfill 必须 true"
-            assert r[7] is True, "enabled=true 才允许 UI 手动触发（disabled 会被 sync() 拒）"
-            assert r[9] is not None, "retention＝回补下限（有界占用闸门，批 108·步 3 正名）"
+            assert r[3] == "incremental" and r[4] == "none", "crypto＝连续轴，无交易日历"
+            assert r[5] is True, "handler 真读 backfill_from ⇒ supports_backfill 必须 true"
+            assert r[6] is True, "enabled=true 才允许 UI 手动触发（disabled 会被 sync() 拒）"
+            assert r[8] is not None, "retention＝回补下限（有界占用闸门，批 108·步 3 正名）"
 
     def test_manual_schedule_is_the_storage_gate(self):
         """🔴 `schedule='manual'` 是**存储闸门**，不是笔误。

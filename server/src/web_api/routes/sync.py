@@ -50,7 +50,7 @@ def list_sync_config(payload: dict = Depends(require_perm("read"))):
             # 批 108·步 3（裁定 H）：`start_floor` 一列三义已拆 ⇒ 本端点改出 `retention`
             # （保留策略下界，YYYYMMDD；NULL=未声明不设下限）。列本身留下版 DROP，
             # 本版起**零读点**（API 是那唯一的读点）。
-            # 批 127 Z4：data_type 列零消费——本版起零读点（DROP 留下一版 contract）。
+            # 批 129：data_type 列已随 0158 contract DROP（批 127 Z4 起零读点）。
             "supports_backfill": bool(r[14]),
             "retention": r[15].strftime("%Y%m%d") if r[15] else None}
             for r in rows]

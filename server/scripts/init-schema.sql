@@ -47,7 +47,6 @@ CREATE TABLE IF NOT EXISTS sync_config (
     name            TEXT NOT NULL,
     tushare_api     TEXT NOT NULL,
     pg_table        TEXT NOT NULL,
-    data_type       TEXT NOT NULL,
     sync_mode       TEXT NOT NULL DEFAULT 'incremental',
     schedule        TEXT NOT NULL DEFAULT 'manual',
     enabled         BOOLEAN DEFAULT true,

@@ -416,7 +416,7 @@ def verify_schema() -> dict[str, list[str]]:
     - 单条 information_schema 查询拿全部列（非逐表探测）
     - **纯函数返回 findings，不做告警**——db.py 是最底层模块，告警路由归入口层
       （web startup / runner / hub / celery 父进程，复用 monitor 容错范式），避免依赖倒置
-    - 只比缺列（0038 类问题）；不比 data_type/多余列（链外遗留不阻断）
+    - 只比缺列（0038 类问题）；不比多余列（链外遗留不阻断）
     """
     import logging
     logger = logging.getLogger("data_platform")

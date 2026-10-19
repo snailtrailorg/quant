@@ -711,10 +711,10 @@ class TestRealDb:
 
     def test_sync_config_row(self):
         rows = self._q("SELECT provider, trade_day_filter, supports_backfill, start_floor::text, "
-                       "data_type, enabled, sync_mode FROM sync_config WHERE id='binance_perp_daily'")
+                       "enabled, sync_mode FROM sync_config WHERE id='binance_perp_daily'")
         assert len(rows) == 1, "迁移 0132 未跑（binance_perp_daily 行缺失）"
-        provider, tdf, sbf, floor, dtype, enabled, mode = rows[0]
-        assert (provider, tdf, dtype) == ("binance", "none", "crypto")
+        provider, tdf, sbf, floor, enabled, mode = rows[0]
+        assert (provider, tdf) == ("binance", "none")
         assert sbf is True and floor == "2019-09-08"
         assert enabled is True and mode == "incremental"
 
