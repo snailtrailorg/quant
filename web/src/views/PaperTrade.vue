@@ -234,7 +234,14 @@ const searchSymbols = async (q) => {
   symbolSearching.value = true
   try {
     const r = await api.get('/sync/symbols/astock_daily', { params: { q, page: 1, size: 20 } })
-    symbolOptions.value = (r.items || []).slice(0, 20).map(i => i.ts_code)
+    // ts_code → vt_symbol 归一（同 LiveTask：建任务链为 vt 口径，.SH 提交会被 account_allows 拒）
+    const EX = { SH: 'SHSE', SZ: 'SZSE', BJ: 'BSE' }
+    symbolOptions.value = (r.items || []).slice(0, 20).map(i => {
+      const m = String(i.ts_code).toUpperCase().match(/^(.+\.[A-Z]+)$/)
+      if (!m) return i.ts_code
+      const [sym, ex] = m[1].split('.')
+      return `${sym}.${EX[ex] || ex}`
+    })
   } catch { symbolOptions.value = [] }
   finally { symbolSearching.value = false }
 }
