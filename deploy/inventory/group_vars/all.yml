@@ -38,7 +38,7 @@ deploy_sync_whitelist:
 deploy_emd_build: true
 
 # ---- 波次稳定窗（设计稿 §3 注记②：无原生 dwell，循环实现）----
-deploy_dwell_seconds: 30             # is-active 需连续保持的秒数（沙箱压缩覆盖）
+deploy_dwell_seconds: 10             # is-active 需连续保持的秒数（2026-10-19 用户裁定 30→10：两次 prod 全量实测 5.5min 无恙；交易日紧急发布可 -e deploy_dwell_seconds=30 回保守）
 deploy_dwell_poll: 2                 # 采样间隔
 deploy_dwell_max_wait: 120           # 单元总等待上限（含反复重启拉锯）
 
@@ -47,4 +47,4 @@ deploy_keep_releases: 5              # 按 release_id 字典序保留 N 个已�
 # ---- 批 8 · 变更感知发布 ----
 # server_changed=false（四切片+units 指纹全一致）→ 快车道：跳阶段 3/5/7（导入冒烟/pip/alembic/波次重启），
 # 只走同步+双链 flip+postverify（pinned 断言=旧版）。逃生门：-e force_full=true 恒走全量。
-# dwell 压缩：-e deploy_dwell_seconds=10（快速模式，默认 30 保守值不变）。
+# dwell 压缩：默认已 10s（2026-10-19 裁定）；保守模式 -e deploy_dwell_seconds=30。
