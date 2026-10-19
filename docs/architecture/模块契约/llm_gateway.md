@@ -3,6 +3,11 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md` §6 LLMProvider + §LLM 层（LLMResponse/Tool）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
+> **最近变更**（模块代码 git 史前 3 条；本节为导航快照，真相源=git log）：
+> - 2026-10-01　批77续 全站/全市场闸收回 admin 独占（halt + live_trading_control）
+> - 2026-10-01　批77 权限矩阵与实盘面分离：新增 live_control 键（analyst 不执行实盘交易）
+> - 2026-10-01　批76 二次裁定：解冻档位三面统一 strategy_control（trader 与 admin 皆可）
+
 ## 职责
 平台所有 AI 调用的**唯一入口**。国内模型 DeepSeek(主) + GLM(备)，按 `priority` 全局主备容灾 + 半开熔断 + 指数退避 + 工具白名单（RBAC 角色）+ 用量日志（llm_usage）。
 运行期只用国内模型，**不接 Claude/OpenAI**；Claude Code 仅开发助手。LLM 回复按输入语言自然回复（已移除 lang 注入）。

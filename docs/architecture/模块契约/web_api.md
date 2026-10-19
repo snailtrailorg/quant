@@ -3,7 +3,10 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（6 大接口 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么端点"。
 
-> **最近变更（2026-09-24 多账号源 D5）**：create_live_task 三级时点① `account_allows(account_id, symbol)`（routes/trading.py）；建任务 account_id 必填+int 校验。
+> **最近变更**（模块代码 git 史前 3 条；本节为导航快照，真相源=git log）：
+> - 2026-10-19　批129步3/4：0158 DROP sync_config.data_type（contract pair=0154）+ 双档去列 + exp
+> - 2026-10-19　测试 warning 清零：FastAPI lifespan 迁移 + redis setex 弃用清理（批 128b）
+> - 2026-10-18　僵尸清理 Z4：4 个死依赖移除 + data_type 零读点（收尾）
 ## 最近变更（web-design 重设计施工,2026-08-30）
 
 - **风控**:GET `/api/risk/state` 扩展 `metrics{total_drawdown,daily_loss,available,snapshot_age_s}`（水位仪表+fail-closed 可见,P1-1）；GET `/api/risk/log?action=&limit=`（risk_log 决策面板——check_order 出口统一写入 approve/reject/adjust）

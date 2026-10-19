@@ -3,6 +3,11 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（AnalysisResult 见本文 §一；Bar/BarContext 见 §K 线层）。本文件不重复数据结构定义。
 
+> **最近变更**（模块代码 git 史前 3 条；本节为导航快照，真相源=git log）：
+> - 2026-10-18　僵尸清理 Z2：死函数 24 个删除（65 候选逐判）
+> - 2026-09-29　批81 P2-9：选股权重配置化（system_config selection_weights 键，fallback 硬编码现值）
+> - 2026-09-29　技术债治理 3/4：ruff 清存量（426→0，全绿）
+
 ## 职责
 A股分析引擎：**日线选股**（横截面多因子分位打分 + 排序）+ **分钟级研判**（D2 已实现 2026-08-10）+ 可转债条款解读（convertible_terms.py）。
 输出 `AnalysisResult` 供 Web 看板展示。**A 股只读不下单**--实盘交易走 XTPAdapter（受三级开关控制，非本模块职责）。

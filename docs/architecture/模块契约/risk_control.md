@@ -3,7 +3,10 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
-> **最近变更（2026-09-24 多账号源 D1-D6）**：新增 `account_allows(account_id, symbol)`（D1 三级时点③，BUY 拦/SELL 豁免，落 `check_order` 2.6 段）；`_symbol_exposure` 净敞口（D4，`direction_long/short/net` 资源 id 化）。
+> **最近变更**（模块代码 git 史前 3 条；本节为导航快照，真相源=git log）：
+> - 2026-10-18　批 127 深水区+终极清理：sync id 正名/注释文档统一/data_type 裁列启动
+> - 2026-10-03　批86-B 纸上交易落码：paper 命名规范化 + 0125-0127 三迁移 + paper_trade 单键矩阵 + PaperTrade
+> - 2026-09-30　P2-5 延伸：Valkey client 单源工厂 business_redis（26 处 from_url 样板收编）
 ## 职责
 全局总风控 + 分市场独立风控双层。**所有自动交易下单前必过 `check_order`**；一键熔断状态存 Valkey（禁止内存缓存）；实盘三级开关第二级（`.env` 总闸 AND Web 分项）在此前置检查。
 独立提供 `RiskRule` 单规则抽象（PT6，别人实现接口加规则，不改 `risk_control`）。

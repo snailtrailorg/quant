@@ -15,13 +15,20 @@
     <template v-if="moreText" #append>
       <div class="ts-more">{{ moreText }}</div>
     </template>
+    <!-- #empty 槽透传（102a 挂账收口：SmsCard/SmtpCard 空态文案经 TableShell 静默丢失）——
+         未传时不动 EP 默认空态（条件转发防空白覆盖） -->
+    <template v-if="slots.empty" #empty>
+      <slot name="empty" />
+    </template>
   </el-table>
 </template>
 
 <script setup>
-import { ref, computed, nextTick, onMounted, onUnmounted, watch, useAttrs } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch, useAttrs, useSlots } from 'vue'
 
 defineOptions({ inheritAttrs: false })   // 显式 v-bind="$attrs" 透传（含事件），防根双绑
+
+const slots = useSlots()   // #empty 条件转发判定（未传不覆盖 EP 默认空态）
 
 const props = defineProps({
   storageKey: { type: String, required: true },   // 语义键（localStorage 前缀 colw.）

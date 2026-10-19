@@ -3,6 +3,11 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
+> **最近变更**（模块代码 git 史前 3 条；本节为导航快照，真相源=git log）：
+> - 2026-10-19　测试 warning 清零：FastAPI lifespan 迁移 + redis setex 弃用清理（批 128b）
+> - 2026-10-14　fix(security): 批123 步4 双盲审返工 —— status 伪组件+排序+估计角标+schema 兜底
+> - 2026-10-11　feat(security): 批120 线① 安全采集器+两表+beat任务 —— 基线diff告警/AI摘要fail-soft/降级语义
+
 ## 职责
 统一告警出口：分级路由（info/warn/critical）+ 1min 去重合并 + 日配额限流 + 历史记录。
 所有模块通过 `AlertNotify.get().notify(level, title, body)` 推送，不直接接触渠道。渠道走 `MessageChannel` 抽象（PT1 平台化，DB 配置 `channel_config`，别人实现接口接入）。

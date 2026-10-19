@@ -2,7 +2,10 @@
 
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件。
 > 配套：`docs/design/D15-服务监控设计.md`（设计全貌）+ `docs/architecture/接口契约.md`。
-> **最近变更（批 66b，2026-09-27 上产）**：hub 观测面 N 实例化——collector `snap["hubs"]`（SCAN per-account+legacy 裸键收编 account=0）+ CORE_UNITS 去 md-hub@quant；R4 期望集×在场集交叉（`_hub_expected_ids` DB 源）+legacy 过渡豁免+per-account streak（JSON dict 持久化）；R6 per-account（component=md-hub:{acct}）；render_prometheus account 标签。
+> **最近变更**（模块代码 git 史前 3 条；本节为导航快照，真相源=git log）：
+> - 2026-10-16　批126b：描述双语幂等补齐（空即生成中英文再更新）+ 组件表漏洞列改名漏洞数量
+> - 2026-10-16　批126：漏洞描述一句话化（AI 入库时一次性生成）+ 已修复行显式删除
+> - 2026-10-16　feat(security): finding GC —— 90 天未再报即删（用户问「已修复积累太多如何删」）
 
 ## 职责
 双层监控的内层：采集组件状态（systemd unit/Valkey 心跳族/依赖）→ 症状型规则判定 →
