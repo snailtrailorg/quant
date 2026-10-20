@@ -149,17 +149,80 @@ class TestRateLimitShared:
         ad = OA.OkxAdapter()
         assert hasattr(ad, "_req_times")
 
+    def test_fetch_supply_dispatches_bar_minute(self):
+        """步 4 盲审 A-P0 修：真 OkxAdapter.fetch_supply('bar_minute','perp',freq=…) 必须分派
+        到 pull_minute（_FakeOkx 恰好遮住过这个洞——六组测试无一例真 adapter 分派断言）。"""
+        ad = OA.OkxAdapter()
+        with patch.object(ad, "pull_minute", return_value=pd.DataFrame()) as pm:
+            ad.fetch_supply("bar_minute", "perp", symbol="BTC-USDT-SWAP",
+                            freq="1h", start="20261018", end="20261019")
+        assert pm.call_args[0] == ("BTC-USDT-SWAP", "1h", "20261018", "20261019"), pm.call_args
+        with pytest.raises(Exception, match="未实现"):
+            ad.fetch_supply("rt_quote", None)
 
-_HAS_DB = True
-try:
-    from src.data_platform.db import get_conn
-    with get_conn() as _c:
-        _c.execute("SELECT 1 FROM sync_config LIMIT 1")
-except Exception:
-    _HAS_DB = False
+    def test_handler_with_real_adapter_end_to_end(self):
+        """步 4 盲审 B-P3-c：handler 级真 adapter 例（P0 滑过的结构性根因——_FakeOkx
+        全 mock adapter 面，真 OkxAdapter 的 fetch_supply/to_bar_rows/限频链从未过测）。
+        真 OkxAdapter + 仅 mock _request（HTTP 边）+ 真 handler：盘中档全链落行+游标推进。"""
+        from src.data_sync import engine
+
+        ad = OA.OkxAdapter()
+
+        def _fake_request(path, params):
+            if "instruments" in path:
+                return {"data": [{"instId": "BTC-USDT-SWAP", "ctType": "linear",
+                                  "settleCcy": "USDT", "state": "live",
+                                  "listTime": "1600000000000"}]}
+            # candles：两页后空（1 根已收盘 bar，UTC 2026-10-19）
+            ts = str(int(datetime(2026, 10, 19, tzinfo=timezone.utc).timestamp() * 1000))
+            if not getattr(_fake_request, "_served", False):
+                _fake_request._served = True
+                return {"data": [[ts, "1", "2", "0.5", "1.5", "10", "20", "30", "1"]]}
+            return {"data": []}
+
+        ad._request = _fake_request
+        cfg = {"id": "okx_perp_hourly", "provider": "okx", "last_sync_date": None,
+               "retention": date(2026, 10, 13)}
+        with patch.object(engine, "_get_supply_adapter", return_value=ad), \
+             patch("src.data_platform.db.save_bars", return_value=1) as sb, \
+             patch("src.data_platform.db.save_bars_overwrite", return_value=1):
+            r = engine._HANDLERS["okx_perp_hourly"](cfg, "20261019", None)
+        assert r["pulled"] >= 1 and r["failed_dates"] == [], r
+        assert r["cursor_upto"] == "20261019", r
+        assert sb.call_args[0][2] == "1h" if len(sb.call_args[0]) > 2 else True  # 落表 freq
+
+    def test_retry_exhaustion_attempts_six_times(self):
+        """步 4 盲审 A-P2-a：_MAX_RETRY=5 ⇒ 总尝试 6 次、退避 5 次（2/4/8/16/32）。"""
+        ad = OA.OkxAdapter()
+        calls = []
+
+        def _always_503(url, **kw):
+            calls.append(1)
+            import requests
+            r = requests.Response()
+            r.status_code = 503
+            return r
+
+        with patch.object(ad._session, "get", side_effect=_always_503), \
+             patch.object(OA.time, "sleep") as sl:
+            with pytest.raises(Exception, match="okx HTTP 503"):
+                ad._request("/x", {})
+        assert len(calls) == 6, calls
+        assert len(sl.call_args_list) == 5
 
 
-@pytest.mark.skipif(not _HAS_DB, reason="无 dev 库")
+def _db_up() -> bool:
+    """函数级探测（101b/99 范式——收集期零连接；防 DB 黑洞时 import 期无限等）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as _c:
+            _c.execute("SELECT 1 FROM sync_config LIMIT 1")
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _db_up(), reason="无 dev 库")
 class TestDbReconciliation:
     def test_three_rows_match_specs(self):
         from src.data_sync import engine

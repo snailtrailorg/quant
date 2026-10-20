@@ -63,7 +63,7 @@ _LIMIT = 100                                      # history-candles 单页上限
 _MAX_PAGES = 600                                  # 防御上限（6 年日线 ≈ 22 页，600 远超需求）
 _RATE_MAX = 20                                    # IP 级 20 req…
 _RATE_WINDOW = 2.0                                # …/ 2s（设计 §4.2）
-_RETRY_BASE = 2.0                                 # 退避基数（秒）：2 / 4 / 8
+_RETRY_BASE = 2.0                                 # 退避基数（秒）：2 / 4 / 8 / 16 / 32（批 116 起 5 次）
 _MAX_RETRY = 5                                      # 批 116：3→5（102b 挂账——7/485 标的 3 次退避后仍 ConnectionReset；预算不够，非异常未捕）
 _RETRY_JITTER = 0.3                               # 退避抖动上限（±0–30%，批 105）
 _POOL_CONNS = 2                                   # urllib3 连接池：本 adapter 单线程顺序请求
@@ -95,7 +95,7 @@ def _retry_after(resp) -> float | None:
 
 
 def _backoff(attempt: int) -> float:
-    """指数退避 **+ 抖动**：`2/4/8s` × (1 + U(0, 0.3))。
+    """指数退避 **+ 抖动**：`2/4/8/16/32s` × (1 + U(0, 0.3))。
 
     抖动是**必要的不是装饰**（批 105）：102b prod 首跑 7/485 标的 `Connection reset`——
     全部标的按同一节奏重试时，重试流量自己排成同步波峰，正好再撞同一代理出口的
@@ -160,7 +160,7 @@ class OkxAdapter(BaseDataAdapter):
     def _request(self, path: str, params: dict) -> dict:
         """GET `path`（经代理出口，**会话内连接复用**）→ 返回 JSON body；`code!='0'` **响亮抛**。
 
-        重试面（三次退避 `_backoff`＝2/4/8s×(1+U(0,0.3))）：**网络异常**、**HTTP 429/5xx**
+        重试面（五次退避 `_backoff`＝2/4/8/16/32s×(1+U(0,0.3))）：**网络异常**、**HTTP 429/5xx**
         （优先用 `Retry-After`，该值由服务端给出、不加抖动）、**业务限频 `code=50011`**
         （HTTP 仍 200，实现时最易漏的一路）。重试耗尽即抛，**不静默返回空**——空帧会被
         上游当「该窗口无数据」记 success，把故障埋掉。
@@ -377,12 +377,16 @@ class OkxAdapter(BaseDataAdapter):
         return rows
 
     def fetch_supply(self, kind: str, sub_kind: str | None = None, **params) -> pd.DataFrame:
-        """批 100 供给端口：`('bar_daily', 'perp')` → per-symbol 区间拉取（源原生 DataFrame）。
+        """批 100 供给端口：`('bar_daily'|'bar_minute', 'perp')` → per-symbol 区间拉取（源原生 DataFrame）。
 
-        参数：`symbol`（instId，可带 `.OKX`）/ `start` / `end`（'YYYYMMDD'）；`freq` 忽略
-        （本源本批只有日线）。与 binance 侧同构 ⇒ 证明批 100 的端口**与 provider 无关**。
+        参数：`symbol`（instId，可带 `.OKX`）/ `start` / `end`（'YYYYMMDD'）；
+        `bar_minute` 另收 `freq`（内部 freq，由本 adapter 映射到 OKX bar 词——
+        引擎不持有源词表）。与 binance 侧同构 ⇒ 批 100 端口**与 provider 无关**。
         """
         if kind == "bar_daily" and sub_kind in (None, "perp"):
             return self.pull_daily(params.get("symbol", ""),
                                    params.get("start", ""), params.get("end", ""))
+        if kind == "bar_minute" and sub_kind in (None, "perp"):
+            return self.pull_minute(params.get("symbol", ""), params.get("freq", ""),
+                                    params.get("start", ""), params.get("end", ""))
         raise UnsupportedFeature(f"okx 未实现 fetch_supply(kind={kind}, sub_kind={sub_kind})")

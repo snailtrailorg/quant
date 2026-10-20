@@ -489,8 +489,9 @@ class TestFetchSupply:
         ad = OA.OkxAdapter()
         with pytest.raises(UnsupportedFeature):
             ad.fetch_supply("bar_daily", "stock")
+        # 批 116 起 (bar_minute, perp) 合法分派——域外例改 rt_quote/基金域
         with pytest.raises(UnsupportedFeature):
-            ad.fetch_supply("bar_minute", "perp")
+            ad.fetch_supply("rt_quote", None)
 
     def test_pull_minute_non_internal_raises_loud(self):
         """批 116 起 pull_minute 真实现（盘中三档）——非内部 freq 仍**响亮拒绝**
