@@ -117,7 +117,8 @@ def _pool_meta(table: str) -> dict | None:
     return {"kind": row["kind"], "pg_table": row["pg_table"], "pk": list(row["pk_cols"])}
 
 
-def _window_of(table: str, cursors: dict, upper_str: str) -> tuple[str | None, str | None]:
+def _window_of(table: str, cursors: dict, upper_str: str,
+               overlap_days: int | None = None) -> tuple[str | None, str | None]:
     """表级窗口策略（引擎侧编排声明——「请求哪段」；「怎么向源表达」在 adapter）。
 
     单日表 → (upper, upper)；增量表且有游标 → (cursor-回看重叠, upper) 含起点重叠幂等防漏；
@@ -125,13 +126,16 @@ def _window_of(table: str, cursors: dict, upper_str: str) -> tuple[str | None, s
 
     upper_str＝窗口上界（批 92：由 run_pool_sync 传入的「昨日自然日」，非 today——cron 改每日
     02:00 后当日公告尚未发布，用 today 作上界会让当轮恒拉不到当天公告且游标已越过）。
+    overlap_days（批 130·期二）：回看重叠天数——run_pool_sync 每轮读一次族层注入（禁
+    symbols×tables 双层循环内逐调用查库）；None=代码缺省 _POOL_OVERLAP_DAYS（未迁移库兜底）。
     """
+    _overlap = _POOL_OVERLAP_DAYS if overlap_days is None else overlap_days
     if table in _SINGLE_DAY_TABLES:
         return upper_str, upper_str
     if table in _INCREMENTAL_TABLES and cursors.get(table):
         cur = cursors[table]
         start = (date.fromisoformat(f"{cur[:4]}-{cur[4:6]}-{cur[6:8]}")
-                 - timedelta(days=_POOL_OVERLAP_DAYS)).strftime("%Y%m%d")
+                 - timedelta(days=_overlap)).strftime("%Y%m%d")
         return start, upper_str
     return None, None
 
@@ -202,6 +206,16 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
         # 当轮恒拉不到当天公告、游标又已越过 ⇒ 静默漏。增量窗口回看重叠在 _window_of 内叠加。
         upper_str = (date.today() - timedelta(days=1)).strftime("%Y%m%d")
         cursors = {} if (full or symbols) else _load_cursors()
+        # 批 130·期二：增量四表回看重叠读族层（每轮一次——_window_of 在双层循环内禁逐调用查库；
+        # 四行同值读 fina_indicator；行缺/列缺/未迁移库 → None=代码缺省 _POOL_OVERLAP_DAYS 兜底）
+        _kc_overlap = None
+        try:
+            from src.data_sync.engine import _read_sync_kind
+            _kcv = _read_sync_kind("fina_indicator")
+            if _kcv.get("overlap_days") is not None:
+                _kc_overlap = int(_kcv["overlap_days"])
+        except Exception:
+            _kc_overlap = None
         deadline = time.time() + timebox_s
         errors: list[str] = []
         metas: dict[str, dict] = {}
@@ -221,7 +235,7 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
                     break
                 try:
                     req = _pool_request(table, ts_code, meta["kind"],
-                                        _window_of(table, cursors, upper_str))
+                                        _window_of(table, cursors, upper_str, _kc_overlap))
                     # 限速/熔断收编（批 64b 原语义）：键=表名=限速档键；窗口组装与列归一等
                     # 纯计算在上下文外，**只有源拉取**计入配额与熔断（与旧实现同锚点）
                     with rate_limit_context(ds, table):

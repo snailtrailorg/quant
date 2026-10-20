@@ -1712,6 +1712,9 @@ TO_AF=0158
 
 FROM_AG=0158
 TO_AG=0159
+
+FROM_AH=0159
+TO_AH=0160
 case_ae() {
 echo
 echo "########## 用例 AE：0145 安全态势两表（upgrade→downgrade→upgrade 往返） ##########"
@@ -1849,6 +1852,46 @@ step up "$TO_AG" "AG3 复 upgrade（幂等）"
 chk "复 upgrade 后三行回" "$(q "select count(*) from sync_config where id like 'okx_perp_%'")" "3"
 }
 
+case_ah() {
+echo
+echo "########## 用例 AH：0160 sync_kind_config 参数两列（UPDATE 型首例；upgrade→downgrade 往返+幂等） ##########"
+reset_scratch
+fixture() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE sync_kind_config (
+  sync_id text PRIMARY KEY, kind text NOT NULL, sub_kind text, pg_table text,
+  pk_cols text, float_cols text, text_cols text, rebuild text);
+INSERT INTO sync_kind_config (sync_id, kind, sub_kind, pg_table, pk_cols, float_cols, text_cols, rebuild) VALUES
+  ('forecast_sync', 'financial_stmt', 'forecast', 'forecast', '{ts_code,ann_date}', '{}', '{}', 'incremental'),
+  ('income', 'financial_stmt', 'income', 'income', '{ts_code,end_date}', '{}', '{}', 'incremental'),
+  ('dividend', 'holder_structure', 'dividend', 'dividend', '{ts_code,ann_date}', '{}', '{}', 'incremental'),
+  ('margin_detail_sync', 'featured_daily', 'margin_detail', 'margin_detail', '{trade_date,ts_code}', '{}', '{}', 'incremental'),
+  ('astock_list', 'static_list', 'stock', 'asset_static_info', '{ts_code}', '{}', '{}', 'full');
+SQL
+}
+fixture
+stamp "$FROM_AH"
+step up "$TO_AH" "AH1 upgrade（两列+回填）"
+
+chk "两列已加" "$(q "select count(*) from information_schema.columns where table_schema='$SCRATCH' and table_name='sync_kind_config' and column_name in ('overlap_days','lag_trade_days')")" "2"
+chk "overlap=3 精确种（forecast/margin）" "$(q "select string_agg(sync_id, ',' order by sync_id) from sync_kind_config where overlap_days=3")" "forecast_sync,margin_detail_sync"
+chk "overlap=7 精确种（income）" "$(q "select string_agg(sync_id, ',' order by sync_id) from sync_kind_config where overlap_days=7")" "income"
+chk "lag=1 仅 margin" "$(q "select string_agg(sync_id, ',' order by sync_id) from sync_kind_config where lag_trade_days=1")" "margin_detail_sync"
+chk "死值禁种（dividend/astock_list 恒 NULL）" "$(q "select count(*) from sync_kind_config where sync_id in ('dividend','astock_list') and (overlap_days is not null or lag_trade_days is not null)")" "0"
+
+x "update sync_kind_config set overlap_days=99 where sync_id='income'"
+step up "$TO_AH" "AH2 复 upgrade（幂等——手改不覆盖）"
+chk "手改值保留" "$(q "select overlap_days from sync_kind_config where sync_id='income'")" "99"
+
+step down "$FROM_AH" "AH3 downgrade（两列 DROP 行零损）"
+chk "列已删" "$(q "select count(*) from information_schema.columns where table_schema='$SCRATCH' and table_name='sync_kind_config' and column_name in ('overlap_days','lag_trade_days')")" "0"
+chk "行零损（5 行）" "$(q "select count(*) from sync_kind_config")" "5"
+
+step up "$TO_AH" "AH4 复 upgrade（downgrade 后重升——守卫允许重种）"
+chk "重升后 income 回种 7" "$(q "select overlap_days from sync_kind_config where sync_id='income'")" "7"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
 echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA + $FROM_AC→$TO_AC + $FROM_AF→$TO_AF） ##########"
 precheck
@@ -1885,4 +1928,6 @@ case_ad
 case_ae
 case_af
 case_ag
+case_ah
+case_ah
 finish

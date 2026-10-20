@@ -2701,26 +2701,34 @@ _VIA_KIND_IDS = frozenset({
 
 
 def _read_sync_kind(sync_id: str) -> dict:
-    """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild/pk_cols/float_cols/text_cols）。
+    """读 sync_kind_config 归置行（kind/sub_kind/pg_table/rebuild/pk_cols/float_cols/text_cols/overlap_days/lag_trade_days）。
 
     pk_cols（批 83b 补）：池内族通用落库的 ON CONFLICT 主键来源——落库层不硬编码表名/主键。
     float_cols/text_cols（批 115·步 2 补）：tier1 列形状**单一真源**——`_make_tier1_handler`
     注册路径首调读本行取列（代码常量 `_TIER1_*_COLS` 已退役）。无行/表缺返回 {}。
+    overlap_days/lag_trade_days（批 130·期二）：窗口参数**族层宿主**——tier1/pool 读点
+    在 handler 调用期取值（批 107 立法：engine import 禁触库）。
+    批 130：catch 扩 UndefinedColumn——未迁移库（staging 代码先于 schema）回落 {}，
+    读点走代码缺省，禁炸。
     """
     try:
         with get_conn() as conn:
             cur = conn.execute(
-                "SELECT kind, sub_kind, pg_table, rebuild, pk_cols, float_cols, text_cols "
+                "SELECT kind, sub_kind, pg_table, rebuild, pk_cols, float_cols, text_cols, "
+                "overlap_days, lag_trade_days "
                 "FROM sync_kind_config WHERE sync_id=%s",
                 (sync_id,))
             row = cur.fetchone()
-    except psycopg.errors.UndefinedTable:
+    except (psycopg.errors.UndefinedTable, psycopg.errors.UndefinedColumn):
         return {}
     if not row:
         return {}
     return {"kind": row[0], "sub_kind": row[1], "pg_table": row[2], "rebuild": row[3],
             "pk_cols": list(row[4] or []),
-            "float_cols": list(row[5] or []), "text_cols": list(row[6] or [])}
+            "float_cols": list(row[5] or []), "text_cols": list(row[6] or []),
+            # 批 130·期二：窗口参数族层宿主（None=零消费行/未回填——读点走代码缺省）。
+            # len 守卫：mock/旧库形（7 列）不炸，两键缺省 None
+            **({"overlap_days": row[7], "lag_trade_days": row[8]} if len(row) > 8 else {})}
 
 
 def _fetch_supply(adapter, *, kind: str, sub_kind: str | None, symbols: tuple[str, ...],
@@ -3022,9 +3030,16 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         adapter = _get_supply_adapter(cfg)
         # 批 83b：限速/熔断/用量归属随 sync_config.provider 走（原死钉 get_data_source("tushare")）
         ds = _get_rate_ds(prov)
+        # 批 130·期二：窗口参数调用期读族层（批 107 立法——import 期禁触库；工厂注册值降为缺省兜底）。
+        # 行缺/列缺（未迁移库）→ 保持注册值；真消费行意外 NULL 也保持（0 缺省）——告警留给回归钉而非运行时噪声。
+        _kc = _read_sync_kind(sync_id) if sync_id else {}
+        _overlap = int(_kc["overlap_days"]) if _kc.get("overlap_days") is not None \
+            else _TIER1_OVERLAP_DAYS
+        _lag = int(_kc["lag_trade_days"]) if _kc.get("lag_trade_days") is not None \
+            else lag_trade_days
         # 批 92：窗口上界＝数据可用日（不再无条件用 sync() 传入的 today）——T+1 表
         # （margin_detail，lag=1）上界＝上一交易日，逐日循环不再空拉尚不可得的当日。
-        end_date = _data_ready_end_date(lag_trade_days)
+        end_date = _data_ready_end_date(_lag)
         # 修 2026-08-19：backfill_from 直接用（含当日）；增量才 +1 天（last_sync_date 的次日），
         # 批 92 再回看 _TIER1_OVERLAP_DAYS 天兜上游迟发布（upsert 幂等，不重复计数）。
         # 批 108·步 3：无游标时的下界＝三方地板（替换 `today−3d` 的**假首跑地板**）。
@@ -3037,7 +3052,7 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         else:
             _last = cfg.get("last_sync_date")
             start_ts = ((pd.Timestamp(_last)
-                         + timedelta(days=1 - _TIER1_OVERLAP_DAYS)).strftime("%Y%m%d")
+                         + timedelta(days=1 - _overlap)).strftime("%Y%m%d")
                         if _last else _floor_s)
         if start_ts > end_date:
             return {"pulled": 0, "saved": 0, "start": start_ts, "cursor_upto": end_date,
