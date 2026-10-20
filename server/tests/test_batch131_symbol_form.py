@@ -121,11 +121,6 @@ class TestPoolEndpointNormalization:
 class TestCreatePoolNormalization:
     """P1-2（审员）：create_pool 写侧归一四例——P0-1（vt_to_ts 非校验器）正因此漏网。"""
 
-    def _call(self, symbols):
-        import src.web_api.routes.backtest as BT
-        from src.web_api.models import PoolCreateReq  # noqa: F401  (若不存在则用 dict)
-        return BT
-
     def test_invalid_suffix_400(self):
         import src.web_api.routes.backtest as BT
         from src.web_api.errors import ApiError
