@@ -115,7 +115,11 @@ def trigger_pool_data_api(full: bool = False, pool_id: str | None = None,
         with get_conn() as conn:
             rows = conn.execute(
                 "SELECT symbol FROM pool_symbols WHERE pool_id=%s", (pool_id,)).fetchall()
-        symbols = [r[0] for r in rows]
+        # 批 131：pool_symbols 存 **vt 形态**（600000.SHSE），而 pool 同步契约收 **ts_code**
+        # （run_pool_sync 的日常轮走 _get_pool_ts_codes 已是 ts）——此处原样下发是本 bug 的唯一
+        # 生产入口（prod 实证：saved=0 / 「指定数据不存在」）。
+        from src.data_platform.schema import vt_to_ts
+        symbols = [vt_to_ts(r[0]) for r in rows]
         if not symbols:
             raise ApiError(400, "POOL_EMPTY", f"池 {pool_id} 无标的，无可回补")
     task = pool_data_sync_task.delay(full=full, symbols=symbols)

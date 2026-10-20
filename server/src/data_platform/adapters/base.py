@@ -164,9 +164,19 @@ class BaseDataAdapter(ABC):
         """
         return None
 
-    # —— 归一化（带默认实现，Tushare 直通，聚宽/米筐覆写，24 号 §2.1）——
+    # —— 归一化（带默认实现，聚宽/币安/OKX/tushare 按源覆写，24 号 §2.1）——
     def to_source_symbol(self, symbol: str) -> str:
-        """内部 ts_code（600000.SH）→ 源格式（聚宽 600000.XSHG）。默认直通。"""
+        """**入参＝内部 vt 形态**（`600000.SHSE`）→ 源格式（聚宽 `600000.XSHG` / tushare `600000.SH`）。
+
+        批 131 契约正名：原注释写「内部 ts_code（600000.SH）」，与事实不符——本仓内部
+        一律 vt 形态（bar 表 PK / Subscription / pool_symbols / DataBus 全 vt），源格式只在
+        供给面边界出现。**该错误注释导致 tushare 不覆写本方法 ⇒ 直通 ⇒ 池数据全败**（成因在案）。
+
+        实现要求（新增 adapter 照此）：
+        - 入参**已是源格式**时**幂等**返回（既有按 ts_code 直调的路径走这条分支）；
+        - **不认识的形态必须响亮失败**（ValueError 带原值）——猜错=拉错标的的数据，比失败更糟。
+        默认实现＝直通（内部形态与源一致的 adapter 不覆写即可，如 XTP 用 vt 自身）。
+        """
         return symbol
     def to_source_freq(self, freq: str) -> str:
         """内部 freq（'1min'）→ 源格式（聚宽 '1m'）。默认直通。"""
@@ -216,6 +226,36 @@ class TushareAdapter(BaseDataAdapter):
     """
 
     provider = "tushare"
+
+    def to_source_symbol(self, symbol: str) -> str:
+        """vt（600000.SHSE）→ tushare ts_code（600000.SH）。批 131。
+
+        **委托 `schema.to_ts_code`**（`EXCHANGE_TS_MAP` 唯一真源）——不在此新造映射表
+        （双审同判：再写一份=第四份漂移点）。后缀白名单：vt 全集 SHSE/SZSE/BSE + **SSE**
+        （本仓合法形态：fees.py:33 / risk.py:340 / tasks.py:241 实测快照即 600000.SSE）
+        + 源格式幂等集 SH/SZ/BJ。
+
+        - 空串/None ⇒ 返回空串（维持既有「无 symbol」空帧语义，调用方 bar_minute 等
+          用 `symbols[0] if symbols else ""` 兜底）；
+        - `.OF`（场外，本仓无产生者）/`.SZE`（trade_cal 交易所名非 vt 后缀）⇒ 硬拒；
+        - 裸码/未知后缀 ⇒ ValueError（不猜——猜错=拉错标的的数据）。
+        """
+        if not symbol:
+            return ""
+        s = str(symbol).strip()
+        head, _, ex = s.rpartition(".")
+        if not _:
+            raise ValueError(
+                f"tushare 源格式转换失败：{symbol!r} 无交易所后缀（合法 vt 后缀 "
+                "SHSE/SZSE/BSE/SSE 或源格式 SH/SZ/BJ，如 600000.SHSE）")
+        ex = ex.upper()
+        if ex not in {"SHSE", "SZSE", "BSE", "SSE", "SH", "SZ", "BJ"}:
+            raise ValueError(
+                f"tushare 源格式转换失败：{symbol!r} 后缀 {ex} 不在白名单 "
+                "(SHSE/SZSE/BSE/SSE/SH/SZ/BJ)")
+        from src.data_platform.schema import to_ts_code, to_vt_symbol
+        # 先归一到 vt（`.SSE`→`.SHSE` 等别名由 schema 单表负责），再 vt→ts
+        return to_ts_code(to_vt_symbol(f"{head}.{ex}"))
     # D25：⊆ 校验宇宙=本声明——0094 归置表 20 个 sync_id 全量（v1 仅 5 项致 15 项能力用户勾不了）
     # 批 99：补 4 缺项（convertible_terms/static_symbols/pool_data/pool_data_full_calibrate）——
     # 它们有 sync_config 行却在能力声明与 SYNC_ID_CAP_MAP 双双缺席（「清单有·声明无」，
@@ -426,6 +466,9 @@ class TushareAdapter(BaseDataAdapter):
         rng = getattr(req, "range_", None)
         start = rng[0].strftime("%Y%m%d") if rng and rng[0] else None
         end = rng[1].strftime("%Y%m%d") if rng and rng[1] else None
+        # 批 131：per-symbol 面**入口一次性归一**（vt→源格式）——逐个调用点接会漏第五个分支。
+        # 幂等（已源格式原样），未知形态响亮（ValueError 逐标的进 errors，不静默拉错数据）。
+        syms = tuple(self.to_source_symbol(s) for s in (getattr(req, "symbols", None) or ()))
 
         if kind == "bar_daily":
             if sub == "convertible":
@@ -445,7 +488,7 @@ class TushareAdapter(BaseDataAdapter):
                 api = "fund_daily" if sub == "listed_fund" else "daily"
                 kind_param = "E" if sub == "listed_fund" else "astock"
                 dfs = []
-                for sym in (req.symbols or ()):
+                for sym in syms:
                     with rate_limit_context(self._ds, api):
                         dfs.append(self.pull_daily(sym, start, end, adj=None, kind=kind_param))
                 df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
@@ -469,12 +512,12 @@ class TushareAdapter(BaseDataAdapter):
                 rows = self.to_bar_rows(df, freq, adj_map)
         elif kind == "index_daily":
             from src.data_platform.adapters.tushare_adapter import pull_index_daily
-            sym = req.symbols[0] if req.symbols else ""
+            sym = syms[0] if syms else ""
             df = pull_index_daily(sym, start, end)
             rows = self.to_bar_rows(df, freq)
         elif kind == "bar_minute":
             from src.data_platform.adapters.tushare_adapter import split_minute_range
-            sym = req.symbols[0] if req.symbols else ""
+            sym = syms[0] if syms else ""
             if not start or not end:
                 rows = []
             else:
@@ -499,7 +542,7 @@ class TushareAdapter(BaseDataAdapter):
                 # 拒绝而非就近拉数：错族拉取会往错表写数（防串源的形状维）
                 raise UnsupportedFeature(
                     f"tushare 池内表 {sub} 属 kind={spec['kind']}，请求 kind={kind} 不符")
-            sym = req.symbols[0] if req.symbols else ""
+            sym = syms[0] if syms else ""
             df = pull_pool_table(spec, sym, start, end, pro=self.get_client())
             rows = to_pool_rows(spec, df, sym)
             return to_contract(rows, source=self.provider, kind=kind, columns=spec["columns"])

@@ -109,7 +109,7 @@ class TestFetchDispatch:
              patch.object(ad, "pull_daily_batch", return_value=MagicMock()) as pb, \
              patch.object(ad, "to_bar_rows", return_value=[_row()]) as tbr:
             ad.fetch(self._req("bar_daily", sub="stock"))
-        pd_.assert_called_once_with("600000.SHSE", "20260901", "20260921", adj=None, kind="astock")
+        pd_.assert_called_once_with("600000.SH", "20260901", "20260921", adj=None, kind="astock")
         pb.assert_not_called()
         tbr.assert_called_once()   # adj_map 不传=缺省 None（逐行 adj_factor）——消费面不复权口径
 
@@ -120,7 +120,7 @@ class TestFetchDispatch:
         with patch.object(ad, "pull_daily", return_value=pd.DataFrame()) as pd_, \
              patch.object(ad, "to_bar_rows", return_value=[_row()]):
             ad.fetch(self._req("bar_daily", sub="listed_fund"))
-        pd_.assert_called_once_with("600000.SHSE", "20260901", "20260921", adj=None, kind="E")
+        pd_.assert_called_once_with("600000.SH", "20260901", "20260921", adj=None, kind="E")
 
     def test_bar_daily_consume_empty_is_quiet(self):
         """停牌/缺根：pull_daily 空 df → to_bar_rows 空入参不崩（空帧语义，缺根豁免=天然成立）。"""
@@ -143,7 +143,7 @@ class TestFetchDispatch:
              patch.object(ad, "to_bar_rows", return_value=[_row()]):
             ad.fetch(self._req("bar_minute", freq="1min"))
         sr.assert_called_once_with("20260901", "20260921", "1min")
-        pm.assert_called_once_with("600000.SHSE", "1min", "20260901 09:00:00", "20260901 15:00:00")
+        pm.assert_called_once_with("600000.SH", "1min", "20260901 09:00:00", "20260901 15:00:00")
 
     def test_bar_minute_preserve_false_merges(self):
         """批 58b：preserve_current_normalization=False 时启用竞价条并入首根。"""

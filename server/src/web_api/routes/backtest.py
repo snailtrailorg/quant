@@ -69,9 +69,20 @@ def create_pool(req: PoolReq, payload: dict = Depends(require_perm("strategy_con
             "description=EXCLUDED.description",
             (req.id, req.name, req.category, req.description))
         conn.execute("DELETE FROM pool_symbols WHERE pool_id=%s", (req.id,))
+        # 批 131（盲审 B-P0-1/A-P1-7）：写侧归一——原样入库会造混合形态（裸码/ts/vt 混杂，
+        # 而 stock_detail 的 in_pool 判定按 vt 比对 ⇒ ts 形态行恒判「非池」）。复用 add 的归一口径。
+        from src.data_platform.schema import to_vt_symbol, vt_to_ts
+        _norm: list[tuple[str, str]] = []
         for sym in symbols:
-            conn.execute("INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s,%s) ON CONFLICT DO NOTHING", (req.id, sym))
+            raw = (sym or "").strip()
+            if "." not in raw:
+                raise ApiError(400, "SYMBOL_INVALID", f"symbol 需带交易所后缀（如 600000.SHSE）: {raw}")
+            vt = to_vt_symbol(raw)
+            _norm.append((vt, vt_to_ts(vt)))   # vt_to_ts 兼作合法性校验（防垃圾入池后同步空转）
+        for vt, _ts in _norm:
+            conn.execute("INSERT INTO pool_symbols (pool_id, symbol) VALUES (%s,%s) ON CONFLICT DO NOTHING", (req.id, vt))
         conn.commit()
+        symbols = [vt for vt, _ts in _norm]
     audit_log(payload["username"], "create_pool", req.id)
     return {"ok": True, "id": req.id, "count": len(symbols)}
 

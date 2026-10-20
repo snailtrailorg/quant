@@ -337,3 +337,8 @@ def log_round(result: dict, mode: str = "backfill") -> None:
         return
     _log("pool_data", mode, "", "", result.get("symbols", 0), result.get("saved", 0),
          result.get("duration_ms", 0), status, "; ".join(errors[:3])[:400], [])
+    # 批 131（盲审 B-P1-4）：手动/定向回补失败**主动告警**——本 bug 潜伏至今的直接原因就是
+    # 这条路径只写 sync_log 不走告警（配置驱动路径有 status 铃铛，手动路径没有）。
+    if errors and status in ("partial", "timeout"):
+        from .engine import _alert_sync_failure
+        _alert_sync_failure("pool_data", status, errors[:5])
