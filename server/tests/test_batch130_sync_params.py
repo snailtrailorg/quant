@@ -153,3 +153,36 @@ class TestDbValueWiring:
         assert _dre.call_args[0][0] == 1, _dre.call_args
         # overlap=3（DB）⇒ 下界=last+1-3=20261016
         assert r.get("start") == "20261016", r
+
+    def test_pool_injects_db_overlap(self):
+        """pool 注入链行为钉（复审 A2-GAP：engine 有接线钉而 pool 无——丢注入无测试会红）。
+        patch _read_sync_kind 返 overlap=6 + spy _window_of：run 后断言 spy 收到 6 非 None。"""
+        from unittest.mock import patch, MagicMock
+        import pandas as pd
+        from src.data_sync import pool_data as PD
+
+        real_window = PD._window_of
+        seen: list = []
+
+        def _spy(table, cursors, upper, overlap_days=None):
+            if table in PD._INCREMENTAL_TABLES:
+                seen.append(overlap_days)
+            return real_window(table, cursors, upper, overlap_days)
+
+        fake_adapter = MagicMock()
+        fake_adapter.fetch.return_value = pd.DataFrame({"ts_code": ["000001.SZ"], "ann_date": ["20261019"], "o": [1.0]})
+
+        kc = {"kind": "financial_stmt", "sub_kind": "income", "pg_table": "income",
+              "rebuild": "incremental", "pk_cols": ["ts_code", "ann_date"],
+              "float_cols": ["o"], "text_cols": [], "overlap_days": 6, "lag_trade_days": None}
+
+        with patch.object(PD, "_get_pool_ts_codes", return_value=["000001.SZ"]), \
+             patch.object(PD, "_read_sync_kind", return_value=kc), \
+             patch.object(PD, "_get_kline_adapter", return_value=fake_adapter), \
+             patch.object(PD, "_get_rate_ds"), \
+             patch.object(PD, "_load_cursors", return_value={"income": "20261010"}), \
+             patch.object(PD, "_window_of", side_effect=_spy), \
+             patch.object(PD, "_sink_frame", return_value=1):
+            PD.run_pool_sync(cfg={"id": "pool_data", "provider": "tushare"},
+                             symbols=["000001.SZ"], timebox_s=30)
+        assert 6 in seen and None not in seen, seen   # DB 值真注入（丢注入=seen 全 None 即红）
