@@ -717,6 +717,12 @@ class PythonStrategy(Strategy):
         安全：exec 在受限 namespace 中运行，只暴露 ctx 对象和安全的 builtins 子集。
         """
         self._ctx._update(bar, history or [], self.config.params)
+        # 批 119（盲审 B 审点 6 自补）：宿主数据面四态透传 ctx——否则 Python 策略模式
+        # ctx 四态恒类默认 None（声明 bar_daily 的因子经 get_factor 路径静默不供给）
+        self._ctx._daily_history = self._daily_history
+        self._ctx._static = self._static
+        self._ctx._supply_degraded = self._supply_degraded
+        self._ctx._daily_n = self._daily_n
         # 受限 namespace：只暴露 ctx + on_bar + 安全 builtins 子集
         safe_builtins = {
             "abs": abs, "max": max, "min": min, "sum": sum,

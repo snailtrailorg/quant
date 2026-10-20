@@ -454,7 +454,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     if any(k in needs for k in ("static_list", "fundamental_daily")):
         try:
             from src.data_platform.security_master import SMClient
-            _static_attr = SMClient.get(symbol)   # SecurityAttr 12 字段 frozen（v2 复审钉）
+            _static_attr = SMClient().get(symbol)   # 实例方法（盲审 B 审点 7 自补：类直调=TypeError 落 fail-open 恒 None）；SecurityAttr 12 字段 frozen
         except Exception as e:
             logger.warning("static 供给读 SM 失败（fail-open，static=None）: %s", e)
     decision = judge_supply(symbol, needs, len(history), daily_actual=len(_daily_rows))
