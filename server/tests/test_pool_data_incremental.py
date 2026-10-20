@@ -65,6 +65,7 @@ class _FakeLock:
 class _FakeResult:
     def __init__(self, rows): self._rows = rows
     def fetchall(self): return self._rows
+    def fetchone(self): return None   # 批 95：台架补全——原缺此方法 ⇒ 日历查询恒走异常分支（审员 P2-4 实测失真）
 
 
 class _FakeCursor:
@@ -173,12 +174,15 @@ class TestWindow:
         for r in ad.reqs_of("income"):
             assert r.range_ == (exp_start, exp_end)
         assert all(r.range_ is None for r in ad.reqs_of("top10_holders"))
-        # cyq_chips 单日模式（源侧译成 trade_date=）：批 95 起日常轮**上界回落到最近交易日**
-        # （原断言 (昨日,昨日) 在非交易日场景恒 0 行且长假丢边界；月末/周末跑会随机红）。
-        # 此处只钉「两端相等」的单日语义，精确回落值由 test_batch95_single_day_window 用 mock 日历钉。
-        for r in ad.reqs_of("cyq_chips"):
-            assert r.range_ is not None and r.range_[0] == r.range_[1], \
-                f"单日表窗口必须是 (d, d)，实得 {r.range_}"
+        # cyq_chips 单日模式（源侧译成 trade_date=）：批 95 日常轮**上界回落到最近交易日**
+        # （审员 P1-2：原先只钉「两端相等」→ 拆掉接线也全绿=零判别力；此处 patch 日历返
+        # 固定交易日，**钉住返回值真的进了 _window_of**。）
+        from src.data_sync import pool_data as _PD
+        with patch.object(_PD, "_nearest_trade_day", return_value="20261015"):
+            _, ad2, _ = _run(cursors={"income": "20260801"})
+        exp_td = datetime(2026, 10, 15)
+        assert all(r.range_ == (exp_td, exp_td) for r in ad2.reqs_of("cyq_chips")), \
+            "日常轮日历回落值必须进单日表窗口（拆掉接线即红）"
 
     def test_request_shape_is_supply_contract(self):
         """请求形态：kind 由归置行给、sub_kind=表名、单标的、supply 模式。"""

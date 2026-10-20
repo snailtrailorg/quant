@@ -127,10 +127,12 @@ def _nearest_trade_day(upper_str: str) -> str:
     - 无行（日历未覆盖）：warning 后返原值——staging 首装空表时**不能**误诊成 DB 异常
       （原 `fetchone()[0]` 遇空表 TypeError 被 except 吞成「读取失败」）。
     - 异常：warning 后返原值。
-    - **陈旧守卫**：结果与 upper 跨度 > 10 自然日 ⇒ warning 并返原值——trade_cal 断更时
+    - **陈旧守卫**：结果与 upper 跨度 > **15** 自然日 ⇒ warning 并返原值——trade_cal 断更时
       会返几天前的旧日，拉旧日 + upsert 幂等 + status=done ⇒ 比 0 行更难发现（比 0 行更糟）。
+      ⚠ 阈值须 > 最大法定长假跨度：2026 春节休市 02-14..02-23 = **10 个自然日**（首日 upper=02-23
+      ⇒ nearest=02-13，span 恰 10）——原取 10 会擦线零余量，再长一天即误触、长假 0 行 bug 复现。
+      真断更场景 span 是几十天（日历停在 0901、upper=1019 ⇒ 49），15 的区分度足够。
     """
-    from datetime import date as _d
     try:
         with _pdb.get_conn() as conn:
             cur = conn.execute(
@@ -143,10 +145,10 @@ def _nearest_trade_day(upper_str: str) -> str:
             logger.warning("trade_cal 未覆盖 ≤%s，单日表窗口回落原值（本修不生效）", upper_str)
             return upper_str
         got = str(row[0])
-        span = (_d.fromisoformat(f"{upper_str[:4]}-{upper_str[4:6]}-{upper_str[6:8]}")
-                - _d.fromisoformat(f"{got[:4]}-{got[4:6]}-{got[6:8]}")).days
-        if span > 10:
-            logger.warning("trade_cal 陈旧/未覆盖：≤%s 最近交易日 %s 距 %d 天（>10）——回落原值，"
+        span = (date.fromisoformat(f"{upper_str[:4]}-{upper_str[4:6]}-{upper_str[6:8]}")
+                - date.fromisoformat(f"{got[:4]}-{got[4:6]}-{got[6:8]}")).days
+        if span > 15:
+            logger.warning("trade_cal 陈旧/未覆盖：≤%s 最近交易日 %s 距 %d 天（>15）——回落原值，"
                            "避免静默拉陈旧日（请查 trade_cal 同步）", upper_str, got, span)
             return upper_str
         return got

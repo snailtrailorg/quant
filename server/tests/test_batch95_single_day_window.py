@@ -7,8 +7,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.data_sync import pool_data as PD
 
 
@@ -47,16 +45,23 @@ class TestNearestTradeDay:
             assert PD._nearest_trade_day("20261018") == "20261018"
         assert "未覆盖" in caplog.text   # 无行须留痕（不得误诊成 DB 异常）
 
-    def test_exception_fail_open(self):
+    def test_exception_fail_open(self, caplog):
         m = MagicMock()
         m.side_effect = RuntimeError("db down")
         with patch.object(PD._pdb, "get_conn", m):
             assert PD._nearest_trade_day("20261018") == "20261018"
+        assert "读取失败" in caplog.text   # 两类 warning 对称（审员 P2-2）
 
     def test_stale_guard(self):
-        """陈旧守卫（A-P1-2）：跨度 >10 日返原值——防 trade_cal 断更静默拉陈旧日。"""
+        """陈旧守卫（A-P1-2）：跨度 >15 日返原值——防 trade_cal 断更静默拉陈旧日。"""
         with patch.object(PD._pdb, "get_conn", self._mock_conn(("20260101",))):
             assert PD._nearest_trade_day("20261018") == "20261018"
+
+    def test_long_holiday_not_guarded(self):
+        """春节边界（审员 P1-1）：2026 春节休市 02-14..02-23（10 天），首日 upper=02-23
+        ⇒ nearest=02-13，span=10 —— **必须不触发**守卫（原阈值 10 零余量=长假 bug 复现）。"""
+        with patch.object(PD._pdb, "get_conn", self._mock_conn(("20260213",))):
+            assert PD._nearest_trade_day("20260223") == "20260213"
 
 
 class TestRunIntegration:
@@ -79,8 +84,9 @@ class TestRunIntegration:
              patch.object(PD, "_get_rate_ds"), \
              patch.object(PD, "_load_cursors", return_value={}), \
              patch.object(PD, "_sink_frame", return_value=1), \
-             patch.object(PD, "_nearest_trade_day", return_value="20261016"):
+             patch.object(PD, "_nearest_trade_day", return_value="20261016") as nd:
             PD.run_pool_sync(cfg={"id": "pool_data", "provider": "tushare"},
                              full=True, symbols=["600000.SH"], timebox_s=30)
         cyq = [rng for sub, rng in seen if sub == "cyq_chips"]
         assert cyq and all(r is None for r in cyq), cyq
+        assert not nd.called, "full/回补轮不应查日历（窗口无参，短路）"
