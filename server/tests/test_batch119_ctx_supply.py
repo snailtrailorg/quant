@@ -72,6 +72,16 @@ class TestBuilder:
 
 
 class TestJudgeSupplyDaily:
+    def test_fundamental_daily_rejected(self):
+        """D1 收口（自审补）：fundamental_daily 砍映射 ⇒ 声明了必须响亮拒绝（防静默不供给复发）。"""
+        from src.strategy_runner.main import judge_supply
+        r = judge_supply("X", {"fundamental_daily": 5}, 0, daily_actual=0)
+        assert r["action"] == "reject" and r["kind"] == "fundamental_daily"
+
+    def test_static_list_still_accepted(self):
+        from src.strategy_runner.main import judge_supply
+        assert judge_supply("X", {"static_list": 1}, 0, daily_actual=0)["action"] == "ok"
+
     def test_daily_three_branches(self):
         from src.strategy_runner.main import judge_supply
 
@@ -125,25 +135,33 @@ class TestSupplyDegradedChannel:
 
 
 class TestConsistencyPin:
-    def test_onbar_dual_run_same_value(self):
-        """一致钉（on_bar 级双跑）：暖机态首根 vs 回测前缀+同 bar——因子值相等。
+    def test_onbar_dual_run_two_states(self):
+        """一致钉（on_bar 级双跑·真两态——非自证）：
+        A=**暖机态**（_warmup_daily 已按 trim_daily 裁好 N 根，builder 传 daily_n=0 不再裁）；
+        B=**回测态**（预载全段，builder 传 daily_n=N 由 trim_daily 裁）。
+        两态输入形状不同、构造路径不同、结果必须相等（单源窗规则保证）。
         适用域=纯 daily_history+当前 bar 因子（读 ctx.history 的因子窗异构排除）。"""
-        daily = [{"ts": f"2026-10-{d:02d}T00:00:00+00:00", "close": 10.0 + d}
-                 for d in range(10, 20)]
+        from datetime import datetime, timezone
+
+        full = [{"ts": f"2026-10-{d:02d}T00:00:00+00:00", "close": 10.0 + d}
+                for d in range(10, 20)]
         bar = {"close": 31.0, "high": 32.0, "low": 30.0, "open": 30.5,
                "volume": 100, "ts": "2026-10-20T10:00:00+00:00", "symbol": "X"}
 
-        def _factor_value(daily_hist):
-            ctx = build_bar_ctx(bar, [], daily_history=daily_hist, daily_n=5)
-            closes = [r["close"] for r in ctx.daily_history] + [ctx.close]
+        def _ma5(ctx):
+            closes = [r["close"] for r in (ctx.daily_history or [])] + [ctx.close]
             return sum(closes) / len(closes)
 
-        # A=暖机态（整段+builder 裁）；B=回测前缀（同全段+同 bar 裁）——单源构造=必相等
-        assert _factor_value(daily) == _factor_value(daily)
-        # 换段长窗（N=3 vs N=5）值不同——判别力存在
-        assert _factor_value(daily) != (
-            lambda: (lambda c: sum(c) / len(c))(
-                [r["close"] for r in daily[-3:]] + [31.0]))()
+        # A：暖机态——runner 侧已裁好（模拟 _warmup_daily 产物：5 根，到 10-19）
+        warm = trim_daily(full, bar["ts"], 5)
+        ctx_a = build_bar_ctx(bar, [], daily_history=warm, daily_n=0)
+        # B：回测态——全段预载，builder 内裁
+        ctx_b = build_bar_ctx(bar, [], daily_history=full, daily_n=5)
+        assert ctx_a.daily_history == ctx_b.daily_history, (ctx_a.daily_history, ctx_b.daily_history)
+        assert _ma5(ctx_a) == _ma5(ctx_b)
+        # 判别力：窗长不同必不同（证明断言非恒真）
+        ctx_c = build_bar_ctx(bar, [], daily_history=full, daily_n=3)
+        assert _ma5(ctx_c) != _ma5(ctx_b)
 
 
 class TestWebTrialReject:

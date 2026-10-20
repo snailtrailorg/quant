@@ -601,7 +601,7 @@ def run(ctx: dict) -> None:
                 n = need_n or len(dh)
                 strategy._daily_history = _warmup_daily(strategy.symbol, n) or dh
         except Exception as e:   # 滚动失败保持旧窗（降级不中断——supply_degraded 语义另走判定面）
-            pass  # noqa: S110
+            logger.warning("daily_history 日界滚动失败（保持旧窗，下步重试）: %s", e)
 
     loop.every("daily-roll", 0.0, _daily_roll)        # 批 119：日线窗日界滚动：每步
     loop.every("sess-edge", 0.0, _sess_edge)         # 时段沿清 sess_bar_wall 基线：每步

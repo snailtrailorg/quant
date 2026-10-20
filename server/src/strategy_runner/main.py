@@ -160,6 +160,14 @@ def judge_supply(symbol: str, needs: dict[str, int], history_len: int,
         return {"action": "reject",
                 "reason": f"needs 含非法/L2 占位键: {bad}（词表=DATA_KINDS；depth/stream_tick 引擎侧无供给管道）",
                 "kind": bad[0], "declared": minute_n, "actual": history_len}
+    # 批 119 D1（自审补）：fundamental_daily 本批**砍映射不供给**（时变数据进恒容器=语义错位）——
+    # 声明了必须响亮拒绝，否则=「声明了却静默不供给」（118 立法的复发面）
+    if "fundamental_daily" in needs:
+        return {"action": "reject",
+                "reason": "needs 含 fundamental_daily——批 119 暂不供给该类（时变逐日数据，进 static 会恒定化；"
+                          "改声明 bar_daily 或待专项批接入）",
+                "kind": "fundamental_daily", "declared": int(needs.get("fundamental_daily", 0)),
+                "actual": history_len}
     if minute_n <= 0 and daily_actual < 0:
         return {"action": "ok", "reason": "无 bar_minute 声明", "kind": None,
                 "declared": 0, "actual": history_len}
@@ -451,7 +459,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     if _daily_n > 0:
         _daily_rows = _warmup_daily(symbol, _daily_n)
     _static_attr = None
-    if any(k in needs for k in ("static_list", "fundamental_daily")):
+    if "static_list" in needs:   # 批 119 D1：只收无时序静态行——fundamental_daily（时变，daily_basic 逐日）**不进 static**
         try:
             from src.data_platform.security_master import SMClient
             _static_attr = SMClient().get(symbol)   # 实例方法（盲审 B 审点 7 自补：类直调=TypeError 落 fail-open 恒 None）；SecurityAttr 12 字段 frozen

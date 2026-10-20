@@ -13,7 +13,7 @@ from enum import Enum
 from src.data_platform.jsonb import jsonb
 
 from .broker import record_broker_usage
-from .factor import BarContext, DSLFactor, Factor, _check_ast_blacklist, build_bar_ctx, get_factor, trim_daily
+from .factor import BarContext, DSLFactor, Factor, _check_ast_blacklist, build_bar_ctx, get_factor
 
 logger = logging.getLogger("strategy")
 
