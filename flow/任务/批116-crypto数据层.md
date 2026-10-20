@@ -79,3 +79,10 @@ crypto 数据层的**剩余缺口**收口：① okx_perp_daily 10-08/10-09 晨�
 ## mock 方式
 
 同 101b/102b（adapter mock 返回可辨识假数据；不连真 OKX——dev 出不了网，真机留 prod 实测）。补：bar 词参数断言（mock 捕获请求 params[bar] 比对映射表）。
+
+## 步 8 观察判据（2026-10-20 午休窗上产 202610201210-cc2a49a 后）
+
+- 明晨晨档自动核（10-21 08:40）：okx_perp_daily 游标 20261019→20261020、异步派发生效（journal 调度轮秒回+worker 侧 sync_via_celery 行）
+- 三档量级对照（已验 15min ✅ 47424 行/游标 20261019）：hourly ~97s 与 1min ~12min 待手动串行触发对照
+- 130 合并观察（同版上产）：tier1 九键午后轮窗口正常；pool 增量轮 overlap=7 注入正常
+- 收官=观察窗 7 天零相关 error（10-27）
