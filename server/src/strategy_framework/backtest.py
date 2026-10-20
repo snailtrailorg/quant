@@ -173,7 +173,8 @@ class BacktestEngine:
             # ⇒ daily_history 天然=驱动序列自身（builder 按 bar_ts 日界沿裁「严格昨日往前 N 根」），
             # 无需另拉。原「未传即 raise」使声明 bar_daily 的策略回测恒 error（死路）。
             _bf = (bars[0].get("freq") if bars else None)
-            if _bf in ("1D", "1d"):
+            # 大小写不敏感（db.py:195：写路径历史用 "1D"、读路径混用 "1d"）
+            if str(_bf).lower() in ("1d", "1dutc", "day"):
                 daily_bars = bars
                 logger.info("needs bar_daily=%d：回测日线驱动 ⇒ daily_history 取驱动序列自身", _dn)
             else:

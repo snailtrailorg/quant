@@ -267,14 +267,19 @@ def run(ctx: dict) -> None:
         # （瞬态——流回放窗有限是常态，不升级为拒启）。仅告警+记档，不冻结不退出；
         # 首启判定已在 runner 装载侧（judge_supply），此处收运行期收缩面。
         _declared = int(_needs.get("bar_minute", 0))
+        _daily_declared = int(_needs.get("bar_daily", 0))
         _strat = ctx.get("strategy")
         _shrunk = bool(_declared and len(fresh) < _declared)
+        # 批 119（复审 P1-3 补）：日线轴同判——原只看 bar_minute ⇒ 初始 _rewarm() 启动即跑会把
+        # 启动时判定的 degraded 覆盖成 False（日线窗仍空）⇒ 因子异常重新以 0.0 进聚合（「降级=下单」雷换日线面复发）
+        _daily_short = bool(_daily_declared and len(getattr(_strat, "_daily_history", None) or []) < _daily_declared)
         if _shrunk:
             logger.warning("rewarm 后窗口 %d < 声明窗 %d（%s）——degraded：因子窗口不足，"
                            "值可能不准；数据面恢复后自动补齐", len(fresh), _declared, symbol)
             try:
                 from src.strategy_runner.main import judge_supply
-                d = judge_supply(symbol, _needs, len(fresh))
+                d = judge_supply(symbol, _needs, len(fresh),
+                                 daily_actual=len(getattr(_strat, "_daily_history", None) or []))
                 _alert(f"任务 {tid} rewarm 窗口不足（{symbol}）",
                        f"{d['reason']}（实得 {d['actual']}/{d['declared']}）", code="warmup.degraded")
                 _st = getattr(_strat, "warmup_result", None)
@@ -286,7 +291,7 @@ def run(ctx: dict) -> None:
         # 运行期收缩后降级通道仍 False ⇒ compute_factors 照旧吞异常成 0.0 进聚合（「降级=下单」雷）。
         # 双向同步：收缩=True；窗口恢复=False（数据面自愈后可翻回正常通道）。
         if _strat is not None:
-            _strat._supply_degraded = bool(_shrunk)
+            _strat._supply_degraded = bool(_shrunk or _daily_short)
         history[:] = fresh
         # 批 66c 解冻闭环（D26 §3.4②）：rewarm 后显式推进 max_ts 至回放尾——否则回放不推水位，
         # 冻结重启后首根 live bar 仍满足缺口条件再冻结（盘中永远解不了）。跳洞=显式接受。

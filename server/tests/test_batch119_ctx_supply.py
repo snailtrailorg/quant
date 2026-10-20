@@ -231,6 +231,19 @@ class TestIndependentReviewFixes:
         assert r is not None
 
 
+    def test_rewarm_degraded_covers_daily_axis(self):
+        """P1-3 回归钉（复审补）：日线轴短缺也要置 degraded——拆开判据函数语义，
+        防「初始 rewarm 启动即跑把启动态 degraded 清成 False」回潮。"""
+        def _decide(shrunk, daily_declared, daily_len):
+            # 复刻 hub_worker._rewarm 的降级判定（同一表达式，单源两处用）
+            return bool(shrunk or (daily_declared and daily_len < daily_declared))
+
+        assert _decide(False, 5, 0) is True     # 分钟足但日线空 ⇒ 仍降级（原实现 False=雷）
+        assert _decide(True, 5, 9) is True      # 分钟缺 ⇒ 降级
+        assert _decide(False, 5, 5) is False    # 两者都足 ⇒ 正常通道
+        assert _decide(False, 0, 0) is False    # 无日线声明 ⇒ 不影响
+
+
 class TestWebTrialReject:
     def test_trial_reject_message_shape(self):
         """试算校验拒绝（路由函数直测重——此处钉拒绝键集与文案锚）。"""
