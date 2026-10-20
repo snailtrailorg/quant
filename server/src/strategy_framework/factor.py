@@ -461,10 +461,22 @@ class BarContext:
 
     symbol：当前标的（double_low 等跨表因子需要；P2-2026-08-20 接通——原 getattr 永空，
     "双低"实为"最低价"占位）。默认空串向后兼容。
+
+    批 119 数据面三属性（后置 kwarg 零破坏既有构造点）：
+    - daily_history：**跨日日线窗**（list[dict]，日界沿裁剪——只含 bar_ts 严格昨日往前）。
+      ⚠ 禁跨频次：history=驱动频次窗（实盘 30 天滚动 1min/回测=驱动窗），跨日一律
+      daily_history——因子作者拿错窗=拿错数据形态。
+    - static：标的静态属性（SecurityAttr frozen，真源=SMClient.get 单点；只收无时序行
+      ——fundamental_daily 类时变数据不进此容器，批 119 砍映射另裁）。
+    - supply_degraded：≡warmup_result.action=="degraded" 快照（随 rewarm 更新；改名消歧
+      118 撞词）。消费立法：True 时因子**照算**+策略层可选 gating，**禁 raise**（compute_factors
+      异常会被吞成 0.0 进聚合——"降级=下单"雷；单独通道记 None 跳过聚合）。
     """
     def __init__(self, close: float, high: float, low: float,
                  open_: float, volume: float, history: list[dict] | None = None,
-                 symbol: str = "", bar_ts=None):
+                 symbol: str = "", bar_ts=None, *,
+                 daily_history: list[dict] | None = None,
+                 static=None, supply_degraded: bool = False):
         self.close = close
         self.high = high
         self.low = low
@@ -473,6 +485,9 @@ class BarContext:
         self.symbol = symbol
         self.bar_ts = bar_ts   # P2：时点约束（double_low 防前视）
         self._history = history or []
+        self.daily_history = daily_history
+        self.static = static
+        self.supply_degraded = supply_degraded
 
     def sma(self, n: int) -> float:
         """简单移动平均。P4-1 缓存：同 bar 多次调 sma(n) 只算一次。"""
@@ -493,6 +508,65 @@ class BarContext:
     @property
     def history(self) -> list[dict]:
         return self._history
+
+
+def _daily_ts_key(row: dict):
+    """日线行 ts 归一（三态：date/datetime/ISO 串 → 'YYYY-MM-DD' 串；hub_worker._epoch_key 先例）。
+    无 ts 行返回 None（trim 会剔除——日线行缺 ts=数据面脏行，不静默保留）。"""
+    ts = row.get("ts") if isinstance(row, dict) else None
+    if ts is None:
+        return None
+    if isinstance(ts, str):
+        return ts[:10]
+    try:
+        return ts.strftime("%Y-%m-%d")
+    except AttributeError:
+        return str(ts)[:10]
+
+
+def trim_daily(rows: list[dict] | None, bar_ts, n: int) -> list[dict]:
+    """跨日窗裁剪单源（批 119：回测/实盘/预览三侧共用——一致性由单源保证，不由测试保证）。
+
+    规则（v2 复审钉死）：**日界沿**——只保留 ts.date() **严格早于** bar_ts.date() 的行
+    （当日日线行剔除：盘中 bar_ts=10:30 时当日 00:00 行若放行=当日全天 OHLC 前视；
+    D16 日界沿先例）；ts 三态归一（date/datetime/ISO 串）；返回末 n 根完整日（升序）。
+    """
+    if not rows or bar_ts is None or n <= 0:
+        return []
+    try:
+        bar_day = bar_ts[:10] if isinstance(bar_ts, str) else bar_ts.strftime("%Y-%m-%d")
+    except AttributeError:
+        bar_day = str(bar_ts)[:10]
+    kept = [r for r in rows if (k := _daily_ts_key(r)) is not None and k < bar_day]
+    kept.sort(key=_daily_ts_key)
+    return kept[-n:]
+
+
+def build_bar_ctx(bar, history: list[dict] | None, *,
+                  daily_history: list[dict] | None = None,
+                  daily_n: int = 0,
+                  static=None, supply_degraded: bool = False) -> BarContext:
+    """ctx 构造单源（批 119 D2：五构造点全改调此函数——窗规则/属性填充唯一真源）。
+
+    daily_history：**整段供给**（回测=预载全段；实盘=滚动窗）——本函数按当前 bar_ts
+    经 trim_daily **日界沿切片**（回测逐 bar 滚动由此实现：同一段全量数据，每 bar 裁
+    出「严格昨日往前 N 根」；实盘侧由 hub_worker 日界钩子增量补整段，此处同口径裁）。
+    daily_n=0 表示不裁（透传——非声明路径兼容）。
+    """
+    d = bar if isinstance(bar, dict) else {
+        "close": getattr(bar, "close", None), "high": getattr(bar, "high", None),
+        "low": getattr(bar, "low", None), "open": getattr(bar, "open", None),
+        "volume": getattr(bar, "volume", 0), "ts": getattr(bar, "ts", None),
+    }
+    dh = daily_history
+    if dh and daily_n > 0:
+        dh = trim_daily(dh, d.get("ts"), daily_n)
+    return BarContext(
+        close=float(d.get("close") or 0.0), high=float(d.get("high") or 0.0),
+        low=float(d.get("low") or 0.0), open_=float(d.get("open") or 0.0),
+        volume=float(d.get("volume") or 0.0), history=history,
+        symbol=str(d.get("symbol") or ""), bar_ts=d.get("ts"),
+        daily_history=dh, static=static, supply_degraded=supply_degraded)
 
 
 class Factor:

@@ -578,6 +578,32 @@ def run(ctx: dict) -> None:
                                        "worker 退出由 systemd 接管；请查 journalctl 定位首个异常。",
                                        code="runtime.fatal"))
     loop.every("stop-check", 5.0, _stop_hook)        # 停止（P4-3；清理+exit 0 在钩子内）
+
+    def _daily_roll():
+        """批 119：daily_history 日界滚动（v2 复审 D3 钉死）——**每步求值，不依赖 session
+        沿翻转**（crypto in_session 骨架 24x7 恒 True 永无翻转，而加密恰是预期消费者）；
+        条件=当前 bar 日 > 窗尾日 ⇒ 增量补拉。**rewarm 不触碰 daily 容器**（分钟窗收缩面
+        与日线滚动互不干涉——两个钩子专职分离）。"""
+        try:
+            dh = getattr(strategy, "_daily_history", None)
+            if not dh:
+                return
+            from src.strategy_framework.factor import _daily_ts_key
+            from src.strategy_runner.main import _warmup_daily
+            need_n = int(getattr(strategy, "_daily_n", 0) or 0)
+            bar_day = None
+            lb = strategy._last_bar if hasattr(strategy, "_last_bar") else None
+            if lb and lb.get("ts"):
+                ts = lb["ts"]
+                bar_day = ts[:10] if isinstance(ts, str) else ts.strftime("%Y-%m-%d")
+            tail = _daily_ts_key(dh[-1]) if dh else None
+            if bar_day and tail and tail < bar_day:
+                n = need_n or len(dh)
+                strategy._daily_history = _warmup_daily(strategy.symbol, n) or dh
+        except Exception as e:   # 滚动失败保持旧窗（降级不中断——supply_degraded 语义另走判定面）
+            pass  # noqa: S110
+
+    loop.every("daily-roll", 0.0, _daily_roll)        # 批 119：日线窗日界滚动：每步
     loop.every("sess-edge", 0.0, _sess_edge)         # 时段沿清 sess_bar_wall 基线：每步
     loop.every("blind-watch", 0.0, _blind_watch)     # 盲视判定+告警（喂 frozen 字段）：每步
     loop.every("heartbeat", 5.0, _heartbeat)         # 心跳（D3 七字段+ts）

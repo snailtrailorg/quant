@@ -13,7 +13,7 @@ from enum import Enum
 from src.data_platform.jsonb import jsonb
 
 from .broker import record_broker_usage
-from .factor import BarContext, DSLFactor, Factor, _check_ast_blacklist, get_factor
+from .factor import BarContext, DSLFactor, Factor, _check_ast_blacklist, build_bar_ctx, get_factor, trim_daily
 
 logger = logging.getLogger("strategy")
 
@@ -180,6 +180,14 @@ def validate_params_against_defs(params, defs):
 class Strategy:
     """统一策略基类。所有策略（A股分析/可转债场内基金/加密合约）继承此基类。"""
 
+    # 批 119 数据面实例态（runner/worker 注入；基类只读不拉——分层：strategy 层不触数据层）。
+    # **类属性声明**（非 __init__）——PythonStrategy 等子类有独立 __init__ 不经基类链，
+    # 类属性默认值保证任何子类实例未注入时读到的都是安全缺省（None/False=不供给）。
+    _daily_history: list[dict] | None = None
+    _static = None
+    _supply_degraded = False
+    _daily_n: int = 0
+
     def __init__(self, config: StrategyConfig, adapter):
         self.id = config.id
         self.symbol = config.symbol
@@ -239,16 +247,14 @@ class Strategy:
     def on_bar(self, bar: dict, history: list[dict] | None = None) -> Signal | None:
         """收到 K 线 → 因子计算 → 信号 → 下单。"""
         self._last_bar = dict(bar)   # 批 66c：驱动 bar 记忆（_log_signal_order 落 bar_fingerprint 归因）
-        ctx = BarContext(
-            close=bar.get("close", 0),
-            high=bar.get("high", 0),
-            low=bar.get("low", 0),
-            open_=bar.get("open", 0),
-            volume=bar.get("volume", 0),
-            history=history or [],
-            symbol=self.symbol,          # P2-2026-08-20：double_low 等跨表因子接通
-            bar_ts=bar.get("ts"),        # P2：时点约束（防回测前视）
-        )
+        # 批 119：ctx 经单源 builder（窗规则/数据面属性唯一真源）；数据面供给挂实例态
+        # （runner/worker 注入 _daily_history/_static/_supply_degraded——基类不触数据层）
+        ctx = build_bar_ctx(
+            bar, history or [],
+            daily_history=self._daily_history,
+            daily_n=getattr(self, "_daily_n", 0) or 0,
+            static=self._static,
+            supply_degraded=self._supply_degraded)
         fv = self.compute_factors(ctx)
         sig = self._aggregator.aggregate(fv)
         sig.symbol = self.symbol
@@ -381,12 +387,23 @@ class Strategy:
     # ——— 因子计算 ———
 
     def compute_factors(self, ctx: BarContext) -> dict[str, float]:
-        """计算所有因子值。"""
+        """计算所有因子值。
+
+        批 119 消费立法：supply_degraded 时因子**照算**，异常走**单独通道**
+        （记 None + 跳过聚合）——不走下面的吞→0.0 通道（降级反而生成 0.0 值过阈值
+        下单的雷，盲审 A-P0-A）；非 degraded 路径保留吞 0.0（既有语义）。
+        """
         result = {}
         for f in self._factors:
             try:
-                result[f.name] = f.compute(ctx)
+                v = f.compute(ctx)
+                if ctx.supply_degraded and v is None:
+                    continue          # 降级通道：None=跳过聚合（不进 0.0）
+                result[f.name] = v
             except Exception as e:
+                if ctx.supply_degraded:
+                    logger.warning("因子 %s 降级计算失败（跳过聚合，不填 0）: %s", f.name, e)
+                    continue          # 降级通道：异常也跳过
                 logger.warning("因子 %s 计算失败: %s", f.name, e)
                 result[f.name] = 0.0
         return result
@@ -587,23 +604,24 @@ class StrategyContext:
         self._params: dict = {}
         self._state: dict = {}
         self._signal: Signal | None = None
+        # 批 119：数据面四态（宿主 Strategy 注入经 _update 透传——PythonStrategy 持策略态）
+        self._daily_history: list[dict] | None = None
+        self._static = None
+        self._supply_degraded = False
+        self._daily_n: int = 0
 
     def _update(self, bar: dict, history: list[dict] | None, params: dict):
         self._bar = bar
         self._history = history or []
         self._params = params
         self._signal = None
-        # 构建 BarContext 供 get_factor 调用
-        self._bar_ctx = BarContext(
-            close=bar.get("close", 0),
-            high=bar.get("high", 0),
-            low=bar.get("low", 0),
-            open_=bar.get("open", 0),
-            volume=bar.get("volume", 0),
-            history=history or [],
-            symbol=self.symbol,          # P2：同基类 on_bar（get_factor 路径）
-            bar_ts=bar.get("ts"),
-        )
+        # 构建 BarContext 供 get_factor 调用（批 119：同经单源 builder）
+        self._bar_ctx = build_bar_ctx(
+            bar, history or [],
+            daily_history=self._daily_history,
+            daily_n=getattr(self, "_daily_n", 0) or 0,
+            static=self._static,
+            supply_degraded=self._supply_degraded)
 
     # ——— 只读数据 ———
 

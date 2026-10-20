@@ -147,18 +147,36 @@ class BacktestEngine:
     def run(self, config: StrategyConfig, bars: list[dict],
             shares_per_trade: int = 100,
             on_bar_callback: Callable | None = None,
-            benchmark_bars: list | None = None) -> BacktestResult:
+            benchmark_bars: list | None = None,
+            daily_bars: list[dict] | None = None) -> BacktestResult:
         """运行回测。
 
         Args:
             config: 策略配置
             bars: K 线列表 [{ts, open, high, low, close, volume, ...}, ...]
             shares_per_trade: 每笔交易股数
+            daily_bars: 批 119——needs 声明 bar_daily 时传入日线段（预载全段，逐 bar
+                由 builder/trim_daily 日界沿切片滚动；**未传且 needs 有声明=响亮 error**
+                防「声明了却静默不供给」；无声明传了=忽略+warning）。
         """
         adapter = BacktestAdapter()
         adapter.set_commission(self.commission_rate)
         adapter.set_slippage(self.slippage)   # P0-6：slippage 接线（曾死参）
         strategy = Strategy.from_config(config, adapter)
+
+        # 批 119：daily_bars 供给契约（声明↔传参一致——双向响亮）
+        from .factor import aggregate_needs
+        _needs = aggregate_needs(strategy)
+        _dn = int(_needs.get("bar_daily", 0))
+        if _dn > 0 and not daily_bars:
+            raise ValueError(
+                f"needs 声明 bar_daily={_dn} 但 run() 未传 daily_bars——回测喂数缺口，"
+                "拒绝静默空窗跑（批 119 D2 校验拒绝）")
+        if daily_bars and _dn <= 0:
+            logger.warning("run() 传了 daily_bars 但 needs 无 bar_daily 声明——忽略")
+        # 预载挂实例：逐 bar 由基类 on_bar→builder→trim_daily 日界沿切片滚动
+        strategy._daily_history = list(daily_bars) if daily_bars else None
+        strategy._daily_n = _dn
 
         # 回测数据完整性预检
         pc = precheck_backtest_data(config, bars)

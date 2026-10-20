@@ -19,13 +19,14 @@ class CryptoCTATrendStrategy(Strategy):
 
     def on_bar(self, bar: dict, history: list[dict] | None = None) -> Signal | None:
         """双均线交叉：快线（SMA10）上穿慢线（SMA30）BUY / 下穿 SELL。"""
-        from src.strategy_framework import BarContext
+        from src.strategy_framework import build_bar_ctx
         history = history or []
-        ctx = BarContext(
-            close=bar.get("close", 0), high=bar.get("high", 0),
-            low=bar.get("low", 0), open_=bar.get("open", 0),
-            volume=bar.get("volume", 0),
-        )
+        ctx = build_bar_ctx(
+            bar, history,
+            daily_history=self._daily_history,
+            daily_n=getattr(self, "_daily_n", 0) or 0,
+            static=self._static,
+            supply_degraded=self._supply_degraded)
 
         fast_n = self.config.params.get("fast_n", 10)
         slow_n = self.config.params.get("slow_n", 30)

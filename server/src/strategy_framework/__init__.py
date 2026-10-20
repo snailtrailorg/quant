@@ -11,6 +11,7 @@ from importlib import import_module
 _REEXPORTS: dict[str, str] = {
     # factor（轻量：ast/operator）
     "Factor": ".factor", "BarContext": ".factor", "DSLFactor": ".factor",
+    "build_bar_ctx": ".factor", "trim_daily": ".factor",
     "register_factor": ".factor", "list_factors": ".factor", "get_factor": ".factor",
     "_check_ast_blacklist": ".factor", "load_factors_from_db": ".factor",
     "_make_factor_class": ".factor", "register_custom_factor": ".factor",
@@ -42,6 +43,7 @@ def __dir__():
 
 __all__ = [
     "Factor", "BarContext", "DSLFactor", "register_factor", "list_factors", "get_factor",
+    "build_bar_ctx", "trim_daily",
     "Strategy", "StrategyConfig", "Signal", "Action", "SignalAggregator",
     "PythonStrategy", "StrategyContext", "_check_ast_blacklist",
     "ExecutionAdapter", "XTPAdapter", "CryptoPerpAdapter",

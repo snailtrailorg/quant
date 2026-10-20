@@ -300,6 +300,15 @@ def preview_factor_api(body: dict = Body(...),
         return {"error": f"无数据: {symbol} {freq}"}
     if max_n and len(frame.rows) < n:
         return {"error": f"数据不足以拉满窗口 {n}（现 {len(frame.rows)} 根 {freq}）——窗口改小或用回测链"}
+    # 批 119 D2 校验拒绝：跨窗/静态声明的因子不支持试算（试算仅驱动频次窗——
+    # daily_history/static 恒缺省，静默 None 值=错值红线 wd-13 先例；走回测链验证）。
+    # needs 真源=因子注册表 entry（aggregate_needs 同通道，Factor 实例不持 needs）
+    from src.strategy_framework.factor import get_factor as _gf
+    _entry = _gf(factor.name) if getattr(factor, "name", "") else None
+    _fn = (_entry or {}).get("needs") or {}
+    if any(k in _fn for k in ("bar_daily", "static_list", "fundamental_daily")):
+        return {"error": "该因子声明了跨日/静态数据面（needs 含 bar_daily/static 族）——"
+                "试算不支持（仅驱动频次窗）；请用回测链验证（run 传 daily_bars）"}
     bars = [dict(zip(BAR_COLUMNS, r)) for r in frame.rows[-n:]]
     values, errors = [], 0
     for i, bar in enumerate(bars):

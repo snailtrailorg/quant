@@ -20,12 +20,13 @@ class ConvertibleDoubleLowStrategy(Strategy):
 
     def on_bar(self, bar: dict, history: list[dict] | None = None) -> Signal | None:
         """双低策略 on_bar：用 double_low 因子（或简化价格）打分。"""
-        from src.strategy_framework import BarContext
-        ctx = BarContext(
-            close=bar.get("close", 0), high=bar.get("high", 0),
-            low=bar.get("low", 0), open_=bar.get("open", 0),
-            volume=bar.get("volume", 0),
-        )
+        from src.strategy_framework import build_bar_ctx
+        ctx = build_bar_ctx(
+            bar, history or [],
+            daily_history=self._daily_history,
+            daily_n=getattr(self, "_daily_n", 0) or 0,
+            static=self._static,
+            supply_degraded=self._supply_degraded)
         factor_values = self.compute_factors(ctx)
 
         # double_low 因子返回负价格（低价格好）。信号聚合后 BUY。

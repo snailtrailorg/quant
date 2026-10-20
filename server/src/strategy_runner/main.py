@@ -77,9 +77,42 @@ def _wait_for_deps(max_wait: float = 600.0) -> bool:
         time.sleep(d)
 
 
+def _warmup_daily(symbol: str, n: int) -> list[dict]:
+    """批 119：日线窗暖机补拉（DataBus 层；读窗=声明 N 日×2 余量，经 trim_daily 裁到位）。
+
+    沿 _warmup_history 先例（模块级可导入——DataBus mock 单测拉不起 main 流程也能测）；
+    失败 fail-open 返 []（判定层按 daily_actual=0 走三分支，不在此炸）。
+    """
+    from datetime import datetime as _dt
+    from datetime import timedelta
+
+    from src.data_platform.databus import DataBus
+    from src.quant_common.contract import DataRequest
+    from src.strategy_framework.factor import trim_daily
+    from src.strategy_runner.hub_worker import _crypto_provider
+    try:
+        source = _crypto_provider(symbol)
+        req = DataRequest(kind="bar_daily", symbols=(symbol,), temporality="historical",
+                          freq="1D", range_=(_dt.now() - timedelta(days=n * 2 + 15), _dt.now()),
+                          source=source)
+        frame, _wm = DataBus().get_bars(req)
+        rows = [{"ts": r[2], "open": float(r[3]), "high": float(r[4]), "low": float(r[5]),
+                 "close": float(r[6]), "volume": float(r[7]), "amount": float(r[8] or 0)}
+                for r in frame.rows]
+        return trim_daily(rows, _dt.now(), n)
+    except Exception as e:
+        logger.warning("%s 日线暖机补拉失败（fail-open 空窗，判定层降级）: %s", symbol, e)
+        return []
+
+
 def judge_supply(symbol: str, needs: dict[str, int], history_len: int,
-                 list_date_fn=None, trading_days_between=None) -> dict:
+                 list_date_fn=None, trading_days_between=None,
+                 daily_actual: int = -1) -> dict:
     """批 118 判定语义（钉死于任务文件产出 4——**纯函数**，main/hub_worker 双消费）。
+
+    批 119 扩界（118 域授权扩界，任务文件声明）：daily_actual ≥0 时对 needs 的
+    bar_daily:N 做同构三分支（系数=1 根/日 vs 分钟 240——A-P1-2）；-1=未供给
+    （调用侧没拉日线=不判，兼容旧调用面）。
 
     入参：
       symbol          标的（branch② 读 list_date 用）
@@ -127,6 +160,39 @@ def judge_supply(symbol: str, needs: dict[str, int], history_len: int,
         return {"action": "reject",
                 "reason": f"needs 含非法/L2 占位键: {bad}（词表=DATA_KINDS；depth/stream_tick 引擎侧无供给管道）",
                 "kind": bad[0], "declared": minute_n, "actual": history_len}
+    if minute_n <= 0 and daily_actual < 0:
+        return {"action": "ok", "reason": "无 bar_minute 声明", "kind": None,
+                "declared": 0, "actual": history_len}
+    # 批 119 扩界：bar_daily 三分支（系数 1 根/日；结构复刻 minute 链——kind/declared/actual 口径同）
+    daily_n = int(needs.get("bar_daily", 0))
+    if daily_n > 0 and daily_actual >= 0:
+        if daily_actual >= daily_n:
+            pass   # daily 充足——继续 minute 判定（两 kind 独立判，minute 不足仍会降级）
+        else:
+            try:
+                ld2 = list_date_fn(symbol)
+            except Exception:
+                ld2 = None
+            if ld2 is None:
+                return {"action": "degraded",
+                        "reason": f"{symbol} bar_daily 实得 {daily_actual} < 声明 {daily_n}（list_date 无档归瞬态）",
+                        "kind": "bar_daily", "declared": daily_n, "actual": daily_actual}
+            from datetime import date as _d2
+            from datetime import datetime as _dt2
+            try:
+                d0d = _d2.fromisoformat(str(ld2)[:10])
+            except ValueError:
+                return {"action": "degraded",
+                        "reason": f"{symbol} bar_daily 不足且 list_date 脏值 {ld2!r}",
+                        "kind": "bar_daily", "declared": daily_n, "actual": daily_actual}
+            listed_d = trading_days_between(d0d, _dt2.now().date())   # 系数换算：daily=1 根/日
+            if listed_d < daily_n:
+                return {"action": "reject",
+                        "reason": f"{symbol} 上市 {listed_d} 日 < bar_daily 声明 {daily_n} 日（真不可满足）",
+                        "kind": "bar_daily", "declared": daily_n, "actual": daily_actual}
+            return {"action": "degraded",
+                    "reason": f"{symbol} 标的够老但日线缺（实得 {daily_actual} < {daily_n}）——瞬态，同步层追",
+                    "kind": "bar_daily", "declared": daily_n, "actual": daily_actual}
     if minute_n <= 0:
         return {"action": "ok", "reason": "无 bar_minute 声明", "kind": None,
                 "declared": 0, "actual": history_len}
@@ -378,10 +444,28 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     logger.info("策略 %s 数据声明 needs=%s（bar_minute=%d）→ 暖机窗 %d", sid, needs, _minute_n, warmup_n)
 
     history = _warmup_history(symbol, n=warmup_n)
-    decision = judge_supply(symbol, needs, len(history))
+    # 批 119：needs 含 bar_daily ⇒ 暖机补拉日线窗（DataBus 层——A03 路由不可绕；
+    # crypto 按 source 过滤对齐 _warmup_history 的 D3 先例）；static 挂 SMClient 单点。
+    _daily_n = int(needs.get("bar_daily", 0))
+    _daily_rows: list[dict] = []
+    if _daily_n > 0:
+        _daily_rows = _warmup_daily(symbol, _daily_n)
+    _static_attr = None
+    if any(k in needs for k in ("static_list", "fundamental_daily")):
+        try:
+            from src.data_platform.security_master import SMClient
+            _static_attr = SMClient.get(symbol)   # SecurityAttr 12 字段 frozen（v2 复审钉）
+        except Exception as e:
+            logger.warning("static 供给读 SM 失败（fail-open，static=None）: %s", e)
+    decision = judge_supply(symbol, needs, len(history), daily_actual=len(_daily_rows))
     # degraded/reject 信息挂 strategy 实例属性（批 119 BarContext 扩展的读点；
     # 本批消费面=runner 启动日志+告警）
     strategy.warmup_result = decision
+    # 批 119：数据面三态注入实例（ctx 构造经 build_bar_ctx 读——基类不触数据层）
+    strategy._daily_history = _daily_rows or None
+    strategy._static = _static_attr
+    strategy._supply_degraded = decision["action"] == "degraded"
+    strategy._daily_n = _daily_n   # 批 119：日界滚动钩子读（hub_worker._daily_roll）
     if decision["action"] == "reject":
         logger.error("暖机判定拒启（%s 实得 %s/%s 根）: %s",
                      symbol, decision["actual"], decision["declared"], decision["reason"])
