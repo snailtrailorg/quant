@@ -3006,9 +3006,17 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         **每轮 handler 调用读一次**（非首调缓存）——配置变更（加列/改列）下轮生效无须重启；
         反证也据此钉：DB 行改错 ⇒ 下一轮 sync 即红。
         """
+    def _resolve_cols(_kc_row: dict | None = None):
+        """批 115·步 2：列形状单源读侧——`cols_from_sync_kind=True` 时读 `sync_kind_config` 行。
+
+        **每轮 handler 调用读一次**（非首调缓存）——配置变更（加列/改列）下轮生效无须重启；
+        反证也据此钉：DB 行改错 ⇒ 下一轮 sync 即红。
+        批 130（盲审 B-P2-a）：`_kc_row` 由 handler 体内已读的同一行传入——同一 sync_id
+        每轮一次 SELECT（原先双发）；None=兼容旧直调路径（自读）。
+        """
         if not cols_from_sync_kind:
             return list(float_cols or []), list(text_cols or [])
-        row = _read_sync_kind(sync_id or "")
+        row = _kc_row if _kc_row is not None else _read_sync_kind(sync_id or "")
         if not row:
             # 归置行缺失=配置债——静默退空列会把全表写成仅主键行（丢数据面），必须响亮
             raise RuntimeError(
@@ -3022,17 +3030,18 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         """通用第一档同步：按 trade_date 拉全市场 → upsert。"""
         from src.data_platform.db import get_conn as _gc
         from src.data_platform.rate_limit import rate_limit_context
+        # 批 130·期二：窗口参数调用期读族层（批 107 立法——import 期禁触库；工厂注册值降为缺省兜底）。
+        # 行缺/列缺（未迁移库）→ 保持注册值；真消费行意外 NULL 也保持（0 缺省）——告警留给回归钉而非运行时噪声。
+        # 盲审 B-P2-a：同一行喂 _resolve_cols（每轮一次 SELECT，原先双发）。
+        _kc = _read_sync_kind(sync_id) if sync_id else {}
         # 批 115·步 2：列形状每轮解析（注册路径=sync_kind_config 单源；SQL/值归一在解析后构造）
-        float_cols, text_cols = _resolve_cols()
+        float_cols, text_cols = _resolve_cols(_kc or None)
         all_cols = float_cols + text_cols
         updates = ", ".join(f"{c}=EXCLUDED.{c}" for c in all_cols if c not in pk_cols)
         prov = _provider_of(cfg)
         adapter = _get_supply_adapter(cfg)
         # 批 83b：限速/熔断/用量归属随 sync_config.provider 走（原死钉 get_data_source("tushare")）
         ds = _get_rate_ds(prov)
-        # 批 130·期二：窗口参数调用期读族层（批 107 立法——import 期禁触库；工厂注册值降为缺省兜底）。
-        # 行缺/列缺（未迁移库）→ 保持注册值；真消费行意外 NULL 也保持（0 缺省）——告警留给回归钉而非运行时噪声。
-        _kc = _read_sync_kind(sync_id) if sync_id else {}
         _overlap = int(_kc["overlap_days"]) if _kc.get("overlap_days") is not None \
             else _TIER1_OVERLAP_DAYS
         _lag = int(_kc["lag_trade_days"]) if _kc.get("lag_trade_days") is not None \

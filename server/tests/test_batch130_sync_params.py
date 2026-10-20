@@ -71,14 +71,85 @@ class TestZeroDriftOracle:
 
 class TestOldSchemaTolerance:
     def test_read_sync_kind_7col_shape_no_crash(self):
-        """未迁移库容错（B-P1-5）：7 列形态解包不炸（len 守卫），两键缺省 None。"""
+        """未迁移库容错（B-P1-5）：mock get_conn 返回 7 元组真调 _read_sync_kind——
+        不炸、两键缺省缺失（盲审 B-P1-a①：禁自证 build 复刻，必须走真函数）。"""
+        from unittest.mock import patch, MagicMock
+        from src.data_sync import engine
+
+        class _Cur:
+            def __init__(self, row):
+                self._row = row
+
+            def fetchone(self):
+                return self._row
+
+        class _Conn:
+            def __init__(self, cur):
+                self._cur = cur
+
+            def execute(self, *a, **k):
+                return self._cur
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
         row7 = ("kind", None, "tbl", "incremental", ["a"], ["b"], [])
+        with patch.object(engine, "get_conn", return_value=_Conn(_Cur(row7))):
+            d = engine._read_sync_kind("x")
+        assert "overlap_days" not in d and d["kind"] == "kind"
+
         row9 = ("kind", None, "tbl", "incremental", ["a"], ["b"], [], 3, 1)
+        with patch.object(engine, "get_conn", return_value=_Conn(_Cur(row9))):
+            d = engine._read_sync_kind("x")
+        assert d["overlap_days"] == 3 and d["lag_trade_days"] == 1
 
-        def build(row):
-            d = {"k": row[0]}
-            d.update({"overlap_days": row[7], "lag_trade_days": row[8]} if len(row) > 8 else {})
-            return d
 
-        assert "overlap_days" not in build(row7)
-        assert build(row9)["overlap_days"] == 3 and build(row9)["lag_trade_days"] == 1
+class TestDbValueWiring:
+    def test_tier1_handler_consumes_db_overlap_lag(self):
+        """接线行为钉（盲审 B-P1-c：batch92 _build 不传 sync_id ⇒ DB 读点行为级零覆盖——
+        本例带 sync_id 构造 handler，dev 真库真值（margin 行 overlap=3/lag=1），
+        mock adapter/落库，断言窗口真消费 DB 值）。"""
+        from unittest.mock import patch
+        import pandas as pd
+        from src.data_sync import engine
+
+        handler = engine._make_tier1_handler(
+            "featured_daily", "margin_detail", "margin_detail",
+            ["trade_date", "ts_code"], float_cols=["o"],
+            sync_id="margin_detail_sync", cols_from_sync_kind=True)
+
+        class _FakeAdapter:
+            venue = "XTP"
+
+            def available_range(self, kind):
+                return ("20100101", None)
+
+            def publish_lag(self, kind):
+                return 1
+
+            def list_symbols(self, refresh=False):
+                return ["X"]
+
+            def symbol_inception(self, sym):
+                return None
+
+            def fetch_supply(self, kind, sub_kind=None, **p):
+                return pd.DataFrame(
+                    [{"ts_code": "X", "trade_date": p.get("trade_date", "20261019"), "o": 1.0}])
+
+        cfg = {"id": "margin_detail_sync", "provider": "tushare", "last_sync_date": "20261018"}
+        with patch.object(engine, "_get_supply_adapter", return_value=_FakeAdapter()), \
+             patch.object(engine, "_get_rate_ds"), \
+             patch.object(engine, "_data_ready_end_date", return_value="20261019") as _dre, \
+             patch("src.data_platform.db.get_conn") as _gcmock:
+            # 落库连接 mock（_gc 是函数内 import——patch db 层 get_conn 经 save 路径；
+            # execute 返回裸 cursor 形态足够 upsert 路径零炸）
+            _gcmock.return_value.__enter__.return_value.execute.return_value.fetchone.return_value = (1,)
+            r = handler(cfg, "20261020", None)
+        # lag=1（DB）⇒ _data_ready_end_date 收到 1 而非注册缺省 0
+        assert _dre.call_args[0][0] == 1, _dre.call_args
+        # overlap=3（DB）⇒ 下界=last+1-3=20261016
+        assert r.get("start") == "20261016", r

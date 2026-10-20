@@ -208,13 +208,16 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
         cursors = {} if (full or symbols) else _load_cursors()
         # 批 130·期二：增量四表回看重叠读族层（每轮一次——_window_of 在双层循环内禁逐调用查库；
         # 四行同值读 fina_indicator；行缺/列缺/未迁移库 → None=代码缺省 _POOL_OVERLAP_DAYS 兜底）
+        # 盲审B-P1-b：失败须留痕（对照 _load_cursors 的 warning 惯例）——静默回退会掩盖
+        # 「DB 参数已接管但本轮没读到」的撕裂态；回退值=原常量，行为零漂移。
         _kc_overlap = None
         try:
-            from src.data_sync.engine import _read_sync_kind
             _kcv = _read_sync_kind("fina_indicator")
             if _kcv.get("overlap_days") is not None:
                 _kc_overlap = int(_kcv["overlap_days"])
-        except Exception:
+        except Exception as e:            # SoftTimeLimitExceeded 不吞（BaseException 族外再细分成本>收益，日志留痕即可）
+            logger.warning("pool overlap 读族层失败，本轮回退代码缺省 %s 天：%s",
+                           _POOL_OVERLAP_DAYS, e)
             _kc_overlap = None
         deadline = time.time() + timebox_s
         errors: list[str] = []
