@@ -117,8 +117,48 @@ def _pool_meta(table: str) -> dict | None:
     return {"kind": row["kind"], "pg_table": row["pg_table"], "pk": list(row["pk_cols"])}
 
 
+def _nearest_trade_day(upper_str: str) -> str:
+    """≤ upper 的最近交易日（批 95：单日表窗口回落）。
+
+    ⚠ **不可**复用 `engine._data_ready_end_date(lag=1)`——它取「≤today 的第 2 个交易日」，
+    周六会返周四（跳过周五），与本需求（≤upper 的**第一个**交易日）不等价。
+
+    fail-open 三态（盲审 A-P1-2 / B-P1-3）：
+    - 无行（日历未覆盖）：warning 后返原值——staging 首装空表时**不能**误诊成 DB 异常
+      （原 `fetchone()[0]` 遇空表 TypeError 被 except 吞成「读取失败」）。
+    - 异常：warning 后返原值。
+    - **陈旧守卫**：结果与 upper 跨度 > 10 自然日 ⇒ warning 并返原值——trade_cal 断更时
+      会返几天前的旧日，拉旧日 + upsert 幂等 + status=done ⇒ 比 0 行更难发现（比 0 行更糟）。
+    """
+    from datetime import date as _d
+    try:
+        with _pdb.get_conn() as conn:
+            cur = conn.execute(
+                "SELECT to_char(cal_date, 'YYYYMMDD') FROM trade_cal "
+                "WHERE exchange='SSE' AND is_open=1 AND cal_date <= %s "
+                "ORDER BY cal_date DESC LIMIT 1",
+                (f"{upper_str[:4]}-{upper_str[4:6]}-{upper_str[6:8]}",))
+            row = cur.fetchone()
+        if not row or not row[0]:
+            logger.warning("trade_cal 未覆盖 ≤%s，单日表窗口回落原值（本修不生效）", upper_str)
+            return upper_str
+        got = str(row[0])
+        span = (_d.fromisoformat(f"{upper_str[:4]}-{upper_str[4:6]}-{upper_str[6:8]}")
+                - _d.fromisoformat(f"{got[:4]}-{got[4:6]}-{got[6:8]}")).days
+        if span > 10:
+            logger.warning("trade_cal 陈旧/未覆盖：≤%s 最近交易日 %s 距 %d 天（>10）——回落原值，"
+                           "避免静默拉陈旧日（请查 trade_cal 同步）", upper_str, got, span)
+            return upper_str
+        return got
+    except Exception as e:
+        logger.warning("交易日历读取失败（单日表窗口回落原值）: %s", e)
+        return upper_str
+
+
 def _window_of(table: str, cursors: dict, upper_str: str,
-               overlap_days: int | None = None) -> tuple[str | None, str | None]:
+               overlap_days: int | None = None, *,
+               single_day: str | None = None,
+               single_day_all: bool = False) -> tuple[str | None, str | None]:
     """表级窗口策略（引擎侧编排声明——「请求哪段」；「怎么向源表达」在 adapter）。
 
     单日表 → (upper, upper)；增量表且有游标 → (cursor-回看重叠, upper) 含起点重叠幂等防漏；
@@ -131,7 +171,13 @@ def _window_of(table: str, cursors: dict, upper_str: str,
     """
     _overlap = _POOL_OVERLAP_DAYS if overlap_days is None else overlap_days
     if table in _SINGLE_DAY_TABLES:
-        return upper_str, upper_str
+        # 批 95：单日表三态——①full/回补轮 single_day_all ⇒ (None,None) **无参=一次 ~45 天**
+        # （A-P0-1 实测：cyq_chips 不传 trade_date 回 45 个交易日；_pool_request 已支持 start=None）；
+        # ②日常轮 single_day=≤upper 最近交易日（修长假边界缺口）；③缺省=现状 (upper,upper) 零漂移。
+        if single_day_all:
+            return None, None
+        _sd = single_day or upper_str
+        return _sd, _sd
     if table in _INCREMENTAL_TABLES and cursors.get(table):
         cur = cursors[table]
         start = (date.fromisoformat(f"{cur[:4]}-{cur[4:6]}-{cur[6:8]}")
@@ -231,14 +277,20 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
         total_saved = 0
         done_symbols: dict[str, set] = {}
         timeboxed = False
+        # 批 95（+B-P2-2）：本轮窗口对所有表恒定 ⇒ 循环外算一次（纯函数原被算 N×M 次）；
+        # 单日表 full/补轮走无参（一次 ~45 天），日常轮回落到最近交易日。
+        _sd_all = bool(full or symbols)
+        _sd_upper = None if _sd_all else _nearest_trade_day(upper_str)
+        windows = {t: _window_of(t, cursors, upper_str, _kc_overlap,
+                                 single_day=_sd_upper, single_day_all=_sd_all)
+                   for t in metas}
         for ts_code in ts_codes:
             for table, meta in metas.items():
                 if time.time() >= deadline:
                     timeboxed = True
                     break
                 try:
-                    req = _pool_request(table, ts_code, meta["kind"],
-                                        _window_of(table, cursors, upper_str, _kc_overlap))
+                    req = _pool_request(table, ts_code, meta["kind"], windows[table])
                     # 限速/熔断收编（批 64b 原语义）：键=表名=限速档键；窗口组装与列归一等
                     # 纯计算在上下文外，**只有源拉取**计入配额与熔断（与旧实现同锚点）
                     with rate_limit_context(ds, table):

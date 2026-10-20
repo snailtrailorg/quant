@@ -164,10 +164,10 @@ class TestDbValueWiring:
         real_window = PD._window_of
         seen: list = []
 
-        def _spy(table, cursors, upper, overlap_days=None):
+        def _spy(table, cursors, upper, overlap_days=None, **_kw):   # 批 95：容忍后续新增 keyword 参
             if table in PD._INCREMENTAL_TABLES:
                 seen.append(overlap_days)
-            return real_window(table, cursors, upper, overlap_days)
+            return real_window(table, cursors, upper, overlap_days, **_kw)
 
         fake_adapter = MagicMock()
         fake_adapter.fetch.return_value = pd.DataFrame({"ts_code": ["000001.SZ"], "ann_date": ["20261019"], "o": [1.0]})

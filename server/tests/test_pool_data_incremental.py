@@ -173,9 +173,12 @@ class TestWindow:
         for r in ad.reqs_of("income"):
             assert r.range_ == (exp_start, exp_end)
         assert all(r.range_ is None for r in ad.reqs_of("top10_holders"))
-        # cyq_chips 单日模式（引擎给 (上界, 上界)，源侧译成 trade_date=）
-        td = exp_end
-        assert all(r.range_ == (td, td) for r in ad.reqs_of("cyq_chips"))
+        # cyq_chips 单日模式（源侧译成 trade_date=）：批 95 起日常轮**上界回落到最近交易日**
+        # （原断言 (昨日,昨日) 在非交易日场景恒 0 行且长假丢边界；月末/周末跑会随机红）。
+        # 此处只钉「两端相等」的单日语义，精确回落值由 test_batch95_single_day_window 用 mock 日历钉。
+        for r in ad.reqs_of("cyq_chips"):
+            assert r.range_ is not None and r.range_[0] == r.range_[1], \
+                f"单日表窗口必须是 (d, d)，实得 {r.range_}"
 
     def test_request_shape_is_supply_contract(self):
         """请求形态：kind 由归置行给、sub_kind=表名、单标的、supply 模式。"""
