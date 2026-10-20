@@ -47,7 +47,42 @@ class TestSymbolMatrix:
         with pytest.raises(ValueError, match="转换失败"):
             TushareAdapter().to_source_symbol(bad)
 
-class TestFetchEntryNormalization:
+class TestPoolEndpointNormalization:
+    """审点 7（自补）：`trigger?pool_id=` 端点是本 bug 的唯一生产入口——拆掉 vt_to_ts 即红。"""
+
+    def test_pool_id_symbols_converted(self):
+        import src.web_api.routes.sync as S
+        captured = {}
+
+        class _Cur:
+            def fetchall(self):
+                return [("600000.SHSE",), ("000001.SZSE",)]
+
+        class _Conn:
+            def execute(self, *a, **k):
+                return _Cur()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        class _Task:
+            @staticmethod
+            def delay(full=False, symbols=None):
+                captured["symbols"] = symbols
+
+                class _T:
+                    id = "x"
+                return _T()
+
+        with patch.object(S, "get_conn", return_value=_Conn()), \
+                patch("src.scheduler.tasks.pool_data_sync_task", _Task), \
+                patch.object(S, "audit_log"):
+            S.trigger_pool_data_api(full=False, pool_id="test-pool", payload={"username": "u"})
+        assert captured["symbols"] == ["600000.SH", "000001.SZ"], captured
+
     def test_pool_family_passes_ts(self):
         import src.data_platform.adapters.base as B
         ad = B.TushareAdapter()
