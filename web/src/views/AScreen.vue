@@ -109,8 +109,12 @@ const addToPool = async () => {
   const pool = pools.value.find(p => p.id === selectedPool.value)
   if (!pool) return
   const symbols = [...checked.value]
-  const existing = (pool.symbols || []).map(s => (s || '').split('.')[0])
-  const merged = [...new Set([...existing, ...symbols])]
+  // 批 131：去重键仍按裸码，但**下发必须带后缀**（existing 是 vt 形态、勾选行 ts_code 是 ts 形态，
+  // 后端归一为 vt 入库）。原实现把 existing 去后缀后下发 ⇒ 池子一非空就发裸码 ⇒ 后端 SYMBOL_INVALID 400。
+  const _key = (s) => (s || '').split('.')[0]
+  const _existing = (pool.symbols || []).filter(Boolean)
+  const _seen = new Set(_existing.map(_key))
+  const merged = [..._existing, ...symbols.filter(s => !_seen.has(_key(s)))]
   try {
     await api.post('/pool', { id: pool.id, name: pool.name, category: pool.category || 'astock',
                               symbolsStr: merged.join('\n'), description: pool.description || '' })

@@ -116,3 +116,44 @@ class TestPoolEndpointNormalization:
             with patch.object(ad, "to_bar_rows", return_value=[]):
                 ad.fetch(_req("bar_daily", sub_kind="stock", symbols=("600000.SH",)))
         assert pd_.call_args[0][0] == "600000.SH"
+
+
+class TestCreatePoolNormalization:
+    """P1-2（审员）：create_pool 写侧归一四例——P0-1（vt_to_ts 非校验器）正因此漏网。"""
+
+    def _call(self, symbols):
+        import src.web_api.routes.backtest as BT
+        from src.web_api.models import PoolCreateReq  # noqa: F401  (若不存在则用 dict)
+        return BT
+
+    def test_invalid_suffix_400(self):
+        import src.web_api.routes.backtest as BT
+        from src.web_api.errors import ApiError
+        captured = {}
+
+        class _Conn:
+            def execute(self, *a, **k):
+                captured.setdefault("sql", []).append(a[0][:30] if a else "")
+
+                class _C:
+                    def fetchone(self):
+                        return (1,)
+                return _C()
+
+            def commit(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        import types
+        req = types.SimpleNamespace(id="p", name="p", category="astock",
+                                    description="",
+                                    symbolsStr="600000.FOO")
+        with patch.object(BT, "get_conn", return_value=_Conn()), \
+                patch.object(BT, "audit_log"):
+            with pytest.raises(ApiError):
+                BT.create_pool(req, payload={"username": "u"})

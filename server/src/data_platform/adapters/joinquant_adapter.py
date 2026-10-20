@@ -199,7 +199,12 @@ class JoinQuantAdapter(BaseDataAdapter):
     # ── 符号归一 ──
 
     def to_source_symbol(self, symbol: str) -> str:
-        """内部 ts_code（`600000.SH` / `600000.SHSE`）→ 聚宽（`600000.XSHG`）。默认直通。"""
+        """**入参＝内部 vt 形态**（`600000.SHSE`；源格式 `600000.SH` 幂等）→ 聚宽 `600000.XSHG`。
+
+        批 131 契约收敛：原注释写「内部 ts_code（600000.SH / 600000.SHSE）」含混——本仓内部
+        一律 vt（见 BaseDataAdapter.to_source_symbol docstring）；两种输入都接受是幂等性，
+        不是「内部有两种形态」。未知后缀透传（聚宽侧会拒），与 tushare 的响亮策略不同（各自源特性）。
+        """
         if not symbol or "." not in str(symbol):
             return str(symbol)
         code, _, ex = str(symbol).rpartition(".")
