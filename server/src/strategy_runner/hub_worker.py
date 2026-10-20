@@ -267,7 +267,9 @@ def run(ctx: dict) -> None:
         # （瞬态——流回放窗有限是常态，不升级为拒启）。仅告警+记档，不冻结不退出；
         # 首启判定已在 runner 装载侧（judge_supply），此处收运行期收缩面。
         _declared = int(_needs.get("bar_minute", 0))
-        if _declared and len(fresh) < _declared:
+        _strat = ctx.get("strategy")
+        _shrunk = bool(_declared and len(fresh) < _declared)
+        if _shrunk:
             logger.warning("rewarm 后窗口 %d < 声明窗 %d（%s）——degraded：因子窗口不足，"
                            "值可能不准；数据面恢复后自动补齐", len(fresh), _declared, symbol)
             try:
@@ -275,11 +277,16 @@ def run(ctx: dict) -> None:
                 d = judge_supply(symbol, _needs, len(fresh))
                 _alert(f"任务 {tid} rewarm 窗口不足（{symbol}）",
                        f"{d['reason']}（实得 {d['actual']}/{d['declared']}）", code="warmup.degraded")
-                _st = getattr(ctx.get("strategy"), "warmup_result", None)
+                _st = getattr(_strat, "warmup_result", None)
                 if isinstance(_st, dict):
                     _st.update(d)
             except Exception:   # noqa: S110  # 告警链 never-raise（fail-open 降级）
                 pass
+        # 批 119（独立补审 P1-3）：ctx.supply_degraded 承诺「随 rewarm 更新」——原只启动赋值一次，
+        # 运行期收缩后降级通道仍 False ⇒ compute_factors 照旧吞异常成 0.0 进聚合（「降级=下单」雷）。
+        # 双向同步：收缩=True；窗口恢复=False（数据面自愈后可翻回正常通道）。
+        if _strat is not None:
+            _strat._supply_degraded = bool(_shrunk)
         history[:] = fresh
         # 批 66c 解冻闭环（D26 §3.4②）：rewarm 后显式推进 max_ts 至回放尾——否则回放不推水位，
         # 冻结重启后首根 live bar 仍满足缺口条件再冻结（盘中永远解不了）。跳洞=显式接受。
@@ -581,25 +588,34 @@ def run(ctx: dict) -> None:
 
     def _daily_roll():
         """批 119：daily_history 日界滚动（v2 复审 D3 钉死）——**每步求值，不依赖 session
-        沿翻转**（crypto in_session 骨架 24x7 恒 True 永无翻转，而加密恰是预期消费者）；
-        条件=当前 bar 日 > 窗尾日 ⇒ 增量补拉。**rewarm 不触碰 daily 容器**（分钟窗收缩面
-        与日线滚动互不干涉——两个钩子专职分离）。"""
+        沿翻转**（crypto in_session 骨架 24x7 恒 True 永无翻转，而加密恰是预期消费者）。
+
+        独立补审 P1-2 两修：①**同日只滚一次**——原守卫 `tail < bar_day` 在交易日永远为真
+        （tail=上一交易日、bar_day=当日），period=0.0 钩子每 5s 拉一次 DataBus（任务数×12 次/分）；
+        改用 `_last_roll_day` 状态位去重。②**空窗不自锁**——原 `if not dh: return` 使暖机失败后
+        终身无日线；改为 dh 空也尝试补（有 needs 声明时）。
+        """
         try:
-            dh = getattr(strategy, "_daily_history", None)
-            if not dh:
-                return
-            from src.strategy_framework.factor import _daily_ts_key
-            from src.strategy_runner.main import _warmup_daily
             need_n = int(getattr(strategy, "_daily_n", 0) or 0)
-            bar_day = None
-            lb = strategy._last_bar if hasattr(strategy, "_last_bar") else None
-            if lb and lb.get("ts"):
-                ts = lb["ts"]
-                bar_day = ts[:10] if isinstance(ts, str) else ts.strftime("%Y-%m-%d")
+            if need_n <= 0:
+                return                      # 无声明=零动作
+            lb = getattr(strategy, "_last_bar", None) or {}
+            ts = lb.get("ts")
+            if not ts:
+                return
+            bar_day = ts[:10] if isinstance(ts, str) else ts.strftime("%Y-%m-%d")
+            if getattr(strategy, "_daily_rolled_day", None) == bar_day:
+                return                      # 今日已滚（去重）
+            dh = getattr(strategy, "_daily_history", None) or []
+            from src.strategy_framework.factor import _daily_ts_key
             tail = _daily_ts_key(dh[-1]) if dh else None
-            if bar_day and tail and tail < bar_day:
-                n = need_n or len(dh)
-                strategy._daily_history = _warmup_daily(strategy.symbol, n) or dh
+            if tail is not None and tail >= bar_day:
+                return                      # 窗已含当日（异常态，交由判定面）
+            from src.strategy_runner.main import _warmup_daily
+            fresh = _warmup_daily(strategy.symbol, need_n)
+            if fresh:
+                strategy._daily_history = fresh
+                strategy._daily_rolled_day = bar_day   # 成功才记，失败下步重试
         except Exception as e:   # 滚动失败保持旧窗（降级不中断——supply_degraded 语义另走判定面）
             logger.warning("daily_history 日界滚动失败（保持旧窗，下步重试）: %s", e)
 

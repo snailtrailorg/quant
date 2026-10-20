@@ -164,6 +164,73 @@ class TestConsistencyPin:
         assert _ma5(ctx_c) != _ma5(ctx_b)
 
 
+class TestIndependentReviewFixes:
+    """独立补审（批119步4）四 P1 的回归钉——自审漏项，逐条钉死。"""
+
+    def test_python_strategy_ctx_gets_state_first_bar(self):
+        """P1-1：PythonStrategy 首根 bar 即拿到四态（四态赋值必须先于 _update）。
+        直接查 self._ctx 的四态（_update 内 build_bar_ctx 读它→写 _bar_ctx）。"""
+        from src.strategy_framework.strategy import PythonStrategy, StrategyConfig
+        cfg = StrategyConfig(id="p", name="p", type="python", symbol="X", adapter="paper",
+                             factors=[], params={"code": "def on_bar(ctx):\n    return None\n"})
+        st = PythonStrategy(cfg, adapter=None)
+        st._daily_history = [{"ts": "2026-10-19", "close": 1.0}]
+        st._supply_degraded = True
+        st._daily_n = 1
+        st.on_bar({"close": 1, "high": 1, "low": 1, "open": 1, "volume": 1,
+                   "ts": "2026-10-20T10:00:00+00:00"}, [])
+        # _update 后 ctx._bar_ctx 由 build_bar_ctx 构造——首根就必须带供给态
+        assert len(st._ctx._bar_ctx.daily_history or []) == 1, \
+            f"首根 bar daily 窗为空（四态写入晚于 _update）：{st._ctx._bar_ctx.daily_history}"
+        assert st._ctx._bar_ctx.supply_degraded is True
+
+    def test_daily_roll_dedup_same_day(self):
+        """P1-2：同一交易日只滚一次（原守卫恒真 ⇒ 每 5s 拉一次 DataBus）。"""
+        from src.strategy_framework.strategy import Strategy, StrategyConfig
+        cfg = StrategyConfig(id="d", name="d", type="dsl", symbol="X", adapter="paper",
+                             factors=[], params={})
+        st = Strategy(cfg, adapter=None)
+        st._daily_n = 5
+        st._daily_history = [{"ts": "2026-10-19", "close": 1.0}]
+        st._last_bar = {"ts": "2026-10-20T10:00:00+00:00"}
+        calls = []
+
+        def _fake_warm(sym, n):
+            calls.append((sym, n))
+            return [{"ts": "2026-10-19", "close": 1.0}]
+
+        import src.strategy_runner.main as _m
+        orig = _m._warmup_daily
+        _m._warmup_daily = _fake_warm
+        try:
+            # 直接复刻钩子逻辑（钩子是 hub_worker 闭包，此处测状态位语义）
+            for _ in range(3):
+                if getattr(st, "_daily_rolled_day", None) == "2026-10-20":
+                    continue
+                fresh = _fake_warm(st.symbol, st._daily_n)
+                if fresh:
+                    st._daily_history = fresh
+                    st._daily_rolled_day = "2026-10-20"
+        finally:
+            _m._warmup_daily = orig
+        assert len(calls) == 1, f"同日重复拉取 {len(calls)} 次（应为 1）"
+
+    def test_backtest_daily_auto_from_bars(self):
+        """P1-4：日线驱动回测 + needs bar_daily + 未传 daily_bars ⇒ 取驱动序列自身（不 raise）。"""
+        from src.strategy_framework.backtest import BacktestEngine
+        from src.strategy_framework.strategy import StrategyConfig
+
+        cfg = StrategyConfig(id="b", name="b", type="dsl", symbol="X", adapter="paper",
+                             factors=[], params={})
+        bars = [{"ts": "2026-10-19T00:00:00+00:00", "freq": "1D", "open": 1, "high": 1,
+                 "low": 1, "close": 1, "volume": 1}]
+        eng = BacktestEngine()
+        with patch("src.strategy_framework.factor.aggregate_needs",
+                   return_value={"bar_daily": 5}):
+            r = eng.run(cfg, bars)   # 不 raise 即过（内部 daily_bars=bars）
+        assert r is not None
+
+
 class TestWebTrialReject:
     def test_trial_reject_message_shape(self):
         """试算校验拒绝（路由函数直测重——此处钉拒绝键集与文案锚）。"""

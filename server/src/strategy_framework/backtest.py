@@ -169,9 +169,17 @@ class BacktestEngine:
         _needs = aggregate_needs(strategy)
         _dn = int(_needs.get("bar_daily", 0))
         if _dn > 0 and not daily_bars:
-            raise ValueError(
-                f"needs 声明 bar_daily={_dn} 但 run() 未传 daily_bars——回测喂数缺口，"
-                "拒绝静默空窗跑（批 119 D2 校验拒绝）")
+            # 批 119（独立补审 P1-4）：回测当前**只有日线驱动**（tasks/web 恒拉 kind=bar_daily）
+            # ⇒ daily_history 天然=驱动序列自身（builder 按 bar_ts 日界沿裁「严格昨日往前 N 根」），
+            # 无需另拉。原「未传即 raise」使声明 bar_daily 的策略回测恒 error（死路）。
+            _bf = (bars[0].get("freq") if bars else None)
+            if _bf in ("1D", "1d"):
+                daily_bars = bars
+                logger.info("needs bar_daily=%d：回测日线驱动 ⇒ daily_history 取驱动序列自身", _dn)
+            else:
+                raise ValueError(
+                    f"needs 声明 bar_daily={_dn} 但回测是 {_bf} 驱动且未传 daily_bars——"
+                    "分钟驱动回测需显式传日线段（批 119 校验拒绝，不静默空窗）")
         if daily_bars and _dn <= 0:
             logger.warning("run() 传了 daily_bars 但 needs 无 bar_daily 声明——忽略")
         # 预载挂实例：逐 bar 由基类 on_bar→builder→trim_daily 日界沿切片滚动
