@@ -1,5 +1,9 @@
 -- 量化平台数据库初始化种子（sync_config 8 条同步任务配置）
 -- ====================================================================
+-- ⚠⚠ 本档已滞后于迁移链（2026-10-21 记）：种子沿用 etf_daily/etf_list 旧名（批 127 正名漏网）、
+-- sync_config CREATE 缺 supports_backfill/start_floor/retention 三列（0131/0139 链）。**勿直接用于环境重建**——
+-- 真源 = 备份恢复（backup-db.sh + psql restore）+ alembic 迁移链。本档仅作历史参考，待随批修复（待办挂账）。
+-- ====================================================================
 -- 用法:
 --   psql -d quant -f scripts/init-seed.sql
 --   或覆盖默认配置: psql -d quant -v ASTOCK_DAILY_SCHEDULE="0 17 * * 1-5" -f scripts/init-seed.sql
