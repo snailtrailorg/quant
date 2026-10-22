@@ -601,6 +601,9 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("bar_minute", None): "pull_minute_supply",
 }
 
+# 批 137a：`_SUPPLY_PULL` 里**不来自工厂项**的条目（对账缺口重拉专用，非 tier1/全量重建配置）。
+# 测试用本集合校验「工厂项 ⊆ 映射表」，显式登记才允许出现——防顺手加一条绕过工厂对账。
+_SUPPLY_PULL_NON_FACTORY: frozenset[tuple[str, str | None]] = frozenset({("bar_minute", None)})
 
 # 批 103b：`JoinQuantAdapter` 已从本文件迁出至 `joinquant_adapter.py`（真接实现 + jqdatasdk
 # 形状知识）。注册仍靠 `@register_adapter` 的 import 副作用——`adapters/__init__.py` 显式

@@ -286,7 +286,9 @@ class TestLimitedRepull:
         out, repulls, _a = _run(ad, universe=[("BTC.BINANCE", datetime.now(timezone.utc), "2026-10-01")],
                                 local={"20261001", "20261002", "20261003", "20261004"},
                                 today_end=date(2026, 10, 4))
-        assert repulls == [("BTC", "2026-10-02", "2026-10-02")], "按缺口区间重拉（源符号形态）"
+        # 批 137a：形态归一由 adapter 负责（`_repull_symbol` 内 `to_source_symbol`）——crypto 直通，
+        # binance 的 pull 内部再 `split(".")`；因此这里收到 vt 原值而非剥壳裸码。
+        assert repulls == [("BTC.BINANCE", "2026-10-02", "2026-10-02")], "按缺口区间重拉（vt 形态，源侧由 adapter 归一）"
         assert out[SID]["repulled"] == 1 and out[SID]["closed"] == 1
         row = _rows(SID)[0]
         assert (row[1], row[2], row[3], row[5]) == ("2026-10-02", "2026-10-02", "closed", 1)

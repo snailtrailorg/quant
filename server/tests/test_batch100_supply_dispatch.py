@@ -37,13 +37,14 @@ class TestSupplyMap:
         cb_basic/listed_fund_list/trade_cal/static_symbols/convertible_terms）也收编到同一端口 ⇒ 并集。
         批 117 加 st_list（tier1 8 + full 2 = 10）。
         """
-        from src.data_platform.adapters.base import _SUPPLY_PULL
+        from src.data_platform.adapters.base import _SUPPLY_PULL, _SUPPLY_PULL_NON_FACTORY
         from src.data_sync import engine
         engine_keys = {(k, s) for (k, s, _t, _p) in engine._TIER1_BATCH.values()}
         engine_keys |= {(k, s) for (k, s, _t, _p, _d) in engine._TIER1_FULL.values()}
         assert len(engine_keys) == 10, f"工厂项应为 10（tier1 8 + full 2），实得 {len(engine_keys)}"
         engine_keys |= {(k, s) for (k, s, _t) in engine._LITERAL_SUPPLY.values()}
-        assert set(_SUPPLY_PULL) == engine_keys
+        # 批 137a：对账缺口重拉专用项显式豁免（不是工厂项，但必须登记才能存在）
+        assert set(_SUPPLY_PULL) - _SUPPLY_PULL_NON_FACTORY == engine_keys
 
     def test_all_pull_functions_exist(self):
         """每个映射值的 pull 函数在 tushare_adapter 里真实存在。"""
