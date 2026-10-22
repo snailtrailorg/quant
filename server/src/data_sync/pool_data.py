@@ -224,6 +224,25 @@ def _sink_frame(frame, meta: dict) -> int:
     return len(rows)
 
 
+def _reconcile_round(metas: dict, ts_codes: list, per_table_saved: dict, errors: list,
+                     *, complete: bool = True) -> None:
+    """批 137b：按表族对账（收尾一次；异常只告警不阻同步）。
+
+    complete=False（本轮被时间盒截断）⇒ 只跑只读族 A/B/C，D 族 streak 不计数。
+    """
+    try:
+        from .pool_reconcile import notify_findings, reconcile
+        res = reconcile(metas, ts_codes, per_table_saved=per_table_saved, errors=errors,
+                        complete=complete)
+        findings = res.get("findings") or []
+        if findings:
+            logger.warning("[pool_reconcile] %d 项: %s", len(findings), "；".join(findings[:5]))
+            notify_findings(findings)
+        else:
+            logger.info("[pool_reconcile] A/B/C/D 四族检查通过")
+    except Exception as e:
+        logger.warning("[pool_reconcile] 对账整体异常（隔离）: %s", e)
+
 def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
                   timebox_s: int = 280) -> dict:
     """跑一轮池内深度同步（通用编排；拉取经 adapter.fetch 契约）。
@@ -277,6 +296,7 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
                 continue
             metas[table] = meta
         total_saved = 0
+        per_table_saved: dict[str, int] = {t: 0 for t in metas}
         done_symbols: dict[str, set] = {}
         timeboxed = False
         # 批 95（+B-P2-2）：本轮窗口对所有表恒定 ⇒ 循环外算一次（纯函数原被算 N×M 次）；
@@ -286,27 +306,37 @@ def run_pool_sync(cfg: dict | None = None, *, full: bool = False, symbols=None,
         windows = {t: _window_of(t, cursors, upper_str, _kc_overlap,
                                  single_day=_sd_upper, single_day_all=_sd_all)
                    for t in metas}
-        for ts_code in ts_codes:
-            for table, meta in metas.items():
-                if time.time() >= deadline:
-                    timeboxed = True
-                    break
-                try:
-                    req = _pool_request(table, ts_code, meta["kind"], windows[table])
-                    # 限速/熔断收编（批 64b 原语义）：键=表名=限速档键；窗口组装与列归一等
-                    # 纯计算在上下文外，**只有源拉取**计入配额与熔断（与旧实现同锚点）
-                    with rate_limit_context(ds, table):
-                        frame = adapter.fetch(req)
-                    total_saved += _sink_frame(frame, meta)
-                    done_symbols.setdefault(table, set()).add(ts_code)
-                except Exception as e:
-                    errors.append(f"{ts_code}/{table}: {type(e).__name__}: {str(e)[:40]}")
-                    logger.warning("池数据 %s/%s: %s", ts_code, table, e)
-            if timeboxed:
+        # 批 137b：**时间盒起点改无状态按最陈旧排序**——原实现固定 (symbol × table) 顺序，
+        # 280s 只够约 90 标的 ⇒ 池子一大，尾部标的每轮都从头开始 ⇒ 永久饿死。
+        # 现每轮先查「该 (表,标的) 最近行日期」，最旧的先跑：天然轮转、重启安全、无需游标。
+        from .pool_reconcile import stale_order
+        for ts_code, table in stale_order(metas, ts_codes):
+            if time.time() >= deadline:
+                timeboxed = True
                 break
+            meta = metas[table]
+            try:
+                req = _pool_request(table, ts_code, meta["kind"], windows[table])
+                # 限速/熔断收编（批 64b 原语义）：键=表名=限速档键；窗口组装与列归一等
+                # 纯计算在上下文外，**只有源拉取**计入配额与熔断（与旧实现同锚点）
+                with rate_limit_context(ds, table):
+                    frame = adapter.fetch(req)
+                n_saved = _sink_frame(frame, meta)
+                total_saved += n_saved
+                per_table_saved[table] = per_table_saved.get(table, 0) + n_saved
+                done_symbols.setdefault(table, set()).add(ts_code)
+            except Exception as e:
+                errors.append(f"{ts_code}/{table}: {type(e).__name__}: {str(e)[:40]}")
+                logger.warning("池数据 %s/%s: %s", ts_code, table, e)
         # 游标推进在收尾统一做（按表判覆盖：timebox 中断未覆盖的表下轮重拉同窗口幂等）
         if not symbols:
             _advance_cursors(done_symbols, ts_codes, upper_str)
+        # 批 137b：对账只在**调度轮**跑（full 校准 / 手动定向回补不跑）——
+        # ① 那两类轮的窗口语义不同，A/D 族判定会错  ② 批 95 的「full 轮不查日历」不变量必须保持。
+        # 时间盒截断轮**照跑**只读族（A/B/C）——池大时每轮都可能 timebox，否则对账永不执行（死功能）。
+        if cfg is not None and not full and not symbols:
+            _reconcile_round(metas, ts_codes, per_table_saved, errors, complete=not timeboxed)
+
         duration_ms = int((time.time() - t0) * 1000)
         if timeboxed:
             return {"status": "timebox", "symbols": len(ts_codes), "saved": total_saved,
