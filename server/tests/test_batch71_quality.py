@@ -39,22 +39,15 @@ class TestValidateBarQuality:
         assert any("重复" in i for i in q["issues"])
         assert any("成交量为 0" in i for i in q["issues"])
 
-    def test_per_symbol_gap_not_cross_symbol(self):
-        """per-symbol 断点（批 71 groupby 向量化）：跨标的日期跳变不算断点。"""
+    def test_gap_check_removed(self):
+        """批 134：**时序断点检查已删**（df 级启发式与 engine._find_gaps 重复且更差——
+        实测 300/300 标的中标、96% 落在长假）。真断点判定归日历感知面。"""
         from src.data_platform.adapters.tushare_adapter import validate_bar_quality
         q = validate_bar_quality(_df([
             ("000001.SZ", "20260101", 10, 10, 10, 10, 100, 10.0),
-            ("000002.SZ", "20260925", 10, 10, 10, 10, 100, 10.0),   # 换标的=组边界非断点
+            ("000001.SZ", "20260925", 10, 10, 10, 10, 100, 10.0),   # 真断点也不由本函数报
         ]))
         assert not any("时序断点" in i for i in q["issues"])
-
-    def test_real_gap_within_symbol_detected(self):
-        from src.data_platform.adapters.tushare_adapter import validate_bar_quality
-        q = validate_bar_quality(_df([
-            ("000001.SZ", "20260101", 10, 10, 10, 10, 100, 10.0),
-            ("000001.SZ", "20260925", 10, 10, 10, 10, 100, 10.0),   # 同标的隔 8 个月=真断点
-        ]))
-        assert any("时序断点" in i for i in q["issues"])
 
 
 class TestLogBarQualityFailSoft:
@@ -63,10 +56,12 @@ class TestLogBarQualityFailSoft:
         issues 一行一条（[quality] 前缀）。"""
         import logging
         from src.data_sync import engine
-        # 真脏数据路径（双盲 P2-3：零 patch——trade_date="bad" 经 pd.to_datetime 真抛
-        # ValueError，走 _log_bar_quality 的 fail-soft 分支）
-        with caplog.at_level(logging.WARNING, logger=engine.__name__):
-            engine._log_bar_quality(_df([("x", "bad", 1, 1, 1, 1, 1, 1)]), "bar_daily")
+        # 批 134：原「trade_date=bad 经 pd.to_datetime 抛错」的路径已随断点检查删除；
+        # fail-soft 语义改为直接注入校验器异常来钉（不依赖实现细节）。
+        with patch("src.data_platform.adapters.tushare_adapter.validate_bar_quality",
+                   side_effect=RuntimeError("boom")):
+            with caplog.at_level(logging.WARNING, logger=engine.__name__):
+                engine._log_bar_quality(_df([("000001.SZ", "20260925", 1, 1, 1, 1, 1, 1)]), "bar_daily")
         assert any("校验器异常（不阻入库）" in r.message for r in caplog.records)
 
     def test_engine_issues_logged_per_line(self, caplog):

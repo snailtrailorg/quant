@@ -947,17 +947,31 @@ def _save_bars(rows: list[tuple]) -> int:
     return save_bars("1D", rows)
 
 
-def _log_bar_quality(df, label: str) -> None:
-    """批 71：日线质量校验（fail-soft——校验器任何异常只 warning 不阻入库，对齐旧 :692-698
-    语义；v2 #1 双同 P1）。输入=Tushare 原生 df（ts_code/trade_date YYYYMMDD/ohlc/vol/pre_close）；
-    issues 一行一条（观察期统计友好——v2 #16）。"""
+def _quality_snapshot(df, label: str) -> dict | None:
+    """跑一次质量校验（fail-soft：异常只 warning、返回 None，绝不阻入库）。
+
+    批 134：`_log_bar_quality`（per-symbol，逐 issue）与 `sync_all`（全量，只累计）
+    共用本函数——避免两处各写一遍 try/except 与 import。
+    """
     try:
         from src.data_platform.adapters.tushare_adapter import validate_bar_quality
-        q = validate_bar_quality(df)
-        for issue in q.get("issues") or []:
-            logger.warning("[quality] %s %s", label, issue)
+        return validate_bar_quality(df)
     except Exception as e:
         logger.warning("[quality] %s 校验器异常（不阻入库）: %s", label, e)
+        return None
+
+
+def _log_bar_quality(df, label: str) -> None:
+    """per-symbol 质量校验（fail-soft；issues 一行一条——量小，观察期查询口径不变）。
+
+    批 134：校验语义已改（删断点/跳空，见 `validate_bar_quality` docstring）；**全量重建路径
+    不走本函数**——它只在 `sync_all` 里累计成一条摘要（见 `quality.summarize`）。
+    """
+    q = _quality_snapshot(df, label)
+    if not q:
+        return
+    for issue in q.get("issues") or []:
+        logger.warning("[quality] %s %s", label, issue)
 
 
 # 批 72 v2 #6：质量校验 label 词表映射（沿用批 71——观察期查询零改动）。
@@ -3866,6 +3880,14 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
     ok = 0
     failed: list[str] = []
     total_saved = 0
+    # 批 134：质量计数**局部累加**（零全局态）——全量重建逐标的逐 issue warning 会挤爆 journald
+    # （实测 16 万行/小时），改为结束时一条摘要。
+    from src.data_platform.adapters import quality as _q
+    q_counts = _q.empty_counts()
+    q_symbols = 0
+    q_with_issue = 0
+    q_errors = 0
+    q_top: list[tuple[str, int]] = []
 
     for i, tc in enumerate(ts_codes, 1):
         try:
@@ -3885,13 +3907,29 @@ def sync_all(sync_id: str, progress_cb: Callable | None = None) -> dict:
                 with rate_limit_context(ds, "daily"):
                     df = _pull_daily_df(adapter, tc, start, today, kind=kind)
                 if df is not None and not df.empty:
-                    _log_bar_quality(df, _QUALITY_LABEL_OF.get(kind, kind))   # 批 72：sync_all 收编（v2 #3）
+                    # 批 134：**只累计不逐条 warning**（本轮结束出 1 条摘要）
+                    q = _quality_snapshot(df, _QUALITY_LABEL_OF.get(kind, kind))
+                    if q is None:
+                        q_errors += 1
+                    else:
+                        q_symbols += 1
+                        _q.add_counts(q_counts, q.get("counts"))
+                        n_bad = _q.issue_total(q.get("counts") or {})
+                        if n_bad:
+                            q_with_issue += 1
+                            q_top.append((tc, n_bad))
                     total_saved += _save_bars(adapter.to_bar_rows(df, "1D", None))
             ok += 1
         except Exception as e:
             failed.append(f"{tc}:{type(e).__name__}:{str(e)[:40]}")
         if progress_cb:
             progress_cb(i, total, tc)
+
+    if q_symbols or q_errors:
+        logger.warning(_q.summarize(
+            _QUALITY_LABEL_OF.get(kind, kind), q_counts, symbols=q_symbols,
+            with_issue=q_with_issue, errors=q_errors,
+            top=sorted(q_top, key=lambda x: -x[1])))
 
     return {"status": "partial" if failed else "success",
             "total": total, "ok": ok, "failed_count": len(failed),

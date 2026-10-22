@@ -481,60 +481,82 @@ def save_daily_basic(df: pd.DataFrame) -> int:
 # --- 数据质量校验 ---
 
 def validate_bar_quality(df: pd.DataFrame) -> dict:
-    """F-DATA-020 数据质量自动校验。
+    """F-DATA-020 数据质量校验（批 134 语义修正版）。
 
-    检查：去重、价量为 0、异常跳空、时序断点。
+    只查**本函数能判准**的两类：
+      - dup        重复 K 线（同 ts_code + trade_date）
+      - zero_price OHLC 为 0（真脏价，行被剔除）
+    并按停牌语义分两个桶：
+      - suspended           vol=0 且 OHLC 四价齐平 ⇒ **正常停牌**，不产 issue
+      - suspended_residual  vol=0 但价格不齐平 ⇒ 真异常，产 issue
+
+    **已删的两项（批 134，实测依据）**：
+      - 时序断点(>7 自然日)：df 级启发式把春节/国庆长假当断点——实测 300/300 标的中标、
+        34.5 处/标的、96% 落在长假。真断点判定属 engine._find_gaps（trade_cal 日历感知 +
+        sync_gap 落表），本函数无权也无信息判定。
+      - 异常跳空(>20%)：命中以除权伪命中（pre_close 未复权，主板 2,162 命中里仅 19 非除权）
+        + 北交所 ±30% + 基金/转债为主；板别阈值需 板别/ST/新股/复牌/除权 五类元数据，df 不具备。
+
+    **valid 口径刻意保持原语义**：历史上含「为 0」「停牌」的 issue 不计入 invalid ⇒ 现等价于
+    counts["dup"] == 0。这是**保留**而非遗漏，改它等于静默翻转既有消费方行为。
+
+    Returns: {valid, issues, counts{dup,zero_price,suspended,suspended_residual},
+              clean_count, original_count, dedupped}
     """
+    counts = {"dup": 0, "zero_price": 0, "suspended": 0, "suspended_residual": 0}
     if df is None or df.empty:
-        return {"valid": False, "issues": ["空数据"], "clean_count": 0}
+        # 空 df 同样返回四键（累加侧不得 KeyError）
+        return {"valid": False, "issues": ["空数据"], "counts": counts,
+                "clean_count": 0, "original_count": 0, "dedupped": 0}
 
-    issues = []
+    issues: list[str] = []
     total = len(df)
     clean = df.copy()
 
     # 1. 去重（trade_date 重复）
-    dup_count = clean.duplicated(subset=["ts_code", "trade_date"]).sum()
+    dup_count = int(clean.duplicated(subset=["ts_code", "trade_date"]).sum())
     if dup_count > 0:
         issues.append(f"重复K线: {dup_count} 条")
         clean = clean.drop_duplicates(subset=["ts_code", "trade_date"])
+        counts["dup"] = dup_count
 
-    # 2. 价/量为 0
-    for col in ["open", "high", "low", "close"]:
-        zero = (clean[col] == 0).sum()
-        if zero > 0:
-            issues.append(f"{col} 为 0: {zero} 条")
-            clean = clean[clean[col] != 0]
+    # 2. 停牌掩码**先算**（置于价 0 检查之前）：全 0 OHLC 的停牌行若先走价 0 分支，
+    #    会先喷「open 为 0」并被剔除，停牌桶永远看不到它（误报；clean 被调用方丢弃，无数据丢失）。
+    ohlc = [c for c in ("open", "high", "low", "close") if c in clean.columns]
+    if len(ohlc) == 4 and "vol" in clean.columns:
+        flat = ((clean["open"] == clean["high"]) & (clean["high"] == clean["low"])
+                & (clean["low"] == clean["close"]))
+        zero_vol = clean["vol"].fillna(0) == 0
+        susp = zero_vol & flat
+    else:
+        zero_vol = pd.Series(False, index=clean.index)
+        susp = pd.Series(False, index=clean.index)
+    counts["suspended"] = int(susp.sum())
 
-    vol_zero = (clean["vol"] == 0).sum() if "vol" in clean.columns else 0
-    if vol_zero > 0:
-        issues.append(f"成交量为 0: {vol_zero} 条（停牌可能正常）")
+    residual = zero_vol & ~susp
+    if bool(residual.any()):
+        counts["suspended_residual"] = int(residual.sum())
+        issues.append("成交量为 0 且价格不齐平: %d 条" % counts["suspended_residual"])
 
-    # 3. 异常跳空（今收 vs 昨收 > 20%）
-    if "close" in clean.columns and "pre_close" in clean.columns:
-        clean["gap_pct"] = abs(clean["close"] - clean["pre_close"]) / clean["pre_close"].replace(0, 1) * 100
-        big_gaps = (clean["gap_pct"] > 20).sum()
-        if big_gaps > 0:
-            issues.append(f"异常跳空(>20%): {big_gaps} 条")
-
-    # 4. 时序断点（日线 >7 天间隔）——per-symbol 向量化（批 71：全市场批跨标的混算
-    #    无意义；sort+diff 后掩掉 ts_code 变更行=组边界，免 groupby-apply 逐组开销）
-    if "trade_date" in clean.columns:
-        clean = clean.sort_values(["ts_code", "trade_date"])
-        dates = pd.to_datetime(clean["trade_date"], format="%Y%m%d")
-        diffs = dates.diff().dt.days
-        same_sym = clean["ts_code"].eq(clean["ts_code"].shift())
-        gaps = ((diffs > 7) & same_sym).sum()
-        if gaps > 0:
-            issues.append(f"时序断点(>7天): {gaps} 处")
+    # 3. 价 0（排除停牌行；按行计一次，消息仍逐列给出便于定位）
+    zero_any = pd.Series(False, index=clean.index)
+    for col in ohlc:
+        z = (clean[col] == 0) & ~susp
+        if bool(z.any()):
+            issues.append(f"{col} 为 0: {int(z.sum())} 条")
+            zero_any = zero_any | z
+    if bool(zero_any.any()):
+        counts["zero_price"] = int(zero_any.sum())
+        clean = clean[~zero_any]
 
     return {
-        "valid": len([i for i in issues if "为 0" not in i and "停牌" not in i]) == 0,
+        "valid": counts["dup"] == 0,      # 见 docstring：保持原「价 0 / 停牌不计 invalid」语义
         "issues": issues,
+        "counts": counts,
         "clean_count": len(clean),
         "original_count": total,
-        "dedupped": int(dup_count) if dup_count > 0 else 0,
+        "dedupped": counts["dup"],
     }
-
 
 # ─── 三档数据第一档：全局定时同步 pull 函数（U 审 2026-08-19）───
 
