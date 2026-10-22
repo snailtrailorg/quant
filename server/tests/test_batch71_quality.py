@@ -1,6 +1,6 @@
 """批 71 · 数据质量地基四件套测试。
 
-件 1：validate_bar_quality 真 bug 修复（DataFrame 进出+per-symbol 断点+fail-soft）
+件 1：validate_bar_quality 真 bug 修复（DataFrame 进出+fail-soft；**批 134 起判据=重复/价0/停牌/残差四桶**，断点检查已删——真断点归 engine._find_gaps）
 件 2：cur_version seed 后不走缺省（mock DB）
 件 3：_log_usage 双写（llm_usage+data_source_usage 独立 try）
 件 4：ApiError params 端点级形状（BOT_QUOTA）
