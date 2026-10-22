@@ -1,78 +1,74 @@
-# 批 132 · CSP 撤 unsafe-eval（vue-i18n 构建期预编译）· v2
+# 批 132 · CSP 撤 unsafe-eval（vue-i18n 构建期预编译）· v3
 
-> 立项 2026-10-21（用户裁 A）。**v2（盲审 A 实证后重写）**：4 P0 + 4 P1 全处置。v1 有两处必炸（build 直接失败 / build 绿但运行时白屏）+ 验证假绿 + 上线次序缺失。
+> 立项 2026-10-21（用户裁 A）。**v3（双盲审齐）**：A 审 v1 出 4 P0（实证）；B 审 v2 再出 2 P0 + 4 P1（归因纠正）。全部处置。
 
 ## 背景
 
-10-12 事故：`script-src 'self'` 拦 vue-i18n 运行时消息编译器（`new Function`）⇒ 登录页白屏；应急加 `'unsafe-eval'`（f21ad67 + 线上热修）。本批构建期预编译撤销它。
+10-12 事故：`script-src 'self'` 拦 vue-i18n 运行时消息编译器（`new Function`）⇒ 登录页白屏；应急加 `'unsafe-eval'`。本批构建期预编译撤销它。
 
-## 现状（A 实核）
+## P0（6 条，全实证）
 
-- 词条：单文件 `web/src/locales/index.js`（160KB 静态 JS 对象）；**无 SFC `<i18n>`、无 tm/rt、无 setLocaleMessage**——插件最干净接入形态。
-- 初始化：`web/src/i18n.js:24-29` `legacy: false`，66 处 `useI18n()`（全线 composition，legacy 问题不存在）。
-- 现状产物：`dist/assets/vue-vendor-*.js` 含 `new Function`（=事故同款）。
-- CSP 配置实为 **3 处**（quant.conf :30 server 级 / :91 index.html / :102 assets），非 v1 写的 2 处。
+### P0-1 **11 条**词条含保留符（v2 写 9 条，B 补 2）
+`{}`/`@` 是硬错（build 直接失败）；**`|` 是复数分隔符 —— build 绿、静默腐化**（只显示最后一支）。
 
-## P0（必炸项，v2 已修）
+| 词条 | 位置 | 保留符 | 后果 |
+|---|---|---|---|
+| zh.backtest.jsonHint / factors.paramsInvalid / factors.phParams / err.IFACE_PARAMS_INVALID / err.EMAIL_INVALID_FORMAT | locales/index.js | `{}`/`@` | build 硬错 |
+| en.backtest.jsonHint / factors.phParams / err.IFACE_PARAMS_INVALID / err.EMAIL_INVALID_FORMAT | 同上 | `{}`/`@` | build 硬错 |
+| **zh.backtest.groupAvg（:491）/ en（:1843）** | 含 4 个 `|` | `|` | **build 绿但上线丢前三段**（BacktestRun.vue:40 实测只显示「夏普 3」） |
 
-### P0-1 构建直接失败：9 条词条含 `{}`/`@` 保留符
-`zh.backtest.jsonHint`、`zh.factors.paramsInvalid`、`zh.factors.phParams`、`zh.err.IFACE_PARAMS_INVALID`、`zh.err.EMAIL_INVALID_FORMAT` + en 同 4 条（共 9）。
-根因：vue-i18n 消息语法里 `{`/`}`/`@` 为保留符（运行时只 warn 回落，构建期硬错 `Invalid token in placeholder`）。
-**修法（已实证渲染正确）**：转义为 `{'{'}` / `{'}'}` / `{'@'}`。**限定范围必须放开这 9 条**（只改这 9 条）。
-附带：`strictMessage` HTML 检查无风险（词条值零 HTML 标签）。
+修法：转义 `{'{'}`/`{'}'}`/`{'@'}`/`{'|'}`（实测渲染正确；不影响 check-locales 占位符正则）。`$` 在 vue-i18n 9 非保留符（词法只认 `{ } @ |`），不处理。
+**防复发**：`web/scripts/check-locales.mjs` 加第 5 门（AST 遍历校验消息 token 合法性）——手抄清单必漏（本次 9 vs 11 即证）。
 
-### P0-2 默认配置 = build 绿但运行时白屏（最危险）
-插件 v11 把资源编译成 AST，而 vue-i18n **9.14.4** 运行时要 `__INTLIFY_JIT_COMPILATION__` 才认 AST；未 define ⇒ 运行时把 AST 当字符串再编译 ⇒ `SyntaxError` + 登录页空壳（dev 用 full build 看不出）。
-**修法（已实测）**：
-```js
-define: { __INTLIFY_JIT_COMPILATION__: 'true' },
-plugins: [vue(), VueI18nPlugin({ include: '<abs>/src/locales/**', dropMessageCompiler: true })],
-```
-实测：产物 `new Function`/`Function(`/`eval(` 均 0；严格 CSP 下渲染 `保存|你好，Bob！`，零违规零 pageerror。
-备选（同样实测干净，但属依赖大版本）：升 vue-i18n@11.4.16 —— 另批，本批走 A。
+### P0-2 插件默认配置 = build 绿但运行时白屏
+插件 v11 产 AST，vue-i18n 9.14.4 运行时需 `__INTLIFY_JIT_COMPILATION__` 才认；未 define ⇒ SyntaxError + 登录页空壳。
+修法：`define: { __INTLIFY_JIT_COMPILATION__: 'true' }` + `VueI18nPlugin({ include: <glob>, dropMessageCompiler: true })`。
 
-### P0-3 验证必须自建「生产 CSP 静态服务」
-- dev server 用 full build ⇒ P0-2 类故障不复现；
-- `vite preview` **不发 CSP 头** ⇒ 零证据（=curl 盲区换壳）。
-**必须**：`vite build` → node http 起静态服务（**带生产同款 CSP 串** + history 回退）→ puppeteer-core + `/usr/bin/google-chrome`（仓内先例 `web/verify-gate.mjs`）：
-1) `evaluateOnNewDocument` 注册 `securitypolicyviolation` 收集（console 文本不可靠）；
-2) 全新 context（不写 localStorage）= 未登录态 → `/login`；
-3) 收 `pageerror`；
-4) zh/en 各跑一遍。
-**判据**：`violations.length === 0 && pageerrors.length === 0` + 选择器断言（`input[type=password]`、按钮文案、`#app` 非单注释）。原「DOM ≥ 4231B」降为辅助信号。
+### P0-3 验证必须自建「生产 CSP 静态服务」，且**分两档**
+- dev server 用 full build 不复现；`vite preview` 不发 CSP 头 ⇒ 零证据。
+- **B 补 P0**：静态服务无后端 ⇒ 3 个动态 key 页（需 admin/数据）进不去，router 重定向回 /login，脚本「通过」=假绿。
 
-### P0-4 上线次序（否则第二次白屏）
-nginx conf 无 ansible 处置 = michael 手工通道，与 dist 发布是**两次独立操作**。次序：
-① **先上 dist**（此时 conf 仍允许 eval）→ 线上 headless 验 zh/en + 关键页；
-② 再改 conf + reload；
-③ 复验响应头无 `unsafe-eval` + 页面完整。
-回滚 = 一行加回 `'unsafe-eval'`（快于回滚 dist）。
+**两档**：
+- **无后端档**：静态 CSP 服务 + fresh context ⇒ 只测 `/login` 的 0 violation / 0 pageerror。
+- **有后端档**：静态服务挂 `/api`+`/ws` proxy → 127.0.0.1:8000（照抄 vite.config.js:15-22）+ 后端起（dev-start.sh）+ 登录（verify-gate.mjs 式 SMOKE_PASS）⇒ 再跑动态 key 页/菜单页。
+- 实现细节：module script 必须 `Content-Type: text/javascript`（回 text/plain ⇒ 整页空白=假红）；SPA history 回退；CSP 只加文档响应（子资源头不参与执行策略）。
+- **zh 分支必须强制**：fresh context + headless 默认 en-US ⇒ detectBrowserLang 恒 en，zh 永不执行。用 `evaluateOnNewDocument` 覆写 `navigator.language/languages` 或写 `localStorage.lang`（verify-gate.mjs:10 现成写法）。
+
+### P0-4 上线次序 + **逆向不变量**
+① 先上 dist（conf 仍允许 eval）→ 线上验 zh/en + 关键页；② 再改 conf → `nginx -t && systemctl reload nginx`；③ 复验头无 unsafe-eval + 页面完整。
+**逆向不变量（B 补）**：conf 撤 eval 后，**任何回滚 dist 到 132 之前版本都会二次白屏**（旧 vue-vendor 含 new Function）⇒ 回滚 dist 前**必须先恢复 eval**。写进任务。
+**真源（B 补）**：deploy 全链无 nginx 任务（14 只 wrapper 无 nginx）⇒ 手工通道；且仓内 `server/scripts/nginx/quant.conf` 只落 releases/<id>/scripts/nginx/，**不是 /etc 那份**（10-12 是热修）⇒ 动手前先 `nginx -T` 快照 diff 三行再改。
+**dist 走管道**：release.yml:120 preflight build / :301 阶段2 rsync dist / :517 flip-web ⇒ 走 release.yml + 部署窗，禁手工 scp。
+
+### P0-5 两处落地即炸（B 补）
+- `web/package.json` 有 `"type": "module"` ⇒ vite.config.js **无 `__dirname`** ⇒ 用 `fileURLToPath(new URL('./src/locales/**', import.meta.url))`。
+- **vue-i18n 精确钉 9.14.4**（现 `^9.13.0` 可漂移）——JIT 是「插件产 AST ↔ 运行时认 AST」私有契约，小版本错位=白屏。
+
+### P0-6 体积真实数字（B 纠正归因）
+3.9MB/1MB gzip 那个 chunk 是 **monaco**（编辑器页动态引），**不是主包**。entry = 148KB 裸 / **60KB gzip**，locale 就在 entry ⇒ 预编译后 entry **60KB → ~115KB gzip（+90%）**。
+修法：`manualChunks` 增 `if (id.includes('/src/locales/')) return 'locales'`（vite.config.js:38 起）——hash 稳定 ⇒ 二次访问 immutable，index.html 并行 preload。验收记 entry 前后两个 gzip 数。
 
 ## P1
 
-- **CSP 3 处一起改**（:30/:91/:102）——只改 2 处虽能生效（子资源 CSP 不参与文档执行策略），但留漂移。
-- **「产物无 new Function」判据改口径**：`echarts-*.js` 有 `new Function("return ("+r+")")()` 死分支（JSON.parse 兜底，实测不执行）⇒ 判据 = 「**vue-vendor 内 0 处** + 运行时违规=0」。
-- **体积实测（须记录）**：词条 128KB → **1.31MB 裸 / 114KB gzip（+63KB）**；主包已 3.9MB/1MB gzip。接受或拆 locale chunk——任务文件留数字，别上产后才发现。
-- **版本钉死**：`@intlify/unplugin-vue-i18n@11.2.7 -D` + 提交 package-lock（v12 行为变了）。
+- CSP **3 处**一起改（:30/:91/:102）。
+- 「产物无 new Function」判据改：**除 echarts 已知 2 处（import 期 custom-element 探测，try/catch 吞）外全 assets 0 处** + 运行时违规=0（否则别的库引入 eval 无感）。
+- 动态 key 页断言：先 waitFor 页面特征文案再断 0 violation（空页也 0 violation）。
+- 覆盖建议从「3 页」扩成**登录后主菜单 16 项全扫**（顺带覆盖 monaco 页，成本≈0）。
+- prebuild 是**四项**（check-tokens/check-locales/test-coldiff/check-orphans），转义后行宽变化可能触 coldiff ⇒ 改完跑全链。
+- 加 `"verify:csp"` npm script（否则没人跑）。
 
-## P2
+## 落地清单
 
-- `include` 用 glob `src/locales/**`（别硬路径；别把应用源码纳入）。
-- **动态 key 页必须验**（预编译后是对象树查找，安全但需覆盖）：`PermResources.vue:133`（nav.${}）/ `Risk.vue:132`（common.lvl.${}）/ `InterfacesCard.vue:37`（interfaces.cap_${}）/ `RiskRules.vue:90` / `AlertSettings.vue:152` / `utils/status.js:14` / `utils/cronText.js:74`。
-- 语言切换断「渲染一致」（zh/en 同页 innerText 含对应语种字样），非「不报错」。
-- 转义后行宽变化可能触 `check-coldiff` ⇒ 改完跑全链 `npm run build`（含 prebuild 三检查）。
-
-## 最小改动清单
-
-1. `web/package.json`：`@intlify/unplugin-vue-i18n@11.2.7`（devDep 钉死）+ lock
-2. `web/vite.config.js`：VueI18nPlugin（include glob + dropMessageCompiler）+ define JIT flag
-3. `web/src/locales/index.js`：9 条词条转义
-4. `server/scripts/nginx/quant.conf`：3 处删 `'unsafe-eval'`
-5. 验证脚本：`web/scripts/verify-csp.mjs`（落库作回归守门）
+1. `web/package.json`：`@intlify/unplugin-vue-i18n@11.2.7`（钉死）+ **vue-i18n 精确 9.14.4** + `verify:csp` script + lock
+2. `web/vite.config.js`：VueI18nPlugin（ESM include 写法 + dropMessageCompiler）+ define JIT flag + manualChunks 拆 locales
+3. `web/src/locales/index.js`：**11 条**转义（含 groupAvg 的 `|`）
+4. `web/scripts/check-locales.mjs`：加第 5 门（保留符校验，防复发）
+5. `web/scripts/verify-csp.mjs`：两档（无后端/有后端）+ securitypolicyviolation + pageerror + zh 强制
+6. `server/scripts/nginx/quant.conf`：3 处删 unsafe-eval（线上以 `nginx -T` 快照为准）
 
 ## 验收标准
-1. `npm run build` 全链绿（含 prebuild 三检查）
-2. verify-csp.mjs：登录页 + 3 个动态 key 页 × zh/en → 0 violation / 0 pageerror / 选择器齐
-3. `vue-vendor` 产物 0 处 `new Function`；体积变化记录在案
-4. **上线次序**：dist 先行（eval 仍开）→ 线上验 → conf 撤 eval（michael）→ 复验头 + 页面
-5. 回滚预案：conf 一行加回
+1. `npm run build` 全链绿（四门 prebuild）
+2. 无后端档：`/login` × zh/en ⇒ 0 violation / 0 pageerror / 选择器齐
+3. 有后端档：登录成功 → 主菜单 16 项全扫 + 7 处动态 key 页 ⇒ 0 违规（echarts 除外）+ 文案渲染正确（groupAvg 四段齐全）
+4. entry gzip 前后对比记录（预期 ~60KB → ~115KB，拆 locales 后回落到 ~65KB）
+5. 上线四步 + 逆向不变量 + `nginx -T` 快照 diff 留档
