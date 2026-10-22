@@ -1,8 +1,21 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import { fileURLToPath, URL } from 'node:url'
+import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite'
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    // 批 132：vue-i18n 词条**构建期预编译**（运行时不再 new Function ⇒ 可撤 CSP unsafe-eval）。
+    // dropMessageCompiler=true 剥掉运行时编译器；JIT flag 让 9.x 运行时认插件产出的 AST
+    // （缺它会 build 绿但运行时 SyntaxError + 登录页白屏——双盲审 A/B 均实证）。
+    // ⚠ package.json 是 "type": "module" ⇒ **无 __dirname**，include 必须用 import.meta.url。
+    VueI18nPlugin({
+      include: fileURLToPath(new URL('./src/locales/**', import.meta.url)),
+      dropMessageCompiler: true,
+    }),
+  ],
+  define: { __INTLIFY_JIT_COMPILATION__: 'true' },
   server: {
     port: 5173,
     proxy: {
@@ -26,6 +39,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // 批 132：locale 表（预编译后 ~1.31MB 裸）独立成 chunk——防 entry 从 60KB gzip 涨到 115KB
+          if (id.includes('/src/locales/')) return 'locales'
           // Vue 核心框架
           if (id.includes('node_modules/vue/') || id.includes('node_modules/@vue/') ||
               id.includes('node_modules/vue-router') || id.includes('node_modules/vue-i18n')) {

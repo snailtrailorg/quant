@@ -125,3 +125,34 @@ console.log('✓ locales 无重复键')
   }
   console.log('✓ 词条占位符 zh/en 一致（集合语义）')
 }
+
+// 批 132 第 5 门：vue-i18n 消息保留符校验（{ } @ |）——未转义的保留符要么 build 硬错（{ } @），
+// 要么**静默腐化**（| 是复数分隔符：build 绿但只显示最后一支，实测 groupAvg 前三段全丢）。
+// 用 acorn AST 取字符串字面量（正则跨行必误报）；合法占位符 {name}/{n} 与转义形态 {'x'} 放行。
+{
+  const bads = []
+  const walk = (node, path) => {
+    if (!node || typeof node !== 'object') return
+    if (node.type === 'Literal' && typeof node.value === 'string') {
+      let s = node.value
+      if (!/[{}@|]/.test(s)) return
+      s = s.replace(/\{'(.)'\}/g, '')                     // 已转义形态 {'x'} 全部摘除
+      s = s.replace(/\{[A-Za-z_][A-Za-z0-9_]*\}/g, '')     // 命名占位符
+      s = s.replace(/\{\d+\}/g, '')                       // 索引占位符
+      if (/[{}@|]/.test(s)) bads.push('  ' + path + ': ' + node.value.slice(0, 70))
+      return
+    }
+    for (const k of Object.keys(node)) {
+      const v = node[k]
+      if (Array.isArray(v)) v.forEach((x, idx) => walk(x, path))
+      else if (v && typeof v === 'object') walk(v, path)
+    }
+  }
+  walk(ast, 'locales')
+  if (bads.length) {
+    console.error('✗ 词条含未转义的 vue-i18n 保留符（{ } @ |）' + bads.length + ' 处——用 {\'x\'} 转义:')
+    bads.slice(0, 10).forEach(x => console.error(x))
+    process.exit(1)
+  }
+  console.log('✓ 词条无未转义保留符（{ } @ |）')
+}
