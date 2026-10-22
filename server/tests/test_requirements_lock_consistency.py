@@ -163,18 +163,19 @@ class TestRealFiles:
 
 # ────────────── 批 136 增补：**版本满足**闸门（原闸门只查包名，不查版本） ──────────────
 #
-# 血证（批 136）：Pillow>=13.0.0 写进 .txt，但 .lock 仍是 pillow==12.3.0 ⇒
-# 原闸门（只比包名）全绿，部署按 lock 装 ⇒ prod 实际仍是 12.3，**安全修复假绿**。
-# 所以补一条：部署目标 Python（3.11）适用的声明，其版本约束必须被 lock 的 pin 满足。
-#（全仓只有 Pillow 带环境标记；标记求值只支持 python_version <op> "x.y" 形态，
-# 出现别的标记形态请扩展本闸门，不要静默放过。）
+# 血证（批 136，2026-10-22）：Pillow>=13.0.0 写进 .txt 而 .lock 仍钉 12.3.0 ⇒
+# 原闸门（只比包名）全绿，部署按 lock 装 ⇒ prod 实际仍是旧版，**安全修复假绿**。
+# 另：本仓**部署环境有 Python 版本漂移**（prod=3.11 / staging=3.10，见 DEPLOY_PYS），
+# 故 lock 允许同名多 pin（带环境标记）；本闸门按**每个目标版本**分别校验。
 
-_DEPLOY_PY = (3, 10)   # 部署 venv 的实际解释器版本
-# 证据（批 136，2026-10-22）：release 阶段 5 pip 预检拒绝 `pillow==13.0.0`
-# （"Requires-Python >=3.11 … require a different python version"）⇒ 部署 venv 是 3.10，
-# 与 lock 头 "pip-compile with Python 3.10" 一致。若将来升级 runtime，**同步改这里**。
+DEPLOY_PYS = ((3, 10), (3, 11))   # staging/dev 与 prod 的实际解释器版本（prod 取自运行态安全快照）
+# 证据：staging release 阶段 5 pip 预检拒绝 pillow==13.0.0（Requires-Python >=3.11）⇒ staging=3.10；
+#       prod /api/security/snapshot 的 components.python = 3.11.13 ⇒ prod=3.11。
+
 _SPEC_RE = re.compile(r"^(>=|<=|==|>|<)\s*([0-9][0-9A-Za-z.\-]*)")
 _MARKER_RE = re.compile(r'python_version\s*(>=|<=|==|>|<)\s*["\']([0-9.]+)["\']')
+_LOCK_PIN_M = re.compile(
+    r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([0-9][0-9A-Za-z.\-]*)\s*(?:;\s*(.*))?$")
 
 
 def _vtuple(v: str) -> tuple[int, int, int]:
@@ -184,9 +185,9 @@ def _vtuple(v: str) -> tuple[int, int, int]:
     return (nums[0], nums[1], nums[2])
 
 
-def marker_applies(marker: str, py: tuple[int, int] = _DEPLOY_PY) -> bool:
-    """部署目标 Python 是否命中该环境标记（无标记=恒真）。"""
-    if not marker.strip():
+def marker_applies(marker: str, py: tuple[int, int]) -> bool:
+    """该环境标记在目标 Python 上是否成立（无标记=恒真）。"""
+    if not marker or not marker.strip():
         return True
     m = _MARKER_RE.search(marker)
     if not m:
@@ -202,8 +203,8 @@ def _satisfies(version: str, op: str, want: str) -> bool:
             ">": a > b, ">=": a >= b}[op]
 
 
-def declared_specs(text: str, py: tuple[int, int] = _DEPLOY_PY) -> dict[str, list[tuple[str, str]]]:
-    """部署目标适用的顶层声明：{规范化包名: [(op, 版本), …]}（同名多行=合并约束）。"""
+def declared_specs(text: str, py: tuple[int, int]) -> dict[str, list[tuple[str, str]]]:
+    """目标 Python 适用的顶层声明：{规范化包名: [(op, 版本), …]}。"""
     specs: dict[str, list[tuple[str, str]]] = {}
     for raw in text.splitlines():
         line = raw.strip()
@@ -218,35 +219,34 @@ def declared_specs(text: str, py: tuple[int, int] = _DEPLOY_PY) -> dict[str, lis
         m = _NAME_HEAD.match(body.strip())
         if not m:
             continue
-        rest = body.strip()[m.end():]
-        sm = _SPEC_RE.match(rest.strip())
+        sm = _SPEC_RE.match(body.strip()[m.end():].strip())
         if sm:
             specs.setdefault(canon(m.group(1)), []).append((sm.group(1), sm.group(2)))
     return specs
 
 
-def lock_versions(text: str) -> dict[str, str]:
-    """{包名: 版本}（只取 pin 行）。"""
-    out: dict[str, str] = {}
+def lock_pins(text: str) -> dict[str, list[tuple[str, str]]]:
+    """{包名: [(版本, 标记)]}——同包可有多条带标记的 pin（跨 Python 版本分档）。"""
+    out: dict[str, list[tuple[str, str]]] = {}
     for raw in text.splitlines():
-        m = re.match(r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([0-9][0-9A-Za-z.\-]*)", raw)
+        m = _LOCK_PIN_M.match(raw.strip().rstrip("\\").strip())
         if m:
-            out[canon(m.group(1))] = m.group(2)
+            out.setdefault(canon(m.group(1)), []).append((m.group(2), m.group(3) or ""))
     return out
 
 
 def version_violations(txt_text: str, lock_text: str,
-                       py: tuple[int, int] = _DEPLOY_PY) -> list[str]:
-    """部署目标适用的声明里，lock 的 pin 不满足约束的项（应为空）。"""
-    locks = lock_versions(lock_text)
+                       py: tuple[int, int]) -> list[str]:
+    """给定目标 Python 下，lock 的 pin 不满足 txt 约束的项（应为空）。"""
+    pins = lock_pins(lock_text)
     bad: list[str] = []
     for name, specs in declared_specs(txt_text, py).items():
-        ver = locks.get(name)
-        if ver is None:
+        cand = [v for v, mk in pins.get(name, []) if marker_applies(mk, py)]
+        if not cand:
             continue           # 缺包由「包名闸门」负责报
         for op, want in specs:
-            if not _satisfies(ver, op, want):
-                bad.append(f"{name}: lock {ver} 不满足 {op}{want}（部署目标 py{py[0]}.{py[1]}）")
+            if not any(_satisfies(v, op, want) for v in cand):
+                bad.append(f"{name}: lock {cand} 不满足 {op}{want}（目标 py{py[0]}.{py[1]}）")
     return bad
 
 
@@ -259,24 +259,31 @@ class TestVersionSatisfaction:
 
     def test_passes_when_pin_newer(self):
         assert version_violations('PySocks>=1.7\n',
-                                  "pysocks==1.7.1 \\\n    --hash=sha256:x\n") == []
+                                  "pysocks==1.7.1 \\\n    --hash=sha256:x\n", py=(3, 10)) == []
 
     def test_marker_filtered_out(self):
-        """仅对 dev(3.10) 适用的声明不参与部署目标判定。"""
-        txt = 'Pillow>=99.0.0; python_version < "3.11"\n'
-        assert version_violations(txt, "pillow==13.0.0\n", py=(3, 11)) == []
+        """仅对 ≥3.11 适用的声明，在 3.10 目标下不参与判定。"""
+        txt = 'Pillow>=99.0.0; python_version >= "3.11"\n'
+        assert version_violations(txt, "pillow==12.3.0\n", py=(3, 10)) == []
 
-    def test_marker_applied_for_deploy_target(self):
-        txt = 'Pillow>=13.0.0; python_version >= "3.11"\n'
-        assert version_violations(txt, "pillow==13.0.0\n", py=(3, 11)) == []
-        assert version_violations(txt, "pillow==12.3.0\n", py=(3, 11))
+    def test_dual_pin_satisfies_both_targets(self):
+        """双分支 pin（13.0.0@≥3.11 / 12.3.0@<3.11）在两个目标下都通过。"""
+        txt = ('Pillow>=13.0.0; python_version >= "3.11"\n'
+               'Pillow>=12.3.0; python_version < "3.11"\n')
+        lock = ("pillow==13.0.0 ; python_version >= \"3.11\" \\\n    --hash=sha256:a\n"
+                "pillow==12.3.0 ; python_version < \"3.11\" \\\n    --hash=sha256:b\n")
+        assert version_violations(txt, lock, py=(3, 10)) == []
+        assert version_violations(txt, lock, py=(3, 11)) == []
 
     def test_real_files_versions_satisfied(self):
-        """核心断言：部署目标下 .txt 的每个版本约束都被 .lock 满足。"""
-        bad = version_violations(REQ_TXT.read_text(encoding="utf-8"),
-                                 REQ_LOCK.read_text(encoding="utf-8"))
+        """核心断言：**每个部署目标版本**下 .txt 的版本约束都被 .lock 满足。"""
+        txt = REQ_TXT.read_text(encoding="utf-8")
+        lock = REQ_LOCK.read_text(encoding="utf-8")
+        bad: list[str] = []
+        for py in DEPLOY_PYS:
+            bad += version_violations(txt, lock, py=py)
         assert not bad, (
             "requirements.lock 的 pin 不满足 requirements.txt 的版本约束：\n  "
             + "\n  ".join(bad)
-            + "\n→ 后果：部署按 lock 装 ⇒ prod 实际版本仍是旧的，安全/功能修复假绿（批 136 的 Pillow 即此坑）。"
+            + "\n→ 后果：部署按 lock 装 ⇒ 实际版本仍是旧的，安全/功能修复假绿（批 136 的 Pillow 即此坑）。"
         )

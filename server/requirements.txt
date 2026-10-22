@@ -61,9 +61,9 @@ python-dotenv>=1.0
 # (sentence-transformers + FlagEmbedding)
 cryptography>=42
 qrcode>=7.4
-Pillow>=12.3.0           # 批 136：13.x 要求 Python≥3.11，而**部署 venv 为 3.10**（release 阶段 5 pip 预检实证拒绝 13.0.0）
-                         # ⇒ 12.3.0 是 3.10 上的最高版本；升级 Pillow 需先升 runtime（另立批，见待办）
-aiohttp>=3.14.4          # 批 136：dingtalk-stream 传递依赖显式钉（连接池耗尽/scheme 伪造类 CVE；3.14.5 已是 3.10 可用最新）
+Pillow>=13.0.0; python_version >= "3.11"   # 批 136：prod venv=3.11（运行态快照实证）⇒ 13.x 可装，图像解码 CVE 修复生效
+Pillow>=12.3.0; python_version < "3.11"    # staging/dev venv=3.10（stage5 实证 13.x 被拒）⇒ 保持 12.3（环境漂移债，见待办）
+aiohttp>=3.14.4          # 批 136：dingtalk-stream 传递依赖显式钉（连接池耗尽/scheme 伪造类 CVE；3.14.5 为当前最新）
 
 # === 测试 ===
 pytest>=8.0
