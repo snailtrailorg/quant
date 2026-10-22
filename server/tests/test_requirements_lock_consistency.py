@@ -160,3 +160,120 @@ class TestRealFiles:
         lock = parse_lock_names(REQ_LOCK.read_text(encoding="utf-8"))
         assert "pysocks" in txt, "requirements.txt 里 PySocks 不见了（socks5h 代理将不可用）"
         assert "pysocks" in lock, "PySocks 在 .txt 但不在 .lock ⇒ prod 必缺（102a 事故重演）"
+
+# ────────────── 批 136 增补：**版本满足**闸门（原闸门只查包名，不查版本） ──────────────
+#
+# 血证（批 136）：Pillow>=13.0.0 写进 .txt，但 .lock 仍是 pillow==12.3.0 ⇒
+# 原闸门（只比包名）全绿，部署按 lock 装 ⇒ prod 实际仍是 12.3，**安全修复假绿**。
+# 所以补一条：部署目标 Python（3.11）适用的声明，其版本约束必须被 lock 的 pin 满足。
+#（全仓只有 Pillow 带环境标记；标记求值只支持 python_version <op> "x.y" 形态，
+# 出现别的标记形态请扩展本闸门，不要静默放过。）
+
+_DEPLOY_PY = (3, 11)
+_SPEC_RE = re.compile(r"^(>=|<=|==|>|<)\s*([0-9][0-9A-Za-z.\-]*)")
+_MARKER_RE = re.compile(r'python_version\s*(>=|<=|==|>|<)\s*["\']([0-9.]+)["\']')
+
+
+def _vtuple(v: str) -> tuple[int, int, int]:
+    nums = [int(x) for x in re.findall(r"\d+", v)[:3]]
+    while len(nums) < 3:
+        nums.append(0)
+    return (nums[0], nums[1], nums[2])
+
+
+def marker_applies(marker: str, py: tuple[int, int] = _DEPLOY_PY) -> bool:
+    """部署目标 Python 是否命中该环境标记（无标记=恒真）。"""
+    if not marker.strip():
+        return True
+    m = _MARKER_RE.search(marker)
+    if not m:
+        raise AssertionError(f"不支持的标记形态：{marker!r}——扩展 marker_applies 后再放行")
+    op, ver = m.group(1), _vtuple(m.group(2))[:2]
+    return {"<": py < ver, "<=": py <= ver, "==": py == ver,
+            ">": py > ver, ">=": py >= ver}[op]
+
+
+def _satisfies(version: str, op: str, want: str) -> bool:
+    a, b = _vtuple(version), _vtuple(want)
+    return {"<": a < b, "<=": a <= b, "==": a[:len(b)] == b,
+            ">": a > b, ">=": a >= b}[op]
+
+
+def declared_specs(text: str, py: tuple[int, int] = _DEPLOY_PY) -> dict[str, list[tuple[str, str]]]:
+    """部署目标适用的顶层声明：{规范化包名: [(op, 版本), …]}（同名多行=合并约束）。"""
+    specs: dict[str, list[tuple[str, str]]] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
+            continue
+        line = re.sub(r"\s+#.*$", "", line).strip()
+        if not line:
+            continue
+        body, _, marker = line.partition(";")
+        if not marker_applies(marker):
+            continue
+        m = _NAME_HEAD.match(body.strip())
+        if not m:
+            continue
+        rest = body.strip()[m.end():]
+        sm = _SPEC_RE.match(rest.strip())
+        if sm:
+            specs.setdefault(canon(m.group(1)), []).append((sm.group(1), sm.group(2)))
+    return specs
+
+
+def lock_versions(text: str) -> dict[str, str]:
+    """{包名: 版本}（只取 pin 行）。"""
+    out: dict[str, str] = {}
+    for raw in text.splitlines():
+        m = re.match(r"([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?==([0-9][0-9A-Za-z.\-]*)", raw)
+        if m:
+            out[canon(m.group(1))] = m.group(2)
+    return out
+
+
+def version_violations(txt_text: str, lock_text: str,
+                       py: tuple[int, int] = _DEPLOY_PY) -> list[str]:
+    """部署目标适用的声明里，lock 的 pin 不满足约束的项（应为空）。"""
+    locks = lock_versions(lock_text)
+    bad: list[str] = []
+    for name, specs in declared_specs(txt_text, py).items():
+        ver = locks.get(name)
+        if ver is None:
+            continue           # 缺包由「包名闸门」负责报
+        for op, want in specs:
+            if not _satisfies(ver, op, want):
+                bad.append(f"{name}: lock {ver} 不满足 {op}{want}（部署目标 py{py[0]}.{py[1]}）")
+    return bad
+
+
+class TestVersionSatisfaction:
+    def test_flags_stale_pin(self):
+        """判别力：批 136 的真实事故形态（txt>=13 / lock 12.3）必须红。"""
+        bad = version_violations('Pillow>=13.0.0; python_version >= "3.11"\n',
+                                 "pillow==12.3.0 \\\n    --hash=sha256:x\n")
+        assert bad and "pillow" in bad[0]
+
+    def test_passes_when_pin_newer(self):
+        assert version_violations('PySocks>=1.7\n',
+                                  "pysocks==1.7.1 \\\n    --hash=sha256:x\n") == []
+
+    def test_marker_filtered_out(self):
+        """仅对 dev(3.10) 适用的声明不参与部署目标判定。"""
+        txt = 'Pillow>=99.0.0; python_version < "3.11"\n'
+        assert version_violations(txt, "pillow==13.0.0\n") == []
+
+    def test_marker_applied_for_deploy_target(self):
+        txt = 'Pillow>=13.0.0; python_version >= "3.11"\n'
+        assert version_violations(txt, "pillow==13.0.0\n") == []
+        assert version_violations(txt, "pillow==12.3.0\n")
+
+    def test_real_files_versions_satisfied(self):
+        """核心断言：部署目标下 .txt 的每个版本约束都被 .lock 满足。"""
+        bad = version_violations(REQ_TXT.read_text(encoding="utf-8"),
+                                 REQ_LOCK.read_text(encoding="utf-8"))
+        assert not bad, (
+            "requirements.lock 的 pin 不满足 requirements.txt 的版本约束：\n  "
+            + "\n  ".join(bad)
+            + "\n→ 后果：部署按 lock 装 ⇒ prod 实际版本仍是旧的，安全/功能修复假绿（批 136 的 Pillow 即此坑）。"
+        )
