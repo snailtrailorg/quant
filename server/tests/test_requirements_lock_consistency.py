@@ -169,7 +169,10 @@ class TestRealFiles:
 #（全仓只有 Pillow 带环境标记；标记求值只支持 python_version <op> "x.y" 形态，
 # 出现别的标记形态请扩展本闸门，不要静默放过。）
 
-_DEPLOY_PY = (3, 11)
+_DEPLOY_PY = (3, 10)   # 部署 venv 的实际解释器版本
+# 证据（批 136，2026-10-22）：release 阶段 5 pip 预检拒绝 `pillow==13.0.0`
+# （"Requires-Python >=3.11 … require a different python version"）⇒ 部署 venv 是 3.10，
+# 与 lock 头 "pip-compile with Python 3.10" 一致。若将来升级 runtime，**同步改这里**。
 _SPEC_RE = re.compile(r"^(>=|<=|==|>|<)\s*([0-9][0-9A-Za-z.\-]*)")
 _MARKER_RE = re.compile(r'python_version\s*(>=|<=|==|>|<)\s*["\']([0-9.]+)["\']')
 
@@ -210,7 +213,7 @@ def declared_specs(text: str, py: tuple[int, int] = _DEPLOY_PY) -> dict[str, lis
         if not line:
             continue
         body, _, marker = line.partition(";")
-        if not marker_applies(marker):
+        if not marker_applies(marker, py):
             continue
         m = _NAME_HEAD.match(body.strip())
         if not m:
@@ -251,7 +254,7 @@ class TestVersionSatisfaction:
     def test_flags_stale_pin(self):
         """判别力：批 136 的真实事故形态（txt>=13 / lock 12.3）必须红。"""
         bad = version_violations('Pillow>=13.0.0; python_version >= "3.11"\n',
-                                 "pillow==12.3.0 \\\n    --hash=sha256:x\n")
+                                 "pillow==12.3.0 \\\n    --hash=sha256:x\n", py=(3, 11))
         assert bad and "pillow" in bad[0]
 
     def test_passes_when_pin_newer(self):
@@ -261,12 +264,12 @@ class TestVersionSatisfaction:
     def test_marker_filtered_out(self):
         """仅对 dev(3.10) 适用的声明不参与部署目标判定。"""
         txt = 'Pillow>=99.0.0; python_version < "3.11"\n'
-        assert version_violations(txt, "pillow==13.0.0\n") == []
+        assert version_violations(txt, "pillow==13.0.0\n", py=(3, 11)) == []
 
     def test_marker_applied_for_deploy_target(self):
         txt = 'Pillow>=13.0.0; python_version >= "3.11"\n'
-        assert version_violations(txt, "pillow==13.0.0\n") == []
-        assert version_violations(txt, "pillow==12.3.0\n")
+        assert version_violations(txt, "pillow==13.0.0\n", py=(3, 11)) == []
+        assert version_violations(txt, "pillow==12.3.0\n", py=(3, 11))
 
     def test_real_files_versions_satisfied(self):
         """核心断言：部署目标下 .txt 的每个版本约束都被 .lock 满足。"""
