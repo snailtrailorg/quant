@@ -2238,10 +2238,16 @@ def _list_repullable(sync_id: str, symbol: str) -> list[tuple[str, str]]:
 
 
 def _repull_symbol(adapter, kind: str, sub_kind: str | None, freq: str,
-                   src_sym: str, gap_start: str, gap_end: str) -> int:
-    """按缺口区间重拉单标的（幂等 upsert）。返回写入行数（缺表/空帧 ⇒ 0）。"""
+                   vt_symbol: str, gap_start: str, gap_end: str) -> int:
+    """按缺口区间重拉单标的（幂等 upsert）。返回写入行数（缺表/空帧 ⇒ 0）。
+
+    批 137a：入参是**内部 vt 形态**（`600000.SHSE`），此处统一经 `adapter.to_source_symbol`
+    转成源格式——**不再由调用方剥后缀**（原实现 `rsplit(".", 1)[0]` 剥成裸码，tushare 侧恒
+    `UnsupportedFeature`，A 股分钟缺口永不自愈）。crypto 侧该方法是直通，零漂移。
+    """
     from src.data_platform.db import save_bars
     from src.data_platform.rate_limit import rate_limit_context
+    src_sym = adapter.to_source_symbol(vt_symbol)
     with rate_limit_context(_get_rate_ds(adapter.provider), "daily"):
         df = adapter.fetch_supply(
             kind, sub_kind, symbol=src_sym, freq=freq,
@@ -2455,7 +2461,8 @@ def _reconcile_symbols() -> dict:
             repull_map = {} if stat["budget_exceeded"] else _repullable_map(prev_map)
             pulled_map: dict[str, list[str]] = {}
             for vt_symbol, cand in repull_map.items():
-                src_sym = vt_symbol.rsplit(".", 1)[0]
+                # 批 137a：传 vt 原值，源格式归一在 _repull_symbol 内做（调用方不再碰形态）。
+                src_sym = vt_symbol
                 for g0, g1 in cand:
                     try:
                         _repull_symbol(adapter, kind, sub_kind, freq, src_sym, g0, g1)

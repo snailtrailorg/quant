@@ -27,21 +27,21 @@ EXCHANGE_TS_MAP = {v: k for k, v in TS_EXCHANGE_MAP.items() if k in ("SH", "SZ")
 EXCHANGE_TS_MAP["SHSE"] = "SH"
 EXCHANGE_TS_MAP["SZSE"] = "SZ"
 EXCHANGE_TS_MAP["BSE"] = "BJ"
+# 批 137a：`.SSE` 是本仓合法形态（fees.py:33 / risk.py:340 / tasks.py:241 实证快照即 600000.SSE）——
+# 缺这一项时 vt_to_ts("600000.SSE") 原样返回 .SSE，发给 tushare 必失败。
+EXCHANGE_TS_MAP["SSE"] = "SH"
 
 
 def vt_to_ts(vt_symbol: str) -> str:
-    """vnpy vt_symbol → Tushare ts_code（to_vt_symbol 对偶；S-F1：pool_symbols 全链 vt 格式
-    vs stk_mins 要 Tushare 格式——不转换永久空转）。
+    """vnpy vt_symbol → Tushare ts_code（**薄别名**，实现唯一＝to_ts_code）。
+
+    批 137a：保留原名是为了不动 5 处调用点（stock_detail/perms/backtest/sync/pool_data）；
+    两个同义函数各写一份实现，正是 .SSE 映射缺失被复制成两处的成因。
 
     >>> vt_to_ts("600000.SHSE")
     "600000.SH"
-    >>> vt_to_ts("000001.SZSE")
-    "000001.SZ"
     """
-    if "." not in vt_symbol:
-        return vt_symbol
-    sym, ex = vt_symbol.rsplit(".", 1)
-    return f"{sym}.{EXCHANGE_TS_MAP.get(ex.upper(), ex.upper())}"
+    return to_ts_code(vt_symbol)
 
 
 def to_vt_symbol(ts_code: str) -> str:

@@ -265,6 +265,22 @@ def pull_minute(ts_code: str, freq: str, start_date: str, end_date: str | None =
     return df
 
 
+def pull_minute_supply(symbol: str = "", freq: str = "1min",
+                       start: str = "", end: str | None = None) -> pd.DataFrame:
+    """供给面薄壳：fetch_supply("bar_minute", None, symbol=…, freq=…, start=…, end=…) → pull_minute。
+
+    批 137a：`_repull_symbol` 用统一形参命名（symbol/start/end），而 `pull_minute` 收
+    `ts_code/start_date/end_date`；`fetch_supply` 按被调函数签名过滤参数（base.py:570）⇒
+    不套壳时只会透传 freq。`symbol` 由调用方先经 `adapter.to_source_symbol` 归一成 ts_code；
+    start/end 传 YYYYMMDD 时补全为全天窗口（源侧要求 "YYYYMMDD HH:MM:SS"）。
+    """
+    def _full(v: str, hhmmss: str) -> str:
+        v = (v or "").strip()
+        return v if len(v) > 8 else f"{v} {hhmmss}"
+
+    return pull_minute(symbol, freq, _full(start, "00:00:00"),
+                       _full(end, "23:59:59") if end else None)
+
 def to_save_rows_min(df: pd.DataFrame, freq: str) -> list[tuple]:
     """分钟线 DataFrame → 写入 DB 行列表（trade_time 作为 ts）。"""
     from ..schema import to_vt_symbol

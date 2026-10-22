@@ -596,6 +596,9 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("static_list", "terms"): "pull_cb_basic_raw",             # convertible_terms（逐只 ts_code=）
     ("static_list", "listed_fund"): "pull_fund_basic_raw",      # listed_fund_list
     ("trade_cal", None): "pull_trade_cal_raw",                 # trade_cal（逐年，纯读）
+    # 批 137a：分钟线 per-symbol 重拉（对账缺口自愈的唯一路径）。薄壳收 symbol/freq/start/end，
+    # 内部转 pull_minute(ts_code, freq, start_date, end_date)——参数名不同，inspect 过滤会只剩 freq。
+    ("bar_minute", None): "pull_minute_supply",
 }
 
 
