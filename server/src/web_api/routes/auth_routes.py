@@ -636,9 +636,11 @@ def _save_avatar_base64(data: str, uid: int) -> str:
     try:
         from PIL import Image
         img = Image.open(_io.BytesIO(raw))
-        img.load()
+        # 批 136：**先验格式再解码**——format 从 header 解析（open 即得），无需 load；
+        # 原顺序 load() 在格式白名单之前 ⇒ 任意格式先被完整解码（Pillow 解码类 CVE 攻击面）
         if img.format not in ("JPEG", "PNG", "WEBP"):
             raise ApiError(400, "AVATAR_FORMAT", "仅支持 JPG、PNG、WebP 格式")
+        img.load()
         # 中心方形裁剪（裁剪器已 1:1，此处兜底）→ RGB → 256px
         w, h = img.size
         side = min(w, h)
