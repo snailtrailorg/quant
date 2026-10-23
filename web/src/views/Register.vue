@@ -48,7 +48,7 @@
           <a href="javascript:void(0)" class="link">{{ t('register.termsLink') }}</a>
         </div>
 
-        <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%; margin-top: 12px"
+        <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%; margin-top: var(--sp-3)"
           :disabled="!form.username || !form.password || !form.confirm || !agreed">{{ t('register.submit') }}</el-button>
       </el-form>
 
@@ -156,16 +156,16 @@ const onRegister = async () => {
 </script>
 
 <style scoped>
-.register-page { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: linear-gradient(135deg, #2b5876, #4e9e6b); padding: 40px 16px; box-sizing: border-box; }
+.register-page { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: linear-gradient(135deg, #2b5876, #4e9e6b); padding: 40px var(--sp-4); box-sizing: border-box; }
 .register-card { width: 440px; max-width: 100%; padding: 0; overflow: hidden; }
 .register-card :deep(.el-card__body) { padding: 0; }
-.banner { background: linear-gradient(90deg, #67c23a, #4e9e6b); color: #fff; padding: 18px 24px; font-size: var(--fs-page); font-weight: bold; }
-.state-msg { padding: 32px 24px; text-align: center; color: var(--text-secondary); }
+.banner { background: linear-gradient(90deg, #67c23a, #4e9e6b); color: #fff; padding: 18px var(--sp-6); font-size: var(--fs-page); font-weight: bold; }
+.state-msg { padding: var(--sp-8) var(--sp-6); text-align: center; color: var(--text-secondary); }
 .state-msg.error { color: var(--critical); line-height: 1.8; }
-.register-form { padding: 20px 28px 8px; }
-.welcome { text-align: center; color: var(--text-primary); font-size: var(--fs-body); margin: 4px 0 12px; }
-.email-box { background: var(--bg-canvas); border-radius: 6px; padding: 10px 14px; font-size: var(--fs-label); color: var(--text-secondary); margin-bottom: 14px; }
-.pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -8px 0 10px; }
+.register-form { padding: var(--sp-5) 28px var(--sp-2); }
+.welcome { text-align: center; color: var(--text-primary); font-size: var(--fs-body); margin: var(--sp-1) 0 var(--sp-3); }
+.email-box { background: var(--bg-canvas); border-radius: 6px; padding: var(--sp-25) 14px; font-size: var(--fs-label); color: var(--text-secondary); margin-bottom: 14px; }
+.pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -var(--sp-2) 0 var(--sp-25); }
 /* 批11：头像选择（圆形预览+加号空态） */
 .avatar-row { display: flex; align-items: center; gap: 12px; width: 100%; }
 .avatar-picker { width: 56px; height: 56px; border-radius: 50%; border: 1px dashed var(--border-weak);
@@ -173,11 +173,11 @@ const onRegister = async () => {
   color: var(--text-secondary); flex-shrink: 0; }
 .avatar-hint { font-size: var(--fs-label); color: var(--text-secondary); }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
-.terms-row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; cursor: pointer; user-select: none; }
+.terms-row { display: flex; align-items: center; gap: 8px; margin-bottom: var(--sp-1); cursor: pointer; user-select: none; }
 .back-login { text-align: center; margin: var(--sp-2) 0 18px; }
 .link { color: var(--brand-600); font-size: var(--fs-label); text-decoration: none; }
-.terms-scroll { max-height: 65vh; overflow-y: auto; padding: 0 8px; }
-.terms-lang { color: var(--text-primary); font-size: var(--fs-card); font-weight: 600; margin: var(--sp-4) 0 8px; }
+.terms-scroll { max-height: 65vh; overflow-y: auto; padding: 0 var(--sp-2); }
+.terms-lang { color: var(--text-primary); font-size: var(--fs-card); font-weight: 600; margin: var(--sp-4) 0 var(--sp-2); }
 .terms-body { white-space: pre-wrap; font-family: inherit; font-size: var(--fs-body); color: var(--text-secondary); line-height: 1.7; margin: 0; }
-.scroll-hint { color: var(--warn-fill); font-size: var(--fs-label); margin-right: 12px; }
+.scroll-hint { color: var(--warn-fill); font-size: var(--fs-label); margin-right: var(--sp-3); }
 </style>

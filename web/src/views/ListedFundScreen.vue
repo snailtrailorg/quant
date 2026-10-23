@@ -44,7 +44,7 @@
         </el-table-column>
       </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
-        layout="prev, pager, next" style="margin-top: 12px; justify-content: flex-end" />
+        layout="prev, pager, next" style="margin-top: var(--sp-3); justify-content: flex-end" />
     </el-card>
   </div>
 </template>

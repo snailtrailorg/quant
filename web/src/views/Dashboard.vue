@@ -3,7 +3,7 @@
     <!-- P1-3（web-design 05 §5.1）指挥中心：30 秒回答四问——钱安全吗/任务活着吗/今天赚亏/数据正常吗 -->
 
     <!-- 空态三步引导（05 §5.0-1：零数据首访态） -->
-    <el-card v-if="emptyState" style="margin-bottom: 20px">
+    <el-card v-if="emptyState" style="margin-bottom: var(--sp-5)">
       <div style="text-align: center; padding: var(--sp-6) 0">
         <div style="font-size: var(--fs-page); font-weight: 600; margin-bottom: var(--sp-4)">{{ t('dashboard.welcome', { app: t('app.title') }) }}</div>
         <el-steps :active="emptyStep" align-center style="max-width: 720px; margin: 0 auto">
@@ -11,7 +11,7 @@
           <el-step :title="t('dashboard.step2')" :description="t('dashboard.step2d')" />
           <el-step :title="t('dashboard.step3')" :description="t('dashboard.step3d')" />
         </el-steps>
-        <div style="margin-top: 20px">
+        <div style="margin-top: var(--sp-5)">
           <el-button type="primary" @click="$router.push('/factors')">{{ t('dashboard.goFactors') }}</el-button>
           <el-button @click="$router.push('/strategy')">{{ t('dashboard.goStrategy') }}</el-button>
           <el-button @click="$router.push('/backtest')">{{ t('dashboard.goBacktest') }}</el-button>
@@ -27,7 +27,7 @@
       <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
         <div class="klabel">{{ t('dashboard.riskGauge') }}</div>
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
-        <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: 4px" />
+        <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: var(--sp-1)" />
       </div></el-card></div>
       <KpiCard v-if="canLive" :label="t('dashboard.tasksRunning')" :value="liveTasks.filter(x => x.status === 'running').length + '/' + liveTasks.length" />
     </div>
@@ -237,7 +237,7 @@ const sparkline = computed(() => {
 </script>
 
 <style scoped>
-.kpi { padding: 6px 0; }
+.kpi { padding: var(--sp-15) 0; }
 /* KPI flex 等分（wd-14 §2.3：flex:1 1 0 + min-width:0 + 卡内截断） */
 .kpi-row { display: flex; gap: 16px; margin-bottom: 0; }
 .kpi-cell { flex: 1 1 0; min-width: 0; }
@@ -256,7 +256,7 @@ const sparkline = computed(() => {
 }
 .sparkline { font-size: var(--fs-foot); color: var(--text-secondary); }
 .klabel { color: var(--text-secondary); font-size: var(--fs-label); }
-.task-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
+.task-row { display: flex; align-items: center; gap: 8px; padding: var(--sp-15) 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
 .task-row:last-child { border-bottom: none; }
 .dot { width: var(--dot); height: var(--dot); border-radius: 50%; display: inline-block; }
 .dot.running { background: var(--success); }
@@ -264,6 +264,6 @@ const sparkline = computed(() => {
 .dot.error { background: var(--critical); }
 .evt-row { padding: 5px 0; font-size: var(--fs-body); border-bottom: 1px solid var(--border-weak); display: flex; gap: 6px; align-items: center; }
 .evt-row:last-child { border-bottom: none; }
-.pos-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
+.pos-row { display: flex; justify-content: space-between; padding: var(--sp-15) 0; border-bottom: 1px solid var(--border-weak); font-size: var(--fs-body); }
 .pos-row:last-child { border-bottom: none; }
 </style>

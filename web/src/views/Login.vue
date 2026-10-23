@@ -11,7 +11,7 @@
         </el-form-item>
         <el-button type="primary" native-type="submit" :loading="loading" size="large" style="width: 100%">{{ t('login.submit') }}</el-button>
       </el-form>
-      <p style="text-align: center; margin-top: 12px">
+      <p style="text-align: center; margin-top: var(--sp-3)">
         <router-link to="/forgot-password" style="color: var(--brand-600); font-size: var(--fs-label)">{{ t('login.forgotPassword') }}</router-link>
       </p>
     </el-card>

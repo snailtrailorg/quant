@@ -26,7 +26,7 @@
         </template>
       </el-table-column>
     </TableShell>
-    <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 12px">{{ t('systemConfig.hint') }}</div>
+    <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-3)">{{ t('systemConfig.hint') }}</div>
 
     <!-- 批35 编辑弹窗：四型控件原样搬入（int/float 保留 :min=0 批28-7 防线）；标题不带行项名（批24 裁定）
          快审 P2-1 收紧：保存 in-flight 时 ESC/X 关窗会丢在途编辑值——before-close 守卫+取消钮禁用 -->
@@ -38,7 +38,7 @@
           <el-input-number v-if="editing.value_type === 'int' || editing.value_type === 'float'"
             v-model="editing.editValue"
             :min="numMin" :max="numMax" :step="numStep" :precision="numPrecision" style="width: 140px" />
-          <span v-if="isPct" style="margin-left: 6px">%</span>
+          <span v-if="isPct" style="margin-left: var(--sp-15)">%</span>
           <!-- 批45：percent 键换算模型（0.9↔90，步进 1%=0.01）；min/max 由注册表 bounds 驱动（批36b-α；
                batch28-7 缺省回落 0；xtp 负值禁用语义放开）；float 缺省 step 0.1 防 step=1 坑复发 -->
           <el-switch v-else-if="editing.value_type === 'bool'" v-model="editing.editValue" />

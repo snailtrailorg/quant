@@ -9,7 +9,7 @@
         </div>
       </div>
     </template>
-    <el-card v-if="currentSync" shadow="never" style="margin-bottom: 12px">
+    <el-card v-if="currentSync" shadow="never" style="margin-bottom: var(--sp-3)">
       <div style="display: flex; align-items: center; gap: 12px">
         <span style="font-size: var(--fs-label); white-space: nowrap">{{ currentSync.name }}</span>
         <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />

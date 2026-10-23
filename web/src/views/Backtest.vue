@@ -7,8 +7,8 @@
             {{ t('backtest.runList') }}
             <!-- P2-4（05 §5.7）：badge 摘要 -->
             <el-tag size="small" style="margin-left: var(--sp-2)">{{ t('backtest.runningTag') }} {{ runningCount }}</el-tag>
-            <el-tag size="small" type="info" style="margin-left: 4px">{{ t('backtest.todayTag') }} {{ todayCount }}</el-tag>
-            <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: 4px">{{ t('backtest.failedTag') }} {{ failedCount }}</el-tag>
+            <el-tag size="small" type="info" style="margin-left: var(--sp-1)">{{ t('backtest.todayTag') }} {{ todayCount }}</el-tag>
+            <el-tag v-if="failedCount" size="small" type="danger" style="margin-left: var(--sp-1)">{{ t('backtest.failedTag') }} {{ failedCount }}</el-tag>
           </span>
           <span style="display: inline-flex; gap: var(--icon-gap); align-items: center">
             <!-- 批23：动作组统一序=筛选→新建→列设置（本页轮询自刷无刷新钮）；状态筛选 RowFilter 多选本地过滤 -->
@@ -104,7 +104,7 @@
         </el-form-item>
         <el-form-item :label="t('backtest.dateRange')">
           <el-date-picker v-model="form.dateRange" type="daterange" :start-placeholder="t('common.startDate')" :end-placeholder="t('common.endDate')" style="width: 100%" />
-          <div style="width: 100%; margin-top: 4px">
+          <div style="width: 100%; margin-top: var(--sp-1)">
             <el-button v-for="q in quickRanges" :key="q.label" size="small" text type="primary" @click="form.dateRange = q.range()">{{ q.label }}</el-button>
           </div>
         </el-form-item>

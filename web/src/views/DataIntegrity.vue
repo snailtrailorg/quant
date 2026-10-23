@@ -15,7 +15,7 @@
       </div>
     </template>
 
-    <el-row :gutter="12" style="margin-bottom: 12px">
+    <el-row :gutter="12" style="margin-bottom: var(--sp-3)">
       <el-col :span="6"><el-card shadow="never"><div style="color:var(--text-secondary)">{{ t('dataIntegrity.complete') }}</div><div style="font-size: var(--fs-kpi); color: var(--success)">{{ summary.complete || 0 }}</div></el-card></el-col>
       <el-col :span="6"><el-card shadow="never"><div style="color:var(--text-secondary)">{{ t('dataIntegrity.partial') }}</div><div style="font-size: var(--fs-kpi); color: var(--warn-fill)">{{ summary.partial || 0 }}</div></el-card></el-col>
       <el-col :span="6"><el-card shadow="never"><div style="color:var(--text-secondary)">{{ t('dataIntegrity.missing') }}</div><div style="font-size: var(--fs-kpi); color: var(--critical)">{{ summary.missing || 0 }}</div></el-card></el-col>

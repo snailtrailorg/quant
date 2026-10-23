@@ -43,7 +43,7 @@
           <el-input-number
             :model-value="toPct(form.values[p.key])" @update:model-value="v => form.values[p.key] = fromPct(v)"
             :min="p.lo * 100" :max="p.hi * 100" :step="(p.step || 0.01) * 100" :precision="0" style="width: 180px" />
-          <span style="margin-left: 6px">%</span>
+          <span style="margin-left: var(--sp-15)">%</span>
         </template>
         <el-input-number v-else-if="p.dtype === 'float' || p.dtype === 'int'"
           v-model="form.values[p.key]" :min="p.lo ?? undefined" :max="p.hi ?? undefined"

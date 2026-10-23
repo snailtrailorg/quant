@@ -64,7 +64,7 @@
     </el-card>
 
     <!-- 用量监控 section（批50 卡片化） -->
-    <el-card style="margin-top: 20px">
+    <el-card style="margin-top: var(--sp-5)">
       <template #header>
         <div style="display: flex; justify-content: space-between; align-items: center">
           <span>{{ t('llm.llmUsageTitle2') }}</span>
@@ -172,7 +172,7 @@ onMounted(() => { load(); loadUsage() })
 </script>
 
 <style scoped>
-.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--sp-25); }
 .cooldown-note { color: var(--text-secondary); }
 .drag-handle { display: inline-block; width: 12px; height: 10px; cursor: grab;
                background: linear-gradient(180deg, var(--text-secondary) 0 2px, transparent 2px 4px, var(--text-secondary) 4px 6px, transparent 6px 8px, var(--text-secondary) 8px 10px);

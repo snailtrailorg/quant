@@ -2,7 +2,7 @@
   <!-- 批 56a·M1：标的属性查询页（只读——主档+时变时间线+时段表；29 号 §四面三件套）。
        批 88：自集成中心 security tab 迁入数据管理页（域对齐——security_master 是数据域真源，非集成配置）。 -->
   <div>
-    <el-card shadow="never" style="margin-bottom: 12px">
+    <el-card shadow="never" style="margin-bottom: var(--sp-3)">
       <div style="display: flex; gap: 8px; align-items: center">
         <el-input v-model="symbol" :placeholder="t('interfaces.secPh')" style="width: 260px"
                   @keyup.enter="load" clearable />
@@ -11,10 +11,10 @@
     </el-card>
 
     <el-alert v-if="errMsg" type="warning" :title="errMsg" show-icon :closable="false"
-              style="margin-bottom: 12px" />
+              style="margin-bottom: var(--sp-3)" />
 
     <template v-if="data">
-      <el-card shadow="never" style="margin-bottom: 12px">
+      <el-card shadow="never" style="margin-bottom: var(--sp-3)">
         <template #header><span style="font-weight: 600">{{ t('interfaces.secTitle') }}</span></template>
         <el-descriptions :column="4" border size="small">
           <el-descriptions-item :label="t('interfaces.secColName')">{{ data.attr.name || '—' }}</el-descriptions-item>
@@ -26,7 +26,7 @@
           <el-descriptions-item :label="t('interfaces.secColMultiplier')">
             <span>{{ data.attr.multiplier }}</span>
             <el-tooltip :content="t('interfaces.secMultiplierTip')" placement="top">
-              <el-icon style="margin-left: 4px; color: var(--text-secondary)"><InfoFilled /></el-icon>
+              <el-icon style="margin-left: var(--sp-1); color: var(--text-secondary)"><InfoFilled /></el-icon>
             </el-tooltip>
           </el-descriptions-item>
           <el-descriptions-item :label="t('interfaces.secColTick')">{{ data.attr.tick_size }}</el-descriptions-item>
@@ -34,11 +34,11 @@
         </el-descriptions>
       </el-card>
 
-      <el-card shadow="never" style="margin-bottom: 12px">
+      <el-card shadow="never" style="margin-bottom: var(--sp-3)">
         <template #header><span style="font-weight: 600">{{ t('interfaces.secTimelineTitle') }}</span></template>
-        <el-timeline v-if="data.states.length" style="padding-left: 4px">
+        <el-timeline v-if="data.states.length" style="padding-left: var(--sp-1)">
           <el-timeline-item v-for="(s, i) in data.states" :key="i" :timestamp="s.effective_from" placement="top">
-            <el-tag size="small" style="margin-right: 6px">{{ s.kind }}</el-tag>
+            <el-tag size="small" style="margin-right: var(--sp-15)">{{ s.kind }}</el-tag>
             <code style="font-size: var(--fs-foot)">{{ JSON.stringify(s.value) }}</code>
           </el-timeline-item>
         </el-timeline>
@@ -101,5 +101,5 @@ const load = async () => {
 </script>
 
 <style scoped>
-.empty-note { color: var(--text-secondary); padding: 16px 0; text-align: center; font-size: var(--fs-foot); }
+.empty-note { color: var(--text-secondary); padding: var(--sp-4) 0; text-align: center; font-size: var(--fs-foot); }
 </style>

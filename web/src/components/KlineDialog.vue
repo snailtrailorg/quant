@@ -1,6 +1,6 @@
 <template>
   <el-dialog v-model="visible" :title="title" width="90%" top="3vh" @open="onOpen" @closed="onClose" destroy-on-close>
-    <div style="display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; align-items: center">
+    <div style="display: flex; gap: 12px; margin-bottom: var(--sp-3); flex-wrap: wrap; align-items: center">
       <el-radio-group v-model="period" @change="onPeriodChange">
         <el-radio-button value="day">{{ t('kline.dayK') }}</el-radio-button>
         <el-radio-button value="week">{{ t('kline.weekK') }}</el-radio-button>

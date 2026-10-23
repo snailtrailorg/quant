@@ -11,7 +11,7 @@
         </div>
       </div>
     </template>
-    <el-alert :title="summary" :type="hasIssues ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: 20px" />
+    <el-alert :title="summary" :type="hasIssues ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: var(--sp-5)" />
 
     <!-- W6：el-table-v2 虚拟滚动（≤500 行）+行点击详情抽屉（原 expand 列 v2 不支持——盲审重构） -->
     <el-auto-resizer>
@@ -37,7 +37,7 @@
     </el-drawer>
 
     <!-- 原始 issues 摘要（兼容期保留——旧字符串通道，勿误修#11） -->
-    <el-collapse v-if="rawIssues.length" style="margin-top: 12px">
+    <el-collapse v-if="rawIssues.length" style="margin-top: var(--sp-3)">
       <el-collapse-item :title="t('reconcile.rawIssues', { n: rawIssues.length })">
         <div v-for="(it, i) in rawIssues" :key="i" style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ it }}</div>
       </el-collapse-item>

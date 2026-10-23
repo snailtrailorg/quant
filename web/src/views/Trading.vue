@@ -8,7 +8,7 @@
       </div>
     </template>
     <el-alert v-if="loadFailed" type="error" :closable="false" show-icon
-              :title="$t('trading.loadFailed')" style="margin-bottom: 12px" />
+              :title="$t('trading.loadFailed')" style="margin-bottom: var(--sp-3)" />
     <!-- wd-20 §2.4：KpiCard 四卡 + flex 首屏（与 Dashboard 同构；pnl 色走 up/down 令牌类） -->
     <div style="display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-5)">
       <KpiCard :label="t('trading.totalAssets')" :value="'¥' + formatNum(positionData.total_value)" />
@@ -70,7 +70,7 @@
             </el-tooltip>
           </template>
         </el-alert>
-        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 6px; display: flex; justify-content: space-between">
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-15); display: flex; justify-content: space-between">
           <span>{{ t('trading.snapshotNote') }}{{ snapshotAccount.snapshot_ts ? fmtTime.full(snapshotAccount.snapshot_ts) : '—' }}</span>
           <span>{{ t('trading.lastUpdate') }}: {{ lastUpdate }}</span>
         </div>

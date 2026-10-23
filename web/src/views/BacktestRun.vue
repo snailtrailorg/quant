@@ -10,7 +10,7 @@
       </div>
     </template>
 
-    <el-row :gutter="20" style="margin-bottom: 20px">
+    <el-row :gutter="20" style="margin-bottom: var(--sp-5)">
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.totalReturn') }}</div><div class="value">{{ pct(run.total_return_pct) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.winRate') }}</div><div class="value">{{ pct(run.win_rate) }}</div></div></el-card></el-col>
       <el-col :span="6"><el-card shadow="hover"><div class="stat"><div class="label">{{ t('backtest.sharpe') }}</div><div class="value">{{ run.sharpe_ratio ?? '-' }}</div></div></el-card></el-col>
@@ -21,7 +21,7 @@
     </el-row>
 
     <!-- P2-5：费用与摩擦面板（引擎侧已参数化：佣金/印花税卖出0.05%/过户费/滑点/涨跌停约束） -->
-    <el-alert type="info" :closable="false" style="margin-bottom: 20px">
+    <el-alert type="info" :closable="false" style="margin-bottom: var(--sp-5)">
       {{ t('backtest.feePanel') }}
     </el-alert>
 
@@ -36,7 +36,7 @@
           </span>
         </div>
       </template>
-      <el-alert v-if="summary" type="info" :closable="false" style="margin-bottom: 12px">
+      <el-alert v-if="summary" type="info" :closable="false" style="margin-bottom: var(--sp-3)">
         {{ t('backtest.groupAvg', { ret: summary.avg?.total_return_pct, wr: summary.avg?.win_rate, sh: summary.avg?.sharpe_ratio, n: summary.count }) }}
       </el-alert>
       <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
@@ -166,7 +166,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.stat { text-align: center; padding: 12px 0; }
+.stat { text-align: center; padding: var(--sp-3) 0; }
 .stat .label { color: var(--text-secondary); font-size: var(--fs-label); }
-.stat .value { font-size: var(--fs-kpi); font-weight: bold; color: var(--text-primary); margin-top: 4px; }
+.stat .value { font-size: var(--fs-kpi); font-weight: bold; color: var(--text-primary); margin-top: var(--sp-1); }
 </style>

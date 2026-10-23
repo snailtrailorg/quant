@@ -3,13 +3,13 @@
     <!-- 头部：快照 + 涨跌停空间 + 五档（8 内容区之 2 常驻） -->
     <el-card>
       <template #header>
-          <el-button type="primary" size="small" @click="goBack" style="margin-right: 8px">← {{ t('common.back') }}</el-button>
+          <el-button type="primary" size="small" @click="goBack" style="margin-right: var(--sp-2)">← {{ t('common.back') }}</el-button>
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
           <div>
             <span style="font-size: var(--fs-page);font-weight:600">{{ detail.name || quote?.name || symbol }}</span>
             <el-tag v-if="detail.in_pool" type="success" style="margin-left:var(--sp-2)">{{ t('stockDetail.inPool') }}</el-tag>
             <el-tag v-else type="info" style="margin-left:var(--sp-2)">{{ t('stockDetail.notPool') }}</el-tag>
-            <span style="margin-left:12px;color:var(--text-secondary)">{{ detail.ts_code }}
+            <span style="margin-left:var(--sp-3);color:var(--text-secondary)">{{ detail.ts_code }}
               <template v-if="detail.industry"> · {{ detail.industry }}</template>
             </span>
           </div>
@@ -36,7 +36,7 @@
               <span>{{ t('stockDetail.amount') }}: {{ fmtAmt(quote.amount) }}</span>
               <span>{{ t('stockDetail.high') }}/{{ t('stockDetail.low') }}: {{ quote.high }}/{{ quote.low }}</span>
             </div>
-            <div class="meta" style="margin-top:6px">
+            <div class="meta" style="margin-top:var(--sp-15)">
               <span>{{ t('stockDetail.limitUp') }}: <b style="color:var(--up)">{{ quote.upper_limit ?? detail.limit?.up_limit ?? '-' }}</b></span>
               <span style="margin-left:var(--sp-4)">{{ t('stockDetail.limitDown') }}: <b style="color:var(--down)">{{ quote.lower_limit ?? detail.limit?.down_limit ?? '-' }}</b></span>
               <span style="margin-left:var(--sp-4);color:var(--text-secondary)">{{ quote.ts }}</span>
@@ -73,12 +73,12 @@
               <el-radio-button label="day">{{ t('stockDetail.kDay') }}</el-radio-button>
               <el-radio-button label="intraday">{{ t('stockDetail.kIntraday') }}</el-radio-button>
             </el-radio-group>
-            <span v-if="intraday.date" style="margin-left:12px;color:var(--text-secondary)">
+            <span v-if="intraday.date" style="margin-left:var(--sp-3);color:var(--text-secondary)">
               {{ intraday.date }}（{{ srcName(intraday.source) }}）
             </span>
           </div>
           <!-- P2-13（09-B9）：吸收 KlineDialog 指标全集（MA/BOLL/SAR 主图+7 副图指标） -->
-          <el-button size="small" @click="klineDlg = true" style="margin-left: 12px">{{ t('stockDetail.fullChart') }}</el-button>
+          <el-button size="small" @click="klineDlg = true" style="margin-left: var(--sp-3)">{{ t('stockDetail.fullChart') }}</el-button>
           <KlineDialog v-model="klineDlg" :symbol="symbol" />
           <template v-if="klineMode === 'day'">
             <v-chart v-if="klineData.length" :option="klineOption" autoresize style="height:420px" />
@@ -96,7 +96,7 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('stockDetail.chips')" name="chips">
-          <div v-if="detail.chips" style="color:var(--text-secondary);margin-bottom:6px">
+          <div v-if="detail.chips" style="color:var(--text-secondary);margin-bottom:var(--sp-15)">
             {{ t('stockDetail.chipsDate') }}: {{ detail.chips.trade_date }}（{{ detail.chips.source }}）
           </div>
           <v-chart v-if="detail.chips?.dist?.length" :option="chipsOption" autoresize style="height:360px" />
@@ -147,7 +147,7 @@
         </el-tab-pane>
 
         <el-tab-pane :label="t('stockDetail.ai')" name="ai">
-          <div style="margin-bottom:10px;display:flex;gap:8px">
+          <div style="margin-bottom:var(--sp-25);display:flex;gap:8px">
             <el-button type="primary" :loading="analyzing" :disabled="!canAnalyze" @click="doAnalyze">
               {{ analysis ? t('stockDetail.reAnalyze') : t('stockDetail.doAnalyze') }}
             </el-button>
@@ -383,17 +383,17 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 </script>
 
 <style scoped>
-.snap .price { font-size: calc(var(--fs-kpi) * 1.25); font-weight: 700; margin-right: 10px; }
+.snap .price { font-size: calc(var(--fs-kpi) * 1.25); font-weight: 700; margin-right: var(--sp-25); }
 .snap .chg { font-size: var(--fs-card); font-weight: 600; }
 .up { color: var(--up); }
 .down { color: var(--down); }
 .flat { color: var(--text-secondary); }
-.meta { display: flex; gap: 18px; color: var(--text-secondary); flex-wrap: wrap; font-size: var(--fs-label); margin-top: 10px; }
+.meta { display: flex; gap: 18px; color: var(--text-secondary); flex-wrap: wrap; font-size: var(--fs-label); margin-top: var(--sp-25); }
 .depth { width: 100%; border-collapse: collapse; font-size: var(--fs-label); }
-.depth td { padding: 2px 8px; border-bottom: 1px solid var(--border-weak); }
-.depth .mid { text-align: center; color: var(--text-secondary); font-weight: 600; padding: 4px 0; }
+.depth td { padding: 2px var(--sp-2); border-bottom: 1px solid var(--border-weak); }
+.depth .mid { text-align: center; color: var(--text-secondary); font-weight: 600; padding: var(--sp-1) 0; }
 .depth .ask td:nth-child(2) { color: var(--down); }
 .depth .bid td:nth-child(2) { color: var(--up); }
-.frow { display: flex; justify-content: space-between; padding: 4px 0; }
+.frow { display: flex; justify-content: space-between; padding: var(--sp-1) 0; }
 .analysis { white-space: pre-wrap; line-height: 1.7; background: var(--bg-canvas); padding: 14px; border-radius: 6px; }
 </style>

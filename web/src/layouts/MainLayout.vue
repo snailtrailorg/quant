@@ -30,7 +30,7 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item v-for="e in freezeEvents" :key="e.id" :command="e.task_id">
-                  <span style="margin-right: 8px">{{ e.symbol || ('#' + e.task_id) }}</span>
+                  <span style="margin-right: var(--sp-2)">{{ e.symbol || ('#' + e.task_id) }}</span>
                   <span style="color: var(--text-secondary)">{{ t(FT[e.freeze_type] || 'liveTask.ftUnknown') }}</span>
                 </el-dropdown-item>
                 <el-dropdown-item v-if="!freezeEvents.length" disabled>{{ t('liveTask.freezeNone') }}</el-dropdown-item>
@@ -86,7 +86,7 @@
             </svg>
           </button>
         </el-header>
-        <el-menu :default-active="route.path" router background-color="var(--bg-sidebar)" text-color="#bfcbd9" active-text-color="#FFFFFF" style="padding-bottom: 12px; --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
+        <el-menu :default-active="route.path" router background-color="var(--bg-sidebar)" text-color="#bfcbd9" active-text-color="#FFFFFF" style="padding-bottom: var(--sp-3); --el-menu-item-height: 40px; --el-menu-sub-item-height: 40px">
           <!-- P3-9（web-design 03 v2.1）：菜单 v2.1 四组 16 项——组标题与菜单项同字号;组内流程序 -->
           <el-menu-item index="/"><el-icon><DataBoard /></el-icon>{{ t('nav.dashboard') }}</el-menu-item>
 
@@ -149,7 +149,7 @@
           <span>{{ item.label }}</span>
           <span style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ item.path }}</span>
         </div>
-        <div v-if="!cmdkResults.length" style="color: var(--text-secondary); text-align: center; padding: 20px">{{ t('layout.noResults') }}</div>
+        <div v-if="!cmdkResults.length" style="color: var(--text-secondary); text-align: center; padding: var(--sp-5)">{{ t('layout.noResults') }}</div>
       </div>
     </div>
   </el-dialog>
@@ -372,7 +372,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 /* 批114：冻结入口独立图标角标（不复用 el-badge——与铃铛告警面解耦，角标自绘） */
 .freeze-trigger { position: relative; display: inline-flex; align-items: center; }
 .freeze-badge { position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px;
-  padding: 0 4px; border-radius: 8px; box-sizing: border-box;
+  padding: 0 var(--sp-1); border-radius: 8px; box-sizing: border-box;
   background: var(--warn-fill); color: #fff; font-size: var(--fs-foot); line-height: 16px; text-align: center;
   font-family: var(--font-num); font-weight: 600; pointer-events: none; }
 .aside-brand { display: flex; align-items: center; gap: 8px; }
@@ -408,14 +408,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .pinned-shift { margin-left: 200px; }   /* 顶栏+inner 容器同让位（推挤式缩范围） */
 
 /* 通知级别色点：critical 深红 / warn 橙 / info 灰（走 tokens：--critical/--warn-fill/--text-secondary） */
-.dot { display: inline-block; width: var(--dot); height: var(--dot); border-radius: 50%; margin-right: 6px; }
+.dot { display: inline-block; width: var(--dot); height: var(--dot); border-radius: 50%; margin-right: var(--sp-15); }
 .dot.critical { background: var(--critical); }
 .dot.warn { background: var(--warn-fill); }
 .dot.info { background: var(--text-secondary); }
-.notif-body { white-space: pre-wrap; color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.5; margin: 4px 0 2px 14px; max-height: 4.5em; overflow: hidden; }
+.notif-body { white-space: pre-wrap; color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.5; margin: var(--sp-1) 0 2px 14px; max-height: 4.5em; overflow: hidden; }
 .notif-guide { color: var(--el-color-primary); font-size: var(--fs-foot); line-height: 1.5; margin: 2px 0 2px 14px; }
 /* wd-20 §2.6 ⌘K combobox 选项 */
-.cmdk-opt { padding: var(--sp-2) 12px; cursor: pointer; border-bottom: 1px solid var(--border-weak);
+.cmdk-opt { padding: var(--sp-2) var(--sp-3); cursor: pointer; border-bottom: 1px solid var(--border-weak);
   display: flex; justify-content: space-between; }
 .cmdk-opt.active { background: var(--el-fill-color-light); }
 .cmdk-opt.active span:first-child { color: var(--brand-600); font-weight: 600; }

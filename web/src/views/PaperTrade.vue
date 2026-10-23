@@ -47,10 +47,10 @@
 
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: var(--sp-2) 16px">
+          <div style="padding: var(--sp-2) var(--sp-4)">
             <!-- 与实盘任务页同构：自愈时间线（task_logs 过滤渲染）——paper 走同一条 runner
                  运行时路径，日志同落 task_logs（task_id 前缀 live:），复用同一读法。 -->
-            <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: 6px">{{ t('liveTask.selfHeal') }}:</div>
+            <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-15)">{{ t('liveTask.selfHeal') }}:</div>
             <div style="font-size: var(--fs-foot); font-family: var(--font-num)">
               {{ t('liveTask.bars') }}: {{ row.bars ?? '—' }} | {{ t('common.status') }}: {{ row.status }}
             </div>
@@ -65,7 +65,7 @@
                  解冻语义与实盘完全一致（接受当前数据状态，不重启），判权走 assert_task_perm(mode=paper)
                  ⇒ paper_trade——本页用户天然持有。 -->
             <div style="margin-top: var(--sp-2); border-top: 1px solid var(--border-light); padding-top: var(--sp-2)">
-              <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-bottom: 6px">{{ t('liveTask.freezeHistory') }}</div>
+              <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-bottom: var(--sp-15)">{{ t('liveTask.freezeHistory') }}</div>
               <div v-if="row._freeze === null" style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ t('liveTask.freezeNoPerm') }}</div>
               <div v-else-if="!row._freeze?.length" style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ t('liveTask.freezeNone') }}</div>
               <div v-else style="font-size: var(--fs-foot); font-family: var(--font-num)">

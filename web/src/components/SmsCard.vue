@@ -183,12 +183,12 @@ const del = async (row) => {
 }
 </script>
 <style scoped>
-.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--sp-25); }
 .drag-handle { display: inline-block; width: 12px; height: 10px; cursor: grab;
                background: linear-gradient(180deg, var(--text-secondary) 0 2px, transparent 2px 4px, var(--text-secondary) 4px 6px, transparent 6px 8px, var(--text-secondary) 8px 10px);   /* 批46：90deg→180deg 竖线转横线（快审 A-P1-1：色标收进 10px 盒高三线全显——原 10-12px 段被裁只显两线） */
                opacity: .55; }
 .drag-handle:active { cursor: grabbing; }
-.tpl-body { font-family: var(--font-mono, monospace); font-size: var(--fs-foot); padding: 4px; word-break: break-all;
+.tpl-body { font-family: var(--font-mono, monospace); font-size: var(--fs-foot); padding: var(--sp-1); word-break: break-all;
             background: var(--fill-weak, transparent); border-radius: 4px; }
-.tpl-note { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
+.tpl-note { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: var(--sp-15); line-height: 1.5; }
 </style>

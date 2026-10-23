@@ -187,5 +187,5 @@ onUnmounted(() => {
 
 <style scoped>
 /* 批32：append slot 懒加载提示行（滚动区内） */
-.ts-more { text-align: center; padding: 8px 0; color: var(--text-secondary); font-size: var(--fs-foot); }
+.ts-more { text-align: center; padding: var(--sp-2) 0; color: var(--text-secondary); font-size: var(--fs-foot); }
 </style>

@@ -254,5 +254,5 @@ onMounted(async () => {
 })
 </script>
 <style scoped>
-.sub-limit-hint { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: 4px; line-height: 1.4; }
+.sub-limit-hint { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: var(--sp-1); line-height: 1.4; }
 </style>

@@ -5,24 +5,24 @@
     <el-card>
       <template #header>{{ t('risk.state') }}</template>
       <el-alert :title="state.halted ? t('risk.halted') : t('risk.normal')"
-                :type="state.halted ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: 20px" />
+                :type="state.halted ? 'error' : 'success'" show-icon :closable="false" style="margin-bottom: var(--sp-5)" />
       <el-descriptions :column="1" border>
         <el-descriptions-item :label="t('risk.haltReason')">{{ state.reason || '—' }}</el-descriptions-item>
         <el-descriptions-item :label="t('risk.maxDrawdown')">{{ ((state.rules?.global?.max_drawdown || 0.15) * 100).toFixed(0) }}%</el-descriptions-item>
         <el-descriptions-item :label="t('risk.dailyLossLimit')">{{ ((state.rules?.global?.daily_loss_limit || 0.05) * 100).toFixed(0) }}%</el-descriptions-item>
         <el-descriptions-item :label="t('risk.leverageMax')">{{ state.rules?.crypto?.leverage_max || 5 }}x</el-descriptions-item>
       </el-descriptions>
-      <div style="margin-top: 20px; display: flex; gap: 12px">
+      <div style="margin-top: var(--sp-5); display: flex; gap: 12px">
         <el-button v-if="canHalt" type="danger" @click="onHalt" :disabled="state.halted">{{ t('risk.halt') }}</el-button>
         <el-button v-if="canResume" type="success" @click="onResume" :disabled="!state.halted">{{ t('risk.resume') }}</el-button>
       </div>
     </el-card>
 
     <!-- P1-1 水位仪表（05 §5.3）：双进度条;75/90 变色纯 UI 档（引擎无预警语义） -->
-    <el-card style="margin-top: 20px">
+    <el-card style="margin-top: var(--sp-5)">
       <template #header>{{ t('risk.gaugeTitle') }}</template>
       <div v-for="g in gauges" :key="g.key" style="margin-bottom: 18px">
-        <div style="display: flex; justify-content: space-between; margin-bottom: 4px">
+        <div style="display: flex; justify-content: space-between; margin-bottom: var(--sp-1)">
           <span>{{ g.label }}</span>
           <span class="num" :style="{ color: g.color }">{{ (g.value * 100).toFixed(1) }}% / {{ (g.limit * 100).toFixed(0) }}%</span>
         </div>
@@ -37,10 +37,10 @@
     </el-card>
 
     <!-- P2-1 实盘三级开关分项 -->
-    <el-card style="margin-top: 20px">
+    <el-card style="margin-top: var(--sp-5)">
       <template #header>{{ t('risk.liveSwitchTitle') }}</template>
       <!-- 链条打磨#21：.env 总闸状态（三级开关第一级——关则分项全无效） -->
-      <el-alert v-if="masterEnabled === false" type="error" :closable="false" style="margin-bottom: 12px">
+      <el-alert v-if="masterEnabled === false" type="error" :closable="false" style="margin-bottom: var(--sp-3)">
         {{ t('risk.masterOff') }}
       </el-alert>
       <TableShell :data="liveTradingMarkets" storage-key="live-switches">
@@ -59,13 +59,13 @@
           </template>
         </el-table-column>
       </TableShell>
-      <el-alert type="info" :closable="false" style="margin-top: 12px">
+      <el-alert type="info" :closable="false" style="margin-top: var(--sp-3)">
         {{ t('risk.switchHint') }}
       </el-alert>
     </el-card>
 
     <!-- P1-1 风控决策日志（05 §5.3 B#2）：拒单/覆写/放行三类可筛 -->
-    <el-card style="margin-top: 20px">
+    <el-card style="margin-top: var(--sp-5)">
       <template #header>
         <div style="display:flex; justify-content:space-between; align-items:center">
           <span>{{ t('risk.logTitle') }}</span>

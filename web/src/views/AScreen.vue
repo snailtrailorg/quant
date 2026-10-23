@@ -11,8 +11,8 @@
         <el-button type="primary" style="width: 100%" @click="load" :loading="loading">{{ t('screener.run') }}</el-button>
       </el-form>
       <el-divider />
-      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: 6px">{{ t('screener.savedPlans') }}</div>
-      <div v-for="(plan, name) in plans" :key="name" style="display: flex; gap: 4px; margin-bottom: 4px">
+      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-15)">{{ t('screener.savedPlans') }}</div>
+      <div v-for="(plan, name) in plans" :key="name" style="display: flex; gap: 4px; margin-bottom: var(--sp-1)">
         <el-button size="small" text type="primary" @click="applyPlan(name)">{{ name }}</el-button>
         <el-button size="small" text type="danger" @click="delPlan(name)">×</el-button>
       </div>
@@ -53,7 +53,7 @@
         </el-table-column>
       </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
-        layout="prev, pager, next" style="margin-top: 12px; justify-content: flex-end" />
+        layout="prev, pager, next" style="margin-top: var(--sp-3); justify-content: flex-end" />
     </el-card>
   </div>
 </template>

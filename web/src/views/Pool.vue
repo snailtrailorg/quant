@@ -16,9 +16,9 @@
     <TableShell :data="pools" :row-key="r => r.id" :expand-row-keys="expanded" @expand-change="onExpand" storage-key="pool-main">
       <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: var(--sp-2) 24px">
+          <div style="padding: var(--sp-2) var(--sp-6)">
             <!-- 池深度数据回补（二档：财务/筹码/股东，非分钟） -->
-            <el-button size="small" type="warning" style="margin-bottom: 10px"
+            <el-button size="small" type="warning" style="margin-bottom: var(--sp-25)"
                        :disabled="navReadonly" @click="backfillMinute(row)">{{ t('pool.backfillMinute') }}</el-button>
             <!-- 单标的添加 -->
             <div style="display: flex; gap: 8px; align-items: center; margin-top: var(--sp-2)">

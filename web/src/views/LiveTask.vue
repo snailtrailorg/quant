@@ -51,9 +51,9 @@
       </el-table-column>
             <el-table-column type="expand">
         <template #default="{ row }">
-          <div style="padding: var(--sp-2) 16px">
+          <div style="padding: var(--sp-2) var(--sp-4)">
             <!-- wd-20 §1.5 方案 A：自愈时间线（task_logs 过滤渲染 + 行内事实字段） -->
-            <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: 6px">{{ t('liveTask.selfHeal') }}:</div>
+            <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-15)">{{ t('liveTask.selfHeal') }}:</div>
             <div style="font-size: var(--fs-foot); font-family: var(--font-num)">
               {{ t('liveTask.mdMode') }}: {{ row.md_mode || '—' }} | {{ t('liveTask.lag') }}: {{ row.lag_s ?? row.lag ?? '—' }}s | {{ t('liveTask.bars') }}: {{ row.bars ?? '—' }} | {{ t('common.status') }}: {{ row.status }}
               | {{ t('liveTask.nRestarts') }}: {{ restartCount(row) }} | {{ t('liveTask.lastExit') }}: {{ lastExit(row) }}
@@ -70,14 +70,14 @@
                  列表行的 ❄ 是 30s 轮询布尔（短冻结会整跳），此处是「冻过几次/谁解的/用哪种方式」的事实。
                  三态：null=无 read 权限（与空区分，防误读为「没冻过」）/ []=真没冻过 / [...]=有记录 -->
             <div style="margin-top: var(--sp-2); border-top: 1px solid var(--border-light); padding-top: var(--sp-2)">
-              <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-bottom: 6px">
+              <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-bottom: var(--sp-15)">
                 {{ t('liveTask.freezeHistory') }}
                 <span v-if="!row._freeze?.length" style="opacity: 0.7">{{ t('liveTask.freezeSince') }}</span>
               </div>
               <div v-if="row._freeze === null" style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ t('liveTask.freezeNoPerm') }}</div>
               <div v-else-if="!row._freeze?.length" style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ t('liveTask.freezeNone') }}</div>
               <div v-else style="font-size: var(--fs-foot); font-family: var(--font-num)">
-                <div style="display: flex; gap: 8px; color: var(--text-secondary); margin-bottom: 4px">
+                <div style="display: flex; gap: 8px; color: var(--text-secondary); margin-bottom: var(--sp-1)">
                   <span style="min-width: 150px">{{ t('liveTask.colFrozenAt') }}</span>
                   <span style="min-width: 68px">{{ t('liveTask.colType') }}</span>
                   <span style="min-width: 92px">{{ t('liveTask.colWatermark') }}</span>

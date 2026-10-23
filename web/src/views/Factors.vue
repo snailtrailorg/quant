@@ -57,7 +57,7 @@
           </template>
         </el-table-column>
       </TableShell>
-      <div v-if="!refsList.length" style="color: var(--text-secondary); text-align: center; padding: 20px">—</div>
+      <div v-if="!refsList.length" style="color: var(--text-secondary); text-align: center; padding: var(--sp-5)">—</div>
     </el-dialog>
 
     <!-- 编辑弹窗 -->
@@ -89,21 +89,21 @@
         </el-form-item>
         <el-form-item :label="t('factors.historyWindow')">
           <el-input-number v-model="form.needsHistory" :min="0" :step="1" :disabled="form.ftype === 'dsl'" />
-          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: 4px">
+          <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin-top: var(--sp-1)">
             {{ form.ftype === 'dsl' ? t('factors.dslHistoryHint') : t('factors.historyHint') }}
           </div>
         </el-form-item>
         <el-form-item :label="t('factors.pvParams')">
           <el-input v-model="preview.symbol" style="width: 150px" placeholder="600000.SHSE" />
-          <el-select v-model="preview.freq" style="width: 80px; margin-left: 6px">
+          <el-select v-model="preview.freq" style="width: 80px; margin-left: var(--sp-15)">
             <el-option v-for="f in ['1D','1min','5min']" :key="f" :value="f" :label="f" />
           </el-select>
-          <el-input-number v-model="preview.bars" :min="20" :max="500" :step="20" style="margin-left: 6px" />
+          <el-input-number v-model="preview.bars" :min="20" :max="500" :step="20" style="margin-left: var(--sp-15)" />
         </el-form-item>
         <el-form-item v-if="form.ftype === 'dsl'" :label="t('factors.exprLabel')">
           <div style="width: 100%">
             <DslEditor v-model="form.code" :placeholder="t('factors.dslPlaceholder')" />
-            <div style="margin-top: 6px; font-size: var(--fs-foot); color: var(--el-text-color-secondary)">
+            <div style="margin-top: var(--sp-15); font-size: var(--fs-foot); color: var(--el-text-color-secondary)">
               {{ t('factors.dslHint') }}
             </div>
             <div style="margin-top: var(--sp-2); display: flex; gap: 8px; align-items: center">

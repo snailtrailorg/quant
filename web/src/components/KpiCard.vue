@@ -37,7 +37,7 @@ export default {
 </script>
 <style scoped>
 .kpi-cell { flex: 1 1 0; min-width: 0; }
-.kpi { padding: 6px 0; }
+.kpi { padding: var(--sp-15) 0; }
 .klabel { color: var(--text-secondary); font-size: var(--fs-label); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kpi-num { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ksub { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: 2px; }

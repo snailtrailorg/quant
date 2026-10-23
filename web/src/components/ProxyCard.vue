@@ -40,7 +40,7 @@
       </TableShell>
     </el-card>
 
-    <el-card style="margin-top: 12px">
+    <el-card style="margin-top: var(--sp-3)">
       <template #header><span style="font-weight: 600">{{ t('proxy.bindTitle') }}</span></template>
       <div class="order-note">{{ t('proxy.bindHint') }}</div>
       <TableShell :data="bindRows" storage-key="proxy-bindings" row-key="consumer">
@@ -82,7 +82,7 @@
           <el-input v-model="form.url" :placeholder="urlPlaceholder" />
         </el-form-item>
         <div class="order-note">{{ t('proxy.urlHint') }}</div>
-        <el-form-item :label="t('proxy.notes')" style="margin-top: 12px">
+        <el-form-item :label="t('proxy.notes')" style="margin-top: var(--sp-3)">
           <el-input v-model="form.notes" :placeholder="t('proxy.notesPh')" />
         </el-form-item>
         <el-form-item :label="t('common.enable')"><el-switch v-model="form.enabled" /></el-form-item>
@@ -214,5 +214,5 @@ onMounted(load)
 
 <style scoped>
 /* 与 SmtpCard 同款说明行（复用既有形态，不新增令牌面） */
-.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--sp-25); }
 </style>

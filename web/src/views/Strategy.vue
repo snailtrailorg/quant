@@ -48,7 +48,7 @@
     <!-- 编辑弹窗 -->
     <el-dialog v-model="editVisible" :title="editForm.isNew ? t('strategy.createTitle') : t('strategy.editTitle')" width="720px" :close-on-click-modal="false">
       <!-- P2-2（05 §5.6 要点 4）：快照隔离横幅——改在跑策略不影响存量任务（快照固化） -->
-      <el-alert v-if="runningTasksFor(editForm.id).length" type="warning" :closable="false" style="margin-bottom: 12px">
+      <el-alert v-if="runningTasksFor(editForm.id).length" type="warning" :closable="false" style="margin-bottom: var(--sp-3)">
         {{ t('strategy.snapshotIsolation', { n: runningTasksFor(editForm.id).length }) }}
       </el-alert>
       <el-form :model="editForm" label-width="100px" v-loading="saving">
@@ -61,7 +61,7 @@
         <el-form-item :label="t('strategy.enable')">
           <el-switch v-model="editForm.enabled" />
         </el-form-item>
-        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin: -10px 0 10px 100px">
+        <div style="color: var(--text-secondary); font-size: var(--fs-foot); margin: -var(--sp-25) 0 var(--sp-25) 100px">
           {{ t('strategy.hintNoSymbol') }}
         </div>
 
@@ -69,7 +69,7 @@
                 <!-- P2-2(wd-05 §5.6/arch-16 §6):多频率 needs 声明段 -->
         <el-form-item :label="t('strategy.needsDecl')">
           <el-checkbox v-model="editForm.needs_daily" :label="t('strategy.needsDaily')" />
-          <el-checkbox v-model="editForm.needs_minute" :label="t('strategy.needsMinute')" style="margin-left: 12px" />
+          <el-checkbox v-model="editForm.needs_minute" :label="t('strategy.needsMinute')" style="margin-left: var(--sp-3)" />
         </el-form-item>
 <el-divider content-position="left">{{ t('strategy.mode') }}</el-divider>
         <el-form-item :label="t('strategy.mode')">
@@ -82,7 +82,7 @@
         <!-- DSL 模式 -->
         <template v-if="editForm.mode === 'dsl'">
           <el-divider content-position="left">{{ t('strategy.factorConfig') }}</el-divider>
-          <div v-for="(f, i) in editForm.factors" :key="i" style="margin-bottom: 12px">
+          <div v-for="(f, i) in editForm.factors" :key="i" style="margin-bottom: var(--sp-3)">
             <div style="display: flex; gap: 8px; align-items: center">
               <el-select v-model="f.name" :placeholder="t('strategy.phFactor')" style="width: 180px" @change="onFactorChange(f)">
                 <el-option v-for="fac in availableFactors" :key="fac.name" :label="`${fac.name} (${fac.category})`" :value="fac.name" />
@@ -91,7 +91,7 @@
               <el-button type="danger" @click="removeFactor(i)">{{ t('strategy.removeFactor') }}</el-button>
             </div>
             <!-- 链条打磨#9：因子参数子表单（按因子 schema 动态展开——此前 params 锁死默认值改不了） -->
-            <div v-if="factorSchema(f.name).length" style="display: flex; gap: 12px; margin: 6px 0 0 188px; flex-wrap: wrap">
+            <div v-if="factorSchema(f.name).length" style="display: flex; gap: 12px; margin: var(--sp-15) 0 0 188px; flex-wrap: wrap">
               <div v-for="p in factorSchema(f.name)" :key="p.k" style="display: flex; align-items: center; gap: 4px">
                 <span style="font-size: var(--fs-foot); color: var(--el-text-color-secondary)">{{ p.k }}:</span>
                 <el-input-number v-model="f.params[p.k]" :step="1" size="small" style="width: 110px" />
@@ -134,7 +134,7 @@
 
         <!-- 参数定义 -->
         <el-divider content-position="left">{{ t('strategy.paramDef') }}</el-divider>
-        <div v-for="(pd, i) in editForm.parameterDefs" :key="i" style="margin-bottom: 12px; padding: var(--sp-2); border: 1px solid var(--border-weak); border-radius: 4px">
+        <div v-for="(pd, i) in editForm.parameterDefs" :key="i" style="margin-bottom: var(--sp-3); padding: var(--sp-2); border: 1px solid var(--border-weak); border-radius: 4px">
           <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
             <el-input v-model="pd.name" :placeholder="t('strategy.phParamName')" style="width: 140px" />
             <el-select v-model="pd.type" :placeholder="t('common.type')" style="width: 100px">
@@ -155,7 +155,7 @@
             </template>
             <el-button type="danger" @click="editForm.parameterDefs.splice(i, 1)">{{ t('common.delete') }}</el-button>
           </div>
-          <el-input v-model="pd.description" :placeholder="t('strategy.phDesc')" style="margin-top: 6px" />
+          <el-input v-model="pd.description" :placeholder="t('strategy.phDesc')" style="margin-top: var(--sp-15)" />
         </div>
         <el-button type="primary" @click="addParamDef">{{ t('strategy.addParam') }}</el-button>
 

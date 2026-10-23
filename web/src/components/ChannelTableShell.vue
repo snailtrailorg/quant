@@ -67,7 +67,7 @@ defineExpose({ onDrop })
 </script>
 
 <style scoped>
-.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--sp-25); }
 .drag-handle { display: inline-block; width: 12px; height: 10px; cursor: grab;
                background: linear-gradient(180deg, var(--text-secondary) 0 2px, transparent 2px 4px, var(--text-secondary) 4px 6px, transparent 6px 8px, var(--text-secondary) 8px 10px);
                opacity: .55; }

@@ -136,17 +136,17 @@ const quick = q => { input.value = q; onSend() }
 </script>
 
 <style scoped>
-.chat-body { flex: 1; overflow-y: auto; padding: 12px; background: var(--bg-canvas); border-radius: 4px; }
-.msg { margin-bottom: 12px; display: flex; }
+.chat-body { flex: 1; overflow-y: auto; padding: var(--sp-3); background: var(--bg-canvas); border-radius: 4px; }
+.msg { margin-bottom: var(--sp-3); display: flex; }
 .msg.user { justify-content: flex-end; }
 .msg.assistant { justify-content: flex-start; }
-.bubble { max-width: 70%; padding: 10px 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.bubble { max-width: 70%; padding: var(--sp-25) 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .msg.user .bubble { background: var(--brand-600); color: #fff; }
 .msg.assistant .bubble { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-weak); }
-.chat-input { margin-top: 12px; }
+.chat-input { margin-top: var(--sp-3); }
 /* P2-12：Markdown 渲染样式（v-html 需 :deep）——批24 盲审A-P1-1：原位于 style 块外被 SFC 静默丢弃（自 671375f 起死码），本批归位块内使其生效 */
-.bubble.md :deep(pre.md-code) { background: #1e2430; color: #e6eaf2; padding: 10px; border-radius: 6px; overflow-x: auto; font-family: var(--font-num); font-size: var(--fs-foot); }
-.bubble.md :deep(code) { background: rgba(31, 79, 216, 0.08); padding: 1px 4px; border-radius: 3px; font-family: var(--font-num); }
-.bubble.md :deep(table.md-tab) { border-collapse: collapse; margin: 6px 0; }
-.bubble.md :deep(table.md-tab td) { border: 1px solid var(--border-weak); padding: 3px 8px; font-size: var(--fs-foot); }
+.bubble.md :deep(pre.md-code) { background: #1e2430; color: #e6eaf2; padding: var(--sp-25); border-radius: 6px; overflow-x: auto; font-family: var(--font-num); font-size: var(--fs-foot); }
+.bubble.md :deep(code) { background: rgba(31, 79, 216, 0.08); padding: 1px var(--sp-1); border-radius: 3px; font-family: var(--font-num); }
+.bubble.md :deep(table.md-tab) { border-collapse: collapse; margin: var(--sp-15) 0; }
+.bubble.md :deep(table.md-tab td) { border: 1px solid var(--border-weak); padding: 3px var(--sp-2); font-size: var(--fs-foot); }
 </style>

@@ -6,7 +6,7 @@
         <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
       </div>
     </template>
-    <el-alert type="info" :closable="false" style="margin-bottom: 12px" :title="t('permRes.redline')" />
+    <el-alert type="info" :closable="false" style="margin-bottom: var(--sp-3)" :title="t('permRes.redline')" />
     <TabsShell :tabs="tabs" default-tab="nav" v-slot="slotProps">
       <!-- 菜单页签（唯一可编辑面：分组/排序/显示名覆盖/停用） -->
       <template v-if="slotProps.tab === 'nav'">
@@ -169,7 +169,7 @@ const save = async () => {
 }
 </script>
 <style scoped>
-.bind-note { font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: 8px; }
+.bind-note { font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-2); }
 .key-id { font-family: var(--font-mono, monospace); font-size: var(--fs-foot); color: var(--text-secondary); }
 .ep-line { font-family: var(--font-mono, monospace); font-size: var(--fs-foot); line-height: 1.5;
            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }

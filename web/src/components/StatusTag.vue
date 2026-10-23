@@ -11,7 +11,7 @@ const meta = computed(() => statusMeta(props.value, t))
   <span class="st" :title="value">{{ meta.zh }}<span :class="['dot', meta.dot]" /></span>
 </template>
 <style scoped>
-.st { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; height: 22px;
+.st { display: inline-flex; align-items: center; gap: 5px; padding: 0 var(--sp-2); height: 22px;
   border-radius: 11px; background: var(--bg-canvas); font-size: var(--fs-foot);
   color: var(--text-primary); white-space: nowrap; }
 .dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex: none; }

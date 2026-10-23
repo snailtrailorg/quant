@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div v-for="(def, i) in defs" :key="i" style="margin-bottom: 12px">
+    <div v-for="(def, i) in defs" :key="i" style="margin-bottom: var(--sp-3)">
       <el-form-item :label="def.label || def.name">
         <div style="display: flex; align-items: center; gap: 8px; width: 100%">
           <el-switch v-if="def.type === 'boolean'" v-model="vals[def.name]" />

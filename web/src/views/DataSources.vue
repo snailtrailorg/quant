@@ -5,7 +5,7 @@
        今日调用量卡片 + Tushare 限速/熔断折叠面板（数据源侧运维参数）。
        API 密钥账户卡（P4-5 accounts 表，实盘任务绑定用）随账号语义迁「交易账号」页签。 -->
   <div>
-    <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: 12px">
+    <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: var(--sp-3)">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
       <TableShell :data="usage.today" storage-key="datasource-usage">
         <el-table-column prop="provider" label="Provider" min-width="120" />
@@ -27,7 +27,7 @@
             <el-table-column prop="override" :label="t('dataSources.overrideCol')" width="210">
               <template #default="{ row }">
                 <el-input-number v-model="row._edit" :min="0" :max="86400" :step="0.05" :precision="3" size="small" controls-position="right" style="width: 130px" />
-                <el-button size="small" type="primary" style="margin-left: 6px" :disabled="!overrideDirty(row)" @click="saveOverride(row)">{{ t('common.save') }}</el-button>
+                <el-button size="small" type="primary" style="margin-left: var(--sp-15)" :disabled="!overrideDirty(row)" @click="saveOverride(row)">{{ t('common.save') }}</el-button>
               </template>
             </el-table-column>
             <el-table-column prop="status" :label="t('dataSources.statusCol')" width="90">

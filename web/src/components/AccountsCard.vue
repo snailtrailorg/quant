@@ -1,7 +1,7 @@
 <template>
   <!-- 批55b:API 密钥账户卡(实盘任务绑定专用——批55b 盲审 A-P1 修:TradingAccounts 重写误删写入口断链)。
       旧页签全功能 CRUD 精简保留;strategy_account.account_id(Text)+LiveTask 下拉消费 /api/account 不变。 -->
-  <el-card style="margin-top: 12px">
+  <el-card style="margin-top: var(--sp-3)">
     <template #header>
       <div style="display: flex; justify-content: space-between; align-items: center">
         <span style="font-weight: 600">{{ t('interfaces.accountsTitle') }}</span>
@@ -98,5 +98,5 @@ onMounted(load)
 </script>
 
 <style scoped>
-.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px; }
+.order-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-bottom: var(--sp-25); }
 </style>

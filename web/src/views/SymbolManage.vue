@@ -20,7 +20,7 @@
       :title="t('symbol.countDegraded', { err: countError })" style="margin-bottom: var(--sp-3)" />
 
     <!-- 全量同步进度条 -->
-    <el-card v-if="allRunning || progress.status === 'running' || progress.status === 'error'" shadow="never" style="margin-bottom: 12px">
+    <el-card v-if="allRunning || progress.status === 'running' || progress.status === 'error'" shadow="never" style="margin-bottom: var(--sp-3)">
       <div style="display: flex; align-items: center; gap: 12px">
         <el-progress :percentage="Number(progress.pct || 0)" :status="progress.status === 'error' ? 'exception' : ''" style="flex: 1" />
         <span style="font-size: var(--fs-foot); color: var(--text-secondary); white-space: nowrap">

@@ -6,7 +6,7 @@
         <!-- ═══ 页签一：用户列表（=原设置·账号+邀请，列精简/两操作/批量删） ═══ -->
         <div v-if="slotProps.tab === 'users'">
           <!-- 批16 补齐：区块卡片层（其他多区块页均有 el-card 分节，本页原裸 div+h3——用户实测点名不一致） -->
-          <el-card shadow="never" style="margin-bottom: 12px">
+          <el-card shadow="never" style="margin-bottom: var(--sp-3)">
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('account.userMgmt') }}</span>

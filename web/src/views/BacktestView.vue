@@ -12,8 +12,8 @@
     </template>
 
     <!-- 指标概览（ptrade 批 3：10 指标） -->
-    <el-row :gutter="12" style="margin-bottom: 20px">
-      <el-col :span="4" v-for="m in overviewMetrics" :key="m.key" style="margin-bottom: 12px">
+    <el-row :gutter="12" style="margin-bottom: var(--sp-5)">
+      <el-col :span="4" v-for="m in overviewMetrics" :key="m.key" style="margin-bottom: var(--sp-3)">
         <el-card shadow="hover"><div class="stat">
           <div class="label">{{ m.label }}</div>
           <div class="value">{{ m.value }}</div>
@@ -64,7 +64,7 @@
         </TableShell>
       </el-tab-pane>
       <el-tab-pane :label="t('backtest.rolling')" name="rolling">
-        <div style="margin-bottom: 12px">
+        <div style="margin-bottom: var(--sp-3)">
           <el-select v-model="rollingType" style="width: 180px">
             <el-option v-for="mt in metricTypes" :key="mt.key" :value="mt.key" :label="mt.label" />
           </el-select>
@@ -255,7 +255,7 @@ const sellPoints = computed(() => (trades.value || []).filter(t => t.action === 
 
 
 <style scoped>
-.stat { text-align: center; padding: 12px 0; }
+.stat { text-align: center; padding: var(--sp-3) 0; }
 .stat .label { color: var(--text-secondary); font-size: var(--fs-foot); }
-.stat .value { font-size: var(--fs-page); font-weight: bold; color: var(--text-primary); margin-top: 4px; }
+.stat .value { font-size: var(--fs-page); font-weight: bold; color: var(--text-primary); margin-top: var(--sp-1); }
 </style>

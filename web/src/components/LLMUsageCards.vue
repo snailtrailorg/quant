@@ -91,7 +91,7 @@ const option = computed(() => {
 
 <style scoped>
 .metric-card { border: 1px solid var(--border-weak); }
-.chips { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: var(--sp-2); }
 .chip-btn { cursor: pointer; user-select: none; }
 .chip-btn.off { opacity: .35; }
 .chip { display: inline-flex; align-items: center; gap: 6px; }

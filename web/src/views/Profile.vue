@@ -130,7 +130,7 @@
     <el-divider />
 
     <!-- 批11C：我的 IM 通道（owner=self；每用户可多个；消息以绑定身份继承本人组权限） -->
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-3)">
       <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0">{{ t('myIm.title') }}</h3>
       <IconBtn :icon="Plus" :title="t('myIm.add')" @click="openImAdd" />
     </div>
@@ -205,7 +205,7 @@
           <div v-if="!qrStatus" style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.qrIntro') }}</div>
           <img v-if="qrImg" :src="qrImg" style="width: 220px; display: block; margin: 0 auto" alt="QR" />
           <div v-if="qrImg && qrCountdown"
-               style="text-align: center; margin-top: 6px; font-size: var(--fs-card); font-weight: 600; color: var(--brand-600)">
+               style="text-align: center; margin-top: var(--sp-15); font-size: var(--fs-card); font-weight: 600; color: var(--brand-600)">
             {{ t('myIm.qrValid', { t: qrCountdown }) }}</div>
           <div v-if="qrStatus === 'starting' || qrStatus === 'pending'" style="text-align: center; color: var(--text-secondary)">
             <div class="qr-skeleton"></div>{{ t('myIm.qrStarting') }}
@@ -216,14 +216,14 @@
           </div>
           <div v-else-if="qrStatus === 'confirming'" style="text-align: center; color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.qrConfirming') }}</div>
           <div v-else-if="qrStatus === 'timeout'" style="text-align: center; color: var(--warn-fill)">{{ t('myIm.qrTimeout') }}</div>
-          <div v-if="qrStatus === 'timeout'" style="text-align: center; margin-top: 8px">
+          <div v-if="qrStatus === 'timeout'" style="text-align: center; margin-top: var(--sp-2)">
             <el-button type="primary" @click="startQr">{{ t('myIm.qrRetry') }}</el-button>
           </div>
           <div v-else-if="qrStatus === 'error'" style="text-align: center; color: var(--critical)">{{ qrNote || t('common.failed') }}</div>
           <!-- 五轮：绑定机制取消——done 即成功终态（发消息即 owner 身份，无需绑定步骤） -->
           <div v-if="qrStatus === 'done'" style="text-align: center; padding: var(--sp-4) 0">
             <el-icon :size="48" color="var(--success)"><CircleCheckFilled /></el-icon>
-            <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 6px">{{ t('myIm.doneTitle') }}</div>
+            <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 var(--sp-15)">{{ t('myIm.doneTitle') }}</div>
             <div style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.doneGuide') }}</div>
           </div>
           <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: var(--fs-label)">{{ qrNote }}</div>
@@ -243,7 +243,7 @@
         <div v-else>
           <!-- 批24 迭代六（用户裁定）：三分区=API 权限/菜单页面/市场操作（对齐组编辑页签序，说法统一）；
                nav 数据 /auth/me 已带（load_nav_map）——只列被限制项，未列出=可正常使用 -->
-          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('perm.apiPermTitle') }}</h3>
+          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 var(--sp-3)">{{ t('perm.apiPermTitle') }}</h3>
           <template v-if="permAllKeys.length">
             <!-- 批24 迭代七：分组+中文名只读展示（与 PermMatrix 同构；未知键落 other 组兜底） -->
             <div v-for="g in permGroupsOf(permAllKeys)" :key="g.id" style="margin-bottom: var(--sp-3)">
@@ -266,7 +266,7 @@
             {{ t('perm.legendAllowed') }} · <span style="color: var(--critical)">{{ t('perm.legendRed') }}</span>
           </div>
           <el-divider />
-          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('layout.navLimitTitle') }}</h3>
+          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 var(--sp-3)">{{ t('layout.navLimitTitle') }}</h3>
           <div v-if="navLimited.length" class="nav-limit-table">
             <div v-for="[id, st] in navLimited" :key="id" class="nav-limit-row">
               <span style="text-align: left">{{ navName(id) }}</span>
@@ -280,7 +280,7 @@
           </div>
           <el-divider />
           <template v-if="Object.keys(me.market_op || {}).length">
-          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 12px">{{ t('profile.marketOpTitle') }}</h3>
+          <h3 style="font-size: var(--fs-card); font-weight: 600; margin: 0 0 var(--sp-3)">{{ t('profile.marketOpTitle') }}</h3>
           <el-checkbox-group :model-value="marketAllowedKeys" disabled class="perm-grid">
             <el-checkbox v-for="(ok, mk) in me.market_op || {}" :key="mk" :value="mk" :class="{ 'perm-denied': !ok }">
               {{ t('perm.mk_' + mk) }}
@@ -824,7 +824,7 @@ const onChangePwd = async () => {
 .perm-denied { opacity: .55; }
 .perm-denied :deep(.el-checkbox__label) { color: var(--critical); text-decoration: line-through; }
 /* 批33a：.perm-ovr（橙字）随 user-override 退役删 */
-.icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-height: 360px; overflow-y: auto; padding: 4px; }
+.icon-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-height: 360px; overflow-y: auto; padding: var(--sp-1); }
 .icon-grid img { width: 100%; aspect-ratio: 1; border-radius: 50%; cursor: pointer; border: 3px solid transparent; }
 .icon-grid img:hover { border-color: var(--border-weak); }
 .icon-grid img.selected { border-color: var(--brand-600); }

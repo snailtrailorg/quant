@@ -301,5 +301,5 @@ const onReorderFailed = async (e) => {
 </script>
 
 <style scoped>
-.exch-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-top: 4px; }
+.exch-note { font-size: var(--fs-foot); color: var(--text-secondary); line-height: 1.5; margin-top: var(--sp-1); }
 </style>
