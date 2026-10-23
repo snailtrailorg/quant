@@ -1,3 +1,4 @@
+# EXPAND-CONTRACT: phase=expand  # 回溯标记（批 142）：为后续 contract（DROP alert_history）配对——本迁移 upgrade 段零变化
 """consolidate runtime tables: 10 张运行时表
 
 Revision ID: 0027
