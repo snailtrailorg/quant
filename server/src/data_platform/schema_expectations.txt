@@ -2,7 +2,6 @@ account_permission :: account_id,allowed_categories,allowed_exchanges,allowed_bo
 account_snapshot :: id,ts,total_value,daily_pnl,initial_capital,available_cash,account_id
 accounts :: id,name,exchange,api_key_enc,api_secret_enc,api_key_hint,enabled,created_at
 alert_channel_sub :: id,channel,target,categories,min_level,enabled,updated_at
-alert_history :: id,ts,level,title,body,channel
 alert_user_sub :: id,user_id,categories,min_level,enabled,created_at,updated_at,channels
 asset_static_info :: ts_code,name,industry,market,list_status,list_date,delist_date
 astock_analysis :: id,ts,symbol,action,score,rating,factors

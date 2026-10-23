@@ -1892,6 +1892,57 @@ step up "$TO_AH" "AH4 复 upgrade（downgrade 后重升——守卫允许重种�
 chk "重升后 income 回种 7" "$(q "select overlap_days from sync_kind_config where sync_id='income'")" "7"
 }
 
+# ── 用例 AI：0161 DROP alert_history（contract pair=0027；upgrade→downgrade→upgrade 往返） ──
+FROM_AI=0160
+TO_AI=0161
+case_ai() {
+echo
+echo "########## 用例 AI：0161 DROP alert_history（contract pair=0027；upgrade→downgrade→upgrade 往返） ##########"
+reset_scratch
+# fixture：0027 形态 alert_history（六列）+ 样本行（表删前非空，验证 DROP 不挑行）
+fixture() {
+$PSQL <<SQL
+SET search_path = $SCRATCH;
+CREATE TABLE alert_history (
+  id BIGSERIAL PRIMARY KEY,
+  ts TIMESTAMPTZ DEFAULT now(),
+  level TEXT, title TEXT, body TEXT, channel TEXT);
+INSERT INTO alert_history (level, title, body, channel) VALUES
+  ('warn', '样本告警', '内容', 'feishu');
+SQL
+}
+fixture
+stamp "$FROM_AI"
+step up "$TO_AI" "AI1 upgrade（DROP TABLE）"
+
+chk "表已删" "$(q "select to_regclass('alert_history') is null")" "t"
+
+step down "$FROM_AI" "AI2 downgrade（按 0027 形态重建）"
+chk "表已回" "$(q "select to_regclass('alert_history') is not null")" "t"
+chk "六列列集不变（显式对比防形态漂移）" "$(q "select string_agg(column_name, ',' order by column_name) from information_schema.columns where table_schema='$SCRATCH' and table_name='alert_history'")" "body,channel,id,level,title,ts"
+chk "数据不复活（0 行——结构可回滚语义）" "$(q "select count(*) from alert_history")" "0"
+
+step up "$TO_AI" "AI3 复 upgrade（复跑幂等）"
+chk "复 upgrade 后表再删" "$(q "select to_regclass('alert_history') is null")" "t"
+
+# 离线渲染完整性（同 case_c 判据）
+local tmp; tmp="$(mktemp -d)"
+if offline_render up "$FROM_AI:$TO_AI" "$tmp/up.sql"; then
+  chk "upgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ upgrade --sql 渲染失败"; tail -6 "$tmp/up.sql.err"; FAIL=1
+fi
+if offline_render down "$TO_AI:$FROM_AI" "$tmp/dn.sql"; then
+  chk "downgrade --sql 退出码" "0" "0"
+else
+  echo "  ✗ downgrade --sql 渲染失败"; tail -6 "$tmp/dn.sql.err"; FAIL=1
+fi
+chk "upgrade 渲染含版本推进" "$(grep -c "SET version_num='$TO_AI'" "$tmp/up.sql")" "1"
+chk "upgrade 渲染含 DROP TABLE alert_history" "$(grep -ci 'DROP TABLE alert_history' "$tmp/up.sql")" "1"
+chk "downgrade 渲染含 CREATE TABLE alert_history" "$(grep -ci 'create table alert_history' "$tmp/dn.sql")" "1"
+rm -rf "$tmp"
+}
+
 # ═══════════════════════════ 主流程 ═══════════════════════════
 echo "########## 迁移往返回归（scratch=$SCRATCH  revisions=$FROM→$TO + $FROM_D→$TO_D + $FROM_E→$TO_E + $FROM_I→$TO_I + $FROM_K→$TO_K + $FROM_L→$TO_L + $FROM_M→$TO_M + $FROM_O→$TO_O + $FROM_Q→$TO_Q + $FROM_S→$TO_S + $FROM_U→$TO_U + $FROM_W→$TO_W + $FROM_Y→$TO_Y + $FROM_AA→$TO_AA + $FROM_AC→$TO_AC + $FROM_AF→$TO_AF） ##########"
 precheck
@@ -1929,4 +1980,5 @@ case_ae
 case_af
 case_ag
 case_ah
+case_ai
 finish

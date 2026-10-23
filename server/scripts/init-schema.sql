@@ -216,20 +216,7 @@ CREATE TABLE IF NOT EXISTS accounts (
 ALTER TABLE accounts OWNER TO quant;
 
 -- ============================================================
--- 13. alert_history（告警历史）
--- ============================================================
-CREATE TABLE IF NOT EXISTS alert_history (
-    id BIGSERIAL PRIMARY KEY,
-    ts TIMESTAMPTZ DEFAULT now(),
-    level TEXT,
-    title TEXT,
-    body TEXT,
-    channel TEXT
-);
-ALTER TABLE alert_history OWNER TO quant;
-
--- ============================================================
--- 14. astock_analysis（A股分析结果）
+-- 13. astock_analysis（A股分析结果）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS astock_analysis (
     id BIGSERIAL PRIMARY KEY,
@@ -243,7 +230,7 @@ CREATE TABLE IF NOT EXISTS astock_analysis (
 ALTER TABLE astock_analysis OWNER TO quant;
 
 -- ============================================================
--- 15. broker_usage（券商调用统计）
+-- 14. broker_usage（券商调用统计）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS broker_usage (
     id BIGSERIAL PRIMARY KEY,
@@ -257,7 +244,7 @@ CREATE TABLE IF NOT EXISTS broker_usage (
 ALTER TABLE broker_usage OWNER TO quant;
 
 -- ============================================================
--- 16. convertible_terms（可转债条款）
+-- 15. convertible_terms（可转债条款）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS convertible_terms (
     ts_code TEXT PRIMARY KEY,
@@ -267,7 +254,7 @@ CREATE TABLE IF NOT EXISTS convertible_terms (
 ALTER TABLE convertible_terms OWNER TO quant;
 
 -- ============================================================
--- 17. signal_log（策略信号）
+-- 16. signal_log（策略信号）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS signal_log (
     id BIGSERIAL PRIMARY KEY,
@@ -281,7 +268,7 @@ CREATE TABLE IF NOT EXISTS signal_log (
 ALTER TABLE signal_log OWNER TO quant;
 
 -- ============================================================
--- 18. order_log（订单）
+-- 17. order_log（订单）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS order_log (
     id BIGSERIAL PRIMARY KEY,
@@ -297,7 +284,7 @@ CREATE TABLE IF NOT EXISTS order_log (
 ALTER TABLE order_log OWNER TO quant;
 
 -- ============================================================
--- 19. trade_log（成交）
+-- 18. trade_log（成交）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS trade_log (
     id BIGSERIAL PRIMARY KEY,
@@ -312,7 +299,7 @@ CREATE TABLE IF NOT EXISTS trade_log (
 ALTER TABLE trade_log OWNER TO quant;
 
 -- ============================================================
--- 20. static_symbols（静态标的列表）
+-- 19. static_symbols（静态标的列表）
 -- ============================================================
 CREATE TABLE IF NOT EXISTS static_symbols (
     ts_code TEXT PRIMARY KEY,
