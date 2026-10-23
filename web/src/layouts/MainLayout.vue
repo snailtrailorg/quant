@@ -14,7 +14,7 @@
 
           <!-- ═ 告警（批22：admin-only，角标=活跃告警数，点击进系统监控页） ═ -->
           <el-badge v-if="role === 'admin'" :value="alertCount" :hidden="!alertCount" :max="99"
-                    :type="alertLevel === 'critical' ? 'danger' : 'warning'">
+                    :type="alertLevel === 'critical' ? 'danger' : 'warning'" class="alert-badge">
             <IconBtn :icon="Bell" :title="t('sysmon.title')" @click="$router.push('/observe')" />
           </el-badge>
 
@@ -375,6 +375,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   padding: 0 var(--sp-1); border-radius: 8px; box-sizing: border-box;
   background: var(--warn-fill); color: #fff; font-size: var(--fs-foot); line-height: 16px; text-align: center;
   font-family: var(--font-num); font-weight: 600; pointer-events: none; }
+/* 批 141：告警角标对齐冻结角标标准（尺寸/位置统一——用户裁定；红/橙语义色仍由 EP type 提供） */
+.alert-badge :deep(.el-badge__content) {
+  top: -3px; right: -3px; transform: none;
+  min-width: 16px; height: 16px; line-height: 16px; padding: 0 var(--sp-1);
+  border-radius: 8px; font-size: var(--fs-foot); font-family: var(--font-num); font-weight: 600;
+  box-sizing: border-box;
+}
 .aside-brand { display: flex; align-items: center; gap: 8px; }
 .aside-brand-text { color: #fff; font-size: var(--fs-page); font-weight: 700; }
 /* 图钉（2026-09-10）：标题后右对齐——flex 布局 text 撑开+margin-left:auto；钉死=竖直针高亮,浮动=斜 45°灰 */

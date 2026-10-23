@@ -17,10 +17,9 @@
           <span>{{ t('secpage.postureTitle') }}</span>
           <div style="display:flex;align-items:center;gap:12px">
             <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
-            <!-- 批 138：手动重扫（图标按钮，最右）——触发后轮询 scan_date 变化 -->
-            <el-button size="small" :icon="Refresh" :loading="scanning" @click="onRescan">
-              {{ t('secpage.rescan') }}
-            </el-button>
+            <!-- 批 138/141：手动重扫——按全站规范用 IconBtn（纯图标+title 提示，批 21 立法） -->
+            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning"
+                     :disabled="scanning" @click="onRescan" />
           </div>
         </div>
       </template>
