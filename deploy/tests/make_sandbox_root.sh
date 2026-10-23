@@ -57,6 +57,11 @@ cp "$HERE/../../server/src/data_platform/migration_policy.py" "$STAGE/src/data_p
 # 补占位道具（vendor 内容随场景无关——同步通道存在性即所验）
 mkdir -p "$STAGE/vendor"
 echo ".sbx vendor 占位（make_sandbox_root 生成）" > "$STAGE/vendor/README"
+# 批 136/133：requirements-dev.txt 与 deps/ 白名单切片占位（缺=rsync code 23 中止——批 133 沙箱回归实跑暴露）。
+# requirements-dev 复制真文件（沙箱 stage-5 若走真装，内容须合法）；deps 内容随场景无关（vnpy wheel 仅生产预检）。
+cp "$HERE/../../server/requirements-dev.txt" "$STAGE/requirements-dev.txt"
+mkdir -p "$STAGE/deps"
+echo ".sbx deps 占位（make_sandbox_root 生成）" > "$STAGE/deps/README"
 # 批 106 同款：3980c0c 把 requirements.lock 加进白名单 + 改 quant-pip-wrapper 读 lock，
 # 但基线只有 requirements.txt ⇒ 基线发布 rsync code 23 中止（整套六场景自 2026-09-29 起全红）。
 # 补占位 lock：**注释-only ⇒ pip `--dry-run --require-hashes` rc=0**（已实测），

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# quant-hbfile —— hub 心跳健康检查（**file 模式**：读 shared/runtime/hub_hb.json；批 133）
+#
+# 与 quant-hbfile 的 redis 兄弟（quant-hbcheck）互补：staging/prod 用 redis 模式（quant-hbcheck）:
+# 只有沙箱配置 file 模式。**真机切 file 模式的前置（本 wrapper 只是备货，未装位）**:
+#   ① michael 装位（cp 到 /usr/local/sbin + chown quant:quant 755 + sudoers QUANT_DEPLOY_QUANT 行）——
+#      装位只能人做（A06 §3.6）；
+#   ② hub 侧 json 写入确认（server/src 无 hub_hb.json 写者——file 模式需先给 hub 加写入，
+#      见 flow/任务归档/批133 任务文件 §挂账）。
+# 沙箱：deploy_sudo_quant="" ⇒ release.yml 调仓库副本=同用户直读（0700 目录自然可读）。
+#
+# 逻辑与原 release.yml 内联段逐字等价（单一真源迁移到本文件）：缺失即非零退出，
+# 过期阈值 10s，字段集 = gen+8（ts/unit/state/bar_count/stream_lag_ms/xtp_ok/valkey_ok/lease）。
+set -euo pipefail
+
+f=${1:?用法: quant-hbfile <hub_hb.json 路径>}
+[ -f "$f" ] || { echo "✗ hub 心跳文件缺失: $f" >&2; exit 1; }
+age=$(( $(date +%s) - $(stat -c %Y "$f") ))
+[ "$age" -le 10 ] || { echo "✗ hub 心跳过期（${age}s 无更新）" >&2; exit 1; }
+'/usr/bin/python3' - "$f" <<'PYEOF'
+import json, sys
+data = json.load(open(sys.argv[1]))
+need = ["gen", "ts", "unit", "state", "bar_count", "stream_lag_ms", "xtp_ok", "valkey_ok", "lease"]
+missing = [k for k in need if k not in data]
+if missing:
+    print(f"✗ hub 心跳缺字段: {missing}", file=sys.stderr)
+    sys.exit(1)
+print("✓ hub 心跳 gen+8 字段齐备")
+PYEOF

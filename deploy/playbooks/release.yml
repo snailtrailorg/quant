@@ -634,32 +634,13 @@
             - postverify_probe.json is defined
 
         # ⚠ 沙箱专属分支（仅 sandbox.yml 配 deploy_hub_hb_mode=file；staging/prod 皆 redis）：
-        #   ① 解释器随 2026-10-08 P0 根修统一为**系统 /usr/bin/python3**（同一依赖方向判据：
-        #      验证步骤不得依赖应用 venv）。本段只解析 JSON（json/sys 皆 stdlib）⇒ 无 venv 需求；
-        #      改回 `shared/venv` 会被 test_release_playbook_has_no_ddl_logic.py 的全文守卫判红。
-        #   ② **仍挂账（🔖）**：`[ -f ]`/`stat` 读的是 `shared/runtime/hub_hb.json`，该目录
-        #      `0700 quant:quant` ⇒ 真机若切 file 模式必 EACCES（与阶段 4 原写法 rc=126 同源）。
-        #      本支改身份需新 wrapper（装位只能人做）⇒ 现挂账，**勿照抄本形态**（见 flow/待办.md）。
-        #   ⚠ 勿误读下方 redis 支：它**现在**走 `sudo -u quant <quant-hbcheck wrapper>`（合规）；
-        #   被改掉的正是它的**历史形态**——`f8f767e`（2026-08-26）提交信息「quant-hbcheck
-        #   wrapper…替换 redis 模式直跑——治 deploy 无权 venv」，即同坑先例与既定出口。
-        - name: 阶段 8 —— hub 心跳复现（gen+8 字段；文件模式）
-          ansible.builtin.shell: |
-            set -u
-            f='{{ deploy_hub_hb_file }}'
-            [ -f "$f" ] || { echo "✗ hub 心跳文件缺失: $f" >&2; exit 1; }
-            age=$(( $(date +%s) - $(stat -c %Y "$f") ))
-            [ "$age" -le 10 ] || { echo "✗ hub 心跳过期（${age}s 无更新）" >&2; exit 1; }
-            '/usr/bin/python3' - "$f" <<'PYEOF'
-            import json, sys
-            data = json.load(open(sys.argv[1]))
-            need = ["gen", "ts", "unit", "state", "bar_count", "stream_lag_ms", "xtp_ok", "valkey_ok", "lease"]
-            missing = [k for k in need if k not in data]
-            if missing:
-                print(f"✗ hub 心跳缺字段: {missing}", file=sys.stderr)
-                sys.exit(1)
-            print("✓ hub 心跳 gen+8 字段齐备")
-            PYEOF
+        #   解释器纪律同 redis 支（系统 /usr/bin/python3，禁应用 venv——test_release_playbook_has_no_ddl_logic 守门）。
+        #   批 133（C 方案修好备着）：原内联段迁移到 `wrappers/quant-hbfile`（逻辑逐字等价，单一真源），
+        #   分支改调 wrapper——沙箱（deploy_sudo_quant=""）经 quant_hbfile_cmd 直跑仓库副本=同用户直读，
+        #   行为零漂移；真机切 file 模式前须装位（michael）+ sudoers 行，**未装位时本分支在真机必失败**
+        #   （预期行为：装位是切换 file 模式的前置，见任务归档 批133 §挂账）。
+        - name: 阶段 8 —— hub 心跳复现（gen+8 字段；文件模式·quant-hbfile wrapper）
+          ansible.builtin.command: "{{ quant_hbfile_cmd | default((deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-hbfile ' ~ deploy_hub_hb_file) | trim) }}"
           when: deploy_hub_hb_mode == 'file'
           changed_when: false
 

@@ -19,6 +19,7 @@ quant_alembic_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-a
 quant_importsmoke_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-importsmoke-wrapper') | trim }}"
 quant_pip_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-pip-wrapper') | trim }}"
 quant_dbro_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-dbro') | trim }}"      # v3.3: 波次实例 DB 真相源（沙箱走假 SQL 输出文件）
+quant_hbfile_cmd: "{{ (deploy_sudo_quant ~ ' ' ~ deploy_wrapper_dir ~ '/quant-hbfile ' ~ deploy_hub_hb_file) | trim }}"   # 批 133: file 模式心跳（沙箱=仓库副本同用户直跑，行为与旧内联段一致）
 
 # wrapper 环境注入（生产为 {}：wrapper 内置默认即生产路径）
 deploy_wrapper_env:
