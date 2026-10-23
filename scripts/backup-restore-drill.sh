@@ -12,6 +12,8 @@ export PGHOST PGUSER
 FAIL=0
 chk() { if [ "$2" = "$3" ]; then echo "  ✓ $1: $2"; else echo "  ✗ $1: 期望[$3] 实得[$2]"; FAIL=1; fi; }
 psqlq() { psql -d "$DBNAME" -tAc "$1" 2>&1; }
+# ⚠ 本机 pg_hba：quant 库 trust、postgres 库 md5——一律挂 quant 库连接（含 CREATE/DROP DATABASE），
+#   碰 postgres 库=密码提示读 /dev/tty 永久挂起（2026-10-23 实证，管道下不可见）。
 
 echo "===== 0. 前置 ====="
 [ -f "$DUMP" ] || { echo "✗ dump 不存在: $DUMP"; exit 2; }
@@ -23,8 +25,8 @@ echo "  ✓ gzip 且 ${SIZE_MB}MB"
 FREE_KB=$(df --output=avail -k /var/lib/pgsql 2>/dev/null | tail -1 | tr -dc 0-9)
 [ -n "$FREE_KB" ] || FREE_KB=$(df --output=avail -k / | tail -1 | tr -dc 0-9)
 echo "  PG 所在盘剩余: $((FREE_KB/1024)) MB"
-psql -d postgres -tAc "select 1" >/dev/null 2>&1 || { echo "✗ 连不上 PG（$PGUSER@$PGHOST）"; exit 2; }
-psql -d postgres -tAc "select rolcreatedb from pg_roles where rolname=current_user" | grep -q t || {
+psql -d quant -tAc "select 1" >/dev/null 2>&1 || { echo "✗ 连不上 PG（$PGUSER@$PGHOST）"; exit 2; }
+psql -d quant -tAc "select rolcreatedb from pg_roles where rolname=current_user" | grep -q t || {
   echo "✗ 当前角色无 CREATEDB——先执行: sudo -u postgres psql -c \"ALTER ROLE $PGUSER CREATEDB;\""; exit 2; }
 echo; echo "===== 1. 三级验证之一：gzip 完整性 ====="
 gzip -t "$DUMP" && echo "  ✓ gzip -t OK" || { echo "  ✗ gzip -t FAIL"; FAIL=1; }
@@ -38,8 +40,8 @@ UNCOMP_MB=$(zcat "$DUMP" | wc -c | awk '{print int($1/1024/1024)+200}')
 echo "解压后估算: ${UNCOMP_MB} MB"
 [ "$FREE_KB" -gt $((UNCOMP_MB*1024)) ] || { echo "  ✗ 空间不足，abort（restore 不硬跑）"; exit 3; }
 echo; echo "===== 4. restore 正身（临时库 $DBNAME）====="
-psql -d postgres -c "DROP DATABASE IF EXISTS $DBNAME" >/dev/null && echo "  (旧临时库已清)"
-createdb "$DBNAME" || { echo "✗ createdb 失败"; exit 3; }
+psql -d quant -c "DROP DATABASE IF EXISTS $DBNAME" >/dev/null && echo "  (旧临时库已清)"
+psql -d quant -c "CREATE DATABASE $DBNAME" >/dev/null || { echo "✗ createdb 失败"; exit 3; }
 zcat "$DUMP" | psql -d "$DBNAME" -q -v ON_ERROR_STOP=0 >/tmp/drill-restore.log 2>&1
 RC=$?
 echo "  restore 退出码: $RC（非零看 /tmp/drill-restore.log 尾部）"
@@ -57,7 +59,7 @@ done
 echo; echo "===== 6. 游标实抽（sync_config，与 dump 时点=02:00 对齐人工判读）====="
 psqlq "select id||' :: '||coalesce(last_sync_date::text,'-')||' '||coalesce(last_sync_count::text,'-')||' '||last_status from sync_config order by id" 2>/dev/null | head -20
 echo; echo "===== 7. 临时库大小 + 自删 ====="
-psql -d postgres -tAc "select pg_size_pretty(pg_database_size('$DBNAME'))" 2>/dev/null
-dropdb "$DBNAME" && echo "  ✓ 临时库已删"
+psql -d quant -tAc "select pg_size_pretty(pg_database_size('$DBNAME'))" 2>/dev/null
+psql -d quant -c "DROP DATABASE $DBNAME" >/dev/null && echo "  ✓ 临时库已删"
 echo; [ "$FAIL" = 0 ] && echo "=== 演练全部通过 ===" || echo "=== 有失败项 ==="
 exit $FAIL
