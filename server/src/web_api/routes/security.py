@@ -192,6 +192,22 @@ def security_finding_delete(pkg: str = Query(...), vuln_id: str = Query(...),
 _SECURITY_HISTORY_CACHE: dict = {}   # 批126p：31 天逐行×基线 diff 真算实测 1.4s；扫描
                                      # 06:00 日更+安全页 5min 轮询——60s 缓存新鲜度绝对够
 
+@router.delete("/summary")
+def security_summary_delete(date_str: str = Query(alias="date"),
+                            _u: dict = Depends(require_perm("data_sync"))):
+    """删一整日安全快照（批 140：AI 历史摘要弹窗「删除条目」）。
+
+    权限：data_sync（数据采集面写操作，与触发扫描同键）。删后清 history 缓存——
+    否则分钟桶缓存会让弹窗读到已删行。
+    """
+    day = _parse_date(date_str)
+    if not store.delete_snapshot(day):
+        raise ApiError(404, "SECURITY_SUMMARY_NOT_FOUND", f"{day.isoformat()} 无此条目")
+    _SECURITY_HISTORY_CACHE.clear()
+    from src.data_platform.audit import audit_log
+    audit_log(_u["username"], "security_summary_delete", day.isoformat())
+    return {"ok": True}
+
 @router.get("/history")
 def security_history(days: int = 30, _u: dict = Depends(require_perm("read"))):
     """近 N 天逐日趋势：漏洞计数/新增/基线变更/组件变更（版本差真算）+ ai_summary 首行
@@ -228,6 +244,7 @@ def security_history(days: int = 30, _u: dict = Depends(require_perm("read"))):
             "baseline_changes": len(diff_items),
             "component_changes": _component_changes(prev_triple, cur_triple),
             "ai_summary_preview": summary.splitlines()[0][:120] if summary else "",
+            "ai_summary": summary,   # 批 140：弹窗表格要全文（payload 增量 ~KB 级，可接受）
         })
         prev_snap = s
     rows.reverse()   # 近日在前

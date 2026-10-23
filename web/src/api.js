@@ -347,3 +347,4 @@ export const getSecurityHistory = (days = 30) => api.get('/security/history', { 
 // 批 126：已修复漏洞行显式删除（admin-only，替代隐藏定期清理——用户裁定）
 export const deleteSecurityFinding = (pkg, vulnId) => api.delete('/security/finding', { params: { pkg, vuln_id: vulnId } })
 export const triggerSecurityScan = () => api.post('/security/scan')   // 批 138：手动触发扫描
+export const deleteSecuritySummary = (date) => api.delete('/security/summary', { params: { date } })   // 批 140

@@ -90,6 +90,20 @@ def get_finding_spans() -> list[tuple]:
         return cur.fetchall()
 
 
+def delete_snapshot(scan_date: date) -> bool:
+    """删一整日安全快照（批 140：AI 历史摘要弹窗的「删除条目」）。
+
+    影响面=当日 findings/components 一并消失（快照是行粒度）；基线 diff 的
+    「前一日」指针自动跳到更早一行（get_prev_snapshot 语义），无需修补。
+    """
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM security_snapshots WHERE scan_date=%s", (scan_date,))
+        conn.commit()
+        return (cur.rowcount or 0) > 0
+
+
 def delete_fixed_finding(pkg: str, vuln_id: str, today: date) -> str:
     """删一行**已修复** finding（批 126：显式删除取代隐藏 GC——用户裁定）。
 

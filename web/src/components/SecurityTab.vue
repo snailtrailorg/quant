@@ -67,14 +67,11 @@
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.aiSummary') }}</span>
-          <el-collapse style="border:none;width:60%" v-if="historySummaries.length">
-            <el-collapse-item :title="t('secpage.historySummaries')" name="h">
-              <div v-for="h in historySummaries" :key="h.scan_date" class="hist-item">
-                <span class="hist-date">{{ h.scan_date }}</span>
-                <span class="hist-preview">{{ h.ai_summary_preview || t('secpage.noSummary') }}</span>
-              </div>
-            </el-collapse-item>
-          </el-collapse>
+          <!-- 批 140：历史摘要折叠区 → 图标按钮（弹窗表格：日期/摘要/操作） -->
+          <el-tooltip :content="t('secpage.historySummaries')" placement="top">
+            <el-button size="small" :icon="Tickets" :disabled="!historySummaries.length"
+                       @click="histDialog = true" />
+          </el-tooltip>
         </div>
       </template>
       <div v-if="snap.ai_summary" class="ai-text">{{ snap.ai_summary }}</div>
@@ -179,6 +176,24 @@
 
     <!-- 批 124：原 E 区「基线变更时间线」删除（用户裁定无价值：冷启动无数据、
          历史只存计数不存明细——基线变化本身已在 A 区卡与告警面覆盖） -->
+
+    <!-- 批 140：AI 历史摘要弹窗（日期/摘要/操作——用户裁定折叠区改按钮） -->
+    <el-dialog v-model="histDialog" :title="t('secpage.historySummaries')" width="760px">
+      <el-table :data="historySummaries" size="small" max-height="480">
+        <el-table-column prop="scan_date" :label="t('secpage.histDate')" width="110" />
+        <el-table-column :label="t('secpage.aiSummary')" min-width="420">
+          <template #default="{ row }">
+            <span style="white-space:pre-wrap">{{ row.ai_summary || t('secpage.noSummary') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('secpage.histOps')" width="80" align="center">
+          <template #default="{ row }">
+            <IconBtn :icon="Delete" type="danger" size="small"
+                     :title="t('common.delete')" @click="onDeleteSummary(row.scan_date)" />
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </template>
   <div v-else v-loading="true" class="sec-loading" />
 </template>
@@ -186,9 +201,9 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { WarningFilled, Delete, Refresh } from '@element-plus/icons-vue'
+import { WarningFilled, Delete, Refresh, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding, triggerSecurityScan } from '../api'
+import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding, triggerSecurityScan, deleteSecuritySummary } from '../api'
 import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
 import RowFilter from './RowFilter.vue'
@@ -392,6 +407,24 @@ const onDeleteFinding = async (row) => {
 
 const historySummaries = computed(() =>
   (history.value || []).filter(d => d.scan_date !== snap.value?.scan_date && d.ai_summary_preview))
+
+// 批 140：历史摘要弹窗——逐条删除（删整日快照行；确认后删并原位刷新）
+const histDialog = ref(false)
+const onDeleteSummary = async (d) => {
+  try {
+    await ElMessageBox.confirm(t('secpage.histDelConfirm', { date: d }),
+                              t('secpage.historySummaries'), { type: 'warning' })
+  } catch { return }   // 取消=不动
+  try {
+    await deleteSecuritySummary(d.replaceAll('-', ''))
+    const [s, h] = await Promise.all([getSecuritySnapshot(), getSecurityHistory(30)])
+    snap.value = s
+    history.value = h.items || []
+    ElMessage.success(t('common.deleteSuccess'))
+  } catch (e) {
+    ElMessage.error(e?.detail || t('common.deleteFailed'))
+  }
+}
 
 </script>
 
