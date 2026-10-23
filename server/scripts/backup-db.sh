@@ -7,7 +7,7 @@ set -euo pipefail
 BACKUP_DIR="${BACKUP_DIR:-/home/quant/backups}"
 DB_NAME="${DB_NAME:-quant}"
 DB_USER="${DB_USER:-quant}"
-KEEP_DAYS="${KEEP_DAYS:-7}"
+KEEP_DAYS="${KEEP_DAYS:-5}"   # 批143 B2：7→5（磁盘治理裁定 2026-10-23，回收 ~1.8G）
 
 mkdir -p "$BACKUP_DIR"
 
