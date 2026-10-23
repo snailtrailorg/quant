@@ -15,7 +15,13 @@
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.postureTitle') }}</span>
-          <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
+          <div style="display:flex;align-items:center;gap:12px">
+            <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
+            <!-- 批 138：手动重扫（图标按钮，最右）——触发后轮询 scan_date 变化 -->
+            <el-button size="small" :icon="Refresh" :loading="scanning" @click="onRescan">
+              {{ t('secpage.rescan') }}
+            </el-button>
+          </div>
         </div>
       </template>
       <div class="card-grid">
@@ -180,9 +186,9 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { WarningFilled, Delete } from '@element-plus/icons-vue'
+import { WarningFilled, Delete, Refresh } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding } from '../api'
+import { getSecuritySnapshot, getSecurityHistory, deleteSecurityFinding, triggerSecurityScan } from '../api'
 import StatusTag from './StatusTag.vue'
 import TableShell from './TableShell.vue'
 import RowFilter from './RowFilter.vue'
@@ -214,6 +220,28 @@ const load = async () => {
 }
 onMounted(() => { load(); pollTimer = setInterval(load, 300000) })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
+
+// 批 138：手动重扫——入队后轮询 scan_date 变化（采集分钟级，上限 5 分钟），完成即刷新并提示
+const scanning = ref(false)
+const onRescan = async () => {
+  if (scanning.value) return
+  scanning.value = true
+  try {
+    await triggerSecurityScan()
+    ElMessage.success(t('secpage.rescanStarted'))
+    const before = snap.value?.scan_date
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 10000))
+      await load()
+      if (snap.value?.scan_date && snap.value.scan_date !== before) break
+    }
+    ElMessage.success(t('secpage.rescanDone'))
+  } catch (e) {
+    ElMessage.error(e?.detail || t('common.deleteFailed'))
+  } finally {
+    scanning.value = false
+  }
+}
 
 // A 区
 const activeFindings = computed(() => (snap.value?.findings || []).filter(f => !f.fixed))

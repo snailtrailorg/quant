@@ -17,7 +17,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, Query
 
 from src.data_platform import security_store as store
-from src.web_api.auth import require_perm
+from src.web_api.auth import audit_log, require_perm
 from src.web_api.errors import ApiError
 
 logger = logging.getLogger("web_api")
@@ -92,6 +92,21 @@ def _enrich_findings(day: date, vulns_ok: bool = True,
 
 def _count_new_findings(day: date, spans: list[tuple]) -> int:
     return sum(1 for first, _ in spans if first == day)
+
+
+@router.post("/scan")
+def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
+    """手动触发安全扫描（批 138）：把既有每日 beat 任务 `security_scan` 入队。
+
+    权限：data_sync（数据采集面操作——与「触发同步」同键；扫描=采集的一种）。
+    任务自身幂等（同日重扫=覆盖同日快照行）；不加防重锁——并发触发只是多一轮只读采集，
+    保持最小面。扫描耗时分钟级：前端轮询 snapshot 的 scan_date 感知完成。
+    """
+    from src.scheduler.tasks import security_scan
+    task = security_scan.delay()
+    audit_log(payload.get("username", ""), "trigger_security_scan", "")
+    logger.info("security scan triggered by %s (task=%s)", payload.get("username"), task.id)
+    return {"status": "submitted", "task_id": task.id}
 
 
 @router.get("/snapshot")
