@@ -1,20 +1,27 @@
 #!/usr/bin/env bash
 # 备份恢复演练（批 143 A 段）——dump → 临时库 restore → 三级验证升级版 → 临时库自删
-# 用法（root 或 sudo）: bash backup-restore-drill.sh <dump 文件路径> [临时库名=quant_drill]
-# 风险闸: 开跑前自查 df——restore 需要与解压后 dump 相当的剩余空间；临时库用后即删，其余零删除。
-# 磁盘余量不足时 abort（restore 一步前检查），绝不硬跑。
+# 用法（root 或 sudo）: bash backup-restore-drill.sh <dump 文件路径(.gz)> [临时库名=quant_drill]
+# 风险闸: ①文件类型/大小前置校验（非 gzip 或 <100MB 即 fail-fast——防抓错文件）
+#         ②空间闸（解压后估算 vs PG 盘剩余）——restore 不硬跑；临时库用后即删，其余零删除。
+#         ③postgres 执行统一 runuser（su - 在部分 sudo 会话触发密码循环——2026-10-23 实证）。
 set -uo pipefail
-DUMP="${1:?用法: backup-restore-drill.sh <dump路径> [临时库名]}"
+DUMP="${1:?用法: backup-restore-drill.sh <dump路径.gz> [临时库名]}"
 DBNAME="${2:-quant_drill}"
 FAIL=0
 chk() { if [ "$2" = "$3" ]; then echo "  ✓ $1: $2"; else echo "  ✗ $1: 期望[$3] 实得[$2]"; FAIL=1; fi; }
-psqlq() { su - postgres -c "psql -d $DBNAME -tAc \"$1\"" 2>&1; }
+pg() { runuser -u postgres -- "$@"; }          # root→postgres 免密执行（无 PAM 会话认证）
+psqlq() { pg psql -d "$DBNAME" -tAc "$1" 2>&1; }
 
 echo "===== 0. 前置 ====="
 [ -f "$DUMP" ] || { echo "✗ dump 不存在: $DUMP"; exit 2; }
 ls -lh "$DUMP"
+file -b "$DUMP" | grep -qi gzip || { echo "✗ 不是 gzip 文件——取错文件了（期望 backup-db.sh 产出的 .gz，~736M）"; file -b "$DUMP"; exit 2; }
+SIZE_MB=$(du -m "$DUMP" | awk '{print $1}')
+[ "$SIZE_MB" -ge 100 ] || { echo "✗ 文件仅 ${SIZE_MB}MB——不像备份（期望 ~736M），疑似日志类文件"; exit 2; }
+echo "  ✓ gzip 且 ${SIZE_MB}MB"
 FREE_KB=$(df --output=avail -k /var/lib/pgsql 2>/dev/null | tail -1 | tr -dc 0-9)
-echo "PG 所在盘剩余: $((FREE_KB/1024)) MB"
+[ -n "$FREE_KB" ] || FREE_KB=$(df --output=avail -k / | tail -1 | tr -dc 0-9)
+echo "  PG 所在盘剩余: $((FREE_KB/1024)) MB"
 echo; echo "===== 1. 三级验证之一：gzip 完整性 ====="
 gzip -t "$DUMP" && echo "  ✓ gzip -t OK" || { echo "  ✗ gzip -t FAIL"; FAIL=1; }
 echo; echo "===== 2. 三级验证之二：结构段计数 ====="
@@ -27,9 +34,9 @@ UNCOMP_MB=$(zcat "$DUMP" | wc -c | awk '{print int($1/1024/1024)+200}')
 echo "解压后估算: ${UNCOMP_MB} MB"
 [ "$FREE_KB" -gt $((UNCOMP_MB*1024)) ] || { echo "  ✗ 空间不足，abort（restore 不硬跑）"; exit 3; }
 echo; echo "===== 4. restore 正身（临时库 $DBNAME）====="
-su - postgres -c "dropdb --if-exists $DBNAME" && echo "  (旧临时库已清)"
-su - postgres -c "createdb $DBNAME" || { echo "✗ createdb 失败"; exit 3; }
-zcat "$DUMP" | su - postgres -c "psql -d $DBNAME -q -v ON_ERROR_STOP=0" >/tmp/drill-restore.log 2>&1
+pg dropdb --if-exists "$DBNAME" && echo "  (旧临时库已清)"
+pg createdb "$DBNAME" || { echo "✗ createdb 失败"; exit 3; }
+zcat "$DUMP" | pg psql -d "$DBNAME" -q -v ON_ERROR_STOP=0 >/tmp/drill-restore.log 2>&1
 RC=$?
 echo "  restore 退出码: $RC（非零看 /tmp/drill-restore.log 尾部）"
 tail -5 /tmp/drill-restore.log
@@ -46,7 +53,7 @@ done
 echo; echo "===== 6. 游标实抽（sync_config，与 dump 时点=02:00 对齐人工判读）====="
 psqlq "select id||' :: '||coalesce(last_sync_date::text,'-')||' '||coalesce(last_sync_count::text,'-')||' '||last_status from sync_config order by id" 2>/dev/null | head -20
 echo; echo "===== 7. 临时库大小 + 自删 ====="
-su - postgres -c "psql -tAc \"select pg_size_pretty(pg_database_size('$DBNAME'))\"" 2>/dev/null
-su - postgres -c "dropdb $DBNAME" && echo "  ✓ 临时库已删"
+pg psql -tAc "select pg_size_pretty(pg_database_size('$DBNAME'))" 2>/dev/null
+pg dropdb "$DBNAME" && echo "  ✓ 临时库已删"
 echo; [ "$FAIL" = 0 ] && echo "=== 演练全部通过 ===" || echo "=== 有失败项 ==="
 exit $FAIL
