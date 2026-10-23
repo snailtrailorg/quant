@@ -159,12 +159,12 @@ const onRegister = async () => {
 .register-page { display: flex; justify-content: center; align-items: center; min-height: 100vh; background: linear-gradient(135deg, #2b5876, #4e9e6b); padding: 40px var(--sp-4); box-sizing: border-box; }
 .register-card { width: 440px; max-width: 100%; padding: 0; overflow: hidden; }
 .register-card :deep(.el-card__body) { padding: 0; }
-.banner { background: linear-gradient(90deg, #67c23a, #4e9e6b); color: #fff; padding: 18px var(--sp-6); font-size: var(--fs-page); font-weight: bold; }
+.banner { background: linear-gradient(90deg, #67c23a, #4e9e6b); color: #fff; padding: var(--sp-5) var(--sp-6); font-size: var(--fs-page); font-weight: bold; }
 .state-msg { padding: var(--sp-8) var(--sp-6); text-align: center; color: var(--text-secondary); }
 .state-msg.error { color: var(--critical); line-height: 1.8; }
 .register-form { padding: var(--sp-5) 28px var(--sp-2); }
 .welcome { text-align: center; color: var(--text-primary); font-size: var(--fs-body); margin: var(--sp-1) 0 var(--sp-3); }
-.email-box { background: var(--bg-canvas); border-radius: 6px; padding: var(--sp-25) 14px; font-size: var(--fs-label); color: var(--text-secondary); margin-bottom: 14px; }
+.email-box { background: var(--bg-canvas); border-radius: 6px; padding: var(--sp-25) var(--sp-4); font-size: var(--fs-label); color: var(--text-secondary); margin-bottom: var(--sp-4); }
 .pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -var(--sp-2) 0 var(--sp-25); }
 /* 批11：头像选择（圆形预览+加号空态） */
 .avatar-row { display: flex; align-items: center; gap: 12px; width: 100%; }
@@ -174,7 +174,7 @@ const onRegister = async () => {
 .avatar-hint { font-size: var(--fs-label); color: var(--text-secondary); }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
 .terms-row { display: flex; align-items: center; gap: 8px; margin-bottom: var(--sp-1); cursor: pointer; user-select: none; }
-.back-login { text-align: center; margin: var(--sp-2) 0 18px; }
+.back-login { text-align: center; margin: var(--sp-2) 0 var(--sp-5); }
 .link { color: var(--brand-600); font-size: var(--fs-label); text-decoration: none; }
 .terms-scroll { max-height: 65vh; overflow-y: auto; padding: 0 var(--sp-2); }
 .terms-lang { color: var(--text-primary); font-size: var(--fs-card); font-weight: 600; margin: var(--sp-4) 0 var(--sp-2); }

@@ -21,7 +21,7 @@
     <!-- P1-1 水位仪表（05 §5.3）：双进度条;75/90 变色纯 UI 档（引擎无预警语义） -->
     <el-card style="margin-top: var(--sp-5)">
       <template #header>{{ t('risk.gaugeTitle') }}</template>
-      <div v-for="g in gauges" :key="g.key" style="margin-bottom: 18px">
+      <div v-for="g in gauges" :key="g.key" style="margin-bottom: var(--sp-5)">
         <div style="display: flex; justify-content: space-between; margin-bottom: var(--sp-1)">
           <span>{{ g.label }}</span>
           <span class="num" :style="{ color: g.color }">{{ (g.value * 100).toFixed(1) }}% / {{ (g.limit * 100).toFixed(0) }}%</span>

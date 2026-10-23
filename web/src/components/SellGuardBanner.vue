@@ -1,6 +1,6 @@
 <template>
   <!-- P1-8（06 宝藏#3）：SELL 保底明示——冻结/盲视/熔断期"BUY 已拒 SELL 放行" -->
-  <el-alert v-if="active" :title="t('sellGuard.text', { reason })" type="warning" show-icon :closable="false" style="margin-bottom: 14px" />
+  <el-alert v-if="active" :title="t('sellGuard.text', { reason })" type="warning" show-icon :closable="false" style="margin-bottom: var(--sp-4)" />
 </template>
 <script setup>
 import { ref, computed, onMounted } from 'vue'

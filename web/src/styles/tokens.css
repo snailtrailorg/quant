@@ -185,7 +185,7 @@ html.dark {
 .el-card__header .el-card { font-weight: 400; }
 /* 批49：弹窗行距立法（EP 默认 .el-form-item margin-bottom 18px 偏大——用户反馈各弹窗行距大且不一；
    全局统一收紧。label-width 五档+position 混用的规格统一=大改另批挂账） */
-.el-dialog .el-form-item { margin-bottom: 14px; }
+.el-dialog .el-form-item { margin-bottom: var(--sp-4); }
 /* 批24 追加：弹窗标题对齐卡片标题（同 fs-card 档同 600 字重） */
 .el-dialog__title { font-weight: 600; }
 .el-pagination { font-size: var(--fs-label); }

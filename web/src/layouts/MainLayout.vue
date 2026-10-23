@@ -412,8 +412,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
 .dot.critical { background: var(--critical); }
 .dot.warn { background: var(--warn-fill); }
 .dot.info { background: var(--text-secondary); }
-.notif-body { white-space: pre-wrap; color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.5; margin: var(--sp-1) 0 2px 14px; max-height: 4.5em; overflow: hidden; }
-.notif-guide { color: var(--el-color-primary); font-size: var(--fs-foot); line-height: 1.5; margin: 2px 0 2px 14px; }
+.notif-body { white-space: pre-wrap; color: var(--text-secondary); font-size: var(--fs-foot); line-height: 1.5; margin: var(--sp-1) 0 2px var(--sp-4); max-height: 4.5em; overflow: hidden; }
+.notif-guide { color: var(--el-color-primary); font-size: var(--fs-foot); line-height: 1.5; margin: 2px 0 2px var(--sp-4); }
 /* wd-20 §2.6 ⌘K combobox 选项 */
 .cmdk-opt { padding: var(--sp-2) var(--sp-3); cursor: pointer; border-bottom: 1px solid var(--border-weak);
   display: flex; justify-content: space-between; }

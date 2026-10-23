@@ -140,7 +140,7 @@ const quick = q => { input.value = q; onSend() }
 .msg { margin-bottom: var(--sp-3); display: flex; }
 .msg.user { justify-content: flex-end; }
 .msg.assistant { justify-content: flex-start; }
-.bubble { max-width: 70%; padding: var(--sp-25) 14px; border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.bubble { max-width: 70%; padding: var(--sp-25) var(--sp-4); border-radius: 10px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .msg.user .bubble { background: var(--brand-600); color: #fff; }
 .msg.assistant .bubble { background: var(--bg-surface); color: var(--text-primary); border: 1px solid var(--border-weak); }
 .chat-input { margin-top: var(--sp-3); }

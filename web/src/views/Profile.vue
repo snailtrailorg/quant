@@ -801,7 +801,7 @@ const onChangePwd = async () => {
 .profile-tab-box { border: 1px solid var(--border-weak); border-radius: var(--radius-m); padding: var(--sp-3) var(--sp-4); }
 .profile-close-row { display: flex; justify-content: flex-end; margin-top: var(--sp-3); }
 .mismatch :deep(.el-input__wrapper) { box-shadow: 0 0 0 1px var(--critical) inset; }
-.pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -14px 0 14px; }
+.pwd-rule { color: var(--text-secondary); font-size: var(--fs-foot); margin: -14px 0 var(--sp-4); }
 /* 批24 迭代五（用户裁定）：真·列对齐——外层单 grid 定两列轨道（label max-content/value 1fr），行 subgrid 继承；
    编辑钮不单列，直接跟在值后（value 格 inline） */
 .info-table { display: grid; grid-template-columns: max-content 1fr; column-gap: var(--sp-4); row-gap: var(--sp-2); }   /* 批28-5：去 560 约束——容器决定宽度 */

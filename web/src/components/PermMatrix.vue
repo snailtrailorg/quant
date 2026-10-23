@@ -59,7 +59,7 @@
       </el-tab-pane>
     </el-tabs>
     <!-- hideSave（批24 迭代十二）：组弹窗统一保存时隐藏组件内按钮，save 经 expose 由外层调 -->
-    <el-button v-if="!hideSave" type="primary" @click="save" :loading="saving" style="margin-top: 14px">{{ t('common.save') }}</el-button>
+    <el-button v-if="!hideSave" type="primary" @click="save" :loading="saving" style="margin-top: var(--sp-4)">{{ t('common.save') }}</el-button>
   </div>
 </template>
 

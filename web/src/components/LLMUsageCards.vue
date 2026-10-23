@@ -98,5 +98,5 @@ const option = computed(() => {
 .dot { width: var(--dot); height: var(--dot); border-radius: 50%; flex-shrink: 0; }
 .chip-name { font-size: var(--fs-label); font-weight: 600; }
 .chip-sub { font-size: var(--fs-foot); color: var(--text-secondary); }
-.empty-group { color: var(--text-secondary); font-size: var(--fs-foot); padding: 18px 0; text-align: center; }
+.empty-group { color: var(--text-secondary); font-size: var(--fs-foot); padding: var(--sp-5) 0; text-align: center; }
 </style>

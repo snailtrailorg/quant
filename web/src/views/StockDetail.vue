@@ -395,5 +395,5 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 .depth .ask td:nth-child(2) { color: var(--down); }
 .depth .bid td:nth-child(2) { color: var(--up); }
 .frow { display: flex; justify-content: space-between; padding: var(--sp-1) 0; }
-.analysis { white-space: pre-wrap; line-height: 1.7; background: var(--bg-canvas); padding: 14px; border-radius: 6px; }
+.analysis { white-space: pre-wrap; line-height: 1.7; background: var(--bg-canvas); padding: var(--sp-4); border-radius: 6px; }
 </style>
