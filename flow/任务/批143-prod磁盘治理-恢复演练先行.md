@@ -18,7 +18,7 @@
 1. **restore 正身**：取 prod 最新 dump → 同机临时库 restore（michael/root 通道，CREATEDB 有）——10-20 挂账收口
 2. **三级验证升级版**：①gzip -t ②DDL+COPY 段计数 ③关键表**行数与游标实抽、与库内实况对数**（sync_config 游标值、security_master 标的数、bar_1d 行数——以 dump 时点为锚）——绿＝备份完整性证实
 3. **取证清单**（全部只读）：du 分解（PGDATA/base 每库、pg_wal、log/temp）｜pg_stat_user_tables top20（n_dead_tup/n_live_tup/last_autovacuum）｜pg_replication_slots 活性与 lag｜pg_stat_database.temp_files/temp_bytes｜pg_total_relation_size top20｜**quant 部署根 du -d2 分解**（releases×N 各自构成——deps/vendor 轮子切片是嫌疑大头；shared/venv、shared/runtime、var、backups 磁盘占用）
-4. 产出：取证报告落 `flow/稳定性检查/批143-磁盘取证.md`，B 段清单以此为唯一依据
+4. **表结构完整本地副本（顺产）**：restore 临时库上经 information_schema 导出全量表结构（表/列/类型/注释/行数估计）→ `docs/design/D18-表结构参考-生成.md`（生成式，文件头写生成命令；init-schema.sql 只覆盖核心 19 节、schema_expectations.txt 只有列名无类型——此件补全，随演练重跑维护）
 
 ## B 段：证据驱动清理（**A 绿后**，逐项按证据裁定）
 1. 无损先行：WAL 归因（死 slot→drop、archive 断点→修）→ CHECKPOINT；temp/旧日志清理
