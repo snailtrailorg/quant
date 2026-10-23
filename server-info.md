@@ -6,7 +6,7 @@
 
 ## 机器与访问模型
 - **prod**：`quant.snailtrail.cc`（120.24.235.98），Alibaba Cloud Linux 3（al8/RHEL8 系，内核 5.10.134），SELinux 关闭；内存 1.8G+swap；Python 3.11（shared/venv）
-- **staging**：`staging.local`（彩排机，同路径/同权限/同 sudoers/真 ssh；**PG 与本地 dev 共用同一实例**——升级迁移前想清楚打到谁的库，批 142 曾踩）
+- **staging**：`staging.local`（彩排机，同路径/同权限/同 sudoers/真 ssh；**PG 与本地 dev 共用同一实例——dev 侧 alembic 升降级会打穿彩排前置**，批 142 实证；expectations 重跑用 chain_scratch schema 勿升真库。本地 pg_hba **按库名 trust**：quant 库免密、postgres 库与新库 md5——`-d postgres` 在管道里=密码提示读 /dev/tty 永久挂起
 - 访问：root **不直连 ssh**；michael ssh+sudo（一次性/救火）；**常态唯一通道=`deploy/.venv` 的 ansible**（deploy 密钥 ~/.ssh/quant_deploy_ed25519 + sudoers 白名单 wrapper，禁裸 ssh/scp——连上也是死路）
 
 ## 部署根（/data/websites/snailtrail.cc/quant/）
@@ -21,9 +21,10 @@
 | `var/` | deploy 状态（快照/指纹/标记） | 管道读写，勿手碰 |
 | `bin/run-current` | 服务入口（穿 shared 的稳定启动器） | systemd ExecStart 唯一指向 |
 
-## 数据与备份
-- **PG18**：QUANT_DB_URL 在 shared/.env；alembic 经 `quant-alembic-wrapper`（发布阶段 5）；**PG 目录 12G vs dump ~736M——磁盘治理=批 143（A 演练取证→B 清理）**
-- **备份**：`/home/quant/scripts/backup-db.sh`（稳定副本不进 releases）→ `/home/quant/backups/`，crontab 02:00，保留 7 天
+## 数据与备份（批 143 治理后终态 2026-10-23）
+- **PG18**：QUANT_DB_URL 在 shared/.env；alembic 经 `quant-alembic-wrapper`（发布阶段 5）；**PGDATA=`/data/databases/pgsql`（非默认路径）**。库 ~11G=活数据紧凑态（bar_1d heap 2.6G+idx 2.1G / daily_basic 1.1G+0.9G——批 143 REINDEX+VACUUM FULL 后）；**grype-db 3.1G=单活动漏洞库（grype v6）正常体量，勿清**
+- **备份**：`/home/quant/scripts/backup-db.sh`（稳定副本不进 releases）→ `/home/quant/backups/`，crontab 02:00，**保留 5 天**（批 143 改）；dump ~930M/份；**恢复演练已过（备份可兜底）**，工具 `scripts/backup-restore-drill.sh`（本地跑，前置临时授权见脚本头）
+- **磁盘水位**：根盘 40G 用量 78%（journal 已 cap 200M）；bar 表无分区/清理策略=矩阵 F-17 开放项
 - **Valkey 分库**：db4=业务（心跳/熔断/锁/流）、db5=Celery broker、db6=Celery result；关键键：`quant:hb:md-hub`(HASH 8 字段)、`quant:hb:task:{tid}`、`hub:lease`/`hub:gen`(fencing)
 - **密钥**：SECRET_KEY 单根密钥，HKDF 派生 JWT_SECRET + ENCRYPTION_KEY(Fernet)
 
