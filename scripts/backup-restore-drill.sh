@@ -52,7 +52,7 @@ zcat "$DUMP" | awk '/^COPY /{t=$2;n=0;f=1;next} /^\\\.$/{if(f){print t,n;f=0}nex
 TOTAL_SEG=$(wc -l < /tmp/drill-copylines.txt)
 echo "  dump 数据段 $TOTAL_SEG 个；关键表对数："
 for T in public.sync_config public.security_master public.users public.bar_1d; do
-  A=$(awk -v t="$T " '$1==t{print $2}' /tmp/drill-copylines.txt | head -1)
+  A=$(awk -v t="$T" '$1==t{print $2}' /tmp/drill-copylines.txt | head -1)
   B=$(psqlq "select count(*) from ${T#public.}" 2>/dev/null)
   chk "$T" "$B" "$A"
 done
