@@ -549,13 +549,20 @@ def _tier_alert_filter(stale: list[dict]) -> tuple[list[dict], set[str]]:
         return stale, set()
 
 
-@app.task(name="src.scheduler.tasks.data_continuity_check")
-def data_continuity_check():
+@app.task(name="src.scheduler.tasks.data_continuity_check",
+          bind=True, soft_time_limit=2400, time_limit=2700)   # 批 145：慢轮实测峰 2093s+~15% 余量
+def data_continuity_check(self):
     """P-MON-006 数据断连自愈与断点补采。
 
     检测 K 线断点 -> 自动补采 -> 重算缺失因子。
     断线检测（Valkey 心跳）+ 因子重算触发补采。
     三档新表新鲜度检测（项 18，2026-08-21）。
+
+    时限显式声明（批 145，沿批 110·D 制）：实测双峰——慢轮 1664~2093s（带补采动作）、
+    快轮 24~63s；soft=2400 后慢轮不再触发全局 300s 软限的 SoftLimitExceeded 告警。
+    机制注：原告警后任务「跑完不熔断」的真因=软限异常在补采段被 except Exception
+    吞除（SoftLimitExceeded 继承 Exception），非「未捕则直达完成」。若实跑峰 >2400s
+    改本常量并重跑门（校准规则同批 110·D）。
     """
     from datetime import date, timedelta
 
@@ -784,6 +791,10 @@ def data_sync_scheduler():
             # 成功写终态（新 sync 项首跑被杀的形态，st_list_sync 2026-10-10 实证：进程
             # 11:15 被回滚重启杀死、ts 停 NULL ⇒ 原 `if last_sync_ts:` 恒假 ⇒ **永不复位**，
             # 本修复自己注释批判的「永久 skip」在 NULL 分支复活）。
+            # 批 144：running 心跳锚点=置位/运行中刷新的 last_sync_ts（_mark_running(True)
+            # 同刷 ts）——运行中任务 ts 恒新鲜，仅进程死亡后才停摆 ⇒ >7200s 恢复「进程已死」
+            # 本义。last_sync_ts 语义=活跃时刻（running 中=置位时刻，DataManage「同步时间」
+            # 列同此），勿误当前端展示 bug。
             _stale = False
             if last_sync_ts is None:
                 _stale = True

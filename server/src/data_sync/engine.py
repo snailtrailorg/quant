@@ -217,7 +217,15 @@ def _log(sync_id: str, mode: str, start: str, end: str, pulled: int, saved: int,
 def _mark_running(sync_id: str, running: bool):
     status = "running" if running else "idle"
     with get_conn() as conn:
-        conn.execute("UPDATE sync_config SET last_status=%s WHERE id=%s", (status, sync_id))
+        # 批 144：running 置位同刷 last_sync_ts——僵尸判定（tasks.py 调度轮）按 ts 龄 >7200s
+        # 判死进程；置位不刷 ts 则 async 长任务（binance 晨档 1069s）跨调度轮必被误判
+        # 「僵尸 running 已复位」（prod 10-22/10-23 连续两晨实证）。False 分支不刷：终态由
+        # _update_sync_state 随后覆盖（G-S2 顺序，测试锁死）。
+        if running:
+            conn.execute("UPDATE sync_config SET last_status=%s, last_sync_ts=now() WHERE id=%s",
+                         (status, sync_id))
+        else:
+            conn.execute("UPDATE sync_config SET last_status=%s WHERE id=%s", (status, sync_id))
         conn.commit()
 
 
@@ -3192,6 +3200,12 @@ def _make_full_rebuild_handler(kind: str, sub_kind: str | None, table: str, pk_c
             df = adapter.fetch_supply(kind, sub_kind, **_kw)
         if df is None or df.empty:
             return {"pulled": 0, "saved": 0, "start": "", "failed_dates": ["空数据"], "expected_days": 1, "actual_days": 0}
+        # 批 146：上游返回内部重复行时全删全插撞 df 自身重复键（namechange 2026-10 实证
+        # duplicate key (ts_code,name,start_date)）——写入前按主键去重。交集空跳过
+        # （drop_duplicates(subset=[]) 的 falsy subset 会退化全列去重，非本意）。
+        _pk = [c for c in (pk_cols or []) if c in df.columns]
+        if _pk:
+            df = df.drop_duplicates(subset=_pk, keep="last")
         cols = list(df.columns)
         placeholders = ", ".join(["%s"] * len(cols))
         cols_sql = ", ".join(cols)
