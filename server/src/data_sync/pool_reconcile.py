@@ -49,7 +49,16 @@ FAMILY_C: dict[str, str] = {
     "namechange_sync": "改名历史",
     "concept_sync": "概念分类",
 }
-C_STALE_DAYS = 7
+# 批 146：按 id 分档——trade_cal 年度刷新（1 月 1 日，init-seed '0 9 1 1 *'）7 天阈值
+# 必误伤（数据到 2026-12-31 齐全、10-05 success 仍报「77 天未成功」）；其余五键=周级。
+C_STALE_DAYS: dict[str, int] = {
+    "astock_list": 7,
+    "listed_fund_list": 7,
+    "cb_basic": 7,
+    "trade_cal": 370,          # 年度任务（365+余量）
+    "namechange_sync": 7,
+    "concept_sync": 7,
+}
 D_STREAK_ALERT = 6
 # 排序族权重：相等陈旧度时 A 族优先（日频、可自愈）
 _FAMILY_RANK = {"A": 0, "B": 1, "C": 2, "D": 3}
@@ -227,8 +236,9 @@ def check_family_c() -> list:
             continue
         ref = now if ts.tzinfo else now.replace(tzinfo=None)
         age = (ref - ts).days
-        if age > C_STALE_DAYS:
-            findings.append("C族 %s: 已 %d 天未成功（阈值 %d）" % (name, age, C_STALE_DAYS))
+        _stale_days = C_STALE_DAYS.get(sid, 7)
+        if age > _stale_days:
+            findings.append("C族 %s: 已 %d 天未成功（阈值 %d）" % (name, age, _stale_days))
     return findings
 
 

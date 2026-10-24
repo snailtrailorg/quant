@@ -650,14 +650,29 @@ def pull_stock_st(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
             else pd.concat(frames, ignore_index=True))
 
 def pull_concept(trade_date: str = "", ts_code: str = "") -> pd.DataFrame:
-    """概念板块列表。全量重建模式。"""
+    """概念板块列表。全量重建模式。
+
+    批 146 窄投影：2026-10 上游改版返回 12 列且含两个重名列 name（实测 3000 行），
+    本仓 concept 表仅 ts_code+name。先去重名列再取表列交集（源列名面归 adapter——
+    A02 分层判据）；行去重由引擎工厂 pk 兜底（职责分层）。
+    """
     pro = get_pro()
     kwargs = {}
     if trade_date:
         kwargs["trade_date"] = trade_date
     if ts_code:
         kwargs["ts_code"] = ts_code
-    return pro.concept(**kwargs)
+    df = pro.concept(**kwargs)
+    if df is None:
+        return df
+    # 重名列去重（保留首个 name）+ 表列交集——empty 同样投影（形状一致，防 12 列空 df 进工厂）
+    df = df.loc[:, ~df.columns.duplicated()]
+    cols = [c for c in ("ts_code", "name") if c in df.columns]
+    if not cols:
+        # 零交集（上游彻底重命名核心列）——归空数据路径 fail-loud（码审 A P2：df[[]] 的
+        # 0 列非空形态会绕过工厂 empty 检查落进 INSERT () 空列 SQL，提前归零）
+        return df.iloc[0:0]
+    return df[cols]
 
 
 # ─────────────────── 池内深度数据（三档第二档 10 表）——批 83b：拉取下沉 fetch 契约 ───────────────────
