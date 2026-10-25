@@ -243,7 +243,13 @@ def version_violations(txt_text: str, lock_text: str,
     for name, specs in declared_specs(txt_text, py).items():
         cand = [v for v, mk in pins.get(name, []) if marker_applies(mk, py)]
         if not cand:
-            continue           # 缺包由「包名闸门」负责报
+            # 批 148 审 B2 P0-1 缝：包名闸门只报「txt 无此包」；本声明（marker 适用本目标）
+            # 在 lock 无适用 pin（如 3.10 重编译把 >=3.11 marker 档整体剔除）⇒ 版本闸必须
+            # 自己报红——否则 pillow13 档静默蒸发（批 136 修复失效）而两闸全绿。
+            if pins.get(name):
+                bad.append(f"{name}: txt 档适用 py{py[0]}.{py[1]} 但 lock 无适用 pin"
+                           f"（marker 档缺失——多目标重编译剔除？lock={pins[name]}）")
+            continue           # 包整体缺（lock 无任何档）由「包名闸门」负责报
         for op, want in specs:
             if not any(_satisfies(v, op, want) for v in cand):
                 bad.append(f"{name}: lock {cand} 不满足 {op}{want}（目标 py{py[0]}.{py[1]}）")
@@ -274,6 +280,16 @@ class TestVersionSatisfaction:
                 "pillow==12.3.0 ; python_version < \"3.11\" \\\n    --hash=sha256:b\n")
         assert version_violations(txt, lock, py=(3, 10)) == []
         assert version_violations(txt, lock, py=(3, 11)) == []
+
+    def test_marker_branch_missing_flagged(self):
+        """批 148 审 B2 P0-1：txt 双档声明，lock 只剩 <3.11 档（≥3.11 档被 3.10 重编译剔除）
+        ⇒ 在 3.11 目标下必红（原 continue 缝让批 136 pillow 修复静默蒸发）。"""
+        txt = ('Pillow>=13.0.0; python_version >= "3.11"\n'
+               'Pillow>=12.3.0; python_version < "3.11"\n')
+        lock = "pillow==12.3.0 ; python_version < \"3.11\" \\\n    --hash=sha256:b\n"
+        bad = version_violations(txt, lock, py=(3, 11))
+        assert bad and "marker 档缺失" in bad[0], bad
+        assert version_violations(txt, lock, py=(3, 10)) == []
 
     def test_real_files_versions_satisfied(self):
         """核心断言：**每个部署目标版本**下 .txt 的版本约束都被 .lock 满足。"""

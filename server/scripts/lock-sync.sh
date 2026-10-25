@@ -56,6 +56,22 @@ done < "$REQ"
 [[ "$miss" -eq 0 ]] || exit 1
 echo "   ✓ 全部命中"
 
+echo "⑤ marker 档守卫（批 148 审 B2 P0：3.10 重编译会把 >=3.11 marker 档整体剔除）..."
+miss=0
+while IFS= read -r line; do
+    [[ "$line" =~ python_version ]] || continue
+    name=$(echo "$line" | sed 's/\[.*//; s/[<>=!~; ].*//' | tr '[:upper:]' '[:lower:]' | tr '_' '-')
+    marker=$(echo "$line" | sed -n 's/.*;[[:space:]]*\(python_version.*\)$/\1/p')
+    [[ -n "$name" && -n "$marker" ]] || continue
+    ver=$(echo "$marker" | grep -oE '[0-9]+\.[0-9]+' | head -1)
+    op=$(echo "$marker" | grep -oE '(>=|<)' | head -1)
+    [[ -n "$ver" && -n "$op" ]] || continue
+    grep -qiE "^${name//+/\+}(\[[^]]*\])?==.*python_version[[:space:]]+${op}[[:space:]]+\"?${ver}" "$LOCK" \
+        || { echo "   X $name 的 ${op}${ver} 方向档在 lock 缺失——多目标档被剔除！" >&2; miss=1; }
+done < "$REQ"
+[[ "$miss" -eq 0 ]] || exit 1
+echo "   ✓ marker 档完整"
+
 echo
 echo "✅ lock 同步完成。下一步："
 echo "   git add requirements.txt requirements.lock && git commit"
