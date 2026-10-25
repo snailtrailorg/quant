@@ -32,13 +32,16 @@ FAMILY_D: frozenset[str] = frozenset({
 })
 # B 族：**显式六表**（不能拿 _TIER1_BATCH 整个遍历——里面还有 cyq_perf 与 forecast：
 # forecast 是业绩预告（ann_date 事件型，非披露季天天 0 行）⇒ 按日快照判必假报）。
-FAMILY_B: tuple[tuple[str, str], ...] = (
-    ("stk_limit", "trade_date"),
-    ("moneyflow", "trade_date"),
-    ("margin_detail", "trade_date"),
-    ("top_list", "trade_date"),
-    ("block_trade", "trade_date"),
-    ("st_list", "trade_date"),
+# 批 147：三元组 (表, 日期列, lag_trade_days)——lag=1 族（margin_detail）上游 T+1 发布
+# （晨档时昨日数据尚未出）⇒ 表 max 恒落后「昨日快照」假设一日，每晚误报；对账 expected
+# 对 lag 族再回退一交易日对齐发布节奏（数据面零缺失，批 146 步 8 定谳）。
+FAMILY_B: tuple[tuple[str, str, int], ...] = (
+    ("stk_limit", "trade_date", 0),
+    ("moneyflow", "trade_date", 0),
+    ("margin_detail", "trade_date", 1),
+    ("top_list", "trade_date", 0),
+    ("block_trade", "trade_date", 0),
+    ("st_list", "trade_date", 0),
 )
 # C 族：静态清单（sync_config id → 可读名）；id 必须与 sync_config 实际一致
 FAMILY_C: dict[str, str] = {
@@ -202,17 +205,27 @@ def check_family_b() -> list:
     expected = _nearest_trade_day(yesterday)
     if not expected:
         return findings
-    for pg_table, dc in FAMILY_B:
+    for pg_table, dc, lag_days in FAMILY_B:
+        # 批 147：lag 族 expected 再回退 lag 个交易日（T+1 发布节奏对齐）
+        tbl_expected = expected
+        for _ in range(lag_days):
+            prev = _nearest_trade_day(
+                (datetime.strptime(tbl_expected, "%Y%m%d") - timedelta(days=1)).strftime("%Y%m%d"))
+            if not prev or prev >= tbl_expected:
+                break   # ntd 异常返空——不回退，宁可误报不静默。（注：ntd fail-open 返原值
+                        # 形态下 prev=前一自然日字符串 < tbl_expected——本守卫不拦，按自然日
+                        # 回退一次，属该函数陈旧守卫的既有容错语义，审 B2 P1-1 勘正）
+            tbl_expected = prev
         try:
             with get_conn() as conn:
                 cur = conn.execute(
-                    f"SELECT COUNT(*) FROM {pg_table} WHERE {dc} >= %s", (expected,))
+                    f"SELECT COUNT(*) FROM {pg_table} WHERE {dc} >= %s", (tbl_expected,))
                 n = int(cur.fetchone()[0])
         except Exception as e:
             logger.warning("池对账 B 族读 %s 失败: %s", pg_table, e)
             continue
         if n == 0:
-            findings.append("B族 %s: 自 %s 起无任何行（全市场快照缺）" % (pg_table, expected))
+            findings.append("B族 %s: 自 %s 起无任何行（全市场快照缺）" % (pg_table, tbl_expected))
     return findings
 
 

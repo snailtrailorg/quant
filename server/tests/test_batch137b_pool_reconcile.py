@@ -253,7 +253,7 @@ class TestRegressionOfReviewP0:
     def test_family_b_is_explicit_six(self):
         """P0-2：B 族只能含 6 张按日快照表——cyq_perf/forecast 进 B 必假报。"""
         from src.data_sync.pool_reconcile import FAMILY_B
-        tables = [t for t, _dc in FAMILY_B]
+        tables = [t for t, *_rest in FAMILY_B]   # 批 147 三元组（+lag）——首个元素恒表名
         assert len(tables) == 6, tables
         assert "cyq_perf" not in tables and "forecast" not in tables
 
