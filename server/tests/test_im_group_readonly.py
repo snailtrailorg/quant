@@ -1,5 +1,10 @@
 """批27-7：群聊限只读（用户裁定）——perms 钳 {"read"}（根修：LLM 看不到操作工具）+
 tool_calls 层兜底拒答；操作确认仅私聊。"""
+import sys
+def _llm_pkg():
+    import src.llm_gateway
+    return src.llm_gateway
+
 from unittest.mock import MagicMock, patch
 
 
@@ -16,7 +21,7 @@ def _run(chat_type, tool_calls=None):
     resp.content = "查询结果"
     gw.chat.return_value = resp
     with patch("src.im_bot.users.resolve_im_identity", return_value=_identity()), \
-         patch("src.llm_gateway.gateway", gw), \
+         patch("src.llm_gateway.gateway.gateway", gw), \
          patch("src.llm_gateway.gateway.READ_TOOLS", []), \
          patch("src.llm_gateway.gateway.OPERATIONAL_TOOLS", [MagicMock(name="emergency_halt")]):
         # OPERATIONAL_TOOLS 元素 .name —— MagicMock(name=) 不设 .name 属性，用真实小对象

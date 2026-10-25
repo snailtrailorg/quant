@@ -28,7 +28,7 @@
     - Tick 级高频全量存储（按需订阅，不持久化全量 Tick）
 - **约束**(时间 / 资源 / 必须遵守的):
   - 部署 OS：Alibaba Cloud Linux 3（OpenAnolis, al8/RHEL8 系，内核 5.10.134-19.7.al8；开发机 Fedora 同 RPM 系）
-  - 语言：Python 3.10（venv；服务器 120.24.235.98=3.11，本地=3.10，不用 3.14--vnpy 4.4.0 硬 pin pyside6==6.8.2.1 不支持 3.14，详见 CLAUDE.md 技术栈约束）
+  - 语言：Python 3.11（venv，批 149 起 dev/staging 对齐 prod；不用 3.14--vnpy 4.4.0 硬 pin pyside6==6.8.2.1 不支持 3.14，详见 CLAUDE.md 技术栈约束）
   - 服务器：低配 ECS（最小 2核/4GB，推荐 4核/8GB），无 Docker
   - 数据库：PostgreSQL 18 + pgvector + Valkey（Redis 协议兼容），弃 TimescaleDB/重型向量库
   - 运行期 AI 仅国内模型（DeepSeek/GLM），不接 Anthropic/OpenAI

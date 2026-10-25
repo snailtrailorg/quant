@@ -282,7 +282,7 @@ class TestStockApiEndpoints:
 
     def test_analyze_caches_and_calls_llm(self, admin_client):
         from src.data_platform import stock_detail as sd
-        from src.llm_gateway import gateway as gw
+        from src.llm_gateway.gateway import gateway as gw
         r, _ = _fake_redis()
         fake_detail = {"ts_code": "600519.SH", "name": "贵州茅台", "industry": "白酒",
                        "in_pool": False, "quote": {"last": 1291.0, "name": "贵州茅台"},

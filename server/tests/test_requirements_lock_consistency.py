@@ -168,9 +168,10 @@ class TestRealFiles:
 # 另：本仓**部署环境有 Python 版本漂移**（prod=3.11 / staging=3.10，见 DEPLOY_PYS），
 # 故 lock 允许同名多 pin（带环境标记）；本闸门按**每个目标版本**分别校验。
 
-DEPLOY_PYS = ((3, 10), (3, 11))   # staging/dev 与 prod 的实际解释器版本（prod 取自运行态安全快照）
+DEPLOY_PYS = ((3, 11),)   # 批 149：dev/staging 升 3.11 对齐 prod（3.10 退役；原 (3,10),(3,11) 双目标随 Pillow 双档收敛改单）
 # 证据：staging release 阶段 5 pip 预检拒绝 pillow==13.0.0（Requires-Python >=3.11）⇒ staging=3.10；
 #       prod /api/security/snapshot 的 components.python = 3.11.13 ⇒ prod=3.11。
+#       批 149（2026-10-25）：dev venv 重建 3.11.16 实证，staging 彩排栈随 release 管道同步。
 
 _SPEC_RE = re.compile(r"^(>=|<=|==|>|<)\s*([0-9][0-9A-Za-z.\-]*)")
 _MARKER_RE = re.compile(r'python_version\s*(>=|<=|==|>|<)\s*["\']([0-9.]+)["\']')

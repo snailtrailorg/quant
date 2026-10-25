@@ -705,7 +705,7 @@ def _describe(f: dict) -> tuple[str, str]:
     fail-soft：LLM 异常返回 ("", "")（列 NULL，_backfill_descriptions 下轮再补）。
     """
     try:
-        from src.llm_gateway import gateway
+        from src.llm_gateway.gateway import gateway
         facts = [
             f"漏洞编号: {f['vuln_id']}",
             f"受影响包: {f['pkg']}",
@@ -780,7 +780,7 @@ def _ai_summary(scan_date: date, fresh: list[dict], diff_items: list[dict]) -> s
     prompt 声明数据非指令；输出钉死纯文本 ≤300 字。
     """
     try:
-        from src.llm_gateway import gateway
+        from src.llm_gateway.gateway import gateway
         lines = [
             f"日期: {scan_date.isoformat()}",
             f"新增漏洞: {len(fresh)} 条；基线偏差: {len(diff_items)} 项。",

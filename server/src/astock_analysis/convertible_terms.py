@@ -19,7 +19,7 @@ def analyze_convertible_terms(terms: dict) -> dict:
     """
     if not terms:
         return {"summary": "（无条款数据）", "raw_terms": {}}
-    from src.llm_gateway import gateway
+    from src.llm_gateway.gateway import gateway
 
     name = terms.get("bond_short_name") or terms.get("ts_code", "")
     prompt = (

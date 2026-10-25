@@ -327,7 +327,7 @@ def test_feishu_webhook_message_flow():
     3. 最终回复发送给用户
     """
     from src.im_bot.feishu_client import process_message_async, FeishuClient
-    from src.llm_gateway import gateway as llm_gateway
+    from src.llm_gateway.gateway import gateway as llm_gateway
     from src.llm_gateway.gateway import LLMResponse
 
     with patch.object(llm_gateway, "chat", return_value=LLMResponse(content="您好，我是量化交易助手。当前风控状态正常。")) as mock_chat, \
@@ -360,7 +360,7 @@ def test_feishu_webhook_message_unauthorized():
 def test_feishu_process_message_with_tool():
     """消息触发读类工具调用，工具结果回传 LLM 后回复。"""
     from src.im_bot.feishu_client import process_message_async, FeishuClient
-    from src.llm_gateway import gateway as llm_gateway
+    from src.llm_gateway.gateway import gateway as llm_gateway
     from src.llm_gateway.gateway import LLMResponse
 
     with patch.object(llm_gateway, "chat") as mock_chat, \

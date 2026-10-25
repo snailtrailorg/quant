@@ -3,7 +3,7 @@
 mock gateway.chat + pull_cb_basic，不连真实 Tushare/LLM/DB。
 """
 from unittest.mock import patch
-from src.llm_gateway import gateway
+from src.llm_gateway.gateway import gateway
 from src.llm_gateway.gateway import LLMResponse
 
 fake_terms = {

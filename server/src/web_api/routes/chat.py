@@ -25,7 +25,7 @@ router = APIRouter(tags=["chat"])
 def chat(req: ChatReq, payload: dict = Depends(require_perm("strategy_control"))):
     """自然语言查询 → LLM 网关（只读工具直执闭环，P1-4）。"""
     try:
-        from src.llm_gateway import gateway
+        from src.llm_gateway.gateway import gateway
         from src.llm_gateway.gateway import READ_TOOLS
         messages = [{"role": "user", "content": req.message}]
         resp = None
@@ -119,7 +119,7 @@ async def ws_chat(ws: WebSocket, token: str = Query(None)):
         await ws.close(code=4001, reason="token 无效")
         return
     role = payload.get("db_role") or payload.get("role", "viewer")   # 批27-11：对齐 POST 面批11B（降级/改组即时生效）
-    from src.llm_gateway import gateway
+    from src.llm_gateway.gateway import gateway
     try:
         while True:
             data = await ws.receive_json()

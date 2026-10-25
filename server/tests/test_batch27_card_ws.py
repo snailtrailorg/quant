@@ -8,6 +8,11 @@ run_until_complete 先例（test_eventbus.py）。
 import asyncio
 import json
 import time
+import sys
+def _llm_pkg():
+    import src.llm_gateway
+    return src.llm_gateway
+
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -434,7 +439,7 @@ def test_handle_incoming_passes_full_toolset():
     ident = {"user_id": 1, "username": "alice", "role": "admin",
              "perms": {"read", "strategy_control", "halt", "trade", "resume"}}
     replied = []
-    with patch("src.llm_gateway.gateway", gw), \
+    with patch("src.llm_gateway.gateway.gateway", gw), \
          patch("src.im_bot.users.resolve_im_identity", return_value=ident):
         handlers.handle_incoming("feishu", 7, "ou_x", "急停", lambda t: replied.append(t), "p2p")
     assert gw.chat.called

@@ -86,7 +86,7 @@ def analyze_stock_api(symbol: str,
     detail = get_stock_detail(symbol)
     if not detail.get("name") and not (detail.get("quote") or {}).get("name"):
         raise ApiError(404, "SYMBOL_NOT_FOUND", f"未识别标的 {symbol}")
-    from src.llm_gateway import gateway
+    from src.llm_gateway.gateway import gateway
     def _clip(v, n=200):
         return str(v).replace("\n", " ")[:n] if v is not None else ""   # B5：外部字段截断防注入
     q = detail.get("quote") or {}

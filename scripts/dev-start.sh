@@ -55,7 +55,7 @@ check_prereq() {
   # venv
   if [ ! -x "$VENV" ]; then
     red "  venv: ✗ 不存在 ($VENV)"
-    red "  → cd server && python3.10 -m venv venv && ./venv/bin/pip install -r requirements.txt"
+    red "  → cd server && python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt"
     return 1
   fi
   green "  venv: ✓"

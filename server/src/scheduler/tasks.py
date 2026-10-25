@@ -113,7 +113,7 @@ def daily_report(self):
     rc = RiskControl.get()
     body = f"日期: {date.today().isoformat()}\n风控: {'熔断' if rc.is_halted() else '正常'}"
     try:
-        from src.llm_gateway import gateway
+        from src.llm_gateway.gateway import gateway
         response = gateway.chat(
             [{"role": "user", "content": f"请生成简短盘后报告：\n{body}"}],
             role="viewer",
@@ -155,7 +155,7 @@ def health_check():
 
     # LLM (DeepSeek)
     try:
-        from src.llm_gateway import gateway
+        from src.llm_gateway.gateway import gateway
         resp = gateway.chat([{"role":"user","content":"ping"}], timeout=10, retries=0, caller="health_check")
         results["llm"] = {"status": "ok" if resp.content else "empty", "model": resp.usage.get("model","")}
     except Exception as e:

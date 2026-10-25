@@ -35,7 +35,7 @@ class TestChatLoop:
         """gateway patch：实例 .chat side_effect + **模块级**工具表（gateway 实例名与模块名
         撞车——READ_TOOLS 在模块上，字符串 patch 会落到实例上 AttributeError）+ 首见留痕。"""
         from importlib import import_module
-        from src.llm_gateway import gateway as _gw_inst
+        from src.llm_gateway.gateway import gateway as _gw_inst
         gm = import_module("src.llm_gateway.gateway")
         return [
             patch("src.im_bot.users.resolve_im_identity", return_value=_identity()),

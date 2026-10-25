@@ -20,7 +20,7 @@
   - `docs/manual/` — **操作手册**（面向使用者，索引+因子/策略/回测/实盘/数据源切换五册，`server/docs` 镜像随 rsync 部署 + Web 内置 `/help`）
   - `docs/reference/` — **外部参考资料**（第三方 SDK/协议/客户竞品，非原创——`README.md` 有索引）
   - `docs/obsolete/` — **过时归档**（已废弃/已吸收文档 + 已完成任务文件，保留历史不删除——`README.md` 有归档清单与替代对照）
-- `server/` - 后端（`src/` Python 3.10 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
+- `server/` - 后端（`src/` Python 3.11 代码 + `scripts/init-seed.sql` + `scripts/systemd/`（单元与 polkit 规则）+ `requirements.txt` + `.env` + `venv/`）。本地开发 + 部署源，整体 rsync（P3 回写 2026-08-20：systemd 实际在 `scripts/systemd/`，根下无该目录）
 - `web/` - 前端（Vue3 + Vite，原 `src/web_ui/`）。`npm run build` 后部署 `dist/`
 - `deploy/` - **工件化交付（现行，2026-08-26 起在管生产）**：Ansible playbooks（release/rollback/bootstrap 三剧本八阶段+自动回滚）+ inventory（quant-prod/quant-staging 彩排：同路径/同权限/同 sudoers/真 ssh）+ wrappers（**14 只特权通道**，sudoers 白名单唯一真源）+ collections vendor + 六场景失败注入。**发布=彩排绿后跑 release.yml**（机制全貌详见 `docs/architecture/A06-部署管道架构.md`）
 - `scripts/` - 本地 dev 脚本（`dev-init-db.sh`/`dev-init-valkey.sh`/`dev-start.sh`/`verify.sh`）+ 独立运维工具（`migrate-encryption-key.sh`/`test-live-pipeline.sh`/`test_xtp_connect.py`/**`test-migration-roundtrip.sh`**——破坏性/改写过的迁移在 scratch schema 里真跑 upgrade+downgrade 的往返回归，为什么必须存在见 `flow/任务/批85-破坏性迁移两步走立法.md`）。**不传服务器**。旧 bash 部署链已删除（2026-08-27 git 史可考 40fb5fa，Ansible 接管后回滚周期已过）
@@ -61,7 +61,7 @@
 - **部署窗三段**（2026-09-01 用户裁定）：交易日 盘前启动截止 8:55 / 午休 11:35 起-12:40 启动截止 / 盘后 15:05 起；闸拦启动时刻（pipeline `deploy_trading_windows`）；staging 彩排绿前提；部署命令一律落文件、输出为空先验状态再动。
 
 ### 技术栈约束
-- **Python 版本**：服务器 `120.24.235.98` = 3.11（venv 3.11.13），本地开发机 = 3.10。**不用 3.14**——根因：vnpy 4.4.0 硬 pin `pyside6==6.8.2.1`，该版本 `requires_python <3.14`，3.14 上 pip 装不上 vnpy 4.4.0；resolver 回退 vnpy 4.0.0 与 vnpy_binance 2026.7.23 错配（`Exchange.GLOBAL` 缺失致 import 崩）。纯 Python 依赖（numpy/pandas/psycopg/PySide6 6.11/fastapi/celery 等）在 3.14 全 OK，卡点单一在上游 vnpy 的 PySide6 pin，等 vnpy 放宽即解（2026-08-03 实测）。改版本要严格评估 + 客户确认，不擅动。
+- **Python 版本**：服务器 `120.24.235.98` = 3.11（venv 3.11.13），本地开发机 = **3.11**（批 149 升级对齐，venv 3.11.16；原 3.10 已退役）。**不用 3.14**——根因：vnpy 4.4.0 硬 pin `pyside6==6.8.2.1`，该版本 `requires_python <3.14`，3.14 上 pip 装不上 vnpy 4.4.0；resolver 回退 vnpy 4.0.0 与 vnpy_binance 2026.7.23 错配（`Exchange.GLOBAL` 缺失致 import 崩）。纯 Python 依赖（numpy/pandas/psycopg/PySide6 6.11/fastapi/celery 等）在 3.14 全 OK，卡点单一在上游 vnpy 的 PySide6 pin，等 vnpy 放宽即解（2026-08-03 实测）。改版本要严格评估 + 客户确认，不擅动。
 - **PostgreSQL 18 + pgvector + Valkey**（Redis 协议兼容）。弃 TimescaleDB / 重型向量库。
 - **vnpy 核心 + vnpy_xtp**（交易+行情接口）为第三方成熟组件，不重复造轮；**回测自建 BacktestEngine**（纯 Python，不依赖 vnpy CtaBacktestingEngine）。
 - **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade，产上经 `quant-alembic-wrapper` 随 Ansible 管道执行），不手动 ALTER。`init-schema.sql` 保留作手工运维参考。**运行时不再 `CREATE TABLE IF NOT EXISTS`**（2026-08-13 清零，原 30 处全部入迁移 0027；`bar_{freq}` 8 表 2026-09-03 由迁移 0064 补齐）；`db.py` 的 `verify_schema()` 启动时校验表存在并告警，`ensure_table()` 仅 `to_regclass` 校验存在+告警（`_verified_tables` 缓存），不建表。

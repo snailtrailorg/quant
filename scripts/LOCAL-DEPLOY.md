@@ -30,7 +30,7 @@ bash scripts/dev-start.sh logs       # tail -f 后端日志
 1. **前置检查**（失败给出修复命令）：
    - PG（`pg_isready -U quant -d quant`）— 没起 → `sudo bash scripts/dev-init-db.sh`
    - Valkey（`valkey-cli ping`）— 没起 → `bash scripts/dev-init-valkey.sh`
-   - venv（`server/venv/bin/python`）— 没建 → `cd server && python3.10 -m venv venv && ./venv/bin/pip install -r requirements.txt`
+   - venv（`server/venv/bin/python`）— 没建 → `cd server && python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt`
    - node_modules（`web/node_modules`）— 没装 → `cd web && npm install`
 2. **跑迁移**：`cd server && alembic upgrade head`
 3. **启后端**：`setsid ./venv/bin/uvicorn src.web_api.main:app --port 8000` → 日志 `/tmp/quant-uvicorn.log`，轮询 `/health` 最多 15s
@@ -47,9 +47,9 @@ sudo bash scripts/dev-init-db.sh
 # 2. Valkey
 bash scripts/dev-init-valkey.sh
 
-# 3. 后端依赖（venv 用 Python 3.10，不用 3.14，详见 CLAUDE.md 技术栈约束）
+# 3. 后端依赖（venv 用 Python 3.11，对齐 prod；不用 3.14，详见 CLAUDE.md 技术栈约束）
 cd server
-python3.10 -m venv venv
+python3.11 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 
 # 4. 前端依赖
@@ -66,7 +66,7 @@ cp server/.env.example server/.env
 |---|---|
 | `PG: ✗ 未启动` | `sudo bash scripts/dev-init-db.sh` 建角色/库 |
 | `Valkey: ✗ 未启动` | `bash scripts/dev-init-valkey.sh` |
-| `venv: ✗ 不存在` | `cd server && python3.10 -m venv venv && ./venv/bin/pip install -r requirements.txt` |
+| `venv: ✗ 不存在` | `cd server && python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt` |
 | `node_modules: ✗` | `cd web && npm install` |
 | 后端启动失败 | `bash scripts/dev-start.sh logs` 看日志；常见是端口占用（`lsof -i :8000`）或迁移报错 |
 | 前端启动失败 | `tail -20 /tmp/quant-vite.log`；常见是端口占用或依赖缺失 |

@@ -84,7 +84,7 @@ def handle_incoming(provider: str, bot_id: int, im_user_id: str, text: str,
         perms = {"read"}
 
     try:
-        from src.llm_gateway import gateway
+        from src.llm_gateway.gateway import gateway
         from src.llm_gateway.gateway import OPERATIONAL_TOOLS
         operational_names = {t.name for t in OPERATIONAL_TOOLS}
         messages = [{"role": "user", "content": text}]
