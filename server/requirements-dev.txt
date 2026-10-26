@@ -3,6 +3,7 @@
 ruff>=0.9
 pybind11>=2.12   # 批 151：EMQ 编译通道构建依赖（quant-emd-build 读 shared/venv 的 Python.h+pybind11）——旧 3.10 venv 历史手装暗依赖，rebuild 后即丢实证；入 dev 段=构建工具正位
 importlib_metadata>=8   # 批 151：vnpy_xtp（lock 外手装包）运行时依赖——同暗依赖链正位
+filelock>=4.2.1   # 批 153 补：工具链伴生包正位（upgrade-tools 升 pip/setuptools/wheel 时 pip 解析带入 venv 但不进 lock）——CVE-2026-1129xx 修复线；dev 段恒装盖住工具链降级面
 # 批 123 已退役（2026-10-15 prod 首轮 grype 扫描绿：status=ok/45 findings 带
 # severity/台账 189 行——观察条件满足即删，回退窗口关闭；退役史见 A07 §二）
 # ——随 venv 存在，不依赖「谁的本机」；部署管道随 release 装进 shared venv）
