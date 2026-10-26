@@ -14,12 +14,12 @@ vnpy-okx                   # OKX 网关（永续合约）
 # venv 重建后手装 vnpy-xtp==2.2.32.2.3（需本机编译链，批 149 实证 3.11 构建成功）
 
 # === Web 后端 ===
-fastapi>=0.110
+fastapi>=0.162           # 批 150 前滚
 uvicorn[standard]>=0.29
 pyjwt>=2.8                 # JWT 认证
 bcrypt>=4.0            # 密码哈希（P2：passlib 死依赖移除——src 零 import 直用 bcrypt；原靠 passlib 传递带入未声明）
-pandas>=2.0           # P2：直接依赖显式声明（原靠 vnpy/tushare 传递带入，上游一变即 ImportError）
-numpy>=1.26            # P2：同上（直接依赖显式声明）
+pandas>=2.0,<3.0         # P2：直接依赖显式声明（原靠 vnpy/tushare 传递带入，上游一变即 ImportError）；上界=3.x 行为差（None→nan 等）留专项批验
+numpy>=2.4,<2.5            # P2：同上（直接依赖显式声明）；批 150 前滚（上界防 3.x 意外跳）
 openpyxl>=3.1          # ptrade 批 3：回测报告 Excel 导出（原靠传递带入未声明）
 weasyprint>=60,<71     # ptrade 批 3：回测报告 PDF 导出（HTML→PDF；服务器 pango/cairo+wqy-microhei 已装，fc 自动发现字体）；70.0 已验 py3.10 兼容（2026-10-11 安全升级）
 python-multipart>=0.0.9    # 表单/上传
@@ -32,12 +32,12 @@ redis>=5.0                 # Valkey（Redis 协议兼容）/ Celery broker
 celery>=5.3
 
 # === 数据库迁移（schema 版本管理，对齐 safebox）===
-alembic>=1.13
-sqlalchemy>=2.0      # alembic 依赖，显式声明
+alembic>=1.20.1
+sqlalchemy>=2.1      # alembic 依赖，显式声明（批 150 前滚）
 croniter>=2.0        # cron 表达式解析（sync_config.schedule）
 
 # === AI / LLM 网关（01）===
-openai>=1.30                # DeepSeek/GLM OpenAI 兼容客户端
+openai>=3.37                # DeepSeek/GLM OpenAI 兼容客户端（批 150 前滚）
 httpx>=0.27
 
 # === 数据源（06）===
@@ -53,14 +53,14 @@ dingtalk-stream>=0.24          # 批13：钉钉 Stream 模式官方 SDK
 websockets>=11                 # 批13：显式 pin（企微自实现 ws；本随 dingtalk-stream 传递，防上游抽走）
 
 # === 通用 ===
-pydantic>=2.7
+pydantic>=2.14
 pyyaml>=6.0
 python-dotenv>=1.0
 
 # === 嵌入模型 bge-m3 不进主 venv（拖 torch ~2GB）===
 # 独立 worker 进程单独建: requirements-embedding.txt
 # (sentence-transformers + FlagEmbedding)
-cryptography>=42
+cryptography>=50.0.2
 qrcode>=7.4
 Pillow>=13.0.0    # 批 149：Python 全环境 3.11 对齐后收敛单档（原批 136 双档 marker 随 3.10 退役拆除）
 aiohttp>=3.14.4          # 批 136：dingtalk-stream 传递依赖显式钉（连接池耗尽/scheme 伪造类 CVE；3.14.5 为当前最新）

@@ -89,7 +89,8 @@ class TestJudgeSupplyDaily:
             return "2020-01-01"
 
         def _ld_new(sym):
-            return "2026-10-18"
+            from datetime import date, timedelta
+            return (date.today() - timedelta(days=2)).isoformat()   # 相对日期（原硬编码 2026-10-18 随时间推移失效：days>7 后近似交易日 ≥needs，reject 退化 degraded）
 
         needs = {"bar_daily": 5}
         # 充足 → ok（无 bar_minute 声明短路）
