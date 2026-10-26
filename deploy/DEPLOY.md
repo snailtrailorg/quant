@@ -6,6 +6,8 @@
 
 ## 速查节（常规操作一页；以下命令均为实际验证过的形态）
 
+> venv 解释器升级（如 3.10→3.11）：装位新 wrapper 后 `sudo -u quant /usr/local/sbin/quant-pip-wrapper rebuild /usr/bin/python3.11 <release_id>`（批 151；失败 .bak 自动兜底）
+
 > 全部在**控制机 `~/Projects/quant/deploy/` 目录下**跑（否则 `ansible.cfg` 不生效，缺省 inventory=沙箱是安全缺省）。**改机制（wrapper/sudoers/nginx/playbook）不走本节**——先通读 A06 + §11 输入→消费者地图。
 
 ```bash

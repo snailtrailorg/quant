@@ -22,12 +22,21 @@ set -euo pipefail
 ROOT=${QUANT_DEPLOY_ROOT:-/data/websites/snailtrail.cc/quant}
 INDEX=${QUANT_PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
 
-[ $# -ge 1 ] && [ $# -le 2 ] || { echo "用法: quant-pip-wrapper freeze|upgrade-tools|dry-run <release_id>|install <release_id>" >&2; exit 2; }
+[ $# -ge 1 ] && [ $# -le 3 ] || { echo "用法: quant-pip-wrapper freeze|upgrade-tools|dry-run <release_id>|install <release_id>|rebuild <python_path> <release_id>" >&2; exit 2; }
 sub=$1
-release_id=${2:-}
+# 批 151：rebuild 参数序=<python_path> <release_id>（release_id 在 $3）；其余子命令在 $2
+if [ "$sub" = "rebuild" ]; then
+  release_id=${3:-}
+else
+  release_id=${2:-}
+fi
 
 PIP="$ROOT/shared/venv/bin/pip"
-[ -x "$PIP" ] || { echo "✗ shared/venv pip 不存在: $PIP" >&2; exit 1; }
+# 批 151：rebuild 场景 venv 可能已不存在（正是重建动机）——PIP 预检对其豁免，
+# 由 rebuild 分支自建后使用
+if [ "$sub" != "rebuild" ]; then
+  [ -x "$PIP" ] || { echo "✗ shared/venv pip 不存在: $PIP" >&2; exit 1; }
+fi
 
 case "$sub" in
   freeze)
@@ -41,6 +50,13 @@ case "$sub" in
     # only-if-needed=已最新时零动作；幂等可恒跑。
     [ $# -eq 1 ] || { echo "✗ upgrade-tools 不收参数" >&2; exit 2; }
     exec "$PIP" install -U --upgrade-strategy only-if-needed pip setuptools wheel
+    ;;
+  rebuild)
+    # 批 151：venv 解释器重建通道（主体在 case 后共享段——依赖 REQ_STAGED 构造）。
+    [ $# -eq 3 ] || { echo "✗ rebuild 必须带 <python_path> <release_id>" >&2; exit 2; }
+    py=$2
+    [[ "$py" =~ ^/usr/bin/python3\.[0-9]+$ ]] || { echo "✗ python_path 非法（须 /usr/bin/python3.N）: $py" >&2; exit 2; }
+    [ -x "$py" ] || { echo "✗ 解释器不存在: $py" >&2; exit 1; }
     ;;
   dry-run|install)
     [ $# -eq 2 ] || { echo "✗ $sub 必须带 release_id" >&2; exit 2; }
@@ -69,6 +85,33 @@ sed "s|file://[^ ]*/deps/|file://$ROOT/releases/$release_id/deps/|g" \
   "$REQ" > "$REQ_STAGED" || { echo "✗ lock 路径重写失败" >&2; exit 1; }
 [ -f "$ROOT/releases/$release_id/deps/vnpy-4.5.0+nogui-py3-none-any.whl" ] \
   || { echo "✗ deps/ 未随切片同步（检查 deploy_slices）" >&2; exit 1; }
+
+if [ "$sub" = "rebuild" ]; then
+  # 批 151：备份→重建→工具链→按 release 树 lock 全量装配（与 install 同链：file://
+  # 重写/哈希校验/孤儿清理/dev 段）。失败任一步非零即退——.bak 兜底手动回滚。
+  VENV="$ROOT/shared/venv"
+  BAK="$VENV.bak-$(date +%Y%m%d%H%M%S)"
+  echo "① 备份旧 venv → $BAK"
+  mv "$VENV" "$BAK"
+  echo "② ${py} 重建 venv"
+  "$py" -m venv "$VENV" || { echo "✗ venv 重建失败——回滚: mv $BAK $VENV" >&2; mv "$BAK" "$VENV" 2>/dev/null || true; exit 1; }
+  echo "③ 工具链升级"
+  "$VENV/bin/pip" install -q -U pip setuptools wheel -i "$INDEX" || { echo "✗ 工具链失败——回滚: rm -rf $VENV && mv $BAK $VENV" >&2; rm -rf "$VENV"; mv "$BAK" "$VENV" 2>/dev/null || true; exit 1; }
+  echo "④ 按 release $release_id 全量装配（--require-hashes）"
+  if "$VENV/bin/pip" install --require-hashes -i "$INDEX" -r "$REQ_STAGED"; then
+    "$VENV/bin/pip" uninstall -y pyside6 pyside6-addons pyside6-essentials shiboken6 pyqtgraph qdarkstyle >/dev/null 2>&1 || true
+    DEV="$ROOT/releases/$release_id/requirements-dev.txt"
+    if [ -f "$DEV" ]; then
+      "$VENV/bin/pip" install -i "$INDEX" -r "$DEV" || echo "⚠ requirements-dev 安装失败（不阻重建）" >&2
+    fi
+    echo "✓ rebuild 完成: $($VENV/bin/python --version 2>&1)；旧 venv 备份在 $BAK（确认后可删）"
+  else
+    echo "✗ 装配失败——回滚: rm -rf $VENV && mv $BAK $VENV" >&2
+    rm -rf "$VENV"; mv "$BAK" "$VENV" 2>/dev/null || true
+    exit 1
+  fi
+  exit 0
+fi
 
 if [ "$sub" = "dry-run" ]; then
   # 预检：解析/哈希校验，不改 venv；解析不了（坏包名/冲突）即非零退出
