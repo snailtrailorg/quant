@@ -10,8 +10,7 @@
 vnpy @ file:///home/bernard/Projects/quant/server/deps/vnpy-4.5.0+nogui-py3-none-any.whl   # 绝对路径（pip-compile file: 限制——PIPs #7559）
 vnpy-binance               # 币安网关（永续合约）
 vnpy-okx                   # OKX 网关（永续合约）
-# vnpy-xtp —— 不入 lock（sdist 无 --generate-hashes 可行路径，lock-sync 实测拖死 1h+）：
-# venv 重建后手装 vnpy-xtp==2.2.32.2.3（需本机编译链，批 149 实证 3.11 构建成功）
+vnpy-xtp @ file:///home/bernard/Projects/quant/server/deps/vnpy_xtp-2.2.32.2.3-cp311-cp311-linux_x86_64.whl   # 批 152：本地构建 cp311 wheel 入 lock（pypi 只 sdist，--generate-hashes 拖死编译——三次暗依赖爆后正位，批 125 vnpy fork 同款形态）
 
 # === Web 后端 ===
 fastapi>=0.162           # 批 150 前滚

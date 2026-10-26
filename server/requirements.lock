@@ -3513,7 +3513,9 @@ vine==5.1.0 \
     #   kombu
 vnpy @ file:///home/bernard/Projects/quant/server/deps/vnpy-4.5.0+nogui-py3-none-any.whl \
     --hash=sha256:3698dbd09e82dd37c555fd5d240058cd837a1c775e3655699a693a462c20c1c5
-    # via -r requirements.txt
+    # via
+    #   -r requirements.txt
+    #   vnpy-xtp
 vnpy-binance==2026.8.5 \
     --hash=sha256:2ec2885cdee35bb452c0800bc916fb95e811891dba911c3d4f376e68b5d08ad0 \
     --hash=sha256:76656e61ff575c745bfd52ba9c011f6adc197853093d89f0dc3224054f77a5d8
@@ -3534,6 +3536,9 @@ vnpy-websocket==1.1.1 \
     # via
     #   vnpy-binance
     #   vnpy-okx
+vnpy-xtp @ file:///home/bernard/Projects/quant/server/deps/vnpy_xtp-2.2.32.2.3-cp311-cp311-linux_x86_64.whl \
+    --hash=sha256:366a16f2a6e68460676cb6a6684875db6ec1b0b4fe20a1c8415de1742793473a
+    # via -r requirements.txt
 watchfiles==1.3.0 \
     --hash=sha256:000b9688fc8133037a8b075c8ebf98f32844ff8964dda61e85c1db547dafc441 \
     --hash=sha256:025b108f2d5cc2799cb941f79380df3e8b22bfb589c218e801767fe78d598c95 \
