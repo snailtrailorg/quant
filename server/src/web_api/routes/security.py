@@ -120,6 +120,12 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     """
     day = _parse_date(date_str) if date_str else date.today()
     snap = store.get_snapshot(day)
+    if snap is None and not date_str:
+        # 批 153：默认查询回落最近一行（每日 00:00-06:00 今日未扫的语义空窗——
+        # 前端时间元素显示实际 scan_date；显式 ?date= 查无仍 404 保真）
+        snap = store.get_latest_snapshot()
+        if snap is not None:
+            day = snap["scan_date"]
     if snap is None:
         raise ApiError(404, "SECURITY_SNAPSHOT_NOT_FOUND",
                        f"{day.isoformat()} 无安全快照（beat 每日 06:00 采集，无行=当日未扫）")

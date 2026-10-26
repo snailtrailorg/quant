@@ -33,6 +33,18 @@ def get_snapshot(scan_date: date) -> dict | None:
     return dict(zip(cols, row)) if row else None
 
 
+def get_latest_snapshot() -> dict | None:
+    """最近一行快照（批 153：默认查询回落——每日 00:00-06:00 今日无行时空窗消除）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"SELECT {_SNAP_COLS} FROM security_snapshot ORDER BY scan_date DESC LIMIT 1")
+        row = cur.fetchone()
+    cols = ("scan_date", "status", "components", "ports", "ssh_cfg",
+            "dnf", "headers", "ai_summary", "created_at")
+    return dict(zip(cols, row)) if row else None
+
+
 def get_prev_snapshot(scan_date: date) -> dict | None:
     """早于 scan_date 的最近一日快照（基线 diff 基线侧；同 run_security_scan 取法）。"""
     from src.data_platform.db import get_conn
