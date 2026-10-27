@@ -164,6 +164,22 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     # 此前前端从未渲染）；台账 pip 域→findings 暴露时长 + 直出 components_ledger
     ledger_rows = store.get_component_ledger()
     ledger = {r["name"]: r["last_changed"] for r in ledger_rows if r["source"] == "pip"}
+    # 批 154 补5：台账行逐行附 latest（服务端单源推导，前端零判断）：
+    #   命中 outdated → 真实新版；pip 域/已知 rpm 域未命中 → 当前版（即已最新）；
+    #   其余（pango/cairo/字体等无发行版坐标）→ None（前端显 —，不假声称）
+    def _nm(x: str) -> str:
+        return str(x).lower().replace("_", "-")
+
+    _out_map = {_nm(o["name"]): o["latest"] for o in (snap.get("components") or {}).get("outdated") or []}
+    _RPM_KNOWN = {"python", "nginx", "openssl", "postgres", "redis"}
+    for _r in ledger_rows:
+        _k = _nm(_r["name"])
+        if _k in _out_map:
+            _r["latest"] = _out_map[_k]
+        elif _r["source"] == "pip" or _k in _RPM_KNOWN:
+            _r["latest"] = _r["version"]
+        else:
+            _r["latest"] = None
     degraded_zones = [
         {"zone": z, "reason": (snap.get(z) or {}).get("degraded_reason") or ""}
         for z in ("headers", "ports", "ssh_cfg", "dnf", "components")
@@ -181,7 +197,8 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "components": snap["components"],
         "components_ledger": [
             {"source": r["source"], "name": r["name"], "version": r["version"],
-             "origin": r["origin"] or "", "last_changed": r["last_changed"].isoformat()}
+             "origin": r["origin"] or "", "last_changed": r["last_changed"].isoformat(),
+             "latest": r.get("latest")}
             for r in ledger_rows],
         "ports": snap["ports"],
         "ssh_cfg": snap["ssh_cfg"],

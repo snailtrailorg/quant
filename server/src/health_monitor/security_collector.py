@@ -953,7 +953,7 @@ def run_security_scan(today: date | None = None) -> dict:
         # 历史轮已入库的脏行，规则收敛自动清除）
         conn.execute(
             "DELETE FROM security_component WHERE source='system' AND name IN "
-            "('outdated', 'n_outdated', 'dep_audit_at', 'vulns_db')")
+            "('outdated', 'outdated_error', 'n_outdated', 'dep_audit_at', 'vulns_db')")
 
 
         # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）。
@@ -962,7 +962,7 @@ def run_security_scan(today: date | None = None) -> dict:
         # 不再伪组件化——用户页面 outdated 行渲染全串实证此病）
         sys_rows = [
             ("system", k, str(v), "系统组件") for k, v in parts["components"].items()
-            if k not in ("pip", "status", "dep_audit_at") and isinstance(v, str) and v
+            if k not in ("pip", "status", "dep_audit_at", "outdated_error") and isinstance(v, str) and v
         ]
         _upsert_components(conn, today, sys_rows)
 

@@ -13,7 +13,8 @@ def test_sys_rows_str_only():
 def test_meta_keys_purge():
     """存量伪组件自愈 DELETE（outdated/n_outdated/dep_audit_at/vulns_db）。"""
     src = inspect.getsource(sc.run_security_scan)
-    assert "'outdated', 'n_outdated', 'dep_audit_at', 'vulns_db'" in src
+    for k in ("outdated", "outdated_error", "n_outdated", "dep_audit_at", "vulns_db"):
+        assert k in src, k
 
 
 def test_meta_keys_never_rows():
