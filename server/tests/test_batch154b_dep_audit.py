@@ -19,14 +19,15 @@ def test_collector_reads_cache_not_subprocess():
 
 
 def test_dep_audit_writes_cache(monkeypatch):
-    """dep_audit：pip 出 JSON→写 Valkey（ISO 时间戳+items）。"""
+    """dep_audit：pip 出 JSON→写 Valkey（ISO 时间戳+items）。工厂形态 business_redis()。"""
     from src.scheduler import tasks
     fake = MagicMock(stdout='[{"name":"PyYAML","version":"6.0","latest_version":"6.1"}]', returncode=0)
     store = {}
-    br = MagicMock()
-    br.set.side_effect = lambda k, v: store.__setitem__(k, v)
+    client = MagicMock()
+    client.set.side_effect = lambda k, v: store.__setitem__(k, v)
+    factory = MagicMock(return_value=client)
     with patch("subprocess.run", return_value=fake), \
-         patch("src.quant_common.redis_client.business_redis", br):
+         patch("src.quant_common.redis_client.business_redis", factory):
         r = tasks.dep_audit()
     assert r["status"] == "ok" and r["n_outdated"] == 1
     assert "sec:dep_outdated" in store and "pyyaml" in store["sec:dep_outdated"]

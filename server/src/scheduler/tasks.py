@@ -747,7 +747,7 @@ def dep_audit():
         items = [{"name": o.get("name", "").lower(), "cur": o.get("version", ""),
                   "latest": o.get("latest_version", "")}
                  for o in _json.loads(out.stdout or "[]")]
-        business_redis.set("sec:dep_outdated", _json.dumps({
+        business_redis().set("sec:dep_outdated", _json.dumps({
             "ts": dt.datetime.now(dt.timezone.utc).isoformat(), "items": items}))
         return {"status": "ok", "n_outdated": len(items)}
     except Exception as e:

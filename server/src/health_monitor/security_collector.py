@@ -256,7 +256,7 @@ def _collect_components() -> dict:
     # 30s 超时必炸；扫描读缓存 0s，无缓存/超 26h=空缺显示 —，不降级分区不阻扫描）
     try:
         from src.quant_common.redis_client import business_redis
-        raw = business_redis.get("sec:dep_outdated")
+        raw = business_redis().get("sec:dep_outdated")
         if raw:
             import datetime as _dt
             cached = json.loads(raw)
