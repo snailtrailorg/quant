@@ -87,8 +87,8 @@ def _run(cmd: list[str], timeout: int = _CMD_TIMEOUT) -> str:
 
 def _degraded(part: dict, reason: str) -> dict:
     """分区降级标记（fail-soft：不炸整体，显式留 reason 供前端黄点）。"""
-    part["status"] = "degraded"
     part["degraded_reason"] = reason[:200]
+    part["status"] = "degraded"
     return part
 
 
@@ -197,6 +197,12 @@ def _component_origin(a_type: str, locations: list | None,
     return "pip 安装"
 
 
+def _ver_key(v: str) -> tuple:
+    """版本串→可比元组（与任务侧同定义）。"""
+    import re as _re
+    return tuple(int(x) for x in _re.findall(r"\d+", v or "")[:4])
+
+
 def _clean_component_version(key: str, raw: str) -> str:
     """系统组件版本串清洗（批 154 补4）：命令原文→纯版本。
 
@@ -274,23 +280,25 @@ def _collect_components() -> dict:
     except Exception as e:
         logger.warning("pip freeze 采集失败: %s", e)
         _degraded(part, f"pip freeze 失败: {e}")
-    # 批 154 补②：依赖滞后改**读缓存**（异步 dep_audit 任务每日 05:00 预算好写 Valkey
-    # sec:dep_outdated——pip list --outdated 实测 207s，内联扫描=每日阻塞 3.5min 且类
-    # 30s 超时必炸；扫描读缓存 0s，无缓存/超 26h=空缺显示 —，不降级分区不阻扫描）
+    # 批 154 补6：依赖滞后读缓存（dep_audit 每日 05:00 预算好）——
+    # 扫描零外部命令；无缓存/超 26h = 项目缺席（前端显 破折号），不降级分区
     try:
         from src.quant_common.redis_client import business_redis
-        raw = business_redis().get("sec:dep_outdated")
+        raw = business_redis().get("sec:dep_audit")
         if raw:
             import datetime as _dt
             cached = json.loads(raw)
             age_h = (_dt.datetime.now(_dt.timezone.utc)
                      - _dt.datetime.fromisoformat(cached["ts"])).total_seconds() / 3600
             if age_h <= 26:
-                part["outdated"] = cached["items"]
-                part["n_outdated"] = len(cached["items"])
+                part["outdated"] = list(cached.get("pip") or [])
+                part["n_outdated"] = len(part["outdated"])
                 part["dep_audit_at"] = cached["ts"][:19]
+                # rpm 最新版延后比较（当前版采集完成后才就位）
+                part["_rpm_latest"] = dict(cached.get("rpm") or {})
     except Exception as e:
-        logger.warning("dep_outdated 缓存读取失败（不降级分区）: %s", e)
+        logger.warning("dep_audit 缓存读取失败（不降级分区）: %s", e)
+
     part["python"] = platform.python_version()      # 解释器版本（无子进程——直接查）
     for key, cmd in (
         ("nginx", ["nginx", "-v"]),                      # nginx -v 走 stderr（官方行为）
@@ -314,35 +322,18 @@ def _collect_components() -> dict:
                 part[key] = None
         except Exception:
             part[key] = None
-    # 批 154 补：rpm 组件最新版探测（dnf available——python/nginx 等 OS 层也有「是否
-    # 最新」可见性；单包查询秒级×6 键，fail-soft 单键失败不拖累）
-    _rpm_latest = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
-                   "postgresql-server": "postgres", "redis-server": "redis"}
-    outdated = part.setdefault("outdated", [])
-    if not isinstance(outdated, list):
-        outdated = part["outdated"] = []
-    for rpm_name, ledger_key in _rpm_latest.items():
-        cur = part.get(ledger_key)
-        if not cur:
+
+    # rpm 层滞后判定（仓库最新 > 当前版才报；拿不到权威值不主张）
+    _rl = part.pop("_rpm_latest", None) or {}
+    for _k, _latest in _rl.items():
+        _cur = part.get(_k)
+        if not _cur:
             continue
-        try:
-            avail = _run(["dnf", "repoquery", "--qf", "%{VERSION}\n", rpm_name])
-            cands = [ln.strip() for ln in (avail or "").splitlines() if ln.strip()]
-            # 批 154 补3：repoquery 输出非版本序（字典序）——[-1] 拿到的是最低版（python 3.11.2<3.11.13 实证）；
-            # 版本元组化取 max；cur 为 ledger 原始串（含前缀/全串）需剥离出纯版本再比
-            def _ver_key(v):
-                import re as _re
-                parts = _re.findall(r"\d+", v)
-                return tuple(int(x) for x in parts[:4])
-            latest = max(cands, key=_ver_key) if cands else ""
-            import re as _re2
-            cur_m = _re2.search(r"\d+(?:\.\d+)+", cur or "")
-            cur_ver = cur_m.group(0) if cur_m else (cur or "")
-            if latest and _ver_key(latest) > _ver_key(cur_ver):
-                outdated.append({"name": ledger_key, "cur": cur_ver, "latest": latest})
-        except Exception as e:
-            logger.warning("dnf repoquery 探测失败 %s（跳过）: %s", rpm_name, e)
-    part["n_outdated"] = len(outdated)
+        _cur_ver = _clean_component_version(_k, _cur)
+        if _latest and _ver_key(_latest) > _ver_key(_cur_ver):
+            part.setdefault("outdated", []).append(
+                {"name": _k, "cur": _cur_ver, "latest": _latest})
+            part["n_outdated"] = len(part["outdated"])
     return part
 
 

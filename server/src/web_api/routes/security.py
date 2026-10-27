@@ -111,7 +111,7 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
         import json as _json
         import datetime as _dt
         from src.quant_common.redis_client import business_redis
-        raw = business_redis().get("sec:dep_outdated")
+        raw = business_redis().get("sec:dep_audit")
         fresh = False
         if raw:
             ts = _dt.datetime.fromisoformat(_json.loads(raw)["ts"])

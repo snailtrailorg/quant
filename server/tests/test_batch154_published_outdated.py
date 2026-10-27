@@ -35,14 +35,14 @@ class TestOutdated:
         import inspect
         from src.health_monitor import security_collector as sc
         src = inspect.getsource(sc._collect_components)
-        assert "_ver_key(latest) > _ver_key(cur_ver)" in src
+        assert "_ver_key(_latest) > _ver_key(_cur_ver)" in src
         assert "_ver_key(latest) != _ver_key(cur_ver)" not in src
     def test_components_collects_outdated(self):
         """components 分区读 dep_audit 缓存（批 154 补②：内联 pip 子进程已删——207s 阻塞根除）。"""
         import inspect
         from src.health_monitor import security_collector as sc
         src = inspect.getsource(sc._collect_components)
-        assert "sec:dep_outdated" in src          # 读缓存键
+        assert "sec:dep_audit" in src          # 读缓存键
         assert 'pip", "list", "--outdated"' not in src   # 内联子进程已绝迹
 
 

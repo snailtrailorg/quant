@@ -728,31 +728,73 @@ def security_scan(self):
     return run_security_scan()
 
 
+_RPM_LATEST_MAP = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
+                   "postgresql-server": "postgres", "redis-server": "redis"}
+
+
+def _ver_key(v: str) -> tuple:
+    """版本串→可比元组（非数字段截断）。"""
+    import re as _re
+    return tuple(int(x) for x in _re.findall(r"\d+", v or "")[:4])
+
+
 @app.task(name="src.scheduler.tasks.dep_audit")
 def dep_audit():
-    """批 154 补2：依赖滞后预算任务（异步——pip list --outdated 实测 207s，内联扫描
-    会阻塞 3.5min）。算好写 Valkey sec:dep_outdated，security_scan 读缓存 0s 出数；
-    beat 每日 05:00（早 06:00 扫描一小时，扫描读到的即今日值）。fail-soft：失败留旧
-    缓存（26h 过期线兜底）。"""
+    """批 154 补6：依赖滞后预算（pip 全量版本比对 + rpm 仓库最新版）。
+
+    为什么异步：pip list --outdated 实测 207s，内联进扫描 = 每日阻塞 3.5min；
+    dnf repoquery 单键秒级但 5 键也要十几秒——一并移出扫描热路径（扫描零外部命令）。
+
+    产出缓存 sec:dep_audit = {ts, pip:[{name,cur,latest}], rpm:{ledger_key: latest}}
+    ——只存原始事实，“是否滞后”判定留在采集侧（当前版在那里）。
+    beat 每日 05:00（扫描 06:00 读到的就是当日值）。fail-soft：失败留旧缓存（26h 线兜底）。
+    """
     import datetime as dt
     import json as _json
     import subprocess as _sp
     import sys as _sys
+
+    from src.quant_common.redis_client import business_redis
+
+    def _run(cmd, timeout):
+        r = _sp.run(cmd, capture_output=True, text=True, timeout=timeout)
+        r.check_returncode()
+        return r.stdout or ""
+
+    pip_items, rpm_latest, errs = [], {}, []
     try:
-        from src.quant_common.redis_client import business_redis
-        out = _sp.run([_sys.executable, "-m", "pip", "list", "--outdated", "--format=json",
-                       "--disable-pip-version-check"],
-                      capture_output=True, text=True, timeout=300)
-        out.check_returncode()
-        items = [{"name": o.get("name", "").lower(), "cur": o.get("version", ""),
-                  "latest": o.get("latest_version", "")}
-                 for o in _json.loads(out.stdout or "[]")]
-        business_redis().set("sec:dep_outdated", _json.dumps({
-            "ts": dt.datetime.now(dt.timezone.utc).isoformat(), "items": items}))
-        return {"status": "ok", "n_outdated": len(items)}
+        raw = _run([_sys.executable, "-m", "pip", "list", "--outdated", "--format=json",
+                    "--disable-pip-version-check"], 300)
+        pip_items = [{"name": o.get("name", "").lower(), "cur": o.get("version", ""),
+                      "latest": o.get("latest_version", "")}
+                     for o in _json.loads(raw or "[]")]
     except Exception as e:
-        logger.warning("dep_audit 失败（旧缓存 26h 线兜底）: %s", e)
-        return {"status": "failed", "error": str(e)[:200]}
+        errs.append(f"pip: {e}"[:120])
+
+    # rpm 层（仓库最新版——与当前版的比较在采集侧）
+    for rpm_name, ledger_key in _RPM_LATEST_MAP.items():
+        try:
+            out = _run(["dnf", "repoquery", "--qf", "%{VERSION}\n", rpm_name], 60)
+            cands = [ln.strip() for ln in out.splitlines() if ln.strip()]
+            if cands:
+                rpm_latest[ledger_key] = max(cands, key=_ver_key)
+        except Exception as e:
+            errs.append(f"{rpm_name}: {e}"[:120])
+
+    if not pip_items and not rpm_latest:
+        logger.warning("dep_audit 全面失败（旧缓存 26h 线兜底）: %s", errs)
+        return {"status": "failed", "errors": errs}
+
+    try:
+        business_redis().set("sec:dep_audit", _json.dumps({
+            "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "pip": pip_items, "rpm": rpm_latest}))
+    except Exception as e:
+        logger.warning("dep_audit 写缓存失败: %s", e)
+        return {"status": "failed", "errors": errs + [str(e)[:120]]}
+
+    return {"status": "ok" if not errs else "partial", "n_pip": len(pip_items),
+            "n_rpm": len(rpm_latest), "errors": errs}
 
 
 # 长任务异步派发声明（批 83b）——**执行机制声明，非注册表**：同步项注册在 sync_config（行）

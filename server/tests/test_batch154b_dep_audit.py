@@ -14,7 +14,7 @@ def test_collector_reads_cache_not_subprocess():
     import inspect
     from src.health_monitor import security_collector as sc
     src = inspect.getsource(sc._collect_components)
-    assert 'sec:dep_outdated' in src
+    assert 'sec:dep_audit' in src
     assert 'pip", "list", "--outdated"' not in src
 
 
@@ -29,5 +29,5 @@ def test_dep_audit_writes_cache(monkeypatch):
     with patch("subprocess.run", return_value=fake), \
          patch("src.quant_common.redis_client.business_redis", factory):
         r = tasks.dep_audit()
-    assert r["status"] == "ok" and r["n_outdated"] == 1
-    assert "sec:dep_outdated" in store and "pyyaml" in store["sec:dep_outdated"]
+    assert r["status"] == "ok" and r["n_pip"] == 1
+    assert "sec:dep_audit" in store and "pyyaml" in store["sec:dep_audit"]
