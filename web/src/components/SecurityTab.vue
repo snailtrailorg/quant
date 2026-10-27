@@ -301,7 +301,6 @@ const latestMap = computed(() => {
 const latestOf = (name) => latestMap.value[_norm(name)]
 const depOutdatedWarn = computed(() => (snap.value?.n_outdated || 0) > 20)
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
-const statusZoneHint = computed(() => t('secpage.zoneOk'))
 const degradedZones = computed(() => snap.value?.degraded_zones || [])
 
 // C 区（批 125 重构）：搜索（ID/包/描述子串）× RowFilter（严重度 distinct × 状态
