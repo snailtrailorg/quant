@@ -305,9 +305,18 @@ def _collect_components() -> dict:
         try:
             avail = _run(["dnf", "repoquery", "--qf", "%{VERSION}", rpm_name])
             cands = [ln.strip() for ln in (avail or "").splitlines() if ln.strip()]
-            latest = cands[-1] if cands else ""
-            if latest and latest != cur:
-                outdated.append({"name": ledger_key, "cur": cur, "latest": latest})
+            # 批 154 补3：repoquery 输出非版本序（字典序）——[-1] 拿到的是最低版（python 3.11.2<3.11.13 实证）；
+            # 版本元组化取 max；cur 为 ledger 原始串（含前缀/全串）需剥离出纯版本再比
+            def _ver_key(v):
+                import re as _re
+                parts = _re.findall(r"\d+", v)
+                return tuple(int(x) for x in parts[:4])
+            latest = max(cands, key=_ver_key) if cands else ""
+            import re as _re2
+            cur_m = _re2.search(r"\d+(?:\.\d+)+", cur or "")
+            cur_ver = cur_m.group(0) if cur_m else (cur or "")
+            if latest and _ver_key(latest) != _ver_key(cur_ver):
+                outdated.append({"name": ledger_key, "cur": cur_ver, "latest": latest})
         except Exception as e:
             logger.warning("dnf repoquery 探测失败 %s（跳过）: %s", rpm_name, e)
     part["n_outdated"] = len(outdated)
