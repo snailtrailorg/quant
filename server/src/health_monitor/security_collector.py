@@ -315,7 +315,7 @@ def _collect_components() -> dict:
             import re as _re2
             cur_m = _re2.search(r"\d+(?:\.\d+)+", cur or "")
             cur_ver = cur_m.group(0) if cur_m else (cur or "")
-            if latest and _ver_key(latest) != _ver_key(cur_ver):
+            if latest and _ver_key(latest) > _ver_key(cur_ver):
                 outdated.append({"name": ledger_key, "cur": cur_ver, "latest": latest})
         except Exception as e:
             logger.warning("dnf repoquery 探测失败 %s（跳过）: %s", rpm_name, e)

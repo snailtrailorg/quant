@@ -29,6 +29,14 @@ class TestPublished:
 
 
 class TestOutdated:
+    def test_strict_newer_only(self):
+        """只报 latest 严格新于 current（postgres 18.4 vs 仓库 13.23 实证——发行版仓库
+        版本低于实际安装版时不主张滞后；否则「最新版比当前还旧」）。"""
+        import inspect
+        from src.health_monitor import security_collector as sc
+        src = inspect.getsource(sc._collect_components)
+        assert "_ver_key(latest) > _ver_key(cur_ver)" in src
+        assert "_ver_key(latest) != _ver_key(cur_ver)" not in src
     def test_components_collects_outdated(self):
         """components 分区读 dep_audit 缓存（批 154 补②：内联 pip 子进程已删——207s 阻塞根除）。"""
         import inspect
