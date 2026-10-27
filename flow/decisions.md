@@ -746,3 +746,15 @@
 - **裁定**：crypto 日线＝`bar_daily` + `trade_day_filter='none'`（连续自然日语义）；盘中三档＝`bar_minute`（`1h` 名义收窄）。不扩 `Temporality` 枚举、不 re-label `streaming`。判据（hard gate）：`contract.py:56` kind→时态硬闸 + 零消费者不造第二真源——详见设计 §4.6（追加）。
 - **同批裁定**：OKX 盘中三档全铺（用户裁）；manual 调度起步＝存储+代理双闸门，cron 化与 retention 放宽＝后续用户显式决策（relay 带宽实测+存储评估后）。
 
+
+## 2026-10-27 · 依赖边界裁定：OS=运行时基座，venv=一切 Python 依赖（Docker 化/OS 化两向探索均否）
+
+- **背景**：批 149-153 五连（3.11 全环境对齐/lock 前滚 7 包/rebuild 通道/暗依赖清零/filelock 正位）后，用户探索两问：①Docker 化是否可全由 ansible 接管 ②venv 部分依赖可否外置 OS。
+- **裁定**：现状边界为正解——**OS 层（dnf/michael 通道）只放运行时基座**（python3.11 本体/devel 编译链/gcc-toolset/nginx/openssl/PG/Valkey/grype），**一切 Python 依赖（直接/fork wheel/dev 段/传递闭包）自包含于 shared/venv**。两向探索均不落地。
+- **理由**：
+  1. Docker 化：能收编系统层进镜像，但失去的是 XTP 实时面（bridge/NAT 时延变量）+systemd 深绑（live-task@{tid}/hub 波次/OnFailure）+现权限模型收紧面（docker socket=root 提权面）；而现有痛点（venv 重建/回滚/环境复现）已被 rebuild wrapper+lock hash+原子翻转解到 95%，剩余 5%（3 个系统包年动一次）不值迁移成本。
+  2. OS 化 venv 包：发行版冻结版本（numpy 2.4.6 vs RPM 1.24 级）掐死 pip 生态速度——量化依赖前滚（37/135 落后实证）直接不可行；双事实源撕裂（lock vs dnf 两套闸门）；venv ABI 自包含是本周刚验完的核心资产（rebuild 3.11+filelock 定位+暗依赖清零全靠「venv=全部依赖」不变量）；外置包让 venv.bak 回滚不再完整。
+  3. 例外通道保留：某包仅在 OS 仓库有安全维护（密码学基座被发行版 backport）时该包外置才立项。
+- **不变量**：`venv=全部 Python 依赖`——守护者=每日 06:00 security_scan（扫 venv 实态非 lock，任何 lock 外漂移 24h 内可见：filelock 4.1.1 实证）。
+- **分工**（2026-10-26 用户裁定）：Python 包+系统包升级=用户；deploy 面升级（lock 前滚执行/彩排/上产）=助手；机制代码=助手。
+- **重开条件**：多机扩容需统一编排 / 环境漂移成高频痛点 / 密码学基座需发行版维护。
