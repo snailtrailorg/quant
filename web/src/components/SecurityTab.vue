@@ -47,11 +47,11 @@
                  :title="z.reason">⚠ {{ z.zone }}：{{ z.reason.slice(0, 40) }}</div>
           </div>
           <div v-else class="kpi-sub">{{ statusZoneHint }}</div>
+          <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
         </el-card>
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.scanDate') }}</span></div>
           <div class="card-value"><span class="pct small">{{ snap.scan_date }}</span></div>
-          <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
           <div class="kpi-sub dep-outdated" :class="{ warn: depOutdatedWarn }">
             {{ t('secpage.depOutdated') }}: {{ snap.n_outdated ?? '—' }}
           </div>

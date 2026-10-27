@@ -255,7 +255,8 @@ def _collect_components() -> dict:
     # 批次：提界→lock-sync→回归→彩排→上产）。pip list --outdated 一次调用（tuna 直连，
     # 国内稳定无需代理）；fail-soft：失败仅记 outdated_error 不 degraded（主采集不受累）
     try:
-        out = _run([sys.executable, "-m", "pip", "list", "--outdated", "--format=json"])
+        out = _run([sys.executable, "-m", "pip", "list", "--outdated", "--format=json",
+                    "--disable-pip-version-check"], timeout=300)
         part["outdated"] = [
             {"name": o.get("name", "").lower(), "cur": o.get("version", ""),
              "latest": o.get("latest_version", "")}
