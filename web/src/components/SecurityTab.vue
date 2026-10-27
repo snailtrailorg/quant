@@ -164,8 +164,11 @@
       </template>
       <TableShell :data="compRowsShown" storage-key="security-components" style="width:100%">
         <el-table-column prop="name" :label="t('secpage.component')" min-width="170" />
-        <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip />
         <el-table-column prop="origin" :label="t('secpage.origin')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="120">
+          <template #default="{ row }">{{ row.last_changed || '—' }}</template>
+        </el-table-column>
+        <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip />
         <el-table-column prop="vuln_count" :label="t('secpage.vulnCountCol')" min-width="90"
                          :sort-method="(a, b) => b.vuln_count - a.vuln_count" sortable>
           <template #default="{ row }">
@@ -173,16 +176,12 @@
             <span v-else class="sev-none">—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="120">
-          <template #default="{ row }">{{ row.last_changed || '—' }}</template>
-        </el-table-column>
         <el-table-column :label="t('secpage.latestCol')" min-width="130">
           <template #default="{ row }">
             <span v-if="latestMap[row.name]">
-              {{ row.version }} <span class="latest-arrow">→</span>
               <span class="latest-new">{{ latestMap[row.name] }}</span>
             </span>
-            <span v-else>{{ row.version }}</span>
+            <span v-else class="sev-none">—</span>
           </template>
         </el-table-column>
       </TableShell>
