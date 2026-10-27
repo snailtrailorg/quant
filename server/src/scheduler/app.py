@@ -148,6 +148,10 @@ app.conf.update(
         # 批 120：每日安全态势扫描（06:00 盘前低峰）。**非拉取不进 sync_config**（守批 109
         # 裁定，先例=data-gap-reconcile/sm-reconcile）——六分区采集+基线 diff+AI 摘要，
         # 任务侧 soft_time_limit=600 覆盖全局 300s。
+        "dep-audit": {
+            "task": "src.scheduler.tasks.dep_audit",   # 批 154 补②：依赖滞后预算（05:00 早扫描 1h，写 Valkey 缓存供 security_scan 读）
+            "schedule": crontab(hour=5, minute=0),
+        },
         "security-scan": {
             "task": "src.scheduler.tasks.security_scan",
             "schedule": crontab(hour=6, minute=0),

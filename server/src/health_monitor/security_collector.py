@@ -251,20 +251,23 @@ def _collect_components() -> dict:
     except Exception as e:
         logger.warning("pip freeze 采集失败: %s", e)
         _degraded(part, f"pip freeze 失败: {e}")
-    # 批 154：依赖滞后探测（venv=全部 Python 依赖的债务仪表——检查不升级；升级恒走
-    # 批次：提界→lock-sync→回归→彩排→上产）。pip list --outdated 一次调用（tuna 直连，
-    # 国内稳定无需代理）；fail-soft：失败仅记 outdated_error 不 degraded（主采集不受累）
+    # 批 154 补②：依赖滞后改**读缓存**（异步 dep_audit 任务每日 05:00 预算好写 Valkey
+    # sec:dep_outdated——pip list --outdated 实测 207s，内联扫描=每日阻塞 3.5min 且类
+    # 30s 超时必炸；扫描读缓存 0s，无缓存/超 26h=空缺显示 —，不降级分区不阻扫描）
     try:
-        out = _run([sys.executable, "-m", "pip", "list", "--outdated", "--format=json",
-                    "--disable-pip-version-check"], timeout=300)
-        part["outdated"] = [
-            {"name": o.get("name", "").lower(), "cur": o.get("version", ""),
-             "latest": o.get("latest_version", "")}
-            for o in json.loads(out or "[]")]
-        part["n_outdated"] = len(part["outdated"])
+        from src.quant_common.redis_client import business_redis
+        raw = business_redis.get("sec:dep_outdated")
+        if raw:
+            import datetime as _dt
+            cached = json.loads(raw)
+            age_h = (_dt.datetime.now(_dt.timezone.utc)
+                     - _dt.datetime.fromisoformat(cached["ts"])).total_seconds() / 3600
+            if age_h <= 26:
+                part["outdated"] = cached["items"]
+                part["n_outdated"] = len(cached["items"])
+                part["dep_audit_at"] = cached["ts"][:19]
     except Exception as e:
-        logger.warning("pip outdated 探测失败（不降级分区）: %s", e)
-        part["outdated_error"] = str(e)[:200]
+        logger.warning("dep_outdated 缓存读取失败（不降级分区）: %s", e)
     part["python"] = platform.python_version()      # 解释器版本（无子进程——直接查）
     for key, cmd in (
         ("nginx", ["nginx", "-v"]),                      # nginx -v 走 stderr（官方行为）

@@ -30,12 +30,12 @@ class TestPublished:
 
 class TestOutdated:
     def test_components_collects_outdated(self):
-        """components 分区采集 outdated（pip list --outdated 一次调用，fail-soft 不降级）。"""
+        """components 分区读 dep_audit 缓存（批 154 补②：内联 pip 子进程已删——207s 阻塞根除）。"""
         import inspect
         from src.health_monitor import security_collector as sc
         src = inspect.getsource(sc._collect_components)
-        assert '"pip", "list", "--outdated", "--format=json"' in src
-        assert "outdated_error" in src   # 失败仅记错不 degraded（主采集不受累）
+        assert "sec:dep_outdated" in src          # 读缓存键
+        assert 'pip", "list", "--outdated"' not in src   # 内联子进程已绝迹
 
 
 class TestAiPromptPublished:

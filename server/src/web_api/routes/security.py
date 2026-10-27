@@ -105,6 +105,22 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
     保持最小面。扫描耗时分钟级：前端轮询 snapshot 的 scan_date 感知完成。
     """
     from src.scheduler.tasks import security_scan
+    # 批 154 补②：缓存空/过期（>26h）时顺带异步预算 dep_audit——本轮扫描显示 —，
+    # 下轮（或 1-2 分钟后手动再扫）出全量；不阻塞本轮扫描
+    try:
+        import json as _json
+        import datetime as _dt
+        from src.quant_common.redis_client import business_redis
+        raw = business_redis.get("sec:dep_outdated")
+        fresh = False
+        if raw:
+            ts = _dt.datetime.fromisoformat(_json.loads(raw)["ts"])
+            fresh = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() < 26 * 3600
+        if not fresh:
+            from src.scheduler.tasks import dep_audit
+            dep_audit.delay()
+    except Exception:
+        pass   # 缓存探测失败不影响触发扫描本体
     task = security_scan.delay()
     audit_log(payload.get("username", ""), "trigger_security_scan", "")
     logger.info("security scan triggered by %s (task=%s)", payload.get("username"), task.id)

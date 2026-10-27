@@ -728,6 +728,33 @@ def security_scan(self):
     return run_security_scan()
 
 
+@app.task(name="src.scheduler.tasks.dep_audit")
+def dep_audit():
+    """批 154 补2：依赖滞后预算任务（异步——pip list --outdated 实测 207s，内联扫描
+    会阻塞 3.5min）。算好写 Valkey sec:dep_outdated，security_scan 读缓存 0s 出数；
+    beat 每日 05:00（早 06:00 扫描一小时，扫描读到的即今日值）。fail-soft：失败留旧
+    缓存（26h 过期线兜底）。"""
+    import datetime as dt
+    import json as _json
+    import subprocess as _sp
+    import sys as _sys
+    try:
+        from src.quant_common.redis_client import business_redis
+        out = _sp.run([_sys.executable, "-m", "pip", "list", "--outdated", "--format=json",
+                       "--disable-pip-version-check"],
+                      capture_output=True, text=True, timeout=300)
+        out.check_returncode()
+        items = [{"name": o.get("name", "").lower(), "cur": o.get("version", ""),
+                  "latest": o.get("latest_version", "")}
+                 for o in _json.loads(out.stdout or "[]")]
+        business_redis.set("sec:dep_outdated", _json.dumps({
+            "ts": dt.datetime.now(dt.timezone.utc).isoformat(), "items": items}))
+        return {"status": "ok", "n_outdated": len(items)}
+    except Exception as e:
+        logger.warning("dep_audit 失败（旧缓存 26h 线兜底）: %s", e)
+        return {"status": "failed", "error": str(e)[:200]}
+
+
 # 长任务异步派发声明（批 83b）——**执行机制声明，非注册表**：同步项注册在 sync_config（行）
 # + engine._HANDLERS（handler）；此处只声明「到点后怎么跑」。值 = celery 消息 expires 秒
 # （原 beat 的 options.expires 沿用值，防 worker 停机期间堆积过期轮次）。

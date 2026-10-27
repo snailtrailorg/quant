@@ -46,7 +46,6 @@
             <div v-for="z in degradedZones" :key="z.zone" class="zone-item"
                  :title="z.reason">⚠ {{ z.zone }}：{{ z.reason.slice(0, 40) }}</div>
           </div>
-          <div v-else class="kpi-sub">{{ statusZoneHint }}</div>
           <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
         </el-card>
         <el-card shadow="never" class="metric-card">
@@ -170,7 +169,7 @@
         </el-table-column>
         <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip>
           <template #default="{ row }">
-            <span :class="{ 'ver-stale': latestMap[row.name] }">{{ row.version }}</span>
+            <span :class="{ 'ver-stale': latestOf(row.name) }">{{ row.version }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="vuln_count" :label="t('secpage.vulnCountCol')" min-width="90"
@@ -182,8 +181,8 @@
         </el-table-column>
         <el-table-column :label="t('secpage.latestCol')" min-width="130">
           <template #default="{ row }">
-            <span v-if="latestMap[row.name]">
-              <span class="latest-new">{{ latestMap[row.name] }}</span>
+            <span v-if="latestOf(row.name)">
+              <span class="latest-new">{{ latestOf(row.name) }}</span>
             </span>
             <span v-else class="sev-none">—</span>
           </template>
@@ -291,12 +290,15 @@ const lastScanAt = computed(() => {
   const ts = snap.value?.created_at
   return ts ? new Date(ts).toLocaleString() : '—'
 })
-// 批 154：依赖滞后（A 区小字+D 区箭头列——检查不升级；>20 琥珀告警）
+// 批 154 补③：依赖滞后（A 区小字+D 区箭头列——检查不升级；>20 琥珀告警）
+// 键归一匹配：pip 名小写下划线/连字符混形 vs ledger 名（PyYAML/pyyaml、typing_extensions）
+const _norm = (s) => String(s).toLowerCase().replace(/_/g, "-")
 const latestMap = computed(() => {
   const m = {}
-  for (const o of snap.value?.outdated || []) m[o.name] = o.latest
+  for (const o of snap.value?.outdated || []) m[_norm(o.name)] = o.latest
   return m
 })
+const latestOf = (name) => latestMap.value[_norm(name)]
 const depOutdatedWarn = computed(() => (snap.value?.n_outdated || 0) > 20)
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
 const statusZoneHint = computed(() => t('secpage.zoneOk'))
