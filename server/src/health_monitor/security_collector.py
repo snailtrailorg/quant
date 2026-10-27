@@ -197,6 +197,29 @@ def _component_origin(a_type: str, locations: list | None,
     return "pip 安装"
 
 
+def _clean_component_version(key: str, raw: str) -> str:
+    """系统组件版本串清洗（批 154 补4）：命令原文→纯版本。
+
+    nginx -v 走 stderr 形如 "nginx version: nginx/1.24.0"、redis "v=6.2.24"、
+    psql "psql (PostgreSQL) 18.4"、rpm --qf "pango-1.48.7"——这些前缀进台账后
+    「当前版本」列脏、与 repoquery 版本串比较也永远不等（页面实证）。
+    """
+    if not raw:
+        return raw
+    import re as _re
+    pats = {
+        "nginx": r"nginx/([0-9][\w.]*)",
+        "redis": r"v=([0-9][\w.]*)",
+        "postgres": r"\)\s*([0-9][\w.]*)",
+    }
+    pat = pats.get(key)
+    if pat is None:
+        # rpm --qf 形态：取尾部的版本 token（pango-1.48.7 / wqy-microhei-fonts-0.2.0）
+        pat = r"([0-9][0-9a-zA-Z.]*)$"
+    m = _re.search(pat, raw)
+    return m.group(1) if m else raw.strip()
+
+
 def _upsert_components(conn, scan_date: date,
                        rows: list[tuple[str, str, str, str]]) -> None:
     """组件台账 UPSERT（批 123/124·security_component——版本变更史一等表）。
@@ -284,7 +307,7 @@ def _collect_components() -> dict:
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=_CMD_TIMEOUT)
             ver = (out.stderr if key == "nginx" else out.stdout).strip().splitlines()
             if out.returncode == 0 and ver:
-                part[key] = ver[0][:120]
+                part[key] = _clean_component_version(key, ver[0][:120])
             elif out.returncode == 0 or key in ("nginx", "redis"):   # 未装/非 rpm 系=环境差异，不算失败
                 part[key] = None
             else:
@@ -939,7 +962,7 @@ def run_security_scan(today: date | None = None) -> dict:
         # 不再伪组件化——用户页面 outdated 行渲染全串实证此病）
         sys_rows = [
             ("system", k, str(v), "系统组件") for k, v in parts["components"].items()
-            if k not in ("pip", "status") and isinstance(v, str) and v
+            if k not in ("pip", "status", "dep_audit_at") and isinstance(v, str) and v
         ]
         _upsert_components(conn, today, sys_rows)
 
