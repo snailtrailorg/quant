@@ -168,7 +168,11 @@
         <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="120">
           <template #default="{ row }">{{ row.last_changed || '—' }}</template>
         </el-table-column>
-        <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span :class="{ 'ver-stale': latestMap[row.name] }">{{ row.version }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="vuln_count" :label="t('secpage.vulnCountCol')" min-width="90"
                          :sort-method="(a, b) => b.vuln_count - a.vuln_count" sortable>
           <template #default="{ row }">
@@ -484,6 +488,9 @@ const onDeleteSummary = async (d) => {
 /* 严重度色（tokens 语义复用：critical 深红/warn 橙/主文灰） */
 .sev { font-size: var(--fs-foot); font-weight: 600; }
 .sev-critical { color: var(--critical); }
+/* 批 154 补：非最新版橙黄（当前版本+最新版列同色——滞后即提示） */
+.ver-stale { color: var(--warn); }
+.latest-new { color: var(--warn); font-weight: 500; }
 .sev-high { color: var(--warn-fill); }
 .sev-medium { color: var(--brand-500); }
 .sev-low, .sev-negligible, .sev-unknown { color: var(--text-secondary); }

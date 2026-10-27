@@ -287,6 +287,26 @@ def _collect_components() -> dict:
                 part[key] = None
         except Exception:
             part[key] = None
+    # 批 154 补：rpm 组件最新版探测（dnf available——python/nginx 等 OS 层也有「是否
+    # 最新」可见性；单包查询秒级×6 键，fail-soft 单键失败不拖累）
+    _rpm_latest = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
+                   "postgresql-server": "postgres", "redis-server": "redis"}
+    outdated = part.setdefault("outdated", [])
+    if not isinstance(outdated, list):
+        outdated = part["outdated"] = []
+    for rpm_name, ledger_key in _rpm_latest.items():
+        cur = part.get(ledger_key)
+        if not cur:
+            continue
+        try:
+            avail = _run(["dnf", "repoquery", "--qf", "%{VERSION}", rpm_name])
+            cands = [ln.strip() for ln in (avail or "").splitlines() if ln.strip()]
+            latest = cands[-1] if cands else ""
+            if latest and latest != cur:
+                outdated.append({"name": ledger_key, "cur": cur, "latest": latest})
+        except Exception as e:
+            logger.warning("dnf repoquery 探测失败 %s（跳过）: %s", rpm_name, e)
+    part["n_outdated"] = len(outdated)
     return part
 
 
