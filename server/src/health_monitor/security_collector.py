@@ -303,7 +303,7 @@ def _collect_components() -> dict:
         if not cur:
             continue
         try:
-            avail = _run(["dnf", "repoquery", "--qf", "%{VERSION}", rpm_name])
+            avail = _run(["dnf", "repoquery", "--qf", "%{VERSION}\n", rpm_name])
             cands = [ln.strip() for ln in (avail or "").splitlines() if ln.strip()]
             # 批 154 补3：repoquery 输出非版本序（字典序）——[-1] 拿到的是最低版（python 3.11.2<3.11.13 实证）；
             # 版本元组化取 max；cur 为 ledger 原始串（含前缀/全串）需剥离出纯版本再比
