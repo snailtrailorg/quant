@@ -52,6 +52,9 @@
           <div class="card-head"><span class="card-name">{{ t('secpage.scanDate') }}</span></div>
           <div class="card-value"><span class="pct small">{{ snap.scan_date }}</span></div>
           <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
+          <div class="kpi-sub dep-outdated" :class="{ warn: depOutdatedWarn }">
+            {{ t('secpage.depOutdated') }}: {{ snap.n_outdated ?? '—' }}
+          </div>
         </el-card>
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.vulnDb') }}</span></div>
@@ -66,11 +69,9 @@
       <template #header>
         <div style="display:flex;justify-content:space-between;align-items:center">
           <span>{{ t('secpage.aiSummary') }}</span>
-          <!-- 批 140：历史摘要折叠区 → 图标按钮（弹窗表格：日期/摘要/操作） -->
-          <el-tooltip :content="t('secpage.historySummaries')" placement="top">
-            <el-button size="small" :icon="Tickets" :disabled="!historySummaries.length"
-                       @click="histDialog = true" />
-          </el-tooltip>
+          <!-- 批 140：历史摘要折叠区 → 图标按钮；批 154 统一 IconBtn（全站规范——纯图标+title，与重扫钮同构） -->
+          <IconBtn :icon="Tickets" :title="t('secpage.historySummaries')"
+                   :disabled="!historySummaries.length" @click="histDialog = true" />
         </div>
       </template>
       <div v-if="snap.ai_summary" class="ai-text">{{ snap.ai_summary }}</div>
@@ -126,7 +127,12 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="first_seen" :label="t('secpage.firstSeen')" min-width="110" />
+        <el-table-column :label="t('secpage.published')" min-width="110">
+          <template #default="{ row }">
+            <span>{{ row.published || row.first_seen }}</span>
+            <span v-if="!row.published" class="pub-est">≈</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="t('common.action')" min-width="70">
           <template #default="{ row }">
             <IconBtn v-if="row.fixed" :icon="Delete" type="danger" size="small"
@@ -169,6 +175,15 @@
         </el-table-column>
         <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="120">
           <template #default="{ row }">{{ row.last_changed || '—' }}</template>
+        </el-table-column>
+        <el-table-column :label="t('secpage.latestCol')" min-width="130">
+          <template #default="{ row }">
+            <span v-if="latestMap[row.name]">
+              {{ row.version }} <span class="latest-arrow">→</span>
+              <span class="latest-new">{{ latestMap[row.name] }}</span>
+            </span>
+            <span v-else>{{ row.version }}</span>
+          </template>
         </el-table-column>
       </TableShell>
     </el-card>
@@ -273,6 +288,13 @@ const lastScanAt = computed(() => {
   const ts = snap.value?.created_at
   return ts ? new Date(ts).toLocaleString() : '—'
 })
+// 批 154：依赖滞后（A 区小字+D 区箭头列——检查不升级；>20 琥珀告警）
+const latestMap = computed(() => {
+  const m = {}
+  for (const o of snap.value?.outdated || []) m[o.name] = o.latest
+  return m
+})
+const depOutdatedWarn = computed(() => (snap.value?.n_outdated || 0) > 20)
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
 const statusZoneHint = computed(() => t('secpage.zoneOk'))
 const degradedZones = computed(() => snap.value?.degraded_zones || [])

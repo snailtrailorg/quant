@@ -67,6 +67,8 @@ def _enrich_findings(day: date, vulns_ok: bool = True,
             "description": f.get("description") or "",
             "description_en": f.get("description_en") or "",
             "first_seen": first.isoformat(), "last_seen": last.isoformat(),
+            # 批 154：CVE 公开日（grype DB 真值；NULL=未知——前端回退 first_seen 灰显）
+            "published": f["published_date"].isoformat() if f.get("published_date") else None,
             "dwell_days": max(_days_between(day, first), 0),
             "expose_days": max(_days_between(day, base), 0),
             "expose_est": f["pkg"] not in ledger,   # ≈ 标记：台账缺行=回退发现日（估计值）
@@ -171,6 +173,9 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "headers": snap["headers"],
         "degraded_zones": degraded_zones,
         "vulns_db": (snap.get("components") or {}).get("vulns_db") or {},
+        # 批 154：依赖滞后（venv 债务仪表——components 分区透传；检查不升级）
+        "n_outdated": (snap.get("components") or {}).get("n_outdated"),
+        "outdated": (snap.get("components") or {}).get("outdated") or [],
         "baseline_diff": baseline_diff,
     }
 

@@ -251,6 +251,19 @@ def _collect_components() -> dict:
     except Exception as e:
         logger.warning("pip freeze 采集失败: %s", e)
         _degraded(part, f"pip freeze 失败: {e}")
+    # 批 154：依赖滞后探测（venv=全部 Python 依赖的债务仪表——检查不升级；升级恒走
+    # 批次：提界→lock-sync→回归→彩排→上产）。pip list --outdated 一次调用（tuna 直连，
+    # 国内稳定无需代理）；fail-soft：失败仅记 outdated_error 不 degraded（主采集不受累）
+    try:
+        out = _run([sys.executable, "-m", "pip", "list", "--outdated", "--format=json"])
+        part["outdated"] = [
+            {"name": o.get("name", "").lower(), "cur": o.get("version", ""),
+             "latest": o.get("latest_version", "")}
+            for o in json.loads(out or "[]")]
+        part["n_outdated"] = len(part["outdated"])
+    except Exception as e:
+        logger.warning("pip outdated 探测失败（不降级分区）: %s", e)
+        part["outdated_error"] = str(e)[:200]
     part["python"] = platform.python_version()      # 解释器版本（无子进程——直接查）
     for key, cmd in (
         ("nginx", ["nginx", "-v"]),                      # nginx -v 走 stderr（官方行为）
@@ -493,6 +506,9 @@ def _collect_vulns() -> dict:
                 "vuln_id": vuln_id,
                 "severity": v.get("severity") or None,
                 "fix_version": ",".join(v.get("fix", {}).get("versions") or []) or None,
+                # 批 154：CVE 公开日（grype vulnerability.published——用户裁定：公开时间才有
+                # 风险敞口语义，我方 first_seen 仅回退用）；缺失 NULL 由 AI 摘要环节补判
+                "published": v.get("published") or None,
                 # 原文 600 上限（AI 压缩输入用；入库形态见 _describe）
                 "description": (v.get("description") or "")[:600],
             })
@@ -677,22 +693,36 @@ def _upsert_findings(conn, scan_date: date, findings: list[dict]) -> list[dict]:
         # 的判据锚（快照 created_at=now()=事务开始，早于它 ⇒ last_seen_at 较新=本轮
         # 报了；较旧/相等=本轮未报 ⇒ fixed。批 124；date 粒度的同日死结由此解开）
         if row:
+            # 批 154：published 顺带回填（存量行 NULL 补新值；grype 每轮全量带）
             conn.execute(
                 "UPDATE security_finding SET last_seen=%s, last_seen_at=clock_timestamp(), "
-                "fix_version=%s, severity=%s "
+                "fix_version=%s, severity=%s, "
+                "published_date=COALESCE(published_date, %s) "
                 "WHERE source='grype' AND pkg=%s AND vuln_id=%s",
-                (scan_date, f.get("fix_version"), f.get("severity"), f["pkg"], f["vuln_id"]))
+                (scan_date, f.get("fix_version"), f.get("severity"),
+                 _parse_iso_date(f.get("published")), f["pkg"], f["vuln_id"]))
         else:
             zh, en = _describe(f)
             conn.execute(
                 "INSERT INTO security_finding "
                 "(source, pkg, vuln_id, fix_version, severity, first_seen, last_seen, "
-                "last_seen_at, description, description_en) "
-                "VALUES ('grype', %s, %s, %s, %s, %s, %s, clock_timestamp(), %s, %s)",
+                "last_seen_at, description, description_en, published_date) "
+                "VALUES ('grype', %s, %s, %s, %s, %s, %s, clock_timestamp(), %s, %s, %s)",
                 (f["pkg"], f["vuln_id"], f.get("fix_version"), f.get("severity"),
-                 scan_date, scan_date, zh or None, en or None))
+                 scan_date, scan_date, zh or None, en or None,
+                 _parse_iso_date(f.get("published"))))
             fresh.append(f)
     return fresh
+
+
+def _parse_iso_date(raw: str | None) -> date | None:
+    """grype published（ISO8601 字符串）→ date；缺失/畸形返回 None（批 154）。"""
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(str(raw)[:10])
+    except ValueError:
+        return None
 
 
 def _describe(f: dict) -> tuple[str, str]:
@@ -787,8 +817,11 @@ def _ai_summary(scan_date: date, fresh: list[dict], diff_items: list[dict]) -> s
         ]
         for f in fresh[:10]:
             desc = (f.get("description") or "").strip()[:300]
+            pub = f.get("published") or ""
+            pub_note = (f" 公开 {str(pub)[:10]}" if pub
+                        else " 公开时间未知（请依据 CVE 编号/描述推断大致公开年月并标注「约」）")
             lines.append(f"- {f['pkg']} {f['vuln_id']} 修复版 {f.get('fix_version') or '?'}"
-                         f" <cve_text>{desc}</cve_text>")
+                         f"{pub_note} <cve_text>{desc}</cve_text>")
         for d in diff_items[:10]:
             lines.append(f"- 基线: {d['detail']}")
         resp = gateway.chat(

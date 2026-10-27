@@ -130,7 +130,7 @@ class TestParsers:
         # CVE 号优先归一后两条 match 去重为一条；pkg lowercase；severity 原生透传
         assert part["findings"] == [{"pkg": "requests", "vuln_id": "CVE-2024-1",
                                      "severity": "High", "fix_version": "2.32.0",
-                                     "description": "D"}]
+                                     "published": None, "description": "D"}]
         assert part["n_matches"] == 2
 
     def test_vulns_rc1_with_vulns_is_ok_and_lands(self, tmp_path):
@@ -168,7 +168,7 @@ class TestParsers:
         assert part["status"] == "ok"
         assert part["findings"] == [{"pkg": "cryptography", "vuln_id": "GHSA-abc",
                                      "severity": "Critical", "fix_version": "3.4.0",
-                                     "description": "bad"}]
+                                     "published": None, "description": "bad"}]
 
     def test_vulns_degraded_on_grype_error(self, tmp_path):
         """grype rc≠0 = 错误 ⇒ degraded（官方语义，2026-10-15 读档修正：不设
@@ -764,7 +764,7 @@ class TestUpsertDescription:
             _upsert_findings(conn, date(2026, 10, 16), [f])
         ins = [c for c in conn.cur.calls if c[0].startswith("INSERT INTO security_finding")]
         assert ins and "description_en" in ins[0][0]
-        assert ins[0][1][-2:] == ("生成的描述", "generated")   # 末两参=双语
+        assert ins[0][1][-3:-1] == ("生成的描述", "generated")   # 末两参=双语
 
     def test_update_path_never_calls_llm(self):
         from src.health_monitor.security_collector import _upsert_findings
