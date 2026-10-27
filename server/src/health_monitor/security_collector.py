@@ -926,13 +926,20 @@ def run_security_scan(today: date | None = None) -> dict:
         # 入库过滤防新增；此处 DELETE 治旧——规则变更自动收敛存量）
         conn.execute(
             "DELETE FROM security_component WHERE source='binary' AND version='UNKNOWN'")
+        # 批 154 补②：存量伪组件清偿（outdated/n_outdated/dep_audit_at/vulns_db 元键——
+        # 历史轮已入库的脏行，规则收敛自动清除）
+        conn.execute(
+            "DELETE FROM security_component WHERE source='system' AND name IN "
+            "('outdated', 'n_outdated', 'dep_audit_at', 'vulns_db')")
 
 
         # 台账 system 域（components 分区既有产出——不依赖 grype，grype 未装机也滚动）。
-        # 排除 "pip"（大 dict 非版本）与 "status"（分区标记非组件——盲审 A/B 同发现伪组件）
+        # 只入**值=纯版本串**的键（白名单式 isinstance(v, str)——批 154 补②新增的
+        # outdated 清单/n_outdated 计数/dep_audit_at 时间戳/vulns_db 字典等元数据键
+        # 不再伪组件化——用户页面 outdated 行渲染全串实证此病）
         sys_rows = [
             ("system", k, str(v), "系统组件") for k, v in parts["components"].items()
-            if k not in ("pip", "status") and v
+            if k not in ("pip", "status") and isinstance(v, str) and v
         ]
         _upsert_components(conn, today, sys_rows)
 
