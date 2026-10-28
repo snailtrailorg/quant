@@ -955,9 +955,9 @@ def run_security_scan(today: date | None = None) -> dict:
                       for r in dh_rows}
         _upsert_components(conn, today, sys_rows, judged_map)
         _probe = [r for r in (vulns.get("ledger") or []) if r and r[0] == "pip"][:3]
-        logger.warning("LEDGER-PROBE judged_keys_has_pandas=%s ledger_pip_sample=%s normhit=%s",
-                       "pandas" in judged_map, _probe,
-                       [(n, _norm_key(n) in judged_map) for _, n, _, _ in _probe])
+        logger.info("LEDGER-PROBE has_pandas=%s sample=%s normhit=%s",
+                    "pandas" in judged_map, _probe,
+                    [(n, _norm_key(n) in judged_map) for _, n, _, _ in _probe])
         logger.info("upsert sys rows=%s judged=%s sample_keys=%s", len(sys_rows), len(judged_map), list(judged_map)[:5])
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
