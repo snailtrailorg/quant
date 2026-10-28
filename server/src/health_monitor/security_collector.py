@@ -922,6 +922,7 @@ def run_security_scan(today: date | None = None) -> dict:
             _gl = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
             _gm = {r["name"]: (r.get("latest"), r.get("managed_by"), r.get("judge_class"), r.get("judge_why")) for r in _gl}
             _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
+            logger.info("upsert grype-ledger rows=%s judged=%s", len(vulns.get("ledger") or []), len(_gm))
 
         # 幂等描述补齐（批 126）：全表空描述行回填——**不依赖 vulns 分区 ok**（LLM
         # 生成与 grype 扫描无关，降级日也能补存量/失败行；空=待办下轮再补）
@@ -953,6 +954,7 @@ def run_security_scan(today: date | None = None) -> dict:
                        r.get("judge_class"), r.get("judge_why"))
                       for r in dh_rows}
         _upsert_components(conn, today, sys_rows, judged_map)
+        logger.info("upsert sys rows=%s judged=%s sample_keys=%s", len(sys_rows), len(judged_map), list(judged_map)[:5])
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
         conn.execute(
