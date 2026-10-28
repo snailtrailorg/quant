@@ -132,6 +132,31 @@ def pip_installed() -> list:
     return out
 
 
+def pypi_versions_cached(name: str, refresh: bool = False, timeout: int = 10) -> dict:
+    """分批缓存层（批 155 补）：Valkey sec:pypi:<name>（TTL 7d）。
+
+    prod 实证 pypi.org 150 包 9min 撞 soft——常态轮：命中直用（零网络）；
+    未命中查网落缓存；refresh=True 主动重查（轮转补查保新鲜，7 天全量覆盖）。
+    Valkey 不可达时静默回退直查（缓存是加速器非依赖）。"""
+    try:
+        import json as _json
+        from src.quant_common.redis_client import business_redis
+        key = f"sec:pypi:{name}"
+        br = business_redis()
+        if not refresh:
+            hit = br.get(key)
+            if hit:
+                return _json.loads(hit)
+        result = pypi_versions(name, timeout=timeout)
+        try:
+            br.set(key, _json.dumps(result), ex=7 * 86400)
+        except Exception:
+            pass
+        return result
+    except Exception:
+        return pypi_versions(name, timeout=timeout)
+
+
 def pypi_versions(name: str, base=None, timeout: int = 10) -> dict:
     """PEP 691 simple -> {"versions": 非yanked[], "yanked": []}。
 

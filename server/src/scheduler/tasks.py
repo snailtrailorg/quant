@@ -752,7 +752,8 @@ _SYNC_ASYNC_DISPATCH: dict[str, int] = {
     "binance_perp_daily": 3600,
 }
 
-@app.task(name="src.scheduler.tasks.dep_audit")
+@app.task(name="src.scheduler.tasks.dep_audit",
+          soft_time_limit=1500, time_limit=1600)   # 批 155 补：prod pypi.org 150 包 9min 撞默认 soft（18:14 SoftTimeLimitExceeded 实证）——首日全量需 1500s；分批缓存生效后常态 <90s
 def dep_audit():
     """批 155：依赖健康审计 v2（方案 §4/§4.1 契约 v1——结构化全链）。
 
@@ -805,11 +806,15 @@ def dep_audit():
         installed = []
         errors.append(f"pip-enum: {e}"[:120])
 
+    # 批 155 补：分批缓存（sec:pypi:* TTL 7d）+轮转补查（1/7 概率 refresh——
+    # 7 天全量覆盖，常态网络请求 ~1/7 量级；prod 150 包直查 9min 撞 soft 实证）
+    import random as _rnd
     def _fetch(row):
         if row["local"]:
             return row, None, None
         try:
-            pv = os_pkg.pypi_versions(row["name"])
+            refresh = _rnd.random() < (1 / 7)
+            pv = os_pkg.pypi_versions_cached(row["name"], refresh=refresh)
             return row, pv["versions"], None
         except Exception as ex:
             return row, None, str(ex)[:100]

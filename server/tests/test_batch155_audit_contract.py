@@ -60,3 +60,14 @@ def test_fresh_check_requires_schema(monkeypatch):
     from src.web_api.routes import security as S
     src = inspect.getsource(S.security_scan_trigger)
     assert 'c.get("schema_version") == 1' in src
+
+
+def test_soft_limit_and_batch_cache():
+    """批 155 补：soft 1500（prod 9min 撞限实证）+ 分批缓存层（1/7 轮转补查）。"""
+    import inspect
+    from src.scheduler import tasks
+    from src.health_monitor import os_pkg
+    assert "soft_time_limit=1500" in inspect.getsource(tasks)
+    assert hasattr(os_pkg, "pypi_versions_cached")
+    src = inspect.getsource(tasks.dep_audit)
+    assert "pypi_versions_cached" in src and "1 / 7" in src
