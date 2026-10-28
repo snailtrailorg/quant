@@ -18,8 +18,8 @@
           <div style="display:flex;align-items:center;gap:12px">
             <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
             <!-- 批 138/141：手动重扫——按全站规范用 IconBtn（纯图标+title 提示，批 21 立法） -->
-            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning"
-                     :disabled="scanning" @click="onRescan" />
+            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning || localPending"
+                     :disabled="scanning || localPending" @click="onRescan" />
           </div>
         </div>
       </template>
@@ -273,11 +273,11 @@ const onRescan = async () => {
       if (snap.value?.scan_date !== before) { }   // 日期变但锁未放=继续等锁
     }
     ElMessage.success(t('secpage.rescanDone'))
+    localPending.value = false          // 轮询确认完成才解禁（全程禁用无缝隙）
   } catch (e) {
     if (e?.code === 'SEC_SCAN_RUNNING') ElMessage.warning(t('secpage.scanRunning'))
     else ElMessage.error(e?.detail || t('common.deleteFailed'))
-  } finally {
-    localPending.value = false
+    localPending.value = false          // 仅失败/409 解禁；成功=轮询确认完成才解禁（全周期禁用）
   }
 }
 
