@@ -918,7 +918,10 @@ def run_security_scan(today: date | None = None) -> dict:
         if vulns.get("status") == "ok":
             fresh = _upsert_findings(conn, today, vulns.get("findings") or [])
             # 台账 pip/rpm 域（SBOM 顺带产出——grype 链 ok 才有）
-            _upsert_components(conn, today, vulns.get("ledger") or [])
+            # 批 155：pip 域行经 grype ledger 入账（同传 judged）
+            _gl = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
+            _gm = {r["name"]: (r.get("latest"), r.get("managed_by"), r.get("judge_class"), r.get("judge_why")) for r in _gl}
+            _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
 
         # 幂等描述补齐（批 126）：全表空描述行回填——**不依赖 vulns 分区 ok**（LLM
         # 生成与 grype 扫描无关，降级日也能补存量/失败行；空=待办下轮再补）
