@@ -78,8 +78,12 @@ def get_component_ledger() -> list[dict]:
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         cur = conn.execute(
-            "SELECT source, name, version, origin, last_changed FROM security_component")
-        cols = ("source", "name", "version", "origin", "last_changed")
+            "SELECT source, name, version, origin, last_changed, managed_by, "
+            "latest_version, latest_source, judge_class, judge_why, checked_at "
+            "FROM security_component")
+        cols = ("source", "name", "version", "origin", "last_changed",
+                "managed_by", "latest_version", "latest_source",
+                "judge_class", "judge_why", "checked_at")
         return _rows_to_dicts(cur, cols)
 
 
