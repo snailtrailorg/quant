@@ -12,8 +12,10 @@ from src.web_api.routes import security as sec
 
 class TestLedgerLatest:
     def test_note_attached_in_route(self):
+        """批 155 随形：snapshot 输出 dep_health 汇总+组件行新列（台账直读零现算）。"""
         src = inspect.getsource(sec.security_snapshot)
-        assert '_out_map' in src and '"latest": r.get("latest")' in src
+        assert "_dep_health_summary" in src and "has_update" in src
+        assert "stale_days" in src and "latest_version" in src
 
     def test_rpm_known_domain(self):
         src = inspect.getsource(sec.security_snapshot)

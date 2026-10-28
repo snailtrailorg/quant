@@ -52,7 +52,7 @@
           <div class="card-head"><span class="card-name">{{ t('secpage.scanDate') }}</span></div>
           <div class="card-value"><span class="pct small">{{ snap.scan_date }}</span></div>
           <div class="kpi-sub dep-outdated" :class="{ warn: depOutdatedWarn }">
-            {{ t('secpage.depOutdated') }}: {{ snap.n_outdated ?? '—' }}
+            {{ t('secpage.depOutdated') }}: {{ snap.dep_health?.has_update_n ?? '—' }}
           </div>
         </el-card>
         <el-card shadow="never" class="metric-card">
@@ -168,9 +168,7 @@
           <template #default="{ row }">{{ row.last_changed || '—' }}</template>
         </el-table-column>
         <el-table-column prop="version" :label="t('secpage.version')" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <span :class="{ 'ver-stale': row.latest && row.latest !== row.version }">{{ row.version }}</span>
-          </template>
+          <template #default="{ row }">{{ row.version }}</template>
         </el-table-column>
         <el-table-column prop="vuln_count" :label="t('secpage.vulnCountCol')" min-width="90"
                          :sort-method="(a, b) => b.vuln_count - a.vuln_count" sortable>
@@ -179,12 +177,18 @@
             <span v-else class="sev-none">—</span>
           </template>
         </el-table-column>
-        <el-table-column :label="t('secpage.latestCol')" min-width="130">
+        <el-table-column prop="latest_version" :label="t('secpage.latestCol')" min-width="130">
           <template #default="{ row }">
-            <span v-if="row.latest && row.latest !== row.version" class="latest-new">{{ row.latest }}</span>
-            <span v-else-if="row.latest" class="ver-uptodate">{{ row.latest }}</span>
-            <span v-else class="sev-none">—</span>
+            <span :title="row.judge_why">{{ row.latest_version || '—' }}</span>
           </template>
+        </el-table-column>
+        <el-table-column prop="has_update" :label="t('secpage.hasUpdate')" min-width="110">
+          <template #default="{ row }">
+            <span :title="row.judge_why">{{ hasUpdateText(row.has_update) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="stale_days" :label="t('secpage.staleDays')" min-width="100">
+          <template #default="{ row }">{{ row.stale_days ?? '—' }}</template>
         </el-table-column>
       </TableShell>
     </el-card>
@@ -252,24 +256,28 @@ onMounted(() => { load(); pollTimer = setInterval(load, 300000) })
 onUnmounted(() => { if (pollTimer) clearInterval(pollTimer) })
 
 // 批 138：手动重扫——入队后轮询 scan_date 变化（采集分钟级，上限 5 分钟），完成即刷新并提示
-const scanning = ref(false)
+// 批 155 §4.4c：扫描态=服务端真源 scan_running（刷新/跨端一致）；本地布尔仅防抖
+const scanning = computed(() => !!(snap.value?.scan_running))
+const localPending = ref(false)
 const onRescan = async () => {
-  if (scanning.value) return
-  scanning.value = true
+  if (scanning.value || localPending.value) return
+  localPending.value = true
   try {
     await triggerSecurityScan()
     ElMessage.success(t('secpage.rescanStarted'))
     const before = snap.value?.scan_date
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 90; i++) {
       await new Promise(r => setTimeout(r, 10000))
       await load()
-      if (snap.value?.scan_date && snap.value.scan_date !== before) break
+      if (!snap.value?.scan_running && snap.value?.scan_date) break
+      if (snap.value?.scan_date !== before) { }   // 日期变但锁未放=继续等锁
     }
     ElMessage.success(t('secpage.rescanDone'))
   } catch (e) {
-    ElMessage.error(e?.detail || t('common.deleteFailed'))
+    if (e?.code === 'SEC_SCAN_RUNNING') ElMessage.warning(t('secpage.scanRunning'))
+    else ElMessage.error(e?.detail || t('common.deleteFailed'))
   } finally {
-    scanning.value = false
+    localPending.value = false
   }
 }
 
@@ -292,7 +300,8 @@ const lastScanAt = computed(() => {
 // 批 154 补③：依赖滞后（A 区小字+D 区箭头列——检查不升级；>20 琥珀告警）
 // 键归一匹配：pip 名小写下划线/连字符混形 vs ledger 名（PyYAML/pyyaml、typing_extensions）
 // 批 154 补5：依赖滞后（A 区小字；D 区三态列直读 row.latest，服务端单源）
-const depOutdatedWarn = computed(() => (snap.value?.n_outdated || 0) > 20)
+const depOutdatedWarn = computed(() => (snap.value?.dep_health?.has_update_n || 0) > 20)
+const hasUpdateText = (v) => v === 'yes' ? t('secpage.huYes') : v === 'no' ? t('secpage.huNo') : t('secpage.huUnknown')
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
 const degradedZones = computed(() => snap.value?.degraded_zones || [])
 
@@ -367,6 +376,11 @@ const compFilterGroups = computed(() => {
       { value: 'yes', label: t('secpage.hasVuln') },
       { value: 'no', label: t('secpage.noVulnOpt') },
     ] },
+    // 批 155：是否有更新版本（多选标签惯例；「未知」不命中任何标签）
+    { key: 'upd', label: t('secpage.hasUpdate'), options: [
+      { value: 'yes', label: t('secpage.huYes') },
+      { value: 'no', label: t('secpage.huNo') },
+    ] },
   ]
 })
 // 三层叠加：RowFilter（来源×状态）→ 搜索（name/origin/version 多字段子串——
@@ -379,9 +393,11 @@ const compRowsShown = computed(() => {
   // 写反（无 key 给 ['yes'] = 全选后回到只看有漏洞=「没反应」的根因）。
   const vuln = rf.vuln ?? []
   const source = rf.source ?? []
+  const upd = rf.upd ?? []
   const rows = all.filter(r =>
     (!source.length || source.includes(r.source)) &&
-    (!vuln.length || (vuln.includes('yes') && r.vuln_count) || (vuln.includes('no') && !r.vuln_count)))
+    (!vuln.length || (vuln.includes('yes') && r.vuln_count) || (vuln.includes('no') && !r.vuln_count)) &&
+    (!upd.length || upd.includes(r.has_update)))   // 未知(undefined)不命中任何标签✓
   if (!compFilter.value.trim()) return rows
   const q = compFilter.value.toLowerCase()
   return rows.filter(r =>
@@ -483,9 +499,7 @@ const onDeleteSummary = async (d) => {
 .sev { font-size: var(--fs-foot); font-weight: 600; }
 .sev-critical { color: var(--critical); }
 /* 批 154 补：非最新版橙黄（当前版本+最新版列同色——滞后即提示） */
-.ver-stale { color: var(--warn); }
-.ver-uptodate { color: var(--text-tertiary); }
-.latest-new { color: var(--warn); font-weight: 500; }
+/* 批 155 用户裁定：取消依赖颜色标示（分类靠是/否筛选列）——ver-stale/latest-new/ver-uptodate 全撤 */
 .sev-high { color: var(--warn-fill); }
 .sev-medium { color: var(--brand-500); }
 .sev-low, .sev-negligible, .sev-unknown { color: var(--text-secondary); }

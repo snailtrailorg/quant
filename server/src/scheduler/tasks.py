@@ -722,85 +722,23 @@ def health_monitor_check():
 # 批120：覆盖全局 300s；批124 提至 2400s——扫描前置 grype db update（每次先更新，
 # 首次/大版本全量 ~3.1GB，prod 带宽 2.8MB/s ⇒ 最长 ~20min）+ syft/grype 链 + 五分区
 def security_scan(self):
-    """批 120：每日安全态势扫描（组件/端口/ssh/dnf/头/漏洞六分区 → 快照落库 + 基线 diff
-    告警 + AI 摘要 fail-soft）。单分区失败只标该分区 degraded，不抛。"""
+    """批 120：每日安全态势扫描（六分区 → 快照落库 + 基线 diff 告警 + AI 摘要
+    fail-soft）。批 155 §4.4c：收尾释放串行化锁（值=自己才删，防误删）。"""
     from src.health_monitor.security_collector import run_security_scan
-    return run_security_scan()
-
-
-_RPM_LATEST_MAP = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
-                   "postgresql-server": "postgres", "redis-server": "redis"}
-
-
-def _ver_key(v: str) -> tuple:
-    """版本串→可比元组（非数字段截断）。"""
-    import re as _re
-    return tuple(int(x) for x in _re.findall(r"\d+", v or "")[:4])
-
-
-@app.task(name="src.scheduler.tasks.dep_audit")
-def dep_audit():
-    """批 154 补6：依赖滞后预算（pip 全量版本比对 + rpm 仓库最新版）。
-
-    为什么异步：pip list --outdated 实测 207s，内联进扫描 = 每日阻塞 3.5min；
-    dnf repoquery 单键秒级但 5 键也要十几秒——一并移出扫描热路径（扫描零外部命令）。
-
-    产出缓存 sec:dep_audit = {ts, pip:[{name,cur,latest}], rpm:{ledger_key: latest}}
-    ——只存原始事实，“是否滞后”判定留在采集侧（当前版在那里）。
-    beat 每日 05:00（扫描 06:00 读到的就是当日值）。fail-soft：失败留旧缓存（26h 线兜底）。
-    """
-    import datetime as dt
-    import json as _json
-    import subprocess as _sp
-    import sys as _sys
-
-    from src.quant_common.redis_client import business_redis
-
-    def _run(cmd, timeout):
-        r = _sp.run(cmd, capture_output=True, text=True, timeout=timeout)
-        r.check_returncode()
-        return r.stdout or ""
-
-    pip_items, rpm_latest, errs = [], {}, []
     try:
-        raw = _run([_sys.executable, "-m", "pip", "list", "--outdated", "--format=json",
-                    "--disable-pip-version-check"], 300)
-        pip_items = [{"name": o.get("name", "").lower(), "cur": o.get("version", ""),
-                      "latest": o.get("latest_version", "")}
-                     for o in _json.loads(raw or "[]")]
-    except Exception as e:
-        errs.append(f"pip: {e}"[:120])
-
-    # rpm 层（仓库最新版——与当前版的比较在采集侧）
-    for rpm_name, ledger_key in _RPM_LATEST_MAP.items():
+        return run_security_scan()
+    finally:
         try:
-            out = _run(["dnf", "repoquery", "--qf", "%{VERSION}\n", rpm_name], 60)
-            cands = [ln.strip() for ln in out.splitlines() if ln.strip()]
-            if cands:
-                rpm_latest[ledger_key] = max(cands, key=_ver_key)
-        except Exception as e:
-            errs.append(f"{rpm_name}: {e}"[:120])
-
-    if not pip_items and not rpm_latest:
-        logger.warning("dep_audit 全面失败（旧缓存 26h 线兜底）: %s", errs)
-        return {"status": "failed", "errors": errs}
-
-    try:
-        business_redis().set("sec:dep_audit", _json.dumps({
-            "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
-            "pip": pip_items, "rpm": rpm_latest}))
-    except Exception as e:
-        logger.warning("dep_audit 写缓存失败: %s", e)
-        return {"status": "failed", "errors": errs + [str(e)[:120]]}
-
-    return {"status": "ok" if not errs else "partial", "n_pip": len(pip_items),
-            "n_rpm": len(rpm_latest), "errors": errs}
+            from src.quant_common.redis_client import business_redis
+            br = business_redis()
+            lock_val = br.get("sec:scan_lock")
+            cur_id = str(self.request.id) if getattr(self, "request", None) else ""
+            if lock_val and lock_val == cur_id:
+                br.delete("sec:scan_lock")
+        except Exception:
+            pass   # 锁 TTL 2700s 兜底，释放失败不炸任务
 
 
-# 长任务异步派发声明（批 83b）——**执行机制声明，非注册表**：同步项注册在 sync_config（行）
-# + engine._HANDLERS（handler）；此处只声明「到点后怎么跑」。值 = celery 消息 expires 秒
-# （原 beat 的 options.expires 沿用值，防 worker 停机期间堆积过期轮次）。
-# 为什么要它：这两条原为独立 beat（自带 celery 任务 + soft_time_limit=320），收编后若在
 # data_sync_scheduler 进程内联跑，池轮 280s 时间盒会逼近该 beat 的 300s 软超时，并挤掉
 # 同周期其他到期同步项（内联路径 = tier1 九键用的小任务，秒级完成）。
 _SYNC_ASYNC_DISPATCH: dict[str, int] = {
@@ -811,6 +749,139 @@ _SYNC_ASYNC_DISPATCH: dict[str, int] = {
     "okx_perp_daily": 3600,
     "binance_perp_daily": 3600,
 }
+
+@app.task(name="src.scheduler.tasks.dep_audit")
+def dep_audit():
+    """批 155：依赖健康审计 v2（方案 §4/§4.1 契约 v1——结构化全链）。
+
+    importlib 全枚举+PEP610 local+PEP691 上游+OS provider 全量+约束快照
+    -> Valkey sec:dep_audit。幂等：run_id 后写胜+重入自退；ok 量化>20% err。
+    """
+    import concurrent.futures as _cf
+    import datetime as _dt
+    import json as _json
+    import os as _os
+
+    from src.health_monitor import os_pkg
+    from src.quant_common.depjudge import (
+        in_constraint_max as _icm_fn, parse_constraints, parse_names)
+    from src.quant_common.depjudge import _v as _pep440
+    from src.quant_common.redis_client import business_redis
+
+    CACHE_KEY = "sec:dep_audit"
+    run_id = _dt.datetime.now(_dt.timezone.utc).isoformat()
+
+    try:
+        prev = business_redis().get(CACHE_KEY)
+        if prev and _json.loads(prev).get("run_id", "") >= run_id:
+            return {"status": "skipped", "reason": "newer run exists"}
+    except Exception:
+        pass
+
+    errors = []
+
+    constraints, dev_names = {}, []
+    try:
+        here = _os.path.dirname(_os.path.abspath(__file__))
+        server_dir = _os.path.dirname(_os.path.dirname(here))
+        for fname, is_dev in (("requirements.txt", False),
+                              ("requirements-dev.txt", True)):
+            path = _os.path.join(server_dir, fname)
+            try:
+                text = open(path, encoding="utf-8").read()
+            except Exception:
+                continue
+            constraints.update(parse_constraints(text))
+            if is_dev:
+                dev_names = parse_names(text)
+    except Exception as e:
+        errors.append(f"constraints: {e}"[:120])
+
+    try:
+        installed = os_pkg.pip_installed()
+    except Exception as e:
+        installed = []
+        errors.append(f"pip-enum: {e}"[:120])
+
+    def _fetch(row):
+        if row["local"]:
+            return row, None, None
+        try:
+            pv = os_pkg.pypi_versions(row["name"])
+            return row, pv["versions"], None
+        except Exception as ex:
+            return row, None, str(ex)[:100]
+
+    pip_rows, n_fail, n_remote = [], 0, 0
+    with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+        for row, vers, err in ex.map(_fetch, installed):
+            grp = "dev" if row["name"] in dev_names else "runtime"
+            if err is not None:
+                n_fail += 1
+                n_remote += 1
+                if n_fail <= 3:
+                    errors.append(f"pypi {row['name']}: {err}")
+                pip_rows.append({"name": row["name"], "cur": row["cur"],
+                                 "latest": None, "in_constraint_max": None,
+                                 "local": row["local"], "group": grp})
+                continue
+            if not row["local"]:
+                n_remote += 1
+            constraint = constraints.get(row["name"])
+            latest = icm = None
+            if vers:
+                best, best_v = None, None
+                for v in vers:
+                    pv = _pep440(v)
+                    if pv is not None and (best_v is None or pv > best_v):
+                        best, best_v = v, pv
+                latest = best
+                icm = _icm_fn(vers, constraint, row["cur"])
+            pip_rows.append({"name": row["name"], "cur": row["cur"],
+                             "latest": latest, "in_constraint_max": icm,
+                             "local": row["local"], "group": grp})
+
+    provider = os_pkg.detect_provider()
+    os_installed, os_upgrades = [], {}
+    if provider.id == "unsupported":
+        errors.append(provider.reason)
+    else:
+        try:
+            os_installed = provider.list_installed()
+        except Exception as e:
+            errors.append(f"os-list: {e}"[:120])
+        try:
+            os_upgrades = provider.upgrade_candidates()
+        except Exception as e:
+            errors.append(f"os-upgrades: {e}"[:120])
+
+    denom = max(n_remote, 1)
+    ok = (n_fail / denom) <= 0.20 and bool(pip_rows or os_installed)
+    payload = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "ts": run_id,
+        "ok": ok,
+        "errors": errors[:20],
+        "constraints": constraints,
+        "dev": dev_names,
+        "pip": pip_rows,
+        "os": {"pkg_mgr": provider.id, "installed_n": len(os_installed),
+               "upgrades": os_upgrades, "latest": os_upgrades},
+    }
+    try:
+        business_redis().set(CACHE_KEY, _json.dumps(payload))
+    except Exception as e:
+        logger.warning("dep_audit cache write failed: %s", e)
+        return {"status": "failed", "errors": errors[:5] + [str(e)[:100]]}
+
+    undeclared = [r["name"] for r in pip_rows
+                  if r["group"] == "runtime" and r["name"] not in constraints]
+    return {"status": "ok" if ok else "partial",
+            "n_pip": len(pip_rows), "n_local": len([r for r in pip_rows if r["local"]]),
+            "n_remote": n_remote, "n_fail": n_fail,
+            "n_os": len(os_installed), "n_os_upgrades": len(os_upgrades),
+            "n_undeclared": len(undeclared), "errors": errors[:5]}
 
 
 @app.task(name="src.scheduler.tasks.data_sync_scheduler")

@@ -98,33 +98,72 @@ def _count_new_findings(day: date, spans: list[tuple]) -> int:
 
 @router.post("/scan")
 def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
-    """手动触发安全扫描（批 138）：把既有每日 beat 任务 `security_scan` 入队。
+    """手动触发安全扫描（批 138；批 155 串行化 §4.4c）。
 
-    权限：data_sync（数据采集面操作——与「触发同步」同键；扫描=采集的一种）。
-    任务自身幂等（同日重扫=覆盖同日快照行）；不加防重锁——并发触发只是多一轮只读采集，
-    保持最小面。扫描耗时分钟级：前端轮询 snapshot 的 scan_date 感知完成。
+    Valkey sec:scan_lock（TTL>任务 time_limit）：占用中 -> 409 SEC_SCAN_RUNNING
+    （拒绝入队而非排队）；任务收尾 DEL（值=自己）；崩溃 TTL 兜底。缓存
+    stale 顺带 async 派 dep_audit（fresh 线=DEP_AUDIT_FRESH_H 单源）。
     """
+    import json as _json
+    import datetime as _dt
+    from src.quant_common.redis_client import business_redis
     from src.scheduler.tasks import security_scan
-    # 批 154 补②：缓存空/过期（>26h）时顺带异步预算 dep_audit——本轮扫描显示 —，
-    # 下轮（或 1-2 分钟后手动再扫）出全量；不阻塞本轮扫描
+    br = business_redis()
+    lock_val = br.get("sec:scan_lock")
+    if lock_val:
+        raise ApiError(409, "SEC_SCAN_RUNNING", f"扫描进行中（task={lock_val[:8]}）")
     try:
-        import json as _json
-        import datetime as _dt
-        from src.quant_common.redis_client import business_redis
-        raw = business_redis().get("sec:dep_audit")
+        from src.quant_common.depjudge import DEP_AUDIT_FRESH_H
+        raw = br.get("sec:dep_audit")
         fresh = False
         if raw:
             ts = _dt.datetime.fromisoformat(_json.loads(raw)["ts"])
-            fresh = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() < 26 * 3600
+            fresh = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() < DEP_AUDIT_FRESH_H * 3600
         if not fresh:
             from src.scheduler.tasks import dep_audit
             dep_audit.delay()
+    except ApiError:
+        raise
     except Exception:
-        pass   # 缓存探测失败不影响触发扫描本体
+        pass
     task = security_scan.delay()
+    try:
+        br.set("sec:scan_lock", str(task.id), ex=2700)
+    except Exception:
+        pass
     audit_log(payload.get("username", ""), "trigger_security_scan", "")
     logger.info("security scan triggered by %s (task=%s)", payload.get("username"), task.id)
     return {"status": "submitted", "task_id": task.id}
+
+
+def _hu(judge_class):
+    from src.quant_common.depjudge import has_update_of
+    return has_update_of(judge_class)
+
+
+def _stale_days(row):
+    lc = row.get("last_changed")
+    if not lc:
+        return None
+    return (date.today() - lc).days
+
+
+def _dep_health_summary(snap, ledger_rows):
+    """批 155：依赖健康汇总（主展示数=has_update_n；细类供 tooltip/折叠头）。"""
+    from collections import Counter
+    comp = snap.get("components") or {}
+    dh = comp.get("dep_health") or {}
+    cnt = Counter(r.get("judge_class") or "unknown" for r in ledger_rows)
+    has_n = sum(1 for r in ledger_rows if _hu(r.get("judge_class")) == "yes")
+    dev_n = sum(1 for r in (dh.get("rows") or []) if r.get("group") == "dev")
+    return {"has_update_n": has_n,
+            "actionable": cnt.get("actionable", 0),
+            "in_constraint": cnt.get("in_constraint", 0),
+            "pinned": cnt.get("pinned", 0), "drift": cnt.get("drift", 0),
+            "unreachable": cnt.get("unreachable", 0), "unknown": cnt.get("unknown", 0),
+            "dev_n": dev_n, "checked_at": dh.get("checked_at"),
+            "fresh": dh.get("fresh"), "pkg_mgr": dh.get("pkg_mgr"),
+            "errors": dh.get("errors") or []}
 
 
 @router.get("/snapshot")
@@ -162,6 +201,13 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     # 视作 vulns 未证实，不判任何 fixed（P1-2：宁多显示不假清零）
     # 批 123：降级分区明细（A 区状态卡直读——六分区 status/degraded_reason 既有数据，
     # 此前前端从未渲染）；台账 pip 域→findings 暴露时长 + 直出 components_ledger
+    # 批 155：串行化真源——锁存在性（§4.4c；前端零推断）
+    try:
+        from src.quant_common.redis_client import business_redis
+        scan_running = bool(business_redis().get("sec:scan_lock"))
+    except Exception:
+        scan_running = False
+
     ledger_rows = store.get_component_ledger()
     ledger = {r["name"]: r["last_changed"] for r in ledger_rows if r["source"] == "pip"}
     # 批 154 补5：台账行逐行附 latest（服务端单源推导，前端零判断）：
@@ -198,7 +244,12 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "components_ledger": [
             {"source": r["source"], "name": r["name"], "version": r["version"],
              "origin": r["origin"] or "", "last_changed": r["last_changed"].isoformat(),
-             "latest": r.get("latest")}
+             "latest_version": r.get("latest_version"),
+             "managed_by": r.get("managed_by"),
+             "judge_class": r.get("judge_class"),
+             "judge_why": r.get("judge_why") or "",
+             "has_update": _hu(r.get("judge_class")),
+             "stale_days": _stale_days(r)}
             for r in ledger_rows],
         "ports": snap["ports"],
         "ssh_cfg": snap["ssh_cfg"],
@@ -210,6 +261,8 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "n_outdated": (snap.get("components") or {}).get("n_outdated"),
         "outdated": (snap.get("components") or {}).get("outdated") or [],
         "baseline_diff": baseline_diff,
+        "scan_running": scan_running,
+        "dep_health": _dep_health_summary(snap, ledger_rows),
     }
 
 

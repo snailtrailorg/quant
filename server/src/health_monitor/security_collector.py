@@ -197,45 +197,36 @@ def _component_origin(a_type: str, locations: list | None,
     return "pip 安装"
 
 
-def _ver_key(v: str) -> tuple:
-    """版本串→可比元组（与任务侧同定义）。"""
+
+
+def _norm_key(name: str) -> str:
     import re as _re
-    return tuple(int(x) for x in _re.findall(r"\d+", v or "")[:4])
-
-
-def _clean_component_version(key: str, raw: str) -> str:
-    """系统组件版本串清洗（批 154 补4）：命令原文→纯版本。
-
-    nginx -v 走 stderr 形如 "nginx version: nginx/1.24.0"、redis "v=6.2.24"、
-    psql "psql (PostgreSQL) 18.4"、rpm --qf "pango-1.48.7"——这些前缀进台账后
-    「当前版本」列脏、与 repoquery 版本串比较也永远不等（页面实证）。
-    """
-    if not raw:
-        return raw
-    import re as _re
-    pats = {
-        "nginx": r"nginx/([0-9][\w.]*)",
-        "redis": r"v=([0-9][\w.]*)",
-        "postgres": r"\)\s*([0-9][\w.]*)",
-    }
-    pat = pats.get(key)
-    if pat is None:
-        # rpm --qf 形态：取尾部的版本 token（pango-1.48.7 / wqy-microhei-fonts-0.2.0）
-        pat = r"([0-9][0-9a-zA-Z.]*)$"
-    m = _re.search(pat, raw)
-    return m.group(1) if m else raw.strip()
+    return _re.sub(r"[-_.]+", "-", str(name)).lower()
 
 
 def _upsert_components(conn, scan_date: date,
-                       rows: list[tuple[str, str, str, str]]) -> None:
+                       rows: list[tuple[str, str, str, str]],
+                       judged: dict | None = None) -> None:
     """组件台账 UPSERT（批 123/124·security_component——版本变更史一等表）。
 
     rows=[(source, name, version, origin)]；语义（任务文件 §二.3）：
     新组件 → 三日同值入库；版本没变 → 只推 last_seen/origin 刷新；变了 →
     version+last_changed 同步。单行失败跳过（台账不炸扫描）。
     """
+    import datetime as _dtn
+    now_ts = _dtn.datetime.now(_dtn.timezone.utc)
+    # 批 155：判定列幂等覆盖 + checked_at GREATEST 单调（§4.4b）
+    J_UPD = ("managed_by=%s, latest_version=%s, latest_source=%s, "
+             "judge_class=%s, judge_why=%s, "
+             "checked_at=GREATEST(COALESCE(checked_at, %s), %s) ")
     for source, name, version, origin in rows:
         try:
+            j = (judged or {}).get(_norm_key(name))
+            if j:
+                jv = (j[1], j[0], "pypi" if j[1] == "pypi" else None,
+                      j[2], j[3], now_ts, now_ts)
+            else:
+                jv = (None, None, None, None, None, now_ts, now_ts)
             cur = conn.execute(
                 "SELECT version FROM security_component WHERE source=%s AND name=%s",
                 (source, name))
@@ -243,20 +234,21 @@ def _upsert_components(conn, scan_date: date,
             if row is None:
                 conn.execute(
                     "INSERT INTO security_component "
-                    "(source, name, version, origin, first_seen, last_changed, last_seen) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                    (source, name, version, origin, scan_date, scan_date, scan_date))
+                    "(source, name, version, origin, first_seen, last_changed, last_seen, "
+                    "managed_by, latest_version, latest_source, judge_class, judge_why, checked_at) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                    (source, name, version, origin, scan_date, scan_date, scan_date) + jv)
             elif row[0] != version:
                 conn.execute(
                     "UPDATE security_component "
-                    "SET version=%s, last_changed=%s, last_seen=%s, origin=%s "
+                    "SET version=%s, last_changed=%s, last_seen=%s, origin=%s, " + J_UPD +
                     "WHERE source=%s AND name=%s",
-                    (version, scan_date, scan_date, origin, source, name))
+                    (version, scan_date, scan_date, origin) + jv + (source, name))
             else:
                 conn.execute(
-                    "UPDATE security_component SET last_seen=%s, origin=%s "
+                    "UPDATE security_component SET last_seen=%s, origin=%s, " + J_UPD +
                     "WHERE source=%s AND name=%s",
-                    (scan_date, origin, source, name))
+                    (scan_date, origin) + jv + (source, name))
         except Exception as e:
             logger.warning("台账 UPSERT 失败 %s/%s（跳过）: %s", source, name, e)
 
@@ -280,60 +272,58 @@ def _collect_components() -> dict:
     except Exception as e:
         logger.warning("pip freeze 采集失败: %s", e)
         _degraded(part, f"pip freeze 失败: {e}")
-    # 批 154 补6：依赖滞后读缓存（dep_audit 每日 05:00 预算好）——
-    # 扫描零外部命令；无缓存/超 26h = 项目缺席（前端显 破折号），不降级分区
+    # 批 155：依赖健康 v2——读 audit 契约（schema v1；30h 线=DEP_AUDIT_FRESH_H 单源）
+    # 过期/缺失 -> degraded（B2 根除：显式原因，不再静默 —）；unsupported 同 degraded
     try:
+        import datetime as _dt
+        from src.quant_common.depjudge import DEP_AUDIT_FRESH_H, judge, has_update_of
         from src.quant_common.redis_client import business_redis
         raw = business_redis().get("sec:dep_audit")
-        if raw:
-            import datetime as _dt
-            cached = json.loads(raw)
-            age_h = (_dt.datetime.now(_dt.timezone.utc)
-                     - _dt.datetime.fromisoformat(cached["ts"])).total_seconds() / 3600
-            if age_h <= 26:
-                part["outdated"] = list(cached.get("pip") or [])
-                part["n_outdated"] = len(part["outdated"])
-                part["dep_audit_at"] = cached["ts"][:19]
-                # rpm 最新版延后比较（当前版采集完成后才就位）
-                part["_rpm_latest"] = dict(cached.get("rpm") or {})
+        contract = json.loads(raw) if raw else None
+        if not contract or contract.get("schema_version") != 1:
+            raise RuntimeError("缓存缺失或 schema 不识别")
+        ts = _dt.datetime.fromisoformat(contract["ts"])
+        age_h = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() / 3600
+        if age_h > DEP_AUDIT_FRESH_H:
+            raise RuntimeError(f"缓存过期 {age_h:.0f}h > {DEP_AUDIT_FRESH_H}h")
+        constraints = contract.get("constraints") or {}
+        dev_names = set(contract.get("dev") or [])
+        judged = []
+        for row in contract.get("pip") or []:
+            managed = "local" if row.get("local") else "pypi"
+            cls, why = judge(row.get("cur"), constraints.get(row["name"]),
+                             row.get("latest"), row.get("in_constraint_max"),
+                             True, managed)
+            judged.append({"name": row["name"], "cur": row.get("cur"),
+                           "latest": row.get("latest"), "managed_by": managed,
+                           "group": row.get("group"), "judge_class": cls,
+                           "judge_why": why, "has_update": has_update_of(cls)})
+        os_c = contract.get("os") or {}
+        part["dep_health"] = {
+            "rows": judged, "pkg_mgr": os_c.get("pkg_mgr"),
+            "os_installed_n": os_c.get("installed_n"),
+            "checked_at": contract["ts"][:19], "fresh": True,
+            "ok": contract.get("ok"), "errors": contract.get("errors") or []}
+        part["dep_audit_at"] = contract["ts"][:19]
+        # 旧字段兼容（一个发布周期后删——方案 §4.4 deprecate）
+        part["outdated"] = [r for r in judged if r["has_update"] == "yes"]
+        part["n_outdated"] = len(part["outdated"])
+        if os_c.get("pkg_mgr") == "unsupported":
+            raise RuntimeError(os_c.get("reason") or "无包管理器适配")
     except Exception as e:
-        logger.warning("dep_audit 缓存读取失败（不降级分区）: %s", e)
-
-    part["python"] = platform.python_version()      # 解释器版本（无子进程——直接查）
-    for key, cmd in (
-        ("nginx", ["nginx", "-v"]),                      # nginx -v 走 stderr（官方行为）
-        ("openssl", ["rpm", "-q", "--qf", "%{VERSION}", "openssl"]),
-        ("postgres", ["psql", "--version"]),
-        ("redis", ["redis-server", "--version"]),
-        # quant 直接依赖的系统组件（dnf 装、非 pip 层可重建——版本入快照纳管）：
-        # pango/cairo=weasyprint PDF 渲染 dlopen；wqy 字体=PDF 中文；gcc-toolset=EMQ 绑定编译
-        ("pango", ["rpm", "-q", "--qf", "%{NAME}-%{VERSION}", "pango"]),
-        ("cairo", ["rpm", "-q", "--qf", "%{NAME}-%{VERSION}", "cairo"]),
-        ("wqy-microhei", ["rpm", "-q", "--qf", "%{NAME}-%{VERSION}", "wqy-microhei-fonts"]),
-    ):
+        logger.warning("dep_audit 契约读取失败: %s", e)
+        _degraded(part, f"依赖审计数据不可用: {str(e)[:120]}")
+    # 批 155：系统组件结构化（rpm -q --qf——§4.2 禁人类文本；B4 根除）
+    # 未装/非 rpm 系=None（环境差异不算失败）；latest/judge 走 dep_health（契约驱动）
+    for key, pkg in (("python", "python3.11"), ("nginx", "nginx"),
+                     ("openssl", "openssl"), ("postgres", "postgresql-server"),
+                     ("redis", "redis-server"), ("pango", "pango"),
+                     ("cairo", "cairo"), ("wqy-microhei", "wqy-microhei-fonts")):
         try:
-            out = subprocess.run(cmd, capture_output=True, text=True, timeout=_CMD_TIMEOUT)
-            ver = (out.stderr if key == "nginx" else out.stdout).strip().splitlines()
-            if out.returncode == 0 and ver:
-                part[key] = _clean_component_version(key, ver[0][:120])
-            elif out.returncode == 0 or key in ("nginx", "redis"):   # 未装/非 rpm 系=环境差异，不算失败
-                part[key] = None
-            else:
-                part[key] = None
+            ver = _run(["rpm", "-q", "--qf", "%{VERSION}", pkg]).strip()
+            part[key] = ver or None
         except Exception:
             part[key] = None
-
-    # rpm 层滞后判定（仓库最新 > 当前版才报；拿不到权威值不主张）
-    _rl = part.pop("_rpm_latest", None) or {}
-    for _k, _latest in _rl.items():
-        _cur = part.get(_k)
-        if not _cur:
-            continue
-        _cur_ver = _clean_component_version(_k, _cur)
-        if _latest and _ver_key(_latest) > _ver_key(_cur_ver):
-            part.setdefault("outdated", []).append(
-                {"name": _k, "cur": _cur_ver, "latest": _latest})
-            part["n_outdated"] = len(part["outdated"])
     return part
 
 
@@ -955,7 +945,11 @@ def run_security_scan(today: date | None = None) -> dict:
             ("system", k, str(v), "系统组件") for k, v in parts["components"].items()
             if k not in ("pip", "status", "dep_audit_at", "outdated_error") and isinstance(v, str) and v
         ]
-        _upsert_components(conn, today, sys_rows)
+        dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
+        judged_map = {r["name"]: (r.get("latest"), r.get("managed_by"),
+                       r.get("judge_class"), r.get("judge_why"))
+                      for r in dh_rows}
+        _upsert_components(conn, today, sys_rows, judged_map)
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
         conn.execute(
