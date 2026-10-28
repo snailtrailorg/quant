@@ -124,10 +124,11 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
         if not fresh:
             from src.scheduler.tasks import dep_audit
             dep_audit.delay()
+            logger.info("dep_audit dispatched (cache stale/missing)")
     except ApiError:
         raise
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("dep_audit dispatch probe failed: %s", _e)   # 批155 验证期：不再静默
     task = security_scan.delay()
     try:
         br.set("sec:scan_lock", str(task.id), ex=2700)
