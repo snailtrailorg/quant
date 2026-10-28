@@ -169,6 +169,27 @@ def _dep_health_summary(snap, ledger_rows):
             "errors": dh.get("errors") or []}
 
 
+@router.get("/dep-audit-debug")
+def dep_audit_debug(_u: dict = Depends(require_perm("data_sync"))):
+    """批 155 验证期：读 sec:dep_audit 原始缓存（排查采集/派发链；key 只读）。"""
+    import datetime as _dt
+    import json as _json
+    from src.quant_common.redis_client import business_redis
+    from src.quant_common.depjudge import DEP_AUDIT_FRESH_H
+    raw = business_redis().get("sec:dep_audit")
+    if not raw:
+        return {"exists": False, "fresh_h_line": DEP_AUDIT_FRESH_H}
+    c = _json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+    ts = _dt.datetime.fromisoformat(c.get("ts", "1970-01-01T00:00:00+00:00"))
+    age_h = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() / 3600
+    return {"exists": True, "schema_version": c.get("schema_version"),
+            "ts": c.get("ts"), "age_h": round(age_h, 2),
+            "fresh": age_h <= DEP_AUDIT_FRESH_H, "ok": c.get("ok"),
+            "n_pip": len(c.get("pip") or []),
+            "pkg_mgr": (c.get("os") or {}).get("pkg_mgr"),
+            "errors": (c.get("errors") or [])[:5]}
+
+
 @router.get("/snapshot")
 def security_snapshot(date_str: str = Query("", alias="date"),
                       _u: dict = Depends(require_perm("read"))):
