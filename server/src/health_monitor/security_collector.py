@@ -299,6 +299,7 @@ def _collect_components() -> dict:
                            "group": row.get("group"), "judge_class": cls,
                            "judge_why": why, "has_update": has_update_of(cls)})
         os_c = contract.get("os") or {}
+        part["_os_upgrades"] = dict(os_c.get("upgrades") or {})
         part["dep_health"] = {
             "rows": judged, "pkg_mgr": os_c.get("pkg_mgr"),
             "os_installed_n": os_c.get("installed_n"),
@@ -313,7 +314,6 @@ def _collect_components() -> dict:
     except Exception as e:
         logger.warning("dep_audit 契约读取失败: %s", e)
         _degraded(part, f"依赖审计数据不可用: {str(e)[:120]}")
-    # 批 155：系统组件结构化（rpm -q --qf——§4.2 禁人类文本；B4 根除）
     # 未装/非 rpm 系=None（环境差异不算失败）；latest/judge 走 dep_health（契约驱动）
     for key, pkg in (("python", "python3.11"), ("nginx", "nginx"),
                      ("openssl", "openssl"), ("postgres", "postgresql-server"),
@@ -324,6 +324,30 @@ def _collect_components() -> dict:
             part[key] = ver or None
         except Exception:
             part[key] = None
+    # 批 155 v2.5 专家#8：OS 可达性判定（upgrades 集为准）
+    _upg = part.pop("_os_upgrades", None) or {}
+    _rpm_map = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
+                "postgresql-server": "postgres", "redis-server": "redis",
+                "pango": "pango", "cairo": "cairo", "wqy-microhei-fonts": "wqy-microhei"}
+    _os_rows = []
+    for _pkg, _key in _rpm_map.items():
+        _cur = part.get(_key)
+        if not _cur:
+            continue
+        _row = {"name": _key, "cur": _cur, "managed_by": "repo", "group": "os"}
+        if _pkg in _upg:
+            _row.update({"latest": _upg[_pkg], "judge_class": "actionable",
+                        "judge_why": "仓库可升 " + str(_upg[_pkg]),
+                        "has_update": "yes"})
+        else:
+            _row.update({"latest": None, "judge_class": "current", "judge_why": "",
+                        "has_update": "no"})
+        _os_rows.append(_row)
+    if _os_rows:
+        _dh = part.setdefault("dep_health", {})
+        _dh["rows"] = (_dh.get("rows") or []) + _os_rows
+    # 批 155：系统组件结构化（rpm -q --qf——§4.2 禁人类文本；B4 根除）
+
     return part
 
 

@@ -71,6 +71,33 @@ class TestBoundaries:
         assert DEP_AUDIT_FRESH_H == 30
 
 
+class TestV25Pins:
+    """v2.5 专家三钉：constraint=None 语义 / 全 yanked / version-不变幂等。"""
+
+    def test_constraint_none_no_drift(self):
+        # 专家#3：None=无约束（fail-open），绝不触发 drift；走 7a
+        assert judge("1.0", None, "2.0", None, True, "pypi")[0] == "actionable"
+        assert judge("1.0", "", "2.0", None, True, "pypi")[0] == "actionable"
+
+    def test_all_yanked_no_versions(self):
+        # 专家#4：采集侧全 yanked → versions 空 → latest=None → unknown
+        assert judge("1.0", None, None, None, True, "pypi")[0] == "unknown"
+
+    def test_version_unchanged_last_changed_stable(self):
+        # 专家四类：同日复跑 version 不变 → else 分支 SQL 不推 last_changed
+        import inspect
+        from src.health_monitor import security_collector as sc
+        src = inspect.getsource(sc._upsert_components)
+        # 定位第三个 execute（else 分支）：其 SQL 以 UPDATE...SET last_seen 开头且无 last_changed 赋值
+        sqls = [ln for ln in src.split(chr(10)) if "UPDATE security_component" in ln or "last_changed=%s" in ln]
+        # UPDATE 两处（变更分支含 last_changed=%s；else 分支不含）
+        assert any("last_changed=%s" in x for x in sqls)
+        # else 分支 SQL 以 "SET last_seen=%s, origin=%s" 开头且不含 last_changed
+        else_sql = [x for x in sqls if "SET last_seen=%s" in x]
+        assert else_sql
+        assert all("last_changed" not in x for x in else_sql)
+
+
 class TestHasUpdate:
     @pytest.mark.parametrize("cls,want", [
         ("actionable", "yes"), ("in_constraint", "yes"),
