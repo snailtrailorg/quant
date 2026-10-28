@@ -49,3 +49,14 @@ def test_ok_quantified(monkeypatch):
     from src.scheduler import tasks
     src = inspect.getsource(tasks.dep_audit)
     assert "0.20" in src
+
+
+def test_fresh_check_requires_schema(monkeypatch):
+    """批 155 §4.1：旧 schema 缓存（无 schema_version）不得判 fresh 压住 audit 派发。
+
+    prod 实证：154 遗留缓存 ts 新鲜（age 12.7h）+ schema null → 端点 fresh=True
+    → 新 audit 3h 未派发、采集侧全 unknown。"""
+    import inspect
+    from src.web_api.routes import security as S
+    src = inspect.getsource(S.security_scan_trigger)
+    assert 'c.get("schema_version") == 1' in src
