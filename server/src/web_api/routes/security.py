@@ -110,6 +110,8 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
     from src.scheduler.tasks import security_scan
     br = business_redis()
     lock_val = br.get("sec:scan_lock")
+    if isinstance(lock_val, bytes):
+        lock_val = lock_val.decode()
     if lock_val:
         raise ApiError(409, "SEC_SCAN_RUNNING", f"扫描进行中（task={lock_val[:8]}）")
     try:

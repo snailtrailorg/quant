@@ -732,6 +732,8 @@ def security_scan(self):
             from src.quant_common.redis_client import business_redis
             br = business_redis()
             lock_val = br.get("sec:scan_lock")
+            if isinstance(lock_val, bytes):
+                lock_val = lock_val.decode()          # redis-py bytes vs str 恒不等（409 的 b'' 铁证）
             cur_id = str(self.request.id) if getattr(self, "request", None) else ""
             if lock_val and lock_val == cur_id:
                 br.delete("sec:scan_lock")
