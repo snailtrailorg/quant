@@ -1090,6 +1090,7 @@ def run_security_scan(today: date | None = None) -> dict:
         _alerted = bool(_st.get("alerted"))
         _msgs = []
         _cross = _act_n >= _thr and (not _alerted or _prev_n < _thr)
+        logger.info("B156A act=%s thr=%s prev=%s alerted=%s cross=%s", _act_n, _thr, _prev_n, _alerted, _cross)
         if _cross:
             _sample = [r for r in _rows5 if r.get("judge_class") == "actionable"][:5]
             _fmt = "; ".join(f"[{r.get('group')}] {r['name']} {r.get('cur')}->{r.get('latest')}" for r in _sample)
