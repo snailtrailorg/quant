@@ -168,7 +168,15 @@
       </template>
       <TableShell :data="compRowsPaged" storage-key="security-components" style="width:100%">
         <el-table-column prop="name" :label="t('secpage.component')" min-width="170" />
-        <el-table-column prop="origin" :label="t('secpage.origin')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="managed_by" :label="t('secpage.installVia')" min-width="96">
+          <template #default="{ row }">{{ managedByText(row.managed_by) }}</template>
+        </el-table-column>
+        <el-table-column prop="dep_chain" :label="t('secpage.depRel')" min-width="150">
+          <template #default="{ row }">
+            <span v-if="row.dep_chain" :title="row.origin">{{ row.dep_chain }}</span>
+            <span v-else>—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="120">
           <template #default="{ row }">{{ row.last_changed || '—' }}</template>
         </el-table-column>
@@ -367,13 +375,18 @@ const componentRows = computed(() => {
   for (const f of (snap.value?.findings || [])) {
     if (!f.fixed) vc[f.pkg] = (vc[f.pkg] || 0) + 1
   }
-  return led.map(r => ({ ...r, vuln_count: vc[r.name] || 0 }))
+  return led.map(r => ({
+    ...r, vuln_count: vc[r.name] || 0,
+    dep_chain: (r.origin && r.origin.includes('→')) ? r.origin : '',   // 依赖链子集（途径语义由 managed_by 列接管）
+  }))
 })
+// 安装途径中文映射（managed_by 值域：repo/pypi/local/none；空=未判定）
+const managedByText = v => ({ repo: 'dnf 仓库', pypi: 'PyPI', local: '本地 wheel', none: '非包管理器' }[v] || '—')
 // 行筛选组（Audit 范式）：来源类型（distinct 预取）× 漏洞状态（固定枚举）
 const compFilterGroups = computed(() => {
-  const srcs = [...new Set(componentRows.value.map(r => r.source))].sort()
+  const srcs = [...new Set(componentRows.value.map(r => r.managed_by).filter(Boolean))].sort()
   return [
-    { key: 'source', label: t('secpage.originCol'), options: srcs.map(s => ({ value: s, label: s })) },
+    { key: 'source', label: t('secpage.installVia'), options: srcs.map(s => ({ value: s, label: managedByText(s) })) },
     { key: 'vuln', label: t('secpage.vulnState'), options: [
       { value: 'yes', label: t('secpage.hasVuln') },
       { value: 'no', label: t('secpage.noVulnOpt') },
@@ -404,7 +417,7 @@ const compRowsShown = computed(() => {
   const source = rf.source ?? []
   const upd = rf.upd ?? []
   const rows = all.filter(r =>
-    (!source.length || source.includes(r.source)) &&
+    (!source.length || source.includes(r.managed_by)) &&
     (!vuln.length || (vuln.includes('yes') && r.vuln_count) || (vuln.includes('no') && !r.vuln_count)) &&
     (!upd.length || upd.includes(r.has_update)))   // 三态可筛（是/否/未知）
   if (!compFilter.value.trim()) return rows
