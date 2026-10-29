@@ -388,15 +388,10 @@ const compFilterGroups = computed(() => {
 })
 // 三层叠加：RowFilter（来源×状态）→ 搜索（name/origin/version 多字段子串——
 // "vnpy" 能带出 origin=vnpy→pyside6 捆绑 的 ffmpeg）
-const compShowAll = ref(false)
-const COMP_PAGE = 200   // 批 156（M3）：880 行首屏截断——有更新优先，展开看全部
 const compRowsPaged = computed(() => {
   const rows = compRowsShown.value
-  const sorted = [...rows].sort((a, b) =>
+  return [...rows].sort((a, b) =>
     (b.has_update === 'yes') - (a.has_update === 'yes') || (b.vuln_count || 0) - (a.vuln_count || 0))
-  // 批 156 裁定：有筛选/搜索时全量显示（筛选即意图）；仅默认态截断首屏
-  const hasFilter = !!(compFilter.value.trim() || Object.values(compRowFilter.value || {}).some(v => (v || []).length))
-  return (hasFilter || compShowAll.value) ? sorted : sorted.slice(0, COMP_PAGE)
 })
 
 const compRowsShown = computed(() => {
