@@ -760,7 +760,7 @@ def _os_repo_all(provider) -> dict:
         return {}
     try:
         out = _sp.run(["dnf", "-q", "repoquery", "--qf",
-                       "%{NAME}\t%{VERSION}\n"], capture_output=True, text=True, timeout=240)
+                       "%{NAME}\t%{VERSION}\n"], capture_output=True, text=True, timeout=360)
         names = {}
         for ln in (out.stdout or "").splitlines():
             parts = ln.split("\t")
@@ -901,6 +901,11 @@ def dep_audit():
                "all_repos": _os_repo_all(provider),
                "upgrades": os_upgrades, "latest": os_upgrades},
     }
+    # 批 156 遗留 B 观测：全仓名单异常小=repoquery 部分 metadata
+    _ar_n = len((payload.get("os") or {}).get("all_repos") or {})
+    if provider.id == "dnf" and _ar_n < 5000:
+        errors.append(f"os-repo-all suspicious: only {_ar_n} names")
+        payload["ok"] = False
     try:
         business_redis().set(CACHE_KEY, _json.dumps(payload))
         # v2.5 专家#6：电平告警状态（ok=false 连续两轮才告的计数基础）

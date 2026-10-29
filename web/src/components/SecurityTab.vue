@@ -182,14 +182,14 @@
             <span v-else class="sev-none">—</span>
           </template>
         </el-table-column>
-        <el-table-column prop="latest_version" :label="t('secpage.latestCol')" min-width="130">
-          <template #default="{ row }">
-            <span :title="row.judge_why">{{ row.latest_version || '—' }}</span>
-          </template>
-        </el-table-column>
         <el-table-column prop="has_update" :label="t('secpage.hasUpdate')" min-width="110">
           <template #default="{ row }">
             <span :title="row.judge_why">{{ hasUpdateText(row.has_update) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="latest_version" :label="t('secpage.latestCol')" min-width="130">
+          <template #default="{ row }">
+            <span :title="row.judge_why">{{ row.latest_version || '—' }}</span>
           </template>
         </el-table-column>
       </TableShell>
@@ -394,7 +394,9 @@ const compRowsPaged = computed(() => {
   const rows = compRowsShown.value
   const sorted = [...rows].sort((a, b) =>
     (b.has_update === 'yes') - (a.has_update === 'yes') || (b.vuln_count || 0) - (a.vuln_count || 0))
-  return compShowAll.value ? sorted : sorted.slice(0, COMP_PAGE)
+  // 批 156 裁定：有筛选/搜索时全量显示（筛选即意图）；仅默认态截断首屏
+  const hasFilter = !!(compFilter.value.trim() || Object.values(compRowFilter.value || {}).some(v => (v || []).length))
+  return (hasFilter || compShowAll.value) ? sorted : sorted.slice(0, COMP_PAGE)
 })
 
 const compRowsShown = computed(() => {
