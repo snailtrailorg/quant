@@ -990,8 +990,7 @@ def run_security_scan(today: date | None = None) -> dict:
                 if _nm and _nm not in _gm:
                     _gm[_nm] = (None, "none", "unknown", "SBOM 识别、非包管理器纳管")
 
-            _r156 = _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
-            logger.info("B156P grype rows=%s gm=%s r=%s", len(vulns.get("ledger") or []), len(_gm), _r156)
+            _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
 
         # 幂等描述补齐（批 126）：全表空描述行回填——**不依赖 vulns 分区 ok**（LLM
         # 生成与 grype 扫描无关，降级日也能补存量/失败行；空=待办下轮再补）
@@ -1028,11 +1027,9 @@ def run_security_scan(today: date | None = None) -> dict:
             _LEGACY8 = ("python", "nginx", "openssl", "postgres", "redis", "pango", "cairo", "wqy-microhei")
             conn.execute("DELETE FROM security_component WHERE source=%s AND name IN (%s,%s,%s,%s,%s,%s,%s,%s)", ("system",) + _LEGACY8)
             _os_up = [("system", r["name"], str(r.get("cur") or ""), "OS rpm") for r in _os_all]
-            _r156b = _upsert_components(conn, today, _os_up, judged_map)
-            logger.info("B156P os rows=%s r=%s", len(_os_up), _r156b)
+            _upsert_components(conn, today, _os_up, judged_map)
             conn.execute("DELETE FROM security_component WHERE source=%s AND last_seen < %s", ("system", today - _dt3.timedelta(days=3)))
-        _r156c = _upsert_components(conn, today, sys_rows, judged_map)
-        logger.info("B156P sys rows=%s r=%s", len(sys_rows), _r156c)
+        _upsert_components(conn, today, sys_rows, judged_map)
         logger.info("upsert sys rows=%s judged=%s", len(sys_rows), len(judged_map))
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
