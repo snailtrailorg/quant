@@ -192,9 +192,6 @@
             <span :title="row.judge_why">{{ hasUpdateText(row.has_update) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="stale_days" :label="t('secpage.staleDays')" min-width="100">
-          <template #default="{ row }">{{ row.stale_days ?? '—' }}</template>
-        </el-table-column>
       </TableShell>
     </el-card>
 
@@ -381,10 +378,11 @@ const compFilterGroups = computed(() => {
       { value: 'yes', label: t('secpage.hasVuln') },
       { value: 'no', label: t('secpage.noVulnOpt') },
     ] },
-    // 批 155：是否有更新版本（多选标签惯例；「未知」不命中任何标签）
+    // 批 155/156 裁定：是否有更新（含「未知」选项——三态全可筛）
     { key: 'upd', label: t('secpage.hasUpdate'), options: [
       { value: 'yes', label: t('secpage.huYes') },
       { value: 'no', label: t('secpage.huNo') },
+      { value: 'unknown', label: t('secpage.huUnknown') },
     ] },
   ]
 })
@@ -411,7 +409,7 @@ const compRowsShown = computed(() => {
   const rows = all.filter(r =>
     (!source.length || source.includes(r.source)) &&
     (!vuln.length || (vuln.includes('yes') && r.vuln_count) || (vuln.includes('no') && !r.vuln_count)) &&
-    (!upd.length || upd.includes(r.has_update)))   // 未知(undefined)不命中任何标签✓
+    (!upd.length || upd.includes(r.has_update)))   // 三态可筛（是/否/未知）
   if (!compFilter.value.trim()) return rows
   const q = compFilter.value.toLowerCase()
   return rows.filter(r =>

@@ -904,14 +904,16 @@ def dep_audit():
     try:
         business_redis().set(CACHE_KEY, _json.dumps(payload))
         # v2.5 专家#6：电平告警状态（ok=false 连续两轮才告的计数基础）
+        # 批 156 修：**合并写**——保留 scan 写入的 alerted/prev_actionable_n（覆盖写会把
+        # 电平状态抹掉=alerted 活不过下轮 audit → 每日重复告警）
         try:
             st_key = "sec:dep_alert_state"
             prev_raw = business_redis().get(st_key)
-            prev = _json.loads(prev_raw) if prev_raw else {}
-            consecutive = (prev.get("consecutive_fail", 0) + 1) if not ok else 0
-            business_redis().set(st_key, _json.dumps({
+            prev_st = _json.loads(prev_raw) if prev_raw else {}
+            consecutive = (prev_st.get("consecutive_fail", 0) + 1) if not ok else 0
+            prev_st.update({
                 "prev_ok": ok, "consecutive_fail": consecutive,
-                "prev_ts": run_id}))
+                "prev_ts": run_id})
         except Exception:
             pass
     except Exception as e:

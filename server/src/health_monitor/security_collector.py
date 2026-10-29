@@ -1030,6 +1030,18 @@ def run_security_scan(today: date | None = None) -> dict:
             _upsert_components(conn, today, _os_up, judged_map)
             conn.execute("DELETE FROM security_component WHERE source=%s AND last_seen < %s", ("system", today - _dt3.timedelta(days=3)))
         _upsert_components(conn, today, sys_rows, judged_map)
+        # 批 156 补（2.3 验收线）：不在本轮判定域的台账行显式 unknown——
+        # jv 全 NULL 的行（audit 未覆盖名/昨日残留）批量标 unknown(why=未在本轮审计)
+        try:
+            import datetime as _dt156
+            conn.execute(
+                "UPDATE security_component SET judge_class=%s, "
+                "judge_why=%s, checked_at=%s "
+                "WHERE judge_class IS NULL AND checked_at IS NOT NULL",
+                ("unknown", "未在本轮审计（数据源差集——下轮对齐或 3 天 GC 收口）",
+                 _dt156.datetime.now(_dt156.timezone.utc)))
+        except Exception as _e156:
+            logger.warning("null-judge backfill failed: %s", _e156)
         logger.info("upsert sys rows=%s judged=%s", len(sys_rows), len(judged_map))
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
