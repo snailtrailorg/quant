@@ -291,7 +291,10 @@ def _collect_components() -> dict:
         if not contract or _sv not in (1, 2):
 
             raise RuntimeError("缓存缺失或 schema 不识别")
-        ts = _dt.datetime.fromisoformat(contract["ts"])
+        _ts_raw = contract["ts"]
+        if "+00:00-" in _ts_raw:   # 容错：历史 run_id 后缀形态（156 前 audit 写入——明晨例行重写后自然消失）
+            _ts_raw = _ts_raw.split("+00:00-")[0] + "+00:00"
+        ts = _dt.datetime.fromisoformat(_ts_raw)
         age_h = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() / 3600
         if age_h > DEP_AUDIT_FRESH_H:
             raise RuntimeError(f"缓存过期 {age_h:.0f}h > {DEP_AUDIT_FRESH_H}h")
