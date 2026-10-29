@@ -205,9 +205,11 @@ def dep_health_groups(_u: dict = Depends(require_perm("read"))):
     """批 156（B10/M3）：服务端聚合——分组计数+组内分页行（880 行不全量拉取）。"""
     from src.data_platform import security_store as _st
     rows = _st.get_component_ledger()
+    from src.quant_common.depjudge import has_update_of
     groups = {"yes": [], "no": [], "unknown": []}
     for r in rows:
-        groups.setdefault(r.get("has_update") or "unknown", []).append(r)
+        r["has_update"] = has_update_of(r.get("judge_class"))   # 派生（store 不落此列）
+        groups.setdefault(r["has_update"], []).append(r)
     return {
         "counts": {k: len(v) for k, v in groups.items()},
         "total": len(rows),
