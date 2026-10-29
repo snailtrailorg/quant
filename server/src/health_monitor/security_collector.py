@@ -1037,7 +1037,7 @@ def run_security_scan(today: date | None = None) -> dict:
             conn.execute(
                 "UPDATE security_component SET judge_class=%s, "
                 "judge_why=%s, checked_at=%s "
-                "WHERE judge_class IS NULL AND checked_at IS NOT NULL",
+                "WHERE judge_class IS NULL",
                 ("unknown", "未在本轮审计（数据源差集——下轮对齐或 3 天 GC 收口）",
                  _dt156.datetime.now(_dt156.timezone.utc)))
         except Exception as _e156:
