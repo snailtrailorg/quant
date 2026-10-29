@@ -888,7 +888,7 @@ def dep_audit():
     payload = {
         "schema_version": 2,
         "run_id": run_id,
-        "ts": run_id,
+        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),   # 纯 ISO（消费端 fromisoformat；run_id 含随机后缀分开存）
         "ok": ok,
         "errors": errors[:20],
         "constraints": constraints,
