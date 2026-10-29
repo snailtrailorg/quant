@@ -215,6 +215,7 @@ def _upsert_components(conn, scan_date: date,
     """
     import datetime as _dtn
     now_ts = _dtn.datetime.now(_dtn.timezone.utc)
+    _n_ins = _n_upd = _n_err = 0   # 批156 probe
     # 批 155：判定列幂等覆盖 + checked_at GREATEST 单调（§4.4b）
     J_UPD = ("managed_by=%s, latest_version=%s, latest_source=%s, "
              "judge_class=%s, judge_why=%s, "
@@ -237,20 +238,26 @@ def _upsert_components(conn, scan_date: date,
                     "(source, name, version, origin, first_seen, last_changed, last_seen, "
                     "managed_by, latest_version, latest_source, judge_class, judge_why, checked_at) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                    (source, name, version, origin, scan_date, scan_date, scan_date) + jv)
+                    (source, name, version, origin, scan_date, scan_date, scan_date)
+                    + (jv[0], jv[1], jv[2], jv[3], jv[4], now_ts))   # 批156 根修：INSERT 单 checked_at（jv 双 now_ts 仅供 UPDATE 的 GREATEST 双占位）
+                _n_ins += 1
             elif row[0] != version:
                 conn.execute(
                     "UPDATE security_component "
                     "SET version=%s, last_changed=%s, last_seen=%s, origin=%s, " + J_UPD +
                     "WHERE source=%s AND name=%s",
                     (version, scan_date, scan_date, origin) + jv + (source, name))
+                _n_upd += 1
             else:
                 conn.execute(
                     "UPDATE security_component SET last_seen=%s, origin=%s, " + J_UPD +
                     "WHERE source=%s AND name=%s",
                     (scan_date, origin) + jv + (source, name))
+                _n_upd += 1
         except Exception as e:
+            _n_err += 1
             logger.warning("台账 UPSERT 失败 %s/%s（跳过）: %s", source, name, e)
+    return _n_ins, _n_upd, _n_err   # 批156 probe
 
 
 # ── 分区采集 ───────────────────────────────────────────────────────────────
@@ -983,7 +990,8 @@ def run_security_scan(today: date | None = None) -> dict:
                 if _nm and _nm not in _gm:
                     _gm[_nm] = (None, "none", "unknown", "SBOM 识别、非包管理器纳管")
 
-            _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
+            _r156 = _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
+            logger.info("B156P grype rows=%s gm=%s r=%s", len(vulns.get("ledger") or []), len(_gm), _r156)
 
         # 幂等描述补齐（批 126）：全表空描述行回填——**不依赖 vulns 分区 ok**（LLM
         # 生成与 grype 扫描无关，降级日也能补存量/失败行；空=待办下轮再补）
@@ -1020,9 +1028,11 @@ def run_security_scan(today: date | None = None) -> dict:
             _LEGACY8 = ("python", "nginx", "openssl", "postgres", "redis", "pango", "cairo", "wqy-microhei")
             conn.execute("DELETE FROM security_component WHERE source=%s AND name IN (%s,%s,%s,%s,%s,%s,%s,%s)", ("system",) + _LEGACY8)
             _os_up = [("system", r["name"], str(r.get("cur") or ""), "OS rpm") for r in _os_all]
-            _upsert_components(conn, today, _os_up, judged_map)
+            _r156b = _upsert_components(conn, today, _os_up, judged_map)
+            logger.info("B156P os rows=%s r=%s", len(_os_up), _r156b)
             conn.execute("DELETE FROM security_component WHERE source=%s AND last_seen < %s", ("system", today - _dt3.timedelta(days=3)))
-        _upsert_components(conn, today, sys_rows, judged_map)
+        _r156c = _upsert_components(conn, today, sys_rows, judged_map)
+        logger.info("B156P sys rows=%s r=%s", len(sys_rows), _r156c)
         logger.info("upsert sys rows=%s judged=%s", len(sys_rows), len(judged_map))
 
         # 同日复跑=覆盖刷新（scan_date unique）；components 不含 vulns 分区（各自独立）
