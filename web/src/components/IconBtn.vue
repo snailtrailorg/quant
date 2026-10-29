@@ -8,14 +8,14 @@
   <el-button
     circle
     :title="title || undefined"
-    :disabled="disabled"
-    :loading="loading"
+    :disabled="disabled || loading"
     :aria-label="ariaLabel || title || undefined"
     class="icon-btn"
     :class="[type ? `icon-btn--${type}` : '', size === 'small' ? 'icon-btn--small' : '']"
     @click="$emit('click', $event)"
   >
     <el-icon v-if="icon && !loading"><component :is="icon" /></el-icon>
+    <el-icon v-else-if="icon" class="icon-btn--spinning"><component :is="icon" /></el-icon>
     <slot v-else />
   </el-button>
 </template>
@@ -51,6 +51,10 @@ defineEmits(['click'])
 .icon-btn--small :deep(.el-icon) { font-size: calc(var(--icon-glyph) - 4px); }
 /* 图标字形尺寸：el-icon 按 1em 走，这里放大；文字槽位（语言「EN/中」）不受影响 */
 .icon-btn :deep(.el-icon) { font-size: var(--icon-glyph); }
+/* loading 态：图标原地自转（EP 内建 loading spinner 是文字按钮语义——circle 纯图标钮下
+   渲染在文字位带 margin 偏移=偏左根源；禁用 :loading 改图标位旋转，按钮正中心零偏移） */
+.icon-btn--spinning { animation: icon-btn-spin 0.9s linear infinite; }
+@keyframes icon-btn-spin { to { transform: rotate(360deg); } }
 /* 语义色：颜色在图标，底仍透明，hover 同淡中性 */
 .icon-btn--danger { color: var(--el-color-danger); }
 .icon-btn--warning { color: var(--el-color-warning); }
