@@ -39,7 +39,7 @@ def test_audit_writes_contract(monkeypatch):
     assert pv.call_count == 1                      # 仅 pandas 一次；vnpy 零请求
     import json
     c = json.loads(store["sec:dep_audit"])
-    assert c["schema_version"] == 1 and "constraints" in c and "os" in c
+    assert c["schema_version"] in (1, 2) and "constraints" in c and "os" in c   # 156 起=2（钉查字段齐备非锁版本）
     assert any(row["name"] == "pandas" and row["latest"] == "3.1.0" for row in c["pip"])
 
 

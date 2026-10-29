@@ -752,6 +752,25 @@ _SYNC_ASYNC_DISPATCH: dict[str, int] = {
     "binance_perp_daily": 3600,
 }
 
+def _os_repo_all(provider) -> dict:
+    """批 156：全仓包名单次缓存（B3——仓库无坐标判定内存比对）。
+    repoquery --all 一次；失败返回 {}（判定降级 unknown 保守）。"""
+    import subprocess as _sp
+    if provider.id != "dnf":
+        return {}
+    try:
+        out = _sp.run(["dnf", "-q", "repoquery", "--qf",
+                       "%{NAME}\t%{VERSION}\n"], capture_output=True, text=True, timeout=240)
+        names = {}
+        for ln in (out.stdout or "").splitlines():
+            parts = ln.split("\t")
+            if len(parts) == 2 and parts[0]:
+                names[parts[0]] = parts[1]
+        return names
+    except Exception:
+        return {}
+
+
 @app.task(name="src.scheduler.tasks.dep_audit",
           soft_time_limit=1500, time_limit=1600)   # 批 155 补：prod pypi.org 150 包 9min 撞默认 soft（18:14 SoftTimeLimitExceeded 实证）——首日全量需 1500s；分批缓存生效后常态 <90s
 def dep_audit():
@@ -867,7 +886,7 @@ def dep_audit():
     denom = max(n_remote, 1)
     ok = (n_fail / denom) <= 0.20 and bool(pip_rows or os_installed)
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "run_id": run_id,
         "ts": run_id,
         "ok": ok,
@@ -876,6 +895,10 @@ def dep_audit():
         "dev": dev_names,
         "pip": pip_rows,
         "os": {"pkg_mgr": provider.id, "installed_n": len(os_installed),
+               "installed": [{"name": ip.name, "epoch": ip.epoch,
+                                "version": ip.version, "release": ip.release,
+                                "arch": ""} for ip in os_installed],
+               "all_repos": _os_repo_all(provider),
                "upgrades": os_upgrades, "latest": os_upgrades},
     }
     try:

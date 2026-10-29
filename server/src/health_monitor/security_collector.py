@@ -280,7 +280,9 @@ def _collect_components() -> dict:
         from src.quant_common.redis_client import business_redis
         raw = business_redis().get("sec:dep_audit")
         contract = json.loads(raw) if raw else None
-        if not contract or contract.get("schema_version") != 1:
+        _sv = contract.get("schema_version") if contract else None
+        if not contract or _sv not in (1, 2):
+
             raise RuntimeError("缓存缺失或 schema 不识别")
         ts = _dt.datetime.fromisoformat(contract["ts"])
         age_h = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() / 3600
@@ -299,6 +301,33 @@ def _collect_components() -> dict:
                            "group": row.get("group"), "judge_class": cls,
                            "judge_why": why, "has_update": has_update_of(cls)})
         os_c = contract.get("os") or {}
+        # 批 156（schema 2）：OS 全量行——upgrades 可达口径+all_repos 无坐标判定
+        if _sv == 2:
+            _upg_all = dict(os_c.get("upgrades") or {})
+            _repos = os_c.get("all_repos") or {}
+            _seen_best = {}   # multilib 同名取最高版（B1）
+            for _ip in os_c.get("installed") or []:
+                _n = _ip.get("name") or ""
+                if not _n:
+                    continue
+                _ver = _ip.get("version") or ""
+                _prev = _seen_best.get(_n)
+                if _prev and str(_prev.get("version")) >= str(_ver):
+                    continue
+                _seen_best[_n] = _ip
+            for _n, _ip in _seen_best.items():
+                _cur = _ip.get("version")
+                _row = {"name": _n, "cur": _cur, "managed_by": "repo", "group": "os"}
+                if _n in _upg_all:
+                    _row.update({"latest": _upg_all[_n], "judge_class": "actionable",
+                                "judge_why": "仓库可升 " + str(_upg_all[_n]), "has_update": "yes"})
+                elif _n in _repos:
+                    _row.update({"latest": None, "judge_class": "current", "judge_why": "", "has_update": "no"})
+                else:
+                    _row.update({"latest": None, "judge_class": "unknown",
+                                "judge_why": "仓库无坐标", "has_update": "no"})
+                judged.append(_row)
+
         part["_os_upgrades"] = dict(os_c.get("upgrades") or {})
         part["dep_health"] = {
             "rows": judged, "pkg_mgr": os_c.get("pkg_mgr"),
@@ -326,7 +355,11 @@ def _collect_components() -> dict:
             part[key] = None
     # 批 155 v2.5 专家#8：OS 可达性判定（upgrades 集为准）
     _upg = part.pop("_os_upgrades", None) or {}
-    _rpm_map = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
+    # 批 156：schema 2 时旧 8 行过渡采集退役（全量行已接管；schema 1 中间态仍走此路径）
+    if _sv == 2:
+        _rpm_map = {}
+    else:
+        _rpm_map = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
                 "postgresql-server": "postgres", "redis-server": "redis",
                 "pango": "pango", "cairo": "cairo", "wqy-microhei-fonts": "wqy-microhei"}
     _os_rows = []
@@ -943,8 +976,13 @@ def run_security_scan(today: date | None = None) -> dict:
             fresh = _upsert_findings(conn, today, vulns.get("findings") or [])
             # 台账 pip/rpm 域（SBOM 顺带产出——grype 链 ok 才有）
             # 批 155：pip 域行经 grype ledger 入账（同传 judged）
-            _gl = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
-            _gm = {r["name"]: (r.get("latest"), r.get("managed_by"), r.get("judge_class"), r.get("judge_why")) for r in _gl}
+            _dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
+            _gm = {r["name"]: (r.get("latest"), r.get("managed_by"), r.get("judge_class"), r.get("judge_why")) for r in _dh_rows}
+            for _lr in (vulns.get("ledger") or []):
+                _nm = _norm_key(_lr[1]) if len(_lr) > 1 and _lr[1] else None
+                if _nm and _nm not in _gm:
+                    _gm[_nm] = (None, "none", "unknown", "SBOM 识别、非包管理器纳管")
+
             _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
 
         # 幂等描述补齐（批 126）：全表空描述行回填——**不依赖 vulns 分区 ok**（LLM
@@ -976,6 +1014,14 @@ def run_security_scan(today: date | None = None) -> dict:
         judged_map = {r["name"]: (r.get("latest"), r.get("managed_by"),
                        r.get("judge_class"), r.get("judge_why"))
                       for r in dh_rows}
+        import datetime as _dt3
+        _os_all = [r for r in dh_rows if r.get("group") == "os"]
+        if _os_all:
+            _LEGACY8 = ("python", "nginx", "openssl", "postgres", "redis", "pango", "cairo", "wqy-microhei")
+            conn.execute("DELETE FROM security_component WHERE source=%s AND name IN (%s,%s,%s,%s,%s,%s,%s,%s)", ("system",) + _LEGACY8)
+            _os_up = [("system", r["name"], str(r.get("cur") or ""), "OS rpm") for r in _os_all]
+            _upsert_components(conn, today, _os_up, judged_map)
+            conn.execute("DELETE FROM security_component WHERE source=%s AND last_seen < %s", ("system", today - _dt3.timedelta(days=3)))
         _upsert_components(conn, today, sys_rows, judged_map)
         logger.info("upsert sys rows=%s judged=%s", len(sys_rows), len(judged_map))
 
@@ -1011,6 +1057,51 @@ def run_security_scan(today: date | None = None) -> dict:
                 conn.commit()
         except Exception as e:
             logger.warning("ai_summary 回写失败（不影响扫描结果）: %s", e)
+
+    # 批 156: 依赖健康告警电平
+    try:
+        import json as _json5
+        from src.quant_common.redis_client import business_redis as _br5
+        _dh5 = (parts.get("components") or {}).get("dep_health") or {}
+        _rows5 = _dh5.get("rows") or []
+        _act_n = sum(1 for r in _rows5 if r.get("judge_class") == "actionable")
+        _drift_n = sum(1 for r in _rows5 if r.get("judge_class") == "drift")
+        _thr = 20
+        try:   # batch156 threshold configurable
+            from src.data_platform.db import get_conn as _gc5
+            with _gc5() as _cc5:
+                _r5 = _cc5.execute("SELECT value FROM system_config WHERE key=%s",
+                                   ("dep_alert_threshold",)).fetchone()
+                if _r5:
+                    _thr = int(_r5[0])
+        except Exception:
+            _thr = 20
+        _br5i = _br5()
+        _st_raw = _br5i.get("sec:dep_alert_state")
+        _st = _json5.loads(_st_raw) if _st_raw else {}
+        _prev_n = int(_st.get("prev_actionable_n") or 0)
+        _alerted = bool(_st.get("alerted"))
+        _msgs = []
+        _cross = _act_n >= _thr and (not _alerted or _prev_n < _thr)
+        if _cross:
+            _sample = [r for r in _rows5 if r.get("judge_class") == "actionable"][:5]
+            _fmt = "; ".join(f"[{r.get('group')}] {r['name']} {r.get('cur')}->{r.get('latest')}" for r in _sample)
+            _msgs.append(f"依赖可升级 {_act_n} 达阈值 {_thr}：{_fmt}（checked_at={_dh5.get('checked_at')}）")
+            _alerted = True
+        elif _alerted and _act_n < _thr:
+            _msgs.append(f"依赖可升级回落 {_prev_n}->{_act_n}（低于阈值 {_thr}）")
+            _alerted = False
+        if _drift_n > 0:
+            _msgs.append(f"环境漂移 {_drift_n} 行（刚执行升级属预期，下轮自愈）")
+        if _msgs:
+            from src.alert_notify.notify import notify
+            notify("warn", "data", "；".join(_msgs))
+        _br5i.set("sec:dep_alert_state", _json5.dumps({
+            "prev_ok": _dh5.get("ok"), "prev_actionable_n": _act_n,
+            "alerted": _alerted,
+            "consecutive_fail": _st.get("consecutive_fail") or 0}))
+    except Exception as _e5:
+        logger.warning("dep alert level failed: %s", _e5)
 
     return {"status": status, "n_diff": len(diff_items), "n_fresh_vulns": len(fresh),
             "ai_summary": ai_summary[:120], "parts": {k: v.get("status") for k, v in parts.items()} |

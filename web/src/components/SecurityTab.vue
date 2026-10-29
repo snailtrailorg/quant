@@ -139,6 +139,11 @@
           </template>
         </el-table-column>
       </TableShell>
+      <div v-if="compRowsShown.length > COMP_PAGE" class="comp-more">
+        <el-button link type="primary" @click="compShowAll = !compShowAll">
+          {{ compShowAll ? t("secpage.compCollapse") : t("secpage.compMore", { n: compRowsShown.length - COMP_PAGE }) }}
+        </el-button>
+      </div>
     </el-card>
 
     <!-- D 组件列表（批 124：版本表→列表，全量组件 + 来源自解释 + 漏洞数 + RowFilter）。
@@ -161,7 +166,7 @@
           </div>
         </div>
       </template>
-      <TableShell :data="compRowsShown" storage-key="security-components" style="width:100%">
+      <TableShell :data="compRowsPaged" storage-key="security-components" style="width:100%">
         <el-table-column prop="name" :label="t('secpage.component')" min-width="170" />
         <el-table-column prop="origin" :label="t('secpage.origin')" min-width="150" show-overflow-tooltip />
         <el-table-column prop="last_changed" :label="t('secpage.lastChanged')" min-width="120">
@@ -385,6 +390,15 @@ const compFilterGroups = computed(() => {
 })
 // 三层叠加：RowFilter（来源×状态）→ 搜索（name/origin/version 多字段子串——
 // "vnpy" 能带出 origin=vnpy→pyside6 捆绑 的 ffmpeg）
+const compShowAll = ref(false)
+const COMP_PAGE = 200   // 批 156（M3）：880 行首屏截断——有更新优先，展开看全部
+const compRowsPaged = computed(() => {
+  const rows = compRowsShown.value
+  const sorted = [...rows].sort((a, b) =>
+    (b.has_update === 'yes') - (a.has_update === 'yes') || (b.vuln_count || 0) - (a.vuln_count || 0))
+  return compShowAll.value ? sorted : sorted.slice(0, COMP_PAGE)
+})
+
 const compRowsShown = computed(() => {
   const all = componentRows.value
   const rf = compRowFilter.value
@@ -404,7 +418,7 @@ const compRowsShown = computed(() => {
     `${r.name || ''} ${r.origin || ''} ${r.version || ''}`.toLowerCase().includes(q))
 })
 const compHint = computed(() =>
-  t('secpage.compMatch', { n: compRowsShown.value.length, total: componentRows.value.length }))
+  t('secpage.compMatch', { n: compRowsPaged.value.length, total: componentRows.value.length }))
 
 // A 区漏洞库卡（批 124 用户裁定换基线偏差卡——「漏洞判定的时效边界」）：
 // DB 构建日（import.json URL 时间戳——采集器提取）；>3 天黄（上游日更 1 次，

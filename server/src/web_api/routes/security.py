@@ -195,6 +195,21 @@ def dep_audit_debug(_u: dict = Depends(require_perm("data_sync"))):
             "errors": (c.get("errors") or [])[:5]}
 
 
+@router.get("/dep-health")
+def dep_health_groups(_u: dict = Depends(require_perm("read"))):
+    """批 156（B10/M3）：服务端聚合——分组计数+组内分页行（880 行不全量拉取）。"""
+    from src.data_platform import security_store as _st
+    rows = _st.get_component_ledger()
+    groups = {"yes": [], "no": [], "unknown": []}
+    for r in rows:
+        groups.setdefault(r.get("has_update") or "unknown", []).append(r)
+    return {
+        "counts": {k: len(v) for k, v in groups.items()},
+        "total": len(rows),
+        "rows": {k: v[:50] for k, v in groups.items()},   # 组内首 50 行，翻页后续批
+    }
+
+
 @router.get("/snapshot")
 def security_snapshot(date_str: str = Query("", alias="date"),
                       _u: dict = Depends(require_perm("read"))):
