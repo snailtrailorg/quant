@@ -59,7 +59,7 @@ def test_fresh_check_requires_schema(monkeypatch):
     import inspect
     from src.web_api.routes import security as S
     src = inspect.getsource(S.security_scan_trigger)
-    assert 'c.get("schema_version") == 1' in src
+    assert 'c.get("schema_version") == 2' in src   # 156 起=2（旧形态缓存不得压住派发）
 
 
 def test_soft_limit_and_batch_cache():

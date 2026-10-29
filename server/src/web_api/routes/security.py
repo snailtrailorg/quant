@@ -123,8 +123,10 @@ def security_scan_trigger(payload: dict = Depends(require_perm("data_sync"))):
             # 批 155 §4.1 契约：schema 不识别=视为无缓存（旧 154 结构 ts 新鲜也不能
             # 压住新 audit 派发——prod 实证：昨晚旧缓存 age 12.7h 判 fresh 导致
             # 新 audit 三小时未被派发、采集侧全 unknown）
-            if c.get("schema_version") == 1:
-                ts = _dt.datetime.fromisoformat(c["ts"])
+            if c.get("schema_version") == 2:
+                # 批 156：schema 2 才算 fresh（1=旧形态——扫描侧走回退路径，审计需升级重写）
+                ts = _dt.datetime.fromisoformat(c["ts"].split("+00:00-")[0] + "+00:00"
+                                                if "+00:00-" in c["ts"] else c["ts"])
                 fresh = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() < DEP_AUDIT_FRESH_H * 3600
         if not fresh:
             from src.scheduler.tasks import dep_audit
