@@ -186,7 +186,9 @@ def dep_audit_debug(_u: dict = Depends(require_perm("data_sync"))):
         return {"exists": False, "fresh_h_line": DEP_AUDIT_FRESH_H}
     c = _json.loads(raw) if isinstance(raw, (str, bytes)) else raw
     _ts_raw = str(c.get("ts") or "1970-01-01T00:00:00+00:00")
-    ts = _dt.datetime.fromisoformat(_ts_raw.split("+00:00-")[0])   # 容错：历史 run_id 后缀形态
+    if "+00:00-" in _ts_raw:                       # 容错：历史 run_id 后缀形态（切后补 tz 防 naive）
+        _ts_raw = _ts_raw.split("+00:00-")[0] + "+00:00"
+    ts = _dt.datetime.fromisoformat(_ts_raw)
     age_h = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds() / 3600
     return {"exists": True, "schema_version": c.get("schema_version"),
             "ts": c.get("ts"), "age_h": round(age_h, 2),
