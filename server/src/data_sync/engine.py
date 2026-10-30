@@ -1387,6 +1387,14 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
             try:
                 _pull_one(sym)
             except Exception as e:
+                # 批 157：软时限**直抛**（不吞）——crypto 拉取主循环此前会把它记成 per-symbol
+                # 失败继续下一标的，一路跑到 hard SIGKILL（10-30 两证：97.3%/95.6% 死于 hard
+                # 而非 soft）。窄捕获先于通用 except，形态照抄 :2494（_repull_symbol 先例）。
+                # 直抛走 sync() except：游标写回旧值（不前移——段边界前移属批 157 分段步骤，
+                # 本步只保证「时限开火+终态干净（_mark_running/_log/退避刷新）」）。
+                if (_CelerySoftTimeLimit is not None
+                        and isinstance(e, _CelerySoftTimeLimit)):
+                    raise
                 failed[sym] = f"{type(e).__name__}:{str(e)[:40]}"
             if progress_cb:
                 progress_cb(i, total, sym)
@@ -1399,6 +1407,9 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
                     _pull_one(sym)
                     failed.pop(sym, None)
                 except Exception as e:
+                    if (_CelerySoftTimeLimit is not None
+                            and isinstance(e, _CelerySoftTimeLimit)):
+                        raise      # 批 157：软时限直抛（同首轮，二轮补拉也不吞）
                     failed[sym] = f"{type(e).__name__}:{str(e)[:40]}"
 
         # 游标契约（批 105 扩展，逐字见工厂 docstring「partial 冻结」段）：
