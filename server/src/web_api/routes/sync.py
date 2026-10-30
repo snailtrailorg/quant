@@ -91,8 +91,12 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
     """异步触发类型级同步：提交 Celery 后台任务，立即返回 task_id（不阻塞 HTTP）。"""
     _validate_sid(sid)            # D-1 配套：入口 4xx 预检（此前任意 sid 200，校验延后 worker）
     _validate_backfill(backfill_from)   # D-2：非法日期此前静默成功（abc 落 start 列）
-    from src.scheduler.tasks import sync_via_celery
-    task = sync_via_celery.delay(sid, backfill_from)
+    from src.scheduler.tasks import _CRYPTO_INTRADAY_SIDS, sync_via_celery, sync_via_celery_crypto
+    # 批 157：crypto 盘中档走宽时限变体（时限注册级约束 ⇒ 变体任务承接；sid 集单源 tasks.py）
+    if sid in _CRYPTO_INTRADAY_SIDS:
+        task = sync_via_celery_crypto.delay(sid, backfill_from)
+    else:
+        task = sync_via_celery.delay(sid, backfill_from)
     audit_log(payload["username"], "trigger_sync", sid)
     return {"status": "submitted", "task_id": task.id}
 
@@ -189,6 +193,11 @@ def trigger_progress_api(sid: str, task_id: str | None = None,
             ks = k.decode() if isinstance(k, bytes) else k
             vs = v.decode() if isinstance(v, bytes) else v
             out[ks] = int(vs) if ks in _INT_FIELDS and vs.lstrip("-").isdigit() else vs
+        # 批 157：活性判活读 SyncLock 锁键（20s 心跳续期/60s TTL，与源速解耦）——
+        # running 但锁已不存在 = 死残留（SIGKILL/撞锁/worker 亡后 Valkey 键 TTL 1h 内的假象）。
+        if out.get("status") == "running" and not r.exists(f"sync:lock:{sid}"):
+            out["status"] = "stale"
+            out["stale_reason"] = "锁已释放但进度键未收尾（任务被杀/中断）——以 sync_log 与 journal 为准"
         return out
     # 兜底：查 Celery AsyncResult（hash 过期/worker 重启时）
     if task_id:

@@ -1198,6 +1198,34 @@ def _crypto_end(end_date: str, adapter, kind: str) -> date:
                _dt.now(_tz.utc).date() - _td(days=int(adapter.publish_lag(kind))))
 
 
+# 批 157：盘中档分段预算（秒）——每段扫描完在段边界检查；预算尽则本任务收尾，
+# 余段由下轮增量接力（游标=reached）。取 soft(3600) 的一半：段正常完成+终态收尾余量充足。
+_SEGMENT_BUDGET = 1800.0
+
+
+def _segment_window(start: date, end: date) -> list[tuple[date, date]]:
+    """窗口切分为「整月段+残日段」（批 157）——月包优化保留（>90 天走 monthly ZIP 的
+    adapter 路径在整月段上自然生效），残日段短小快扫。升序返回。
+
+    例：2026-09-20 ~ 2026-10-28 ⇒ [(09-20, 09-30), (10-01, 10-28)]（首残日+尾残日，
+    中间无整月则合一）。纯 2 天窗不切（调用方 (end-start).days>=2 已挡，本函数对
+    任意窗给正确结果）。
+    """
+    if start > end:
+        return []
+    segs: list[tuple[date, date]] = []
+    cur = start
+    while cur <= end:
+        # 本月剩余
+        if (cur.year, cur.month) == (end.year, end.month):
+            segs.append((cur, end))
+            break
+        nxt = (date(cur.year, cur.month, 28) + timedelta(days=5)).replace(day=1)
+        segs.append((cur, min(nxt - timedelta(days=1), end)))
+        cur = nxt
+    return segs
+
+
 def _crypto_base_start(cfg: dict, backfill_from: str | None, adapter, kind: str,
                        ) -> tuple[date, list[dict]]:
     """crypto **家族级**窗口下界：游标在 ⇒ 游标＋1；无游标 ⇒ 三方地板（设计 §5.1）。
@@ -1366,13 +1394,13 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
                 excl.setdefault(f"{e.get('symbol', '')}|{e['kind']}|{e['from']}|{e['to']}", e)
             return max(start, f) if f else start
 
-        def _pull_one(sym: str) -> None:
+        def _pull_one(sym: str, seg_end: date, seg_end_s: str) -> None:
             nonlocal pulled, saved, reached
             s0 = _start_of(sym)
-            if s0 > end:
-                return        # 该标的下界晚于窗口上界（如新上币）⇒ 本轮无作业，非失败
+            if s0 > seg_end:
+                return        # 该标的下界晚于本段上界（如新上币）⇒ 本段无作业，非失败
             df = adapter.fetch_supply(kind, sub_kind, symbol=sym,
-                                      start=s0.strftime("%Y%m%d"), end=end_s, freq=freq)
+                                      start=s0.strftime("%Y%m%d"), end=seg_end_s, freq=freq)
             if df is not None and not df.empty:
                 rows = adapter.to_bar_rows(df, freq)
                 if rows:
@@ -1383,28 +1411,44 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
                     if ds > reached:
                         reached = ds
 
-        for i, sym in enumerate(syms, 1):
-            try:
-                _pull_one(sym)
-            except Exception as e:
-                # 批 157：软时限**直抛**（不吞）——crypto 拉取主循环此前会把它记成 per-symbol
-                # 失败继续下一标的，一路跑到 hard SIGKILL（10-30 两证：97.3%/95.6% 死于 hard
-                # 而非 soft）。窄捕获先于通用 except，形态照抄 :2494（_repull_symbol 先例）。
-                # 直抛走 sync() except：游标写回旧值（不前移——段边界前移属批 157 分段步骤，
-                # 本步只保证「时限开火+终态干净（_mark_running/_log/退避刷新）」）。
-                if (_CelerySoftTimeLimit is not None
-                        and isinstance(e, _CelerySoftTimeLimit)):
-                    raise
-                failed[sym] = f"{type(e).__name__}:{str(e)[:40]}"
-            if progress_cb:
-                progress_cb(i, total, sym)
+        # 批 157：区间分段——盘中档（freeze=False 族）长窗按「整月+残日」切段，段边界查预算
+        # （_SEGMENT_BUDGET）；已扫段的游标=该段内实际取到数据的末日（reached 契约不变），
+        # 增量下轮自动从新游标续——时限从此不构成威胁。freeze 档（日线）不切分段
+        # （整窗零漂移——A 审 P0：冻结锚 end-N 与分段互噬）。
+        segments: list[tuple[date, date]] = [(start, end)]
+        if not freeze_on_partial and (end - start).days >= 2:
+            segments = _segment_window(start, end)
+        seg_budget_left: float | None = _SEGMENT_BUDGET if len(segments) > 1 else None
+        _seg_t0 = datetime.now(timezone.utc)
+        for _seg_idx, (_seg_lo, _seg_hi) in enumerate(segments):
+            if seg_budget_left is not None and _seg_idx > 0 and seg_budget_left <= 0:
+                break   # 本任务段预算尽：已扫段照走（reached/failed 已记账），余段下轮增量接力
+            _seg_hi_s = _seg_hi.strftime("%Y%m%d")
+            for i, sym in enumerate(syms, 1):
+                try:
+                    _pull_one(sym, _seg_hi, _seg_hi_s)
+                except Exception as e:
+                    # 批 157：软时限**直抛**（不吞）——crypto 拉取主循环此前会把它记成 per-symbol
+                    # 失败继续下一标的，一路跑到 hard SIGKILL（10-30 两证：97.3%/95.6% 死于 hard
+                    # 而非 soft）。窄捕获先于通用 except，形态照抄 :2494（_repull_symbol 先例）。
+                    # 直抛走 sync() except：游标写回旧值（段内已 commit 数据不丢）。
+                    if (_CelerySoftTimeLimit is not None
+                            and isinstance(e, _CelerySoftTimeLimit)):
+                        raise
+                    failed[sym] = f"{type(e).__name__}:{str(e)[:40]}"
+                if progress_cb and _seg_idx == 0:
+                    # 批 157：progress 只发首段（多段重复枚举=进度倒跳；段级进度走 segments_done/total）
+                    progress_cb(i, total, sym)
+            if seg_budget_left is not None:
+                seg_budget_left -= (datetime.now(timezone.utc) - _seg_t0).total_seconds()
+                _seg_t0 = datetime.now(timezone.utc)
 
         # 批 105 二轮补拉：首轮失败标的**立即**各重试一次（不 sleep——瞬时抖动大多秒级自愈，
         # 而 sleep 会把全任务时长乘进去；adapter 内部已有 2/4/8s 退避兜着间隔）。成功即清账。
         if failed:
             for sym in list(failed):
                 try:
-                    _pull_one(sym)
+                    _pull_one(sym, end, end_s)
                     failed.pop(sym, None)
                 except Exception as e:
                     if (_CelerySoftTimeLimit is not None

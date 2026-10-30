@@ -743,6 +743,12 @@ def security_scan(self):
 
 # data_sync_scheduler 进程内联跑，池轮 280s 时间盒会逼近该 beat 的 300s 软超时，并挤掉
 # 同周期其他到期同步项（内联路径 = tier1 九键用的小任务，秒级完成）。
+# 批 157：crypto 盘中档 sid 集（变体任务路由单源——web trigger 与 scheduler dispatch 共用）
+_CRYPTO_INTRADAY_SIDS = frozenset({
+    "binance_perp_1min", "binance_perp_15min", "binance_perp_hourly",
+    "okx_perp_1min", "okx_perp_15min", "okx_perp_hourly",
+})
+
 _SYNC_ASYNC_DISPATCH: dict[str, int] = {
     "pool_data": 290,
     "pool_data_full_calibrate": 3600,
@@ -750,6 +756,14 @@ _SYNC_ASYNC_DISPATCH: dict[str, int] = {
     # 300s 软限下无保护且挤占同轮其他项；派发后由 sync_via_celery（soft 3600）承接。
     "okx_perp_daily": 3600,
     "binance_perp_daily": 3600,
+    # 批 157：盘中三档入异步派发——防将来 cron 化误配置内联饿死调度轮（当下仍 manual-only，
+    # 存储闸门裁定不翻案）；派发路由到宽时限变体 sync_via_celery_crypto。
+    "binance_perp_1min": 5400,
+    "binance_perp_15min": 5400,
+    "binance_perp_hourly": 5400,
+    "okx_perp_1min": 5400,
+    "okx_perp_15min": 5400,
+    "okx_perp_hourly": 5400,
 }
 
 def _os_repo_all(provider) -> dict:
@@ -1073,8 +1087,9 @@ def data_sync_scheduler():
             # 长任务异步派发（批 83b）：独立 celery 任务执行，不阻塞本 beat（见常量处说明）。
             # track=False：不建 tasks 表行（定时路径每 5 分钟一轮=一年约 10 万行噪声；
             # 手动触发的 /api/sync/trigger 仍走 track=True 建行，触发人可见）。
-            sync_via_celery.apply_async(args=[sid], kwargs={"track": False},
-                                       queue="data", expires=_SYNC_ASYNC_DISPATCH[sid])
+            _tgt = sync_via_celery_crypto if sid in _CRYPTO_INTRADAY_SIDS else sync_via_celery
+            _tgt.apply_async(args=[sid], kwargs={"track": False},
+                             queue="data", expires=_SYNC_ASYNC_DISPATCH[sid])
             triggered.append({"id": sid, "dispatched": "async"})
             continue
         from src.data_sync import sync
@@ -1154,6 +1169,19 @@ _TIER1_TIME_LIMITS = {
 @app.task(name="src.scheduler.tasks.sync_via_celery",
           bind=True, soft_time_limit=3600, time_limit=4200)
 def sync_via_celery(self, sync_id: str, backfill_from: str | None = None, track: bool = True):
+    return _sync_via_celery_body(self, sync_id, backfill_from, track)
+
+
+@app.task(name="src.scheduler.tasks.sync_via_celery_crypto",
+          bind=True, soft_time_limit=5400, time_limit=6000)   # 批 157：crypto 盘中档变体
+def sync_via_celery_crypto(self, sync_id: str, backfill_from: str | None = None, track: bool = True):
+    """crypto 盘中档专属变体（批 157）——celery 时限是任务注册级不可按消息分档，
+    故宽时限（5400/6000=2.6 段预算+收尾余量）独立注册；分段使正常任务永不触及时限，
+    本值是保命闸不是预算。sid 白名单路由在 web_api/routes/sync.py（trigger 处）。"""
+    return _sync_via_celery_body(self, sync_id, backfill_from, track)
+
+
+def _sync_via_celery_body(self, sync_id: str, backfill_from: str | None = None, track: bool = True):
     """类型级同步异步执行（HTTP trigger 立即返回 task_id，前端轮询进度）。
 
     progress 写 Valkey sync:type:{sid}（与全量重建 sync_all_symbols 的 sync:progress:{sid} 分开）。

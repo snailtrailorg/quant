@@ -99,17 +99,20 @@ class TestBeatsRetired:
 
     def test_async_dispatch_declaration_covers_exactly_declared(self):
         """异步派发声明 ↔ 注册面交叉对账（防声明了不存在的 sync_id / 漏了长任务）。
-        批 116：+crypto 日线两键（内联实测 135~1660s，300s 软限无保护——步 0-A 挂账收口）。"""
-        from src.scheduler.tasks import _SYNC_ASYNC_DISPATCH
+        批 116：+crypto 日线两键（内联实测 135~1660s，300s 软限无保护——步 0-A 挂账收口）。
+        批 157：+crypto 盘中六键（防将来 cron 化误配置内联；派发路由宽时限变体）。"""
+        from src.scheduler.tasks import _SYNC_ASYNC_DISPATCH, _CRYPTO_INTRADAY_SIDS
         from src.data_sync.engine import _HANDLERS
         assert set(_SYNC_ASYNC_DISPATCH) == {"pool_data", "pool_data_full_calibrate",
-                                             "okx_perp_daily", "binance_perp_daily"}
+                                             "okx_perp_daily", "binance_perp_daily"} | set(_CRYPTO_INTRADAY_SIDS)
         assert set(_SYNC_ASYNC_DISPATCH) <= set(_HANDLERS)
         # expires 沿用原 beat options.expires（防 worker 停机期间堆积过期轮次）
         assert _SYNC_ASYNC_DISPATCH["pool_data"] == 290
         assert _SYNC_ASYNC_DISPATCH["pool_data_full_calibrate"] == 3600
         assert _SYNC_ASYNC_DISPATCH["okx_perp_daily"] == 3600
         assert _SYNC_ASYNC_DISPATCH["binance_perp_daily"] == 3600
+        for sid in _CRYPTO_INTRADAY_SIDS:
+            assert _SYNC_ASYNC_DISPATCH[sid] == 5400
 
     def test_sync_via_celery_has_track_switch(self):
         """track 开关在位且默认为 True（手动触发仍建任务行，行为不变）。"""
