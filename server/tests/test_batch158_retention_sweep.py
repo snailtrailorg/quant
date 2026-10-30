@@ -76,12 +76,15 @@ def test_source_match_and_cutoff(monkeypatch):
     assert "FOR UPDATE SKIP LOCKED" in sql0
 
 
-def test_veto_skips_table(monkeypatch):
-    inner = _install(monkeypatch, [("DELETE", 0)],
-                     [("binance_perp_1min", "bar_1min", "binance", 7)], ["bar_1min"])
+def test_null_sibling_does_not_veto(monkeypatch):
+    """2026-10-31 修订钉：NULL 档=自己的行不裁，**不否决**同表其他档——
+    旧 veto 设计锁死 bar_1min（结构性永不裁）已删；source 匹配保证隔离。"""
+    inner = _install(monkeypatch, [("DELETE FROM bar_1min", 0)],
+                     [("binance_perp_1min", "bar_1min", "binance", 7)], [])
     from src.scheduler.tasks import bar_retention_sweep as _t
     res = _t.run()
-    assert not [s for s in inner.executed if s.startswith("DELETE")]
+    # veto 行不再查询/不再拦截——DELETE 照发（此处 0 行命中是数据态非拦截）
+    assert [s for s in inner.executed if s.startswith("DELETE")]
     assert res["deleted"] == 0
 
 

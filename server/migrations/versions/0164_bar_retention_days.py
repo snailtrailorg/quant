@@ -1,6 +1,7 @@
 """批 158：bar 表滚动保留——sync_config.retention_days 列 + 三表 ts 单列索引。
 
-- retention_days INTEGER NULL：滚动保留窗（天）。NULL=否决票（该表任一共写档 NULL => 整表不裁）。
+- retention_days INTEGER NULL：滚动保留窗（天）。NULL=该档自己的行不裁（共写表按
+  source 隔离互不可见——无表级否决，veto 设计 2026-10-31 删除）。
   与 retention（DATE 起点地板=拉多老）语义正交。
 - ts 索引（CONCURRENTLY，0060 先例形态）：DELETE ... WHERE source=%s AND ts<... 无前导索引
   会全表扫（现有 idx_{t}_symbol_ts 是 symbol 前导——A 审 P1）。

@@ -1978,12 +1978,11 @@ def data_gap_reconcile():
 def bar_retention_sweep(self):
     """bar 表滚动保留清道夫（批 158）——日轮 04:37 低峰（app.py beat）。
 
-    规则（方案批158 v2）：
+    规则（方案批158，2026-10-31 修订）：
     - 逐 sync_config 行：retention_days 非 NULL ⇒ 按该行 provider 精确裁其共写 bar 表
-      （DELETE WHERE source=<provider> AND ts < now()@utc - N days）——NULL 行不参与
-      （否决票语义在「表级任一共写档 NULL ⇒ 整表跳过」判定里实现）。
-    - NULL 否决票：该表全部共写档中任一 retention_days IS NULL ⇒ 整表跳过（warning）——
-      宁可不裁也不错裁全史档（例：bar_1min 共写 astock_minute=NULL ⇒ 首夜跳过）。
+      （DELETE WHERE source=<provider> AND ts < now() - N days）。
+    - NULL 的语义=该档自己的行不裁（共写表内按 source 隔离，互不可见——无表级否决层，
+      旧 veto 设计 2026-10-31 删除：它锁死共写表且保护的误裁在 source 匹配下不可能发生）。
     - 分批 DELETE（ctid 子查询 5 万/批+逐批 commit——D18 写路径规范）；单档单轮上限
       500 万行（防长事务锁表），超限本轮止（下轮续）。
     - 落 sync_log：sync_id='bar_retention_sweep'，status='pruned'（新词，删除量在 error
@@ -2001,25 +2000,21 @@ def bar_retention_sweep(self):
         logger.info("bar_retention_sweep: %s", msg)
 
     with get_conn() as conn:
+        # NULL 档的自然语义=「自己的行不裁」——DELETE 谓词按 source 精确匹配（批 158 设计），
+        # 共写表内各档互不可见，无需（也不应有）表级否决层：2026-10-31 复盘，veto 层保护的
+        # 「NULL 档数据被误裁」在 source 匹配下物理不可能发生，属过度保守双保险——
+        # 它的副作用（bar_1min 被 astock_minute 的 NULL 锁死=结构性永不裁）比假想风险更有害。
         rows = conn.execute(
             "SELECT s.id, s.pg_table, s.provider, s.retention_days FROM sync_config s "
             "WHERE s.retention_days IS NOT NULL AND s.pg_table LIKE 'bar_%' "
             "ORDER BY s.id").fetchall()
-        # NULL 否决票：按表聚合共写档
         by_table: dict[str, list] = {}
         for r in rows:
             by_table.setdefault(r[1], []).append(r)
-        vetoed = conn.execute(
-            "SELECT DISTINCT pg_table FROM sync_config "
-            "WHERE pg_table LIKE 'bar_%' AND retention_days IS NULL").fetchall()
-        veto_tables = {v[0] for v in vetoed}
         import re as _re
         _TBL_OK = _re.compile(r"^bar_[0-9a-z_]+$")   # 盲审 P2：pg_table 是 DB 值直拼 SQL——白名单封死
         total_deleted = 0
         for tbl, entries in sorted(by_table.items()):
-            if tbl in veto_tables:
-                _note(f"表 {tbl} 跳过（存在 retention_days=NULL 共写档——否决票）")
-                continue
             if not _TBL_OK.match(tbl):
                 _note(f"表 {tbl} 跳过（表名不符 bar_* 白名单）")
                 continue
