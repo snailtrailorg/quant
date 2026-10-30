@@ -987,7 +987,9 @@ def run_security_scan(today: date | None = None) -> dict:
             # 台账 pip/rpm 域（SBOM 顺带产出——grype 链 ok 才有）
             # 批 155：pip 域行经 grype ledger 入账（同传 judged）
             _dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
-            _gm = {r["name"]: (r.get("latest"), r.get("managed_by"), r.get("judge_class"), r.get("judge_why")) for r in _dh_rows}
+            # 批 156 修：键 norm 化——rpm 名下划线/大小写（libcom_err/perl-Net-SSLeay）经
+            # _norm_key 转连字符小写后才能命中（昨日 69 行差集的根因=原名键 vs norm 查表失配）
+            _gm = {_norm_key(r["name"]): (r.get("latest"), r.get("managed_by"), r.get("judge_class"), r.get("judge_why")) for r in _dh_rows}
             for _lr in (vulns.get("ledger") or []):
                 _nm = _norm_key(_lr[1]) if len(_lr) > 1 and _lr[1] else None
                 if _nm and _nm not in _gm:
@@ -1021,7 +1023,7 @@ def run_security_scan(today: date | None = None) -> dict:
             if k not in ("pip", "status", "dep_audit_at", "outdated_error") and isinstance(v, str) and v
         ]
         dh_rows = ((parts.get("components") or {}).get("dep_health") or {}).get("rows") or []
-        judged_map = {r["name"]: (r.get("latest"), r.get("managed_by"),
+        judged_map = {_norm_key(r["name"]): (r.get("latest"), r.get("managed_by"),
                        r.get("judge_class"), r.get("judge_why"))
                       for r in dh_rows}
         import datetime as _dt3
