@@ -35,9 +35,12 @@ def upgrade() -> None:
     # 步4盲审（B-P1-3）：autocommit_block 会先提交挂起事务——CONCURRENTLY 若失败，重跑须
     # 幂等。条件加列 + UPDATE 带 IS NULL 守卫（重跑不覆盖已改值）。
     bind = op.get_bind()
-    has_col = bind.execute(
+    # prod 教训（2026-10-30 首上产炸点）：SQLAlchemy 2.x 的 bind.execute 不收裸字符串
+    # （ObjectNotExecutableError）——须 text() 包裹（0060 的 op.execute 形态不受影响）。
+    from sqlalchemy import text as _text
+    has_col = bind.execute(_text(
         "SELECT 1 FROM information_schema.columns "
-        "WHERE table_name='sync_config' AND column_name='retention_days'").fetchone()
+        "WHERE table_name='sync_config' AND column_name='retention_days'")).fetchone()
     if not has_col:
         op.add_column("sync_config", sa.Column("retention_days", sa.Integer(), nullable=True))
     for sid, days in _DEFAULTS:
