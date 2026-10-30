@@ -66,7 +66,7 @@
 - **PostgreSQL 18 + pgvector + Valkey**（Redis 协议兼容）。弃 TimescaleDB / 重型向量库。
 - **vnpy 核心 + vnpy_xtp**（交易+行情接口）为第三方成熟组件，不重复造轮；**回测自建 BacktestEngine**（纯 Python，不依赖 vnpy CtaBacktestingEngine）。
 - **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade，产上经 `quant-alembic-wrapper` 随 Ansible 管道执行），不手动 ALTER。`init-schema.sql` 保留作手工运维参考。**运行时不再 `CREATE TABLE IF NOT EXISTS`**（2026-08-13 清零，原 30 处全部入迁移 0027；`bar_{freq}` 8 表 2026-09-03 由迁移 0064 补齐）；`db.py` 的 `verify_schema()` 启动时校验表存在并告警，`ensure_table()` 仅 `to_regclass` 校验存在+告警（`_verified_tables` 缓存），不建表。
-- **策略实盘化架构（终态，2026-09-01 批 6b 收官）**：每任务独立子进程（systemd `quant-live-task@{tid}`）+ XTPAdapter 下单；**hub 模式唯一**（worker=TD-only+消费 `hub:bars:*` 流，暖机=PG bar_1min **7 天**（2026-10-30 用户裁定，原 30 天——随批 158 保留窗对齐）+流回放 240 根双源；EVENT_LOG 注册→`[gw]` TD 会话日志可见）；direct 已退役——`md_mode=direct → EX_CONFIG(78)` fail-fast，回滚仅整版本 rollback。bar_shadow 冻结（历史表）。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
+- **策略实盘化架构（终态，2026-09-01 批 6b 收官）**：每任务独立子进程（systemd `quant-live-task@{tid}`）+ XTPAdapter 下单；**hub 模式唯一**（worker=TD-only+消费 `hub:bars:*` 流，暖机=PG bar_1min **1 天**（2026-10-31 用户裁定，30 天→7 天→1 天随批 158 保留窗对齐）+流回放 240 根双源；EVENT_LOG 注册→`[gw]` TD 会话日志可见）；direct 已退役——`md_mode=direct → EX_CONFIG(78)` fail-fast，回滚仅整版本 rollback。bar_shadow 冻结（历史表）。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
 - **Web 前端**：Vue3 + Element Plus + 设计令牌体系（`web/src/styles/tokens.css`，D24-web设计系统全文：四令牌四色相/暗色变体/六级字号/EP 整组 ramp）。**前端已纳入 Ansible 管道**（web 工件化批 2026-08-30：控制机 build→dist 同步到 `releases/<id>/web/`→`quant-flip-web` wrapper 原子切换→rollback/GC 配套），`web` 符号链接与 `server` 同层同版。菜单 v2.1 四组 16 项（策略研究/实盘交易/风险控制/系统管理）。旧路由 21 条全 redirect 到新壳。
 
 ### 协作约束

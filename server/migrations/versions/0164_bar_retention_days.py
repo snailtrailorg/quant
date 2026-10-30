@@ -25,11 +25,11 @@ _IDX = [("bar_1min", "idx_bar_1min_ts", "ts"),
         ("bar_15min", "idx_bar_15min_ts", "ts"),
         ("bar_1h", "idx_bar_1h_ts", "ts")]
 
-# 步4盲审 P0-1（A）：okx 盘中三档共写同三张 bar 表——只配 binance 会让 NULL 否决票命中
-# 全部目标表，sweep 结构性空转（每轮零删除）。okx 与 binance 同裁定值（启用即生效）。
-# astock_minute 仍 NULL ⇒ bar_1min 持续否决（预期内，方案 v3 已记录启用前置）。
-_DEFAULTS = [("binance_perp_1min", 7), ("binance_perp_15min", 60), ("binance_perp_hourly", 180),
-             ("okx_perp_1min", 7), ("okx_perp_15min", 60), ("okx_perp_hourly", 180)]
+# 步4盲审 P0-1（A）：okx 盘中三档共写同三张 bar 表——须同配（NULL 档自己的行不裁，但共写表各档独立生效）。
+# 2026-10-31 用户裁定：1min 缺省 7→1 天（磁盘 94% 容量压力——1min 是耗盘主力，滚动只留当日）。
+# 15min/60 天、1h/180 天不变。astock_minute=NULL（自己的行不裁）。
+_DEFAULTS = [("binance_perp_1min", 1), ("binance_perp_15min", 60), ("binance_perp_hourly", 180),
+             ("okx_perp_1min", 1), ("okx_perp_15min", 60), ("okx_perp_hourly", 180)]
 
 
 def upgrade() -> None:
