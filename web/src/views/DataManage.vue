@@ -172,6 +172,10 @@
              该键 = 后端 handler 是否真消费 backfill_from（sync_config 列，迁移 0131）。
              旧门两个方向都错：trade_cal(sync_mode=full) 该有入口却没有（prod 回补链第一环卡死）；
              pool_data(incremental) 不该有却渲染了假按钮（点了只跑常规增量、还报成功）。 -->
+        <el-form-item label="保留天数">
+          <el-input-number v-model="cronForm.retention_days" :min="1" :max="3650" style="width: 100%" />
+          <div class="cron-raw-hint">滚动保留窗（天）：清道夫日轮按此裁旧数据；空=不裁。改小后可手动触发清道夫即刻生效</div>
+        </el-form-item>
         <template v-if="cronForm.supports_backfill">
           <el-divider style="margin: var(--sp-1) 0 var(--sp-3)" />
           <el-form-item :label="t('dataManage.backfillFrom')">
@@ -420,7 +424,7 @@ onUnmounted(stopPoll)
 const cronDialog = ref(false)
 const cronForm = ref({ id: '', name: '', sync_mode: '', schedule: '', trade_day_filter: 'none', date: '',
                        freq: 'scheduled', time: '09:00', days: [], minutes: 15,
-                       supports_backfill: false, retention: null })
+                       supports_backfill: false, retention: null, retention_days: null })
 const cronRow = computed(() => configs.value.find(c => c.id === cronForm.value.id))
 const cronTemplates = [
   { label: t('dataManage.tplDaily'), expr: '30 16 * * 1-5' },
@@ -449,7 +453,9 @@ const openCron = (row) => {
                      // 批 99：能力真源（后端 /sync/config 返回）——门与日期下限都由它决定
                      // 批 108·步 3：下限列由 start_floor 换为 retention（一列三义已拆正名）
                      supports_backfill: row.supports_backfill === true,
-                     retention: row.retention || null }
+                     retention: row.retention || null,
+                     // 批 158：滚动保留窗（天，null=不裁；与 retention 起点地板正交）
+                     retention_days: row.retention_days ?? null }
   cronDialog.value = true
 }
 // 批 99／批 108·步 3：回补日期下限＝`retention`（保留策略下界，YYYYMMDD）。早于它的请求
@@ -465,7 +471,8 @@ const backfillDisabledDate = (d) => floorDisabled(d.getTime(), cronForm.value.re
 const saveCron = async () => {
   try {
     // 批27-16：透传原 enabled——编辑停用行的 cron 不再被强制启用
-    await api.post(`/sync/config/${cronForm.value.id}`, { schedule: cronForm.value.schedule, enabled: cronForm.value.enabled, trade_day_filter: cronForm.value.trade_day_filter })
+    // 批 158：retention_days 随存（滚动保留窗——清道夫每轮实时读，改小即清多余数据）
+    await api.post(`/sync/config/${cronForm.value.id}`, { schedule: cronForm.value.schedule, enabled: cronForm.value.enabled, trade_day_filter: cronForm.value.trade_day_filter, retention_days: cronForm.value.retention_days ?? null })
     cronDialog.value = false; ElMessage.success(t('common.success')); load()
   } catch { ElMessage.error(t('common.failed')) }
 }

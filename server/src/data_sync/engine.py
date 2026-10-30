@@ -231,7 +231,7 @@ def _mark_running(sync_id: str, running: bool):
 
 def _get_config(sync_id: str) -> dict:
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider, retention FROM sync_config WHERE id=%s", (sync_id,))
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider, retention, retention_days FROM sync_config WHERE id=%s", (sync_id,))
         row = cur.fetchone()
         if not row:
             return {}
@@ -243,7 +243,9 @@ def _get_config(sync_id: str) -> dict:
                 # `start_floor` 已拆 ⇒ 本键是「窗口下界三地板」之一（设计 §5.1）；**引擎真读**
                 # （`_window_floors`），不是装饰列。
                 # 批 129：data_type 列已随 0158 contract DROP（批 127 Z4 起零消费）。
-                "retention": row[11]}
+                "retention": row[11],
+                # 批 158：滚动保留窗（天）——NULL=否决票（共写档任一 NULL ⇒ 该表整体不裁）。
+                "retention_days": row[12]}
 
 
 def _update_sync_state(sync_id: str, last_date: str | None, count: int, status: str = "idle"):

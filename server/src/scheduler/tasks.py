@@ -1970,3 +1970,77 @@ def data_gap_reconcile():
     """
     from src.data_sync.engine import _reconcile_symbols
     return {"reconcile": _reconcile_symbols()}
+
+
+@app.task(name="src.scheduler.tasks.bar_retention_sweep",
+          bind=True, soft_time_limit=3600, time_limit=4200)   # 批 158：显式时限（批 110 清单同登记）
+def bar_retention_sweep(self):
+    """bar 表滚动保留清道夫（批 158）——日轮 04:37 低峰（app.py beat）。
+
+    规则（方案批158 v2）：
+    - 逐 sync_config 行：retention_days 非 NULL ⇒ 按该行 provider 精确裁其共写 bar 表
+      （DELETE WHERE source=<provider> AND ts < now()@utc - N days）——NULL 行不参与
+      （否决票语义在「表级任一共写档 NULL ⇒ 整表跳过」判定里实现）。
+    - NULL 否决票：该表全部共写档中任一 retention_days IS NULL ⇒ 整表跳过（warning）——
+      宁可不裁也不错裁全史档（例：bar_1min 共写 astock_minute=NULL ⇒ 首夜跳过）。
+    - 分批 DELETE（ctid 子查询 5 万/批+逐批 commit——D18 写路径规范）；单档单轮上限
+      500 万行（防长事务锁表），超限本轮止（下轮续）。
+    - 落 sync_log：sync_id='bar_retention_sweep'，status='pruned'（新词，删除量在 error
+      字段注记——不复用 rows_saved 入库语义）。
+    - 每轮实时读配置（窗口收紧即清：Web 改小后下轮/手动触发即刻按新窗多删）。
+    """
+    from src.data_platform.db import get_conn
+
+    _BATCH = 50_000
+    _CAP = 5_000_000
+    _log_lines: list[str] = []
+
+    def _note(msg):
+        _log_lines.append(msg)
+        logger.info("bar_retention_sweep: %s", msg)
+
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT s.id, s.pg_table, s.provider, s.retention_days FROM sync_config s "
+            "WHERE s.retention_days IS NOT NULL AND s.pg_table LIKE 'bar_%' "
+            "ORDER BY s.id").fetchall()
+        # NULL 否决票：按表聚合共写档
+        by_table: dict[str, list] = {}
+        for r in rows:
+            by_table.setdefault(r[1], []).append(r)
+        vetoed = conn.execute(
+            "SELECT DISTINCT pg_table FROM sync_config "
+            "WHERE pg_table LIKE 'bar_%' AND retention_days IS NULL").fetchall()
+        veto_tables = {v[0] for v in vetoed}
+        total_deleted = 0
+        for tbl, entries in sorted(by_table.items()):
+            if tbl in veto_tables:
+                _note(f"表 {tbl} 跳过（存在 retention_days=NULL 共写档——否决票）")
+                continue
+            for sid, _tbl, provider, days in entries:
+                cutoff = f"(now() AT TIME ZONE 'utc' - interval '{int(days)} days')"
+                deleted = 0
+                while deleted < _CAP:
+                    cur = conn.execute(
+                        f"DELETE FROM {tbl} WHERE ctid IN ("
+                        f"  SELECT ctid FROM {tbl} WHERE source=%s AND ts < {cutoff} "
+                        f"  LIMIT {_BATCH} FOR UPDATE SKIP LOCKED)", (provider,))
+                    n = cur.rowcount if cur.rowcount is not None else 0
+                    conn.commit()
+                    if n == 0:
+                        break
+                    deleted += n
+                    if deleted >= _CAP:
+                        _note(f"{sid} 达单轮上限 {_CAP}（剩余下轮续）")
+                        break
+                if deleted:
+                    total_deleted += deleted
+                    _note(f"{sid}({tbl},source={provider}) 裁 {deleted} 行（<{int(days)} 天）")
+        # 落 sync_log（status=pruned；删除量注记进 error 字段——语义独立于 rows_saved）
+        conn.execute(
+            "INSERT INTO sync_log (sync_id, mode, start_date, end_date, rows_pulled, rows_saved, "
+            "duration_ms, status, error, ts) VALUES (%s,%s,NULL,NULL,0,0,%s,%s,%s,now())",
+            ("bar_retention_sweep", "sweep", 0, "pruned",
+             "; ".join(_log_lines)[:500] or "无可裁项"))
+        conn.commit()
+    return {"status": "pruned", "deleted": total_deleted, "notes": _log_lines[:20]}

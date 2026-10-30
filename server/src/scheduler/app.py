@@ -230,6 +230,12 @@ app.conf.update(
         # 该 beat 300s 软超时——异步执行机制见 tasks._SYNC_ASYNC_DISPATCH）。至此任务书 83b
         # 点 3「四条硬编码 beat 收编」四条全部落地（另两条见 0118）。
         # 腾讯分钟攒已退役（2026-09-23：自攒历史分钟线退役，将来买 Tushare stk_mins 正式数据）
+        # 批 158：bar 表滚动保留清道夫——日轮 04:37 低峰（数据队列；任务内时限 3600/4200 显式）
+        "bar-retention-sweep": {
+            "task": "src.scheduler.tasks.bar_retention_sweep",
+            "schedule": crontab(hour=4, minute=37),
+            "options": {"queue": "data", "expires": 3600},
+        },
         "health-monitor": {
             "task": "src.scheduler.tasks.health_monitor_check",
             "schedule": 30.0,

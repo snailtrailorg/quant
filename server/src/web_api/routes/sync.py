@@ -42,7 +42,7 @@ def _validate_backfill(backfill_from: str | None) -> None:
 @router.get("/api/sync/config")
 def list_sync_config(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description, provider, supports_backfill, retention FROM sync_config ORDER BY id")
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, trade_day_filter, enabled, last_sync_date, last_sync_ts, last_sync_count, last_status, description, provider, supports_backfill, retention, retention_days FROM sync_config ORDER BY id")
         rows = cur.fetchall()
         return [{"id": r[0], "name": r[1], "tushare_api": r[2], "pg_table": r[3], "sync_mode": r[4], "schedule": r[5], "trade_day_filter": r[6], "enabled": r[7], "last_sync_date": r[8], "last_sync_ts": str(r[9]) if r[9] else None, "last_sync_count": r[10], "last_status": r[11], "description": r[12], "provider": r[13],
             # 批 99：能力真源（项层）——supports_backfill=该 handler 是否消费 backfill_from。
@@ -52,7 +52,9 @@ def list_sync_config(payload: dict = Depends(require_perm("read"))):
             # 本版起**零读点**（API 是那唯一的读点）。
             # 批 129：data_type 列已随 0158 contract DROP（批 127 Z4 起零读点）。
             "supports_backfill": bool(r[14]),
-            "retention": r[15].strftime("%Y%m%d") if r[15] else None}
+            "retention": r[15].strftime("%Y%m%d") if r[15] else None,
+            # 批 158：滚动保留窗（天，NULL=不裁；与 retention 起点地板正交）
+            "retention_days": r[16]}
             for r in rows]
 
 
@@ -72,7 +74,7 @@ def _validate_provider(sid: str, provider: str):
 @router.post("/api/sync/config/{sid}")
 def update_sync_config_api(sid: str, body: dict, payload: dict = Depends(require_perm("data_sync"))):
     """部分更新同步配置（26 号收尾批 C：条件 SET，旧调用不带 provider 不覆写 NULL；provider 白名单）。"""
-    allowed = {"schedule", "enabled", "trade_day_filter", "provider"}
+    allowed = {"schedule", "enabled", "trade_day_filter", "provider", "retention_days"}
     updates = {k: body[k] for k in allowed if k in body}
     if not updates:
         return {"ok": True}
@@ -91,6 +93,12 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
     """异步触发类型级同步：提交 Celery 后台任务，立即返回 task_id（不阻塞 HTTP）。"""
     _validate_sid(sid)            # D-1 配套：入口 4xx 预检（此前任意 sid 200，校验延后 worker）
     _validate_backfill(backfill_from)   # D-2：非法日期此前静默成功（abc 落 start 列）
+    if sid == "bar_retention_sweep":
+        # 批 158：清道夫手动通道（窗口收紧即清——Web 改小后即刻触发按新窗多删）
+        from src.scheduler.tasks import bar_retention_sweep
+        task = bar_retention_sweep.delay()
+        audit_log(payload["username"], "trigger_sync", sid)
+        return {"status": "submitted", "task_id": task.id}
     from src.scheduler.tasks import _CRYPTO_INTRADAY_SIDS, sync_via_celery, sync_via_celery_crypto
     # 批 157：crypto 盘中档走宽时限变体（时限注册级约束 ⇒ 变体任务承接；sid 集单源 tasks.py）
     if sid in _CRYPTO_INTRADAY_SIDS:
