@@ -1,6 +1,6 @@
-# 批 157 · crypto 盘中档时限根治（v2 · 双盲审 A/B 全处置后重写）
+# 批 157 · crypto 盘中档时限根治（v3 · 实施后终态）
 
-> 立项 2026-10-30；v2 同日（A/B 双盲审：157 计 P0×3+P1×4+P2×2，两审独立撞 soft 被吞/回补接力/心跳误报三条，全处置——同判与裁定见文末「盲审处置」）。
+> 立项 2026-10-30，**同日实施完成**（commits a79a7bd 步1 / f1da34a 步2-5，dev 全链 503+ 绿）。v2 双盲审 A/B 全处置记录见文末（历史保留）。
 > 关联：批 110（时限显式声明）· 批 144/145（僵尸误报）· 批 101/101b/105/116（crypto bar 链与游标契约）。
 
 ## 一、病根（实证三条）
@@ -68,7 +68,13 @@ except Exception as e:
 2. dev 仿真：mock 源限速跑 3 段窗，断言两任务接力追平+游标中间态落库。
 3. prod（上产后）：手动触发 binance_perp_hourly——journal 出现 SoftTimeLimitExceeded **早于** hard（时限开火证明）；连续触发至 success；okx 三档回归绿。
 
-## 盲审处置对照
+## 实施终态（2026-10-30，v3）
+
+- **步1（a79a7bd）**：soft 窄捕获直抛——首轮+二轮补拉两处（engine.py :1390/:1410 区），3 新测（test_batch157_softlimit_reraise）。
+- **步2-5（f1da34a）**：区间分段（_segment_window 整月+残日 / _SEGMENT_BUDGET=1800s / 游标=reached 段边界接力 / freeze 档整窗不切 / progress 只发首段）；sync_via_celery_crypto 变体（5400/6000，函数体抽 _sync_via_celery_body）；_CRYPTO_INTRADAY_SIDS 单源（web trigger + scheduler dispatch 共用）六档入 _SYNC_ASYNC_DISPATCH（expires=5400）；progress 端点锁判活（running+锁键不存在 ⇒ stale + stale_reason）。守门测试（dispatch 键集 / progress per-symbol）随批更新。
+- 上产验证点：手动触发 binance_perp_hourly 全窗——journal 出现 SoftTimeLimitExceeded **早于** hard；连续触发至 success。
+
+## 盲审处置对照（v2 历史）
 
 | 发现 | 级 | 处置 |
 |---|---|---|
