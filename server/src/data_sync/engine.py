@@ -1420,8 +1420,14 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
         segments: list[tuple[date, date]] = [(start, end)]
         if not freeze_on_partial and (end - start).days >= 2:
             segments = _segment_window(start, end)
-        seg_budget_left: float | None = _SEGMENT_BUDGET if len(segments) > 1 else None
+        # 步4盲审（A-P1-3/B 同源）：backfill 模式**禁用段预算**——回补不推游标，预算静默截断会让
+        # 多段回补永远从段 0 重扫（旧版超时是 loud error，截断比它更难察觉）。回补退回软时限兜底。
+        _budget_on = len(segments) > 1 and not backfill_from
+        seg_budget_left: float | None = _SEGMENT_BUDGET if _budget_on else None
         _seg_t0 = datetime.now(timezone.utc)
+        # 步4盲审 P0（A/B 同撞）：已扫末段边界——预算中断后二轮补拉若用全窗 end，单个失败
+        # 标的补拉成功即把 reached 推到 end ⇒ 游标越过未扫段=永久洞。补拉/游标全部钳到已扫段。
+        _scanned_hi, _scanned_hi_s = end, end_s
         for _seg_idx, (_seg_lo, _seg_hi) in enumerate(segments):
             if seg_budget_left is not None and _seg_idx > 0 and seg_budget_left <= 0:
                 break   # 本任务段预算尽：已扫段照走（reached/failed 已记账），余段下轮增量接力
@@ -1441,6 +1447,7 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
                 if progress_cb and _seg_idx == 0:
                     # 批 157：progress 只发首段（多段重复枚举=进度倒跳；段级进度走 segments_done/total）
                     progress_cb(i, total, sym)
+            _scanned_hi, _scanned_hi_s = _seg_hi, _seg_hi_s   # 段完整扫过（G-S1：failed 照推）
             if seg_budget_left is not None:
                 seg_budget_left -= (datetime.now(timezone.utc) - _seg_t0).total_seconds()
                 _seg_t0 = datetime.now(timezone.utc)
@@ -1450,7 +1457,7 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
         if failed:
             for sym in list(failed):
                 try:
-                    _pull_one(sym, end, end_s)
+                    _pull_one(sym, _scanned_hi, _scanned_hi_s)   # 盲审 P0：钳已扫段上界，防游标越窗
                     failed.pop(sym, None)
                 except Exception as e:
                     if (_CelerySoftTimeLimit is not None

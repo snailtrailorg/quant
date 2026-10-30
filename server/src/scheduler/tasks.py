@@ -1177,7 +1177,8 @@ def sync_via_celery(self, sync_id: str, backfill_from: str | None = None, track:
 def sync_via_celery_crypto(self, sync_id: str, backfill_from: str | None = None, track: bool = True):
     """crypto 盘中档专属变体（批 157）——celery 时限是任务注册级不可按消息分档，
     故宽时限（5400/6000=2.6 段预算+收尾余量）独立注册；分段使正常任务永不触及时限，
-    本值是保命闸不是预算。sid 白名单路由在 web_api/routes/sync.py（trigger 处）。"""
+    本值是保命闸不是预算。sid 白名单路由两处：web trigger（sync.py）与 scheduler
+    dispatch（本文件 _SYNC_ASYNC_DISPATCH 派发点）。"""
     return _sync_via_celery_body(self, sync_id, backfill_from, track)
 
 
@@ -2012,30 +2013,44 @@ def bar_retention_sweep(self):
             "SELECT DISTINCT pg_table FROM sync_config "
             "WHERE pg_table LIKE 'bar_%' AND retention_days IS NULL").fetchall()
         veto_tables = {v[0] for v in vetoed}
+        import re as _re
+        _TBL_OK = _re.compile(r"^bar_[0-9a-z_]+$")   # 盲审 P2：pg_table 是 DB 值直拼 SQL——白名单封死
         total_deleted = 0
         for tbl, entries in sorted(by_table.items()):
             if tbl in veto_tables:
                 _note(f"表 {tbl} 跳过（存在 retention_days=NULL 共写档——否决票）")
                 continue
-            for sid, _tbl, provider, days in entries:
-                cutoff = f"(now() AT TIME ZONE 'utc' - interval '{int(days)} days')"
-                deleted = 0
-                while deleted < _CAP:
-                    cur = conn.execute(
-                        f"DELETE FROM {tbl} WHERE ctid IN ("
-                        f"  SELECT ctid FROM {tbl} WHERE source=%s AND ts < {cutoff} "
-                        f"  LIMIT {_BATCH} FOR UPDATE SKIP LOCKED)", (provider,))
-                    n = cur.rowcount if cur.rowcount is not None else 0
-                    conn.commit()
-                    if n == 0:
-                        break
-                    deleted += n
-                    if deleted >= _CAP:
-                        _note(f"{sid} 达单轮上限 {_CAP}（剩余下轮续）")
-                        break
-                if deleted:
-                    total_deleted += deleted
-                    _note(f"{sid}({tbl},source={provider}) 裁 {deleted} 行（<{int(days)} 天）")
+            if not _TBL_OK.match(tbl):
+                _note(f"表 {tbl} 跳过（表名不符 bar_* 白名单）")
+                continue
+            # 盲审 P1-2：逐表容错——单表异常不炸整轮（pruned 日志照落，其余表继续）
+            try:
+                for sid, _tbl, provider, days in entries:
+                    if not isinstance(days, int) or days < 1:   # 盲审 P1：防御坏值（API 校验是第一道闸）
+                        _note(f"{sid} 跳过（retention_days 非法：{days!r}）")
+                        continue
+                    # 盲审 P2-6：timestamptz 算术（天然 UTC）——AT TIME ZONE 'utc' 产 naive 会随会话时区漂移
+                    cutoff = f"now() - interval '{int(days)} days'"
+                    deleted = 0
+                    while deleted < _CAP:
+                        cur = conn.execute(
+                            f"DELETE FROM {tbl} WHERE ctid IN ("
+                            f"  SELECT ctid FROM {tbl} WHERE source=%s AND ts < {cutoff} "
+                            f"  LIMIT {_BATCH} FOR UPDATE SKIP LOCKED)", (provider,))
+                        n = cur.rowcount if cur.rowcount is not None else 0
+                        conn.commit()
+                        if n == 0:
+                            break
+                        deleted += n
+                        if deleted >= _CAP:
+                            _note(f"{sid} 达单轮上限 {_CAP}（剩余下轮续）")
+                            break
+                    if deleted:
+                        total_deleted += deleted
+                        _note(f"{sid}({tbl},source={provider}) 裁 {deleted} 行（<{int(days)} 天）")
+            except Exception as _tbl_e:
+                conn.rollback()
+                _note(f"表 {tbl} 异常跳过：{str(_tbl_e)[:120]}")
         # 落 sync_log（status=pruned；删除量注记进 error 字段——语义独立于 rows_saved）
         conn.execute(
             "INSERT INTO sync_log (sync_id, mode, start_date, end_date, rows_pulled, rows_saved, "

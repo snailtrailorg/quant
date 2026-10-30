@@ -130,3 +130,54 @@ def test_normal_failure_still_recorded(env, monkeypatch):
              "last_sync_date": None, "provider": "binance"}, "20261029")
     assert any("BBBUSDT" in f for f in out.get("failed_dates", [])), out
     assert out.get("pulled", 0) > 0
+
+
+def test_budget_break_cursor_capped_to_scanned(monkeypatch):
+    """步4盲审 P0（A/B 同撞）回归钉：预算断点后二轮补拉钳已扫段——游标不得越窗。
+
+    场景：跨月两段窗（09-27~10-28 切 2 段）；首段末标的抛业务失败；段预算 mock 为 0
+    （首段扫完即 break）；二轮补拉若用全窗 end 会把 reached 推到 10-28 ⇒ 游标越过
+    未扫的 10 月段。修复后：补拉窗钳到已扫末段（09-30），cursor_upto<=0930。
+    """
+    from datetime import date as _d
+    import pandas as pd
+    import src.data_sync.engine as E
+    import src.data_platform.db as DB
+
+    monkeypatch.setattr(E, "_CelerySoftTimeLimit", None, raising=False)
+    monkeypatch.setattr(E, "_crypto_end", lambda end_date, adapter, kind: _d(2026, 10, 28))
+    monkeypatch.setattr(E, "_crypto_base_start",
+                        lambda cfg, bf, adapter, kind: (_d(2026, 9, 27), []))
+    monkeypatch.setattr(E, "_sm_upsert_crypto", lambda adapter, syms: None)
+    monkeypatch.setattr(DB, "save_bars", lambda freq, rows: 0)
+
+    class _Boom(Exception):
+        pass
+
+    class _Ad4:
+        provider = "binance"; venue = "BINANCE"
+        available_range = staticmethod(lambda kind: ("2019-12-31", None))
+        publish_lag = staticmethod(lambda kind: 1)
+        list_symbols = staticmethod(lambda: ["AAAUSDT", "ZZZUSDT"])
+        fetch_calls = []
+        def fetch_supply(self, kind, sub_kind, symbol="", start="", end="", freq=""):
+            _Ad4.fetch_calls.append((symbol, start, end))
+            if symbol == "AAAUSDT":
+                raise _Boom("biz")      # 首段失败 ⇒ 进二轮补拉
+            return pd.DataFrame([{"ts": pd.Timestamp("2026-09-30", tz="UTC"), "symbol": symbol}])
+        to_bar_rows = staticmethod(lambda df, freq: [
+            (s, None, r.ts, None, None, None, None, None, None, None, None, None)
+            for s, r in zip(df["symbol"], df.itertuples())])
+
+    monkeypatch.setattr(E, "_get_supply_adapter", lambda cfg: _Ad4())
+    # 段预算恒 0：首段（段0）扫完、段边界检查时 break（_seg_idx=1 时 seg_budget_left<=0）
+    monkeypatch.setattr(E, "_SEGMENT_BUDGET", 0.0)
+    h = E._make_crypto_bar_handler("binance_perp_hourly", "bar_minute", "perp", "1h",
+                                   label="binance", enum_hint="test")
+    out = h({"id": "binance_perp_hourly", "mode": "incremental", "retention": None,
+             "last_sync_date": None, "provider": "binance"}, "20261029")
+    # 游标不得越过已扫末段（2026-09-30）——未扫的 10 月段留给下轮
+    assert out["cursor_upto"] <= "20260930", out
+    # 二轮补拉的窗口上界必须=已扫末段 0930（不是全窗 1028）
+    retry_calls = [c for c in _Ad4.fetch_calls if c[0] == "AAAUSDT"]
+    assert retry_calls and all(c[2] == "20260930" for c in retry_calls), _Ad4.fetch_calls

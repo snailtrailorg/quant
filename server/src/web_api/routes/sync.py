@@ -75,6 +75,13 @@ def _validate_provider(sid: str, provider: str):
 def update_sync_config_api(sid: str, body: dict, payload: dict = Depends(require_perm("data_sync"))):
     """部分更新同步配置（26 号收尾批 C：条件 SET，旧调用不带 provider 不覆写 NULL；provider 白名单）。"""
     allowed = {"schedule", "enabled", "trade_day_filter", "provider", "retention_days"}
+    # 盲审 P1（A/B 同撞）：retention_days 入口闸——负数/0 会把 cutoff 推到未来=该 source 全量删除
+    # 的量产按钮；字符串则 psycopg 500。钳 1..3650（与前端 el-input-number 同界）。
+    if "retention_days" in body and body["retention_days"] is not None:
+        v = body["retention_days"]
+        if not isinstance(v, int) or not (1 <= v <= 3650):
+            raise ApiError(400, "SYNC_RETENTION_DAYS_INVALID",
+                           f"retention_days 须为 1..3650 的整数（天）：{v!r}")
     updates = {k: body[k] for k in allowed if k in body}
     if not updates:
         return {"ok": True}
@@ -369,13 +376,15 @@ def get_sync_logs_api(payload: dict = Depends(require_perm("read"))):
         # 纯 SELECT 漏列致「交易日/缺口」两列恒 '-'（盲审 B 实测 115/1446 行有值=日线类）
         cur = conn.execute(
             "SELECT id, sync_id, mode, start_date, end_date, rows_pulled, rows_saved, "
-            "duration_ms, status, ts, expected_days, actual_days, failed_dates "
+            "duration_ms, status, ts, expected_days, actual_days, failed_dates, error "
             "FROM sync_log ORDER BY ts DESC LIMIT 100")
         rows = cur.fetchall()
     return [{"id": r[0], "sync_id": r[1], "mode": r[2],
              "start": str(r[3]) if r[3] else None, "end": str(r[4]) if r[4] else None,
              "rows_pulled": r[5], "rows_saved": r[6], "duration_ms": r[7],
              "status": r[8], "ts": str(r[9]) if r[9] else None,
+             # 批 158 步4盲审（B-P2-7）：pruned 行删除量注记在 error 列——不选出则 Web 看不到删了多少
+             "note": r[13] or "",
              "expected_days": r[10], "actual_days": r[11],
              "failed_dates": r[12] if r[12] else None} for r in rows]
 

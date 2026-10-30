@@ -363,6 +363,17 @@ const startPoll = (row, name, task_id) => {
           ElMessage.warning(t('dataManage.pollTimeout', { name }))
           currentSync.value = null; progress.value = {}; setRowStatus(row.id, 'idle')
         }
+      } else if (p.status === 'stale') {
+        // 批 157 步4盲审（A/B 同撞）：stale=锁已释放但进度键未收尾（任务被杀/中断）——
+        // 不是成功。二次确认（防释锁到写终态的 ms 级瞬态误报）后定性。
+        await new Promise(r => setTimeout(r, 1500))
+        const p2 = await api.get('/sync/trigger/' + row.id + '/progress', { params: { task_id } })
+        if (p2.status !== 'stale') return   // 瞬态：下轮轮询自然走正常分支
+        stopPoll()
+        ElMessage.warning(name + ': ' + (p2.stale_reason || '任务疑似中断（进度残留）——以同步日志为准'))
+        currentSync.value = null; progress.value = {}
+        setRowStatus(row.id, 'idle')
+        await load()
       } else {
         stopPoll()
         notifyResult(row, p, name)

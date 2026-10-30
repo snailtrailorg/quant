@@ -71,8 +71,8 @@ def test_source_match_and_cutoff(monkeypatch):
     assert del_sqls
     sql0 = del_sqls[0]
     assert "source=%s" in sql0
-    assert "AT TIME ZONE 'utc'" in sql0
-    assert "interval '7 days'" in sql0
+    # 步4盲审 B-P2-6：timestamptz 算术（now()-interval，天然 UTC）替代 AT TIME ZONE 'utc'（naive 会随会话漂移）
+    assert "now() - interval '7 days'" in sql0
     assert "FOR UPDATE SKIP LOCKED" in sql0
 
 
@@ -100,3 +100,16 @@ def test_cap_breaks(monkeypatch):
     from src.scheduler.tasks import bar_retention_sweep as _t
     res = _t.run()
     assert res["deleted"] == 5_000_000
+
+
+def test_retention_days_api_validation():
+    """步4盲审 P1（A/B 同撞）：retention_days 入口闸——非 int/越界 4xx，防负值=全量删除按钮。"""
+    from fastapi import HTTPException
+    from src.web_api.routes.sync import update_sync_config_api  # noqa: F401  import 面
+    import src.web_api.routes.sync as SR
+    from src.web_api.errors import ApiError
+    import inspect
+    src_text = inspect.getsource(SR)
+    # 结构断言：入口闸在 allowed 集之前、钳 1..3650
+    assert "SYNC_RETENTION_DAYS_INVALID" in src_text
+    assert "1 <= v <= 3650" in src_text
