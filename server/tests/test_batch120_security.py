@@ -70,7 +70,18 @@ class TestParsers:
         from src.health_monitor.security_collector import _collect_components
         fake = MagicMock(returncode=0, stdout="Flask==3.0.0\n# comment\nrequests == 2.31.0\n"
                                               "-e .\n", stderr="")
-        with patch("subprocess.run", return_value=fake):
+        # 批 157/158 会话发现：批 155 起 _collect_components 内嵌 dep_audit 契约读取（真 Valkey）——
+        # 离线单测被环境缓存时效污染（dev 旧缓存 33h 曾染红本测；契约缺失也是 degraded）。
+        # 桩喂新鲜契约，本测只管 freeze 解析（dep_audit 契约有批155 专项测试覆盖）。
+        import datetime as _dt
+        import json as _json
+        _fresh = _json.dumps({
+            "schema_version": 1,
+            "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        }).encode()
+        with patch("subprocess.run", return_value=fake), \
+             patch("src.quant_common.redis_client.business_redis") as _br:
+            _br.return_value.get.return_value = _fresh
             part = _collect_components()
         assert part["status"] == "ok"
         assert part["pip"] == {"flask": "3.0.0", "requests": "2.31.0"}
