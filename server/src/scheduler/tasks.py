@@ -717,13 +717,67 @@ def health_monitor_check():
     return run_check()
 
 
+def _security_tmp_sweep() -> list[str]:
+    import os
+    """扫描类临时残件清理（2026-10-31 用户裁定合并实施——三类一次性写不回收的病同源）。
+
+    ① grype-db 孤儿 download* 目录：db update 被腰斩（worker 重启/盘满）后 3.2G 残留不自愈
+       （10-31 实证）；mtime>24h 护栏——当日正在写的活下载不误删。
+    ② /tmp/quant-sbom.json：syft 扫描产物（30M/次）写后不回收。
+    ③ /tmp/quant-req-*.lock 旧锁：部署/依赖审计每次新建旧的不清（曾堆积 1.9 万个）——
+       mtime>7d（活跃锁是当前 release 的，<24h 恒新，安全）。
+    失败容错：清理是卫生不是关键路径——单项 OSError 记 warning 继续。
+    """
+    import shutil
+    import time as _time
+    from pathlib import Path as _Path
+
+    cleaned: list[str] = []
+    now = _time.time()
+    _tmp = _Path(os.environ.get("QUANT_TMP_DIR", "/tmp"))   # env 注入=测试面
+    # ① grype 孤儿
+    grype_dir = _Path(os.environ.get("QUANT_GRYPE_DIR",
+                                     "/data/websites/snailtrail.cc/quant/shared/grype-db"))
+    try:
+        for d in grype_dir.glob("grype-db-download*"):
+            try:
+                if now - d.stat().st_mtime < 24 * 3600:
+                    continue   # 活下载（当日）不删
+                shutil.rmtree(d, ignore_errors=True)
+                cleaned.append(f"grype:{d.name[:40]}")
+            except OSError:
+                pass
+    except OSError:
+        pass
+    # ②③ /tmp 残件
+    try:
+        sbom = _tmp / "quant-sbom.json"
+        if sbom.exists() and now - sbom.stat().st_mtime > 24 * 3600:
+            sbom.unlink(missing_ok=True)
+            cleaned.append("tmp:quant-sbom.json")
+        import glob as _glob
+        for f in _glob.glob(str(_tmp / "quant-req-*.lock")):
+            try:
+                if now - _Path(f).stat().st_mtime > 7 * 86400:
+                    _Path(f).unlink(missing_ok=True)
+                    cleaned.append(f"tmp:{_Path(f).name[:40]}")
+            except OSError:
+                pass
+    except OSError:
+        pass
+    if cleaned:
+        logger.info("security_tmp_sweep: 清理 %d 项 %s", len(cleaned), cleaned[:10])
+    return cleaned
+
+
 @app.task(name="src.scheduler.tasks.security_scan",
           bind=True, soft_time_limit=2400, time_limit=2500)
 # 批120：覆盖全局 300s；批124 提至 2400s——扫描前置 grype db update（每次先更新，
 # 首次/大版本全量 ~3.1GB，prod 带宽 2.8MB/s ⇒ 最长 ~20min）+ syft/grype 链 + 五分区
 def security_scan(self):
     """批 120：每日安全态势扫描（六分区 → 快照落库 + 基线 diff 告警 + AI 摘要
-    fail-soft）。批 155 §4.4c：收尾释放串行化锁（值=自己才删，防误删）。"""
+    fail-soft）。批 155 §4.4c：收尾释放串行化锁（值=自己才删，防误删）。
+    尾部卫生（2026-10-31）：_security_tmp_sweep 清扫描类临时残件（grype 孤儿/sbom/旧锁）。"""
     from src.health_monitor.security_collector import run_security_scan
     try:
         return run_security_scan()
@@ -739,6 +793,10 @@ def security_scan(self):
                 br.delete("sec:scan_lock")
         except Exception:
             pass   # 锁 TTL 2700s 兜底，释放失败不炸任务
+        try:
+            _security_tmp_sweep()
+        except Exception:
+            pass   # 卫生失败不影响扫描
 
 
 # data_sync_scheduler 进程内联跑，池轮 280s 时间盒会逼近该 beat 的 300s 软超时，并挤掉
