@@ -106,3 +106,66 @@ def test_keep_count_three(monkeypatch, env):
     assert res["kept"] == 3
     files = sorted(p.name for p in env.glob("quant_*.sql.gz"))
     assert len(files) == 3, files
+
+
+def test_replace_oserror_caught(monkeypatch, env):
+    """步4盲审 P0 回归钉：os.replace 抛 OSError（如并发 tmp 被删）——
+    必须落 _fail（failed+tmp 清净），而非 NameError/裸逃。"""
+    import os as _os
+    import subprocess as sp
+    import src.scheduler.tasks as T
+    monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: _P(rc=0))
+    monkeypatch.setattr(_os, "replace", lambda a, b: (_ for _ in ()).throw(OSError("race")))
+    _notify_calls = []
+    import importlib as _il
+    _AN = _il.import_module("src.alert_notify.notify")
+    monkeypatch.setattr(_AN, "notify", lambda *a, **k: _notify_calls.append(a))
+    res = T.backup_db.run()
+    assert res["status"] == "failed" and "OSError" in res["error"], res
+    assert not list(env.glob("*.tmp"))
+    assert _notify_calls, "失败必须告警"
+
+
+def test_softlimit_kills_process_group(monkeypatch, env):
+    """步4盲审 P1 回归钉：软限在 wait 段抛出——finally 杀进程组+清残件+failed。"""
+    import os as _os
+    import signal as _sig
+    import subprocess as sp
+    from celery.exceptions import SoftTimeLimitExceeded
+    import src.scheduler.tasks as T
+
+    killed = []
+    monkeypatch.setattr(_os, "killpg", lambda gid, sig: killed.append((gid, sig)))
+    monkeypatch.setattr(_os, "getpgid", lambda pid: pid)
+
+    class _StallP(_P):
+        def wait(self):
+            raise SoftTimeLimitExceeded()
+
+    _live = _StallP(rc=None)
+    _live.poll = lambda: None   # 进程「还活着」——finally 应杀
+    monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: _live)
+    import importlib as _il
+    _AN = _il.import_module("src.alert_notify.notify")
+    monkeypatch.setattr(_AN, "notify", lambda *a, **k: None)
+    res = T.backup_db.run()
+    assert res["status"] == "failed", res
+    assert killed and killed[0][1] == _sig.SIGKILL, "进程组必须被 SIGKILL"
+    assert not list(env.glob("*.tmp")), "残件必须清理"
+
+
+def test_space_boundary_exact(monkeypatch, env):
+    """步4盲审 P2：可用==need 边界——放行（不小于）。"""
+    import subprocess as sp
+    import src.scheduler.tasks as T
+    (env / "quant_20261030_020000.sql.gz").write_bytes(b"x" * 100)
+    class _SV:   # need 有 1GiB fallback 下限——充足语义须 ≥1G（字面「恰等 need」在 1G 地板下不可达）
+        f_bavail, f_frsize = (1 << 30) // 4096 + 1, 4096
+    import os as _os
+    monkeypatch.setattr(_os, "statvfs", lambda p: _SV())
+    monkeypatch.setattr(sp, "Popen", lambda cmd, **kw: _P(rc=0))
+    import importlib as _il
+    _AN = _il.import_module("src.alert_notify.notify")
+    monkeypatch.setattr(_AN, "notify", lambda *a, **k: None)
+    res = T.backup_db.run()
+    assert res["status"] == "success", res

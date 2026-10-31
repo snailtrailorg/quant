@@ -2079,10 +2079,11 @@ def backup_db(self):
     from datetime import datetime as _dtm
     from pathlib import Path as _Path
 
+    from celery.exceptions import SoftTimeLimitExceeded   # 步4盲审 P0：except 引用而未导入=NameError 陷阱（防线2失败路径全死码）
     from src.alert_notify.notify import notify
+    import time as _time   # 水位自检与孤儿 tmp 护栏共用（步4盲审）
 
-    import os as _os
-    BACKUP_DIR = _Path(_os.environ.get("QUANT_BACKUP_DIR", "/home/quant/backups"))   # env 注入=测试面
+    BACKUP_DIR = _Path(os.environ.get("QUANT_BACKUP_DIR", "/home/quant/backups"))   # env 注入=测试面
     DB_NAME, DB_USER = "quant", "quant"
     KEEP_COUNT = 3
     _GLOB = f"{DB_NAME}_*.sql.gz"
@@ -2100,9 +2101,23 @@ def backup_db(self):
 
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 防线 2 前半：入口清历史孤儿 tmp（hard-kill 遗留）
+    # 步4盲审 A/B 同源（expires 静默丢弃观测面）：自检水位——上份成功备份 mtime>26h 即告警。
+    # 覆盖两类静默：beat 消息过期未拾起 / 队列被长任务占满挤掉。本轮成功则自然重置水位。
+    try:
+        _done = sorted(BACKUP_DIR.glob(_GLOB))
+        if _done and _time.time() - _done[-1].stat().st_mtime > 26 * 3600:
+            notify("warn", "system", "数据库备份水位异常",
+                   f"最新成功备份 {_done[-1].name} 已超 26h（可能被队列占用/过期静默丢弃）",
+                   code="backup.stale")
+    except Exception:
+        pass
+
+    # 防线 2 前半：入口清历史孤儿 tmp（hard-kill 遗留）。步4盲审 P1：mtime>4200s（2×hard limit）
+    # 护栏——双跑窗口内并发实例的活 tmp（正在写）不可能超过 hard 2100s，不误删。
     for orphan in BACKUP_DIR.glob(f"{DB_NAME}_*.tmp"):
         try:
+            if _time.time() - orphan.stat().st_mtime < 4200:
+                continue   # 可能是并发活实例的 tmp——跳过
             orphan.unlink()
             logger.warning("backup_db: 清孤儿 tmp %s", orphan)
         except OSError:
@@ -2123,40 +2138,53 @@ def backup_db(self):
     final_path = BACKUP_DIR / f"{DB_NAME}_{ts}.sql.gz"
     tmp_path = BACKUP_DIR / f"{DB_NAME}_{ts}.tmp"
 
-    # 防线 1+3：双 Popen 流式管道
-    gz_fh = open(tmp_path, "wb")
-    dump_p = _sp.Popen(["pg_dump", "-U", DB_USER, DB_NAME],
-                       stdout=_sp.PIPE, stderr=_sp.PIPE, start_new_session=True)
-    gz_p = _sp.Popen(["gzip"], stdin=dump_p.stdout, stdout=gz_fh,
-                     stderr=_sp.PIPE, start_new_session=True)
-    dump_p.stdout.close()   # 让 gzip 收到 EOF
-    dump_err = dump_p.stderr.read().decode(errors="replace")
-    gz_err = gz_p.stderr.read().decode(errors="replace")
-    dump_rc = dump_p.wait()
-    gz_rc = gz_p.wait()
-    gz_fh.close()
-
+    # 防线 1+3：双 Popen 流式管道。步4盲审 P1：read/wait 段并入 try——软限可在任意边界抛
+    # （管道挂死时 stderr.read 阻塞恰是最可能撞软限处），统一走 finally 清理路。
+    gz_fh = None
+    dump_p = gz_p = None
     try:
+        gz_fh = open(tmp_path, "wb")   # 步4盲审 B-P1：open 一并入 try（权限类失败也走 _fail 告警）
+        dump_p = _sp.Popen(["pg_dump", "-U", DB_USER, DB_NAME],
+                           stdout=_sp.PIPE, stderr=_sp.PIPE, start_new_session=True)
+        gz_p = _sp.Popen(["gzip"], stdin=dump_p.stdout, stdout=gz_fh,
+                         stderr=_sp.PIPE, start_new_session=True)
+        dump_p.stdout.close()   # 让 gzip 收到 EOF
+        dump_err = dump_p.stderr.read().decode(errors="replace")
+        gz_err = gz_p.stderr.read().decode(errors="replace")
+        dump_rc = dump_p.wait()
+        gz_rc = gz_p.wait()
+
         if dump_rc != 0 or gz_rc != 0:   # 防线 1：双 rc 任一非 0 即失败
             return _fail(f"rc dump={dump_rc} gzip={gz_rc}：{dump_err[:200] or gz_err[:200]}",
                          partial=tmp_path)
         os.replace(tmp_path, final_path)   # 防线 2：原子转正
     except SoftTimeLimitExceeded:
-        # 软限窗内杀进程组（防孤儿续写）+清残件
-        for p in (gz_p, dump_p):
-            try:
-                os.killpg(os.getpgid(p.pid), _signal.SIGKILL)
-            except (ProcessLookupError, OSError):
-                pass
-        return _fail("软时限触发，进程组已杀", partial=tmp_path)
+        return _fail("软时限触发", partial=tmp_path)
     except Exception as e:
-        return _fail(f"转正异常: {e}", partial=tmp_path)
+        return _fail(f"备份异常: {type(e).__name__}:{e}", partial=tmp_path)
+    finally:
+        # 步4盲审 P0+P1：统一清理路——软限/异常时杀进程组（防孤儿续写）+关句柄。
+        # 正常路径进程已退，killpg 对已死组是 no-op。
+        if gz_fh is not None:
+            gz_fh.close()
+        for p in (gz_p, dump_p):
+            if p is not None and p.poll() is None:
+                try:
+                    os.killpg(os.getpgid(p.pid), _signal.SIGKILL)
+                except (ProcessLookupError, OSError):
+                    pass
 
-    size = final_path.stat().st_size
+    try:
+        size = final_path.stat().st_size   # 步4盲审 B-P2：stat 失败不掩成功（文件已转正）
+    except OSError:
+        size = -1
     removed = []
     for old in sorted(BACKUP_DIR.glob(_GLOB), reverse=True)[KEEP_COUNT:]:
-        old.unlink()
-        removed.append(old.name)
+        try:
+            old.unlink()   # 步4盲审 P2：retention 失败不推翻备份成功（半删态下轮幂等收敛）
+            removed.append(old.name)
+        except OSError as _oe:
+            logger.warning("backup_db: 旧份删除失败 %s: %s", old.name, _oe)
     logger.info("backup_db: 完成 %s (%d bytes)，保留 %d 份，清理 %s",
                 final_path.name, size, KEEP_COUNT, removed or "无")
     return {"status": "success", "file": final_path.name, "size": size,
