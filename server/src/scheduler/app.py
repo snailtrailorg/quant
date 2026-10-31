@@ -201,12 +201,12 @@ app.conf.update(
         },
         "notifications-cleanup": {
             "task": "src.scheduler.tasks.notifications_cleanup",
-            "schedule": crontab(hour=3, minute=13),   # 批27-31：低峰（避 04:00 备份）
+            "schedule": crontab(hour=3, minute=13),   # 批27-31：低峰（备份实在 02:00 批159，04:00 系民俗误记）
             "options": {"queue": "risk"},
         },
         "logs-cleanup": {   # 批25：system_log>30d 清理
             "task": "src.scheduler.tasks.cleanup_logs",
-            "schedule": crontab(hour=3, minute=23),   # 批27-31：低峰（避 04:00 备份/04:07 校准）
+            "schedule": crontab(hour=3, minute=23),   # 批27-31：低峰（避 04:07 校准；备份=02:00 批159）
             "options": {"queue": "risk"},
         },
         # 批 83b：convertible-terms-sync / static-list-sync 两条 beat 已收编为
@@ -231,6 +231,14 @@ app.conf.update(
         # 点 3「四条硬编码 beat 收编」四条全部落地（另两条见 0118）。
         # 腾讯分钟攒已退役（2026-09-23：自攒历史分钟线退役，将来买 Tushare stk_mins 正式数据）
         # 批 158：bar 表滚动保留清道夫——日轮 04:37 低峰（数据队列；任务内时限 3600/4200 显式）
+        # 批 159：备份收编（原 cron 02:00 backup-db.sh 退役——管道外调度面清零）
+        # expires=3600：停机恢复后旧消息丢弃（深夜补跑无价值）；beat 时区=本 conf 的 Asia/Shanghai
+        # （配置值非 OS 时区，二者当前一致——上产前 timedatectl 核实，方案批159 §2.2）
+        "db-backup": {
+            "task": "src.scheduler.tasks.backup_db",
+            "schedule": crontab(hour=2, minute=0),
+            "options": {"queue": "data", "expires": 3600},
+        },
         "bar-retention-sweep": {
             "task": "src.scheduler.tasks.bar_retention_sweep",
             "schedule": crontab(hour=4, minute=37),

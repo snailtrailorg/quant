@@ -249,7 +249,7 @@ sudo -u quant /usr/local/sbin/quant-hbcheck   # 行情 hub 心跳（8 字段）�
 ## 7. 日常运维
 
 - **升级/回滚**：`deploy/DEPLOY.md` 三命令（彩排→发布→回滚）——不要手工改 releases 目录
-- **备份**：`server/scripts/backup-db.sh`（pg_dump+gzip 保 7 天）入 crontab：`0 2 * * * <路径>/backup-db.sh`
+- **备份**：celery 任务 `backup_db`（beat 02:00，批 159 收编——pg_dump+gzip 双 rc 校验，保最新 3 份）；旧 cron 脚本已退役
 - **日志**：`journalctl -u "quant-*" -n 100 --no-pager`（九单元模板，`@` 后为实例名）
 - **实盘开启**：三级开关（.env 总闸 `ENABLE_LIVE_TRADING` + Web 分项 + 策略 `backtest_verified`）——见操作指导·实盘册
 

@@ -18,7 +18,7 @@ psqlq() { psql -d "$DBNAME" -tAc "$1" 2>&1; }
 echo "===== 0. 前置 ====="
 [ -f "$DUMP" ] || { echo "✗ dump 不存在: $DUMP"; exit 2; }
 ls -lh "$DUMP"
-file -b "$DUMP" | grep -qi gzip || { echo "✗ 不是 gzip 文件——取错文件了（期望 backup-db.sh 产出的 .gz，~930M）"; file -b "$DUMP"; exit 2; }
+file -b "$DUMP" | grep -qi gzip || { echo "✗ 不是 gzip 文件——取错文件了（期望 backup_db 任务产出的 .gz，~930M）"; file -b "$DUMP"; exit 2; }
 SIZE_MB=$(du -m "$DUMP" | awk '{print $1}')
 [ "$SIZE_MB" -ge 100 ] || { echo "✗ 文件仅 ${SIZE_MB}MB——不像备份，疑似日志类文件"; exit 2; }
 echo "  ✓ gzip 且 ${SIZE_MB}MB"

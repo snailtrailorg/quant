@@ -23,6 +23,8 @@ RUNBOOK: dict[str, dict] = {
     "im.first-seen":     {"label": "飞书新用户首见", "guide": "首次给 bot 发消息者已按 default_role 自动登记（同时成告警收件人）——非预期则到 设置→集成→IM→用户管理 调整。"},
     # ——— 数据面（hub/worker） ———
     "deps.exhausted":   {"label": "依赖探活耗尽", "guide": "PG 持续不可达超 10 分钟——查 PG 服务与网络；runner 已退出待 systemd 重试。"},
+    # ——— 批 159 备份收编（2026-10-31） ———
+    "backup.failed":    {"label": "数据库备份失败", "guide": "pg_dump/gzip 双 rc 校验或空间预检不过（四道防线详情方案批159）——查 journalctl -u quant-celery-worker 备份段与磁盘余量；恢复前旧备份仍在 /home/quant/backups（保 3 份）。"},
     "warmup.degraded":  {"label": "暖机供给不足", "guide": "因子声明窗大于实得历史（瞬态，同步层追；批 118 判定三分支）——任务已降级启动，查数据同步缺口（sync_gap）与标的是否过新；因子窗口内值可能不准。"},
     "frozen.stream":    {"label": "流异常冻结", "guide": "流序号跳变/不可信 bar（数据污染事实）——流衔接自动解/人工解（Web 或 IM 发起→Web 确认）；SELL 不受限。"},
     # 批 76 F2：解冻两通道（自动/人工）——冻结不再以重启为唯一解

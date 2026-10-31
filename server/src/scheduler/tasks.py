@@ -2054,3 +2054,110 @@ def bar_retention_sweep(self):
              "; ".join(_log_lines)[:500] or "无可裁项"))
         conn.commit()
     return {"status": "pruned", "deleted": total_deleted, "notes": _log_lines[:20]}
+
+
+@app.task(name="src.scheduler.tasks.backup_db",
+          bind=True, soft_time_limit=1800, time_limit=2100)   # 批 159/批 110：软限=killpg+清残件唯一窗（余量 300s）
+def backup_db(self):
+    """PG 定时备份（批 159 收编 celery，原 cron backup-db.sh 退役）。
+
+    四道防线（方案 v2 §2.1，双盲审 A/B 处置）：
+    1. 双 rc 校验：Popen 显式双进程（pg_dump.stdout→gzip.stdin），两个 returncode 都查——
+       单 shell 管道 rc=末命令，pg_dump 中途死会被 gzip rc=0 掩成成功（cron 版靠 pipefail，A/B 同撞 P0）。
+    2. 残件防线：写 $FILE.tmp，双 rc 全 0 才 os.replace 转正；retention 只认正式名；
+       失败/软限路径 killpg（start_new_session 进程组）+rm partial；入口先清历史孤儿 tmp。
+    3. 流式写盘：gzip stdout 直写文件句柄，禁 capture_output（原始 ~10G 会顶爆 cgroup
+       MemoryMax=1600M 连杀整池——A-P1）。
+    4. 空间预检：目标盘可用 < max(2×上份 dump 大小, 1G) ⇒ abort+critical 告警（B-P1）。
+
+    保留：KEEP_COUNT=3 份（2026-10-31 用户裁定），文件名时间戳降序删旧（首轮把存量 ~6 份裁到 3）。
+    失败告警：notify("critical","system",code="backup.failed")——PG 停时 dispatch 外推不依赖被备份库。
+    """
+    import os
+    import signal as _signal
+    import subprocess as _sp
+    from datetime import datetime as _dtm
+    from pathlib import Path as _Path
+
+    from src.alert_notify.notify import notify
+
+    import os as _os
+    BACKUP_DIR = _Path(_os.environ.get("QUANT_BACKUP_DIR", "/home/quant/backups"))   # env 注入=测试面
+    DB_NAME, DB_USER = "quant", "quant"
+    KEEP_COUNT = 3
+    _GLOB = f"{DB_NAME}_*.sql.gz"
+
+    def _fail(msg: str, partial: _Path | None = None) -> dict:
+        if partial is not None:
+            try:
+                partial.unlink(missing_ok=True)
+            except OSError:
+                pass
+        notify("critical", "system", "数据库备份失败",
+               f"{msg}（partial 已清理）", code="backup.failed")
+        logger.error("backup_db: %s", msg)
+        return {"status": "failed", "error": msg}
+
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 防线 2 前半：入口清历史孤儿 tmp（hard-kill 遗留）
+    for orphan in BACKUP_DIR.glob(f"{DB_NAME}_*.tmp"):
+        try:
+            orphan.unlink()
+            logger.warning("backup_db: 清孤儿 tmp %s", orphan)
+        except OSError:
+            pass
+
+    # 防线 4：空间预检（os.statvfs 纯 Python——无子进程依赖，比 df 解析稳）
+    prev = sorted(BACKUP_DIR.glob(_GLOB), reverse=True)
+    need = max((prev[0].stat().st_size * 2 if prev else 0), 1 << 30)
+    try:
+        _sv = os.statvfs(BACKUP_DIR)
+        avail = _sv.f_bavail * _sv.f_frsize
+    except OSError:
+        avail = 1 << 40   # statvfs 失败放行（fail-open：备份价值高于误拦）
+    if avail < need:
+        return _fail(f"空间预检不过：可用 {avail >> 30}G < 需 {need >> 30}G")
+
+    ts = _dtm.now().strftime("%Y%m%d_%H%M%S")
+    final_path = BACKUP_DIR / f"{DB_NAME}_{ts}.sql.gz"
+    tmp_path = BACKUP_DIR / f"{DB_NAME}_{ts}.tmp"
+
+    # 防线 1+3：双 Popen 流式管道
+    gz_fh = open(tmp_path, "wb")
+    dump_p = _sp.Popen(["pg_dump", "-U", DB_USER, DB_NAME],
+                       stdout=_sp.PIPE, stderr=_sp.PIPE, start_new_session=True)
+    gz_p = _sp.Popen(["gzip"], stdin=dump_p.stdout, stdout=gz_fh,
+                     stderr=_sp.PIPE, start_new_session=True)
+    dump_p.stdout.close()   # 让 gzip 收到 EOF
+    dump_err = dump_p.stderr.read().decode(errors="replace")
+    gz_err = gz_p.stderr.read().decode(errors="replace")
+    dump_rc = dump_p.wait()
+    gz_rc = gz_p.wait()
+    gz_fh.close()
+
+    try:
+        if dump_rc != 0 or gz_rc != 0:   # 防线 1：双 rc 任一非 0 即失败
+            return _fail(f"rc dump={dump_rc} gzip={gz_rc}：{dump_err[:200] or gz_err[:200]}",
+                         partial=tmp_path)
+        os.replace(tmp_path, final_path)   # 防线 2：原子转正
+    except SoftTimeLimitExceeded:
+        # 软限窗内杀进程组（防孤儿续写）+清残件
+        for p in (gz_p, dump_p):
+            try:
+                os.killpg(os.getpgid(p.pid), _signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
+        return _fail("软时限触发，进程组已杀", partial=tmp_path)
+    except Exception as e:
+        return _fail(f"转正异常: {e}", partial=tmp_path)
+
+    size = final_path.stat().st_size
+    removed = []
+    for old in sorted(BACKUP_DIR.glob(_GLOB), reverse=True)[KEEP_COUNT:]:
+        old.unlink()
+        removed.append(old.name)
+    logger.info("backup_db: 完成 %s (%d bytes)，保留 %d 份，清理 %s",
+                final_path.name, size, KEEP_COUNT, removed or "无")
+    return {"status": "success", "file": final_path.name, "size": size,
+            "kept": KEEP_COUNT, "removed": removed}

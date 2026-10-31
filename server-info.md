@@ -23,7 +23,7 @@
 
 ## 数据与备份（批 143 治理后终态 2026-10-23）
 - **PG18**：QUANT_DB_URL 在 shared/.env；alembic 经 `quant-alembic-wrapper`（发布阶段 5）；**PGDATA=`/data/databases/pgsql`（非默认路径）**。库 ~11G=活数据紧凑态（bar_1d heap 2.6G+idx 2.1G / daily_basic 1.1G+0.9G——批 143 REINDEX+VACUUM FULL 后）；**grype-db 3.1G=单活动漏洞库（grype v6）正常体量，勿清**
-- **备份**：cron 02:00 直跑 release 树 `/data/websites/snailtrail.cc/quant/server/scripts/backup-db.sh`（server 符号链接自动跟版——2026-10-31 改，原 /home/quant/scripts 独立拷贝不随发布更新的盲点已消），产物 `/home/quant/backups/`，**保留最新 3 份**（2026-10-31 裁定）；dump ~930M/份；**恢复演练已过（备份可兜底）**，工具 `scripts/backup-restore-drill.sh`（本地跑，前置临时授权见脚本头）
+- **备份**：celery 任务 `backup_db`（beat 02:00 queue=data，批 159 收编——四道防线：双 rc/tmp 原子转正/流式/空间预检；**cron 面已清零**），产物 `/home/quant/backups/`，**保留最新 3 份**（2026-10-31 裁定）；dump ~930M/份；**恢复演练已过（备份可兜底）**，工具 `scripts/backup-restore-drill.sh`（本地跑，前置临时授权见脚本头）
 - **磁盘水位**：根盘 40G 用量 78%（journal 已 cap 200M）；bar 表无分区/清理策略=矩阵 F-17 开放项
 - **Valkey 分库**：db4=业务（心跳/熔断/锁/流）、db5=Celery broker、db6=Celery result；关键键：`quant:hb:md-hub`(HASH 8 字段)、`quant:hb:task:{tid}`、`hub:lease`/`hub:gen`(fencing)
 - **密钥**：SECRET_KEY 单根密钥，HKDF 派生 JWT_SECRET + ENCRYPTION_KEY(Fernet)
