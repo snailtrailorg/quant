@@ -765,8 +765,7 @@ def _security_tmp_sweep() -> list[str]:
                 pass
     except OSError:
         pass
-    if cleaned:
-        logger.info("security_tmp_sweep: 清理 %d 项 %s", len(cleaned), cleaned[:10])
+    logger.info("security_tmp_sweep: 清理 %d 项 %s", len(cleaned), cleaned[:10])   # 空清单也留痕=跑了可证
     return cleaned
 
 
