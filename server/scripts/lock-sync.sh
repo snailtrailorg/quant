@@ -26,8 +26,11 @@ command -v ./venv/bin/pip-compile >/dev/null || {
 
 [[ -f "$REQ" ]] || { echo "❌ 缺 $REQ" >&2; exit 1; }
 
+# UPGRADE=1 forward-roll: bump resolved versions to latest stable
+UPGRADE_FLAG=""
+[ "${UPGRADE:-0}" = "1" ] && UPGRADE_FLAG="--upgrade"
 echo "① 重编译 $LOCK（--generate-hashes）..."
-./venv/bin/pip-compile --generate-hashes --no-strip-extras \
+./venv/bin/pip-compile --generate-hashes --no-strip-extras $UPGRADE_FLAG \
     --output-file "$LOCK" "$REQ"
 
 echo "② 校验 hash 完整性..."
