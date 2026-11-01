@@ -66,6 +66,11 @@ def judge(cur: str | None, constraint: str | None, latest: str | None,
         lat_v = _v(latest)
         if lat_v is None:
             return "unknown", f"上游版本不可解析: {latest!r}"
+        # 批 160·A：上游 latest 为预发布（rc/b/dev/a+数字后缀）⇒ 不作升级目标判 current
+        # （预发布不该出现在「可升级」建议——B156A 噪声主源之一）
+        import re as _re
+        if _re.search(r"[.]?(rc|b|dev|a)[0-9]+$", latest.strip()):
+            return "current", f"上游 {latest} 为预发布，不作升级目标"
         if lat_v <= cur_v:
             return "current", ""
         if _in(lat_v, constraint):
