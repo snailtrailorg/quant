@@ -313,7 +313,7 @@ def _collect_components() -> dict:
                       "FROM security_component WHERE source='pip'")
                 _args = []
                 if _lc_ts:
-                    _q += " AND last_seen <= %s"
+                    _q += " AND COALESCE(checked_at, last_seen::timestamptz) <= %s"   # 步4盲审 A-P1-3：屏草锚=checked_at（timestamptz）；历史行 NULL 回退 last_seen
                     _args.append(_lc_ts)
                 _tbl_rows = _c2.execute(_q, tuple(_args)).fetchall()
         except Exception as _e2:
@@ -326,8 +326,11 @@ def _collect_components() -> dict:
                                "judge_class": _r[3], "judge_why": _r[4],
                                "has_update": has_update_of(_r[3])})
         else:
+            # 步4盲审 B-P0-3：表读失败且兼容键为空 ⇒ fail-loud 进 degraded（防全表 unknown+假回落）
             _rows_raw = business_redis().get("sec:dep_audit:rows")
-            for row in (json.loads(_rows_raw) if _rows_raw else ()):
+            if not _rows_raw:
+                raise RuntimeError("dep rows 双源皆空（表读失败+兼容键缺）——fail-loud 降级")
+            for row in json.loads(_rows_raw):
                 judged.append({"name": row["name"], "cur": row.get("cur"),
                                "latest": row.get("latest"),
                                "managed_by": "local" if row.get("local") else "pypi",
@@ -1117,6 +1120,9 @@ def run_security_scan(today: date | None = None) -> dict:
         from src.quant_common.redis_client import business_redis as _br5
         _dh5 = (parts.get("components") or {}).get("dep_health") or {}
         _rows5 = _dh5.get("rows") or []
+        # 步4盲审 B-P0-3/A-P1-4：rows 空 ⇒ 跳过电平判定保持 alerted 原态（防 _act_n=0 假回落+误清锁存）
+        if not _rows5 and (_dh5.get("degraded") or not _dh5):
+            logger.warning("dep rows 空——跳过 B156A 电平判定（保持原态）")
         _act_n = sum(1 for r in _rows5 if r.get("judge_class") == "actionable")
         _drift_n = sum(1 for r in _rows5 if r.get("judge_class") == "drift")
         _thr = 20

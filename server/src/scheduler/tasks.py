@@ -863,6 +863,7 @@ def dep_audit():
 
     from src.health_monitor import os_pkg
     from src.quant_common.depjudge import judge as _judge
+    from src.quant_common.depjudge import in_constraint_max as _icm_fn
     from src.quant_common.depjudge import parse_constraints, parse_names
     from src.quant_common.depjudge import _v as _pep440
     from src.quant_common.redis_client import business_redis
@@ -887,9 +888,13 @@ def dep_audit():
                 prev_state = "zombie" if age > 600 else "running"
         else:
             prev_state = "interrupted"   # 无 done 无 beat：上轮中途消失（kill/重启）
+        if prev_state == "running":
+            return {"status": "skipped", "reason": "上轮仍在跑（beat 活）——互斥（步4盲审 B-P1）"}
         if prev_state in ("zombie", "interrupted"):
             logger.warning("dep_audit 上轮终态=%s（%s）——幂等落库无损失，本轮重开",
                            prev_state, beat.get("n") if beat else "无beat键")
+        elif prev_state == "unknown":
+            logger.warning("dep_audit beat 键损坏/不可解析（步4盲审）——按中断重开")
     except Exception:
         prev_state = "unknown"
 
@@ -918,18 +923,24 @@ def dep_audit():
         installed = []
         errors.append(f"pip-enum: {e}"[:120])
 
-    # —— 续跑判据（批 161 dev 实测修正：跨 run 语义）——当日已处理（last_seen >= 今日 UTC 零点）
-    # 的包跳网查；原「>= 本轮起点」同 run 恒空/跨 run 恒不命中，续跑永不生效（n_remote 不降实证）。
-    round_start = _dt.datetime.now(_dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    # —— 续跑判据（步4盲审 B-P1：26h 窗替代当日零点——跨零点中断重触发不再自取消）——
+    round_start = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=26)
 
+    _beat_fails = 0
     def _beat(n, total, done=False):
+        # 步4盲审 B-P1-3：心跳是时限拆除后唯一活性信号——写失败须留痕（连续≥3 次 error+errors 追加）
+        nonlocal _beat_fails
         try:
             payload = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(), "n": n}
             if done:
                 payload["status"] = "done"
             br.set(BEAT_KEY, _json.dumps(payload), ex=26 * 3600)
-        except Exception:
-            pass
+            _beat_fails = 0
+        except Exception as _be:
+            _beat_fails += 1
+            if _beat_fails >= 3:
+                logger.error("dep_audit 心跳写连续失败 %d 次: %s", _beat_fails, _be)
+                errors.append(f"beat-write-failed: {str(_be)[:80]}")
 
     from src.data_platform.db import get_conn
     done_names = set()
@@ -947,11 +958,11 @@ def dep_audit():
         if not batch_rows:
             return
         SQL = ("INSERT INTO security_component (source, name, version, origin, "
-               "first_seen, last_changed, last_seen, latest_version, latest_source, "
-               "judge_class, judge_why) VALUES ('pip', %s, %s, 'pip 安装', now(), now(), now(), %s, 'pypi', %s, %s) "
+               "first_seen, last_changed, last_seen, checked_at, latest_version, latest_source, "
+               "judge_class, judge_why) VALUES ('pip', %s, %s, 'pip 安装', now(), now(), now(), now(), %s, 'pypi', %s, %s) "
                "ON CONFLICT (source, name) DO UPDATE SET version=EXCLUDED.version, "
                "last_changed=CASE WHEN security_component.version <> EXCLUDED.version THEN now() ELSE security_component.last_changed END, "
-               "last_seen=now(), latest_version=EXCLUDED.latest_version, "
+               "last_seen=now(), checked_at=now(), latest_version=EXCLUDED.latest_version, "
                "latest_source='pypi', judge_class=EXCLUDED.judge_class, judge_why=EXCLUDED.judge_why")
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -960,20 +971,25 @@ def dep_audit():
 
     pip_rows, n_fail, n_remote = [], 0, 0
     batch = []
+    _reuse_judge = None
     total = len(installed)
     for i, row in enumerate(installed, 1):
         name, cur, local = row["name"], row["cur"], row["local"]
         grp = "dev" if name in dev_names else "runtime"
+        constraint = constraints.get(name)   # 步4修复：提前（icm 计算依赖——原序 UnboundLocalError）
         latest, icm = None, None
         if local:
             managed = "local"
         elif name in done_names:
-            managed = "pypi"   # 本轮已落库（续跑）——跳网查，读取表内现值即可
+            # 续跑（步4盲审 A-P1-2 修复）：读回已落 jc/jw 直接沿用——重算 icm=None 会把
+            # in_constraint 降级覆盖成 pinned（judge_class 漂移）
+            managed = "pypi"
             with get_conn() as conn:
                 prev = conn.execute(
-                    "SELECT latest_version FROM security_component WHERE source='pip' AND name=%s",
-                    (name,)).fetchone()
+                    "SELECT latest_version, judge_class, judge_why FROM security_component "
+                    "WHERE source='pip' AND name=%s", (name,)).fetchone()
                 latest = prev[0] if prev else None
+                _reuse_judge = (prev[1], prev[2]) if prev and prev[1] else None
         else:
             managed = "pypi"
             try:
@@ -987,12 +1003,15 @@ def dep_audit():
                         if pvv is not None and (best_v is None or pvv > best_v):
                             best, best_v = v, pvv
                     latest = best
+                    icm = _icm_fn(vers, constraint, cur)   # 步4盲审 B-P0-2：in_constraint 分支输入断供修复（v2 重构迁移遗漏）
             except Exception as ex:
                 n_fail += 1
                 if n_fail <= 3:
                     errors.append(f"pypi {name}: {str(ex)[:100]}")
-        constraint = constraints.get(name)
-        jc, jw = _judge(cur, constraint, latest, icm, True, managed)
+        if _reuse_judge is not None:
+            jc, jw = _reuse_judge            # 续跑沿用（不重算）
+        else:
+            jc, jw = _judge(cur, constraint, latest, icm, True, managed)
         batch.append((name, cur, latest, jc, jw))
         pip_rows.append({"name": name, "cur": cur, "latest": latest,
                          "in_constraint_max": icm, "local": local, "group": grp,
@@ -1005,24 +1024,33 @@ def dep_audit():
     _flush_batch(batch)
     _beat(total, total, done=True)
 
-    # —— OS 域随行落表（A-P1：契约降级后 os 判定以表为源）——
+    # —— OS 域随行落表（步4盲审 P0 同撞修复：原 os_installed/os_upgrades 为不存在的 API——
+    # hasattr 假完工；真源=provider.list_installed()/upgrade_candidates()）——
+    os_installed, os_upgrades = [], []
     try:
-        os_installed = os_pkg.os_installed() if hasattr(os_pkg, "os_installed") else []
-        os_upgrades = os_pkg.os_upgrades() if hasattr(os_pkg, "os_upgrades") else []
+        provider = os_pkg.detect_provider()
+        os_installed = [{"name": p.name, "version": p.version} for p in provider.list_installed()]
+        _upg = provider.upgrade_candidates() or {}
+        os_upgrades = _upg if isinstance(_upg, dict) else {}
     except Exception as e:
-        os_installed, os_upgrades = [], []
         errors.append(f"os-enum: {e}"[:120])
     if os_installed:
         os_batch = []
         for r in os_installed:
-            nm = r.get("name") if isinstance(r, dict) else r[0]
-            ver = r.get("version") if isinstance(r, dict) else (r[1] if len(r) > 1 else "")
-            jc, jw = _judge(ver, None, None, None, True, "rpm")
-            os_batch.append((nm, str(ver or ""), None, jc, jw))
+            nm, ver = r.get("name", ""), str(r.get("version") or "")
+            _lat = None
+            if isinstance(os_upgrades, dict):
+                _c = os_upgrades.get(nm)
+                if isinstance(_c, dict):
+                    _lat = _c.get("version") or _c.get("latest") or None
+                elif isinstance(_c, str):
+                    _lat = _c
+            jc, jw = _judge(ver, None, _lat, None, True, "rpm" if _lat is None else "repo")
+            os_batch.append((nm, ver, _lat, jc, jw))
         try:
             SQL_OS = ("INSERT INTO security_component (source, name, version, origin, "
-                      "first_seen, last_changed, last_seen, judge_class, judge_why) "
-                      "VALUES ('system', %s, %s, 'OS rpm', now(), now(), now(), %s, %s) "
+                      "first_seen, last_changed, last_seen, checked_at, latest_version, latest_source, judge_class, judge_why) "
+                      "VALUES ('system', %s, %s, 'OS rpm', now(), now(), now(), now(), %s, 'dnf', %s, %s) "
                       "ON CONFLICT (source, name) DO UPDATE SET version=EXCLUDED.version, "
                       "last_changed=CASE WHEN security_component.version <> EXCLUDED.version THEN now() ELSE security_component.last_changed END, "
                       "last_seen=now(), judge_class=EXCLUDED.judge_class, judge_why=EXCLUDED.judge_why")
@@ -1035,7 +1063,7 @@ def dep_audit():
 
     undeclared = [r["name"] for r in pip_rows
                   if r["group"] == "runtime" and r["name"] not in constraints]
-    ok = not errors or n_fail < max(1, len(installed) // 5)
+    ok = bool(pip_rows or os_installed) and (not errors or n_fail < max(1, len(installed) // 5))   # 步4盲审 A-P1-5：枚举全挂不再 ok=True
 
     # —— 契约瘦身（B-P1 屏草+映射+A-P0 兼容窗：pip rows 惰性写一个发布周期，批 162+ 删）——
     payload = {
