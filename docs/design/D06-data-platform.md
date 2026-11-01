@@ -69,7 +69,7 @@ class DataPlatform:
 | volume | numeric | 成交量 |
 | amount | numeric | 成交额 |
 | adj_factor | numeric | 复权因子（A 股）|
-| source | text | tushare/akshare/binance/okx/xtp |
+| source | text | tushare/binance/okx/xtp |
 
 **对齐原则**：XTP 实时行情推送的字段名/类型/编码与这张表完全一致，实盘把 WS 回调写入同样结构，策略代码读到的 `Bar` 对象回测实盘同形。symbol 统一用 vnpy `vt_symbol`（`raw.EXCHANGE`），XTPAdapter 用 `parse_vt_symbol()` 拆成 `(symbol, exchange)` 再喂 XTP 网关（详见 04）。具体 exchange 串（`SHSE`/`SZSE`/...）以 vnpy_xtp 枚举为准，实现时核实。
 

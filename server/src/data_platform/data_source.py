@@ -27,7 +27,7 @@ class DataSource(ABC):
     """数据源接口。
 
     限速（24 号抽象聚合）：`get_rate_limit(api_name)` 委托限速策略（非 abstract——
-    带默认实现，AkShare stub 零改动，未来 Wind 不强制实现）。配置归
+    带默认实现，新增源零改动，未来 Wind 不强制实现）。配置归
     `data_source.params` JSON：{"rate_limits": {"stk_mins": 60, ...}}。
     params 分界：秘密→credentials_encrypted；运维参数（rate_limits/base_url）→params。
     """
@@ -438,22 +438,3 @@ def get_data_source(provider: str) -> DataSource | None:
     except Exception as e:
         logger.warning(f"读 data_source({provider}) 失败: {e}")
         return None
-
-
-class AkShareDataSource(DataSource):
-    """AkShare 数据源（P3-17 stub，免费无 token，补充 Tushare 不足）。
-
-    AkShare 无需 API key，直接 akshare 库拉数据。
-    暂未注册到 _REGISTRY（需安装 akshare 库 + 实现具体接口）。
-    """
-    def get_client(self):
-        import akshare as ak
-        return ak
-    def test_connection(self) -> bool:
-        try:
-            import akshare  # noqa: F401  # import 成功即可用（可用性探测）
-            return True
-        except ImportError:
-            return False
-    def record_usage(self, api_calls=1, api_name="", success=True, latency_ms=0, provider=""):
-        pass  # AkShare 免费无配额
