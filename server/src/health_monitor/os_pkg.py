@@ -132,21 +132,18 @@ def pip_installed() -> list:
     return out
 
 
-def pypi_versions_cached(name: str, refresh: bool = False, timeout: int = 10) -> dict:
-    """分批缓存层（批 155 补）：Valkey sec:pypi:<name>（TTL 7d）。
-
-    prod 实证 pypi.org 150 包 9min 撞 soft——常态轮：命中直用（零网络）；
-    未命中查网落缓存；refresh=True 主动重查（轮转补查保新鲜，7 天全量覆盖）。
+def pypi_versions_cached(name: str, timeout: int = 10) -> dict:
+    """缓存层：Valkey sec:pypi:<name>（TTL 7d——批 161：恒读缓存，到期自然重查=天然轮转；
+    原 refresh 参数与 1/7 抽签退役——续跑判据在表侧（last_seen），缓存仅跨轮加速）。
     Valkey 不可达时静默回退直查（缓存是加速器非依赖）。"""
     try:
         import json as _json
         from src.quant_common.redis_client import business_redis
         key = f"sec:pypi:{name}"
         br = business_redis()
-        if not refresh:
-            hit = br.get(key)
-            if hit:
-                return _json.loads(hit)
+        hit = br.get(key)
+        if hit:
+            return _json.loads(hit)
         result = pypi_versions(name, timeout=timeout)
         try:
             br.set(key, _json.dumps(result), ex=7 * 86400)

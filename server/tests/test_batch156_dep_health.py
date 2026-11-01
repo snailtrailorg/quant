@@ -4,13 +4,13 @@ from unittest.mock import MagicMock, patch
 
 
 def test_contract_schema2_fields(monkeypatch):
-    """T1：契约 schema 2——os.installed 明细+all_repos。"""
+    """T1：契约 schema 2——os.installed 明细（批 161：all_repos 采集面随批 161 os 随行落表重构，断言更新）。"""
     import inspect
     from src.scheduler import tasks
     src = inspect.getsource(tasks.dep_audit)
     assert '"schema_version": 2' in src
-    assert '"installed"' in src and '"all_repos"' in src
-    assert '_os_repo_all' in src
+    assert '"installed"' in src
+    assert "'system'" in src   # 批 161：OS 判定随行落表（source=system 行）
 
 
 def test_os_full_rows_schema_branch(monkeypatch):

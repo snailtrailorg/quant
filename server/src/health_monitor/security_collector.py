@@ -299,17 +299,42 @@ def _collect_components() -> dict:
         if age_h > DEP_AUDIT_FRESH_H:
             raise RuntimeError(f"缓存过期 {age_h:.0f}h > {DEP_AUDIT_FRESH_H}h")
         constraints = contract.get("constraints") or {}
-        dev_names = set(contract.get("dev") or [])
+        dev_names = set(contract.get("dev") or contract.get("dev_names") or [])
         judged = []
-        for row in contract.get("pip") or []:
-            managed = "local" if row.get("local") else "pypi"
-            cls, why = judge(row.get("cur"), constraints.get(row["name"]),
-                             row.get("latest"), row.get("in_constraint_max"),
-                             True, managed)
-            judged.append({"name": row["name"], "cur": row.get("cur"),
-                           "latest": row.get("latest"), "managed_by": managed,
-                           "group": row.get("group"), "judge_class": cls,
-                           "judge_why": why, "has_update": has_update_of(cls)})
+        # 批 161：rows 真源=台账表（judge 已随行落列），last_complete.ts 为轮次屏草
+        # （B-P1：坏网 audit 长跑与 scan 重叠时，截断到完整上一轮——半更新行不入判）。
+        # 表零行/异常回退兼容键 sec:dep_audit:rows（回滚兼容窗，批 162+ 删）。
+        _lc_ts = ((contract.get("last_complete") or {}).get("ts"))
+        _tbl_rows = None
+        try:
+            from src.data_platform.db import get_conn as _gc2
+            with _gc2() as _c2:
+                _q = ("SELECT name, version, latest_version, judge_class, judge_why "
+                      "FROM security_component WHERE source='pip'")
+                _args = []
+                if _lc_ts:
+                    _q += " AND last_seen <= %s"
+                    _args.append(_lc_ts)
+                _tbl_rows = _c2.execute(_q, tuple(_args)).fetchall()
+        except Exception as _e2:
+            logger.warning("dep_health 表读降级（回退兼容键）: %s", _e2)
+        if _tbl_rows:
+            for _r in _tbl_rows:
+                judged.append({"name": _r[0], "cur": _r[1], "latest": _r[2],
+                               "managed_by": "pypi",
+                               "group": "dev" if _r[0] in dev_names else "runtime",
+                               "judge_class": _r[3], "judge_why": _r[4],
+                               "has_update": has_update_of(_r[3])})
+        else:
+            _rows_raw = business_redis().get("sec:dep_audit:rows")
+            for row in (json.loads(_rows_raw) if _rows_raw else ()):
+                judged.append({"name": row["name"], "cur": row.get("cur"),
+                               "latest": row.get("latest"),
+                               "managed_by": "local" if row.get("local") else "pypi",
+                               "group": row.get("group"),
+                               "judge_class": row.get("judge_class") or "unknown",
+                               "judge_why": row.get("judge_why") or "",
+                               "has_update": has_update_of(row.get("judge_class"))})
         os_c = contract.get("os") or {}
         # 批 156（schema 2）：OS 全量行——upgrades 可达口径+all_repos 无坐标判定
         if _sv == 2:

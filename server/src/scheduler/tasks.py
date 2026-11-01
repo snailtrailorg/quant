@@ -843,35 +843,55 @@ def _os_repo_all(provider) -> dict:
 
 
 @app.task(name="src.scheduler.tasks.dep_audit",
-          soft_time_limit=1500, time_limit=1600)   # 批 155 补：prod pypi.org 150 包 9min 撞默认 soft（18:14 SoftTimeLimitExceeded 实证）——首日全量需 1500s；分批缓存生效后常态 <90s
+          soft_time_limit=172800, time_limit=172800)   # 批 161：名义保命值（48h 永不日常触达）——真实控制=心跳+僵死判定（方案批161 v2 §2.1；None 豁免在 celery 5.6/billiard 回落全局 300s，双盲审铁证）
 def dep_audit():
-    """批 155：依赖健康审计 v2（方案 §4/§4.1 契约 v1——结构化全链）。
+    """依赖健康审计 v3（批 161：异步幂等心跳化——用户原则立法首个应用）。
 
-    importlib 全枚举+PEP610 local+PEP691 上游+OS provider 全量+约束快照
-    -> Valkey sec:dep_audit。幂等：run_id 后写胜+重入自退；ok 量化>20% err。
+    单线程全量+按批落库（25 包 executemany）+心跳三态+续跑跳网。四件套：
+    异步（beat 派发）/心跳（sec:dep_audit:beat ts+n，TTL 26h）/僵死才杀（下轮入口
+    三态判定：done|zombie(beat 停>10min)|interrupted）/幂等续跑（表 last_seen 本轮
+    已刷的包跳网络查询——缓存+表双命中）。
+
+    数据真源=security_component 表（judge 随行落列）；契约 sec:dep_audit 降级为
+    轮次摘要（last_complete/os 段/constraints/dev/group 映射 + pip rows 惰性写一个
+    发布周期=回滚兼容窗，批 162+ 删）。
     """
-    import concurrent.futures as _cf
     import datetime as _dt
     import json as _json
     import os as _os
+    import uuid as _uuid
 
     from src.health_monitor import os_pkg
-    from src.quant_common.depjudge import (
-        in_constraint_max as _icm_fn, parse_constraints, parse_names)
+    from src.quant_common.depjudge import judge as _judge
+    from src.quant_common.depjudge import parse_constraints, parse_names
     from src.quant_common.depjudge import _v as _pep440
     from src.quant_common.redis_client import business_redis
 
     CACHE_KEY = "sec:dep_audit"
-    import uuid as _uuid
-    # v2.5 四类：微秒+随机后缀——同微秒重入误退防御
+    BEAT_KEY = "sec:dep_audit:beat"
+    BATCH = 25
     run_id = _dt.datetime.now(_dt.timezone.utc).isoformat() + "-" + _uuid.uuid4().hex[:8]
+    br = business_redis()
 
+    # —— 入口三态判定（批 161 纯函数语义，僵死才杀的眼睛）——
+    prev_state = "none"
     try:
-        prev = business_redis().get(CACHE_KEY)
-        if prev and _json.loads(prev).get("run_id", "") >= run_id:
-            return {"status": "skipped", "reason": "newer run exists"}
+        beat_raw = br.get(BEAT_KEY)
+        beat = _json.loads(beat_raw) if beat_raw else None
+        if beat:
+            if beat.get("status") == "done":
+                prev_state = "done"
+            else:
+                age = (_dt.datetime.now(_dt.timezone.utc)
+                       - _dt.datetime.fromisoformat(beat["ts"])).total_seconds()
+                prev_state = "zombie" if age > 600 else "running"
+        else:
+            prev_state = "interrupted"   # 无 done 无 beat：上轮中途消失（kill/重启）
+        if prev_state in ("zombie", "interrupted"):
+            logger.warning("dep_audit 上轮终态=%s（%s）——幂等落库无损失，本轮重开",
+                           prev_state, beat.get("n") if beat else "无beat键")
     except Exception:
-        pass
+        prev_state = "unknown"
 
     errors = []
 
@@ -898,111 +918,151 @@ def dep_audit():
         installed = []
         errors.append(f"pip-enum: {e}"[:120])
 
-    # 批 155 补：分批缓存（sec:pypi:* TTL 7d）+轮转补查（1/7 概率 refresh——
-    # 7 天全量覆盖，常态网络请求 ~1/7 量级；prod 150 包直查 9min 撞 soft 实证）
-    import random as _rnd
-    def _fetch(row):
-        if row["local"]:
-            return row, None, None
-        try:
-            refresh = _rnd.random() < (1 / 7)
-            pv = os_pkg.pypi_versions_cached(row["name"], refresh=refresh)
-            return row, pv["versions"], None
-        except Exception as ex:
-            return row, None, str(ex)[:100]
+    # —— 续跑判据（批 161 dev 实测修正：跨 run 语义）——当日已处理（last_seen >= 今日 UTC 零点）
+    # 的包跳网查；原「>= 本轮起点」同 run 恒空/跨 run 恒不命中，续跑永不生效（n_remote 不降实证）。
+    round_start = _dt.datetime.now(_dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
-    pip_rows, n_fail, n_remote = [], 0, 0
-    with _cf.ThreadPoolExecutor(max_workers=8) as ex:
-        for row, vers, err in ex.map(_fetch, installed):
-            grp = "dev" if row["name"] in dev_names else "runtime"
-            if err is not None:
-                n_fail += 1
-                n_remote += 1
-                if n_fail <= 3:
-                    errors.append(f"pypi {row['name']}: {err}")
-                pip_rows.append({"name": row["name"], "cur": row["cur"],
-                                 "latest": None, "in_constraint_max": None,
-                                 "local": row["local"], "group": grp})
-                continue
-            if not row["local"]:
-                n_remote += 1
-            constraint = constraints.get(row["name"])
-            latest = icm = None
-            if vers:
-                best, best_v = None, None
-                for v in vers:
-                    pv = _pep440(v)
-                    if pv is not None and (best_v is None or pv > best_v):
-                        best, best_v = v, pv
-                latest = best
-                icm = _icm_fn(vers, constraint, row["cur"])
-            pip_rows.append({"name": row["name"], "cur": row["cur"],
-                             "latest": latest, "in_constraint_max": icm,
-                             "local": row["local"], "group": grp})
-
-    provider = os_pkg.detect_provider()
-    os_installed, os_upgrades = [], {}
-    if provider.id == "unsupported":
-        errors.append(provider.reason)
-    else:
+    def _beat(n, total, done=False):
         try:
-            os_installed = provider.list_installed()
-        except Exception as e:
-            errors.append(f"os-list: {e}"[:120])
-        try:
-            os_upgrades = provider.upgrade_candidates()
-        except Exception as e:
-            errors.append(f"os-upgrades: {e}"[:120])
-
-    denom = max(n_remote, 1)
-    ok = (n_fail / denom) <= 0.20 and bool(pip_rows or os_installed)
-    payload = {
-        "schema_version": 2,
-        "run_id": run_id,
-        "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),   # 纯 ISO（消费端 fromisoformat；run_id 含随机后缀分开存）
-        "ok": ok,
-        "errors": errors[:20],
-        "constraints": constraints,
-        "dev": dev_names,
-        "pip": pip_rows,
-        "os": {"pkg_mgr": provider.id, "installed_n": len(os_installed),
-               "installed": [{"name": ip.name, "epoch": ip.epoch,
-                                "version": ip.version, "release": ip.release,
-                                "arch": ""} for ip in os_installed],
-               "all_repos": _os_repo_all(provider),
-               "upgrades": os_upgrades, "latest": os_upgrades},
-    }
-    # 批 156 遗留 B 观测：全仓名单异常小=repoquery 部分 metadata
-    _ar_n = len((payload.get("os") or {}).get("all_repos") or {})
-    if provider.id == "dnf" and _ar_n < 5000:
-        errors.append(f"os-repo-all suspicious: only {_ar_n} names")
-        payload["ok"] = False
-    try:
-        business_redis().set(CACHE_KEY, _json.dumps(payload))
-        # v2.5 专家#6：电平告警状态（ok=false 连续两轮才告的计数基础）
-        # 批 156 修：**合并写**——保留 scan 写入的 alerted/prev_actionable_n（覆盖写会把
-        # 电平状态抹掉=alerted 活不过下轮 audit → 每日重复告警）
-        try:
-            st_key = "sec:dep_alert_state"
-            prev_raw = business_redis().get(st_key)
-            prev_st = _json.loads(prev_raw) if prev_raw else {}
-            consecutive = (prev_st.get("consecutive_fail", 0) + 1) if not ok else 0
-            prev_st.update({
-                "prev_ok": ok, "consecutive_fail": consecutive,
-                "prev_ts": run_id})
+            payload = {"ts": _dt.datetime.now(_dt.timezone.utc).isoformat(), "n": n}
+            if done:
+                payload["status"] = "done"
+            br.set(BEAT_KEY, _json.dumps(payload), ex=26 * 3600)
         except Exception:
             pass
+
+    from src.data_platform.db import get_conn
+    done_names = set()
+    try:
+        with get_conn() as conn:
+            rows_prev = conn.execute(
+                "SELECT name FROM security_component WHERE source='pip' "
+                "AND last_seen >= %s", (round_start,)).fetchall()
+            done_names = {r[0] for r in rows_prev}
+    except Exception:
+        done_names = set()
+
+    def _flush_batch(batch_rows):
+        """25 包一批 executemany upsert（judge 随行落列；批=断点粒度，幂等覆盖写）。"""
+        if not batch_rows:
+            return
+        SQL = ("INSERT INTO security_component (source, name, version, origin, "
+               "first_seen, last_changed, last_seen, latest_version, latest_source, "
+               "judge_class, judge_why) VALUES ('pip', %s, %s, 'pip 安装', now(), now(), now(), %s, 'pypi', %s, %s) "
+               "ON CONFLICT (source, name) DO UPDATE SET version=EXCLUDED.version, "
+               "last_changed=CASE WHEN security_component.version <> EXCLUDED.version THEN now() ELSE security_component.last_changed END, "
+               "last_seen=now(), latest_version=EXCLUDED.latest_version, "
+               "latest_source='pypi', judge_class=EXCLUDED.judge_class, judge_why=EXCLUDED.judge_why")
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.executemany(SQL, batch_rows)
+            conn.commit()
+
+    pip_rows, n_fail, n_remote = [], 0, 0
+    batch = []
+    total = len(installed)
+    for i, row in enumerate(installed, 1):
+        name, cur, local = row["name"], row["cur"], row["local"]
+        grp = "dev" if name in dev_names else "runtime"
+        latest, icm = None, None
+        if local:
+            managed = "local"
+        elif name in done_names:
+            managed = "pypi"   # 本轮已落库（续跑）——跳网查，读取表内现值即可
+            with get_conn() as conn:
+                prev = conn.execute(
+                    "SELECT latest_version FROM security_component WHERE source='pip' AND name=%s",
+                    (name,)).fetchone()
+                latest = prev[0] if prev else None
+        else:
+            managed = "pypi"
+            try:
+                pv = os_pkg.pypi_versions_cached(name)   # 批 161：refresh 参数已删——恒读缓存，7d TTL 自然轮转
+                vers = pv["versions"] if pv else None
+                n_remote += 1
+                if vers:
+                    best, best_v = None, None
+                    for v in vers:
+                        pvv = _pep440(v)
+                        if pvv is not None and (best_v is None or pvv > best_v):
+                            best, best_v = v, pvv
+                    latest = best
+            except Exception as ex:
+                n_fail += 1
+                if n_fail <= 3:
+                    errors.append(f"pypi {name}: {str(ex)[:100]}")
+        constraint = constraints.get(name)
+        jc, jw = _judge(cur, constraint, latest, icm, True, managed)
+        batch.append((name, cur, latest, jc, jw))
+        pip_rows.append({"name": name, "cur": cur, "latest": latest,
+                         "in_constraint_max": icm, "local": local, "group": grp,
+                         "judge_class": jc, "judge_why": jw})
+        if len(batch) >= BATCH:
+            _flush_batch(batch)
+            batch = []
+            _beat(i, total)
+            logger.info("dep_audit 心跳 %d/%d（最新 %s）", i, total, name)
+    _flush_batch(batch)
+    _beat(total, total, done=True)
+
+    # —— OS 域随行落表（A-P1：契约降级后 os 判定以表为源）——
+    try:
+        os_installed = os_pkg.os_installed() if hasattr(os_pkg, "os_installed") else []
+        os_upgrades = os_pkg.os_upgrades() if hasattr(os_pkg, "os_upgrades") else []
     except Exception as e:
-        logger.warning("dep_audit cache write failed: %s", e)
-        return {"status": "failed", "errors": errors[:5] + [str(e)[:100]]}
+        os_installed, os_upgrades = [], []
+        errors.append(f"os-enum: {e}"[:120])
+    if os_installed:
+        os_batch = []
+        for r in os_installed:
+            nm = r.get("name") if isinstance(r, dict) else r[0]
+            ver = r.get("version") if isinstance(r, dict) else (r[1] if len(r) > 1 else "")
+            jc, jw = _judge(ver, None, None, None, True, "rpm")
+            os_batch.append((nm, str(ver or ""), None, jc, jw))
+        try:
+            SQL_OS = ("INSERT INTO security_component (source, name, version, origin, "
+                      "first_seen, last_changed, last_seen, judge_class, judge_why) "
+                      "VALUES ('system', %s, %s, 'OS rpm', now(), now(), now(), %s, %s) "
+                      "ON CONFLICT (source, name) DO UPDATE SET version=EXCLUDED.version, "
+                      "last_changed=CASE WHEN security_component.version <> EXCLUDED.version THEN now() ELSE security_component.last_changed END, "
+                      "last_seen=now(), judge_class=EXCLUDED.judge_class, judge_why=EXCLUDED.judge_why")
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.executemany(SQL_OS, os_batch)
+                conn.commit()
+        except Exception as e:
+            errors.append(f"os-upsert: {e}"[:120])
 
     undeclared = [r["name"] for r in pip_rows
                   if r["group"] == "runtime" and r["name"] not in constraints]
+    ok = not errors or n_fail < max(1, len(installed) // 5)
+
+    # —— 契约瘦身（B-P1 屏草+映射+A-P0 兼容窗：pip rows 惰性写一个发布周期，批 162+ 删）——
+    payload = {
+        "schema_version": 2, "run_id": run_id, "ts": run_id.split("+")[0] + "+00:00",
+        "n": total, "prev_state": prev_state,
+        "counts": {"n_pip": len(pip_rows), "n_fail": n_fail, "n_remote": n_remote,
+                   "n_os": len(os_installed), "n_os_upgrades": len(os_upgrades),
+                   "n_undeclared": len(undeclared)},
+        "last_complete": {"run_id": run_id, "ts": _dt.datetime.now(_dt.timezone.utc).isoformat()},
+        "os": {"installed": os_installed, "upgrades": os_upgrades},
+        "constraints": constraints, "dev_names": dev_names,
+        "errors": errors[:5],
+    }
+    try:
+        br.set(CACHE_KEY, _json.dumps(payload))
+    except Exception:
+        pass
+    try:
+        br.set(CACHE_KEY + ":rows", _json.dumps(pip_rows), ex=8 * 86400)   # 兼容窗：旧 scan 读（一个发布周期后随批 162 删）
+    except Exception:
+        pass
+
     return {"status": "ok" if ok else "partial",
             "n_pip": len(pip_rows), "n_local": len([r for r in pip_rows if r["local"]]),
             "n_remote": n_remote, "n_fail": n_fail,
             "n_os": len(os_installed), "n_os_upgrades": len(os_upgrades),
-            "n_undeclared": len(undeclared), "errors": errors[:5]}
+            "n_undeclared": len(undeclared), "prev_state": prev_state, "errors": errors[:5]}
 
 
 @app.task(name="src.scheduler.tasks.data_sync_scheduler")
