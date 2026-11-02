@@ -1,15 +1,17 @@
 <template>
+  <!-- 批163 v3（用户定版=集成中心同构）：TabsShell 进 header 槽（进去即页签，无标题/无描述行）；
+       页签内容=内嵌 el-card（蹭 tokens:185 字体特判防 header 样式连坐——v1 教训），刷新钮在各卡头。 -->
   <el-card>
     <template #header>
-      <div style="display:flex; justify-content:space-between; align-items:center">
-        <span>{{ t('permRes.title') }}</span>
-        <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
-      </div>
-    </template>
-    <el-alert type="info" :closable="false" style="margin-bottom: var(--sp-3)" :title="t('permRes.redline')" />
     <TabsShell :tabs="tabs" default-tab="nav" v-slot="slotProps">
       <!-- 菜单页签（唯一可编辑面：分组/排序/显示名覆盖/停用） -->
-      <template v-if="slotProps.tab === 'nav'">
+      <el-card v-if="slotProps.tab === 'nav'">
+        <template #header>
+          <div style="display:flex; justify-content:space-between; align-items:center">
+            <span style="font-weight: 600">{{ t('permRes.listNav') }}</span>
+            <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
+          </div>
+        </template>
         <TableShell :data="rows.nav" storage-key="perm-res-nav">
           <el-table-column prop="id" :label="t('permRes.colId')" min-width="120">
             <template #default="{ row }"><span class="key-id">{{ row.id }}</span></template>
@@ -34,16 +36,21 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="actions" :label="t('common.action')" width="90">
-            <template #default="{ row }">
-              <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openEdit(row)" />
-            </template>
-          </el-table-column>
+            <el-table-column prop="actions" :label="t('common.action')" width="90">
+              <template #default="{ row }">
+                <IconBtn size="small" :icon="Edit" :title="t('common.edit')" @click="openEdit(row)" />
+              </template>
+            </el-table-column>
         </TableShell>
-      </template>
+      </el-card>
       <!-- API 键页签（只读+绑定端点反查+锁键标注） -->
-      <template v-else-if="slotProps.tab === 'api'">
-        <div class="bind-note">{{ t('permRes.bindingsNote') }} · {{ t('permRes.nBindings', { n: rows.bindings_total }) }}</div>
+      <el-card v-else-if="slotProps.tab === 'api'">
+        <template #header>
+          <div style="display:flex; justify-content:space-between; align-items:center">
+            <span style="font-weight: 600">{{ t('permRes.listApi') }}</span>
+            <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
+          </div>
+        </template>
         <TableShell :data="rows.api" storage-key="perm-res-api">
           <el-table-column prop="key" :label="t('permRes.colId')" min-width="170">
             <template #default="{ row }"><span class="key-id">{{ row.key }}</span></template>
@@ -67,9 +74,15 @@
             </template>
           </el-table-column>
         </TableShell>
-      </template>
+      </el-card>
       <!-- 市场键页签（只读） -->
-      <template v-else>
+      <el-card v-else>
+        <template #header>
+          <div style="display:flex; justify-content:space-between; align-items:center">
+            <span style="font-weight: 600">{{ t('permRes.listMkt') }}</span>
+            <IconBtn :icon="Refresh" :title="t('common.refresh')" @click="load" />
+          </div>
+        </template>
         <TableShell :data="rows.market_op.map(k => ({ key: k }))" storage-key="perm-res-market">
           <el-table-column prop="key" :label="t('permRes.colId')" min-width="130">
             <template #default="{ row }"><span class="key-id">{{ row.key }}</span></template>
@@ -85,10 +98,12 @@
             </template>
           </el-table-column>
         </TableShell>
-      </template>
+      </el-card>
     </TabsShell>
+    </template>
+  </el-card>
 
-    <!-- 编辑弹窗（nav 条目四字段；条目集不可增删红线） -->
+  <!-- 编辑弹窗（nav 条目四字段；条目集不可增删红线） -->
     <el-dialog v-model="editDlg" :close-on-click-modal="false" :title="t('permRes.editTitle')" width="440px">
       <el-form label-width="110px">
         <el-form-item :label="t('permRes.colId')"><el-input :model-value="editing.id" disabled /></el-form-item>
@@ -104,7 +119,6 @@
         <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
-  </el-card>
 </template>
 
 <script setup>
