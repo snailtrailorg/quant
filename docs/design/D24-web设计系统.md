@@ -185,3 +185,7 @@ Element Plus 落地要整组做（初版低估，盲审修正）：
 - **守门 check-pageshell.mjs** 两规则：
   - R1（改）：**el-card header 槽内出现 TabsShell**（=壳模式）或裸表格 → 报错。v2 后 header 槽模式整体非法，R1 同时抓「壳回归」与「裸表连坐」两类。
   - R2（不变）：shadow=never 基线计数（豁免 card-grid 内嵌），只降不升。
+## 9. 组件分级表（2026-11-02 立）——一致性核心=shadow，由 R2 门守；本表=选用速查不新增门（用户裁定）
+ ### 9.1 结构层：TabsShell（页签栏唯一）/TableShell（表壳）/ContentCard（内容卡壳）——禁裸 el-table（已零）、手写 header div（渐进消化）
+ ### 9.2 交互律层：IconBtn / RowFilter / ColumnSettings / RefreshBtn——已由 §7 立规+BTN 维守门
+ ### 9.3 展示层：StatusTag（状态色内聚）/ KpiCard（JBMono+600）/ EmptyState / Avatar——禁裸 el-tag 三元色与手写大数字 div（评审语言暂不设门——一致性核心 shadow 已由 R2 守）
