@@ -5,7 +5,7 @@
        编辑入口在集成中心·数据源 tab（set_positions）。后端 PATCH /routing/policies 与 _score 机制保留，
        M3+ quality 真实化时随该批恢复 UI。页面更名「路由诊断」，自 ops 组菜单降为数据管理页 tab。 -->
   <div>
-    <el-card shadow="never" style="margin-bottom: var(--sp-3)">
+    <el-card style="margin-bottom: var(--sp-3)">
       <template #header><span style="font-weight: 600">{{ t('routing.rtDryTitle') }}</span></template>
       <el-alert type="info" :title="t('routing.rtDryTip')" :closable="false" style="margin-bottom: var(--sp-3)" />
       <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3)">
@@ -36,7 +36,7 @@
       </template>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card>
       <template #header><span style="font-weight: 600">{{ t('routing.rtAuditTitle') }}</span></template>
       <TableShell :data="decisions" storage-key="routing-decisions" size="small">
         <el-table-column :label="t('routing.rtColTime')" min-width="150"

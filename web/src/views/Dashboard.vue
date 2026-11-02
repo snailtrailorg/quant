@@ -24,7 +24,7 @@
       <KpiCard :label="t('trading.totalAssets')" :value="fmtMoney(dashboard.total_value)" :spark="sparkVals" />
       <KpiCard :label="t('trading.todayPnl')" :value="pnlArrow(dashboard.daily_pnl) + ' ' + fmtMoney(dashboard.daily_pnl)" :tone="pnlClass(dashboard.daily_pnl)" />
       <KpiCard :label="t('trading.totalPnl') + '（' + t('dashboard.sinceInception') + '）'" :value="pnlArrow(dashboard.total_pnl) + ' ' + fmtMoney(dashboard.total_pnl)" :tone="pnlClass(dashboard.total_pnl)" />
-      <div class="kpi-cell"><el-card shadow="never"><div class="kpi">
+      <div class="kpi-cell"><el-card><div class="kpi">
         <div class="klabel">{{ t('dashboard.riskGauge') }}</div>
         <div class="kpi-num" :style="{ color: gaugeColor }">{{ ((riskMetrics.total_drawdown || 0) * 100).toFixed(1) }}%</div>
         <el-progress :percentage="ddPct" :color="gaugeColor" :stroke-width="8" :show-text="false" style="margin-top: var(--sp-1)" />
@@ -36,7 +36,7 @@
            批 86-B：无 live_control 时实盘任务列整列不渲染，曲线列扩满整行（不留 9 栅空位）。 -->
       <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
       <el-col :xs="24" :sm="24" :md="canLive ? 15 : 24">
-        <el-card shadow="never">
+        <el-card>
           <template #header>
             <div style="display:flex; justify-content:space-between; align-items:center">
               {{ t('dashboard.equityCurve') }}
@@ -50,7 +50,7 @@
         </el-card>
       </el-col>
       <el-col v-if="canLive" :xs="24" :sm="24" :md="9">
-        <el-card shadow="never">
+        <el-card>
           <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.liveTasks') }}<el-button text size="small" @click="$router.push('/live-task')">{{ t('dashboard.more') }}→</el-button></div></template>
           <div v-for="task in liveTasks.slice(0, 5)" :key="task.id" class="task-row">
             <span class="dot" :class="task.status" />{{ task.name }}
@@ -60,7 +60,7 @@
           <EmptyState size="small" :description="t('dashboard.noTasks')" :action-label="t('dashboard.goStrategy')" @action="$router.push('/live-task')" />
         </el-card>
         <!-- 今日事件（简化：今日 risk/data 类通知） -->
-        <el-card shadow="never" style="margin-top: var(--sp-4)">
+        <el-card style="margin-top: var(--sp-4)">
           <template #header>{{ t('dashboard.todayEvents') }}</template>
           <div v-for="n in todayEvents.slice(0, 4)" :key="n.id" class="evt-row">⚠ {{ n.title }}</div>
           <EmptyState size="small" :description="t('dashboard.noEvents')" />
@@ -70,7 +70,7 @@
 
     <!-- 底排：持仓 Top5 / 今日订单流 / 数据健康 / 最近回测（wd-14 §2.4：≥992 四列 / 768-991 两列 / <768 堆叠） -->
     <el-row class="resp-row" :gutter="16" style="margin-top: var(--sp-4)">
-      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
+      <el-col :xs="24" :sm="12" :md="6"><el-card>
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.topPositions') }}<el-button text size="small" @click="$router.push('/trading')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="p in topPositions" :key="p.symbol" class="pos-row">
           <span>{{ (p.symbol || '').split('.')[0] }}</span>
@@ -78,7 +78,7 @@
         </div>
         <EmptyState size="small" :description="t('dashboard.noPositions')" :action-label="t('dashboard.goStrategy')" @action="$router.push('/trading')" />
       </el-card></el-col>
-      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
+      <el-col :xs="24" :sm="12" :md="6"><el-card>
         <template #header>{{ t('dashboard.todayOrders') }}</template>
         <div v-for="o in todayOrders.slice(0, 6)" :key="o.id" class="evt-row">
           <el-tag size="small" :type="o.action === 'BUY' ? 'danger' : 'success'">{{ o.action === 'BUY' ? t('dashboard.buy') : t('dashboard.sell') }}</el-tag>
@@ -87,13 +87,13 @@
         </div>
         <EmptyState size="small" :description="t('dashboard.noOrders')" />
       </el-card></el-col>
-      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
+      <el-col :xs="24" :sm="12" :md="6"><el-card>
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.dataHealth') }}<el-button text size="small" @click="$router.push('/data-integrity')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div class="evt-row">{{ t('dashboard.complete') }}: <b class="num" style="color: var(--success)">{{ integrity.complete || 0 }}</b></div>
         <div class="evt-row">{{ t('dashboard.missing') }}: <b class="num" style="color: var(--critical)">{{ integrity.missing || 0 }}</b></div>
         <div class="evt-row" style="color: var(--text-secondary); font-size: var(--fs-foot)">{{ t('dashboard.dataHealthNote') }}</div>
       </el-card></el-col>
-      <el-col :xs="24" :sm="12" :md="6"><el-card shadow="never">
+      <el-col :xs="24" :sm="12" :md="6"><el-card>
         <template #header><div style="display:flex; justify-content:space-between">{{ t('dashboard.recentBacktests') }}<el-button text size="small" @click="$router.push('/backtest')">{{ t('dashboard.more') }}→</el-button></div></template>
         <div v-for="b in recentBacktests.slice(0, 4)" :key="b.id" class="evt-row">
           #{{ b.id }}

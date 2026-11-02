@@ -2,7 +2,7 @@
   <!-- 批 56a·M1：标的属性查询页（只读——主档+时变时间线+时段表；29 号 §四面三件套）。
        批 88：自集成中心 security tab 迁入数据管理页（域对齐——security_master 是数据域真源，非集成配置）。 -->
   <div>
-    <el-card shadow="never" style="margin-bottom: var(--sp-3)">
+    <el-card style="margin-bottom: var(--sp-3)">
       <div style="display: flex; gap: 8px; align-items: center">
         <el-input v-model="symbol" :placeholder="t('interfaces.secPh')" style="width: 260px"
                   @keyup.enter="load" clearable />
@@ -14,7 +14,7 @@
               style="margin-bottom: var(--sp-3)" />
 
     <template v-if="data">
-      <el-card shadow="never" style="margin-bottom: var(--sp-3)">
+      <el-card style="margin-bottom: var(--sp-3)">
         <template #header><span style="font-weight: 600">{{ t('interfaces.secTitle') }}</span></template>
         <el-descriptions :column="4" border size="small">
           <el-descriptions-item :label="t('interfaces.secColName')">{{ data.attr.name || '—' }}</el-descriptions-item>
@@ -34,7 +34,7 @@
         </el-descriptions>
       </el-card>
 
-      <el-card shadow="never" style="margin-bottom: var(--sp-3)">
+      <el-card style="margin-bottom: var(--sp-3)">
         <template #header><span style="font-weight: 600">{{ t('interfaces.secTimelineTitle') }}</span></template>
         <el-timeline v-if="data.states.length" style="padding-left: var(--sp-1)">
           <el-timeline-item v-for="(s, i) in data.states" :key="i" :timestamp="s.effective_from" placement="top">
@@ -48,7 +48,7 @@
         </div>
       </el-card>
 
-      <el-card shadow="never">
+      <el-card>
         <template #header><span style="font-weight: 600">{{ t('interfaces.secSessionsTitle') }}</span></template>
         <!-- 批 56a 盲审修：TableShell 壳（29 号 §一第四铁律——新页表格禁裸 el-table） -->
         <TableShell :data="data.sessions" storage-key="security-sessions" size="small">

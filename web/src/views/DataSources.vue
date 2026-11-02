@@ -5,7 +5,7 @@
        今日调用量卡片 + Tushare 限速/熔断折叠面板（数据源侧运维参数）。
        API 密钥账户卡（P4-5 accounts 表，实盘任务绑定用）随账号语义迁「交易账号」页签。 -->
   <div>
-    <el-card v-if="usage.today && usage.today.length" shadow="never" style="margin-bottom: var(--sp-3)">
+    <el-card v-if="usage.today && usage.today.length" style="margin-bottom: var(--sp-3)">
       <div style="font-weight: bold; margin-bottom: var(--sp-2)">{{ t('dataSources.usageTitle') }}</div>
       <TableShell :data="usage.today" storage-key="datasource-usage">
         <el-table-column prop="provider" label="Provider" min-width="120" />

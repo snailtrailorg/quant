@@ -6,7 +6,7 @@
         <!-- ═══ 页签一：用户列表（=原设置·账号+邀请，列精简/两操作/批量删） ═══ -->
         <div v-if="slotProps.tab === 'users'">
           <!-- 批16 补齐：区块卡片层（其他多区块页均有 el-card 分节，本页原裸 div+h3——用户实测点名不一致） -->
-          <el-card shadow="never" style="margin-bottom: var(--sp-3)">
+          <el-card style="margin-bottom: var(--sp-3)">
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('account.userMgmt') }}</span>
@@ -83,7 +83,7 @@
           </el-dialog>
 
           <!-- 邀请记录（批17 17D 用户裁定：去批量选择，行级删除+撤销） -->
-          <el-card shadow="never">
+          <el-card>
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('account.inviteLog') }}</span>
@@ -134,7 +134,7 @@
         <!-- ═══ 页签二：用户群组（批11B：动态用户组——四内置锁名+自定义组增删改） ═══ -->
         <div v-else>
           <!-- 批16 补齐：区块卡片层（同页签一） -->
-          <el-card shadow="never">
+          <el-card>
             <template #header>
               <div style="display: flex; justify-content: space-between; align-items: center">
                 <span>{{ t('um.tabGroups') }}</span>
