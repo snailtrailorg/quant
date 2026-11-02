@@ -1,6 +1,4 @@
 <template>
-  <el-card>
-    <template #header>
       <!-- 批11：用户管理页（系统管理第一项）——两页签：用户列表 / 用户群组（批 B 填实） -->
       <TabsShell :tabs="tabs" default-tab="users" v-slot="slotProps">
         <!-- ═══ 页签一：用户列表（=原设置·账号+邀请，列精简/两操作/批量删） ═══ -->
@@ -197,8 +195,6 @@
           </el-dialog>
         </div>
       </TabsShell>
-    </template>
-  </el-card>
 </template>
 
 <script setup>

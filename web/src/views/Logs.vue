@@ -1,12 +1,11 @@
 <template>
-  <div>
-    <!-- 批24 迭代十六 hotfix4（用户裁定：条目级整合非页面拼接）：邮件发送记录映射为日志条目混排进本表
-         （level=status 映射/module=email/msg=收件人+主题+错误），双源合并按时间倒序；
-         分组筛选（级别+模块——模块 distinct 预取自然含 email）+导出（合并行） -->
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: var(--icon-gap); margin-bottom: var(--sp-3)">
+  <ContentCard :title="t('log.listTitle')">
+    <!-- 批24 迭代十六 hotfix4：邮件发送记录映射为日志条目混排进本表（level=status/module=email/msg=收件人+主题+错误）。
+         批163 §8 B 类：包 ContentCard（Observe 页签壳下工作区内容卡——字体保护+卡头动作归位）。 -->
+    <template #actions>
       <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
       <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExport" />
-    </div>
+    </template>
     <el-alert v-if="noPerm" type="warning" :title="t('log.noPerm')" :closable="false" style="margin-bottom: var(--sp-3)" />
     <TableShell v-else :data="filteredLogs" fill infinite :more-text="moreText" :loading="loading"
                 @load-more="onLoadMore" storage-key="logs-run">
@@ -22,11 +21,12 @@
       <el-table-column prop="msg" :label="t('log.content')" show-overflow-tooltip />
     </TableShell>
 
-  </div>
+  </ContentCard>
 </template>
 
 <script setup>
 import TableShell from '../components/TableShell.vue'
+import ContentCard from '../components/ContentCard.vue'
 import RowFilter from '../components/RowFilter.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { fmtTime } from '../utils/fmtTime'

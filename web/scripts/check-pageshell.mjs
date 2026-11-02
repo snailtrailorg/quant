@@ -22,8 +22,10 @@ for (const f of files) {
   const hm = [...s.matchAll(/<template[^>]*#header[^>]*>([\s\S]*?)<\/template>/g)]
   for (const m of hm) {
     const block = m[1]
+    if (/<TabsShell/.test(block))
+      errs.push('R1 ' + f + ': header-with-TabsShell (shell mode retired, D24 s8 v2)')
     if (/<(TableShell|el-table)[\s>]/.test(block) && !/<el-card|<ContentCard/.test(block))
-      errs.push('R1 ' + f + ': header naked-table (D24 8.3.4)')
+      errs.push('R1 ' + f + ': header naked-table (D24 s8 v2)')
   }
   never += (s.match(/shadow="never"/g) || []).length
 }

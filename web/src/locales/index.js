@@ -819,12 +819,14 @@ mail: '邮件 SMTP',
       confirmDelete: '确认删除因子 "{name}"？',
     },
     log: {
+      listTitle: '运行日志列表',   // 批163 §8：页签壳下内容卡卡头标题
       level: '级别',   // 批23：keyword 随死筛选表单退役；AI 归因词条（analyze/analyzeResult/aiTitle/aiAnalyzeCount/analyzeHint/phAnalyze/noResult/analyzeFailed）整链清
       module: '模块',
       content: '内容',
       noPerm: '运行日志仅管理员可见',
       },
     audit: {
+      listTitle: '操作日志列表',   // 批163 §8
       actor: '操作人',
       target: '目标',
     },
@@ -2180,12 +2182,14 @@ mail: 'Email SMTP',
       confirmDelete: 'Confirm delete factor "{name}"?',
     },
     log: {
+      listTitle: 'Run Logs',
       level: 'Level',   // 批23：keyword 随死筛选表单退役；AI 归因词条整链清
       module: 'Module',
       content: 'Content',
       noPerm: 'Run logs are admin-only',
       },
     audit: {
+      listTitle: 'Operation Log',
       actor: 'Actor',
       target: 'Target',
     },

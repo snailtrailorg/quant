@@ -5,14 +5,10 @@
              profile tab 删除——个人中心弹窗唯一入口（头像下拉/深链 ?profile=）
        批33a：perm tab 退役——权限单源化后唯一入口=用户管理·用户群组（PermMatrix 组弹窗）；
              ?tab=perm 深链由 TabsShell 静默回落 default run -->
-  <el-card>
-    <template #header>
       <TabsShell :tabs="visibleTabs" default-tab="run" v-slot="slotProps">
         <RunConfig v-if="slotProps.tab === 'run'" />
         <AlertSettings v-else />
       </TabsShell>
-    </template>
-  </el-card>
 </template>
 <script setup>
 import { computed } from 'vue'

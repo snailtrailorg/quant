@@ -1,14 +1,10 @@
 <template>
   <!-- wd-20 §2.2：TabsShell 壳（label 走 i18n；query ?tab= 同步） -->
-  <el-card>
-    <template #header>
       <TabsShell :tabs="tabs" default-tab="astock" v-slot="slotProps">
               <AScreen v-if="slotProps.tab === 'astock'" />
               <CBScreen v-else-if="slotProps.tab === 'cb'" />
               <ListedFundScreen v-else />
       </TabsShell>
-    </template>
-  </el-card>
 </template>
 <script setup>
 import TabsShell from '../components/TabsShell.vue'

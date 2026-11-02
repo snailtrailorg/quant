@@ -1,8 +1,6 @@
 <template>
   <!-- 批163 v3（用户定版=集成中心同构）：TabsShell 进 header 槽（进去即页签，无标题/无描述行）；
        页签内容=内嵌 el-card（蹭 tokens:185 字体特判防 header 样式连坐——v1 教训），刷新钮在各卡头。 -->
-  <el-card>
-    <template #header>
     <TabsShell :tabs="tabs" default-tab="nav" v-slot="slotProps">
       <!-- 菜单页签（唯一可编辑面：分组/排序/显示名覆盖/停用） -->
       <el-card v-if="slotProps.tab === 'nav'">
@@ -100,8 +98,6 @@
         </TableShell>
       </el-card>
     </TabsShell>
-    </template>
-  </el-card>
 
   <!-- 编辑弹窗（nav 条目四字段；条目集不可增删红线） -->
     <el-dialog v-model="editDlg" :close-on-click-modal="false" :title="t('permRes.editTitle')" width="440px">

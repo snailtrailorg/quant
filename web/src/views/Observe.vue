@@ -3,7 +3,6 @@
        运行状态（资源消耗[原系统指标仅改名]+系统服务+实时连接）/ 运行日志（含底部邮件发件箱——批22 hotfix3
        裁定随迁）/ 审计日志。默认落运行状态。组件全部复用零改动，外层"系统日志"卡壳随页签提升拆除。
        批 120：第四页签「安全」（安全态势五区——SecurityTab）。 -->
-  <div>
     <TabsShell :tabs="tabs" default-tab="status" v-slot="slotProps">
       <div v-if="slotProps.tab === 'status'">
         <SystemMetricsCards />
@@ -14,7 +13,6 @@
       <Audit v-else-if="slotProps.tab === 'audit'" />
       <SecurityTab v-else-if="slotProps.tab === 'security'" />
     </TabsShell>
-  </div>
 </template>
 
 <script setup>

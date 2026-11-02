@@ -1,14 +1,13 @@
 <template>
   <!-- 批23：header 左标题/右动作组（筛选输入→删除→导出）；表加 selection 批删（confirm 数量回显）。
        筛选=本地 computed 即时生效（原表单+查询/重置按钮退役）；导出 IconBtn 化收进动作组。 -->
-  <div>
-    <!-- 批24 迭代十六：el-card 退役（Observe 页签卡内防卡中卡）；筛选文字框→RowFilter 分组（用户+动作，均数据 distinct 预取——
-         用户裁定：用户相关等非固定下拉提前备好）；删除钮图标化（Delete/DeleteFilled） -->
-    <div style="display: flex; justify-content: flex-end; align-items: center; gap: var(--icon-gap); margin-bottom: var(--sp-3)">
-      <!-- 批25：审计删除退役（系统记录，用户裁定 UI 简化）；动作序=筛选→导出 -->
+  <ContentCard :title="t('audit.listTitle')">
+    <!-- 批24 迭代十六原拆卡壳，批163 §8 B 类复归：Observe 页签壳（header 只住页签栏）下工作区直属内容卡——
+         动作序=筛选→导出（批25：删除退役）。 -->
+    <template #actions>
       <RowFilter v-model="rowFilter" :groups="filterGroups" :title="t('common.filter')" />
       <IconBtn size="small" :icon="Download" :title="t('common.export')" @click="onExportCsv" />
-    </div>
+    </template>
     <TableShell :data="logs" fill infinite :more-text="moreText" :loading="loading"
                 @load-more="onLoadMore" storage-key="audit">
       <el-table-column prop="ts" :label="t('common.time')" width="220">   <!-- 批53:固定退出弹性(实测 428) -->
@@ -19,7 +18,7 @@
       <el-table-column prop="target" :label="t('audit.target')" min-width="150" />
       <el-table-column prop="detail" :label="t('common.detail')" show-overflow-tooltip />
     </TableShell>
-  </div>
+  </ContentCard>
 </template>
 
 <script setup>
@@ -27,6 +26,7 @@ import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import TableShell from '../components/TableShell.vue'
+import ContentCard from '../components/ContentCard.vue'
 import { fmtTime } from '../utils/fmtTime'
 import api, { apiErr } from '../api'
 import IconBtn from '../components/IconBtn.vue'

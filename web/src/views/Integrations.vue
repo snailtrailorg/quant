@@ -1,14 +1,10 @@
 <template>
   <!-- wd-20 §2.2：TabsShell 壳（集成中心七合一，动态组件；label 走 i18n 消灭中文字面量） -->
-  <el-card>
-    <template #header>
       <TabsShell :tabs="tabs" default-tab="mail" v-slot="slotProps">
         <!-- 批39 A-P1-2：空 tabs（无任一页签权限/meOnce 失败）渲染空态——原 tabs[0].c 抛 TypeError 白屏 -->
         <EmptyState v-if="!tabs.length" :description="t('common.noPerm')" />
         <component :is="(tabs.find(x => x.key === slotProps.tab) || tabs[0])?.c" v-else />
       </TabsShell>
-    </template>
-  </el-card>
 </template>
 <script setup>
 import { ref, computed, onMounted } from 'vue'
