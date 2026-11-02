@@ -10,7 +10,8 @@
         <ServiceStatusCards style="margin-top: var(--sp-4)" />
         <ConnectionCards style="margin-top: var(--sp-4)" />
       </div>
-      <SysLogs v-else-if="slotProps.tab === 'syslogs'" />   <!-- 批163：logs+audit 合并（内分两子签） -->
+      <Logs v-else-if="slotProps.tab === 'logs'" />
+      <Audit v-else-if="slotProps.tab === 'audit'" />
       <SecurityTab v-else-if="slotProps.tab === 'security'" />
     </TabsShell>
   </div>
@@ -21,11 +22,13 @@ import TabsShell from '../components/TabsShell.vue'
 import SystemMetricsCards from '../components/SystemMetricsCards.vue'
 import ServiceStatusCards from '../components/ServiceStatusCards.vue'
 import ConnectionCards from '../components/ConnectionCards.vue'
-import SysLogs from './SysLogs.vue'
+import Logs from './Logs.vue'
+import Audit from './Audit.vue'
 import SecurityTab from '../components/SecurityTab.vue'
 const tabs = [
   { key: 'status', i18nKey: 'sysmon.runStatus' },   // 批31：页签提升（监控专名进 sysmon 域，共享 tabs 域不染）
-  { key: 'syslogs', i18nKey: 'sysmon.sysLogs' },   // 批163：logs+audit 两签合并（内分子签，SysLogs.vue）
+  { key: 'logs', i18nKey: 'tabs.logs' },
+  { key: 'audit', i18nKey: 'tabs.audit' },
   { key: 'security', i18nKey: 'sysmon.tabSecurity' },   // 批 120：安全态势（键住 sysmon 域——同页签域不外泄）
 ]
 </script>
