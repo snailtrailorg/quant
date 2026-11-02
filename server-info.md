@@ -25,8 +25,9 @@
 - **PG18**：QUANT_DB_URL 在 shared/.env；alembic 经 `quant-alembic-wrapper`（发布阶段 5）；**PGDATA=`/data/databases/pgsql`（非默认路径）**。库 ~11G=活数据紧凑态（bar_1d heap 2.6G+idx 2.1G / daily_basic 1.1G+0.9G——批 143 REINDEX+VACUUM FULL 后）；**grype-db 3.1G=单活动漏洞库（grype v6）正常体量，勿清**
 - **备份**：celery 任务 `backup_db`（beat 02:00 queue=data，批 159 收编——四道防线：双 rc/tmp 原子转正/流式/空间预检；**cron 面已清零，11-01 删 crontab+装位收官**），产物 `/home/quant/backups/`，**保留最新 3 份**（2026-10-31 裁定）；dump ~930M/份；**恢复演练已过（备份可兜底）**，工具 `scripts/backup-restore-drill.sh`（本地跑，前置临时授权见脚本头）
 - **磁盘水位**：根盘 40G 用量 78%（journal 已 cap 200M）；bar 表无分区/清理策略=矩阵 F-17 开放项
-- **Valkey 分库**：db4=业务（心跳/熔断/锁/流）、db5=Celery broker、db6=Celery result；关键键：`quant:hb:md-hub`(HASH 8 字段)、`quant:hb:task:{tid}`、`hub:lease`/`hub:gen`(fencing)
+- **Valkey 分库**（2026-11-02 实测键数校准）：db0=空（DEFAULT 备而未用）、**db4=业务+feishu 长连接（~297 键）**、**db5=Celery broker（~27 键）**、**db6=Celery result（~6.5k 键，TTL 堆积常态）**；关键键：`quant:hb:md-hub`(HASH 8 字段)、`quant:hb:task:{tid}`、`hub:lease`/`hub:gen`(fencing)。⚠️ 排障裸连（redis-cli/redis.Redis() 默认 db0=空库）——业务查询必须 -n 4（11-02 裸连 None 假象教训）
 - **密钥**：SECRET_KEY 单根密钥，HKDF 派生 JWT_SECRET + ENCRYPTION_KEY(Fernet)
+- **OS 级调优**：`vm.overcommit_memory=1`（2026-11-02 随批 162 开；运行时+`/etc/sysctl.d/99-valkey-overcommit.conf` 持久化）——KV 后端 BGSAVE fork 依赖 overcommit，关闭时低内存下后台保存可能失败；valkey 启动日志会 WARN
 
 ## 自检命令（AI 对应检查用；一律走 deploy/.venv ansible）
 ```bash
