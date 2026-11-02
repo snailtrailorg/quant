@@ -19,7 +19,7 @@
 | # | 动作 | 执行者 | 验证标准 |
 |---|---|---|---|
 | 0.1 | prod 装 valkey（EPEL）：`dnf install valkey` | michael | `rpm -q valkey` = 8.0.11-1.el8；`systemctl is-enabled valkey` = disabled（装包不起服务） |
-| 0.2 | 读 redis 现配对齐生成 valkey.conf：bind 127.0.0.1/port **6380**（临时位）/appendonly/maxmemory/dir 与 redis 同值（数据目录建议 /var/lib/valkey 独立，窗内拷 RDB 入） | michael 读 root 面 conf + 助手比对 | `valkey-server /etc/valkey/valkey.conf --test-memory 2` 语法过（或 systemd start 即起即停验证）；与 /etc/redis.conf 逐键 diff 人工核对 |
+| 0.2 | valkey.conf 对齐稿已生成 ✅ 2026-11-02：逐键对照完成（redis 20 行实读 vs valkey 出厂）——仅 bind 同值/port 6380/dir /var/lib/valkey 三处差异+logfile 换目录；单元形态定谳（ExecStart 自带 --supervised systemd+User=valkey+RuntimeDirectory=valkey——conf 不写 supervised/pidfile）；**conf 终版已备（十行）**窗内 michael 首条即 cp | 助手 | conf 十行定稿（对齐稿存 batch162 工作档）；数据面：prod dump.rdb 5.9MB 迁移秒级 |
 | 0.3 | 扫描跟改提交+上产：security_collector _rpm_map 加 "valkey": "redis"（组件键延续） | 助手 | 回归绿+staging 彩排+prod 发布；下轮 scan 组件面 KV 行仍出（redis 6.2.24） |
 | 0.4 | dev 演练 RDB 路径：本机 valkey 导出 RDB→新起 valkey 加载→dbsize+抽样键对拍 | 助手 | 演练脚本三步全过（ dbsize 相等/抽样 20 键值相等/TTL 数相等） |
 | 0.5 | 切换窗预演（staging 不动——staging 已是 valkey；本步=清单桌面走查+回滚路径确认） | 助手 | 清单每步有验证标准+回滚动作，无开放问题 |
