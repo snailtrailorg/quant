@@ -9,23 +9,50 @@
 2. **彩排保真度缺口**：staging 验的是 valkey 行为，prod 跑的是 redis——Streams 消费语义边缘差异测不到。
 3. **文档失真**：CLAUDE.md/server-info 记「Valkey」，prod 实况 redis——名实不符。
 
-## 二、迁移方案（一个盘后窗 ~30min）
+## 二、迁移窗口逐步执行清单（盘后 15:05 后 · 三阶段 · 每步带验证标准与回滚点）
 
-### 2.1 前置（窗前完成，零停机）
-- prod 装包（EPEL valkey 8.0.11）——装包不起服务。
-- 配置：/etc/valkey/valkey.conf 对齐现 redis 配置（bind 127.0.0.1/port 6379 **先改 6380 临时位**/appendonly 与 maxmemory 同值对齐）。
-- dev 演练：本机 valkey 同为 8.x，RDB 加载路径 dev 先走一遍（--rdb 导出→valkey 加载→dbsize 对拍）。
+> 执行主体：助手（ansible 通道+API 验证）；michael 仅 sudoers 面四条（装包/停 redis/起 valkey/降级 redis）。
+> 原则：每步验证绿才进下一步；任一步红走该步标注的回滚动作。窗内应用全停=无写入，RDB 双向兼容。
 
-### 2.2 切换窗（盘后 15:05 后，~30min）
-1. 停 celery beat/worker/md-hub/IM pool/web-api（波次停，按 deploy 八阶段既有单元序）。
-2. redis-cli bgsave → RDB 快照落盘。
-3. **数据迁移**：RDB 拷给 valkey（同 RDB 格式直接加载）：valkey 以 6380 起→dbsize/关键键对拍（hub:bars 消费位点/sec:* 锁/celery 队列深度）。
-4. **切轨**：valkey 停→配置改回 port 6379→redis stop+disable→valkey 起在 6379→应用侧 VALKEY_URL 零改动（同 port 同 db）。
-5. 验证三链：celery（beat 派发一任务+worker 消费）/md-hub Streams（xadd→xreadgroup 消费组位点续读）/告警 notify（sec:dep_alert_state 读写）。
-6. 绿则 systemctl disable redis；redis 包保留一个发布周期后卸（回滚保险）。
+### 阶段 0 · 窗前准备（提前 1-2 天，零停机）
 
-### 2.3 回滚
-窗内任一步红：valkey 停→redis 重起 6379→应用重起（RDB 双向兼容——迁移窗内 prod 无写入，数据零损失；装包不卸无害）。
+| # | 动作 | 执行者 | 验证标准 |
+|---|---|---|---|
+| 0.1 | prod 装 valkey（EPEL）：`dnf install valkey` | michael | `rpm -q valkey` = 8.0.11-1.el8；`systemctl is-enabled valkey` = disabled（装包不起服务） |
+| 0.2 | 读 redis 现配对齐生成 valkey.conf：bind 127.0.0.1/port **6380**（临时位）/appendonly/maxmemory/dir 与 redis 同值（数据目录建议 /var/lib/valkey 独立，窗内拷 RDB 入） | michael 读 root 面 conf + 助手比对 | `valkey-server /etc/valkey/valkey.conf --test-memory 2` 语法过（或 systemd start 即起即停验证）；与 /etc/redis.conf 逐键 diff 人工核对 |
+| 0.3 | 扫描跟改提交+上产：security_collector _rpm_map 加 "valkey": "redis"（组件键延续） | 助手 | 回归绿+staging 彩排+prod 发布；下轮 scan 组件面 KV 行仍出（redis 6.2.24） |
+| 0.4 | dev 演练 RDB 路径：本机 valkey 导出 RDB→新起 valkey 加载→dbsize+抽样键对拍 | 助手 | 演练脚本三步全过（ dbsize 相等/抽样 20 键值相等/TTL 数相等） |
+| 0.5 | 切换窗预演（staging 不动——staging 已是 valkey；本步=清单桌面走查+回滚路径确认） | 助手 | 清单每步有验证标准+回滚动作，无开放问题 |
+
+### 阶段 1 · 数据迁移（窗内前段，redis 仍在服务）
+
+| # | 动作 | 执行者 | 验证标准 | 回滚点 |
+|---|---|---|---|---|
+| 1.1 | 波次停应用（按 deploy 既有单元序）：celery beat→workers→md-hub@*→IM pool→web-api | 助手（ansible） | `systemctl is-active` 全 inactive；journal 无新任务 received | 无（可原地逐个重启） |
+| 1.2 | 确认零写入：`redis-cli client list` 仅本地残余连接+`info stats` 的 instantaneous_ops_per_sec≈0 | 助手 | 两次采样（间隔 5s）ops 均 <5 | — |
+| 1.3 | `redis-cli bgsave` + 等 `last_save_time` 更新 | 助手 | `info persistence` rdb_last_bgsave_status=ok | — |
+| 1.4 | RDB 拷入 valkey 数据目录：`cp /var/lib/redis/dump.rdb /var/lib/valkey/dump.rdb` + 属主 valkey:valkey | michael | ls -la 属主/大小一致；md5 与源相等 | — |
+| 1.5 | valkey 临时位起服务：`systemctl start valkey`（6380） | michael | `valkey-cli -p 6380 ping` = PONG | stop valkey |
+| 1.6 | **键级对拍**：dbsize（0/4 两库）+ 关键键抽样（db0：hub:bars* 消费位点/sec:dep_audit:beat/sec:dep_alert_state/celery 队列键；db4：quant:hb:md-hub:gen）+ 类型与值相等 | 助手 | dbsize 相等×2 库；抽样 ≥10 键值全等；stream 的 length 相等 | — |
+
+### 阶段 2 · 切轨与验证（后段）
+
+| # | 动作 | 执行者 | 验证标准 | 回滚点 |
+|---|---|---|---|---|
+| 2.1 | valkey 停 + conf 改 port 6379 + `systemctl stop redis && systemctl disable redis` + `systemctl start valkey` | michael | `valkey-cli -p 6379 ping`=PONG；`redis-cli ping` 失联（6379 无 redis）；is-enabled redis=disabled | **回滚总闸**：stop valkey→改回 6380→start redis→应用起（数据零损失，30s） |
+| 2.2 | 波次起应用（逆序）：web-api→IM pool→md-hub@*→workers→beat | 助手 | 全 active；journal 起动无 traceback；web /readyz ok | — |
+| 2.3 | **三链验证**：①celery：beat 派发 broker_health_check（或触发一 security_scan）→worker received+succeeded；②md-hub Streams：`xinfo groups hub:bars:*` 消费组位点在+新 xadd 一条→worker xreadgroup 消费到；③告警链：sec:dep_alert_state 读写正常（触发一 scan 看 B156A 行） | 助手 | 三链各有 journal 证据行 | 同 2.1 总闸 |
+| 2.4 | hbcheck 通：`quant-hbcheck`（走 .env VALKEY_URL db4 心跳） | 助手 | exit 0+心跳字段 gen 连续 | — |
+| 2.5 | 观察窗 30min：journal error 计数=0+md-hub 心跳 gen 递增+celery 无 unacked 堆积 | 助手 | 三项全绿 | — |
+| 2.6 | 收尾：server-info.md/CLAUDE.md KV 行改实况；redis 包**保留**（回滚保险，一个发布周期后卸） | 助手 | 文档 push | — |
+
+### 阶段 3 · 次日自然轮验收
+
+| # | 项 | 验证标准 |
+|---|---|---|
+| 3.1 | 05:00 dep_audit | journal：心跳行+done 终态+n_pip 354+OS 面含 valkey 包行（rpm 采集）|
+| 3.2 | 06:00 security_scan | succeeded+组件面 KV 行= valkey 8.0.11（_rpm_map 跟改生效）+B156A 正常 |
+| 3.3 | 批 161 心跳机制新 KV 观察 | sec:dep_audit:beat TTL 26h 生效+三态判定 prev_state=done |
 
 ## 三、跟改清单（全引用面 grep 核查 2026-11-02——五面零改+一处跟改）
 
@@ -44,16 +71,11 @@
 2. **迁移路径 dev 演练**：RDB 导出→valkey 加载→dbsize/键级对拍，先在本机走通（§2.1 前置），不把第一次留给 prod。
 3. **回滚 30 秒**：窗内 prod 无写入（应用全停），redis/valkey RDB 双向兼容——valkey 停→redis 起→应用起即回；装包不卸无害。
 
-## 四、验收
-- 三链验证（§2.2.5）全绿+次日 05:00 dep_audit/06:00 scan 自然轮 journal 正常。
-- server-info.md/CLAUDE.md KV 行改记实况（prod=valkey 8.0.11，三环境统一）。
-- 批 161 心跳机制在新 KV 上观察一轮（beat 键 TTL/三态判定）。
-
-## 五、验收补充
+## 四、验收补充
 - 切换后首轮 security_scan 组件面含 KV 版本行（valkey 8.0.11）——_rpm_map 跟改的验证点。
 
-## 六、限定范围
+## 五、限定范围
 prod 迁移+文档两行；**不动** dev/staging（已是 valkey）、不动应用代码（URL/客户端零改）、不动部署管道单元名（redis.service→valkey.service 需进 A06 §9 波次清单核对一次）。
 
-## 七、执行时机
+## 六、执行时机
 不专门排产——**顺路窗**：下次本就要停机/大版本发布的盘后窗执行；或 redis 6.2 出新 CVE 时升级为优先。
