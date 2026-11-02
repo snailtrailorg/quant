@@ -326,18 +326,8 @@ def _collect_components() -> dict:
                                "judge_class": _r[3], "judge_why": _r[4],
                                "has_update": has_update_of(_r[3])})
         else:
-            # 步4盲审 B-P0-3：表读失败且兼容键为空 ⇒ fail-loud 进 degraded（防全表 unknown+假回落）
-            _rows_raw = business_redis().get("sec:dep_audit:rows")
-            if not _rows_raw:
-                raise RuntimeError("dep rows 双源皆空（表读失败+兼容键缺）——fail-loud 降级")
-            for row in json.loads(_rows_raw):
-                judged.append({"name": row["name"], "cur": row.get("cur"),
-                               "latest": row.get("latest"),
-                               "managed_by": "local" if row.get("local") else "pypi",
-                               "group": row.get("group"),
-                               "judge_class": row.get("judge_class") or "unknown",
-                               "judge_why": row.get("judge_why") or "",
-                               "has_update": has_update_of(row.get("judge_class"))})
+            # 批 161 收尾：兼容键已删（表为唯一真源）——表读失败一律 fail-loud 降级（防全表 unknown+假回落）
+            raise RuntimeError("dep rows 表读失败（唯一真源）——fail-loud 降级")
         os_c = contract.get("os") or {}
         # 批 156（schema 2）：OS 全量行——upgrades 可达口径+all_repos 无坐标判定
         if _sv == 2:

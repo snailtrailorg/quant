@@ -55,13 +55,13 @@ def test_zombie_detection_three_states():
 
 
 def test_contract_shape_v3():
-    """契约瘦身形态：last_complete/os 段/constraints/dev_names/counts；兼容 :rows 键 TTL 8d。"""
+    """契约瘦身形态：last_complete/os 段/constraints/dev_names/counts；兼容 :rows 键已删（收尾批——表为唯一真源）。"""
     import inspect
     from src.scheduler import tasks
     src = inspect.getsource(tasks.dep_audit)
     for frag in ("last_complete", '"os"', "constraints", "dev_names", "prev_state"):
         assert frag in src, frag
-    assert ":rows" in src and "8 * 86400" in src
+    assert ":rows" not in src and "8 * 86400" not in src   # 收尾批：兼容键已删
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +145,6 @@ def test_full_chain_beat_done_and_contract(monkeypatch):
     contract = json.loads(store["sec:dep_audit"])
     assert contract["counts"]["n_os"] == 1
     assert contract["os"]["installed"], "os 段非空（P0-1 防复发）"
-    assert store.get("sec:dep_audit:rows"), "兼容键在"
 
 
 def test_full_chain_running_mutex(monkeypatch):

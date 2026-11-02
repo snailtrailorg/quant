@@ -823,24 +823,6 @@ _SYNC_ASYNC_DISPATCH: dict[str, int] = {
     "okx_perp_hourly": 5400,
 }
 
-def _os_repo_all(provider) -> dict:
-    """批 156：全仓包名单次缓存（B3——仓库无坐标判定内存比对）。
-    repoquery --all 一次；失败返回 {}（判定降级 unknown 保守）。"""
-    import subprocess as _sp
-    if provider.id != "dnf":
-        return {}
-    try:
-        out = _sp.run(["dnf", "-q", "repoquery", "--qf",
-                       "%{NAME}\t%{VERSION}\n"], capture_output=True, text=True, timeout=360)
-        names = {}
-        for ln in (out.stdout or "").splitlines():
-            parts = ln.split("\t")
-            if len(parts) == 2 and parts[0]:
-                names[parts[0]] = parts[1]
-        return names
-    except Exception:
-        return {}
-
 
 @app.task(name="src.scheduler.tasks.dep_audit",
           soft_time_limit=172800, time_limit=172800)   # 批 161：名义保命值（48h 永不日常触达）——真实控制=心跳+僵死判定（方案批161 v2 §2.1；None 豁免在 celery 5.6/billiard 回落全局 300s，双盲审铁证）
@@ -1079,10 +1061,6 @@ def dep_audit():
     }
     try:
         br.set(CACHE_KEY, _json.dumps(payload))
-    except Exception:
-        pass
-    try:
-        br.set(CACHE_KEY + ":rows", _json.dumps(pip_rows), ex=8 * 86400)   # 兼容窗：旧 scan 读（一个发布周期后随批 162 删）
     except Exception:
         pass
 
