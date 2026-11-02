@@ -11,8 +11,9 @@
 
 ## 一点五、迁移对象定谳（2026-11-02 michael 终判）
 
-- **应用 VALKEY_URL = redis://127.0.0.1:6379/4**——业务键/celery broker/md-hub Streams/心跳**全部混装 db4**（296 键），db0 空。
+- 库全景（michael 实测 2026-11-02）：**db4=业务+feishu 长连接（297 键）**（VALKEY_URL/FEISHU_VALKEY_URL 同库）、**db5=celery broker（27 键**：队列+unacked+kombu 位点，CELERY_BROKER_URL=.../5）、db0 空（DEFAULT_VALKEY_URL 备而未用）。
 - 之前「裸连读 None/db0 空」之谜终版：同一实例、库号看错（redis.Redis() 默认 db0）——非多实例。
+- 迁移=**全库 RDB 拷贝**（db4+db5 天然覆盖）；对拍清单含 db5 队列键；应用侧零改动（broker/业务两个 URL 都不动）。
 - RDB 迁移天然全库拷贝，方案不变；**一切验证命令必须 -n 4**。
 - 连带勘误：app.py:22 注释「broker/backend 直连 VALKEY_URL=db0」为陈旧注释（实际 db4）——随批 163 顺手修，不阻塞本批。
 
