@@ -389,6 +389,7 @@ def _collect_components() -> dict:
     else:
         _rpm_map = {"python3.11": "python", "nginx": "nginx", "openssl": "openssl",
                 "postgresql-server": "postgres", "redis-server": "redis",
+                "valkey": "redis",   # 批 162：KV 引擎换轨（redis→valkey）后组件键延续（_rpm_map 跟改）
                 "pango": "pango", "cairo": "cairo", "wqy-microhei-fonts": "wqy-microhei"}
     _os_rows = []
     for _pkg, _key in _rpm_map.items():
