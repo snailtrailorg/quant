@@ -1,3 +1,7 @@
+// D24 8 页面结构守门（批163）。R1=header 槽裸表格红线（字体连坐——块提取非贪婪，嵌套 header 下
+// 会截断但两类真实违规均可抓，误报场景本属非法写法——已知局限，精确化需 SFC 解析器不值）。
+// R2=shadow=never 基线计数（豁免：卡组内嵌小卡 metric-card/kpi 类的 never 合法——D24 8.3.2；
+// 基线含合法豁免项，消化只动工作区直属卡，终点非零）。
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 

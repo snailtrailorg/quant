@@ -169,7 +169,7 @@ Element Plus 落地要整组做（初版低估，盲审修正）：
 | **页签壳（TabShell 卡）** | 页面唯一外层 `el-card`，其 header 槽住 `TabsShell`（页签栏） | 一页一个；进去就是页签；单工作区页面无壳（内容卡直接当页面主体） |
 | **页签（Tab）** | 页签壳 header 里的切换项（TabsShell） | 键走 i18n；query 同步+sessionStorage 记忆沿用 TabsShell 契约 |
 | **工作区（Workspace）** | 页签下方的内容区域 | 可放 **1..N 张内容卡**；纵排为主，监控小卡可横排 |
-| **内容卡（Card）** | 工作区里的 `el-card`，承载一个内容单元 | **默认阴影（立体感）**；卡头=左标题（font-weight:600）+右动作钮（IconBtn 组，`--icon-gap`）——动作挂在卡头不挂页签壳 |
+| **内容卡（Card）** | 工作区里的 `el-card`，承载一个内容单元 | **默认阴影（立体感）**——限直属卡，卡组内嵌小卡豁免（§8.3.2）；卡头=左标题（font-weight:600）+右动作钮（IconBtn 组，`--icon-gap`）——动作挂在卡头不挂页签壳 |
 | **卡头（Card Header）** | 内容卡的 `#header` 槽 | 左「××列表/××明细」标题 + 右刷新/新建等；无动作时也可只有标题 |
 | **卡体（Card Body）** | 内容卡主体 | 表格（TableShell）/表单/监控小组件（KPI 曲线/状态卡）皆可 |
 
