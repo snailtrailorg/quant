@@ -1323,6 +1323,7 @@ mail: '邮件 SMTP',
       active: '运行中', inactive: '已停止', online: '在线', offline: '离线',
       running: '运行中', frozen: '冻结', restarts: '重启次数', noData: '暂无数据', history: '历史',
       tabSecurity: '系统安全',   // 批 120 页签（与 tabs.security「标的资料」异键防撞；2026-10-13 用户更名）
+      sysLogs: "系统日志",   // 批163：logs+audit 合并页签（内分两子签——子签键沿用 tabs.logs/audit）
     },
     secpage: {   // 批 120：安全态势五区（A 状态卡/B AI 摘要/C 漏洞列表/D 组件版本/E 基线时间线）
       vulnTotal: '活跃漏洞', status: '扫描状态', scanDate: '快照日期', depOutdated: '依赖滞后', lastScan: '上次扫描',
@@ -2666,6 +2667,7 @@ mail: 'Email SMTP',
       active: 'Active', inactive: 'Inactive', online: 'Online', offline: 'Offline',
       running: 'Running', frozen: 'Frozen', restarts: 'Restarts', noData: 'No data', history: 'History',
       tabSecurity: 'System Security',   // batch 120
+      sysLogs: "System Logs",   // batch 163: merged tab (sub-tabs reuse tabs.logs/audit)
     },
     secpage: {   // batch 120: security posture five zones
       vulnTotal: 'Active vulns', status: 'Scan status', scanDate: 'Snapshot date', depOutdated: 'Deps outdated', lastScan: 'Last scan',
