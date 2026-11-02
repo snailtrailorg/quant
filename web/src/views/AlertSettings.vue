@@ -2,12 +2,16 @@
   <div>
     <!-- 批42：两条过渡横幅已删（用户裁定）——理由见下。 -->
 
-    <!-- 批34：一行一用户+通道勾选（用户口述重设计）；创建/凭证收编图标钮。
-         批163 样板：容器卡退役（el-card 页面壳→裸 div）——header 标题省略（页签即语境），动作钮右对齐。 -->
-    <div>
-      <div style="display: flex; justify-content: flex-end; align-items: center; gap: var(--icon-gap); margin-bottom: var(--sp-3)">
-        <IconBtn :icon="Plus" :title="t('alerts.addSub')" @click="add" />   <!-- 批37：短信凭证入口迁集成中心 -->
-      </div>
+    <!-- 批34：一行一用户+通道勾选（用户口述重设计）；创建/凭证收编 header 图标钮 -->
+    <el-card>
+      <template #header>
+        <div style="display: flex; justify-content: space-between; align-items: center">
+          <span style="font-weight: 600">{{ t('alerts.page.title') }}</span>
+          <span style="display: flex; gap: 8px">
+            <IconBtn :icon="Plus" :title="t('alerts.addSub')" @click="add" />   <!-- 批37：短信凭证入口迁集成中心 -->
+          </span>
+        </div>
+      </template>
       <EmptyState v-if="!allowed" :description="t('alerts.noPerm')" />
       <TableShell :data="rows" storage-key="alert-subs">
         <el-table-column prop="username" :label="t('alerts.subUser')" min-width="213">
@@ -46,7 +50,7 @@
           </template>
         </el-table-column>
       </TableShell>
-    </div>
+    </el-card>
 
     <!-- 订阅编辑（批34：单用户+通道勾选三态——全勾提交 null=自动；一个不勾=该用户暂不接收） -->
     <el-dialog v-model="dlg" :close-on-click-modal="false" :title="isEdit ? t('alerts.editSub') : t('alerts.addSub')" width="560px">
