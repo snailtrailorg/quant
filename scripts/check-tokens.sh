@@ -25,20 +25,25 @@ count_fs()   { grep -rEo "font-size: ?[0-9.]+(px|em|rem|%)" web/src/views/ web/s
 count_btn_type() { grep -rEoh "<el-button[^>]*type=\"(success|warning|danger)\"" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | wc -l; }
 # 批163 第五维：font-weight 700 计数（标题=600/正文=400，700 仅限品牌位 8 处豁免；只许降不许升）
 count_w700() { grep -rEoh "font-weight: ?700" web/src/views/ web/src/components/ web/src/layouts/ --include="*.vue" 2>/dev/null | wc -l; }
-PX=$(count_px); HEX=$(count_hex); FS=$(count_fs); BTN=$(count_btn_type); W700=$(count_w700)
+# 批163 第六维：三元/条件 el-tag :type= 计数（状态色逻辑外露——§9.3 应走 StatusTag；豁免=列内简短两三态 tag，
+# 存量 25 处多为豁免形态，基线只拦新增不强制回改）
+count_rawtag() { grep -rE '<el-tag[^>]*:type="[^"]*[?]' web/src/views/ web/src/components/ --include='*.vue' 2>/dev/null | wc -l; }
+PX=$(count_px); HEX=$(count_hex); FS=$(count_fs); BTN=$(count_btn_type); W700=$(count_w700); RAWTAG=$(count_rawtag)
 if [ "${1:-}" = "--update" ]; then
-  echo "BASE_PX=$PX BASE_HEX=$HEX BASE_FS=$FS BASE_BTN=$BTN BASE_W700=$W700" > "$BASE_FILE"; echo "基线更新: PX=$PX HEX=$HEX FS=$FS BTN=$BTN W700=$W700"; exit 0
+  echo "BASE_PX=$PX BASE_HEX=$HEX BASE_FS=$FS BASE_BTN=$BTN BASE_W700=$W700 BASE_RAWTAG=$RAWTAG" > "$BASE_FILE"; echo "基线更新: PX=$PX HEX=$HEX FS=$FS BTN=$BTN W700=$W700 RAWTAG=$RAWTAG"; exit 0
 fi
 if [ ! -f "$BASE_FILE" ]; then echo "BASE_PX=$PX BASE_HEX=$HEX BASE_FS=$FS BASE_BTN=$BTN BASE_W700=$W700" > "$BASE_FILE"; echo "首采基线: PX=$PX HEX=$HEX FS=$FS BTN=$BTN W700=$W700"; exit 0; fi
 source "$BASE_FILE"
 : "${BASE_FS:=0}"   # 旧基线无 FS 键时兜底 0（批24 前基线只有 PX/HEX 两键）
 : "${BASE_BTN:=0}"  # 旧基线无 BTN 键时兜底 0（批86 前基线只有 PX/HEX/FS 三键）
 : "${BASE_W700:=8}"  # 旧基线无 W700 键时兜底 8（批163 前四键——品牌位豁免现状值）
+: "${BASE_RAWTAG:=25}"  # 旧基线无 RAWTAG 键时兜底 25（§9.3 豁免存量）
 RC=0
 [ "$PX" -gt "$BASE_PX" ] && { echo "✗ 内联 px 计数上升: $PX > $BASE_PX（令牌禁新增——wd-20 §2.3-C）"; RC=1; }
 [ "$HEX" -gt "$BASE_HEX" ] && { echo "✗ 内联 hex 计数上升: $HEX > $BASE_HEX（色值禁新增）"; RC=1; }
 [ "$FS" -gt "$BASE_FS" ] && { echo "✗ font-size 硬编码上升: $FS > $BASE_FS（字号唯一真相源=六级令牌——批24）"; RC=1; }
 [ "$BTN" -gt "$BASE_BTN" ] && { echo "✗ el-button 语义色 type= 计数上升: $BTN > $BASE_BTN（行内动作按钮须用 IconBtn 及其 tone——批86）"; RC=1; }
 [ "$W700" -gt "$BASE_W700" ] && { echo "✗ font-weight 700 计数上升: $W700 > $BASE_W700（标题体系=600；700 仅品牌位豁免——批163 字体审计）"; RC=1; }
+[ "$RAWTAG" -gt "$BASE_RAWTAG" ] && { echo "✗ 三元 el-tag :type= 计数上升: $RAWTAG > $BASE_RAWTAG（状态色应内聚 StatusTag——D24 §9.3；豁免=列内简短两三态，存量不强制回改）"; RC=1; }
 [ "$RC" -eq 0 ] && echo "✓ 令牌门: PX=$PX≤$BASE_PX HEX=$HEX≤$BASE_HEX FS=$FS≤$BASE_FS BTN=$BTN≤$BASE_BTN"
 exit $RC
