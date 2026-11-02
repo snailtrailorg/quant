@@ -30,7 +30,9 @@
 | 0.2 | valkey.conf 对齐稿已生成 ✅ 2026-11-02：逐键对照完成（redis 20 行实读 vs valkey 出厂）——仅 bind 同值/port 6380/dir /var/lib/valkey 三处差异+logfile 换目录；单元形态定谳（ExecStart 自带 --supervised systemd+User=valkey+RuntimeDirectory=valkey——conf 不写 supervised/pidfile）；**conf 终版已备（十行）**窗内 michael 首条即 cp | 助手 | conf 十行定稿（对齐稿存 batch162 工作档）；数据面：prod dump.rdb 5.9MB 迁移秒级 |
 | 0.3 | 扫描跟改提交+上产：security_collector _rpm_map 加 "valkey": "redis"（组件键延续） | 助手 | 回归绿+staging 彩排+prod 发布；下轮 scan 组件面 KV 行仍出（redis 6.2.24） |
 | 0.4 | dev 演练 RDB 路径：本机 valkey 导出 RDB→新起 valkey 加载→dbsize+抽样键对拍 | 助手 | 演练脚本三步全过（ dbsize 相等/抽样 20 键值相等/TTL 数相等） |
-| 0.5 | 切换窗预演（staging 不动——staging 已是 valkey；本步=清单桌面走查+回滚路径确认） | 助手 | 清单每步有验证标准+回滚动作，无开放问题 |
+| 0.5 | 桌面走查+**6380 热起排练 ✅ 2026-11-02 12:52 完成**：conf 覆写（四合一复合命令）→valkey 6380 起→PONG+db4 285/db5 27 热拷 RDB 加载成功。排练两教训：①conf 覆写与 RDB 拷贝必须同一条复合命令（分步易跳步——首次失败=conf 未覆写撞 6379 端口）②热拷 dbsize 有时点差（285 vs 297）非数据丢失，正式窗冷拷消除。排练毕即 stop valkey（防双份内存空载） | 助手 | 已过（实测 PONG+两库键数） |
+
+**正式窗 15:05 复合命令**（①步四合一，防跳步）：conf tee + bgsave 后 RDB 冷拷 + chown + start valkey + ping/dbsize 验证——单条串行 | | |
 
 ### 阶段 1 · 数据迁移（窗内前段，redis 仍在服务）
 
