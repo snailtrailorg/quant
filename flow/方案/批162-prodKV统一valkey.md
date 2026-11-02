@@ -9,6 +9,13 @@
 2. **彩排保真度缺口**：staging 验的是 valkey 行为，prod 跑的是 redis——Streams 消费语义边缘差异测不到。
 3. **文档失真**：CLAUDE.md/server-info 记「Valkey」，prod 实况 redis——名实不符。
 
+## 一点五、迁移对象定谳（2026-11-02 michael 终判）
+
+- **应用 VALKEY_URL = redis://127.0.0.1:6379/4**——业务键/celery broker/md-hub Streams/心跳**全部混装 db4**（296 键），db0 空。
+- 之前「裸连读 None/db0 空」之谜终版：同一实例、库号看错（redis.Redis() 默认 db0）——非多实例。
+- RDB 迁移天然全库拷贝，方案不变；**一切验证命令必须 -n 4**。
+- 连带勘误：app.py:22 注释「broker/backend 直连 VALKEY_URL=db0」为陈旧注释（实际 db4）——随批 163 顺手修，不阻塞本批。
+
 ## 二、迁移窗口逐步执行清单（盘后 15:05 后 · 三阶段 · 每步带验证标准与回滚点）
 
 > 执行主体：助手（ansible 通道+API 验证）；michael 仅 sudoers 面四条（装包/停 redis/起 valkey/降级 redis）。
@@ -33,7 +40,7 @@
 | 1.3 | `redis-cli bgsave` + 等 `last_save_time` 更新 | 助手 | `info persistence` rdb_last_bgsave_status=ok | — |
 | 1.4 | RDB 拷入 valkey 数据目录：`cp /var/lib/redis/dump.rdb /var/lib/valkey/dump.rdb` + 属主 valkey:valkey | michael | ls -la 属主/大小一致；md5 与源相等 | — |
 | 1.5 | valkey 临时位起服务：`systemctl start valkey`（6380） | michael | `valkey-cli -p 6380 ping` = PONG | stop valkey |
-| 1.6 | **键级对拍**：dbsize（0/4 两库）+ 关键键抽样（db0：hub:bars* 消费位点/sec:dep_audit:beat/sec:dep_alert_state/celery 队列键；db4：quant:hb:md-hub:gen）+ 类型与值相等 | 助手 | dbsize 相等×2 库；抽样 ≥10 键值全等；stream 的 length 相等 | — |
+| 1.6 | **键级对拍**（⚠️ 2026-11-02 定谳：**应用业务全在 db4**——VALKEY_URL=redis://127.0.0.1:6379/4，db0 空）：dbsize db4 相等 + 关键键抽样（db4：sec:dep_audit/sec:dep_alert_state/hub:bars* 消费位点/celery 队列键/quant:hb:md-hub:gen）+ 类型与值相等 | 助手 | db4 dbsize 相等；抽样 ≥10 键值全等；stream 的 length 相等 | — |
 
 ### 阶段 2 · 切轨与验证（后段）
 
