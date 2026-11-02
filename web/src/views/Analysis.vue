@@ -1,12 +1,11 @@
 <template>
-  <el-card>
-    <template #header>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>{{ t('analysis.title') }}</span>
-        <!-- 批17 17C：刷新图标化（原 t('analysis.refresh') 文本钮） -->
-        <RefreshBtn @refresh="load" :loading="loading" />
-      </div>
-    </template>
+  <!-- 批163 样板：容器卡退役（el-card 页面壳→裸 div——Audit 先例「页签卡内防卡中卡」）。
+       header 标题+动作→顶部动作行（右对齐，令牌间距）。 -->
+  <div>
+    <div style="display: flex; justify-content: flex-end; align-items: center; gap: var(--icon-gap); margin-bottom: var(--sp-3)">
+      <!-- 批17 17C：刷新图标化（原 t('analysis.refresh') 文本钮） -->
+      <RefreshBtn @refresh="load" :loading="loading" />
+    </div>
     <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
     <TableShell :data="results" storage-key="analysis-results">
       <el-table-column prop="symbol" :label="t('analysis.stock')" width="130" />   <!-- 批53:固定型退出弹性,Conclusion 独占 flex -->
@@ -43,7 +42,7 @@
         <el-button type="primary" @click="confirmAddPool" :loading="adding">{{ t('analysis.addBtn') }}</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </div>
 </template>
 
 <script setup>
