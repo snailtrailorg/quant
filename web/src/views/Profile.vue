@@ -223,7 +223,7 @@
           <!-- 五轮：绑定机制取消——done 即成功终态（发消息即 owner 身份，无需绑定步骤） -->
           <div v-if="qrStatus === 'done'" style="text-align: center; padding: var(--sp-4) 0">
             <el-icon :size="48" color="var(--success)"><CircleCheckFilled /></el-icon>
-            <div style="font-size: var(--fs-page); font-weight: 700; margin: var(--sp-2) 0 var(--sp-15)">{{ t('myIm.doneTitle') }}</div>
+            <div style="font-size: var(--fs-page); font-weight: 600; margin: var(--sp-2) 0 var(--sp-15)">{{ t('myIm.doneTitle') }}</div>
             <div style="color: var(--text-secondary); font-size: var(--fs-label)">{{ t('myIm.doneGuide') }}</div>
           </div>
           <div v-if="qrNote && qrStatus === 'done'" style="text-align: center; color: var(--warn-fill); font-size: var(--fs-label)">{{ qrNote }}</div>

@@ -46,4 +46,5 @@ const label = x => t(x.i18nKey)
 </template>
 <style scoped>
 .tb { margin-left: 5px; font-size: var(--fs-foot); color: var(--text-secondary); font-weight: 400; }
+:deep(.el-tabs__item b) { font-weight: 600; }   /* 批163：页签名与卡头标题字重一致（原 b 默认 700） */
 </style>
