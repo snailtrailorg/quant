@@ -63,7 +63,7 @@
 
 ### 技术栈约束
 - **Python 版本**：服务器 `120.24.235.98` = 3.11（venv 3.11.13），本地开发机 = **3.11**（批 149 升级对齐，venv 3.11.16；原 3.10 已退役）。**不用 3.14**——根因：vnpy 4.4.0 硬 pin `pyside6==6.8.2.1`，该版本 `requires_python <3.14`，3.14 上 pip 装不上 vnpy 4.4.0；resolver 回退 vnpy 4.0.0 与 vnpy_binance 2026.7.23 错配（`Exchange.GLOBAL` 缺失致 import 崩）。纯 Python 依赖（numpy/pandas/psycopg/PySide6 6.11/fastapi/celery 等）在 3.14 全 OK，卡点单一在上游 vnpy 的 PySide6 pin，等 vnpy 放宽即解（2026-08-03 实测）。改版本要严格评估 + 客户确认，不擅动。
-- **PostgreSQL 18 + pgvector + Valkey**（Redis 协议兼容）。弃 TimescaleDB / 重型向量库。
+- **PostgreSQL 18 + pgvector + Valkey**（三环境统一 valkey 8.x——批 162 后 prod 实装 8.0.11@6379，redis 6.2 已退役）。弃 TimescaleDB / 重型向量库。
 - **vnpy 核心 + vnpy_xtp**（交易+行情接口）为第三方成熟组件，不重复造轮；**回测自建 BacktestEngine**（纯 Python，不依赖 vnpy CtaBacktestingEngine）。
 - **Schema 版本管理用 alembic**（对齐 safebox）：变更走迁移文件（`alembic revision` + 手写 upgrade/downgrade，产上经 `quant-alembic-wrapper` 随 Ansible 管道执行），不手动 ALTER。`init-schema.sql` 保留作手工运维参考。**运行时不再 `CREATE TABLE IF NOT EXISTS`**（2026-08-13 清零，原 30 处全部入迁移 0027；`bar_{freq}` 8 表 2026-09-03 由迁移 0064 补齐）；`db.py` 的 `verify_schema()` 启动时校验表存在并告警，`ensure_table()` 仅 `to_regclass` 校验存在+告警（`_verified_tables` 缓存），不建表。
 - **策略实盘化架构（终态，2026-09-01 批 6b 收官）**：每任务独立子进程（systemd `quant-live-task@{tid}`）+ XTPAdapter 下单；**hub 模式唯一**（worker=TD-only+消费 `hub:bars:*` 流，暖机=PG bar_1min **1 天**（2026-10-31 用户裁定，30 天→7 天→1 天随批 158 保留窗对齐）+流回放 240 根双源；EVENT_LOG 注册→`[gw]` TD 会话日志可见）；direct 已退役——`md_mode=direct → EX_CONFIG(78)` fail-fast，回滚仅整版本 rollback。bar_shadow 冻结（历史表）。回测走自建 BacktestEngine（PG 历史 bar）。详见记忆 strategy-live-architecture。
