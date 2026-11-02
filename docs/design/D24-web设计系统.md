@@ -181,6 +181,12 @@ Element Plus 落地要整组做（初版低估，盲审修正）：
 4. **字体保护**：页签壳 header 槽里只准放 TabsShell 和内嵌 el-card——内嵌卡受 tokens.css `.el-card__header .el-card { font-weight:400 }` 特判保护；**裸表格/裸文字直挂 header 槽会被 fs-card/600 连坐**（批163 v1 实证事故）。
 5. **单工作区页面**（无页签）：内容卡直接作页面主体（`Analysis`/`PaperTrade` 式），同规则：卡头标题+动作、立体感。
 6. **术语即验收语言**：评审/需求描述用「页面→页签壳→页签→工作区→内容卡→卡头/卡体」链路表述；「容器卡」「甲形态」等过程词退役。
+
+### 8.4 通用组件与守门（2026-11-02 随立）
+
+- **PageShellCard**（`components/PageShellCard.vue`）：页签壳薄壳——`#tabs` 槽=页签栏（header 槽），默认槽=工作区。
+- **ContentCard**（`components/ContentCard.vue`）：内容卡薄壳——`title` prop=卡头左标题（600 字重）、`#actions` 槽=右动作钮（icon-gap 间距）、默认槽=卡体；默认阴影。新页一律用这两件而非手写 el-card 结构。
+- **守门 `check-pageshell.mjs`**（挂 prebuild 第五关）：R1=header 槽内裸表格报错（字体连坐红线 8.3.4 的机制化）；R2=`shadow="never"` 计数基线制（基线 35，只许降不许升，清零后可收紧为硬禁）——立体感红线 8.3.2 的机制化。
 2. 同页同类控件**尺寸统一**（如搜索框同宽——批126d：C/D 区统一 200px）
 
 ### 7.5 表格列
