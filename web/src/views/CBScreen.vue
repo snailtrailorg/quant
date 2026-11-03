@@ -1,35 +1,20 @@
 <template>
-  <!-- 05 §5.9 转债筛选:双低/溢价率/到期年限 条件+核心列+勾选入池 -->
-  <div style="display: flex; gap: 16px">
-    <el-card style="width: 260px; flex-shrink: 0">
-      <template #header>{{ t('screener.cbFilters') }}</template>
-      <el-form label-position="top" size="small">
-        <el-form-item :label="t('screener.doubleLowMax')"><el-input-number v-model="f.double_low_max" :min="0" :step="5" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.premiumMax')"><el-input-number v-model="f.premium_max" :min="0" :step="5" :precision="0" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.remainingYearsMax')"><el-input-number v-model="f.remaining_years_max" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.couponRateMin')"><el-input-number v-model="f.coupon_rate_min" :min="0" :step="0.1" :precision="2" style="width:100%" /></el-form-item>
-        <el-button type="primary" style="width: 100%" @click="load" :loading="loading">{{ t('screener.run') }}</el-button>
-      </el-form>
-    </el-card>
-
-    <el-card style="flex: 1; overflow: auto">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>{{ t('screener.results') }} ({{ rows.length }})</span>
-          <div>
-            <!-- 批17 17B：列显示配置（代码/转债名称列恒显不进 defs） -->
-            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.screener-cb" :columns="cbColDefs" v-model:visible="cbVisible" /></span>
-            <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: var(--sp-2)">
-              <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
-            </el-select>
-            <IconBtn size="small" :icon="Plus" :title="t('screener.addToPool') + (checked.size ? ' (' + checked.size + ')' : '')" :disabled="!checked.size || !selectedPool" @click="addToPool" />
-          </div>
-        </div>
+  <div class="screen-wrap">
+    <ContentCard :title="t('screener.cbFilters')" class="left">
+      <ScreenFilterPanel category="convertible" @result="onResult" />
+    </ContentCard>
+    <ContentCard :title="t('screener.results') + ' (' + rows.length + ')'" class="right">
+      <template #actions>
+        <ColumnSettings storage-key="cols.screener-cb" :columns="colDefs" v-model:visible="visible" />
+        <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" class="pool">
+          <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
+        </el-select>
+        <IconBtn size="small" :icon="Plus"
+                 :title="t('screener.addToPool') + (checked.size ? ' (' + checked.size + ')' : '')"
+                 :disabled="!checked.size || !selectedPool" @click="addToPool" />
       </template>
-      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
       <TableShell :data="pagedRows" size="small" @selection-change="onSelChange" storage-key="screener-cb">
         <el-table-column type="selection" width="40" />
-        <!-- 批16：列宽套档；+正股代码/正股现价（后端已返回未显示） -->
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('screener.bondName')" min-width="120" show-overflow-tooltip />
         <el-table-column prop="stk_code" :label="t('cols.underlyingCode')" min-width="184" />
@@ -39,7 +24,7 @@
           <template #default="{ row }">{{ row.stk_close != null ? row.stk_close.toFixed(2) : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('double_low')" prop="double_low" :label="t('screener.doubleLow')" min-width="90" class-name="num" sortable>
-          <template #default="{ row }">{{ row.double_low?.toFixed(1) || '—' }}</template>
+          <template #default="{ row }">{{ row.double_low != null ? row.double_low.toFixed(1) : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('premium')" prop="premium_pct" :label="t('screener.premium')" min-width="92" class-name="num">
           <template #default="{ row }">
@@ -53,8 +38,8 @@
         </el-table-column>
       </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
-        layout="prev, pager, next" style="margin-top: var(--sp-3); justify-content: flex-end" />
-    </el-card>
+        layout="prev, pager, next" class="pager" />
+    </ContentCard>
   </div>
 </template>
 
@@ -63,23 +48,22 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import api from '../api'
+import ContentCard from '../components/ContentCard.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import IconBtn from '../components/IconBtn.vue'
+import ScreenFilterPanel from '../components/ScreenFilterPanel.vue'
 import { Plus } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
 const rows = ref([])
-const loading = ref(false)
 const checked = ref(new Set())
 const pools = ref([])
 const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
-const f = ref({ double_low_max: 0, premium_max: 0, remaining_years_max: 0, coupon_rate_min: 0 })
 
-// 批17 17B：列显示配置——代码/转债名称列恒显不进 defs；转股价=低频参考列默认隐
-const cbColDefs = computed(() => [
+const colDefs = computed(() => [
   { key: 'stk_name', label: t('screener.stkName') },
   { key: 'bond_close', label: t('trading.price') },
   { key: 'stk_close', label: t('cols.underlyingPrice') },
@@ -88,28 +72,19 @@ const cbColDefs = computed(() => [
   { key: 'conv_price', label: t('screener.convPrice'), hidden: true },
   { key: 'maturity_date', label: t('screener.maturity') },
 ])
-const cbVisible = ref([])
-const colOn = k => cbVisible.value.includes(k)
+const visible = ref([])
+const colOn = k => visible.value.includes(k)
 
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }
+const onResult = (r) => { rows.value = r; page.value = 1 }
 
-const load = async () => {
-  loading.value = true
-  try {
-    const params = new URLSearchParams(Object.entries(f.value).map(([k, v]) => [k, String(v)]).concat([['limit', '500']]))
-    rows.value = await api.get(`/screen/cb?${params}`) || []
-  } catch { rows.value = [] }
-  finally { loading.value = false }
-}
 const loadPools = async () => { try { pools.value = await api.get('/pool') || [] } catch {} }
 const addToPool = async () => {
   if (!checked.value.size || !selectedPool.value) return
   const pool = pools.value.find(p => p.id === selectedPool.value)
   if (!pool) return
   const symbols = [...checked.value]
-  // 批 131：去重键仍按裸码，但**下发必须带后缀**（existing 是 vt 形态、勾选行 ts_code 是 ts 形态，
-  // 后端归一为 vt 入库）。原实现把 existing 去后缀后下发 ⇒ 池子一非空就发裸码 ⇒ 后端 SYMBOL_INVALID 400。
   const _key = (s) => (s || '').split('.')[0]
   const _existing = (pool.symbols || []).filter(Boolean)
   const _seen = new Set(_existing.map(_key))
@@ -120,5 +95,14 @@ const addToPool = async () => {
     ElMessage.success(t('screener.added', { n: symbols.length }))
   } catch { ElMessage.error(t('common.failed')) }
 }
-onMounted(() => { load(); loadPools() })
+
+onMounted(loadPools)
 </script>
+
+<style scoped>
+.screen-wrap { display: flex; gap: var(--sp-3); }
+.left { width: 300px; flex-shrink: 0; }
+.right { flex: 1; overflow: auto; }
+.pool { width: 140px; }
+.pager { margin-top: var(--sp-3); justify-content: flex-end; }
+</style>

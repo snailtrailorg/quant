@@ -165,16 +165,24 @@ _CACHE_JOIN = (" LEFT JOIN screen_factor_cache {alias} ON {alias}.ts_code = {ts_
                "AND {alias}.trade_date = (SELECT max(trade_date) FROM screen_factor_cache "
                "WHERE category = '{category}' AND factor = '{factor}')")
 
+# 恒带注册表字段（衍生展示列如双低/溢价——表达式单源仍取注册表）
+_DISPLAY_FIELDS = {"convertible": ["double_low", "premium_pct"],
+                   "stock": ["momentum_20", "price_vs_ma250"]}
+
 # 展示列（结果表恒带——评审 P0：只查条件字段导致名称/价格列全空）
 _DISPLAY = {
     "stock": {"name": "a.name", "close": "d.close", "pe": "d.pe", "pe_ttm": "d.pe_ttm",
-              "pb": "d.pb", "turnover_rate": "d.turnover_rate", "total_mv": "d.total_mv",
+              "pb": "d.pb", "turnover": "d.turnover_rate", "turnover_rate": "d.turnover_rate",
+              "total_mv": "d.total_mv",
               "circ_mv": "d.circ_mv", "dv_ratio": "d.dv_ratio", "ps": "d.ps"},
-    "convertible": {"name": "b.bond_short_name", "close": "cd.close", "stk_code": "b.stk_code",
-                    "stk_close": "sd.close", "conv_price": "b.conv_price",
-                    "maturity_date": "b.maturity_date", "coupon_rate": "b.coupon_rate"},
+    "convertible": {"name": "b.bond_short_name", "close": "cd.close", "bond_close": "cd.close",
+                    "stk_code": "b.stk_code", "stk_name": "b.stk_short_name", "stk_close": "sd.close",
+                    "conv_price": "b.conv_price", "maturity_date": "b.maturity_date",
+                    "coupon_rate": "b.coupon_rate"},
     "listed_fund": {"name": "lf.name", "fund_scale": "lf.fund_scale",
-                    "management_fee": "lf.management_fee"},
+                    "management_fee": "lf.management_fee", "fund_type": "lf.fund_type",
+                    "tracking_error": "lf.tracking_error",
+                    "invest_type": "lf.invest_type", "management": "lf.management"},
 }
 
 _BASE = {
@@ -212,19 +220,19 @@ def build_base_from(category: str, fields: list[str] | None = None) -> str:
     # 输出列：展示列打底 → 条件字段覆盖（同名字段去重——评审 P0：同字段两条件会重复 JOIN/重名列）
     out = dict(_DISPLAY[category])
     cache_joined = set()
-    for f in dict.fromkeys(fields or []):
+    ordered = list(_DISPLAY_FIELDS.get(category, [])) + list(dict.fromkeys(fields or []))
+    for f in ordered:
         spec = flds.get(f)
         if spec is None:
             continue
         if spec["source"] == "cache":
-            if spec["factor"] not in cache_joined:
-                alias = f"f_{f}"
+            factor = spec["factor"]
+            if factor not in cache_joined:
+                alias = f"f_{factor}"
                 joins += _CACHE_JOIN.format(alias=alias, ts_col=base["ts_col"],
-                                            factor=spec["factor"], category=category)
-                cache_joined.add(spec["factor"])
-                out[f] = f"{alias}.value"
-            else:
-                out[f] = f"f_{f}.value"
+                                            factor=factor, category=category)
+                cache_joined.add(factor)
+            out[f] = f"f_{spec['factor']}.value"
         elif spec["source"] == "column":
             out[f] = spec["col"]
         else:

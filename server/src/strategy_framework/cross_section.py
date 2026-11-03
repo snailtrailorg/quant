@@ -238,4 +238,5 @@ def run_cross_section(category, filter_expr, rank_expr, limit=100):
         results.sort(key=lambda r: -(float(r.get("fund_scale") or 0)))
     else:
         results.sort(key=lambda r: -(float(r.get("total_mv") or 0)))
-    return results[: int(limit)]
+    # 内部字段（__rank__）不外泄——只留数据列
+    return [{k: v for k, v in r.items() if not k.startswith("__")} for r in results[: int(limit)]]

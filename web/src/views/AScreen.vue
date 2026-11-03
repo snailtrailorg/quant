@@ -1,56 +1,20 @@
 <template>
-  <!-- 05 §5.9 A股筛选:条件区(左 240px 常驻)+结果表(勾选入池 symbolsStr)+方案保存 localStorage+市值亿 -->
-  <div style="display: flex; gap: 16px">
-    <el-card style="width: 260px; flex-shrink: 0">
-      <template #header>{{ t('screener.filters') }}</template>
-      <el-tabs v-model="activeTab">
-        <el-tab-pane :label="t('screener.tabBasic')" name="basic">
-          <el-radio-group v-model="match" size="small" style="margin-bottom: var(--sp-2)">
-            <el-radio-button value="all">{{ t('screener.matchAll') }}</el-radio-button>
-            <el-radio-button value="any">{{ t('screener.matchAny') }}</el-radio-button>
-          </el-radio-group>
-          <ScreenConditionRow v-for="(r, i) in conds" :key="i" :row="r" :fields="fields"
-                              @upd="p => Object.assign(conds[i], p)" @del="conds.splice(i, 1)" />
-          <el-button size="small" style="width: 100%; margin-bottom: var(--sp-1)" @click="conds.push({ field: 'pe_ttm', op: '<', value: 30 })">+ {{ t('screener.addCond') }}</el-button>
-          <el-button type="primary" style="width: 100%" @click="run" :loading="loading">{{ t('screener.run') }}</el-button>
-        </el-tab-pane>
-        <el-tab-pane :label="t('screener.tabAdvanced')" name="dsl">
-          <el-input v-model="dslFilter" type="textarea" :rows="3" size="small"
-                    :placeholder="t('screener.dslFilterPh')" style="margin-bottom: var(--sp-1)" />
-          <el-input v-model="dslRank" type="textarea" :rows="2" size="small"
-                    :placeholder="t('screener.dslRankPh')" style="margin-bottom: var(--sp-1)" />
-          <div v-if="dslErr" style="font-size: var(--fs-foot); color: var(--critical); margin-bottom: var(--sp-1)">{{ dslErr }}</div>
-          <el-button type="primary" style="width: 100%" @click="runDsl" :loading="loading">{{ t('screener.run') }}</el-button>
-        </el-tab-pane>
-      </el-tabs>
-      <el-divider />
-      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-2)">{{ t('screener.savedPlans') }}</div>
-      <div v-for="p in presets" :key="p.id" style="display: flex; gap: var(--sp-1); margin-bottom: var(--sp-1); align-items: center">
-        <el-button size="small" text type="primary" style="flex: 1; justify-content: flex-start" @click="applyPreset(p)">{{ p.name }}</el-button>
-        <el-tag v-if="p.source === 'builtin'" size="small" type="info">{{ t('screener.builtinTag') }}</el-tag>
-        <el-button v-if="p.source !== 'builtin'" size="small" text type="danger" @click="delPreset(p)">×</el-button>
-      </div>
-      <el-button size="small" style="width: 100%" @click="savePreset">{{ t('screener.savePlan') }}</el-button>
-    </el-card>
-
-    <el-card style="flex: 1; overflow: auto">
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>{{ t('screener.results') }} ({{ rows.length }})</span>
-          <div>
-            <!-- 批17 17B：列显示配置（代码/名称列恒显不进 defs） -->
-            <span style="margin-right: var(--sp-2)"><ColumnSettings storage-key="cols.screener-astock" :columns="astockColDefs" v-model:visible="astockVisible" /></span>
-            <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" style="width: 140px; margin-right: var(--sp-2)">
-              <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
-            </el-select>
-            <IconBtn size="small" :icon="Plus" :title="t('screener.addToPool') + (checked.size ? ' (' + checked.size + ')' : '')" :disabled="!checked.size || !selectedPool" @click="addToPool" />
-          </div>
-        </div>
+  <div class="screen-wrap">
+    <ContentCard :title="t('screener.filters')" class="left">
+      <ScreenFilterPanel category="stock" @result="onResult" />
+    </ContentCard>
+    <ContentCard :title="t('screener.results') + ' (' + rows.length + ')'" class="right">
+      <template #actions>
+        <ColumnSettings storage-key="cols.screener-astock" :columns="colDefs" v-model:visible="visible" />
+        <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" class="pool">
+          <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
+        </el-select>
+        <IconBtn size="small" :icon="Plus"
+                 :title="t('screener.addToPool') + (checked.size ? ' (' + checked.size + ')' : '')"
+                 :disabled="!checked.size || !selectedPool" @click="addToPool" />
       </template>
-      <!-- 批17 17A：TableShell 列宽拖拽+持久化 -->
       <TableShell :data="pagedRows" size="small" @selection-change="onSelChange" storage-key="screener-astock">
         <el-table-column type="selection" width="40" />
-        <!-- 批16：列宽套档（min-width 权重，评估文档档位制）；+滚动市盈率（后端已返回） -->
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
         <el-table-column v-if="colOn('close')" prop="close" :label="t('trading.price')" min-width="80" class-name="num" />
@@ -59,28 +23,28 @@
           <template #default="{ row }">{{ row.pe_ttm != null ? row.pe_ttm.toFixed(1) : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('pb')" prop="pb" label="PB" min-width="80" class-name="num" />
-        <el-table-column v-if="colOn('turnover')" prop="turnover" :label="t('screener.turnover')" min-width="101" class-name="num">
-          <template #default="{ row }">{{ row.turnover?.toFixed(1) || '—' }}</template>
+        <el-table-column v-if="colOn('turnover')" prop="turnover" :label="t('cols.turnover')" min-width="101" class-name="num">
+          <template #default="{ row }">{{ row.turnover != null ? row.turnover.toFixed(1) : '—' }}</template>
         </el-table-column>
         <el-table-column v-if="colOn('market_cap')" prop="total_mv" :label="t('screener.marketCap')" min-width="110" class-name="num">
-          <template #default="{ row }">{{ fmtCn(row.total_mv * 10000, 1) }}</template>
+          <template #default="{ row }">{{ row.total_mv ? fmtCn(row.total_mv * 10000, 1) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('circ_mv')" prop="circ_mv" :label="t('screener.circMvMin').replace(/下限\(万元\)/, '')" min-width="110" class-name="num">
-          <template #default="{ row }">{{ row.circ_mv ? fmtCn(row.circ_mv * 10000, 1) : '-' }}</template>
+        <el-table-column v-if="colOn('circ_mv')" prop="circ_mv" :label="t('cols.circMv')" min-width="110" class-name="num">
+          <template #default="{ row }">{{ row.circ_mv ? fmtCn(row.circ_mv * 10000, 1) : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('dv_ratio')" prop="dv_ratio" :label="t('screener.dvRatioMin').replace(/下限\(%\)/, '')" min-width="90" class-name="num">
-          <template #default="{ row }">{{ row.dv_ratio ?? '-' }}</template>
+        <el-table-column v-if="colOn('dv_ratio')" prop="dv_ratio" :label="t('cols.dvRatio')" min-width="90" class-name="num">
+          <template #default="{ row }">{{ row.dv_ratio ?? '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('momentum')" prop="momentum_20" :label="t('screener.mom20Min').replace(/下限.*/, '')" min-width="90" class-name="num">
-          <template #default="{ row }">{{ row.momentum_20 != null ? (row.momentum_20 * 100).toFixed(1) + '%' : '-' }}</template>
+        <el-table-column v-if="colOn('momentum')" prop="momentum_20" :label="t('cols.mom20')" min-width="90" class-name="num">
+          <template #default="{ row }">{{ row.momentum_20 != null ? (row.momentum_20 * 100).toFixed(1) + '%' : '—' }}</template>
         </el-table-column>
-        <el-table-column v-if="colOn('ma250_dev')" prop="price_vs_ma250" :label="t('screener.ma250DevMin').replace(/下限\(%\)/, '')" min-width="100" class-name="num">
-          <template #default="{ row }">{{ row.price_vs_ma250 != null ? row.price_vs_ma250.toFixed(1) + '%' : '-' }}</template>
+        <el-table-column v-if="colOn('ma250_dev')" prop="price_vs_ma250" :label="t('cols.ma250Dev')" min-width="100" class-name="num">
+          <template #default="{ row }">{{ row.price_vs_ma250 != null ? row.price_vs_ma250.toFixed(1) + '%' : '—' }}</template>
         </el-table-column>
       </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
-        layout="prev, pager, next" style="margin-top: var(--sp-3); justify-content: flex-end" />
-    </el-card>
+        layout="prev, pager, next" class="pager" />
+    </ContentCard>
   </div>
 </template>
 
@@ -88,121 +52,41 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import api, { apiErr } from '../api'
+import api from '../api'
 import { fmtCn } from '../utils/format'
+import ContentCard from '../components/ContentCard.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import IconBtn from '../components/IconBtn.vue'
+import ScreenFilterPanel from '../components/ScreenFilterPanel.vue'
 import { Plus } from '@element-plus/icons-vue'
 
-const { t, te } = useI18n()
+const { t } = useI18n()
 const rows = ref([])
-const loading = ref(false)
 const checked = ref(new Set())
 const pools = ref([])
 const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
-const activeTab = ref('basic')
-const dslFilter = ref('')
-const dslRank = ref('')
-const dslErr = ref('')
-const match = ref('all')
-const conds = ref([{ field: 'pe_ttm', op: '<', value: 30 }, { field: 'st_filter', op: '=', value: true }])
-const fields = ref([])
-const presets = ref([])
 
-const loadFields = async () => {
-  try { fields.value = (await api.get('/screen/fields?category=stock'))?.fields || [] } catch { }
-}
-const loadPresets = async () => {
-  try { presets.value = await api.get('/screen/presets?category=stock') || [] } catch { }
-}
-onMounted(() => { loadFields(); loadPresets(); loadPools() })
-
-const run = async () => {
-  loading.value = true
-  try {
-    const typeOf = f => (fields.value.find(x => x.name === f) || {}).type
-    const live = conds.value.filter(r => r.field && r.value !== null && r.value !== undefined
-      && !(typeOf(r.field) === 'bool' && r.value !== true))   // 开关关=该条件不生效（后端 bool 仅收 true）
-    const j = await api.post('/screen/run', {
-      category: 'stock', limit: 500,
-      definition: { v: 1, match: match.value, rows: live.map(r => ({ field: r.field, op: r.op, value: r.value })) },
-    })
-    rows.value = j.rows || []
-    page.value = 1
-    if (j.nulls_excluded) ElMessage.info(t('screener.nullsExcluded', { n: j.nulls_excluded }))
-  } catch (e) {
-    ElMessage.error(apiErr(e, t('common.loadFailed')))
-  } finally { loading.value = false }
-}
-
-const runDsl = async () => {
-  loading.value = true
-  dslErr.value = ''
-  try {
-    const j = await api.post('/screen/run-dsl', {
-      category: 'stock', limit: 500,
-      filter: dslFilter.value || '', rank: dslRank.value || null,
-    })
-    rows.value = j.rows || []
-    page.value = 1
-  } catch (e) {
-    const code = e?.response?.data?.code || e?.code
-    dslErr.value = code && te('err.' + code) ? t('err.' + code) : apiErr(e, t('common.loadFailed'))
-  } finally { loading.value = false }
-}
-const applyPreset = (p) => {
-  const d = p.definition || {}
-  if (d.filter !== undefined) {   // dsl 源：填高级页签并切换（不互转——P1-5）
-    activeTab.value = 'dsl'
-    dslFilter.value = d.filter || ''
-    dslRank.value = d.rank || ''
-    dslErr.value = ''
-  } else {
-    activeTab.value = 'basic'
-    if (d.match) match.value = d.match
-    if (Array.isArray(d.rows)) conds.value = d.rows.map(r => ({ ...r }))
-  }
-  if (p.skipped_fields?.length) ElMessage.warning(t('screener.skippedFields', { n: p.skipped_fields.length }))
-}
-const savePreset = async () => {
-  try {
-    const { ElMessageBox } = await import('element-plus')
-    const { value: name } = await ElMessageBox.prompt(t('screener.planName'), t('screener.savePlan'))
-    const definition = activeTab.value === 'dsl'
-      ? { v: 1, filter: dslFilter.value, rank: dslRank.value || undefined }
-      : { v: 1, match: match.value, rows: conds.value.map(r => ({ field: r.field, op: r.op, value: r.value })) }
-    await api.post('/screen/presets', { name, category: 'stock', definition })
-    await loadPresets()
-  } catch (e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(apiErr(e, t('common.saveFailed'))) }
-}
-const delPreset = async (p) => {
-  try {
-    await api.delete(`/screen/presets/${p.id}`)
-    await loadPresets()
-  } catch (e) { ElMessage.error(apiErr(e, t('common.loadFailed'))) }
-}
-
-// 批17 17B：列显示配置——代码/名称列恒显不进 defs；换手率=低频列默认隐
-const astockColDefs = computed(() => [
+const colDefs = computed(() => [
   { key: 'close', label: t('trading.price') },
   { key: 'pe', label: 'PE' },
   { key: 'pe_ttm', label: t('cols.peTtm') },
   { key: 'pb', label: 'PB' },
-  { key: 'turnover', label: t('screener.turnover'), hidden: true },
+  { key: 'turnover', label: t('cols.turnover'), hidden: true },
   { key: 'market_cap', label: t('screener.marketCap') },
-  { key: 'circ_mv', label: t('screener.circMvMin').replace(/下限\(万元\)/, '') },   // 批164a：流通市值/股息/动量/年线乖离
-  { key: 'dv_ratio', label: t('screener.dvRatioMin').replace(/下限\(%\)/, '') },
-  { key: 'momentum', label: t('screener.mom20Min').replace(/下限.*/, '') },
-  { key: 'ma250_dev', label: t('screener.ma250DevMin').replace(/下限\(%\)/, '') },
+  { key: 'circ_mv', label: t('cols.circMv') },
+  { key: 'dv_ratio', label: t('cols.dvRatio') },
+  { key: 'momentum', label: t('cols.mom20') },
+  { key: 'ma250_dev', label: t('cols.ma250Dev') },
 ])
-const astockVisible = ref([])
-const colOn = k => astockVisible.value.includes(k)
+const visible = ref([])
+const colOn = k => visible.value.includes(k)
 
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }
+const onResult = (r) => { rows.value = r; page.value = 1 }
 
 const loadPools = async () => { try { pools.value = await api.get('/pool') || [] } catch {} }
 const addToPool = async () => {
@@ -210,8 +94,6 @@ const addToPool = async () => {
   const pool = pools.value.find(p => p.id === selectedPool.value)
   if (!pool) return
   const symbols = [...checked.value]
-  // 批 131：去重键仍按裸码，但**下发必须带后缀**（existing 是 vt 形态、勾选行 ts_code 是 ts 形态，
-  // 后端归一为 vt 入库）。原实现把 existing 去后缀后下发 ⇒ 池子一非空就发裸码 ⇒ 后端 SYMBOL_INVALID 400。
   const _key = (s) => (s || '').split('.')[0]
   const _existing = (pool.symbols || []).filter(Boolean)
   const _seen = new Set(_existing.map(_key))
@@ -222,4 +104,14 @@ const addToPool = async () => {
     ElMessage.success(t('screener.added', { n: symbols.length }))
   } catch { ElMessage.error(t('common.failed')) }
 }
+
+onMounted(loadPools)
 </script>
+
+<style scoped>
+.screen-wrap { display: flex; gap: var(--sp-3); }
+.left { width: 300px; flex-shrink: 0; }
+.right { flex: 1; overflow: auto; }
+.pool { width: 140px; }
+.pager { margin-top: var(--sp-3); justify-content: flex-end; }
+</style>

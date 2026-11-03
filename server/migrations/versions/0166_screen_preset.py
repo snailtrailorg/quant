@@ -45,11 +45,13 @@ def upgrade():
                     unique=True, postgresql_where=sa.text("source='builtin'"))
     op.create_index("uq_preset_user", "screen_preset", ["category", "created_by", "name"],
                     unique=True, postgresql_where=sa.text("source!='builtin'"))
-    # 权限行（批 77 先例：api 维；列名对齐真 schema——subject_id/dimension/resource）
-    op.execute("INSERT INTO permission (subject_type, subject_id, dimension, resource, effect) "
-               "SELECT 'role', 'admin', 'api', 'screen_preset', 'allow' "
-               "WHERE NOT EXISTS (SELECT 1 FROM permission WHERE subject_type='role' AND subject_id='admin' "
-               "AND dimension='api' AND resource='screen_preset')")
+    # 权限行（批 77 先例：api 维；列名对齐真 schema）——admin 地板 + trader/analyst 默认可存方案（viewer 只读）
+    for role in ("admin", "trader", "analyst"):
+        op.execute(sa.text(
+            "INSERT INTO permission (subject_type, subject_id, dimension, resource, effect) "
+            "SELECT 'role', :r, 'api', 'screen_preset', 'allow' "
+            "WHERE NOT EXISTS (SELECT 1 FROM permission WHERE subject_type='role' AND subject_id=:r "
+            "AND dimension='api' AND resource='screen_preset')").bindparams(r=role))
     for name, cat, src, definition in BUILTIN_SEEDS:
         op.execute(
             sa.text("INSERT INTO screen_preset (name, category, source, definition) "
@@ -61,7 +63,7 @@ def upgrade():
 
 def downgrade():
     op.execute("DELETE FROM permission WHERE subject_type='role' AND dimension='api' "
-               "AND resource='screen_preset'")
+               "AND resource='screen_preset' AND subject_id IN ('admin','trader','analyst')")
     op.drop_index("uq_preset_user", table_name="screen_preset")
     op.drop_index("uq_preset_builtin", table_name="screen_preset")
     op.drop_table("screen_preset")

@@ -24,6 +24,8 @@ def _shape_source(definition: dict) -> str:
 
 
 def _validate_dry_run(category: str, definition: dict) -> None:
+    if definition.get("v") != 1:
+        raise ApiError(400, "SCREEN_PRESET_INVALID", "方案格式版本不支持（v=1）")
     src = _shape_source(definition)
     if src == "builder":
         try:
@@ -74,9 +76,16 @@ def update_preset(pid: int, body: PresetBody,
         raise ApiError(403, "SCREEN_PRESET_BUILTIN", "出厂预置不可修改——另存为新方案")
     if row[4] != payload["uid"] and payload.get("role") != "admin":
         raise ApiError(403, "SCREEN_PRESET_NOT_YOURS", "仅本人方案可修改")
+    if row[2] != body.category:
+        raise ApiError(400, "SCREEN_PRESET_CATEGORY", "方案品类不可变更")
     _validate_dry_run(body.category, body.definition)
     src = _shape_source(body.definition)
-    preset_update(pid, body.name, body.category, src, body.definition)
+    try:
+        preset_update(pid, body.name, body.category, src, body.definition)
+    except Exception as e:
+        if "UniqueViolation" in type(e).__name__ or "duplicate key" in str(e):
+            raise ApiError(409, "SCREEN_PRESET_DUP", "同名方案已存在")
+        raise
     audit_log(payload["username"], "screen_preset_update", "#" + str(pid))
     return {"id": pid, "source": src}
 
@@ -145,6 +154,8 @@ def run_screen(body: RunBody, payload: dict = Depends(require_perm("read"))):
         raise ApiError(400, "SCREEN_RUN_LIMIT", "limit 上限 500")
     if _shape_source(body.definition) != "builder":
         raise ApiError(400, "SCREEN_RUN_DSL", "DSL 式请走 run-dsl（164c）")
+    if not body.definition.get("rows"):
+        raise ApiError(400, "SCREEN_RUN_EMPTY", "请至少添加一个条件")
     try:
         where, params, null_fields = compile_conditions(body.category, body.definition)
     except ValueError as e:
