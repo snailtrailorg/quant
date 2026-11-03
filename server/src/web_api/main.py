@@ -159,6 +159,7 @@ from .routes.chat import router as chat_router  # /api/chat /ws/chat /ws/market 
 from .routes.im_bots import router as im_bots_router  # /api/im-bots/*
 from .routes.mgmt import router as mgmt_router  # /api/data-sources + /api/trading-accounts（批 83a 拆表两族）/api/datasource rate-limits /api/tasks
 from .routes.proxies import router as proxies_router  # 批 102a：/api/proxies/*（池 + 绑定 + 探连通）
+from .routes.screen import router as screen_router  # 批 164b：/api/screen/*（presets CRUD+run+fields——标的筛选 v2）
 from .routes.quality import router as quality_router  # 批 62b：/api/quality 对账域
 from .routes.risk import router as risk_router  # /api/risk* /api/live-trading /api/reconcile /api/convertible
 from .routes.routing import router as routing_router  # 批 57 M2：/api/routing/*（策略+dry-run+审计）
@@ -172,6 +173,7 @@ from .routes.trading import router as trading_router  # /api/position /api/pnl /
 app.include_router(quality_router)   # 批 62b：M7 对账
 app.include_router(system_router)
 app.include_router(auth_router)
+app.include_router(screen_router)   # 批 164b
 app.include_router(strategy_router)
 app.include_router(trading_router)
 app.include_router(sync_router)
