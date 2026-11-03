@@ -107,6 +107,29 @@ class RunBody(BaseModel):
     limit: int = 100
 
 
+class RunDslBody(BaseModel):
+    category: str
+    filter: str
+    rank: str | None = None
+    limit: int = 100
+
+
+@router.post("/api/screen/run-dsl")
+def run_dsl(body: RunDslBody, payload: dict = Depends(require_perm("read"))):
+    """横截面 DSL 筛选（164c）——与 /run 同族规（limit 帽/权限键/错误码形态）。"""
+    if body.limit > 500:
+        raise ApiError(400, "SCREEN_RUN_LIMIT", "limit 上限 500")
+    from src.strategy_framework.cross_section import run_cross_section
+    try:
+        rows = run_cross_section(body.category, body.filter, body.rank, body.limit)
+    except ValueError as e:
+        code = str(e).split(":", 1)[0]
+        if not code.startswith("XSEC_"):
+            code = "XSEC_SYNTAX"
+        raise ApiError(400, code, str(e))
+    return {"rows": rows, "count": len(rows)}
+
+
 @router.post("/api/screen/run")
 def run_screen(body: RunBody, payload: dict = Depends(require_perm("read"))):
     if body.limit > 500:

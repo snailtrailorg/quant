@@ -3,7 +3,7 @@
   <div style="display: flex; gap: 16px">
     <el-card style="width: 260px; flex-shrink: 0">
       <template #header>{{ t('screener.filters') }}</template>
-      <el-tabs model-value="basic">
+      <el-tabs v-model="activeTab">
         <el-tab-pane :label="t('screener.tabBasic')" name="basic">
           <el-radio-group v-model="match" size="small" style="margin-bottom: var(--sp-2)">
             <el-radio-button value="all">{{ t('screener.matchAll') }}</el-radio-button>
@@ -15,7 +15,12 @@
           <el-button type="primary" style="width: 100%" @click="run" :loading="loading">{{ t('screener.run') }}</el-button>
         </el-tab-pane>
         <el-tab-pane :label="t('screener.tabAdvanced')" name="dsl">
-          <div style="font-size: var(--fs-foot); color: var(--text-secondary); padding: var(--sp-3) 0">{{ t('screener.dslComing') }}</div>
+          <el-input v-model="dslFilter" type="textarea" :rows="3" size="small"
+                    :placeholder="t('screener.dslFilterPh')" style="margin-bottom: var(--sp-1)" />
+          <el-input v-model="dslRank" type="textarea" :rows="2" size="small"
+                    :placeholder="t('screener.dslRankPh')" style="margin-bottom: var(--sp-1)" />
+          <div v-if="dslErr" style="font-size: var(--fs-foot); color: var(--critical); margin-bottom: var(--sp-1)">{{ dslErr }}</div>
+          <el-button type="primary" style="width: 100%" @click="runDsl" :loading="loading">{{ t('screener.run') }}</el-button>
         </el-tab-pane>
       </el-tabs>
       <el-divider />
@@ -98,6 +103,10 @@ const pools = ref([])
 const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
+const activeTab = ref('basic')
+const dslFilter = ref('')
+const dslRank = ref('')
+const dslErr = ref('')
 const match = ref('all')
 const conds = ref([{ field: 'pe_ttm', op: '<', value: 30 }, { field: 'st_filter', op: '=', value: true }])
 const fields = ref([])
@@ -126,20 +135,42 @@ const run = async () => {
   } finally { loading.value = false }
 }
 
+const runDsl = async () => {
+  loading.value = true
+  dslErr.value = ''
+  try {
+    const j = await api.post('/screen/run-dsl', {
+      category: 'stock', limit: 500,
+      filter: dslFilter.value || '', rank: dslRank.value || null,
+    })
+    rows.value = j.rows || []
+  } catch (e) {
+    const code = e?.response?.data?.code
+    dslErr.value = code ? t('err.' + code) : apiErr(e, t('common.loadFailed'))
+  } finally { loading.value = false }
+}
 const applyPreset = (p) => {
   const d = p.definition || {}
-  if (d.match) match.value = d.match
-  if (Array.isArray(d.rows)) conds.value = d.rows.map(r => ({ ...r }))
+  if (d.filter !== undefined) {   // dsl 源：填高级页签并切换（不互转——P1-5）
+    activeTab.value = 'dsl'
+    dslFilter.value = d.filter || ''
+    dslRank.value = d.rank || ''
+    dslErr.value = ''
+  } else {
+    activeTab.value = 'basic'
+    if (d.match) match.value = d.match
+    if (Array.isArray(d.rows)) conds.value = d.rows.map(r => ({ ...r }))
+  }
   if (p.skipped_fields?.length) ElMessage.warning(t('screener.skippedFields', { n: p.skipped_fields.length }))
 }
 const savePreset = async () => {
   try {
     const { ElMessageBox } = await import('element-plus')
     const { value: name } = await ElMessageBox.prompt(t('screenter.planName') || t('screener.planName'), t('screener.savePlan'))
-    await api.post('/screen/presets', {
-      name, category: 'stock',
-      definition: { v: 1, match: match.value, rows: conds.value.map(r => ({ field: r.field, op: r.op, value: r.value })) },
-    })
+    const definition = activeTab.value === 'dsl'
+      ? { v: 1, filter: dslFilter.value, rank: dslRank.value || undefined }
+      : { v: 1, match: match.value, rows: conds.value.map(r => ({ field: r.field, op: r.op, value: r.value })) }
+    await api.post('/screen/presets', { name, category: 'stock', definition })
     await loadPresets()
   } catch (e) { if (e !== 'cancel' && e?.toString && !String(e).includes('cancel')) ElMessage.error(apiErr(e, t('common.saveFailed'))) }
 }
