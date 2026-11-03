@@ -141,8 +141,8 @@ def register_factor(name: str, *, category: str = "custom", needs_history: int =
                     needs: dict[str, int] | None = None, **kwargs):
     """装饰器：将因子类注册到全局注册表。
 
-    needs_history: 需要的历史窗口大小。0=静态因子（只用当前 bar，可选股+策略）；
-                   >0=动态因子（需要历史窗口，只能用于策略，不能选股）。
+    needs_history: 需要的历史窗口大小。0=静态因子（只用当前 bar，可用于标的筛选+策略）；
+                   >0=动态因子（需要历史窗口，只能用于策略，不能用于标的筛选）。
                    等价糖：needs={"bar_minute": N}（批 118 多维声明，显式 needs 优先）。
     needs: 多维数据依赖声明（批 118）。键 ∈ DATA_KINDS（contract.py 唯一词表），
            非法键/L2 占位键抛 NeedsError（fail-fast——启动期响亮失败，不静默不供给）。
@@ -153,7 +153,7 @@ def register_factor(name: str, *, category: str = "custom", needs_history: int =
             ...
     """
     final_needs = merge_needs(needs, needs_history)
-    # 糖值回写：web/选股面消费 needs_history（静态/动态档），以合并结果为准
+    # 糖值回写：web/标的筛前面消费 needs_history（静态/动态档），以合并结果为准
     needs_history = final_needs.get("bar_minute", 0)
 
     def wrapper(cls):
@@ -175,7 +175,7 @@ def list_factors(category: str | None = None, static_only: bool = False) -> list
     """列出已注册的因子。
 
     category: 按 category 过滤
-    static_only: True 只返回静态因子（needs_history=0），用于选股引擎
+    static_only: True 只返回静态因子（needs_history=0），用于标的筛选引擎
     """
     items = list(_FACTOR_REGISTRY.values())
     if category:

@@ -19,9 +19,9 @@ DB = os.environ.get("QUANT_DB_URL", "postgresql://quant@127.0.0.1:5432/quant")
 # 只列主体表；弹窗/子表随页补。列名给 SQL 标识符（与库一致），前端展示名在批16 清单。
 SOURCES = {
     "research": [
-        ("选股器.A股", "screen_astock", ["ts_code", "name", "close", "pe", "pb", "turnover", "total_mv", "pe_ttm"]),
-        ("选股器.转债", "screen_cb", ["ts_code", "name", "stk_code", "stk_name", "bond_close", "double_low", "premium_pct", "conv_price", "maturity_date", "stk_close"]),
-        ("选股器.ETF", "screen_etf", ["ts_code", "name", "fund_type", "fund_scale", "management_fee", "tracking_error", "management", "invest_type"]),
+        ("标的筛选.A股", "screen_astock", ["ts_code", "name", "close", "pe", "pb", "turnover", "total_mv", "pe_ttm"]),
+        ("标的筛选.转债", "screen_cb", ["ts_code", "name", "stk_code", "stk_name", "bond_close", "double_low", "premium_pct", "conv_price", "maturity_date", "stk_close"]),
+        ("标的筛选.ETF", "screen_etf", ["ts_code", "name", "fund_type", "fund_scale", "management_fee", "tracking_error", "management", "invest_type"]),
         ("股票池.主表", "pools", ["id", "name", "category", "description", "minute_history_start"]),  # symbols数/minute_count=API 聚合列，用缺省 80/100
         ("股票池.标的", "pool_symbols", ["symbol", "last_ts", "covered"]),
         ("股票池.攒数据", "minute_symbols", ["symbol", "source", "last_ts"]),
