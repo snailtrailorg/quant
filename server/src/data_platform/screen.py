@@ -76,6 +76,83 @@ def fields_for(category: str) -> dict:
     return FIELDS[category]
 
 
+def preset_list(category: str, uid: int) -> list[dict]:
+    import json
+    from .db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "SELECT id, name, category, source, definition, created_by, updated_at "
+            "FROM screen_preset WHERE category = %s "
+            "AND (source = 'builtin' OR created_by = %s) "
+            "ORDER BY source DESC, updated_at DESC", (category, uid))
+        rows = cur.fetchall()
+    out = []
+    for r in rows:
+        d = r[4] if isinstance(r[4], dict) else json.loads(r[4])
+        skipped = []
+        flds = FIELDS.get(r[2], {})
+        if "rows" in d:
+            skipped = [row.get("field") for row in d["rows"] if row.get("field") not in flds]
+            d["rows"] = [row for row in d["rows"] if row.get("field") in flds]
+        out.append({"id": r[0], "name": r[1], "category": r[2], "source": r[3],
+                    "definition": d, "created_by": r[5], "updated_at": str(r[6]),
+                    "skipped_fields": skipped})
+    return out
+
+
+def preset_create(name: str, category: str, source: str, definition: dict, uid: int) -> int:
+    import json
+    from .db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "INSERT INTO screen_preset (name, category, source, definition, created_by) "
+            "VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (name, category, source, json.dumps(definition), uid))
+        conn.commit()
+        return cur.fetchone()[0]
+
+
+def preset_get(pid: int) -> tuple | None:
+    from .db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id, name, category, source, created_by FROM screen_preset WHERE id = %s", (pid,))
+        return cur.fetchone()
+
+
+def preset_update(pid: int, name: str, category: str, source: str, definition: dict) -> None:
+    import json
+    from .db import get_conn
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE screen_preset SET name=%s, category=%s, source=%s, definition=%s, updated_at=now() "
+            "WHERE id=%s", (name, category, source, json.dumps(definition), pid))
+        conn.commit()
+
+
+def preset_delete(pid: int) -> None:
+    from .db import get_conn
+    with get_conn() as conn:
+        conn.execute("DELETE FROM screen_preset WHERE id=%s", (pid,))
+        conn.commit()
+
+
+def run_query(category: str, fields: list, where: str, params: list, limit: int, null_fields: list) -> dict:
+    from .db import get_conn
+    base = build_base_from(category, fields or None)
+    q = f"SELECT * FROM ({base}) q{where} ORDER BY ts_code LIMIT {int(limit)}"
+    with get_conn() as conn:
+        cur = conn.execute(q, params)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        if null_fields:
+            null_checks = " OR ".join(f + " IS NULL" for f in null_fields)
+            cur = conn.execute(f"SELECT count(*) FROM ({base}) q WHERE {null_checks}")
+            nulls = cur.fetchone()[0]
+        else:
+            nulls = 0
+    return {"rows": rows, "nulls_excluded": nulls, "count": len(rows)}
+
+
 _CACHE_JOIN = (" LEFT JOIN screen_factor_cache {alias} ON {alias}.ts_code = {ts_col} "
                "AND {alias}.factor = '{factor}' "
                "AND {alias}.trade_date = (SELECT max(trade_date) FROM screen_factor_cache)")

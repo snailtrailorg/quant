@@ -3,28 +3,29 @@
   <div style="display: flex; gap: 16px">
     <el-card style="width: 260px; flex-shrink: 0">
       <template #header>{{ t('screener.filters') }}</template>
-      <el-form label-position="top" size="small">
-        <el-form-item :label="t('screener.peMax')"><el-input-number v-model="f.pe_max" :min="0" :step="5" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.pbMax')"><el-input-number v-model="f.pb_max" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.mvMin')"><el-input-number v-model="f.mv_min" :min="0" :step="50" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.turnoverMin')"><el-input-number v-model="f.turnover_min" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.peTtmMax')"><el-input-number v-model="f.pe_ttm_max" :min="0" :step="5" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.circMvMin')"><el-input-number v-model="f.circ_mv_min" :min="0" :step="50" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.dvRatioMin')"><el-input-number v-model="f.dv_ratio_min" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.psMax')"><el-input-number v-model="f.ps_max" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.excludeSt')"><el-switch v-model="f.exclude_st" /></el-form-item>
-        <el-form-item :label="t('screener.listDaysMin')"><el-input-number v-model="f.list_days_min" :min="0" :step="365" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.mom20Min')"><el-input-number v-model="f.momentum_20_min" :step="0.05" :precision="2" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.ma250DevMin')"><el-input-number v-model="f.price_vs_ma250_min" :step="5" :precision="1" style="width:100%" /></el-form-item>
-        <el-button type="primary" style="width: 100%" @click="load" :loading="loading">{{ t('screener.run') }}</el-button>
-      </el-form>
+      <el-tabs model-value="basic" style="--el-tabs-header-height: 32px">
+        <el-tab-pane :label="t('screener.tabBasic')" name="basic">
+          <el-radio-group v-model="match" size="small" style="margin-bottom: 6px">
+            <el-radio-button value="all">{{ t('screener.matchAll') }}</el-radio-button>
+            <el-radio-button value="any">{{ t('screener.matchAny') }}</el-radio-button>
+          </el-radio-group>
+          <ScreenConditionRow v-for="(r, i) in rows" :key="i" :row="r" :fields="fields"
+                              @upd="p => Object.assign(rows[i], p)" @del="rows.splice(i, 1)" />
+          <el-button size="small" style="width: 100%; margin-bottom: 6px" @click="rows.push({ field: 'pe_ttm', op: '<', value: 30 })">+ {{ t('screener.addCond') }}</el-button>
+          <el-button type="primary" style="width: 100%" @click="run" :loading="loading">{{ t('screener.run') }}</el-button>
+        </el-tab-pane>
+        <el-tab-pane :label="t('screener.tabAdvanced')" name="dsl">
+          <div style="font-size: var(--fs-foot); color: var(--text-secondary); padding: 12px 0">{{ t('screener.dslComing') }}</div>
+        </el-tab-pane>
+      </el-tabs>
       <el-divider />
-      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-15)">{{ t('screener.savedPlans') }}</div>
-      <div v-for="(plan, name) in plans" :key="name" style="display: flex; gap: 4px; margin-bottom: var(--sp-1)">
-        <el-button size="small" text type="primary" @click="applyPlan(name)">{{ name }}</el-button>
-        <el-button size="small" text type="danger" @click="delPlan(name)">×</el-button>
+      <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-2)">{{ t('screener.savedPlans') }}</div>
+      <div v-for="p in presets" :key="p.id" style="display: flex; gap: 4px; margin-bottom: 4px; align-items: center">
+        <el-button size="small" text type="primary" style="flex: 1; justify-content: flex-start" @click="applyPreset(p)">{{ p.name }}</el-button>
+        <el-tag v-if="p.source === 'builtin'" size="small" type="info">{{ t('screener.builtinTag') }}</el-tag>
+        <el-button v-if="p.source !== 'builtin'" size="small" text type="danger" @click="delPreset(p)">×</el-button>
       </div>
-      <el-button size="small" style="width: 100%" @click="savePlan">{{ t('screener.savePlan') }}</el-button>
+      <el-button size="small" style="width: 100%" @click="savePreset">{{ t('screener.savePlan') }}</el-button>
     </el-card>
 
     <el-card style="flex: 1; overflow: auto">
