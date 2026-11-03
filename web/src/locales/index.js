@@ -58,6 +58,7 @@ export default {
       symbol: '标的',
       createdAt: '创建时间',
       updatedAt: '更新时间',
+      actions: '操作',   // 批165：方案列表操作列头
       initialCapital: '初始资金',
       startDate: '开始',
       endDate: '结束',
@@ -102,7 +103,7 @@ export default {
       logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 mail: '邮件 SMTP',
       llm: 'LLM 模型', dataSources: '数据源', tradingAccounts: '交易账号', sms: '短信通道', proxy: '代理出口',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签   // 批102a:代理出口页签
-      run: '运行配置', alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
+ alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
     },
     proxy: {   // 批102a：代理出口（全局池 + 按消费方绑定 + 测连通）
       poolTitle: '代理池',
@@ -446,7 +447,7 @@ mail: '邮件 SMTP',
       feePanel: '费用与摩擦：佣金可配（默认万5）+ 印花税（卖出 0.05%）+ 过户费（0.001%）+ 滑点可配 + 涨跌停一字板不可成交约束',
       retCol: '收益', ddCol: '回撤', reason: '失败原因',
       r1m: '近1月', r3m: '近3月', r6m: '近6月', r1y: '近1年',   // 批27-15：commission 重复键已删（保 :480 '佣金'——运行时本就后者胜）
-      run: '运行',
+
       detail: '详情',
       view: '可视化',
       runList: '回测运行列表',
@@ -1296,18 +1297,20 @@ mail: '邮件 SMTP',
       // 批33a：perm 键删（盲审 B-P1 两区对齐）
     },
     screener: {
-      filters: '筛选条件', results: '结果', run: '筛选', addToPool: '加入自选标的', selectPool: '选择池',   // 批89：跟随池改名（「股票池」→「自选标的」正文残留清零）
-      added: '已添加 {n} 只标的到池', savedPlans: '已保存方案', savePlan: '保存当前方案', planName: '方案名称',
-      tabBasic: '普通条件', tabAdvanced: '高级', matchAll: '满足全部', matchAny: '满足任一',
+ results: '结果', addToPool: '加入自选标的', selectPool: '选择池',   // 批89：跟随池改名；批165 run 键随旧面板退役
+      added: '已添加 {n} 只标的到池', planName: '方案名称',
+      tabBasic: '普通条件', tabAdvanced: '高级',
+      plans: '筛选方案', newPlan: '新建方案', editPlan: '编辑方案', delPlan: '删除方案', applyPlan: '应用并筛选',
+      applyBtn: '应用', saveApply: '保存并应用', orHint: '需要 OR 或括号组合？请用「高级」页签的 DSL 表达式。',
+      noPlans: '暂无方案，点右上 + 新建', delPlanConfirm: '确定删除方案「{name}」？',   // 批165
       fieldPh: '字段', opPctTop: '分位前%', opPctBottom: '分位后%',
       noFields: '该品类字段尚未接入数据源，暂不能筛选。', needCond: '请至少添加一个条件。',
       grp_valuation: '估值', grp_size: '规模', grp_quality: '质量', grp_tech: '技术面', grp_other: '其他',
-      addCond: '添加条件', builtinTag: '预置',
+      addCond: '添加条件',
       dslFilterPh: '过滤表达式，如：pe_ttm ＜ 30 and momentum_20 ＞ 0.05', dslRankPh: '排序表达式（可选），如：rank(momentum_20)',
-      nullsExcluded: '{n} 只标的因字段为空被排除', skippedFields: '{n} 个条件字段已失效被跳过',   // 批164b
+      nullsExcluded: '{n} 只标的因字段为空被排除',   // 批164b（skippedFields 随 165 弹窗形态退役）
       marketCap: '市值',
-      cbFilters: '转债筛选',
-      doubleLow: '双低', premium: '溢价率', convPrice: '转股价', maturity: '到期日', bondName: '转债名', stkName: '正股名',
+            doubleLow: '双低', premium: '溢价率', convPrice: '转股价', maturity: '到期日', bondName: '转债名', stkName: '正股名',
       fundScale: '规模', mgmtFee: '管理费', trackingErr: '跟踪误差', fundType: '类型',
     },
     perm: {
@@ -1379,18 +1382,20 @@ mail: '邮件 SMTP',
   },
   en: {
     screener: {
-      filters: 'Filters', results: 'Results', run: 'Screen', addToPool: 'Add to pool', selectPool: 'Select pool',
-      added: 'Added {n} symbols to pool', savedPlans: 'Saved plans', savePlan: 'Save plan', planName: 'Plan name',
-      tabBasic: 'Basic', tabAdvanced: 'Advanced', matchAll: 'Match all', matchAny: 'Match any',
+ results: 'Results', addToPool: 'Add to pool', selectPool: 'Select pool',
+      added: 'Added {n} symbols to pool', planName: 'Plan name',
+      tabBasic: 'Basic', tabAdvanced: 'Advanced',
+      plans: 'Screening Plans', newPlan: 'New Plan', editPlan: 'Edit Plan', delPlan: 'Delete Plan', applyPlan: 'Apply & Screen',
+      applyBtn: 'Apply', saveApply: 'Save & Apply', orHint: 'Need OR / parentheses? Use the Advanced tab DSL expression.',
+      noPlans: 'No plans yet — click + to create', delPlanConfirm: 'Delete plan "{name}"?',   // 批165
       fieldPh: 'Field', opPctTop: 'Top %', opPctBottom: 'Bottom %',
       noFields: 'No fields available for this category yet.', needCond: 'Add at least one condition.',
       grp_valuation: 'Valuation', grp_size: 'Size', grp_quality: 'Quality', grp_tech: 'Technical', grp_other: 'Other',
-      addCond: 'Add condition', builtinTag: 'Built-in',
+      addCond: 'Add condition',
       dslFilterPh: 'Filter e.g. pe_ttm ＜ 30 and momentum_20 ＞ 0.05', dslRankPh: 'Rank (optional) e.g. rank(momentum_20)',
-      nullsExcluded: '{n} symbols excluded (null field)', skippedFields: '{n} condition fields skipped (stale)',
+      nullsExcluded: '{n} symbols excluded (null field)',
       marketCap: 'Mkt Cap',
-      cbFilters: 'CB Filters',
-      doubleLow: 'D-Low', premium: 'Premium', convPrice: 'Conv px', maturity: 'Maturity', bondName: 'Bond', stkName: 'Stock',
+            doubleLow: 'D-Low', premium: 'Premium', convPrice: 'Conv px', maturity: 'Maturity', bondName: 'Bond', stkName: 'Stock',
       fundScale: 'Scale', mgmtFee: 'Mgmt fee', trackingErr: 'Track err', fundType: 'Type',
     },
     app: { title: 'Snail Quant' },   // 2026-09-09 用户裁定：侧栏 200px 容不下长文案（161.8px>160px 内容区），缩短
@@ -1450,6 +1455,7 @@ mail: '邮件 SMTP',
       symbol: 'Symbol',
       createdAt: 'Created At',
       updatedAt: 'Updated At',
+      actions: 'Actions',   // 批165：方案列表操作列头
       initialCapital: 'Initial Capital',
       startDate: 'Start',
       endDate: 'End',
@@ -1493,7 +1499,7 @@ mail: '邮件 SMTP',
       logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名
 mail: 'Email SMTP',
       llm: 'LLM Models', dataSources: 'Data Sources', tradingAccounts: 'Trading Accounts', sms: 'SMS Channels', proxy: 'Proxy Egress',   // 批37   // 批83a   // 批102a
-      run: 'Run Config', alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
+ alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
     },
     proxy: {   // batch102a: proxy egress (pool + per-consumer binding + connectivity test)
       poolTitle: 'Proxy Pool',
@@ -1835,7 +1841,7 @@ mail: 'Email SMTP',
       feePanel: 'Fees & friction: configurable commission (default 0.05%) + stamp tax (sell 0.05%) + transfer fee (0.001%) + slippage + limit-lock no-fill constraint',
       retCol: 'Return', ddCol: 'Drawdown', reason: 'Failure',
       r1m: '1M', r3m: '3M', r6m: '6M', r1y: '1Y',   // 批27-15：commission 重复键已删（保后——运行时本就后者胜）
-      run: 'Run',
+
       detail: 'Detail',
       view: 'Visualization',
       runList: 'Backtest Runs',

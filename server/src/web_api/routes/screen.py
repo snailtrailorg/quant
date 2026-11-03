@@ -72,9 +72,7 @@ def update_preset(pid: int, body: PresetBody,
     row = preset_get(pid)
     if row is None:
         raise ApiError(404, "SCREEN_PRESET_NOT_FOUND", "方案不存在")
-    if row[3] == "builtin":
-        raise ApiError(403, "SCREEN_PRESET_BUILTIN", "出厂预置不可修改——另存为新方案")
-    if row[4] != int(payload["sub"]) and payload.get("role") != "admin":
+    if row[4] != int(payload["sub"]) and payload.get("role") != "admin":   # 无主行(created_by=NULL)=仅 admin
         raise ApiError(403, "SCREEN_PRESET_NOT_YOURS", "仅本人方案可修改")
     if row[2] != body.category:
         raise ApiError(400, "SCREEN_PRESET_CATEGORY", "方案品类不可变更")
@@ -95,8 +93,6 @@ def delete_preset(pid: int, payload: dict = Depends(require_perm("screen_preset"
     row = preset_get(pid)
     if row is None:
         raise ApiError(404, "SCREEN_PRESET_NOT_FOUND", "方案不存在")
-    if row[3] == "builtin":
-        raise ApiError(403, "SCREEN_PRESET_BUILTIN", "出厂预置不可删除")
     if row[4] != int(payload["sub"]) and payload.get("role") != "admin":
         raise ApiError(403, "SCREEN_PRESET_NOT_YOURS", "仅本人方案可删除")
     preset_delete(pid)

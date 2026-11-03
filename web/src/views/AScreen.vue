@@ -1,9 +1,8 @@
 <template>
   <div class="screen-wrap">
-    <ContentCard :title="t('screener.filters')" class="left">
-      <ScreenFilterPanel category="stock" @result="onResult" />
-    </ContentCard>
-    <ContentCard :title="t('screener.results') + ' (' + rows.length + ')'" class="right">
+    <ScreenPlanList class="left" :plans="presets" :loading="plansLoading" :active-id="activePresetId"
+                    @create="openDlg(null)" @edit="openDlg" @apply="applyPreset" @changed="loadPresets" />
+    <ContentCard :title="resultTitle" class="right">
       <template #actions>
         <ColumnSettings storage-key="cols.screener-astock" :columns="colDefs" v-model:visible="visible" />
         <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" class="pool">
@@ -45,6 +44,8 @@
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
         layout="prev, pager, next" class="pager" />
     </ContentCard>
+    <ScreenPlanDialog :visible="dlgVisible" category="stock" :plan="editPlan" :fields="fields"
+                      @close="dlgVisible = $event" @saved="loadPresets" @applydef="runDef" />
   </div>
 </template>
 
@@ -58,7 +59,8 @@ import ContentCard from '../components/ContentCard.vue'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import IconBtn from '../components/IconBtn.vue'
-import ScreenFilterPanel from '../components/ScreenFilterPanel.vue'
+import ScreenPlanList from '../components/ScreenPlanList.vue'
+import ScreenPlanDialog from '../components/ScreenPlanDialog.vue'
 import { Plus } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
@@ -68,6 +70,17 @@ const pools = ref([])
 const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
+const presets = ref([])
+const plansLoading = ref(false)
+const fields = ref([])
+const dlgVisible = ref(false)
+const editPlan = ref(null)
+const activePresetId = ref(null)
+const activeName = ref('')
+
+const resultTitle = computed(() => activeName.value
+  ? t('screener.results') + ' · ' + activeName.value + ' (' + rows.value.length + ')'
+  : t('screener.results') + ' (' + rows.value.length + ')')
 
 const colDefs = computed(() => [
   { key: 'close', label: t('trading.price') },
@@ -83,10 +96,32 @@ const colDefs = computed(() => [
 ])
 const visible = ref([])
 const colOn = k => visible.value.includes(k)
-
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }
-const onResult = (r) => { rows.value = r; page.value = 1 }
+
+const loadPresets = async () => {
+  plansLoading.value = true
+  try { presets.value = await api.get('/screen/presets?category=stock') || [] } catch { presets.value = [] }
+  finally { plansLoading.value = false }
+}
+const loadFields = async () => { try { fields.value = (await api.get('/screen/fields?category=stock'))?.fields || [] } catch { fields.value = [] } }
+
+const openDlg = (plan) => { editPlan.value = plan; dlgVisible.value = true }
+const applyPreset = (p) => { activePresetId.value = p.id; activeName.value = p.name; runDef(p.definition) }
+const runDef = async (def) => {
+  try {
+    const j = def.filter !== undefined
+      ? await api.post('/screen/run-dsl', { category: 'stock', limit: 500, filter: def.filter || '', rank: def.rank || null })
+      : await api.post('/screen/run', { category: 'stock', limit: 500, definition: def })
+    rows.value = j.rows || []
+    page.value = 1
+    if (j.nulls_excluded) ElMessage.info(t('screener.nullsExcluded', { n: j.nulls_excluded }))
+  } catch (e) { ElMessage.error(apiErrX(e)) }
+}
+const apiErrX = (e) => {
+  const code = e?.response?.data?.code || e?.code
+  return code ? t('err.' + code) : t('common.loadFailed')
+}
 
 const loadPools = async () => { try { pools.value = await api.get('/pool') || [] } catch {} }
 const addToPool = async () => {
@@ -105,11 +140,11 @@ const addToPool = async () => {
   } catch { ElMessage.error(t('common.failed')) }
 }
 
-onMounted(loadPools)
+onMounted(() => { loadPresets(); loadFields(); loadPools() })
 </script>
 
 <style scoped>
-.screen-wrap { display: flex; gap: var(--sp-3); }
+.screen-wrap { display: flex; gap: var(--sp-3); align-items: flex-start; }
 .left { width: 300px; flex-shrink: 0; }
 .right { flex: 1; overflow: auto; }
 .pool { width: 140px; }

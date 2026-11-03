@@ -261,9 +261,8 @@ def compile_conditions(category: str, definition: dict) -> tuple[str, list, list
     """
     flds = fields_for(category)
     rows = definition.get("rows", [])
-    match = definition.get("match", "all")
-    if match not in ("all", "any"):
-        raise ValueError("match must be all|any")
+    # 批 165 用户裁定：恒 AND（match 键忽略——存量 any 方案宽容降级为 AND；
+    # OR/括号需求走 DSL 页签，业界 builder 无 any 先例）
     parts, params, notes = [], [], []
     for row in rows:
         f, op, val = row.get("field"), row.get("op"), row.get("value")
@@ -298,6 +297,5 @@ def compile_conditions(category: str, definition: dict) -> tuple[str, list, list
         params.append(val)
         if spec.get("nullable"):
             notes.append(f)
-    joiner = " AND " if match == "all" else " OR "
-    where = (" WHERE " + joiner.join(parts)) if parts else ""
+    where = (" WHERE " + " AND ".join(parts)) if parts else ""
     return where, params, notes

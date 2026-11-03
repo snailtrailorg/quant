@@ -13,10 +13,15 @@ def test_compile_all_basic():
     assert params == [30, 500000] and set(notes) == {"pe_ttm", "circ_mv"}
 
 
-def test_compile_any():
+def test_match_key_ignored():
+    # 批 165：match 恒 AND（存量 any 宽容降级）
     d = {"v": 1, "match": "any", "rows": [{"field": "pe", "op": "<", "value": 10}]}
     where, _, _ = compile_conditions("stock", d)
     assert where.startswith(" WHERE pe IS NOT NULL")
+    d2 = {"v": 1, "rows": [{"field": "pe", "op": "<", "value": 10},
+                          {"field": "pb", "op": ">", "value": 1}]}
+    where2, _, _ = compile_conditions("stock", d2)
+    assert " AND " in where2   # 无 match 键=AND
 
 
 def test_bool_only_true():
