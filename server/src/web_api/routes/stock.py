@@ -148,36 +148,71 @@ def get_kline_api(symbol: str, days: int = 0,
 @router.get("/api/screen/astock")
 def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
                       turnover_min: float = 0, limit: int = 100,
+                      pe_ttm_max: float = 0, circ_mv_min: float = 0, dv_ratio_min: float = 0,
+                      ps_max: float = 0, exclude_st: bool = False, list_days_min: int = 0,
+                      momentum_20_min: float = None, price_vs_ma250_min: float = None,
                       payload: dict = Depends(require_perm("read"))):
-    """A股基本面筛选（daily_basic 最新交易日 + join asset_static_info name）。"""
+    """A股基本面筛选（daily_basic 最新交易日 + join asset_static_info name）。
+
+    批 164a 扩参（字段注册表 data_platform/screen.py 单源）：pe_ttm/circ_mv/dv_ratio/ps（现库列）+
+    exclude_st（名称匹配 analysis.py:104 先例）+list_days（join list_date）+
+    momentum_20/price_vs_ma250（screen_factor_cache 预计算 join——NULL 行按 NULL 立法剔除）。
+    参数式=0 跳过（与既有四参同构）；field/op 通用面=164b。
+    """
     def _f(x):
         return float(x) if x is not None else None
     with get_conn() as conn:
         cur = conn.execute("""
-            SELECT d.ts_code, s.name, d.close, d.pe, d.pe_ttm, d.pb, d.turnover_rate, d.total_mv
+            SELECT d.ts_code, s.name, d.close, d.pe, d.pe_ttm, d.pb, d.turnover_rate, d.total_mv,
+                   d.circ_mv, d.dv_ratio, d.ps,
+                   f20.value AS momentum_20, f250.value AS price_vs_ma250
             FROM daily_basic d
             LEFT JOIN asset_static_info s ON s.ts_code = d.ts_code
+            LEFT JOIN screen_factor_cache f20
+                   ON f20.ts_code = d.ts_code AND f20.factor = 'momentum_20'
+                  AND f20.trade_date = (SELECT max(trade_date) FROM screen_factor_cache)
+            LEFT JOIN screen_factor_cache f250
+                   ON f250.ts_code = d.ts_code AND f250.factor = 'price_vs_ma250'
+                  AND f250.trade_date = (SELECT max(trade_date) FROM screen_factor_cache)
             WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)
               AND (%s = 0 OR d.pe <= %s)
               AND (%s = 0 OR d.pb <= %s)
               AND (%s = 0 OR d.total_mv >= %s)
               AND (%s = 0 OR d.turnover_rate >= %s)
+              AND (%s = 0 OR d.pe_ttm <= %s)
+              AND (%s = 0 OR d.circ_mv >= %s)
+              AND (%s = 0 OR d.dv_ratio >= %s)
+              AND (%s = 0 OR d.ps <= %s)
+              AND (%s::boolean = false OR (s.name IS NOT NULL AND s.name NOT LIKE '%%ST%%' AND s.name NOT LIKE '%%退%%'))
+              AND (%s::int = 0 OR (s.list_date IS NOT NULL AND (CURRENT_DATE - s.list_date::date) >= %s::int))
+              AND (%s::float8 IS NULL OR f20.value >= %s::float8)
+              AND (%s::float8 IS NULL OR f250.value >= %s::float8)
             ORDER BY d.total_mv DESC NULLS LAST
             LIMIT %s
-        """, (pe_max, pe_max, pb_max, pb_max, mv_min, mv_min, turnover_min, turnover_min, limit))
+        """, (pe_max, pe_max, pb_max, pb_max, mv_min, mv_min, turnover_min, turnover_min,
+               pe_ttm_max, pe_ttm_max, circ_mv_min, circ_mv_min, dv_ratio_min, dv_ratio_min,
+               ps_max, ps_max, exclude_st,
+               list_days_min, list_days_min,
+               momentum_20_min, momentum_20_min, price_vs_ma250_min, price_vs_ma250_min, limit))
         rows = cur.fetchall()
     return [{"ts_code": r[0], "name": r[1], "close": _f(r[2]), "pe": _f(r[3]),
              "pe_ttm": _f(r[4]), "pb": _f(r[5]), "turnover": _f(r[6]),
              "total_mv": _f(r[7]),   # 万元;前端 fmtCn 显示亿
+             "circ_mv": _f(r[8]), "dv_ratio": _f(r[9]), "ps": _f(r[10]),
+             "momentum_20": _f(r[11]), "price_vs_ma250": _f(r[12]),
              }
             for r in rows]
 
 
 @router.get("/api/screen/cb")
 def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: float = 0,
-                  remaining_min: float = 0,
+                  remaining_years_max: float = 0, coupon_rate_min: float = 0,
                   payload: dict = Depends(require_perm("read"))):
-    """可转债筛选（cb_basic_info + cb_daily + 正股 daily_basic → 双低/溢价率;05 §5.9）。"""
+    """可转债筛选（cb_basic_info + cb_daily + 正股 daily_basic → 双低/溢价率;05 §5.9）。
+
+    批 164a 扩参：remaining_years_max（剩余年限=maturity_date 现算）/coupon_rate_min（票面利率）。
+    原 remaining_min 死参退役（收参不进 SQL——双盲 B-P0-2 实证；表无剩余规模列）。
+    """
     def _f(x):
         return float(x) if x is not None else None
     with get_conn() as conn:
@@ -204,9 +239,11 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
                 WHERE d.trade_date = (SELECT max(trade_date) FROM daily_basic)
             ) sd ON b.stk_code = sd.ts_code
             WHERE b.list_date <= to_char(now() AT TIME ZONE 'Asia/Shanghai', 'YYYYMMDD') AND (b.delist_date IS NULL OR b.delist_date > to_char(now() AT TIME ZONE 'Asia/Shanghai', 'YYYYMMDD'))
+              AND (%s::float8 = 0 OR (b.maturity_date IS NOT NULL AND (b.maturity_date::date - CURRENT_DATE) <= %s::float8 * 365))
+              AND (%s::float8 = 0 OR b.coupon_rate >= %s::float8)
             ORDER BY double_low NULLS LAST
             LIMIT %s
-        """, (limit,))
+        """, (remaining_years_max, remaining_years_max, coupon_rate_min, coupon_rate_min, limit))
         rows = cur.fetchall()
     out = []
     for r in rows:

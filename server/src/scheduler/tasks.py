@@ -2324,33 +2324,46 @@ def screen_factor_compute():
     miss 语义：筛选端点只读缓存——miss 行不阻塞筛选（该因子条件跳过+提示）。
     """
     from ..data_platform.db import get_conn
-    factor = "momentum_20"
+    FACTORS = [("momentum_5", 5, "mom"), ("momentum_20", 20, "mom"),
+               ("momentum_60", 60, "mom"), ("momentum_120", 120, "mom"),
+               ("momentum_250", 250, "mom"), ("price_vs_ma250", 250, "dev")]
+    results = {}
     with get_conn() as conn:
-        # bar_1d 真列=symbol/freq/ts（无 ts_code/trade_date——编码期实证修正）
         cur = conn.execute("SELECT COALESCE(max(ts)::date, '1970-01-01') FROM bar_1d WHERE freq='1D'")
         t1 = cur.fetchone()[0]
-        cur = conn.execute(
-            "SELECT count(*) FROM screen_factor_cache WHERE factor=%s AND trade_date=%s", (factor, t1))
-        if cur.fetchone()[0] > 0:
-            logger.info("screen_factor_compute: %s@%s 已存在，跳过（幂等）", factor, t1)
-            return {"status": "skipped", "factor": factor, "trade_date": str(t1)}
-        cur = conn.execute("""
-            WITH m20 AS (
-                SELECT symbol,
-                       avg(close) OVER (PARTITION BY symbol ORDER BY ts
-                         ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS ma20,
-                       close,
-                       max(ts) OVER (PARTITION BY symbol) AS last_ts
-                FROM bar_1d WHERE freq='1D'
-            )
-            SELECT split_part(symbol, '.', 1), close / NULLIF(ma20, 0) - 1
-            FROM m20 WHERE last_ts::date = %s AND ma20 IS NOT NULL
-        """, (t1,))
-        rows = [("stock", r[0], factor, t1, r[1]) for r in cur.fetchall()]
-        if rows:
-            cur.executemany(
-                "INSERT INTO screen_factor_cache (category, ts_code, factor, trade_date, value) "
-                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", rows)
-            conn.commit()
-        logger.info("screen_factor_compute: %s@%s 落 %d 行", factor, t1, len(rows))
-        return {"status": "success", "factor": factor, "trade_date": str(t1), "rows": len(rows)}
+        for factor, win_n, kind in FACTORS:
+            cur = conn.execute(
+                "SELECT count(*) FROM screen_factor_cache WHERE factor=%s AND trade_date=%s", (factor, t1))
+            if cur.fetchone()[0] > 0:
+                results[factor] = "skipped"
+                continue
+            dev_expr = "(last_close / NULLIF(ma, 0) - 1) * 100" if kind == "dev" else \
+                      "last_close / NULLIF(ma, 0) - 1"
+            cur = conn.execute("""
+                WITH last_day AS (
+                    SELECT symbol, close, ts FROM bar_1d
+                    WHERE freq='1D' AND ts::date = %s
+                ), win AS (
+                    SELECT ld.symbol, ld.close AS last_close,
+                           (SELECT avg(t.close) FROM (
+                               SELECT b.close FROM bar_1d b
+                               WHERE b.symbol = ld.symbol AND b.freq='1D' AND b.ts <= ld.ts
+                               ORDER BY b.ts DESC LIMIT """ + str(win_n) + """
+                            ) t) AS ma
+                    FROM last_day ld
+                )
+                SELECT split_part(symbol, '.', 1) || '.' || left(split_part(symbol, '.', 2), 2), """ + dev_expr + """
+                FROM win WHERE ma IS NOT NULL AND last_close > 0
+            """, (t1,))
+            rows = [("stock", r[0], factor, t1, r[1]) for r in cur.fetchall()]
+            if rows:
+                cur.executemany(
+                    "INSERT INTO screen_factor_cache (category, ts_code, factor, trade_date, value) "
+                    "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", rows)
+            results[factor] = len(rows)
+        conn.commit()
+        cur = conn.execute("DELETE FROM screen_factor_cache WHERE trade_date < CURRENT_DATE - 90")
+        gc_n = cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+        conn.commit()
+    logger.info("screen_factor_compute@%s: %s (gc=%s)", t1, results, gc_n)
+    return {"status": "success", "trade_date": str(t1), "factors": results, "gc": gc_n}

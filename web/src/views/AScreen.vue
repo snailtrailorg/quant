@@ -8,6 +8,14 @@
         <el-form-item :label="t('screener.pbMax')"><el-input-number v-model="f.pb_max" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
         <el-form-item :label="t('screener.mvMin')"><el-input-number v-model="f.mv_min" :min="0" :step="50" style="width:100%" /></el-form-item>
         <el-form-item :label="t('screener.turnoverMin')"><el-input-number v-model="f.turnover_min" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.peTtmMax')"><el-input-number v-model="f.pe_ttm_max" :min="0" :step="5" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.circMvMin')"><el-input-number v-model="f.circ_mv_min" :min="0" :step="50" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.dvRatioMin')"><el-input-number v-model="f.dv_ratio_min" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.psMax')"><el-input-number v-model="f.ps_max" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.excludeSt')"><el-switch v-model="f.exclude_st" /></el-form-item>
+        <el-form-item :label="t('screener.listDaysMin')"><el-input-number v-model="f.list_days_min" :min="0" :step="365" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.mom20Min')"><el-input-number v-model="f.momentum_20_min" :step="0.05" :precision="2" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.ma250DevMin')"><el-input-number v-model="f.price_vs_ma250_min" :step="5" :precision="1" style="width:100%" /></el-form-item>
         <el-button type="primary" style="width: 100%" @click="load" :loading="loading">{{ t('screener.run') }}</el-button>
       </el-form>
       <el-divider />
@@ -51,6 +59,18 @@
         <el-table-column v-if="colOn('market_cap')" prop="total_mv" :label="t('screener.marketCap')" min-width="110" class-name="num">
           <template #default="{ row }">{{ fmtCn(row.total_mv * 10000, 1) }}</template>
         </el-table-column>
+        <el-table-column v-if="colOn('circ_mv')" prop="circ_mv" :label="t('screener.circMvMin').replace(/下限\(万元\)/, '')" min-width="110" class-name="num">
+          <template #default="{ row }">{{ row.circ_mv ? fmtCn(row.circ_mv * 10000, 1) : '-' }}</template>
+        </el-table-column>
+        <el-table-column v-if="colOn('dv_ratio')" prop="dv_ratio" :label="t('screener.dvRatioMin').replace(/下限\(%\)/, '')" min-width="90" class-name="num">
+          <template #default="{ row }">{{ row.dv_ratio ?? '-' }}</template>
+        </el-table-column>
+        <el-table-column v-if="colOn('momentum')" prop="momentum_20" :label="t('screener.mom20Min').replace(/下限.*/, '')" min-width="90" class-name="num">
+          <template #default="{ row }">{{ row.momentum_20 != null ? (row.momentum_20 * 100).toFixed(1) + '%' : '-' }}</template>
+        </el-table-column>
+        <el-table-column v-if="colOn('ma250_dev')" prop="price_vs_ma250" :label="t('screener.ma250DevMin').replace(/下限\(%\)/, '')" min-width="100" class-name="num">
+          <template #default="{ row }">{{ row.price_vs_ma250 != null ? row.price_vs_ma250.toFixed(1) + '%' : '-' }}</template>
+        </el-table-column>
       </TableShell>
       <el-pagination v-if="rows.length > pageSize" v-model:current-page="page" :page-size="pageSize" :total="rows.length"
         layout="prev, pager, next" style="margin-top: var(--sp-3); justify-content: flex-end" />
@@ -77,7 +97,9 @@ const pools = ref([])
 const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
-const f = ref({ pe_max: 0, pb_max: 0, mv_min: 0, turnover_min: 0 })
+const f = ref({ pe_max: 0, pb_max: 0, mv_min: 0, turnover_min: 0,
+  pe_ttm_max: 0, circ_mv_min: 0, dv_ratio_min: 0, ps_max: 0,
+  exclude_st: false, list_days_min: 0, momentum_20_min: null, price_vs_ma250_min: null })
 const plans = ref(JSON.parse(localStorage.getItem('screener_astock_plans') || '{}'))
 
 // 批17 17B：列显示配置——代码/名称列恒显不进 defs；换手率=低频列默认隐
@@ -88,6 +110,10 @@ const astockColDefs = computed(() => [
   { key: 'pb', label: 'PB' },
   { key: 'turnover', label: t('screener.turnover'), hidden: true },
   { key: 'market_cap', label: t('screener.marketCap') },
+  { key: 'circ_mv', label: t('screener.circMvMin').replace(/下限\(万元\)/, '') },   // 批164a：流通市值/股息/动量/年线乖离
+  { key: 'dv_ratio', label: t('screener.dvRatioMin').replace(/下限\(%\)/, '') },
+  { key: 'momentum', label: t('screener.mom20Min').replace(/下限.*/, '') },
+  { key: 'ma250_dev', label: t('screener.ma250DevMin').replace(/下限\(%\)/, '') },
 ])
 const astockVisible = ref([])
 const colOn = k => astockVisible.value.includes(k)
@@ -98,7 +124,9 @@ const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) 
 const load = async () => {
   loading.value = true
   try {
-    const params = new URLSearchParams(Object.entries(f.value).map(([k, v]) => [k, String(v)]).concat([['limit', '500']]))
+    const params = new URLSearchParams(Object.entries(f.value)
+      .filter(([, v]) => v !== null && v !== undefined && v !== false && v !== 0)   // 批164a：null/开关false/0 全=不过滤，不占 URL
+      .map(([k, v]) => [k, String(v)]).concat([['limit', '500']]))
     rows.value = await api.get(`/screen/astock?${params}`) || []
   } catch { rows.value = [] }
   finally { loading.value = false }

@@ -30,8 +30,18 @@ FIELDS: dict[str, dict[str, dict]] = {
         "list_days": {"label": "上市天数", "source": "expr",
                       "expr": "(CURRENT_DATE - a.list_date::date)",
                       "type": "num", "nullable": False, "group": "other"},
-        "momentum_20": {"label": "20日动量", "source": "cache", "factor": "momentum_20",
-                        "type": "num", "nullable": True, "group": "tech"},   # screen_factor_cache
+        "momentum_20": {"label": "月线动量(20日)", "source": "cache", "factor": "momentum_20",
+                        "type": "num", "nullable": True, "group": "tech"},   # 周期谱系：周5/月20/季60/半年120/年250
+        "momentum_5":   {"label": "周线动量(5日)", "source": "cache", "factor": "momentum_5",
+                        "type": "num", "nullable": True, "group": "tech"},
+        "momentum_60":  {"label": "季线动量(60日)", "source": "cache", "factor": "momentum_60",
+                        "type": "num", "nullable": True, "group": "tech"},
+        "momentum_120": {"label": "半年线动量(120日)", "source": "cache", "factor": "momentum_120",
+                        "type": "num", "nullable": True, "group": "tech"},
+        "momentum_250": {"label": "年线动量(250日)", "source": "cache", "factor": "momentum_250",
+                        "type": "num", "nullable": True, "group": "tech"},
+        "price_vs_ma250": {"label": "年线乖离%", "source": "cache", "factor": "price_vs_ma250",
+                            "type": "num", "nullable": True, "group": "tech"},
     },
     "convertible": {
         "remaining_years": {"label": "剩余年限(年)", "source": "expr",
