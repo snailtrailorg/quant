@@ -1,19 +1,19 @@
 <template>
-  <div style="display: flex; gap: 6px; margin-bottom: 6px; align-items: center">
-    <el-select :model-value="row.field" filterable placeholder="字段" style="width: 130px" size="small"
+  <div style="display: flex; gap: var(--sp-1); margin-bottom: var(--sp-1); align-items: center">
+    <el-select :model-value="row.field" filterable placeholder="字段" style="flex: 4; min-width: 0" size="small"
                @update:model-value="onField">
       <el-option-group v-for="g in groups" :key="g" :label="g">
         <el-option v-for="f in fieldsByGroup(g)" :key="f.name" :value="f.name" :label="f.label"
                    :disabled="f.dead" />
       </el-option-group>
     </el-select>
-    <el-select :model-value="row.op" style="width: 110px" size="small" @update:model-value="emit('upd', {op: $event})">
+    <el-select :model-value="row.op" style="flex: 3; min-width: 0" size="small" @update:model-value="emit('upd', {op: $event})">
       <el-option v-for="o in opsFor" :key="o.v" :value="o.v" :label="o.l" />
     </el-select>
     <el-switch v-if="isBool" :model-value="row.value === true" @update:model-value="emit('upd', {value: true})" />
-    <el-input-number v-else :model-value="numVal" :step="0.5" style="width: 120px" size="small"
+    <el-input-number v-else :model-value="numVal" :step="0.5" style="flex: 3; min-width: 0" size="small"
                      @update:model-value="emit('upd', {value: $event})" />
-    <el-button text size="small" type="danger" @click="emit('del')">×</el-button>
+    <el-button text size="small" @click="emit('del')">×</el-button>
   </div>
 </template>
 

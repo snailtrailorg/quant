@@ -1281,9 +1281,11 @@ mail: '邮件 SMTP',
     screener: {
       filters: '筛选条件', results: '结果', run: '筛选', addToPool: '加入自选标的', selectPool: '选择池',   // 批89：跟随池改名（「股票池」→「自选标的」正文残留清零）
       added: '已添加 {n} 只标的到池', savedPlans: '已保存方案', savePlan: '保存当前方案', planName: '方案名称',
-      peMax: 'PE 上限', pbMax: 'PB 上限', mvMin: '市值下限(万元)', turnoverMin: '换手率下限(%)',
-      peTtmMax: 'PE(TTM) 上限', circMvMin: '流通市值下限(万元)', dvRatioMin: '股息率下限(%)', psMax: '市销率上限',
-      excludeSt: '排除ST/退市', listDaysMin: '上市天数下限', mom20Min: '月线动量下限(如0.05)', ma250DevMin: '年线乖离下限(%)',   // 批164a
+      circMvMin: '流通市值下限(万元)', dvRatioMin: '股息率下限(%)',
+      mom20Min: '月线动量下限(如0.05)', ma250DevMin: '年线乖离下限(%)',   // 批164a（excludeSt/listDaysMin 随 164b 表单退役——字段标签现由注册表 label 供给）
+      tabBasic: '普通条件', tabAdvanced: '高级', matchAll: '满足全部', matchAny: '满足任一',
+      addCond: '添加条件', dslComing: 'DSL 表达式筛选随下期交付', builtinTag: '预置',
+      nullsExcluded: '{n} 只标的因字段为空被排除', skippedFields: '{n} 个条件字段已失效被跳过',   // 批164b
       marketCap: '市值', turnover: '换手率',
       cbFilters: '转债筛选', doubleLowMax: '双低上限', premiumMax: '溢价率上限(%)', remainingMin: '剩余年限下限',
       doubleLow: '双低', premium: '溢价率', convPrice: '转股价', maturity: '到期日', bondName: '转债名', stkName: '正股名',
@@ -1361,9 +1363,11 @@ mail: '邮件 SMTP',
     screener: {
       filters: 'Filters', results: 'Results', run: 'Screen', addToPool: 'Add to pool', selectPool: 'Select pool',
       added: 'Added {n} symbols to pool', savedPlans: 'Saved plans', savePlan: 'Save plan', planName: 'Plan name',
-      peMax: 'PE max', pbMax: 'PB max', mvMin: 'Market cap min (wan)', turnoverMin: 'Turnover min (%)',
-      peTtmMax: 'PE(TTM) max', circMvMin: 'Circ. cap min (wan)', dvRatioMin: 'Dividend yield min (%)', psMax: 'P/S max',
-      excludeSt: 'Exclude ST/delisting', listDaysMin: 'Listed days min', mom20Min: 'MA20 momentum min', ma250DevMin: 'MA250 deviation min (%)',
+      circMvMin: 'Circ. cap min (wan)', dvRatioMin: 'Dividend yield min (%)',
+      mom20Min: 'MA20 momentum min', ma250DevMin: 'MA250 deviation min (%)',
+      tabBasic: 'Basic', tabAdvanced: 'Advanced', matchAll: 'Match all', matchAny: 'Match any',
+      addCond: 'Add condition', dslComing: 'DSL expression screening ships next release', builtinTag: 'Built-in',
+      nullsExcluded: '{n} symbols excluded (null field)', skippedFields: '{n} condition fields skipped (stale)',
       marketCap: 'Mkt Cap', turnover: 'Turnover',
       cbFilters: 'CB Filters', doubleLowMax: 'Double-low max', premiumMax: 'Premium max (%)', remainingMin: 'Remaining yrs min',
       doubleLow: 'D-Low', premium: 'Premium', convPrice: 'Conv px', maturity: 'Maturity', bondName: 'Bond', stkName: 'Stock',

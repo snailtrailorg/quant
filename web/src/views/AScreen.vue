@@ -3,24 +3,24 @@
   <div style="display: flex; gap: 16px">
     <el-card style="width: 260px; flex-shrink: 0">
       <template #header>{{ t('screener.filters') }}</template>
-      <el-tabs model-value="basic" style="--el-tabs-header-height: 32px">
+      <el-tabs model-value="basic">
         <el-tab-pane :label="t('screener.tabBasic')" name="basic">
-          <el-radio-group v-model="match" size="small" style="margin-bottom: 6px">
+          <el-radio-group v-model="match" size="small" style="margin-bottom: var(--sp-2)">
             <el-radio-button value="all">{{ t('screener.matchAll') }}</el-radio-button>
             <el-radio-button value="any">{{ t('screener.matchAny') }}</el-radio-button>
           </el-radio-group>
-          <ScreenConditionRow v-for="(r, i) in rows" :key="i" :row="r" :fields="fields"
-                              @upd="p => Object.assign(rows[i], p)" @del="rows.splice(i, 1)" />
-          <el-button size="small" style="width: 100%; margin-bottom: 6px" @click="rows.push({ field: 'pe_ttm', op: '<', value: 30 })">+ {{ t('screener.addCond') }}</el-button>
+          <ScreenConditionRow v-for="(r, i) in conds" :key="i" :row="r" :fields="fields"
+                              @upd="p => Object.assign(conds[i], p)" @del="conds.splice(i, 1)" />
+          <el-button size="small" style="width: 100%; margin-bottom: var(--sp-1)" @click="conds.push({ field: 'pe_ttm', op: '<', value: 30 })">+ {{ t('screener.addCond') }}</el-button>
           <el-button type="primary" style="width: 100%" @click="run" :loading="loading">{{ t('screener.run') }}</el-button>
         </el-tab-pane>
         <el-tab-pane :label="t('screener.tabAdvanced')" name="dsl">
-          <div style="font-size: var(--fs-foot); color: var(--text-secondary); padding: 12px 0">{{ t('screener.dslComing') }}</div>
+          <div style="font-size: var(--fs-foot); color: var(--text-secondary); padding: var(--sp-3) 0">{{ t('screener.dslComing') }}</div>
         </el-tab-pane>
       </el-tabs>
       <el-divider />
       <div style="font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-2)">{{ t('screener.savedPlans') }}</div>
-      <div v-for="p in presets" :key="p.id" style="display: flex; gap: 4px; margin-bottom: 4px; align-items: center">
+      <div v-for="p in presets" :key="p.id" style="display: flex; gap: var(--sp-1); margin-bottom: var(--sp-1); align-items: center">
         <el-button size="small" text type="primary" style="flex: 1; justify-content: flex-start" @click="applyPreset(p)">{{ p.name }}</el-button>
         <el-tag v-if="p.source === 'builtin'" size="small" type="info">{{ t('screener.builtinTag') }}</el-tag>
         <el-button v-if="p.source !== 'builtin'" size="small" text type="danger" @click="delPreset(p)">×</el-button>
@@ -98,10 +98,57 @@ const pools = ref([])
 const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
-const f = ref({ pe_max: 0, pb_max: 0, mv_min: 0, turnover_min: 0,
-  pe_ttm_max: 0, circ_mv_min: 0, dv_ratio_min: 0, ps_max: 0,
-  exclude_st: false, list_days_min: 0, momentum_20_min: null, price_vs_ma250_min: null })
-const plans = ref(JSON.parse(localStorage.getItem('screener_astock_plans') || '{}'))
+const match = ref('all')
+const conds = ref([{ field: 'pe_ttm', op: '<', value: 30 }, { field: 'st_filter', op: '=', value: true }])
+const fields = ref([])
+const presets = ref([])
+
+const loadFields = async () => {
+  try { fields.value = (await api.get('/screen/fields?category=stock'))?.fields || [] } catch { }
+}
+const loadPresets = async () => {
+  try { presets.value = await api.get('/screen/presets?category=stock') || [] } catch { }
+}
+onMounted(() => { loadFields(); loadPresets(); loadPools() })
+
+const run = async () => {
+  loading.value = true
+  try {
+    const live = conds.value.filter(r => r.field && r.value !== null && r.value !== undefined)
+    const j = await api.post('/screen/run', {
+      category: 'stock', limit: 500,
+      definition: { v: 1, match: match.value, rows: live.map(r => ({ field: r.field, op: r.op, value: r.value })) },
+    })
+    rows.value = j.rows || []
+    if (j.nulls_excluded) ElMessage.info(t('screener.nullsExcluded', { n: j.nulls_excluded }))
+  } catch (e) {
+    ElMessage.error(apiErr(e, t('common.loadFailed')))
+  } finally { loading.value = false }
+}
+
+const applyPreset = (p) => {
+  const d = p.definition || {}
+  if (d.match) match.value = d.match
+  if (Array.isArray(d.rows)) conds.value = d.rows.map(r => ({ ...r }))
+  if (p.skipped_fields?.length) ElMessage.warning(t('screener.skippedFields', { n: p.skipped_fields.length }))
+}
+const savePreset = async () => {
+  try {
+    const { ElMessageBox } = await import('element-plus')
+    const { value: name } = await ElMessageBox.prompt(t('screenter.planName') || t('screener.planName'), t('screener.savePlan'))
+    await api.post('/screen/presets', {
+      name, category: 'stock',
+      definition: { v: 1, match: match.value, rows: conds.value.map(r => ({ field: r.field, op: r.op, value: r.value })) },
+    })
+    await loadPresets()
+  } catch (e) { if (e !== 'cancel' && e?.toString && !String(e).includes('cancel')) ElMessage.error(apiErr(e, t('common.saveFailed'))) }
+}
+const delPreset = async (p) => {
+  try {
+    await api.delete(`/screen/presets/${p.id}`)
+    await loadPresets()
+  } catch (e) { ElMessage.error(apiErr(e, t('common.loadFailed'))) }
+}
 
 // 批17 17B：列显示配置——代码/名称列恒显不进 defs；换手率=低频列默认隐
 const astockColDefs = computed(() => [
@@ -122,16 +169,6 @@ const colOn = k => astockVisible.value.includes(k)
 const pagedRows = computed(() => rows.value.slice((page.value - 1) * pageSize, page.value * pageSize))
 const onSelChange = (sel) => { checked.value = new Set(sel.map(r => r.ts_code)) }
 
-const load = async () => {
-  loading.value = true
-  try {
-    const params = new URLSearchParams(Object.entries(f.value)
-      .filter(([, v]) => v !== null && v !== undefined && v !== false && v !== 0)   // 批164a：null/开关false/0 全=不过滤，不占 URL
-      .map(([k, v]) => [k, String(v)]).concat([['limit', '500']]))
-    rows.value = await api.get(`/screen/astock?${params}`) || []
-  } catch { rows.value = [] }
-  finally { loading.value = false }
-}
 const loadPools = async () => { try { pools.value = await api.get('/pool') || [] } catch {} }
 const addToPool = async () => {
   if (!checked.value.size || !selectedPool.value) return
@@ -150,15 +187,4 @@ const addToPool = async () => {
     ElMessage.success(t('screener.added', { n: symbols.length }))
   } catch { ElMessage.error(t('common.failed')) }
 }
-const savePlan = () => {
-  const name = prompt(t('screener.planName'))
-  if (!name) return
-  plans.value[name] = { ...f.value }
-  localStorage.setItem('screener_astock_plans', JSON.stringify(plans.value))
-  ElMessage.success(t('common.success'))
-}
-const applyPlan = (name) => { f.value = { ...plans.value[name] }; load() }
-const delPlan = (name) => { delete plans.value[name]; localStorage.setItem('screener_astock_plans', JSON.stringify(plans.value)) }
-
-onMounted(() => { load(); loadPools() })
 </script>
