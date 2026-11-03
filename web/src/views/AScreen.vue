@@ -88,14 +88,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import api from '../api'
+import api, { apiErr } from '../api'
 import { fmtCn } from '../utils/format'
 import TableShell from '../components/TableShell.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { Plus } from '@element-plus/icons-vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const rows = ref([])
 const loading = ref(false)
 const checked = ref(new Set())
@@ -123,12 +123,15 @@ onMounted(() => { loadFields(); loadPresets(); loadPools() })
 const run = async () => {
   loading.value = true
   try {
-    const live = conds.value.filter(r => r.field && r.value !== null && r.value !== undefined)
+    const typeOf = f => (fields.value.find(x => x.name === f) || {}).type
+    const live = conds.value.filter(r => r.field && r.value !== null && r.value !== undefined
+      && !(typeOf(r.field) === 'bool' && r.value !== true))   // 开关关=该条件不生效（后端 bool 仅收 true）
     const j = await api.post('/screen/run', {
       category: 'stock', limit: 500,
       definition: { v: 1, match: match.value, rows: live.map(r => ({ field: r.field, op: r.op, value: r.value })) },
     })
     rows.value = j.rows || []
+    page.value = 1
     if (j.nulls_excluded) ElMessage.info(t('screener.nullsExcluded', { n: j.nulls_excluded }))
   } catch (e) {
     ElMessage.error(apiErr(e, t('common.loadFailed')))
@@ -144,9 +147,10 @@ const runDsl = async () => {
       filter: dslFilter.value || '', rank: dslRank.value || null,
     })
     rows.value = j.rows || []
+    page.value = 1
   } catch (e) {
-    const code = e?.response?.data?.code
-    dslErr.value = code ? t('err.' + code) : apiErr(e, t('common.loadFailed'))
+    const code = e?.response?.data?.code || e?.code
+    dslErr.value = code && te('err.' + code) ? t('err.' + code) : apiErr(e, t('common.loadFailed'))
   } finally { loading.value = false }
 }
 const applyPreset = (p) => {
@@ -166,13 +170,13 @@ const applyPreset = (p) => {
 const savePreset = async () => {
   try {
     const { ElMessageBox } = await import('element-plus')
-    const { value: name } = await ElMessageBox.prompt(t('screenter.planName') || t('screener.planName'), t('screener.savePlan'))
+    const { value: name } = await ElMessageBox.prompt(t('screener.planName'), t('screener.savePlan'))
     const definition = activeTab.value === 'dsl'
       ? { v: 1, filter: dslFilter.value, rank: dslRank.value || undefined }
       : { v: 1, match: match.value, rows: conds.value.map(r => ({ field: r.field, op: r.op, value: r.value })) }
     await api.post('/screen/presets', { name, category: 'stock', definition })
     await loadPresets()
-  } catch (e) { if (e !== 'cancel' && e?.toString && !String(e).includes('cancel')) ElMessage.error(apiErr(e, t('common.saveFailed'))) }
+  } catch (e) { if (e !== 'cancel' && e !== 'close') ElMessage.error(apiErr(e, t('common.saveFailed'))) }
 }
 const delPreset = async (p) => {
   try {

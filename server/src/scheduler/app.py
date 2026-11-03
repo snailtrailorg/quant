@@ -218,6 +218,13 @@ app.conf.update(
             "schedule": crontab(hour=16, minute=30),
             "options": {"queue": "risk"},
         },
+        # 批 164a：标的筛选预计算因子（动量族/年线乖离）——盘后 16:45（晚于 16:30 日报与 15:05 数据窗；
+        # 任务内幂等+90 天 GC，soft 1800s 显式）。评测发现「只定义未调度」=功能空转，此处为唯一调度面。
+        "screen-factor-compute": {
+            "task": "src.scheduler.tasks.screen_factor_compute",
+            "schedule": crontab(hour=16, minute=45),
+            "options": {"queue": "data", "expires": 3600},
+        },
         "broker-health-check": {
             "task": "src.scheduler.tasks.broker_health_check",
             "schedule": crontab(hour="*/6", minute=51),   # 批27-31：6h 周期+错峰分钟

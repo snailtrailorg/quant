@@ -52,12 +52,14 @@ FIELDS: dict[str, dict[str, dict]] = {
                             "type": "num", "nullable": True, "group": "tech"},
     },
     "convertible": {
+        # 转股价值 = 100 * 正股价 / 转股价（评审 P0：原式取了倒数，实测双低值 294 荒谬）
         "double_low":  {"label": "双低值", "source": "expr",
-                        "expr": "(cd.close + 100.0 * b.conv_price / NULLIF(sd.close, 0))",
+                        "expr": "(cd.close + (cd.close - 100.0 * sd.close / NULLIF(b.conv_price, 0)) "
+                                "/ NULLIF(100.0 * sd.close / NULLIF(b.conv_price, 0), 0) * 100)",
                         "type": "num", "nullable": True, "group": "valuation"},
         "premium_pct": {"label": "转股溢价率%", "source": "expr",
-                        "expr": "((cd.close - 100.0 * b.conv_price / NULLIF(sd.close, 0)) "
-                                "/ NULLIF(100.0 * b.conv_price / sd.close, 0) * 100)",
+                        "expr": "((cd.close - 100.0 * sd.close / NULLIF(b.conv_price, 0)) "
+                                "/ NULLIF(100.0 * sd.close / NULLIF(b.conv_price, 0), 0) * 100)",
                         "type": "num", "nullable": True, "group": "valuation"},
         "remaining_years": {"label": "剩余年限(年)", "source": "expr",
                              "expr": "(b.maturity_date::date - CURRENT_DATE)",
@@ -136,26 +138,44 @@ def preset_delete(pid: int) -> None:
         conn.commit()
 
 
-def run_query(category: str, fields: list, where: str, params: list, limit: int, null_fields: list) -> dict:
+def run_query(category: str, fields: list, where: str, params: list, limit: int,
+              null_fields: list, order_by: str | None = None) -> dict:
     from .db import get_conn
     base = build_base_from(category, fields or None)
-    q = f"SELECT * FROM ({base}) q{where} ORDER BY ts_code LIMIT {int(limit)}"
+    order = order_by or "ts_code"
+    q = f"SELECT * FROM ({base}) q{where} ORDER BY {order} LIMIT {int(limit)}"
     with get_conn() as conn:
         cur = conn.execute(q, params)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, r)) for r in cur.fetchall()]
         if null_fields:
+            # 被条件剔除的 NULL 行 =（满足其余条件 ∩ 引用字段为空）——须带同一 where（评审 P1）
             null_checks = " OR ".join(f + " IS NULL" for f in null_fields)
-            cur = conn.execute(f"SELECT count(*) FROM ({base}) q WHERE {null_checks}")
+            where_wo_nulls = where if not where else where + " AND (" + null_checks + ")"
+            cur = conn.execute(f"SELECT count(*) FROM ({base}) q{where_wo_nulls}", params)
             nulls = cur.fetchone()[0]
         else:
             nulls = 0
     return {"rows": rows, "nulls_excluded": nulls, "count": len(rows)}
 
 
+# 缓存 join：按 category+factor 各取自己的 max(trade_date)（全局 max 会串品类/因子——评审 P1）
 _CACHE_JOIN = (" LEFT JOIN screen_factor_cache {alias} ON {alias}.ts_code = {ts_col} "
-               "AND {alias}.factor = '{factor}' "
-               "AND {alias}.trade_date = (SELECT max(trade_date) FROM screen_factor_cache)")
+               "AND {alias}.category = '{category}' AND {alias}.factor = '{factor}' "
+               "AND {alias}.trade_date = (SELECT max(trade_date) FROM screen_factor_cache "
+               "WHERE category = '{category}' AND factor = '{factor}')")
+
+# 展示列（结果表恒带——评审 P0：只查条件字段导致名称/价格列全空）
+_DISPLAY = {
+    "stock": {"name": "a.name", "close": "d.close", "pe": "d.pe", "pe_ttm": "d.pe_ttm",
+              "pb": "d.pb", "turnover_rate": "d.turnover_rate", "total_mv": "d.total_mv",
+              "circ_mv": "d.circ_mv", "dv_ratio": "d.dv_ratio", "ps": "d.ps"},
+    "convertible": {"name": "b.bond_short_name", "close": "cd.close", "stk_code": "b.stk_code",
+                    "stk_close": "sd.close", "conv_price": "b.conv_price",
+                    "maturity_date": "b.maturity_date", "coupon_rate": "b.coupon_rate"},
+    "listed_fund": {"name": "lf.name", "fund_scale": "lf.fund_scale",
+                    "management_fee": "lf.management_fee"},
+}
 
 _BASE = {
     "stock": {
@@ -164,10 +184,11 @@ _BASE = {
         "order": "d.total_mv DESC NULLS LAST",
     },
     "convertible": {
+        # 时区双转：ts 存 UTC（上海零点=前一日 16:00 UTC）——date_trunc 出 naive 后必须再转回 timestamptz
         "from": ("FROM cb_basic_info b "
                  "LEFT JOIN (SELECT symbol, close, ts FROM bar_1d WHERE freq='1D' "
-                 "AND ts >= date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') "
-                 "AND ts < date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') + interval '1 day') cd "
+                 "AND ts >= (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') "
+                 "AND ts < (date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai') + interval '1 day') cd "
                  "ON cd.symbol = replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE') "
                  "LEFT JOIN (SELECT ts_code, close FROM daily_basic "
                  "WHERE trade_date = (SELECT max(trade_date) FROM daily_basic)) sd ON b.stk_code = sd.ts_code"),
@@ -188,19 +209,27 @@ def build_base_from(category: str, fields: list[str] | None = None) -> str:
     base = _BASE[category]
     flds = fields_for(category)
     joins = base["from"]
-    selects = [f"{base['ts_col']} AS ts_code"]
-    for f in (fields or list(flds)):
+    # 输出列：展示列打底 → 条件字段覆盖（同名字段去重——评审 P0：同字段两条件会重复 JOIN/重名列）
+    out = dict(_DISPLAY[category])
+    cache_joined = set()
+    for f in dict.fromkeys(fields or []):
         spec = flds.get(f)
         if spec is None:
             continue
         if spec["source"] == "cache":
-            alias = f"f_{f}"
-            joins += _CACHE_JOIN.format(alias=alias, ts_col=base["ts_col"], factor=spec["factor"])
-            selects.append(f"{alias}.value AS {f}")
+            if spec["factor"] not in cache_joined:
+                alias = f"f_{f}"
+                joins += _CACHE_JOIN.format(alias=alias, ts_col=base["ts_col"],
+                                            factor=spec["factor"], category=category)
+                cache_joined.add(spec["factor"])
+                out[f] = f"{alias}.value"
+            else:
+                out[f] = f"f_{f}.value"
         elif spec["source"] == "column":
-            selects.append(f"{spec['col']} AS {f}")
+            out[f] = spec["col"]
         else:
-            selects.append(f"{spec['expr']} AS {f}")
+            out[f] = spec["expr"]
+    selects = [f"{base['ts_col']} AS ts_code"] + [f"{expr} AS {name}" for name, expr in out.items()]
     latest = f" WHERE {base['latest']}" if base["latest"] else ""
     return f"SELECT {', '.join(selects)} {joins}{latest}"
 

@@ -2329,30 +2329,49 @@ def screen_factor_compute():
                ("momentum_250", 250, "mom"), ("price_vs_ma250", 250, "dev")]
     results = {}
     with get_conn() as conn:
-        cur = conn.execute("SELECT COALESCE(max(ts)::date, '1970-01-01') FROM bar_1d WHERE freq='1D'")
+        # 日界按上海时区（bar_1d.ts 存 UTC，上海零点=前一日 16:00 UTC——评审 P1 偏一天）
+        cur = conn.execute(
+            "SELECT COALESCE(max((ts AT TIME ZONE 'Asia/Shanghai')::date), '1970-01-01') "
+            "FROM bar_1d WHERE freq='1D'")
         t1 = cur.fetchone()[0]
+        # 当日标的数（幂等判据用——残缺缓存可自愈，评审 P1：count>0 会把半截数据永久标 skipped）
+        cur = conn.execute(
+            "SELECT count(DISTINCT symbol) FROM bar_1d WHERE freq='1D' "
+            "AND (ts AT TIME ZONE 'Asia/Shanghai')::date = %s", (t1,))
+        expect_n = cur.fetchone()[0] or 0
         for factor, win_n, kind in FACTORS:
             cur = conn.execute(
                 "SELECT count(*) FROM screen_factor_cache WHERE factor=%s AND trade_date=%s", (factor, t1))
-            if cur.fetchone()[0] > 0:
+            have_n = cur.fetchone()[0]
+            if expect_n and have_n >= int(expect_n * 0.9):   # ≥90% 视为完整；残缺则重算
                 results[factor] = "skipped"
                 continue
+            if have_n:
+                conn.execute("DELETE FROM screen_factor_cache WHERE factor=%s AND trade_date=%s",
+                             (factor, t1))
             dev_expr = "(last_close / NULLIF(ma, 0) - 1) * 100" if kind == "dev" else \
                       "last_close / NULLIF(ma, 0) - 1"
+            # 复权：close*adj_factor / 最新 adj_factor（除权日不产生假动量——评审 P1）
             cur = conn.execute("""
                 WITH last_day AS (
-                    SELECT symbol, close, ts FROM bar_1d
-                    WHERE freq='1D' AND ts::date = %s
+                    SELECT symbol, close, COALESCE(adj_factor, 1) AS af, ts FROM bar_1d
+                    WHERE freq='1D' AND (ts AT TIME ZONE 'Asia/Shanghai')::date = %s
                 ), win AS (
-                    SELECT ld.symbol, ld.close AS last_close,
-                           (SELECT avg(t.close) FROM (
-                               SELECT b.close FROM bar_1d b
+                    SELECT ld.symbol, ld.close * ld.af AS last_close, ld.af,
+                           (SELECT avg(t.ac) FROM (
+                               SELECT b.close * COALESCE(b.adj_factor, 1) AS ac FROM bar_1d b
                                WHERE b.symbol = ld.symbol AND b.freq='1D' AND b.ts <= ld.ts
                                ORDER BY b.ts DESC LIMIT """ + str(win_n) + """
                             ) t) AS ma
                     FROM last_day ld
                 )
-                SELECT split_part(symbol, '.', 1) || '.' || left(split_part(symbol, '.', 2), 2), """ + dev_expr + """
+                SELECT CASE split_part(symbol, '.', 2)
+                         WHEN 'SHSE' THEN split_part(symbol, '.', 1) || '.SH'
+                         WHEN 'SSE'  THEN split_part(symbol, '.', 1) || '.SH'
+                         WHEN 'SZSE' THEN split_part(symbol, '.', 1) || '.SZ'
+                         WHEN 'BSE'  THEN split_part(symbol, '.', 1) || '.BJ'
+                         ELSE symbol END,
+                       """ + dev_expr + """
                 FROM win WHERE ma IS NOT NULL AND last_close > 0
             """, (t1,))
             rows = [("stock", r[0], factor, t1, r[1]) for r in cur.fetchall()]

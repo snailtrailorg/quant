@@ -31,13 +31,15 @@ def _validate_dry_run(category: str, definition: dict) -> None:
         except ValueError as e:
             raise ApiError(400, "SCREEN_PRESET_INVALID", str(e))
     else:
-        try:
-            from ...strategy_framework.cross_section import validate_cross_section_expr
-            validate_cross_section_expr(definition.get("filter", ""), category)
-        except ImportError:
-            raise ApiError(400, "SCREEN_PRESET_DSL_PENDING", "DSL 校验器随 164c 交付")
-        except ValueError as e:
-            raise ApiError(400, "SCREEN_PRESET_INVALID", str(e))
+        from ...strategy_framework.cross_section import validate_cross_section_expr
+        for expr in (definition.get("filter") or "", definition.get("rank") or ""):
+            if not expr:
+                continue
+            try:
+                validate_cross_section_expr(expr, category)
+            except ValueError as e:
+                code = str(e).split(":", 1)[0]
+                raise ApiError(400, code if code.startswith("XSEC_") else "SCREEN_PRESET_INVALID", str(e))
 
 
 @router.get("/api/screen/presets")
@@ -53,8 +55,11 @@ def create_preset(body: PresetBody, payload: dict = Depends(require_perm("screen
     src = _shape_source(body.definition)
     try:
         pid = preset_create(body.name, body.category, src, body.definition, payload["uid"])
-    except Exception:
-        raise ApiError(409, "SCREEN_PRESET_DUP", "同名方案已存在")
+    except Exception as e:
+        # 只把唯一冲突转 409；其余（连接/权限/约束）如实抛出（评审 P1：勿把 DB 故障伪装成重名）
+        if "UniqueViolation" in type(e).__name__ or "duplicate key" in str(e):
+            raise ApiError(409, "SCREEN_PRESET_DUP", "同名方案已存在")
+        raise
     audit_log(payload["username"], "screen_preset_create", body.category + "/" + body.name)
     return {"id": pid, "source": src}
 
@@ -119,10 +124,14 @@ def run_dsl(body: RunDslBody, payload: dict = Depends(require_perm("read"))):
     """横截面 DSL 筛选（164c）——与 /run 同族规（limit 帽/权限键/错误码形态）。"""
     if body.limit > 500:
         raise ApiError(400, "SCREEN_RUN_LIMIT", "limit 上限 500")
+    if body.category not in FIELDS:
+        raise ApiError(400, "SCREEN_PRESET_CATEGORY", "unknown category")
+    if not (body.filter or "").strip():
+        raise ApiError(400, "SCREEN_RUN_EMPTY", "过滤表达式不能为空")
     from src.strategy_framework.cross_section import run_cross_section
     try:
         rows = run_cross_section(body.category, body.filter, body.rank, body.limit)
-    except ValueError as e:
+    except (ValueError, IndexError) as e:
         code = str(e).split(":", 1)[0]
         if not code.startswith("XSEC_"):
             code = "XSEC_SYNTAX"
@@ -145,5 +154,15 @@ def run_screen(body: RunBody, payload: dict = Depends(require_perm("read"))):
         if "仅数值" in msg or "percentile 仅" in msg:
             raise ApiError(400, "SCREEN_FIELD_TYPE_MISMATCH", msg)
         raise ApiError(400, "SCREEN_PRESET_INVALID", msg)
-    fields = [r["field"] for r in body.definition.get("rows", [])]
-    return run_query(body.category, fields, where, params, body.limit, null_fields)
+    rows_spec = body.definition.get("rows", [])
+    fields = [r["field"] for r in rows_spec]
+    # 排序：首个数值条件的字段+方向（双低前百需按双低升序——评审 P1）
+    order_by = None
+    _DIR = {"<": "ASC", "<=": "ASC", "percentile_bottom": "ASC",
+            ">": "DESC", ">=": "DESC", "percentile_top": "DESC"}
+    for r in rows_spec:
+        spec = FIELDS.get(body.category, {}).get(r.get("field"))
+        if spec and spec.get("type") == "num" and r.get("op") in _DIR:
+            order_by = f"q.{r['field']} {_DIR[r['op']]} NULLS LAST"
+            break
+    return run_query(body.category, fields, where, params, body.limit, null_fields, order_by)

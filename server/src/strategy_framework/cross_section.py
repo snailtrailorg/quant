@@ -24,63 +24,63 @@ _XSEC_VECTOR_FUNCS = {"rank", "zscore", "percentile"}
 _MAX_CALLS = 10
 
 
-class _Validator(ast.NodeVisitor):
-    def __init__(self, fields):
-        self.fields = fields
-        self.calls = 0
-        self.err = None
-
-    def _fail(self, code, msg):
-        if self.err is None:
-            self.err = f"{code}: {msg}"
-
-    def visit_Name(self, node):
-        ok = node.id in self.fields or node.id in _XSEC_NUM_FUNCS \
-            or node.id in _XSEC_VECTOR_FUNCS or node.id in ("true", "false")
-        if not ok:
-            self._fail("XSEC_UNKNOWN_FIELD", str(node.id))
-        self.generic_visit(node)
-
-    def visit_Call(self, node):
-        self.calls += 1
-        if self.calls > _MAX_CALLS:
-            self._fail("XSEC_TOO_MANY", f"函数调用超 {_MAX_CALLS}")
-            return
-        fname = node.func.id if isinstance(node.func, ast.Name) else None
-        if fname in _XSEC_VECTOR_FUNCS:
-            for sub in ast.walk(node.args[0] if node.args else ast.Constant(value=0)):
-                if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) \
-                        and sub.func.id in _XSEC_VECTOR_FUNCS:
-                    self._fail("XSEC_NESTED", f"{fname} 内禁嵌横截面函数")
-                    return
-        elif fname not in _XSEC_NUM_FUNCS:
-            self._fail("XSEC_FORBIDDEN_FUNC", str(fname))
-        if node.keywords:
-            self._fail("XSEC_SYNTAX", "不支持 kwargs")
-        self.generic_visit(node)
-
-    def generic_visit(self, node):
-        if self.err:
-            return
-        if isinstance(node, (ast.Import, ast.Attribute, ast.Subscript, ast.Lambda,
-                             ast.ListComp, ast.DictComp, ast.Dict, ast.Tuple, ast.Set,
-                             ast.JoinedStr, ast.Await, ast.Yield)):
-            self._fail("XSEC_SYNTAX", f"禁节点 {type(node).__name__}")
-            return
-        super().generic_visit(node)
+# 节点白名单（与 _eval_scalar 严格同集——评审 P1-2：黑名单校验放过 UAdd/FloorDiv/IfExp/Starred/In/Is
+# 而求值器不认 ⇒ 静默丢行。白名单化后「校验过必可求值」在结构上成立）
+_ALLOWED_NODES = (
+    ast.Expression, ast.Constant, ast.Name, ast.Load,
+    ast.BinOp, ast.UnaryOp, ast.Compare, ast.BoolOp, ast.Call,
+    ast.And, ast.Or, ast.Not, ast.Add, ast.Sub, ast.Mult, ast.Div, ast.Mod,
+    ast.USub, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq,
+)
+_MAX_NODES = 200
+_MAX_CONST = 1e9
 
 
 def validate_cross_section_expr(expr, category):
+    """白名单校验：通过的表达式必可被 _eval_scalar 求值（无静默丢行面）。"""
     if len(expr) > 500:
         raise ValueError("XSEC_SYNTAX: 表达式过长")
     try:
         tree = ast.parse(expr, mode="eval")
     except SyntaxError as e:
         raise ValueError(f"XSEC_SYNTAX: {e}")
-    v = _Validator(set(fields_for(category)))
-    v.visit(tree)
-    if v.err:
-        raise ValueError(v.err)
+    nodes = list(ast.walk(tree))
+    if len(nodes) > _MAX_NODES:
+        raise ValueError(f"XSEC_TOO_MANY: 节点数超 {_MAX_NODES}")
+    flds = fields_for(category)
+    calls = [n for n in nodes if isinstance(n, ast.Call)]
+    if len(calls) > _MAX_CALLS:
+        raise ValueError(f"XSEC_TOO_MANY: 函数调用超 {_MAX_CALLS}")
+    call_names = {n.func.id for n in calls if isinstance(n.func, ast.Name)}
+    for n in nodes:
+        if not isinstance(n, _ALLOWED_NODES):
+            raise ValueError(f"XSEC_SYNTAX: 禁节点 {type(n).__name__}")
+        if isinstance(n, ast.Constant):
+            if isinstance(n.value, bool):
+                continue
+            if not isinstance(n.value, (int, float)):
+                raise ValueError("XSEC_SYNTAX: 仅允许数值常量")
+            if abs(n.value) > _MAX_CONST:
+                raise ValueError("XSEC_CONST_RANGE: 常量超出范围")
+        if isinstance(n, ast.Name) and n.id not in call_names:
+            if n.id not in flds and n.id not in _XSEC_NUM_FUNCS \
+                    and n.id not in _XSEC_VECTOR_FUNCS and n.id not in ("true", "false"):
+                raise ValueError(f"XSEC_UNKNOWN_FIELD: {n.id}")
+    for n in calls:
+        if not isinstance(n.func, ast.Name):
+            raise ValueError("XSEC_SYNTAX: 函数名须为标识符")
+        fname = n.func.id
+        if fname not in _XSEC_NUM_FUNCS and fname not in _XSEC_VECTOR_FUNCS:
+            raise ValueError(f"XSEC_FORBIDDEN_FUNC: {fname}")
+        if n.keywords:
+            raise ValueError("XSEC_SYNTAX: 不支持关键字参数")
+        if fname in _XSEC_VECTOR_FUNCS:
+            if len(n.args) != 1:
+                raise ValueError(f"XSEC_ARITY: {fname} 须恰好 1 个参数")
+            for sub in ast.walk(n.args[0]):
+                if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) \
+                        and sub.func.id in _XSEC_VECTOR_FUNCS:
+                    raise ValueError(f"XSEC_NESTED: {fname} 内禁嵌横截面函数")
 
 
 def _eval_scalar(node, env):
@@ -91,6 +91,10 @@ def _eval_scalar(node, env):
             return env[node.id]
         if node.id in _XSEC_NUM_FUNCS:
             return _XSEC_FUNCS[node.id]
+        if node.id == "true":
+            return True
+        if node.id == "false":
+            return False
         raise NameError(node.id)
     if isinstance(node, ast.BinOp):
         import operator as op_
@@ -176,18 +180,23 @@ def run_cross_section(category, filter_expr, rank_expr, limit=100):
         import statistics
         s = sorted(vals)
         m = len(s)
-        out = {}
-        if fname == "rank":
-            for j, i in enumerate(rows_idx):
-                out[i] = (s.index(vals[j]) + 1) / m
-        elif fname == "zscore":
+        if fname == "zscore":
             mu = statistics.mean(vals)
             sd = statistics.pstdev(vals) or 1.0
-            out = {i: (v - mu) / sd for i, v in zip(rows_idx, vals)}
-        else:
-            for j, i in enumerate(rows_idx):
-                out[i] = 100.0 * s.index(vals[j]) / max(m - 1, 1)
-        return out
+            return {i: (v - mu) / sd for i, v in zip(rows_idx, vals)}
+        # 并列取平均秩（O(n log n) 建表——原 s.index 是 O(n²) 且并列全落最低位）
+        rank_of = {}
+        j = 0
+        while j < m:
+            k = j
+            while k + 1 < m and s[k + 1] == s[j]:
+                k += 1
+            avg_rank = (j + k) / 2.0 + 1.0     # 1-based 平均秩
+            rank_of[s[j]] = avg_rank
+            j = k + 1
+        if fname == "rank":
+            return {i: rank_of[v] / m for i, v in zip(rows_idx, vals)}
+        return {i: 100.0 * (rank_of[v] - 1) / max(m - 1, 1) for i, v in zip(rows_idx, vals)}
 
     xsec_cols = {}
     for tree in (ftree_all, rtree_all):
@@ -222,6 +231,11 @@ def run_cross_section(category, filter_expr, rank_expr, limit=100):
 
     if rtree is not None:
         results.sort(key=lambda r: r.get("__rank__", -1e18), reverse=True)
+    elif category == "convertible":
+        # 转债默认按双低升序（低者优）——原 total_mv 不存在导致随机序（评审 P1）
+        results.sort(key=lambda r: (r.get("double_low") is None, r.get("double_low") or 0.0))
+    elif category == "listed_fund":
+        results.sort(key=lambda r: -(float(r.get("fund_scale") or 0)))
     else:
-        results.sort(key=lambda r: float(r.get("total_mv") or 0), reverse=True)
+        results.sort(key=lambda r: -(float(r.get("total_mv") or 0)))
     return results[: int(limit)]

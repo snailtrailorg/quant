@@ -60,7 +60,8 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("DELETE FROM permission WHERE resource_type='api' AND resource_key='screen_preset'")
+    op.execute("DELETE FROM permission WHERE subject_type='role' AND dimension='api' "
+               "AND resource='screen_preset'")
     op.drop_index("uq_preset_user", table_name="screen_preset")
     op.drop_index("uq_preset_builtin", table_name="screen_preset")
     op.drop_table("screen_preset")
