@@ -46,7 +46,7 @@ def _validate_dry_run(category: str, definition: dict) -> None:
 
 @router.get("/api/screen/presets")
 def list_presets(category: str, payload: dict = Depends(require_perm("read"))):
-    return preset_list(category, payload["uid"])
+    return preset_list(category, int(payload["sub"]))
 
 
 @router.post("/api/screen/presets")
@@ -56,7 +56,7 @@ def create_preset(body: PresetBody, payload: dict = Depends(require_perm("screen
     _validate_dry_run(body.category, body.definition)
     src = _shape_source(body.definition)
     try:
-        pid = preset_create(body.name, body.category, src, body.definition, payload["uid"])
+        pid = preset_create(body.name, body.category, src, body.definition, int(payload["sub"]))
     except Exception as e:
         # 只把唯一冲突转 409；其余（连接/权限/约束）如实抛出（评审 P1：勿把 DB 故障伪装成重名）
         if "UniqueViolation" in type(e).__name__ or "duplicate key" in str(e):
@@ -74,7 +74,7 @@ def update_preset(pid: int, body: PresetBody,
         raise ApiError(404, "SCREEN_PRESET_NOT_FOUND", "方案不存在")
     if row[3] == "builtin":
         raise ApiError(403, "SCREEN_PRESET_BUILTIN", "出厂预置不可修改——另存为新方案")
-    if row[4] != payload["uid"] and payload.get("role") != "admin":
+    if row[4] != int(payload["sub"]) and payload.get("role") != "admin":
         raise ApiError(403, "SCREEN_PRESET_NOT_YOURS", "仅本人方案可修改")
     if row[2] != body.category:
         raise ApiError(400, "SCREEN_PRESET_CATEGORY", "方案品类不可变更")
@@ -97,7 +97,7 @@ def delete_preset(pid: int, payload: dict = Depends(require_perm("screen_preset"
         raise ApiError(404, "SCREEN_PRESET_NOT_FOUND", "方案不存在")
     if row[3] == "builtin":
         raise ApiError(403, "SCREEN_PRESET_BUILTIN", "出厂预置不可删除")
-    if row[4] != payload["uid"] and payload.get("role") != "admin":
+    if row[4] != int(payload["sub"]) and payload.get("role") != "admin":
         raise ApiError(403, "SCREEN_PRESET_NOT_YOURS", "仅本人方案可删除")
     preset_delete(pid)
     audit_log(payload["username"], "screen_preset_delete", "#" + str(pid) + " " + str(row[1]))
