@@ -16,6 +16,14 @@ GROUPS = ("valuation", "size", "quality", "tech", "other")
 
 FIELDS: dict[str, dict[str, dict]] = {
     "stock": {
+        "pe":        {"label": "PE", "source": "column", "col": "d.pe",
+                      "type": "num", "nullable": True, "group": "valuation"},
+        "pb":        {"label": "PB", "source": "column", "col": "d.pb",
+                      "type": "num", "nullable": True, "group": "valuation"},
+        "total_mv":  {"label": "总市值(万)", "source": "column", "col": "d.total_mv",
+                      "type": "num", "nullable": True, "group": "size"},
+        "turnover":  {"label": "换手率%", "source": "column", "col": "d.turnover_rate",
+                      "type": "num", "nullable": True, "group": "other"},
         "pe_ttm":    {"label": "PE(TTM)", "source": "column", "col": "d.pe_ttm",
                       "type": "num", "nullable": True, "group": "valuation"},
         "circ_mv":   {"label": "流通市值(万)", "source": "column", "col": "d.circ_mv",
@@ -44,6 +52,13 @@ FIELDS: dict[str, dict[str, dict]] = {
                             "type": "num", "nullable": True, "group": "tech"},
     },
     "convertible": {
+        "double_low":  {"label": "双低值", "source": "expr",
+                        "expr": "(cd.close + 100.0 * b.conv_price / NULLIF(sd.close, 0))",
+                        "type": "num", "nullable": True, "group": "valuation"},
+        "premium_pct": {"label": "转股溢价率%", "source": "expr",
+                        "expr": "((cd.close - 100.0 * b.conv_price / NULLIF(sd.close, 0)) "
+                                "/ NULLIF(100.0 * b.conv_price / sd.close, 0) * 100)",
+                        "type": "num", "nullable": True, "group": "valuation"},
         "remaining_years": {"label": "剩余年限(年)", "source": "expr",
                              "expr": "(b.maturity_date::date - CURRENT_DATE)",
                              "type": "num", "nullable": False, "group": "other"},
@@ -59,3 +74,116 @@ def fields_for(category: str) -> dict:
     if category not in FIELDS:
         raise ValueError(f"unknown category: {category}")
     return FIELDS[category]
+
+
+_CACHE_JOIN = (" LEFT JOIN screen_factor_cache {alias} ON {alias}.ts_code = {ts_col} "
+               "AND {alias}.factor = '{factor}' "
+               "AND {alias}.trade_date = (SELECT max(trade_date) FROM screen_factor_cache)")
+
+_BASE = {
+    "stock": {
+        "from": "FROM daily_basic d LEFT JOIN asset_static_info a ON a.ts_code = d.ts_code",
+        "ts_col": "d.ts_code", "latest": "d.trade_date = (SELECT max(trade_date) FROM daily_basic)",
+        "order": "d.total_mv DESC NULLS LAST",
+    },
+    "convertible": {
+        "from": ("FROM cb_basic_info b "
+                 "LEFT JOIN (SELECT symbol, close, ts FROM bar_1d WHERE freq='1D' "
+                 "AND ts >= date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') "
+                 "AND ts < date_trunc('day', (SELECT max(ts) FROM bar_1d) AT TIME ZONE 'Asia/Shanghai') + interval '1 day') cd "
+                 "ON cd.symbol = replace(replace(b.ts_code, '.SZ', '.SZSE'), '.SH', '.SHSE') "
+                 "LEFT JOIN (SELECT ts_code, close FROM daily_basic "
+                 "WHERE trade_date = (SELECT max(trade_date) FROM daily_basic)) sd ON b.stk_code = sd.ts_code"),
+        "ts_col": "b.ts_code", "latest": None, "order": "double_low NULLS LAST",
+    },
+    "listed_fund": {
+        "from": "FROM listed_fund_basic lf",
+        "ts_col": "lf.ts_code", "latest": None, "order": "lf.ts_code",
+    },
+}
+
+
+def build_base_from(category: str, fields: list[str] | None = None) -> str:
+    """品类基础查询段（SELECT+FROM+JOIN）——b 编译器与 c 求值器同引单源（164b 件3/B-P0）。
+
+    fields=引用字段集（决定 cache JOIN 增补与 SELECT 列）；返回可直接拼 WHERE 的 base SQL 头。
+    """
+    base = _BASE[category]
+    flds = fields_for(category)
+    joins = base["from"]
+    selects = [f"{base['ts_col']} AS ts_code"]
+    for f in (fields or list(flds)):
+        spec = flds.get(f)
+        if spec is None:
+            continue
+        if spec["source"] == "cache":
+            alias = f"f_{f}"
+            joins += _CACHE_JOIN.format(alias=alias, ts_col=base["ts_col"], factor=spec["factor"])
+            selects.append(f"{alias}.value AS {f}")
+        elif spec["source"] == "column":
+            selects.append(f"{spec['col']} AS {f}")
+        else:
+            selects.append(f"{spec['expr']} AS {f}")
+    latest = f" WHERE {base['latest']}" if base["latest"] else ""
+    return f"SELECT {', '.join(selects)} {joins}{latest}"
+
+
+# ── 条件编译器（批 164b 件4）──
+# 契约（任务 v3 步骤 4/5）：definition={v:1, match:'all'|'any', rows:[{field,op,value}]}
+# 产 where 作用于 build_base_from 的**外层子查询**（PG 同层 WHERE 不可引 SELECT 别名——实证）。
+# 注入面零拼接：field 恒取注册表字符串（查表键）；op 走白名单映射；value 全参数绑定。
+
+_OPS = {
+    "=": "= %s", "!=": "!= %s", ">": "> %s", ">=": ">= %s", "<": "< %s", "<=": "<= %s",
+}
+_PERCENTILE = {"percentile_top", "percentile_bottom"}
+
+
+def compile_conditions(category: str, definition: dict) -> tuple[str, list, list[str]]:
+    """编译 builder 式 definition → (where_sql, params, null_field_notes)。
+
+    返回 where 片段（含外层子查询包裹头）、绑定参数序、NULL 语义注记（供响应 skipped/nulls 提示）。
+    错误：ValueError(field 未知/op×类型错配/percentile 边界/bool 非 true)——路由层转 400/422。
+    """
+    flds = fields_for(category)
+    rows = definition.get("rows", [])
+    match = definition.get("match", "all")
+    if match not in ("all", "any"):
+        raise ValueError("match must be all|any")
+    parts, params, notes = [], [], []
+    for row in rows:
+        f, op, val = row.get("field"), row.get("op"), row.get("value")
+        spec = flds.get(f)
+        if spec is None:
+            raise ValueError(f"unknown field: {f}")
+        if op in _PERCENTILE:
+            if spec["type"] != "num":
+                raise ValueError(f"percentile 仅数值字段: {f}")
+            if not (isinstance(val, (int, float)) and 0 <= val <= 100):
+                raise ValueError("percentile value∈[0,100]")
+            # 母数=品类当日全集∩剔该字段 NULL（与 164c rank 母数同口径）；percentile_cont 标量子查询
+            direction = ">=" if op == "percentile_top" else "<="
+            sub = (f"(SELECT percentile_cont({val / 100}) WITHIN GROUP (ORDER BY q.{f}) "
+                   f"FROM ({build_base_from(category, [f])}) q WHERE q.{f} IS NOT NULL)")
+            parts.append(f"{f} IS NOT NULL AND {f} {direction} {sub}")
+            continue
+        if op not in _OPS:
+            raise ValueError(f"unknown op: {op}")
+        if spec["type"] == "bool":
+            if op != "=" or val is not True:
+                raise ValueError(f"bool 字段仅支持 = true（极性立法）: {f}")
+            parts.append(f"{f} = true")   # 正向谓词直取（st_filter=false=只留ST——陷阱封死）
+            continue
+        if spec["type"] != "num":
+            raise ValueError(f"op 仅数值: {f}")
+        if not isinstance(val, (int, float)):
+            raise ValueError(f"value 须数值: {f}")
+        frag = _OPS[op]
+        col = f   # 外层子查询别名=字段名
+        parts.append(f"{col} IS NOT NULL AND {col} {frag}")
+        params.append(val)
+        if spec.get("nullable"):
+            notes.append(f)
+    joiner = " AND " if match == "all" else " OR "
+    where = (" WHERE " + joiner.join(parts)) if parts else ""
+    return where, params, notes

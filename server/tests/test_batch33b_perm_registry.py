@@ -30,7 +30,7 @@ def authed_client(client):
 def test_registry_base_three_lists():
     """底座三清单：api 13/nav 19（批 88：routing 退册——页面降 tab，nav 维管不到）/market 5。"""
     from src.data_platform.perm_registry import API_PERM_KEYS, NAV_ITEMS_BASE, MARKET_OP_KEYS, NAV_ALIASES
-    assert len(API_PERM_KEYS) == 15 and len(set(API_PERM_KEYS)) == 15   # 批55b:account_keys 退役；批77:+live_control；批86-B:+paper_trade/strategy_pretest（纸上交易面）
+    assert len(API_PERM_KEYS) == 16 and len(set(API_PERM_KEYS)) == 16   # 批164b:+screen_preset（前史：55b account_keys 退役；77 +live_control；86-B +paper_trade/strategy_pretest）
     assert len(NAV_ITEMS_BASE) == 19   # 17+perm-resources（批33b）+paper-trade（批86-B）−routing（批88 降 tab 退册）——trade-switch 随批 70 M6 退役
     assert len(MARKET_OP_KEYS) == 5   # 批127 Step3：正名单键（etf 清）
     assert len(NAV_ALIASES) == 2       # 批38：8 条死别名已清（活=stock/data-manage）
@@ -73,7 +73,7 @@ def test_get_permissions_shape_compat(authed_client):
         r = authed_client.get("/api/permissions")
     assert r.status_code == 200
     j = r.json()
-    assert len(j["keys"]) == 15 and j["keys"][0] == "read"   # 批86-B:+paper_trade
+    assert len(j["keys"]) == 16 and j["keys"][0] == "read"   # 批164b:+screen_preset（前 86-B:+paper_trade）
     nav = j["nav"]["items"]
     assert all("id" in e and "group" in e for e in nav)      # 原名保留（PermMatrix prop=group 直绑）
     # A-P1-2 修后等价钉：前 17 项 id 序==原 NAV_ITEMS 声明序（组秩排序非字母序）
@@ -128,7 +128,7 @@ def test_perm_resources_get_shape(authed_client):
         r = authed_client.get("/api/perm-resources")
     assert r.status_code == 200
     j = r.json()
-    assert len(j["api"]) == 15 and j["bindings_total"] >= 170   # 批86-B:+paper_trade
+    assert len(j["api"]) == 16 and j["bindings_total"] >= 170   # 批164b:+screen_preset（前 86-B:+paper_trade）
     user_mgmt = next(a for a in j["api"] if a["key"] == "user_mgmt")
     assert user_mgmt["locked"] is True and user_mgmt["endpoints"]
 

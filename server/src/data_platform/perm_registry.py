@@ -43,7 +43,7 @@ _logger = logging.getLogger("data_platform.perm_registry")
 API_PERM_KEYS: list[str] = [
     "read", "strategy_control", "live_control", "data_sync", "halt", "resume", "trade",
     "live_trading_control", "risk_rules", "user_mgmt",
-    "system_config", "llm_config", "im_bots_config", "alerts_config",
+    "system_config", "llm_config", "im_bots_config", "alerts_config", "screen_preset",   # 批164b：筛选方案写面（读面=read 既有键）
     "paper_trade",
 ]
 
