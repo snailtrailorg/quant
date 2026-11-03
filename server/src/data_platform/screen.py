@@ -85,8 +85,8 @@ def preset_list(category: str, uid: int) -> list[dict]:
         cur = conn.execute(
             "SELECT id, name, category, source, definition, created_by, updated_at "
             "FROM screen_preset WHERE category = %s "
-            "AND (source = 'builtin' OR created_by = %s) "
-            "ORDER BY source DESC, updated_at DESC", (category, uid))
+            "AND (created_by IS NULL OR created_by = %s) "
+            "ORDER BY updated_at DESC", (category, uid))
         rows = cur.fetchall()
     out = []
     for r in rows:
