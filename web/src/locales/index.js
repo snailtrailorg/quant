@@ -57,7 +57,6 @@ export default {
       // 盲审B题外：Strategy/LiveTask 列头误用无键的 common.account（裸键）
       symbol: '标的',
       createdAt: '创建时间',
-      actions: '操作',   // 批165：方案列表操作列头
       initialCapital: '初始资金',
       startDate: '开始',
       endDate: '结束',
@@ -1453,7 +1452,6 @@ mail: '邮件 SMTP',
       stopFailed: 'Stop failed',
       symbol: 'Symbol',
       createdAt: 'Created At',
-      actions: 'Actions',   // 批165：方案列表操作列头
       initialCapital: 'Initial Capital',
       startDate: 'Start',
       endDate: 'End',
