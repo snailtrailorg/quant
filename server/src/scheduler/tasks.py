@@ -2312,3 +2312,45 @@ def backup_db(self):
                 final_path.name, size, KEEP_COUNT, removed or "无")
     return {"status": "success", "file": final_path.name, "size": size,
             "kept": KEEP_COUNT, "removed": removed}
+
+
+@app.task(name="src.scheduler.tasks.screen_factor_compute",
+          soft_time_limit=1800, time_limit=2100)
+def screen_factor_compute():
+    """批 164a：标的筛选预计算因子——盘后调度（15:05 后 T-1 日全量算）。
+
+    幂等（任务文件 v2 验收）：目标 trade_date 已有该 factor 行则跳过（不重算）。
+    期 1 因子：momentum_20 = close / mean(close,20) - 1（A股 stock 品类；bar_1d 域）。
+    miss 语义：筛选端点只读缓存——miss 行不阻塞筛选（该因子条件跳过+提示）。
+    """
+    from ..data_platform.db import get_conn
+    factor = "momentum_20"
+    with get_conn() as conn:
+        # bar_1d 真列=symbol/freq/ts（无 ts_code/trade_date——编码期实证修正）
+        cur = conn.execute("SELECT COALESCE(max(ts)::date, '1970-01-01') FROM bar_1d WHERE freq='1D'")
+        t1 = cur.fetchone()[0]
+        cur = conn.execute(
+            "SELECT count(*) FROM screen_factor_cache WHERE factor=%s AND trade_date=%s", (factor, t1))
+        if cur.fetchone()[0] > 0:
+            logger.info("screen_factor_compute: %s@%s 已存在，跳过（幂等）", factor, t1)
+            return {"status": "skipped", "factor": factor, "trade_date": str(t1)}
+        cur = conn.execute("""
+            WITH m20 AS (
+                SELECT symbol,
+                       avg(close) OVER (PARTITION BY symbol ORDER BY ts
+                         ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS ma20,
+                       close,
+                       max(ts) OVER (PARTITION BY symbol) AS last_ts
+                FROM bar_1d WHERE freq='1D'
+            )
+            SELECT split_part(symbol, '.', 1), close / NULLIF(ma20, 0) - 1
+            FROM m20 WHERE last_ts::date = %s AND ma20 IS NOT NULL
+        """, (t1,))
+        rows = [("stock", r[0], factor, t1, r[1]) for r in cur.fetchall()]
+        if rows:
+            cur.executemany(
+                "INSERT INTO screen_factor_cache (category, ts_code, factor, trade_date, value) "
+                "VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING", rows)
+            conn.commit()
+        logger.info("screen_factor_compute: %s@%s 落 %d 行", factor, t1, len(rows))
+        return {"status": "success", "factor": factor, "trade_date": str(t1), "rows": len(rows)}
