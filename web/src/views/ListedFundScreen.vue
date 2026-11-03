@@ -4,7 +4,7 @@
                     @create="openDlg(null)" @edit="openDlg" @apply="applyPreset" @changed="loadPresets" />
     <ContentCard :title="resultTitle" class="right">
       <template #actions>
-        <ColumnSettings storage-key="cols.screener-cb" :columns="colDefs" v-model:visible="visible" />
+        <ColumnSettings storage-key="cols.screener-etf" :columns="colDefs" v-model:visible="visible" />
         <el-select v-model="selectedPool" size="small" :placeholder="t('screener.selectPool')" class="pool">
           <el-option v-for="p in pools" :key="p.id" :value="p.id" :label="p.name" />
         </el-select>

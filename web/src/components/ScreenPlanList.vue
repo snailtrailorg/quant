@@ -6,7 +6,7 @@
     <TableShell :data="plans" fill :loading="loading" storage-key="screener-plans"
                 highlight-current-row @current-change="onRowClick">
       <el-table-column prop="name" :label="t('screener.planName')" min-width="90" show-overflow-tooltip />
-      <el-table-column :label="t('common.action')" width="112">
+      <el-table-column :label="t('common.action')" width="120" fixed="right">   <!-- 3×24钮+2×8gap+2×12padding+边框=118 → 120；fixed 同 Strategy 先例（flex 表内不参与压缩） -->
         <template #default="{ row }">
           <IconBtn size="small" :icon="CaretRight" :title="t('screener.applyPlan')" @click.stop="emit('apply', row)" />
           <IconBtn size="small" :icon="Edit" :title="t('screener.editPlan')" @click.stop="emit('edit', row)" />
