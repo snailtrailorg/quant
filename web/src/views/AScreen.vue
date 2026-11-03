@@ -12,7 +12,7 @@
                  :title="t('screener.addToPool') + (checked.size ? ' (' + checked.size + ')' : '')"
                  :disabled="!checked.size || !selectedPool" @click="addToPool" />
       </template>
-      <TableShell :data="pagedRows" size="small" @selection-change="onSelChange" storage-key="screener-astock">
+      <TableShell :data="pagedRows" @selection-change="onSelChange" storage-key="screener-astock">
         <el-table-column type="selection" width="40" />
         <el-table-column prop="ts_code" label="Code" min-width="110" />
         <el-table-column prop="name" :label="t('common.name')" min-width="140" show-overflow-tooltip />
@@ -144,7 +144,7 @@ onMounted(() => { loadPresets(); loadFields(); loadPools() })
 </script>
 
 <style scoped>
-.screen-wrap { display: flex; gap: var(--sp-3); align-items: flex-start; }
+.screen-wrap { display: flex; gap: var(--el-main-padding, 20px); align-items: flex-start; }
 .left { width: 300px; flex-shrink: 0; }
 .right { flex: 1; overflow: auto; }
 .pool { width: 140px; }

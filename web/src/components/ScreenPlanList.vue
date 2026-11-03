@@ -3,13 +3,10 @@
     <template #actions>
       <IconBtn size="small" :icon="Plus" :title="t('screener.newPlan')" @click="emit('create')" />
     </template>
-    <TableShell :data="plans" size="small" fill :loading="loading" storage-key="screener-plans"
+    <TableShell :data="plans" fill :loading="loading" storage-key="screener-plans"
                 highlight-current-row @current-change="onRowClick">
       <el-table-column prop="name" :label="t('screener.planName')" min-width="90" show-overflow-tooltip />
-      <el-table-column prop="updated_at" :label="t('common.updatedAt')" width="96">
-        <template #default="{ row }">{{ (row.updated_at || '').slice(5, 10) }}</template>
-      </el-table-column>
-      <el-table-column :label="t('common.actions')" width="92" align="right">
+      <el-table-column :label="t('common.actions')" width="112" align="right">
         <template #default="{ row }">
           <IconBtn size="small" :icon="CaretRight" :title="t('screener.applyPlan')" @click.stop="emit('apply', row)" />
           <IconBtn size="small" :icon="Edit" :title="t('screener.editPlan')" @click.stop="emit('edit', row)" />
