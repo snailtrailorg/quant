@@ -53,7 +53,7 @@ def test_scan_bindings_full_and_drift():
     import src.web_api.main
     assert src.web_api.main  # 注册全部路由（真用防 pyflakes）
     b = scan_perm_bindings()
-    assert len(b) >= 170 and len({x["key"] for x in b}) == 15   # 批86-B:14→15（+paper_trade）；绑定数随多键形态上升
+    assert len(b) >= 170 and len({x["key"] for x in b}) == 16   # 批86-B:15→16（+paper_trade）；绑定数随多键形态上升
     assert check_binding_drift() == []
     r = APIRouter()
     @r.get("/api/__unreg_test")

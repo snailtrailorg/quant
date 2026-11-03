@@ -46,6 +46,7 @@ _PROD_SHAPED_ROWS = [
     ("trader", "live_trading_control", "allow"),
     ("admin", "read", "allow"),
     ("admin", "strategy_control", "allow"),
+    ("admin", "screen_preset", "allow"),   # 批164b：筛选方案写面
     ("admin", "data_sync", "allow"),
     ("admin", "halt", "allow"),
     ("admin", "resume", "allow"),
