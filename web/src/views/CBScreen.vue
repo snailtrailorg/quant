@@ -6,7 +6,8 @@
       <el-form label-position="top" size="small">
         <el-form-item :label="t('screener.doubleLowMax')"><el-input-number v-model="f.double_low_max" :min="0" :step="5" style="width:100%" /></el-form-item>
         <el-form-item :label="t('screener.premiumMax')"><el-input-number v-model="f.premium_max" :min="0" :step="5" :precision="0" style="width:100%" /></el-form-item>
-        <el-form-item :label="t('screener.remainingMin')"><el-input-number v-model="f.remaining_min" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.remainingYearsMax')"><el-input-number v-model="f.remaining_years_max" :min="0" :step="0.5" :precision="1" style="width:100%" /></el-form-item>
+        <el-form-item :label="t('screener.couponRateMin')"><el-input-number v-model="f.coupon_rate_min" :min="0" :step="0.1" :precision="2" style="width:100%" /></el-form-item>
         <el-button type="primary" style="width: 100%" @click="load" :loading="loading">{{ t('screener.run') }}</el-button>
       </el-form>
     </el-card>
@@ -75,7 +76,7 @@ const pools = ref([])
 const selectedPool = ref('')
 const page = ref(1)
 const pageSize = 50
-const f = ref({ double_low_max: 0, premium_max: 0, remaining_min: 0 })
+const f = ref({ double_low_max: 0, premium_max: 0, remaining_years_max: 0, coupon_rate_min: 0 })
 
 // 批17 17B：列显示配置——代码/转债名称列恒显不进 defs；转股价=低频参考列默认隐
 const cbColDefs = computed(() => [
