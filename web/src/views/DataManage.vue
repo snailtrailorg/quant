@@ -1,14 +1,5 @@
 <template>
-  <el-card>
-    <template #header>
-      <div style="display: flex; justify-content: space-between; align-items: center">
-        <span>{{ t('dataManage.title') }}</span>
-        <div style="display: flex; gap: var(--icon-gap); align-items: center">
-          <ColumnSettings storage-key="cols.sync-config" :columns="syncColDefs" v-model:visible="syncVisible" />
-          <RefreshBtn :loading="loading" @refresh="load" />
-        </div>
-      </div>
-    </template>
+  <div>
     <el-card v-if="currentSync" style="margin-bottom: var(--sp-3)">
       <div style="display: flex; align-items: center; gap: 12px">
         <span style="font-size: var(--fs-label); white-space: nowrap">{{ currentSync.name }}</span>
@@ -21,6 +12,10 @@
     </el-card>
     <!-- 批166：按数据源分页签（dev 实测分布 tushare 25/binance 4/okx 4/joinquant 1）——任务表过滤渲染 -->
     <TabsShell :tabs="providerTabs" :default-tab="activeProvider" v-slot="sp">
+      <div class="tab-actions">
+        <ColumnSettings storage-key="cols.sync-config" :columns="syncColDefs" v-model:visible="syncVisible" />
+        <RefreshBtn :loading="loading" @refresh="load" />
+      </div>
       <TableShell :data="configsByProvider(sp.tab)" :loading="loading" storage-key="sync-config">
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
       <el-table-column v-if="colOn('provider')" prop="provider" :label="t('dataManage.provider')" min-width="140">
@@ -72,17 +67,15 @@
         </template>
       </el-table-column>
     </TableShell>
-    </TabsShell>
 
-    <el-divider />
-    <el-card>
-      <template #header>
-        <div style="display: flex; justify-content: space-between; align-items: center">
-          <span>{{ t('dataManage.syncLogs') }}</span>
-          <ColumnSettings storage-key="cols.sync-logs" :columns="logColDefs" v-model:visible="logVisible" />
-        </div>
-      </template>
-      <TableShell :data="logs" max-height="300" storage-key="sync-logs">
+      <el-card style="margin-top: var(--sp-3)">
+        <template #header>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <span>{{ t('dataManage.syncLogs') }}</span>
+            <ColumnSettings storage-key="cols.sync-logs" :columns="logColDefs" v-model:visible="logVisible" />
+          </div>
+        </template>
+        <TableShell :data="logsByProvider(sp.tab)" max-height="300" storage-key="sync-logs">
         <el-table-column v-if="logColOn('task')" prop="sync_id" :label="t('dataManage.task')" min-width="120" />
         <el-table-column v-if="logColOn('ts')" prop="ts" :label="t('common.time')" min-width="220">
           <template #default="{ row }">{{ fmtTime.full(row.ts) }}</template>
@@ -123,6 +116,7 @@
         </el-table-column>
       </TableShell>
     </el-card>
+    </TabsShell>
 
     <!-- 编辑弹窗（批16 操作收编：调度+回补进弹窗，删除进 footer；吸收原 cron/回补双弹窗） -->
     <el-dialog v-model="cronDialog" :close-on-click-modal="false" :title="t('dataManage.editTitle')" width="560px">
@@ -198,7 +192,7 @@
         <el-button type="primary" @click="saveCron" :disabled="navReadonly">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
-  </el-card>
+  </div>
 </template>
 
 <script setup>
@@ -230,6 +224,11 @@ const providerTabs = computed(() => {
   return ordered.map(p => ({ key: p, i18nKey: 'dataManage.src_' + p, badge: String(configs.value.filter(c => (c.provider || 'tushare') === p).length) }))
 })
 const configsByProvider = p => configs.value.filter(c => (c.provider || 'tushare') === p)
+// 批166：日志按源拆分（log.sync_id → config.id → provider；未知 id 归「其他」不丢行）
+const logsByProvider = p => {
+  const ids = new Set(configsByProvider(p).map(c => c.id))
+  return logs.value.filter(l => ids.has(l.sync_id))
+}
 const logs = ref([])
 const providers = ref({})   // {provider: [sync_ids]} 能力矩阵（26 号收尾批 C provider 下拉数据源）
 const loading = ref(false)
@@ -501,6 +500,7 @@ const saveCron = async () => {
 }
 </script>
 <style scoped>
+.tab-actions { display: flex; justify-content: flex-end; gap: var(--icon-gap); align-items: center; margin-bottom: var(--sp-1); }
 /* 列头 tooltip 提示可交互（虚线下划线=hover 有说明） */
 .hdr-hint { cursor: help; border-bottom: 1px dashed var(--text-secondary); }
 </style>
