@@ -111,14 +111,14 @@
     </el-card>
     </TabsShell>
 
-    <!-- 批166：添加任务弹窗——该源能力清单三态（已接入/他源也提供/可添加） -->
+    <!-- 批166：添加任务弹窗——数据源列显承载方；checkbox 状态=已接入（勾选+禁用），黄标=能力由他源也提供 -->
     <el-dialog v-model="addDialog" :title="t('dataManage.addTask') + ' · ' + addProvider" width="560px">
       <div v-if="!addRows.length" style="color: var(--text-secondary); padding: var(--sp-3) 0; text-align: center">{{ t('dataManage.allCapsIn') }}</div>
       <div v-for="r in addRows" :key="r.sid" style="display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border-weak)">
         <el-checkbox v-model="r.checked" :disabled="r.exists" />
         <span style="flex: 1">{{ r.sid }}</span>
-        <el-tag v-if="r.exists" size="small" type="success">{{ t('dataManage.capIn') }}</el-tag>
-        <el-tag v-else-if="r.otherProviders.length" size="small" type="warning">
+        <span style="width: 90px; font-size: var(--fs-foot); color: var(--text-secondary)">{{ r.currentProvider || '—' }}</span>
+        <el-tag v-if="!r.exists && r.otherProviders.length" size="small" type="warning">
           {{ t('dataManage.capByOthers', { providers: r.otherProviders.join(' / ') }) }}
         </el-tag>
       </div>
@@ -252,13 +252,16 @@ const addRows = ref([])
 const openAdd = (p) => {
   addProvider.value = p
   const caps = (providers.value[p] || []).map(String)
-  const allIds = new Set(configs.value.map(c => String(c.id)))
-  addRows.value = caps.map(sid => ({
-    sid, checked: false, exists: allIds.has(sid),
-    otherProviders: Object.entries(providers.value)
-      .filter(([pp, ids]) => pp !== p && (ids || []).map(String).includes(sid))
-      .map(([pp]) => pp),
-  }))
+  const byId = new Map(configs.value.map(c => [String(c.id), c.provider || 'tushare']))
+  addRows.value = caps.map(sid => {
+    const exists = byId.has(sid)
+    return {
+      sid, exists, checked: exists, currentProvider: byId.get(sid) || '',
+      otherProviders: Object.entries(providers.value)
+        .filter(([pp, ids]) => pp !== p && (ids || []).map(String).includes(sid))
+        .map(([pp]) => pp),
+    }
+  })
   addDialog.value = true
 }
 const submitAdd = async () => {
