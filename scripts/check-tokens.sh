@@ -13,7 +13,7 @@ count_px()   { grep -rEoh "(margin|padding)(-(top|bottom|left|right))?: ?[^;\"]*
 # hex 排除 K 线数据面色（#defa*——图表数据非 UI 语义色）
 count_hex()  { grep -rEoh "#[0-9a-fA-F]{3,6}" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | grep -v "^#defa" | wc -l; }
 # 批24：字号旁路第三维（px/em/rem/% 相对单位同属排版旁路；驼峰 fontSize=编辑器/图表/头像 API 参数非 CSS 排版，天然不匹配）
-count_fs()   { grep -rEo "font-size: ?[0-9.]+(px|em|rem|%)" web/src/views/ web/src/components/ web/src/layouts/ web/src/App.vue --include="*.vue" 2>/dev/null | wc -l; }
+count_fs()   { grep -rE "font-size: ?[0-9.]+(px|em|rem|%)" web/src/views/ web/src/components/ web/src/layouts/ web/src/App.vue --include="*.vue" 2>/dev/null | grep -v 'token-ok' | grep -oE "font-size: ?[0-9.]+(px|em|rem|%)" | wc -l; }   # 批170：token-ok 行标记=显式豁免（与 i18n-ok 同构；须同行注释说明理由）
 # 批86 第四维：el-button 语义色 type=（success|warning|danger）计数。
 # 前三维（px/hex/font-size）结构上看不见 `type=` ⇒ 操作列把 type=success|danger 当按钮色用，
 # 用 EP 语义色替代本仓令牌/IconBtn tone，色漂移永不告警（批86 实证：LiveTask 操作列 4 处）。

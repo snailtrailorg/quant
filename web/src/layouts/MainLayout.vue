@@ -42,7 +42,7 @@
           <div style="display: flex; align-items: center; gap: 16px">
             <!-- 批167：语言下拉（注册表驱动——加语言零 UI 改动；当前语言打勾） -->
             <el-dropdown trigger="click" @command="setLang">
-              <IconBtn :title="t('layout.language')">{{ langLabel }}</IconBtn>
+              <IconBtn :title="t('layout.language')" style="font-size: 15px">{{ langLabel }}</IconBtn>   <!-- token-ok：语言钮拉丁短标光学补偿（用户裁定 15px，全站唯一特例——见 D24 §1b 注） -->
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item v-for="lg in LANGUAGES" :key="lg.code" :command="lg.code">
