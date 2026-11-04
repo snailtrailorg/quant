@@ -184,9 +184,9 @@
              该键 = 后端 handler 是否真消费 backfill_from（sync_config 列，迁移 0131）。
              旧门两个方向都错：trade_cal(sync_mode=full) 该有入口却没有（prod 回补链第一环卡死）；
              pool_data(incremental) 不该有却渲染了假按钮（点了只跑常规增量、还报成功）。 -->
-        <el-form-item label="保留天数">
+        <el-form-item :label="t('dataManage.retentionDays')">
           <el-input-number v-model="cronForm.retention_days" :min="1" :max="3650" style="width: 100%" />
-          <div class="cron-raw-hint">滚动保留窗（天）：清道夫日轮按此裁旧数据；空=不裁。改小后可手动触发清道夫即刻生效</div>
+          <div class="cron-raw-hint">{{ t('dataManage.retentionDaysHint') }}</div>
         </el-form-item>
         <template v-if="cronForm.supports_backfill">
           <el-divider style="margin: var(--sp-1) 0 var(--sp-3)" />
@@ -447,7 +447,7 @@ const startPoll = (row, name, task_id) => {
         const p2 = await api.get('/sync/trigger/' + row.id + '/progress', { params: { task_id } })
         if (p2.status !== 'stale') return   // 瞬态：下轮轮询自然走正常分支
         stopPoll()
-        ElMessage.warning(name + ': ' + (p2.stale_reason || '任务疑似中断（进度残留）——以同步日志为准'))
+        ElMessage.warning(name + ': ' + (p2.stale_reason || t('dataManage.staleFallback')))
         currentSync.value = null; progress.value = {}
         setRowStatus(row.id, 'idle')
         await load()

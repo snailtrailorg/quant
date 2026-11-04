@@ -500,7 +500,7 @@ const enrichTasks = async () => {
   }))
 }
 // wd-20 §1.5 裁定②：重启/退出码由 task_logs 时间线派生（启动条目数-1=重启数）
-const restartCount = row => row._timeline === null ? '—' : Math.max((row._timeline || []).filter(l => (l.msg || '').includes('任务启动')).length - 1, 0)
+const restartCount = row => row._timeline === null ? '—' : Math.max((row._timeline || []).filter(l => (l.msg || '').includes('任务启动')).length - 1, 0)   // i18n-ok（日志消息逻辑匹配串——与后端 msg 契约耦合，非 UI 文案）
 const lastExit = row => {
   const e = (row._timeline || []).find(l => (l.msg || '').includes('退出'))
   return e ? (e.msg.includes('退出码 0') ? '0' : e.msg.slice(0, 24)) : '—'

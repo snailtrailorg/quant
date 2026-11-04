@@ -187,7 +187,7 @@ const validating = ref(false)
 const codeValid = ref(null)
 const codeError = ref('')
 
-const DEFAULT_CODE = `def compute(ctx, n=20):
+const DEFAULT_CODE = `def compute(ctx, n=20):   // i18n-ok（整段 Python 代码示例——内文中文注释随代码呈现，词条化破坏示例）
     """计算因子值。
 
     ctx 可用属性/方法：

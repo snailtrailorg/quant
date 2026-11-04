@@ -12,30 +12,34 @@ const emit = defineEmits(['update:modelValue'])
 const editorContainer = ref(null)
 let editor = null
 
+// 批167：doc 走词条（dslDoc.* 域——monaco 悬浮文档三语随切）
+import i18n from '../i18n'
+const t = k => i18n.global.t(k)   // 批167：monaco 文档词条（模块级函数用全局实例）
+
 const FIELDS = [
-  { id: 'close', doc: '当前 bar 收盘价（标量）' },
-  { id: 'high', doc: '当前 bar 最高价（标量）' },
-  { id: 'low', doc: '当前 bar 最低价（标量）' },
-  { id: 'open', doc: '当前 bar 开盘价（标量；open 与 open_ 等价）' },
-  { id: 'open_', doc: '开盘价别名（与 open 等价）' },
-  { id: 'volume', doc: '当前 bar 成交量（标量）' },
+  { id: 'close', doc: 'dslDoc.f_close' },
+  { id: 'high', doc: 'dslDoc.f_high' },
+  { id: 'low', doc: 'dslDoc.f_low' },
+  { id: 'open', doc: 'dslDoc.f_open' },
+  { id: 'open_', doc: 'dslDoc.f_open_' },
+  { id: 'volume', doc: 'dslDoc.f_volume' },
 ]
 const FUNCS = [
   // 纯标量函数（factor.py _DT_FUNCS 白名单,盲审 B-P2 补齐）
-  { id: 'abs', sig: 'abs(x)', doc: '绝对值' },
-  { id: 'sum', sig: 'sum(a, b, ...)', doc: '求和（标量）' },
-  { id: 'round', sig: 'round(x, ndigits?)', doc: '四舍五入' },
-  { id: 'float', sig: 'float(x)', doc: '转浮点' },
-  { id: 'int', sig: 'int(x)', doc: '转整数' },
+  { id: 'abs', sig: 'abs(x)', doc: 'dslDoc.abs' },
+  { id: 'sum', sig: 'sum(a, b, ...)', doc: 'dslDoc.sum' },
+  { id: 'round', sig: 'round(x, ndigits?)', doc: 'dslDoc.round' },
+  { id: 'float', sig: 'float(x)', doc: 'dslDoc.float' },
+  { id: 'int', sig: 'int(x)', doc: 'dslDoc.int' },
   // 窗口函数（8）
-  { id: 'mean', sig: 'mean(field, n)', doc: '窗口 n 根（含当前）均值' },
-  { id: 'std', sig: 'std(field, n)', doc: '窗口 n 根标准差' },
-  { id: 'max', sig: 'max(field, n)', doc: '窗口 n 根最大值' },
-  { id: 'min', sig: 'min(field, n)', doc: '窗口 n 根最小值' },
-  { id: 'ema', sig: 'ema(field, n)', doc: '窗口 n 根指数移动均值' },
-  { id: 'rsi', sig: 'rsi(field, n)', doc: '窗口 n 根 RSI（0-100）' },
-  { id: 'slope', sig: 'slope(field, n)', doc: '窗口 n 根线性斜率' },
-  { id: 'avevol', sig: 'avevol(field, n)', doc: '窗口 n 根平均量' },
+  { id: 'mean', sig: 'mean(field, n)', doc: 'dslDoc.mean' },
+  { id: 'std', sig: 'std(field, n)', doc: 'dslDoc.std' },
+  { id: 'max', sig: 'max(field, n)', doc: 'dslDoc.max' },
+  { id: 'min', sig: 'min(field, n)', doc: 'dslDoc.min' },
+  { id: 'ema', sig: 'ema(field, n)', doc: 'dslDoc.ema' },
+  { id: 'rsi', sig: 'rsi(field, n)', doc: 'dslDoc.rsi' },
+  { id: 'slope', sig: 'slope(field, n)', doc: 'dslDoc.slope' },
+  { id: 'avevol', sig: 'avevol(field, n)', doc: 'dslDoc.avevol' },
 ]
 
 let _registered = false
@@ -68,16 +72,16 @@ async function ensureLanguage(monaco) {
         suggestions: [
           ...FUNCS.map(f => ({
             label: f.id, kind: K.Function, insertText: `${f.id}(`,
-            detail: f.sig, documentation: f.doc, range,
+            detail: f.sig, documentation: t(f.doc), range,
           })),
           ...FIELDS.map(f => ({
             label: f.id, kind: K.Variable, insertText: f.id,
-            detail: '字段', documentation: f.doc, range,
+            detail: t('dslDoc.fieldTag'), documentation: t(f.doc), range,
           })),
           {
             label: 'mean(close,20) / close - 1',
             kind: K.Snippet, insertText: 'mean(close,20) / close - 1',
-            detail: '模板', documentation: '均线偏离度（经典例）', range,
+            detail: t('dslDoc.tplTag'), documentation: t('dslDoc.tplMaDev'), range,
           },
         ],
       }

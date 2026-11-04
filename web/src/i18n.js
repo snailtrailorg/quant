@@ -3,7 +3,7 @@ import messages from './locales/index.js'
 
 // 语言码 → 本族语名称（菜单显示）+ 短标签（标题栏按钮显示——批167 用户裁定「简/繁/EN」）。
 // 语言集从 messages keys 派生（加语言零 UI 改动）；名称/短标签仅此一处登记。
-const NATIVE = {
+const NATIVE = {   // i18n-ok（语言名本体各用本族语——跨语言恒定是设计语义，非待译文案）
   zh: { label: '简体中文', short: '简' },
   'zh-tw': { label: '繁體中文', short: '繁' },
   en: { label: 'English', short: 'EN' },
