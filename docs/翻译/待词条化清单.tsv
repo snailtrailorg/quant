@@ -1,5 +1,0 @@
-# 待词条化清单 — 批167 全量审核完毕（2026-11-04）
-# 原 1529 处：1506=locales 词表自身（扫描器已豁免）；23 真嫌疑全审：
-#   真硬编码已修 12 处（DslEditor monaco 文档 9+DataManage 表单/hint/兜底 3——三语词条化 dslDoc.*/retentionDays 等域）
-#   白名单豁免 11 处（Factors Python 代码示例块/LiveTask 日志逻辑匹配串/i18n.js 语言名本体/TableShell 注释残渣）——HARDCODE_OK 声明表 in web/scripts/check-hardcoded-lang.mjs
-# 终态：硬编码扫描 0 处；三语守门 1767 键对称。
