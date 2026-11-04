@@ -187,8 +187,8 @@ mail: '邮件 SMTP',
       backtest: '回测中心',
       factors: '因子管理',   // 批89：四字统一（库→管理，与页面 header factors.title 同步）
       screener: '标的筛选', settings: '系统设置', permResources: '系统权限',   // 批37 改名；批88 dataRouting 死键清（页面降 tab 迁数据管理）；批89 四字统一+去股（三 tab=A股/转债/ETF，威廉姆裁决：标的是交易所官方术语且平台内三处已用）
-      pool: '自选标的', analysis: '每日研判', dataops: '数据管理',   // 批87 改名（批89 pool 同步）
-      gDataOps: '数据', dataSync: '数据同步', dataCheck: '数据检查', taskSched: '任务调度', routingPolicy: '路由策略', securityMaster: '证券主档',   // 批166：侧栏数据组五项（checkout 回滚丢失重补）
+      pool: '自选标的', analysis: '每日研判', 
+      gDataOps: '数据管理', dataSync: '数据同步', dataCheck: '数据检查', taskSched: '任务调度', routingPolicy: '路由策略', securityMaster: '证券主档',   // 批166：侧栏数据组五项（checkout 回滚丢失重补）
       integrations: '集成中心', observe: '系统监控', chat: 'AI 助手',
       risk: '风控总览',
       reconcile: '三账对账',
@@ -1593,8 +1593,8 @@ mail: 'Email SMTP',
       backtest: 'Backtest',
       factors: 'Factors',
       screener: 'Screener', settings: 'System Settings', permResources: 'System Permissions',
-      pool: 'Stock Pool', analysis: 'Daily Analysis', dataops: 'Data Management',   // batch87
-      gDataOps: 'Data', dataSync: 'Sync', dataCheck: 'Data Check', taskSched: 'Task Scheduling', routingPolicy: 'Routing Policy', securityMaster: 'Security Master',   // 批166
+      pool: 'Stock Pool', analysis: 'Daily Analysis', 
+      gDataOps: 'Data Management', dataSync: 'Sync', dataCheck: 'Data Check', taskSched: 'Task Scheduling', routingPolicy: 'Routing Policy', securityMaster: 'Security Master',   // 批166
       integrations: 'Integrations', observe: 'System Monitor', chat: 'AI Assistant',
       risk: 'Risk',
       reconcile: 'Reconcile',
@@ -3043,8 +3043,7 @@ mail: 'Email SMTP',
         "permResources": "系統權限",
         "pool": "自選標的",
         "analysis": "每日研判",
-        "dataops": "資料管理",
-        "gDataOps": "資料",
+        "gDataOps": "資料管理",
         "dataSync": "資料同步",
         "dataCheck": "資料檢查",
         "taskSched": "任務排程",
