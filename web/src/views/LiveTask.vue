@@ -141,11 +141,11 @@
          对照 Backtest 的「更多」是两件事（终止/删除）。现在删除是操作列的红色垃圾桶图标，
          入口即语义；这里只剩强确认本身（输入任务名，站内最强确认），标题也改为直陈「删除任务」。 -->
     <el-dialog v-model="delVisible" :title="t('liveTask.deleteTitle')" width="420px" :close-on-click-modal="false">
-      <el-form @submit.prevent>
+      <el-form @submit.prevent label-position="top">
         <el-form-item :label="t('liveTask.deletePromptTip', { name: delRow?.name })">
           <el-input v-model="deleteConfirmName" :placeholder="delRow?.name" />
         </el-form-item>
-      </el-form>
+      </el-form>   <!-- 批169（issue report 1）：label 长句在默认左布局把 input 挤到边缘极小——改 top 布局，提示占整行、input 恢复全宽 -->
       <template #footer>
         <el-button @click="delVisible = false">{{ t('common.cancel') }}</el-button>
         <el-button type="danger" :disabled="!delRow || deleteConfirmName.trim() !== delRow.name" @click="onDelete(delRow)">{{ t('common.delete') }}</el-button>
