@@ -96,8 +96,6 @@ export default {
     },
     tabs: {
       astock: 'A股', cb: '可转债', etf: '场内基金',
-      sync: '同步任务', integrity: '完整性体检', quality: '股票清单核对', sched: '调度',
-      routing: '路由诊断', security: '标的资料',   // 批88：自集成中心/ops 组迁入数据管理页（域对齐）
       logs: '运行日志', audit: '操作日志',   // 批49：用户亲定改名   // 批24 迭代十六：四页签改名+调序（outbox 拆出独立成签；mail 页签键=sysmon.tabMail——tabs.mail 归集成中心 SmtpCard）
 mail: '邮件 SMTP',
       llm: 'LLM 模型', dataSources: '数据源', tradingAccounts: '交易账号', sms: '短信通道', proxy: '代理出口',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签   // 批102a:代理出口页签
@@ -673,6 +671,8 @@ mail: '邮件 SMTP',
     },
     dataManage: {
       title: '数据同步管理',
+      src_tushare: 'tushare', src_binance: 'binance', src_okx: 'okx', src_joinquant: 'joinquant', src_xtp: 'XTP',
+      integrity: '数据完整性', quality: '数据质量',
       dataType: '数据类型',
       provider: '数据源',
       providerSwitch: '切换数据源',
@@ -1490,8 +1490,6 @@ mail: '邮件 SMTP',
     },
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'Listed Funds',
-      sync: 'Sync Tasks', integrity: 'Integrity', quality: 'Stock List Check', sched: 'Scheduler',
-      routing: 'Route Diagnostics', security: 'Security Master',   // batch88: migrated into Data Ops (domain alignment)
       logs: 'Run Logs', audit: 'Operation Log',   // 批49 改名
 mail: 'Email SMTP',
       llm: 'LLM Models', dataSources: 'Data Sources', tradingAccounts: 'Trading Accounts', sms: 'SMS Channels', proxy: 'Proxy Egress',   // 批37   // 批83a   // 批102a
@@ -2065,6 +2063,8 @@ mail: 'Email SMTP',
     },
     dataManage: {
       title: 'Data Sync Management',
+      src_tushare: 'tushare', src_binance: 'binance', src_okx: 'okx', src_joinquant: 'joinquant', src_xtp: 'XTP',
+      integrity: 'Data Integrity', quality: 'Data Quality',
       dataType: 'Data Type',
       provider: 'Provider',
       providerSwitch: 'Switch Provider',

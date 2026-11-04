@@ -93,7 +93,15 @@
           <!-- 批 87：数据中心迁组（用户 2026-10-03 裁决方案 A）——数据获取=研究链第一环，提为一级
                菜单项（总揽下、策略研究上）。可见性自挂 has('data_sync')：终结「骑 ops 组门」的隐性耦合，
                与路由 meta.perm、后端写键三层同锚 data_sync（analyst 可见可用；viewer/trader 关门外）。 -->
-          <el-menu-item v-if="has('data_sync')" index="/dataops"><el-icon><FolderOpened /></el-icon>{{ t('nav.dataops') }}</el-menu-item>
+          <!-- 批166：数据管理侧栏二级菜单（原一级单页六页签 → 五子页） -->
+          <el-sub-menu v-if="has('data_sync')" index="datagrp">
+            <template #title><el-icon><FolderOpened /></el-icon>{{ t('nav.gDataOps') }}</template>
+            <el-menu-item index="/dataops/sync"><el-icon><Refresh /></el-icon>{{ t('nav.dataSync') }}</el-menu-item>
+            <el-menu-item index="/dataops/quality"><el-icon><CircleCheck /></el-icon>{{ t('nav.dataCheck') }}</el-menu-item>
+            <el-menu-item index="/dataops/sched"><el-icon><Timer /></el-icon>{{ t('nav.taskSched') }}</el-menu-item>
+            <el-menu-item index="/dataops/routing"><el-icon><Guide /></el-icon>{{ t('nav.routingPolicy') }}</el-menu-item>
+            <el-menu-item index="/dataops/security"><el-icon><Coin /></el-icon>{{ t('nav.securityMaster') }}</el-menu-item>
+          </el-sub-menu>
 
           <el-sub-menu index="research">
             <template #title><el-icon><DataAnalysis /></el-icon>{{ t('nav.gResearch') }}</template>
@@ -159,7 +167,7 @@
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock, Document,
-         ChatDotRound, Bell, User, SwitchButton, Back, Grid } from '@element-plus/icons-vue'
+         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Refresh, Guide } from '@element-plus/icons-vue'   // 批166：数据组图标（Timer 已在首行导入集）
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
@@ -337,7 +345,7 @@ const searchIndex = computed(() => [
   { label: t('nav.backtest'), path: '/backtest' }, { label: t('nav.analysis'), path: '/analysis' },
   { label: t('nav.liveTasks'), path: '/live-task' }, { label: t('nav.tradingDesk'), path: '/trading' },
   { label: t('nav.risk'), path: '/risk' }, { label: t('nav.reconcile'), path: '/reconcile' },
-  { label: t('nav.dataops'), path: '/dataops' }, { label: t('nav.integrations'), path: '/integrations' },
+  { label: t('nav.dataSync'), path: '/dataops/sync' }, { label: t('nav.dataCheck'), path: '/dataops/quality' }, { label: t('nav.integrations'), path: '/integrations' },   // 批166：数据组两项（sync/quality 常用）
   { label: t('nav.observe'), path: '/observe' }, { label: t('nav.settings'), path: '/settings' },
   { label: t('nav.chat'), path: '/chat' },
 ])

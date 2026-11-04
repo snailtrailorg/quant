@@ -19,8 +19,9 @@
         </span>
       </div>
     </el-card>
-    <!-- 批17 TableShell：列宽拖拽+持久化（批16 试点 border 升级为全站机制的首两表） -->
-    <TableShell :data="configs" :loading="loading" storage-key="sync-config">
+    <!-- 批166：按数据源分页签（dev 实测分布 tushare 25/binance 4/okx 4/joinquant 1）——任务表过滤渲染 -->
+    <TabsShell :tabs="providerTabs" :default-tab="activeProvider" v-slot="sp">
+      <TableShell :data="configsByProvider(sp.tab)" :loading="loading" storage-key="sync-config">
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
       <el-table-column v-if="colOn('provider')" prop="provider" :label="t('dataManage.provider')" min-width="140">
         <template #default="{ row }">
@@ -71,6 +72,7 @@
         </template>
       </el-table-column>
     </TableShell>
+    </TabsShell>
 
     <el-divider />
     <el-card>
@@ -203,6 +205,7 @@
 import StatusTag from '../components/StatusTag.vue'
 import ColumnSettings from '../components/ColumnSettings.vue'
 import TableShell from '../components/TableShell.vue'
+import TabsShell from '../components/TabsShell.vue'   // 批166：源页签壳
 import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
 import { Refresh, Setting, Edit } from '@element-plus/icons-vue'
@@ -218,6 +221,15 @@ const { t } = useI18n()
 const navReadonly = inject('navReadonly', ref(false))
 const router = useRouter()
 const configs = ref([])
+// 批166：源页签（provider distinct 稳定序；计数走 TabsShell badge）
+const _PROVIDER_ORDER = ['tushare', 'binance', 'okx', 'joinquant', 'xtp']
+const activeProvider = ref('tushare')
+const providerTabs = computed(() => {
+  const present = [...new Set(configs.value.map(c => c.provider || 'tushare'))]
+  const ordered = _PROVIDER_ORDER.filter(p => present.includes(p)).concat(present.filter(p => !_PROVIDER_ORDER.includes(p)))
+  return ordered.map(p => ({ key: p, i18nKey: 'dataManage.src_' + p, badge: String(configs.value.filter(c => (c.provider || 'tushare') === p).length) }))
+})
+const configsByProvider = p => configs.value.filter(c => (c.provider || 'tushare') === p)
 const logs = ref([])
 const providers = ref({})   // {provider: [sync_ids]} 能力矩阵（26 号收尾批 C provider 下拉数据源）
 const loading = ref(false)

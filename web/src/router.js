@@ -39,8 +39,17 @@ const routes = [
       { path: 'stock/:symbol', name: 'stock-detail', component: () => import('./views/StockDetail.vue') },
       { path: 'integrations', name: 'integrations', component: () => import('./views/Integrations.vue'), meta: { perm: 'llm_config' } },   // 批39 A-P1-2：路由门（任一集成 tab 权限可进；空 tabs 组件侧空态兜底）
       { path: 'users', name: 'users', component: () => import('./views/UserManagement.vue'), meta: { admin: true } },   // 批11：用户管理（系统管理第一项；user_mgmt=admin-only 同 permissions 守卫）
-      { path: 'dataops', name: 'dataops', component: () => import('./views/DataOps.vue'), meta: { perm: 'data_sync' } },   // 批87：门=data_sync，与菜单 v-if/后端写键三层对齐（此前无守卫=viewer/trader 直链半开门，写全 403）
-      { path: 'routing', redirect: '/dataops?tab=routing' },   // 批88：路由诊断降 tab 迁入数据管理（旧深链归位惯例；原批 57 M2 独立页退役）
+      // 批166：数据管理侧栏二级菜单——/dataops 子路径化（旧 ?tab= 兼容 redirect 收口）
+      { path: 'dataops', component: () => import('./views/DataOps.vue'), meta: { perm: 'data_sync' },   // 批87：门=data_sync 三层对齐
+        children: [
+          { path: '', redirect: to => ({ path: '/dataops/' + ({ integrity: 'quality', quality: 'quality', sched: 'sched', routing: 'routing', security: 'security' }[to.query.tab] || 'sync'), query: {} }) },   // 批166：旧 ?tab= 兼容（integrity→quality 合并）
+          { path: 'sync', name: 'dataops-sync', component: () => import('./views/DataManage.vue') },
+          { path: 'quality', name: 'dataops-quality', component: () => import('./views/DataCheck.vue') },
+          { path: 'sched', name: 'dataops-sched', component: () => import('./views/TaskManager.vue') },
+          { path: 'routing', name: 'dataops-routing', component: () => import('./views/RoutingPolicy.vue') },
+          { path: 'security', name: 'dataops-security', component: () => import('./views/SecurityMaster.vue') },
+        ] },
+      { path: 'routing', redirect: '/dataops/routing' },   // 批88 迁入；批166 子路径化
       { path: 'observe', name: 'observe', component: () => import('./views/Observe.vue') },
       { path: 'permissions', redirect: '/users?tab=groups' },   // 批33a：权限页退役——权限单入口=用户管理·用户群组（PermMatrix 组弹窗）；旧深链归位
       { path: 'settings', name: 'settings', component: () => import('./views/Settings.vue') },
@@ -58,13 +67,13 @@ const routes = [
       // 系统 (Admin)
       { path: 'account', redirect: '/integrations?tab=interfaces' },  // 批16：API 密钥能力在集成中心·交易账户
       { path: 'logs', redirect: '/observe?tab=logs' },
-      { path: 'data-manage', redirect: '/dataops?tab=sync' },
-      { path: 'data-integrity', redirect: '/dataops?tab=integrity' },
+      { path: 'data-manage', redirect: '/dataops/sync' },   // 批166 子路径化
+      { path: 'data-integrity', redirect: '/dataops/quality' },   // 批166：并入数据检查页
       { path: 'data-manage/:syncId', name: 'symbol-manage', component: () => import('./views/SymbolManage.vue'), meta: { admin: true } },
       { path: 'audit', redirect: '/observe?tab=audit' },
       { path: 'llm-models', redirect: '/integrations?tab=llm' },
       { path: 'data-sources', redirect: '/integrations?tab=interfaces' },
-      { path: 'tasks', redirect: '/dataops?tab=sched' },
+      { path: 'tasks', redirect: '/dataops/sched' },   // 批166 子路径化
       { path: 'channels', redirect: '/integrations?tab=push' },
       { path: 'brokers', redirect: '/integrations?tab=brokers' },
       { path: 'risk-rules', name: 'risk-rules', component: () => import('./views/RiskRules.vue'), meta: { admin: true } },
