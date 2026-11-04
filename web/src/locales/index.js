@@ -1333,7 +1333,7 @@ mail: '邮件 SMTP',
     },
     layout: {
       pin: '点击切换为固定', unpin: '点击切换为自动隐藏',
-      toEn: '点击切换为英文', toZh: '点击切换为中文',
+      language: '选择语言',   // 批167：乒乓退役（toEn/toZh 随语言菜单退役）
       toDark: '点击切换为深色', toLight: '点击切换为浅色',
       search: '搜索', searchPh: '搜索页面/功能…', noResults: '无结果',
       navLimitTitle: '菜单权限', navLimitNote: '只列出受限制的页面，其余都能正常用', navLimitEmpty: '所有页面都能正常使用', permChangeHint: '需要开通或调整权限，请联系管理员',
@@ -2702,7 +2702,7 @@ mail: 'Email SMTP',
     },
     layout: {
       pin: 'Pin sidebar', unpin: 'Auto-hide sidebar',
-      toEn: 'Switch to English', toZh: 'Switch to Chinese',
+      language: 'Select Language',
       toDark: 'Switch to dark mode', toLight: 'Switch to light mode',
      search: 'Search', searchPh: 'Search pages…', noResults: 'No results',
       navLimitTitle: 'Menu Permissions', navLimitNote: 'Only restricted pages are listed; all others work normally', navLimitEmpty: 'All pages are available as normal', permChangeHint: 'To request a change, contact your admin',

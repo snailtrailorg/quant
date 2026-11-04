@@ -40,7 +40,17 @@
 
           <!-- ═ 偏好组（语言/暗色乒乓，恢复到标题栏） ═ -->
           <div style="display: flex; align-items: center; gap: 16px">
-            <IconBtn :title="langTitle" @click="toggleLang">{{ langLabel }}</IconBtn>
+            <!-- 批167：语言下拉（注册表驱动——加语言零 UI 改动；当前语言打勾） -->
+            <el-dropdown trigger="click" @command="setLang">
+              <IconBtn :title="t('layout.language')">{{ langLabel }}</IconBtn>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item v-for="lg in LANGUAGES" :key="lg.code" :command="lg.code">
+                    {{ lg.label }}<el-icon v-if="locale === lg.code" style="margin-left: auto"><Check /></el-icon>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <IconBtn :icon="dark ? Sunny : Moon" :title="dark ? t('layout.toLight') : t('layout.toDark')" @click="onDark(!dark)" />
           </div>
 
@@ -167,14 +177,14 @@
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock, Document,
-         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Refresh, Guide } from '@element-plus/icons-vue'   // 批166：数据组图标（Timer 已在首行导入集）
+         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Refresh, Guide, Check } from '@element-plus/icons-vue'   // 批166 数据组；批167 Check（语言菜单当前项）
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { getMe, meOnce, resetMeCache, getSystemAlerts, getOpenFreezeEvents } from '../api'
 import api, { getStrategies, getFactorList } from '../api'
-import { setLang } from '../i18n'
+import { setLang as i18nSetLang, LANGUAGES } from '../i18n'   // 批167：注册表驱动语言菜单
 import Avatar from '../components/Avatar.vue'
 import IconBtn from '../components/IconBtn.vue'
 import Profile from '../views/Profile.vue'
@@ -309,10 +319,9 @@ loadPerms()
 onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loadDynamicIndex(); loadFreezeEntry(); freezeTimer = setInterval(loadFreezeEntry, 30000) })
 onUnmounted(() => { if (alertTimer) clearInterval(alertTimer); if (freezeTimer) clearInterval(freezeTimer) })
 
-// 批21：语言乒乓（真源 locale.value）；批48 后用户裁定：按钮显示**当前语言**（中文态"中"/英文态"EN"），title 仍指目标语言
-const langLabel = computed(() => locale.value === 'zh' ? '中' : 'EN')
-const langTitle = computed(() => locale.value === 'zh' ? t('layout.toEn') : t('layout.toZh'))
-const toggleLang = () => setLang(locale.value === 'zh' ? 'en' : 'zh')
+// 批167：语言菜单注册表驱动（按钮标签=当前语言本族语名缩略；乒乓与 toEn/toZh 词条退役）
+const langLabel = computed(() => (LANGUAGES.find(l => l.code === locale.value) || {}).label || locale.value)
+const setLang = (code) => { i18nSetLang(code) }
 const logout = async () => {
   try { await api.post('/auth/logout') } catch {}
   try { resetMeCache() } catch {}

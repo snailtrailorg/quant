@@ -72,23 +72,32 @@ console.log('✓ locales 无重复键')
     }
   }
   const root = ast.body.find(s => s.type === 'ExportDefaultDeclaration')?.declaration
-  const zhNode = root?.properties?.find(p => p.key.name === 'zh')?.value
-  const enNode = root?.properties?.find(p => p.key.name === 'en')?.value
-  if (!zhNode || !enNode) {
-    console.error('✗ 未找到顶层 zh/en 段（结构变更？）')
+  // 批167：N 语对称（动态遍历全部顶层语言域，zh 为基准两两比对——加语言零守门改动）
+  const langNodes = root?.properties?.filter(p => p.value?.type === 'ObjectExpression') ?? []
+  const zhNode = langNodes.find(p => p.key.name === 'zh')?.value
+  if (!zhNode || langNodes.length < 2) {
+    console.error('✗ 未找到顶层 zh 基准段或语言域不足两个（结构变更？）')
     process.exit(1)
   }
-  const zhKeys = new Set(), enKeys = new Set()
-  collect(zhNode, '', zhKeys); collect(enNode, '', enKeys)
-  const zhOnly = [...zhKeys].filter(k => !enKeys.has(k))
-  const enOnly = [...enKeys].filter(k => !zhKeys.has(k))
-  if (zhOnly.length || enOnly.length) {
-    console.error(`✗ en/zh 键集不对称（zh-only ${zhOnly.length} / en-only ${enOnly.length}）:`)
-    zhOnly.forEach(k => console.error(`  仅 zh: ${k}`))
-    enOnly.forEach(k => console.error(`  仅 en: ${k}`))
-    process.exit(1)
+  const zhKeys = new Set()
+  collect(zhNode, '', zhKeys)
+  let bad = 0
+  for (const p of langNodes) {
+    if (p.key.name === 'zh') continue
+    const otherKeys = new Set()
+    collect(p.value, '', otherKeys)
+    const oOnly = [...otherKeys].filter(k => !zhKeys.has(k))
+    const zOnly = [...zhKeys].filter(k => !otherKeys.has(k))
+    if (oOnly.length || zOnly.length) {
+      bad++
+      console.error(`✗ ${p.key.name}/zh 键集不对称（${p.key.name}-only ${oOnly.length} / zh-only ${zOnly.length}）:`)
+      oOnly.slice(0, 10).forEach(k => console.error(`  仅 ${p.key.name}: ${k}`))
+      zOnly.slice(0, 10).forEach(k => console.error(`  仅 zh: ${k}`))
+    } else {
+      console.log(`✓ ${p.key.name}/zh 键集对称（${zhKeys.size} 键）`)
+    }
   }
-  console.log(`✓ en/zh 键集对称（${zhKeys.size} 键）`)
+  if (bad) process.exit(1)
 }
 
 // 批 71 守门（第四门）：词条占位符 zh/en 一致——同一键 {x} 占位符名字集合（去重）相等。
@@ -96,8 +105,6 @@ console.log('✓ locales 无重复键')
 // JSON 示例类词条（如 IFACE_PARAMS_INVALID）花括号带引号不匹配 /\{(\w+)\}/，无误报（已核）。
 {
   const root2 = ast.body.find(s => s.type === 'ExportDefaultDeclaration')?.declaration
-  const zh2 = root2?.properties?.find(p => p.key.name === 'zh')?.value
-  const en2 = root2?.properties?.find(p => p.key.name === 'en')?.value
   const collectMap = (node, prefix, out) => {
     if (!node || node.type !== 'ObjectExpression') return
     for (const p of node.properties) {
@@ -108,22 +115,28 @@ console.log('✓ locales 无重复键')
     }
   }
   const ph = (s) => new Set([...String(s).matchAll(/\{(\w+)\}/g)].map(m => m[1]))
-  const zhMap = new Map(), enMap = new Map()
-  collectMap(zh2, '', zhMap); collectMap(en2, '', enMap)
-  const bad = []
-  for (const [k, v] of zhMap) {
-    const ev = enMap.get(k)
-    if (ev === undefined) continue   // 单侧缺键第三门已管
-    const a = ph(v), b = ph(ev)
-    if (a.size !== b.size || [...a].some(x => !b.has(x)))
-      bad.push(`  ${k}: zh {${[...a].join(',')}} vs en {${[...b].join(',')}}`)
+  // 批167：N 语占位符（zh 基准 vs 全部语言域）
+  const zh2 = root2?.properties?.find(p => p.key.name === 'zh')?.value
+  const zhMap = new Map()
+  collectMap(zh2, '', zhMap)
+  let bad2 = []
+  for (const pn of root2?.properties?.filter(p => p.value?.type === 'ObjectExpression' && p.key.name !== 'zh') ?? []) {
+    const om = new Map()
+    collectMap(pn.value, '', om)
+    for (const [k, v] of zhMap) {
+      const ov = om.get(k)
+      if (ov === undefined) continue   // 单侧缺键第三门已管
+      const a = ph(v), b = ph(ov)
+      if (a.size !== b.size || [...a].some(x => !b.has(x)))
+        bad2.push(`  ${k}: zh {${[...a].join(',')}} vs ${pn.key.name} {${[...b].join(',')}}`)
+    }
   }
-  if (bad.length) {
-    console.error(`✗ 词条占位符 zh/en 不一致 ${bad.length} 处:`)
-    bad.forEach(x => console.error(x))
+  if (bad2.length) {
+    console.error(`✗ 词条占位符 zh vs 各语言不一致 ${bad2.length} 处:`)
+    bad2.forEach(x => console.error(x))
     process.exit(1)
   }
-  console.log('✓ 词条占位符 zh/en 一致（集合语义）')
+  console.log('✓ 词条占位符 zh vs 各语言一致（集合语义）')
 }
 
 // 批 132 第 5 门：vue-i18n 消息保留符校验（{ } @ |）——未转义的保留符要么 build 硬错（{ } @），
