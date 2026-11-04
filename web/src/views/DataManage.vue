@@ -260,12 +260,7 @@ const openAdd = (p) => {
   const byId = new Map(configs.value.map(c => [String(c.id), c.provider || 'tushare']))
   addRows.value = caps.map(sid => {
     const exists = byId.has(sid)
-    return {
-      sid, exists, checked: exists, currentProvider: byId.get(sid) || '',
-      otherProviders: Object.entries(providers.value)
-        .filter(([pp, ids]) => pp !== p && (ids || []).map(String).includes(sid))
-        .map(([pp]) => pp),
-    }
+    return { sid, exists, checked: exists, currentProvider: byId.get(sid) || '' }
   })
   addDialog.value = true
 }
