@@ -438,3 +438,27 @@ def get_data_source(provider: str) -> DataSource | None:
     except Exception as e:
         logger.warning(f"读 data_source({provider}) 失败: {e}")
         return None
+
+
+def create_sync_configs(provider: str, ids: list[str]) -> dict:
+    """批166：批量接入同步任务（能力差集落库）——ids 须 ⊆ provider capabilities 白名单；
+    幂等 ON CONFLICT；返回 created/skipped（路由层纯编排，SQL 恒在本层）。"""
+    from .adapters.base import _ADAPTERS
+    cls = _ADAPTERS.get(provider)
+    if cls is None:
+        raise ValueError(f"unknown provider: {provider}")
+    caps = {str(x) for x in cls.capabilities}
+    bad = [i for i in ids if i not in caps]
+    if bad:
+        raise ValueError(f"cap not supported: {bad}")
+    from .db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute("SELECT id FROM sync_config WHERE id = ANY(%s)", (ids,))
+        existing = {r[0] for r in cur.fetchall()}
+        fresh = [i for i in ids if i not in existing]
+        if fresh:
+            conn.executemany(
+                "INSERT INTO sync_config (id, provider, enabled) VALUES (%s, %s, false) "
+                "ON CONFLICT (id) DO NOTHING", [(i, provider) for i in fresh])
+            conn.commit()
+    return {"created": fresh, "skipped": sorted(existing & set(ids))}

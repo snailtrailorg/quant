@@ -15,17 +15,10 @@
       <div class="tab-actions">
         <ColumnSettings storage-key="cols.sync-config" :columns="syncColDefs" v-model:visible="syncVisible" />
         <RefreshBtn :loading="loading" @refresh="load" />
+        <IconBtn size="small" :icon="Plus" :title="t('dataManage.addTask')" @click="openAdd(sp.tab)" />
       </div>
       <TableShell :data="configsByProvider(sp.tab)" :loading="loading" storage-key="sync-config">
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
-      <el-table-column v-if="colOn('provider')" prop="provider" :label="t('dataManage.provider')" min-width="140">
-        <template #default="{ row }">
-          <el-select :model-value="row.provider || 'tushare'" size="small"
-                     :disabled="providerOptions(row).length <= 1" @change="v => changeProvider(row, v)">
-            <el-option v-for="p in providerOptions(row)" :key="p" :value="p" :label="p" />
-          </el-select>
-        </template>
-      </el-table-column>
       <el-table-column v-if="colOn('mode')" prop="sync_mode" :label="t('common.mode')" min-width="120" />
       <el-table-column v-if="colOn('schedule')" prop="schedule" :label="t('dataManage.cronSchedule')" min-width="140">
         <template #default="{ row }">
@@ -118,10 +111,33 @@
     </el-card>
     </TabsShell>
 
+    <!-- 批166：添加任务弹窗——该源能力清单三态（已接入/他源也提供/可添加） -->
+    <el-dialog v-model="addDialog" :title="t('dataManage.addTask') + ' · ' + addProvider" width="560px">
+      <div v-if="!addRows.length" style="color: var(--text-secondary); padding: var(--sp-3) 0; text-align: center">{{ t('dataManage.allCapsIn') }}</div>
+      <div v-for="r in addRows" :key="r.sid" style="display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border-weak)">
+        <el-checkbox v-model="r.checked" :disabled="r.exists" />
+        <span style="flex: 1">{{ r.sid }}</span>
+        <el-tag v-if="r.exists" size="small" type="success">{{ t('dataManage.capIn') }}</el-tag>
+        <el-tag v-else-if="r.otherProviders.length" size="small" type="warning">
+          {{ t('dataManage.capByOthers', { providers: r.otherProviders.join(' / ') }) }}
+        </el-tag>
+      </div>
+      <template #footer>
+        <el-button @click="addDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :disabled="!addRows.some(r => r.checked)" @click="submitAdd">{{ t('common.add') }}</el-button>
+      </template>
+    </el-dialog>
+
     <!-- 编辑弹窗（批16 操作收编：调度+回补进弹窗，删除进 footer；吸收原 cron/回补双弹窗） -->
     <el-dialog v-model="cronDialog" :close-on-click-modal="false" :title="t('dataManage.editTitle')" width="560px">
       <el-form label-width="80px">
         <!-- 批 93：结构化编辑器（频率/时间/重复日）——提交时编译回 cron，库里仍存 cron -->
+        <el-form-item :label="t('dataManage.provider')">
+          <el-select v-model="cronForm.provider" :disabled="providerOptions(cronRow || {}).length <= 1" style="width: 100%">
+            <el-option v-for="p in providerOptions(cronRow || {})" :key="p" :value="p" :label="p" />
+          </el-select>
+          <div style="font-size: var(--fs-foot); color: var(--text-secondary)">{{ t('dataManage.providerSwitchHint') }}</div>
+        </el-form-item>
         <el-form-item :label="t('dataManage.freq')">
           <el-radio-group v-model="cronForm.freq" @change="syncModelToCron">
             <el-radio-button value="scheduled">{{ t('dataManage.freqScheduled') }}</el-radio-button>
@@ -202,7 +218,7 @@ import TableShell from '../components/TableShell.vue'
 import TabsShell from '../components/TabsShell.vue'   // 批166：源页签壳
 import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
-import { Refresh, Setting, Edit } from '@element-plus/icons-vue'
+import { Refresh, Setting, Edit, Plus } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import { cronToModel, modelToCron, describeCron } from '../utils/cronText'
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
@@ -228,6 +244,30 @@ const configsByProvider = p => configs.value.filter(c => (c.provider || 'tushare
 const logsByProvider = p => {
   const ids = new Set(configsByProvider(p).map(c => c.id))
   return logs.value.filter(l => ids.has(l.sync_id))
+}
+// 批166：添加任务——该源能力三态（已接入/他源也提供/可添加）；重复能力显式提示
+const addDialog = ref(false)
+const addProvider = ref('')
+const addRows = ref([])
+const openAdd = (p) => {
+  addProvider.value = p
+  const caps = (providers.value[p] || []).map(String)
+  const allIds = new Set(configs.value.map(c => String(c.id)))
+  addRows.value = caps.map(sid => ({
+    sid, checked: false, exists: allIds.has(sid),
+    otherProviders: Object.entries(providers.value)
+      .filter(([pp, ids]) => pp !== p && (ids || []).map(String).includes(sid))
+      .map(([pp]) => pp),
+  }))
+  addDialog.value = true
+}
+const submitAdd = async () => {
+  const picked = addRows.value.filter(r => r.checked && !r.exists).map(r => r.sid)
+  if (!picked.length) { addDialog.value = false; return }
+  try {
+    await api.post('/sync/config', { provider: addProvider.value, ids: picked })
+    addDialog.value = false; ElMessage.success(t('common.success')); load()
+  } catch (e) { ElMessage.error(t('common.failed')) }
 }
 const logs = ref([])
 const providers = ref({})   // {provider: [sync_ids]} 能力矩阵（26 号收尾批 C provider 下拉数据源）
@@ -446,7 +486,8 @@ onUnmounted(stopPoll)
 const cronDialog = ref(false)
 const cronForm = ref({ id: '', name: '', sync_mode: '', schedule: '', trade_day_filter: 'none', date: '',
                        freq: 'scheduled', time: '09:00', days: [], minutes: 15,
-                       supports_backfill: false, retention: null, retention_days: null })
+                       supports_backfill: false, retention: null, retention_days: null, provider: '' })
+const _cronProvider0 = ref('')   // 批166：打开时快照——保存时 diff 触发切源流
 const cronRow = computed(() => configs.value.find(c => c.id === cronForm.value.id))
 const cronTemplates = [
   { label: t('dataManage.tplDaily'), expr: '30 16 * * 1-5' },
@@ -477,7 +518,9 @@ const openCron = (row) => {
                      supports_backfill: row.supports_backfill === true,
                      retention: row.retention || null,
                      // 批 158：滚动保留窗（天，null=不裁；与 retention 起点地板正交）
-                     retention_days: row.retention_days ?? null }
+                     retention_days: row.retention_days ?? null,
+                     provider: row.provider || 'tushare' }
+  _cronProvider0.value = cronForm.value.provider
   cronDialog.value = true
 }
 // 批 99／批 108·步 3：回补日期下限＝`retention`（保留策略下界，YYYYMMDD）。早于它的请求
@@ -491,6 +534,15 @@ const floorDisabled = (dTs, floor, nowTs) => {
 }
 const backfillDisabledDate = (d) => floorDisabled(d.getTime(), cronForm.value.retention, Date.now())
 const saveCron = async () => {
+  // 批166：源变更先走切源确认（清空重建），取消则整体不保存
+  if (cronForm.value.provider && cronForm.value.provider !== _cronProvider0.value) {
+    const row = cronRow.value
+    if (row) {
+      const ok = await changeProvider(row, cronForm.value.provider).then(() => true).catch(() => false)
+      if (!ok) return
+      _cronProvider0.value = cronForm.value.provider
+    }
+  }
   try {
     // 批27-16：透传原 enabled——编辑停用行的 cron 不再被强制启用
     // 批 158：retention_days 随存（滚动保留窗——清道夫每轮实时读，改小即清多余数据）

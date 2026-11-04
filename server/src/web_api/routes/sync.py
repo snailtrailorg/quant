@@ -7,6 +7,7 @@ import re as _re
 from fastapi import APIRouter, Body, Depends
 
 from src.data_platform.db import get_conn
+from src.data_platform.data_source import create_sync_configs   # 批166：能力差集落库（层1 承载）
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
@@ -69,6 +70,23 @@ def _validate_provider(sid: str, provider: str):
         raise ApiError(400, "SYNC_PROVIDER_INVALID", f"provider {provider} 未注册")
     if sid not in cls.capabilities:
         raise ApiError(400, "SYNC_PROVIDER_NO_CAPABILITY", f"provider {provider} 不提供同步项 {sid}")
+
+
+@router.post("/api/sync/config")
+def create_sync_configs_api(body: dict, payload: dict = Depends(require_perm("data_sync"))):
+    """批166：批量接入同步任务（SQL 下沉 data_platform.data_source.create_sync_configs）。"""
+    provider = body.get("provider") or ""
+    ids = body.get("ids") or []
+    if not isinstance(ids, list) or not ids or not all(isinstance(x, str) for x in ids):
+        raise ApiError(400, "SYNC_CREATE_IDS_INVALID", "ids 须为非空字符串数组")
+    try:
+        result = create_sync_configs(provider, ids)
+    except ValueError as e:
+        msg = str(e)
+        code = "SYNC_PROVIDER_UNKNOWN" if msg.startswith("unknown provider") else "SYNC_CAP_NOT_SUPPORTED"
+        raise ApiError(400, code, msg)
+    audit_log(payload["username"], "create_sync_config", f"{provider}:{result['created']}")
+    return {"ok": True, **result}
 
 
 @router.post("/api/sync/config/{sid}")
