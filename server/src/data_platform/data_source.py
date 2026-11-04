@@ -440,38 +440,46 @@ def get_data_source(provider: str) -> DataSource | None:
         return None
 
 
-def create_sync_configs(provider: str, ids: list[str]) -> dict:
-    """批166：批量接入同步任务（能力差集落库）——ids 须 ⊆ provider capabilities 白名单；
-    幂等 ON CONFLICT；返回 created/skipped（路由层纯编排，SQL 恒在本层）。"""
+def create_sync_configs(provider: str, items: list) -> dict:
+    """批166：批量接入同步任务（能力差集落库）——items=[{sid,name?}] 或 [sid]；sid 须 ⊆
+    provider capabilities 白名单；幂等 ON CONFLICT；返回 created/skipped（SQL 恒在本层）。"""
     from .adapters.base import _ADAPTERS
     cls = _ADAPTERS.get(provider)
     if cls is None:
         raise ValueError(f"unknown provider: {provider}")
     caps = {str(x) for x in cls.capabilities}
-    bad = [i for i in ids if i not in caps]
-    if bad:
-        raise ValueError(f"cap not supported: {bad}")
+    norm = []
+    for it in items:
+        sid, name = (it.get("sid"), it.get("name") or it.get("sid")) if isinstance(it, dict) else (str(it), str(it))
+        if sid not in caps:
+            raise ValueError(f"cap not supported: {[sid]}")
+        api_name = (it.get("api_name") if isinstance(it, dict) else None) or sid
+        table = (it.get("table") if isinstance(it, dict) else None) or "bar_1d"
+        norm.append((sid, name, api_name, table))
+    sids = [s for s, *_ in norm]
     from .db import get_conn
     with get_conn() as conn:
-        cur = conn.execute("SELECT id FROM sync_config WHERE id = ANY(%s)", (ids,))
+        cur = conn.execute("SELECT id FROM sync_config WHERE id = ANY(%s)", (sids,))
         existing = {r[0] for r in cur.fetchall()}
-        fresh = [i for i in ids if i not in existing]
+        fresh = [(s, n, a, t) for s, n, a, t in norm if s not in existing]
         if fresh:
-            conn.executemany(
-                "INSERT INTO sync_config (id, provider, enabled) VALUES (%s, %s, false) "
-                "ON CONFLICT (id) DO NOTHING", [(i, provider) for i in fresh])
+            with conn.cursor() as cur:
+                cur.executemany(
+                    "INSERT INTO sync_config (id, name, tushare_api, pg_table, provider, enabled) "
+                    "VALUES (%s, %s, %s, %s, %s, false) ON CONFLICT (id) DO NOTHING",
+                    [(s, n, a, t, provider) for s, n, a, t in fresh])
             conn.commit()
-    return {"created": fresh, "skipped": sorted(existing & set(ids))}
+    return {"created": [s for s, _, _, _ in fresh], "skipped": sorted(existing & set(sids))}
 
 
 def delete_sync_configs(provider: str, ids: list[str]) -> dict:
-    """批166：移出同步管理（仅删本源承载的 sync_config 行；历史数据不动——retention 清道夫独立管）。
-    他源承载行不可经本源删（前端行只读；服务端再校验一层）。"""
+    """批166：移出同步管理=停用（enabled=false 行保留——任务元数据不销毁恢复即改回；
+    历史数据不动——retention 清道夫独立管）。仅作用本源承载行（服务端再校验一层）。"""
     from .db import get_conn
     with get_conn() as conn:
         cur = conn.execute(
-            "DELETE FROM sync_config WHERE id = ANY(%s) AND provider = %s RETURNING id",
-            (ids, provider))
+            "UPDATE sync_config SET enabled=false WHERE id = ANY(%s) AND provider = %s "
+            "AND enabled RETURNING id", (ids, provider))
         deleted = [r[0] for r in cur.fetchall()]
         conn.commit()
     return {"deleted": deleted}

@@ -124,7 +124,7 @@
       </div>
       <template #footer>
         <el-button @click="addDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :disabled="!addRows.some(r => r.checked)" @click="submitAdd">{{ t('common.add') }}</el-button>
+        <el-button type="primary" :disabled="!addRows.some(r => r.checked !== r.exists || (r.exists && r.currentProvider === addProvider && !r.checked))" @click="submitAdd">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
 
@@ -254,10 +254,12 @@ const openAdd = (p) => {
   addProvider.value = p
   addFilter.value = []
   const caps = (providers.value[p] || []).map(String)
-  const byId = new Map(configs.value.map(c => [String(c.id), c.provider || 'tushare']))
+  const cfgById = new Map(configs.value.map(c => [String(c.id), c]))
   addRows.value = caps.map(sid => {
-    const exists = byId.has(sid)
-    return { sid, exists, checked: exists, currentProvider: byId.get(sid) || '' }
+    const cfg = cfgById.get(sid)
+    const mine = cfg && (cfg.provider || 'tushare') === p
+    return { sid, exists: !!cfg, enabled: !!cfg && cfg.enabled !== false,
+            checked: !!cfg && cfg.enabled !== false, currentProvider: cfg ? (cfg.provider || 'tushare') : '' }
   })
   addDialog.value = true
 }
@@ -276,17 +278,19 @@ const filteredAddRows = computed(() => {
   return addRows.value.filter(match)
 })
 const submitAdd = async () => {
-  const toAdd = addRows.value.filter(r => !r.exists && r.checked).map(r => r.sid)
-  const toDel = addRows.value.filter(r => r.exists && r.currentProvider === addProvider.value && !r.checked).map(r => r.sid)
-  if (!toAdd.length && !toDel.length) { addDialog.value = false; return }
-  if (toDel.length) {
+  const toCreate = addRows.value.filter(r => !r.exists && r.checked).map(r => r.sid)
+  const toEnable = addRows.value.filter(r => r.exists && r.currentProvider === addProvider.value && !r.enabled && r.checked).map(r => r.sid)
+  const toDisable = addRows.value.filter(r => r.exists && r.currentProvider === addProvider.value && r.enabled && !r.checked).map(r => r.sid)
+  if (!toCreate.length && !toEnable.length && !toDisable.length) { addDialog.value = false; return }
+  if (toDisable.length) {
     try {
-      await ElMessageBox.confirm(t('dataManage.removeTaskConfirm', { n: toDel.length }), t('common.confirm'), { type: 'warning' })
+      await ElMessageBox.confirm(t('dataManage.removeTaskConfirm', { n: toDisable.length }), t('common.confirm'), { type: 'warning' })
     } catch { return }
   }
   try {
-    if (toAdd.length) await api.post('/sync/config', { provider: addProvider.value, ids: toAdd })
-    if (toDel.length) await api.delete('/sync/config', { data: { provider: addProvider.value, ids: toDel } })
+    if (toCreate.length) await api.post('/sync/config', { provider: addProvider.value, items: toCreate.map(s => ({ sid: s, name: s })) })
+    for (const sid of toEnable) await api.post(`/sync/config/${sid}`, { enabled: true })
+    if (toDisable.length) await api.delete('/sync/config', { data: { provider: addProvider.value, ids: toDisable } })
     addDialog.value = false; ElMessage.success(t('common.success')); load()
   } catch (e) { ElMessage.error(t('common.failed')) }
 }

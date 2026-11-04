@@ -76,11 +76,11 @@ def _validate_provider(sid: str, provider: str):
 def create_sync_configs_api(body: dict, payload: dict = Depends(require_perm("data_sync"))):
     """批166：批量接入同步任务（SQL 下沉 data_platform.data_source.create_sync_configs）。"""
     provider = body.get("provider") or ""
-    ids = body.get("ids") or []
-    if not isinstance(ids, list) or not ids or not all(isinstance(x, str) for x in ids):
-        raise ApiError(400, "SYNC_CREATE_IDS_INVALID", "ids 须为非空字符串数组")
+    items = body.get("items") or []
+    if not isinstance(items, list) or not items:
+        raise ApiError(400, "SYNC_CREATE_IDS_INVALID", "items 须为非空数组")
     try:
-        result = create_sync_configs(provider, ids)
+        result = create_sync_configs(provider, items)
     except ValueError as e:
         msg = str(e)
         code = "SYNC_PROVIDER_UNKNOWN" if msg.startswith("unknown provider") else "SYNC_CAP_NOT_SUPPORTED"
