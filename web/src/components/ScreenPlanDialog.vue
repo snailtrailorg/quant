@@ -1,6 +1,9 @@
 <template>
   <el-dialog :model-value="visible" :title="dlgTitle" width="720px" :close-on-click-modal="false"
              @update:model-value="v => emit('close', v)">
+    <el-input v-model="name" :placeholder="t('screener.planName')" clearable class="name-row">
+      <template #prepend>{{ t('screener.planName') }}</template>
+    </el-input>
     <el-tabs v-model="tab">
       <el-tab-pane :label="t('screener.tabBasic')" name="basic">
         <div v-if="!fields.length" class="hint">{{ t('screener.noFields') }}</div>
@@ -18,8 +21,7 @@
     <template #footer>
       <el-button @click="emit('close', false)">{{ t('common.cancel') }}</el-button>
       <el-button :loading="saving" @click="save(false)">{{ t('common.save') }}</el-button>
-      <el-button :disabled="!canRun" @click="applyOnly">{{ t('screener.applyBtn') }}</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!canRun" @click="save(true)">{{ t('screener.saveApply') }}</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!canRun" @click="save(true)">{{ t('screener.applyBtn') }}</el-button>
     </template>
   </el-dialog>
 </template>
@@ -27,7 +29,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import api, { apiErr } from '../api'
 import ScreenConditionRow from './ScreenConditionRow.vue'
 
@@ -40,6 +42,7 @@ const emit = defineEmits(['close', 'saved', 'applydef'])
 const { t, te } = useI18n()
 
 const tab = ref('basic')
+const name = ref('')
 let seq = 0
 const conds = ref([])
 const dslFilter = ref('')
@@ -47,11 +50,12 @@ const dslRank = ref('')
 const dslErr = ref('')
 const saving = ref(false)
 
-const dlgTitle = computed(() => props.plan ? t('screener.editPlan') + '：' + props.plan.name : t('screener.newPlan'))
+const dlgTitle = computed(() => props.plan ? t('screener.editPlan') : t('screener.newPlan'))
 
 watch(() => props.visible, (v) => {
   if (!v) return
   dslErr.value = ''
+  name.value = props.plan?.name || ''
   const d = props.plan?.definition || {}
   if (d.filter !== undefined) {
     tab.value = 'dsl'
@@ -78,24 +82,20 @@ const liveConds = () => conds.value.filter(c => c.field && c.value !== null && c
 const curDefinition = () => tab.value === 'dsl'
   ? { v: 1, filter: dslFilter.value, rank: dslRank.value || undefined }
   : { v: 1, rows: liveConds().map(c => ({ field: c.field, op: c.op, value: c.value })) }
-const canRun = computed(() => tab.value === 'dsl'
+const canRun = computed(() => !!name.value.trim() && (tab.value === 'dsl'
   ? !!dslFilter.value.trim()
-  : liveConds().length > 0)
-
-const applyOnly = () => { emit('applydef', curDefinition()); emit('close', false) }
+  : liveConds().length > 0))
 
 const save = async (thenApply) => {
   const def = curDefinition()
+  if (!name.value.trim()) { ElMessage.warning(t('screener.needName')); return }
   if (def.filter !== undefined && !def.filter.trim()) { ElMessage.warning(t('screener.needCond')); return }
   saving.value = true
   try {
     if (props.plan) {
-      await api.patch(`/screen/presets/${props.plan.id}`, { name: props.plan.name, category: props.category, definition: def })
+      await api.patch(`/screen/presets/${props.plan.id}`, { name: name.value.trim(), category: props.category, definition: def })
     } else {
-      try {
-        const { value: name } = await ElMessageBox.prompt(t('screener.planName'), t('screener.newPlan'))
-        await api.post('/screen/presets', { name, category: props.category, definition: def })
-      } catch (e) { if (e === 'cancel' || e === 'close') return; throw e }
+      await api.post('/screen/presets', { name: name.value.trim(), category: props.category, definition: def })
     }
     if (thenApply) { emit('applydef', def); emit('close', false) }
     else { ElMessage.success(t('common.success')); emit('saved') }
@@ -109,6 +109,7 @@ const save = async (thenApply) => {
 
 <style scoped>
 .blk { width: 100%; margin-bottom: var(--sp-1); }
+.name-row { margin-bottom: var(--sp-2); }
 .hint { font-size: var(--fs-foot); color: var(--text-secondary); margin-bottom: var(--sp-1); }
 .err { font-size: var(--fs-foot); color: var(--critical); margin-bottom: var(--sp-1); }
 </style>

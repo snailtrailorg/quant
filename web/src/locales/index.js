@@ -1299,8 +1299,8 @@ mail: '邮件 SMTP',
       added: '已添加 {n} 只标的到池', planName: '方案名称',
       tabBasic: '普通条件', tabAdvanced: '高级',
       plans: '筛选方案', newPlan: '新建方案', editPlan: '编辑方案', delPlan: '删除方案', applyPlan: '应用并筛选',
-      applyBtn: '应用', saveApply: '保存并应用', orHint: '需要 OR 或括号组合？请用「高级」页签的 DSL 表达式。',
-      noPlans: '暂无方案，点右上 + 新建', delPlanConfirm: '确定删除方案「{name}」？',   // 批165
+      applyBtn: '应用', orHint: '需要 OR 或括号组合？请用「高级」页签的 DSL 表达式。',   // applyBtn=保存并应用（批165 三按钮裁定：取消/保存/应用）
+      noPlans: '暂无方案，点右上 + 新建', delPlanConfirm: '确定删除方案「{name}」？', needName: '请填写方案名称',   // 批165
       fieldPh: '字段', opPctTop: '分位前%', opPctBottom: '分位后%',
       noFields: '该品类字段尚未接入数据源，暂不能筛选。', needCond: '请至少添加一个条件。',
       grp_valuation: '估值', grp_size: '规模', grp_quality: '质量', grp_tech: '技术面', grp_other: '其他',
@@ -1384,8 +1384,8 @@ mail: '邮件 SMTP',
       added: 'Added {n} symbols to pool', planName: 'Plan name',
       tabBasic: 'Basic', tabAdvanced: 'Advanced',
       plans: 'Screening Plans', newPlan: 'New Plan', editPlan: 'Edit Plan', delPlan: 'Delete Plan', applyPlan: 'Apply & Screen',
-      applyBtn: 'Apply', saveApply: 'Save & Apply', orHint: 'Need OR / parentheses? Use the Advanced tab DSL expression.',
-      noPlans: 'No plans yet — click + to create', delPlanConfirm: 'Delete plan "{name}"?',   // 批165
+      applyBtn: 'Apply', orHint: 'Need OR / parentheses? Use the Advanced tab DSL expression.',
+      noPlans: 'No plans yet — click + to create', delPlanConfirm: 'Delete plan "{name}"?', needName: 'Plan name is required.',   // 批165
       fieldPh: 'Field', opPctTop: 'Top %', opPctBottom: 'Bottom %',
       noFields: 'No fields available for this category yet.', needCond: 'Add at least one condition.',
       grp_valuation: 'Valuation', grp_size: 'Size', grp_quality: 'Quality', grp_tech: 'Technical', grp_other: 'Other',
