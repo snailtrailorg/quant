@@ -7,7 +7,7 @@ import re as _re
 from fastapi import APIRouter, Body, Depends
 
 from src.data_platform.db import get_conn
-from src.data_platform.data_source import create_sync_configs   # 批166：能力差集落库（层1 承载）
+from src.data_platform.data_source import create_sync_configs, delete_sync_configs   # 批166：任务接入/移出（层1 承载）
 
 from ..auth import audit_log, require_perm
 from ..errors import ApiError
@@ -86,6 +86,18 @@ def create_sync_configs_api(body: dict, payload: dict = Depends(require_perm("da
         code = "SYNC_PROVIDER_UNKNOWN" if msg.startswith("unknown provider") else "SYNC_CAP_NOT_SUPPORTED"
         raise ApiError(400, code, msg)
     audit_log(payload["username"], "create_sync_config", f"{provider}:{result['created']}")
+    return {"ok": True, **result}
+
+
+@router.delete("/api/sync/config")
+def delete_sync_configs_api(body: dict, payload: dict = Depends(require_perm("data_sync"))):
+    """批166：批量移出同步管理（SQL 下沉 data_platform.data_source.delete_sync_configs）。"""
+    provider = body.get("provider") or ""
+    ids = body.get("ids") or []
+    if not isinstance(ids, list) or not ids or not all(isinstance(x, str) for x in ids):
+        raise ApiError(400, "SYNC_CREATE_IDS_INVALID", "ids 须为非空字符串数组")
+    result = delete_sync_configs(provider, ids)
+    audit_log(payload["username"], "delete_sync_config", f"{provider}:{result['deleted']}")
     return {"ok": True, **result}
 
 

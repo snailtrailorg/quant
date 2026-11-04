@@ -15,7 +15,7 @@
       <div class="tab-actions">
         <ColumnSettings storage-key="cols.sync-config" :columns="syncColDefs" v-model:visible="syncVisible" />
         <RefreshBtn :loading="loading" @refresh="load" />
-        <IconBtn size="small" :icon="Plus" :title="t('dataManage.addTask')" @click="openAdd(sp.tab)" />
+        <IconBtn size="small" :icon="Filter" :title="t('dataManage.manageTask')" @click="openAdd(sp.tab)" />
       </div>
       <TableShell :data="configsByProvider(sp.tab)" :loading="loading" storage-key="sync-config">
       <el-table-column prop="name" :label="t('dataManage.dataType')" min-width="200" show-overflow-tooltip />
@@ -118,7 +118,7 @@
       </div>
       <div v-if="!filteredAddRows.length" style="color: var(--text-secondary); padding: var(--sp-3) 0; text-align: center">{{ t('dataManage.allCapsIn') }}</div>
       <div v-for="r in filteredAddRows" :key="r.sid" class="add-row" :class="{ readonly: r.exists && r.currentProvider !== addProvider }">
-        <el-checkbox v-model="r.checked" :disabled="r.exists" />
+        <el-checkbox v-model="r.checked" :disabled="r.exists && r.currentProvider !== addProvider" />
         <span style="flex: 1">{{ r.sid }}</span>
         <span style="width: 90px; font-size: var(--fs-foot); color: var(--text-secondary)">{{ r.currentProvider || '—' }}</span>
       </div>
@@ -219,7 +219,7 @@ import TabsShell from '../components/TabsShell.vue'   // 批166：源页签壳
 import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
 import RowFilter from '../components/RowFilter.vue'   // 批166：添加弹窗行筛选
-import { Refresh, Setting, Edit, Plus } from '@element-plus/icons-vue'
+import { Refresh, Setting, Edit, Plus, Filter } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import { cronToModel, modelToCron, describeCron } from '../utils/cronText'
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
@@ -276,10 +276,17 @@ const filteredAddRows = computed(() => {
   return addRows.value.filter(match)
 })
 const submitAdd = async () => {
-  const picked = addRows.value.filter(r => r.checked && !r.exists).map(r => r.sid)
-  if (!picked.length) { addDialog.value = false; return }
+  const toAdd = addRows.value.filter(r => !r.exists && r.checked).map(r => r.sid)
+  const toDel = addRows.value.filter(r => r.exists && r.currentProvider === addProvider.value && !r.checked).map(r => r.sid)
+  if (!toAdd.length && !toDel.length) { addDialog.value = false; return }
+  if (toDel.length) {
+    try {
+      await ElMessageBox.confirm(t('dataManage.removeTaskConfirm', { n: toDel.length }), t('common.confirm'), { type: 'warning' })
+    } catch { return }
+  }
   try {
-    await api.post('/sync/config', { provider: addProvider.value, ids: picked })
+    if (toAdd.length) await api.post('/sync/config', { provider: addProvider.value, ids: toAdd })
+    if (toDel.length) await api.delete('/sync/config', { data: { provider: addProvider.value, ids: toDel } })
     addDialog.value = false; ElMessage.success(t('common.success')); load()
   } catch (e) { ElMessage.error(t('common.failed')) }
 }

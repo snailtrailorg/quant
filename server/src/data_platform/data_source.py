@@ -462,3 +462,16 @@ def create_sync_configs(provider: str, ids: list[str]) -> dict:
                 "ON CONFLICT (id) DO NOTHING", [(i, provider) for i in fresh])
             conn.commit()
     return {"created": fresh, "skipped": sorted(existing & set(ids))}
+
+
+def delete_sync_configs(provider: str, ids: list[str]) -> dict:
+    """批166：移出同步管理（仅删本源承载的 sync_config 行；历史数据不动——retention 清道夫独立管）。
+    他源承载行不可经本源删（前端行只读；服务端再校验一层）。"""
+    from .db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "DELETE FROM sync_config WHERE id = ANY(%s) AND provider = %s RETURNING id",
+            (ids, provider))
+        deleted = [r[0] for r in cur.fetchall()]
+        conn.commit()
+    return {"deleted": deleted}
