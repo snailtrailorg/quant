@@ -121,9 +121,6 @@
         <el-checkbox v-model="r.checked" :disabled="r.exists" />
         <span style="flex: 1">{{ r.sid }}</span>
         <span style="width: 90px; font-size: var(--fs-foot); color: var(--text-secondary)">{{ r.currentProvider || '—' }}</span>
-        <el-tag v-if="r.exists && r.currentProvider !== addProvider" size="small" type="warning">
-          {{ t('dataManage.capByOthers', { providers: r.currentProvider }) }}
-        </el-tag>
       </div>
       <template #footer>
         <el-button @click="addDialog = false">{{ t('common.cancel') }}</el-button>

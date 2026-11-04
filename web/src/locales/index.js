@@ -673,7 +673,6 @@ mail: '邮件 SMTP',
     dataManage: {
       src_tushare: 'tushare', src_binance: 'binance', src_okx: 'okx', src_joinquant: 'joinquant', src_xtp: 'XTP',
       addTask: '添加任务', allCapsIn: '该数据源的全部能力均已接入同步管理', fAddable: '可添加', fMine: '本源已接入', fOthers: '他源承载',
-      capByOthers: '当前由 {providers} 承载', providerSwitchHint: '切换数据源会清空重建历史数据',   // 批166
       integrity: '数据完整性', quality: '数据质量',
       dataType: '数据类型',
       provider: '数据源',
@@ -2067,7 +2066,6 @@ mail: 'Email SMTP',
     dataManage: {
       src_tushare: 'tushare', src_binance: 'binance', src_okx: 'okx', src_joinquant: 'joinquant', src_xtp: 'XTP',
       addTask: 'Add Task', allCapsIn: 'All capabilities of this source are already in sync.', fAddable: 'Addable', fMine: 'In this source', fOthers: 'Other source',
-      capByOthers: 'Currently served by {providers}', providerSwitchHint: 'Switching provider rebuilds history',   // 批166
       integrity: 'Data Integrity', quality: 'Data Quality',
       dataType: 'Data Type',
       provider: 'Provider',
