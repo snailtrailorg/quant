@@ -197,3 +197,8 @@ body, .el-table, .el-form-item__label { line-height: var(--lh-base); }
 /* 批126f：图标钮相邻间距立法（用户裁定 8px 标准）——EP 默认 .el-button+.el-button=12px
    偏松；行内操作列（IconBtn 并排）与 header 工具栏（gap: var(--icon-gap)）同值全站统一 */
 .icon-btn + .icon-btn { margin-left: var(--icon-gap); }
+/* 批167 规则立法①：页签标题字号=内容卡标题字号（fs-body；字重 600 由 TabsShell 批163 先行）
+   ——EP tabs 无字号变量，全局直写 */
+.el-tabs__item { font-size: var(--fs-body); }
+/* 批167 规则立法②：弹窗标题字号=内容卡标题（--el-dialog-title-font-size=fs-card 已在 EP 变量层）；
+   弹窗内正文/表单随 EP base=fs-body 令牌族——与页面同源，无需逐组件覆写 */
