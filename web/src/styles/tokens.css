@@ -199,6 +199,6 @@ body, .el-table, .el-form-item__label { line-height: var(--lh-base); }
 .icon-btn + .icon-btn { margin-left: var(--icon-gap); }
 /* 批167 规则立法①：页签标题字号=内容卡标题字号（fs-body；字重 600 由 TabsShell 批163 先行）
    ——EP tabs 无字号变量，全局直写 */
-.el-tabs__item { font-size: var(--fs-body); }   /* 批167 A 案：main.js 中本文件后于 EP css 加载——源码顺序胜出，单类即生效 */
+.el-tabs__item { font-size: var(--fs-card); font-weight: 600; }   /* 批167 修正案：页签标题=卡头标题同款（fs-card+600——对齐 tokens:179 卡头既有立法；首版误对 fs-body 且漏字重） */
 /* 批167 规则立法②：弹窗标题字号=内容卡标题（--el-dialog-title-font-size=fs-card 已在 EP 变量层）；
    弹窗内正文/表单随 EP base=fs-body 令牌族——与页面同源，无需逐组件覆写 */
