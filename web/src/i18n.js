@@ -1,11 +1,15 @@
 import { createI18n } from 'vue-i18n'
 import messages from './locales/index.js'
 
-// 语言码 → 本族语名称（菜单显示用）。批167 单源化：**语言集从 messages keys 派生**——
-// locales 加新语言域即自动出现在菜单（零 UI 改动）；本族语名仅此一处登记。
-const NATIVE_NAMES = { zh: '简体中文', 'zh-tw': '繁體中文', en: 'English' }
+// 语言码 → 本族语名称（菜单显示）+ 短标签（标题栏按钮显示——批167 用户裁定「简/繁/EN」）。
+// 语言集从 messages keys 派生（加语言零 UI 改动）；名称/短标签仅此一处登记。
+const NATIVE = {
+  zh: { label: '简体中文', short: '简' },
+  'zh-tw': { label: '繁體中文', short: '繁' },
+  en: { label: 'English', short: 'EN' },
+}
 export const LANGUAGES = Object.keys(messages)
-  .map(code => ({ code, label: NATIVE_NAMES[code] || code }))
+  .map(code => ({ code, label: (NATIVE[code] || {}).label || code, short: (NATIVE[code] || {}).short || code }))
 
 const savedLang = localStorage.getItem('lang')
 

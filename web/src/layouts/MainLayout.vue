@@ -320,7 +320,7 @@ onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loa
 onUnmounted(() => { if (alertTimer) clearInterval(alertTimer); if (freezeTimer) clearInterval(freezeTimer) })
 
 // 批167：语言菜单注册表驱动（按钮标签=当前语言本族语名缩略；乒乓与 toEn/toZh 词条退役）
-const langLabel = computed(() => (LANGUAGES.find(l => l.code === locale.value) || {}).label || locale.value)
+const langLabel = computed(() => (LANGUAGES.find(l => l.code === locale.value) || {}).short || locale.value)   // 批167：按钮短标签（简/繁/EN——用户裁定）
 const setLang = (code) => { i18nSetLang(code) }
 const logout = async () => {
   try { await api.post('/auth/logout') } catch {}

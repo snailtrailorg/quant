@@ -2,6 +2,7 @@
 // vue-i18n 对象字面量重复键后值静默胜（tabs.mail / nav.settings / backtest.commission 三案在录）。
 // 用 acorn 按 ObjectExpression 作用域精确判定——正则必误报（同名键跨命名空间合法出现，如 settings 6 处）。
 import { readFileSync } from 'node:fs'
+const keyName = pp => pp.key.type === 'Identifier' ? pp.key.name : (pp.key.type === 'Literal' ? pp.key.value : null)
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -20,7 +21,7 @@ function walk(node) {
     const seen = new Map()
     for (const p of node.properties) {
       if (p.type === 'Property' && !p.computed && p.key.type === 'Identifier') {
-        const k = p.key.name
+        const k = keyName(p)
         if (seen.has(k)) dups.push(`  ${k}:${lineOf(p.start)}（首见 :${seen.get(k)}——后值静默胜）`)
         else seen.set(k, lineOf(p.start))
       }
@@ -65,8 +66,8 @@ console.log('✓ locales 无重复键')
   const collect = (node, prefix, out) => {
     if (!node || node.type !== 'ObjectExpression') return
     for (const p of node.properties) {
-      if (p.type !== 'Property' || p.computed || p.key.type !== 'Identifier') continue
-      const path = prefix ? `${prefix}.${p.key.name}` : p.key.name
+      if (p.type !== 'Property' || p.computed || !keyName(p)) continue
+      const path = prefix ? `${prefix}.${keyName(p)}` : keyName(p)
       if (p.value.type === 'ObjectExpression') collect(p.value, path, out)
       else out.add(path)
     }
@@ -74,7 +75,7 @@ console.log('✓ locales 无重复键')
   const root = ast.body.find(s => s.type === 'ExportDefaultDeclaration')?.declaration
   // 批167：N 语对称（动态遍历全部顶层语言域，zh 为基准两两比对——加语言零守门改动）
   const langNodes = root?.properties?.filter(p => p.value?.type === 'ObjectExpression') ?? []
-  const zhNode = langNodes.find(p => p.key.name === 'zh')?.value
+  const zhNode = langNodes.find(p => keyName(p) === 'zh')?.value
   if (!zhNode || langNodes.length < 2) {
     console.error('✗ 未找到顶层 zh 基准段或语言域不足两个（结构变更？）')
     process.exit(1)
@@ -83,18 +84,18 @@ console.log('✓ locales 无重复键')
   collect(zhNode, '', zhKeys)
   let bad = 0
   for (const p of langNodes) {
-    if (p.key.name === 'zh') continue
+    if (keyName(p) === 'zh') continue
     const otherKeys = new Set()
     collect(p.value, '', otherKeys)
     const oOnly = [...otherKeys].filter(k => !zhKeys.has(k))
     const zOnly = [...zhKeys].filter(k => !otherKeys.has(k))
     if (oOnly.length || zOnly.length) {
       bad++
-      console.error(`✗ ${p.key.name}/zh 键集不对称（${p.key.name}-only ${oOnly.length} / zh-only ${zOnly.length}）:`)
-      oOnly.slice(0, 10).forEach(k => console.error(`  仅 ${p.key.name}: ${k}`))
+      console.error(`✗ ${keyName(p)}/zh 键集不对称（${keyName(p)}-only ${oOnly.length} / zh-only ${zOnly.length}）:`)
+      oOnly.slice(0, 10).forEach(k => console.error(`  仅 ${keyName(p)}: ${k}`))
       zOnly.slice(0, 10).forEach(k => console.error(`  仅 zh: ${k}`))
     } else {
-      console.log(`✓ ${p.key.name}/zh 键集对称（${zhKeys.size} 键）`)
+      console.log(`✓ ${keyName(p)}/zh 键集对称（${zhKeys.size} 键）`)
     }
   }
   if (bad) process.exit(1)
@@ -108,19 +109,19 @@ console.log('✓ locales 无重复键')
   const collectMap = (node, prefix, out) => {
     if (!node || node.type !== 'ObjectExpression') return
     for (const p of node.properties) {
-      if (p.type !== 'Property' || p.computed || p.key.type !== 'Identifier') continue
-      const path = prefix ? `${prefix}.${p.key.name}` : p.key.name
+      if (p.type !== 'Property' || p.computed || !keyName(p)) continue
+      const path = prefix ? `${prefix}.${keyName(p)}` : keyName(p)
       if (p.value.type === 'ObjectExpression') collectMap(p.value, path, out)
       else if (p.value.type === 'Literal' && typeof p.value.value === 'string') out.set(path, p.value.value)
     }
   }
   const ph = (s) => new Set([...String(s).matchAll(/\{(\w+)\}/g)].map(m => m[1]))
   // 批167：N 语占位符（zh 基准 vs 全部语言域）
-  const zh2 = root2?.properties?.find(p => p.key.name === 'zh')?.value
+  const zh2 = root2?.properties?.find(p => keyName(p) === 'zh')?.value
   const zhMap = new Map()
   collectMap(zh2, '', zhMap)
   let bad2 = []
-  for (const pn of root2?.properties?.filter(p => p.value?.type === 'ObjectExpression' && p.key.name !== 'zh') ?? []) {
+  for (const pn of root2?.properties?.filter(p => p.value?.type === 'ObjectExpression' && keyName(p) !== 'zh') ?? []) {
     const om = new Map()
     collectMap(pn.value, '', om)
     for (const [k, v] of zhMap) {
