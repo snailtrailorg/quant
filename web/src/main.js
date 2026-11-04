@@ -2,7 +2,7 @@ import { createApp } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'   // 暗色 EP 变量（html.dark 激活;P3-1）
-import './styles/tokens.css'                          // 设计令牌（P3-1,04 全文）
+import './styles/tokens.css'                          // 设计令牌（P3-1,04 全文）——批167 A 案：恒后于 EP css 加载，令牌层 EP 覆写靠源码顺序自然胜出（特异性保持单类；防「以高制高」军备）
 import 'vue-cropper/dist/index.css'  // 全局引入（注意：该包 CSS 自带 [data-v-a742df44] 且组件 JS 硬编码同款 __scopeId，两者自洽——只要引入即生效）
 import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
