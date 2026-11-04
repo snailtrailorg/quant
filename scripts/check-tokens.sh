@@ -14,6 +14,24 @@ count_px()   { grep -rEoh "(margin|padding)(-(top|bottom|left|right))?: ?[^;\"]*
 count_hex()  { grep -rEoh "#[0-9a-fA-F]{3,6}" web/src/views/ web/src/components/ --include="*.vue" 2>/dev/null | grep -v "^#defa" | wc -l; }
 # 批24：字号旁路第三维（px/em/rem/% 相对单位同属排版旁路；驼峰 fontSize=编辑器/图表/头像 API 参数非 CSS 排版，天然不匹配）
 count_fs()   { grep -rE "font-size: ?[0-9.]+(px|em|rem|%)" web/src/views/ web/src/components/ web/src/layouts/ web/src/App.vue --include="*.vue" 2>/dev/null | grep -v 'token-ok' | grep -oE "font-size: ?[0-9.]+(px|em|rem|%)" | wc -l; }   # 批170：token-ok 行标记=显式豁免（与 i18n-ok 同构；须同行注释说明理由）
+# 批170 加固：token-ok 不是自由通行证——**门侧白名单**（文件:期望次数）。越界文件、数量增减一律门红，
+# 想新增特例必须改本行白名单（review 可见），不能靠随手加标记蒙混。
+TOKEN_OK_ALLOW="web/src/layouts/MainLayout.vue:1"
+check_token_ok() {
+  local allow_file="${TOKEN_OK_ALLOW%:*}" allow_n="${TOKEN_OK_ALLOW##*:}" bad=0 line n
+  local hits
+  hits=$(grep -rn 'token-ok' web/src/views/ web/src/components/ web/src/layouts/ web/src/App.vue --include="*.vue" 2>/dev/null || true)
+  [ -z "$hits" ] && { echo "✗ token-ok 豁免缺失：白名单要求 $allow_file 出现 $allow_n 处"; return 1; }
+  while IFS= read -r line; do
+    case "$line" in
+      "$allow_file":*) ;;
+      *) echo "✗ token-ok 越界（未列入白名单）: $line"; bad=1 ;;
+    esac
+  done <<< "$hits"
+  n=$(printf '%s\n' "$hits" | grep -c "^${allow_file}:" || true)
+  [ "$n" -ne "$allow_n" ] && { echo "✗ token-ok 数量不符：$allow_file 有 $n 处，白名单为 $allow_n 处"; bad=1; }
+  return $bad
+}
 # 批86 第四维：el-button 语义色 type=（success|warning|danger）计数。
 # 前三维（px/hex/font-size）结构上看不见 `type=` ⇒ 操作列把 type=success|danger 当按钮色用，
 # 用 EP 语义色替代本仓令牌/IconBtn tone，色漂移永不告警（批86 实证：LiveTask 操作列 4 处）。
@@ -45,5 +63,6 @@ RC=0
 [ "$BTN" -gt "$BASE_BTN" ] && { echo "✗ el-button 语义色 type= 计数上升: $BTN > $BASE_BTN（行内动作按钮须用 IconBtn 及其 tone——批86）"; RC=1; }
 [ "$W700" -gt "$BASE_W700" ] && { echo "✗ font-weight 700 计数上升: $W700 > $BASE_W700（标题体系=600；700 仅品牌位豁免——批163 字体审计）"; RC=1; }
 [ "$RAWTAG" -gt "$BASE_RAWTAG" ] && { echo "✗ 三元 el-tag :type= 计数上升: $RAWTAG > $BASE_RAWTAG（状态色应内聚 StatusTag——D24 §9.3；豁免=列内简短两三态，存量不强制回改）"; RC=1; }
+check_token_ok || RC=1
 [ "$RC" -eq 0 ] && echo "✓ 令牌门: PX=$PX≤$BASE_PX HEX=$HEX≤$BASE_HEX FS=$FS≤$BASE_FS BTN=$BTN≤$BASE_BTN"
 exit $RC
