@@ -113,13 +113,16 @@
 
     <!-- 批166：添加任务弹窗——数据源列显承载方；checkbox 状态=已接入（勾选+禁用），黄标=能力由他源也提供 -->
     <el-dialog v-model="addDialog" :title="t('dataManage.addTask') + ' · ' + addProvider" width="560px">
-      <div v-if="!addRows.length" style="color: var(--text-secondary); padding: var(--sp-3) 0; text-align: center">{{ t('dataManage.allCapsIn') }}</div>
-      <div v-for="r in addRows" :key="r.sid" style="display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border-weak)">
+      <div style="display: flex; justify-content: flex-end; margin-bottom: var(--sp-1)">
+        <RowFilter v-model="addFilter" :options="addFilterOptions" :title="t('common.filter')" />
+      </div>
+      <div v-if="!filteredAddRows.length" style="color: var(--text-secondary); padding: var(--sp-3) 0; text-align: center">{{ t('dataManage.allCapsIn') }}</div>
+      <div v-for="r in filteredAddRows" :key="r.sid" class="add-row" :class="{ readonly: r.exists && r.currentProvider !== addProvider }">
         <el-checkbox v-model="r.checked" :disabled="r.exists" />
         <span style="flex: 1">{{ r.sid }}</span>
         <span style="width: 90px; font-size: var(--fs-foot); color: var(--text-secondary)">{{ r.currentProvider || '—' }}</span>
-        <el-tag v-if="!r.exists && r.otherProviders.length" size="small" type="warning">
-          {{ t('dataManage.capByOthers', { providers: r.otherProviders.join(' / ') }) }}
+        <el-tag v-if="r.exists && r.currentProvider !== addProvider" size="small" type="warning">
+          {{ t('dataManage.capByOthers', { providers: r.currentProvider }) }}
         </el-tag>
       </div>
       <template #footer>
@@ -218,6 +221,7 @@ import TableShell from '../components/TableShell.vue'
 import TabsShell from '../components/TabsShell.vue'   // 批166：源页签壳
 import RefreshBtn from '../components/RefreshBtn.vue'
 import IconBtn from '../components/IconBtn.vue'
+import RowFilter from '../components/RowFilter.vue'   // 批166：添加弹窗行筛选
 import { Refresh, Setting, Edit, Plus } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
 import { cronToModel, modelToCron, describeCron } from '../utils/cronText'
@@ -251,6 +255,7 @@ const addProvider = ref('')
 const addRows = ref([])
 const openAdd = (p) => {
   addProvider.value = p
+  addFilter.value = []
   const caps = (providers.value[p] || []).map(String)
   const byId = new Map(configs.value.map(c => [String(c.id), c.provider || 'tushare']))
   addRows.value = caps.map(sid => {
@@ -264,6 +269,20 @@ const openAdd = (p) => {
   })
   addDialog.value = true
 }
+const addFilter = ref([])
+const addFilterOptions = computed(() => [
+  { value: 'addable', label: t('dataManage.fAddable') },
+  { value: 'mine', label: t('dataManage.fMine') },
+  { value: 'others', label: t('dataManage.fOthers') },
+])
+const filteredAddRows = computed(() => {
+  if (!addFilter.value.length) return addRows.value
+  const match = r => {
+    if (r.exists) return r.currentProvider === addProvider.value ? addFilter.value.includes('mine') : addFilter.value.includes('others')
+    return addFilter.value.includes('addable')
+  }
+  return addRows.value.filter(match)
+})
 const submitAdd = async () => {
   const picked = addRows.value.filter(r => r.checked && !r.exists).map(r => r.sid)
   if (!picked.length) { addDialog.value = false; return }
@@ -556,6 +575,8 @@ const saveCron = async () => {
 </script>
 <style scoped>
 .tab-actions { display: flex; justify-content: flex-end; gap: var(--icon-gap); align-items: center; margin-bottom: var(--sp-1); }
+.add-row { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; border-bottom: 1px solid var(--border-weak); }
+.add-row.readonly { opacity: 0.55; }   /* 他源承载=行只读（视觉灰化；checkbox 已禁用） */
 /* 列头 tooltip 提示可交互（虚线下划线=hover 有说明） */
 .hdr-hint { cursor: help; border-bottom: 1px dashed var(--text-secondary); }
 </style>
