@@ -282,15 +282,27 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         for z in ("headers", "ports", "ssh_cfg", "dnf", "components")
         if (snap.get(z) or {}).get("status") == "degraded"
     ]
-    if snap["status"] == "degraded" and not degraded_zones:
-        degraded_zones.append({"zone": "vulns", "reason": "grype 分区 degraded（快照 status 含最差）"})
+    # 批170：vulns 分区状态直读快照（此前靠「整体 degraded 且无其他分区」反推——
+    # components 同时降级时 vulns 降级被吞，前端无法标注历史数据）
+    _comps = snap.get("components") or {}
+    _vulns_status = _comps.get("vulns_status")
+    if _vulns_status == "degraded":
+        degraded_zones.append({"zone": "vulns",
+                               "reason": _comps.get("vulns_degraded_reason") or "grype 分区 degraded"})
+    elif _vulns_status is None and snap["status"] == "degraded" and not degraded_zones:
+        degraded_zones.append({"zone": "vulns", "reason": "grype 分区 degraded（历史快照：状态未单列）"})
+    _findings = _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger,
+                                 snap_created_at=snap["created_at"])
+    # 批170：数据截至日 = 现存 finding 的最新 last_seen（无额外查询）；旧于今日或 vulns 降级即 stale
+    _findings_as_of = max((f["last_seen"] for f in _findings), default=None)
+    findings_stale = ((_findings_as_of is not None and _findings_as_of < day.isoformat())
+                      or _vulns_status == "degraded")
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
         "ai_summary": snap["ai_summary"] or "",
         "created_at": snap["created_at"].isoformat() if snap["created_at"] else None,
-        "findings": _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger,
-                                      snap_created_at=snap["created_at"]),
+        "findings": _findings,
         "components": snap["components"],
         "components_ledger": [
             {"source": r["source"], "name": r["name"], "version": r["version"],
@@ -307,6 +319,9 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "dnf": snap["dnf"],
         "headers": snap["headers"],
         "degraded_zones": degraded_zones,
+        "vulns_status": _vulns_status or "unknown",
+        "findings_as_of": _findings_as_of,
+        "findings_stale": findings_stale,   # 批170：true ⇒ 列表是历史值，不得当当前风险读
         "vulns_db": (snap.get("components") or {}).get("vulns_db") or {},
         # 批 154：依赖滞后（venv 债务仪表——components 分区透传；检查不升级）
         "n_outdated": (snap.get("components") or {}).get("n_outdated"),

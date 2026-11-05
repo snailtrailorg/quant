@@ -463,11 +463,14 @@ def create_sync_configs(provider: str, items: list) -> dict:
         existing = {r[0] for r in cur.fetchall()}
         fresh = [(s, n, a, t) for s, n, a, t in norm if s not in existing]
         if fresh:
+            # 批170：supports_backfill 必须按代码真源落值——该列历史上只由迁移 seed，
+            # 建行路径绕过后新建同步项会静默失去回补入口（batch99 能力真源测试揪出）
+            from src.data_platform.backfill_registry import BACKFILLABLE_IDS
             with conn.cursor() as cur:
                 cur.executemany(
-                    "INSERT INTO sync_config (id, name, tushare_api, pg_table, provider, enabled) "
-                    "VALUES (%s, %s, %s, %s, %s, false) ON CONFLICT (id) DO NOTHING",
-                    [(s, n, a, t, provider) for s, n, a, t in fresh])
+                    "INSERT INTO sync_config (id, name, tushare_api, pg_table, provider, enabled, supports_backfill) "
+                    "VALUES (%s, %s, %s, %s, %s, false, %s) ON CONFLICT (id) DO NOTHING",
+                    [(s, n, a, t, provider, s in BACKFILLABLE_IDS) for s, n, a, t in fresh])
             conn.commit()
     return {"created": [s for s, _, _, _ in fresh], "skipped": sorted(existing & set(sids))}
 

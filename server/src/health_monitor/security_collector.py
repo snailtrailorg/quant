@@ -262,6 +262,30 @@ def _upsert_components(conn, scan_date: date,
 
 # ── 分区采集 ───────────────────────────────────────────────────────────────
 
+def read_dep_rows(lc_ts: str | None):
+    """读 pip 台账行（批170 从 _collect_components 抽出——根因①的读取侧）。
+
+    切面语义：`checked_at <= last_complete.ts` 取「最近一个完整审计轮的判定」。
+    **切面过滤为空 ≠ 数据坏**：行是逐包原子 upsert 的，混轮不存在字段级不一致，
+    故回退全表并返回 mixed=True（观测用）；只有**表真空**才 fail-loud（真无真源）。
+    2026-11-04 17:4x 连续降级 = 写入侧把 checked_at 当“扫描时间”改，切面把自己切空。
+    """
+    from src.data_platform.db import get_conn
+    SQL_BASE = ("SELECT name, version, latest_version, judge_class, judge_why, checked_at "
+                "FROM security_component WHERE source='pip'")
+    with get_conn() as conn:
+        if lc_ts:
+            rows = conn.execute(SQL_BASE + " AND COALESCE(checked_at, last_seen::timestamptz) <= %s",
+                                (lc_ts,)).fetchall()
+            if rows:
+                return rows, False
+        all_rows = conn.execute(SQL_BASE).fetchall()
+    if not all_rows:
+        raise RuntimeError("dep rows 表为空（唯一真源无行）——fail-loud 降级")
+    logger.warning("dep rows 切面为空（cutoff=%s）→ 回退全表 %s 行", lc_ts, len(all_rows))
+    return all_rows, True
+
+
 def _collect_components() -> dict:
     """组件版本：pip freeze 全量 + nginx/openssl/pg/redis 版本。
 
@@ -305,29 +329,14 @@ def _collect_components() -> dict:
         # （B-P1：坏网 audit 长跑与 scan 重叠时，截断到完整上一轮——半更新行不入判）。
         # 表零行/异常回退兼容键 sec:dep_audit:rows（回滚兼容窗，批 162+ 删）。
         _lc_ts = ((contract.get("last_complete") or {}).get("ts"))
-        _tbl_rows = None
-        try:
-            from src.data_platform.db import get_conn as _gc2
-            with _gc2() as _c2:
-                _q = ("SELECT name, version, latest_version, judge_class, judge_why "
-                      "FROM security_component WHERE source='pip'")
-                _args = []
-                if _lc_ts:
-                    _q += " AND COALESCE(checked_at, last_seen::timestamptz) <= %s"   # 步4盲审 A-P1-3：屏草锚=checked_at（timestamptz）；历史行 NULL 回退 last_seen
-                    _args.append(_lc_ts)
-                _tbl_rows = _c2.execute(_q, tuple(_args)).fetchall()
-        except Exception as _e2:
-            logger.warning("dep_health 表读降级（回退兼容键）: %s", _e2)
-        if _tbl_rows:
-            for _r in _tbl_rows:
-                judged.append({"name": _r[0], "cur": _r[1], "latest": _r[2],
-                               "managed_by": "pypi",
-                               "group": "dev" if _r[0] in dev_names else "runtime",
-                               "judge_class": _r[3], "judge_why": _r[4],
-                               "has_update": has_update_of(_r[3])})
-        else:
-            # 批 161 收尾：兼容键已删（表为唯一真源）——表读失败一律 fail-loud 降级（防全表 unknown+假回落）
-            raise RuntimeError("dep rows 表读失败（唯一真源）——fail-loud 降级")
+        _tbl_rows, _mixed = read_dep_rows(_lc_ts)
+        part["dep_mixed_round"] = _mixed
+        for _r in _tbl_rows:
+            judged.append({"name": _r[0], "cur": _r[1], "latest": _r[2],
+                           "managed_by": "pypi",
+                           "group": "dev" if _r[0] in dev_names else "runtime",
+                           "judge_class": _r[3], "judge_why": _r[4],
+                           "has_update": has_update_of(_r[3])})
         os_c = contract.get("os") or {}
         # 批 156（schema 2）：OS 全量行——upgrades 可达口径+all_repos 无坐标判定
         if _sv == 2:
@@ -998,6 +1007,10 @@ def run_security_scan(today: date | None = None) -> dict:
     # components.python 键同款先例：分区外挂元数据走相邻 jsonb）
     parts["components"]["vulns_db"] = {
         "state": vulns.get("db"), "built_at": vulns.get("db_built_at")}
+    # 批170 根因修③：vulns 分区状态显式落库（此前只由「整体 degraded 且无其他分区」反推，
+    # 导致 vulns 降级被 components 降级掩盖、前端无从标注「这批漏洞是历史值」）
+    parts["components"]["vulns_status"] = vulns.get("status") or "unknown"
+    parts["components"]["vulns_degraded_reason"] = (vulns.get("degraded_reason") or "")[:200]
     status = "degraded" if any(p.get("status") == "degraded" for p in
                                (*parts.values(), vulns)) else "ok"
 
@@ -1075,12 +1088,14 @@ def run_security_scan(today: date | None = None) -> dict:
         # jv 全 NULL 的行（audit 未覆盖名/昨日残留）批量标 unknown(why=未在本轮审计)
         try:
             import datetime as _dt156
+            # 批170 根因修①：**不得改写 checked_at**——该列语义=「本行判定产出的审计轮时间」，
+            # 是读取侧 `checked_at <= last_complete.ts` 的轮次切面锚。此处回填只是“本轮没看到你”，
+            # 并不产生新判定；原实现写 now()（=扫描时间）会把整批行推到切面之后，
+            # 下一次扫描直接切出空集（2026-11-04 17:4x 连续降级的真因）。
             conn.execute(
-                "UPDATE security_component SET judge_class=%s, "
-                "judge_why=%s, checked_at=%s "
+                "UPDATE security_component SET judge_class=%s, judge_why=%s "
                 "WHERE judge_class IS NULL",
-                ("unknown", "未在本轮审计（数据源差集——下轮对齐或 3 天 GC 收口）",
-                 _dt156.datetime.now(_dt156.timezone.utc)))
+                ("unknown", "未在本轮审计（数据源差集——下轮对齐或 3 天 GC 收口）"))
         except Exception as _e156:
             logger.warning("null-judge backfill failed: %s", _e156)
         logger.info("upsert sys rows=%s judged=%s", len(sys_rows), len(judged_map))

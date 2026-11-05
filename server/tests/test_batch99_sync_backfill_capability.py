@@ -50,6 +50,12 @@ NOT_BACKFILLABLE_EXPECTED = {
 }
 
 
+def test_registry_matches_expected():
+    """批170：代码注册表（建行时按它落 supports_backfill）必须与期望字面量一致——防两处漂移。"""
+    from src.data_platform.backfill_registry import BACKFILLABLE_IDS
+    assert set(BACKFILLABLE_IDS) == BACKFILLABLE_EXPECTED
+
+
 def _db_up() -> bool:
     try:
         from src.data_platform.db import get_conn

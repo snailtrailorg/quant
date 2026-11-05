@@ -31,6 +31,8 @@
           </div>
           <div class="card-value">
             <span class="pct" :class="{ critical: activeFindings.length }">{{ activeFindings.length }}</span>
+            <!-- 批170：降级/历史日不得把旧值当当前风险读——数字旁标数据截至日 -->
+            <span v-if="findingsStale" class="stale-tag">{{ t('secpage.asOf', { d: findingsAsOf || '—' }) }}</span>
           </div>
           <div class="src-dots">
             <span v-for="n in srcCounts" :key="n.source" class="src-dot-item">
@@ -98,6 +100,8 @@
           </div>
         </div>
       </template>
+      <!-- 批170（issue report 2 根因）：采集不可用时不拿历史值冒充当前——列表上方明示数据截至日 -->
+      <div v-if="findingsStale" class="stale-warn">⚠ {{ t('secpage.vulnStale', { d: findingsAsOf || '—' }) }}</div>
       <TableShell :data="filteredFindings" storage-key="security-findings" style="width:100%">
         <el-table-column prop="vuln_id" :label="t('secpage.vulnId')" min-width="170">
           <template #default="{ row }">
@@ -317,6 +321,8 @@ const depOutdatedWarn = computed(() => (snap.value?.dep_health?.has_update_n || 
 const hasUpdateText = (v) => v === 'yes' ? t('secpage.huYes') : v === 'no' ? t('secpage.huNo') : t('secpage.huUnknown')
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
 const degradedZones = computed(() => snap.value?.degraded_zones || [])
+const findingsStale = computed(() => !!snap.value?.findings_stale)   // 批170：漏洞列表为历史值
+const findingsAsOf = computed(() => snap.value?.findings_as_of || '')
 
 // C 区（批 125 重构）：搜索（ID/包/描述子串）× RowFilter（严重度 distinct × 状态
 // 默认 active——原 header checkbox 裁，状态语义归筛选组；红点/清除钮组件级生效）
@@ -510,6 +516,8 @@ const onDeleteSummary = async (d) => {
 .dot.neutral { background: var(--flat); }
 .stale-warn { color: var(--warn-fill); font-size: var(--fs-foot); }
 .ai-warn { color: var(--el-color-warning); font-size: var(--fs-label); margin-bottom: var(--sp-2); }
+.stale-tag { font-size: var(--fs-foot); color: var(--text-secondary); margin-left: var(--sp-2); }
+.stale-warn { color: var(--el-color-warning); font-size: var(--fs-label); margin-bottom: var(--sp-2); }
 .ai-text { white-space: pre-wrap; line-height: 1.7; font-size: var(--fs-body); }
 .hist-item { display: flex; gap: var(--sp-3); padding: var(--sp-1) 0; font-size: var(--fs-foot); }
 .hist-date { color: var(--text-secondary); flex: none; }
