@@ -1957,7 +1957,8 @@ def _sync_gap_sync(sync_id: str, *, symbols: list[str], win_map: dict[str, tuple
                    gaps_map: dict[str, list[tuple[str, str]]] | None = None,
                    uncertain_map: dict[str, str] | None = None,
                    pulled_map: dict[str, list[str]] | None = None,
-                   prev_map: dict[str, list[tuple]] | None = None) -> dict:
+                   prev_map: dict[str, list[tuple]] | None = None,
+                   window_guard: bool = False) -> dict:
     """**视图式全量重同步（scope 级）**：以**本轮现算**为唯一真源，与 scope 内行做**集合差**。
 
     **读取规模契约（批 110 · 产出 D）**：live 行**一次**读出（`prev_map` 可复用调用方已读的口，
@@ -1992,6 +1993,16 @@ def _sync_gap_sync(sync_id: str, *, symbols: list[str], win_map: dict[str, tuple
 
     返回聚合统计：`{opened, reopened, updated, closed, uncertain, new:[(symbol,a,e)],
     closed_anchors:[(symbol,a)], uncertain_anchors:[(symbol,a)]}`。
+
+    `window_guard`（批 171a · D2）：默认 `False`＝**逐字现状**。为 `True` 时按本轮窗口
+    `win_map[sym]=(lo,hi)` **夹取既有行**——窗口外既有行**零写入**（不 closed / 不 touch /
+    不转 uncertain / 不对齐 / 不 pull / 不因新锚而 INSERT 重开），窗口内语义逐字不变；
+    `current` 新锚若落在窗口外**非终态**行的 `[gap_start, gap_end]` 内，也仅从
+    INSERT/reopen 候选剔除。归属按锚（`gap_start`）、重叠按区间；`lo/hi` 空 ⇒ `ValueError`
+    （不静默退化）。**仅 per-date 路径传 `True`**；per-symbol 的 stale 单日窗须写全族 live 行
+    （§5.4 抑制门），恒走 `False`。
+    `window_guard=True` 时 `prev_map` 须由 `_sync_gap_scope_rows` 产出（日期已 `_anchor`
+    归一）；且仅单 symbol 路径传 True，故 `out_spans` 规模恒 ≤ 单标的既有行数、无需区间索引。
     """
     symbols = list(symbols or [])
     stats = {"opened": 0, "reopened": 0, "updated": 0, "closed": 0, "uncertain": 0,
@@ -2017,14 +2028,28 @@ def _sync_gap_sync(sync_id: str, *, symbols: list[str], win_map: dict[str, tuple
         # `sync_gap_ident`（这正是 `_anchor` docstring 说的「两者做差集永不相等」同族）。
         lo = _anchor(_w[0]) if _w[0] else ""
         hi = _anchor(_w[1]) if _w[1] else ""
+        if window_guard and (not lo or not hi):
+            raise ValueError(f"window_guard 需要非空窗口（{sync_id}/{sym}）")
         prev = prev_map.get(sym) or []
         by_anchor = {r[0]: r for r in prev}
         live = [r for r in prev if r[2] in _SYNC_GAP_LIVE_STATES]
+        # 批 171a：窗口归属**按锚**。live_in ≡ 锚 ∈ [lo,hi]（故 R4 的 in_win(a) 恒真，
+        # 不重复判）；False 时 live_in＝live 同一对象、live_out/out_spans 为空
+        # ⇒ 下面每个分支与改动前逐字等价。
+        live_in = [r for r in live if lo <= r[0] <= hi] if window_guard else live
+        live_out = [r for r in live if not (lo <= r[0] <= hi)] if window_guard else []
+        # R5 剔除集合：`live_out ⊆ live`，终态行排除实由上方 `live` 过滤保证；此处
+        # 条件与设计 §2 R5 逐字对齐（防御性冗余，恒真），不得删以免 live 口径变更时漂移。
+        out_spans = [(r[0], r[1]) for r in live_out
+                     if r[2] in _SYNC_GAP_LIVE_STATES] if window_guard else []
         ureason = (uncertain_map or {}).get(sym)
 
         if ureason:
-            if live:
-                for r in live:
+            if live:                       # 批 171a：判定保持**全量 live**（不得改 live_in，
+                                           # 否则「有窗外 live 行、窗内无」会误判无行而插 scope 行）；
+                                           # per-date 抑制分支在「仅窗外 live 行」时该轮零写入
+                                           # （含倒置窗 lo>hi），属 §2 R1 / 验收 5 知情取舍
+                for r in live_in:          # R1：仅窗内行转 uncertain
                     unc_u.append((ureason, sync_id, sym, r[0]))
                     stats["uncertain"] += 1
                     stats["uncertain_anchors"].append((sym, r[0]))
@@ -2049,19 +2074,19 @@ def _sync_gap_sync(sync_id: str, *, symbols: list[str], win_map: dict[str, tuple
             # 「本轮未现算」≠「本轮现算为空」：前者**不主张**（只刷 last_seen），后者才是「全补齐 ⇒
             # 逐行 closed」。把 None 当空集会**谎报 closed**（P0-1 同族）⇒ 响亮告警后原样返回。
             logger.warning("sync_gap 视图式同步收到未现算（⇒ 本轮不主张，%s/%s）", sync_id, sym)
-            for r in live:
+            for r in live_in:              # R2：仅窗内行刷 last_seen
                 touch.append((sync_id, sym, r[0]))
             continue
         gm = gaps_map[sym]
         if gm is None:
             # 显式「本轮无作业/不主张」（如 per-symbol 下界晚于窗口上界的新上币）⇒ 静默刷 last_seen
-            for r in live:
+            for r in live_in:              # R2：仅窗内行刷 last_seen
                 touch.append((sync_id, sym, r[0]))
             continue
 
         current = {_anchor(a): _anchor(e) for a, e in (gm or [])}
-        live_anchors = {r[0] for r in live}
-        for r in live:
+        live_anchors = {r[0] for r in live}  # 全量锚（含窗外）⇒ 窗外锚不会被当新锚
+        for r in live_in:                    # R3/R4：窗外行零写入
             a = r[0]
             if a in current:
                 if round_id is None:
@@ -2074,6 +2099,8 @@ def _sync_gap_sync(sync_id: str, *, symbols: list[str], win_map: dict[str, tuple
                 stats["closed"] += 1
                 stats["closed_anchors"].append((sym, a))
         for a in sorted(set(current) - live_anchors):
+            if window_guard and any(g0 <= a <= g1 for g0, g1 in out_spans):
+                continue                     # R5：新锚落在窗外非终态行区间内 ⇒ 剔除候选（零写入）
             row = by_anchor.get(a)
             hr = 1 if round_id is not None else 0
             if row is None:
@@ -2089,7 +2116,10 @@ def _sync_gap_sync(sync_id: str, *, symbols: list[str], win_map: dict[str, tuple
                 logger.warning("sync_gap 锚冲突（%s/%s/%s）：既有 %s vs 本次 open —— 不改写"
                                "（缺口主张与排除段登记互不覆盖）", sync_id, sym, a, row[2])
         for a in (pulled_map or {}).get(sym, []):
-            pull.append((sync_id, sym, _anchor(a)))
+            an = _anchor(a)
+            if window_guard and not (lo <= an <= hi):
+                continue                     # R7：仅窗内锚计 pull
+            pull.append((sync_id, sym, an))
 
     with get_conn() as conn:
         cur = conn.cursor()
@@ -2146,12 +2176,15 @@ def _sync_gap_sync_one(sync_id: str, symbol: str, *, win_lo: str, win_hi: str,
 
     `round_id=None`（per-date 对账不做「连续 N 轮」判据——该判据是 per-symbol 旁路的门控）；
     返回体把 `new` 归一成旧形态 `[(gap_start, gap_end)]`（per-date 调用方只关心段）。
+    批 171a：唯一向 `_sync_gap_sync` 传 `window_guard=True` 的入口——per-date 窗口＝本轮
+    同步窗口，窗外既有行不得被本轮误 closed（D2「不遗忘」）。per-symbol 两路不走此包装。
     """
     st = _sync_gap_sync(
         sync_id, symbols=[symbol], win_map={symbol: (win_lo, win_hi)}, round_id=None,
         gaps_map=None if gaps is None else {symbol: gaps},
         uncertain_map={symbol: uncertain_reason} if uncertain_reason else None,
-        pulled_map={symbol: pulled_anchors} if pulled_anchors else None)
+        pulled_map={symbol: pulled_anchors} if pulled_anchors else None,
+        window_guard=True)                 # 批 171a：per-date 族按本轮窗口夹取，窗外行零写入
     st["new"] = [(a, e) for _s, a, e in st["new"]]
     return st
 
