@@ -300,7 +300,9 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     # 「采集不可用」恒真死锁（重扫不消，82 条全 fixed 实证）。findings_as_of 保留为
     # 信息性展示（最近活跃发现日）；stale 只看快照日与 vulns 分区状态。
     _findings_as_of = max((f["last_seen"] for f in _findings), default=None)
-    findings_stale = (_vulns_status == "degraded") or (snap["scan_date"] < _today)
+    # 显式 ?date= ＝用户主动翻看历史 ⇒ 永不 stale（快照日用户已知）；无参默认才按
+    # 「今日视角」判（今日未扫/回落旧快照 ⇒ stale）。vulns 降级两路都标。
+    findings_stale = (_vulns_status == "degraded") or (not date_str and snap["scan_date"] < _today)
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
