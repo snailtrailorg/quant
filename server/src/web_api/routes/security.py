@@ -227,6 +227,7 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     alias 保持 `?date=` 对外契约不变。
     """
     day = _parse_date(date_str) if date_str else date.today()
+    _today = date.today()          # 批170 补丁：stale 与真实今天比——回落旧快照（今日未扫）仍应标 stale
     snap = store.get_snapshot(day)
     if snap is None and not date_str:
         # 批 153：默认查询回落最近一行（每日 00:00-06:00 今日未扫的语义空窗——
@@ -294,9 +295,12 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     _findings = _enrich_findings(day, vulns_ok=snap["status"] == "ok", ledger=ledger,
                                  snap_created_at=snap["created_at"])
     # 批170：数据截至日 = 现存 finding 的最新 last_seen（无额外查询）；旧于今日或 vulns 降级即 stale
+    # 批170 补丁（2026-11-05）：stale 语义改为「**产出这份数据的扫描**不新鲜」——
+    # 全修复场景（grype 0 匹配 ⇒ 无人滚 last_seen ⇒ max 冻结在最后修复日）曾被误报
+    # 「采集不可用」恒真死锁（重扫不消，82 条全 fixed 实证）。findings_as_of 保留为
+    # 信息性展示（最近活跃发现日）；stale 只看快照日与 vulns 分区状态。
     _findings_as_of = max((f["last_seen"] for f in _findings), default=None)
-    findings_stale = ((_findings_as_of is not None and _findings_as_of < day.isoformat())
-                      or _vulns_status == "degraded")
+    findings_stale = (_vulns_status == "degraded") or (snap["scan_date"] < _today)
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
