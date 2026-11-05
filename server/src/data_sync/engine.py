@@ -400,8 +400,19 @@ def sync(sync_id: str, backfill_from: str | None = None,
             # 15-服务监控的 tier2 心跳只认 done/success）。未声明=通用口径。
             status = r.get("log_status") or ("partial" if failed_dates else "success")
             duration_ms = int((time.time() - t0) * 1000)
+            # 批 171a·D1（游标不越界）：在 _log 前**预算** cap 收口效果（r/cfg 均已就绪）——
+            # 留痕走 error 列（sync_log 无 note 列；成功路径恒空串 ⇒ 追加不覆没；批 158
+            # bar_retention_sweep 注记先例）。_cap=None（未声明族）⇒ 逐字现状、零 Valkey 触碰。
+            _cap = r.get("cursor_cap")
+            _cap_note = ""
+            if _cap is not None and not backfill_from:
+                _v0 = (r["last_success_date"] if "last_success_date" in r and not failed_dates
+                       else (r.get("cursor_upto") or end_date) if "last_success_date" not in r
+                       else r["last_success_date"])
+                if _cap < _v0 and (_cap >= (cfg["last_sync_date"] or "")):
+                    _cap_note = f"cursor_capped:{_cap}"
             _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
-                 status, "", failed_dates, expected_days, actual_days)
+                 status, _cap_note, failed_dates, expected_days, actual_days)
             # 批 108·步 3（设计 §5.3「封顶不得静默」）：`policy_discard`（主动不保留）/
             # `unreachable`（源不可达）**不是缺口** ⇒ 只记日志、不进 failed_dates（不误告警）。
             # 批 109：由「只记日志」升级为**落表终态**（幂等，读-改-写；`sync_gap` 的终态出口）。
@@ -432,6 +443,13 @@ def sync(sync_id: str, backfill_from: str | None = None,
             # 冻游标 → beat 每 30min 重试风暴。
             # 全失败仍刷 last_sync_ts（G-S3：调度器以旧 ts 算 next_run 会连发重试）。
             if not backfill_from:
+                # 批 171a·D1：cap 收口（min 且钳制不倒退）+ 终态词通则（收口实际改值且原词
+                # idle ⇒ partial）+ 逃逸闸计数（触键 ⇔ _cap 非 None：生效 INCR / 未生效 DEL）。
+                # _cap=None ⇒ _clamp 恒等 ⇒ 未声明族逐字零漂移（含全失败/异常路径不参与）。
+                def _clamp(v: str) -> str:
+                    if _cap and _cap < v:
+                        v = _cap
+                    return max(v, cfg["last_sync_date"] or "") if _cap else v
                 if "last_success_date" in r:
                     if failed_dates and r["last_success_date"] is None:
                         # 全失败：游标不动（旧值），标 failed——下轮增量自动重试整个窗口。
@@ -445,9 +463,10 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     elif failed_dates:
                         # 部分失败：推到**连续成功末日**（G-Q1a：最大成功日会永久跳过中间失败日；
                         # 后段已入库日下轮重拉由 upsert 幂等兜底）
-                        _advance = (r["last_success_date"], saved, "partial")
+                        _advance = (_clamp(r["last_success_date"]), saved, "partial")
                     else:
-                        _advance = (end_date, saved, "idle")
+                        _advance = (_clamp(end_date), saved,
+                                    "partial" if _cap and _clamp(end_date) != end_date else "idle")
                 else:
                     # 批 92：无 last_success_date 键的 handler（tier1 按日族）改从返回体取
                     # 「游标上界」——它可能窄于 end_date（如 margin_detail 的 T+1 数据可用日
@@ -461,13 +480,28 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     #   就冻游标会引发 beat 重试风暴，见上方 :384-387 与 G-S1）。只改词。
                     _term = ("idle" if not failed_dates
                              else ("partial" if saved else "failed"))
-                    _advance = (r.get("cursor_upto") or end_date, saved, _term)
+                    _v_nc = r.get("cursor_upto") or end_date          # 未收口原值（终态词判定）
+                    _advance = (_clamp(_v_nc), saved,
+                                "partial" if _cap and _clamp(_v_nc) != _v_nc else _term)
             else:
                 _advance = None   # 回补不推进游标（现状）
             _mark_running(sync_id, False)   # G-S2：先清 running（置 idle），终态随后覆盖——
             #   若顺序颠倒，partial/failed 会被本行无条件覆盖回 idle（测试锁死此顺序）
             if _advance is not None:
                 _update_sync_state(sync_id, *_advance)
+            # 批 171a·D1 逃逸闸：触键 ⇔ _cap 非 None（增量轮）——生效 INCR+EXPIRE（==N 恰打点
+            # 一次）/ 未生效（含回补带 cap）DEL。_cap=None 轮零 Valkey 触碰（fail-soft 见
+            # _cursor_freeze_count）。全失败/异常路径 _advance 语义不收口 ⇒ 未生效 ⇒ DEL 清零。
+            if _cap is not None and not backfill_from:
+                _eff = _advance is not None and _cap_note != ""       # 收口实际改值
+                _cnt = _cursor_freeze_count(sync_id, bumped=_eff)
+                if _eff and _cnt == _CAP_FREEZE_ALERT_ROUNDS:
+                    _alert_generic(
+                        "sync.cursor_frozen",
+                        f"同步游标冻结 {sync_id}",
+                        f"连续 {_CAP_FREEZE_ALERT_ROUNDS} 轮 cap 收口实际生效（缺口未自愈，"
+                        f"cap={_cap}）——游标停在缺口前，窗口逐轮增长。查 dataops sync_gap "
+                        f"state='open' 行与上游该日发布；确认永久缺后可回补越界或调 retention。")
             if failed_dates:
                 # H 口径统一：告警用终态（failed/partial，与 sync_config.last_status 一致）。
                 # 批 104：`_advance[2]` 不再对「无 last_success_date 族」恒给 'idle'
@@ -1566,6 +1600,18 @@ _SYNC_GAP_EXCLUDED_STATES: tuple[str, ...] = ("unreachable", "policy_discard")
 # 快照 age 阈值（自然日）：SM 列表快照超此 age ⇒ 期望集不完整 ⇒ `uncertain(reason='stale_source')`
 # （设计 §5.4 第一行；§九.1「依赖倒置」的闭合口——inception 是派生数据，快照过期即系统性漏报）。
 _SNAPSHOT_STALE_DAYS = 7
+
+# 批 171a·D1（游标不越界）：per-date 稠密白名单——只有「每日发布」的族才允许出具 cursor_cap。
+# 排除（装配可达但稀疏/事件驱动，空日是数据本性不是缺口）：forecast_sync（ann_date 驱动）、
+# top_list_sync / block_trade_sync（事件驱动非每日保证）——prod last-100 sync_log 实证
+# （2026-11-05）。守门：server/tests/test_batch171a_cursor_cap.py 断言白名单与
+# set(_TIER1_BATCH) ∪ {astock_daily, listed_fund_daily, cb_daily, astock_daily_jq} 的关系。
+_CAP_EMIT_IDS: frozenset[str] = frozenset({
+    "astock_daily", "listed_fund_daily", "cb_daily", "astock_daily_jq",
+    "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "st_list_sync", "cyq_perf_sync",
+})
+# 逃逸闸：同 sid 连续 N 轮 cap 实际生效 ⇒ 告警一次（==N 恰打点，防风暴）。日频族 N=7 ≈ 7 交易日。
+_CAP_FREEZE_ALERT_ROUNDS = 7
 # per-symbol 限频重拉：`open` 行 pull_count < 此值 **且** 距 `last_seen` ≥ 1 天 ⇒ 按缺口区间重拉
 _GAP_REPULL_MAX = 3
 _GAP_REPULL_MIN_INTERVAL_DAYS = 1
@@ -1930,6 +1976,59 @@ def _sync_gap_scope_rows(sync_id: str, symbols: list[str]) -> dict[str, list[tup
             out.setdefault(r[0], []).append(
                 (_anchor(r[1]), _anchor(r[2]), r[3], r[4], r[5], r[6], r[7]))
     return out
+
+
+def _cursor_cap(sync_id: str, rec: dict, failed_dates: list) -> str | None:
+    """批 171a·D1：出具 cursor_cap——出具条件四连：白名单 ∧ gap 非空 ∧ 非 uncertain ∧ 非全失败。
+
+    `rec` **必须是 `_reconcile_dates` 返回的对账 dict**（其 `expected` 是 int 计数）——
+    不是 handler 返回体（后者 `expected_days` 三族口径各异，传错则全失败判定基数漂移）。
+    返回 min(gap) 前一自然日（YYYYMMDD）——不依赖日历查询、cap 落非交易日无害
+    （各族起点均按自然日 +1 推进）。
+    """
+    if sync_id not in _CAP_EMIT_IDS:
+        return None
+    if rec.get("uncertain") is not None or not rec.get("gap_dates"):
+        return None
+    if failed_dates and len(failed_dates) >= (rec.get("expected") or 0):
+        # 全失败（tier1 全窗炸）⇒ 不出 cap，游标走原语义（G-S1「无键族无条件推进」不漂移）
+        return None
+    _g = min(rec["gap_dates"])
+    return (date(int(_g[:4]), int(_g[4:6]), int(_g[6:8]))
+            - timedelta(days=1)).strftime("%Y%m%d")
+
+
+def _cursor_freeze_count(sync_id: str, *, bumped: bool) -> int | None:
+    """批 171a·D1 逃逸闸计数：`sync:cap_freeze:<sid>` 单源 Valkey（INCR+EXPIRE 7d 续期 / DEL）。
+
+    fail-soft 三不（触键点在 sync() try 内——裸抛会双日志行+伪 failed 告警三连）：
+    吞一切异常、异常时返 None（计数未知——不出告警、不抛、不清零）。同 `_alert_generic` 纪律。
+    """
+    try:
+        from src.quant_common.redis_client import business_redis
+        r = business_redis(socket_timeout=5, socket_connect_timeout=5)
+        key = f"sync:cap_freeze:{sync_id}"
+        if bumped:
+            n = r.incr(key)
+            r.expire(key, 7 * 86400)
+            return int(n)
+        r.delete(key)
+        return None
+    except Exception as e:
+        logger.warning("cap 冻结计数失败（%s，不影响同步）: %s", sync_id, e)
+        return None
+
+
+def _cursor_cap_healed(sync_id: str, rec: dict) -> bool:
+    """批 171a·D1 痊愈轮判定（handler 尾部侧）：白名单族「对账在场 ∧ 非 uncertain ∧ gap 清空」。
+
+    痊愈 ⇒ DEL 计数（堵二次冻结静默：冻结→愈合→7d 内再冻结，无此条则计数从 ≥7 续涨、
+    ==N 永不再真）。mock handler 不执行尾部 ⇒ 既有用例零 Valkey 触碰仍成立。
+    """
+    return (sync_id in _CAP_EMIT_IDS
+            and rec is not None
+            and rec.get("uncertain") is None
+            and not rec.get("gap_dates"))
 
 
 def _repullable_map(prev_map: dict[str, list[tuple]]) -> dict[str, list[tuple[str, str]]]:
@@ -2776,11 +2875,17 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
                     "跳过 %d（非 XSHE/XSHG，如 %s）（额度余 %d/%d）",
                     start_s, end_s, len(dates), pulled, saved, len(failed),
                     len(set(skipped)), sorted(set(skipped))[:3], win["spare"], win["total"])
+        # 批 171a·D1：出具 cursor_cap（白名单族 + 对账 gap 非空 ⇒ 游标不越过缺口）；
+        # 痊愈轮（gap 清空）DEL 冻结计数（handler 尾部侧——mock 不执行尾部 ⇒ 零触碰成立）
+        _ccap = _cursor_cap(cfg["id"], _rec, failed)
+        if _ccap is None and _cursor_cap_healed(cfg["id"], _rec):
+            _cursor_freeze_count(cfg["id"], bumped=False)
         return {"pulled": pulled, "saved": saved, "start": start_s,
                 "failed_dates": failed, "expected_days": len(dates),
                 "actual_days": len([d for d in dates if d <= cursor]) if cursor else 0,
                 "cursor_upto": cursor,
-                "excluded": _excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec}
+                "excluded": _excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec,
+                **({"cursor_cap": _ccap} if _ccap else {})}
 
 
 _HANDLERS = {
@@ -2930,6 +3035,10 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
         where_params=(sub,), expected=_trade_days, win_lo=start, win_hi=end_date,
         repull_fn=_pull_day)
 
+    # 批 171a·D1：出具 cursor_cap + 痊愈轮 DEL 冻结计数（handler 尾部侧）
+    _ccap = _cursor_cap(cfg["id"], _rec, failed_dates)
+    if _ccap is None and _cursor_cap_healed(cfg["id"], _rec):
+        _cursor_freeze_count(cfg["id"], bumped=False)
     return {
         "pulled": total_pulled,
         "saved": total_saved,
@@ -2940,6 +3049,7 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
         "start": start,
         "gap_dates": _rec["gap_dates"],
         "reconcile": _rec,
+        **({"cursor_cap": _ccap} if _ccap else {}),
     }
 
 
@@ -2975,10 +3085,15 @@ def _sync_via_kind_cb_daily(adapter, *, sync_id: str, start: str, end_date: str,
         where="symbol IN (SELECT vt_symbol FROM security_master WHERE category='convertible')",
         expected=_trade_dates_in_range(start, end_date), win_lo=start, win_hi=end_date,
         repull_fn=_pull_day)
+    # 批 171a·D1：出具 cursor_cap + 痊愈轮 DEL 冻结计数（handler 尾部侧）
+    _ccap = _cursor_cap(sync_id, _rec, [])
+    if _ccap is None and _cursor_cap_healed(sync_id, _rec):
+        _cursor_freeze_count(sync_id, bumped=False)
     return {"pulled": pulled, "saved": saved, "start": start,
             "failed_dates": [], "expected_days": _rec["expected"],
             "actual_days": _rec["expected"] - len(_rec["gap_dates"]),
-            "gap_dates": _rec["gap_dates"], "reconcile": _rec}
+            "gap_dates": _rec["gap_dates"], "reconcile": _rec,
+            **({"cursor_cap": _ccap} if _ccap else {})}
 
 
 def _sync_via_kind_index(adapter, *, start: str, end_date: str,
@@ -3263,11 +3378,17 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         _rec = _reconcile_dates(
             sync_id or cfg.get("id") or kind, table=table, date_expr=date_param,
             expected=_trade_days, win_lo=start_ts, win_hi=end_date, repull_fn=_pull_day)
+        # 批 171a·D1：出具 cursor_cap + 痊愈轮 DEL 冻结计数（handler 尾部侧）。
+        # rec 身份＝_reconcile_dates 返回 dict（expected 是 int 计数）；失败列表＝failed_dates 实名。
+        _ccap = _cursor_cap(sync_id or cfg.get("id") or kind, _rec, failed_dates)
+        if _ccap is None and _cursor_cap_healed(sync_id or cfg.get("id") or kind, _rec):
+            _cursor_freeze_count(sync_id or cfg.get("id") or kind, bumped=False)
         return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
                 "cursor_upto": end_date,
                 "failed_dates": failed_dates,
                 "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
-                "excluded": _fam_excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec}
+                "excluded": _fam_excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec,
+                **({"cursor_cap": _ccap} if _ccap else {})}
 
     return _handler
 
