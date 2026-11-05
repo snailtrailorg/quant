@@ -73,6 +73,9 @@
                    :disabled="!historySummaries.length" @click="histDialog = true" />
         </div>
       </template>
+      <!-- 批170（issue report 2）：降级时摘要必带不完整警示——历史快照里可能存着修复前生成的「态势平稳」文本，
+           生成侧已加固，展示侧再加一道，避免拿缺数据当好消息 -->
+      <div v-if="snap.ai_summary && degradedZones.length" class="ai-warn">⚠ {{ t('secpage.aiSummaryDegraded') }}</div>
       <div v-if="snap.ai_summary" class="ai-text">{{ snap.ai_summary }}</div>
       <div v-else class="sec-empty">{{ t('secpage.noSummary') }}</div>
     </el-card>
@@ -506,6 +509,7 @@ const onDeleteSummary = async (d) => {
 .dot.info { background: var(--brand-500); }
 .dot.neutral { background: var(--flat); }
 .stale-warn { color: var(--warn-fill); font-size: var(--fs-foot); }
+.ai-warn { color: var(--el-color-warning); font-size: var(--fs-label); margin-bottom: var(--sp-2); }
 .ai-text { white-space: pre-wrap; line-height: 1.7; font-size: var(--fs-body); }
 .hist-item { display: flex; gap: var(--sp-3); padding: var(--sp-1) 0; font-size: var(--fs-foot); }
 .hist-date { color: var(--text-secondary); flex: none; }
