@@ -101,6 +101,13 @@ class FakeValkey:
                     n += 1
         return n
 
+    def incr(self, key, amount: int = 1):
+        """批 171a·D1：cap 冻结计数用（INCR 语义——不存在从 0 起）。"""
+        cur = int(self._b.kv.get(key, 0))
+        cur += amount
+        self._b.kv[key] = str(cur)
+        return cur
+
     def expire(self, key, seconds: int):
         if key in self._b.kv or key in self._b.h:
             self._b.exp[key] = self._b.now() + float(seconds)

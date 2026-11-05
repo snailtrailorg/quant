@@ -400,17 +400,29 @@ def sync(sync_id: str, backfill_from: str | None = None,
             # 15-服务监控的 tier2 心跳只认 done/success）。未声明=通用口径。
             status = r.get("log_status") or ("partial" if failed_dates else "success")
             duration_ms = int((time.time() - t0) * 1000)
-            # 批 171a·D1（游标不越界）：在 _log 前**预算** cap 收口效果（r/cfg 均已就绪）——
-            # 留痕走 error 列（sync_log 无 note 列；成功路径恒空串 ⇒ 追加不覆没；批 158
-            # bar_retention_sweep 注记先例）。_cap=None（未声明族）⇒ 逐字现状、零 Valkey 触碰。
+            # 批 171a·D1（游标不越界）：**单一判定源**（步4 双盲审 A-P0-1/P1-2、B-P0-1/P1-1
+            # 修复）——raw（未收口原值）/_capped_v（收口后值）/effective（收口实际改值）在
+            # _log 前算一次，note 注记、终态词通则、freeze 计数三处消费同一结果，禁两套逻辑。
+            # _cap=None（未声明族/回补）⇒ raw=None ⇒ 全链恒等现状、零 Valkey 触碰。
+            # keyed 全失败（含 lsd=None 首日失败形态）走 fallback 分支＝不收口 ⇒ raw=None。
             _cap = r.get("cursor_cap")
-            _cap_note = ""
-            if _cap is not None and not backfill_from:
-                _v0 = (r["last_success_date"] if "last_success_date" in r and not failed_dates
-                       else (r.get("cursor_upto") or end_date) if "last_success_date" not in r
-                       else r["last_success_date"])
-                if _cap < _v0 and (_cap >= (cfg["last_sync_date"] or "")):
-                    _cap_note = f"cursor_capped:{_cap}"
+            _raw = _adv = None
+            _effective = False
+            if not backfill_from:
+                if "last_success_date" in r:
+                    if failed_dates and r["last_success_date"] is None:
+                        pass                    # 全失败 fallback：不收口（G-S1/H-S2 语义）
+                    else:
+                        _raw = (r["last_success_date"] if failed_dates else end_date)
+                else:
+                    _raw = r.get("cursor_upto") or end_date
+                if _raw is not None and _cap is not None:
+                    _adv = _cap if _cap < _raw else _raw
+                    _adv = max(_adv, cfg["last_sync_date"] or "")    # clamp 不倒退
+                    _effective = _adv != _raw                        # 规格语义：推进值≠原值
+                elif _raw is not None:
+                    _adv = _raw              # _cap=None：原推进值原样（逐字现状）
+            _cap_note = f"cursor_capped:{_cap}" if _effective else ""
             _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
                  status, _cap_note, failed_dates, expected_days, actual_days)
             # 批 108·步 3（设计 §5.3「封顶不得静默」）：`policy_discard`（主动不保留）/
@@ -443,13 +455,9 @@ def sync(sync_id: str, backfill_from: str | None = None,
             # 冻游标 → beat 每 30min 重试风暴。
             # 全失败仍刷 last_sync_ts（G-S3：调度器以旧 ts 算 next_run 会连发重试）。
             if not backfill_from:
-                # 批 171a·D1：cap 收口（min 且钳制不倒退）+ 终态词通则（收口实际改值且原词
-                # idle ⇒ partial）+ 逃逸闸计数（触键 ⇔ _cap 非 None：生效 INCR / 未生效 DEL）。
-                # _cap=None ⇒ _clamp 恒等 ⇒ 未声明族逐字零漂移（含全失败/异常路径不参与）。
-                def _clamp(v: str) -> str:
-                    if _cap and _cap < v:
-                        v = _cap
-                    return max(v, cfg["last_sync_date"] or "") if _cap else v
+                # 批 171a·D1：收口值/生效判定由上方**单一判定源**给出（_raw/_adv/_effective），
+                # 此处只组 _advance——禁再写第二套 min/clamp 逻辑（步4 双盲审 P1 判定分叉教训）。
+                # 终态词通则（规格 §2.A）：收口实际改值且原词 idle ⇒ partial；partial/failed 保持。
                 if "last_success_date" in r:
                     if failed_dates and r["last_success_date"] is None:
                         # 全失败：游标不动（旧值），标 failed——下轮增量自动重试整个窗口。
@@ -463,37 +471,31 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     elif failed_dates:
                         # 部分失败：推到**连续成功末日**（G-Q1a：最大成功日会永久跳过中间失败日；
                         # 后段已入库日下轮重拉由 upsert 幂等兜底）
-                        _advance = (_clamp(r["last_success_date"]), saved, "partial")
+                        _advance = (_adv if _effective else _raw, saved, "partial")
                     else:
-                        _advance = (_clamp(end_date), saved,
-                                    "partial" if _cap and _clamp(end_date) != end_date else "idle")
+                        _advance = (_adv if _effective else _raw, saved,
+                                    "partial" if _effective else "idle")
                 else:
                     # 批 92：无 last_success_date 键的 handler（tier1 按日族）改从返回体取
                     # 「游标上界」——它可能窄于 end_date（如 margin_detail 的 T+1 数据可用日
                     # ＝上一交易日）。缺省仍 end_date ⇒ 未声明者零行为变化。
-                    # 批 104：终态词**如实反映失败**。原实现恒给 'idle'，而这一处同时
-                    #   ①写进 `sync_config.last_status`、②被下方 `_alert_sync_failure` 取作
-                    #   告警标题 ⇒ 有失败时**两处一起失真**（prod 实证：`last_status='idle'`
-                    #   而 `sync_log.status='partial'`；告警标题成「数据同步 idle: okx_perp_daily」
-                    #   正文却是「失败 7 项」）。故修**源头**而非只改告警词——一处真源。
-                    #   ⚠ 游标推进语义**不变**（这两个族仍无条件推进：分钟线档若全市场失败
-                    #   就冻游标会引发 beat 重试风暴，见上方 :384-387 与 G-S1）。只改词。
+                    # 批 104：终态词**如实反映失败**（词失真=状态+告警标题双坏，一处真源）。
+                    #   ⚠ 游标推进语义**不变**（无键族无条件推进——G-S1 防重试风暴）。只改词。
                     _term = ("idle" if not failed_dates
                              else ("partial" if saved else "failed"))
-                    _v_nc = r.get("cursor_upto") or end_date          # 未收口原值（终态词判定）
-                    _advance = (_clamp(_v_nc), saved,
-                                "partial" if _cap and _clamp(_v_nc) != _v_nc else _term)
+                    _advance = (_adv if _effective else _raw, saved,
+                                "partial" if (_effective and _term == "idle") else _term)
             else:
                 _advance = None   # 回补不推进游标（现状）
             _mark_running(sync_id, False)   # G-S2：先清 running（置 idle），终态随后覆盖——
             #   若顺序颠倒，partial/failed 会被本行无条件覆盖回 idle（测试锁死此顺序）
             if _advance is not None:
                 _update_sync_state(sync_id, *_advance)
-            # 批 171a·D1 逃逸闸：触键 ⇔ _cap 非 None（增量轮）——生效 INCR+EXPIRE（==N 恰打点
-            # 一次）/ 未生效（含回补带 cap）DEL。_cap=None 轮零 Valkey 触碰（fail-soft 见
-            # _cursor_freeze_count）。全失败/异常路径 _advance 语义不收口 ⇒ 未生效 ⇒ DEL 清零。
-            if _cap is not None and not backfill_from:
-                _eff = _advance is not None and _cap_note != ""       # 收口实际改值
+            # 批 171a·D1 逃逸闸：触键 ⇔ _cap 非 None——增量轮按 _effective INCR/DEL；
+            # **回补带 cap 键 ⇒ DEL**（规格 §2.B：回补＝操作员主动介入，计数让位清零）。
+            # _cap=None 轮零 Valkey 触碰（fail-soft 见 _cursor_freeze_count）。
+            if _cap is not None:
+                _eff = _effective and not backfill_from
                 _cnt = _cursor_freeze_count(sync_id, bumped=_eff)
                 if _eff and _cnt == _CAP_FREEZE_ALERT_ROUNDS:
                     _alert_generic(

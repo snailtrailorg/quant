@@ -33,7 +33,13 @@ def _reset_rate_limit():
 
     批 73：熔断状态迁 Valkey——一并 patch rate_limit._r 为每测试独立 FakeValkey
     （不连真 Valkey：跨测试键残留污染 + CI 无 Valkey 可达）；需要拿 fake 的测试
-    （跨进程钉/TTL 自愈钉）请求本 fixture 得返回值。"""
+    （跨进程钉/TTL 自愈钉）请求本 fixture 得返回值。
+
+    批 171a·D1 备注（步4 B-P1-2 裁定）：engine cap 冻结计数直调 business_redis，
+    不在此全局 patch——card_ws dedup 闸/valkey 单源测试**刻意**用真 business_redis
+    语义（全局 FakeValkey 误伤 14 用例，实测回滚）。freeze helper 自身 fail-soft
+    （吞异常返 None）⇒ CI 无 Valkey 时测试仍绿；dev Valkey 可达时的 DEL 幂等无害
+    （键不存在返 0、不建键）。测试面隔离由 test_batch171a_cursor_cap.py 自带 mock 承担。"""
     from unittest.mock import patch
     from src.data_platform import rate_limit
     from tests.fake_valkey import FakeValkey
