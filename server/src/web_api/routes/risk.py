@@ -333,7 +333,8 @@ def data_integrity_api(freq: str = "1D",
                       payload: dict = Depends(require_perm("read"))):
     """数据完整性看板：每标的本地条数 vs 预期，算完整性%。
 
-    freq: 1D（按 trade_cal 交易日）/ 1min / 5min（按自然日 × bars_per_day）。
+    freq: 1D / 1min / 5min。预期根数按**市场**算（批170）：A 股/场内基金走 trade_cal 交易日
+    × 240/48 根；加密（BINANCE/OKX）24/7 × 1440/288 根——口径真源 data_platform.integrity。
     返回 {items:[{symbol, local_count, first, last, expected, pct, status}], summary}
     status: complete(>=99%) / partial(>0%) / missing(0)
     批27-26：全表聚合按 freq 分键 60s 缓存（_METRICS_CACHE 先例——viewer 可反复刷的 DB 压力点）。
@@ -346,7 +347,7 @@ def data_integrity_api(freq: str = "1D",
     if _hit and _t.time() - _hit[0] < 60:
         return _hit[1]
     table = "bar_1D" if freq == "1D" else f"bar_{freq}"
-    bars_per_day = {"1D": 1, "1min": 240, "5min": 48}[freq]
+    from src.data_platform.integrity import expected_bars   # 批170：按市场口径（加密 24/7）
     try:
         # 批 91：① 时区转换移出聚合——min/max 直接作用于索引列 ts（dev 1371 万行实测
         #          1.87s→1.00s）；② 只读全表聚合放宽 statement_timeout（prod 10s 过紧）。
@@ -355,11 +356,9 @@ def data_integrity_api(freq: str = "1D",
                 f"SELECT symbol, count(*), (min(ts) AT TIME ZONE 'Asia/Shanghai')::date, "
                 f"(max(ts) AT TIME ZONE 'Asia/Shanghai')::date FROM {table} GROUP BY symbol ORDER BY symbol")
             rows = cur.fetchall()
-            if freq == "1D":
-                cur = conn.execute("SELECT cal_date FROM trade_cal WHERE is_open=1")
-                day_set = {r[0] for r in cur.fetchall()}
-            else:
-                day_set = None
+            # 批170：取有序开市日（完整性口径按市场分别算预期——见 data_platform.integrity）
+            cur = conn.execute("SELECT cal_date FROM trade_cal WHERE is_open=1 ORDER BY cal_date")
+            day_set = [r[0] for r in cur.fetchall()]
     except Exception as e:
         # 批 91：不再静默吞错。此前该分支返回的体与「表真的空」**逐字相同** ⇒ 界面把
         # 「查询失败」谎报成「0 只标的 / 暂无数据」，前端错误条（loadFailed）永不亮。
@@ -375,13 +374,11 @@ def data_integrity_api(freq: str = "1D",
             items.append({"symbol": sym, "local_count": cnt, "first": None, "last": None,
                           "expected": 0, "pct": 0, "status": "missing"})
             continue
-        if freq == "1D":
-            # trade_cal 可能不全（只近年同步），fallback 工作日估算取大值
-            tc_count = sum(1 for d in day_set if first <= d <= last) if day_set else 0
-            workday_est = (last - first).days * 5 // 7  # 每周 5 工作日粗估
-            expected = max(tc_count, workday_est)
-        else:
-            expected = ((last - first).days + 1) * bars_per_day
+        # 批170 根因修：按市场算预期（旧口径 max(交易日, 自然日×5/7) 使 A 股天花板 ~93%，
+        # 且把加密 7×24 用 A 股日历当分母 → 实测 150%+；分钟线同理按 240 而非 1440）
+        expected = expected_bars(freq, sym, first, last, day_set,
+                                 day_set[0] if day_set else None,
+                                 day_set[-1] if day_set else None)
         pct = round(cnt / expected * 100, 1) if expected else 0
         status = "complete" if pct >= 99 else ("partial" if pct > 0 else "missing")
         if status == "complete":
