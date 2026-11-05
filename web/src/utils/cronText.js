@@ -56,14 +56,11 @@ export function modelToCron(m) {
 }
 
 // cron → 人读描述（解析不了的原样返回，绝不编造）
-// 周几名（批166：内建双语数组——原 locales wd1..7 键经模板串拼接，orphans 静态扫不出=守门盲区）
-const _WD = {
-  zh: ['一', '二', '三', '四', '五', '六', '日'],
-  en: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-}
-const _wdName = (d, t) => {
-  const lang = (t('cronText.weekPrefix') === '每周') ? 'zh' : 'en'   // weekPrefix 值探测语言（zh='每周'/en='Every '）
-  return (_WD[lang] || _WD.zh)[Number(d) - 1] || String(d)
+// 周几名（批170 修正：单键 cronText.wdShort 静态消费——原内建数组靠比较「每周」判语言，繁体「每週」会误判成英文；
+// 且数组在 DataManage 里复制了第二份。现唯一真相=locales，helper 导出共用）
+export const wdName = (d, t) => {
+  const arr = String(t('cronText.wdShort') || '').split(',')
+  return arr[Number(d) - 1] || String(d)
 }
 
 export function describeCron(expr, t) {
@@ -81,7 +78,7 @@ export function describeCron(expr, t) {
     const days = dowList(f.dow)
     if (!days.length) return t('cronText.dailyAt', { time })
     if (days.join(',') === '1,2,3,4,5') return t('cronText.workdaysAt', { time })
-    const label = t('cronText.weekPrefix') + days.map(d => _wdName(d, t)).join('/')
+    const label = t('cronText.weekPrefix') + days.map(d => wdName(d, t)).join('/')
     return t('cronText.weekdaysAt', { days: label, time })
   }
   if (/^\d+$/.test(f.dom) && /^\d+$/.test(f.mon) && f.dow === '*')

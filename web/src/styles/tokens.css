@@ -118,22 +118,25 @@
   --el-dialog-title-font-size: var(--fs-card);
   --el-tag-font-size: var(--fs-foot);
   /* 批168 EP 字号变量桥扩面——消费面实证（站内 grep）后挂，未消费组件（cascader/statistic/text/tour）不臆造 */
-  --el-alert-title-font-size: var(--fs-card);            /* alert 标题=标题级 */
-  --el-alert-description-font-size: var(--fs-label);     /* alert 描述=辅助 */
-  --el-badge-font-size: var(--fs-foot);                  /* 徽标=脚注级 */
-  --el-checkbox-font-size: var(--fs-body);               /* 复选标签=正文 */
-  --el-radio-font-size: var(--fs-body);                  /* 单选标签=正文 */
-  --el-collapse-header-font-size: var(--fs-card);        /* 折叠头=标题级 */
-  --el-collapse-content-font-size: var(--fs-body);
-  --el-dialog-content-font-size: var(--fs-body);         /* 弹窗正文=页面正文（批167 规则②） */
-  --el-messagebox-font-size: var(--fs-body);             /* 确认框标题/按钮 */
-  --el-messagebox-content-font-size: var(--fs-body);
-  --el-link-font-size: var(--fs-body);
-  --el-menu-item-font-size: var(--fs-label);             /* 侧栏菜单=D24 §133 既有裁定 fs-label */
-  --el-pagination-font-size: var(--fs-body);
-  --el-pagination-font-size-small: var(--fs-label);
-  --el-popover-font-size: var(--fs-body);
-  --el-popover-title-font-size: var(--fs-card);          /* popover 标题=标题级 */
+  /* 桥接铁律（批170 立法）：**只做同值映射**——把 EP 的绝对 px 换成等价令牌档（13↔fs-label、14↔fs-body、
+     12↔fs-foot、18↔fs-page），使组件随视口缩放；**不得顺手改变既有层级**（那属于新的设计决定，须实测+用户确认）。
+     逐条右侧注明「EP 默认 → 本值」以证同值。 */
+  --el-alert-title-font-size: var(--fs-body);            /* 14 → 13.99 */
+  --el-alert-description-font-size: var(--fs-body);      /* 14 → 13.99 */
+  --el-badge-font-size: var(--fs-foot);                  /* 12 → 12.18 */
+  --el-checkbox-font-size: var(--fs-body);               /* 14 → 13.99 */
+  --el-radio-font-size: var(--fs-body);                  /* base 14 → 13.99 */
+  --el-collapse-header-font-size: var(--fs-label);       /* 13 → 12.87 */
+  --el-collapse-content-font-size: var(--fs-label);      /* 13 → 12.87 */
+  --el-dialog-content-font-size: var(--fs-body);         /* 14 → 13.99 */
+  --el-messagebox-font-size: var(--fs-page);             /* large 18×1.07=19.3（沿用既有 large=fs-page 映射） */
+  --el-messagebox-content-font-size: var(--fs-body);     /* base 14 → 13.99 */
+  --el-link-font-size: var(--fs-body);                   /* base 14 → 13.99 */
+  --el-menu-item-font-size: var(--fs-body);              /* base 14 → 13.99（D24 §133 写 fs-label 与实况不符——另行裁定，不在桥接批擅改） */
+  --el-pagination-font-size: var(--fs-body);             /* 14 → 13.99 */
+  --el-pagination-font-size-small: var(--fs-foot);       /* 12 → 12.18 */
+  --el-popover-font-size: var(--fs-body);                /* base 14 → 13.99 */
+  --el-popover-title-font-size: var(--fs-card);          /* 16 → 16.09 */
 
   /* 涨跌语义直通 EP 危险/成功不可混用——success 用 --success（青绿），
      danger 保持 EP 语义红（操作反馈），与 --up（数据方向红）分离 */

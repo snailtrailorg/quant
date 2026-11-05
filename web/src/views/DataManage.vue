@@ -152,7 +152,7 @@
           <el-form-item :label="t('dataManage.repeatDays')">
             <el-select v-model="cronForm.days" multiple collapse-tags style="width: 100%"
                        :placeholder="t('cronText.everyDay')" @change="syncModelToCron">
-              <el-option v-for="d in 7" :key="d" :value="d" :label="wdName(d)" />
+              <el-option v-for="d in 7" :key="d" :value="d" :label="wdName(d, t)" />
             </el-select>
           </el-form-item>
         </template>
@@ -221,8 +221,7 @@ import IconBtn from '../components/IconBtn.vue'
 import RowFilter from '../components/RowFilter.vue'   // 批166：添加弹窗行筛选
 import { Refresh, Setting, Edit, Plus, Filter } from '@element-plus/icons-vue'
 import { fmtTime } from '../utils/fmtTime'
-import { cronToModel, modelToCron, describeCron } from '../utils/cronText'
-const wdName = d => { const zh = t('cronText.weekPrefix') === '每周'; const W = zh ? ['一','二','三','四','五','六','日'] : ['Mon','Tue','Wed','Thu','Fri','Sat','Sun']; return W[d - 1] || String(d) }   // 批166：周几名内建（locales 模板串拼接=守门盲区）
+import { cronToModel, modelToCron, describeCron, wdName } from '../utils/cronText'   // 批170：周名 helper 单一来源（原在此复制第二份数组）
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
