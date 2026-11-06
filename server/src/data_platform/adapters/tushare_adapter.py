@@ -565,6 +565,17 @@ def pull_stk_limit(trade_date: str, end_date: str | None = None) -> pd.DataFrame
     pro = get_pro()
     return pro.stk_limit(trade_date=trade_date)
 
+
+def pull_suspend_d(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
+    """每日停牌/复牌登记（全市场单日，批 171b——4 列，~15 行/日，timing 全 NULL=全天）。
+
+    suspend_type ∈ {S=停牌, R=复牌}：R 行当日**实有 bar**（dev 2026-10-14 实证）——
+    消费侧净化只认 S+full_day 行（integrity.suspended_on/suspend_days_bulk）。
+    空日（零停牌）返回 0 行但带全 4 列——工厂 df.empty 判空在 transform 之前短路。
+    """
+    pro = get_pro()
+    return pro.suspend_d(trade_date=trade_date)
+
 def pull_moneyflow(trade_date: str, end_date: str | None = None) -> pd.DataFrame:
     """个股资金流向（全市场单日，20 列大中小单）。"""
     pro = get_pro()

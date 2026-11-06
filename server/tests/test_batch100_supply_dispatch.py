@@ -41,7 +41,8 @@ class TestSupplyMap:
         from src.data_sync import engine
         engine_keys = {(k, s) for (k, s, _t, _p) in engine._TIER1_BATCH.values()}
         engine_keys |= {(k, s) for (k, s, _t, _p, _d) in engine._TIER1_FULL.values()}
-        assert len(engine_keys) == 10, f"工厂项应为 10（tier1 8 + full 2），实得 {len(engine_keys)}"
+        # 批 171b：tier1 9（+suspend_d_sync 停牌登记）+ full 2 = 11
+        assert len(engine_keys) == 11, f"工厂项应为 11（tier1 9 + full 2），实得 {len(engine_keys)}"
         engine_keys |= {(k, s) for (k, s, _t) in engine._LITERAL_SUPPLY.values()}
         # 批 137a：对账缺口重拉专用项显式豁免（不是工厂项，但必须登记才能存在）
         assert set(_SUPPLY_PULL) - _SUPPLY_PULL_NON_FACTORY == engine_keys

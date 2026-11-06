@@ -22,7 +22,7 @@ def test_registry_shapes():
 
 def test_capability_map_and_subset():
     from src.data_platform.capabilities import provider_capabilities, check_capability_subset
-    assert provider_capabilities("tushare") == {"hist_quote", "ref_data"}   # MAP 30 项全集（0094+0106）归一；adapter 声明 20 串保持不变
+    assert provider_capabilities("tushare") == {"hist_quote", "ref_data", "inst_event"}  # MAP 归一（0094+0106；批 171b +suspend_d_sync→inst_event）
     assert provider_capabilities("xtp") == {"trading", "rt_quote"}
     ok, msg = check_capability_subset("tushare", {"hist_quote", "trading"})
     assert not ok and "启用子集" in msg   # 越集拒

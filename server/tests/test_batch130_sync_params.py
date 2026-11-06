@@ -48,7 +48,7 @@ class TestMigrationSnapshot:
         with get_conn() as conn:
             n = conn.execute(
                 "SELECT count(*) FROM sync_kind_config WHERE overlap_days IS NULL").fetchone()[0]
-        assert n == 30, n
+        assert n == 31, n   # 批 171b：+suspend_d_sync（无 overlap/lag 声明行）
 
 
 class TestZeroDriftOracle:

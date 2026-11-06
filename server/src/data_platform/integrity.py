@@ -40,15 +40,80 @@ def bars_per_day(freq: str, symbol: str) -> int:
     return (CRYPTO_BARS_PER_DAY if is_crypto(symbol) else BARS_PER_DAY)[freq]
 
 
+# ── 批 171b：停牌日历净化口（suspend_calendar 唯一消费口——risk.py/tasks.py/engine 只调口不写 SQL）──
+
+
+def _suspend_rows(first: date, last: date) -> list[tuple[str, date]]:
+    """区间内全日停牌行 [(ts_code, trade_date)]（仅 suspend_type='S' AND full_day='True'——
+    R 复牌行当日实有 bar，永不参与净化；full_day 为 text 'True'/'False'，见迁移 0168）。
+    表不存在/查询失败返回 []（宁多报不漏报）。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            return [(r[0], r[1]) for r in conn.execute(
+                "SELECT ts_code, trade_date FROM suspend_calendar "
+                "WHERE trade_date >= %s AND trade_date <= %s "
+                "AND suspend_type = 'S' AND full_day = 'True'", (first, last))]
+    except Exception:
+        return []
+
+
+def _vt_to_ts(vt: str) -> str:
+    """vt→源码归一（.SHSE→.SH / .SZSE→.SZ / .BSE→.BJ）——to_vt_symbol 的逆。"""
+    for v, t in ((".SHSE", ".SH"), (".SZSE", ".SZ"), (".BSE", ".BJ")):
+        if vt.endswith(v):
+            return vt[: -len(v)] + t
+    return vt
+
+
+def suspended_on(day: date, vt_symbols: set[str]) -> set[str]:
+    """day 当日全日停牌 ∩ vt_symbols（返回 **vt 形态**子集——口内归一，防 ts/vt 错位静默失效）。"""
+    hit = {t for t, d in _suspend_rows(day, day)}
+    return {v for v in vt_symbols if _vt_to_ts(v) in hit}
+
+
+def suspend_days_bulk(first: date, last: date, vt_symbols: set[str]) -> dict[str, list[date]]:
+    """区间批量净化图：{**vt_symbol**: [窗内全日停牌日]}（同 S+full_day 口径；键 vt 形态——
+    与 risk.py 面板循环变量 sym 直接 get，零 N+1：scope 级一次取图内存扣减）。"""
+    rows = _suspend_rows(first, last)
+    ts_of = {_vt_to_ts(v): v for v in vt_symbols}
+    out: dict[str, list[date]] = {}
+    for ts, d in rows:
+        v = ts_of.get(ts)
+        if v is not None:
+            out.setdefault(v, []).append(d)
+    return out
+
+
+def delist_map_bulk(categories: tuple[str, ...] = ("stock", "listed_fund", "convertible")
+                    ) -> dict[str, date]:
+    """批 171b：SM 退市日批量口 {vt_symbol: delist_date}（risk.py 面板消费——查询下沉层 1，
+    路由零内联 SQL 铁律）；表不可达返 {}。"""
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            return {r[0]: r[1] for r in conn.execute(
+                "SELECT vt_symbol, delist_date FROM security_master "
+                "WHERE category = ANY(%s) AND delist_date IS NOT NULL", (list(categories),))}
+    except Exception:
+        return {}
+
+
 def expected_bars(freq: str, symbol: str, first: date, last: date,
                   open_days: list[date], cal_min: date | None = None,
-                  cal_max: date | None = None) -> int:
+                  cal_max: date | None = None,
+                  suspend_days: list[date] | None = None) -> int:
     """区间 [first, last] 内的预期根数（含两端）。
 
     open_days: **有序**的开市日列表（trade_cal is_open=1）。
     加密：自然日全算。
     交易日历市场：区间完全落在 trade_cal 覆盖内 → 精确计数；
     部分越界 → 覆盖段精确计数 + 缺口按覆盖段实测开市比率外推（不是拍脑袋 5/7）。
+
+    批 171b：`suspend_days`（该标的窗内**全日停牌日**列表，suspend_days_bulk 产物）——
+    停牌日不计期望（×bpd：1D 减 n、1min 减 n×240）。None=零漂移（调用方未接净化）。
+    加密无停牌概念：显式跳过（不消费该参）。外推分支（日历越界段）不减——停牌数据
+    新窗才有，老窗如实多报（宁多报不漏报）。
     """
     if last < first:
         return 0
@@ -68,13 +133,18 @@ def expected_bars(freq: str, symbol: str, first: date, last: date,
 
     days_total = (last - first).days + 1
     if first >= cmin and last <= cmax:
-        return covered * bpd   # 精确
-
-    # 越界：用覆盖段实测开市比率外推缺口
-    cov_lo = max(first, cmin)
-    cov_hi = min(last, cmax)
-    cov_days = max((cov_hi - cov_lo).days + 1, 0)
-    if cov_days <= 0:
-        return 0
-    ratio = covered / cov_days if cov_days else (5 / 7)
-    return max(int(round(covered + (days_total - cov_days) * ratio)), 1) * bpd
+        n = covered   # 精确
+    else:
+        # 越界：用覆盖段实测开市比率外推缺口
+        cov_lo = max(first, cmin)
+        cov_hi = min(last, cmax)
+        cov_days = max((cov_hi - cov_lo).days + 1, 0)
+        if cov_days <= 0:
+            return 0
+        ratio = covered / cov_days if cov_days else (5 / 7)
+        n = max(int(round(covered + (days_total - cov_days) * ratio)), 1)
+        return n * bpd   # 外推分支不减停牌（数据窗未覆盖，如实多报）
+    # 批 171b：全日停牌日不计期望（仅精确分支；crypto 已在上方早退不达此）
+    if suspend_days:
+        n -= sum(1 for d in suspend_days if first <= d <= last)
+    return max(n, 0) * bpd

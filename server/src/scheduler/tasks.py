@@ -613,10 +613,18 @@ def data_continuity_check(self):
         from src.data_platform.db import is_trading_day as _is_td
         _days = [week_ago + timedelta(days=i) for i in range((today - week_ago).days)]
         expected = sum(1 for d in _days if d.weekday() < 5 and _is_td(d))   # 不含今天
+        # 批 171b：停牌净化（DEF-10 活体受害点）——scope 级一次取图（零 N+1），per-symbol
+        # 期望减窗内停牌日数；副收益＝停牌股不再触发下方无效补采。
+        try:
+            from src.data_platform.integrity import suspend_days_bulk
+            _susp = suspend_days_bulk(week_ago, today, {r[0] for r in rows}) or {}
+        except Exception:
+            _susp = {}
         repaired_any = False   # F-55：循环内逐标的写触发会导致 N 次 rewarm，改为循环外只写一次
         for symbol, last_ts, cnt in rows:
-            if cnt < expected:
-                issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{expected})")
+            _exp_sym = expected - len(_susp.get(symbol) or [])
+            if cnt < _exp_sym:
+                issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{_exp_sym})")
                 try:
                     ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
                     from src.data_platform.adapters.base import TushareAdapter

@@ -137,6 +137,8 @@ class TushareDataSource(DataSource):
         # engine 侧（tier1 七键从 daily 0.5s 归位 per-API + 四裸调点首接限速）：
         "stk_limit": 0.3, "moneyflow": 0.3, "margin_detail": 0.3, "top_list": 0.3,
         "block_trade": 0.3, "cyq_perf": 0.3, "forecast": 0.3,
+        # 批 171b：停牌日历（工厂 rate_limit_context 键=表名）
+        "suspend_calendar": 0.3,
         "cb_basic": 0.3, "fund_basic": 0.3, "namechange": 0.3, "concept": 0.3,
     }
 

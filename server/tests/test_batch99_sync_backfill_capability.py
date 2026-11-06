@@ -33,9 +33,10 @@ BACKFILLABLE_EXPECTED = {
     # bar 族 6（_VIA_KIND_IDS）
     "astock_daily", "listed_fund_daily", "cb_daily", "index_daily",
     "astock_minute", "astock_minute_5min",
-    # tier1 批量 8（_TIER1_BATCH；批 117 +st_list_sync）
+    # tier1 批量 9（_TIER1_BATCH；批 117 +st_list_sync；批 171b +suspend_d_sync）
     "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
     "block_trade_sync", "cyq_perf_sync", "forecast_sync", "st_list_sync",
+    "suspend_d_sync",
     # 单表专项 12（astock_basic / trade_cal / 批 101 binance_perp_daily / 批 103b astock_daily_jq
     #   / 批 101b binance_perp_{hourly,1min,15min} / 批 102b okx_perp_daily
     #   / 批 116 okx_perp_{hourly,1min,15min}）
@@ -129,7 +130,8 @@ class TestBackfillCapabilityTruth:
             "astock_basic", "index_daily",
             "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
             "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min",
-            "st_list_sync"}   # 批 117 P0-2/0143：retention='2026-01-01' 地板（防全史首跑）
+            "st_list_sync",     # 批 117 P0-2/0143：retention='2026-01-01' 地板（防全史首跑）
+            "suspend_d_sync"}   # 批 171b：retention='2026-10-01' 地板（同型防首跑全史）
         assert rows["binance_perp_hourly"] < rows["binance_perp_1min"], \
             "hourly 的保留窗更长（7 天 vs 1 天）"
         assert str(rows["okx_perp_hourly"]) < str(rows["okx_perp_1min"]), \

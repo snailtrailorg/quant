@@ -368,17 +368,38 @@ def data_integrity_api(freq: str = "1D",
 
     items = []
     complete = partial = missing = 0
+    # 批 171b：停牌/退市净化——scope 级两次批量（零 N+1）：①停牌图 ②SM delist（下沉
+    # integrity.py，路由零内联 SQL 铁律）。键均 vt 形态（口内归一），与下方循环变量 sym
+    # 直接 get；crypto 由 expected_bars 内部跳过停牌参。
+    from datetime import date as _d
+    from src.data_platform.integrity import delist_map_bulk, is_crypto, suspend_days_bulk
+    _vt_syms = {r[0] for r in rows}
+    _non_crypto = {s for s in _vt_syms if not is_crypto(s)}
+    _susp = (suspend_days_bulk(min((r[1] for r in rows if r[1]), default=_d(2000, 1, 1)),
+                               _d.today(), _non_crypto)
+             if _non_crypto else {})
+    _delist = delist_map_bulk()
     for sym, cnt, first, last in rows:
         if not first or not last or cnt == 0:
             missing += 1
             items.append({"symbol": sym, "local_count": cnt, "first": None, "last": None,
                           "expected": 0, "pct": 0, "status": "missing"})
             continue
+        # 批 171b：退市截断（delist 后不算期望——防「已退市仍虚增分母」；delist 早于
+        # first 的极端态由 expected_bars 自身 last<first 归零兜底）
+        _dl = _delist.get(sym)
+        if _dl is not None and _dl < last:
+            last = _dl
+        if last < first:
+            items.append({"symbol": sym, "local_count": cnt, "first": first, "last": last,
+                          "expected": 0, "pct": 0, "status": "missing"})
+            continue
         # 批170 根因修：按市场算预期（旧口径 max(交易日, 自然日×5/7) 使 A 股天花板 ~93%，
         # 且把加密 7×24 用 A 股日历当分母 → 实测 150%+；分钟线同理按 240 而非 1440）
         expected = expected_bars(freq, sym, first, last, day_set,
                                  day_set[0] if day_set else None,
-                                 day_set[-1] if day_set else None)
+                                 day_set[-1] if day_set else None,
+                                 suspend_days=_susp.get(sym))
         pct = round(cnt / expected * 100, 1) if expected else 0
         status = "complete" if pct >= 99 else ("partial" if pct > 0 else "missing")
         if status == "complete":

@@ -64,7 +64,7 @@ class TestDispatchTables:
         + 批 116 OKX 盘中 bar 3（okx_perp_hourly/1min/15min）= 28
         （含 0118 收编的 static_symbols/convertible_terms；防工厂回填静默失效）。"""
         from src.data_sync.engine import _HANDLERS
-        assert len(_HANDLERS) == 28, sorted(_HANDLERS)
+        assert len(_HANDLERS) == 29, sorted(_HANDLERS)  # 批 171b：+suspend_d_sync
 
 
 @pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
@@ -99,7 +99,7 @@ class TestSyncConfigBijection:
 
         防的是"某条 cfg 行丢了而代码路由也一起丢"（双射仍成立但能力真空）这种同向漂移。
         """
-        assert len(_cfgs()) == 34
+        assert len(_cfgs()) == 35  # 批 171b：+suspend_d_sync
 
     def test_via_kind_ids_all_have_kind_rows(self):
         """每个 bar 族 sync_id 必须有 sync_kind_config 归置行——

@@ -1605,8 +1605,9 @@ _SNAPSHOT_STALE_DAYS = 7
 
 # 批 171a·D1（游标不越界）：per-date 稠密白名单——只有「每日发布」的族才允许出具 cursor_cap。
 # 排除（装配可达但稀疏/事件驱动，空日是数据本性不是缺口）：forecast_sync（ann_date 驱动）、
-# top_list_sync / block_trade_sync（事件驱动非每日保证）——prod last-100 sync_log 实证
-# （2026-11-05）。守门：server/tests/test_batch171a_cursor_cap.py 断言白名单与
+# top_list_sync / block_trade_sync（事件驱动非每日保证）、suspend_d_sync（批 171b：停牌登记
+# 事件表，零停牌日=正常态）——prod last-100 sync_log 实证（2026-11-05）。守门：
+# server/tests/test_batch171a_cursor_cap.py 断言白名单与
 # set(_TIER1_BATCH) ∪ {astock_daily, listed_fund_daily, cb_daily, astock_daily_jq} 的关系。
 _CAP_EMIT_IDS: frozenset[str] = frozenset({
     "astock_daily", "listed_fund_daily", "cb_daily", "astock_daily_jq",
@@ -2633,6 +2634,32 @@ def _reconcile_symbols() -> dict:
                 # （都是 scope 级可见性）⇒ 同制响亮告警。
                 _alert_local_unreadable(sync_id, table)
             prev_map = _sync_gap_scope_rows(sync_id, symbols)
+            # 批 171b：停牌净化+退市截断——scope 级两次批量（零 N+1，键 vt 形态口内归一）。
+            # 仅 A 股类 scope 有意义（crypto 无停牌/退市概念——suspend_days_bulk 表空返 {}、
+            # delist 全 NULL 天然 no-op；当前 per-symbol scope 全 crypto ⇒ 属未来预置，诚实声明）。
+            # 停牌批量窗＝end_d 回看 400 自然日（覆盖 per-symbol floor 的最大可能——过度取行
+            # 无害：内存过滤按各 symbol 的 [floor,end] 窗算；suspend 表 ≤30 行/日量级可控）。
+            try:
+                from src.data_platform.integrity import suspend_days_bulk as _sdb
+                _susp_map = (_sdb(end_d - timedelta(days=400), end_d, set(symbols))
+                             if tzname != "UTC" else {})
+            except Exception:
+                _susp_map = {}
+            _delist_map: dict[str, object] = {}
+            if tzname != "UTC":
+                try:
+                    with get_conn() as _c:
+                        _delist_map = {r[0]: r[1] for r in _c.execute(
+                            "SELECT vt_symbol, delist_date FROM security_master "
+                            "WHERE category=%s AND exchange=%s AND delist_date IS NOT NULL",
+                            (category, venue or "")).fetchall()} if venue else {}
+                        if not venue:
+                            _delist_map = {r[0]: r[1] for r in _c.execute(
+                                "SELECT vt_symbol, delist_date FROM security_master "
+                                "WHERE category=%s AND delist_date IS NOT NULL",
+                                (category,)).fetchall()}
+                except Exception:
+                    _delist_map = {}
 
             win_map: dict[str, tuple[str, str]] = {}
             uncertain_map: dict[str, str] = {}
@@ -2663,6 +2690,19 @@ def _reconcile_symbols() -> dict:
                     if expected is None:
                         uncertain_map[vt_symbol] = "calendar_uncovered"
                         continue
+                # 批 171b①：退市截断——delist 后不算期望（窗上界收口，per-symbol 咬合面）。
+                _dl = _delist_map.get(vt_symbol)
+                if _dl is not None and _dl < end_d:
+                    _end_s = _dl.strftime("%Y%m%d")
+                    if _dl <= floor:
+                        gaps_map[vt_symbol] = None   # 上市即退/窗前已退 ⇒ 无作业、非缺口
+                        continue
+                    expected = [d for d in expected if d <= _end_s]
+                    win_map[vt_symbol] = (lo_s, _end_s)
+                # 批 171b②：停牌净化——全日停牌日不进缺口差集（紧凑串/DATE 口内已归一）。
+                _sset = {d.strftime("%Y%m%d") for d in (_susp_map.get(vt_symbol) or [])}
+                if _sset:
+                    expected = [d for d in expected if d not in _sset]
                 exp_map[vt_symbol] = expected
                 local = local_map.get(vt_symbol, set())
                 gaps_map[vt_symbol] = _to_segments([d for d in expected if d not in local], expected)
@@ -3221,8 +3261,18 @@ _TIER1_LAG_TRADING_DAYS: dict[str, int] = {"margin_detail_sync": 1}
 def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: list[str],
                         float_cols: list[str] | None = None, text_cols: list[str] | None = None,
                         lag_trade_days: int = 0, date_param: str = "trade_date",
-                        sync_id: str | None = None, cols_from_sync_kind: bool = False):
+                        sync_id: str | None = None, cols_from_sync_kind: bool = False,
+                        transform: Callable[[object], object] | None = None,
+                        reconcile: bool = True):
     """工厂：生成第一档按日批量同步 handler（批 100：拉取改走 `adapter.fetch_supply(kind, sub_kind)`）。
+
+    批 171b 两新参（默认零漂移，经 `_TIER1_BATCH_EXTRA` kwargs 边车注入——元组仍四元组）：
+        transform: 源 DataFrame→落库形状适配（布尔派生/列选取），调用点在 `_pull_day` 的
+            `df.empty` 判空**之后**（空帧先短路）；泛化边界＝仅形状适配，禁业务逻辑。
+        reconcile: False＝**跳过整个尾部块**（`_reconcile_dates` + `_cursor_cap` 出具 +
+            healed-DEL + 返回体三键 reconcile/gap_dates/cursor_cap 全无）——稀疏事件表
+            （suspend_d）零行日＝正常态，日期级差集会产 symbol='' 假 open；白名单门另挡
+            Valkey 触碰（双保险）。
 
     Args:
         kind / sub_kind: 归置键（真源 `sync_kind_config`；批 100 前本工厂硬编码 `importlib` 直连
@@ -3339,6 +3389,9 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
                 df = adapter.fetch_supply(kind, sub_kind, **{date_param: td})
             if df is None or df.empty:
                 return 0
+            if transform is not None:
+                # 批 171b：形状适配（布尔派生/列选取）——空判之后（transform 只见非空全列帧）
+                df = transform(df)
             with _gc() as conn:
                 with conn.cursor() as cur:
                     # DB 优化（2026-08-21 盘点）：逐行 execute（单日全市场 ~5000 次往返）
@@ -3374,6 +3427,15 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
             if progress_cb:
                 progress_cb(len(date_range), len(date_range), td)
 
+        if not reconcile:
+            # 批 171b：稀疏事件表（suspend_d）跳过整个尾部块——零行日=正常态，日期级差集
+            # 会产 symbol='' 假 open；无 reconcile/gap_dates/cursor_cap 三键 ⇒ sync() 的
+            # D1 收口/告警零交互（白名单门另挡 Valkey——双保险）。
+            return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
+                    "cursor_upto": end_date,
+                    "failed_dates": failed_dates,
+                    "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
+                    "excluded": _fam_excl}
         # 批 109（**§7.1 明写「TIER1 族当前 handler 自算窗口，收编时须一并纳入」**）：
         # 日期级差集。期望集与拉取循环**同一列表** `_trade_days`（覆盖感知）；`None` ⇒ uncertain。
         # 本地存在性比 `date_param` 对应的列（forecast 是 `ann_date`——拉取参数即落库列）。
@@ -3528,13 +3590,26 @@ _TIER1_BATCH = {
     "forecast_sync":      ("financial_stmt", "forecast",      "forecast",      ["ts_code","ann_date","end_date"]),
     # 批 117：ST 官方名单（按日全市场快照，范式照抄 stk_limit；ST 判定真源切此表）
     "st_list_sync":       ("featured_daily", "st_list",       "st_list",       ["trade_date","ts_code"]),
+    # 批 171b：停牌日历（suspend=DataKind 既有词；稀疏事件表 ⇒ reconcile=False 经 EXTRA 边车）
+    "suspend_d_sync":     ("suspend",         None,            "suspend_calendar", ["ts_code","trade_date"]),
+}
+# 批 171b：kwargs 边车（元组仍四元组——test_batch100/test_batch107 的 4 元组解包不破；
+# 既有 8 键 get 返空 dict ⇒ 逐字零漂移）。transform＝suspend_timing→full_day 布尔派生+
+# 列选取；reconcile=False＝跳过尾部对账块。
+_TIER1_BATCH_EXTRA: dict[str, dict] = {
+    "suspend_d_sync": {
+        "transform": lambda df: df.assign(full_day=df["suspend_timing"].isna())[
+            ["ts_code", "trade_date", "suspend_type", "full_day"]],
+        "reconcile": False,
+    },
 }
 for _sid, (_kind, _sub, _tbl, _pk) in _TIER1_BATCH.items():
     _HANDLERS[_sid] = _make_tier1_handler(
         _kind, _sub, _tbl, _pk,
         lag_trade_days=_TIER1_LAG_TRADING_DAYS.get(_sid, 0),
         date_param="ann_date" if _sid == "forecast_sync" else "trade_date",
-        sync_id=_sid, cols_from_sync_kind=True)
+        sync_id=_sid, cols_from_sync_kind=True,
+        **_TIER1_BATCH_EXTRA.get(_sid, {}))
 
 # 全量重建的（2 个）。元组＝(kind, sub_kind, 目标表, 主键, date_param)；date_param=None＝源无窗口（快照）
 _TIER1_FULL = {

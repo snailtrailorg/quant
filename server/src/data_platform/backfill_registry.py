@@ -18,6 +18,8 @@ BACKFILLABLE_IDS: frozenset[str] = frozenset({
     # tier1 批量 8（engine._TIER1_BATCH）
     "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "top_list_sync",
     "block_trade_sync", "cyq_perf_sync", "forecast_sync", "st_list_sync",
+    # 批 171b：停牌日历（tier1 第 9 键——工厂 handler 真读 backfill_from）
+    "suspend_d_sync",
     # 单表专项 12
     "astock_basic", "trade_cal", "binance_perp_daily", "astock_daily_jq",
     "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",

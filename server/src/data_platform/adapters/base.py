@@ -269,6 +269,7 @@ class TushareAdapter(BaseDataAdapter):
         "concept_sync", "trade_cal",
         "convertible_terms", "static_symbols", "pool_data", "pool_data_full_calibrate",
         "st_list_sync",   # 批 117：ST 官方名单（featured_daily 族）
+        "suspend_d_sync",  # 批 171b：停牌日历（suspend 族——事件稀疏，对账豁免）
     }
 
     # 批 99：契约层能力声明（contract.CapabilityDecl）——**真声明**，激活 `register_adapter`
@@ -299,6 +300,8 @@ class TushareAdapter(BaseDataAdapter):
         CapabilityDecl("financial_stmt", "historical", ASTOCK_ALL,
                        sub_kinds=frozenset({"forecast", "income", "balancesheet",
                                             "cashflow", "fina_indicator"})),
+        # 批 171b：停牌日历（suspend=DataKind 既有词 contract.py:35；非聚合域无 sub_kinds）
+        CapabilityDecl("suspend", "historical", ASTOCK_ALL),
         CapabilityDecl("holder_structure", "historical", ASTOCK_ALL,
                        sub_kinds=frozenset({"top10_holders", "dividend", "pledge_stat",
                                             "share_float", "stk_holdernumber"})),
@@ -583,6 +586,8 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("featured_daily", "cyq_perf"): "pull_cyq_perf",
     # 批 117：ST 官方名单快照（同族「按日全市场快照」——步 0 实测 pro.stock_st 全量 201 行）
     ("featured_daily", "st_list"): "pull_stock_st",
+    # 批 171b：停牌登记（suspend=DataKind 既有词；稀疏事件表——engine 侧 reconcile=False）
+    ("suspend", None): "pull_suspend_d",
     ("financial_stmt", "forecast"): "pull_forecast",
     ("static_list", "namechange"): "pull_namechange",
     ("industry_class", "concept"): "pull_concept",

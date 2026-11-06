@@ -115,6 +115,8 @@ SYNC_ID_CAP_MAP: dict[str, str] = {
     "pool_data": "ref_data", "pool_data_full_calibrate": "ref_data",
     # 批 117：ST 官方名单快照（featured_daily 族，参考数据类）
     "st_list_sync": "ref_data",
+    # 批 171b：停牌日历（suspend 族——KIND_CAP_CLASS["suspend"]="inst_event"）
+    "suspend_d_sync": "inst_event",
 }
 NON_DATA_PROVIDERS = {"tencent": {"rt_quote"}, "xtp": {"trading", "rt_quote"},
                       "binance_perp": {"trading", "rt_quote"}, "okx_perp": {"trading", "rt_quote"},

@@ -392,9 +392,11 @@ class TestWhitelistDrift:
     def test_d1_whitelist_vs_reachable(self):
         reachable = set(engine._TIER1_BATCH) | {"astock_daily", "listed_fund_daily",
                                                 "cb_daily", "astock_daily_jq"}
-        excluded = {"forecast_sync", "top_list_sync", "block_trade_sync"}
+        # 批 171b：excluded 扩 4 族——+suspend_d_sync（suspend 停牌登记＝事件驱动稀疏，
+        # 与 forecast/top_list/block_trade 同判别：空日是数据本性不是缺口，cap 会致倒漂）
+        excluded = {"forecast_sync", "top_list_sync", "block_trade_sync", "suspend_d_sync"}
         assert engine._CAP_EMIT_IDS <= reachable, "白名单 ⊆ 装配可达族"
-        assert reachable - engine._CAP_EMIT_IDS == excluded, "可达 − 白名单 ＝ 显式排除 3 族"
+        assert reachable - engine._CAP_EMIT_IDS == excluded, "可达 − 白名单 ＝ 显式排除 4 族"
 
     def test_d2_dense_members_present(self):
         for sid in ("astock_daily", "astock_daily_jq", "stk_limit_sync", "cyq_perf_sync"):
