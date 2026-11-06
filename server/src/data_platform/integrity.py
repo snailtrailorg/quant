@@ -46,7 +46,8 @@ def bars_per_day(freq: str, symbol: str) -> int:
 def _suspend_rows(first: date, last: date) -> list[tuple[str, date]]:
     """区间内全日停牌行 [(ts_code, trade_date)]（仅 suspend_type='S' AND full_day='True'——
     R 复牌行当日实有 bar，永不参与净化；full_day 为 text 'True'/'False'，见迁移 0168）。
-    表不存在/查询失败返回 []（宁多报不漏报）。"""
+    表不存在/查询失败返回 []（宁多报不漏报）——**告警留痕**（步4 B-P1-1：裸吞曾把接线
+    int 入参错吞成静默全灭，3042 全绿下不可见）。"""
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
@@ -54,7 +55,10 @@ def _suspend_rows(first: date, last: date) -> list[tuple[str, date]]:
                 "SELECT ts_code, trade_date FROM suspend_calendar "
                 "WHERE trade_date >= %s AND trade_date <= %s "
                 "AND suspend_type = 'S' AND full_day = 'True'", (first, last))]
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "suspend_calendar 读取失败（fail-open 宁多报）: %s", e)
         return []
 
 
@@ -83,14 +87,17 @@ def suspend_days_bulk(first: date, last: date, vt_symbols: set[str]) -> dict[str
 def delist_map_bulk(categories: tuple[str, ...] = ("stock", "listed_fund", "convertible")
                     ) -> dict[str, date]:
     """批 171b：SM 退市日批量口 {vt_symbol: delist_date}（risk.py 面板消费——查询下沉层 1，
-    路由零内联 SQL 铁律）；表不可达返 {}。"""
+    路由零内联 SQL 铁律）；表不可达返 {}（告警留痕，同 _suspend_rows fail-open 纪律）。"""
     try:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             return {r[0]: r[1] for r in conn.execute(
                 "SELECT vt_symbol, delist_date FROM security_master "
                 "WHERE category = ANY(%s) AND delist_date IS NOT NULL", (list(categories),))}
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            "security_master delist 批量读取失败（fail-open）: %s", e)
         return {}
 
 

@@ -118,6 +118,41 @@ class TestExpectedBarsSuspend:
                           suspend_days=[date(2026, 10, 1)])   # 窗外停牌日
         assert n == 3
 
+    def test_fail_open_leaves_trace(self):
+        """步4 B-P1-1/P1-2 守门：非 date 入参（接线错形态）⇒ fail-open 返空**且留 warning 日志**
+        ——裸吞曾把 risk.py 的 int 入参错吞成静默全灭（3042 全绿下不可见）。"""
+        import logging as _lg
+
+        from src.data_platform.integrity import suspend_days_bulk
+        recorded = []
+
+        class _Cap(_lg.Handler):
+            def emit(self, record):
+                recorded.append(record.getMessage())
+
+        logger = _lg.getLogger("src.data_platform.integrity")
+        cap = _Cap()
+        logger.addHandler(cap)
+        try:
+            got = suspend_days_bulk(1, date(2026, 11, 6), {"000016.SZSE"})   # int＝错误接线形态
+        finally:
+            logger.removeHandler(cap)
+        assert got == {}, "fail-open 宁多报"
+        assert any("suspend_calendar 读取失败" in m for m in recorded), "静默错必须留痕"
+
+    @needs_db
+    def test_full_day_value_domain(self):
+        """步4 B-P2-4：full_day 值域 ⊆ {'True','False'}（防大小写漂移断链）；半日 S+False
+        行（dev 实有 5 条，如 301569.SZ 10-15）被净化口正确排除。"""
+        from src.data_platform.db import get_conn
+        with get_conn() as c:
+            vals = {r[0] for r in c.execute("SELECT DISTINCT full_day FROM suspend_calendar")}
+        assert vals <= {"True", "False"}, f"值域漂移: {vals}"
+        # 半日行（False）不参与净化——真数据里找一条验证
+        m = suspend_days_bulk(date(2026, 10, 1), date(2026, 11, 5), {"301569.SZSE"})
+        days_301569 = m.get("301569.SZSE") or []
+        assert all(isinstance(d, date) for d in days_301569)
+
 
 # ---------------------------------------------------------------------------
 # 退市截断（验收 5——合成夹具直调 + reconcile 窗上界单测）

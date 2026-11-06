@@ -375,7 +375,9 @@ def data_integrity_api(freq: str = "1D",
     from src.data_platform.integrity import delist_map_bulk, is_crypto, suspend_days_bulk
     _vt_syms = {r[0] for r in rows}
     _non_crypto = {s for s in _vt_syms if not is_crypto(s)}
-    _susp = (suspend_days_bulk(min((r[1] for r in rows if r[1]), default=_d(2000, 1, 1)),
+    # 停牌批量窗下界＝面板行的最早 first（r[2]——列序 symbol/count/first/last；步4 B-P0-1：
+    # 误用 r[1](count) 会 int 入参被 fail-open 吞成静默全灭）
+    _susp = (suspend_days_bulk(min((r[2] for r in rows if r[2]), default=_d(2000, 1, 1)),
                                _d.today(), _non_crypto)
              if _non_crypto else {})
     _delist = delist_map_bulk()
@@ -385,18 +387,18 @@ def data_integrity_api(freq: str = "1D",
             items.append({"symbol": sym, "local_count": cnt, "first": None, "last": None,
                           "expected": 0, "pct": 0, "status": "missing"})
             continue
-        # 批 171b：退市截断（delist 后不算期望——防「已退市仍虚增分母」；delist 早于
-        # first 的极端态由 expected_bars 自身 last<first 归零兜底）
+        # 批 171b：退市截断（delist 后不算期望——防「已退市仍虚增分母」）——截断只作用于
+        # 期望计算的**局部量** `_last_eff`；items 的 last 字段保持原始末根日（前端
+        # DataIntegrity.vue 直接展示 last，语义=末根而非退市日——步4 B-P2-1）。
         _dl = _delist.get(sym)
-        if _dl is not None and _dl < last:
-            last = _dl
-        if last < first:
+        _last_eff = min(last, _dl) if (_dl is not None and _dl < last) else last
+        if _last_eff < first:
             items.append({"symbol": sym, "local_count": cnt, "first": first, "last": last,
                           "expected": 0, "pct": 0, "status": "missing"})
             continue
         # 批170 根因修：按市场算预期（旧口径 max(交易日, 自然日×5/7) 使 A 股天花板 ~93%，
         # 且把加密 7×24 用 A 股日历当分母 → 实测 150%+；分钟线同理按 240 而非 1440）
-        expected = expected_bars(freq, sym, first, last, day_set,
+        expected = expected_bars(freq, sym, first, _last_eff, day_set,
                                  day_set[0] if day_set else None,
                                  day_set[-1] if day_set else None,
                                  suspend_days=_susp.get(sym))
