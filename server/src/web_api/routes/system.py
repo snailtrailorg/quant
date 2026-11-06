@@ -28,6 +28,7 @@ SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
     "alert_swap_warn": (0, 1, True, True),
     "alert_cpu_warn": (0, 1, True, True), "alert_cpu_crit": (0, 1, True, True),   # 批78 CPU 卡阈值（缺省 0.7/0.9 随迁移 0112 seed）
     "log_retention_days": (0, 36500, False, False), "audit_retention_days": (0, 36500, False, False),   # 0=不清理（批28-7 语义）
+    "sync_max_span_days": (1, None, False, False),   # 批 171d-A：单轮跨度下界 1（0/负=语义错误）；上界不钳（2026-11-06 裁定：用户旋钮无门禁）
     "celery_concurrency": (1, 16, False, False),
     "collect_period_disk": (30, 86400, False, False),
     "collect_period_mem": (10, 86400, False, False), "collect_period_swap": (10, 86400, False, False),

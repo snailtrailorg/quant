@@ -250,12 +250,19 @@ def trigger_progress_api(sid: str, task_id: str | None = None,
         res = celery_app.AsyncResult(task_id)
         if res.state == "SUCCESS":
             d = res.result or {}
+            # 批 171d-A：截断反馈透传跳③（AsyncResult 兜底——hash 过期窗口 FE 走此分支）。
+            _extra = {}
+            if d.get("next_from"):
+                _extra["next_from"] = d["next_from"]
+            if d.get("clamped"):
+                _extra["clamped"] = d["clamped"]
             return {"status": d.get("status", "success"),
                     "rows_pulled": d.get("rows_pulled", 0),
                     "rows_saved": d.get("rows_saved", 0),
                     "expected_days": d.get("expected_days") or 0,
                     "actual_days": d.get("actual_days") or 0,
-                    "failed_dates_count": len(d.get("failed_dates") or [])}
+                    "failed_dates_count": len(d.get("failed_dates") or []),
+                    **_extra}
         if res.state in ("PENDING", "STARTED", "RETRY"):
             return {"status": "running"}
         if res.state == "FAILURE":

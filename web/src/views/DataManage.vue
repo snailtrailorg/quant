@@ -417,6 +417,25 @@ const notifyResult = (row, p, prefix) => {
   let msg = t('dataManage.syncResultMsg', { name: prefix, pulled: p.rows_pulled || 0, saved: p.rows_saved || 0 })
   if (p.expected_days) msg += t('dataManage.tradeDayPart', { actual: p.actual_days, expected: p.expected_days })
   if (p.failed_dates_count) msg += t('dataManage.gapPart', { n: p.failed_dates_count })
+  // 批 171d-A：截断反馈——clamped 提示 + 续跑入口（容错：坏 JSON/缺键静默不示）。
+  try {
+    const cl = typeof p.clamped === 'string' ? JSON.parse(p.clamped) : p.clamped
+    if (cl && cl.span && p.next_from) {
+      msg += t('dataManage.clampedSpan', { next: p.next_from })
+      ElMessageBox.confirm(msg, t('dataManage.clampedTitle'), {
+        confirmButtonText: t('dataManage.clampedResume', { next: p.next_from }),
+        cancelButtonText: t('common.cancel'), type: 'info',
+      }).then(async () => {
+        setRowStatus(row.id, 'running')
+        try {
+          const r = await api.post(`/sync/trigger/${row.id}`, null, { params: { backfill_from: p.next_from } })
+          if (r.status === 'submitted') startPoll(row, t('dataManage.backfillTaskName', { name: row.name, value: p.next_from }), r.task_id)
+          else { notifyResult(row, r, t('dataManage.backfillTaskName', { name: row.name, value: p.next_from })); setRowStatus(row.id, 'idle') }
+        } catch { ElMessage.error(t('dataManage.submitFailed')); setRowStatus(row.id, 'idle') }
+      }).catch(() => {})
+      return
+    }
+  } catch { /* clamped 坏 JSON：静默不示（171 fail-open 留痕在后端日志） */ }
   ElMessage[p.failed_dates_count ? 'warning' : 'success'](msg)
 }
 

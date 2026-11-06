@@ -231,7 +231,7 @@ def _mark_running(sync_id: str, running: bool):
 
 def _get_config(sync_id: str) -> dict:
     with get_conn() as conn:
-        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider, retention, retention_days FROM sync_config WHERE id=%s", (sync_id,))
+        cur = conn.execute("SELECT id, name, tushare_api, pg_table, sync_mode, schedule, enabled, last_sync_date, last_sync_ts, last_status, provider, retention, retention_days, max_span_days FROM sync_config WHERE id=%s", (sync_id,))
         row = cur.fetchone()
         if not row:
             return {}
@@ -245,7 +245,32 @@ def _get_config(sync_id: str) -> dict:
                 # 批 129：data_type 列已随 0158 contract DROP（批 127 Z4 起零消费）。
                 "retention": row[11],
                 # 批 158：滚动保留窗（天）——NULL=否决票（共写档任一 NULL ⇒ 该表整体不裁）。
-                "retention_days": row[12]}
+                "retention_days": row[12],
+                # 批 171d-A：单轮最大跨度（任务列 → 全局键 → 366 三级回落；坏值=366+warning——
+                # 0 是手滑不是「无限制」）。挂 cfg 每轮一次，禁 handler 体内直查 system_config。
+                "_max_span_days": _span_of(row[13] if len(row) > 13 else None)}
+
+
+def _span_of(task_val) -> int | None:
+    """跨度三级回落：任务列（正整数）→ system_config.sync_max_span_days（正整数）→ 366。
+    坏值/0/负数 ⇒ 回落 366 + logger.warning（171 留痕纪律）。None ⇒ 366（键行迁移后恒有，
+    但 staging/prod 窗口期/手删行时兜底）。"""
+    for v, src in ((task_val, "task"),):
+        if isinstance(v, int) and v >= 1:
+            return v
+        if v is not None:
+            logger.warning("max_span_days 任务级值非法（%r）⇒ 回落全局", v)
+    try:
+        with get_conn() as conn:
+            r = conn.execute(
+                "SELECT value FROM system_config WHERE key='sync_max_span_days'").fetchone()
+        if r and str(r[0]).isdigit() and int(r[0]) >= 1:
+            return int(r[0])
+        if r:
+            logger.warning("sync_max_span_days 全局值非法（%r）⇒ 回落 366", r[0])
+    except Exception as e:
+        logger.warning("sync_max_span_days 读取失败 ⇒ 回落 366: %s", e)
+    return 366
 
 
 def _update_sync_state(sync_id: str, last_date: str | None, count: int, status: str = "idle"):
@@ -423,8 +448,14 @@ def sync(sync_id: str, backfill_from: str | None = None,
                 elif _raw is not None:
                     _adv = _raw              # _cap=None：原推进值原样（逐字现状）
             _cap_note = f"cursor_capped:{_cap}" if _effective else ""
+            # 批 171d-A：截断短语入 note（_cap_note 同点拼装——判定单源，note 只组一次）。
+            _clamp_note = ""
+            if r.get("clamped"):
+                _clamp_note = f" clamped=span@{r['clamped'].get('span') and end_date}"
+                if r.get("next_from"):
+                    _clamp_note += f" next={r['next_from']}"
             _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
-                 status, _cap_note, failed_dates, expected_days, actual_days)
+                 status, _cap_note + _clamp_note, failed_dates, expected_days, actual_days)
             # 批 108·步 3（设计 §5.3「封顶不得静默」）：`policy_discard`（主动不保留）/
             # `unreachable`（源不可达）**不是缺口** ⇒ 只记日志、不进 failed_dates（不误告警）。
             # 批 109：由「只记日志」升级为**落表终态**（幂等，读-改-写；`sync_gap` 的终态出口）。
@@ -509,10 +540,15 @@ def sync(sync_id: str, backfill_from: str | None = None,
                 # 批 104：`_advance[2]` 不再对「无 last_success_date 族」恒给 'idle'
                 #   （上方 :406 起如实给 idle/partial/failed）⇒ 告警标题与正文不再自相矛盾。
                 _alert_sync_failure(sync_id, _advance[2] if _advance else status, failed_dates)
+            # 批 171d-A：透传跳①（三跳白名单之首）——clamped/next_from 从 handler 进返回体。
+            _pass = {}
+            for _k in ("clamped", "next_from"):
+                if r.get(_k) is not None:
+                    _pass[_k] = r[_k]
             return {"status": status, "rows_pulled": pulled, "rows_saved": saved,
                     "duration_ms": duration_ms, "failed_dates": failed_dates,
                     "expected_days": expected_days, "actual_days": actual_days,
-                    "backfill": bool(backfill_from)}
+                    "backfill": bool(backfill_from), **_pass}
 
         except Exception as e:
             # P1-B 修复（2026-10-03 数据同步验证）：**异常型失败同样推进 last_sync_ts**。
@@ -654,12 +690,23 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
         start = max((pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d"), _floor_s)
         if start > end_date:
             return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [], "expected_days": 0, "actual_days": 0}
+    # 批 171d-A：单轮最大跨度（回补轮）；_sync_by_trade_date 是 keyed（last_success_date）
+    # 数据驱动游标——夹后 end_date 传入即天然安全。
+    start, _eff_end, _trunc = _clamp_span(start, end_date, cfg.get("_max_span_days"))
+    if _trunc:
+        end_date = _eff_end
 
     r = _sync_by_trade_date(lambda trade_date: adapter.fetch_supply(kind, sub, trade_date=trade_date),
                             lambda df: save_daily_basic(df), start, end_date,
                             api_name=_api_name_of(cfg), progress_cb=progress_cb,
                             provider=_provider_of(cfg))
     r["start"] = start
+    if _trunc and backfill_from:
+        r["clamped"] = {"floor": None, "span": True}
+        r["next_from"] = _next_from(end_date,
+                                    [f.split(":")[0] for f in (r.get("failed_dates") or [])
+                                     if ":" in f] or None,
+                                    r.get("last_success_date"))
     return r
 
 
@@ -836,6 +883,14 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
     kind, sub, _tbl = _LITERAL_SUPPLY["trade_cal"]
     year_now = date.today().year
     year0 = int(backfill_from[:4]) if backfill_from else year_now
+    # 批 171d-A：year 循环站点特判——截年（`floor 年+跨度年`），年粒度过拉幂等无害。
+    _span = cfg.get("_max_span_days")
+    if backfill_from and _span:
+        _y_max = _ymd(f"{year0}0101") + timedelta(days=_span - 1)
+        year_now = min(year_now, _y_max.year)
+        _trunc_cal = _y_max.year < date.today().year
+    else:
+        _trunc_cal = False
     prov = _provider_of(cfg)      # 批 83b：provider 真路由（原死钉 tushare）
     adapter = _get_supply_adapter(cfg)   # 批 107
     _ds = _get_rate_ds(prov)
@@ -858,8 +913,13 @@ def _sync_trade_cal(cfg: dict, end_date: str, backfill_from: str | None = None,
                 )
             conn.commit()
         pulled += len(rows)
-    return {"pulled": pulled, "saved": pulled, "start": end_date,
-            "failed_dates": [], "expected_days": None, "actual_days": None}
+    r_cal = {"pulled": pulled, "saved": pulled, "start": end_date,
+             "failed_dates": [], "expected_days": None, "actual_days": None}
+    # 批 171d-A：截断反馈（year 循环族——next_from 取截年后首日；无失败日粒度）。
+    if _trunc_cal:
+        r_cal["clamped"] = {"floor": None, "span": True}
+        r_cal["next_from"] = f"{year_now + 1}0101"
+    return r_cal
 
 
 # ─── 批 83b：原独立 beat 收编为 sync_config 驱动的 handler ───
@@ -1132,6 +1192,34 @@ def _ymd(s) -> date:
         return s
     t = str(s).strip().replace("-", "").replace("/", "")
     return date(int(t[:4]), int(t[4:6]), int(t[6:8]))
+
+
+# ── 批 171d-A：单轮最大跨度（D31 §5 裁定 5）──
+
+
+def _clamp_span(start: str, end: str, max_days: int | None) -> tuple[str, str, bool]:
+    """`(start, effective_end, truncated)`——`effective_end = min(end, start+max_days-1)`（含两端）。
+
+    `max_days is None ⇒ 不夹取`（0/负数**不进本函数**——防线在 `_get_config` 回落链：
+    非正整数/不可解析 ⇒ 回落 366+warning，0 是手滑不是「无限制」，D31 裁定 5 防的正是它）。
+    日期算术一律经 `_ymd`+timedelta（禁新写 str 解析——防第三套日期算式）。"""
+    if max_days is None:
+        return start, end, False
+    d_end = _ymd(end)
+    eff = min(d_end, _ymd(start) + timedelta(days=max_days - 1))
+    return start, eff.strftime("%Y%m%d"), eff < d_end
+
+
+def _next_from(effective_end: str, failed_dates: list | None,
+               last_success_date: str | None = None) -> str:
+    """截断轮续跑起点——**单一判定源**（禁各站点自写推法，批 171 判定单源纪律）：
+    keyed 族有 `last_success_date` ⇒ 取之；否则有失败日 ⇒ `min(failed)+1`（==连续成功末日+1，
+    防跳中窗失败日）；无失败 ⇒ `effective_end+1`。"""
+    if last_success_date:
+        return last_success_date
+    if failed_dates:
+        return min(failed_dates)
+    return (_ymd(effective_end) + timedelta(days=1)).strftime("%Y%m%d")
 
 
 # 哨兵：区分「未传 inception」与「显式传 None（未知）」（`_window_floors` 的批量预取口）。
@@ -2839,6 +2927,12 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
     # 步 1 实现）——设计 §九.7「无 inception 族只能靠 retention（＋源下界）」。
     _floor, _excl = _family_start(adapter, "bar_daily", cfg)
     start_d = max(start_d, win["start"], _floor)
+    # 批 171d-A：单轮最大跨度（date 对象站点——_clamp_span 收 YYYYMMDD 串，进出各转一次；
+    # 夹取点在 start_d/end_d 定型后）。jq 数据驱动游标（cursor=实际完成日）天然安全。
+    _s, _e, _trunc = _clamp_span(start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d"),
+                                  cfg.get("_max_span_days"))
+    if _trunc:
+        end_d = _ymd(_e)
     start_s, end_s = start_d.strftime("%Y%m%d"), end_d.strftime("%Y%m%d")
 
     if start_d > end_d:
@@ -3136,6 +3230,10 @@ def _sync_via_kind_cb_daily(adapter, *, sync_id: str, start: str, end_date: str,
             "failed_dates": [], "expected_days": _rec["expected"],
             "actual_days": _rec["expected"] - len(_rec["gap_dates"]),
             "gap_dates": _rec["gap_dates"], "reconcile": _rec,
+            # 批 171d-A：无 cursor_upto 键时 sync() 走 `or end_date` 兜底——但调用侧
+            # _sync_via_kind 已把 end_date 夹为 effective_end，此处补键钉死游标不变式
+            # （truncated ⇒ cursor_upto ≤ effective_end，任务文件 §2 行 6）。
+            "cursor_upto": end_date,
             **({"cursor_cap": _ccap} if _ccap else {})}
 
 
@@ -3224,6 +3322,11 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
         if start > end_date:
             return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [],
                     "expected_days": 0, "actual_days": 0, "excluded": _fam_excl}
+    # 批 171d-A：单轮最大跨度（D31 §5）——回补轮夹取；bar 6 族游标数据驱动（keyed
+    # last_success_date / min(failed)），子 handler 返回体天然按夹后 end_date 计算。
+    start, _eff_end, _trunc = _clamp_span(start, end_date, cfg.get("_max_span_days"))
+    if _trunc:
+        end_date = _eff_end
 
     if kind == "bar_daily" and sub in ("stock", "listed_fund"):
         r = _sync_via_kind_daily_batch(adapter, sub=sub, cfg=cfg, start=start,
@@ -3243,6 +3346,13 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
     # 由 `sync()` 落 `sync_gap` **终态**行（幂等）。
     if _fam_excl:
         r["excluded"] = _fam_excl
+    # 批 171d-A：截断反馈（仅回补轮）——keyed 族 next_from 优先 last_success_date（单一助手）。
+    if _trunc and backfill_from:
+        r["clamped"] = {"floor": None, "span": True}
+        r["next_from"] = _next_from(end_date,
+                                    [f.split(":")[0] for f in (r.get("failed_dates") or [])
+                                     if ":" in f] or None,
+                                    r.get("last_success_date"))
     return r
 
 
@@ -3357,6 +3467,12 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
             start_ts = ((pd.Timestamp(_last)
                          + timedelta(days=1 - _overlap)).strftime("%Y%m%d")
                         if _last else _floor_s)
+        # 批 171d-A：单轮最大跨度（D31 §5）——回补轮夹取（增量轮尾巴窗 <<366 恒不触）。
+        # 夹取点在 end_date 被 _data_ready_end_date 重赋值（:3398）之后——先夹后判空窗。
+        start_ts, _eff_end, _trunc = _clamp_span(
+            start_ts, end_date, cfg.get("_max_span_days"))
+        if _trunc:
+            end_date = _eff_end
         if start_ts > end_date:
             return {"pulled": 0, "saved": 0, "start": start_ts, "cursor_upto": end_date,
                     "failed_dates": [], "expected_days": 0, "actual_days": 0,
@@ -3428,15 +3544,23 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
             if progress_cb:
                 progress_cb(len(date_range), len(date_range), td)
 
+        # 批 171d-A：截断反馈（仅回补轮出具——增量轮截断静默自动续，防 FE 续跑钮错配）。
+        _clamped_extra = {}
+        if _trunc and backfill_from:
+            _clamped_extra = {
+                "clamped": {"floor": None, "span": True},
+                "next_from": _next_from(end_date, [f.split(":")[0] for f in failed_dates
+                                                   if ":" in f] or None)}
         if not reconcile:
             # 批 171b：稀疏事件表（suspend_d）跳过整个尾部块——零行日=正常态，日期级差集
             # 会产 symbol='' 假 open；无 reconcile/gap_dates/cursor_cap 三键 ⇒ sync() 的
             # D1 收口/告警零交互（白名单门另挡 Valkey——双保险）。
+            # 批 171d-A：本出口（suspend_d 回补族）同样带 clamped/next_from——跨轮续跑主场景。
             return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
                     "cursor_upto": end_date,
                     "failed_dates": failed_dates,
                     "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
-                    "excluded": _fam_excl}
+                    "excluded": _fam_excl, **_clamped_extra}
         # 批 109（**§7.1 明写「TIER1 族当前 handler 自算窗口，收编时须一并纳入」**）：
         # 日期级差集。期望集与拉取循环**同一列表** `_trade_days`（覆盖感知）；`None` ⇒ uncertain。
         # 本地存在性比 `date_param` 对应的列（forecast 是 `ann_date`——拉取参数即落库列）。
@@ -3453,7 +3577,7 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
                 "failed_dates": failed_dates,
                 "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
                 "excluded": _fam_excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec,
-                **({"cursor_cap": _ccap} if _ccap else {})}
+                **({"cursor_cap": _ccap} if _ccap else {}), **_clamped_extra}
 
     return _handler
 

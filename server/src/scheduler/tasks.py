@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, datetime, timezone
 
@@ -1358,6 +1359,11 @@ def _sync_via_celery_body(self, sync_id: str, backfill_from: str | None = None, 
             "actual_days": result.get("actual_days") or 0,
             "failed_dates_count": len(failed),
             "pct": 100,
+            # 批 171d-A：截断反馈透传跳②——hset 值只收标量，clamped dict 须 JSON 序列化；
+            # 读侧 hgetall 原样透出，FE JSON.parse。
+            "next_from": result.get("next_from") or "",
+            "clamped": json.dumps(result["clamped"], ensure_ascii=False)
+                       if result.get("clamped") else "",
         })
         r.expire(key, 3600)
         complete_task(task_id, status="completed")
