@@ -381,9 +381,11 @@ def _collect_components() -> dict:
         logger.warning("dep_audit 契约读取失败: %s", e)
         _degraded(part, f"依赖审计数据不可用: {str(e)[:120]}")
     # 未装/非 rpm 系=None（环境差异不算失败）；latest/judge 走 dep_health（契约驱动）
+    # 批 162 漏网（2026-11-06 修）：KV 换轨后探测目标仍是 redis-server（not installed ⇒ None）
+    # ——改探 valkey，键名 redis 延续（前端/快照键不断裂）。
     for key, pkg in (("python", "python3.11"), ("nginx", "nginx"),
                      ("openssl", "openssl"), ("postgres", "postgresql-server"),
-                     ("redis", "redis-server"), ("pango", "pango"),
+                     ("redis", "valkey"), ("pango", "pango"),
                      ("cairo", "cairo"), ("wqy-microhei", "wqy-microhei-fonts")):
         try:
             ver = _run(["rpm", "-q", "--qf", "%{VERSION}", pkg]).strip()

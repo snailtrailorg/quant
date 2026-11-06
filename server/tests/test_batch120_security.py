@@ -92,6 +92,18 @@ class TestParsers:
             part = _collect_components()
         assert part["status"] == "degraded"
 
+    def test_rpm_probe_targets_valkey_not_redis(self):
+        """批 162 漏网守门（2026-11-06）：KV 换轨后探测目标必须是 valkey（键名 redis 延续）——
+        探测 redis-server 在 prod 恒 not installed ⇒ components.redis=None（面板失明）。"""
+        import re as _re
+        import inspect as _ins
+        from src.health_monitor import security_collector as sc
+        src = _ins.getsource(sc._collect_components)
+        m = _re.search(r'for key, pkg in \((.*?)\):', src, _re.S)
+        assert m, "探测清单元组未找到（结构变更？）"
+        assert '("redis", "valkey")' in m.group(1), "redis 键必须探 valkey"
+        assert 'redis-server' not in m.group(1), "探测 redis-server 是批 162 前旧目标（回退禁）"
+
     def test_dnf_missing_file_degrades(self, tmp_path):
         from src.health_monitor.security_collector import _collect_dnf
         part = _collect_dnf(tmp_path / "nope.json")
