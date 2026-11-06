@@ -2649,11 +2649,12 @@ def _reconcile_symbols() -> dict:
             if tzname != "UTC":
                 try:
                     with get_conn() as _c:
-                        _delist_map = {r[0]: r[1] for r in _c.execute(
-                            "SELECT vt_symbol, delist_date FROM security_master "
-                            "WHERE category=%s AND exchange=%s AND delist_date IS NOT NULL",
-                            (category, venue or "")).fetchall()} if venue else {}
-                        if not venue:
+                        if venue:
+                            _delist_map = {r[0]: r[1] for r in _c.execute(
+                                "SELECT vt_symbol, delist_date FROM security_master "
+                                "WHERE category=%s AND exchange=%s AND delist_date IS NOT NULL",
+                                (category, venue)).fetchall()}
+                        else:
                             _delist_map = {r[0]: r[1] for r in _c.execute(
                                 "SELECT vt_symbol, delist_date FROM security_master "
                                 "WHERE category=%s AND delist_date IS NOT NULL",

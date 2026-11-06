@@ -614,10 +614,12 @@ def data_continuity_check(self):
         _days = [week_ago + timedelta(days=i) for i in range((today - week_ago).days)]
         expected = sum(1 for d in _days if d.weekday() < 5 and _is_td(d))   # 不含今天
         # 批 171b：停牌净化（DEF-10 活体受害点）——scope 级一次取图（零 N+1），per-symbol
-        # 期望减窗内停牌日数；副收益＝停牌股不再触发下方无效补采。
+        # 期望减窗内停牌日数；副收益＝停牌股不再触发下方无效补采。窗上界＝**昨天**
+        # （expected 口径「不含今天」——含今天会把阈值压低 1 天漏报向，步4 盲审 A-P1-1）。
         try:
             from src.data_platform.integrity import suspend_days_bulk
-            _susp = suspend_days_bulk(week_ago, today, {r[0] for r in rows}) or {}
+            _susp = (suspend_days_bulk(week_ago, today - timedelta(days=1),
+                                       {r[0] for r in rows}) or {})
         except Exception:
             _susp = {}
         repaired_any = False   # F-55：循环内逐标的写触发会导致 N 次 rewarm，改为循环外只写一次

@@ -58,12 +58,7 @@ def _suspend_rows(first: date, last: date) -> list[tuple[str, date]]:
         return []
 
 
-def _vt_to_ts(vt: str) -> str:
-    """vt→源码归一（.SHSE→.SH / .SZSE→.SZ / .BSE→.BJ）——to_vt_symbol 的逆。"""
-    for v, t in ((".SHSE", ".SH"), (".SZSE", ".SZ"), (".BSE", ".BJ")):
-        if vt.endswith(v):
-            return vt[: -len(v)] + t
-    return vt
+from src.data_platform.schema import vt_to_ts as _vt_to_ts   # 单一真源（含 .SSE 形态，批 137a）
 
 
 def suspended_on(day: date, vt_symbols: set[str]) -> set[str]:

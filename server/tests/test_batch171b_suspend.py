@@ -52,16 +52,19 @@ class TestPurgePorts:
         got = suspended_on(date(2026, 10, 14),
                            {"000016.SZSE", "002860.SZSE", "002813.SZSE", "600000.SHSE"})
         assert got == {"000016.SZSE"}, "仅 S 行（000016）；R 行与未停牌标的不进"
-        # 非停牌日空集：取库里 10 月窗内**无任何行**的日期（000016 可能连续停牌——不能拍脑袋选日）
+        # 非停牌日空集：000016 连停 10-08~10-22（dev 实证）——须选**库内该标的无行**的
+        # 日期（10-23 复牌后首个交易日窗内；拍脑选日=把「任选一日非停牌」写成「任一日
+        # 都非停牌」——步4 盲审 A-P0-1 教训）
         from src.data_platform.db import get_conn
         with get_conn() as c:
             have = {r[0] for r in c.execute(
-                "SELECT DISTINCT trade_date FROM suspend_calendar "
-                "WHERE trade_date BETWEEN '2026-10-01' AND '2026-11-05'").fetchall()}
-        for d in have:
-            if d != date(2026, 10, 14):
-                assert suspended_on(d, {"000016.SZSE"}) == set(), f"{d} 非该标的停牌日"
-                break
+                "SELECT DISTINCT trade_date FROM suspend_calendar WHERE ts_code='000016.SZ'"
+            ).fetchall()}
+        candidates = [d for d in (date(2026, 10, 23), date(2026, 10, 26), date(2026, 11, 2))
+                      if d not in have]
+        assert candidates, "库内 10-23 后应有非停牌日（000016 复牌）"
+        for d in candidates:
+            assert suspended_on(d, {"000016.SZSE"}) == set(), f"{d} 非该标的停牌日应空集"
 
     @needs_db
     def test_bulk_keys_are_vt(self):
