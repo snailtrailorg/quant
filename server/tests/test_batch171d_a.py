@@ -10,6 +10,7 @@ from datetime import date
 import pytest
 
 from src.data_sync.engine import _clamp_span, _next_from
+from src.data_sync import engine as eng
 
 
 class TestPureFunctions:
@@ -37,29 +38,30 @@ class TestPureFunctions:
 class TestSpanFallback:
 
     def test_bad_global_value_falls_back_with_warning(self, caplog):
-        """验收 7：坏值 ⇒ 回落 366 + 留痕（fail-open 必留痕，批 171 纪律）。"""
+        """验收 7：坏值 ⇒ 回落 366 + 留痕（fail-open 必留痕，批 171 纪律）。
+        步4 B-P1-3 修正：mock 断裂（_FakeCur 无 fetchone 曾走错分支）——改带 fetchone。"""
         import logging
         from src.data_sync import engine as eng
         with pytest.MonkeyPatch.context() as mp:
             class _FakeCur:
                 def execute(self, sql, params=None):
-                    return [("abc",)]
+                    return self
+
+                def fetchone(self):
+                    return ("abc",)   # 全局键坏值 ⇒ isdigit False ⇒ 目标分支
 
             class _FakeConn:
                 def __enter__(self):
-                    return self
+                    return _FakeCur()
 
                 def __exit__(self, *a):
                     return False
-
-                def execute(self, sql, params=None):
-                    return _FakeCur()
 
             mp.setattr(eng, "get_conn", lambda *a, **k: _FakeConn())
             with caplog.at_level(logging.WARNING, logger="src.data_sync.engine"):
                 v = eng._span_of(None)
         assert v == 366
-        assert any("sync_max_span_days" in r.getMessage() for r in caplog.records)
+        assert any("全局值非法" in r.getMessage() for r in caplog.records), "钉目标分支非 except 兜底"
 
     def test_task_level_override(self):
         assert _span_helper(30) == 30
@@ -115,10 +117,22 @@ class TestSiteHandlers:
 
         monkeypatch.setattr(eng, "_get_supply_adapter", lambda cfg: _FakeAdapter())
         monkeypatch.setattr(eng, "get_conn", _no_conn_raises)   # _pull_day 空帧不达 DB
+        # 步4 B-P2-4：真限速器 0.3s×262 日真睡 72s——stub 限速上下文（函数内局部 import，
+        # patch 源模块 rate_limit.rate_limit_context）。
+        import src.data_platform.rate_limit as _rl
+
+        class _NoRate:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        monkeypatch.setattr(_rl, "rate_limit_context", lambda *a, **k: _NoRate())
 
         h = eng._HANDLERS["suspend_d_sync"]
         r = h(self._cfg(366), "20261106", backfill_from="20240101")
-        assert r["clamped"] == {"floor": None, "span": True}
+        assert r["clamped"] == {"floor": None, "span": True, "span_end": "20241231"}
         assert r["cursor_upto"] == "20241231", "游标不变式：截断轮游标 ≤ effective_end"
         assert r["next_from"] == "20250101"
 
@@ -181,7 +195,78 @@ class TestPassthrough:
         assert r.get("clamped") == {"floor": None, "span": True}
         assert r.get("next_from") == "20250101"
 
-    def test_hset_payload_serializes_clamped(self):
-        """跳②：tasks hset 值标量化——clamped 须 JSON 串（dict 直 hset 抛 DataError）。"""
-        payload = {"next_from": "", "clamped": json.dumps({"floor": None, "span": True})}
-        assert all(isinstance(v, str) for v in payload.values())
+    def test_hset_payload_serializes_clamped(self, monkeypatch):
+        """跳②（步4 B-P1-3 修正：真跑非自证）——mock business_redis 工厂捕获 hset mapping，
+        断言 clamped 是 JSON 串且 round-trip 回原 dict（dict 直 hset 会 DataError）。
+        business_redis 是工厂（socket_timeout kwargs）非实例——mock 按工厂形态。"""
+        import src.scheduler.tasks as tasks_mod
+        captured = {}
+        _handling = {"phase": "run"}
+
+        class _FakeR:
+            def hset(self, key, mapping=None, **kw):
+                if mapping.get("status") in ("done", "success"):
+                    captured.update(mapping)   # 完成态 mapping（新键所在）
+
+            def expire(self, *a, **kw):
+                pass
+
+            def delete(self, *a, **kw):
+                pass
+
+            def hgetall(self, *a, **kw):
+                return {}
+
+            def hincrby(self, *a, **kw):
+                pass
+
+        monkeypatch.setattr(tasks_mod, "business_redis",
+                            lambda **kw: _FakeR())
+        # 引擎侧 mock：_sync_via_celery_body 内部 import engine.sync —— patch engine 命名空间
+        monkeypatch.setattr(eng, "_get_config", lambda sid: {
+            "id": sid, "mode": "incremental", "enabled": True, "provider": "tushare"})
+        monkeypatch.setattr(eng, "_mark_running", lambda *a: None)
+        monkeypatch.setattr(eng, "_update_sync_state", lambda *a, **k: None)
+        monkeypatch.setattr(eng, "_log", lambda *a, **k: None)
+        monkeypatch.setattr(eng, "_sync_gap_sync", lambda *a, **k: None)
+        monkeypatch.setattr(eng, "_get_supply_adapter", lambda cfg: None)
+        monkeypatch.setitem(eng._HANDLERS, "x_hset",
+                            lambda cfg, end_date, backfill_from=None, progress_cb=None: {
+                                "pulled": 1, "saved": 1, "cursor_upto": "20241231",
+                                "failed_dates": [], "expected_days": 1, "actual_days": 1,
+                                "clamped": {"floor": None, "span": True},
+                                "next_from": "20250101"})
+        from src.data_sync.engine import sync as _engine_sync
+        monkeypatch.setattr("src.data_sync.engine.sync", _engine_sync)
+        tasks_mod._sync_via_celery_body(
+            type("S", (), {"request": type("R", (), {"id": "t-hset"})})(),
+            "x_hset", backfill_from="20240101", track=False)
+        assert isinstance(captured.get("clamped"), str), "hset 值必须标量（str）"
+        assert json.loads(captured["clamped"]) == {"floor": None, "span": True}
+        assert captured.get("next_from") == "20250101"
+
+    def test_keyed_incremental_truncation_cursor(self, monkeypatch):
+        """步4 双审 P0 守门（A/B 同撞）：keyed 族增量首跑截断零失败 ⇒ 游标推 effective_end
+        而非 today——`:445` 消费 cursor_upto 键（修复前直用 end_date 越窗）。"""
+        from src.data_sync import engine as eng
+        monkeypatch.setattr(eng, "_get_config", lambda sid: {"id": sid, "mode": "incremental",
+                                                             "enabled": True, "provider": "tushare"})
+        updates = {}
+        monkeypatch.setattr(eng, "_mark_running", lambda *a: None)
+        monkeypatch.setattr(eng, "_update_sync_state",
+                            lambda sid, last, count, status="idle": updates.update(
+                                sid=sid, last=last, status=status))
+        monkeypatch.setattr(eng, "_log", lambda *a, **k: None)
+        monkeypatch.setattr(eng, "_sync_gap_sync", lambda *a, **k: None)
+        monkeypatch.setattr(eng, "_get_supply_adapter", lambda cfg: None)
+
+        def _handler(cfg, end_date, backfill_from=None, progress_cb=None):
+            # keyed 形态：拉到夹后 eff=20141231 全成功（lsd=eff 零失败）
+            return {"pulled": 1, "saved": 1, "start": "20140101",
+                    "last_success_date": "20141231",
+                    "cursor_upto": "20141231",   # ← 修复链：handler 出具夹后界
+                    "failed_dates": [], "expected_days": 300, "actual_days": 300}
+
+        monkeypatch.setitem(eng._HANDLERS, "x_keyed", _handler)
+        eng.sync("x_keyed")   # 增量（无 backfill）——end_date=today 语境
+        assert updates["last"] == "20141231", "游标必须收敛 effective_end（修复前=today 越窗）"

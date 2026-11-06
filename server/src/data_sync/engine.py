@@ -251,15 +251,14 @@ def _get_config(sync_id: str) -> dict:
                 "_max_span_days": _span_of(row[13] if len(row) > 13 else None)}
 
 
-def _span_of(task_val) -> int | None:
+def _span_of(task_val) -> int:
     """跨度三级回落：任务列（正整数）→ system_config.sync_max_span_days（正整数）→ 366。
-    坏值/0/负数 ⇒ 回落 366 + logger.warning（171 留痕纪律）。None ⇒ 366（键行迁移后恒有，
-    但 staging/prod 窗口期/手删行时兜底）。"""
-    for v, src in ((task_val, "task"),):
-        if isinstance(v, int) and v >= 1:
-            return v
-        if v is not None:
-            logger.warning("max_span_days 任务级值非法（%r）⇒ 回落全局", v)
+    坏值/0/负数 ⇒ 回落 366 + logger.warning（171 留痕纪律）。键行迁移后恒有值，
+    staging/prod 窗口期/手删行时兜底 366。**恒返 int**（三级必落值）。"""
+    if isinstance(task_val, int) and task_val >= 1:
+        return task_val
+    if task_val is not None:
+        logger.warning("max_span_days 任务级值非法（%r）⇒ 回落全局", task_val)
     try:
         with get_conn() as conn:
             r = conn.execute(
@@ -438,7 +437,12 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     if failed_dates and r["last_success_date"] is None:
                         pass                    # 全失败 fallback：不收口（G-S1/H-S2 语义）
                     else:
-                        _raw = (r["last_success_date"] if failed_dates else end_date)
+                        # 批 171d-A 步4 双审 P0（A/B 同撞）：keyed 零失败分支原直用
+                        # end_date(=today)——增量首跑截断轮会把游标推过夹点，(eff, today]
+                        # 永久静默空洞。改：截断轮 handler 出具 cursor_upto=effective_end，
+                        # 此处尊重之（无键轮零漂移）。
+                        _raw = (r["last_success_date"] if failed_dates
+                                else (r.get("cursor_upto") or end_date))
                 else:
                     _raw = r.get("cursor_upto") or end_date
                 if _raw is not None and _cap is not None:
@@ -451,7 +455,7 @@ def sync(sync_id: str, backfill_from: str | None = None,
             # 批 171d-A：截断短语入 note（_cap_note 同点拼装——判定单源，note 只组一次）。
             _clamp_note = ""
             if r.get("clamped"):
-                _clamp_note = f" clamped=span@{r['clamped'].get('span') and end_date}"
+                _clamp_note = f" clamped=span@{r['clamped'].get('span_end') or end_date}"
                 if r.get("next_from"):
                     _clamp_note += f" next={r['next_from']}"
             _log(sync_id, cfg["mode"], start_date, end_date, pulled, saved, duration_ms,
@@ -650,6 +654,9 @@ def _sync_by_trade_date(pro_api_fn: Callable, save_fn: Callable,
         "expected_days": expected_days,
         "actual_days": len(date_range) - len(failed_dates),
         "last_success_date": last_success_date,   # None=全失败；三态仅 sync() 对含此键者生效
+        # 批 171d-A 步4 P0：keyed 零失败分支的游标上界——调用侧夹取的 effective_end 经
+        # end 参数传入即本值；sync() :445 零失败改消费此键（无截断轮恒 == end 零漂移）。
+        "cursor_upto": end,
     }
 
 
@@ -702,10 +709,10 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
                             provider=_provider_of(cfg))
     r["start"] = start
     if _trunc and backfill_from:
-        r["clamped"] = {"floor": None, "span": True}
+        r["clamped"] = {"floor": None, "span": True, "span_end": end_date}
         r["next_from"] = _next_from(end_date,
                                     [f.split(":")[0] for f in (r.get("failed_dates") or [])
-                                     if ":" in f] or None,
+                                     if len(f) >= 8 and f[:8].isdigit()] or None,
                                     r.get("last_success_date"))
     return r
 
@@ -1213,8 +1220,9 @@ def _clamp_span(start: str, end: str, max_days: int | None) -> tuple[str, str, b
 def _next_from(effective_end: str, failed_dates: list | None,
                last_success_date: str | None = None) -> str:
     """截断轮续跑起点——**单一判定源**（禁各站点自写推法，批 171 判定单源纪律）：
-    keyed 族有 `last_success_date` ⇒ 取之；否则有失败日 ⇒ `min(failed)+1`（==连续成功末日+1，
-    防跳中窗失败日）；无失败 ⇒ `effective_end+1`。"""
+    keyed 族有 `last_success_date` ⇒ 取之；否则有失败日 ⇒ `min(failed)`（==连续成功末日+1，
+    重拉首个失败日——upsert 幂等）；无失败 ⇒ `effective_end+1`。入参 failed 须已过
+    **日期形态闸**（8 位纯数字——minute/index 的 "sym:err" 粒度在调用侧过滤）。"""
     if last_success_date:
         return last_success_date
     if failed_dates:
@@ -3017,12 +3025,20 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
         _ccap = _cursor_cap(cfg["id"], _rec, failed)
         if _ccap is None and _cursor_cap_healed(cfg["id"], _rec):
             _cursor_freeze_count(cfg["id"], bumped=False)
-        return {"pulled": pulled, "saved": saved, "start": start_s,
+        r_jq = {"pulled": pulled, "saved": saved, "start": start_s,
                 "failed_dates": failed, "expected_days": len(dates),
                 "actual_days": len([d for d in dates if d <= cursor]) if cursor else 0,
                 "cursor_upto": cursor,
                 "excluded": _excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec,
                 **({"cursor_cap": _ccap} if _ccap else {})}
+        # 批 171d-A 步4 P1-2：jq 站点出具（六站点唯一缺口——游标 reached 数据驱动安全，
+        # 但 FE 回补截断零感知）。失败串日期形态闸同 via_kind（jq 失败串非日期前缀）。
+        if _trunc and backfill_from:
+            r_jq["clamped"] = {"floor": None, "span": True, "span_end": end_s}
+            r_jq["next_from"] = _next_from(end_s,
+                                           [f.split(":")[0] for f in failed
+                                            if len(f) >= 8 and f[:8].isdigit()] or None)
+        return r_jq
 
 
 _HANDLERS = {
@@ -3248,7 +3264,10 @@ def _sync_via_kind_index(adapter, *, start: str, end_date: str,
     saved = save_index_bars(list(frame.rows)) if frame.rows else 0
     return {"pulled": len(frame.rows), "saved": saved, "start": start,
             "failed_dates": [] if frame.rows else ["index_daily:empty"],
-            "expected_days": None, "actual_days": None}
+            "expected_days": None, "actual_days": None,
+            # 批 171d-A 步4 P0-2：无键时 sync() or-end_date 兜底=today——增量首跑截断
+            # 越窗；补键钉游标于调用侧夹后的 end_date（无截断轮恒等原值，零漂移）。
+            "cursor_upto": end_date}
 
 
 def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
@@ -3284,7 +3303,9 @@ def _sync_via_kind_minute(adapter, *, sync_id: str, start: str, end_date: str,
             progress_cb(i, total, tc)
     return {"pulled": total_pulled, "saved": total_saved, "start": start,
             "failed_dates": failed, "expected_days": None,
-            "actual_days": total - len(failed)}
+            "actual_days": total - len(failed),
+            # 批 171d-A 步4 P0-2：同 index_daily——补键钉游标（minute 无键同族）。
+            "cursor_upto": end_date}
 
 
 def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
@@ -3347,11 +3368,13 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
     if _fam_excl:
         r["excluded"] = _fam_excl
     # 批 171d-A：截断反馈（仅回补轮）——keyed 族 next_from 优先 last_success_date（单一助手）。
+    # 失败串日期形态闸（步4 B-P1-1）：minute/index 的失败是 "sym:err"/"tag:err" 非日期前缀——
+    # 过滤后落助手第三分支（eff+1），防 FE 续跑钮收到 "000001.SZ" 乱值。
     if _trunc and backfill_from:
-        r["clamped"] = {"floor": None, "span": True}
+        r["clamped"] = {"floor": None, "span": True, "span_end": end_date}
         r["next_from"] = _next_from(end_date,
                                     [f.split(":")[0] for f in (r.get("failed_dates") or [])
-                                     if ":" in f] or None,
+                                     if len(f) >= 8 and f[:8].isdigit()] or None,
                                     r.get("last_success_date"))
     return r
 
@@ -3548,9 +3571,9 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         _clamped_extra = {}
         if _trunc and backfill_from:
             _clamped_extra = {
-                "clamped": {"floor": None, "span": True},
+                "clamped": {"floor": None, "span": True, "span_end": end_date},
                 "next_from": _next_from(end_date, [f.split(":")[0] for f in failed_dates
-                                                   if ":" in f] or None)}
+                                                   if len(f) >= 8 and f[:8].isdigit()] or None)}
         if not reconcile:
             # 批 171b：稀疏事件表（suspend_d）跳过整个尾部块——零行日=正常态，日期级差集
             # 会产 symbol='' 假 open；无 reconcile/gap_dates/cursor_cap 三键 ⇒ sync() 的
