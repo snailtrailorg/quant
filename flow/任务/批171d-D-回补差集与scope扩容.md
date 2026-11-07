@@ -16,6 +16,8 @@
   - **停牌净化窗改全史**（消假缺口依赖链）：`suspend_days_bulk` 窗从 400 自然日 widen 至 `min(floor)`（38.9 万行内存 ~40MB 可控——dev 实测）；不 widen 则 A 股 28 万假缺口股日恒撞闸（A-P1-4/B-P0-3 同撞坐实）。
   - **期望集 N+1 消除**（A-P1-3）：scope 级一次查 `[min(floor), end]` 全量日历、内存按 per-symbol floor 切片（多数标的共享前缀）——即使早闸跳族也现在钉死（调预算启用主张那一刻立即生效）。
 - **DEF-08 供给映射**（A-P1-5/B-P1-4）：照 `pull_minute_supply` 先例（137a 同族参数陷阱）新写薄壳 `pull_daily_supply(symbol=, freq=, start=, end=)`（tushare_adapter）；`_SUPPLY_PULL[("bar_daily","stock")]` + `_SUPPLY_PULL_NON_FACTORY` 登记（防 test_batch100 键集断言红）。产线该路径在早闸下暂死码（repull_map={}）——**可测性口径=单测**（spec 明示）。
+- **双读复用**（快核备注1）：回补差集预读与收尾对账的 `_local_dates` 同轮复用一次结果（一轮一读，bar_1d stock 侧 ~9s/次省半）。
+- **主循环零预算豁免**（快核备注2）：回补差集主循环不挂行预算——豁免依据=手动触发（非 beat 自动）+171d-A 跨度 366 夹天数+差集自限于缺失日（三者天然有界）；预算闸只挂 `_reconcile_dates` repull 段（beat 增量轮自动路径）。
 
 ## 1. 实施步骤
 
@@ -52,7 +54,7 @@
 2. **A 股 scope 早闸**：dev 直跑 `_reconcile_symbols()`（不等周日）⇒ `out['astock_daily'].budget_exceeded==1 && sm_covered==5577` + journal 摘要行 + 告警 code=sync.reconcile_budget；**03:33 轮该族增量成本≈SM 读+告警**（无 local map/无 N+1——早闸直证）。
 3. **预算闸 stop-after**：mock 每日 3000 行×差集 3 日×预算 5000 ⇒ 拉 2 日停（acc=6000≥5000 允许末日超限）+ budget_truncated + next_from=第 3 日。
 4. **成功闸**：mock forecast 窗 3 日 2 日失败 ⇒ cursor_upto=首失败日前；首日失败 ⇒ cursor=start-1（回退≤overlap 断言）。
-5. **净化窗全史**：000002 型（155 日停牌段 2015-16）在窗内被净化不产缺口段（dev 直跑断言 gaps 不含停牌日）。
+5. **净化窗全史**：前置=dev 临时调大 `_GAP_ROW_BUDGET["bar_daily"]`（如 6000——早闸跳族下 gaps 永不算，照字执行会撞跳族）；000002 型（155 日停牌段 2015-16）在窗内被净化不产缺口段（dev 直跑断言 gaps 不含停牌日）。
 6. **DEF-08**：单测 `fetch_supply("bar_daily","stock",symbol="000001.SZ",...)` 返 DataFrame（产线死码口径）。
 7. 全量 pytest + §3 入账全绿。
 
