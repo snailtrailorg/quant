@@ -248,7 +248,10 @@ def _get_config(sync_id: str) -> dict:
                 "retention_days": row[12],
                 # 批 171d-A：单轮最大跨度（任务列 → 全局键 → 366 三级回落；坏值=366+warning——
                 # 0 是手滑不是「无限制」）。挂 cfg 每轮一次，禁 handler 体内直查 system_config。
-                "_max_span_days": _span_of(row[13] if len(row) > 13 else None)}
+                "_max_span_days": _span_of(row[13] if len(row) > 13 else None),
+                # 批 171d-B：全局地板（第四源，date|None 已解析——坏值 fail-open None+告警
+                # 在 _floor_default 内完成，禁透传原始串进 known dict）。
+                "_floor_default": _floor_default()}
 
 
 def _span_of(task_val) -> int:
@@ -270,6 +273,26 @@ def _span_of(task_val) -> int:
     except Exception as e:
         logger.warning("sync_max_span_days 读取失败 ⇒ 回落 366: %s", e)
     return 366
+
+
+def _floor_default() -> date | None:
+    """批 171d-B：全局地板（第四源）——恒读 system_config.sync_floor_default，
+    解析为 date|None 后返回（**禁透传原始串**——known dict 的 _ymd 遇坏值会炸，
+    坏值在此 fail-open 为 None+告警，171 留痕纪律）。无键行（未迁移/手删）⇒ None
+    ⇒ 第四源缺席（零漂移，与 171d-A 前行为逐字同）。"""
+    try:
+        with get_conn() as conn:
+            r = conn.execute(
+                "SELECT value FROM system_config WHERE key='sync_floor_default'").fetchone()
+        if not r:
+            return None
+        return _ymd(str(r[0]).strip())
+    except ValueError:
+        logger.warning("sync_floor_default 值非法（%r）⇒ 忽略（fail-open 宁多报）", r[0] if r else None)
+        return None
+    except Exception as e:
+        logger.warning("sync_floor_default 读取失败 ⇒ 忽略: %s", e)
+        return None
 
 
 def _update_sync_state(sync_id: str, last_date: str | None, count: int, status: str = "idle"):
@@ -690,6 +713,7 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
     # `max(cursor+1, ·)`＝cursor+1。
     _floor, _excl = _family_start(adapter, kind, cfg)
     _floor_s = _floor.strftime("%Y%m%d")
+    _floor_clamped = bool(backfill_from and _floor_s > backfill_from)   # 批 171d-B：旗标
     if backfill_from:
         start = max(backfill_from, _floor_s)
     else:
@@ -708,8 +732,9 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
                             api_name=_api_name_of(cfg), progress_cb=progress_cb,
                             provider=_provider_of(cfg))
     r["start"] = start
-    if _trunc and backfill_from:
-        r["clamped"] = {"floor": None, "span": True, "span_end": end_date}
+    if backfill_from and (_floor_clamped or _trunc):
+        r["clamped"] = {"floor": floor_s if _floor_clamped else None,
+                        "span": _trunc, "span_end": end_date}
         r["next_from"] = _next_from(end_date,
                                     [f.split(":")[0] for f in (r.get("failed_dates") or [])
                                      if len(f) >= 8 and f[:8].isdigit()] or None,
@@ -1271,7 +1296,10 @@ def _window_floors(adapter, kind: str, cfg: dict, *, sym: str | None = None,
     ret_s = ret.strftime("%Y-%m-%d") if ret else None
 
     known = {k: _ymd(v) for k, v in (("inception", inception), ("retention", ret_s),
-                                     ("source_earliest", src_lo)) if v}
+                                     ("source_earliest", src_lo),
+                                     # 批 171d-B：第四源全局地板（max 语义——深史任务的
+                                     # 浅 retention 也被顶住；NULL 任务时第四源独担）。
+                                     ("floor_default", cfg.get("_floor_default"))) if v}
     floor = max(known.values()) if known else None
 
     excl: list[dict] = []
@@ -1289,10 +1317,15 @@ def _window_floors(adapter, kind: str, cfg: dict, *, sym: str | None = None,
     # vs source 2019-12-31、inception NULL ⇒ 静默弃约 7 年）。
     _lower = [_ymd(v) for v in (inception, src_lo) if v]
     lo_known = max(_lower) if _lower else None
-    if ret_s and lo_known and _ymd(ret_s) > lo_known:
+    # 批 171d-B：policy_discard 单源改判据——「胜出地板 > 已知下界 ⇒ 一段 [lo_known, floor)」
+    # （原 ret_s 单臂闸在 NULL retention 族永不登记——全局键生效后漏账；单段防双臂重叠
+    # 撞 UNIQUE）。reason 注明胜出源；每轮每族 1 条幂等落表（如实预告，非首轮一次）。
+    if floor is not None and lo_known is not None and floor > lo_known:
+        _src = ("任务 retention" if ret_s and floor == _ymd(ret_s) else
+                "全局地板 sync_floor_default")
         excl.append({"kind": "policy_discard", "symbol": _sym,
-                     "from": lo_known.isoformat(), "to": ret_s,
-                     "reason": "任务 retention 晚于已知下界（上币日/源界）⇒ 该段为主动不保留（非不存在）"})
+                     "from": lo_known.isoformat(), "to": floor.isoformat(),
+                     "reason": f"{_src} 晚于已知下界（上币日/源界）⇒ 该段为主动不保留（非不存在）"})
     return floor, excl
 
 
@@ -2934,6 +2967,7 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
     # 生命周期 ⇒ 只能靠 `retention`（＝任务列；本族未声明）＋ `available_range`（＝账号窗口，
     # 步 1 实现）——设计 §九.7「无 inception 族只能靠 retention（＋源下界）」。
     _floor, _excl = _family_start(adapter, "bar_daily", cfg)
+    _floor_clamped = backfill_from is not None and _floor > _d(backfill_from)   # 批 171d-B
     start_d = max(start_d, win["start"], _floor)
     # 批 171d-A：单轮最大跨度（date 对象站点——_clamp_span 收 YYYYMMDD 串，进出各转一次；
     # 夹取点在 start_d/end_d 定型后）。jq 数据驱动游标（cursor=实际完成日）天然安全。
@@ -3033,8 +3067,9 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
                 **({"cursor_cap": _ccap} if _ccap else {})}
         # 批 171d-A 步4 P1-2：jq 站点出具（六站点唯一缺口——游标 reached 数据驱动安全，
         # 但 FE 回补截断零感知）。失败串日期形态闸同 via_kind（jq 失败串非日期前缀）。
-        if _trunc and backfill_from:
-            r_jq["clamped"] = {"floor": None, "span": True, "span_end": end_s}
+        if backfill_from and (_floor_clamped or _trunc):
+            r_jq["clamped"] = {"floor": _floor.strftime("%Y%m%d") if _floor_clamped else None,
+                               "span": _trunc, "span_end": end_s}
             r_jq["next_from"] = _next_from(end_s,
                                            [f.split(":")[0] for f in failed
                                             if len(f) >= 8 and f[:8].isdigit()] or None)
@@ -3334,6 +3369,7 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
     # ⚠️ 本族**无 inception**（per-date 拉取，无逐个标的生命周期）⇒ 只能靠 retention ＋ 源界（§九.7）。
     floor_s, _fam_excl = _family_start(adapter, kind, cfg)
     floor_s = floor_s.strftime("%Y%m%d")
+    _floor_clamped = bool(backfill_from and floor_s > backfill_from)   # 批 171d-B：旗标（增量轮恒 False）
     if backfill_from:
         start = max(backfill_from, floor_s)          # 回补显式起点仍受地板夹（源拿不到更早）
     else:
@@ -3370,8 +3406,9 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
     # 批 171d-A：截断反馈（仅回补轮）——keyed 族 next_from 优先 last_success_date（单一助手）。
     # 失败串日期形态闸（步4 B-P1-1）：minute/index 的失败是 "sym:err"/"tag:err" 非日期前缀——
     # 过滤后落助手第三分支（eff+1），防 FE 续跑钮收到 "000001.SZ" 乱值。
-    if _trunc and backfill_from:
-        r["clamped"] = {"floor": None, "span": True, "span_end": end_date}
+    if backfill_from and (_floor_clamped or _trunc):
+        r["clamped"] = {"floor": floor_s if _floor_clamped else None,
+                        "span": _trunc, "span_end": end_date}
         r["next_from"] = _next_from(end_date,
                                     [f.split(":")[0] for f in (r.get("failed_dates") or [])
                                      if len(f) >= 8 and f[:8].isdigit()] or None,
@@ -3483,6 +3520,7 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         # 取代（设计 §六），与下界无关。
         _floor_s, _fam_excl = _family_start(adapter, kind, cfg)
         _floor_s = _floor_s.strftime("%Y%m%d")
+        _floor_clamped = bool(backfill_from and _floor_s > backfill_from)   # 批 171d-B：旗标
         if backfill_from:
             start_ts = max(backfill_from, _floor_s)
         else:
@@ -3569,9 +3607,11 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
 
         # 批 171d-A：截断反馈（仅回补轮出具——增量轮截断静默自动续，防 FE 续跑钮错配）。
         _clamped_extra = {}
-        if _trunc and backfill_from:
+        # 批 171d-B：两维正交——floor 夹起点（旗标）或 span 截终点，任一即出具。
+        if backfill_from and (_floor_clamped or _trunc):
             _clamped_extra = {
-                "clamped": {"floor": None, "span": True, "span_end": end_date},
+                "clamped": {"floor": _floor_s if _floor_clamped else None,
+                            "span": _trunc, "span_end": end_date},
                 "next_from": _next_from(end_date, [f.split(":")[0] for f in failed_dates
                                                    if len(f) >= 8 and f[:8].isdigit()] or None)}
         if not reconcile:

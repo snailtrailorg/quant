@@ -40,6 +40,29 @@ def _validate_backfill(backfill_from: str | None) -> None:
         raise ApiError(400, "SYNC_BACKFILL_INVALID", f"backfill_from 非法日期: {e}")
 
 
+def _validate_backfill_retention(sid: str, backfill_from: str | None) -> None:
+    """批 171d-B（DEF-11）：回补段 ∩ 批 158 滚动裁剪窗 ⇒ 拒绝——防复活已裁数据与 GC 互搏。
+
+    校验在 **trigger API 层**（engine 禁 ApiError 三死路：分层违例/异常吞没/celery 异步
+    400 不可达）。cutoff 用 date.today()（GC 侧 PG now() 为 UTC——边角 1 天模糊，接受并注释）。
+    retention_days NULL=无裁剪不拦（dev 实查非 NULL 仅 6 crypto 分钟档）。"""
+    if backfill_from is None:
+        return
+    from datetime import date as _d, timedelta as _td
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        row = conn.execute("SELECT retention_days FROM sync_config WHERE id=%s", (sid,)).fetchone()
+    rd = row[0] if row else None
+    if not rd:
+        return
+    cutoff = _d.today() - _td(days=int(rd))
+    if _dt.datetime.strptime(backfill_from, "%Y%m%d").date() < cutoff:
+        raise ApiError(400, "SYNC_BACKFILL_RETENTION_CONFLICT",
+                       f"回补起点 {backfill_from} 落在滚动裁剪窗内（retention_days={rd}，"
+                       f"cutoff≈{cutoff}）——回补会复活已裁数据与 GC 互斥；"
+                       f"如确需深史请调大 retention_days 或临时置 NULL")
+
+
 @router.get("/api/sync/config")
 def list_sync_config(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
@@ -130,6 +153,7 @@ def trigger_sync_api(sid: str, backfill_from: str | None = None, payload: dict =
     """异步触发类型级同步：提交 Celery 后台任务，立即返回 task_id（不阻塞 HTTP）。"""
     _validate_sid(sid)            # D-1 配套：入口 4xx 预检（此前任意 sid 200，校验延后 worker）
     _validate_backfill(backfill_from)   # D-2：非法日期此前静默成功（abc 落 start 列）
+    _validate_backfill_retention(sid, backfill_from)   # 批 171d-B DEF-11：裁剪窗互斥
     if sid == "bar_retention_sweep":
         # 批 158：清道夫手动通道（窗口收紧即清——Web 改小后即刻触发按新窗多删）
         from src.scheduler.tasks import bar_retention_sweep
@@ -299,6 +323,8 @@ def backfill_symbol_api(sid: str, ts_code: str, body: dict = Body(...),
     for d in (body.get("start", ""), body.get("end", "")):
         if d:
             _validate_backfill(d if len(d) == 8 else d.replace("-", ""))
+    # 批 171d-B DEF-11：per-symbol 回补旁路同险（crypto 分钟档 retention_days 实存）——起点同校验。
+    _validate_backfill_retention(sid, body.get("start", "").replace("-", "") or None)
     from src.data_sync.engine import backfill_symbol
     result = backfill_symbol(sid, ts_code, body.get("start", ""), body.get("end", ""))
     audit_log(payload["username"], "backfill_symbol", f"{sid}:{ts_code}:{body.get('start')}~{body.get('end')}")

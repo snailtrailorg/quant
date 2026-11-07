@@ -529,6 +529,14 @@ def update_system_config(key: str, body: dict = Body(...),
                 value = str(float(value))
             except Exception:
                 raise ApiError(400, "CONFIG_VALUE_INVALID", f"{key} 需 float 值")
+        elif value_type == "date":
+            # 批 171d-B：日期型键格式防呆（非门禁——用户旋钮可任意改值，仅拦手滑格式错）。
+            import datetime as _dt
+            try:
+                value = _dt.date.fromisoformat(str(value).strip()).isoformat()
+            except Exception:
+                raise ApiError(400, "CONFIG_VALUE_INVALID",
+                               f"{key} 需 YYYY-MM-DD 日期值: {str(value)[:40]!r}")
         # 批36b-α：数值键→(lo,hi) 查表注册表（批28-7 两键特例并入统一；未注册键=仅 cast 零范围
         # ——注册表是增强非强制全集）。NaN/Inf 一并拒（36a 同病）。
         from math import isfinite

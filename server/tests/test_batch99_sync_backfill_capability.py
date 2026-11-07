@@ -131,7 +131,8 @@ class TestBackfillCapabilityTruth:
             "binance_perp_hourly", "binance_perp_1min", "binance_perp_15min",
             "okx_perp_hourly", "okx_perp_1min", "okx_perp_15min",
             "st_list_sync",     # 批 117 P0-2/0143：retention='2026-01-01' 地板（防全史首跑）
-            "suspend_d_sync"}   # 批 171b：retention='2026-10-01' 地板（同型防首跑全史）
+            "suspend_d_sync",   # 批 171b：retention='2026-10-01' 地板（同型防首跑全史）
+            "trade_cal"}        # 批 171d-B/0171：声明性 seed '1990-12-19'（日历自持全史）
         assert rows["binance_perp_hourly"] < rows["binance_perp_1min"], \
             "hourly 的保留窗更长（7 天 vs 1 天）"
         assert str(rows["okx_perp_hourly"]) < str(rows["okx_perp_1min"]), \

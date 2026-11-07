@@ -29,7 +29,9 @@ SQL_BASELINE = {
     "alerts.py": 27, "auth_routes.py": 53, "backtest.py": 27, "chat.py": 14,
     "events.py": 0, "im_bots.py": 14, "mgmt.py": 0, "quality.py": 3,
     "risk.py": 20, "routing.py": 4, "stock.py": 8, "strategy.py": 14,
-    "sync.py": 13, "system.py": 25, "trading.py": 28,
+    "sync.py": 14,
+    # 批 171d-B：+1（retention_days 互斥预检 SELECT——入口 4xx 防御，校验性点查非业务查询面）
+    "system.py": 25, "trading.py": 28,
 }
 
 SQL_RE = re.compile(
