@@ -94,6 +94,7 @@ export default {
       idle: '空闲', ok: '正常', warn: '告警', stuck: '卡死', completed: '已完成',
       terminated: '已终止', paused: '已暂停',
       disabled: '已停用',
+      skipped: '已跳过',   // 批 171g（DEF-04）：空窗已追平/上游未发布——正常等待态
     },
     tabs: {
       astock: 'A股', cb: '可转债', etf: '场内基金',
@@ -1502,6 +1503,7 @@ mail: '邮件 SMTP',
       idle: 'Idle', ok: 'OK', warn: 'Warn', stuck: 'Stuck', completed: 'Completed',
       terminated: 'Terminated', paused: 'Paused',
       disabled: 'Disabled',
+      skipped: 'Skipped',
     },
     tabs: {
       astock: 'A-Shares', cb: 'Convertibles', etf: 'Listed Funds',
@@ -2890,6 +2892,7 @@ mail: 'Email SMTP',
         "terminated": "已終止",
         "paused": "已暫停",
         "disabled": "已停用",
+        "skipped": "已跳過",
       },
       tabs: {
         "astock": "A股",

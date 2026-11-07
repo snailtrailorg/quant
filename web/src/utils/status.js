@@ -8,6 +8,7 @@ export const STATUS_META = {
   sent:{dot:'neutral'},     failed:{dot:'critical'}, success:{dot:'success'}, idle:{dot:'neutral'},
   ok:{dot:'success'},       warn:{dot:'warn'},       stuck:{dot:'critical'},  completed:{dot:'neutral'},
   terminated:{dot:'neutral'}, paused:{dot:'warn'}, disabled:{dot:'neutral'},
+  skipped:{dot:'neutral'},   // 批 171g（DEF-04）：空窗已追平/未发布等待——正常态非作业
 }
 export const statusMeta = (r, t) => {
   const m = STATUS_META[r] || { dot: 'neutral' }

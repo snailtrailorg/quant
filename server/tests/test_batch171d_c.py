@@ -105,11 +105,14 @@ class TestDerivedClamp:
     def test_non_derrieved_family_untouched(self):
         """非派生族（如 astock_basic）⇒ 真函数在注册表 miss 处返 None 不查库（零成本
         直证——步4 A-P2-4：原 tripwire 被内层 patch 遮蔽＝空钉，改用真函数+断言值）。"""
+        from datetime import date as _d
         assert engine._local_max("astock_basic") is None, "注册表 miss ⇒ None（不查库）"
         _r, cap = _run({"pulled": 1, "saved": 1, "start": "20261105",
                         "failed_dates": [], "last_success_date": "20261107"},
                        local_max=None, sid="astock_basic")
-        assert cap.states[0][0] == "20261107", "原推进（无收口链）"
+        # 无键 handler 推 cursor_upto-or-end_date（=today）——日期无关断言（原 20261107
+        # 硬编码是 11-07 当日写的日期脆弱形态，次日即红）
+        assert cap.states[0][0] == _d.today().strftime("%Y%m%d"), "原推进（无收口链）"
 
     def test_none_advance_path_skips_derived(self):
         """A 增审新 P1：last_date=None 入参路径 ⇒ 派生整体跳过（None 语义 :302 原样——

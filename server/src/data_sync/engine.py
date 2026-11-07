@@ -728,7 +728,10 @@ def _sync_astock_basic(cfg: dict, end_date: str, backfill_from: str | None = Non
         last = cfg.get("last_sync_date") or (date.today() - timedelta(days=7)).strftime("%Y%m%d")
         start = max((pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d"), _floor_s)
         if start > end_date:
-            return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [], "expected_days": 0, "actual_days": 0}
+            # 批 171g（DEF-04 词修）：空窗＝已追平（游标≥today），非成功作业——
+            # `log_status='skipped'`（正常等待态，crypto/jq 先例同词）。
+            return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [],
+                    "expected_days": 0, "actual_days": 0, "log_status": "skipped"}
     # 批 171d-A：单轮最大跨度（回补轮）；_sync_by_trade_date 是 keyed（last_success_date）
     # 数据驱动游标——夹后 end_date 传入即天然安全。
     start, _eff_end, _trunc = _clamp_span(start, end_date, cfg.get("_max_span_days"))
@@ -3504,8 +3507,10 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
         start = ((pd.Timestamp(last) + timedelta(days=1)).strftime("%Y%m%d")
                  if last else floor_s)
         if start > end_date:
+            # 批 171g（DEF-04 词修）：空窗＝已追平——skipped（171g 三处早退同批）。
             return {"pulled": 0, "saved": 0, "start": start, "failed_dates": [],
-                    "expected_days": 0, "actual_days": 0, "excluded": _fam_excl}
+                    "expected_days": 0, "actual_days": 0, "log_status": "skipped",
+                    "excluded": _fam_excl}
     # 批 171d-A：单轮最大跨度（D31 §5）——回补轮夹取；bar 6 族游标数据驱动（keyed
     # last_success_date / min(failed)），子 handler 返回体天然按夹后 end_date 计算。
     start, _eff_end, _trunc = _clamp_span(start, end_date, cfg.get("_max_span_days"))
@@ -3663,9 +3668,10 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         if _trunc:
             end_date = _eff_end
         if start_ts > end_date:
+            # 批 171g（DEF-04 词修）：空窗＝已追平——skipped（171g 三处早退同批）。
             return {"pulled": 0, "saved": 0, "start": start_ts, "cursor_upto": end_date,
                     "failed_dates": [], "expected_days": 0, "actual_days": 0,
-                    "excluded": _fam_excl}
+                    "log_status": "skipped", "excluded": _fam_excl}
 
         # 批 97：逐日循环接交易日历（法定节假日不再空调用）——日历未覆盖区间时
         # fail-open 回 freq="B"（宁多打、不漏拉）。trade days ⊆ business days，
