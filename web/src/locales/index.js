@@ -101,6 +101,7 @@ export default {
 mail: '邮件 SMTP',
       llm: 'LLM 模型', dataSources: '数据源', tradingAccounts: '交易账号', sms: '短信通道', proxy: '代理出口',   // 批43 改名（文案师）   // 批83a:集成中心「外部接口」单页签拆「数据源/交易账号」两页签   // 批102a:代理出口页签
  alerts: '告警通道',   // 批23：告警→告警通道（用户裁定 7）；批33a：perm 键随权限页退役删
+      run: '运行配置',   // 批 171g 补回：批 165 孤儿清理误删（Settings.vue tabs.run 动态引用 i18nKey 形态静态扫不到——非孤儿）
     },
     proxy: {   // 批102a：代理出口（全局池 + 按消费方绑定 + 测连通）
       poolTitle: '代理池',
@@ -1508,6 +1509,7 @@ mail: '邮件 SMTP',
 mail: 'Email SMTP',
       llm: 'LLM Models', dataSources: 'Data Sources', tradingAccounts: 'Trading Accounts', sms: 'SMS Channels', proxy: 'Proxy Egress',   // 批37   // 批83a   // 批102a
  alerts: 'Alert Channels',   // 批33a：perm 键删（两区对齐）
+      run: 'Run Config',   // 批 171g 补回（同 zh 侧）
     },
     proxy: {   // batch102a: proxy egress (pool + per-consumer binding + connectivity test)
       poolTitle: 'Proxy Pool',
@@ -2902,6 +2904,7 @@ mail: 'Email SMTP',
         "sms": "簡訊通道",
         "proxy": "代理出口",
         "alerts": "告警通道",
+        "run": "運行配置",
       },
       proxy: {
         "poolTitle": "代理池",
