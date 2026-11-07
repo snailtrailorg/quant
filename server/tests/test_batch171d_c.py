@@ -332,20 +332,24 @@ class TestLocalMaxRealSQL:
                 got = engine._local_max(sid)
                 assert got is None or re.fullmatch(r"\d{8}", got), \
                     f"{sid}: 返回非 YYYYMMDD/None 形态: {got!r}"
-                # SH 渲染一致性：SQL 内 AT TIME ZONE 'Asia/Shanghai' ⇒ 与基准聚合同值
-                if got is not None and "AT TIME ZONE 'Asia/Shanghai'" in sql:
-                    m = re.search(r"FROM (\w+)", sql)
-                    tbl = m.group(1)
-                    if "security_master" in sql:      # bar 族谓词形态
-                        cat = re.search(r"category='(\w+)'", sql).group(1)
-                        base = conn.execute(
-                            f"SELECT to_char(max(ts AT TIME ZONE 'Asia/Shanghai'),'YYYYMMDD') "
-                            f"FROM {tbl} WHERE symbol IN "
-                            f"(SELECT vt_symbol FROM security_master WHERE category=%s)",
-                            (cat,)).fetchone()[0]
-                    else:                              # bar_index 全表
-                        base = conn.execute(
-                            f"SELECT to_char(max(ts AT TIME ZONE 'Asia/Shanghai'),'YYYYMMDD') "
-                            f"FROM {tbl}").fetchone()[0]
-                    assert got == str(base), \
-                        f"{sid}: LIMIT1={got} 与 SH 基准聚合={base} 不一致（时区渲染回归）"
+                # SH 渲染一致性（B 增审 P2 修正）：**bar_* 表族按表名无条件比对**——禁用
+                # 「SQL 内含 AT TIME ZONE」作门（index_daily P0 正是删掉该子句的形态——
+                # 门控会静默跳过＝守门自失效）。基准自身已 SH 锚定，被测 SQL 无论渲染
+                # 形态如何，LIMIT1 值偏差即红。tier1 五族（trade_date 文本列无时区语义）
+                # 跳过基准比对（形态断言已足）。
+                tbl = _tbl
+                if not tbl.startswith("bar_"):
+                    continue
+                if "security_master" in sql:      # bar 族谓词形态
+                    cat = re.search(r"category='(\w+)'", sql).group(1)
+                    base = conn.execute(
+                        f"SELECT to_char(max(ts AT TIME ZONE 'Asia/Shanghai'),'YYYYMMDD') "
+                        f"FROM {tbl} WHERE symbol IN "
+                        f"(SELECT vt_symbol FROM security_master WHERE category=%s)",
+                        (cat,)).fetchone()[0]
+                else:                              # bar_index 全表
+                    base = conn.execute(
+                        f"SELECT to_char(max(ts AT TIME ZONE 'Asia/Shanghai'),'YYYYMMDD') "
+                        f"FROM {tbl}").fetchone()[0]
+                assert got == (str(base) if base else None), \
+                    f"{sid}: LIMIT1={got} 与 SH 基准聚合={base} 不一致（时区渲染回归）"
