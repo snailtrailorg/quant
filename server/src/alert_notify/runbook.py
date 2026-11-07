@@ -54,7 +54,6 @@ RUNBOOK: dict[str, dict] = {
     "sync.inception_cover_low": {"label": "inception 可及性异常", "guide": "两种形态：① `security_master.list_date` 覆盖率**连续多轮**不足（≥2 轮）⇒ 该 scope 缺口被 §5.4 的 uncertain **永久静默抑制**（抑制本是安全网，失修即变盲区）——查刷新链是否持续探不到源（crypto 看代理出口）；② **互证闸不符**：`engine._RECONCILE_UNKNOWN_INCEPTION` 的声明与实测「有 symbol 且 list_date 空」漂移 ⇒ 复核声明集（源可及性可能已变）。"},
     "sync.local_unreadable": {"label": "对账本地不可读", "guide": "`_local_dates_map` 对 bar 表**整 scope**读取失败（表未建/权限/连接）⇒ 该 scope 全族转 `uncertain`（**不是**「无缺口」）——bar 表系统性不可读时，真实大段缺失会被压成不确定且**只**在 journal 摘要留 `uncertain=N`。查该表是否存在、连接与权限；这是**观测盲区的补救告警**（与 `sync.universe_missing` 同级）。"},
     "sync.reconcile_budget": {"label": "对账体量超阈", "guide": "本轮该 scope 的**落表行数**超 `engine._GAP_ROW_BUDGET[kind]` ⇒ **不落主张**（该 scope 当轮缺口**不报**＝显名取舍「用漏报换稳定」，以本告警替代静默）＋ 其判据不许过门。通常预示窗口下界/期望集算错或库被污染——查 floor 计算与 bar 表；确需放宽时调 `_GAP_ROW_BUDGET`（按族字典，daily/minute 量级差大）。"},
-    "sync.cursor_frozen": {"label": "同步游标冻结", "guide": "批 171a·D1 逃逸闸：同 sync_id 连续 N 轮（engine._CAP_FREEZE_ALERT_ROUNDS，现 7）cursor_cap 收口实际生效（`sync:cap_freeze:<sid>` Valkey 计数）——缺口未自愈、游标停在缺口前，窗口逐轮增长。查 dataops sync_gap state='open' 行与上游该日发布；确认永久缺后回补越界（backfill）或调 retention；`sync_log.error` 的 `cursor_capped:<date>` 注记可追溯每轮收口。"},
     "disk.warning":     {"label": "磁盘告警", "guide": "磁盘余量触警——清理 var/log 与旧 release（GC 保 N=5）。"},
     # ——— 健康监控 ———
     "health.iface-down":   {"label": "接口健康异常", "guide": "LLM/PG/Valkey 有离线——查 /observe 健康页与对应服务。"},

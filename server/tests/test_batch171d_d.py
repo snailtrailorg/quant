@@ -156,9 +156,6 @@ class TestTier1BackfillDiff:
                             lambda *a, **k: set(local_dates) if local_dates else None)
         monkeypatch.setattr(eng, "_trade_dates_in_range",
                             lambda lo, hi: [f"2026010{i}" for i in (1, 2, 3)])
-        monkeypatch.setattr(eng, "_cursor_cap", lambda *a: None)
-        monkeypatch.setattr(eng, "_cursor_cap_healed", lambda *a: False)
-        monkeypatch.setattr(eng, "_cursor_freeze_count", lambda *a, **k: 0)
         monkeypatch.setattr(eng, "_alert_sync_gaps", lambda *a: None)
         cfg = {"id": sid, "mode": "incremental", "enabled": True,
                "last_sync_date": None, "provider": "tushare", "_max_span_days": 366}

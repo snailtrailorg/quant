@@ -41,10 +41,6 @@ def _run(handler_ret, *, cfg=None, local_max=None, sid=NS):
         def __exit__(self, *a):
             return False
 
-    def _fake_freeze(sid, *, bumped):
-        cap.freeze_calls.append((sid, bumped))
-        return None
-
     with patch("src.data_sync.sync_lock.SyncLock", _FakeLock), \
          patch.object(engine, "_get_config", return_value=fake_cfg), \
          patch.object(engine, "_HANDLERS", {sid: MagicMock(return_value=handler_ret)}), \
@@ -56,8 +52,7 @@ def _run(handler_ret, *, cfg=None, local_max=None, sid=NS):
          patch.object(engine, "_log",
                       side_effect=lambda *a, **k: cap.logs.append((a[7], a[8]))), \
          patch.object(engine, "_alert_generic"), \
-         patch.object(engine, "_alert_sync_failure"), \
-         patch.object(engine, "_cursor_freeze_count", side_effect=_fake_freeze):
+         patch.object(engine, "_alert_sync_failure"):
         result = engine.sync(sid)
     return result, cap
 
@@ -66,13 +61,16 @@ class TestDerivedClamp:
     """验收 1（sync() 读侧派生收口——A-P0-2 单源链）。"""
 
     def test_min_clamps_advance(self):
-        """推进 20261107 > 本地末日 20261104 ⇒ 收口 20261104、词 partial（idle→partial 通则）。"""
+        """推进 20261107 > 本地末日 20261104 ⇒ 收口 20261104、词 partial（idle→partial 通则）。
+        171 收官件：note 落 `derived_clamp:<mx>` 词汇（审计面——A-P2-5）。"""
         _r, cap = _run({"pulled": 1, "saved": 1, "start": "20261105", "failed_dates": [],
                         "expected_days": 3, "actual_days": 3,
                         "cursor_upto": "20261107"},
                        local_max="20261104", sid="astock_daily")
         assert cap.states[0][0] == "20261104", "收口至数据末日"
         assert cap.states[0][2] == "partial", "收口生效 ⇒ 词 partial"
+        assert any("derived_clamp:20261104" in (e or "") for _s, e in cap.logs), \
+            "sync_log note 留痕（禁静默）"
 
     def test_empty_domain_none_no_clamp(self):
         """空域 None（bar_5min 现状 0 行）⇒ 不收口（防 None 传染 NULL 全窗循环）。"""
@@ -201,9 +199,6 @@ class TestTier1SparseGateFlip:
         monkeypatch.setattr(engine, "_local_dates", lambda *a, **k: None)
         monkeypatch.setattr(engine, "_trade_dates_in_range",
                             lambda lo, hi: ["20261105", "20261106"])
-        monkeypatch.setattr(engine, "_cursor_cap", lambda *a: None)
-        monkeypatch.setattr(engine, "_cursor_cap_healed", lambda *a: False)
-        monkeypatch.setattr(engine, "_cursor_freeze_count", lambda *a, **k: 0)
         monkeypatch.setattr(engine, "_alert_sync_gaps", lambda *a: None)
         cfg = {"id": sid, "mode": "incremental", "enabled": True,
                "last_sync_date": "20261104", "provider": "tushare", "_max_span_days": 366}
@@ -291,14 +286,10 @@ class TestCapRetirementZeroTouch:
     def test_cap_emit_ids_empty(self):
         assert engine._CAP_EMIT_IDS == frozenset()
 
-    def test_cursor_cap_always_none(self):
-        for sid in ("astock_daily", "stk_limit_sync", "cb_daily", "cyq_perf_sync"):
-            assert engine._cursor_cap(
-                sid, {"gap_dates": ["20261014"], "uncertain": None, "expected": 3}, []) is None
-
-    def test_healed_always_false(self):
-        assert not engine._cursor_cap_healed(
-            "astock_daily", {"gap_dates": [], "uncertain": None, "expected": 3})
+    def test_cap_functions_gone(self):
+        """171 收官件：三函数已删（重定义即红——反向守门在 test_batch171a）。"""
+        assert not hasattr(engine, "_cursor_cap")
+        assert not hasattr(engine, "_cursor_cap_healed")
 
 
 def _db_up() -> bool:
