@@ -309,6 +309,7 @@ def _run_sync(handler_ret):
          patch.object(engine, "_get_config", return_value=fake_cfg), \
          patch.object(engine, "_VIA_KIND_IDS", frozenset()), \
          patch.object(engine, "_HANDLERS", {"astock_daily": MagicMock(return_value=handler_ret)}), \
+         patch.object(engine, "_local_max", return_value=None), \
          patch.object(engine, "_log"), \
          patch.object(engine, "_mark_running"), \
          patch.object(engine, "_update_sync_state"), \

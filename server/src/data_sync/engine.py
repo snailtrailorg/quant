@@ -1286,7 +1286,13 @@ _DERIVED_MAX_SQL: dict[str, tuple[str, str]] = {
                  "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_1d "
                  "WHERE symbol IN (SELECT vt_symbol FROM security_master "
                  "WHERE category='convertible') ORDER BY ts DESC LIMIT 1"),
-    "index_daily": ("bar_index", "SELECT to_char(ts,'YYYYMMDD') FROM bar_index ORDER BY ts DESC LIMIT 1"),
+    "index_daily": ("bar_index",
+                    # 批 171d-C 步4 A-P0：连接池 pin TimeZone=UTC（db.py 批 56b），bar_index.ts
+                    # 为上海零点（=前日 16:00 UTC）——裸 to_char(ts) 恒渲染早一天 ⇒ 游标每轮
+                    # 被压低一天（dev 实证：utc=20261105 / sh=20261106）。必须 AT TIME ZONE
+                    # 'Asia/Shanghai' 与其余 6 条 bar SQL 对齐。
+                    "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_index "
+                    "ORDER BY ts DESC LIMIT 1"),
     "astock_minute": ("bar_1min",
                       "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_1min "
                       "WHERE symbol IN (SELECT vt_symbol FROM security_master "

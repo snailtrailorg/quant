@@ -92,23 +92,25 @@ class TestDerivedClamp:
         assert cap.states[0][0] == "20261105", "部分失败推连续成功末——不因 max 抬高"
 
     def test_failed_word_unchanged_when_clamped(self):
-        """收口+failed 共现 ⇒ 词仍 failed（status 单源不改写——P1-4）。"""
-        _r, cap = _run({"pulled": 0, "saved": 0, "start": "20261105",
-                        "failed_dates": ["20261105:X"],
-                        "last_success_date": None,
-                        # 全失败 fallback 分支（_raw=None）⇒ 派生不进——此用例钉部分失败：
-                        },
-                       local_max="20261104", sid="cb_daily")
-        # cb_daily 无 keyed 键 ⇒ cursor_upto=end_date(today) 路径
-        assert cap.states[0][2] in ("partial", "failed"), "词如实（不被收口改写成 idle）"
+        """收口+failed 共现 ⇒ 词仍 partial、游标收口（status 单源不改写——P1-4）。
+
+        步4 A-P1-3 修正：部分失败（lsd 非 None）+local_max<lsd ⇒ 游标=_mx 且词 partial
+        （原用例误走全失败 fallback 分支+双活断言＝路径不可分辨反面教材）。
+        """
+        _r, cap = _run({"pulled": 3, "saved": 3, "start": "20261105",
+                        "failed_dates": ["20261106:X"],
+                        "last_success_date": "20261106"},
+                       local_max="20261104", sid="astock_daily")
+        assert cap.states[0][0] == "20261104", "部分失败轮派生收口仍生效（恒收）"
+        assert cap.states[0][2] == "partial", "收口+failed 共现词=partial（不被改写）"
 
     def test_non_derrieved_family_untouched(self):
-        """非派生族（如 astock_basic）⇒ _local_max 不进链（query 零调用——禁用族零成本）。"""
-        with patch.object(engine, "_local_max",
-                          side_effect=AssertionError("非派生族不得查询")) as _lm:
-            _r, cap = _run({"pulled": 1, "saved": 1, "start": "20261105",
-                            "failed_dates": [], "last_success_date": "20261107"},
-                           sid="astock_basic")
+        """非派生族（如 astock_basic）⇒ 真函数在注册表 miss 处返 None 不查库（零成本
+        直证——步4 A-P2-4：原 tripwire 被内层 patch 遮蔽＝空钉，改用真函数+断言值）。"""
+        assert engine._local_max("astock_basic") is None, "注册表 miss ⇒ None（不查库）"
+        _r, cap = _run({"pulled": 1, "saved": 1, "start": "20261105",
+                        "failed_dates": [], "last_success_date": "20261107"},
+                       local_max=None, sid="astock_basic")
         assert cap.states[0][0] == "20261107", "原推进（无收口链）"
 
     def test_none_advance_path_skips_derived(self):
@@ -297,3 +299,53 @@ class TestCapRetirementZeroTouch:
     def test_healed_always_false(self):
         assert not engine._cursor_cap_healed(
             "astock_daily", {"gap_dates": [], "uncertain": None, "expected": 3})
+
+
+def _db_up() -> bool:
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            conn.execute("SELECT 1 FROM sync_config LIMIT 1")
+        return True
+    except Exception:
+        return False
+
+
+needs_db = pytest.mark.skipif(not _db_up(), reason="真库行为级（无 dev 库自动跳过）")
+
+
+class TestLocalMaxRealSQL:
+    """步4 A-P1-2：12 条派生 SQL **真库逐条执行**守门——P0（index_daily 时区缺失）正是
+    从「全 mock 零执行」的洞漏掉（161b/171「改查询必须看真实输出」纪律）。
+
+    断言口径：返回 None（空域——bar_5min 现状合法）或 8 位 YYYYMMDD；**SH 渲染一致性**
+    ——bar 族与独立基准查询（同表同谓词 max() 聚合+AT TIME ZONE）值必须相等（防
+    时区/渲染形态回归——index_daily 曾 utc/sh 差一天）。
+    """
+
+    @needs_db
+    def test_all_twelve_sqls_execute_and_render_sh(self):
+        import re
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            for sid, (_tbl, sql) in sorted(engine._DERIVED_MAX_SQL.items()):
+                got = engine._local_max(sid)
+                assert got is None or re.fullmatch(r"\d{8}", got), \
+                    f"{sid}: 返回非 YYYYMMDD/None 形态: {got!r}"
+                # SH 渲染一致性：SQL 内 AT TIME ZONE 'Asia/Shanghai' ⇒ 与基准聚合同值
+                if got is not None and "AT TIME ZONE 'Asia/Shanghai'" in sql:
+                    m = re.search(r"FROM (\w+)", sql)
+                    tbl = m.group(1)
+                    if "security_master" in sql:      # bar 族谓词形态
+                        cat = re.search(r"category='(\w+)'", sql).group(1)
+                        base = conn.execute(
+                            f"SELECT to_char(max(ts AT TIME ZONE 'Asia/Shanghai'),'YYYYMMDD') "
+                            f"FROM {tbl} WHERE symbol IN "
+                            f"(SELECT vt_symbol FROM security_master WHERE category=%s)",
+                            (cat,)).fetchone()[0]
+                    else:                              # bar_index 全表
+                        base = conn.execute(
+                            f"SELECT to_char(max(ts AT TIME ZONE 'Asia/Shanghai'),'YYYYMMDD') "
+                            f"FROM {tbl}").fetchone()[0]
+                    assert got == str(base), \
+                        f"{sid}: LIMIT1={got} 与 SH 基准聚合={base} 不一致（时区渲染回归）"
