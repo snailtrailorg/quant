@@ -624,27 +624,43 @@ def data_continuity_check(self):
         except Exception:
             _susp = {}
         repaired_any = False   # F-55：循环内逐标的写触发会导致 N 次 rewarm，改为循环外只写一次
-        for symbol, last_ts, cnt in rows:
-            _exp_sym = expected - len(_susp.get(symbol) or [])
-            if cnt < _exp_sym:
-                issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{_exp_sym})")
-                try:
-                    ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
-                    from src.data_platform.adapters.base import TushareAdapter
-                    from src.data_platform.adapters.tushare_adapter import pull_daily
-                    from src.data_platform.db import save_bars
-                    df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
-                    if not df.empty:
-                        rws = TushareAdapter().to_bar_rows(df, "1D")
-                        repaired = save_bars("1D", rws)
-                        if repaired > 0:
-                            repaired_any = True
-                except Exception as e:
-                    issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
-        # F-55（2026-09-03）：运行级只写一次触发标记（原循环内逐标的写，多 worker 每次 poll 读到
-        # 新值就 rewarm，N 个修复标的 → N 次重暖机）。写变化值（isoformat 微秒级唯一）
-        if repaired_any and r is not None:
-            r.set("factor:recalc:triggered", datetime.now().isoformat(), ex=3600)
+        # 批 171e（DEF-13）：补采写段罩锁——防 beat 重叠/手动+beat 并发双跑（重复重拉/
+        # recalc 键重复触发）。锁只罩**写段**（上方检测查询/suspend 净化只读不罩）；
+        # 未获 ⇒ 跳过补采循环（缺量 issue 当轮不报，以一条锁跳过行替代；repaired_any
+        # 恒 False ⇒ recalc 键结构性不写）。**过渡护栏**：本补采段是 171 对账体系外平行
+        # 旧路径，收编评估随 171c 腿 3 裁定（任务文件长期方向声明）。
+        from src.data_sync.sync_lock import SyncLock
+        with SyncLock("reconcile:continuity") as clock:
+            if not clock.acquired:
+                logger.warning("补采锁被持(reconcile:continuity)，本轮跳过补采")
+                issues.append("补采锁被持(reconcile:continuity)，本轮跳过补采")
+            else:
+                for symbol, last_ts, cnt in rows:
+                    _exp_sym = expected - len(_susp.get(symbol) or [])
+                    if cnt < _exp_sym:
+                        issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{_exp_sym})")
+                        try:
+                            ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
+                            from src.data_platform.adapters.base import TushareAdapter
+                            from src.data_platform.adapters.tushare_adapter import pull_daily
+                            from src.data_platform.db import save_bars
+                            # 批 171e（A-P1-1）：裸 pull_daily 零限速——包 rate_limit_context
+                            #（每小时轮补采与增量波次叠加时该侧无闸）。
+                            from src.data_platform.rate_limit import rate_limit_context
+                            from src.data_sync.engine import _get_rate_ds
+                            with rate_limit_context(_get_rate_ds("tushare"), "daily"):
+                                df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
+                            if not df.empty:
+                                rws = TushareAdapter().to_bar_rows(df, "1D")
+                                repaired = save_bars("1D", rws)
+                                if repaired > 0:
+                                    repaired_any = True
+                        except Exception as e:
+                            issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
+                # F-55（2026-09-03）：运行级只写一次触发标记（原循环内逐标的写，多 worker 每次 poll 读到
+                # 新值就 rewarm，N 个修复标的 → N 次重暖机）。写变化值（isoformat 微秒级唯一）
+                if repaired_any and r is not None:
+                    r.set("factor:recalc:triggered", datetime.now().isoformat(), ex=3600)
     except Exception as e:
         issues.append(f"检测异常: {str(e)[:100]}")
 
@@ -2107,9 +2123,18 @@ def data_gap_reconcile():
     实测单轮耗时，若 > 1800s 则**改此常量**并重跑门。
     超时语义（契约，见 `engine._reconcile_symbols`）：软限**直抛**（per-symbol `except` 不吞）
     ⇒ **中止整轮**（失去 per-symbol 隔离）＝「整轮放弃、幂等、下轮续」。
+
+    批 171e（DEF-13）：入口罩 `SyncLock("reconcile:symbols")`——防 beat 重叠/手动+beat
+    并发双跑（sync_gap 行读写竞态+重复重拉）。未获 ⇒ skipped 平铺体（与 sync() 同词；
+    消费方零命中已核）。锁键与 sync_id/provider 键无碰撞；`__enter__` 自动心跳
+    （TTL 60s vs 慢轮 2093s）。
     """
     from src.data_sync.engine import _reconcile_symbols
-    return {"reconcile": _reconcile_symbols()}
+    from src.data_sync.sync_lock import SyncLock
+    with SyncLock("reconcile:symbols") as rlock:
+        if not rlock.acquired:
+            return {"status": "skipped", "reason": "上次对账仍在运行"}
+        return {"reconcile": _reconcile_symbols()}
 
 
 @app.task(name="src.scheduler.tasks.bar_retention_sweep",
