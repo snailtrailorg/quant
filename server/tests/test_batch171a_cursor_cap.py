@@ -406,6 +406,10 @@ class TestWhitelistDrift:
             "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "st_list_sync",
             "cyq_perf_sync", "index_daily", "astock_minute", "astock_minute_5min",
         }), "派生 12 族（D31 §3 分轨表稠密轨）"
+        # 批 171d-C（B-P2-1）：接住原 d1 的「⊆ 装配可达」守卫——派生族必须真实装配
+        # （防字面量集与路由表漂移：未来改名/删键即红）。
+        assert engine._DERIVED_CURSOR_IDS <= (set(engine._VIA_KIND_IDS) | set(engine._HANDLERS)), \
+            "派生集 ⊆ 装配可达（via_kind ∪ _HANDLERS）"
 
     def test_d2_stray_cap_key_ignored_for_derived(self):
         """A-P1-3 消费侧守卫：派生族 handler_ret 带 stray cursor_cap 键 ⇒ sync() 恒忽略
