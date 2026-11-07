@@ -93,7 +93,9 @@ class TestTradeDatesInRange:
     def test_normal_returns_open_days_only(self):
         rows = [(date(2026, 9, 28), True), (date(2026, 9, 29), True),
                 (date(2026, 10, 1), False), (date(2026, 10, 2), False),
-                (date(2026, 10, 5), False)]
+                (date(2026, 10, 5), False), (date(2026, 10, 8), False)]
+        # 批 171h：末行补至 10-08（距 end 10-09=1 天 ≤3 容差）——末端守卫下原 10-05
+        # 末行（距 end=4 天）会被判截断回 None（新语义正确行为，171h 文件有专测）。
         with patch("src.data_platform.db.get_conn", return_value=_FakeConn(rows)):
             # 首行 09-28 距起点 09-26 仅 2 天 ⇒ 覆盖成立
             assert engine._trade_dates_in_range("20260926", "20261009") == \

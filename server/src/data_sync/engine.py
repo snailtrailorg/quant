@@ -392,6 +392,15 @@ def _trade_dates_in_range(start_ts: str, end_ts: str) -> list[str] | None:
             logger.warning("trade_cal 覆盖度不足（首行 %s 晚于区间起点 %s），回退 freq=B",
                            rows[0][0], d0)
             return None
+        # 批 171h（DEF-16）：**末端守卫**——末行距区间终点 >3 天 ⇒ 日历被截断（如年末
+        # 未预排/表尾早于 end）⇒ 返回部分区间会静默漏末端段（期望集偏小=假 closed）。
+        # 与首端同语义 fail-open（None ⇒ 回 freq=B / uncertain）。3 天容差=周末/长假
+        # 聚集（末行距 end=3 合法：周五末行对下周一 end）。跨年窗撞未预排日历=保守回退
+        # （宁多打不漏拉，预期行为非缺陷——dev 日历预排到 2026-12-31 实证零常态误报）。
+        if (date(int(end_ts[:4]), int(end_ts[4:6]), int(end_ts[6:8])) - rows[-1][0]).days > 3:
+            logger.warning("trade_cal 末端覆盖不足（末行 %s 早于区间终点 %s 超 3 天），回退 freq=B",
+                           rows[-1][0], d1)
+            return None
         return [r[0].strftime("%Y%m%d") for r in rows if r[1]]
     except Exception as e:
         logger.warning("交易日历区间读取失败（回退 freq=B）: %s", e)
@@ -2110,12 +2119,18 @@ def _local_dates(table: str, date_expr: str, where: str = "",
 
 
 def _local_dates_map(table: str, date_expr: str, symbols: list[str],
+                     since: str | None = None,
                      ) -> dict[str, set[str]] | None:
     """**scope 级一次**取本地日期集：`{symbol: {date}}`（**读取规模契约**：不逐标的往返）。
 
     与 `_local_dates(table, date_expr, "symbol=%s", (sym,))` **语义等价**（后者是单标的 SQL 版，
-    仍是 per-date 族的口）——等价性由 `test_batch110_reconcile_scale.TestBatchEquivalence` 钉住：
-    同一表同一表达式下，`_local_dates_map(...).get(sym, set())` 必须逐值等于单标的 `_local_dates`。
+    仍是 per-date 族的口）——等价性由 `test_batch110_reconcile_scale.TestBatchEquivalence` 钉住：同一表同一表达式下，`_local_dates_map(...).get(sym, set())` 必须逐值等于单标的 `_local_dates`。
+
+    批 171h（DEF-06）：`since`＝YYYYMMDD 下界（家族级地板——`_window_floors(sym=None)` 口径）。
+    语义＝**超集投影**：返回结果仍包含窗内全部行（expected 逐日比对消费，集合超集零语义
+    漂移——比 per-symbol inception 更松的下界只多读不改判定）。`None`=零漂移（不加条件，
+    逐字现状——家族三源皆未声明时的兜底）。date_expr 复用 to_char YYYYMMDD（8 位定长
+    字典序=日期序）。
 
     不可判 ⇒ `None`（fail-closed ⇒ **整个 scope** 转 `uncertain`）——与 `_local_dates` 同纪律：
     不得退化成「空集」（那会被当成「一天都没有」⇒ 全窗口假缺口）。
@@ -2123,9 +2138,13 @@ def _local_dates_map(table: str, date_expr: str, symbols: list[str],
     if not symbols:
         return {}
     sql = f"SELECT symbol, {date_expr} FROM {table} WHERE symbol = ANY(%s)"
+    params: list = [list(symbols)]
+    if since is not None:
+        sql += f" AND {date_expr} >= %s"
+        params.append(since)
     try:
         with get_conn() as conn:
-            cur = conn.execute(sql, (list(symbols),))
+            cur = conn.execute(sql, tuple(params))
             out: dict[str, set[str]] = {}
             for s, d in cur.fetchall():
                 if d:
@@ -2858,6 +2877,11 @@ def _reconcile_symbols() -> dict:
                            uncertain_map={s: "stale_source" for s in symbols})
             stat["uncertain"] = sm_total
         else:
+            # 批 171h（DEF-06）：家族级地板一次预读（retention+源界 max，无 inception——
+            # :1373 sym=None 语义）作为 _local_dates_map 下界。stock 1990→2010、perp→近月。
+            # None（三源皆未声明）⇒ since=None 零漂移兜底。
+            _fam_floor, _ = _window_floors(adapter, kind, cfg, sym=None)
+            _since = _fam_floor.strftime("%Y%m%d") if _fam_floor else None
             # 批 171d-D（盲审 A-P1-3）：scope 级一次查 [min floor, end] 全量日历、循环内
             # 按各 symbol floor 内存切片（多数标的共享前缀）——消 5577×逐标的日历查询 N+1。
             _cal_all = (_trade_dates_in_range(
@@ -2867,7 +2891,7 @@ def _reconcile_symbols() -> dict:
                 from bisect import bisect_left as _bl
             dexpr = f"to_char(ts AT TIME ZONE '{tzname}','YYYYMMDD')"
             # ① 一次取本地日期集（读侧批量）② 一次取 sync_gap 行（重拉候选内存筛，不逐标的查）
-            local_map = _local_dates_map(table, dexpr, symbols)
+            local_map = _local_dates_map(table, dexpr, symbols, since=_since)
             if local_map is None:
                 # P1-4（步 4 盲审）：`_local_dates_map` 返回 `None` ⇒ **整 scope** 不可读 ⇒
                 # 下面逐标的落 `uncertain(local_unreadable)` ⇒ 真实大段缺失被**压成 uncertain**，
@@ -2988,7 +3012,8 @@ def _reconcile_symbols() -> dict:
                                        sync_id, vt_symbol, g0, g1, e)
             if pulled_map:
                 # 重拉后**一次**刷新（只对发生重拉的标的）⇒ 重算其段（不再逐标的查）
-                refreshed = _local_dates_map(table, dexpr, list(pulled_map))
+                # 批 171h：同 `_since` 下界（重拉段恒 ≥ 家族地板——上界刷新语义不变）
+                refreshed = _local_dates_map(table, dexpr, list(pulled_map), since=_since)
                 if refreshed is not None:
                     local_map.update(refreshed)
                     for vt_symbol in pulled_map:
