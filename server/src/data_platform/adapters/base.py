@@ -586,6 +586,8 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
     ("featured_daily", "cyq_perf"): "pull_cyq_perf",
     # 批 117：ST 官方名单快照（同族「按日全市场快照」——步 0 实测 pro.stock_st 全量 201 行）
     ("featured_daily", "st_list"): "pull_stock_st",
+    # 批 171d-D（DEF-08）：A 股日线 per-symbol 重拉支路（薄壳 pull_daily_supply）
+    ("bar_daily", "stock"): "pull_daily_supply",
     # 批 171b：停牌登记（suspend=DataKind 既有词；稀疏事件表——engine 侧 reconcile=False）
     ("suspend", None): "pull_suspend_d",
     ("financial_stmt", "forecast"): "pull_forecast",
@@ -608,7 +610,8 @@ _SUPPLY_PULL: dict[tuple[str, str | None], str] = {
 
 # 批 137a：`_SUPPLY_PULL` 里**不来自工厂项**的条目（对账缺口重拉专用，非 tier1/全量重建配置）。
 # 测试用本集合校验「工厂项 ⊆ 映射表」，显式登记才允许出现——防顺手加一条绕过工厂对账。
-_SUPPLY_PULL_NON_FACTORY: frozenset[tuple[str, str | None]] = frozenset({("bar_minute", None)})
+_SUPPLY_PULL_NON_FACTORY: frozenset[tuple[str, str | None]] = frozenset(
+    {("bar_minute", None), ("bar_daily", "stock")})   # 批 171d-D：per-symbol 重拉旁路（非工厂项）
 
 # 批 103b：`JoinQuantAdapter` 已从本文件迁出至 `joinquant_adapter.py`（真接实现 + jqdatasdk
 # 形状知识）。注册仍靠 `@register_adapter` 的 import 副作用——`adapters/__init__.py` 显式

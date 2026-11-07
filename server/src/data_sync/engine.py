@@ -1226,6 +1226,16 @@ def _ymd(s) -> date:
     return date(int(t[:4]), int(t[4:6]), int(t[6:8]))
 
 
+def _sparse_cursor_end(end_date: str, failed_dates: list) -> str:
+    """批 171d-D 稀疏成功闸：failed 空 ⇒ end_date；非空 ⇒ min(日期形失败)-1（落非交易日
+    无害——_cursor_cap 同约定）。非日期粒度失败串过滤后为空 ⇒ 保持 end_date（重拉语义）。"""
+    _days = sorted(f.split(":")[0] for f in (failed_dates or [])
+                   if len(f) >= 8 and f[:8].isdigit())
+    if not _days:
+        return end_date
+    return (_ymd(_days[0]) - timedelta(days=1)).strftime("%Y%m%d")
+
+
 # ── 批 171d-A：单轮最大跨度（D31 §5 裁定 5）──
 
 
@@ -1768,6 +1778,9 @@ _RECONCILE_SYMBOL_SCOPE: dict[str, tuple[str, str | None, str, str, str, str]] =
     "okx_perp_15min": ("bar_minute", "perp", "15min", "bar_15min", "UTC", "perp"),
     "astock_minute": ("bar_minute", None, "1min", "bar_1min", "Asia/Shanghai", "stock"),
     "astock_minute_5min": ("bar_minute", None, "5min", "bar_5min", "Asia/Shanghai", "stock"),
+    # 批 171d-D（DEF-05）：A 股日线入 per-symbol 对账 scope——171b 停牌净化/delist 截断
+    # 预置口由此激活；DEF-07 早闸（标的数>预算⇒跳族）在 SM 读后前置。
+    "astock_daily": ("bar_daily", "stock", "1D", "bar_1d", "Asia/Shanghai", "stock"),
 }
 
 
@@ -2513,7 +2526,8 @@ def _alert_reconcile_budget(sync_id: str, segs: int, budget: int, kind: str) -> 
 def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list[str] | None,
                      win_lo: str, win_hi: str, where: str = "", where_params: tuple = (),
                      repull_fn: Callable[[str], None] | None = None,
-                     symbol: str = "", max_repull: int | None = None) -> dict:
+                     symbol: str = "", max_repull: int | None = None,
+                     row_budget: int | None = None) -> dict:
     """per-date：**日期级差集 → 内联重拉 → 视图式落表**（设计 §7.1 主路径；同步收尾步骤，非独立任务）。
 
     `expected` ＝ 本轮窗口内的期望日，**唯一来源** `_trade_dates_in_range`（覆盖感知）。
@@ -2541,17 +2555,38 @@ def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list
                 "uncertain": "local_unreadable"}
 
     missing = [d for d in expected if d not in local]
+    budget_truncated = False   # 批 171d-D：早退路径安全（uncertain/empty 分支）
     repulled = failed = 0
     if missing and repull_fn is not None:
         cap = len(missing) if max_repull is None else max(0, min(len(missing), max_repull))
+        # 批 171d-D：per-date **行数**预算闸（stop-after——末日超限允许：原子粒度=全市场单日
+        # ~5566 行>预算 5000 时 stop-before 会零重拉死锁）。行数由 repull_fn 返回值归一后累计
+        # （三形态在调用侧已归一 int；None→0 容忍仅防旧签名——禁 isinstance 静默守卫）。
+        row_budget = row_budget if row_budget is not None else _GAP_ROW_BUDGET.get(
+            "bar_daily", 5000)
+        acc_rows = 0
+        pulled_dates: list[str] = []
         for d in missing[:cap]:
+            if acc_rows >= row_budget:
+                break
             try:
-                repull_fn(d)
+                _n = repull_fn(d)
+                # 三形态归一（B-P0-2 实证：cb_daily/daily_batch repull_fn 返 tuple）——
+                # tuple=(rows,saved) 取[0]；int 直用；None=0（jq 补返后不再达）。
+                if isinstance(_n, tuple):
+                    _n = _n[0]
+                acc_rows += int(_n) if _n is not None else 0
                 repulled += 1
+                pulled_dates.append(d)
             except Exception as e:
                 failed += 1
                 logger.warning("对账内联重拉失败 %s %s: %s", sync_id, d, e)
-        if cap < len(missing):
+        budget_truncated = False
+        if acc_rows >= row_budget and repulled < len(missing):
+            budget_truncated = True
+            logger.warning("对账重拉行预算截断 %s：acc=%d ≥ %d，余 %d 日落 open（续跑下轮差集复访）",
+                           sync_id, acc_rows, row_budget, len(missing) - repulled)
+        elif cap < len(missing):
             logger.warning("对账内联重拉预算耗尽 %s：缺 %d 日、仅重拉 %d 日，余者落 open 下轮续补",
                            sync_id, len(missing), cap)
     still = missing
@@ -2569,7 +2604,10 @@ def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list
     return {"expected": len(expected), "missing": len(missing), "repulled": repulled,
             "repull_failed": failed, "still_missing": still, "gap_dates": still,
             "segments": segs, "new_segments": stats.get("new") or [], "gaps": stats,
-            "uncertain": None}
+            "uncertain": None,
+            # 批 171d-D：行预算截断信号（handler 转 next_from 续跑——clamped 条件扩
+            # or budget_truncated；下轮差集自动复访剩余日）。
+            **({"budget_truncated": True} if budget_truncated else {})}
 
 
 def _list_repullable(sync_id: str, symbol: str) -> list[tuple[str, str]]:
@@ -2726,6 +2764,21 @@ def _reconcile_symbols() -> dict:
                       "budget_exceeded": 0, "round_id": round_id,
                       "judged": round_id is not None, "suppressed": 0}
 
+        # 批 171d-D（DEF-07 早闸）：标的数 > 行预算 ⇒ 期望集/local 读**之前**跳族——省
+        # 5577×日历查询与 8.7s/2GB local map；仍产 journal 摘要（stat 即摘要源）+ 告警
+        # 复用 sync.reconcile_budget。启用主张路径=调大 _GAP_ROW_BUDGET（净化窗已全史，见下）。
+        _budget_early = _GAP_ROW_BUDGET.get(kind, _GAP_ROW_BUDGET["bar_daily"])
+        # budget<=0＝测试哨兵/禁用（晚闸 :2848 语义保留）——早闸只在正预算下拦
+        if _budget_early > 0 and sm_total > _budget_early:
+            stat["budget_exceeded"] = 1
+            logger.error("对账体量早闸 %s：标的 %d > 预算 %d（kind=%s）⇒ 本轮跳族（调预算启用）",
+                         sync_id, sm_total, _budget_early, kind)
+            _alert_reconcile_budget(sync_id, sm_total, _budget_early, kind)
+            _log_scope_summary(sync_id, stat)   # 摘要行仍出（可观测性——scope 级日志口）
+            out[sync_id] = {"skipped": "budget_early", "symbols": sm_total,
+                            "budget": _budget_early}
+            continue
+
         # —— 互证闸（V5）：比对键＝「SM **有** symbol 且 `list_date` **空**」；只在**新鲜时**评估 ——
         if not stale:
             measured_empty = sm_covered < sm_total
@@ -2753,6 +2806,13 @@ def _reconcile_symbols() -> dict:
                            uncertain_map={s: "stale_source" for s in symbols})
             stat["uncertain"] = sm_total
         else:
+            # 批 171d-D（盲审 A-P1-3）：scope 级一次查 [min floor, end] 全量日历、循环内
+            # 按各 symbol floor 内存切片（多数标的共享前缀）——消 5577×逐标的日历查询 N+1。
+            _cal_all = (_trade_dates_in_range(
+                min((_ymd(r[2]) for r in sm_rows if r[2]), default=end_d).strftime("%Y%m%d"),
+                end_s) if tzname != "UTC" else None)
+            if _cal_all is not None:
+                from bisect import bisect_left as _bl
             dexpr = f"to_char(ts AT TIME ZONE '{tzname}','YYYYMMDD')"
             # ① 一次取本地日期集（读侧批量）② 一次取 sync_gap 行（重拉候选内存筛，不逐标的查）
             local_map = _local_dates_map(table, dexpr, symbols)
@@ -2766,11 +2826,15 @@ def _reconcile_symbols() -> dict:
             # 批 171b：停牌净化+退市截断——scope 级两次批量（零 N+1，键 vt 形态口内归一）。
             # 仅 A 股类 scope 有意义（crypto 无停牌/退市概念——suspend_days_bulk 表空返 {}、
             # delist 全 NULL 天然 no-op；当前 per-symbol scope 全 crypto ⇒ 属未来预置，诚实声明）。
-            # 停牌批量窗＝end_d 回看 400 自然日（覆盖 per-symbol floor 的最大可能——过度取行
-            # 无害：内存过滤按各 symbol 的 [floor,end] 窗算；suspend 表 ≤30 行/日量级可控）。
+            # 停牌批量窗＝min(list_date)（**全史**）。批 171d-D v2（盲审 A-P1-4/B-P0-3）：
+            # 400d 回看是分钟族浅地板时代假设——A 股 2248 只 floor=2014 下漏 28 万停牌股日
+            # ⇒ 假缺口段恒撞预算闸；全史 38.9 万行内存 ~40MB 可控（dev 实测）。
             try:
                 from src.data_platform.integrity import suspend_days_bulk as _sdb
-                _susp_map = (_sdb(end_d - timedelta(days=400), end_d, set(symbols))
+                _ld_min = min((r[2] for r in sm_rows if r[2]), default=end_d)
+                if isinstance(_ld_min, str):
+                    _ld_min = _ymd(_ld_min)
+                _susp_map = (_sdb(_ld_min, end_d, set(symbols))
                              if tzname != "UTC" else {})
             except Exception:
                 _susp_map = {}
@@ -2816,7 +2880,12 @@ def _reconcile_symbols() -> dict:
                     expected = [(floor + timedelta(days=i)).strftime("%Y%m%d")
                                 for i in range((end_d - floor).days + 1)]
                 else:
-                    expected = _trade_dates_in_range(lo_s, end_s)
+                    if _cal_all is not None:
+                        expected = _cal_all[_bl(_cal_all, lo_s):]   # 内存切片（前缀共享）
+                        if expected and expected[-1] > end_s:
+                            expected = [d for d in expected if d <= end_s]
+                    else:
+                        expected = _trade_dates_in_range(lo_s, end_s)
                     if expected is None:
                         uncertain_map[vt_symbol] = "calendar_uncovered"
                         continue
@@ -3011,13 +3080,17 @@ def _sync_astock_daily_jq(cfg: dict, end_date: str, backfill_from: str | None = 
             dates = [(start_d + timedelta(days=i)).strftime("%Y%m%d")
                      for i in range((end_d - start_d).days + 1)]
 
-        def _repull_day(day: str) -> None:
-            """单日重拉（对账内联重拉用）——与主循环同一条 adapter 路径，`overwrite` 同语义。"""
+        def _repull_day(day: str) -> int:
+            """单日重拉（对账内联重拉用）——与主循环同一条 adapter 路径，`overwrite` 同语义。
+
+            批 171d-D：返行数（repull_fn 三形态归一——预算闸 acc 累计依赖）。"""
             df = adapter.pull_daily_batch(day, "astock", symbols=symbols)
             if df is not None and not df.empty:
                 rows = adapter.to_bar_rows(df, "1D")
                 if rows:
                     save_bars_overwrite("1D", rows)
+                    return len(rows)
+            return 0
 
         pulled = saved = 0
         failed: list[str] = []
@@ -3164,7 +3237,8 @@ def _fetch_supply(adapter, *, kind: str, sub_kind: str | None, symbols: tuple[st
 
 
 def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_date: str,
-                               progress_cb: Callable | None = None) -> dict:
+                               progress_cb: Callable | None = None,
+                               _backfill_diff: bool = False) -> dict:
     """bar_daily+stock/etf 逐日批：镜像 _sync_by_trade_date 语义（fetch 替代 pro_api_fn+save_fn）。
 
     逐日 fetch(bar_daily, sub, range_=(day,day)) → _save_bars（DB 写在熔断上下文外，保持归因拆分）；
@@ -3181,6 +3255,10 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
     else:
         date_range = [d.strftime("%Y%m%d")
                       for d in pd.date_range(start=start, end=end_date, freq="B")]
+    # 批 171d-D（编码期修正）：daily_batch **不适用日级差集**——该族是「按日全市场批」，
+    # 任一真实交易日 bar_1d 恒有 ~3500 行 ⇒ 日级「已有」恒真 ⇒ 差集过滤会漏掉单标的孔洞
+    # （test_multi_source 实证：stub 标的无行但日级判据说已有）。保持整段盲拉（upsert 幂等）
+    # ——差集化仅 tier1 快照 5 族（单表单写者）与 cb_daily（族谓词窗零缺失短路）。
     total = len(date_range)
     total_pulled = 0
     total_saved = 0
@@ -3242,7 +3320,8 @@ def _sync_via_kind_daily_batch(adapter, *, sub: str, cfg: dict, start: str, end_
 
 
 def _sync_via_kind_cb_daily(adapter, *, sync_id: str, start: str, end_date: str,
-                            progress_cb: Callable | None = None) -> dict:
+                            progress_cb: Callable | None = None,
+                            _backfill_diff: bool = False) -> dict:
     """bar_daily+convertible 区间（镜像已退役的 _sync_cb_daily——批 72 一步切）：单次 fetch → _save_bars；无 last_success_date。
 
     批 109：**主拉取是整段单 fetch**（不逐日）⇒ 缺日无「逐日循环」可依赖，对账的内联重拉走
@@ -3259,11 +3338,26 @@ def _sync_via_kind_cb_daily(adapter, *, sync_id: str, start: str, end_date: str,
             return 0, 0
         return len(frame.rows), _save_bars(list(frame.rows))
 
-    with rate_limit_context(_get_rate_ds(adapter.provider), "cb_daily"):
-        frame = _fetch_supply(adapter, kind="bar_daily", sub_kind="convertible",
-                              symbols=(), start=start, end=end_date, freq="1D")
-    pulled = len(frame.rows)
-    saved = _save_bars(list(frame.rows)) if frame.rows else 0
+    # 批 171d-D：回补差集化（cb_daily 段式——零缺失短路；**父级回补上下文门控**同
+    # daily_batch：直调默认 False 盲拉）。有缺失仍整段 fetch（upsert 幂等）。
+    _local_have = (_local_dates(
+        "bar_1d", "to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD')",
+        where="symbol IN (SELECT vt_symbol FROM security_master WHERE category='convertible')")
+        if _backfill_diff else None)
+    _cb_expected = _trade_dates_in_range(start, end_date)
+    if (_local_have is not None and _cb_expected is not None
+            and all(d in _local_have for d in _cb_expected)):
+        logger.info("回补差集(cb_daily)：窗 %d 日零缺失 ⇒ 跳过主 fetch", len(_cb_expected))
+        pulled = saved = 0
+        class _Empty:
+            rows = []
+        frame = _Empty()
+    else:
+        with rate_limit_context(_get_rate_ds(adapter.provider), "cb_daily"):
+            frame = _fetch_supply(adapter, kind="bar_daily", sub_kind="convertible",
+                                  symbols=(), start=start, end=end_date, freq="1D")
+        pulled = len(frame.rows)
+        saved = _save_bars(list(frame.rows)) if frame.rows else 0
 
     # 批 109：整段单 fetch 的族**尤其**需要日期级差集——空帧/部分缺都不进 failed_dates，
     # 只有差集能把「拉回了但某几天没有」暴露出来。
@@ -3387,10 +3481,12 @@ def _sync_via_kind(cfg: dict, end_date: str, backfill_from: str | None = None,
 
     if kind == "bar_daily" and sub in ("stock", "listed_fund"):
         r = _sync_via_kind_daily_batch(adapter, sub=sub, cfg=cfg, start=start,
-                                       end_date=end_date, progress_cb=progress_cb)
+                                       end_date=end_date, progress_cb=progress_cb,
+                                       _backfill_diff=bool(backfill_from))
     elif kind == "bar_daily" and sub == "convertible":
         r = _sync_via_kind_cb_daily(adapter, sync_id=sync_id, start=start,
-                                    end_date=end_date, progress_cb=progress_cb)
+                                    end_date=end_date, progress_cb=progress_cb,
+                                    _backfill_diff=bool(backfill_from))
     elif kind == "index_daily":
         r = _sync_via_kind_index(adapter, start=start, end_date=end_date, progress_cb=progress_cb)
     elif kind == "bar_minute":
@@ -3548,6 +3644,22 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         else:
             date_range = [d.strftime("%Y%m%d")
                           for d in pd.date_range(start=start_ts, end=end_date, freq="B")]
+        # 批 171d-D：稠密白名单回补差集化——拉取循环前一次查窗内已有日，只拉缺失日
+        # （稀疏族不罩：缺日≠不完整，重放=upsert 刷新；_local_dates None ⇒ fail-open 回
+        # 整段盲拉+告警——禁 fail-closed 中止回补）。结果传收尾对账复用（一轮一读）。
+        _local_have: set[str] | None = None
+        if backfill_from and (cfg.get("id") or sync_id or kind) in _DENSE_BACKFILL_IDS:
+            _local_have = _local_dates(table, date_param)
+            if _local_have is None:
+                logger.warning("回补差集预读不可读（%s）⇒ fail-open 整段盲拉", table)
+            else:
+                _missing_days = [d for d in date_range if d not in _local_have]
+                if len(_missing_days) < len(date_range):
+                    logger.info("回补差集：窗 %d 日缺 %d 日（%s..%s）",
+                                len(date_range), len(_missing_days),
+                                _missing_days[0] if _missing_days else "-",
+                                _missing_days[-1] if _missing_days else "-")
+                    date_range = _missing_days
         # 修 2026-08-19：insert_cols 含 PK，placeholders 必须同长（原漏 PK 导致每日 INSERT 失败）
         insert_cols = pk_cols + [c for c in all_cols if c not in pk_cols]
         placeholders = ", ".join(["%s"] * len(insert_cols))
@@ -3619,8 +3731,10 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
             # 会产 symbol='' 假 open；无 reconcile/gap_dates/cursor_cap 三键 ⇒ sync() 的
             # D1 收口/告警零交互（白名单门另挡 Valkey——双保险）。
             # 批 171d-A：本出口（suspend_d 回补族）同样带 clamped/next_from——跨轮续跑主场景。
+            # 批 171d-D：稀疏成功闸——failed 非空游标停连续成功末日（首日失败回退≤overlap，
+            # 幂等无害；D31 §3 全稀疏轨纪律）。
             return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
-                    "cursor_upto": end_date,
+                    "cursor_upto": _sparse_cursor_end(end_date, failed_dates),
                     "failed_dates": failed_dates,
                     "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
                     "excluded": _fam_excl, **_clamped_extra}
@@ -3635,8 +3749,14 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         _ccap = _cursor_cap(sync_id or cfg.get("id") or kind, _rec, failed_dates)
         if _ccap is None and _cursor_cap_healed(sync_id or cfg.get("id") or kind, _rec):
             _cursor_freeze_count(sync_id or cfg.get("id") or kind, bumped=False)
+        _sid_key = sync_id or cfg.get("id") or kind
+        # 批 171d-D：稀疏成功闸扩全轨——非 _CAP_EMIT_IDS 的 reconcile=True 族（forecast/
+        # top_list/block_trade）同收紧；D1 白名单族（稠密）游标仍由 _cursor_cap 收口（互不干扰：
+        # sparse4 ∩ cap = ∅）。
+        _sparse_end = (end_date if _sid_key in _CAP_EMIT_IDS
+                       else _sparse_cursor_end(end_date, failed_dates))
         return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
-                "cursor_upto": end_date,
+                "cursor_upto": _sparse_end,
                 "failed_dates": failed_dates,
                 "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
                 "excluded": _fam_excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec,
@@ -3784,6 +3904,13 @@ _TIER1_BATCH = {
 # 批 171b：kwargs 边车（元组仍四元组——test_batch100/test_batch107 的 4 元组解包不破；
 # 既有 8 键 get 返空 dict ⇒ 逐字零漂移）。transform＝suspend_timing→full_day 布尔派生+
 # 列选取；reconcile=False＝跳过尾部对账块。
+# 批 171d-D：回补差集化**稠密白名单**（每日快照族——有 per-date 期望判据；稀疏 4 族
+# suspend_d/forecast/top_list/block_trade 保持整窗重放=upsert 刷新语义，D31 §4 v2.5）。
+_DENSE_BACKFILL_IDS = frozenset({
+    "stk_limit_sync", "moneyflow_sync", "margin_detail_sync",
+    "cyq_perf_sync", "st_list_sync",
+})
+
 _TIER1_BATCH_EXTRA: dict[str, dict] = {
     "suspend_d_sync": {
         "transform": lambda df: df.assign(full_day=df["suspend_timing"].isna())[

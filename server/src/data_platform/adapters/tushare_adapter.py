@@ -281,6 +281,16 @@ def pull_minute_supply(symbol: str = "", freq: str = "1min",
     return pull_minute(symbol, freq, _full(start, "00:00:00"),
                        _full(end, "23:59:59") if end else None)
 
+def pull_daily_supply(symbol: str = "", freq: str = "1D",
+                     start: str = "", end: str | None = None) -> pd.DataFrame:
+    """供给面薄壳：fetch_supply("bar_daily","stock", symbol=…, freq=…, start=…, end=…) → pull_daily。
+
+    批 171d-D（DEF-08）：`_repull_symbol` 统一形参（symbol/start/end）vs `pull_daily` 的
+    ts_code/start_date/end_date——不套壳则 fetch_supply 签名过滤后全被丢（137a pull_minute_supply
+    同族陷阱）。symbol 已由调用方归一 ts_code；freq 忽略（日线单频）。"""
+    return pull_daily(symbol, start, end)
+
+
 def to_save_rows_min(df: pd.DataFrame, freq: str) -> list[tuple]:
     """分钟线 DataFrame → 写入 DB 行列表（trade_time 作为 ts）。"""
     from ..schema import to_vt_symbol

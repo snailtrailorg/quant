@@ -74,7 +74,8 @@ class TestDispatch:
             r = engine._sync_via_kind(_cfg("astock_daily"), "20260921", backfill_from="20260901")
         assert r == {"x": 1}
         db.assert_called_once_with(ga.return_value, sub="stock", cfg=_cfg("astock_daily"),
-                                   start="20260901", end_date="20260921", progress_cb=None)
+                                   start="20260901", end_date="20260921", progress_cb=None,
+                                   _backfill_diff=True)   # 批 171d-D
 
     def test_daily_batch_convertible_interval(self):
         with patch.object(engine, "_read_sync_kind", return_value={
@@ -84,7 +85,8 @@ class TestDispatch:
             r = engine._sync_via_kind(_cfg("cb_daily"), "20260921", backfill_from="20260901")
         assert r == {"x": 2}
         cb.assert_called_once_with(ga.return_value, sync_id="cb_daily", start="20260901",
-                                   end_date="20260921", progress_cb=None)
+                                   end_date="20260921", progress_cb=None,
+                                   _backfill_diff=True)   # 批 171d-D：回补差集上下文旗标
 
     def test_index_daily(self):
         with patch.object(engine, "_read_sync_kind", return_value={
