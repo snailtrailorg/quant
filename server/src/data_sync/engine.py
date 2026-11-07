@@ -2565,7 +2565,6 @@ def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list
         row_budget = row_budget if row_budget is not None else _GAP_ROW_BUDGET.get(
             "bar_daily", 5000)
         acc_rows = 0
-        pulled_dates: list[str] = []
         for d in missing[:cap]:
             if acc_rows >= row_budget:
                 break
@@ -2581,7 +2580,6 @@ def _reconcile_dates(sync_id: str, *, table: str, date_expr: str, expected: list
             except Exception as e:
                 failed += 1
                 logger.warning("对账内联重拉失败 %s %s: %s", sync_id, d, e)
-        budget_truncated = False
         if acc_rows >= row_budget and repulled < len(missing):
             budget_truncated = True
             logger.warning("对账重拉行预算截断 %s：acc=%d ≥ %d，余 %d 日落 open（续跑下轮差集复访）",
@@ -3646,7 +3644,10 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
                           for d in pd.date_range(start=start_ts, end=end_date, freq="B")]
         # 批 171d-D：稠密白名单回补差集化——拉取循环前一次查窗内已有日，只拉缺失日
         # （稀疏族不罩：缺日≠不完整，重放=upsert 刷新；_local_dates None ⇒ fail-open 回
-        # 整段盲拉+告警——禁 fail-closed 中止回补）。结果传收尾对账复用（一轮一读）。
+        # 整段盲拉+告警——禁 fail-closed 中止回补）。注：预读与收尾对账各查一次
+        # （_local_dates 两读，~秒级/次）——复用未做，如需优化在 _reconcile_dates 加
+        # 预读复用参（快核备注1 记账）。
+        _win_n = len(date_range)   # 批 171d-D（A-P1-3）：全窗口径先捕（差集过滤前）
         _local_have: set[str] | None = None
         if backfill_from and (cfg.get("id") or sync_id or kind) in _DENSE_BACKFILL_IDS:
             _local_have = _local_dates(table, date_param)
@@ -3654,11 +3655,13 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
                 logger.warning("回补差集预读不可读（%s）⇒ fail-open 整段盲拉", table)
             else:
                 _missing_days = [d for d in date_range if d not in _local_have]
-                if len(_missing_days) < len(date_range):
+                if not _missing_days:
+                    logger.info("回补差集：窗 %d 日零缺失 ⇒ 跳过拉取直达对账", len(date_range))
+                    date_range = []
+                elif len(_missing_days) < len(date_range):
                     logger.info("回补差集：窗 %d 日缺 %d 日（%s..%s）",
                                 len(date_range), len(_missing_days),
-                                _missing_days[0] if _missing_days else "-",
-                                _missing_days[-1] if _missing_days else "-")
+                                _missing_days[0], _missing_days[-1])
                     date_range = _missing_days
         # 修 2026-08-19：insert_cols 含 PK，placeholders 必须同长（原漏 PK 导致每日 INSERT 失败）
         insert_cols = pk_cols + [c for c in all_cols if c not in pk_cols]
@@ -3720,12 +3723,15 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         # 批 171d-A：截断反馈（仅回补轮出具——增量轮截断静默自动续，防 FE 续跑钮错配）。
         _clamped_extra = {}
         # 批 171d-B：两维正交——floor 夹起点（旗标）或 span 截终点，任一即出具。
+        # （批 171d-D 行预算截断接线在**正常尾部出口**处——_rec 仅 reconcile 分支存在，
+        # 此块位于早退 return 之前不可引用。）
         if backfill_from and (_floor_clamped or _trunc):
+            _nf_days = [f.split(":")[0] for f in failed_dates
+                        if len(f) >= 8 and f[:8].isdigit()]
             _clamped_extra = {
                 "clamped": {"floor": _floor_s if _floor_clamped else None,
                             "span": _trunc, "span_end": end_date},
-                "next_from": _next_from(end_date, [f.split(":")[0] for f in failed_dates
-                                                   if len(f) >= 8 and f[:8].isdigit()] or None)}
+                "next_from": _next_from(end_date, _nf_days or None)}
         if not reconcile:
             # 批 171b：稀疏事件表（suspend_d）跳过整个尾部块——零行日=正常态，日期级差集
             # 会产 symbol='' 假 open；无 reconcile/gap_dates/cursor_cap 三键 ⇒ sync() 的
@@ -3736,7 +3742,7 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
             return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
                     "cursor_upto": _sparse_cursor_end(end_date, failed_dates),
                     "failed_dates": failed_dates,
-                    "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
+                    "expected_days": _win_n, "actual_days": len(date_range) - len(failed_dates),
                     "excluded": _fam_excl, **_clamped_extra}
         # 批 109（**§7.1 明写「TIER1 族当前 handler 自算窗口，收编时须一并纳入」**）：
         # 日期级差集。期望集与拉取循环**同一列表** `_trade_days`（覆盖感知）；`None` ⇒ uncertain。
@@ -3755,10 +3761,20 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         # sparse4 ∩ cap = ∅）。
         _sparse_end = (end_date if _sid_key in _CAP_EMIT_IDS
                        else _sparse_cursor_end(end_date, failed_dates))
+        # 批 171d-D（步4 A/B 同撞 P1）：行预算截断接线——_rec 在此已存在（reconcile 分支内）；
+        # 截断 ⇒ 并入/改写 clamped 与 next_from（优先 still_missing 首日=剩余差集续拉点）。
+        if backfill_from and _rec.get("budget_truncated"):
+            _still = _rec.get("still_missing") or []
+            _cl = dict((_clamped_extra or {}).get(
+                "clamped", {"floor": None, "span": False, "span_end": end_date}))
+            _clamped_extra = {"clamped": _cl,
+                              "next_from": (_still[0] if _still else
+                                            (_clamped_extra or {}).get(
+                                                "next_from", end_date))}
         return {"pulled": total_pulled, "saved": total_saved, "start": start_ts,
                 "cursor_upto": _sparse_end,
                 "failed_dates": failed_dates,
-                "expected_days": len(date_range), "actual_days": len(date_range) - len(failed_dates),
+                "expected_days": _win_n, "actual_days": len(date_range) - len(failed_dates),
                 "excluded": _fam_excl, "gap_dates": _rec["gap_dates"], "reconcile": _rec,
                 **({"cursor_cap": _ccap} if _ccap else {}), **_clamped_extra}
 
