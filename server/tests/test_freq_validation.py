@@ -11,10 +11,14 @@ def _row(ts="2026-08-18"):
 
 
 def test_save_bars_accepts_uppercase_1D():
-    """写路径历史统一用 "1D"（engine.py:448/tasks.py:354/platform.py）——必须过校验。"""
+    """写路径历史统一用 "1D"（engine.py:448/tasks.py:354/platform.py）——必须过校验。
+
+    批 171f：cursor.rowcount mock 需显式 int（返真实插入数——MagicMock 属性非 int
+    会被 rc>0 兜成 0）。"""
     from src.data_platform import db
     mock_conn = MagicMock()
     mock_conn.__enter__.return_value = mock_conn
+    mock_conn.cursor.return_value.__enter__.return_value.rowcount = 1
     with patch.object(db, "get_conn", return_value=mock_conn), \
          patch.object(db, "validate_bars", side_effect=lambda rows: rows), \
          patch.object(db, "ensure_table") as mock_ensure:

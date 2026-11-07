@@ -183,7 +183,8 @@ _VALID_FREQS = {'1min', '5min', '15min', '30min', '60min', '1h', '4h', '1d',
 
 
 def save_bars(freq: str, rows: list[tuple]) -> int:
-    """批量写入 K 线，冲突跳过。返回写入行数。
+    """批量写入 K 线，冲突跳过。返回**实际插入行数**（批 171f/DEF-12——原 len(rows) 不扣
+    冲突；psycopg3 executemany rowcount 三态正确，save_index_bars 同款先例）。
 
     入库前校验：validate_bars 剔 ohlc=0 + 标 ts 断点（A2 #30）。
     """
@@ -200,15 +201,21 @@ def save_bars(freq: str, rows: list[tuple]) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany(insert_sql, rows)
+            # 批 171f：rowcount 必须在 commit **前**取——psycopg3 commit() 重置 cursor
+            # rowcount 为 -1（实测三态 pre-commit 正确 fresh=1/conflict=0/partial=差值；
+            # save_index_bars 同位先例恰因 commit 后取被 rc>0 兜成恒 0，未暴露）。
+            rc = cur.rowcount
         conn.commit()
-        return len(rows)
+        return rc if isinstance(rc, int) and rc > 0 else 0   # 真实插入数（幂等重写=0）
 
 
 def save_bars_overwrite(freq: str, rows: list[tuple]) -> int:
     """批量写入 K 线，冲突覆盖（回补用，体现手动回补优先级高于增量）。
 
     2026-08-18 G 审对齐：与 save_bars 同款校验（大小写不敏感 freq + validate_bars）——
-    覆盖路径此前零校验（垃圾 freq 直接建野表/脏行直入）。"""
+    覆盖路径此前零校验（垃圾 freq 直接建野表/脏行直入）。
+    批 171f/DEF-12：返回 cur.rowcount（upsert 更新行计入——DO UPDATE 的 rowcount 含
+    冲突被更新行，语义＝受影响行数非净新增）。"""
     if not rows:
         return 0
     rows = validate_bars(rows)
@@ -220,8 +227,9 @@ def save_bars_overwrite(freq: str, rows: list[tuple]) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany(insert_sql, rows)
+            rc = cur.rowcount   # commit 前取（同 save_bars 批 171f 注）
         conn.commit()
-        return len(rows)
+        return rc if isinstance(rc, int) and rc > 0 else 0
 
 
 def save_index_bars(rows: list[tuple]) -> int:
@@ -242,8 +250,8 @@ def save_index_bars(rows: list[tuple]) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.executemany(insert_sql, rows)
+            rc = cur.rowcount   # 批 171f：commit 前取（原 commit 后取恒 -1 被 rc>0 兜成恒 0——先例自身 bug）
         conn.commit()
-        rc = cur.rowcount
         return rc if isinstance(rc, int) and rc > 0 else 0   # 幂等重同步时真实插入数（非 len(rows)）
 
 
