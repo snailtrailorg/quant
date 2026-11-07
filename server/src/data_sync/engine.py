@@ -301,6 +301,9 @@ def _update_sync_state(sync_id: str, last_date: str | None, count: int, status: 
 
     last_date=None（配置游标本就为空）时写 NULL=不变，仅刷新 last_sync_ts——异常路径
     （P1-B 2026-10-03）用它表达「游标不动、只退避」。
+
+    批 171d-C：**哑写**——派生收口在 sync() 单源判定链内完成（A-P0-2 读侧裁定），
+    本函数不做第二次 min（判定单源纪律：禁两套收口逻辑）。
     """
     with get_conn() as conn:
         conn.execute(
@@ -452,7 +455,11 @@ def sync(sync_id: str, backfill_from: str | None = None,
             # _log 前算一次，note 注记、终态词通则、freeze 计数三处消费同一结果，禁两套逻辑。
             # _cap=None（未声明族/回补）⇒ raw=None ⇒ 全链恒等现状、零 Valkey 触碰。
             # keyed 全失败（含 lsd=None 首日失败形态）走 fallback 分支＝不收口 ⇒ raw=None。
+            # 批 171d-C（A-P0-1/P1-3）：D1 cap 消费侧守卫——派生族 stray cursor_cap 键
+            # （未来 handler 回填/测试注入）恒忽略 ⇒ 消费链可证死码。
             _cap = r.get("cursor_cap")
+            if sync_id in _DERIVED_CURSOR_IDS:
+                _cap = None
             _raw = _adv = None
             _effective = False
             if not backfill_from:
@@ -474,7 +481,20 @@ def sync(sync_id: str, backfill_from: str | None = None,
                     _effective = _adv != _raw                        # 规格语义：推进值≠原值
                 elif _raw is not None:
                     _adv = _raw              # _cap=None：原推进值原样（逐字现状）
-            _cap_note = f"cursor_capped:{_cap}" if _effective else ""
+                # 批 171d-C（D31 §3，A-P0-2 读侧单源裁定）：**派生收口**——推进值再与
+                # 本地数据末日 min 一层（只紧不松；None=空域/查询失败/非派生族 ⇒ 不收口）。
+                # 实际压低 ⇒ warning 留痕两值（删数据回退自愈型但禁静默——批 108「封顶
+                # 不得静默」一脉）。异常路径（except :598 写回旧值）不经过本链 ⇒ 「游标
+                # 不动」承诺保留（恒收范围＝成功/partial 两态）。
+                if _raw is not None and sync_id in _DERIVED_CURSOR_IDS:
+                    _mx = _local_max(sync_id)
+                    if _mx is not None and _mx < _adv:
+                        logger.warning(
+                            "派生收口（%s）：推进值 %s > 本地数据末日 %s ⇒ 收口（数据末为准，"
+                            "缺口主张在 sync_gap/显式回补）", sync_id, _adv, _mx)
+                        _adv = _mx
+                        _effective = True
+            _cap_note = f"cursor_capped:{_cap}" if _effective and _cap is not None else ""
             # 批 171d-A：截断短语入 note（_cap_note 同点拼装——判定单源，note 只组一次）。
             _clamp_note = ""
             if r.get("clamped"):
@@ -1236,6 +1256,79 @@ def _sparse_cursor_end(end_date: str, failed_dates: list) -> str:
     return (_ymd(_days[0]) - timedelta(days=1)).strftime("%Y%m%d")
 
 
+# ── 批 171d-C：稠密族游标派生化（D31 §3——写侧 min(收口, max(local)) 结构收口）──
+# 派生族清单＝12 族：原 _CAP_EMIT_IDS 9 族（tier1 稠密 5 + via_kind/jq 4）＋ bar 6 族的
+# 无 keyed/cursor 成员 3（171d-A 已补 cursor_upto 键）。**加密 8 族暂缓**（连续轴、无日历
+# 语义——维持现状游标）。守门＝tests/test_batch171a_cursor_cap.py 双断言 + test_batch171d_c.py。
+_DERIVED_CURSOR_IDS: frozenset[str] = frozenset({
+    "astock_daily", "listed_fund_daily", "cb_daily", "astock_daily_jq",
+    "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "st_list_sync", "cyq_perf_sync",
+    "index_daily", "astock_minute", "astock_minute_5min",
+})
+# 派生查询声明：sid -> (表, SQL——单行单列返回 YYYYMMDD 串或 None)。
+# bar 族（bar_1d/1min/5min）＝族谓词（SM category 域）+ ORDER BY ts DESC LIMIT 1（idx_*_ts
+# 索引，dev 实测 45ms/9ms/4ms；max() 聚合形态 1.4s Parallel Seq Scan 不可用）；tier1 ＝
+# max(trade_date)（text 8 位数字典序＝日期序，小表 7-40ms）；bar_index ＝ LIMIT 1（无谓词）。
+_DERIVED_MAX_SQL: dict[str, tuple[str, str]] = {
+    "astock_daily": ("bar_1d",
+                     "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_1d "
+                     "WHERE symbol IN (SELECT vt_symbol FROM security_master "
+                     "WHERE category='stock') ORDER BY ts DESC LIMIT 1"),
+    "astock_daily_jq": ("bar_1d",  # 同 stock 域（jq×tushare 多写者：max=并集末日，P2-1 声明）
+                        "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_1d "
+                        "WHERE symbol IN (SELECT vt_symbol FROM security_master "
+                        "WHERE category='stock') ORDER BY ts DESC LIMIT 1"),
+    "listed_fund_daily": ("bar_1d",
+                          "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_1d "
+                          "WHERE symbol IN (SELECT vt_symbol FROM security_master "
+                          "WHERE category='listed_fund') ORDER BY ts DESC LIMIT 1"),
+    "cb_daily": ("bar_1d",
+                 "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_1d "
+                 "WHERE symbol IN (SELECT vt_symbol FROM security_master "
+                 "WHERE category='convertible') ORDER BY ts DESC LIMIT 1"),
+    "index_daily": ("bar_index", "SELECT to_char(ts,'YYYYMMDD') FROM bar_index ORDER BY ts DESC LIMIT 1"),
+    "astock_minute": ("bar_1min",
+                      "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_1min "
+                      "WHERE symbol IN (SELECT vt_symbol FROM security_master "
+                      "WHERE category='stock') ORDER BY ts DESC LIMIT 1"),
+    "astock_minute_5min": ("bar_5min",
+                           "SELECT to_char(ts AT TIME ZONE 'Asia/Shanghai','YYYYMMDD') FROM bar_5min "
+                           "WHERE symbol IN (SELECT vt_symbol FROM security_master "
+                           "WHERE category='stock') ORDER BY ts DESC LIMIT 1"),
+    "stk_limit_sync": ("stk_limit", "SELECT max(trade_date) FROM stk_limit"),
+    "moneyflow_sync": ("moneyflow", "SELECT max(trade_date) FROM moneyflow"),
+    "margin_detail_sync": ("margin_detail", "SELECT max(trade_date) FROM margin_detail"),
+    "st_list_sync": ("st_list", "SELECT max(trade_date) FROM st_list"),
+    "cyq_perf_sync": ("cyq_perf", "SELECT max(trade_date) FROM cyq_perf"),
+}
+
+
+def _local_max(sync_id: str) -> str | None:
+    """派生族本地数据末日（YYYYMMDD | None）——写侧收口的**唯一**读取口（D31 §3）。
+
+    三 None 语义（批 C 三护栏，A/B 审合并裁定）：
+    - **空域 None**（查询成功但域 0 行——max() 聚合返 NULL，如 bar_5min 现状）⇒ 返 None
+      ⇒ 调用方**不收口**（防 None 传染游标写 NULL 全窗循环；未同步族正常态**不告警**——
+      A-P1-1：告警会在启用前每轮误响）；
+    - **查询失败/超时**（statement_timeout=5000 护栏）⇒ 返 None + warning ⇒ fail-open 原值
+      （171 留痕纪律——禁静默）；
+    - 非 `_DERIVED_CURSOR_IDS` 族 ⇒ None（不查——禁用族零成本不变式：派生读点只在
+      sync() 终态链，enabled=f 不进 sync() 体内 ⇒ 不跑查询）。
+    """
+    spec = _DERIVED_MAX_SQL.get(sync_id)
+    if spec is None:
+        return None
+    _tbl, sql = spec
+    try:
+        with get_conn() as conn:
+            conn.execute("SET LOCAL statement_timeout=5000")
+            r = conn.execute(sql).fetchone()
+        return (str(r[0]) if r and r[0] else None)
+    except Exception as e:
+        logger.warning("派生收口本地 max 读取失败（%s/%s）⇒ 本轮不收口: %s", sync_id, _tbl, e)
+        return None
+
+
 # ── 批 171d-A：单轮最大跨度（D31 §5 裁定 5）──
 
 
@@ -1531,10 +1624,25 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
         adapter = _get_supply_adapter(cfg)
         end = _crypto_end(end_date, adapter, kind)
         start, _fam_excl = _crypto_base_start(cfg, backfill_from, adapter, kind)
-        start_s, end_s = start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+        # 批 171d-C（D31 §1 遗留项，B-P2-2/A-P2-3 三钉）：单轮最大跨度接入——span 按
+        # **family 起点**算（`_crypto_base_start` 的 start，非 per-symbol `_start_of`——
+        # 分段 :1595 起点同源）；接线位＝end/start 定型后、`start>end` 早退之前（date↔串
+        # 进出镜像 jq :3041 形态）。截断只出 clamped.span；next_from=span_end+1（连续轴
+        # 续跑点良定义，与其他七站点截断反馈对称——FE 续跑钮可用）。
+        _s, _e, _trunc = _clamp_span(start.strftime("%Y%m%d"),
+                                     end.strftime("%Y%m%d"), cfg.get("_max_span_days"))
+        if _trunc:
+            end = _ymd(_e)
+        _span_end_s = end.strftime("%Y%m%d")
+        start_s, end_s = start.strftime("%Y%m%d"), _span_end_s
+        _clamped_extra: dict = {}
+        if backfill_from and _trunc:
+            _clamped_extra = {"clamped": {"floor": None, "span": True, "span_end": _span_end_s},
+                              "next_from": (_ymd(_span_end_s) + timedelta(days=1)).strftime("%Y%m%d")}
         if start > end:
             return {"pulled": 0, "saved": 0, "start": start_s, "failed_dates": [],
-                    "expected_days": 0, "actual_days": 0, "cursor_upto": end_s}
+                    "expected_days": 0, "actual_days": 0, "cursor_upto": end_s,
+                    **_clamped_extra}
 
         syms = adapter.list_symbols()
         if not syms:
@@ -1660,7 +1768,8 @@ def _make_crypto_bar_handler(sync_id: str, kind: str, sub_kind: str, freq: str,
                     label, sync_id, start_s, end_s, total, pulled, saved, len(failed_list), cursor)
         out = {"pulled": pulled, "saved": saved, "start": start_s,
                "failed_dates": failed_list, "expected_days": None,
-               "actual_days": total - len(failed_list), "cursor_upto": cursor}
+               "actual_days": total - len(failed_list), "cursor_upto": cursor,
+               **_clamped_extra}
         if log_status:
             out["log_status"] = log_status
         if excl:
@@ -1743,15 +1852,10 @@ _SYNC_GAP_EXCLUDED_STATES: tuple[str, ...] = ("unreachable", "policy_discard")
 _SNAPSHOT_STALE_DAYS = 7
 
 # 批 171a·D1（游标不越界）：per-date 稠密白名单——只有「每日发布」的族才允许出具 cursor_cap。
-# 排除（装配可达但稀疏/事件驱动，空日是数据本性不是缺口）：forecast_sync（ann_date 驱动）、
-# top_list_sync / block_trade_sync（事件驱动非每日保证）、suspend_d_sync（批 171b：停牌登记
-# 事件表，零停牌日=正常态）——prod last-100 sync_log 实证（2026-11-05）。守门：
-# server/tests/test_batch171a_cursor_cap.py 断言白名单与
-# set(_TIER1_BATCH) ∪ {astock_daily, listed_fund_daily, cb_daily, astock_daily_jq} 的关系。
-_CAP_EMIT_IDS: frozenset[str] = frozenset({
-    "astock_daily", "listed_fund_daily", "cb_daily", "astock_daily_jq",
-    "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "st_list_sync", "cyq_perf_sync",
-})
+# 批 171d-C（D31 §3）：**清空退役**——12 族游标改写侧派生收口（sync() 读侧单源 min
+# `_local_max`），cap 出具/痊愈 DEL/逃逸闸全链死码（消费侧 ignore 守卫见 sync() :455 区；
+# 代码保留待 171 收官件统一清理——含 RUNBOOK sync.cursor_frozen 词条）。键 7d TTL 自然过期。
+_CAP_EMIT_IDS: frozenset[str] = frozenset()
 # 逃逸闸：同 sid 连续 N 轮 cap 实际生效 ⇒ 告警一次（==N 恰打点，防风暴）。日频族 N=7 ≈ 7 交易日。
 _CAP_FREEZE_ALERT_ROUNDS = 7
 # per-symbol 限频重拉：`open` 行 pull_count < 此值 **且** 距 `last_seen` ≥ 1 天 ⇒ 按缺口区间重拉
@@ -3756,10 +3860,13 @@ def _make_tier1_handler(kind: str, sub_kind: str | None, table: str, pk_cols: li
         if _ccap is None and _cursor_cap_healed(sync_id or cfg.get("id") or kind, _rec):
             _cursor_freeze_count(sync_id or cfg.get("id") or kind, bumped=False)
         _sid_key = sync_id or cfg.get("id") or kind
-        # 批 171d-D：稀疏成功闸扩全轨——非 _CAP_EMIT_IDS 的 reconcile=True 族（forecast/
-        # top_list/block_trade）同收紧；D1 白名单族（稠密）游标仍由 _cursor_cap 收口（互不干扰：
-        # sparse4 ∩ cap = ∅）。
-        _sparse_end = (end_date if _sid_key in _CAP_EMIT_IDS
+        # 批 171d-D：稀疏成功闸扩全轨——非白名单的 reconcile=True 族（forecast/
+        # top_list/block_trade）同收紧。
+        # 批 171d-C（B-P0-1/A-P0-1）：判据重指 `_DERIVED_CURSOR_IDS`（原 `_CAP_EMIT_IDS`
+        # 清空后恒 False ⇒ tier1 稠密 5 族误落稀疏闸＝D1 借尸还魂）。派生族走 end_date
+        # 推进+sync() 读侧派生 min 结构收口；API 级失败日变中窗缺口由 sync_gap 主张
+        # （D31 裁定 3）。
+        _sparse_end = (end_date if _sid_key in _DERIVED_CURSOR_IDS
                        else _sparse_cursor_end(end_date, failed_dates))
         # 批 171d-D（步4 A/B 同撞 P1）：行预算截断接线——_rec 在此已存在（reconcile 分支内）；
         # 截断 ⇒ 并入/改写 clamped 与 next_from（优先 still_missing 首日=剩余差集续拉点）。

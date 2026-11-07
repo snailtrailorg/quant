@@ -1,7 +1,12 @@
-"""批 171a · D1 游标不越界守门（`flow/任务/批171a-D1-游标不越界.md` §5 验收 11 条）。
+"""批 171a·D1 游标不越界守门（`flow/任务/批171a-D1-游标不越界.md` §5 验收 11 条）。
 
 钉的是**行为**：cap 出具四条件 / 收口三分支（min+clamp+终态词）/ 逃逸闸（==N 恰一次、
 DEL 语义、fail-soft 三不、零触碰）/ 白名单漂移 / 既有测试零漂移。
+
+批 171d-C 改写：D1 白名单清空（`_CAP_EMIT_IDS == frozenset()`）——本文件转为**反向
+守门**：钉「cap 出具恒 None / 消费侧 stray 键恒忽略 / 零 Valkey 触碰」防 D1 复活；
+sync() 收口链代码保留 ⇒ mock cap 键的 a1/a5/a6/a7/a8/c1-c3/c5-c8 行为级用例**保留**
+（钉死消费链现状——任何回填复活都先撞这批用例）。派生收口行为在 test_batch171d_c.py。
 
 mock harness 同 `test_sync_cursor._run_sync` 范式（不依赖真库真 Valkey）。
 """
@@ -32,8 +37,13 @@ class _Cap:
 
 
 def _run(handler_ret, cfg=None, backfill=False):
-    """跑 engine.sync() 全路径，返回 (result, cap)。handler 返回 handler_ret（可含 cursor_cap）。"""
+    """跑 engine.sync() 全路径，返回 (result, cap)。handler 返回 handler_ret（可含 cursor_cap）。
+
+    批 171d-C：cfg 可传 12 派生族真名（消费侧守卫用例）——默认 NS 非派生族（`_local_max`
+    不查库 fail-fast None，保持老用例零库依赖）。
+    """
     cap = _Cap()
+    sid = (cfg or {}).get("id", NS)
     fake_cfg = cfg or {"id": NS, "name": "x", "mode": "incremental", "enabled": True,
                        "last_sync_date": "20261010", "last_sync_ts": None, "last_status": "idle"}
 
@@ -57,8 +67,9 @@ def _run(handler_ret, cfg=None, backfill=False):
 
     with patch("src.data_sync.sync_lock.SyncLock", _FakeLock), \
          patch.object(engine, "_get_config", return_value=fake_cfg), \
-         patch.object(engine, "_HANDLERS", {NS: MagicMock(return_value=handler_ret)}), \
+         patch.object(engine, "_HANDLERS", {sid: MagicMock(return_value=handler_ret)}), \
          patch.object(engine, "_VIA_KIND_IDS", frozenset()), \
+         patch.object(engine, "_local_max", return_value=None), \
          patch.object(engine, "_mark_running"), \
          patch.object(engine, "_update_sync_state",
                       side_effect=lambda sid, d, s, t: cap.states.append((str(d), s, t))), \
@@ -69,7 +80,7 @@ def _run(handler_ret, cfg=None, backfill=False):
          patch.object(engine, "_alert_sync_failure",
                       side_effect=lambda *a, **k: cap.__setattr__("fail_alerts", cap.fail_alerts + 1)), \
          patch.object(engine, "_cursor_freeze_count", side_effect=_fake_freeze):
-        result = engine.sync(NS, backfill_from="20261001" if backfill else None)
+        result = engine.sync(sid, backfill_from="20261001" if backfill else None)
     return result, cap
 
 
@@ -189,25 +200,23 @@ class TestHelper:
                                   ["20261011:X", "20261012:Y"]) is None
 
     def test_b5_positive_full_path(self):
-        """正例：白名单 + gap 两日 + uncertain None + failed 1/3 ⇒ 恰 20261013。
+        """批 171d-C 反向守门（原正例删除）：白名单清空 ⇒ 出具恒 None——防 D1 复活。
 
-        兼钉 rec 身份：expected 是 int（传 handler 返回体形态则此断言语义漂移——
-        本用例直接构造 reconcile dict 形态）。
+        原 b5 断言 `astock_daily` 白名单正例出具 20261013——D1 退役后同一入参必须
+        恒 None；保留同构入参作反向钉（171 教训：删用例＝丢守门）。
         """
         got = engine._cursor_cap("astock_daily",
                                  {"gap_dates": ["20261014", "20261016"], "uncertain": None,
                                   "expected": 3},
                                  ["20261012:X"])
-        assert got == "20261013"
+        assert got is None, "D1 退役：白名单恒空 ⇒ 出具恒 None"
 
     def test_b6_healed(self):
-        """痊愈轮判定：白名单 + 对账在场 + 非 uncertain + gap 清空 ⇒ True。"""
-        assert engine._cursor_cap_healed("astock_daily",
-                                         {"gap_dates": [], "uncertain": None, "expected": 3})
+        """批 171d-C 反向守门：白名单恒空 ⇒ 痊愈判定恒 False（healed-DEL 零触发）。"""
+        assert not engine._cursor_cap_healed("astock_daily",
+                                             {"gap_dates": [], "uncertain": None, "expected": 3})
         assert not engine._cursor_cap_healed("forecast_sync",
                                              {"gap_dates": [], "uncertain": None, "expected": 3})
-        assert not engine._cursor_cap_healed("astock_daily",
-                                             {"gap_dates": ["20261014"], "uncertain": None})
 
 
 # ---------------------------------------------------------------------------
@@ -388,19 +397,32 @@ class TestFreezeGate:
 
 
 class TestWhitelistDrift:
+    """批 171d-C：白名单双断言（恒空 + 派生 12 族）——A-P1-3 消费侧死码可证。"""
 
-    def test_d1_whitelist_vs_reachable(self):
-        reachable = set(engine._TIER1_BATCH) | {"astock_daily", "listed_fund_daily",
-                                                "cb_daily", "astock_daily_jq"}
-        # 批 171b：excluded 扩 4 族——+suspend_d_sync（suspend 停牌登记＝事件驱动稀疏，
-        # 与 forecast/top_list/block_trade 同判别：空日是数据本性不是缺口，cap 会致倒漂）
-        excluded = {"forecast_sync", "top_list_sync", "block_trade_sync", "suspend_d_sync"}
-        assert engine._CAP_EMIT_IDS <= reachable, "白名单 ⊆ 装配可达族"
-        assert reachable - engine._CAP_EMIT_IDS == excluded, "可达 − 白名单 ＝ 显式排除 4 族"
+    def test_d1_whitelist_empty_and_derived_twelve(self):
+        assert engine._CAP_EMIT_IDS == frozenset(), "D1 退役：白名单恒空"
+        assert engine._DERIVED_CURSOR_IDS == frozenset({
+            "astock_daily", "listed_fund_daily", "cb_daily", "astock_daily_jq",
+            "stk_limit_sync", "moneyflow_sync", "margin_detail_sync", "st_list_sync",
+            "cyq_perf_sync", "index_daily", "astock_minute", "astock_minute_5min",
+        }), "派生 12 族（D31 §3 分轨表稠密轨）"
 
-    def test_d2_dense_members_present(self):
-        for sid in ("astock_daily", "astock_daily_jq", "stk_limit_sync", "cyq_perf_sync"):
-            assert sid in engine._CAP_EMIT_IDS
+    def test_d2_stray_cap_key_ignored_for_derived(self):
+        """A-P1-3 消费侧守卫：派生族 handler_ret 带 stray cursor_cap 键 ⇒ sync() 恒忽略
+        （消费链可证死码——任何未来回填先撞本用例）。"""
+        _r, cap = _run({"pulled": 1, "saved": 1, "start": "20261011", "failed_dates": [],
+                        "expected_days": 5, "actual_days": 5,
+                        "last_success_date": "20261015",
+                        "reconcile": {"gap_dates": ["20261014"]},
+                        "cursor_cap": "20261013"},   # stray 键——D1 语义复活尝试
+                       cfg={"id": "astock_daily", "name": "x", "mode": "incremental",
+                            "enabled": True, "last_sync_date": "20261010",
+                            "last_sync_ts": None, "last_status": "idle"})
+        assert cap.freeze_calls == [], "stray cap ⇒ 消费侧忽略 ⇒ 零 Valkey 触碰"
+        assert all("cursor_capped" not in (e or "") for _s, e in cap.logs), "无 cap 注记"
+        # 推进值不被 stray cap 收口：_local_max=None（mock）⇒ 派生不收口 ⇒ 推进
+        # cursor_upto-or-end_date＝today（20261015 的 keyed 分支零失败走 cursor_upto 链）
+        assert cap.states[0][0] != "20261013", "stray cap 不得收口推进值"
 
 
 # ---------------------------------------------------------------------------

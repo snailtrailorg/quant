@@ -30,7 +30,12 @@ class _FakeLock:
 
 
 def _run_sync(handler_ret, cfg_last="20260810"):
-    """跑 engine.sync()，捕获终态写入与调用顺序。返回 (result, update_calls, running_calls, alerts)。"""
+    """跑 engine.sync()，捕获终态写入与调用顺序。返回 (result, update_calls, running_calls, alerts)。
+
+    批 171d-C：sync_id 用 astock_daily（12 派生族真名）⇒ `_local_max` 真库查询会跑——
+    mock 为 None（不收口），保持本文件钉「三态原语义」零库依赖。派生收口行为在
+    test_batch171d_c.py 专测。
+    """
     from src.data_sync import engine
     fake_cfg = {"id": "astock_daily", "name": "x", "mode": "incremental", "enabled": True,
                 "last_sync_date": cfg_last, "last_sync_ts": None, "last_status": "idle"}
@@ -41,6 +46,7 @@ def _run_sync(handler_ret, cfg_last="20260810"):
          patch.object(engine, "_get_config", return_value=fake_cfg), \
          patch.object(engine, "_VIA_KIND_IDS", frozenset()), \
          patch.object(engine, "_HANDLERS", {"astock_daily": handler}), \
+         patch.object(engine, "_local_max", return_value=None), \
          patch.object(engine, "_log"), \
          patch.object(engine, "_expected_trading_days", return_value=1), \
          patch.object(engine, "_mark_running",
