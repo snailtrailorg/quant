@@ -314,10 +314,10 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
     """
     import time as _t
     from src.quant_common.redis_client import business_redis
-    from src.data_platform.config_store import exposure_snapshots, live_running_tasks, trading_accounts_enabled
+    from src.data_platform.config_store import exposure_snapshots, live_running_tasks, trading_accounts_all
     live = {str(tid): acct for tid, acct in live_running_tasks()}
     snaps = exposure_snapshots()
-    accts = trading_accounts_enabled()
+    accts = trading_accounts_all()   # 批 171q：全量（含未启用——FE 灰态，禁硬编码通道）
     r = None
     try:
         r = business_redis(socket_timeout=3)
@@ -325,7 +325,7 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
         pass
     now = _t.time()
     items = []
-    for acct_id, name, provider in accts:
+    for acct_id, name, provider, acct_enabled in accts:
         working = None
         running = False
         if r is not None:
@@ -346,6 +346,7 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
         snap = sn.get("snap")
         items.append({
             "account_id": acct_id, "name": name, "provider": provider,
+            "enabled": bool(acct_enabled),   # 批 171q：未启用=FE 灰态不可勾
             "running": running,
             "working_orders": working,          # None=无活 runner/键缺（FE 显 —）
             "position_value": None if stale else sn.get("pos_value", 0.0),

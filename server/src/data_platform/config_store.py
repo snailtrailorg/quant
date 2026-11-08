@@ -138,12 +138,14 @@ def all_ids(kind: str) -> set[int]:
         return {r[0] for r in cur.fetchall()}
 
 
-def trading_accounts_enabled() -> list[tuple]:
-    """批 171o：enabled 通道账号行 [(id, name, provider)]（紧急处置复选组数据源）。"""
+def trading_accounts_all() -> list[tuple]:
+    """批 171q：**全部**通道账号行 [(id, name, provider, enabled)]——紧急处置复选组
+    唯一数据源（禁 FE 硬编码通道：未启用账号由系统行本身呈现，禁自造条目）。"""
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         return conn.execute(
-            "SELECT id, name, provider FROM trading_account WHERE enabled=true").fetchall()
+            "SELECT id, name, provider, enabled FROM trading_account "
+            "ORDER BY enabled DESC, id").fetchall()
 
 
 def exposure_snapshots() -> dict:

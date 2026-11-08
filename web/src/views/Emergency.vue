@@ -1,48 +1,35 @@
 <template>
   <div>
-    <!-- 批 171p：紧急处置页（用户终版布局——无状态区/无全选/未开通禁用/单卡四段操作）。
-         D24：页面无标题 → 工作区 → 内容卡（卡头=左标题+右动作，卡体=表单/列表）。 -->
-    <!-- 1 处置范围（缺省全选；已开通账号恒可勾，未开通通道灰态） -->
+    <!-- 批 171q：紧急处置页（用户终版——横排四卡操作带；范围=系统账号真源；无状态区/无页脚说明） -->
+    <!-- 1 处置范围（数据源=trading_account 全量行；未启用灰态，禁自造通道） -->
     <el-card>
-      <template #header>
-        <div class="card-head-row">
-          <span>{{ t('emg.scope') }}</span>
-          <span class="kpi-sub">{{ t('emg.selectedN', { n: selectedCount, m: accounts.length }) }}</span>
-        </div>
-      </template>
+      <template #header>{{ t('emg.scope') }}</template>
       <div class="scope-list">
-        <el-checkbox v-for="a in accounts" :key="a.account_id" v-model="a.checked">
+        <el-checkbox v-for="a in accounts" :key="a.account_id" v-model="a.checked" :disabled="!a.enabled">
           <span>{{ a.name }}</span>
           <span class="kpi-sub scope-meta">
             {{ t('emg.working') }}: {{ a.working_orders == null ? '—' : (a.working_orders < 0 ? t('emg.unknown') : a.working_orders) }}
             · {{ t('emg.posValue') }}: {{ a.position_value == null ? t('emg.unknown') : '¥' + Number(a.position_value).toLocaleString() }}
           </span>
           <span v-if="(a.working_orders || 0) > 0" class="dot-live" :title="t('emg.hasWorking')" />
-          <span v-if="!a.running" class="kpi-sub">（{{ t('emg.notRunning') }}）</span>
-        </el-checkbox>
-        <el-checkbox v-for="c in unconnected" :key="c.key" :model-value="false" disabled>
-          <span>{{ c.name }}</span>
-          <span class="kpi-sub">（{{ t('emg.apiNotOpen') }}）</span>
+          <span v-if="!a.enabled" class="kpi-sub">（{{ t('emg.disabledAccount') }}）</span>
+          <span v-else-if="!a.running" class="kpi-sub">（{{ t('emg.notRunning') }}）</span>
         </el-checkbox>
       </div>
     </el-card>
 
-    <!-- 2 处置操作（四级递进：撤单 包含于 熔断 包含于 清仓；恢复仅解除拦截） -->
-    <el-card style="margin-top: var(--sp-3)">
-      <template #header>{{ t('emg.ops') }}</template>
-      <div v-for="(op, i) in ops" :key="op.key" class="op-row" :class="{ 'op-row-first': i === 0 }">
-        <div class="op-text">
-          <div class="op-name">{{ i + 1 }}. {{ t(op.name) }}</div>
-          <div class="op-sub">{{ t(op.desc) }}</div>
-        </div>
-        <div class="op-act">
-          <el-button :type="op.btnType" :plain="op.plain" :disabled="op.disabled()" @click="op.run">
-            {{ t(op.btn) }}<template v-if="op.withCount">（{{ selectedCount }}）</template>
-          </el-button>
-          <div v-if="op.hint && op.hint()" class="kpi-sub op-hint">{{ op.hint() }}</div>
-        </div>
-      </div>
-    </el-card>
+    <!-- 2 处置操作（横排四卡；递进：撤单 ⊂ 熔断 ⊂ 清仓；恢复仅解除拦截） -->
+    <div class="op-grid">
+      <el-card v-for="(op, i) in ops" :key="op.key" class="op-card">
+        <div class="op-name">{{ i + 1 }}. {{ t(op.name) }}</div>
+        <div class="op-sub">{{ t(op.desc) }}</div>
+        <el-button :type="op.btnType" :plain="op.plain" :disabled="op.disabled()"
+                   class="op-btn" @click="op.run">
+          {{ t(op.btn) }}<template v-if="op.withCount">（{{ selectedCount }}）</template>
+        </el-button>
+        <div v-if="op.hint && op.hint()" class="kpi-sub op-hint">{{ op.hint() }}</div>
+      </el-card>
+    </div>
 
     <!-- 3 处置记录 -->
     <el-card style="margin-top: var(--sp-3)">
@@ -59,8 +46,6 @@
         <span>{{ e.text }}</span>
       </div>
     </el-card>
-
-    <div class="kpi-sub safety-bar">{{ t('emg.safety') }} · {{ t('emg.dataFresh') }}</div>
   </div>
 </template>
 
@@ -81,12 +66,7 @@ let timer = null
 
 const halted = computed(() => !!state.value.halted)
 const selectedCount = computed(() => selectedIds(accounts.value).length)
-const unconnected = [
-  { key: 'binance', name: 'Binance' },
-  { key: 'okx', name: 'OKX' },
-]
 
-// 恢复钮剩余等待（熔断未满 5 分钟置灰的原因说明——非状态展示）
 const resumeWait = () => {
   if (!halted.value || !haltTs.value) return ''
   const left = 300 - (nowTs.value - haltTs.value)
@@ -155,11 +135,11 @@ const load = async () => {
     haltTs.value = e.halted_ts
     const items = e.items || []
     if (!accounts.value.length) {
-      accounts.value = items.map(a => ({ ...a, checked: true }))
+      accounts.value = items.map(a => ({ ...a, checked: !!a.enabled }))   // 缺省：已启用全选
     } else {
       accounts.value = accounts.value.map(old => {
         const n = items.find(x => x.account_id === old.account_id)
-        return n ? { ...n, checked: old.checked } : old
+        return n ? { ...n, checked: old.checked && !!n.enabled } : old
       })
     }
   } catch (e) { console.error(e) }
@@ -218,17 +198,14 @@ onUnmounted(() => clearInterval(timer))
 .card-head-row { display: flex; justify-content: space-between; align-items: center; }
 .scope-list { display: flex; flex-direction: column; gap: var(--sp-2); }
 .scope-meta { margin-left: var(--sp-2); }
-.op-row { display: flex; align-items: center; justify-content: space-between;
-  gap: var(--sp-3); padding: var(--sp-3) 0; border-top: var(--border-w, 1px) solid var(--border); }
-.op-row-first { border-top: none; padding-top: 0; }
-.op-text { min-width: 0; }
+.op-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3); margin-top: var(--sp-3); }
 .op-name { font-weight: 600; }
-.op-sub { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: var(--sp-1); }
-.op-act { flex: none; text-align: right; }
+.op-sub { font-size: var(--fs-foot); color: var(--text-secondary); margin-top: var(--sp-1); min-height: 32px; }
+.op-btn { width: 100%; margin-top: var(--sp-2); }
 .op-hint { margin-top: var(--sp-1); }
 .tl-row { display: flex; gap: var(--sp-2); align-items: baseline; }
 .tl-op { min-width: 60px; }
 .tl-warn { color: var(--critical); }
-.safety-bar { margin-top: var(--sp-3); padding: var(--sp-2); background: var(--bg-canvas);
-  border-radius: var(--sp-1); }
+.dot-live { display: inline-block; width: var(--dot); height: var(--dot); border-radius: 50%;
+  background: var(--critical); margin-left: var(--sp-1); }
 </style>
