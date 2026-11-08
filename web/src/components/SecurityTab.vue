@@ -42,13 +42,20 @@
           </div>
         </el-card>
         <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.status') }}</span></div>
+          <div class="card-head"><span class="card-name">{{ t('secpage.status') }}</span>
+            <!-- 批 171l：新代码已上产但快照仍是旧轮（06:00 beat 周期）——角标防「空等无解释」 -->
+            <el-tag v-if="staleAfterDeploy && !scanning" size="small" type="warning" style="margin-left:auto">
+              {{ t('secpage.staleDeploy') }}</el-tag>
+          </div>
           <div class="card-value"><StatusTag :value="snap.status" /></div>
           <div v-if="degradedZones.length" class="zone-list">
             <div v-for="z in degradedZones" :key="z.zone" class="zone-item"
                  :title="z.reason">⚠ {{ z.zone }}：{{ z.reason.slice(0, 40) }}</div>
           </div>
           <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
+          <div v-if="staleAfterDeploy && !scanning" class="kpi-sub dep-outdated warn">
+            {{ t('secpage.staleDeployHint') }}
+          </div>
         </el-card>
         <el-card shadow="never" class="metric-card">
           <div class="card-head"><span class="card-name">{{ t('secpage.scanDate') }}</span></div>
@@ -62,6 +69,21 @@
           <div class="card-value"><span class="pct small">{{ dbBuiltDate || '—' }}</span></div>
           <div class="kpi-sub">{{ dbStateHint }}</div>
         </el-card>
+      </div>
+    </el-card>
+
+    <!-- 批 171l：系统安全更新条件卡（dnf 分区 pending_count>0 才渲染——零噪音）。
+         kernel 行精确匹配高亮（kernel/kernel-core——剥 .arch；tools/headers/devel 不误伤）。 -->
+    <el-card v-if="dnfPending.length" style="margin-top: var(--sp-3)">
+      <template #header>
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <span>{{ t('secpage.dnfUpdates') }}（{{ dnfPending.length }}）</span>
+        </div>
+      </template>
+      <div v-for="p in dnfPending" :key="p.name" style="display:flex;gap:var(--sp-2);align-items:center;padding:2px 0">
+        <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="p.name">{{ p.name }}</span>
+        <span class="kpi-sub">{{ t('secpage.updateTag') }}: {{ p.errata || '—' }}</span>
+        <el-tag v-if="isKernelPkg(p.name)" size="small" type="danger">{{ t('secpage.kernelReboot') }}</el-tag>
       </div>
     </el-card>
 
@@ -322,6 +344,15 @@ const hasUpdateText = (v) => v === 'yes' ? t('secpage.huYes') : v === 'no' ? t('
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
 const degradedZones = computed(() => snap.value?.degraded_zones || [])
 const findingsStale = computed(() => !!snap.value?.findings_stale)   // 批170：漏洞列表为历史值
+// 批 171l：部署后快照未刷新 + dnf 待更安全更新（kernel 精确匹配）
+const staleAfterDeploy = computed(() => !!snap.value?.stale_after_deploy)
+const dnfPending = computed(() => (snap.value?.dnf?.packages || [])
+  .filter(p => p && p.name))
+const isKernelPkg = name => {
+  // NEVRA 形态 kernel-5.10.134-19.10.al8.x86_64：剥 .arch 后以 kernel/kernel-core
+  // + 版本号开头（tools/headers/devel/modules 等子包不匹配——只有内核本体需重启）
+  return /^(kernel|kernel-core)-\d|^(kernel|kernel-core)$/.test(String(name || ''))
+}
 const findingsAsOf = computed(() => snap.value?.findings_as_of || '')
 
 // C 区（批 125 重构）：搜索（ID/包/描述子串）× RowFilter（严重度 distinct × 状态

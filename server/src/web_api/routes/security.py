@@ -303,6 +303,27 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     # 显式 ?date= ＝用户主动翻看历史 ⇒ 永不 stale（快照日用户已知）；无参默认才按
     # 「今日视角」判（今日未扫/回落旧快照 ⇒ stale）。vulns 降级两路都标。
     findings_stale = (_vulns_status == "degraded") or (not date_str and snap["scan_date"] < _today)
+    # 批 171l：stale_after_deploy——新代码已上产但快照仍是旧轮产物（运维空等一个扫描
+    # 周期）。锚=本进程 cwd（release 目录名前 12 位=控制机 Asia/Shanghai 墙钟），
+    # created_at=UTC aware ⇒ 目录时间戳 attach +08:00 后比较（A-P0：盘后部署窗
+    # 20:00CST vs 扫描 06:05CST 裸墙钟恒判反）。解析失败/created_at None ⇒ fail-open
+    # false（dev 无 releases 布局恒 false——预期）。
+    stale_after_deploy = False
+    try:
+        import os as _os
+        import re as _re
+        from datetime import datetime as _dt, timedelta as _tdd
+        from datetime import timezone as _tz
+        _cwd = _os.readlink("/proc/self/cwd")
+        _m = _re.search(r"/releases/(\d{12})-", _cwd)
+        if _m and snap["created_at"] is not None:
+            _t = _m.group(1)
+            _deploy_at = _dt(int(_t[:4]), int(_t[4:6]), int(_t[6:8]),
+                             int(_t[8:10]), int(_t[10:12]),
+                             tzinfo=_tz(_tdd(hours=8)))   # 目录名=控制机 CST 墙钟
+            stale_after_deploy = snap["created_at"] < _deploy_at
+    except Exception:
+        stale_after_deploy = False   # fail-open（呈现层禁炸）
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
@@ -328,6 +349,7 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "vulns_status": _vulns_status or "unknown",
         "findings_as_of": _findings_as_of,
         "findings_stale": findings_stale,   # 批170：true ⇒ 列表是历史值，不得当当前风险读
+        "stale_after_deploy": stale_after_deploy,   # 批 171l：新代码已上产但快照未刷新（角标用）
         "vulns_db": (snap.get("components") or {}).get("vulns_db") or {},
         # 批 154：依赖滞后（venv 债务仪表——components 分区透传；检查不升级）
         "n_outdated": (snap.get("components") or {}).get("n_outdated"),
