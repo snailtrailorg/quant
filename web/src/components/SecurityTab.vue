@@ -80,7 +80,7 @@
           <span>{{ t('secpage.dnfUpdates') }}（{{ dnfPending.length }}）</span>
         </div>
       </template>
-      <div v-for="p in dnfPending" :key="p.name" style="display:flex;gap:var(--sp-2);align-items:center;padding:2px 0">
+      <div v-for="p in dnfPending" :key="p.name" style="display:flex;gap:var(--sp-2);align-items:center;padding:var(--sp-1) 0">
         <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" :title="p.name">{{ p.name }}</span>
         <span class="kpi-sub">{{ t('secpage.updateTag') }}: {{ p.errata || '—' }}</span>
         <el-tag v-if="isKernelPkg(p.name)" size="small" type="danger">{{ t('secpage.kernelReboot') }}</el-tag>
