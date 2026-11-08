@@ -605,10 +605,11 @@ class TestBatch78CpuRules:
             snap["resources"]["cpu"] = {"pct": pct}   # cpu 形状只有 pct（无 total/used 字节）
         return snap
 
-    def test_cpu_warning_at_075(self):
-        """synthetic snap 无 thresholds——evaluate 兜底 dict 含 cpu（P0-2 钉：缺 cpu 即 KeyError）。"""
+    def test_cpu_warning_at_085(self):
+        """synthetic snap 无 thresholds——evaluate 兜底 dict 含 cpu（P0-2 钉：缺 cpu 即 KeyError）。
+        批 171k：warn 阈值 0.7→0.8（晨窗治理）——0.85 档断言（0.75 现在是健康区间）。"""
         from src.health_monitor.monitor import evaluate
-        findings, _ = evaluate(self._snap_cpu(0.75))
+        findings, _ = evaluate(self._snap_cpu(0.85))
         assert any(f["rule_id"] == "cpu_high" and f["severity"] == "warning"
                    and f["component"] == "cpu" for f in findings)
 
@@ -678,7 +679,7 @@ class TestBatch78CfgChain:
         collector._CFG_CACHE.update({"thresholds": None, "periods": None, "ts": 0.0})
         with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
             thr, periods = collector._read_cfg()
-        assert thr["cpu"] == {"warn": 0.7, "crit": 0.9}
+        assert thr["cpu"] == {"warn": 0.8, "crit": 0.9}   # 批 171k：0.7→0.8
         assert periods["cpu"] == 30
         collector._CFG_CACHE.update({"thresholds": None, "periods": None, "ts": 0.0})
 

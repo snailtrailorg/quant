@@ -25,17 +25,28 @@ def _fake_lock_cls(acquired: bool):
 
 class TestContinuityLock:
 
-    def _run(self, acquired=True):
-        """mock 全外协跑 data_continuity_check（celery task .run 直调）。"""
+    def _run(self, acquired=True, cnt=1):
+        """mock 全外协跑 data_continuity_check（celery task .run 直调）。
+        cnt：检测行计数。批 171k：cnt=0 断连=检测查询**无该标的行**+SM 全集含它
+        （GROUP BY 只出有行标的——真断连标的在差集里，非 cnt=0 行）。"""
+        def _exec(sql, *a):
+            cur = MagicMock()
+            if "security_master" in sql:
+                cur.fetchall.return_value = [("600000.SHSE",)]
+            else:
+                cur.fetchall.return_value = (
+                    [] if cnt == 0 else [("600000.SHSE", "2026-11-01", cnt)])
+            return cur
+
+        _redis_m = MagicMock()
+        _redis_m.exists.return_value = False   # 批 171k：当日去重键不存在（首日语义）
         with patch("src.data_sync.sync_lock.SyncLock", _fake_lock_cls(acquired)), \
-             patch("src.scheduler.tasks.business_redis", MagicMock()), \
+             patch("src.scheduler.tasks.business_redis", MagicMock(return_value=_redis_m)), \
              patch("src.scheduler.tasks.get_conn") as gc, \
              patch("src.data_platform.db.is_trading_day", return_value=True, create=True), \
              patch("src.data_platform.integrity.suspend_days_bulk", return_value={}, create=True), \
              patch("src.alert_notify.notify") as nf:
-            # 检测查询：一只标的近 7 天 1 条（预期 >1 ⇒ 缺量候选）
-            gc.return_value.__enter__.return_value.execute.return_value.fetchall.return_value = [
-                ("600000.SHSE", "2026-11-01", 1)]
+            gc.return_value.__enter__.return_value.execute.side_effect = _exec
             out = tasks.data_continuity_check.run()
         return out, nf
 
@@ -47,11 +58,13 @@ class TestContinuityLock:
         assert out["repaired_bars"] == 0
 
     def test_lock_acquired_reports_gap_and_repairs(self):
-        """获锁 ⇒ 缺量 issue 照报 + 补采循环执行（pull_daily 被调）——零漂移直证。"""
+        """获锁 ⇒ cnt=0 断连 issue 照报 + 补采循环执行（pull_daily 被调）——零漂移直证。
+        批 171k：缺量判定改 cnt=0 才报（原「近7天仅」词随阈值语义退役）——测试行 cnt=1
+        在 171k 后属低频豁免象限，改 0 才触补采。"""
         with patch("src.data_platform.adapters.tushare_adapter.pull_daily",
                    return_value=MagicMock(empty=False)) as pl:
-            out, _nf = self._run(acquired=True)
-        assert any("近7天仅" in i for i in out["issues"]), "缺量行照报"
+            out, _nf = self._run(acquired=True, cnt=0)
+        assert any("整周零根" in i for i in out["issues"]), "cnt=0 断连行照报"
         pl.assert_called_once(), "补采循环执行"
 
 

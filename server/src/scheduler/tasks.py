@@ -158,12 +158,27 @@ def health_check():
     try:
         from src.llm_gateway.gateway import gateway
         resp = gateway.chat([{"role":"user","content":"ping"}], timeout=10, retries=0, caller="health_check")
-        results["llm"] = {"status": "ok" if resp.content else "empty", "model": resp.usage.get("model","")}
+        # 批 171k（A-P1-2）：gateway 全链挂**不抛异常返 content=""**（gateway.py :390
+        # 「所有 provider 不可用」）——原判 empty=非 error ⇒ LLM 主备全挂现状零告警。
+        # 修实：空串=error（主备全挂信号，critical——N 行容灾链只吸收单点抖动，
+        # 健康面见到的失败本就是全挂）。
+        if resp.content:
+            results["llm"] = {"status": "ok", "model": resp.usage.get("model", "")}
+        else:
+            results["llm"] = {"status": "error", "msg": "主备全挂（gateway 返回空——所有 provider 不可用）"}
+            from src.alert_notify import notify
+            notify("critical", "system", "LLM 网关主备全挂",
+                   "gateway.chat 返回空内容（N 行容灾链全失败）——查 /observe 健康页与 llm_gateway 日志",
+                   code="health.llm-degraded")
     except Exception as e:
         results["llm"] = {"status": "error", "msg": str(e)[:100]}
+        from src.alert_notify import notify
+        notify("critical", "system", "LLM 网关主备全挂",
+               f"health_check 调用异常: {str(e)[:100]}",
+               code="health.llm-degraded")
 
-    # 异常告警
-    errors = [k for k,v in results.items() if v["status"] == "error"]
+    # 异常告警（PG/Valkey——真依赖离线保持 iface-down；LLM 已单独拆 health.llm-degraded）
+    errors = [k for k, v in results.items() if v["status"] == "error" and k != "llm"]
     if errors:
         from src.alert_notify import notify
         notify("critical", "system", "接口健康异常", f"离线: {errors}", code="health.iface-down")
@@ -550,6 +565,17 @@ def _tier_alert_filter(stale: list[dict]) -> tuple[list[dict], set[str]]:
         return stale, set()
 
 
+def _bar_gap_symbols(rows, expected_map):
+    """批 171k：bar 缺量判定纯函数——**cnt=0（整周零根）才算断连**。
+
+    实证（A-P0-2）：66 标的分布 cnt4×31/cnt3×18/cnt2×10/cnt1×7——低频 ETF 的「缺量」
+    是分布尾部（161614 近 120 日仅 ~30 根）非固定边界可豁免；cnt=0=有历史但整周无
+    新增（真断连），其余交给当日去重收口。返回 [(symbol, 0, expected)] 列表。
+    """
+    return [(sym, 0, expected_map.get(sym, 0))
+            for sym, cnt in rows.items() if cnt == 0]
+
+
 @app.task(name="src.scheduler.tasks.data_continuity_check",
           bind=True, soft_time_limit=2400, time_limit=2700)   # 批 145：慢轮实测峰 2093s+~15% 余量
 def data_continuity_check(self):
@@ -635,28 +661,63 @@ def data_continuity_check(self):
                 logger.warning("补采锁被持(reconcile:continuity)，本轮跳过补采")
                 issues.append("补采锁被持(reconcile:continuity)，本轮跳过补采")
             else:
-                for symbol, last_ts, cnt in rows:
-                    _exp_sym = expected - len(_susp.get(symbol) or [])
-                    if cnt < _exp_sym:
-                        issues.append(f"{symbol}: 近7天仅{cnt}条(预期~{_exp_sym})")
-                        try:
-                            ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
-                            from src.data_platform.adapters.base import TushareAdapter
-                            from src.data_platform.adapters.tushare_adapter import pull_daily
-                            from src.data_platform.db import save_bars
-                            # 批 171e（A-P1-1）：裸 pull_daily 零限速——包 rate_limit_context
-                            #（每小时轮补采与增量波次叠加时该侧无闸）。
-                            from src.data_platform.rate_limit import rate_limit_context
-                            from src.data_sync.engine import _get_rate_ds
-                            with rate_limit_context(_get_rate_ds("tushare"), "daily"):
-                                df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
-                            if not df.empty:
-                                rws = TushareAdapter().to_bar_rows(df, "1D")
-                                repaired = save_bars("1D", rws)
-                                if repaired > 0:
-                                    repaired_any = True
-                        except Exception as e:
-                            issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
+                # 批 171k：cnt=0 才算断连（A-P0-2——低频 ETF 缺量是分布尾部非固定边界
+                # 可豁免）。**真断连=SM 全集−本周有行集的差集**（检测 SQL GROUP BY 只出
+                # 有行标的——cnt=0 标的本就不在 rows 里，纯函数的 0 分支只服务测试直调；
+                # 差集口径下 cnt 恒 0）。豁免同时跳过补采（低频标的「缺量」是正常形态，
+                # 补采=纯 API 浪费；真断连差集标的仍补采）。
+                _cnt_map = {sym: cnt for sym, _ts, cnt in rows}
+                _exp_map = {sym: expected - len(_susp.get(sym) or []) for sym in _cnt_map}
+                # SM 全集（stock+listed_fund——本检测面=bar_1D 日线域）差集
+                try:
+                    with get_conn() as conn:
+                        _sm_syms = {r[0] for r in conn.execute(
+                            "SELECT vt_symbol FROM security_master "
+                            "WHERE category IN ('stock','listed_fund')").fetchall()}
+                    _zero_syms = _sm_syms - set(_cnt_map)
+                    for _zs in _zero_syms:
+                        _cnt_map[_zs] = 0
+                        _exp_map[_zs] = expected - len(_susp.get(_zs) or [])
+                except Exception as _e:
+                    logger.warning("SM 全集差集读取失败（断连检测退化为仅存量行）: %s", _e)
+                _gaps = _bar_gap_symbols(_cnt_map, _exp_map)
+                bar_gap_lines = []
+                for symbol, _zero, _exp_sym in _gaps:
+                    bar_gap_lines.append(f"{symbol}: 整周零根(预期~{_exp_sym})")
+                    try:
+                        ts_code = symbol.replace(".SHSE", ".SH").replace(".SZSE", ".SZ").replace(".BSE", ".BJ")
+                        from src.data_platform.adapters.base import TushareAdapter
+                        from src.data_platform.adapters.tushare_adapter import pull_daily
+                        from src.data_platform.db import save_bars
+                        # 批 171e（A-P1-1）：裸 pull_daily 零限速——包 rate_limit_context
+                        #（每小时轮补采与增量波次叠加时该侧无闸）。
+                        from src.data_platform.rate_limit import rate_limit_context
+                        from src.data_sync.engine import _get_rate_ds
+                        with rate_limit_context(_get_rate_ds("tushare"), "daily"):
+                            df = pull_daily(ts_code, week_ago.strftime("%Y%m%d"), today.strftime("%Y%m%d"))
+                        if not df.empty:
+                            rws = TushareAdapter().to_bar_rows(df, "1D")
+                            repaired = save_bars("1D", rws)
+                            if repaired > 0:
+                                repaired_any = True
+                    except Exception as e:
+                        issues.append(f"{symbol} 补采失败: {str(e)[:60]}")
+                # 批 171k（A-P1-1）：bar 缺量段聚合独立 notify+当日电平去重（issues 里
+                # 其余事件——Valkey 心跳/tier/补采锁——语义各异，按 code 整体去重会吞
+                # 同日后发的真事件；本地日期键与 :604 窗口同源）。
+                if bar_gap_lines:
+                    try:
+                        _rk = business_redis(socket_timeout=3)
+                        _dk = f"alert:dedup:data.disconn:{date.today().isoformat()}"
+                        if _rk.exists(_dk):
+                            logger.info("bar 缺量告警当日已发（%d 标的），跳过: %s",
+                                        len(bar_gap_lines), _dk)
+                            bar_gap_lines = []
+                        else:
+                            _rk.set(_dk, "1", ex=2 * 86400)
+                    except Exception as _e:
+                        logger.warning("缺量当日去重键不可用（跳过去重继续发）: %s", _e)
+                    issues.extend(bar_gap_lines)
                 # F-55（2026-09-03）：运行级只写一次触发标记（原循环内逐标的写，多 worker 每次 poll 读到
                 # 新值就 rewarm，N 个修复标的 → N 次重暖机）。写变化值（isoformat 微秒级唯一）
                 if repaired_any and r is not None:

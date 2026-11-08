@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import logging
 
 logger = logging.getLogger("health_monitor")
@@ -205,6 +207,23 @@ def evaluate(snap: dict, state: dict | None = None) -> tuple[list[dict], dict]:
             pct = r["pct"]
             sev = "critical" if (thr[kind].get("crit") is not None and pct > thr[kind]["crit"]) \
                 else ("warning" if pct > thr[kind]["warn"] else None)
+            # 批 171k：cpu warn 晨窗豁免（prod 08:00-09:30 备份+beat 叠加为已知峰——
+            # 窗内只记不报；crit 恒报）。窗走 system_config 键 `alert_cpu_morning_window`
+            # （缺省 '08:00-09:30'，运维可覆盖；格式 HH:MM-HH:MM 非法 ⇒ 豁免不生效——fail-closed）。
+            if sev == "warning" and kind == "cpu":
+                _win = (_snap_thr.get("cpu_morning_window")
+                        or (_snap_thr.get("cpu") or {}).get("morning_window")
+                        or "08:00-09:30")
+                _now = datetime.now().strftime("%H:%M")
+                try:
+                    _lo, _hi = _win.split("-")
+                    if _lo <= _now < _hi:
+                        out.append({"rule_id": "cpu_high", "component": "cpu",
+                                    "severity": "info",
+                                    "detail": f"cpu used {pct:.1%}（晨窗 {_win} 内，只记不报）"})
+                        continue
+                except ValueError:
+                    pass   # 窗格式非法 ⇒ 不豁免（fail-closed）
             if sev:
                 out.append({"rule_id": rule, "component": comp, "severity": sev,
                             "detail": f"{kind} used {pct:.1%}（阈值 {sev}）"})

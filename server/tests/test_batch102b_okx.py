@@ -757,7 +757,7 @@ class TestMigration0137Shape:
             revs[mod.revision] = str(mod.down_revision)
         heads = set(revs) - set(revs.values())
         # 0145（批 120：安全态势页两表 expand-only）
-        assert heads == {"0172"}, f"head 不是唯一 0172：{sorted(heads)}"   # 批 171f：0172 新链头（orphan gap cleanup）——链头钉随批交棒（0171/0168 承载见 git 史）
+        assert heads == {"0173"}, f"head 不是唯一 0173：{sorted(heads)}"   # 批 171k：0173 新链头（cpu warn seed）——链头钉随批交棒（0172/0171 承载见 git 史）
 
     def test_expand_only_no_ddl(self):
         """expand-only：upgrade 零 DDL（阶段 4 破坏性门不拦；回滚只回代码）。"""

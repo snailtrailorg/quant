@@ -36,7 +36,7 @@ _CFG_CACHE: dict = {"thresholds": None, "periods": None, "ts": 0.0}
 # 缺省（批22 迭代用户裁定：内存 warn 缺省 60%；周期内存 60s/磁盘 3600s/swap 300s；
 #   批78 cpu：warn 0.70/crit 0.90 用户知情裁定——0.7 档盘中瞬时越限告警属预期；周期 30s）
 _DEF_THRESHOLDS = {"mem": {"warn": 0.6, "crit": 0.9}, "disk": {"warn": 0.8, "crit": 0.9},
-                   "swap": {"warn": 0.8}, "cpu": {"warn": 0.7, "crit": 0.9}}
+                   "swap": {"warn": 0.8}, "cpu": {"warn": 0.8, "crit": 0.9}}   # 批 171k：cpu warn 0.7→0.8（prod 晨窗备份+beat 叠加峰）——线上值由迁移 0173 改 seed
 _DEF_PERIODS = {"mem": 60, "disk": 3600, "swap": 300, "cpu": 30}
 _CFG_KEYS = {
     "thresholds": {

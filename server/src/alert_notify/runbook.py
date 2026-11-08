@@ -57,7 +57,8 @@ RUNBOOK: dict[str, dict] = {
     "data.pollution": {"label": "复权因子污染扩大", "guide": "批 171j：bar_1D stock 品类 NULL adj_factor 较前日**递增**（近 3 日窗）——attach 静默降级信号（`pull_adj_factor` 返回 None/空 ⇒ adj_map={} 部分缺失无告警——supply 路径 base.py :505 间歇形态）。查 journal 当日 16:30 波次 adj_factor 接口调用；修数=慢扫 `POST /api/sync/adj-factor-backfill`（积分保护：手动触发）；连续多日 warn=attach 持续失败，属修复映射面。fund/cb/binance NULL=预期形态不告（因子覆盖面差异）。"},
     "disk.warning":     {"label": "磁盘告警", "guide": "磁盘余量触警——清理 var/log 与旧 release（GC 保 N=5）。"},
     # ——— 健康监控 ———
-    "health.iface-down":   {"label": "接口健康异常", "guide": "LLM/PG/Valkey 有离线——查 /observe 健康页与对应服务。"},
+    "health.iface-down":   {"label": "接口健康异常", "guide": "PG/Valkey 有离线——查 /observe 健康页与对应服务。（LLM 离线已拆 health.llm-degraded。）"},
+    "health.llm-degraded": {"label": "LLM 网关主备全挂", "guide": "批 171k：gateway.chat 返回空内容=所有 provider 不可用（单点抖动由 N 行容灾链吸收——见到本告警即主备全挂）。查 /observe 健康页 llm 分区与 llm_gateway 日志（DeepSeek 主/GLM 备的 key 与网络）。"},
     "health.channel-down": {"label": "通道连通异常", "guide": "数据/通知通道离线——查 dataops 数据源页与通道配置。"},
     "health.schema-drift": {"label": "schema 漂移", "guide": "列级校验发现缺失列——核对迁移是否全跑（alembic current）。"},
     "health.schema-off":   {"label": "schema 校验禁用", "guide": "校验开关被关——确认是否有意，防漂移盲区。"},
