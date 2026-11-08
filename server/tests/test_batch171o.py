@@ -14,9 +14,9 @@ class TestExposure:
     def _run(self, monkeypatch, accts, snaps, live, hb_map):
         conn = MagicMock()
         conn.execute.return_value.fetchall.return_value = accts
-        # 171q：enabled 列并入（(id, name, provider, enabled) 四元组）
-        monkeypatch.setattr("src.data_platform.config_store.trading_accounts_all",
-                            lambda: [(a[0], a[1], a[2], True) for a in accts])
+        # 171q：真源含 is_virtual 标志（(id, name, provider, enabled, is_virtual)）
+        monkeypatch.setattr("src.data_platform.config_store.trading_accounts_with_flags",
+                            lambda: [(a[0], a[1], a[2], True, False) for a in accts])
         monkeypatch.setattr("src.data_platform.config_store.exposure_snapshots", lambda: snaps)
         monkeypatch.setattr("src.data_platform.config_store.live_running_tasks", lambda: live)
         r = MagicMock()

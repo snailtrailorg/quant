@@ -138,13 +138,17 @@ def all_ids(kind: str) -> set[int]:
         return {r[0] for r in cur.fetchall()}
 
 
-def trading_accounts_all() -> list[tuple]:
-    """批 171q：**全部**通道账号行 [(id, name, provider, enabled)]——紧急处置复选组
-    唯一数据源（禁 FE 硬编码通道：未启用账号由系统行本身呈现，禁自造条目）。"""
+def trading_accounts_with_flags() -> list[tuple]:
+    """批 171q：交易账号真源 [(id, name, provider, enabled, is_virtual)]。
+
+    谓词与**交易域等价**（批 86-B 立法：虚拟账户 is_virtual=true 不进交易域列表，
+    见本文件 list_rows 注释）——紧急处置页据此判定可处置账号，保证与「建任务绑账号」
+    下拉、交易 API 看到的账号集合同一真源。调用方按 is_virtual 分轨（虚拟=纸交易，
+    不涉真实资金，处置页不展示）。"""
     from src.data_platform.db import get_conn
     with get_conn() as conn:
         return conn.execute(
-            "SELECT id, name, provider, enabled FROM trading_account "
+            "SELECT id, name, provider, enabled, is_virtual FROM trading_account "
             "ORDER BY enabled DESC, id").fetchall()
 
 

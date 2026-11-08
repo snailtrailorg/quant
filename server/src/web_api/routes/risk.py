@@ -314,10 +314,22 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
     """
     import time as _t
     from src.quant_common.redis_client import business_redis
-    from src.data_platform.config_store import exposure_snapshots, live_running_tasks, trading_accounts_all
+    from src.data_platform.config_store import (exposure_snapshots, live_running_tasks,
+                                                trading_accounts_with_flags)
     live = {str(tid): acct for tid, acct in live_running_tasks()}
     snaps = exposure_snapshots()
-    accts = trading_accounts_all()   # 批 171q：全量（含未启用——FE 灰态，禁硬编码通道）
+    _rows = trading_accounts_with_flags()   # 与交易域同真源（is_virtual 分轨）
+    _virtual_ids = {r[0] for r in _rows if r[4]}
+    accts = [r[:4] for r in _rows if not r[4]]   # 虚拟账户（纸交易）不入处置面
+    # **安全并集**（紧急场景绝不允许漏账号）：任何「运行中」实盘任务的 account_id
+    # 若不在账号表（脏数据/未登记），也补进来标「未登记」——宁可多一行，不可少一个
+    # 正在交易的账号。虚拟账户即使有任务也不并入（纸交易不涉真实资金）。
+    _known = {r[0] for r in accts}
+    _orphans = sorted({acct for acct in live.values()
+                       if acct not in _known and acct not in _virtual_ids})
+    for _aid in _orphans:
+        accts.append((_aid, f"账号#{_aid}（未登记）", "?", True))
+    _orphan_ids = set(_orphans)
     r = None
     try:
         r = business_redis(socket_timeout=3)
@@ -347,6 +359,7 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
         items.append({
             "account_id": acct_id, "name": name, "provider": provider,
             "enabled": bool(acct_enabled),   # 批 171q：未启用=FE 灰态不可勾
+            "unregistered": acct_id in _orphan_ids,   # 运行中但账号表无行（安全并集补入）
             "running": running,
             "working_orders": working,          # None=无活 runner/键缺（FE 显 —）
             "position_value": None if stale else sn.get("pos_value", 0.0),

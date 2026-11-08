@@ -12,7 +12,8 @@
             · {{ t('emg.posValue') }}: {{ a.position_value == null ? t('emg.unknown') : '¥' + Number(a.position_value).toLocaleString() }}
           </span>
           <span v-if="(a.working_orders || 0) > 0" class="dot-live" :title="t('emg.hasWorking')" />
-          <span v-if="!a.enabled" class="kpi-sub">（{{ t('emg.disabledAccount') }}）</span>
+          <span v-if="a.unregistered" class="kpi-sub">（{{ t('emg.unregistered') }}）</span>
+          <span v-else-if="!a.enabled" class="kpi-sub">（{{ t('emg.disabledAccount') }}）</span>
           <span v-else-if="!a.running" class="kpi-sub">（{{ t('emg.notRunning') }}）</span>
         </el-checkbox>
       </div>
