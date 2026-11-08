@@ -205,6 +205,92 @@ def risk_resume(payload: dict = Depends(require_perm("resume"))):
     return {"halted": False}
 
 
+def _live_runners() -> list[tuple[str, int]]:
+    """批 171n：活 runner 枚举——live_task status='running' 行 ∩ 心跳键新鲜（B-P0-2：
+    td_registry 是 builder 插件表非运行时枚举；僵尸 runner〔行 running 心跳死〕不收——
+    命令下发给死进程=静默过期）。返回 [(tid, account_id)]。"""
+    from src.quant_common.redis_client import business_redis
+    from src.data_platform.config_store import live_running_tasks
+    out = []
+    rows = live_running_tasks()
+    try:
+        r = business_redis(socket_timeout=3)
+        import time as _t
+        for tid, acct in rows:
+            try:
+                hb = r.hgetall(f"quant:hb:task:{tid}")
+                ts = hb.get("ts") if isinstance(hb, dict) else None
+                if ts and _t.time() - float(ts) < 30:
+                    out.append((str(tid), acct))
+            except Exception:
+                continue
+    except Exception:
+        pass   # Valkey 不可达：返回空=端点侧 409（保守——不发命令给未知态）
+    return out
+
+
+def _dispatch_risk_cmd(verb: str, payload: dict) -> dict:
+    """批 171n：急停命令下发共用体（cancel-all/close-all 两端点同链）。
+
+    三态分叉（A-P1-3）：无 runner ⇒ 409；已下发未回执（5s 窗）⇒ 202 dispatched；
+    回执在窗内 ⇒ 200 汇总。audit_log 三态分别落痕。
+    """
+    import json as _json
+    import time as _t
+    import uuid as _uuid
+    from src.web_api.errors import ApiError
+    from src.quant_common.redis_client import business_redis
+    runners = _live_runners()
+    if not runners:
+        audit_log(payload["username"], f"risk_{verb.replace('-', '_')}",
+                  detail="no active runner (409)")
+        raise ApiError(409, "RISK_NO_ACTIVE_RUNNER",
+                       "无活动实盘 runner（live_task running ∩ 心跳新鲜为空）——命令未下发")
+    r = business_redis(socket_timeout=3)
+    req_ids = []
+    for tid, _acct in runners:
+        req_id = _uuid.uuid4().hex[:12]
+        r.set(f"risk:cmd:{tid}",
+              _json.dumps({"id": req_id, "verb": verb,
+                           "operator": payload["username"], "ts": _t.time()}),
+              ex=10 * 60)
+        req_ids.append((tid, req_id))
+    # 回执窗（5s——worker 拍周期 1s 轮询+执行）
+    results = {}
+    deadline = _t.time() + 5
+    pending = {req_id: tid for tid, req_id in req_ids}
+    while pending and _t.time() < deadline:
+        for req_id in list(pending):
+            raw = r.get(f"risk:cmd:result:{req_id}")
+            if raw:
+                results[pending.pop(req_id)] = _json.loads(raw)
+                r.delete(f"risk:cmd:result:{req_id}")
+        _t.sleep(0.3)
+    audit_log(payload["username"], f"risk_{verb.replace('-', '_')}",
+              detail=f"dispatched={len(req_ids)} acked={len(results)}")
+    if pending:
+        return {"status": "dispatched", "dispatched": len(req_ids),
+                "acked": len(results), "results": results,
+                "pending": list(pending.values())}
+    return {"status": "done", "dispatched": len(req_ids), "results": results}
+
+
+@router.post("/api/risk/cancel-all")
+def risk_cancel_all(payload: dict = Depends(require_perm("halt"))):
+    """批 171n：一键撤全部在场委托（「请求已受理」语义——XTP 异步，结果见 journal）。"""
+    return _dispatch_risk_cmd("cancel-all", payload)
+
+
+@router.post("/api/risk/close-all")
+def risk_close_all(payload: dict = Depends(require_perm("halt"))):
+    """批 171n：一键全平（body {"confirm":"CONFIRM"} 二次确认——股灾场景防误触）。"""
+    if payload.get("confirm") != "CONFIRM":
+        from src.web_api.errors import ApiError
+        raise ApiError(400, "RISK_CONFIRM_REQUIRED",
+                       "close-all 需 body {\"confirm\":\"CONFIRM\"} 二次确认")
+    return _dispatch_risk_cmd("close-all", payload)
+
+
 @router.get("/api/risk-rules")
 def list_risk_rules(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:

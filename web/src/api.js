@@ -76,6 +76,9 @@ export const getAstockSelection = date => api.get('/astock/selection', { params:
 export const getRiskState = () => api.get('/risk/state')
 export const riskHalt = () => api.post('/risk/halt')
 export const riskResume = () => api.post('/risk/resume')
+// 批 171n：急停补全（撤单轻确认/全平 CONFIRM 强确认在 Risk.vue）
+export const riskCancelAll = () => api.post('/risk/cancel-all')
+export const riskCloseAll = () => api.post('/risk/close-all', { confirm: 'CONFIRM' })
 
 // 批23：审计批量删（{ids:[int]} / {all:true}，后端留痕 audit_delete）
 export const getUsers = () => api.get('/user')

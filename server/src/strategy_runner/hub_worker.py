@@ -39,6 +39,59 @@ def _crypto_provider(symbol: str) -> str | None:
     return None
 
 
+# 批 171n：急停命令通道（Web 端点 → GETDEL 请求键 → worker 拍内消费 → 结果键回执）。
+# 键：请求 risk:cmd:{tid}（值 JSON {id, verb, operator, ts}，TTL 10min——GETDEL 天然
+# 幂等单消费，_unfreeze_poll 同款先例）；结果 risk:cmd:result:{req_id}（TTL 10min）。
+RISK_CMD_KEY = "risk:cmd:{tid}"
+RISK_CMD_RESULT_KEY = "risk:cmd:result:{req_id}"
+
+
+def consume_risk_cmd(r, adapter, tid: str, account_id=None) -> dict | None:
+    """拍内消费一条急停命令（模块级可直测——批 56b run() 闭包不可测教训）。
+
+    verb ∈ {cancel-all, close-all}。返回 {id, verb, result} 或 None（无命令）。
+    结果写回执键（web 短轮询窗内读到 ⇒ 200 汇总；超时 ⇒ 202 dispatched 语义在端点侧）。
+    """
+    raw = None
+    try:
+        raw = r.getdel(RISK_CMD_KEY.format(tid=tid))
+    except AttributeError:            # 老驱动回退（非原子——同 _unfreeze_poll 形态）
+        try:
+            raw = r.get(RISK_CMD_KEY.format(tid=tid))
+            if raw:
+                r.delete(RISK_CMD_KEY.format(tid=tid))
+        except Exception:
+            raw = None
+    except Exception:
+        return None
+    if not raw:
+        return None
+    try:
+        cmd = json.loads(raw) if isinstance(raw, str) else {}
+    except (ValueError, TypeError):
+        cmd = {}
+    verb = cmd.get("verb") or ""
+    req_id = cmd.get("id") or ""
+    operator = cmd.get("operator") or "manual"
+    result: dict = {}
+    try:
+        if verb == "cancel-all":
+            result = trading._cancel_working_orders(adapter)
+        elif verb == "close-all":
+            result = trading._close_all_positions(adapter, account_id=account_id, operator=operator)
+        else:
+            result = {"error": f"unknown verb: {verb}"}
+    except Exception as e:
+        result = {"error": str(e)[:200]}
+    try:
+        r.set(RISK_CMD_RESULT_KEY.format(req_id=req_id),
+              json.dumps({"tid": tid, "verb": verb, "result": result}, ensure_ascii=False),
+              ex=10 * 60)
+    except Exception as e:
+        logger.warning("急停命令回执写失败（结果仅 journal 可见）: %s", e)
+    return {"id": req_id, "verb": verb, "result": result}
+
+
 def bar_stream_key(symbol: str, account_id: int) -> str:
     """D26 批 66b：全市场统一 per-account 流键 `hub:bars:{account_id}:{symbol}`。
 
@@ -635,6 +688,15 @@ def run(ctx: dict) -> None:
     loop.every("td-reconnect", 0.0, _td_reconnect)   # TD 重连沿对账：每步
     loop.every("zombie-claim", 5.0, _zombie_claim)   # xautoclaim 僵尸认领（评审 S3）
     loop.every("unfreeze-poll", 5.0, _unfreeze_poll)  # 批 76 F2：人工解冻请求消费（Valkey 键）
+
+    def _risk_cmd_poll():
+        """批 171n：急停命令消费（Web cancel-all/close-all → GETDEL → 回执键）。"""
+        try:
+            consume_risk_cmd(r, adapter, tid, account_id=account_id)
+        except Exception as e:   # noqa: BLE001 —— 命令通道故障不伤主循环
+            logger.debug("急停命令轮询失败: %s}", e)
+
+    loop.every("risk-cmd-poll", 1.0, _risk_cmd_poll)   # 批 171n：秒级响应（period=0.0 每步太密）
     try:
         loop.run()   # 永续（XReadSleeper never-raise 保证 sleep 位不抛；停止/NOGROUP 带码直达）
     except KeyboardInterrupt:

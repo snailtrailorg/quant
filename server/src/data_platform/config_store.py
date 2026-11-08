@@ -138,6 +138,15 @@ def all_ids(kind: str) -> set[int]:
         return {r[0] for r in cur.fetchall()}
 
 
+def live_running_tasks() -> list[tuple]:
+    """批 171n：status='running' 的 (id, account_id) 行集（急停命令下发对象枚举——
+    路由层禁内联 SQL 铁律，下沉本层）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT id, account_id FROM live_task WHERE status='running'").fetchall()
+
+
 def has_live_task(account_id: int) -> bool:
     """该 id 是否被 live_task 引用（**仅交易族可调**：live_task.account_id → trading_account.id）。"""
     with get_conn() as conn:

@@ -155,6 +155,7 @@ class TestWiringMatrix:
         "snapshot": 60.0, "halt-edge": 0.0, "factor-recalc": 5.0,
         "td-reconnect": 0.0, "zombie-claim": 5.0,
         "unfreeze-poll": 5.0,   # 批 76 F2：人工解冻请求消费（Valkey 键）
+        "risk-cmd-poll": 1.0,   # 批 171n：急停命令消费（cancel-all/close-all GETDEL）
         "daily-roll": 0.0,      # 批 119：daily_history 日界滚动（每步；不依赖 session 沿）
     }
 

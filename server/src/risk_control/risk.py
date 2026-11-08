@@ -273,7 +273,18 @@ class RiskControl:
             logger.error("熔断状态读取失败，按熔断拒单: %s", e)
             return RiskDecision(approved=False, reason=f"熔断状态不可读（Valkey 故障），保守拒单: {e}", severity="critical", rule="HALT_UNREADABLE")
         if halted:
-            return RiskDecision(approved=False, reason=f"熔断中: {_halt_reason}", severity="critical", rule="HALTED")
+            # 批 171n（A-P0-1/B-P0-3 裁定）：**平仓方向放行**——A 股现货无 offset 字段
+            # （Order dataclass :28 无此字段、XTP/EMT send_order 恒 Offset.NONE），方向判据
+            # ＝action=="SELL"（A 股现货 SELL 必然减仓——与 2.5 market_op 豁免/F-31 日亏
+            # 同判据哲学）。熔断拦平仓=全平自锁死（先 halt 再 close-all 被自己拒）。
+            # ⚠️ crypto 永续接入时 SELL≠平仓（开反向仓）——届时须换判据（边界注）。
+            # HALT_UNREADABLE（上方）全拒不变：读不到方向=保守。
+            if str(order.get("action", "")).upper() == "SELL":
+                logger.warning("熔断中·平仓方向放行（降风险单不拦）: %s %s",
+                               order.get("symbol"), _halt_reason)
+                # 落 risk_log 注记（放行可审计）——走出口统一落痕，此处只过闸
+            else:
+                return RiskDecision(approved=False, reason=f"熔断中: {_halt_reason}", severity="critical", rule="HALTED")
 
         # 2. 实盘开关（三级 AND：.env 总闸 + Web 分项 live_trading_config）
         # 批 86-B：**paper 跳过本步**（唯一跳过的一步）——语义是「能不能动真钱」，
@@ -392,6 +403,10 @@ class RiskControl:
         max_amount = rules.get("max_single_amount", 100000)
         amount = price * volume
         if price > 0 and amount > max_amount:
+            # 批 171n（A-P1-1②/B-P1-6）：**SELL 方向豁免截断**——reduce-only 被截=残留仓
+            # 反语义（平仓单金额大恰是持仓大，截量=平不掉）。与 halted 平仓放行同哲学。
+            if str(order.get("action", "")).upper() == "SELL":
+                return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限但 SELL 平仓方向豁免截断", severity="info", rule="MAX_SINGLE_AMOUNT")
             new_vol = int(max_amount / price)
             if new_vol <= 0:
                 return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}，截断后 volume=0", severity="warn", rule="MAX_SINGLE_AMOUNT")

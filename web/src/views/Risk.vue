@@ -15,6 +15,9 @@
       <div style="margin-top: var(--sp-5); display: flex; gap: 12px">
         <el-button v-if="canHalt" type="danger" @click="onHalt" :disabled="state.halted">{{ t('risk.halt') }}</el-button>
         <el-button v-if="canResume" type="success" @click="onResume" :disabled="!state.halted">{{ t('risk.resume') }}</el-button>
+        <!-- 批 171n：急停补全——撤单/全平（halt 同权限 admin 独占；全平 CONFIRM 强确认同 RESUME 形态） -->
+        <el-button v-if="canHalt" type="warning" @click="onCancelAll">{{ t('risk.cancelAll') }}</el-button>
+        <el-button v-if="canHalt" type="danger" plain @click="onCloseAll">{{ t('risk.closeAll') }}</el-button>
       </div>
     </el-card>
 
@@ -95,7 +98,7 @@ import { ref, computed, onMounted, inject } from 'vue'
 import TableShell from '../components/TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { getRiskState, riskHalt, riskResume, getLiveTrading, updateLiveTrading } from '../api'
+import { getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getLiveTrading, updateLiveTrading } from '../api'
 import SellGuardBanner from '../components/SellGuardBanner.vue'
 
 const { t } = useI18n()
@@ -196,6 +199,31 @@ const onHalt = async () => {
     await ElMessageBox.confirm(t('risk.confirmHalt'), { type: 'warning' })
     await riskHalt(); ElMessage.success(t('risk.halted')); load()
   } catch (e) { console.error(e) }
+}
+// 批 171n：一键撤单（「请求已受理」语义——结果见 journal/回执汇总）
+const onCancelAll = async () => {
+  try {
+    await ElMessageBox.confirm(t('risk.confirmCancelAll'), { type: 'warning' })
+    const r = await riskCancelAll()
+    ElMessage.success(r.status === 'done'
+      ? t('risk.cancelAllDone', { n: r.dispatched })
+      : t('risk.dispatched', { n: r.dispatched }))
+    load()
+  } catch (e) { if (e?.response) console.error(e) }
+}
+// 批 171n：一键全平（CONFIRM 强确认——降风险动作但影响半径大）
+const onCloseAll = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      t('risk.closeAllPromptTip'), t('risk.closeAllPromptTitle'),
+      { type: 'warning', confirmButtonText: t('risk.closeAll') })
+    if (value?.trim() !== 'CONFIRM') { ElMessage.warning(t('risk.resumeMismatch')); return }
+    const r = await riskCloseAll()
+    ElMessage.success(r.status === 'done'
+      ? t('risk.closeAllDone', { n: (r.results && Object.values(r.results).length) || 0 })
+      : t('risk.dispatched', { n: r.dispatched }))
+    load()
+  } catch (e) { if (e?.response) console.error(e) }
 }
 const onResume = async () => {
   // H7（08 盲审#2）：恢复=输入确认(重新暴露风险才是强确认该在的地方);熔断保持轻确认

@@ -260,8 +260,8 @@ def snapshot_cycle(adapter, account_id, tid, baseline_cache: dict) -> None:
 def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
     """SB2 熔断沿：进入熔断的瞬间撤全部在场委托（F-41——熔断只拦新单不撤旧单=熔断期间仍建仓）。
 
-    halt_state={"was": bool} 由调用方持有（沿检测状态跨拍保持）；Valkey 不可达时保持上一
-    状态（check_order 侧已保守拒单）。告警文案统一 direct 版（4a 知情差异④）。
+    批 171n：撤单核心已提纯 `_cancel_working_orders`（本函数留沿判定+告警壳——F-41
+    行为零漂移）。
     """
     try:
         from src.risk_control.risk import RiskControl
@@ -271,18 +271,91 @@ def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
     if halted_now and not halt_state["was"]:
         logger.critical("检测到熔断，撤销全部在场委托")
         _alert(f"熔断触发，已自动撤销在场委托: {sid}", "check_order 已拒新单；在场委托撤销结果见 journalctl。", code="risk.halt-edge")
-        try:
-            from vnpy.trader.constant import Status
-            working = (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)
-            for od in (adapter.query_orders() or []):
-                if getattr(od, "status", None) in working:
-                    try:
-                        adapter.cancel_order(od.vt_orderid)
-                    except Exception as ce:
-                        logger.warning("撤单失败 %s: %s", od.vt_orderid, ce)
-        except Exception as e:
-            logger.error("熔断撤单流程异常: %s", e)
+        _cancel_working_orders(adapter)
     halt_state["was"] = halted_now
+
+
+def _cancel_working_orders(adapter) -> dict:
+    """批 171n：撤全部在场委托（F-41 提纯+一键撤单共用核心）。
+
+    返回 {"requested": N, "failed": M}——**语义=「请求已受理」非「已撤成功」**（XTP
+    异步撤单；结果以 query_orders 复查与 journal 为准——股灾场景速度优先不等确认）。
+    """
+    out = {"requested": 0, "failed": 0}
+    try:
+        from vnpy.trader.constant import Status
+        working = (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)
+        for od in (adapter.query_orders() or []):
+            if getattr(od, "status", None) in working:
+                out["requested"] += 1
+                try:
+                    adapter.cancel_order(od.vt_orderid)
+                except Exception as ce:
+                    out["failed"] += 1
+                    logger.warning("撤单失败 %s: %s", od.vt_orderid, ce)
+    except Exception as e:
+        logger.error("撤单流程异常: %s", e)
+    return out
+
+
+def _close_all_positions(adapter, account_id=None, operator: str = "manual") -> dict:
+    """批 171n：一键全平（股灾急停）。逐持仓发平仓单——走 check_order 全链（halted 对
+    SELL 放行=件一；无 strategy_id 豁免频次计数；SELL 豁免金额截断）。
+
+    T+1 防线（A-P0-3）：volume 按 `volume - frozen` 截断（当日买入冻结仓不可卖——
+    strategy.py :430 兜底同款；可卖=0 的标的 skip 记名）。价格（A-P0-2）：cost_price
+    =avg_price（持仓快照必然可得，防市价 price=0 被 INVALID_PRICE 拒）。
+    无自动重试（残余=人工面板处置——股灾场景重试风暴比残余更危险）。
+    """
+    from src.risk_control.risk import RiskControl
+    rc = RiskControl.get()
+    out = {"closed_requested": 0, "skipped_t1": [], "rejected": [], "positions_remain": 0}
+    try:
+        positions = adapter.query_position() or []
+    except Exception as e:
+        logger.error("全平：持仓查询失败: %s", e)
+        out["positions_remain"] = -1   # 查询失败=未知态（非零仓）
+        return out
+    for pos in positions:
+        vol = int(getattr(pos, "volume", 0) or 0)
+        frozen = int(getattr(pos, "frozen", 0) or 0)
+        sellable = max(vol - frozen, 0)
+        sym = getattr(pos, "symbol", "")
+        if vol <= 0:
+            continue   # 多空对冲 NET 口径的空腿/零仓跳过（XTP 现货域 volume>0 恒多仓）
+        if sellable <= 0:
+            out["skipped_t1"].append(sym)
+            logger.warning("全平 skip %s：T+1 冻结不可卖（volume=%d frozen=%d）", sym, vol, frozen)
+            continue
+        order = {
+            "symbol": sym,
+            "action": "SELL",
+            "volume": sellable,
+            "price": float(getattr(pos, "avg_price", 0) or 0),   # cost_price（防 INVALID_PRICE）
+            "reason": "emergency_close_all",
+            "operator": operator,
+            "account_id": account_id,
+            # 有意不带 strategy_id：max_trades_per_day 计数豁免（急停非策略行为）
+        }
+        d = rc.check_order(order, account_id=account_id)
+        if d.approved:
+            try:
+                from src.strategy_framework.adapters import Order
+                oid = adapter.send_order(Order(symbol=sym, action="SELL", volume=sellable,
+                                               price=order["price"], order_type="limit"))
+                out["closed_requested"] += 1
+                logger.warning("全平发单 %s x%d @%.3f → %s", sym, sellable, order["price"], oid)
+            except Exception as se:
+                out["rejected"].append(f"{sym}:{str(se)[:60]}")
+        else:
+            out["rejected"].append(f"{sym}:{d.reason[:60]}")
+            logger.warning("全平被风控拒 %s: %s", sym, d.reason)
+    try:
+        remain = sum(int(getattr(p, "volume", 0) or 0) for p in (adapter.query_position() or []))
+        out["positions_remain"] = remain
+    except Exception:
+        pass
+    return out
 
 
 _recalc_seen: str | None = None   # F-55：本 worker 进程最近一次消费的因子重算触发标记值（多 worker 各记，不删全局键）
