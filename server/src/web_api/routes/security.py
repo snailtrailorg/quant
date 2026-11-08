@@ -342,7 +342,9 @@ def security_snapshot(date_str: str = Query("", alias="date"),
             deploy["recent"] = sorted(_entries)[-5:]
             try:
                 _web = _os.readlink(f"{_root}/web")
-                deploy["web_same"] = _web.rstrip("/").rsplit("/", 1)[-1] == _rel
+                # web 链指向 releases/<id>/web（带尾缀）——剥 releases/<id> 后取 id 比对
+                _wm = _re2.search(r"/releases/([^/]+)", _web)
+                deploy["web_same"] = (_wm.group(1) == _rel) if _wm else None
             except Exception:
                 deploy["web_same"] = None   # web 链不可读=未知（fail-open）
     except Exception as _e:
