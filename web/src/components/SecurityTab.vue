@@ -17,6 +17,9 @@
           <span>{{ t('secpage.postureTitle') }}</span>
           <div style="display:flex;align-items:center;gap:12px">
             <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
+            <!-- 批 138/141：手动重扫——原位置保留（批 171p 曾误迁入扫描结果卡，已回位） -->
+            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning || localPending"
+                     :disabled="scanning || localPending" @click="onRescan" />
           </div>
         </div>
       </template>
@@ -27,7 +30,7 @@
             <el-icon v-if="activeFindings.length" :size="15" class="ic-critical"><WarningFilled /></el-icon>
           </div>
           <div class="card-value">
-            <span class="pct" :class="{ critical: activeFindings.length }">{{ activeFindings.length }}</span>
+            <span class="pct small" :class="{ critical: activeFindings.length }">{{ activeFindings.length }}</span>
             <!-- 批170：降级/历史日不得把旧值当当前风险读——数字旁标数据截至日 -->
             <span v-if="findingsStale" class="stale-tag">{{ t('secpage.asOf', { d: findingsAsOf || '—' }) }}</span>
           </div>
@@ -41,11 +44,7 @@
         <!-- 批 171p：「扫描结果」卡（原 扫描状态+快照日期 两卡合并——用户裁定；stale 解释
              文案随合并退役〔机制自白费解——两卡并排时间自明〕；重扫钮随迁入本卡） -->
         <el-card shadow="never" class="metric-card">
-          <div class="card-head">
-            <span class="card-name">{{ t('secpage.scanResult') }}</span>
-            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning || localPending"
-                     :disabled="scanning || localPending" @click="onRescan" />
-          </div>
+          <div class="card-head"><span class="card-name">{{ t('secpage.scanResult') }}</span></div>
           <div class="card-value">
             <span class="pct small">{{ snap.scan_date }}</span>
             <StatusTag :value="snap.status" />

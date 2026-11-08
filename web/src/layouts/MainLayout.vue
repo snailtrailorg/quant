@@ -270,6 +270,7 @@ const onProfileUpdated = (u) => {
 const alertCount = ref(0)
 const alertLevel = ref('warning')
 let alertTimer = null
+let haltTimer = null   // 批 171o：熔断红点轮询
 const loadAlerts = async () => {
   if (role.value !== 'admin') return
   try {
@@ -313,18 +314,17 @@ const onDark = v => { dark.value = v; document.documentElement.classList.toggle(
 if (dark.value) document.documentElement.classList.add('dark')
 import { Moon, Sunny } from '@element-plus/icons-vue'
 
-// P1-4：急停（熔断=轻确认,04 §4.5——所有可登录角色可触发,后端 require_perm 兜底）
-const onEmergencyHalt = async () => {
-  try {
-    await ElMessageBox.confirm(t('risk.confirmHalt'), t('common.confirm'), { type: 'warning' })
-    const { riskHalt } = await import('../api')
-    await riskHalt(); ElMessage.success(t('risk.halted'))
-  } catch (e) { if (e?.response) ElMessage.error(String(e)) }
+// 批 171o：顶栏红钮=跳转紧急处置页；halted 红点 + 菜单 halt 门（30s 轮询 getRiskState）
+// ⚠ 2026-11-08 修：模板引用的 halted/canHalt 此前未声明（v-if 恒 falsy ⇒ 菜单不显示）
+const halted = ref(false)
+const canHalt = computed(() => (perms.value || []).includes('halt'))
+const loadHalted = async () => {
+  try { const s = await getRiskState(); halted.value = !!s.halted } catch (e) { /* 静默 */ }
 }
 // 批22：告警角标初始化 + 30s 轮询（健康/通知逻辑迁至系统监控页与 NotificationList 组件）
 loadPerms()
-onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loadDynamicIndex(); loadFreezeEntry(); freezeTimer = setInterval(loadFreezeEntry, 30000) })
-onUnmounted(() => { if (alertTimer) clearInterval(alertTimer); if (freezeTimer) clearInterval(freezeTimer) })
+onMounted(() => { loadAlerts(); alertTimer = setInterval(loadAlerts, 30000); loadDynamicIndex(); loadFreezeEntry(); freezeTimer = setInterval(loadFreezeEntry, 30000); loadHalted(); haltTimer = setInterval(loadHalted, 30000) })
+onUnmounted(() => { if (alertTimer) clearInterval(alertTimer); if (freezeTimer) clearInterval(freezeTimer); if (haltTimer) clearInterval(haltTimer) })
 
 // 批167：语言菜单注册表驱动（按钮标签=当前语言本族语名缩略；乒乓与 toEn/toZh 词条退役）
 const langLabel = computed(() => (LANGUAGES.find(l => l.code === locale.value) || {}).short || locale.value)   // 批167：按钮短标签（简/繁/EN——用户裁定）

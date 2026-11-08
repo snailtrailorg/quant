@@ -339,7 +339,7 @@ def security_snapshot(date_str: str = Query("", alias="date"),
             deploy["current"] = _rel
             _entries = [e for e in _os.listdir(f"{_root}/releases")
                         if _re2.match(r"^\d{12}-", e)]
-            deploy["recent"] = sorted(_entries)[-5:]
+            deploy["recent"] = sorted(_entries)[-3:]   # 批 171p：用户裁定保留 3 条
             try:
                 _web = _os.readlink(f"{_root}/web")
                 # web 链指向 releases/<id>/web（带尾缀）——剥 releases/<id> 后取 id 比对
