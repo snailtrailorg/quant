@@ -63,10 +63,15 @@ def test_success_shape_unchanged():
         out = risk_mod.data_integrity_api(freq="1D", payload={"username": "t"})
 
     assert "error" not in out          # 成功路径不带 error 键（契约不变）
-    assert out["summary"] == {"total": 1, "complete": 1, "partial": 0, "missing": 0}
+    # 批 171j：summary 增 suspended_total（净化规模 Σ）；既有键不动（shape 守门扩面）
+    assert out["summary"] == {"total": 1, "complete": 1, "partial": 0, "missing": 0,
+                              "suspended_total": 0}
     assert out["items"][0]["symbol"] == "600000.SHSE"
     assert out["items"][0]["pct"] == 100.0
     assert out["items"][0]["status"] == "complete"
+    # 批 171j：净化对照列在（无停牌标的=0 对照消失语义）
+    assert out["items"][0]["suspended_days"] == 0
+    assert out["items"][0]["raw_expected"] == out["items"][0]["expected"]
 
 
 def test_bad_freq_still_errors():

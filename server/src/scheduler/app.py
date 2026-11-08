@@ -225,6 +225,13 @@ app.conf.update(
             "schedule": crontab(hour=16, minute=45),
             "options": {"queue": "data", "expires": 3600},
         },
+        # 批 171j（DEF-14 检测半）：污染检测日扫——16:50（16:30 bar 日线波后一轮即抓当日
+        # 新鲜 NULL）。品类口径：stock NULL=污染（递变告警）；fund/cb/binance=预期信息态。
+        "data-pollution-scan": {
+            "task": "src.scheduler.tasks.data_pollution_scan",
+            "schedule": crontab(hour=16, minute=50),
+            "options": {"queue": "data", "expires": 3600},
+        },
         "broker-health-check": {
             "task": "src.scheduler.tasks.broker_health_check",
             "schedule": crontab(hour="*/6", minute=51),   # 批27-31：6h 周期+错峰分钟

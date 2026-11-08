@@ -54,6 +54,7 @@ RUNBOOK: dict[str, dict] = {
     "sync.inception_cover_low": {"label": "inception 可及性异常", "guide": "两种形态：① `security_master.list_date` 覆盖率**连续多轮**不足（≥2 轮）⇒ 该 scope 缺口被 §5.4 的 uncertain **永久静默抑制**（抑制本是安全网，失修即变盲区）——查刷新链是否持续探不到源（crypto 看代理出口）；② **互证闸不符**：`engine._RECONCILE_UNKNOWN_INCEPTION` 的声明与实测「有 symbol 且 list_date 空」漂移 ⇒ 复核声明集（源可及性可能已变）。"},
     "sync.local_unreadable": {"label": "对账本地不可读", "guide": "`_local_dates_map` 对 bar 表**整 scope**读取失败（表未建/权限/连接）⇒ 该 scope 全族转 `uncertain`（**不是**「无缺口」）——bar 表系统性不可读时，真实大段缺失会被压成不确定且**只**在 journal 摘要留 `uncertain=N`。查该表是否存在、连接与权限；这是**观测盲区的补救告警**（与 `sync.universe_missing` 同级）。"},
     "sync.reconcile_budget": {"label": "对账体量超阈", "guide": "本轮该 scope 的**落表行数**超 `engine._GAP_ROW_BUDGET[kind]` ⇒ **不落主张**（该 scope 当轮缺口**不报**＝显名取舍「用漏报换稳定」，以本告警替代静默）＋ 其判据不许过门。通常预示窗口下界/期望集算错或库被污染——查 floor 计算与 bar 表；确需放宽时调 `_GAP_ROW_BUDGET`（按族字典，daily/minute 量级差大）。"},
+    "data.pollution": {"label": "复权因子污染扩大", "guide": "批 171j：bar_1D stock 品类 NULL adj_factor 较前日**递增**（近 3 日窗）——attach 静默降级信号（`pull_adj_factor` 返回 None/空 ⇒ adj_map={} 部分缺失无告警——supply 路径 base.py :505 间歇形态）。查 journal 当日 16:30 波次 adj_factor 接口调用；修数=慢扫 `POST /api/sync/adj-factor-backfill`（积分保护：手动触发）；连续多日 warn=attach 持续失败，属修复映射面。fund/cb/binance NULL=预期形态不告（因子覆盖面差异）。"},
     "disk.warning":     {"label": "磁盘告警", "guide": "磁盘余量触警——清理 var/log 与旧 release（GC 保 N=5）。"},
     # ——— 健康监控 ———
     "health.iface-down":   {"label": "接口健康异常", "guide": "LLM/PG/Valkey 有离线——查 /observe 健康页与对应服务。"},

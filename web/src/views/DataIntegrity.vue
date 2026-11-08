@@ -28,6 +28,12 @@
       <el-table-column prop="first" :label="t('dataIntegrity.first')" min-width="120" />
       <el-table-column prop="last" :label="t('dataIntegrity.last')" min-width="120" />
       <el-table-column prop="expected" :label="t('dataIntegrity.expected')" min-width="100" />
+      <el-table-column prop="suspended_days" :label="t('dataIntegrity.suspended')" min-width="110">
+        <template #default="{ row }">{{ row.suspended_days ? t('dataIntegrity.suspendedN', { n: row.suspended_days }) : '—' }}</template>
+      </el-table-column>
+      <el-table-column prop="raw_expected" :label="t('dataIntegrity.rawExpected')" min-width="110">
+        <template #default="{ row }">{{ row.raw_expected && row.raw_expected !== row.expected ? row.raw_expected : '—' }}</template>
+      </el-table-column>
       <el-table-column prop="pct" :label="t('dataIntegrity.integrityPct')" min-width="180">
         <template #default="{ row }">
           <el-progress :percentage="Number(row.pct || 0)" :status="row.status === 'complete' ? 'success' : row.status === 'missing' ? 'exception' : ''" />

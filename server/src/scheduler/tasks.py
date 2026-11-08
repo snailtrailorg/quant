@@ -2427,3 +2427,77 @@ def screen_factor_compute():
         conn.commit()
     logger.info("screen_factor_compute@%s: %s (gc=%s)", t1, results, gc_n)
     return {"status": "success", "trade_date": str(t1), "factors": results, "gc": gc_n}
+
+
+@app.task(name="src.scheduler.tasks.data_pollution_scan",
+          bind=True, soft_time_limit=300, time_limit=360)
+def data_pollution_scan(self):
+    """批 171j（DEF-14 检测半）：bar_1D 复权因子污染日扫（beat 16:50——16:30 波次后）。
+
+    品类口径（v3 规格 §0，A 根因实锤）：stock NULL=真污染（attach 静默降级间歇形态
+    ——11-03 实测 8/5565 vs 邻日 2500+）；fund/cb NULL=预期（因子在 fund_adj 接口/
+    转债无因子语义）；binance 源 100% NULL=预期。检测只对 stock 递变告警。
+
+    **递变阈值**（B-P1-2）：info 起步恒记计数；warn 仅当 stock NULL 较前日**递增**
+    （Valkey 前日键）——attach 正常日无新增 NULL 不响；递增=attach 降级新信号。
+    递减/持平不告（慢扫修数正常下降）。
+
+    SM join 盲区（A-P2-2）：LEFT JOIN+unknown 单独计数（近 3 日实测 3 行无 SM 匹配）。
+    日切片锚 AT TIME ZONE 'Asia/Shanghai'（A-P2-3，171d-C 纪律）。
+    """
+    from datetime import date, timedelta
+
+    from src.data_sync.sync_lock import SyncLock
+
+    today = date.today()
+    lo = today - timedelta(days=3)
+    with SyncLock("scan:pollution") as plock:
+        if not plock.acquired:
+            return {"status": "skipped", "reason": "上次扫描仍在运行"}
+        try:
+            with get_conn() as conn:
+                rows = conn.execute("""
+                    SELECT COALESCE(sm.category, 'unknown') AS cat,
+                           count(*) FILTER (WHERE b.adj_factor IS NULL) AS nulls,
+                           count(*) AS total
+                    FROM bar_1d b
+                    LEFT JOIN security_master sm ON sm.vt_symbol = b.symbol
+                    WHERE b.source = 'tushare'
+                      AND (b.ts AT TIME ZONE 'Asia/Shanghai')::date >= %s
+                    GROUP BY 1
+                """, (lo,)).fetchall()
+        except Exception as e:
+            logger.warning("污染检测 SQL 失败: %s", e)
+            return {"status": "error", "error": str(e)[:100]}
+
+    counts = {r[0]: (r[1], r[2]) for r in rows}
+    stock_null = counts.get("stock", (0, 0))[0]
+    fund_null = counts.get("listed_fund", (0, 0))[0]
+    cb_null = counts.get("convertible", (0, 0))[0]
+    unknown_null = counts.get("unknown", (0, 0))[0]
+
+    # 递变判定：前日键存 stock_null——递增才 warn（写入治本上线前 attach 降级日是
+    # 间歇信号非常态；恒告会与告警噪音治理方向冲突）
+    warned = False
+    prev = None
+    try:
+        r = business_redis(socket_timeout=3, decode_responses=True)
+        prev_raw = r.get("scan:pollution:prev_stock_null")
+        prev = int(prev_raw) if prev_raw else None
+        r.set("scan:pollution:prev_stock_null", stock_null, ex=7 * 86400)
+    except Exception as e:
+        logger.warning("污染检测前日键读写失败（递变判定退化为仅记录）: %s", e)
+
+    if prev is not None and stock_null > prev:
+        warned = True
+        from src.alert_notify import notify
+        notify("warn", "data", "复权因子污染扩大",
+               f"stock NULL 因子 {prev} → {stock_null}（近 3 日窗，attach 可能静默降级——"
+               f"查 journal 当日 adj_factor 接口形态；慢扫可修数：POST /api/sync/adj-factor-backfill）",
+               code="data.pollution")
+    elif stock_null > 0:
+        logger.info("污染检测：stock_null=%d（前日=%s，未递增不告警）", stock_null, prev)
+
+    return {"status": "ok", "stock_null": stock_null, "fund_null": fund_null,
+            "cb_null": cb_null, "unknown_null": unknown_null,
+            "prev_stock_null": prev, "warned": warned}

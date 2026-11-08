@@ -381,11 +381,14 @@ def data_integrity_api(freq: str = "1D",
                                _d.today(), _non_crypto)
              if _non_crypto else {})
     _delist = delist_map_bulk()
+    _suspended_total = 0   # 批 171j：面板级净化规模（Σ 已扣停牌日数）
     for sym, cnt, first, last in rows:
         if not first or not last or cnt == 0:
             missing += 1
             items.append({"symbol": sym, "local_count": cnt, "first": None, "last": None,
-                          "expected": 0, "pct": 0, "status": "missing"})
+                          "expected": 0, "pct": 0, "status": "missing",
+                          # 批 171j：净化对照三态契约（crypto/missing=0——规格 §0 件三）
+                          "suspended_days": 0, "raw_expected": 0})
             continue
         # 批 171b：退市截断（delist 后不算期望——防「已退市仍虚增分母」）——截断只作用于
         # 期望计算的**局部量** `_last_eff`；items 的 last 字段保持原始末根日（前端
@@ -393,8 +396,11 @@ def data_integrity_api(freq: str = "1D",
         _dl = _delist.get(sym)
         _last_eff = min(last, _dl) if (_dl is not None and _dl < last) else last
         if _last_eff < first:
+            missing += 1
             items.append({"symbol": sym, "local_count": cnt, "first": first, "last": last,
-                          "expected": 0, "pct": 0, "status": "missing"})
+                          "expected": 0, "pct": 0, "status": "missing",
+                          "suspended_days": len(_susp.get(sym) or []),
+                          "raw_expected": 0})
             continue
         # 批170 根因修：按市场算预期（旧口径 max(交易日, 自然日×5/7) 使 A 股天花板 ~93%，
         # 且把加密 7×24 用 A 股日历当分母 → 实测 150%+；分钟线同理按 240 而非 1440）
@@ -402,6 +408,15 @@ def data_integrity_api(freq: str = "1D",
                                  day_set[0] if day_set else None,
                                  day_set[-1] if day_set else None,
                                  suspend_days=_susp.get(sym))
+        # 批 171j：净化对照列——raw_expected=不减停牌的期望（同参 suspend_days=None）。
+        # pct 语义不动（唯一真源=净化后收敛度）；对照列让「87% 分母扣了多少停牌」可见。
+        # crypto 的 expected_bars 内部跳过停牌参 ⇒ raw==expected 天然成立（无对照语义）。
+        _susp_n = len(_susp.get(sym) or [])
+        _suspended_total += _susp_n
+        raw_expected = expected_bars(freq, sym, first, _last_eff, day_set,
+                                     day_set[0] if day_set else None,
+                                     day_set[-1] if day_set else None,
+                                     suspend_days=None)
         pct = round(cnt / expected * 100, 1) if expected else 0
         status = "complete" if pct >= 99 else ("partial" if pct > 0 else "missing")
         if status == "complete":
@@ -411,8 +426,11 @@ def data_integrity_api(freq: str = "1D",
         else:
             missing += 1
         items.append({"symbol": sym, "local_count": cnt, "first": str(first), "last": str(last),
-                      "expected": expected, "pct": pct, "status": status})
+                      "expected": expected, "pct": pct, "status": status,
+                      "suspended_days": _susp_n, "raw_expected": raw_expected})
     _result = {"items": items, "summary": {"total": len(items), "complete": complete,
-                                        "partial": partial, "missing": missing}}
+                                        "partial": partial, "missing": missing,
+                                        # 批 171j：面板级净化规模（Σ 已扣停牌日数）
+                                        "suspended_total": _suspended_total}}
     _AGG_CACHE[_ck] = (_t.time(), _result)   # 批27-26：按 freq 分键缓存
     return _result
