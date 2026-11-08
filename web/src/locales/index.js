@@ -2797,7 +2797,7 @@ mail: 'Email SMTP',
       tabSecurity: 'System Security',   // batch 120
     },
     secpage: {   // batch 120: security posture five zones
-      vulnTotal: 'Active vulns', status: 'Scan status', scanDate: 'Snapshot date', depOutdated: 'Deps outdated', lastScan: 'Last scan',
+      vulnTotal: 'Active vulns', depOutdated: 'Deps outdated', lastScan: 'Last scan',
       stale: 'Data stale (no scan in 26h+)', vulnDb: 'Vuln DB',
       scanResult: 'Scan Result', deploys: 'Recent Releases',
       dnfUpdates: 'OS Security Updates', updateTag: 'Update ref', kernelReboot: 'Reboot to apply',
