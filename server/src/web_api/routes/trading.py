@@ -167,10 +167,17 @@ def create_live_task(body: dict = Body(...),
 
     with get_conn() as conn:
         # D2：account 校验——存在且交易域（建任务绑定交易账号，delete_interface 受 FK RESTRICT 守卫）
+        # 批 171r：**实盘任务禁止绑定虚拟账户**（is_virtual=true 的纸交易账户）——批86-B
+        # 只在列表侧隐藏，创建路径此前漏了这道闸（可构造出「实盘任务挂虚拟账户 ⇒ 风控预算
+        # 落在空账户 ⇒ 风控形同关闭」）。DB 侧另有 0174 触发器兜底（任何写入路径都拦）。
         cur = conn.execute(
-            "SELECT id FROM trading_account WHERE id=%s", (account_id,))
-        if cur.fetchone() is None:
+            "SELECT id, is_virtual FROM trading_account WHERE id=%s", (account_id,))
+        _acc = cur.fetchone()
+        if _acc is None:
             raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在或非交易域")
+        if mode == "live" and _acc[1]:
+            raise ApiError(400, "ACCOUNT_VIRTUAL_FORBIDDEN",
+                           f"account {account_id} 是虚拟账户（纸上交易），实盘任务不得绑定")
         # D5 三级时点①：account 级品种权限（account_allows）——建任务时拒绝无权限品种
         from src.data_platform.perms import account_allows
         if not account_allows(account_id, symbol):
