@@ -340,7 +340,8 @@ def security_snapshot(date_str: str = Query("", alias="date"),
             _entries = [e for e in _os.listdir(f"{_root}/releases")
                         if _re2.match(r"^\d{12}-", e)]
             # 批 171p：保留 3 条「历史发布」（排除当前版避免与首行重复），最新在前
-            deploy["recent"] = sorted((e for e in _entries if e != _rel), reverse=True)[:3]
+            # 用户裁定：整卡共 3 行 = 当前版 + 历史 2 条（末条去掉）
+            deploy["recent"] = sorted((e for e in _entries if e != _rel), reverse=True)[:2]
             try:
                 _web = _os.readlink(f"{_root}/web")
                 # web 链指向 releases/<id>/web（带尾缀）——剥 releases/<id> 后取 id 比对
