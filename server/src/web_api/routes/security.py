@@ -344,8 +344,9 @@ def security_snapshot(date_str: str = Query("", alias="date"),
                 deploy["web_same"] = _web.rstrip("/").rsplit("/", 1)[-1] == _rel
             except Exception:
                 deploy["web_same"] = None   # web 链不可读=未知（fail-open）
-    except Exception:
-        pass   # dev/异常布局——空块（FE 显 —）
+    except Exception as _e:
+        # 批 171p：fail-open 留痕（171 纪律——禁静默吞异常；dev 布局每轮会打一条 debug 级）
+        logging.getLogger("web_api.security").debug("deploy 块解析失败（fail-open）: %s", _e)
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
