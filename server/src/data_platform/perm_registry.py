@@ -72,6 +72,9 @@ NAV_ITEMS_BASE: list[dict] = [
     {"id": "risk", "group": "riskgrp", "order": 1},
     {"id": "reconcile", "group": "riskgrp", "order": 2},
     {"id": "risk-rules", "group": "riskgrp", "order": 3},
+    # 批 171o：紧急处置页（用户裁定组内末位——低频页不占常驻视线；入口主为顶栏红钮）。
+    # 菜单显隐走 halt 键（admin 独占——FE 路由 meta.perm 同键）。
+    {"id": "emergency", "group": "riskgrp", "order": 4},
     {"id": "users", "group": "ops", "order": 1},
     {"id": "integrations", "group": "ops", "order": 4},   # 批 88：原 order 3 的 routing 退册（降 tab），order 值不重排仅排序键
     {"id": "observe", "group": "ops", "order": 5},

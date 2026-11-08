@@ -10,7 +10,13 @@
           <!-- 批21 标题栏圆钮统一（2026-09-14 用户五裁定）：功能分组 + 全站圆钮统一 32px（IconBtn）；组内 gap 16px、组间 gap 24px -->
           <!-- ═ 安全组 ═ -->
           <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼） -->
-          <IconBtn type="danger" :icon="SwitchButton" :title="t('risk.halt')" @click="onEmergencyHalt" />
+          <!-- 批 171o：红钮=跳转紧急处置页（用户裁定——处置动作进操作台再动手）；
+               halted 红点全员可见（30s 轮询 getRiskState——read 键四角色可得） -->
+          <span class="freeze-badge" style="position:relative">
+            <IconBtn type="danger" :icon="SwitchButton" :title="halted ? t('risk.halted') : t('nav.emergency')"
+                     @click="$router.push('/emergency')" />
+            <span v-if="halted" class="halt-dot" />
+          </span>
 
           <!-- ═ 告警（批22：admin-only，角标=活跃告警数，点击进系统监控页） ═ -->
           <el-badge v-if="role === 'admin'" :value="alertCount" :hidden="!alertCount" :max="99"
@@ -137,6 +143,7 @@
             <el-menu-item index="/risk"><el-icon><CircleCheck /></el-icon>{{ t('nav.risk') }}</el-menu-item>
             <el-menu-item index="/reconcile"><el-icon><ScaleToOriginal /></el-icon>{{ t('nav.reconcile') }}</el-menu-item>
             <el-menu-item index="/risk-rules"><el-icon><List /></el-icon>{{ t('nav.riskRules') }}</el-menu-item>
+            <el-menu-item v-if="canHalt" index="/emergency"><el-icon><AlarmClock /></el-icon>{{ t('nav.emergency') }}</el-menu-item>
           </el-sub-menu>
 
           <el-sub-menu index="ops" v-if="has('data_sync') || has('system_config')">
@@ -177,12 +184,12 @@
 import { DataBoard, DataAnalysis, Search, MagicStick, SetUp, Timer,
          TrendCharts, Collection, Monitor, Coin, VideoPlay, Odometer, Warning, CircleCheck,
          ScaleToOriginal, List, Setting, FolderOpened, Link, FirstAidKit, Lock, Document,
-         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Refresh, Guide, Check } from '@element-plus/icons-vue'   // 批166 数据组；批167 Check（语言菜单当前项）
+         ChatDotRound, Bell, User, SwitchButton, Back, Grid, Refresh, Guide, Check, AlarmClock } from '@element-plus/icons-vue'   // 批 171o：AlarmClock（紧急处置菜单）   // 批166 数据组；批167 Check（语言菜单当前项）
 import { ref, computed, onMounted, onUnmounted, watch , provide } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { getMe, meOnce, resetMeCache, getSystemAlerts, getOpenFreezeEvents } from '../api'
+import { getMe, meOnce, resetMeCache, getSystemAlerts, getOpenFreezeEvents, getRiskState } from '../api'
 import api, { getStrategies, getFactorList } from '../api'
 import { setLang as i18nSetLang, LANGUAGES } from '../i18n'   // 批167：注册表驱动语言菜单
 import Avatar from '../components/Avatar.vue'
@@ -443,4 +450,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown))
   display: flex; justify-content: space-between; }
 .cmdk-opt.active { background: var(--el-fill-color-light); }
 .cmdk-opt.active span:first-child { color: var(--brand-600); font-weight: 600; }
+/* 批 171o：顶栏熔断红点（freeze-badge 泛化 16px 标准同款） */
+.halt-dot { position:absolute; top:-2px; right:-2px; width:10px; height:10px;
+  border-radius:50%; background: var(--critical); border:2px solid var(--bg-canvas); }
 </style>

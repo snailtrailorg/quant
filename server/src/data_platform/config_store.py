@@ -138,6 +138,35 @@ def all_ids(kind: str) -> set[int]:
         return {r[0] for r in cur.fetchall()}
 
 
+def trading_accounts_enabled() -> list[tuple]:
+    """批 171o：enabled 通道账号行 [(id, name, provider)]（紧急处置复选组数据源）。"""
+    from src.data_platform.db import get_conn
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT id, name, provider FROM trading_account WHERE enabled=true").fetchall()
+
+
+def exposure_snapshots() -> dict:
+    """批 171o：紧急处置 exposure 的 PG 真相表读（路由层禁内联 SQL 铁律下沉）。
+    返回 {account_id: {"pos_ts": ts, "pos_value": float, "snap": (tv, pnl, ts)}}。"""
+    from src.data_platform.db import get_conn
+    out: dict = {}
+    with get_conn() as conn:
+        for acct_id, ts in conn.execute(
+                "SELECT DISTINCT ON (account_id) account_id, ts FROM position_snapshot "
+                "ORDER BY account_id, ts DESC").fetchall():
+            out.setdefault(acct_id, {})["pos_ts"] = ts
+        for acct_id, val in conn.execute(
+                "SELECT account_id, sum(volume*cost_price) FROM position_snapshot "
+                "GROUP BY 1").fetchall():
+            out.setdefault(acct_id, {})["pos_value"] = float(val or 0)
+        for acct_id, tv, pnl, ts in conn.execute(
+                "SELECT DISTINCT ON (account_id) account_id, total_value, daily_pnl, ts "
+                "FROM account_snapshot ORDER BY account_id, ts DESC").fetchall():
+            out.setdefault(acct_id, {})["snap"] = (float(tv or 0), float(pnl or 0), ts)
+    return out
+
+
 def live_running_tasks() -> list[tuple]:
     """批 171n：status='running' 的 (id, account_id) 行集（急停命令下发对象枚举——
     路由层禁内联 SQL 铁律，下沉本层）。"""

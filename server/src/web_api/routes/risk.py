@@ -191,10 +191,14 @@ def reconcile_reset(payload: dict = Depends(require_perm("user_mgmt"))):
 
 @router.post("/api/risk/halt")
 def risk_halt(payload: dict = Depends(require_perm("halt"))):
+    """批 171o：熔断=拦截+撤单串联——**先置 halted 再 dispatch cancel-all**（A-P0-1：
+    先撤后停的两步窗内策略新 BUY 照常入场；halt 是 Valkey 键即时生效，先停后撤零窗口；
+    与 runner 侧 halt_edge_cancel 沿撤单双保险——沿判定幂等，已熔断再点=只撤单）。"""
     from src.risk_control import RiskControl
     RiskControl.get().emergency_halt(f"Web:{payload['username']}")
-    audit_log(payload["username"], "emergency_halt", detail="web button")
-    return {"halted": True}
+    audit_log(payload["username"], "emergency_halt", detail="web button (halt then cancel-all)")
+    cancel_out = _dispatch_risk_cmd("cancel-all", payload)
+    return {"halted": True, "cancel": cancel_out}
 
 
 @router.post("/api/risk/resume")
@@ -205,14 +209,17 @@ def risk_resume(payload: dict = Depends(require_perm("resume"))):
     return {"halted": False}
 
 
-def _live_runners() -> list[tuple[str, int]]:
+def _live_runners(accounts: list[int] | None = None) -> list[tuple[str, int]]:
     """批 171n：活 runner 枚举——live_task status='running' 行 ∩ 心跳键新鲜（B-P0-2：
     td_registry 是 builder 插件表非运行时枚举；僵尸 runner〔行 running 心跳死〕不收——
-    命令下发给死进程=静默过期）。返回 [(tid, account_id)]。"""
+    命令下发给死进程=静默过期）。返回 [(tid, account_id)]。
+    批 171o：accounts 过滤（勾选集——None=全部；过滤后空=调用方区分 400/409）。"""
     from src.quant_common.redis_client import business_redis
     from src.data_platform.config_store import live_running_tasks
     out = []
     rows = live_running_tasks()
+    if accounts is not None:
+        rows = [(tid, acct) for tid, acct in rows if acct in set(accounts)]
     try:
         r = business_redis(socket_timeout=3)
         import time as _t
@@ -229,23 +236,43 @@ def _live_runners() -> list[tuple[str, int]]:
     return out
 
 
-def _dispatch_risk_cmd(verb: str, payload: dict) -> dict:
+def _dispatch_risk_cmd(verb: str, payload: dict, accounts: list[int] | None = None) -> dict:
     """批 171n：急停命令下发共用体（cancel-all/close-all 两端点同链）。
 
-    三态分叉（A-P1-3）：无 runner ⇒ 409；已下发未回执（5s 窗）⇒ 202 dispatched；
+    三态分叉（A-P1-3）：无 runner ⇒ 409；已下发未回执（10s 窗——171o A-P2-1：
+    close-all 串联〔撤单+稳定窗+逐标发单〕5s 不够）⇒ 202 dispatched；
     回执在窗内 ⇒ 200 汇总。audit_log 三态分别落痕。
+    批 171o：accounts 勾选集过滤+**按 account 去重**（A-P1-4——撤/平是网关全账户
+    动作，同 account 多 runner 双发重复；每 account 取首个活 tid）；过滤后空集
+    （有活 runner 但勾选不含）=400 RISK_NO_MATCH_ACCOUNT 区别于 409。
     """
     import json as _json
     import time as _t
     import uuid as _uuid
     from src.web_api.errors import ApiError
     from src.quant_common.redis_client import business_redis
-    runners = _live_runners()
+    from src.data_platform.config_store import live_running_tasks
+    if accounts is not None:
+        _all_rows = live_running_tasks()
+        _valid = {a for _t_, a in _all_rows}
+        _bad = set(accounts) - _valid
+        if _bad:
+            raise ApiError(400, "RISK_INVALID_ACCOUNT",
+                           f"无效账号 id: {sorted(_bad)}（不在 running 任务集）")
+    runners = _live_runners(accounts=accounts)
     if not runners:
+        if accounts is not None and live_running_tasks():
+            raise ApiError(400, "RISK_NO_MATCH_ACCOUNT",
+                           "勾选账号无活动 runner（其余账号有活任务但不在勾选集）")
         audit_log(payload["username"], f"risk_{verb.replace('-', '_')}",
                   detail="no active runner (409)")
         raise ApiError(409, "RISK_NO_ACTIVE_RUNNER",
                        "无活动实盘 runner（live_task running ∩ 心跳新鲜为空）——命令未下发")
+    # 批 171o（A-P1-4）：按 account 去重——同 account 多 runner 只发一 tid（撤/平是
+    # 网关全账户动作，双发重复撤单）。
+    _seen_accts = set()
+    runners = [(tid, acct) for tid, acct in runners
+               if not (acct in _seen_accts or _seen_accts.add(acct))]
     r = business_redis(socket_timeout=3)
     req_ids = []
     for tid, _acct in runners:
@@ -275,20 +302,92 @@ def _dispatch_risk_cmd(verb: str, payload: dict) -> dict:
     return {"status": "done", "dispatched": len(req_ids), "results": results}
 
 
+@router.get("/api/risk/exposure")
+def risk_exposure(_p: dict = Depends(require_perm("halt"))):
+    """批 171o：紧急处置页火势总览——按通道账号聚合（A-P1-3 改道：PG 真相表+HB 扩展，
+    不新建快照钩子）。行=trading_account enabled 账号：
+    - working_orders：HB 键 quant:hb:task:{tid} 扩展字段（5s 拍新鲜；-1=TD 断线未知）
+    - 持仓市值/盈亏：position_snapshot/account_snapshot（snapshot_cycle 60s 真值；
+      ts>120s=stale ⇒ None〔FE 渲染「未知」——A-P0-2：断线残影防假清仓〕）
+    - running：活 runner 在场与否（live_running_tasks ∩ 心跳）
+    页脚口径：在场单数 5s 快照；持仓市值 60s 快照（>120s 显未知）。
+    """
+    import time as _t
+    from src.quant_common.redis_client import business_redis
+    from src.data_platform.config_store import exposure_snapshots, live_running_tasks, trading_accounts_enabled
+    live = {str(tid): acct for tid, acct in live_running_tasks()}
+    snaps = exposure_snapshots()
+    accts = trading_accounts_enabled()
+    r = None
+    try:
+        r = business_redis(socket_timeout=3)
+    except Exception:
+        pass
+    now = _t.time()
+    items = []
+    for acct_id, name, provider in accts:
+        working = None
+        running = False
+        if r is not None:
+            for tid, acct in live.items():
+                if acct != acct_id:
+                    continue
+                running = True
+                try:
+                    hb = r.hgetall(f"quant:hb:task:{tid}")
+                    wo = hb.get("working_orders")
+                    working = int(wo) if wo is not None else None
+                except Exception:
+                    pass
+                break
+        sn = snaps.get(acct_id) or {}
+        ts_fresh = sn.get("pos_ts")
+        stale = (ts_fresh is None) or (now - ts_fresh.timestamp() > 120)
+        snap = sn.get("snap")
+        items.append({
+            "account_id": acct_id, "name": name, "provider": provider,
+            "running": running,
+            "working_orders": working,          # None=无活 runner/键缺（FE 显 —）
+            "position_value": None if stale else sn.get("pos_value", 0.0),
+            "daily_pnl": (None if not snap or (now - snap[2].timestamp() > 120)
+                          else snap[1]),
+            "stale": stale,
+        })
+    return {"items": items, "halted_ts": RiskControl_halt_ts()}
+
+
+def RiskControl_halt_ts():
+    from src.risk_control.risk import RiskControl
+    rc = RiskControl.get()
+    try:
+        return rc.halt_ts()
+    except Exception:
+        return None
+
+
 @router.post("/api/risk/cancel-all")
 def risk_cancel_all(payload: dict = Depends(require_perm("halt"))):
-    """批 171n：一键撤全部在场委托（「请求已受理」语义——XTP 异步，结果见 journal）。"""
-    return _dispatch_risk_cmd("cancel-all", payload)
+    """批 171n：一键撤全部在场委托（「请求已受理」语义——XTP 异步，结果见 journal）。
+    批 171o：可选 body accounts=[id]（勾选集——缺省全部）。"""
+    return _dispatch_risk_cmd("cancel-all", payload, accounts=payload.get("accounts"))
 
 
 @router.post("/api/risk/close-all")
 def risk_close_all(payload: dict = Depends(require_perm("halt"))):
-    """批 171n：一键全平（body {"confirm":"CONFIRM"} 二次确认——股灾场景防误触）。"""
+    """批 171n：一键全平（body {"confirm":"CONFIRM"} 二次确认——股灾场景防误触）。
+    批 171o：清仓=全包含（用户裁定四级递进）——未熔断先置 halted（拒新单）→撤在场单→
+    全持仓平仓。worker 侧 consume_risk_cmd 的 close-all 分支已串联撤+平（171o）；web 侧
+    本端点只补前置 halt。"""
     if payload.get("confirm") != "CONFIRM":
         from src.web_api.errors import ApiError
         raise ApiError(400, "RISK_CONFIRM_REQUIRED",
                        "close-all 需 body {\"confirm\":\"CONFIRM\"} 二次确认")
-    return _dispatch_risk_cmd("close-all", payload)
+    from src.risk_control import RiskControl
+    rc = RiskControl.get()
+    if not rc.is_halted():
+        rc.emergency_halt(f"close-all:{payload['username']}")
+        audit_log(payload["username"], "emergency_halt", detail="auto (close-all preamble)")
+    return _dispatch_risk_cmd("close-all", payload, accounts=payload.get("accounts"))
 
 
 @router.get("/api/risk-rules")

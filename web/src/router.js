@@ -62,6 +62,7 @@ const routes = [
 
       // 风控
       { path: 'risk', name: 'risk', component: () => import('./views/Risk.vue') },
+      { path: 'emergency', name: 'emergency', component: () => import('./views/Emergency.vue'), meta: { perm: 'halt' } },   // 批 171o：admin 独占（halt 键）
       { path: 'reconcile', name: 'reconcile', component: () => import('./views/Reconcile.vue') },
 
       // 系统 (Admin)

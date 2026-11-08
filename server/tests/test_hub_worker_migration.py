@@ -207,7 +207,7 @@ class TestHeartbeatD3:
         """批 69b：+td 字段（int(bool) 形态——L2 真连探测导出；direct 专属字段仍不写）。"""
         _hooks(wired)["heartbeat"].fn()
         m = wired["fake"].hashes[HB_TASK_KEY]
-        assert set(m) == {"pid", "md", "gen", "last_bar_ts", "lag", "bars", "frozen", "td", "ts"}
+        assert set(m) == {"pid", "md", "gen", "last_bar_ts", "lag", "bars", "frozen", "td", "working_orders", "ts"}   # 批 171o：+working_orders（exposure 数据源）
         assert m["md"] == "hub" and m["frozen"] == "0" and m["td"] in ("0", "1")
 
 

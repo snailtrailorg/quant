@@ -84,6 +84,7 @@ class RiskControl:
         self._rules_loaded_at = time.time()
         self._HALT_KEY = "risk:halted"
         self._HALT_REASON_KEY = "risk:halt_reason"
+        self._HALT_TS_KEY = "risk:halt_ts"   # 批 171o：独立时间戳键（勿改 halted 值——is_halted =="1" 判定牵连）
 
     @staticmethod
     def _merged_rules(loaded: dict | None) -> dict:
@@ -144,18 +145,27 @@ class RiskControl:
         return self._redis.get(self._HALT_KEY) == "1"
 
     def emergency_halt(self, reason: str = "manual") -> None:
-        """一键熔断：停止所有自动开仓。"""
+        """一键熔断：停止所有自动开仓。批 171o：补写 halt_ts（恢复钮 <5min 置灰的时钟源）。"""
+        import time as _t
         self._redis.set(self._HALT_KEY, "1")
         self._redis.set(self._HALT_REASON_KEY, reason)
+        self._redis.set(self._HALT_TS_KEY, str(_t.time()))
         logger.critical(f"熔断触发: {reason}")
 
     def resume(self) -> None:
-        """恢复交易（仅 Admin）。"""
-        self._redis.delete(self._HALT_KEY, self._HALT_REASON_KEY)
+        """恢复交易（仅 Admin）。批 171o：删三键（含 halt_ts）。"""
+        self._redis.delete(self._HALT_KEY, self._HALT_REASON_KEY, self._HALT_TS_KEY)
         logger.info("熔断解除，恢复交易")
 
     def halt_reason(self) -> str | None:
         return self._redis.get(self._HALT_REASON_KEY)
+
+    def halt_ts(self) -> float | None:
+        """批 171o：熔断起始 epoch 秒（None=未熔断或键缺失——FE 置灰逻辑容错）。"""
+        try:
+            return float(self._redis.get(self._HALT_TS_KEY) or 0) or None
+        except (TypeError, ValueError):
+            return None
 
     # ── 实盘开关（三级 AND：.env 总闸 + Web 分项 + 策略级） ──
 

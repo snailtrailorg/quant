@@ -149,14 +149,15 @@ class TestConsumeRiskCmd:
         r.getdel.return_value = '{"id":"r1","verb":"cancel-all","operator":"u"}'
         adapter = MagicMock()
         adapter.query_orders.return_value = []
-        out = HW.consume_risk_cmd(r, adapter, "t1")
+        _td = SimpleNamespace(connect_status=True)
+        out = HW.consume_risk_cmd(r, adapter, "t1", td_api=_td)
         assert out["verb"] == "cancel-all" and out["result"]["requested"] == 0
         # 回执键写入
         rk = [c.args[0] for c in r.set.call_args_list if "risk:cmd:result:r1" in str(c.args[0])]
         assert rk, "回执键写入"
         # 二次消费（GETDEL 空）⇒ None（幂等）
         r2 = MagicMock(); r2.getdel.return_value = None
-        assert HW.consume_risk_cmd(r2, adapter, "t1") is None
+        assert HW.consume_risk_cmd(r2, adapter, "t1", td_api=_td) is None
 
 
 class TestEndpoints:

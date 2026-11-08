@@ -46,7 +46,7 @@ RISK_CMD_KEY = "risk:cmd:{tid}"
 RISK_CMD_RESULT_KEY = "risk:cmd:result:{req_id}"
 
 
-def consume_risk_cmd(r, adapter, tid: str, account_id=None) -> dict | None:
+def consume_risk_cmd(r, adapter, tid: str, account_id=None, td_api=None) -> dict | None:
     """拍内消费一条急停命令（模块级可直测——批 56b run() 闭包不可测教训）。
 
     verb ∈ {cancel-all, close-all}。返回 {id, verb, result} 或 None（无命令）。
@@ -75,10 +75,21 @@ def consume_risk_cmd(r, adapter, tid: str, account_id=None) -> dict | None:
     operator = cmd.get("operator") or "manual"
     result: dict = {}
     try:
-        if verb == "cancel-all":
+        # 批 171o（A-P0-2）：TD 断线防线——断线时 query_position 清缓存返 []=假「已清仓」、
+        # query_orders=断线前残影；执行比拒绝更危险 ⇒ 回执 td_disconnected 不执行。
+        if not getattr(td_api, "connect_status", False):
+            result = {"error": "td_disconnected",
+                      "detail": "TD 会话断线——缓存不可信（持仓清空=假清仓/委托=残影），"
+                                "拒绝执行；恢复连接后重试"}
+        elif verb == "cancel-all":
             result = trading._cancel_working_orders(adapter)
         elif verb == "close-all":
-            result = trading._close_all_positions(adapter, account_id=account_id, operator=operator)
+            # 批 171o：清仓=全包含（四级递进裁定）——撤在场单 →（稳定窗 2s 待撤单回执
+            # 释放 frozen）→ 全持仓平仓（_close_all_positions 内 T+1 截断/cost_price）。
+            _c = trading._cancel_working_orders(adapter)
+            time.sleep(2.0)   # 撤单在途回执窗（frozen 释放——A-P2-2：撤→平少卖残余源）
+            _p = trading._close_all_positions(adapter, account_id=account_id, operator=operator)
+            result = {"cancel": _c, "close": _p}
         else:
             result = {"error": f"unknown verb: {verb}"}
     except Exception as e:
@@ -559,12 +570,24 @@ def run(ctx: dict) -> None:
 
         批 69b：td 导出（TD 会话真连态——L2 真连探测消费；探测导出缺省 False〔td_api
         None=stub〕，与 _td_reconnect 沿判定缺省 True 目的不同〔沿判定乐观重试〕）。
+        批 171o：working_orders 导出（在场委托 working 态计数——紧急处置页 exposure
+        数据源；超集原则只增字段，collector hgetall 兼容）。
         """
+        _wo = -1   # -1=未知（TD 断线/查询失败——渲染「未知」非 0，A-P0-2 防线）
+        try:
+            if getattr(td_api, "connect_status", False):
+                from vnpy.trader.constant import Status as _St
+                _wo = sum(1 for od in (adapter.query_orders() or [])
+                          if getattr(od, "status", None) in
+                          (_St.SUBMITTING, _St.NOTTRADED, _St.PARTTRADED))
+        except Exception:
+            _wo = -1
         hb.beat(pid=os.getpid(), md="hub", gen=state.gen,
                 last_bar_ts=stats["last_bar_wall"] or 0,
                 lag=(time.time() - stats["last_bar_wall"]) if stats["last_bar_wall"] else -1,
                 bars=stats["bars"], frozen=int(frozen.get("now", False)),
-                td=int(bool(getattr(td_api, "connect_status", False))))
+                td=int(bool(getattr(td_api, "connect_status", False))),
+                working_orders=_wo)
 
     def _td_reconnect():
         """TD 重连沿 → 重跑对账（R-BR11；ctx["reconcile"]=runner 超集含成交补录，4b 收敛冗余循环）。
@@ -692,7 +715,7 @@ def run(ctx: dict) -> None:
     def _risk_cmd_poll():
         """批 171n：急停命令消费（Web cancel-all/close-all → GETDEL → 回执键）。"""
         try:
-            consume_risk_cmd(r, adapter, tid, account_id=account_id)
+            consume_risk_cmd(r, adapter, tid, account_id=account_id, td_api=td_api)
         except Exception as e:   # noqa: BLE001 —— 命令通道故障不伤主循环
             logger.debug("急停命令轮询失败: %s}", e)
 

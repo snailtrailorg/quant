@@ -12,13 +12,36 @@
         <el-descriptions-item :label="t('risk.dailyLossLimit')">{{ ((state.rules?.global?.daily_loss_limit || 0.05) * 100).toFixed(0) }}%</el-descriptions-item>
         <el-descriptions-item :label="t('risk.leverageMax')">{{ state.rules?.crypto?.leverage_max || 5 }}x</el-descriptions-item>
       </el-descriptions>
-      <div style="margin-top: var(--sp-5); display: flex; gap: 12px">
-        <el-button v-if="canHalt" type="danger" @click="onHalt" :disabled="state.halted">{{ t('risk.halt') }}</el-button>
-        <el-button v-if="canResume" type="success" @click="onResume" :disabled="!state.halted">{{ t('risk.resume') }}</el-button>
-        <!-- 批 171n：急停补全——撤单/全平（halt 同权限 admin 独占；全平 CONFIRM 强确认同 RESUME 形态） -->
-        <el-button v-if="canHalt" type="warning" @click="onCancelAll">{{ t('risk.cancelAll') }}</el-button>
-        <el-button v-if="canHalt" type="danger" plain @click="onCloseAll">{{ t('risk.closeAll') }}</el-button>
+      <!-- 批 171o：操作按钮全部迁紧急处置页（状态操作分离——用户裁定）；
+           熔断态卡尾直达链接（admin） -->
+      <div v-if="canHalt && state.halted" style="margin-top: var(--sp-3)">
+        <el-link type="danger" @click="$router.push('/emergency')">{{ t('risk.gotoEmergency') }} →</el-link>
       </div>
+    </el-card>
+
+    <!-- 批 171o：通道账号风险总览（顶替操作按钮位——处置人日常看火势；非 admin 可看无处置链接） -->
+    <el-card style="margin-top: var(--sp-5)">
+      <template #header>{{ t('risk.acctOverview') }}</template>
+      <el-table :data="exposure" size="small">
+        <el-table-column prop="name" :label="t('emg.acct')" min-width="140" />
+        <el-table-column :label="t('emg.working')" min-width="90">
+          <template #default="{ row }">{{ row.working_orders == null ? '—' : (row.working_orders < 0 ? t('emg.unknown') : row.working_orders) }}</template>
+        </el-table-column>
+        <el-table-column :label="t('emg.posValue')" min-width="110">
+          <template #default="{ row }">{{ row.position_value == null ? t('emg.unknown') : '¥' + Number(row.position_value).toLocaleString() }}</template>
+        </el-table-column>
+        <el-table-column :label="t('risk.dailyLossLimit').slice(0,2) + 'PnL'" min-width="90">
+          <template #default="{ row }">{{ row.daily_pnl == null ? '—' : (row.daily_pnl >= 0 ? '+' : '') + row.daily_pnl.toFixed(0) }}</template>
+        </el-table-column>
+        <el-table-column :label="t('common.status')" min-width="80">
+          <template #default="{ row }">{{ row.running ? t('emg.running') : t('emg.idle') }}</template>
+        </el-table-column>
+        <el-table-column v-if="canHalt" :label="t('common.action')" min-width="80">
+          <template #default="{ row }">
+            <el-link type="primary" @click="$router.push('/emergency')">{{ t('risk.dispatch') }}</el-link>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <!-- P1-1 水位仪表（05 §5.3）：双进度条;75/90 变色纯 UI 档（引擎无预警语义） -->
@@ -98,7 +121,7 @@ import { ref, computed, onMounted, inject } from 'vue'
 import TableShell from '../components/TableShell.vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getLiveTrading, updateLiveTrading } from '../api'
+import { getRiskState, getRiskExposure, getLiveTrading, updateLiveTrading } from '../api'
 import SellGuardBanner from '../components/SellGuardBanner.vue'
 
 const { t } = useI18n()
@@ -194,46 +217,10 @@ const onToggleLive = async (market, enabled) => {
   } finally { row.loading = false }
 }
 
-const onHalt = async () => {
-  try {
-    await ElMessageBox.confirm(t('risk.confirmHalt'), { type: 'warning' })
-    await riskHalt(); ElMessage.success(t('risk.halted')); load()
-  } catch (e) { console.error(e) }
+const exposure = ref([])
+const loadExposure = async () => {
+  try { const e = await getRiskExposure(); exposure.value = e.items || [] } catch (err) { /* 非 admin 403 容错 */ }
 }
-// 批 171n：一键撤单（「请求已受理」语义——结果见 journal/回执汇总）
-const onCancelAll = async () => {
-  try {
-    await ElMessageBox.confirm(t('risk.confirmCancelAll'), { type: 'warning' })
-    const r = await riskCancelAll()
-    ElMessage.success(r.status === 'done'
-      ? t('risk.cancelAllDone', { n: r.dispatched })
-      : t('risk.dispatched', { n: r.dispatched }))
-    load()
-  } catch (e) { if (e?.response) console.error(e) }
-}
-// 批 171n：一键全平（CONFIRM 强确认——降风险动作但影响半径大）
-const onCloseAll = async () => {
-  try {
-    const { value } = await ElMessageBox.prompt(
-      t('risk.closeAllPromptTip'), t('risk.closeAllPromptTitle'),
-      { type: 'warning', confirmButtonText: t('risk.closeAll') })
-    if (value?.trim() !== 'CONFIRM') { ElMessage.warning(t('risk.resumeMismatch')); return }
-    const r = await riskCloseAll()
-    ElMessage.success(r.status === 'done'
-      ? t('risk.closeAllDone', { n: (r.results && Object.values(r.results).length) || 0 })
-      : t('risk.dispatched', { n: r.dispatched }))
-    load()
-  } catch (e) { if (e?.response) console.error(e) }
-}
-const onResume = async () => {
-  // H7（08 盲审#2）：恢复=输入确认(重新暴露风险才是强确认该在的地方);熔断保持轻确认
-  try {
-    const { value } = await ElMessageBox.prompt(
-      t('risk.resumePromptTip'), t('risk.resumePromptTitle'),
-      { type: 'warning', confirmButtonText: t('risk.resume') })
-    if (value?.trim() !== 'RESUME') { ElMessage.warning(t('risk.resumeMismatch')); return }
-    await riskResume(); ElMessage.success(t('risk.resumed')); load()
-  } catch (e) { if (e?.response) console.error(e) }
-}
-onMounted(async () => { await load(); await loadLog(); await loadLive() })
+
+onMounted(async () => { await load(); await loadLog(); await loadLive(); loadExposure(); setInterval(loadExposure, 30000) })
 </script>
