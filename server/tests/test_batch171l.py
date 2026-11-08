@@ -68,3 +68,13 @@ class TestKernelExactMatch:
 @pytest.mark.skipif(True, reason="API 集成面由 FE 数据驱动+返体键在 test 安全件回归——stale 逻辑已由上两类直证")
 class TestApiKeys:
     pass
+
+
+class TestConceptSnapshotSemantics:
+    """批 171m：concept_sync date_param=None（全量列表接口——带 trade_date=今日恒空，
+    11-01/02 实证「空数据 partial」数月）。注册表钉防回归。"""
+
+    def test_concept_date_param_is_none(self):
+        from src.data_sync.engine import _TIER1_FULL
+        assert _TIER1_FULL["concept_sync"][4] is None, "快照语义（全量列表接口无日参）"
+        assert _TIER1_FULL["namechange_sync"][4] is None

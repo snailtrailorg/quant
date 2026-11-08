@@ -4007,7 +4007,11 @@ for _sid, (_kind, _sub, _tbl, _pk) in _TIER1_BATCH.items():
 # 全量重建的（2 个）。元组＝(kind, sub_kind, 目标表, 主键, date_param)；date_param=None＝源无窗口（快照）
 _TIER1_FULL = {
     "namechange_sync": ("static_list",    "namechange", "namechange", ["ts_code","name","start_date"], None),
-    "concept_sync":    ("industry_class", "concept",    "concept",    ["ts_code"],                       "trade_date"),
+    # 批 171m（concept_sync 诊断收口）：date_param 原误写 'trade_date'——concept 是**全量
+    # 列表接口**（带 trade_date=今日 ⇒ 按日过滤后 0 行 ⇒ 每轮恒空数据恒 partial，11-01/02
+    # 实证；批 146 修了列投影没修参数面）。改 None=快照语义（与 namechange 同型——
+    # 3000 行全量重建，引擎幂等）。真调直证：无参 3000 行/带今日 0 行。
+    "concept_sync":    ("industry_class", "concept",    "concept",    ["ts_code"],                       None),
 }
 for _sid, (_kind, _sub, _tbl, _pk, _dp) in _TIER1_FULL.items():
     _HANDLERS[_sid] = _make_full_rebuild_handler(
