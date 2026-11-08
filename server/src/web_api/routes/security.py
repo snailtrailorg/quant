@@ -329,12 +329,11 @@ def security_snapshot(date_str: str = Query("", alias="date"),
     # 字典序尾 5；web 链 readlink 比对 server 当前 release id（双链一致性——分裂预警）。
     deploy: dict = {"current": None, "web_same": None, "recent": []}
     try:
-        import os as _os0
-        deploy["_diag_cwd"] = _os0.readlink("/proc/self/cwd")
         import os as _os
         import re as _re2
         _cwd2 = _os.readlink("/proc/self/cwd")
-        _m2 = _re2.search(r"^(.*)/releases/([^/]+)/", _cwd2)
+        # 批 171p 修：server 链接直指 releases/<id> 根（无尾缀子目录）——正则尾 / 可选
+        _m2 = _re2.search(r"^(.*)/releases/([^/]+)", _cwd2)
         if _m2:
             _root, _rel = _m2.group(1), _m2.group(2)
             deploy["current"] = _rel
