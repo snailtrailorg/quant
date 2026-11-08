@@ -17,9 +17,6 @@
           <span>{{ t('secpage.postureTitle') }}</span>
           <div style="display:flex;align-items:center;gap:12px">
             <span v-if="stale" class="stale-warn">{{ t('secpage.stale') }}</span>
-            <!-- 批 138/141：手动重扫——按全站规范用 IconBtn（纯图标+title 提示，批 21 立法） -->
-            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning || localPending"
-                     :disabled="scanning || localPending" @click="onRescan" />
           </div>
         </div>
       </template>
@@ -41,27 +38,38 @@
             <span v-if="!srcCounts.length" class="kpi-sub">{{ t('secpage.noVulnOpt') }}</span>
           </div>
         </el-card>
+        <!-- 批 171p：「扫描结果」卡（原 扫描状态+快照日期 两卡合并——用户裁定；stale 解释
+             文案随合并退役〔机制自白费解——两卡并排时间自明〕；重扫钮随迁入本卡） -->
         <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.status') }}</span>
-            <!-- 批 171l：新代码已上产但快照仍是旧轮（06:00 beat 周期）——角标防「空等无解释」 -->
-            <el-tag v-if="staleAfterDeploy && !scanning" size="small" type="warning" style="margin-left:auto">
-              {{ t('secpage.staleDeploy') }}</el-tag>
+          <div class="card-head">
+            <span class="card-name">{{ t('secpage.scanResult') }}</span>
+            <IconBtn :icon="Refresh" :title="t('secpage.rescan')" :loading="scanning || localPending"
+                     :disabled="scanning || localPending" @click="onRescan" />
           </div>
-          <div class="card-value"><StatusTag :value="snap.status" /></div>
+          <div class="card-value">
+            <span class="pct small">{{ snap.scan_date }}</span>
+            <StatusTag :value="snap.status" />
+          </div>
           <div v-if="degradedZones.length" class="zone-list">
             <div v-for="z in degradedZones" :key="z.zone" class="zone-item"
                  :title="z.reason">⚠ {{ z.zone }}：{{ z.reason.slice(0, 40) }}</div>
           </div>
           <div class="kpi-sub">{{ t('secpage.lastScan') }}: {{ lastScanAt }}</div>
-          <div v-if="staleAfterDeploy && !scanning" class="kpi-sub dep-outdated warn">
-            {{ t('secpage.staleDeployHint') }}
-          </div>
-        </el-card>
-        <el-card shadow="never" class="metric-card">
-          <div class="card-head"><span class="card-name">{{ t('secpage.scanDate') }}</span></div>
-          <div class="card-value"><span class="pct small">{{ snap.scan_date }}</span></div>
           <div class="kpi-sub dep-outdated" :class="{ warn: depOutdatedWarn }">
             {{ t('secpage.depOutdated') }}: {{ snap.dep_health?.has_update_n ?? '—' }}
+          </div>
+        </el-card>
+        <!-- 批 171p：「最近上产」卡（当前版+双链一致性+最近 5 版） -->
+        <el-card shadow="never" class="metric-card">
+          <div class="card-head"><span class="card-name">{{ t('secpage.deploys') }}</span></div>
+          <div class="card-value">
+            <span class="pct small">{{ deployShort }}</span>
+            <el-tag v-if="snap.deploy?.web_same === true" size="small" type="success">web ✓</el-tag>
+            <el-tag v-else-if="snap.deploy?.web_same === false" size="small" type="warning">web ≠</el-tag>
+          </div>
+          <div class="kpi-sub deploy-list">
+            <div v-for="r in snap.deploy?.recent || []" :key="r"
+                 :class="{ 'deploy-cur': r === snap.deploy?.current }">{{ deployFmt(r) }}</div>
           </div>
         </el-card>
         <el-card shadow="never" class="metric-card">
@@ -344,8 +352,12 @@ const hasUpdateText = (v) => v === 'yes' ? t('secpage.huYes') : v === 'no' ? t('
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
 const degradedZones = computed(() => snap.value?.degraded_zones || [])
 const findingsStale = computed(() => !!snap.value?.findings_stale)   // 批170：漏洞列表为历史值
-// 批 171l：部署后快照未刷新 + dnf 待更安全更新（kernel 精确匹配）
-const staleAfterDeploy = computed(() => !!snap.value?.stale_after_deploy)
+// 批 171p：部署卡辅助（staleAfterDeploy 渲染退役——API 键保留兼容）
+const deployShort = computed(() => {
+  const c = snap.value?.deploy?.current
+  return c ? c.slice(5, 10) + ' ' + c.slice(13) : '—'   // MM-DD HH:MM + sha 短
+})
+const deployFmt = r => r ? `${r.slice(4, 6)}/${r.slice(6, 8)} ${r.slice(8, 10)}:${r.slice(10, 12)} ${r.slice(13)}` : ''
 const dnfPending = computed(() => (snap.value?.dnf?.packages || [])
   .filter(p => p && p.name))
 const isKernelPkg = name => {

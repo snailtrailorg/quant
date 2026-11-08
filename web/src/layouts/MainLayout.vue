@@ -12,7 +12,7 @@
           <!-- P1-4（05 §5.2 要点 9）：⛔ 急停常驻顶栏（火警时不该先找消防栓在几楼） -->
           <!-- 批 171o：红钮=跳转紧急处置页（用户裁定——处置动作进操作台再动手）；
                halted 红点全员可见（30s 轮询 getRiskState——read 键四角色可得） -->
-          <span class="freeze-badge" style="position:relative">
+          <span style="position:relative; display:inline-flex">
             <IconBtn type="danger" :icon="SwitchButton" :title="halted ? t('risk.halted') : t('nav.emergency')"
                      @click="$router.push('/emergency')" />
             <span v-if="halted" class="halt-dot" />

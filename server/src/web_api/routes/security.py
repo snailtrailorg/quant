@@ -324,6 +324,28 @@ def security_snapshot(date_str: str = Query("", alias="date"),
             stale_after_deploy = snap["created_at"] < _deploy_at
     except Exception:
         stale_after_deploy = False   # fail-open（呈现层禁炸）
+    # 批 171p：「最近上产」卡数据（零新查询零特权——快核放行口径）：cwd 派生 releases/
+    # 路径（dev 布局 fail-open），`^\d{12}-` 过滤 GC 保护名单的非常规条目（web-legacy 等），
+    # 字典序尾 5；web 链 readlink 比对 server 当前 release id（双链一致性——分裂预警）。
+    deploy: dict = {"current": None, "web_same": None, "recent": []}
+    try:
+        import os as _os
+        import re as _re2
+        _cwd2 = _os.readlink("/proc/self/cwd")
+        _m2 = _re2.search(r"^(.*)/releases/([^/]+)/", _cwd2)
+        if _m2:
+            _root, _rel = _m2.group(1), _m2.group(2)
+            deploy["current"] = _rel
+            _entries = [e for e in _os.listdir(f"{_root}/releases")
+                        if _re2.match(r"^\d{12}-", e)]
+            deploy["recent"] = sorted(_entries)[-5:]
+            try:
+                _web = _os.readlink(f"{_root}/web")
+                deploy["web_same"] = _web.rstrip("/").rsplit("/", 1)[-1] == _rel
+            except Exception:
+                deploy["web_same"] = None   # web 链不可读=未知（fail-open）
+    except Exception:
+        pass   # dev/异常布局——空块（FE 显 —）
     return {
         "status": snap["status"],
         "scan_date": day.isoformat(),
@@ -349,7 +371,8 @@ def security_snapshot(date_str: str = Query("", alias="date"),
         "vulns_status": _vulns_status or "unknown",
         "findings_as_of": _findings_as_of,
         "findings_stale": findings_stale,   # 批170：true ⇒ 列表是历史值，不得当当前风险读
-        "stale_after_deploy": stale_after_deploy,   # 批 171l：新代码已上产但快照未刷新（角标用）
+        "stale_after_deploy": stale_after_deploy,   # 批 171l：新代码已上产但快照未刷新（角标用；171p 起 FE 不再渲染文案——键保留兼容）
+        "deploy": deploy,   # 批 171p：最近上产卡（current/web_same/recent）
         "vulns_db": (snap.get("components") or {}).get("vulns_db") or {},
         # 批 154：依赖滞后（venv 债务仪表——components 分区透传；检查不升级）
         "n_outdated": (snap.get("components") or {}).get("n_outdated"),
