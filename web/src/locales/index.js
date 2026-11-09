@@ -1146,6 +1146,11 @@ mail: '邮件 SMTP',
       deactivateConfirm: '确认注销账号？注销后无法恢复，个人信息将被脱敏',
     },
     err: {
+      RISK_NO_ACTIVE_RUNNER: '没有运行中的实盘任务，撤单/清仓无法执行——请先在实盘任务页启动一个任务（其交易账号须与勾选一致）。',
+      RISK_NO_MATCH_ACCOUNT: '勾选的账号没有运行中的实盘任务，请重新勾选。',
+      RISK_INVALID_ACCOUNT: '勾选的账号无效，请刷新页面后重试。',
+      RISK_CONFIRM_REQUIRED: '请输入 CONFIRM 确认后再提交。',
+
       XSEC_UNKNOWN_FIELD: '表达式引用了未知字段，请从字段下拉提示中选取。',
       XSEC_FORBIDDEN_FUNC: '表达式使用了不支持的函数（仅可用 rank/zscore/percentile/abs/max/min/round）。',
       XSEC_NESTED: 'rank/zscore/percentile 不能嵌套使用。',
@@ -2576,6 +2581,11 @@ mail: 'Email SMTP',
       deactivateConfirm: 'Deactivate your account? This cannot be undone; personal info will be anonymized',
     },
     err: {
+      RISK_NO_ACTIVE_RUNNER: 'No live task is running - cancel/close cannot execute. Start a live task first (its account must match the selection).',
+      RISK_NO_MATCH_ACCOUNT: 'None of the selected accounts has a running live task.',
+      RISK_INVALID_ACCOUNT: 'Selected account is invalid - refresh and retry.',
+      RISK_CONFIRM_REQUIRED: 'Type CONFIRM to proceed.',
+
       XSEC_UNKNOWN_FIELD: 'Unknown field in expression. Pick from the field suggestions.',
       XSEC_FORBIDDEN_FUNC: 'Unsupported function (allowed: rank/zscore/percentile/abs/max/min/round).',
       XSEC_NESTED: 'rank/zscore/percentile cannot be nested.',
@@ -4312,7 +4322,12 @@ mail: 'Email SMTP',
         "deactivateHint": "註銷後帳號無法登入，個人資訊將被去識別化",
         "deactivateConfirm": "確認註銷帳號？註銷後無法恢復，個人資訊將被去識別化",
       },
-      err: {
+      "err": {
+      "RISK_NO_ACTIVE_RUNNER": "沒有運行中的實盤任務，撤單/清倉無法執行——請先在實盤任務頁啟動一個任務（其交易賬號須與勾選一致）。",
+      "RISK_NO_MATCH_ACCOUNT": "勾選的賬號沒有運行中的實盤任務，請重新勾選。",
+      "RISK_INVALID_ACCOUNT": "勾選的賬號無效，請刷新頁面後重試。",
+      "RISK_CONFIRM_REQUIRED": "請輸入 CONFIRM 確認後再提交。",
+
         "XSEC_UNKNOWN_FIELD": "表達式引用了未知欄位，請從欄位下拉提示中選取。",
         "XSEC_FORBIDDEN_FUNC": "表達式使用了不支援的函式（僅可用 rank/zscore/percentile/abs/max/min/round）。",
         "XSEC_NESTED": "rank/zscore/percentile 不能巢狀使用。",

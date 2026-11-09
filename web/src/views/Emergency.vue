@@ -53,7 +53,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getRiskExposure } from '../api'
+import { getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getRiskExposure, apiErr } from '../api'
 import { selectedIds, canResume } from '../utils/emergency'
 
 const { t } = useI18n()
@@ -151,7 +151,14 @@ async function onCancelAll () {
     const r = await riskCancelAll(selectedIds(accounts.value))
     addTl(t('emg.opCancel'), fmtResult(r), r.status === 'done')
     await load()
-  } catch (e) { if (e?.response) console.error(e) }
+  } catch (e) {
+    // 2026-11-09：失败必须上屏（原 catch 静默 → 用户看到「点了没反应」）
+    if (e?.response || e?.code) {
+      const msg = apiErr(e, t('common.failed'))
+      ElMessage.error(msg)
+      addTl(t('emg.opCancel'), msg, false)
+    }
+  }
 }
 async function onHalt () {
   try {
@@ -159,7 +166,13 @@ async function onHalt () {
     const r = await riskHalt()
     addTl(t('emg.opHalt'), t('risk.halted') + '；' + fmtResult(r.cancel), true)
     await load()
-  } catch (e) { if (e?.response) console.error(e) }
+  } catch (e) {
+    if (e?.response || e?.code) {
+      const msg = apiErr(e, t('common.failed'))
+      ElMessage.error(msg)
+      addTl(t('emg.opHalt'), msg, false)
+    }
+  }
 }
 async function onCloseAll () {
   try {
@@ -170,7 +183,13 @@ async function onCloseAll () {
     const r = await riskCloseAll(selectedIds(accounts.value))
     addTl(t('emg.opClose'), fmtResult(r), r.status === 'done')
     await load()
-  } catch (e) { if (e?.response) console.error(e) }
+  } catch (e) {
+    if (e?.response || e?.code) {
+      const msg = apiErr(e, t('common.failed'))
+      ElMessage.error(msg)
+      addTl(t('emg.opClose'), msg, false)
+    }
+  }
 }
 async function onResume () {
   try {
@@ -181,7 +200,13 @@ async function onResume () {
     await riskResume()
     addTl(t('emg.opResume'), t('risk.resumed'), true)
     await load()
-  } catch (e) { if (e?.response) console.error(e) }
+  } catch (e) {
+    if (e?.response || e?.code) {
+      const msg = apiErr(e, t('common.failed'))
+      ElMessage.error(msg)
+      addTl(t('emg.opResume'), msg, false)
+    }
+  }
 }
 
 onMounted(async () => {
