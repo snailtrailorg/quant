@@ -367,7 +367,9 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual") -> 
             out["rejected"].append(f"{sym}:no-price")
             logger.warning("全平 skip %s：无可用价格（成本/行情均缺）", sym)
             continue
-        px = round(px * 0.99, 3)   # 略低于最新价（合法且易成交）
+        # 用最新成交价本身（不再打折）：打折 1% 会把贴近跌停的标的推出价带
+        # （2026-11-09 14:24 实测 159812 @0.990 仍被 "beyond the limit" 拒）
+        px = round(px, 3)
         remaining = sellable
         while remaining > 0:
             qty = min(remaining, XTP_MAX_ORDER_QTY)

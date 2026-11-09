@@ -127,7 +127,7 @@ class TestCloseAllPositions:
         assert out["skipped_t1"] == ["000001.SZSE"], "T+1 冻结标的 skip 记名"
         assert out["closed_requested"] == 1
         o = sent[0]
-        assert o.volume == 1000 and abs(o.price - 10.395) < 1e-6, "可卖量+最新价×0.99（非 cost_price）"
+        assert o.volume == 1000 and abs(o.price - 10.5) < 1e-6, "可卖量+最新价（非 cost_price；不再打折）"
         # check_order 收到的 dict：无 strategy_id（频次豁免锚）
         got = rc.check_order.call_args[0][0]
         assert "strategy_id" not in got and got["action"] == "SELL"
