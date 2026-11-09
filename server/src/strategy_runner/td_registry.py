@@ -81,6 +81,25 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
         def subscribe(self, req) -> None:  # hub 模式 worker 无行情
             pass
 
+        def write_error(self, msg: str, error: dict | None = None) -> None:
+            """TD 报错回调（vnpy_xtp 的 XtpTdApi 在委托/撤单/查询失败时调 gateway.write_error）。
+
+            2026-11-09（171n e2e 抓真因）：`write_error` 定义在 **XtpGateway** 而非
+            BaseGateway；ThinTdGateway 只继承 BaseGateway ⇒ 任何撤单失败/委托失败回调
+            抛 AttributeError，撤单回调线程被打断（熔断沿撤单真实路径必踩）。
+            实现：日志 + EVENT_LOG（与 write_log 同源），never-raise——回调里不能再抛。
+            """
+            try:
+                detail = ""
+                if isinstance(error, dict):
+                    detail = str(error.get("error_msg") or error.get("error_id") or "")
+                text = f"{msg}：{detail}" if detail else msg
+                logger.error("TD 报错: %s", text)
+                from vnpy.trader.object import LogData
+                self.on_log(LogData(msg=text, gateway_name=self.gateway_name))
+            except Exception:   # noqa: BLE001 —— 回调链路禁抛
+                pass
+
         def send_order(self, req) -> str:
             return self.td_api.send_order(req)
 

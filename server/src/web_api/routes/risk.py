@@ -195,9 +195,18 @@ def risk_halt(payload: dict = Depends(require_perm("halt"))):
     先撤后停的两步窗内策略新 BUY 照常入场；halt 是 Valkey 键即时生效，先停后撤零窗口；
     与 runner 侧 halt_edge_cancel 沿撤单双保险——沿判定幂等，已熔断再点=只撤单）。"""
     from src.risk_control import RiskControl
+    from src.web_api.errors import ApiError
     RiskControl.get().emergency_halt(f"Web:{payload['username']}")
     audit_log(payload["username"], "emergency_halt", detail="web button (halt then cancel-all)")
-    cancel_out = _dispatch_risk_cmd("cancel-all", payload)
+    # 2026-11-09（171n e2e）：halt 是**全局止血**——无活动 runner/撤单下发失败绝不
+    # 反过来让 halt 请求失败（原实现 dispatch 抛 409 时 halted 已置位，前端却收到失败=
+    # 状态与回执矛盾）。撤单降级为 best-effort，结果随回执带回。
+    try:
+        cancel_out = _dispatch_risk_cmd("cancel-all", payload)
+    except ApiError as e:
+        cancel_out = {"error": e.code, "detail": str(e)}
+    except Exception as e:   # noqa: BLE001 —— halt 永不因撤单失败而失败
+        cancel_out = {"error": "CANCEL_DISPATCH_FAILED", "detail": str(e)[:200]}
     return {"halted": True, "cancel": cancel_out}
 
 
@@ -207,6 +216,16 @@ def risk_resume(payload: dict = Depends(require_perm("resume"))):
     RiskControl.get().resume()
     audit_log(payload["username"], "risk_resume")
     return {"halted": False}
+
+
+def _hb_get(hb, key: str):
+    """心跳字段读取（str/bytes 双形态）——decode_responses 缺省 False 时键是 bytes，
+    直接 hb.get("ts") 恒 None（171n e2e 抓到的 409 真因）。"""
+    if not isinstance(hb, dict):
+        return None
+    if key in hb:
+        return hb[key]
+    return hb.get(key.encode())
 
 
 def _live_runners(accounts: list[int] | None = None) -> list[tuple[str, int]]:
@@ -221,12 +240,16 @@ def _live_runners(accounts: list[int] | None = None) -> list[tuple[str, int]]:
     if accounts is not None:
         rows = [(tid, acct) for tid, acct in rows if acct in set(accounts)]
     try:
-        r = business_redis(socket_timeout=3)
+        # 2026-11-09（171n e2e 抓真因）：business_redis 默认 decode_responses=False
+        # ⇒ hgetall 返回 bytes 键，`hb.get("ts")` 恒 None ⇒ 所有 runner 被判「心跳死」
+        # ⇒ cancel-all/close-all/halt 恒 409（mock 用 str-key dict 全绿掩盖）。
+        # 修：decode_responses=True + _hb_get 双形态容错（旧 client 复用也不炸）。
+        r = business_redis(decode_responses=True, socket_timeout=3)
         import time as _t
         for tid, acct in rows:
             try:
                 hb = r.hgetall(f"quant:hb:task:{tid}")
-                ts = hb.get("ts") if isinstance(hb, dict) else None
+                ts = _hb_get(hb, "ts")
                 if ts and _t.time() - float(ts) < 30:
                     out.append((str(tid), acct))
             except Exception:
@@ -325,7 +348,7 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
     accts = [r[:4] for r in _rows if not r[4]]
     r = None
     try:
-        r = business_redis(socket_timeout=3)
+        r = business_redis(decode_responses=True, socket_timeout=3)   # 同 _live_runners：bytes 键防呆
     except Exception:
         pass
     now = _t.time()
@@ -337,11 +360,14 @@ def risk_exposure(_p: dict = Depends(require_perm("halt"))):
             for tid, acct in live.items():
                 if acct != acct_id:
                     continue
-                running = True
                 try:
                     hb = r.hgetall(f"quant:hb:task:{tid}")
-                    wo = hb.get("working_orders")
-                    working = int(wo) if wo is not None else None
+                    ts = _hb_get(hb, "ts")
+                    # 心跳新鲜才算「运行中」（僵尸 runner：行 running 但心跳死——
+                    # 171n e2e 抓到 dead runner 仍显示 running=True，误导处置人）
+                    running = bool(ts) and (now - float(ts) < 30)
+                    wo = _hb_get(hb, "working_orders")
+                    working = int(wo) if (running and wo is not None) else None
                 except Exception:
                     pass
                 break
