@@ -301,7 +301,7 @@ def _cancel_working_orders(adapter) -> dict:
     return out
 
 
-XTP_MAX_ORDER_QTY = 1_000_000   # 单笔报单上限（2026-11-09 e2e 实测：>100 万股交易所拒 "Parameter quantity invalid!"）
+XTP_MAX_ORDER_QTY = 100_000   # 单笔报单上限（2026-11-09 e2e 实测：100 万股仍被拒 "Parameter quantity invalid!"，取保守 10 万股）
 
 
 def _latest_close_for(sym: str) -> float:
@@ -386,8 +386,11 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual") -> 
                 break
             try:
                 from src.strategy_framework.adapters import Order
+                # 市价单（最优五档剩余撤销）：绕开涨跌幅价带——bar_1min 可能是陈价
+                # （2026-11-09 实测：陈价限价单被 "beyond the limit" 拒）；price 仅供
+                # 风控 check_order 非零校验，市价单交易所不看该价。
                 oid = adapter.send_order(Order(symbol=sym, action="SELL", volume=qty,
-                                               price=px, order_type="limit"))
+                                               price=px, order_type="market"))
                 out["closed_requested"] += 1
                 sent.append((oid, sym))
                 logger.warning("全平发单 %s x%d @%.3f → %s", sym, qty, px, oid)

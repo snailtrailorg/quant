@@ -340,8 +340,9 @@ class TestCloseAllChunkingAndExchangeReject:
         with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
              patch.object(T, "_latest_close_for", return_value=1.0):
             out = T._close_all_positions(a)
-        assert [o.volume for o in sent] == [1_000_000, 1_000_000, 500_000], "按单笔上限拆单"
-        assert out["closed_requested"] == 3
+        assert sum(o.volume for o in sent) == 2_500_000, "总量守恒"
+        assert all(o.volume <= 100_000 for o in sent), "每单不超上限（10 万股）"
+        assert out["closed_requested"] == len(sent) >= 25
 
     def test_exchange_reject_counted(self):
         from vnpy.trader.constant import Status
