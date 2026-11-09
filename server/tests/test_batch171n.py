@@ -121,12 +121,13 @@ class TestCloseAllPositions:
         adapter.send_order.side_effect = lambda o: sent.append(o) or "oid"
         rc = MagicMock()
         rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
-        with patch("src.risk_control.risk.RiskControl.get", return_value=rc):
+        with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
+             patch("src.strategy_runner.trading._latest_close_for", return_value=10.5):
             out = _close_all_positions(adapter, account_id=1, operator="t")
         assert out["skipped_t1"] == ["000001.SZSE"], "T+1 冻结标的 skip 记名"
         assert out["closed_requested"] == 1
         o = sent[0]
-        assert o.volume == 1000 and o.price == 10.5, "可卖量+cost_price"
+        assert o.volume == 1000 and abs(o.price - 10.395) < 1e-6, "可卖量+最新价×0.99（非 cost_price）"
         # check_order 收到的 dict：无 strategy_id（频次豁免锚）
         got = rc.check_order.call_args[0][0]
         assert "strategy_id" not in got and got["action"] == "SELL"
@@ -322,3 +323,36 @@ class TestBodyWiring:
         with patch.object(R, "_dispatch_risk_cmd", return_value={"status": "done"}) as d:
             R.risk_cancel_all({"accounts": [3]}, {"username": "t"})
             assert d.call_args.kwargs["accounts"] == [3]
+
+class TestCloseAllChunkingAndExchangeReject:
+    """2026-11-09 e2e 实证：成本价越界被拒 + 超百万股单笔被拒。"""
+
+    def _pos(self, sym, vol, frozen=0, price=1.0):
+        return SimpleNamespace(symbol=sym, volume=vol, frozen=frozen, avg_price=price)
+
+    def test_chunked_by_max_order_qty(self):
+        from src.strategy_runner import trading as T
+        a = MagicMock()
+        a.query_position.side_effect = [[self._pos("511010.SSE", 2_500_000)], []]
+        sent = []
+        a.send_order.side_effect = lambda o: sent.append(o) or f"oid{len(sent)}"
+        rc = MagicMock(); rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
+        with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
+             patch.object(T, "_latest_close_for", return_value=1.0):
+            out = T._close_all_positions(a)
+        assert [o.volume for o in sent] == [1_000_000, 1_000_000, 500_000], "按单笔上限拆单"
+        assert out["closed_requested"] == 3
+
+    def test_exchange_reject_counted(self):
+        from vnpy.trader.constant import Status
+        from src.strategy_runner import trading as T
+        a = MagicMock()
+        a.query_position.side_effect = [[self._pos("600000.SSE", 100)], []]
+        a.send_order.return_value = "oid-x"
+        a.query_orders.return_value = [SimpleNamespace(vt_orderid="oid-x", symbol="600000.SSE",
+                                                       status=Status.REJECTED)]
+        rc = MagicMock(); rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
+        with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
+             patch.object(T, "_latest_close_for", return_value=10.0):
+            out = T._close_all_positions(a)
+        assert any("exchange-rejected" in r for r in out["rejected"]), "交易所拒单必须进回执"

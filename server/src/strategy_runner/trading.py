@@ -301,15 +301,46 @@ def _cancel_working_orders(adapter) -> dict:
     return out
 
 
+XTP_MAX_ORDER_QTY = 1_000_000   # 单笔报单上限（2026-11-09 e2e 实测：>100 万股交易所拒 "Parameter quantity invalid!"）
+
+
+def _latest_close_for(sym: str) -> float:
+    """最新分钟收盘（bar_1min 真相源；SSE/SHSE 双写法——持仓 symbol 用 SSE）。
+
+    2026-11-09 e2e 实证：用 cost_price 当平仓限价会被交易所按涨跌幅拒单
+    （600000 成本 1.001 vs 市价 ~10 → 远低于跌停价）。
+    """
+    from src.data_platform.db import get_conn
+    cands = [sym]
+    if sym.endswith(".SSE"):
+        cands.append(sym[:-4] + ".SHSE")
+    elif sym.endswith(".SHSE"):
+        cands.append(sym[:-5] + ".SSE")
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT close FROM bar_1min WHERE symbol = ANY(%s) ORDER BY ts DESC LIMIT 1",
+                (cands,)).fetchone()
+        return float(row[0]) if row and row[0] is not None else 0.0
+    except Exception as e:
+        logger.warning("全平取价失败 %s: %s", sym, e)
+        return 0.0
+
+
 def _close_all_positions(adapter, account_id=None, operator: str = "manual") -> dict:
     """批 171n：一键全平（股灾急停）。逐持仓发平仓单——走 check_order 全链（halted 对
     SELL 放行=件一；无 strategy_id 豁免频次计数；SELL 豁免金额截断）。
 
-    T+1 防线（A-P0-3）：volume 按 `volume - frozen` 截断（当日买入冻结仓不可卖——
-    strategy.py :430 兜底同款；可卖=0 的标的 skip 记名）。价格（A-P0-2）：cost_price
-    =avg_price（持仓快照必然可得，防市价 price=0 被 INVALID_PRICE 拒）。
+    T+1 防线（A-P0-3）：volume 按 `volume - frozen` 截断（可卖=0 的标的 skip 记名）。
     无自动重试（残余=人工面板处置——股灾场景重试风暴比残余更危险）。
+
+    2026-11-09 e2e 三修（用户实点「平不掉」根因）：
+    1. **价格**：不再用 cost_price（常越界被交易所拒）——取最新分钟收盘 ×0.99；
+    2. **数量**：按 XTP_MAX_ORDER_QTY 拆单（超大单 "Parameter quantity invalid!"）；
+    3. **回执**：交易所拒单也计入 rejected（原只统计风控拒，回执虚报成功）。
     """
+    import time as _t
+    from vnpy.trader.constant import Status
     from src.risk_control.risk import RiskControl
     rc = RiskControl.get()
     out = {"closed_requested": 0, "skipped_t1": [], "rejected": [], "positions_remain": 0}
@@ -319,6 +350,7 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual") -> 
         logger.error("全平：持仓查询失败: %s", e)
         out["positions_remain"] = -1   # 查询失败=未知态（非零仓）
         return out
+    sent: list[tuple[str, str]] = []   # (vt_orderid, symbol)
     for pos in positions:
         vol = int(getattr(pos, "volume", 0) or 0)
         frozen = int(getattr(pos, "frozen", 0) or 0)
@@ -330,29 +362,46 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual") -> 
             out["skipped_t1"].append(sym)
             logger.warning("全平 skip %s：T+1 冻结不可卖（volume=%d frozen=%d）", sym, vol, frozen)
             continue
-        order = {
-            "symbol": sym,
-            "action": "SELL",
-            "volume": sellable,
-            "price": float(getattr(pos, "avg_price", 0) or 0),   # cost_price（防 INVALID_PRICE）
-            "reason": "emergency_close_all",
-            "operator": operator,
-            "account_id": account_id,
-            # 有意不带 strategy_id：max_trades_per_day 计数豁免（急停非策略行为）
-        }
-        d = rc.check_order(order, account_id=account_id)
-        if d.approved:
+        px = _latest_close_for(sym) or float(getattr(pos, "avg_price", 0) or 0)
+        if px <= 0:
+            out["rejected"].append(f"{sym}:no-price")
+            logger.warning("全平 skip %s：无可用价格（成本/行情均缺）", sym)
+            continue
+        px = round(px * 0.99, 3)   # 略低于最新价（合法且易成交）
+        remaining = sellable
+        while remaining > 0:
+            qty = min(remaining, XTP_MAX_ORDER_QTY)
+            order = {
+                "symbol": sym, "action": "SELL", "volume": qty, "price": px,
+                "reason": "emergency_close_all", "operator": operator,
+                "account_id": account_id,
+                # 有意不带 strategy_id：max_trades_per_day 计数豁免（急停非策略行为）
+            }
+            d = rc.check_order(order, account_id=account_id)
+            if not d.approved:
+                out["rejected"].append(f"{sym}:{d.reason[:60]}")
+                logger.warning("全平被风控拒 %s: %s", sym, d.reason)
+                break
             try:
                 from src.strategy_framework.adapters import Order
-                oid = adapter.send_order(Order(symbol=sym, action="SELL", volume=sellable,
-                                               price=order["price"], order_type="limit"))
+                oid = adapter.send_order(Order(symbol=sym, action="SELL", volume=qty,
+                                               price=px, order_type="limit"))
                 out["closed_requested"] += 1
-                logger.warning("全平发单 %s x%d @%.3f → %s", sym, sellable, order["price"], oid)
+                sent.append((oid, sym))
+                logger.warning("全平发单 %s x%d @%.3f → %s", sym, qty, px, oid)
             except Exception as se:
                 out["rejected"].append(f"{sym}:{str(se)[:60]}")
-        else:
-            out["rejected"].append(f"{sym}:{d.reason[:60]}")
-            logger.warning("全平被风控拒 %s: %s", sym, d.reason)
+                break
+            remaining -= qty
+    if sent:
+        try:
+            _t.sleep(1.5)   # 交易所拒单回报窗（异步：拒单在事件回调里落 OrderData）
+            ids = {o for o, _ in sent}
+            for od in (adapter.query_orders() or []):
+                if getattr(od, "vt_orderid", None) in ids and getattr(od, "status", None) == Status.REJECTED:
+                    out["rejected"].append(f"{od.symbol}:exchange-rejected")
+        except Exception as e:
+            logger.warning("全平回执汇总失败: %s", e)
     try:
         remain = sum(int(getattr(p, "volume", 0) or 0) for p in (adapter.query_position() or []))
         out["positions_remain"] = remain
