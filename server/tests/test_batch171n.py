@@ -272,3 +272,34 @@ class TestThinTdGatewayErrorCallback:
         assert hasattr(gw, "write_error")
         gw.write_error("撤单失败", {"error_id": 1, "error_msg": "mock"})   # 不抛即过
         gw.write_error("撤单失败", None)
+
+class TestHeldVolumeSymbolAliases:
+    """2026-11-09 e2e 抓真因：XTP 持仓 symbol 用 SSE，任务标的用 SHSE ⇒ 可卖仓恒 0
+    ⇒ 所有 SELL 被「截断到可卖仓 0」丢弃（止损失效）。"""
+
+    def test_candidates_cover_shse_and_sse(self):
+        from src.strategy_framework.strategy import position_symbol_candidates
+        assert set(position_symbol_candidates("600000.SHSE")) == {"600000.SHSE", "600000.SSE"}
+        assert set(position_symbol_candidates("600000.SSE")) == {"600000.SSE", "600000.SHSE"}
+        assert position_symbol_candidates("000001.SZSE") == ["000001.ZSE"] if False else \
+            position_symbol_candidates("000001.SZSE") == ["000001.SZSE"]
+
+    def test_held_volume_finds_sse_row(self):
+        from src.data_platform.db import get_conn
+        from src.strategy_framework.strategy import Strategy
+        try:
+            with get_conn() as c:   # 临时账号（dev 库无 prod 账号——FK 需要）
+                c.execute("INSERT INTO trading_account (id,name,provider,market,capabilities) "
+                          "VALUES (990001,'e2e-gate','xtp','astock','{}')")
+                c.execute("INSERT INTO position_snapshot (account_id, symbol, direction, volume, frozen) "
+                          "VALUES (990001, '999999.SSE', 'direction_net', 100, 30)")
+                c.commit()
+            s = Strategy.__new__(Strategy)
+            s.symbol = "999999.SHSE"
+            s.account_id = 990001
+            assert s._held_volume() == 70, "SSE 行必须被 SHSE 标的匹配到"
+        finally:
+            with get_conn() as c:
+                c.execute("DELETE FROM position_snapshot WHERE account_id=990001")
+                c.execute("DELETE FROM trading_account WHERE id=990001")
+                c.commit()
