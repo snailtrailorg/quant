@@ -351,7 +351,7 @@ const hasUpdateText = (v) => v === 'yes' ? t('secpage.huYes') : v === 'no' ? t('
 // A 区状态卡：ok=一句话；degraded=降级分区逐条（zone+原因——快照既有数据首渲染）
 const degradedZones = computed(() => snap.value?.degraded_zones || [])
 const findingsStale = computed(() => !!snap.value?.findings_stale)   // 批170：漏洞列表为历史值
-// 批 171p：部署卡辅助（staleAfterDeploy 渲染退役——API 键保留兼容）
+// 批 171p：部署卡辅助（staleAfterDeploy 渲染退役；2026-11-09 API 键一并删除）
 // 版本目录名形态 202611081927-cb4e36c（YYYYMMDDHHMM-sha）→ "11/08 19:27 cb4e36c"
 // 批 171p 修：当前版此前用 slice(5,10)（错位成 10819 类乱码）——统一走 deployFmt
 const deployFmt = r => r ? `${r.slice(4, 6)}/${r.slice(6, 8)} ${r.slice(8, 10)}:${r.slice(10, 12)} ${r.slice(13)}` : ''
