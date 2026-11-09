@@ -95,14 +95,14 @@ class TestHaltThenCancelOrder:
         with patch("src.risk_control.risk.RiskControl.get") as rc, \
              patch.object(R, "_dispatch_risk_cmd", return_value={"status": "done"}) as d:
             rc.return_value.is_halted.return_value = False
-            R.risk_close_all({"username": "t", "confirm": "CONFIRM"})
+            R.risk_close_all({"confirm": "CONFIRM"}, {"username": "t"})
             rc.return_value.emergency_halt.assert_called_once()
             d.assert_called_once()
 
     def test_close_all_confirm_gate(self):
         from src.web_api.errors import ApiError
         with pytest.raises(ApiError):
-            R.risk_close_all({"username": "t"})
+            R.risk_close_all({}, {"username": "t"})
 
 
 class TestConsumeCloseAllChain:

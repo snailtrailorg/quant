@@ -196,7 +196,7 @@ class TestEndpoints:
         from src.web_api.errors import ApiError
         from src.web_api.routes import risk as R
         with pytest.raises(ApiError) as ei:
-            R.risk_close_all({"username": "t"})   # 无 confirm
+            R.risk_close_all({}, {"username": "t"})   # 无 confirm（body 空）
         assert ei.value.status_code == 400
 
 class TestHeartbeatDecoding:
@@ -303,3 +303,22 @@ class TestHeldVolumeSymbolAliases:
                 c.execute("DELETE FROM position_snapshot WHERE account_id=990001")
                 c.execute("DELETE FROM trading_account WHERE id=990001")
                 c.commit()
+
+class TestBodyWiring:
+    """2026-11-09 e2e 抓真因：confirm/accounts 从 auth payload 取 ⇒ 恒 400 / 恒全量。
+    必须从请求 Body 取（前端 body 里的 CONFIRM/accounts 才生效）。"""
+
+    def test_close_all_confirm_from_body(self):
+        from src.web_api.routes import risk as R
+        with patch("src.risk_control.risk.RiskControl.get") as rc, \
+             patch.object(R, "_dispatch_risk_cmd", return_value={"status": "done"}) as d:
+            rc.return_value.is_halted.return_value = True
+            assert R.risk_close_all({"confirm": "CONFIRM", "accounts": [7]},
+                                    {"username": "t"})["status"] == "done"
+            assert d.call_args.kwargs["accounts"] == [7]
+
+    def test_cancel_all_accounts_from_body(self):
+        from src.web_api.routes import risk as R
+        with patch.object(R, "_dispatch_risk_cmd", return_value={"status": "done"}) as d:
+            R.risk_cancel_all({"accounts": [3]}, {"username": "t"})
+            assert d.call_args.kwargs["accounts"] == [3]

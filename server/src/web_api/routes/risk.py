@@ -1,7 +1,7 @@
 """风控路由：熔断开关 + 风控规则 CRUD + 三账对账 + 审计日志 + 数据完整性看板。"""
 import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 
 from src.data_platform.db import get_conn, get_conn_for_heavy_read
 
@@ -398,19 +398,27 @@ def RiskControl_halt_ts():
 
 
 @router.post("/api/risk/cancel-all")
-def risk_cancel_all(payload: dict = Depends(require_perm("halt"))):
+def risk_cancel_all(body: dict = Body(default={}),
+                   payload: dict = Depends(require_perm("halt"))):
     """批 171n：一键撤全部在场委托（「请求已受理」语义——XTP 异步，结果见 journal）。
-    批 171o：可选 body accounts=[id]（勾选集——缺省全部）。"""
-    return _dispatch_risk_cmd("cancel-all", payload, accounts=payload.get("accounts"))
+    批 171o：可选 body accounts=[id]（勾选集——缺省全部）。
+
+    2026-11-09（e2e 抓真因）：原实现从 **auth payload** 取 accounts（Depends 注入的是
+    用户名/角色，不是请求体）⇒ 勾选集恒 None（永远全量）。改为 Body 读。
+    """
+    return _dispatch_risk_cmd("cancel-all", payload, accounts=(body or {}).get("accounts"))
 
 
 @router.post("/api/risk/close-all")
-def risk_close_all(payload: dict = Depends(require_perm("halt"))):
+def risk_close_all(body: dict = Body(default={}),
+                  payload: dict = Depends(require_perm("halt"))):
     """批 171n：一键全平（body {"confirm":"CONFIRM"} 二次确认——股灾场景防误触）。
     批 171o：清仓=全包含（用户裁定四级递进）——未熔断先置 halted（拒新单）→撤在场单→
     全持仓平仓。worker 侧 consume_risk_cmd 的 close-all 分支已串联撤+平（171o）；web 侧
     本端点只补前置 halt。"""
-    if payload.get("confirm") != "CONFIRM":
+    # 2026-11-09（e2e 抓真因）：confirm/accounts 原从 auth payload 取 ⇒ 恒 400
+    # （前端 body 里的 CONFIRM 被无视，用户「手动平仓平不掉」的真根因）。改 Body 读。
+    if (body or {}).get("confirm") != "CONFIRM":
         from src.web_api.errors import ApiError
         raise ApiError(400, "RISK_CONFIRM_REQUIRED",
                        "close-all 需 body {\"confirm\":\"CONFIRM\"} 二次确认")
@@ -419,7 +427,7 @@ def risk_close_all(payload: dict = Depends(require_perm("halt"))):
     if not rc.is_halted():
         rc.emergency_halt(f"close-all:{payload['username']}")
         audit_log(payload["username"], "emergency_halt", detail="auto (close-all preamble)")
-    return _dispatch_risk_cmd("close-all", payload, accounts=payload.get("accounts"))
+    return _dispatch_risk_cmd("close-all", payload, accounts=(body or {}).get("accounts"))
 
 
 @router.get("/api/risk-rules")
