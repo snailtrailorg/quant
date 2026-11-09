@@ -98,9 +98,12 @@ def write_order_status(d, adapter, sid: str, symbol: str) -> None:
                 logger.warning("order_log 终态回写跳过（无关联行）: vt=%s status=%s %s",
                                vt, new_status, getattr(d, "symbol", symbol))
                 return
+            # 2026-11-09（171n e2e 抓真库语法错）：psycopg 不做元组展开，`NOT IN %s`
+            # 渲染成 `NOT IN $3` ⇒ 语法错 ⇒ 终态回写从未成功（never-raise 静默吞）。
+            # 数组比较用 `<> ALL(%s)`（仓内 ANY(%s) 同族写法）。
             cur = conn.execute(
-                "UPDATE order_log SET status=%s WHERE id=%s AND status NOT IN %s",
-                (new_status, row[0], ORDER_FINAL_STATES))
+                "UPDATE order_log SET status=%s WHERE id=%s AND status <> ALL(%s)",
+                (new_status, row[0], list(ORDER_FINAL_STATES)))
             if cur.rowcount:
                 logger.info("order_log 终态: #%s → %s (%s)", row[0], new_status, getattr(d, "symbol", symbol))
             conn.commit()

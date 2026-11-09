@@ -1,6 +1,13 @@
-"""批 68：order_log 终态回写测试钉（映射/只进不退/vt 两步/send_failed 可覆写/risk 语义）。"""
+"""批 68：order_log 终态回写测试钉（映射/只进不退/vt 两步/send_failed 可覆写/risk 语义）。
+
+2026-11-09 增真库守门类 TestRealDbSql：SQL 语句在真库逐条执行——mock 只证「字符串里有
+这行字」，不能证明语句可执行（`NOT IN $3` 语法错曾全绿掩盖）。
+"""
+import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from vnpy.trader.constant import Status
 
@@ -61,19 +68,58 @@ class TestWriteOrderStatus:
         assert "client_order_id" in sel2.args[0]
 
     def test_final_state_guards_update(self):
-        """只进不退：UPDATE WHERE status NOT IN 终态集（迟到 partial 片段被 SQL 闭包挡）。"""
+        """只进不退：`status <> ALL(终态集)`（迟到 partial 片段被 SQL 闭包挡）。
+
+        2026-11-09 修：原实现 `NOT IN %s` 传元组 ⇒ psycopg 渲染 `NOT IN $3` 语法错，
+        never-raise 静默吞 ⇒ 终态回写从未生效（171n e2e 真库抓到）。数组比较用 ALL。
+        """
         from src.strategy_runner.trading import ORDER_FINAL_STATES, write_order_status
         conn, _ = _conn([(9,)])
         with patch("src.data_platform.db.get_conn", return_value=conn):
             write_order_status(_d(Status.PARTTRADED), MagicMock(), "s1", "X")
         upd = conn.execute.call_args_list[1]
-        assert "NOT IN" in upd.args[0]
-        assert "partial" in upd.args[1]
+        assert "<> ALL" in upd.args[0]
+        assert set(upd.args[1][2]) == set(ORDER_FINAL_STATES)
 
     def test_never_raise(self):
         from src.strategy_runner.trading import write_order_status
         with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
             write_order_status(_d(Status.ALLTRADED), MagicMock(), "s1", "X")   # 不抛即过
+
+
+def _real_db_up() -> bool:
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as c:
+            c.execute("SELECT 1 FROM order_log LIMIT 1")
+        return True
+    except Exception:
+        return False
+
+
+class TestRealDbSql:
+    """真库逐条执行守门：mock 只证字符串形状，不证语句可跑（`NOT IN $3` 曾全绿）。
+
+    插入临时行 → 执行终态回写 → 再执行非终态写（应 0 行=只进不退）→ 回滚不留痕。
+    """
+
+    @pytest.mark.skipif(not _real_db_up(), reason="真库不可用（无 dev 库自动跳过）")
+    def test_update_executes_and_closes(self):
+        from src.data_platform.db import get_conn
+        from src.strategy_runner.trading import ORDER_FINAL_STATES
+        cid = "e2e-gate-" + uuid.uuid4().hex[:10]
+        with get_conn() as c:
+            oid = c.execute(
+                "INSERT INTO order_log (ts, strategy_id, symbol, action, volume, price, status, client_order_id) "
+                "VALUES (now(), 'e2e-gate', '600000.SHSE', 'BUY', 100, 10, 'submitted', %s) RETURNING id",
+                (cid,)).fetchone()[0]
+            upd = c.execute("UPDATE order_log SET status=%s WHERE id=%s AND status <> ALL(%s)",
+                            ("all_traded", oid, list(ORDER_FINAL_STATES)))
+            assert upd.rowcount == 1, "终态回写语句在真库执行失败"
+            again = c.execute("UPDATE order_log SET status=%s WHERE id=%s AND status <> ALL(%s)",
+                              ("partial", oid, list(ORDER_FINAL_STATES)))
+            assert again.rowcount == 0, "终态闭包失效（只进不退被破坏）"
+            c.rollback()
 
 
 class TestRiskCountSemantics:
