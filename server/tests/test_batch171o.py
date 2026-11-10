@@ -106,29 +106,52 @@ class TestHaltThenCancelOrder:
 
 
 class TestConsumeCloseAllChain:
-    def test_chain_and_disconnect_guard(self):
+    """批 171s：执行链已搬入 EmergencyWorker 专用线程（consume_risk_cmd 只投递）。
+
+    此处直接驱动 worker 的 _handle（同步执行路径），断言串联序 + TD 断线防线 +
+    终局 uid 定向零内容 SSE 帧仍成立。
+    """
+
+    def _worker(self, adapter, td_api):
+        import threading
         from src.strategy_runner import hub_worker as HW
+        return HW.EmergencyWorker(adapter=adapter, td_api=td_api, account_id=1,
+                                  tid="t1", closing=threading.Event())
+
+    def test_chain_and_disconnect_guard(self):
         from src.strategy_runner import trading as T
-        r = MagicMock()
-        r.getdel.return_value = '{"id":"r1","verb":"close-all","operator":"u"}'
-        adapter = MagicMock()
+        w = self._worker(MagicMock(), SimpleNamespace(connect_status=True))
         with patch.object(T, "_cancel_working_orders", return_value={"requested": 3, "failed": 0}) as c, \
              patch.object(T, "_close_all_positions", return_value={"closed_requested": 2}) as p, \
-             patch.object(HW, "time") as tm:
-            tm.sleep = lambda s: None
-            out = HW.consume_risk_cmd(r, adapter, "t1", td_api=SimpleNamespace(connect_status=True))
-        assert out["result"]["cancel"]["requested"] == 3
-        assert out["result"]["close"]["closed_requested"] == 2
-        c.assert_called_once(); p.assert_called_once()
+             patch.object(T, "write_cmd_result") as wr, \
+             patch("src.data_platform.hub_quote.get_retry_config",
+                   return_value={"deadline_s": 120}), \
+             patch("src.strategy_runner.hub_worker.time.sleep"), \
+             patch("src.quant_common.eventbus.bus.publish_cross_process") as pub:
+            w._handle({"req_id": "r1", "verb": "close-all", "operator": "u",
+                       "operator_uid": 7})
+        c.assert_called_once()
+        p.assert_called_once()
+        assert p.call_args.kwargs["req_id"] == "r1"
+        assert not w._closing.is_set(), "整轮结束必须清 Gate"
+        # 终局 :final 写入 + uid 定向零内容 SSE 帧
+        assert any(call.kwargs.get("final") is True for call in wr.call_args_list)
+        pub.assert_called_once_with(7, "emergency_close_final", {})
 
     def test_td_disconnected_refuses(self):
-        from src.strategy_runner import hub_worker as HW
-        r = MagicMock()
-        r.getdel.return_value = '{"id":"r2","verb":"close-all"}'
-        adapter = MagicMock()
-        out = HW.consume_risk_cmd(r, adapter, "t1", td_api=SimpleNamespace(connect_status=False))
-        assert out["result"]["error"] == "td_disconnected", "断线=拒绝执行（假清仓防线）"
-        adapter.query_orders.assert_not_called()
+        import json
+        from src.strategy_runner import trading as T
+        w = self._worker(MagicMock(), SimpleNamespace(connect_status=False))
+        with patch.object(T, "_close_all_positions") as p, \
+             patch.object(T, "write_cmd_result") as wr, \
+             patch("src.quant_common.eventbus.bus.publish_cross_process"):
+            w._handle({"req_id": "r2", "verb": "close-all"})
+        p.assert_not_called()
+        w._adapter.query_orders.assert_not_called()
+        writes = [json.dumps(call.args[1], ensure_ascii=False)
+                  for call in wr.call_args_list if len(call.args) > 1]
+        assert any("td_disconnected" in blob for blob in writes), \
+            "td_disconnected 必须写进回执/终局（可见非静默）"
 
 
 class TestHaltTsKeys:

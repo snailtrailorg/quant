@@ -252,12 +252,15 @@ def main() -> None:
     md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
 
     def _desired_symbols() -> set[str]:
-        """订阅真相源（三源）：running 任务标的 ∪ system_config 白名单 ∪ 临时订阅。
+        """订阅真相源（四源）：running 任务标的 ∪ 持仓标的 ∪ system_config 白名单 ∪ 临时订阅。
 
         池源已移除（2026-09-04 分钟数据源重构 21 号 §3.3）：历史分钟数据改腾讯攒
         （bar_1min），hub 不再为攒数据订阅非实盘标的，释放 XTP 订阅额度。
         临时源（2026-08-20 三档详情页"看过即订阅"，用户裁定 XTP 为主路径）：expire_at>now
         的行——过期即不可见=自动退订（30min TTL 由详情页每次打开续期）。
+        批 171s 件六：持仓源（`position_snapshot` volume>0、按本 hub 的 account_id 过滤）——
+        根本保证「有持仓 ⇒ 有同源行情 ⇒ 能平仓」；经 to_vt_symbol 归一，逐字符对齐
+        `hub:latest_tick:{account_id}:{symbol}` 写入键。不改动既有三源语义。
         """
         try:
             from src.data_platform.db import get_conn
@@ -284,6 +287,20 @@ def main() -> None:
                     conn.commit()
                 except Exception as e:
                     logger.warning("读临时订阅源失败: %s", e)
+                # 批 171s 件六：持仓标的进订阅真相源（按 account_id 过滤，防 N 账号×全量标的
+                # 放大 XTP 订阅额度）；to_vt_symbol 归一 .SSE→.SHSE。读失败独立降级不炸 hub。
+                try:
+                    from src.data_platform.schema import to_vt_symbol
+                    cur = conn.execute(
+                        "SELECT DISTINCT symbol FROM position_snapshot "
+                        "WHERE volume>0 AND account_id=%s", (account_id,))
+                    pos_rows = {to_vt_symbol(x[0]) for x in cur.fetchall() if x[0]}
+                    if pos_rows:
+                        rows |= pos_rows
+                        logger.debug("持仓源订阅 +%d 标的（account=%s）", len(pos_rows), account_id)
+                except Exception as e:
+                    logger.warning("读 position_snapshot 持仓订阅源失败（account=%s）: %s",
+                                   account_id, e)
                 return rows
         except Exception as e:
             logger.warning("读订阅真相源失败（沿用旧集）: %s", e)

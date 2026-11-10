@@ -20,6 +20,18 @@ logger = logging.getLogger("risk_control")
 Level = Literal["info", "warn", "critical"]
 
 
+def is_flat_or_reduce(order: dict) -> bool:
+    """批 171s 件二 P1-B：平仓/减仓单判据（reduce-only 单源）。
+
+    A 股现货 SELL 必然减仓；急停平仓单带 `reason="emergency_close_all"`（方向由
+    `adapter.close_action(pos)` 派生——加密空单平仓是 BUY，方向不可作唯一凭据）。
+    判据单源化替掉 check_order 内散落的 `action=="SELL"` 放行条件。**普通 BUY 开仓不在其列**
+    （不放松风控），仅 `reason=="emergency_close_all"` 的 BUY 平空放行。
+    """
+    return (str(order.get("action", "")).upper() == "SELL"
+            or order.get("reason") == "emergency_close_all")
+
+
 @dataclass
 class RiskDecision:
     approved: bool
@@ -283,13 +295,12 @@ class RiskControl:
             logger.error("熔断状态读取失败，按熔断拒单: %s", e)
             return RiskDecision(approved=False, reason=f"熔断状态不可读（Valkey 故障），保守拒单: {e}", severity="critical", rule="HALT_UNREADABLE")
         if halted:
-            # 批 171n（A-P0-1/B-P0-3 裁定）：**平仓方向放行**——A 股现货无 offset 字段
-            # （Order dataclass :28 无此字段、XTP/EMT send_order 恒 Offset.NONE），方向判据
-            # ＝action=="SELL"（A 股现货 SELL 必然减仓——与 2.5 market_op 豁免/F-31 日亏
-            # 同判据哲学）。熔断拦平仓=全平自锁死（先 halt 再 close-all 被自己拒）。
-            # ⚠️ crypto 永续接入时 SELL≠平仓（开反向仓）——届时须换判据（边界注）。
-            # HALT_UNREADABLE（上方）全拒不变：读不到方向=保守。
-            if str(order.get("action", "")).upper() == "SELL":
+            # 批 171s（件二 P1-B）：**平仓/减仓放行**——判据单源化 `is_flat_or_reduce(order)`
+            # = action=="SELL" 或 reason=="emergency_close_all"（急停平仓单方向由
+            # adapter.close_action 派生，加密空单平仓是 BUY，方向不可作唯一凭据）。
+            # 熔断拦平仓=全平自锁死（先 halt 再 close-all 被自己拒）。普通 BUY 开仓仍全拒
+            # （HALTED）；HALT_UNREADABLE（上方）全拒不变：读不到熔断态=保守。
+            if is_flat_or_reduce(order):
                 logger.warning("熔断中·平仓方向放行（降风险单不拦）: %s %s",
                                order.get("symbol"), _halt_reason)
                 # 落 risk_log 注记（放行可审计）——走出口统一落痕，此处只过闸
@@ -312,7 +323,7 @@ class RiskControl:
         try:
             from src.data_platform.perms import market_op_allowed
             operator = order.get("operator") or ""
-            if str(order.get("action", "")).upper() != "SELL":
+            if not is_flat_or_reduce(order):
                 if not operator:
                     return RiskDecision(approved=False,
                         reason="订单缺 operator（旧 --id 路径或异常构造，fail-closed 拒单）",
@@ -348,11 +359,11 @@ class RiskControl:
         if state.total_drawdown >= global_rules.get("max_drawdown", 0.15):
             # P0 修复（2026-08-20 双盲审计 F5.2）：总回撤熔断曾连 SELL/止损一起拒——触线后
             # 只能持仓看戏，与 F-31 同错。对齐日亏语义：只禁开仓，平仓放行。
-            if str(order.get("action", "")).upper() != "SELL":
+            if not is_flat_or_reduce(order):
                 return RiskDecision(approved=False, reason=f"总回撤 {state.total_drawdown:.1%} 超限，禁止开仓（平仓放行）", severity="critical", rule="MAX_DRAWDOWN")
         if state.daily_loss >= global_rules.get("daily_loss_limit", 0.05):
             # SB2（F-31）：日亏限额只禁开仓，SELL/平仓放行——否则触发限额后连止损都做不了
-            if str(order.get("action", "")).upper() != "SELL":
+            if not is_flat_or_reduce(order):
                 return RiskDecision(approved=False, reason=f"单日亏损 {state.daily_loss:.1%} 超限，禁止开仓（平仓放行）", severity="warn", rule="DAILY_LOSS_LIMIT")
 
         # 4. 分市场检查
@@ -413,10 +424,11 @@ class RiskControl:
         max_amount = rules.get("max_single_amount", 100000)
         amount = price * volume
         if price > 0 and amount > max_amount:
-            # 批 171n（A-P1-1②/B-P1-6）：**SELL 方向豁免截断**——reduce-only 被截=残留仓
-            # 反语义（平仓单金额大恰是持仓大，截量=平不掉）。与 halted 平仓放行同哲学。
-            if str(order.get("action", "")).upper() == "SELL":
-                return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限但 SELL 平仓方向豁免截断", severity="info", rule="MAX_SINGLE_AMOUNT")
+            # 批 171s（件二 P1-B）：**平仓/减仓方向豁免截断**（is_flat_or_reduce 单源）——
+            # reduce-only 被截=残留仓反语义（平仓单金额大恰是持仓大，截量=平不掉）。
+            # 与 halted 平仓放行同哲学；急停 BUY 平空同样豁免（方向由 close_action 派生）。
+            if is_flat_or_reduce(order):
+                return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限但平仓/减仓方向豁免截断", severity="info", rule="MAX_SINGLE_AMOUNT")
             new_vol = int(max_amount / price)
             if new_vol <= 0:
                 return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}，截断后 volume=0", severity="warn", rule="MAX_SINGLE_AMOUNT")

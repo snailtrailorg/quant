@@ -80,6 +80,9 @@ export const riskResume = () => api.post('/risk/resume')
 export const riskCancelAll = (accounts) => api.post('/risk/cancel-all', accounts ? { accounts } : {})
 export const riskCloseAll = (accounts) => api.post('/risk/close-all', { confirm: 'CONFIRM', ...(accounts ? { accounts } : {}) })
 export const getRiskExposure = () => api.get('/risk/exposure')
+// 批 171s：急停终局清单——零内容 SSE 信号帧 emergency_close_final 触发重拉，清单只走鉴权端点
+export const getRiskCloseResult = (reqId) => api.get('/risk/close-result/' + encodeURIComponent(reqId))
+export const getRiskCloseResultsRecent = () => api.get('/risk/close-result/recent')
 
 // 批23：审计批量删（{ids:[int]} / {all:true}，后端留痕 audit_delete）
 export const getUsers = () => api.get('/user')

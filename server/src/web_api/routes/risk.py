@@ -259,6 +259,56 @@ def _live_runners(accounts: list[int] | None = None) -> list[tuple[str, int]]:
     return out
 
 
+# ——— 批 171s：急停终局可见（cmd uid 定向 + :final 端点重拉 + recent 索引）———
+_CLOSE_FINAL_PREFIX = "risk:cmd:result:"
+_CLOSE_FINAL_SUFFIX = ":final"
+_CLOSE_RECENT_MAX = 20
+
+
+def _operator_uid(payload: dict):
+    """auth payload sub（=user_id，可能是 str）→ int（sse_bridge.py:44 / events.py:35
+    要求 int 频道后缀）。缺失/非法 → None：cmd 带 operator_uid=None，worker 据此不发 SSE
+    帧、靠端点 + FE 轮询兜底；绝不退回 uid=0 全站广播（批69a/18E 立法 + 防 Viewer 越权）。"""
+    try:
+        sub = payload.get("sub")
+        return int(sub) if sub is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _aggregate_lists(results: dict) -> dict:
+    """从 5s 窗内的首轮回执聚合 pending/no_quote/retrying 清单（跨 tid）。
+    兼容清单落在回执顶层或 result 子对象两种形态；终局清单以 :final 端点为准（件五）。"""
+    agg = {"pending": [], "no_quote": [], "retrying": []}
+    for ack in results.values():
+        if not isinstance(ack, dict):
+            continue
+        srcs = [ack]
+        if isinstance(ack.get("result"), dict):
+            srcs.append(ack["result"])
+        for src in srcs:
+            for k in agg:
+                v = src.get(k)
+                if isinstance(v, list):
+                    agg[k].extend(v)
+    return agg
+
+
+def _parse_close_final(req_id: str, raw) -> dict | None:
+    """解析 :final 键 JSON → {req_id, ...清单}；坏 JSON/缺失 → None（留痕非静默）。"""
+    import json as _json
+    if not raw:
+        return None
+    try:
+        doc = _json.loads(raw) if isinstance(raw, (str, bytes)) else None
+    except (ValueError, TypeError):
+        logger.warning("close-result final 坏 JSON: req_id=%s", req_id)
+        return None
+    if not isinstance(doc, dict):
+        return None
+    return {**doc, "req_id": req_id}
+
+
 def _dispatch_risk_cmd(verb: str, payload: dict, accounts: list[int] | None = None) -> dict:
     """批 171n：急停命令下发共用体（cancel-all/close-all 两端点同链）。
 
@@ -297,14 +347,34 @@ def _dispatch_risk_cmd(verb: str, payload: dict, accounts: list[int] | None = No
     runners = [(tid, acct) for tid, acct in runners
                if not (acct in _seen_accts or _seen_accts.add(acct))]
     r = business_redis(socket_timeout=3)
+    # 批 171s（件四/件五）：cmd 带操作者 uid，供 worker 透传给 EmergencyWorker 做
+    # uid 定向零内容 SSE 终局帧。sub 可能是 str → 显式 int()（sse_bridge 频道后缀要求 int）。
+    # 缺失/转换失败属异常态：logger.warning 留痕 + cmd operator_uid=None（worker 据此不发
+    # SSE 帧、纯靠端点 + FE 轮询兜底），绝不退回 uid=0 全站广播。无「按权限键枚举用户」
+    # fallback（仓内无实现、死分支）。
+    operator_uid = _operator_uid(payload)
+    if operator_uid is None:
+        logger.warning("risk cmd 缺合法 sub（停用 uid 定向 SSE，靠端点兜底）: verb=%s sub=%r",
+                       verb, payload.get("sub"))
     req_ids = []
     for tid, _acct in runners:
         req_id = _uuid.uuid4().hex[:12]
         r.set(f"risk:cmd:{tid}",
               _json.dumps({"id": req_id, "verb": verb,
-                           "operator": payload["username"], "ts": _t.time()}),
+                           "operator": payload["username"], "ts": _t.time(),
+                           "operator_uid": operator_uid}),
               ex=10 * 60)
         req_ids.append((tid, req_id))
+    # 批 171s：per-uid recent 索引（服务端真源——页面刷新/晚开无内存 req_ids 仍可查终局）。
+    # web 下发时即登记 req_id；worker 写 :final 后 recent 端点按 uid 取（只 close-all 有终局）。
+    if verb == "close-all" and operator_uid is not None:
+        try:
+            _idx = f"risk:close:recent:{operator_uid}"
+            r.lpush(_idx, *[rid for _tid, rid in req_ids])
+            r.ltrim(_idx, 0, _CLOSE_RECENT_MAX - 1)
+            r.expire(_idx, 30 * 60)
+        except Exception as e:   # noqa: BLE001 —— 索引非关键路径，recent 端点有 scan 兜底
+            logger.warning("risk close recent 索引写失败（recent 退 scan 兜底）: %s", e)
     # 回执窗（5s——worker 拍周期 1s 轮询+执行）
     results = {}
     deadline = _t.time() + 5
@@ -318,11 +388,17 @@ def _dispatch_risk_cmd(verb: str, payload: dict, accounts: list[int] | None = No
         _t.sleep(0.3)
     audit_log(payload["username"], f"risk_{verb.replace('-', '_')}",
               detail=f"dispatched={len(req_ids)} acked={len(results)}")
+    # 批 171s：返回增 req_ids（tid→req_id，供 FE 按 req_id 短轮询单查端点）+ 首轮
+    # pending/no_quote/retrying 清单透传（终局清单以 :final 端点为准，件五）。
+    base = {"dispatched": len(req_ids), "results": results,
+            "req_ids": {tid: rid for tid, rid in req_ids},
+            **_aggregate_lists(results)}
     if pending:
-        return {"status": "dispatched", "dispatched": len(req_ids),
-                "acked": len(results), "results": results,
-                "pending": list(pending.values())}
-    return {"status": "done", "dispatched": len(req_ids), "results": results}
+        # pending_runners=未回执 tid（旧 pending 字段改名——避免与「未平标的清单 pending」
+        # 同名不同义）；逾 5s 窗的孤儿回执不再靠本字段，改由 :final 端点 + FE 轮询。
+        return {"status": "dispatched", "acked": len(results),
+                "pending_runners": list(pending.values()), **base}
+    return {"status": "done", **base}
 
 
 @router.get("/api/risk/exposure")
@@ -428,6 +504,81 @@ def risk_close_all(body: dict = Body(default={}),
         rc.emergency_halt(f"close-all:{payload['username']}")
         audit_log(payload["username"], "emergency_halt", detail="auto (close-all preamble)")
     return _dispatch_risk_cmd("close-all", payload, accounts=(body or {}).get("accounts"))
+
+
+# 批 171s（件五）：急停终局清单只走鉴权端点重拉——SSE 零内容帧不带清单/req_id
+# （批69a main.py:360 + sse_bridge.py:9-10 频道级立法 + 批18E 服务端重验）。
+# 注意：/recent 必须先于 /{req_id} 注册，否则 "recent" 会被当路径参数吞掉。
+@router.get("/api/risk/close-result/recent")
+def risk_close_results_recent(payload: dict = Depends(require_perm("halt"))):
+    """按操作者 uid 列最近 N 个急停终局 :final（服务端真源，不依赖前端内存 req_ids——
+    页面刷新/晚开仍可查）。主源=per-uid 索引 risk:close:recent:{uid}（_dispatch_risk_cmd
+    下发时登记）；索引空（历史数据/索引过期）→ scan 全部 :final 键兜底。只列已有终局。"""
+    import re as _re
+    from src.quant_common.redis_client import business_redis
+    r = business_redis(decode_responses=True, socket_timeout=2)
+    uid = _operator_uid(payload)
+    req_ids = []
+    if uid is not None:
+        try:
+            req_ids = [x for x in (r.lrange(f"risk:close:recent:{uid}", 0,
+                                            _CLOSE_RECENT_MAX - 1) or [])
+                       if isinstance(x, str) and x]
+        except Exception as e:   # noqa: BLE001 —— 索引读失败退 scan 兜底
+            logger.warning("close-result recent 索引读失败（退 scan 兜底）: %s", e)
+    if not req_ids:
+        try:
+            for k in r.scan_iter(match="risk:cmd:result:*:final", count=200):
+                ks = k.decode() if isinstance(k, bytes) else k
+                m = _re.fullmatch(r"risk:cmd:result:(.+):final", ks)
+                if m:
+                    req_ids.append(m.group(1))
+        except Exception as e:   # noqa: BLE001
+            logger.warning("close-result recent scan 失败: %s", e)
+    items, seen = [], set()
+    for rid in req_ids:
+        if rid in seen:
+            continue
+        seen.add(rid)
+        try:
+            raw = r.get(f"{_CLOSE_FINAL_PREFIX}{rid}{_CLOSE_FINAL_SUFFIX}")
+        except Exception:   # noqa: BLE001 —— 单键读失败跳过，不留半条目
+            continue
+        doc = _parse_close_final(rid, raw)
+        if doc is None:
+            continue
+        # 批 171s：按操作者 uid 软隔离——:final 的 operator_uid（worker2 本轮补的元数据）
+        # 明确属于他人则跳过；缺失/None（异常态未发 SSE 帧）保留，保证页面刷新/晚开仍可查
+        # （件五 P0）。主源 per-uid 索引天然同 uid，此过滤主要作用于 scan 兜底路径。
+        if uid is not None:
+            owner = doc.get("operator_uid")
+            if owner is not None and str(owner) != str(uid):
+                continue
+        items.append(doc)
+    def _ts_key(d):
+        try:   # :final 是 worker 产出的外部 JSON，ts 形态不受控——非数值退回 0 不炸端点
+            return float(d.get("ts") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+    items.sort(key=_ts_key, reverse=True)
+    return {"items": items[:_CLOSE_RECENT_MAX]}
+
+
+@router.get("/api/risk/close-result/{req_id}")
+def risk_close_result(req_id: str, payload: dict = Depends(require_perm("halt"))):
+    """急停终局单查——读 risk:cmd:result:{req_id}:final（TTL 30min）。键不存在=进行中
+    → {status:"pending"}；清单（pending/no_quote/retrying/closed_requested/interrupted）
+    来自 worker 权威源，端点 require_perm("halt") 服务端重验，无权限 403。"""
+    import re as _re
+    from src.quant_common.redis_client import business_redis
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", req_id or ""):
+        raise ApiError(400, "BAD_REQ_ID", "req_id 非法")
+    r = business_redis(decode_responses=True, socket_timeout=2)
+    raw = r.get(f"{_CLOSE_FINAL_PREFIX}{req_id}{_CLOSE_FINAL_SUFFIX}")
+    doc = _parse_close_final(req_id, raw)
+    if doc is None:
+        return {"status": "pending", "req_id": req_id}
+    return {**doc, "status": "final"}
 
 
 @router.get("/api/risk-rules")

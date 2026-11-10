@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -39,18 +41,22 @@ def _crypto_provider(symbol: str) -> str | None:
     return None
 
 
-# 批 171n：急停命令通道（Web 端点 → GETDEL 请求键 → worker 拍内消费 → 结果键回执）。
-# 键：请求 risk:cmd:{tid}（值 JSON {id, verb, operator, ts}，TTL 10min——GETDEL 天然
-# 幂等单消费，_unfreeze_poll 同款先例）；结果 risk:cmd:result:{req_id}（TTL 10min）。
+# 批 171s：急停命令通道（Web 端点 → GETDEL 请求键 → 主循环拍**只投递** → 专用线程执行）。
+# 键：请求 risk:cmd:{tid}（值 JSON {id, verb, operator, operator_uid, ts}，TTL 10min——
+# GETDEL 天然幂等单消费）；结果键格式单点在 trading.RISK_RESULT_KEY / RISK_FINAL_KEY。
 RISK_CMD_KEY = "risk:cmd:{tid}"
-RISK_CMD_RESULT_KEY = "risk:cmd:result:{req_id}"
+RISK_CMD_RESULT_KEY = trading.RISK_RESULT_KEY   # 别名：格式真源在 trading（回执写口）
 
 
-def consume_risk_cmd(r, adapter, tid: str, account_id=None, td_api=None) -> dict | None:
-    """拍内消费一条急停命令（模块级可直测——批 56b run() 闭包不可测教训）。
+def consume_risk_cmd(r, adapter, tid: str, account_id=None, td_api=None,
+                     cmd_queue=None) -> dict | None:
+    """批 171s 件四：主循环拍内**只投递不执行**（模块级可直测——56b 闭包不可测教训）。
 
-    verb ∈ {cancel-all, close-all}。返回 {id, verb, result} 或 None（无命令）。
-    结果写回执键（web 短轮询窗内读到 ⇒ 200 汇总；超时 ⇒ 202 dispatched 语义在端点侧）。
+    GETDEL 取命令 → 解析 req_id/verb/operator/operator_uid → 投给该 runner 的
+    EmergencyWorker daemon 线程队列 → **立即返回**（不 sleep、不循环、不发单、不碰
+    adapter 下单/平仓）。TD 断线防线（171o A-P0-2）随执行一起搬入 EmergencyWorker。
+    cmd_queue 为 None（旧直测形态）时只解析不投递，warning 留痕不静默丢命令。
+    adapter / account_id / td_api 保留形参以兼容既有调用点，本函数不再使用。
     """
     raw = None
     try:
@@ -70,37 +76,20 @@ def consume_risk_cmd(r, adapter, tid: str, account_id=None, td_api=None) -> dict
         cmd = json.loads(raw) if isinstance(raw, str) else {}
     except (ValueError, TypeError):
         cmd = {}
-    verb = cmd.get("verb") or ""
-    req_id = cmd.get("id") or ""
-    operator = cmd.get("operator") or "manual"
-    result: dict = {}
-    try:
-        # 批 171o（A-P0-2）：TD 断线防线——断线时 query_position 清缓存返 []=假「已清仓」、
-        # query_orders=断线前残影；执行比拒绝更危险 ⇒ 回执 td_disconnected 不执行。
-        if not getattr(td_api, "connect_status", False):
-            result = {"error": "td_disconnected",
-                      "detail": "TD 会话断线——缓存不可信（持仓清空=假清仓/委托=残影），"
-                                "拒绝执行；恢复连接后重试"}
-        elif verb == "cancel-all":
-            result = trading._cancel_working_orders(adapter)
-        elif verb == "close-all":
-            # 批 171o：清仓=全包含（四级递进裁定）——撤在场单 →（稳定窗 2s 待撤单回执
-            # 释放 frozen）→ 全持仓平仓（_close_all_positions 内 T+1 截断/cost_price）。
-            _c = trading._cancel_working_orders(adapter)
-            time.sleep(2.0)   # 撤单在途回执窗（frozen 释放——A-P2-2：撤→平少卖残余源）
-            _p = trading._close_all_positions(adapter, account_id=account_id, operator=operator)
-            result = {"cancel": _c, "close": _p}
-        else:
-            result = {"error": f"unknown verb: {verb}"}
-    except Exception as e:
-        result = {"error": str(e)[:200]}
-    try:
-        r.set(RISK_CMD_RESULT_KEY.format(req_id=req_id),
-              json.dumps({"tid": tid, "verb": verb, "result": result}, ensure_ascii=False),
-              ex=10 * 60)
-    except Exception as e:
-        logger.warning("急停命令回执写失败（结果仅 journal 可见）: %s", e)
-    return {"id": req_id, "verb": verb, "result": result}
+    item = {
+        "req_id": cmd.get("id") or "",
+        "verb": cmd.get("verb") or "",
+        "operator": cmd.get("operator") or "manual",
+        "operator_uid": cmd.get("operator_uid"),   # worker3 _dispatch_risk_cmd 补 int(sub)
+        "ts": cmd.get("ts"),
+    }
+    if cmd_queue is not None:
+        cmd_queue.put_nowait(item)
+    else:
+        logger.warning("急停命令未投递（cmd_queue 缺失）tid=%s req=%s verb=%s",
+                       tid, item["req_id"], item["verb"])
+    return {"id": item["req_id"], "verb": item["verb"],
+            "dispatched": cmd_queue is not None}
 
 
 def bar_stream_key(symbol: str, account_id: int) -> str:
@@ -127,6 +116,184 @@ def _account_mismatch(fields: dict, account_id) -> bool:
 # 批 2 骨架三件套（与 hub 同款；_valkey 保留别名供测试/冒烟注入 fake）
 _alert = make_alert()
 _valkey = make_valkey
+
+
+_STOP_CMD = object()   # EmergencyWorker 停机哨兵（drain 投递，唤醒空闲线程）
+
+
+class EmergencyWorker:
+    """批 171s 件四：每 runner 一个 daemon 线程，串行消费急停命令（queue.Queue）。
+
+    主循环拍（_risk_cmd_poll，1s）只 GETDEL→投递→立即返回；整轮急停（撤→平稳定窗
+    2.0s、拒单回报窗 1.5s、重取价重试循环、终局回执/SSE）全部在本线程内完成——
+    主循环内零 sleep。_closing Event 置位期间 Gate 同时拦具名钩子链与行情消费链
+    （process_batch），保证同账号全部 adapter 写归本线程、零竞态。
+    """
+
+    def __init__(self, *, adapter, td_api, account_id, tid, closing: threading.Event):
+        self._q: queue.Queue = queue.Queue()
+        self._adapter = adapter
+        self._td_api = td_api
+        self._account_id = account_id
+        self._tid = tid
+        self._closing = closing
+        self._current_req_id = ""
+        self._current_verb = ""
+        self._thread = threading.Thread(target=self._run,
+                                        name=f"emergency-{tid}", daemon=True)
+
+    @property
+    def cmd_queue(self) -> queue.Queue:
+        return self._q
+
+    @property
+    def current_req_id(self) -> str:
+        return self._current_req_id
+
+    @property
+    def current_verb(self) -> str:
+        return self._current_verb
+
+    def start(self) -> None:
+        self._thread.start()
+
+    def drain(self, timeout_s: float) -> bool:
+        """限时停机：投哨兵 + join；返回是否已退出（False=整轮在飞，调用方写 interrupted）。"""
+        self._q.put_nowait(_STOP_CMD)
+        self._thread.join(timeout=max(0.1, float(timeout_s)))
+        return not self._thread.is_alive()
+
+    def _run(self) -> None:
+        while True:
+            cmd = self._q.get()
+            try:
+                if cmd is _STOP_CMD:
+                    return
+                try:
+                    self._handle(cmd)
+                except Exception:
+                    # never-raise 但 never-silent：异常也写终局 + 告警 + logger.exception
+                    logger.exception("急停线程命令异常 req=%s verb=%s",
+                                     cmd.get("req_id"), cmd.get("verb"))
+                    _alert(f"急停线程异常（{self._tid}）",
+                           f"req={cmd.get('req_id')} verb={cmd.get('verb')}；"
+                           "已写 interrupted 终局，请查 journalctl。",
+                           code="emergency.worker_error")
+                    self._final(cmd, {"error": "internal_error", "pending": [],
+                                      "no_quote": [], "retrying": False,
+                                      "closed_requested": 0, "positions_remain": -1},
+                                interrupted=True)
+            finally:
+                self._q.task_done()
+
+    def _td_connected(self) -> bool:
+        return bool(getattr(self._td_api, "connect_status", False))
+
+    def _cancel_all(self, cmd) -> dict:
+        if not self._td_connected():
+            return {"error": "td_disconnected",
+                    "detail": "TD 会话断线——缓存不可信，拒绝执行；恢复连接后重试"}
+        # 批 171s：撤单同样碰 adapter（cancel_order）——必须与心跳/快照/行情链互斥，
+        # 复用同一 _closing Gate（短窗；close-all 分支在外层已有置位时重复 set 无害）。
+        self._closing.set()
+        try:
+            return trading._cancel_working_orders(self._adapter)
+        finally:
+            self._closing.clear()
+
+    def _close_all(self, cmd) -> dict:
+        # 批 171o A-P0-2：TD 断线时 query_position 清缓存返 []=假「已清仓」、
+        # query_orders=残影；执行比拒绝更危险 ⇒ 回执 td_disconnected 不执行。
+        if not self._td_connected():
+            return {"error": "td_disconnected",
+                    "detail": "TD 会话断线——缓存不可信（持仓清空=假清仓/委托=残影），"
+                              "拒绝执行；恢复连接后重试"}
+        trading._cancel_working_orders(self._adapter)   # 撤在场单
+        time.sleep(2.0)   # 撤→平稳定窗（frozen 释放；专用线程内，主循环零 sleep）
+        try:
+            from src.data_platform.hub_quote import get_retry_config
+            deadline_s = float(get_retry_config().get("deadline_s") or 120)
+        except Exception:
+            deadline_s = 120.0
+        deadline_ts = time.time() + deadline_s
+        return trading._close_all_positions(
+            self._adapter, account_id=self._account_id,
+            operator=cmd.get("operator") or "manual",
+            req_id=cmd.get("req_id") or "", deadline_ts=deadline_ts,
+            td_api=self._td_api)
+
+    def _handle(self, cmd: dict) -> None:
+        verb = cmd.get("verb") or ""
+        req_id = cmd.get("req_id") or ""
+        self._current_req_id = req_id
+        self._current_verb = verb
+        if verb == "close-all":
+            self._closing.set()      # Gate 覆盖两条链（具名钩子 + process_batch）
+            try:
+                result = self._close_all(cmd)
+            finally:
+                self._closing.clear()
+            if "error" in result:    # 快速失败（TD 断线）走不到 _close_all_positions 的首轮写
+                trading.write_cmd_result(req_id, self._ack(verb, req_id, result))
+            # 只有 close-all 有「急停终局」语义（:final + SSE）——cancel-all/未知 verb 只写主回执
+            self._final(cmd, result, interrupted=False)
+        elif verb == "cancel-all":
+            result = self._cancel_all(cmd)
+            trading.write_cmd_result(req_id, self._ack(verb, req_id, result))
+        else:
+            result = {"error": f"unknown verb: {verb}"}
+            trading.write_cmd_result(req_id, self._ack(verb, req_id, result))
+        self._current_req_id = ""
+        self._current_verb = ""
+
+    @staticmethod
+    def _ack(verb, req_id, result) -> dict:
+        """cancel-all / 未知 verb 的即时主回执（web 5s 窗）。"""
+        return {"req_id": req_id, "verb": verb, "phase": "first",
+                "result": result, "pending": [], "no_quote": [],
+                "retrying": False, "closed_requested": 0, "interrupted": False}
+
+    def _final(self, cmd: dict, result: dict, *, interrupted: bool) -> None:
+        """终局：写 :final（TTL 30min）+ uid 定向零内容 SSE 帧（件五）。
+
+        仅 `verb=="close-all"` 有此语义——cancel-all/未知 verb 若也写 :final，`recent`
+        端点的 scan 兜底会把「撤单终局」当急停清单上屏（P2-b）。单点在此收口，覆盖
+        `_handle` 正常路径与 `_run` 异常兜底路径。
+        """
+        if (cmd.get("verb") or "") != "close-all":
+            return
+        req_id = cmd.get("req_id") or ""
+        payload = dict(result) if isinstance(result, dict) else {"result": result}
+        payload.setdefault("pending", [])
+        payload.setdefault("no_quote", [])
+        payload.setdefault("retrying", False)
+        payload.setdefault("closed_requested", 0)
+        payload.setdefault("positions_remain", -1)
+        payload.setdefault("interrupted", False)
+        payload["interrupted"] = bool(interrupted)
+        payload["req_id"] = req_id
+        payload["verb"] = cmd.get("verb") or ""
+        payload["phase"] = "final"
+        # uid 定向（int(sub)，非 0）；缺失/非法/0 → 不发帧、绝不退回 uid=0 全站
+        try:
+            uid = int(cmd.get("operator_uid"))
+        except (TypeError, ValueError):
+            uid = 0
+        # recent 端点 scan 兜底按 ts 倒序、operator_uid 可过滤（元数据，不进 SSE 帧）；
+        # 频道级立法只约束 quant:sse:* 帧，:final 是鉴权端点读的 Valkey 键，不冲突
+        payload["ts"] = time.time()
+        payload["operator_uid"] = uid if uid else None
+        trading.write_cmd_result(req_id, payload, final=True)
+        if uid:
+            try:
+                from src.quant_common.eventbus import bus
+                bus.publish_cross_process(uid, "emergency_close_final", {})
+            except Exception as e:
+                logger.warning("急停终局 SSE 帧发布失败 req=%s: %s", req_id, e)
+        else:
+            logger.warning("急停终局 operator_uid 缺失/非法（%r）→ 不发 SSE 帧，"
+                           "靠 :final 端点 + FE 轮询兜底 req=%s",
+                           cmd.get("operator_uid"), req_id)
 
 def _warmup_merge(hist: list, entries: list, upto_ts: str | None = None) -> list:
     """流回放合入 history（模块级可测——批 56b 盲审 A：闭包版不可测致回归钉缩水）。
@@ -243,6 +410,9 @@ def run(ctx: dict) -> None:
     from src.quant_common.session import in_session, session_edge
 
     r = _valkey()
+    # 批 171s：账号级 Gate（急停整轮期间置位，覆盖两条链）。可从 ctx 注入（测试可持有并复位；
+    # 生产 ctx 无该键 → 新建，行为不变）。
+    closing = ctx.get("closing") or threading.Event()
     tid, sid, symbol = ctx["tid"], ctx["sid"], ctx["symbol"]
     market = ctx.get("market") or market_of_symbol(symbol)   # 批 66c：ctx 注入真源（接口行），缺省按 symbol 后缀派生
     # 批 118：暖机/运行窗常量真源=src.strategy_runner（WARMUP_BASELINE=100/WARMUP_CAP=5000）。
@@ -510,17 +680,25 @@ def run(ctx: dict) -> None:
                     sa.name if sa else "NONE")
 
     def process_batch(batch) -> int:
+        # 批 171s 件四（审官 B P0-B）：急停整轮期间**只 xack、不驱动策略**——
+        # 不调 handle_msg/on_bar/place_order ⇒ strategy.py:496 send_order 零调用；
+        # bar 不丢（xack 后由暖机/gap 从 DB 补，同 :288 既有双保险）。
+        # 不改 xsleeper 单线程模型、不引后台线程进行情链。
+        # 逐条判 Gate（批次可能跨置位时刻：入口判会让后半批继续驱动 on_bar）。
         ids = []
+        processed = 0
         for _stream, entries in batch:
             for eid, f in entries:
-                handle_msg(f)
-                ids.append(eid)
+                if not closing.is_set():
+                    handle_msg(f)
+                    processed += 1
+                ids.append(eid)   # 急停期同样 xack（不背 pending）
         if ids:
             try:
                 r.xack(stream, gname, *ids)
             except Exception as e:
                 logger.warning("XACK 失败: %s", e)
-        return len(ids)
+        return processed
 
     # ——— 批 4b：EngineLoop 编排（旧 5s 定时段逐项退化为钩子；11 项清单/period 见设计）———
     sess_was = _in_mkt_session()   # 时段沿检测基态
@@ -529,6 +707,41 @@ def run(ctx: dict) -> None:
     halt_state = {"was": False}
     _baseline_cache = {"baseline": None}   # 账户基线缓存（4a 起调用方持有）
     hb = HeartbeatWriter(r, hb_task_key, ttl=90)
+
+    # 批 171s 件四：账号内急停专用 daemon 线程 + 限时 drain 参数（drain_timeout_s）
+    try:
+        from src.data_platform.hub_quote import get_retry_config
+        emergency_drain_s = float(get_retry_config().get("drain_timeout_s") or 5)
+    except Exception:
+        emergency_drain_s = 5.0
+    emergency = EmergencyWorker(adapter=adapter, td_api=td_api, account_id=account_id,
+                                tid=tid, closing=closing)
+
+    def _drain_before_exit(where: str) -> None:
+        """exit_process(0) 前置位 + 限时 drain；超时写 :final(interrupted) + _alert
+        + order_log 标 interrupted（件四：不留半截平仓无痕、never-silent）。"""
+        req_id = emergency.current_req_id
+        verb = emergency.current_verb
+        closing.set()
+        if emergency.drain(emergency_drain_s):
+            return
+        if verb != "close-all":
+            # 非 close-all（撤单/未知）无急停终局语义——不写 :final（防 recent scan 误上屏）
+            logger.error("急停线程 drain 超时（%s，%ss）verb=%s req=%s——非 close-all，不写终局",
+                         where, emergency_drain_s, verb, req_id)
+            return
+        logger.error("急停线程 drain 超时（%s，%ss）req=%s", where, emergency_drain_s, req_id)
+        _alert(f"任务 {tid} 急停线程 drain 超时（{where}）",
+               f"req={req_id}；在飞平仓已标 interrupted，请人工核对券商委托。",
+               code="emergency.interrupted")
+        trading.write_cmd_result(
+            req_id,
+            {"req_id": req_id, "verb": "close-all", "phase": "final",
+             "interrupted": True, "retrying": True,
+             "pending": [], "no_quote": [], "closed_requested": 0,
+             "positions_remain": -1},
+            final=True)
+        trading.mark_emergency_interrupted(req_id)
 
     def _stop_hook():
         """停止路径（设计裁定不用 failure=exit——Restart=on-failure 拉起=F-36 churn 倒退）：
@@ -542,6 +755,7 @@ def run(ctx: dict) -> None:
             r.xgroup_del(stream, gname)
         except Exception:  # noqa: S110
             pass  # 失败不阻断（fail-open 降级）  # noqa: S110
+        _drain_before_exit("stop")
         exit_process(0)
 
     def _sess_edge():
@@ -575,7 +789,9 @@ def run(ctx: dict) -> None:
         """
         _wo = -1   # -1=未知（TD 断线/查询失败——渲染「未知」非 0，A-P0-2 防线）
         try:
-            if getattr(td_api, "connect_status", False):
+            # 批 171s：心跳不整跳（必须继续，防误判僵尸），仅急停期跳过
+            # adapter.query_orders()（同账号 adapter 读归专用线程），working_orders 记 -1
+            if getattr(td_api, "connect_status", False) and not closing.is_set():
                 from vnpy.trader.constant import Status as _St
                 _wo = sum(1 for od in (adapter.query_orders() or [])
                           if getattr(od, "status", None) in
@@ -594,6 +810,8 @@ def run(ctx: dict) -> None:
         窗开沿建连（P2 批 08-28，A-P1-1）：窗开且未连 → ctx["td_connect"]()——盘外窗关
         启动的进程由此腿补首连，连上后下一沿触发对账（B-P1-1 启动对账条件化的配对）。"""
         nonlocal td_status_was
+        if closing.is_set():
+            return   # 批 171s：急停期跳过 td-reconnect / reconcile（adapter 读归专用线程）
         td_status = bool(getattr(td_api, "connect_status", True))
         if td_status and not td_status_was:
             logger.info("TD 重连沿，重跑对账（含成交补录）")
@@ -658,13 +876,19 @@ def run(ctx: dict) -> None:
         else:
             logger.info("收到解冻请求但当前未冻结（忽略）: %s", payload)
 
+    def _on_fatal(reason: str) -> None:
+        # 批 171s：loop._fatal 在 on_fatal 之后立即 exit_process（os._exit 强杀在飞线程）
+        # ⇒ 必须先限时 drain 留痕，再发原告警。
+        _drain_before_exit("fatal")
+        _alert(f"任务 {tid} {reason}，自动重启",
+               "worker 退出由 systemd 接管；请查 journalctl 定位首个异常。",
+               code="runtime.fatal")
+
     loop = EngineLoop(
         name=f"live-task-{tid}", step=5.0,
         sleeper=XReadSleeper(r, stream, gname, cname, process_batch),  # 流消费=sleeper 注入
         watchdog=lambda: _sd_notify("WATCHDOG=1"), event_engines=(ee,),  # 喂狗+事件线程存活（R-BR12）
-        on_fatal=lambda reason: _alert(f"任务 {tid} {reason}，自动重启",
-                                       "worker 退出由 systemd 接管；请查 journalctl 定位首个异常。",
-                                       code="runtime.fatal"))
+        on_fatal=_on_fatal)
     loop.every("stop-check", 5.0, _stop_hook)        # 停止（P4-3；清理+exit 0 在钩子内）
 
     def _daily_roll():
@@ -703,23 +927,35 @@ def run(ctx: dict) -> None:
     loop.every("daily-roll", 0.0, _daily_roll)        # 批 119：日线窗日界滚动：每步
     loop.every("sess-edge", 0.0, _sess_edge)         # 时段沿清 sess_bar_wall 基线：每步
     loop.every("blind-watch", 0.0, _blind_watch)     # 盲视判定+告警（喂 frozen 字段）：每步
-    loop.every("heartbeat", 5.0, _heartbeat)         # 心跳（D3 七字段+ts）
-    loop.every("snapshot", 60.0, lambda: trading.snapshot_cycle(  # 快照+持仓批（旧 12 拍=60s）
-        adapter, ctx.get("account_id"), tid, _baseline_cache))
-    loop.every("halt-edge", 0.0, lambda: trading.halt_edge_cancel(adapter, halt_state, sid))  # 熔断沿撤在场单
+    loop.every("heartbeat", 5.0, _heartbeat)         # 心跳（D3 七字段+ts；急停期不整跳）
+
+    def _snapshot_guarded():
+        if closing.is_set():   # 批 171s：急停期跳过快照（adapter.query_account/position 归专用线程）
+            return
+        trading.snapshot_cycle(adapter, ctx.get("account_id"), tid, _baseline_cache)
+
+    def _halt_edge_guarded():
+        if closing.is_set():   # 批 171s：急停期跳过熔断沿撤单（撤单归专用线程）
+            return
+        trading.halt_edge_cancel(adapter, halt_state, sid)
+
+    loop.every("snapshot", 60.0, _snapshot_guarded)   # 快照+持仓批（旧 12 拍=60s）
+    loop.every("halt-edge", 0.0, _halt_edge_guarded)  # 熔断沿撤在场单
     loop.every("factor-recalc", 5.0, lambda: trading.recalc_hook(r, _rewarm, history))  # 因子重算+热重载
     loop.every("td-reconnect", 0.0, _td_reconnect)   # TD 重连沿对账：每步
     loop.every("zombie-claim", 5.0, _zombie_claim)   # xautoclaim 僵尸认领（评审 S3）
     loop.every("unfreeze-poll", 5.0, _unfreeze_poll)  # 批 76 F2：人工解冻请求消费（Valkey 键）
 
     def _risk_cmd_poll():
-        """批 171n：急停命令消费（Web cancel-all/close-all → GETDEL → 回执键）。"""
+        """批 171s：急停命令消费——主循环拍只 GETDEL→投递→立即返回（1s 注册保持）。"""
         try:
-            consume_risk_cmd(r, adapter, tid, account_id=account_id, td_api=td_api)
+            consume_risk_cmd(r, adapter, tid, account_id=account_id, td_api=td_api,
+                             cmd_queue=emergency.cmd_queue)
         except Exception as e:   # noqa: BLE001 —— 命令通道故障不伤主循环
-            logger.debug("急停命令轮询失败: %s}", e)
+            logger.debug("急停命令轮询失败: %s", e)
 
     loop.every("risk-cmd-poll", 1.0, _risk_cmd_poll)   # 批 171n：秒级响应（period=0.0 每步太密）
+    emergency.start()   # 批 171s：随 loop 启动（daemon；每 runner 恰一个）
     try:
         loop.run()   # 永续（XReadSleeper never-raise 保证 sleep 位不抛；停止/NOGROUP 带码直达）
     except KeyboardInterrupt:
@@ -738,4 +974,5 @@ def run(ctx: dict) -> None:
             r.xgroup_del(stream, gname)
         except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
+        _drain_before_exit("exit")   # 批 171s：异常/KeyboardInterrupt 路径同样限时 drain
         exit_process(0)

@@ -609,7 +609,10 @@ class TestBatch78CpuRules:
         """synthetic snap 无 thresholds——evaluate 兜底 dict 含 cpu（P0-2 钉：缺 cpu 即 KeyError）。
         批 171k：warn 阈值 0.7→0.8（晨窗治理）——0.85 档断言（0.75 现在是健康区间）。"""
         from src.health_monitor.monitor import evaluate
-        findings, _ = evaluate(self._snap_cpu(0.85))
+        snap = self._snap_cpu(0.85)
+        # 与当前时钟解耦：171k 的 cpu warn 晨窗豁免（08:00-09:30 降级为 info）会让本断言在晨窗时段必红
+        snap["thresholds"] = {"cpu": {"morning_window": "00:00-00:01"}}
+        findings, _ = evaluate(snap)
         assert any(f["rule_id"] == "cpu_high" and f["severity"] == "warning"
                    and f["component"] == "cpu" for f in findings)
 

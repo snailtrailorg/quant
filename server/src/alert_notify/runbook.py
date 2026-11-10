@@ -72,4 +72,9 @@ RUNBOOK: dict[str, dict] = {
     "llm.budget":       {"label": "LLM 预算预警", "guide": "用量接近预算上限——设置页调额或收敛调用方。"},
     "email.failed":     {"label": "邮件最终失败", "guide": "发件箱最终失败——查 SMTP 配置与收件域投递链（发件箱页有 last_error）。"},
     "factor.drift":     {"label": "因子漂移", "guide": "实盘 vs 回测因子偏差超限——核对数据口径与因子参数。"},
+    # ——— 批 171s 急停全平（2026-11-10） ———
+    "emergency.incomplete": {"label": "急停全平未竟", "guide": "重试用尽/绝对超时/连续无同源行情仍未平完——按紧急处置页 pending/no_quote 清单人工核对券商持仓与在场委托，必要时补挂平仓。"},
+    "emergency.interrupted": {"label": "急停线程中断", "guide": "进程退出前 drain 超时、在飞平仓已中断——人工核对券商委托与持仓，必要时补挂平仓。"},
+    "emergency.valkey_down": {"label": "急停同源行情全断", "guide": "Valkey 不可达致急停无同源报价、已停止空转——查 Valkey 服务与网络，恢复后重发一键清仓。"},
+    "emergency.worker_error": {"label": "急停线程异常", "guide": "急停专用线程顶层异常（已留痕+告警）——journalctl 查该任务首个异常，必要时人工处置持仓。"},
 }

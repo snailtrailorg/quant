@@ -116,6 +116,107 @@ class ExecutionAdapter(ABC):
         """client_id -> vnpy 委托号（成交/撤单关联用）。默认无实现返回 None。"""
         return None
 
+    # ── 批 171s 件二/件三：平仓定价与规则可覆写接口（provider 单维） ──
+    # 主流程（trading._close_all_positions）只调这些接口，**零 `if 品种/板块` 硬编码分支**；
+    # 账号/标的特异性全在子类覆写或 close_policy 配置属性里。基类给完整可跑的缺省实现。
+
+    # provider → `close_policy.{provider}.*` 配置键段（子类可覆写）
+    close_policy_provider: str = "xtp"
+
+    def close_action(self, pos) -> str:
+        """平仓方向由持仓 direction 派生：短仓买回平空=BUY，其余（多/NET）卖平=SELL。
+        硬约束：主流程只算一次、同一值喂定价/Order/order_log/check_order，禁写死 "SELL"。
+        """
+        return "BUY" if getattr(pos, "direction", "") == "direction_short" else "SELL"
+
+    def close_policy(self) -> dict:
+        """本 provider 的品种规则（件三配置属性）；读 system_config 走 data_platform 封装。"""
+        from src.data_platform import hub_quote
+        return hub_quote.get_close_policy(self.close_policy_provider)
+
+    def opponent_price(self, tick: dict, action: str) -> float:
+        """实时可见最优对手单价：SELL→买档（卖给买一），BUY→卖档（向卖一买）。
+        depth 从配置（缺省 1=最优档）；缺档 / 0 价 / 非法 → 0.0（调用方按 no_quote 处理）。
+        """
+        try:
+            depth = int(self.close_policy().get("opponent_depth", 1) or 1)
+        except (TypeError, ValueError):
+            depth = 1
+        side = "bid" if str(action).upper() == "SELL" else "ask"
+        levels = tick.get(side) or []
+        if depth < 1 or depth > len(levels):
+            return 0.0
+        try:
+            px = float(levels[depth - 1] or 0)
+        except (TypeError, ValueError):
+            return 0.0
+        return px if px > 0 else 0.0
+
+    def has_limit_band(self, tick: dict, sym: str, policy: dict | None = None) -> bool:
+        """有无跌停线判定：配置 `has_limit_band=False` 强制按「无跌停线」（对手价×让价）处理；
+        其余（True/缺省）按 tick.lower_limit>0 判。子类可按 category 覆写。
+
+        2026-11-10 编码审 D P1-3：原实现只读 tick，`close_policy.*.has_limit_band` 成死配置。
+        `policy` 参数供 close_reference_price 复用已读配置（避免同轮重复 DB 读）。
+        """
+        try:
+            pol = policy if policy is not None else self.close_policy()
+            if pol.get("has_limit_band") is False:
+                return False
+        except Exception:   # noqa: BLE001 —— 配置读失败回落 tick 判（不阻断定价）
+            pass
+        try:
+            return float(tick.get("lower_limit") or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
+    def close_reference_price(self, tick: dict, pos, action: str) -> float:
+        """平仓参考价：有跌停线 → 跌停价挂单；否则对手价按方向让价（方向感知，非 ×0.9 写死）。
+        SELL(平多) → ×(1-aggression)；BUY(平空) → ×(1+aggression)。无可用价 → 0.0。
+        子类整体覆写（场内基金/可转债/加密各自规则）；基类缺省已覆盖「加密空单平仓 BUY
+        → ask[0]×(1+aggression)」反例（短仓 direction_short 经 close_action 派生 BUY）。
+        """
+        pol = self.close_policy()
+        sym = getattr(pos, "symbol", "") or ""
+        if self.has_limit_band(tick, sym, pol):
+            try:
+                lower = float(tick.get("lower_limit") or 0)
+            except (TypeError, ValueError):
+                lower = 0.0
+            return lower if lower > 0 else 0.0
+        opp = self.opponent_price(tick, action)
+        if opp <= 0:
+            return 0.0
+        try:
+            aggression = float(pol.get("aggression", 0.10))
+        except (TypeError, ValueError):
+            aggression = 0.10
+        factor = 1 - aggression if str(action).upper() == "SELL" else 1 + aggression
+        return opp * factor
+
+    def max_close_order_qty(self, sym: str) -> int:
+        """拆单上限（缺省 100000；读 close_policy.max_order_qty）。"""
+        try:
+            return int(self.close_policy().get("max_order_qty", 100000) or 100000)
+        except (TypeError, ValueError):
+            return 100000
+
+    def round_close_price(self, px: float, tick: dict) -> float:
+        """按 price_tick 最小价位取整（防跌破/越界）；缺省/无有效配置保留 3 位。"""
+        try:
+            px = float(px)
+        except (TypeError, ValueError):
+            return 0.0
+        if px <= 0:
+            return 0.0
+        try:
+            pt = float(self.close_policy().get("price_tick", 0.001))
+        except (TypeError, ValueError):
+            pt = 0.001
+        if pt > 0:
+            return round(round(px / pt) * pt, 6)
+        return round(px, 3)
+
 
 # --- 场内 XTP 适配器（vnpy_xtp 网关，可转债/场内基金/A 股股票） ---
 
@@ -134,6 +235,10 @@ class XTPAdapter(ExecutionAdapter):
     后异步推 EVENT_POSITION/ACCOUNT，本类注册监听收集到缓存，query_xxx 触发后轮询等结果。
     query_orders/trades 纯靠事件推送（XTP 网关无主动查委托/成交接口）。
     """
+
+    # 批 171s 件三：provider 单维配置空间（与迁移 0175 的 close_policy.xtp.* 种子、
+    # hub_quote.get_close_policy 拼键三者逐字一致）
+    close_policy_provider: str = "xtp"
 
     def __init__(self, gateway=None, event_engine=None, order_prefix: str = ""):
         self._order_prefix = order_prefix  # R-BR10：多 worker 唯一性 {tid}:{epoch} 前缀
@@ -348,6 +453,11 @@ class XTPAdapter(ExecutionAdapter):
 class CryptoPerpAdapter(ExecutionAdapter):
     """加密永续合约适配器基类（币安/OKX）。"""
 
+    # 批 171s 件三：币安/OKX 共用 crypto 配置空间。加密实盘 gate 未开（规格 §5 边界），
+    # 迁移 0175 **不 seed** close_policy.crypto.* —— get_close_policy 回落代码缺省 + warning
+    # 留痕（fail-open 非静默）。gate 开启后再补种子即可，代码零改动。
+    close_policy_provider: str = "crypto"
+
     def __init__(self, gateway=None):
         self._gateway = gateway
         self._leverage = 1
@@ -391,6 +501,11 @@ class EmtAdapter(ExecutionAdapter):
     查询异步分帧（request_id+is_last 收齐）；order_client_id 是 uint32（字符串 client_id
     自派生短号+双向映射表）；SDK 单例（CreateTraderApi 重复调用返同句柄——模块级防御）。
     """
+
+    # 批 171s 件三：EMT 账户（东财测试柜台真实在跑）独立 provider 配置空间——
+    # 与迁移 0175 的 close_policy.emt.* 种子、get_close_policy 拼键三者逐字一致，
+    # 不再误读 xtp 规则（provider 特异性）。
+    close_policy_provider: str = "emt"
 
     _API_SINGLETON = None   # SDK 单例防御（builder/测试同进程二次 Create 撞句柄）
 

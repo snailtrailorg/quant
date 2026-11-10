@@ -53,7 +53,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getRiskExposure, apiErr } from '../api'
+import { sse, getRiskState, riskHalt, riskResume, riskCancelAll, riskCloseAll, getRiskExposure, getRiskCloseResult, getRiskCloseResultsRecent, apiErr } from '../api'
 import { selectedIds, canResume } from '../utils/emergency'
 
 const { t } = useI18n()
@@ -102,10 +102,16 @@ const ops = computed(() => [
 
 const fmtResult = r => {
   if (!r) return ''
+  // 批 171s：首轮 pending/no_quote/retrying 清单（后端 _dispatch_risk_cmd 顶层聚合透传）
+  const lists = []
+  if (countOf(r.pending)) lists.push(t('emg.finalPending', { n: countOf(r.pending) }))
+  if (countOf(r.no_quote)) lists.push(t('emg.finalNoQuote', { n: countOf(r.no_quote) }))
+  if (r.retrying === true || countOf(r.retrying)) lists.push(t('emg.finalRetrying'))
   if (r.status === 'done') {
-    const parts = []
+    const parts = [...lists]
     for (const [tid, ack] of Object.entries(r.results || {})) {
-      const res = ack.result || {}
+      // 批 171s：worker2 主回执改为扁平 dict（无 result 子 dict）——旧三层格式仍兼容
+      const res = ack.result || ack
       if (res.cancel !== undefined) {
         parts.push(t('emg.rCancelled', { n: res.cancel?.requested ?? 0, f: res.cancel?.failed ?? 0 }))
         const c = res.close || {}
@@ -114,19 +120,97 @@ const fmtResult = r => {
         parts.push(t('emg.rRemain', { n: c.positions_remain ?? '?' }))
       } else if (res.requested !== undefined) {
         parts.push(t('emg.rCancelled', { n: res.requested, f: res.failed }))
+      } else if (res.closed_requested !== undefined) {
+        // 扁平主回执（本批）：closed_requested / positions_remain / retrying / interrupted
+        parts.push(t('emg.finalClosed', { n: res.closed_requested }))
+        parts.push(t('emg.rRemain', { n: res.positions_remain ?? '?' }))
+        if (res.retrying === true) parts.push(t('emg.finalRetrying'))
+        if (res.interrupted === true) parts.push(t('emg.finalInterrupted'))
       } else if (res.error) {
         parts.push(res.error + (res.detail ? ' — ' + res.detail : ''))
       }
     }
     return parts.join('；') || 'ok'
   }
-  return t('emg.rDispatched', { n: r.dispatched ?? 0 })
+  return [t('emg.rDispatched', { n: r.dispatched ?? 0 }), ...lists].join('；')
 }
 
 const addTl = (op, text, ok = true) => {
   const d = new Date()
   timeline.value.unshift({ time: d.toTimeString().slice(0, 8), op, text, ok })
 }
+
+// ── 批 171s：急停终局可见（零内容帧 SSE → 鉴权端点重拉，清单绝不在帧里）──
+// 三路取数：①onMounted 拉 recent（页面刷新/晚开无内存 req_ids 仍可查）
+// ②收到 emergency_close_final 零内容帧重拉 recent ③onCloseAll 按 req_ids 短轮询单查端点
+const countOf = v => Array.isArray(v) ? v.length : (typeof v === 'number' ? v : 0)
+const fmtFinal = (id, r) => {
+  const parts = [t('emg.finalTitle', { id })]
+  // 批 171s（编码审 D P2-c）：失败/异常终局优先展示，绝不误显示「全部平仓完成」
+  // —— TD 断线（error=td_disconnected）或非 done 的 final_reason（重试用尽/系统断流）。
+  if (r?.error) {
+    parts.push(r.error + (r.detail ? ' — ' + r.detail : ''))
+    return parts.join('；')
+  }
+  if (countOf(r?.pending)) parts.push(t('emg.finalPending', { n: countOf(r.pending) }))
+  if (countOf(r?.no_quote)) parts.push(t('emg.finalNoQuote', { n: countOf(r.no_quote) }))
+  // worker2 的 :final 里 retrying 是 bool 标志（非清单）——兼容 bool/非空 list 两形态
+  if (r?.retrying === true || countOf(r?.retrying)) parts.push(t('emg.finalRetrying'))
+  if (countOf(r?.closed_requested)) parts.push(t('emg.finalClosed', { n: countOf(r.closed_requested) }))
+  if (r?.interrupted) parts.push(t('emg.finalInterrupted'))
+  const fr = String(r?.final_reason || '')
+  if (fr && fr !== 'final:done') {          // 非正常终局：显因，不追加「完成」
+    parts.push(t('emg.finalReason', { r: fr }))
+    return parts.join('；')
+  }
+  if (parts.length === 1) parts.push(t('emg.finalClean'))
+  return parts.join('；')
+}
+const recentSeen = new Set()   // 防三路上屏同一 req_id 重复
+const renderFinal = (id, doc) => {
+  if (!id || recentSeen.has(id)) return
+  recentSeen.add(id)
+  addTl(t('emg.finalRecent'), fmtFinal(id, doc), true)
+}
+const loadRecent = async () => {
+  try {
+    const d = await getRiskCloseResultsRecent()
+    for (const item of (d?.items || [])) renderFinal(item?.req_id, item)
+  } catch { /* recent 端点失败不阻塞页面（轮询 + 单查仍可用） */ }
+}
+
+let finalPollTimer = null
+const finalPollIds = ref([])
+let finalPollTicks = 0
+const FINAL_POLL_MAX_TICKS = 90   // 2s × 90 = 180s（覆盖 close_all_deadline_s 120s 余量）
+const stopFinalPoll = () => {
+  if (finalPollTimer) { clearInterval(finalPollTimer); finalPollTimer = null }
+}
+const pollFinals = async () => {
+  if (!finalPollIds.value.length) { stopFinalPoll(); return }
+  finalPollTicks += 1
+  if (finalPollTicks > FINAL_POLL_MAX_TICKS) { stopFinalPoll(); finalPollIds.value = []; return }
+  for (const id of [...finalPollIds.value]) {
+    try {
+      const r = await getRiskCloseResult(id)
+      if (r?.status === 'final') {
+        renderFinal(id, r)
+        finalPollIds.value = finalPollIds.value.filter(x => x !== id)
+      }
+    } catch { /* 单次查询失败留待下轮——:final 键 TTL 30min，不丢 */ }
+  }
+  if (!finalPollIds.value.length) stopFinalPoll()
+}
+const startFinalPoll = (ids) => {
+  finalPollIds.value = [...new Set([...finalPollIds.value, ...ids])].filter(Boolean)
+  finalPollTicks = 0
+  if (!finalPollTimer) finalPollTimer = setInterval(pollFinals, 2000)
+}
+const onSseFrame = (ev) => {
+  if (ev.event !== 'data' || ev.data?.type !== 'emergency_close_final') return
+  loadRecent()   // 零内容信号帧不带清单/req_id——重拉 recent 端点取权威清单
+}
+let sseUnsub = null
 
 const load = async () => {
   try {
@@ -182,6 +266,11 @@ async function onCloseAll () {
     if (value?.trim() !== 'CONFIRM') { ElMessage.warning(t('risk.resumeMismatch')); return }
     const r = await riskCloseAll(selectedIds(accounts.value))
     addTl(t('emg.opClose'), fmtResult(r), r.status === 'done')
+    const ids = Object.values(r?.req_ids || {})
+    if (ids.length) {
+      addTl(t('emg.opClose'), t('emg.finalWaiting'), true)
+      startFinalPoll(ids)   // ③按返回 req_ids 短轮询单查端点（异常态无 SSE 帧时兜底）
+    }
     await load()
   } catch (e) {
     if (e?.response || e?.code) {
@@ -211,12 +300,18 @@ async function onResume () {
 
 onMounted(async () => {
   await load()
+  loadRecent()                              // ①页面刷新/晚开无内存 req_ids 仍可查已有终局
+  sseUnsub = sse.subscribe(onSseFrame)       // ②零内容信号帧 → 重拉 recent
   timer = setInterval(() => {
     nowTs.value = Math.floor(Date.now() / 1000)
     load()
   }, 5000)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  stopFinalPoll()
+  if (sseUnsub) sseUnsub()
+})
 </script>
 
 <style scoped>

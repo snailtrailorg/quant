@@ -97,6 +97,7 @@ def wired():
         "frozen": {"now": False, "sticky": False, "sticky_cause": None},
         "warmup_pg": lambda: [], "stop_check": lambda: False,
         "reconcile": MagicMock(), "account_id": 1,
+        "closing": hw.threading.Event(),   # 批 171s：注入 Gate，fixture 持有以便 run() 收尾后复位
     }
     captured = {}
 
@@ -111,6 +112,8 @@ def wired():
          patch.object(EngineLoop, "run", _fake_run), \
          patch("src.strategy_runner.hub_worker.os._exit"):
         hw.run(ctx)
+        # run() finally 的 _drain_before_exit 会置位 Gate；fixture 模拟「进程仍在跑」，复位后再驱动钩子
+        ctx["closing"].clear()
         yield {"fake": fake, "ctx": ctx, "loop": captured["loop"], "rec": rec, "clo": clo}
 
 

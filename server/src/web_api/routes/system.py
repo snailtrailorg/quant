@@ -38,6 +38,21 @@ SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
     "smtp_max_attempts": (1, 10, False, False),   # 批47：每通道尝试配额（总尝试=配额——用户裁定 A）
     "llm_cooldown_min": (1, 1440, False, False), "llm_fail_threshold": (1, 100, False, False),
     "llm_retry_wait_s": (0, 300, False, False),   # 批50：LLM 容灾三参数（冷却/阈值/重试间隔——system_config 新真源）
+    # 批 171s 件三/件五：平仓品种规则 + 急停重试编排（close_policy.* 与 close_all_* 键）
+    "close_policy.xtp.opponent_depth": (1, 5, False, False),   # 五档最优对手价档位
+    "close_policy.xtp.aggression": (0, 0.5, False, False),       # 让价幅度（方向感知，0~0.5）
+    "close_policy.xtp.max_order_qty": (1, None, False, False),   # 拆单上限 ≥1
+    "close_policy.xtp.price_tick": (0, 1, True, False),          # 最小价位（>0）
+    # EMT 独立 provider 值域（与 xtp 同款；crypto 未 seed、无行可写故不注册）
+    "close_policy.emt.opponent_depth": (1, 5, False, False),
+    "close_policy.emt.aggression": (0, 0.5, False, False),
+    "close_policy.emt.max_order_qty": (1, None, False, False),
+    "close_policy.emt.price_tick": (0, 1, True, False),
+    "close_all_retry_interval_s": (1, None, False, False),
+    "close_all_retry_max": (1, None, False, False),
+    "close_all_deadline_s": (1, None, False, False),
+    "no_quote_empty_max": (1, None, False, False),
+    "drain_timeout_s": (1, None, False, False),
 }
 
 router = APIRouter(tags=["system"])
