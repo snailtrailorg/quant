@@ -3,6 +3,7 @@
 > 原编号 02（2026-09-24 文档体系重构，architecture→design 拆分）。
 
 > **平台化集成（2026-08-08）**：Broker 接口（PT5）+ Task 统一任务（PT1）。XTPAdapter/Binance/OKXBroker 实现。详见记忆 `platform-architecture`。
+> **与 D32 关系（2026-11-10 架构定稿）**：Broker / 执行 / 行情接口的目标形态是 `D32-接入插件架构` 的「端口 + provider 插件」——`Broker`/`DataSource` 收敛为 `ExecutionPort`/`MarketDataPort`/`HistoryPort`（见 D32 §六）；现行代码仍以 `platform-architecture` 为准，D32 未实施前不改契约。
 >
 > **因子平台化 + 双模式 + 任务分离（2026-08-11）**：① 因子 DB 化（`factor_def` 表，用户 Web 写 Python 自定义因子）+ 静态/动态区分（`needs_history`）；② 双模式策略执行（DSL + Python 代码框 `PythonStrategy`）；③ 参数定义系统（`parameter_defs`，任务动态表单）；④ 策略与实盘/回测任务分离（`live_task` 表，一标的一进程，策略快照隔离）。
 >
@@ -10,7 +11,7 @@
 
 ## 1. 目的
 
-提供跨三市场统一的策略/模型抽象：**统一的是模型结构，不是执行语义**。可转债 T+0、A 股只读分析、加密永续合约共用一套 `Strategy` 基类 + `Factor` 注册制 + `SignalAggregator` + `ExecutionAdapter` 抽象，差异下沉到适配器。
+提供跨三市场统一的策略/模型抽象：**统一的是模型结构，不是执行语义**。可转债 T+0、A 股只读分析、加密永续合约共用一套 `Strategy` 基类 + `Factor` 注册制 + `SignalAggregator` + 执行端口抽象；**差异下沉到 provider 插件 + 声明式规格**（`D32`）——执行语义/品种规则**不**堆在 adapter 里（adapter 只是网关之后的执行端口）。
 
 让策略可**配置驱动**（Web 端选因子、调权重、改参数、写 DSL 表达式 / Python 代码），而不是每个模型改代码硬编码。
 
@@ -22,7 +23,7 @@
 4. **信号聚合**：因子值 + 权重 → 买/卖/持信号。
 5. **DSL 表达式引擎 + Python 代码模式**：受限 DSL 表达式 + 用户写 `on_bar(ctx)` 的 Python 代码框（双模式统一执行）。
 6. **参数定义系统**：策略声明 `parameter_defs`（参数 schema），创建任务时动态生成表单。
-7. **ExecutionAdapter 抽象**：A 股只读（raise）、场内 XTP、加密币安/OKX 三种实现。
+7. **执行端口抽象**（目标 `ExecutionPort` + `ProviderPlugin`，见 `D32` §六；现行实现为 `ExecutionAdapter`）：A 股只读（raise）、场内 XTP/EMT、加密币安/OKX。
 8. **配置 schema + Web 配置 → 运行实例**：JSON 配置实例化策略，参数热改。
 9. **回测/实盘同构**：策略代码不变，切换 `backtest` / `live` 模式只换数据源与 adapter。
 10. **策略与任务分离**：`strategy_config` 为配方（不绑标的），`live_task` 为实盘任务（绑定策略+标的+参数值），`backtest_runs` 为回测任务（多标的+per-symbol 参数）。
@@ -133,16 +134,23 @@ parameter_defs = [
 ```
 校验函数：`validate_parameter_defs()` 校验 schema 结构，`validate_params_against_defs()` 校验参数值类型/范围，`build_default_params()` 构建默认值。
 
-### 5.6 ExecutionAdapter
+### 5.6 执行端口（现行 `ExecutionAdapter` → 目标 `ExecutionPort`）
+
+> **与 D32 关系（2026-11-10 架构定稿）**：执行接口的**目标架构**是 `D32-接入插件架构` 的 `ExecutionPort`（端口）+ `ProviderPlugin`（插件实体）——provider 插件提供实现，通用层只依赖端口；**品种规则（涨跌停/T+1/最小价位/平仓定价）不沉在 adapter**，而是声明式 `InstrumentSpec` + `RuleSet`（D32 §7.2/§7.3）。本节描述**现行代码**（D32 实施前以代码为准）。
+
 ```python
+# 现行（代码真相）：adapter = 网关之后的执行端口/翻译缓存层（不是网关，网关是 vnpy 插件）
 class ExecutionAdapter:
-    def send_order(self, order: Order) -> str: ...      # 返回 order_id
+    def send_order(self, order: Order) -> str: ...
     def cancel_order(self, order_id: str) -> None: ...
     def query_position(self) -> list[Position]: ...
+    def query_account/query_orders/query_trades/get_vt_orderid(...): ...
 
-class XTPAdapter(ExecutionAdapter):       # vnpy_xtp 网关
-class BinancePerpAdapter(ExecutionAdapter): ...   # vnpy 加密网关
-class OKXPerpAdapter(ExecutionAdapter): ...
+class XTPAdapter(ExecutionAdapter): ...            # 包 vnpy_xtp 网关
+class EmtAdapter(ExecutionAdapter): ...            # 东财 EMT
+class CryptoPerpAdapter(ExecutionAdapter): ...     # 币安/OKX 永续（薄）
+
+# 目标（D32，待实施）：ExecutionPort（端口）+ ProviderPlugin（插件实体，自包含凭证/连接/号段/连接窗）
 ```
 
 ## 6. 配置 schema（策略与任务分离）
