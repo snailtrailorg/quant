@@ -14,8 +14,10 @@ SRC = os.path.join(os.path.dirname(__file__), "..", "src")
 
 LAYER = {
     "quant_common": 0,
+    "ports": 1, "registry": 1,          # D32：端口/注册表只依赖层 0
     "data_platform": 1, "alert_notify": 2, "task_manager": 2, "strategy_framework": 2,
     "risk_control": 2, "astock_analysis": 2, "llm_gateway": 2, "strategies": 2,
+    "providers": 2,                     # D32：插件只依赖 ports + quant_common
     "strategy_runner": 3, "md_hub": 3, "data_sync": 3, "scheduler": 3, "health_monitor": 3,
     "im_bot": 3,   # 19 号 §3:IM 统一接入服务层(Provider/凭证/用户)
     "web_api": 4, "feishu_bot": 4,
@@ -57,24 +59,20 @@ def _module_edges():
                 segs = [s for s in m.group(1).split(".") if s]
                 if segs and segs[0] != src_mod:
                     edges.add((src_mod, segs[0]))
-            # P4 修复（2026-08-20 审计 A1/A-架构）：相对 import 通道原不扫描——
-            # `from ..web_api import x` 铁律测试照样全绿（factor.py 5 处实际在用此通道）
-            depth = len(parts) - 1   # 当前文件距 src/ 的包深度(文件所在包的层数)
+            # P4 修复（2026-08-20 审计 A1/A-架构）：相对 import 通道。
+            # 2026-11-11 修正（批172a 审 A-P1-6）：原实现 `base_idx = depth - up_level`
+            # 对 `src/ports/execution.py` 的 `from ..quant_common import x` 取到
+            # parts[0]="ports"，与自身同名被丢弃——新包的分层约束形同虚设。
+            # 正确语义：LAYER 比较**顶层包名**；`..` 上跳到 src 根时目标是 rest，
+            # 否则顶层包恒为 parts[0]。
+            pkg_depth = len(parts) - 1               # 文件所在包的段数（不含文件名）
             for m in re.finditer(r"(?:from|import)\s+(\.+)([\w.]*)", txt):
                 dots = len(m.group(1))
                 rest = m.group(2).split(".")[0]
                 if not rest:
                     continue
-                # B-S3 修正:n 点 = 向上 n-1 层(1 点=本包内,2 点=父包)。target 包 =
-                # 向上后所在包的下一个段。up_level 超出 src/ 根=不可能(语法上合法但我们的
-                # 包结构内只会在 src/ 内)——越界按 src 根处理报最强嫌疑。
-                up_level = dots - 1
-                base_idx = depth - up_level          # target 段在 parts 里的索引
-                if base_idx < 0 or base_idx >= len(parts):
-                    continue                          # 理论不可达
-                target_pkg = parts[base_idx] if base_idx < depth else rest
-                if target_pkg.endswith(".py"):
-                    target_pkg = target_pkg[:-1].split(".")[0] if False else (parts[base_idx][:-3] if base_idx == depth else target_pkg)
+                remaining = pkg_depth - (dots - 1)   # 上跳后剩余的包段数
+                target_pkg = rest if remaining <= 0 else parts[0]
                 if target_pkg and target_pkg != src_mod:
                     edges.add((src_mod, target_pkg))
     return edges
