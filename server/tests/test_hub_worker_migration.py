@@ -123,6 +123,7 @@ def wired():
         "td_api": td, "history": [], "frozen": {"now": False, "sticky": False},
         "warmup_pg": lambda: [], "stop_check": lambda: False,
         "reconcile": MagicMock(), "account_id": 1,
+        "exec_port": MagicMock(),          # 172b：EVENT_TRADE 端口（必填）
         "closing": hw.threading.Event(),   # 批 171s：注入 Gate，fixture 持有以便 run() 收尾后复位
     }
     captured = {}
@@ -267,3 +268,13 @@ class TestTdReconnect:
         w["td"].connect_status = True
         h.fn()                                   # 重连沿 → 对账（runner 超集，含成交补录）
         w["ctx"]["reconcile"].assert_called_once()
+
+
+def test_trade_port_subscription_routes_to_write_trade_log(wired):
+    """172b 接线守门：EVENT_TRADE 必须经 ctx.exec_port.subscribe_trade，且 cb 收到 domain 后写库。"""
+    ctx = wired["ctx"]
+    cb = ctx["exec_port"].subscribe_trade.call_args.args[0]
+    trade = object()
+    with patch("src.strategy_runner.trading.write_trade_log") as wt:
+        cb(trade)
+    wt.assert_called_once_with(trade, ctx["adapter"], ctx["sid"], ctx["symbol"])

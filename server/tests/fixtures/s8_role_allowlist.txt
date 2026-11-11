@@ -1,0 +1,2 @@
+# S8 角色隔离 allowlist（空=当前零豁免）
+# 格式：相对 src 路径:行号:符号（例如 md_hub/main.py:12:ExecutionPort）

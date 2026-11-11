@@ -374,6 +374,7 @@ def wired_worker():
         "frozen": {"now": False, "sticky": False, "sticky_cause": None},
         "warmup_pg": lambda: [], "stop_check": lambda: False,
         "reconcile": MagicMock(), "account_id": 1, "market": "astock",
+        "exec_port": MagicMock(),          # 172b：EVENT_TRADE 端口（必填）
     }
     captured = {}
 
@@ -536,7 +537,7 @@ class TestS6AuditClaimChain:
 
     @pytest.mark.skipif(not _db_up(), reason="真库不可用")
     def test_two_chunks_two_rows_and_cid_claim_path(self):
-        from vnpy.trader.constant import Status
+        from src.quant_common.domain import Direction, OrderState, OrderStatus
         from src.data_platform.db import get_conn
         from src.strategy_runner import trading as T
         req = "s6" + uuid.uuid4().hex[:8]
@@ -567,13 +568,15 @@ class TestS6AuditClaimChain:
 
             # 路①：vt_orderid 命中
             T.write_order_status(
-                SimpleNamespace(vt_orderid="XTP.9001", status=Status.ALLTRADED,
-                                symbol="600000.SHSE"), adapter, "s6", "600000.SHSE")
+                OrderState(orderid="", vt_orderid="XTP.9001", symbol="600000.SHSE",
+                           direction=Direction.LONG, status=OrderStatus.ALL_TRADED,
+                           volume=100, traded=100, price=10.0), adapter, "s6", "600000.SHSE")
             # 路②：vt 行不存在 → _vt2cid → client_order_id 认领（真库 `<> ALL` 执行）
             adapter._vt2cid["CLAIM.2"] = cid2
             T.write_order_status(
-                SimpleNamespace(vt_orderid="CLAIM.2", status=Status.ALLTRADED,
-                                symbol="600000.SHSE"), adapter, "s6", "600000.SHSE")
+                OrderState(orderid="", vt_orderid="CLAIM.2", symbol="600000.SHSE",
+                           direction=Direction.LONG, status=OrderStatus.ALL_TRADED,
+                           volume=200, traded=200, price=10.0), adapter, "s6", "600000.SHSE")
             with get_conn() as c:
                 got = dict(c.execute(
                     "SELECT client_order_id, status FROM order_log "

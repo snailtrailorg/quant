@@ -9,11 +9,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from vnpy.trader.constant import Status
+from src.quant_common.domain import Direction, OrderState, OrderStatus
 
 
 def _d(status, vt="EMT.123"):
-    return SimpleNamespace(vt_orderid=vt, status=status, symbol="600000.SHSE")
+    return OrderState(orderid="", vt_orderid=vt, symbol="600000.SHSE", direction=Direction.LONG,
+                      status=status, volume=0, traded=0, price=0)
 
 
 def _conn(fetch_rows):
@@ -31,13 +32,13 @@ class TestWriteOrderStatus:
         from src.strategy_runner.trading import write_order_status
         # NOTTRADED/SUBMITTING 不回写（不触 DB）
         with patch("src.data_platform.db.get_conn") as g:
-            write_order_status(_d(Status.NOTTRADED), MagicMock(), "s1", "X")
-            write_order_status(_d(Status.SUBMITTING), MagicMock(), "s1", "X")
+            write_order_status(_d(OrderStatus.NOT_TRADED), MagicMock(), "s1", "X")
+            write_order_status(_d(OrderStatus.SUBMITTED), MagicMock(), "s1", "X")
         g.assert_not_called()
         # ALLTRADED → all_traded
         conn, cur = _conn([(41,)])
         with patch("src.data_platform.db.get_conn", return_value=conn):
-            write_order_status(_d(Status.ALLTRADED), MagicMock(), "s1", "X")
+            write_order_status(_d(OrderStatus.ALL_TRADED), MagicMock(), "s1", "X")
         upd = [c for c in conn.execute.call_args_list if "UPDATE order_log" in c.args[0]][0]
         assert upd.args[1][0] == "all_traded"
 
@@ -46,7 +47,7 @@ class TestWriteOrderStatus:
         from src.strategy_runner.trading import write_order_status
         conn, cur = _conn([(77,)])
         with patch("src.data_platform.db.get_conn", return_value=conn):
-            write_order_status(_d(Status.CANCELLED), MagicMock(), "s1", "X")
+            write_order_status(_d(OrderStatus.CANCELLED), MagicMock(), "s1", "X")
         sel = conn.execute.call_args_list[0]
         assert "ORDER BY id DESC LIMIT 1" in sel.args[0]
         upd = conn.execute.call_args_list[1]
@@ -62,7 +63,7 @@ class TestWriteOrderStatus:
         adapter._lock.__exit__ = MagicMock(return_value=False)
         conn, _ = _conn([None, (55,)])
         with patch("src.data_platform.db.get_conn", return_value=conn):
-            write_order_status(_d(Status.REJECTED, vt=""), adapter, "s1", "X")
+            write_order_status(_d(OrderStatus.REJECTED, vt=""), adapter, "s1", "X")
         adapter._vt2cid.get.assert_called()
         sel2 = conn.execute.call_args_list[0]   # vt 空=跳过 vt 步，首个 execute 即 cid 查询
         assert "client_order_id" in sel2.args[0]
@@ -76,7 +77,7 @@ class TestWriteOrderStatus:
         from src.strategy_runner.trading import ORDER_FINAL_STATES, write_order_status
         conn, _ = _conn([(9,)])
         with patch("src.data_platform.db.get_conn", return_value=conn):
-            write_order_status(_d(Status.PARTTRADED), MagicMock(), "s1", "X")
+            write_order_status(_d(OrderStatus.PARTIAL), MagicMock(), "s1", "X")
         upd = conn.execute.call_args_list[1]
         assert "<> ALL" in upd.args[0]
         assert set(upd.args[1][2]) == set(ORDER_FINAL_STATES)
@@ -84,7 +85,7 @@ class TestWriteOrderStatus:
     def test_never_raise(self):
         from src.strategy_runner.trading import write_order_status
         with patch("src.data_platform.db.get_conn", side_effect=RuntimeError("db down")):
-            write_order_status(_d(Status.ALLTRADED), MagicMock(), "s1", "X")   # 不抛即过
+            write_order_status(_d(OrderStatus.ALL_TRADED), MagicMock(), "s1", "X")   # 不抛即过
 
 
 def _real_db_up() -> bool:

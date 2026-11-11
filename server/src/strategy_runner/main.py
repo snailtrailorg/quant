@@ -350,20 +350,27 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     def on_log(event):
         logger.info("[gw] %s", getattr(event.data, "msg", event.data))
     ee.register(EVENT_LOG, on_log)
-    # 批 68：order_log 终态回写（on_log 同位——builder 前注册接住 EMT RESTART 当日重放，
-    # 终态集守卫+同值 UPDATE 幂等治愈漏写）
-    from vnpy.trader.event import EVENT_ORDER
+    # 批 68：order_log 终态回写（builder 前注册接住 EMT RESTART 当日重放）。
+    # 172b：消费改走 ExecutionPort，翻译+回调整体在 ACL 守卫内；adapter 用 holder 惰性绑定
+    # （build 返回前为 None，早到事件靠 vt_orderid 认领，不抛 NameError）。
+    from vnpy.trader.event import EVENT_ORDER, EVENT_TRADE
+
+    from src.strategy_runner.legacy_exec_port import LegacyExecutionPort
+    _adapter_holder: dict = {"a": None}
+    exec_port = LegacyExecutionPort(
+        ee, lambda: _adapter_holder["a"], _guard, EVENT_ORDER, EVENT_TRADE,
+    )
 
     @_guard("worker.on_order_status")
-    def on_order(event):
-        trading.write_order_status(event.data, adapter, sid, symbol)
+    def on_order(d):
+        trading.write_order_status(d, _adapter_holder["a"], sid, symbol)
         # 批 69a：SSE 信号帧（零内容——信任边界立法；重拉 /api/orders 由前端做）
         try:
             from src.quant_common.eventbus import bus  # 惰性导入（notify.py:89 先例）
             bus.publish_cross_process(0, "order_update", {})
         except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
-    ee.register(EVENT_ORDER, on_order)
+    exec_port.subscribe_order(on_order)
 
     # 批 65a：单入口分发（EX_CONFIG 异常处理留此调用点——78=RestartPrevent 豁免防重启风暴）
     try:
@@ -412,6 +419,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     gw = rt["gw"]
     td_api = rt["td_api"]
     adapter = rt["adapter"]
+    _adapter_holder["a"] = adapter   # 172b：ACL 惰性绑定（早到事件此前为 None）
     setting = rt["setting"]
     _td_open = rt["td_open"]
     _lead, _lag = rt["lead"], rt["lag"]
@@ -526,7 +534,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
     ctx.update({
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
         "account_id": account_id, "market": iface.get("market"),   # 批 66c：worker 时段门/缺口检测 per-market 真源（接口行）
-        "strategy": strategy, "adapter": adapter, "event_engine": ee,
+        "strategy": strategy, "adapter": adapter, "event_engine": ee, "exec_port": exec_port,
         "td_api": td_api, "history": history, "frozen": frozen,
         "initial_capital": initial_capital,
         "warmup_pg": lambda: _warmup_history(symbol, n=warmup_n),   # 批 118：rewarm 侧同窗（needs 自适应）

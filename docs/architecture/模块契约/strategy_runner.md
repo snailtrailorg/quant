@@ -6,6 +6,8 @@
 > 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架。
 > **批 6b（2026-09-01）：direct 退役**——hub 是唯一实盘行情模式（md_mode=direct → EX_CONFIG 拒绝），§二 改退役记录。
 
+> **最近变更（批 172b，2026-11-11）**：EVENT_ORDER/EVENT_TRADE 消费切 `ports.ExecutionPort`（迁移期 `legacy_exec_port.py` 反腐蚀层，P3 删）；`write_order_status/write_trade_log` 入参改 domain（`OrderState/Trade`）；`run(ctx)` 新增 `exec_port`；`legacy_translate.py` 为 P1b 翻译层（零 vnpy import）。
+
 > **最近变更（批 66a/66b/66c，2026-09-26/27 上产）**：旧 `--id` 路径退役（批 66a D26 #6——`--task-id` 唯一）；`bar_stream_key(symbol, account_id)` 必填 raise（裸键防线）+ `_account_mismatch` 同源校验（签名去 symbol/market 跳过分支）；`_hub_alive(r, account_id)` per-account（修原裸键读=A股心跳恒真掩盖加密 hub 死亡）；水位键含 account；`ctx.market`（接口行真源）+ `_in_mkt_session` per-market；`_ts_gap_frozen`（60s+ 段内段首 2 分钟豁免→sticky）+ `_rewarm` 推进 max_ts（解冻闭环）。
 ## 职责
 每 live_task 一个子进程（`quant-live-task@{id}`，systemd）：ThinTdGateway（TD-only）+ XTPAdapter +
@@ -18,6 +20,8 @@ server/src/strategy_runner/
 ├── trading.py      # 交易域九单元（4a 新建，306 行）——direct 与 hub worker 单源；依赖注入零模块级可变状态
 ├── hub_worker.py   # hub 模式 worker（4b 迁骨架）：EngineLoop 11 钩子 + XReadSleeper 流消费
 ├── td_registry.py  # 批 65a：TD builder 注册表（build_td_runtime 单入口分发）
+├── legacy_translate.py   # 172b：vnpy/legacy 对象 → domain（P3 删）
+├── legacy_exec_port.py   # 172b：ExecutionPort 反腐蚀层（P3 删）
 └── alert_failed.py # OnFailure 钩子（systemd quant-task-failed@ 调）
 ```
 
@@ -48,7 +52,8 @@ FROZEN_STALE_BAR_S = 300                      # bar 新鲜门限（buy_ok/盲视
 buy_ok_check(frozen, stats, hub_alive, now, in_session=True) -> bool
     # send_order 时刻事实检查：BUY 需 时段+bar<300s+hub 心跳；夜间回放拒（C-F2）；纯函数供测试
 frozen_allows(action, frozen) -> bool        # 只判 sticky（untrusted/gap 污染事实）BUY 拒/SELL 放（R-AV2）
-write_trade_log(d, adapter, sid, symbol)     # TradeData→trade_log（trade_ref 幂等 + RETURNING 入库观测）
+write_order_status(d: OrderState, adapter, sid, symbol)  # 终态回写（P1b 起入参 domain）
+write_trade_log(d: Trade, adapter, sid, symbol)        # Trade→trade_log（trade_ref 幂等 + RETURNING 入库观测）
 snapshot_cycle(adapter, account_id, tid, baseline_cache)
     # 60s 账户快照（direct 形态：含 available_cash/单事务/SB1 断线不写假值）+ 同拍持仓批
 halt_edge_cancel(adapter, halt_state, sid)   # SB2 熔断沿撤全部在场委托（F-41）；halt_state 调用方持有
@@ -61,8 +66,8 @@ _account_baseline_capital(total, cache)      # #10 基线=账户首条快照 tot
 
 ### hub_worker.py——worker 编排与流消费
 ```python
-run(ctx) -> None    # ctx: {tid, sid, symbol, account_id, market, strategy, adapter, event_engine, td_api,
-                    #      history, frozen, initial_capital, warmup_pg, stop_check, reconcile}
+run(ctx) -> None    # ctx: {tid, sid, symbol, account_id, market, strategy, adapter, event_engine, exec_port,
+                    #      td_api, history, frozen, initial_capital, warmup_pg, stop_check, reconcile}
                     # buy_ok 由 run 注入 ctx（_gated_send 消费）；frozen 与 main 网关共享同一 dict（C2）；
                     # account_id 必填（None raise——批 66b 裸键防线第二道）；market=ctx 注入真源（接口行），
                     # 缺省按 symbol 后缀派生（批 66c per-market 时段门/缺口检测）

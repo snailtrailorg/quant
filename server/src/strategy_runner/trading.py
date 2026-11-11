@@ -19,6 +19,8 @@ import json
 import logging
 
 from src.data_platform.tz import as_utc  # 批 56b 盲审 B：trade_log ts 收口（vnpy datetime naive——pin UTC 后裸写=错 8h）
+from src.quant_common.domain import Direction, OrderState, OrderStatus, Trade
+from src.strategy_runner.legacy_translate import status_of, to_domain_trade
 
 logger = logging.getLogger("strategy_runner.trading")
 
@@ -67,23 +69,40 @@ def frozen_allows(action: str, frozen: dict) -> bool:
 ORDER_FINAL_STATES = ("all_traded", "cancelled", "rejected")   # 批 68 终态集（SQL 闭包=只进不退主防线）
 
 
-def write_order_status(d, adapter, sid: str, symbol: str) -> None:
-    """OrderData → order_log.status 终态回写（批 68，批 61 挂账——在途判定根治）。
+def _client_id_of(d, adapter, vt: str) -> str:
+    """cid 读取：adapter 当前 _vt2cid 优先；adapter 无该属性/None 才用 domain 快照。
 
-    EVENT_ORDER 消费（main on_log 同位注册——EMT RESTART 当日重放可接住并幂等治愈）。
-    映射：PARTTRADED→partial/ALLTRADED→all_traded/CANCELLED→cancelled/REJECTED→rejected；
-    SUBMITTING/NOTTRADED 不回写（提交侧已管）。只进不退：SQL 终态集闭包（迟到片段/乱序
+    与基线「读进程内存现值」同刻；domain 字段只作 P3 端口兜底（禁快照优先）。
+    """
+    if adapter is not None and hasattr(adapter, "_vt2cid"):
+        lock = getattr(adapter, "_lock", None)
+        try:
+            if lock is not None:
+                with lock:
+                    cid = adapter._vt2cid.get(vt, "")
+            else:
+                cid = adapter._vt2cid.get(vt, "")
+            return cid if isinstance(cid, str) else ""
+        except Exception:
+            return ""
+    return getattr(d, "client_id", "") or ""
+
+
+def write_order_status(d: OrderState, adapter, sid: str, symbol: str) -> None:
+    """OrderState → order_log.status 终态回写（批 68；P1b 改读 domain）。
+
+    映射：PARTIAL→partial/ALL_TRADED→all_traded/CANCELLED→cancelled/REJECTED→rejected；
+    SUBMITTED/NOT_TRADED 不回写（提交侧已管）。只进不退：SQL 终态集闭包（迟到片段/乱序
     天然挡）；send_failed=提交侧伪终态可被覆写（超时类实达柜台终态迟到=合法纠正）。
     关联键：vt_orderid 两步（非唯一索引——SELECT LIMIT 1 最新再 UPDATE WHERE id）；
     空则 _lock 下 _vt2cid 反查 client_order_id（唯一索引）。never-raise。
     """
     try:
-        from vnpy.trader.constant import Status
-        m = {Status.PARTTRADED: "partial", Status.ALLTRADED: "all_traded",
-             Status.CANCELLED: "cancelled", Status.REJECTED: "rejected"}
+        m = {OrderStatus.PARTIAL: "partial", OrderStatus.ALL_TRADED: "all_traded",
+             OrderStatus.CANCELLED: "cancelled", OrderStatus.REJECTED: "rejected"}
         new_status = m.get(getattr(d, "status", None))
         if not new_status:
-            return   # SUBMITTING/NOTTRADED=非推进
+            return   # SUBMITTED/NOT_TRADED=非推进
         from src.data_platform.db import get_conn
         vt = getattr(d, "vt_orderid", "") or ""
         with get_conn() as conn:
@@ -95,8 +114,7 @@ def write_order_status(d, adapter, sid: str, symbol: str) -> None:
                     "SELECT id FROM order_log WHERE vt_orderid=%s ORDER BY id DESC LIMIT 1", (vt,))
                 row = cur.fetchone()
             if not row:
-                with adapter._lock:
-                    cid = adapter._vt2cid.get(vt)
+                cid = _client_id_of(d, adapter, vt)
                 if cid:
                     cur = conn.execute(
                         "SELECT id FROM order_log WHERE client_order_id=%s ORDER BY id DESC LIMIT 1", (cid,))
@@ -105,9 +123,9 @@ def write_order_status(d, adapter, sid: str, symbol: str) -> None:
                 logger.warning("order_log 终态回写跳过（无关联行）: vt=%s status=%s %s",
                                vt, new_status, getattr(d, "symbol", symbol))
                 return
-            # 2026-11-09（171n e2e 抓真库语法错）：psycopg 不做元组展开，`NOT IN %s`
-            # 渲染成 `NOT IN $3` ⇒ 语法错 ⇒ 终态回写从未成功（never-raise 静默吞）。
-            # 数组比较用 `<> ALL(%s)`（仓内 ANY(%s) 同族写法）。
+            # 2026-11-09（171n e2e 抓真库语法错）：psycopg 不做元组展开，NOT IN %s
+            # 渲染成 NOT IN $3 ⇒ 语法错 ⇒ 终态回写从未成功（never-raise 静默吞）。
+            # 数组比较用 <> ALL(%s)（仓内 ANY(%s) 同族写法）。
             cur = conn.execute(
                 "UPDATE order_log SET status=%s WHERE id=%s AND status <> ALL(%s)",
                 (new_status, row[0], list(ORDER_FINAL_STATES)))
@@ -118,20 +136,23 @@ def write_order_status(d, adapter, sid: str, symbol: str) -> None:
         logger.warning("order_log 终态回写失败(never-raise): %s", e)
 
 
-def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
-    """TradeData → trade_log（SC1，EVENT_TRADE 与启动/重连对账共用）。
+def write_trade_log(d: Trade, adapter, sid: str, symbol: str) -> None:
+    """Trade → trade_log（SC1，EVENT_TRADE 与启动/重连对账共用；P1b 改读 domain）。
 
-    幂等：trade_ref 唯一索引 + ON CONFLICT DO NOTHING。RETURNING 版（4a 统一——worker 侧
-    同步获得成交入库观测日志，知情差异⑤）。
+    幂等：trade_ref 唯一索引 + ON CONFLICT DO NOTHING。RETURNING 版（4a 统一）。
+    查询顺序互斥（与基线逐字）：cid 非空只查 cid（查不到不回落 vt）；cid 空才查 vt。
+    trade_ref 空值写 NULL（PG 唯一索引对 NULL 不去重；写 "" 会让后续成交被静默丢弃）。
     """
     try:
-        from vnpy.trader.constant import Direction
-
+        if adapter is None:
+            # 早到事件（adapter 未绑定）不写 NULL account 行：ON CONFLICT 会把该行永久定格，
+            # 之后 reconcile 带正确 account 的补录被吞（P3 端口先订阅后绑定时可达）。
+            logger.warning("trade_log 写入跳过（adapter 未绑定）: %s", getattr(d, "tradeid", ""))
+            return
         from src.data_platform.db import get_conn
-        action = "BUY" if d.direction == Direction.LONG else "SELL"
-        vt = getattr(d, "vt_orderid", "")
-        with adapter._lock:
-            cid = adapter._vt2cid.get(vt)
+        action = "BUY" if getattr(d, "direction", None) == Direction.LONG else "SELL"
+        vt = getattr(d, "orderid", "") or ""
+        cid = _client_id_of(d, adapter, vt)
         order_db_id, strategy_of = None, sid
         with get_conn() as conn:
             if cid:
@@ -155,7 +176,7 @@ def write_trade_log(d, adapter, sid: str, symbol: str) -> None:
                 (as_utc(getattr(d, "datetime", None)) if getattr(d, "datetime", None) is not None else None,
                  strategy_of, order_db_id, getattr(d, "symbol", symbol),
                  action, float(getattr(d, "volume", 0) or 0), float(getattr(d, "price", 0) or 0),
-                 getattr(d, "vt_tradeid", None) or None,
+                 getattr(d, "tradeid", None) or None,
                  getattr(adapter, "account_id", None)))
             if cur.fetchone():
                 logger.info("成交入库: %s %s %s@%s (order_db=%s)", getattr(d, "symbol", symbol),
@@ -286,23 +307,35 @@ def halt_edge_cancel(adapter, halt_state: dict, sid) -> None:
 
 
 def _cancel_working_orders(adapter) -> dict:
-    """批 171n：撤全部在场委托（F-41 提纯+一键撤单共用核心）。
+    """批 171n：撤全部在场委托（F-41 提纯+一键撤单共用核心；P1b 改读 domain）。
 
-    返回 {"requested": N, "failed": M}——**语义=「请求已受理」非「已撤成功」**（XTP
-    异步撤单；结果以 query_orders 复查与 journal 为准——股灾场景速度优先不等确认）。
+    返回 {"requested": N, "failed": M, "untranslatable": U}——requested/failed 语义不变
+    （请求已受理/撤单异常）；untranslatable=状态或 vt_orderid 不可读而跳过的单（可观测，
+    不冒充撤单成功）。在场判定只读 status+vt_orderid 两字段（与基线同，缺字段不漏撤）。
     """
-    out = {"requested": 0, "failed": 0}
+    out = {"requested": 0, "failed": 0, "untranslatable": 0}
     try:
-        from vnpy.trader.constant import Status
-        working = (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)
+        working = {OrderStatus.SUBMITTED, OrderStatus.NOT_TRADED, OrderStatus.PARTIAL}
         for od in (adapter.query_orders() or []):
-            if getattr(od, "status", None) in working:
-                out["requested"] += 1
-                try:
-                    adapter.cancel_order(od.vt_orderid)
-                except Exception as ce:
-                    out["failed"] += 1
-                    logger.warning("撤单失败 %s: %s", od.vt_orderid, ce)
+            try:
+                st = status_of(od)
+            except Exception as e:
+                out["untranslatable"] += 1
+                logger.warning("撤单状态翻译失败（跳过）: %s", e)
+                continue
+            if st not in working:
+                continue
+            vt = getattr(od, "vt_orderid", "") or ""
+            if not vt:
+                out["untranslatable"] += 1
+                logger.warning("在场委托缺 vt_orderid，跳过撤单")
+                continue
+            out["requested"] += 1
+            try:
+                adapter.cancel_order(vt)
+            except Exception as ce:
+                out["failed"] += 1
+                logger.warning("撤单失败 %s: %s", vt, ce)
     except Exception as e:
         logger.error("撤单流程异常: %s", e)
     return out
@@ -772,17 +805,25 @@ def stop_due(tid, sid) -> bool:
 
 def reconcile_orders(adapter, sid, symbol=None) -> None:
     """SC2 启动/重连对账（runner 超集——4a 知情差异①：worker 由只告警在场委托升级为三件套，
-    启动与每次 TD 重连沿均变化，知情接受）。
+    启动与每次 TD 重连沿均变化，知情接受；P1b 改读 domain）。
 
     v1 策略：发现残留委托只告警不自动撤（防误杀人工单）；成交补录靠 trade_ref 幂等。
+    在场判定只读 status（缺状态跳过并留痕）；告警方向用原始对象 .value（locale 无关）。
     """
     try:
-        from vnpy.trader.constant import Status
-        working = [o for o in (adapter.query_orders() or [])
-                   if getattr(o, "status", None) in (Status.SUBMITTING, Status.NOTTRADED, Status.PARTTRADED)]
+        working = []
+        for o in (adapter.query_orders() or []):
+            try:
+                st = status_of(o)
+            except Exception as e:
+                logger.warning("对账委托状态翻译失败（跳过）: %s", e)
+                continue
+            if st in (OrderStatus.SUBMITTED, OrderStatus.NOT_TRADED, OrderStatus.PARTIAL):
+                working.append(o)
         if working:
             desc = "; ".join(
-                f"{o.symbol} {getattr(o.direction, 'value', '?')} {o.volume}@{o.price}"
+                f"{getattr(o, 'symbol', '?')} {getattr(getattr(o, 'direction', None), 'value', '?')} "
+                f"{getattr(o, 'volume', 0)}@{getattr(o, 'price', 0)}"
                 for o in working[:10])
             logger.warning("启动对账：%d 笔在场委托: %s", len(working), desc)
             _alert(f"启动对账发现 {len(working)} 笔在场委托（任务 {sid}）",
@@ -790,7 +831,12 @@ def reconcile_orders(adapter, sid, symbol=None) -> None:
         trades = adapter.query_trades() or []
         n_new = 0
         for t in trades:
-            write_trade_log(t, adapter, sid, symbol)
+            try:
+                dt = to_domain_trade(t, _client_id_of(t, adapter, getattr(t, "vt_orderid", "") or ""))
+            except Exception as e:
+                logger.warning("对账成交翻译失败（跳过）: %s", e)
+                continue
+            write_trade_log(dt, adapter, sid, symbol)
             n_new += 1
         if trades:
             logger.info("启动对账：补录当日成交 %d 笔（trade_ref 幂等去重）", n_new)

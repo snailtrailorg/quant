@@ -10,8 +10,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import src.data_platform.db as db
+from src.quant_common.domain import Direction, Trade
 from src.strategy_runner import trading
-from vnpy.trader.constant import Direction, Status
+from vnpy.trader.constant import Status
 
 
 def _pos(symbol="600000.SHSE", volume=1000, direction="direction_long", frozen=200, yd=800):
@@ -25,9 +26,10 @@ def _acct(balance=1_000_000.0, frozen=0.0):
 
 def _trade(direction=Direction.LONG, vt_orderid="x.1", vt_tradeid="t1", symbol="600000.SHSE"):
     # 批 56b 盲审 B：datetime=naive datetime（vnpy xtp_gateway strptime 真形态——非字符串）
+    # 172b：domain Trade（tradeid/orderid 存 vt 键；client_id 留空由 _vt2cid 兜底）
     from datetime import datetime as _dt
-    return SimpleNamespace(direction=direction, vt_orderid=vt_orderid, vt_tradeid=vt_tradeid,
-                           datetime=_dt(2026, 8, 27, 9, 31), symbol=symbol, volume=100, price=9.05)
+    return Trade(tradeid=vt_tradeid, orderid=vt_orderid, direction=direction,
+                 datetime=_dt(2026, 8, 27, 9, 31), symbol=symbol, volume=100, price=9.05)
 
 
 def _adapter():
@@ -406,7 +408,10 @@ class TestReconcileOrders:
              patch.object(trading, "write_trade_log") as wt:
             trading.reconcile_orders(adapter, "s1", "600000.SHSE")
         assert wt.call_count == 2
-        wt.assert_called_with(adapter.query_trades.return_value[1], adapter, "s1", "600000.SHSE")
+        last = wt.call_args_list[-1]
+        assert isinstance(last.args[0], Trade)
+        assert last.args[0].tradeid == "t2" and last.args[0].orderid == "x.1"
+        assert last.args[1:] == (adapter, "s1", "600000.SHSE")
 
     def test_wal_orphans_alerted(self):
         adapter = MagicMock()

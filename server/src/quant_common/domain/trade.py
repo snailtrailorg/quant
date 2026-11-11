@@ -14,13 +14,14 @@ from .enums import Direction
 
 @dataclass(frozen=True)
 class Trade:
-    tradeid: str
-    orderid: str
+    tradeid: str             # 存 vt_tradeid（trade_ref 唯一键）
+    orderid: str             # 存 vt_orderid（券商侧对账键；裸 orderid 不在此，P3 插件按此填）
     symbol: str
     direction: Direction
     price: float
     volume: float
     datetime: datetime | None = None
+    client_id: str = ""         # best-effort：_vt2cid 反填；trade_log 认领用
 
 
 @dataclass(frozen=True)

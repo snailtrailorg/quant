@@ -45,3 +45,4 @@ class OrderState:
     traded: float
     price: float
     datetime: datetime | None = None
+    client_id: str = ""         # best-effort：平台侧稳定身份（P1b 由 _vt2cid 反填，P3 由插件填）

@@ -108,7 +108,7 @@ class TestCancelWorkingOrders:
         ]
         adapter.cancel_order.side_effect = [None, RuntimeError("x")]
         out = _cancel_working_orders(adapter)
-        assert out == {"requested": 2, "failed": 1}
+        assert out["requested"] == 2 and out["failed"] == 1 and out["untranslatable"] == 0
 
 
 class TestCloseAllPositions:

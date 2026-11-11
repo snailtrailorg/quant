@@ -97,6 +97,7 @@ def wired():
         "frozen": {"now": False, "sticky": False, "sticky_cause": None},
         "warmup_pg": lambda: [], "stop_check": lambda: False,
         "reconcile": MagicMock(), "account_id": 1,
+        "exec_port": MagicMock(),          # 172b：EVENT_TRADE 端口（必填）
         "closing": hw.threading.Event(),   # 批 171s：注入 Gate，fixture 持有以便 run() 收尾后复位
     }
     captured = {}

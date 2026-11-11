@@ -429,6 +429,7 @@ def run(ctx: dict) -> None:
         raise ValueError("ctx.account_id required——裸键形态已退役（批 66b；上游 live_task.account_id NOT NULL）")
     strategy, adapter = ctx["strategy"], ctx["adapter"]
     ee = ctx["event_engine"]          # 评审 C1：键名统一
+    exec_port = ctx["exec_port"]      # 172b：事件推送走 ExecutionPort（必填，禁回落直注册）
     td_api = ctx.get("td_api")
     history = ctx["history"]
     frozen = ctx["frozen"]            # 与 _run_hub_mode 的 send_order 网关共享同一 dict（评审 C2）
@@ -441,10 +442,10 @@ def run(ctx: dict) -> None:
              "dropped_cross": 0, "sess_bar_wall": 0.0}
     hb_task_key = f"quant:hb:task:{tid}"
 
-    # ——— EVENT_TRADE → trade_log（评审 S1；4a 单源化 trading）———
+    # ——— EVENT_TRADE → trade_log（评审 S1；4a 单源化 trading；172b 走端口）———
     @make_guard("hub.on_trade", _alert)
-    def on_trade(event):
-        trading.write_trade_log(event.data, adapter, sid, symbol)
+    def on_trade(t):
+        trading.write_trade_log(t, adapter, sid, symbol)
         # 批 69a：SSE 信号帧（零内容——前端重拉 orders/position）
         try:
             from src.quant_common.eventbus import bus  # 惰性导入（notify.py:89 先例）
@@ -452,7 +453,7 @@ def run(ctx: dict) -> None:
         except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
 
-    ee.register(__import__("vnpy.trader.event", fromlist=["EVENT_TRADE"]).EVENT_TRADE, on_trade)
+    exec_port.subscribe_trade(on_trade)
     # ——— 消费组（先建组后回放，评审陷阱 6）———
     # P0-3 修复（2026-08-20 双盲审计 A1）：重启即销毁旧组重建（新组从 $ 起）——原组残留时 ">" 从旧水位
     # 续消费，重启窗内 bar 重驱动 on_bar=重复下单；丢的 bar 由暖机/gap 从 DB 补，双保险=下方 max_ts 过滤。
