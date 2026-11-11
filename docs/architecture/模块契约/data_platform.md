@@ -62,7 +62,7 @@ server/src/data_platform/
 
 ## 批 57 新模块：routing.py（2026-09-20，29 号 §五 M2）
 
-- **resolve(req, principal=None) -> CandidateChain**：五步——硬过滤（external_interface.capabilities
+- **resolve(req, principal=None) -> CandidateChain**：五步——硬过滤（data_source.capabilities
   （55a 语义名经 _CAP_KIND_ALIASES 映射）+enabled+SMClient.covers scope+权限 market 级）/软排序
   （健康一票前置（熔断沉底——28 §6.1 张力裁决）>position 人工序>三因子加权）/审计落 routing_decision
   /供给模式排除 local_pg（28 §7.1 v3.2）/local_pg 消费模式恒第一候选（LOCAL_KINDS 起步={bar_daily}）。
@@ -73,7 +73,7 @@ server/src/data_platform/
   routing_policy.bulkhead_defaults 覆写>派生初值（M3+ Quality 档案真实化）。
 - **热更新**：`cfg:version` Valkey 单调整数（策略页保存 INCR bump_config_version）+TTL 2s 周期对账
   （pub/sub 订阅通道挂 M4/M5）。
-- 读写表：routing_policy/routing_decision（读写）；external_interface（读）。
+- 读写表：routing_policy/routing_decision（读写）；data_source（读）。
 - 被调：web_api /api/routing/*（策略 CRUD+dry-run+审计）；engine._get_kline_adapter 试点
   （system_config 键 routing_kline_pilot=on 时 resolve(supply) 选源；off=原路径回滚）。
 
@@ -337,7 +337,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 | `bar_1D` / `bar_1min` / `bar_5min` | `db.save_bars` / `save_bars_overwrite` | `db.get_bars`（回测/分析/K线端点） |
 | `daily_basic` | `tushare_adapter.save_daily_basic` | web_api（筛选端点） |
 | `trade_cal` | `tushare_adapter.pull_trade_cal` | `db.get_trade_calendar` / `is_trading_day` |
-| `external_interface`（批55a 合表 0090：data_source_config+broker_config→统一外部接口表——行=账号/列=能力/页签=过滤视图，见 27 号架构文档） | web_api（/api/interfaces 族+旧端点垫片，写侧 ⊆ 代码能力校验） | `data_source.get_data_source`（数据域行）/`broker.get_broker`（交易域行） |
+| `data_source`（0116 拆表，原 data_source_config；行=账号/列=能力，见 A02）+ `trading_account`（0116 拆表，原 broker_config） | web_api（/api/interfaces 族，写侧 ⊆ 代码能力校验） | `data_source.get_data_source`（数据源）/ `broker.get_broker`（交易账号） |
 | `data_source_usage` | `DataSource.record_usage`（API 用量，A4 #36；批55a 加 interface_id 列——provider 双填保留显示冗余） | web_api（用量看板，GROUP BY provider 不变） |
 | `channel_config` | web_api（消息通道端点） | `channel.get_channel` |
 | `live_trading_config` | web_api（实盘开关端点） | `risk.is_live_trading_allowed` |
