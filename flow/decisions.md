@@ -758,3 +758,12 @@
 - **不变量**：`venv=全部 Python 依赖`——守护者=每日 06:00 security_scan（扫 venv 实态非 lock，任何 lock 外漂移 24h 内可见：filelock 4.1.1 实证）。
 - **分工**（2026-10-26 用户裁定）：Python 包+系统包升级=用户；deploy 面升级（lock 前滚执行/彩排/上产）=助手；机制代码=助手。
 - **重开条件**：多机扩容需统一编排 / 环境漂移成高频痛点 / 密码学基座需发行版维护。
+
+## 2026-11-11 · D32 接入插件架构三项裁定（可插拔 / 五维 / 部署分片）
+
+- **可插拔 ≠ 热插拔**：插件随 release 交付。可插拔的验收定义=新增 provider 只加 `providers/<id>/` 目录 + 一行注册 + 一次发布，核心文件零改动。不承诺运行中动态装卸——证券交易需慎重决策与长期稳定，行业无热插拔需求；本仓部署单元是 release（版本树不可变、venv 跨 release 共享）。
+- **五维**：Market × Instrument × Provider × Risk × **Account**。Account 只回答「能不能」（准入/资金/授权/停牌态），Risk 回答「该不该」（仓位/回撤/熔断）。
+- **部署分片**：边界由**市场**定义（`deploy_markets`，机器级配置放 release 树外 `/etc`，走 Ansible host_vars），不由插件定义。非目标=跨市场组合策略、跨机聚合视图。
+- **同批技术裁定**：号段唯一域 `(account, provider, terminal_id)`（同账号 hub MD + N 个任务 TD 并存）；租约真源 DB 表（跨机互斥，本机 Valkey 只缓存）；acquire 单语句原子；平仓失败语义三分（开仓 fail-closed / 平仓 fail-open 兜底链 / 读失败降级）；`close_policy` 的 `has_limit_band`/`price_tick` 删、其余三键迁 provider 维；`research` 进 `PORT_CAPS` 不进 `CAPABILITIES`。
+- **理由**：四轮盲审（架构/可实施性/一致性/红队）共识，审报告 `flow/审计/2026-11-11-D32四审并帧.md`；终审两票「可进入 P1a 立项」。
+- **实施**：P1a/P1b/P2–P5 + P7 数据侧销账，每批双盲审。
