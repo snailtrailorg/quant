@@ -226,3 +226,34 @@ def test_md_port_delegates_to_gateway(monkeypatch):
     assert seen["gw"].calls[0] == (True, False)
     assert seen["gw"].calls[1] == ("sub", ("600000.SHSE",))
     assert port.connected is True
+
+# ── B 路线：端口兼容面（worker 现行形状，传输在插件内）────────────
+
+def test_compat_send_and_cancel_shape():
+    from src.providers.xtp.td import XtpExecutionPort, _LegacyCompat
+
+    gw = _Gw()
+    port = XtpExecutionPort(_EE(), gw, _Api(), _slot(), lambda n: (lambda f: f))
+    compat = _LegacyCompat(port, account_id=1)
+
+    from src.strategy_framework.adapters import Order as LegacyOrder
+    cid = compat.send_order(LegacyOrder("600000.SHSE", "BUY", 100, 10.0, "limit", "t1:e1000:c9"))
+    assert cid == "t1:e1000:c9" and gw.sent[0].reference == cid
+
+    vt = compat.get_vt_orderid(cid)
+    assert vt == "XTP.1"
+    from vnpy.trader.constant import Exchange
+    port._orders[vt] = SimpleNamespace(orderid="1", symbol="600000", exchange=Exchange.SSE)
+    compat.cancel_order(vt)            # 传 vt 也能撤（映射回 cid，命中缓存）
+    assert gw.cancelled and gw.cancelled[0].orderid == "1"
+
+
+def test_compat_query_returns_domain_objects():
+    from src.providers.xtp.td import XtpExecutionPort, _LegacyCompat
+
+    port = XtpExecutionPort(_EE(), _Gw(), _Api(), _slot(), lambda n: (lambda f: f))
+    port._orders["XTP.1"] = order_data()
+    port._cid2vt["CID"] = "XTP.1"
+    compat = _LegacyCompat(port)
+    rows = compat.query_orders()
+    assert rows and rows[0].vt_orderid == "TEST.1" or rows[0].orderid == "1"

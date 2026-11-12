@@ -254,3 +254,82 @@ def build_td(event_engine, slot, setting: dict,
     port = XtpExecutionPort(event_engine, gw, api, slot, guard_factory, setting)
     port.connect()
     return port
+
+
+def build_td_compat(event_engine, slot, setting: dict,
+                    guard_factory: Callable[[str], Callable[[Callable], Callable]],
+                    account_id: int | None = None):
+    """过渡装配：返回 worker 现行 adapter 形状（内部仍是插件端口）。"""
+    port = build_td(event_engine, slot, setting, guard_factory)
+    return _LegacyCompat(port, account_id)
+
+# ── 兼容面（worker/strategy 现行调用形状；P3 出口由端口直连替代）────
+# 说明：调用点仍用 legacy 形状，但传输/会话/映射已全在本插件；P4 前收敛为纯端口。
+
+def _ruleset(port, sym: str = ""):
+    from src.data_platform.rules import rules_for
+    return rules_for(getattr(port, "account_id", None), sym or "",
+                     provider="xtp")
+
+
+class _LegacyCompat:
+    """把 ExecutionPort 的域接口映射为 worker 现行 adapter 形状（零 vnpy import）。"""
+
+    close_policy_provider = "xtp"
+    paper_mode = False
+
+    def __init__(self, port: "XtpExecutionPort", account_id: int | None = None):
+        self._port = port
+        self.account_id = account_id
+
+    # 交易
+    def send_order(self, order) -> str | None:
+        from src.quant_common.domain import Action, Order as DOrder, OrderType
+
+        act = Action.BUY if str(order.action).upper() == "BUY" else Action.SELL
+        otype = OrderType.MARKET if str(getattr(order, "order_type", "limit")).lower() == "market" else OrderType.LIMIT
+        r = self._port.send(DOrder(order.symbol, act, order.volume, order.price, otype,
+                                   getattr(order, "client_id", "") or ""))
+        return r.client_id if r.accepted else None
+
+    def cancel_order(self, order_id: str) -> None:
+        cid = order_id
+        with self._port._lock:
+            if order_id in self._port._vt2cid:
+                cid = self._port._vt2cid[order_id]
+        self._port.cancel(cid)
+
+    def get_vt_orderid(self, client_id: str):
+        return self._port.resolve_vt_order_id(client_id)
+
+    def query_position(self):
+        return self._port.query_positions()
+
+    def query_account(self):
+        st = self._port.query_account()
+        return [st] if st is not None else []
+
+    def query_orders(self):
+        return self._port.query_orders()
+
+    def query_trades(self):
+        return self._port.query_trades()
+
+    # 规则面（与 adapters 同源：RuleSet）
+    def close_policy(self) -> dict:
+        rs = _ruleset(self._port)
+        return {**rs.close_policy, "has_limit_band": rs.has_limit_band,
+                "price_tick": float(rs.ins.tick_size or 0)}
+
+    def close_action(self, pos) -> str:
+        return "BUY" if getattr(pos, "direction", "") == "direction_short" else "SELL"
+
+    def close_reference_price(self, tick: dict, pos, action: str) -> float:
+        rs = _ruleset(self._port, getattr(pos, "symbol", ""))
+        return rs.reference_price(tick, pos, action)
+
+    def max_close_order_qty(self, sym: str) -> int:
+        return _ruleset(self._port, sym).max_close_qty()
+
+    def round_close_price(self, px: float, tick: dict, sym: str = "") -> float:
+        return _ruleset(self._port, sym or (tick or {}).get("symbol", "")).round_price(px)
