@@ -3,6 +3,8 @@
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（§执行层 Order/Position/ExecutionAdapter）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 
+> **最近变更（批 172c P2b，2026-11-11）**：平仓规则面委托 `data_platform.rules.rules_for`（close_policy/opponent_price/has_limit_band/close_reference_price/max_close_order_qty/round_close_price）；`round_close_price(px, tick, sym="")` 按 `InstrumentSpec.tick_size` 取整（不再读 system_config）；**传输面 send/cancel/query/连接一行未动**（P3）。
+>
 > **最近变更**（模块代码 git 史前 3 条；本节为导航快照，真相源=git log）：
 > - 2026-10-18　僵尸清理 Z2：死函数 24 个删除（65 候选逐判）
 > - 2026-10-03　批86-B 纸上交易落码：paper 命名规范化 + 0125-0127 三迁移 + paper_trade 单键矩阵 + PaperTrade

@@ -1,5 +1,7 @@
 # 模块契约 · data_platform（数据中台）
 
+> **批 172c（2026-11-11）新增**：`specs.py`（MarketSpec/InstrumentSpec/AccountPermSpec/AccountSnapshot + cfg:version 缓存 + 规格写侧）与 `rules.py`（RuleSet/validate/reference_price/sellable/pre_trade_checks/close_fallback_price/rules_for）；规则唯一判定源，adapters 与 risk 只消费。
+>
 > 本模块的 public API + 依赖 + 被调 + 读写表 + 不变量。任务改本模块前读本文件，不用读整个项目。
 > 配套：`docs/architecture/接口契约.md`（跨模块签名 + 数据结构）。本文件不重复数据结构定义，只列"本模块暴露什么"。
 

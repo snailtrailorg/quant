@@ -6,6 +6,8 @@
 > 批 4（2026-08-27）：4a 交易域九单元单源化 trading.py；4b worker 迁 runtime 骨架。
 > **批 6b（2026-09-01）：direct 退役**——hub 是唯一实盘行情模式（md_mode=direct → EX_CONFIG 拒绝），§二 改退役记录。
 
+> **最近变更（批 172c P2b，2026-11-11）**：`_close_all_positions` 定价切 `RuleSet`（adapter 薄委托）+ 四级兜底（跌停线→对手价×aggression→最新价钳带内→转人工）+ 减仓 `validate(mode="reduce")` 挂点；`strategy.place_order` WAL 后加合规校验（拒绝标同一 order_log 行 rejected）；`risk.check_order` 新增资金/保证金硬门（CASH_UNKNOWN/CASH_INSUFFICIENT/MARGIN_INSUFFICIENT，平仓豁免）；`hub_worker` 新增 2s cfg:version 轮询 + 启动规则预检。
+>
 > **最近变更（批 172b，2026-11-11）**：EVENT_ORDER/EVENT_TRADE 消费切 `ports.ExecutionPort`（迁移期 `legacy_exec_port.py` 反腐蚀层，P3 删）；`write_order_status/write_trade_log` 入参改 domain（`OrderState/Trade`）；`run(ctx)` 新增 `exec_port`；`legacy_translate.py` 为 P1b 翻译层（零 vnpy import）。
 
 > **最近变更（批 66a/66b/66c，2026-09-26/27 上产）**：旧 `--id` 路径退役（批 66a D26 #6——`--task-id` 唯一）；`bar_stream_key(symbol, account_id)` 必填 raise（裸键防线）+ `_account_mismatch` 同源校验（签名去 symbol/market 跳过分支）；`_hub_alive(r, account_id)` per-account（修原裸键读=A股心跳恒真掩盖加密 hub 死亡）；水位键含 account；`ctx.market`（接口行真源）+ `_in_mkt_session` per-market；`_ts_gap_frozen`（60s+ 段内段首 2 分钟豁免→sticky）+ `_rewarm` 推进 max_ts（解冻闭环）。
