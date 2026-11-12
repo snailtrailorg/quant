@@ -226,7 +226,7 @@ class TestRenewGuardContract:
     def test_exception_backoff_protected(self):
         """SdkLifecycleError -> False 且计入退避（防持续抛错无节奏重试）。"""
         from src.strategy_framework.md_session import XtpMdSession
-        from src.strategy_framework.md_api_guard import SdkLifecycleError
+        from src.providers.xtp.md_api_guard import SdkLifecycleError
         md = self._md()
         md.relogin.side_effect = SdkLifecycleError("relogin 在 idle 态非法")
         sess = XtpMdSession(md)

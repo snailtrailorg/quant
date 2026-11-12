@@ -13,7 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.strategy_framework.md_api_guard import GuardedXtpMdApi, SdkLifecycleError, SdkState
+from src.providers.xtp.md_api_guard import GuardedXtpMdApi, SdkLifecycleError, SdkState
 
 
 class _FakeGateway:

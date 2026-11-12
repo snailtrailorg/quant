@@ -145,7 +145,7 @@ class XtpMdGateway(MdGateway):
         from vnpy.trader.constant import Exchange
         from vnpy.trader.event import EVENT_LOG
 
-        from src.strategy_framework.md_api_guard import GuardedXtpMdApi
+        from src.providers.xtp.md_api_guard import GuardedXtpMdApi
         from src.strategy_framework.md_session import XtpMdSession, load_xtp_window_cfg
         from src.strategy_framework.runtime.alerts import make_alert
         from src.strategy_framework.runtime.mdlink import MdSessionSupervisor
@@ -201,7 +201,7 @@ class XtpMdGateway(MdGateway):
         """
         from vnpy_xtp.gateway.xtp_gateway import EXCHANGE_VT2XTP
 
-        from src.strategy_framework.md_api_guard import SdkState
+        from src.providers.xtp.md_api_guard import SdkState
         raw, ex = symbol.rsplit(".", 1)
         e = self._EX.get(ex)
         xtp_ex = EXCHANGE_VT2XTP.get(e) if e else None
