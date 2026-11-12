@@ -8,4 +8,15 @@ from __future__ import annotations
 
 from . import xtp  # noqa: F401  —— import 即注册（P3）
 
-__all__: list[str] = ["xtp"]
+
+def ensure_registered() -> None:
+    """幂等确保 XTP 已注册（registry.clear 后 / 进程重载场景；启动接线用）。"""
+    from src.registry import DOMAIN_TRADING, UnknownProvider, get, register
+
+    try:
+        get(DOMAIN_TRADING, "xtp")
+    except UnknownProvider:
+        register(DOMAIN_TRADING, "xtp", xtp.XtpPlugin())
+
+
+__all__: list[str] = ["xtp", "ensure_registered"]
