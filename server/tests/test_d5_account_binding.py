@@ -39,6 +39,13 @@ class TestAccountAllowsCheckOrder:
     def test_buy_allowed_when_account_allows(self, rc, monkeypatch):
         monkeypatch.setattr(rc, "_get_global_state", lambda vid: _state())
         monkeypatch.setattr("src.data_platform.perms.account_allows", lambda vid, sym: True)
+        # 172c：资金门（P2b）要求新鲜快照——本类只测权限维，注入足额快照
+        from datetime import datetime
+
+        from src.data_platform.specs import AccountSnapshot
+        monkeypatch.setattr(
+            "src.data_platform.specs.AccountSnapshot.of",
+            classmethod(lambda cls, aid: AccountSnapshot(aid, datetime.now(), 1e9, 1e9, 0.0, 1e9)))
         d = rc.check_order(dict(BUY), account_id=1)
         assert d.approved
 

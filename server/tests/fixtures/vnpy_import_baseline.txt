@@ -4,19 +4,19 @@
 # 注意：行号会随这些文件改动漂移——仅位移时同步更新并在提交信息注明「仅位移」。
 # count: 42
 md_hub/main.py:37:4
-strategy_framework/adapters.py:225:4
-strategy_framework/adapters.py:258:12
-strategy_framework/adapters.py:309:8
-strategy_framework/adapters.py:310:8
-strategy_framework/adapters.py:342:8
-strategy_framework/adapters.py:663:8
-strategy_framework/adapters.py:679:8
-strategy_framework/adapters.py:680:8
-strategy_framework/adapters.py:719:8
-strategy_framework/adapters.py:720:8
-strategy_framework/adapters.py:759:8
-strategy_framework/adapters.py:760:8
-strategy_framework/adapters.py:904:12
+strategy_framework/adapters.py:239:4
+strategy_framework/adapters.py:272:12
+strategy_framework/adapters.py:323:8
+strategy_framework/adapters.py:324:8
+strategy_framework/adapters.py:356:8
+strategy_framework/adapters.py:677:8
+strategy_framework/adapters.py:693:8
+strategy_framework/adapters.py:694:8
+strategy_framework/adapters.py:733:8
+strategy_framework/adapters.py:734:8
+strategy_framework/adapters.py:773:8
+strategy_framework/adapters.py:774:8
+strategy_framework/adapters.py:918:12
 strategy_framework/md_api_guard.py:32:0
 strategy_framework/md_api_guard.py:33:0
 strategy_framework/md_gateway.py:144:8

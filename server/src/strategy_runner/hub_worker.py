@@ -885,12 +885,50 @@ def run(ctx: dict) -> None:
                "worker 退出由 systemd 接管；请查 journalctl 定位首个异常。",
                code="runtime.fatal")
 
+    # P2b：启动规则完整性预检（动态规则注册 + 在跑标的规格齐全）
+    try:
+        from src.data_platform.rules import assert_dynamic_rules_complete, rules_for
+        assert_dynamic_rules_complete()
+        _rs = rules_for(account_id, symbol, provider=getattr(adapter, "close_policy_provider", None))
+        if _rs.state != "fresh":
+            _alert(f"任务 {tid} 规则不完整（{symbol}）",
+                   "规格缺失=开仓将 fail-closed；请检查 security_master/band_rules。",
+                   code="rules.missing")
+    except Exception as e:   # noqa: BLE001 —— 预检失败不阻断启动，但必须可审计
+        logger.error("规则完整性预检失败: %s", e)
+        _alert(f"任务 {tid} 规则预检失败", str(e)[:300], code="rules.preflight")
+
     loop = EngineLoop(
         name=f"live-task-{tid}", step=5.0,
         sleeper=XReadSleeper(r, stream, gname, cname, process_batch),  # 流消费=sleeper 注入
         watchdog=lambda: _sd_notify("WATCHDOG=1"), event_engines=(ee,),  # 喂狗+事件线程存活（R-BR12）
         on_fatal=_on_fatal)
     loop.every("stop-check", 5.0, _stop_hook)        # 停止（P4-3；清理+exit 0 在钩子内）
+
+    _cfg_seen = {"v": None}
+
+    def _cfg_version_hook():
+        """P2b：配置版本轮询（≤2s）——变化即清规格缓存，全进程读到新规格。"""
+        try:
+            from src.data_platform.routing import CFG_VERSION_KEY
+            raw = r.get(CFG_VERSION_KEY)
+            ver = int(raw) if raw and str(raw).isdigit() else 0
+        except Exception as e:   # noqa: BLE001 —— 读失败下轮再试
+            logger.debug("cfg:version 轮询失败: %s", e)
+            return
+        if _cfg_seen["v"] is None:
+            _cfg_seen["v"] = ver
+            return
+        if ver != _cfg_seen["v"]:
+            _cfg_seen["v"] = ver
+            try:
+                from src.data_platform import specs
+                specs.invalidate()
+            except Exception as e:   # noqa: BLE001
+                logger.warning("规格缓存失效失败: %s", e)
+            logger.info("cfg:version=%s 变化，规格缓存已失效", ver)
+
+    loop.every("cfg-version", 2.0, _cfg_version_hook)
 
     def _daily_roll():
         """批 119：daily_history 日界滚动（v2 复审 D3 钉死）——**每步求值，不依赖 session

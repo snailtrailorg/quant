@@ -54,6 +54,22 @@ def normalize_board(market_text: str | None) -> str | None:
     }.get(str(market_text).strip())
 
 
+def _tick_for(category: str, tick) -> float | None:
+    """category → 交易所事实 tick（stock 0.01；基金/转债 0.001；perp 保留行值）。
+
+    上游源常把 tick 灌成 0.001/0，写侧归一可防迁移后的重复污染。
+    """
+    try:
+        t = float(tick)
+    except (TypeError, ValueError):
+        t = 0.0
+    if category == "stock":
+        return 0.01
+    if category in ("listed_fund", "convertible", "fund", "reits"):
+        return 0.001
+    return t if t > 0 else (tick if tick is not None else None)
+
+
 @dataclass(frozen=True)
 class SecurityAttr:
     """security_master 一行的形状（SMClient.get 返回）。"""
@@ -159,6 +175,7 @@ class SMClient:
         return None
 
     def upsert_rows(self, rows: list[tuple]) -> int:
+        # 172c：tick 是品种事实——写入即按 category 归一（防上游重复灌入既有的错值）
         """填充链写侧（engine 同步任务调用——executemany 单批，18 号 §2.1）。
 
         rows 元组序（**13 列，批 108·步 2 起**）=(vt_symbol, market, exchange, category, board,
@@ -180,7 +197,8 @@ class SMClient:
             raise ValueError(
                 f"upsert_rows 需 13 列且 session_id 非空（批 108 起）；"
                 f"收到 {len(bad)}/{len(rows)} 行不合规，首行={tuple(bad[0])[:4]}…")
-        clean = [(*r[:9], r[9], _null_date(r[10]), _null_date(r[11]), r[12]) for r in rows]
+        clean = [(*r[:8], _tick_for(r[3], r[8]), r[9], _null_date(r[10]), _null_date(r[11]), r[12])
+                 for r in rows]
         if not clean:
             return 0
         from .db import get_conn
@@ -192,7 +210,11 @@ class SMClient:
                     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
                     "ON CONFLICT (vt_symbol) DO UPDATE SET "
                     "name=EXCLUDED.name, industry=EXCLUDED.industry, board=EXCLUDED.board, "
-                    "multiplier=EXCLUDED.multiplier, tick_size=EXCLUDED.tick_size, "
+                    "multiplier=EXCLUDED.multiplier, "
+                    # 172c：tick 按库内 category 归一（调用方 category 可能是历史词 etf）
+                    "tick_size=CASE WHEN security_master.category='stock' THEN 0.01 "
+                    "WHEN security_master.category IN ('listed_fund','convertible','fund','reits') THEN 0.001 "
+                    "ELSE EXCLUDED.tick_size END, "
                     "trade_phase=EXCLUDED.trade_phase, session_id=EXCLUDED.session_id, "
                     "list_date=COALESCE(EXCLUDED.list_date, security_master.list_date), "
                     "delist_date=EXCLUDED.delist_date, updated_at=now()", clean)

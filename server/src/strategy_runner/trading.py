@@ -616,17 +616,41 @@ def _close_all_positions(adapter, account_id=None, operator: str = "manual",
                 round_no_quote.append(f"{sym}:{reason}")
                 logger.warning("全平 no_quote %s：%s（不静默降级到腾讯/成本价/陈bar）", sym, reason)
                 continue
+            # P2b：减仓合规挂点（停牌放行、只告警；规则缺失不阻断急停）
+            try:
+                from types import SimpleNamespace as _NS
+
+                from src.data_platform.rules import RuleViolation, rules_for as _rules_for
+                _rules_for(account_id, sym, provider=getattr(adapter, "close_policy_provider", None)).validate(
+                    _NS(symbol=sym, action=action, volume=vol, price=0.0,
+                        order_type="limit", reason="emergency_close_all"), tick, "reduce")
+            except RuleViolation as e:
+                logger.warning("全平规则提示 %s: %s", sym, e)
+            except Exception as e:   # noqa: BLE001 —— 规则层故障不得阻断急停
+                logger.warning("全平规则检查失败（继续）%s: %s", sym, e)
             try:
                 px = adapter.close_reference_price(tick, pos, action)
             except Exception as e:
                 logger.warning("全平定价失败 %s: %s", sym, e)
                 px = 0.0
             if not px or px <= 0:
+                # P2b 四级兜底：跌停线→对手价×aggression→最新价钳带内→None 转人工
+                try:
+                    from src.data_platform.rules import close_fallback_price, rules_for
+                    _rs = rules_for(account_id, sym, provider=getattr(adapter, "close_policy_provider", None))
+                    _fb = close_fallback_price(tick, action, _rs.close_policy, _rs.has_limit_band)
+                    px = float(_fb) if _fb else 0.0
+                    if px > 0:
+                        logger.warning("全平第 3 级兜底定价 %s: %.3f（对手价缺失）", sym, px)
+                except Exception as e:   # noqa: BLE001 —— 兜底失败仍按 no_quote 处理
+                    logger.warning("全平兜底定价失败 %s: %s", sym, e)
+                    px = 0.0
+            if not px or px <= 0:
                 round_no_quote.append(f"{sym}:no-price")
                 logger.warning("全平无可用参考价 %s（no_quote 留痕，不静默降级）", sym)
                 continue
             try:
-                rpx = adapter.round_close_price(px, tick)
+                rpx = adapter.round_close_price(px, tick, sym)
             except Exception as e:
                 logger.warning("全平取整失败 %s: %s", sym, e)
                 rpx = px

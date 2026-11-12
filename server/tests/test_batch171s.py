@@ -203,7 +203,7 @@ class TestS2DirectionAndPricing:
         a = _Adapter([])
         lng = _pos("600000.SHSE")
         sht = _pos("BTCUSDT.BINANCE", direction="direction_short")
-        with patch("src.data_platform.hub_quote.get_close_policy", return_value=_policy()):
+        with _patch_rules():
             assert a.close_action(lng) == "SELL"
             assert a.close_action(sht) == "BUY", "direction_short 必须派生 BUY（买回平空）"
             # 有跌停线 → 跌停价（不看对手价）
@@ -229,7 +229,7 @@ class TestS2DirectionAndPricing:
         req = "s2" + uuid.uuid4().hex[:8]
         try:
             with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
-                 patch("src.data_platform.hub_quote.get_close_policy", return_value=_policy()), \
+                 _patch_rules(), \
                  patch("src.data_platform.hub_quote.get_retry_config", return_value=_retry_cfg()), \
                  patch.object(T, "_quote_price",
                               return_value=({"ask": ["50000"], "bid": ["49900"]}, "")), \
@@ -284,7 +284,7 @@ class TestS3ReQuoteEveryRound:
         rc = MagicMock()
         rc.check_order.return_value = SimpleNamespace(approved=True, reason="")
         with patch("src.risk_control.risk.RiskControl.get", return_value=rc), \
-             patch("src.data_platform.hub_quote.get_close_policy", return_value=_policy()), \
+             _patch_rules(), \
              patch("src.data_platform.hub_quote.get_retry_config", return_value=_retry_cfg()), \
              patch.object(T, "_quote_price",
                           side_effect=[({"px": 10.0}, ""), ({"px": 9.5}, "")]) as q, \
@@ -698,52 +698,67 @@ class _EmptyConn:
         return []
 
 
-class TestS8ClosePolicyConfig:
-    """缺行不回落/不 warning、覆写不生效、值域越界不拒 → 本类红。"""
+def _fake_rules(policy=None, tick_size="0.001"):
+    """P2b：adapter 规则面的测试替身（规格层不读库）。"""
+    from src.data_platform.rules import RuleSet, _DummyAcc
+    pol = policy or _policy()
+    ins = SimpleNamespace(tick_size=tick_size, price_band=None, lot_size=1, order_types=[],
+                          sellable_rule="volume_minus_frozen", venue_flags={},
+                          position_side="long_only", t_plus=1, order_range=None, symbol="")
+    acc = _DummyAcc({"opponent_depth": pol["opponent_depth"],
+                     "aggression": pol["aggression"],
+                     "max_order_qty": pol["max_order_qty"]})
+    return RuleSet(ms=None, ins=ins, acc=acc, state="fresh")
 
-    def test_missing_rows_fall_back_to_code_defaults_with_warning(self, caplog):
-        from src.data_platform.hub_quote import get_close_policy
-        with caplog.at_level(logging.WARNING, logger="src.data_platform.hub_quote"), \
-             patch("src.data_platform.db.get_conn", return_value=_EmptyConn()):
-            pol = get_close_policy("xtp")
+
+def _patch_rules(policy=None, tick_size="0.001"):
+    return patch.object(ExecutionAdapter, "_ruleset",
+                        lambda self, sym="": _fake_rules(policy, tick_size))
+
+
+class TestS8AccountClosePolicy:
+    """P2b：策略源=账户 params；缺省按 provider；越界拒写；旧 system_config 键必须退役。"""
+
+    def test_missing_params_fall_back_to_provider_defaults(self):
+        a = _Adapter([])
+        a.account_id = None            # 无账户上下文 → provider 缺省
+        pol = a.close_policy()
         assert pol["aggression"] == 0.10 and pol["max_order_qty"] == 100000
-        assert pol["opponent_depth"] == 1 and pol["price_tick"] == 0.001
-        assert any("回落代码缺省" in r.getMessage() for r in caplog.records), \
-            "缺行必须 warning 留痕（静默 fail-open=红）"
+        assert pol["opponent_depth"] == 1
 
-    def test_bounds_registered_for_close_policy_keys(self):
+    def test_system_config_close_policy_retired(self):
         from src.web_api.routes.system import SYSTEM_CONFIG_BOUNDS
-        for k in ("close_policy.xtp.opponent_depth", "close_policy.xtp.aggression",
-                  "close_policy.xtp.max_order_qty", "close_policy.xtp.price_tick",
-                  "close_policy.emt.aggression", "close_all_retry_max",
-                  "close_all_deadline_s", "no_quote_empty_max"):
-            assert k in SYSTEM_CONFIG_BOUNDS, f"{k} 缺值域注册（前端控件无 bounds）"
+        assert not [k for k in SYSTEM_CONFIG_BOUNDS if k.startswith("close_policy.")]
+        if _db_up():
+            from src.data_platform.db import get_conn
+            with get_conn() as c:
+                n = c.execute("SELECT count(*) FROM system_config WHERE key LIKE 'close_policy.%'").fetchone()[0]
+            assert n == 0, "旧配置键必须退役（0177 contract）"
+
+    def test_out_of_bounds_rejected_by_specs(self):
+        from src.data_platform import specs
+        with pytest.raises(ValueError):
+            specs.update_close_policy(0, {"opponent_depth": 9})
+        with pytest.raises(ValueError):
+            specs.update_close_policy(0, {"aggression": 0.9})
 
     @pytest.mark.skipif(not _db_up(), reason="真库不可用")
-    def test_db_override_effective_and_out_of_bounds_rejected(self):
+    def test_account_params_override_effective(self):
+        from src.data_platform import specs
         from src.data_platform.db import get_conn
-        from src.data_platform.hub_quote import get_close_policy
-        from src.web_api.errors import ApiError
-        from src.web_api.routes.system import update_system_config
-        key = "close_policy.xtp.aggression"
         with get_conn() as c:
-            prev = c.execute("SELECT value FROM system_config WHERE key=%s",
-                             (key,)).fetchone()
-            c.execute(
-                "INSERT INTO system_config (key,value,value_type,description) "
-                "VALUES (%s,'0.25','float','test') "
-                "ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value", (key,))
-            c.commit()
+            row = c.execute("SELECT id, params FROM trading_account ORDER BY id LIMIT 1").fetchone()
+        acc_id, prev = row[0], row[1]
         try:
-            assert get_close_policy("xtp")["aggression"] == 0.25, "DB 覆写必须生效"
-            with pytest.raises(ApiError) as ei:
-                update_system_config(key, {"value": 0.9}, payload={"username": "t"})
-            assert ei.value.status_code == 400, "越界值必须拒写（bounds 生效）"
+            specs.update_close_policy(acc_id, {"opponent_depth": 2, "aggression": 0.25,
+                                               "max_order_qty": 500})
+            a = _Adapter([])
+            a.account_id = acc_id
+            assert a.close_policy()["aggression"] == 0.25
+            assert a.max_close_order_qty("600000.SHSE") == 500
         finally:
             with get_conn() as c:
-                if prev:
-                    c.execute("UPDATE system_config SET value=%s WHERE key=%s",
-                              (prev[0], key))
-                else:
-                    c.execute("DELETE FROM system_config WHERE key=%s", (key,))
+                c.execute("UPDATE trading_account SET params=%s::jsonb WHERE id=%s",
+                          (json.dumps(prev or {}, ensure_ascii=False), acc_id))
                 c.commit()
+            specs.invalidate()

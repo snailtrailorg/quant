@@ -76,5 +76,7 @@ RUNBOOK: dict[str, dict] = {
     "emergency.incomplete": {"label": "急停全平未竟", "guide": "重试用尽/绝对超时/连续无同源行情仍未平完——按紧急处置页 pending/no_quote 清单人工核对券商持仓与在场委托，必要时补挂平仓。"},
     "emergency.interrupted": {"label": "急停线程中断", "guide": "进程退出前 drain 超时、在飞平仓已中断——人工核对券商委托与持仓，必要时补挂平仓。"},
     "emergency.valkey_down": {"label": "急停同源行情全断", "guide": "Valkey 不可达致急停无同源报价、已停止空转——查 Valkey 服务与网络，恢复后重发一键清仓。"},
+    "rules.missing": {"label": "交易规格缺失", "guide": "security_master/band_rules 无该标行=开仓 fail-closed。补规格行（系统管理→系统权限/规格）后 cfg:version 自动生效。"},
+    "rules.preflight": {"label": "规则预检失败", "guide": "启动时规则加载异常（规格表不可读/动态规则未注册）。查日志首个异常；修复前开仓一律拒单。"},
     "emergency.worker_error": {"label": "急停线程异常", "guide": "急停专用线程顶层异常（已留痕+告警）——journalctl 查该任务首个异常，必要时人工处置持仓。"},
 }

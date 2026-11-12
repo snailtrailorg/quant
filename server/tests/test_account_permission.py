@@ -134,7 +134,9 @@ class TestAccountPermissionSeed:
         from src.data_platform.db import get_conn
         with get_conn() as conn:
             vid = conn.execute(
-                "SELECT id FROM trading_account WHERE provider='xtp' LIMIT 1").fetchone()
+                "SELECT id FROM trading_account t WHERE provider='xtp' "
+                "AND EXISTS (SELECT 1 FROM account_permission p WHERE p.account_id=t.id) "
+                "ORDER BY id LIMIT 1").fetchone()
         if vid is None:
             pytest.skip("无 xtp 交易 account")
         assert account_allows(vid[0], "600000.SHSE") is True

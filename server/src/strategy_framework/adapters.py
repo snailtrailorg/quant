@@ -129,14 +129,26 @@ class ExecutionAdapter(ABC):
         """
         return "BUY" if getattr(pos, "direction", "") == "direction_short" else "SELL"
 
+    def _ruleset(self, sym: str = ""):
+        """规则集（P2b：规格层唯一判定源）。account_id 由 runner 注入。"""
+        from src.data_platform.rules import rules_for
+        return rules_for(getattr(self, "account_id", None), sym or "",
+                         provider=self.close_policy_provider)
+
     def close_policy(self) -> dict:
-        """本 provider 的品种规则（件三配置属性）；读 system_config 走 data_platform 封装。"""
-        from src.data_platform import hub_quote
-        return hub_quote.get_close_policy(self.close_policy_provider)
+        """平仓策略（账户 params.close_policy，缺省按 provider）；由 RuleSet 解析。"""
+        try:
+            rs = self._ruleset("")
+            return {**rs.close_policy, "has_limit_band": rs.has_limit_band,
+                    "price_tick": float(rs.ins.tick_size or 0)}
+        except Exception as e:   # noqa: BLE001 —— 规则层故障不得阻断定价（回落代码缺省）
+            logger.warning("close_policy 规则读取失败（回落缺省）: %s", e)
+            return {"opponent_depth": 1, "aggression": 0.10, "max_order_qty": 100000,
+                    "has_limit_band": True, "price_tick": 0.001}
 
     def opponent_price(self, tick: dict, action: str) -> float:
         """实时可见最优对手单价：SELL→买档（卖给买一），BUY→卖档（向卖一买）。
-        depth 从配置（缺省 1=最优档）；缺档 / 0 价 / 非法 → 0.0（调用方按 no_quote 处理）。
+        depth 从账户策略（缺省 1=最优档）；缺档 / 0 价 / 非法 → 0.0（调用方按 no_quote 处理）。
         """
         try:
             depth = int(self.close_policy().get("opponent_depth", 1) or 1)
@@ -153,11 +165,10 @@ class ExecutionAdapter(ABC):
         return px if px > 0 else 0.0
 
     def has_limit_band(self, tick: dict, sym: str, policy: dict | None = None) -> bool:
-        """有无跌停线判定：配置 `has_limit_band=False` 强制按「无跌停线」（对手价×让价）处理；
-        其余（True/缺省）按 tick.lower_limit>0 判。子类可按 category 覆写。
+        """有无跌停线：band_rules.has_limit_band=False 强制「无跌停线」（对手价×让价）；
+        其余按 tick.lower_limit>0 判。`policy` 参数供 close_reference_price 复用（免重复读）。
 
-        2026-11-10 编码审 D P1-3：原实现只读 tick，`close_policy.*.has_limit_band` 成死配置。
-        `policy` 参数供 close_reference_price 复用已读配置（避免同轮重复 DB 读）。
+        P2b：开关来自声明式规格（band_rules），不再读 system_config。
         """
         try:
             pol = policy if policy is not None else self.close_policy()
@@ -195,27 +206,30 @@ class ExecutionAdapter(ABC):
         return opp * factor
 
     def max_close_order_qty(self, sym: str) -> int:
-        """拆单上限（缺省 100000；读 close_policy.max_order_qty）。"""
+        """拆单上限（账户策略 max_order_qty，缺省 100000；由 RuleSet 解析）。"""
         try:
-            return int(self.close_policy().get("max_order_qty", 100000) or 100000)
-        except (TypeError, ValueError):
+            return self._ruleset(sym).max_close_qty()
+        except Exception as e:   # noqa: BLE001 —— 规则层故障回落缺省（不阻断平仓）
+            logger.warning("max_close_order_qty 规则读取失败（回落 100000）: %s", e)
             return 100000
 
-    def round_close_price(self, px: float, tick: dict) -> float:
-        """按 price_tick 最小价位取整（防跌破/越界）；缺省/无有效配置保留 3 位。"""
+    def round_close_price(self, px: float, tick: dict, sym: str = "") -> float:
+        """按 InstrumentSpec.tick_size 取整（P2b：价 tick 是品种事实，不再读配置）。
+
+        未知标的/规则缺失 → 保留 3 位（与旧缺省一致，不阻断平仓）。
+        """
         try:
             px = float(px)
         except (TypeError, ValueError):
             return 0.0
         if px <= 0:
             return 0.0
+        code = sym or (tick or {}).get("symbol") or ""
         try:
-            pt = float(self.close_policy().get("price_tick", 0.001))
-        except (TypeError, ValueError):
-            pt = 0.001
-        if pt > 0:
-            return round(round(px / pt) * pt, 6)
-        return round(px, 3)
+            return self._ruleset(code).round_price(px)
+        except Exception as e:   # noqa: BLE001 —— 规则层故障保留 3 位
+            logger.warning("round_close_price 规则读取失败（保留 3 位）: %s", e)
+            return round(px, 3)
 
 
 # --- 场内 XTP 适配器（vnpy_xtp 网关，可转债/场内基金/A 股股票） ---

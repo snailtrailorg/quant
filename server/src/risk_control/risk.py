@@ -350,6 +350,45 @@ class RiskControl:
             return RiskDecision(approved=False,
                 reason=f"account 权限检查异常（fail-closed）: {e}", severity="critical", rule="ACCOUNT_PERM_ERROR")
 
+        # 2.7 资金/保证金硬门（P2b；只拦开仓，平仓/减仓豁免——减风险方向不得被钱挡住）
+        if not paper and not is_flat_or_reduce(order) and account_id is not None:
+            try:
+                from src.data_platform.specs import AccountSnapshot, InstrumentSpec
+
+                ins = InstrumentSpec.of(symbol)
+                need = float(order.get("price", 0) or 0) * float(order.get("volume", 0) or 0)
+                if need <= 0:
+                    return RiskDecision(approved=False, rule="CASH_UNKNOWN",
+                                        reason=f"无法计算委托占用额（price/volume 无效）: {symbol}",
+                                        severity="critical")
+                snap = AccountSnapshot.of(account_id)
+                if snap.ts is None:
+                    return RiskDecision(approved=False, rule="CASH_UNKNOWN",
+                                        reason=f"账户资金快照缺失（account={account_id}）",
+                                        severity="critical")
+                from datetime import datetime
+
+                from src.data_platform.tz import as_utc
+                age = (as_utc(datetime.now()) - as_utc(snap.ts)).total_seconds()
+                if age > 120:
+                    return RiskDecision(approved=False, rule="CASH_UNKNOWN",
+                                        reason=f"账户资金快照过期 {int(age)}s（>120s，account={account_id}）",
+                                        severity="warn")
+                if ins.category == "perp":
+                    avail = float(snap.equity or 0) - float(snap.margin_used or 0)
+                    if avail < need:
+                        return RiskDecision(approved=False, rule="MARGIN_INSUFFICIENT",
+                                            reason=f"可用保证金不足: need={need:.2f} avail={avail:.2f}",
+                                            severity="warn")
+                elif float(snap.available_cash or 0) < need:
+                    return RiskDecision(approved=False, rule="CASH_INSUFFICIENT",
+                                        reason=f"可用资金不足: need={need:.2f} avail={float(snap.available_cash or 0):.2f}",
+                                        severity="warn")
+            except Exception as e:   # noqa: BLE001 —— 规格不可用=开仓 fail-closed
+                return RiskDecision(approved=False, rule="CASH_UNKNOWN",
+                                    reason=f"资金门规格不可用（fail-closed）: {e}",
+                                    severity="critical")
+
         # 3. 全局风控
         state = self._get_global_state(account_id)
         # SB1（F-29）fail-closed：快照数据源故障/无数据时拒绝一切新单（故障时保护必须更紧不能更松）

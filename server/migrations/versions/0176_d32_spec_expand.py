@@ -52,6 +52,16 @@ def upgrade() -> None:
     op.create_check_constraint(
         _CHECK_POSITION, "security_master",
         "position_side IN ('long_only','short_allowed','both')")
+    # jsonb 类型守卫（0121 同款：防 json.dumps 双重编码静默降级）
+    op.create_check_constraint(
+        "ck_security_master_order_types_json", "security_master",
+        "jsonb_typeof(order_types) = 'array'")
+    op.create_check_constraint(
+        "ck_security_master_venue_flags_json", "security_master",
+        "jsonb_typeof(venue_flags) = 'object'")
+    op.create_check_constraint(
+        "ck_security_master_order_range_json", "security_master",
+        "order_range_override IS NULL OR jsonb_typeof(order_range_override) = 'object'")
 
     # 2. band_rules 申报范围列
     op.add_column("band_rules", sa.Column(
@@ -134,7 +144,10 @@ def downgrade() -> None:
         DECLARE n int;
         BEGIN
           SELECT count(*) INTO n FROM (
-            SELECT provider, count(DISTINCT (params->'close_policy')::text) AS k
+            SELECT provider, count(DISTINCT concat_ws('|',
+                     (params->'close_policy'->>'opponent_depth')::int,
+                     round((params->'close_policy'->>'aggression')::numeric, 6),
+                     (params->'close_policy'->>'max_order_qty')::int)) AS k
             FROM trading_account WHERE params ? 'close_policy' GROUP BY provider
           ) x WHERE x.k > 1;
           IF n > 0 THEN
@@ -151,6 +164,9 @@ def downgrade() -> None:
     op.drop_column("band_rules", "order_range_lower_pct")
     op.drop_column("band_rules", "order_range_mode")
     op.drop_column("band_rules", "has_limit_band")
+    op.execute("ALTER TABLE security_master DROP CONSTRAINT IF EXISTS ck_security_master_order_range_json")
+    op.execute("ALTER TABLE security_master DROP CONSTRAINT IF EXISTS ck_security_master_venue_flags_json")
+    op.execute("ALTER TABLE security_master DROP CONSTRAINT IF EXISTS ck_security_master_order_types_json")
     op.drop_constraint(_CHECK_POSITION, "security_master", type_="check")
     for col in ("version", "source", "effective_from", "order_range_override",
                 "venue_flags", "position_side", "order_types", "sellable_rule"):

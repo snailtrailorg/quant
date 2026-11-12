@@ -486,6 +486,26 @@ class Strategy:
         if order_row_id is None:
             logger.error("WAL 记账失败，放弃本次下单（fail-closed）: %s %s", self.symbol, sig.action.name)
             return
+        # P2b：合规校验（WAL 后、send 前；拒绝标同一 order_log 行，不另起行）
+        try:
+            from types import SimpleNamespace as _NS
+
+            from ..data_platform.rules import RuleViolation, rules_for
+            _rs = rules_for(getattr(self, "account_id", None), self.symbol,
+                            provider=getattr(self.config, "adapter", None))
+            _rs.validate(_NS(symbol=self.symbol, action=final.get("action", ""),
+                             volume=final.get("volume", volume), price=final.get("price", price),
+                             order_type="market" if sig.price_type == "MARKET" else "limit",
+                             reason=sig.reason or ""),
+                         {"symbol": self.symbol, "last_price": price}, "open")
+        except RuleViolation as e:
+            logger.warning("规则拒绝下单 %s: %s %s", e.code, self.symbol, e)
+            self._update_order_status(order_row_id, "rejected", error=f"{e.code}: {e}"[:500])
+            return
+        except Exception as e:   # noqa: BLE001 —— 规则层不可用=开仓 fail-closed
+            logger.error("规则校验不可用，拒单（fail-closed）: %s", e)
+            self._update_order_status(order_row_id, "rejected", error=f"RULE_UNAVAILABLE: {e}"[:500])
+            return
         import time as _t
 
         from .adapters import Order

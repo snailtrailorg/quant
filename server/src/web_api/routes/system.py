@@ -38,16 +38,7 @@ SYSTEM_CONFIG_BOUNDS: dict[str, tuple] = {
     "smtp_max_attempts": (1, 10, False, False),   # 批47：每通道尝试配额（总尝试=配额——用户裁定 A）
     "llm_cooldown_min": (1, 1440, False, False), "llm_fail_threshold": (1, 100, False, False),
     "llm_retry_wait_s": (0, 300, False, False),   # 批50：LLM 容灾三参数（冷却/阈值/重试间隔——system_config 新真源）
-    # 批 171s 件三/件五：平仓品种规则 + 急停重试编排（close_policy.* 与 close_all_* 键）
-    "close_policy.xtp.opponent_depth": (1, 5, False, False),   # 五档最优对手价档位
-    "close_policy.xtp.aggression": (0, 0.5, False, False),       # 让价幅度（方向感知，0~0.5）
-    "close_policy.xtp.max_order_qty": (1, None, False, False),   # 拆单上限 ≥1
-    "close_policy.xtp.price_tick": (0, 1, True, False),          # 最小价位（>0）
-    # EMT 独立 provider 值域（与 xtp 同款；crypto 未 seed、无行可写故不注册）
-    "close_policy.emt.opponent_depth": (1, 5, False, False),
-    "close_policy.emt.aggression": (0, 0.5, False, False),
-    "close_policy.emt.max_order_qty": (1, None, False, False),
-    "close_policy.emt.price_tick": (0, 1, True, False),
+    # 批 171s 件五：急停重试编排（close_policy.* 已于 172c P2b 迁至 trading_account.params）
     "close_all_retry_interval_s": (1, None, False, False),
     "close_all_retry_max": (1, None, False, False),
     "close_all_deadline_s": (1, None, False, False),
@@ -601,6 +592,13 @@ def update_system_config(key: str, body: dict = Body(...),
             (str(value), payload["username"], key))
         conn.commit()
     audit_log(payload["username"], "update_system_config", key, "(password)" if value_type == "password" else str(value))
+    # 172c：配置写后 bump 版本（规格/策略缓存 ≤2s 内全进程失效）；读写失败不阻断保存
+    try:
+        from src.data_platform.routing import bump_config_version
+        bump_config_version()
+    except Exception as _e:   # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("cfg:version bump 失败（配置已保存）: %s", _e)
 
     # 动态生效：celery_concurrency 即时 pool_grow/shrink
     dynamic_result = None

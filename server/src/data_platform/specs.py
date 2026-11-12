@@ -62,6 +62,7 @@ class MarketSpec:
 @dataclass(frozen=True)
 class InstrumentSpec:
     symbol: str
+    market: str
     exchange: str
     category: str
     board: str | None
@@ -91,6 +92,7 @@ class AccountPermSpec:
     st_allowed: bool
     convertible_allowed: bool
     data_license: str
+    close_policy: dict       # {opponent_depth, aggression, max_order_qty}
 
     @classmethod
     def of(cls, account_id: int) -> "AccountPermSpec":
@@ -187,7 +189,7 @@ def _load_instrument(symbol: str) -> InstrumentSpec:
         t_plus = _parse_t_plus(phase)
 
     return InstrumentSpec(
-        symbol=row[0], exchange=exch, category=cat, board=board,
+        symbol=row[0], market=_market, exchange=exch, category=cat, board=board,
         tick_size=Decimal(str(tick)), multiplier=Decimal(str(mult or 1)),
         lot_size=lot, t_plus=t_plus, price_band=price_band,
         sellable_rule=sellable or "volume_minus_frozen",
@@ -214,7 +216,8 @@ def _load_perm(account_id: int) -> AccountPermSpec:
     if not perm:
         # 无权限行=零权限（perms.py 同款 fail-closed），不是不限
         return AccountPermSpec(account_id, acc[0], set(), set(), set(), False, False,
-                               str(params.get("data_license") or ""))
+                               str(params.get("data_license") or ""),
+                               dict(params.get("close_policy") or {}))
     cats = {("listed_fund" if c == "etf" else c) for c in (perm[0] or [])}
     return AccountPermSpec(
         account_id=account_id, market=acc[0],
@@ -222,6 +225,7 @@ def _load_perm(account_id: int) -> AccountPermSpec:
         allowed_boards=set(perm[2] or []), st_allowed=bool(perm[3]),
         convertible_allowed=bool(perm[4]),
         data_license=str(params.get("data_license") or ""),
+        close_policy=dict(params.get("close_policy") or {}),
     )
 
 
@@ -331,6 +335,16 @@ def _get_params(c, account_id: int) -> dict:
         raise KeyError(f"trading_account 无行 {account_id}")
     params = row[0] or {}
     return json.loads(params) if isinstance(params, str) else dict(params)
+
+
+def get_account_close_policy(account_id: int) -> dict | None:
+    """账户级平仓策略（params.close_policy）；无行返回 None（不许抛）。"""
+    try:
+        with get_conn() as c:
+            params = _get_params(c, account_id)
+        return dict(params.get("close_policy") or {}) or None
+    except Exception:
+        return None
 
 
 def get_close_policy(account_id: int) -> dict:

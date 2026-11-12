@@ -161,6 +161,7 @@ class TestWiringMatrix:
         "unfreeze-poll": 5.0,   # 批 76 F2：人工解冻请求消费（Valkey 键）
         "risk-cmd-poll": 1.0,   # 批 171n：急停命令消费（cancel-all/close-all GETDEL）
         "daily-roll": 0.0,      # 批 119：daily_history 日界滚动（每步；不依赖 session 沿）
+        "cfg-version": 2.0,     # 172c P2b：配置版本轮询（规格缓存失效）
     }
 
     def test_every_hooks_exact(self, wired):
