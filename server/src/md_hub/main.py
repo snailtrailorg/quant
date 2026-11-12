@@ -111,6 +111,24 @@ def _poll_iface_switch(r, prev_version, row_id, current_provider, prev_cred_hash
     return v, new_hash, switched
 
 
+class _LegacyMdShim:
+    """legacy MdGateway → MarketDataPort 形状（subscribe/unsubscribe 收 list）。"""
+
+    def __init__(self, gw):
+        self._gw = gw
+
+    def subscribe(self, symbols):
+        for s in (symbols if isinstance(symbols, (list, tuple, set)) else [symbols]):
+            self._gw.subscribe(s)
+
+    def unsubscribe(self, symbols):
+        for s in (symbols if isinstance(symbols, (list, tuple, set)) else [symbols]):
+            self._gw.unsubscribe(s)
+
+    def __getattr__(self, name):
+        return getattr(self._gw, name)
+
+
 def main() -> None:
     # #48：启动时列级校验（hub 侧同款）
     try:
@@ -126,7 +144,15 @@ def main() -> None:
     from src.data_platform.log_sink import chain_sigterm as _chain
     from src.data_platform.log_sink import install as _log_install
     _log_install("hub")
-    _chain(_sig.getsignal(_sig.SIGTERM))
+    _prev_term = _sig.getsignal(_sig.SIGTERM)
+
+    def _on_term(signum, frame):   # 停止来源可见化（部署波/人工 stop 都会留日志）
+        logger.warning("收到 SIGTERM（hub pid=%s account=%s）——优雅退出",
+                       os.getpid(), os.environ.get("ACCOUNT_ID", ""))
+        if callable(_prev_term):
+            _prev_term(signum, frame)
+
+    _chain(_on_term)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     if EventEngine is None:
         logger.error("vnpy 未安装")
@@ -230,8 +256,27 @@ def main() -> None:
         market = iface["market"]   # 会话模型分支真源（crypto/astock）
         from src.strategy_framework.md_gateway import create_md_gateway
         import src.providers as _providers
-        _providers.ensure_registered()   # P3：MD 网关注册（懒导入 vnpy）
-        md_gw = create_md_gateway(iface["provider"], counters)   # 未注册 provider ValueError → 78（盲审 P1-1）
+        from src.registry import UnsupportedCapability, UnknownProvider, pick
+
+        _providers.ensure_registered()   # P3：插件注册（懒导入 vnpy）
+        _impl = "legacy"
+        try:
+            from src.data_platform.db import get_conn as _gc
+            with _gc() as _c:
+                _r = _c.execute("SELECT impl FROM trading_account WHERE id=%s", (row_id,)).fetchone()
+            _impl = (_r[0] if _r else "legacy")
+        except Exception:   # noqa: BLE001 —— 读不到按 legacy
+            _impl = "legacy"
+        if _impl == "plugin":
+            try:
+                _plugin = pick("trading_account", iface["provider"], {"market_data"}, impl="plugin")
+                md_gw = _plugin.build({"counters": counters, "account_id": row_id}, "md", None)
+                logger.info("[gw] provider=%s 走插件 MarketDataPort（account=%s）", iface["provider"], row_id)
+            except (UnknownProvider, UnsupportedCapability) as e:
+                logger.warning("[gw] provider=%s 无 MD 插件（%s），回落 legacy 注册表", iface["provider"], e)
+                md_gw = _LegacyMdShim(create_md_gateway(iface["provider"], counters))
+        else:
+            md_gw = _LegacyMdShim(create_md_gateway(iface["provider"], counters))
         md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
         md_gw.connect(iface["credentials"], iface["params"])   # 组装/建连异常 → 78（盲审 P2-4）
     except Exception as e:
@@ -325,7 +370,7 @@ def main() -> None:
 
     def _subscribe(sym: str) -> None:
         try:
-            md_gw.subscribe(sym)   # 订阅原语=网关插件（XTP 的交易所映射在 XtpMdGateway）
+            md_gw.subscribe([sym])   # 端口形状（插件）；legacy 由 _LegacyMdShim 收 list
         except Exception as e:
             logger.warning("订阅失败 %s: %s", sym, e)
 
@@ -339,7 +384,7 @@ def main() -> None:
             bar = agg.flush_symbol(sym)
             if bar:
                 _publish(bar)
-            md_gw.unsubscribe(sym)
+            md_gw.unsubscribe([sym])
         except Exception as e:
             logger.warning("退订失败 %s: %s", sym, e)
 

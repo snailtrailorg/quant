@@ -196,10 +196,10 @@ def test_md_port_delegates_to_gateway(monkeypatch):
             self.calls.append((in_session, trading_day))
 
         def subscribe(self, symbols):
-            self.calls.append(("sub", tuple(symbols)))
+            self.calls.append(("sub", symbols))
 
         def unsubscribe(self, symbols):
-            self.calls.append(("unsub", tuple(symbols)))
+            self.calls.append(("unsub", symbols))
 
         def set_context(self, ctx):
             pass
@@ -224,7 +224,7 @@ def test_md_port_delegates_to_gateway(monkeypatch):
     port.poll_supervise(True, False)
     port.subscribe(["600000.SHSE"])
     assert seen["gw"].calls[0] == (True, False)
-    assert seen["gw"].calls[1] == ("sub", ("600000.SHSE",))
+    assert seen["gw"].calls[1] == ("sub", "600000.SHSE")   # 端口收 list，底层网关收单标的
     assert port.connected is True
 
 # ── B 路线：端口兼容面（worker 现行形状，传输在插件内）────────────

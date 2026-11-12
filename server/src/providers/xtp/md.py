@@ -45,10 +45,12 @@ class XtpMarketDataPort:
         self._gw.set_on_tick(cb)
 
     def subscribe(self, symbols: list[str]) -> None:
-        self._gw.subscribe(symbols)
+        for s in symbols:
+            self._gw.subscribe(s)
 
     def unsubscribe(self, symbols: list[str]) -> None:
-        self._gw.unsubscribe(symbols)
+        for s in symbols:
+            self._gw.unsubscribe(s)
 
     def snapshot(self, symbol: str):
         return self._gw.snapshot(symbol)
