@@ -550,6 +550,7 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         "tid": tid if tid is not None else sid, "sid": sid, "symbol": symbol,
         "account_id": account_id, "market": iface.get("market"),   # 批 66c：worker 时段门/缺口检测 per-market 真源（接口行）
         "strategy": strategy, "adapter": adapter, "event_engine": ee, "exec_port": exec_port,
+        "session_slot": rt.get("session_slot"),
         "td_api": td_api, "history": history, "frozen": frozen,
         "initial_capital": initial_capital,
         "warmup_pg": lambda: _warmup_history(symbol, n=warmup_n),   # 批 118：rewarm 侧同窗（needs 自适应）
@@ -558,7 +559,16 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
         "td_window": (_lead, _lag) if _lead is not None else None,   # 非 XTP=None（_td_connect_due 首行短路）
         "needs": needs,   # 批 118：聚合声明（worker hist_window/rewarm degraded 消费）
     })
-    hub_worker_run(ctx)
+    try:
+        hub_worker_run(ctx)
+    finally:
+        _slot = rt.get("session_slot")
+        if _slot is not None:
+            try:
+                from src.strategy_runner.session_slot import SessionSlotAllocator
+                SessionSlotAllocator.release(_slot)
+            except Exception as e:   # noqa: BLE001 —— 退出路径不因清理失败阻断
+                logger.warning("会话租约释放失败（忽略）: %s", e)
 
 
 def _log_timeline(tid, level: str, message: str) -> None:

@@ -162,6 +162,7 @@ class TestWiringMatrix:
         "risk-cmd-poll": 1.0,   # 批 171n：急停命令消费（cancel-all/close-all GETDEL）
         "daily-roll": 0.0,      # 批 119：daily_history 日界滚动（每步；不依赖 session 沿）
         "cfg-version": 2.0,     # 172c P2b：配置版本轮询（规格缓存失效）
+        "slot-renew": 15.0,     # 172d P3：TD 会话租约续租（15s/45s）
     }
 
     def test_every_hooks_exact(self, wired):

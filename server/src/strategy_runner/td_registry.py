@@ -97,7 +97,7 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
         logger.info("XTP 账号 %s 走插件端口（terminal_id=%s）", account_id, slot.terminal_id)
         return {"gw": gw, "td_api": td_api, "adapter": adapter, "setting": setting,
                 "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp",
-                "exec_port": port}
+                "exec_port": port, "session_slot": slot}
 
     class ThinTdGateway(BaseGateway):
         """TD-only 壳：事件转发 + 抽象方法转发 td_api（零 MD 零合约表，R-BR1/R-CAP1）。"""

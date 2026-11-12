@@ -938,6 +938,25 @@ def run(ctx: dict) -> None:
 
     loop.every("cfg-version", 2.0, _cfg_version_hook)
 
+    _slot = ctx.get("session_slot")
+
+    def _slot_renew_hook():
+        """P3：TD 会话租约续租（15s/45s）；被抢=立即断开退出（75 → systemd 退避重拉）。"""
+        if _slot is None:
+            return
+        from src.strategy_runner.session_slot import SessionLost, SessionSlotAllocator, SessionUnavailable
+
+        try:
+            SessionSlotAllocator.renew(_slot)
+        except SessionLost:
+            _alert(f"任务 {tid} 会话号被抢占（terminal_id={_slot.terminal_id}）",
+                   "另一实例已接管该终端号，本进程立即退出避免双会话。", code="slot.lost")
+            exit_process(75)
+        except SessionUnavailable as e:
+            logger.warning("会话租约续租失败（下轮重试）: %s", e)
+
+    loop.every("slot-renew", 15.0, _slot_renew_hook)
+
     def _daily_roll():
         """批 119：daily_history 日界滚动（v2 复审 D3 钉死）——**每步求值，不依赖 session
         沿翻转**（crypto in_session 骨架 24x7 恒 True 永无翻转，而加密恰是预期消费者）。
