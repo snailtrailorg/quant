@@ -767,3 +767,8 @@
 - **同批技术裁定**：号段唯一域 `(account, provider, terminal_id)`（同账号 hub MD + N 个任务 TD 并存）；租约真源 DB 表（跨机互斥，本机 Valkey 只缓存）；acquire 单语句原子；平仓失败语义三分（开仓 fail-closed / 平仓 fail-open 兜底链 / 读失败降级）；`close_policy` 的 `has_limit_band`/`price_tick` 删、其余三键迁 provider 维；`research` 进 `PORT_CAPS` 不进 `CAPABILITIES`。
 - **理由**：四轮盲审（架构/可实施性/一致性/红队）共识，审报告 `flow/审计/2026-11-11-D32四审并帧.md`；终审两票「可进入 P1a 立项」。
 - **实施**：P1a/P1b/P2–P5 + P7 数据侧销账，每批双盲审。
+## 2026-11-12 · D32 P3 前契约变更：poll_supervise 增 in_session
+
+- **决策**：`MarketDataPort.poll_supervise` 形参由 `(trading_day)` 改为 `(in_session, trading_day)`。
+- **理由**：连接窗判定属编排层（读 `xtp_session_lead_min/lag_min` + 交易日历），插件只执行 connect/suspend；P1b 迁移时该形参被临时丢弃（记在 172d 事实表）。
+- **执行**：先改 D32 §六/§12.2 → 再改 `ports/market_data.py` 与 `md_hub/main.py` 调用点（P3 编码首步）。
