@@ -22,5 +22,6 @@ class XtpPlugin:
             guard = guard_factory or (lambda name: (lambda fn: fn))
             return td.build_td(event_engine, slot, setting or {}, guard)
         if role == "md":
-            raise UnsupportedCapability("XTP MD 端口待 P3 第二段迁移")
+            from . import md
+            return md.build_md(account, slot)
         raise UnsupportedCapability(f"XTP 不支持 role={role!r}")

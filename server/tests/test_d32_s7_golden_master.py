@@ -79,10 +79,10 @@ def test_registry_registered_with_manifest():
 
     plugin = get("trading_account", "xtp")
     assert plugin.manifest.port_caps == {"execution", "market_data", "account"}
-    with pytest.raises(UnsupportedCapability):
-        plugin.build({}, "md", _slot())
     with pytest.raises(ValueError):
         plugin.build({}, "td", _slot(), event_engine=None)
+    with pytest.raises(UnsupportedCapability):
+        plugin.build({}, "research", _slot())
 
 
 # ── S7：下单/撤单等价 ────────────────────────────────────
@@ -164,3 +164,60 @@ def test_subscribe_pushes_domain_and_recovers_client_id():
     handler = ee.handlers[_transport.events()["order"]][-1]
     handler(SimpleNamespace(data=order_data()))
     assert got and got[0].client_id == "CID.1" and got[0].symbol == "600000.SHSE"
+
+def test_md_port_delegates_to_gateway(monkeypatch):
+    """MD 端口必须把 in_session/trading_day 原样下传（连接窗语义不丢）。"""
+    import src.strategy_framework.md_gateway as G
+    from src.registry import get
+
+    seen = {}
+
+    class FakeGw:
+        provider = "xtp"
+
+        def __init__(self, counters):
+            self.counters = counters
+            self.calls = []
+            seen["gw"] = self
+
+        @property
+        def connected(self):
+            return True
+
+        def start_ready(self):
+            return True
+
+        def poll_supervise(self, in_session, trading_day):
+            self.calls.append((in_session, trading_day))
+
+        def subscribe(self, symbols):
+            self.calls.append(("sub", tuple(symbols)))
+
+        def unsubscribe(self, symbols):
+            self.calls.append(("unsub", tuple(symbols)))
+
+        def set_context(self, ctx):
+            pass
+
+        def connect(self, credentials, params):
+            self.calls.append(("connect", credentials.get("k")))
+
+        def close(self):
+            pass
+
+        def event_threads_healthy(self):
+            return True
+
+        def set_on_tick(self, cb):
+            pass
+
+        def snapshot(self, symbol):
+            return None
+
+    monkeypatch.setattr(G, "XtpMdGateway", FakeGw)
+    port = get("trading_account", "xtp").build({}, "md", _slot())
+    port.poll_supervise(True, False)
+    port.subscribe(["600000.SHSE"])
+    assert seen["gw"].calls[0] == (True, False)
+    assert seen["gw"].calls[1] == ("sub", ("600000.SHSE",))
+    assert port.connected is True
