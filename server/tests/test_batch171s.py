@@ -656,7 +656,7 @@ class TestS7SubscriptionSource:
                                          "credentials": {}, "params": {}}), \
                      patch("src.strategy_framework.md_gateway.create_md_gateway",
                            return_value=_GW()), \
-                     patch("src.strategy_framework.md_session.is_trading_day",
+                     patch("src.providers.xtp.session.is_trading_day",
                            return_value=True), \
                      patch.object(EngineLoop, "run", _fake_run), \
                      patch.object(M, "exit_process"):

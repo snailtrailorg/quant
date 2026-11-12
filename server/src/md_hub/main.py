@@ -150,7 +150,7 @@ def main() -> None:
     logger.info("hub 启动：uuid=%s gen=%d 实例=%s account=%s", my_uuid, gen, instance_name or "(空)", account_id)
 
     # ——— 行情网关（批 63 二：插件化——XTP 全套收编 md_gateway.XtpMdGateway，hub 只持通用面）———
-    from src.strategy_framework.md_session import is_trading_day
+    from src.providers.xtp.session import is_trading_day
     from src.strategy_framework.runtime.loop import EngineLoop
     from src.strategy_framework.runtime.pulse import HeartbeatWriter, SessionCounters
     from src.strategy_framework.runtime.subs import SubscriptionManager

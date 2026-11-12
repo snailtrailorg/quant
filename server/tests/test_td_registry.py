@@ -51,9 +51,9 @@ def test_xtp_builder_shape():
     fake_setting = {"账号": "a", "密码": "b", "客户号": "1", "交易地址": "x", "交易端口": "1"}
     # patch 值非默认（7,3≠产默认 10/10）——若 patch 机制失效走真 DB fail-open 默认则断言必红（防假绿）
     with patch.object(td_registry, "build_xtp_setting", return_value=fake_setting), \
-         patch("src.strategy_framework.md_session.is_trading_day", return_value=True), \
-         patch("src.strategy_framework.md_session.load_xtp_window_cfg", return_value=(7, 3)), \
-         patch("src.strategy_framework.md_session.xtp_session_window_open", return_value=False), \
+         patch("src.providers.xtp.session.is_trading_day", return_value=True), \
+         patch("src.providers.xtp.session.load_xtp_window_cfg", return_value=(7, 3)), \
+         patch("src.providers.xtp.session.xtp_session_window_open", return_value=False), \
          patch("vnpy_xtp.gateway.xtp_gateway.XtpTdApi") as api_cls, \
          patch("src.strategy_framework.adapters.XTPAdapter") as ad_cls:
         rt = build_td_runtime("xtp", MagicMock(), 7, 4, 99)
@@ -73,9 +73,9 @@ def test_xtp_builder_connects_when_window_open():
     fake_setting = {"账号": "acct", "密码": "pw", "客户号": "42", "交易地址": "tcp://x",
                     "交易端口": "1", "授权码": "ok"}
     with patch.object(td_registry, "build_xtp_setting", return_value=fake_setting), \
-         patch("src.strategy_framework.md_session.is_trading_day", return_value=True), \
-         patch("src.strategy_framework.md_session.load_xtp_window_cfg", return_value=(7, 3)), \
-         patch("src.strategy_framework.md_session.xtp_session_window_open", return_value=True), \
+         patch("src.providers.xtp.session.is_trading_day", return_value=True), \
+         patch("src.providers.xtp.session.load_xtp_window_cfg", return_value=(7, 3)), \
+         patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
          patch("vnpy_xtp.gateway.xtp_gateway.XtpTdApi") as api_cls, \
          patch("src.strategy_framework.adapters.XTPAdapter"):
         rt = build_td_runtime("xtp", MagicMock(), 7, 4, 99)

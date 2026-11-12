@@ -66,8 +66,8 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
     # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
     from datetime import datetime as _dtnow  # 盲审 A-P0：函数级导入（模块头部无 datetime）
 
-    from src.strategy_framework.md_session import is_trading_day as _itd
-    from src.strategy_framework.md_session import load_xtp_window_cfg, xtp_session_window_open
+    from src.providers.xtp.session import is_trading_day as _itd
+    from src.providers.xtp.session import load_xtp_window_cfg, xtp_session_window_open
     _lead, _lag = load_xtp_window_cfg()
     _td_open = xtp_session_window_open(_dtnow.now(), _lead, _lag, trading_day=_itd())
 
@@ -147,7 +147,7 @@ def _build_emt_runtime(ee, tid, account_id, boot_epoch) -> dict:
 
     from src.strategy_framework.adapters import EmtAdapter
     from src.strategy_framework.broker import get_interface_row
-    from src.strategy_framework.md_session import is_trading_day, load_xtp_window_cfg, xtp_session_window_open
+    from src.providers.xtp.session import is_trading_day, load_xtp_window_cfg, xtp_session_window_open
 
     row = get_interface_row(row_id=account_id)
     cred = row.get("credentials") or {}

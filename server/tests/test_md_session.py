@@ -12,13 +12,13 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from src.strategy_framework.md_session import is_trading_day, zombie_session
+from src.providers.xtp.session import is_trading_day, zombie_session
 
 
 @pytest.fixture(autouse=True)
 def _fresh_td_cache():
     """D2 按日缓存防跨测试污染（坑③）：每测试前后清——mock 后缓存脏值=假绿假红。"""
-    from src.strategy_framework.md_session import _reset_td_cache
+    from src.providers.xtp.session import _reset_td_cache
     _reset_td_cache()
     yield
     _reset_td_cache()
@@ -71,7 +71,7 @@ class TestTradingDayCache:
         with patch("src.data_platform.platform.is_trading_day",
                    side_effect=lambda d: n.append(1) or True):
             assert is_trading_day(datetime(2026, 8, 24)) is True
-            from src.strategy_framework.md_session import _reset_td_cache
+            from src.providers.xtp.session import _reset_td_cache
             _reset_td_cache()
             assert is_trading_day(datetime(2026, 8, 24)) is True
         assert len(n) == 2   # 重置后重打 DB
@@ -121,9 +121,9 @@ class TestZombieSession:
 class TestXtpMdSession:
     def test_schedule_due_on_time(self):
         """交易日：09:10 前 False；窗口内 09:10/09:29 True（当日去重）；09:30 后 False。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(MagicMock())
-        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+        with patch("src.providers.xtp.session.is_trading_day", return_value=True):
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 9)) is False
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 10)) is True
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 11)) is False  # 当日去重
@@ -131,21 +131,21 @@ class TestXtpMdSession:
     def test_schedule_due_window_end(self):
         """窗口外（开盘后启动）：不续航——盘中启动已有新鲜登录，重登只会自杀式 churn
         （2026-08-25 14:05 实锤）。"""
-        from src.strategy_framework.md_session import XtpMdSession
-        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+        from src.providers.xtp.session import XtpMdSession
+        with patch("src.providers.xtp.session.is_trading_day", return_value=True):
             assert XtpMdSession(MagicMock()).schedule_due(datetime(2026, 8, 25, 9, 30)) is False
             assert XtpMdSession(MagicMock()).schedule_due(datetime(2026, 8, 25, 14, 5)) is False
 
     def test_schedule_due_non_trading_day(self):
         """非交易日 -> False。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(MagicMock())
-        with patch("src.strategy_framework.md_session.is_trading_day", return_value=False):
+        with patch("src.providers.xtp.session.is_trading_day", return_value=False):
             assert sess.schedule_due(datetime(2026, 8, 24, 9, 10)) is False
 
     def test_renew_calls_relogin(self):
         """renew() -> md.relogin()（批 1 起走守卫官方序列）。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         md = MagicMock()
         md.relogin.return_value = True
         sess = XtpMdSession(md)
@@ -154,33 +154,33 @@ class TestXtpMdSession:
 
     def test_renew_md_none(self):
         """md_api 不存在 -> False。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(None)
         assert sess.renew() is False
 
     def test_retry_ready_first(self):
         """首次 retry_ready（last_retry_ts=0）-> True（立即触发）。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(MagicMock())
         assert sess.retry_ready(0) is True
 
     def test_retry_ready_backoff(self):
         """renew 后 5s -> False（60s 退避未到点）。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(MagicMock())
         sess.renew()  # 设 last_retry_ts=now, backoff=60
         assert sess.retry_ready(sess._last_retry_ts + 5) is False
 
     def test_retry_ready_elapsed(self):
         """renew 后 65s -> True（60s 退避已过）。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(MagicMock())
         sess.renew()  # backoff=30 -> 60
         assert sess.retry_ready(sess._last_retry_ts + 65) is True
 
     def test_on_recovered_resets(self):
         """on_recovered -> backoff 回归起始值 30s。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(MagicMock())
         sess.renew()  # backoff=30 -> 60
         sess.renew()  # 60 -> 120
@@ -190,7 +190,7 @@ class TestXtpMdSession:
 
     def test_renew_escalates_backoff(self):
         """连续 renew 退避翻倍封顶 300s。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(MagicMock())
         for _ in range(5):
             sess.renew()
@@ -210,7 +210,7 @@ class TestRenewGuardContract:
 
     def test_confirmed_relogin(self):
         """relogin True -> 返回 True，日志「已确认」，退避翻倍。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(self._md(True))
         assert sess.renew() is True
         assert sess._backoff == 60
@@ -218,14 +218,14 @@ class TestRenewGuardContract:
 
     def test_unconfirmed_still_attempted(self):
         """relogin False（服务端槽占用）-> 仍返回 True（已发起），日志「未确认」，退避照翻。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(self._md(False))
         assert sess.renew() is True
         assert sess._backoff == 60
 
     def test_exception_backoff_protected(self):
         """SdkLifecycleError -> False 且计入退避（防持续抛错无节奏重试）。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         from src.providers.xtp.md_api_guard import SdkLifecycleError
         md = self._md()
         md.relogin.side_effect = SdkLifecycleError("relogin 在 idle 态非法")
@@ -237,13 +237,13 @@ class TestRenewGuardContract:
 
     def test_no_relogin_backend_rejected(self):
         """后端无 relogin（未接守卫）-> 警告拒发，退避不动。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         md = MagicMock(spec=["login_server"])   # 无 relogin 面
         assert XtpMdSession(md).renew() is False
 
     def test_on_recovered_resets_last_retry(self):
         """恢复清 _last_retry_ts：下次症状立即触发（不等退避）。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(self._md(True))
         sess.renew()
         assert sess._last_retry_ts > 0
@@ -254,7 +254,7 @@ class TestRenewGuardContract:
     def test_on_recovered_spam_guard(self, caplog):
         """打屏守卫：连续两次恢复只打第一条日志（2026-08-25 hub 每 5s 刷屏根治）。"""
         import logging as _logging
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         sess = XtpMdSession(self._md(True))
         sess.renew()
         with caplog.at_level(_logging.INFO, logger="md_session"):
@@ -270,12 +270,12 @@ class TestRenewGuardContract:
 class TestUnconfirmedRenewRetry:
     def test_unconfirmed_renew_rolls_back_and_retries_in_window(self):
         """09:10 续航未确认：当日标记回滚 + 窗口内按退避重试（开盘 10min 盲区根修）。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         from datetime import datetime as _dt
         md = MagicMock()
         md.relogin.return_value = False
         sess = XtpMdSession(md)
-        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+        with patch("src.providers.xtp.session.is_trading_day", return_value=True):
             assert sess.schedule_due(_dt(2026, 8, 26, 9, 10)) is True
             assert sess.renew() is True                 # 未确认
             assert sess._renewed_date is None           # 回滚
@@ -285,12 +285,12 @@ class TestUnconfirmedRenewRetry:
 
     def test_confirmed_renew_marks_day_done(self):
         """已确认：当日标记保持，窗口内不再续航。"""
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         from datetime import datetime as _dt, date as _d
         md = MagicMock()
         md.relogin.return_value = True
         sess = XtpMdSession(md)
-        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+        with patch("src.providers.xtp.session.is_trading_day", return_value=True):
             assert sess.schedule_due(_dt(2026, 8, 26, 9, 10)) is True
             assert sess.renew() is True
             assert sess._renewed_date == _d(2026, 8, 26)
@@ -301,7 +301,7 @@ class TestSessionWindow:
     """P2 批 08-28 每日连接窗：纯函数表驱动 + XtpMdSession 窗化 + fail-open 日历。"""
 
     def test_window_open_table(self):
-        from src.strategy_framework.md_session import xtp_session_window_open
+        from src.providers.xtp.session import xtp_session_window_open
         from datetime import datetime as _dt
         T = lambda h, m: _dt(2026, 8, 28, h, m)
         # 默认 lead=lag=10：9:05 开（9:15−10）~ 15:10 关（15:00+10，含 15:00 整分钟）
@@ -320,7 +320,7 @@ class TestSessionWindow:
 
     def test_window_open_cross_hour_arithmetic(self):
         """真分钟算术回归（伪十进制 915-95=820 跨小时错，9:15-95min 实为 7:40）。"""
-        from src.strategy_framework.md_session import xtp_session_window_open
+        from src.providers.xtp.session import xtp_session_window_open
         from datetime import datetime as _dt
         T = lambda h, m: _dt(2026, 8, 28, h, m)
         assert xtp_session_window_open(T(7, 39), 95, 10) is False
@@ -328,22 +328,22 @@ class TestSessionWindow:
 
     def test_window_open_lead_clamped(self):
         """lead 越界钳 600：开沿=9:15−600min（负→全日开）。"""
-        from src.strategy_framework.md_session import xtp_session_window_open
+        from src.providers.xtp.session import xtp_session_window_open
         from datetime import datetime as _dt
         assert xtp_session_window_open(_dt(2026, 8, 28, 0, 5), 700, 10) is True
 
     def test_renew_hm_derived_from_lead(self):
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         assert XtpMdSession(MagicMock(), lead_min=10, lag_min=10).RENEW_HM == (9, 5)
         assert XtpMdSession(MagicMock(), lead_min=95, lag_min=10).RENEW_HM == (7, 40)
         assert XtpMdSession(MagicMock()).RENEW_HM == (9, 10)   # 无窗=类默认（旧行为）
 
     def test_window_close_due_and_suspend(self):
-        from src.strategy_framework.md_session import XtpMdSession
+        from src.providers.xtp.session import XtpMdSession
         from datetime import datetime as _dt
         md = MagicMock()
         sess = XtpMdSession(md, lead_min=10, lag_min=10)
-        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+        with patch("src.providers.xtp.session.is_trading_day", return_value=True):
             assert sess.window_close_due(_dt(2026, 8, 28, 20, 0)) is True
             assert sess.window_close_due(_dt(2026, 8, 28, 10, 0)) is False
         assert sess.close_for_window() is True
@@ -358,7 +358,7 @@ class TestSessionWindow:
     def test_is_trading_day_fail_open_natural_day(self):
         """用户裁定 08-28：日历读不到=当自然日（周六也 True）——weekday 故障点消除。"""
         from datetime import datetime as _dt
-        from src.strategy_framework import md_session as ms
+        from src.providers.xtp import session as ms
         ms._reset_td_cache()
         with patch("src.data_platform.platform.is_trading_day", side_effect=RuntimeError("DB 挂")):
             assert ms.is_trading_day(_dt(2026, 8, 29)) is True   # 周六
@@ -375,7 +375,7 @@ class TestTdConnectDue:
         t0 = 1_000_000.0
         assert _td_connect_due(t0, None, 0.0, _dt(2026, 8, 28, 9, 6)) is False   # 无窗配置
         assert _td_connect_due(t0, (10, 10), t0 - 30, _dt(2026, 8, 28, 9, 6)) is False  # 60s 节流内
-        with patch("src.strategy_framework.md_session.is_trading_day", return_value=True):
+        with patch("src.providers.xtp.session.is_trading_day", return_value=True):
             assert _td_connect_due(t0, (10, 10), t0 - 61, _dt(2026, 8, 28, 9, 6)) is True
             assert _td_connect_due(t0, (10, 10), t0 - 61, _dt(2026, 8, 28, 20, 0)) is False  # 窗外
             # 周末（日历读不到=自然日语义下 is_trading_day=True，但显式 False 时拒）

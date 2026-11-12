@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Callable
 
-from src.strategy_framework.md_session import zombie_session
+from src.providers.xtp.session import zombie_session
 
 logger = logging.getLogger("runtime.pulse")
 

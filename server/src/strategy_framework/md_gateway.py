@@ -146,7 +146,7 @@ class XtpMdGateway(MdGateway):
         from vnpy.trader.event import EVENT_LOG
 
         from src.providers.xtp.md_api_guard import GuardedXtpMdApi
-        from src.strategy_framework.md_session import XtpMdSession, load_xtp_window_cfg
+        from src.providers.xtp.session import XtpMdSession, load_xtp_window_cfg
         from src.strategy_framework.runtime.alerts import make_alert
         from src.strategy_framework.runtime.mdlink import MdSessionSupervisor
 
@@ -376,7 +376,7 @@ class EmqMdGateway(MdGateway):
         # 服务」+staging 实证周日 Login-1；窗=交易日 8:25-15:15（8:35 前 10 分 lead/收盘让 15 分）。
         from datetime import datetime as _dt
 
-        from src.strategy_framework.md_session import is_trading_day
+        from src.providers.xtp.session import is_trading_day
         self._login_addr = (ip, port, account, pwd)
         if not _emq_window_open(_dt.now(), is_trading_day()):
             self._connected = False

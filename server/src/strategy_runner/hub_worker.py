@@ -396,7 +396,7 @@ def _td_connect_due(now: float, win, last_conn_ts: float, dt_now) -> bool:
     MD 槽回收同型）。纯函数供单测。"""
     if not win or now - last_conn_ts < 60.0:
         return False
-    from src.strategy_framework.md_session import is_trading_day, xtp_session_window_open
+    from src.providers.xtp.session import is_trading_day, xtp_session_window_open
     return xtp_session_window_open(dt_now, win[0], win[1], trading_day=is_trading_day())
 
 

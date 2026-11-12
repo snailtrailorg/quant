@@ -2158,7 +2158,7 @@ def sm_reconcile_check():
     """
     from datetime import datetime as _dt
 
-    from src.strategy_framework.md_session import is_trading_day
+    from src.providers.xtp.session import is_trading_day
     if not is_trading_day(_dt.now()):
         return {"skipped": "非交易日"}
     from src.data_platform.quality import sm_reconcile

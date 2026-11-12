@@ -113,7 +113,7 @@ class TestEmqWindow:
         from src.strategy_framework import md_gateway as gw
         monkeypatch.setattr(gw, "_load_emd_binding", lambda: _fake_emd_mod())
         monkeypatch.setattr(gw, "_make_spi", lambda m, s: None)
-        monkeypatch.setattr("src.strategy_framework.md_session.is_trading_day", lambda d=None: False)
+        monkeypatch.setattr("src.providers.xtp.session.is_trading_day", lambda d=None: False)
         g = gw.EmqMdGateway(None)
         g.connect({"emq_account": "a", "emq_password": "p"}, {"emq_l1_host": "1.2.3.4:8093"})
         assert g._connected is False and g._login_err == 0
@@ -128,7 +128,7 @@ class TestEmqWindow:
         mod.QuoteApi._last_api.Login.return_value = -1
         monkeypatch.setattr(gw, "_load_emd_binding", lambda: mod)
         monkeypatch.setattr(gw, "_make_spi", lambda m, s: None)
-        monkeypatch.setattr("src.strategy_framework.md_session.is_trading_day", lambda d=None: True)
+        monkeypatch.setattr("src.providers.xtp.session.is_trading_day", lambda d=None: True)
         monkeypatch.setattr(gw, "_emq_window_open", lambda now, td: True)
         g = gw.EmqMdGateway(None)
         with _pytest.raises(RuntimeError):
@@ -139,7 +139,7 @@ class TestEmqWindow:
         from src.strategy_framework import md_gateway as gw
         monkeypatch.setattr(gw, "_load_emd_binding", lambda: _fake_emd_mod())
         monkeypatch.setattr(gw, "_make_spi", lambda m, s: None)
-        monkeypatch.setattr("src.strategy_framework.md_session.is_trading_day", lambda d=None: False)
+        monkeypatch.setattr("src.providers.xtp.session.is_trading_day", lambda d=None: False)
         g = gw.EmqMdGateway(None)
         g.connect({"emq_account": "a", "emq_password": "p"}, {"emq_l1_host": "1.2.3.4:8093"})
         monkeypatch.setattr(gw, "_emq_window_open", lambda now, td: True)   # 窗开模拟

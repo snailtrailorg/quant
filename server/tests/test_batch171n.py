@@ -302,7 +302,7 @@ class TestThinTdGatewayErrorCallback:
     def test_write_error_exists_and_never_raises(self, monkeypatch):
         import os
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        import src.strategy_framework.md_session as M
+        import src.providers.xtp.session as M
         import src.strategy_runner.td_registry as TD
         # 绑定点在 td_registry 模块命名空间（模块级 import）——patch broker 会因导入顺序失效
         monkeypatch.setattr(TD, "build_xtp_setting",
