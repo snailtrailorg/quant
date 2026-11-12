@@ -229,6 +229,27 @@ def _lease_boot(r, account_id=None) -> tuple[str, int]:
     exit_process(4)
 
 
+_LEASE_RELEASE_LUA = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+end
+return 0
+"""
+
+
+def _lease_release(r, account_id=None, uuid_: str = "") -> bool:
+    """优雅停止时释放租约（CAS：只删自己的键）；失败只返回 False，不抛。
+
+    不释放会让新实例在 TTL(30s) 内被拒（exit 3），部署波 dwell 判定失败。
+    """
+    if not uuid_:
+        return False
+    try:
+        return bool(r.eval(_LEASE_RELEASE_LUA, 1, _key(LEASE_KEY, account_id), uuid_))
+    except Exception:
+        return False
+
+
 _LEASE_RENEW_LUA = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
     return redis.call('expire', KEYS[1], ARGV[2])

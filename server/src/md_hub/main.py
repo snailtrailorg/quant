@@ -21,6 +21,7 @@ from datetime import datetime
 
 from src.md_hub.parts import (  # 数据面部件（批 2 原样移驻；import 即重导出保测试路径——ThinGateway 批 63 二收编 md_gateway 后不再经 main 重导出）
     _LEASE_RENEW_LUA,
+    _lease_release,
     LATEST_TICK_PREFIX,
     LEASE_KEY,
     MinuteAggregator,
@@ -437,6 +438,11 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        # P3：优雅停止释放租约（否则新实例在 TTL 30s 内被拒 → 部署 dwell 抖动）
+        try:
+            _lease_release(r, account_id, my_uuid)
+        except Exception:   # noqa: BLE001 —— 退出路径禁抛
+            pass
         exit_process(0)   # 原生库拆除规避（同 runner）；SystemExit 路径已直接 exit_process 带码
 
 
