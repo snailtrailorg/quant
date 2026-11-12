@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -18,8 +19,13 @@ from decimal import Decimal
 from src.data_platform.db import get_conn
 from src.quant_common.markets import ASSET_CATEGORIES, MARKETS
 
+logger = logging.getLogger(__name__)
+
 _SESSION_OF_MARKET = {"astock": "astock_main", "crypto": "crypto_247"}
 _CACHE: dict[tuple, object] = {}
+# 上次成功的规格（DB 抖动时的 stale 兜底；键 (kind,key)，与版本无关）
+_LAST_GOOD: dict[tuple[str, str], object] = {}
+_STALE: set[tuple[str, str]] = set()
 
 
 def _cfg_version() -> int:
@@ -34,6 +40,7 @@ def _cfg_version() -> int:
 
 
 def _cached(kind: str, key: str, fn):
+    """版本缓存 + 上次成功兜底（读失败 → stale 快照 + 告警，交 RuleSet 按 mode 分流）。"""
     ver = _cfg_version()
     k = (kind, key, ver)
     if k not in _CACHE:
@@ -41,8 +48,22 @@ def _cached(kind: str, key: str, fn):
         for old in [x for x in _CACHE if x[0] == kind]:
             if old[2] != ver:
                 _CACHE.pop(old, None)
-        _CACHE[k] = fn()
+        try:
+            _CACHE[k] = fn()
+            _LAST_GOOD[(kind, key)] = _CACHE[k]
+            _STALE.discard((kind, key))
+        except Exception as e:
+            last = _LAST_GOOD.get((kind, key))
+            if last is None:
+                raise
+            _STALE.add((kind, key))
+            _CACHE[k] = last
+            logger.warning("规格读取失败，沿用上次快照（stale）%s/%s: %s", kind, key, e)
     return _CACHE[k]
+
+
+def is_stale(kind: str, key: str) -> bool:
+    return (kind, key) in _STALE
 
 
 @dataclass(frozen=True)
@@ -251,6 +272,7 @@ def _load_snapshot(account_id: int) -> AccountSnapshot:
 def invalidate() -> None:
     """测试/管理端写后清缓存（生产靠 cfg:version 自然失效）。"""
     _CACHE.clear()
+    _STALE.clear()
 
 
 # ── 规格管理写侧（路由只调这里；新路由禁内联 SQL）────────────────

@@ -890,10 +890,18 @@ def run(ctx: dict) -> None:
         from src.data_platform.rules import assert_dynamic_rules_complete, rules_for
         assert_dynamic_rules_complete()
         _rs = rules_for(account_id, symbol, provider=getattr(adapter, "close_policy_provider", None))
-        if _rs.state != "fresh":
+        if _rs.state == "missing":
             _alert(f"任务 {tid} 规则不完整（{symbol}）",
                    "规格缺失=开仓将 fail-closed；请检查 security_master/band_rules。",
                    code="rules.missing")
+        elif _rs.state == "stale":
+            _alert(f"任务 {tid} 规则快照过期（{symbol}）",
+                   "规格表读取失败，正在沿用上次成功值；请检查数据库连通性。",
+                   code="rules.stale")
+        if getattr(_rs.ins, "venue_flags", {}).get("tick_unverified"):
+            _alert(f"任务 {tid} 品种 tick 未核验（{symbol}）",
+                   "security_master.tick_size 为历史填充值，实盘前必须按交易所步长校正。",
+                   code="rules.tick_unverified")
     except Exception as e:   # noqa: BLE001 —— 预检失败不阻断启动，但必须可审计
         logger.error("规则完整性预检失败: %s", e)
         _alert(f"任务 {tid} 规则预检失败", str(e)[:300], code="rules.preflight")

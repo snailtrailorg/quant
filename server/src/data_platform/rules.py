@@ -187,6 +187,8 @@ class RuleSet:
 
     def validate(self, intent: Any, tick: dict | None, mode: str = "open") -> None:
         """合规校验：缺规则 fail-closed（开仓）/ 兜底（平仓）。"""
+        if self.state == "stale":
+            logger.warning("规则快照过期（沿用上次成功值）: %s", getattr(intent, "symbol", ""))
         if self.state == "missing":
             if mode == "open":
                 raise RuleViolation("RULE_MISSING", f"规则未配置: {getattr(intent, 'symbol', '')}")
@@ -257,7 +259,9 @@ def rules_for(account_id: int | None, symbol: str, provider: str | None = None,
         ms = specs.MarketSpec.of(ins.market)
     except Exception:
         ms = None
-    return RuleSet(ms=ms, ins=ins, acc=acc, state="fresh")
+    stale = specs.is_stale("instrument", symbol) or (
+        account_id is not None and specs.is_stale("perm", str(account_id)))
+    return RuleSet(ms=ms, ins=ins, acc=acc, state="stale" if stale else "fresh")
 
 
 @dataclass(frozen=True)

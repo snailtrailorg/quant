@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
@@ -199,6 +200,21 @@ def test_cash_gate_exempts_sell(rc, monkeypatch):
 
 
 # ── 版本失效 ─────────────────────────────────────────────
+
+def test_stale_fallback_uses_last_good_snapshot():
+    """读失败 → 沿用上次成功规格 + state=stale（不是重新抛/静默 fresh）。"""
+    from src.data_platform import specs
+    specs.invalidate()
+    first = InstrumentSpec.of("600000.SHSE")
+    with patch("src.data_platform.specs._cfg_version", return_value=999), \
+         patch("src.data_platform.specs._load_instrument", side_effect=RuntimeError("db down")):
+        again = InstrumentSpec.of("600000.SHSE")
+        assert rules_for(None, "600000.SHSE").state == "stale"
+    assert again == first
+    assert specs.is_stale("instrument", "600000.SHSE") is True
+    specs.invalidate()
+    assert specs.is_stale("instrument", "600000.SHSE") is False
+
 
 def test_cfg_version_bump_and_specs_invalidate():
     from src.data_platform import specs
