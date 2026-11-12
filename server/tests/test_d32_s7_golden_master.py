@@ -257,3 +257,43 @@ def test_compat_query_returns_domain_objects():
     compat = _LegacyCompat(port)
     rows = compat.query_orders()
     assert rows and rows[0].vt_orderid == "TEST.1" or rows[0].orderid == "1"
+
+def test_td_registry_plugin_impl_builds_port(monkeypatch):
+    """impl='plugin' → 运行时带 exec_port（插件端口）；legacy 不带。"""
+    import src.strategy_runner.td_registry as R
+    from src.strategy_runner.session_slot import SessionSlot
+
+    class _Cur:
+        def fetchone(self):
+            return ("plugin",)
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **k):
+            return _Cur()
+
+    monkeypatch.setattr("src.data_platform.db.get_conn", lambda: _Conn())
+    monkeypatch.setattr("src.strategy_runner.session_slot.SessionSlotAllocator.acquire",
+                        classmethod(lambda cls, *a, **k: SessionSlot(1, "xtp", "td", 2, "t1:e1:", True, 1, "h", 1)))
+    monkeypatch.setattr("src.strategy_runner.td_registry.build_xtp_setting",
+                        lambda **k: {"账号": "a", "密码": "p", "客户号": "1", "交易地址": "h", "交易端口": "1"})
+    monkeypatch.setattr("src.providers.xtp.session.load_xtp_window_cfg", lambda: (10, 10))
+    monkeypatch.setattr("src.providers.xtp.session.is_trading_day", lambda *a, **k: True)
+    monkeypatch.setattr("src.providers.xtp.session.xtp_session_window_open",
+                        lambda *a, **k: False)
+    monkeypatch.setattr("src.providers.xtp.td.make_gateway", lambda ee, name="XTP": _Gw())
+    monkeypatch.setattr("src.providers.xtp._transport.td_api_cls", lambda: (lambda gw: _Api()))
+    monkeypatch.setattr("src.strategy_framework.runtime.alerts.make_alert", lambda *a, **k: (lambda *x, **y: None))
+    monkeypatch.setattr("src.strategy_framework.runtime.alerts.make_guard",
+                        lambda name, alert=None: (lambda fn: fn))
+
+    rt = R.build_td_runtime("xtp", _EE(), 1, 1, 1)
+    assert "exec_port" in rt and rt["adapter"] is not None
+    r = rt["adapter"].send_order(__import__("src.strategy_framework.adapters", fromlist=["Order"]).Order(
+        "600000.SHSE", "BUY", 100, 10.0, "limit", "t1:e1:c1"))
+    assert r == "t1:e1:c1"

@@ -357,9 +357,18 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
 
     from src.strategy_runner.legacy_exec_port import LegacyExecutionPort
     _adapter_holder: dict = {"a": None}
+    # P3 双轨：plugin 账号的端口在 build 时产生（订阅紧随其后）；legacy 维持 build 前订阅
+    _impl = "legacy"
+    try:
+        from src.data_platform.db import get_conn as _gc
+        with _gc() as _c:
+            _r = _c.execute("SELECT impl FROM trading_account WHERE id=%s", (account_id,)).fetchone()
+        _impl = (_r[0] if _r else "legacy")
+    except Exception:   # noqa: BLE001 —— 读不到按 legacy（不阻断启动）
+        pass
     exec_port = LegacyExecutionPort(
         ee, lambda: _adapter_holder["a"], _guard, EVENT_ORDER, EVENT_TRADE,
-    )
+    ) if _impl != "plugin" else None
 
     @_guard("worker.on_order_status")
     def on_order(d):
@@ -370,7 +379,8 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
             bus.publish_cross_process(0, "order_update", {})
         except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
             pass
-    exec_port.subscribe_order(on_order)
+    if exec_port is not None:
+        exec_port.subscribe_order(on_order)
 
     # 批 65a：单入口分发（EX_CONFIG 异常处理留此调用点——78=RestartPrevent 豁免防重启风暴）
     try:
@@ -415,6 +425,11 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
               "td_open": True, "lead": None, "lag": None, "cfg_adapter": provider}
         if is_paper:
             logger.info("实盘任务 %s 以【纸上交易】模式启动：实时行情 + 完整风控链，订单不进入市场", tid)
+
+    if exec_port is None:
+        exec_port = rt.get("exec_port") or LegacyExecutionPort(
+            ee, lambda: _adapter_holder["a"], _guard, EVENT_ORDER, EVENT_TRADE)
+        exec_port.subscribe_order(on_order)
 
     gw = rt["gw"]
     td_api = rt["td_api"]

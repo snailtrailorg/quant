@@ -71,6 +71,34 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
     _lead, _lag = load_xtp_window_cfg()
     _td_open = xtp_session_window_open(_dtnow.now(), _lead, _lag, trading_day=_itd())
 
+    # ── P3 双轨：impl='plugin' 走插件端口（传输/会话/映射全在 providers/xtp）──
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as _c:
+            _row = _c.execute("SELECT impl FROM trading_account WHERE id=%s", (account_id,)).fetchone()
+        _impl = (_row[0] if _row else "legacy")
+    except Exception:
+        _impl = "legacy"
+    if _impl == "plugin":
+        from src.providers.xtp import td as _td
+        from src.strategy_framework.runtime.alerts import make_alert, make_guard
+        from src.strategy_runner.session_slot import SessionSlotAllocator
+
+        slot = SessionSlotAllocator.acquire(account_id, "xtp", "td", tid, boot_epoch, _td_open)
+        _alert = make_alert()
+        gw = _td.make_gateway(ee)
+        td_api = _td._transport.td_api_cls()(gw)
+        gw.td_api = td_api
+        port = _td.XtpExecutionPort(ee, gw, td_api, slot,
+                                    lambda n: make_guard(n, _alert), setting)
+        if _td_open:
+            gw.connect(setting)
+        adapter = _td._LegacyCompat(port, account_id)
+        logger.info("XTP 账号 %s 走插件端口（terminal_id=%s）", account_id, slot.terminal_id)
+        return {"gw": gw, "td_api": td_api, "adapter": adapter, "setting": setting,
+                "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp",
+                "exec_port": port}
+
     class ThinTdGateway(BaseGateway):
         """TD-only 壳：事件转发 + 抽象方法转发 td_api（零 MD 零合约表，R-BR1/R-CAP1）。"""
 
