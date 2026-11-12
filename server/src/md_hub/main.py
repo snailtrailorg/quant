@@ -228,6 +228,8 @@ def main() -> None:
         iface = get_interface_row(row_id, md_only=True)
         market = iface["market"]   # 会话模型分支真源（crypto/astock）
         from src.strategy_framework.md_gateway import create_md_gateway
+        import src.providers as _providers
+        _providers.ensure_registered()   # P3：MD 网关注册（懒导入 vnpy）
         md_gw = create_md_gateway(iface["provider"], counters)   # 未注册 provider ValueError → 78（盲审 P1-1）
         md_gw.set_on_tick(on_tick)   # tick 喂入（EVENT_TICK 注册收编插件内）
         md_gw.connect(iface["credentials"], iface["params"])   # 组装/建连异常 → 78（盲审 P2-4）

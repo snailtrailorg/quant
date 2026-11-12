@@ -17,6 +17,11 @@ def ensure_registered() -> None:
         get(DOMAIN_TRADING, "xtp")
     except UnknownProvider:
         register(DOMAIN_TRADING, "xtp", xtp.XtpPlugin())
+    # MD 网关注册（vnpy 依赖，运行时才导入；保证 create_md_gateway('xtp') 可用）
+    try:
+        from .xtp import md_gateway  # noqa: F401
+    except Exception:   # noqa: BLE001 —— 无 vnpy 环境（单测/离线）不阻断
+        pass
 
 
 __all__: list[str] = ["xtp", "ensure_registered"]

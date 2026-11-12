@@ -19,6 +19,8 @@ def _conn(rows):
 
 def test_list_md_gateway_providers_has_xtp():
     from src.strategy_framework.md_gateway import list_md_gateway_providers
+    import src.providers as _P
+    _P.ensure_registered()   # P3：XTP 网关注册移到 providers，需显式触发
     assert "xtp" in list_md_gateway_providers()
 
 

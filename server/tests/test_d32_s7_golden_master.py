@@ -170,7 +170,7 @@ def test_subscribe_pushes_domain_and_recovers_client_id():
 def test_md_port_delegates_to_gateway(monkeypatch):
     """MD 端口必须把 in_session/trading_day 原样下传（连接窗语义不丢）。"""
     import src.providers as P
-    import src.strategy_framework.md_gateway as G
+    import src.providers.xtp.md_gateway as G
 
     P.ensure_registered()
     from src.registry import get

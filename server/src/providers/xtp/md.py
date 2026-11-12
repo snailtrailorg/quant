@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class XtpMarketDataPort:
     def __init__(self, counters: Any, slot: Any = None) -> None:
-        from src.strategy_framework.md_gateway import XtpMdGateway
+        from src.providers.xtp.md_gateway import XtpMdGateway
         self.slot = slot
         self._gw = XtpMdGateway(counters)
 
