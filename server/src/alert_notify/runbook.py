@@ -77,6 +77,7 @@ RUNBOOK: dict[str, dict] = {
     "emergency.interrupted": {"label": "急停线程中断", "guide": "进程退出前 drain 超时、在飞平仓已中断——人工核对券商委托与持仓，必要时补挂平仓。"},
     "emergency.valkey_down": {"label": "急停同源行情全断", "guide": "Valkey 不可达致急停无同源报价、已停止空转——查 Valkey 服务与网络，恢复后重发一键清仓。"},
     "rules.missing": {"label": "交易规格缺失", "guide": "security_master/band_rules 无该标行=开仓 fail-closed。补规格行（系统管理→系统权限/规格）后 cfg:version 自动生效。"},
+    "md.license_denied": {"label": "行情授权拒绝", "guide": "该标的未在账号 data_license 白名单内，hub 跳过订阅并告警。到 规格→账户 data-license 补类别或标的（空值=不限制）。"},
     "rules.stale": {"label": "规则快照过期", "guide": "规格表读取失败，进程沿用上次成功值并告警。查 PG 连通性；恢复后 cfg:version 变更会自动重载。"},
     "rules.tick_unverified": {"label": "tick 未核验", "guide": "该品种 tick_size 是历史填充（非交易所事实）。实盘前校正 security_master.tick_size，否则取整价可能非法。"},
     "rules.preflight": {"label": "规则预检失败", "guide": "启动时规则加载异常（规格表不可读/动态规则未注册）。查日志首个异常；修复前开仓一律拒单。"},

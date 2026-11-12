@@ -250,6 +250,7 @@ def main() -> None:
             exit_process(9)   # systemd on-failure 拉起（9 不在 RestartPreventExitStatus——30s 窗承诺载体）
 
     md_status_was = False   # MD 重连沿基态（SA2 hub 版；connected 由网关插件供）
+    _license_denied_seen: set[str] = set()   # 172d：已告警过的未授权标的（防每 15s 刷屏）
 
     def _desired_symbols() -> set[str]:
         """订阅真相源（四源）：running 任务标的 ∪ 持仓标的 ∪ system_config 白名单 ∪ 临时订阅。
@@ -301,6 +302,19 @@ def main() -> None:
                 except Exception as e:
                     logger.warning("读 position_snapshot 持仓订阅源失败（account=%s）: %s",
                                    account_id, e)
+                # 172d：行情授权门（data_license 白名单；空=不限制）
+                try:
+                    from src.data_platform.subscription import denied_symbols
+                    denied = denied_symbols(account_id, rows)
+                    if denied:
+                        rows -= denied
+                        new_denied = denied - _license_denied_seen
+                        if new_denied:
+                            _license_denied_seen |= new_denied
+                            logger.warning("行情授权拒绝订阅 %d 标的（account=%s，样本=%s）",
+                                           len(new_denied), account_id, sorted(new_denied)[:3])
+                except Exception as e:
+                    logger.warning("行情授权判定失败（按已授权集继续）: %s", e)
                 return rows
         except Exception as e:
             logger.warning("读订阅真相源失败（沿用旧集）: %s", e)
