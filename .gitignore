@@ -52,3 +52,6 @@ deploy/tests/logs/
 # 仓根 Linux 回收站目录（gio trash 落到仓根时），非项目产物
 .Trash-0/
 deploy/files-grype/
+
+# codegraph 本地索引/daemon（非项目产物）
+.codegraph/

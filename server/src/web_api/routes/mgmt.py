@@ -19,7 +19,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from src.data_platform import config_store
 
@@ -631,6 +631,96 @@ def put_account_permission(account_id: int, req: AccountPermissionReq, payload: 
         req.is_st_allowed, req.convertible_allowed)
     audit_log(payload["username"], "account_permission_update", f"account={account_id}")
     return {"account_id": account_id}
+
+
+# ── 批 172c P2a：规格管理（SQL 在 data_platform/specs.py；本文件零 SQL）────
+
+def _bump() -> None:
+    from src.data_platform.routing import bump_config_version
+    bump_config_version()
+
+
+@router.get("/api/specs/instruments/{symbol}")
+def get_spec_instrument(symbol: str, payload: dict = Depends(require_perm("read"))):
+    from src.data_platform import specs
+    row = specs.get_instrument_row(symbol)
+    if not row:
+        raise ApiError(404, "SPEC_NOT_FOUND", f"security_master 无行 {symbol}")
+    return row
+
+
+@router.patch("/api/specs/instruments/{symbol}")
+def patch_spec_instrument(symbol: str, body: dict = Body(...),
+                          payload: dict = Depends(require_perm("system_config"))):
+    from src.data_platform import specs
+    try:
+        row = specs.update_instrument(symbol, body or {})
+    except KeyError:
+        raise ApiError(404, "SPEC_NOT_FOUND", f"security_master 无行 {symbol}")
+    except ValueError as e:
+        raise ApiError(400, "SPEC_BAD_VALUE", str(e))
+    _bump()
+    audit_log(payload["username"], "spec_instrument_update", symbol)
+    return row
+
+
+@router.get("/api/specs/band-rules/{exchange}/{board}")
+def get_spec_band(exchange: str, board: str, payload: dict = Depends(require_perm("read"))):
+    from src.data_platform import specs
+    row = specs.get_band_rule(exchange, board)
+    if not row:
+        raise ApiError(404, "SPEC_NOT_FOUND", f"band_rules 无行 {exchange}/{board}")
+    return row
+
+
+@router.patch("/api/specs/band-rules/{exchange}/{board}")
+def patch_spec_band(exchange: str, board: str, body: dict = Body(...),
+                    payload: dict = Depends(require_perm("system_config"))):
+    from src.data_platform import specs
+    try:
+        row = specs.update_band_rule(exchange, board, body or {})
+    except ValueError as e:
+        raise ApiError(400, "SPEC_BAD_VALUE", str(e))
+    _bump()
+    audit_log(payload["username"], "spec_band_update", f"{exchange}/{board}")
+    return row
+
+
+@router.get("/api/specs/accounts/{account_id}/close-policy")
+def get_spec_close_policy(account_id: int, payload: dict = Depends(require_perm("read"))):
+    from src.data_platform import specs
+    try:
+        return specs.get_close_policy(account_id)
+    except KeyError:
+        raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在")
+
+
+@router.patch("/api/specs/accounts/{account_id}/close-policy")
+def patch_spec_close_policy(account_id: int, body: dict = Body(...),
+                            payload: dict = Depends(require_perm("system_config"))):
+    from src.data_platform import specs
+    try:
+        out = specs.update_close_policy(account_id, body or {})
+    except KeyError:
+        raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在")
+    except ValueError as e:
+        raise ApiError(400, "SPEC_BAD_VALUE", str(e))
+    _bump()
+    audit_log(payload["username"], "spec_close_policy_update", f"account={account_id}")
+    return out
+
+
+@router.patch("/api/specs/accounts/{account_id}/data-license")
+def patch_spec_data_license(account_id: int, body: dict = Body(...),
+                            payload: dict = Depends(require_perm("system_config"))):
+    from src.data_platform import specs
+    try:
+        out = specs.update_data_license(account_id, str((body or {}).get("data_license") or ""))
+    except KeyError:
+        raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在")
+    _bump()
+    audit_log(payload["username"], "spec_data_license_update", f"account={account_id}")
+    return {"account_id": account_id, "data_license": out}
 
 
 
