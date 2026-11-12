@@ -710,6 +710,22 @@ def patch_spec_close_policy(account_id: int, body: dict = Body(...),
     return out
 
 
+@router.patch("/api/specs/accounts/{account_id}/impl")
+def patch_spec_impl(account_id: int, body: dict = Body(...),
+                    payload: dict = Depends(require_perm("system_config"))):
+    """双轨开关（legacy/plugin）——审计记录，任务下次启动生效。"""
+    from src.data_platform import specs
+    try:
+        out = specs.update_impl(account_id, str((body or {}).get("impl") or ""))
+    except KeyError:
+        raise ApiError(404, "ACCOUNT_NOT_FOUND", f"account {account_id} 不存在")
+    except ValueError as e:
+        raise ApiError(400, "SPEC_BAD_VALUE", str(e))
+    _bump()
+    audit_log(payload["username"], "spec_impl_update", f"account={account_id} impl={out}")
+    return {"account_id": account_id, "impl": out}
+
+
 @router.patch("/api/specs/accounts/{account_id}/data-license")
 def patch_spec_data_license(account_id: int, body: dict = Body(...),
                             payload: dict = Depends(require_perm("system_config"))):

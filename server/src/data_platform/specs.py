@@ -396,6 +396,22 @@ def update_close_policy(account_id: int, policy: dict) -> dict:
     return get_close_policy(account_id)
 
 
+def update_impl(account_id: int, impl: str) -> str:
+    """双轨开关（legacy/plugin）；只改账号行，任务下次启动生效。"""
+    value = str(impl or "").strip().lower()
+    if value not in ("legacy", "plugin"):
+        raise ValueError("impl 只能是 legacy 或 plugin")
+    with get_conn() as c:
+        row = c.execute("SELECT 1 FROM trading_account WHERE id=%s", (account_id,)).fetchone()
+        if not row:
+            raise KeyError(f"trading_account 无行 {account_id}")
+        c.execute("UPDATE trading_account SET impl=%s, updated_at=now() WHERE id=%s",
+                  (value, account_id))
+        c.commit()
+    invalidate()
+    return value
+
+
 def get_data_license(account_id: int) -> str:
     with get_conn() as c:
         return str(_get_params(c, account_id).get("data_license") or "")
