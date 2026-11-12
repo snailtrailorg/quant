@@ -60,13 +60,17 @@ def _port(ee=None, gw=None):
 # ── 注册 / 懒导入 ────────────────────────────────────────
 
 def test_import_providers_does_not_import_vnpy():
-    for m in [m for m in sys.modules if m == "vnpy" or m.startswith("vnpy.")]:
-        del sys.modules[m]
-    import importlib
+    """独立进程断言（同进程会被其他测试已导入的 vnpy 污染）。"""
+    import pathlib
+    import subprocess
 
-    import src.providers as P
-    importlib.reload(P)
-    assert not [m for m in sys.modules if m.startswith("vnpy")]
+    root = pathlib.Path(__file__).resolve().parents[1]
+    out = subprocess.run(
+        [sys.executable, "-c", "import sys; import src.providers; "
+                               "print(any(m == 'vnpy' or m.startswith('vnpy.') for m in sys.modules))"],
+        cwd=root, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr[-500:]
+    assert out.stdout.strip() == "False", f"导入 providers 拉起了 vnpy: {out.stdout}"
 
 
 def test_registry_registered_with_manifest():

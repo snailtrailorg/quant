@@ -1,4 +1,5 @@
-"""批 172d P3：XTP 会话号段租约表 + 双轨 impl 列 + account_key 部分唯一。"""
+# EXPAND-CONTRACT: phase=expand pair=0180
+"""批 172d P3 expand：会话租约表 + 双轨 impl 列（不含索引切换，切换在 0180 contract）。"""
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -28,33 +29,8 @@ def upgrade() -> None:
     op.create_check_constraint("ck_trading_account_impl", "trading_account",
                                "impl IN ('legacy','plugin')")
 
-    # account_key 部分唯一：重复行预检（enabled 且 key 非空）→ 有重复 raise，禁静默
-    op.execute("""
-        DO $$
-        DECLARE n int;
-        BEGIN
-          SELECT count(*) INTO n FROM (
-            SELECT market, account_key FROM trading_account
-            WHERE account_key IS NOT NULL AND enabled
-            GROUP BY market, account_key HAVING count(*) > 1
-          ) x;
-          IF n > 0 THEN
-            RAISE EXCEPTION 'trading_account 存在 % 组 (market, account_key) 重复，先人工合并', n;
-          END IF;
-        END $$;
-    """)
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_trading_account_account_key")
-        op.execute("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "
-                   "uq_trading_account_market_account_key ON trading_account (market, account_key) "
-                   "WHERE account_key IS NOT NULL AND enabled")
-
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
-        op.execute("DROP INDEX CONCURRENTLY IF EXISTS uq_trading_account_market_account_key")
-        op.execute("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "
-                   "ix_trading_account_account_key ON trading_account (provider, account_key)")
     op.drop_constraint("ck_trading_account_impl", "trading_account", type_="check")
     op.drop_column("trading_account", "impl")
     op.drop_table("provider_session_slot")
