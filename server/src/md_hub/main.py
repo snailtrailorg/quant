@@ -151,6 +151,8 @@ def main() -> None:
                        os.getpid(), os.environ.get("ACCOUNT_ID", ""))
         if callable(_prev_term):
             _prev_term(signum, frame)
+        else:   # 无人接管（SIG_DFL/SIG_IGN）：必须自行退出，否则吞掉停止信号→systemd 90s 后 SIGKILL
+            raise SystemExit(0)
 
     _chain(_on_term)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
