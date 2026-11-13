@@ -82,6 +82,7 @@ def consume_risk_cmd(r, adapter, tid: str, account_id=None, td_api=None,
         "operator": cmd.get("operator") or "manual",
         "operator_uid": cmd.get("operator_uid"),   # worker3 _dispatch_risk_cmd 补 int(sub)
         "ts": cmd.get("ts"),
+        "order": cmd.get("order") or {},   # 批173：手动买卖参数（verb=manual-order）
     }
     if cmd_queue is not None:
         cmd_queue.put_nowait(item)
@@ -222,6 +223,20 @@ class EmergencyWorker:
             req_id=cmd.get("req_id") or "", deadline_ts=deadline_ts,
             td_api=self._td_api)
 
+    def _manual_order(self, cmd) -> dict:
+        """批 173：手动买卖在专用线程内执行（web-api 无 TD 会话）。"""
+        o = cmd.get("order") or {}
+        if not o:
+            logger.warning("手动单命令缺 order（丢弃）tid=%s req=%s",
+                           self._tid, cmd.get("req_id"))
+            return {"accepted": False, "reason": "BAD_CMD"}
+        if not self._td_connected():
+            return {"accepted": False, "reason": "TD_DISCONNECTED"}
+        return trading.submit_manual_order(
+            self._adapter, account_id=self._account_id,
+            operator=cmd.get("operator") or "manual",
+            req_id=cmd.get("req_id") or "", order=o)
+
     def _handle(self, cmd: dict) -> None:
         verb = cmd.get("verb") or ""
         req_id = cmd.get("req_id") or ""
@@ -237,6 +252,16 @@ class EmergencyWorker:
                 trading.write_cmd_result(req_id, self._ack(verb, req_id, result))
             # 只有 close-all 有「急停终局」语义（:final + SSE）——cancel-all/未知 verb 只写主回执
             self._final(cmd, result, interrupted=False)
+        elif verb == "manual-order":
+            # 批173：正常下单也碰 adapter，复用 _closing 短窗防与主循环行情链并发；
+            # 只写主回执，不写 :final / 不发 SSE（避免污染急停终局列表）。
+            self._closing.set()
+            try:
+                result = self._manual_order(cmd)
+            finally:
+                self._closing.clear()
+            trading.write_cmd_result(req_id, {"req_id": req_id, "verb": verb,
+                                              "phase": "done", **result})
         elif verb == "cancel-all":
             result = self._cancel_all(cmd)
             trading.write_cmd_result(req_id, self._ack(verb, req_id, result))

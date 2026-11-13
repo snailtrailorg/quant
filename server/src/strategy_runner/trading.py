@@ -450,6 +450,89 @@ def mark_emergency_interrupted(req_id: str) -> None:
         logger.warning("急停单 interrupted 标记失败 req=%s: %s", req_id, e)
 
 
+def manual_order_open(sym: str, volume, price: float, account_id, operator: str,
+                      req_id: str, action: str, cid: str) -> int | None:
+    """批 173：手动单审计落库（INSERT 在 send 之前；F-4 时序铁律）。
+
+    与 _close_order_open 同形态，但 strategy_id='manual'（区分急停单）、cid 由调用方
+    预生成。失败返回 None → 调用方 fail-closed 放弃下单（never-raise 留痕）。
+    """
+    try:
+        from src.data_platform.db import get_conn
+        with get_conn() as conn:
+            oid = conn.execute(
+                "INSERT INTO order_log (strategy_id, symbol, action, volume, price, status, "
+                "account_id, client_order_id) "
+                "VALUES ('manual', %s, %s, %s, %s, 'submitting', %s, %s) RETURNING id",
+                (sym, action, volume, price, account_id, cid)).fetchone()[0]
+            conn.commit()
+        return oid
+    except Exception as e:
+        logger.warning("手动单审计落库失败 %s cid=%s: %s", sym, cid, e)
+        return None
+
+
+def submit_manual_order(adapter, account_id, operator: str, req_id: str,
+                        order: dict) -> dict:
+    """批 173：手动买卖执行（EmergencyWorker 线程内，_closing 短窗保护）。
+
+    链路：SELL 可卖截断 → RiskControl.check_order（唯一咽喉，禁旁路）→
+    INSERT order_log(submitting) → adapter.send_order → 回填 vt_orderid / send_failed。
+    send_order 返 None 或抛异常都记 send_failed 且不虚报成功（171s 审 C P0）。
+    """
+    from src.risk_control.risk import RiskControl
+    sym = str(order.get("symbol") or "")
+    action = str(order.get("action") or "").upper()
+    try:
+        volume = int(order.get("volume") or 0)
+        price = float(order.get("price") or 0)
+    except (TypeError, ValueError):
+        return {"accepted": False, "reason": "BAD_ORDER", "client_order_id": ""}
+    cid = str(order.get("client_order_id") or f"mo-{req_id}-{sym}")
+
+    if action == "SELL":
+        try:
+            held = 0
+            for p in (adapter.query_position() or []):
+                if getattr(p, "symbol", "") == sym:
+                    held = max(int(getattr(p, "volume", 0) or 0)
+                               - int(getattr(p, "frozen", 0) or 0), 0)
+                    break
+            if held <= 0:
+                return {"accepted": False, "reason": "NO_SELLABLE_POSITION",
+                        "client_order_id": cid}
+            volume = min(volume, held)
+        except Exception as e:
+            logger.warning("手动卖可卖仓查询失败（按原量）: %s", e)
+
+    od = {"symbol": sym, "action": action, "volume": volume, "price": price,
+          "reason": "manual_order", "operator": operator, "account_id": account_id}
+    d = RiskControl.get().check_order(od, account_id=account_id)
+    if not d.approved:
+        return {"accepted": False, "reason": d.reason, "client_order_id": cid}
+    if isinstance(getattr(d, "adjusted", None), dict):
+        volume = int(d.adjusted.get("volume", volume))
+        price = float(d.adjusted.get("price", price))
+
+    oid = manual_order_open(sym, volume, price, account_id, operator, req_id, action, cid)
+    if oid is None:
+        return {"accepted": False, "reason": "WAL_FAILED", "client_order_id": cid}
+    try:
+        from src.strategy_framework.adapters import Order
+        ret = adapter.send_order(Order(symbol=sym, action=action, volume=volume,
+                                       price=price, order_type="limit", client_id=cid))
+        if not ret:
+            _close_order_mark(oid, adapter, cid, "send_failed", error="gateway_rejected")
+            return {"accepted": False, "reason": "NOT_SENT", "client_order_id": cid}
+        _close_order_mark(oid, adapter, cid, "submitted")
+        return {"accepted": True, "client_order_id": cid,
+                "vt_orderid": adapter.get_vt_orderid(cid),
+                "volume": volume, "price": price}
+    except Exception as e:
+        _close_order_mark(oid, adapter, cid, "send_failed", error=str(e)[:200])
+        return {"accepted": False, "reason": "SEND_ERROR", "client_order_id": cid}
+
+
 def write_cmd_result(req_id: str, result: dict, *, final: bool = False) -> None:
     """急停回执写（never-raise 留痕）：主回执=第一轮快照（web 5s 窗），终局=:final（TTL 30min）。
 

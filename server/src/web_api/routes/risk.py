@@ -581,6 +581,110 @@ def risk_close_result(req_id: str, payload: dict = Depends(require_perm("halt"))
     return {**doc, "status": "final"}
 
 
+# ——— 批 173：手动买卖（复用 risk:cmd 命令通道，verb=manual-order）———
+# Web 层零 SQL / 零 adapter / 零 TD：只校验 + 鉴权 + 下发，执行在活 runner 内。
+
+def _dispatch_manual_cmd(body: dict, payload: dict) -> dict:
+    import json as _json
+    import time as _t
+    import uuid as _uuid
+    from src.web_api.errors import ApiError
+    from src.quant_common.redis_client import business_redis
+    account_id = int(body["account_id"])
+    runners = _live_runners(accounts=[account_id])
+    if not runners:
+        audit_log(payload["username"], "manual_order",
+                  detail=f"no active runner acct={account_id} (409)")
+        raise ApiError(409, "MANUAL_NO_ACTIVE_RUNNER",
+                       "该账号无活动实盘 runner（TD 会话不可用）——命令未下发")
+    tid, _acct = runners[0]
+    req_id = _uuid.uuid4().hex[:12]
+    cid = str(body.get("client_order_id") or f"mo-{req_id}-{body['symbol']}")
+    r = business_redis(socket_timeout=3)
+    if body.get("client_order_id"):
+        if not r.set(f"manual:cid:{cid}", "1", nx=True, ex=600):
+            raise ApiError(400, "MANUAL_DUPLICATE_CID", "client_order_id 重复提交")
+    cmd = {"id": req_id, "verb": "manual-order",
+           "operator": payload["username"], "operator_uid": _operator_uid(payload),
+           "ts": _t.time(),
+           "order": {"symbol": body["symbol"], "action": body["action"],
+                     "volume": int(body["volume"]), "price": float(body["price"]),
+                     "order_type": "limit", "client_order_id": cid}}
+    r.set(f"risk:cmd:{tid}", _json.dumps(cmd), ex=10 * 60)
+    audit_log(payload["username"], "manual_order",
+              detail=f"req={req_id} tid={tid} {cmd['order']['action']} "
+                     f"{cmd['order']['symbol']} x{cmd['order']['volume']} @{cmd['order']['price']}")
+    deadline = _t.time() + 5
+    while _t.time() < deadline:
+        raw = r.get(f"risk:cmd:result:{req_id}")
+        if raw:
+            try:
+                doc = _json.loads(raw)
+            except (ValueError, TypeError):
+                doc = {}
+            r.delete(f"risk:cmd:result:{req_id}")
+            return {"status": "accepted" if doc.get("accepted") else "rejected",
+                    "req_id": req_id, "tid": tid, **doc}
+        _t.sleep(0.3)
+    audit_log(payload["username"], "manual_order_dispatched", detail=f"req={req_id} tid={tid}")
+    return {"status": "dispatched", "req_id": req_id, "tid": tid}
+
+
+@router.post("/api/manual-order")
+def manual_order(body: dict = Body(default={}),
+                 payload: dict = Depends(require_perm("trade"))):
+    """批 173：手动限价买卖。执行在活 runner 内（web-api 无 TD 会话）；
+    每笔必过 RiskControl.check_order，拒单可见、留 risk_log。"""
+    import re as _re
+    body = body or {}
+    if body.get("confirm") != "CONFIRM":
+        raise ApiError(400, "MANUAL_CONFIRM_REQUIRED",
+                       "手动单需 body {\"confirm\":\"CONFIRM\"} 二次确认")
+    aid = body.get("account_id")
+    if not isinstance(aid, int) or isinstance(aid, bool) or aid <= 0:
+        raise ApiError(400, "BAD_ACCOUNT_ID", "account_id 须为正整数")
+    sym = str(body.get("symbol") or "").strip()
+    if not _re.fullmatch(r"[0-9A-Za-z]{6}\.[A-Za-z]{3,4}", sym):
+        raise ApiError(400, "BAD_SYMBOL", "symbol 格式非法（须 6 位代码.交易所）")
+    action = str(body.get("action") or "").upper()
+    if action not in ("BUY", "SELL"):
+        raise ApiError(400, "BAD_ACTION", "action 须为 BUY 或 SELL")
+    vol = body.get("volume")
+    if not isinstance(vol, int) or isinstance(vol, bool) or vol <= 0 or vol > 100000 or vol % 100:
+        raise ApiError(400, "BAD_VOLUME", "volume 须为正整数、100 整数倍、≤100000")
+    try:
+        px = float(body.get("price") or 0)
+    except (TypeError, ValueError):
+        raise ApiError(400, "BAD_PRICE", "price 须为正数")
+    if px <= 0:
+        raise ApiError(400, "BAD_PRICE", "price 须为正数")
+    cid = body.get("client_order_id")
+    if cid is not None and not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(cid)):
+        raise ApiError(400, "BAD_CLIENT_ORDER_ID", "client_order_id 非法")
+    clean = {"account_id": aid, "symbol": sym, "action": action,
+             "volume": vol, "price": px, "client_order_id": cid}
+    return _dispatch_manual_cmd(clean, payload)
+
+
+@router.get("/api/manual-order/{req_id}")
+def manual_order_result(req_id: str, payload: dict = Depends(require_perm("trade"))):
+    """批 173：手动单回执单查（读 risk:cmd:result:{req_id}）。"""
+    import json as _json
+    import re as _re
+    from src.quant_common.redis_client import business_redis
+    if not _re.fullmatch(r"[A-Za-z0-9_-]{1,64}", req_id or ""):
+        raise ApiError(400, "BAD_REQ_ID", "req_id 非法")
+    r = business_redis(decode_responses=True, socket_timeout=2)
+    raw = r.get(f"risk:cmd:result:{req_id}")
+    if not raw:
+        return {"status": "pending", "req_id": req_id}
+    try:
+        doc = _json.loads(raw) if isinstance(raw, str) else {}
+    except (ValueError, TypeError):
+        doc = {}
+    return {"status": "done", "req_id": req_id, **doc}
+
+
 @router.get("/api/risk-rules")
 def list_risk_rules(payload: dict = Depends(require_perm("read"))):
     with get_conn() as conn:
