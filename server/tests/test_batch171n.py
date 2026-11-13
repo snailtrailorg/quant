@@ -297,24 +297,16 @@ class TestHeartbeatDecoding:
 
 class TestThinTdGatewayErrorCallback:
     """vnpy_xtp 在撤单/委托失败时调 gateway.write_error——BaseGateway 没有此方法，
-    ThinTdGateway 必须补（否则撤单失败回调抛 AttributeError，熔断沿撤单路径被打断）。"""
+    ThinTdGateway 必须补（否则撤单失败回调抛 AttributeError，熔断沿撤单路径被打断）。
+    P3：ThinTdGateway 已随 XTP TD 运行时迁入 providers/xtp/td.py::make_gateway，
+    td_registry 的 legacy 装配已删——守门改测插件端口的同一契约。"""
 
     def test_write_error_exists_and_never_raises(self, monkeypatch):
         import os
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-        import src.providers.xtp.session as M
-        import src.strategy_runner.td_registry as TD
-        # 绑定点在 td_registry 模块命名空间（模块级 import）——patch broker 会因导入顺序失效
-        monkeypatch.setattr(TD, "build_xtp_setting",
-                            lambda **kw: {"账号": "x", "密码": "y", "客户号": 1,
-                                          "交易地址": "h", "交易端口": 1, "授权码": "z"})
-        monkeypatch.setattr(M, "load_xtp_window_cfg", lambda: (10, 10))
-        monkeypatch.setattr(M, "xtp_session_window_open", lambda *a, **k: False)
-        monkeypatch.setattr(M, "is_trading_day", lambda *a, **k: True)
         from vnpy.event import EventEngine
-        from src.strategy_runner.td_registry import build_td_runtime
-        rt = build_td_runtime("xtp", EventEngine(), 999, 1, 123)
-        gw = rt["gw"]
+        from src.providers.xtp.td import make_gateway
+        gw = make_gateway(EventEngine())
         assert hasattr(gw, "write_error")
         gw.write_error("撤单失败", {"error_id": 1, "error_msg": "mock"})   # 不抛即过
         gw.write_error("撤单失败", None)

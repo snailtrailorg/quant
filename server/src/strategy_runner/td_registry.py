@@ -50,28 +50,14 @@ def build_td_runtime(provider, ee, tid, account_id, boot_epoch) -> dict | None:
 
 @register_td_builder("xtp")
 def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
-    """D5：XTP 专属 TD 运行时组装（ThinTdGateway + XtpTdApi + XTPAdapter + 连接窗）。
+    """XTP TD 运行时组装（P3 收口：唯一路径=providers/xtp 插件端口）。
 
-    （批 65a 迁自 main.py:125-184，适配三处：import 源/logger/模块归属。）
-    返回 {gw, td_api, adapter, setting, td_open, lead, lag, cfg_adapter}。
+    旧 ThinTdGateway + XtpTdApi + XTPAdapter 组装已于批 172d 删除；
+    impl!='plugin' 的行在此 fail-fast（main 转 EX_CONFIG=78），不静默回落已删路径。
+    返回 {gw, td_api, adapter, setting, td_open, lead, lag, cfg_adapter, exec_port, session_slot}。
     row_id=account_id 显式传（build_xtp_setting 取数失败 raise，禁 .env fallback——防 A 任务串 B 账户）。
     """
-    from vnpy.trader.gateway import BaseGateway
-    from vnpy_xtp.gateway.xtp_gateway import XtpTdApi
-
-    from src.strategy_framework.adapters import XTPAdapter
-    setting = build_xtp_setting(client_id=runner_client_id(tid), row_id=account_id)
-
-    # 每日连接窗·TD 侧（只 A股 XTP 套窗）：窗开建连/窗关启动不连（窗开沿由
-    # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
-    from datetime import datetime as _dtnow  # 盲审 A-P0：函数级导入（模块头部无 datetime）
-
-    from src.providers.xtp.session import is_trading_day as _itd
-    from src.providers.xtp.session import load_xtp_window_cfg, xtp_session_window_open
-    _lead, _lag = load_xtp_window_cfg()
-    _td_open = xtp_session_window_open(_dtnow.now(), _lead, _lag, trading_day=_itd())
-
-    # ── P3 双轨：impl='plugin' 走插件端口（传输/会话/映射全在 providers/xtp）──
+    # 实现形态门先判：legacy 已删，取数/建连之前就拒（否则错误信息被下游覆盖）
     try:
         from src.data_platform.db import get_conn
         with get_conn() as _c:
@@ -79,86 +65,40 @@ def _build_xtp_runtime(ee, tid, account_id, boot_epoch) -> dict:
         _impl = (_row[0] if _row else "legacy")
     except Exception:
         _impl = "legacy"
-    if _impl == "plugin":
-        from src.providers.xtp import td as _td
-        from src.strategy_framework.runtime.alerts import make_alert, make_guard
-        from src.strategy_runner.session_slot import SessionSlotAllocator
+    if _impl != "plugin":
+        raise RuntimeError(
+            f"XTP 账号 {account_id} impl={_impl!r}：legacy TD 路径已于 P3 删除，须切 impl=plugin"
+        )
 
-        slot = SessionSlotAllocator.acquire(account_id, "xtp", "td", tid, boot_epoch, _td_open)
-        _alert = make_alert()
-        gw = _td.make_gateway(ee)
-        td_api = _td._transport.td_api_cls()(gw)
-        gw.td_api = td_api
-        port = _td.XtpExecutionPort(ee, gw, td_api, slot,
-                                    lambda n: make_guard(n, _alert), setting)
-        if _td_open:
-            gw.connect(setting)
-        adapter = _td._LegacyCompat(port, account_id)
-        logger.info("XTP 账号 %s 走插件端口（terminal_id=%s）", account_id, slot.terminal_id)
-        return {"gw": gw, "td_api": td_api, "adapter": adapter, "setting": setting,
-                "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp",
-                "exec_port": port, "session_slot": slot}
+    from datetime import datetime as _dtnow  # 盲审 A-P0：函数级导入（模块头部无 datetime）
 
-    class ThinTdGateway(BaseGateway):
-        """TD-only 壳：事件转发 + 抽象方法转发 td_api（零 MD 零合约表，R-BR1/R-CAP1）。"""
+    from src.providers.xtp import td as _td
+    from src.providers.xtp.session import is_trading_day as _itd
+    from src.providers.xtp.session import load_xtp_window_cfg, xtp_session_window_open
+    from src.strategy_framework.runtime.alerts import make_alert, make_guard
+    from src.strategy_runner.session_slot import SessionSlotAllocator
 
-        def connect(self, s: dict) -> None:
-            self.td_api.connect(s["账号"], s["密码"], int(s["客户号"]), s["交易地址"],
-                                int(s["交易端口"]), s.get("授权码", ""), 3)
+    setting = build_xtp_setting(client_id=runner_client_id(tid), row_id=account_id)
 
-        def subscribe(self, req) -> None:  # hub 模式 worker 无行情
-            pass
+    # 每日连接窗·TD 侧（只 A股 XTP 套窗）：窗开建连/窗关启动不连（窗开沿由
+    # hub_worker._td_reconnect 补首连）；盘后不断开（XtpTdApi 无 logout）。lead/lag 任一 0=禁用日窗。
+    _lead, _lag = load_xtp_window_cfg()
+    _td_open = xtp_session_window_open(_dtnow.now(), _lead, _lag, trading_day=_itd())
 
-        def write_error(self, msg: str, error: dict | None = None) -> None:
-            """TD 报错回调（vnpy_xtp 的 XtpTdApi 在委托/撤单/查询失败时调 gateway.write_error）。
-
-            2026-11-09（171n e2e 抓真因）：`write_error` 定义在 **XtpGateway** 而非
-            BaseGateway；ThinTdGateway 只继承 BaseGateway ⇒ 任何撤单失败/委托失败回调
-            抛 AttributeError，撤单回调线程被打断（熔断沿撤单真实路径必踩）。
-            实现：日志 + EVENT_LOG（与 write_log 同源），never-raise——回调里不能再抛。
-            """
-            try:
-                detail = ""
-                if isinstance(error, dict):
-                    detail = str(error.get("error_msg") or error.get("error_id") or "")
-                text = f"{msg}：{detail}" if detail else msg
-                logger.error("TD 报错: %s", text)
-                from vnpy.trader.object import LogData
-                self.on_log(LogData(msg=text, gateway_name=self.gateway_name))
-            except Exception:   # noqa: BLE001 —— 回调链路禁抛
-                pass
-
-        def send_order(self, req) -> str:
-            return self.td_api.send_order(req)
-
-        def cancel_order(self, req) -> None:
-            self.td_api.cancel_order(req)
-
-        def query_account(self) -> None:
-            self.td_api.query_account()
-
-        def query_position(self) -> None:
-            self.td_api.query_position()
-
-        def close(self) -> None:
-            try:
-                if getattr(self.td_api, "connect_status", False):
-                    self.td_api.exit()
-            except Exception:  # 失败不阻断（fail-open 降级）  # noqa: S110
-                pass
-
-    gw = ThinTdGateway(ee, "XTP")
-    td_api = XtpTdApi(gw)
+    slot = SessionSlotAllocator.acquire(account_id, "xtp", "td", tid, boot_epoch, _td_open)
+    _alert = make_alert()
+    gw = _td.make_gateway(ee)
+    td_api = _td._transport.td_api_cls()(gw)
     gw.td_api = td_api
+    port = _td.XtpExecutionPort(ee, gw, td_api, slot,
+                                lambda n: make_guard(n, _alert), setting)
     if _td_open:
-        gw.connect(setting)   # 只连 TD（R-TD1：hub 零 TD，worker 零 MD）
-    else:
-        logger.info("TD 窗关启动（lead=%d/lag=%d），连接待窗开沿", _lead, _lag)
-
-    adapter = XTPAdapter(gateway=gw, event_engine=ee,
-                         order_prefix=f"t{tid}:e{boot_epoch}:")
+        gw.connect(setting)
+    adapter = _td._LegacyCompat(port, account_id)
+    logger.info("XTP 账号 %s 走插件端口（terminal_id=%s）", account_id, slot.terminal_id)
     return {"gw": gw, "td_api": td_api, "adapter": adapter, "setting": setting,
-            "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp"}
+            "td_open": _td_open, "lead": _lead, "lag": _lag, "cfg_adapter": "xtp",
+            "exec_port": port, "session_slot": slot}
 
 
 @register_td_builder("emt_emq")

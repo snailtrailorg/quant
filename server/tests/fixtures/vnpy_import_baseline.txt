@@ -2,7 +2,7 @@
 # 规则：只减不增。P3/P4 迁一个 provider 删对应行；P5 后应为空。
 # 重刷基线必须同时改 `# count`，并在提交信息说明理由（防按行重刷洗白）。
 # 注意：行号会随这些文件改动漂移——仅位移时同步更新并在提交信息注明「仅位移」。
-md_hub/main.py:37:4
+md_hub/main.py:38:4
 strategy_framework/adapters.py:239:4
 strategy_framework/adapters.py:272:12
 strategy_framework/adapters.py:323:8
@@ -33,7 +33,4 @@ strategy_framework/md_gateway.py:466:8
 strategy_framework/md_gateway.py:494:8
 strategy_framework/md_gateway.py:517:8
 strategy_framework/md_gateway.py:523:12
-strategy_runner/td_registry.py:126:16
-strategy_runner/td_registry.py:59:4
-strategy_runner/td_registry.py:60:4
-# count: 34
+# count: 31

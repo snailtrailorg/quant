@@ -237,10 +237,13 @@ return 0
 """
 
 
-def _lease_release(r, account_id=None, uuid_: str = "") -> bool:
+def _release_own_lease(r, account_id=None, uuid_: str = "") -> bool:
     """优雅停止时释放租约（CAS：只删自己的键）；失败只返回 False，不抛。
 
     不释放会让新实例在 TTL(30s) 内被拒（exit 3），部署波 dwell 判定失败。
+    注意：不叫 `_lease_release`——那是 M5 A/B 切换仲裁的退役符号
+    （D26 §4.1，test_lease_guard.test_m5_machinery_gone 禁止其复活）；本函数是
+    当前租约机制（_lease_acquire SET NX EX 30）的停止清理，语义不同、名字须区分。
     """
     if not uuid_:
         return False

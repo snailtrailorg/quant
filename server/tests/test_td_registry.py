@@ -8,6 +8,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from src.strategy_runner import td_registry
 from src.strategy_runner.td_registry import TD_BUILDERS, build_td_runtime, register_td_builder
 
@@ -45,43 +47,59 @@ def test_key_domain_providers():
     assert "xtp" in TD_BUILDERS
 
 
-def test_xtp_builder_shape():
-    """builder 可调性：mock 全外部依赖（td_registry 命名空间的模块级 import+md_session 三函数
-    ——不 patch 则真连 DB+时钟 flaky），断言八键形状与 td_open 分支。"""
-    fake_setting = {"账号": "a", "密码": "b", "客户号": "1", "交易地址": "x", "交易端口": "1"}
-    # patch 值非默认（7,3≠产默认 10/10）——若 patch 机制失效走真 DB fail-open 默认则断言必红（防假绿）
-    with patch.object(td_registry, "build_xtp_setting", return_value=fake_setting), \
-         patch("src.providers.xtp.session.is_trading_day", return_value=True), \
-         patch("src.providers.xtp.session.load_xtp_window_cfg", return_value=(7, 3)), \
-         patch("src.providers.xtp.session.xtp_session_window_open", return_value=False), \
-         patch("vnpy_xtp.gateway.xtp_gateway.XtpTdApi") as api_cls, \
-         patch("src.strategy_framework.adapters.XTPAdapter") as ad_cls:
-        rt = build_td_runtime("xtp", MagicMock(), 7, 4, 99)
-        assert set(rt) == {"gw", "td_api", "adapter", "setting", "td_open",
-                           "lead", "lag", "cfg_adapter"}   # 八键契约（与 stub 分支键集一致）
-        assert rt["setting"] is fake_setting
-        assert rt["td_open"] is False and rt["lead"] == 7 and rt["lag"] == 3
-        assert rt["cfg_adapter"] == "xtp"
-        assert rt["gw"].td_api is api_cls.return_value
-        api_cls.return_value.connect.assert_not_called()   # 窗关不连
-        ad_cls.assert_called_once()   # order_prefix 含 tid/boot_epoch
-        assert "t7:e99:" in ad_cls.call_args.kwargs["order_prefix"]
+def _patch_db_impl(impl: str):
+    """builder 内函数级 import db.get_conn —— patch 该符号注入账号 impl 值。"""
+    class _C:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def execute(self, *a, **k):
+            return self
+
+        def fetchone(self):
+            return (impl,)
+    return patch("src.data_platform.db.get_conn", return_value=_C())
 
 
-def test_xtp_builder_connects_when_window_open():
-    """td_open=True 分支钉：gw.connect(setting)→td_api.connect 位置参数转发（TD 会话建立面）。"""
-    fake_setting = {"账号": "acct", "密码": "pw", "客户号": "42", "交易地址": "tcp://x",
-                    "交易端口": "1", "授权码": "ok"}
-    with patch.object(td_registry, "build_xtp_setting", return_value=fake_setting), \
+def test_xtp_builder_requires_plugin_impl():
+    """P3 收口：legacy TD 路径已删 —— impl!='plugin' 必须 fail-fast（main 转 78），
+    不得静默回落到已删除的组装路径。"""
+    with _patch_db_impl("legacy"):
+        with pytest.raises(RuntimeError, match="legacy TD 路径已于 P3 删除"):
+            build_td_runtime("xtp", MagicMock(), 7, 4, 99)
+
+
+def test_xtp_builder_plugin_shape():
+    """插件路径八键 + exec_port/session_slot 形状（窗开=建连、窗关=不连由 td_open 透传）。"""
+    fake_setting = {"账号": "acct", "密码": "pw", "客户号": "42", "交易地址": "tcp://x", "交易端口": "1"}
+    slot = MagicMock()
+    slot.terminal_id = 19
+    with _patch_db_impl("plugin"), \
+         patch.object(td_registry, "build_xtp_setting", return_value=fake_setting), \
          patch("src.providers.xtp.session.is_trading_day", return_value=True), \
          patch("src.providers.xtp.session.load_xtp_window_cfg", return_value=(7, 3)), \
          patch("src.providers.xtp.session.xtp_session_window_open", return_value=True), \
-         patch("vnpy_xtp.gateway.xtp_gateway.XtpTdApi") as api_cls, \
-         patch("src.strategy_framework.adapters.XTPAdapter"):
+         patch("src.strategy_runner.session_slot.SessionSlotAllocator.acquire", return_value=slot), \
+         patch("src.providers.xtp.td.make_gateway") as mk_gw, \
+         patch("src.providers.xtp.td._transport.td_api_cls") as api_cls, \
+         patch("src.providers.xtp.td.XtpExecutionPort") as port_cls, \
+         patch("src.providers.xtp.td._LegacyCompat") as compat:
         rt = build_td_runtime("xtp", MagicMock(), 7, 4, 99)
-        assert rt["td_open"] is True
-        api_cls.return_value.connect.assert_called_once_with(
-            "acct", "pw", 42, "tcp://x", 1, "ok", 3)   # ThinTdGateway.connect 转发契约
+
+    assert set(rt) == {"gw", "td_api", "adapter", "setting", "td_open",
+                       "lead", "lag", "cfg_adapter", "exec_port", "session_slot"}
+    assert rt["setting"] is fake_setting
+    assert rt["td_open"] is True and rt["lead"] == 7 and rt["lag"] == 3
+    assert rt["cfg_adapter"] == "xtp"
+    assert rt["gw"] is mk_gw.return_value
+    assert rt["td_api"] is api_cls.return_value.return_value
+    assert rt["exec_port"] is port_cls.return_value
+    assert rt["session_slot"] is slot
+    assert rt["adapter"] is compat.return_value
+    mk_gw.return_value.connect.assert_called_once_with(fake_setting)   # 窗开建连
 
 
 def test_dispatch_none_and_dict_equivalence():
