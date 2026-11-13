@@ -35,3 +35,21 @@ def test_empty_symbol_kept_empty():
     d = NS(symbol="", exchange=None, orderid="", vt_orderid="", direction=None, status=_ST,
            volume=0, traded=0, price=0, datetime=None)
     assert translate.to_order_state(d).symbol == ""
+
+
+def test_flush_positions_writes_canonical():
+    """正向控制（L3）：adapter 归一后的 symbol 原样落 position_snapshot（.SHSE）。"""
+    from unittest.mock import MagicMock, patch
+    from src.strategy_runner import trading
+    pos = NS(symbol="600036.SHSE", direction="direction_net", volume=800, frozen=0,
+             avg_price=44.2, pnl=0.0, yd_volume=0)
+    a = MagicMock()
+    a.query_position.return_value = [pos]
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    cur = conn.cursor.return_value
+    cur.__enter__.return_value = cur
+    with patch("src.data_platform.db.get_conn", return_value=conn):
+        trading._flush_positions(a, 1, "tid")
+    rows = cur.executemany.call_args.args[1]
+    assert rows[0][1] == "600036.SHSE"
