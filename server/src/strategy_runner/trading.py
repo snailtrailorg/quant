@@ -497,9 +497,13 @@ def submit_manual_order(adapter, account_id, operator: str, req_id: str,
 
     if action == "SELL":
         try:
+            # 批174：持仓快照 symbol 走 vnpy Exchange 值（沪市 .SSE），委托走项目 vt（.SHSE）——
+            # 复用项目既有 position_symbol_candidates 双写候选，否则沪市手动卖恒判 NO_SELLABLE_POSITION。
+            from src.strategy_framework.strategy import position_symbol_candidates
+            _cands = set(position_symbol_candidates(sym))
             held = 0
             for p in (adapter.query_position() or []):
-                if getattr(p, "symbol", "") == sym:
+                if getattr(p, "symbol", "") in _cands:
                     held = max(int(getattr(p, "volume", 0) or 0)
                                - int(getattr(p, "frozen", 0) or 0), 0)
                     break

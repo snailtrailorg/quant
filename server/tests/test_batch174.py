@@ -92,3 +92,21 @@ def test_write_order_status_writes_reject_error():
                            error="交易委托失败，代码：10000，信息：")
     upd = [c for c in conn.execute.call_args_list if "SET" in c.args[0]]
     assert any("error=%s" in c.args[0] and "交易委托失败" in str(c.args[1]) for c in upd)
+
+
+def test_sell_matches_shse_sse_alias():
+    """持仓 vnpy 口径 .SSE、委托项目口径 .SHSE → 双写候选匹配（否则沪市手动卖恒拒 NO_SELLABLE）。"""
+    from src.strategy_runner import trading
+    a = MagicMock()
+    a.send_order.return_value = "vt-1"
+    a.get_vt_orderid.return_value = "vt-1"
+    a.query_position.return_value = [NS(symbol="600036.SSE", volume=800, frozen=0)]
+    dec = NS(approved=True, adjusted=None)
+    body = {"symbol": "600036.SHSE", "action": "SELL", "volume": 500, "price": 44.2,
+            "client_order_id": "mo-x"}
+    with patch("src.risk_control.risk.RiskControl.get") as get, \
+         patch.object(trading, "manual_order_open", return_value=42), \
+         patch.object(trading, "_close_order_mark"):
+        get.return_value.check_order.return_value = dec
+        out = trading.submit_manual_order(a, 1, "admin", "r1", body)
+    assert out["accepted"] is True and out["volume"] == 500
