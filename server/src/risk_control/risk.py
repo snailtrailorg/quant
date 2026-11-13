@@ -469,10 +469,19 @@ class RiskControl:
             if is_flat_or_reduce(order):
                 return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限但平仓/减仓方向豁免截断", severity="info", rule="MAX_SINGLE_AMOUNT")
             new_vol = int(max_amount / price)
+            # 批174：按品种手数向下取整——非整手量必被交易所拒 `Invalid security quantity`
+            # （A股/ETF 100 股一手、可转债 10 张一手；平仓/减仓单已在上方豁免不截断）。
+            try:
+                from src.data_platform.specs import InstrumentSpec
+                _cat = InstrumentSpec.of(order.get("symbol", "")).category
+                _lot = 10 if _cat == "convertible" else 100
+            except Exception:
+                _lot = 100
+            new_vol = (new_vol // _lot) * _lot
             if new_vol <= 0:
-                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}，截断后 volume=0", severity="warn", rule="MAX_SINGLE_AMOUNT")
+                return RiskDecision(approved=False, reason=f"单笔金额 {amount:.0f} 超限 {max_amount}，截断后不足 1 手（lot={_lot}）", severity="warn", rule="MAX_SINGLE_AMOUNT")
             adjusted = {**order, "volume": new_vol}
-            return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限，截断 volume {int(volume)}->{new_vol}", adjusted=adjusted, severity="warn", rule="MAX_SINGLE_AMOUNT")
+            return RiskDecision(approved=True, reason=f"单笔金额 {amount:.0f} 超限，截断 volume {int(volume)}->{new_vol}（按 {_lot} 取整）", adjusted=adjusted, severity="warn", rule="MAX_SINGLE_AMOUNT")
         return RiskDecision(approved=True, reason="场内风控通过")
 
     def _check_crypto(self, order: dict, state) -> RiskDecision:

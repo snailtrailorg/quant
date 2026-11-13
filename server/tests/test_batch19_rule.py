@@ -103,11 +103,15 @@ class TestActionClassification:
         ins = MagicMock()
         ins.__enter__.return_value = ins
         c = self._rc_amount(max_amount=500)
-        # price=10 × volume=100 → 1000 超 500 → new_vol=50（截断放行=覆写）
+        # 批174：截断量按品种手数取整——price=1 × volume=1000 → int(500/1)=500（整手）→ 覆写放行。
+        # （原用 price=10×100 得 new_vol=50，非整百=交易所必拒的废单，新逻辑按 100 取整后为 0 → 拒，
+        #  故改用能产出整手的合法参数，断言语义仍是「approved+adjusted=adjust」。）
         with patch("src.data_platform.perms.market_op_allowed", return_value=True), \
              patch("src.risk_control.risk.get_conn", return_value=ins):
-            d = c.check_order(dict(BUY))
+            d = c.check_order({"symbol": "600000.SHSE", "action": "BUY", "volume": 1000,
+                               "price": 1.0, "operator": "u1"})
         assert d.approved and d.adjusted is not None and d.rule == "MAX_SINGLE_AMOUNT"
+        assert d.adjusted["volume"] == 500      # 批174：按 100 取整
         assert ins.execute.call_args[0][1][0] == "adjust"
 
 

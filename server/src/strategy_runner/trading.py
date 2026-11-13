@@ -88,7 +88,7 @@ def _client_id_of(d, adapter, vt: str) -> str:
     return getattr(d, "client_id", "") or ""
 
 
-def write_order_status(d: OrderState, adapter, sid: str, symbol: str) -> None:
+def write_order_status(d: OrderState, adapter, sid: str, symbol: str, error: str = "") -> None:
     """OrderState → order_log.status 终态回写（批 68；P1b 改读 domain）。
 
     映射：PARTIAL→partial/ALL_TRADED→all_traded/CANCELLED→cancelled/REJECTED→rejected；
@@ -126,9 +126,14 @@ def write_order_status(d: OrderState, adapter, sid: str, symbol: str) -> None:
             # 2026-11-09（171n e2e 抓真库语法错）：psycopg 不做元组展开，NOT IN %s
             # 渲染成 NOT IN $3 ⇒ 语法错 ⇒ 终态回写从未成功（never-raise 静默吞）。
             # 数组比较用 <> ALL(%s)（仓内 ANY(%s) 同族写法）。
+            # 批174：拒单原因（由编排层从插件 pop_order_error 取，插件不写业务库）
+            _sets, _args = "status=%s", [new_status]
+            if new_status == "rejected" and error:
+                _sets += ", error=%s"
+                _args.append(str(error)[:500])
+            _args += [row[0], list(ORDER_FINAL_STATES)]
             cur = conn.execute(
-                "UPDATE order_log SET status=%s WHERE id=%s AND status <> ALL(%s)",
-                (new_status, row[0], list(ORDER_FINAL_STATES)))
+                f"UPDATE order_log SET {_sets} WHERE id=%s AND status <> ALL(%s)", tuple(_args))
             if cur.rowcount:
                 logger.info("order_log 终态: #%s → %s (%s)", row[0], new_status, getattr(d, "symbol", symbol))
             conn.commit()

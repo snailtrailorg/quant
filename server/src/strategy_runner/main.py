@@ -372,7 +372,17 @@ def _run_hub_mode(sid, tid, name, s_type, symbol, factors, aggregator, params, i
 
     @_guard("worker.on_order_status")
     def on_order(d):
-        trading.write_order_status(d, _adapter_holder["a"], sid, symbol)
+        # 批174：拒因由插件 pop_order_error 产出、编排层落 order_log.error（插件不写业务库）
+        _err = ""
+        try:
+            from src.quant_common.domain import OrderStatus
+            if getattr(d, "status", None) == OrderStatus.REJECTED:
+                _fn = getattr(exec_port, "pop_order_error", None)
+                if callable(_fn):
+                    _err = _fn() or ""
+        except Exception:   # noqa: BLE001 —— 取拒因失败不阻断回写
+            _err = ""
+        trading.write_order_status(d, _adapter_holder["a"], sid, symbol, error=_err)
         # 批 69a：SSE 信号帧（零内容——信任边界立法；重拉 /api/orders 由前端做）
         try:
             from src.quant_common.eventbus import bus  # 惰性导入（notify.py:89 先例）

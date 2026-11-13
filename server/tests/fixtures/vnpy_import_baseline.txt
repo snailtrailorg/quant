@@ -21,7 +21,7 @@ strategy_runner/main.py:19:4
 strategy_runner/main.py:324:4
 strategy_runner/main.py:347:4
 strategy_runner/main.py:356:4
-strategy_runner/trading.py:630:4
+strategy_runner/trading.py:635:4
 strategy_framework/md_gateway.py:184:4
 strategy_framework/md_gateway.py:185:4
 strategy_framework/md_gateway.py:36:4

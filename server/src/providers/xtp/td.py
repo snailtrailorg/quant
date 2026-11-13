@@ -19,6 +19,38 @@ from . import _transport, translate
 
 logger = logging.getLogger(__name__)
 
+# 批174：最近一次「交易委托失败」详情（write_error 写、_on_order 拒单时消费落 order_log.error）。
+# 同一 onOrderEvent 回调内先 write_error 再推 EVENT_ORDER，时间差 <1ms ⇒ 2s 窗内视为同笔。
+_LAST_REJECT: dict = {"ts": 0.0, "detail": ""}
+
+
+def _fmt_error(msg: str, error) -> str:
+    """批174：完整错误文案。原实现 error_msg 为空时只剩数字（如 10000），拒因不可读。"""
+    if not isinstance(error, dict):
+        return msg
+    eid, emsg = error.get("error_id"), error.get("error_msg")
+    if not eid and not emsg:
+        return msg
+    return f"{msg}，代码：{eid}，信息：{emsg}"
+
+
+def pop_last_reject(window_s: float = 2.0) -> str:
+    """批174：取出最近一次「交易委托失败」详情并清空（2s 窗内有效）。
+
+    分层纪律：插件只做 provider 特定错误捕获/格式化；`order_log.error` 落库在编排层
+    （`trading.write_order_status`），不在此处写业务表。
+    """
+    try:
+        if time.time() - _LAST_REJECT["ts"] <= window_s and _LAST_REJECT["detail"]:
+            detail = _LAST_REJECT["detail"]
+            _LAST_REJECT["ts"] = 0.0
+            _LAST_REJECT["detail"] = ""
+            return detail
+    except Exception:   # noqa: BLE001
+        pass
+    return ""
+
+
 POSITION_STABLE_WINDOW_S = 3.0
 ACCOUNT_WAIT_S = 2.0
 
@@ -59,6 +91,10 @@ class XtpExecutionPort:
         d = event.data
         with self._lock:
             self._orders[d.vt_orderid] = d
+
+    def pop_order_error(self) -> str:
+        """批174：拒因查询接口（插件不写业务库；编排层 write_order_status 消费落库）。"""
+        return pop_last_reject()
 
     def _on_trade(self, event: Any) -> None:
         d = event.data
@@ -215,9 +251,10 @@ def make_gateway(event_engine, name: str = "XTP"):
 
         def write_error(self, msg: str, error: dict | None = None) -> None:
             try:
-                detail = str((error or {}).get("error_msg") or (error or {}).get("error_id") or "") \
-                    if isinstance(error, dict) else ""
-                text = f"{msg}：{detail}" if detail else msg
+                text = _fmt_error(msg, error)   # 批174：保留完整「代码+信息」
+                if "交易委托失败" in msg:
+                    _LAST_REJECT["ts"] = time.time()
+                    _LAST_REJECT["detail"] = text
                 logger.error("TD 报错: %s", text)
                 self.on_log(obj.LogData(msg=text, gateway_name=self.gateway_name))
             except Exception:   # noqa: BLE001 —— 回调链路禁抛
