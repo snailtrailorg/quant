@@ -772,3 +772,10 @@
 - **决策**：`MarketDataPort.poll_supervise` 形参由 `(trading_day)` 改为 `(in_session, trading_day)`。
 - **理由**：连接窗判定属编排层（读 `xtp_session_lead_min/lag_min` + 交易日历），插件只执行 connect/suspend；P1b 迁移时该形参被临时丢弃（记在 172d 事实表）。
 - **执行**：先改 D32 §六/§12.2 → 再改 `ports/market_data.py` 与 `md_hub/main.py` 调用点（P3 编码首步）。
+
+## 2026-11-13 · 批173 手动买卖接口裁定
+
+- **裁定**（用户）：「实现吧，然后上产，建仓」「强制上产」——按方案推荐项定稿，`-e force=true` 盘中发布（自担风险），staging 彩排跳过；FE 面板拆后批。
+- **契约**：手动单走 `risk:cmd:{tid}` → `EmergencyWorker` 异步链（web-api 无 TD 会话），每笔必过 `RiskControl.check_order`（唯一咽喉，禁旁路）；权限键复用 `trade` 不加新键；不建表、不加迁移；`manual-order` 分支不写 `:final`/SSE（避免污染急停终局）。
+- **理由**：171s 急停实单验收需要今日建仓、下一交易日复验一键平仓，而系统原无按指定标的+数量下买单的口子；盘中 force 是为赶在 15:00 收盘前建仓。
+- **结果**：release `202611131440-8ad0dc1`，10 只建仓（14 笔单＝6 成交/4 在途/4 被拒，补单救回 3 只）；复验日＝下周一 11-16（11-14 周六休市）。
