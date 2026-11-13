@@ -1,11 +1,38 @@
 """vnpy/XTP SDK 对象 → 领域模型（插件内翻译；不依赖迁移期 ACL）。"""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from src.quant_common.domain import (
     AccountState, Direction, OrderState, OrderStatus, Position, Trade,
 )
+from src.quant_common.symbology import canonical
+
+logger = logging.getLogger(__name__)
+
+
+def _canonical_symbol(obj: Any) -> str:
+    """批175 L1：vnpy 的 `symbol` 是**裸码**（`600036`）、`vt_symbol` 才带后缀；
+    统一归一到项目 vt（`.SSE→.SHSE`）。空值保持空串；不可归一保留原值 + warning
+    （never-raise 但 never-silent——回报链在 on_order 回调线程，抛错会崩实盘）。"""
+    # 优先 `symbol`：真实 vnpy 是裸码（拼 exchange.value）；fixture/项目口径可能已带后缀。
+    # 不用 `vt_symbol` 优先——它由 vnpy 按 `symbol+"."+exchange.value` 生成，symbol 已带后缀时会变脏。
+    s = getattr(obj, "symbol", "") or ""
+    ex = getattr(getattr(obj, "exchange", None), "value", "") or ""
+    if s and "." in s:
+        vt = s
+    elif s and ex:
+        vt = f"{s}.{ex}"
+    else:
+        vt = getattr(obj, "vt_symbol", "") or s
+    if not vt:
+        return ""
+    try:
+        return canonical(vt)
+    except ValueError as e:
+        logger.warning("translate: symbol 不可归一（保留原值）%s: %s", vt, e)
+        return vt
 
 _STATUS = {
     "SUBMITTING": OrderStatus.SUBMITTED,
@@ -50,7 +77,7 @@ def to_order_state(d: Any, client_id: str = "") -> OrderState:
     return OrderState(
         orderid=getattr(d, "orderid", "") or "",
         vt_orderid=getattr(d, "vt_orderid", "") or "",
-        symbol=getattr(d, "symbol", "") or "",
+        symbol=_canonical_symbol(d),      # 批175：裸码/vt 统一到 vt
         direction=direction_of(d), status=status_of(d),
         volume=float(getattr(d, "volume", 0) or 0),
         traded=float(getattr(d, "traded", 0) or 0),
@@ -63,7 +90,7 @@ def to_trade(d: Any, client_id: str = "") -> Trade:
     return Trade(
         tradeid=getattr(d, "vt_tradeid", "") or "",
         orderid=getattr(d, "vt_orderid", "") or "",
-        symbol=getattr(d, "symbol", "") or "",
+        symbol=_canonical_symbol(d),      # 批175：裸码/vt 统一到 vt
         direction=direction_of(d),
         price=float(getattr(d, "price", 0) or 0),
         volume=float(getattr(d, "volume", 0) or 0),
@@ -74,7 +101,7 @@ def to_trade(d: Any, client_id: str = "") -> Trade:
 def to_position(p: Any) -> Position:
     name = getattr(getattr(p, "direction", None), "name", "LONG").lower()
     return Position(
-        symbol=getattr(p, "vt_symbol", "") or getattr(p, "symbol", "") or "",
+        symbol=_canonical_symbol(p),      # 批175：.SSE→.SHSE
         volume=int(getattr(p, "volume", 0) or 0),
         avg_price=float(getattr(p, "price", 0) or 0),
         pnl=float(getattr(p, "pnl", 0.0) or 0.0),
