@@ -272,7 +272,7 @@ def main() -> None:
         if _impl == "plugin":
             try:
                 _plugin = pick("trading_account", iface["provider"], {"market_data"}, impl="plugin")
-                md_gw = _plugin.build({"counters": counters, "account_id": row_id}, "md", None)
+                md_gw = _plugin.build(counters, "md", None)   # build(account=counters, role, slot) → build_md(counters, slot)
                 logger.info("[gw] provider=%s 走插件 MarketDataPort（account=%s）", iface["provider"], row_id)
             except (UnknownProvider, UnsupportedCapability) as e:
                 logger.warning("[gw] provider=%s 无 MD 插件（%s），回落 legacy 注册表", iface["provider"], e)
