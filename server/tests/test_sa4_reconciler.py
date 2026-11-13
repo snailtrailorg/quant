@@ -355,6 +355,25 @@ def _run_l3(failed=(), active=(), conn=None, valkey=None, valkey_error=False,
 
 
 class TestDesiredUnits:
+    def test_p3_xtp_in_md_provider_allowlist(self):
+        """P3 回归守门：SA4 hub 期望源的 provider 白名单必须含 xtp。
+
+        2026-11-13 P0：XTP MD 迁到 registry 插件后，legacy 注册表不再含 xtp，
+        SA4 每 300s 把账号 1 的 hub 判为"多余实例" stop 掉（开盘即无 XTP 行情）。
+        直接钉 conn.execute 传给 trading_account SQL 的参数（白名单内容本身），
+        不用 mock 的 SQL 前缀分流结果——否则白名单缺 xtp 也会假绿（守门自失效）。
+        """
+        from src.scheduler import tasks as T
+        conn = _mk_conn2()
+        with patch.object(T, "_sa4_strategy_unit_files", return_value=[]):
+            T._desired_units(conn)
+        hub_sql = [c for c in conn.execute.call_args_list
+                   if "trading_account" in c.args[0]]
+        assert hub_sql, "未发 trading_account 查询"
+        params = hub_sql[0].args[1][0]
+        assert "xtp" in params, f"MD provider 白名单缺 xtp（会把账号 1 hub 周期停掉）: {params}"
+        assert "emt_emq" in params   # legacy 双轨仍须保留
+
     def test_three_sources_unified(self):
         """期望表三源归一：live_task running + strategy is-enabled（无关联）+ hub 常开末位。"""
         from src.scheduler import tasks as T

@@ -1872,12 +1872,25 @@ def _desired_units(conn) -> list[tuple[str, str]]:
         if r is not None and r.returncode == 0 and r.stdout.strip() == "enabled":
             desired.append((unit, "strategy"))
     # 批 66b（D26 账号级 hub）：trading 域 enabled 全市场行驱动期望（unit 名=行 id 数字）
+    # P3 补（2026-11-13 P0）：XTP MD 已迁 registry 插件，legacy 注册表不再含 xtp；
+    # 期望源须并入 registry(trading, market_data) provider，否则账号 1 的 hub 被判多余、
+    # 每 300s 被本 reconciler 停掉（开盘即无 XTP 行情）。并集保留 legacy 双轨（EMT/加密）。
     from src.strategy_framework.md_gateway import list_md_gateway_providers
-    md_providers = list_md_gateway_providers()
+    import src.providers as _providers
+    from src.registry import DOMAIN_TRADING, UnsupportedCapability, pick, registered
+    _providers.ensure_registered()   # 幂等：保证 scheduler 进程内 registry 已填充
+    md_providers = set(list_md_gateway_providers())
+    for _domain, _provider in registered():
+        if _domain == DOMAIN_TRADING:
+            try:
+                pick(_domain, _provider, {"market_data"}, "plugin")
+                md_providers.add(_provider)
+            except UnsupportedCapability:
+                pass
     cur = conn.execute(
         "SELECT id FROM trading_account "
         "WHERE enabled=true "
-        "AND provider = ANY(%s)", (list(md_providers),))
+        "AND provider = ANY(%s)", (sorted(md_providers),))
     for row in cur.fetchall():
         desired.append((f"quant-md-hub@{row[0]}.service", "hub"))
     return desired
