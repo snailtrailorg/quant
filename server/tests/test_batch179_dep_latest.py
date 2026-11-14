@@ -1,56 +1,90 @@
-"""批179 守门：latest 按实际安装集补齐（组件列表不再因台账切面缺行而显示"无更新版本"）。"""
-from src.health_monitor.security_collector import _fill_missing_latest
+"""批 179b 守门：扫描读侧零联网 + latest 三态真实映射。
+
+批 179 曾把逐包 PyPI 联网（_fill_missing_latest + force 重查）搬进用户手动
+security_scan 的关键路径，串行 N×10s 直接把扫描卡死。本批恢复「上游刷新只在
+dep_audit 慢路径」，并钉死两条：① 读侧绝不联网 ② latest 缺失显示「未知」而
+非「无更新」——不把没查到谎报成已确认最新。
+"""
+from __future__ import annotations
+
+import datetime as dt
+import inspect
+import json
+import urllib.request
+from pathlib import Path
+
+from src.health_monitor import security_collector as sc
+from src.health_monitor.os_pkg import pypi_versions_cached
+from src.quant_common.depjudge import has_update_of, judge
 
 
-def _row(name, cur, latest=None, jc="unknown"):
-    return {"name": name, "cur": cur, "latest": latest, "managed_by": "pypi",
-            "group": "runtime", "judge_class": jc, "judge_why": "", "has_update": "no"}
+# ① 读侧三态：latest 的真实语义
+def test_unknown_is_unknown_not_no_update():
+    """上游版本不可得 = 未知；有明确判定的才允许 no。"""
+    assert has_update_of("unknown") == "unknown"
+    assert has_update_of(None) == "unknown"
+    assert has_update_of("actionable") == "yes"
+    assert has_update_of("in_constraint") == "yes"
+    assert has_update_of("current") == "no"
+    assert has_update_of("pinned") == "no"
+    assert has_update_of("drift") == "no"
+    assert has_update_of("unreachable") == "no"
 
 
-def test_missing_row_filled_from_installed():
-    judged = []
-    calls = []
-    def fetch(name, force=False):
-        calls.append((name, force))
-        return {"versions": ["2.10", "4.0.1", "4.1"]}
-    n = _fill_missing_latest(judged, {"soupsieve": "2.10"}, {}, set(), fetch=fetch)
-    assert n == 1 and calls == [("soupsieve", True)]
-    row = judged[0]
-    assert row["latest"] == "4.1" and row["has_update"] == "yes"
-    assert row["judge_class"] == "actionable"
+def test_latest_missing_maps_to_unknown():
+    """latest 未取到 → judge=unknown → 组件行「未知」（soupsieve 旧形态回归钉）。"""
+    jc, why = judge("2.10", None, None, None, True, "pypi")
+    assert jc == "unknown" and "上游" in why
+    assert has_update_of(jc) == "unknown"
 
 
-def test_null_latest_refetched():
-    judged = [_row("soupsieve", "2.10")]
-    calls = []
-    def fetch(name, force=False):
-        calls.append(force)
-        return {"versions": ["4.1"]}
-    _fill_missing_latest(judged, {"soupsieve": "2.10"}, {}, set(), fetch=fetch)
-    assert calls == [True] and judged[0]["latest"] == "4.1"
+def test_latest_above_current_is_actionable():
+    jc, _ = judge("2.10", None, "4.1", None, True, "pypi")
+    assert jc == "actionable" and has_update_of(jc) == "yes"
 
 
-def test_stale_cache_refetched_when_latest_le_current():
-    """缓存里最新 <= 已装版本 → 视为落后，强制重查（发布后 7 天窗口问题）。"""
-    judged = [_row("soupsieve", "4.1", latest="2.10", jc="current")]
-    calls = []
-    def fetch(name, force=False):
-        calls.append(force)
-        return {"versions": ["4.1", "4.2"]}
-    _fill_missing_latest(judged, {"soupsieve": "4.1"}, {}, set(), fetch=fetch)
-    assert calls == [True] and judged[0]["latest"] == "4.2"
+def test_latest_equal_current_is_no_update():
+    jc, _ = judge("4.1", None, "4.1", None, True, "pypi")
+    assert jc == "current" and has_update_of(jc) == "no"
 
 
-def test_up_to_date_row_not_refetched():
-    judged = [_row("pandas", "3.0.0", latest="3.1.0", jc="actionable")]
-    def fetch(name, force=False):
-        raise AssertionError("不应重查")
-    assert _fill_missing_latest(judged, {"pandas": "3.0.0"}, {}, set(), fetch=fetch) == 0
+# ② 扫描读侧零联网：符号级静态守门（按专有符号判，不引用被测属性）
+def test_scan_collector_has_no_pypi_refresh():
+    text = Path(sc.__file__).read_text(encoding="utf-8")
+    for banned in ("pypi_versions_cached", "pypi_versions(", "_fill_missing_latest",
+                   "dep_gap_filled", "force=force"):
+        assert banned not in text, f"扫描读侧不应出现上游刷新: {banned}"
 
 
-def test_fetch_failure_does_not_raise():
-    def fetch(name, force=False):
-        raise RuntimeError("network")
-    judged = []
-    assert _fill_missing_latest(judged, {"x": "1.0"}, {}, set(), fetch=fetch) == 0
-    assert judged == []
+def test_cached_signature_has_no_force():
+    """缓存层恒读缓存——不再有绕过缓存的 force 通道。"""
+    assert "force" not in inspect.signature(pypi_versions_cached).parameters
+
+
+# ③ 运行时守门：_collect_components 不触碰网络，且组件真源=实际安装集
+def test_collect_components_zero_network(monkeypatch):
+    def _boom(*a, **kw):
+        raise AssertionError("扫描读侧不得联网")
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+
+    monkeypatch.setattr(sc, "_run", lambda *a, **kw: "soupsieve==2.10\n")
+    monkeypatch.setattr(sc, "read_dep_rows", lambda lc: (
+        [("soupsieve", "2.10", None, "unknown", "上游不可达或未登记", None)], False))
+
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    contract = {"schema_version": 2, "ts": now, "constraints": {}, "dev": [],
+                "ok": True, "errors": [], "last_complete": {"ts": now},
+                "os": {"pkg_mgr": "dnf", "upgrades": {}, "all_repos": {},
+                       "installed": [], "installed_n": 0}}
+
+    class _R:
+        def get(self, key):
+            return json.dumps(contract).encode() if key == "sec:dep_audit" else None
+
+    monkeypatch.setattr("src.quant_common.redis_client.business_redis", lambda: _R())
+
+    part = sc._collect_components()
+    assert "soupsieve" in part["pip"]                      # 真源=pip 安装集
+    rows = (part.get("dep_health") or {}).get("rows") or []
+    assert any(r["name"] == "soupsieve" and r["has_update"] == "unknown" for r in rows)
+    assert part["status"] == "ok"

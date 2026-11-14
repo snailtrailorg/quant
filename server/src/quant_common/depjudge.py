@@ -86,11 +86,18 @@ def judge(cur: str | None, constraint: str | None, latest: str | None,
 
 
 def has_update_of(judge_class: str | None) -> str:
-    """judge_class -> yes/no/unknown（服务端单源，v2.1 裁定）。"""
+    """judge_class -> yes/no/unknown（服务端单源；批 179b 三态化）。
+
+    unknown / 未判定 = 上游版本不可得（latest 未取到 / 未登记 / 无法解析），是「未知」
+    而非「无更新」——不能把没查到谎报成已确认最新。current/pinned/drift/unreachable
+    均有明确判定，仍为 no。
+    """
     if judge_class in ("actionable", "in_constraint"):
         return HAS_UPDATE_YES
-    if judge_class in _CLASSES:
+    if judge_class in ("current", "pinned", "drift", "unreachable"):
         return HAS_UPDATE_NO
+    if judge_class in _CLASSES:                    # 余下即 unknown
+        return HAS_UPDATE_UNKNOWN
     return HAS_UPDATE_UNKNOWN                     # None/未判定/迁移存量
 
 

@@ -102,7 +102,7 @@ class TestHasUpdate:
     @pytest.mark.parametrize("cls,want", [
         ("actionable", "yes"), ("in_constraint", "yes"),
         ("pinned", "no"), ("current", "no"), ("drift", "no"),
-        ("unreachable", "no"), ("unknown", "no"), (None, "unknown"), ("", "unknown"),
+        ("unreachable", "no"), ("unknown", "unknown"), (None, "unknown"), ("", "unknown"),
     ])
     def test_map(self, cls, want):
         assert has_update_of(cls) == want
