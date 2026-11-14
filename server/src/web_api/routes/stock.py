@@ -195,7 +195,8 @@ def screen_astock_api(pe_max: float = 0, pb_max: float = 0, mv_min: float = 0,
                list_days_min, list_days_min,
                momentum_20_min, momentum_20_min, price_vs_ma250_min, price_vs_ma250_min, limit))
         rows = cur.fetchall()
-    return [{"ts_code": r[0], "name": r[1], "close": _f(r[2]), "pe": _f(r[3]),
+    from src.data_platform.schema import to_vt_symbol
+    return [{"ts_code": r[0], "vt_symbol": to_vt_symbol(r[0]), "name": r[1], "close": _f(r[2]), "pe": _f(r[3]),
              "pe_ttm": _f(r[4]), "pb": _f(r[5]), "turnover": _f(r[6]),
              "total_mv": _f(r[7]),   # 万元;前端 fmtCn 显示亿
              "circ_mv": _f(r[8]), "dv_ratio": _f(r[9]), "ps": _f(r[10]),
@@ -245,6 +246,7 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
             LIMIT %s
         """, (remaining_years_max, remaining_years_max, coupon_rate_min, coupon_rate_min, limit))
         rows = cur.fetchall()
+    from src.data_platform.schema import to_vt_symbol
     out = []
     for r in rows:
         dl, pp = _f(r[8]), _f(r[9])
@@ -252,7 +254,9 @@ def screen_cb_api(limit: int = 100, double_low_max: float = 0, premium_max: floa
             continue
         if premium_max > 0 and (pp is None or pp > premium_max):
             continue
-        out.append({"ts_code": r[0], "name": r[1], "stk_code": r[2], "stk_name": r[3],
+        out.append({"ts_code": r[0], "vt_symbol": to_vt_symbol(r[0]),
+                    "stk_code": r[2], "stk_vt_symbol": to_vt_symbol(r[2]) if r[2] else None,
+                    "name": r[1], "stk_name": r[3],
                     "conv_price": _f(r[4]), "maturity_date": str(r[5]) if r[5] else "",
                     "bond_close": _f(r[6]), "stk_close": _f(r[7]),
                     "double_low": dl, "premium_pct": pp})
@@ -276,7 +280,8 @@ def screen_etf_api(limit: int = 100, scale_min: float = 0, fee_max: float = 0,
             LIMIT %s
         """, (scale_min, scale_min, fee_max, fee_max, limit))
         rows = cur.fetchall()
-    return [{"ts_code": r[0], "name": r[1], "management": r[2],
+    from src.data_platform.schema import to_vt_symbol
+    return [{"ts_code": r[0], "vt_symbol": to_vt_symbol(r[0]), "name": r[1], "management": r[2],
              "fund_type": r[3], "invest_type": r[4],
              "fund_scale": _f(r[5]), "management_fee": _f(r[6]),
              "tracking_error": _f(r[7])} for r in rows]

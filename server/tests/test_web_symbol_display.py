@@ -63,3 +63,43 @@ def test_screen_rows_expose_vt_symbol():
     syms = [r["vt_symbol"] for r in out["rows"]]
     assert syms == ["601939.SHSE", "920085.BSE"]
     assert out["rows"][0]["ts_code"] == "601939.SH"      # 源口径保留（join 用）
+
+
+# ——— 选股列表三端点（stock.py 手写 SQL 路径）也必须回 vt_symbol ———
+def _fake_conn(rows):
+    from unittest.mock import MagicMock
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    cur = MagicMock()
+    cur.fetchall.return_value = rows
+    conn.execute.return_value = cur
+    return conn
+
+
+def test_screen_astock_api_exposes_vt_symbol():
+    from unittest.mock import patch
+    from src.web_api.routes import stock as R
+    row = ("601939.SH", "建设银行", 12.1, 9.3, 8.9, 0.86, 1.3, 3.1e8, 1.1e8, 4.8, 2.0, None, None)
+    with patch.object(R, "get_conn", return_value=_fake_conn([row])):
+        out = R.screen_astock_api(payload={})
+    assert out[0]["vt_symbol"] == "601939.SHSE" and out[0]["ts_code"] == "601939.SH"
+
+
+def test_screen_cb_api_exposes_vt_symbol():
+    from unittest.mock import patch
+    from src.web_api.routes import stock as R
+    row = ("113056.SH", "重银转债", "601963.SH", "重庆银行", 9.22, "20280323",
+           123.4, 12.1, 130.0, 5.0)
+    with patch.object(R, "get_conn", return_value=_fake_conn([row])):
+        out = R.screen_cb_api(payload={})
+    assert out[0]["vt_symbol"] == "113056.SHSE"
+    assert out[0]["stk_vt_symbol"] == "601963.SHSE"
+
+
+def test_screen_etf_api_exposes_vt_symbol():
+    from unittest.mock import patch
+    from src.web_api.routes import stock as R
+    row = ("158907.SZ", "国泰鑫汇", "国泰基金", "股票型", None, 12.0, 0.5, 1.0)
+    with patch.object(R, "get_conn", return_value=_fake_conn([row])):
+        out = R.screen_etf_api(payload={})
+    assert out[0]["vt_symbol"] == "158907.SZSE"
