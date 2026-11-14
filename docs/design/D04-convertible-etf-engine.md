@@ -39,7 +39,7 @@ class XTPAdapter(ExecutionAdapter):
     def __init__(self, xtp_gateway: vnpy_xtp.XtpGateway): ...
     @staticmethod
     def parse_vt_symbol(vt_symbol: str) -> tuple[str, str]:
-        """vt_symbol `603986.SHSE` → ('603986', Exchange.SHSE)。
+        """vt_symbol `603986.XSHG` → ('603986', Exchange.XSHG)。
         拆分后 symbol='603986' + exchange=SHSE 喂 XTP 网关，
         否则直接传 vt_symbol 会'未知合约'拒单。"""
     def send_order(self, order: Order) -> str:

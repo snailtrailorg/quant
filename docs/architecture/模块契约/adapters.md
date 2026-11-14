@@ -45,7 +45,7 @@ class XTPAdapter(ExecutionAdapter):
     def __init__(self, gateway=None, event_engine=None)
         # gateway = vnpy_xtp.XtpGateway；event_engine 缺省取 gateway.event_engine
         # __init__ 注册 4 事件监听（EVENT_ORDER/TRADE/POSITION/ACCOUNT）-> 缓存 dict
-    @staticmethod parse_vt_symbol(vt_symbol) -> tuple[str, str]   # "603986.SHSE" -> ("603986","SHSE")
+    @staticmethod parse_vt_symbol(vt_symbol) -> tuple[str, str]   # "603986.XSHG" -> ("603986","SHSE")
     send_order(order) -> str              # client_id（自增 c1/c2...）；维护 cid<->vt_orderid 映射
     cancel_order(order_id) -> None        # order_id 按 cid 映射查 vt_orderid + CancelRequest
     query_position() -> list[Position]    # 调 gateway.query_position() 后 _wait_update 轮询等事件（2s）

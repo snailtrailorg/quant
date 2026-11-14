@@ -64,7 +64,7 @@ class DataPlatform:
 ### 6.1 K 线表（PostgreSQL `bar_{freq}`，分区按年）
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| symbol | text | **vnpy 原生 vt_symbol**：`{raw_symbol}.{EXCHANGE}`，exchange 用 vnpy Exchange 枚举值。如 `603986.SHSE` / `113xxx.SZSE` / `BTCUSDT-PERP.BINANCE`。**严禁点号在前格式**（如 `SH.603986` 会导致 XTP 实盘"未知合约"拒单）|
+| symbol | text | **vnpy 原生 vt_symbol**：`{raw_symbol}.{EXCHANGE}`，exchange 用 vnpy Exchange 枚举值。如 `603986.XSHG` / `113xxx.XSHE` / `BTCUSDT-PERP.XBIN`。**严禁点号在前格式**（如 `SH.603986` 会导致 XTP 实盘"未知合约"拒单）|
 | freq | text | `1min`/`5min`/`15min`/`1H`/`4H`/`1D` |
 | ts | timestamptz | **统一带时区**（A股+08:00，加密 UTC）|
 | open/high/low/close | numeric | OHLCV |

@@ -39,7 +39,7 @@ parts.py 的公共件在 main.py 顶部 import 重导出——既有测试导入
 | `_lease_boot(r, account_id=None)` | `-> (uuid, gen)` | 租约启动（先拿权再连行情）：3 次重试；真让位 SystemExit(3)，耗尽 os._exit(4)；真让位写 surrender 标记（EX 600） |
 | `_write_latest_tick(r, symbol, tick, fail_ts, account_id=None)` | | 最新 tick 快照 per-account 键（`_key(LATEST_TICK_PREFIX, account_id)+:{symbol}`；0 价过滤前置/连败 60s 退避防半死 Valkey 拖死主链） |
 | `ThinGateway` | — | 批 63 二移驻 `strategy_framework/md_gateway.py`（层序：strategy_framework 禁 import 上层；vnpy 网关薄壳归 vnpy 集成层） |
-| `_project_symbol(tick)` | TickData→`600000.SHSE` | vnpy SSE→项目 SHSE |
+| `_project_symbol(tick)` | TickData→`600000.XSHG` | vnpy SSE→项目 SHSE |
 | `_in_bar_session(t, market="astock")` | `datetime, str -> bool` | 聚合喂入门（P2 修复批 08-28）：astock `930<=hm<1130 or 1300<=hm<1501`；`market="crypto"` 恒 True（24/7）——盘前/午休尾/收盘后快照不进聚合，冷启动基线顺延至 09:30 后首笔；仅拦 agg 喂入，latest_tick/心跳不受影响 |
 | `LEASE_KEY`/`GEN_KEY`/`SURRENDER_KEY`/`LATEST_TICK_PREFIX`/`LATEST_TICK_TTL`/`_LEASE_RENEW_LUA` | 常量 | 租约两键+surrender 标记+latest_tick 前缀/TTL + CAS 续期 Lua（批 66a：INTENT_KEY/ACTIVE_INSTANCE_KEY/_GUARDED_ACQUIRE_LUA/_CAS_DEL_LUA 随 M5 退役删除） |
 

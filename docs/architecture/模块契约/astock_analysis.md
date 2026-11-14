@@ -31,7 +31,7 @@ server/src/astock_analysis/
 class AnalysisResult:
     ts: str                      # 交易日（YYYYMMDD）
     symbol: str                  # ts_code（600000.SH）
-    vt_symbol: str               # 600000.SHSE
+    vt_symbol: str               # 600000.XSHG
     model: str = "daily_select_v1"
     score: float = 0.0           # 综合评分（DailySelectionEngine=横截面 rank(pct) 归一 [-1,1] 加权；分位制见 SELECTION_FACTORS）
     rating: str = "HOLD"         # BUY / HOLD / AVOID（日线=分位：BUY≥q85 / AVOID≤q15；分钟引擎仍用 ±0.3 阈值）
@@ -132,7 +132,7 @@ MinuteAnalysisEngine()
 - **rating 分位制（P3 回写 2026-08-20）**：日线=横截面分位——BUY≥q85 / AVOID≤q15 / 中间 HOLD（`analysis.py:137`）；旧"`>0.3`/`<-0.3` 阈值 + `ma_dev*2+momentum*1.5+vol_ratio*0.5` 公式"仅存于 MinuteAnalysisEngine（分钟引擎）
 - **score 权重配置驱动**：`SELECTION_FACTORS` 注册表（每项 {weight, direction, col, desc}），加因子=加条目；缺数因子列（notna<30）整体跳过、权重按活跃因子重分配
 - **横截面零 API**：`run()` 一次 SQL 全市场（daily_basic 45 日窗口 JOIN moneyflow/cyq_perf/asset_static_info），不逐标的打 tushare（P3 回写 2026-08-20）
-- **vt_symbol**：`to_vt_symbol(ts_code)` 转换（`600000.SH` -> `600000.SHSE`）
+- **vt_symbol**：`to_vt_symbol(ts_code)` 转换（`600000.SH` -> `600000.XSHG`）
 - **LLM 增强**：`enhance_with_llm` 只处理前 5 只（限流），失败不抛（填占位文本）
 - **分钟数据来源**：读 PG `bar_1min`/`bar_5min`（D2 已实现）；实时行情订阅是 #4 实盘化范畴
 

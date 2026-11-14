@@ -134,8 +134,8 @@ init_trade_calendar(year: int) -> None
 Bar  # dataclass，见接口契约 §Bar
 Freq = Literal["1min", "5min", "15min", "1H", "4H", "1D"]
 
-to_vt_symbol(ts_code: str) -> str          # "600000.SH" -> "600000.SHSE"
-to_ts_code(vt_symbol: str) -> str          # "600000.SHSE" -> "600000.SH"
+to_vt_symbol(ts_code: str) -> str          # "600000.SH" -> "600000.XSHG"
+to_ts_code(vt_symbol: str) -> str          # "600000.XSHG" -> "600000.SH"
 parse_vt_symbol(vt_symbol: str) -> tuple[str, str]  # -> ("600000", "SHSE")
 
 TS_EXCHANGE_MAP = {"SH":"SHSE", "SZ":"SZSE", "BJ":"BSE", ...}  # Tushare->vnpy
@@ -353,7 +353,7 @@ is_live_trading_enabled() -> bool   # .env ENABLE_LIVE_TRADING（实盘第一级
 
 ## 六、不变量
 
-- **vt_symbol**：`raw.EXCHANGE`（`600000.SHSE`），转换走 `schema.to_vt_symbol/to_ts_code`
+- **vt_symbol**：`raw.EXCHANGE`（`600000.XSHG`），转换走 `schema.to_vt_symbol/to_ts_code`
 - **freq**：`1D` / `1min` / `5min` / `15min` / `30min` / `60min`（bar 表后缀 = freq）。**写入口径以 `db._VALID_FREQS` 白名单为准（db.py:119，2026-08-20 扩）**：11 项超集 `{'1min','5min','15min','30min','60min','1h','4h','1d','1H','4H','1D'}`（大小写兼容）——`schema.Freq` Literal 是其子集，两者非同一集合（P3 回写 2026-08-20 注明）
 - **ts**：`TIMESTAMPTZ`，A 股 +08:00，加密 UTC
 - **rows 11 字段顺序**：`(symbol, freq, ts, open, high, low, close, volume, amount, adj_factor, source)`--`save_bars`/`save_bars_overwrite`/`to_save_rows`/`to_save_rows_min` 一致

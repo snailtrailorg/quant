@@ -179,7 +179,7 @@ class CryptoPerpAdapter(ExecutionAdapter): ...     # 币安/OKX 永续（薄）
 ```json
 {
   "id": 1, "name": "茅台均线",
-  "strategy_id": "ma_trend", "symbol": "600000.SHSE",
+  "strategy_id": "ma_trend", "symbol": "600000.XSHG",
   "params": {"buy_threshold": 0.03},          // 任务级参数值（覆盖策略默认）
   "strategy_snapshot": {...},                  // 创建时策略快照（隔离，改策略不影响已跑任务）
   "status": "running", "task_id": 42, "systemd_unit": "quant-live-task@1",
@@ -191,11 +191,11 @@ class CryptoPerpAdapter(ExecutionAdapter): ...     # 币安/OKX 永续（薄）
 ```json
 {
   "id": 42, "strategy_config_id": "ma_trend",
-  "symbols": ["600000.SHSE", "600001.SHSE"],
+  "symbols": ["600000.XSHG", "600001.XSHG"],
   "params": {"buy_threshold": 0.02, "capital": 1000000, "start": "2025-01-01", "end": "2026-01-01"},
   "symbol_params": {                           // per-symbol 覆盖
-    "600000.SHSE": {"buy_threshold": 0.03},
-    "600001.SHSE": {"buy_threshold": 0.02}
+    "600000.XSHG": {"buy_threshold": 0.03},
+    "600001.XSHG": {"buy_threshold": 0.02}
   },
   "mode": "parallel", "status": "running"
 }
