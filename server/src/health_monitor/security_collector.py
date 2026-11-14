@@ -286,6 +286,55 @@ def read_dep_rows(lc_ts: str | None):
     return all_rows, True
 
 
+def _fill_missing_latest(judged: list, installed: dict, constraints: dict,
+                         dev_names: set, fetch=None) -> int:
+    """批179：按**实际安装集**补齐 latest（台账切面缺失/为空/缓存落后 → 强制重查）。
+
+    返回补齐行数；fetch 可注入（单测）。失败逐包跳过，不炸扫描。
+    """
+    from src.health_monitor.os_pkg import pypi_versions_cached
+    from src.quant_common.depjudge import (has_update_of, in_constraint_max as _icm_fn,
+                                           judge, _v as _vparse)
+    fetch = fetch or pypi_versions_cached
+    idx = {_norm_key(j["name"]): j for j in judged if j.get("managed_by") == "pypi"}
+    filled = 0
+    for name, cur in installed.items():
+        k = _norm_key(name)
+        row = idx.get(k)
+        need = row is None or not row.get("latest")
+        force = row is None or not row.get("latest")
+        if row and row.get("latest"):
+            lv, cv = _vparse(row["latest"]), _vparse(cur)
+            if lv is not None and cv is not None and lv <= cv:
+                need, force = True, True      # 缓存落后于已装版本 → 重查
+        if not need:
+            continue
+        try:
+            pv = fetch(name, force=force)
+        except Exception:
+            continue
+        vers = (pv or {}).get("versions") or []
+        best, best_v = None, None
+        for v in vers:
+            p = _vparse(v)
+            if p is not None and (best_v is None or p > best_v):
+                best, best_v = v, p
+        if best is None:
+            continue
+        c = constraints.get(name)
+        jc, jw = judge(cur, c, best, _icm_fn(vers, c, cur), True, "pypi")
+        if row is None:
+            row = {"name": name, "cur": cur, "latest": None, "managed_by": "pypi",
+                   "group": "dev" if name in dev_names else "runtime",
+                   "judge_class": "unknown", "judge_why": "", "has_update": "no"}
+            judged.append(row)
+            idx[k] = row
+        row.update({"latest": best, "judge_class": jc, "judge_why": jw,
+                    "has_update": has_update_of(jc)})
+        filled += 1
+    return filled
+
+
 def _collect_components() -> dict:
     """组件版本：pip freeze 全量 + nginx/openssl/pg/redis 版本。
 
@@ -308,6 +357,7 @@ def _collect_components() -> dict:
     try:
         import datetime as _dt
         from src.quant_common.depjudge import DEP_AUDIT_FRESH_H, judge, has_update_of
+        from src.quant_common.depjudge import in_constraint_max as _icm_fn, _v as _vparse
         from src.quant_common.redis_client import business_redis
         raw = business_redis().get("sec:dep_audit")
         contract = json.loads(raw) if raw else None
@@ -337,6 +387,14 @@ def _collect_components() -> dict:
                            "group": "dev" if _r[0] in dev_names else "runtime",
                            "judge_class": _r[3], "judge_why": _r[4],
                            "has_update": has_update_of(_r[3])})
+        # 批179：组件真源=实际安装集（pip freeze）。台账切面缺失 / latest 为空 / 缓存最新<=已装
+        # → 就地强制重查并补行（缓存只做加速器；requirements 仅用于判 pinned，不决定查不查）。
+        try:
+            _filled = _fill_missing_latest(judged, part.get("pip") or {}, constraints, dev_names)
+            if _filled:
+                part["dep_gap_filled"] = _filled
+        except Exception as _e:
+            logger.warning("dep latest 补齐失败: %s", _e)
         os_c = contract.get("os") or {}
         # 批 156（schema 2）：OS 全量行——upgrades 可达口径+all_repos 无坐标判定
         if _sv == 2:
@@ -1042,7 +1100,13 @@ def run_security_scan(today: date | None = None) -> dict:
                 if _nm and _nm not in _gm:
                     _gm[_nm] = (None, "none", "unknown", "SBOM 识别、非包管理器纳管")
 
-            _upsert_components(conn, today, vulns.get("ledger") or [], _gm)
+            # 批179：组件列表真源=实际安装集 ∪ SBOM 台账（SBOM 只做漏洞关联，不再决定谁上榜）
+            _ledger = list(vulns.get("ledger") or [])
+            _have = {_norm_key(r[1]) for r in _ledger if len(r) > 1}
+            for _pn, _pv in (parts.get("components", {}).get("pip") or {}).items():
+                if _norm_key(_pn) not in _have:
+                    _ledger.append(("pip", _pn, _pv, "pip 安装"))
+            _upsert_components(conn, today, _ledger, _gm)
 
         # 幂等描述补齐（批 126）：全表空描述行回填——**不依赖 vulns 分区 ok**（LLM
         # 生成与 grype 扫描无关，降级日也能补存量/失败行；空=待办下轮再补）
